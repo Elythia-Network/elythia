@@ -1,4 +1,4 @@
-# プロジェクトの構成の再編 (正式改名・frontend の組み込み・テスト配置の整理)
+# プロジェクトの構成の再編 (正式改名・frontend の組み込み・テスト配置の整理・プラグインの仕組みの改名)
 
 **Status**: Draft (#3180、2026-09-24) / **Scope**: リポジトリ全体の構成、改名の範囲、本家 Misskey への追従方式
 
@@ -8,10 +8,11 @@
 
 ## 目的
 
-仮称「mk-go」を正式な名前に改め、同じ機会に次の 2 つの構成を見直す。
+仮称「mk-go」を正式な名前に改め、同じ機会に次の 3 つを見直す。
 
 1. 同梱 frontend を本体リポジトリへ組み込み、`third_party/` をなくす
 2. テスト関連の配置を整理する
+3. プラグインの仕組みの呼び名を改める (本家 frontend のクライアントプラグインと紛らわしいため)
 
 名前が変わるとモジュールパス・リポジトリ名・イメージ名・パスがほぼ全て動くので、構成の見直しを別の機会に分けると同じ箇所を 2 度書き換えることになる。
 
@@ -29,7 +30,7 @@
 | frontend のページ名 (`/about-mkgo` など) と画面の文言 | 新しい名前にする。旧 URL は転送する |
 | ドキュメント | 新しい名前にする。CHANGELOG と CLAUDE.md の更新記録の過去の記述は書き換えない |
 | 関数名などコード上の識別子 | 据え置き |
-| `/api/meta` の `mkGo*` (`mkGoVersion` / `mkGoCommit` / `mkGoFrontendVersion` / `mkGoPlugins` / `mkGo`) | 据え置き (同梱 frontend と外部クライアントが読む wire の項目) |
+| `/api/meta` の `mkGoVersion` / `mkGoCommit` / `mkGoFrontendVersion`、`internal/core/procstats` の `mkGo` | 据え置き (同梱 frontend と外部クライアントが読む wire の項目)。nodeinfo の `mkGoPlugins` は R4 で扱う |
 | 環境変数の接頭辞 `MK_` | 据え置き (運営者の設定を壊さない) |
 
 ### R2. frontend の組み込み
@@ -47,6 +48,27 @@
 - 検証用の compose を各スイートの中へ移し、全てに `name:` を付ける (本番 project `mk` への合流を防ぐ)
 - ベンチを `tests/bench/` の下にまとめ、名前の揺れを揃える
 - リポジトリ直下には運営者向けの compose (`docker-compose.yml` / `docker-compose.image.yml` / `compose.uds.yaml.example`) だけを残し、`docker-compose.yml` にも `name:` を付ける
+
+### R4. プラグインの仕組みの改名
+
+「plugin」という呼び名そのものを新しい語に変える。語は未決 (Q8)。
+
+語を変える理由は、Misskey 本家の frontend にある**クライアントプラグイン** (AiScript、`/settings/plugin`) と紛らわしいため。今も `admin/server-plugins` の名前空間を分けて衝突を避けている (`internal/api/admin/server_plugins.go`)。
+
+| 対象 | 今の名前 | 扱い |
+|---|---|---|
+| 公開パッケージ (プラグイン作者が import する) | `plugin/` (`plugintest` / `peercache` を含む) | 新しい語にする。中の型名・関数名 (`Definition` など) は据え置き |
+| マニフェスト | `mk-plugin.yml` | 新しい名前にする。旧名も猶予期間は読む |
+| プラグインのモジュール名・リポジトリ名 | `mk-plugin-*` | 新しい名前にする (R1 のモジュールパス変更と同時) |
+| 置き場 | `plugins/` | 新しい語にする |
+| 運営者の設定キー | `plugins.<name>.*` | 新しい語にする。旧キーも猶予期間は読む |
+| 管理 API | `admin/server-plugins` | 新しい語にする。旧名も猶予期間は受け付ける |
+| プラグインごとの DB schema | `plugin_<name>` | 新しい語へ移す (D8) |
+| プラグインのジョブキュー | `plugin:<name>` | 新しい語へ移す (D8) |
+| 相手サーバーのプラグインを呼ぶ経路 (連合) | `/plugin/<name>/...` | 新しい語にする。旧経路も猶予期間は受け付ける (D8) |
+| nodeinfo の宣言 (連合) | `metadata.mkGoPlugins` | 新しい名前にする。猶予期間は両方を出し、両方を読む (D8) |
+| ツール・生成物・ドキュメント | `tools/pluginbuild` / `plugindev` / `pluginresolve`、`*plugins.generated.*`、`docs/plugins/` | 新しい語にする |
+| 内部のコード上の識別子 | `pluginstore`、`PluginQueuePrefix` など | 据え置き (R1 と同じ) |
 
 ### 非機能要件
 
@@ -157,6 +179,17 @@ tests/
 - 配布イメージは旧名でもしばらく publish するか (猶予) を決める
 - nodeinfo / UA の変更は連合先の一覧に出る名前が変わる。CHANGELOG の Note に書く
 
+### D8. プラグインの仕組みの改名 (R4)
+
+保存されたデータと連合に出る名前は、**旧版から上げた運営者と、旧版のままの連合先の両方**を壊さないように移す。旧名を読む経路は猶予期間 (Q9) のあと撤去する。
+
+- **DB schema** (`plugin_<name>` → 新しい接頭辞): 起動時に `pluginstore` が「旧 schema があって新 schema が無い」ときだけ `ALTER SCHEMA ... RENAME TO` する。rename はメタデータの書き換えだけなのでデータ量に依存しない。**旧版へ戻すと旧版は新 schema を見つけられない**ので、戻し方 (手で逆 rename する手順) を CHANGELOG の Note に書く
+- **ジョブキュー** (`plugin:<name>` → 新しい接頭辞): Redis のキーを rename しない (BullMQ のキーはジョブのハッシュ・リスト・ロックに分かれており、一部だけ移ると壊れる)。定期ジョブは起動時に新しいキューへ登録し直し、旧キューの定期ジョブは撤去する (#3171 の `PruneUnregistered` と同じ形)。旧キューに残った待機中・遅延中のジョブは、猶予期間だけ旧キューにも worker を付けて**捌ききる**。新規の投入は新しいキューにだけ行う
+- **連合の経路** (`/plugin/<name>/...`): 新旧の両方を同じ handler に配線する。呼び出す側は、相手の nodeinfo に新しい宣言があれば新経路、旧い宣言しか無ければ旧経路を使う
+- **nodeinfo の宣言** (`metadata.mkGoPlugins`): 猶予期間は新旧両方の key に同じ値を出し、読む側 (`internal/server/plugin_peer_lookup.go`) は新しい key を優先して旧い key へフォールバックする
+- **設定キー・マニフェスト・管理 API**: 旧名を読んだら警告のログを出す。新旧の両方が書かれていたら起動エラーにする (どちらが効くのかを黙って決めない)
+- **公開パッケージの import パス**: R1 のモジュールパス変更と同時に変わるので、プラグイン作者向けの移行の案内 (D7) にまとめる。独立リポジトリのプラグイン 4 つは同じ段階で追従させる
+
 ## 段階 (sub-issue の単位)
 
 名前が決まらなくてもできる段階を先に進める。
@@ -167,8 +200,9 @@ tests/
 | P2 | テスト関連の配置の整理 (D6) | しない |
 | P3 | 本家の参照を `.cache/misskey` へ分離 (D2)。この時点では frontend はまだ submodule のまま | しない |
 | P4 | frontend の取り込み (D1 / D3 / D4 / D5)、submodule と fork の廃止 | しない |
-| P5 | 正式な名前の決定 | — |
+| P5 | 正式な名前と、プラグインの仕組みの新しい呼び名の決定 | — |
 | P6 | 改名 (D7) | する |
+| P6b | プラグインの仕組みの改名 (D8)。保存データと連合の移行を含むので P6 とは別 PR にする | する |
 | P7 | ドキュメント・CLAUDE.md の整理 | する |
 
 - P3 を P4 より先に分けるのは、「本家を読む側」と「自分たちの frontend を読む側」を別々に切り替えて、壊れたときにどちらが原因か分かるようにするため
@@ -183,6 +217,8 @@ tests/
 - Q5. 旧 URL (`/about-mkgo` など) の転送を残す期間
 - Q6. `assets/` (D3) の名前と置き場所
 - Q7. `mkGoFrontendVersion` の新しい形式 (D5)
+- Q8. プラグインの仕組みの新しい呼び名 (R4、P5)
+- Q9. プラグインの旧名 (マニフェスト・設定キー・管理 API・連合の経路・nodeinfo の key・旧キューの worker) を読み続ける猶予期間 (D8)
 
 ## リスク
 
