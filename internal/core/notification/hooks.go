@@ -445,6 +445,35 @@ func (h *Hook) OnReactionCreated(notifieeID, notifierID, noteID, reaction string
 	})
 }
 
+// OnReactionRemoved removes the reaction notification notifierID left on the
+// note author's stream when the reaction is withdrawn or replaced (#3201).
+//
+// 取り消したリアクションは「無いもの」なので通知も残さない。付け替えのときは
+// 呼び出し側が直後に新しいリアクションの通知を作る。best-effort。
+func (h *Hook) OnReactionRemoved(notifieeID, notifierID, noteID string) {
+	if h.svc == nil {
+		return
+	}
+	if err := h.svc.DeleteByNote(context.Background(), notifieeID, notifierID, noteID, TypeReaction); err != nil {
+		slog.Warn("notification: remove reaction notification failed", "notifiee", notifieeID, "note", noteID, "err", err)
+	}
+}
+
+// OnNoteDeleted removes the renote / quote notification a deleted note left on
+// its renote target's author (#3201).
+//
+// 通知の NoteID はリノート自身なので、一覧からは read 時に落ちる (#1953)。
+// それでも stream に残ると未読件数に数えられ、開いても何も無い状態になる。
+// 自分のノートのリノートは通知を作っていないので何もしない。best-effort。
+func (h *Hook) OnNoteDeleted(note *model.Note) {
+	if h.svc == nil || note == nil || note.RenoteUserID == nil || *note.RenoteUserID == note.UserID {
+		return
+	}
+	if err := h.svc.DeleteByNote(context.Background(), *note.RenoteUserID, note.UserID, note.ID, TypeRenote, TypeQuote); err != nil {
+		slog.Warn("notification: remove renote notification failed", "notifiee", *note.RenoteUserID, "note", note.ID, "err", err)
+	}
+}
+
 // OnPollVote records a poll vote notification on the note author's stream.
 func (h *Hook) OnPollVote(notifieeID, notifierID, noteID string, choice int) {
 	c := choice

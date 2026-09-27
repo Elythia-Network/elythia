@@ -2445,8 +2445,9 @@ func TestProcess_AnnounceWithoutFanoutHook(t *testing.T) {
 
 // fakeNotificationHook records OnNoteCreated calls.
 type fakeNotificationHook struct {
-	mu    sync.Mutex
-	calls []fakeNotificationCall
+	mu      sync.Mutex
+	calls   []fakeNotificationCall
+	deleted []string
 }
 
 type fakeNotificationCall struct {
@@ -2464,6 +2465,16 @@ func (f *fakeNotificationHook) OnNoteCreated(note *model.Note, author *model.Use
 		replyTarget:  replyTarget,
 		renoteTarget: renoteTarget,
 	})
+	f.mu.Unlock()
+}
+
+func (f *fakeNotificationHook) OnNoteDeleted(note *model.Note) {
+	f.mu.Lock()
+	renoteUser := ""
+	if note.RenoteUserID != nil {
+		renoteUser = *note.RenoteUserID
+	}
+	f.deleted = append(f.deleted, note.ID+" "+note.UserID+"->"+renoteUser)
 	f.mu.Unlock()
 }
 

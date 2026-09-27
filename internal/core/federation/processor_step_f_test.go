@@ -2157,3 +2157,37 @@ func TestProcess_UpdateQuestion_AuthorLookupFailureDoesNotUpdate(t *testing.T) {
 		})
 	}
 }
+
+// #3201: リモートからのリノート取り消し (Undo(Announce)) でも通知を消す。
+// この経路は DeleteService を通らないので、hook を直接呼ばないと丸ごと漏れる。
+func TestProcess_UndoAnnounceRemovesRenoteNotification(t *testing.T) {
+	env := newFullProcessor(t, aliceActor)
+	env.noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: "bob", Visibility: model.NoteVisibilityPublic}
+	hook := &fakeNotificationHook{}
+	env.processor.SetNotificationHook(hook)
+
+	require.NoError(t, env.processor.Process([]byte(`{
+		"type": "Announce",
+		"id": "https://remote.example/announces/a1",
+		"actor": "https://remote.example/users/alice",
+		"object": "https://example.com/notes/n1"
+	}`)))
+	var boost *model.Note
+	for _, n := range env.noteRepo.Notes {
+		if n.RenoteID != nil && *n.RenoteID == "n1" {
+			boost = n
+		}
+	}
+	require.NotNil(t, boost)
+	require.NoError(t, env.processor.Process([]byte(`{
+		"type": "Undo",
+		"actor": "https://remote.example/users/alice",
+		"object": {"type": "Announce", "object": "https://example.com/notes/n1"}
+	}`)))
+
+	hook.mu.Lock()
+	defer hook.mu.Unlock()
+	// 通知は (受信者 = リノート先の作者, 通知者 = リノートした人, NoteID = リノート自身) で
+	// 引くので、消したブーストそのものが 3 つとも持って渡ること。
+	assert.Equal(t, []string{boost.ID + " " + boost.UserID + "->bob"}, hook.deleted)
+}

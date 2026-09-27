@@ -2845,6 +2845,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	pollService.SetEventPublisher(noteEventPub)
 	reactionService.SetNoteStreamHook(&reactionNoteStreamAdapter{pub: noteEventPub})
 	noteDeleteService.SetNoteStreamHook(&noteDeleteStreamAdapter{pub: noteEventPub})
+	// 取り消したリノート / 削除した引用の通知を消す (#3201)。**配線しないと build も
+	// テストも通ったまま** 未読件数に中身の無い通知が数えられ続ける。
+	noteDeleteService.SetNotificationHook(notificationHook)
 
 	// 2. Channel registry: Misskey 互換のチャンネル名で各 factory を登録する
 	streamRegistry := stream.NewRegistry()

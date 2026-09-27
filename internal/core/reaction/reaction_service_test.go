@@ -400,6 +400,12 @@ type recordingNotificationHook struct {
 	notifier string
 	noteID   string
 	reaction string
+	// events records created / removed calls in order (#3201).
+	events []string
+}
+
+func (h *recordingNotificationHook) OnReactionRemoved(notifieeID, notifierID, noteID string) {
+	h.events = append(h.events, "removed "+notifieeID+"/"+notifierID+"/"+noteID)
 }
 
 func (h *recordingNotificationHook) OnReactionCreated(notifieeID, notifierID, noteID, rx string) {
@@ -408,6 +414,7 @@ func (h *recordingNotificationHook) OnReactionCreated(notifieeID, notifierID, no
 	h.notifier = notifierID
 	h.noteID = noteID
 	h.reaction = rx
+	h.events = append(h.events, "created "+notifieeID+"/"+notifierID+"/"+noteID+"/"+rx)
 }
 
 func TestService_NotificationHook_OnReaction(t *testing.T) {
@@ -875,4 +882,57 @@ func TestService_Delete_ConcurrentZeroAffected(t *testing.T) {
 	)
 	err := svc.Delete(&model.User{ID: "viewer"}, "n1")
 	assert.ErrorIs(t, err, reaction.ErrReactionNotFound)
+}
+
+// #3201: 取り消したリアクションの通知を消す。
+func TestService_NotificationHook_OnDeleteRemovesNotification(t *testing.T) {
+	svc, repo, _, _, _ := newService(t)
+	seedNote(repo, "n1", "author", model.NoteVisibilityPublic)
+	hook := &recordingNotificationHook{}
+	svc.SetNotificationHook(hook)
+	viewer := &model.User{ID: "viewer"}
+
+	_, err := svc.Create(viewer, "n1", "👍")
+	require.NoError(t, err)
+	require.NoError(t, svc.Delete(viewer, "n1"))
+	assert.Equal(t, []string{"created author/viewer/n1/👍", "removed author/viewer/n1"}, hook.events)
+
+	// 取り消し済みをもう一度取り消しても (並行 unreact / 存在しない) 何もしない。
+	require.Error(t, svc.Delete(viewer, "n1"))
+	assert.Len(t, hook.events, 2)
+}
+
+// 付け替えは古い通知を消してから新しい通知を作る。残すと付け替えのたびに増える。
+func TestService_NotificationHook_ReplaceRemovesOldNotification(t *testing.T) {
+	svc, repo, _, _, _ := newService(t)
+	seedNote(repo, "n1", "author", model.NoteVisibilityPublic)
+	hook := &recordingNotificationHook{}
+	svc.SetNotificationHook(hook)
+	viewer := &model.User{ID: "viewer"}
+
+	_, err := svc.Create(viewer, "n1", "👍")
+	require.NoError(t, err)
+	_, err = svc.Create(viewer, "n1", "🎉")
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		"created author/viewer/n1/👍",
+		"removed author/viewer/n1",
+		"created author/viewer/n1/🎉",
+	}, hook.events)
+}
+
+// 自分のノートへのリアクションは通知を作っていないので、消しにも行かない。
+func TestService_NotificationHook_SelfReactionIsNotTouched(t *testing.T) {
+	svc, repo, _, _, _ := newService(t)
+	seedNote(repo, "n1", "author", model.NoteVisibilityPublic)
+	hook := &recordingNotificationHook{}
+	svc.SetNotificationHook(hook)
+	author := &model.User{ID: "author"}
+
+	_, err := svc.Create(author, "n1", "👍")
+	require.NoError(t, err)
+	_, err = svc.Create(author, "n1", "🎉")
+	require.NoError(t, err)
+	require.NoError(t, svc.Delete(author, "n1"))
+	assert.Empty(t, hook.events)
 }

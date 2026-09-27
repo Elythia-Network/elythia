@@ -90,9 +90,12 @@ func ConvertLegacy(raw string) string {
 	return raw
 }
 
-// NotificationHook is invoked after a reaction is created.
+// NotificationHook is invoked after a reaction is created or removed.
 type NotificationHook interface {
 	OnReactionCreated(notifieeID, notifierID, noteID, reaction string)
+	// OnReactionRemoved removes the notification the reaction left (#3201).
+	// 取り消しと、別のリアクションへの付け替えの両方で呼ぶ。
+	OnReactionRemoved(notifieeID, notifierID, noteID string)
 }
 
 // FederationHook is invoked after a reaction is created or removed so that
@@ -357,6 +360,11 @@ func (s *Service) Create(user *model.User, noteID, rawReaction string) (string, 
 		if s.federationHook != nil {
 			s.federationHook.OnReactionRemoved(user, target, existing.Reaction)
 		}
+		// 古いリアクションの通知を消す (#3201)。残すと付け替えのたびに通知が
+		// 増え、取り消し済みのリアクションが並ぶ。新しい通知は下で作る。
+		if s.notificationHook != nil && target.UserID != user.ID {
+			s.notificationHook.OnReactionRemoved(target.UserID, user.ID, target.ID)
+		}
 		// #2106 N16: noteStream に古いリアクションの unreacted を publish する。upstream
 		// ReactionService.create の置き換えは delete() 経由で unreacted を発火するが、mk-go は
 		// 新 reaction の reacted のみ送っており、subNote 購読クライアントで古い reaction の
@@ -483,6 +491,11 @@ func (s *Service) Delete(user *model.User, noteID string) error {
 	_ = s.countWriter.Increment(target.ID, existing.Reaction, -1)
 	if s.federationHook != nil {
 		s.federationHook.OnReactionRemoved(user, target, existing.Reaction)
+	}
+	// 取り消したリアクションの通知を消す (#3201)。連合の Undo(Like) もここを通る。
+	// upstream は消さない。自分へのリアクションは通知を作っていない。
+	if s.notificationHook != nil && target.UserID != user.ID {
+		s.notificationHook.OnReactionRemoved(target.UserID, user.ID, target.ID)
 	}
 	// noteStream に unreacted を publish して subNote 購読中の WebSocket
 	// クライアントへ即時反映する (#700)。
