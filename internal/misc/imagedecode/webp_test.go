@@ -402,3 +402,13 @@ func TestDecode_AnimatedWebPKeepsExifOrientationAfterOddICCP(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, image.Rect(0, 0, 16, 8), img.Bounds())
 }
+
+func TestEvenPayload_DoesNotAliasInput(t *testing.T) {
+	src := []byte{1, 2, 3, 9}
+	odd := src[:3]
+	got := evenPayload(odd)
+	assert.Equal(t, []byte{1, 2, 3, 0}, got)
+	assert.Equal(t, byte(9), src[3], "input backing array must not be overwritten")
+	even := []byte{1, 2}
+	assert.Equal(t, even, evenPayload(even))
+}

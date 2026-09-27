@@ -424,7 +424,7 @@ func evenPayload(p []byte) []byte {
 	if len(p)%2 == 0 {
 		return p
 	}
-	out := make([]byte, len(p)+1)
-	copy(out, p)
-	return out
+	// 容量を長さで切った slice に append するので、必ず新しい配列へ複製される
+	// (入力のバイト列を書き換えない)。長さ + 1 を自分で計算して確保しない。
+	return append(p[:len(p):len(p)], 0)
 }
