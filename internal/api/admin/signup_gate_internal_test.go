@@ -81,3 +81,18 @@ func TestNormalizeSignupGateBools(t *testing.T) {
 		})
 	}
 }
+
+// meta が引けないときは、この更新で送られた値だけで判定する。
+func TestNormalizeRegistrationClosed_NilCurrent(t *testing.T) {
+	t.Run("閉じる更新は招待制の値も立てる", func(t *testing.T) {
+		fields := map[string]any{"registrationClosed": true, "disableRegistration": false}
+		normalizeRegistrationClosed(fields, nil)
+		assert.Equal(t, true, fields["disableRegistration"])
+	})
+	t.Run("解除する更新は遷移を判定できないので触らない", func(t *testing.T) {
+		fields := map[string]any{"registrationClosed": false, "approvalRequiredForSignup": true}
+		normalizeRegistrationClosed(fields, nil)
+		_, ok := fields["disableRegistration"]
+		assert.False(t, ok)
+	})
+}

@@ -70,6 +70,10 @@ META_IGNORE = DEFAULT_IGNORE_KEYS | {
     # 申請フォームの定義 (#2570)。承認制と同じく mk-go 独自で、申請ページが
     # 描画に使うので公開 meta に出す必要がある。
     "signupApplicationForm",
+    # 新規登録を受け付けない (#3186) も mk-go 独自。登録可否そのものは本家の
+    # disableRegistration / features.registration で表すので、比べる意味があるのは
+    # そちらだけ。docs/divergence.md に additive field として記載済み。
+    "registrationClosed",
     "globalTimeline", "localTimeline",
 }
 

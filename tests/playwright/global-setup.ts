@@ -29,6 +29,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { type APIRequestContext, request as createRequest } from '@playwright/test';
 import { DEFAULT_TEST_PASSWORD } from './fixtures/auth';
+import { isTsBackend } from './fixtures/backend';
 import { resetRateLimit } from './fixtures/rate_limit';
 
 const baseURL = process.env.MK_BASE_URL ?? 'http://mkgo:3000';
@@ -185,8 +186,16 @@ export default async function globalSetup(): Promise<void> {
     }
 
     // 3. disableRegistration=false に切り替え (再実行時も idempotent)
+    //
+    // mk-go では「受け付けない」(#3186) も外す。前の run が閉じたまま終わっていると、
+    // サーバーは disableRegistration=false を閉じる側で上書きし、以降の signup が全滅
+    // する。TS はこの field を知らないので送らない。
     const metaResp = await ctx.post(`${baseURL}/api/admin/update-meta`, {
-      data: { i: root.token, disableRegistration: false },
+      data: {
+        i: root.token,
+        disableRegistration: false,
+        ...(isTsBackend ? {} : { registrationClosed: false, approvalRequiredForSignup: false }),
+      },
       failOnStatusCode: false,
     });
     if (metaResp.status() !== 200 && metaResp.status() !== 204) {

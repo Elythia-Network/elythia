@@ -742,3 +742,41 @@ func TestCreatePending_ProhibitedUsername(t *testing.T) {
 func TestPendingSignupTTL_MatchesUpstream(t *testing.T) {
 	assert.Equal(t, 30*time.Minute, signup.PendingSignupTTL)
 }
+
+// 「受け付けない」の間は、承認済みの申請に紐付く確認待ちも止める (#3186)。
+//
+// **申請に紐付く pending を使うのが要点。** 承認制のゲート (checkApprovalGate) は
+// 申請 ID を持つ pending を素通しするので、紐付かない pending で試すと承認制の
+// ゲートが代わりに止めてしまい、こちらのゲートを外しても落ちない。
+func TestPromotePending_RegistrationClosedRejectsAppliedPending(t *testing.T) {
+	svc, userRepo, metaRepo := newTestService(t)
+	pendingRepo := testutil.NewMockUserPendingRepository()
+	svc.SetUserPendingRepo(pendingRepo)
+
+	appID := "app1"
+	row, err := svc.CreatePendingForApplication("applied", "a@example.com", "pw123", nil, &appID)
+	require.NoError(t, err)
+
+	metaRepo.Meta.RegistrationClosed = true
+	_, err = svc.PromotePending(row.Code)
+	require.ErrorIs(t, err, signup.ErrRegistrationClosed)
+	assert.Empty(t, userRepo.Users, "アカウントを作らない")
+	assert.Len(t, pendingRepo.Rows, 1, "解除後に完了できるよう行は残す")
+}
+
+// meta が読めないときは通さない。承認制のゲートを素通りする (申請に紐付く) pending でも。
+func TestPromotePending_RegistrationGateFailsClosedWhenMetaUnavailable(t *testing.T) {
+	svc, userRepo, metaRepo := newTestService(t)
+	pendingRepo := testutil.NewMockUserPendingRepository()
+	svc.SetUserPendingRepo(pendingRepo)
+
+	appID := "app1"
+	row, err := svc.CreatePendingForApplication("applied", "a@example.com", "pw123", nil, &appID)
+	require.NoError(t, err)
+
+	metaRepo.Meta = nil // Fetch が error を返す
+	_, err = svc.PromotePending(row.Code)
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, signup.ErrRegistrationClosed, "障害を「閉じている」に化けさせない")
+	assert.Empty(t, userRepo.Users, "アカウントを作らない")
+}

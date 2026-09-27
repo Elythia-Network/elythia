@@ -137,3 +137,13 @@ func TestSSRMetaCarriesMinimumUsernameLength(t *testing.T) {
 		})
 	}
 }
+
+// ページに埋め込む meta も、「受け付けない」(#3186) の間は登録不可と名乗る。
+// 入口の表示は最初にこちらを読むので、/api/meta だけ直すと再取得までの間ずれる。
+func TestSSRMeta_RegistrationClosed(t *testing.T) {
+	cfg := &config.Config{URL: "https://example.com"}
+	out := buildSSRMetaKeys(t, cfg, &model.Meta{ID: "x", RegistrationClosed: true})
+	require.Equal(t, true, out["registrationClosed"])
+	require.Equal(t, true, out["disableRegistration"])
+	require.Equal(t, false, out["features"].(map[string]any)["registration"])
+}

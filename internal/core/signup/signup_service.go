@@ -160,6 +160,9 @@ var (
 	// **どちらもアカウントは作られていない**が、その理由は同じではない。
 	// 「この error なら tx で巻き戻っている」という形で依存しないこと。
 	ErrApplicationNotApproved = errors.New("signup application is not approved")
+	// ErrRegistrationClosed is returned while the server accepts no
+	// registrations at all (meta.registrationClosed, #3186).
+	ErrRegistrationClosed = errors.New("registration is closed")
 	// ErrInvitationAlreadyUsed is returned when the invitation ticket linked to
 	// a pending signup has already been consumed by another user. transaction
 	// 経路で SELECT FOR UPDATE 後に usedById を確認することで concurrent burst
@@ -629,9 +632,13 @@ func (s *Service) CreatePendingForApplication(username, email, password string, 
 //   - ErrUsernameAlreadyExists: 確認 link 待ちの間に同名 user が登録されたケース
 //   - ErrInvitationAlreadyUsed: tx 経路で ticket がすでに別 user に消費済 (#604)
 //   - ErrInvitationRevoked: tx 経路で ticket が admin に削除済 (#610 item 2)
+//   - ErrRegistrationClosed: 登録を受け付けていない (#3186)。コードを引く前に返す
 //   - ErrApplicationNotApproved: 承認制が有効なのに申請に紐付いていない (#2804)、
 //     または紐付く申請が使用済み / 期限切れ / 不在 (#2576)
 func (s *Service) PromotePending(code string) (*SignupResult, error) {
+	if err := s.checkRegistrationOpen(); err != nil {
+		return nil, err
+	}
 	pending, err := s.pendingRepo.FindByCode(code)
 	if err != nil {
 		// **DB 障害を not-found に丸めない** (#2799)。
@@ -655,6 +662,28 @@ func (s *Service) PromotePending(code string) (*SignupResult, error) {
 		return s.promotePendingTx(pending)
 	}
 	return s.promotePendingNoTx(pending)
+}
+
+// checkRegistrationOpen rejects finalizing a pending signup while the server
+// accepts no registrations (#3186).
+//
+// **確認待ちの登録も止める。** 「受け付けない」は荒らしの最中に緊急で閉じる用途で、
+// 閉じる直前に確認メールを受け取った登録が通ると閉じた意味が無い。行は消さないので、
+// `PendingSignupTTL` 内に解除されればそのまま完了できる。
+//
+// **コードを引く前に判定する。** 閉じている間はコードの有無も答えない。
+//
+// **meta が読めなければ通さない** (checkApprovalGate と同じ理由。DB 障害を迂回路に
+// しない)。
+func (s *Service) checkRegistrationOpen() error {
+	meta, err := s.metaRepo.Fetch()
+	if err != nil {
+		return fmt.Errorf("signup: fetch meta for registration gate: %w", err)
+	}
+	if meta.RegistrationClosed {
+		return ErrRegistrationClosed
+	}
+	return nil
 }
 
 // checkApprovalGate rejects a pending signup that carries no approval

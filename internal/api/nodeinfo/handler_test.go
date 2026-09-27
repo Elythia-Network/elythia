@@ -550,3 +550,20 @@ func TestNodeinfo_SettersInvalidateCache(t *testing.T) {
 	meta = out["metadata"].(map[string]any)
 	assert.Equal(t, []any{"demo"}, meta["mkGoPlugins"], "setter 後は build し直す")
 }
+
+// 「受け付けない」(#3186) は、列だけが立っていても登録不可と名乗る。
+// 正規化で disableRegistration も立つが、列を直接書き換えられた場合の備え。
+func TestVersion2_1_RegistrationClosed(t *testing.T) {
+	metaRepo := testutil.NewMockMetaRepository()
+	metaRepo.Meta = &model.Meta{ID: "x", RegistrationClosed: true}
+	h := NewHandler(&config.Config{Version: "0.0.0", Host: "example.com"})
+	h.SetMetaRepo(metaRepo)
+
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	require.NoError(t, h.Version2_1(e.NewContext(httptest.NewRequest(http.MethodGet, "/nodeinfo/2.1", nil), rec)))
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, false, resp["openRegistrations"])
+	assert.Equal(t, true, resp["metadata"].(map[string]any)["disableRegistration"])
+}

@@ -3137,6 +3137,10 @@ func (m *MockMetaRepository) Update(fields map[string]any) error {
 			if b, ok := v.(bool); ok {
 				m.Meta.ApprovalRequiredForSignup = b
 			}
+		case "registrationClosed":
+			if b, ok := v.(bool); ok {
+				m.Meta.RegistrationClosed = b
+			}
 		case "signupApplicationForm":
 			if j, ok := v.(datatypes.JSON); ok {
 				m.Meta.SignupApplicationForm = j

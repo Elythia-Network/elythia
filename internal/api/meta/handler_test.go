@@ -1018,3 +1018,28 @@ func TestMeta_ExposesEffectiveMinimumUsernameLength(t *testing.T) {
 		})
 	}
 }
+
+// 「受け付けない」(#3186) は入口と登録画面が表示の分岐に使うので公開する。外から
+// 見える登録可否 (disableRegistration / features.registration) は、列だけが立って
+// いても登録不可にする。
+func TestMeta_RegistrationClosed(t *testing.T) {
+	for _, closed := range []bool{true, false} {
+		t.Run(map[bool]string{true: "closed", false: "open"}[closed], func(t *testing.T) {
+			h, metaRepo := newTestHandler()
+			metaRepo.Meta = &model.Meta{ID: "x", RegistrationClosed: closed}
+
+			e := echo.New()
+			req := httptest.NewRequest(http.MethodPost, "/api/meta", nil)
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			rec := httptest.NewRecorder()
+			require.NoError(t, h.Meta(e.NewContext(req, rec)))
+			require.Equal(t, http.StatusOK, rec.Code)
+
+			var body map[string]any
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+			assert.Equal(t, closed, body["registrationClosed"])
+			assert.Equal(t, closed, body["disableRegistration"])
+			assert.Equal(t, !closed, body["features"].(map[string]any)["registration"])
+		})
+	}
+}

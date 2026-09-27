@@ -173,6 +173,16 @@ type signupRequest struct {
 	TestcaptchaResponse string `json:"testcaptcha-response"`
 }
 
+// registrationClosedError is returned by every signup route while the server
+// accepts no registrations (mk-go, #3186).
+//
+// **招待コードの誤り (INVITATION_CODE_INVALID) と分ける。** 同じにすると、利用者は
+// コードを打ち間違えたと読んでやり直し続ける。
+func registrationClosedError(c echo.Context) error {
+	return c.JSON(http.StatusForbidden,
+		apierr.Error("REGISTRATION_CLOSED", "This server is not accepting new registrations.", "2776429f-df02-4b56-a708-30d5ddda7b95"))
+}
+
 // duplicatedUsernameError は username 重複時の error response を返す。
 //
 // upstream Misskey TS は \`/api/signup\` の username 重複を Fastify-style
@@ -198,6 +208,12 @@ func (h *Handler) Signup(c echo.Context) error {
 	meta, err := h.metaRepo.Fetch()
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
+	}
+
+	// 「受け付けない」は招待コードを見る前に返す (#3186)。testMode でも迂回しない —
+	// upstream の e2e はこの列を立てないので、迂回させる理由が無い。
+	if meta.RegistrationClosed {
+		return registrationClosedError(c)
 	}
 
 	// 承認制のときは通常の登録経路を閉じる (#2557)。
@@ -417,6 +433,8 @@ func (h *Handler) SignupPending(c echo.Context) error {
 	result, err := h.signupService.PromotePending(req.Code)
 	if err != nil {
 		switch err {
+		case coresignup.ErrRegistrationClosed:
+			return registrationClosedError(c)
 		case coresignup.ErrPendingNotFound:
 			return apierr.FastifyReply(c, http.StatusBadRequest, "NO_SUCH_CODE")
 		case coresignup.ErrPendingExpired:

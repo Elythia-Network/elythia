@@ -281,8 +281,10 @@ func (h *Handler) buildDocument(version string) map[string]any {
 			if m.MaintainerEmail != nil {
 				maintainerEmail = *m.MaintainerEmail
 			}
-			openRegistrations = !m.DisableRegistration
-			disableRegistration = m.DisableRegistration
+			// disableRegistration は「受け付けない」を有効にする更新で同時に立つが、列を
+			// 直接書き換えられた場合にも登録可と名乗らないよう、ここでも見る (#3186)。
+			openRegistrations = !m.DisableRegistration && !m.RegistrationClosed
+			disableRegistration = m.DisableRegistration || m.RegistrationClosed
 			emailRequiredForSignup = m.EmailRequiredForSignup
 			enableHcaptcha = m.EnableHcaptcha
 			enableRecaptcha = m.EnableRecaptcha

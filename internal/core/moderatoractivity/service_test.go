@@ -93,6 +93,27 @@ func TestCheck_AlreadyInvitationOnly_NoOp(t *testing.T) {
 	assert.Nil(t, meta.updated, "既に招待制なら meta を触らない")
 }
 
+// 承認制と「受け付けない」のときは、モデレーターが全員非アクティブでも触らない
+// (#3186)。承認制で disableRegistration だけを立てると、承認制の入口まで塞がる。
+func TestCheck_ApprovalOrClosed_NoOp(t *testing.T) {
+	now := time.Date(2026, 1, 30, 12, 0, 0, 0, time.UTC)
+	old := now.Add(-10 * 24 * time.Hour)
+	for name, m := range map[string]*model.Meta{
+		"approval": {ApprovalRequiredForSignup: true},
+		"closed":   {RegistrationClosed: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			meta := &fakeMeta{meta: m}
+			mods := &fakeModerators{users: []*model.User{userWithActive("a", &old)}}
+			s, ann, wh, _ := newSvc(now, mods, meta)
+			require.NoError(t, s.Check())
+			assert.Nil(t, meta.updated)
+			assert.Empty(t, ann.created)
+			assert.Empty(t, wh.events)
+		})
+	}
+}
+
 func TestCheck_NoModeratorsWithLastActive_NoOp(t *testing.T) {
 	// lastActiveDate を持つ moderator が 0 人 → 安全側で no-op (登録を無効化しない)。
 	now := time.Date(2026, 1, 30, 12, 0, 0, 0, time.UTC)
