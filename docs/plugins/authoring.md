@@ -329,11 +329,46 @@ func effectivePolicies(ctx plugin.Context, inv plugin.EffectivePolicyInvalidator
 
 `Keys`は空・空文字・重複を許さず、hostが持つnative policy keyだけを宣言できる。`Resolve`は必須。resolverは`req.UserID`と、activeなnative role IDをソート・重複除去した`req.RoleIDs`を受け取る。匿名解決では`UserID`が空文字で、`RoleIDs`はnilではない空sliceになる。入力sliceはproviderごとに複製されるが、resolver側でも変更しないこと。
 
+resolverは`req.UserID`のほかに、activeな手動ロールのassignmentを`req.ActiveAssignments`で受け取る。`RoleIDs`は従来どおりconditionalロールを含むが、`ActiveAssignments`は`role_assignment`の行を持つ手動ロールだけなので、`ActiveAssignments`の各`RoleID`は必ず`RoleIDs`に含まれる。ロールごとに高々1件で、並びは`RoleID`順、匿名解決では非nilの空sliceになる。期限切れ・削除済み・`role`行が無いorphanは含まれない。rolesとassignmentはhostの同じ1回の読取から同時に作られるので、両者の間に食い違いの窓は無い。`RoleIDs`は減っていないので、`ActiveAssignments`を読まないproviderの挙動は変わらない。
+
+`AssignmentID`は**不透明なID**として扱う — 内容は解釈せず、plugin storageの行と対応させるだけにする。unassign → re-assignでは別IDになるので、assignmentに紐づく状態を復活させられない。
+
 resolverの実行token取得待ちとresolver実行の期限はそれぞれ1秒。tokenを期限内に取得できないrequestはnative fallbackへ戻るが、providerは無効化されない。token取得後にresolver専用の新しい1秒deadlineが始まり、この実行期限を超えたproviderだけがprocess再起動まで無効化される。resolverへ渡されたcontextをStorage I/Oにも必ず渡すこと。contextを無視する処理はhostから強制終了できないが、hostは同じproviderの実行をcapacity 1に制限するため、timeout後に残留するresolver goroutineはproviderごと最大1本になる。
 
 resolverから本体のpolicy解決を呼び戻してはならない。同じ入力では自分のin-flight結果を待ち、異なる入力では自分が保持しているcapacity 1 tokenを待つため、いずれも外側のresolver deadlineを使い切ってproviderがprocess再起動まで無効化される。
 
-contributionの`Priority`は`0..2`で、大きいpriorityのgroupだけをnative roleと同じ規則で集約する。同じprovider内では同じ`Key`と`Order`の組を重複できない。`UseDefault: true`では`Value`を無視し、そのkeyのnative defaultを同じpriorityへ参加させる。
+contributionの`Priority`は`0..2`で、大きいpriorityのgroupだけをnative roleと同じ規則で集約する。同じprovider内での重複判定はcontributionの種別で違う — **追加contribution（`ReplaceRoleID`なし）は`Key`と`Order`の組**で一意で、`Order`は同一`Key`の複数寄与の並びを決める。**置換contribution（`ReplaceRoleID`あり）は`Order`を0に固定したうえで`Key`と`ReplaceRoleID`の組**で一意になる（後述）— 置換は`Order`を選べないので、同じ`Key`の別ロール置換を`Order`で区別すると必ず衝突する。`UseDefault: true`では`Value`を無視し、そのkeyのnative defaultを同じpriorityへ参加させる。
+
+`ReplaceRoleID`にロールIDを入れると、そのcontributionは「追加」ではなく**置換**になる — 指定したactive manualロールが`Key`にネイティブに持つcontributionだけを、1対1で差し替える。追加だけだとboolのORや数値のmaxでネイティブの値が生き残ってしまうので、計算した値を対象ロールの値として出したい用途には置換が必要になる。
+
+**置換の契約**（`ReplaceRoleID`が空でない場合）:
+
+- 対象は`req.ActiveAssignments`に現れるロールだけ。conditionalロールは`role_assignment`の行を持たないため置換対象にできない
+- 置換後のentryは**元のネイティブentryの`priority`を引き継ぐ**。自分で選ぶと二重定義になるので`Priority`と`Order`はどちらも`0`のまま書く
+- 置換後も、他のロールのcontribution・providerの通常contribution・instance / server capと同じpriority cascadeと型集約を行う
+- `explicit`も`UseDefault`に従う。`UseDefault: true`の置換は「このロールのoverrideをベース値に戻す」= ネイティブの`useDefault`と同じ扱い
+- administrator / moderator判定は対象外のまま
+
+```go
+func effectivePolicies(ctx plugin.Context, inv plugin.EffectivePolicyInvalidator) (plugin.EffectivePolicyRegistration, error) {
+	return plugin.EffectivePolicyRegistration{
+		Keys: []string{"mentionLimit"},
+		Resolve: func(c context.Context, req plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+			out := []plugin.EffectivePolicyContribution{}
+			for _, a := range req.ActiveAssignments {
+				// ロールごとに1件の置換を出す。Priority / Order は 0 のまま渡す =
+				// 元のネイティブentryのpriorityを引き継ぐ。
+				out = append(out, plugin.EffectivePolicyContribution{
+					Key:           "mentionLimit",
+					Value:         40,
+					ReplaceRoleID: a.RoleID,
+				})
+			}
+			return out, nil
+		},
+	}, nil
+}
+```
 
 値はnative keyの型に一致させる。boolはOR、integer-native policyは最大値、`chatAvailability`は`available`、`readonly`、`unavailable`の順で寛容な値、`uploadableFileTypes`はtrim後のset unionを使う。`optOutNotificationTypes`は**set intersectionを使う** — 「受け取らない」一覧なのでunionにすると複数ロールに属するほど通知が減り、他のpolicyが緩い方へ倒れるのと向きが食い違うため (#2898)。型不一致の候補は集約から除外し、有効な候補が1件も無ければnative defaultへ戻す。integer-native policyは`int`、host `int`範囲内の`int64`、または有限かつhost `int`範囲内の`float64`を受理する。`float64`の小数部は拒否・切り捨てず、結果のpolicy mapでも小数として維持する。typed integerは`2^53`を超えても`float64`へ変換せず比較する。
 
@@ -341,9 +376,11 @@ contributionの`Priority`は`0..2`で、大きいpriorityのgroupだけをnative
 
 未宣言key、unknown key、priority範囲外、order重複、型不一致、NaN、infinity、範囲外整数、enum外の値、空または非文字列の配列要素が1件でもあればprovider全体を失敗として扱う。resolverのerrorやpanicも同様。失敗providerが宣言したkeyはnative結果へ戻し、同じkeyに対する他providerの貢献も破棄する。宣言していないkeyには成功providerの貢献を適用し続ける。成功値はproviderごとのLRUへ保存し、evictionまたはinvalidation後のresolver失敗はcacheせずnativeへ戻す。fallbackはproviderごとの累積回数が1、2、4、8...回になった時だけ匿名warningとして記録し、恒常障害でrequestごとにlogを増やさない。診断errorとwarningはplugin名、user/role/policy ID、provider output、panic値を含まない。
 
+**置換が複数providerから重なったときはmalformedではない。** 上に挙げた失敗条件は「provider自身の出力が壊れている」場合で、置換の競合はそうではない。同じ`Key`と`ReplaceRoleID`を複数providerが置換した場合は**競合**になる。hostはそのpairを置換として受け入れず、ネイティブcontributionへ戻す — どちらの値も採らないので、管理者が設定したロールの値が残る。provider全体は失敗扱いにしないので、**ネイティブへ戻るのはそのpairだけで、他のkeyの追加contributionも他のロールの置換も通常どおり効く**。checked解決はこの結果を競合を表す固定errorと伴って返し、unchecked解決は同じ結果を返して競合errorだけを捨てる。provider失敗と併発した場合は両方のerrorが`errors.Is`で辿れる。provider失敗は宣言keyをネイティブへ戻すので、他のproviderの置換も同じkeyなら巻き戻る。
+
 instance/server capはplugin集約の後に適用する。`maxFileSizeMb`、`chunkedUploadMaxConcurrentSessions`、`chunkedUploadMaxPendingMb`へ`0`以下の無制限値を返しても、positiveなcapが設定されていればcap値になる。
 
-`Resolve`は、明示的なinvalidationの間は`UserID`とsorted active `RoleIDs`だけで結果が決まる純粋関数として実装する。時刻、request固有情報、未通知の外部状態へ依存してはならない。成功結果cacheはoperator設定`effectivePolicyProviderCacheEntries`（既定10000件、providerごと）のLRUであり、eviction時は同じ入力を再解決するためである。
+`Resolve`は、明示的なinvalidationの間は`UserID`、sorted active `RoleIDs`、`ActiveAssignments`だけで結果が決まる純粋関数として実装する。時刻、request固有情報、未通知の外部状態へ依存してはならない。**同じ`RoleIDs`でも`ActiveAssignments`が違えば結果が違ってもよい**ので、hostはproviderごとの成功結果cache keyにassignment IDを含める（付け外し / 再割り当ての直後に前の結果を返さないため）。cacheはoperator設定`effectivePolicyProviderCacheEntries`（既定10000件、providerごと）のLRUであり、eviction時は同じ入力を再解決する。
 
 plugin独自の書き込みでpolicy入力が変わった場合は、永続化のcommit成功後にだけ`inv.InvalidateUser`または`inv.InvalidateRole`を呼ぶ。失敗結果はcacheしない。in-flightの古いnative role/provider結果はinvalidation後のrequestへ返さず、cacheにも戻さない。conditional roleの対象userはassignment rowから列挙できないため、role invalidationは全userのrole/policy cacheを保守的に破棄する。匿名（空`UserID`）にはper-user invalidationが無いため、匿名結果に影響する状態変更では`InvalidateRole`を使う。
 
@@ -810,9 +847,14 @@ type Definition struct
 
 func (Definition) Validate() error
 
+type ActiveRoleAssignment struct
+  RoleID string
+  AssignmentID string
+
 type EffectivePolicyRequest struct
   UserID string
   RoleIDs []string
+  ActiveAssignments []ActiveRoleAssignment
 
 type EffectivePolicyContribution struct
   Key string
@@ -820,6 +862,7 @@ type EffectivePolicyContribution struct
   UseDefault bool
   Value any
   Order int
+  ReplaceRoleID string
 
 type EffectivePolicyResolver func(context.Context, EffectivePolicyRequest) ([]EffectivePolicyContribution, error)
 

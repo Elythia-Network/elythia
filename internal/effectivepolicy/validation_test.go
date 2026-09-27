@@ -34,6 +34,7 @@ func TestValidateContributions(t *testing.T) {
 	tests := []struct {
 		name          string
 		keys          []string
+		roles         []string
 		contributions []plugin.EffectivePolicyContribution
 		valid         bool
 	}{
@@ -62,10 +63,39 @@ func TestValidateContributions(t *testing.T) {
 		{name: "float overflow", keys: []string{"mentionLimit"}, contributions: []plugin.EffectivePolicyContribution{{Key: "mentionLimit", Value: maxIntFloat}}},
 		{name: "wrong number type", keys: []string{"mentionLimit"}, contributions: []plugin.EffectivePolicyContribution{{Key: "mentionLimit", Value: "1"}}},
 		{name: "use default", keys: []string{"canSearchNotes"}, contributions: []plugin.EffectivePolicyContribution{{Key: "canSearchNotes", UseDefault: true, Value: "ignored"}}, valid: true},
+		// --- 置換 ---
+		{name: "valid replacement", keys: []string{"mentionLimit"}, roles: []string{"r1"},
+			contributions: []plugin.EffectivePolicyContribution{{Key: "mentionLimit", Value: 40, ReplaceRoleID: "r1"}}, valid: true},
+		{name: "replacement of a role that is not active", keys: []string{"mentionLimit"}, roles: []string{"r1"},
+			contributions: []plugin.EffectivePolicyContribution{{Key: "mentionLimit", Value: 40, ReplaceRoleID: "r2"}}},
+		{name: "replacement with no active roles at all", keys: []string{"mentionLimit"},
+			contributions: []plugin.EffectivePolicyContribution{{Key: "mentionLimit", Value: 40, ReplaceRoleID: "r1"}}},
+		{name: "replacement choosing a priority", keys: []string{"mentionLimit"}, roles: []string{"r1"},
+			contributions: []plugin.EffectivePolicyContribution{{Key: "mentionLimit", Value: 40, Priority: 1, ReplaceRoleID: "r1"}}},
+		{name: "replacement choosing an order", keys: []string{"mentionLimit"}, roles: []string{"r1"},
+			contributions: []plugin.EffectivePolicyContribution{{Key: "mentionLimit", Value: 40, Order: 3, ReplaceRoleID: "r1"}}},
+		{name: "replacement of an undeclared key", keys: []string{"canSearchNotes"}, roles: []string{"r1"},
+			contributions: []plugin.EffectivePolicyContribution{{Key: "canSearchUsers", Value: 40, ReplaceRoleID: "r1"}}},
+		{name: "replacement of an unknown native key", keys: []string{"unknown"}, roles: []string{"r1"},
+			contributions: []plugin.EffectivePolicyContribution{{Key: "unknown", Value: 40, ReplaceRoleID: "r1"}}},
+		{name: "replacement with a wrong value type", keys: []string{"mentionLimit"}, roles: []string{"r1"},
+			contributions: []plugin.EffectivePolicyContribution{{Key: "mentionLimit", Value: "40", ReplaceRoleID: "r1"}}},
+		// **同じ key でも role が違えば別 tie。** 複数 role を同時に置換する plugin を
+		// 「重複」で弾かない。
+		{name: "two roles replaced for the same key", keys: []string{"mentionLimit"}, roles: []string{"r1", "r2"},
+			contributions: []plugin.EffectivePolicyContribution{
+				{Key: "mentionLimit", Value: 40, ReplaceRoleID: "r1"},
+				{Key: "mentionLimit", Value: 50, ReplaceRoleID: "r2"},
+			}, valid: true},
+		{name: "same role replaced twice", keys: []string{"mentionLimit"}, roles: []string{"r1"},
+			contributions: []plugin.EffectivePolicyContribution{
+				{Key: "mentionLimit", Value: 40, ReplaceRoleID: "r1"},
+				{Key: "mentionLimit", Value: 50, ReplaceRoleID: "r1"},
+			}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.valid, ValidateContributions(tc.keys, tc.contributions))
+			assert.Equal(t, tc.valid, ValidateContributions(tc.keys, tc.roles, tc.contributions))
 		})
 	}
 }
@@ -111,4 +141,21 @@ func TestValidatePolicyValue(t *testing.T) {
 			assert.Equal(t, tt.want, ValidatePolicyValue(tt.key, tt.value))
 		})
 	}
+}
+
+// **置換は (Key, ReplaceRoleID) で一意。** (Key, Order) だけで判定すると、同じ key の
+// 2 つの role を同時に置換する plugin が「重複」で弾かれる。置換の Order は 0 しか
+// 選べないので、role ID を含めないと同時置換ができない。
+func TestValidateContributionsReplacementTieUsesRoleID(t *testing.T) {
+	two := []plugin.EffectivePolicyContribution{
+		{Key: "mentionLimit", Value: 40, ReplaceRoleID: "r1"},
+		{Key: "mentionLimit", Value: 50, ReplaceRoleID: "r2"},
+	}
+	assert.True(t, ValidateContributions([]string{"mentionLimit"}, []string{"r1", "r2"}, two))
+
+	same := []plugin.EffectivePolicyContribution{
+		{Key: "mentionLimit", Value: 40, ReplaceRoleID: "r1"},
+		{Key: "mentionLimit", Value: 50, ReplaceRoleID: "r1"},
+	}
+	assert.False(t, ValidateContributions([]string{"mentionLimit"}, []string{"r1"}, same))
 }

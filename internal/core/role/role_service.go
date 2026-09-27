@@ -234,7 +234,9 @@ const roleCacheTTL = 5 * time.Minute
 
 // roleCacheEntry は per-user の roles snapshot + 失効時刻。
 type roleCacheEntry struct {
-	roles     []*model.Role
+	// snapshot は roles と activeAssignments の組。**1 回の ListByUser から共に
+	// 積まれる**ので、2 者の整合性が壊れることがなく、解決は 1 query で済む。
+	snapshot  userRoleSnapshot
 	expiresAt time.Time
 }
 
@@ -276,6 +278,26 @@ func cloneRoles(roles []*model.Role) []*model.Role {
 		cloned[i] = cloneRole(role)
 	}
 	return cloned
+}
+
+// userRoleSnapshot は 1 ユーザーの role 解決結果: 解決済み roles と、それを支撑する
+// active manual assignment。
+//
+// **2 つを返す。1 回で読む。** assignment の唯一の供給源は `ListByUser` なので、
+// roles と同じ操作で読むことが「policy 解決が 1 query のまま」という性質と、
+// 「片方にだけ現れる role がない」という整合性を同時に守る。
+type userRoleSnapshot struct {
+	roles             []*model.Role
+	activeAssignments []activeRoleAssignment
+}
+
+// clone は cache entry と呼び出し側のどちらかが他の変更を観測しないよう値を複製
+// する（GetUserRoles が roles に対してやっていたことと同じ）。
+func (s userRoleSnapshot) clone() userRoleSnapshot {
+	return userRoleSnapshot{
+		roles:             cloneRoles(s.roles),
+		activeAssignments: cloneActiveRoleAssignments(s.activeAssignments),
+	}
 }
 
 // Service manages roles and role assignments.
@@ -493,26 +515,24 @@ func (s *Service) listRolesCached() ([]*model.Role, error) {
 	}
 }
 
-// GetUserRoles returns all active roles applied to the user. The returned
-// slice is the union of (a) manually assigned roles that have not expired
-// and (b) `target=conditional` roles whose `condFormula` evaluates to true
-// for the user. Mirrors upstream Misskey TS `RoleService.getUserRoles` so
-// admin-authored conditional roles (e.g. "base role for all local users")
-// take effect at gate sites like HasRolePolicy (#1020).
+// resolveUserRoleSnapshot resolves the user's active roles and their active
+// manual assignments, serving the per-user cache when it is warm.
 //
-// 結果は roleCacheTTL 期間 in-memory にキャッシュされる (#300 3-5)。
-// Conditional 評価結果も同じ cache に乗るので、user の followers/notes
-// count などが変動しても最大 5 分の反映遅延がある点に注意 (= upstream TS
-// と同じ trade-off)。
-func (s *Service) GetUserRoles(userID string) ([]*model.Role, error) {
+// **戻り値は常に cache と非共有の複製。** 呼び出し側が書き換えても cache は
+// 変わらない。
+//
+// **partial snapshot を返さない。** `ListByUser` が失敗したら roles も
+// activeAssignments も一切埋めずに error を返す。片方だけ返すと、plugin には
+// 「その role に active な assignment が無い」という嘘が見える。
+func (s *Service) resolveUserRoleSnapshot(userID string) (userRoleSnapshot, error) {
 	if userID == "" {
-		return nil, nil
+		return userRoleSnapshot{roles: nil, activeAssignments: []activeRoleAssignment{}}, nil
 	}
 	s.userRoleCacheMu.RLock()
 	if entry := s.userRoleCache[userID]; entry != nil && time.Now().Before(entry.expiresAt) {
-		roles := entry.roles
+		snapshot := entry.snapshot.clone()
 		s.userRoleCacheMu.RUnlock()
-		return cloneRoles(roles), nil
+		return snapshot, nil
 	}
 	s.userRoleCacheMu.RUnlock()
 	s.userRoleCacheMu.Lock()
@@ -522,9 +542,10 @@ func (s *Service) GetUserRoles(userID string) ([]*model.Role, error) {
 	s.userRoleCacheMu.Unlock()
 	defer s.finishUserRoleFlight(userID)
 
+	// **唯一の読取点。** roles と activeAssignments はこの 1 回から共に作られる。
 	assignments, err := s.assignmentRepo.ListByUser(userID)
 	if err != nil {
-		return nil, err
+		return userRoleSnapshot{}, err
 	}
 	assignedRoles := make([]*model.Role, 0, len(assignments))
 	for _, a := range assignments {
@@ -532,6 +553,7 @@ func (s *Service) GetUserRoles(userID string) ([]*model.Role, error) {
 			assignedRoles = append(assignedRoles, a.Role)
 		}
 	}
+	activeAssignments := activeRoleAssignmentsFrom(assignments)
 
 	// Conditional role 評価: 全 role を fetch して target=conditional のみを
 	// formula 評価で絞り込む。assigned roles と matched conditional の和集合
@@ -542,6 +564,7 @@ func (s *Service) GetUserRoles(userID string) ([]*model.Role, error) {
 	// 配慮した soft-fail。
 	condRoles := s.evaluateConditionalRoles(userID, assignedRoles)
 	roles := append(assignedRoles, condRoles...)
+
 	// #2106 S5: cache 失効を「TTL」と「最も早い assignment expiresAt」の min にする。
 	// ListByUser は fetch 時点で有効な assignment しか返さないが、TTL 中に期限切れに
 	// なる time-limited assignment はそのまま cache に残り、最大 roleCacheTTL の間
@@ -554,16 +577,37 @@ func (s *Service) GetUserRoles(userID string) ([]*model.Role, error) {
 			cacheExpiry = *a.ExpiresAt
 		}
 	}
-	snapshot := cloneRoles(roles)
+
+	snapshot := userRoleSnapshot{roles: roles, activeAssignments: activeAssignments}
 	s.userRoleCacheMu.Lock()
 	if s.allUserRoleEpoch == allEpoch && s.userRoleEpoch[userID] == userEpoch {
-		s.userRoleCache[userID] = &roleCacheEntry{
-			roles:     snapshot,
-			expiresAt: cacheExpiry,
-		}
+		s.userRoleCache[userID] = &roleCacheEntry{snapshot: snapshot.clone(), expiresAt: cacheExpiry}
 	}
 	s.userRoleCacheMu.Unlock()
-	return cloneRoles(snapshot), nil
+	return snapshot.clone(), nil
+}
+
+// GetUserRoles returns all active roles applied to the user. The returned
+// slice is the union of (a) manually assigned roles that have not expired
+// and (b) `target=conditional` roles whose `condFormula` evaluates to true
+// for the user. Mirrors upstream Misskey TS `RoleService.getUserRoles` so
+// admin-authored conditional roles (e.g. "base role for all local users")
+// take effect at gate sites like HasRolePolicy (#1020).
+//
+// 結果は roleCacheTTL 期間 in-memory にキャッシュされる (#300 3-5)。
+// Conditional 評価結果も同じ cache に乗るので、user の followers/notes
+// count などが変動しても最大 5 分の反映遅延がある点に注意 (= upstream TS
+// と同じ trade-off)。
+//
+// **active manual assignment も同時に解決している**が、この公開 API は外へ返さない。
+// assignment を露出するのは resolveUserRoleSnapshot を直接使う effective policy
+// 解決だけ。
+func (s *Service) GetUserRoles(userID string) ([]*model.Role, error) {
+	snapshot, err := s.resolveUserRoleSnapshot(userID)
+	if err != nil {
+		return nil, err
+	}
+	return snapshot.roles, nil
 }
 
 func (s *Service) finishUserRoleFlight(userID string) {
@@ -574,6 +618,65 @@ func (s *Service) finishUserRoleFlight(userID string) {
 		delete(s.userRoleFlights, userID)
 		delete(s.userRoleEpoch, userID)
 	}
+}
+
+// activeRoleAssignment は active な手動role assignment と、その role の組。role cache
+// entry の隣で保持し、effective policy の解決が plugin へ渡す assignment 同一性を表す。
+type activeRoleAssignment struct {
+	roleID       string
+	assignmentID string
+}
+
+// activeRoleAssignmentsFrom は active manual assignment を「1 role につき高々 1 件」
+// に還元する。
+//
+// **`Role` が nil なら入れない。** role 行を消した orphan assignment は resolved roles
+// からも落ちるので、入れないと「置換対象なのに native contribution の無い role」になる。
+//
+// **conditional role は入れない。** `role_assignment` の行は手動割り当てだけが持つので、
+// `target=conditional` の role を指す行はロールを manual → conditional に切り替えた
+// 直後などの残骸であり、置換対象にならない。`target` が空文字のものは通す — DB の
+// `role_target` は既定 `manual` なので、「conditional ではない」を読めば本番と一致する。
+//
+// **同じ role が複数行あれば assignment ID の最小値 1 件だけを残す。** `Assign` は先に
+// `Exists` を見るので通常 1 行しか無いが、1 対 1 の置換が成立するには「active な手動
+// ロールにつき assignment は 1 つ」であることが host の**保証**になっている必要がある。
+// 決まっていないと置換対象が一意に定まらない。
+func activeRoleAssignmentsFrom(assignments []*model.RoleAssignment) []activeRoleAssignment {
+	out := make([]activeRoleAssignment, 0, len(assignments))
+	at := make(map[string]int, len(assignments))
+	for _, a := range assignments {
+		if a == nil || a.Role == nil || a.ID == "" || a.RoleID == "" {
+			continue
+		}
+		if a.Role.Target == model.RoleTargetConditional {
+			continue
+		}
+		if i, duplicate := at[a.RoleID]; duplicate {
+			if a.ID < out[i].assignmentID {
+				out[i].assignmentID = a.ID
+			}
+			continue
+		}
+		at[a.RoleID] = len(out)
+		out = append(out, activeRoleAssignment{roleID: a.RoleID, assignmentID: a.ID})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].roleID != out[j].roleID {
+			return out[i].roleID < out[j].roleID
+		}
+		return out[i].assignmentID < out[j].assignmentID
+	})
+	return out
+}
+
+// cloneActiveRoleAssignments は値を複製して返す。cache entry を読み出した側が
+// 書き換えないようにする。
+func cloneActiveRoleAssignments(in []activeRoleAssignment) []activeRoleAssignment {
+	if in == nil {
+		return nil
+	}
+	return append(make([]activeRoleAssignment, 0, len(in)), in...)
 }
 
 // GetUserAssigns returns the user's currently active role assignments.
@@ -1212,34 +1315,82 @@ type policyEntry struct {
 	explicit bool
 }
 
-// computePolicy resolves the effective value for a single policy key by
-// applying upstream TS priority cascade + per-key aggregator. baseVal is
-// the merged default+meta value used when a role specifies useDefault=true
-// or when no role has an override. extra carries effective-policy provider
-// contributions for the key (already validated & type-checked by the host);
-// it is merged into the same priority cascade as the role overrides.
-func computePolicy(key string, baseVal any, roleOverrides []map[string]rolePolicyOverride, extra []policyEntry) any {
-	// 各 role について本 policy の override を組み立てる。entry 無し =
-	// priority=0, useDefault=true (= base にフォールバック) として扱う。
-	collected := make([]policyEntry, 0, len(roleOverrides)+len(extra))
-	for _, m := range roleOverrides {
-		if m == nil {
-			collected = append(collected, policyEntry{priority: 0, value: baseVal})
-			continue
-		}
-		p, ok := m[key]
-		if !ok {
-			collected = append(collected, policyEntry{priority: 0, value: baseVal})
-			continue
-		}
-		if p.UseDefault {
-			collected = append(collected, policyEntry{priority: p.Priority, value: baseVal})
-		} else {
-			collected = append(collected, policyEntry{priority: p.Priority, value: p.Value, explicit: true})
-		}
+// rolePolicyInput は 1 つのロールが集約に贈るものの全体:
+//
+//   - roleID: どのロールか（置換の対象を突き合わせるため）
+//   - overrides: `Role.Policies` を key ごとに decode した結果
+//   - replacements: provider がこの要求で「native contribution の代わりに使う」と
+//     宣言した entry（key ごと）。provider が置換しなかったロールは nil。
+//
+// **aggregator は一切知らない。** entry を 1 つ選んで priority cascade に積むだけなので、
+// 置換の有無は関数内で完結する。
+type rolePolicyInput struct {
+	roleID    string
+	overrides map[string]rolePolicyOverride
+	// replacements はこのロールの置換 entry。provider が置換しなかったロールでは
+	// nil のまま（= native entry が使われる）。
+	replacements map[string]policyEntry
+}
+
+// entry は、このロールが key に対して贈る entry を返す。置換されていれば置換 entry
+// （**元 native entry の priority を引き継ぐ**）、されていなければ native entry。
+func (in rolePolicyInput) entry(key string, baseVal any) policyEntry {
+	if replacement, ok := in.replacements[key]; ok {
+		return replacement
 	}
-	// provider contribution は同じ priority cascade に参加させる
-	// (= native と provider は同一 priority グループ内で aggregate される)。
+	return rolePolicyEntry(in.overrides, key, baseVal)
+}
+
+// rolePolicyEntry は置換されていないロールが key に贈る entry。**この role が key を
+// 宣言していない場合は base 値を priority 0 で参加させる**という upstream 互換の既定が
+// ここに入る。
+func rolePolicyEntry(overrides map[string]rolePolicyOverride, key string, baseVal any) policyEntry {
+	p, ok := overrides[key]
+	if !ok {
+		return policyEntry{priority: 0, value: baseVal}
+	}
+	if p.UseDefault {
+		return policyEntry{priority: p.Priority, value: baseVal}
+	}
+	return policyEntry{priority: p.Priority, value: p.Value, explicit: true}
+}
+
+// newRolePolicyInputs は解決したロールを「ロールIDつきで集約できる」形へ変換する。
+// `Role.Policies` が空 / パース不能なロールは overrides が nil のまま入り、集約では
+// base 参加 = 従来と同じ。
+func newRolePolicyInputs(roles []*model.Role) []rolePolicyInput {
+	out := make([]rolePolicyInput, 0, len(roles))
+	for _, r := range roles {
+		if r == nil {
+			out = append(out, rolePolicyInput{})
+			continue
+		}
+		if len(r.Policies) == 0 {
+			out = append(out, rolePolicyInput{roleID: r.ID})
+			continue
+		}
+		out = append(out, rolePolicyInput{roleID: r.ID, overrides: parseRolePolicies(r.Policies)})
+	}
+	return out
+}
+
+// computePolicy resolves the effective value for a single policy key by
+// applying upstream TS priority cascade + per-key aggregator. baseVal is the
+// merged default+meta value used when a role specifies useDefault=true or when
+// no role has an override. inputs carries each role's parsed policies plus the
+// replacement entries an effective-policy provider supplied for it. extra
+// carries effective-policy provider contributions for the key (already validated
+// & type-checked by the host); it is merged into the same priority cascade as the
+// role overrides.
+func computePolicy(key string, baseVal any, inputs []rolePolicyInput, extra []policyEntry) any {
+	// 各 role がこの policy に贈る entry を組み立てる。entry 無し = priority=0,
+	// useDefault=true (= base にフォールバック) として扱う。
+	collected := make([]policyEntry, 0, len(inputs)+len(extra))
+	for _, in := range inputs {
+		collected = append(collected, in.entry(key, baseVal))
+	}
+	// provider contribution は同じ priority cascade に参加させる (= native と provider は
+	// 同一 priority グループ内で aggregate される)。
 	collected = append(collected, extra...)
 	// upstream: priority 2 → 1 → 0 の順で「該当 priority に少なくとも 1 件
 	// あればそのグループだけ aggregate」。fallback の priority 0 は全 role

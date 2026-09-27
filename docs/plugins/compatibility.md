@@ -28,6 +28,14 @@ mk-go 本体を変更する人向け。**公開面を広げてよい条件**と�
 
 `Definition.EffectivePolicies`と関連型の追加はこのadditive契約に従い、`Validate`もRoutes、Jobs、EffectivePoliciesのいずれかを要求する形へ緩和するだけなので、`APIVersion`は1のまま維持する。
 
+`EffectivePolicyRequest.ActiveAssignments` と `plugin.ActiveRoleAssignment` の追加も同じ扱い。**`RoleIDs` は変更されない**ので、`EffectivePolicyRequest`はhostが組み立ててproviderに渡すものだけだから、`RoleIDs`を読む既存providerの挙動は変わらず、新sliceを無視する実装は害がない。`APIVersion`は1のまま。
+
+`EffectivePolicyContribution.ReplaceRoleID`の追加も同じ扱い。**keyed struct literalで組み立てる限り**、**未設定なら追加contributionのまま**なので既存providerの挙動は変わらず、pluginは「対象ロールのネイティブcontributionを置き換える」という新しい契約にだけオプトインする。置換の`Priority`/`Order`制約はprovider作者の誤りを弾くもので、既存providerの出力形式は変えない。`APIVersion`は1のまま。
+
+`EffectivePolicyRequest`をpluginのtestやヘルパーで組み立てる場合は`plugin.Definition`と同じく**keyed struct literalだけ**を互換対象とする（`RoleIDs: ...`のようにフィールド名を書く）。外部プラグインのpositional / unkeyed literalはサポートしない。
+
+`EffectivePolicyContribution`をpluginのコードやtestで組み立てる場合も`plugin.Definition`と同じく**keyed struct literalだけ**を互換対象とする（`Key: ...`のようにフィールド名を書く）。**exported fieldを増やした型はpositional / unkeyed literalがソースで壊れる** — `ActiveAssignments`の追加で`EffectivePolicyRequest`が、`ReplaceRoleID`の追加で`EffectivePolicyContribution`がこれに当たるので、実行時の挙動がadditiveのままであってもコンパイルは通らない。
+
 `Definition.Peer`（#2819）と`Context.Queue()`、`plugin.Queue` / `EnqueueOption`の追加も同じ扱い。`Definition.Peer`は既存プラグインが`Routes`の中でpeerを登録していても壊さない（`RoleBoth`ならそのまま動く）が、**ロールを分割した構成では応答が届かない**ので、移すこと。登録が無いロールでは起動時にwarnが出る。
 
 `Context`はmk-goが実装してプラグインは受け取るだけなので、メソッドが増えてもプラグインは壊れない（プラグイン側が`Context`を自前で実装している場合はこの限りではないが、それはサポート対象外）。

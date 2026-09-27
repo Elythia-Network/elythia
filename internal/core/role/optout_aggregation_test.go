@@ -7,6 +7,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// policyInputs は「ロールごとの override だけを持つ」test 入力を rolePolicyInput へ
+// 包む。roleID は空のままでよい — この file の test は置換を扱わない（置換は
+// plugin_policy_test.go 側）。
+func policyInputs(overrides ...map[string]rolePolicyOverride) []rolePolicyInput {
+	out := make([]rolePolicyInput, 0, len(overrides))
+	for _, m := range overrides {
+		out = append(out, rolePolicyInput{overrides: m})
+	}
+	return out
+}
+
 // TestOptOutNotificationTypesAggregatesByIntersection pins that the mk-go
 // specific opt-out policy is merged the opposite way from uploadableFileTypes.
 //
@@ -152,7 +163,7 @@ func TestOptOutNotificationTypes_UnsetRolesDoNotCancel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := computePolicy(PolicyOptOutNotificationTypes, base, tt.overrides, nil)
+			got := computePolicy(PolicyOptOutNotificationTypes, base, policyInputs(tt.overrides...), nil)
 			require.Equal(t, tt.want, got)
 		})
 	}
@@ -161,10 +172,10 @@ func TestOptOutNotificationTypes_UnsetRolesDoNotCancel(t *testing.T) {
 // 他の []string policy は未設定ロールの base 参加を保つ (union の挙動を変えない)。
 func TestUploadableFileTypes_UnsetRolesStillParticipate(t *testing.T) {
 	base := []string{"image/*"}
-	got := computePolicy("uploadableFileTypes", base, []map[string]rolePolicyOverride{
-		{"uploadableFileTypes": {Priority: 0, Value: []string{"video/*"}}},
-		{},
-	}, nil)
+	got := computePolicy("uploadableFileTypes", base, policyInputs(
+		map[string]rolePolicyOverride{"uploadableFileTypes": {Priority: 0, Value: []string{"video/*"}}},
+		map[string]rolePolicyOverride{},
+	), nil)
 	require.Equal(t, []string{"image/*", "video/*"}, got,
 		"union の policy では未設定ロールの base も集約に参加する")
 }
@@ -189,9 +200,9 @@ func TestOptOutNotificationTypes_PriorityCascadeMatchesOtherPolicies(t *testing.
 	}
 
 	gotOptOut := computePolicy(PolicyOptOutNotificationTypes, optOutBase,
-		overrides(PolicyOptOutNotificationTypes, []string{"abuseReport"}), nil)
+		policyInputs(overrides(PolicyOptOutNotificationTypes, []string{"abuseReport"})...), nil)
 	gotUpload := computePolicy("uploadableFileTypes", uploadBase,
-		overrides("uploadableFileTypes", []string{"video/*"}), nil)
+		policyInputs(overrides("uploadableFileTypes", []string{"video/*"})...), nil)
 
 	require.Equal(t, optOutBase, gotOptOut,
 		"priority 2 が useDefault でも、その層で決まる (priority 0 へ滑り落ちない)")
@@ -202,10 +213,10 @@ func TestOptOutNotificationTypes_PriorityCascadeMatchesOtherPolicies(t *testing.
 // priority 2 に明示値があればそれで決まる (cascade 自体は生きている)。
 func TestOptOutNotificationTypes_HighPriorityExplicitWins(t *testing.T) {
 	got := computePolicy(PolicyOptOutNotificationTypes, []string{},
-		[]map[string]rolePolicyOverride{
-			{PolicyOptOutNotificationTypes: {Priority: 2, Value: []string{"abuseReport"}}},
-			{PolicyOptOutNotificationTypes: {Priority: 0, Value: []string{"note"}}},
-		}, nil)
+		policyInputs(
+			map[string]rolePolicyOverride{PolicyOptOutNotificationTypes: {Priority: 2, Value: []string{"abuseReport"}}},
+			map[string]rolePolicyOverride{PolicyOptOutNotificationTypes: {Priority: 0, Value: []string{"note"}}},
+		), nil)
 	require.Equal(t, []string{"abuseReport"}, got)
 }
 

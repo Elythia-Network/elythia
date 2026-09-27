@@ -23,6 +23,16 @@ import (
 // the underlying provider error is never surfaced to the caller.
 var ErrEffectivePolicyProvider = errors.New("effective policy provider failed")
 
+// ErrEffectivePolicyReplacementConflict is returned by GetUserPoliciesChecked
+// when two providers replaced the same role and policy key. Fixed and
+// identifier-free, like [ErrEffectivePolicyProvider]: which roles collided is an
+// operator concern and never reaches the caller.
+//
+// The contested pair keeps its native contribution; every other contribution in
+// the same result is still applied. It is joined with [ErrEffectivePolicyProvider]
+// when a provider also failed in the same request, so `errors.Is` finds both.
+var ErrEffectivePolicyReplacementConflict = errors.New("effective policy replacement conflict")
+
 const effectivePolicyProviderTimeout = time.Second
 const defaultEffectivePolicyProviderCacheEntries = 10_000
 
@@ -74,6 +84,10 @@ func newPolicyProviderRuntime(cacheEntries int) *policyProviderRuntime {
 type policyProviderCacheKey struct {
 	userID  string
 	roleIDs string
+	// assignments は ActiveAssignments の encoding。**RoleIDs が同じでも assignment が
+	// 違えば結果は違う** plugin がある（assignment ごとに状態を持つ）ので、付けないと
+	// 付け外し / 再割り当ての直後に前の結果を返す。
+	assignments string
 }
 
 type policyProviderCacheEntry struct {
@@ -178,28 +192,26 @@ func (s *Service) resolvePolicies(userID string) (map[string]any, error) {
 	}
 
 	roles := []*model.Role{}
+	activeAssignments := []activeRoleAssignment{}
 	if userID != "" {
-		var err error
-		roles, err = s.GetUserRoles(userID)
+		// **1 回の読取から roles と activeAssignments を共に得る。** repository が読めない
+		// ときは activeAssignments を空で埋めた snapshot を渡さず、provider を起動する
+		// 前に checked error にする。
+		snapshot, err := s.resolveUserRoleSnapshot(userID)
 		if err != nil {
 			return s.applyServerCaps(base), fmt.Errorf("role: effective policy inputs: %w", err)
 		}
+		roles = snapshot.roles
+		activeAssignments = snapshot.activeAssignments
 	}
 	if len(roles) == 0 && len(providers) == 0 {
 		return s.applyServerCaps(base), nil
 	}
-	roleOverrides := make([]map[string]rolePolicyOverride, 0, len(roles))
-	for _, r := range roles {
-		if r == nil || len(r.Policies) == 0 {
-			roleOverrides = append(roleOverrides, nil)
-			continue
-		}
-		roleOverrides = append(roleOverrides, parseRolePolicies(r.Policies))
-	}
+	roleInputs := newRolePolicyInputs(roles)
 
 	out := make(map[string]any, len(base))
 	for key, baseVal := range base {
-		out[key] = computePolicy(key, baseVal, roleOverrides, nil)
+		out[key] = computePolicy(key, baseVal, roleInputs, nil)
 	}
 	if len(providers) == 0 {
 		return s.applyServerCaps(out), nil
@@ -211,11 +223,27 @@ func (s *Service) resolvePolicies(userID string) (map[string]any, error) {
 
 	// provider には現在 active な native RoleID のみを、ソート + clone して渡す。
 	roleIDs := activeRoleIDs(roles)
+	// active manual assignment も渡す。**同じ snapshot から写す**ので 2 本目の query は
+	// 出ない。RoleIDs だけでは「同じ role でもどの assignment なのか」が分からず、
+	// assignment に紐づく状態を持つ plugin が作れないため。戻り値は常に非nil（匿名は空slice）。
+	assignments := pluginActiveRoleAssignments(activeAssignments)
 
 	// key -> provider contribution entries (同一 priority cascade に参加させる)。
 	contribs := make(map[string][]policyEntry)
+	// key -> roleID -> この要求で受理した置換 entry。
+	replacements := make(map[string]map[string]policyEntry)
+	// key -> roleID: 複数 provider が同じ role/key を置換した競合。
+	conflicted := make(map[string]map[string]bool)
 	// 失敗したproviderの宣言keyはplugin貢献をすべて破棄してnative結果へ戻す。
 	failed := make(map[string]bool)
+	// 置換は元の native priority を引き継ぐので、role ごとの overrides を引けるように
+	// しておく。
+	overridesByRole := make(map[string]map[string]rolePolicyOverride, len(roleInputs))
+	for _, in := range roleInputs {
+		if in.roleID != "" {
+			overridesByRole[in.roleID] = in.overrides
+		}
+	}
 
 	type resolvedProvider struct {
 		contributions []plugin.EffectivePolicyContribution
@@ -229,9 +257,15 @@ func (s *Service) resolvePolicies(userID string) (map[string]any, error) {
 			defer providersWG.Done()
 			providerRoleIDs := make([]string, len(roleIDs))
 			copy(providerRoleIDs, roleIDs)
+			providerAssignments := make([]plugin.ActiveRoleAssignment, len(assignments))
+			copy(providerAssignments, assignments)
 			resolved[i].contributions, resolved[i].ok = resolvePolicyProviderCached(
 				p,
-				plugin.EffectivePolicyRequest{UserID: userID, RoleIDs: providerRoleIDs},
+				plugin.EffectivePolicyRequest{
+					UserID:            userID,
+					RoleIDs:           providerRoleIDs,
+					ActiveAssignments: providerAssignments,
+				},
 			)
 		}()
 	}
@@ -247,6 +281,10 @@ func (s *Service) resolvePolicies(userID string) (map[string]any, error) {
 			continue
 		}
 		for _, c := range res {
+			if c.ReplaceRoleID != "" {
+				collectPolicyReplacement(replacements, conflicted, overridesByRole, c, base[c.Key])
+				continue
+			}
 			baseVal := base[c.Key]
 			value := c.Value
 			if c.UseDefault {
@@ -259,8 +297,24 @@ func (s *Service) resolvePolicies(userID string) (map[string]any, error) {
 		}
 	}
 
+	// 置換が 1 件でもあれば、置換 entry 付きで集約し直す。競合した pair は accepted から
+	// 消してあるので、そこは native のままになる。
+	if len(replacements) > 0 {
+		replacedInputs := applyPolicyReplacements(roleInputs, replacements)
+		for key, byRole := range replacements {
+			if len(byRole) == 0 {
+				// **この key の置換が全部競合した。** native 集約の結果 out[key] を
+				// そのまま残し、他の provider の通常contribution だけ足し直す。
+				continue
+			}
+			out[key] = computePolicy(key, base[key], replacedInputs, contribs[key])
+		}
+	}
 	for key, entries := range contribs {
-		out[key] = computePolicy(key, base[key], roleOverrides, entries)
+		if len(replacements[key]) > 0 {
+			continue // 上の loop で置換込みで計算済み
+		}
+		out[key] = computePolicy(key, base[key], roleInputs, entries)
 	}
 
 	for key := range failed {
@@ -270,10 +324,21 @@ func (s *Service) resolvePolicies(userID string) (map[string]any, error) {
 	}
 
 	out = s.applyServerCaps(out)
-	if len(failed) > 0 {
+	providerFailed := len(failed) > 0
+	conflict := hasPolicyReplacementConflict(conflicted)
+	// **単独のときは素の sentinel を返す。** 既存テストも既存呼び出し側も
+	// `err == ErrEffectivePolicyProvider` 相当を前提にしているため、1 つしか無いのに join
+	// すると等価性が壊れる。
+	switch {
+	case providerFailed && conflict:
+		return out, errors.Join(ErrEffectivePolicyProvider, ErrEffectivePolicyReplacementConflict)
+	case providerFailed:
 		return out, ErrEffectivePolicyProvider
+	case conflict:
+		return out, ErrEffectivePolicyReplacementConflict
+	default:
+		return out, nil
 	}
-	return out, nil
 }
 
 // log returns the logger captured when the runtime was built, falling back to
@@ -300,7 +365,11 @@ func resolvePolicyProviderCached(provider policyProvider, req plugin.EffectivePo
 	if provider.runtime.disabled.Load() {
 		return nil, false
 	}
-	key := policyProviderCacheKey{userID: req.UserID, roleIDs: encodePolicyProviderRoleIDs(req.RoleIDs)}
+	key := policyProviderCacheKey{
+		userID:      req.UserID,
+		roleIDs:     encodePolicyProviderRoleIDs(req.RoleIDs),
+		assignments: encodePolicyProviderAssignments(req.ActiveAssignments),
+	}
 
 	var flight *policyProviderFlight
 	// **ループではない。** 早期 return を持つ 1 回きりの区間で、`for` は
@@ -329,9 +398,18 @@ func resolvePolicyProviderCached(provider policyProvider, req plugin.EffectivePo
 	provider.runtime.flights[key] = flight
 	provider.runtime.cacheMu.Unlock()
 
+	// **置換してよい role は resolver を呼ぶ前に確定させる。** request は値渡しだが
+	// `ActiveAssignments` の slice は共有されているので、resolver は自分の要素を書き換え
+	// られる。戻ってきた後に `req` を読んではいけない — 「active な role を conditional
+	// な role に差し替えて」置換を通してしまう。**呼び出し前に ID を取り出した集合**を
+	// 使うので、resolver 側の書き込みは判定に入らない。
+	//
+	// cache hit / flight 共有は上で return 済みなので、この取り出しは cache miss の経路
+	// にだけかかる。
+	replaceableRoleIDs := activeRoleIDsFromAssignments(req.ActiveAssignments)
 	contributions, ok := invokePolicyProvider(provider, req, key, flight)
 	if ok {
-		ok = effectivepolicy.ValidateContributions(provider.reg.Keys, contributions)
+		ok = effectivepolicy.ValidateContributions(provider.reg.Keys, replaceableRoleIDs, contributions)
 	}
 	if ok {
 		contributions = clonePolicyContributions(contributions)
@@ -446,6 +524,23 @@ func encodePolicyProviderRoleIDs(roleIDs []string) string {
 		encoded.WriteString(strconv.Itoa(len(roleID)))
 		encoded.WriteByte(':')
 		encoded.WriteString(roleID)
+	}
+	return encoded.String()
+}
+
+// encodePolicyProviderAssignments は role ID と assignment ID の**両方を**
+// length-prefix して key にする。片方だけ prefix すると
+// `{RoleID: "a", AssignmentID: "bc"}` と `{RoleID: "ab", AssignmentID: "c"}` が同じ key に
+// なり、plugin には別の user の assignment ID が渡る。
+func encodePolicyProviderAssignments(assignments []plugin.ActiveRoleAssignment) string {
+	var encoded strings.Builder
+	for _, a := range assignments {
+		encoded.WriteString(strconv.Itoa(len(a.RoleID)))
+		encoded.WriteByte(':')
+		encoded.WriteString(a.RoleID)
+		encoded.WriteString(strconv.Itoa(len(a.AssignmentID)))
+		encoded.WriteByte(':')
+		encoded.WriteString(a.AssignmentID)
 	}
 	return encoded.String()
 }
@@ -609,6 +704,11 @@ func lessPolicyContribution(a, b plugin.EffectivePolicyContribution) bool {
 	if a.Order != b.Order {
 		return a.Order < b.Order
 	}
+	// **置換は Order が 0 なので、置換同士は RoleID で順序を決める。** 空文字が先に来るので、
+	// ReplaceRoleID を持たない contribution の並びは従来と同じ。
+	if a.ReplaceRoleID != b.ReplaceRoleID {
+		return a.ReplaceRoleID < b.ReplaceRoleID
+	}
 	if a.Key != b.Key {
 		return a.Key < b.Key
 	}
@@ -619,6 +719,121 @@ func lessPolicyContribution(a, b plugin.EffectivePolicyContribution) bool {
 		return !a.UseDefault
 	}
 	return false
+}
+
+// pluginActiveRoleAssignments は host 内部型を公開plugin型へ写す。戻り値は常に非nil
+// （len 0 でも make の戻りなので nil にならない）— 匿名解決の契約。
+func pluginActiveRoleAssignments(in []activeRoleAssignment) []plugin.ActiveRoleAssignment {
+	out := make([]plugin.ActiveRoleAssignment, len(in))
+	for i, a := range in {
+		out[i] = plugin.ActiveRoleAssignment{RoleID: a.roleID, AssignmentID: a.assignmentID}
+	}
+	return out
+}
+
+// hasPolicyReplacementConflict reports whether any (key, role) pair was contested.
+func hasPolicyReplacementConflict(conflicted map[string]map[string]bool) bool {
+	for _, roles := range conflicted {
+		if len(roles) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// collectPolicyReplacement records one accepted replacement, or marks the (key,
+// role) pair as contested when a second provider already replaced it.
+//
+// **置く entry は元 native entry を改変したもの**なので、declared priority と `explicit`
+// の既定（その role が key を宣言していなければ base 参加 = explicit でない）を引き継ぎ、
+// 値だけ contrib の Value に差し替える。
+//
+// **競合は pair 単位で落とす。** provider 全体を失敗扱いにしてしまうと、置換していない
+// 無関係な key まで native へ戻すことになる。どちらの値も採らない = 管理者が設定した
+// role の値が残るので、fallback の向きは安全。
+func collectPolicyReplacement(
+	accepted map[string]map[string]policyEntry,
+	conflicted map[string]map[string]bool,
+	overridesByRole map[string]map[string]rolePolicyOverride,
+	contribution plugin.EffectivePolicyContribution,
+	baseVal any,
+) {
+	byRole := accepted[contribution.Key]
+	if byRole == nil {
+		byRole = make(map[string]policyEntry, 1)
+		accepted[contribution.Key] = byRole
+	}
+	if conflicted[contribution.Key][contribution.ReplaceRoleID] {
+		return
+	}
+	if _, taken := byRole[contribution.ReplaceRoleID]; taken {
+		delete(byRole, contribution.ReplaceRoleID)
+		roles := conflicted[contribution.Key]
+		if roles == nil {
+			roles = make(map[string]bool, 1)
+			conflicted[contribution.Key] = roles
+		}
+		roles[contribution.ReplaceRoleID] = true
+		return
+	}
+	entry := rolePolicyEntry(overridesByRole[contribution.ReplaceRoleID], contribution.Key, baseVal)
+	// UseDefault は「この role の override を base に戻す」= native の useDefault と同じ
+	// 扱い。値を使う場合は explicit な設定になる。
+	entry.value = clonePolicyValue(baseVal)
+	entry.explicit = false
+	if !contribution.UseDefault {
+		entry.value = clonePolicyValue(contribution.Value)
+		entry.explicit = true
+	}
+	byRole[contribution.ReplaceRoleID] = entry
+}
+
+// applyPolicyReplacements returns a copy of inputs with the accepted replacement
+// entries attached. 元の slice は触らないので native pass は自分の entry を保ったまま。
+//
+// **roleID が空の input には付けない。** 置換の target は必ず非空の role ID なので空の
+// role ID に一致するはずはないが、この guard で「読めないロールに置換が混ざる」形を1行で
+// 塞ぐ。
+func applyPolicyReplacements(inputs []rolePolicyInput, replacements map[string]map[string]policyEntry) []rolePolicyInput {
+	out := make([]rolePolicyInput, len(inputs))
+	copy(out, inputs)
+	for i := range out {
+		if out[i].roleID == "" {
+			continue
+		}
+		attached := make(map[string]policyEntry, len(replacements))
+		for key, byRole := range replacements {
+			if entry, ok := byRole[out[i].roleID]; ok {
+				attached[key] = entry
+			}
+		}
+		if len(attached) > 0 {
+			out[i].replacements = attached
+		}
+	}
+	return out
+}
+
+// activeRoleIDsFromAssignments は request の assignment が覆う role ID をソート・重複
+// 除去して返す。**置換が名乗ってよい target の host 側の姿**。
+func activeRoleIDsFromAssignments(assignments []plugin.ActiveRoleAssignment) []string {
+	if len(assignments) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(assignments))
+	seen := make(map[string]struct{}, len(assignments))
+	for _, a := range assignments {
+		if a.RoleID == "" {
+			continue
+		}
+		if _, duplicate := seen[a.RoleID]; duplicate {
+			continue
+		}
+		seen[a.RoleID] = struct{}{}
+		out = append(out, a.RoleID)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // activeRoleIDs extracts the currently active role IDs from the resolved
