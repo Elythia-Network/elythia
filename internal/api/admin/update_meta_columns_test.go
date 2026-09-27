@@ -19,7 +19,7 @@ import (
 //   - 書かせてよい → この一覧に足す
 //   - 書かせたくない → `updateMetaProtectedColumns` にも足す
 //
-// 数え方: `internal/model/meta.go` の `gorm:"column:..."` タグ (実測 146)。
+// 数え方: `internal/model/meta.go` の `gorm:"column:..."` タグ (実測 147)。
 var knownMetaColumns = []string{
 	"allowExternalApRedirect",
 	"app192IconUrl",
@@ -122,6 +122,7 @@ var knownMetaColumns = []string{
 	"proxyRemoteFiles",
 	"recaptchaSecretKey",
 	"recaptchaSiteKey",
+	"registrationClosed",
 	"relayOrphanUserGraceDays",
 	"remoteNotesCleaningExpiryDaysForEachNotes",
 	"remoteNotesCleaningMaxProcessingDurationInMinutes",

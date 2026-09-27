@@ -178,11 +178,13 @@ func (h *Handler) buildMeta(detail bool) (map[string]any, error) {
 		"uri":                    h.config.URL,
 		"description":            m.Description,
 		"langs":                  strArrayOrEmpty(m.Langs),
-		"disableRegistration":    m.DisableRegistration,
+		"disableRegistration":    m.DisableRegistration || m.RegistrationClosed,
 		"emailRequiredForSignup": m.EmailRequiredForSignup,
 		// 承認制かどうかは登録ページが分岐に使うので公開する
 		// (emailRequiredForSignup と同じ扱い、#2554)。
 		"approvalRequiredForSignup": m.ApprovalRequiredForSignup,
+		// 「受け付けない」(#3186)。入口と登録画面が表示の分岐に使う。
+		"registrationClosed": m.RegistrationClosed,
 		// 申請フォームの定義。申請ページが描画に使う (#2570)。
 		"signupApplicationForm": jsonArrayOrEmpty(m.SignupApplicationForm),
 		"enableHcaptcha":        m.EnableHcaptcha,
@@ -249,7 +251,7 @@ func (h *Handler) buildMeta(detail bool) (map[string]any, error) {
 		"policies": mergedPolicies,
 
 		"features": map[string]any{
-			"registration":              !m.DisableRegistration,
+			"registration":              !m.DisableRegistration && !m.RegistrationClosed,
 			"emailRequiredForSignup":    m.EmailRequiredForSignup,
 			"approvalRequiredForSignup": m.ApprovalRequiredForSignup,
 			"localTimeline":             PolicyBool(mergedPolicies, "ltlAvailable"),

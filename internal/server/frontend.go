@@ -440,9 +440,11 @@ func buildMetaJSON(cfg *config.Config, m *model.Meta, proxyAccountResolver meta.
 		"uri":                       cfg.URL,
 		"description":               m.Description,
 		"langs":                     m.Langs,
-		"disableRegistration":       m.DisableRegistration,
+		"disableRegistration":       m.DisableRegistration || m.RegistrationClosed,
 		"emailRequiredForSignup":    m.EmailRequiredForSignup,
 		"approvalRequiredForSignup": m.ApprovalRequiredForSignup,
+		// 「受け付けない」(#3186)。入口と登録画面が表示の分岐に使う。
+		"registrationClosed": m.RegistrationClosed,
 		// 申請フォームの定義 (#2570)。**ここに載せ忘れると申請が完了不能になる** —
 		// instance.ts は SSR 埋め込みを localStorage cache より優先し、以後 1 時間
 		// /api/meta を再取得しない。申請ページは定義を空と見て answers を 0 件送り、
@@ -510,7 +512,7 @@ func buildMetaJSON(cfg *config.Config, m *model.Meta, proxyAccountResolver meta.
 		"clientOptions":                clientOptionsJSON(m.ClientOptions),
 		"policies":                     mergedPolicies,
 		"features": map[string]any{
-			"registration":              !m.DisableRegistration,
+			"registration":              !m.DisableRegistration && !m.RegistrationClosed,
 			"emailRequiredForSignup":    m.EmailRequiredForSignup,
 			"approvalRequiredForSignup": m.ApprovalRequiredForSignup,
 			"localTimeline":             meta.PolicyBool(mergedPolicies, "ltlAvailable"),

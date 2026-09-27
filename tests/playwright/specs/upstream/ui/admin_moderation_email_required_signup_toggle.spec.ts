@@ -14,7 +14,8 @@
 // 独自の「登録を承認制にする」switch (#2570) が enableRegistration の直後に
 // 入ったため、2 番目は approvalRequiredForSignup になっていた。押している
 // ものが違っても spec は緑で、approvalRequiredForSignup が on のまま残って
-// **以降の全 spec の signup が 403 になっていた** (#2620)。
+// **以降の全 spec の signup が 403 になっていた** (#2620)。登録の受け付け方は
+// #3186 で 4 択のラジオになったが、ラベルで引く理由は変わらない。
 
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';

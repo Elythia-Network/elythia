@@ -72,6 +72,16 @@ func applicationView(a *model.SignupApplication) map[string]any {
 // エラー応答を書いたことを err の非 nil で表そうとすると、書いた直後に呼び出し
 // 側が素通りして処理を続けてしまう。
 func (h *Handler) approvalReady(c echo.Context) (*model.Meta, bool, error) {
+	return h.approvalGate(c, false)
+}
+
+// approvalGate is approvalReady, optionally rejecting first while the server
+// accepts no registrations (#3186).
+//
+// **承認制かどうかより先に見る。** 承認制でないサーバーでも、閉じているならそう
+// 伝える (UNAVAILABLE だと「承認制ではない」と読まれる)。照会 (approvalReady) には
+// 掛けない — 閉じている間も申請者が結果を見られるように。
+func (h *Handler) approvalGate(c echo.Context, rejectClosed bool) (*model.Meta, bool, error) {
 	if h.applications == nil {
 		return nil, false, c.JSON(http.StatusServiceUnavailable,
 			apierr.Error("UNAVAILABLE", "Approval-based signup is not enabled.", "7c1c9c2f-1a2b-4c3d-8e5f-6a7b8c9d0e1f"))
@@ -80,6 +90,9 @@ func (h *Handler) approvalReady(c echo.Context) (*model.Meta, bool, error) {
 	if err != nil {
 		return nil, false, c.JSON(http.StatusInternalServerError,
 			apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
+	}
+	if rejectClosed && meta.RegistrationClosed {
+		return nil, false, registrationClosedError(c)
 	}
 	if !meta.ApprovalRequiredForSignup {
 		return nil, false, c.JSON(http.StatusServiceUnavailable,
@@ -98,7 +111,7 @@ func (h *Handler) approvalReady(c echo.Context) (*model.Meta, bool, error) {
 // 状態の照会 (ApplicationStatus) には掛けない。読むだけで何も作らないので、
 // 既に申請した人が結果を見られなくなるほうが害が大きい。
 func (h *Handler) approvalOpen(c echo.Context) (*model.Meta, bool, error) {
-	meta, ok, err := h.approvalReady(c)
+	meta, ok, err := h.approvalGate(c, true)
 	if !ok {
 		return nil, false, err
 	}

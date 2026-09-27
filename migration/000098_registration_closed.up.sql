@@ -1,0 +1,12 @@
+-- registrationClosed: 新規登録をどの経路からも受け付けない (#3186)。
+--
+-- 有効な間は signup (招待コード付きを含む) / 承認制の申請 / 承認済みの申請からの登録 /
+-- メール確認の完了をすべて拒否する。途中まで進んでいる登録も止める (荒らしの最中に
+-- 緊急で閉じる用途)。申請・確認待ち・招待コードの記録は消さないので、解除すれば
+-- 有効期限内のものはそのまま使える (承認済みの申請は、承認制で再開した場合だけ。
+-- 承認制でなければ申請からの登録は元から受け付けない)。
+--
+-- **有効にする更新では disableRegistration も true にする** (admin/update-meta の
+-- normalizeRegistrationClosed)。TS はこの列を認識しないが、TS へ戻しても
+-- disableRegistration が true なので招待制に落ちる。登録が開く方向には倒れない。
+ALTER TABLE "meta" ADD COLUMN IF NOT EXISTS "registrationClosed" boolean NOT NULL DEFAULT false;

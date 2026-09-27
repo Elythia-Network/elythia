@@ -105,7 +105,14 @@ func (s *Service) Check() error {
 		return err
 	}
 	// 既に招待制なら何もしない (upstream process() の早期 return)。
-	if meta.DisableRegistration {
+	//
+	// **承認制 (#2557) と「受け付けない」(#3186) のときも何もしない (mk-go 独自)。**
+	// この処理の目的は「審査する人がいない間に、誰でも登録できる状態を残さない」こと。
+	// 承認制は承認するモデレーターがいなければ誰も入れないので、閉じる理由が無い。
+	// しかも disableRegistration だけを立てると承認制の入口 (approvalOpen) まで塞がり、
+	// 承認制と招待制が重なった「どこからも登録できない」状態になる (#2565 が避けている
+	// 組み合わせ)。「受け付けない」は既に全部閉じている。
+	if meta.DisableRegistration || meta.ApprovalRequiredForSignup || meta.RegistrationClosed {
 		return nil
 	}
 

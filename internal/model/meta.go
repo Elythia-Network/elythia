@@ -42,6 +42,12 @@ type Meta struct {
 	// `disableRegistration` と重ねると承認制の入口まで閉じる (`approvalOpen` が
 	// 503) ので、有効にする更新では同じ更新で登録を開放する (#2565 / #2803)。
 	ApprovalRequiredForSignup bool `gorm:"column:approvalRequiredForSignup;default:false" json:"approvalRequiredForSignup"`
+	// RegistrationClosed rejects every signup route while set, including
+	// ones already in progress (mk-go, #3186).
+	// 有効にする更新では disableRegistration も true にする (admin/update-meta の
+	// normalizeRegistrationClosed)。承認制の設定は残し、解除すると元に戻る。
+	// 他の受け付け方より優先する。
+	RegistrationClosed bool `gorm:"column:registrationClosed;default:false" json:"registrationClosed"`
 	// SignupApplicationForm is the admin-defined application form (#2570)。
 	// 要素の配列で、各要素は {label, type, required, maxLength}。
 	SignupApplicationForm datatypes.JSON `gorm:"column:signupApplicationForm;type:jsonb;default:'[]'" json:"signupApplicationForm"`

@@ -1610,6 +1610,7 @@ func (h *Handler) AdminMeta(c echo.Context) error {
 		"disableRegistration":       m.DisableRegistration,
 		"emailRequiredForSignup":    m.EmailRequiredForSignup,
 		"approvalRequiredForSignup": m.ApprovalRequiredForSignup,
+		"registrationClosed":        m.RegistrationClosed,
 		"signupApplicationForm":     m.SignupApplicationForm,
 		// Cache
 		"cacheRemoteFiles":          m.CacheRemoteFiles,
@@ -1786,6 +1787,9 @@ func (h *Handler) UpdateMeta(c echo.Context) error {
 	// 手段まで塞いでしまう)。
 	currentMeta, _ := h.metaRepo.Fetch()
 	normalizeSignupConditions(fields, currentMeta)
+	// **承認制の整合より後に置く。** 「受け付けない」は他の受け付け方より優先するので、
+	// 承認制を入れる更新が開けた登録を、ここで閉じ直す (#3186)。
+	normalizeRegistrationClosed(fields, currentMeta)
 	// 申請フォームの定義を検証する (#2570)。**上限を置かないと管理者が自分で
 	// 壊せる** — 項目を無制限に足せば申請ページが使い物にならなくなる。
 	if err := validateSignupApplicationForm(fields); err != nil {
@@ -1926,6 +1930,41 @@ func (h *Handler) maybeAutoGenerateVAPID(fields map[string]any) error {
 	fields["swPublicKey"] = newPub
 	fields["swPrivateKey"] = newPriv
 	return nil
+}
+
+// normalizeRegistrationClosed makes "not accepting registrations" win over the
+// other registration modes (mk-go, #3186).
+//
+// **有効な間は disableRegistration を立てる。** 外から見た値 (nodeinfo の
+// `openRegistrations` / `/api/meta` の `features.registration`) を本家と同じにするため
+// と、TS へ戻したときに招待制へ落とすため (新しい列は無視される)。利用者の指定より
+// 優先する — 閉じたまま登録が開いた値を残すと、TS へ戻したときに開く。
+//
+// **承認制は外さない。** 閉じている間も申請者が状態を照会できるように (照会は承認制の
+// 入口で、閉じている間も開けてある) と、解除したときに元の受け付け方へ戻れるように。
+// 承認制と disableRegistration が同時に立つのは #2565 が避けている組み合わせだが、
+// 閉じている間は「どの入口も開かない」がまさに意図した状態なので構わない。
+//
+// **解除する更新では、承認制が残っていれば登録を開け直す** (#2565 の整合)。閉じる
+// 更新で立てた disableRegistration が残ると、承認制の入口が `approvalOpen` で塞がった
+// ままになる。disableRegistration の明示より優先する — normalizeSignupConditions の
+// 「開ける側は上書きする」と同じ扱いで、尊重すると入口が 1 つも無い状態が作れる。
+// 承認制が無ければ何もしない — disableRegistration が立ったままなので招待制で再開する
+// (開く側へは倒さない)。
+//
+// meta が引けない (current == nil) ときは、この更新で送られた値だけで判定する。
+func normalizeRegistrationClosed(fields map[string]any, current *model.Meta) {
+	wasClosed := current != nil && current.RegistrationClosed
+	if metaBoolAfterUpdate(fields, "registrationClosed", wasClosed) {
+		fields["disableRegistration"] = true
+		return
+	}
+	if !wasClosed {
+		return
+	}
+	if metaBoolAfterUpdate(fields, "approvalRequiredForSignup", current.ApprovalRequiredForSignup) {
+		fields["disableRegistration"] = false
+	}
 }
 
 // metaBoolAfterUpdate returns the effective bool value of key after the
@@ -4564,7 +4603,7 @@ func (h *Handler) ShowModerationLogs(c echo.Context) error {
 // コードが持つ。メールは独立した任意設定。
 
 // signupGateBoolFields are the registration gates that must arrive as booleans.
-var signupGateBoolFields = []string{"approvalRequiredForSignup", "disableRegistration"}
+var signupGateBoolFields = []string{"approvalRequiredForSignup", "disableRegistration", "registrationClosed"}
 
 // normalizeSignupGateBools drops JSON null and rejects other non-bool values
 // for the registration gates.
@@ -4584,7 +4623,7 @@ var signupGateBoolFields = []string{"approvalRequiredForSignup", "disableRegistr
 // クライアントを 400 にすると互換が壊れる。落とさないと NOT NULL 制約違反で
 // 500 になる (この分岐を入れる前の mk-go の挙動)。
 //
-// **対象はこの 2 つに絞る** — 他の bool 列は型を間違えても正規化の判断を
+// **対象は登録のゲートに絞る** (#3186 で `registrationClosed` が加わり 3 つ) — 他の bool 列は型を間違えても正規化の判断を
 // すり抜けさせる働きが無く、update-meta の全 bool 列を一括で弾くと既存クライアント
 // への影響範囲が読めない。
 func normalizeSignupGateBools(fields map[string]any) error {
