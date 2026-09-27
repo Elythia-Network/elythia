@@ -2289,6 +2289,42 @@ func TestEffectivePolicy_ReplacementConflictUncheckedResolutionFallsBack(t *test
 	assert.Equal(t, 10, policies["mentionLimit"])
 }
 
+func TestEffectivePolicy_ReplacementConflictUncheckedWarningsAreCountedAndRateLimited(t *testing.T) {
+	var logs lockedBuffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	svc, roleRepo, assignRepo, _ := newTestService(t)
+	// Service が構築時 logger を保持し、解決時の global default に書かないことも固定する。
+	slog.SetDefault(previous)
+	roleRepo.Roles["r1"] = &model.Role{ID: "r1", Name: "A", Target: model.RoleTargetManual,
+		Policies: datatypes.JSON([]byte(`{"mentionLimit":{"priority":1,"value":10}}`))}
+	for i := range 5 {
+		assign(t, assignRepo, fmt.Sprintf("u%d", i), "r1")
+	}
+	replace := func(value int) plugin.EffectivePolicyResolver {
+		return func(_ context.Context, req plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+			return []plugin.EffectivePolicyContribution{{
+				Key: "mentionLimit", Value: value, ReplaceRoleID: req.ActiveAssignments[0].RoleID,
+			}}, nil
+		}
+	}
+	registerProvider(t, svc, "level-a", []string{"mentionLimit"}, replace(40))
+	registerProvider(t, svc, "level-b", []string{"mentionLimit"}, replace(90))
+
+	for i := range 5 {
+		policies := svc.GetUserPolicies(fmt.Sprintf("u%d", i))
+		assert.Equal(t, 10, policies["mentionLimit"])
+	}
+
+	output := logs.String()
+	assert.Equalf(t, 3, strings.Count(output, "effective policy replacement conflict"),
+		"occurrences 1, 2, and 4 are reported instead of logging every request\nlogs:\n%s", output)
+	assert.Contains(t, output, "occurrences=4")
+	assert.Contains(t, output, "mentionLimit:r1")
+}
+
 // **置換が active でない role を名乗れば provider 全体が失敗扱い。** malformed output と
 // 同じ扱いなので、宣言 key は native へ戻る。
 func TestEffectivePolicy_ReplacementOfInactiveRoleFailsTheProvider(t *testing.T) {

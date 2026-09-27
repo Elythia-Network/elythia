@@ -64,6 +64,22 @@ type policyProviderRuntime struct {
 	globalEpoch  uint64
 }
 
+type policyReplacementConflictRuntime struct {
+	logger      *slog.Logger
+	occurrences atomic.Uint64
+}
+
+func newPolicyReplacementConflictRuntime() policyReplacementConflictRuntime {
+	return policyReplacementConflictRuntime{logger: slog.Default()}
+}
+
+func (runtime *policyReplacementConflictRuntime) log() *slog.Logger {
+	if runtime.logger != nil {
+		return runtime.logger
+	}
+	return slog.Default()
+}
+
 func newPolicyProviderRuntime(cacheEntries int) *policyProviderRuntime {
 	if cacheEntries <= 0 {
 		cacheEntries = defaultEffectivePolicyProviderCacheEntries
@@ -167,10 +183,12 @@ func (s *Service) snapshotPolicyProviders() []policyProvider {
 }
 
 // GetUserPoliciesChecked returns the user's effective role policies the same
-// way GetUserPolicies does, but also reports whether a registered provider
-// failed. On provider failure the returned map uses the native policy result
-// for every key declared by that provider, and the error is the fixed
-// ErrEffectivePolicyProvider. Successful provider output is stored in a
+// way GetUserPolicies does, but also reports provider failures and replacement
+// conflicts. On provider failure the returned map uses the native policy result
+// for every key declared by that provider and returns [ErrEffectivePolicyProvider].
+// A contested role/key pair keeps its native contribution and returns
+// [ErrEffectivePolicyReplacementConflict]. When both occur, the errors are joined
+// so errors.Is finds either sentinel. Successful provider output is stored in a
 // bounded per-provider LRU; plugins must explicitly invalidate affected inputs
 // after committed state changes.
 func (s *Service) GetUserPoliciesChecked(userID string) (map[string]any, error) {
@@ -326,6 +344,9 @@ func (s *Service) resolvePolicies(userID string) (map[string]any, error) {
 	out = s.applyServerCaps(out)
 	providerFailed := len(failed) > 0
 	conflict := hasPolicyReplacementConflict(conflicted)
+	if conflict {
+		recordPolicyReplacementConflict(&s.policyReplacementConflicts, conflicted)
+	}
 	// **単独のときは素の sentinel を返す。** 既存テストも既存呼び出し側も
 	// `err == ErrEffectivePolicyProvider` 相当を前提にしているため、1 つしか無いのに join
 	// すると等価性が壊れる。
@@ -359,6 +380,24 @@ func recordPolicyProviderFallback(runtime *policyProviderRuntime) {
 	if failures&(failures-1) == 0 {
 		runtime.log().Warn("effective policy provider fallback", "failures", failures)
 	}
+}
+
+func recordPolicyReplacementConflict(runtime *policyReplacementConflictRuntime, conflicted map[string]map[string]bool) {
+	occurrences := runtime.occurrences.Add(1)
+	// provider fallback と同じく 1, 2, 4, 8...回だけ記録する。
+	if occurrences&(occurrences-1) != 0 {
+		return
+	}
+	pairs := make([]string, 0)
+	for key, roles := range conflicted {
+		for roleID := range roles {
+			pairs = append(pairs, key+":"+roleID)
+		}
+	}
+	sort.Strings(pairs)
+	runtime.log().Warn("effective policy replacement conflict",
+		"occurrences", occurrences,
+		"pairs", pairs)
 }
 
 func resolvePolicyProviderCached(provider policyProvider, req plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, bool) {
