@@ -16,7 +16,6 @@ import (
 	corechat "github.com/shiroha-a/mk/internal/core/chat"
 	corefollowing "github.com/shiroha-a/mk/internal/core/following"
 	corenote "github.com/shiroha-a/mk/internal/core/note"
-	"github.com/shiroha-a/mk/internal/core/notification"
 	corereaction "github.com/shiroha-a/mk/internal/core/reaction"
 	corereversi "github.com/shiroha-a/mk/internal/core/reversi"
 	"github.com/shiroha-a/mk/internal/misc/id"
@@ -76,17 +75,16 @@ type Processor struct {
 	blockingService *coreblocking.Service
 	abuseReportRepo repository.AbuseReportRepository
 	abuseIDGen      id.Generator
-	// abuseModeratorLister / abuseInAppNotifier はリモートからの通報 (AP Flag)
-	// をモデレーターの通知欄に出す (#2868)。local の report-abuse と同じ扱いに
-	// するためで、片方でも nil なら通知しない。
+	// abuseInAppNotifier はリモートからの通報 (AP Flag) をモデレーターの通知欄に
+	// 出す (#2868)。local の report-abuse と同じ実装 (core/abuse.InAppNotifier)
+	// を通すので、連打の絞り方 (#3200) も同じになる。nil なら通知しない。
 	//
 	// **admin stream と system webhook はこの経路では飛んでいない** (local 側の
 	// #1549 / #1542 が users handler にしかない既存の穴)。ここで in-app だけを
 	// 足すのは、通報の出どころで通知の有無が変わる非対称を作らないため。
-	abuseModeratorLister AbuseModeratorLister
-	abuseInAppNotifier   AbuseInAppNotifier
-	pinningRepo          repository.UserNotePiningRepository
-	pinningIDGen         id.Generator
+	abuseInAppNotifier AbuseInAppNotifier
+	pinningRepo        repository.UserNotePiningRepository
+	pinningIDGen       id.Generator
 
 	// Reversi federation hooks (Phase 9.7). All four are set via
 	// SetReversi; if nil, reversi inbox types are treated as unsupported.
@@ -712,56 +710,16 @@ func (p *Processor) SetAbuseReportRepo(repo repository.AbuseReportRepository, id
 	p.abuseIDGen = idGen
 }
 
-// AbuseModeratorLister lists moderator/administrator users (#2868)。
-// 実装は core/role.Service。
-type AbuseModeratorLister interface {
-	GetModerators() ([]*model.User, error)
-}
-
-// AbuseInAppNotifier creates the in-app notification moderators see for a new
-// report (#2868)。実装は core/notification.Service。
+// AbuseInAppNotifier leaves a new report in the moderators' notification list
+// (#2868)。実装は core/abuse.InAppNotifier (連打の絞りもそちら、#3200)。
 type AbuseInAppNotifier interface {
-	Create(ctx context.Context, in notification.CreateInput) (*notification.Notification, error)
+	NotifyNewReport(ctx context.Context, report *model.AbuseUserReport)
 }
 
 // SetAbuseReportNotification wires the in-app notification for reports that
-// arrive over ActivityPub (#2868)。片方でも nil なら通知しない。
-func (p *Processor) SetAbuseReportNotification(lister AbuseModeratorLister, notifier AbuseInAppNotifier) {
-	p.abuseModeratorLister = lister
+// arrive over ActivityPub (#2868)。nil なら通知しない。
+func (p *Processor) SetAbuseReportNotification(notifier AbuseInAppNotifier) {
 	p.abuseInAppNotifier = notifier
-}
-
-// notifyModeratorsOfRemoteAbuseReport mirrors the local report-abuse fanout for
-// reports received over ActivityPub (#2868)。best-effort。
-func (p *Processor) notifyModeratorsOfRemoteAbuseReport(report *model.AbuseUserReport) {
-	if p.abuseModeratorLister == nil || p.abuseInAppNotifier == nil {
-		return
-	}
-	mods, err := p.abuseModeratorLister.GetModerators()
-	if err != nil {
-		slog.Warn("remote abuse report: list moderators failed", "err", err)
-		return
-	}
-	for _, m := range mods {
-		// notifier は通報者 (リモートユーザー)。通報者自身がローカルの
-		// モデレーターになることは無いので self-notification は起きないが、
-		// 起きても正しい挙動なので同じく警告に出さない。
-		_, nerr := p.abuseInAppNotifier.Create(context.Background(), notification.CreateInput{
-			NotifieeID: m.ID,
-			NotifierID: report.ReporterID,
-			Type:       notification.TypeAbuseReport,
-			// **comment は入れない (#2868)。** 通報コメントは定型フォームの全文が
-			// 入るので通知欄に出しても読めず、出さない以上 Redis に通報本文の
-			// 複製を残す理由が無い (権限を失った元モデレーターに読まれる面も減る)。
-			Extra: map[string]any{
-				"reportId":     report.ID,
-				"targetUserId": report.TargetUserID,
-			},
-		})
-		if nerr != nil && !errors.Is(nerr, notification.ErrSelfNotification) {
-			slog.Warn("remote abuse report: in-app notification failed", "moderator", m.ID, "err", nerr)
-		}
-	}
 }
 
 // SetPinningRepo wires the note pinning repository for Add/Remove activities.
@@ -2661,7 +2619,9 @@ func (p *Processor) handleFlag(act genericActivity) error {
 		slog.Warn("failed to create abuse report from flag activity", "err", err)
 		return err
 	}
-	p.notifyModeratorsOfRemoteAbuseReport(report)
+	if p.abuseInAppNotifier != nil {
+		p.abuseInAppNotifier.NotifyNewReport(context.Background(), report)
+	}
 	return nil
 }
 

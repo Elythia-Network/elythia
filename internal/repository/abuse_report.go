@@ -25,6 +25,22 @@ type AbuseReportRepository interface {
 	// 要るのは 3 スカラーだけ。通知一覧はページあたり最大 100 件なので、
 	// 1 件ずつ引くと 1 リクエストで数百 SELECT が直列に走る。
 	FindStatesByIDs(ids []string) (map[string]model.AbuseReportState, error)
+	// CountUnresolved returns the number of reports that are not resolved yet.
+	//
+	// **通知をまとめたときに後続の通報を見落とさないために使う (#3200)。**
+	// まとめた通知が指す 1 件が対処済みでも、未対応が残っていることを出す。
+	CountUnresolved() (int64, error)
+	// HasOlderUnresolvedByPair reports whether an unresolved report from
+	// reporterID against targetUserID exists with an id older than beforeID.
+	//
+	// **「自分より古い」に限る (#3200)。** 同じ組の通報が並行して入ると、
+	// 「自分以外に在るか」ではお互いを見て両方が通知を見送り、誰にも届かない。
+	// id は時刻順なので、最古の 1 件だけが通知する。
+	HasOlderUnresolvedByPair(reporterID, targetUserID, beforeID string) (bool, error)
+	// HasOlderUnresolvedFromHost reports whether an unresolved report whose
+	// reporter lives on host exists with an id older than beforeID. 「古い」に
+	// 限る理由は HasOlderUnresolvedByPair と同じ。
+	HasOlderUnresolvedFromHost(host, beforeID string) (bool, error)
 }
 
 type abuseReportRepository struct {
@@ -78,6 +94,46 @@ func (r *abuseReportRepository) FindStatesByIDs(ids []string) (map[string]model.
 		}
 	}
 	return out, nil
+}
+
+func (r *abuseReportRepository) CountUnresolved() (int64, error) {
+	var n int64
+	if err := r.db.Model(&model.AbuseUserReport{}).Where(`"resolved" = ?`, false).Count(&n).Error; err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func (r *abuseReportRepository) HasOlderUnresolvedByPair(reporterID, targetUserID, beforeID string) (bool, error) {
+	if !storable(reporterID) || !storable(targetUserID) || !storable(beforeID) {
+		return false, nil
+	}
+	// **Count にしない。** `SELECT count(*) ... LIMIT 1` は LIMIT が集計を
+	// 打ち切らないので、連打中は通報のたびに該当行を全部数える。1 行見つかれば
+	// 足りる。
+	var ids []string
+	if err := r.db.Model(&model.AbuseUserReport{}).
+		Where(`"reporterId" = ? AND "targetUserId" = ? AND "resolved" = ? AND id < ?`, reporterID, targetUserID, false, beforeID).
+		Limit(1).Pluck("id", &ids).Error; err != nil {
+		return false, err
+	}
+	return len(ids) > 0, nil
+}
+
+func (r *abuseReportRepository) HasOlderUnresolvedFromHost(host, beforeID string) (bool, error) {
+	if !storable(host) || !storable(beforeID) {
+		return false, nil
+	}
+	// **Count にしない。** `SELECT count(*) ... LIMIT 1` は LIMIT が集計を
+	// 打ち切らないので、連打中は通報のたびに該当行を全部数える。1 行見つかれば
+	// 足りる。
+	var ids []string
+	if err := r.db.Model(&model.AbuseUserReport{}).
+		Where(`"reporterHost" = ? AND "resolved" = ? AND id < ?`, host, false, beforeID).
+		Limit(1).Pluck("id", &ids).Error; err != nil {
+		return false, err
+	}
+	return len(ids) > 0, nil
 }
 
 func (r *abuseReportRepository) List(resolved *bool, reporterOrigin, targetUserOrigin, sinceID, untilID string, limit int) ([]*model.AbuseUserReport, error) {

@@ -18,7 +18,6 @@ import (
 	"github.com/shiroha-a/mk/internal/api/notehide"
 	"github.com/shiroha-a/mk/internal/api/pagination"
 	"github.com/shiroha-a/mk/internal/core/notesfilter"
-	"github.com/shiroha-a/mk/internal/core/notification"
 	"github.com/shiroha-a/mk/internal/core/reaction"
 	corewebhook "github.com/shiroha-a/mk/internal/core/webhook"
 	"github.com/shiroha-a/mk/internal/entity"
@@ -297,16 +296,20 @@ func (h *Handler) inactiveAbuseWebhookIDs() []string {
 	return excludes
 }
 
-// notifyModeratorsOfAbuseReport notifies every moderator/administrator of a new
-// report through two channels (#1549 / #2868)。lister / notifier 未配線時は
-// no-op。失敗は best-effort で握り潰す (report 自体は永続化済)。
+// notifyModeratorsOfAbuseReport notifies moderators/administrators of a new
+// report through two channels (#1549 / #2868)。未配線の側は no-op。失敗は
+// best-effort で握り潰す (report 自体は永続化済)。
 //
 //   - admin stream の newAbuseUserReport (#1549)。その瞬間に管理画面を開いて
-//     いる人に即座に届く。後から見返せない。
+//     いる人に即座に届く。後から見返せない。通報ごとに流す。
 //   - 通知欄に残る in-app notification (#2868)。**upstream には無い** —
-//     あちらは email / system webhook / admin stream しか持たない。
+//     あちらは email / system webhook / admin stream しか持たない。連打で
+//     通知欄が埋まらないよう core/abuse 側で絞る (#3200)。
 func (h *Handler) notifyModeratorsOfAbuseReport(report *model.AbuseUserReport) {
-	if h.moderatorLister == nil || (h.abuseNotifier == nil && h.abuseInAppNotifier == nil) {
+	if h.abuseInAppNotifier != nil {
+		h.abuseInAppNotifier.NotifyNewReport(context.Background(), report)
+	}
+	if h.moderatorLister == nil || h.abuseNotifier == nil {
 		return
 	}
 	mods, err := h.moderatorLister.GetModerators()
@@ -324,33 +327,7 @@ func (h *Handler) notifyModeratorsOfAbuseReport(report *model.AbuseUserReport) {
 		"comment":      report.Comment,
 	}
 	for _, m := range mods {
-		if h.abuseNotifier != nil {
-			h.abuseNotifier.PublishAdminEvent(m.ID, "newAbuseUserReport", body)
-		}
-		if h.abuseInAppNotifier == nil {
-			continue
-		}
-		// **リクエストの ctx を使わない。** 通報は永続化済みで、通知はそれに
-		// 付随する副作用。クライアント切断で欠けるべきではない。
-		//
-		// 通報者自身がモデレーターなら notifier == notifiee になり
-		// ErrSelfNotification で弾かれる。自分の通報が自分の通知欄に出ないのは
-		// 正しいので、警告として出さない。
-		_, nerr := h.abuseInAppNotifier.Create(context.Background(), notification.CreateInput{
-			NotifieeID: m.ID,
-			NotifierID: report.ReporterID,
-			Type:       notification.TypeAbuseReport,
-			// **comment は入れない (#2868)。** 通報コメントは定型フォームの全文が
-			// 入るので通知欄に出しても読めず、出さない以上 Redis に通報本文の
-			// 複製を残す理由が無い (権限を失った元モデレーターに読まれる面も減る)。
-			Extra: map[string]any{
-				"reportId":     report.ID,
-				"targetUserId": report.TargetUserID,
-			},
-		})
-		if nerr != nil && !errors.Is(nerr, notification.ErrSelfNotification) {
-			slog.Warn("report-abuse: in-app notification failed", "moderator", m.ID, "err", nerr)
-		}
+		h.abuseNotifier.PublishAdminEvent(m.ID, "newAbuseUserReport", body)
 	}
 }
 

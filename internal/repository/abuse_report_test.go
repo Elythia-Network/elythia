@@ -330,3 +330,103 @@ func TestModerationLogRepository_List_Filters(t *testing.T) {
 		assert.Contains(t, string(l.Info), "victimA")
 	}
 }
+
+// TestAbuseReportRepository_CountUnresolved checks that only unresolved reports
+// are counted (#3200). 他のテストの行が残っていても壊れないよう差分で見る。
+func TestAbuseReportRepository_CountUnresolved(t *testing.T) {
+	repo := NewAbuseReportRepository(testDB)
+	createTestUser(t, "ar_cu_t")
+	createTestUser(t, "ar_cu_r")
+
+	before, err := repo.CountUnresolved()
+	require.NoError(t, err)
+
+	open := &model.AbuseUserReport{ID: "ar_cu1", TargetUserID: "ar_cu_t", ReporterID: "ar_cu_r"}
+	done := &model.AbuseUserReport{ID: "ar_cu2", TargetUserID: "ar_cu_t", ReporterID: "ar_cu_r", Resolved: true}
+	require.NoError(t, repo.Create(open))
+	defer cleanupAbuseReport(t, open.ID)
+	require.NoError(t, repo.Create(done))
+	defer cleanupAbuseReport(t, done.ID)
+
+	after, err := repo.CountUnresolved()
+	require.NoError(t, err)
+	assert.Equal(t, before+1, after)
+}
+
+// TestAbuseReportRepository_HasOlderUnresolvedByPair pins every condition of
+// the duplicate check (#3200): same pair, unresolved, strictly older id.
+func TestAbuseReportRepository_HasOlderUnresolvedByPair(t *testing.T) {
+	repo := NewAbuseReportRepository(testDB)
+	createTestUser(t, "ar_hp_t")
+	createTestUser(t, "ar_hp_t2")
+	createTestUser(t, "ar_hp_r")
+	createTestUser(t, "ar_hp_r2")
+
+	older := &model.AbuseUserReport{ID: "ar_hp2", TargetUserID: "ar_hp_t", ReporterID: "ar_hp_r"}
+	require.NoError(t, repo.Create(older))
+	defer cleanupAbuseReport(t, older.ID)
+
+	cases := []struct {
+		name             string
+		reporter, target string
+		beforeID         string
+		want             bool
+	}{
+		{"same pair older unresolved", "ar_hp_r", "ar_hp_t", "ar_hp3", true},
+		{"the report itself is not older", "ar_hp_r", "ar_hp_t", "ar_hp2", false},
+		{"newer report does not count", "ar_hp_r", "ar_hp_t", "ar_hp1", false},
+		{"other reporter", "ar_hp_r2", "ar_hp_t", "ar_hp3", false},
+		{"other target", "ar_hp_r", "ar_hp_t2", "ar_hp3", false},
+		{"NUL never matches", "ar_hp_r\x00", "ar_hp_t", "ar_hp3", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := repo.HasOlderUnresolvedByPair(tc.reporter, tc.target, tc.beforeID)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+
+	require.NoError(t, repo.UpdateFields(older.ID, map[string]any{"resolved": true}))
+	got, err := repo.HasOlderUnresolvedByPair("ar_hp_r", "ar_hp_t", "ar_hp3")
+	require.NoError(t, err)
+	assert.False(t, got, "resolved reports must not suppress new notifications")
+}
+
+// TestAbuseReportRepository_HasOlderUnresolvedFromHost pins every condition of
+// the per-host check (#3200).
+func TestAbuseReportRepository_HasOlderUnresolvedFromHost(t *testing.T) {
+	repo := NewAbuseReportRepository(testDB)
+	createTestUser(t, "ar_hh_t")
+	createTestUser(t, "ar_hh_r")
+
+	host := "flood.example"
+	older := &model.AbuseUserReport{ID: "ar_hh2", TargetUserID: "ar_hh_t", ReporterID: "ar_hh_r", ReporterHost: &host}
+	require.NoError(t, repo.Create(older))
+	defer cleanupAbuseReport(t, older.ID)
+
+	cases := []struct {
+		name     string
+		host     string
+		beforeID string
+		want     bool
+	}{
+		{"same host older unresolved", host, "ar_hh3", true},
+		{"the report itself is not older", host, "ar_hh2", false},
+		{"newer report does not count", host, "ar_hh1", false},
+		{"other host", "other.example", "ar_hh3", false},
+		{"NUL never matches", host + "\x00", "ar_hh3", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := repo.HasOlderUnresolvedFromHost(tc.host, tc.beforeID)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+
+	require.NoError(t, repo.UpdateFields(older.ID, map[string]any{"resolved": true}))
+	got, err := repo.HasOlderUnresolvedFromHost(host, "ar_hh3")
+	require.NoError(t, err)
+	assert.False(t, got, "resolved reports must not suppress new notifications")
+}

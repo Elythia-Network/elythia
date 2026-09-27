@@ -97,3 +97,31 @@ func TestPackNotification_OtherTypesKeepComment(t *testing.T) {
 	require.NotNil(t, out)
 	require.Equal(t, "keep me", out["comment"])
 }
+
+// #3200: まとめた通知から後続の通報に気付けるよう、未対応の件数を出す。
+func TestPackNotification_AbuseReportUnresolvedCount(t *testing.T) {
+	n := int64(7)
+	out := PackNotification(abuseNotification(), nil, nil, nil, nil, nil,
+		WithAbuseReportLookup(func(string) (AbuseReportStatus, bool) {
+			return AbuseReportStatus{Resolved: true, UnresolvedCount: &n}, true
+		}))
+	require.NotNil(t, out)
+	require.Equal(t, int64(7), out["unresolvedCount"])
+
+	zero := int64(0)
+	out = PackNotification(abuseNotification(), nil, nil, nil, nil, nil,
+		WithAbuseReportLookup(func(string) (AbuseReportStatus, bool) {
+			return AbuseReportStatus{UnresolvedCount: &zero}, true
+		}))
+	require.Equal(t, int64(0), out["unresolvedCount"], "0 件も件数として出す")
+}
+
+// 件数が分からないときは出さない。0 を出すと「未対応なし」と読めてしまう。
+func TestPackNotification_AbuseReportUnknownCountIsOmitted(t *testing.T) {
+	out := PackNotification(abuseNotification(), nil, nil, nil, nil, nil,
+		WithAbuseReportLookup(func(string) (AbuseReportStatus, bool) {
+			return AbuseReportStatus{}, true
+		}))
+	require.NotNil(t, out)
+	require.NotContains(t, out, "unresolvedCount")
+}

@@ -1,6 +1,7 @@
-// Package abuse implements abuse-report forwarding. The sole entrypoint
-// today is Forwarder, which handles the "notify the remote origin of a
-// reported user" flow triggered by admin/forward-abuse-user-report.
+// Package abuse implements the side effects of abuse reports: Forwarder
+// handles the "notify the remote origin of a reported user" flow triggered by
+// admin/forward-abuse-user-report, and InAppNotifier leaves new reports in the
+// moderators' notification list.
 package abuse
 
 import (

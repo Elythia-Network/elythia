@@ -80,6 +80,14 @@ type AbuseReportStatus struct {
 	ResolvedAs string
 	// AssigneeID is the moderator who resolved it, if recorded.
 	AssigneeID string
+	// UnresolvedCount is the number of reports nobody has dealt with yet,
+	// across the whole instance. nil when it could not be determined.
+	//
+	// **通知をまとめているので要る (#3200)。** 未読がある間は新しい通報の通知を
+	// 作らないので、この通知が指す 1 件が対処済みでも後続が残っていることを
+	// ここで出す。分からないときに 0 を出すと「未対応なし」と読めてしまうので、
+	// 出さない。
+	UnresolvedCount *int64
 }
 
 // AbuseReportLookup resolves a report ID to its current state, returning false
@@ -380,6 +388,9 @@ func packNotificationCore(n *notification.Notification, user *model.User, note *
 		}
 		if status.AssigneeID != "" {
 			out["assigneeId"] = status.AssigneeID
+		}
+		if status.UnresolvedCount != nil {
+			out["unresolvedCount"] = *status.UnresolvedCount
 		}
 	}
 	if n.Type == notification.TypeChatRoomInvitationReceived {
