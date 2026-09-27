@@ -9,7 +9,7 @@ import "testing"
 // 同じ abuse_user_report 行として管理画面には出るので、通知が来ないことだけが
 // 症状になる。
 func TestRemoteAbuseReportNotificationIsWired(t *testing.T) {
-	assertWired(t, routerGo, "federationProcessor.SetAbuseReportNotification(roleService, notificationService)",
+	assertWired(t, routerGo, "federationProcessor.SetAbuseReportNotification(abuseInAppNotifier)",
 		"連合経由の通報がモデレーターの通知欄に出ない。\n"+
 			"管理画面には出るので、通知だけが欠ける形になる。")
 }

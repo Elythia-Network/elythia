@@ -7,21 +7,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/core/notification"
 	"github.com/shiroha-a/mk/internal/misc/id"
 	"github.com/shiroha-a/mk/internal/model"
 	"github.com/shiroha-a/mk/internal/testutil"
 )
 
-type stubRemoteModeratorLister struct{ mods []*model.User }
+type stubRemoteInAppNotifier struct{ reports []*model.AbuseUserReport }
 
-func (s stubRemoteModeratorLister) GetModerators() ([]*model.User, error) { return s.mods, nil }
-
-type stubRemoteInAppNotifier struct{ created []notification.CreateInput }
-
-func (s *stubRemoteInAppNotifier) Create(_ context.Context, in notification.CreateInput) (*notification.Notification, error) {
-	s.created = append(s.created, in)
-	return &notification.Notification{ID: "n1", Type: in.Type}, nil
+func (s *stubRemoteInAppNotifier) NotifyNewReport(_ context.Context, report *model.AbuseUserReport) {
+	s.reports = append(s.reports, report)
 }
 
 // #2868: リモートからの通報 (AP Flag) もモデレーターの通知欄に出す。
@@ -35,7 +29,7 @@ func TestProcess_FlagNotifiesModerators(t *testing.T) {
 	idGenFlag, _ := id.NewGenerator("aidx")
 	p.SetAbuseReportRepo(abuseRepo, idGenFlag)
 	notifier := &stubRemoteInAppNotifier{}
-	p.SetAbuseReportNotification(stubRemoteModeratorLister{mods: []*model.User{{ID: "mod1"}, {ID: "mod2"}}}, notifier)
+	p.SetAbuseReportNotification(notifier)
 
 	repo.Users["bob"] = &model.User{ID: "bob", Username: "bob"}
 	body := []byte(`{
@@ -46,17 +40,13 @@ func TestProcess_FlagNotifiesModerators(t *testing.T) {
 	}`)
 	require.NoError(t, p.Process(body))
 	require.Len(t, abuseRepo.Reports, 1)
-	require.Len(t, notifier.created, 2, "moderator ごとに 1 件作る")
+	require.Len(t, notifier.reports, 1, "通報 1 件につき 1 回渡す (モデレーターごとの展開と絞りは notifier 側)")
 
-	for _, in := range notifier.created {
-		assert.Equal(t, notification.TypeAbuseReport, in.Type)
-		assert.Equal(t, "bob", in.Extra["targetUserId"])
-		assert.NotEmpty(t, in.Extra["reportId"])
-		// 通報コメントは入れない (#2868)。local 経路と同じ。
-		assert.NotContains(t, in.Extra, "comment")
-	}
-	assert.ElementsMatch(t, []string{"mod1", "mod2"},
-		[]string{notifier.created[0].NotifieeID, notifier.created[1].NotifieeID})
+	r := notifier.reports[0]
+	assert.Equal(t, "bob", r.TargetUserID)
+	require.NotNil(t, r.ReporterHost, "ホスト単位の絞り (#3200) に reporterHost が要る")
+	assert.Equal(t, "remote.example", *r.ReporterHost)
+	assert.Same(t, abuseRepo.Reports[r.ID], r, "保存済みの通報を渡す")
 }
 
 // 未配線なら通知を作らない (旧挙動)。

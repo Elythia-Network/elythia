@@ -7183,6 +7183,37 @@ func (m *MockAbuseReportRepository) FindStatesByIDs(ids []string) (map[string]mo
 	return out, nil
 }
 
+// CountUnresolved counts the reports that are not resolved yet (#3200).
+func (m *MockAbuseReportRepository) CountUnresolved() (int64, error) {
+	var n int64
+	for _, r := range m.Reports {
+		if !r.Resolved {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// HasOlderUnresolvedByPair mirrors the production query (#3200).
+func (m *MockAbuseReportRepository) HasOlderUnresolvedByPair(reporterID, targetUserID, beforeID string) (bool, error) {
+	for _, r := range m.Reports {
+		if !r.Resolved && r.ReporterID == reporterID && r.TargetUserID == targetUserID && r.ID < beforeID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// HasOlderUnresolvedFromHost mirrors the production query (#3200).
+func (m *MockAbuseReportRepository) HasOlderUnresolvedFromHost(host, beforeID string) (bool, error) {
+	for _, r := range m.Reports {
+		if !r.Resolved && r.ReporterHost != nil && *r.ReporterHost == host && r.ID < beforeID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (m *MockAbuseReportRepository) UpdateFields(id string, fields map[string]any) error {
 	r, ok := m.Reports[id]
 	if !ok {

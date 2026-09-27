@@ -56,6 +56,7 @@ type Handler struct {
 	// fail-closed)。状態を出せないまま「未対応」に見せると、対処済みの通報に
 	// 別のモデレーターが二重で当たる。
 	abuseReportStates       AbuseReportStateLookup
+	abuseUnresolvedCount    func() (int64, error)
 	emojiApplicationLookup  entity.EmojiApplicationLookup
 	signupApplicationLookup entity.SignupApplicationLookup
 	// moderatorChecker は read 時に abuseReport 通知の閲覧権限を再確認する
@@ -98,6 +99,13 @@ type AbuseReportStateLookup func(ids []string) (map[string]model.AbuseReportStat
 // SetAbuseReportLookup wires the read-time state lookup for abuseReport
 // notifications (#2868)。未配線なら abuseReport 通知を返さない (fail-closed)。
 func (h *Handler) SetAbuseReportLookup(fn AbuseReportStateLookup) { h.abuseReportStates = fn }
+
+// SetAbuseReportUnresolvedCounter wires the count of unresolved reports shown
+// on abuseReport notifications (#3200)。実装は
+// repository.AbuseReportRepository.CountUnresolved。未配線なら件数を出さない。
+func (h *Handler) SetAbuseReportUnresolvedCounter(fn func() (int64, error)) {
+	h.abuseUnresolvedCount = fn
+}
 
 // SetEmojiApplicationLookup wires the read-time state lookup for
 // emojiApplicationProcessed notifications (#2934)。未配線なら返さない
@@ -197,12 +205,22 @@ func (h *Handler) batchAbuseReportLookup(rows []entity.NotificationItem) (entity
 	if err != nil {
 		return nil, err
 	}
+	// 件数はページで 1 回だけ引く (インスタンス全体の値なので通知ごとに変わらない)。
+	// エラーは状態の lookup と同じく 500 にする (#2792)。
+	var unresolved *int64
+	if h.abuseUnresolvedCount != nil {
+		n, err := h.abuseUnresolvedCount()
+		if err != nil {
+			return nil, err
+		}
+		unresolved = &n
+	}
 	return func(reportID string) (entity.AbuseReportStatus, bool) {
 		st, ok := states[reportID]
 		if !ok {
 			return entity.AbuseReportStatus{}, false
 		}
-		out := entity.AbuseReportStatus{Resolved: st.Resolved}
+		out := entity.AbuseReportStatus{Resolved: st.Resolved, UnresolvedCount: unresolved}
 		if st.ResolvedAs != nil {
 			out.ResolvedAs = *st.ResolvedAs
 		}

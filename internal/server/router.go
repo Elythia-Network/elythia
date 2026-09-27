@@ -509,6 +509,13 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		if st.AssigneeID != nil {
 			out.AssigneeID = *st.AssigneeID
 		}
+		// 未対応の件数 (#3200)。取れなければ件数だけ出さない — 通知そのものは
+		// 状態が引けているので落とさない。
+		if n, err := abuseReportRepoForNotif.CountUnresolved(); err == nil {
+			out.UnresolvedCount = &n
+		} else {
+			slog.Warn("notification: unresolved abuse report count failed", "err", err)
+		}
 		return out, true
 	}
 	followingService.SetNotificationHook(notificationHook)
@@ -2156,6 +2163,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	notificationsHandler.SetTestNotifier(notificationHook)
 	notificationsHandler.SetRoleLookup(roleNotifLookup)
 	notificationsHandler.SetAbuseReportLookup(abuseNotifStates)
+	notificationsHandler.SetAbuseReportUnresolvedCounter(abuseReportRepoForNotif.CountUnresolved)
 	notificationsHandler.SetEmojiApplicationLookup(emojiApplicationNotifLookup)
 	notificationsHandler.SetSignupApplicationLookup(signupApplicationNotifLookup)
 	// 通知に埋め込む note の files / channel / myReaction を埋める (#2735)。
@@ -2986,7 +2994,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	usersHandler.SetAbuseReportFanout(roleService, stream.NewAdminStreamPublisher(streamPubSub))
 	// 通報を通知欄にも残す (#2868)。**admin stream だけでは足りない** — あちらは
 	// その瞬間に管理画面を開いている人にしか届かず、後から見返せない。
-	usersHandler.SetAbuseReportInAppNotifier(notificationService)
+	// local と連合 (Flag) で同じ notifier を共有する — 連打の絞り (#3200) が
+	// 通報の出どころで変わらないように。
+	abuseInAppNotifier := coreabuse.NewInAppNotifier(roleService, notificationService, repository.NewAbuseReportRepository(s.db))
+	usersHandler.SetAbuseReportInAppNotifier(abuseInAppNotifier)
 
 	// server / queue stats publishers (#344)。起動時から tick を回して
 	// `serverStats` / `queueStats` トピックへ定期 publish する。
@@ -3097,7 +3108,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	federationProcessor.SetAbuseReportRepo(repository.NewAbuseReportRepository(s.db), idGen)
 	// リモートからの通報 (AP Flag) もモデレーターの通知欄に出す (#2868)。
 	// **配線しないと通報の出どころで通知の有無が変わる。**
-	federationProcessor.SetAbuseReportNotification(roleService, notificationService)
+	federationProcessor.SetAbuseReportNotification(abuseInAppNotifier)
 	federationProcessor.SetPinningRepo(piningRepo, idGen)
 	federationProcessor.SetRelayMarker(relaySvc)
 	federationProcessor.SetRelayActorChecker(relaySvc)

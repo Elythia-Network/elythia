@@ -17,4 +17,15 @@ func TestAbuseReportLookupIsWired(t *testing.T) {
 	assertWired(t, routerGo, "notificationPublisher.SetAbuseReportLookup(abuseNotifLookup)",
 		"abuseReport 通知が realtime (WebSocket) で出なくなる。\n"+
 			"一覧には出るので、片方だけ壊れていることに気付きにくい。")
+	// 未対応の件数 (#3200)。通知をまとめているので、これが無いと最初の通報が
+	// 対処済みになった時点で後続の通報に通知欄から気付けない。
+	assertWired(t, routerGo, "notificationsHandler.SetAbuseReportUnresolvedCounter(abuseReportRepoForNotif.CountUnresolved)",
+		"通知一覧に未対応の件数が出ず、まとめた通知の後続を見落とす。")
+	// realtime 側は router の lookup の中で数える。取れなくても通知は落とさない
+	// 作りなので、この呼び出しを消しても他のテストは緑のまま件数だけが消える。
+	assertWired(t, routerGo, "abuseReportRepoForNotif.CountUnresolved()",
+		"realtime (WebSocket) の通報の通知に未対応の件数が出なくなる。")
+	// 呼び出しだけでは足りない。結果を捨てても (`_ = n`) 上の照合は通る。
+	assertWired(t, routerGo, "out.UnresolvedCount = &n",
+		"数えた件数を捨てていて、realtime の通報の通知に件数が出ない。")
 }
