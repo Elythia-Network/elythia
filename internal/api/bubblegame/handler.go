@@ -27,6 +27,11 @@ func NewHandler(repo repository.BubbleGameRepository, idGen id.Generator) *Handl
 	return &Handler{repo: repo, idGen: idGen}
 }
 
+// seedMaxAge is how old a seed may be when its score is registered (mk-go,
+// #3192). upstream は 5 時間。frontend の途中保存の期限 (drop-and-fusion-save.ts の
+// SAVE_MAX_AGE_MS) と揃えること。
+const seedMaxAge = 7 * 24 * time.Hour
+
 // bubbleGameModeMaxRunes は `bubble_game_record.gameMode` の列幅。
 const bubbleGameModeMaxRunes = 128
 
@@ -60,8 +65,11 @@ func (h *Handler) Register(c echo.Context) error {
 	if seedDate.After(now) {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_SEED", "Provided seed is invalid.", "eb627bc7-574b-4a52-a860-3c3eae772b88"))
 	}
-	// 5時間以上前のシードは不正
-	if seedDate.Before(now.Add(-5 * time.Hour)) {
+	// 古すぎるシードは不正。**upstream は 5 時間**だが、mk-go は途中から再開できる
+	// (#3192) ので延ばす。再開したゲームは元のシードを使い続けるので、5 時間だと
+	// 夜に中断して翌朝終えたゲームが登録できず、しかも frontend は登録の失敗を
+	// 表示しない。frontend はこれより古い保存を再開させない。
+	if seedDate.Before(now.Add(-seedMaxAge)) {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_SEED", "Provided seed is invalid.", "eb627bc7-574b-4a52-a860-3c3eae772b88"))
 	}
 
