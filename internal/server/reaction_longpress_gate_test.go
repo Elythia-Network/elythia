@@ -156,7 +156,12 @@ func TestReactableRemoteReactionIsWired(t *testing.T) {
 				// **ここが本体** — 単語検索ではこの 2 行を戻す変異を捕まえられない。
 				"const canReact = computed(() => canToggle.value || ($i != null && localAlternative.value != null));",
 				"const sendingReaction = computed(() => localAlternative.value ?? props.reaction);",
-				"const sendingEmojiName = computed(() => getEmojiNameFromReaction(sendingReaction.value));",
+				// 押したときに送るのは sendingReaction (#3187 で送信部を sendReaction に
+				// 切り出した)。mock の emit はチップ自身のキーのとき = 相乗りでないときだけ。
+				"await sendReaction(sendingReaction.value, localAlternative.value == null);",
+				// mock の emit は ownChip のときだけ (押す / 外すの 2 箇所)。
+				"if (ownChip) emit('reactionToggled', reaction, (props.count - 1));",
+				"if (ownChip) emit('reactionToggled', reaction, (props.count + 1));",
 				// 「押せる」の述語を使う 4 箇所。どれも upstream 自身の行に戻せるので、
 				// rebase の衝突解消で theirs を採ると自動的に壊れる。
 				"[$style.reacted]: myReaction == reaction,",
@@ -166,7 +171,8 @@ func TestReactableRemoteReactionIsWired(t *testing.T) {
 				"	if (canReact.value) {",
 				// 絵文字の引き当てとパレットに入れる文字列も送る側で。
 				// パレットに `:foo@host:` が入ると、パレットからだけリモートのキーを送る。
-				"customEmojisMap.get(sendingEmojiName.value)",
+				"const reactionEmojiName = getEmojiNameFromReaction(reaction);",
+				"customEmojisMap.get(reactionEmojiName)",
 				"addToEmojiPalette(isLocalCustomEmoji.value || localAlternative.value != null",
 				"`:${bareEmojiName(emojiName.value)}:`",
 			},
@@ -204,33 +210,47 @@ func TestReactableRemoteReactionIsWired(t *testing.T) {
 		}
 	}
 
-	// **`toggleReaction` の中に `props.reaction` を残さない。**
+	// **`toggleReaction` / `sendReaction` の中に `props.reaction` を残さない。**
 	//
 	// **例外を作らないこと。** mock (`MkTutorialDialog.*`) の emit だけはチップの identity を
 	// 送りたくなるが、それをやると相乗り時に別のチップの count を動かす。
-	// 相乗りのときは emit しない形にして、この禁止を保っている。
+	// 相乗りのときは emit しない形にして、この禁止を保っている (#3187 以降は
+	// `sendReaction` の `ownChip` 引数で受ける。本体で `props.reaction` と比べない)。
 	// 差し替えた箇所は `props.reaction` が 12 / `emojiName.value` が 2 の計 14 で
 	// (数え方は upstream 版の `toggleReaction` の中を `grep -c`)、名指しの検査では
 	// **そのうち 1 つだけを戻す変異が素通りする** (実測)。関数の中身をまとめて見る。
+	//
+	// **送信の本体は `sendReaction` にある** (#3187 で「インポートしてリアクション」と
+	// 共有するために切り出した)。`toggleReaction` だけを見ると、本体を丸ごと素通しする。
 	//
 	// `props.reaction` を読んでよいのは関数の外 (`localAlternativeReaction` に
 	// 渡す computed や表示用の `emojiName`)。
 	raw, err := os.ReadFile(component)
 	require.NoError(t, err)
 	src := stripComments(string(raw))
-	const marker = "async function toggleReaction("
-	start := strings.Index(src, marker)
-	require.GreaterOrEqualf(t, start, 0, "%s に %s が無い (書式が変わった?)", component, marker)
-	end := strings.Index(src[start:], "\n}\n")
-	require.GreaterOrEqualf(t, end, 0, "%s の toggleReaction の終わりを読めない", component)
-	//
-	// `emojiName.value` も同じ。`sendingEmojiName.value` は大文字の `E` なので
-	// この禁止に引っかからない。
-	body := src[start : start+end]
-	for _, forbidden := range []string{"props.reaction", "emojiName.value"} {
-		require.NotContainsf(t, body, forbidden,
-			"%s の toggleReaction が %s を使っている。相乗りのときリモートの"+
-				"ショートコードを送る / 絵文字が引き当たらず楽観更新が落ちる (#2697)",
-			component, forbidden)
+	for _, marker := range []string{"async function toggleReaction(", "async function sendReaction("} {
+		start := strings.Index(src, marker)
+		require.GreaterOrEqualf(t, start, 0, "%s に %s が無い (書式が変わった?)", component, marker)
+		end := strings.Index(src[start:], "\n}\n")
+		require.GreaterOrEqualf(t, end, 0, "%s の %s の終わりを読めない", component, marker)
+		//
+		// `emojiName.value` も同じ。`reactionEmojiName` は大文字の `E` で `.value` も
+		// 付かないので、この禁止に引っかからない。
+		body := src[start : start+end]
+		forbidden := []string{"props.reaction", "emojiName.value"}
+		// **`sendReaction` はチップ自身を読まない。** 「インポートしてリアクション」
+		// (#3187) は取り込んだ `:name@.:` を引数で渡すので、本体が `sendingReaction` や
+		// `localAlternative` (= チップのキー) を読むと、取り込んだ絵文字ではなく
+		// チップのキーを送る。押したときの挙動は変わらないので、ここでしか捕まらない
+		// (敵対的レビューが実測)。
+		if marker == "async function sendReaction(" {
+			forbidden = append(forbidden, "sendingReaction", "localAlternative")
+		}
+		for _, forbidden := range forbidden {
+			require.NotContainsf(t, body, forbidden,
+				"%s の %s が %s を使っている。相乗りのときリモートの"+
+					"ショートコードを送る / 絵文字が引き当たらず楽観更新が落ちる (#2697)",
+				component, marker, forbidden)
+		}
 	}
 }
