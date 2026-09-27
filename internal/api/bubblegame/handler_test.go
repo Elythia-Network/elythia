@@ -93,10 +93,25 @@ func TestRegister_InvalidSeed_Future(t *testing.T) {
 
 func TestRegister_InvalidSeed_TooOld(t *testing.T) {
 	h, _ := newTestHandler()
-	old := fmt.Sprintf("%d", time.Now().Add(-6*time.Hour).UnixMilli())
+	old := fmt.Sprintf("%d", time.Now().Add(-seedMaxAge-time.Hour).UnixMilli())
 	body := fmt.Sprintf(`{"score":1,"seed":"%s","logs":[],"gameMode":"normal","gameVersion":1}`, old)
 	rec := post(h.Register, body, u1)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+// #3192: 途中から再開したゲームは元のシードを使い続けるので、upstream の 5 時間を
+// 超えても登録できる。**翌日に再開したゲームのスコアが黙って落ちない**ことを見る。
+func TestRegister_ResumedSeedOlderThanUpstreamLimit(t *testing.T) {
+	h, repo := newTestHandler()
+	resumed := fmt.Sprintf("%d", time.Now().Add(-30*time.Hour).UnixMilli())
+	body := fmt.Sprintf(`{"score":1,"seed":"%s","logs":[],"gameMode":"normal","gameVersion":4}`, resumed)
+	rec := post(h.Register, body, u1)
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Len(t, repo.records, 1)
+}
+
+func TestSeedMaxAgeIsSevenDays(t *testing.T) {
+	assert.Equal(t, 7*24*time.Hour, seedMaxAge)
 }
 
 func TestRegister_CreateError(t *testing.T) {
