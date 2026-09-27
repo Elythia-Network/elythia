@@ -198,6 +198,64 @@ func TestEffectivePolicy_RoleIDsIsolatedBetweenProviders(t *testing.T) {
 	assert.Equal(t, []string{"r1", "r2"}, seen, "each provider must receive an isolated sorted RoleIDs slice")
 }
 
+// **provider ごとに request の ActiveAssignments も防御的コピーである。** 1 回の解決で
+// host は 1 本の assignments を作って全 provider goroutine へ渡すので、コピーを忘れると
+// 片方の書き換えがもう片方に漏れる (RoleIDs を渡しているのと同じ理屈で守っている)。
+//
+// **観測順を channel で厳密に固定する。** 2 provider の実行順は不定なので、
+// `beta が自分の slice を捕まえる` → `alpha が自分の slice を書き換える` の順に
+// なります。beta は **複製しない** — slice header だけ外へ持ち出すので、array を
+// 共有していると alpha の書き換えがそのまま観測値に現れる。
+func TestEffectivePolicy_ActiveAssignmentsIsolatedBetweenProviders(t *testing.T) {
+	svc, roleRepo, assignRepo, _ := newTestService(t)
+	roleRepo.Roles["r1"] = &model.Role{ID: "r1", Name: "A", Target: model.RoleTargetManual}
+	assign(t, assignRepo, "u1", "r1")
+
+	// betaCaptured: beta が自分の request slice を捕まえた。
+	// alphaMutated: alpha が自分の request slice を書き換えた。
+	betaCaptured := make(chan struct{})
+	alphaMutated := make(chan struct{})
+	var alphaBefore []plugin.ActiveRoleAssignment
+	var betaRequest []plugin.ActiveRoleAssignment
+
+	registerProvider(t, svc, "alpha", []string{"canSearchNotes"},
+		func(_ context.Context, req plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+			alphaBefore = append([]plugin.ActiveRoleAssignment(nil), req.ActiveAssignments...)
+			// **ctx での打ち切りは無い。** beta は自分の resolver で何も待たないので
+			// 必ず捕まえ終わる。ここで host の timeout へ逃がすと「alpha が書き換える前に
+			// assertion が走る」窓が残り、証明が空振りする。
+			<-betaCaptured
+			for i := range req.ActiveAssignments {
+				req.ActiveAssignments[i] = plugin.ActiveRoleAssignment{RoleID: "hacked", AssignmentID: "hacked"}
+			}
+			close(alphaMutated)
+			return nil, nil
+		})
+	registerProvider(t, svc, "beta", []string{"canInvite"},
+		func(_ context.Context, req plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+			// **複製しない。** slice header だけを外へ持ち出す。array を共有していると
+			// alpha の書き換えがそのまま観測値に現れる。
+			betaRequest = req.ActiveAssignments
+			close(betaCaptured)
+			return nil, nil
+		})
+
+	_, err := svc.GetUserPoliciesChecked("u1")
+	// **error なしで戻った = alpha の resolver が return 済み = 書き換え済み。**
+	// providersWG が全 provider を join するので、ここより後で alpha の resolver が
+	// 走ることはない。落ちているならそれ以上待たずに落とす (不正な host に対する
+	// test timeout を避ける)。
+	require.NoError(t, err)
+	// **二重の保証。** 上の happens-before に加えて、alpha の書き換えが終わるまで
+	// assertion へ進まない。先に走ると beta の観測が空振りする。
+	<-alphaMutated
+
+	want := []plugin.ActiveRoleAssignment{{RoleID: "r1", AssignmentID: "a_u1_r1"}}
+	assert.Equal(t, want, alphaBefore, "host must hand every provider the same assignments")
+	assert.Equal(t, want, betaRequest,
+		"alpha rewriting its own slice must not be observable in beta's request")
+}
+
 func TestEffectivePolicy_ProviderOnlyGetsActiveRoles(t *testing.T) {
 	svc, roleRepo, assignRepo, _ := newTestService(t)
 	roleRepo.Roles["r1"] = &model.Role{ID: "r1", Name: "A"}
@@ -1835,6 +1893,193 @@ func TestInvalidateRolePolicies_EmptyRoleNoop(t *testing.T) {
 	require.NoError(t, svc.InvalidateRolePolicies(context.Background(), ""))
 }
 
+// newCountingTestService は newTestService と同じ形の戻り値に、既存の
+// countingAssignmentRepo (role_service_test.go) を挟んだもの。**型を使い回す**
+// ことで「1 query」の主張が全 test で同じ数え方になる。
+func newCountingTestService(t *testing.T) (*role.Service, *testutil.MockRoleRepository, *testutil.MockRoleAssignmentRepository, *countingAssignmentRepo) {
+	t.Helper()
+	roleRepo := testutil.NewMockRoleRepository()
+	assignRepo := testutil.NewMockRoleAssignmentRepository(roleRepo)
+	metaRepo := testutil.NewMockMetaRepository()
+	idGen, _ := id.NewGenerator("aidx")
+	counting := &countingAssignmentRepo{MockRoleAssignmentRepository: assignRepo}
+	return role.NewService(roleRepo, counting, metaRepo, idGen), roleRepo, assignRepo, counting
+}
+
+func TestEffectivePolicy_ActiveAssignmentsCoverOnlyActiveManualRoles(t *testing.T) {
+	svc, roleRepo, assignRepo, _ := newTestService(t)
+	roleRepo.Roles["r1"] = &model.Role{ID: "r1", Name: "A", Target: model.RoleTargetManual}
+	roleRepo.Roles["r2"] = &model.Role{ID: "r2", Name: "B", Target: model.RoleTargetManual}
+	// conditional role は condFormula で一致する。assignment row は無い。
+	roleRepo.Roles["r3"] = &model.Role{ID: "r3", Name: "C", Target: model.RoleTargetConditional,
+		CondFormula: datatypes.JSON([]byte(`{"type":"isLocal"}`))}
+	// **conditional に切り替えた role を指す残骸行。** `role_assignment` の行はロールを
+	// 切り替えても消えないので、`Role` が populate 済みで `Target=conditional` にしたまま
+	// 入り込んだ行になる。
+	// resolved roles には入る (native contribution がある) が assignment 同一性は無いので、
+	// ActiveAssignments には入れてはいけない。
+	roleRepo.Roles["r4"] = &model.Role{ID: "r4", Name: "D", Target: model.RoleTargetConditional,
+		CondFormula: datatypes.JSON([]byte(`{"type":"isLocal"}`))}
+	assign(t, assignRepo, "u1", "r1")
+	assign(t, assignRepo, "u1", "r2")
+	assignRepo.Assignments["u1:r4"] = &model.RoleAssignment{ID: "a_u1_r4", UserID: "u1", RoleID: "r4"}
+	// orphan assignment: role_assignment の行だけが残っている。
+	assignRepo.Assignments["u1:r9"] = &model.RoleAssignment{ID: "a_u1_r9", UserID: "u1", RoleID: "r9"}
+	userRepo := testutil.NewMockUserRepository()
+	userRepo.Users["u1"] = &model.User{ID: "u1"} // Host nil なので isLocal が真
+	svc.SetUserRepo(userRepo)
+
+	var request plugin.EffectivePolicyRequest
+	registerProvider(t, svc, "ctx", []string{"canSearchNotes"},
+		func(_ context.Context, req plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+			request = req
+			return nil, nil
+		})
+
+	_, err := svc.GetUserPoliciesChecked("u1")
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"r1", "r2", "r3", "r4"}, request.RoleIDs, "RoleIDs は conditional を含むという既存契約を変えない")
+	assert.Equal(t, []plugin.ActiveRoleAssignment{
+		{RoleID: "r1", AssignmentID: "a_u1_r1"},
+		{RoleID: "r2", AssignmentID: "a_u1_r2"},
+	}, request.ActiveAssignments,
+		"assignment 行が無い conditional role / conditional を指す残骸行 / role 行が無い orphan は ActiveAssignments に入らない")
+	// **部分集合の不変条件。** RoleIDs にあるのに ActiveAssignments に入らない、あるいは
+	// 逆が起きたら host 側で契約が壊れている。
+	for _, a := range request.ActiveAssignments {
+		assert.Contains(t, request.RoleIDs, a.RoleID)
+	}
+}
+
+func TestEffectivePolicy_ActiveAssignmentsAreNonNilForAnonymous(t *testing.T) {
+	svc, _, _, _ := newTestService(t)
+	var request plugin.EffectivePolicyRequest
+	var seen bool
+	registerProvider(t, svc, "ctx", []string{"canSearchNotes"},
+		func(_ context.Context, req plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+			seen = true
+			request = req
+			return nil, nil
+		})
+
+	_, err := svc.GetUserPoliciesChecked("")
+	require.NoError(t, err)
+	require.True(t, seen, "匿名解決でも provider は呼ばれるので ActiveAssignments は非nil空sliceである必要がある")
+	assert.NotNil(t, request.ActiveAssignments)
+	assert.Empty(t, request.ActiveAssignments)
+}
+
+func TestEffectivePolicy_ActiveAssignmentsExcludeExpiredAssignments(t *testing.T) {
+	svc, roleRepo, assignRepo, _ := newTestService(t)
+	roleRepo.Roles["r1"] = &model.Role{ID: "r1", Name: "A", Target: model.RoleTargetManual}
+	roleRepo.Roles["r2"] = &model.Role{ID: "r2", Name: "B", Target: model.RoleTargetManual}
+	assign(t, assignRepo, "u1", "r1")
+	past := time.Now().Add(-time.Hour)
+	assignRepo.Assignments["u1:r2"] = &model.RoleAssignment{ID: "a_u1_r2", UserID: "u1", RoleID: "r2", ExpiresAt: &past}
+
+	var request plugin.EffectivePolicyRequest
+	registerProvider(t, svc, "ctx", []string{"canSearchNotes"},
+		func(_ context.Context, req plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+			request = req
+			return nil, nil
+		})
+
+	_, err := svc.GetUserPoliciesChecked("u1")
+	require.NoError(t, err)
+	assert.Equal(t, []plugin.ActiveRoleAssignment{{RoleID: "r1", AssignmentID: "a_u1_r1"}}, request.ActiveAssignments)
+}
+
+// **1 回の解決で ListByUser は 1 回だけ。** roles と activeAssignments を別々に
+// 読む設計に戻ると 2 回になり、hot path に query が 1 本増える。
+func TestEffectivePolicy_ResolutionIssuesExactlyOneQuery(t *testing.T) {
+	svc, roleRepo, assignRepo, counting := newCountingTestService(t)
+	roleRepo.Roles["r1"] = &model.Role{ID: "r1", Name: "A", Target: model.RoleTargetManual}
+	assign(t, assignRepo, "u1", "r1")
+	var seen int
+	registerProvider(t, svc, "ctx", []string{"canSearchNotes"},
+		func(context.Context, plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+			seen++
+			return nil, nil
+		})
+
+	_, err := svc.GetUserPoliciesChecked("u1")
+	require.NoError(t, err)
+	assert.Equal(t, 1, seen)
+	assert.Equal(t, 1, counting.listByUserCalls, "roles と activeAssignments は 1 回の ListByUser から共に作られる")
+
+	// warm cache: provider 自身が LRU に当たって resolver を呼ばないが、role
+	// スナップショットは native pass の前に必ず通る。ここで 2 本目が出たら検出できる。
+	_, err = svc.GetUserPoliciesChecked("u1")
+	require.NoError(t, err)
+	assert.Equal(t, 1, counting.listByUserCalls, "warm cache は 2 つとも答える")
+}
+
+// **invalidation は「読み直す」ために存在する。** 空の assignments を返して黙る、
+// という別の故障を許さない。
+//
+// `InvalidateUser` (= per-user の role cache と provider cache を落とす公開の
+// 無効化入口) を使う。`InvalidateUserRoleCache` だけだと role snapshot は読み直す
+// ものの provider の成功結果 LRU が同じ key を残したままなので、resolver は2回目に
+// 呼ばれず「解決後に渡された assignments」を観測できない。
+func TestEffectivePolicy_InvalidationRefetchesBothInsteadOfEmptyingAssignments(t *testing.T) {
+	svc, roleRepo, assignRepo, counting := newCountingTestService(t)
+	roleRepo.Roles["r1"] = &model.Role{ID: "r1", Name: "A", Target: model.RoleTargetManual}
+	assign(t, assignRepo, "u1", "r1")
+	want := []plugin.ActiveRoleAssignment{{RoleID: "r1", AssignmentID: "a_u1_r1"}}
+	var got [][]plugin.ActiveRoleAssignment
+	registerProvider(t, svc, "ctx", []string{"canSearchNotes"},
+		func(_ context.Context, req plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+			got = append(got, req.ActiveAssignments)
+			return nil, nil
+		})
+
+	_, err := svc.GetUserPoliciesChecked("u1")
+	require.NoError(t, err)
+	require.NoError(t, svc.InvalidateUser(context.Background(), "u1"))
+	_, err = svc.GetUserPoliciesChecked("u1")
+	require.NoError(t, err)
+
+	assert.Equal(t, 2, counting.listByUserCalls, "invalidated な user は読み直す")
+	require.Len(t, got, 2, "provider は 2 回とも呼ばれる")
+	assert.Equal(t, want, got[0])
+	assert.Equal(t, want, got[1], "invalidation 後の解決で assignments が空に堕ちてはいけない")
+}
+
+// **repository の読み損ねは握り潰さない。** activeAssignments を空で埋めた partial
+// snapshot を渡すと、plugin には「その role に active な assignment が無い」という
+// 嘘が見えるので、provider を起動する前に error にする。
+//
+// 既存の `TestEffectivePolicy_RoleLookupErrorSkipsProvidersAndRemainsDistinct` は同じ
+// 経路を「provider を起動しない」角度で固定している。こちらは assignments 側の契約を
+// 明示する **regression guard** で、実装前から緑になる（既存の `GetUserRoles` が既に
+// error を返すため）。RED は Step 2 の内部 test で観測する。
+func TestEffectivePolicy_AssignmentRepositoryFailureSkipsProviders(t *testing.T) {
+	roleRepo := testutil.NewMockRoleRepository()
+	assignRepo := &failingPolicyAssignmentRepo{
+		MockRoleAssignmentRepository: testutil.NewMockRoleAssignmentRepository(roleRepo),
+		err:                          errors.New("assignment lookup failed"),
+	}
+	metaRepo := testutil.NewMockMetaRepository()
+	idGen, _ := id.NewGenerator("aidx")
+	svc := role.NewService(roleRepo, assignRepo, metaRepo, idGen)
+	var providerCalls atomic.Int32
+	var assignments []plugin.ActiveRoleAssignment
+	registerProvider(t, svc, "p", []string{"canSearchNotes"},
+		func(_ context.Context, req plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+			providerCalls.Add(1)
+			assignments = req.ActiveAssignments
+			return nil, nil
+		})
+
+	_, err := svc.GetUserPoliciesChecked("u1")
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "role: effective policy inputs")
+	assert.Zero(t, providerCalls.Load(), "role 入力を読めないとき provider を起動しない")
+	assert.Nil(t, assignments, "assignment を空で埋めた値で provider を起動しない")
+}
+
 func BenchmarkEffectivePolicy_NoProviderAnonymous(b *testing.B) {
 	roleRepo := testutil.NewMockRoleRepository()
 	assignRepo := testutil.NewMockRoleAssignmentRepository(roleRepo)
@@ -1847,4 +2092,309 @@ func BenchmarkEffectivePolicy_NoProviderAnonymous(b *testing.B) {
 	for b.Loop() {
 		_ = svc.GetUserPolicies("")
 	}
+}
+
+// 置換は native priority を引き継ぐ。**priority 0 で押し込まない。**
+//
+//	r1: mentionLimit priority 1 = 10（native 結果は 10）
+//	r2: mentionLimit priority 0 = 100
+//	r1 を 40 に置換 → priority 1 の group だけが集約されるので 40。
+//	priority 0 で押し込んでいたら priority 1 group が消えて max(40, 100) = 100。
+func TestEffectivePolicy_ReplacementKeepsTheNativePriority(t *testing.T) {
+	svc, roleRepo, assignRepo, _ := newTestService(t)
+	roleRepo.Roles["r1"] = &model.Role{ID: "r1", Name: "A", Target: model.RoleTargetManual,
+		Policies: datatypes.JSON([]byte(`{"mentionLimit":{"priority":1,"value":10}}`))}
+	roleRepo.Roles["r2"] = &model.Role{ID: "r2", Name: "B", Target: model.RoleTargetManual,
+		Policies: datatypes.JSON([]byte(`{"mentionLimit":{"priority":0,"value":100}}`))}
+	assign(t, assignRepo, "u1", "r1")
+	assign(t, assignRepo, "u1", "r2")
+
+	// 置換が無ければ priority 1 の group が 10 で決まる。
+	policies, err := svc.GetUserPoliciesChecked("u1")
+	require.NoError(t, err)
+	require.Equal(t, 10, policies["mentionLimit"], "native は priority 1 の group だけで決まる")
+
+	registerProvider(t, svc, "level", []string{"mentionLimit"},
+		func(_ context.Context, req plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+			return []plugin.EffectivePolicyContribution{{
+				Key: "mentionLimit", Value: 40, ReplaceRoleID: req.ActiveAssignments[0].RoleID,
+			}}, nil
+		})
+
+	policies, err = svc.GetUserPoliciesChecked("u1")
+	require.NoError(t, err)
+	assert.Equal(t, 40, policies["mentionLimit"], "置換は native の priority を引き継ぐので r2 の 100 に負けない")
+}
+
+// **置換でも explicit は contribution の値に従う。** explicit は intersection する policy
+// だけで意味を持ち、「そのロールが明示的に設定したか」を表す。どちらのロールも key を
+// 宣言していないので native は base 参加 = 明示設定なしとして intersection には何も
+// 乗らない。r1 を明示値で置換すると初めて乗る。
+func TestEffectivePolicy_ReplacementCarriesTheExplicitFlagForIntersection(t *testing.T) {
+	svc, roleRepo, assignRepo, _ := newTestService(t)
+	roleRepo.Roles["r1"] = &model.Role{ID: "r1", Name: "A", Target: model.RoleTargetManual}
+	roleRepo.Roles["r2"] = &model.Role{ID: "r2", Name: "B", Target: model.RoleTargetManual}
+	assign(t, assignRepo, "u1", "r1")
+	assign(t, assignRepo, "u1", "r2")
+
+	policies, err := svc.GetUserPoliciesChecked("u1")
+	require.NoError(t, err)
+	require.Equal(t, []string{}, policies[role.PolicyOptOutNotificationTypes], "どちらも未設定なので intersection は空")
+
+	registerProvider(t, svc, "level", []string{role.PolicyOptOutNotificationTypes},
+		func(_ context.Context, req plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+			return []plugin.EffectivePolicyContribution{{
+				Key: role.PolicyOptOutNotificationTypes, Value: []string{"note"}, ReplaceRoleID: "r1",
+			}}, nil
+		})
+
+	policies, err = svc.GetUserPoliciesChecked("u1")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"note"}, policies[role.PolicyOptOutNotificationTypes],
+		"明示値での置換だけが intersection に参加する")
+}
+
+// **`UseDefault: true` の置換は「この role の override を base に戻す」** = native の
+// useDefault と同じ扱い。explicit は立たない。
+func TestEffectivePolicy_ReplacementWithUseDefaultStaysUnset(t *testing.T) {
+	svc, roleRepo, assignRepo, _ := newTestService(t)
+	roleRepo.Roles["r1"] = &model.Role{ID: "r1", Name: "A", Target: model.RoleTargetManual}
+	roleRepo.Roles["r2"] = &model.Role{ID: "r2", Name: "B", Target: model.RoleTargetManual}
+	assign(t, assignRepo, "u1", "r1")
+	assign(t, assignRepo, "u1", "r2")
+	registerProvider(t, svc, "level", []string{role.PolicyOptOutNotificationTypes},
+		func(_ context.Context, req plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+			return []plugin.EffectivePolicyContribution{{
+				Key: role.PolicyOptOutNotificationTypes, UseDefault: true, Value: []string{"note"}, ReplaceRoleID: "r1",
+			}}, nil
+		})
+
+	policies, err := svc.GetUserPoliciesChecked("u1")
+	require.NoError(t, err)
+	assert.Equal(t, []string{}, policies[role.PolicyOptOutNotificationTypes],
+		"UseDefault の置換は明示設定にならず intersection に参加しない")
+}
+
+// **競合は pair 単位。** provider 全体を失敗扱いにしてしまうと、その provider の無関係な
+// key まで native に戻ってしまう。置換したい plugin だけを黙らせる形の被害を出さない。
+func TestEffectivePolicy_ReplacementConflictFallsBackToNative(t *testing.T) {
+	svc, roleRepo, assignRepo, _ := newTestService(t)
+	roleRepo.Roles["r1"] = &model.Role{ID: "r1", Name: "A", Target: model.RoleTargetManual,
+		Policies: datatypes.JSON([]byte(`{"mentionLimit":{"priority":1,"value":10}}`))}
+	assign(t, assignRepo, "u1", "r1")
+	replace := func(value int) plugin.EffectivePolicyResolver {
+		return func(_ context.Context, req plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+			return []plugin.EffectivePolicyContribution{{
+				Key: "mentionLimit", Value: value, ReplaceRoleID: req.ActiveAssignments[0].RoleID,
+			}}, nil
+		}
+	}
+	registerProvider(t, svc, "level-a", []string{"mentionLimit"}, replace(40))
+	registerProvider(t, svc, "level-b", []string{"mentionLimit"}, replace(90))
+
+	policies, err := svc.GetUserPoliciesChecked("u1")
+	require.ErrorIs(t, err, role.ErrEffectivePolicyReplacementConflict)
+	assert.Equal(t, 10, policies["mentionLimit"], "競合した pair は管理者が設定した native 値が残る")
+	assert.NotErrorIs(t, err, role.ErrEffectivePolicyProvider, "競合は provider 失敗と区別する")
+}
+
+// 競合した key 以外は、**両 provider の通常contributionを通常通り集約する。**
+func TestEffectivePolicy_ReplacementConflictKeepsOtherContributions(t *testing.T) {
+	svc, roleRepo, assignRepo, _ := newTestService(t)
+	roleRepo.Roles["r1"] = &model.Role{ID: "r1", Name: "A", Target: model.RoleTargetManual,
+		Policies: datatypes.JSON([]byte(`{"mentionLimit":{"priority":1,"value":10}}`))}
+	assign(t, assignRepo, "u1", "r1")
+	build := func(mentionLimit, userListLimit int) plugin.EffectivePolicyResolver {
+		return func(_ context.Context, req plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+			return []plugin.EffectivePolicyContribution{
+				{Key: "mentionLimit", Value: mentionLimit, ReplaceRoleID: req.ActiveAssignments[0].RoleID},
+				{Key: "userListLimit", Priority: 1, Value: userListLimit},
+			}, nil
+		}
+	}
+	registerProvider(t, svc, "level-a", []string{"mentionLimit", "userListLimit"}, build(40, 50))
+	registerProvider(t, svc, "level-b", []string{"mentionLimit", "userListLimit"}, build(90, 60))
+
+	policies, err := svc.GetUserPoliciesChecked("u1")
+	require.ErrorIs(t, err, role.ErrEffectivePolicyReplacementConflict)
+	assert.Equal(t, 10, policies["mentionLimit"], "競合した pair だけ native")
+	assert.Equal(t, 60, policies["userListLimit"], "競合していない key は両 provider の contribution を集約する")
+}
+
+// **provider 失敗は宣言 key を native へ戻す（既存挙動）。** 他 provider の置換も同じ key
+// なら巻き戻る。既存 sentinel は単独のときは素のまま。
+func TestEffectivePolicy_FailedProviderWinsOverAnotherProvidersReplacement(t *testing.T) {
+	svc, roleRepo, assignRepo, _ := newTestService(t)
+	roleRepo.Roles["r1"] = &model.Role{ID: "r1", Name: "A", Target: model.RoleTargetManual,
+		Policies: datatypes.JSON([]byte(`{"mentionLimit":{"priority":1,"value":10}}`))}
+	assign(t, assignRepo, "u1", "r1")
+	registerProvider(t, svc, "broken", []string{"mentionLimit"},
+		func(context.Context, plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+			return nil, errors.New("provider storage failure")
+		})
+	registerProvider(t, svc, "level", []string{"mentionLimit"},
+		func(_ context.Context, req plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+			return []plugin.EffectivePolicyContribution{{
+				Key: "mentionLimit", Value: 40, ReplaceRoleID: req.ActiveAssignments[0].RoleID,
+			}}, nil
+		})
+
+	policies, err := svc.GetUserPoliciesChecked("u1")
+	require.Equal(t, role.ErrEffectivePolicyProvider, err, "単独の provider 失敗は素の sentinel")
+	assert.Equal(t, 10, policies["mentionLimit"], "失敗 provider の宣言 key は native へ戻る")
+}
+
+// **provider 失敗と競合が同時に起きたら両方の error が errors.Is で辿れる。**
+func TestEffectivePolicy_JoinsProviderFailureAndReplacementConflict(t *testing.T) {
+	svc, roleRepo, assignRepo, _ := newTestService(t)
+	roleRepo.Roles["r1"] = &model.Role{ID: "r1", Name: "A", Target: model.RoleTargetManual,
+		Policies: datatypes.JSON([]byte(`{"mentionLimit":{"priority":1,"value":10}}`))}
+	assign(t, assignRepo, "u1", "r1")
+	replace := func(value int) plugin.EffectivePolicyResolver {
+		return func(_ context.Context, req plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+			return []plugin.EffectivePolicyContribution{{
+				Key: "mentionLimit", Value: value, ReplaceRoleID: req.ActiveAssignments[0].RoleID,
+			}}, nil
+		}
+	}
+	registerProvider(t, svc, "broken", []string{"canSearchNotes"},
+		func(context.Context, plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+			return nil, errors.New("provider storage failure")
+		})
+	registerProvider(t, svc, "level-a", []string{"mentionLimit"}, replace(40))
+	registerProvider(t, svc, "level-b", []string{"mentionLimit"}, replace(90))
+
+	_, err := svc.GetUserPoliciesChecked("u1")
+	require.ErrorIs(t, err, role.ErrEffectivePolicyProvider)
+	require.ErrorIs(t, err, role.ErrEffectivePolicyReplacementConflict)
+}
+
+// **unchecked 解決は fallback map を返すだけ。** error は地表に出さない。
+func TestEffectivePolicy_ReplacementConflictUncheckedResolutionFallsBack(t *testing.T) {
+	svc, roleRepo, assignRepo, _ := newTestService(t)
+	roleRepo.Roles["r1"] = &model.Role{ID: "r1", Name: "A", Target: model.RoleTargetManual,
+		Policies: datatypes.JSON([]byte(`{"mentionLimit":{"priority":1,"value":10}}`))}
+	assign(t, assignRepo, "u1", "r1")
+	replace := func(value int) plugin.EffectivePolicyResolver {
+		return func(_ context.Context, req plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+			return []plugin.EffectivePolicyContribution{{
+				Key: "mentionLimit", Value: value, ReplaceRoleID: req.ActiveAssignments[0].RoleID,
+			}}, nil
+		}
+	}
+	registerProvider(t, svc, "level-a", []string{"mentionLimit"}, replace(40))
+	registerProvider(t, svc, "level-b", []string{"mentionLimit"}, replace(90))
+
+	policies := svc.GetUserPolicies("u1")
+	assert.Equal(t, 10, policies["mentionLimit"])
+}
+
+// **置換が active でない role を名乗れば provider 全体が失敗扱い。** malformed output と
+// 同じ扱いなので、宣言 key は native へ戻る。
+func TestEffectivePolicy_ReplacementOfInactiveRoleFailsTheProvider(t *testing.T) {
+	svc, roleRepo, assignRepo, _ := newTestService(t)
+	roleRepo.Roles["r1"] = &model.Role{ID: "r1", Name: "A", Target: model.RoleTargetManual,
+		Policies: datatypes.JSON([]byte(`{"mentionLimit":{"priority":1,"value":10}}`))}
+	assign(t, assignRepo, "u1", "r1")
+	registerProvider(t, svc, "level", []string{"mentionLimit"},
+		func(context.Context, plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+			return []plugin.EffectivePolicyContribution{{Key: "mentionLimit", Value: 40, ReplaceRoleID: "r-other"}}, nil
+		})
+
+	policies, err := svc.GetUserPoliciesChecked("u1")
+	require.Equal(t, role.ErrEffectivePolicyProvider, err)
+	assert.Equal(t, 10, policies["mentionLimit"])
+}
+
+// **置換で priority を選ぶと provider 全体が失敗扱い。** 0 以外は malformed。
+func TestEffectivePolicy_ReplacementChoosingAPriorityFailsTheProvider(t *testing.T) {
+	svc, roleRepo, assignRepo, _ := newTestService(t)
+	roleRepo.Roles["r1"] = &model.Role{ID: "r1", Name: "A", Target: model.RoleTargetManual,
+		Policies: datatypes.JSON([]byte(`{"mentionLimit":{"priority":1,"value":10}}`))}
+	assign(t, assignRepo, "u1", "r1")
+	registerProvider(t, svc, "level", []string{"mentionLimit"},
+		func(_ context.Context, req plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+			return []plugin.EffectivePolicyContribution{{
+				Key: "mentionLimit", Value: 40, Priority: 1, ReplaceRoleID: req.ActiveAssignments[0].RoleID,
+			}}, nil
+		})
+
+	policies, err := svc.GetUserPoliciesChecked("u1")
+	require.Equal(t, role.ErrEffectivePolicyProvider, err)
+	assert.Equal(t, 10, policies["mentionLimit"])
+}
+
+// **置換の target は resolver を呼ぶ前に確定していなければならない。** host は resolver に
+// `ActiveAssignments` を**複製して**渡すので、resolver は自分の slice を書き換えられる。
+// 複製し直してから「置換してよい role」を判定すると、resolver が「active な role を
+// conditional な role に差し替えて」置換を通できてしまう。
+//
+// 攻撃者は `RoleIDs` を見るだけで conditional role の ID を知れるので、差し込む ID は
+// 実際に手に入る:
+//
+//	r1 (manual, active):      mentionLimit priority 1 = 10
+//	r-conditional (条件一致): mentionLimit priority 1 = 20 → native は max(10, 20) = 20
+//	                        RoleIDs には出るが ActiveAssignments には出ない
+//
+// 差し替えが通る (修正前): priority 1 group が max(10, 40) = 40 になる
+// 差し替えが弾かれる (修正後): provider 全体が失敗扱いで native の 20 に戻る
+func TestEffectivePolicy_ReplacementCannotForgeTheTargetThroughTheRequest(t *testing.T) {
+	svc, roleRepo, assignRepo, _ := newTestService(t)
+	roleRepo.Roles["r1"] = &model.Role{ID: "r1", Name: "A", Target: model.RoleTargetManual,
+		Policies: datatypes.JSON([]byte(`{"mentionLimit":{"priority":1,"value":10}}`))}
+	roleRepo.Roles["r-conditional"] = &model.Role{ID: "r-conditional", Name: "C", Target: model.RoleTargetConditional,
+		CondFormula: datatypes.JSON([]byte(`{"type":"isLocal"}`)),
+		Policies:    datatypes.JSON([]byte(`{"mentionLimit":{"priority":1,"value":20}}`))}
+	assign(t, assignRepo, "u1", "r1")
+	userRepo := testutil.NewMockUserRepository()
+	userRepo.Users["u1"] = &model.User{ID: "u1"} // Host nil なので isLocal が真
+	svc.SetUserRepo(userRepo)
+
+	registerProvider(t, svc, "level", []string{"mentionLimit"},
+		func(_ context.Context, req plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+			// r1 は実際に active な手動ロールなのに、resolver が自分の slice を conditional
+			// な role に書き換えて、その target の置換を返す。
+			req.ActiveAssignments[0].RoleID = "r-conditional"
+			return []plugin.EffectivePolicyContribution{{
+				Key: "mentionLimit", Value: 40, ReplaceRoleID: "r-conditional",
+			}}, nil
+		})
+
+	policies, err := svc.GetUserPoliciesChecked("u1")
+	// **assert 2 つで報告する。** 「差し替えが通った」証拠は error が nil なことと
+	// 値が 40 になることの両方で出る。require で止めると片方しか見えない。
+	assert.Equal(t, role.ErrEffectivePolicyProvider, err, "resolver が書き換えた target は置換先にならない")
+	assert.Equal(t, 20, policies["mentionLimit"], "宣言 key は native へ戻る")
+}
+
+// **逆に、request を書き換えても「本来の対象」は置換できる。** target の判定は
+// **resolver 呼び出し前**の集合で行うので、resolver 側の書き込みで本来 active だった
+// role まで失ってはいけない（= 置換をすべて不正扱いにするような過大な修正の防線）。
+//
+//	r1 を 40 に置換 → priority 1 group が max(40, r-conditional の 20) = 40
+func TestEffectivePolicy_RequestMutationDoesNotHideTheGenuineReplacementTarget(t *testing.T) {
+	svc, roleRepo, assignRepo, _ := newTestService(t)
+	roleRepo.Roles["r1"] = &model.Role{ID: "r1", Name: "A", Target: model.RoleTargetManual,
+		Policies: datatypes.JSON([]byte(`{"mentionLimit":{"priority":1,"value":10}}`))}
+	roleRepo.Roles["r-conditional"] = &model.Role{ID: "r-conditional", Name: "C", Target: model.RoleTargetConditional,
+		CondFormula: datatypes.JSON([]byte(`{"type":"isLocal"}`)),
+		Policies:    datatypes.JSON([]byte(`{"mentionLimit":{"priority":1,"value":20}}`))}
+	assign(t, assignRepo, "u1", "r1")
+	userRepo := testutil.NewMockUserRepository()
+	userRepo.Users["u1"] = &model.User{ID: "u1"} // Host nil なので isLocal が真
+	svc.SetUserRepo(userRepo)
+
+	registerProvider(t, svc, "level", []string{"mentionLimit"},
+		func(_ context.Context, req plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+			// 書き換えるのは snapshot 済みの slice だけ。返す置換は実際に active だった r1 を
+			// 名乗るので、呼び出し前に確定した集合なら通る。
+			req.ActiveAssignments[0].RoleID = "r-conditional"
+			return []plugin.EffectivePolicyContribution{{
+				Key: "mentionLimit", Value: 40, ReplaceRoleID: "r1",
+			}}, nil
+		})
+
+	policies, err := svc.GetUserPoliciesChecked("u1")
+	require.NoError(t, err, "resolver が request を書き換えたこと自体は provider 失敗ではない")
+	assert.Equal(t, 40, policies["mentionLimit"], "呼び出し前に確定した active な role は置換できる")
 }

@@ -64,6 +64,8 @@ plugin/plugintest: type Schedule struct
 plugin:   field APIError.Body json.RawMessage
 plugin:   field APIError.Endpoint string
 plugin:   field APIError.Status int
+plugin:   field ActiveRoleAssignment.AssignmentID string
+plugin:   field ActiveRoleAssignment.RoleID string
 plugin:   field Blob.Body []byte
 plugin:   field Blob.CacheControl string
 plugin:   field Blob.ContentType string
@@ -80,10 +82,12 @@ plugin:   field Definition.Version string
 plugin:   field EffectivePolicyContribution.Key string
 plugin:   field EffectivePolicyContribution.Order int
 plugin:   field EffectivePolicyContribution.Priority int
+plugin:   field EffectivePolicyContribution.ReplaceRoleID string
 plugin:   field EffectivePolicyContribution.UseDefault bool
 plugin:   field EffectivePolicyContribution.Value any
 plugin:   field EffectivePolicyRegistration.Keys []string
 plugin:   field EffectivePolicyRegistration.Resolve EffectivePolicyResolver
+plugin:   field EffectivePolicyRequest.ActiveAssignments []ActiveRoleAssignment
 plugin:   field EffectivePolicyRequest.RoleIDs []string
 plugin:   field EffectivePolicyRequest.UserID string
 plugin:   field EnqueueOptions.DedupTTL time.Duration
@@ -142,6 +146,7 @@ plugin: func WithDelay(time.Duration) EnqueueOption
 plugin: func WithMaxAttempts(int) EnqueueOption
 plugin: type API interface
 plugin: type APIError struct
+plugin: type ActiveRoleAssignment struct
 plugin: type Blob struct
 plugin: type Caller interface
 plugin: type Config interface

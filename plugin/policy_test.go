@@ -45,3 +45,20 @@ func TestEffectivePolicyRegistrationValidate(t *testing.T) {
 		})
 	}
 }
+
+func TestEffectivePolicyRequest_CarriesActiveAssignmentsAlongsideRoleIDs(t *testing.T) {
+	// plugin作者は RoleID と AssignmentID を別々に読む。片方だけを持つ型に
+	// 戻すと「assignment単位に持つplugin stateが別のroleのもの」と誤って付け替えられる。
+	assignment := ActiveRoleAssignment{RoleID: "r1", AssignmentID: "a1"}
+
+	request := EffectivePolicyRequest{
+		UserID:            "u1",
+		RoleIDs:           []string{"r1", "r2"},
+		ActiveAssignments: []ActiveRoleAssignment{assignment},
+	}
+
+	assert.Equal(t, "r1", request.ActiveAssignments[0].RoleID)
+	assert.Equal(t, "a1", request.ActiveAssignments[0].AssignmentID)
+	// ActiveAssignments は RoleIDs を置き換えず、並んで運ぶ。
+	assert.Equal(t, []string{"r1", "r2"}, request.RoleIDs)
+}
