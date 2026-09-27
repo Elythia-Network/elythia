@@ -52,9 +52,11 @@ const (
 	//
 	// **見積もりは下振れしうる。** `@id` / `id` を持つノードは blank node に
 	// ならないものとして数えないが、`id` が `@id` へ写像されるかは
-	// **document 側の `@context` 次第**で、LD-Signature 経路は compact を
-	// 通さないので攻撃者がそこを決められる。だからこの上限を単独の防御と
-	// みなさないこと (主防御は maxBlankNodeLabels)。
+	// **document 側の `@context` 次第**。受信の LD-Signature 経路は
+	// ld.InboxCompactContext へ compact した文書を normalize するので `id` は
+	// AS2 の alias で `@id` になるが、compact を経ない呼び出しでは攻撃者が
+	// そこを決められる。だからこの上限を単独の防御とみなさないこと (主防御は
+	// maxBlankNodeLabels)。
 	maxBlankNodes = 512
 
 	// maxComplexityDepth bounds how deep the estimator walks.

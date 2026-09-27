@@ -76,7 +76,7 @@ func TestManager_AcceptViaHTTPTestServer(t *testing.T) {
 		if err != nil {
 			return
 		}
-		go m.Accept(conn, &model.User{ID: "alice"}, nil)
+		go m.Accept(conn, &model.User{ID: "alice"}, nil, "")
 	}))
 	defer srv.Close()
 
@@ -124,7 +124,7 @@ func TestManager_AcceptInvokesMuteBlockLookup(t *testing.T) {
 		if err != nil {
 			return
 		}
-		go m.Accept(conn, &model.User{ID: "alice"}, nil)
+		go m.Accept(conn, &model.User{ID: "alice"}, nil, "")
 	}))
 	defer srv.Close()
 
@@ -166,7 +166,7 @@ func TestManager_AcceptInvokesPolicyProvider(t *testing.T) {
 		if err != nil {
 			return
 		}
-		go m.Accept(conn, &model.User{ID: "alice"}, nil)
+		go m.Accept(conn, &model.User{ID: "alice"}, nil, "")
 	}))
 	defer srv.Close()
 
@@ -199,7 +199,7 @@ func TestManager_AcceptDispatchesConnectMessages(t *testing.T) {
 		if err != nil {
 			return
 		}
-		go m.Accept(conn, &model.User{ID: "alice"}, nil)
+		go m.Accept(conn, &model.User{ID: "alice"}, nil, "")
 	}))
 	defer srv.Close()
 
@@ -289,7 +289,7 @@ func TestManagerAccept_AttachesScopesThroughAcceptPath(t *testing.T) {
 				if err != nil {
 					return
 				}
-				go m.Accept(conn, &model.User{ID: "alice"}, tc.scopes)
+				go m.Accept(conn, &model.User{ID: "alice"}, tc.scopes, "")
 			}))
 			defer srv.Close()
 

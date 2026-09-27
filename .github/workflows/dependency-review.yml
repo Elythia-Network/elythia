@@ -25,7 +25,7 @@ jobs:
   review:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # **PR へコメントさせない。** `comment-summary-in-pr` は
       # `pull-requests: write` を要るが、結果は job のログで読める。
@@ -34,6 +34,6 @@ jobs:
       # `fail-on-severity` は high から始める。moderate まで落とすと、
       # 到達不能なものまで止めることになり (到達可能性を見るのは `vulncheck`
       # の役目)、依存を上げるだけの PR が通らなくなる。
-      - uses: actions/dependency-review-action@v4
+      - uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
         with:
           fail-on-severity: high

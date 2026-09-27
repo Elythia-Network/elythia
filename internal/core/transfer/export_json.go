@@ -3,8 +3,10 @@ package transfer
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 
 	"github.com/shiroha-a/mk/internal/model"
+	"github.com/shiroha-a/mk/internal/repository"
 )
 
 // exportFavorites reuses the note export pipeline but pulls rows from
@@ -13,13 +15,16 @@ import (
 //
 // keyset pagination で順送りに取り込む (#424 でリポジトリ側を offset から
 // untilID 方式に変更した移行)。collectClipNotes と同じパターン。
-func (e *Exporter) exportFavorites(userID string) ([]byte, error) {
+//
+// 閲覧資格を失ったノートは exportableFor で行ごと落とす。cursor は落とす前の
+// rows で進める (落とした行で止まるとページが途切れる)。
+func (e *Exporter) exportFavorites(user *model.User) ([]byte, error) {
 	var buf bytes.Buffer
 	buf.WriteByte('[')
 	first := true
 	untilID := ""
 	for {
-		rows, err := e.deps.NoteFavoriteRepo.ListByUser(userID, untilID, "", notesExportBatchSize)
+		rows, err := e.deps.NoteFavoriteRepo.ListByUser(user.ID, untilID, "", notesExportBatchSize)
 		if err != nil {
 			return nil, err
 		}
@@ -28,6 +33,13 @@ func (e *Exporter) exportFavorites(userID string) ([]byte, error) {
 		}
 		for _, fav := range rows {
 			if fav.Note == nil {
+				continue
+			}
+			ok, verr := e.exportableFor(user, fav.Note)
+			if verr != nil {
+				return nil, verr
+			}
+			if !ok {
 				continue
 			}
 			entry := map[string]any{
@@ -90,14 +102,36 @@ func (e *Exporter) exportAntennas(userID string) ([]byte, error) {
 			"userListAccts":                  nil,
 		}
 		if a.UserListID != nil {
-			entry["userListId"] = *a.UserListID
-			if accts, err := e.listAccts(*a.UserListID); err == nil {
-				entry["userListAccts"] = accts
+			owned, err := e.ownsList(userID, *a.UserListID)
+			if err != nil {
+				return nil, err
+			}
+			// 自分の list のときだけ ID とメンバーを出す。1aac65d より前は他人の
+			// list ID を保存できたので、そのまま解決すると他人の list のメンバー
+			// 構成を export 経由で読めてしまう (照合側の所有者検証と同じ理由)。
+			if owned {
+				entry["userListId"] = *a.UserListID
+				if accts, err := e.listAccts(*a.UserListID); err == nil {
+					entry["userListAccts"] = accts
+				}
 			}
 		}
 		out = append(out, entry)
 	}
 	return json.Marshal(out)
+}
+
+// ownsList reports whether listID exists and belongs to userID. A missing list
+// is reported as not owned; other lookup errors are returned.
+func (e *Exporter) ownsList(userID, listID string) (bool, error) {
+	list, err := e.deps.UserListRepo.FindByID(listID)
+	if err != nil {
+		if repository.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("find user list %s: %w", listID, err)
+	}
+	return list != nil && list.UserID == userID, nil
 }
 
 // listAccts resolves a userList's members to acct strings (username / username@host)
@@ -125,14 +159,16 @@ func (e *Exporter) listAccts(listID string) ([]string, error) {
 
 // exportClips emits a JSON array of the user's clips, each with the packed
 // notes contained in the clip. 各 clip 内の note は単純な配列 (本家互換)。
-func (e *Exporter) exportClips(userID string) ([]byte, error) {
-	clips, err := e.deps.ClipRepo.ListByUser(userID, "", "", 1000, 0)
+// 自分の clip でも中身は他人のノートなので、閲覧資格の無いものは落とす
+// (collectClipNotes 参照)。
+func (e *Exporter) exportClips(user *model.User) ([]byte, error) {
+	clips, err := e.deps.ClipRepo.ListByUser(user.ID, "", "", 1000, 0)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]map[string]any, 0, len(clips))
 	for _, c := range clips {
-		notes, err := e.collectClipNotes(c.ID)
+		notes, err := e.collectClipNotes(user, c.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -152,8 +188,9 @@ func (e *Exporter) exportClips(userID string) ([]byte, error) {
 }
 
 // collectClipNotes walks ClipNoteRepository with pagination and resolves each
-// referenced note into its model.Note form for exporting.
-func (e *Exporter) collectClipNotes(clipID string) ([]*model.Note, error) {
+// referenced note into its model.Note form for exporting. Notes the viewer can
+// no longer see are skipped (upstream ExportClipsProcessorService parity).
+func (e *Exporter) collectClipNotes(viewer *model.User, clipID string) ([]*model.Note, error) {
 	var out []*model.Note
 	untilID := ""
 	for {
@@ -167,6 +204,13 @@ func (e *Exporter) collectClipNotes(clipID string) ([]*model.Note, error) {
 		for _, cn := range rows {
 			n, err := e.deps.NoteRepo.FindByIDWithRelations(cn.NoteID)
 			if err != nil || n == nil {
+				continue
+			}
+			ok, verr := e.exportableFor(viewer, n)
+			if verr != nil {
+				return nil, verr
+			}
+			if !ok {
 				continue
 			}
 			out = append(out, n)

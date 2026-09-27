@@ -423,3 +423,37 @@ func TestImport_Antennas_UserListAcctsConvertsToUsers(t *testing.T) {
 	assert.Nil(t, got.UserListID, "変換後は cross-instance で無意味な userListId を捨てる")
 	assert.ElementsMatch(t, []string{"bob", "carol@remote.example"}, []string(got.Users))
 }
+
+// ファイルに書かれた userListId は使わない (upstream と同じく常に null)。
+// そのまま保存すると他人の list ID を所有者検証なしでソースにできる。
+func TestImport_Antennas_IgnoresUserListIDFromFile(t *testing.T) {
+	body := []byte(`[{"name":"news","src":"list","keywords":[[]],"userListId":"victimlist"}]`)
+	deps, user, _, _, _, _ := newImporterDeps(t, body)
+	res, err := transfer.NewImporter(deps).Import(context.Background(), user.ID, transfer.ImportAntennas, "fid")
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Applied)
+
+	aRepo := deps.AntennaRepo.(*testutil.MockAntennaRepository)
+	require.Len(t, aRepo.Antennas, 1)
+	for _, a := range aRepo.Antennas {
+		assert.Nil(t, a.UserListID)
+		assert.Equal(t, model.AntennaSourceList, a.Src, "userListAccts が無ければ src は維持 (upstream と同じ)")
+	}
+}
+
+// upstream は userListAccts の truthy で users へ倒すので、空配列でも倒す。
+func TestImport_Antennas_EmptyUserListAcctsConvertsToUsers(t *testing.T) {
+	body := []byte(`[{"name":"news","src":"list","keywords":[[]],"users":["x"],"userListAccts":[]}]`)
+	deps, user, _, _, _, _ := newImporterDeps(t, body)
+	res, err := transfer.NewImporter(deps).Import(context.Background(), user.ID, transfer.ImportAntennas, "fid")
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Applied)
+
+	aRepo := deps.AntennaRepo.(*testutil.MockAntennaRepository)
+	require.Len(t, aRepo.Antennas, 1)
+	for _, a := range aRepo.Antennas {
+		assert.Equal(t, model.AntennaSourceUsers, a.Src)
+		assert.Empty(t, a.Users)
+		assert.Nil(t, a.UserListID)
+	}
+}

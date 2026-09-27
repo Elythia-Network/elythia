@@ -107,6 +107,7 @@ import (
 	corenote "github.com/shiroha-a/mk/internal/core/note"
 	corenotification "github.com/shiroha-a/mk/internal/core/notification"
 	corepage "github.com/shiroha-a/mk/internal/core/page"
+	"github.com/shiroha-a/mk/internal/core/passwordguard"
 	corepoll "github.com/shiroha-a/mk/internal/core/poll"
 	"github.com/shiroha-a/mk/internal/core/procstats"
 	corereaction "github.com/shiroha-a/mk/internal/core/reaction"
@@ -712,6 +713,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		UserListRepo:     userListRepo,
 		Drive:            driveService,
 		Notifier:         notificationService,
+		IDGen:            idGen,
 		// custom-emojis export: 全 local emoji を ListLocal で列挙し、各画像を
 		// SSRF-safe client で download して zip 化する (#1217)。画像取得は最大
 		// 60s/個、cap 8 MiB。
@@ -1917,6 +1919,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	iHandler.SetUserRepo(userRepo)
 	iHandler.SetRoleProvider(roleService)
 	iHandler.SetTOTPReplayGuard(totpReplayGuard)
+	// 現在のパスワードを照合する i/* の照合失敗をアカウント単位で数える。
+	// route ごとの limiter に置くと、token を持つだけの第三者が被害者の
+	// i/regenerate-token を使い切れる (passwordguard の package doc)。
+	passwordFailureGuard := passwordguard.NewRedisGuard(s.redis.Default)
+	iHandler.SetPasswordFailureGuard(passwordFailureGuard)
 	// upstream UserAuthService と同じテスト用バイパス。testMode 以外では無効。
 	coretwofactor.SetTestMode(s.config.TestMode)
 	iHandler.SetRegistryRepo(registryRepo)
@@ -2899,7 +2906,25 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		streamManager.SubscribeRelationReload()
 		// broadcast stream (emojiAdded/Updated/Deleted 等) を全 connection へ forward (#2046)。
 		streamManager.SubscribeBroadcast()
+		// 資格情報の失効 (token 再生成 / access token 失効 / 凍結 / 削除) を受けて、
+		// その資格情報で張られた接続を閉じる。publish は失効を処理したプロセスが
+		// 行うので、接続を持つ全プロセスが購読する (mk-go 独自、docs/divergence.md)。
+		streamManager.SubscribeStreamRevoke()
 	}
+	// 失効 event に相乗りして、各プロセスが自分の tokenCache から対象利用者の
+	// entry を落とす。tokenCache はプロセス内の map なので、Web ノードが複数
+	// あると失効を処理したノード以外に旧 token の entry が残り、閉じた接続が
+	// そのノードへ再接続すると無期限に残る。
+	streamManager.OnStreamRevoke(s.auth.InvalidateTokensForUser)
+	// 2 回目の閉じ処理は tokenCache の TTL が切れた後に行う (DB を引いた直後に
+	// 無効化 event を追い越して積まれた entry も、そこで確実に切れている)。
+	streamManager.SetRevokeRecheckDelay(middleware.AuthCacheTTL + 5*time.Second)
+	// WebSocket は接続時に 1 度しか認証しないので、tokenCache を落とすだけでは
+	// 既存の接続が閉じない。失効を扱う handler へ revoke publisher を配る。
+	// 自プロセスの Manager も渡す — publish が失敗しても、ここに居る接続は閉じる。
+	streamRevokePublisher := stream.NewStreamRevokePublisher(streamPubSub, streamManager)
+	iHandler.SetStreamRevoker(streamRevokePublisher)
+	oauthHandler.SetStreamRevoker(streamRevokePublisher)
 	iHandler.SetHardMutePublisher(&hardMutePublisherAdapter{pubsub: streamPubSub})
 	// relation 変更 (#2400) の publisher を各 mutation 側へ配線する。7 系統すべてを
 	// 繋がないと「一部の操作だけ反映されない」形の抜けになるので、まとめて置く。
@@ -3270,6 +3295,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// AuthMiddleware が duck-typed で UserTokenInvalidator interface を
 	// 満たしている。
 	adminHandler.SetUserTokenInvalidator(s.auth)
+	// 凍結・削除した利用者の WebSocket を閉じる (tokenCache の失効とは独立)。
+	adminHandler.SetUserStreamRevoker(streamRevokePublisher)
 	adminHandler.SetInstanceRepo(instanceRepo)
 	adminHandler.SetDeliveryHealthProvider(deliveryHealth)
 	adminHandler.SetInboxHealthProvider(inboxHealth)
@@ -3972,25 +3999,16 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.Any("/*", apiCatchall)
 
 	// フロントエンドアセット配信
-	// ビルド済みアセットがあれば静的配信、なければVite dev serverプロキシ
+	// dev モードなら Vite dev server へプロキシ、そうでなければビルド済みアセットを
+	// 静的配信する (無ければ 404。dev server へは流さない)。
 	//
 	// dev モードではビルド成果物の有無を**見ない** (#2477)。見てしまうと、
 	// 以前のビルドが残っているだけで dev server に繋がらず HMR に入れない。
-	frontendDir := frontendutil.FrontendDir()
-	if _, err := os.Stat(frontendDir); err == nil && !isDev(s.config) {
-		s.echo.Static("/vite", frontendDir)
-	} else {
-		s.echo.Any("/vite/*", newViteProxy(viteDevServerURL))
-	}
+	registerFrontendAssets(s.echo, s.config, "/vite", frontendutil.FrontendDir(), viteDevServerURL)
 
 	// embed 専用バンドル配信 (#2389)。通常の SPA とは別 build なので別ディレクトリ・
 	// 別 prefix になる (upstream ClientServerService の `/embed_vite/` と同じ)。
-	frontendEmbedDir := frontendutil.FrontendEmbedDir()
-	if _, err := os.Stat(frontendEmbedDir); err == nil && !isDev(s.config) {
-		s.echo.Static("/embed_vite", frontendEmbedDir)
-	} else {
-		s.echo.Any("/embed_vite/*", newViteProxy(viteEmbedDevServerURL))
-	}
+	registerFrontendAssets(s.echo, s.config, "/embed_vite", frontendutil.FrontendEmbedDir(), viteEmbedDevServerURL)
 
 	// フロントエンド配布アセット (locales, fonts等) + リポジトリアセット (ai.png等)
 	// Echo は同一パスに Static を 2 回登録すると上書きされるため、
@@ -4173,6 +4191,12 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"i/revoke-token が成功と同じ 204 を返したまま token を消さない (恒久)"},
 		{"oauth.authInvalidator", oauthHandler.HasAuthInvalidator(),
 			"authorization code 再利用を検出して失効させた token が TTL のあいだ通る"},
+		{"i.streamRevoker", iHandler.HasStreamRevoker(),
+			"regenerate-token / revoke-token / delete-account の後も、失効した token で張られた WebSocket が通知・DM を受け取り続ける"},
+		{"admin.userStreamRevoker", adminHandler.HasUserStreamRevoker(),
+			"凍結・削除した利用者の WebSocket が通知・DM・フォロワー限定投稿を受け取り続ける"},
+		{"oauth.streamRevoker", oauthHandler.HasStreamRevoker(),
+			"authorization code 再利用で失効させた token の WebSocket が開いたまま残る"},
 		{"signup.applicationSettlement", signupService.HasApplicationSettlement(),
 			"承認済み申請の行ロックが飛び、1 承認から複数アカウントを作る窓が開く"},
 		{"signup.formTokens", signupHandler.HasFormTokens(),

@@ -243,5 +243,10 @@ func (h *Handler) RevokeToken(c echo.Context) error {
 	if h.authInvalidator != nil && tok.Token != "" {
 		h.authInvalidator.InvalidateToken(tok.Token)
 	}
+	// その token で張られた WebSocket も閉じる (mk-go 独自)。アプリ連携の解除も
+	// この endpoint を通る。
+	if h.streamRevoker != nil {
+		h.streamRevoker.RevokeAccessTokenStreams(u.ID, tok.ID)
+	}
 	return c.NoContent(http.StatusNoContent)
 }

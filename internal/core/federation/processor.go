@@ -1316,7 +1316,7 @@ func (p *Processor) handleUndoAnnounce(act genericActivity, inner genericActivit
 //     `ErrLookupUnavailable` で種別を残し、`inbox.go` がそれだけ retry に倒す。
 //     **落とす側は 1 箇所ではない** — HTTP 署名 (`verifyPayload`)、転送 activity の
 //     認可 (`authorizeActor` → LD-Signature の creator 解決と鍵引き)、Headers 無しの
-//     legacy 経路 (`ldVerifier.VerifyIfPresent`) の 3 つが同じ sentinel を見る。
+//     legacy 経路 (`ldVerifier.VerifyAndCompact`) の 3 つが同じ sentinel を見る。
 //
 // この規則で数えれば対象は導ける (件数を別に持たない)。
 //

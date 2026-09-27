@@ -2,10 +2,12 @@ package note_test
 
 import (
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	corechannel "github.com/shiroha-a/mk/internal/core/channel"
 	"github.com/shiroha-a/mk/internal/core/note"
 	"github.com/shiroha-a/mk/internal/misc/id"
 	"github.com/shiroha-a/mk/internal/model"
@@ -1138,7 +1140,7 @@ func TestCreateService_ChannelHookEnsureAndOnPosted(t *testing.T) {
 func TestCreateService_ChannelNotFound(t *testing.T) {
 	svc, _, _ := newCreateService(t)
 	hook := newRecordingChannelHook()
-	hook.ensureErr = errors.New("missing")
+	hook.ensureErr = fmt.Errorf("show: %w", corechannel.ErrChannelNotFound)
 	svc.SetChannelHook(hook)
 
 	user := &model.User{ID: "u1"}
@@ -1146,6 +1148,24 @@ func TestCreateService_ChannelNotFound(t *testing.T) {
 	channelID := "ch1"
 	_, err := svc.Create(note.CreateInput{User: user, Text: &text, ChannelID: &channelID})
 	assert.ErrorIs(t, err, note.ErrChannelNotFound)
+}
+
+// hook の DB 障害は ErrChannelNotFound に丸めず、そのまま返す (#2792)。
+func TestCreateService_ChannelLookupErrorIsNotNotFound(t *testing.T) {
+	svc, repo, _ := newCreateService(t)
+	hook := newRecordingChannelHook()
+	dbErr := errors.New("connection refused")
+	hook.ensureErr = dbErr
+	svc.SetChannelHook(hook)
+
+	user := &model.User{ID: "u1"}
+	text := "hello"
+	channelID := "ch1"
+	_, err := svc.Create(note.CreateInput{User: user, Text: &text, ChannelID: &channelID})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, dbErr)
+	assert.NotErrorIs(t, err, note.ErrChannelNotFound)
+	assert.Empty(t, repo.Notes)
 }
 
 func TestCreateService_NoChannelHookSkipsCheck(t *testing.T) {

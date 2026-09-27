@@ -413,6 +413,31 @@ func TestToken_ReplayRevokesAndRejects(t *testing.T) {
 	assert.Contains(t, inv.tokens, issuedToken, "replay は auth cache も無効化する")
 }
 
+type fakeStreamRevoker struct {
+	calls [][2]string
+}
+
+func (f *fakeStreamRevoker) RevokeAccessTokenStreams(userID, tokenID string) {
+	f.calls = append(f.calls, [2]string{userID, tokenID})
+}
+
+// replay で失効させた token で既に張られた WebSocket も閉じる。
+func TestToken_ReplayRevokesStreams(t *testing.T) {
+	hn := newHarness(t)
+	rev := &fakeStreamRevoker{}
+	hn.h.SetStreamRevoker(rev)
+	assert.True(t, hn.h.HasStreamRevoker())
+	seedGrant(hn, "code1")
+	rec1 := hn.post(t, hn.h.Token, validTokenForm(hn, "code1"))
+	require.Equal(t, http.StatusOK, rec1.Code)
+	assert.Empty(t, rev.calls, "正常な発行では閉じない")
+	issuedID := hn.tokens.created[0].ID
+
+	rec2 := hn.post(t, hn.h.Token, validTokenForm(hn, "code1"))
+	assert.Equal(t, http.StatusBadRequest, rec2.Code)
+	assert.Equal(t, [][2]string{{"u1", issuedID}}, rev.calls)
+}
+
 func TestToken_WrongVerifier(t *testing.T) {
 	hn := newHarness(t)
 	seedGrant(hn, "code1")

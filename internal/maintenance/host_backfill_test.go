@@ -324,3 +324,24 @@ func TestBackfillHostColumnBatch_DoesNotOverwriteChangedRows(t *testing.T) {
 	assert.Equal(t, 1, res.Updated,
 		"戻り値は「撃った」件数。実際に当たったかは上の assert で見る")
 }
+
+// UTS#46 の mapping をしない旧 build が保存した行 (`ｅｖｉｌ.example` を
+// `xn--qi7ciaj2b.example` にしたもの) も、接続先と同じ `evil.example` に戻すこと。
+// 戻さないと、既に入っている行が blockedHosts / 一覧の絞り込みを素通りし続ける。
+// 正当な IDN の行は触らない。
+func TestBackfillHostColumnBatch_RepairsUnmappedPunycode(t *testing.T) {
+	testDB.Exec(`DELETE FROM "user" WHERE id LIKE 'hbm_%'`)
+	seedHostUser(t, "hbm_fw", "hbmfw", "xn--qi7ciaj2b.example")
+	seedHostUser(t, "hbm_dot", "hbmdot", "xn--evilexample-7e3j")
+	seedHostUser(t, "hbm_raw", "hbmraw", "ｅｖｉｌ2.example")
+	seedHostUser(t, "hbm_idn", "hbmidn", "xn--eckve.example")
+
+	res, err := BackfillHostColumnBatch(testDB, userHostColumn, "hbm_", 100, false)
+	require.NoError(t, err)
+	assert.Equal(t, 4, res.Scanned)
+	assert.Equal(t, 3, res.Updated)
+	assert.Equal(t, "evil.example", userHost(t, "hbm_fw"))
+	assert.Equal(t, "evil.example", userHost(t, "hbm_dot"))
+	assert.Equal(t, "evil2.example", userHost(t, "hbm_raw"))
+	assert.Equal(t, "xn--eckve.example", userHost(t, "hbm_idn"), "正当な IDN の表記は変わらない")
+}

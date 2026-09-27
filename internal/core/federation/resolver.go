@@ -4197,11 +4197,10 @@ func hostFromURI(uri string) (string, error) {
 }
 
 // punyHost normalizes a host for comparison the way upstream
-// UtilityService.toPuny does (idna.ToASCII(lowercase), UTS#46)。Unicode IDN と
+// UtilityService.toPuny does (UTS#46 mapping + punycode, lowercase)。Unicode IDN と
 // punycode の mixed-form (例: `パイ.example` vs `xn--eckve.example`) を同一視
-// するため host 一致比較の両辺に適用する (#1850)。idna が失敗する不正入力のみ
-// 小文字化で返す (Go default の lenient UTS#46 profile では port 付き host も
-// 成功し ASCII tail はそのまま残るため、fallback は実質ほぼ発生しない)。これは
+// するため host 一致比較の両辺に適用する (#1850)。規則は `idnhost.Puny` が持つ
+// (Go の HTTP client が実際に dial する名前 = `idna.Lookup` と同じ形)。これは
 // 保存側 (`hostFromURI`) も #2706 で同じ正規化を掛けるようになったので、両者は
 // 同じ値を作る。punyHost が今も要るのは、**外から渡ってくる acct や actor の host**
 // を保存形と同じ正規形へ揃えるため (読み取り側の両当たりは #2996 で撤去した)。
@@ -4210,8 +4209,8 @@ func hostFromURI(uri string) (string, error) {
 // 保存する (`punyHostPort` が剥がす) が、`punyHost` はポートを見ない。ポートを
 // 含む host を突き合わせるときは `punyHostPort` / `NormalizeGateHost` を使う。
 //
-// なお Go の idna は ideographic/fullwidth dot (U+3002 等) を `.` に畳まない
-// (Node の domainToASCII と異なるが、別 authority を同一視しない安全側)。
+// 全角英字・句点類 (U+3002 等)・soft hyphen も畳む。畳まないと接続先は同じなのに
+// 表記だけ違う host が blockedHosts を素通りする (`idnhost.Puny` の doc)。
 func punyHost(host string) string { return idnhost.Puny(host) }
 
 // finalURLFetcher は redirect 後の最終 URL も返せる fetcher。本番 APFetcher が

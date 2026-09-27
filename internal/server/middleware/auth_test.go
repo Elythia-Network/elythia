@@ -213,6 +213,8 @@ func TestAuthenticate_DeletedUserTreatedAsAnonymous(t *testing.T) {
 
 	handler := auth.Authenticate()(func(c echo.Context) error {
 		assert.Nil(t, GetUser(c), "削除済 user は context に attach されない")
+		assert.True(t, IsInactiveAccountRequest(c), "/streaming が拒否できるよう印を積む")
+		assert.False(t, IsSuspendedRequest(c), "凍結の 403 YOUR_ACCOUNT_SUSPENDED とは区別する")
 		return c.String(http.StatusOK, "ok")
 	})
 	require.NoError(t, handler(c))
@@ -1142,4 +1144,30 @@ func TestRejectAppToken_ResponseShapeMatchesRequireScope(t *testing.T) {
 	}
 
 	assert.JSONEq(t, body(RequireScope("write:account")), body(RejectAppToken()))
+}
+
+// 保存値は char(16) なので 16 文字未満の token は末尾が空白で埋まって返る。
+// 埋め草は落として比べ、リクエスト側の空白は落とさない。
+func TestNativeTokenMatches(t *testing.T) {
+	s := func(v string) *string { return &v }
+	assert.True(t, nativeTokenMatches(s("abcdef1234567890"), "abcdef1234567890"))
+	assert.False(t, nativeTokenMatches(s("abcdef1234567890"), "abcdef1234567890 "))
+	assert.True(t, nativeTokenMatches(s("short           "), "short"), "char の埋め草は無視する")
+	assert.False(t, nativeTokenMatches(s("short           "), "short "))
+	assert.False(t, nativeTokenMatches(s("abcdef1234567890"), "other"))
+	assert.True(t, nativeTokenMatches(nil, "x"), "token 列を持たない mock は照合できないので通す")
+}
+
+func TestIsInactiveAccountRequest(t *testing.T) {
+	e := echo.New()
+	newCtx := func() echo.Context {
+		return e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), httptest.NewRecorder())
+	}
+	assert.False(t, IsInactiveAccountRequest(newCtx()))
+	c := newCtx()
+	c.Set(string(suspendedContextKey), true)
+	assert.True(t, IsInactiveAccountRequest(c))
+	c = newCtx()
+	c.Set(string(deletedContextKey), true)
+	assert.True(t, IsInactiveAccountRequest(c))
 }

@@ -11,7 +11,6 @@ import (
 	"github.com/shiroha-a/mk/internal/core/move"
 	"github.com/shiroha-a/mk/internal/repository"
 	"github.com/shiroha-a/mk/internal/server/middleware"
-	"golang.org/x/crypto/bcrypt"
 )
 
 // Move handles POST /api/i/move.
@@ -84,11 +83,8 @@ func (h *Handler) Move(c echo.Context) error {
 				"1fb7cb09-d46a-4fff-b8df-057708cce513",
 			))
 		}
-		if err := bcrypt.CompareHashAndPassword([]byte(*profile.Password), []byte(req.Password)); err != nil {
-			return c.JSON(http.StatusBadRequest, apierr.Error(
-				"INCORRECT_PASSWORD", "Incorrect password.",
-				"932c904e-9460-45b7-9ce6-7ed33be7eb2c",
-			))
+		if !h.comparePassword(c, me.ID, *profile.Password, req.Password, "932c904e-9460-45b7-9ce6-7ed33be7eb2c") {
+			return nil
 		}
 	}
 	if h.mover == nil {

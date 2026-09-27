@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/net/idna"
 )
 
 // **比較の両辺を揃えるための正規化** (#2704)。保存側も #2706 で `hostFromURI` が同じ
@@ -44,11 +45,67 @@ func TestPuny(t *testing.T) {
 		}
 	})
 
-	t.Run("ideographic dot は畳まない", func(t *testing.T) {
-		// Go の idna は U+3002 を `.` にしない。別 authority を同一視しない
-		// 安全側なので、この挙動を固定しておく。
-		assert.NotEqual(t, "xn--eckve.example", Puny("パイ。example"))
+	t.Run("UTS46 の mapping で接続先と同じ名前に畳む", func(t *testing.T) {
+		// net/http は非 ASCII の host を idna.Lookup で変換してから dial する。
+		// 保存と比較がそれと違う形を作ると、接続先は evil.example なのに
+		// blockedHosts の evil.example に当たらない。
+		for _, in := range []string{
+			"ｅｖｉｌ.example",
+			"evil\u3002example",
+			"evil\uff0eexample",
+			"evil\uff61example",
+			"evil.ex\u00adample",
+			"ＥＶＩＬ.example",
+		} {
+			assert.Equal(t, "evil.example", Puny(in), "%q", in)
+		}
+		assert.Equal(t, "evil.example:8443", Puny("ｅｖｉｌ.example:8443"))
+		assert.Equal(t, "xn--eckve.example", Puny("パイ\u3002example"))
+		assert.Equal(t, "xn--eckve.example", Puny("ﾊﾟｲ.example"), "半角カナも同じ名前")
 	})
+
+	t.Run("正当な IDN の表記は変わらない", func(t *testing.T) {
+		// mapping の対象にならない文字だけの IDN は、以前の profile と同じ値を作る。
+		// 保存済みの行が変わらないことの裏取り。
+		for in, want := range map[string]string{
+			"パイ.example":        "xn--eckve.example",
+			"faß.de":            "xn--fa-hia.de",
+			"bücher.example":    "xn--bcher-kva.example",
+			"例え.テスト":            "xn--r8jz45g.xn--zckzah",
+			"xn--eckve.example": "xn--eckve.example",
+		} {
+			assert.Equal(t, want, Puny(in), in)
+			legacy, err := idna.ToASCII(in)
+			require.NoError(t, err)
+			assert.Equal(t, legacy, Puny(in), "以前の profile と同じ: %s", in)
+		}
+	})
+
+	t.Run("Lookup が拒否する入力は従来の形", func(t *testing.T) {
+		assert.Equal(t, "xn--_x-mg4ash.example", Puny("パイ_x.example"))
+		assert.Equal(t, "a_b.example", Puny("A_B.example"))
+	})
+
+	t.Run("ASCII は小文字化だけ", func(t *testing.T) {
+		// net/http は ASCII の host をそのまま dial するので、xn-- ラベルを
+		// 解釈し直すと接続先とずれる。
+		assert.Equal(t, "xn--qi7ciaj2b.example", Puny("XN--QI7CIAJ2B.example"))
+	})
+
+	t.Run("net/http が dial する名前と一致する", func(t *testing.T) {
+		for _, in := range []string{"ｅｖｉｌ.example", "evil\u3002example", "evil.ex\u00adample", "パイ.example"} {
+			dialed, err := idna.Lookup.ToASCII(in)
+			require.NoError(t, err)
+			assert.Equal(t, dialed, Puny(in), in)
+		}
+	})
+}
+
+func TestMatchesBlockList_MappedSpellings(t *testing.T) {
+	for _, in := range []string{"ｅｖｉｌ.example", "evil\u3002example", "evil.ex\u00adample", "sub.ｅｖｉｌ.example:8443"} {
+		assert.True(t, MatchesBlockList([]string{"evil.example"}, in), "%q", in)
+		assert.True(t, MatchesBlockList([]string{"ｅｖｉｌ.example"}, Puny(in)), "%q", in)
+	}
 }
 
 // **正規形を作る規則は 1 つだけ (#2994)。** 比較側 (`sameDeliveryHost`) と保存側
@@ -110,5 +167,28 @@ func TestCanonicalURI_FoldsSpellings(t *testing.T) {
 		"HTTPS://Remote.Example:443/chat/rooms/r1",
 	} {
 		assert.Equal(t, want, CanonicalURI(raw), raw)
+	}
+}
+
+// 旧 build が mapping 無しで punycode 化した行を、接続先と同じ名前へ戻すこと。
+// 正当な IDN と Lookup が拒否する形は変えない。
+func TestRepairLegacyPuny(t *testing.T) {
+	for in, want := range map[string]string{
+		"xn--qi7ciaj2b.example":      "evil.example",
+		"xn--evilexample-7e3j":       "evil.example",
+		"evil.xn--example-mka":       "evil.example",
+		"xn--qi7ciaj2b.example:8443": "evil.example:8443",
+		"XN--QI7CIAJ2B.example":      "evil.example",
+		"xn--eckve.example":          "xn--eckve.example",
+		"xn--_x-mg4ash.example":      "xn--_x-mg4ash.example",
+		"xn--zz.example":             "xn--zz.example",
+		"Mixed.Example":              "mixed.example",
+		"パイ.example":                 "xn--eckve.example",
+		"[::1]:8443":                 "[::1]:8443",
+	} {
+		assert.Equal(t, want, RepairLegacyPuny(in), in)
+	}
+	for _, in := range []string{"xn--qi7ciaj2b.example", "xn--eckve.example", "remote.example"} {
+		assert.Equal(t, RepairLegacyPuny(in), RepairLegacyPuny(RepairLegacyPuny(in)), "idempotent: %s", in)
 	}
 }

@@ -615,7 +615,7 @@ func (h *Hook) passesReceiveConfig(notifieeID string, in CreateInput) bool {
 	case "followingOrFollower":
 		return h.followingExists(notifieeID, in.NotifierID) || h.followingExists(in.NotifierID, notifieeID)
 	case "list":
-		return h.listContains(entry.UserListID, in.NotifierID)
+		return h.listContains(notifieeID, entry.UserListID, in.NotifierID)
 	}
 	return true
 }
@@ -633,11 +633,23 @@ func (h *Hook) followingExists(followerID, followeeID string) bool {
 	return ex
 }
 
-// listContains reports whether userID is a member of listID. dep 未配線 / 空
-// listID / query error は許可側 (true) に倒す。
-func (h *Hook) listContains(listID, userID string) bool {
+// listContains reports whether userID is a member of listID, which must be
+// owned by ownerID (the notifiee). dep 未配線 / 空 listID / query error は許可側
+// (true) に倒す。list が無い、または ownerID のものでなければ false。
+func (h *Hook) listContains(ownerID, listID, userID string) bool {
 	if h.userListRepo == nil || listID == "" {
 		return true
+	}
+	// userListId は i/update で保存するときに所有者を検証していない (upstream も
+	// 同じ)。他人の list を指定されたまま照合すると、通知が届くかどうかでその
+	// list のメンバー構成を 1 人ずつ確かめられるので、照合側で所有者を見る
+	// (アンテナの照合と同じ多層防御)。
+	list, err := h.userListRepo.FindByID(listID)
+	if err != nil {
+		return !repository.IsNotFound(err)
+	}
+	if list == nil || list.UserID != ownerID {
+		return false
 	}
 	members, err := h.userListRepo.ListMembers(listID)
 	if err != nil {

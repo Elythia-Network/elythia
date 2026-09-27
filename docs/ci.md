@@ -209,11 +209,19 @@ workflow が後から集めたもの。前者がある場合はそちらが本�
 
 2 つの step があり、落ちた step で意味が違う。
 
-**Go version pin の不一致** — `go.mod` の `go` directive と Dockerfile の builder tag が
+**Go version pin の不一致** — `go.mod` の `go` directive と、golang image を使う Dockerfile
+(`git grep` で列挙した全て。`Dockerfile.bundled` や `tests/` の検証用も含む) の builder tag が
 ずれている。両方を同じ patch version に揃える。分けて検査しているのは、`govulncheck` が
 見るのは `go.mod` 側だけで、**Dockerfile だけ古いと CI は緑のまま配る image が脆弱**に
 なるため。builder を `golang:1.27-alpine` のような floating tag に戻すのも不可
 (pull 時期で stdlib の patch が変わり、再現可能な形で「既知脆弱性を含まない」と言えない)。
+配る Dockerfile (`Dockerfile` / `Dockerfile.bundled` / `deploy/uds/Dockerfile.mkgo`) は
+base image を `golang:1.27.1-alpine@sha256:<digest>` のように **tag と digest の併記**で
+固定しているので (patch の tag でも publish し直しで中身が変わる。
+`TestDistributedDockerfileBaseImagesArePinnedByDigest` が見る)、この検査は tag 側で版を
+照合し、digest は形だけを見る。Go の版を上げるときは digest も取り直すこと
+(`docker buildx imagetools inspect golang:<ver>-alpine` の Digest 行)。digest だけの更新は
+dependabot の `docker` が出す。
 
 **govulncheck の検出** — 手元で同じコマンドを回す。
 
@@ -233,7 +241,7 @@ package load エラーで解析が空振りしうる。**ローカルの `go` �
 - 依存モジュール → `go get <module>@<fixed>` で修正版へ。**修正版の指定は govulncheck の
   `Fixed in:` をそのまま使う。** 同じモジュールに複数の脆弱性があると必要な版が別々で、
   一番低い版に上げても残ることがある
-- Go stdlib → `go mod edit -go=<patch>` と Dockerfile の builder tag を両方上げる
+- Go stdlib → `go mod edit -go=<patch>` と Dockerfile の builder tag を上げる (`git grep -n 'FROM golang:'` で全て拾う)
 
 新しい CVE が公開されると、**コードを変えていない PR でも落ちる**。これは required check に
 していない理由でもある。落ちたときは自分の変更が原因とは限らないので、まず `Found in:` の
@@ -302,6 +310,53 @@ PR では回らない。失敗は Actions 上で確認して別 PR で対処す�
 
 `spec (ts …)` を常時回さないのは、upstream が変わらない限り答えが変わらないため。詳細は
 #2289。
+
+## action の版固定
+
+`.github/workflows/` から参照する action と reusable workflow は、**GitHub 公式
+(`actions/*`) も含めて全て commit SHA で固定する**。
+
+```yaml
+- uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+```
+
+**tag は付け替えられる。** `@v7` のような参照は、action のリポジトリ (あるいはそれを
+乗っ取った第三者) が tag を別 commit へ動かした瞬間に中身が変わる。`docker.yml` と
+`build-with-plugins.yml` は `packages: write` を持って GHCR へ publish するので、そこで
+動く action が差し替わると**配る image そのものを書き換えられる**。公式だけ例外にしないのは、
+「どれが例外か」を読む側が毎回判断しなくて済むようにするため。
+
+`TestWorkflowActionsArePinnedToSHA` (`internal/entitycompat/actions_pin_test.go`) が
+`owner/repo@<40 桁の SHA> # vX.Y.Z` の形になっているかを見る (`docker://` は
+`docker://<image>@sha256:<digest>` を固定として扱う)。`test-shards` で回るので
+tag 参照に戻すと required check の `test` が落ちる。同じリポジトリ内の参照 (`./...`) と
+YAML のコメント行は対象外。workflow は YAML パーサで読むので、flow 形式
+(`- {uses: ...}`) や値を次の行に置く書き方も拾う。**SHA とコメントの版が対応して
+いるかは見ない** — tag を解くにはネットワークが要り、ゲートでは判定できない。
+
+**更新は dependabot に任せる。** `.github/dependabot.yml` の `github-actions` ecosystem が
+週 1 回、固定した action の新しい版を 1 つの PR にまとめて出す。dependabot は SHA と
+`# vX.Y.Z` のコメントを一緒に書き換えるので、コメントの書式 (`# v` + 3 桁の版) を崩さない
+こと。
+
+**手で上げるとき**は tag を commit SHA に解いてから書く。
+
+```bash
+git ls-remote https://github.com/actions/checkout 'refs/tags/v7*'
+```
+
+- **annotated tag は `^{}` の行を使う。** `refs/tags/v7.0.1` の行は tag object の SHA で、
+  `refs/tags/v7.0.1^{}` の行が commit。`uses:` に書くのは commit
+- `v7` のような major tag は動く前提のもの。**それと同じ commit を指す `vX.Y.Z` を探して
+  コメントに書く** (major tag 名をコメントにすると、どの版を固定したのか読めない)
+- tag が無く branch だけのもの (`actions/dependency-review-action` の `v4` は branch) は
+  `refs/heads/<name>` の SHA と、同じ commit を指す `vX.Y.Z` tag を使う
+
+あわせて **publish する job の `actions/checkout` には `persist-credentials: false` を
+付ける** (`docker.yml` の 2 job / `docker-branch.yml` / `build-with-plugins.yml`)。
+付けないと token が `.git/config` に残ったまま、後続の `pnpm install` の lifecycle script や
+第三者のプラグインのコードが走る。いずれの job も checkout 後に mk-go の git 認証を使って
+いない (`docker-branch.yml` の push は token を URL に明示した別リポジトリから行う)。
 
 ## 落ちたときの一般的な注意
 

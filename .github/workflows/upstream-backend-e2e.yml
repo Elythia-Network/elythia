@@ -97,7 +97,7 @@ jobs:
           --health-retries 20
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # pull_request では github.ref が refs/pull/<n>/merge になるので PR の
           # 内容が checkout される。workflow_dispatch のときだけ inputs.ref。
@@ -106,13 +106,13 @@ jobs:
           submodules: recursive
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           # pnpm のバージョンは submodule 側 package.json の packageManager から
           # 取る。mk リポジトリ直下には package.json が無いので、既定のまま
@@ -120,7 +120,7 @@ jobs:
           package_json_file: third_party/misskey/package.json
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: third_party/misskey/.node-version
           cache: pnpm
@@ -142,7 +142,7 @@ jobs:
       # 「サーバーが何を返したか」が分からないことが多い。
       - name: Upload mk-go log on failure
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: upstream-e2e-mkgo-log-${{ matrix.shard }}
           path: /tmp/mkgo-upstream-e2e.log

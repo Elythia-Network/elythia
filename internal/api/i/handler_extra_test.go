@@ -332,6 +332,42 @@ func TestFavorites_WithNote(t *testing.T) {
 	assert.NoError(t, perr, "createdAt は ms 精度 ISO-8601: %q", createdAt)
 }
 
+// **閲覧資格を失った followers note は本文を伏せて返すこと。**
+//
+// favorite した後で作者のフォローを外した (外された) 場合、upstream は
+// NoteFavoriteEntityService → noteEntityService.pack(note, me) の hideNote で
+// 本文を空にして `isHidden: true` で返す。行そのものは残す。自分の note は
+// 伏せない。
+func TestFavorites_HidesNoteNoLongerVisible(t *testing.T) {
+	h, _ := newExtraHandler(t)
+	favRepo := testutil.NewMockNoteFavoriteRepository()
+	secret := "followers only secret"
+	mine := "my own followers note"
+	favRepo.Favorites["u1:n1"] = &model.NoteFavorite{
+		ID: "f1", UserID: "u1", NoteID: "n1",
+		Note: &model.Note{ID: "n1", UserID: "author", Visibility: model.NoteVisibilityFollowers, Text: &secret},
+	}
+	favRepo.Favorites["u1:n2"] = &model.NoteFavorite{
+		ID: "f2", UserID: "u1", NoteID: "n2",
+		Note: &model.Note{ID: "n2", UserID: "u1", Visibility: model.NoteVisibilityFollowers, Text: &mine},
+	}
+	h.SetFavoriteRepo(favRepo)
+	rec := postExtra(h.Favorites, `{}`, &model.User{ID: "u1"})
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.NotContains(t, rec.Body.String(), secret)
+
+	var resp []map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Len(t, resp, 2, "行は落とさない")
+	byNote := map[string]map[string]any{}
+	for _, r := range resp {
+		byNote[r["noteId"].(string)] = r["note"].(map[string]any)
+	}
+	assert.Equal(t, true, byNote["n1"]["isHidden"])
+	assert.Nil(t, byNote["n1"]["text"])
+	assert.Equal(t, mine, byNote["n2"]["text"], "自分の note は伏せない")
+}
+
 // untilId 経由の cursor pagination が repo に正しく伝わり、cursor 以下の
 // favorite だけ返ることを検証する (#424 の core fix)。
 func TestFavorites_UntilIDPaginates(t *testing.T) {

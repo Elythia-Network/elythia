@@ -432,23 +432,19 @@ func TestInboxProcessor_LegacyPayloadSkipsVerify(t *testing.T) {
 
 // --- LD-Signature gate (#1164 Phase D) ---
 
-// stubLDVerifier captures VerifyIfPresent calls and lets tests force the
-// outcome.
+// stubLDVerifier captures LD-Signature verifier calls and lets tests force
+// the outcome.
 type stubLDVerifier struct {
-	err       error
-	callCount int
-	// VerifyAndCreator outcome (forwarded-activity path).
+	err error
+	// VerifyAndCompact outcome (forwarded-activity and legacy paths).
 	creator      string
 	present      bool
 	creatorCount int
+	// compactedBody overrides the Body VerifyAndCompact returns.
+	compactedBody []byte
 	// CheckForbiddenDirectivesIfPresent outcome (signer==actor path, #2106 N26).
 	forbiddenErr   error
 	forbiddenCount int
-}
-
-func (s *stubLDVerifier) VerifyIfPresent(_ []byte) error {
-	s.callCount++
-	return s.err
 }
 
 func (s *stubLDVerifier) CheckForbiddenDirectivesIfPresent(_ []byte) error {
@@ -456,9 +452,18 @@ func (s *stubLDVerifier) CheckForbiddenDirectivesIfPresent(_ []byte) error {
 	return s.forbiddenErr
 }
 
-func (s *stubLDVerifier) VerifyAndCreator(_ []byte) (string, bool, error) {
+// VerifyAndCompact は compact の代わりに入力をそのまま Body として返す
+// (compactedBody を指定したときはそれを返す)。
+func (s *stubLDVerifier) VerifyAndCompact(body []byte) (federation.VerifiedLDActivity, bool, error) {
 	s.creatorCount++
-	return s.creator, s.present, s.err
+	if s.err != nil {
+		return federation.VerifiedLDActivity{}, s.present, s.err
+	}
+	out := body
+	if s.compactedBody != nil {
+		out = s.compactedBody
+	}
+	return federation.VerifiedLDActivity{Creator: s.creator, Body: out}, s.present, nil
 }
 
 // multiActorVerifier resolves different actors keyed by the (fragment-less)
@@ -730,7 +735,7 @@ func TestInboxProcessor_LDVerify_NoVerifierBypassesGate(t *testing.T) {
 	require.Len(t, stub.calls, 1)
 }
 
-// LD-Sig verify pass (= VerifyIfPresent nil error) なら Process が呼ばれる。
+// LD-Sig verify pass (= VerifyAndCompact nil error) なら Process が呼ばれる。
 func TestInboxProcessor_LDVerify_PassDelegates(t *testing.T) {
 	stub := &stubFedProcessor{}
 	verifier := &stubLDVerifier{err: nil}
@@ -741,11 +746,11 @@ func TestInboxProcessor_LDVerify_PassDelegates(t *testing.T) {
 		TypeName: queue.TaskTypeInbox,
 		Body:     mustEncode(t, queue.InboxPayload{Body: []byte(`{"type":"Note"}`)}),
 	}))
-	assert.Equal(t, 1, verifier.callCount, "VerifyIfPresent is called exactly once")
+	assert.Equal(t, 1, verifier.creatorCount, "VerifyAndCompact is called exactly once")
 	require.Len(t, stub.calls, 1, "verify pass → Process is called")
 }
 
-// LD-Sig verify fail (= VerifyIfPresent returns error) なら Process は呼ばれず
+// LD-Sig verify fail (= VerifyAndCompact returns error) なら Process は呼ばれず
 // activity が drop される (= queue ack するが Process bypass)。
 func TestInboxProcessor_LDVerify_FailDropsActivity(t *testing.T) {
 	stub := &stubFedProcessor{}
@@ -758,8 +763,36 @@ func TestInboxProcessor_LDVerify_FailDropsActivity(t *testing.T) {
 		Body:     mustEncode(t, queue.InboxPayload{Body: []byte(`{"type":"Note"}`)}),
 	})
 	require.NoError(t, err, "verify fail でも error は返さず ack (= 同 activity を retry に乗せない)")
-	assert.Equal(t, 1, verifier.callCount)
+	assert.Equal(t, 1, verifier.creatorCount)
 	require.Len(t, stub.calls, 0, "verify fail → Process is NOT called (activity dropped)")
+}
+
+// Headers の無い legacy 経路でも、LD-Signature を検証したなら**署名が覆う内容**
+// (compact 済みの文書) を渡す。生 body には署名外のキーを誰でも足せる。
+func TestInboxProcessor_LDVerify_LegacyPathDispatchesCompactedBody(t *testing.T) {
+	raw := []byte(`{"type":"Note","_misskey_content":"FORGED","signature":{"type":"RsaSignature2017"}}`)
+	compacted := []byte(`{"type":"Note","content":"signed"}`)
+	tests := []struct {
+		name    string
+		present bool
+		want    []byte
+	}{
+		{name: "signature present dispatches compacted body", present: true, want: compacted},
+		{name: "no signature dispatches raw body", present: false, want: raw},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &stubFedProcessor{}
+			p := processors.NewInboxProcessor(stub)
+			p.SetLDSignatureVerifier(&stubLDVerifier{present: tc.present, compactedBody: compacted})
+			require.NoError(t, p.Handle(context.Background(), driver.RawTask{
+				TypeName: queue.TaskTypeInbox,
+				Body:     mustEncode(t, queue.InboxPayload{Body: raw}),
+			}))
+			require.Len(t, stub.calls, 1)
+			assert.JSONEq(t, string(tc.want), string(stub.calls[0]))
+		})
+	}
 }
 
 // 任意 error は driver の retry policy (inboxJobMaxAttempts) に任せるため
@@ -798,7 +831,7 @@ func TestInboxProcessor_SignerIsActor_LDSigVerifyFailureNotDropped(t *testing.T)
 	stub := &stubFedProcessor{}
 	p := processors.NewInboxProcessor(stub)
 	p.SetSignatureVerifier(verifier)
-	// VerifyIfPresent はエラー (鍵未解決) だが forbidden-directive check は通る。
+	// VerifyAndCompact はエラー (鍵未解決) だが forbidden-directive check は通る。
 	ldv := &stubLDVerifier{present: true, err: errors.New("ld-sig: public key not found"), forbiddenErr: nil}
 	p.SetLDSignatureVerifier(ldv)
 
@@ -808,7 +841,7 @@ func TestInboxProcessor_SignerIsActor_LDSigVerifyFailureNotDropped(t *testing.T)
 		TypeName: queue.TaskTypeInbox, Body: mustEncode(t, payload),
 	}))
 	require.Len(t, stub.calls, 1, "signer==actor の HTTP 署名済 activity は LD-sig verify 失敗でも処理される")
-	assert.Equal(t, 0, ldv.callCount, "signer==actor 経路では VerifyIfPresent を呼ばない")
+	assert.Equal(t, 0, ldv.creatorCount, "signer==actor 経路では VerifyAndCompact を呼ばない")
 	assert.Equal(t, 1, ldv.forbiddenCount, "forbidden-directive hardening は実行する")
 }
 

@@ -1,6 +1,7 @@
 package i
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -81,8 +82,14 @@ func (h *Handler) ChangePassword(c echo.Context) error {
 		}
 	}()
 
+	attempt, ok := h.beginPasswordCheck(c, u.ID)
+	if !ok {
+		return nil
+	}
 	scheme, outcome := password.Verify(c.Request().Context(), *profile.Password, req.CurrentPassword)
 	if outcome == password.OutcomeUnavailable {
+		// 照合していないので失敗として数えない。
+		attempt.Release(context.WithoutCancel(c.Request().Context()))
 		// 枠を取れなかっただけで現パスワードは正しいかもしれない。**400 に
 		// 潰さない** (#2849)。
 		slog.Warn("change-password: password verification unavailable",
@@ -101,6 +108,7 @@ func (h *Handler) ChangePassword(c echo.Context) error {
 		// 400 INCORRECT_PASSWORD に揃える。
 		return c.JSON(http.StatusBadRequest, apierr.Error("INCORRECT_PASSWORD", "Incorrect password.", "932c904e-9460-45b7-9ce6-7ed33be7eb2c"))
 	}
+	attempt.Release(context.WithoutCancel(c.Request().Context()))
 
 	// bcrypt は 73 byte 以上の password で ErrPasswordTooLong を返す。Node 側
 	// (upstream Misskey TS) は silent truncation するが、Go では error で
@@ -166,8 +174,8 @@ func (h *Handler) DeleteAccount(c echo.Context) error {
 	// upstream Misskey TS は raw `throw new Error('incorrect password')` を
 	// framework が 401 に変換する (#885)。mk-go も drop-in 互換のため 401
 	// に揃える (旧 mk-go は 403 を返していた)。
-	if err := bcrypt.CompareHashAndPassword([]byte(*profile.Password), []byte(req.Password)); err != nil {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INCORRECT_PASSWORD", "Incorrect password.", "932c904e-9460-45b7-9ce6-7ed33be7eb2c"))
+	if !h.comparePassword(c, u.ID, *profile.Password, req.Password, "932c904e-9460-45b7-9ce6-7ed33be7eb2c") {
+		return nil
 	}
 
 	// #2230: root / system アカウントの自己削除は連合・instance を壊すため拒否する
@@ -202,6 +210,10 @@ func (h *Handler) DeleteAccount(c echo.Context) error {
 	// 本 helper の O(N) cache scan cost は許容範囲。helper の詳細は
 	// handler.go の invalidateUserTokenCache を参照。
 	h.invalidateUserTokenCache(u.ID)
+	// 削除済み user 名義の WebSocket を全端末ぶん閉じる (mk-go 独自)。
+	if h.streamRevoker != nil {
+		h.streamRevoker.RevokeUserStreams(u.ID)
+	}
 
 	// #2230: 論理削除フラグを立てるだけでは notes / drive / following が purge されず、user 行も
 	// 残るので「凍結状態のまま消えない」。admin/delete-account と同様に (1) sharedInbox へ
@@ -303,22 +315,12 @@ func (h *Handler) isProtectedSelfDelete(u *model.User) (bool, error) {
 // を受け付ける (#424)。フロントの無限スクロールは untilId を毎ページ送って
 // くるので、cursor 無視だと同一ページが永久ループする。
 //
-// 設計メモ — visibility re-check しない理由 (#1488):
-//
-//   - favorite は viewer の意図的なローカル「ブックマーク」相当の保存行為。
-//     viewer は favorite 作成時点で当該 note に対して RequireVisible を通過済み
-//     (= note ID と本文を既に知っている状態。#1443)。
-//   - ID-known doctrine: viewer の persisted bookmark 行を later に author が
-//     visibility 縮小したからといって viewer のローカル UX を破壊するのは違和感
-//     がある (upstream Misskey TS も同じ shape で content を返す)。
-//   - スタレ favorite の content は viewer 自身しか取得できないため mass leak で
-//     はなく、ID-known な notes/show ShowForAPI doctrine と同じ境界線。
-//   - drop-in 互換 (CLAUDE.md Section 6) を維持するために upstream と shape を
-//     揃える。doctrine 側に倒す案 (Option B) は #1488 で議論されたが
-//     Option A (現状維持 = upstream-aligned) を採用 (wontfix)。
-//
-// 関連: #1443 (notes/favorites/create で create 段の visibility gate)、
-// memory: project_visibility_idor_sweep の「ShowForAPI doctrine 例外」リスト。
+// 閲覧資格を失った note は本文を伏せる: favorite した後で作者のフォローを外した
+// (外された) followers note などは、upstream の
+// NoteFavoriteEntityService が `noteEntityService.pack(note, me)` を通すので
+// hideNote で本文・添付・CW が空になり `isHidden: true` で返る。行は落とさない
+// (upstream も favorite の一覧自体は返す)。#1488 はここを「upstream も content を
+// 返す」前提で現状維持としていたが、その前提は誤りだった。
 func (h *Handler) Favorites(c echo.Context) error {
 	u := middleware.GetUser(c)
 	var req struct {
@@ -360,7 +362,7 @@ func (h *Handler) Favorites(c echo.Context) error {
 	// /api/i/favorites は認証 path なので u が viewer。pinned notes と同じく
 	// 自分の myReaction / Channel / Files を埋める (#426)。
 	h.fieldRes.Apply(packed, u)
-	notehide.HideEmbeds(u, packed)
+	notehide.HideStoredNotes(u, packed)
 	byID := make(map[string]*entity.NoteEntity, len(packed))
 	for i := range packed {
 		byID[packed[i].ID] = &packed[i]
@@ -407,8 +409,8 @@ func (h *Handler) RegenerateToken(c echo.Context) error {
 	// upstream Misskey TS は raw `throw new Error('incorrect password')` を
 	// framework が 401 に変換する (#885)。mk-go も drop-in 互換のため 401
 	// に揃える (旧 mk-go は 403 を返していた)。
-	if err := bcrypt.CompareHashAndPassword([]byte(*profile.Password), []byte(req.Password)); err != nil {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INCORRECT_PASSWORD", "Incorrect password.", "932c904e-9460-45b7-9ce6-7ed33be7eb2c"))
+	if !h.comparePassword(c, u.ID, *profile.Password, req.Password, "932c904e-9460-45b7-9ce6-7ed33be7eb2c") {
+		return nil
 	}
 
 	newToken := misc.NewNativeToken()
@@ -432,6 +434,12 @@ func (h *Handler) RegenerateToken(c echo.Context) error {
 	// 検知してログアウトする用途)。
 	if h.mainStreamPublisher != nil {
 		h.mainStreamPublisher.PublishMainEvent(u.ID, "myTokenRegenerated", nil)
+	}
+	// 旧 token で張られた WebSocket を閉じる (mk-go 独自、docs/divergence.md)。
+	// **myTokenRegenerated の後に呼ぶ。** 閉じる側は猶予を置いてから閉じ、
+	// それまでに届いた event は送り切るので、この順序で他端末にも通知が届く。
+	if h.streamRevoker != nil && oldToken != "" {
+		h.streamRevoker.RevokeNativeTokenStreams(u.ID, oldToken)
 	}
 	// upstream Misskey TS は body なしの 204 No Content を返す (= 新 token
 	// は myTokenRegenerated WS event 経由で client に伝達する設計、#883)。

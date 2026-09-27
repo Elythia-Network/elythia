@@ -36,8 +36,8 @@ import (
 //     収集すらされない。このリポジトリには SQL を断片ごとに組んで `strings.Join`
 //     する経路が (chart / fsck / maintenance など) あり、そこが盲点になっていた
 //
-// 判定を「クォートで開いた区間に動詞が在るか」だけにすると、走査 186 サイト
-// (ユニークキー 103、うち人工ソース 6 サイト) に対し該当は 3 サイト / 3 キーしか
+// 判定を「クォートで開いた区間に動詞が在るか」だけにすると、走査 180 サイト
+// (ユニークキー 98、うち人工ソース 6 サイト) に対し該当は 3 サイト / 3 キーしか
 // ない (実測)。本番はそのうち `internal/server/frontend.go#renderFrontendShell` の
 // 1 キー (1 サイト、JS 生成) だけで、allowlist に理由付きで載せれば済む。
 //
@@ -118,10 +118,12 @@ var sqlFormatMustDetect = []struct{ Key, Want string }{
 	{"internal/entitycompat/sqlbindfixture/sample.go#UnsafeConcatenatedFormat", "WHERE"},
 	{"internal/maintenance/host_backfill.go#BackfillHostColumnBatch", "SELECT"},
 	{"internal/repository/poll.go#IncrementVote", "votes["},
-	// **`internal/` だけを名指しにしない。** 走査の内訳は internal 178 / cmd 5 /
+	// **`internal/` だけを名指しにしない。** 走査の内訳は internal 175 / cmd 2 /
 	// plugin 3 (実測) なので、`cmd` か `plugin` を root から外しても違反集合も
-	// 名指しも一切変わらず、8 サイトが黙って検査対象から消える (#3136 と同じ型)。
-	{"cmd/migrate/main.go#main", "pgx5://"},
+	// 名指しも一切変わらず、5 サイトが黙って検査対象から消える (#3136 と同じ型)。
+	// cmd の名指しは以前 cmd/migrate の DSN 組み立てだったが、DSN は
+	// config.DatabaseURL へ寄せたので healthcheck の URL に替えた。
+	{"cmd/misskey/main.go#runHealthcheck", "/healthz"},
 	{"plugin/api.go#Error", "plugin: API"},
 }
 

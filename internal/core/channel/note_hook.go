@@ -13,10 +13,20 @@ func NewNoteCreateHook(svc *Service) *NoteCreateHook {
 	return &NoteCreateHook{svc: svc}
 }
 
-// EnsureChannelExists implements core/note.ChannelHook.
+// EnsureChannelExists implements core/note.ChannelHook. An archived channel
+// is reported as ErrChannelNotFound, because it no longer accepts posts.
 func (h *NoteCreateHook) EnsureChannelExists(channelID string) error {
-	_, err := h.svc.Show(channelID)
-	return err
+	c, err := h.svc.Show(channelID)
+	if err != nil {
+		return err
+	}
+	// upstream NoteCreateService は `findOneBy({ id, isArchived: false })` で引くので、
+	// アーカイブ済みは NO_SUCH_CHANNEL になる。notes/create・予約投稿の公開
+	// (post_scheduled_note)・drafts からの投稿はすべてこの hook を通る。
+	if c == nil || c.IsArchived {
+		return ErrChannelNotFound
+	}
+	return nil
 }
 
 // OnNotePosted implements core/note.ChannelHook.

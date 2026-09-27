@@ -276,9 +276,16 @@ func (s *Service) Create(in CreateInput) (*model.Antenna, error) {
 		}
 	}
 	// upstream create.ts: src='list' で userListId 指定時、自分が所有する list か検証。
+	// **検証したときだけ保存する** (upstream も `userList ? userList.id : null`)。
+	// src が list 以外のときに未検証の値を保存すると、後の update で src だけ
+	// list へ切り替えて他人の list を参照できてしまう。
+	var userListID *string
 	if in.Src == model.AntennaSourceList {
 		if err := s.validateUserList(in.OwnerID, in.UserListID); err != nil {
 			return nil, err
+		}
+		if in.UserListID != nil && *in.UserListID != "" {
+			userListID = in.UserListID
 		}
 	}
 	// Marshal of [][]string never fails, so we ignore the error.
@@ -295,7 +302,7 @@ func (s *Service) Create(in CreateInput) (*model.Antenna, error) {
 		UserID:                         in.OwnerID,
 		Name:                           in.Name,
 		Src:                            in.Src,
-		UserListID:                     in.UserListID,
+		UserListID:                     userListID,
 		Users:                          in.Users,
 		Keywords:                       keywords,
 		ExcludeKeywords:                exclude,
@@ -360,10 +367,20 @@ func (s *Service) Update(ownerID, antennaID string, in UpdateInput) (*model.Ante
 	if a.UserID != ownerID {
 		return nil, ErrAccessDenied
 	}
-	// upstream update.ts: 新 src か既存 src が list で userListId 指定時、
-	// 自分が所有する list か検証する。
-	if (in.Src != nil && *in.Src == model.AntennaSourceList) || a.Src == model.AntennaSourceList {
-		if err := s.validateUserList(ownerID, in.UserListID); err != nil {
+	// 更新後の src が list なら、更新後に参照する userListId (新値、未指定なら
+	// 既存値) が自分の list か検証する。upstream update.ts は「新 src か既存 src
+	// が list で userListId 指定時」だけ検証するが、それだと src だけを list へ
+	// 切り替えたときに既存の (未検証の) userListId がそのまま有効になる。
+	finalSrc := a.Src
+	if in.Src != nil {
+		finalSrc = *in.Src
+	}
+	finalListID := a.UserListID
+	if in.UserListID != nil {
+		finalListID = in.UserListID
+	}
+	if finalSrc == model.AntennaSourceList {
+		if err := s.validateUserList(ownerID, finalListID); err != nil {
 			return nil, err
 		}
 	}
@@ -380,14 +397,24 @@ func (s *Service) Update(ownerID, antennaID string, in UpdateInput) (*model.Ante
 		}
 		fields["src"] = *in.Src
 	}
-	if in.UserListID != nil {
-		// 空文字列での nullify を許すため ポインタ非 nil なら上書き対象扱い。
-		// #2106 L48 (documented limitation): upstream update.ts は userListId の明示 null で clear、
-		// 非 list src で null 化するが、Go の *string は JSON の null と absent を区別できないため
-		// mk-go は「空文字列で clear」の convention を採る (JSON null clear / 非 list src 自動 null 化は
-		// 未対応)。validateUserList 連携の都合で edge を残す。通常 UI 経路 (src=list 時のみ
-		// userListId を送る) では乖離しない。
-		fields["userListId"] = in.UserListID
+	switch {
+	case finalSrc != model.AntennaSourceList:
+		// list 以外の src では userListId を保存しない (upstream update.ts も
+		// 検証していない userListId は null で書く)。既存値も残さない — 残すと
+		// 後で src だけ list へ戻したときに参照が復活する。上の検証があるので
+		// 復活しても他人の list は通らないが、未検証の値を持ち続ける理由が無い。
+		if a.UserListID != nil || in.UserListID != nil {
+			fields["userListId"] = nil
+		}
+	case in.UserListID != nil:
+		// #2106 L48 (documented limitation): Go の *string は JSON の null と
+		// absent を区別できないため、mk-go は「空文字列で clear」の convention を
+		// 採る (JSON null での clear は未対応)。
+		if *in.UserListID == "" {
+			fields["userListId"] = nil
+		} else {
+			fields["userListId"] = in.UserListID
+		}
 	}
 	if in.Users != nil {
 		// model.Antenna.Users は model.StringArray なので plain []string で
@@ -970,12 +997,20 @@ func (m *matchMemo) ownerFollows(s *Service, ownerID, authorID string) bool {
 }
 
 // listContains reports whether authorID belongs to listID, caching the member
-// set for the lifetime of one note fan-out.
-func (m *matchMemo) listContains(s *Service, listID, authorID string) bool {
+// set for the lifetime of one note fan-out. The list must be owned by ownerID
+// (the antenna owner); otherwise nothing matches.
+func (m *matchMemo) listContains(s *Service, ownerID, listID, authorID string) bool {
 	if s.userListRepo == nil || listID == "" {
 		return false
 	}
 	fetch := func() map[string]struct{} {
+		// 保存時の所有者検証 (validateUserList) に加えて照合時にも見る。
+		// 検証が入る前に保存された他人の userListId が残っていても、他人の
+		// list のメンバー構成をアンテナ経由で覗けないようにする。
+		list, err := s.userListRepo.FindByID(listID)
+		if err != nil || list == nil || list.UserID != ownerID {
+			return nil
+		}
 		members, err := s.userListRepo.ListMembers(listID)
 		if err != nil {
 			return nil
@@ -990,10 +1025,12 @@ func (m *matchMemo) listContains(s *Service, listID, authorID string) bool {
 		_, ok := fetch()[authorID]
 		return ok
 	}
-	set, hit := m.lists[listID]
+	// 所有者の判定を含むのでキーは (owner, list) の対にする。
+	key := ownerID + "\x00" + listID
+	set, hit := m.lists[key]
 	if !hit {
 		set = fetch()
-		m.lists[listID] = set
+		m.lists[key] = set
 	}
 	_, ok := set[authorID]
 	return ok
@@ -1031,7 +1068,7 @@ func (s *Service) matchSource(a *model.Antenna, author *model.User, ownerFollows
 		if s.userListRepo == nil || a.UserListID == nil || *a.UserListID == "" {
 			return false
 		}
-		return memo.listContains(s, *a.UserListID, author.ID)
+		return memo.listContains(s, a.UserID, *a.UserListID, author.ID)
 	default:
 		// all
 		return true

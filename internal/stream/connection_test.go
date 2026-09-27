@@ -33,6 +33,16 @@ type fakeConn struct {
 	pongHandler func(string) error
 	closed      bool
 	readLimit   int64
+	// closeFrames は WriteControl に渡された close frame の payload。
+	closeFrames [][]byte
+	// closedAfterWrites は Close 時点の writes の件数 (close frame より後に
+	// data frame が書かれていないかの確認用)。
+	closedAfterWrites int
+	// writeDeadline は最後に SetWriteDeadline で設定された値。
+	writeDeadline time.Time
+	// writeGate が non-nil なら、WriteMessage はそれが close されるか Close
+	// されるまで戻らない (相手が読まずに送信が詰まった状態の再現)。
+	writeGate chan struct{}
 }
 
 func newFakeConn() *fakeConn {
@@ -55,6 +65,13 @@ func (f *fakeConn) ReadMessage() (int, []byte, error) {
 }
 
 func (f *fakeConn) WriteMessage(_ int, data []byte) error {
+	if f.writeGate != nil {
+		select {
+		case <-f.writeGate:
+		case <-f.done:
+			return errors.New("fake closed")
+		}
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.writeErr != nil {
@@ -64,9 +81,12 @@ func (f *fakeConn) WriteMessage(_ int, data []byte) error {
 	return nil
 }
 
-func (f *fakeConn) WriteControl(messageType int, _ []byte, _ time.Time) error {
+func (f *fakeConn) WriteControl(messageType int, data []byte, _ time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if messageType == websocket.CloseMessage {
+		f.closeFrames = append(f.closeFrames, append([]byte(nil), data...))
+	}
 	if messageType == websocket.PingMessage {
 		f.pings++
 		if f.pingErr != nil {
@@ -77,6 +97,19 @@ func (f *fakeConn) WriteControl(messageType int, _ []byte, _ time.Time) error {
 }
 
 func (f *fakeConn) SetReadDeadline(_ time.Time) error { return nil }
+
+func (f *fakeConn) SetWriteDeadline(t time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.writeDeadline = t
+	return nil
+}
+
+func (f *fakeConn) getWriteDeadline() time.Time {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.writeDeadline
+}
 
 // readLimit は SetReadLimit で設定された値 (0 = 未設定 = 無制限)。
 func (f *fakeConn) SetReadLimit(limit int64) {
@@ -105,6 +138,9 @@ func (f *fakeConn) getPongHandler() func(string) error {
 }
 func (f *fakeConn) Close() error {
 	f.mu.Lock()
+	if !f.closed {
+		f.closedAfterWrites = len(f.writes)
+	}
 	f.closed = true
 	f.mu.Unlock()
 	f.doneOnce.Do(func() { close(f.done) })

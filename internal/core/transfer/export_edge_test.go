@@ -3,6 +3,7 @@ package transfer_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -171,6 +172,7 @@ func TestExport_Antennas_WithUserList(t *testing.T) {
 		ExcludeKeywords: []byte(`[]`),
 		Users:           model.StringArray{},
 	}
+	deps.UserListRepo.(*testutil.MockUserListRepository).Lists[listID] = &model.UserList{ID: listID, UserID: user.ID, Name: "mine"}
 
 	exporter := transfer.NewExporter(deps)
 	_, err := exporter.Export(context.Background(), user.ID, transfer.ExportAntennas)
@@ -296,4 +298,52 @@ func TestExport_Antennas_UserListAccts(t *testing.T) {
 	require.True(t, ok, "list source は userListAccts を配列で出す")
 	assert.ElementsMatch(t, []any{"bob", "carol@remote.example"}, accts)
 	assert.Equal(t, true, out[0]["excludeNotesInSensitiveChannel"])
+}
+
+// 1aac65d より前に保存された他人の userListId が残っていても、export はその
+// list の ID もメンバーも出さない。
+func TestExport_Antennas_OtherUsersListIsNotResolved(t *testing.T) {
+	saver, _, deps, user := newExportDeps(t)
+	aRepo := deps.AntennaRepo.(*testutil.MockAntennaRepository)
+	listRepo := deps.UserListRepo.(*testutil.MockUserListRepository)
+	listID := "victimlist"
+	aRepo.Antennas["a1"] = &model.Antenna{
+		ID: "a1", UserID: user.ID, Name: "news", Src: "list", UserListID: &listID,
+		Keywords: []byte(`[]`), ExcludeKeywords: []byte(`[]`), Users: model.StringArray{},
+	}
+	listRepo.Lists[listID] = &model.UserList{ID: listID, UserID: "bob", Name: "bob's secret list"}
+	require.NoError(t, listRepo.AddMember(&model.UserListMembership{ID: "m1", UserListID: listID, UserID: "carol"}))
+
+	_, err := transfer.NewExporter(deps).Export(context.Background(), user.ID, transfer.ExportAntennas)
+	require.NoError(t, err)
+	body := string(saver.uploads[0].Body)
+	assert.NotContains(t, body, listID)
+	assert.NotContains(t, body, "carol")
+	var out []map[string]any
+	require.NoError(t, json.Unmarshal(saver.uploads[0].Body, &out))
+	require.Len(t, out, 1)
+	assert.Nil(t, out[0]["userListAccts"])
+}
+
+type failingFindListRepo struct {
+	*testutil.MockUserListRepository
+}
+
+func (failingFindListRepo) FindByID(string) (*model.UserList, error) {
+	return nil, errors.New("db down")
+}
+
+// list の lookup 失敗は「他人の list」と取り違えず、エラーとして返す (#2792)。
+func TestExport_Antennas_ListLookupErrorPropagates(t *testing.T) {
+	_, _, deps, user := newExportDeps(t)
+	deps.UserListRepo = failingFindListRepo{MockUserListRepository: testutil.NewMockUserListRepository()}
+	listID := "l1"
+	deps.AntennaRepo.(*testutil.MockAntennaRepository).Antennas["a1"] = &model.Antenna{
+		ID: "a1", UserID: user.ID, Name: "news", Src: "list", UserListID: &listID,
+		Keywords: []byte(`[]`), ExcludeKeywords: []byte(`[]`), Users: model.StringArray{},
+	}
+
+	_, err := transfer.NewExporter(deps).Export(context.Background(), user.ID, transfer.ExportAntennas)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "db down")
 }

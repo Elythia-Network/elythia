@@ -15,6 +15,7 @@ import (
 
 	"github.com/shiroha-a/mk/internal/core/drive"
 	"github.com/shiroha-a/mk/internal/core/notification"
+	"github.com/shiroha-a/mk/internal/misc/id"
 	"github.com/shiroha-a/mk/internal/model"
 	"github.com/shiroha-a/mk/internal/repository"
 )
@@ -101,6 +102,10 @@ type ExporterDeps struct {
 	// なら ExportCustomEmojis は "emoji source not configured" で失敗する。
 	EmojiRepo         EmojiSource
 	EmojiImageFetcher EmojiImageFetcher
+	// IDGen はノート ID から作成時刻を読むのに使う (favorites / clips export の
+	// makeNotesHiddenBefore 判定)。未配線だと期間設定のある作者のノートは
+	// 判定不能として出力しない。
+	IDGen id.Generator
 }
 
 // Exporter produces Misskey-compatible export files and saves them as
@@ -168,7 +173,7 @@ func (e *Exporter) Export(ctx context.Context, userID, exportType string, opts .
 		body, err = e.exportMuting(user.ID)
 		name = timestampedName("mute", "csv")
 	case ExportFavorites:
-		body, err = e.exportFavorites(user.ID)
+		body, err = e.exportFavorites(user)
 		name = timestampedName("favorites", "json")
 	case ExportUserLists:
 		body, err = e.exportUserLists(user.ID)
@@ -177,7 +182,7 @@ func (e *Exporter) Export(ctx context.Context, userID, exportType string, opts .
 		body, err = e.exportAntennas(user.ID)
 		name = timestampedName("antennas", "json")
 	case ExportClips:
-		body, err = e.exportClips(user.ID)
+		body, err = e.exportClips(user)
 		name = timestampedName("clips", "json")
 	case ExportCustomEmojis:
 		body, err = e.exportCustomEmojis(ctx)

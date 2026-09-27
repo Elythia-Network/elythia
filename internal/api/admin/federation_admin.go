@@ -14,9 +14,9 @@ import (
 )
 
 // toPunyHost normalizes a host the same way upstream UtilityService.toPuny does
-// (domainToASCII(host.toLowerCase()), node:url / UTS#46)。Go では idna.ToASCII の
-// default (非 transitional) profile がこれに最も近い。idna.ToASCII が失敗する不正
-// host は小文字化のみで返し、後段の FindByHost に「見つからない」と判定させる。
+// (domainToASCII(host.toLowerCase()), node:url / UTS#46 mapping)。Go の HTTP client
+// が dial する名前 (`idna.Lookup`) と同じ形で、全角英字や U+3002 も畳む。変換でき
+// ない不正 host は小文字化のみで返し、後段の FindByHost に「見つからない」と判定させる。
 //
 // 取り込み側 (`resolver.hostFromURI`) も #2706 で同じ正規化を掛けるので、保存形と
 // 引き当ては同じ値になる。**backfill 前に非正規化で保存された行は引けない** —

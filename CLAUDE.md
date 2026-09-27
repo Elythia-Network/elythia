@@ -602,7 +602,7 @@ checkout / setup-go を除くと step は実行順に 3 つ。**required job な
 ### `vulncheck`ジョブ
 
 - `GOOS=linux govulncheck ./...` で依存と Go stdlib の**到達可能な**既知脆弱性を検出する。実際にデプロイするのは Linux なので `GOOS` を明示する (未指定だと host 依存の package load エラーで空振りしうる)。
-- あわせて `go.mod` の `go` directive と `Dockerfile` の builder tag が同じ patch version を指していることを検査する。govulncheck が見るのは `go.mod` 側だけなので、**Dockerfile だけ古いと CI は緑のまま配る image が脆弱になる**。builder を floating tag (`golang:1.27-alpine`) に戻さないこと (pull 時期で stdlib の patch が変わり、再現可能な形で「既知脆弱性を含まない」と言えない)。
+- あわせて `go.mod` の `go` directive と、golang image を使う**全ての** tracked な Dockerfile (`Dockerfile` / `Dockerfile.bundled` / `deploy/uds/Dockerfile.mkgo` / `tests/` の検証用) の builder tag が同じ patch version を指していることを検査する。govulncheck が見るのは `go.mod` 側だけなので、**Dockerfile だけ古いと CI は緑のまま配る image が脆弱になる**。builder を floating tag (`golang:1.27-alpine`) に戻さないこと (pull 時期で stdlib の patch が変わり、再現可能な形で「既知脆弱性を含まない」と言えない)。配る Dockerfile の base image は tag と digest の併記 (`golang:1.27.1-alpine@sha256:...`) で固定しており、この検査は tag 側で版を照合する。
 - 検出は import しているだけのものを含まず、**呼び出しが到達可能なもの**に限られる。無視リストを育てずに運用できるので、抑制ではなく更新で直す。修正版は govulncheck の `Fixed in:` に従うこと (同一モジュールに複数の脆弱性があると必要な版が別々で、低い方に上げても残る)。
 - PR の required check には**含めない**。新規 CVE の公開でコードを変えていない PR でも落ちるため。
 - 導入は #2387。通常テストが全て緑の状態で到達可能な脆弱性が 11 件残っており、既存の check では捕まらない領域だったため追加した。
@@ -932,6 +932,18 @@ PR では回らないので、失敗は Actions 上で確認して別 PR で対�
 個別 fix の履歴は CHANGELOG.md 側に集約しており、本セクションは CLAUDE.md 本体
 (Section 1-10 の policy / Makefile target / CI 閾値 / CI workflow 等) を変更した
 タイミングのみ記録する。
+
+- **2026-09-26**: `.github/workflows/` の action を**全て commit SHA で固定**した (`# vX.Y.Z` の
+  コメント付き。`actions/*` も例外にしない)。tag は付け替えられるので、`packages: write` で
+  GHCR へ publish する `docker.yml` / `build-with-plugins.yml` の中で動く action が差し替わると
+  配る image を書き換えられる。`TestWorkflowActionsArePinnedToSHA` が形を固定し、更新は
+  `.github/dependabot.yml` の `github-actions` で受ける。publish する job の checkout には
+  `persist-credentials: false` を付けた。手順は docs/ci.md の「action の版固定」。
+  同じ理由で、配る Dockerfile (`Dockerfile` / `Dockerfile.bundled` /
+  `deploy/uds/Dockerfile.mkgo`) の base image (golang / distroless / alpine) も
+  `<tag>@sha256:<digest>` で固定した (`TestDistributedDockerfileBaseImagesArePinnedByDigest`)。
+  digest の更新は dependabot の `docker` が受け、tag の版は上げさせない (golang は
+  go.mod と揃える必要があるため)。
 
 - **2026-09-23**: mkq を v1.0.8 → **v1.1.1** に更新 (BullMQ 6 へ移行。upstream 2026.9.0 の
   bullmq 6.3.2 と wire が揃う)。**2026-09-22 の SA1019 entry にある「Redis は呼び出し側で

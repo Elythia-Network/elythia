@@ -38,6 +38,20 @@ func TestApplyBlockedHosts_SubdomainMatch(t *testing.T) {
 	assert.Equal(t, "n2", out[0].ID, "suffix一致は `.` 境界でのみ成立する (notblocked.example は残る)")
 }
 
+// 非既定ポートの host (`user.host` はそれを保持する) で投稿しても一覧から
+// 除外される。inbox 側の判定と同じ関数を使っていることの確認でもある。
+func TestApplyBlockedHosts_IgnoresPort(t *testing.T) {
+	notes := []*model.Note{
+		{ID: "n1", UserHost: strPtr("blocked.example:8443")},
+		{ID: "n2", ReplyUserHost: strPtr("sub.blocked.example:8443")},
+		{ID: "n3", RenoteUserHost: strPtr("blocked.example.")},
+		{ID: "n4", UserHost: strPtr("notblocked.example:8443")},
+	}
+	out := ApplyBlockedHosts(notes, []string{"blocked.example"})
+	assert.Len(t, out, 1)
+	assert.Equal(t, "n4", out[0].ID)
+}
+
 func TestApplyBlockedHosts_CaseInsensitive(t *testing.T) {
 	notes := []*model.Note{{ID: "n1", UserHost: strPtr("Blocked.Example")}}
 	assert.Empty(t, ApplyBlockedHosts(notes, []string{"blocked.example"}))

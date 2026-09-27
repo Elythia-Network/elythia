@@ -222,6 +222,10 @@ type Handler struct {
 	// router で必ず wire する (未配線時は 30s cache TTL 待ちで stale 旧 user
 	// が auth 通過する security regression が残る)。
 	userTokenInvalidator UserTokenInvalidator
+	// userStreamRevoker は凍結・削除した user の /streaming 接続を閉じる。
+	// WebSocket は接続時に 1 度しか認証しないので、tokenCache を落としても
+	// 既存の接続は通知・DM を受け取り続ける。
+	userStreamRevoker UserStreamRevoker
 	// signinRepo は admin/show-user の `signins` field を実データで埋める
 	// ために使う (#1198)。未配線時は `[]` fallback で shape compat を保つ。
 	signinRepo repository.SigninRepository
@@ -301,6 +305,34 @@ type UserTokenInvalidator interface {
 // (未配線時は最大 30 秒 stale window が残る)。
 func (h *Handler) SetUserTokenInvalidator(inv UserTokenInvalidator) {
 	h.userTokenInvalidator = inv
+}
+
+// UserStreamRevoker closes every live /streaming connection of a user.
+// Implemented by stream.StreamRevokePublisher (pubsub fan-out so connections
+// held by other processes close too).
+type UserStreamRevoker interface {
+	RevokeUserStreams(userID string)
+}
+
+// SetUserStreamRevoker wires the revoker used by admin/suspend-user and the
+// account deletion endpoints.
+func (h *Handler) SetUserStreamRevoker(r UserStreamRevoker) {
+	h.userStreamRevoker = r
+}
+
+// HasUserStreamRevoker reports whether the stream revoker is wired.
+//
+// 未配線だと、凍結・削除した利用者の WebSocket が**再接続するまで通知・DM・
+// フォロワー限定投稿を受け取り続ける** (HasUserTokenInvalidator とは独立)。
+func (h *Handler) HasUserStreamRevoker() bool { return h.userStreamRevoker != nil }
+
+// revokeUserStreams closes the target user's streaming connections. 凍結解除
+// では呼ばない (凍結中の利用者の token では /streaming へ接続できない — upgrade が 403 — ので閉じる対象が無い)。
+func (h *Handler) revokeUserStreams(userID string) {
+	if h.userStreamRevoker == nil || userID == "" {
+		return
+	}
+	h.userStreamRevoker.RevokeUserStreams(userID)
 }
 
 // invalidateUserTokenCache は target user の全 token cache entry を即時
@@ -1462,6 +1494,8 @@ func (h *Handler) SuspendUser(c echo.Context) error {
 	// 凍結直後の auth bypass 防止 (#965)。target の全 token cache entry を
 	// 即時削除し、middleware 通過後の P2 gate (#964) に依存せず確実に弾く。
 	h.invalidateUserTokenCache(req.UserID)
+	// 既に張られている WebSocket も閉じる (mk-go 独自、docs/divergence.md)。
+	h.revokeUserStreams(req.UserID)
 	// upstream UserSuspendService.suspend: local user なら全 sharedInbox へ
 	// Delete(actor) を配信する (#1759)。best-effort (queue 経由)。
 	if h.userModerationFed != nil {

@@ -34,7 +34,7 @@ func TestMatchMemo_NilFallsBackToDirectLookup(t *testing.T) {
 
 	var memo *matchMemo
 	assert.True(t, memo.ownerFollows(svc, "owner", "author"))
-	assert.False(t, memo.listContains(svc, "missing-list", "author"))
+	assert.False(t, memo.listContains(svc, "owner", "missing-list", "author"))
 }
 
 // list メンバーシップも note 単位でキャッシュする。
@@ -46,9 +46,9 @@ func TestMatchMemo_ListMembership(t *testing.T) {
 	svc.SetUserListRepo(listRepo)
 
 	memo := newMatchMemo()
-	assert.True(t, memo.listContains(svc, "l1", "author"))
-	assert.True(t, memo.listContains(svc, "l1", "author"), "2 回目はキャッシュから返す")
-	assert.False(t, memo.listContains(svc, "l1", "stranger"))
+	assert.True(t, memo.listContains(svc, "owner", "l1", "author"))
+	assert.True(t, memo.listContains(svc, "owner", "l1", "author"), "2 回目はキャッシュから返す")
+	assert.False(t, memo.listContains(svc, "owner", "l1", "stranger"))
 }
 
 // #2752: followers 可視の note では、**可視性 gate の follow 判定も** memo を

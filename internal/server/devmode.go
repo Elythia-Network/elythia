@@ -2,6 +2,9 @@ package server
 
 import (
 	"log/slog"
+	"os"
+
+	"github.com/labstack/echo/v4"
 
 	"github.com/shiroha-a/mk/internal/config"
 	"github.com/shiroha-a/mk/internal/frontendutil"
@@ -62,6 +65,37 @@ func logDevModeBanner(cfg *config.Config) {
 		"viteDevServer", viteDevServerURL,
 		"embedDevServer", viteEmbedDevServerURL,
 		"注意", "本番では無効にしてください (dev server が無いと frontend が配信されません)")
+}
+
+// registerFrontendAssets serves prefix (`/vite` or `/embed_vite`) from the
+// built assets in dir, or proxies it to the Vite dev server at devServer when
+// cfg enables dev mode. Outside dev mode a missing build answers 404.
+//
+// **dev server への proxy は dev モードのときだけにする。** 以前は「ビルド成果物が
+// 無ければ proxy」だったので、本番でビルド出力が欠けている (bind-mount の
+// 付け忘れ、ビルド途中で消えている窓 #2885 など) と、`/vite/*` が**認証なしで**
+// `localhost:5173` へ reverse proxy されていた。そのポートで何が待ち受けて
+// いるかは mk-go の管理外で、同じホストの別サービスへ外から任意のパスを
+// 送り込める。dev モードは `dev: true` / `MK_DEV=1` の明示的な指定でしか
+// 入らない (`make dev` はビルド成果物が無いときにそれを立てる)。
+//
+// **404 を明示的に登録する。** 何も登録しないと SPA の catchall が HTML を 200 で
+// 返し、「JS のはずが HTML」という原因から遠い壊れ方になる。
+func registerFrontendAssets(e *echo.Echo, cfg *config.Config, prefix, dir, devServer string) {
+	if isDev(cfg) {
+		e.Any(prefix+"/*", newViteProxy(devServer))
+		return
+	}
+	_, err := os.Stat(dir)
+	if err == nil {
+		e.Static(prefix, dir)
+		return
+	}
+	slog.Warn("frontend のビルド成果物が見つからないので 404 を返します。開発中なら dev: true (MK_DEV=1) で Vite dev server を使ってください",
+		"prefix", prefix, "dir", dir, "error", err)
+	e.Any(prefix+"/*", func(echo.Context) error {
+		return echo.ErrNotFound
+	})
 }
 
 // loaderAssetsFor returns the bootloader assets to inline into the SPA shell.

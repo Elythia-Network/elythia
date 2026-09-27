@@ -19,7 +19,8 @@ type antennaImportEntry struct {
 	Keywords        json.RawMessage `json:"keywords"`
 	ExcludeKeywords json.RawMessage `json:"excludeKeywords"`
 	Users           []string        `json:"users"`
-	UserListID      *string         `json:"userListId"`
+	// userListId は読まない (import は常に null で作る)。ImportAntennas の
+	// コメント参照。
 	// UserListAccts は upstream ExportedAntenna の list source 用 acct 配列。import 側で
 	// list→users 変換に使う (#2106 N24)。
 	UserListAccts                  []string `json:"userListAccts"`
@@ -49,14 +50,18 @@ func (i *Importer) importAntennas(user *model.User, body []byte) (*ImportResult,
 
 		// #2106 N24: upstream ImportAntennasProcessorService 互換 — list source antenna は
 		// userListAccts を users source へ倒して取り込む (cross-instance では userListId が
-		// 無意味なため)。userListAccts が無ければ src は維持する。
+		// 無意味なため)。userListAccts が null / 欠落なら src は維持する。upstream は
+		// `antenna.userListAccts` の truthy で判定するので、空配列 [] も users へ倒す
+		// (encoding/json は [] を非 nil の空 slice にするので != nil がそれに当たる)。
+		//
+		// userListId は upstream と同じく**常に null** で作る。ファイルの値は利用者が
+		// 自由に書けるので、そのまま保存すると他人の list ID を検証なしでアンテナの
+		// ソースにできる (antennas/create / update の所有者検証を迂回する)。
 		src := model.AntennaSource(ent.Src)
 		users := model.StringArray(ent.Users)
-		userListID := ent.UserListID
-		if src == model.AntennaSourceList && len(ent.UserListAccts) > 0 {
+		if src == model.AntennaSourceList && ent.UserListAccts != nil {
 			src = model.AntennaSourceUsers
 			users = model.StringArray(ent.UserListAccts)
-			userListID = nil
 		}
 		if users == nil {
 			users = model.StringArray{}
@@ -67,7 +72,7 @@ func (i *Importer) importAntennas(user *model.User, body []byte) (*ImportResult,
 			UserID:                         user.ID,
 			Name:                           ent.Name,
 			Src:                            src,
-			UserListID:                     userListID,
+			UserListID:                     nil,
 			Users:                          users,
 			Keywords:                       datatypes.JSON(keywords),
 			ExcludeKeywords:                datatypes.JSON(excludeKeywords),

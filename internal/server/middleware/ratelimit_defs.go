@@ -84,13 +84,25 @@ var DefaultEndpointLimits = map[string]*EndpointLimit{
 	"gallery/posts/update": {Duration: time.Hour, Max: 300},
 
 	// ── I (account) ────────────────────────────────────
-	"i/change-password":       {Duration: time.Hour, Max: 10, MinInterval: time.Second},
 	"i/move":                  {Duration: 24 * time.Hour, Max: 5},
 	"i/notifications":         {Duration: 30 * time.Second, Max: 30},
 	"i/notifications-grouped": {Duration: 30 * time.Second, Max: 30},
 	"i/update":                {Duration: time.Hour, Max: 20},
 	"i/update-email":          {Duration: time.Hour, Max: 3},
 	"i/webhooks/test":         {Duration: 15 * time.Minute, Max: 60},
+
+	// ── I (パスワードを照合する endpoint) ──────────────
+	//
+	// **`i/change-password` / `i/delete-account` / `i/regenerate-token` /
+	// `i/2fa/*` はここに置かない。**
+	// limiter は route の RequireAuth / RequireSecure より前に走り、成否に
+	// 関係なく user bucket を消費するので、被害者の token を持つだけの第三者
+	// (scope 不問) が枠を使い切れる — token 漏洩時の唯一の対処である
+	// `i/regenerate-token` を攻撃者が止められる。パスワードの総当たりは
+	// handler 側の `passwordguard` が照合失敗だけを (アカウント, 接続元の範囲) とアカウント全体の 2 段で数えて
+	// 止める (`TestPasswordChecksAreFailureLimited` が固定)。
+	// `i/change-password` には以前 mk-go 独自の route 上限 (1h 10) があったが、
+	// 同じ理由で第三者に使い切られるので外した (upstream にも limit は無い)。
 
 	// ── Muting ─────────────────────────────────────────
 	"mute/create":        {Duration: time.Hour, Max: 20},

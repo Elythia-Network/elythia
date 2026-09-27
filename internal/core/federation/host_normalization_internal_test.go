@@ -60,3 +60,25 @@ func TestHostFromURI_RejectsPortWithoutHost(t *testing.T) {
 	_, err := hostFromURI("https://:8443/users/x")
 	assert.Error(t, err)
 }
+
+// 全角英字・句点・soft hyphen を含む URI は、Go の HTTP client が
+// idna.Lookup で `evil.example` に変換して dial する。保存形と比較の値が
+// 接続先と違う形になると、blockedHosts の `evil.example` を素通りする。
+func TestHostFromURI_FoldsUTS46MappedSpellings(t *testing.T) {
+	for _, uri := range []string{
+		"https://ｅｖｉｌ.example/users/x",
+		"https://evil。example/users/x",
+		"https://evil.ex\u00adample/users/x",
+		"https://ｅｖｉｌ.example:443/users/x",
+	} {
+		got, err := hostFromURI(uri)
+		require.NoError(t, err)
+		assert.Equal(t, "evil.example", got, uri)
+		assert.Equal(t, "evil.example", NormalizeGateHost(uri), uri)
+		assert.True(t, sameDeliveryHost(uri, "https://evil.example/inbox"), uri)
+		assert.NoError(t, assertResponseHostMatches("https://evil.example/users/x", uri), uri)
+	}
+	got, err := hostFromURI("https://ｅｖｉｌ.example:8443/users/x")
+	require.NoError(t, err)
+	assert.Equal(t, "evil.example:8443", got)
+}

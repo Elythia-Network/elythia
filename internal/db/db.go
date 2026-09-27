@@ -30,6 +30,9 @@ func New(cfg *config.Config) (*gorm.DB, error) {
 		PrepareStmt: true,
 	})
 	if err != nil {
+		if hint := cfg.DBTLSErrorHint(err); hint != "" {
+			return nil, fmt.Errorf("failed to connect to database (%s): %w", hint, err)
+		}
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 

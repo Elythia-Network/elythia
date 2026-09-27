@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/shiroha-a/mk/internal/misc/idnhost"
 )
 
 // SensitiveDetector scores media content for NSFW likelihood.
@@ -51,22 +53,11 @@ func SensitivityThreshold(sensitivity string) float64 {
 }
 
 // IsSilencedHost reports whether host is in the silenced hosts list
-// (case-insensitive, subdomain matching like bannedEmailDomains).
+// (case-insensitive, subdomain matching like bannedEmailDomains). The port and
+// trailing dot of host are ignored, so `evil.example:8443` is silenced by an
+// `evil.example` entry (idnhost.MatchesBlockList).
 func IsSilencedHost(host string, silencedHosts []string) bool {
-	if host == "" {
-		return false
-	}
-	suffix := "." + strings.ToLower(host)
-	for _, h := range silencedHosts {
-		h = strings.TrimSpace(strings.ToLower(h))
-		if h == "" {
-			continue
-		}
-		if strings.HasSuffix(suffix, "."+h) {
-			return true
-		}
-	}
-	return false
+	return idnhost.MatchesBlockList(silencedHosts, host)
 }
 
 // ShouldDetect returns whether detection should run for the given upload

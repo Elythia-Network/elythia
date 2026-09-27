@@ -17,7 +17,6 @@ import (
 	"github.com/shiroha-a/mk/internal/model"
 	"github.com/shiroha-a/mk/internal/repository"
 	"github.com/shiroha-a/mk/internal/server/middleware"
-	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
@@ -77,8 +76,8 @@ func (h *Handler) TwoFARegister(c echo.Context) error {
 			use.Rollback()
 		}
 	}()
-	if err := bcrypt.CompareHashAndPassword([]byte(*profile.Password), []byte(req.Password)); err != nil {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INCORRECT_PASSWORD", "Incorrect password.", "78d6c839-20c9-4c66-b90a-fc0542168b48"))
+	if !h.comparePassword(c, user.ID, *profile.Password, req.Password, "78d6c839-20c9-4c66-b90a-fc0542168b48") {
+		return nil
 	}
 
 	// issuer は upstream (register.ts) が config.host (instance hostname) を使う。
@@ -232,8 +231,8 @@ func (h *Handler) TwoFAUnregister(c echo.Context) error {
 			use.Rollback()
 		}
 	}()
-	if err := bcrypt.CompareHashAndPassword([]byte(*profile.Password), []byte(req.Password)); err != nil {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INCORRECT_PASSWORD", "Incorrect password.", "7add0395-9901-4098-82f9-4f67af65f775"))
+	if !h.comparePassword(c, user.ID, *profile.Password, req.Password, "7add0395-9901-4098-82f9-4f67af65f775") {
+		return nil
 	}
 
 	// **ここでは Commit しない** (#2852)。この操作は 2FA を丸ごと消すので消費を
@@ -305,8 +304,7 @@ func (h *Handler) requireWebAuthn(c echo.Context, password, incorrectPwID string
 		_ = c.JSON(http.StatusBadRequest, apierr.Error("ACCESS_DENIED", "No password set.", "1fb7cb09-d46a-4fff-b8df-057708cce513"))
 		return nil, nil, false
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(*profile.Password), []byte(password)); err != nil {
-		_ = c.JSON(http.StatusBadRequest, apierr.Error("INCORRECT_PASSWORD", "Incorrect password.", incorrectPwID))
+	if !h.comparePassword(c, user.ID, *profile.Password, password, incorrectPwID) {
 		return nil, nil, false
 	}
 	return user, profile, true
@@ -652,8 +650,8 @@ func (h *Handler) TwoFARemoveKey(c echo.Context) error {
 			use.Rollback()
 		}
 	}()
-	if err := bcrypt.CompareHashAndPassword([]byte(*profile.Password), []byte(req.Password)); err != nil {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INCORRECT_PASSWORD", "Incorrect password.", "141c598d-a825-44c8-9173-cfb9d92be493"))
+	if !h.comparePassword(c, user.ID, *profile.Password, req.Password, "141c598d-a825-44c8-9173-cfb9d92be493") {
+		return nil
 	}
 
 	// upstream remove-key.ts:74-78 は delete を無条件に実行し no-match でも

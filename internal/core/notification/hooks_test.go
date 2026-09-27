@@ -2,6 +2,7 @@ package notification
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -570,10 +571,34 @@ func TestPassesReceiveConfig(t *testing.T) {
 		h, _, repo := newTestHook(t)
 		repo.Profiles["alice"] = mkProfile("alice", `{"reaction":{"type":"list","userListId":"L1"}}`)
 		ulr := testutil.NewMockUserListRepository()
+		ulr.Lists["L1"] = &model.UserList{ID: "L1", UserID: "alice", Name: "friends"}
 		require.NoError(t, ulr.AddMember(&model.UserListMembership{ID: "m1", UserListID: "L1", UserID: "bob"}))
 		h.SetUserListRepo(ulr)
 		assert.True(t, h.passesReceiveConfig("alice", CreateInput{Type: TypeReaction, NotifierID: "bob"}))
 		assert.False(t, h.passesReceiveConfig("alice", CreateInput{Type: TypeReaction, NotifierID: "carol"}))
+	})
+
+	// 他人の list を userListId に指定されていても、そのメンバーを通さない。
+	// 通すと通知の届き方で他人の list のメンバー構成を確かめられる。
+	t.Run("list owned by another user never passes", func(t *testing.T) {
+		h, _, repo := newTestHook(t)
+		repo.Profiles["alice"] = mkProfile("alice", `{"reaction":{"type":"list","userListId":"L2"}}`)
+		ulr := testutil.NewMockUserListRepository()
+		ulr.Lists["L2"] = &model.UserList{ID: "L2", UserID: "dave", Name: "dave's list"}
+		require.NoError(t, ulr.AddMember(&model.UserListMembership{ID: "m1", UserListID: "L2", UserID: "bob"}))
+		h.SetUserListRepo(ulr)
+		assert.False(t, h.passesReceiveConfig("alice", CreateInput{Type: TypeReaction, NotifierID: "bob"}))
+	})
+
+	// 存在しない list は誰も通さない。lookup の障害は他の関係性 gate と同じく許可側。
+	t.Run("missing list denies, lookup error permits", func(t *testing.T) {
+		h, _, repo := newTestHook(t)
+		repo.Profiles["alice"] = mkProfile("alice", `{"reaction":{"type":"list","userListId":"gone"}}`)
+		h.SetUserListRepo(testutil.NewMockUserListRepository())
+		assert.False(t, h.passesReceiveConfig("alice", CreateInput{Type: TypeReaction, NotifierID: "bob"}))
+
+		h.SetUserListRepo(failingListLookupRepo{MockUserListRepository: testutil.NewMockUserListRepository()})
+		assert.True(t, h.passesReceiveConfig("alice", CreateInput{Type: TypeReaction, NotifierID: "bob"}))
 	})
 
 	// dep 未配線時は gate を素通り (best-effort)。
@@ -1006,4 +1031,12 @@ func TestHook_WebPushSuppressedAfterRead(t *testing.T) {
 	// delay 経過を待つ。
 	time.Sleep(120 * time.Millisecond)
 	assert.Empty(t, pub.calls, "delay 内既読化で Web Push が抑制される")
+}
+
+type failingListLookupRepo struct {
+	*testutil.MockUserListRepository
+}
+
+func (failingListLookupRepo) FindByID(string) (*model.UserList, error) {
+	return nil, errors.New("db down")
 }

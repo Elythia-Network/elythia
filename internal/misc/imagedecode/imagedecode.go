@@ -108,6 +108,11 @@ func DecodeWithPixelCap(data []byte, maxPixels int64) (image.Image, error) {
 	if ExceedsSandboxedDecoderSize(data) {
 		return nil, fmt.Errorf("%w: %d bytes", ErrEncodedTooLarge, len(data))
 	}
+	// EXIF / ICC は imaging がデコードの途中で宣言値のまま確保する。どの形式でも
+	// imaging へ渡す前に見る (checkEmbeddedMetadata の doc)。
+	if err := checkEmbeddedMetadata(data); err != nil {
+		return nil, err
+	}
 	// **ラスタを確保する前にヘッダの寸法を見る。** `image.DecodeConfig` は
 	// 登録済みデコーダのヘッダだけを読むので、ここで弾けば巨大な確保が起きない。
 	//
@@ -182,10 +187,9 @@ func DecodeWithPixelCap(data []byte, maxPixels int64) (image.Image, error) {
 		// 「真っ黒な画像」なので、そちらの方がましという判断。
 		return png.Decode(bytes.NewReader(data))
 	}
-	// **アニメーション WebP はここに残る。** 単コマだけ取り出す decoder が
-	// 手元に無い (`golang.org/x/image/webp` は VP8X + ANMF を読めず、
-	// imaging の `webp.DecodeAnimated` が唯一の経路) ため、塞ぐと現在動いて
-	// いる変換が落ちる。GIF / APNG と同じ増幅が残っている。
+	if isWebP(data) {
+		return decodeWebP(data, maxPixels)
+	}
 	return imaging.Decode(bytes.NewReader(data), imaging.AutoOrientation(true))
 }
 
@@ -481,9 +485,9 @@ func hasChunk(data []byte, typ string) bool {
 // なので、コンテナを歩いて `VP8X` の ANIMATION フラグか `ANIM` / `ANMF` チャンクを
 // 見るしかない (GIF / APNG は MIME が形式そのものを表すので判定が要らない)。
 //
-// **デコードしない。** アニメーション WebP から 1 コマだけ取り出す decoder は
-// 手元に無く (上の `decodeImage` のコメント)、ここで必要なのは「アニメーションか」
-// だけなので、ヘッダを読むに留める。
+// **デコードしない。** ここで必要なのは「アニメーションか」だけなので、
+// ヘッダを読むに留める (デコードするときは `decodeWebP` が 1 コマ目だけを
+// 静止 WebP に組み直す)。
 //
 // 歩き方は `internal/core/drive/imagemeta.go` の `webpHasMetadata` と同じ。
 // チャンクは偶数境界に揃えられ、長さが container を越えたら打ち切る。

@@ -66,9 +66,16 @@ port: 3000
 # Proxy trust settings.
 #
 # Specifies the IP addresses that the server treats as trusted
-# reverse proxies. mk-go reads this as a YAML array of CIDR ranges
-# (Misskey TS uses a polymorphic shape; mk-go simplifies it to an
-# array). Defaults to private + loopback ranges.
+# reverse proxies. Only the listed ranges are trusted for
+# X-Forwarded-For. Entries may be CIDRs, bare IPs (treated as /32 or
+# /128) or the names loopback / linklocal / uniquelocal. `false` or `[]`
+# trusts no proxy. `true` (trust every hop) and hop counts are rejected,
+# as is any entry that cannot be parsed. Defaults to private + loopback
+# ranges (same as Misskey TS). See docs/configuration.md.
+# NOTE: earlier mk-go versions always trusted loopback / private
+# addresses on top of this list. If you list only CDN ranges, also add
+# your reverse proxy (or `uniquelocal` / `loopback`), otherwise every
+# client is seen as the proxy address.
 #
 #trustProxy:
 #  - '127.0.0.1/32'
@@ -252,8 +259,16 @@ db:
   #disableCache: true
 
   # Extra Connection options
+  # `ssl: true` enables TLS and verifies the server certificate and hostname
+  # against the system CAs (same as upstream node-postgres). NOTE: earlier
+  # mk-go versions did not verify. For a self-signed / private CA, point
+  # `sslrootcert` at the CA file; to explicitly skip verification (exposes
+  # the connection to interception) use `ssl: { rejectUnauthorized: false }`
+  # (or `ssl: no-verify`).
+  # `sslmode` (libpq value) may be set instead of `ssl`. See docs/configuration.md.
   #extra:
   #  ssl: true
+  #  sslrootcert: /etc/ssl/certs/pg-ca.pem
 
   # Connection pool tuning (mk-go specific; Misskey TS does not expose these)
   #maxOpenConns: 25       # default: GORM/database/sql の既定値
@@ -439,6 +454,15 @@ id: 'aidx'
 # (the summaly proxy itself) are called directly so that internal/localhost
 # summaly deployments keep working — the proxy still applies to whatever the
 # summaly proxy itself fetches downstream.
+# Destination check: for every request that goes through the proxy, mk-go
+# resolves the destination host itself and refuses to hand it to the proxy
+# when any address is private / reserved (allowedPrivateNetworks still
+# applies). The proxy re-resolves the name on its own, so a DNS rebinding
+# window remains: configure the proxy to deny private, loopback and
+# link-local destinations (e.g. 169.254.169.254) as well. Destinations that
+# cannot be resolved locally are not forwarded either.
+# Numeric hosts that are not a plain dotted quad (0x7f.1, 2130706433, 127.1)
+# are refused, since the proxy may read them as 127.0.0.1.
 #proxy: http://127.0.0.1:3128
 
 # Hosts that bypass `proxy` (exact hostname match). Pre-populated with the
@@ -533,6 +557,10 @@ proxyBypassHosts:
 #
 # This is deliberately separate from testMode: enabling the dev frontend
 # must not also open the destructive endpoints above.
+#
+# Only dev mode proxies to the dev server. Without it, a missing build makes
+# /vite/* answer 404 instead of reaching localhost:5173. `make dev` sets
+# MK_DEV=1 automatically when no built frontend is present.
 #dev: false
 
 # Mount net/http/pprof handlers at /debug/pprof/* for local

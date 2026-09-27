@@ -10,8 +10,10 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
+	"github.com/shiroha-a/mk/internal/misc/credkey"
 	"github.com/shiroha-a/mk/internal/model"
 	"github.com/shiroha-a/mk/internal/server/middleware"
+	"github.com/shiroha-a/mk/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -24,13 +26,17 @@ type stubAcceptor struct {
 	// scopes は Accept が受け取った値をそのまま積む。**捨てると handler から
 	// acceptor への配線が無検査になる** (#streaming-scope の原因がまさにその形)。
 	scopes [][]string
+	// credentials も同じ理由で積む。捨てると失効時に接続を特定する鍵が
+	// handler から渡っていなくても気付けない。
+	credentials []string
 }
 
-func (s *stubAcceptor) Accept(conn *websocket.Conn, user *model.User, scopes []string) {
+func (s *stubAcceptor) Accept(conn *websocket.Conn, user *model.User, scopes []string, credential string) {
 	s.mu.Lock()
 	s.accepted++
 	s.users = append(s.users, user)
 	s.scopes = append(s.scopes, scopes)
+	s.credentials = append(s.credentials, credential)
 	s.mu.Unlock()
 	_ = conn.Close()
 }
@@ -268,6 +274,139 @@ func TestStream_ForwardsScopesThroughStream(t *testing.T) {
 			}
 			assert.NotNil(t, got, "app token の scope が acceptor へ届いていない")
 			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// 失効時に「そのトークンで張られた接続だけ」を閉じるための鍵が、handler から
+// acceptor へ実際に届いているかを WebSocket 越しに固定する。
+func TestStream_ForwardsCredentialThroughStream(t *testing.T) {
+	cases := []struct {
+		name  string
+		user  bool
+		scope *middleware.AuthScope
+		token string
+		want  string
+	}{
+		{
+			name:  "native token is keyed by its hash",
+			user:  true,
+			scope: &middleware.AuthScope{IsApp: false},
+			token: "native-secret",
+			want:  credkey.Native("native-secret"),
+		},
+		{
+			name:  "app token is keyed by its row id",
+			user:  true,
+			scope: &middleware.AuthScope{IsApp: true, Scopes: []string{"read:account"}, TokenID: "tok1"},
+			token: "app-secret",
+			want:  credkey.AccessToken("tok1"),
+		},
+		{
+			name: "anonymous has no credential",
+			want: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			acc := &stubAcceptor{}
+			h := NewHandler(acc)
+			e := echo.New()
+			e.GET("/streaming", h.Stream, func(next echo.HandlerFunc) echo.HandlerFunc {
+				return func(c echo.Context) error {
+					if tc.user {
+						c.Set(string(middleware.UserContextKey), &model.User{ID: "alice"})
+					}
+					if tc.scope != nil {
+						c.Set(string(middleware.AuthScopeContextKey), tc.scope)
+					}
+					if tc.token != "" {
+						c.Set(string(middleware.TokenContextKey), tc.token)
+					}
+					return next(c)
+				}
+			})
+			srv := httptest.NewServer(e)
+			t.Cleanup(srv.Close)
+
+			dialer := websocket.Dialer{HandshakeTimeout: 2 * time.Second}
+			conn, _, err := dialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http")+"/streaming", nil)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = conn.Close() })
+
+			require.Eventually(t, func() bool {
+				acc.mu.Lock()
+				defer acc.mu.Unlock()
+				return acc.accepted == 1
+			}, 2*time.Second, 10*time.Millisecond)
+
+			acc.mu.Lock()
+			got := acc.credentials[0]
+			acc.mu.Unlock()
+			assert.Equal(t, tc.want, got)
+			assert.NotContains(t, got, "secret", "生 token を鍵にしない")
+		})
+	}
+}
+
+func TestConnectionCredential(t *testing.T) {
+	u := &model.User{ID: "alice"}
+	assert.Equal(t, "", connectionCredential(nil, &middleware.AuthScope{}, "t"), "anonymous")
+	assert.Equal(t, "", connectionCredential(u, nil, "t"), "no scope view")
+	assert.Equal(t, credkey.Native("t"), connectionCredential(u, &middleware.AuthScope{}, "t"))
+	assert.Equal(t, credkey.AccessToken("id1"), connectionCredential(u, &middleware.AuthScope{IsApp: true, TokenID: "id1"}, "t"))
+}
+
+// native token の鍵は DB に保存された値から作る。リクエストの文字列から作ると、
+// char 比較で同じ利用者に解決される "<token> " の接続が、失効側の配る鍵
+// (保存値から作る) と一致せず閉じない。
+func TestConnectionCredential_NativeUsesStoredToken(t *testing.T) {
+	stored := "abcdef1234567890"
+	u := &model.User{ID: "alice", Token: &stored}
+	assert.Equal(t, credkey.Native(stored), connectionCredential(u, &middleware.AuthScope{}, stored+" "))
+	// 16 文字未満の保存値は埋め草付きで返るが、失効側と同じ鍵になる。
+	short := "short           "
+	assert.Equal(t, credkey.Native("short"), connectionCredential(&model.User{ID: "alice", Token: &short}, &middleware.AuthScope{}, "short"))
+}
+
+// 凍結・削除済みの利用者の token での upgrade は 403 で拒否する (upstream
+// StreamingApiServerService の isSuspended)。認証 middleware はこれらを匿名に
+// 落とすので、見ないと匿名接続として張れてしまう。実際の middleware を通して
+// 確かめる (印の名前を取り違えても気付けるように)。
+func TestStream_InactiveAccountUpgradeIsForbidden(t *testing.T) {
+	cases := []struct {
+		name string
+		user *model.User
+	}{
+		{"suspended", &model.User{ID: "u_susp", IsSuspended: true}},
+		{"deleted", &model.User{ID: "u_del", IsDeleted: true}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			userRepo := testutil.NewMockUserRepository()
+			userRepo.Tokens["inactive-token"] = tc.user
+			auth := middleware.NewAuthMiddleware(userRepo, testutil.NewMockAccessTokenRepository())
+			acc := &stubAcceptor{}
+			h := NewHandler(acc)
+			e := echo.New()
+			e.GET("/streaming", h.Stream, auth.Authenticate())
+			srv := httptest.NewServer(e)
+			t.Cleanup(srv.Close)
+
+			dialer := websocket.Dialer{HandshakeTimeout: 2 * time.Second}
+			_, resp, err := dialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http")+"/streaming?i=inactive-token", nil)
+			require.Error(t, err)
+			require.NotNil(t, resp)
+			assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+			_ = resp.Body.Close()
+			acc.mu.Lock()
+			assert.Equal(t, 0, acc.accepted, "匿名接続として受け付けない")
+			acc.mu.Unlock()
+
+			// token 無しの匿名接続は従来どおり通る。
+			conn, _, err := dialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http")+"/streaming", nil)
+			require.NoError(t, err)
+			_ = conn.Close()
 		})
 	}
 }

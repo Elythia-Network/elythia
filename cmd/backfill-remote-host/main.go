@@ -1,5 +1,7 @@
 // Command backfill-remote-host normalizes every stored remote host to the form
-// hostFromURI now produces (idna.ToASCII(lowercase), UTS#46) — #2706.
+// hostFromURI now produces (UTS#46 mapping + punycode, lowercase) — #2706.
+// Rows stored by builds that punycoded without the UTS#46 mapping
+// (`ｅｖｉｌ.example` → `xn--qi7ciaj2b.example`) are folded back as well.
 //
 // 既存行は `url.Parse` の生の host で保存されており、`Mixed.Example` のような表記の
 // まま残る。読み取り側の両当たりは #2996 で撤去したので acct 解決からも引けず、連合ゲート

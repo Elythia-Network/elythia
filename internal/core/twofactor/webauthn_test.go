@@ -617,7 +617,10 @@ func TestTakePasskeySession_RedisError(t *testing.T) {
 //     fixture を再利用しているが、こちらは mk-go の WebAuthnService を経由
 //     して redis セッション取得 → wa.FinishRegistration の包括動作を網羅する。
 
-func TestFinishRegistration_Success(t *testing.T) {
+// The W3C vector's authenticator data carries flags 0x59 (UP / BE / BS / AT)
+// without UV, so it exercises the rejection path. 受理側は
+// TestFinishRegistration_RequiresUV が in-process の認証器で見ている。
+func TestFinishRegistration_W3CVectorWithoutUVIsRejected(t *testing.T) {
 	requireRedis(t)
 	twofaTestRedis.FlushAll(context.Background())
 
@@ -645,11 +648,8 @@ func TestFinishRegistration_Success(t *testing.T) {
 	require.NoError(t, svc.putRegistrationSession(context.Background(), "test-user-id", sd))
 
 	httpReq := httptest.NewRequest("POST", "/", bytes.NewReader(body))
-	cred, err := svc.FinishRegistration(context.Background(), &model.User{ID: "test-user-id", Username: "test"}, nil, httpReq)
-	require.NoError(t, err)
-	require.NotNil(t, cred)
-	expectedCredID := decodeHex(t, credentialIDHex)
-	assert.Equal(t, expectedCredID, cred.ID)
+	_, err = svc.FinishRegistration(context.Background(), &model.User{ID: "test-user-id", Username: "test"}, nil, httpReq)
+	requireUVRejected(t, err)
 }
 
 // --- helpers ---

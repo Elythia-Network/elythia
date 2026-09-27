@@ -40,6 +40,7 @@ func (h *Handler) AccountsDelete(c echo.Context) error {
 		// entry を即時 invalidate して 30s stale window を消す。DB 更新が
 		// 失敗したケースでは cache を触る理由がないので、err 成功時のみ。
 		h.invalidateUserTokenCache(req.UserID)
+		h.revokeUserStreams(req.UserID)
 		h.logUserAction(c, moderationlog.LogDeleteAccount, req.UserID)
 	}
 	h.scheduleAccountCascade(req.UserID, user != nil && user.Host != nil)
@@ -111,6 +112,7 @@ func (h *Handler) DeleteAccount(c echo.Context) error {
 		// AccountsDelete と同じ。target の全 token cache entry を即時
 		// invalidate (#965)。
 		h.invalidateUserTokenCache(req.UserID)
+		h.revokeUserStreams(req.UserID)
 		h.logUserAction(c, moderationlog.LogDeleteAccount, req.UserID)
 	}
 	// upstream DeleteAccountService: local user は物理削除 job の前に全 sharedInbox

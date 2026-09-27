@@ -546,6 +546,86 @@ func TestService_HostMatching(t *testing.T) {
 	}
 }
 
+// 非既定ポートで actor を公開しただけで blockedHosts / silencedHosts /
+// mediaSilencedHosts を回避できてはいけない。`hostFromURI` は非既定ポートを
+// `user.host` に残すので、拒否側の判定はポートを落とした形でも照合する。
+func TestService_DenyListsIgnorePort(t *testing.T) {
+	const host = "evil.example:8443"
+
+	t.Run("IsBlocked", func(t *testing.T) {
+		svc, _, metaRepo := newService(t)
+		metaRepo.Meta.BlockedHosts = model.StringArray{"evil.example"}
+		assert.True(t, svc.IsBlocked(host))
+		assert.True(t, svc.IsBlocked("sub.evil.example:8443"), "サブドメイン一致もポート付きで保たれる")
+		assert.False(t, svc.IsBlocked("notevil.example:8443"))
+	})
+	t.Run("IsAllowed_all", func(t *testing.T) {
+		svc, _, metaRepo := newService(t)
+		metaRepo.Meta.BlockedHosts = model.StringArray{"evil.example"}
+		assert.False(t, svc.IsAllowed(host))
+	})
+	t.Run("IsSilenced", func(t *testing.T) {
+		svc, _, metaRepo := newService(t)
+		metaRepo.Meta.SilencedHosts = model.StringArray{"evil.example"}
+		assert.True(t, svc.IsSilenced(host))
+	})
+	t.Run("IsMediaSilenced", func(t *testing.T) {
+		svc, _, metaRepo := newService(t)
+		metaRepo.Meta.MediaSilencedHosts = model.StringArray{"evil.example"}
+		assert.True(t, svc.IsMediaSilenced(host))
+	})
+	t.Run("ShouldSkipDelivery", func(t *testing.T) {
+		svc, _, metaRepo := newService(t)
+		metaRepo.Meta.BlockedHosts = model.StringArray{"evil.example"}
+		assert.True(t, svc.ShouldSkipDelivery(host))
+	})
+	t.Run("CanFetchOptionalRemoteData", func(t *testing.T) {
+		svc, _, metaRepo := newService(t)
+		metaRepo.Meta.BlockedHosts = model.StringArray{"evil.example"}
+		assert.False(t, svc.CanFetchOptionalRemoteData(host))
+	})
+	// 許可リストにポート付きで載せていても、拒否リストはポートを落として
+	// 照合するので拒否が勝つ (拒否側を緩めない)。
+	t.Run("blocked wins over port-specific allow entry", func(t *testing.T) {
+		svc, _, metaRepo := newService(t)
+		metaRepo.Meta.Federation = "specified"
+		metaRepo.Meta.FederationHosts = model.StringArray{host}
+		metaRepo.Meta.BlockedHosts = model.StringArray{"evil.example"}
+		assert.False(t, svc.IsAllowed(host))
+		assert.True(t, svc.ShouldSkipDelivery(host))
+		assert.False(t, svc.CanFetchOptionalRemoteData(host))
+	})
+}
+
+// federation: specified の許可リストはポートを落とさない (upstream
+// isFederationAllowedHost と同じ)。落とすと同じホスト名の別ポートまで許可が
+// 広がる。
+func TestService_AllowListPortIsSignificant(t *testing.T) {
+	cases := []struct {
+		name    string
+		allowed string
+		host    string
+		want    bool
+	}{
+		{name: "bare entry does not admit non-default port", allowed: "good.example", host: "good.example:8443", want: false},
+		{name: "bare entry admits default port", allowed: "good.example", host: "good.example", want: true},
+		{name: "bare entry admits subdomain", allowed: "good.example", host: "sub.good.example", want: true},
+		{name: "port-specific entry admits that port", allowed: "good.example:8443", host: "good.example:8443", want: true},
+		{name: "port-specific entry does not admit another port", allowed: "good.example:8443", host: "good.example:9443", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _, metaRepo := newService(t)
+			metaRepo.Meta.Federation = "specified"
+			metaRepo.Meta.FederationHosts = model.StringArray{tc.allowed}
+			assert.Equal(t, tc.want, svc.IsAllowed(tc.host), "IsAllowed")
+			assert.Equal(t, !tc.want, svc.ShouldSkipDelivery(tc.host), "ShouldSkipDelivery")
+			assert.Equal(t, tc.want, svc.CanFetchOptionalRemoteData(tc.host), "CanFetchOptionalRemoteData")
+			assert.Equal(t, tc.want, instance.HostMatchesAllowList([]string{tc.allowed}, tc.host), "HostMatchesAllowList")
+		})
+	}
+}
+
 func TestService_Suspend(t *testing.T) {
 	svc, repo, _ := newService(t)
 	repo.Instances["alpha.example"] = &model.Instance{ID: "i1", Host: "alpha.example"}

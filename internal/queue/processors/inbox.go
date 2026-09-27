@@ -9,12 +9,12 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/shiroha-a/mk/internal/activitypub"
 	"github.com/shiroha-a/mk/internal/core/deliveryhealth"
 	"github.com/shiroha-a/mk/internal/core/federation"
+	"github.com/shiroha-a/mk/internal/misc/idnhost"
 	"github.com/shiroha-a/mk/internal/model"
 	"github.com/shiroha-a/mk/internal/queue"
 	"github.com/shiroha-a/mk/internal/queue/driver"
@@ -112,17 +112,18 @@ type InboxChartHook interface {
 // LD-Sig 経路を skip (= HTTP Signature だけで認証完了とする後方互換)。
 // 実装は core/federation.LDSignatureVerifier。
 type LDSignatureVerifier interface {
-	VerifyIfPresent(rawBody []byte) error
 	// CheckForbiddenDirectivesIfPresent runs only the forbidden-directive hardening
 	// (no key resolution / RSA verify). Used by the signer==actor path (#2106 N26)
 	// so an HTTP-signature-authenticated activity is not dropped just because its
 	// LD-Signature fails to verify, while keeping the JSON-LD injection defense.
 	CheckForbiddenDirectivesIfPresent(rawBody []byte) error
-	// VerifyAndCreator additionally reports whether the activity carried an
-	// LD-Signature and, on success, the verified signature.creator key URI.
-	// Used to authenticate forwarded activities whose HTTP signer differs
-	// from the activity actor.
-	VerifyAndCreator(rawBody []byte) (creator string, present bool, err error)
+	// VerifyAndCompact additionally reports whether the activity carried an
+	// LD-Signature and, on success, the verified signature.creator key URI and
+	// the activity compacted to the signed properties. Used to authenticate
+	// forwarded activities whose HTTP signer differs from the activity actor
+	// (and on the header-less legacy path); the caller must process the
+	// returned Body instead of the raw body.
+	VerifyAndCompact(rawBody []byte) (verified federation.VerifiedLDActivity, present bool, err error)
 }
 
 // SignatureCapabilityRecorder records which signature scheme a remote host
@@ -306,6 +307,9 @@ func (p *InboxProcessor) Handle(_ context.Context, t driver.Task) error {
 	// 未署名の body から採った id は相手の申告でしかなく、覚えると他人の id を
 	// 先に登録して本物を落とせる。
 	activityID := ""
+	// body は dispatch する本文。転送経路では authorizeActor が署名済みの内容へ
+	// 差し替える。
+	body := payload.Body
 	if len(payload.Headers) > 0 && p.verifier != nil {
 		actor, keyType, err := p.verifyPayload(payload)
 		if errors.Is(err, federation.ErrLookupUnavailable) {
@@ -344,7 +348,8 @@ func (p *InboxProcessor) Handle(_ context.Context, t driver.Task) error {
 		// (actor spoofing 対策)。一致しない場合は転送活動とみなし LD-Signature が
 		// body actor を認証している場合のみ許可する。LD-Signature の hardening
 		// (forbidden directive 等) も本 gate に集約する。
-		if fields, err := p.authorizeActor(payload.Body, actor); err != nil {
+		fields, authorizedBody, err := p.authorizeActor(payload.Body, actor)
+		if err != nil {
 			if errors.Is(err, federation.ErrLookupUnavailable) {
 				// **ここも ack しない** (#3121)。転送 activity の認可は
 				// LD-Signature の creator を `ResolveActor` で解決し、その鍵を
@@ -372,12 +377,16 @@ func (p *InboxProcessor) Handle(_ context.Context, t driver.Task) error {
 			p.recordInboxTelemetry(host, deliveryhealth.ClassActorUnauthorized, started, err.Error())
 			return nil
 		}
+		// **以降は authorizeActor が返した本文を使う。** 転送経路では LD-Signature が
+		// 覆う内容だけに compact した文書で、生 body には署名外のキー
+		// (`_misskey_content` 等) を転送者が足せる。
+		body = authorizedBody
 		if actor != nil && actor.Host != nil {
 			host = *actor.Host
 		}
 		// **ここまで来て初めて activity.id を信用できる。** 署名が本文を縛って
 		// いて、authorizeActor が id の host と actor の host の一致を見た後。
-		activityID = federation.ExtractActivityID(payload.Body)
+		activityID = federation.ExtractActivityID(body)
 		if p.isReplay(activityID) {
 			slog.Debug("inbox: activity already processed, dropping replay",
 				"host", host, "activityId", activityID)
@@ -392,7 +401,15 @@ func (p *InboxProcessor) Handle(_ context.Context, t driver.Task) error {
 		// legacy / direct-enqueue 経路 (Headers 無し = HTTP 署名者を特定できない)。
 		// 署名者照合はできないが、body に LD-Signature があれば従来どおり検証して
 		// hardening を効かせる (#1164 Phase D)。fail なら drop。
-		if err := p.ldVerifier.VerifyIfPresent(payload.Body); err != nil {
+		//
+		// **本番では到達しない。** inbox handler は admitInbox で Signature ヘッダを
+		// 必須にしたうえで Headers を詰めて enqueue し (Host は必ず入る)、router は
+		// SignatureVerifier を必ず配線する。InboxPayload を作るのもその handler
+		// だけ。それでも検証済みとして扱うなら、転送経路と同じく**署名が覆う
+		// 内容 (compact 済みの文書) を渡す** — 生 body には署名外のキー
+		// (`_misskey_content` 等) を誰でも足せる。
+		verified, present, err := p.ldVerifier.VerifyAndCompact(payload.Body)
+		if err != nil {
 			if errors.Is(err, federation.ErrLookupUnavailable) {
 				// 上と同じ (#3121)。creator の鍵は DB から引くので、理由を
 				// 見ずに drop すると DB 障害のあいだ届いた activity が消える。
@@ -406,8 +423,11 @@ func (p *InboxProcessor) Handle(_ context.Context, t driver.Task) error {
 			p.recordInboxTelemetry(host, deliveryhealth.ClassLDSignatureFailed, started, err.Error())
 			return nil
 		}
+		if present {
+			body = verified.Body
+		}
 	}
-	if err := p.dispatch(payload.Body, signer); err != nil {
+	if err := p.dispatch(body, signer); err != nil {
 		if errors.Is(err, federation.ErrUnsupportedActivity) {
 			slog.Debug("inbox: unsupported activity, dropped", "host", host)
 			// 異常ではない (相手は正しく送っており、こちらが対応していない
@@ -503,7 +523,12 @@ func (p *InboxProcessor) verifyPayload(payload queue.InboxPayload) (*model.User,
 // authorizeActor gates the activity and returns the identity fields it read,
 // so the caller can log **who** was dropped without re-parsing the body
 // (#2716 / #2724 review MEDIUM-4)。
-func (p *InboxProcessor) authorizeActor(body []byte, signer *model.User) (federation.ActivityFields, error) {
+//
+// It also returns the body the caller must process from here on: the raw body
+// when the HTTP signature covers it (signer == actor), or the LD-Signature's
+// compacted document when the activity was forwarded, so that properties the
+// LD-Signature does not cover never reach the handlers.
+func (p *InboxProcessor) authorizeActor(body []byte, signer *model.User) (federation.ActivityFields, []byte, error) {
 	// gate は Process と同じ unwrap+Normalize を経た actor を見る必要がある。
 	// raw body を直接 parse すると `as:actor` / `{"@id":...}` / 配列 wrap で
 	// gate を空 actor にすり抜けさせ、Process だけが本当の actor で動く
@@ -516,7 +541,7 @@ func (p *InboxProcessor) authorizeActor(body []byte, signer *model.User) (federa
 	if bodyActor == "" {
 		// actor 欠落は Process 側 ("activity missing actor") が弾く。ここでは
 		// 判定不能なので素通しし、なりすまし対象が無い状態にする。
-		return fields, nil
+		return fields, body, nil
 	}
 	// activity.id host gate (upstream InboxProcessorService): activity.id は文字列
 	// 必須で、その host は actor の host と一致しなければならない。これが無いと、
@@ -525,10 +550,10 @@ func (p *InboxProcessor) authorizeActor(body []byte, signer *model.User) (federa
 	// (#1779)。署名検証後 (= 認証済み actor) に評価する。
 	activityID := fields.ID
 	if activityID == "" {
-		return fields, fmt.Errorf("activity id is not a string")
+		return fields, nil, fmt.Errorf("activity id is not a string")
 	}
 	if idHost, actorHost := uriHost(activityID), uriHost(bodyActor); idHost == "" || idHost != actorHost {
-		return fields, fmt.Errorf("signerHost != activity.id host: actor=%q id=%q", bodyActor, activityID)
+		return fields, nil, fmt.Errorf("signerHost != activity.id host: actor=%q id=%q", bodyActor, activityID)
 	}
 	signerURI := signerURIOf(signer)
 
@@ -539,37 +564,41 @@ func (p *InboxProcessor) authorizeActor(body []byte, signer *model.User) (federa
 		// 失敗 (creator 鍵未解決 / legacy LD-sig / normalize 差異) で HTTP 署名済の正規
 		// activity を drop しないようにする。
 		if p.ldVerifier != nil {
-			return fields, p.ldVerifier.CheckForbiddenDirectivesIfPresent(body)
+			if err := p.ldVerifier.CheckForbiddenDirectivesIfPresent(body); err != nil {
+				return fields, nil, err
+			}
+			return fields, body, nil
 		}
-		return fields, nil
+		return fields, body, nil
 	}
 
 	// 署名者 != actor: 転送活動の可能性。LD-Signature による actor 認証が必須。
 	if p.ldVerifier == nil {
-		return fields, fmt.Errorf("actor mismatch and no LD verifier: signer=%q actor=%q", signerURI, bodyActor)
+		return fields, nil, fmt.Errorf("actor mismatch and no LD verifier: signer=%q actor=%q", signerURI, bodyActor)
 	}
 	// LD-Signature の creator (鍵 URI) を body から読む。
 	creatorKeyID := extractLDCreator(body)
 	if creatorKeyID == "" {
-		return fields, fmt.Errorf("actor mismatch and no LD-signature: signer=%q actor=%q", signerURI, bodyActor)
+		return fields, nil, fmt.Errorf("actor mismatch and no LD-signature: signer=%q actor=%q", signerURI, bodyActor)
 	}
-	// 検証より先に creator actor を解決して鍵を取得/永続化する。VerifyAndCreator
+	// 検証より先に creator actor を解決して鍵を取得/永続化する。VerifyAndCompact
 	// は FindByKeyID の純粋 DB read で、先に解決しておかないと未知 origin actor
 	// からの最初の転送活動が常に drop される (#parity review AUTH-2、upstream
 	// getAuthUserFromKeyId は未知 actor を fetch する挙動と整合)。
 	ldUser, err := p.resolveLDCreator(activitypub.ResolveKeyURL(creatorKeyID), signer)
 	if err != nil {
-		return fields, fmt.Errorf("resolve ld-signature creator %q: %w", creatorKeyID, err)
+		return fields, nil, fmt.Errorf("resolve ld-signature creator %q: %w", creatorKeyID, err)
 	}
 	// 鍵が DB に載った状態で LD-Signature 本体を検証する。
-	if _, present, err := p.ldVerifier.VerifyAndCreator(body); err != nil {
+	verified, present, err := p.ldVerifier.VerifyAndCompact(body)
+	if err != nil {
 		// **creator だけ載せる。** signer / actor は破棄ログの専用属性になったので
 		// 重ねる必要が無い。重ねると `LastError.Message` の 200 rune 切り詰めで
 		// **原因 (crypto/rsa: verification error) が落ちる** — 診断のための PR が
 		// 別の診断面を下げることになる (#2724 review MEDIUM-1)。
-		return fields, fmt.Errorf("ld-signature verify failed (creator=%q): %w", creatorKeyID, err)
+		return fields, nil, fmt.Errorf("ld-signature verify failed (creator=%q): %w", creatorKeyID, err)
 	} else if !present {
-		return fields, fmt.Errorf("actor mismatch and no LD-signature: signer=%q actor=%q", signerURI, bodyActor)
+		return fields, nil, fmt.Errorf("actor mismatch and no LD-signature: signer=%q actor=%q", signerURI, bodyActor)
 	}
 	// LD-Signature の creator (鍵) の owner URI が activity.actor と一致するか
 	// 確認する。一致しなければ「自分の鍵で署名したが他人を actor に詐称」した
@@ -579,7 +608,18 @@ func (p *InboxProcessor) authorizeActor(body []byte, signer *model.User) (federa
 		ldURI = *ldUser.URI
 	}
 	if ldURI == "" || ldURI != bodyActor {
-		return fields, fmt.Errorf("ld-signature signer %q != activity.actor %q", ldURI, bodyActor)
+		return fields, nil, fmt.Errorf("ld-signature signer %q != activity.actor %q", ldURI, bodyActor)
+	}
+	// **以降は compact 済みの文書で判定し直す** (upstream の「もう一度actorチェック」)。
+	// 処理に渡すのは verified.Body なので、ゲートが見た actor / id と handler が
+	// 見る actor / id を一致させる。生 body の値は creator 解決と早期の足切りに
+	// 使っただけで、署名が覆っているのは compact 後の値のほう。
+	compactFields := federation.ExtractActivityFields(verified.Body)
+	if compactFields.Actor != ldURI {
+		return fields, nil, fmt.Errorf("ld-signature signer %q != compacted activity.actor %q", ldURI, compactFields.Actor)
+	}
+	if idHost := uriHost(compactFields.ID); idHost == "" || idHost != uriHost(compactFields.Actor) {
+		return fields, nil, fmt.Errorf("signerHost != compacted activity.id host: actor=%q id=%q", compactFields.Actor, compactFields.ID)
 	}
 	// **転送された actor 側の連合可否も見る。**
 	//
@@ -593,19 +633,24 @@ func (p *InboxProcessor) authorizeActor(body []byte, signer *model.User) (federa
 	// upstream は署名者側 (`InboxProcessorService.ts:76-80`) と LD-Signature 側
 	// (`:207-211`) の 2 箇所で `isFederationAllowedHost` を見る。
 	if p.isBlocked(ldUser) {
-		return fields, fmt.Errorf("blocked ld-signature actor host: %q", ldURI)
+		return fields, nil, fmt.Errorf("blocked ld-signature actor host: %q", ldURI)
 	}
-	return fields, nil
+	return compactFields, verified.Body, nil
 }
 
-// uriHost returns the lowercased hostname of a URI, or "" when the URI is
-// unparseable or has no host. Used by the activity.id host gate (#1779)。
+// uriHost returns the normalized hostname of a URI (idnhost.Puny, port
+// ignored), or "" when the URI is unparseable or has no host. Used by the
+// activity.id host gate (#1779)。
+//
+// 保存側・連合ゲートと同じ正規化を掛ける。小文字化だけだと、接続先が同じ
+// `ｅｖｉｌ.example` と `evil.example` を別 host として弾く (安全側ではあるが、
+// 同じ authority の別綴りを同一視する規則が場所ごとに違う状態になる)。
 func uriHost(uri string) string {
 	u, err := url.Parse(uri)
-	if err != nil {
+	if err != nil || u.Hostname() == "" {
 		return ""
 	}
-	return strings.ToLower(u.Hostname())
+	return idnhost.Puny(u.Hostname())
 }
 
 // hasLDSignature reports whether the raw activity body carries a non-null
@@ -730,7 +775,7 @@ func (p *InboxProcessor) dispatch(body []byte, signer *model.User) error {
 // resolveLDCreator resolves the LD-Signature creator, marking it as
 // relay-derived when a subscribed relay delivered the activity (#2340).
 //
-// 転送活動の署名検証には creator の公開鍵が要り、`VerifyAndCreator` は DB read
+// 転送活動の署名検証には creator の公開鍵が要り、`VerifyAndCompact` は DB read
 // なので先に解決して載せる必要がある。この経路は ephemeral 化できないため、
 // 印を付けて後追いの孤児掃除で回収する。
 //

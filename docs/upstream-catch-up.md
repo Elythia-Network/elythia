@@ -197,7 +197,7 @@ fork へ push → tag を push → 親リポの gitlink と doc」。逆順だ�
 - `docs/divergence.md` の pin 行（tag と**短縮 SHA の併記**。`make submodulepin-check` が gitlink と突き合わせる）
 - `docs/divergence.md` §4-2 の表に 1 行
 - 同ファイル冒頭サマリの件数と範囲（`TestDivergenceDoc_*` が表と突き合わせる）
-- `Dockerfile.bundled` の `MISSKEY_ASSETS_IMAGE`（配る image に焼く frontend。ずれても image はビルドできるので CI は落ちない）
+- `Dockerfile.bundled` の `MISSKEY_ASSETS_IMAGE`（配る image に焼く frontend。ずれても image はビルドできるので CI は落ちない）。**`<tag>@sha256:<digest>` で書き、digest も取り直す** — BuildKit は digest を優先するので、tag だけ上げると新しい tag を名乗る古い frontend が焼き込まれる。digest は `docker buildx imagetools inspect --raw ghcr.io/shiroha-a/misskey-ts-assets:<tag> | sha256sum` で取れる (manifest のバイト列の sha256 が digest)。tag と digest の対応は `docker.yml` の `build-and-push-bundled` が registry に問い合わせて見る (過去タグを `-f tag=` で publish し直すときは、当時の Dockerfile.bundled が digest を持たないので照合を skip して warning に落とす)
 
 機械で守られているのはこのうち「表の連番が規則どおりか」（`assertForkTagSequence`。
 数字 +1 か、同じ数字への次の英字しか許さない）と「pin 行 ↔ gitlink」「tag → commit」

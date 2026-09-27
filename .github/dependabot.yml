@@ -1,0 +1,43 @@
+# GitHub Actions の action は commit SHA で固定している (docs/ci.md の
+# 「action の版固定」)。固定すると tag の付け替えでは追従しなくなるので、
+# 更新は dependabot の PR で受ける。dependabot は SHA と `# vX.Y.Z` の
+# コメントを一緒に書き換える。
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    # 1 週間分を 1 PR にまとめる。action ごとに PR が立つと、required check を
+    # 回す回数だけ増えてレビューの単位としても細かすぎる。
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "Chore actions"
+
+  # 配る Dockerfile の base image は `<tag>@sha256:<digest>` で固定している
+  # (Dockerfile のコメント)。固定すると公式 image の publish し直し (alpine /
+  # distroless のセキュリティ更新) を拾わなくなるので、digest の更新はここで
+  # 受ける。**tag の版は上げさせない** — golang の版は go.mod の `go` directive
+  # と揃える必要があり (vulncheck job が見る)、alpine の minor を上げると
+  # runtime の中身が変わる。版を上げるのは人が go.mod と一緒に行う。
+  - package-ecosystem: docker
+    directories:
+      - /
+      - /deploy/uds
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
+          - version-update:semver-patch
+    groups:
+      docker-base-images:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "Chore docker"

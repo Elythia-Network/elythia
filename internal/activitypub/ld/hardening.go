@@ -41,7 +41,10 @@ var forbiddenDirectives = map[string]struct{}{
 // is encountered. Mirrors upstream `JsonLd.checkForForbiddenDirectives`。
 //
 // Caller (= InboxProcessor) は LD-Signature verify の前に必ず本関数を通すこと。
-// 順序は compact → CheckForForbiddenDirectives → Freeze → VerifyRsaSignature2017。
+// upstream の順序は compact → CheckForForbiddenDirectives → Freeze →
+// VerifyRsaSignature2017。mk-go の受信経路 (federation.LDSignatureVerifier) は
+// fetch しないので Freeze を compact の前に置き、生の文書と compact 後の文書の
+// 両方に本関数を掛ける。
 func (p *Processor) CheckForForbiddenDirectives(value any) error {
 	switch v := value.(type) {
 	case map[string]any:

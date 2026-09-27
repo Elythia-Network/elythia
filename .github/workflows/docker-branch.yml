@@ -43,8 +43,12 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         # submodule は不要。配布物は compose と設定のひな形だけ。
+        with:
+          # push は $RUNNER_TEMP に作り直した別リポジトリから、token を URL に
+          # 明示して行う。checkout の認証情報は使わないので残さない。
+          persist-credentials: false
 
       # 生成元をそのままコピーする。ここで内容を書き換えないのが要点。
       - name: Assemble branch content

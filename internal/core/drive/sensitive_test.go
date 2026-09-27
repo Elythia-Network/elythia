@@ -34,6 +34,13 @@ func TestIsSilencedHost(t *testing.T) {
 	assert.False(t, IsSilencedHost("anything.com", nil))
 }
 
+func TestIsSilencedHost_IgnoresPort(t *testing.T) {
+	hosts := []string{"bad.example.com"}
+	assert.True(t, IsSilencedHost("bad.example.com:8443", hosts))
+	assert.True(t, IsSilencedHost("sub.bad.example.com:8443", hosts))
+	assert.False(t, IsSilencedHost("notbad.example.com:8443", hosts))
+}
+
 func TestIsSilencedHost_EmptyEntries(t *testing.T) {
 	assert.False(t, IsSilencedHost("anything.com", []string{"", "  "}))
 }

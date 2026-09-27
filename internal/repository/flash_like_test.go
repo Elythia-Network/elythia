@@ -145,3 +145,59 @@ func TestFlashLikeRepository_ListByUser_QueryError(t *testing.T) {
 	_, err := repo.ListByUser("nobody", "", "", 10, 0)
 	assert.Error(t, err)
 }
+
+// **like した後に非公開化された Flash を一覧に出さないこと。**
+//
+// flash/my-likes は Flash を script ごと返すので、ここで絞らないと
+// flash/show の可視性判定 (非公開は所有者のみ) を迂回して読める。
+func TestFlashLikeRepository_ListByUser_ExcludesPrivateFlashOfOthers(t *testing.T) {
+	flashRepo := NewFlashRepository(testDB)
+	repo := NewFlashLikeRepository(testDB)
+	owner := insertTestUser(t, "u_flp_own", "flpowner")
+	defer cleanupUser(t, owner.ID)
+	liker := insertTestUser(t, "u_flp_lik", "flpliker")
+	defer cleanupUser(t, liker.ID)
+
+	pub := newTestFlash("fl_p_pub", owner.ID, "shared topic public")
+	priv := newTestFlash("fl_p_priv", owner.ID, "shared topic private")
+	priv.Visibility = "private"
+	self := newTestFlash("fl_p_self", liker.ID, "shared topic mine")
+	self.Visibility = "private"
+	for _, f := range []*model.Flash{pub, priv, self} {
+		require.NoError(t, flashRepo.Create(f))
+		defer cleanupFlash(t, f.ID)
+	}
+	likes := []*model.FlashLike{
+		{ID: "fll_p_pub", UserID: liker.ID, FlashID: pub.ID},
+		{ID: "fll_p_priv", UserID: liker.ID, FlashID: priv.ID},
+		// 自分の Flash は like できないが、行があっても所有者には見えてよい。
+		{ID: "fll_p_self", UserID: liker.ID, FlashID: self.ID},
+	}
+	for _, l := range likes {
+		require.NoError(t, repo.Create(l))
+	}
+	defer testDB.Exec(`DELETE FROM "flash_like" WHERE id IN (?, ?, ?)`, likes[0].ID, likes[1].ID, likes[2].ID)
+
+	flashIDs := func(rows []*model.FlashLike) []string {
+		out := make([]string, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, r.FlashID)
+		}
+		return out
+	}
+
+	rows, err := repo.ListByUser(liker.ID, "", "", 10, 0)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{pub.ID, self.ID}, flashIDs(rows))
+
+	rows, err = repo.ListByUserSearch(liker.ID, "shared", "", "", 10, 0)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{pub.ID, self.ID}, flashIDs(rows))
+
+	// 所有者自身が like 行を持つ場合は非公開でも出る。
+	require.NoError(t, repo.Create(&model.FlashLike{ID: "fll_p_own", UserID: owner.ID, FlashID: priv.ID}))
+	defer testDB.Exec(`DELETE FROM "flash_like" WHERE id = ?`, "fll_p_own")
+	rows, err = repo.ListByUser(owner.ID, "", "", 10, 0)
+	require.NoError(t, err)
+	assert.Equal(t, []string{priv.ID}, flashIDs(rows))
+}

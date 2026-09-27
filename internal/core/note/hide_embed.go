@@ -49,7 +49,7 @@ func HideEmbedDecision(viewer *model.User, f EmbedFacts, follows func(authorID s
 	// public/home note は、フォロワー判定の前に followers へ降格する。著者設定
 	// 由来なので prefs が判明している時のみ。
 	if vis == string(model.NoteVisibilityPublic) || vis == string(model.NoteVisibilityHome) {
-		if f.AuthorPrefsKnown && shouldHideNoteByTime(f.MakeNotesFollowersOnlyBefore, f.CreatedAtMs, nowMs) {
+		if f.AuthorPrefsKnown && ShouldHideNoteByTime(f.MakeNotesFollowersOnlyBefore, f.CreatedAtMs, nowMs) {
 			vis = string(model.NoteVisibilityFollowers)
 		}
 	}
@@ -68,7 +68,7 @@ func HideEmbedDecision(viewer *model.User, f EmbedFacts, follows func(authorID s
 		return true
 	}
 	// makeNotesHiddenBefore: 期限切れの古い note を隠す。
-	if f.AuthorPrefsKnown && shouldHideNoteByTime(f.MakeNotesHiddenBefore, f.CreatedAtMs, nowMs) {
+	if f.AuthorPrefsKnown && ShouldHideNoteByTime(f.MakeNotesHiddenBefore, f.CreatedAtMs, nowMs) {
 		return true
 	}
 	// specified: 指定ユーザー以外には隠す (note-intrinsic, prefs 不要)。
@@ -135,14 +135,14 @@ func HideNoteByPrefsDecision(viewer *model.User, f EmbedFacts, follows func(auth
 		return true
 	}
 	// makeNotesHiddenBefore: 期限切れの古い note を隠す。
-	if shouldHideNoteByTime(f.MakeNotesHiddenBefore, f.CreatedAtMs, nowMs) {
+	if ShouldHideNoteByTime(f.MakeNotesHiddenBefore, f.CreatedAtMs, nowMs) {
 		return true
 	}
 	// treatVisibility: public/home が makeNotesFollowersOnlyBefore ウィンドウを
 	// 過ぎたら followers へ降格。降格した時だけ followers-recipient 判定で hide
 	// する (元から followers/specified の note は intrinsic ゲート任せ)。
 	if f.Visibility == string(model.NoteVisibilityPublic) || f.Visibility == string(model.NoteVisibilityHome) {
-		if shouldHideNoteByTime(f.MakeNotesFollowersOnlyBefore, f.CreatedAtMs, nowMs) {
+		if ShouldHideNoteByTime(f.MakeNotesFollowersOnlyBefore, f.CreatedAtMs, nowMs) {
 			return !viewerIsFollowersRecipient(viewerID, f, follows)
 		}
 	}
@@ -162,7 +162,7 @@ func ShouldDowngradeVisibility(f EmbedFacts, nowMs int64) bool {
 	if f.Visibility != string(model.NoteVisibilityPublic) && f.Visibility != string(model.NoteVisibilityHome) {
 		return false
 	}
-	return shouldHideNoteByTime(f.MakeNotesFollowersOnlyBefore, f.CreatedAtMs, nowMs)
+	return ShouldHideNoteByTime(f.MakeNotesFollowersOnlyBefore, f.CreatedAtMs, nowMs)
 }
 
 // viewerIsFollowersRecipient reports whether viewer is allowed to see a
@@ -184,12 +184,12 @@ func viewerIsFollowersRecipient(viewerID string, f EmbedFacts, follows func(auth
 	return follows != nil && follows(f.AuthorID)
 }
 
-// shouldHideNoteByTime ports upstream misc/should-hide-note-by-time.ts.
+// ShouldHideNoteByTime ports upstream misc/should-hide-note-by-time.ts.
 //
 // hiddenBefore は秒単位。nil は無効 (隠さない)。<= 0 は「作成からの経過秒」での相対
 // 判定で、経過 >= |hiddenBefore| 秒なら隠す。> 0 は絶対 epoch 秒での判定で、
 // createdAt(秒) <= hiddenBefore なら隠す。createdAtMs / nowMs はミリ秒。
-func shouldHideNoteByTime(hiddenBefore *int, createdAtMs, nowMs int64) bool {
+func ShouldHideNoteByTime(hiddenBefore *int, createdAtMs, nowMs int64) bool {
 	if hiddenBefore == nil {
 		return false
 	}

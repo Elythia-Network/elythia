@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"log/slog"
-	"net"
 	"net/url"
 	"strings"
 	"time"
@@ -87,13 +86,18 @@ type RedisOptions struct {
 
 // DBOptions represents PostgreSQL connection configuration.
 type DBOptions struct {
-	Host         string            `mapstructure:"host"`
-	Port         int               `mapstructure:"port"`
-	DB           string            `mapstructure:"db"`
-	User         string            `mapstructure:"user"`
-	Pass         string            `mapstructure:"pass"`
-	DisableCache bool              `mapstructure:"disableCache"`
-	Extra        map[string]string `mapstructure:"extra"`
+	Host         string `mapstructure:"host"`
+	Port         int    `mapstructure:"port"`
+	DB           string `mapstructure:"db"`
+	User         string `mapstructure:"user"`
+	Pass         string `mapstructure:"pass"`
+	DisableCache bool   `mapstructure:"disableCache"`
+	// Extra mirrors upstream's db.extra (passed through to node-postgres).
+	// mk-go only reads the TLS keys; see ResolveDBTLS. 値の型は YAML の
+	// ままにする — string に weak decode すると bool の true が "1" になり、
+	// upstream の object 形式 (ssl: { rejectUnauthorized: false }) は読めずに
+	// 起動が落ちていた。
+	Extra map[string]any `mapstructure:"extra"`
 	// Pool tuning (Go固有。Misskey TS設定にはない)
 	MaxOpenConns    *int `mapstructure:"maxOpenConns"`
 	MaxIdleConns    *int `mapstructure:"maxIdleConns"`
@@ -320,10 +324,13 @@ type Source struct {
 	DeactivateAntennaThreshold   *int   `mapstructure:"deactivateAntennaThreshold"`
 	PidFile                      string `mapstructure:"pidFile"`
 
-	// TrustProxy is a list of CIDR ranges for trusted reverse proxies.
-	// When set, Echo uses X-Forwarded-For from these ranges to determine
-	// the real client IP. Defaults to private IP ranges (TS-compatible).
-	TrustProxy []string `mapstructure:"trustProxy"`
+	// TrustProxy lists the reverse proxies whose X-Forwarded-For entries are
+	// trusted. Accepts a list (or comma-separated string) of CIDRs, bare IPs
+	// and the proxy-addr names loopback / linklocal / uniquelocal, or false
+	// to trust none. Unset means DefaultTrustProxy (TS-compatible). See
+	// resolveTrustProxy. 型は any にしてある — []string だと bool の true が
+	// weak decode で ["1"] になり、元の値の形を区別できない。
+	TrustProxy any `mapstructure:"trustProxy"`
 
 	// TestMode enables destructive test-only endpoints such as /api/reset-db.
 	// Must never be enabled in production. Can be overridden via MK_TESTMODE=1.
@@ -498,7 +505,9 @@ type Config struct {
 	PidFile                      string
 	Logging                      *LoggingOptions
 
-	// TrustProxy is a list of CIDR ranges for trusted reverse proxies.
+	// TrustProxy is the normalized list of trusted reverse proxy CIDRs.
+	// nil means "not resolved" and is treated as DefaultTrustProxy; a non-nil
+	// empty slice means no proxy is trusted (X-Forwarded-For is ignored).
 	TrustProxy []string
 
 	// TestMode enables destructive test-only endpoints such as /api/reset-db.
@@ -769,6 +778,17 @@ func resolve(src *Source) (*Config, error) {
 		return nil, err
 	}
 
+	trustProxy, err := resolveTrustProxy(src.TrustProxy)
+	if err != nil {
+		return nil, err
+	}
+
+	// DSN() は Config から毎回導出するので、誤った db.extra はここで起動を
+	// 止める (DSN 側で黙って既定に倒すと、平文 / 無検証で繋がってしまう)。
+	if _, err := ResolveDBTLS(src.DB.Extra); err != nil {
+		return nil, err
+	}
+
 	cfg := &Config{
 		Version:     MisskeyVersion,
 		URL:         parsedURL.Scheme + "://" + parsedURL.Host,
@@ -856,7 +876,7 @@ func resolve(src *Source) (*Config, error) {
 		PidFile:                      src.PidFile,
 		Logging:                      src.Logging,
 
-		TrustProxy: resolveTrustProxy(src.TrustProxy),
+		TrustProxy: trustProxy,
 
 		TestMode:                            src.TestMode,
 		Dev:                                 src.Dev,
@@ -950,40 +970,6 @@ func (r RedisOptions) KeyPrefix() string {
 	return r.Prefix + ":"
 }
 
-// DefaultTrustProxy is the default set of CIDR ranges for trusted proxies,
-// matching the TypeScript Misskey defaults (private IP ranges).
-var DefaultTrustProxy = []string{
-	"10.0.0.0/8",
-	"172.16.0.0/12",
-	"192.168.0.0/16",
-	"127.0.0.1/32",
-	"::1/128",
-	"fc00::/7",
-}
-
-// resolveTrustProxy returns the provided list or the default if empty.
-func resolveTrustProxy(provided []string) []string {
-	if len(provided) > 0 {
-		return provided
-	}
-	return DefaultTrustProxy
-}
-
-// ParseTrustProxy converts a list of CIDR strings into parsed *net.IPNet values.
-// Invalid CIDRs are skipped with a warning log.
-func ParseTrustProxy(cidrs []string) []*net.IPNet {
-	var nets []*net.IPNet
-	for _, cidr := range cidrs {
-		_, ipNet, err := net.ParseCIDR(cidr)
-		if err != nil {
-			slog.Warn("invalid trustProxy CIDR, skipping", "cidr", cidr, "err", err)
-			continue
-		}
-		nets = append(nets, ipNet)
-	}
-	return nets
-}
-
 // deriveMediaProxySecret returns the configured secret for HMAC-signed media
 // proxy URLs, or nil when the operator did not set one.
 //
@@ -1057,56 +1043,6 @@ func normalizeVideoThumbMode(raw string) string {
 	default:
 		return "post"
 	}
-}
-
-// DSN returns the PostgreSQL connection string.
-//
-// Host が "/" で始まる場合は UNIX domain socket 接続とみなす。libpq / pgx の
-// 慣例に従い、host にソケットディレクトリのパスを、port に対応する PG ポート番号
-// (socket 名 .s.PGSQL.<port> の末尾数字) を渡す。UDS では TLS を張れないので
-// sslmode は強制的に disable になる。
-func (c *Config) DSN() string {
-	if IsUnixSocketPath(c.DB.Host) {
-		return fmt.Sprintf(
-			"host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
-			c.DB.Host, c.DB.Port, c.DB.User, c.DB.Pass, c.DB.DB,
-		)
-	}
-	sslMode := "disable"
-	if v, ok := c.DB.Extra["ssl"]; ok && v == "true" {
-		sslMode = "require"
-	}
-	return fmt.Sprintf(
-		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		c.DB.Host, c.DB.Port, c.DB.User, c.DB.Pass, c.DB.DB, sslMode,
-	)
-}
-
-// SlaveDSN returns the PostgreSQL connection string for the idx-th read
-// replica declared in DBSlaves. idx が範囲外の場合は空文字列を返す。
-//
-// SSL/sslmode / Unix socket 判定は primary の DB 設定に合わせる。
-// Misskey 本家では dbSlaves エントリ内で sslmode を個別指定する API は無いため、
-// primary の extra.ssl を継承する (same-network / same-cluster replica を前提)。
-func (c *Config) SlaveDSN(idx int) string {
-	if idx < 0 || idx >= len(c.DBSlaves) {
-		return ""
-	}
-	s := c.DBSlaves[idx]
-	if IsUnixSocketPath(s.Host) {
-		return fmt.Sprintf(
-			"host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
-			s.Host, s.Port, s.User, s.Pass, s.DB,
-		)
-	}
-	sslMode := "disable"
-	if v, ok := c.DB.Extra["ssl"]; ok && v == "true" {
-		sslMode = "require"
-	}
-	return fmt.Sprintf(
-		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		s.Host, s.Port, s.User, s.Pass, s.DB, sslMode,
-	)
 }
 
 // IsUnixSocketPath reports whether the given host string points to a UNIX

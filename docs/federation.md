@@ -84,12 +84,30 @@ HTTP Signature からは言えない。これを埋めるのが LD-Signature。
 - **verify するのは 2 つの経路だけ。** (1) HTTP 署名ヘッダの無い legacy /
   direct-enqueue 経路、(2) **HTTP 署名者と body の actor が食い違う転送経路**。
   後者は LD-Signature が body actor を認証している場合にのみ通す (actor spoofing 対策)
-- **upstream と違って `compact` を呼ばない** (#2106 L49、divergence 登録済み)。
-  upstream は `compact → checkForForbiddenDirectives → freeze → verifyRsaSignature2017`
-  の順だが、mk-go は raw activity に直接 check を掛ける。`ld.PreloadedLoader` が
-  HTTP fetch を一切行わない (AS2.0 / security v1 / identity v1 の 3 つだけを resolve)
-  ので、remote context で directive を後付けする経路が構造的に無いことが前提。
-  **将来 fetch fallback を足すなら compact 後の check に切り替える必要がある**
+- **転送経路では upstream と同じく compact し、compact 後の文書を処理に渡す。**
+  (1) の legacy 経路も同じく compact 後の文書を渡す (本番の inbox handler は必ず
+  Headers を詰めるので到達しないが、検証済みとして扱う以上は生 body を渡さない)。
+  `signature` を外して upstream の `CONTEXT` (`ld.InboxCompactContext`) へ compact し、
+  forbidden directive の検査と RsaSignature2017 の検証もその文書に掛け
+  (生の文書の検査はキー名しか見ないので、inline context で `"g": "@graph"` と
+  別名を付けると素通りする。compact が `@graph` / `@included` に戻すのでそこで捕まる)、
+  `authorizeActor` は actor / id をその文書で見直したうえで handler へ渡す。
+  **生 body を処理してはいけない** — AS2 context の `"@vocab": "_:"` により、context で
+  定義されていない語 (`_misskey_content` など) は URDNA2015 で blank node 述語として
+  捨てられ署名に含まれないので、転送者が署名済み activity にそういうキーを足すと
+  原著者名義の本文を差し替えられる (以前の mk-go がそうだった)。compact 後の文書では
+  署名外の述語は `_:<name>` のキーで残り、handler からは見えない
+- **`signature.created` が過去 7 日 / 未来 1 時間の外なら拒否する。欠落・複数・読めない
+  値も拒否する** (upstream には無い。転送経路の replay 対策。divergence 登録済み)。
+  **値は JSON の `created` キーではなく、署名された options の正規形 (n-quads) の
+  `dc:created` から読む** (`ld.Processor.SignedCreated`)。options は identity/v1 で
+  正規化されるので、`created` を `dc:created` (型付き) や完全 IRI に書き換えても RDF は
+  同じで署名は通る。キーだけを見ると「欠落」と読まれて窓を外せた
+- **preload 外の remote context は解決しない** (#2106 L49、divergence 登録済み)。
+  `ld.PreloadedLoader` は HTTP fetch を一切行わない (AS2.0 / security v1 / identity v1 の
+  3 つだけを resolve) ので、それ以外を参照する転送 activity は compact 段で
+  `ErrCacheFrozen` になり拒否される。freeze は compact の前に置いてある (upstream は後)。
+  **将来 fetch fallback を足すなら freeze を compact の後へ動かす必要がある**
 - canonicalize は外部 URL を引きうる操作なので、SSRF / キャッシュ増幅 / spoofing 対策を
   `ld/hardening.go` と `ld/loader.go` に置いている
 

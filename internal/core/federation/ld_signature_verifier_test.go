@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -46,7 +47,6 @@ func TestLDSignatureVerifier_ForbiddenDirective_Rejected(t *testing.T) {
 		"signature": {
 			"type": "RsaSignature2017",
 			"creator": "https://example.com/users/alice#main-key",
-			"created": "2026-05-21T00:00:00Z",
 			"signatureValue": "AAAA"
 		}
 	}`))
@@ -71,15 +71,16 @@ func TestLDSignatureVerifier_MissingCreator_Rejected(t *testing.T) {
 }
 
 // signature field がオブジェクトでない (例: 文字列) 場合は reject。present=true
-// を報告しつつ error を返す (VerifyAndCreator 経路)。
+// を報告しつつ error を返す (VerifyAndCompact 経路)。
 func TestLDSignatureVerifier_SignatureNotObject_Rejected(t *testing.T) {
 	repo := testutil.NewMockUserPublickeyRepository()
 	v := corefederation.NewLDSignatureVerifier(repo)
 
-	creator, present, err := v.VerifyAndCreator([]byte(`{"type":"Note","signature":"not-an-object"}`))
+	verified, present, err := v.VerifyAndCompact([]byte(`{"type":"Note","signature":"not-an-object"}`))
 	require.Error(t, err)
 	assert.True(t, present, "signature field exists, so present must be true")
-	assert.Empty(t, creator)
+	assert.Empty(t, verified.Creator)
+	assert.Nil(t, verified.Body)
 	assert.Contains(t, err.Error(), "not an object")
 }
 
@@ -92,6 +93,7 @@ func TestLDSignatureVerifier_UnknownCreator_Rejected(t *testing.T) {
 		"signature": {
 			"type": "RsaSignature2017",
 			"creator": "https://example.com/users/unknown#main-key",
+			"created": "` + ldFreshCreated() + `",
 			"signatureValue": "AAAA"
 		}
 	}`))
@@ -123,7 +125,7 @@ func TestLDSignatureVerifier_BadSignatureValueRejected(t *testing.T) {
 		"signature": {
 			"type": "RsaSignature2017",
 			"creator": "https://example.com/users/alice#main-key",
-			"created": "2026-05-21T00:00:00Z",
+			"created": "` + ldFreshCreated() + `",
 			"signatureValue": "AAAA"
 		}
 	}`))
@@ -131,6 +133,7 @@ func TestLDSignatureVerifier_BadSignatureValueRejected(t *testing.T) {
 	// rsa.VerifyPKCS1v15 経由の verify mismatch。
 	assert.NotContains(t, err.Error(), "public key not found",
 		"public key は resolve できた状態で signature verify で fail することを確認")
+	assert.ErrorIs(t, err, ld.ErrSignatureMismatch, "created の窓より手前で落ちていないこと")
 }
 
 func TestLDSignatureVerifier_NilRepo_NoOp(t *testing.T) {
@@ -214,7 +217,7 @@ func TestLDSignatureVerifier_ValidSignatureAccepted(t *testing.T) {
 		"type":     "Note",
 		"id":       "https://example.com/notes/n1",
 		"content":  "hello",
-	}, privPEM, keyID, time.Unix(1700000000, 0).UTC())
+	}, privPEM, keyID, time.Now())
 	require.NoError(t, err)
 
 	body, err := json.Marshal(signed)
@@ -253,7 +256,6 @@ func TestLDSignatureVerifier_NonPreloadedContextRejectedByFreeze(t *testing.T) {
 		"signature": {
 			"type": "RsaSignature2017",
 			"creator": "https://example.com/users/alice#main-key",
-			"created": "2023-11-14T22:13:20Z",
 			"signatureValue": "AAAA"
 		}
 	}`)
@@ -278,6 +280,7 @@ func TestLDSignatureVerifier_KeyLookupFailureIsLookupUnavailable(t *testing.T) {
 		"signature": {
 			"type": "RsaSignature2017",
 			"creator": "https://example.com/users/alice#main-key",
+			"created": "` + ldFreshCreated() + `",
 			"signatureValue": "AAAA"
 		}
 	}`)
@@ -290,4 +293,300 @@ func TestLDSignatureVerifier_KeyLookupFailureIsLookupUnavailable(t *testing.T) {
 	require.Error(t, err)
 	assert.NotErrorIs(t, err, corefederation.ErrLookupUnavailable)
 	assert.Contains(t, err.Error(), "public key not found")
+}
+
+// ldFreshCreated returns a `signature.created` value inside the accepted
+// window, for fixtures that must get past the window check.
+func ldFreshCreated() string {
+	return time.Now().UTC().Format(time.RFC3339)
+}
+
+// ldTestKey registers a fresh RSA key for alice and returns its private PEM.
+func ldTestKey(t *testing.T, repo *testutil.MockUserPublickeyRepository) (keyID, privPEM string) {
+	t.Helper()
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	pubDER, err := x509.MarshalPKIXPublicKey(&priv.PublicKey)
+	require.NoError(t, err)
+	keyID = "https://example.com/users/alice#main-key"
+	repo.Keys["alice"] = &model.UserPublickey{
+		UserID: "alice", KeyID: keyID,
+		KeyPEM: string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubDER})),
+	}
+	privPEM = string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)}))
+	return keyID, privPEM
+}
+
+// **署名が覆っていないキーは compact 後の Body に短い名前で残らない。**
+// Mastodon の context は `_misskey_content` を定義しないので、AS2 の
+// `@vocab: "_:"` で blank node IRI になり署名に含まれない。署名は通るが、
+// Body の object に `_misskey_content` キーがあってはならない。
+func TestLDSignatureVerifier_CompactDropsUnsignedKeys(t *testing.T) {
+	repo := testutil.NewMockUserPublickeyRepository()
+	keyID, privPEM := ldTestKey(t, repo)
+
+	signed, err := ld.NewProcessor().SignRsaSignature2017(map[string]any{
+		"@context": []any{"https://www.w3.org/ns/activitystreams", map[string]any{"sensitive": "as:sensitive"}},
+		"id":       "https://example.com/notes/n1/activity",
+		"type":     "Create",
+		"actor":    "https://example.com/users/alice",
+		"to":       []any{"https://www.w3.org/ns/activitystreams#Public"},
+		"object": map[string]any{
+			"id":        "https://example.com/notes/n1",
+			"type":      "Note",
+			"content":   "<p>signed</p>",
+			"sensitive": false,
+		},
+	}, privPEM, keyID, time.Now())
+	require.NoError(t, err)
+	signed["object"].(map[string]any)["_misskey_content"] = "forged"
+	signed["object"].(map[string]any)["quoteUrl"] = "https://evil.example/notes/x"
+	body, err := json.Marshal(signed)
+	require.NoError(t, err)
+
+	verified, present, err := corefederation.NewLDSignatureVerifier(repo).VerifyAndCompact(body)
+	require.NoError(t, err, "署名外のキーを足しても LD-Signature 自体は通る (だから compact が要る)")
+	require.True(t, present)
+	assert.Equal(t, keyID, verified.Creator)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(verified.Body, &got))
+	obj, ok := got["object"].(map[string]any)
+	require.True(t, ok, "object が残っていない: %s", verified.Body)
+	assert.NotContains(t, obj, "_misskey_content", "署名外の _misskey_content が残っている")
+	assert.NotContains(t, obj, "quoteUrl", "署名外の quoteUrl が残っている")
+	assert.Equal(t, "<p>signed</p>", obj["content"])
+	assert.Equal(t, false, obj["sensitive"])
+	assert.Equal(t, "as:Public", got["to"], "upstream と同じ compact 形になること")
+	assert.Equal(t, "https://example.com/users/alice", got["actor"])
+	sig, ok := got["signature"].(map[string]any)
+	require.True(t, ok, "signature が付け直されていない")
+	assert.Equal(t, keyID, sig["creator"])
+}
+
+// 署名した語彙 (context で定義された `_misskey_content`) は compact 後も残る。
+func TestLDSignatureVerifier_CompactKeepsSignedExtensionKeys(t *testing.T) {
+	repo := testutil.NewMockUserPublickeyRepository()
+	keyID, privPEM := ldTestKey(t, repo)
+
+	signed, err := ld.NewProcessor().SignRsaSignature2017(map[string]any{
+		"@context": []any{
+			"https://www.w3.org/ns/activitystreams",
+			map[string]any{"misskey": "https://misskey-hub.net/ns#", "_misskey_content": "misskey:_misskey_content"},
+		},
+		"id":               "https://example.com/notes/n1",
+		"type":             "Note",
+		"_misskey_content": "signed **mfm**",
+	}, privPEM, keyID, time.Now())
+	require.NoError(t, err)
+	body, err := json.Marshal(signed)
+	require.NoError(t, err)
+
+	verified, _, err := corefederation.NewLDSignatureVerifier(repo).VerifyAndCompact(body)
+	require.NoError(t, err)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(verified.Body, &got))
+	assert.Equal(t, "signed **mfm**", got["_misskey_content"])
+}
+
+// signature.created の窓 (replay 対策)。
+func TestLDSignatureVerifier_CreatedWindow(t *testing.T) {
+	repo := testutil.NewMockUserPublickeyRepository()
+	keyID, privPEM := ldTestKey(t, repo)
+	v := corefederation.NewLDSignatureVerifier(repo)
+	doc := map[string]any{
+		"@context": "https://www.w3.org/ns/activitystreams",
+		"id":       "https://example.com/notes/n1",
+		"type":     "Note",
+		"content":  "hello",
+	}
+	sign := func(t *testing.T, created time.Time) []byte {
+		t.Helper()
+		signed, err := ld.NewProcessor().SignRsaSignature2017(doc, privPEM, keyID, created)
+		require.NoError(t, err)
+		b, err := json.Marshal(signed)
+		require.NoError(t, err)
+		return b
+	}
+
+	tests := []struct {
+		name    string
+		created time.Time
+		wantErr bool
+	}{
+		{name: "just signed", created: time.Now()},
+		{name: "six days old", created: time.Now().Add(-6 * 24 * time.Hour)},
+		{name: "slightly ahead", created: time.Now().Add(30 * time.Minute)},
+		{name: "eight days old", created: time.Now().Add(-8 * 24 * time.Hour), wantErr: true},
+		{name: "two hours ahead", created: time.Now().Add(2 * time.Hour), wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := v.VerifyIfPresent(sign(t, tc.created))
+			if tc.wantErr {
+				require.ErrorIs(t, err, corefederation.ErrLDSignatureExpired)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+
+	// created が文字列でない / 読めない形式は、窓の判定ができないので拒否する。
+	for name, created := range map[string]string{
+		"not a string": `12345`,
+		"unparseable":  `"yesterday"`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			body := []byte(`{
+				"@context": "https://www.w3.org/ns/activitystreams",
+				"type": "Note",
+				"signature": {
+					"type": "RsaSignature2017",
+					"creator": "` + keyID + `",
+					"created": ` + created + `,
+					"signatureValue": "AAAA"
+				}
+			}`)
+			require.ErrorIs(t, v.VerifyIfPresent(body), corefederation.ErrLDSignatureExpired)
+		})
+	}
+}
+
+// **created は署名された RDF から読む。** `created` を `dc:created` (型付き) や
+// 完全 IRI へ移しても RDF は同じなので署名は通る。JSON のキーだけを見る判定は
+// これを「欠落」と読み、古い署名の窓を外せた。
+func TestLDSignatureVerifier_CreatedWindowSeesAliasedKeys(t *testing.T) {
+	repo := testutil.NewMockUserPublickeyRepository()
+	keyID, privPEM := ldTestKey(t, repo)
+	v := corefederation.NewLDSignatureVerifier(repo)
+	doc := map[string]any{
+		"@context": "https://www.w3.org/ns/activitystreams",
+		"id":       "https://example.com/notes/n1",
+		"type":     "Note",
+		"content":  "hello",
+	}
+	aliases := map[string]func(sig map[string]any, created string){
+		"dc:created": func(sig map[string]any, created string) {
+			sig["dc:created"] = map[string]any{"@value": created, "@type": "xsd:dateTime"}
+		},
+		"absolute IRI": func(sig map[string]any, created string) {
+			sig["http://purl.org/dc/terms/created"] = map[string]any{
+				"@value": created, "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
+			}
+		},
+	}
+	for name, move := range aliases {
+		for _, tc := range []struct {
+			age     time.Duration
+			wantErr bool
+		}{
+			{age: 0},
+			{age: 400 * 24 * time.Hour, wantErr: true},
+		} {
+			t.Run(fmt.Sprintf("%s/age=%s", name, tc.age), func(t *testing.T) {
+				signed, err := ld.NewProcessor().SignRsaSignature2017(doc, privPEM, keyID, time.Now().Add(-tc.age))
+				require.NoError(t, err)
+				sig := signed["signature"].(map[string]any)
+				created := sig["created"].(string)
+				delete(sig, "created")
+				move(sig, created)
+				body, err := json.Marshal(signed)
+				require.NoError(t, err)
+
+				err = v.VerifyIfPresent(body)
+				if tc.wantErr {
+					require.ErrorIs(t, err, corefederation.ErrLDSignatureExpired)
+					return
+				}
+				require.NoError(t, err, "RDF として同じ署名を落としている")
+			})
+		}
+	}
+}
+
+// 転送経路では created を必須にする。created の無い署名は鮮度を持たず、
+// 一度受け取れば無期限に再送できる。複数ある / 日時として読めない形も拒否する。
+func TestLDSignatureVerifier_CreatedRequiredAndUnambiguous(t *testing.T) {
+	repo := testutil.NewMockUserPublickeyRepository()
+	keyID, _ := ldTestKey(t, repo)
+	v := corefederation.NewLDSignatureVerifier(repo)
+	fresh := ldFreshCreated()
+	tests := map[string]string{
+		"missing": ``,
+		"two values": `"created": "` + fresh + `",
+					"dc:created": {"@value": "2020-01-01T00:00:00Z", "@type": "xsd:dateTime"},`,
+		"node reference": `"created": {"@id": "https://example.com/t"},`,
+	}
+	for name, created := range tests {
+		t.Run(name, func(t *testing.T) {
+			body := []byte(`{
+				"@context": "https://www.w3.org/ns/activitystreams",
+				"type": "Note",
+				"signature": {
+					"type": "RsaSignature2017",
+					"creator": "` + keyID + `",
+					` + created + `
+					"signatureValue": "AAAA"
+				}
+			}`)
+			require.ErrorIs(t, v.VerifyIfPresent(body), corefederation.ErrLDSignatureExpired)
+		})
+	}
+
+	// options を正規化できない形は窓の判定に進めず拒否する。
+	body := []byte(`{
+		"@context": "https://www.w3.org/ns/activitystreams",
+		"type": "Note",
+		"signature": {
+			"type": "RsaSignature2017",
+			"creator": "` + keyID + `",
+			"created": {"@value": {"nested": true}},
+			"signatureValue": "AAAA"
+		}
+	}`)
+	err := v.VerifyIfPresent(body)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "signature options")
+}
+
+// **compact 後の文書にも forbidden directive の検査を掛ける。** 生の文書の検査は
+// キー名しか見ないので、inline context で `"g": "@graph"` のような別名を付けると
+// 素通りする。compact は別名を InboxCompactContext の形 (= `@graph` /
+// `@included` そのもの) に戻すので、そこで捕まえる。署名は正しく付けてある —
+// compact 後の検査を外すと verify まで進んで受理される形にしてある。
+func TestLDSignatureVerifier_ForbiddenDirectiveUnderAliasRejectedAfterCompact(t *testing.T) {
+	repo := testutil.NewMockUserPublickeyRepository()
+	keyID, privPEM := ldTestKey(t, repo)
+	v := corefederation.NewLDSignatureVerifier(repo)
+
+	tests := map[string]map[string]any{
+		"@graph": {
+			"@context": []any{"https://www.w3.org/ns/activitystreams", map[string]any{"g": "@graph"}},
+			"g": []any{
+				map[string]any{"id": "https://example.com/notes/a", "type": "Note", "content": "a"},
+				map[string]any{"id": "https://example.com/notes/b", "type": "Note", "content": "b"},
+			},
+		},
+		"@included": {
+			"@context": []any{"https://www.w3.org/ns/activitystreams", map[string]any{"inc": "@included"}},
+			"id":       "https://example.com/notes/a",
+			"type":     "Note",
+			"content":  "a",
+			"inc": []any{
+				map[string]any{"id": "https://example.com/notes/b", "type": "Note", "content": "b"},
+			},
+		},
+	}
+	for name, doc := range tests {
+		t.Run(name, func(t *testing.T) {
+			signed, err := ld.NewProcessor().SignRsaSignature2017(doc, privPEM, keyID, time.Now())
+			require.NoError(t, err)
+			body, err := json.Marshal(signed)
+			require.NoError(t, err)
+			require.NotContains(t, string(body), `"`+name+`":`,
+				"生の文書に directive がキーとして出ていると別名の検査にならない")
+
+			require.ErrorIs(t, v.VerifyIfPresent(body), ld.ErrForbiddenDirective)
+		})
+	}
 }

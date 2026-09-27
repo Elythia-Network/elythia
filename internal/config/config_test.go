@@ -244,7 +244,7 @@ func TestDSN_UnixSocket(t *testing.T) {
 			Pass: "secret",
 			// UDS では TLS を張れないので、Extra に ssl=true があっても
 			// 強制的に sslmode=disable になることを確認する。
-			Extra: map[string]string{"ssl": "true"},
+			Extra: map[string]any{"ssl": "true"},
 		},
 	}
 
@@ -308,12 +308,12 @@ func TestDSN_SSLEnabled(t *testing.T) {
 			DB:    "misskey",
 			User:  "postgres",
 			Pass:  "secret",
-			Extra: map[string]string{"ssl": "true"},
+			Extra: map[string]any{"ssl": "true"},
 		},
 	}
 
 	dsn := cfg.DSN()
-	assert.Contains(t, dsn, "sslmode=require")
+	assert.Contains(t, dsn, "sslmode=verify-full")
 }
 
 func TestLoad_MaxFileSizeOverride(t *testing.T) {
@@ -883,42 +883,6 @@ trustProxy:
 	assert.Equal(t, []string{"203.0.113.0/24", "198.51.100.0/24"}, cfg.TrustProxy)
 }
 
-func TestResolveTrustProxy_EmptyUsesDefault(t *testing.T) {
-	result := resolveTrustProxy(nil)
-	assert.Equal(t, DefaultTrustProxy, result)
-}
-
-func TestResolveTrustProxy_CustomReturnsProvided(t *testing.T) {
-	custom := []string{"10.0.0.0/8"}
-	result := resolveTrustProxy(custom)
-	assert.Equal(t, custom, result)
-}
-
-func TestParseTrustProxy_ValidCIDRs(t *testing.T) {
-	nets := ParseTrustProxy([]string{"10.0.0.0/8", "192.168.0.0/16"})
-	assert.Len(t, nets, 2)
-}
-
-func TestParseTrustProxy_InvalidCIDR(t *testing.T) {
-	nets := ParseTrustProxy([]string{"10.0.0.0/8", "invalid", "192.168.0.0/16"})
-	assert.Len(t, nets, 2)
-}
-
-func TestParseTrustProxy_Empty(t *testing.T) {
-	nets := ParseTrustProxy(nil)
-	assert.Empty(t, nets)
-}
-
-func TestParseTrustProxy_IPv6(t *testing.T) {
-	nets := ParseTrustProxy([]string{"::1/128", "fc00::/7"})
-	assert.Len(t, nets, 2)
-}
-
-func TestParseTrustProxy_AllInvalid(t *testing.T) {
-	nets := ParseTrustProxy([]string{"not-a-cidr", "also-bad"})
-	assert.Empty(t, nets)
-}
-
 func TestLoad_DBSlaves(t *testing.T) {
 	yaml := `
 url: https://example.com
@@ -998,14 +962,14 @@ func TestSlaveDSN_InheritsPrimarySSL(t *testing.T) {
 		DB: DBOptions{
 			Host:  "primary",
 			Port:  5432,
-			Extra: map[string]string{"ssl": "true"},
+			Extra: map[string]any{"ssl": "true"},
 		},
 		DBSlaves: []DBSlaveOptions{
 			{Host: "replica1", Port: 5432, DB: "misskey", User: "u", Pass: "p"},
 		},
 	}
 	dsn := cfg.SlaveDSN(0)
-	assert.Contains(t, dsn, "sslmode=require")
+	assert.Contains(t, dsn, "sslmode=verify-full")
 }
 
 func TestSlaveDSN_UnixSocket(t *testing.T) {
@@ -1013,7 +977,7 @@ func TestSlaveDSN_UnixSocket(t *testing.T) {
 	cfg := &Config{
 		DB: DBOptions{
 			Host:  "/var/run/postgresql",
-			Extra: map[string]string{"ssl": "true"},
+			Extra: map[string]any{"ssl": "true"},
 		},
 		DBSlaves: []DBSlaveOptions{
 			{Host: "/var/run/postgresql/replica", Port: 5433, DB: "misskey", User: "u", Pass: "p"},

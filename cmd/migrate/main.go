@@ -2,9 +2,7 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"log/slog"
-	"net/url"
 	"os"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -35,27 +33,15 @@ func main() {
 	// `postgres` へ書き戻して `sql.Open("pgx/v5", ...)` するので、**DSN の形は
 	// libpq 互換のまま**でよい。pgx の ParseConfig も libpq 互換なので UDS の
 	// 書き方も変わらない。
-	var dbURL string
-	if config.IsUnixSocketPath(cfg.DB.Host) {
-		// UDS の場合はホスト部を空にして host クエリにソケットディレクトリを渡す。
-		// postgres://...@/var/run/postgresql:5432/... の形式は UDS として
-		// 解釈されず TCP localhost にフォールバックするため。
-		dbURL = fmt.Sprintf("pgx5:///%s?host=%s&port=%d&user=%s&password=%s&sslmode=disable",
-			cfg.DB.DB,
-			url.QueryEscape(cfg.DB.Host),
-			cfg.DB.Port,
-			url.QueryEscape(cfg.DB.User),
-			url.QueryEscape(cfg.DB.Pass),
-		)
-	} else {
-		dbURL = fmt.Sprintf("pgx5://%s:%s@%s:%d/%s?sslmode=disable",
-			cfg.DB.User, cfg.DB.Pass, cfg.DB.Host, cfg.DB.Port, cfg.DB.DB,
-		)
-	}
+	// DSN の組み立て (TLS 設定・資格情報のエスケープ・UDS の扱い) は本体と
+	// 共通の config.DatabaseURL に任せる。以前はここで独自に組んでおり、
+	// db.extra.ssl を見ずに常に sslmode=disable で繋ぎ、TCP 経路では
+	// パスワードをエスケープせずに URL へ埋めていた。
+	dbURL := cfg.DatabaseURL("pgx5")
 
 	m, err := migrate.New("file://migration", dbURL)
 	if err != nil {
-		slog.Error("failed to create migrator", "error", err)
+		logDBError(cfg, "failed to create migrator", err)
 		os.Exit(1)
 	}
 	defer m.Close()
@@ -79,7 +65,7 @@ func main() {
 	}
 
 	if err != nil && err != migrate.ErrNoChange {
-		slog.Error("migration failed", "error", err)
+		logDBError(cfg, "migration failed", err)
 		os.Exit(1)
 	}
 
@@ -88,4 +74,14 @@ func main() {
 	} else {
 		slog.Info("migration completed", "direction", *direction)
 	}
+}
+
+// logDBError logs a DB error, adding the TLS remediation hint when the
+// failure was a certificate verification error.
+func logDBError(cfg *config.Config, msg string, err error) {
+	if hint := cfg.DBTLSErrorHint(err); hint != "" {
+		slog.Error(msg, "error", err, "hint", hint)
+		return
+	}
+	slog.Error(msg, "error", err)
 }

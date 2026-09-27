@@ -10,6 +10,8 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+
+	jsonld "github.com/piprate/json-gold/ld"
 )
 
 // LDSignatureType is the only LD-Signature algorithm Misskey TS / mk-go
@@ -89,16 +91,7 @@ func (p *Processor) VerifyRsaSignature2017(activity map[string]any, publicKeyPEM
 // に渡す。upstream の `verifier.update(verifyData)` + `verifier.verify(...,
 // 'sha256')` の挙動と等価。
 func (p *Processor) createVerifyData(data, options map[string]any) (string, error) {
-	// options 側: clone + @context 付加 + type/id/signatureValue 削除
-	optsCopy := make(map[string]any, len(options)+1)
-	for k, v := range options {
-		if k == "type" || k == "id" || k == "signatureValue" {
-			continue
-		}
-		optsCopy[k] = v
-	}
-	optsCopy["@context"] = "https://w3id.org/identity/v1"
-	canonOpts, err := p.Normalize(optsCopy)
+	canonOpts, err := p.Normalize(signedOptions(options))
 	if err != nil {
 		return "", fmt.Errorf("normalize options: %w", err)
 	}
@@ -119,6 +112,69 @@ func (p *Processor) createVerifyData(data, options map[string]any) (string, erro
 	docHash := hex.EncodeToString(sha256Sum([]byte(canonData)))
 
 	return optionsHash + docHash, nil
+}
+
+// signedOptions returns the part of the signature object that
+// RsaSignature2017 covers: options minus `type` / `id` / `signatureValue`,
+// with `@context` forced to identity/v1 (upstream createVerifyData)。
+// **`@context` は上書きする** — signature 側に context を書かせると語の意味を
+// 差し替えられる。
+func signedOptions(options map[string]any) map[string]any {
+	optsCopy := make(map[string]any, len(options)+1)
+	for k, v := range options {
+		if k == "type" || k == "id" || k == "signatureValue" {
+			continue
+		}
+		optsCopy[k] = v
+	}
+	optsCopy["@context"] = identityContextIRI
+	return optsCopy
+}
+
+// identityContextIRI is the context the signature options are normalized
+// under (upstream / Mastodon の `CONTEXT`)。
+const identityContextIRI = "https://w3id.org/identity/v1"
+
+// DCCreatedIRI is the predicate `signature.created` expands to under
+// identity/v1 (`"created": {"@id": "dc:created", "@type": "xsd:dateTime"}`)。
+const DCCreatedIRI = "http://purl.org/dc/terms/created"
+
+// SignedCreated returns the lexical values of every dc:created literal in the
+// canonical (URDNA2015) form of the signature options — exactly the triples
+// VerifyRsaSignature2017 hashes.
+//
+// **JSON のキーではなく署名された RDF から読む。** options は identity/v1 で
+// 正規化されるので、`created` を消して `dc:created` (型付き) や完全 IRI の
+// `http://purl.org/dc/terms/created` に同じ値を書いても RDF は変わらず署名は
+// 通る。キー `created` だけを見る判定はそこで「欠落」と読み違える。ここで
+// 得る値は署名が覆う値そのものなので、別名の書き方に依存しない。
+func (p *Processor) SignedCreated(signature map[string]any) ([]string, error) {
+	canon, err := p.Normalize(signedOptions(signature))
+	if err != nil {
+		return nil, fmt.Errorf("normalize options: %w", err)
+	}
+	ds, err := jsonld.ParseNQuads(canon)
+	if err != nil {
+		return nil, fmt.Errorf("parse canonical options: %w", err)
+	}
+	var out []string
+	for _, quads := range ds.Graphs {
+		for _, q := range quads {
+			pred, ok := q.Predicate.(jsonld.IRI)
+			if !ok || pred.Value != DCCreatedIRI {
+				continue
+			}
+			// 値が IRI / blank node のときは日時として読めないので、読めない値
+			// として呼び出し側に拒否させる (空文字列は time.Parse で落ちる)。
+			lit, ok := q.Object.(jsonld.Literal)
+			if !ok {
+				out = append(out, "")
+				continue
+			}
+			out = append(out, lit.Value)
+		}
+	}
+	return out, nil
 }
 
 func sha256Sum(b []byte) []byte {

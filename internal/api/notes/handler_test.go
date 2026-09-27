@@ -12,6 +12,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/shiroha-a/mk/internal/api/apierr"
+	corechannel "github.com/shiroha-a/mk/internal/core/channel"
 	corenote "github.com/shiroha-a/mk/internal/core/note"
 	"github.com/shiroha-a/mk/internal/entitycompat/shapetest"
 	"github.com/shiroha-a/mk/internal/misc/id"
@@ -792,20 +793,18 @@ func TestCreate_CannotReplyToInvisibleNote(t *testing.T) {
 	assert.Equal(t, apierr.UUIDCannotReplyToAnInvisibleNote, uuidStr)
 }
 
-// channelNotFoundHook は EnsureChannelExists が常にエラーを返すテストスタブ。
-type channelNotFoundHook struct{}
+// channelErrHook は EnsureChannelExists が常に err を返すテストスタブ。
+type channelErrHook struct{ err error }
 
-func (channelNotFoundHook) EnsureChannelExists(_ string) error { return errNotFoundSentinel }
-func (channelNotFoundHook) OnNotePosted(_, _, _ string)        {}
-
-var errNotFoundSentinel = errors.New("channel not found")
+func (h channelErrHook) EnsureChannelExists(_ string) error { return h.err }
+func (channelErrHook) OnNotePosted(_, _, _ string)          {}
 
 func TestCreate_ChannelNotFound(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	pollRepo := testutil.NewMockPollRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil)
-	createSvc.SetChannelHook(channelNotFoundHook{})
+	createSvc.SetChannelHook(channelErrHook{err: corechannel.ErrChannelNotFound})
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
 	h := NewHandler(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
@@ -825,6 +824,64 @@ func TestCreate_ChannelNotFound(t *testing.T) {
 	code, uuidStr := decodeError(t, rec.Body.Bytes())
 	assert.Equal(t, "NO_SUCH_CHANNEL", code)
 	assert.Equal(t, apierr.UUIDNoSuchChannel, uuidStr)
+}
+
+// チャンネルの lookup が DB 障害で失敗したら NO_SUCH_CHANNEL に丸めず 500 (#2792)。
+func TestCreate_ChannelLookupErrorIsInternal(t *testing.T) {
+	noteRepo := testutil.NewMockNoteRepository()
+	pollRepo := testutil.NewMockPollRepository()
+	idGen, _ := id.NewGenerator("aidx")
+	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil)
+	createSvc.SetChannelHook(channelErrHook{err: errors.New("connection refused")})
+	deleteSvc := corenote.NewDeleteService(noteRepo)
+	querySvc := corenote.NewQueryService(noteRepo, nil)
+	h := NewHandler(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
+
+	body := `{"text": "to channel", "channelId": "c1"}`
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/notes/create", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	setAuthUser(c, &model.User{ID: "user1", Username: "testuser"})
+
+	require.NoError(t, h.Create(c))
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.NotContains(t, rec.Body.String(), "NO_SUCH_CHANNEL")
+	assert.Empty(t, noteRepo.Notes, "障害時にノートを作らない")
+}
+
+// **アーカイブ済みチャンネルへの notes/create は NO_SUCH_CHANNEL。**
+//
+// 本番と同じ corechannel の hook を配線して確かめる (upstream は
+// `isArchived: false` で引くので同じ応答になる)。
+func TestCreate_ArchivedChannel(t *testing.T) {
+	noteRepo := testutil.NewMockNoteRepository()
+	pollRepo := testutil.NewMockPollRepository()
+	idGen, _ := id.NewGenerator("aidx")
+	channelRepo := testutil.NewMockChannelRepository()
+	channelRepo.Channels["ch1"] = &model.Channel{ID: "ch1", Name: "old", IsArchived: true}
+	channelSvc := corechannel.NewService(channelRepo, testutil.NewMockChannelFollowingRepository(), noteRepo, idGen)
+	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil)
+	createSvc.SetChannelHook(corechannel.NewNoteCreateHook(channelSvc))
+	deleteSvc := corenote.NewDeleteService(noteRepo)
+	querySvc := corenote.NewQueryService(noteRepo, nil)
+	h := NewHandler(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
+
+	user := &model.User{ID: "user1", Username: "testuser"}
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/notes/create", strings.NewReader(`{"text": "to channel", "channelId": "ch1"}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	setAuthUser(c, user)
+
+	require.NoError(t, h.Create(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	code, uuidStr := decodeError(t, rec.Body.Bytes())
+	assert.Equal(t, "NO_SUCH_CHANNEL", code)
+	assert.Equal(t, apierr.UUIDNoSuchChannel, uuidStr)
+	assert.Empty(t, noteRepo.Notes, "ノートを作らないこと")
 }
 
 func TestDelete_InvalidJSON(t *testing.T) {

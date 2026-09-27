@@ -59,9 +59,30 @@ cp .config/docker.yml.example .config/docker.yml
 | `db.user` | string | `"misskey"` | ユーザー名 |
 | `db.pass` | string | - | パスワード |
 | `db.disableCache` | bool | `false` | **no-op**。Misskey YAML 互換のために受け付けるだけで、どこからも読んでいない |
-| `db.extra.ssl` | bool | `false` | SSL接続 |
+| `db.extra.ssl` | bool / map / `no-verify` | `false` | TLS接続。`true` は**サーバー証明書とホスト名を検証する** (`sslmode=verify-full`、システムの CA)。upstream (node-postgres) の形 `{ rejectUnauthorized: false }` と `'no-verify'` は検証しない TLS (`sslmode=require`)。詳細は下記 |
+| `db.extra.sslmode` | string | - | **mk-go 独自**。libpq の `sslmode` を直接指定する (`disable` / `allow` / `prefer` / `require` / `verify-ca` / `verify-full`)。`db.extra.ssl` と同時には書けない |
+| `db.extra.sslrootcert` | string | - | **mk-go 独自**。検証に使う CA 証明書 (PEM) の**ファイルパス**。自己署名 / 私設 CA の DB に使う |
 
-`dbReplications: true`とすると`dbSlaves`設定でリードレプリカを使用可能。
+`dbReplications: true`とすると`dbSlaves`設定でリードレプリカを使用可能。レプリカは primary の `db.extra` の TLS 設定を引き継ぐ (ホスト名の検証はレプリカ自身の `host` で行う)。
+
+#### DB 接続の TLS (`db.extra`)
+
+| 書き方 | 意味 | pgx の `sslmode` |
+|---|---|---|
+| 未設定 / `ssl: false` | 平文 | `disable` |
+| `ssl: true` | TLS + 証明書とホスト名の検証 (システムの CA) | `verify-full` |
+| `ssl: true` + `sslrootcert: /path/ca.pem` | TLS + 指定した CA で検証 | `verify-full` |
+| `ssl: { rejectUnauthorized: false }` / `ssl: no-verify` | TLS だが**検証しない** (盗聴・なりすましに無防備) | `require` |
+| `sslmode: <値>` (+ `sslrootcert`) | libpq の意味そのまま (`prefer` / `allow` と `sslrootcert` の併記は起動エラー) | 指定値 |
+
+- **`ssl: true` の意味が変わった (破壊的変更)。** 以前の mk-go は `ssl: 'true'` (文字列) のときだけ `sslmode=require` = **証明書を検証しない TLS** で繋いでいた。しかも YAML の bool の `ssl: true` は設定の読み込みで `"1"` になって比較に外れ、**平文で繋いでいた**。upstream (node-postgres) の `ssl: true` は Node の既定 (`rejectUnauthorized: true`) で検証するので、それに揃えた。自己署名証明書の DB に `ssl: true` で繋いでいた構成は起動時に `certificate signed by unknown authority` 等で落ちる。その場合は (a) CA を `db.extra.sslrootcert` に指定する、または (b) 検証を明示的に無効にする (`ssl: { rejectUnauthorized: false }`) のどちらかを選ぶ。起動エラーにも同じ案内を出す。
+- **upstream の object 形式で解釈するのは `rejectUnauthorized` だけ。** node-postgres の `ca` は PEM の中身を受けるが、pgx はファイルパスしか受けないので `ca` は起動エラーにする (CA をファイルに保存して `sslrootcert` へ)。`cert` / `key` / `servername` 等も黙って捨てずに起動エラーにする。`ssl` 以外の `extra` のキー (`statement_timeout` 等、upstream が pool へ渡すもの) は無視する。
+- **`ssl: no-verify` は `{ rejectUnauthorized: false }` と同じ。** node-postgres (upstream が使う pg 8.23.0 の `lib/connection-parameters.js`) が同じ意味で受ける書き方なので、そのまま移せる。
+- 矛盾する組み合わせ (`ssl` と `sslmode` の併記、TLS 無効なのに `sslrootcert`、`rejectUnauthorized: false` / `no-verify` と `sslrootcert` の併記、`sslmode: prefer` / `allow` と `sslrootcert` の併記) は起動エラーにする。最後のものは、pgx が `prefer` / `allow` では CA を渡しても**証明書を検証せず**、TLS を断られると**平文へ落ちる**ため (CA を書いた運営者の意図と逆になる)。検証したいなら `verify-full` (または `verify-ca`) にする。
+- 証明書の検証に失敗したときの起動エラーには、書いた設定に合わせた対処を添える (`ssl: true` なら「以前は検証していなかった」旨と `sslrootcert` / `rejectUnauthorized: false`、`sslmode` を明示していれば `sslrootcert` / `sslmode: require`、`sslrootcert` を指定していればその CA ファイルと `db.host` の確認)。
+- **環境変数で渡すなら設定ファイルにキーを書いておく。** `db.extra.*` は `bindEnvKeys()` に登録していないので、`MK_DB_EXTRA_SSL` / `MK_DB_EXTRA_SSLMODE` / `MK_DB_EXTRA_SSLROOTCERT` は**設定ファイルに同じキー (`extra:` の下の `ssl:` 等) があるときだけ**効く (下の「環境変数オーバーライド」を参照)。ファイルに無いまま export しても黙って平文で繋ぐ。
+- **UNIX ソケット (`host` が `/` 始まり) では TLS を張らない** (`sslmode=disable` 固定)。
+- `cmd/migrate` / `misskey doctor` / backfill 系の CLI も本体と同じ接続設定 (TLS・パスワードのエスケープ) を使う。
 
 ### Redis (`redis.*`)
 
@@ -147,12 +168,33 @@ cp .config/docker.yml.example .config/docker.yml
 
 | キー | 型 | デフォルト | 説明 |
 |---|---|---|---|
-| `proxy` | string | - | 外向き HTTP のプロキシ URL (PR #485) |
+| `proxy` | string | - | 外向き HTTP のプロキシ URL (PR #485)。`proxyBypassHosts` 以外の宛先は proxy に渡す前に mk-go 側で検査する (リテラル IP はそのまま、ホスト名は手元で解決した全アドレス。1 つでも private / 予約済みなら拒否し、手元で解決できない宛先も渡さない。Unicode の IDN は接続時と同じ punycode の名前で解決する。`0x7f.1` / `2130706433` / `127.1` のような厳密な dotted-quad でない数値表記は渡さない)。通過した宛先は 30 秒間覚えて、その間はリクエストごとの名前解決を省く (拒否した宛先は覚えない)。**ただし proxy は宛先を自分で再解決するので DNS rebinding の窓は残る。proxy 側でも private / loopback / link-local (`169.254.169.254` など) 宛てを拒否する設定にすること** |
 | `proxySmtp` | string | - | SMTP 配送のプロキシ URL。`http://host:port` (HTTP CONNECT)、`https://host:port`、`socks5://[user:pass@]host:port` (#496) |
-| `proxyBypassHosts` | []string | - | プロキシを迂回するホスト (HTTP のみ) |
-| `allowedPrivateNetworks` | []string | - | プライベート IP / loopback / metadata service へのアウトバウンド接続を許可する CIDR allowlist。AP fetch / URL preview / mediaproxy / `RemoteStatsFetcher` (#943) で共通に効く。開発時の self-loop 用途 (`127.0.0.0/8` 等)、本番では空のまま運用する |
+| `proxyBypassHosts` | []string | - | プロキシを迂回するホスト (HTTP のみ)。リクエストの host を小文字化 + punycode にした形との完全一致で照合する (一覧側も同じ形に揃えるので、Unicode や大文字で書いてもよい) |
+| `allowedPrivateNetworks` | []string | - | プライベート IP / loopback / metadata service へのアウトバウンド接続を許可する CIDR allowlist。AP fetch / URL preview / mediaproxy / `RemoteStatsFetcher` (#943) で共通に効く。`proxy` 設定時も同じ判定を proxy へ渡す前の宛先検査に使うので、ここに入れた範囲は proxy 経由でも許可される (proxy 自体への接続はこの設定と無関係に常に許可)。開発時の self-loop 用途 (`127.0.0.0/8` 等)、本番では空のまま運用する |
 | `outgoingAddress` | string | - | 外向き HTTP の送信元 IP として bind するアドレス。複数 NIC 環境で federation 配信の source IP を固定する用途 (#496)。不正値は警告のみで kernel auto-pick に fallback |
+| `trustProxy` | []string / string / `false` | private + loopback (下記) | `X-Forwarded-For` を信頼する前段 proxy。詳細は下記 |
 | `outgoingAddressFamily` | string | `dual` | DNS 解決後の IP family 制限。`"ipv4"` / `"ipv6"` 指定で該当 family のみで dial、`"dual"` または空で両方 (#496) |
+
+#### 前段 proxy の信頼 (`trustProxy`)
+
+クライアント IP (rate limit・サインイン履歴・IP 履歴に使う) は `X-Forwarded-For` を右から左へ見て、**`trustProxy` に含まれない最初のアドレス**を採る。接続元が `trustProxy` に含まれなければ `X-Forwarded-For` は見ない。
+
+| 書き方 | 意味 |
+|---|---|
+| 未設定 | 既定値 `10.0.0.0/8` / `172.16.0.0/12` / `192.168.0.0/16` / `127.0.0.1/32` / `::1/128` / `fc00::/7` (upstream と同じ) |
+| CIDR / 素の IP のリスト | 書いたものだけを信頼する。素の IP は `/32` (`/128`) として扱う。`loopback` / `linklocal` / `uniquelocal` (upstream の proxy-addr の名前) も書ける |
+| カンマ区切りの文字列 | リストと同じ (`MK_TRUSTPROXY=10.0.0.0/8,192.0.2.1` のように環境変数で渡すとき) |
+| `false` / `[]` / `''` | どの proxy も信頼しない (`X-Forwarded-For` を無視して接続元アドレスを使う)。**UNIX ソケットで待ち受けているときは例外**で、接続元アドレスが無いので `X-Forwarded-For` (無ければ `X-Real-IP`) を読む (下記) |
+| `true` / 数値 | **起動エラー** |
+
+- **書いた範囲だけを信頼する。** 以前は Echo の既定で loopback / link-local / private が常に信頼されていたので、CDN の範囲だけを書いても private アドレスからの `X-Forwarded-For` が信頼され続けた。既定値 (未設定) のときの挙動は、`127.0.0.2`-`127.255.255.255` と link-local (`169.254.0.0/16` / `fe80::/10`) を信頼しなくなった点を除いて変わらない (どちらも upstream の既定にも入っていない)。必要なら `loopback` / `linklocal` を足す。
+- **アップグレード時の注意: `trustProxy` を明示している構成は、前段 proxy のアドレスが入っているか確かめる。** 以前は上記の理由で、`trustProxy` に CDN の範囲だけを書き、nginx は同じホスト (`127.0.0.1`) や Docker の bridge network (`172.16.0.0/12` 等) から繋ぐ構成が**たまたま動いていた**。今はその nginx を信頼しないので、**全利用者のクライアント IP が nginx のアドレスになる** — rate limit のバケットを全員で共有して 429 が多発し、サインイン履歴と IP 履歴 (`user_ip`) が 1 アドレスに集まる。nginx のアドレス、または `uniquelocal` (private の範囲) / `loopback` を `trustProxy` に足す (例: `trustProxy: ['203.0.113.0/24', 'uniquelocal', 'loopback']`)。未設定のまま使っている構成は既定値に private と loopback が入っているので影響しない。
+- **気付けるように 2 か所で警告を出す。** (a) 起動時に、`trustProxy` が loopback / private / unique-local のどの範囲も含まなければ (`false` / `[]` を含む) `trustProxy trusts no loopback or private address` を Warn で出す。前段を置かずに直接公開している構成ではそれが正しい設定なので、起動は止めない。UNIX ソケットで待ち受けているときは出さない (下記の理由でこの問題が起きない)。(b) 実行中に、信頼していない loopback / private アドレスから `X-Forwarded-For` 付きのリクエストが届いたら、`received X-Forwarded-For from a loopback or private address that trustProxy does not trust` を**プロセスごとに 1 回だけ** Warn で出す (`remoteAddr` にそのアドレスが載る)。(a) は設定だけを見るので、private の範囲を書いていても実際の proxy がその外にいる構成 (別の bridge network 等) は (b) でしか気付けない。
+- **解釈できない値は起動エラーにする。** 以前は警告して捨てていたため、全部捨てると `X-Forwarded-For` の**最左を無条件に信頼する** Echo の既定に落ち、誰でも IP を詐称できた (`trustProxy: true` や `proxy.internal` のようなホスト名で実際にそうなる)。
+- **`trustProxy: true` は受け付けない。** upstream (Fastify) では「全ての hop を信頼する」意味で、前段を経由せずに届いたリクエストが IP を自由に名乗れる。前段 proxy のアドレスを列挙すること。hop 数 (数値) も同じ理由で受け付けない。
+- **`[]` は「信頼しない」。** 以前の mk-go は空リストを既定値として扱っていたが、upstream (`config.trustProxy ?? 既定`) では空リストがそのまま効くので揃えた。
+- UNIX ソケットで待ち受けている場合は接続元アドレスが無いので、`X-Forwarded-For` を右から左へ見て `trustProxy` に含まれない最初の (解析できる) アドレスを採る。`X-Forwarded-For` が無ければ `X-Real-IP` を使う (接続できるのは同じホストの proxy だけという前提)。**`false` / `[]` でもこれらのヘッダは読む** — その場合は `X-Forwarded-For` の右端 (前段 proxy が追記した接続元) がそのまま採られる。
 
 ### 検索
 
@@ -261,7 +303,8 @@ mk-go 側のマイグレーションには含めていない。pgroonga 拡張�
 `#meilisearch:` と `#<queue>JobConcurrency` / `#<queue>JobPerSec` は**コメントアウト
 されたまま**なので、example をそのまま使う構成では `MK_MEILISEARCH_HOST` /
 `MK_DELIVERJOBCONCURRENCY` を export しても効きません。使うならまず yml 側の
-コメントを外してください。
+コメントを外してください。`db.extra.ssl` (example ではコメントアウト) も同じで、
+`MK_DB_EXTRA_SSL` を効かせるには yml に `extra:` と `ssl:` の行が要ります。
 
 キー単位の判定です。`meilisearch:` ブロックだけあって `apiKey:` 行が無ければ
 `MK_MEILISEARCH_APIKEY` は効きません。
@@ -295,7 +338,7 @@ mk-go 側のマイグレーションには含めていない。pgroonga 拡張�
 |---|---|
 | `MISSKEY_FRONTEND_DIR` | ビルド済み SPA (vite 出力)。既定 `third_party/misskey/built/_frontend_vite_` |
 | `MISSKEY_FRONTEND_DIST_DIR` | locales / fonts 等の dist。既定 `third_party/misskey/built/_frontend_dist_` |
-| `MISSKEY_FRONTEND_EMBED_DIR` | embed 用の vite 出力。**既定値は `MISSKEY_FRONTEND_DIR` の sibling として解決される** — 別の変数を要求すると設定漏れに気付けないまま dev server proxy へ落ちて 502 になるため |
+| `MISSKEY_FRONTEND_EMBED_DIR` | embed 用の vite 出力。**既定値は `MISSKEY_FRONTEND_DIR` の sibling として解決される** — 別の変数を要求すると設定漏れに気付けないまま `/embed_vite/*` が 404 になるため (以前は dev server proxy へ落ちて 502 だった。dev モード以外では proxy しない) |
 | `MISSKEY_SW_DIST_DIR` | service worker の出力。既定値の解決は embed と同じ |
 | `MISSKEY_FLUENT_EMOJI_DIR` | fluent-emoji ディレクトリ (実績バッジ / 通知アイコン) |
 | `MISSKEY_TWEMOJI_DIR` | Twemojiアセットディレクトリ |
@@ -322,7 +365,7 @@ CIでのテスト実行時に使用。Redis は testcontainers が立てるが�
 
 ## マイグレーションの接続先
 
-`cmd/migrate` は **`DATABASE_URL` を読まない**。`-config` (既定 `.config/default.yml`) を読み、`db.*` から DSN を組み立てる。
+`cmd/migrate` は **`DATABASE_URL` を読まない**。`-config` (既定 `.config/default.yml`) を読み、`db.*` から DSN を組み立てる。TLS (`db.extra`) とパスワードのエスケープは本体と同じ規則に従う (以前は `db.extra.ssl` を見ずに常に平文で繋いでいた)。
 
 ```bash
 make migrate-up                                    # .config/default.yml へ

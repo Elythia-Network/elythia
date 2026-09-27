@@ -19,7 +19,15 @@
 #   docker build -f Dockerfile.bundled -t mk-go:bundled .
 #   docker compose -f docker-compose.image.yml up -d   (publish 済みイメージを pull)
 
-ARG MISSKEY_ASSETS_IMAGE=ghcr.io/shiroha-a/misskey-ts-assets:2026.9.1-mk.1
+# **tag と digest を併記する。** tag は付け替えられるので、tag だけだと fork 側で
+# 同じ tag を publish し直したとき (あるいは registry の書き込み権を奪われたとき)
+# に中身が黙って変わる。digest があると BuildKit は tag を無視して digest で
+# pull する。tag を残すのは doc の pin 行と突き合わせるため
+# (`make submodulepin-check`)。**tag を上げたら digest も必ず取り直す** — 古い
+# digest のままだと tag だけ新しい古い frontend が焼き込まれる。docker.yml の
+# `build-and-push-bundled` が tag と digest の対応を registry に問い合わせて確かめる。
+# 取り直し方は docs/upstream-catch-up.md。
+ARG MISSKEY_ASSETS_IMAGE=ghcr.io/shiroha-a/misskey-ts-assets:2026.9.1-mk.1@sha256:588ceee6b6b014d9f6218a3520dad246a44b66b05770fdcb40a47a05c3ca37a9
 
 # アセットの供給元。既定は external (公式のアセットイメージ) で、プラグインの
 # frontend を含めたいときだけ local に切り替える (#2940)。
@@ -35,7 +43,12 @@ ARG ASSETS_SOURCE=external
 #
 # 既存 Dockerfile の builder stage と同じ手順。ただし submodule のアセットを
 # 参照しないので、`pnpm install` 済みかどうかの事前チェックは不要。
-FROM golang:1.27-alpine AS builder
+#
+# patch version まで固定する (`Dockerfile` と同じ理由)。go.mod の `go` directive
+# と揃っていることを CI の `vulncheck` job が見る。上の assets image と同じく
+# tag だけでは中身が固定されないので、base image も digest を併記する
+# (`Dockerfile` と同じ値。更新は dependabot の `docker` が digest ごと上げる)。
+FROM golang:1.27.1-alpine@sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414 AS builder
 
 # git は go mod download 時の private module fetch に使う (通常の Dockerfile と同じ)。
 # plugins/ のプラグインが private な依存を持つ場合にここで要る。
@@ -95,7 +108,7 @@ COPY third_party/misskey/packages/backend/node_modules/@misskey-dev/emoji-assets
 FROM assets-${ASSETS_SOURCE} AS assets
 
 # Stage 3: Runtime
-FROM gcr.io/distroless/static-debian13
+FROM gcr.io/distroless/static-debian13:latest@sha256:58133991db06659feaabe0f4e97a35cebf15ef4ea08f8a4c6d2ee5f75e4aa6a0
 
 WORKDIR /app
 

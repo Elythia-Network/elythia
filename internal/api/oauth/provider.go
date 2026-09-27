@@ -72,7 +72,25 @@ type Handler struct {
 	// authInvalidator は optional。未設定でも revoke 自体は DB から消えるが、
 	// auth cache の TTL (30s) の間だけ古い token が通ってしまう。
 	authInvalidator TokenInvalidator
+	// streamRevoker は失効させた token で張られた /streaming 接続を閉じる。
+	// optional。未設定だと、盗んだ code から得た token の WebSocket が
+	// 失効後も開いたまま残る。
+	streamRevoker StreamRevoker
 }
+
+// StreamRevoker closes the /streaming connections authenticated with an app
+// access token. Implemented by stream.StreamRevokePublisher.
+type StreamRevoker interface {
+	RevokeAccessTokenStreams(userID, tokenID string)
+}
+
+// SetStreamRevoker wires the revoker used when a code replay revokes a token.
+func (h *Handler) SetStreamRevoker(r StreamRevoker) {
+	h.streamRevoker = r
+}
+
+// HasStreamRevoker reports whether the stream revoker is wired.
+func (h *Handler) HasStreamRevoker() bool { return h.streamRevoker != nil }
 
 // SetAuthInvalidator wires the auth middleware so code-replay revocation takes
 // effect immediately instead of after the auth cache TTL.
@@ -312,8 +330,14 @@ func (h *Handler) Token(c echo.Context) error {
 			}
 			if derr := h.tokenRepo.DeleteByID(tid); derr != nil {
 				slog.Warn("oauth: failed to revoke token on code replay", "tokenId", tid, "err", derr)
-			} else if raw != "" && h.authInvalidator != nil {
-				h.authInvalidator.InvalidateToken(raw)
+			} else {
+				if raw != "" && h.authInvalidator != nil {
+					h.authInvalidator.InvalidateToken(raw)
+				}
+				// その token で既に張られた WebSocket も閉じる (mk-go 独自)。
+				if h.streamRevoker != nil {
+					h.streamRevoker.RevokeAccessTokenStreams(g.UserID, tid)
+				}
 			}
 		}
 		slog.Info("oauth: authorization code replay detected", "clientId", g.ClientID, "userId", g.UserID)

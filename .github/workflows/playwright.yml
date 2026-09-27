@@ -170,7 +170,7 @@ jobs:
     continue-on-error: ${{ matrix.continue_on_error }}
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # pull_request では github.ref が refs/pull/<n>/merge になるので
           # PR の内容が checkout される。'develop' 固定のままだと PR の変更を
@@ -204,7 +204,7 @@ jobs:
       - name: Cache misskey workspace (built + node_modules)
         id: cache-misskey
         if: matrix.backend == 'mk-go'
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           # packages/*/node_modules で全 workspace package を glob 対応
           # (新 package 追加時に手動更新不要)。built/ は pnpm build の成果物。
@@ -216,7 +216,7 @@ jobs:
 
       - name: Set up pnpm
         if: matrix.backend == 'mk-go' && steps.cache-misskey.outputs.cache-hit != 'true'
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           # pnpm のバージョンは submodule 側 package.json の packageManager から
           # 取る。mk リポジトリ直下には package.json が無い。
@@ -234,7 +234,7 @@ jobs:
 
       - name: Set up Node.js
         if: matrix.backend == 'mk-go' && steps.cache-misskey.outputs.cache-hit != 'true'
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: third_party/misskey/.node-version
 
@@ -302,7 +302,7 @@ jobs:
       # 45 min timeout した TS job の失敗内容を追えなかった (#2289)。
       - name: Upload test-results on failure
         if: failure() || cancelled()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-results-${{ matrix.backend }}-${{ matrix.shard }}
           path: tests/playwright/test-results/
@@ -320,7 +320,7 @@ jobs:
 
       - name: Upload logs artifact on failure
         if: failure() || cancelled()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-logs-${{ matrix.backend }}-${{ matrix.shard }}
           path: /tmp/playwright-logs/

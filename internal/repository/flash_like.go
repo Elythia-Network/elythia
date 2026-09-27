@@ -65,31 +65,25 @@ func (r *flashLikeRepository) Exists(userID, flashID string) (bool, error) {
 	return count > 0, nil
 }
 
+// likedByUserQuery selects the flash_like rows owned by userID whose flash
+// is still visible to userID (public, or owned by userID).
+func (r *flashLikeRepository) likedByUserQuery(userID string) *gorm.DB {
+	// like した後に非公開化された Flash を一覧に出さない。一覧は script を
+	// 含めて返すので、ここを絞らないと flash/show の可視性判定を迂回できる。
+	// JOIN なので削除済み Flash の行も同時に落ちる。両表に id/userId 列が
+	// あるため Select で flash_like 側を明示する (scan ambiguity 回避)。
+	return r.db.Model(&model.FlashLike{}).
+		Select(`flash_like.*`).
+		Joins(`JOIN flash ON flash.id = flash_like."flashId"`).
+		Where(`flash_like."userId" = ?`, userID).
+		Where(`(flash.visibility = 'public' OR flash."userId" = ?)`, userID)
+}
+
 // ListByUser returns the flash_like rows owned by userID newest first
-// (id desc), used by Misskey 互換 i/flashs/likes endpoint.
+// (id desc), used by Misskey 互換 i/flashs/likes endpoint. Likes on flashes
+// that are no longer visible to userID are excluded.
 func (r *flashLikeRepository) ListByUser(userID, sinceID, untilID string, limit, offset int) ([]*model.FlashLike, error) {
-	if limit <= 0 {
-		limit = 30
-	}
-	if limit > 100 {
-		limit = 100
-	}
-	q := r.db.Where(`"userId" = ?`, userID)
-	if sinceID != "" {
-		q = q.Where("id > ?", sinceID)
-	}
-	if untilID != "" {
-		q = q.Where("id < ?", untilID)
-	}
-	q = q.Order(paginationOrder(sinceID, untilID, "id")).Limit(limit)
-	if sinceID == "" && untilID == "" && offset > 0 {
-		q = q.Offset(offset)
-	}
-	var rows []*model.FlashLike
-	if err := q.Find(&rows).Error; err != nil {
-		return nil, err
-	}
-	return rows, nil
+	return paginateLikes(r.likedByUserQuery(userID), sinceID, untilID, limit, offset)
 }
 
 // ListByUserSearch returns the flash_like rows owned by userID whose joined
@@ -106,22 +100,23 @@ func (r *flashLikeRepository) ListByUserSearch(userID, search, sinceID, untilID 
 	if len(words) == 0 {
 		return r.ListByUser(userID, sinceID, untilID, limit, offset)
 	}
+	// 各語を title/summary への ILIKE (語内 OR、語間 AND) で絞る。
+	q := r.likedByUserQuery(userID)
+	for _, word := range words {
+		like := "%" + escapeLike(word) + "%"
+		q = q.Where(`flash.title ILIKE ? OR flash.summary ILIKE ?`, like, like)
+	}
+	return paginateLikes(q, sinceID, untilID, limit, offset)
+}
+
+// paginateLikes applies cursor (sinceID/untilID) or offset pagination on
+// flash_like.id to q and runs it. Cursor 指定時は offset 無視。
+func paginateLikes(q *gorm.DB, sinceID, untilID string, limit, offset int) ([]*model.FlashLike, error) {
 	if limit <= 0 {
 		limit = 30
 	}
 	if limit > 100 {
 		limit = 100
-	}
-	// flash_like と flash を join し、各語を title/summary への ILIKE (語内 OR、
-	// 語間 AND) で絞る。両表に id/userId 列があるため Select で flash_like 側を
-	// 明示する (scan ambiguity 回避)。
-	q := r.db.Model(&model.FlashLike{}).
-		Select(`flash_like.*`).
-		Joins(`JOIN flash ON flash.id = flash_like."flashId"`).
-		Where(`flash_like."userId" = ?`, userID)
-	for _, word := range words {
-		like := "%" + escapeLike(word) + "%"
-		q = q.Where(`flash.title ILIKE ? OR flash.summary ILIKE ?`, like, like)
 	}
 	if sinceID != "" {
 		q = q.Where(`flash_like.id > ?`, sinceID)

@@ -1,8 +1,7 @@
 package notesfilter
 
 import (
-	"strings"
-
+	"github.com/shiroha-a/mk/internal/misc/idnhost"
 	"github.com/shiroha-a/mk/internal/model"
 	"github.com/shiroha-a/mk/internal/repository"
 )
@@ -54,19 +53,13 @@ func ApplyBlockedHosts(notes []*model.Note, blockedHosts []string) []*model.Note
 
 // hostBlocked reports whether host matches any blocked entry exactly or as a
 // subdomain (`%.entry` 相当)。ILIKE 突合なので case-insensitive。
+//
+// 判定は inbox / 配送側 (`instance.HostMatchesAny`) と同じ関数に寄せる。
+// 別実装のままだと、あちらでポート付き host (`evil.example:8443`) を塞いでも
+// 既に取り込まれたノートは一覧から消えない、という片側だけの修正になる。
 func hostBlocked(host *string, blockedHosts []string) bool {
-	if host == nil || *host == "" {
+	if host == nil {
 		return false
 	}
-	h := strings.ToLower(*host)
-	for _, b := range blockedHosts {
-		b = strings.ToLower(b)
-		if b == "" {
-			continue
-		}
-		if h == b || strings.HasSuffix(h, "."+b) {
-			return true
-		}
-	}
-	return false
+	return idnhost.MatchesBlockList(blockedHosts, *host)
 }

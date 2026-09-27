@@ -26,6 +26,10 @@ var (
 	// ErrWebAuthnNotConfigured is returned when WebAuthnService methods are
 	// called on a zero-value or nil-Redis instance.
 	ErrWebAuthnNotConfigured = errors.New("twofactor: webauthn service not configured")
+	// ErrWebAuthnCounterRollback is returned when the assertion's signature
+	// counter did not advance past the stored value, which signals a cloned
+	// authenticator.
+	ErrWebAuthnCounterRollback = errors.New("twofactor: webauthn signature counter did not increase")
 )
 
 // webAuthnSessionTTL bounds how long a registration / authentication challenge
@@ -180,6 +184,8 @@ var readRandom = cryptorand.Read
 // 同じく residentKey=required / userVerification=preferred を要求する。これが
 // 無いと一部の authenticator + browser 組合せ (特に passkey 経由の platform
 // authenticator) でダイアログは表示されるが credential が返らないケースがある。
+// preferred はブラウザへの要求だけで、FinishRegistration は UV を必須にして
+// 検証する (upstream と同じ)。
 func (s *WebAuthnService) BeginRegistration(ctx context.Context, user *model.User, existing []*model.UserSecurityKey) (*protocol.CredentialCreation, error) {
 	if s == nil || s.wa == nil {
 		return nil, ErrWebAuthnNotConfigured
@@ -202,6 +208,8 @@ func (s *WebAuthnService) BeginRegistration(ctx context.Context, user *model.Use
 // returns a Credential ready to be persisted as a UserSecurityKey row. The
 // SessionData is loaded by user id alone (no client-supplied sessionID),
 // matching Misskey TS WebAuthnService.verifyRegistration (#698).
+//
+// The attestation must carry the User Verified flag.
 func (s *WebAuthnService) FinishRegistration(ctx context.Context, user *model.User, existing []*model.UserSecurityKey, req *http.Request) (*webauthn.Credential, error) {
 	if s == nil || s.wa == nil {
 		return nil, ErrWebAuthnNotConfigured
@@ -210,6 +218,10 @@ func (s *WebAuthnService) FinishRegistration(ctx context.Context, user *model.Us
 	if err != nil {
 		return nil, err
 	}
+	// upstream の verifyRegistration は `requireUserVerification: true` で検証する。
+	// options は preferred なので、保存した session の値のままだと go-webauthn は
+	// UV フラグを見ない。
+	sd.UserVerification = protocol.VerificationRequired
 	adapter := &userAdapter{user: user, keys: existing}
 	cred, err := s.wa.FinishRegistration(adapter, *sd, req)
 	if err != nil {
@@ -256,12 +268,15 @@ func (s *WebAuthnService) takeRegistrationSession(ctx context.Context, userID st
 // preferred second factor. The SessionData is keyed by user id alone — Misskey
 // TS upstream の signin プロトコルが client へ session id を返さないため
 // (#705)、同 user の新たな challenge は既存を上書きする。
+//
+// The browser is asked for userVerification=preferred like upstream;
+// FinishLogin requires it regardless.
 func (s *WebAuthnService) BeginLogin(ctx context.Context, user *model.User, existing []*model.UserSecurityKey) (*protocol.CredentialAssertion, error) {
 	if s == nil || s.wa == nil {
 		return nil, ErrWebAuthnNotConfigured
 	}
 	adapter := &userAdapter{user: user, keys: existing}
-	assertion, sd, err := s.wa.BeginLogin(adapter)
+	assertion, sd, err := s.wa.BeginLogin(adapter, webauthn.WithUserVerification(protocol.VerificationPreferred))
 	if err != nil {
 		return nil, err
 	}
@@ -276,6 +291,10 @@ func (s *WebAuthnService) BeginLogin(ctx context.Context, user *model.User, exis
 // WebAuthnService.verifyAuthentication (#705). The returned Credential carries
 // an updated counter; callers should persist it via UserSecurityKeyRepository
 // to detect cloned authenticators on subsequent logins.
+//
+// The assertion must carry the User Verified flag, whether the key is the
+// second factor or the only one. Returns ErrWebAuthnCounterRollback when the
+// signature counter signals a cloned authenticator.
 func (s *WebAuthnService) FinishLogin(ctx context.Context, user *model.User, existing []*model.UserSecurityKey, req *http.Request) (*webauthn.Credential, error) {
 	if s == nil || s.wa == nil {
 		return nil, ErrWebAuthnNotConfigured
@@ -284,12 +303,34 @@ func (s *WebAuthnService) FinishLogin(ctx context.Context, user *model.User, exi
 	if err != nil {
 		return nil, err
 	}
+	// upstream の verifyAuthentication は 2 要素目でも
+	// `requireUserVerification: true` で検証する。options は preferred なので、
+	// 保存した session の値のままだと go-webauthn は UV フラグを見ない。
+	sd.UserVerification = protocol.VerificationRequired
 	adapter := &userAdapter{user: user, keys: existing}
 	cred, err := s.wa.FinishLogin(adapter, *sd, req)
 	if err != nil {
 		return nil, err
 	}
+	if err := checkCounter(cred); err != nil {
+		return nil, err
+	}
 	return cred, nil
+}
+
+// checkCounter rejects an assertion whose signature counter signals a cloned
+// authenticator.
+//
+// upstream は @simplewebauthn の verifyAuthenticationResponse が
+// `(newCounter > 0 || counter > 0) && newCounter <= counter` で throw するので
+// ログインが失敗する。go-webauthn は CloneWarning を立てるだけで成功を返すので、
+// ここで拒否する。**counter を持たない認証器 (常に 0) は誤検知しない** —
+// `Authenticator.UpdateCounter` が 0 / 0 を CloneWarning にしない。
+func checkCounter(cred *webauthn.Credential) error {
+	if cred.Authenticator.CloneWarning {
+		return ErrWebAuthnCounterRollback
+	}
+	return nil
 }
 
 // putLoginSession overwrites any in-flight login challenge for the user.
@@ -339,7 +380,9 @@ func (s *WebAuthnService) BeginPasskeyLogin(ctx context.Context, ctxID string) (
 	if s == nil || s.wa == nil {
 		return nil, ErrWebAuthnNotConfigured
 	}
-	assertion, sd, err := s.wa.BeginDiscoverableLogin()
+	// options は upstream と同じ preferred。UV の要否は FinishPasskeyLogin が
+	// required で検証する。
+	assertion, sd, err := s.wa.BeginDiscoverableLogin(webauthn.WithUserVerification(protocol.VerificationPreferred))
 	if err != nil {
 		return nil, err
 	}
@@ -365,6 +408,9 @@ func (s *WebAuthnService) FinishPasskeyLogin(ctx context.Context, ctxID string, 
 	if err != nil {
 		return nil, nil, err
 	}
+	// 保存した値に依らず required で検証する。upstream も
+	// `requireUserVerification: true` で検証している。
+	sd.UserVerification = protocol.VerificationRequired
 	var resolvedUser *model.User
 	handler := func(rawID, userHandle []byte) (webauthn.User, error) {
 		u, keys, err := resolve(rawID, userHandle)
@@ -376,6 +422,9 @@ func (s *WebAuthnService) FinishPasskeyLogin(ctx context.Context, ctxID string, 
 	}
 	cred, err := s.wa.FinishDiscoverableLogin(handler, *sd, req)
 	if err != nil {
+		return nil, nil, err
+	}
+	if err := checkCounter(cred); err != nil {
 		return nil, nil, err
 	}
 	return resolvedUser, cred, nil

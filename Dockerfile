@@ -11,7 +11,13 @@
 # 「この image は stdlib の既知脆弱性を含まない」を再現可能な形で言えない。
 # go.mod の `go` directive と揃えること (govulncheck は go.mod 側を見るので、
 # ここだけ古いと CI が緑のまま脆弱な binary が出る)。
-FROM golang:1.27.1-alpine AS builder
+#
+# **base image は tag と digest を併記する。** patch version の tag でも付け
+# 替えは起きる (公式 image は同じ tag を alpine の更新などで publish し直す)
+# ので、tag だけだと「どの builder で作ったか」を再現できない。digest があると
+# BuildKit は digest で pull する。tag は読む人向けと CI の版照合用に残す。
+# 更新は dependabot (`.github/dependabot.yml` の `docker`) が digest ごと上げる。
+FROM golang:1.27.1-alpine@sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414 AS builder
 
 # Step 2 (#618) で chai2010/webp → gen2brain/webp (libwebp on wazero/WASM) に
 # 切替えたので cgo 依存はゼロ。build-base (gcc + musl libc) は不要になった。
@@ -90,7 +96,10 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # `/app/misskey -healthcheck` で binary 自身に叩かせる (cmd/misskey/main.go
 # の -healthcheck フラグ)。docker-compose.dropin*.mk.yml /
 # docker-compose.federation.misskey.yml で使用。
-FROM gcr.io/distroless/static-debian13
+#
+# tag を省くと `latest` になり、いつ build したかで中身が変わる。builder と
+# 同じく digest で固定する (distroless の更新は dependabot が digest ごと上げる)。
+FROM gcr.io/distroless/static-debian13:latest@sha256:58133991db06659feaabe0f4e97a35cebf15ef4ea08f8a4c6d2ee5f75e4aa6a0
 
 WORKDIR /app
 

@@ -30,7 +30,8 @@ func FrontendDir() string {
 // 既定値を FrontendDir の sibling として解決するのは SwDistDir と同じ理由。
 // deploy 側は MISSKEY_FRONTEND_DIR しか指していないことが多く (本番 compose /
 // federation Dockerfile ともにそう)、embed だけ別の環境変数を要求すると
-// **設定漏れに気付けないまま dev server proxy へ落ちて 502 になる**。
+// **設定漏れに気付けないまま /embed_vite/* が 404 になる** (以前は dev server
+// proxy へ落ちて 502 だった。今は dev モードでしか proxy しない)。
 // 実際 Playwright を通すまでこの状態に気付けなかった。
 func FrontendEmbedDir() string {
 	if v := os.Getenv("MISSKEY_FRONTEND_EMBED_DIR"); v != "" {

@@ -1,6 +1,8 @@
 package safehttp
 
 import (
+	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -242,7 +244,7 @@ func TestNewSSRFSafeTransport_ForwardsThroughProxy(t *testing.T) {
 
 	// httptest は 127.0.0.1 で起動するので allowedCIDRs 無しでも proxy
 	// 接続自体は SSRF skip される (proxyAddr 一致)。
-	tr := NewSSRFSafeTransport(nil, WithProxy(proxy.URL, nil))
+	tr := NewSSRFSafeTransport(nil, WithProxy(proxy.URL, nil), withLookup(publicLookup))
 	client := &http.Client{Transport: tr}
 
 	resp, err := client.Get("http://example.com/path")
@@ -430,7 +432,7 @@ func TestNewSSRFSafeTransport_IPv6ProxyDefaultPort(t *testing.T) {
 		t.Skip("something is listening on [::1]:80 (e.g. local nginx); cannot observe #486 regression via dial-fail branch")
 	}
 
-	tr := NewSSRFSafeTransport(nil, WithProxy("http://[::1]", nil))
+	tr := NewSSRFSafeTransport(nil, WithProxy("http://[::1]", nil), withLookup(publicLookup))
 	require.NotNil(t, tr)
 	require.NotNil(t, tr.Proxy)
 
@@ -439,4 +441,164 @@ func TestNewSSRFSafeTransport_IPv6ProxyDefaultPort(t *testing.T) {
 	require.Error(t, err, "dial to ::1:80 will fail (no listener) but must not be SSRF-blocked")
 	assert.NotErrorIs(t, err, ErrSSRFBlocked,
 		"proxy connection must skip SSRF check even when proxy host is IPv6 loopback without explicit port")
+}
+
+// publicLookup resolves every host (IP literals included) to a public address
+// so proxy tests do not depend on the sandbox's DNS.
+func publicLookup(_ context.Context, _ string) ([]net.IPAddr, error) {
+	return []net.IPAddr{{IP: net.ParseIP("93.184.215.14")}}, nil
+}
+
+// fakeLookup は host ごとの解決結果を返す resolver。IP リテラルは本物の
+// resolver と同じくそのまま返す。
+func fakeLookup(table map[string][]string) lookupFunc {
+	return func(_ context.Context, host string) ([]net.IPAddr, error) {
+		if ip := net.ParseIP(host); ip != nil {
+			return []net.IPAddr{{IP: ip}}, nil
+		}
+		addrs, ok := table[host]
+		if !ok {
+			return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
+		}
+		out := make([]net.IPAddr, 0, len(addrs))
+		for _, a := range addrs {
+			out = append(out, net.IPAddr{IP: net.ParseIP(a)})
+		}
+		return out, nil
+	}
+}
+
+// countingProxy は受け取った absolute-form URL の host を記録する forward proxy。
+func countingProxy(t *testing.T) (*httptest.Server, *[]string) {
+	t.Helper()
+	var hosts []string
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hosts = append(hosts, r.URL.Host)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(proxy.Close)
+	return proxy, &hosts
+}
+
+// proxy 経由では mk-go が宛先へ dial しないので、宛先の検査は proxy へ渡す
+// 前に行わなければならない。内部 IP リテラル / 内部へ解決されるホスト名 /
+// 一部だけ内部を含む解決結果はどれも proxy に届かず ErrSSRFBlocked になる。
+func TestNewSSRFSafeTransport_ProxyBlocksPrivateDestinations(t *testing.T) {
+	lookup := fakeLookup(map[string][]string{
+		"internal.example": {"10.0.0.5"},
+		"mixed.example":    {"93.184.215.14", "169.254.169.254"},
+		"v6.example":       {"::1"},
+	})
+	cases := []struct {
+		name string
+		url  string
+	}{
+		{"metadata literal", "http://169.254.169.254/latest/meta-data/"},
+		{"rfc1918 literal with port", "http://10.0.0.5:9200/"},
+		{"ipv6 loopback literal", "http://[::1]:8080/"},
+		{"https literal via CONNECT", "https://127.0.0.1/"},
+		{"hostname resolving to private", "http://internal.example/"},
+		{"hostname with one private address", "http://mixed.example/"},
+		{"hostname resolving to ipv6 loopback", "http://v6.example/"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			proxy, hosts := countingProxy(t)
+			tr := NewSSRFSafeTransport(nil, WithProxy(proxy.URL, nil), withLookup(lookup))
+			client := &http.Client{Transport: tr, Timeout: 2 * time.Second}
+
+			_, err := client.Get(tc.url)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, ErrSSRFBlocked)
+			assert.Empty(t, *hosts, "private destination must not reach the proxy")
+		})
+	}
+}
+
+// 解決できない宛先は検証できないので proxy に渡さない (fail closed)。
+func TestNewSSRFSafeTransport_ProxyBlocksUnresolvableDestination(t *testing.T) {
+	proxy, hosts := countingProxy(t)
+	tr := NewSSRFSafeTransport(nil, WithProxy(proxy.URL, nil), withLookup(fakeLookup(nil)))
+	client := &http.Client{Transport: tr, Timeout: 2 * time.Second}
+
+	_, err := client.Get("http://nowhere.example/")
+	require.Error(t, err)
+	var dnsErr *net.DNSError
+	assert.True(t, errors.As(err, &dnsErr), "lookup failure must surface: %v", err)
+	assert.Empty(t, *hosts)
+}
+
+// 外部アドレスへ解決される宛先は従来どおり proxy に届く。
+func TestNewSSRFSafeTransport_ProxyForwardsPublicDestination(t *testing.T) {
+	proxy, hosts := countingProxy(t)
+	lookup := fakeLookup(map[string][]string{"remote.example": {"93.184.215.14", "2606:2800:21f:cb07:6820:80da:af6b:8b2c"}})
+	tr := NewSSRFSafeTransport(nil, WithProxy(proxy.URL, nil), withLookup(lookup))
+	client := &http.Client{Transport: tr, Timeout: 2 * time.Second}
+
+	for _, u := range []string{"http://remote.example/a", "http://93.184.215.14:8080/b"} {
+		resp, err := client.Get(u)
+		require.NoError(t, err, u)
+		_ = resp.Body.Close()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	}
+	assert.Equal(t, []string{"remote.example", "93.184.215.14:8080"}, *hosts)
+}
+
+// allowedPrivateNetworks に入れた範囲は proxy 経由でも許可される (dial 時の
+// 判定と同じ関数を使う)。範囲外の private は引き続き拒否。
+func TestNewSSRFSafeTransport_ProxyHonoursAllowedPrivateNetworks(t *testing.T) {
+	proxy, hosts := countingProxy(t)
+	lookup := fakeLookup(map[string][]string{"es.internal": {"10.0.0.5"}})
+	tr := NewSSRFSafeTransport([]string{"10.0.0.0/24"}, WithProxy(proxy.URL, nil), withLookup(lookup))
+	client := &http.Client{Transport: tr, Timeout: 2 * time.Second}
+
+	for _, u := range []string{"http://10.0.0.5:9200/", "http://es.internal/"} {
+		resp, err := client.Get(u)
+		require.NoError(t, err, u)
+		_ = resp.Body.Close()
+	}
+	assert.Equal(t, []string{"10.0.0.5:9200", "es.internal"}, *hosts)
+
+	_, err := client.Get("http://10.0.1.5/")
+	assert.ErrorIs(t, err, ErrSSRFBlocked)
+	assert.Len(t, *hosts, 2, "address outside the allowlist must not reach the proxy")
+}
+
+// redirect 先も proxy へ渡す前に検査される (Transport.Proxy はリクエスト毎に
+// 呼ばれる)。外部 → 内部への redirect は proxy に 1 回目しか届かない。
+func TestNewSSRFSafeTransport_ProxyChecksRedirectTarget(t *testing.T) {
+	var hosts []string
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hosts = append(hosts, r.URL.Host)
+		http.Redirect(w, r, "http://169.254.169.254/latest/meta-data/", http.StatusFound)
+	}))
+	defer proxy.Close()
+
+	lookup := fakeLookup(map[string][]string{"remote.example": {"93.184.215.14"}})
+	tr := NewSSRFSafeTransport(nil, WithProxy(proxy.URL, nil), withLookup(lookup))
+	client := &http.Client{Transport: tr, Timeout: 2 * time.Second}
+
+	_, err := client.Get("http://remote.example/start")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrSSRFBlocked)
+	assert.Equal(t, []string{"remote.example"}, hosts)
+}
+
+// bypass 経路は proxy を経由せず、dial 時の検査が効く (resolver hook も dial 側に効く)。
+func TestNewSSRFSafeTransport_BypassHostStillCheckedAtDial(t *testing.T) {
+	proxy, hosts := countingProxy(t)
+	lookup := fakeLookup(map[string][]string{"bypass.example": {"127.0.0.1"}})
+	tr := NewSSRFSafeTransport(nil, WithProxy(proxy.URL, []string{"bypass.example"}), withLookup(lookup))
+	client := &http.Client{Transport: tr, Timeout: 2 * time.Second}
+
+	_, err := client.Get("http://bypass.example/")
+	assert.ErrorIs(t, err, ErrSSRFBlocked)
+	assert.Empty(t, *hosts)
+}
+
+// http.Transport は Host の無い URL を Proxy callback より前に弾くので、
+// 空 host の枝は直接呼んで固定する。
+func TestCheckProxiedHost_EmptyHost(t *testing.T) {
+	err := checkProxiedHost(context.Background(), publicLookup, "", nil)
+	assert.ErrorIs(t, err, ErrSSRFBlocked)
 }

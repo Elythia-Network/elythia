@@ -66,7 +66,7 @@ func TestTokenCache_TTLExpired(t *testing.T) {
 	c.now = clock.Now
 	c.put("tok", &model.User{ID: "u1"}, nil, "", false)
 
-	clock.Advance(authCacheTTL + time.Second)
+	clock.Advance(AuthCacheTTL + time.Second)
 	_, _, _, _, ok := c.get("tok")
 	assert.False(t, ok, "expired entry must be evicted on get")
 	assert.Equal(t, 0, c.len(), "expired entry should be deleted from map")
@@ -79,7 +79,7 @@ func TestTokenCache_Sweep(t *testing.T) {
 	c.sweepEvery = 0 // disable auto-sweep so we can call it explicitly
 	c.put("a", &model.User{ID: "ua"}, nil, "", false)
 	c.put("b", &model.User{ID: "ub"}, nil, "", false)
-	clock.Advance(authCacheTTL + time.Second)
+	clock.Advance(AuthCacheTTL + time.Second)
 	c.put("c", &model.User{ID: "uc"}, nil, "", false) // c is fresh
 	c.sweep()
 
@@ -96,7 +96,7 @@ func TestTokenCache_AutoSweepOnPut(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		c.put("stale-"+string(rune('a'+i)), &model.User{ID: "u"}, nil, "", false)
 	}
-	clock.Advance(authCacheTTL + time.Second)
+	clock.Advance(AuthCacheTTL + time.Second)
 	// 4th put should hit the sweep threshold and clean the 3 stale entries.
 	c.put("fresh", &model.User{ID: "fresh"}, nil, "", false)
 	assert.Equal(t, 1, c.len(), "only the fresh entry should remain after auto-sweep")

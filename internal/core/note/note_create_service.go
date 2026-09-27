@@ -4,6 +4,7 @@ package note
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"math/rand"
 	"regexp"
@@ -21,6 +22,7 @@ import (
 	"github.com/shiroha-a/mk/internal/model"
 	"github.com/shiroha-a/mk/internal/repository"
 
+	corechannel "github.com/shiroha-a/mk/internal/core/channel"
 	"github.com/shiroha-a/mk/internal/core/role"
 )
 
@@ -43,8 +45,14 @@ var (
 	ErrCannotReplyToInvisibleNote = errors.New("cannot reply to this note")
 	// ErrCannotRenoteInvisibleNote is returned when the renoter cannot see the renote target.
 	ErrCannotRenoteInvisibleNote = errors.New("cannot renote this note")
-	// ErrChannelNotFound is returned when the channelId references a missing channel.
-	ErrChannelNotFound = errors.New("channel not found")
+	// ErrChannelNotFound is returned when the channelId references a missing
+	// (or archived) channel. It is the same value as channel.ErrChannelNotFound
+	// so that a ChannelHook can report not-found without importing core/note.
+	//
+	// hook が返すエラーのうち not-found だけを NO_SUCH_CHANNEL にし、DB 障害は
+	// そのまま返すために同一の値にしてある (#2792)。core/channel は core/role
+	// 経由で core/note から到達されるので、逆向きに core/note を import できない。
+	ErrChannelNotFound = corechannel.ErrChannelNotFound
 	// ErrCannotRenoteToAPureRenote is returned when the renote target is a pure
 	// renote (renote of another note with no original content). Misskey disallows
 	// renoting a pure renote to avoid redundant propagation chains.
@@ -575,7 +583,12 @@ func (s *CreateService) Create(in CreateInput) (*model.Note, error) {
 	// 経路が無く到達しない上、OnNotePosted も no-op で無害なため許容する。
 	if specifiedChannelID != nil && s.channelHook != nil {
 		if err := s.channelHook.EnsureChannelExists(*specifiedChannelID); err != nil {
-			return nil, ErrChannelNotFound
+			// **DB 障害を not-found に丸めない** (#2792)。丸めると障害が
+			// NO_SUCH_CHANNEL (400) に化け、監視でも 5xx が立たない。
+			if errors.Is(err, ErrChannelNotFound) {
+				return nil, ErrChannelNotFound
+			}
+			return nil, fmt.Errorf("ensure channel exists: %w", err)
 		}
 	}
 

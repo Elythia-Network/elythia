@@ -86,7 +86,7 @@ var (
 // **実ファイルに対する変異検証は 19 形**。Dockerfile / doc 側が 17 — 同じ
 // ファイルを変えるものが 12 (pin を古い tag に戻す / 存在しない tag にする /
 // doc の pin 行の tag だけ変える / ARG 行を消す / ARG 行をコメントアウトする /
-// tag を外す (暗黙 latest) / digest pin にする / tag を変数参照にする / pin 行の
+// tag を外す (暗黙 latest) / digest だけの pin にする / tag を変数参照にする / pin 行の
 // 書式例を同じ行に足す / 別の行に足す / `FROM` をリテラルの古い tag に書き換える
 // (ARG の参照は残す) / ARG を宣言したまま参照しない)、別の tracked Dockerfile を
 // 足すものが 5 (`arg` 小文字 / 1 命令に複数名 / `bundled.Dockerfile` /
@@ -150,11 +150,19 @@ func TestBundledAssetsPinMatchesDoc(t *testing.T) {
 			found++
 			repo, tag, ok := splitImageRef(ref)
 			if !assert.Truef(t, ok, "%s の %s (%s) から repository と tag を読めない。\n"+
-				"doc の pin (tag) と突き合わせるので `<image>:<tag>` の形で書くこと\n"+
-				"(digest pin や変数のままだと対応が取れない)", f.path, bundledAssetsArg, ref) {
+				"doc の pin (tag) と突き合わせるので `<image>:<tag>@sha256:<digest>` の形で書くこと\n"+
+				"(tag を持たない digest だけの pin や変数のままだと対応が取れない)", f.path, bundledAssetsArg, ref) {
 				continue
 			}
 			assertAssetsTag(t, f.path, docTag, tag, "ARG "+bundledAssetsArg)
+			// **digest も要求する。** tag は付け替えられるので、tag だけだと
+			// fork 側で同じ tag を publish し直したときに焼き込む中身が黙って
+			// 変わる。digest が tag と対応しているかはネットワークが要るので
+			// ここでは見ない (docker.yml の build-and-push-bundled が見る)。
+			assert.Truef(t, hasImageDigest(ref),
+				"%s の %s (%s) に digest が無い。\n"+
+					"`<image>:<tag>@sha256:<digest>` の形で書くこと (取り方は docs/upstream-catch-up.md)",
+				f.path, bundledAssetsArg, ref)
 			repoSet[repo] = true
 		}
 
@@ -278,6 +286,9 @@ func TestAssetsPinScanners(t *testing.T) {
 			{name: "no tag", ref: repo},
 			{name: "port but no tag", ref: "localhost:5000/x"},
 			{name: "digest pin", ref: repo + "@sha256:abc"},
+			{name: "tag and digest", ref: repo + ":v1@sha256:" + strings.Repeat("a", 64), repo: repo, tag: "v1", ok: true},
+			{name: "digest only", ref: repo + "@sha256:" + strings.Repeat("a", 64)},
+			{name: "tag and malformed digest", ref: repo + ":v1@sha256:abc"},
 			{name: "variable tag", ref: repo + ":${TAG}"},
 			{name: "variable repo", ref: "${REGISTRY}/x:v1"},
 			{name: "empty tag", ref: repo + ":"},
@@ -288,6 +299,24 @@ func TestAssetsPinScanners(t *testing.T) {
 				require.Equal(t, tt.ok, ok)
 				require.Equal(t, tt.repo, gotRepo)
 				require.Equal(t, tt.tag, gotTag)
+			})
+		}
+	})
+
+	t.Run("digest の有無", func(t *testing.T) {
+		digest := "sha256:" + strings.Repeat("0", 64)
+		tests := []struct {
+			name, ref string
+			want      bool
+		}{
+			{"tag and digest", repo + ":v1@" + digest, true},
+			{"tag only", repo + ":v1", false},
+			{"malformed digest", repo + ":v1@sha256:abc", false},
+			{"uppercase hex", repo + ":v1@sha256:" + strings.Repeat("A", 64), false},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				require.Equal(t, tt.want, hasImageDigest(tt.ref))
 			})
 		}
 	})
@@ -382,14 +411,19 @@ func looksLikeDockerfile(path string) bool {
 
 // splitImageRef splits an image reference into its repository and tag.
 //
-// ok=false は「tag として突き合わせられない形」。digest pin (`@sha256:...`)、
+// ok=false は「tag として突き合わせられない形」。tag を持たない digest pin (`<image>@sha256:...`)、
 // tag 無し、registry の port (`host:5000/x`) を tag と誤読する形、変数が展開
 // されないまま残っている形をまとめて弾く。**曖昧なら通さない**側に倒してある
 // ので、読めない pin は呼び出し側で fail する。
 func splitImageRef(ref string) (repo, tag string, ok bool) {
-	// digest pin は tag を持たないので doc の tag と対応が取れない。
-	if strings.Contains(ref, "@") {
-		return "", "", false
+	// `<tag>@sha256:<digest>` の併記は tag を持つので受ける。digest だけの pin
+	// (`<image>@sha256:...`) は tag を持たないので、digest を外した後の tag
+	// 判定で落ちる。digest の書式が崩れているものも通さない。
+	if at := strings.IndexByte(ref, '@'); at >= 0 {
+		if !imageDigestRe.MatchString(ref[at+1:]) {
+			return "", "", false
+		}
+		ref = ref[:at]
 	}
 	i := strings.LastIndex(ref, ":")
 	if i < 0 {
@@ -405,4 +439,13 @@ func splitImageRef(ref string) (repo, tag string, ok bool) {
 		return "", "", false
 	}
 	return repo, tag, true
+}
+
+// imageDigestRe matches the digest part of an image reference.
+var imageDigestRe = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+
+// hasImageDigest reports whether ref ends with a well-formed `@sha256:` digest.
+func hasImageDigest(ref string) bool {
+	at := strings.LastIndexByte(ref, '@')
+	return at >= 0 && imageDigestRe.MatchString(ref[at+1:])
 }

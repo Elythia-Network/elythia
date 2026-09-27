@@ -8,10 +8,14 @@ import (
 	"github.com/shiroha-a/mk/internal/model"
 )
 
-// authCacheTTL は token → User を hot path でキャッシュする寿命。
+// AuthCacheTTL is how long a resolved token stays in the per-process auth
+// cache. stream.Manager の 2 回目の閉じ処理 (SetRevokeRecheckDelay) はこれより
+// 長くする必要があるので公開している。
+//
+// token → User を hot path でキャッシュする寿命。
 // 短い TTL は logout / token revoke の反映遅延を 30 秒以内に抑えつつ、
 // 高頻度の認証リクエストで DB の `FindByToken` 呼び出しをほぼ消す (#512 / #413 #3)。
-const authCacheTTL = 30 * time.Second
+const AuthCacheTTL = 30 * time.Second
 
 // authCacheSweepEvery はキャッシュ growth が unbounded にならないように
 // `put` 1 回ごとに sweep を掛ける確率の分母 (1/N の確率で full sweep)。
@@ -47,7 +51,7 @@ type tokenCache struct {
 // the wall clock as the now function.
 func newTokenCache() *tokenCache {
 	return &tokenCache{
-		ttl:        authCacheTTL,
+		ttl:        AuthCacheTTL,
 		sweepEvery: authCacheSweepEvery,
 		now:        time.Now,
 	}

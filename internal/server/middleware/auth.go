@@ -43,6 +43,10 @@ const (
 	// upstream ApiCallService が cacheSec の Cache-Control 判定を raw token (`!token`)
 	// で行うため、無効/suspended/deleted token でも cache を付けないようにする (#2049)。
 	rawTokenPresentContextKey contextKey = "misskeyRawTokenPresent"
+	// deletedContextKey flags that the request carried a valid token whose
+	// account is (logically) deleted. HTTP では匿名として扱うが、/streaming は
+	// 凍結と同じくこの接続を拒否する (IsInactiveAccountRequest)。
+	deletedContextKey contextKey = "misskeyDeleted"
 )
 
 // AuthScope is the OAuth scope view of an authenticated request. IsApp is
@@ -134,6 +138,7 @@ func (a *AuthMiddleware) Authenticate() echo.MiddlewareFunc {
 
 			// 論理削除された user は anonymous request 扱いに落とす (#962 P2)。
 			if user.IsDeleted {
+				c.Set(string(deletedContextKey), true)
 				return next(c)
 			}
 			// 凍結された user は公開 endpoint では anonymous 扱いに落とす
@@ -175,6 +180,18 @@ func (a *AuthMiddleware) Authenticate() echo.MiddlewareFunc {
 // CREDENTIAL_REQUIRED を返す handler でも suspended だけは 403 に分ける必要がある。
 func IsSuspendedRequest(c echo.Context) bool {
 	v, _ := c.Get(string(suspendedContextKey)).(bool)
+	return v
+}
+
+// IsInactiveAccountRequest reports whether the request carried a valid token
+// whose account is suspended or deleted. Both are treated as anonymous by
+// Authenticate; /streaming uses this to refuse the upgrade instead
+// (upstream StreamingApiServerService rejects suspended users with 403).
+func IsInactiveAccountRequest(c echo.Context) bool {
+	if IsSuspendedRequest(c) {
+		return true
+	}
+	v, _ := c.Get(string(deletedContextKey)).(bool)
 	return v
 }
 
@@ -460,6 +477,19 @@ func (a *AuthMiddleware) resolveUser(token string) (user *model.User, scopes []s
 
 	// まずnative tokenで検索 (= user 自身の login token, full access)。
 	user, err = a.userRepo.FindByToken(token)
+	if err == nil && !nativeTokenMatches(user.Token, token) {
+		// **保存値と完全一致しないものは native token として認めない。**
+		// user.token は char(16) で、PostgreSQL の char 比較は末尾の空白を
+		// 無視するので、"<token> " も同じ利用者に解決される。認証自体は通っても
+		// 害が無いように見えるが、この文字列は tokenCache の別キーになり
+		// (InvalidateToken が消すのは空白なしのキーだけ)、WebSocket の失効の鍵も
+		// 「リクエストの文字列」から作られて i/regenerate-token で閉じなくなる。
+		// 正当なクライアントが空白を足すことは無いので、完全一致を要求する
+		// (upstream の findOneBy も char 比較なので、ここは安全側への乖離)。
+		// 空白付きの文字列は access_token (varchar) とも一致しないので、下の
+		// 経路で not found に落ちる。
+		user, err = nil, gorm.ErrRecordNotFound
+	}
 	if err == nil {
 		a.tokenCache.put(token, user, nil, "", false)
 		return user, nil, "", false, nil
@@ -490,6 +520,19 @@ func (a *AuthMiddleware) resolveUser(token string) (user *model.User, scopes []s
 	scopes = []string(accessToken.Permission)
 	a.tokenCache.put(token, accessToken.User, scopes, accessToken.ID, true)
 	return accessToken.User, scopes, accessToken.ID, true, nil
+}
+
+// nativeTokenMatches reports whether the raw request token is exactly the
+// native token stored for the user.
+//
+// 保存値は char(16) なので、16 文字に満たない token は末尾を空白で埋めた形で
+// 読み出される。埋め草だけを落として比べ、リクエスト側の空白は落とさない。
+//
+// stored が nil のときは照合できないので通す。本番の FindByToken は
+// `token = ?` に一致した行しか返さないので nil にはならず、nil になるのは
+// token 列を埋めない mock 経由だけ。
+func nativeTokenMatches(stored *string, token string) bool {
+	return stored == nil || strings.TrimRight(*stored, " ") == token
 }
 
 func sha256Hash(s string) string {

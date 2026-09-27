@@ -38,7 +38,7 @@ jobs:
     timeout-minutes: 35
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # stage 3 の mk-go image build (tests/federation/common/Dockerfile.mkgo)
           # が third_party/misskey/built/ と assets/ を COPY するので、submodule
@@ -46,7 +46,7 @@ jobs:
           submodules: recursive
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           # pnpm のバージョンは submodule 側 package.json の packageManager から
           # 取る。mk リポジトリ直下には package.json が無い。
@@ -63,7 +63,7 @@ jobs:
           package_json_file: third_party/misskey/package.json
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: third_party/misskey/.node-version
 
@@ -78,7 +78,7 @@ jobs:
           pnpm build
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Pre-pull heavy images
         # 旧版は `&` で background 化していたが、GitHub Actions の `run:`
@@ -118,7 +118,7 @@ jobs:
 
       - name: Upload logs on failure
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dropin-frontend-logs
           path: /tmp/dropin-frontend-logs/

@@ -24,7 +24,7 @@ var errWiringCheckSkipped = errors.New("critical wiring check did not run: setup
 
 // criticalWiringCount is the number of entries setupRoutes is expected to
 // register. Guards against an entry being dropped from the table.
-const criticalWiringCount = 86
+const criticalWiringCount = 89
 
 // criticalWiring names one dependency whose absence degrades behaviour
 // silently instead of failing visibly.

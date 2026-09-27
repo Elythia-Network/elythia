@@ -761,6 +761,13 @@ func (h *ssrMetaHandler) FlashPage(c echo.Context) error {
 	if err != nil || flash == nil {
 		return h.renderPlain(c)
 	}
+	// 非公開の Flash は API (flash/show) では所有者以外に存在しない扱いにして
+	// いるので、ここでも title / summary / 作者を出さない。SSR はセッションを
+	// 見ない (Cookie 認証を持たない) ので所有者かどうかを判定できず、非公開は
+	// 一律に素の shell を返す。upstream はここで可視性を見ない (divergence.md)。
+	if flash.Visibility != "" && flash.Visibility != "public" {
+		return h.renderPlain(c)
+	}
 	author := h.userByID(flash.UserID)
 	og := propertyTag("og:type", "article") +
 		propertyTag("og:title", flash.Title) +

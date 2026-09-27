@@ -9,8 +9,9 @@ import (
 	"golang.org/x/net/idna"
 )
 
-// Puny normalizes a host for comparison the way upstream
-// UtilityService.toPuny does (idna.ToASCII(lowercase), UTS#46)。
+// Puny normalizes a host for comparison and storage the way upstream
+// UtilityService.toPuny / `new URL().host` does (UTS#46 mapping + punycode,
+// lowercase), which is also the name Go's HTTP client actually dials.
 //
 // **比較専用。** 比較に使う側は正規化されていない形で来ることがある
 // (フロントの mention リンクは `toUnicode(host)` で URL を組むし、投稿本文の
@@ -27,18 +28,95 @@ import (
 // 剥がさない。ポートを含む host を引き当てるときは、保存側と同じ形にしてから
 // 渡すこと。
 //
-// idna が失敗する不正入力のみ小文字化で返す (Go default の lenient UTS#46
-// profile では port 付き host も成功し ASCII tail はそのまま残るため、fallback は
-// 実質ほぼ発生しない)。
+// **UTS#46 の文字対応付け (mapping) を掛ける。これが接続先と一致させる要点。**
+// Go の HTTP client は非 ASCII の host を `idna.Lookup.ToASCII` で変換してから
+// dial する (`net/http` の `idnaASCII`)。Lookup は全角英数 (`ｅｖｉｌ`)・
+// 句点類 (U+3002 / U+FF0E / U+FF61)・soft hyphen (U+00AD) などを対応付けるので、
+// `https://ｅｖｉｌ.example/` の接続先は `evil.example` になる。以前は mapping を
+// しない `idna.ToASCII` (Punycode profile) だったため、同じ URL が
+// `xn--qi7ciaj2b.example` として保存・比較され、`blockedHosts` の `evil.example`
+// を素通りしていた。upstream の `new URL(uri).host` (WHATWG = UTS#46 mapping) も
+// `evil.example` に畳む。
 //
-// なお Go の idna は ideographic/fullwidth dot (U+3002 等) を `.` に畳まない
-// (Node の domainToASCII と異なるが、別 authority を同一視しない安全側)。
+// **ASCII の入力は小文字化だけ。** net/http は ASCII の host に idna を掛けずに
+// そのまま dial するので、ここで変換すると接続先とずれる (`xn--` ラベルの
+// 検証失敗で別の形に寄せる、等)。正当な IDN (`パイ.example`) はどちらの
+// profile でも同じ `xn--eckve.example` になるので、保存済みの行の表記は変わらない。
+// 変わるのは mapping の対象になる文字を含む host だけ。
+//
+// Lookup が拒否する入力 (`_` を含むラベル、不正な bidi 等) は従来どおり
+// `idna.ToASCII` の結果 (それも失敗すれば小文字化) で返す。net/http も Lookup が
+// 失敗した host は変換せずに dial するが、pure-Go resolver は非 ASCII の名前を
+// 拒否し、cgo 経由でも元のバイト列のまま問い合わせるので、mapping 後の名前
+// (`evil.example`) へ届く経路にはならない。空文字を返さないのは、比較の片側が
+// 消えて**別ホストを同一視する**方向に倒れるため。
+//
+// ポート (`name:8443`) は Lookup が `:` を拒否するので、分けてから掛ける。
 func Puny(host string) string {
 	lower := strings.ToLower(host)
+	if isASCII(lower) {
+		return lower
+	}
+	name, port := splitGatePort(host)
+	out := punyName(name)
+	if port != "" {
+		return out + ":" + port
+	}
+	return out
+}
+
+// punyName converts a non-ASCII host name (no port) to the form net/http dials.
+func punyName(name string) string {
+	if ascii, err := idna.Lookup.ToASCII(name); err == nil {
+		return ascii
+	}
+	lower := strings.ToLower(name)
 	if ascii, err := idna.ToASCII(lower); err == nil {
 		return ascii
 	}
 	return lower
+}
+
+// RepairLegacyPuny normalizes a host that was stored by an older build, which
+// punycoded Unicode hosts without UTS#46 mapping. Such a build stored
+// `https://ｅｖｉｌ.example/` as `xn--qi7ciaj2b.example`; this decodes the
+// punycode labels and re-applies Puny so the row becomes `evil.example`.
+//
+// **backfill 専用。実行時の比較には使わない。** ASCII の host は net/http が
+// そのまま dial するので、`xn--qi7ciaj2b.example` という綴りの URL の接続先は
+// 文字どおりその名前で、`evil.example` ではない。
+//
+// **保存済みの行の由来は区別できない。** 旧 Puny は ASCII をそのまま返したので、
+// 最初から ASCII で `https://xn--qi7ciaj2b.attacker.example/` と書いた URI も同じ
+// 綴りで保存されている (DNS はラベルの IDNA 妥当性を強制しないので、自分の
+// ゾーンの下になら作れる)。その行もここで `evil.attacker.example` へ畳まれ、
+// 実行時に URI から作る host と食い違う。**許容している理由**: 書き換わるのは
+// 当該の xn-- ラベル (と、U+3002 を含むときはそれが割れた分) だけで、その上位の
+// ラベルは変わらないので、結果は常に元の登録ドメインの下に留まる。他人の
+// ドメインへ寄せることはできず、影響はそのラベルを自分で作った相手の行に閉じる。
+// 由来の URI 列を持つのは user 表だけで、他の列は導き直せない。
+//
+// 畳み直すのは、decode した結果が Lookup で受理される (= 当時 mapping されずに
+// 残った) ときだけ。正当な IDN (`xn--eckve.example`) は同じ値へ戻るので変わらず、
+// Lookup が拒否する形 (`xn--_x-mg4ash.example`) も Puny の fallback と同じ値のまま。
+func RepairLegacyPuny(host string) string {
+	p := Puny(host)
+	if !strings.Contains(p, "xn--") {
+		return p
+	}
+	name, port := splitGatePort(p)
+	decoded, err := idna.Punycode.ToUnicode(name)
+	if err != nil || decoded == name {
+		return p
+	}
+	fixed, err := idna.Lookup.ToASCII(decoded)
+	if err != nil {
+		return p
+	}
+	if port != "" {
+		return fixed + ":" + port
+	}
+	return fixed
 }
 
 // HostPort normalizes a parsed URL's authority the way upstream's `punyHost`

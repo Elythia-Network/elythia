@@ -9,6 +9,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 	"github.com/shiroha-a/mk/internal/api/apierr"
+	"github.com/shiroha-a/mk/internal/misc/credkey"
 	"github.com/shiroha-a/mk/internal/model"
 	"github.com/shiroha-a/mk/internal/server/middleware"
 )
@@ -22,8 +23,32 @@ import (
 // 制限が無い」を意味し、native login token (フロントエンドが使う) と
 // 匿名接続がそちらに当たる。mk-go は cookie 認証を持たない。空の non-nil slice は「スコープを 1 つも持たない app token」で、
 // nil とは区別する。
+//
+// credential は認証に使った資格情報の鍵 (internal/misc/credkey)。匿名は ""。
+// トークンが失効したときに、そのトークンで張られた接続だけを閉じるのに使う。
 type ConnectionAcceptor interface {
-	Accept(conn *websocket.Conn, user *model.User, scopes []string)
+	Accept(conn *websocket.Conn, user *model.User, scopes []string, credential string)
+}
+
+// connectionCredential returns the credkey for the token that authenticated
+// this request, or "" when the connection is anonymous.
+//
+// native token の鍵は**リクエストの文字列ではなく DB に保存された値**から作る。
+// 失効側 (i/regenerate-token) が配る鍵は保存値から作るので、リクエストの
+// 文字列が保存値と 1 文字でも違う形で通ると (char 比較は末尾空白を無視する)
+// 鍵が一致せず、その接続は閉じない。user.Token を持たない (mock 由来の) user
+// のときだけリクエストの文字列に倒す。
+func connectionCredential(user *model.User, scope *middleware.AuthScope, token string) string {
+	if user == nil || scope == nil {
+		return ""
+	}
+	if scope.IsApp {
+		return credkey.AccessToken(scope.TokenID)
+	}
+	if user.Token != nil {
+		return credkey.Native(*user.Token)
+	}
+	return credkey.Native(token)
 }
 
 // connectionScopes returns the scope list to enforce for this connection, or
@@ -80,6 +105,16 @@ func (h *Handler) Stream(c echo.Context) error {
 	if !websocket.IsWebSocketUpgrade(c.Request()) {
 		return c.NoContent(http.StatusServiceUnavailable)
 	}
+	// 凍結された利用者の token での upgrade は 403 (本文なし) で拒否する
+	// (upstream StreamingApiServerService の `user?.isSuspended`)。認証
+	// middleware は凍結・削除済みの利用者を匿名に落とすので、ここで見ないと
+	// 匿名接続として張れてしまう — 失効 (凍結) で閉じた接続が、再接続で匿名として
+	// 戻ってくる。削除済みの利用者も同じく拒否する (upstream は論理削除の時点で
+	// 拒否しないが、物理削除の後は token が引けず 401 になる。mk-go は論理削除の
+	// まま行を残すので、凍結と同じ扱いに倒す。docs/divergence.md)。
+	if middleware.IsInactiveAccountRequest(c) {
+		return c.NoContent(http.StatusForbidden)
+	}
 	conn, err := h.upgrader.Upgrade(c.Response(), c.Request(), nil)
 	if err != nil {
 		// gorilla/websocket は Upgrade 失敗時にレスポンスヘッダを既に書き込んで
@@ -95,6 +130,7 @@ func (h *Handler) Stream(c echo.Context) error {
 		_ = conn.Close()
 		return nil
 	}
-	h.acceptor.Accept(conn, user, scopes)
+	credential := connectionCredential(user, middleware.GetAuthScope(c), middleware.GetToken(c))
+	h.acceptor.Accept(conn, user, scopes, credential)
 	return nil
 }

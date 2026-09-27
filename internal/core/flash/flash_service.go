@@ -127,10 +127,19 @@ func (s *Service) Show(requesterID, flashID string) (*model.Flash, error) {
 	// 非公開のものは所有者にだけ返す。存在そのものを伏せるため not-found を返す
 	// (`pages` の core service は ErrAccessDenied を返すが、あちらは
 	// `pages/show` が not-found へ畳んでいる。ここでは直接 not-found にする)。
-	if f != nil && f.Visibility != "" && f.Visibility != "public" && f.UserID != requesterID {
+	if !visibleTo(f, requesterID) {
 		return nil, ErrFlashNotFound
 	}
 	return f, nil
+}
+
+// visibleTo reports whether requesterID may read f. Non-public flashes are
+// visible only to their owner. An empty visibility is treated as public.
+func visibleTo(f *model.Flash, requesterID string) bool {
+	if f == nil {
+		return true
+	}
+	return f.Visibility == "" || f.Visibility == "public" || f.UserID == requesterID
 }
 
 // ShowAny returns the flash regardless of its visibility.
@@ -265,6 +274,11 @@ func (s *Service) Like(userID, flashID string) error {
 		}
 		return ErrFlashNotFound
 	}
+	// 見えないものは存在しない扱いにする (Show と同じ判定)。like が通ると
+	// flash/my-likes が本文 (script) ごと返すので、閲覧の抜け道になる。
+	if !visibleTo(f, userID) {
+		return ErrFlashNotFound
+	}
 	// 自分の flash は like できない (upstream flash/like の yourFlash, #1548)。
 	// TS の順序 (noSuchFlash -> yourFlash -> alreadyLiked) に合わせ NotFound の
 	// 直後・already-liked チェックの前に置く。
@@ -294,7 +308,8 @@ func (s *Service) Unlike(userID, flashID string) error {
 	if userID == "" {
 		return errors.New("userId is required")
 	}
-	if _, err := s.repo.FindByID(flashID); err != nil {
+	f, err := s.repo.FindByID(flashID)
+	if err != nil {
 		// **DB 障害を not-found に丸めない** (#2799)。
 		if !repository.IsNotFound(err) {
 			return err
@@ -306,6 +321,12 @@ func (s *Service) Unlike(userID, flashID string) error {
 		// **DB 障害を not-found に丸めない** (#2799)。
 		if !repository.IsNotFound(err) {
 			return err
+		}
+		// like 後に非公開化されたものでも、自分の like は外せる (下の Delete)。
+		// ただし like していない非公開のものに NOT_LIKED を返すと存在が
+		// 分かってしまうので、Show と同じく not-found にする。
+		if !visibleTo(f, userID) {
+			return ErrFlashNotFound
 		}
 		return ErrNotLiked
 	}
@@ -362,6 +383,11 @@ func (s *Service) MyLikes(userID, search, sinceID, untilID string, limit, offset
 		f, err := s.repo.FindByID(l.FlashID)
 		if err != nil {
 			// 削除されていたり権限が変わった Flash はスキップする。
+			continue
+		}
+		// like した後に非公開化されたものは返さない。repository の JOIN でも
+		// 絞っているが、repository を差し替えた構成でも漏らさないよう二重に見る。
+		if !visibleTo(f, userID) {
 			continue
 		}
 		out = append(out, LikedFlash{LikeID: l.ID, Flash: f})

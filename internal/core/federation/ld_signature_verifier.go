@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/shiroha-a/mk/internal/activitypub/ld"
 	"github.com/shiroha-a/mk/internal/repository"
@@ -19,15 +20,52 @@ import (
 //   - signature 有り + verify pass → nil
 //   - signature 有り + verify fail → error (caller は activity を drop する)
 //
-// upstream Misskey TS 2026.5.4 の InboxProcessorService.process は
-// `compact → checkForForbiddenDirectives → freeze → verifyRsaSignature2017`
-// の sequence を全 inbound activity に適用する。**mk-go は compact を呼ばない**
-// (#2106 L49、下の CheckForForbiddenDirectives 呼び出し前のコメント参照)。
-// canonicalize 中の SSRF / cache amplification / spoofing 攻撃は ld.Processor
-// 側の hardening (forbidden directives / cache cap / freeze) で遮断する。
+// upstream Misskey TS 2026.5.4 の InboxProcessorService.process は、HTTP 署名者と
+// activity.actor が一致しない (= 転送された) activity に対して
+// `delete signature → compact → checkForForbiddenDirectives → freeze →
+// verifyRsaSignature2017` を適用し、**compact 後の activity を以降の処理に使う**。
+// mk-go も同じく compact 済みの文書を返し、呼び出し側 (InboxProcessor) はそれを
+// dispatch する (VerifyAndCompact 参照)。
 type LDSignatureVerifier struct {
 	pubkeyRepo repository.UserPublickeyRepository
 }
+
+// VerifiedLDActivity is the result of a successful LD-Signature verification.
+type VerifiedLDActivity struct {
+	// Creator is the verified `signature.creator` key URI.
+	Creator string
+	// Body is the activity compacted into ld.InboxCompactContext with the
+	// original `signature` re-attached. Only properties covered by the
+	// signature survive under their short names, so callers that authenticate
+	// an activity by its LD-Signature must process Body instead of the raw
+	// request body.
+	Body []byte
+}
+
+// ldSignatureMaxAge / ldSignatureMaxFuture bound `signature.created`.
+//
+// **upstream にこの検査は無い** (docs/divergence.md)。LD-Signature は本文だけを
+// 縛り、HTTP 署名の Date のような鮮度を持たない。転送経路では HTTP 署名は
+// 転送者 (= 攻撃者でもありうる) のものなので、一度受け取った署名付き activity は
+// 何年後でも投げ直せる (削除済みノートの Create を再送して復活させる、古い
+// Update で本文を巻き戻す等)。replay guard (inbox_replay.go) は 15 分しか覚えない。
+//
+// 窓の根拠: `created` は署名した時刻 (Mastodon の LinkedDataSignature#sign! も
+// upstream の signRsaSignature2017 も配送用に render した時点の now) で、転送者は
+// 元の body をそのまま流すので、届くまでの遅延は元サーバーの配送 retry と
+// 転送者の retry の和になる。upstream の deliver は既定 12 回・間隔は倍々で最大
+// 8 時間なので、retry を使い切るまでおよそ 1.4 日 (jitter 込みで 1.6 日、
+// `httpRelatedBackoff`)。7 日を超えて届く転送活動は受信側が長く落ちていた場合
+// くらいで、それを落とす損失より無期限の replay を塞ぐ利益を取る。未来側は
+// 時計のずれだけを許す。窓の内側の replay は塞いでいない (docs/divergence.md)。
+const (
+	ldSignatureMaxAge    = 7 * 24 * time.Hour
+	ldSignatureMaxFuture = time.Hour
+)
+
+// ErrLDSignatureExpired is returned when `signature.created` is outside the
+// accepted window (see ldSignatureMaxAge).
+var ErrLDSignatureExpired = errors.New("ld-sig: signature.created outside the accepted window")
 
 // NewLDSignatureVerifier returns a verifier wired to the supplied
 // user_publickey repository. signature.creator (key URI) から keyId 一致する
@@ -43,101 +81,164 @@ func NewLDSignatureVerifier(pubkeyRepo repository.UserPublickeyRepository) *LDSi
 //
 // Returns error when:
 //   - body has `signature` but creator / signatureValue missing or malformed
+//   - `signature.created` is missing, ambiguous, unreadable or outside the
+//     accepted window (read from the signed RDF, not the JSON key)
 //   - public key cannot be resolved
 //   - forbidden directive detected in the activity
+//   - the activity cannot be compacted (e.g. non-preloaded context)
 //   - RsaSignature2017 verify fails (signature mismatch / key mismatch /
 //     unsupported algorithm)
 func (v *LDSignatureVerifier) VerifyIfPresent(rawBody []byte) error {
-	_, _, err := v.VerifyAndCreator(rawBody)
+	_, _, err := v.VerifyAndCompact(rawBody)
 	return err
 }
 
-// VerifyAndCreator behaves like VerifyIfPresent but additionally reports
+// VerifyAndCompact behaves like VerifyIfPresent but additionally reports
 // whether the activity carried an LD-Signature (`present`) and, on success,
-// the verified `signature.creator` key URI. Callers use the creator to
+// the verified creator and the compacted activity. Callers use the creator to
 // confirm the LD-Signature actually authenticates the activity's `actor`
 // (forwarded-activity authentication, upstream
-// `authUser.user.uri !== getApId(activity.actor)` gate).
+// `authUser.user.uri !== getApId(activity.actor)` gate), and must process the
+// returned Body rather than rawBody.
 //
-//   - no `signature` field        -> ("", false, nil)
-//   - signature present + verify  -> (creator, true, nil)
-//   - signature present + invalid -> ("", true, err)
-func (v *LDSignatureVerifier) VerifyAndCreator(rawBody []byte) (string, bool, error) {
+//   - no `signature` field        -> (zero, false, nil)
+//   - signature present + verify  -> (verified, true, nil)
+//   - signature present + invalid -> (zero, true, err)
+func (v *LDSignatureVerifier) VerifyAndCompact(rawBody []byte) (VerifiedLDActivity, bool, error) {
 	if v == nil || v.pubkeyRepo == nil {
-		return "", false, nil
+		return VerifiedLDActivity{}, false, nil
 	}
 	var act map[string]any
 	if err := json.Unmarshal(rawBody, &act); err != nil {
-		return "", false, fmt.Errorf("ld-sig: body unmarshal: %w", err)
+		return VerifiedLDActivity{}, false, fmt.Errorf("ld-sig: body unmarshal: %w", err)
 	}
 	sigRaw, hasSig := act["signature"]
 	if !hasSig || sigRaw == nil {
-		return "", false, nil
+		return VerifiedLDActivity{}, false, nil
 	}
 	sig, ok := sigRaw.(map[string]any)
 	if !ok {
-		return "", true, errors.New("ld-sig: signature field is not an object")
+		return VerifiedLDActivity{}, true, errors.New("ld-sig: signature field is not an object")
 	}
 	creator, _ := sig["creator"].(string)
 	if creator == "" {
-		return "", true, errors.New("ld-sig: signature.creator missing")
+		return VerifiedLDActivity{}, true, errors.New("ld-sig: signature.creator missing")
 	}
 	// per-verify fresh processor (upstream JsonLd class instance と等価)。
 	// cache cap / freeze は新規 instance ごとに reset される。
-	//
-	// 順序は upstream `compact → checkForForbiddenDirectives → freeze →
-	// verifyRsaSignature2017` を踏襲する。forbidden directive を pubkey
-	// resolve より先に check して、不正 activity は DB lookup のコストを
-	// 払う前に reject する。
-	//
-	// **mk-go の前提**: upstream は compact 後の document に対して forbidden
-	// check を実行するが、mk-go は raw activity に直接適用する (= compact を
-	// 呼ばない)。これは `ld.PreloadedLoader` が HTTP fetch を一切行わない
-	// 設計 (= 3 つの embed context のみ resolve、それ以外は ErrContextNotPreloaded)
-	// のため、remote context injection で directive を後付けする攻撃ベクタが
-	// 構造的に存在しないことを前提にしている。raw activity 段階の check で
-	// 十分かつ upstream より strict (= 攻撃者が compact 内で `@reverse` を意
-	// 味変換しようとしても入口で reject される)。
-	//
-	// 将来 mk-go に HTTP fetch fallback を追加する場合は、compact 後 check
-	// に切り替える必要がある (= remote context が後付け directive を inject
-	// する経路が成立してしまうため)。その場合は本コメントを更新し、
-	// `proc.Compact(act, ...)` を挟んでから check するフローに変更する。
-	//
-	// #2106 L49 (documented limitation): upstream は verify 前に compact して任意の @context を
-	// 標準形へ畳んでから URDNA2015 normalize するが、mk-go は compact を省く。3 つの preload
-	// context (AS2.0 / security v1 / identity v1) 外の custom context を参照する activity は
-	// normalize 段で **ErrCacheFrozen** になり、HTTP 署名の無い forwarded/relay 経路
-	// (LD-Signature が唯一の authenticator) で reject されうる。
-	//
-	// **エラーは ErrContextNotPreloaded ではない。** 下の Freeze() が verify より先に走るため
-	// loadDocument は frozen 分岐で止まり、PreloadedLoader まで到達しない。この記述が
-	// 誤っていたせいで、#2680 (preload まで freeze で塞いでいた不具合) の調査が遠回りになった
-	// — ログに出る文言と doc の文言が一致せず、別の問題に見えた。
-	//
-	// 標準 context のみの一般的な Misskey/Mastodon activity では問題にならない
-	// (どちらも AS2 + security/v1 + インライン拡張オブジェクトを送るため、
-	// preload だけで解決できる)。compact 導入は LD-Signature 経路の
-	// security-sensitive な変更のため、現状は documented limitation として維持する。
 	proc := ld.NewProcessor()
+	// 生の文書にも forbidden check を掛ける。upstream は compact 後にだけ見るが、
+	// 入口で弾くほうが strict で、compact 前に `@reverse` 等を含む文書を
+	// json-gold に渡さずに済む。compact 後にも下で改めて見る。
 	if err := proc.CheckForForbiddenDirectives(act); err != nil {
-		return "", true, err
+		return VerifiedLDActivity{}, true, err
 	}
+	// **upstream と違い compact より前に Freeze する。** upstream は compact 中に
+	// remote context を HTTP で取りに行くので、取り終えた後に freeze する。mk-go の
+	// loader は preload 済みの 3 context しか返さず fetch 経路を持たないので、
+	// 先に freeze しても今は結果が変わらない (preload は freeze の対象外、
+	// ld.Processor.loadDocument / #2680)。先に置いておけば、将来 fetch fallback を
+	// 足したときに compact が無防備に fetch する形にならない — その時は upstream と
+	// 同じく compact の後へ動かし、forbidden check を compact 後にも掛けること。
+	//
+	// #2106 L49 (documented limitation): preload 外の custom context を参照する
+	// activity は compact 段で ErrCacheFrozen になり、LD-Signature が唯一の
+	// authenticator である転送経路では reject される。upstream は context を
+	// fetch して受理する。標準 context のみの一般的な Misskey/Mastodon activity
+	// (AS2 + security/v1 + インライン拡張オブジェクト) は preload だけで解決できる。
 	proc.Freeze()
+
+	// **署名された内容だけを処理に渡すために compact する** (upstream と同じ)。
+	// URDNA2015 は RDF の triple しか見ないので、AS2 context の `@vocab: "_:"` で
+	// blank node IRI に展開される未定義語 (`_misskey_content` を context で定義して
+	// いない Mastodon の文書に足したもの等) は署名に含まれない。生の JSON を
+	// そのまま handler に渡すと、転送者が署名済み activity にそういうキーを足して
+	// 被害者名義のノート本文を差し替えられた。compact 後の文書では、署名された
+	// 述語だけが InboxCompactContext の短い名前で現れ、署名外の述語は `_:<name>`
+	// という handler が読まないキーになる。
+	unsigned := make(map[string]any, len(act))
+	for k, val := range act {
+		if k == "signature" {
+			continue
+		}
+		unsigned[k] = val
+	}
+	compacted, err := proc.Compact(unsigned, ld.InboxCompactContext())
+	if err != nil {
+		return VerifiedLDActivity{}, true, fmt.Errorf("ld-sig: %w", err)
+	}
+	if err := proc.CheckForForbiddenDirectives(compacted); err != nil {
+		return VerifiedLDActivity{}, true, err
+	}
+	compacted["signature"] = sig
+
+	// **created は署名された RDF から読む** (ld.Processor.SignedCreated)。JSON の
+	// `created` キーだけを見ると、転送者がそれを `dc:created` (型付き) や完全 IRI
+	// へ移すだけで「欠落」と読まれて窓を外せた — options は identity/v1 で正規化
+	// されるので RDF は同じで、署名は通る。
+	//
+	// 鍵の lookup より先に見る。値は署名対象 (options 側) なので、改ざんされて
+	// いれば後段の verify で落ちる。ここで先に弾くのは DB を読まずに済むからで、
+	// 判定結果は変わらない。
+	created, err := proc.SignedCreated(sig)
+	if err != nil {
+		return VerifiedLDActivity{}, true, fmt.Errorf("ld-sig: signature options: %w", err)
+	}
+	if err := checkLDSignatureCreated(created, time.Now()); err != nil {
+		return VerifiedLDActivity{}, true, err
+	}
+
 	pubkey, err := v.pubkeyRepo.FindByKeyID(creator)
 	if err != nil {
 		if !repository.IsNotFound(err) {
 			// **「鍵が無い」に潰さない** (#3121)。潰すと呼び出し側が
 			// LD-Signature の検証失敗として activity を drop するので、
 			// DB 障害のあいだ届いた転送 activity がまるごと失われる。
-			return "", true, fmt.Errorf("%w: ld-sig public key for keyId=%s: %v", ErrLookupUnavailable, creator, err)
+			return VerifiedLDActivity{}, true, fmt.Errorf("%w: ld-sig public key for keyId=%s: %v", ErrLookupUnavailable, creator, err)
 		}
-		return "", true, fmt.Errorf("ld-sig: public key not found for keyId=%s: %w", creator, err)
+		return VerifiedLDActivity{}, true, fmt.Errorf("ld-sig: public key not found for keyId=%s: %w", creator, err)
 	}
-	if err := proc.VerifyRsaSignature2017(act, pubkey.KeyPEM); err != nil {
-		return "", true, err
+	// 検証も compact 後の文書に対して行う (upstream と同じ)。compact は RDF として
+	// 同値な変形なので、正しい署名はそのまま通る。逆に json-gold の compact が
+	// 何かを足したり変えたりしていれば、ここで署名が合わなくなって落ちる —
+	// 返す Body が署名された内容そのものであることを、この verify が保証する。
+	if err := proc.VerifyRsaSignature2017(compacted, pubkey.KeyPEM); err != nil {
+		return VerifiedLDActivity{}, true, err
 	}
-	return creator, true, nil
+	body, err := json.Marshal(compacted)
+	if err != nil {
+		return VerifiedLDActivity{}, true, fmt.Errorf("ld-sig: marshal compacted activity: %w", err)
+	}
+	return VerifiedLDActivity{Creator: creator, Body: body}, true, nil
+}
+
+// checkLDSignatureCreated enforces the `signature.created` window on the
+// dc:created values read from the signed options (see
+// ld.Processor.SignedCreated). Exactly one value is required.
+//
+// **欠落は拒否する。** この verifier を通るのは HTTP 署名者と actor が食い違う
+// 転送経路 (と Headers の無い legacy 経路) だけで、そこでは LD-Signature が唯一の
+// 認証になる。created が無い署名は鮮度を持たないので、一度受け取れば無期限に
+// 再送できる。upstream (`JsonLdService.signRsaSignature2017`) も Mastodon
+// (`LinkedDataSignature#sign!`) も署名時刻を必ず入れるので、正当な署名は落ちない
+// (それ以外の実装は未確認。docs/divergence.md)。複数あるのも、どれで判定するか
+// 決められないので拒否する。
+func checkLDSignatureCreated(values []string, now time.Time) error {
+	switch len(values) {
+	case 0:
+		return fmt.Errorf("%w: created missing", ErrLDSignatureExpired)
+	case 1:
+	default:
+		return fmt.Errorf("%w: %d created values", ErrLDSignatureExpired, len(values))
+	}
+	created, err := time.Parse(time.RFC3339, values[0])
+	if err != nil {
+		return fmt.Errorf("%w: created %q: %v", ErrLDSignatureExpired, values[0], err)
+	}
+	if created.Before(now.Add(-ldSignatureMaxAge)) || created.After(now.Add(ldSignatureMaxFuture)) {
+		return fmt.Errorf("%w: created=%s", ErrLDSignatureExpired, created.UTC().Format(time.RFC3339))
+	}
+	return nil
 }
 
 // CheckForbiddenDirectivesIfPresent runs only the forbidden-directive hardening of

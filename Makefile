@@ -299,7 +299,18 @@ build: plugins ## バイナリを ./built/misskey に生成
 run: build ## build して起動
 	$(BUILD_DIR)/$(BINARY) -config .config/default.yml
 
-dev: ## go run で直接起動
+# **ビルド済みフロントが無いときだけ MK_DEV=1 を立てる。** mk-go は dev モード
+# (`dev: true` / MK_DEV=1) でしか `/vite/*` を dev server へ流さない —
+# 本番でビルド出力が欠けたときに、認証なしで localhost:5173 へ reverse proxy
+# されていたため。以前の `make dev` は「無ければ proxy」の暗黙の挙動に頼って
+# いたので、同じ条件をここで明示する。ビルド済みなら従来どおりそれを配る。
+# 呼び出し側が MK_DEV を export していればそちらを優先する。
+# (recipe の中に置くと make -n / 実行時にこのコメントが echo されるので外に置く)
+dev: ## go run で直接起動 (ビルド済みフロントが無ければ Vite dev server を使う)
+	@if [ -z "$${MK_DEV+x}" ] && [ ! -d "$${MISSKEY_FRONTEND_DIR:-third_party/misskey/built/_frontend_vite_}" ]; then \
+		echo "make dev: ビルド済みフロントが無いので MK_DEV=1 で起動します (Vite dev server を localhost:5173 で立てること)"; \
+		export MK_DEV=1; \
+	fi; \
 	go run ./cmd/misskey -config .config/default.yml
 
 clean: ## ビルド成果物を削除
@@ -1107,7 +1118,7 @@ perm-check: ## router middleware の権限が upstream より緩くないか検�
 
 .PHONY: wiring-check
 wiring-check: ## router で配線が必要なものが外れていないか検査
-	go test ./internal/entitycompat/... -run 'TestTimelineTogglesAreWired|TestSecurityHeadersAreWired|TestCriticalWiringCountMatchesTable|TestInviteModeratorCheckerIsWired|TestPluginPeerBodyLimitIsWired|TestPluginPeerRateLimiterIsWired|TestAPICatchallIsWired|TestPluginJobQueuesAreWired|TestPluginPeerEnqueuerIsWired|TestReadAllNotificationsPusherIsWired|TestWebPushProducersAreWired|TestChatPusherIsWired|TestChartManagementLoggerIsResolvedAtWiring|TestNotificationPolicyResolverIsWired|TestAbuseReportInAppNotifierIsWired|TestNotificationModeratorCheckerIsWired|TestRemoteAbuseReportNotificationIsWired|TestAbuseReportLookupIsWired|TestNormalizeWiringKeepsStringLiteralSpacing|TestEmojiDecorationCacheIsWired|TestEmojiMutationsDropDecorationCache|TestApplicationReceivedNotificationIsWired|TestMediaProxyConcurrencyIsWired|TestCaptchaReloadIsWired|TestRoleInvalidationIsWired|TestCredentialRoutesWithoutScopeRejectAppTokens|TestAppTokenGateExemptHasNoDeadEntries|TestOutboundConstructorsReceiveSharedOptions|TestPeerJobEnvelopeTagIsStable|TestPrivilegedPolicyKeysMatchAdminRoutes|TestStripGoComments|TestCleanProcessorReceivesThePendingPruner|TestDriveUsageProviderIsWired|TestDriveUsageRouteIsRegistered|TestIPLogServiceIsWired|TestClientIPMiddlewareIsWired|TestSigninIPRecorderIsWired|TestIPAccountSearchRepoIsWired|TestIPAccountSearchRouteIsRegistered|TestIPRelatedAccountsRouteIsRegistered|TestIPLookupAuditIsWired|TestIPLookupLogRetentionIsWired|TestIPLookupLogRouteIsRegistered|TestIPLookupRoutesHaveRateLimits|TestRemoteStatsGateUsesFailClosedPredicate' -count=1 -v
+	go test ./internal/entitycompat/... -run 'TestTimelineTogglesAreWired|TestSecurityHeadersAreWired|TestCriticalWiringCountMatchesTable|TestInviteModeratorCheckerIsWired|TestPluginPeerBodyLimitIsWired|TestPluginPeerRateLimiterIsWired|TestAPICatchallIsWired|TestPluginJobQueuesAreWired|TestPluginPeerEnqueuerIsWired|TestReadAllNotificationsPusherIsWired|TestWebPushProducersAreWired|TestChatPusherIsWired|TestChartManagementLoggerIsResolvedAtWiring|TestNotificationPolicyResolverIsWired|TestAbuseReportInAppNotifierIsWired|TestNotificationModeratorCheckerIsWired|TestRemoteAbuseReportNotificationIsWired|TestAbuseReportLookupIsWired|TestNormalizeWiringKeepsStringLiteralSpacing|TestEmojiDecorationCacheIsWired|TestEmojiMutationsDropDecorationCache|TestApplicationReceivedNotificationIsWired|TestMediaProxyConcurrencyIsWired|TestCaptchaReloadIsWired|TestRoleInvalidationIsWired|TestCredentialRoutesWithoutScopeRejectAppTokens|TestAppTokenGateExemptHasNoDeadEntries|TestOutboundConstructorsReceiveSharedOptions|TestPeerJobEnvelopeTagIsStable|TestPrivilegedPolicyKeysMatchAdminRoutes|TestStripGoComments|TestCleanProcessorReceivesThePendingPruner|TestDriveUsageProviderIsWired|TestDriveUsageRouteIsRegistered|TestIPLogServiceIsWired|TestClientIPMiddlewareIsWired|TestSigninIPRecorderIsWired|TestIPAccountSearchRepoIsWired|TestIPAccountSearchRouteIsRegistered|TestIPRelatedAccountsRouteIsRegistered|TestIPLookupAuditIsWired|TestIPLookupLogRetentionIsWired|TestIPLookupLogRouteIsRegistered|TestIPLookupRoutesHaveRateLimits|TestPasswordChecksAreFailureLimited|TestPasswordFailureGuardIsWired|TestRemoteStatsGateUsesFailClosedPredicate|TestStreamRevokeIsWired' -count=1 -v
 
 .PHONY: notiftype-check
 notiftype-check: ## 通知タイプの一覧が 1 箇所から導出されているか検査

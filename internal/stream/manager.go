@@ -45,6 +45,17 @@ type Manager struct {
 	policyProvider  RolePolicyProvider
 	lastActive      LastActiveRecorder
 
+	// revokeSettle は失効 event を受けてから実際に接続を閉じるまでの猶予。
+	// 0 以下なら既定値 (defaultRevokeSettle) を使う。stream_revoke.go 参照。
+	revokeSettle time.Duration
+	// revokeRecheck は 1 回目の閉じ処理から 2 回目までの間隔 (0 以下なら既定値)。
+	// revokeObservers は失効 event を受けた直後に呼ぶ callback (tokenCache の
+	// 無効化)。どちらも stream_revoke.go 参照。起動時に配線し、event の処理は
+	// 別 goroutine で読むので revokeMu で守る。
+	revokeMu        sync.RWMutex
+	revokeRecheck   time.Duration
+	revokeObservers []func(userID string)
+
 	// **bus の解除は名前ではなくハンドルで行う** (#H-4)。Manager が張る
 	// プロセス唯一の購読も、名前で閉じると同名トピックを購読している接続を
 	// 巻き込むため。
@@ -158,9 +169,13 @@ func (m *Manager) SetPolicyProvider(p RolePolicyProvider) {
 
 // Accept implements api/streaming.ConnectionAcceptor. *websocket.Conn から
 // Connection を組み立て、Dispatcher 経由で channel framework に橋渡しする。
-func (m *Manager) Accept(ws *websocket.Conn, user *model.User, scopes []string) {
+//
+// credential は認証に使った資格情報の鍵 (internal/misc/credkey)。匿名は ""。
+// 失効 (RevokeStreams) 時に対象の接続を特定するために保持する。
+func (m *Manager) Accept(ws *websocket.Conn, user *model.User, scopes []string, credential string) {
 	id := m.allocateID()
 	c := NewConnection(id, user, ws)
+	c.SetCredential(credential)
 	// scope 制限のある接続 (app access_token) だけ attach する。nil のままだと
 	// HasPermission が全許可になるので、**channel の RequiredPermission が
 	// 効くのはここを通ったときだけ**。
@@ -264,6 +279,7 @@ func (m *Manager) Shutdown() {
 	// reload signal が届かないようにする (#791)。
 	m.UnsubscribeWordMuteReload()
 	m.UnsubscribeBroadcast()
+	m.UnsubscribeStreamRevoke()
 	m.mu.Lock()
 	conns := make([]*Connection, 0, len(m.conns))
 	for _, c := range m.conns {

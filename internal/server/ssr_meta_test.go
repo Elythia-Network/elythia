@@ -593,6 +593,24 @@ func TestSSRPages_OpenGraph(t *testing.T) {
 		assert.Contains(t, body, `<meta property="og:url" content="https://example.test/play/f1">`)
 		assert.Contains(t, body, `<title>ゲーム | Misskey</title>`)
 	})
+
+	// 非公開の Flash は所有者以外に存在しない扱いなので、SSR でも title /
+	// summary / id / 作者を出さない。
+	t.Run("private flash", func(t *testing.T) {
+		h, userRepo, _ := newSSRTestHandler(t)
+		userRepo.Users["u1"] = ssrTestUser("u1", "alice")
+		flashRepo := testutil.NewMockFlashRepository()
+		flashRepo.Flashes["f1"] = &model.Flash{ID: "f1", UserID: "u1", Title: "秘密のゲーム", Summary: "秘密の説明", Visibility: "private"}
+		h.flashRepo = flashRepo
+
+		body := ssrGet(t, h.FlashPage, "/play/f1", map[string]string{"id": "f1"}).Body.String()
+
+		assert.NotContains(t, body, "秘密のゲーム")
+		assert.NotContains(t, body, "秘密の説明")
+		assert.NotContains(t, body, "misskey:flash-id")
+		assert.NotContains(t, body, "/play/f1")
+		assert.NotContains(t, body, "alice")
+	})
 }
 
 // gallery は sensitive かどうかで展開先に出す画像を変える (upstream

@@ -16,9 +16,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
 
@@ -232,9 +232,9 @@ jobs:
       SHARD_TOTAL: 4
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
 
@@ -316,7 +316,7 @@ jobs:
 
       - name: Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-shard-${{ matrix.shard }}
           path: coverage-shard-${{ matrix.shard }}.out
@@ -376,9 +376,9 @@ jobs:
       MK_PLUGIN_TESTS_REQUIRE_DB: "1"
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
@@ -412,9 +412,9 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
 
@@ -495,19 +495,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           # pnpm のバージョンは submodule 側 package.json の packageManager から
           # 取る。mk リポジトリ直下には package.json が無い。
           package_json_file: third_party/misskey/package.json
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: third_party/misskey/.node-version
           cache: pnpm
@@ -531,7 +531,7 @@ jobs:
       # plugin-api.ts を壊してもサンプル側では検出されない。サンプルは
       # mk-plugin.yml で既定無効 (#2495) なので、disabled も含める
       # plugins-all を使う。
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
 
@@ -586,9 +586,9 @@ jobs:
   vulncheck:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
 
@@ -596,19 +596,58 @@ jobs:
       # 指していないといけない。govulncheck が見るのは go.mod 側なので、ここが
       # ずれていると **CI は緑のまま、実際に配る image だけが脆弱**になる。
       # floating tag (`golang:1.27-alpine`) に戻すと再現性も失われる。
-      - name: Go version pin is consistent between go.mod and Dockerfile
+      #
+      # **`Dockerfile` だけを見ない。** golang image を使う tracked な Dockerfile を
+      # 全て対象にする。`Dockerfile.bundled` は配る bundled image と
+      # build-with-plugins の builder なのに floating tag のまま検査から漏れていた。
+      # 列挙は `git grep` なので、golang image を使う Dockerfile が増えても自動で
+      # 対象になる。1 つも拾えなければ落とす (書式が変わって空振りすると、検査
+      # していないのに緑になる)。
+      - name: Go version pin is consistent between go.mod and Dockerfiles
         run: |
+          set -euo pipefail
           gomod=$(awk '/^go [0-9]/ {print $2; exit}' go.mod)
-          docker=$(sed -n 's/^FROM golang:\([0-9.]*\)-alpine AS builder$/\1/p' Dockerfile)
-          echo "go.mod=$gomod Dockerfile=$docker"
-          if [ -z "$docker" ]; then
-            echo "Dockerfile の builder が patch version 固定になっていない" >&2
+          echo "go.mod=$gomod"
+          lines=$(git grep -niE '^[[:space:]]*FROM[[:space:]]+(--[^[:space:]]+[[:space:]]+)*(docker\.io/)?(library/)?golang[:@[:space:]]' \
+            -- ':(icase)*dockerfile*' ':(icase)*containerfile*' || true)
+          if [ -z "$lines" ]; then
+            echo "golang image を使う Dockerfile を 1 つも見つけられなかった" >&2
             exit 1
           fi
-          if [ "$gomod" != "$docker" ]; then
-            echo "go.mod ($gomod) と Dockerfile ($docker) の Go version が一致しない" >&2
-            exit 1
-          fi
+          # 行は `<path>:<lineno>:FROM [--flag ...] <image> [AS <name>]`。
+          # image は FROM の後ろで最初の `--` で始まらない語。
+          printf '%s\n' "$lines" | awk -v want="golang:${gomod}-alpine" '
+            {
+              split($0, p, ":")
+              loc = p[1] ":" p[2]
+              body = substr($0, length(loc) + 2)
+              n = split(body, w, /[[:space:]]+/)
+              image = ""
+              for (i = 1; i <= n; i++) {
+                if (w[i] == "" || tolower(w[i]) == "from" || w[i] ~ /^--/) continue
+                image = w[i]; break
+              }
+              print loc " " image
+              # 配る Dockerfile は `golang:<ver>-alpine@sha256:<digest>` で tag と
+              # digest を併記している。照合するのは tag 側で、digest は形だけ見る
+              # (tag と digest の対応は registry に問い合わせないと分からない)。
+              tag = image
+              dig = ""
+              at = index(image, "@")
+              if (at > 0) {
+                tag = substr(image, 1, at - 1)
+                dig = substr(image, at + 1)
+              }
+              if (dig != "" && !(dig ~ /^sha256:[0-9a-f]+$/ && length(dig) == 71)) {
+                printf "::error::%s の builder (%s) の digest が sha256:<64 桁> の形でない\n", loc, image > "/dev/stderr"
+                bad = 1
+              }
+              if (tag != want) {
+                printf "::error::%s の builder (%s) が go.mod と同じ patch version (%s) を指していない\n", loc, image, want > "/dev/stderr"
+                bad = 1
+              }
+            }
+            END { exit bad }'
 
       # 実際にデプロイするのは Linux なので GOOS=linux で解析する。既定のまま
       # だと host 依存の package load エラーで解析が空振りしうる。

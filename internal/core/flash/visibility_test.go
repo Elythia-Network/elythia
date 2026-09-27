@@ -101,3 +101,58 @@ func TestShowAny_DBErrorIsNotNotFound(t *testing.T) {
 	require.ErrorIs(t, err, boom)
 	require.NotErrorIs(t, err, ErrFlashNotFound)
 }
+
+// **非公開の Flash は like できないこと。**
+//
+// like が通ると flash/my-likes が script ごと返すので、Show の可視性判定を
+// 迂回して他人の非公開 Flash を読めてしまう。存在も伏せるため not-found。
+func TestLike_RejectsPrivateFlashOfOthers(t *testing.T) {
+	t.Parallel()
+
+	repo := testutil.NewMockFlashRepository()
+	require.NoError(t, repo.Create(&model.Flash{
+		ID: "fl1", UserID: "owner", Visibility: "private", Script: "SECRET",
+	}))
+	likeRepo := testutil.NewMockFlashLikeRepository()
+	idGen, _ := id.NewGenerator("aidx")
+	svc := NewService(repo, likeRepo, idGen)
+
+	require.ErrorIs(t, svc.Like("stranger", "fl1"), ErrFlashNotFound)
+	require.Empty(t, likeRepo.Likes, "like 行を作らないこと")
+}
+
+// **like 後に非公開化された Flash を my-likes で返さないこと。**
+func TestMyLikes_SkipsFlashMadePrivateAfterLike(t *testing.T) {
+	t.Parallel()
+
+	repo := testutil.NewMockFlashRepository()
+	require.NoError(t, repo.Create(&model.Flash{ID: "pub", UserID: "owner", Visibility: "public"}))
+	require.NoError(t, repo.Create(&model.Flash{ID: "priv", UserID: "owner", Visibility: "private", Script: "SECRET"}))
+	likeRepo := testutil.NewMockFlashLikeRepository()
+	require.NoError(t, likeRepo.Create(&model.FlashLike{ID: "l1", UserID: "liker", FlashID: "pub"}))
+	require.NoError(t, likeRepo.Create(&model.FlashLike{ID: "l2", UserID: "liker", FlashID: "priv"}))
+	idGen, _ := id.NewGenerator("aidx")
+	svc := NewService(repo, likeRepo, idGen)
+
+	got, err := svc.MyLikes("liker", "", "", "", 10, 0)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Equal(t, "pub", got[0].Flash.ID)
+}
+
+// like 後に非公開化されたものでも、自分の like は外せること。like して
+// いない非公開のものは NOT_LIKED ではなく not-found (存在を伏せる)。
+func TestUnlike_PrivateFlash(t *testing.T) {
+	t.Parallel()
+
+	repo := testutil.NewMockFlashRepository()
+	require.NoError(t, repo.Create(&model.Flash{ID: "priv", UserID: "owner", Visibility: "private"}))
+	likeRepo := testutil.NewMockFlashLikeRepository()
+	require.NoError(t, likeRepo.Create(&model.FlashLike{ID: "l1", UserID: "liker", FlashID: "priv"}))
+	idGen, _ := id.NewGenerator("aidx")
+	svc := NewService(repo, likeRepo, idGen)
+
+	require.ErrorIs(t, svc.Unlike("stranger", "priv"), ErrFlashNotFound)
+	require.NoError(t, svc.Unlike("liker", "priv"))
+	require.Empty(t, likeRepo.Likes)
+}
