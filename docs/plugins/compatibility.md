@@ -28,7 +28,7 @@ mk-go 本体を変更する人向け。**公開面を広げてよい条件**と�
 
 `Definition.EffectivePolicies`と関連型の追加はこのadditive契約に従い、`Validate`もRoutes、Jobs、EffectivePoliciesのいずれかを要求する形へ緩和するだけなので、`APIVersion`は1のまま維持する。
 
-`EffectivePolicyRequest.ActiveAssignments` と `plugin.ActiveRoleAssignment` の追加も同じ扱い。**`RoleIDs` は変更されない**ので、`EffectivePolicyRequest`はhostが組み立ててproviderに渡すものだけだから、`RoleIDs`を読む既存providerの挙動は変わらず、新sliceを無視する実装は害がない。`APIVersion`は1のまま。
+`EffectivePolicyRequest.ActiveAssignments` と `plugin.ActiveRoleAssignment` の追加も同じ扱い。`EffectivePolicyRequest` はhostが組み立ててproviderへ渡す入力であり、**`RoleIDs` は変更されない**。そのため`RoleIDs`だけを読む既存providerの挙動は変わらず、新しいsliceを無視する実装にも影響はない。`APIVersion`は1のまま。
 
 `EffectivePolicyContribution.ReplaceRoleID`の追加も同じ扱い。**keyed struct literalで組み立てる限り**、**未設定なら追加contributionのまま**なので既存providerの挙動は変わらず、pluginは「対象ロールのネイティブcontributionを置き換える」という新しい契約にだけオプトインする。置換の`Priority`/`Order`制約はprovider作者の誤りを弾くもので、既存providerの出力形式は変えない。`APIVersion`は1のまま。
 

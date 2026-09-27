@@ -280,7 +280,7 @@ func cloneRoles(roles []*model.Role) []*model.Role {
 	return cloned
 }
 
-// userRoleSnapshot は 1 ユーザーの role 解決結果: 解決済み roles と、それを支撑する
+// userRoleSnapshot は 1 ユーザーの role 解決結果: 解決済み roles と、それを支える
 // active manual assignment。
 //
 // **2 つを返す。1 回で読む。** assignment の唯一の供給源は `ListByUser` なので、
@@ -364,6 +364,9 @@ type Service struct {
 	// effectivePolicyProviderCacheEntries はproviderごとの成功結果LRU上限。
 	// wire-timeに設定し、未設定または非正値なら既定値を使う。
 	effectivePolicyProviderCacheEntries int
+	// policyReplacementConflicts は unchecked の本番経路でも置換競合を運用ログへ
+	// 届ける。logger は Service 構築時の default を保持する。
+	policyReplacementConflicts policyReplacementConflictRuntime
 }
 
 // RoleAssignNotifier records a 'roleAssigned' notification on role assignment
@@ -394,6 +397,7 @@ func NewService(
 		userRoleEpoch:                       make(map[string]uint64),
 		userRoleFlights:                     make(map[string]int),
 		effectivePolicyProviderCacheEntries: defaultEffectivePolicyProviderCacheEntries,
+		policyReplacementConflicts:          newPolicyReplacementConflictRuntime(),
 	}
 }
 
@@ -1315,7 +1319,7 @@ type policyEntry struct {
 	explicit bool
 }
 
-// rolePolicyInput は 1 つのロールが集約に贈るものの全体:
+// rolePolicyInput は 1 つのロールが集約へ渡すものの全体:
 //
 //   - roleID: どのロールか（置換の対象を突き合わせるため）
 //   - overrides: `Role.Policies` を key ごとに decode した結果
@@ -1332,7 +1336,7 @@ type rolePolicyInput struct {
 	replacements map[string]policyEntry
 }
 
-// entry は、このロールが key に対して贈る entry を返す。置換されていれば置換 entry
+// entry は、このロールが key に対して寄与する entry を返す。置換されていれば置換 entry
 // （**元 native entry の priority を引き継ぐ**）、されていなければ native entry。
 func (in rolePolicyInput) entry(key string, baseVal any) policyEntry {
 	if replacement, ok := in.replacements[key]; ok {
@@ -1341,7 +1345,7 @@ func (in rolePolicyInput) entry(key string, baseVal any) policyEntry {
 	return rolePolicyEntry(in.overrides, key, baseVal)
 }
 
-// rolePolicyEntry は置換されていないロールが key に贈る entry。**この role が key を
+// rolePolicyEntry は置換されていないロールが key に寄与する entry。**この role が key を
 // 宣言していない場合は base 値を priority 0 で参加させる**という upstream 互換の既定が
 // ここに入る。
 func rolePolicyEntry(overrides map[string]rolePolicyOverride, key string, baseVal any) policyEntry {
@@ -1383,7 +1387,7 @@ func newRolePolicyInputs(roles []*model.Role) []rolePolicyInput {
 // & type-checked by the host); it is merged into the same priority cascade as the
 // role overrides.
 func computePolicy(key string, baseVal any, inputs []rolePolicyInput, extra []policyEntry) any {
-	// 各 role がこの policy に贈る entry を組み立てる。entry 無し = priority=0,
+	// 各 role がこの policy に寄与する entry を組み立てる。entry 無し = priority=0,
 	// useDefault=true (= base にフォールバック) として扱う。
 	collected := make([]policyEntry, 0, len(inputs)+len(extra))
 	for _, in := range inputs {
