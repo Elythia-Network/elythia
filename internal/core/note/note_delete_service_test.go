@@ -333,3 +333,39 @@ func TestDeleteService_AuthorSelfDeleteUsesActor(t *testing.T) {
 	require.NotNil(t, hook.author)
 	assert.Equal(t, "author", hook.author.ID)
 }
+
+// recordingDeleteNotificationHook captures the notes handed to the notification
+// hook (#3201).
+type recordingDeleteNotificationHook struct{ notes []*model.Note }
+
+func (h *recordingDeleteNotificationHook) OnNoteDeleted(n *model.Note) { h.notes = append(h.notes, n) }
+
+// #3201: 削除したノートを通知の hook に渡す (リノート / 引用の通知を消すため)。
+// モデレーターが他人のノートを消した場合も同じ。
+func TestDeleteService_NotificationHookInvoked(t *testing.T) {
+	noteRepo := testutil.NewMockNoteRepository()
+	target := "author"
+	noteRepo.Notes["rn"] = &model.Note{ID: "rn", UserID: "user1", RenoteUserID: &target}
+	noteRepo.Notes["rn2"] = &model.Note{ID: "rn2", UserID: "user2", RenoteUserID: &target}
+	svc := note.NewDeleteService(noteRepo)
+	hook := &recordingDeleteNotificationHook{}
+	svc.SetNotificationHook(hook)
+
+	require.NoError(t, svc.Delete(&model.User{ID: "user1"}, "rn"))
+	require.NoError(t, svc.DeleteAs(&model.User{ID: "mod"}, true, "rn2"))
+	require.Len(t, hook.notes, 2)
+	assert.Equal(t, "rn", hook.notes[0].ID)
+	assert.Equal(t, "rn2", hook.notes[1].ID)
+}
+
+// 削除に失敗したら通知は消さない。
+func TestDeleteService_NotificationHookNotFiredOnFailure(t *testing.T) {
+	noteRepo := testutil.NewMockNoteRepository()
+	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: "owner"}
+	svc := note.NewDeleteService(noteRepo)
+	hook := &recordingDeleteNotificationHook{}
+	svc.SetNotificationHook(hook)
+
+	require.Error(t, svc.Delete(&model.User{ID: "intruder"}, "n1"))
+	assert.Empty(t, hook.notes)
+}

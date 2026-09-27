@@ -710,8 +710,15 @@ func (s *Service) DeleteByTypeAndNotifier(ctx context.Context, notifieeID string
 	if notifieeID == "" || notifierID == "" {
 		return nil
 	}
-	// 全 stream entry を走査 (MaxPerUser=300 cap なので上限は常識的)。
-	res, err := s.client.XRange(ctx, s.streamKey(notifieeID), "-", "+").Result()
+	return s.deleteWhere(ctx, notifieeID, func(n *Notification) bool {
+		return n.Type == typ && n.NotifierID == notifierID
+	})
+}
+
+// deleteWhere removes every notification in userID's stream for which match
+// returns true. 全 stream entry を走査する (MaxPerUser=300 cap なので上限は常識的)。
+func (s *Service) deleteWhere(ctx context.Context, userID string, match func(*Notification) bool) error {
+	res, err := s.client.XRange(ctx, s.streamKey(userID), "-", "+").Result()
 	if err != nil {
 		return err
 	}
@@ -725,17 +732,36 @@ func (s *Service) DeleteByTypeAndNotifier(ctx context.Context, notifieeID string
 		if err := json.Unmarshal([]byte(raw), &n); err != nil {
 			continue
 		}
-		if n.Type == typ && n.NotifierID == notifierID {
+		if match(&n) {
 			toDelete = append(toDelete, msg.ID)
 		}
 	}
 	if len(toDelete) == 0 {
 		return nil
 	}
-	if err := s.client.XDel(ctx, s.streamKey(notifieeID), toDelete...).Err(); err != nil {
-		return err
+	return s.client.XDel(ctx, s.streamKey(userID), toDelete...).Err()
+}
+
+// DeleteByNote removes the notifications of the given types that notifierID
+// caused on noteID from notifieeID's stream.
+//
+// **取り消した操作の通知を残さない (#3201)。** リアクションの通知が指すのは
+// リアクションされた元ノートなので、取り消しても read 時に落ちる理由が無く
+// 一覧に残り続ける。リノートの通知はリノート自身を指すので一覧からは read 時に
+// 落ちる (#1953) が、stream には残って未読件数に数えられ、MaxPerUser の枠も
+// 使い続ける。upstream はどちらも消さない。
+func (s *Service) DeleteByNote(ctx context.Context, notifieeID, notifierID, noteID string, types ...Type) error {
+	if notifieeID == "" || notifierID == "" || noteID == "" || len(types) == 0 {
+		return nil
 	}
-	return nil
+	wanted := make(map[Type]struct{}, len(types))
+	for _, t := range types {
+		wanted[t] = struct{}{}
+	}
+	return s.deleteWhere(ctx, notifieeID, func(n *Notification) bool {
+		_, ok := wanted[n.Type]
+		return ok && n.NotifierID == notifierID && n.NoteID == noteID
+	})
 }
 
 // scheduleUnreadPublish delivers an `unreadNotification` event to the user's
@@ -760,6 +786,15 @@ func (s *Service) scheduleUnreadPublish(notifieeID, streamID string, packed any,
 			// badge を burn せず、冗長な push も送らない (#2106 L35)。
 			slog.Debug("notification: unreadNotification/push suppressed (already read)",
 				"userId", notifieeID, "streamId", streamID, "latestRead", latestRead)
+			return
+		}
+		// 待機中に通知そのものが消された (リアクション / リノートの取り消し #3201、
+		// 通報の通知の置き換え #3200 など) → 送らない。送ると一覧に無い通知の
+		// Web Push が届き、バッジだけが +1 される。確かめられなかったときは
+		// 送る側に倒す (取りこぼすより、消えた通知を 1 回送るほうがまし)。
+		if entries, err := s.client.XRange(context.Background(), s.streamKey(notifieeID), streamID, streamID).Result(); err == nil && len(entries) == 0 {
+			slog.Debug("notification: unreadNotification/push suppressed (deleted)",
+				"userId", notifieeID, "streamId", streamID)
 			return
 		}
 		if s.mainStreamPublisher != nil {

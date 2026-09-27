@@ -47,6 +47,13 @@ type DeleteNoteStreamHook interface {
 	OnNoteDeleted(noteID string, deletedAt time.Time)
 }
 
+// DeleteNotificationHook is invoked after a note is deleted so notifications
+// that pointed at it can be removed (#3201)。実装は core/notification.Hook。
+// 失敗はベストエフォート。
+type DeleteNotificationHook interface {
+	OnNoteDeleted(note *model.Note)
+}
+
 // ModeratorDeleteHook is invoked when a moderator deletes another user's note
 // so the action can be written to the moderation log (upstream
 // NoteDeleteService writes a `deleteNote` moderation log when
@@ -65,6 +72,7 @@ type DeleteService struct {
 	timelineHook        DeleteTimelineHook
 	noteStreamHook      DeleteNoteStreamHook
 	moderatorDeleteHook ModeratorDeleteHook
+	notificationHook    DeleteNotificationHook
 }
 
 // NewDeleteService creates a new DeleteService.
@@ -108,6 +116,12 @@ func (s *DeleteService) SetTimelineHook(h DeleteTimelineHook) {
 // moderation log (#1765)。
 func (s *DeleteService) SetModeratorDeleteHook(h ModeratorDeleteHook) {
 	s.moderatorDeleteHook = h
+}
+
+// SetNotificationHook attaches a DeleteNotificationHook invoked after Delete
+// so the renote / quote notification the note left is removed (#3201)。
+func (s *DeleteService) SetNotificationHook(h DeleteNotificationHook) {
+	s.notificationHook = h
 }
 
 // SetNoteStreamHook attaches a DeleteNoteStreamHook invoked after Delete so
@@ -188,6 +202,13 @@ func (s *DeleteService) DeleteAs(actor *model.User, isModerator bool, noteID str
 	// クライアントへ即時反映する (#700)。失敗はベストエフォート。
 	if s.noteStreamHook != nil {
 		s.noteStreamHook.OnNoteDeleted(note.ID, deletedAt)
+	}
+	// 取り消したリノート / 削除した引用の通知を消す (#3201)。local の
+	// notes/unrenote と連合の Delete(Note) はここを通る。**連合の Undo(Announce) は
+	// 通らない** (noteRepo.Delete を直接呼ぶ) ので processor 側で同じ hook を呼ぶ。
+	// ベストエフォート。
+	if s.notificationHook != nil {
+		s.notificationHook.OnNoteDeleted(note)
 	}
 	// moderator が他人の note を削除したときは moderation log に deleteNote を
 	// 残す (upstream NoteDeleteService の deleter && note.userId !== deleter.id、

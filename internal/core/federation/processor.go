@@ -277,6 +277,9 @@ type AntennaHook interface {
 // 上部の "Hook mutation contract"。
 type NotificationHook interface {
 	OnNoteCreated(note *model.Note, author *model.User, replyTarget, renoteTarget *model.Note)
+	// OnNoteDeleted removes the renote notification a withdrawn boost left
+	// (#3201)。Undo(Announce) は DeleteService を通らないので、ここから呼ぶ。
+	OnNoteDeleted(note *model.Note)
 }
 
 // NoteChartHook is invoked after a freshly persisted inbound Create / Announce
@@ -1237,6 +1240,12 @@ func (p *Processor) handleUndoAnnounce(act genericActivity, inner genericActivit
 		}
 		if err := p.noteRepo.Delete(n); err != nil {
 			return err
+		}
+		// 取り消されたブーストの通知を消す (#3201)。**この経路は DeleteService を
+		// 通らない** (noteRepo.Delete を直接呼ぶ) ので、DeleteService 側の hook
+		// だけではリモートからのリノート取り消しが丸ごと漏れる。
+		if p.notificationHook != nil {
+			p.notificationHook.OnNoteDeleted(n)
 		}
 		// handleAnnounce の increment と同条件でのみ減算する。条件がずれると
 		// 加算しなかった boost の undo で count が負に振れる (#2283)。

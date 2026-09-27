@@ -270,3 +270,29 @@ func TestCreateCoalesced_FailedCreateKeepsExisting(t *testing.T) {
 	_, window := coalesceKeys(svc, "mod")
 	assert.EqualValues(t, 0, testRedis.Client.Exists(ctx, window).Val(), "no window without a creation")
 }
+
+// TestCreateCoalesced_ReplacementStillPublishes: 置き換えで古い通知を消しても、新しい
+// 通知の unreadNotification は出る (#3200)。送信直前の存在確認 (#3201) は消えた通知の
+// 分だけを止めるので、消す対象に新しい通知が混ざると唯一のバッジ更新が消える。
+func TestCreateCoalesced_ReplacementStillPublishes(t *testing.T) {
+	svc := newTestSvc(t)
+	svc.SetUnreadPublishDelay(200 * time.Millisecond)
+	pub := &stubMainPublisher{}
+	svc.SetMainStreamPublisher(pub)
+	ctx := context.Background()
+
+	_, err := svc.CreateCoalesced(ctx, abuseInput("mod", "r1"), Coalesce{})
+	require.NoError(t, err)
+	_, err = svc.CreateCoalesced(ctx, abuseInput("mod", "r2"), Coalesce{})
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		pub.mu.Lock()
+		defer pub.mu.Unlock()
+		return len(pub.calls) == 1
+	}, 5*time.Second, 10*time.Millisecond, "the replacement publishes")
+	time.Sleep(300 * time.Millisecond)
+	pub.mu.Lock()
+	defer pub.mu.Unlock()
+	assert.Len(t, pub.calls, 1, "the replaced r1 does not publish")
+}
