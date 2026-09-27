@@ -27,7 +27,7 @@
 # digest のままだと tag だけ新しい古い frontend が焼き込まれる。docker.yml の
 # `build-and-push-bundled` が tag と digest の対応を registry に問い合わせて確かめる。
 # 取り直し方は docs/upstream-catch-up.md。
-ARG MISSKEY_ASSETS_IMAGE=ghcr.io/shiroha-a/misskey-ts-assets:2026.9.1-mk.1@sha256:588ceee6b6b014d9f6218a3520dad246a44b66b05770fdcb40a47a05c3ca37a9
+ARG MISSKEY_ASSETS_IMAGE=ghcr.io/shiroha-a/misskey-ts-assets:2026.9.1-mk.2@sha256:490ecd420e8ac9ebf1861251a60f9da03b8a3ebb6d5877240718333d2b5c1534
 
 # アセットの供給元。既定は external (公式のアセットイメージ) で、プラグインの
 # frontend を含めたいときだけ local に切り替える (#2940)。
