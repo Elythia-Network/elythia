@@ -777,3 +777,50 @@ func TestService_ProhibitedWords(t *testing.T) {
 	metaRepo.Meta = nil
 	assert.Nil(t, svc.ProhibitedWords())
 }
+
+type recordedGone struct {
+	host string
+	at   time.Time
+}
+
+type fakeGoneRecorder struct {
+	got []recordedGone
+	err error
+}
+
+func (f *fakeGoneRecorder) RecordGone(host string, at time.Time) error {
+	f.got = append(f.got, recordedGone{host, at})
+	return f.err
+}
+
+// goneSuspended になった時刻を記録する (#3067)。既に gone / 手動停止なら記録しない
+// (状態が変わっていないので、最初に消えた時刻を上書きしない)。
+func TestService_MarkGoneSuspended_RecordsTime(t *testing.T) {
+	svc, repo, _ := newService(t)
+	now := time.Date(2026, 9, 28, 0, 0, 0, 0, time.UTC)
+	svc.SetClock(func() time.Time { return now })
+	rec := &fakeGoneRecorder{}
+	svc.SetGoneRecorder(rec)
+
+	repo.Instances["alpha.example"] = &model.Instance{ID: "i1", Host: "alpha.example"}
+	require.NoError(t, svc.MarkGoneSuspended("alpha.example"))
+	require.NoError(t, svc.MarkGoneSuspended("alpha.example"))
+	repo.Instances["beta.example"] = &model.Instance{ID: "i2", Host: "beta.example", SuspensionState: model.SuspensionStateManuallySuspended}
+	require.NoError(t, svc.MarkGoneSuspended("beta.example"))
+	assert.Equal(t, []recordedGone{{"alpha.example", now}}, rec.got)
+
+	// 記録に失敗しても停止そのものは成立させる。
+	rec.err = errors.New("db down")
+	repo.Instances["gamma.example"] = &model.Instance{ID: "i3", Host: "gamma.example"}
+	require.NoError(t, svc.MarkGoneSuspended("gamma.example"))
+	assert.Equal(t, model.SuspensionStateGoneSuspended, repo.Instances["gamma.example"].SuspensionState)
+}
+
+// goneSuspended にしたら、判定のキャッシュを待たずに配送を止める。
+func TestService_MarkGoneSuspended_InvalidatesSuspendCache(t *testing.T) {
+	svc, repo, _ := newService(t)
+	repo.Instances["alpha.example"] = &model.Instance{ID: "i1", Host: "alpha.example"}
+	require.False(t, svc.ShouldSkipDelivery("alpha.example"), "caches the not-suspended decision")
+	require.NoError(t, svc.MarkGoneSuspended("alpha.example"))
+	assert.True(t, svc.ShouldSkipDelivery("alpha.example"))
+}

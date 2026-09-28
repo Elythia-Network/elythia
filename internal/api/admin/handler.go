@@ -221,6 +221,8 @@ type Handler struct {
 	// remoteCheckSelfHost は自ホスト (断る)。
 	remoteCheck         RemoteChecker
 	remoteCheckSelfHost string
+	// goneCleaner は消えたインスタンスとのフォロー関係の片付け (#3067)。
+	goneCleaner GoneInstanceCleaner
 	// userTokenInvalidator は admin が他 user を suspend / unsuspend /
 	// 論理削除した直後に target user の全 tokenCache entry を即時失効する
 	// ために使う (#965)。i/regenerate-token (#884) や i/update (#960) と

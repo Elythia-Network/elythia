@@ -95,6 +95,7 @@ import (
 	corefederation "github.com/shiroha-a/mk/internal/core/federation"
 	coreflash "github.com/shiroha-a/mk/internal/core/flash"
 	corefollowing "github.com/shiroha-a/mk/internal/core/following"
+	"github.com/shiroha-a/mk/internal/core/gonecleanup"
 	corehashtag "github.com/shiroha-a/mk/internal/core/hashtag"
 	coreinstance "github.com/shiroha-a/mk/internal/core/instance"
 	"github.com/shiroha-a/mk/internal/core/iplog"
@@ -859,6 +860,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// Instance management (Phase 3 Step H)
 	instanceService := coreinstance.NewService(instanceRepo, metaRepo, idGen)
+	// goneSuspended になった時刻を残す (#3067)。消えたインスタンスとのフォロー関係を
+	// 片付ける候補を「いつから消えているか」で並べる。
+	goneInstanceRepo := repository.NewGoneInstanceRepository(s.db)
+	instanceService.SetGoneRecorder(goneInstanceRepo)
 	federationResolver.SetInstanceTracker(instanceService)
 	// #1538: reactionAcceptance gate — role-gated emoji + media-silenced host。
 	// instanceService 生成後 (= 本ブロック) で配線する (reactionService は line ~281
@@ -3413,6 +3418,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		delivery:  deliveryHealth,
 		breaker:   deliveryBreaker,
 	}), corefederation.NormalizeGateHost(s.config.URL))
+	// 消えたインスタンスとのフォロー関係の片付け (#3067)。自動では消さず、管理者が
+	// 候補を見て実行する。
+	adminHandler.SetGoneInstanceCleaner(gonecleanup.NewService(goneInstanceRepo, instanceService, followingService))
 	// admin/federation/update-instance の suspend / unsuspend を deliver hot path
 	// の suspend 判定 cache へ TTL を待たず即時反映する (#1407 review)。
 	adminHandler.SetInstanceSuspendCacheInvalidator(instanceService)
@@ -3667,6 +3675,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// mk-go 独自 (#3055)。指定したホストとの疎通を 1 回だけ検査する。相手へ GET を
 	// 送るだけで状態を変えないので、観測系と同じ scope。
 	api.POST("/admin/federation/check-host", adminHandler.FederationCheckHost, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:server-info"))
+	// mk-go 独自 (#3067)。消えたインスタンスと、残っているフォロー関係の件数。
+	api.POST("/admin/federation/gone-instances", adminHandler.FederationGoneInstances, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:server-info"))
+	// mk-go 独自 (#3067)。消えたインスタンスとのフォロー関係を片付ける。取り返しが
+	// つかない書き込みなので、既存の admin/federation/* の書き込み系と同じ scope。
+	api.POST("/admin/federation/clean-gone-instance", adminHandler.FederationCleanGoneInstance, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:federation"))
 	// mk-go 独自 (#3048)。落ちた配送先へのブレーカーを手で閉じる。配送の挙動を
 	// 変える書き込みなので、既存の admin/federation/* の書き込み系と同じ scope。
 	api.POST("/admin/federation/close-delivery-breaker", adminHandler.FederationCloseDeliveryBreaker, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:federation"))

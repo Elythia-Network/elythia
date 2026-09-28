@@ -14,8 +14,8 @@ import (
 // HostColumn identifies one remote-host column to normalize.
 //
 // KeysetColumn is what the batch paginates on. It is usually the primary key;
-// `instance_signature_capability` has no separate id so it paginates on the
-// host column itself (see HostColumns).
+// `instance_signature_capability` and `instance_gone_suspension` have no
+// separate id so they paginate on the host column itself (see HostColumns).
 type HostColumn struct {
 	Table        string
 	KeysetColumn string
@@ -48,6 +48,7 @@ var HostColumns = []HostColumn{
 	{Table: "user", KeysetColumn: "id", Column: "host"},
 	{Table: "instance", KeysetColumn: "id", Column: "host"},
 	{Table: "instance_signature_capability", KeysetColumn: "host", Column: "host"},
+	{Table: "instance_gone_suspension", KeysetColumn: "host", Column: "host"},
 	{Table: "emoji", KeysetColumn: "id", Column: "host"},
 	{Table: "following", KeysetColumn: "id", Column: "followerHost"},
 	{Table: "following", KeysetColumn: "id", Column: "followeeHost"},

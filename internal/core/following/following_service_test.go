@@ -1628,3 +1628,31 @@ func TestHasSilencedHostChecker(t *testing.T) {
 type silencedHostFunc func(string) bool
 
 func (f silencedHostFunc) IsSilenced(host string) bool { return f(host) }
+
+// #3067: UnfollowQuiet は upstream の silent と同じく、main stream と利用者の
+// webhook を出さず、Undo(Follow) も配送しない。数と集計は通常どおり減らす。
+func TestUnfollowQuiet_NoDeliveryNoNotification(t *testing.T) {
+	svc, userRepo, _, _ := newSvc(t)
+	addUser(t, userRepo, "alice", false)
+	addUser(t, userRepo, "bob", false)
+	_, err := svc.Follow("alice", "bob", following.FollowOptions{})
+	require.NoError(t, err)
+
+	fed := &stubFederationHook{}
+	svc.SetFederationHook(fed)
+	pub := &stubMainStreamPublisher{}
+	svc.SetMainStreamPublisher(pub)
+	web := &recordingWebhookHook{}
+	svc.SetWebhookHook(web)
+	chart := &recordingChartHook{}
+	svc.SetChartHook(chart)
+
+	require.NoError(t, svc.UnfollowQuiet("alice", "bob"))
+	assert.Empty(t, fed.unfollowed, "no Undo(Follow)")
+	assert.Empty(t, pub.calls, "no main-stream event")
+	assert.Zero(t, web.unfollows, "no user webhook")
+	assert.Len(t, chart.unfollows, 1, "charts are still updated")
+	assert.Equal(t, 0, userRepo.Users["alice"].FollowingCount)
+	assert.Equal(t, 0, userRepo.Users["bob"].FollowersCount)
+	assert.ErrorIs(t, svc.UnfollowQuiet("alice", "bob"), following.ErrNotFollowing)
+}

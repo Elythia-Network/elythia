@@ -131,6 +131,12 @@ const (
 	// あるので見出しは出るが、upstream の misskey-js から作る絞り込みの
 	// 選択肢には出ない (「全て」でのみ見える)。
 	LogResetEmojiApplicationQuota LogType = "resetEmojiApplicationQuota"
+	// 消えたインスタンスとのフォロー関係の片付け (#3067)。info は
+	// {host, removedFollowers, removedFollowing, removedFollowRequests, remaining}。
+	// **取り返しがつかない操作**なので、誰がどのホストの関係を何件消したかを残す
+	// (upstream の remove-all-following はログを残さないが、あちらはフォロワーだけで
+	// こちらはローカルの利用者のフォローまで消す)。
+	LogCleanGoneInstance LogType = "cleanGoneInstance"
 )
 
 // UserInfo builds the standard {userId, userUsername, userHost} info

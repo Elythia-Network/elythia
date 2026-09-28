@@ -254,7 +254,7 @@ func projectRoot() string {
 // した列も 1 テーブル 1600 列の上限に数えるため、繰り返すと最後は
 // `tables can have at most 1600 columns` で落ちる。
 //
-// **再適用で実際に枠を食うのは `note` だけ** (実測。migration が作る 116 テーブル
+// **再適用で実際に枠を食うのは `note` だけ** (実測。migration が作る 117 テーブル
 // 中 1 つ。`internal_repository` を数えると 117 だが、増えた 1 つはこの台帳自身)。
 // `000033` が `ADD COLUMN IF NOT EXISTS` で足し `000036` が落とすため。`DROP
 // COLUMN` を含む migration は他に 3 本あるが、落とす列は `CREATE TABLE` 由来で
@@ -271,7 +271,7 @@ const migrationLedgerTable = "testutil_applied_migrations"
 // 一過性の失敗 (並行 DDL / lock timeout / 新しい migration の実バグ) が恒久的に
 // 隠れる。
 //
-// 既存 schema への再適用でエラーになるのは実測で **98 本中 2 本だけ**
+// 既存 schema への再適用でエラーになるのは実測で **99 本中 2 本だけ**
 // (`000001_initial` の制約重複と `000075_signup_application`)。どちらも
 // 1 ファイル = 1 つの暗黙トランザクションなので丸ごとロールバックし、列枠を
 // 食わない。**列枠を食う `000033` (ADD) / `000036` (DROP) は成功する側**なので、
