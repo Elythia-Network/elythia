@@ -23,6 +23,7 @@ import (
 	"github.com/shiroha-a/mk/internal/activitypub"
 	"github.com/shiroha-a/mk/internal/activitypub/mfm"
 	coredrive "github.com/shiroha-a/mk/internal/core/drive"
+	"github.com/shiroha-a/mk/internal/core/fedrule"
 	corenote "github.com/shiroha-a/mk/internal/core/note"
 	"github.com/shiroha-a/mk/internal/misc/colfit"
 	"github.com/shiroha-a/mk/internal/misc/hashtag"
@@ -380,6 +381,8 @@ type PublickeyExtraStore interface {
 // する。エントリは actorTTL を超えると miss として扱い、次回 ResolveActor 時
 // にリフレッシュされる。
 type Resolver struct {
+	// rules は連合のルール (#3090)。nil なら評価しない。
+	rules    RuleEvaluator
 	userRepo repository.UserRepository
 	noteRepo repository.NoteRepository
 	urls     *activitypub.URLBuilder
@@ -3002,6 +3005,26 @@ func (r *Resolver) ingestNoteWithCreated(body []byte, deliveringActorURI string,
 			"uri", truncateRunes(apNote.ID, noteURIMaxRunes), "actor", actor.ID)
 		return nil, false, nil
 	}
+	// 連合のルール (#3090)。禁止語と同じく**行を作る前**に評価する。ここより後ろは
+	// 返信先・引用先の取得や添付の登録で行を書くので、拒否するものはここで落とす。
+	// 取り込みの全経路 (inbox の Create、Announce 先・返信先・引用先の取得、
+	// リレー) がこの関数を通るので、ブースト経由で入ってくる投稿にも効く。
+	var ruleDecision fedrule.Decision
+	if r.rules != nil && r.rules.HasNoteRules() {
+		hasAttachment := len(extractAttachments(apNote.Attachment, apNote.Sensitive.Bool())) > 0
+		in := noteRuleFacts(actor, note.Text, note.CW, &apNote, hasAttachment)
+		in.Actor = r.rules.ActorFacts(actor)
+		ruleDecision = r.rules.EvaluateNote(in)
+		if ruleDecision.Reject {
+			slog.Info("federation: dropping inbound note rejected by a federation rule",
+				"uri", truncateRunes(apNote.ID, noteURIMaxRunes), "actor", actor.ID)
+			return nil, false, nil
+		}
+		// silence と同じ形でタイムラインから外す (public → home)。
+		if ruleDecision.Unlist && note.Visibility == model.NoteVisibilityPublic {
+			note.Visibility = model.NoteVisibilityHome
+		}
+	}
 	// 返信先がローカルに存在すれば紐付ける。リモート返信先の解決は後続 phase で
 	// 対応するため、現状では nil のままにする。
 	var replyTarget *model.Note
@@ -3169,9 +3192,20 @@ func (r *Resolver) ingestNoteWithCreated(body []byte, deliveringActorURI string,
 	if tags := hashtag.ExtractNoteTags(hashtagSources...); len(tags) > 0 {
 		note.Tags = model.StringArray(tags)
 	}
+	// ルールの CW は tag を抜いた**後**に付ける。前に付けると、管理者の書いた
+	// 文言の hashtag がその投稿の tag として集計される。
+	if cw := ruleCW(ruleDecision, note.CW); cw != nil {
+		note.CW = cw
+	}
 	// AP `attachment` 配列を drive_file 行に upsert (#378)。link 形式のみで
 	// 実 fetch はせず、frontend が drive_file.url 経由で remote 取得する。
-	note.FileIDs = r.upsertAttachments(extractAttachments(apNote.Attachment, apNote.Sensitive.Bool()), &actor.ID, actor.Host)
+	note.FileIDs = r.upsertAttachments(applyRulesToAttachments(ruleDecision,
+		extractAttachments(apNote.Attachment, apNote.Sensitive.Bool())), &actor.ID, actor.Host)
+	if ruleDecision.Sensitive && !r.markFilesSensitive(note.FileIDs, actor.ID) {
+		if cw := foldCW(note.CW); cw != nil {
+			note.CW = cw
+		}
+	}
 	if len(note.FileIDs) > 0 {
 		// AttachedFileTypes は MIME type の配列 (TS との互換性)。
 		note.AttachedFileTypes = r.collectAttachedFileTypes(note.FileIDs)
@@ -3448,7 +3482,8 @@ func (r *Resolver) UpdateRemoteQuestion(object json.RawMessage, actorURI string)
 //     (`upsertAttachments` が**新規に作る** `drive_file` の `isSensitive` /
 //     `maybeSensitive` に書く。既知 URL の添付は URI で dedup して `continue`
 //     する (関数から抜けるのではなく次の添付へ進む) ので、**保存済みの添付の
-//     NSFW は Update では変わらない**)
+//     NSFW は送信者の sensitive では変わらない**。例外は連合のルール (#3090) の
+//     「センシティブにする」で、投稿者自身の保存済みの行にも立てる)
 //   - **書き込みは note の列だけではない。** 同じ呼び出しで `drive_file` /
 //     `emoji` / hashtag の行が作られ、**`emoji` と hashtag は既存行も書き換わる**
 //     — `upsertEmojis` は同名 + 同 host の行の `originalUrl` / `publicUrl` /
@@ -3555,14 +3590,49 @@ func (r *Resolver) UpdateRemoteNote(body []byte, actorURI string) (*model.Note, 
 	if newText != "" {
 		effectiveText = &newText
 	}
-	effectiveCW := existing.CW
-	if newCW != nil {
-		effectiveCW = newCW
-	}
+	// **CW は受け取った Update を正とする** (#3090)。Update は投稿全体を送り直す
+	// ものなので、summary が無ければ CW は外れている。以前は「変えない」として
+	// 保存済みの値を使っていたが、保存済みの CW には連合のルールが付けた文言も
+	// 入るので、それが送信者の CW として tag に拾われ、パターンや禁止語の判定にも
+	// 混ざって以後の編集が全部弾かれた (#3090 の敵対的レビューで実測)。ルールの
+	// CW は、当たれば下で付け直す。
+	effectiveCW := newCW
 	if r.containsProhibitedWords(effectiveText, effectiveCW, nil) {
 		slog.Info("federation: dropping inbound note update containing prohibited words",
 			"uri", truncateRunes(apNote.ID, noteURIMaxRunes), "noteId", existing.ID)
 		return existing, nil
+	}
+	// 連合のルール (#3090) も編集に掛ける。掛けないと「条件に当たらない投稿を
+	// 作ってから Update で差し替える」で素通りできる。判定は更新後の値で行う。
+	var ruleDecision fedrule.Decision
+	if r.rules != nil && r.rules.HasNoteRules() {
+		author, aerr := r.noteAuthorForRules(existing.UserID)
+		if aerr != nil {
+			// 投稿者を引けないと bot / 新規の条件を判定できない。取り込みを
+			// やり直させる (黙って素通しにしない)。
+			return nil, fmt.Errorf("update remote note: rule author: %w", aerr)
+		}
+		hasAttachment := len(extractAttachments(apNote.Attachment, apNote.Sensitive.Bool())) > 0
+		in := noteRuleFacts(author, effectiveText, effectiveCW, &apNote, hasAttachment)
+		if in.Host == "" && existing.UserHost != nil {
+			in.Host = strings.ToLower(*existing.UserHost)
+		}
+		in.Actor = r.rules.ActorFacts(author)
+		in.Update = true
+		// 「初めて見てから N 時間以内」は投稿した時刻で測る (fedrule.NoteInput.At)。
+		if t, err := r.idGen.ParseTime(existing.ID); err == nil {
+			in.At = t
+		}
+		ruleDecision = r.rules.EvaluateNote(in)
+		if ruleDecision.Reject {
+			slog.Info("federation: dropping inbound note update rejected by a federation rule",
+				"uri", truncateRunes(apNote.ID, noteURIMaxRunes), "noteId", existing.ID)
+			return existing, nil
+		}
+		if ruleDecision.Unlist && existing.Visibility == model.NoteVisibilityPublic {
+			fields["visibility"] = model.NoteVisibilityHome
+			existing.Visibility = model.NoteVisibilityHome
+		}
 	}
 	if newText != "" {
 		fields["text"] = &newText
@@ -3593,7 +3663,7 @@ func (r *Resolver) UpdateRemoteNote(body []byte, actorURI string) (*model.Note, 
 		fields["mentions"] = mentions
 		existing.Mentions = mentions
 	}
-	if newCW != nil {
+	if !pointerStringsEqual(existing.CW, newCW) {
 		fields["cw"] = newCW
 		existing.CW = newCW
 	}
@@ -3641,11 +3711,23 @@ func (r *Resolver) UpdateRemoteNote(body []byte, actorURI string) (*model.Note, 
 		fields["tags"] = noteTags
 		existing.Tags = noteTags
 	}
+	// ルールの CW は tag を抜いた後に付ける (取り込み側と同じ理由)。
+	if cw := ruleCW(ruleDecision, existing.CW); cw != nil {
+		fields["cw"] = cw
+		existing.CW = cw
+	}
 	// AP `attachment` 配列の差分を反映する (#378)。driveFileRepo 未設定時は
 	// upsertAttachments が空 slice を返すので何もしない (= 既存 fileIDs を
 	// 誤って空に上書きしない、Devin #400 #1)。
 	if r.driveFileRepo != nil {
-		fileIDs := r.upsertAttachments(extractAttachments(apNote.Attachment, apNote.Sensitive.Bool()), &existing.UserID, existing.UserHost)
+		fileIDs := r.upsertAttachments(applyRulesToAttachments(ruleDecision,
+			extractAttachments(apNote.Attachment, apNote.Sensitive.Bool())), &existing.UserID, existing.UserHost)
+		if ruleDecision.Sensitive && !r.markFilesSensitive(fileIDs, existing.UserID) {
+			if cw := foldCW(existing.CW); cw != nil {
+				fields["cw"] = cw
+				existing.CW = cw
+			}
+		}
 		if !slices.Equal([]string(existing.FileIDs), []string(fileIDs)) {
 			fields["fileIds"] = model.StringArray(fileIDs)
 			existing.FileIDs = model.StringArray(fileIDs)

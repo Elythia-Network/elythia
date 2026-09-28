@@ -82,6 +82,9 @@ var metaHostColumns = []HostColumn{
 	{Table: "meta", KeysetColumn: "id", Column: "mediaSilencedHosts"},
 	{Table: "meta", KeysetColumn: "id", Column: "federationHosts"},
 	{Table: "meta", KeysetColumn: "id", Column: "smtpHost"},
+	// 連合のルール (#3090) の条件。meta の *Hosts と同じく後方一致のパターンで、
+	// 保存時に正規化している。
+	{Table: "federation_rule", KeysetColumn: "id", Column: "hosts"},
 }
 
 // HostBackfillResult reports the outcome of one keyset batch.

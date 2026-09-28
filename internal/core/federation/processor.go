@@ -63,6 +63,8 @@ type RelayActorChecker interface {
 
 // Processor dispatches inbound activities to the right handler.
 type Processor struct {
+	// rules は連合のルール (#3090)。nil なら評価しない。
+	rules            RuleEvaluator
 	resolver         *Resolver
 	followingService *corefollowing.Service
 	reactionService  *corereaction.Service
@@ -467,6 +469,11 @@ const maxCollectionDepth = 1
 // dispatchActivity routes a parsed activity to its handler. depth tracks
 // Collection/OrderedCollection unrolling so handleCollection can bound recursion.
 func (p *Processor) dispatchActivity(act genericActivity, depth int, signer *model.User) error {
+	// 連合のルール (#3090) で拒否するものは、ここで ack して捨てる (禁止語と
+	// 同じく retry させない)。
+	if p.activityRejectedByRules(act, signer) {
+		return nil
+	}
 	switch strings.ToLower(act.Type) {
 	case "follow":
 		return p.handleFollow(act)

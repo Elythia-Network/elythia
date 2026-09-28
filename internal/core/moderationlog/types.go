@@ -137,6 +137,13 @@ const (
 	// (upstream の remove-all-following はログを残さないが、あちらはフォロワーだけで
 	// こちらはローカルの利用者のフォローまで消す)。
 	LogCleanGoneInstance LogType = "cleanGoneInstance"
+	// 連合のルール (#3090) の作成 / 更新 / 削除。info は
+	// {ruleId, ruleName, rule} (更新は {ruleId, ruleName, before, after})。
+	// ルールは受信を拒否・書き換えるので、ホスト単位の設定 (updateServerSettings に
+	// 残る) と同じく誰がいつ変えたかを残す。
+	LogCreateFederationRule LogType = "createFederationRule"
+	LogUpdateFederationRule LogType = "updateFederationRule"
+	LogDeleteFederationRule LogType = "deleteFederationRule"
 )
 
 // UserInfo builds the standard {userId, userUsername, userHost} info
