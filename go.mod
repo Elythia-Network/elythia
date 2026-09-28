@@ -36,7 +36,7 @@ require (
 	github.com/prometheus/client_golang v1.24.1
 	github.com/prometheus/client_model v0.6.2
 	github.com/redis/go-redis/v9 v9.22.0
-	github.com/shiroha-a/mkq v1.2.0
+	github.com/shiroha-a/mkq v1.4.0
 	github.com/shirou/gopsutil/v4 v4.26.3
 	github.com/spakin/netpbm v1.3.2
 	github.com/spf13/viper v1.21.0
@@ -49,7 +49,7 @@ require (
 	golang.org/x/crypto v0.56.0
 	golang.org/x/image v0.45.0
 	golang.org/x/net v0.57.0
-	golang.org/x/sync v0.22.0
+	golang.org/x/sync v0.23.0
 	golang.org/x/text v0.41.0
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/datatypes v1.2.7

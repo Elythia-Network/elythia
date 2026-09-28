@@ -1295,8 +1295,9 @@ var ErrHandlerAbandoned = errors.New("mkqdriver: handler did not return before i
 // mutated after the closure is created (Server.Start enforces this
 // by snapshotting via maps.Clone before the call).
 //
-// driver.ErrSkipRetry → mkq.ErrUnrecoverable conversion lives here so
-// processors can keep their existing %w-wrap idiom unchanged.
+// driver.ErrSkipRetry → mkq.ErrUnrecoverable and driver.DelayError →
+// mkq.Delay conversions live here (nativeError) so processors can keep
+// their existing %w-wrap idiom unchanged.
 func newDispatchHandler(handlers map[string]driver.HandlerFunc, qname string, obs driver.Observer, deadline time.Duration, ab abandonSink) mkq.Handler[framedPayload] {
 	return func(ctx context.Context, job *mkq.Job[framedPayload]) (any, error) {
 		taskType := job.Data.Type
@@ -1314,28 +1315,48 @@ func newDispatchHandler(handlers map[string]driver.HandlerFunc, qname string, ob
 		}
 		// observer 未配線なら clock も触らない (hot path、#2277)。
 		if obs == nil {
-			err := run(ctx)
-			if err != nil && errors.Is(err, driver.ErrSkipRetry) {
-				return nil, fmt.Errorf("%w: %w", err, mkq.ErrUnrecoverable)
-			}
-			return nil, err
+			return nil, nativeError(run(ctx))
 		}
 		// dispatch wait は **初回試行のみ** 観測する。job.Timestamp は BullMQ の
 		// 作成時刻で attempt ごとに更新されないため、retry 分を含めると backoff
 		// 待ち (意図的な遅延) が「詰まり」として混ざり、p95 が数十秒に化ける。
 		// 見たいのは「enqueue された job がどれだけ待たされてから最初に拾われたか」
 		// = 混雑度なので、AttemptsMade == 0 に限定する。
-		if job.AttemptsMade == 0 && !job.Timestamp.IsZero() {
+		//
+		// **取り出されたのが初めてのときに限る (AttemptsStarted)。** 遅延で戻した
+		// job (driver.DelayError、#3048) は試行回数を消費しないので AttemptsMade は
+		// 0 のまま戻ってくる。そちらだけで見ると、意図して待たせた時間を混雑として
+		// 数える。
+		if job.AttemptsMade == 0 && job.AttemptsStarted <= 1 && !job.Timestamp.IsZero() {
 			obs.ObserveDispatchWait(qname, time.Since(job.Timestamp))
 		}
 		started := time.Now()
 		err := run(ctx)
-		obs.ObserveProcessing(qname, time.Since(started), err != nil)
-		if err != nil && errors.Is(err, driver.ErrSkipRetry) {
-			return nil, fmt.Errorf("%w: %w", err, mkq.ErrUnrecoverable)
+		// **遅延の要求は観測しない。** 失敗として数えると、落ちた配送先を待たせて
+		// いるだけで失敗率が上がって見える。成功として数えると、送っていないのに
+		// ms 級の処理が「成功」として処理時間の分布に混ざる。
+		var delayed *driver.DelayError
+		if !errors.As(err, &delayed) {
+			obs.ObserveProcessing(qname, time.Since(started), err != nil)
 		}
-		return nil, err
+		return nil, nativeError(err)
 	}
+}
+
+// nativeError maps the driver sentinels a handler returned to mkq's
+// native ones. A DelayError takes precedence over ErrSkipRetry, as in mkq.
+func nativeError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var delayed *driver.DelayError
+	if errors.As(err, &delayed) {
+		return fmt.Errorf("%w: %w", err, mkq.Delay(delayed.Delay))
+	}
+	if errors.Is(err, driver.ErrSkipRetry) {
+		return fmt.Errorf("%w: %w", err, mkq.ErrUnrecoverable)
+	}
+	return err
 }
 
 // abandonCounters tracks abandoned handlers per queue. The zero value is
