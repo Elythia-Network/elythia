@@ -12,6 +12,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -69,6 +71,17 @@ type DeliveryTelemetry interface {
 	RecordDelivery(host string, o deliveryhealth.Outcome)
 }
 
+// DeliveryBreaker holds deliveries to hosts that are down or asked us to
+// slow down (#3048). 実装は core/deliveryhealth.Breaker。
+type DeliveryBreaker interface {
+	Check(ctx context.Context, host, job string) deliveryhealth.CheckResult
+	RecordFailure(ctx context.Context, host, probeToken string) (open bool, untilProbe time.Duration)
+	ReleaseProbe(ctx context.Context, host, probeToken string)
+	HoldFor(untilProbe time.Duration) time.Duration
+	RecordSuccess(ctx context.Context, host string)
+	Throttle(ctx context.Context, host string, retryAfter time.Duration)
+}
+
 // SuspendedChecker reports whether delivery to a host should be skipped
 // based on meta.deliverSuspendedSoftware.
 type SuspendedChecker interface {
@@ -97,6 +110,7 @@ type DeliverProcessor struct {
 	responseHook     ResponseHook
 	chartHook        ChartHook
 	telemetry        DeliveryTelemetry
+	breaker          DeliveryBreaker
 	suspendedChecker SuspendedChecker
 	deliveryGate     DeliveryGate
 	capabilities     Ed25519AcceptanceRecorder
@@ -387,6 +401,12 @@ func (p *DeliverProcessor) SetDeliveryTelemetry(t DeliveryTelemetry) {
 	p.telemetry = t
 }
 
+// SetDeliveryBreaker wires the per-host breaker / 429 throttle (#3048)。
+// 未配線なら今までどおり、落ちた相手にも retry の回数まで撃ち続ける。
+func (p *DeliverProcessor) SetDeliveryBreaker(b DeliveryBreaker) {
+	p.breaker = b
+}
+
 // hostFromInbox returns the host portion of an inbox URL, or "" if the URL is
 // not parseable. ResponseHook 通知用に共通化する。
 //
@@ -434,25 +454,77 @@ func (p *DeliverProcessor) recordError(inbox string) {
 	}
 }
 
-// recordTelemetry forwards one attempt's detail to the health recorder.
+// attempt carries what recordAttempt needs about one delivery attempt.
+type attempt struct {
+	ctx     context.Context
+	host    string
+	started time.Time
+	// breakerState は Check の時点でこのホストにブレーカーの状態があったか。
+	// 無ければ成功のたびに Redis を叩かずに済む。
+	breakerState bool
+	// probeToken はこの配送が半開の試行のときの札 (試行でなければ "")。
+	// 試行の失敗だけが間隔を倍にする。
+	probeToken string
+	// local は HTTP の送信まで至らなかった失敗 (署名鍵の読み込みなど、こちら側の
+	// 事情)。相手の不調ではないのでブレーカーに数えない。
+	local bool
+}
+
+// errLocalSend marks a delivery failure that happened before any request
+// reached the remote host (our side: signing key, etc.).
+var errLocalSend = errors.New("ap deliver: failed before sending")
+
+// recordAttempt forwards one attempt's outcome to the health recorder and
+// the breaker.
 //
 // **判定はしない。** class は呼び出し元 (応答 switch) が決める。ここで
-// status から再分類すると「成功とみなす範囲」が二重管理になる。
-func (p *DeliverProcessor) recordTelemetry(host string, class deliveryhealth.OutcomeClass, status int, started time.Time, errMsg string) {
-	if p.telemetry == nil || host == "" {
-		return
+// status から再分類すると「成功とみなす範囲」が二重管理になる。観測と
+// ブレーカーも同じ class から決める (#3048)。
+//
+// 戻り値はブレーカーが開いていてこのジョブを待たせるべき時間 (held が true の
+// とき)。**開いている間の失敗は試行回数を消費させない。** 消費させると、溜まった
+// ジョブが試行のたびに持ち回りで回数を失い、7 日の自動停止より前に捨てられる。
+func (p *DeliverProcessor) recordAttempt(a attempt, class deliveryhealth.OutcomeClass, status int, errMsg string) (hold time.Duration, held bool) {
+	if a.host == "" {
+		return 0, false
 	}
-	p.telemetry.RecordDelivery(host, deliveryhealth.Outcome{
-		Class:   class,
-		Status:  status,
-		Latency: time.Since(started),
-		Err:     errMsg,
-	})
+	if p.telemetry != nil {
+		p.telemetry.RecordDelivery(a.host, deliveryhealth.Outcome{
+			Class:   class,
+			Status:  status,
+			Latency: time.Since(a.started),
+			Err:     errMsg,
+		})
+	}
+	if p.breaker == nil {
+		return 0, false
+	}
+	if a.local {
+		// こちら側の失敗は相手の不調として数えない。試行だったなら枠だけ返す
+		// (返さないと 5 分間次の試行ができない)。
+		p.breaker.ReleaseProbe(a.ctx, a.host, a.probeToken)
+		return 0, false
+	}
+	// 相手が落ちているのは接続失敗と 5xx だけ。4xx / 410 / 429 は応答が返って
+	// きている (相手は健在) ので閉じる側に数える。4xx は送ったものが悪く、止めても
+	// 直らない。
+	switch class {
+	case deliveryhealth.ClassTransport, deliveryhealth.ClassServerError:
+		open, untilProbe := p.breaker.RecordFailure(a.ctx, a.host, a.probeToken)
+		if open {
+			return p.breaker.HoldFor(untilProbe), true
+		}
+	default:
+		if a.breakerState {
+			p.breaker.RecordSuccess(a.ctx, a.host)
+		}
+	}
+	return 0, false
 }
 
 // Handle dispatches a single deliver task. The driver runtime invokes
 // this for every dequeued task.
-func (p *DeliverProcessor) Handle(_ context.Context, t driver.Task) error {
+func (p *DeliverProcessor) Handle(ctx context.Context, t driver.Task) error {
 	payload, err := queue.DecodeDeliverPayload(t.Payload())
 	if err != nil {
 		// payload が壊れているジョブは何度リトライしても無意味なのでスキップ。
@@ -482,15 +554,34 @@ func (p *DeliverProcessor) Handle(_ context.Context, t driver.Task) error {
 	// いる」と判断したときだけ詰める、という契約は変わっていない。
 	useEd25519 := (payload.Ed25519KeyID != "" || payload.Ed25519PrivPEM != "") && !p.isEd25519Degraded(host)
 
+	// 落ちている相手 / 間隔を空けるよう言われた相手へは送らず、試行回数を消費せずに
+	// 後へ回す (#3048)。**生成側 (fanout) では止めない** — ブレーカーの開閉は可変な
+	// 状態なので、生成側で止めると閉じたときに配送が復活しない。ジョブは作り、
+	// 取り出したときに判断する。Delete も同じ扱いにする (相手が落ちている間は、
+	// 迂回させても届かない)。
+	a := attempt{ctx: ctx, host: host}
+	if p.breaker != nil && host != "" {
+		r := p.breaker.Check(ctx, host, deliveryJobKey(t.Payload()))
+		if r.Decision == deliveryhealth.BreakerDelay {
+			slog.Debug("ap deliver: held back (breaker open or rate limited)", "host", host, "wait", r.Delay)
+			return fmt.Errorf("ap deliver: %s held back: %w", host, driver.Delay(r.Delay))
+		}
+		a.probeToken = r.ProbeToken
+		a.breakerState = r.HasState || r.Decision == deliveryhealth.BreakerProbe
+	}
+
 	// 配送レイテンシの起点 (#2461)。sendOnce の中で Ed25519->RSA の再送が起きた
 	// 場合も含めて「この job が相手にかけた時間」を測る。
-	started := time.Now()
+	a.started = time.Now()
 
 	resp, signedWithEd25519, err := p.sendOnce(payload, useEd25519)
 	if err != nil {
 		// network error / parse error は再投函。詳細は sendOnce 内で log 済。
 		p.recordError(payload.Inbox)
-		p.recordTelemetry(host, deliveryhealth.ClassTransport, 0, started, err.Error())
+		a.local = errors.Is(err, errLocalSend)
+		if hold, held := p.recordAttempt(a, deliveryhealth.ClassTransport, 0, err.Error()); held {
+			return fmt.Errorf("%w: %w", err, driver.Delay(hold))
+		}
 		return err
 	}
 	// closure 内の resp は defer 実行時の現在値を見る (= retry 後の resp も
@@ -520,7 +611,10 @@ func (p *DeliverProcessor) Handle(_ context.Context, t driver.Task) error {
 		retryResp, retrySignedWithEd25519, retryErr := p.sendOnce(payload, false)
 		if retryErr != nil {
 			p.recordError(payload.Inbox)
-			p.recordTelemetry(host, deliveryhealth.ClassTransport, 0, started, retryErr.Error())
+			a.local = errors.Is(retryErr, errLocalSend)
+			if hold, held := p.recordAttempt(a, deliveryhealth.ClassTransport, 0, retryErr.Error()); held {
+				return fmt.Errorf("%w: %w", retryErr, driver.Delay(hold))
+			}
 			return retryErr
 		}
 		resp = retryResp // defer は新 resp を Close する
@@ -531,7 +625,7 @@ func (p *DeliverProcessor) Handle(_ context.Context, t driver.Task) error {
 	switch {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		p.recordSuccess(payload.Inbox)
-		p.recordTelemetry(host, deliveryhealth.ClassSuccess, resp.StatusCode, started, "")
+		_, _ = p.recordAttempt(a, deliveryhealth.ClassSuccess, resp.StatusCode, "")
 		if signedWithEd25519 {
 			// Ed25519 で送って同期的に拒否されなかったことを記録する (#2393)。
 			// 「相手が検証できた」までは言えない (verify-in-worker な実装は検証前に
@@ -546,7 +640,7 @@ func (p *DeliverProcessor) Handle(_ context.Context, t driver.Task) error {
 		slog.Info("ap deliver: target gone",
 			"inbox", payload.Inbox, "status", resp.StatusCode)
 		p.recordSuccess(payload.Inbox)
-		p.recordTelemetry(host, deliveryhealth.ClassGone, resp.StatusCode, started, "")
+		_, _ = p.recordAttempt(a, deliveryhealth.ClassGone, resp.StatusCode, "")
 		// shared inbox が 410 Gone を返したらインスタンス全体が消滅したとみなし
 		// goneSuspended に切り替えて以後の配送を止める (upstream
 		// DeliverProcessorService の isSharedInbox && 410、#1811)。404 は個別 actor
@@ -563,7 +657,13 @@ func (p *DeliverProcessor) Handle(_ context.Context, t driver.Task) error {
 		slog.Warn("ap deliver: rate limited (429), will retry",
 			"inbox", payload.Inbox)
 		p.recordSuccess(payload.Inbox)
-		p.recordTelemetry(host, deliveryhealth.ClassRateLimited, resp.StatusCode, started, "")
+		_, _ = p.recordAttempt(a, deliveryhealth.ClassRateLimited, resp.StatusCode, "")
+		// ほかのジョブも同じホストへは間隔を空ける (#3048)。このジョブ自体は
+		// 今までどおり retry の回数を消費する (上限があるように)。戻ってきたときは
+		// 間隔の判定で待たされるので、Retry-After より早くは撃たない。
+		if p.breaker != nil && host != "" {
+			p.breaker.Throttle(ctx, host, parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()))
+		}
 		return fmt.Errorf("rate limited (429): %s", resp.Status)
 	case resp.StatusCode >= 400 && resp.StatusCode < 500:
 		// その他の4xxは受信側の不正リクエスト扱い。HTTP として応答が返って
@@ -571,14 +671,16 @@ func (p *DeliverProcessor) Handle(_ context.Context, t driver.Task) error {
 		slog.Warn("ap deliver: client error",
 			"inbox", payload.Inbox, "status", resp.StatusCode)
 		p.recordSuccess(payload.Inbox)
-		p.recordTelemetry(host, deliveryhealth.ClassClientError, resp.StatusCode, started, resp.Status)
+		_, _ = p.recordAttempt(a, deliveryhealth.ClassClientError, resp.StatusCode, resp.Status)
 		return fmt.Errorf("client error (%d): %w", resp.StatusCode, driver.ErrSkipRetry)
 	default:
 		// 5xx は受信側の一時的な障害。リトライさせる + 不調状態としてマーク。
 		slog.Warn("ap deliver: server error",
 			"inbox", payload.Inbox, "status", resp.StatusCode)
 		p.recordError(payload.Inbox)
-		p.recordTelemetry(host, deliveryhealth.ClassServerError, resp.StatusCode, started, resp.Status)
+		if hold, held := p.recordAttempt(a, deliveryhealth.ClassServerError, resp.StatusCode, resp.Status); held {
+			return fmt.Errorf("server error: %s: %w", resp.Status, driver.Delay(hold))
+		}
 		return errors.New("server error: " + resp.Status)
 	}
 }
@@ -618,9 +720,9 @@ func (p *DeliverProcessor) sendOnce(payload queue.DeliverPayload, useEd25519 boo
 		//
 		// 恒久的な失敗 (鍵が無い / PEM が壊れている) だけを ErrSkipRetry にする。
 		if isPermanentSigningKeyError(err) {
-			return nil, false, fmt.Errorf("parse private key: %w: %w", err, driver.ErrSkipRetry)
+			return nil, false, fmt.Errorf("parse private key: %w: %w: %w", err, errLocalSend, driver.ErrSkipRetry)
 		}
-		return nil, false, fmt.Errorf("load private key: %w", err)
+		return nil, false, fmt.Errorf("load private key: %w: %w", err, errLocalSend)
 	}
 	resp, perr := p.signer.PostSigned(payload.Inbox, payload.Body, key)
 	if perr != nil {
@@ -640,3 +742,40 @@ func (p *DeliverProcessor) sendOnce(payload queue.DeliverPayload, useEd25519 boo
 // `SetSuspendedChecker` は operator が `deliverSuspendedSoftware` を設定した
 // ときだけ配線されるので対象外。
 func (p *DeliverProcessor) HasDeliveryGate() bool { return p.deliveryGate != nil }
+
+// parseRetryAfter reads an HTTP Retry-After value (delay-seconds or an
+// HTTP-date). It returns 0 when the header is absent or unusable; the
+// breaker then applies its default.
+func parseRetryAfter(v string, now time.Time) time.Duration {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0
+	}
+	if secs, err := strconv.ParseInt(v, 10, 64); err == nil || errors.Is(err, strconv.ErrRange) {
+		// int64 に収まらない秒数は ParseInt が上限値と ErrRange を返す。数字としては
+		// 読めているので、捨てずに上限で受ける。
+		if secs <= 0 {
+			return 0
+		}
+		// 上限はブレーカー側 (ThrottleMax) で掛ける。ここで秒数を Duration に
+		// 直すときに溢れないよう、先に 1 日で頭打ちにする。
+		return time.Duration(min(secs, 24*60*60)) * time.Second
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		if d := t.Sub(now); d > 0 {
+			return d
+		}
+	}
+	return 0
+}
+
+// deliveryJobKey identifies a delivery across wake-ups so that a job held by
+// a 429 keeps its reserved send time.
+//
+// ジョブの ID は driver.Task に載っていないので payload から作る。同じ payload の
+// ジョブが 2 つあると予約を共有するが、先に起きた方が予約を消し、後の方は
+// 止めていなければそのまま送る (止めていれば並び直す) だけで、取りこぼしは無い。
+func deliveryJobKey(payload []byte) string {
+	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:16])
+}
