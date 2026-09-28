@@ -236,3 +236,43 @@ func TestAPFetcher_FetchHTML(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(body), "<link rel=\"icon\"")
 }
+
+// 疎通の診断 (#3055) 用の署名だけの取得は、401 / 403 でも署名なしへ落ちない。
+// 落ちると「こちらの署名が拒否されている」を診断できない。
+func TestAPFetcher_FetchObjectSignedOnly_NeverFallsBack(t *testing.T) {
+	var unsigned, signed int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Signature") == "" {
+			unsigned++
+			w.Header().Set("Content-Type", "application/activity+json")
+			_, _ = w.Write([]byte(`{"id":"x"}`))
+			return
+		}
+		signed++
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	f := NewAPFetcher(activitypub.NewClient(nil, "test"))
+	f.SetSigner(&stubSigner{key: genTestRSAKey(t)})
+	_, err := f.FetchObjectSignedOnly(srv.URL + "/users/alice")
+	var se *activitypub.StatusError
+	require.ErrorAs(t, err, &se)
+	assert.Equal(t, http.StatusUnauthorized, se.StatusCode)
+	assert.Equal(t, 1, signed)
+	assert.Zero(t, unsigned, "no unsigned retry")
+}
+
+func TestAPFetcher_FetchObjectSignedOnly_NoSigner(t *testing.T) {
+	f := NewAPFetcher(activitypub.NewClient(nil, "test"))
+	_, err := f.FetchObjectSignedOnly("https://remote.example/users/alice")
+	assert.ErrorIs(t, err, ErrNoSigner)
+
+	f.SetSigner(&stubSigner{err: ErrNoSigner})
+	_, err = f.FetchObjectSignedOnly("https://remote.example/users/alice")
+	assert.ErrorIs(t, err, ErrNoSigner)
+
+	f.SetSigner(&stubSigner{})
+	_, err = f.FetchObjectSignedOnly("https://remote.example/users/alice")
+	assert.ErrorIs(t, err, ErrNoSigner, "a nil key is treated as no signer")
+}

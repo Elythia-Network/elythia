@@ -433,6 +433,10 @@ type FederationHostSets struct {
 	// SuspendedSoftware は meta.deliverSuspendedSoftware をパースしたもの。
 	// federation/instances 等の softwareSuspended 表示判定に使う (#1732)。
 	SuspendedSoftware []model.SuspendedSoftwareEntry
+	// Federation / FederationHosts は連合モード (`all` / `none` / `specified`) と
+	// `specified` のときの許可リスト。疎通の診断 (#3055) が IsAllowed と同じ判定に使う。
+	Federation      string
+	FederationHosts []string
 }
 
 // FederationHostLists returns the blocked / silenced / media-silenced host
@@ -460,6 +464,8 @@ func (s *Service) FederationHostLists() (FederationHostSets, error) {
 		Silenced:          meta.SilencedHosts,
 		MediaSilenced:     meta.MediaSilencedHosts,
 		SuspendedSoftware: suspended,
+		Federation:        meta.Federation,
+		FederationHosts:   meta.FederationHosts,
 	}, nil
 }
 

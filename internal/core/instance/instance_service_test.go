@@ -407,8 +407,12 @@ func TestService_FederationHostLists(t *testing.T) {
 	metaRepo.Meta.BlockedHosts = model.StringArray{"bad.example"}
 	metaRepo.Meta.SilencedHosts = model.StringArray{"quiet.example"}
 	metaRepo.Meta.MediaSilencedHosts = model.StringArray{"media.example"}
+	metaRepo.Meta.Federation = "specified"
+	metaRepo.Meta.FederationHosts = model.StringArray{"friend.example"}
 	hosts, err := svc.FederationHostLists()
 	require.NoError(t, err)
+	assert.Equal(t, "specified", hosts.Federation)
+	assert.Equal(t, []string{"friend.example"}, []string(hosts.FederationHosts))
 	assert.Equal(t, []string{"bad.example"}, []string(hosts.Blocked))
 	assert.Equal(t, []string{"quiet.example"}, []string(hosts.Silenced))
 	assert.Equal(t, []string{"media.example"}, []string(hosts.MediaSilenced))

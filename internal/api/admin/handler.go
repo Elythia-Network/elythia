@@ -217,6 +217,10 @@ type Handler struct {
 	signupApplications SignupApplicationReviewer
 	// selfCheck は admin/self-check の実行元 (#2463)。未配線なら空の結果を返す。
 	selfCheck SelfCheckRunner
+	// remoteCheck は admin/federation/check-host の実行元 (#3055)。
+	// remoteCheckSelfHost は自ホスト (断る)。
+	remoteCheck         RemoteChecker
+	remoteCheckSelfHost string
 	// userTokenInvalidator は admin が他 user を suspend / unsuspend /
 	// 論理削除した直後に target user の全 tokenCache entry を即時失効する
 	// ために使う (#965)。i/regenerate-token (#884) や i/update (#960) と
