@@ -351,6 +351,45 @@ func TestServer_HandleSkipRetryConvertsToUnrecoverable(t *testing.T) {
 	}, 5*time.Second, 50*time.Millisecond, "expected job to land in failed bucket")
 }
 
+// driver.Delay は実際の mkq を通しても試行回数を消費しない (#3048)。retry の枠が
+// 1 回しか無い (MaxRetry 0) job でも、遅延を何度返しても失敗にならず、最後に
+// 処理されて完了する。変換 (nativeError) が抜けると、1 回目の遅延で failed に
+// 落ちる。
+func TestServer_HandleDelayDoesNotConsumeAttempts(t *testing.T) {
+	d := newDriver(t)
+	srv := d.Server()
+	var runs atomic.Int64
+	done := make(chan struct{})
+	srv.Handle("test:delay", func(_ context.Context, _ driver.Task) error {
+		if runs.Add(1) <= 3 {
+			return fmt.Errorf("held back: %w", driver.Delay(20*time.Millisecond))
+		}
+		close(done)
+		return nil
+	})
+	require.NoError(t, srv.Start())
+	t.Cleanup(srv.Shutdown)
+
+	require.NoError(t, d.Client().Enqueue(context.Background(), "test:delay", nil,
+		driver.WithQueue("deliver"), driver.WithMaxRetry(0)))
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("job did not come back after its delays (ran %d times)", runs.Load())
+	}
+	require.Eventually(t, func() bool {
+		info, err := d.Inspector().GetQueueInfo("deliver")
+		return err == nil && info.Completed >= 1 && info.Failed == 0
+	}, 5*time.Second, 50*time.Millisecond, "the job must complete, not fail")
+
+	ctx := context.Background()
+	idStr, err := testRedis.Client.Get(ctx, "bull:deliver:id").Result()
+	require.NoError(t, err)
+	// 完了時に BullMQ は最後の試行を 1 回と数える。遅延も数えていれば 4 になる。
+	atm, _ := testRedis.Client.HGet(ctx, "bull:deliver:"+idStr, "atm").Result()
+	assert.Equal(t, "1", atm, "only the run that completed counts as an attempt")
+}
+
 // TestServer_HandleNoRegisteredHandler verifies an unknown job name
 // surfaces as a permanent failure (no infinite retry loop).
 func TestServer_HandleNoRegisteredHandler(t *testing.T) {

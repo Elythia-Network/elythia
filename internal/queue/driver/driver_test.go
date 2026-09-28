@@ -3,6 +3,7 @@ package driver
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -111,5 +112,16 @@ func TestApplyEnqueueOptions_AgeOptions(t *testing.T) {
 	}
 	if got.KeepFailedAge != 3*24*time.Hour {
 		t.Fatalf("KeepFailedAge: got %v", got.KeepFailedAge)
+	}
+}
+
+func TestDelay(t *testing.T) {
+	err := fmt.Errorf("held: %w", Delay(3*time.Second))
+	var d *DelayError
+	if !errors.As(err, &d) || d.Delay != 3*time.Second {
+		t.Fatalf("Delay must unwrap to *DelayError(3s), got %v", err)
+	}
+	if !strings.Contains(err.Error(), "3s") {
+		t.Fatalf("message should carry the delay, got %q", err.Error())
 	}
 }

@@ -1,6 +1,10 @@
 package driver
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+	"time"
+)
 
 // ErrSkipRetry is a sentinel returned by a HandlerFunc to tell the driver
 // the job must not be retried even if attempts remain. Drivers map
@@ -10,6 +14,26 @@ import "errors"
 // so callers can both inspect the underlying cause and observe the skip
 // signal via errors.Is.
 var ErrSkipRetry = errors.New("queue driver: skip retry")
+
+// DelayError is returned (or wrapped) by a HandlerFunc to put the job
+// back for Delay without consuming an attempt. Drivers map it to their
+// native delay (mkq.Delay, i.e. BullMQ's DelayedError).
+//
+// 「今は送るべきでない」ときに使う (配送先が落ちていると分かっている、しばらく
+// 待つよう言われた、など)。普通のエラーで返すと retry の枠を待つだけで使い切り、
+// 相手が戻る前にジョブが捨てられる (#3048)。
+type DelayError struct {
+	Delay time.Duration
+}
+
+func (e *DelayError) Error() string {
+	return fmt.Sprintf("queue driver: delayed for %s", e.Delay)
+}
+
+// Delay returns a *DelayError for d. See DelayError.
+func Delay(d time.Duration) error {
+	return &DelayError{Delay: d}
+}
 
 // ErrResizeNotSupported is returned by Driver.Resize when the driver has
 // no worker pool object to resize at all.
