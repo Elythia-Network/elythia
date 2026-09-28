@@ -40,10 +40,12 @@ type MetadataFetcher interface {
 // for any code that needs to know whether a host is blocked / silenced /
 // suspended, and for refreshing the cached metadata after a fetch.
 type Service struct {
-	repo            repository.InstanceRepository
-	metaRepo        repository.MetaRepository
-	idGen           id.Generator
-	clock           func() time.Time
+	repo     repository.InstanceRepository
+	metaRepo repository.MetaRepository
+	idGen    id.Generator
+	clock    func() time.Time
+	// goneRecorder は goneSuspended になった時刻の記録先 (#3067)。nil なら記録しない。
+	goneRecorder    GoneRecorder
 	metadataFetcher MetadataFetcher
 
 	// mu は suspendCache / requestReceivedCache / lastMetaWarn を保護する。
@@ -365,9 +367,33 @@ func (s *Service) MarkGoneSuspended(host string) error {
 		inst.SuspensionState == model.SuspensionStateManuallySuspended {
 		return nil
 	}
-	return s.repo.UpdateFields(host, map[string]any{
+	if err := s.repo.UpdateFields(host, map[string]any{
 		"suspensionState": string(model.SuspensionStateGoneSuspended),
-	})
+	}); err != nil {
+		return err
+	}
+	// 判定のキャッシュを捨てる。残すと cacheTTL の間、消えた相手へ配送が続く
+	// (管理画面からの停止と同じ扱い)。
+	s.InvalidateSuspendCache(host)
+	// 停止した時刻を残す (#3067)。消えたインスタンスとのフォロー関係を片付ける
+	// 候補を「いつから消えているか」で並べるため。記録に失敗しても停止そのものは
+	// 成立しているので、止めずにログだけ残す (経過日数が不明と表示されるだけ)。
+	if s.goneRecorder != nil {
+		if err := s.goneRecorder.RecordGone(host, s.clock()); err != nil {
+			slog.Warn("instance: record gone suspension failed", "host", host, "err", err)
+		}
+	}
+	return nil
+}
+
+// GoneRecorder stores when an instance became goneSuspended (#3067).
+type GoneRecorder interface {
+	RecordGone(host string, at time.Time) error
+}
+
+// SetGoneRecorder wires where MarkGoneSuspended records the time.
+func (s *Service) SetGoneRecorder(r GoneRecorder) {
+	s.goneRecorder = r
 }
 
 // IsBlocked reports whether the host matches an entry in meta.blockedHosts.

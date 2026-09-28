@@ -58,6 +58,7 @@ func TestLogTypeValues(t *testing.T) {
 		// moderation_log.type に入り frontend の locale 引きにも使われるので、
 		// 変えると過去のログの見出しが空欄になる。
 		{LogResetEmojiApplicationQuota, "resetEmojiApplicationQuota"},
+		{LogCleanGoneInstance, "cleanGoneInstance"},
 	}
 	for _, tc := range cases {
 		if string(tc.got) != tc.want {

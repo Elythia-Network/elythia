@@ -452,7 +452,7 @@ func (s *Service) Follow(followerID, followeeID string, opts FollowOptions) (*Fo
 
 // Unfollow removes a following relationship from follower to followee.
 func (s *Service) Unfollow(followerID, followeeID string) error {
-	return s.unfollow(followerID, followeeID, true)
+	return s.unfollow(followerID, followeeID, unfollowOpts{deliver: true, notify: true})
 }
 
 // UnfollowSilent removes the following without delivering an Undo(Follow) to a
@@ -462,10 +462,31 @@ func (s *Service) Unfollow(followerID, followeeID string) error {
 // so that receiving a Reject does not bounce a spurious Undo(Follow) back to the
 // rejecter. The normal Unfollow path still federates.
 func (s *Service) UnfollowSilent(followerID, followeeID string) error {
-	return s.unfollow(followerID, followeeID, false)
+	return s.unfollow(followerID, followeeID, unfollowOpts{deliver: false, notify: true})
 }
 
-func (s *Service) unfollow(followerID, followeeID string, deliver bool) error {
+// UnfollowQuiet removes the following without any AP delivery, main-stream
+// event or user webhook. Counts and charts are still updated.
+//
+// 消えたインスタンスとのフォロー関係の片付け (#3067) 用。管理者の操作で何百件も
+// 解除するので、利用者の webhook へ「フォロー解除」を 1 件ずつ飛ばさない
+// (upstream の UserFollowingService.unfollow の silent=true も webhook と main
+// stream の publish を止める)。**配送も止める点は upstream の silent と違う** —
+// あちらは silent でも Undo / Reject を配送するが、片付けの相手はもう存在しない
+// ので送っても届かない。
+func (s *Service) UnfollowQuiet(followerID, followeeID string) error {
+	return s.unfollow(followerID, followeeID, unfollowOpts{})
+}
+
+// unfollowOpts selects the side effects of unfollow.
+type unfollowOpts struct {
+	// deliver は相手へ Undo(Follow) / Reject を配送するか。
+	deliver bool
+	// notify は main stream の unfollow と利用者の webhook を出すか。
+	notify bool
+}
+
+func (s *Service) unfollow(followerID, followeeID string, opts unfollowOpts) error {
 	if followerID == followeeID {
 		return ErrSelfFollow
 	}
@@ -508,20 +529,20 @@ func (s *Service) unfollow(followerID, followeeID string, deliver bool) error {
 			// #2106 N11: deliver=false (inbound Reject 処理) では Undo(Follow) を
 			// rejecter へ逆配送しない。chart / webhook / main stream は upstream
 			// remoteReject も publishUnfollow するので維持する。
-			if deliver && s.federationHook != nil {
+			if opts.deliver && s.federationHook != nil {
 				s.federationHook.OnLocalUnfollowed(follower, followee)
 			}
 			if s.chartHook != nil {
 				s.chartHook.OnUnfollow(follower, followee)
 			}
-			if s.webhookHook != nil {
+			if opts.notify && s.webhookHook != nil {
 				s.webhookHook.OnUnfollow(follower, followee)
 			}
 			// TS本家は自分が unfollow した相手を main に publish する
 			// (フォローボタン等の即時反映)。follow event と同様、UserDetailed
 			// shapeでisFollowing=false / hasPendingFollowRequestFromYou=falseを
 			// 明示的に埋める (frontendはこれらを直接代入するのでundefined不可)。
-			if s.mainStreamPublisher != nil {
+			if opts.notify && s.mainStreamPublisher != nil {
 				s.mainStreamPublisher.PublishMainEvent(followerID, "unfollow", entity.PackUserForFollowStreamEvent(followee, false, false, s.idGen))
 			}
 		}
