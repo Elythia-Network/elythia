@@ -10,7 +10,7 @@ mk-go が持つ「純正 Misskey (misskey-dev/misskey) には無い、または�
 > Misskey TS は 1.0.0 時点と同じ `2026.7.0` のままだった。**2026.9.0 への追従 (#2877) で
 > ベースラインを `2026.9.0` へ更新し、2026.9.1 への追従 (#3176) で `2026.9.1` へ上げた。**
 > 個々の記述はまだ 2026.7.0 時点の観察に基づくものが
-> 混じりうるので、乖離を判断するときは対象の実装を現 pin (`2026.9.1-mk.13`) で確認すること。
+> 混じりうるので、乖離を判断するときは対象の実装を現 pin (`2026.9.1-mk.14`) で確認すること。
 
 ## このドキュメントの位置づけ
 
@@ -32,13 +32,13 @@ mk-go は drop-in 互換 (同じ DB / Redis / frontend を Misskey TS と共有�
 
 | 軸 | mk-go 独自 | cherrypick 由来 | 未実装 |
 |---|---|---|---|
-| API endpoint | GET variant 23 + alias 4 + 分割アップロード 4 + 承認制 7 + 絵文字の申請 10 + exact assignment lookup 2 + admin 観測 7 + 配送のブレーカー 1 + 消えたインスタンスの片付け 2 + IP 検索 3 | chat 15 | **0** |
+| API endpoint | GET variant 23 + alias 4 + 分割アップロード 4 + 承認制 7 + 絵文字の申請 10 + exact assignment lookup 2 + admin 観測 7 + 配送のブレーカー 1 + 消えたインスタンスの片付け 2 + 連合のルール 5 + IP 検索 3 | chat 15 | **0** |
 | API レスポンスの additive field | 8 (`runtime` / `mkGoVersion` / `chunkedUpload` / `approvalRequiredForSignup` / `registrationClosed` / `signupApplicationForm` / `canRequestCustomEmojis` / `minimumUsernameLength`) | reversi packed game の `crc32` 等 | — |
-| DB テーブル | 15 (+ bookkeeping 2) | 0 | 0 |
+| DB テーブル | 16 (+ bookkeeping 2) | 0 | 0 |
 | DB カラム | 23 (+ 未使用の残存列 3) | 3 | 0 |
 | ActivityPub | Ed25519 / RemoteStatsFetcher ほか | reversi 連合 / chat 連合 | — |
 | config キー | 20 前後 | 0 | — |
-| fork frontend の独自変更 | 131 tag (`2026.7.0-mk.0` ～ `2026.9.1-mk.13`) | — | — |
+| fork frontend の独自変更 | 132 tag (`2026.7.0-mk.0` ～ `2026.9.1-mk.14`) | — | — |
 
 **upstream endpoint の未実装はゼロ** (coverage 100.0%、444/444)。DB schema も upstream の全テーブル・全共有カラムを superset で保持しており、逆方向の欠落は無い。
 
@@ -48,7 +48,7 @@ mk-go は drop-in 互換 (同じ DB / Redis / frontend を Misskey TS と共有�
 
 upstream の endpoint は `endpoints/` 配下 438 件 + `ApiServerService.ts` の fastify 直登録 6 件 (POST 5 / GET 1) = **444 件**。うち **444 件すべてを実装済み (coverage 100.0%)**。
 
-### 1-1. mk-go にしかない (78)
+### 1-1. mk-go にしかない (83)
 
 | 分類 | 件数 | 内容 |
 |---|---|---|
@@ -64,6 +64,7 @@ upstream の endpoint は `endpoints/` 配下 438 件 + `ApiServerService.ts` �
 | admin の観測系 | 7 | `admin/server-plugins` (組み込みプラグインの一覧、`read:admin:meta`)、`admin/server-metrics` / `admin/self-check` / `admin/federation/delivery-health` / `admin/federation/inbox-health` / `admin/federation/check-host` (いずれも `read:admin:server-info`)、`admin/drive/usage` (`read:admin:drive`、#3053)。upstream に対応物が無い。**mk-go は連合の配送 / 受信の健全性を Redis に host 単位で記録している** (`internal/core/deliveryhealth`) ので、それを admin 画面から読むための endpoint。Redis 上のカウンタなので flush で消え、drop-in の引き継ぎ対象でもない。**`admin/drive/usage` だけは出所が違い、DB の `drive_file` を都度集計する** (詳細は §5 の表)。**`admin/federation/check-host` も記録を読むのではなく、指定したホストへ能動的に接続して検査する** (詳細は §2 の表)。scope も観測系で共有している `read:admin:server-info` ではなく `read:admin:drive` を使う — 利用者別の内訳を返すので、既存の `admin/drive/files` と同じ管轄に置くのが自然 |
 | 配送のブレーカー | 1 | `admin/federation/close-delivery-breaker` (#3048、`write:admin:federation`)。落ちた配送先へのブレーカー (§5) を手で閉じる (429 の停止と予約も消す)。upstream にはブレーカーが無いため対応物が無い。止めている相手の一覧は `admin/federation/delivery-health` の `breakers` に出す |
 | 消えたインスタンスの片付け | 2 | `admin/federation/gone-instances` (`read:admin:server-info`) / `admin/federation/clean-gone-instance` (`write:admin:federation`) (#3067)。shared inbox が 410 を返して goneSuspended になったインスタンスとの間に残ったフォロー関係を、管理者が候補を見て片付ける。**自動では消さない** — 取り返しがつかない (誤りだったら相手の利用者全員が再フォローするしかない) ので、候補 (停止した時刻、両方向のフォロー、フォローリクエストの件数) を出して管理者が実行する。実行時に状態を読み直し、goneSuspended でなければ `INSTANCE_NOT_GONE` で断る (戻した後・手動停止は対象外)。**upstream の `remove-all-following` と違い、ローカルの利用者のフォローも消す** (相手はもう存在しないので意味の無い行になる)。**配送も利用者への通知もしない** — 相手へ Undo / Reject を送っても届かず、利用者の webhook と main stream の `unfollow` も出さない (upstream の `remove-all-following` が使う `silent` と同じ。管理者の操作で何百件も解除するので 1 件ずつ飛ばさない)。フォロー数・インスタンスの集計・チャートは通常の解除と同じく更新する。1 回で 1000 件までで、残りは件数で返す。**片付けの途中でも 100 件ごとと、フォローリクエストを消す前に状態を読み直す** (途中で戻されたら残りは消さない)。同じホストの片付けは並行させない (`CLEANUP_IN_PROGRESS`。2 つが同じ行を引くとフォロー数が二重に減る。プロセス内の排他なので別ノードからの同時実行までは防がない)。監査ログに mk-go 独自の型 `cleanGoneInstance` で host と件数を残す (途中で止まっても消した分は `failed` を付けて残し、数えていない `remaining` は書かない)。**利用者向けに理由を知らせる通知は作っていない** (本番の実測で対象は 12 行・利用者数人。必要になったら別に扱う) |
+| 連合のルール | 5 | `admin/federation/rules/list` / `hits` (モデレーター、`read:admin:meta`) / `create` / `update` / `delete` (管理者、`write:admin:meta`) (#3090)。受信した activity / 投稿に条件と動作の組を適用する (§3-5)。upstream のホスト単位の設定 (`blockedHosts` など) では表現できない判断を足す口で、対応物は無い。変更を管理者に限るのは、`blockedHosts` (`update-meta` は管理者のみ) と同じく受信を丸ごと止められる設定だから |
 | その他 / alias | 4 | `i/flashs` / `i/flashs/likes` (upstream の `flash/my` / `flash/my-likes` に対する mk-go 側の path alias。両者とも mk-go に実装済み)、`signin` (upstream が `signin-flow` に統合した旧 path の backward-compat shim。**`signin-flow` と同じ captcha 検証と 2FA challenge を通す** — 片方だけ緩いと、運営者が captcha を有効にしてもこちらが素通りする)、`admin/emoji/fetch-remote-meta` (リモート絵文字のインポート時に、AP では運ばれないカテゴリ・エイリアス・センシティブを相手の REST API から取る。#2698) |
 
 ランダムマッチ (`reversi/match` の `userId` 無し) は **local user 同士のみ**。待機列 (`reversi:matchAny`) に載るのはこのインスタンスで認証を通した local user だけなので、相手がリモートになることはない。upstream Misskey も yojo-art/cherrypick も**連合ランダムマッチは持っていない**ので意図的に揃えている。名指しの招待 (`userId` 指定) は従来どおり連合する。
@@ -133,7 +134,7 @@ upstream 由来のクライアントはそのまま通る (省略時は upstream
 
 **逆方向の欠落はゼロ** — upstream の `@Entity` 76 テーブルと全共有カラムを mk-go が superset で保持している。
 
-### 2-1. mk-go 独自テーブル (17)
+### 2-1. mk-go 独自テーブル (18)
 
 | テーブル | 由来 | 理由 |
 |---|---|---|
@@ -150,6 +151,7 @@ upstream 由来のクライアントはそのまま通る (省略時は upstream
 | `instance_secret` | mk-go 独自 | インスタンスごとに生成する秘密値。最初の用途は media proxy の HMAC 鍵。以前は設定に `mediaProxySecret` が無いとインスタンス URL から導出していたが、**URL は公開情報なので誰でも同じ鍵を計算でき署名を偽造できた**。鍵はプロセス間・再起動をまたいで安定している必要があるので (署名した URL を別プロセスが検証する / 発行済み URL が再起動後も有効)、起動時のメモリ生成では足りず DB に置く |
 | `instance_signature_capability` | mk-go 独自 | リモートインスタンスがどの署名方式に対応しているかを host 単位で記録する。判定材料は宣言 (actor の `assertionMethod[]`) / 受信観測 / 送信結果の 3 系統で、それぞれ単独では穴があるので併記する |
 | `instance_gone_suspension` | mk-go 独自 | shared inbox が 410 を返して goneSuspended になった時刻を host 単位で記録する (#3067)。消えたインスタンスとのフォロー関係を片付ける候補を「いつから消えているか」で並べるための起点。`instance` に停止した時刻の列が無く、共有テーブルに列を足すと TS へ戻したときに形が変わるので別テーブルにした。**行があっても今も消えているとは限らない** (管理者が戻した後も残る) ので、読む側は `instance."suspensionState"` で絞る。TS が立てた goneSuspended には行が無い (時刻は不明として表示する) |
+| `federation_rule` | mk-go 独自 | 連合のルール (#3090、§3-5)。ホスト単位の設定 (`meta` の `blockedHosts` など) に**追加の層として**重ねるもので、置き換えない。TS へ戻すとこのテーブルは読まれず**ルールだけが効かなくなる** (ホスト単位の設定は `meta` にあるので残る)。当たった件数と記録は Redis (`apFederationRule:*`) にだけ置く |
 | `ip_lookup_log` | mk-go 独自 | IP とアカウントの対応を**誰がいつ引いたか**の記録 (#3106)。`admin/ip/*` は upstream に無い口 (#3104 / #3105) なので、その監査も upstream には無い。**`moderation_log` に入れない** — あちらは保持期間を持たず永久に残るのに、この記録に入るのは**照会に使った IP そのもの**で、IP とアカウントの対応と同じだけ機密性がある。`moderation_log` 全体に保持期間を入れると無関係な記録まで消えるので、専用テーブルを分けて 90 日で刈る (`user_ip` と同じ長さだが理由は別で、定数も別)。**結果そのものは記録しない** — 残すのは件数だけで、候補に出たアカウントや一致した IP は書かない (書くとこの表が第 2 の「IP とアカウントの対応」になる)。`user` への FK は張らない — 照会した人を消しても記録は残るのが監査として正しい (`signup_application` と同じ方針)。**純正へは還元できない行** (照会という機能自体が upstream に無い)。 |
 | `note_unread` | 準・独自 | upstream DB にも legacy 遺物として残るが 2026.7.0 の `models/` に entity は無く参照 0 件。mk-go はこれを実用し `/api/i` の `hasUnreadSpecifiedNotes` / `hasUnreadMentions` を Redis stream を舐めずに解決する。upstream legacy 版にある `noteChannelId` は mk-go の定義に無い (TS 製 DB では `CREATE TABLE IF NOT EXISTS` が no-op なので実害なし) |
 | `migrations` | drop-in 互換 | TypeORM の bookkeeping。mk-go 由来 DB に TS を後から繋いだ時に migration を再実行させないための seed。name は本家と同じ `ClassName+timestamp` 形式で 346 件を保持する (#2244 で短縮形から是正)。漏れは `TestMigrationSeed_CoversUpstream` が CI で検出する |
@@ -409,7 +411,82 @@ e2e は `make dropin-fedibird-test` (Fedibird-like mock との双方向 Ed25519 
 | リモート actor の `vcard:bday` / `vcard:Address` が string でないとき | `activitypub/types.go` | **upstream より緩い** (#2662)。upstream は TS の型が `string` なだけで実行時検証が無く、`vcard:bday` は `.match()` が TypeError になり、`vcard:Address` は非 string がそのまま `location` に代入される。mk-go は document を通す。**JSON-LD の展開形 (`{"@value": ...}` / `["x"]` / `[{"@value": "x"}]`) は剥がして値を拾い**、それでも読めない形は捨てる (表示用の付加情報でしかないため) |
 | AP dereference route の一部欠落 | `server/router.go` | **保留** (#2507)。`/follows/<follower>/<id>` (Follow activity id)・`/users/<id>/likes/<id>` (Like id)・`/emojis/<name>` (emoji tag id) は外向きに広告するが dereference route が無く 404。Follow / Like の id は Accept / Undo の相関にしか使われず他実装が dereference する事例は稀、emoji は tag に inline embed 済みで dereference 不要のため。`<note URI>/activity` は #2507 で実装済み。signature の keyId (`/users/<id>#main-key`) は actor 本体の fragment なので actor route で解決され、upstream の `/users/:user/publickey` 相当は不要 |
 | 通報 (Flag) の comment 書式 | `core/federation/processor.go` | **意図的**。upstream は `` `${content}\n${JSON.stringify(uris, null, 2)}` `` (2 space の pretty print、`ApInboxService.ts:576`) だが mk-go は compact。`abuse_user_report.comment` の本文だけの差で、既存の通報との一貫性を優先して揃えていない (#2665) |
+| 連合のルール | `core/fedrule` / `core/federation/rules.go` | **mk-go 独自** (#3090)。詳細は §3-5 |
 | 1:1 配送の inbox の選び方 | `core/federation/deliver_service.go` | **経路で使い分ける**。upstream は「フォロワーの inbox 集合を先に作り、direct recipient の `sharedInbox` が既にその中にあれば skip、無ければ個別 inbox」という 1 本の手順 (`ApDeliverManagerService.execute`)。mk-go は direct を先に送ってフォロワー側から exclude する構成なので、**フォロワー配信と重ねる経路 (`reaction` / `note delete` の hook) は `sharedInbox` を使う** — 個別 inbox にすると exclude (URL の完全一致) が効かず同じ activity が 2 通届き、逆に exclude 側へ `sharedInbox` を足すと**そのインスタンスの他のフォロワー全員に届かなくなる** (sharedInbox は 1 エントリで全員を表すため)。**1:1 だけで完結する経路 (`DeliverToUser`、specified なアンケートの Update) は個別 inbox**を使う (upstream の direct recipe と同じ)。個別 inbox を持たない行は `sharedInbox` へ倒す — upstream は `if (recipe.to.inbox === null) continue;` で skip するが、送れるなら送る方が利用者の意図に近い。そのときだけ `IsSharedInbox` が立つので、410 Gone が host 単位の gone 判定 (`MarkGoneSuspended`) へ届きうる |
+
+
+### 3-5. 連合のルール (mk-go 独自)
+
+**ホスト単位の設定より細かく、プラグイン (#3071) より宣言的な中間層** (#3090)。
+Akkoma / Pleroma の MRF と同じ考え方で、受信したものに「条件と動作の組」を適用する。
+upstream には対応物が無い。
+
+- **2 種類ある。** `note` のルールは投稿の中身まで見て、拒否 / メディアを落とす /
+  CW を付ける / 添付をセンシティブにする / タイムラインから外す、ができる。
+  `activity` のルールは受信した activity を種別 (`Follow` / `Like` など) で見て、
+  拒否だけができる (中身がまだ分からない段階なので書き換えは持てない)
+- **条件**: 送信元ホスト (`blockedHosts` と同じ後方一致)、bot か、初めて見てから
+  N 時間以内か、本文 / CW / 投票の選択肢のパターン (`prohibitedWords` と同じ書式)、添付の有無、
+  タグ (`note.tags` と同じ正規化)。指定した条件はすべて満たす必要があり (AND)、
+  配列の中はどれかに当たればよい (OR)。**条件の無い `note` のルールは作れない**
+  (全投稿に当たるルールは書きかけの事故で、拒否にすると連合が丸ごと止まるため)
+- **どこで効くか。** `activity` のルールは `dispatchActivity` の入口 = inbox の
+  **署名検証の後**で評価する (Collection の中身は 1 件ずつ)。`note` のルールは
+  投稿を取り込む全経路 (inbox の Create、Announce 先・返信先・引用先の取得、
+  リレー) と、リモートの編集 (Update) の取り込みで評価する。編集にも掛けないと、
+  当たらない投稿を作ってから差し替えるだけで素通りできる
+- **mode が 3 つある。** `disabled` は評価しない。`record` は当たった記録だけを
+  残して何もしない。`enforce` で初めて効く。**いきなり効かせると誤爆に気付けない**
+  ので、record で当たり具合 (直近 24 時間の件数と、直近 50 件の対象) を見てから
+  enforce にする運用を想定している。条件を変えると記録は捨てる (ただし変更の直前に
+  評価されて書き込み待ちだった分は後から残りうる。捨てるのは best-effort)
+- **合成**: 拒否が最優先。それ以外は当たった `enforce` のルールの動作をすべて
+  合わせる。CW の文言は評価順 (`position` → `id`) で最初に当たったルールのもの
+- **拒否は ack して捨てる** (禁止語と同じ。retry させない)。inbox の健全性
+  (`admin/federation/inbox-health`) では受理として数える — 拒否した件数はルールの
+  側の記録で見る
+- **CW は送信者のものを上書きしない。** 空の CW (sensitive だけの投稿) には文言を
+  補う。ルールの CW から hashtag は拾わない (tag を抜いた後に付ける)
+- **リモートの編集では、受け取った Update の `summary` を CW の正とする。** 無ければ
+  CW は外れたものとして扱い、ルールが当たれば付け直す。以前は `summary` の無い
+  Update を「CW は変えない」として保存済みの値を残していたが、保存済みの CW には
+  ルールの文言も入るので、それが送信者の CW として tag に拾われ、パターンや禁止語の
+  判定にも混ざった。この変更で、**ルールと関係なく、相手が編集で CW を外したときに
+  こちらでも外れる**ようになった (upstream は投稿の編集を取り込まないので、互換性の
+  差は生じない)。本文は従来どおり「無ければ変えない」で、CW とは扱いが違う
+  (本文の無い Update は投稿として成り立たないので、空の本文で消すと壊れた Update で
+  本文が失われる。CW が無いのは普通の状態)
+- **「タイムラインから外す」は silence と同じ形** (保存時に public → home)。
+  既に配った後の編集で当たった場合も visibility は書き換えるが、配り済みの
+  タイムラインからは消えない
+- **「センシティブにする」は添付の `drive_file` 行に立てる。** 同じ URL の添付は
+  行を再利用するので、その投稿者が同じ画像を添付した他の投稿でもセンシティブに
+  なる。**書き換えるのは投稿者自身の行だけ** — 再利用は持ち主を見ないので、他人の
+  添付の URL を指す投稿を送るだけで他人のファイルを書き換えられてしまう。
+  書き換えられない添付が残ったときは、**投稿ごと空の CW で畳む** (そのままだと
+  他人の URL を指すだけで「センシティブにする」をすり抜けられる)
+- **タグの条件は `note.tags` の 32 個の上限で打ち切らずに見る** (打ち切ると、tag
+  配列を詰め物で埋めて本文のタグを押し出すだけですり抜けられる)
+- **編集では「初めて見てから N 時間以内」を投稿した時刻で測る。** 評価した時刻で
+  測ると、新規のうちに投稿して時間が経ってから編集するだけで条件から外れ、ルールの
+  CW が外れる。ただし投稿の時刻 (AP の `published`) が actor を初めて見た時刻より
+  前なら (後から取りに行った古い投稿)、評価した時刻で測る
+- **ブーストはルールの対象外。** Announce は投稿ではないので、`note` のルールは
+  ブーストされた投稿のほうにだけ効く (ブーストした人には効かない。silence と同じ)。
+  特定のサーバーのブーストを止めたいときは `activity` のルールで `Announce` を拒否する
+- 投票 (poll への回答として届く Note) も投稿として評価する
+- **評価のコスト。** ルールはプロセスごとにスナップショットとして持ち、受信の
+  たびに DB を読まない (変更は `internal:federationRulesUpdated` で全プロセスへ
+  伝え、届かなくても 5 分で読み直す)。パターンは読み込み時にコンパイルし、Go の
+  regexp は線形時間なので壊滅的なバックトラックは起きない。ルールは 100 件、
+  パターンは 1 件 1024 文字までに制限している。当たった記録は channel へ積むだけで、
+  溢れたら捨てる (件数は下限になる) — 記録のために受信を止めない
+- **読み直しに失敗したら前のルールを使い続ける。** 空にすると DB の瞬断で拒否して
+  いたものが全部通る
+- **TS へ戻したとき**: `federation_rule` は読まれないので、ルールは効かなくなる。
+  ホスト単位の設定 (`meta`) は残る。ルールで拒否した投稿は取り込まれていない
+  ままで、書き換えた投稿は書き換えた形のまま残る
+- 送信側には適用しない
 
 ---
 
@@ -468,7 +545,7 @@ submodule bump の PR で人が見る。
 
 **還元できるものを一時的に置く場合は、その行に必ず明記する。** 純正にも同じ不具合があるものをここへ置くと、この表を「還元不能な差分の一覧」として読む運用 (upstream 追従時に残す / 落とすを判断する材料) が壊れる。純正へ取り込まれた時点で revert する対象なので、行を読んだだけでそれが分かる必要がある。現時点の該当は `2026.7.0-mk.22h` / `2026.7.0-mk.22i` / `2026.7.0-mk.22j` / `2026.9.0-mk.1` / `2026.9.0-mk.2` / `2026.9.0-mk.2a` / `2026.9.0-mk.8e` / `2026.9.0-mk.8f` / `2026.9.0-mk.15` / `2026.9.0-mk.15a` / `2026.9.0-mk.15b` / `2026.9.0-mk.15c` / `2026.9.0-mk.16` / `2026.9.0-mk.16a` / `2026.9.0-mk.16b` / `2026.9.1-mk.5` の 16 行 (**base を省略しない** — bump で `-mk.N` は 0 に戻るので省略形は曖昧になる)。
 
-**現在の pin は `2026.9.1-mk.13` (`4296c444`)。** `2026.9.0-mk.*` の行はすべて 2026.9.1 への
+**現在の pin は `2026.9.1-mk.14` (`daafb651`)。** `2026.9.0-mk.*` の行はすべて 2026.9.1 への
 載せ替え (`git rebase --onto 2026.9.1 2026.9.0`、custom commit 151 個) で `2026.9.1-mk.0` に
 入っている。**載せ替えの衝突は 0 件** — upstream と fork の両方が触ったファイルは
 `locales/en-US.yml` / `pages/flash/flash.vue` / `utility/get-user-menu.ts` の 3 つだが、
@@ -618,6 +695,7 @@ upstream が `jobState` の型を autogen (`AdminQueueJobsRequest['state'][numbe
 | `2026.9.1-mk.11` | 連合先のサーバーとの疎通を診断するタブを足す (#3055)。サーバーの情報ページにモデレーター向けの「疎通の診断」タブを足し、mk-go 独自の `admin/federation/check-host` を呼ぶ。確かめるアカウントは省略でき、結果は項目ごとに「問題なし / 注意 / 問題あり / 確かめられず」で並べ、backend が返す詳細と直し方の手がかりを出す。**注意だけのときに「問題は見つかりませんでした」と出さない** (ブロック中・配送停止中・429 で間隔を空けている最中も注意になるため)。自サーバーを指定したとき (`CANNOT_CHECK_SELF`) はここでは診断できない旨を出す。**純正へは還元できない行** (純正 backend にこの endpoint が無い)。 |
 | `2026.9.1-mk.12` | 消えたサーバーとのフォロー関係を片付けるタブを足す (#3067)。連合ページに「消えたサーバー」タブを足し、mk-go 独自の `admin/federation/gone-instances` / `clean-gone-instance` を呼ぶ。サーバーごとに消えたと判定した日時と、相手からのフォロー・相手へのフォロー・フォローリクエストの件数を出す。**件数は人数ではなく関係の数なので「件」で数える**。片付けは元に戻せないこと、利用者への通知や Webhook は出ないことを確認で伝える。停止が変更されていたとき (`INSTANCE_NOT_GONE`) と片付け中のとき (`CLEANUP_IN_PROGRESS`) は理由を出して読み直す。モデレーションログに `cleanGoneInstance` の見出しとアイコンを足した (見出しは既存のゲートの要求で en-US にも足す)。**純正へは還元できない行** (純正 backend にこの endpoint が無い)。 |
 | `2026.9.1-mk.13` | バブルゲームの物理を形と別に選べるようにし、超摩擦の FRICTION を足す (#3216)。メニューに「モード」と「物理」(DEFAULT / BOUNCY / FRICTION) を並べ、モードの文字列は形と物理をつないだもの (例: `square-bouncy`) にした。ランキング・ハイスコア・途中保存・スコアの登録が組み合わせごとに分かれる (backend は文字列を検査しないので変更なし)。**NORMAL × BOUNCY は #3194 の `bouncy` のまま**で、DEFAULT と既存の `bouncy` は変更前と同じ局面になる (版 4 のまま。変更前のエンジンで計った digest と照合するテストで固定)。BOUNCY は全ての形に当て、速さの上限を形ごとに計測で決めた (SQUARE / YEN 12、SWEETS 10、NORMAL は記録を変えないため 15)。FRICTION は跳ねず、他の玉に触れている玉と壁に触れている玉を毎 tick 減速させる (壁際の玉はゆっくりずり落ちる)。SPACE は物理を選ばない。エンジン (`misskey-bubble-game`) を変えているので**純正へは還元できない行** (本家は BOUNCY を持たない)。 |
+| `2026.9.1-mk.14` | 連合のルールを管理するタブを足す (#3090)。連合ページに「ルール」タブを足し、mk-go 独自の `admin/federation/rules/*` (`list` / `hits` / `create` / `update` / `delete`) でルールを作成・編集・削除し、直近 24 時間に当たった件数と直近の記録を見られるようにする。変更は管理者のみで、モデレーターには読むだけの欄を出す。新しいルールは「記録だけ」で始める。モデレーションログに `createFederationRule` / `updateFederationRule` / `deleteFederationRule` の見出しと対象を足す。**純正 backend には endpoint が無いので、純正へは還元できない行** |
 
 `2026.7.0-mk.1` の内訳:
 

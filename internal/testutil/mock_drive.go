@@ -393,6 +393,10 @@ func applyDriveFileFields(f *model.DriveFile, fields map[string]any) {
 			if b, ok := v.(bool); ok {
 				f.IsSensitive = b
 			}
+		case "maybeSensitive":
+			if b, ok := v.(bool); ok {
+				f.MaybeSensitive = b
+			}
 		case "folderId":
 			if s, ok := v.(*string); ok {
 				f.FolderID = s

@@ -59,6 +59,9 @@ func TestLogTypeValues(t *testing.T) {
 		// 変えると過去のログの見出しが空欄になる。
 		{LogResetEmojiApplicationQuota, "resetEmojiApplicationQuota"},
 		{LogCleanGoneInstance, "cleanGoneInstance"},
+		{LogCreateFederationRule, "createFederationRule"},
+		{LogUpdateFederationRule, "updateFederationRule"},
+		{LogDeleteFederationRule, "deleteFederationRule"},
 	}
 	for _, tc := range cases {
 		if string(tc.got) != tc.want {

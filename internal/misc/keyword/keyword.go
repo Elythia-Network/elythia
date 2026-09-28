@@ -18,6 +18,7 @@
 package keyword
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 )
@@ -87,6 +88,15 @@ func IsKeyWordIncluded(text string, keywords []string) bool {
 // newline). JS-only flags (g / y / u / d) are ignored because they don't
 // affect whether a match exists.
 func matchRegex(text, pattern, flags string) bool {
+	re, err := compileRegex(pattern, flags)
+	if err != nil {
+		// 不正な regex は upstream の try/catch と同じく "match しない" 扱い
+		return false
+	}
+	return re.MatchString(text)
+}
+
+func compileRegex(pattern, flags string) (*regexp.Regexp, error) {
 	var inline strings.Builder
 	for _, f := range flags {
 		switch f {
@@ -97,10 +107,77 @@ func matchRegex(text, pattern, flags string) bool {
 	if inline.Len() > 0 {
 		pattern = "(?" + inline.String() + ")" + pattern
 	}
-	re, err := regexp.Compile(pattern)
-	if err != nil {
-		// 不正な regex は upstream の try/catch と同じく "match しない" 扱い
+	return regexp.Compile(pattern)
+}
+
+// Matcher is a precompiled filter list with the same semantics as
+// IsKeyWordIncluded.
+//
+// IsKeyWordIncluded は呼ぶたびに regex をコンパイルする。受信のたびに評価する
+// 経路 (連合のルール、#3090) ではそのコストを毎回払わないよう、先にコンパイル
+// しておく。
+type Matcher struct {
+	entries []matcherEntry
+}
+
+type matcherEntry struct {
+	re    *regexp.Regexp
+	words []string
+}
+
+// Compile precompiles filters. Unlike IsKeyWordIncluded, a malformed regex
+// filter is an error: callers that store filters validate them at write time
+// instead of silently never matching. Empty filters are skipped.
+func Compile(filters []string) (*Matcher, error) {
+	m := &Matcher{}
+	for _, filter := range filters {
+		if filter == "" {
+			continue
+		}
+		if sub := regexpFilterRe.FindStringSubmatch(filter); sub != nil {
+			re, err := compileRegex(sub[1], sub[2])
+			if err != nil {
+				return nil, fmt.Errorf("keyword: invalid regex %q: %w", filter, err)
+			}
+			m.entries = append(m.entries, matcherEntry{re: re})
+			continue
+		}
+		words := strings.Fields(filter)
+		if len(words) == 0 {
+			continue
+		}
+		m.entries = append(m.entries, matcherEntry{words: words})
+	}
+	return m, nil
+}
+
+// Empty reports whether the matcher has no filters (it never matches).
+func (m *Matcher) Empty() bool {
+	return m == nil || len(m.entries) == 0
+}
+
+// Match reports whether text matches any filter.
+func (m *Matcher) Match(text string) bool {
+	if m == nil || text == "" {
 		return false
 	}
-	return re.MatchString(text)
+	for _, e := range m.entries {
+		if e.re != nil {
+			if e.re.MatchString(text) {
+				return true
+			}
+			continue
+		}
+		all := true
+		for _, w := range e.words {
+			if !strings.Contains(text, w) {
+				all = false
+				break
+			}
+		}
+		if all {
+			return true
+		}
+	}
+	return false
 }

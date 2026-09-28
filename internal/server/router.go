@@ -93,6 +93,7 @@ import (
 	"github.com/shiroha-a/mk/internal/core/event"
 	corefeatured "github.com/shiroha-a/mk/internal/core/featured"
 	corefederation "github.com/shiroha-a/mk/internal/core/federation"
+	"github.com/shiroha-a/mk/internal/core/fedrule"
 	coreflash "github.com/shiroha-a/mk/internal/core/flash"
 	corefollowing "github.com/shiroha-a/mk/internal/core/following"
 	"github.com/shiroha-a/mk/internal/core/gonecleanup"
@@ -879,6 +880,19 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 適用する。deliver_service / inboxProcessor と同じ instanceService を共有。
 	federationResolver.SetHostBlockChecker(instanceService)
 	federationResolver.SetSilencedHostChecker(instanceService) // #2106 N14: silenced host の public note を home 降格
+	// 連合のルール (#3090)。ホスト単位の設定 (上の hostBlocker / silenced) に
+	// 追加の層として重ねる。activity のルールは inbox の署名検証の後
+	// (dispatchActivity の入口)、投稿のルールは取り込みの全経路で評価する。
+	fedRuleRepo := repository.NewFederationRuleRepository(s.db)
+	fedRuleHits := fedrule.NewHitStore(s.redis.Default)
+	fedRuleService := fedrule.NewService(fedRuleRepo, fedRuleHits, idGen.ParseTime)
+	federationResolver.SetRuleEvaluator(fedRuleService)
+	federationProcessor.SetRuleEvaluator(fedRuleService)
+	{
+		hitsCtx, stopHits := context.WithCancel(context.Background())
+		fedRuleHits.Start(hitsCtx)
+		s.registerShutdownHook(func(context.Context) { stopHits() })
+	}
 	// 新規 instance row 発見時に nodeinfo を取得して metadata を更新する。
 	// admin/federation/refresh-remote-instance-metadata でも同じ fetcher を
 	// 再利用して on-demand で再取得する (#351 フォロー)。
@@ -2789,6 +2803,12 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		metaHandler.InvalidateResponseCache()
 		reloadCaptcha()
 	})
+	// 連合のルール (#3090) は受信の経路でスナップショットを持つので、管理画面で
+	// 変えたら他のプロセスにも読み直させる (繋がないと最大 5 分古いルールで
+	// 評価し続ける)。
+	internalPubSub.Subscribe(context.Background(), "federationRulesUpdated", func([]byte) {
+		fedRuleService.Invalidate()
+	})
 
 	// #3037: ロール / ポリシーの cross-worker cache invalidation。更新した
 	// worker は internal:rolesUpdated を publish し、各 worker は受信して自
@@ -3421,6 +3441,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 消えたインスタンスとのフォロー関係の片付け (#3067)。自動では消さず、管理者が
 	// 候補を見て実行する。
 	adminHandler.SetGoneInstanceCleaner(gonecleanup.NewService(goneInstanceRepo, instanceService, followingService))
+	adminHandler.SetFederationRuleManager(fedrule.NewManager(fedRuleRepo, fedRuleService, fedRuleHits, idGen, func() {
+		if err := internalPubSub.Publish(context.Background(), "federationRulesUpdated", struct{}{}); err != nil {
+			slog.Warn("fedrule: publish federationRulesUpdated failed", "err", err)
+		}
+	}))
 	// admin/federation/update-instance の suspend / unsuspend を deliver hot path
 	// の suspend 判定 cache へ TTL を待たず即時反映する (#1407 review)。
 	adminHandler.SetInstanceSuspendCacheInvalidator(instanceService)
@@ -3680,6 +3705,14 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// mk-go 独自 (#3067)。消えたインスタンスとのフォロー関係を片付ける。取り返しが
 	// つかない書き込みなので、既存の admin/federation/* の書き込み系と同じ scope。
 	api.POST("/admin/federation/clean-gone-instance", adminHandler.FederationCleanGoneInstance, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:federation"))
+	// 連合のルール (#3090、mk-go 独自)。meta.blockedHosts と同じく受信を丸ごと
+	// 止められる設定なので、変更は管理者に限る (blockedHosts は update-meta で
+	// 管理者のみ)。一覧と当たった記録はモデレーターにも見せる。
+	api.POST("/admin/federation/rules/list", adminHandler.FederationRules, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:meta"))
+	api.POST("/admin/federation/rules/hits", adminHandler.FederationRuleHits, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:meta"))
+	api.POST("/admin/federation/rules/create", adminHandler.FederationRuleCreate, middleware.RequireAdmin(roleService), middleware.RequireScope("write:admin:meta"))
+	api.POST("/admin/federation/rules/update", adminHandler.FederationRuleUpdate, middleware.RequireAdmin(roleService), middleware.RequireScope("write:admin:meta"))
+	api.POST("/admin/federation/rules/delete", adminHandler.FederationRuleDelete, middleware.RequireAdmin(roleService), middleware.RequireScope("write:admin:meta"))
 	// mk-go 独自 (#3048)。落ちた配送先へのブレーカーを手で閉じる。配送の挙動を
 	// 変える書き込みなので、既存の admin/federation/* の書き込み系と同じ scope。
 	api.POST("/admin/federation/close-delivery-breaker", adminHandler.FederationCloseDeliveryBreaker, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:federation"))
