@@ -193,6 +193,12 @@ var DefaultEndpointLimits = map[string]*EndpointLimit{
 	// 対応」なので、ここだけ無制限だと mk-go 側に上限を置いた意味が無い。
 	// upstream にこの制限は無いので意図的な divergence (docs/divergence.md §7)。
 	"admin/get-user-ips": {Duration: time.Hour, Max: 120, UserBucketOnly: true},
+	// 連合先との疎通の診断 (#3055)。1 回で相手へ最大 8 本程度のリクエストを飛ばすので、
+	// mk-go を任意の外部ホストへの踏み台にさせない上限を置く。宛先は SSRF-safe
+	// transport が絞るので、ここで見るのは回数だけ。切り分けで続けて叩くので、
+	// 短い窓ではなく時間あたりで抑える。user bucket だけで数えるのは IP 照会と
+	// 同じ理由 (同じ出口 IP から未認証で叩き続けてモデレーターを締め出させない)。
+	"admin/federation/check-host": {Duration: time.Hour, Max: 30, UserBucketOnly: true},
 	// 初回セットアップの窓 (rootUserId 未設定 + 未認証) だけは credential 無しで
 	// 通るので、setupPassword の試行回数に上限を置く。**signin の 10 ではなく 30
 	// にしてある** — この endpoint は administrator が正規にアカウントを作る経路

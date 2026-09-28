@@ -3402,6 +3402,17 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		checker: selfcheck.NewChecker(s.config.URL),
 		deps:    selfcheck.LocalDeps{DB: s.db, Redis: s.redis.Default},
 	})
+	// 連合先との疎通の診断 (#3055)。**通信は SSRF-safe な outboundClient だけ**で、
+	// 上の self-check の client (ガード無し) とは繋がない。自ホストは断る。
+	adminHandler.SetRemoteChecker(s.newRemoteCheckAdapter(remoteCheckSources{
+		fetcher:   apFetcher,
+		instances: instanceService,
+		users:     repository.NewRemoteUserSampler(s.db),
+		sigCaps:   sigCapRepo,
+		degraded:  deliverProcessor.Ed25519Degraded,
+		delivery:  deliveryHealth,
+		breaker:   deliveryBreaker,
+	}), corefederation.NormalizeGateHost(s.config.URL))
 	// admin/federation/update-instance の suspend / unsuspend を deliver hot path
 	// の suspend 判定 cache へ TTL を待たず即時反映する (#1407 review)。
 	adminHandler.SetInstanceSuspendCacheInvalidator(instanceService)
@@ -3653,6 +3664,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// mk-go 独自 (#2471)。送信側と同じ scope を再利用する。
 	api.POST("/admin/federation/inbox-health", adminHandler.FederationInboxHealth, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:server-info"))
 	api.POST("/admin/federation/delivery-health", adminHandler.FederationDeliveryHealth, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:server-info"))
+	// mk-go 独自 (#3055)。指定したホストとの疎通を 1 回だけ検査する。相手へ GET を
+	// 送るだけで状態を変えないので、観測系と同じ scope。
+	api.POST("/admin/federation/check-host", adminHandler.FederationCheckHost, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:server-info"))
 	// mk-go 独自 (#3048)。落ちた配送先へのブレーカーを手で閉じる。配送の挙動を
 	// 変える書き込みなので、既存の admin/federation/* の書き込み系と同じ scope。
 	api.POST("/admin/federation/close-delivery-breaker", adminHandler.FederationCloseDeliveryBreaker, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:federation"))

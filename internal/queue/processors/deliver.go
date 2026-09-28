@@ -315,6 +315,20 @@ func ed25519FailKey(host string) string {
 	return "ed25519:fail:" + host
 }
 
+// Ed25519Degraded reports whether deliveries to host currently fall back to
+// RSA, for diagnosing federation with it (#3055). isEd25519Degraded と違い
+// Redis の障害を隠さない (診断で「落としていない」と断定しないため)。
+func (p *DeliverProcessor) Ed25519Degraded(ctx context.Context, host string) (bool, error) {
+	if p.redis == nil || host == "" {
+		return false, nil
+	}
+	n, err := p.redis.Exists(ctx, ed25519DegradeKey(host)).Result()
+	if err != nil {
+		return false, fmt.Errorf("read ed25519 degrade flag: %w", err)
+	}
+	return n > 0, nil
+}
+
 // isEd25519Degraded reports whether the host has the Ed25519 degrade flag
 // set in Redis. Redis 未配線 or empty host or Redis 障害は false (= 安全側
 // で Ed25519 試行を継続)。

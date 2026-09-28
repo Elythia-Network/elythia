@@ -88,6 +88,26 @@ func (f *APFetcher) FetchObject(uri string) ([]byte, error) {
 	return body, err
 }
 
+// FetchObjectSignedOnly performs a signed GET and never falls back to an
+// unsigned one. Returns ErrNoSigner when no signer is available.
+//
+// 疎通の診断 (#3055) 用。FetchObject は 401/403 で署名なしへ落ちるので、相手が
+// こちらの署名を拒否しているのか、署名なしでも読めるのかを区別できない。
+func (f *APFetcher) FetchObjectSignedOnly(uri string) ([]byte, error) {
+	if f.signer == nil {
+		return nil, ErrNoSigner
+	}
+	key, err := f.signer.Signer()
+	if err != nil {
+		return nil, err
+	}
+	if key == nil {
+		return nil, ErrNoSigner
+	}
+	body, _, err := f.client.FetchJSONWithURL(uri, key)
+	return body, err
+}
+
 // FetchObjectUnsigned performs an explicit unsigned GET. nodeinfo /
 // .well-known/* など peer 認証を要求しない discovery endpoint 用 (#419
 // Devin review)。SignerProvider が wire されていても署名を付けない。
