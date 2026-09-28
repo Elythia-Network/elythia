@@ -199,6 +199,9 @@ type Handler struct {
 	deliveryHealth DeliveryHealthProvider
 	// inboxHealth は admin/federation/inbox-health の集計元 (#2471)。
 	inboxHealth DeliveryHealthProvider
+	// deliveryBreaker は落ちた配送先へのブレーカー (#3048)。nil なら一覧は空で、
+	// 閉じる操作は何もしない。
+	deliveryBreaker DeliveryBreakerAdmin
 	// ipSearchRepo は admin/ip/* の検索元 (#3104)。**未配線なら 500 を返す** —
 	// 空の結果は「その IP を使ったアカウントは無い」という誤った事実になる。
 	ipSearchRepo repository.UserIPSearchRepository

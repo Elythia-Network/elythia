@@ -1226,7 +1226,14 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	inboxHealth := deliveryhealth.NewService(
 		deliveryhealth.NewStoreForDirection(s.redis.Default, deliveryhealth.DirectionInbound),
 		deliveryhealth.DefaultMaxHosts, 0)
+	// 落ちた配送先へのブレーカーと 429 の間隔 (#3048)。状態は Redis に置くので、
+	// queue ノードが複数あっても判断を共有する。管理画面 (Web ノード) からも
+	// 同じ状態を読み、手で閉じる。
+	deliveryBreaker := deliveryhealth.NewBreaker(s.redis.Default)
 	if s.role.RunsQueue() {
+		if deliveryBreaker != nil {
+			deliverProcessor.SetDeliveryBreaker(deliveryBreaker)
+		}
 		deliverProcessor.SetDeliveryTelemetry(deliveryHealth)
 		deliveryHealth.Start(context.Background())
 		s.registerShutdownHook(func(ctx context.Context) { deliveryHealth.Stop(ctx) })
@@ -3313,6 +3320,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	adminHandler.SetUserStreamRevoker(streamRevokePublisher)
 	adminHandler.SetInstanceRepo(instanceRepo)
 	adminHandler.SetDeliveryHealthProvider(deliveryHealth)
+	if deliveryBreaker != nil {
+		adminHandler.SetDeliveryBreaker(deliveryBreaker)
+	}
 	adminHandler.SetInboxHealthProvider(inboxHealth)
 	// IP からアカウントを引く口 (#3104)。**この行を落とすと admin/ip/accounts が
 	// 500 を返す** — 空の結果は「その IP を使ったアカウントは無い」という誤った
@@ -3643,6 +3653,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// mk-go 独自 (#2471)。送信側と同じ scope を再利用する。
 	api.POST("/admin/federation/inbox-health", adminHandler.FederationInboxHealth, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:server-info"))
 	api.POST("/admin/federation/delivery-health", adminHandler.FederationDeliveryHealth, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:server-info"))
+	// mk-go 独自 (#3048)。落ちた配送先へのブレーカーを手で閉じる。配送の挙動を
+	// 変える書き込みなので、既存の admin/federation/* の書き込み系と同じ scope。
+	api.POST("/admin/federation/close-delivery-breaker", adminHandler.FederationCloseDeliveryBreaker, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:federation"))
 	api.POST("/admin/invite/create", adminHandler.InviteCreate, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:invite-codes"))
 	api.POST("/admin/invite/list", adminHandler.InviteList, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:invite-codes"))
 	// 承認制の登録の審査 (#2555)。mk-go 独自。scope は invite-codes を再利用する
