@@ -437,7 +437,8 @@ func (s *Service) ProhibitedWords() []string {
 
 // IsMediaSilenced reports whether the host matches an entry in
 // meta.mediaSilencedHosts. Used by reaction gating to reject custom emoji
-// reactions from media-silenced remote hosts (#1538).
+// reactions from media-silenced remote hosts (#1538) and to mark remote
+// attachments sensitive (#3218).
 func (s *Service) IsMediaSilenced(host string) bool {
 	if host == "" {
 		return false
@@ -745,6 +746,9 @@ func (s *Service) warnMetaFetchFailed(host string, err error) {
 // lists that restrict a host (blockedHosts / silencedHosts /
 // mediaSilencedHosts). A pattern matches if host equals it, or host ends with
 // `.<pattern>` (i.e. host is a subdomain).
+//
+// mediaSilencedHosts だけは upstream の `isMediaSilencedHost` が完全一致なので、
+// mk-go の後方一致はサブドメインにも効く分だけ広い (docs/divergence.md §3-3)。
 //
 // Host is also compared with its port and trailing dot removed, so a remote
 // that publishes its actor on a non-default port (`evil.example:8443`) still
