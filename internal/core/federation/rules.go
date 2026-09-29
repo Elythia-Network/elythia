@@ -141,12 +141,19 @@ func applyRulesToAttachments(d fedrule.Decision, docs []activitypub.Document) []
 // センシティブにできてしまう (#3090 の敵対的レビューで実測)。他人の行を指す
 // 添付は書き換えないので、戻り値が false になる (呼び出し側が投稿ごと畳む)。
 func (r *Resolver) markFilesSensitive(ids model.StringArray, authorID string) bool {
+	return r.markAuthorFiles(ids, authorID, nil, map[string]any{"isSensitive": true, "maybeSensitive": true})
+}
+
+// markAuthorFiles writes fields to the attached files that are not sensitive
+// yet and are owned by authorID (or accepted by alsoWritable), and reports
+// whether every file is now sensitive.
+func (r *Resolver) markAuthorFiles(ids model.StringArray, authorID string, alsoWritable func(*model.DriveFile) bool, fields map[string]any) bool {
 	if r.driveFileRepo == nil || len(ids) == 0 {
 		return true
 	}
 	files, err := r.driveFileRepo.FindByIDs(ids)
 	if err != nil {
-		slog.Warn("federation: cannot load attachments to mark sensitive for a federation rule", "err", err)
+		slog.Warn("federation: cannot load attachments to mark sensitive", "err", err)
 		return false
 	}
 	// 同じ URL の添付が 2 つあると同じ ID が 2 回並ぶ (再利用される) ので、
@@ -157,15 +164,18 @@ func (r *Resolver) markFilesSensitive(ids model.StringArray, authorID string) bo
 	}
 	all := len(files) == len(unique)
 	for _, f := range files {
-		if f.IsSensitive {
+		// 頼まれた印がすでに全部付いていれば書かない。isSensitive だけで判定すると、
+		// 別の取り込み (メディアサイレンス) で isSensitive だけ立った行にルールの
+		// maybeSensitive が付かない。
+		if f.IsSensitive && (fields["maybeSensitive"] == nil || f.MaybeSensitive) {
 			continue
 		}
-		if f.UserID == nil || *f.UserID != authorID {
+		if (f.UserID == nil || *f.UserID != authorID) && (alsoWritable == nil || !alsoWritable(f)) {
 			all = false
 			continue
 		}
-		if err := r.driveFileRepo.Update(f.ID, map[string]any{"isSensitive": true, "maybeSensitive": true}); err != nil {
-			slog.Warn("federation: cannot mark attachment sensitive for a federation rule", "fileId", f.ID, "err", err)
+		if err := r.driveFileRepo.Update(f.ID, fields); err != nil {
+			slog.Warn("federation: cannot mark attachment sensitive", "fileId", f.ID, "err", err)
 			all = false
 		}
 	}

@@ -444,6 +444,9 @@ type Resolver struct {
 	// (全 host 許可) にフォールバック。
 	hostBlocker HostBlockChecker
 
+	// mediaSilencedChecker は meta.mediaSilencedHosts の判定 (#3218)。未配線なら
+	// 添付をセンシティブにしない。
+	mediaSilencedChecker MediaSilencedHostChecker
 	// silencedChecker は remote note ingest 時に meta.silencedHosts 該当 host の
 	// public note を home に降格する判定に使う (#2106 N14)。未配線時は降格しない。
 	silencedChecker SilencedHostChecker
@@ -682,6 +685,45 @@ func (r *Resolver) SetHostBlockChecker(c HostBlockChecker) {
 // *instance.Service implements it (IsSilenced).
 type SilencedHostChecker interface {
 	IsSilenced(host string) bool
+}
+
+// MediaSilencedHostChecker reports whether a host is in meta.mediaSilencedHosts.
+type MediaSilencedHostChecker interface {
+	IsMediaSilenced(host string) bool
+}
+
+// SetMediaSilencedHostChecker attaches the meta.mediaSilencedHosts checker
+// used to mark remote attachments sensitive (#3218).
+func (r *Resolver) SetMediaSilencedHostChecker(c MediaSilencedHostChecker) {
+	r.mediaSilencedChecker = c
+}
+
+// markMediaSilencedFiles marks the attachments of a note by a media-silenced
+// host sensitive.
+//
+// upstream は `DriveService.addFile` で、リンクだけのリモートファイルにも
+// `isMediaSilencedHost` を当てて `isSensitive = true` にする (#3218)。mk-go の
+// 添付は `upsertAttachments` が drive を通さずに作るので、ここで同じことをする。
+// `maybeSensitive` は upstream でも検出の結果なので触らない。
+//
+// 書き換えるのは投稿者自身の行と、**持ち主のホストもメディアサイレンス対象の行**
+// (本来センシティブであるべき行なので、書き換えを悪用される経路にならない)。
+// upstream は投稿者ごとに行を作る (`addFile` の dedup は md5 + userId) ので必ず
+// 投稿者の行に当たるが、mk-go は URL で再利用するので他人の行を指しうる。他人の
+// 行は書き換えない (#3090 と同じ理由。URL を指すだけで他人のファイルを書き換え
+// られる)。**書き換えられない添付が残ったら false を返す** — 呼び出し側は投稿ごと
+// 空の CW で畳む (そのままだと他人の URL を指すだけでメディアサイレンスを
+// すり抜けられる)。再利用する投稿者自身の行にも当てるのは upstream に無い
+// 挙動で、設定する前に取り込んだ画像を同じ人が添付し直すとそのまま表示される
+// のを防ぐ。
+func (r *Resolver) markMediaSilencedFiles(ids model.StringArray, authorID string, host *string) bool {
+	if host == nil || *host == "" || r.mediaSilencedChecker == nil || !r.mediaSilencedChecker.IsMediaSilenced(*host) {
+		return true
+	}
+	ownerSilenced := func(f *model.DriveFile) bool {
+		return f.UserHost != nil && *f.UserHost != "" && r.mediaSilencedChecker.IsMediaSilenced(*f.UserHost)
+	}
+	return r.markAuthorFiles(ids, authorID, ownerSilenced, map[string]any{"isSensitive": true})
 }
 
 // SetSilencedHostChecker attaches the meta.silencedHosts checker used to demote
@@ -3201,7 +3243,13 @@ func (r *Resolver) ingestNoteWithCreated(body []byte, deliveringActorURI string,
 	// 実 fetch はせず、frontend が drive_file.url 経由で remote 取得する。
 	note.FileIDs = r.upsertAttachments(applyRulesToAttachments(ruleDecision,
 		extractAttachments(apNote.Attachment, apNote.Sensitive.Bool())), &actor.ID, actor.Host)
-	if ruleDecision.Sensitive && !r.markFilesSensitive(note.FileIDs, actor.ID) {
+	// ルールを先に当てる (後に回すと、メディアサイレンスで isSensitive だけ立った
+	// 行を「済み」として飛ばし、ルールの maybeSensitive が付かない)。
+	folded := ruleDecision.Sensitive && !r.markFilesSensitive(note.FileIDs, actor.ID)
+	if !r.markMediaSilencedFiles(note.FileIDs, actor.ID, actor.Host) {
+		folded = true
+	}
+	if folded {
 		if cw := foldCW(note.CW); cw != nil {
 			note.CW = cw
 		}
@@ -3722,7 +3770,12 @@ func (r *Resolver) UpdateRemoteNote(body []byte, actorURI string) (*model.Note, 
 	if r.driveFileRepo != nil {
 		fileIDs := r.upsertAttachments(applyRulesToAttachments(ruleDecision,
 			extractAttachments(apNote.Attachment, apNote.Sensitive.Bool())), &existing.UserID, existing.UserHost)
-		if ruleDecision.Sensitive && !r.markFilesSensitive(fileIDs, existing.UserID) {
+		// ルールを先に当てる (取り込み側と同じ理由)。
+		folded := ruleDecision.Sensitive && !r.markFilesSensitive(fileIDs, existing.UserID)
+		if !r.markMediaSilencedFiles(fileIDs, existing.UserID, existing.UserHost) {
+			folded = true
+		}
+		if folded {
 			if cw := foldCW(existing.CW); cw != nil {
 				fields["cw"] = cw
 				existing.CW = cw
