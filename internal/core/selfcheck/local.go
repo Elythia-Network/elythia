@@ -2,10 +2,15 @@ package selfcheck
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
+
+	"github.com/shiroha-a/mk/internal/core/dbhealth"
 )
 
 // LocalDeps are the dependencies the local checks inspect. どれも nil 可で、
@@ -21,6 +26,8 @@ type LocalDeps struct {
 	// MigrationCount は同梱している up migration の本数。DB に記録された
 	// version と突き合わせる。
 	MigrationCount int
+	// DBHealth は PostgreSQL の統計の読み取り (#3095)。nil なら skip。
+	DBHealth func(ctx context.Context) (dbhealth.Report, error)
 }
 
 // CheckDatabase verifies connectivity and migration state.
@@ -111,6 +118,51 @@ func CheckRedis(ctx context.Context, deps LocalDeps) Result {
 	return okResult(name, "接続 ok")
 }
 
+// healthTimeout bounds the database-health check (変数なのはテストで短くするため)。
+var healthTimeout = 10 * time.Second
+
+// maxHealthDetails bounds how many tables the database-health warning names.
+const maxHealthDetails = 5
+
+// CheckDatabaseHealth warns about bloated or unvacuumed tables (#3095).
+//
+// **警告であって失敗ではない。** 動いてはいるが、放置すると膨らみ続けて
+// ある日性能が落ちる類の問題なので、fail にして「壊れている」と見せない。
+func CheckDatabaseHealth(ctx context.Context, deps LocalDeps) Result {
+	const name = "database-health"
+	if deps.DBHealth == nil {
+		return skipResult(name, "未配線")
+	}
+	// **この検査だけで全体の期限を食い潰さない。** doctor は全体で 1 つの期限を
+	// 共有しているので、ここが待たされると後ろの検査まで deadline で FAIL し、
+	// 診断が事実と違うものを指す。
+	hctx, cancel := context.WithTimeout(ctx, healthTimeout)
+	defer cancel()
+	r, err := deps.DBHealth(hctx)
+	if errors.Is(err, context.DeadlineExceeded) {
+		return warnResult(name, fmt.Sprintf("統計の読み取りが %s 以内に終わらない", healthTimeout),
+			"PostgreSQL が高負荷か、統計の読み取りが待たされている。時間をおいて再実行する")
+	}
+	if err != nil {
+		return warnResult(name, fmt.Sprintf("統計を読めない: %v", err),
+			"PostgreSQL の統計 (pg_stat_user_tables) を読む権限があるか確認する")
+	}
+	problems := r.Problems
+	if len(problems) == 0 {
+		return okResult(name, fmt.Sprintf("dead tuple と VACUUM に問題なし (%d テーブル)", len(r.Tables)))
+	}
+	details := make([]string, 0, maxHealthDetails)
+	for i, p := range problems {
+		if i == maxHealthDetails {
+			details = append(details, fmt.Sprintf("ほか %d 件", len(problems)-maxHealthDetails))
+			break
+		}
+		details = append(details, p.Detail)
+	}
+	return warnResult(name, strings.Join(details, " / "),
+		"該当のテーブルに `VACUUM (ANALYZE)` を実行する。繰り返すなら autovacuum の設定 (autovacuum_vacuum_scale_factor など) を見直す。詳細は管理画面の「データベース」")
+}
+
 // Run executes every check and returns the aggregate report.
 //
 // 検査は**止めずに全部走らせる**。最初の失敗で打ち切ると、運用者は直しては
@@ -119,6 +171,7 @@ func Run(ctx context.Context, checker *Checker, deps LocalDeps) Report {
 	results := []Result{checker.CheckConfig()}
 	results = append(results,
 		CheckDatabase(ctx, deps),
+		CheckDatabaseHealth(ctx, deps),
 		CheckRootUser(ctx, deps),
 		CheckRedis(ctx, deps),
 		checker.CheckWebFinger(ctx),

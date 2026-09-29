@@ -9,6 +9,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	"github.com/shiroha-a/mk/internal/config"
+	"github.com/shiroha-a/mk/internal/core/dbhealth"
 	"github.com/shiroha-a/mk/internal/core/selfcheck"
 	"github.com/shiroha-a/mk/internal/redislog"
 	"gorm.io/driver/postgres"
@@ -50,6 +51,7 @@ func runDoctor(configPath string) int {
 		deps.DBErr = dbErr
 	} else {
 		deps.DB = db
+		deps.DBHealth = dbhealth.NewService(db, cfg.DBReplications && len(cfg.DBSlaves) > 0).Report
 		defer closeDoctorDB(db)
 	}
 	if rdb := openDoctorRedis(cfg); rdb != nil {

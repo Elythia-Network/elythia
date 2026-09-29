@@ -225,6 +225,8 @@ type Handler struct {
 	goneCleaner GoneInstanceCleaner
 	// fedRules は連合のルール (#3090)。
 	fedRules FederationRuleManager
+	// dbHealth は DB の健全性 (#3095)。
+	dbHealth DatabaseHealthReader
 	// userTokenInvalidator は admin が他 user を suspend / unsuspend /
 	// 論理削除した直後に target user の全 tokenCache entry を即時失効する
 	// ために使う (#965)。i/regenerate-token (#884) や i/update (#960) と
