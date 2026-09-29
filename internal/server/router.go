@@ -83,6 +83,7 @@ import (
 	"github.com/shiroha-a/mk/internal/core/chart/charthook"
 	corechat "github.com/shiroha-a/mk/internal/core/chat"
 	coreclip "github.com/shiroha-a/mk/internal/core/clip"
+	"github.com/shiroha-a/mk/internal/core/dbhealth"
 	"github.com/shiroha-a/mk/internal/core/deliveryhealth"
 	coredrive "github.com/shiroha-a/mk/internal/core/drive"
 	"github.com/shiroha-a/mk/internal/core/driveusage"
@@ -3424,9 +3425,12 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 連合セルフ診断 (#2463)。migration 本数は起動時に数えず 0 を渡す
 	// (server 側は既に migrate 済みで動いている前提。適用漏れの検出は
 	// `misskey -doctor` の担当で、あちらは同梱ファイルを数えられる)。
+	// DB の健全性 (#3095)。統計はプライマリから読み、1 分キャッシュする。
+	dbHealth := dbhealth.NewService(s.db, s.config.DBReplications && len(s.config.DBSlaves) > 0)
+	adminHandler.SetDatabaseHealth(dbHealth)
 	adminHandler.SetSelfCheckRunner(&selfCheckAdapter{
 		checker: selfcheck.NewChecker(s.config.URL),
-		deps:    selfcheck.LocalDeps{DB: s.db, Redis: s.redis.Default},
+		deps:    selfcheck.LocalDeps{DB: s.db, Redis: s.redis.Default, DBHealth: dbHealth.Report},
 	})
 	// 連合先との疎通の診断 (#3055)。**通信は SSRF-safe な outboundClient だけ**で、
 	// 上の self-check の client (ガード無し) とは繋がない。自ホストは断る。
@@ -3617,6 +3621,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		middleware.RequireScope("read:admin:user-ips"))
 	api.POST("/admin/get-index-stats", adminHandler.GetIndexStats, middleware.RequireAdmin(roleService), middleware.RequireScope("read:admin:index-stats"))
 	api.POST("/admin/get-table-stats", adminHandler.GetTableStats, middleware.RequireAdmin(roleService), middleware.RequireScope("read:admin:table-stats"))
+	// DB の健全性 (#3095、mk-go 独自)。get-table-stats と同じ権限。
+	api.POST("/admin/database-health", adminHandler.DatabaseHealth, middleware.RequireAdmin(roleService), middleware.RequireScope("read:admin:table-stats"))
 	api.POST("/admin/server-info", adminHandler.ServerInfo, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:server-info"))
 	// mk-go 独自 (#2395)。upstream に対応する endpoint は無いので scope も
 	// server-info のものを流用する (admin UI 以外の consumer を想定しない)。

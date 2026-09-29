@@ -2,11 +2,15 @@ package selfcheck
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
+	"github.com/shiroha-a/mk/internal/core/dbhealth"
 	"github.com/shiroha-a/mk/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -66,7 +70,7 @@ func TestRun_ContinuesAfterFailure(t *testing.T) {
 
 	report := Run(context.Background(), NewChecker(srv.URL), LocalDeps{})
 	assert.False(t, report.OK)
-	assert.Len(t, report.Results, 8, "全項目ぶんの結果が返る")
+	assert.Len(t, report.Results, 9, "全項目ぶんの結果が返る")
 }
 
 // warn だけなら OK は落とさない。「見ておくべき」と「壊れている」を区別する。
@@ -134,4 +138,63 @@ func TestCheckRootUser(t *testing.T) {
 		got := CheckRootUser(context.Background(), LocalDeps{DB: closed})
 		assert.Equal(t, StatusFail, got.Status)
 	})
+}
+
+func TestCheckDatabaseHealth(t *testing.T) {
+	ctx := context.Background()
+	assert.Equal(t, StatusSkip, CheckDatabaseHealth(ctx, LocalDeps{}).Status)
+
+	res := CheckDatabaseHealth(ctx, LocalDeps{DBHealth: func(context.Context) (dbhealth.Report, error) {
+		return dbhealth.Report{}, errors.New("permission denied")
+	}})
+	assert.Equal(t, StatusWarn, res.Status, "unreadable statistics are a warning, not a failure")
+	assert.Contains(t, res.Detail, "permission denied")
+	assert.NotEmpty(t, res.Hint)
+
+	now := time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)
+	recent := now.Add(-time.Hour)
+	healthy := dbhealth.Report{GeneratedAt: now, Tables: []dbhealth.TableStat{{Table: "note", DeadRows: 5, LastVacuum: &recent}}, Problems: []dbhealth.Problem{}}
+	res = CheckDatabaseHealth(ctx, LocalDeps{DBHealth: func(context.Context) (dbhealth.Report, error) { return healthy, nil }})
+	assert.Equal(t, StatusOK, res.Status)
+	assert.Contains(t, res.Detail, "1 テーブル")
+
+	// 問題は warn (fail ではない)。名前を出すのは 5 件までで、残りは件数。
+	var problems []dbhealth.Problem
+	for i := 0; i < 7; i++ {
+		problems = append(problems, dbhealth.Problem{Table: fmt.Sprintf("t%d", i), Kind: "bloat", Detail: fmt.Sprintf("t%d: dead", i)})
+	}
+	bloated := dbhealth.Report{GeneratedAt: now, Problems: problems}
+	res = CheckDatabaseHealth(ctx, LocalDeps{DBHealth: func(context.Context) (dbhealth.Report, error) { return bloated, nil }})
+	assert.Equal(t, StatusWarn, res.Status)
+	assert.Contains(t, res.Detail, "t0")
+	assert.Contains(t, res.Detail, "t4")
+	assert.NotContains(t, res.Detail, "t5")
+	assert.Contains(t, res.Detail, "ほか 2 件")
+	assert.Contains(t, res.Hint, "VACUUM")
+
+	// Run にも入っている。
+	rep := Run(ctx, NewChecker("https://example.invalid"), LocalDeps{DBHealth: func(context.Context) (dbhealth.Report, error) { return bloated, nil }})
+	found := false
+	for _, r := range rep.Results {
+		if r.Name == "database-health" {
+			found = true
+			assert.Equal(t, StatusWarn, r.Status)
+		}
+	}
+	assert.True(t, found)
+}
+
+// 統計の読み取りが待たされても、この検査だけで全体の期限を食い潰さない。
+func TestCheckDatabaseHealth_HasItsOwnTimeout(t *testing.T) {
+	old := healthTimeout
+	healthTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { healthTimeout = old })
+	start := time.Now()
+	res := CheckDatabaseHealth(context.Background(), LocalDeps{DBHealth: func(ctx context.Context) (dbhealth.Report, error) {
+		<-ctx.Done()
+		return dbhealth.Report{}, ctx.Err()
+	}})
+	assert.Equal(t, StatusWarn, res.Status)
+	assert.Less(t, time.Since(start), time.Second)
+	assert.Contains(t, res.Detail, "以内に終わらない", "a timeout is not reported as a permission problem")
 }

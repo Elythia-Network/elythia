@@ -379,6 +379,7 @@ worker 数は既定値がキューごとに違い、`stuck 検出` は**キュ�
 ```
   ok    config.url   https://example.com
   ok    database     接続 ok / migration version 100
+  ok    database-health dead tuple と VACUUM に問題なし (118 テーブル)
   ok    root user    meta.rootUserId 設定済み
   ok    redis        接続 ok
   FAIL  webfinger    status 403 (連合が無効)
