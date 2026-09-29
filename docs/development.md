@@ -225,6 +225,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_xxx" ON "yyy" ("zzz");
 | `make dropin-frontend-mk-up` `dropin-frontend-mk-down` `dropin-frontend-swap-test` | 上記の mk-go overlay と切替シナリオ | 同上 |
 | `make federation-misskey-build` `federation-misskey-up` `federation-misskey-test` `federation-misskey-down` `federation-misskey-logs` | Misskey 本家インスタンスを立てて実際に連合させる | [ActivityPub連合](federation.md) |
 | `make federation-misskey-e2e` | 上記を起動から撤去まで通しで実行 (CI の `federation` シナリオと同じ) | 同上 |
+| `make federation-mastodon-e2e` `federation-mastodon-down` | 本物の Mastodon を立てて引用の承認 (FEP-044f) を確かめる。前者は起動から撤去まで通し (CI の `federation-mastodon` シナリオと同じ) | 同上 |
 | `make e2e-submodule-init` | submodule を初期化 (本家フロントエンドの取得)。e2e 系の前提 | — |
 | `make playwright-up` `playwright-test` `playwright-down` | Playwright によるフロントエンド / API テスト | [Playwright](playwright.md) |
 | `make upstream-e2e-deps` `upstream-e2e-up` `upstream-e2e-migrate` `upstream-e2e-test` `upstream-e2e-down` | Misskey 本家の backend e2e をテスト本体無改変で mk-go に向けて実行 | [本家 backend e2e](upstream-backend-e2e.md) |
@@ -331,7 +332,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_xxx" ON "yyy" ("zzz");
 | `spec (mk-go 1/4)` 〜 `4/4` | Playwright | ブラウザからの統合互換。TS backend での実行は `workflow_dispatch` のみ |
 | `e2e (1/4)` 〜 `4/4` | Upstream backend e2e | 本家の backend e2e が mk-go に対して通るか |
 | `diff` | Diff e2e | mk-go と TS の**レスポンスの値**が一致するか |
-| `swap-test` / `mkgo-born` / `ed25519-verify` / `federation` | Drop-in e2e | 切替・ロックイン・Ed25519・実連合の 4 シナリオ |
+| `swap-test` / `mkgo-born` / `ed25519-verify` / `federation` / `federation-mastodon` | Drop-in e2e | 切替・ロックイン・Ed25519・実連合 (Misskey TS / Mastodon) の 5 シナリオ |
 
 どれが何を守っているかの対比は [ci.md](ci.md) にまとめてある。
 

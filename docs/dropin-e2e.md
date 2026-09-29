@@ -168,7 +168,7 @@ compose 内で pull を再試行するか `docker pull misskey/misskey:2026.9.1`
 
 ## CI 実行
 
-`.github/workflows/dropin-e2e.yml` が 4 シナリオを **matrix で並列**に実行する。
+`.github/workflows/dropin-e2e.yml` が 5 シナリオを **matrix で並列**に実行する。
 
 | check 名 | make target | 見ているもの |
 |---|---|---|
@@ -176,6 +176,7 @@ compose 内で pull を再試行するか `docker pull misskey/misskey:2026.9.1`
 | `mkgo-born` | `dropin-mkgo-born-test` | mk-go 生まれの DB を TS に引き渡せるか |
 | `ed25519-verify` | `dropin-fedibird-test` | Fedibird-like mock との Ed25519 双方向 verify |
 | `federation` | `federation-misskey-e2e` | 本物の Misskey TS との実連合 |
+| `federation-mastodon` | `federation-mastodon-e2e` | 本物の Mastodon との引用の承認 (FEP-044f) |
 
 発火条件:
 
