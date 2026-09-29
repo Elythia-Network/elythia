@@ -219,7 +219,9 @@ func TestIPRelated_SkipsSharedLookupWithoutIPs(t *testing.T) {
 
 // 複数 IP で一致した候補は 1 アカウントに統合され、スコアの高い順に並ぶ。
 func TestIPRelated_MergesAndRanks(t *testing.T) {
-	now := time.Now()
+	// 実時刻から離した固定の時刻にする。handler が固定した時刻を使わずに実時刻を
+	// 取ると、減衰でスコアが変わって落ちる (近い時刻だと気付けない)。
+	now := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
 	stub := &stubIPRelated{
 		stubIPSearch: stubIPSearch{hasAny: true},
 		ipRows: []repository.UserIPWindowRow{
@@ -232,6 +234,9 @@ func TestIPRelated_MergesAndRanks(t *testing.T) {
 		},
 	}
 	h, users, _ := newRelatedHandler(t, stub)
+	// スコアは経過時間で減衰するので、handler の時刻を行の時刻に固定する (固定
+	// しないと、-race の遅い CI で数ミリ秒の減衰が許容誤差を超える)。
+	h.SetClockForTest(func() time.Time { return now })
 	for _, u := range []string{"u_one", "u_two"} {
 		users.Users[u] = &model.User{ID: u, Username: u}
 	}
@@ -249,7 +254,9 @@ func TestIPRelated_MergesAndRanks(t *testing.T) {
 
 // **スコアは確率ではない。** 上限が 1 ではないので、パーセントとして読めない。
 func TestIPRelated_ScoreIsNotAProbability(t *testing.T) {
-	now := time.Now()
+	// 実時刻から離した固定の時刻にする。handler が固定した時刻を使わずに実時刻を
+	// 取ると、減衰でスコアが変わって落ちる (近い時刻だと気付けない)。
+	now := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
 	stub := &stubIPRelated{
 		stubIPSearch: stubIPSearch{hasAny: true},
 		ipRows: []repository.UserIPWindowRow{
@@ -262,6 +269,9 @@ func TestIPRelated_ScoreIsNotAProbability(t *testing.T) {
 		},
 	}
 	h, users, _ := newRelatedHandler(t, stub)
+	// スコアは経過時間で減衰するので、handler の時刻を行の時刻に固定する (固定
+	// しないと、-race の遅い CI で数ミリ秒の減衰が許容誤差を超える)。
+	h.SetClockForTest(func() time.Time { return now })
 	users.Users["u1"] = &model.User{ID: "u1", Username: "alice"}
 
 	rec := doPost(h.IPRelatedAccounts, `{"userId":"target"}`, adminUser)

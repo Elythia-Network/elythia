@@ -121,7 +121,7 @@ func (h *Handler) IPRelatedAccounts(c echo.Context) error {
 
 	// **now は 1 回の検索で固定する** (#3105)。呼ぶたびに取り直すと、同じ検索の
 	// 中で先に計算した候補ほど減衰が浅くなり、順位が計算順に依存する。
-	now := time.Now()
+	now := h.now()
 	since := now.AddDate(0, 0, -sinceDays)
 
 	// 起点は対象ユーザーの IP。+1 件引いて打ち切ったかを判断する。
