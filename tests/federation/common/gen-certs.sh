@@ -7,7 +7,8 @@ set -e
 CERT_DIR=/certs
 mkdir -p "$CERT_DIR"
 
-DOMAINS="mkgo misskey"
+# 対象は相手ごとに違う (Misskey / Mastodon) ので、compose から渡せるようにする。
+DOMAINS="${CERT_DOMAINS:-mkgo misskey}"
 
 for domain in $DOMAINS; do
   if [ ! -f "$CERT_DIR/$domain.crt" ]; then

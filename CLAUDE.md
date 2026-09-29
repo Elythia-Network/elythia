@@ -214,6 +214,7 @@ make dropin-frontend-mk-down     # mk overlay cleanup
 # その他の e2e / 検証
 make dropin-mkgo-born-test   # mk-go 生まれの DB を TS に引き渡せるか (#2383)
 make federation-misskey-e2e  # 本物の Misskey TS との実連合を起動から撤去まで通しで (#2362)
+make federation-mastodon-e2e # 本物の Mastodon と引用の承認 (FEP-044f) を通しで (#3234)
 make diff-check              # mk-go と TS のレスポンスを値レベルで diff (#2078)
 make playwright-check        # Playwright を作り直して実行
 make frontend-check          # fork frontend の型チェック + submodule 依存のゲート + eslint
@@ -221,7 +222,7 @@ make frontend-lint           # eslint だけ (CI と同じ範囲、実測 55 秒
 make e2e-down-all            # 検証用スタックを一括撤去 (**本番 project `mk` は対象外**)
 ```
 
-**上記は全体ではない。** `make help` が全 139 target を出す (`^名前:.*##` の行を数えた)。一覧と説明は
+**上記は全体ではない。** `make help` が全 141 target を出す (`^名前:.*##` の行を数えた)。一覧と説明は
 [docs/development.md](docs/development.md)、CI 上の対応は [docs/ci.md](docs/ci.md)。
 
 エントリポイント：
@@ -645,7 +646,7 @@ checkout / setup-go を除くと step は実行順に 3 つ。**required job な
 
 ### `dropin-e2e` workflow (PR トリガー)
 
-- `.github/workflows/dropin-e2e.yml` が drop-in 互換の e2e を **4 シナリオ並列**で実行する。
+- `.github/workflows/dropin-e2e.yml` が drop-in 互換の e2e を **5 シナリオ並列**で実行する。
   `strategy.matrix.include` で make target と check 表示名を対にしている。
 
   | check 名 | 実行内容 |
@@ -654,6 +655,7 @@ checkout / setup-go を除くと step は実行順に 3 つ。**required job な
   | `mkgo-born` | `make dropin-mkgo-born-test` — mk-go 生まれの DB を TS に引き渡せるか (#2379 / #2383) |
   | `ed25519-verify` | `make dropin-fedibird-test` — Fedibird-like AP mock との Ed25519 双方向 verify (#1083 / #2360) |
   | `federation` | `make federation-misskey-e2e` — 本物の Misskey TS を相手にした実連合 (#2362) |
+  | `federation-mastodon` | `make federation-mastodon-e2e` — 本物の Mastodon を相手にした引用の承認 (FEP-044f、#3234) |
 
 - `mkgo-born` は `swap-test` と似て見えるが **DB を作った側が違う** (前者は mk-go の
   migration、後者は TypeORM)。TS が一度も触っていない schema を受け取るのは前者だけで、
@@ -932,6 +934,16 @@ PR では回らないので、失敗は Actions 上で確認して別 PR で対�
 個別 fix の履歴は CHANGELOG.md 側に集約しており、本セクションは CLAUDE.md 本体
 (Section 1-10 の policy / Makefile target / CI 閾値 / CI workflow 等) を変更した
 タイミングのみ記録する。
+
+- **2026-09-30**: Section 3 に `make federation-mastodon-e2e`、Section 8 の `dropin-e2e` に
+  `federation-mastodon` シナリオを追加 (#3234)。`make help` の target は 139 → 141
+  (`federation-mastodon-e2e` / `-down`)。**引用の承認 (FEP-044f) は相手の実装が読めるかでしか
+  確かめられない** — こちらのユニットテストは「自分で描画して自分で読む」ことしか保証せず、
+  Mastodon が `interactionPolicy` をどう解釈し、Accept の `result` をどう検証するかは実物に
+  喋らせないと分からない。公式 image (`ghcr.io/mastodon/mastodon:v4.7.2`) をそのまま使い、
+  秘密鍵は起動時に生成する (commit しない)。**変異で落ちることを確かめてある** —
+  範囲を配らない形で 4 件中 3 件、承認を返さない形で承認のテスト、ブロック時に Reject せず
+  承認する形で Reject のテストが落ちる。
 
 - **2026-09-26**: `.github/workflows/` の action を**全て commit SHA で固定**した (`# vX.Y.Z` の
   コメント付き。`actions/*` も例外にしない)。tag は付け替えられるので、`packages: write` で

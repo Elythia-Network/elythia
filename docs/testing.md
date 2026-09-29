@@ -12,6 +12,7 @@
 | 統合テスト | リポジトリ、Redis連携 | 実 PostgreSQL (`TEST_DB_*`) + Redis (testcontainers) | `go test ./internal/core/...` |
 | E2Eテスト (Playwright) | フロントエンド操作 / API | 実DB + フロントエンド | `make playwright-test` (詳細は[Playwright](playwright.md)) |
 | 連合テスト | mk-go ↔ 本物の Misskey TS の AP 通信 | Docker Compose多段 | `make federation-misskey-e2e` (起動から撤去まで通し。個別に叩くなら `-up` → `-test` → `-down`) |
+| 連合テスト (Mastodon) | mk-go ↔ 本物の Mastodon の引用の承認 (FEP-044f) | Docker Compose多段 | `make federation-mastodon-e2e` (起動から撤去まで通し) |
 | Drop-in e2e (pytest) | TS-A backend を mk-A に差し替えて state preservation 検証 | TS 2 instance + mk overlay | `make dropin-swap-test` (#365 / #367 / #372 / #374、詳細は[dropin-e2e.md](dropin-e2e.md)) |
 | Drop-in frontend e2e (cypress) | 3 TS instance + mk overlay swap で frontend 視点の互換 | cypress + 3 TS + mk-A | `make dropin-frontend-swap-test` (#380 / #381 / #387 / #394、詳細は[dropin-frontend-e2e.md](dropin-frontend-e2e.md)) |
 | Playwright e2e | mk-go と Misskey TS の両 backend で API/frontend 統合互換を検証 | Docker Compose 全部 | `tests/playwright/` 配下 (#744、298 spec ファイル。PR ごとに mk-go、upstream 追従時に TS backend) |
@@ -372,7 +373,7 @@ make dropin-mk-up              # 上から mk-A overlay (= clean DB の mk-A)
 make dropin-swap-test          # TS-then-mk 切替シナリオ (bash orchestrator)
 ```
 
-PR ごとに `.github/workflows/dropin-e2e.yml` が **4 シナリオ**を並列実行する
+PR ごとに `.github/workflows/dropin-e2e.yml` が **5 シナリオ**を並列実行する
 (`fail-fast: false`)。required check には入れない。
 
 | check 名 | make target | 見ているもの |
@@ -381,6 +382,7 @@ PR ごとに `.github/workflows/dropin-e2e.yml` が **4 シナリオ**を並列�
 | `mkgo-born` | `dropin-mkgo-born-test` | **mk-go 生まれの DB を TS に引き渡せるか** (= ロックインの有無、#2383) |
 | `ed25519-verify` | `dropin-fedibird-test` | Fedibird-like mock との Ed25519 双方向 verify (#1083) |
 | `federation` | `federation-misskey-e2e` | 本物の Misskey TS を相手にした実連合 (#2362) |
+| `federation-mastodon` | `federation-mastodon-e2e` | 本物の Mastodon を相手にした引用の承認 (FEP-044f、#3234) |
 
 `swap-test` と `mkgo-born` は似て見えるが **DB を作った側が違う** (前者は TypeORM、
 後者は mk-go の migration)。TS が一度も触っていない schema を受け取るのは後者だけ。

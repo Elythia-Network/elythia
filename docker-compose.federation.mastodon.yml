@@ -1,0 +1,200 @@
+# mk-go ↔ Mastodon の実連合 e2e (#3234)。Mastodon 4.5 以降が使う引用の承認
+# (FEP-044f) を、本物の Mastodon を相手に確かめる。
+#
+# project name を分ける (#804)。既定の `mk` だと UDS 本番のコンテナ群と衝突する。
+name: mk-federation-mastodon
+
+x-mastodon-env: &mastodon-env
+  RAILS_ENV: production
+  LOCAL_DOMAIN: mastodon
+  DB_HOST: postgres-masto
+  DB_USER: mastodon
+  DB_NAME: mastodon
+  DB_PASS: testpass
+  REDIS_HOST: redis-masto
+  ES_ENABLED: "false"
+  # 自己署名の証明書を信頼させる (Ruby の OpenSSL は SSL_CERT_FILE を読む)。
+  SSL_CERT_FILE: /certs/bundle.pem
+  # コンテナ間の通信は docker の私有レンジ。Mastodon は既定で私有 IP への取得を
+  # 止めるので、これが無いと mk-go の actor も投稿も取れない。
+  ALLOWED_PRIVATE_ADDRESSES: 127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+
+x-mastodon-image: &mastodon-image ghcr.io/mastodon/mastodon:v4.7.2
+
+services:
+  certs:
+    image: alpine:3.21
+    command: >
+      sh -c "apk add --no-cache openssl >/dev/null 2>&1 && /gen-certs.sh"
+    environment:
+      CERT_DOMAINS: mkgo mastodon
+    volumes:
+      - certs:/certs
+      - ./tests/federation/common/gen-certs.sh:/gen-certs.sh:ro
+
+  # ── mk-go ──────────────────────────────────────────────────
+  postgres-mkgo:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: misskey
+      POSTGRES_USER: misskey
+      POSTGRES_PASSWORD: testpass
+    healthcheck:
+      test: pg_isready -U misskey
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    networks: [federation]
+
+  redis-mkgo:
+    image: redis:7-alpine
+    healthcheck:
+      test: redis-cli ping
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    networks: [federation]
+
+  app-mkgo:
+    build:
+      context: .
+      dockerfile: tests/federation/common/Dockerfile.mkgo
+    environment:
+      SSL_CERT_FILE: /certs/bundle.pem
+      TZ: Asia/Tokyo
+    depends_on:
+      postgres-mkgo: {condition: service_healthy}
+      redis-mkgo: {condition: service_healthy}
+      certs: {condition: service_completed_successfully}
+    volumes:
+      - certs:/certs:ro
+      - ./tests/federation/common/mkgo.yml:/app/.config/default.yml:ro
+    healthcheck:
+      test: ["CMD", "/app/misskey", "-healthcheck", "-config", ".config/default.yml"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+    networks: [federation]
+
+  nginx-mkgo:
+    image: nginx:alpine
+    volumes:
+      - ./tests/federation/common/nginx-mkgo-ssl.conf:/etc/nginx/nginx.conf:ro
+      - certs:/certs:ro
+    depends_on:
+      app-mkgo: {condition: service_healthy}
+    networks:
+      federation:
+        aliases: [mkgo]
+
+  # ── Mastodon ───────────────────────────────────────────────
+  postgres-masto:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: mastodon
+      POSTGRES_USER: mastodon
+      POSTGRES_PASSWORD: testpass
+    healthcheck:
+      test: pg_isready -U mastodon
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    networks: [federation]
+
+  redis-masto:
+    image: redis:7-alpine
+    healthcheck:
+      test: redis-cli ping
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    networks: [federation]
+
+  # 秘密鍵の生成・DB の用意・テスト用アカウントとトークンの作成を 1 回だけ行う。
+  # 秘密鍵はリポジトリに置かず、ここで作って共有ボリュームで web / sidekiq に渡す。
+  masto-setup:
+    image: *mastodon-image
+    user: root
+    environment: *mastodon-env
+    command: ["bash", "/setup/setup.sh"]
+    depends_on:
+      postgres-masto: {condition: service_healthy}
+      redis-masto: {condition: service_healthy}
+    volumes:
+      - masto-shared:/shared
+      - ./tests/federation/mastodon/setup.sh:/setup/setup.sh:ro
+      - ./tests/federation/mastodon/create_token.rb:/setup/create_token.rb:ro
+    networks: [federation]
+
+  masto-web:
+    image: *mastodon-image
+    environment: *mastodon-env
+    command: ["bash", "-c", "set -a && . /shared/env && set +a && exec bundle exec puma -C config/puma.rb"]
+    depends_on:
+      masto-setup: {condition: service_completed_successfully}
+      certs: {condition: service_completed_successfully}
+    volumes:
+      - masto-shared:/shared:ro
+      - certs:/certs:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s --noproxy localhost localhost:3000/health | grep -q OK"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+    networks: [federation]
+
+  masto-sidekiq:
+    image: *mastodon-image
+    environment: *mastodon-env
+    command: ["bash", "-c", "set -a && . /shared/env && set +a && exec bundle exec sidekiq"]
+    depends_on:
+      masto-setup: {condition: service_completed_successfully}
+      certs: {condition: service_completed_successfully}
+    volumes:
+      - masto-shared:/shared:ro
+      - certs:/certs:ro
+    networks: [federation]
+
+  nginx-masto:
+    image: nginx:alpine
+    volumes:
+      - ./tests/federation/mastodon/nginx-mastodon-ssl.conf:/etc/nginx/nginx.conf:ro
+      - certs:/certs:ro
+    depends_on:
+      masto-web: {condition: service_healthy}
+      certs: {condition: service_completed_successfully}
+    networks:
+      federation:
+        aliases: [mastodon]
+
+  # ── Test Runner ────────────────────────────────────────────
+  test-runner:
+    profiles: ["test"]
+    build:
+      context: ./tests/federation
+      dockerfile: common/Dockerfile
+    environment:
+      MKGO_URL: https://mkgo
+      MASTODON_URL: https://mastodon
+      MKGO_DOMAIN: mkgo
+      MASTODON_DOMAIN: mastodon
+      MASTODON_TOKEN_FILE: /shared/mastodon_token
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ./tests/federation:/tests:ro
+      - masto-shared:/shared:ro
+    working_dir: /tests/mastodon
+    depends_on:
+      nginx-mkgo: {condition: service_started}
+      nginx-masto: {condition: service_started}
+      app-mkgo: {condition: service_healthy}
+      masto-web: {condition: service_healthy}
+    networks: [federation]
+
+volumes:
+  certs:
+  masto-shared:
+
+networks:
+  federation:
+    driver: bridge

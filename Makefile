@@ -6,6 +6,7 @@
 	federation-misskey-build federation-misskey-up federation-misskey-test \
 	federation-misskey-e2e \
 	federation-misskey-down federation-misskey-logs \
+	federation-mastodon-e2e federation-mastodon-down \
 	dropin-up dropin-down dropin-test dropin-logs \
 	dropin-mk-up dropin-mk-test dropin-mk-down dropin-mk-logs dropin-swap-test dropin-fedibird-test \
 	dropin-mkgo-born-test \
@@ -530,6 +531,15 @@ federation-misskey-down: ## 連合テストスタックを撤去
 
 federation-misskey-logs: ## 連合テストスタックのログを表示
 	docker compose -f $(FEDERATION_MISSKEY_COMPOSE) logs -f
+
+# 本物の Mastodon を相手にした実連合 e2e (#3234)。引用の承認 (FEP-044f) を見る。
+FEDERATION_MASTODON_COMPOSE=docker-compose.federation.mastodon.yml
+
+federation-mastodon-e2e: ## Mastodon との連合テストを起動から撤去まで通しで実行
+	./tests/federation/run-mastodon-test.sh
+
+federation-mastodon-down: ## Mastodon との連合テストスタックを撤去
+	docker compose -f $(FEDERATION_MASTODON_COMPOSE) --profile test down -v
 
 # Drop-in e2e (#365) ― Misskey TS 2 インスタンス (A, B) を立ち上げて
 # 連合基盤を検証する。Phase 13-1 では TS ↔ TS の smoke test のみ。

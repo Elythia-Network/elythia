@@ -1,6 +1,6 @@
 name: Drop-in e2e
 
-# drop-in 互換の regression を検知する e2e を 4 シナリオ並列で実行する。
+# drop-in 互換の regression を検知する e2e を 5 シナリオ並列で実行する。
 #
 # - swap-test      (`make dropin-swap-test`)       TS→mk 切替の state preservation (#374)
 # - mkgo-born      (`make dropin-mkgo-born-test`)  mk-go 生まれの DB を TS に
@@ -10,6 +10,8 @@ name: Drop-in e2e
 # - federation     (`make federation-misskey-e2e`) 本物の Misskey TS を相手にした
 #                                                  実連合 (follow / note / reaction /
 #                                                  renote / reply / mention / delete)
+# - federation-mastodon (`make federation-mastodon-e2e`) 本物の Mastodon を相手に
+#                                                  した引用の承認 (FEP-044f、#3234)
 #
 # ed25519-verify は #2360 で追加した。Ed25519 署名は mk-go 独自の先行実装で、
 # 他実装と本当に相互運用できるかは実際に喋らせないと分からない。ユニットテスト
@@ -53,6 +55,7 @@ on:
       - "go.mod"
       - "go.sum"
       - "docker-compose.federation.misskey.yml"
+      - "docker-compose.federation.mastodon.yml"
       # drop-in stack の定義そのもの。ここが抜けていると compose を壊す変更で
       # workflow が**発火せず緑に見える**。frontend 用の
       # `docker-compose.dropin-frontend*.yml` は別 workflow の管轄なので含めない。
@@ -109,6 +112,10 @@ jobs:
             make: federation-misskey-e2e
             image: misskey/misskey:2026.9.1
             compose: -f docker-compose.federation.misskey.yml
+          - name: federation-mastodon
+            make: federation-mastodon-e2e
+            image: ghcr.io/mastodon/mastodon:v4.7.2
+            compose: -f docker-compose.federation.mastodon.yml --profile test
     name: ${{ matrix.name }}
 
     steps:
@@ -187,7 +194,7 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm build
 
-      - name: Pre-pull Misskey TS image
+      - name: Pre-pull the scenario image
         # 旧版は `&` で background 化していたが、GitHub Actions の `run:`
         # step は step 終了で shell process が exit するため background
         # process の継続が runner 環境で保証されない (= pre-pull 効果が
