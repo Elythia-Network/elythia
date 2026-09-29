@@ -120,6 +120,14 @@ func (b *URLBuilder) NoteURI(noteID string) string {
 	return b.baseURL + "/notes/" + noteID
 }
 
+// QuoteAuthorizationURI returns the URI of a FEP-044f approval stamp for a
+// local note (#3234). 承認の URI は承認した作者のホストでなければならない
+// (Mastodon は Accept の actor と承認の URI のホストを突き合わせる) ので、自分の
+// 投稿の下に置く。
+func (b *URLBuilder) QuoteAuthorizationURI(noteID, authorizationID string) string {
+	return b.NoteURI(noteID) + "/quote-authorizations/" + authorizationID
+}
+
 // CreateActivityURI returns the URI of the Create activity wrapping a note.
 func (b *URLBuilder) CreateActivityURI(noteID string) string {
 	return b.NoteURI(noteID) + "/activity"
@@ -645,6 +653,8 @@ func (r *Renderer) RenderNote(n *model.Note, idGen id.Generator) *Note {
 		out.Content += `<br><br><span class="quote-inline">RE: <a href="` + esc + `">` + esc + `</a></span>`
 	}
 
+	out.InteractionPolicy = r.quotePolicy(n)
+
 	// 添付ファイル
 	r.addAttachments(out, n)
 
@@ -1143,6 +1153,75 @@ func (r *Renderer) RenderAccept(actorID string, inner any) *Accept {
 	}
 	AddContext(a)
 	return a
+}
+
+// quotePolicy advertises who may quote the note (FEP-044f、#3234)。
+//
+// 公開範囲より広く引用させない (FEP の推奨)。home (未収載) は公開と同じく誰でも
+// 引用できる (Mastodon の未収載と同じ)。**誰も引用できないときは作者だけを
+// 入れる** — 空配列は JSON-LD で「項目が無い」と同じになり、無いときの解釈は
+// 相手次第になる (FEP の指示)。
+func (r *Renderer) quotePolicy(n *model.Note) *InteractionPolicy {
+	var allowed []string
+	switch n.Visibility {
+	case model.NoteVisibilityPublic, model.NoteVisibilityHome:
+		allowed = []string{Public}
+	case model.NoteVisibilityFollowers:
+		allowed = []string{r.urls.UserFollowers(n.UserID)}
+	default:
+		allowed = []string{r.urls.UserURI(n.UserID)}
+	}
+	return &InteractionPolicy{CanQuote: &InteractionRule{AutomaticApproval: allowed}}
+}
+
+// RenderQuoteAuthorization returns the approval stamp for a quote of a local
+// note (FEP-044f、#3234)。引用する投稿も引用される投稿も URI だけを入れ、埋め
+// 込まない (FEP の MUST NOT。見る権限の無い相手へ中身を渡さないため)。
+func (r *Renderer) RenderQuoteAuthorization(note *model.Note, a *model.NoteQuoteAuthorization) *QuoteAuthorization {
+	out := &QuoteAuthorization{
+		Object: Object{
+			ID:   r.urls.QuoteAuthorizationURI(note.ID, a.ID),
+			Type: "QuoteAuthorization",
+		},
+		AttributedTo:      r.urls.UserURI(note.UserID),
+		InteractingObject: a.QuotingURI,
+		InteractionTarget: r.urls.NoteURI(note.ID),
+	}
+	AddContext(out)
+	return out
+}
+
+// RenderQuoteRequestAccept returns the Accept for a QuoteRequest (FEP-044f、
+// #3234)。object は受け取った QuoteRequest を id で指せる形に組み直し、result に
+// 承認の URI を入れる。Mastodon は object の id で自分の引用を引き当てる。
+func (r *Renderer) RenderQuoteRequestAccept(note *model.Note, a *model.NoteQuoteAuthorization, quoterURI string) *Accept {
+	acc := r.RenderAccept(note.UserID, r.quoteRequestObject(note, a, quoterURI))
+	acc.Result = r.urls.QuoteAuthorizationURI(note.ID, a.ID)
+	return acc
+}
+
+// RenderQuoteRequestReject returns the Reject for a QuoteRequest (FEP-044f)。
+func (r *Renderer) RenderQuoteRequestReject(note *model.Note, requestID, quotingURI, quoterURI string) *Reject {
+	return r.RenderReject(note.UserID, map[string]any{
+		"id":         requestID,
+		"type":       "QuoteRequest",
+		"actor":      quoterURI,
+		"object":     r.urls.NoteURI(note.ID),
+		"instrument": quotingURI,
+	})
+}
+
+func (r *Renderer) quoteRequestObject(note *model.Note, a *model.NoteQuoteAuthorization, quoterURI string) map[string]any {
+	obj := map[string]any{
+		"type":       "QuoteRequest",
+		"actor":      quoterURI,
+		"object":     r.urls.NoteURI(note.ID),
+		"instrument": a.QuotingURI,
+	}
+	if a.RequestID != nil {
+		obj["id"] = *a.RequestID
+	}
+	return obj
 }
 
 // RenderReject returns a Reject activity wrapping the given inner object

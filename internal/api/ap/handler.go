@@ -85,6 +85,8 @@ type Handler struct {
 	// noteRepo は outbox collection endpoint (#1878) の public note 取得 +
 	// pure renote の target URI 解決用。未配線なら outbox は 404。
 	noteRepo repository.NoteRepository
+	// quoteAuthorizations は引用の承認の実体を配る (FEP-044f、#3234)。
+	quoteAuthorizations QuoteAuthorizationStore
 }
 
 // SetFollowingRepo wires the repository used by the followers/following AP

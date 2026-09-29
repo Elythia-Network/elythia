@@ -34,7 +34,7 @@ mk-go は drop-in 互換 (同じ DB / Redis / frontend を Misskey TS と共有�
 |---|---|---|---|
 | API endpoint | GET variant 23 + alias 4 + 分割アップロード 4 + 承認制 7 + 絵文字の申請 10 + exact assignment lookup 2 + admin 観測 8 + 配送のブレーカー 1 + 消えたインスタンスの片付け 2 + 連合のルール 5 + IP 検索 3 + バブルゲームの対戦 7 | chat 15 | **0** |
 | API レスポンスの additive field | 8 (`runtime` / `mkGoVersion` / `chunkedUpload` / `approvalRequiredForSignup` / `registrationClosed` / `signupApplicationForm` / `canRequestCustomEmojis` / `minimumUsernameLength`) | reversi packed game の `crc32` 等 | — |
-| DB テーブル | 16 (+ bookkeeping 2) | 0 | 0 |
+| DB テーブル | 17 (+ bookkeeping 2) | 0 | 0 |
 | DB カラム | 23 (+ 未使用の残存列 3) | 3 | 0 |
 | ActivityPub | Ed25519 / RemoteStatsFetcher ほか | reversi 連合 / chat 連合 | — |
 | config キー | 20 前後 | 0 | — |
@@ -135,7 +135,7 @@ upstream 由来のクライアントはそのまま通る (省略時は upstream
 
 **逆方向の欠落はゼロ** — upstream の `@Entity` 76 テーブルと全共有カラムを mk-go が superset で保持している。
 
-### 2-1. mk-go 独自テーブル (18)
+### 2-1. mk-go 独自テーブル (19)
 
 | テーブル | 由来 | 理由 |
 |---|---|---|
@@ -153,6 +153,7 @@ upstream 由来のクライアントはそのまま通る (省略時は upstream
 | `instance_signature_capability` | mk-go 独自 | リモートインスタンスがどの署名方式に対応しているかを host 単位で記録する。判定材料は宣言 (actor の `assertionMethod[]`) / 受信観測 / 送信結果の 3 系統で、それぞれ単独では穴があるので併記する |
 | `instance_gone_suspension` | mk-go 独自 | shared inbox が 410 を返して goneSuspended になった時刻を host 単位で記録する (#3067)。消えたインスタンスとのフォロー関係を片付ける候補を「いつから消えているか」で並べるための起点。`instance` に停止した時刻の列が無く、共有テーブルに列を足すと TS へ戻したときに形が変わるので別テーブルにした。**行があっても今も消えているとは限らない** (管理者が戻した後も残る) ので、読む側は `instance."suspensionState"` で絞る。TS が立てた goneSuspended には行が無い (時刻は不明として表示する) |
 | `federation_rule` | mk-go 独自 | 連合のルール (#3090、§3-5)。ホスト単位の設定 (`meta` の `blockedHosts` など) に**追加の層として**重ねるもので、置き換えない。TS へ戻すとこのテーブルは読まれず**ルールだけが効かなくなる** (ホスト単位の設定は `meta` にあるので残る)。当たった件数と記録は Redis (`apFederationRule:*`) にだけ置く |
+| `note_quote_authorization` | mk-go 独自 | リモートの引用を承認した記録 (FEP-044f、#3234、§3-6)。1 行を承認の実体 (`QuoteAuthorization`) として配る。**消すと相手側の引用が未承認に戻る** — 第三者は引用を表示する前に承認を取得して確かめるので、行が無い (404) と承認が無いのと同じになる。引用される投稿への FK は `ON DELETE CASCADE` で、投稿を消せば承認も消える。TS へ戻すとこのテーブルは読まれず承認が 404 になり、**これまでの引用が相手側で未承認に戻る** (再検証されたとき)。**純正へは還元できない行** (upstream は FEP-044f に対応していない) |
 | `ip_lookup_log` | mk-go 独自 | IP とアカウントの対応を**誰がいつ引いたか**の記録 (#3106)。`admin/ip/*` は upstream に無い口 (#3104 / #3105) なので、その監査も upstream には無い。**`moderation_log` に入れない** — あちらは保持期間を持たず永久に残るのに、この記録に入るのは**照会に使った IP そのもの**で、IP とアカウントの対応と同じだけ機密性がある。`moderation_log` 全体に保持期間を入れると無関係な記録まで消えるので、専用テーブルを分けて 90 日で刈る (`user_ip` と同じ長さだが理由は別で、定数も別)。**結果そのものは記録しない** — 残すのは件数だけで、候補に出たアカウントや一致した IP は書かない (書くとこの表が第 2 の「IP とアカウントの対応」になる)。`user` への FK は張らない — 照会した人を消しても記録は残るのが監査として正しい (`signup_application` と同じ方針)。**純正へは還元できない行** (照会という機能自体が upstream に無い)。 |
 | `note_unread` | 準・独自 | upstream DB にも legacy 遺物として残るが 2026.7.0 の `models/` に entity は無く参照 0 件。mk-go はこれを実用し `/api/i` の `hasUnreadSpecifiedNotes` / `hasUnreadMentions` を Redis stream を舐めずに解決する。upstream legacy 版にある `noteChannelId` は mk-go の定義に無い (TS 製 DB では `CREATE TABLE IF NOT EXISTS` が no-op なので実害なし) |
 | `migrations` | drop-in 互換 | TypeORM の bookkeeping。mk-go 由来 DB に TS を後から繋いだ時に migration を再実行させないための seed。name は本家と同じ `ClassName+timestamp` 形式で 346 件を保持する (#2244 で短縮形から是正)。漏れは `TestMigrationSeed_CoversUpstream` が CI で検出する |
@@ -492,6 +493,20 @@ upstream には対応物が無い。
 - 送信側には適用しない
 
 ---
+
+### 3-6. 引用の承認 (FEP-044f、mk-go 独自)
+
+Mastodon 4.5 以降は、引用に**引用される側の承認**を求める (FEP-044f)。upstream の Misskey は対応していないので、Mastodon から見た Misskey の投稿は「誰も引用できない」になる (2026-09-30 に mastodon.social で実測: `misskey.io` も `go.k7a.org` も `quote_approval.automatic` が `[]`)。mk-go はこのうち**引用される側** (#3234 の段階 1 + 2) に対応した。
+
+- **引用してよい範囲を配る。** ローカルの投稿に `interactionPolicy.canQuote.automaticApproval` を付ける。public / home は `as:Public`、followers は作者の followers collection、specified は作者だけ (= 誰も引用できない。空配列は JSON-LD で「項目が無い」と同じになるので FEP の指示どおり作者を入れる)。**公開範囲より広く引用させない** (FEP の推奨)。語彙の IRI は Mastodon と同じ (`https://w3id.org/fep/044f#` と GoToSocial の `gts:`)
+- **`QuoteRequest` に自動で答える。** 投稿がローカルで、作者が凍結されておらず、公開範囲が許し (followers 限定なら引用者が作者をフォローしている)、どちらの向きにもブロックが無いときに承認して `Accept` を返す。`result` に承認の URI を入れ、`object` には受け取った `QuoteRequest` を id で返す (Mastodon は id で自分の引用を引き当てる)。activity の id が actor と別のホストなら答えない。**手動承認は持たない**
+- **引用する投稿 (`instrument`) を確かめる。** actor と同じホストの inline ならそれを、そうでなければ取得して、作者が actor であること・引用先がこちらの投稿であることを見る。**確かめられなければ答えない** (Mastodon も sanity check に落ちたら黙って捨てる。`Reject` にすると、引用する投稿を inline で送らない実装の正当な引用 — 取得が 401 / 404 になるもの — を恒久的に拒否してしまう)。引用先は `quote` / `_misskey_quote` / `quoteUrl` / `quoteUri` のどれでもよい。**取得しても取り込まない** — ここで取り込むと、後から届く `Create` が「既にある」になり、引用の通知と chart のフックが飛ばされる (#2686 と同じ形)
+- **inline の instrument は actor と同じホストなら取得せずに信じる** (Mastodon の `import_instrument` と同じ)。そのため、相手が引用する投稿の id を作り出せば、公開の投稿 1 件あたりの承認の行を増やせる。行は投稿を消すと一緒に消え、1 行は数百バイトなので、今は上限を置いていない
+- **承認の実体を配る。** `GET /notes/<id>/quote-authorizations/<承認 id>` が `QuoteAuthorization` を返す。**公開範囲では絞らない** — followers 限定の投稿への引用でも第三者が確かめに来るので。出すのは URI だけで、投稿の中身は埋め込まない (FEP の MUST NOT)。承認は `note_quote_authorization` (§2-1) に 1 行ずつ残し、投稿を消すと一緒に消える
+- **見せていない投稿には答えない。** ダイレクト・ローカル限定の投稿、フォロワーでない相手からのフォロワー限定の投稿、凍結・削除された作者の投稿への `QuoteRequest` には、`Reject` も返さない。`Reject` は作者の署名付きで作者の URI を載せるので、答えるだけで「その id の投稿がある」「誰が書いた」が分かる (aidx の id は時刻と連番なので推測できる)。`Reject` を返すのは、見えている投稿でブロックがあるときだけ。**Mastodon より少し広い** — Mastodon は公開と未収載にしか答えず、フォロワー限定の投稿にはフォロワーからでも答えないが、mk-go はフォロワーには承認する (FEP の範囲内)
+- **答えを届けられなければ再試行する。** 相手は `QuoteRequest` を自分からは送り直さないので、`Accept` / `Reject` の送信に失敗したら inbox の再試行に任せる。承認の記録は冪等なので、再試行でも承認は増えない
+- **既存の投稿は相手側で古いまま。** Mastodon は引用してよい範囲を投稿を最初に取得したときに保存し、`Update` を受けるまで更新しない。この変更より前に取得された投稿は、Mastodon 側では引き続き引用できない
+- **まだやっていないこと。** こちらから引用したときに承認を取りに行く (`QuoteRequest` を送る、`quote` を付ける)、承認の取り消し (`Delete`)、受け取った引用の承認の検証。**後からブロックしても、出した承認は取り消されない** (段階 4)。受け取った引用は**従来どおり承認を見ずに表示する** (#3234 の段階 3 / 4 と論点)
 
 ## 4. 設定ファイル (YAML) の独自キー
 

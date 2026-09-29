@@ -974,6 +974,19 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// inbound Follow に対する Accept 返送は processor から直接呼ぶ (original
 	// Follow の id を保持したまま相手に返すため、service 層を経由しない)。
 	federationProcessor.SetInboundFollowAcceptor(followingDeliveryHook)
+	// FEP-044f: リモートからの QuoteRequest に答え、承認の実体を配る (#3234)。
+	quoteAuthorizationRepo := repository.NewNoteQuoteAuthorizationRepository(s.db)
+	federationProcessor.SetQuoteRequestHandler(corefederation.NewQuoteRequestHandler(corefederation.QuoteRequestDeps{
+		Notes:     noteRepo,
+		Users:     userRepo,
+		Blocks:    blockingService,
+		Follows:   followingService,
+		Approvals: quoteAuthorizationRepo,
+		FetchNote: federationResolver.FetchNoteForVerification,
+		Respond:   corefederation.NewQuoteRequestDeliveryHook(deliverService, apRenderer),
+		URLs:      apURLs,
+		IDGen:     idGen,
+	}))
 	reactionService.SetFederationHook(corefederation.NewReactionDeliveryHook(deliverService, apRenderer, apURLs, idGen, userRepo))
 	// local user が remote user を (un)block した際に Block / Undo(Block) を
 	// 相手 inbox へ配信する (#1560)。
@@ -2449,6 +2462,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// Create / Announce の activity id (renderer が広告する <note URI>/activity)
 	// の dereference 先 (#2507)。upstream と同じくローカルノート専用。
 	s.echo.GET("/notes/:id/activity", apHandler.NoteActivity)
+	// FEP-044f の承認の実体 (#3234)。
+	apHandler.SetQuoteAuthorizationStore(quoteAuthorizationRepo)
+	s.echo.GET("/notes/:id/quote-authorizations/:authId", apHandler.QuoteAuthorization)
 	// ユーザーフィード (#2345)。upstream ClientServerService と同じく
 	// /@:user.rss / .atom / .json を返す。
 	feedHost := s.config.URL

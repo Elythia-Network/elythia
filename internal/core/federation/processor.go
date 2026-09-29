@@ -75,6 +75,9 @@ type Processor struct {
 	// Block/Flag/Move/Add/Remove federation hooks.
 	// SetBlockingService等で注入。nilの場合は対応activityがErrUnsupportedActivityを返す。
 	blockingService *coreblocking.Service
+	// quoteRequests は FEP-044f の QuoteRequest に答える (#3234)。未配線なら
+	// ErrUnsupportedActivity。
+	quoteRequests   *QuoteRequestHandler
 	abuseReportRepo repository.AbuseReportRepository
 	abuseIDGen      id.Generator
 	// abuseInAppNotifier はリモートからの通報 (AP Flag) をモデレーターの通知欄に
@@ -170,6 +173,31 @@ type InboundFollowAcceptor interface {
 // for inbound Follow activities targeting local users.
 func (p *Processor) SetInboundFollowAcceptor(a InboundFollowAcceptor) {
 	p.inboundFollowAcceptor = a
+}
+
+// SetQuoteRequestHandler wires FEP-044f QuoteRequest handling (#3234).
+func (p *Processor) SetQuoteRequestHandler(h *QuoteRequestHandler) {
+	p.quoteRequests = h
+}
+
+// handleQuoteRequest answers a FEP-044f QuoteRequest for a local note (#3234).
+func (p *Processor) handleQuoteRequest(act genericActivity) error {
+	if p.quoteRequests == nil {
+		return ErrUnsupportedActivity
+	}
+	// activity の id は actor と同じホストのものだけ受ける (Mastodon と同じ)。
+	// 違うと、Accept の object に他人の activity の id を返すことになる。
+	if act.ID == "" || !sameHost(act.ID, act.Actor) {
+		return nil
+	}
+	quoter, err := p.resolver.ResolveActor(act.Actor)
+	if err != nil {
+		if isPermanentSkipError(err) {
+			return nil
+		}
+		return err
+	}
+	return p.quoteRequests.Handle(quoter, act.raw)
 }
 
 // SetLocalBaseURL configures the local instance's base URL. This is used to
@@ -529,6 +557,8 @@ func (p *Processor) dispatchActivity(act genericActivity, depth int, signer *mod
 		return p.handleChatMessage(act)
 	case "collection", "orderedcollection":
 		return p.handleCollection(act, depth, signer)
+	case "quoterequest", "https://w3id.org/fep/044f#quoterequest":
+		return p.handleQuoteRequest(act)
 	}
 	return ErrUnsupportedActivity
 }

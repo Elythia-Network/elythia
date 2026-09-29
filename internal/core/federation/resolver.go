@@ -4388,6 +4388,39 @@ func (r *Resolver) fetchObjectWithFinalURL(uri string) ([]byte, string, error) {
 	return body, "", err
 }
 
+// FetchNoteForVerification fetches a remote Note without ingesting it and
+// returns it with the same host checks as ResolveNote (#3234).
+//
+// **取り込まない。** QuoteRequest の instrument を確かめるためだけに読む。ここで
+// 取り込むと、後から届く Create が「既にある」(created=false) になり、引用の
+// 通知と chart のフックが飛ばされる (#2686 と同じ形)。
+func (r *Resolver) FetchNoteForVerification(uri string) (*activitypub.Note, error) {
+	// ResolveNote の fetch 経路 (resolveNoteOnce) と同じ検査を当てる: 連合の
+	// 許可、AS の @context、取得した id と応答したホスト、要求したホストの一致。
+	if !r.hostAllowedForURI(uri) {
+		return nil, ErrHostNotAllowed
+	}
+	body, finalURL, err := r.fetchObjectWithFinalURL(uri)
+	if err != nil {
+		return nil, err
+	}
+	var note activitypub.Note
+	if err := json.Unmarshal(body, &note); err != nil {
+		return nil, fmt.Errorf("fetch note for verification: %w", ErrInvalidNote)
+	}
+	if !hasActivityStreamsContext(note.Context) {
+		return nil, ErrInvalidNote
+	}
+	note.ID = trimWHATWGURL(note.ID)
+	if err := assertResponseHostMatches(finalURL, note.ID); err != nil {
+		return nil, err
+	}
+	if err := assertRequestHostMatches(uri, note.ID); err != nil {
+		return nil, err
+	}
+	return &note, nil
+}
+
 // hasActivityStreamsContext reports whether a fetched AP object's `@context`
 // includes the ActivityStreams 2.0 namespace, replicating upstream
 // Resolver.resolve の invalid-response guard (72180409, #1828)。本家同様に
