@@ -1,4 +1,4 @@
-# プロジェクトの構成の再編 (正式改名・frontend の組み込み・テスト配置の整理・プラグインの仕組みの改名)
+# プロジェクトの構成の再編 (正式改名・frontend の組み込み・テスト配置の整理・プラグインまわりの名前の整理)
 
 **Status**: Draft (#3180、2026-09-24。正式名は 2026-09-30 に決定) / **Scope**: リポジトリ全体の構成、改名の範囲、本家 Misskey への追従方式
 
@@ -12,7 +12,7 @@
 
 1. 同梱 frontend を本体リポジトリへ組み込み、`third_party/` をなくす
 2. テスト関連の配置を整理する
-3. プラグインの仕組みの呼び名を改める (本家 frontend のクライアントプラグインと紛らわしいため)
+3. プラグインまわりで旧名 (mk / mk-go) を含む名前を Elythia に揃える。**「plugin」という呼び名そのものは変えない** (2026-09-30 決定)
 
 名前が変わるとモジュールパス・リポジトリ名・イメージ名・パスがほぼ全て動くので、構成の見直しを別の機会に分けると同じ箇所を 2 度書き換えることになる。
 
@@ -37,7 +37,9 @@
 | User-Agent | `Elythia/<version> (<url>)` |
 | GitHub のリポジトリ | `Elythia-Network/elythia` (URL は `github.com/elythia-network/elythia` でも届く) |
 | Go のモジュールパス | `github.com/elythia-network/elythia` |
-| プラグインのモジュール | `github.com/elythia-network/<名前>` (プラグインの呼び名が決まったら接頭辞を決める。Q8) |
+| プラグインのモジュール | `github.com/elythia-network/elythia-plugin-<名前>` |
+| プラグインのマニフェスト | `elythia-plugin.yml` |
+| nodeinfo のプラグインの宣言 | `metadata.elythiaPlugins` |
 | 配布イメージ | `ghcr.io/elythia-network/elythia` (`-bundled` も同じ置き場所) |
 | 実行バイナリ | `elythia` (`cmd/elythia`、`built/elythia`) |
 | frontend のページ | `/about-elythia` (旧 `/about-mkgo` は転送) |
@@ -52,7 +54,7 @@
 | frontend のページ名 (`/about-mkgo` など) と画面の文言 | `/about-elythia` と表示名 `Elythia` にする。旧 URL は転送する (Q5) |
 | ドキュメント | 新しい名前にする。CHANGELOG と CLAUDE.md の更新記録の過去の記述は書き換えない |
 | 関数名などコード上の識別子 | 据え置き |
-| `/api/meta` の `mkGoVersion` / `mkGoCommit` / `mkGoFrontendVersion`、`internal/core/procstats` の `mkGo` | 据え置き (同梱 frontend と外部クライアントが読む wire の項目)。nodeinfo の `mkGoPlugins` は R4 で扱う |
+| `/api/meta` の `mkGoVersion` / `mkGoCommit` / `mkGoFrontendVersion`、`internal/core/procstats` の `mkGo` | 据え置き (同梱 frontend と外部クライアントが読む wire の項目)。nodeinfo の `mkGoPlugins` は連合で使う宣言なので R4 で改める |
 | 環境変数の接頭辞 `MK_` | 据え置き (運営者の設定を壊さない) |
 
 ### R2. frontend の組み込み
@@ -71,25 +73,25 @@
 - ベンチを `tests/bench/` の下にまとめ、名前の揺れを揃える
 - リポジトリ直下には運営者向けの compose (`docker-compose.yml` / `docker-compose.image.yml` / `compose.uds.yaml.example`) だけを残し、`docker-compose.yml` にも `name:` を付ける
 
-### R4. プラグインの仕組みの改名
+### R4. プラグインまわりの名前を Elythia に揃える
 
-「plugin」という呼び名そのものを新しい語に変える。語は未決 (Q8)。
+**「plugin」という呼び名は変えない (2026-09-30 決定)。** 当初は Misskey 本家の frontend にある**クライアントプラグイン** (AiScript、`/settings/plugin`) と紛らわしいので語ごと変える案だったが、据え置くことにした。紛らわしさは今と同じく、管理 API の名前空間を分けて避ける (`admin/server-plugins`、`internal/api/admin/server_plugins.go`)。
 
-語を変える理由は、Misskey 本家の frontend にある**クライアントプラグイン** (AiScript、`/settings/plugin`) と紛らわしいため。今も `admin/server-plugins` の名前空間を分けて衝突を避けている (`internal/api/admin/server_plugins.go`)。
+変えるのは、**旧名 (mk / mk-go) を名前に含むものだけ**。R1 の「機械が読む名前は小文字」に従う。
 
 | 対象 | 今の名前 | 扱い |
 |---|---|---|
-| 公開パッケージ (プラグイン作者が import する) | `plugin/` (`plugintest` / `peercache` を含む) | 新しい語にする。中の型名・関数名 (`Definition` など) は据え置き |
-| マニフェスト | `mk-plugin.yml` | 新しい名前にする。旧名も猶予期間は読む |
-| プラグインのモジュール名・リポジトリ名 | `mk-plugin-*` | 新しい名前にする (R1 のモジュールパス変更と同時) |
-| 置き場 | `plugins/` | 新しい語にする |
-| 運営者の設定キー | `plugins.<name>.*` | 新しい語にする。旧キーも猶予期間は読む |
-| 管理 API | `admin/server-plugins` | 新しい語にする。旧名も猶予期間は受け付ける |
-| プラグインごとの DB schema | `plugin_<name>` | 新しい語へ移す (D8) |
-| プラグインのジョブキュー | `plugin:<name>` | 新しい語へ移す (D8) |
-| 相手サーバーのプラグインを呼ぶ経路 (連合) | `/plugin/<name>/...` | 新しい語にする。旧経路も猶予期間は受け付ける (D8) |
-| nodeinfo の宣言 (連合) | `metadata.mkGoPlugins` | 新しい名前にする。猶予期間は両方を出し、両方を読む (D8) |
-| ツール・生成物・ドキュメント | `tools/pluginbuild` / `plugindev` / `pluginresolve`、`*plugins.generated.*`、`docs/plugins/` | 新しい語にする |
+| マニフェスト | `mk-plugin.yml` | `elythia-plugin.yml` にする。旧名も猶予期間は読む (D8) |
+| プラグインのモジュール名・リポジトリ名 | `github.com/shiroha-a/mk-plugin-*` | `github.com/elythia-network/elythia-plugin-*` にする (R1 のモジュールパス変更と同時) |
+| nodeinfo の宣言 (連合) | `metadata.mkGoPlugins` | `metadata.elythiaPlugins` にする。猶予期間は両方を出し、両方を読む (D8) |
+| 公開パッケージ | `plugin/` (`plugintest` / `peercache` を含む) | 据え置き。import パスは R1 のモジュールパス変更で `github.com/elythia-network/elythia/plugin` に変わる |
+| 置き場 | `plugins/` | 据え置き |
+| 運営者の設定キー | `plugins.<name>.*` | 据え置き |
+| 管理 API | `admin/server-plugins` | 据え置き |
+| プラグインごとの DB schema | `plugin_<name>` | 据え置き (移行は要らない) |
+| プラグインのジョブキュー | `plugin:<name>` | 据え置き (移行は要らない) |
+| 相手サーバーのプラグインを呼ぶ経路 (連合) | `/plugin/<name>/...` | 据え置き |
+| ツール・生成物・ドキュメント | `tools/pluginbuild` / `plugindev` / `pluginresolve`、`*plugins.generated.*`、`docs/plugins/` | 据え置き。文面の「mk-go」は R1 のドキュメントの改名で Elythia にする |
 | 内部のコード上の識別子 | `pluginstore`、`PluginQueuePrefix` など | 据え置き (R1 と同じ) |
 
 ### R5. TS Misskey への復路の保証をやめる (#3191)
@@ -211,16 +213,13 @@ tests/
 - 配布イメージは旧名でもしばらく publish するか (猶予) を決める
 - nodeinfo / UA の変更は連合先の一覧に出る名前が変わる。CHANGELOG の Note に書く
 
-### D8. プラグインの仕組みの改名 (R4)
+### D8. プラグインまわりの名前の移行 (R4)
 
-保存されたデータと連合に出る名前は、**旧版から上げた運営者と、旧版のままの連合先の両方**を壊さないように移す。旧名を読む経路は猶予期間 (Q9) のあと撤去する。
+呼び名を変えないので、**保存されたデータ (DB schema・ジョブキュー) の移行は要らない。** 移すのは、旧名を含む名前のうち運営者とプラグイン作者と連合先に見えるものだけ。旧版から上げた運営者と、旧版のままの連合先の両方を壊さないようにし、旧名を読む経路は猶予期間 (Q9) のあと撤去する。
 
-- **DB schema** (`plugin_<name>` → 新しい接頭辞): 起動時に `pluginstore` が「旧 schema があって新 schema が無い」ときだけ `ALTER SCHEMA ... RENAME TO` する。rename はメタデータの書き換えだけなのでデータ量に依存しない。**旧版へ戻すと旧版は新 schema を見つけられない**ので、戻し方 (手で逆 rename する手順) を CHANGELOG の Note に書く
-- **ジョブキュー** (`plugin:<name>` → 新しい接頭辞): Redis のキーを rename しない (BullMQ のキーはジョブのハッシュ・リスト・ロックに分かれており、一部だけ移ると壊れる)。定期ジョブは起動時に新しいキューへ登録し直し、旧キューの定期ジョブは撤去する (#3171 の `PruneUnregistered` と同じ形)。旧キューに残った待機中・遅延中のジョブは、猶予期間だけ旧キューにも worker を付けて**捌ききる**。新規の投入は新しいキューにだけ行う
-- **連合の経路** (`/plugin/<name>/...`): 新旧の両方を同じ handler に配線する。呼び出す側は、相手の nodeinfo に新しい宣言があれば新経路、旧い宣言しか無ければ旧経路を使う
-- **nodeinfo の宣言** (`metadata.mkGoPlugins`): 猶予期間は新旧両方の key に同じ値を出し、読む側 (`internal/server/plugin_peer_lookup.go`) は新しい key を優先して旧い key へフォールバックする
-- **設定キー・マニフェスト・管理 API**: 旧名を読んだら警告のログを出す。新旧の両方が書かれていたら起動エラーにする (どちらが効くのかを黙って決めない)
-- **公開パッケージの import パス**: R1 のモジュールパス変更と同時に変わるので、プラグイン作者向けの移行の案内 (D7) にまとめる。独立リポジトリのプラグイン 4 つは同じ段階で追従させる
+- **マニフェスト** (`mk-plugin.yml` → `elythia-plugin.yml`): `pluginbuild` は両方を探す。旧名だけがあれば読んで警告を出す。**両方があれば起動 (ビルド) エラーにする** — どちらが効くのかを黙って決めない
+- **nodeinfo の宣言** (`metadata.mkGoPlugins` → `metadata.elythiaPlugins`): 猶予期間は新旧両方の key に同じ値を出す。読む側 (`internal/server/plugin_peer_lookup.go`) は新しい key を優先し、旧い key へフォールバックする。相手が旧版のままでも、プラグインの連合の経路 (`/plugin/<name>/...`) は変わらないので、宣言を読めれば呼べる
+- **モジュール名** (`mk-plugin-*` → `elythia-plugin-*`): R1 のモジュールパス変更と同時に行う。独立リポジトリのプラグイン 4 つも同じ段階で追従させ、プラグイン作者向けの移行の案内 (D7) にまとめる
 
 ### D9. 復路の保証をやめる (R5)
 
@@ -240,9 +239,9 @@ tests/
 | P2 | テスト関連の配置の整理 (D6) | しない |
 | P3 | 本家の参照を `.cache/misskey` へ分離 (D2)。この時点では frontend はまだ submodule のまま | しない |
 | P4 | frontend の取り込み (D1 / D3 / D4 / D5)、submodule と fork の廃止 | しない |
-| P5 | 正式な名前 (**決定: Elythia**、2026-09-30) と、プラグインの仕組みの新しい呼び名 (未決) の決定 | — |
+| P5 | 正式な名前 (**決定: Elythia**) と、プラグインの呼び名 (**決定: 据え置き**) の決定。どちらも 2026-09-30 | — |
 | P6 | 改名 (D7) | する |
-| P6b | プラグインの仕組みの改名 (D8)。保存データと連合の移行を含むので P6 とは別 PR にする | する |
+| P6b | プラグインまわりの名前の移行 (D8)。連合に出る nodeinfo の宣言を含むので P6 とは別 PR にする | する |
 | P7 | ドキュメント・CLAUDE.md の整理 | する |
 
 - P1b を P3 / P4 より先に置くのは、TS を立てる e2e の読み先が動く段階で `mkgo-born` を「守る」対象から「測る」対象に変えておくため (D9)
@@ -258,8 +257,8 @@ tests/
 - Q5. 旧 URL (`/about-mkgo` など) の転送を残す期間
 - Q6. `assets/` (D3) の名前と置き場所
 - Q7. `mkGoFrontendVersion` の新しい形式 (D5)
-- Q8. プラグインの仕組みの新しい呼び名 (R4、P5)
-- Q9. プラグインの旧名 (マニフェスト・設定キー・管理 API・連合の経路・nodeinfo の key・旧キューの worker) を読み続ける猶予期間 (D8)
+- ~~Q8. プラグインの仕組みの新しい呼び名 (R4、P5)~~ → **据え置く** (2026-09-30)。旧名 (mk / mk-go) を含む名前だけ Elythia に揃える (R4)
+- Q9. プラグインの旧名 (マニフェスト `mk-plugin.yml`・nodeinfo の `mkGoPlugins`) を読み続ける猶予期間 (D8)
 
 ## リスク
 
