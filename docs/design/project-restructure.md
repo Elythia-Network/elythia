@@ -2,7 +2,7 @@
 
 **Status**: Draft (#3180、2026-09-24。正式名は 2026-09-30 に決定) / **Scope**: リポジトリ全体の構成、改名の範囲、本家 Misskey への追従方式
 
-未決事項 (末尾) が残っているので、段階を進めるごとにこの文書を更新する。作業の進み具合は #3180 と、段階ごとの sub-issue で管理する。
+未決事項 (末尾) はすべて決まった (2026-09-30)。段階を進めるごとにこの文書を更新する。作業の進み具合は #3180 と、段階ごとの sub-issue で管理する。
 
 ---
 
@@ -49,12 +49,13 @@
 | nodeinfo `software.name`、User-Agent | `elythia` / `Elythia/<version> (<url>)` にする |
 | Go のモジュールパス (`github.com/shiroha-a/mk`)、プラグインのモジュール名 (`github.com/shiroha-a/mk-plugin-*`) | `github.com/elythia-network/...` にする。独立リポジトリのプラグイン 4 つ (fedwatch / genshin / hsr / nowplaying) も追従させる |
 | GitHub のリポジトリ (`shiroha-a/mk`) | `Elythia-Network` へ移管し、名前を `elythia` にする (GitHub が旧 URL から転送する。D7) |
-| 配布イメージ (`ghcr.io/shiroha-a/mk`、`-bundled`) | `ghcr.io/elythia-network/elythia` にする。旧名での配布の猶予は未決 (Q4) |
+| 配布イメージ (`ghcr.io/shiroha-a/mk`、`-bundled`) | `ghcr.io/elythia-network/elythia` にする。**旧名での配布は改名の版で止める** (Q4)。旧名の最後の版と CHANGELOG の Note で移転を案内する |
 | 実行バイナリ名 (`cmd/misskey`、`built/misskey`) | `elythia` にする |
-| frontend のページ名 (`/about-mkgo` など) と画面の文言 | `/about-elythia` と表示名 `Elythia` にする。旧 URL は転送する (Q5) |
+| frontend のページ名 (`/about-mkgo` など) と画面の文言 | `/about-elythia` と表示名 `Elythia` にする。**旧 URL は転送しない** (Q5。専用ページをわざわざブックマークする人はいない) |
 | ドキュメント | 新しい名前にする。CHANGELOG と CLAUDE.md の更新記録の過去の記述は書き換えない |
 | 関数名などコード上の識別子 | 据え置き |
-| `/api/meta` の `mkGoVersion` / `mkGoCommit` / `mkGoFrontendVersion`、`internal/core/procstats` の `mkGo` | 据え置き (同梱 frontend と外部クライアントが読む wire の項目)。nodeinfo の `mkGoPlugins` は連合で使う宣言なので R4 で改める |
+| `/api/meta` の `mkGoVersion` / `mkGoCommit`、`internal/core/procstats` の `mkGo` | 据え置き (同梱 frontend と外部クライアントが読む wire の項目)。nodeinfo の `mkGoPlugins` は連合で使う宣言なので R4 で改める |
+| `/api/meta` の `mkGoFrontendVersion` | **廃止する** (Q7、D5)。frontend を本体と同じ版で管理するので、frontend だけの版という概念が要らない |
 | 環境変数の接頭辞 `MK_` | 据え置き (運営者の設定を壊さない) |
 
 ### R2. frontend の組み込み
@@ -81,9 +82,9 @@
 
 | 対象 | 今の名前 | 扱い |
 |---|---|---|
-| マニフェスト | `mk-plugin.yml` | `elythia-plugin.yml` にする。旧名も猶予期間は読む (D8) |
+| マニフェスト | `mk-plugin.yml` | `elythia-plugin.yml` にする。旧名は読まない (Q9、D8) |
 | プラグインのモジュール名・リポジトリ名 | `github.com/shiroha-a/mk-plugin-*` | `github.com/elythia-network/elythia-plugin-*` にする (R1 のモジュールパス変更と同時) |
-| nodeinfo の宣言 (連合) | `metadata.mkGoPlugins` | `metadata.elythiaPlugins` にする。猶予期間は両方を出し、両方を読む (D8) |
+| nodeinfo の宣言 (連合) | `metadata.mkGoPlugins` | `metadata.elythiaPlugins` にする。旧名は出さず、読まない (Q9、D8) |
 | 公開パッケージ | `plugin/` (`plugintest` / `peercache` を含む) | 据え置き。import パスは R1 のモジュールパス変更で `github.com/elythia-network/elythia/plugin` に変わる |
 | 置き場 | `plugins/` | 据え置き |
 | 運営者の設定キー | `plugins.<name>.*` | 据え置き |
@@ -140,9 +141,9 @@
 ├── frontend/                  ← 本家の monorepo から backend を除いた部分 (pnpm workspace)
 │   ├── package.json / pnpm-workspace.yaml / pnpm-lock.yaml / .node-version / build.ts / scripts/
 │   ├── packages/frontend, frontend-shared, frontend-embed, sw, i18n, misskey-js, ...
-│   ├── locales/ / assets/
+│   ├── locales/
+│   ├── assets/                ← 本家 backend から借りていた静的アセット (D3)
 │   └── built/                 ← ビルド成果物 (gitignore。本番はここを bind mount)
-├── assets/                    ← 本家 backend から借りていた静的アセット (D3)
 ├── tests/                     ← R3
 ├── deploy/
 ├── UPSTREAM_MISSKEY_VERSION   ← 追従している本家の版 (例: 2026.9.1)
@@ -159,18 +160,18 @@
 - golden は既にコミット済みの testdata なので、本家のソースが要るのは追従時の再生成、本家を読むゲート、本家 backend e2e、apicompat だけ
 - CI で本家を読む job は `actions/checkout` で `misskey-dev/misskey` を `UPSTREAM_MISSKEY_VERSION` の ref で `.cache/misskey/...` へ取得する
 - **本家を読むテストは「無ければ skip」の形を保ち、CI では skip を禁じる** (今の `MK_FRONTEND_GATES_REQUIRE_SUBMODULE` と同じ形)。skip が成功扱いになる問題 (#2892) を持ち込まない
-- 取得方法 (毎回 shallow clone か、共有の bare mirror から worktree 展開か) は未決 (Q3)
+- **取得方法は手元と CI で分ける** (Q3)。手元は共有の bare mirror を 1 つ持ち、版ごとに worktree で展開する (追従作業で旧版と新版を並べるため。2 回目以降の取得が速い)。CI は今と同じく `actions/checkout` で毎回取る (shallow)
 
 ### D3. 本家 backend から借りているアセット
 
-- `packages/backend/assets` (favicon・アイコン等): リポジトリ直下の `assets/` (名前は要検討) に置き、追従時に本家の差分を当てる対象に含める
+- `packages/backend/assets` (favicon・アイコン等): **`frontend/assets/` に置く** (Q6)。本家では backend 側にあるが、配信しているのは画面向けの画像なので実態に合う。追従時に差分を当てる対象が frontend 側の 1 か所にまとまる
 - `@misskey-dev/emoji-assets`: frontend の workspace の依存として持つ (本家では backend の依存だが、使うのは画像ファイルだけ)。Dockerfile は `frontend/node_modules/...` から取る
 - `.dockerignore` の再包含の記述 (pnpm の実体側を再包含している) も新しいパスに合わせる
 
 ### D4. 本家への追従 (`make upstream-sync`)
 
 1. 本家の objects を手元に取る (`git fetch upstream-misskey --tags`、remote は本体リポジトリに追加するが branch は作らない)
-2. `git diff <旧版> <新版> -- <frontend 側のパス>` を `git apply --3way --directory=frontend` で当てる。`packages/backend/assets` は `assets/` へ当てる
+2. `git diff <旧版> <新版> -- <frontend 側のパス>` を `git apply --3way --directory=frontend` で当てる。`packages/backend/assets` は `frontend/assets/` へ当てる
 3. 衝突はファイル単位で衝突マーカーとして残る。解いてコミットし、`UPSTREAM_MISSKEY_VERSION` を上げる
 4. backend 側の変更は今と同じく triage して Go に移植する (docs/upstream-catch-up.md)
 
@@ -179,7 +180,7 @@
 
 ### D5. 版と表示
 
-- frontend の版 = 本体の版。`mkGoFrontendVersion` は「本体の版 + 追従している本家の版」(例 `1.5.0 (misskey 2026.9.1)`) を想定。表示先 (`/about-mkgo`、更新ダイアログの判定) が何を前提にしているかを P4 で確認する
+- **frontend の版 = 本体の版。`mkGoFrontendVersion` は廃止する** (Q7)。読んでいるのは同梱 frontend の `/about-mkgo` の表示だけで (2026-09-30 に確認)、更新ダイアログの判定には使っていない (`check-client-update.ts` のコメントも「fork のタグでは判定できない」として使っていない)。追従している本家の版は `/api/meta` の `version` に既に出ている。ビルド時に埋める `MkGoFrontendVersion` の ldflags (`Makefile` と `Dockerfile` / `deploy/uds/Dockerfile.mkgo`) と、`tests/diff` の除外も合わせて消す
 - `-mk.N` のタグ、`submodulepin-check`、`bundled_assets_pin_test`、`docs/divergence.md` の pin 行は廃止または置き換える
 - `docs/divergence.md` §4-2 (独自変更の一覧) は tag 列を PR 番号に置き換える
 
@@ -210,15 +211,15 @@ tests/
 - **fork frontend (`shiroha-a/misskey-ts`) は移管しない。** P4 で本体の `frontend/` へ取り込んでアーカイブするため
 - モジュールパスの変更は `go mod edit -module` と import の一括置換。プラグインの公開パッケージ (`plugin/`) の import パスも変わるので、プラグインの作者向けに移行の案内を書く
 - リポジトリ名の変更は GitHub の転送に任せるが、`go get` の旧パスは転送されない (モジュールパスは go.mod の宣言が正)
-- 配布イメージは旧名でもしばらく publish するか (猶予) を決める
+- 配布イメージは**旧名での publish を改名の版で止める** (Q4)。旧名の最後の版に移転の案内を載せ、CHANGELOG の Note にも書く
 - nodeinfo / UA の変更は連合先の一覧に出る名前が変わる。CHANGELOG の Note に書く
 
 ### D8. プラグインまわりの名前の移行 (R4)
 
-呼び名を変えないので、**保存されたデータ (DB schema・ジョブキュー) の移行は要らない。** 移すのは、旧名を含む名前のうち運営者とプラグイン作者と連合先に見えるものだけ。旧版から上げた運営者と、旧版のままの連合先の両方を壊さないようにし、旧名を読む経路は猶予期間 (Q9) のあと撤去する。
+呼び名を変えないので、**保存されたデータ (DB schema・ジョブキュー) の移行は要らない。** 移すのは、旧名を含む名前のうち運営者とプラグイン作者と連合先に見えるものだけ。**旧名を読む猶予期間は設けない** (Q9)。代わりに、旧名のまま上げた運営者が黙って壊れないようにする。
 
-- **マニフェスト** (`mk-plugin.yml` → `elythia-plugin.yml`): `pluginbuild` は両方を探す。旧名だけがあれば読んで警告を出す。**両方があれば起動 (ビルド) エラーにする** — どちらが効くのかを黙って決めない
-- **nodeinfo の宣言** (`metadata.mkGoPlugins` → `metadata.elythiaPlugins`): 猶予期間は新旧両方の key に同じ値を出す。読む側 (`internal/server/plugin_peer_lookup.go`) は新しい key を優先し、旧い key へフォールバックする。相手が旧版のままでも、プラグインの連合の経路 (`/plugin/<name>/...`) は変わらないので、宣言を読めれば呼べる
+- **マニフェスト** (`mk-plugin.yml` → `elythia-plugin.yml`): 旧名は読まない。**ただし旧名だけがあるディレクトリは、黙って skip せずビルドエラーにする** (新しい名前へ変えるよう案内する)。黙って skip すると、プラグインが組み込まれていない image が緑で出来る (#2940 で `disabled: true` について踏んだのと同じ形)
+- **nodeinfo の宣言** (`metadata.mkGoPlugins` → `metadata.elythiaPlugins`): 旧名は出さず、読まない。**その間、旧版のままの相手とはプラグインどうしの連合が止まる** (相手は新しい key を知らないので、こちらを対応サーバーと見なさない)。プラグインの連合の経路 (`/plugin/<name>/...`) は変わらないので、相手が上げれば戻る。CHANGELOG の Note に書く
 - **モジュール名** (`mk-plugin-*` → `elythia-plugin-*`): R1 のモジュールパス変更と同時に行う。独立リポジトリのプラグイン 4 つも同じ段階で追従させ、プラグイン作者向けの移行の案内 (D7) にまとめる
 
 ### D9. 復路の保証をやめる (R5)
@@ -251,14 +252,13 @@ tests/
 ## 未決事項
 
 - ~~Q1. 正式な名前 (P5)~~ → **Elythia** に決定 (2026-09-30)。置き場所は `Elythia-Network`、機械が読む名前は小文字 (R1)
-- Q2. fork の履歴を持ち込むか (`git subtree add`、独自コミット 151 個) か、スナップショットとして取り込むか
-- Q3. 本家の取得方法 (毎回 shallow clone / 共有の bare mirror + worktree)
-- Q4. 旧名の配布イメージの猶予期間
-- Q5. 旧 URL (`/about-mkgo` など) の転送を残す期間
-- Q6. `assets/` (D3) の名前と置き場所
-- Q7. `mkGoFrontendVersion` の新しい形式 (D5)
-- ~~Q8. プラグインの仕組みの新しい呼び名 (R4、P5)~~ → **据え置く** (2026-09-30)。旧名 (mk / mk-go) を含む名前だけ Elythia に揃える (R4)
-- Q9. プラグインの旧名 (マニフェスト `mk-plugin.yml`・nodeinfo の `mkGoPlugins`) を読み続ける猶予期間 (D8)
+- ~~Q2. fork の履歴を持ち込むか~~ → **スナップショットとして取り込む** (2026-09-30)。独自変更の経緯は `docs/divergence.md` §4-2 と、アーカイブした fork で追う
+- ~~Q3. 本家の取得方法~~ → **手元は共有の bare mirror + worktree、CI は毎回 shallow** (2026-09-30、D2)
+- ~~Q4. 旧名の配布イメージの猶予期間~~ → **設けない**。改名の版で旧名での publish を止め、移転を案内する (2026-09-30)
+- ~~Q5. 旧 URL (`/about-mkgo` など) の転送を残す期間~~ → **転送しない** (2026-09-30)
+- ~~Q6. `assets/` (D3) の名前と置き場所~~ → **`frontend/assets/`** (2026-09-30、D3)
+- ~~Q7. `mkGoFrontendVersion` の新しい形式~~ → **廃止する** (2026-09-30、D5)。frontend だけの版という概念が要らない
+- ~~Q9. プラグインの旧名を読み続ける猶予期間~~ → **設けない** (2026-09-30、D8)。旧名だけのマニフェストはビルドエラーにする
 
 ## リスク
 
