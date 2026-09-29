@@ -34,6 +34,8 @@ func TestChannels_RequiredPermission(t *testing.T) {
 		{"homeTimeline", &HomeTimelineChannel{}, "read:account"},
 		{"hybridTimeline", &HybridTimelineChannel{}, "read:account"},
 		{"reversi", &ReversiChannel{}, "read:account"},
+		{"bubbleVersus", &BubbleVersusChannel{}, "read:account"},
+		{"bubbleVersusMatch", &BubbleVersusMatchChannel{}, "read:account"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -44,5 +46,5 @@ func TestChannels_RequiredPermission(t *testing.T) {
 
 	// 表の件数も固定する。credentialed なチャンネルを足したときに
 	// ここへ追記し忘れると、その 1 本だけ無検査で通ってしまう。
-	assert.Len(t, cases, 10, "credentialed channel を増減したら表も更新すること")
+	assert.Len(t, cases, 12, "credentialed channel を増減したら表も更新すること")
 }

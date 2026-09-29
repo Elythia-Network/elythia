@@ -8,13 +8,13 @@
 - mk-go implemented (TS の subset): **444**
 - mk-go coverage of TS: **100.0%**
 - TS only (mk-go 未実装): **0**
-- mk-go only (TS spec 外): **84**
+- mk-go only (TS spec 外): **91**
 
 ## TS 側に存在するが mk-go で未実装 (0)
 
 (なし)
 
-## mk-go 側にしかない endpoint (84)
+## mk-go 側にしかない endpoint (91)
 
 ### GET variant 追加 (23)
 
@@ -68,7 +68,7 @@ yojo-art/cherrypick 由来の federated chat 拡張 endpoint。Misskey TS 本家
 | POST | `/api/chat/rooms/unmute` |
 | POST | `/api/chat/unread-count` |
 
-### その他 mk-go 独自 / alias (46)
+### その他 mk-go 独自 / alias (53)
 
 上記カテゴリに当てはまらない mk-go 独自 endpoint。backward-compat shim や alias を含む。
 
@@ -105,6 +105,13 @@ yojo-art/cherrypick 由来の federated chat 拡張 endpoint。Misskey TS 本家
 | POST | `/api/admin/signup-application/approve` |
 | POST | `/api/admin/signup-application/list` |
 | POST | `/api/admin/signup-application/reject` |
+| POST | `/api/bubble-game/versus/accept` |
+| POST | `/api/bubble-game/versus/cancel` |
+| POST | `/api/bubble-game/versus/decline` |
+| POST | `/api/bubble-game/versus/invitations` |
+| POST | `/api/bubble-game/versus/invite` |
+| POST | `/api/bubble-game/versus/report` |
+| POST | `/api/bubble-game/versus/show` |
 | POST | `/api/drive/files/create-chunked/abort` |
 | POST | `/api/drive/files/create-chunked/append` |
 | POST | `/api/drive/files/create-chunked/finish` |
