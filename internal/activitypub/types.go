@@ -1036,6 +1036,16 @@ type Note struct {
 	MisskeyContent APLenientString `json:"_misskey_content,omitempty"`
 	MisskeyQuote   APLenientID     `json:"_misskey_quote,omitempty"`
 	QuoteURL       APLenientID     `json:"quoteUrl,omitempty"`
+	// Quote / QuoteURI は FEP-044f と Fedibird の引用 (#3234)。Mastodon は
+	// `_misskey_quote` も並べて付けるので、引用先の解決は今も `_misskey_quote`
+	// で足りる。ここで読むのは QuoteRequest の instrument を確かめるときだけ。
+	Quote              APLenientID `json:"quote,omitempty"`
+	QuoteURI           APLenientID `json:"quoteUri,omitempty"`
+	QuoteAuthorization APLenientID `json:"quoteAuthorization,omitempty"`
+	// InteractionPolicy は FEP-044f の「引用してよい範囲」(#3234)。送るときは
+	// *InteractionPolicy を入れる。**受け取る側で型を決めない** — 相手の形が
+	// 想定と違うだけで Note 全体の unmarshal が失敗し、投稿を取り込めなくなる。
+	InteractionPolicy any `json:"interactionPolicy,omitempty"`
 	// MisskeyTalk は CherryPick / レガシー Misskey のチャット連合 flag (#692)。
 	// `_misskey_talk: true` が立った Note は ApInboxService で chat message
 	// として処理される (notes テーブルではなく chat_messages テーブルに保存)。
@@ -1258,6 +1268,31 @@ type Block struct {
 type Accept struct {
 	Activity
 	Object any `json:"object"`
+	// Result は QuoteRequest への Accept で承認の URI を運ぶ (FEP-044f、#3234)。
+	// Follow への Accept では空 (omitempty で出ない)。
+	Result string `json:"result,omitempty"`
+}
+
+// InteractionPolicy is the FEP-044f `interactionPolicy` of an object
+// (GoToSocial vocabulary, as used by Mastodon).
+type InteractionPolicy struct {
+	CanQuote *InteractionRule `json:"canQuote,omitempty"`
+}
+
+// InteractionRule lists who may interact without and with manual approval.
+type InteractionRule struct {
+	AutomaticApproval []string `json:"automaticApproval,omitempty"`
+	ManualApproval    []string `json:"manualApproval,omitempty"`
+}
+
+// QuoteAuthorization is the FEP-044f approval stamp a quoted author publishes
+// for a quote post (#3234). It references, and never embeds, the quote post
+// (interactingObject) and the quoted post (interactionTarget).
+type QuoteAuthorization struct {
+	Object
+	AttributedTo      string `json:"attributedTo"`
+	InteractingObject string `json:"interactingObject"`
+	InteractionTarget string `json:"interactionTarget"`
 }
 
 // Reject represents a Reject activity.
@@ -1396,6 +1431,18 @@ var MisskeyContext = map[string]any{
 	"_misskey_makeNotesHiddenBefore":        "misskey:_misskey_makeNotesHiddenBefore",
 	"_misskey_license":                      "misskey:_misskey_license",
 	"freeText":                              map[string]string{"@id": "misskey:freeText", "@type": "schema:text"},
+	// FEP-044f (引用の承認、#3234)。IRI は Mastodon と同じ (GoToSocial の語彙を含む)。
+	"gts":                "https://gotosocial.org/ns#",
+	"quote":              map[string]string{"@id": "https://w3id.org/fep/044f#quote", "@type": "@id"},
+	"quoteAuthorization": map[string]string{"@id": "https://w3id.org/fep/044f#quoteAuthorization", "@type": "@id"},
+	"QuoteRequest":       "https://w3id.org/fep/044f#QuoteRequest",
+	"QuoteAuthorization": "https://w3id.org/fep/044f#QuoteAuthorization",
+	"interactionPolicy":  map[string]string{"@id": "gts:interactionPolicy", "@type": "@id"},
+	"canQuote":           map[string]string{"@id": "gts:canQuote", "@type": "@id"},
+	"automaticApproval":  map[string]string{"@id": "gts:automaticApproval", "@type": "@id"},
+	"manualApproval":     map[string]string{"@id": "gts:manualApproval", "@type": "@id"},
+	"interactingObject":  map[string]string{"@id": "gts:interactingObject", "@type": "@id"},
+	"interactionTarget":  map[string]string{"@id": "gts:interactionTarget", "@type": "@id"},
 }
 
 // fullContext は全AP出力で使われる完全なJSON-LDコンテキスト。
@@ -1450,6 +1497,8 @@ func AddContext(o any) {
 	case *Block:
 		v.Context = ctx
 	case *Accept:
+		v.Context = ctx
+	case *QuoteAuthorization:
 		v.Context = ctx
 	case *Reject:
 		v.Context = ctx
