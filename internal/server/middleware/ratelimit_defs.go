@@ -24,6 +24,9 @@ var DefaultEndpointLimits = map[string]*EndpointLimit{
 
 	// ── Bubble Game ────────────────────────────────────
 	"bubble-game/register": {Duration: time.Hour, Max: 120, MinInterval: 30 * time.Second},
+	// 対戦 (mk-go 独自、#3230)。招待は相手に通知が飛ぶので絞る。
+	"bubble-game/versus/invite": {Duration: time.Hour, Max: 60, MinInterval: time.Second},
+	"bubble-game/versus/report": {Duration: time.Hour, Max: 120},
 
 	// ── Channels ───────────────────────────────────────
 	"channels/create": {Duration: time.Hour, Max: 10},

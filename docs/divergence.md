@@ -32,7 +32,7 @@ mk-go は drop-in 互換 (同じ DB / Redis / frontend を Misskey TS と共有�
 
 | 軸 | mk-go 独自 | cherrypick 由来 | 未実装 |
 |---|---|---|---|
-| API endpoint | GET variant 23 + alias 4 + 分割アップロード 4 + 承認制 7 + 絵文字の申請 10 + exact assignment lookup 2 + admin 観測 8 + 配送のブレーカー 1 + 消えたインスタンスの片付け 2 + 連合のルール 5 + IP 検索 3 | chat 15 | **0** |
+| API endpoint | GET variant 23 + alias 4 + 分割アップロード 4 + 承認制 7 + 絵文字の申請 10 + exact assignment lookup 2 + admin 観測 8 + 配送のブレーカー 1 + 消えたインスタンスの片付け 2 + 連合のルール 5 + IP 検索 3 + バブルゲームの対戦 7 | chat 15 | **0** |
 | API レスポンスの additive field | 8 (`runtime` / `mkGoVersion` / `chunkedUpload` / `approvalRequiredForSignup` / `registrationClosed` / `signupApplicationForm` / `canRequestCustomEmojis` / `minimumUsernameLength`) | reversi packed game の `crc32` 等 | — |
 | DB テーブル | 16 (+ bookkeeping 2) | 0 | 0 |
 | DB カラム | 23 (+ 未使用の残存列 3) | 3 | 0 |
@@ -48,7 +48,7 @@ mk-go は drop-in 互換 (同じ DB / Redis / frontend を Misskey TS と共有�
 
 upstream の endpoint は `endpoints/` 配下 438 件 + `ApiServerService.ts` の fastify 直登録 6 件 (POST 5 / GET 1) = **444 件**。うち **444 件すべてを実装済み (coverage 100.0%)**。
 
-### 1-1. mk-go にしかない (84)
+### 1-1. mk-go にしかない (91)
 
 | 分類 | 件数 | 内容 |
 |---|---|---|
@@ -65,6 +65,7 @@ upstream の endpoint は `endpoints/` 配下 438 件 + `ApiServerService.ts` �
 | 配送のブレーカー | 1 | `admin/federation/close-delivery-breaker` (#3048、`write:admin:federation`)。落ちた配送先へのブレーカー (§5) を手で閉じる (429 の停止と予約も消す)。upstream にはブレーカーが無いため対応物が無い。止めている相手の一覧は `admin/federation/delivery-health` の `breakers` に出す |
 | 消えたインスタンスの片付け | 2 | `admin/federation/gone-instances` (`read:admin:server-info`) / `admin/federation/clean-gone-instance` (`write:admin:federation`) (#3067)。shared inbox が 410 を返して goneSuspended になったインスタンスとの間に残ったフォロー関係を、管理者が候補を見て片付ける。**自動では消さない** — 取り返しがつかない (誤りだったら相手の利用者全員が再フォローするしかない) ので、候補 (停止した時刻、両方向のフォロー、フォローリクエストの件数) を出して管理者が実行する。実行時に状態を読み直し、goneSuspended でなければ `INSTANCE_NOT_GONE` で断る (戻した後・手動停止は対象外)。**upstream の `remove-all-following` と違い、ローカルの利用者のフォローも消す** (相手はもう存在しないので意味の無い行になる)。**配送も利用者への通知もしない** — 相手へ Undo / Reject を送っても届かず、利用者の webhook と main stream の `unfollow` も出さない (upstream の `remove-all-following` が使う `silent` と同じ。管理者の操作で何百件も解除するので 1 件ずつ飛ばさない)。フォロー数・インスタンスの集計・チャートは通常の解除と同じく更新する。1 回で 1000 件までで、残りは件数で返す。**片付けの途中でも 100 件ごとと、フォローリクエストを消す前に状態を読み直す** (途中で戻されたら残りは消さない)。同じホストの片付けは並行させない (`CLEANUP_IN_PROGRESS`。2 つが同じ行を引くとフォロー数が二重に減る。プロセス内の排他なので別ノードからの同時実行までは防がない)。監査ログに mk-go 独自の型 `cleanGoneInstance` で host と件数を残す (途中で止まっても消した分は `failed` を付けて残し、数えていない `remaining` は書かない)。**利用者向けに理由を知らせる通知は作っていない** (本番の実測で対象は 12 行・利用者数人。必要になったら別に扱う) |
 | 連合のルール | 5 | `admin/federation/rules/list` / `hits` (モデレーター、`read:admin:meta`) / `create` / `update` / `delete` (管理者、`write:admin:meta`) (#3090)。受信した activity / 投稿に条件と動作の組を適用する (§3-5)。upstream のホスト単位の設定 (`blockedHosts` など) では表現できない判断を足す口で、対応物は無い。変更を管理者に限るのは、`blockedHosts` (`update-meta` は管理者のみ) と同じく受信を丸ごと止められる設定だから |
+| バブルゲームの対戦 | 7 | `bubble-game/versus/invite` / `invitations` / `show` / `accept` / `decline` / `cancel` / `report` (#3230 / 親 #3228)。upstream のバブルゲームは 1 人用で、対戦は無い。**このインスタンスの利用者どうしの 1:1 だけで、連合しない**。招待制で、招待した側が形と物理を決め、受けた時点で両者共通のシードを決める。盤面は各クライアントが動かし、サーバーは攻撃 (おじゃま石) の中継・切断と制限時間の判定・終局の判定だけを受け持つ。**状態は Redis にだけ置く** (招待 10 分 / 対局 30 分 / 終局後 24 時間で消える)。対戦の記録を DB に残すのは #3232 で、ルールを遊んで固めてから形を決める。**クライアントの申告を信じる部分が大きい** — 盤面を動かすのはクライアントなので、得点・「ゲームオーバーになった」・**送る攻撃の数** (1 回 50 個までに切り詰める。回数の上限は無い) は申告どおりに扱う。サーバーが見るのは、記録に入っているおじゃま石の数が相手の送った数 (サーバーが中継した分) を超えていないかだけで、超えていれば申告した側の負けにする。**受けた石を記録から抜く形は見抜けない** — エンジンは溜まった石を 200 個で打ち切るので、送った数と受けた数は正当な対局でも一致しない。招待制で知り合いどうしの遊びという前提で、試作の段階ではこれ以上の検証を置いていない。報告の記録そのものは Redis に残さない (石の数だけ残す)。制限時間を 5 秒過ぎた攻撃は受けない。時間切れを報告した側は、相手が報告しないまま制限時間から 30 秒経てば、相手が盤面を送り続けていても勝ちを申告できる。ブロックはどちらの向きでも招待と受諾を止める (判定できなければ通さない)。参加していない対局は `NO_SUCH_MATCH` で、あることも知らせない |
 | その他 / alias | 4 | `i/flashs` / `i/flashs/likes` (upstream の `flash/my` / `flash/my-likes` に対する mk-go 側の path alias。両者とも mk-go に実装済み)、`signin` (upstream が `signin-flow` に統合した旧 path の backward-compat shim。**`signin-flow` と同じ captcha 検証と 2FA challenge を通す** — 片方だけ緩いと、運営者が captcha を有効にしてもこちらが素通りする)、`admin/emoji/fetch-remote-meta` (リモート絵文字のインポート時に、AP では運ばれないカテゴリ・エイリアス・センシティブを相手の REST API から取る。#2698) |
 
 ランダムマッチ (`reversi/match` の `userId` 無し) は **local user 同士のみ**。待機列 (`reversi:matchAny`) に載るのはこのインスタンスで認証を通した local user だけなので、相手がリモートになることはない。upstream Misskey も yojo-art/cherrypick も**連合ランダムマッチは持っていない**ので意図的に揃えている。名指しの招待 (`userId` 指定) は従来どおり連合する。
@@ -520,7 +521,11 @@ upstream には対応物が無い。
 
 | チャンネル | 内容 |
 |---|---|
-| `notifications` | **mk-go 独自**。upstream の 18 チャンネルに無い (upstream は `main` に通知を流す) ので mk-go は 19。通知だけを購読したいクライアント向け。**これに依存するクライアントは Misskey TS では動かない**ので、drop-in で戻す可能性があるなら `main` を使うこと |
+| `notifications` | **mk-go 独自**。upstream の 18 チャンネルに無い (upstream は `main` に通知を流す)。通知だけを購読したいクライアント向け。**これに依存するクライアントは Misskey TS では動かない**ので、drop-in で戻す可能性があるなら `main` を使うこと |
+| `bubbleVersus` | **mk-go 独自** (#3230)。バブルゲームの対戦の招待と、その返事 (受けた・断った・取り消した) を本人へ届ける。`read:account` |
+| `bubbleVersusMatch` | **mk-go 独自** (#3230)。対戦 1 つ分 (`matchId` を渡す)。**参加者しかつなげない** (観戦は無い)。準備・攻撃・盤面の要約・切断の申告を受け、開始・攻撃・終局を流す。終局の報告は記録が大きいので API (`bubble-game/versus/report`) で送る。`read:account` |
+
+mk-go 独自の 3 つを足して mk-go は 21 チャンネル。
 
 upstream の 18 チャンネルは**すべて実装済み**で、名前も upstream に揃えてある。
 以下は wire 上のチャンネル名 (`connect` の `channel` に渡す値 = upstream の `chName`)。

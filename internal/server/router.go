@@ -77,6 +77,7 @@ import (
 	coreantenna "github.com/shiroha-a/mk/internal/core/antenna"
 	"github.com/shiroha-a/mk/internal/core/avatardecoration"
 	coreblocking "github.com/shiroha-a/mk/internal/core/blocking"
+	corebubbleversus "github.com/shiroha-a/mk/internal/core/bubbleversus"
 	corecaptcha "github.com/shiroha-a/mk/internal/core/captcha"
 	corechannel "github.com/shiroha-a/mk/internal/core/channel"
 	"github.com/shiroha-a/mk/internal/core/chart"
@@ -3108,6 +3109,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	streamRegistry.Register("reversiGame", channels.NewReversiGameFactory(reversiService).New)
 	streamRegistry.RegisterCredentialed("reversi", channels.NewReversi)
 
+	// バブルゲームの対戦 (#3230)。状態は Redis にだけ置く。
+	bubbleVersusService := corebubbleversus.NewService(s.redis.Default, stream.NewBubbleVersusPublisher(streamPubSub), blockingService, idGen)
+	streamRegistry.RegisterCredentialed("bubbleVersus", channels.NewBubbleVersus)
+	streamRegistry.RegisterCredentialed("bubbleVersusMatch", channels.NewBubbleVersusMatchFactory(bubbleVersusService).New)
+
 	// 6. Chat WebSocket channels (Phase 9.8): chatRoom と chatUser を登録する
 	chatPublisher := stream.NewChatPublisher(streamPubSub)
 	chatService := corechat.NewService(chatRepo, idGen)
@@ -3847,6 +3853,15 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// fetch-rss と同様、#1774)。
 	api.POST("/bubble-game/ranking", bubbleGameHandler.Ranking)
 	api.GET("/bubble-game/ranking", bubbleGameHandler.Ranking)
+	// bubble-game/versus/* — 1:1 の対戦 (mk-go 独自、#3230)
+	bubbleVersusHandler := apibubblegame.NewVersusHandler(bubbleVersusService, userRepo)
+	api.POST("/bubble-game/versus/invite", bubbleVersusHandler.Invite, middleware.RequireAuth(), middleware.RequireScope("write:account"))
+	api.POST("/bubble-game/versus/invitations", bubbleVersusHandler.Invitations, middleware.RequireAuth(), middleware.RequireScope("read:account"))
+	api.POST("/bubble-game/versus/show", bubbleVersusHandler.Show, middleware.RequireAuth(), middleware.RequireScope("read:account"))
+	api.POST("/bubble-game/versus/accept", bubbleVersusHandler.Accept, middleware.RequireAuth(), middleware.RequireScope("write:account"))
+	api.POST("/bubble-game/versus/decline", bubbleVersusHandler.Decline, middleware.RequireAuth(), middleware.RequireScope("write:account"))
+	api.POST("/bubble-game/versus/cancel", bubbleVersusHandler.Cancel, middleware.RequireAuth(), middleware.RequireScope("write:account"))
+	api.POST("/bubble-game/versus/report", bubbleVersusHandler.Report, middleware.RequireAuth(), middleware.RequireScope("write:account"))
 
 	// chat/* — Misskey v2026 チャット機能 (実データ)
 	chatHandler := apichat.NewHandler(chatRepo, idGen)
