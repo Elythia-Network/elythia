@@ -60,6 +60,11 @@ done
 echo "===> stage 2: quote authorization scenarios (pytest)"
 # --build を付けないと runner image がキャッシュのままになり、requirements.txt を
 # 変えても古い image で走る (run-misskey-test.sh と同じ)。
-docker compose -f "$COMPOSE" --profile test run --rm --build test-runner
+#
+# --no-deps が要る。無いと `run --build` が依存の app-mkgo まで再ビルドし、
+# image が変わればコンテナを作り直す (CI で実際に起きた)。nginx は upstream の
+# IP を起動時に解決して持ち続けるので、作り直された app-mkgo に届かず 502 を
+# 返し続ける。依存は stage 1 で起動と healthy を確かめてある。
+docker compose -f "$COMPOSE" --profile test run --rm --build --no-deps test-runner
 
 echo "===> all stages PASS"
