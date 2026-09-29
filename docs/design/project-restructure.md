@@ -1,6 +1,6 @@
 # プロジェクトの構成の再編 (正式改名・frontend の組み込み・テスト配置の整理・プラグインの仕組みの改名)
 
-**Status**: Draft (#3180、2026-09-24) / **Scope**: リポジトリ全体の構成、改名の範囲、本家 Misskey への追従方式
+**Status**: Draft (#3180、2026-09-24。正式名は 2026-09-30 に決定) / **Scope**: リポジトリ全体の構成、改名の範囲、本家 Misskey への追従方式
 
 未決事項 (末尾) が残っているので、段階を進めるごとにこの文書を更新する。作業の進み具合は #3180 と、段階ごとの sub-issue で管理する。
 
@@ -8,7 +8,7 @@
 
 ## 目的
 
-仮称「mk-go」を正式な名前に改め、同じ機会に次の 3 つを見直す。
+仮称「mk-go」を正式な名前 **Elythia** に改め、同じ機会に次の 3 つを見直す。
 
 1. 同梱 frontend を本体リポジトリへ組み込み、`third_party/` をなくす
 2. テスト関連の配置を整理する
@@ -22,14 +22,34 @@
 
 ### R1. 改名
 
+**名前は `Elythia` (2026-09-30 決定)。** 置き場所は GitHub organization の `Elythia-Network`。
+
+**機械が読む名前はすべて小文字にする。** 大文字を使うのは画面とドキュメントの表示 (`Elythia` / `Elythia-Network`) だけ。
+
+- GHCR はイメージ名に大文字を受け付けない
+- Go のモジュールプロキシは大文字を `!e` のようにエスケープする (`github.com/!elythia-!network/...`)
+- GitHub は大文字小文字を区別しないので、小文字のモジュールパスでも同じリポジトリに届く
+
+| 用途 | 名前 |
+|---|---|
+| 表示 (画面・ドキュメント) | `Elythia` |
+| nodeinfo `software.name` | `elythia` |
+| User-Agent | `Elythia/<version> (<url>)` |
+| GitHub のリポジトリ | `Elythia-Network/elythia` (URL は `github.com/elythia-network/elythia` でも届く) |
+| Go のモジュールパス | `github.com/elythia-network/elythia` |
+| プラグインのモジュール | `github.com/elythia-network/<名前>` (プラグインの呼び名が決まったら接頭辞を決める。Q8) |
+| 配布イメージ | `ghcr.io/elythia-network/elythia` (`-bundled` も同じ置き場所) |
+| 実行バイナリ | `elythia` (`cmd/elythia`、`built/elythia`) |
+| frontend のページ | `/about-elythia` (旧 `/about-mkgo` は転送) |
+
 | 対象 | 扱い |
 |---|---|
-| nodeinfo `software.name`、User-Agent | 新しい名前にする |
-| Go のモジュールパス (`github.com/shiroha-a/mk`)、プラグインのモジュール名 (`github.com/shiroha-a/mk-plugin-*`) | 新しい名前にする。独立リポジトリのプラグイン 4 つ (fedwatch / genshin / hsr / nowplaying) も追従させる |
-| GitHub のリポジトリ名 (`shiroha-a/mk`) | 新しい名前にする (GitHub が旧 URL から転送する) |
-| 配布イメージ (`ghcr.io/shiroha-a/mk`、`-bundled`) | 新しい名前にする。旧名での配布の猶予は未決 |
-| 実行バイナリ名 (`cmd/misskey`、`built/misskey`) | 新しい名前にする |
-| frontend のページ名 (`/about-mkgo` など) と画面の文言 | 新しい名前にする。旧 URL は転送する |
+| nodeinfo `software.name`、User-Agent | `elythia` / `Elythia/<version> (<url>)` にする |
+| Go のモジュールパス (`github.com/shiroha-a/mk`)、プラグインのモジュール名 (`github.com/shiroha-a/mk-plugin-*`) | `github.com/elythia-network/...` にする。独立リポジトリのプラグイン 4 つ (fedwatch / genshin / hsr / nowplaying) も追従させる |
+| GitHub のリポジトリ (`shiroha-a/mk`) | `Elythia-Network` へ移管し、名前を `elythia` にする (GitHub が旧 URL から転送する。D7) |
+| 配布イメージ (`ghcr.io/shiroha-a/mk`、`-bundled`) | `ghcr.io/elythia-network/elythia` にする。旧名での配布の猶予は未決 (Q4) |
+| 実行バイナリ名 (`cmd/misskey`、`built/misskey`) | `elythia` にする |
+| frontend のページ名 (`/about-mkgo` など) と画面の文言 | `/about-elythia` と表示名 `Elythia` にする。旧 URL は転送する (Q5) |
 | ドキュメント | 新しい名前にする。CHANGELOG と CLAUDE.md の更新記録の過去の記述は書き換えない |
 | 関数名などコード上の識別子 | 据え置き |
 | `/api/meta` の `mkGoVersion` / `mkGoCommit` / `mkGoFrontendVersion`、`internal/core/procstats` の `mkGo` | 据え置き (同梱 frontend と外部クライアントが読む wire の項目)。nodeinfo の `mkGoPlugins` は R4 で扱う |
@@ -182,8 +202,10 @@ tests/
 - compose の相対パスはファイルの置き場所が基準になるので、移すと build context と bind mount がずれる。`--project-directory` で基準をリポジトリ直下に固定するか、パスを書き換えるかを P2 で決める
 - overlay にも `name:` を付けるか、Makefile からしか起動しない前提にするかも P2 で決める
 
-### D7. 改名 (名前が決まってから)
+### D7. 改名
 
+- **リポジトリは作り直さずに移管 (transfer) する。** issue・PR・スター・履歴が残り、旧 URL から GitHub が転送する。移管と同時に名前を `mk` から `elythia` に変える。移管の後は、手元の `origin` の URL と、CI / workflow に書いたリポジトリ名を直す
+- **fork frontend (`shiroha-a/misskey-ts`) は移管しない。** P4 で本体の `frontend/` へ取り込んでアーカイブするため
 - モジュールパスの変更は `go mod edit -module` と import の一括置換。プラグインの公開パッケージ (`plugin/`) の import パスも変わるので、プラグインの作者向けに移行の案内を書く
 - リポジトリ名の変更は GitHub の転送に任せるが、`go get` の旧パスは転送されない (モジュールパスは go.mod の宣言が正)
 - 配布イメージは旧名でもしばらく publish するか (猶予) を決める
@@ -218,7 +240,7 @@ tests/
 | P2 | テスト関連の配置の整理 (D6) | しない |
 | P3 | 本家の参照を `.cache/misskey` へ分離 (D2)。この時点では frontend はまだ submodule のまま | しない |
 | P4 | frontend の取り込み (D1 / D3 / D4 / D5)、submodule と fork の廃止 | しない |
-| P5 | 正式な名前と、プラグインの仕組みの新しい呼び名の決定 | — |
+| P5 | 正式な名前 (**決定: Elythia**、2026-09-30) と、プラグインの仕組みの新しい呼び名 (未決) の決定 | — |
 | P6 | 改名 (D7) | する |
 | P6b | プラグインの仕組みの改名 (D8)。保存データと連合の移行を含むので P6 とは別 PR にする | する |
 | P7 | ドキュメント・CLAUDE.md の整理 | する |
@@ -229,7 +251,7 @@ tests/
 
 ## 未決事項
 
-- Q1. 正式な名前 (P5)
+- ~~Q1. 正式な名前 (P5)~~ → **Elythia** に決定 (2026-09-30)。置き場所は `Elythia-Network`、機械が読む名前は小文字 (R1)
 - Q2. fork の履歴を持ち込むか (`git subtree add`、独自コミット 151 個) か、スナップショットとして取り込むか
 - Q3. 本家の取得方法 (毎回 shallow clone / 共有の bare mirror + worktree)
 - Q4. 旧名の配布イメージの猶予期間
