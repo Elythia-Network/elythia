@@ -19,6 +19,15 @@ cd "$REPO_ROOT"
 COMPOSE=docker-compose.federation.mastodon.yml
 
 cleanup() {
+  status=$?
+  # workflow 側のログ収集は撤去の後に走るので、何も残らない。失敗したときは
+  # 撤去の前にここで残す (swap-test と同じ。ファイル名は workflow の -post と分ける)。
+  if [ "$status" -ne 0 ]; then
+    echo "===> saving diagnostics to /tmp/dropin-logs"
+    mkdir -p /tmp/dropin-logs
+    docker compose -f "$COMPOSE" --profile test ps -a > /tmp/dropin-logs/ps.log 2>&1 || true
+    docker compose -f "$COMPOSE" --profile test logs --no-color > /tmp/dropin-logs/compose.log 2>&1 || true
+  fi
   echo "===> cleanup"
   docker compose -f "$COMPOSE" --profile test down -v >/dev/null 2>&1 || true
 }

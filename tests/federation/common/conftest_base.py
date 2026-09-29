@@ -25,6 +25,7 @@ def wait_for_health(url: str, path: str, timeout: int = 180, method: str = "GET"
     """Poll until an instance is ready. Accepts self-signed certs."""
     deadline = time.time() + timeout
     last_exc: Exception | None = None
+    last_status: int | None = None
     while time.time() < deadline:
         try:
             if method == "POST":
@@ -33,10 +34,13 @@ def wait_for_health(url: str, path: str, timeout: int = 180, method: str = "GET"
                 resp = httpx.get(f"{url}{path}", timeout=5, verify=False)
             if resp.status_code == 200:
                 return
+            last_status = resp.status_code
         except Exception as exc:  # noqa: BLE001
             last_exc = exc
         time.sleep(2)
     msg = f"{url}{path} did not become healthy within {timeout}s"
+    if last_status is not None:
+        msg += f" (last status: {last_status})"
     if last_exc is not None:
         msg += f" (last: {last_exc})"
     raise TimeoutError(msg)
