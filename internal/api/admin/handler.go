@@ -227,6 +227,9 @@ type Handler struct {
 	fedRules FederationRuleManager
 	// dbHealth は DB の健全性 (#3095)。
 	dbHealth DatabaseHealthReader
+	// clock は時刻の取得 (nil なら time.Now)。テストで経過時間に依存する計算
+	// (関連アカウントのスコアの減衰など) を固定するため。
+	clock func() time.Time
 	// userTokenInvalidator は admin が他 user を suspend / unsuspend /
 	// 論理削除した直後に target user の全 tokenCache entry を即時失効する
 	// ために使う (#965)。i/regenerate-token (#884) や i/update (#960) と
@@ -4760,3 +4763,11 @@ func validateSignupApplicationForm(fields map[string]any) error {
 // session が auth cache の TTL のあいだ生き残る。router 側のコメントも
 // これを security regression と呼んでいる (#2682)。
 func (h *Handler) HasUserTokenInvalidator() bool { return h.userTokenInvalidator != nil }
+
+// now returns the current time, or the fixed one set in tests (SetClockForTest)。
+func (h *Handler) now() time.Time {
+	if h.clock != nil {
+		return h.clock()
+	}
+	return time.Now()
+}

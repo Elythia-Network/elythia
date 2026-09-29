@@ -1,5 +1,7 @@
 package admin
 
+import "time"
+
 // Test seams exposed to admin_test (external) package. file 名が `_test.go`
 // で終わるので production build には含まれない。
 
@@ -18,3 +20,8 @@ func SetDelayedTasksMaxPages(n int) (prev int) {
 	delayedTasksMaxPages = n
 	return prev
 }
+
+// SetClockForTest fixes the handler's clock. スコアの減衰のように経過時間で値が
+// 変わる計算を、テストの時刻と handler の時刻のずれ (-race の遅い CI で数ミリ秒)
+// から切り離すための seam。handler ごとの値なので並列のテストとも干渉しない。
+func (h *Handler) SetClockForTest(fn func() time.Time) { h.clock = fn }
