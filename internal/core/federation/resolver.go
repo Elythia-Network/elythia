@@ -698,6 +698,26 @@ func (r *Resolver) SetMediaSilencedHostChecker(c MediaSilencedHostChecker) {
 	r.mediaSilencedChecker = c
 }
 
+// isMediaSilencedHost reports whether host is in meta.mediaSilencedHosts
+// (未配線 / host 無しは false)。
+func (r *Resolver) isMediaSilencedHost(host *string) bool {
+	return host != nil && *host != "" && r.mediaSilencedChecker != nil && r.mediaSilencedChecker.IsMediaSilenced(*host)
+}
+
+// noteEmojisFor returns the custom emojis a note may use.
+//
+// upstream の NoteCreateService は、投稿者のホストがメディアサイレンス対象なら
+// 投稿の emojis を空にする (#3220。`NoteCreateService.ts:607`)。絵文字の行は
+// その前に ApNoteService.extractEmojis が作るので、`upsertEmojis` は呼んだまま
+// 投稿に載せる名前だけを落とす。**空は nil ではなく空配列** (note.emojis は
+// NOT NULL で、Updates の map 経由だと nil が NULL になる)。
+func (r *Resolver) noteEmojisFor(emojis model.StringArray, host *string) model.StringArray {
+	if r.isMediaSilencedHost(host) {
+		return model.StringArray{}
+	}
+	return emojis
+}
+
 // markMediaSilencedFiles marks the attachments of a note by a media-silenced
 // host sensitive.
 //
@@ -717,7 +737,7 @@ func (r *Resolver) SetMediaSilencedHostChecker(c MediaSilencedHostChecker) {
 // 挙動で、設定する前に取り込んだ画像を同じ人が添付し直すとそのまま表示される
 // のを防ぐ。
 func (r *Resolver) markMediaSilencedFiles(ids model.StringArray, authorID string, host *string) bool {
-	if host == nil || *host == "" || r.mediaSilencedChecker == nil || !r.mediaSilencedChecker.IsMediaSilenced(*host) {
+	if !r.isMediaSilencedHost(host) {
 		return true
 	}
 	ownerSilenced := func(f *model.DriveFile) bool {
@@ -3216,7 +3236,7 @@ func (r *Resolver) ingestNoteWithCreated(body []byte, deliveringActorURI string,
 	}
 	// AP Note Tag配列からカスタム絵文字を抽出してDBにupsert
 	if actor.Host != nil {
-		note.Emojis = r.upsertEmojis(extractEmojiTags(apNote.Tag), *actor.Host)
+		note.Emojis = r.noteEmojisFor(r.upsertEmojis(extractEmojiTags(apNote.Tag), *actor.Host), actor.Host)
 	}
 	// hashtag は AP `tag` 配列の Hashtag entry と本文 / CW の両方から拾い、
 	// hashtag.ExtractNoteTags で case-insensitive dedup + 件数 cap + 長さ判定を
@@ -3724,7 +3744,7 @@ func (r *Resolver) UpdateRemoteNote(body []byte, actorURI string) (*model.Note, 
 	// AP Note Tag配列からカスタム絵文字を抽出してDBにupsert
 	// 既存値と比較して変化があった場合のみfieldsに含める
 	if existing.UserHost != nil {
-		emojis := r.upsertEmojis(extractEmojiTags(apNote.Tag), *existing.UserHost)
+		emojis := r.noteEmojisFor(r.upsertEmojis(extractEmojiTags(apNote.Tag), *existing.UserHost), existing.UserHost)
 		if !slices.Equal([]string(existing.Emojis), []string(emojis)) {
 			fields["emojis"] = emojis
 			existing.Emojis = emojis
