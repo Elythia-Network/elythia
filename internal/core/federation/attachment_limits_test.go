@@ -194,7 +194,7 @@ func TestUpsertAttachments_DropsOversizedColumns(t *testing.T) {
 	t.Run("type over 128 は既定値に倒す", func(t *testing.T) {
 		drive := testutil.NewMockDriveFileRepository()
 		ids := newResolver(drive).UpsertAttachments([]activitypub.Document{{
-			URL: "https://media.example/f/a.png", MediaType: "image/" + strings.Repeat("x", 200),
+			URL: "https://media.example/f/a.bin", MediaType: "image/" + strings.Repeat("x", 200),
 		}}, &userID, &host)
 		require.Len(t, ids, 1, "長い mediaType で添付が落ちている")
 		// **切った値を入れない。** 切ると存在しない MIME type になる。

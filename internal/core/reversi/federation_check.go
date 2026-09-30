@@ -46,7 +46,7 @@ type HTTPDoer interface {
 // **client が nil なら nodeinfo を取りに行かない (fail-closed)。** 以前は素の
 // `&http.Client{}` へ落としていたが、それは **SSRF ガードを通らない client** で、
 // 配線を落とした瞬間に private IP への到達が開く。他の外向き経路
-// (`probeImageDimensions`) は未配線なら取得自体を止める形になっており、
+// (`probeAttachment`) は未配線なら取得自体を止める形になっており、
 // ここだけ fail-open だった。連合対戦が使えなくなるだけなので、閉じる側に倒す。
 func NewFederationChecker(r redis.Cmdable, client HTTPDoer) *FederationChecker {
 	return &FederationChecker{redis: r, client: client}

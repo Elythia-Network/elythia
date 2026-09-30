@@ -10,7 +10,7 @@ import (
 )
 
 // rawAttachments returns n valid AP Document entries (image/png, no dimensions
-// → dimension probe が発火する形)。
+// → 先頭取得 (probe) が発火する形)。
 func rawAttachments(n int) []any {
 	out := make([]any, 0, n)
 	for i := 0; i < n; i++ {
