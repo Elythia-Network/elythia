@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/http"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -1208,12 +1209,26 @@ func (h *Handler) rolePayload(userID string) (isAdmin bool, isMod bool, policies
 		isMod = h.roleProvider.IsModerator(userID)
 		policies = h.roleProvider.GetUserPolicies(userID)
 		if rs, err := h.roleProvider.GetUserRoles(userID); err == nil {
+			// 公開ロールだけを表示順に並べる (#3240)。本家 UserEntityService も
+			// 本人かどうかに関係なく isPublic で絞る。絞らないと、運用上の分類や
+			// モデレーション目的の非公開ロールの名前が、割り当てられた本人に見える。
+			// 権限 (isAdmin / isModerator / policies) は非公開ロールも含めて上で
+			// 計算済みなので変わらない。
+			// iconUrl は entity (packPublicRoles、meUpdated の経路) と同じく media
+			// proxy を通す。通さないと $i.roles[].iconUrl が経路ごとに変わる。
+			visible := make([]*model.Role, 0, len(rs))
 			for _, r := range rs {
+				if r.IsPublic {
+					visible = append(visible, r)
+				}
+			}
+			sort.SliceStable(visible, func(i, j int) bool { return visible[i].DisplayOrder > visible[j].DisplayOrder })
+			for _, r := range visible {
 				roles = append(roles, map[string]any{
 					"id":              r.ID,
 					"name":            r.Name,
 					"color":           r.Color,
-					"iconUrl":         r.IconURL,
+					"iconUrl":         entity.ProxyMediaURLPtr(r.IconURL),
 					"description":     r.Description,
 					"isModerator":     r.IsModerator,
 					"isAdministrator": r.IsAdministrator,
