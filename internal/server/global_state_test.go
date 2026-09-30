@@ -251,7 +251,7 @@ func TestLoaderFixtureTestsResetCache(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	require.NoError(t, err)
 	// **slice で持つ。** `os.ReadDir` はファイル名順にソート済みで返すので、
-	// map に入れ直すと理由なく報告順が非決定的になる (CLAUDE.md の sqlbind-check
+	// map に入れ直すと理由なく報告順が非決定的になる (docs/gates.md の sqlbind-check
 	// entry を参照)。旧 `parser.ParseDir` は map を返していた。
 	var files []*ast.File
 	for _, e := range entries {

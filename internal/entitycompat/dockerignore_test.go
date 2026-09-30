@@ -29,7 +29,7 @@ var excludedFromBuildContext = map[string]string{
 	".git/config":                   "履歴と remote の認証情報が入る",
 	"plugins/example/.git/config":   "入れ子の .git も落とす (plugins/*/ は独立リポジトリ)",
 	".env":                          "運用の設定ファイル (作られていれば認証情報を含む)",
-	".env.test":                     "同上。`.env.test.example` から作る手順が CLAUDE.md にある",
+	".env.test":                     "同上。`.env.test.example` から作る手順が docs/testing.md にある",
 	"drive-files/abcdef.png":        "利用者がアップロードしたファイル。既定の drive の置き場所 (internal/server/router.go)",
 	".config/default.yml":           "operator-local な設定。DB / Redis のパスワードを持つ",
 	"deploy/uds/config/default.yml": "同上 (本番 UDS)",

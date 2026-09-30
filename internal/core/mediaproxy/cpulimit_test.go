@@ -313,7 +313,7 @@ func TestFetchResizeModesTakeACPUSlot(t *testing.T) {
 // **これが無いと `defer release()` を `release()` に変えるだけで全テストが
 // 緑のまま通る (レビューで実測)。** その形は acquire こそするが仕事の前に
 // 返すので同時デコード数を一切縛らず、peak RSS は無制限時に戻る。
-// CLAUDE.md 2026-09-17 が blocker として挙げている「`storableIDs(ids)` と
+// docs/gates.md の 2026-09-17 の経緯が blocker として挙げている「`storableIDs(ids)` と
 // 書いて戻り値を捨てる」と同型。
 //
 // 判定は「枠 1 で N 本同時に投げたとき、待ちきれずに shed されるものが
