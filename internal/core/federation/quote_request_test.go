@@ -517,6 +517,35 @@ func TestQuoteRequest_BlockRacingWithApproval(t *testing.T) {
 	assert.Empty(t, e.resp.accepted)
 }
 
+// 同じ引用 URI の記録が別の相手のものなら答えない (#3239)。答えると、その人の
+// 承認をこの相手へ渡すことになる。記録も書き換えない。
+func TestQuoteRequest_ApprovalOfAnotherQuoterIsNotAnswered(t *testing.T) {
+	e := newQREnv(t)
+	e.store.rows = []*model.NoteQuoteAuthorization{{ID: "carols", NoteID: "pub", QuoterID: "carol", QuotingURI: qrQuoting}}
+	require.NoError(t, e.handle(t, quoteRequest(t, "pub", inlineInstrument(qrBase+"/notes/pub"))))
+	assert.Empty(t, e.resp.accepted)
+	assert.Empty(t, e.resp.rejected)
+	require.Len(t, e.store.rows, 1)
+	assert.Equal(t, "carol", e.store.rows[0].QuoterID)
+
+	// 記録の直前にブロックされていても、他人の記録に対しては Reject も返さない
+	// (Reject の後始末で他人の記録を触らない)。
+	e = newQREnv(t)
+	e.store.rows = []*model.NoteQuoteAuthorization{{ID: "carols", NoteID: "pub", QuoterID: "carol", QuotingURI: qrQuoting}}
+	e.h.blocks = &qrFlipBlocks{after: 2}
+	require.NoError(t, e.handle(t, quoteRequest(t, "pub", inlineInstrument(qrBase+"/notes/pub"))))
+	assert.Empty(t, e.resp.accepted)
+	assert.Empty(t, e.resp.rejected)
+	require.Len(t, e.store.rows, 1)
+
+	// 同じ相手の記録なら、これまでどおり同じ承認を返す。
+	e = newQREnv(t)
+	e.store.rows = []*model.NoteQuoteAuthorization{{ID: "bobs", NoteID: "pub", QuoterID: "bob", QuotingURI: qrQuoting}}
+	require.NoError(t, e.handle(t, quoteRequest(t, "pub", inlineInstrument(qrBase+"/notes/pub"))))
+	require.Len(t, e.resp.accepted, 1)
+	assert.Equal(t, "bobs", e.resp.accepted[0].ID)
+}
+
 // Reject するときは、前の試行で記録された承認も消す。
 func TestQuoteRequest_RejectRemovesExistingApproval(t *testing.T) {
 	e := newQREnv(t)
