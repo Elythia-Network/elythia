@@ -66,30 +66,13 @@ def test_quote_is_accepted(mkgo, mastodon):
     poll_until(notified, timeout=90, interval=3, desc="mk-go notifies the author of the quote")
 
 
-def test_quote_from_blocked_user_is_rejected(mkgo_second, mastodon):
-    """A block on a visible note gets an explicit Reject, and Mastodon marks the quote rejected."""
-    # ブロックするのは 2 人目の利用者 (dave)。他のテストは carol と alice で引用し合うので、
-    # その関係にブロックを入れない (Mastodon が Block / Undo(Block) を処理する順序に
-    # 後続のテストが左右される)。
-    marker = uuid.uuid4().hex
-    note = mkgo_second.create_note(f"not for blocked users {marker}")["createdNote"]
-    target = _resolve(mastodon, mkgo_second, note["id"])
-
-    alice = poll_until(
-        lambda: mkgo_second.users_show("alice", "mastodon"),
-        timeout=90, interval=3, desc="mk-go knows alice@mastodon",
-    )
-    mkgo_second._api("blocking/create", {"userId": alice["id"]})
-    try:
-        quoting = mastodon.quote(target["id"], f"quoting while blocked {marker}")
-
-        def rejected():
-            q = mastodon.status(quoting["id"]).get("quote")
-            return q if q and q.get("state") == "rejected" else None
-
-        poll_until(rejected, timeout=90, interval=3, desc="Mastodon marks the quote rejected")
-    finally:
-        mkgo_second._api("blocking/delete", {"userId": alice["id"]})
+# ブロック中の相手からの QuoteRequest に Reject を返すこと (段階 2) は e2e にしない。
+# Mastodon は、どちらの向きでもブロックを知った時点で引用そのものを作らせない
+# (`StatusPolicy#quote?` = `show?` && `!blocking_author?`)。mk-go のブロックは Block として
+# Mastodon へ届くので、このシナリオは「Block が届く前に引用を作れたとき」しか成り立たず、
+# CI で Block が先に届いて落ちた。Reject の経路はユニットテスト
+# (`TestQuoteRequest_Rejects` など) で押さえ、ブロックの e2e は取り消し
+# (`test_blocking_revokes_our_approval`) で見る。
 
 
 def _mkgo_ap_note(mkgo, note_id: str) -> dict:
