@@ -64,6 +64,8 @@ tests/queue-bench/results/*.md
 
 # Claude Code local state
 .claude/
+# 運営者の環境に固有のルール (#3248)。Claude Code は CLAUDE.md の後に自動で読む
+CLAUDE.local.md
 __pycache__/
 
 # Cypress runtime artifacts (tests/dropin_frontend/cypress and e2e/cypress 配下)
