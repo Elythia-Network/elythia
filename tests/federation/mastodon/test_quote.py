@@ -6,6 +6,7 @@ Mastodon 4.5 以降は、引用に引用される側の承認を求める。mk-g
 
 from __future__ import annotations
 
+import time
 import uuid
 
 from conftest import MASTODON_URL
@@ -147,6 +148,7 @@ def test_mastodon_revocation_withdraws_our_approval(mkgo, mastodon):
         timeout=90, interval=3, desc="mk-go resolves the Mastodon post",
     )
     quoting = mkgo.quote(target["id"], f"quoting to be revoked {marker}")["createdNote"]
+    quoted_at = time.monotonic()
     quoting_uri = _note_url(mkgo, quoting["id"])
 
     # 承認が返るまで Mastodon に取得させない (上のテストと同じ理由)。
@@ -171,6 +173,18 @@ def test_mastodon_revocation_withdraws_our_approval(mkgo, mastodon):
     note = poll_until(withdrawn, timeout=90, interval=3, desc="mk-go withdraws the approval")
     assert "quote" not in note
     assert note["_misskey_quote"] == status["uri"]
+
+    # 保留中の QuoteRequest を送り直す仕組み (#3238) は、承認・取り消しの後には
+    # 送らない。送ると Mastodon は状態を見ずに承認し直す (取り消しが元に戻る)。
+    # 最初の送り直しの時刻を過ぎても、Mastodon 側で取り消されたままか。送り直しは
+    # 作成の 1 分後以降に毎分の定期処理が拾い、そこから配送の queue を通るので、
+    # 定期処理 2 回分の余裕を見る。
+    elapsed = time.monotonic() - quoted_at
+    time.sleep(max(0.0, 180 - elapsed))
+    # 取り消された引用は、Mastodon の API では quote ごと出ないか revoked になる
+    # (mk-go の引用は承認を外した Update で legacy に戻るので、承認済みでない限り出ない)。
+    quote = mastodon.status(quoting_status["id"]).get("quote")
+    assert quote is None or quote.get("state") != "accepted", quote
 
 
 def test_blocking_revokes_our_approval(mkgo_second, mastodon):
