@@ -168,6 +168,53 @@ func TestEmojiFetchRemoteMeta_UnwiredFetcher(t *testing.T) {
 
 var _ apiadmin.RemoteEmojiMetaFetcher = (*fakeRemoteMetaFetcher)(nil)
 
+// 相手の API から取れなかったときは、連合で入っているライセンスを返す (#3246)。
+// 返さないと、ダイアログが空で初期化されて copy が元のライセンスを空で上書きする。
+func TestEmojiFetchRemoteMeta_FallsBackToStoredLicense(t *testing.T) {
+	cases := []struct {
+		name    string
+		fetcher *fakeRemoteMetaFetcher
+	}{
+		{"origin has no license", &fakeRemoteMetaFetcher{meta: &emojimeta.Meta{Category: strp("c")}}},
+		{"unsupported", &fakeRemoteMetaFetcher{err: emojimeta.ErrUnsupported}},
+		{"not found", &fakeRemoteMetaFetcher{err: emojimeta.ErrNotFound}},
+		{"transport error", &fakeRemoteMetaFetcher{err: errors.New("dial tcp: refused")}},
+		{"unwired", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			host := "remote.example"
+			h, _ := setupEmojiHandler(t, &model.Emoji{ID: "e1", Name: "x", Host: &host, License: strp("COGNOSPHERE")})
+			if tc.fetcher != nil {
+				h.SetRemoteEmojiMetaFetcher(tc.fetcher)
+			}
+			rec := doPost(h.EmojiFetchRemoteMeta, `{"emojiId":"e1"}`, adminUser)
+			require.Equal(t, http.StatusOK, rec.Code)
+			var body map[string]any
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+			assert.Equal(t, "COGNOSPHERE", body["license"])
+		})
+	}
+}
+
+// 相手の API の値があればそちらを優先する。保存値が空ならキーを出さない。
+func TestEmojiFetchRemoteMeta_OriginLicenseWins(t *testing.T) {
+	host := "remote.example"
+	h, _ := setupEmojiHandler(t, &model.Emoji{ID: "e1", Name: "x", Host: &host, License: strp("old")})
+	h.SetRemoteEmojiMetaFetcher(&fakeRemoteMetaFetcher{meta: &emojimeta.Meta{License: strp("new")}})
+	rec := doPost(h.EmojiFetchRemoteMeta, `{"emojiId":"e1"}`, adminUser)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	assert.Equal(t, "new", body["license"])
+
+	h, _ = setupEmojiHandler(t, &model.Emoji{ID: "e2", Name: "y", Host: &host, License: strp("")})
+	h.SetRemoteEmojiMetaFetcher(&fakeRemoteMetaFetcher{err: emojimeta.ErrUnsupported})
+	rec = doPost(h.EmojiFetchRemoteMeta, `{"emojiId":"e2"}`, adminUser)
+	body = map[string]any{}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	assert.NotContains(t, body, "license")
+}
+
 // admin/emoji/copy の上書きパラメータ (#2698)。取得・編集した値でコピーする。
 func TestEmojiCopy_OverridesFromRemoteMeta(t *testing.T) {
 	host := "remote.example"
