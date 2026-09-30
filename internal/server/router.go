@@ -841,12 +841,12 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	federationResolver.SetPollVoter(pollService)
 	federationResolver.SetEmojiRepo(emojiRepo)
 	federationResolver.SetDriveFileRepo(driveFileRepo)
-	// AP attachment dimension probe (#461) 用 outbound HTTP client。
+	// AP attachment の先頭取得 (#461 / #3243) 用 outbound HTTP client。
 	// SSRF-safe transport で内部 IP / cloud metadata エンドポイントへの
-	// アクセスを拒否する。timeout は単発 image fetch なので apHTTPClient
+	// アクセスを拒否する。timeout は先頭だけの単発 fetch なので apHTTPClient
 	// (30s) より短めの 10s にする。
-	imageProbeClient := s.outboundClient(10 * time.Second)
-	federationResolver.SetImageProbeClient(imageProbeClient)
+	attachmentProbeClient := s.outboundClient(10 * time.Second)
+	federationResolver.SetAttachmentProbeClient(attachmentProbeClient)
 	federationProcessor := corefederation.NewProcessor(federationResolver, followingService, reactionService, noteDeleteService, userRepo, noteRepo)
 	federationProcessor.SetLocalBaseURL(s.config.URL)
 

@@ -22,7 +22,7 @@ func (nopFetcher) FetchObject(string) ([]byte, error) { return nil, http.ErrServ
 
 // probe は呼び出し側の ctx に従うこと。ここで `context.Background()` を作って
 // いると、ジョブ側がどれだけ打ち切っても外向き GET が出続ける。
-func TestProbeImageDimensions_HonorsCallerContext(t *testing.T) {
+func TestProbeAttachment_HonorsCallerContext(t *testing.T) {
 	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		hits.Add(1)
@@ -34,10 +34,9 @@ func TestProbeImageDimensions_HonorsCallerContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	w, h, ok := probeImageDimensions(ctx, srv.Client(), srv.URL+"/cat.png")
+	p, ok := probeAttachment(ctx, srv.Client(), srv.URL+"/cat.png")
 	assert.False(t, ok, "打ち切られた ctx で probe が成功してはいけない")
-	assert.Zero(t, w)
-	assert.Zero(t, h)
+	assert.Equal(t, attachmentProbe{}, p)
 	assert.Zero(t, hits.Load(), "打ち切られた ctx で外向き GET を出してはいけない")
 }
 
@@ -51,12 +50,12 @@ func (h *hangingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	return nil, req.Context().Err()
 }
 
-// dimension probe の合計時間を 1 document 分で打ち切ること。
+// 先頭取得の合計時間を 1 document 分で打ち切ること。
 //
-// 添付ごとの imageFetchTimeout (3s) しか無いと、無応答のメディアサーバーを
+// 添付ごとの attachmentFetchTimeout (3s) しか無いと、無応答のメディアサーバーを
 // 指した添付を並べるだけで `添付数 × 3s` だけ inbox worker が止まる。ここでは
 // 予算を 150ms に縮めて、4 添付でも予算のオーダーで終わることを見る (予算が
-// 効いていなければ 4 × imageFetchTimeout = 12s 掛かる)。
+// 効いていなければ 4 × attachmentFetchTimeout = 12s 掛かる)。
 func TestUpsertAttachments_BoundsTotalProbeTime(t *testing.T) {
 	drive := testutil.NewMockDriveFileRepository()
 	idGen, err := id.NewGenerator("aidx")
@@ -65,7 +64,7 @@ func TestUpsertAttachments_BoundsTotalProbeTime(t *testing.T) {
 		activitypub.NewURLBuilder("https://example.com"), nopFetcher{}, idGen)
 	r.SetDriveFileRepo(drive)
 	tr := &hangingTransport{}
-	r.SetImageProbeClient(&http.Client{Transport: tr})
+	r.SetAttachmentProbeClient(&http.Client{Transport: tr})
 	r.probeBudget = 150 * time.Millisecond
 
 	docs := make([]activitypub.Document, 0, 4)
@@ -109,7 +108,7 @@ func TestUpsertAttachments_ZeroProbeBudgetFallsBackToDefault(t *testing.T) {
 	r := NewResolver(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(),
 		activitypub.NewURLBuilder("https://example.com"), nopFetcher{}, idGen)
 	r.SetDriveFileRepo(drive)
-	r.SetImageProbeClient(srv.Client())
+	r.SetAttachmentProbeClient(srv.Client())
 	require.Zero(t, r.probeBudget, "NewResolver は probeBudget を明示設定しない")
 
 	userID, host := "ru", "remote.example"
@@ -128,7 +127,7 @@ func TestUpsertAttachments_ZeroProbeBudgetFallsBackToDefault(t *testing.T) {
 // 添付 x 1 件あたりの timeout」の直列占有なので、その worst case より十分
 // 小さいことを要求する。
 func TestAttachmentProbeBudgetBoundsWorstCase(t *testing.T) {
-	worst := time.Duration(maxRemoteAttachments) * imageFetchTimeout
+	worst := time.Duration(maxRemoteAttachments) * attachmentFetchTimeout
 	if attachmentProbeBudget >= worst {
 		t.Fatalf("予算 %v が worst case %v を抑えていない (上限だけでは直列占有が残る)",
 			attachmentProbeBudget, worst)

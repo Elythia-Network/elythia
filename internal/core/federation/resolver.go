@@ -420,11 +420,6 @@ type Resolver struct {
 	pollVoter     PollVoter                      // optional: AP vote (Note.name) の投票記録
 	emojiRepo     repository.EmojiRepository     // optional: リモート絵文字の永続化
 	driveFileRepo repository.DriveFileRepository // optional: リモート添付の link 化
-	// imageProbeClient は image attachment の dimension probe (#461) で
-	// 使う outbound HTTP client。SSRF-safe transport (router.go で
-	// safehttp.NewSSRFSafeTransport を適用したもの) を渡す前提で、
-	// 未設定なら probe 自体をスキップする (安全側に倒す: SSRF リスクを
-	// 起こすくらいなら properties 空のまま運用)。
 	// ephemeralSink はリレー経由でしか観測しない投稿の置き場 (#2332)。
 	// 設定が有効かつ配線されているときだけ、DB ではなくこちらへ書く。
 	ephemeralSink EphemeralSink
@@ -433,8 +428,12 @@ type Resolver struct {
 	// ephemeralTimeline は DB 行が ephemeral を上書きしたときに FTT から旧 ID
 	// を除くためのもの。残すと hydrate で ephemeral 側が拾われ二重表示になる。
 	ephemeralTimeline EphemeralTimelineRemover
-	imageProbeClient  *http.Client
-	// probeBudget は 1 document 分の dimension probe に許す合計時間。0 なら
+	// attachmentProbeClient は添付の先頭取得 (#461 / #3243) で使う outbound
+	// HTTP client。SSRF-safe transport (router.go で safehttp の transport を
+	// 適用したもの) を渡す前提で、未設定なら取得自体をスキップする (安全側に
+	// 倒す: SSRF リスクを起こすくらいなら申告と推測だけで登録する)。
+	attachmentProbeClient *http.Client
+	// probeBudget は 1 document 分の先頭取得に許す合計時間。0 なら
 	// attachmentProbeBudget を使う (テストだけが縮める)。
 	probeBudget time.Duration
 	// hostBlocker は federation 設定 (none / specified / blockedHosts) を
@@ -656,14 +655,14 @@ func (r *Resolver) SetEmojiRepo(repo repository.EmojiRepository) {
 	r.emojiRepo = repo
 }
 
-// SetImageProbeClient attaches an SSRF-safe *http.Client used by the
-// attachment dimension probe (#461). The supplied client must wrap a
-// transport with safehttp.NewSSRFSafeTransport(...) — otherwise a
-// malicious remote can point a Document URL at internal addresses
-// (cloud metadata, localhost services). nil 渡しは無効化と同義で、
-// その場合 dimension probe はスキップされ properties は空のまま。
-func (r *Resolver) SetImageProbeClient(client *http.Client) {
-	r.imageProbeClient = client
+// SetAttachmentProbeClient attaches an SSRF-safe *http.Client used to read
+// the leading bytes of remote attachments (type, filename and image
+// dimensions; #461 / #3243). The supplied client must wrap a transport with
+// safehttp.NewSSRFSafeTransport(...) — otherwise a malicious remote can point
+// a Document URL at internal addresses (cloud metadata, localhost services).
+// nil 渡しは無効化と同義で、その場合は AP の申告と URL からの推測だけで登録する。
+func (r *Resolver) SetAttachmentProbeClient(client *http.Client) {
+	r.attachmentProbeClient = client
 }
 
 // SetDriveFileRepo attaches a DriveFileRepository for ingesting AP
@@ -4632,9 +4631,9 @@ func NormalizeGateHost(rawURL string) string {
 //
 // **upstream に上限は無い** (`ApNoteService` は `toArray(note.attachment)` を
 // そのまま回す) が、mk-go では 1 件につき `drive_file` の SELECT + INSERT と、
-// `mediaType` が `image/*` で width/height が欠けていれば**外向き GET** が
-// 直列に走る。上限が無いと、署名付き POST 1 通 (inbox の body 上限 64 KiB に
-// 添付 900 件が収まる) で inbox worker を数十分占有できる。
+// 未取り込みの添付なら先頭取得の**外向き GET** (#3243) が直列に走る。上限が
+// 無いと、署名付き POST 1 通 (inbox の body 上限 64 KiB に添付 900 件が
+// 収まる) で inbox worker を数十分占有できる。
 //
 // 値はローカルの受け入れ上限に揃える — `notes/create` の paramDef は
 // `fileIds: maxItems 16` (upstream も同値、`validateCreateInput` 参照)。
@@ -4925,8 +4924,8 @@ func isForeignKeyViolation(err error) bool {
 }
 
 // upsertAttachments persists each AP Document as a drive_file row (link
-// 形式、isLink=true、実 fetch なし) and returns the resulting drive_file IDs
-// in original order. URI による dedup を行うので、同じ remote attachment が
+// 形式、isLink=true、実体は保存せず先頭だけ取得する #3243) and returns the
+// resulting drive_file IDs in original order. URI による dedup を行うので、同じ remote attachment が
 // 複数の note に紐付いても drive_file は 1 行のみ。
 //
 // driveFileRepo が未設定なら空 (model.StringArray{}) を返す (旧挙動)。userID は
@@ -4938,14 +4937,19 @@ func isForeignKeyViolation(err error) bool {
 // `validateFileName` の不合格は `untitled`)。
 //
 // **upstream は実体を download して名前を決める** (Content-Disposition があれば
-// それを優先する) が、mk-go は実体を保存しない (docs/divergence.md 5.5) ので
-// URL の basename だけを使う。**拡張子の補完もしない** — upstream が付けるのは
+// それを優先する)。mk-go は実体を保存しない (docs/divergence.md 5.5) が、先頭を
+// 取得して Content-Disposition を見る (probeAttachment、#3243)。これは
+// Content-Disposition から名前が取れなかったときの fallback — 取得の失敗、
+// ヘッダ無し、名前の不合格 (制御文字・bidi 制御文字を含む)、エラーページと
+// 判断して取得結果を捨てた場合。**拡張子の補完はしない** — upstream が付けるのは
 // 実体を sniff した型であって、相手の申告した mediaType ではないため。
 //
-// 結果が upstream とずれるのは 4 つ。(1) Content-Disposition で filename を返す
-// 配信元。**Misskey 同士ではここでずれる** — upstream は自分が配信するファイルに
-// `Content-Disposition: inline; filename=...` を付ける (object storage / 自 host
-// 配信のどちらも) ので、upstream 側は原ファイル名を採る。(2) 拡張子の補完。
+// 結果が upstream とずれるのは 4 つ。(1) この fallback に落ちたとき。取得に
+// 失敗した添付では Content-Disposition の名前を使えない (**Misskey 同士では
+// ここでずれる** — upstream は自分が配信するファイルに
+// `Content-Disposition: inline; filename=...` を付けるので、upstream 側は原ファイル
+// 名を採る)。名前が不合格のとき upstream は `untitled` にする。Latin-1 の名前は
+// upstream だけが decode する (詳細は docs/divergence.md)。(2) 拡張子の補完。
 // (3) Go の `net/url` は WHATWG URL の正規化をしないので `/a/%2e%2e` (upstream は
 // 畳んで `untitled`) と `/a\b.png` (upstream は `\` を区切り扱いにして `b.png`) が
 // ずれる。(4) upstream は `name === comment` のとき comment を落とすが mk-go は
@@ -4982,8 +4986,8 @@ func (r *Resolver) upsertAttachments(docs []activitypub.Document, userID, host *
 		return model.StringArray{}
 	}
 	ids := make(model.StringArray, 0, len(docs))
-	// dimension probe の予算は**この呼び出し全体**で 1 つ。添付ごとの
-	// `imageFetchTimeout` は 1 本の GET しか縛らないので、直列に積まれると
+	// 先頭取得 (probe) の予算は**この呼び出し全体**で 1 つ。添付ごとの
+	// `attachmentFetchTimeout` は 1 本の GET しか縛らないので、直列に積まれると
 	// 件数分だけ待たされる (attachmentProbeBudget の説明を参照)。
 	//
 	// **ジョブの ctx は届かない。** IngestNote / upsertAttachments は ctx を
@@ -5018,15 +5022,25 @@ func (r *Resolver) upsertAttachments(docs []activitypub.Document, userID, host *
 			continue
 		}
 		now := r.clock()
-		// `drive_file.type` は varchar(128)。**切ると別の MIME type になる**ので、
-		// 収まらなければ既定値に倒す (#2723)。
-		mediaType := doc.MediaType
-		if mediaType == "" || !fitsColumn(mediaType, driveFileTypeMaxRunes) {
-			mediaType = "application/octet-stream"
+		// 先頭を 1 回だけ取得して、形式・名前・画像の寸法をまとめて読む (#3243)。
+		// AP の申告だけで決めると、`mediaType` を持たない実装 (画像なのに
+		// octet-stream になる) や、URL にファイル名を持たない実装 (名前が UUID や
+		// API のパスになる) で壊れる。取得できなければ申告と推測に倒す。
+		var probed attachmentProbe
+		if r.attachmentProbeClient != nil {
+			probed, _ = probeAttachment(probeCtx, r.attachmentProbeClient, doc.URL)
 		}
+		// メディアを名乗るのに文書が返ったら、200 のエラーページを読んだと
+		// みなして取得結果ごと捨てる (形式だけでなく名前もエラーページのもの)。
+		if claimsMedia(doc.MediaType, doc.Type) && isDocumentMIME(probed.MIME) {
+			probed = attachmentProbe{}
+		}
+		// `drive_file.type` は varchar(128)。**切ると別の MIME type になる**ので、
+		// 収まらない申告は採らない (#2723)。
+		mediaType := resolveAttachmentMIME(probed.MIME, doc.MediaType, doc.Type, doc.URL)
 		// AP の `name` は**代替テキスト**なので `comment` (varchar(512)) に入れる。
-		// `name` (varchar(256)) は URL から作る — upstream の `uploadFromUrl` と
-		// 同じ置き場にする (#2723)。
+		// `name` (varchar(256)) は Content-Disposition か URL から作る — upstream の
+		// `uploadFromUrl` と同じ置き場・同じ順にする (#2723)。
 		//
 		// **comment は列の上限で切る。** 説明が長い添付は入らず 22001 で落ち、
 		// **その添付が丸ごと保存されない** (#2717)。rune 単位で切る — byte で
@@ -5034,7 +5048,10 @@ func (r *Resolver) upsertAttachments(docs []activitypub.Document, userID, host *
 		// **NUL も落とす。** 長さだけ直しても、制御文字が混じると 22021 で
 		// 同じく添付が丸ごと落ちる (#2721 review MEDIUM-1)。
 		safeName := sanitizeRemoteText(doc.Name)
-		name := attachmentFileName(doc.URL)
+		name := probed.FileName
+		if name == "" {
+			name = attachmentFileName(doc.URL)
+		}
 		var comment *string
 		if safeName != "" {
 			cn := truncateRunes(safeName, driveFileCommentMaxRunes)
@@ -5058,9 +5075,9 @@ func (r *Resolver) upsertAttachments(docs []activitypub.Document, userID, host *
 			StoredInternal: false,
 		}
 		// AP Document に乗ってきた metadata を可能な限り永続化する
-		// (#460 thumbnail / #461 properties)。link-format なので実体
-		// 画像解析はしないが、remote 側が宣言している width/height/
-		// icon/blurhash を信頼してそのまま保存する。
+		// (#460 thumbnail / #461 properties)。link-format なので実体は
+		// 保存しない。width/height は宣言を優先し、欠けていれば先頭取得で
+		// 読んだ画像ヘッダの値で埋める。icon/blurhash は宣言をそのまま使う。
 		// thumbnail / blurhash は**表示の補助でしかない**ので、列
 		// (varchar(512) / varchar(128)) に入らなければ値ごと捨てて添付は残す。
 		if doc.Icon != nil && doc.Icon.URL != "" {
@@ -5071,19 +5088,14 @@ func (r *Resolver) upsertAttachments(docs []activitypub.Document, userID, host *
 		width := doc.Width
 		height := doc.Height
 		// 上流 Misskey TS の renderDocument は width/height を AP に
-		// 載せないため、image MIME の場合は best-effort で URL を
-		// fetch して画像ヘッダから dimensions を復元する。失敗時は
-		// 0/0 のまま属性 JSON を空にしておき、表示側のフォールバック
-		// に任せる。タイムアウト 3s で inbox 全体は止めない。
-		if (width == 0 || height == 0) && strings.HasPrefix(mediaType, "image/") && r.imageProbeClient != nil {
-			if w, h, ok := probeImageDimensions(probeCtx, r.imageProbeClient, doc.URL); ok {
-				if width == 0 {
-					width = w
-				}
-				if height == 0 {
-					height = h
-				}
-			}
+		// 載せないため、先頭取得で読めた画像ヘッダの寸法で埋める。取得
+		// できなければ 0/0 のまま属性 JSON を空にしておき、表示側の
+		// フォールバックに任せる。
+		if width == 0 {
+			width = probed.Width
+		}
+		if height == 0 {
+			height = probed.Height
 		}
 		if width > 0 || height > 0 {
 			// upstream Misskey は properties JSON を `{width, height}` で

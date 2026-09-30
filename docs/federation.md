@@ -45,7 +45,7 @@
 | `permanent_error.go` | リトライしない失敗の判定 |
 | `suspended.go` | 配送先インスタンスの software 名 / 版で**送信をスキップ**するかの判定 (`meta.deliverSuspendedSoftware`) |
 | `remote_user_resolver.go` | `acct:` からのリモートユーザー解決 |
-| `image_dimensions.go` | 添付画像の寸法取得 |
+| `attachment_probe.go` | リモート添付の先頭取得 (形式・名前・画像の寸法) |
 
 ## HTTP Signatures
 
