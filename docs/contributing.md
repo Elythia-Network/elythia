@@ -273,3 +273,13 @@ misskey-project` は upstream Misskey の著作権表示なので、mk-go 自身
 ときも、submodule 側の `scripts/check-spdx.mjs` が落とすのでヘッダーが要る。
 `tools/pluginbuild` が生成する `server-plugins.generated.ts` がそこに入るのも
 同じ理由で、あれは Go 側の方針の例外ではなく submodule 側の要件。
+
+## 変更の経緯 (旧 CLAUDE.md の更新記録)
+
+CLAUDE.md の「更新記録」に書かれていた本文を、#3248 でここへ移した。**記述は当時のまま**で、文中の「Section N」は当時の CLAUDE.md の節を指す。新しいものが上。
+
+- **2026-08-20**: Section 7 に「ドキュメントを直すときのレビュー条件」を追加 (#2644)。#2637 の完了条件にあった「同じ乖離が再発しにくい仕組み」への回答。本文が候補に挙げていた**静的検査 (存在しない Makefile target / パスの検出) は測ったところ使い物にならなかった** — target は doc 側 107 のうち Makefile に無いのが 3 つで全て grep の取りこぼし (空振りする)、パスは `docs/` と CLAUDE.md / README.md のバッククォート内でスラッシュを含む文字列を拾うと**不在候補が 298 件**で、大半が偽陽性 (API の endpoint パス / CIDR / `internal/` を省いた相対表記)。代わりに #2640 の**敵対的レビュー 7 周で出た High 14 件を型に分類**して確認手順に落とした。最多は**片側更新** (4 件)、次が**裏取りせず書いた** (3 件) と**数え方が未定義 / 数え違い** (3 件)。全文は docs/contributing.md。
+- **2026-08-20**: ドキュメント全体監査 (#2637) の残り 94 件を反映 (#2640)。CLAUDE.md 本体では 5 箇所を修正。(1) Section 1 の技術スタック表が Job Queue を **asynq** と書いていた (既定は #571 で mkq。ここを見て実装方針を決めると legacy 側に倒れる)。**`golang-jwt/jwt/v5` は indirect で未使用**、実際に使う `go-webauthn/webauthn` が未記載、JSON-LD は `piprate/json-gold` を直接依存。(2) Section 2 のディレクトリツリーが `...` 無しで閉じているのに、`internal/` 22 のうち 10・`cmd/` 4 のうち 2・トップレベル 7 つが欠落していた。(3) Section 3 に無い target が 76 あったので、**罠のあるものを足したうえで `make help` が全量であることを明記**した (全列挙は腐るので採らない)。`make tidy` はこのリポジトリでは使えない。(4) Section 8 に `docker.yml` (**PR で走る**) / `docker-branch.yml` / schedule の 2 つ、ci.yml の 3 step が無かった。diff-e2e の「43 比較」は pytest 総数で **endpoint 比較は 30**。(5) Section 9 の環境変数表 11 件に対し `bindEnvKeys()` は **86 キー**。登録の有無で変わるのは「**設定ファイルに書かずに env だけで作れるか**」だけで、ファイルにそのキーがあれば未登録でも `MK_` で上書きできる (`AutomaticEnv`)。実務上引っかかるのは example が既定でコメントアウトしている `meilisearch:` と `<queue>JobConcurrency` なので、その条件を明記した。
+- **2026-08-04**: Section 7 (Git Workflow) に「マージ方法」を追記。フィーチャーブランチ → `develop` の PR は **rebase and merge** に統一する (それ以前は squash-merge)。各コミットがそのまま develop に載るため、1 コミットずつ build / test が通る順序で並べること、確認は使い捨て `git worktree` で行うこと (作業ツリー上の `git stash` は保留中の別作業を巻き込むので使わない) を併記。`main` は従来どおり PR をマージせず FF push のみで、対象が異なる旨も明記した。
+- **2026-06-09**: Section 7 (Git Workflow) に 2 つのルールを追記。(1)「Issue・PR のタイトル・本文は日本語記述を厳守する」(技術用語は原文のまま残してよいが、説明文・見出し・箇条書きの地の文に英語を混在させない)。(2)「`CHANGELOG.md` はリリース時にまとめて記述する」(個別 PR・fix ごとに `## Unreleased` へ追記せず、リリースのタイミングで一括記載する)。
+- **2026-04-11**: 初版作成。

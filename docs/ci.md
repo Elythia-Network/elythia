@@ -379,3 +379,129 @@ CI はまっさらな環境なので、手元にある生成物が要件を隠�
 - [`shape-drift.md`](shape-drift.md) — entity shape / error id の drift gate
 - [`divergence.md`](divergence.md) — 意図的な差分のカタログ
 - [`contributing.md`](contributing.md) — コントリビューション手順
+
+## 変更の経緯 (旧 CLAUDE.md の更新記録)
+
+CLAUDE.md の「更新記録」に書かれていた本文を、#3248 でここへ移した。**記述は当時のまま**で、文中の「Section N」は当時の CLAUDE.md の節を指す。新しいものが上。
+
+- **2026-09-30**: Section 3 に `make federation-mastodon-e2e`、Section 8 の `dropin-e2e` に
+  `federation-mastodon` シナリオを追加 (#3234)。`make help` の target は 139 → 141
+  (`federation-mastodon-e2e` / `-down`)。**引用の承認 (FEP-044f) は相手の実装が読めるかでしか
+  確かめられない** — こちらのユニットテストは「自分で描画して自分で読む」ことしか保証せず、
+  Mastodon が `interactionPolicy` をどう解釈し、Accept の `result` をどう検証するかは実物に
+  喋らせないと分からない。公式 image (`ghcr.io/mastodon/mastodon:v4.7.2`) をそのまま使い、
+  秘密鍵は起動時に生成する (commit しない)。**変異で落ちることを確かめてある** —
+  範囲を配らない形で 4 件中 3 件、承認を返さない形で承認のテスト、ブロック時に Reject せず
+  承認する形で Reject のテストが落ちる。
+- **2026-09-26**: `.github/workflows/` の action を**全て commit SHA で固定**した (`# vX.Y.Z` の
+  コメント付き。`actions/*` も例外にしない)。tag は付け替えられるので、`packages: write` で
+  GHCR へ publish する `docker.yml` / `build-with-plugins.yml` の中で動く action が差し替わると
+  配る image を書き換えられる。`TestWorkflowActionsArePinnedToSHA` が形を固定し、更新は
+  `.github/dependabot.yml` の `github-actions` で受ける。publish する job の checkout には
+  `persist-credentials: false` を付けた。手順は docs/ci.md の「action の版固定」。
+  同じ理由で、配る Dockerfile (`Dockerfile` / `Dockerfile.bundled` /
+  `deploy/uds/Dockerfile.mkgo`) の base image (golang / distroless / alpine) も
+  `<tag>@sha256:<digest>` で固定した (`TestDistributedDockerfileBaseImagesArePinnedByDigest`)。
+  digest の更新は dependabot の `docker` が受け、tag の版は上げさせない (golang は
+  go.mod と揃える必要があるため)。
+- **2026-09-22**: `apicompat` workflow を追加。**`docs/api-compat.md` の再生成が人手に
+  頼っていた** — CLAUDE.md 自身が「生成物を手で直さない」と書いているのに、古くなっても
+  気付く仕組みが無かった。route を足しても upstream が endpoint を増やしてもマトリクスは
+  黙ってずれ、読む人は「mk-go only 59 件」のような数字を現状だと思って判断する。
+  **既存のどの job にも相乗りできない。** submodule (TS の endpoints を読む) と DB / Redis
+  (route dump がサーバーを組み立てる) の両方が要るが、`test-shards` は `third_party/misskey`
+  を checkout せず、`frontend-check` は DB を持たない。別 workflow にして paths で絞った。
+  **再生成には条件が 2 つある** (1.3.0 のリリースで実際に踏んだ)。`testMode: true` が無いと
+  `/api/reset-db` が route に載らず「TS 側に存在するが未実装 1 件」に化けるので、config は
+  `tests/upstream-e2e/mkgo.yml` を使い接続先だけ `MK_*` で service container へ向ける。
+  **プラグインが入ると 19 行混入する**が、同梱の 2 つは `disabled: true` なので clean
+  checkout では起きない (#2701)。
+  **required には含めない** — 判定材料に submodule の内容が入るので、こちらのコードを
+  触っていない PR でも upstream の bump で赤くなりうる。
+  **検証は PR 上で行う** (`docs/ci.md` の方針)。`workflow_dispatch` だけだと default branch に
+  あるものしか起動できず、マージ前に一度も確かめられない。
+- **2026-09-22**: `dependency-review` workflow を追加し、あわせて **`go.sum` の検証方法の記述を訂正**した。
+  **`GOFLAGS=-mod=readonly go build` では go.sum を検証できない。** Section 3 と
+  `docs/development.md` がそう書いていたが誤り。**Go 1.16 以降 `-mod=readonly` は既定値**なので、
+  素の `go build` と同じものを実行しているだけだった。効いていないのは `go.work` のほうで、
+  workspace があると `go.sum` ではなく `go.work.sum` が使われる。**実測**: `go.sum` から
+  `gorm.io/gorm` の 3 行を消して、(a) `go.work` あり → 素の `go build` も
+  `-mod=readonly` も**どちらも exit 0** で素通り、(b) `go.work` なし → どちらも exit 1 で
+  `missing go.sum entry`。手元で確かめるなら **`GOWORK=off go build`**。
+  **CI には何も足さなくてよい。** `go.work` は `tools/pluginbuild` の生成物で gitignore 済み
+  なので、`build` job の `go build ./...` は既に go.sum を検証している。「CI に検証が無い」と
+  思って step を足すところだったが、実測したら既に在った。**裏取りせずに CI を足すと、
+  効いていない検査が増えるだけになる。**
+  `dependency-review` のほうは**時点と射程が `vulncheck` と違う**。あちらは develop に入った
+  後の状態を到達可能性で絞って見るが、こちらは PR の差分を base と比べるので**入る前**に
+  気付ける (代わりに到達可能性は見ない)。`fail-on-severity: high` から始める — moderate まで
+  落とすと到達不能なものまで止めることになり、依存を上げるだけの PR が通らなくなる。
+  **PR へコメントさせない** (`pull-requests: write` を要るので、権限は `contents: read` の
+  ままにする)。required には**含めない** — 見ているのは差分だが、判定に使う advisory DB は
+  GitHub 側で更新されるので、同じ差分でも後から赤くなりうる。
+  **あわせてリポジトリ設定の Secret scanning と Push protection を有効化した** (どちらも
+  `disabled` だった)。公開リポジトリなので無料で、コードもワークフローも要らない。
+  push protection は**コミットされる前**に弾くので、「push してから revoke して履歴を
+  書き換える」という一番つらい復旧を避けられる。`secretfield-check` まで作って秘密の露出を
+  気にしている以上、ここが無効なのは一貫していなかった。**`non_provider_patterns` は
+  有効にしていない** — 秘密鍵などの汎用パターンを見る枝で、Ed25519 / HTTP 署名のテスト
+  フィクスチャが誤検知されうるため、実態を見てから判断する。
+- **2026-09-22**: CI に `codeql` workflow と `lint` job の actionlint を追加。`make help` の target は 137 → 138。**自分のコードを見る静的解析が `go vet` だけだった。**
+  `vulncheck` は依存しか見ず、`make gates` の 21 本は「この形を禁じる」と自分で書いたものしか
+  見ない。テストは「書いた振る舞いがその通りか」しか見ないので、**書いていない分岐**と
+  **通ってはいるが危険な形**が残る。CodeQL はそこを埋める。
+  **見るのは `go` と `actions` の 2 つだけ。** submodule の外にある .ts/.js/.vue は実測 340
+  ファイルで、その大半が `tests/playwright/specs/**` (うち 189 は upstream 由来の UI spec)。
+  Python も `tests/` の検証基盤。production のコードではないので入れると**ノイズにしかならない**。
+  fork frontend は checkout していないので対象外 (upstream のコードで、こちらが直せる範囲ではない)。
+  **autobuild を使わない。** autobuild が回すのは root module だけだが、同梱プラグイン
+  (`plugins/*/go.mod`、tracked は 2 つ) は**別 module**なので `go build ./...` に含まれない
+  (`plugin-tests` job が独立しているのと同じ理由)。`git ls-files` で列挙して個別にビルドする。
+  `go.work` は `tools/pluginbuild` の生成物で gitignore 済みなので、clean checkout では root
+  module だけがビルドされる。**clean worktree で実測して確認した** (root / `plugins/status` /
+  `plugins/trustlevel` の 3 つとも exit 0)。
+  **required には含めない。** CodeQL のクエリパックは CLI の更新で増えるので、コードを 1 行も
+  変えていない PR が新しいクエリで赤くなる (`vulncheck` を required から外しているのと同じ
+  理由)。代わりに weekly の schedule を持たせる — PR トリガーだけだと、触っていないコードに
+  対する新規検出が永久に出てこない。**`ci.yml` に相乗りさせない** — あちらは workflow 直下で
+  `contents: read` に絞っており、CodeQL は `security-events: write` を要る。
+  **actionlint は逆に required に入れる。** 版を固定すれば検査内容が動かないので、`gofmt` や
+  `go vet` と同じ扱いにできる。**CodeQL の `actions` とは別物** — あちらは script injection
+  などのセキュリティを見るが、式の typo・存在しない `needs` 参照・`runs-on` の誤りは見ない。
+  workflow のミスは動かすまで分からない (#2940 で実際に踏んだ) ので、静的に落とす側が要る。
+  **導入時に 10 件出た。うち 1 件は実バグ** — `echo "... \`fork frontend の独自変更\` ..."`
+  が二重引用符の中にバッククォートを置いており、コマンド置換として実行されていた
+  (実測で `fork: command not found` が出てメッセージが欠落する)。同じ step の別の行は
+  `\`` でエスケープ済みで、片側だけ漏れていた。残り 9 件は SC2086 の引用漏れ 4、
+  sed の後方参照と Markdown のバッククォートに対する SC2016 の誤検知 3、`$(echo $x)` の
+  SC2116 / SC2006 が各 1。誤検知は `# shellcheck disable=` を**その行の直前**に置く
+  (ブロック先頭に置くと以降の本物まで黙る)。
+  **shellcheck が無いと黙って検査が減る。** actionlint は `run:` の中身を shellcheck へ
+  渡すが、無ければその分だけ落として**成功で返す**。CI の ubuntu-latest には入っているので、
+  **手元だけ通って CI で落ちる** — 実際に踏んだ (手元 0 件 / CI 10 件)。
+  `make actionlint` は shellcheck が無ければ落とす (`MK_PLUGIN_TESTS_REQUIRE_DB` /
+  `MK_FRONTEND_GATES_REQUIRE_SUBMODULE` と同じ「skip を成功として扱わない」形)。
+  **版の定義は Makefile に 1 つだけ置き、CI は `make actionlint` を呼ぶ。** CI 側に書き写すと
+  #2841 (`make test` と CI の flag がずれていた) と同じドリフトが起きる。`@latest` にしない —
+  新しい検査が増えたときに、workflow を触っていない PR が赤くなる。
+  **射程外**: `javascript-typescript` / `python` (上記)、fork frontend、`golangci-lint` が
+  見る層 (実測で 130 件 = errcheck 50 / staticcheck 45 / unused 20 / ineffassign 12 /
+  govet 3。本番 47・テスト 83。別途対応する)。
+- **2026-09-08**: Section 3 の `make frontend-check` と Section 8 の `frontend-check` job に、submodule のソースを読むゲートを追記 (#2892)。`/about-misskey` の謝辞アイコン 62 枚が `img-src 'self' data: blob:` でブロックされ本番で 1 枚も表示されていなかったのを、`img-src` に固定 2 origin (`avatars.githubusercontent.com` / `assets.misskey-hub.net`) を足して直した。**upstream が host を足すと黙って壊れる**ので、`about-misskey.vue` から外部画像の host を抽出して定数と過不足なく突き合わせるゲートを置いた。**`make gates` には入れない** — あちらは submodule 無しで回る前提で、混ぜると checkout していない環境で skip され「検査していないのに緑」になる。`test-shards` は `third_party/misskey` を checkout しないため、submodule を取る `frontend-check` でだけ回し、`MK_FRONTEND_GATES_REQUIRE_SUBMODULE` で skip を禁じる (`plugin-tests` の `MK_PLUGIN_TESTS_REQUIRE_DB` と同じ形)。**media proxy 経由には落とせない** — mk-go の proxy は upstream と違い open proxy ではなく、allowlist が DB に実在する URL だけを通すので静的な URL は 403 (実測)。**この doc 更新自体が #2892 で漏れていた** — Makefile の target と CI job の中身を変えたのに、それを説明する 5 ファイル 7 箇所が「型チェックだけ」のまま残っていた (CLAUDE.md が「最多の型」と呼ぶ片側更新)。
+- **2026-08-24**: Section 8 の `build` ジョブに `Check bundled plugins are disabled by default` step を追記 (#2701)。同梱サンプルは #2495 で既定無効にする方針にしたが、trustlevel は #2586 で `disabled: true` 付きで同梱したあと **#2585 の実測を採るために意図的に外され、実測が終わっても戻っていなかった**。起きたのは「新しく同梱したものに既定を付け忘れた」ではなく「**検証のために一時的に外して戻し忘れた**」なので、gate はそちらを主対象にしてある。判定は **`git ls-files` + grep だけ**で完結させてある — tracked な `plugins/*/mk-plugin.yml` に `disabled: true` の行があること (列挙が空なら「検査していないのに緑」になるので落とす)。`pluginbuild` に読ませるほうが parser 一致で厳密だが、`pluginbuild` の `discover` は git ではなく**ディレクトリ**を走査するので、`plugins/` に自前プラグインを置いている手元では誤検知するうえ、生成物を書いて `make plugin-dev` の配線を巻き戻す。**残る穴は許容している** — 行ベースの判定なので parser がキーとして読まない位置 (2 つ目の YAML ドキュメント、flow collection の中) に同じ行があると通る。意図的に行わないと踏めない形。手元の再現は `make plugin-vet` (#2701 で新設。`make help` の target は 110 → 111)。
+- **2026-08-18**: Section 8 の `playwright` / `upstream-backend-e2e` を 4 シャード並列として書き換え (#2609)。どちらも**プロセス内では並列にできない** (前者は共有の root アカウントと instance meta、後者は `maxWorkers: 1` + ファイルごとの `/api/reset-db`) ため、並列度はシャードごとに job を分けて稼ぐ。あわせて実態と乖離していた記述を修正: `playwright` は nightly ではなく PR トリガー (#2291 の反映漏れ)、`upstream-backend-e2e` の所要時間は「18-20 min」ではなく分割前で 8.5 分。Playwright の録画を止めた理由も明記。
+- **2026-08-16**: `plugin-tests` job を追加 (#2588)。同梱プラグインのテストは**どの job でも実行されていなかった** (別 module で `go list ./...` に含まれず、`build` job に PostgreSQL が無い)。テストが落ちる変更を入れても CI は緑のままだった。あわせて `build` job の同梱プラグイン検証を `go build` から `go vet` に変更 (テストファイルもコンパイルされるので、公開面を変えて本体だけ直したときに検出できる)。Section 3 に `make plugin-test` を追記。
+- **2026-08-07**: Section 3 に本家 backend e2e の Makefile target (`make upstream-e2e` 系 5 つ) を、Section 8 に `upstream-backend-e2e` workflow を追記 (#2347)。Misskey 本家の `test/e2e/**` を無改変で mk-go に向けて回す PR トリガーの workflow で、required check には含めない。既知乖離は skip でなく expected-failure (`task.fails`) で扱う運用も明記。
+- **2026-08-07**: Section 8 に `diff-e2e` workflow と `frontend-check` job を追記 (#2368)。CI 非対象だった検証資産の棚卸しで、値レベル diff と fork frontend の型チェックを載せた。
+- **2026-08-08**: Section 8 に `vulncheck` ジョブを追記 (#2387)。`GOOS=linux govulncheck ./...` による到達可能な既知脆弱性の検出と、`go.mod` / `Dockerfile` の Go patch version 整合チェック。required check には含めない (新規 CVE 公開でコード無変更の PR でも落ちるため)。
+- **2026-08-08**: Section 8 の `dropin-e2e` workflow に `mkgo-born` シナリオを追加 (#2383)。`make dropin-mkgo-born-test` (mk-go 生まれの DB を TS に引き渡す経路 = ロックインの有無) を CI に載せる。あわせて 2 つの既存不具合を解消: (1) orchestrator が自分で残した診断ログを workflow 側の収集が空ログで上書きしていたので `-post` 付きの別名に分けた、(2) paths フィルタに `docker-compose.dropin*.yml` が無く、drop-in stack の定義を壊す変更で workflow が発火せず緑に見えていた。
+- **2026-08-07**: Section 8 の `dropin-e2e` workflow に `federation` シナリオを追加 (#2362)。あわせて Section 3 に `make federation-misskey-e2e` (起動から撤去まで通しで実行) を追記。
+- **2026-08-07**: Section 8 の `dropin-e2e` workflow を 2 シナリオ matrix として書き換え (#2360)。`ed25519-verify` (`make dropin-fedibird-test`) を追加し、あわせて nightly → PR トリガーへの移行 (#2291) が未反映だった記述を実態に合わせた。
+- **2026-05-16**: `Makefile` に `make dropin-fedibird-test` を追加 (#1086)。Section 3 (Development Commands) の Drop-in 系コマンド一覧に Fedibird-like mock との Ed25519 e2e を載せる。
+- **2026-05-07**: Playwright nightly CI workflow を Section 8 に追記 (#816)。`.github/workflows/playwright.yml` で Phase 1 spec を毎日 17:00 UTC に develop で実行する、matrix `backend = [mk-go, ts]` 並列、`fail-fast: false`、PR required check には含めない方針を明文化。
+- **2026-04-22**: Section 3 に drop-in frontend e2e Phase 14-3 関連の Makefile target (`make dropin-frontend-mk-up` / `make dropin-frontend-mk-down` / `make dropin-frontend-swap-test`) を追加 (#394)。TS-A 切替後の mk-A でも cypress spec が pass することを検証する swap orchestrator を入口に出す。
+- **2026-04-21**: Section 3 に drop-in frontend e2e Phase 14-1 関連の Makefile target (`make dropin-frontend-baseline` / `dropin-frontend-up` / `dropin-frontend-down`) を追加 (#381)。3 Misskey TS インスタンス + cypress runner 構成。
+- **2026-04-21**: Section 8 に `dropin-e2e` workflow (nightly) を追記 (#374)。`make dropin-swap-test` を毎日 18:00 UTC で develop に対して実行、PR required check 非対象、失敗時 docker compose logs を 14 日 artifact 化する運用を明文化。
+- **2026-04-21**: Section 3 に drop-in e2e Phase 13-2 関連の Makefile target (`make dropin-mk-up` / `dropin-mk-test` / `dropin-mk-down` / `dropin-swap-test`) を追加 (#367)。
+- **2026-04-21**: Section 3 に drop-in e2e Phase 13-1 関連の Makefile target (`make dropin-up` / `dropin-test` / `dropin-down`) を追加 (#365)。Section 1 の Tests 配下にも testcontainers-go 周りの拡張ポインタを追記。
+- **2026-04-20**: Section 8 の `test`ジョブを 4-way matrix shard 化として書き換え (`test-shards` 4 並列 + `test` aggregator)。総実行時間を約4.7分→約1.5-2分に短縮。各shardは独立サービスコンテナで動作し、ImportPath順modulo分配で決定的にパッケージを割り当てる。

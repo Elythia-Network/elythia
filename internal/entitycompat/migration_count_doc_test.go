@@ -266,10 +266,11 @@ var migrationCountClaims = []struct {
 
 	{"docs/api-compatibility.md", `migration が作るテーブルは (\d+)`, "tables", 0, "migration が作るテーブル数"},
 	{"internal/testutil/testdb.go", `migration が作る (\d+) テーブル`, "tables", 0, "migration が作るテーブル数"},
-	// **CLAUDE.md も見る。** 同じ主張が最もよく読まれる doc にもある
-	// (#2756 の更新記録)。ここが漏れると、gate が落とした箇所だけ直して
-	// CLAUDE.md が古いまま緑になる — この gate が塞ごうとしている形そのもの。
-	{"CLAUDE.md", `migration が作る (\d+) テーブル`, "tables", 0, "migration が作るテーブル数 (更新記録)"},
+	// **旧 CLAUDE.md の更新記録も見る。** #2756 の entry が同じ主張を持っており、
+	// #3248 で docs/testing.md の「変更の経緯」へ移した。ここが漏れると、gate が
+	// 落とした箇所だけ直して経緯の側が古いまま緑になる — この gate が塞ごうとして
+	// いる形そのもの。
+	{"docs/testing.md", `migration が作る (\d+) テーブル`, "tables", 0, "migration が作るテーブル数 (変更の経緯)"},
 }
 
 // TestMigrationCountsInDocsMatchReality fails when a stated count drifted.
