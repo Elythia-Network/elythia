@@ -544,6 +544,11 @@ func (p *DeliverProcessor) Handle(ctx context.Context, t driver.Task) error {
 		// payload が壊れているジョブは何度リトライしても無意味なのでスキップ。
 		return fmt.Errorf("decode deliver payload: %w: %w", err, driver.ErrSkipRetry)
 	}
+	// 期限付きの job (#3238) は、期限を過ぎていれば送らない。
+	if expired(payload, time.Now()) {
+		slog.Info("ap deliver: dropped (past its deadline)", "inbox", payload.Inbox)
+		return fmt.Errorf("ap deliver: past its deadline: %w", driver.ErrSkipRetry)
+	}
 
 	// deliverSuspendedSoftware: 対象インスタンスの software がリストに該当すればスキップ
 	host := hostFromInbox(payload.Inbox)
@@ -578,7 +583,7 @@ func (p *DeliverProcessor) Handle(ctx context.Context, t driver.Task) error {
 		r := p.breaker.Check(ctx, host, deliveryJobKey(t.Payload()))
 		if r.Decision == deliveryhealth.BreakerDelay {
 			slog.Debug("ap deliver: held back (breaker open or rate limited)", "host", host, "wait", r.Delay)
-			return fmt.Errorf("ap deliver: %s held back: %w", host, driver.Delay(r.Delay))
+			return holdOrDrop(payload, fmt.Errorf("ap deliver: %s held back", host), r.Delay)
 		}
 		a.probeToken = r.ProbeToken
 		a.breakerState = r.HasState || r.Decision == deliveryhealth.BreakerProbe
@@ -594,7 +599,7 @@ func (p *DeliverProcessor) Handle(ctx context.Context, t driver.Task) error {
 		p.recordError(payload.Inbox)
 		a.local = errors.Is(err, errLocalSend)
 		if hold, held := p.recordAttempt(a, deliveryhealth.ClassTransport, 0, err.Error()); held {
-			return fmt.Errorf("%w: %w", err, driver.Delay(hold))
+			return holdOrDrop(payload, err, hold)
 		}
 		return err
 	}
@@ -627,7 +632,7 @@ func (p *DeliverProcessor) Handle(ctx context.Context, t driver.Task) error {
 			p.recordError(payload.Inbox)
 			a.local = errors.Is(retryErr, errLocalSend)
 			if hold, held := p.recordAttempt(a, deliveryhealth.ClassTransport, 0, retryErr.Error()); held {
-				return fmt.Errorf("%w: %w", retryErr, driver.Delay(hold))
+				return holdOrDrop(payload, retryErr, hold)
 			}
 			return retryErr
 		}
@@ -693,7 +698,7 @@ func (p *DeliverProcessor) Handle(ctx context.Context, t driver.Task) error {
 			"inbox", payload.Inbox, "status", resp.StatusCode)
 		p.recordError(payload.Inbox)
 		if hold, held := p.recordAttempt(a, deliveryhealth.ClassServerError, resp.StatusCode, resp.Status); held {
-			return fmt.Errorf("server error: %s: %w", resp.Status, driver.Delay(hold))
+			return holdOrDrop(payload, fmt.Errorf("server error: %s", resp.Status), hold)
 		}
 		return errors.New("server error: " + resp.Status)
 	}
@@ -792,4 +797,20 @@ func parseRetryAfter(v string, now time.Time) time.Duration {
 func deliveryJobKey(payload []byte) string {
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:16])
+}
+
+// expired reports whether a delivery with a deadline is past it (#3238).
+func expired(p queue.DeliverPayload, now time.Time) bool {
+	return p.NotAfter != 0 && now.UnixMilli() > p.NotAfter
+}
+
+// holdOrDrop defers the job by d without using up an attempt — unless the
+// delivery has a deadline, in which case it is dropped (#3238)。期限付きの job を
+// 後へ回すと、試行を消費しないまま何時間も後に届きうる (ブレーカーが開いている
+// 間はずっと)。
+func holdOrDrop(p queue.DeliverPayload, err error, d time.Duration) error {
+	if p.NotAfter != 0 {
+		return fmt.Errorf("%w (dropped instead of held: has a deadline): %w", err, driver.ErrSkipRetry)
+	}
+	return fmt.Errorf("%w: %w", err, driver.Delay(d))
 }

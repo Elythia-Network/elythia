@@ -10,6 +10,7 @@ import (
 	"github.com/shiroha-a/mk/internal/activitypub"
 	"github.com/shiroha-a/mk/internal/model"
 	"github.com/shiroha-a/mk/internal/queue"
+	"github.com/shiroha-a/mk/internal/queue/driver"
 	"github.com/shiroha-a/mk/internal/repository"
 	"golang.org/x/sync/singleflight"
 )
@@ -150,7 +151,7 @@ func (s *DeliverService) SetSyncDeliverHookForTest(fn func(payload queue.Deliver
 // 場合は DeliverActivityWithRecipient を使うと FEP-521a Multikey 対応サーバー
 // 向けに Ed25519 sign が試行される (#1067 / #1071)。
 func (s *DeliverService) DeliverActivity(signerUserID string, body []byte, inboxes []string) error {
-	return s.deliverInternal(signerUserID, body, inboxes, nil, nil)
+	return s.deliverInternal(signerUserID, body, inboxes, nil, nil, time.Time{})
 }
 
 // DeliverActivityWithRecipient is DeliverActivity + recipient capability based
@@ -159,14 +160,38 @@ func (s *DeliverService) DeliverActivity(signerUserID string, body []byte, inbox
 // 鍵情報も詰める (DeliverProcessor 側で実際の sign 分岐 + degrade safeguard
 // を担う)。recipient == nil なら DeliverActivity と等価動作 (#1067 / #1071)。
 func (s *DeliverService) DeliverActivityWithRecipient(signerUserID string, body []byte, inboxes []string, recipient *model.User) error {
-	return s.deliverInternal(signerUserID, body, inboxes, recipient, nil)
+	return s.deliverInternal(signerUserID, body, inboxes, recipient, nil, time.Time{})
+}
+
+// deliverOnceDeadline is how long a DeliverToUserOnce job may wait before it
+// is dropped instead of sent (#3238)。配送の queue で待つ時間も含むので、混んで
+// いる間の分を見て少し長めにする。人が取り消すまでの時間より十分に短ければよい
+// (保留中に重なって届いても害は無い)。
+const deliverOnceDeadline = 5 * time.Minute
+
+// DeliverToUserOnce is DeliverToUser without the deliver queue's retries and
+// with a deadline (#3238)。届かなければ捨て、積んでから deliverOnceDeadline を
+// 過ぎたら送らない。再送の判断を呼び出し側 (状態を確かめてから送る
+// 定期処理) に任せるものに使う — 配送の queue は積んだ後に状態を見ないので、
+// 何時間も後の再試行が、その間に変わった状態を上書きしうる。
+func (s *DeliverService) DeliverToUserOnce(signerUserID string, recipient *model.User, body []byte) error {
+	if recipient == nil || recipient.IsLocal() {
+		return nil
+	}
+	inbox := preferredInbox(recipient)
+	if inbox == "" {
+		return nil
+	}
+	// 1 回きりでも、ブレーカーや流量の制限で後へ回されると (試行を消費しないので)
+	// 何時間も後に届きうる。期限を付けて、過ぎたら送らない。
+	return s.deliverInternal(signerUserID, body, []string{inbox}, recipient, nil, s.clock().Add(deliverOnceDeadline), driver.WithMaxRetry(0))
 }
 
 // deliverInternal enqueues one signed delivery per unique inbox. sharedInboxes
 // (optional) marks which inbox URLs are shared inboxes so the processor can
 // goneSuspend the instance on a 410 (#1811)。recipient の sharedInbox に一致する
 // inbox も shared 扱いにする。
-func (s *DeliverService) deliverInternal(signerUserID string, body []byte, inboxes []string, recipient *model.User, sharedInboxes map[string]bool) error {
+func (s *DeliverService) deliverInternal(signerUserID string, body []byte, inboxes []string, recipient *model.User, sharedInboxes map[string]bool, notAfter time.Time, opts ...driver.EnqueueOption) error {
 	if len(inboxes) == 0 {
 		return nil
 	}
@@ -211,6 +236,9 @@ func (s *DeliverService) deliverInternal(signerUserID string, body []byte, inbox
 			IsSharedInbox: isShared,
 			SignerUserID:  signerUserID,
 		}
+		if !notAfter.IsZero() {
+			payload.NotAfter = notAfter.UnixMilli()
+		}
 		if s.syncDeliverHook != nil {
 			// test 経路 (#780): queue を経由せず inline で sign + POST。
 			// **こちらにだけ鍵を詰める** — queue を通らないので Redis にも
@@ -223,7 +251,7 @@ func (s *DeliverService) deliverInternal(signerUserID string, body []byte, inbox
 			}
 			continue
 		}
-		if err := s.enqueuer.EnqueueDeliver(payload); err != nil {
+		if err := s.enqueuer.EnqueueDeliver(payload, opts...); err != nil {
 			return fmt.Errorf("enqueue deliver to %s: %w", inbox, err)
 		}
 	}
@@ -351,7 +379,7 @@ func (s *DeliverService) DeliverToFollowersExcluding(signerUserID string, body [
 			sharedInboxes[row.Inbox] = true
 		}
 	}
-	return s.deliverInternal(signerUserID, body, inboxes, nil, sharedInboxes)
+	return s.deliverInternal(signerUserID, body, inboxes, nil, sharedInboxes, time.Time{})
 }
 
 // DeliverToInboxes enqueues delivery to an explicit set of remote inboxes,
@@ -372,7 +400,7 @@ func (s *DeliverService) DeliverToInboxes(signerUserID string, body []byte, rows
 			sharedInboxes[row.Inbox] = true
 		}
 	}
-	return s.deliverInternal(signerUserID, body, inboxes, nil, sharedInboxes)
+	return s.deliverInternal(signerUserID, body, inboxes, nil, sharedInboxes, time.Time{})
 }
 
 // DeliverToUser enqueues a delivery to a single recipient user. Local users

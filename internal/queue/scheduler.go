@@ -120,6 +120,16 @@ func (s *Scheduler) RegisterCheckExpiredMutingsJob() error {
 	)
 }
 
+// RegisterResendQuoteRequestsJob registers the per-minute resend of pending
+// QuoteRequests (#3238)。送り直しの予定は 1 分単位なので毎分回す。
+func (s *Scheduler) RegisterResendQuoteRequestsJob() error {
+	return s.register("* * * * *", TaskTypeResendQuoteRequests, nil,
+		driver.WithQueue(MaintenanceQueueName),
+		driver.WithMaxRetry(0),
+		driver.WithUnique(time.Minute),
+	)
+}
+
 // RegisterCleanJob registers the daily generic clean cron (#1563) at 00:00,
 // mirroring upstream `clean`. user_ip 90 日 prune / 期限切れ
 // role_assignment 削除 / reversi outdated game 削除を processors.CleanProcessor

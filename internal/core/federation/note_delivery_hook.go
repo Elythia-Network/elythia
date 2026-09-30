@@ -282,12 +282,18 @@ func (h *NoteDeliveryHook) deliverToSpecified(author *model.User, note *model.No
 }
 
 // SendQuoteRequest implements QuoteOutboxDelivery (#3234).
+//
+// **配送の queue では再試行しない** (#3238)。Mastodon は QuoteRequest を受けると
+// 引用の状態を見ずに承認し直すので、何時間も後に届いた再試行が、その間に作者が
+// 取り消した引用を承認済みに戻す (範囲を狭めた後なら Reject が返って、こちらが
+// 取り消しと誤認する)。送り直しは、保留中かを確かめてから送る定期処理
+// (QuoteOutbox.ResendPending) だけが行う。
 func (h *NoteDeliveryHook) SendQuoteRequest(note *model.Note, quotedURI string, quotedAuthor *model.User) error {
 	body, err := json.Marshal(h.renderer.RenderQuoteRequest(note, quotedURI, h.idGen))
 	if err != nil {
 		return err
 	}
-	return h.deliver.DeliverToUser(note.UserID, quotedAuthor, body)
+	return h.deliver.DeliverToUserOnce(note.UserID, quotedAuthor, body)
 }
 
 // SendNoteUpdate implements QuoteOutboxDelivery (#3234): it re-delivers the

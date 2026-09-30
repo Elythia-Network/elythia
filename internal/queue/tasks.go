@@ -83,6 +83,11 @@ const TaskTypeChartClean = "chart:clean"
 // 残るため hygiene)。channel-mute erase は mk-go に expiresAt 列が無いため別 issue。
 const TaskTypeCheckExpiredMutings = "maintenance:checkExpiredMutings"
 
+// TaskTypeResendQuoteRequests is the task type for the per-minute resend of
+// QuoteRequests that are still pending (FEP-044f、#3238)。Mastodon が取り込みと
+// 競合して黙って捨てた QuoteRequest を、保留中か確かめてから送り直す。
+const TaskTypeResendQuoteRequests = "maintenance:resendQuoteRequests"
+
 // TaskTypeClean is the task type for the daily generic clean job. Mirrors
 // upstream `clean` (cron `0 0 * * *`)。user_ip の 90 日 prune / 期限切れ
 // role_assignment 削除 / reversi outdated game 削除を行う (antenna deactivate は
@@ -208,6 +213,11 @@ type DeliverPayload struct {
 	// SignerUserID is the local user whose keypair signs this delivery.
 	// worker はこれを使って配送時に鍵を引く (payload には載せない)。
 	SignerUserID string `json:"signerUserId,omitempty"`
+	// NotAfter is the deadline (Unix milliseconds) after which the delivery is
+	// dropped instead of sent (#3238)。0 なら期限なし。後へ回されると状態が
+	// 変わった後に届いてしまうもの (引用の承認の QuoteRequest) に付ける。期限付きの
+	// job は、ブレーカーや流量の制限で後へ回す代わりに捨てる。
+	NotAfter int64 `json:"notAfter,omitempty"`
 }
 
 // NewDeliverTask serializes the payload into a driver.Task ready to

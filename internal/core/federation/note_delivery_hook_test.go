@@ -671,6 +671,12 @@ func TestNoteDeliveryHook_SendQuoteRequest(t *testing.T) {
 	require.NoError(t, hook.SendQuoteRequest(note, "https://remote.example/notes/1", bob))
 	require.Len(t, enq.calls, 1)
 	assert.Equal(t, inbox, enq.calls[0].Inbox)
+	// 配送の queue では再試行しない (#3238。再試行は状態を確かめる定期処理だけ)。
+	assert.True(t, enq.opts[0].MaxRetrySet)
+	assert.Equal(t, 0, enq.opts[0].MaxRetry)
+	// 後へ回されて遅れて届かないよう、期限を付ける (5 分)。
+	assert.NotZero(t, enq.calls[0].NotAfter)
+	assert.WithinDuration(t, time.Now().Add(5*time.Minute), time.UnixMilli(enq.calls[0].NotAfter), 10*time.Second)
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(enq.calls[0].Body, &got))
 	assert.Equal(t, "QuoteRequest", got["type"])
