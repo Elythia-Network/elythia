@@ -270,20 +270,20 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_xxx" ON "yyy" ("zzz");
 |---|---|
 | `main` | リリース |
 | `develop` | 開発統合 |
-| `feature/<phase>-<要約>` | 機能追加 |
-| `fix/<対象>-<要約>` | バグ修正 |
+| `feature/<issue番号>-<要約>` | 機能追加 |
+| `fix/<issue番号>-<要約>` | バグ修正 |
 
 すべての作業は対応するissueを先に作成してから着手する。
 
 ### コミットメッセージ
 
-- Phase単位の機能追加: `Phase N.M: <要約>`
-- 修正: `Fix <対象>: <要約>`
+- 形式は `<種類> <対象>: <要約> (#issue番号)` (例: `Fix admin: リモート絵文字のインポートでライセンスを空で上書きしない (#3246)`)
+- 種類は `Fix` / `Feat` / `Test` / `Docs` / `Refactor` / `Bump` / `Chore` のどれか。詳細は CLAUDE.md Section 7
 - コミット前に `make check` を実行 (fmt → lint → actionlint → golangci-lint → test)
 
 ### PR作成
 
-- PRタイトル: `Phase〇 <内容>` または作業の要約
+- PRタイトル: issue のタイトルか、作業の要約
 - PR本文: Summary、主な変更点、テスト、`Closes #<issue番号>`
 - `gh pr create`を使用
 
@@ -351,6 +351,116 @@ PR では回らず schedule で実行されるものが 2 つある。
 - `gofmt`差分 → `make fmt`を実行してから再push
 - テスト失敗 → CIログを読み、ローカルで再現させてから修正する。`--no-verify`等でフックを飛ばさない
 - testcontainersのskip-on-failure起因のflakeがあるため、PRと無関係な失敗は再実行で解消することがある
+
+## コマンド一覧 (旧 CLAUDE.md Section 3)
+
+CLAUDE.md の Section 3 にあった一覧を、#3248 でここへ移した。全 target は `make help` が出す。
+
+すべて`Makefile`経由で実行できます。
+
+```bash
+# ビルド
+make build                  # ./built/misskey に実行ファイル生成
+make dev                    # go run で直接起動（開発用）
+make run                    # build + 実行
+
+# 依存管理
+make tidy                   # go mod tidy。**このリポジトリでは private plugin の解決に
+                            # 失敗するので使えない**。依存追加は go get、go.sum の検証は
+                            # GOWORK=off go build
+
+# コード品質
+make fmt                    # gofmt -s -w . で整形
+make lint                   # go vet ./...
+make check                  # コミット前に必須 (fmt → lint → actionlint → golangci-lint → test)
+
+# テスト
+make test                   # go test ./... -v -race -count=1 -shuffle=3 (CI と同じ**テスト実行**条件)
+make test-fast              # -race 抜き (反復用)。**コミット前の検査ではない**
+make plugin-test            # 同梱プラグインのテスト (別 module なので ./... に含まれない)
+make plugin-doc-check       # docs/plugins/authoring.md の Go スニペットがコンパイルできるか
+
+# 静的 parity ゲート (サーバー / ブラウザ / Docker 不要)
+make gates                  # shapecheck / errorid-check / limitspec-check / perm-check / wiring-check / catalog-check / notfound-check / nulparam-check / compose-check / testflags-check / migrationdoc-check / mdtable-check / notiftype-check / pluginembed-check / dockerignore-check / secretfield-check / ipshape-check / iprecord-check / sqlbind-check / submodulepin-check / gaterun-check を一括
+make apicompat              # docs/api-compat.md を生成 (route dump に stack 起動が必要)
+
+# プラグインの組み込み
+make plugins                # plugins/ を走査して生成 (make build が内部で呼ぶ)
+make plugins-all            # disabled のものも含める (CI 検証用)
+make plugin-dev             # 編集しながら動かす (PLUGIN=plugins/status)
+
+# 更新 (運用)
+make pull                   # 本体 + submodule + plugins/ の独立リポジトリを一括 pull
+make uds-update             # pull → ビルド → 再起動 → 配信 entry の検証 (UDS 本番)
+make docker-update          # 同上 (Docker Compose 構成)
+make uds-restart            # mkgo を再起動して配信 entry を検証だけする
+                            # **`up -d` は再起動を保証しない** — frontend は bind mount
+                            # なので frontend だけ更新すると recreate されず、mk-go が
+                            # 起動時にキャッシュした古い entry を配り続ける (#2885)
+
+# マイグレーション（接続先は -config、既定 .config/default.yml から決まる）
+make migrate-up             # 最新まで適用
+make migrate-down           # 1段階ロールバック (-steps 1)
+go run ./cmd/migrate -direction down   # 全段ロールバック (破壊的。全テーブルが消える)
+make migrate-create         # 新規マイグレーションファイル作成（プロンプト対話）
+
+# Docker
+make docker-build
+make docker-up              # docker compose up -d
+make docker-down
+
+# Drop-in e2e (#364 / #365) — Misskey TS 2 インスタンスを立ち上げて
+# TS ↔ mk 切替互換性を検証する基盤。詳細は docs/dropin-e2e.md。
+make dropin-up              # TS-A / TS-B stack 起動
+make dropin-test            # pytest smoke test 実行
+make dropin-down            # stack + volume 全削除
+
+# Drop-in mk overlay + swap test (#367) — instance A の backend を mk-go に
+# 差し替える e2e シナリオ。
+make dropin-mk-up           # base + mk overlay (clean DB から mk-A 起動)
+make dropin-mk-test         # mk-A に対する smoke test
+make dropin-mk-down         # cleanup
+make dropin-swap-test       # TS-then-mk 切替シナリオ (bash orchestrator)
+
+# Drop-in fedibird-mock e2e (#1083) — Fedibird-like ActivityPub mock との
+# 双方向 Ed25519 verify を検証する e2e。
+make dropin-fedibird-test    # mock ↔ mk-A の Ed25519 inbound/outbound 検証
+
+# 本家 backend e2e (#2347) — Misskey 本家の test/e2e/** をそのまま mk-go に
+# 向けて実行する。テスト本体は無改変。詳細は docs/upstream-backend-e2e.md。
+make upstream-e2e-deps       # submodule 側の依存を用意 (初回 / submodule bump 後)
+make upstream-e2e-up         # e2e 用 PostgreSQL / Redis を起動
+make upstream-e2e-migrate    # e2e 用 DB にマイグレーションを適用
+make upstream-e2e-test       # mk-go をビルドして vitest を実行 (FILE= で 1 ファイル指定可)
+make upstream-e2e            # 上記 4 つを一括実行
+make upstream-e2e-down       # volume ごと撤去
+
+# Drop-in frontend e2e (#380 / Phase 14) — 3 Misskey TS インスタンス + cypress
+# 実ブラウザでフロントエンド視点の drop-in 互換を検証する基盤。
+make dropin-frontend-baseline    # TS-A/B/C + cypress baseline spec 実行
+make dropin-frontend-up          # stack だけ立ち上げ (手動デバッグ用)
+make dropin-frontend-down        # volume ごと cleanup
+make dropin-frontend-swap-test   # TS-A → mk-A 切替まで含む end-to-end (Phase 14-3)
+make dropin-frontend-mk-up       # mk overlay だけ立ち上げ (clean DB の mk-A から起動)
+make dropin-frontend-mk-down     # mk overlay cleanup
+
+# その他の e2e / 検証
+make dropin-mkgo-born-test   # mk-go 生まれの DB を TS に引き渡せるか (#2383)
+make federation-misskey-e2e  # 本物の Misskey TS との実連合を起動から撤去まで通しで (#2362)
+make federation-mastodon-e2e # 本物の Mastodon と引用の承認 (FEP-044f) を通しで (#3234)
+make diff-check              # mk-go と TS のレスポンスを値レベルで diff (#2078)
+make playwright-check        # Playwright を作り直して実行
+make frontend-check          # fork frontend の型チェック + submodule 依存のゲート + eslint
+make frontend-lint           # eslint だけ (CI と同じ範囲、実測 55 秒)
+make e2e-down-all            # 検証用スタックを一括撤去 (**本番 project `mk` は対象外**)
+```
+
+**上記は全体ではない。** `make help` が全 141 target を出す (`^名前:.*##` の行を数えた)。一覧と説明は
+このファイルの上の節、CI 上の対応は [docs/ci.md](ci.md)。
+
+エントリポイント：
+- メインサーバー: `./cmd/misskey -config .config/default.yml`
+- マイグレーション: `./cmd/migrate -direction up`
 
 ## 変更の経緯 (旧 CLAUDE.md の更新記録)
 

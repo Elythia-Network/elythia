@@ -89,6 +89,8 @@ CI は **`-shuffle=3` を全 shard 共通の固定値として**回す。`on` (�
 
 `go test` は**パッケージのテストバイナリを並行実行する**。CI は shard ごとに PostgreSQL を 1 つしか立てないため、共有すると一方の後片付けが他方の前提を壊す。実際に `internal/charttick` の `DELETE FROM "user"` が `internal/api/gallery` の所有者 user を消し、**Go を一切触っていない PR で CI が落ちた**。
 
+削除範囲を絞るだけでは解けない。charttick は**テーブル全体の絶対件数**をアサートするので、絞ると今度は他パッケージの行が混ざって charttick 自身が落ちる。干渉は双方向。shard 分配は `go list` 順の `NR % 4` なので、テストパッケージを 1 つ足すだけで同居の組み合わせが変わる。個別の衝突を潰す対処では再発する。
+
 守ること:
 
 - **DB を読み書きするテストで `OpenSharedTestDB` を使わない。** これは `internal/db` のように接続処理そのものを試すテスト専用

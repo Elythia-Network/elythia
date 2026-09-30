@@ -84,7 +84,7 @@ endpoint 固有のノイズ (meta の operator 設定、note の user オブジ�
 ## 検出した乖離の扱い
 
 確認された値レベル乖離は **#2078 の sub-issue** として個別に起票し、通常の
-issue 消化ワークフロー (実装 → 敵対的レビュー → PR → CI → rebase and merge) で潰す。
+通常の issue の流れ (CLAUDE.md Section 7) で潰す。
 ハーネス自体の endpoint coverage 拡張は #2089 で追う。
 
 ## CI 方針

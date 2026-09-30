@@ -40,7 +40,7 @@ func Assert(t testing.TB, schemaName string, actual map[string]any) {
 // 空文字を常に出すと成功した job にも「Failed reason」行が出てしまう (#2689)。
 //
 // 使うときは**呼び出し側に理由をコメントで残すこと**。golden は生成物なので
-// 手で直さない (CLAUDE.md Section 7)。
+// 手で直さない (CLAUDE.md Section 0)。
 func AssertExcept(t testing.TB, schemaName string, actual map[string]any, exceptFields ...string) {
 	t.Helper()
 	for _, f := range entitycompat.ValidateResponse(schemaName, actual) {
