@@ -79,6 +79,20 @@ func (s *qrStore) Ensure(a *model.NoteQuoteAuthorization) (*model.NoteQuoteAutho
 	return &out, nil
 }
 
+func (s *qrStore) Remove(noteID, quotingURI, quoterID string) error {
+	if s.err != nil {
+		return s.err
+	}
+	kept := s.rows[:0]
+	for _, r := range s.rows {
+		if r.NoteID != noteID || r.QuotingURI != quotingURI || r.QuoterID != quoterID {
+			kept = append(kept, r)
+		}
+	}
+	s.rows = kept
+	return nil
+}
+
 type qrResponder struct {
 	accepted []*model.NoteQuoteAuthorization
 	rejected []string
@@ -469,4 +483,62 @@ func TestQuoteRequestDeliveryHook_Renders(t *testing.T) {
 	assert.NotContains(t, got, "result")
 	assert.Equal(t, qrRequestID, got["object"].(map[string]any)["id"])
 	assert.Equal(t, fmt.Sprint(qrQuoting), got["object"].(map[string]any)["instrument"])
+}
+
+// qrFlipBlocks reports no block for the first `after` checks, then a block by
+// the author (ブロックが判定と記録の間に入った状態)。
+type qrFlipBlocks struct {
+	after, calls int
+	errAt        int
+}
+
+func (b *qrFlipBlocks) IsBlocked(a, c string) (bool, error) {
+	b.calls++
+	if b.errAt != 0 && b.calls == b.errAt {
+		return false, errors.New("db down")
+	}
+	return b.calls > b.after && a == "alice", nil
+}
+
+// 判定の後、記録の前にブロックされたら、記録した承認を消して Reject する
+// (#3234 段階 4。ブロックで承認を消す処理より後に承認ができてしまうのを防ぐ)。
+func TestQuoteRequest_BlockRacingWithApproval(t *testing.T) {
+	e := newQREnv(t)
+	e.h.blocks = &qrFlipBlocks{after: 2}
+	require.NoError(t, e.handle(t, quoteRequest(t, "pub", inlineInstrument(qrBase+"/notes/pub"))))
+	assert.Empty(t, e.resp.accepted)
+	assert.Len(t, e.resp.rejected, 1)
+	assert.Empty(t, e.store.rows, "the approval recorded before the block is removed")
+
+	// 確かめ直しに失敗したら答えずに再試行させる。
+	e = newQREnv(t)
+	e.h.blocks = &qrFlipBlocks{after: 100, errAt: 3}
+	assert.Error(t, e.handle(t, quoteRequest(t, "pub", inlineInstrument(qrBase+"/notes/pub"))))
+	assert.Empty(t, e.resp.accepted)
+}
+
+// Reject するときは、前の試行で記録された承認も消す。
+func TestQuoteRequest_RejectRemovesExistingApproval(t *testing.T) {
+	e := newQREnv(t)
+	e.store.rows = []*model.NoteQuoteAuthorization{{ID: "old", NoteID: "pub", QuoterID: "bob", QuotingURI: qrQuoting}}
+	e.blocks.set[[2]string{"alice", "bob"}] = true
+	require.NoError(t, e.handle(t, quoteRequest(t, "pub", inlineInstrument(qrBase+"/notes/pub"))))
+	assert.Len(t, e.resp.rejected, 1)
+	assert.Empty(t, e.store.rows)
+
+	// 拒否の経路では instrument を確かめていないので、消すのは送ってきた相手の
+	// 承認だけ。他人の引用 URI を並べられても、他人の承認は消さない。
+	e = newQREnv(t)
+	e.store.rows = []*model.NoteQuoteAuthorization{{ID: "victim", NoteID: "pub", QuoterID: "carol", QuotingURI: qrQuoting}}
+	e.blocks.set[[2]string{"bob", "alice"}] = true
+	require.NoError(t, e.handle(t, quoteRequest(t, "pub", qrQuoting)))
+	assert.Len(t, e.resp.rejected, 1)
+	require.Len(t, e.store.rows, 1, "someone else's approval is kept")
+	assert.Equal(t, "victim", e.store.rows[0].ID)
+
+	e = newQREnv(t)
+	e.blocks.set[[2]string{"alice", "bob"}] = true
+	e.store.err = errors.New("db down")
+	assert.Error(t, e.handle(t, quoteRequest(t, "pub", inlineInstrument(qrBase+"/notes/pub"))))
+	assert.Empty(t, e.resp.rejected)
 }

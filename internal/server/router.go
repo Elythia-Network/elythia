@@ -995,6 +995,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	noteDeliveryHook.SetQuoteOutbox(quoteOutbox)
 	federationProcessor.SetQuoteAnswerHandler(quoteOutbox)
 	apRenderer.SetQuoteApprovalResolver(quoteOutbox.ApprovalURI)
+	// ブロックした相手の引用に出していた承認を取り消す (#3234 段階 4)。
+	blockingService.SetQuoteRevoker(corefederation.NewQuoteRevoker(quoteAuthorizationRepo, userRepo, noteRepo,
+		corefederation.NewQuoteRequestDeliveryHook(deliverService, apRenderer), noteDeliveryHook, apURLs))
 	reactionService.SetFederationHook(corefederation.NewReactionDeliveryHook(deliverService, apRenderer, apURLs, idGen, userRepo))
 	// local user が remote user を (un)block した際に Block / Undo(Block) を
 	// 相手 inbox へ配信する (#1560)。

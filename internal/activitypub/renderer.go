@@ -1271,6 +1271,30 @@ func (r *Renderer) RenderQuoteAuthorization(note *model.Note, a *model.NoteQuote
 	return out
 }
 
+// RenderQuoteAuthorizationDelete revokes an approval stamp (FEP-044f、#3234
+// 段階 4)。Mastodon と同じく承認を埋め込み、id は `<承認 URI>#delete`。受け取った側は
+// 承認の URI と actor で引用を引き当てて未承認に戻す。
+//
+// **to を付けない** (RenderDelete と同じ)。実配送先は inbox の一覧で決まり、
+// フォロワー限定の投稿を指す承認を公開宛てとして出さない。
+func (r *Renderer) RenderQuoteAuthorizationDelete(note *model.Note, a *model.NoteQuoteAuthorization) *Delete {
+	stamp := r.RenderQuoteAuthorization(note, a)
+	stamp.Context = nil
+	d := &Delete{
+		Activity: Activity{
+			Object: Object{
+				ID:   stamp.ID + "#delete",
+				Type: "Delete",
+			},
+			Actor:     r.urls.UserURI(note.UserID),
+			Published: time.Now().UTC().Format(publishedLayout),
+		},
+		Object: stamp,
+	}
+	AddContext(d)
+	return d
+}
+
 // RenderQuoteRequestAccept returns the Accept for a QuoteRequest (FEP-044f、
 // #3234)。object は受け取った QuoteRequest を id で指せる形に組み直し、result に
 // 承認の URI を入れる。Mastodon は object の id で自分の引用を引き当てる。

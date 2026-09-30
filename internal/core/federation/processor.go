@@ -186,6 +186,7 @@ func (p *Processor) SetQuoteRequestHandler(h *QuoteRequestHandler) {
 // QuoteAnswerHandler receives the answers to QuoteRequests sent by local notes.
 type QuoteAnswerHandler interface {
 	HandleAnswer(actorURI, requestURI string, accepted bool, result string) error
+	HandleRevocation(actorURI, approvalURI string) (bool, error)
 }
 
 // SetQuoteAnswerHandler wires the handler of Accept / Reject for our
@@ -2249,6 +2250,16 @@ func (p *Processor) handleDelete(act genericActivity) error {
 	if err != nil {
 		return err
 	}
+	// こちらの引用が受けていた承認の取り消し (FEP-044f、#3234 段階 4)。承認の型か、
+	// 型の分からない id のときだけ照合する。型の付いたノート (Tombstone / Note) と、
+	// actor 自身の Delete (アカウント削除。object が actor の id) では引かない
+	// (Mastodon も actor の削除を先に見る)。
+	if p.quoteAnswers != nil && targetURI != act.Actor && mayBeQuoteAuthorization(act.Object) {
+		handled, err := p.quoteAnswers.HandleRevocation(act.Actor, targetURI)
+		if handled || err != nil {
+			return err
+		}
+	}
 	// upstream Misskey #17294 (= 2026.5.0 fix / triage #1001): object が Actor
 	// (self-delete または object.type が Actor 系) で、その actor がローカルに
 	// 存在しないなら無視する。これをやらないと ResolveActor が remote fetch を
@@ -3126,4 +3137,20 @@ func (p *Processor) handleChatMessage(act genericActivity) error {
 		return ErrUnsupportedActivity
 	}
 	return err
+}
+
+// mayBeQuoteAuthorization reports whether a Delete's object may be a FEP-044f
+// approval: a bare id, or an object typed QuoteAuthorization.
+func mayBeQuoteAuthorization(object json.RawMessage) bool {
+	var id string
+	if json.Unmarshal(object, &id) == nil {
+		return true
+	}
+	var obj struct {
+		Type json.RawMessage `json:"type"`
+	}
+	if json.Unmarshal(object, &obj) != nil {
+		return false
+	}
+	return apTypeIs(obj.Type, "QuoteAuthorization")
 }

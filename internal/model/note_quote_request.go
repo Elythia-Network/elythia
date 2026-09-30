@@ -5,6 +5,8 @@ const (
 	QuoteRequestPending  = "pending"
 	QuoteRequestAccepted = "accepted"
 	QuoteRequestRejected = "rejected"
+	// QuoteRequestRevoked は、承認された後に引用される作者が取り消したもの。
+	QuoteRequestRevoked = "revoked"
 )
 
 // NoteQuoteRequest represents the mk-go-only `note_quote_request` table

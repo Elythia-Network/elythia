@@ -73,20 +73,54 @@ func (r *NoteQuoteRequestRepository) MarkAccepted(noteID, approvalURI string) (b
 	if err != nil {
 		return false, err
 	}
-	// 承認 URI が入るのは承認済みのときだけ (拒否は保留中からしか起きない)。
-	return q.ApprovalURI != nil && *q.ApprovalURI == approvalURI && !q.UpdateSent, nil
+	// 取り消された後の同じ Accept では送らない (取り消しの配り直しは MarkRevoked 側)。
+	return q.State == model.QuoteRequestAccepted && q.ApprovalURI != nil && *q.ApprovalURI == approvalURI && !q.UpdateSent, nil
 }
 
-// MarkUpdateSent records that the Update carrying approvalURI was delivered.
-// 承認がその間に変わっていたら何もしない (新しい承認はまだ配っていない)。
-func (r *NoteQuoteRequestRepository) MarkUpdateSent(noteID, approvalURI string) error {
+// MarkUpdateSent records that the Update for the given state and approval URI
+// was delivered. 状態か承認がその間に変わっていたら何もしない (新しい状態の
+// Update はまだ配っていない)。
+func (r *NoteQuoteRequestRepository) MarkUpdateSent(noteID, state, approvalURI string) error {
 	return r.db.Model(&model.NoteQuoteRequest{}).
-		Where(`"noteId" = ? AND "approvalUri" = ?`, noteID, approvalURI).
+		Where(`"noteId" = ? AND "state" = ? AND "approvalUri" = ?`, noteID, state, approvalURI).
 		Update("updateSent", true).Error
 }
 
+// ListByApprovalURI returns the requests whose approval is approvalURI (at
+// most limit). 取り消しの Delete を照合するのに使う。承認の URI は相手のホストの
+// 任意の値でありうるので一意とは限らない — 1 件だけ拾うと、同じ URI を持つ別の
+// 記録に当たって本物の取り消しを取りこぼす。
+func (r *NoteQuoteRequestRepository) ListByApprovalURI(approvalURI string, limit int) ([]model.NoteQuoteRequest, error) {
+	if !storable(approvalURI) {
+		return nil, nil
+	}
+	var rows []model.NoteQuoteRequest
+	if err := r.db.Where(`"approvalUri" = ?`, approvalURI).Order(`"noteId"`).Limit(limit).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// MarkRevoked records that an accepted request was revoked by the quoted
+// author, and reports whether the Update withdrawing the approval still has to
+// be delivered. 承認 URI は残す (取り消しの Update を配り終えたかをそれで照合する)。
+// 描画は状態が accepted のときしか承認を付けない。
+func (r *NoteQuoteRequestRepository) MarkRevoked(noteID string) (bool, error) {
+	err := r.db.Model(&model.NoteQuoteRequest{}).
+		Where(`"noteId" = ? AND "state" = ?`, noteID, model.QuoteRequestAccepted).
+		Updates(map[string]any{"state": model.QuoteRequestRevoked, "updateSent": false}).Error
+	if err != nil {
+		return false, err
+	}
+	q, err := r.FindByNoteID(noteID)
+	if err != nil {
+		return false, err
+	}
+	return q.State == model.QuoteRequestRevoked && !q.UpdateSent, nil
+}
+
 // MarkRejected records that a pending request was rejected. 承認済みのものは
-// 変えない (承認の取り消しは Reject ではなく承認の Delete で届く)。
+// 変えない (承認の後の Reject は取り消しなので、呼び出し側が MarkRevoked を使う)。
 func (r *NoteQuoteRequestRepository) MarkRejected(noteID string) error {
 	return r.db.Model(&model.NoteQuoteRequest{}).
 		Where(`"noteId" = ? AND "state" = ?`, noteID, model.QuoteRequestPending).

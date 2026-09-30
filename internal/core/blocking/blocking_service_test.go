@@ -378,3 +378,25 @@ func TestBlock_CancelledRequestCannotBeAccepted(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, exists, "承認されていないので follower にはならない")
 }
+
+type recordingQuoteRevoker struct{ calls [][2]string }
+
+func (r *recordingQuoteRevoker) RevokeQuotesOnBlock(blockerID, blockeeID string) {
+	r.calls = append(r.calls, [2]string{blockerID, blockeeID})
+}
+
+// Block は、ブロックした相手の引用に出していた承認を取り消させる (#3234 段階 4)。
+// 解除では戻さない (承認は相手が取り直す)。
+func TestBlock_RevokesQuoteApprovals(t *testing.T) {
+	svc, ur, _, _ := newSvc(t)
+	addUser(ur, "a")
+	addUser(ur, "b")
+	revoker := &recordingQuoteRevoker{}
+	svc.SetQuoteRevoker(revoker)
+
+	_, err := svc.Block("a", "b")
+	require.NoError(t, err)
+	assert.Equal(t, [][2]string{{"a", "b"}}, revoker.calls)
+	require.NoError(t, svc.Unblock("a", "b"))
+	assert.Len(t, revoker.calls, 1)
+}

@@ -196,7 +196,7 @@ func TestApplyMigrations_DoesNotRecordFailures(t *testing.T) {
 	assert.EqualValues(t, len(files), recorded, "fresh schema では全 migration が成功して記録される")
 
 	// **失敗を記録しないことは、既存 schema への再適用で見る。** 全 sha を stale に
-	// して流し直すと、実測 102 本中 2 本 (`000001_initial` の制約重複 /
+	// して流し直すと、実測 103 本中 2 本 (`000001_initial` の制約重複 /
 	// `000075_signup_application` の列不在) だけが失敗する。記録するように変えると
 	// stale が 0 になるので、この assert が落ちる。
 	//

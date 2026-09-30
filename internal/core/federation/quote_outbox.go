@@ -18,8 +18,10 @@ type QuoteRequestStore interface {
 	FindByNoteID(noteID string) (*model.NoteQuoteRequest, error)
 	FindByRequestURI(requestURI string) (*model.NoteQuoteRequest, error)
 	Ensure(noteID, requestURI string) (*model.NoteQuoteRequest, error)
+	ListByApprovalURI(approvalURI string, limit int) ([]model.NoteQuoteRequest, error)
 	MarkAccepted(noteID, approvalURI string) (bool, error)
-	MarkUpdateSent(noteID, approvalURI string) error
+	MarkRevoked(noteID string) (bool, error)
+	MarkUpdateSent(noteID, state, approvalURI string) error
 	MarkRejected(noteID string) error
 }
 
@@ -180,7 +182,8 @@ func (o *QuoteOutbox) ApprovalURI(note *model.Note) (string, error) {
 // HandleAnswer records the Accept (with result = approval URI) or Reject that
 // actorURI sent for one of our QuoteRequests, identified by requestURI.
 // 承認されたら、承認を付けた Update を配り直す。届けられなければ error で返し、
-// inbox に再試行させる (承認の記録は冪等)。
+// inbox に再試行させる (承認の記録は冪等)。承認の後に届いた Reject は取り消し
+// として扱う (Mastodon の Reject#reject_quote! と同じ)。
 func (o *QuoteOutbox) HandleAnswer(actorURI, requestURI string, accepted bool, result string) error {
 	req, err := o.requests.FindByRequestURI(requestURI)
 	if repository.IsNotFound(err) {
@@ -189,51 +192,23 @@ func (o *QuoteOutbox) HandleAnswer(actorURI, requestURI string, accepted bool, r
 	if err != nil {
 		return fmt.Errorf("quote answer: find request: %w", err)
 	}
-	note, err := o.decider.notes.FindByID(req.NoteID)
-	if repository.IsNotFound(err) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("quote answer: find note: %w", err)
-	}
-	if note.RenoteID == nil {
-		return nil
-	}
-	target, err := o.decider.notes.FindByID(*note.RenoteID)
-	if repository.IsNotFound(err) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("quote answer: find quoted note: %w", err)
-	}
-	quotedAuthor, err := o.decider.users.FindByID(target.UserID)
-	if repository.IsNotFound(err) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("quote answer: find quoted author: %w", err)
-	}
-	// 答えられるのは引用される投稿の作者だけ。他人の Accept で承認済みにさせない。
-	if quotedAuthor.URI == nil || *quotedAuthor.URI != actorURI {
-		return nil
+	note, quoter, ok, err := o.answerTarget(req, actorURI)
+	if err != nil || !ok {
+		return err
 	}
 	if !accepted {
 		if err := o.requests.MarkRejected(note.ID); err != nil {
 			return fmt.Errorf("quote answer: record reject: %w", err)
 		}
-		return nil
+		if req.ApprovalURI == nil {
+			return nil
+		}
+		return o.revoke(note, quoter, *req.ApprovalURI)
 	}
 	// 承認の URI は作者のホストのものに限る (Mastodon の Accept#accept_quote! と
 	// 同じ)。第三者はこれを取りに行くので、別ホストを指させない。
 	if !validApprovalURI(result, actorURI) {
 		return nil
-	}
-	quoter, err := o.decider.users.FindByID(note.UserID)
-	if repository.IsNotFound(err) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("quote answer: find quoter: %w", err)
 	}
 	// 配り直すのは、その承認を付けた Update をまだ配り終えていないときだけ。同じ
 	// Accept が何度届いても、その度にフォロワー全員へ送らない (Mastodon も pending
@@ -249,14 +224,107 @@ func (o *QuoteOutbox) HandleAnswer(actorURI, requestURI string, accepted bool, r
 	if !needSend {
 		return nil
 	}
+	return o.sendUpdate(note, quoter, model.QuoteRequestAccepted, result)
+}
+
+// HandleRevocation withdraws our quote's approval when its author deletes it
+// (a Delete whose object is the approval, FEP-044f). 自分の引用の承認でなければ
+// handled = false を返し、呼び出し側は通常の Delete として扱う。
+func (o *QuoteOutbox) HandleRevocation(actorURI, approvalURI string) (bool, error) {
+	reqs, err := o.requests.ListByApprovalURI(approvalURI, quoteRevocationMatchLimit)
+	if err != nil {
+		return false, fmt.Errorf("quote revocation: find request: %w", err)
+	}
+	handled := false
+	for i := range reqs {
+		note, quoter, ok, err := o.answerTarget(&reqs[i], actorURI)
+		if err != nil {
+			return true, err
+		}
+		// 照合できなければ通常の Delete として扱わせる。承認の URI は相手のホストの
+		// 任意の URI でありうるので、たまたま一致した別の Delete (アカウントやノートの
+		// 削除) を飲み込まない。
+		if !ok {
+			continue
+		}
+		handled = true
+		if err := o.revoke(note, quoter, approvalURI); err != nil {
+			return true, err
+		}
+	}
+	return handled, nil
+}
+
+// quoteRevocationMatchLimit bounds how many requests one Delete is matched
+// against. 正当な承認 URI は引用 1 つにつき 1 つなので、普通は 1 件。
+const quoteRevocationMatchLimit = 20
+
+// revoke marks the request revoked and re-delivers the note without the
+// approval. 第三者 (Mastodon) は承認の抜けた Update を受けて、引用を未承認に戻す。
+func (o *QuoteOutbox) revoke(note *model.Note, quoter *model.User, approvalURI string) error {
+	needSend, err := o.requests.MarkRevoked(note.ID)
+	if err != nil {
+		return fmt.Errorf("quote revocation: record: %w", err)
+	}
+	if !needSend {
+		return nil
+	}
+	return o.sendUpdate(note, quoter, model.QuoteRequestRevoked, approvalURI)
+}
+
+// sendUpdate re-delivers note and records that the Update for (state, approval)
+// went out. 失敗は error で返して inbox に再試行させる (記録は「未配信」のまま)。
+func (o *QuoteOutbox) sendUpdate(note *model.Note, quoter *model.User, state, approvalURI string) error {
 	if err := o.deliver.SendNoteUpdate(note, quoter); err != nil {
 		return fmt.Errorf("quote answer: send update: %w", err)
 	}
-	if err := o.requests.MarkUpdateSent(note.ID, result); err != nil {
-		// 送れてはいるので再試行はさせない (次に同じ Accept が届けば送り直すだけ)。
+	if err := o.requests.MarkUpdateSent(note.ID, state, approvalURI); err != nil {
+		// 送れてはいるので再試行はさせない (次に同じ答えが届けば送り直すだけ)。
 		slog.Warn("quote answer: record update delivery", "noteId", note.ID, "err", err)
 	}
 	return nil
+}
+
+// answerTarget loads the quoting note and its author for an answer to req and
+// checks that actorURI is the author of the quoted note. 答えられるのは引用される
+// 投稿の作者だけ (他人の Accept / Reject / Delete で状態を変えさせない)。「無い」と
+// 作者の不一致は ok = false、DB 障害は error。
+func (o *QuoteOutbox) answerTarget(req *model.NoteQuoteRequest, actorURI string) (*model.Note, *model.User, bool, error) {
+	note, err := o.decider.notes.FindByID(req.NoteID)
+	if repository.IsNotFound(err) {
+		return nil, nil, false, nil
+	}
+	if err != nil {
+		return nil, nil, false, fmt.Errorf("quote answer: find note: %w", err)
+	}
+	if note.RenoteID == nil {
+		return nil, nil, false, nil
+	}
+	target, err := o.decider.notes.FindByID(*note.RenoteID)
+	if repository.IsNotFound(err) {
+		return nil, nil, false, nil
+	}
+	if err != nil {
+		return nil, nil, false, fmt.Errorf("quote answer: find quoted note: %w", err)
+	}
+	quotedAuthor, err := o.decider.users.FindByID(target.UserID)
+	if repository.IsNotFound(err) {
+		return nil, nil, false, nil
+	}
+	if err != nil {
+		return nil, nil, false, fmt.Errorf("quote answer: find quoted author: %w", err)
+	}
+	if quotedAuthor.URI == nil || *quotedAuthor.URI != actorURI {
+		return nil, nil, false, nil
+	}
+	quoter, err := o.decider.users.FindByID(note.UserID)
+	if repository.IsNotFound(err) {
+		return nil, nil, false, nil
+	}
+	if err != nil {
+		return nil, nil, false, fmt.Errorf("quote answer: find quoter: %w", err)
+	}
+	return note, quoter, true, nil
 }
 
 func validApprovalURI(uri, actorURI string) bool {
@@ -289,22 +357,29 @@ func quoteAnswerRequestURI(object json.RawMessage, localBaseURL string) string {
 		ID   string          `json:"id"`
 		Type json.RawMessage `json:"type"`
 	}
-	if json.Unmarshal(object, &inner) != nil {
+	if json.Unmarshal(object, &inner) != nil || !apTypeIs(inner.Type, "QuoteRequest") {
 		return ""
 	}
+	return inner.ID
+}
+
+// apTypeIs reports whether an AP `type` (a string or an array) includes the
+// FEP-044f term name, compact (`QuoteRequest`) or expanded
+// (`https://w3id.org/fep/044f#QuoteRequest`, JSON-LD を compact できなかったとき)。
+func apTypeIs(raw json.RawMessage, name string) bool {
 	var types []string
 	var one string
-	if json.Unmarshal(inner.Type, &one) == nil {
+	if json.Unmarshal(raw, &one) == nil {
 		types = []string{one}
 	} else {
-		_ = json.Unmarshal(inner.Type, &types)
+		_ = json.Unmarshal(raw, &types)
 	}
 	for _, t := range types {
-		if strings.EqualFold(t, "QuoteRequest") || strings.EqualFold(t, "https://w3id.org/fep/044f#QuoteRequest") {
-			return inner.ID
+		if strings.EqualFold(t, name) || strings.EqualFold(t, "https://w3id.org/fep/044f#"+name) {
+			return true
 		}
 	}
-	return ""
+	return false
 }
 
 // quoteAnswerResult reads the `result` (the approval URI) of an Accept. 配列なら

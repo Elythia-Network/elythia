@@ -252,3 +252,24 @@ func TestRenderNoteUpdate_QuoteApproval(t *testing.T) {
 	assert.Equal(t, APLenientID("https://example.com/notes/target1"), obj.Quote)
 	assert.Equal(t, 1, calls, "the approval is looked up once")
 }
+
+func TestRenderQuoteAuthorizationDelete(t *testing.T) {
+	n := &model.Note{ID: "n1", UserID: "alice"}
+	a := &model.NoteQuoteAuthorization{ID: "a1", NoteID: "n1", QuoterID: "bob", QuotingURI: "https://remote.example/notes/q"}
+	raw, err := json.Marshal(newRenderer().RenderQuoteAuthorizationDelete(n, a))
+	require.NoError(t, err)
+	var m map[string]any
+	require.NoError(t, json.Unmarshal(raw, &m))
+	stampURI := "https://example.com/notes/n1/quote-authorizations/a1"
+	assert.Equal(t, "Delete", m["type"])
+	assert.Equal(t, stampURI+"#delete", m["id"])
+	assert.Equal(t, "https://example.com/users/alice", m["actor"])
+	assert.NotNil(t, m["@context"])
+	// フォロワー限定の投稿を指す承認を公開宛てとして出さない。
+	assert.NotContains(t, m, "to")
+	obj := m["object"].(map[string]any)
+	assert.Equal(t, stampURI, obj["id"])
+	assert.Equal(t, "QuoteAuthorization", obj["type"])
+	assert.Equal(t, "https://remote.example/notes/q", obj["interactingObject"])
+	assert.NotContains(t, obj, "@context")
+}
