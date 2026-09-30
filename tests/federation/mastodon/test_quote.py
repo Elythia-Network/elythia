@@ -66,17 +66,20 @@ def test_quote_is_accepted(mkgo, mastodon):
     poll_until(notified, timeout=90, interval=3, desc="mk-go notifies the author of the quote")
 
 
-def test_quote_from_blocked_user_is_rejected(mkgo, mastodon):
+def test_quote_from_blocked_user_is_rejected(mkgo_second, mastodon):
     """A block on a visible note gets an explicit Reject, and Mastodon marks the quote rejected."""
+    # ブロックするのは 2 人目の利用者 (dave)。他のテストは carol と alice で引用し合うので、
+    # その関係にブロックを入れない (Mastodon が Block / Undo(Block) を処理する順序に
+    # 後続のテストが左右される)。
     marker = uuid.uuid4().hex
-    note = mkgo.create_note(f"not for blocked users {marker}")["createdNote"]
-    target = _resolve(mastodon, mkgo, note["id"])
+    note = mkgo_second.create_note(f"not for blocked users {marker}")["createdNote"]
+    target = _resolve(mastodon, mkgo_second, note["id"])
 
     alice = poll_until(
-        lambda: mkgo.users_show("alice", "mastodon"),
+        lambda: mkgo_second.users_show("alice", "mastodon"),
         timeout=90, interval=3, desc="mk-go knows alice@mastodon",
     )
-    mkgo._api("blocking/create", {"userId": alice["id"]})
+    mkgo_second._api("blocking/create", {"userId": alice["id"]})
     try:
         quoting = mastodon.quote(target["id"], f"quoting while blocked {marker}")
 
@@ -86,7 +89,7 @@ def test_quote_from_blocked_user_is_rejected(mkgo, mastodon):
 
         poll_until(rejected, timeout=90, interval=3, desc="Mastodon marks the quote rejected")
     finally:
-        mkgo._api("blocking/delete", {"userId": alice["id"]})
+        mkgo_second._api("blocking/delete", {"userId": alice["id"]})
 
 
 def _mkgo_ap_note(mkgo, note_id: str) -> dict:
@@ -106,6 +109,18 @@ def test_quoting_a_mastodon_post_is_approved(mkgo, mastodon):
     quoting = mkgo.quote(target["id"], f"quoting mastodon {marker}")["createdNote"]
     quoting_uri = _note_url(mkgo, quoting["id"])
 
+    # mk-go は返ってきた承認を quoteAuthorization として配る。**Mastodon の検索で
+    # 引用する投稿を取らせるのは、承認が返った後にする** — 取得と QuoteRequest の
+    # 処理が同時に走ると、Mastodon は引用先が結び付く前の記録で照合して黙って捨てる
+    # (Mastodon 側の競合。docs/divergence.md §3-6)。
+    def authorized():
+        note = _mkgo_ap_note(mkgo, quoting["id"])
+        auth = note.get("quoteAuthorization")
+        return note if auth and auth.startswith(MASTODON_ORIGIN) else None
+
+    note = poll_until(authorized, timeout=90, interval=3, desc="mk-go publishes the approval")
+    assert note["quote"] == status["uri"]
+
     # 引用される側 (Mastodon) では、QuoteRequest に答えた時点で承認済み。
     def accepted_on_mastodon():
         s = mastodon.resolve_status(quoting_uri)
@@ -114,15 +129,6 @@ def test_quoting_a_mastodon_post_is_approved(mkgo, mastodon):
 
     quote = poll_until(accepted_on_mastodon, timeout=90, interval=3, desc="Mastodon accepts the quote")
     assert quote["quoted_status"]["uri"] == status["uri"]
-
-    # mk-go は返ってきた承認を quoteAuthorization として配る。
-    def authorized():
-        note = _mkgo_ap_note(mkgo, quoting["id"])
-        auth = note.get("quoteAuthorization")
-        return note if auth and auth.startswith(MASTODON_ORIGIN) else None
-
-    note = poll_until(authorized, timeout=90, interval=3, desc="mk-go publishes the approval")
-    assert note["quote"] == status["uri"]
 
 
 def test_local_quote_is_approved_for_third_parties(mkgo, mkgo_second, mastodon):
@@ -147,3 +153,61 @@ def test_local_quote_is_approved_for_third_parties(mkgo, mkgo_second, mastodon):
 
     quote = poll_until(accepted, timeout=90, interval=3, desc="Mastodon verifies mk-go's approval")
     assert quote["quoted_status"]["uri"] == _note_url(mkgo, original["id"])
+
+
+def test_mastodon_revocation_withdraws_our_approval(mkgo, mastodon):
+    """Stage 4: the quoted author revokes on Mastodon; mk-go drops quoteAuthorization."""
+    marker = uuid.uuid4().hex
+    status = mastodon.post("/api/v1/statuses", status=f"quote then revoke {marker}")
+    target = poll_until(
+        lambda: mkgo.resolve_ap(status["uri"]).get("object"),
+        timeout=90, interval=3, desc="mk-go resolves the Mastodon post",
+    )
+    quoting = mkgo.quote(target["id"], f"quoting to be revoked {marker}")["createdNote"]
+    quoting_uri = _note_url(mkgo, quoting["id"])
+
+    # 承認が返るまで Mastodon に取得させない (上のテストと同じ理由)。
+    poll_until(
+        lambda: _mkgo_ap_note(mkgo, quoting["id"]).get("quoteAuthorization"),
+        timeout=90, interval=3, desc="mk-go publishes the approval",
+    )
+
+    def accepted_on_mastodon():
+        s = mastodon.resolve_status(quoting_uri)
+        q = (s or {}).get("quote")
+        return s if q and q.get("state") == "accepted" else None
+
+    quoting_status = poll_until(accepted_on_mastodon, timeout=90, interval=3, desc="Mastodon accepts the quote")
+
+    mastodon.post(f"/api/v1/statuses/{status['id']}/quotes/{quoting_status['id']}/revoke")
+
+    def withdrawn():
+        note = _mkgo_ap_note(mkgo, quoting["id"])
+        return note if "quoteAuthorization" not in note else None
+
+    note = poll_until(withdrawn, timeout=90, interval=3, desc="mk-go withdraws the approval")
+    assert "quote" not in note
+    assert note["_misskey_quote"] == status["uri"]
+
+
+def test_blocking_revokes_our_approval(mkgo_second, mastodon):
+    """Stage 4: an mk-go author blocking the quoter revokes the approval on Mastodon."""
+    marker = uuid.uuid4().hex
+    note = mkgo_second.create_note(f"to be quoted then blocked {marker}")["createdNote"]
+    target = _resolve(mastodon, mkgo_second, note["id"])
+    quoting = mastodon.quote(target["id"], f"quoting before block {marker}")
+
+    def state():
+        q = mastodon.status(quoting["id"]).get("quote") or {}
+        return q.get("state")
+
+    poll_until(lambda: state() == "accepted", timeout=90, interval=3, desc="Mastodon marks the quote accepted")
+    alice = poll_until(
+        lambda: mkgo_second.users_show("alice", "mastodon"),
+        timeout=90, interval=3, desc="mk-go knows alice@mastodon",
+    )
+    mkgo_second._api("blocking/create", {"userId": alice["id"]})
+    try:
+        poll_until(lambda: state() == "revoked", timeout=90, interval=3, desc="Mastodon revokes the quote")
+    finally:
+        mkgo_second._api("blocking/delete", {"userId": alice["id"]})
