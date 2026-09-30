@@ -1358,6 +1358,14 @@ type Update struct {
 	Object any `json:"object"`
 }
 
+// QuoteRequest asks the author of a note for permission to quote it
+// (FEP-044f、#3234)。object は引用される投稿、instrument は引用する投稿。
+type QuoteRequest struct {
+	Activity
+	Object     string `json:"object"`
+	Instrument any    `json:"instrument"`
+}
+
 // Like represents a Like (reaction) activity.
 type Like struct {
 	Activity
@@ -1499,6 +1507,8 @@ func AddContext(o any) {
 	case *Accept:
 		v.Context = ctx
 	case *QuoteAuthorization:
+		v.Context = ctx
+	case *QuoteRequest:
 		v.Context = ctx
 	case *Reject:
 		v.Context = ctx

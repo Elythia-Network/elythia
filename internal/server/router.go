@@ -976,7 +976,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	federationProcessor.SetInboundFollowAcceptor(followingDeliveryHook)
 	// FEP-044f: リモートからの QuoteRequest に答え、承認の実体を配る (#3234)。
 	quoteAuthorizationRepo := repository.NewNoteQuoteAuthorizationRepository(s.db)
-	federationProcessor.SetQuoteRequestHandler(corefederation.NewQuoteRequestHandler(corefederation.QuoteRequestDeps{
+	quoteRequestHandler := corefederation.NewQuoteRequestHandler(corefederation.QuoteRequestDeps{
 		Notes:     noteRepo,
 		Users:     userRepo,
 		Blocks:    blockingService,
@@ -986,7 +986,15 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		Respond:   corefederation.NewQuoteRequestDeliveryHook(deliverService, apRenderer),
 		URLs:      apURLs,
 		IDGen:     idGen,
-	}))
+	})
+	federationProcessor.SetQuoteRequestHandler(quoteRequestHandler)
+	// こちらの引用の承認を取りに行き (ローカル同士は自分で発行)、承認を
+	// quoteAuthorization として配る (#3234 段階 3)。
+	quoteOutbox := corefederation.NewQuoteOutbox(quoteRequestHandler,
+		repository.NewNoteQuoteRequestRepository(s.db), quoteAuthorizationRepo, noteDeliveryHook)
+	noteDeliveryHook.SetQuoteOutbox(quoteOutbox)
+	federationProcessor.SetQuoteAnswerHandler(quoteOutbox)
+	apRenderer.SetQuoteApprovalResolver(quoteOutbox.ApprovalURI)
 	reactionService.SetFederationHook(corefederation.NewReactionDeliveryHook(deliverService, apRenderer, apURLs, idGen, userRepo))
 	// local user が remote user を (un)block した際に Block / Undo(Block) を
 	// 相手 inbox へ配信する (#1560)。

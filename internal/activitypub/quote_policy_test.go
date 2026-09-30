@@ -102,3 +102,153 @@ func TestNote_UnmarshalToleratesOddInteractionPolicy(t *testing.T) {
 		assert.Equal(t, "c", n.Content, policy)
 	}
 }
+
+// 引用の `quote` / `quoteAuthorization` は承認があるときだけ付ける (#3234 段階 3)。
+// 承認の無いまま `quote` を付けると、Mastodon は引用を「承認待ち」として表示し、
+// 本文の RE: リンクを消す (承認を返さない相手への引用は永久にそのまま)。
+func TestRenderNote_QuoteAndAuthorization(t *testing.T) {
+	idGen := newIDGen(t)
+	text := "look"
+	target := "target1"
+	quoting := &model.Note{ID: idGen.Generate(time.Now()), UserID: "alice", Text: &text, RenoteID: &target, Visibility: model.NoteVisibilityPublic}
+	targetURI := "https://example.com/notes/target1"
+
+	render := func(t *testing.T, r *Renderer, n *model.Note) map[string]any {
+		t.Helper()
+		raw, err := json.Marshal(r.RenderNote(n, idGen))
+		require.NoError(t, err)
+		var m map[string]any
+		require.NoError(t, json.Unmarshal(raw, &m))
+		return m
+	}
+
+	t.Run("quote without approval stays legacy", func(t *testing.T) {
+		m := render(t, newRenderer(), quoting)
+		assert.NotContains(t, m, "quote")
+		assert.NotContains(t, m, "quoteAuthorization")
+		assert.Equal(t, targetURI, m["_misskey_quote"])
+		assert.Contains(t, m["content"], "RE: ")
+	})
+
+	t.Run("quote with approval", func(t *testing.T) {
+		r := newRenderer()
+		var asked *model.Note
+		r.SetQuoteApprovalResolver(func(n *model.Note) (string, error) {
+			asked = n
+			return "https://remote.example/approvals/1", nil
+		})
+		m := render(t, r, quoting)
+		assert.Equal(t, targetURI, m["quote"])
+		assert.Equal(t, "https://remote.example/approvals/1", m["quoteAuthorization"])
+		assert.Same(t, quoting, asked)
+	})
+
+	t.Run("resolver returning empty adds nothing", func(t *testing.T) {
+		r := newRenderer()
+		r.SetQuoteApprovalResolver(func(*model.Note) (string, error) { return "", nil })
+		m := render(t, r, quoting)
+		assert.NotContains(t, m, "quote")
+		assert.NotContains(t, m, "quoteAuthorization")
+	})
+
+	t.Run("lookup failure renders an unapproved quote", func(t *testing.T) {
+		r := newRenderer()
+		r.SetQuoteApprovalResolver(func(*model.Note) (string, error) { return "x", assert.AnError })
+		m := render(t, r, quoting)
+		assert.NotContains(t, m, "quote")
+		assert.NotContains(t, m, "quoteAuthorization")
+		assert.Equal(t, targetURI, m["_misskey_quote"])
+	})
+
+	t.Run("pure renote and plain note carry no quote", func(t *testing.T) {
+		r := newRenderer()
+		called := false
+		r.SetQuoteApprovalResolver(func(*model.Note) (string, error) { called = true; return "x", nil })
+		plain := &model.Note{ID: idGen.Generate(time.Now()), UserID: "alice", Text: &text, Visibility: model.NoteVisibilityPublic}
+		pure := &model.Note{ID: idGen.Generate(time.Now()), UserID: "alice", RenoteID: &target, Visibility: model.NoteVisibilityPublic}
+		for _, n := range []*model.Note{plain, pure} {
+			m := render(t, r, n)
+			assert.NotContains(t, m, "quote")
+			assert.NotContains(t, m, "quoteAuthorization")
+		}
+		assert.False(t, called, "the resolver is only asked for quotes")
+	})
+}
+
+func TestIsQuote(t *testing.T) {
+	text, empty, target := "t", "", "n1"
+	assert.True(t, IsQuote(&model.Note{RenoteID: &target, Text: &text}))
+	assert.False(t, IsQuote(&model.Note{RenoteID: &target}))
+	assert.False(t, IsQuote(&model.Note{RenoteID: &target, Text: &empty}))
+	assert.False(t, IsQuote(&model.Note{Text: &text}))
+}
+
+func TestRenderQuoteRequest(t *testing.T) {
+	idGen := newIDGen(t)
+	text := "look"
+	target := "remote1"
+	n := &model.Note{ID: "q1", UserID: "alice", Text: &text, RenoteID: &target, Visibility: model.NoteVisibilityPublic}
+	raw, err := json.Marshal(newRenderer().RenderQuoteRequest(n, "https://remote.example/notes/9", idGen))
+	require.NoError(t, err)
+	var m map[string]any
+	require.NoError(t, json.Unmarshal(raw, &m))
+	assert.Equal(t, "https://example.com/notes/q1#quote-request", m["id"])
+	assert.Equal(t, "QuoteRequest", m["type"])
+	assert.Equal(t, "https://example.com/users/alice", m["actor"])
+	assert.Equal(t, "https://remote.example/notes/9", m["object"])
+	assert.NotNil(t, m["@context"])
+	inst, ok := m["instrument"].(map[string]any)
+	require.True(t, ok, "the quoting note is inlined")
+	assert.Equal(t, "https://example.com/notes/q1", inst["id"])
+	assert.NotContains(t, inst, "@context")
+}
+
+func TestRenderNoteUpdate(t *testing.T) {
+	idGen := newIDGen(t)
+	text := "hi"
+	n := &model.Note{ID: "u1", UserID: "alice", Text: &text, Visibility: model.NoteVisibilityPublic}
+	u, err := newRenderer().RenderNoteUpdate(n, idGen)
+	require.NoError(t, err)
+	raw, err := json.Marshal(u)
+	require.NoError(t, err)
+	var m map[string]any
+	require.NoError(t, json.Unmarshal(raw, &m))
+	assert.Equal(t, "Update", m["type"])
+	assert.Contains(t, m["id"], "https://example.com/notes/u1#updates/")
+	obj := m["object"].(map[string]any)
+	assert.Equal(t, "Note", obj["type"])
+	assert.Equal(t, "https://example.com/notes/u1", obj["id"])
+	// 編集ではないので updated を付けない (Mastodon は updated の無い Update を
+	// 付随情報の更新として扱う)。
+	assert.NotContains(t, obj, "updated")
+	assert.NotContains(t, obj, "@context")
+	assert.Equal(t, obj["to"], m["to"])
+}
+
+// 承認済みの引用を配り直す Update は、承認を引けなければ作らない。承認の抜けた
+// Update を受けた Mastodon は、承認済みの引用を未承認に戻す。
+func TestRenderNoteUpdate_QuoteApproval(t *testing.T) {
+	idGen := newIDGen(t)
+	text, target := "look", "target1"
+	quoting := &model.Note{ID: "u2", UserID: "alice", Text: &text, RenoteID: &target, Visibility: model.NoteVisibilityPublic}
+
+	r := newRenderer()
+	r.SetQuoteApprovalResolver(func(*model.Note) (string, error) { return "", assert.AnError })
+	_, err := r.RenderNoteUpdate(quoting, idGen)
+	assert.ErrorIs(t, err, assert.AnError)
+	_, err = r.RenderQuestionUpdate(quoting, idGen)
+	assert.ErrorIs(t, err, assert.AnError)
+
+	// 引用でなければ承認を引かない (引けなくても作れる)。
+	_, err = r.RenderNoteUpdate(&model.Note{ID: "u3", UserID: "alice", Text: &text, Visibility: model.NoteVisibilityPublic}, idGen)
+	assert.NoError(t, err)
+
+	calls := 0
+	r.SetQuoteApprovalResolver(func(*model.Note) (string, error) { calls++; return "https://remote.example/approvals/1", nil })
+	u, err := r.RenderNoteUpdate(quoting, idGen)
+	require.NoError(t, err)
+	obj := u.Object.(*Note)
+	assert.Equal(t, APLenientID("https://remote.example/approvals/1"), obj.QuoteAuthorization)
+	assert.Equal(t, APLenientID("https://example.com/notes/target1"), obj.Quote)
+	assert.Equal(t, 1, calls, "the approval is looked up once")
+}

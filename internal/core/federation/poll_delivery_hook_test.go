@@ -304,3 +304,17 @@ func TestPollDeliveryHook_OnLocalPollUpdated_SpecifiedReachesMentioned(t *testin
 	assert.ElementsMatch(t, []string{dmInbox, mentionedInbox}, got,
 		"メンション先に票数の Update が届いていない")
 }
+
+// 引用の承認を引けないときは、票数の Update を送らない (#3234)。承認の抜けた
+// Update を受けた Mastodon は、承認済みの引用を未承認に戻す。
+func TestPollDeliveryHook_OnLocalPollUpdated_SkipsWhenQuoteApprovalFails(t *testing.T) {
+	hook, enq, userRepo, keypairRepo, followingRepo, _ := newHookSetupWithFollowing(t)
+	seedSigner(t, userRepo, keypairRepo, "author")
+	followingRepo.RemoteInboxes["author"] = []string{"https://follower.example/inbox"}
+	hook.renderer.SetQuoteApprovalResolver(func(*model.Note) (string, error) { return "", assert.AnError })
+	text, target := "poll quote", "quoted"
+	hook.OnLocalPollUpdated(&model.Note{
+		ID: "n1", UserID: "author", HasPoll: true, Visibility: model.NoteVisibilityPublic, Text: &text, RenoteID: &target,
+	})
+	assert.Empty(t, enq.delivers)
+}
