@@ -74,3 +74,16 @@ def mastodon() -> MastodonClient:
     with open(MASTODON_TOKEN_FILE) as f:
         token = f.read().strip()
     return MastodonClient(MASTODON_URL, token)
+
+
+@pytest.fixture(scope="session")
+def mkgo_second(mkgo) -> MisskeyLikeClient:
+    """A second mk-go user (dave), for quotes between local users."""
+    client = MisskeyLikeClient(MKGO_URL, MKGO_DOMAIN)
+    try:
+        data = mkgo._api("admin/accounts/create", {"username": "dave", "password": "password1234"})
+        client.token = data.get("token")
+    except RuntimeError:
+        # 前回の実行で作った利用者が残っている (volume を消さずに回し直したとき)。
+        client.signin("dave", "password1234")
+    return client
