@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"strings"
 	"time"
@@ -167,6 +168,19 @@ func (h *QuoteRequestHandler) Handle(quoter *model.User, raw json.RawMessage) er
 	})
 	if err != nil {
 		return fmt.Errorf("quote request: record approval: %w", err)
+	}
+	// **記録が別の相手のものなら答えない (#3239)。** 記録は (投稿, 引用 URI) で
+	// 一意なので、同じホストの別人が先にその引用 URI を名乗っていると、Ensure は
+	// その人の行を返す。答えると、その人の承認をこの相手へ渡すことになり、ブロック
+	// による取り消しも相手を取り違える。名乗れるのは相手のサーバーの管理者だけ
+	// (inline の instrument は actor と同じホストのときだけ信じる) なので、記録を
+	// 書き換えずに黙って捨てる。記録は名乗った側のまま残るので、作者が本物の相手を
+	// ブロックしてもその記録は取り消されない — 名乗った側をブロックすれば消える。
+	// 相手のサーバーの管理者はそもそも本物の相手を騙れるので、脅威の範囲は変わらない。
+	if approval.QuoterID != quoter.ID {
+		slog.Warn("quote request: approval is recorded for another quoter",
+			"noteId", note.ID, "quotingUri", quotingURI, "quoter", quoter.ID, "recorded", approval.QuoterID)
+		return nil
 	}
 	// 記録した後でブロックを確かめ直す (#3234 段階 4)。作者のブロックは「ブロックを
 	// 記録 → 承認を消す」の順に進むので、判定と記録の間にブロックされると、消した
