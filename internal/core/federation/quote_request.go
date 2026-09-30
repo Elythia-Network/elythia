@@ -18,6 +18,7 @@ import (
 // QuoteApprovalStore records quote approvals granted by local authors.
 type QuoteApprovalStore interface {
 	Ensure(a *model.NoteQuoteAuthorization) (*model.NoteQuoteAuthorization, error)
+	Remove(noteID, quotingURI, quoterID string) error
 }
 
 // QuoteRequestResponder sends the answer to a QuoteRequest back to the
@@ -150,12 +151,7 @@ func (h *QuoteRequestHandler) Handle(quoter *model.User, raw json.RawMessage) er
 		}
 	}
 	if decision == quoteReject {
-		// 届けられなければ error で返して再試行させる (相手は QuoteRequest を
-		// 自分からは送り直さないので、落とすと引用が保留のまま残る)。
-		if err := h.respond.SendQuoteReject(note, req.ID, quotingURI, quoter); err != nil {
-			return fmt.Errorf("quote request: send reject: %w", err)
-		}
-		return nil
+		return h.reject(note, req.ID, quotingURI, quoter)
 	}
 
 	var requestID *string
@@ -171,6 +167,18 @@ func (h *QuoteRequestHandler) Handle(quoter *model.User, raw json.RawMessage) er
 	})
 	if err != nil {
 		return fmt.Errorf("quote request: record approval: %w", err)
+	}
+	// 記録した後でブロックを確かめ直す (#3234 段階 4)。作者のブロックは「ブロックを
+	// 記録 → 承認を消す」の順に進むので、判定と記録の間にブロックされると、消した
+	// 後に承認ができてしまう。記録の後に確かめれば、そのブロックは見える。
+	// **確かめ直した後にブロックされる窓は残る** — そのときは消された承認の Accept を
+	// 送ることになるが、承認は 404 なので第三者は確かめて退ける。
+	blocked, err := h.blockedBetween(note.UserID, quoter.ID)
+	if err != nil {
+		return err
+	}
+	if blocked {
+		return h.reject(note, req.ID, quotingURI, quoter)
 	}
 	// 再送された QuoteRequest には、最初の承認をそのまま返す (同じ承認 URI)。
 	// ただし Accept の object は今回の QuoteRequest の id を指す (相手は id で
@@ -235,16 +243,47 @@ func (h *QuoteRequestHandler) decide(note *model.Note, quoter *model.User) (quot
 	default:
 		return quoteIgnore, nil
 	}
-	for _, pair := range [][2]string{{author.ID, quoter.ID}, {quoter.ID, author.ID}} {
-		blocked, err := h.blocks.IsBlocked(pair[0], pair[1])
-		if err != nil {
-			return quoteIgnore, fmt.Errorf("quote request: block check: %w", err)
-		}
-		if blocked {
-			return quoteReject, nil
-		}
+	blocked, err := h.blockedBetween(author.ID, quoter.ID)
+	if err != nil {
+		return quoteIgnore, err
+	}
+	if blocked {
+		return quoteReject, nil
 	}
 	return quoteAllow, nil
+}
+
+// blockedBetween reports whether either user blocks the other.
+func (h *QuoteRequestHandler) blockedBetween(a, b string) (bool, error) {
+	for _, pair := range [][2]string{{a, b}, {b, a}} {
+		blocked, err := h.blocks.IsBlocked(pair[0], pair[1])
+		if err != nil {
+			return false, fmt.Errorf("quote request: block check: %w", err)
+		}
+		if blocked {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// reject answers with Reject and removes the approval this quoter may already
+// hold for the quote (ブロックと競合して記録されたもの、前の試行で記録された
+// もの)。届けられなければ error で返して再試行させる (相手は QuoteRequest を
+// 自分からは送り直さないので、落とすと引用が保留のまま残る)。
+//
+// **消すのは送ってきた相手の承認だけ。** 拒否の経路では instrument を確かめて
+// いない (`instrumentQuotes` は承認するときだけ走る) ので、quotingURI は相手が
+// 書いた任意の値になる。相手で絞らないと、作者をブロックした (Block を送った)
+// 相手が、他人の引用 URI を並べた QuoteRequest で他人の承認を消せる。
+func (h *QuoteRequestHandler) reject(note *model.Note, requestID, quotingURI string, quoter *model.User) error {
+	if err := h.approvals.Remove(note.ID, quotingURI, quoter.ID); err != nil {
+		return fmt.Errorf("quote request: remove approval: %w", err)
+	}
+	if err := h.respond.SendQuoteReject(note, requestID, quotingURI, quoter); err != nil {
+		return fmt.Errorf("quote request: send reject: %w", err)
+	}
+	return nil
 }
 
 // instrumentQuotes checks that the quoting note is by quoter and quotes

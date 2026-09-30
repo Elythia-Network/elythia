@@ -54,3 +54,30 @@ func (r *NoteQuoteAuthorizationRepository) Ensure(a *model.NoteQuoteAuthorizatio
 	}
 	return r.FindByNoteIDAndQuotingURI(a.NoteID, a.QuotingURI)
 }
+
+// DeleteByAuthorAndQuoter removes the approvals authorID gave to quoterID's
+// quotes and returns them (#3234 段階 4、作者が相手をブロックしたとき)。消した行は
+// 取り消しの Delete を組み立てるのに使う。
+func (r *NoteQuoteAuthorizationRepository) DeleteByAuthorAndQuoter(authorID, quoterID string) ([]model.NoteQuoteAuthorization, error) {
+	if !storable(authorID) || !storable(quoterID) {
+		return nil, nil
+	}
+	var rows []model.NoteQuoteAuthorization
+	if err := r.db.Raw(`DELETE FROM "note_quote_authorization" a USING "note" n
+		WHERE a."noteId" = n."id" AND n."userId" = ? AND a."quoterId" = ?
+		RETURNING a.*`, authorID, quoterID).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// Remove deletes quoterID's approval of quotingURI for the note, if any.
+// 相手で絞る — quotingURI は拒否の経路では確かめていない値なので、他人の承認を
+// 消させない。
+func (r *NoteQuoteAuthorizationRepository) Remove(noteID, quotingURI, quoterID string) error {
+	if !storable(noteID) || !storable(quotingURI) || !storable(quoterID) {
+		return nil
+	}
+	return r.db.Where(`"noteId" = ? AND "quotingUri" = ? AND "quoterId" = ?`, noteID, quotingURI, quoterID).
+		Delete(&model.NoteQuoteAuthorization{}).Error
+}

@@ -23,6 +23,8 @@ func (qdAllow) IsFollowing(string, string) (bool, error) { return false, nil }
 
 type qdStore struct{ n int }
 
+func (s *qdStore) Remove(string, string, string) error { return nil }
+
 func (s *qdStore) Ensure(a *model.NoteQuoteAuthorization) (*model.NoteQuoteAuthorization, error) {
 	s.n++
 	return a, nil
@@ -122,6 +124,11 @@ func TestProcess_QuoteRequestActorUnresolvable(t *testing.T) {
 
 type qdAnswers struct{ got []string }
 
+func (a *qdAnswers) HandleRevocation(actor, approvalURI string) (bool, error) {
+	a.got = append(a.got, "revoke "+actor+" "+approvalURI)
+	return approvalURI == "https://remote.example/approvals/ours", nil
+}
+
 func (a *qdAnswers) HandleAnswer(actor, requestURI string, accepted bool, result string) error {
 	verdict := "reject"
 	if accepted {
@@ -174,4 +181,78 @@ func TestProcess_QuoteAnswerDispatch(t *testing.T) {
 	_ = p.Process(answer("Accept", follow, ""))
 	_ = p.Process(answer("Reject", follow, ""))
 	assert.Len(t, answers.got, 3)
+}
+
+// 承認の取り消し (#3234 段階 4): Delete の object が承認の型か型の無い id なら、
+// 自分の引用の承認かを先に照合する。そうでなければ通常の Delete として扱う。
+func TestProcess_QuoteRevocationDispatch(t *testing.T) {
+	n := 0
+	del := func(object any) []byte {
+		n++
+		raw, err := json.Marshal(map[string]any{
+			"id": fmt.Sprintf("https://remote.example/deletes/%d", n), "type": "Delete",
+			"actor": "https://remote.example/users/alice", "object": object,
+		})
+		require.NoError(t, err)
+		return raw
+	}
+	p, _, _, _ := newProcessor(t, aliceActor)
+	answers := &qdAnswers{}
+	p.SetQuoteAnswerHandler(answers)
+
+	ours := "https://remote.example/approvals/ours"
+	require.NoError(t, p.Process(del(map[string]any{"id": ours, "type": "QuoteAuthorization"})))
+	require.NoError(t, p.Process(del(map[string]any{"id": ours, "type": "https://w3id.org/fep/044f#QuoteAuthorization"})))
+	require.NoError(t, p.Process(del(ours)))
+	assert.Equal(t, []string{
+		"revoke https://remote.example/users/alice " + ours,
+		"revoke https://remote.example/users/alice " + ours,
+		"revoke https://remote.example/users/alice " + ours,
+	}, answers.got)
+
+	// ノートや actor の Delete では照合しない。
+	answers.got = nil
+	_ = p.Process(del(map[string]any{"id": "https://remote.example/notes/9", "type": "Tombstone"}))
+	_ = p.Process(del(map[string]any{"id": "https://remote.example/notes/9", "type": "Note"}))
+	assert.Empty(t, answers.got)
+	// 自分の引用の承認でなければ、通常の Delete へ進む (照合はする)。
+	_ = p.Process(del("https://remote.example/notes/10"))
+	assert.Equal(t, []string{"revoke https://remote.example/users/alice https://remote.example/notes/10"}, answers.got)
+}
+
+// 自分の引用の承認として処理したら、通常の Delete へは進まない (actor を取りに
+// 行かない)。actor を取れない状態でも、取り消しとしては成功する。
+func TestProcess_QuoteRevocationDoesNotFallThrough(t *testing.T) {
+	p, _, _, _ := newProcessorFetchErr(t, errors.New("connection reset"))
+	answers := &qdAnswers{}
+	p.SetQuoteAnswerHandler(answers)
+	raw, err := json.Marshal(map[string]any{
+		"id": "https://remote.example/deletes/x", "type": "Delete",
+		"actor": "https://remote.example/users/alice", "object": "https://remote.example/approvals/ours",
+	})
+	require.NoError(t, err)
+	require.NoError(t, p.Process(raw))
+	require.Len(t, answers.got, 1)
+
+	// 自分の承認でなければ、通常の Delete として actor を取りに行く (ここでは失敗する)。
+	raw, err = json.Marshal(map[string]any{
+		"id": "https://remote.example/deletes/y", "type": "Delete",
+		"actor": "https://remote.example/users/alice", "object": "https://remote.example/notes/1",
+	})
+	require.NoError(t, err)
+	assert.Error(t, p.Process(raw))
+}
+
+// actor 自身の Delete (アカウント削除) では照合しない。
+func TestProcess_QuoteRevocationSkipsActorDelete(t *testing.T) {
+	p, _, _, _ := newProcessor(t, aliceActor)
+	answers := &qdAnswers{}
+	p.SetQuoteAnswerHandler(answers)
+	raw, err := json.Marshal(map[string]any{
+		"id": "https://remote.example/users/alice#delete", "type": "Delete",
+		"actor": "https://remote.example/users/alice", "object": "https://remote.example/users/alice",
+	})
+	require.NoError(t, err)
+	_ = p.Process(raw)
+	assert.Empty(t, answers.got)
 }

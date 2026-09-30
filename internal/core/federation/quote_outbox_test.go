@@ -70,17 +70,41 @@ func (r *qoRequests) MarkAccepted(noteID, approval string) (bool, error) {
 	if q.State == model.QuoteRequestPending {
 		q.State, q.ApprovalURI, q.UpdateSent = model.QuoteRequestAccepted, &approval, false
 	}
-	return q.ApprovalURI != nil && *q.ApprovalURI == approval && !q.UpdateSent, nil
+	return q.State == model.QuoteRequestAccepted && q.ApprovalURI != nil && *q.ApprovalURI == approval && !q.UpdateSent, nil
 }
 
-func (r *qoRequests) MarkUpdateSent(noteID, approval string) error {
+func (r *qoRequests) MarkUpdateSent(noteID, state, approval string) error {
 	if r.err != nil {
 		return r.err
 	}
-	if q := r.rows[noteID]; q.ApprovalURI != nil && *q.ApprovalURI == approval {
+	if q := r.rows[noteID]; q.State == state && q.ApprovalURI != nil && *q.ApprovalURI == approval {
 		q.UpdateSent = true
 	}
 	return nil
+}
+
+func (r *qoRequests) ListByApprovalURI(uri string, limit int) ([]model.NoteQuoteRequest, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	var out []model.NoteQuoteRequest
+	for _, q := range r.rows {
+		if q.ApprovalURI != nil && *q.ApprovalURI == uri && len(out) < limit {
+			out = append(out, *q)
+		}
+	}
+	return out, nil
+}
+
+func (r *qoRequests) MarkRevoked(noteID string) (bool, error) {
+	if r.err != nil {
+		return false, r.err
+	}
+	q := r.rows[noteID]
+	if q.State == model.QuoteRequestAccepted {
+		q.State, q.UpdateSent = model.QuoteRequestRevoked, false
+	}
+	return q.State == model.QuoteRequestRevoked && !q.UpdateSent, nil
 }
 
 func (r *qoRequests) MarkRejected(noteID string) error {
@@ -463,7 +487,7 @@ func TestQuoteOutbox_HandleAcceptRetriesFailedUpdate(t *testing.T) {
 
 type qoFailingSentMark struct{ *qoRequests }
 
-func (qoFailingSentMark) MarkUpdateSent(string, string) error { return errors.New("db down") }
+func (qoFailingSentMark) MarkUpdateSent(string, string, string) error { return errors.New("db down") }
 
 // 送れた後の記録に失敗しても再試行はさせない (送り直しは次の Accept で足りる)。
 func TestQuoteOutbox_HandleAcceptSentMarkFailure(t *testing.T) {
@@ -555,4 +579,134 @@ func TestQuoteOutbox_HandleAnswerRecordFailures(t *testing.T) {
 	assert.Error(t, o.HandleAnswer(qoCarolURI, uri, true, qoApproval))
 	assert.Error(t, o.HandleAnswer(qoCarolURI, uri, false, ""))
 	assert.Empty(t, e.delivery.updates, "nothing is sent before the approval is recorded")
+}
+
+func (e *qoEnv) accepted(t *testing.T) *model.Note {
+	t.Helper()
+	n := e.requested(t)
+	require.NoError(t, e.o.HandleAnswer(qoCarolURI, qrBase+"/notes/q1#quote-request", true, qoApproval))
+	require.Equal(t, qoApproval, e.approval(t, n))
+	return n
+}
+
+// 承認の Delete (#3234 段階 4): 引用される作者が承認を取り消したら、承認を外した
+// Update を配り直す。
+func TestQuoteOutbox_HandleRevocation(t *testing.T) {
+	e := newQOEnv(t)
+	n := e.accepted(t)
+	handled, err := e.o.HandleRevocation(qoCarolURI, qoApproval)
+	require.NoError(t, err)
+	assert.True(t, handled)
+	assert.Equal(t, model.QuoteRequestRevoked, e.requests.rows["q1"].State)
+	assert.Empty(t, e.approval(t, n))
+	assert.Equal(t, []string{"q1 dave", "q1 dave"}, e.delivery.updates)
+
+	// 同じ Delete がもう一度届いても配り直さない。取り消された後の Accept でも戻さない。
+	handled, err = e.o.HandleRevocation(qoCarolURI, qoApproval)
+	require.NoError(t, err)
+	assert.True(t, handled)
+	require.NoError(t, e.o.HandleAnswer(qoCarolURI, qrBase+"/notes/q1#quote-request", true, qoApproval))
+	assert.Len(t, e.delivery.updates, 2)
+	assert.Empty(t, e.approval(t, n))
+}
+
+func TestQuoteOutbox_HandleRevocationIgnores(t *testing.T) {
+	e := newQOEnv(t)
+	n := e.accepted(t)
+	// 自分の引用の承認でなければ、通常の Delete として扱わせる。
+	handled, err := e.o.HandleRevocation(qoCarolURI, "https://remote.example/notes/other")
+	require.NoError(t, err)
+	assert.False(t, handled)
+	// 引用される作者以外は取り消せない。照合できないものは通常の Delete として扱わせる
+	// (承認の URI とたまたま一致した別の Delete を飲み込まない)。
+	handled, err = e.o.HandleRevocation(qrQuoterURI, qoApproval)
+	require.NoError(t, err)
+	assert.False(t, handled)
+	assert.Equal(t, qoApproval, e.approval(t, n))
+	assert.Len(t, e.delivery.updates, 1)
+}
+
+// 取り消しの Update を届けられなければ再試行させ、再試行で送り直す。
+func TestQuoteOutbox_HandleRevocationRetries(t *testing.T) {
+	e := newQOEnv(t)
+	e.accepted(t)
+	e.delivery.err = errors.New("queue down")
+	_, err := e.o.HandleRevocation(qoCarolURI, qoApproval)
+	require.Error(t, err)
+	e.delivery.err = nil
+	_, err = e.o.HandleRevocation(qoCarolURI, qoApproval)
+	require.NoError(t, err)
+	assert.Len(t, e.delivery.updates, 3)
+	_, err = e.o.HandleRevocation(qoCarolURI, qoApproval)
+	require.NoError(t, err)
+	assert.Len(t, e.delivery.updates, 3)
+}
+
+func TestQuoteOutbox_HandleRevocationFailures(t *testing.T) {
+	e := newQOEnv(t)
+	e.accepted(t)
+	e.requests.err = errors.New("db down")
+	handled, err := e.o.HandleRevocation(qoCarolURI, qoApproval)
+	assert.Error(t, err)
+	assert.False(t, handled)
+
+	e = newQOEnv(t)
+	e.accepted(t)
+	e.users.err = errors.New("db down")
+	_, err = e.o.HandleRevocation(qoCarolURI, qoApproval)
+	assert.Error(t, err)
+
+	e = newQOEnv(t)
+	e.accepted(t)
+	o := NewQuoteOutbox(e.h, qoFailingRevoke{e.requests}, e.store, e.delivery)
+	_, err = o.HandleRevocation(qoCarolURI, qoApproval)
+	assert.Error(t, err)
+}
+
+type qoFailingRevoke struct{ *qoRequests }
+
+func (qoFailingRevoke) MarkRevoked(string) (bool, error) { return false, errors.New("db down") }
+
+// 承認の後に届いた Reject は取り消しとして扱う (Mastodon の Reject#reject_quote!)。
+func TestQuoteOutbox_RejectAfterAcceptRevokes(t *testing.T) {
+	e := newQOEnv(t)
+	n := e.accepted(t)
+	require.NoError(t, e.o.HandleAnswer(qoCarolURI, qrBase+"/notes/q1#quote-request", false, ""))
+	assert.Equal(t, model.QuoteRequestRevoked, e.requests.rows["q1"].State)
+	assert.Empty(t, e.approval(t, n))
+	assert.Len(t, e.delivery.updates, 2)
+}
+
+// 取り消された後に同じ Accept が再送されても、承認の Update を送り直さない。
+func TestQuoteOutbox_AcceptReplayAfterRevoke(t *testing.T) {
+	uri := qrBase + "/notes/q1#quote-request"
+	e := newQOEnv(t)
+	e.accepted(t)
+	e.delivery.err = errors.New("queue down")
+	_, err := e.o.HandleRevocation(qoCarolURI, qoApproval)
+	require.Error(t, err)
+	e.delivery.err = nil
+	require.NoError(t, e.o.HandleAnswer(qoCarolURI, uri, true, qoApproval))
+	assert.Len(t, e.delivery.updates, 2, "no approved Update after revocation")
+}
+
+// 同じ承認 URI を持つ記録が他にあっても、作者の一致する記録を取り消す (1 件だけ
+// 拾って取りこぼさない)。
+func TestQuoteOutbox_HandleRevocationSharedApprovalURI(t *testing.T) {
+	e := newQOEnv(t)
+	n := e.accepted(t)
+	decoy := qoApproval
+	// 別の作者の投稿への引用が、同じ承認 URI を記録している。
+	host, otherURI := "remote.example", "https://remote.example/users/mallory"
+	e.users.users["mallory"] = &model.User{ID: "mallory", Host: &host, URI: &otherURI}
+	e.notes["mnote"] = &model.Note{ID: "mnote", UserID: "mallory", UserHost: &host, URI: strp("https://remote.example/statuses/m")}
+	text := "look"
+	e.notes["q0"] = &model.Note{ID: "q0", UserID: "dave", Text: &text, RenoteID: strp("mnote"), Visibility: model.NoteVisibilityPublic}
+	e.requests.rows["q0"] = &model.NoteQuoteRequest{NoteID: "q0", RequestURI: "x", State: model.QuoteRequestAccepted, ApprovalURI: &decoy}
+
+	handled, err := e.o.HandleRevocation(qoCarolURI, qoApproval)
+	require.NoError(t, err)
+	assert.True(t, handled)
+	assert.Empty(t, e.approval(t, n))
+	assert.Equal(t, model.QuoteRequestAccepted, e.requests.rows["q0"].State, "the other author's record is untouched")
 }

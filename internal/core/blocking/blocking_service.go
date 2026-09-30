@@ -34,6 +34,9 @@ type Service struct {
 	// federationHook は local user が remote user を (un)block した際に
 	// Block / Undo(Block) を相手 inbox へ配信する (#1560)。nil なら配信しない。
 	federationHook FederationHook
+	// quoteRevoker はブロックした相手の引用に出していた承認を取り消す
+	// (FEP-044f、#3234 段階 4)。nil なら何もしない。
+	quoteRevoker QuoteRevoker
 	// followRequestCanceller は block 時に保留中の follow request を
 	// 双方向で取り消す。実装は core/following.Service。nil なら何もしない。
 	followRequestCanceller FollowRequestCanceller
@@ -49,6 +52,17 @@ type Service struct {
 type FederationHook interface {
 	OnBlocked(blockerID, blockeeID string)
 	OnUnblocked(blockerID, blockeeID string)
+}
+
+// QuoteRevoker withdraws the quote approvals the blocker granted to the
+// blockee (#3234)。実装は core/federation。best-effort で、戻り値を持たない。
+type QuoteRevoker interface {
+	RevokeQuotesOnBlock(blockerID, blockeeID string)
+}
+
+// SetQuoteRevoker wires the quote approval revocation run on block (#3234)。
+func (s *Service) SetQuoteRevoker(r QuoteRevoker) {
+	s.quoteRevoker = r
 }
 
 // FollowRequestCanceller cancels any pending follow request between two users.
@@ -176,6 +190,11 @@ func (s *Service) Block(blockerID, blockeeID string) (*model.Blocking, error) {
 			slog.Warn("block: cancel pending follow requests failed",
 				"blocker", blockerID, "blockee", blockeeID, "err", err)
 		}
+	}
+
+	// ブロックした相手の引用に出していた承認を取り消す (#3234)。
+	if s.quoteRevoker != nil {
+		s.quoteRevoker.RevokeQuotesOnBlock(blockerID, blockeeID)
 	}
 
 	// remote blockee へ Block activity を配信する (#1560)。

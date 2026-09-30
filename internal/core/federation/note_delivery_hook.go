@@ -295,6 +295,9 @@ func (h *NoteDeliveryHook) SendQuoteRequest(note *model.Note, quotedURI string, 
 // 承認を付けたものを、Create を受け取った相手 (フォロワー・直接の宛先・公開なら
 // relay) へ配り直す。
 func (h *NoteDeliveryHook) SendNoteUpdate(note *model.Note, author *model.User) error {
+	if note.LocalOnly {
+		return nil
+	}
 	switch note.Visibility {
 	case model.NoteVisibilityPublic, model.NoteVisibilityHome, model.NoteVisibilityFollowers:
 	default:

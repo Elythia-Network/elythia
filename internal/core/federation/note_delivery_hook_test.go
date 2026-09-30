@@ -675,6 +675,13 @@ func TestNoteDeliveryHook_SendQuoteRequest(t *testing.T) {
 	require.NoError(t, json.Unmarshal(enq.calls[0].Body, &got))
 	assert.Equal(t, "QuoteRequest", got["type"])
 	assert.Equal(t, "https://remote.example/notes/1", got["object"])
+
+	// ローカルの相手には送らない。送れなければ error。
+	enq.calls = nil
+	require.NoError(t, hook.SendQuoteRequest(note, "https://remote.example/notes/1", &model.User{ID: "dave"}))
+	assert.Empty(t, enq.calls)
+	enq.err = assert.AnError
+	assert.Error(t, hook.SendQuoteRequest(note, "https://remote.example/notes/1", bob))
 }
 
 func TestNoteDeliveryHook_SendNoteUpdate(t *testing.T) {
@@ -713,6 +720,13 @@ func TestNoteDeliveryHook_SendNoteUpdate(t *testing.T) {
 
 	// ダイレクトの引用は承認を取りに行かないので、配り直しもしない
 	// (引用される作者へも送らない)。
+	// ローカル限定の投稿は連合しない。
+	enq.calls = nil
+	lonly := makeNote(author.ID, model.NoteVisibilityPublic)
+	lonly.Text, lonly.RenoteID, lonly.LocalOnly = &text, &target, true
+	require.NoError(t, hook.SendNoteUpdate(lonly, author))
+	assert.Empty(t, enq.calls)
+
 	enq.calls = nil
 	dm := makeNote(author.ID, model.NoteVisibilitySpecified)
 	dm.Text, dm.RenoteID = &text, &target
@@ -742,4 +756,48 @@ func TestNoteDeliveryHook_SendNoteUpdate_ApprovalLookupFails(t *testing.T) {
 
 	assert.ErrorIs(t, hook.SendNoteUpdate(note, author), assert.AnError)
 	assert.Empty(t, enq.calls)
+}
+
+// 承認の取り消し (#3234 段階 4): Delete は作者のフォロワーと、リモートの相手の inbox へ。
+func TestQuoteRequestDeliveryHook_SendApprovalDelete(t *testing.T) {
+	_, enq, userRepo, followingRepo, keypairRepo, _ := newNoteDeliveryHook(t)
+	author := makeLocalAuthor(t, userRepo, keypairRepo)
+	followingRepo.RemoteInboxes[author.ID] = []string{"https://r.example/inbox"}
+	urls := activitypub.NewURLBuilder("https://example.com")
+	hook := federation.NewQuoteRequestDeliveryHook(federation.NewDeliverService(enq, userRepo, followingRepo, keypairRepo, urls), activitypub.NewRenderer(urls))
+	host, inbox := "remote.example", "https://remote.example/users/bob/inbox"
+	bob := &model.User{ID: "bob", Username: "bob", Host: &host, Inbox: &inbox}
+	a := &model.NoteQuoteAuthorization{ID: "a1", NoteID: "n1", QuoterID: "bob", QuotingURI: "https://remote.example/notes/q"}
+
+	require.NoError(t, hook.SendApprovalDelete(author, bob, a))
+	var inboxes []string
+	for _, c := range enq.calls {
+		inboxes = append(inboxes, c.Inbox)
+		var got map[string]any
+		require.NoError(t, json.Unmarshal(c.Body, &got))
+		assert.Equal(t, "Delete", got["type"])
+		assert.Equal(t, "https://example.com/notes/n1/quote-authorizations/a1", got["object"].(map[string]any)["id"])
+	}
+	assert.ElementsMatch(t, []string{"https://r.example/inbox", inbox}, inboxes)
+
+	// 相手がローカルなら、フォロワーだけ (引用する投稿の Update は別に配る)。
+	enq.calls = nil
+	require.NoError(t, hook.SendApprovalDelete(author, &model.User{ID: "dave"}, a))
+	require.Len(t, enq.calls, 1)
+	assert.Equal(t, "https://r.example/inbox", enq.calls[0].Inbox)
+
+	// 相手と同じ inbox を持つフォロワーには二度送らない。
+	enq.calls = nil
+	followingRepo.RemoteInboxes[author.ID] = []string{"https://r.example/inbox", inbox}
+	require.NoError(t, hook.SendApprovalDelete(author, bob, a))
+	inboxes = nil
+	for _, c := range enq.calls {
+		inboxes = append(inboxes, c.Inbox)
+	}
+	assert.ElementsMatch(t, []string{"https://r.example/inbox", inbox}, inboxes)
+	// 相手へは先に送る (フォロワーへの送信が落ちても相手には届く)。
+	assert.Equal(t, inbox, enq.calls[0].Inbox)
+
+	enq.err = assert.AnError
+	assert.Error(t, hook.SendApprovalDelete(author, bob, a))
 }
