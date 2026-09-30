@@ -24,7 +24,8 @@ node_modules
 # DB / Redis のパスワードを持つ。`*.y*ml` は `*.yml.example` にマッチしないので、
 # Dockerfile が COPY する `.config/docker.yml.example` は残る (`config.Load` は
 # 拡張子を見ないので `.yaml` も設定ファイルになりうる。両方拾う)。
-# `.claude` は permission の allowlist で、同じく gitignored な operator-local。
+# `.claude` は permission の allowlist などの operator-local (gitignored)。`rules/` だけは
+# 共有して git で追跡するが (#3248)、Claude Code 向けの文書なので image には要らない。
 .config/*.y*ml
 deploy/uds/config/*.y*ml
 compose.uds.yaml

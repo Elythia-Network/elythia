@@ -62,8 +62,10 @@ tests/queue-bench/results/*.md
 !tests/queue-bench/results/inbound-announce-before.json
 !tests/queue-bench/results/inbound-announce-after.json
 
-# Claude Code local state
-.claude/
+# Claude Code local state。rules/ だけは共有する (#3248)。
+# `.claude/` と書くとディレクトリごと除外され、中の再包含が効かないので `/*` にする
+.claude/*
+!.claude/rules/
 # 運営者の環境に固有のルール (#3248)。Claude Code は CLAUDE.md の後に自動で読む
 CLAUDE.local.md
 __pycache__/
