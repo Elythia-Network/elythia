@@ -80,10 +80,10 @@ func (h *Handler) EmojiFetchRemoteMeta(c echo.Context) error {
 	if h.remoteEmojiMetaFetcher == nil {
 		// **id 等は返す。** frontend は id が無いとモーダルを描けず、取り込みも
 		// できない。`ferr` 側と同じ形に揃える。
-		return c.JSON(http.StatusOK, map[string]any{
+		return c.JSON(http.StatusOK, withStoredLicense(map[string]any{
 			"fetched": false, "reason": "error",
 			"emojiId": src.ID, "name": src.Name, "host": *src.Host, "originalUrl": src.OriginalURL,
-		})
+		}, src))
 	}
 
 	// software 名は nodeinfo 由来。**未知なら叩かない** — per-name endpoint を
@@ -113,10 +113,10 @@ func (h *Handler) EmojiFetchRemoteMeta(c echo.Context) error {
 			slog.WarnContext(c.Request().Context(), "emoji fetch-remote-meta failed",
 				"host", *src.Host, "name", src.Name, "software", software, "err", ferr)
 		}
-		return c.JSON(http.StatusOK, map[string]any{
+		return c.JSON(http.StatusOK, withStoredLicense(map[string]any{
 			"fetched": false, "reason": reason,
 			"emojiId": src.ID, "name": src.Name, "host": *src.Host, "originalUrl": src.OriginalURL,
-		})
+		}, src))
 	}
 
 	// **取れなかった項目はキーごと出さない。** 空文字を返すと、frontend が
@@ -138,9 +138,26 @@ func (h *Handler) EmojiFetchRemoteMeta(c echo.Context) error {
 	}
 	if meta.License != nil {
 		out["license"] = *meta.License
+	} else {
+		withStoredLicense(out, src)
 	}
 	if meta.IsSensitive != nil {
 		out["isSensitive"] = *meta.IsSensitive
 	}
 	return c.JSON(http.StatusOK, out)
+}
+
+// withStoredLicense fills `license` from the stored remote emoji when the
+// response does not carry one from the origin's REST API (#3246).
+//
+// ライセンスは連合 (`_misskey_license`) で既に入っている唯一の項目。frontend は
+// 応答の `license` でダイアログを初期化し、編集していなくても `admin/emoji/copy` へ
+// 上書きとして送るので、ここで返さないと相手の API から取れなかったとき (失敗・
+// 非対応・相手が持っていない) に元のライセンスが空で上書きされる。空の値は
+// 「取れなかった項目のキーは出さない」規則に合わせて出さない。
+func withStoredLicense(out map[string]any, src *model.Emoji) map[string]any {
+	if src.License != nil && *src.License != "" {
+		out["license"] = *src.License
+	}
+	return out
 }
