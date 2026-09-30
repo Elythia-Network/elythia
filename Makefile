@@ -268,7 +268,7 @@ endif
 # **`$(shell ...)` は使わない。** make の parse 時に必ず走るので、target と
 # 無関係な `make help` でも git を呼ぶことになるうえ、`gaterun-check` が
 # 「この Makefile に `$(shell …)` が無いので `make -pn` に副作用が無い」という
-# 前提で回っている (CLAUDE.md 2026-09-06)。recipe 内の `$$(...)` なら展開は
+# 前提で回っている (docs/gates.md の 2026-09-06 の経緯、gaterun-check)。recipe 内の `$$(...)` なら展開は
 # 実行時だけで、`make -n` では表示されるだけになる。
 #
 # git が無い / リポジトリ外でビルドした場合は空のまま。読む側が「不明」として

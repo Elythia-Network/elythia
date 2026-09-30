@@ -17,7 +17,7 @@ import (
 // ipSearchDB は検索テスト専用の兄弟 schema。
 //
 // **`HasAnyHistory` がテーブル全体の絶対的な事実を返す**ので、同じパッケージの
-// 他テストが残した `user_ip` の行が混ざると期待値が成立しない (CLAUDE.md
+// 他テストが残した `user_ip` の行が混ざると期待値が成立しない (docs/testing.md
 // 「DB を使うテストの分離」)。専用 schema を一度だけ作って使い回す。
 var (
 	ipSearchDB    *gorm.DB

@@ -18,7 +18,7 @@ import (
 // **shared な schema では書けない。** 集計はインスタンス全体の**絶対値**を返すので、
 // 同じパッケージの他テストが残した drive_file / user / emoji の行が混ざると期待値が
 // 成立しない。かといって shared schema で `DELETE FROM "drive_file"` をすると、行の
-// 残り方に依存している他テストを壊す (CLAUDE.md「DB を使うテストの分離」の双方向
+// 残り方に依存している他テストを壊す (docs/testing.md「DB を使うテストの分離」の双方向
 // 干渉そのもの)。専用 schema を一度だけ作って使い回す。
 var (
 	usageDB     *gorm.DB

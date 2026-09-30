@@ -83,7 +83,7 @@ var emojiMutationDirs = []string{
 //
 // **`seen > 0` では足りない。** `emojiMutatingMethods` から 1 つ抜いても他の
 // メソッドで件数は残るので、検査が静かに狭まったまま緑になる (実測)。
-// CLAUDE.md の secretfield gate が `mustDetectSecretFields` で塞いだのと同じ形。
+// docs/gates.md の secretfield-check が `mustDetectSecretFields` で塞いだのと同じ形。
 //
 // **選び方**: 変更メソッド 5 つと対象ディレクトリ 2 つを、それぞれ「抜けたら
 // どれかが検出されなくなる」ように 1 つずつ覆う。全件を並べると正当な endpoint

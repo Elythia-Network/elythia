@@ -107,7 +107,7 @@ var matchQueryKey = regexp.MustCompile(`matchQuery\(\[[^\]]*?'([A-Za-z0-9_]+)'\s
 //
 // **コメントアウトした XFolder は数えない。** 生テキストを走査すると
 // `<!-- 一時的に無効化 -->` で囲んだフォームを実在扱いしてしまい、管理画面から
-// 消えているのにゲートが緑になる。CLAUDE.md 2026-08-31 の wiring-check が
+// 消えているのにゲートが緑になる。docs/gates.md の 2026-08-31 の経緯 (wiring-check) が
 // `/* */` で同じ穴を踏んでおり (#2856)、#2701 が記録した事故は
 // 「検証のために一時的に外して戻し忘れる」= まさにこの形。
 func parsePolicyEditorFolderKeys(t *testing.T, path string) []string {
