@@ -351,3 +351,300 @@ PR では回らず schedule で実行されるものが 2 つある。
 - `gofmt`差分 → `make fmt`を実行してから再push
 - テスト失敗 → CIログを読み、ローカルで再現させてから修正する。`--no-verify`等でフックを飛ばさない
 - testcontainersのskip-on-failure起因のflakeがあるため、PRと無関係な失敗は再実行で解消することがある
+
+## 変更の経緯 (旧 CLAUDE.md の更新記録)
+
+CLAUDE.md の「更新記録」に書かれていた本文を、#3248 でここへ移した。**記述は当時のまま**で、文中の「Section N」は当時の CLAUDE.md の節を指す。新しいものが上。
+
+- **2026-09-23**: mkq を v1.0.8 → **v1.1.1** に更新 (BullMQ 6 へ移行。upstream 2026.9.0 の
+  bullmq 6.3.2 と wire が揃う)。**2026-09-22 の SA1019 entry にある「Redis は呼び出し側で
+  Start / Stop を入れ替えない」は go-redis v9.21.0 で逆になった** (redis/go-redis#3751)。
+  依存の連鎖で go-redis が 9.18 → 9.22 に上がり、`ZRangeArgs` の `Rev` + `ByLex` で
+  go-redis が並べ替えなくなったため、アンテナのタイムラインが実 Redis で空を返した
+  (`TestNotes_*` が検出)。現在は**呼び出し側で `Rev` のとき Start に大きい方を置く**。
+  **pause は BullMQ 6 でフラグだけになり、ジョブは `wait` に残る** — pause 中も
+  `Pending` に backlog が見える。オートスケーラはその深さで worker を増やしていたので、
+  #3166 で `PendingCount` を `DispatchableCount` (pause 中は 0) に改めた。
+- **2026-09-23**: Go を 1.26.6 → **1.27.1** に更新。Section 1 の技術スタック表と Section 8 の
+  floating tag の例を合わせた。**`go.work` は生成物なので `make plugins` で作り直す** —
+  作り直さないと `go.work` の `go 1.26.6` で toolchain が選ばれ (`go version` が 1.26.6 の
+  まま)、ビルドが `requires go >= 1.27.1` で落ちる。あわせて `make golangci-lint` の
+  toolchain を go.mod の版に固定した — `go run golangci-lint@v2.13.2` は golangci-lint 自身の
+  `go 1.26.0` を基準に選ぶので、手元の go が古いと go1.26 でビルドされて lint を拒否する。
+  **CI で 2 つ落ちた (手元の `make check` は緑だった)。** (a) **gofmt の整形結果が変わった**
+  (コメントの桁揃え) のに、`make fmt` は PATH の gofmt (1.26) を使っていて気付けなかった。
+  `go env GOROOT` の gofmt を使うよう直した。しかも 1.27 の `gofmt -d` は差分があると
+  exit 1 を返すので、CI の Format check は `bash -e` で**差分を 1 行も出さずに**落ちていた。
+  (b) **カバレッジのブロックが細かく数えられる**ようになり、`tools/pluginbuild` が
+  90.8% → 88.6% に落ちた (文の総数 163 → 184。テストされない `main` の重みが増えた)。
+  フラグの解析を `parseArgs` に切り出してテストした。
+- **2026-09-22**: legacy の **asynq driver を削除**し、mkq を唯一の queue driver にした
+  (#2985)。Section 1 の技術スタック表と Section 2 のツリーを実態に合わせてある。
+  **既定が mkq になってから 4 か月以上、本番で asynq へ戻す判断は一度も要らなかった**
+  (既定の切り替えは #631、2026-05-02。`gh pr view 631 --json mergedAt` で実測)。残して
+  いたぶんだけ実装と doc が二重になり、`internal/queue/driver/option.go` だけで asynq に
+  言及する行が **10** あった (数え方: 削除前の同ファイルで `grep -c asynq`)。うち
+  「silent no-op」「対応 API なし」と書いてあるのは **6 行**で、残りは既定値の違い
+  (`asynq defaults to 25`) や意味の違い (`MaxRetry=0` の解釈) の注記。
+  **`jobQueueDriver: asynq` は起動エラーにする。** 既定が mkq の状態で明示して asynq を
+  選んでいた運用は意図的なので、黙って mkq で起動すると **driver が入れ替わったことに
+  気付けない** (予約投稿の可否もレート上限の効き方も変わる)。typo (`mkqq`) とは文面を
+  分ける — operator が取るべき行動が違うため、asynq だけ「削除済み。mkq にするか行を
+  消せば既定」と案内する。**移行は片道なので、その旨もメッセージに書く** —
+  asynq の未処理ジョブは `asynq:{<queue>}:*` に残り mkq (`bull:*`) からは見えないので、
+  切り替え前に**旧ビルドで捌ききる**しかない。新ビルドは起動を拒むので、後から捌く
+  手段が無い。
+  **消える能力差は 2 つ。** `SupportsScheduledNote` (= asynq では予約投稿を
+  `TOO_MANY_SCHEDULED_NOTES` で門前払いしていた、#1045 Phase 2-C) と、
+  `startAutoScale` の `ErrResizeNotSupported` 起動エラー判定。
+  **前者を消すと `notes/drafts/update` から `TOO_MANY_SCHEDULED_NOTES` の唯一の出口が
+  消える。** upstream (`NoteDraftService.update`) は「未予約 → 予約」に切り替わるとき
+  `scheduledNoteLimit` を見るが、mk-go の update は**元からその gate を持っていない**
+  (create 側は持つ)。既定 mkq では capability gate が常に false だったので発火していた
+  わけでもなく回帰ではないが、コードが消えると乖離が見えなくなるので
+  `docs/divergence.md` に記録した。`errorid-check` は emission しか見ないので落ちない。
+  **後者は「残す」と書きかけて、裏取りで誤りだと分かった。** 初稿は「mkqdriver も
+  `Server.Start` 前は同じエラーを返すので、配線順を守る guard として生きている」と
+  書いたが、**本番配線では一度も発火しない**。`d.dServer` を代入するのは
+  `Driver.Server()` で (`Start()` ではない)、`newServer` は構築時に
+  `queue.NewServer(queueDriver)` = `d.Server()` を呼ぶ。だから `Driver.Resize` は常に
+  `Server.Resize` へ委譲し、pool 未作成時に返るのは `ErrResizeNotSupported` ではなく
+  `mkqdriver: Resize: unknown queue "deliver"` で、guard の `errors.Is` に当たらない。
+  **述語を `err != nil` に広げる案も採れない** — `TestStartAutoScale_InitialResizeFailureDoesNotPreventStart`
+  が「一時的な Resize 失敗で起動を止めない」を固定している (Redis の瞬断で起動不能に
+  なる)。**この誤りは敵対的レビューが実測で見つけた。** 「コードを読んだ」で済ませて
+  4 箇所へ書き写すところだった。
+  **`driver.ErrResizeNotSupported` 自体は残る** — `Driver.Server()` を一度も呼んで
+  いない driver が `Resize` された場合の sentinel で、`mkqdriver` 自身のテストが
+  固定している (`TestDriver_Resize_BeforeStartReturnsNotSupported`)。
+  **テストの移植で 1 群、driver 固有の前提に依存していたものが出た。** `internal/queue` の
+  `TestClient_Enqueue*_ClosedClientFails` 4 本は `queue.Client.Close()` 後の enqueue が
+  失敗することを見ていた。asynq では `Client.Close` が実接続を閉じるので意味があったが、
+  **mkq の `Client.Close` は no-op** (接続は driver が持つ) なので、そのまま移すと落ちる。
+  閉じる対象を driver に直して `*_ClosedDriverFails` にした (実測: 元の形に戻すと 4 本とも
+  「エラーが返らない」で落ちる)。**「空虚」ではない** — このリポジトリで空虚と呼ぶのは
+  「壊しても通る」ほうで、これは「driver を替えると落ちる」形だった。
+  attempts の検証も移し替えが要った — **mkq driver は `TaskSummary.MaxRetry` を埋めない**
+  ので、BullMQ の `opts.attempts` を読む形にしてある (変異検証: `mkqdriver/option.go` の
+  `WithAttempts(o.MaxRetry+1)` を `WithAttempts(o.MaxRetry)` にして
+  `go test ./internal/queue/...` を回すと **7 本**落ちる。移植した 6 本と、
+  mkqdriver 側で元からある `TestEnqueue_MaxRetryAppliedToBullMQHash`)。
+  **`go.mod` は `hibiken/asynq` と `golang.org/x/time` の 2 つを外す。** 後者は
+  asynqdriver の rate limiter でしか直接使っていなかった。ただし **消しきれない** —
+  `echo/v4/middleware` が要るので `// indirect` へ移す (`go mod tidy` はこのリポジトリでは
+  使えないので手で動かし、`GOWORK=off go build ./...` で充足を確認した。**手元は
+  `cmd/misskey/plugins_generated.go` が private plugin を import するので、退避してから
+  でないと go.sum の検証にならない**)。
+  **queue-bench は 2-way (TS ↔ mkq) にした。** 実測表は当時測った値の記録なので残し、
+  「#2985 より前の表には asynq 行がある」と注記した。
+  **`docs/design/*` は注記だけ足す。** 設計時点の見積もり (`Phase 7 (数ヶ月後)`)、Phase 表の
+  見積もり列、実測値は触らない。現在形で書かれていて嘘になった段落 (auto-scale ADR §5.2、
+  mkq-design の Status) にだけ「#2985 で削除済み」を添えた。
+  **射程外**: 実測値と設計判断そのもの (この更新記録の過去 entry、`docs/update/*`、
+  `tests/queue-bench/results/*`、`docs/design/*` の数値と見積もり) は書き換えない。
+- **2026-09-22**: `echo` の `LoggerWithConfig` を `RequestLoggerWithConfig` へ移行し、
+  **`SA1019` の抑制をゼロにした**。同日の SA1019 entry で「移行しない」と判断した唯一の
+  1 件で、そのときの理由は「redact の配線を固定するテストが無く、壊しても誰も気付けない」
+  だった。**テストを足した時点でその理由は消えていた**ので移した。
+  **出力は完全に同じ。** 旧実装と新実装を同一プロセスで並べて実測し、
+  `2026-09-22T17:50:40+09:00 GET /api/notes/timeline?i=REDACTED&limit=10 200 757ns` の形式が
+  一致することを確認した (差はレイテンシの実測値だけ)。**時刻は `v.StartTime` ではなく
+  `time.Now()`** — 旧 `${time_rfc3339}` が書き込み時点を出していたので合わせた
+  (`StartTime` はリクエスト開始時刻で値がずれる)。
+  **`RequestLoggerConfig` は `Output` を持たない。** `LogValuesFunc` の中で自分で書くので、
+  テストと共有するには writer を引数で渡す形になる (`gzipConfig` の「設定を返す」形とは
+  少し違う)。
+  **`HandleError: true` が要る。** 既定 (false) だと `c.Error(err)` が呼ばれず `res.Status` が
+  更新されないので、handler が素の error を返したときに**クライアントには 500 を返しながら
+  ログには 200 と書く**。旧実装は `c.Error(err)` を先に呼んでから status を読んでいた
+  (レビューの実測で 17 ケース中 4 ケースが食い違い、これを立てると 17/17 一致)。
+  **エラーを上位へ返さないようにラップする。** 旧 `LoggerWithConfig` は名前付き戻り値が
+  後続の代入で上書きされる副作用で handler のエラーを飲んでいた。素直に移すと
+  `return err` するので、**外側の Sentry middleware が 404 / 405 まで capture し始める** —
+  未認証で誰でも叩ける経路なので、存在しないパスへ POST を投げるだけで quota を焼ける
+  (`sampleRate` の既定は 1.0)。**この副作用は最初のコミットで見落としており、レビューが
+  実測で見つけた。** 旧挙動に揃えて握ってある。飲むこと自体の是非は別で、直すなら
+  Sentry 側を「5xx だけ capture」にするのが筋。
+  **色は元から一度も出ていなかった。** 旧実装は `${status}` を gommon/color 経由で出すが、
+  production は `Output` を設定していないので `SetOutput(nil)` が呼ばれる。gommon は
+  `*os.File` でない時点で `disabled = true` にして**二度と戻さない**ため、TTY でも色は
+  付かなかった (レビューが実 PTY で実測)。**初稿は「TTY のときの色が無くなる」「差が出るのは
+  `make dev` のときだけ」と書いたが、どちらも裏取りせずに書いた誤り。**
+  **これで `//nolint:staticcheck` は 2 件** (SA9010 / SA1012) になり、どちらも
+  今回有効化した 4 check とは無関係になった。
+- **2026-09-22**: `unused` を有効化し、**段階的な無効化を解消した**。恒久的に無効なのは
+  `QF*` と `S1016` だけになった。削除したのは 20 件で、**19 件はテスト側の未使用 stub**
+  (`stubFedCache` とその 4 メソッド、`failingListByUserRepo`、`test/e2e/helpers_test.go` の
+  ヘルパー 4 つなど。書いたが使わなかったもの)。
+  **本番は 1 件だけで、それは「呼ばれるべきなのに呼ばれていない」バグではなかった。**
+  `reaction.Service.normalizeReaction` は `resolveReaction` の戻り値を 1 つに削った薄い
+  ラッパーで、呼び出し側が実体を直接呼ぶようになった後の残骸。**正規化そのものは現役**
+  (`Create` が `resolveReaction` を呼ぶ) なので、消しても挙動は変わらない。
+  **消すと doc の参照が切れる。** `normalizeReaction` は**振る舞いの説明の根拠**として
+  9 箇所から名指しされていた (数え方: 宣言行と自身の doc 冒頭を除いた `normalizeReaction` の
+  語境界一致)。8 箇所は `entity/emoji_resolver.go` の「local 絵文字を `:name@.:` 形式で
+  永続化する」や `server/emoji_redirect.go` の同旨で機械置換でき、9 件目の `resolveReaction`
+  自身の doc (「shared core of normalizeReaction」) だけ書き換えが要った。参照を `resolveReaction` へ
+  付け替え、**消える doc に書かれていた正規化の規則 (空文字列 → heart、レガシー → Unicode、
+  カスタム絵文字の `:name@.:` 化、actorHost へのフォールバック #459) は `resolveReaction` の
+  doc へ移した** — 関数を消すときに一緒に消えると、仕様がコードのどこにも残らない。
+  **`run.tests` は既定のまま**にしてある。`tests: false` にすると「テストからしか使われない
+  もの」まで未使用と出る (数え方: `run: tests: false` を足して `make golangci-lint`。**この
+  entry の削除後で 10 件** — 削除前は 11 件で、11 件目が消した `normalizeReaction` 自身だった)。
+  **射程外**: `QF*` / `S1016` (恒久)、別 module の `plugins/`。
+- **2026-09-22**: `SA1019` (非推奨 API) を有効化。10 件のうち **9 件を移行し、1 件だけ
+  `//nolint` で抑えた**。段階的に残っていた `unused` も同日に有効化した (下の entry)。
+  **`go/parser.ParseDir` (5 件) は非推奨の理由がこちらの要件に合う。** 「build tag を見ないので
+  package とファイルの対応が不正確」というのが非推奨の理由だが、ゲートは**ディレクトリ内の
+  .go を全部見たい**ので、その不正確さがむしろ望ましい。代替として案内される
+  `golang.org/x/tools/go/packages` は `go list` を起動するぶん重く、package 単位で解決するので
+  ディレクトリを直接列挙したいここには合わない。**「型チェックまで走るので読めなくなる」は
+  誤り** — 型チェックは `NeedTypes` を渡したときだけ走り、走らせても AST は返る (初稿はそう
+  書いてレビューに実測で否定された)。`os.ReadDir` +
+  `parser.ParseFile` に置き換えた (`internal/entitycompat` は 2 箇所あるので
+  `parseNonTestGoFiles` に寄せた)。
+  **Redis は呼び出し側で Start / Stop を入れ替えない。** `ZRangeByLex` /
+  `ZRevRangeByLex` は Redis 6.2 で非推奨なので `ZRangeArgs` へ移したが、**`Rev` +
+  `ByLex` のときは go-redis の `appendArgs` が `Stop, Start` の順に並べ替える**
+  (`sortedset_commands.go`)。Redis の `ZRANGE ... REV` が `start > stop` を要求するのに
+  合わせる処理で、呼び出し側は常に「小さい方が Start」で渡す。**入れ替えると範囲が空になる**
+  (実測: 入れ替える変異で `TestNotes_Paging*` が落ちる)。
+  **`ReverseProxy.Director` -> `Rewrite` で 3 つ変わる。** (a) `SetURL` は宛先へ向けるだけで
+  なく **`Out.Host` を空にして `Out.URL.Host` を Host ヘッダにする**ので、`Director` 版の
+  `req.Host = remote.Host` に相当する代入は要らない — **最初それを書いたが、変異検証で
+  「消しても落ちない」= 冗長だと分かって外した**。(b) **`Rewrite` は X-Forwarded-* を
+  落としてから呼ばれる**ので、`NewSingleHostReverseProxy` が `ServeHTTP` で自動付与していた
+  `X-Forwarded-For` が消える。`SetXForwarded()` で付け直すが、**等価ではない** —
+  `Director` 版は client 由来の値へ追記していたのに対し、あちらは自分が観測した RemoteAddr で
+  置き換える (stdlib の doc が「追記したければ呼ぶ前に inbound からコピーしろ」と明示)。
+  詐称された chain を流さない方向なので、この挙動で固定した。(c) **`Rewrite` 側は
+  `cleanQueryParams` が無条件に走る**ので、`;` や不正な `%` を含む query は該当 param が
+  落ちる (通常の Vite クエリでは無変化。レビューが実測)。
+  `newViteProxy` にはテストが 1 つも無かったので 2 本足した。変異は 5 形で、4 形が検出・
+  1 形 (`r.Out.Host = remote.Host` を足す) は意図どおり非検出 = 冗長の裏取り。
+  **`echo` の `LoggerWithConfig` だけ移行しない** (**同日に移行した**。上の entry)。移行先の
+  `RequestLoggerWithConfig` には
+  **`CustomTagFunc` に相当するものが無い** (フィールドを全列挙して確認)。現在の設定は
+  `${uri}` をそのまま出すと `?i=<token>` が残るのを避けるために `${custom}` + `redact.URI`
+  を使っており、`LogValuesFunc` で書き直すと**間違えたときに有効な credential が
+  アクセスログに残る**。**「出力形式が構造化に変わる」は誤り** — あちらでも
+  `LogValuesFunc` の中で同じテキスト行を組み立てられる (初稿はそう書いてレビューに
+  実測で否定された)。本当の理由は**この配線を固定するテストが 1 つも無かった**こと
+  (`grep CustomTagFunc --include=*_test.go` が 0 件) で、移行時に壊しても誰も気付けない
+  状態だった。`accessLogConfig()` に切り出して `TestAccessLogConfig_RedactsToken` で
+  出力そのものを見るようにしたうえで、移行自体は単独の変更として扱う。
+  `//nolint:staticcheck` に理由を書いて抑えた (外すと 1 件出ることを実測)。**`//nolint` は
+  行末に置く** — 独立行に置くと `e.Use(...)` の 10 行全体が死角になり、**まさに守りたい
+  redact のコードが検査されなくなる** (実測: `CustomTagFunc` の中に SA1019 を仕込んでも 0 件。
+  レビューで指摘され、行末へ移して 1 件出ることを確認した)。
+  **射程外**: `QF*` / `S1016` (恒久。`unused` は同日に有効化した)。
+  **`echo` の `LoggerWithConfig` も同日に移行した** (上の entry)。
+- **2026-09-22**: `ST1003` (命名) と `ST1012` (error var 名) を有効化。**名前を変えても wire と
+  DB は動かない** — `model.Meta` の `SMTP*` は gorm / json タグを持ち、`config.Config` は
+  JSON 化される経路が無く (`config_dump.go` はキーを文字列リテラルで書く)、
+  `PolicyCanSearchIPHistory` は定数「名」で値 `canSearchIpHistory` は据え置き。
+  **裏取りは `secretfield-check`** — allowlist を `Meta.SMTPPass` へ追従させ、`make gates` が
+  通ることで確かめた (旧名へ戻す変異で `TestModelSecretFieldsAreNotSerialized` が落ちる)。
+  **`shapecheck` は根拠にならない** — あちらは `internal/entity` の DTO しか reflect しないので、
+  `model.Meta` の gorm / json タグを壊しても緑のまま通る (レビューが実測)。初稿はこれを
+  根拠として書いており、**空虚な確認を doc に固定するところだった**。
+  **`driver.SkipRetry` -> `ErrSkipRetry` は公開 API の変更ではない** — `internal/queue/driver` は
+  `internal/` 配下なのでプラグインから import できない。ただし **`asynq.SkipRetry` (7 箇所) は
+  外部パッケージの同名**なので触らない。一時プレースホルダへ退避してから置換した。
+  **word boundary だけでは型と変数を区別できない。** `assertAnError` を一括置換したところ、
+  **`type assertAnError struct{}` (error を実装する型) を宣言する 3 ファイルと、それを使う
+  1 ファイル、計 10 箇所まで巻き込んだ** — ST1012 が指摘したのは `internal/api/reversi` の
+  var 1 件だけで、型は対象外。**リネーム前に「その名前が何として宣言されているか」を
+  確認すること。** 置換は散文にも当たる (`non-SkipRetry` が `non-ErrSkipRetry` になった)。
+  **`test/e2e_federation` のパッケージ名だけ除外した。** ST1003 が指摘するのはパッケージ名で
+  ディレクトリ名ではないが、Go の慣習では揃える。ディレクトリ名まで変えると `internal/` の
+  実コード 2 ファイルを含む 24 箇所に波及するうえ (数え方:
+  `git grep -oI e2e_federation -- '*.go' | wc -l`。**code だけで数える** — doc を含めると、
+  この数字に言及した doc 自身が数を変えてしまう。実際、初稿は doc 込みの値を書いて次の
+  コミットで陳腐化させた)、外部から import されないテスト専用
+  パッケージなので実益が無い。**CI のカバレッジ閾値は ImportPath の `/e2e` で判定する**
+  (`ci.yml` の `pkg ~ /\/e2e/` で unanchored な部分一致) ので、**名前が `e2e` で始まる限り**
+  0% 例外は維持される — `federatione2e` のように後ろへ回すと外れて 90% になる (実測)。
+  実測は ST1012 が 4 種 301 箇所 (`stubError` 112 / `SkipRetry` 182 / `stubReactionError` 3 /
+  `assertAnError` 4。数え方: develop で `git grep -oIw <名前> -- '*.go' | wc -l` を足し、
+  温存した `asynq.SkipRetry` 7 と戻した `assertAnError` 10 を引く) + 死んだアンカー行 1 の削除 (`var _ error = errors.New("compile-time
+  anchor for errors import")`。`errors` は同ファイルの他 2 箇所で使われており不要だった)、
+  ST1003 が 21 種 189 箇所。
+  **新しい名前が既に在るかも先に測る。** `errStub` は `internal/api/invite` に元から
+  あった (今回の対象 10 パッケージに含まれないので衝突しなかっただけ)。同一パッケージ
+  だと再宣言でビルドが落ち、別パッケージだと黙って似た名前が増える。
+  **`config.Config` は tag を 1 つも持たない**ので、marshal した瞬間に Go のフィールド名が
+  wire になり秘密も一緒に出る。今は到達する経路が無いことを実測 (`MarshalJSON` に panic を
+  仕込んで全テストを回しても発火しない) で確かめたが、**担保はコメントだけ**なので型宣言の
+  直上にその旨を書いた。ゲート化は別途。
+  **射程外**: `QF*` / `S1016` (恒久。`SA1019` と `unused` は同日に有効化した)、
+  `test/e2e_federation` のパッケージ名、`config.Config` を marshal させないゲート。
+- **2026-09-22**: `lint` job に `golangci-lint` を追加。`make help` の target は 138 → 139。
+  **自分のコードを見る Go の静的解析が `go vet` だけだった。** `go vet` は「明らかに壊れて
+  いるもの」しか見ないので、`errcheck` / `staticcheck` / `ineffassign` が拾う層が空いていた。
+  **`staticcheck.checks` は golangci-lint の既定を置き換える。** 既定は
+  `[all, -ST1000, -ST1003, -ST1016, -ST1020, -ST1021, -ST1022]` なので、`[all, ...]` と
+  書くとそこに入っていた 6 つが**黙って有効になる** (ST1016 だけを意図的に残し、残り
+  5 つを書き戻してある)。初版はそれに気付かず、`comments`
+  プリセットで 369 件を抑止しながら設定側で ON にする、という循環になっていた
+  (敵対的レビューで実測された)。既定の無効化も明示的に書き出して意図を 1 箇所へ。
+  `ST1016` (レシーバ名の統一) だけは**意図的に有効**にしてある (実際に 2 件見つけて直した)。
+  **除外プリセットは `std-error-handling` だけを入れる。** 残り 3 つは実測で無意味か有害:
+  `common-false-positives` は中身が全部 gosec 向けで、gosec を有効にしていないので 100% 死んで
+  いる。`legacy` は 4 つのうち 2 つが gosec、残りは govet の unsafe.Pointer 誤用と SA4011 で、
+  **本物の指摘を消す方向にしか働かない**。`comments` は上の明示的無効化で不要になった。
+  `std-error-handling` が落とすのは `Close` / `Flush` / `print` / `os.Remove` 等だけで、
+  **DB 書き込みやパースの戻り値には当たらない** (ルール定義を直読して確認)。
+  **既定の打ち切りを外す (`max-issues-per-linter: 0` / `max-same-issues: 0`)。** 同一メッセージ
+  3 件・linter あたり 50 件で**切り詰める** (0 件にするわけではないので赤が緑になることはない)。
+  害は「直すたびに隠れていた分が出てくる」ことで、**全部直してから有効化するという運用が
+  成立しない**。実際これに気付かず測定を 3 回やり直した。**同日の CodeQL entry が射程外に
+  挙げた「130 件」もこの打ち切りが効いた値** — errcheck がちょうど 50 (= linter あたりの
+  既定上限) なのがその印。
+  **`make check` も required check に揃える。** `fmt` / `lint` / `test` だけだと、`lint` job が
+  回す actionlint と golangci-lint が手元で一度も走らない (レビューで指摘)。
+  **段階的に有効化する。** 現行設定 (本番 / テスト) での実測は `ST1003` 34 件 (16 / 18)、
+  `ST1012` 14 件 (1 / 13)、`SA1019` 10 件 (6 / 4)、`unused` 20 件 (1 / 19)。**`ST1003` /
+  `ST1012` / `SA1019` はこの日のうちに有効化した** (上の 2 entry)。`QF*` 28 件 (25 / 3) と
+  `S1016` は**恒久的に無効** — 前者は好みのリファクタ、後者は「同じ underlying type なら
+  構造体変換にできる」という提案だが位置ベースになるので、**片方の struct だけ並べ替えると
+  コンパイルが通ったまま値が入れ替わる**。
+  **実バグは 1 件も出なかった。** 疑わしい 4 code (5 箇所) を追ったが、`SA9010` と `SA1012` は誤検知
+  (副作用目的の呼び出し / nil 安全性を確かめるテストそのもの)、`SA4004` と `SA4010` は
+  死んだ構造と死んだ収集だった。**これはバグ発見ではなくハイジーンの整備。**
+  **機械的な一括置換は壊れる。** 規則でまとめて処理したあと全テストを回して **2 件の実害**が
+  出た — `TestUserList_MissingListID` は `Init` の**失敗が仕様**なのに `require.NoError` で
+  包んでしまい、`TestAddContext_IndependentSlices` は足したアサーションが**恒真**だった
+  (`len(append(s,x)) == len(s)+1`)。**どちらも `go vet` では捕まらず、テスト実行と変異検証で
+  初めて出た。** 後者はレビューの代替案 (`assert.NotContains`) も不十分で、`append` は相手の
+  長さより後ろへ書くので backing array を共有していても見えない (実測で変異が素通り)。
+  既存要素の書き換えで直接見る形に直し、変異検証に合格させた。
+  **`typecheck` が落ちると他の linter が全部黙る。** 自前プラグインを入れている手元では
+  `cmd/misskey/plugins_generated.go` が private module を import するので `GOWORK=off` だと
+  そうなる (実測で無関係なパッケージの指摘が消えた)。`make golangci-lint` は生成物を退避して
+  戻す (trap 付き。**`cp -p` にしないと** mktemp の 0600 を引き継いで mode が 644 → 600 になる)。
+  **`go.work` が変えるのは解析対象ではなく build list。** `./...` は module 境界を越えないので
+  workspace があっても `plugins/` は lint されない (実測で package 数 207 が一致) が、
+  **依存の選択版は変わる** — workspace 内の module の require が MVS に参加するため
+  (実測で `golang.org/x/telemetry` が 2025-10-08 → 2026-07-08)。CI は go.work を持たないので、
+  `GOWORK=off` を外すと手元だけ別版を解析することになる。
+  **`make lint` (go vet) は golangci-lint の govet にほぼ包含される** — `go tool vet` の
+  35 analyzer は全て golangci-lint v2.13.2 の既定に含まれ、差は `inline` 1 つ (golangci 側のみ)。
+  同じ解析を 2 回回しているが、CI の `Vet` step と 1:1 に対応させるため残してある。
+  **射程外**: `QF*` / `S1016` (恒久。`ST1003` / `ST1012` / `SA1019` / `unused` は同日に
+  有効化した)、
+  別 module の `plugins/`。**`make check` と `lint` job のドリフトを止めるゲートは置いていない**
+  (#2841 の `testflags-check` に相当するもの)。`make check` が回すのは `lint` job の静的検査 4 つで、
+  `Check duplicate test fixture IDs` と `build` job (`go build ./...` / `make plugin-vet`) は含まない。
+- **2026-09-09**: `make frontend-check` に eslint を追加し、`make frontend-lint` を新設 (#2906)。`make help` の target は 127 → 128。**手元で CI と同じ検査ができていなかった** — `frontend-check` は `vue-tsc` と submodule ゲートだけで、eslint は CI の**別 step** (`pnpm eslint`) だった。#2903 で実際に踏んでいる (デッドコードを消したときの空行 2 連続が `@stylistic/no-multiple-empty-lines` で落ちた)。個別ファイルに `npx eslint` を掛けても CI と同じ glob ではないので見落とす。CLAUDE.md 2026-09-05 の #2841 (`make test` と CI の flag がずれていた) と**同じ型**。**引数は書き写さず `package.json` の script を呼ぶ** — 書き写すと #2841 と同じドリフトが起きるので、`npm run --silent eslint` で script を唯一の定義にした (CI は `pnpm eslint` だが手元に pnpm があるとは限らない。既存の `frontend-check` / `frontend-test` も npx を使っている)。**`eslint .` にしないこと** — upstream が lint していない `test/` まで拾い、追従のたびに他人の負債で落ちる。実測 55 秒で、#2903 と同じ違反を入れて `make frontend-check` が exit 2 で落ちることを確認した。**vitest は入れていない** (`make frontend-test`) — CI も別 step で、こちらは #2844 で既に手元の再現手段がある。
+- **2026-09-07**: Section 3 に「更新 (運用)」のコマンドを足し、Makefile に `pull` / `pull-plugins` / `uds-rebuild` / `uds-restart` / `docker-rebuild` / `docker-restart` の 6 target を追加した (#2885)。`make help` の target は 120 → 126。**`docker compose up -d` は再起動を保証しない** — image と設定が変わらなければコンテナを作り直さないが、frontend は bind mount なので frontend だけ更新したときは何も変わらない。mk-go は `DetectClientEntry` で entry を起動時に 1 回だけ解決してキャッシュするので、再起動しないと消えた古いハッシュを配り続ける。**2026-09-07 に本番で 10 分近くこれを踏んだ** — `built` の最終書き込みが 13:02:52、mk-go の再起動が 13:12:36 で **9 分 44 秒**。`build.ts` は出力先を rm してから作るので、ビルド開始からの実際の窓はさらに長い。mk-go は 05:17 起動のままだった。Makefile と `docs/deployment.md` には「再ビルドと再起動は必ずセット」という原則が元からあったが、**そのセットを `up -d` が実現できていなかった** — 宣言した不変条件を、実行するコマンドが満たしていない型。
+  検証は `deploy/check-frontend-entry.sh` が持つ。敵対的レビューで、初版が**この PR が防ぎたい状況で緑を返す**ことが実測で示された (High 2 件)。(a) 公開 URL は Cloudflare の裏なので、直前まで配信していた古いアセットはエッジに残っており、素で叩くと `cf-cache-status: HIT` の 200 が返る (使い捨てクエリを足すと MISS になり、事故当時の entry は 404 と分かる)。(b) index の loader は `CLIENT_ENTRY.replace('scripts', lang)` で**言語ごとのパスへ振り替える**ので、`scripts/` だけ見てもブラウザが読む URL を見ていない。あわせて `sort -u | head -1` は「アルファベット順で最初の `scripts/*.js`」であって CLIENT_ENTRY ではなく、modulepreload が 1 本増えた日に無検証で緑になる形だった。**「CSS では判定できない」の理由も誤っていた** — `emptyOutDir: false` で古いファイルが残るからではなく、`build.ts` が毎回 `built/_frontend_vite_` を消したうえで**内容ハッシュが同じものは同じ名前で作り直す**ため。理由を取り違えると「CSS だけ内容が変わればその名前だけ変わる」という取り逃がしに気付けないので、現在は entry (全言語) と stylesheet の両方を見る。
+  **`DOCKER_CONFIG` という make 変数を作ってはいけない。** docker CLI が設定ディレクトリとして読む予約名で、make は環境由来の変数を recipe へ export し直すため、operator の環境にそれがあると値を奪って `docker compose` が `unknown command` で死ぬ (実測)。このリポジトリでは `uds-*` を含む docker 系 target が全滅する。初版で踏んだので `ENTRY_CHECK_DOCKER_CONFIG` に改名した。
+  **`docker-*` 系は本番 UDS のホストで叩かない。** `docker-compose.yml` は `name:` を持たないので project 名がディレクトリ名 `mk` になり UDS 本番と同じ project に合流する。`app` / `db` / `redis` が本番の隣に立ち上がり、本番のコンテナは orphan 扱いになる (compose 自身が `--remove-orphans` を勧めてくる)。しかも検証先は `.config/docker.yml` の url なので、**本番を触らないまま緑を返す**。
+  プラグインは `plugins/*/` のうち `.git` を持つ 4 つ (fedwatch / genshin / hsr / nowplaying) が独立リポジトリで、`make update` の `--recurse-submodules` では追従しなかった (`status` / `trustlevel` は本体に tracked なので追従する)。dirty なものは名前を出して skip する — 勝手に stash すると編集中の変更が「消えた」ように見えるうえ、復元手順もどこにも残らない。あわせて `update` が `git pull` の終了ステータスを見ておらず、**pull に失敗しても「変更なし」と表示して exit 0** していたのを直した (本番更新の起点になったので影響範囲が広がっていた)。
+  **`make pull` は submodule の生成物を先に戻す。** `make plugins` (pluginbuild) が `packages/frontend/src/server-plugins.generated.ts` を、`pnpm -r build` の i18n パッケージが `packages/i18n/src/autogen/locale.ts` を書き換える。どちらも submodule 内の **tracked ファイル**なので、一度でもビルドしたワークツリーは常に dirty になる。dirty なまま gitlink が動くと `git pull --recurse-submodules` は checkout に失敗するため、**frontend の再ビルドが要る回 (= submodule bump 回) に限って一括コマンドが必ず止まり、しかも親リポだけ進んだ混在状態で止まる**。そのまま分解実行を続けると新 backend + 旧 frontend が本番に載る。戻すのは**生成物だけ**にしてある — それ以外の変更が残っていれば git 自身が止まるので、frontend に手を入れている最中の作業を黙って捨てない。
+  **検証スクリプトは抽出に失敗したら落とす。** 初版は `LANGS` や stylesheet の書式が変わって正規表現が空振りしても、対象が減るだけで緑を返した (実測: 言語別アセットが全滅していても exit 0)。この PR 自身が引いている「拾えなかったら落とす」に反していたので、`LANGS` が空のとき、および index に `rel="stylesheet"` があるのに href を 1 本も拾えないときは落とすようにした。
+  **片側更新が 2 箇所残っていた。** `README.md` と `docs/upstream-catch-up.md` が事故そのものの手順 (`docker compose up -d` / `up --build -d`) を勧めたままで、しかも README は直下で「再ビルドしたら必ず再起動する」と宣言していた。後者は「submodule の静的アセットを image に焼き込んでいるので `--build` 必須」とも書いていたが、vite frontend は bind-mount で渡しており image に入るのは static-assets / twemoji / fluent-emoji だけ。CLAUDE.md 2026-08-20 の「直したら固有の語で `git grep` する」に該当。
+  **この PR は停止時間を縮めていない。** frontend のビルドは配信中のディレクトリを開始直後に消すので、ビルド開始から再起動完了までは 404 になる (事故当日の実測ではビルドが約 19 秒、再起動していなかった時間が 9 分 44 秒で、**窓のほぼ全部が後者**だった)。塞いだのは「**恒久的に**壊れたまま気付かない」方だけで、無停止にするには別ディレクトリへビルドして差し替える構成が要る。
+- **2026-08-19**: ドキュメント全体監査 (#2637) で見つかった、**手順どおりに実行すると壊れる記述**を修正 (#2638)。(1) `make migrate-down` は `-steps` 未指定で全 down が走っていたので `-steps 1` を付け、ヘルプ・doc の「1 段階」と挙動を一致させた (全段は `go run ./cmd/migrate -direction down` を直接叩く)。(2) **`DATABASE_URL` はどこからも読まれていない** — `cmd/migrate` は `-config` から DSN を組み立てる。Section 9 の該当項目を接続先の説明に置き換えた。(3) Section 4 のテスト準備を実態に合わせた: **testcontainers は Redis 用** (`SetupRedis` は 27 パッケージ、`SetupPostgres` は 3 パッケージ) で、PostgreSQL は外部のものを使う (既定は `localhost:5432` の `misskey_test` / `mk`)。`MustOpenTestDB` は失敗時 panic なので「Docker があれば準備不要」ではない。
+- **2026-08-15**: PostgreSQL を 16 → 18 に統一 (#2513)。compose 全構成・CI service container・testcontainers を `postgres:18-alpine` へ。upstream Misskey の compose 例 (18-alpine) に整合。**postgres:18 image は data layout が変わった** (default PGDATA が `/var/lib/postgresql/18/docker`、VOLUME 宣言が親 `/var/lib/postgresql`) ため、永続 volume を持つ compose のマウント先を `/var/lib/postgresql` へ変更 (旧パスのままだと新規デプロイが匿名 volume に initdb して down で消える。UDS example は明示 PGDATA で回避)。既存の 16 volume は dump→restore が必要 (手順は docs/deployment.md 冒頭)。Section 4 / 8 の版数記述を更新。

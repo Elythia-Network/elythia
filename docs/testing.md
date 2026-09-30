@@ -402,3 +402,61 @@ make dropin-frontend-swap-test     # TS-A → mk-A 切替まで含む end-to-end
 ```
 
 nightly 19:00 UTC で `dropin-frontend-e2e` を実行 (`.github/workflows/dropin-frontend-e2e.yml`)。
+
+## 変更の経緯 (旧 CLAUDE.md の更新記録)
+
+CLAUDE.md の「更新記録」に書かれていた本文を、#3248 でここへ移した。**記述は当時のまま**で、文中の「Section N」は当時の CLAUDE.md の節を指す。新しいものが上。
+
+- **2026-09-22**: migration の **up → down → up 往復テスト**を追加
+  (`internal/repository/migration_roundtrip_test.go`)。**書いた瞬間に本物のバグを 1 件
+  見つけた** — `000001_initial.down.sql` が `DROP TABLE IF EXISTS "schema_migrations"` を
+  持っており、golang-migrate が自分で管理するテーブルを消していた。`Down()` は全 down の
+  あとに `TRUNCATE schema_migrations` を撃つので、**`go run ./cmd/migrate -direction down`
+  (CLAUDE.md Section 3 が全段ロールバックとして案内している手順) は毎回最後に
+  `relation does not exist (SQLSTATE 42P01)` で落ちていた**。`make migrate-down`
+  (`-steps 1`) も version 1 のときは同じ理由で落ちる。**全段 down の後は
+  `schema_migrations` が 1 つだけ空で残る** — Section 3 ほか 6 箇所が「schema が消える」と
+  書いていたが `DROP SCHEMA` は一度も走らないので元から不正確で、「全テーブルが消える」へ
+  直した。
+  **`testutil.ApplyMigrations` では代用できない。** あちらの `findMigrationFiles` は
+  `*.up.sql` しか glob しないので **down を 1 本も実行しない**。加えて up 側も `db.Exec` の
+  エラーを握り潰す (`continue`) ので壊れた SQL でも緑になる。本番の `cmd/migrate` と同じ
+  golang-migrate + pgx5 driver に流す。
+  **down は書いた時点でしか実行されない。** 97 本あって、後から up 側だけ直して対応が
+  崩れても誰も気付けない。壊れているのは**戻したくなった当日**に分かる。
+  **「2 回目の up が通るか」だけでは弱い。** up の 97 本中 96 本は `IF NOT EXISTS` /
+  `EXCEPTION WHEN duplicate_object` で守られているので、**down が取りこぼしても再適用が
+  通ってしまう**。実測 (down を 1 本ずつ空にする ablation) で 2 回目の up が検出できたのは
+  非冪等な `ADD CONSTRAINT` を持つ `000001` だけで、サンプルした他 19 本は緑だった。
+  **down 後に schema の中身 (テーブル / view / sequence / enum) が空であることを直接
+  アサートする**形にして射程を広げてある — これで `000050` / `000075` を空にする変異も
+  検出するようになった (実測)。
+  **専用の兄弟 schema を使い、毎回作り直す。** `internal/repository` の schema でやると
+  down が他のテストの前提を消す (#2450)。**作り直しが要るのは、途中で落ちたときに残骸が
+  残って次の実行が別の理由で落ちるから** — 診断が事実と無関係になる (変異検証で実際に
+  そうなった)。
+  **変異集合**: down に構文エラー (最後 / 中間) / down を空にする (`000001` / `000050` /
+  `000075` / 全部) / `schema_migrations` の DROP を戻す (= 見つけたバグの再導入) /
+  `m.Up()` を消す / `m.Down()` を消す / 2 回目の `m.Up()` を消す / `DROP SCHEMA` を消す
+  (前の実行が途中で失敗している状態で落ちる)。**`000097` を空にする変異は検出しない** —
+  あれは down が元から `-- no-op.` (データ修正の migration) なので、空にしても事実として
+  何も変わらない。**`v1 == v2` と `dirty == false` はアサーションにしても恒真**だったので
+  (実測で変異が素通りした)、version は `migration/` の最大連番と突き合わせる形に替えた。
+  **射程外**: TypeORM 台帳を落とす `000029_db_compat_misskey.down.sql` の
+  `DROP TABLE IF EXISTS "migrations"` — 同じクラスのバグだが、up が
+  `CREATE TABLE IF NOT EXISTS "migrations"` を持つので往復では対称になり緑で通る
+  (既知として `docs/migration-from-ts.md` に記載がある)。
+  **`git checkout` で変異を戻さないこと** — 未コミットの修正まで巻き戻す (実際に踏んだ)。
+- **2026-09-05**: `make test` に `-race -count=1` を足し、`-race` 抜きの `make test-fast` を新設 (#2841)。`make help` の target は 116 → 118 (`test-fast` と `testflags-check`。数え方は `^名前:.*##` の行数)。**Section 3 の「115」が古くなった起点は #2828 ではなく #2844** (`frontend-test` の追加で 116。`e1fd1e06` が 115、`f9ec2716` が 116 と実測。#2844 のコミットメッセージ自身が「116 → 117」と誤記していた)。**順序依存は #2795 で seed を揃えて塞いだのに、データ競合は塞げていなかった** — `make test` は `-race` 無しで回るので、手元で緑のまま required check の `test` が落ちる。`fe7ea8f2` (2026-09-03「Fix CI: SendMeasuresEnvelope のテストが -race で落ちる」) で実際に踏んでいる。**実測は 65.0s → 160.5s (2.5 倍)**、`-race` が全 173 パッケージで競合ゼロ (= 揃えるために先に潰す既存の競合は無い) であることも確認した。CI の `test-shards` は 1 shard あたり実測 158-290s (直近 5 run × 4 shard の job 全体。テスト step 単体は 114-241s)。shard は並列なので `test` check の wall clock は max(shard) だが、**実際の往復は push から結果まで 4m10s-4m59s** かかるので、手元で 95s 払うほうが速い。`-count=1` 自体のコストはゼロだった (65.35s → 65.04s)。**`-shuffle` は `go test` の cacheable flag に入っていない**ので、seed を渡している時点でキャッシュは元から無効。`-count=1` を残すのは CI との一致のためで、キャッシュ対策としては効いていない。`-timeout` / `-coverprofile` / `-covermode` は揃えない — 前者は既定と同じ 10m、後 2 つはカバレッジ閾値チェック用で挙動に影響しない。**`make test-fast` はコミット前の検査ではない** (`-race` が無いので CI で落ちるものが手元で緑になる)。編集しながら回す用で、`make check` は `-race` 付きを使う。
+  **ドリフト自体を止めるゲートも足した** (`make testflags-check` / `TestMakeTestMatchesCIConditions`)。**CI 側を基準にする** — CI の flag のうち `ciOnlyTestFlags` に理由付きで挙げたもの以外は `make test` にも同じ値で無ければ落ちる。CI に flag が増えたときに「足す」か「無視する理由を書く」かを**選ばせる**形にしてある (無条件に無視すると #2841 と同じことが起きる)。片側だけ変えても落ちるので、`ci.yml` の seed を変えて Makefile を忘れる形も塞がる。**どちらかを読めなかったら落とす** — 書式が変わって拾えなくなると、検査していないのに緑になる (compose-check と同じ判断)。あわせて `TestDocsQuoteTheCIShuffleSeed` で **doc に書かれた seed が CI と一致するか**も見る — これは実際に 2 度起きていて、#2795 で seed を `3` にしたあとも `docs/testing.md` と CLAUDE.md には `2795` が残り、**唯一の再現コマンドが間違ったまま**だった (doc の手順で追うと別の並び順を試すので順序依存が再現せず flaky と誤診断される)。**値の不一致は tracked な md 全体**で見て、**欠落だけ名指しの一覧**で見る — 合計件数だと 1 ファイルが `-shuffle` を丸ごと落としても気付けない (実際 README.md が「CI と同条件」と書きながら `-shuffle` を持っていなかった)。正規表現は `-shuffle` への隣接を要求する — 裸の `2795` は issue 番号としても現れるため。散文で書くと拾えないので、doc 側は `-shuffle=3` のインライン表記に統一してある。
+- **2026-09-01**: Section 8 の `test-shards` に `-shuffle` を追加 (#2795)。**`internal/server` は `-shuffle` を有効にすると 5 seed すべてで落ちていた** (落ちるテストは seed ごとに違う)。原因は 2 系統で、どちらも**プロセス共有の状態を張り替えて戻していない**もの。(a) `newServer` / `New` が起動時にグローバルを **12 個** 差し替えるが、テストは同じプロセスで何度も呼ぶので、後続の `avatar` / `emoji_redirect` が素の URL ではなく署名付きプロキシURLを受け取る。(b) `frontendutil` の loader キャッシュはプロセスに 1 つで、fixture は `t.TempDir()` に置くため**ディレクトリが消えた後も内容がキャッシュに残る**。
+  seed は **全 shard 共通の固定値**にした。`on` (毎回ランダム) は失敗を手元で再現できず、required check が不定期に赤くなる。**shard 番号も使わない** — shard 配属は `NR % 4` なので、テストパッケージが 1 つ増えるだけで既存パッケージの seed が変わり順序が丸ごと入れ替わる (無関係な PR が未実行の順序を引いて赤くなり、ランダム seed と同じ問題を別経路で持ち込む)。
+  **seed は実測で選ぶこと。** 覚えやすい値 (issue 番号など) を置くと検出力を持たない値を引く — 実際 `2795` を置いたが、restore を無効化した変異で落ちる seed は 12 個中 7 個だけで、`2795` は落ちない側だった (= 直したバグを CI が検出しない)。採用した `3` は 6 テストが落ちる。
+  **cleanup の登録も一覧も、手で書くと変異検証が効かない形になる。** `TestFrontendHTML_SplashColor` の `<style>` 抽出を splash 名指しに直した時点で、loader cleanup を全部外しても 40 seed で落ちなくなった。restore の一覧も初版は `entity` の 7 つだけで 5 つ落としていた。どちらも AST の gate で形を強制してある (`internal/server/global_state_test.go`)。
+- **2026-08-31**: Section 4 の「DB を使うテストの分離」に、システムカタログを schema で絞る規則と `Scan(&string)` の罠を追記 (#2777)。あわせて `make catalog-check` を新設し `make gates` に入れた (`make help` の target は 112 → 113)。doc だけだと再発する — schema が 17-19 ある条件は残ったままなので。`pg_indexes` を schema 非限定で引くテストが 3 本あり、**required check の `test` を不定期に落としていた** (PR #2778 の `test-shards (1)` が実際に赤くなった)。#2450 で schema を分けた結果、同名テーブルが 17-19 schema に同時に存在し、他パッケージの `ApplyMigrations` が DDL 中だと `could not open relation with OID (SQLSTATE XX000)` になる。**害はそれだけではない** — 絞らないと他 schema の同名 index を自分のものと取り違えるので、migration が適用されていなくても regression guard が緑になる。実測で `internal_repository_ts` の定義が返っており、3 本とも空振りしていた。`Scan(&string)` は複数行でも**最後の 1 行**を黙って取る (GORM は `*string` に対し全行を走査して dest を上書きする) ので、この取り違えは値が正しく見えて気付けない。
+- **2026-08-30**: Section 4 の「DB を使うテストの分離」に列枠の話を追記 (#2756)。PostgreSQL は `DROP COLUMN` した列も 1600 の上限に数えるので、実行のたびに列を落とすテスト構造だと手元でだけ枠が減り続け、最後に落ちる (実測で `clip` / `auth_session` / `app` が 1593 列まで到達した)。原因は 2 つで、`ApplyMigrations` が毎回全 migration を流し直すこと (再適用で実際に枠を食うのは migration が作る 120 テーブル中 `note` の 1 つだけ — `000033` が ADD し `000036` が DROP するため) と、TS 形状を作るテストが列を落として戻していたこと。前者は適用済みを skip する台帳、後者は専用の兄弟 schema を一度だけその形に作る方式で解消した。復旧手順も併記。
+- **2026-08-10**: Section 4 に「DB を使うテストの分離」を追記 (#2450)。`testutil.OpenTestDB` が呼び出し元パッケージ専用の PostgreSQL schema に接続するようになった。`go test` はパッケージを並行実行し CI の shard は DB を 1 つしか持たないため、共有すると一方の後片付けが他方を壊す (実際に Go を触っていない PR で CI が落ちた)。削除範囲を絞るだけでは解けない (干渉が双方向) 点と、migration の enum guard に `pg_type WHERE typname` を使わない旨も明記。
+- **2026-04-28**: `internal/server`のCIカバレッジ閾値を0%例外に追加 (#462)。`avatar.go`/`avatar_test.go`の追加で同パッケージ初の`_test.go`が入り、`router.go`(2000行超のwire層)込みのpackage全体カバレッジが2.5%で計測されてCIが落ちたため。`testutil`/`e2e`と同じく実挙動はe2e/drop-in testで検証する設計に揃える。個別handlerファイルは`_test.go`単体で90%相当をカバーする運用は維持。
+- **2026-04-18**: Section 4 / Section 8 のカバレッジ例外閾値を更新 (#260)。`internal/repository` パッケージのテスト拡充でカバレッジを76.4%→99.9%に引き上げて CI 閾値を 90% に戻し、`internal/api/admin` の閾値を 60%→80% に引き上げ(現状83.8%)。CI step "Run all tests with coverage"に`set -o pipefail`を追加してテスト失敗の握り潰し解消も同時に。
+- **2026-04-18**: Section 4 / Section 8 に `internal/repository` パッケージのCIカバレッジ閾値を暫定的に 76% に緩和する例外を追加（#260で90%復帰予定）。
+- **2026-04-12**: Section 4 にテストカバレッジ目標を追記（最低90% / 推奨95% / 目標100%）。
