@@ -110,7 +110,7 @@ PR を出すと十数個の check が走る。**どれが何を見ていて、�
 | `mkgo-born` | Drop-in e2e | **mk-go 生まれの DB を TS に引き渡せるか** (= ロックインの有無) | 5 min | `make dropin-mkgo-born-test` |
 | `ed25519-verify` | Drop-in e2e | Fedibird-like mock との Ed25519 双方向 verify | 5 min | `make dropin-fedibird-test` |
 | `federation` | Drop-in e2e | 本物の Misskey TS との実連合 (follow/note/reaction/renote/reply/mention/delete) | 4 min | `make federation-misskey-e2e` |
-| `federation-mastodon` | Drop-in e2e | 本物の Mastodon から mk-go の投稿を引用でき、承認済みになるか (FEP-044f)。ブロック中は拒否されるか | 未計測 | `make federation-mastodon-e2e` |
+| `federation-mastodon` | Drop-in e2e | 本物の Mastodon との引用の承認 (FEP-044f): 双方向の引用が承認済みになるか、取り消しが双方向で効くか | 未計測 | `make federation-mastodon-e2e` |
 | `spec (mk-go 1/4)` 〜 `4/4` | Playwright | ブラウザからの統合互換 (298 spec ファイル) | 4-9 min | `make playwright-check` |
 | `build-and-push` / `-bundled` | Docker | image がビルドできるか (PR では push しない) | 4 min | `docker build -f Dockerfile .` |
 | `build / build` | Build with plugins (selftest) | 運営者向けの reusable workflow が通るか。外部プラグインを実際に clone し、frontend を持つので SPA の自前ビルド (`ASSETS_SOURCE=local`) まで走る。**`docker build --check` では見えない範囲** (pluginbuild / go build が通るか、`assets-local` の COPY 元が context に実在するか、pnpm の symlink を越えられるか) を確認できるのはこの check だけ | 6 min | paths に該当する PR で自動発火する。手動なら `gh workflow run build-with-plugins-selftest.yml --ref <branch>` (default branch にある場合のみ) |
