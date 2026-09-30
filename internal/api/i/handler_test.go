@@ -581,7 +581,10 @@ func TestMe_WithRoleProvider(t *testing.T) {
 		admin:     true,
 		moderator: true,
 		roles: []*model.Role{
-			{ID: "r1", Name: "Admin", IsAdministrator: true, DisplayOrder: 10},
+			{ID: "r1", Name: "Admin", IsAdministrator: true, IsPublic: true, DisplayOrder: 10},
+			// 非公開ロールは本人にも出さない (#3240)。権限 (isAdmin 等) には効く。
+			{ID: "r2", Name: "internal-tag", IsAdministrator: true, IsPublic: false, DisplayOrder: 20},
+			{ID: "r3", Name: "Supporter", IsPublic: true, DisplayOrder: 30},
 		},
 		policies: map[string]any{"gtlAvailable": true, "driveCapacityMb": 500},
 	})
@@ -607,12 +610,28 @@ func TestMe_WithRoleProvider(t *testing.T) {
 	assert.Equal(t, true, resp["isModerator"])
 
 	roles := resp["roles"].([]any)
-	assert.Len(t, roles, 1)
-	role := roles[0].(map[string]any)
-	assert.Equal(t, "Admin", role["name"])
+	require.Len(t, roles, 2, "the non-public role is not shown")
+	// 表示順 (displayOrder) の大きい順 (本家と同じ)。
+	assert.Equal(t, "Supporter", roles[0].(map[string]any)["name"])
+	assert.Equal(t, "Admin", roles[1].(map[string]any)["name"])
 
 	policies := resp["policies"].(map[string]any)
 	assert.Equal(t, float64(500), policies["driveCapacityMb"])
+}
+
+// 他の経路 (users/show 等) で自分を表示したときも、非公開ロールを出さない (#3240)。
+// EnrichSelf は呼び出し元が絞った roles を上書きするので、ここで絞っていないと
+// 呼び出し元の絞り込みが失われる。
+func TestEnrichSelf_HidesPrivateRoles(t *testing.T) {
+	h := &Handler{roleProvider: &stubRoleProvider{roles: []*model.Role{
+		{ID: "pub", Name: "public-role", IsPublic: true},
+		{ID: "priv", Name: "internal-tag", IsPublic: false},
+	}}}
+	resp := map[string]any{"roles": []any{map[string]any{"id": "pub"}}}
+	h.EnrichSelf(context.Background(), &model.User{ID: "u1"}, &model.UserProfile{UserID: "u1"}, resp)
+	roles := resp["roles"].([]any)
+	require.Len(t, roles, 1)
+	assert.Equal(t, "pub", roles[0].(map[string]any)["id"])
 }
 
 func TestMe_CreatedAtFromValidID(t *testing.T) {
@@ -2910,4 +2929,22 @@ func TestUpdate_OrdinaryFieldsStillPass(t *testing.T) {
 	user := updateUser(repo)
 	rec := post(h.Update, `{"fields":[{"name":"サイト","value":"https://example.com"}]}`, user)
 	assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+}
+
+// ロールのアイコンは entity (meUpdated の経路) と同じく media proxy を通す。
+// 通さないと $i.roles[].iconUrl が /api/i とストリーミングで食い違う。
+func TestRolePayload_ProxiesRoleIcon(t *testing.T) {
+	entity.SetMediaURLContext(entity.NewMediaURLContext(
+		"https://mk.test", "https://mk.test/proxy", []byte("role-icon-secret"), false, true))
+	defer entity.SetMediaURLContext(nil)
+	icon := "https://cdn.example.test/role.png"
+	h := &Handler{roleProvider: &stubRoleProvider{roles: []*model.Role{
+		{ID: "pub", Name: "public-role", IsPublic: true, IconURL: &icon},
+	}}}
+	_, _, _, roles := h.rolePayload("u1")
+	require.Len(t, roles, 1)
+	got := roles[0].(map[string]any)["iconUrl"].(*string)
+	require.NotNil(t, got)
+	assert.Equal(t, *entity.ProxyMediaURLPtr(&icon), *got)
+	assert.NotEqual(t, icon, *got, "a remote icon goes through the proxy")
 }
