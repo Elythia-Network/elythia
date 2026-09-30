@@ -949,6 +949,7 @@ func (s *Server) registerSchedulerJobs() {
 		{"orphanUserCleanup", s.queueScheduler.RegisterOrphanUserCleanupJob},
 		{"orphanAttachmentCleanup", s.queueScheduler.RegisterOrphanAttachmentCleanupJob},
 		{"checkModeratorsActivity", s.queueScheduler.RegisterCheckModeratorsActivityJob},
+		{"resendQuoteRequests", s.queueScheduler.RegisterResendQuoteRequestsJob},
 	}
 	for _, j := range jobs {
 		if err := j.fn(); err != nil {

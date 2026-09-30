@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"time"
+
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -44,9 +46,10 @@ func (r *NoteQuoteRequestRepository) FindByRequestURI(requestURI string) (*model
 }
 
 // Ensure records a pending request for the note unless one already exists, and
-// returns the stored row. 既にあれば状態を変えない (承認済みを pending に戻さない)。
-func (r *NoteQuoteRequestRepository) Ensure(noteID, requestURI string) (*model.NoteQuoteRequest, error) {
-	q := &model.NoteQuoteRequest{NoteID: noteID, RequestURI: requestURI, State: model.QuoteRequestPending}
+// returns the stored row. 既にあれば状態も送り直しの予定も変えない (承認済みを
+// pending に戻さない)。nextResendAt は最初の送り直しの時刻 (#3238)。
+func (r *NoteQuoteRequestRepository) Ensure(noteID, requestURI string, nextResendAt time.Time) (*model.NoteQuoteRequest, error) {
+	q := &model.NoteQuoteRequest{NoteID: noteID, RequestURI: requestURI, State: model.QuoteRequestPending, NextResendAt: &nextResendAt}
 	if err := r.db.Clauses(clause.OnConflict{DoNothing: true}).Create(q).Error; err != nil {
 		return nil, err
 	}
@@ -65,7 +68,7 @@ func (r *NoteQuoteRequestRepository) Ensure(noteID, requestURI string) (*model.N
 func (r *NoteQuoteRequestRepository) MarkAccepted(noteID, approvalURI string) (bool, error) {
 	err := r.db.Model(&model.NoteQuoteRequest{}).
 		Where(`"noteId" = ? AND "state" = ?`, noteID, model.QuoteRequestPending).
-		Updates(map[string]any{"state": model.QuoteRequestAccepted, "approvalUri": approvalURI, "updateSent": false}).Error
+		Updates(map[string]any{"state": model.QuoteRequestAccepted, "approvalUri": approvalURI, "updateSent": false, "nextResendAt": nil}).Error
 	if err != nil {
 		return false, err
 	}
@@ -124,5 +127,28 @@ func (r *NoteQuoteRequestRepository) MarkRevoked(noteID string) (bool, error) {
 func (r *NoteQuoteRequestRepository) MarkRejected(noteID string) error {
 	return r.db.Model(&model.NoteQuoteRequest{}).
 		Where(`"noteId" = ? AND "state" = ?`, noteID, model.QuoteRequestPending).
-		Update("state", model.QuoteRequestRejected).Error
+		Updates(map[string]any{"state": model.QuoteRequestRejected, "nextResendAt": nil}).Error
+}
+
+// DueResends returns pending requests whose resend time has come (#3238),
+// oldest first. 状態は SQL にリテラルで書く — 部分 index の条件
+// (`state = 'pending'`) と一致させ、汎用の実行計画でも index が使えるように。
+func (r *NoteQuoteRequestRepository) DueResends(now time.Time, limit int) ([]model.NoteQuoteRequest, error) {
+	var rows []model.NoteQuoteRequest
+	err := r.db.Where(`"state" = 'pending' AND "nextResendAt" IS NOT NULL AND "nextResendAt" <= ?`, now).
+		Order(`"nextResendAt"`).Limit(limit).Find(&rows).Error
+	return rows, err
+}
+
+// ClaimResend takes a due resend: it counts the resend and moves the schedule
+// to next (nil = no more) only if the request is still pending and still due
+// at due. 取り分けられるのは 1 回だけ (複数の worker が同じ行を引いても二重に送らない)。
+func (r *NoteQuoteRequestRepository) ClaimResend(noteID string, due time.Time, next *time.Time) (bool, error) {
+	res := r.db.Model(&model.NoteQuoteRequest{}).
+		Where(`"noteId" = ? AND "state" = 'pending' AND "nextResendAt" = ?`, noteID, due).
+		Updates(map[string]any{"resendCount": gorm.Expr(`"resendCount" + 1`), "nextResendAt": next})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
 }

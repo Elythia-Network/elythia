@@ -1,5 +1,7 @@
 package model
 
+import "time"
+
 // Quote request states of NoteQuoteRequest.
 const (
 	QuoteRequestPending  = "pending"
@@ -19,6 +21,10 @@ type NoteQuoteRequest struct {
 	State       string  `gorm:"column:state;type:varchar(16);not null" json:"state"`
 	ApprovalURI *string `gorm:"column:approvalUri;type:varchar(512)" json:"approvalUri"`
 	UpdateSent  bool    `gorm:"column:updateSent;not null" json:"updateSent"`
+	// ResendCount / NextResendAt は保留中の QuoteRequest の送り直しの予定 (#3238)。
+	// NextResendAt が nil なら送り直さない。
+	ResendCount  int        `gorm:"column:resendCount;not null" json:"resendCount"`
+	NextResendAt *time.Time `gorm:"column:nextResendAt" json:"nextResendAt"`
 }
 
 // TableName returns the table name.

@@ -20,14 +20,17 @@ import (
 // stubEnqueuer captures EnqueueDeliver calls.
 type stubEnqueuer struct {
 	calls []queue.DeliverPayload
-	err   error
+	// opts は calls と同じ順で、各配送に渡された enqueue オプション。
+	opts []driver.EnqueueOptions
+	err  error
 }
 
-func (s *stubEnqueuer) EnqueueDeliver(payload queue.DeliverPayload, _ ...driver.EnqueueOption) error {
+func (s *stubEnqueuer) EnqueueDeliver(payload queue.DeliverPayload, opts ...driver.EnqueueOption) error {
 	if s.err != nil {
 		return s.err
 	}
 	s.calls = append(s.calls, payload)
+	s.opts = append(s.opts, driver.ApplyEnqueueOptions(opts))
 	return nil
 }
 

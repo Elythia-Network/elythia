@@ -2,6 +2,7 @@ package repository
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -16,7 +17,7 @@ func TestNoteQuoteRequestRepository(t *testing.T) {
 	repo := NewNoteQuoteRequestRepository(testDB)
 	reqURI := "https://local.example/notes/qr_note1#quote-request"
 
-	q, err := repo.Ensure("qr_note1", reqURI)
+	q, err := repo.Ensure("qr_note1", reqURI, time.Now())
 	require.NoError(t, err)
 	assert.Equal(t, model.QuoteRequestPending, q.State)
 	assert.Nil(t, q.ApprovalURI)
@@ -37,7 +38,7 @@ func TestNoteQuoteRequestRepository(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, needSend, "delivered once, not again for the same approval")
 	// 承認済みのものは、送り直し (Ensure) でも Reject でも状態を変えない。
-	again, err := repo.Ensure("qr_note1", reqURI)
+	again, err := repo.Ensure("qr_note1", reqURI, time.Now())
 	require.NoError(t, err)
 	assert.Equal(t, model.QuoteRequestAccepted, again.State)
 	require.NoError(t, repo.MarkRejected("qr_note1"))
@@ -58,7 +59,7 @@ func TestNoteQuoteRequestRepository(t *testing.T) {
 	assert.Equal(t, "https://remote.example/approvals/1", *got.ApprovalURI)
 
 	// pending のものは Reject で rejected になる。
-	_, err = repo.Ensure("qr_note2", "https://local.example/notes/qr_note2#quote-request")
+	_, err = repo.Ensure("qr_note2", "https://local.example/notes/qr_note2#quote-request", time.Now())
 	require.NoError(t, err)
 	require.NoError(t, repo.MarkRejected("qr_note2"))
 	got, err = repo.FindByNoteID("qr_note2")
@@ -96,7 +97,7 @@ func TestNoteQuoteRequestRepository_Revoke(t *testing.T) {
 	repo := NewNoteQuoteRequestRepository(testDB)
 	approval := "https://remote.example/approvals/qv1"
 
-	_, err := repo.Ensure("qv_note1", "https://local.example/notes/qv_note1#quote-request")
+	_, err := repo.Ensure("qv_note1", "https://local.example/notes/qv_note1#quote-request", time.Now())
 	require.NoError(t, err)
 	// 保留中のものは取り消せない。
 	needSend, err := repo.MarkRevoked("qv_note1")
@@ -135,7 +136,7 @@ func TestNoteQuoteRequestRepository_Revoke(t *testing.T) {
 	assert.False(t, needSend)
 
 	// 同じ承認 URI の記録が複数あれば全部返す (上限まで)。
-	_, err = repo.Ensure("qv_note2", "https://local.example/notes/qv_note2#quote-request")
+	_, err = repo.Ensure("qv_note2", "https://local.example/notes/qv_note2#quote-request", time.Now())
 	require.NoError(t, err)
 	_, err = repo.MarkAccepted("qv_note2", approval)
 	require.NoError(t, err)
@@ -224,4 +225,102 @@ func TestNoteQuoteAuthorizationRepository_Remove(t *testing.T) {
 	assert.NoError(t, err)
 	require.NoError(t, repo.Remove("qm_note1", "https://r.example/none", "qm_quoter"))
 	require.NoError(t, repo.Remove("a\x00", "b", "c"))
+}
+
+// 送り直しの予定 (#3238): 保留中で時刻の来たものを古い順に返し、取り分けは
+// 保留中で予定が変わっていないときに 1 回だけ成功する。
+func TestNoteQuoteRequestRepository_Resend(t *testing.T) {
+	seedUser(t, "qs_author")
+	for _, id := range []string{"qs_note1", "qs_note2", "qs_note3"} {
+		seedQuoteAuthNote(t, id, "qs_author")
+	}
+	repo := NewNoteQuoteRequestRepository(testDB)
+	base := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	_, err := repo.Ensure("qs_note1", "https://l.example/notes/qs_note1#quote-request", base.Add(time.Minute))
+	require.NoError(t, err)
+	_, err = repo.Ensure("qs_note2", "https://l.example/notes/qs_note2#quote-request", base.Add(30*time.Second))
+	require.NoError(t, err)
+	_, err = repo.Ensure("qs_note3", "https://l.example/notes/qs_note3#quote-request", base.Add(time.Hour))
+	require.NoError(t, err)
+	// 既にある行の予定は変えない。
+	again, err := repo.Ensure("qs_note1", "https://l.example/notes/qs_note1#quote-request", base.Add(time.Hour))
+	require.NoError(t, err)
+	require.NotNil(t, again.NextResendAt)
+	assert.True(t, again.NextResendAt.Equal(base.Add(time.Minute)))
+
+	due, err := repo.DueResends(base.Add(2*time.Minute), 10)
+	require.NoError(t, err)
+	require.Len(t, due, 2)
+	assert.Equal(t, "qs_note2", due[0].NoteID, "oldest first")
+	assert.Equal(t, "qs_note1", due[1].NoteID)
+	limited, err := repo.DueResends(base.Add(2*time.Minute), 1)
+	require.NoError(t, err)
+	assert.Len(t, limited, 1)
+
+	next := base.Add(10 * time.Minute)
+	claimed, err := repo.ClaimResend("qs_note1", *due[1].NextResendAt, &next)
+	require.NoError(t, err)
+	assert.True(t, claimed)
+	// 同じ予定ではもう取り分けられない (二重に送らない)。
+	claimed, err = repo.ClaimResend("qs_note1", *due[1].NextResendAt, &next)
+	require.NoError(t, err)
+	assert.False(t, claimed)
+	got, err := repo.FindByNoteID("qs_note1")
+	require.NoError(t, err)
+	assert.Equal(t, 1, got.ResendCount)
+	require.NotNil(t, got.NextResendAt)
+	assert.True(t, got.NextResendAt.Equal(next))
+	// 最後の送り直しでは予定を消す。
+	claimed, err = repo.ClaimResend("qs_note1", next, nil)
+	require.NoError(t, err)
+	assert.True(t, claimed)
+	got, err = repo.FindByNoteID("qs_note1")
+	require.NoError(t, err)
+	assert.Equal(t, 2, got.ResendCount)
+	assert.Nil(t, got.NextResendAt)
+
+	// 保留でなくなったものは返さず、取り分けもできない。答えが届いたら予定も消す
+	// (状態の条件と二重の守り)。
+	_, err = repo.MarkAccepted("qs_note2", "https://r.example/approvals/qs2")
+	require.NoError(t, err)
+	got, err = repo.FindByNoteID("qs_note2")
+	require.NoError(t, err)
+	assert.Nil(t, got.NextResendAt)
+	require.NoError(t, repo.MarkRejected("qs_note3"))
+	got, err = repo.FindByNoteID("qs_note3")
+	require.NoError(t, err)
+	assert.Nil(t, got.NextResendAt)
+	require.NoError(t, testDB.Model(&model.NoteQuoteRequest{}).Where(`"noteId" = ?`, "qs_note3").
+		Updates(map[string]any{"state": model.QuoteRequestPending, "nextResendAt": base.Add(time.Hour)}).Error)
+	due, err = repo.DueResends(base.Add(2*time.Hour), 10)
+	require.NoError(t, err)
+	require.Len(t, due, 1)
+	assert.Equal(t, "qs_note3", due[0].NoteID)
+	claimed, err = repo.ClaimResend("qs_note2", base.Add(30*time.Second), nil)
+	require.NoError(t, err)
+	assert.False(t, claimed)
+}
+
+// 保留中でない行は、予定が残っていても返さず取り分けない (#3238)。状態の条件を
+// 外すと、承認や取り消しの後に送り直して、Mastodon が取り消しを元に戻す。
+func TestNoteQuoteRequestRepository_ResendOnlyPending(t *testing.T) {
+	seedUser(t, "qp_author")
+	repo := NewNoteQuoteRequestRepository(testDB)
+	base := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	due := base.Add(time.Minute)
+	for _, state := range []string{model.QuoteRequestAccepted, model.QuoteRequestRejected, model.QuoteRequestRevoked} {
+		id := "qp_" + state
+		seedQuoteAuthNote(t, id, "qp_author")
+		_, err := repo.Ensure(id, "https://l.example/notes/"+id+"#quote-request", due)
+		require.NoError(t, err)
+		require.NoError(t, testDB.Model(&model.NoteQuoteRequest{}).Where(`"noteId" = ?`, id).Update("state", state).Error)
+		claimed, err := repo.ClaimResend(id, due, nil)
+		require.NoError(t, err)
+		assert.False(t, claimed, state)
+	}
+	rows, err := repo.DueResends(base.Add(time.Hour), 10)
+	require.NoError(t, err)
+	for _, r := range rows {
+		assert.NotContains(t, []string{"qp_accepted", "qp_rejected", "qp_revoked"}, r.NoteID)
+	}
 }

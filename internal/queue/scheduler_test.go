@@ -55,6 +55,7 @@ func TestScheduler_RegisterMaintenanceJobs_NoErr(t *testing.T) {
 	require.NoError(t, s.RegisterCleanJob())
 	require.NoError(t, s.RegisterCleanRemoteNotesJob())
 	require.NoError(t, s.RegisterCheckModeratorsActivityJob())
+	require.NoError(t, s.RegisterResendQuoteRequestsJob())
 }
 
 // TestScheduler_RegisterOrphanCleanupJobs_NoErr は孤児掃除 2 本の cron 式と

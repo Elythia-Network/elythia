@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/shiroha-a/mk/internal/activitypub"
 	"github.com/shiroha-a/mk/internal/misc/colfit"
@@ -17,7 +18,9 @@ import (
 type QuoteRequestStore interface {
 	FindByNoteID(noteID string) (*model.NoteQuoteRequest, error)
 	FindByRequestURI(requestURI string) (*model.NoteQuoteRequest, error)
-	Ensure(noteID, requestURI string) (*model.NoteQuoteRequest, error)
+	Ensure(noteID, requestURI string, nextResendAt time.Time) (*model.NoteQuoteRequest, error)
+	DueResends(now time.Time, limit int) ([]model.NoteQuoteRequest, error)
+	ClaimResend(noteID string, due time.Time, next *time.Time) (bool, error)
 	ListByApprovalURI(approvalURI string, limit int) ([]model.NoteQuoteRequest, error)
 	MarkAccepted(noteID, approvalURI string) (bool, error)
 	MarkRevoked(noteID string) (bool, error)
@@ -131,13 +134,114 @@ func (o *QuoteOutbox) RequestApproval(note *model.Note, author *model.User) erro
 		return fmt.Errorf("quote outbox: find quoted author: %w", err)
 	}
 	// 返ってくる Accept は id で照合するので、送る前に記録する。
-	if _, err := o.requests.Ensure(note.ID, o.decider.urls.QuoteRequestURI(note.ID)); err != nil {
+	if _, err := o.requests.Ensure(note.ID, o.decider.urls.QuoteRequestURI(note.ID), o.decider.now().Add(quoteRequestResendAfter[0])); err != nil {
 		return fmt.Errorf("quote outbox: record request: %w", err)
 	}
 	if err := o.deliver.SendQuoteRequest(note, *target.URI, quotedAuthor); err != nil {
 		return fmt.Errorf("quote outbox: send request: %w", err)
 	}
 	return nil
+}
+
+// quoteRequestResendAfter are when (after the first send) a still-pending
+// QuoteRequest is sent again (#3238)。
+//
+// Mastodon は、引用する投稿を別の経路 (相手のサーバーにいるフォロワー宛ての
+// Create・検索・閲覧) で取り込んでいる最中に QuoteRequest が届くと、引用先が結び
+// 付く前の記録で照合して黙って捨てる (再試行もしない)。同じ id で送り直せば取り込みの
+// 後に照合される。**送り直すのは保留中のものだけ** — Mastodon は QuoteRequest を
+// 受けると引用の状態を見ずに承認し直すので、承認・拒否・取り消しの後に送ると
+// 取り消された引用を承認済みに戻してしまう (#3237 の敵対的レビュー)。
+var quoteRequestResendAfter = []time.Duration{time.Minute, 10 * time.Minute}
+
+// quoteRequestResendTolerance is how late a resend may still be sent. それより
+// 遅れた枠 (mk-go や定期処理が止まっていた間の分) は送らずに使い切る —
+// 送り直しは取り込みとの競合を拾うためのもので、遅れて送っても意味が無く、
+// その間に相手側で承認・取り消しが済んでいれば取り消しを元に戻しうる。
+const quoteRequestResendTolerance = 3 * time.Minute
+
+// quoteRequestResendBatch bounds how many resends one run takes.
+const quoteRequestResendBatch = 100
+
+// ResendPending sends again the QuoteRequests that are still pending and due
+// (#3238)。毎分の定期処理から呼ぶ。送った件数を返す。
+//
+// 行を取り分けてから送る (取り分けは「保留中で予定が変わっていない」ときだけ成功する)
+// ので、複数の worker が同時に走っても二重に送らない。送る前に、投稿がまだ引用で、
+// 公開範囲が対象かを確かめ直す。1 件の失敗で残りを止めない (取り分けた分は次の予定へ
+// 進むので、失敗した回は送り直さない)。
+func (o *QuoteOutbox) ResendPending(now time.Time) (int, error) {
+	due, err := o.requests.DueResends(now, quoteRequestResendBatch)
+	if err != nil {
+		return 0, fmt.Errorf("quote resend: find due: %w", err)
+	}
+	sent := 0
+	for _, req := range due {
+		if req.NextResendAt == nil {
+			continue
+		}
+		// 次の枠は作成からの予定どおりに置く (遅れて走っても予定をずらさない)。
+		var next *time.Time
+		if n := req.ResendCount + 1; n < len(quoteRequestResendAfter) {
+			t := req.NextResendAt.Add(quoteRequestResendAfter[n] - quoteRequestResendAfter[n-1])
+			next = &t
+		}
+		claimed, err := o.requests.ClaimResend(req.NoteID, *req.NextResendAt, next)
+		if err != nil {
+			slog.Warn("quote resend: claim", "noteId", req.NoteID, "err", err)
+			continue
+		}
+		if !claimed || now.Sub(*req.NextResendAt) > quoteRequestResendTolerance {
+			continue
+		}
+		ok, err := o.resend(req.NoteID)
+		if err != nil {
+			slog.Warn("quote resend: send", "noteId", req.NoteID, "err", err)
+			continue
+		}
+		if ok {
+			sent++
+		}
+	}
+	return sent, nil
+}
+
+// resend sends the QuoteRequest of the quoting note again, if it still quotes
+// a remote note it may ask about, and reports whether it sent.
+func (o *QuoteOutbox) resend(noteID string) (bool, error) {
+	note, err := o.decider.notes.FindByID(noteID)
+	if repository.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	target, err := o.quoteTarget(note)
+	if err != nil || target == nil || target.UserHost == nil || target.URI == nil || *target.URI == "" {
+		return false, err
+	}
+	// 引用した本人がその後に凍結・削除されていたら送らない。
+	quoter, err := o.decider.users.FindByID(note.UserID)
+	if repository.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if quoter.IsSuspended || quoter.IsDeleted {
+		return false, nil
+	}
+	quotedAuthor, err := o.decider.users.FindByID(target.UserID)
+	if repository.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if err := o.deliver.SendQuoteRequest(note, *target.URI, quotedAuthor); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // ApprovalURI returns the `quoteAuthorization` of a local quoting note, or ""

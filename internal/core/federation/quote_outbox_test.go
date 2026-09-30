@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -24,8 +25,13 @@ func (s *qrStore) FindByNoteIDAndQuotingURI(noteID, quotingURI string) (*model.N
 }
 
 type qoRequests struct {
-	rows map[string]*model.NoteQuoteRequest
-	err  error
+	rows     map[string]*model.NoteQuoteRequest
+	err      error
+	dueErr   error
+	claimErr error
+	// claimLost は、別の worker が先に取り分けた状態を作る (DueResends の後、
+	// ClaimResend の前に予定を進める)。
+	claimLost bool
 }
 
 func (r *qoRequests) FindByNoteID(noteID string) (*model.NoteQuoteRequest, error) {
@@ -52,14 +58,44 @@ func (r *qoRequests) FindByRequestURI(uri string) (*model.NoteQuoteRequest, erro
 	return nil, repository.ErrNotFound
 }
 
-func (r *qoRequests) Ensure(noteID, uri string) (*model.NoteQuoteRequest, error) {
+func (r *qoRequests) Ensure(noteID, uri string, next time.Time) (*model.NoteQuoteRequest, error) {
 	if r.err != nil {
 		return nil, r.err
 	}
 	if _, ok := r.rows[noteID]; !ok {
-		r.rows[noteID] = &model.NoteQuoteRequest{NoteID: noteID, RequestURI: uri, State: model.QuoteRequestPending}
+		r.rows[noteID] = &model.NoteQuoteRequest{NoteID: noteID, RequestURI: uri, State: model.QuoteRequestPending, NextResendAt: &next}
 	}
 	return r.FindByNoteID(noteID)
+}
+
+func (r *qoRequests) DueResends(now time.Time, limit int) ([]model.NoteQuoteRequest, error) {
+	if r.dueErr != nil {
+		return nil, r.dueErr
+	}
+	var out []model.NoteQuoteRequest
+	for _, q := range r.rows {
+		if q.State == model.QuoteRequestPending && q.NextResendAt != nil && !q.NextResendAt.After(now) && len(out) < limit {
+			out = append(out, *q)
+		}
+	}
+	return out, nil
+}
+
+func (r *qoRequests) ClaimResend(noteID string, due time.Time, next *time.Time) (bool, error) {
+	if r.claimErr != nil {
+		return false, r.claimErr
+	}
+	q := r.rows[noteID]
+	if r.claimLost && q != nil && q.NextResendAt != nil {
+		moved := q.NextResendAt.Add(time.Minute)
+		q.NextResendAt = &moved
+	}
+	if q == nil || q.State != model.QuoteRequestPending || q.NextResendAt == nil || !q.NextResendAt.Equal(due) {
+		return false, nil
+	}
+	q.ResendCount++
+	q.NextResendAt = next
+	return true, nil
 }
 
 func (r *qoRequests) MarkAccepted(noteID, approval string) (bool, error) {
@@ -709,4 +745,192 @@ func TestQuoteOutbox_HandleRevocationSharedApprovalURI(t *testing.T) {
 	assert.True(t, handled)
 	assert.Empty(t, e.approval(t, n))
 	assert.Equal(t, model.QuoteRequestAccepted, e.requests.rows["q0"].State, "the other author's record is untouched")
+}
+
+// 送り直し (#3238): 保留中で予定の来たものだけを、取り分けてから送る。予定は
+// 作成から 1 分後と 10 分後の 2 回。
+func TestQuoteOutbox_ResendPending(t *testing.T) {
+	e := newQOEnv(t)
+	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	e.h.now = func() time.Time { return now }
+	n := e.quote("q1", "remote", model.NoteVisibilityPublic)
+	require.NoError(t, e.o.RequestApproval(n, e.dave))
+	require.Len(t, e.delivery.requests, 1)
+	row := e.requests.rows["q1"]
+	require.NotNil(t, row.NextResendAt)
+	assert.True(t, row.NextResendAt.Equal(now.Add(time.Minute)), "first resend 1 minute after the request")
+
+	// まだ予定が来ていなければ送らない。
+	sent, err := e.o.ResendPending(now.Add(30 * time.Second))
+	require.NoError(t, err)
+	assert.Zero(t, sent)
+
+	// 1 回目: 送り、次の予定は 10 分後 (= 9 分後)。
+	t1 := now.Add(time.Minute)
+	sent, err = e.o.ResendPending(t1)
+	require.NoError(t, err)
+	assert.Equal(t, 1, sent)
+	assert.Len(t, e.delivery.requests, 2)
+	assert.Equal(t, 1, row.ResendCount)
+	require.NotNil(t, row.NextResendAt)
+	assert.True(t, row.NextResendAt.Equal(t1.Add(9*time.Minute)))
+
+	// 2 回目で終わり。
+	t2 := t1.Add(9 * time.Minute)
+	sent, err = e.o.ResendPending(t2)
+	require.NoError(t, err)
+	assert.Equal(t, 1, sent)
+	assert.Nil(t, row.NextResendAt)
+	sent, err = e.o.ResendPending(t2.Add(time.Hour))
+	require.NoError(t, err)
+	assert.Zero(t, sent)
+	assert.Len(t, e.delivery.requests, 3)
+}
+
+// 保留でなくなったもの (承認・拒否・取り消し) には送らない。
+func TestQuoteOutbox_ResendSkipsAnswered(t *testing.T) {
+	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	for name, answer := range map[string]func(e *qoEnv){
+		"accepted": func(e *qoEnv) {
+			require.NoError(t, e.o.HandleAnswer(qoCarolURI, qrBase+"/notes/q1#quote-request", true, qoApproval))
+		},
+		"rejected": func(e *qoEnv) {
+			require.NoError(t, e.o.HandleAnswer(qoCarolURI, qrBase+"/notes/q1#quote-request", false, ""))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newQOEnv(t)
+			e.h.now = func() time.Time { return now }
+			e.requested(t)
+			answer(e)
+			before := len(e.delivery.requests)
+			sent, err := e.o.ResendPending(now.Add(time.Hour))
+			require.NoError(t, err)
+			assert.Zero(t, sent)
+			assert.Len(t, e.delivery.requests, before)
+		})
+	}
+}
+
+// 送る前に投稿を確かめ直す。引用でなくなった / 対象外の公開範囲になったものは、
+// 予定を消費して送らない。
+func TestQuoteOutbox_ResendRechecksNote(t *testing.T) {
+	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	for name, change := range map[string]func(n *model.Note){
+		"now direct":     func(n *model.Note) { n.Visibility = model.NoteVisibilitySpecified },
+		"now local only": func(n *model.Note) { n.LocalOnly = true },
+		"not a quote":    func(n *model.Note) { n.Text = nil },
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newQOEnv(t)
+			e.h.now = func() time.Time { return now }
+			n := e.requested(t)
+			change(n)
+			sent, err := e.o.ResendPending(now.Add(time.Minute))
+			require.NoError(t, err)
+			assert.Zero(t, sent)
+			assert.Len(t, e.delivery.requests, 1)
+			assert.Equal(t, 1, e.requests.rows["q1"].ResendCount, "the slot is consumed")
+		})
+	}
+	// 投稿が消えていたら何もしない。
+	e := newQOEnv(t)
+	e.h.now = func() time.Time { return now }
+	e.requested(t)
+	delete(e.notes, "q1")
+	sent, err := e.o.ResendPending(now.Add(time.Minute))
+	require.NoError(t, err)
+	assert.Zero(t, sent)
+}
+
+func TestQuoteOutbox_ResendFailures(t *testing.T) {
+	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+
+	e := newQOEnv(t)
+	e.requests.dueErr = errors.New("db down")
+	_, err := e.o.ResendPending(now)
+	assert.Error(t, err)
+
+	// 取り分けに失敗したものは送らず、残りは続ける。
+	e = newQOEnv(t)
+	e.h.now = func() time.Time { return now }
+	e.requested(t)
+	e.requests.claimErr = errors.New("db down")
+	sent, err := e.o.ResendPending(now.Add(time.Minute))
+	require.NoError(t, err)
+	assert.Zero(t, sent)
+	assert.Len(t, e.delivery.requests, 1)
+
+	// 別の worker が先に取り分けたものは送らない (二重に送らない)。
+	e = newQOEnv(t)
+	e.h.now = func() time.Time { return now }
+	e.requested(t)
+	e.requests.claimLost = true
+	sent, err = e.o.ResendPending(now.Add(time.Minute))
+	require.NoError(t, err)
+	assert.Zero(t, sent)
+	assert.Len(t, e.delivery.requests, 1)
+
+	// 送れなかったものは数えない (予定は次へ進む)。
+	e = newQOEnv(t)
+	e.h.now = func() time.Time { return now }
+	e.requested(t)
+	e.delivery.err = errors.New("queue down")
+	sent, err = e.o.ResendPending(now.Add(time.Minute))
+	require.NoError(t, err)
+	assert.Zero(t, sent)
+	assert.Equal(t, 1, e.requests.rows["q1"].ResendCount)
+
+	// 相手の利用者が引けなければ送らない。
+	e = newQOEnv(t)
+	e.h.now = func() time.Time { return now }
+	e.requested(t)
+	delete(e.users.users, "carol")
+	sent, err = e.o.ResendPending(now.Add(time.Minute))
+	require.NoError(t, err)
+	assert.Zero(t, sent)
+}
+
+// 予定より大きく遅れた枠 (止まっていた間の分) は送らずに使い切る。次の枠は
+// 作成からの予定どおり。
+func TestQuoteOutbox_ResendSkipsLateSlots(t *testing.T) {
+	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	e := newQOEnv(t)
+	e.h.now = func() time.Time { return now }
+	e.requested(t)
+	row := e.requests.rows["q1"]
+
+	// 1 分後の枠を 5 分後 (4 分遅れ) に処理: 送らない。次の枠は作成から 10 分後のまま。
+	sent, err := e.o.ResendPending(now.Add(5 * time.Minute))
+	require.NoError(t, err)
+	assert.Zero(t, sent)
+	assert.Len(t, e.delivery.requests, 1)
+	require.NotNil(t, row.NextResendAt)
+	assert.True(t, row.NextResendAt.Equal(now.Add(10*time.Minute)))
+
+	// 許容の範囲 (3 分遅れまで) なら送る。
+	sent, err = e.o.ResendPending(now.Add(13 * time.Minute))
+	require.NoError(t, err)
+	assert.Equal(t, 1, sent)
+}
+
+// 引用した本人がその後に凍結・削除されていたら送らない。
+func TestQuoteOutbox_ResendSkipsSuspendedQuoter(t *testing.T) {
+	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	for name, change := range map[string]func(e *qoEnv){
+		"suspended": func(e *qoEnv) { e.dave.IsSuspended = true },
+		"deleted":   func(e *qoEnv) { e.dave.IsDeleted = true },
+		"gone":      func(e *qoEnv) { delete(e.users.users, "dave") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newQOEnv(t)
+			e.h.now = func() time.Time { return now }
+			e.requested(t)
+			change(e)
+			sent, err := e.o.ResendPending(now.Add(time.Minute))
+			require.NoError(t, err)
+			assert.Zero(t, sent)
+			assert.Len(t, e.delivery.requests, 1)
+		})
+	}
 }

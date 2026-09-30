@@ -995,6 +995,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	noteDeliveryHook.SetQuoteOutbox(quoteOutbox)
 	federationProcessor.SetQuoteAnswerHandler(quoteOutbox)
 	apRenderer.SetQuoteApprovalResolver(quoteOutbox.ApprovalURI)
+	// 保留のまま残った QuoteRequest を毎分確かめて送り直す (#3238)。
+	s.queueServer.Handle(queue.TaskTypeResendQuoteRequests, processors.NewResendQuoteRequestsProcessor(quoteOutbox).Handle)
 	// ブロックした相手の引用に出していた承認を取り消す (#3234 段階 4)。
 	blockingService.SetQuoteRevoker(corefederation.NewQuoteRevoker(quoteAuthorizationRepo, userRepo, noteRepo,
 		corefederation.NewQuoteRequestDeliveryHook(deliverService, apRenderer), noteDeliveryHook, apURLs))
