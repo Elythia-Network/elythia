@@ -38,6 +38,19 @@ type NoteDeliveryHook struct {
 	noteRepo repository.NoteRepository
 
 	relay RelayBroadcaster
+	// quotes は引用の承認 (FEP-044f) を取りに行く (#3234)。nil なら何もしない。
+	quotes QuoteApprovalRequester
+}
+
+// QuoteApprovalRequester obtains FEP-044f approvals for local quotes (#3234).
+type QuoteApprovalRequester interface {
+	Prepare(note *model.Note, author *model.User) error
+	RequestApproval(note *model.Note, author *model.User) error
+}
+
+// SetQuoteOutbox wires the quote approval flow. nil で無効 (初期状態)。
+func (h *NoteDeliveryHook) SetQuoteOutbox(q QuoteApprovalRequester) {
+	h.quotes = q
 }
 
 // NewNoteDeliveryHook constructs a NoteDeliveryHook.
@@ -85,6 +98,14 @@ func (h *NoteDeliveryHook) OnNoteCreated(note *model.Note, author *model.User) {
 		return
 	}
 
+	// ローカル同士の引用の承認は Create を描画する前に発行する (最初の Create から
+	// quoteAuthorization が付く)。失敗しても配送は止めない (承認が無いだけ)。
+	if h.quotes != nil {
+		if err := h.quotes.Prepare(note, author); err != nil {
+			slog.Warn("note delivery: prepare quote approval failed", "noteId", note.ID, "err", err)
+		}
+	}
+
 	create := h.renderer.RenderCreate(note, h.idGen)
 	// renderer 由来の Create は string/[]string/Note (string fields のみ) で
 	// 構成されるため json.Marshal が失敗するケースは存在しない。
@@ -109,6 +130,13 @@ func (h *NoteDeliveryHook) OnNoteCreated(note *model.Note, author *model.User) {
 	// されているが、ここでも user ID ベースで seen map を共有して無駄な
 	// enqueue を避ける。#369。
 	h.deliverToDirectRecipients(author, note, body)
+
+	// リモートの投稿の引用は、Create の後に作者へ承認を求める。
+	if h.quotes != nil {
+		if err := h.quotes.RequestApproval(note, author); err != nil {
+			slog.Warn("note delivery: request quote approval failed", "noteId", note.ID, "err", err)
+		}
+	}
 
 	// public な note のみ relay に fanout する。relay は AS Public addressed
 	// activity しか受け付けないため、home/followers/specified はスキップ。
@@ -251,4 +279,47 @@ func (h *NoteDeliveryHook) deliverToSpecified(author *model.User, note *model.No
 				"noteId", note.ID, "userId", uid, "err", err)
 		}
 	}
+}
+
+// SendQuoteRequest implements QuoteOutboxDelivery (#3234).
+func (h *NoteDeliveryHook) SendQuoteRequest(note *model.Note, quotedURI string, quotedAuthor *model.User) error {
+	body, err := json.Marshal(h.renderer.RenderQuoteRequest(note, quotedURI, h.idGen))
+	if err != nil {
+		return err
+	}
+	return h.deliver.DeliverToUser(note.UserID, quotedAuthor, body)
+}
+
+// SendNoteUpdate implements QuoteOutboxDelivery (#3234): it re-delivers the
+// current rendering of note as an Update to the recipients of its Create.
+// 承認を付けたものを、Create を受け取った相手 (フォロワー・直接の宛先・公開なら
+// relay) へ配り直す。
+func (h *NoteDeliveryHook) SendNoteUpdate(note *model.Note, author *model.User) error {
+	switch note.Visibility {
+	case model.NoteVisibilityPublic, model.NoteVisibilityHome, model.NoteVisibilityFollowers:
+	default:
+		// 承認を取りに行くのは公開・未収載・フォロワー限定の引用だけ。
+		return nil
+	}
+	// 承認を引けなければ作らずに error で返す (承認の抜けた Update は、相手側で
+	// 承認済みの引用を未承認に戻す)。
+	update, err := h.renderer.RenderNoteUpdate(note, h.idGen)
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(update)
+	if err != nil {
+		return err
+	}
+	if err := h.deliver.DeliverToFollowers(author.ID, body); err != nil {
+		return err
+	}
+	h.deliverToDirectRecipients(author, note, body)
+	// Create を relay 経由で受け取ったサーバーにも届ける (OnNoteCreated と同じ条件)。
+	if note.Visibility == model.NoteVisibilityPublic && h.relay != nil {
+		if err := h.relay.DeliverToAccepted(context.Background(), author.ID, update); err != nil {
+			slog.Warn("note delivery: relay fanout of update failed", "noteId", note.ID, "err", err)
+		}
+	}
+	return nil
 }

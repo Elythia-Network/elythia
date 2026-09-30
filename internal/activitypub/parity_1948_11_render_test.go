@@ -85,7 +85,9 @@ func TestRenderQuestionUpdate_PublishedMillisIDNano(t *testing.T) {
 	r := newRenderer()
 	idGen := newIDGen(t)
 	n := &model.Note{ID: idGen.Generate(time.Now()), UserID: "u1", Visibility: model.NoteVisibilityPublic, HasPoll: true}
-	m := marshalMap(t, r.RenderQuestionUpdate(n, idGen))
+	u, err := r.RenderQuestionUpdate(n, idGen)
+	require.NoError(t, err)
+	m := marshalMap(t, u)
 	assert.Regexp(t, millisZ, m["published"], "QuestionUpdate.published は .000Z (#1948-11)")
 	// ID は #updates/<nano> 形式 (ミリ秒超の精度を含むため millisZ には一致しない)。
 	assert.Contains(t, m["id"], "#updates/", "QuestionUpdate.id は #updates/<nano> 形式")

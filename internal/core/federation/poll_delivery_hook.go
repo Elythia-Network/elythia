@@ -97,7 +97,14 @@ func (h *PollDeliveryHook) OnLocalPollUpdated(target *model.Note) {
 		return
 	}
 
-	activity := h.renderer.RenderQuestionUpdate(target, h.idGen)
+	activity, err := h.renderer.RenderQuestionUpdate(target, h.idGen)
+	if err != nil {
+		// 引用の承認を引けなかった (#3234)。承認の抜けた Update を送ると、相手側で
+		// 承認済みの引用が未承認に戻るので、この回の票数の更新は送らない
+		// (次の投票で送り直される)。
+		slog.Warn("poll delivery: render question update failed", "noteId", target.ID, "err", err)
+		return
+	}
 	body, err := json.Marshal(activity)
 	if err != nil {
 		slog.Warn("poll delivery: marshal question update failed",

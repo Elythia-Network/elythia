@@ -77,7 +77,10 @@ type Processor struct {
 	blockingService *coreblocking.Service
 	// quoteRequests は FEP-044f の QuoteRequest に答える (#3234)。未配線なら
 	// ErrUnsupportedActivity。
-	quoteRequests   *QuoteRequestHandler
+	quoteRequests *QuoteRequestHandler
+	// quoteAnswers は、こちらが送った QuoteRequest への Accept / Reject を受ける
+	// (#3234 段階 3)。未配線なら従来どおり (Follow 以外の Accept は無視)。
+	quoteAnswers    QuoteAnswerHandler
 	abuseReportRepo repository.AbuseReportRepository
 	abuseIDGen      id.Generator
 	// abuseInAppNotifier はリモートからの通報 (AP Flag) をモデレーターの通知欄に
@@ -178,6 +181,17 @@ func (p *Processor) SetInboundFollowAcceptor(a InboundFollowAcceptor) {
 // SetQuoteRequestHandler wires FEP-044f QuoteRequest handling (#3234).
 func (p *Processor) SetQuoteRequestHandler(h *QuoteRequestHandler) {
 	p.quoteRequests = h
+}
+
+// QuoteAnswerHandler receives the answers to QuoteRequests sent by local notes.
+type QuoteAnswerHandler interface {
+	HandleAnswer(actorURI, requestURI string, accepted bool, result string) error
+}
+
+// SetQuoteAnswerHandler wires the handler of Accept / Reject for our
+// QuoteRequests (FEP-044f、#3234)。
+func (p *Processor) SetQuoteAnswerHandler(h QuoteAnswerHandler) {
+	p.quoteAnswers = h
 }
 
 // handleQuoteRequest answers a FEP-044f QuoteRequest for a local note (#3234).
@@ -1343,6 +1357,13 @@ func (p *Processor) handleUndoAnnounce(act genericActivity, inner genericActivit
 // 自身であれば relay の Accept とみなし、RelayStatusMarker.MarkAccepted を
 // 呼び出す (所有権検証は upstream に無い mk-go 側の硬化)。
 func (p *Processor) handleAccept(act genericActivity) error {
+	// こちらが送った QuoteRequest への承認 (FEP-044f、#3234)。object が id だけの
+	// 文字列でも来るので、下の Follow 用の解釈より先に見る。
+	if p.quoteAnswers != nil {
+		if reqURI := quoteAnswerRequestURI(act.Object, p.localBaseURL); reqURI != "" {
+			return p.quoteAnswers.HandleAnswer(act.Actor, reqURI, true, quoteAnswerResult(act.raw))
+		}
+	}
 	var inner genericActivity
 	// 型エラーを握らないと、直後の normalizeActor (#999) が救うはずの
 	// `inner.actor` が embedded object のケースに**到達できない** (#2662)。
@@ -2454,6 +2475,11 @@ func isBearcapURI(raw json.RawMessage) bool {
 // actor がその relay 自身なら relay 関連として RelayStatusMarker.MarkRejected
 // を呼ぶ。
 func (p *Processor) handleReject(act genericActivity) error {
+	if p.quoteAnswers != nil {
+		if reqURI := quoteAnswerRequestURI(act.Object, p.localBaseURL); reqURI != "" {
+			return p.quoteAnswers.HandleAnswer(act.Actor, reqURI, false, "")
+		}
+	}
 	var inner genericActivity
 	// 型エラーを握らないと、直後の normalizeActor (#999) が救うはずの
 	// `inner.actor` が embedded object のケースに**到達できない** (#2662)。

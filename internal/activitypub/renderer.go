@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html"
 	"log/slog"
 	"regexp"
@@ -126,6 +127,12 @@ func (b *URLBuilder) NoteURI(noteID string) string {
 // 投稿の下に置く。
 func (b *URLBuilder) QuoteAuthorizationURI(noteID, authorizationID string) string {
 	return b.NoteURI(noteID) + "/quote-authorizations/" + authorizationID
+}
+
+// QuoteRequestURI returns the id of the QuoteRequest a local quoting note sends
+// (#3234)。引用する投稿 1 つにつき 1 つなので、投稿の URI から決める。
+func (b *URLBuilder) QuoteRequestURI(noteID string) string {
+	return b.NoteURI(noteID) + "#quote-request"
 }
 
 // CreateActivityURI returns the URI of the Create activity wrapping a note.
@@ -297,6 +304,9 @@ type Renderer struct {
 	// 解決する lookup (#2031)。upstream renderImage は actor icon/image に
 	// sensitive: file.isSensitive / name: file.comment を付ける。nil なら付けない。
 	driveFileMeta func(fileID string) (isSensitive bool, comment *string, ok bool)
+	// quoteApproval は引用する投稿の承認 URI (FEP-044f の quoteAuthorization) を
+	// 引く lookup (#3234)。承認が無ければ空文字列。nil なら付けない。
+	quoteApproval func(n *model.Note) (string, error)
 }
 
 // NewRenderer constructs a Renderer.
@@ -309,6 +319,19 @@ func NewRenderer(urls *URLBuilder) *Renderer {
 // builder (#1876)。
 func (r *Renderer) URLs() *URLBuilder {
 	return r.urls
+}
+
+// SetQuoteApprovalResolver wires the lookup of a quoting note's approval URI
+// (FEP-044f `quoteAuthorization`、#3234)。
+func (r *Renderer) SetQuoteApprovalResolver(fn func(n *model.Note) (string, error)) {
+	r.quoteApproval = fn
+}
+
+// IsQuote reports whether the note is rendered as a quote (a renote with text).
+// 引用として配る (`quote` / `_misskey_quote` を付ける) かどうかの唯一の判定で、
+// QuoteRequest を送るかどうかもこれに揃える。
+func IsQuote(n *model.Note) bool {
+	return n.RenoteID != nil && stringValue(n.Text) != ""
 }
 
 // SetInstanceImageLookup wires a lookup for meta.iconUrl / meta.bannerUrl used
@@ -580,7 +603,40 @@ func (r *Renderer) enrichPersonFromProfile(p *Person, profile *model.UserProfile
 }
 
 // RenderNote packs a local note into a Note object.
+//
+// 引用の承認を引けなかったときは、承認の無い引用として描画する (取得や Create を
+// 止めない)。承認済みの引用を配り直す Update は RenderNoteUpdate を使うこと —
+// 承認の抜けた Update は、相手側で承認済みの引用を未承認に戻す。
 func (r *Renderer) RenderNote(n *model.Note, idGen id.Generator) *Note {
+	return r.renderNote(n, idGen, r.lenientQuoteApproval)
+}
+
+func (r *Renderer) lenientQuoteApproval(n *model.Note) string {
+	if r.quoteApproval == nil {
+		return ""
+	}
+	approval, err := r.quoteApproval(n)
+	if err != nil {
+		slog.Warn("activitypub: quote approval lookup failed; rendering without it", "noteId", n.ID, "err", err)
+		return ""
+	}
+	return approval
+}
+
+// strictQuoteApproval resolves the approval up front and fails on lookup errors.
+func (r *Renderer) strictQuoteApproval(n *model.Note) (func(*model.Note) string, error) {
+	approval := ""
+	if IsQuote(n) && r.quoteApproval != nil {
+		a, err := r.quoteApproval(n)
+		if err != nil {
+			return nil, fmt.Errorf("quote approval: %w", err)
+		}
+		approval = a
+	}
+	return func(*model.Note) string { return approval }, nil
+}
+
+func (r *Renderer) renderNote(n *model.Note, idGen id.Generator, approvalOf func(*model.Note) string) *Note {
 	text := stringValue(n.Text)
 
 	// MFM → HTML変換
@@ -607,7 +663,7 @@ func (r *Renderer) RenderNote(n *model.Note, idGen id.Generator) *Note {
 
 	// quote renote の URI を先に解決する (gate と quote-inline span の両方で使う)。
 	var quoteURI string
-	if n.RenoteID != nil && text != "" {
+	if IsQuote(n) {
 		quoteURI = r.resolveNoteURI(*n.RenoteID)
 	}
 
@@ -646,6 +702,16 @@ func (r *Renderer) RenderNote(n *model.Note, idGen id.Generator) *Note {
 	if quoteURI != "" {
 		out.MisskeyQuote = APLenientID(quoteURI)
 		out.QuoteURL = APLenientID(quoteURI)
+		// FEP-044f の `quote` と `quoteAuthorization` は、承認があるときだけ付ける
+		// (#3234)。**承認の無いまま `quote` を付けてはいけない** — Mastodon は
+		// `quote` のある引用を「承認待ち」として表示し、本文の quote-inline span
+		// (RE: リンク) を消す。承認を返さない相手 (本家 Misskey など) への引用は
+		// 永久にその表示になる。`quote` が無ければ legacy として RE: リンクが残り、
+		// 承認が届いた後の Update で承認済みに切り替わる。
+		if approval := approvalOf(n); approval != "" {
+			out.Quote = APLenientID(quoteURI)
+			out.QuoteAuthorization = APLenientID(approval)
+		}
 		// 非 Misskey クライアント向けに content 末尾へ quote-inline span を
 		// 付ける (#1560、upstream ApRendererService.ts:436-441)。class名
 		// `quote-inline` は非 Misskey クライアントの quote 表示に使われる。
@@ -912,12 +978,26 @@ func (r *Renderer) addEmojiTags(tags *APObjectList, emojiNames []string, host *s
 // 連続投票が発生した場合の Activity ID 衝突を防ぐ。受信側 instance は
 // Activity ID で idempotency dedup するため、衝突するとうしろ側 Update が
 // drop されて count が古いまま固定される (#690 review)。
-func (r *Renderer) RenderQuestionUpdate(n *model.Note, idGen id.Generator) *Update {
-	question := r.RenderNote(n, idGen)
-	// inner Question の @context は outer Update に集約する (RenderCreate /
+func (r *Renderer) RenderQuestionUpdate(n *model.Note, idGen id.Generator) (*Update, error) {
+	return r.RenderNoteUpdate(n, idGen)
+}
+
+// RenderNoteUpdate builds an `Update` wrapping the current rendering of a local
+// note. `updated` を付けないので、Mastodon は編集ではなく付随情報 (引用の承認・
+// 引用してよい範囲・投票数) の更新として扱う (#3234)。
+//
+// 引用の承認を引けなければ error を返す。承認の抜けた Update を受けた Mastodon は、
+// 承認済みの引用を未承認に戻す (承認 URI が変わったとみなす)。
+func (r *Renderer) RenderNoteUpdate(n *model.Note, idGen id.Generator) (*Update, error) {
+	approvalOf, err := r.strictQuoteApproval(n)
+	if err != nil {
+		return nil, err
+	}
+	obj := r.renderNote(n, idGen, approvalOf)
+	// inner Note / Question の @context は outer Update に集約する (RenderCreate /
 	// RenderUpdate と同じパターン、#2510)。
-	question.Context = nil
-	// Activity ID は同一秒内の連続投票でも衝突しないよう nano 精度を保つが、
+	obj.Context = nil
+	// Activity ID は同一秒内の連続更新でも衝突しないよう nano 精度を保つが、
 	// published は upstream toISOString() の .000Z 形式に揃える (#1948-11)。
 	t := time.Now().UTC()
 	u := &Update{
@@ -928,13 +1008,13 @@ func (r *Renderer) RenderQuestionUpdate(n *model.Note, idGen id.Generator) *Upda
 			},
 			Actor:     r.urls.UserURI(n.UserID),
 			Published: t.Format(publishedLayout),
-			To:        question.To,
-			CC:        question.CC,
+			To:        obj.To,
+			CC:        obj.CC,
 		},
-		Object: question,
+		Object: obj,
 	}
 	AddContext(u)
-	return u
+	return u, nil
 }
 
 // RenderVote builds the AP `Create(Note)` activity used to deliver a poll
@@ -1209,6 +1289,28 @@ func (r *Renderer) RenderQuoteRequestReject(note *model.Note, requestID, quoting
 		"object":     r.urls.NoteURI(note.ID),
 		"instrument": quotingURI,
 	})
+}
+
+// RenderQuoteRequest returns the QuoteRequest a local quoting note sends to the
+// author of the remote note it quotes (FEP-044f、#3234)。instrument に引用する
+// 投稿を埋め込む — Mastodon は届いていない投稿を取りに来ずにそれを取り込める
+// (Create より先に届いても答えられる)。
+func (r *Renderer) RenderQuoteRequest(n *model.Note, quotedURI string, idGen id.Generator) *QuoteRequest {
+	instrument := r.RenderNote(n, idGen)
+	instrument.Context = nil
+	q := &QuoteRequest{
+		Activity: Activity{
+			Object: Object{
+				ID:   r.urls.QuoteRequestURI(n.ID),
+				Type: "QuoteRequest",
+			},
+			Actor: r.urls.UserURI(n.UserID),
+		},
+		Object:     quotedURI,
+		Instrument: instrument,
+	}
+	AddContext(q)
+	return q
 }
 
 func (r *Renderer) quoteRequestObject(note *model.Note, a *model.NoteQuoteAuthorization, quoterURI string) map[string]any {
