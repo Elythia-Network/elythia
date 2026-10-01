@@ -52,6 +52,42 @@ func TestClipNoteRepository_LifeCycle(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// DeleteByPair は実際に消えた行数を返す。clips/remove-note は 0 件を
+// NO_SUCH_NOTE にし、1 件のときだけ clippedCount を減らす (本家 4682d44cae)。
+func TestClipNoteRepository_DeleteByPairReportsRows(t *testing.T) {
+	clipRepo := NewClipRepository(testDB)
+	repo := NewClipNoteRepository(testDB)
+	noteRepo := NewNoteRepository(testDB)
+	user := insertTestUser(t, "u_cn_delpair", "cndelpair")
+	defer cleanupUser(t, user.ID)
+
+	c := newTestClip("clp_cn_delpair", user.ID, "alpha")
+	require.NoError(t, clipRepo.Create(c))
+	defer cleanupClip(t, c.ID)
+
+	n := &model.Note{
+		ID:         "n_cn_delpair",
+		UserID:     user.ID,
+		Visibility: model.NoteVisibilityPublic,
+		Reactions:  datatypes.JSON([]byte("{}")),
+	}
+	require.NoError(t, noteRepo.Create(n))
+	defer cleanupNote(t, n.ID)
+
+	require.NoError(t, repo.Create(&model.ClipNote{ID: "cn_delpair", ClipID: c.ID, NoteID: n.ID}))
+	defer testDB.Exec(`DELETE FROM "clip_note" WHERE id = ?`, "cn_delpair")
+
+	deleted, err := repo.DeleteByPair(c.ID, n.ID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), deleted)
+	_, err = repo.FindByPair(c.ID, n.ID)
+	assert.True(t, IsNotFound(err))
+
+	deleted, err = repo.DeleteByPair(c.ID, n.ID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), deleted, "2 回目は 0 件")
+}
+
 // #1554 ListClipIDsByNote は note を含む clip の distinct clipId を返す。
 func TestClipNoteRepository_ListClipIDsByNote(t *testing.T) {
 	clipRepo := NewClipRepository(testDB)

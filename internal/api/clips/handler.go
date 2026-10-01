@@ -440,8 +440,8 @@ func (h *Handler) RemoveNote(c echo.Context) error {
 		case errors.Is(err, coreclip.ErrClipNotFound):
 			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_CLIP", "No such clip.", "b80525c6-97f7-49d7-a42d-ebccd49cfd52"))
 		case errors.Is(err, coreclip.ErrNoteNotFound):
-			// upstream remove-note.ts は note 不在のみ NO_SUCH_NOTE を返す (#1768)。
-			// clip に含まれない note の削除は service 側で silent success になる。
+			// upstream 2026.10.0 の remove-note は、note が無い場合も clip に
+			// 入っていない場合も NO_SUCH_NOTE を返す (4682d44cae)。
 			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_NOTE", "No such note.", "aff017de-190e-434b-893e-33a9ff5049d8"))
 		}
 		return apierr.JSONInternalError(c)

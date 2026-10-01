@@ -92,11 +92,16 @@ func (r *failingPairRepo) FindByPair(string, string) (*model.ClipNote, error) {
 	return nil, r.err
 }
 
+func (r *failingPairRepo) DeleteByPair(string, string) (int64, error) {
+	return 0, r.err
+}
+
 // **pair lookup の DB 障害を「入っていない」に倒さないこと** (#2799)。
 //
 // この 2 つは gate の射程外なので、テストが唯一の回帰検知になる。`AddNote` の
-// 重複チェックは `err == nil` だけを見る形、`RemoveNote` は全 error を silent
-// success にする形で、どちらも「4xx に潰す」形ではないため述語に掛からない。
+// 重複チェックは `err == nil` だけを見る形、`RemoveNote` は削除件数 0 と
+// error を区別しない形で、どちらも「IsNotFound を 4xx に潰す」形ではないため
+// 述語に掛からない。
 func TestClipService_PairLookupDBFailure(t *testing.T) {
 	dbErr := errors.New("dial tcp 127.0.0.1:5432: connect: connection refused")
 	idGen, _ := id.NewGenerator("aidx")
@@ -125,12 +130,13 @@ func TestClipService_PairLookupDBFailure(t *testing.T) {
 		assert.Empty(t, pairRepo.Notes, "DB 障害中に行を足している")
 	})
 
-	// **silent success にしない。** 204 を返すのに note は clip に残るので、
-	// クライアントは成功として UI から消してしまう。
+	// **削除の DB 障害を NO_SUCH_NOTE にしない。** 4xx になると接続断が
+	// 「clip に入っていない」として返り、原因が見えなくなる。
 	t.Run("RemoveNote", func(t *testing.T) {
 		svc, _ := newSvc(t)
 		err := svc.RemoveNote("u1", "c1", "n1")
 		require.Error(t, err, "DB 障害が silent success になっている")
 		assert.ErrorIs(t, err, dbErr)
+		assert.False(t, errors.Is(err, clip.ErrNoteNotFound))
 	})
 }

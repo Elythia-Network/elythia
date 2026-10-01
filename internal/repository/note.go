@@ -1538,10 +1538,11 @@ const noteRemovableExpr = `
 // 本人の操作と無関係に消える。
 //
 // `clip_note` を直接見るのは mk-go 固有の追加。upstream は非正規化カウンタの
-// `clippedCount = 0` で判定するが、mk-go はカウンタを維持せず clip_note を数える
-// 設計 (#2243) なので `clippedCount` は常に 0 で、upstream の条件をそのまま
-// 移植してもクリップを保護できない。`clippedCount` / `pageCount` の比較自体は
-// TS から切り戻したインスタンス (= カウンタが実際に入っている行) のために残す。
+// `clippedCount = 0` だけで判定する。mk-go も #1768 以降は clips/add-note と
+// remove-note で `clippedCount` を増減しているが、それより前に mk-go で
+// クリップした行はカウンタが 0 のまま残っているので、カウンタだけを見ると
+// そうしたクリップを保護できない。`clippedCount` / `pageCount` の比較は
+// カウンタが入っている行 (TS 由来や #1768 以降の行) のために併せて見る。
 func (r *noteRepository) DeleteExpiredRemoteNotes(expiryDays, batchSize int) (int64, error) {
 	deleted, _, _, err := r.DeleteExpiredRemoteNotesAfter(expiryDays, batchSize, "")
 	return deleted, err
