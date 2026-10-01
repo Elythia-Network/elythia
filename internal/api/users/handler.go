@@ -386,8 +386,11 @@ func (h *Handler) emojiLookup() entity.EmojiLookup {
 // populateUserEmojis resolves custom emoji names in user.Emojis to URLs and
 // sets lite.Emojis. PackNotes経由でなくUserLite/UserDetailedを直接返す
 // パス (users/show等) で使用する。
+//
+// ローカルの利用者は本家と同じく解決しない (entity.EmojiResolver.PopulateUserEmojis
+// 参照、#3270)。
 func (h *Handler) populateUserEmojis(u *model.User, lite *entity.UserLite) {
-	if h.emojiRepo == nil || u == nil || lite == nil || len(u.Emojis) == 0 {
+	if h.emojiRepo == nil || u == nil || lite == nil || len(u.Emojis) == 0 || u.Host == nil {
 		return
 	}
 	emojis, err := h.emojiRepo.FindManyByNamesAndHost(u.Emojis, u.Host)

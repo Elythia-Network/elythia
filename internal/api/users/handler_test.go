@@ -2212,8 +2212,14 @@ func TestShow_IsFollowing(t *testing.T) {
 // 実行されるよう emoji 行を仕込む。
 func TestSetters_WireOptionalDeps(t *testing.T) {
 	h, repo := newTestHandler(t)
+	remoteHost := "remote.example"
 	repo.Users["u1"] = &model.User{
 		ID: "u1", Username: "alice", UsernameLower: "alice",
+		Emojis:            []string{"smile"},
+		AvatarDecorations: datatypes.JSON("[]"),
+	}
+	repo.Users["u2"] = &model.User{
+		ID: "u2", Username: "bob", UsernameLower: "bob", Host: &remoteHost,
 		Emojis:            []string{"smile"},
 		AvatarDecorations: datatypes.JSON("[]"),
 	}
@@ -2222,20 +2228,28 @@ func TestSetters_WireOptionalDeps(t *testing.T) {
 	require.NoError(t, emojiRepo.Create(&model.Emoji{
 		ID: "e1", Name: "smile", PublicURL: "https://x/smile.png",
 	}))
+	require.NoError(t, emojiRepo.Create(&model.Emoji{
+		ID: "e2", Name: "smile", Host: &remoteHost, PublicURL: "https://remote.example/smile.png",
+	}))
 	h.SetEmojiRepo(emojiRepo)
 	h.SetInstanceRepo(testutil.NewMockInstanceRepository())
 	h.SetReactionReader(stubBufferedReactions{})
 	h.SetNoteFieldResolver(nil) // Apply は r==nil で no-op (#739)
 
-	rec := postStub(h.Show, `{"userId":"u1"}`, &model.User{ID: "u1"})
-	require.Equal(t, http.StatusOK, rec.Code)
-
-	var resp map[string]any
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	// populateUserEmojis が emoji を URL に解決して emojis map に出すこと
-	emojis, _ := resp["emojis"].(map[string]any)
-	require.NotNil(t, emojis, "emojis should be populated when emojiRepo is wired")
-	assert.Equal(t, "https://x/smile.png", emojis["smile"])
+	show := func(id string) map[string]any {
+		rec := postStub(h.Show, `{"userId":"`+id+`"}`, &model.User{ID: "u1"})
+		require.Equal(t, http.StatusOK, rec.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		emojis, _ := resp["emojis"].(map[string]any)
+		return emojis
+	}
+	// populateUserEmojis がリモートの利用者の emoji を URL に解決して emojis map に出すこと
+	remote := show("u2")
+	require.NotNil(t, remote, "emojis should be populated when emojiRepo is wired")
+	assert.Equal(t, "https://remote.example/smile.png", remote["smile"])
+	// ローカルの利用者は本家と同じく解決しない (#3270)。
+	assert.Empty(t, show("u1"))
 }
 
 // stubBufferedReactions implements entity.BufferedReactionsReader as a no-op

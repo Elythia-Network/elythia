@@ -656,3 +656,31 @@ func TestPopulateNoteEmojis_UnresolvedEmojiExcluded(t *testing.T) {
 	_, exists := (*entity.Emojis)["unknown"]
 	assert.False(t, exists, "unknown emoji should not be in entity.Emojis")
 }
+
+// ローカルの利用者の emojis は本家と同じく解決しない (#3270)。本家
+// CustomEmojiService.populateEmoji は host が null だと null を返す。引きにも
+// 行かない (タイムラインのたびに無駄な問い合わせを増やさない)。
+func TestPopulateUserEmojis_LocalUserNotResolved(t *testing.T) {
+	lookup := &stubEmojiLookup{data: map[string][]*model.Emoji{
+		"": {{ID: "e1", Name: "cat", PublicURL: "https://local.example/emoji/cat.png"}},
+	}}
+	user := &model.User{ID: "u1", Username: "alice", Emojis: model.StringArray{"cat"}}
+	note := &model.Note{ID: "n1", UserID: "u1", User: user, Emojis: model.StringArray{}}
+
+	r := NewEmojiResolver(lookup, []*model.Note{note})
+	lite := &UserLite{Emojis: map[string]string{}}
+	r.PopulateUserEmojis(user, lite)
+
+	assert.Empty(t, lite.Emojis)
+	for _, c := range lookup.calls {
+		assert.NotContains(t, c.names, "cat", "ローカルの利用者の絵文字を引きに行かない")
+	}
+
+	// ローカルのノートの本文に同じ絵文字があってキャッシュに入っていても、
+	// 利用者の emojis には出さない。
+	note.Emojis = model.StringArray{"cat"}
+	r = NewEmojiResolver(lookup, []*model.Note{note})
+	lite = &UserLite{Emojis: map[string]string{}}
+	r.PopulateUserEmojis(user, lite)
+	assert.Empty(t, lite.Emojis)
+}

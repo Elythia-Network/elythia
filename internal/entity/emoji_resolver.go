@@ -114,7 +114,8 @@ func NewEmojiResolver(lookup EmojiLookup, notes []*model.Note) *EmojiResolver {
 			continue
 		}
 		addNames(n.Emojis, n.UserHost)
-		if n.User != nil {
+		// ローカルの利用者の絵文字は解決しない (PopulateUserEmojis 参照) ので引かない。
+		if n.User != nil && n.User.Host != nil {
 			addNames(n.User.Emojis, n.User.Host)
 		}
 		// note.Reactions の JSON キーから custom emoji を抽出して
@@ -246,15 +247,16 @@ func collectReactionEmojiNames(raw []byte) []emojiNameHost {
 }
 
 // PopulateUserEmojis resolves emoji names stored in user.Emojis to URLs
-// and sets lite.Emojis.
+// and sets lite.Emojis. Local users are left empty, like upstream.
+//
+// 本家 CustomEmojiService.populateEmoji は host が null だと解決しないので、
+// ローカルの利用者の emojis は常に {} になる。mk-go も i/update で列を書く
+// ようになった (#3270) ので、解決すると本家に無い値が API に出る。
 func (r *EmojiResolver) PopulateUserEmojis(user *model.User, lite *UserLite) {
-	if r == nil || user == nil || lite == nil || len(user.Emojis) == 0 {
+	if r == nil || user == nil || lite == nil || len(user.Emojis) == 0 || user.Host == nil {
 		return
 	}
-	host := ""
-	if user.Host != nil {
-		host = *user.Host
-	}
+	host := *user.Host
 	emojis := make(map[string]string, len(user.Emojis))
 	for _, name := range user.Emojis {
 		if url, ok := r.cache[name+"@"+host]; ok {
