@@ -3,11 +3,16 @@ package processors_test
 import (
 	"bytes"
 	"context"
+	"crypto/ecdh"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	webpushlib "github.com/SherClockHolmes/webpush-go"
@@ -376,4 +381,96 @@ func TestLibraryWebPushSender_RespectsExistingHTTPClient(t *testing.T) {
 	// 鍵不正で実 HTTP までは行かないが、caller の HTTPClient ポインタは
 	// 引き続き preset を指したまま (sender 側で書き換えない)。
 	assert.Same(t, preset, opts.HTTPClient)
+}
+
+// 本家 PushNotificationService と同じく、保存済みの購読でも配送先として使えない
+// endpoint には送らない。410 のときのような削除もしない (本家も飛ばすだけ)。
+func TestWebPushProcessor_SkipsInvalidStoredEndpoint(t *testing.T) {
+	sender := &stubWebPushSender{}
+	subs := map[string][]*model.SwSubscription{
+		"u1": {
+			{UserID: "u1", Endpoint: "http://push.example/plain-http"},
+			{UserID: "u1", Endpoint: "https://user:pass@push.example/userinfo"},
+			{UserID: "u1", Endpoint: "https:push.example/opaque"},
+			{UserID: "u1", Endpoint: "https://push.example/ok"},
+		},
+	}
+	p, repo := newProcessor(t, sender, metaWithVAPID(), subs)
+
+	payload := queue.WebPushPayload{UserID: "u1", Type: webpush.TypeNotification}
+	require.NoError(t, p.Handle(context.Background(), taskFromPayload(t, payload)))
+	require.Len(t, sender.calls, 1)
+	assert.Equal(t, "https://push.example/ok", sender.calls[0].endpoint)
+	assert.Empty(t, repo.deleteCalled)
+}
+
+// validSubscriptionKeys returns client keys webpush-go can encrypt to, so a
+// Send call actually reaches the HTTP client.
+func validSubscriptionKeys(t *testing.T) webpushlib.Keys {
+	t.Helper()
+	priv, err := ecdh.P256().GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	auth := make([]byte, 16)
+	_, err = rand.Read(auth)
+	require.NoError(t, err)
+	return webpushlib.Keys{
+		P256dh: base64.RawURLEncoding.EncodeToString(priv.PublicKey().Bytes()),
+		Auth:   base64.RawURLEncoding.EncodeToString(auth),
+	}
+}
+
+// vapidOptions returns Options carrying a freshly generated VAPID key pair.
+func vapidOptions(t *testing.T) *webpushlib.Options {
+	t.Helper()
+	vapidPriv, vapidPub, err := webpushlib.GenerateVAPIDKeys()
+	require.NoError(t, err)
+	return &webpushlib.Options{
+		Subscriber:      "https://example.com",
+		VAPIDPublicKey:  vapidPub,
+		VAPIDPrivateKey: vapidPriv,
+		TTL:             30,
+	}
+}
+
+// HTTPClient を注入しないときも、宛先を検査しない http.DefaultClient には
+// 落ちない。loopback の endpoint へは接続しない。
+func TestLibraryWebPushSender_DefaultClientRefusesLoopback(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	t.Cleanup(srv.Close)
+
+	s := processors.LibraryWebPushSender{}
+	resp, err := s.Send(context.Background(), &webpushlib.Subscription{
+		Endpoint: srv.URL + "/push",
+		Keys:     validSubscriptionKeys(t),
+	}, []byte(`{}`), vapidOptions(t))
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	require.Error(t, err)
+	assert.Zero(t, hits.Load(), "the fallback client must not connect to a loopback endpoint")
+}
+
+// countingClient records how many requests it was asked to perform.
+type countingClient struct{ n atomic.Int32 }
+
+func (c *countingClient) Do(*http.Request) (*http.Response, error) {
+	c.n.Add(1)
+	return &http.Response{StatusCode: http.StatusCreated, Body: io.NopCloser(bytes.NewReader(nil))}, nil
+}
+
+// 注入した HTTPClient がある場合は、既定の client ではなくそれを使う。
+func TestLibraryWebPushSender_UsesInjectedClient(t *testing.T) {
+	client := &countingClient{}
+	s := processors.LibraryWebPushSender{HTTPClient: client}
+	resp, err := s.Send(context.Background(), &webpushlib.Subscription{
+		Endpoint: "https://push.example/z",
+		Keys:     validSubscriptionKeys(t),
+	}, []byte(`{}`), vapidOptions(t))
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	assert.Equal(t, int32(1), client.n.Load())
 }
