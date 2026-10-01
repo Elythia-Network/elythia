@@ -1159,6 +1159,7 @@ GTL が無傷なので、この食い違いは mk-go 側の退行として出る
 | AP outbox と `ugcVisibilityForVisitor` | `FanoutTimelineEndpointService` が `me == null` のとき常に設定で絞るので、FTT 有効時は outbox (`getMiNotes({ me: null })`) も巻き込まれ、`none` だと Redis 由来の部分が空になってページングが崩れる | **outbox には掛けない。** 連合の互換を優先する。この設定はログインしていない閲覧者向けの REST / ストリーム / Web のフィードにだけ効かせる (`core/ugcvisibility`) |
 | `notes/featured` の SQL fallback と `ugcVisibilityForVisitor: local` | ranking 以外の経路が無い | ranking が空のときの `count DESC` の SQL fallback (mk-go 独自) では、ログインしていない閲覧者に対して取得後にリモートの投稿者を落とすので、1 ページの件数が `limit` を下回ることがある。ranking 経路は upstream と同じく絞ってから `limit` で切る |
 | `/api/notes` の `noteIds` と `ugcVisibilityForVisitor` | 該当する経路が無い (`noteIds` は mk-go 独自の拡張) | 一覧側と同じく、ログインしていない閲覧者には `none` で全件、`local` でリモートの投稿者のノートを落とす |
+| ストリームの `ugcVisibilityForVisitor: local` で著者を判定できない payload | `note.user.host` を読む段階で例外になり、送られない | 著者 (`user`) が無い・読めない payload は送らない (著者がローカルだと確かめられないため)。外から見える結果は同じ |
 
 > TOTP replay guard と inbox admission は、かつて mk-go 独自の硬化だったが upstream が追いついて現在は同等。コード内の「upstream は持たない」旨のコメントは陳腐化している箇所があるので、見つけたら更新すること。
 

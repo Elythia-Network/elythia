@@ -87,6 +87,11 @@ func (c *RoleTimelineChannel) OnRedisEvent(payload []byte) {
 	if anonRequireSigninDrop(payload, viewerIDFromCtx(c.ctx)) {
 		return
 	}
+	// 未ログインの viewer には meta.ugcVisibilityForVisitor を適用する
+	// (upstream NoteStreamingHidingService.filter)。
+	if anonUGCVisibilityDrop(c.ctx, payload, viewerIDFromCtx(c.ctx)) {
+		return
+	}
 	if !c.filter.shouldEmit(payload, c.ctx.HardMuteRules(), viewerIDFromCtx(c.ctx)) {
 		return
 	}

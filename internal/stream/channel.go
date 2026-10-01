@@ -78,6 +78,12 @@ type ChannelContext interface {
 	// (#1942). Returns nil when the policy provider is unwired — callers treat
 	// nil as "no gating" (fail-open).
 	UserPolicies() map[string]any
+	// UGCVisibilityForVisitor returns the live meta.ugcVisibilityForVisitor
+	// ("all" / "local" / "none"). Channels consult it only for anonymous
+	// viewers, mirroring upstream NoteStreamingHidingService.filter. Returns ""
+	// when the lookup is unwired — callers treat "" as "all" (fail-open, the
+	// startup wiring check guards production).
+	UGCVisibilityForVisitor() string
 }
 
 // PermittedChannel is an optional interface a Channel can implement to

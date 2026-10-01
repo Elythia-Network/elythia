@@ -2976,6 +2976,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// policy provider を配線する (#1942)。REST timeline と同じく WS でも policy で
 	// 無効化された timeline を subscribe させない (policy bypass 解消)。
 	streamManager.SetPolicyProvider(roleService)
+	// 匿名接続への meta.ugcVisibilityForVisitor (upstream
+	// NoteStreamingHidingService / Connection の noteUpdated)。REST と同じ
+	// metaUGCVisibility を毎回引く (cachedMeta なので event ごとの DB 往復は無い)。
+	// 起動時に焼き込むと、管理画面で締めても再起動まで streaming に効かない。
+	streamManager.SetUGCVisibilityLookup(func() string { return metaUGCVisibility(metaRepo) })
 	// 以下 3 つの subscriber は **WebSocket 接続を持つ role でだけ**起動する
 	// (#2459)。queue role には connection が無いので、購読しても受け取った
 	// event を捨てるだけで Redis pubsub の帯域を食う。
@@ -4395,6 +4400,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"配信ごとのミュート / ブロック filter が無効になる (fail-open)"},
 		{"stream.policyProvider", streamManager.HasPolicyProvider(),
 			"streaming の ltlAvailable / gtlAvailable gate が無効になる (fail-open)"},
+		{"stream.ugcVisibilityLookup", streamManager.HasUGCVisibilityLookup(),
+			"未ログインの streaming 接続に ugcVisibilityForVisitor が効かず、全 note と noteUpdated が流れる (fail-open)"},
 		{"inboxProcessor.hostBlockChecker", inboxProcessor.HasHostBlockChecker(),
 			"ブロック済み host / 許可外 host からの activity を受け入れる"},
 		{"inbox.hostBlockChecker", inboxHandler.HasHostBlockChecker(),

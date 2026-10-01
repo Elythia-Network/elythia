@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"sync"
 
+	"github.com/shiroha-a/mk/internal/core/ugcvisibility"
 	"github.com/shiroha-a/mk/internal/model"
 )
 
@@ -108,6 +109,7 @@ type Dispatcher struct {
 	noteElems      map[string]*list.Element  // noteID → noteOrder の要素
 	notifReader    NotificationReader
 	noteVisibility NoteVisibilityChecker
+	ugcVisibility  UGCVisibilityLookup
 }
 
 // NewDispatcher constructs a Dispatcher for the given connection. registry /
@@ -139,6 +141,21 @@ func (d *Dispatcher) SetNotificationReader(nr NotificationReader) {
 // notifications #1444 と同 doctrine)。
 func (d *Dispatcher) SetNoteVisibilityChecker(c NoteVisibilityChecker) {
 	d.noteVisibility = c
+}
+
+// SetUGCVisibilityLookup wires the live meta.ugcVisibilityForVisitor lookup
+// used by anonymous connections (channel note gate and noteUpdated gate).
+// nil disables both gates (fail-open).
+func (d *Dispatcher) SetUGCVisibilityLookup(l UGCVisibilityLookup) {
+	d.ugcVisibility = l
+}
+
+// ugcVisibilityForVisitor returns the current policy, or "" when unwired.
+func (d *Dispatcher) ugcVisibilityForVisitor() string {
+	if d.ugcVisibility == nil {
+		return ""
+	}
+	return d.ugcVisibility()
 }
 
 // HandleClientMessage parses a Misskey-style envelope and forwards it to the
@@ -609,6 +626,12 @@ func (c *channelContext) UserPolicies() map[string]any {
 	return c.dispatcher.conn.Policies()
 }
 
+// UGCVisibilityForVisitor forwards the live meta.ugcVisibilityForVisitor so
+// note channels can apply the visitor policy to anonymous viewers.
+func (c *channelContext) UGCVisibilityForVisitor() string {
+	return c.dispatcher.ugcVisibilityForVisitor()
+}
+
 // --- readNotification / subNote / unsubNote ---
 
 // handleReadNotification marks all notifications as read for the connected user.
@@ -745,6 +768,12 @@ func (d *Dispatcher) forwardNoteEvent(noteID string, payload []byte) {
 		Body json.RawMessage `json:"body"`
 	}
 	if err := json.Unmarshal(payload, &env); err != nil || env.Type == "" {
+		return
+	}
+	// upstream Connection.onNoteStreamMessage と同じく、未ログインの接続には
+	// ugcVisibilityForVisitor が none のとき noteUpdated を一切送らない。
+	// local のときの扱いは upstream も TODO のまま (none だけ見る) なので揃える。
+	if d.conn.User() == nil && ugcvisibility.HidesAll(d.ugcVisibilityForVisitor()) {
 		return
 	}
 	_ = d.conn.Send(map[string]any{

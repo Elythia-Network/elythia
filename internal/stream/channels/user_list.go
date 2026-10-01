@@ -142,6 +142,11 @@ func (c *UserListChannel) OnRedisEvent(payload []byte) {
 	}
 
 	viewerID := viewerIDFromCtx(c.ctx)
+	// 未ログインの viewer には meta.ugcVisibilityForVisitor を適用する
+	// (upstream NoteStreamingHidingService.filter)。
+	if anonUGCVisibilityDrop(c.ctx, payload, viewerID) {
+		return
+	}
 	if !c.filter.shouldEmit(payload, c.ctx.HardMuteRules(), viewerID) {
 		return
 	}

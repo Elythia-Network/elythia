@@ -7,6 +7,7 @@ import (
 	"time"
 
 	corenote "github.com/shiroha-a/mk/internal/core/note"
+	"github.com/shiroha-a/mk/internal/core/ugcvisibility"
 	"github.com/shiroha-a/mk/internal/core/wordmute"
 	"github.com/shiroha-a/mk/internal/entity"
 	"github.com/shiroha-a/mk/internal/model"
@@ -239,6 +240,38 @@ func anonRequireSigninDrop(payload []byte, viewerID string) bool {
 		return true
 	}
 	return false
+}
+
+// anonUGCVisibilityDrop reports whether an anonymous viewer (viewerID == "")
+// must not receive this note under meta.ugcVisibilityForVisitor, mirroring
+// upstream NoteStreamingHidingService.filter (`none` → drop every note,
+// `local` → drop a note whose own author is remote). Signed-in viewers are
+// never affected and never trigger the policy lookup.
+//
+// 判定に使うのは note 自身の著者 (`user.host`) で、renote 先の著者ではない
+// (upstream が `note.user.host` だけを見るのに揃える)。`local` のときに
+// payload を読めない、または `user` が無い場合は、著者がリモートでないことを
+// 確かめられないので落とす。
+func anonUGCVisibilityDrop(ctx stream.ChannelContext, payload []byte, viewerID string) bool {
+	if viewerID != "" {
+		return false
+	}
+	policy := ctx.UGCVisibilityForVisitor()
+	if ugcvisibility.HidesAll(policy) {
+		return true
+	}
+	if policy != ugcvisibility.Local {
+		return false
+	}
+	var p struct {
+		User *struct {
+			Host *string `json:"host"`
+		} `json:"user"`
+	}
+	if err := json.Unmarshal(payload, &p); err != nil || p.User == nil {
+		return true
+	}
+	return ugcvisibility.HidesNote(policy, p.User.Host)
 }
 
 // streamNoteID decodes the note id from a streamed note payload ("" when

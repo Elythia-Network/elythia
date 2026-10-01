@@ -26,6 +26,7 @@ type stubContext struct {
 	followingUpd  []followingUpdate
 	muteBlockSnap *stream.MuteBlockSnapshot
 	policies      map[string]any
+	ugcPolicy     string
 }
 
 // followingUpdate records a call to UpdateFollowingSnapshot for assertions.
@@ -58,7 +59,8 @@ func (s *stubContext) FollowingSnapshot() map[string]bool { return s.followingSn
 func (s *stubContext) MuteBlockSnapshot() *stream.MuteBlockSnapshot {
 	return s.muteBlockSnap
 }
-func (s *stubContext) UserPolicies() map[string]any { return s.policies }
+func (s *stubContext) UserPolicies() map[string]any    { return s.policies }
+func (s *stubContext) UGCVisibilityForVisitor() string { return s.ugcPolicy }
 func (s *stubContext) UpdateFollowingSnapshot(followeeID string, following bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

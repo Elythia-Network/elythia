@@ -59,6 +59,11 @@ func (c *LocalTimelineChannel) OnRedisEvent(payload []byte) {
 	if anonRequireSigninDrop(payload, viewerID) {
 		return
 	}
+	// 未ログインの viewer には meta.ugcVisibilityForVisitor を適用する
+	// (upstream NoteStreamingHidingService.filter)。
+	if anonUGCVisibilityDrop(c.ctx, payload, viewerID) {
+		return
+	}
 	if !c.filter.shouldEmit(payload, c.ctx.HardMuteRules(), viewerID) {
 		return
 	}
@@ -114,6 +119,11 @@ func (c *GlobalTimelineChannel) OnRedisEvent(payload []byte) {
 	// anon viewer + note/renote/reply 著者が requireSigninToViewContents なら drop
 	// (#1942、upstream global-timeline.ts の 3 連 gate)。hideEmbeds より前に弾く。
 	if anonRequireSigninDrop(payload, viewerID) {
+		return
+	}
+	// 未ログインの viewer には meta.ugcVisibilityForVisitor を適用する
+	// (upstream NoteStreamingHidingService.filter)。
+	if anonUGCVisibilityDrop(c.ctx, payload, viewerID) {
 		return
 	}
 	if !c.filter.shouldEmit(payload, c.ctx.HardMuteRules(), viewerID) {
@@ -172,6 +182,11 @@ func (c *HomeTimelineChannel) Init(params json.RawMessage) error {
 // replyShouldEmit の paramWithReplies には false を渡す。
 func (c *HomeTimelineChannel) OnRedisEvent(payload []byte) {
 	viewerID := viewerIDFromCtx(c.ctx)
+	// 未ログインの viewer には meta.ugcVisibilityForVisitor を適用する
+	// (upstream NoteStreamingHidingService.filter)。
+	if anonUGCVisibilityDrop(c.ctx, payload, viewerID) {
+		return
+	}
 	if !c.filter.shouldEmit(payload, c.ctx.HardMuteRules(), viewerID) {
 		return
 	}
@@ -242,6 +257,11 @@ func (c *HybridTimelineChannel) OnRedisEvent(payload []byte) {
 	// localTimeline topic を購読できるため、LTL/GTL と同じく blank shell を送らず
 	// drop して揃える (requireCredential 非適用の root cause は別 issue)。
 	if anonRequireSigninDrop(payload, viewerID) {
+		return
+	}
+	// 未ログインの viewer には meta.ugcVisibilityForVisitor を適用する
+	// (upstream NoteStreamingHidingService.filter)。
+	if anonUGCVisibilityDrop(c.ctx, payload, viewerID) {
 		return
 	}
 	if !c.filter.shouldEmit(payload, c.ctx.HardMuteRules(), viewerID) {
