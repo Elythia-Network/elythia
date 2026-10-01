@@ -412,6 +412,36 @@ func TestUnrenote_Success(t *testing.T) {
 	noteRepo.Notes["rn1"] = &model.Note{ID: "rn1", UserID: "u1", RenoteID: &renoteID, Text: nil}
 	rec := postExtra(h.Unrenote, `{"noteId":"orig"}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.NotContains(t, noteRepo.Notes, "rn1")
+}
+
+func TestUnrenote_ExistingTargetWithoutRenoteIsNoOp(t *testing.T) {
+	h, noteRepo, _ := newExtraHandler(t)
+	noteRepo.Notes["orig"] = &model.Note{ID: "orig", UserID: "u2"}
+
+	rec := postExtra(h.Unrenote, `{"noteId":"orig"}`, &model.User{ID: "u1"})
+
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+}
+
+func TestUnrenote_DeletesQuotesAndAllMatchingRenotes(t *testing.T) {
+	h, noteRepo, _ := newExtraHandler(t)
+	renoteID := "orig"
+	quoteText := "quote"
+	otherRenoteID := "other"
+	noteRepo.Notes["orig"] = &model.Note{ID: "orig", UserID: "u2"}
+	noteRepo.Notes["rn1"] = &model.Note{ID: "rn1", UserID: "u1", RenoteID: &renoteID}
+	noteRepo.Notes["quote1"] = &model.Note{ID: "quote1", UserID: "u1", RenoteID: &renoteID, Text: &quoteText}
+	noteRepo.Notes["other-user"] = &model.Note{ID: "other-user", UserID: "u3", RenoteID: &renoteID}
+	noteRepo.Notes["other-target"] = &model.Note{ID: "other-target", UserID: "u1", RenoteID: &otherRenoteID}
+
+	rec := postExtra(h.Unrenote, `{"noteId":"orig"}`, &model.User{ID: "u1"})
+
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	assert.NotContains(t, noteRepo.Notes, "rn1")
+	assert.NotContains(t, noteRepo.Notes, "quote1")
+	assert.Contains(t, noteRepo.Notes, "other-user")
+	assert.Contains(t, noteRepo.Notes, "other-target")
 }
 
 func TestUnrenote_NotFound(t *testing.T) {
@@ -1171,6 +1201,24 @@ func TestFeatured_Error(t *testing.T) {
 type failingDeleteNoteRepo struct{ *testutil.MockNoteRepository }
 
 func (f *failingDeleteNoteRepo) Delete(_ *model.Note) error { return testutil.ErrNotFound }
+
+type failingListRenotesRepo struct{ *testutil.MockNoteRepository }
+
+func (f *failingListRenotesRepo) ListRenotesByUser(_, _ string) ([]*model.Note, error) {
+	return nil, errors.New("list renotes failed")
+}
+
+func TestUnrenote_ListError(t *testing.T) {
+	noteRepo := testutil.NewMockNoteRepository()
+	noteRepo.Notes["orig"] = &model.Note{ID: "orig", UserID: "u1"}
+	failing := &failingListRenotesRepo{MockNoteRepository: noteRepo}
+	idGen, _ := id.NewGenerator("aidx")
+	h := NewHandler(failing, nil, corenote.NewDeleteService(failing), nil, nil, nil, nil, nil, idGen)
+
+	rec := postExtra(h.Unrenote, `{"noteId":"orig"}`, &model.User{ID: "u1"})
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
 
 func TestUnrenote_DeleteError(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()

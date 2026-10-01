@@ -161,7 +161,7 @@ type NoteRepository interface {
 	// viewerID は viewer 視点の visibility push-down 用。空文字は匿名
 	// (public/home のみ)。
 	ListFeaturedByUser(userID, viewerID, untilID string, limit int) ([]*model.Note, error)
-	FindRenoteByUser(userID, renoteID string) (*model.Note, error)
+	ListRenotesByUser(userID, renoteID string) ([]*model.Note, error)
 	// ListMentions returns notes mentioning userID that userID can see.
 	// visibility が空でなければ note.visibility = visibility の exact-match で
 	// 絞る (upstream TS notes/mentions と同じ; 空は全種別)。振り分けを LIMIT 前に
@@ -986,16 +986,16 @@ func (r *noteRepository) ListFeaturedByUser(userID, viewerID, untilID string, li
 	return pool, nil
 }
 
-func (r *noteRepository) FindRenoteByUser(userID, renoteID string) (*model.Note, error) {
+func (r *noteRepository) ListRenotesByUser(userID, renoteID string) ([]*model.Note, error) {
 	if !storable(userID) || !storable(renoteID) {
-		return nil, ErrNotFound
+		return []*model.Note{}, nil
 	}
-	var note model.Note
-	if err := r.db.Where("\"userId\" = ? AND \"renoteId\" = ? AND text IS NULL", userID, renoteID).
-		Order("id DESC").First(&note).Error; err != nil {
+	var notes []*model.Note
+	if err := r.db.Where("\"userId\" = ? AND \"renoteId\" = ?", userID, renoteID).
+		Order("id ASC").Find(&notes).Error; err != nil {
 		return nil, err
 	}
-	return &note, nil
+	return notes, nil
 }
 
 func (r *noteRepository) ListMentions(userID, visibility string, following bool, limit int, sinceID, untilID string) ([]*model.Note, error) {

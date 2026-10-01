@@ -1834,13 +1834,14 @@ func (m *MockNoteRepository) ListFeaturedByUser(userID, viewerID, untilID string
 	return pool, nil
 }
 
-func (m *MockNoteRepository) FindRenoteByUser(userID, renoteID string) (*model.Note, error) {
+func (m *MockNoteRepository) ListRenotesByUser(userID, renoteID string) ([]*model.Note, error) {
+	notes := make([]*model.Note, 0)
 	for _, n := range m.Notes {
-		if n.UserID == userID && n.RenoteID != nil && *n.RenoteID == renoteID && n.Text == nil {
-			return n, nil
+		if n.UserID == userID && n.RenoteID != nil && *n.RenoteID == renoteID {
+			notes = append(notes, n)
 		}
 	}
-	return nil, ErrNotFound
+	return notes, nil
 }
 
 // ListMentions accepts the `following` flag for signature parity but does not

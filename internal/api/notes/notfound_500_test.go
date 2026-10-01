@@ -22,8 +22,8 @@ type dbFailingNoteRepo struct {
 
 func (r *dbFailingNoteRepo) FindByID(string) (*model.Note, error) { return nil, r.err }
 
-// unrenote は renote 行を引くので、そちらも落とす。
-func (r *dbFailingNoteRepo) FindRenoteByUser(string, string) (*model.Note, error) {
+// unrenote は対象 note と renote 行を引くので、両方を落とす。
+func (r *dbFailingNoteRepo) ListRenotesByUser(string, string) ([]*model.Note, error) {
 	return nil, r.err
 }
 

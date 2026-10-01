@@ -960,7 +960,7 @@ func (f *failingNoteRepo) ListFeatured(_, _ string, _, _ int) ([]*model.Note, er
 func (f *failingNoteRepo) ListFeaturedByUser(_, _, _ string, _ int) ([]*model.Note, error) {
 	return nil, nil
 }
-func (f *failingNoteRepo) FindRenoteByUser(_, _ string) (*model.Note, error) {
+func (f *failingNoteRepo) ListRenotesByUser(_, _ string) ([]*model.Note, error) {
 	return nil, testutil.ErrNotFound
 }
 func (f *failingNoteRepo) ListMentions(_, _ string, _ bool, _ int, _, _ string) ([]*model.Note, error) {
