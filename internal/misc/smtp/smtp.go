@@ -15,12 +15,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"mime"
+	"mime/quotedprintable"
 	"net"
 	gosmtp "net/smtp"
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/net/proxy"
 )
@@ -165,39 +166,88 @@ func SendMessage(host string, port int, user, pass *string, from, to string, msg
 // multipart/alternative のどちらかを返す。HTML が空なら従来通り text/plain。
 //
 // Subject は非 ASCII を含む可能性があるので RFC 2047 encoded-word で送出する
-// (PR #611 review で指摘)。Content-Transfer-Encoding は UTF-8 charset と整合
-// するよう 8bit を宣言する。modern SMTP server は 8BITMIME 拡張対応済が前提
-// (RFC 6152)。multipart の boundary は crypto/rand 由来で per-message に変える。
+// (PR #611 review で指摘)。multipart の boundary は crypto/rand 由来で
+// per-message に変える。
+//
+// **本文は quoted-printable で送る (#3280)。** 以前は 8bit のまま折り返さずに
+// 書いていたので、長い行 (通報のコメントは最大 2048 文字で、日本語なら約 333
+// 文字で 998 オクテットを超える) が RFC 5322 の行の上限を破り、受け取る側の MTA
+// が UTF-8 の途中で折り返したり拒否したりしえた。quoted-printable なら 1 行は
+// 76 文字に収まり、改行も CRLF に揃う。本家 (nodemailer) も必要に応じて符号化する。
 func buildMessage(from, to, subject, text, html string) string {
 	encodedSubject := encodeSubject(subject)
 	if html == "" {
-		return fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n%s",
-			from, to, encodedSubject, text)
+		return fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n%s",
+			from, to, encodedSubject, encodeQuotedPrintable(text))
 	}
 	boundary := randomBoundary()
 	var b strings.Builder
 	fmt.Fprintf(&b, "From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\n", from, to, encodedSubject)
 	fmt.Fprintf(&b, "Content-Type: multipart/alternative; boundary=\"%s\"\r\n\r\n", boundary)
 	// text part
-	fmt.Fprintf(&b, "--%s\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n%s\r\n",
-		boundary, text)
+	fmt.Fprintf(&b, "--%s\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n%s\r\n",
+		boundary, encodeQuotedPrintable(text))
 	// html part
-	fmt.Fprintf(&b, "--%s\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n%s\r\n",
-		boundary, html)
+	fmt.Fprintf(&b, "--%s\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n%s\r\n",
+		boundary, encodeQuotedPrintable(html))
 	fmt.Fprintf(&b, "--%s--\r\n", boundary)
 	return b.String()
 }
 
+// encodeQuotedPrintable encodes s as quoted-printable (RFC 2045). 改行は CRLF
+// に揃い、1 行は 76 文字までに折り返される。
+func encodeQuotedPrintable(s string) string {
+	var b strings.Builder
+	w := quotedprintable.NewWriter(&b)
+	_, _ = w.Write([]byte(s))
+	_ = w.Close()
+	return b.String()
+}
+
+// maxASCIISubject is the longest ASCII subject sent as-is. 件名の行は
+// "Subject: " を含めて 998 オクテットまでなので、それより長いものは
+// encoded-word に包んで折り返す。
+const maxASCIISubject = 900
+
+// subjectChunkBytes is how many bytes go into one encoded-word. base64 で
+// 52 文字になり、"=?UTF-8?B?" と "?=" を足して 64 文字。1 行目の "Subject: "
+// を足しても 73 文字で、RFC 2047 の「encoded-word を含む行は 76 文字まで」に収まる。
+const subjectChunkBytes = 39
+
 // encodeSubject applies RFC 2047 encoded-word formatting when the subject
-// contains non-ASCII bytes. ASCII-only ならそのまま返す (encoded-word でラップ
-// すると一部の MUA が読みにくく表示するため)。
+// contains non-ASCII bytes or is too long for one header line. 短い ASCII なら
+// そのまま返す (encoded-word でラップすると一部の MUA が読みにくく表示するため)。
+//
+// mime.BEncoding は ASCII だけの件名を符号化せず、長い件名も encoded-word を
+// 空白でつなぐだけで行を折り返さない。どちらも長い件名で 1 行の上限
+// (998 オクテット) を超えるので、自分で区切って encoded-word の間で折り返す
+// (RFC 5322 の folding、#3280)。区切りは UTF-8 の文字の途中に置かない。
 func encodeSubject(s string) string {
-	for i := 0; i < len(s); i++ {
+	needsEncoding := len(s) > maxASCIISubject
+	for i := 0; i < len(s) && !needsEncoding; i++ {
 		if s[i] > 127 {
-			return mime.BEncoding.Encode("UTF-8", s)
+			needsEncoding = true
 		}
 	}
-	return s
+	if !needsEncoding {
+		return s
+	}
+	// 不正な UTF-8 は置き換えておく。継続バイトが並ぶと、下の「文字の途中で
+	// 切らない」調整で区切りが 0 まで下がって進まなくなる。
+	s = strings.ToValidUTF8(s, "\uFFFD")
+	var words []string
+	for len(s) > 0 {
+		n := len(s)
+		if n > subjectChunkBytes {
+			n = subjectChunkBytes
+			for n > 0 && !utf8.RuneStart(s[n]) {
+				n--
+			}
+		}
+		words = append(words, "=?UTF-8?B?"+base64.StdEncoding.EncodeToString([]byte(s[:n]))+"?=")
+		s = s[n:]
+	}
+	return strings.Join(words, "\r\n ")
 }
 
 // randomBoundary は crypto/rand 由来の 16 byte hex 文字列を boundary に使う。
