@@ -3138,8 +3138,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	streamRegistry.Register("reversiGame", channels.NewReversiGameFactory(reversiService).New)
 	streamRegistry.RegisterCredentialed("reversi", channels.NewReversi)
 
-	// バブルゲームの対戦 (#3230)。状態は Redis にだけ置く。
+	// バブルゲームの対戦 (#3230)。対局の状態は Redis にだけ置き、記録 (両者の
+	// 報告と勝敗) は DB に書く (#3232)。
+	bubbleVersusRecordRepo := repository.NewBubbleVersusRepository(s.db)
 	bubbleVersusService := corebubbleversus.NewService(s.redis.Default, stream.NewBubbleVersusPublisher(streamPubSub), blockingService, idGen)
+	bubbleVersusService.SetRecordStore(bubbleVersusRecordRepo)
 	streamRegistry.RegisterCredentialed("bubbleVersus", channels.NewBubbleVersus)
 	streamRegistry.RegisterCredentialed("bubbleVersusMatch", channels.NewBubbleVersusMatchFactory(bubbleVersusService).New)
 

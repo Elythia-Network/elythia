@@ -429,7 +429,7 @@ func TestSubmitReport_Invalid(t *testing.T) {
 		"fractional":   {Reason: ReasonGameOver, Logs: [][]any{{float64(1), float64(3), 1.5}}},
 		// int64 へ変換すると負に化ける大きさ (合計が相手の送った数を下回って素通りする)。
 		"huge": {Reason: ReasonGameOver, Logs: [][]any{{float64(1), float64(3), 1e300}}},
-		// 読まない要素にも任意の値を載せさせない (記録は残さないが、形は締める)。
+		// 読まない要素にも任意の値を載せさせない (記録は DB に残すので、形を締める)。
 		"payload in drop": {Reason: ReasonGameOver, Logs: [][]any{{float64(1), float64(0), "x"}}},
 		"extra element":   {Reason: ReasonGameOver, Logs: [][]any{{float64(1), float64(0), float64(3), float64(4)}}},
 		"hold with arg":   {Reason: ReasonGameOver, Logs: [][]any{{float64(1), float64(1), float64(3)}}},
