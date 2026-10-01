@@ -1137,7 +1137,7 @@ notiftype-check: ## 通知タイプの一覧が 1 箇所から導出されてい
 
 .PHONY: migrationdoc-check
 migrationdoc-check: ## migration の本数を述べた doc が実態と合っているか検査
-	go test ./internal/entitycompat/... -run 'TestMigrationCountsInDocsMatchReality|TestNoopDownMigrationListMatchesReality|TestDestructiveMigrationTableRowsAreUnique' -count=1 -v
+	go test ./internal/entitycompat/... -run 'TestMigrationCountsInDocsMatchReality|TestMigrationCountClaimsDoNotPointIntoHistory|TestClaimPointsIntoHistory|TestNoopDownMigrationListMatchesReality|TestDestructiveMigrationTableRowsAreUnique' -count=1 -v
 
 .PHONY: mdtable-check
 mdtable-check: ## md の表の各行がヘッダと同じ列数か検査 (溢れたセルは描画時に捨てられる)

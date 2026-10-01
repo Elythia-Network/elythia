@@ -15,8 +15,10 @@ import (
 
 // migration の本数を述べた記述が実態とずれていないか検査する (#2874)。
 //
-// **この gate が見るのは 8 ファイル 22 箇所** (数え方: migrationCountClaims の
-// 20 + down が no-op の一覧 1 + 破壊的なマイグレーションの表 1)。1 本足したとき
+// **この gate が見るのは 7 ファイル 21 箇所** (数え方: migrationCountClaims の
+// 19 + down が no-op の一覧 1 + 破壊的なマイグレーションの表 1。一覧と表も
+// docs/migration-from-ts.md にあるのでファイルは増えない。経緯の節の判定に読む
+// docs は含めない)。1 本足したとき
 // 実際に動く箇所はその一部で、#2866 (000082 の追加) では 17 箇所だった
 // (total 4 + destructive 11 + 一覧 1 + 表 1。テーブルを作らず data loss 宣言も
 // 持たない migration なので tables / dataloss は動かない)。**そのうち 5 箇所が
@@ -266,11 +268,188 @@ var migrationCountClaims = []struct {
 
 	{"docs/api-compatibility.md", `migration が作るテーブルは (\d+)`, "tables", 0, "migration が作るテーブル数"},
 	{"internal/testutil/testdb.go", `migration が作る (\d+) テーブル`, "tables", 0, "migration が作るテーブル数"},
-	// **旧 CLAUDE.md の更新記録も見る。** #2756 の entry が同じ主張を持っており、
-	// #3248 で docs/testing.md の「変更の経緯」へ移した。ここが漏れると、gate が
-	// 落とした箇所だけ直して経緯の側が古いまま緑になる — この gate が塞ごうとして
-	// いる形そのもの。
-	{"docs/testing.md", `migration が作る (\d+) テーブル`, "tables", 0, "migration が作るテーブル数 (変更の経緯)"},
+	// **経緯の節の中は見ない (#3251)。** #2756 の entry (docs/testing.md の
+	// 「変更の経緯」) も同じ数を書いているが、あれは「当時のまま」残す記録で、
+	// 今の実態に合わせて書き換えるものではない。検査すると、テーブルが増える
+	// たびに過去の記録を書き換えさせることになる。
+	// TestMigrationCountClaimsDoNotPointIntoHistory が、足し戻すと落とす。
+}
+
+// historyMarker is the phrase that the intro paragraph of every "kept as
+// written at the time" section carries (#3248).
+//
+// **見出しの文字列では判定しない (#3251)。** 「(旧 CLAUDE.md Section N)」の節の
+// うち、当時のまま残しているのは docs/architecture.md だけで、docs/ci.md と
+// docs/development.md の同名の節は CLAUDE.md が参照先に指定している**今も
+// 使う本文**。見出しで拾うと、そこに正しい件数を書いたときに誤って落ちる。
+// 当時のままかどうかは、導入文が自分でそう宣言しているかで決める。
+const historyMarker = "**記述は当時のまま**"
+
+// historyFiles lists the docs that must contain at least one history section.
+//
+// 今は claim を持たないファイルも含むのは、そこへ claim を足したときに経緯を
+// 指していないかを見るため。
+//
+// **ファイルごとに要求する。** 「どれか 1 つにあればよい」にすると、1 ファイルの
+// 導入文を書き換えただけで、そのファイルの経緯の節が判定から黙って消える
+// (他のファイルが存在確認を満たしてしまう)。
+var historyFiles = []string{
+	"docs/architecture.md",
+	"docs/ci.md",
+	"docs/contributing.md",
+	"docs/development.md",
+	"docs/gates.md",
+	"docs/testing.md",
+}
+
+// historySpans returns the byte ranges of the level-2 sections whose intro
+// paragraph contains historyMarker. A section ends at the next level-2 heading.
+//
+// **節の終わりまでに限る。** 見出しからファイル末尾までを経緯とみなすと、経緯の
+// 節の後ろに今も使う節を足したときに、そこへ書いた claim が誤って落ちる。
+//
+// **fence (```) は解釈しない。** 経緯の本文に `## ` で始まる行を書くと (fence の
+// 中でも)、そこで節が切れて以降が判定から外れる。経緯の本文には `## ` 行を
+// 書かない前提で、今は該当が無い。
+func historySpans(body string) [][2]int {
+	var starts []int
+	if strings.HasPrefix(body, "## ") {
+		starts = append(starts, 0)
+	}
+	for i := 0; ; {
+		j := strings.Index(body[i:], "\n## ")
+		if j < 0 {
+			break
+		}
+		starts = append(starts, i+j+1)
+		i += j + 1
+	}
+	var spans [][2]int
+	for k, start := range starts {
+		end := len(body)
+		if k+1 < len(starts) {
+			end = starts[k+1]
+		}
+		section := body[start:end]
+		// 導入文 = 見出しの次にある最初の段落。本文の途中で同じ言い回しを
+		// 使っただけの節を、経緯として扱わないため。
+		rest := section
+		if nl := strings.IndexByte(rest, '\n'); nl >= 0 {
+			rest = rest[nl+1:]
+		} else {
+			rest = ""
+		}
+		rest = strings.TrimLeft(rest, "\n")
+		intro := rest
+		if blank := strings.Index(rest, "\n\n"); blank >= 0 {
+			intro = rest[:blank]
+		}
+		if strings.Contains(intro, historyMarker) {
+			spans = append(spans, [2]int{start, end})
+		}
+	}
+	return spans
+}
+
+// TestMigrationCountClaimsDoNotPointIntoHistory fails when a claim's first
+// match lies inside a section kept as written at the time (#3251).
+//
+// **最初の一致の位置で判定する。** TestMigrationCountsInDocsMatchReality が
+// 検査するのは最初の一致なので、それが経緯の節の中にあれば、過去の記録を
+// 今の値へ書き換えさせることになる。
+func TestMigrationCountClaimsDoNotPointIntoHistory(t *testing.T) {
+	root := repoRoot(t)
+	// **判定が空振りしていないことを先に確かめる。** 導入文の書き方を変えると
+	// historySpans が何も返さなくなり、経緯の節を指す claim が素通りする。
+	for _, f := range historyFiles {
+		body, err := os.ReadFile(filepath.Join(root, f))
+		require.NoError(t, err, "%s を読めない", f)
+		require.NotEmpty(t, historySpans(string(body)), "%s に経緯の節が見つからない。"+
+			"導入文から %q を消したか、書き換えたならこの gate も直すこと — "+
+			"空振りすると、経緯の節を指す claim が素通りする", f, historyMarker)
+	}
+
+	for _, claim := range migrationCountClaims {
+		body, err := os.ReadFile(filepath.Join(root, claim.file))
+		require.NoError(t, err, "%s を読めない", claim.file)
+		if claimPointsIntoHistory(body, claim.pattern) {
+			t.Errorf("%s の %q (%s) は経緯の節の中を指している。"+
+				"経緯は当時のまま残す記録なので、今の実態と一致させる対象にしない (#3251)",
+				claim.file, claim.pattern, claim.symptom)
+		}
+	}
+}
+
+// claimPointsIntoHistory reports whether the first match of pattern in body
+// starts inside a history section. It returns false when nothing matches
+// (TestMigrationCountsInDocsMatchReality reports that case).
+func claimPointsIntoHistory(body []byte, pattern string) bool {
+	loc := regexp.MustCompile(pattern).FindIndex(body)
+	if loc == nil {
+		return false
+	}
+	for _, sp := range historySpans(string(body)) {
+		if loc[0] >= sp[0] && loc[0] < sp[1] {
+			return true
+		}
+	}
+	return false
+}
+
+// 判定の枝を人工の入力で固定する (#3251)。
+//
+// **実データだけでは判定が空虚になる。** 今の docs には経緯の節を指す claim が
+// 1 件も無く、経緯の節はどれもファイル最後の `## ` なので、判定を丸ごと無効に
+// しても、節の終わりを常にファイル末尾にしても、実データからは何も起きない
+// (レビューで実測された)。
+func TestClaimPointsIntoHistory(t *testing.T) {
+	const intro = "移した。" + historyMarker + "で、数字は当時の値。\n\n"
+	cases := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{
+			name: "claim inside a history section",
+			body: "# doc\n\n## 今\n\n本文。\n\n## 経緯\n\n" + intro + "- 作るのは 120 テーブル\n",
+			want: true,
+		},
+		{
+			name: "claim in a live section after a history section",
+			body: "# doc\n\n## 経緯\n\n" + intro + "- 古い記録\n\n## 今\n\n作るのは 120 テーブル\n",
+			want: false,
+		},
+		{
+			name: "level-3 heading does not end a history section",
+			body: "# doc\n\n## 経緯\n\n" + intro + "### 小見出し\n\n作るのは 120 テーブル\n",
+			want: true,
+		},
+		{
+			name: "marker only in the second paragraph is not a history section",
+			body: "# doc\n\n## 今\n\n導入文。\n\n" + intro + "作るのは 120 テーブル\n",
+			want: false,
+		},
+		{
+			name: "history section at the very start of the file",
+			body: "## 経緯\n\n" + intro + "作るのは 120 テーブル\n",
+			want: true,
+		},
+		{
+			name: "first match is live even if a later one is in history",
+			body: "# doc\n\n## 今\n\n作るのは 120 テーブル\n\n## 経緯\n\n" + intro + "作るのは 99 テーブル\n",
+			want: false,
+		},
+		{
+			name: "no match",
+			body: "# doc\n\n## 経緯\n\n" + intro + "無関係\n",
+			want: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, claimPointsIntoHistory([]byte(tc.body), `作るのは (\d+) テーブル`))
+		})
+	}
 }
 
 // TestMigrationCountsInDocsMatchReality fails when a stated count drifted.
