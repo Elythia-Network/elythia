@@ -405,3 +405,44 @@ type failingWebhookRepo struct {
 }
 
 func (f *failingWebhookRepo) FindByID(string) (*model.Webhook, error) { return nil, f.err }
+
+// countingBody counts how many bytes the processor reads from the response.
+type countingBody struct {
+	remaining int64
+	read      int64
+	closed    bool
+}
+
+func (b *countingBody) Read(p []byte) (int, error) {
+	if b.remaining <= 0 {
+		return 0, io.EOF
+	}
+	n := int64(len(p))
+	if n > b.remaining {
+		n = b.remaining
+	}
+	b.remaining -= n
+	b.read += n
+	return int(n), nil
+}
+
+func (b *countingBody) Close() error { b.closed = true; return nil }
+
+// 応答の本文は上限までしか読まずに閉じる (#3263)。本家は本文を読まない。
+func TestWebhookProcessor_DrainsBoundedResponseBody(t *testing.T) {
+	body := &countingBody{remaining: 10 << 20}
+	client := &stubHTTPClient{resp: &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Body: body}}
+	p, _, _ := newTestWebhookProcessor(t, client, nil, map[string]*model.SystemWebhook{
+		"s1": {ID: "s1", URL: "https://hook.example/s1"},
+	})
+	task := queue.NewSystemWebhookTask(queue.WebhookPayload{WebhookID: "s1", EventType: "abuseReport", Body: []byte(`{}`)})
+	require.NoError(t, p.HandleSystem(context.Background(), task))
+	assert.True(t, body.closed)
+	assert.LessOrEqual(t, body.read, int64(64<<10), "上限を超えて読まない")
+	assert.Positive(t, body.read, "接続を使い回すため、上限までは読み捨てる")
+}
+
+// 本家の webhook 配送は HttpRequestService.send の既定 5 秒 (#3263)。
+func TestDefaultWebhookTimeout_MatchesUpstream(t *testing.T) {
+	assert.Equal(t, 5*time.Second, processors.DefaultWebhookTimeout)
+}

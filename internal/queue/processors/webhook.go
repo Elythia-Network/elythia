@@ -32,9 +32,20 @@ type WebhookHTTPClient interface {
 }
 
 // DefaultWebhookTimeout is the per-request HTTP timeout for webhook delivery.
-// Matches upstream Misskey's 10 second timeout. Exported so the wire layer
-// can use the same value when constructing the SSRF-safe outbound client.
-const DefaultWebhookTimeout = 10 * time.Second
+// Exported so the wire layer can use the same value when constructing the
+// SSRF-safe outbound client.
+//
+// 本家の webhook 配送は HttpRequestService.send の既定 5 秒を使う (#3263)。
+// 以前は「本家と同じ 10 秒」としていたが誤りだった。
+const DefaultWebhookTimeout = 5 * time.Second
+
+// webhookResponseDrainLimit bounds how much of the response body is read
+// before closing it.
+//
+// 本家は応答の本文を読まない。こちらは接続を使い回すために読み捨てるが、
+// 上限が無いと、大きな本文を返す相手に対してタイムアウトまで読み続ける (#3263)。
+// 上限を超えた分は読まずに閉じる (その接続は使い回されないだけ)。
+const webhookResponseDrainLimit = 64 << 10
 
 // WebhookProcessor handles a single webhook delivery task. It is instantiated
 // twice (once for user webhooks, once for system webhooks) with different
@@ -142,7 +153,7 @@ func (p *WebhookProcessor) handle(ctx context.Context, t driver.Task, user bool)
 		return err
 	}
 	defer func() {
-		_, _ = io.Copy(io.Discard, resp.Body)
+		_, _ = io.CopyN(io.Discard, resp.Body, webhookResponseDrainLimit)
 		_ = resp.Body.Close()
 	}()
 
