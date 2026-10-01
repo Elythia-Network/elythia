@@ -236,10 +236,15 @@ func (p *MeilisearchProvider) timestampOfID(id string) int64 {
 	return t.UnixMilli()
 }
 
-// quoteValue escapes a string value for use inside a Meilisearch filter
-// expression. We rely on user / channel / host ids being limited to a safe
-// alphabet but still single-quote them and double up any embedded quotes
-// defensively.
+// quoteValue renders a string value as a single-quoted Meilisearch filter
+// literal, escaping backslashes and single quotes with a backslash the same way
+// upstream SearchService.compileValue does (misskey-dev/misskey#17991).
 func quoteValue(v string) string {
-	return "'" + strings.ReplaceAll(v, "'", "''") + "'"
+	// Meilisearch のフィルタ構文は SQL と違い `''` を引用符のエスケープとして
+	// 解釈しないので、upstream と同じくバックスラッシュでエスケープする。
+	// バックスラッシュを先に置換しないと、後で足した `\'` の `\` まで二重化
+	// してしまうので順序に意味がある。
+	v = strings.ReplaceAll(v, `\`, `\\`)
+	v = strings.ReplaceAll(v, "'", `\'`)
+	return "'" + v + "'"
 }

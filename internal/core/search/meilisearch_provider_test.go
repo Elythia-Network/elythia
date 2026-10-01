@@ -369,8 +369,32 @@ func TestMeilisearchProvider_TimestampOfBadID(t *testing.T) {
 	assert.Equal(t, int64(0), got)
 }
 
-func TestQuoteValueEscapesSingleQuotes(t *testing.T) {
-	assert.Equal(t, "'a''b'", quoteValue("a'b"))
-	assert.Equal(t, "'plain'", quoteValue("plain"))
+func TestQuoteValueEscapesLikeUpstream(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "plain", in: "plain", want: `'plain'`},
+		{name: "single quote", in: "a'b", want: `'a\'b'`},
+		{name: "backslash", in: `a\b`, want: `'a\\b'`},
+		{name: "backslash before quote", in: `a\'b`, want: `'a\\\'b'`},
+		{name: "trailing backslash", in: `a\`, want: `'a\\'`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, quoteValue(tc.in))
+		})
+	}
 	assert.True(t, strings.HasPrefix(quoteValue("x"), "'"))
+}
+
+func TestMeilisearchProvider_BuildFilterEscapesValues(t *testing.T) {
+	p, _, _, _ := newProviderWithFake(t, IndexScopeLocal)
+	got := p.buildFilter(SearchOpts{
+		UserID:    "u'1",
+		ChannelID: `c\`,
+		Host:      `h\'x`,
+	}, Pagination{})
+	assert.Equal(t, `(userId = 'u\'1') AND (channelId = 'c\\') AND (userHost = 'h\\\'x')`, got)
 }
