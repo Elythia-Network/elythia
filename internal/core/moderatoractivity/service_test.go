@@ -51,10 +51,14 @@ func (f *fakeAnnounce) Create(a *model.Announcement) error {
 	return nil
 }
 
-type fakeWebhook struct{ events []string }
+type fakeWebhook struct {
+	events []string
+	bodies []any
+}
 
-func (f *fakeWebhook) DispatchSystem(eventType string, _ any) {
+func (f *fakeWebhook) DispatchSystem(eventType string, body any) {
 	f.events = append(f.events, eventType)
+	f.bodies = append(f.bodies, body)
 }
 
 type fakeIDGen struct{ n int }
@@ -203,6 +207,12 @@ func TestCheck_WarningWindow_SendsWarning(t *testing.T) {
 	assert.Nil(t, meta.updated, "まだ全員 inactive ではないので切替なし")
 	assert.Equal(t, []string{"inactiveModeratorsWarning"}, wh.events)
 	assert.NotEmpty(t, *sent)
+	// 本家の ModeratorInactivityRemainingTime と同じ 3 つを送る (#3261)。
+	assert.Equal(t, map[string]any{"remainingTime": map[string]any{
+		"time":    int64(48 * time.Hour / time.Millisecond),
+		"asDays":  2,
+		"asHours": 48,
+	}}, wh.bodies[0])
 }
 
 func TestCheck_WarningWindow_NotOnSixHourBoundary_NoWarning(t *testing.T) {
@@ -249,6 +259,11 @@ func TestCheck_WarningWindow_HoursVariant(t *testing.T) {
 	require.NoError(t, s.Check())
 	assert.Equal(t, []string{"inactiveModeratorsWarning"}, wh.events)
 	assert.NotEmpty(t, *sent)
+	assert.Equal(t, map[string]any{"remainingTime": map[string]any{
+		"time":    int64(6 * time.Hour / time.Millisecond),
+		"asDays":  0,
+		"asHours": 6,
+	}}, wh.bodies[0])
 }
 
 func TestCheck_GetModeratorsError_Propagates(t *testing.T) {
@@ -288,4 +303,25 @@ func TestVerifiedEmails_LoadError_NoEmail(t *testing.T) {
 	s.now = func() time.Time { return now }
 	require.NoError(t, s.Check())
 	assert.Empty(t, sent, "profile 取得失敗時はメールを送らない")
+}
+
+// time は時間や日に丸める前の残りのミリ秒 (#3261)。asHours から逆算しない。
+func TestCheck_WarningWindow_TimeIsUnroundedMilliseconds(t *testing.T) {
+	now := time.Date(2026, 1, 30, 12, 0, 0, 0, time.UTC)
+	inactivePeriod := now.Add(-inactivityLimitDays * 24 * time.Hour)
+	remaining := 48*time.Hour + 25*time.Minute + 1234*time.Millisecond
+	newest := inactivePeriod.Add(remaining)
+	oldEnough := now.Add(-20 * 24 * time.Hour)
+	meta := &fakeMeta{meta: &model.Meta{DisableRegistration: false}}
+	mods := &fakeModerators{users: []*model.User{
+		userWithActive("a", &oldEnough),
+		userWithActive("b", &newest),
+	}}
+	s, _, wh, _ := newSvc(now, mods, meta)
+	require.NoError(t, s.Check())
+	require.Len(t, wh.bodies, 1)
+	rt := wh.bodies[0].(map[string]any)["remainingTime"].(map[string]any)
+	assert.Equal(t, remaining.Milliseconds(), rt["time"])
+	assert.Equal(t, 48, rt["asHours"])
+	assert.Equal(t, 2, rt["asDays"])
 }
