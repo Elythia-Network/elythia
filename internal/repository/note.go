@@ -1553,6 +1553,8 @@ const noteRemovableExpr = `
 // クリップした行はカウンタが 0 のまま残っているので、カウンタだけを見ると
 // そうしたクリップを保護できない。`clippedCount` / `pageCount` の比較は
 // カウンタが入っている行 (TS 由来や #1768 以降の行) のために併せて見る。
+// `pageCount` は #3293 からページの作成・更新・削除で増減している。それより前に
+// 作ったページが参照する行は migration 000107 で埋めた。
 func (r *noteRepository) DeleteExpiredRemoteNotes(expiryDays, batchSize int) (int64, error) {
 	deleted, _, _, err := r.DeleteExpiredRemoteNotesAfter(expiryDays, batchSize, "")
 	return deleted, err
