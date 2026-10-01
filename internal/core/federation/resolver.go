@@ -1190,6 +1190,11 @@ func (r *Resolver) resolveActorOnceWithID(uri string, allowCrossHost bool, preas
 		// hashtag 集計 / user_profile / chart も DB 書き込みなので行わない。
 		return user, nil
 	}
+	// フォロー / フォロワー一覧の公開範囲は、upstream createPerson と同じく
+	// actor の following / followers collection を読んで決める (失敗は非公開)。
+	// user 行を作る前に取る。後にすると、取得の間 profile の無い user 行が残り、
+	// その間は一覧の公開範囲が未設定 (= public 扱い) になる。
+	followingVis, followersVis := r.followVisibilitiesOnCreate(actor.ID, actor.FollowingRaw, actor.FollowersRaw)
 	if err := r.userRepo.Create(user); err != nil {
 		return nil, err
 	}
@@ -1235,12 +1240,14 @@ func (r *Resolver) resolveActorOnceWithID(uri string, allowCrossHost bool, preas
 	hostCopy := host
 	extras := extractRemoteProfileExtras(actor)
 	profile := &model.UserProfile{
-		UserID:      user.ID,
-		Description: extractRemoteDescription(actor),
-		Location:    extras.location,
-		Birthday:    extras.birthday,
-		Fields:      extras.fields,
-		UserHost:    &hostCopy,
+		UserID:              user.ID,
+		Description:         extractRemoteDescription(actor),
+		Location:            extras.location,
+		Birthday:            extras.birthday,
+		Fields:              extras.fields,
+		UserHost:            &hostCopy,
+		FollowingVisibility: followingVis,
+		FollowersVisibility: followersVis,
 	}
 	if err := r.userRepo.CreateProfile(profile); err != nil {
 		// profile 作成失敗時は user 取り込みは成立させる (= 次回 refreshActor
@@ -1754,26 +1761,48 @@ func (r *Resolver) refreshActor(existing *model.User, uri string, skipFeatured b
 	// いずれも best-effort で fail しても user 更新は維持する。
 	desc := extractRemoteDescription(actor)
 	extras := extractRemoteProfileExtras(actor)
+	// フォロー / フォロワー一覧の公開範囲 (upstream updatePerson と同じ規則)。
+	// 一時的な失敗 (ネットワーク / 5xx / 429 / 文書の不備) では保存済みの値を
+	// 変えず、4xx なら非公開にする。
+	followingVis, followingOK, followersVis, followersOK := r.followVisibilitiesOnUpdate(actor.ID, actor.FollowingRaw, actor.FollowersRaw)
 	if _, err := r.userRepo.FindProfileByUserID(existing.ID); err != nil {
+		// back-fill では「保存済みの値」が無い。一時的な失敗で列の既定値
+		// (public) に任せると、非公開の一覧を公開扱いにしうるので、作成時と
+		// 同じく非公開に倒す。
+		if !followingOK {
+			followingVis = model.FollowingVisibilityPrivate
+		}
+		if !followersOK {
+			followersVis = model.FollowingVisibilityPrivate
+		}
 		_ = r.userRepo.CreateProfile(&model.UserProfile{
-			UserID:      existing.ID,
-			Description: desc,
-			Location:    extras.location,
-			Birthday:    extras.birthday,
-			Fields:      extras.fields,
-			UserHost:    existing.Host,
+			UserID:              existing.ID,
+			Description:         desc,
+			Location:            extras.location,
+			Birthday:            extras.birthday,
+			Fields:              extras.fields,
+			UserHost:            existing.Host,
+			FollowingVisibility: followingVis,
+			FollowersVisibility: followersVis,
 		})
 	} else {
 		// fields は jsonb 列に string で渡す。**素の []byte を渡してはいけない**
 		// (実測 SQLSTATE 22P02 で UPDATE ごと落ち、同じ書き込みの description も
 		// 巻き添えになる)。datatypes.JSON は driver.Valuer を実装しているので
 		// そのままでも書けるが、値の形を呼び出し側で確定させておく。
-		_ = r.userRepo.UpdateProfile(existing.ID, map[string]any{
+		profileFields := map[string]any{
 			"description": desc,
 			"location":    extras.location,
 			"birthday":    extras.birthday,
 			"fields":      string(extras.fields),
-		})
+		}
+		if followingOK {
+			profileFields["followingVisibility"] = string(followingVis)
+		}
+		if followersOK {
+			profileFields["followersVisibility"] = string(followersVis)
+		}
+		_ = r.userRepo.UpdateProfile(existing.ID, profileFields)
 	}
 	r.cachePublicKey(existing.ID, actor.PublicKey.ID, actor.PublicKey.PublicKeyPEM.String())
 	r.cacheAssertionMethods(existing.ID, actor.ID, actor.AssertionMethod)
@@ -1978,6 +2007,7 @@ func (r *Resolver) fetchActor(uri string, allowCrossHost bool) (*activitypub.Per
 	if err := json.Unmarshal(body, &actor); err != nil {
 		return nil, ErrInvalidActor
 	}
+	actor.FollowersRaw, actor.FollowingRaw = rawFollowCollections(body)
 	// fetch した document が AS @context を持つことを要求する (本家 resolve の
 	// invalid-response guard、#1828)。誤設定 endpoint が返す non-AP JSON を
 	// actor として取り込むのを防ぐ。

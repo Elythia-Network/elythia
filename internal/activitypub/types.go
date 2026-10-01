@@ -1004,6 +1004,14 @@ type Person struct {
 	// user / TS で signup した user では出力されず、drop-in 互換を維持する
 	// (#1067 / #1069)。
 	AssertionMethod MultikeyList `json:"assertionMethod,omitzero"`
+	// FollowersRaw / FollowingRaw hold the raw `followers` / `following` values
+	// of a fetched actor document (an IRI string or an embedded collection).
+	// They are filled by the federation resolver and never serialized.
+	//
+	// Followers / Following (APLenientID) は埋め込みの collection を id に潰す
+	// ので、中身 (first / items / orderedItems) を見るために生の値も持つ。
+	FollowersRaw json.RawMessage `json:"-"`
+	FollowingRaw json.RawMessage `json:"-"`
 }
 
 // Note represents a note object (microblog post).
