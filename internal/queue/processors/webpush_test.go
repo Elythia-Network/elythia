@@ -86,7 +86,10 @@ func (r *fakeSwRepoForProcessor) FindByUserID(userID string) ([]*model.SwSubscri
 }
 func (r *fakeSwRepoForProcessor) Create(_ *model.SwSubscription) error { return nil }
 func (r *fakeSwRepoForProcessor) Update(_ *model.SwSubscription) error { return nil }
-func (r *fakeSwRepoForProcessor) DeleteByEndpoint(_ string) error      { return nil }
+func (r *fakeSwRepoForProcessor) FindByEndpointAuthKey(_ *string, _, _, _ string) ([]*model.SwSubscription, error) {
+	return nil, errors.New("not used")
+}
+func (r *fakeSwRepoForProcessor) DeleteByIDs(_ []string) error { return nil }
 func (r *fakeSwRepoForProcessor) DeleteByUserAndEndpoint(userID, endpoint string) error {
 	r.deleteCalled = append(r.deleteCalled, userID+":"+endpoint)
 	// also remove from in-memory map so cache invalidation + refetch works.

@@ -10,7 +10,8 @@
 //     subscription を作成 → { state: 'subscribed', userId, endpoint, ... }
 //   - sw/show-registration: { endpoint } で取得 → 該当 row なしなら null
 //   - sw/update-registration: sendReadMessage を切替
-//   - sw/unregister: 削除 (auth 不要)
+//   - sw/unregister: { endpoint, auth, publickey } (2026.10.0 から 3 つとも必須)
+//     が一致する行を削除 (credential 不要)
 //
 // 実 push 配信は browser-side / push server 必要なので scope 外。本 spec は
 // CRUD round-trip の shape 整合のみ verify する。
@@ -97,9 +98,16 @@ test.describe('sw/* push subscription round-trip', () => {
     const showAfterBody = (await showAfter.json()) as { sendReadMessage?: boolean };
     expect(showAfterBody.sendReadMessage).toBe(true);
 
-    // 5. unregister: auth 不要 (= browser 側 deactivate でも叩ける)
+    // 5. unregister: credential 不要 (= browser 側 deactivate でも叩ける)。
+    // 2026.10.0 から auth / publickey も必須で、endpoint だけでは 400 になる。
+    const unregMissing = await callApi(request, 'sw/unregister', {
+      endpoint,
+    });
+    expect(unregMissing.status()).toBe(400);
     const unregResp = await callApi(request, 'sw/unregister', {
       endpoint,
+      auth,
+      publickey,
     });
     expect([200, 204]).toContain(unregResp.status());
 

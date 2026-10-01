@@ -3853,7 +3853,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/ap/show", apHandler.APIShow, middleware.RequireAuth(), middleware.RequireScope("read:account"))
 
 	// sw/* — Service Worker push notifications (実データ)
-	swHandler := apisw.NewHandler(swSubRepo, metaRepo, idGen)
+	swHandler := apisw.NewHandler(swSubRepo, metaRepo, idGen, webPushCache)
 	api.POST("/sw/register", swHandler.Register, middleware.RequireAuth(), middleware.RequireSecure())
 	api.POST("/sw/show-registration", swHandler.ShowRegistration, middleware.RequireAuth(), middleware.RequireSecure())
 	api.POST("/sw/update-registration", swHandler.UpdateRegistration, middleware.RequireAuth(), middleware.RequireSecure())

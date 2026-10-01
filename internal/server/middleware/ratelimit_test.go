@@ -591,6 +591,15 @@ func TestDefaultEndpointLimits_KnownEndpoints(t *testing.T) {
 	}
 }
 
+// sw/unregister carries upstream 2026.10.0's limit (30 per hour).
+func TestDefaultEndpointLimits_SwUnregister(t *testing.T) {
+	limit, ok := DefaultEndpointLimits["sw/unregister"]
+	require.True(t, ok)
+	assert.Equal(t, time.Hour, limit.Duration)
+	assert.Equal(t, 30, limit.Max)
+	assert.Zero(t, limit.MinInterval)
+}
+
 // TestDefaultEndpointLimits_UnauthenticatedEntryPoints guards the endpoints a
 // stranger can reach without any credential.
 //
@@ -619,6 +628,8 @@ func TestDefaultEndpointLimits_UnauthenticatedEntryPoints(t *testing.T) {
 		"/api/reset-password",
 		// 初回セットアップの窓だけ credential 無しで通る。
 		"/api/admin/accounts/create",
+		// credential 無しで購読を解除できる (本家 2026.10.0 と同じ)。
+		"/api/sw/unregister",
 	}
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {

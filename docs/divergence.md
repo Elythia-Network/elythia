@@ -1354,7 +1354,8 @@ camelCase の `untilId` / `sinceId` を struct タグで探すので、snake_cas
 gate の外で**実際に届く経路**は測って個別に塞いである。未認証で叩けるもの:
 `federation/followers` / `federation/following` の `host`、`federation/users` の
 `host`、`hashtags/users` / `hashtags/show` の `tag`、`notes/reactions` の `type`、
-`users/clips` / `users/flashs` / `users/gallery/posts` / `users/pages` の `userId`。
+`users/clips` / `users/flashs` / `users/gallery/posts` / `users/pages` の `userId`、
+`sw/unregister` の `endpoint` / `auth` / `publickey` (一致する購読が無いものとして 204)。
 認証が要るもの: `i/registry/*` の `key` / `domain`、`sw/register` の `endpoint` /
 `auth` / `publickey`、`drive/files/find-by-hash` の `md5`。管理者向け:
 `admin/show-users` の `host`、`admin/emoji/*-bulk` の `ids`、
