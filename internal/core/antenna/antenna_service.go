@@ -128,7 +128,7 @@ type Service struct {
 	clock         func() time.Time
 	// rolePolicyProvider は Create で antennaLimit gate に使う (#1029)。
 	// nil 時は gate skip (旧挙動互換)。
-	rolePolicyProvider RolePolicyProvider
+	rolePolicyProvider role.PolicyProvider
 	// publisher は match した note を pubsub topic へ publish する (#1573)。
 	// nil 時は ZSET への追加のみ行い realtime 配信は skip (旧挙動)。
 	publisher StreamingPublisher
@@ -164,14 +164,9 @@ func (s *Service) SetSensitiveChannelLookup(l SensitiveChannelLookup) {
 	s.sensitiveChannels = l
 }
 
-// RolePolicyProvider abstracts role-policy lookup for antenna count limits (#1029).
-type RolePolicyProvider interface {
-	GetUserPolicies(userID string) map[string]any
-}
-
-// SetRolePolicyProvider wires a RolePolicyProvider so Create enforces the
+// SetRolePolicyProvider wires a role policy source so Create enforces the
 // `antennaLimit` role policy (#1029).
-func (s *Service) SetRolePolicyProvider(p RolePolicyProvider) {
+func (s *Service) SetRolePolicyProvider(p role.PolicyProvider) {
 	s.rolePolicyProvider = p
 }
 

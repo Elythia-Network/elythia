@@ -23,15 +23,6 @@ import (
 	"github.com/shiroha-a/mk/internal/core/role"
 )
 
-// RolePolicyProvider returns the merged role policy map for a user. The
-// handler consumes inviteLimit / inviteLimitCycle / inviteExpirationTime from
-// the returned map to enforce upstream Misskey TS semantics (#1029 PR-2).
-// Nil provider disables the gate (= legacy unrestricted behaviour kept for
-// test fixtures).
-type RolePolicyProvider interface {
-	GetUserPolicies(userID string) map[string]any
-}
-
 // ModeratorChecker reports whether a user holds a moderator (or administrator)
 // role. Delete uses it to reproduce upstream's moderator bypass (#2812).
 //
@@ -47,7 +38,7 @@ type ModeratorChecker interface {
 type Handler struct {
 	repo               repository.RegistrationTicketRepository
 	idGen              id.Generator
-	rolePolicyProvider RolePolicyProvider
+	rolePolicyProvider role.PolicyProvider
 	userRepo           repository.UserRepository
 	moderatorChecker   ModeratorChecker
 }
@@ -59,7 +50,7 @@ func NewHandler(repo repository.RegistrationTicketRepository, idGen id.Generator
 
 // SetRolePolicyProvider wires the policy provider used by Create / Limit.
 // Nil keeps the gate disabled (= test fixture / wire 未配線).
-func (h *Handler) SetRolePolicyProvider(p RolePolicyProvider) {
+func (h *Handler) SetRolePolicyProvider(p role.PolicyProvider) {
 	h.rolePolicyProvider = p
 }
 

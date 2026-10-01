@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/shiroha-a/mk/internal/core/role"
 	"github.com/shiroha-a/mk/internal/model"
 )
 
@@ -42,7 +43,7 @@ type Manager struct {
 	followingLookup FollowingSnapshotLookup
 	muteBlockLookup MuteBlockSnapshotLookup
 	noteVisibility  NoteVisibilityChecker
-	policyProvider  RolePolicyProvider
+	policyProvider  role.PolicyProvider
 	lastActive      LastActiveRecorder
 
 	// revokeSettle は失効 event を受けてから実際に接続を閉じるまでの猶予。
@@ -104,13 +105,6 @@ func (m *Manager) trackLastActive(user *model.User) (stop func()) {
 	}
 }
 
-// RolePolicyProvider returns a user's effective role policies. Timeline channels
-// gate ltlAvailable / gtlAvailable on it (#1942). userID == "" yields the base
-// (anonymous) policies, mirroring upstream getUserPolicies(null).
-type RolePolicyProvider interface {
-	GetUserPolicies(userID string) map[string]any
-}
-
 // NewManager constructs a Manager with no live connections. registry / bus が
 // nil でも動作する (channel framework を一切使わないテスト用)。
 func NewManager(registry *Registry, bus PubSubBus) *Manager {
@@ -160,10 +154,10 @@ func (m *Manager) SetNoteVisibilityChecker(c NoteVisibilityChecker) {
 	m.noteVisibility = c
 }
 
-// SetPolicyProvider wires a RolePolicyProvider so timeline channels can gate
+// SetPolicyProvider wires a role policy source so timeline channels can gate
 // ltlAvailable / gtlAvailable at connect time (#1942). nil disables the gate
 // (fail-open, test/旧挙動).
-func (m *Manager) SetPolicyProvider(p RolePolicyProvider) {
+func (m *Manager) SetPolicyProvider(p role.PolicyProvider) {
 	m.policyProvider = p
 }
 

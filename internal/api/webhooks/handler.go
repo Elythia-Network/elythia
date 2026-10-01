@@ -60,13 +60,7 @@ type Handler struct {
 	repo               repository.WebhookRepository
 	idGen              id.Generator
 	dispatcher         TestDispatcher
-	rolePolicyProvider RolePolicyProvider
-}
-
-// RolePolicyProvider abstracts role-policy lookup for `webhookLimit`
-// enforcement (#1029)。実装は core/role.Service。
-type RolePolicyProvider interface {
-	GetUserPolicies(userID string) map[string]any
+	rolePolicyProvider role.PolicyProvider
 }
 
 // NewHandler creates a new webhooks handler.
@@ -80,9 +74,9 @@ func (h *Handler) SetDispatcher(d TestDispatcher) {
 	h.dispatcher = d
 }
 
-// SetRolePolicyProvider wires a RolePolicyProvider so Create enforces the
+// SetRolePolicyProvider wires a role policy source so Create enforces the
 // `webhookLimit` role policy (#1029).
-func (h *Handler) SetRolePolicyProvider(p RolePolicyProvider) {
+func (h *Handler) SetRolePolicyProvider(p role.PolicyProvider) {
 	h.rolePolicyProvider = p
 }
 

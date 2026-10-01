@@ -22,18 +22,12 @@ import (
 type Handler struct {
 	repo               repository.UserListRepository
 	idGen              id.Generator
-	rolePolicyProvider RolePolicyProvider
+	rolePolicyProvider role.PolicyProvider
 	userRepo           repository.UserRepository
 	blockingRepo       repository.BlockingRepository
 	favoriteRepo       UserListFavoriteReader
 	proxyFollow        ProxyFollowEnqueuer
 	userListEventPub   UserListEventPublisher
-}
-
-// RolePolicyProvider abstracts role-policy lookup for `userListLimit` /
-// `userEachUserListsLimit` enforcement (#1029)。実装は core/role.Service。
-type RolePolicyProvider interface {
-	GetUserPolicies(userID string) map[string]any
 }
 
 // UserListFavoriteReader abstracts the favorite count / exists lookup for
@@ -49,9 +43,9 @@ func NewHandler(repo repository.UserListRepository, idGen id.Generator) *Handler
 	return &Handler{repo: repo, idGen: idGen}
 }
 
-// SetRolePolicyProvider wires a RolePolicyProvider so Create / Push enforce
+// SetRolePolicyProvider wires a role policy source so Create / Push enforce
 // the userListLimit / userEachUserListsLimit role policies (#1029).
-func (h *Handler) SetRolePolicyProvider(p RolePolicyProvider) {
+func (h *Handler) SetRolePolicyProvider(p role.PolicyProvider) {
 	h.rolePolicyProvider = p
 }
 

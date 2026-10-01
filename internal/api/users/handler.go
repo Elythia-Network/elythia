@@ -16,6 +16,7 @@ import (
 	"github.com/shiroha-a/mk/internal/api/userrelation"
 	corefollowing "github.com/shiroha-a/mk/internal/core/following"
 	"github.com/shiroha-a/mk/internal/core/notesfilter"
+	"github.com/shiroha-a/mk/internal/core/role"
 	"github.com/shiroha-a/mk/internal/core/user"
 	"github.com/shiroha-a/mk/internal/entity"
 	"github.com/shiroha-a/mk/internal/misc/id"
@@ -43,7 +44,7 @@ type Handler struct {
 	followingRepo      repository.FollowingRepository
 	memoRepo           repository.UserMemoRepository
 	blockingRepo       repository.BlockingRepository
-	rolePolicyProvider RolePolicyProvider
+	rolePolicyProvider role.PolicyProvider
 	proxyFollow        ProxyFollowEnqueuer
 	abuseCreated       AbuseReportCreatedNotifier
 	mutingRepo         repository.MutingRepository
@@ -302,17 +303,10 @@ func (h *Handler) SetBlockingRepo(r repository.BlockingRepository) {
 	h.blockingRepo = r
 }
 
-// RolePolicyProvider abstracts role-policy lookup for `userListLimit` /
-// `userEachUserListsLimit` enforcement in create-from-public (#1550)。実装は
-// core/role.Service。
-type RolePolicyProvider interface {
-	GetUserPolicies(userID string) map[string]any
-}
-
-// SetRolePolicyProvider wires a RolePolicyProvider so create-from-public enforces
+// SetRolePolicyProvider wires a role policy source so create-from-public enforces
 // the userListLimit / userEachUserListsLimit role policies (#1550)。nil 時は
 // limit gate を skip する (= test / 旧挙動)。
-func (h *Handler) SetRolePolicyProvider(p RolePolicyProvider) {
+func (h *Handler) SetRolePolicyProvider(p role.PolicyProvider) {
 	h.rolePolicyProvider = p
 }
 

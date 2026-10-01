@@ -14,13 +14,6 @@ type CanChatLookupAdapter struct {
 	provider PolicyProvider
 }
 
-// PolicyProvider is the subset of role.Service used by the adapter. Defined
-// here as an interface so tests can inject a stub without depending on the
-// full Service.
-type PolicyProvider interface {
-	GetUserPolicies(userID string) map[string]any
-}
-
 // NewCanChatLookup returns an entity.CanChatLookup that resolves a user's
 // canChat status via role policies. Use entity.SetCanChatLookup(...) to wire.
 //

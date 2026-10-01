@@ -15,6 +15,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/redis/go-redis/v9"
 	"github.com/shiroha-a/mk/internal/api/apierr"
+	"github.com/shiroha-a/mk/internal/core/role"
 	"github.com/shiroha-a/mk/internal/safemath"
 )
 
@@ -129,19 +130,12 @@ func parseIntFromString(s string) int64 {
 	return v
 }
 
-// PolicyProvider abstracts user policy lookup so the middleware can
-// scale Max by `rateLimitFactor` from the user's role policies (#606 item 4)。
-// 循環依存を避けるため interface で受け取る (実装は core/role.Service)。
-type PolicyProvider interface {
-	GetUserPolicies(userID string) map[string]any
-}
-
 // RateLimiter provides per-endpoint rate limiting as Echo middleware.
 type RateLimiter struct {
 	store             RateLimitStore
 	enableIPRateLimit bool
 	limits            map[string]*EndpointLimit
-	policyProvider    PolicyProvider // optional, nil なら factor=1 固定
+	policyProvider    role.PolicyProvider // optional, nil なら factor=1 固定
 	disabled          bool
 }
 
@@ -179,7 +173,7 @@ func (rl *RateLimiter) Disable() {
 // 設定すると半分に締まる (倒れる向きは安全側だが、設定の効き方の記述が
 // 実装と食い違っていた)。upstream `RateLimiterService.limit()` の
 // `max: limitation.max / factor` と同じ。
-func (rl *RateLimiter) SetPolicyProvider(p PolicyProvider) {
+func (rl *RateLimiter) SetPolicyProvider(p role.PolicyProvider) {
 	rl.policyProvider = p
 }
 

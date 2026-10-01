@@ -43,10 +43,9 @@ func (r *TimelineRequest) normalize() bool {
 	return true
 }
 
-// Policy keys consumed by timeline gates. notes package 内 private const に
-// 留めて core/role への依存を増やさない (= TimelinePolicyProvider interface の
-// narrow design と整合)。値は role package の Policy* 定数と一致させる必要が
-// あり、ずれると gate が動かなくなるので doc コメントで参照を明記する。
+// Policy keys consumed by timeline gates. 値は role package の Policy* 定数と
+// 一致させる必要があり、ずれると gate が動かなくなるので doc コメントで
+// 参照を明記する。
 const (
 	// policyKeyLtlAvailable = role.PolicyLtlAvailable。
 	policyKeyLtlAvailable = "ltlAvailable"
