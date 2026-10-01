@@ -640,7 +640,7 @@ func TestRemoveNote_NonOwnerHidden(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "NO_SUCH_CLIP")
 }
 
-// #1768: note 不在は NO_SUCH_NOTE 404 (NOT_CLIPPED は廃止)。
+// #1768: note 不在は 400 NO_SUCH_NOTE (NOT_CLIPPED は廃止)。
 func TestRemoveNote_NoSuchNote(t *testing.T) {
 	h, repo, _, _ := newHandler(t)
 	repo.Clips["c1"] = &model.Clip{ID: "c1", UserID: "alice"}
@@ -651,23 +651,28 @@ func TestRemoveNote_NoSuchNote(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "NO_SUCH_NOTE")
 }
 
-// #1768: note は実在するが clip に無い場合は silent success (204)。
-func TestRemoveNote_NotInClipIsNoOp(t *testing.T) {
+// upstream 2026.10.0 (4682d44cae): note は実在するが clip に無い場合も
+// 400 NO_SUCH_NOTE。id は remove-note.ts の noSuchNote と同じ。
+func TestRemoveNote_NotInClipIsNoSuchNote(t *testing.T) {
 	h, repo, _, notes := newHandler(t)
 	repo.Clips["c1"] = &model.Clip{ID: "c1", UserID: "alice"}
 	notes.Notes["n1"] = &model.Note{ID: "n1"}
 	c, rec := newReq(t, `{"clipId":"c1","noteId":"n1"}`)
 	setUser(c, "alice")
 	require.NoError(t, h.RemoveNote(c))
-	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "NO_SUCH_NOTE")
+	assert.Contains(t, rec.Body.String(), "aff017de-190e-434b-893e-33a9ff5049d8")
 }
 
-// failingClipNoteDeleteRepo causes Delete to fail (other than not clipped).
+// failingClipNoteDeleteRepo causes DeleteByPair to fail (other than not clipped).
 type failingClipNoteDeleteRepo struct {
 	*testutil.MockClipNoteRepository
 }
 
-func (r *failingClipNoteDeleteRepo) Delete(_ *model.ClipNote) error { return errors.New("boom") }
+func (r *failingClipNoteDeleteRepo) DeleteByPair(string, string) (int64, error) {
+	return 0, errors.New("boom")
+}
 
 func TestRemoveNote_RepoError(t *testing.T) {
 	repo := testutil.NewMockClipRepository()
@@ -676,7 +681,7 @@ func TestRemoveNote_RepoError(t *testing.T) {
 	mock.Entries["cn1"] = &model.ClipNote{ID: "cn1", ClipID: "c1", NoteID: "n1"}
 	noteRepo := &failingClipNoteDeleteRepo{MockClipNoteRepository: mock}
 	idGen, _ := id.NewGenerator("aidx")
-	// note は実在させて存在チェックを通し、clip_note Delete 失敗の 500 path に到達させる。
+	// clip_note の削除が失敗したら、NO_SUCH_NOTE ではなく 500 にする。
 	notes := testutil.NewMockNoteRepository()
 	notes.Notes["n1"] = &model.Note{ID: "n1"}
 	svc := coreclip.NewService(repo, noteRepo, notes, idGen)

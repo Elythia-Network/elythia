@@ -4463,6 +4463,18 @@ func (m *MockClipNoteRepository) Delete(cn *model.ClipNote) error {
 	return nil
 }
 
+// DeleteByPair removes the matching entries and returns how many were removed.
+func (m *MockClipNoteRepository) DeleteByPair(clipID, noteID string) (int64, error) {
+	var n int64
+	for id, cn := range m.Entries {
+		if cn.ClipID == clipID && cn.NoteID == noteID {
+			delete(m.Entries, id)
+			n++
+		}
+	}
+	return n, nil
+}
+
 func (m *MockClipNoteRepository) FindByPair(clipID, noteID string) (*model.ClipNote, error) {
 	for _, cn := range m.Entries {
 		if cn.ClipID == clipID && cn.NoteID == noteID {

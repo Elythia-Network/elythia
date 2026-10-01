@@ -327,13 +327,27 @@ func TestRemoveNote_NonOwnerHidden(t *testing.T) {
 	assert.ErrorIs(t, err, clip.ErrClipNotFound)
 }
 
-// #1768: note は実在するが clip に含まれない場合、upstream は idempotent delete で
-// silent success。NOT_CLIPPED error は返さない。
-func TestRemoveNote_NotInClipIsNoOp(t *testing.T) {
+// upstream 2026.10.0 (4682d44cae): note は実在するが clip に含まれない場合も
+// NO_SUCH_NOTE (ErrNoteNotFound) になり、clippedCount は減らない。
+func TestRemoveNote_NotInClipIsNoSuchNote(t *testing.T) {
+	svc, repo, _, notes := newSvc(t)
+	repo.Clips["c1"] = &model.Clip{ID: "c1", UserID: "u1"}
+	notes.Notes["n1"] = &model.Note{ID: "n1", ClippedCount: 1}
+	err := svc.RemoveNote("u1", "c1", "n1")
+	assert.ErrorIs(t, err, clip.ErrNoteNotFound)
+	assert.Equal(t, int16(1), notes.Notes["n1"].ClippedCount, "clip に無い note の clippedCount を減らしている")
+}
+
+// 2 回目の remove は NO_SUCH_NOTE になり、clippedCount は 1 回分しか減らない。
+func TestRemoveNote_RepeatedRemoveDecrementsOnce(t *testing.T) {
 	svc, repo, _, notes := newSvc(t)
 	repo.Clips["c1"] = &model.Clip{ID: "c1", UserID: "u1"}
 	notes.Notes["n1"] = &model.Note{ID: "n1"}
-	assert.NoError(t, svc.RemoveNote("u1", "c1", "n1"))
+	require.NoError(t, svc.AddNote("u1", "c1", "n1"))
+	require.Equal(t, int16(1), notes.Notes["n1"].ClippedCount)
+	require.NoError(t, svc.RemoveNote("u1", "c1", "n1"))
+	assert.ErrorIs(t, svc.RemoveNote("u1", "c1", "n1"), clip.ErrNoteNotFound)
+	assert.Equal(t, int16(0), notes.Notes["n1"].ClippedCount)
 }
 
 // #1768: note 自体が存在しなければ NO_SUCH_NOTE (ErrNoteNotFound)。
@@ -344,12 +358,14 @@ func TestRemoveNote_NoSuchNote(t *testing.T) {
 	assert.ErrorIs(t, err, clip.ErrNoteNotFound)
 }
 
-// failingDeleteRepo causes Delete to fail.
+// failingDeleteRepo causes DeleteByPair to fail.
 type failingDeleteRepo struct {
 	*testutil.MockClipNoteRepository
 }
 
-func (r *failingDeleteRepo) Delete(_ *model.ClipNote) error { return errors.New("boom") }
+func (r *failingDeleteRepo) DeleteByPair(string, string) (int64, error) {
+	return 0, errors.New("boom")
+}
 
 func TestRemoveNote_RepoError(t *testing.T) {
 	repo := testutil.NewMockClipRepository()
@@ -358,9 +374,13 @@ func TestRemoveNote_RepoError(t *testing.T) {
 	mock.Entries["cn1"] = &model.ClipNote{ID: "cn1", ClipID: "c1", NoteID: "n1"}
 	noteRepo := &failingDeleteRepo{MockClipNoteRepository: mock}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := clip.NewService(repo, noteRepo, testutil.NewMockNoteRepository(), idGen)
+	notes := testutil.NewMockNoteRepository()
+	notes.Notes["n1"] = &model.Note{ID: "n1", ClippedCount: 1}
+	svc := clip.NewService(repo, noteRepo, notes, idGen)
 	err := svc.RemoveNote("u1", "c1", "n1")
 	assert.Error(t, err)
+	assert.False(t, errors.Is(err, clip.ErrNoteNotFound), "DB 障害が NO_SUCH_NOTE に丸められている")
+	assert.Equal(t, int16(1), notes.Notes["n1"].ClippedCount)
 }
 
 // --- Notes -----------------------------------------------------------------

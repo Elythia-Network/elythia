@@ -11,6 +11,9 @@ import (
 type ClipNoteRepository interface {
 	Create(cn *model.ClipNote) error
 	Delete(cn *model.ClipNote) error
+	// DeleteByPair removes the (clipID, noteID) entry and returns how many rows
+	// were actually deleted (0 when the note was not in the clip).
+	DeleteByPair(clipID, noteID string) (int64, error)
 	FindByPair(clipID, noteID string) (*model.ClipNote, error)
 	ListByClip(clipID string, untilID, sinceID string, limit int) ([]*model.ClipNote, error)
 	// ListByClipVisible is ListByClip with a visibility push-down: clip entries
@@ -46,6 +49,22 @@ func (r *clipNoteRepository) Create(cn *model.ClipNote) error {
 
 func (r *clipNoteRepository) Delete(cn *model.ClipNote) error {
 	return r.db.Delete(cn).Error
+}
+
+// DeleteByPair は削除した行数を返す。clips/remove-note は「実際に消えた
+// ときだけ clippedCount を減らす」ために件数を見る (本家 4682d44cae)。
+// FindByPair → Delete の 2 段だと、同じ組を並行に消した 2 つの要求が両方
+// 見つけて両方減らし、カウンタが負になりうる。DELETE の RowsAffected なら、
+// 後から来た方は先の行ロックが解けた後に 0 行になる。
+func (r *clipNoteRepository) DeleteByPair(clipID, noteID string) (int64, error) {
+	if !storable(clipID) || !storable(noteID) {
+		return 0, nil
+	}
+	res := r.db.Where(`"clipId" = ? AND "noteId" = ?`, clipID, noteID).Delete(&model.ClipNote{})
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	return res.RowsAffected, nil
 }
 
 func (r *clipNoteRepository) FindByPair(clipID, noteID string) (*model.ClipNote, error) {

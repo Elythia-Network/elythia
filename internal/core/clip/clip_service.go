@@ -317,32 +317,22 @@ func (s *Service) RemoveNote(ownerID, clipID, noteID string) error {
 	if c.UserID != ownerID {
 		return ErrClipNotFound
 	}
-	// upstream removeNote は note の存在を notesRepository で確認し、無ければ
-	// NoSuchNote を投げる (#1768)。
-	if _, err := s.notes.FindByID(noteID); err != nil {
-		// **DB 障害を not-found に丸めない** (#2799)。
-		if !repository.IsNotFound(err) {
-			return err
-		}
-		return ErrNoteNotFound
-	}
-	cn, err := s.noteRepo.FindByPair(clipID, noteID)
+	// 本家 2026.10.0 (4682d44cae) の removeNote は note の存在確認をやめ、
+	// clip_note の DELETE が 0 行なら NoSuchNote を投げる。note が無い場合も
+	// clip に入っていない場合も同じ NO_SUCH_NOTE になる (以前の mk-go は後者を
+	// 204 にしていた)。件数は DELETE の RowsAffected で見るので、同じ組への
+	// 並行な remove でも clippedCount は 1 回しか減らない。
+	deleted, err := s.noteRepo.DeleteByPair(clipID, noteID)
 	if err != nil {
-		// **DB 障害を「もう入っていない」にしない** (#2799)。全 error を silent
-		// success にすると、接続断中の remove-note が 204 を返すのに note は
-		// clip に残り、クライアントは成功として UI から消す。
-		if !repository.IsNotFound(err) {
-			return err
-		}
-		// upstream clipNotesRepository.delete は idempotent で、clip に含まれない
-		// note の削除は silent success (NOT_CLIPPED error は upstream に無い、#1768)。
-		return nil
-	}
-	if err := s.noteRepo.Delete(cn); err != nil {
+		// **DB 障害を「もう入っていない」にしない** (#2799)。NO_SUCH_NOTE に
+		// 丸めると、接続断中の remove-note が 4xx になり原因が見えなくなる。
 		return err
 	}
+	if deleted == 0 {
+		return ErrNoteNotFound
+	}
 	// notesCount は非正規化しない (AddNote 側のコメント参照、#2243)。
-	// upstream ClipService.removeNote:156 は note の clippedCount を decrement する。
+	// upstream ClipService.removeNote は消せたときだけ clippedCount を decrement する。
 	_ = s.notes.IncrementCount(noteID, "clippedCount", -1)
 	return nil
 }
