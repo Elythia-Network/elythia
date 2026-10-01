@@ -24,7 +24,7 @@ import (
 
 var errStub = errors.New("stub error")
 
-// stubInvitePolicy is a minimal RolePolicyProvider double.
+// stubInvitePolicy is a minimal role.PolicyProvider double.
 type stubInvitePolicy struct {
 	policies map[string]any
 }
