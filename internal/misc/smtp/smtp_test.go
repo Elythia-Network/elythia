@@ -3,6 +3,9 @@ package smtp
 import (
 	"bufio"
 	"fmt"
+	"io"
+	"mime"
+	"mime/quotedprintable"
 	"net"
 	"slices"
 	"strconv"
@@ -10,6 +13,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestSanitizeHeaderValue(t *testing.T) {
@@ -731,11 +735,11 @@ func TestBuildMessage_Multipart(t *testing.T) {
 	if !strings.Contains(got, `boundary="----=_MK_GO_BOUNDARY_`) {
 		t.Errorf("expected randomized boundary header (prefix ----=_MK_GO_BOUNDARY_)")
 	}
-	// text / html part の本体検証 (Transfer-Encoding は 8bit に統一)
-	if !strings.Contains(got, "Content-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\nplain body") {
+	// text / html part の本体検証 (Transfer-Encoding は quoted-printable、#3280)
+	if !strings.Contains(got, "Content-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\nplain body") {
 		t.Errorf("text part missing or malformed")
 	}
-	if !strings.Contains(got, "Content-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n<p>html body</p>") {
+	if !strings.Contains(got, "Content-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n<p>html body</p>") {
 		t.Errorf("html part missing or malformed")
 	}
 	// closing boundary は randomized なので prefix で確認
@@ -765,8 +769,9 @@ func TestBuildMessage_ASCIISubjectIsNotEncoded(t *testing.T) {
 	}
 }
 
-// Content-Transfer-Encoding 8bit (#600 item 4 review)
-func TestBuildMessage_TransferEncodingIs8bit(t *testing.T) {
+// Content-Transfer-Encoding は quoted-printable (#3280)。8bit のまま折り返さずに
+// 書くと、長い行が RFC 5322 の 998 オクテットの上限を破る。
+func TestBuildMessage_TransferEncodingIsQuotedPrintable(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		text string
@@ -777,8 +782,11 @@ func TestBuildMessage_TransferEncodingIs8bit(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := buildMessage("f@e.test", "t@e.test", "S", tc.text, tc.html)
-			if !strings.Contains(got, "Content-Transfer-Encoding: 8bit") {
-				t.Errorf("must declare 8bit transfer encoding, got: %s", got)
+			if !strings.Contains(got, "Content-Transfer-Encoding: quoted-printable") {
+				t.Errorf("must declare quoted-printable transfer encoding, got: %s", got)
+			}
+			if strings.Contains(got, "Content-Transfer-Encoding: 8bit") {
+				t.Errorf("must not declare 8bit, got: %s", got)
 			}
 			if strings.Contains(got, "Content-Transfer-Encoding: 7bit") {
 				t.Errorf("must not declare 7bit (incorrect for UTF-8), got: %s", got)
@@ -899,5 +907,120 @@ func TestBuildMessage_RandomBoundary(t *testing.T) {
 	}
 	if ba == bb {
 		t.Errorf("boundary should be randomized per message; both=%s", ba)
+	}
+}
+
+// maxLineOctets reports the longest line (without CRLF) in a message.
+func maxLineOctets(msg string) int {
+	longest := 0
+	for _, line := range strings.Split(msg, "\r\n") {
+		if len(line) > longest {
+			longest = len(line)
+		}
+	}
+	return longest
+}
+
+// 長い本文と長い件名でも、メールの各行は RFC 5322 の 998 オクテットに収まり、
+// 元の文字列に戻せる (#3280)。通報のコメントは最大 2048 文字で、日本語なら
+// 約 333 文字で 1 行が上限を超える。
+func TestBuildMessage_LongLinesStayWithinLimitAndRoundTrip(t *testing.T) {
+	longText := strings.Repeat("通報の本文。", 400) + "\n2 行目\nhttps://remote.example/notes/" + strings.Repeat("a", 1200)
+	longHTML := "<p>" + strings.Repeat("あ", 2048) + "</p>"
+	for _, subject := range []string{
+		strings.Repeat("件名", 300),
+		strings.Repeat("s", 2000),
+		"New Abuse Report",
+	} {
+		for _, html := range []string{"", longHTML} {
+			got := buildMessage("f@e.test", "t@e.test", subject, longText, html)
+			if n := maxLineOctets(got); n > 998 {
+				t.Fatalf("line of %d octets exceeds RFC 5322 limit (subject len %d, html %v)", n, len(subject), html != "")
+			}
+
+			header, body, ok := strings.Cut(got, "\r\n\r\n")
+			if !ok {
+				t.Fatal("no header/body separator")
+			}
+			// 件名は折り返しを外して decode すると元に戻る。
+			var rawSubject string
+			for _, line := range strings.Split(strings.ReplaceAll(header, "\r\n ", " "), "\r\n") {
+				if v, ok := strings.CutPrefix(line, "Subject: "); ok {
+					rawSubject = v
+				}
+			}
+			decoded, err := new(mime.WordDecoder).DecodeHeader(rawSubject)
+			if err != nil || decoded != subject {
+				t.Fatalf("subject did not round-trip: err=%v, got %q", err, decoded)
+			}
+
+			if html == "" {
+				text, err := io.ReadAll(quotedprintable.NewReader(strings.NewReader(body)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := strings.ReplaceAll(longText, "\n", "\r\n")
+				if string(text) != want {
+					t.Fatalf("text body did not round-trip")
+				}
+			}
+		}
+	}
+}
+
+// 件名の encoded-word は 1 つずつが 75 文字以内で、UTF-8 の文字を途中で切らない
+// (RFC 2047 は 1 つの encoded-word の中で文字が完結することを求める)。
+func TestEncodeSubject_WordsAreShortAndWholeCharacters(t *testing.T) {
+	// 先頭に ASCII を 1 文字置き、3 バイトの文字の並びを区切りの位置からずらす
+	// (39 バイトは 3 の倍数なので、日本語だけだと区切りが偶然文字の境目に乗る)。
+	got := encodeSubject("a" + strings.Repeat("件名あいう", 100))
+	words := strings.Split(got, "\r\n ")
+	if len(words) < 2 {
+		t.Fatalf("long subject must be split into several encoded-words: %q", got)
+	}
+	dec := new(mime.WordDecoder)
+	for _, w := range words {
+		if len(w) > 75 {
+			t.Errorf("encoded-word longer than 75 chars: %d", len(w))
+		}
+		s, err := dec.Decode(w)
+		if err != nil || !utf8.ValidString(s) {
+			t.Errorf("encoded-word %q does not hold whole characters (err=%v)", w, err)
+		}
+	}
+}
+
+// 不正な UTF-8 の件名でも止まらずに符号化する (継続バイトが並ぶと区切りが
+// 進まなくなる形を防ぐ)。
+func TestEncodeSubject_InvalidUTF8Terminates(t *testing.T) {
+	done := make(chan string, 1)
+	go func() { done <- encodeSubject("a" + strings.Repeat("\x80", 200)) }()
+	select {
+	case got := <-done:
+		if maxLineOctets(got) > 998 {
+			t.Fatalf("line too long")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("encodeSubject did not terminate on invalid UTF-8")
+	}
+}
+
+// ASCII の件名は 900 バイトまでそのまま、901 バイトから符号化する。どちらでも
+// 件名の行は 998 オクテットに収まる。
+func TestEncodeSubject_ASCIIBoundary(t *testing.T) {
+	at := strings.Repeat("s", maxASCIISubject)
+	if got := encodeSubject(at); got != at {
+		t.Errorf("subject of %d bytes must be sent as-is", maxASCIISubject)
+	}
+	if n := len("Subject: " + at); n > 998 {
+		t.Errorf("the as-is limit itself exceeds the line limit: %d", n)
+	}
+	over := at + "s"
+	got := encodeSubject(over)
+	if !strings.HasPrefix(got, "=?UTF-8?B?") {
+		t.Errorf("subject of %d bytes must be encoded", len(over))
+	}
+	if n := maxLineOctets("Subject: " + got); n > 76 {
+		t.Errorf("encoded subject line of %d chars exceeds 76", n)
 	}
 }
