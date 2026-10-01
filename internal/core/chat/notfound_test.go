@@ -91,6 +91,8 @@ func TestChatService_DBFailureIsNotNotFound(t *testing.T) {
 			require.Error(t, err)
 			assert.False(t, errors.Is(err, corechat.ErrNotFound),
 				"DB 障害が not-found に丸められている")
+			assert.False(t, errors.Is(err, corechat.ErrMessageAccess),
+				"DB 障害がアクセスエラーに丸められている")
 			assert.ErrorIs(t, err, dbErr, "元の error がそのまま返るべき")
 		})
 	}

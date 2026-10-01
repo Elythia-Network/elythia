@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -994,9 +995,103 @@ func TestReactionsDelete(t *testing.T) {
 	h, repo := newHandlerWithService(t)
 	// missing params → 400
 	assert.Equal(t, http.StatusBadRequest, post(h.ReactionsDelete, `{}`, u1).Code)
-	repo.Messages["m1"] = &model.ChatMessage{ID: "m1", FromUserID: "sender", Reads: model.StringArray{}, Reactions: model.StringArray{}}
+	// unreact も受信者 (u1) でなければアクセスエラーになるので、u1 宛ての DM にする。
+	to := u1.ID
+	repo.Messages["m1"] = &model.ChatMessage{ID: "m1", FromUserID: "sender", ToUserID: &to, Reads: model.StringArray{}, Reactions: model.StringArray{}}
 	rec := post(h.ReactionsDelete, `{"messageId":"m1","reaction":"👍"}`, u1)
 	assert.Equal(t, http.StatusNoContent, rec.Code)
+}
+
+// recordingPublisher records chat stream publishes.
+type recordingPublisher struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (p *recordingPublisher) PublishUserMessage(context.Context, string, string, string, any) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.calls++
+}
+
+func (p *recordingPublisher) PublishRoomMessage(context.Context, string, string, any) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.calls++
+}
+
+// **存在しない id と、触れられないメッセージを同じ応答にする。** 応答が
+// 分かれると、メッセージの存在をエラーから判別できる。react / unreact
+// それぞれ upstream の endpoint 固有 id で 400 NO_SUCH_MESSAGE を返し、
+// 本文がバイト単位で一致すること、何も消さず何も流さないことを見る。
+func TestReactions_AccessErrorIsIndistinguishable(t *testing.T) {
+	const (
+		reactID   = "9b5839b9-0ba0-4351-8c35-37082093d200"
+		unreactID = "c39ea42f-e3ca-428a-ad57-390e0a711595"
+	)
+	newH := func(t *testing.T) (*Handler, *testutil.MockChatRepository, *recordingPublisher) {
+		t.Helper()
+		repo := testutil.NewMockChatRepository()
+		idGen, _ := id.NewGenerator("aidx")
+		h := NewHandler(repo, idGen)
+		svc := corechat.NewService(repo, idGen)
+		pub := &recordingPublisher{}
+		svc.SetStreamingPublisher(pub)
+		h.SetService(svc)
+		other := "u3"
+		room := "r1"
+		repo.Rooms["r1"] = &model.ChatRoom{ID: "r1", OwnerID: "u3"}
+		// u1 は参加していない DM と部屋。u1 の古いリアクションが残っている
+		// (部屋を抜けた元メンバーの形)。
+		repo.Messages["dm"] = &model.ChatMessage{ID: "dm", FromUserID: u2.ID, ToUserID: &other, Reads: model.StringArray{}, Reactions: model.StringArray{"u1/👍"}}
+		repo.Messages["room"] = &model.ChatMessage{ID: "room", FromUserID: u2.ID, ToRoomID: &room, Reads: model.StringArray{}, Reactions: model.StringArray{"u1/👍"}}
+		repo.Messages["own"] = &model.ChatMessage{ID: "own", FromUserID: u1.ID, ToUserID: &other, Reads: model.StringArray{}, Reactions: model.StringArray{}}
+		return h, repo, pub
+	}
+
+	// 自分のメッセージは react だけがアクセスエラー。unreact は本家どおり、
+	// DM の送った側も自分のリアクションを外せる。
+	for _, ep := range []struct {
+		name    string
+		handler func(*Handler) func(echo.Context) error
+		id      string
+		denied  []string
+	}{
+		{"react", func(h *Handler) func(echo.Context) error { return h.ReactionsCreate }, reactID, []string{"dm", "room", "own"}},
+		{"unreact", func(h *Handler) func(echo.Context) error { return h.ReactionsDelete }, unreactID, []string{"dm", "room"}},
+	} {
+		t.Run(ep.name, func(t *testing.T) {
+			h, repo, pub := newH(t)
+			ghost := post(ep.handler(h), `{"messageId":"ghost","reaction":"👍"}`, u1)
+			require.Equal(t, http.StatusBadRequest, ghost.Code)
+			assertErrorCode(t, ghost, "NO_SUCH_MESSAGE", ep.id)
+
+			for _, mid := range ep.denied {
+				rec := post(ep.handler(h), `{"messageId":"`+mid+`","reaction":"👍"}`, u1)
+				assert.Equal(t, http.StatusBadRequest, rec.Code, mid)
+				assert.Equal(t, ghost.Body.String(), rec.Body.String(), "%s: 存在しない id と応答が違う", mid)
+			}
+			assert.Equal(t, model.StringArray{"u1/👍"}, repo.Messages["dm"].Reactions, "参加していない DM のリアクションが変わった")
+			assert.Equal(t, model.StringArray{"u1/👍"}, repo.Messages["room"].Reactions, "抜けた部屋のリアクションが変わった")
+			assert.Zero(t, pub.calls, "参加していないのにイベントを流している")
+		})
+	}
+}
+
+// **上限の検査はアクセス検査より後。** 参加していない利用者には、上限に
+// 達したメッセージでも 500 (too many) ではなく NO_SUCH_MESSAGE を返す。
+func TestReactionsCreate_LimitCheckedAfterAccess(t *testing.T) {
+	h, repo := newHandlerWithService(t)
+	room := "r1"
+	repo.Rooms["r1"] = &model.ChatRoom{ID: "r1", OwnerID: "u3"}
+	full := make(model.StringArray, 100)
+	for i := range full {
+		full[i] = "u/x"
+	}
+	repo.Messages["m1"] = &model.ChatMessage{ID: "m1", FromUserID: u2.ID, ToRoomID: &room, Reads: model.StringArray{}, Reactions: full}
+	rec := post(h.ReactionsCreate, `{"messageId":"m1","reaction":"👍"}`, u1)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	assertErrorCode(t, rec, "NO_SUCH_MESSAGE", "9b5839b9-0ba0-4351-8c35-37082093d200")
 }
 
 // --- Invitations ---

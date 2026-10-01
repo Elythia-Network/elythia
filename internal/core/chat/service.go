@@ -70,12 +70,12 @@ var (
 	// blocked the sender. Mirrors upstream ChatService's 'blocked' error
 	// (YOU_HAVE_BEEN_BLOCKED).
 	ErrChatBlocked = errors.New("you have been blocked by the recipient")
-	// ErrCannotReact is returned by React when the actor may not react to the
-	// target message: it is their own message, a 1-on-1 message not addressed to
-	// them, or a room message in a room they are not a member of. Mirrors
-	// upstream ChatService.react's 'cannot react to own/others message' (plain
-	// Error -> generic 500).
-	ErrCannotReact = errors.New("cannot react to this message")
+	// ErrMessageAccess is returned by React and Unreact when the target message
+	// does not exist, is the actor's own message, is a 1-on-1 message not
+	// addressed to the actor, or belongs to a room the actor is not a member of.
+	// Mirrors upstream ChatMessageAccessError (2026.10.0), which the API maps to
+	// NO_SUCH_MESSAGE so that these cases are indistinguishable to the caller.
+	ErrMessageAccess = errors.New("chat message not accessible")
 	// ErrTooManyReactions is returned by React when the message already has the
 	// maximum number of reactions (upstream MAX_REACTIONS_PER_MESSAGE).
 	ErrTooManyReactions = errors.New("too many reactions")
@@ -1641,54 +1641,72 @@ func (s *Service) React(ctx context.Context, messageID string, reactor *model.Us
 	if err != nil {
 		return err
 	}
-	msg, err := s.repo.FindMessageByID(messageID)
+	msg, err := s.findReactableMessage(messageID, reactor.ID, false)
 	if err != nil {
-		// **DB 障害を not-found に丸めない** (#2792)。handler の mapChatErr は
-		// ErrNotFound を 400 にするので、ここで潰すと接続断が
-		// 「そんなメッセージは無い」として返る。
-		if !repository.IsNotFound(err) {
-			return err
-		}
-		return ErrNotFound
-	}
-	// 自分のメッセージには react できない。
-	if msg.FromUserID == reactor.ID {
-		return ErrCannotReact
-	}
-	// 1-on-1 で自分が受信者でないメッセージには react できない
-	// (upstream: toRoomId === null && toUserId !== userId)。
-	if msg.ToRoomID == nil {
-		if msg.ToUserID == nil || *msg.ToUserID != reactor.ID {
-			return ErrCannotReact
-		}
+		return err
 	}
 	// reaction 上限 (upstream MAX_REACTIONS_PER_MESSAGE)。
+	// **アクセス検査より後に見る。** 先に見ると、参加していない利用者でも
+	// 上限に達したメッセージだけ別のエラーになり、存在が分かってしまう。
 	if len(msg.Reactions) >= maxReactionsPerMessage {
 		return ErrTooManyReactions
-	}
-	// room メッセージは member でなければ react できない。
-	if msg.ToRoomID != nil && *msg.ToRoomID != "" {
-		room, err := s.repo.FindRoomByID(*msg.ToRoomID)
-		if err != nil {
-			// **DB 障害を not-found に丸めない** (#2792)。
-			if !repository.IsNotFound(err) {
-				return err
-			}
-			return ErrNotFound
-		}
-		isMember, err := s.isRoomMemberWith(room, reactor.ID, *msg.ToRoomID)
-		if err != nil {
-			return err
-		}
-		if !isMember {
-			return ErrCannotReact
-		}
 	}
 	if err := s.repo.AddReaction(messageID, reactor.ID+"/"+reaction); err != nil {
 		return fmt.Errorf("add reaction: %w", err)
 	}
 	s.publishReaction(ctx, msg, EventReact, reactor, reaction)
 	return nil
+}
+
+// findReactableMessage loads the message and checks that userID may react to
+// (or unreact from) it. Every access failure, including a missing message, is
+// reported as ErrMessageAccess; database failures are returned unchanged.
+func (s *Service) findReactableMessage(messageID, userID string, unreact bool) (*model.ChatMessage, error) {
+	msg, err := s.repo.FindMessageByID(messageID)
+	if err != nil {
+		// **DB 障害をアクセスエラーに丸めない** (#2792)。handler はアクセス
+		// エラーを 400 にするので、ここで潰すと接続断が「そんなメッセージは
+		// 無い」として返る。
+		if !repository.IsNotFound(err) {
+			return nil, err
+		}
+		return nil, ErrMessageAccess
+	}
+	// 自分のメッセージには react できない。unreact は本家どおり見ない (DM の
+	// 参加者なら、送った側も自分のリアクションを外せる)。
+	if !unreact && msg.FromUserID == userID {
+		return nil, ErrMessageAccess
+	}
+	if msg.ToRoomID != nil && *msg.ToRoomID != "" {
+		// room メッセージは member でなければ触れない。
+		room, err := s.repo.FindRoomByID(*msg.ToRoomID)
+		if err != nil {
+			// **DB 障害を not-found に丸めない** (#2792)。
+			if !repository.IsNotFound(err) {
+				return nil, err
+			}
+			return nil, ErrMessageAccess
+		}
+		isMember, err := s.isRoomMemberWith(room, userID, *msg.ToRoomID)
+		if err != nil {
+			return nil, err
+		}
+		if !isMember {
+			return nil, ErrMessageAccess
+		}
+		return msg, nil
+	}
+	// 1-on-1 の react は受信者だけ (upstream: toRoomId === null && toUserId !== userId)、
+	// unreact は送った側と受け取った側の両方 (upstream: fromUserId !== userId &&
+	// toUserId !== userId で拒否)。
+	isRecipient := msg.ToUserID != nil && *msg.ToUserID == userID
+	if unreact && (isRecipient || msg.FromUserID == userID) {
+		return msg, nil
+	}
+	if !isRecipient {
+		return nil, ErrMessageAccess
+	}
+	return msg, nil
 }
 
 // normalizeChatReaction validates and canonicalises a chat reaction string,
@@ -1734,35 +1752,19 @@ func (s *Service) Unreact(ctx context.Context, messageID string, reactor *model.
 	// 厳密一致 array_remove で取り消せず silent fail する。custom emoji の存在検証は unreact
 	// では不要なので form だけ揃える (upstream ChatService.unreact も同様)。
 	reaction := normalizeChatReactionForm(emoji)
-	msg, err := s.repo.FindMessageByID(messageID)
+	// **消す前に、upstream 2026.10.0 の unreact と同じアクセス検査を通す。**
+	// 失敗はすべて ErrMessageAccess にまとめる (存在しない id と同じ応答にする)。
+	msg, err := s.findReactableMessage(messageID, reactor.ID, true)
 	if err != nil {
-		// **DB 障害を not-found に丸めない** (#2792)。handler の mapChatErr は
-		// ErrNotFound を 400 にするので、ここで潰すと接続断が
-		// 「そんなメッセージは無い」として返る。
-		if !repository.IsNotFound(err) {
-			return err
-		}
-		return ErrNotFound
+		return err
 	}
 	removed, err := s.repo.RemoveReaction(messageID, reactor.ID+"/"+reaction)
 	if err != nil {
 		return fmt.Errorf("remove reaction: %w", err)
 	}
-	// **実際に消えたときだけ publish する (#3037)。**
-	//
-	// `React` は参加者かどうかを 3 通り (自分宛の DM / room の member /
-	// 自分のメッセージでない) で検査するのに、こちらは何も見ていなかった。
-	// 無条件に publish すると、**会話と無関係な利用者**が任意の messageId を
-	// 投げるだけでその部屋 / DM のストリームにイベントを注入でき、しかも
-	// `reaction` は利用者が決める文字列なのでそのまま相手の画面へ届く。
-	// 400 / 204 の違いからメッセージの存在も分かる。
-	//
-	// **権限検査を足すのではなく publish の条件を絞る。** 消せるのは
-	// `<自分の ID>/<reaction>` だけなので、実際に消えたということは
-	// **自分が過去にそのリアクションを付けられた = 参加者だった**という
-	// こと。upstream (`ChatService.unreact`) も「権限チェックは不要」と
-	// 書いたうえで `TODO: 実際に削除が行われたときのみイベントを発行する`
-	// を残しており、塞ぎ方としてはそちらに沿う。
+	// **実際に消えたときだけ publish する (#3037)。** 参加者でも、付けて
+	// いないリアクションを指定されたときにイベントを流さない。upstream
+	// (`ChatService.unreact`) にも同じ趣旨の TODO がある。
 	if removed {
 		// #2106 N4: stream event も正規化済 reaction で publish し React と対称にする。
 		s.publishReaction(ctx, msg, EventUnreact, reactor, reaction)
