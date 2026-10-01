@@ -592,6 +592,19 @@ func (h *Handler) Translate(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, apierr.Error("CANNOT_TRANSLATE_INVISIBLE_NOTE", "Cannot translate invisible note.", "ea29f2ca-c368-43b3-aaf1-5ac3e74bbe5d"))
 	}
 
+	// upstream 2026.10.0 translate.ts と同じく、visibility の後に
+	// `(await noteEntityService.pack(note, me)).isHidden` 相当でも弾く。CanSee は
+	// 著者の makeNotesHiddenBefore / makeNotesFollowersOnlyBefore /
+	// requireSigninToViewContents を見ないので、別に判定する。translator より前に
+	// 置き、DeepL を呼ばない。
+	hidden, err := h.translateHiddenByAuthorPrefs(viewer, n)
+	if err != nil {
+		return apierr.JSONInternalError(c)
+	}
+	if hidden {
+		return c.JSON(http.StatusBadRequest, apierr.Error("CANNOT_TRANSLATE_INVISIBLE_NOTE", "Cannot translate invisible note.", "ea29f2ca-c368-43b3-aaf1-5ac3e74bbe5d"))
+	}
+
 	// upstream translate.ts: CW があれば `<cw>\n-----\n<text>` を翻訳対象にする
 	// (upstream ab26d2b7b2)。text が無くても CW だけあれば翻訳する。
 	text := ""
@@ -626,6 +639,72 @@ func (h *Handler) Translate(c echo.Context) error {
 		"sourceLang": result.SourceLang,
 		"text":       result.Text,
 	})
+}
+
+// translateHiddenByAuthorPrefs reports whether the packed note would carry
+// isHidden for viewer because of the author's preference gates
+// (corenote.HideNoteByPrefsDecision), mirroring upstream translate.ts's
+// `pack(note, me).isHidden` check. A non-nil error means a lookup failed and
+// the caller must not treat it as "not hidden".
+func (h *Handler) translateHiddenByAuthorPrefs(viewer *model.User, n *model.Note) (bool, error) {
+	author := n.User
+	if author == nil && h.userRepo != nil {
+		u, err := h.userRepo.FindByID(n.UserID)
+		if err != nil && !repository.IsNotFound(err) {
+			return false, err
+		}
+		if u == nil {
+			// 著者が引けない note は設定を確かめられないので翻訳させない (fail-closed)。
+			return true, nil
+		}
+		author = u
+	}
+
+	f := corenote.EmbedFacts{
+		AuthorID:       n.UserID,
+		Visibility:     string(n.Visibility),
+		VisibleUserIDs: n.VisibleUserIDs,
+		Mentions:       n.Mentions,
+	}
+	if n.ReplyUserID != nil {
+		f.ReplyTargetAuthorID = *n.ReplyUserID
+	}
+	// 作成時刻が分からないときは epoch 0 扱いにして、期間設定のゲートを
+	// 「隠す」側に倒す (notehide.parseCreatedAtMs と同じ方針)。
+	if h.idGen != nil {
+		if t, err := h.idGen.ParseTime(n.ID); err == nil {
+			f.CreatedAtMs = t.UnixMilli()
+		}
+	}
+	// userRepo 未配線 (テストの最小構成) では著者設定が分からず、他の経路と同じく
+	// AuthorPrefsKnown=false で著者設定のゲートを評価しない。本番は SetUserRepo
+	// で常に配線される。
+	if author != nil {
+		f.AuthorPrefsKnown = true
+		f.RequireSigninToViewContents = author.RequireSigninToViewContents
+		f.MakeNotesHiddenBefore = author.MakeNotesHiddenBefore
+		f.MakeNotesFollowersOnlyBefore = author.MakeNotesFollowersOnlyBefore
+	}
+
+	// **follow の lookup 障害を「フォローしていない」に丸めない** (#2792)。
+	// 丸めると一時的な障害でフォロワーの翻訳が 400 になる。
+	var followErr error
+	follows := func(authorID string) bool {
+		if viewer == nil || h.userFollowingRepo == nil {
+			return false
+		}
+		ok, err := h.userFollowingRepo.Exists(viewer.ID, authorID)
+		if err != nil {
+			followErr = err
+			return false
+		}
+		return ok
+	}
+	hidden := corenote.HideNoteByPrefsDecision(viewer, f, follows, time.Now().UnixMilli())
+	if followErr != nil {
+		return false, followErr
+	}
+	return hidden, nil
 }
 
 // ShowPartialBulk handles POST /api/notes/show-partial-bulk.
