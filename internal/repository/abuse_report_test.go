@@ -106,6 +106,14 @@ func TestAbuseReportRepository_FindByID_NotFound(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// UpdateFields は該当行が無くてもエラーを返さない。handler は存在の確認をこれに
+// 任せてはいけない (#3259)。testutil のモックもこの前提に合わせているので、前提が変わったら
+// ここで気付く。
+func TestAbuseReportRepository_UpdateFields_MissingRowIsNotAnError(t *testing.T) {
+	repo := NewAbuseReportRepository(testDB)
+	require.NoError(t, repo.UpdateFields("ghost", map[string]any{"resolved": true}))
+}
+
 func TestAbuseReportRepository_List_ResolvedTrue(t *testing.T) {
 	repo := NewAbuseReportRepository(testDB)
 	tr := true

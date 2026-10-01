@@ -145,6 +145,17 @@ func TestAdmin_DBFailureIsNot4xx(t *testing.T) {
 			"DB 障害が 4xx に化けている (#2792)")
 	})
 
+	// resolve-abuse-user-report も abuse report を引く。以前は引かずに
+	// UpdateFields の失敗を 404 にしていた (#3259)。
+	t.Run("admin/resolve-abuse-user-report", func(t *testing.T) {
+		rh, _, _, _ := newTestHandler(t)
+		rh.SetAbuseRepo(&failingAbuseRepo{err: dbErr})
+
+		rec := doPost(rh.ResolveAbuseReport, `{"reportId":"r1"}`, adminUser)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code,
+			"DB 障害が 4xx に化けている (#2792)")
+	})
+
 	// promo/create は user ではなく note を引く。**別の repo なので上の
 	// failingUserRepo では守れない** (実際、guard を外す変異が生き残った)。
 	t.Run("admin/promo/create", func(t *testing.T) {

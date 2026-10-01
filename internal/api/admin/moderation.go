@@ -132,7 +132,8 @@ func (h *Handler) UpdateAbuseUserReport(c echo.Context) error {
 	// 実装では同一ポインタが書き換わって比較が壊れる)。
 	beforeNote := before.ModerationNote
 	if err := h.abuseRepo.UpdateFields(req.ReportID, map[string]any{"moderationNote": note}); err != nil {
-		return c.JSON(http.StatusNotFound, apierr.ErrorWithKind("NO_SUCH_ABUSE_REPORT", "No such abuse report.", "15f51cf5-46d1-4b1d-a618-b35bcbed0662", apierr.KindServer))
+		// 行があることは引いて確かめ済みなので、ここで失敗するのは DB の障害 (#2792)。
+		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
 	}
 	// 変化があったときのみ updateAbuseReportNote を記録 (upstream と同じ)。
 	if beforeNote != note {

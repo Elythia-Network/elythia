@@ -4472,9 +4472,29 @@ func (h *Handler) ResolveAbuseReport(c echo.Context) error {
 	default:
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "resolvedAs must be 'accept', 'reject', or null.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
-	if err := h.abuseRepo.UpdateFields(req.ReportID, fields); err != nil {
+	// 存在の確認を UpdateFields に任せない。GORM の Updates は該当行が無くても
+	// エラーを返さないので、存在しない ID でも 204 になっていた (#3259)。本家も
+	// 先に findOneBy で引いて noSuchAbuseReport を返す。
+	report, err := h.abuseRepo.FindByID(req.ReportID)
+	if err != nil && !repository.IsNotFound(err) {
+		// **DB 障害を not-found に丸めない** (#2792)。
+		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
+	}
+	if err != nil || report == nil {
 		return c.JSON(http.StatusNotFound, apierr.ErrorWithKind("NO_SUCH_ABUSE_REPORT", "No such abuse report.", "ac3794dd-2ce4-d878-e546-73c60c06b398", apierr.KindServer))
 	}
+	// 更新前の行を控える。モックは同じポインタを書き換えるので、UpdateFields の
+	// 後に report を読むと更新後の値になる。本家のログも更新前の行を載せる。
+	before := *report
+	if err := h.abuseRepo.UpdateFields(req.ReportID, fields); err != nil {
+		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
+	}
+	// 本家 AbuseReportService.resolve と同じく resolveAbuseReport を残す (#3259)。
+	h.logModeration(c, moderationlog.LogResolveAbuseReport, map[string]any{
+		"reportId":   req.ReportID,
+		"report":     &before,
+		"resolvedAs": fields["resolvedAs"],
+	})
 	// upstream AbuseReportService.resolve は notifySystemWebhook('abuseReportResolved')
 	// を呼ぶ。best-effort: DB 更新は済んでいるので発火失敗は握り潰す (#1723)。
 	h.notifyAbuseReportResolved(c.Request().Context(), req.ReportID)

@@ -140,6 +140,15 @@ func TestUpdateAbuseUserReport_NotFound(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "15f51cf5-46d1-4b1d-a618-b35bcbed0662")
 }
 
+// 引けた後の更新の失敗は DB の障害なので 500 にする (#2792)。
+func TestUpdateAbuseUserReport_UpdateFailureIs500(t *testing.T) {
+	h, inner := setupAbuseReportHandler(t, &model.AbuseUserReport{ID: "r1"})
+	h.SetAbuseRepo(&failingAbuseUpdateRepo{MockAbuseReportRepository: inner})
+
+	rec := doPost(h.UpdateAbuseUserReport, `{"reportId":"r1","moderationNote":"x"}`, adminUser)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
 // updateAbuseReportNote の log info に before/after が記録される。
 func TestUpdateAbuseUserReport_LogPayload(t *testing.T) {
 	h, _ := setupAbuseReportHandler(t,
