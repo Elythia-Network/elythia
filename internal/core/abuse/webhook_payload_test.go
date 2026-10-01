@@ -157,10 +157,11 @@ func TestWebhookPayload_ResolvesInstanceAndEmojis(t *testing.T) {
 		Instances: wpInstances{rows: []*model.Instance{{Host: host, Name: &instName}}},
 		Emojis: wpEmojis{rows: []*model.Emoji{
 			{Name: "blob", Host: &host, PublicURL: "https://remote.example/blob.png"},
+			{Name: "blob", PublicURL: "https://local.example/blob.png"},
 		}},
 	}
 	reporter := &model.User{ID: "alice", Username: "alice", Host: &host, Emojis: []string{"blob"}}
-	target := &model.User{ID: "bob", Username: "bob"}
+	target := &model.User{ID: "bob", Username: "bob", Emojis: []string{"blob"}}
 
 	body := payloadJSON(t, abuse.WebhookPayload(cnReport(t, idGen), reporter, target, nil, lookups, idGen))
 	rep := body["reporter"].(map[string]any)
@@ -169,8 +170,9 @@ func TestWebhookPayload_ResolvesInstanceAndEmojis(t *testing.T) {
 	assert.Equal(t, "Remote", inst["name"])
 	assert.Equal(t, map[string]any{"blob": "https://remote.example/blob.png"}, rep["emojis"])
 
-	// ローカルの利用者の emojis は固定しない。本家は解決せず常に空だが、mk-go の
-	// EmojiResolver は他の UserLite でも解決しており、Webhook だけの話ではない。
+	// ローカルの利用者の emojis は本家と同じく解決せず空にする (#3270)。同名の
+	// ローカルの絵文字があっても入れない。
 	tgt := body["targetUser"].(map[string]any)
 	assert.Nil(t, tgt["instance"], "ローカルの利用者に instance は付けない")
+	assert.Equal(t, map[string]any{}, tgt["emojis"])
 }
