@@ -40,11 +40,12 @@ func (h *Handler) Followers(c echo.Context) error {
 	if h.followingRepo == nil {
 		return c.JSON(http.StatusOK, []any{})
 	}
-	rows, err := h.followingRepo.ListFollowersByHostCursor(req.Host, req.sinceID, req.untilID, (*req.Limit))
+	viewer := h.followListViewer(c)
+	rows, err := h.followingRepo.ListFollowersByHostCursor(req.Host, req.sinceID, req.untilID, (*req.Limit), viewer)
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
-	return c.JSON(http.StatusOK, h.packFollowings(viewerIDOf(c), rows))
+	return c.JSON(http.StatusOK, h.packFollowings(viewer.UserID, rows))
 }
 
 // Following handles POST /api/federation/following.
@@ -59,11 +60,12 @@ func (h *Handler) Following(c echo.Context) error {
 	if h.followingRepo == nil {
 		return c.JSON(http.StatusOK, []any{})
 	}
-	rows, err := h.followingRepo.ListFollowingByHostCursor(req.Host, req.sinceID, req.untilID, (*req.Limit))
+	viewer := h.followListViewer(c)
+	rows, err := h.followingRepo.ListFollowingByHostCursor(req.Host, req.sinceID, req.untilID, (*req.Limit), viewer)
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
-	return c.JSON(http.StatusOK, h.packFollowings(viewerIDOf(c), rows))
+	return c.JSON(http.StatusOK, h.packFollowings(viewer.UserID, rows))
 }
 
 // Users handles POST /api/federation/users.
@@ -107,6 +109,20 @@ func (h *Handler) Users(c echo.Context) error {
 		out = append(out, d)
 	}
 	return c.JSON(http.StatusOK, out)
+}
+
+// followListViewer describes the caller for the owner visibility filter of
+// federation/followers and federation/following. Mirrors upstream, which
+// applies generateFollowingRelationVisibilityQuery unless the caller is a
+// moderator.
+//
+// moderator checker が未配線なら moderator 扱いしない (絞る側に倒す)。
+func (h *Handler) followListViewer(c echo.Context) model.FollowListViewer {
+	viewerID := viewerIDOf(c)
+	return model.FollowListViewer{
+		UserID:    viewerID,
+		Moderator: h.moderator != nil && viewerID != "" && h.moderator.IsModerator(viewerID),
+	}
 }
 
 // viewerIDOf returns the authenticated viewer's ID, or "" for anonymous callers.

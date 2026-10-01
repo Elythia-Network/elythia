@@ -86,6 +86,9 @@ func TestFollowingRepository_FindByPair_NotFound(t *testing.T) {
 // followers/following を id cursor でページングする (#1732)。
 func TestFollowingRepository_ListByHostCursor(t *testing.T) {
 	repo := NewFollowingRepository(testDB)
+	// ページングだけを見るテストなので、持ち主の公開範囲による絞り込みは
+	// moderator として外す (絞り込みは TestFollowingRepository_HostListVisibility)。
+	modBypass := model.FollowListViewer{Moderator: true}
 	// following は (followerId, followeeId) が unique なので各行を別 pair にする。
 	la := insertTestUser(t, "u_hc_la", "hcla")
 	lb := insertTestUser(t, "u_hc_lb", "hclb")
@@ -109,14 +112,14 @@ func TestFollowingRepository_ListByHostCursor(t *testing.T) {
 	}
 
 	// untilID=hc_fee_c → a, b のみ DESC で [b, a]。
-	rows, err := repo.ListFollowersByHostCursor(host, "", "hc_fee_c", 10)
+	rows, err := repo.ListFollowersByHostCursor(host, "", "hc_fee_c", 10, modBypass)
 	require.NoError(t, err)
 	require.Len(t, rows, 2)
 	assert.Equal(t, "hc_fee_b", rows[0].ID)
 	assert.Equal(t, "hc_fee_a", rows[1].ID)
 
 	// sinceID=hc_fee_a → b, c のみ ASC で [b, c]。
-	rows, err = repo.ListFollowersByHostCursor(host, "hc_fee_a", "", 10)
+	rows, err = repo.ListFollowersByHostCursor(host, "hc_fee_a", "", 10, modBypass)
 	require.NoError(t, err)
 	require.Len(t, rows, 2)
 	assert.Equal(t, "hc_fee_b", rows[0].ID)
@@ -133,24 +136,24 @@ func TestFollowingRepository_ListByHostCursor(t *testing.T) {
 		require.NoError(t, repo.Create(row))
 		defer testDB.Exec(`DELETE FROM "following" WHERE id = ?`, r.id)
 	}
-	rows, err = repo.ListFollowingByHostCursor(host2, "", "", 10)
+	rows, err = repo.ListFollowingByHostCursor(host2, "", "", 10, modBypass)
 	require.NoError(t, err)
 	require.Len(t, rows, 2)
 	assert.Equal(t, "hc_fer_b", rows[0].ID, "default は id DESC")
 
 	// following 版の sinceID / untilID 分岐 + limit<=0 のデフォルト適用も通す。
-	rows, err = repo.ListFollowingByHostCursor(host2, "hc_fer_a", "", 0)
+	rows, err = repo.ListFollowingByHostCursor(host2, "hc_fer_a", "", 0, modBypass)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	assert.Equal(t, "hc_fer_b", rows[0].ID, "sinceID 指定 + limit<=0 デフォルト")
 
-	rows, err = repo.ListFollowingByHostCursor(host2, "", "hc_fer_b", 10)
+	rows, err = repo.ListFollowingByHostCursor(host2, "", "hc_fer_b", 10, modBypass)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	assert.Equal(t, "hc_fer_a", rows[0].ID, "untilID 指定")
 
 	// followers 版も limit<=0 デフォルト適用を通す (全 3 行返る)。
-	rows, err = repo.ListFollowersByHostCursor(host, "", "", 0)
+	rows, err = repo.ListFollowersByHostCursor(host, "", "", 0, modBypass)
 	require.NoError(t, err)
 	assert.Len(t, rows, 3)
 }

@@ -205,12 +205,12 @@ func TestListFiltersRejectUnstorableHost(t *testing.T) {
 	const unstorable = "a\x00b"
 
 	t.Run("federation/followers", func(t *testing.T) {
-		rows, err := NewFollowingRepository(db).ListFollowersByHostCursor(unstorable, "", "", 10)
+		rows, err := NewFollowingRepository(db).ListFollowersByHostCursor(unstorable, "", "", 10, model.FollowListViewer{})
 		require.NoError(t, err, "host を SELECT に載せてしまっている")
 		assert.Empty(t, rows)
 	})
 	t.Run("federation/following", func(t *testing.T) {
-		rows, err := NewFollowingRepository(db).ListFollowingByHostCursor(unstorable, "", "", 10)
+		rows, err := NewFollowingRepository(db).ListFollowingByHostCursor(unstorable, "", "", 10, model.FollowListViewer{})
 		require.NoError(t, err, "host を SELECT に載せてしまっている")
 		assert.Empty(t, rows)
 	})
