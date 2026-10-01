@@ -142,16 +142,54 @@ func TestRun_DetectsNoteCounters(t *testing.T) {
 	assert.EqualValues(t, 1, renotes)
 }
 
-// **clippedCount / pageCount を drift 扱いしないこと。**
+// **pageCount を drift 扱いしないこと。**
 //
-// mk-go はクリップ件数の非正規化カウンタを意図的に維持せず clip_note を直接
-// 数える設計 (#2243)。常に 0 が正しいので、実件数と突き合わせると全件が drift
-// として報告されてしまう。
-func TestRun_IgnoresIntentionallyUnmaintainedCounters(t *testing.T) {
+// mk-go は pageCount を維持していない (本家は PageService で増減する)。実件数と
+// 突き合わせると、維持していないことによる差が全件 drift として報告される。
+func TestRun_IgnoresUnmaintainedPageCount(t *testing.T) {
 	for _, c := range counterChecks {
-		assert.NotEqualf(t, "clippedCount", c.column, "clippedCount は意図的に維持していない")
-		assert.NotEqualf(t, "pageCount", c.column, "pageCount は意図的に維持していない")
+		assert.NotEqualf(t, "pageCount", c.column, "pageCount は維持していない")
 	}
+}
+
+// clippedCount は #1768 から維持しているが、それより前にクリップした行は 0 の
+// まま残っている (#3291)。実件数 (clip_note) と突き合わせて検出し、-fix で直す。
+func TestRun_DetectsClippedCountDrift(t *testing.T) {
+	db := newTestDB(t)
+	seedUser(t, db, "u1")
+	seedNote(t, db, "n1", "u1")
+	seedNote(t, db, "n2", "u1")
+	require.NoError(t, db.Exec(`INSERT INTO "clip" (id, "userId", name) VALUES ('c1', 'u1', 'a'), ('c2', 'u1', 'b')`).Error)
+	// n1 は 2 つのクリップに入っているのにカウンタが 0 (#1768 より前の行)。
+	// n2 はクリップに入っていないのに -1 (0 のまま外して負になった行)。
+	require.NoError(t, db.Exec(`INSERT INTO "clip_note" (id, "noteId", "clipId") VALUES ('cn1', 'n1', 'c1'), ('cn2', 'n1', 'c2')`).Error)
+	require.NoError(t, db.Exec(`UPDATE "note" SET "clippedCount" = -1 WHERE id = 'n2'`).Error)
+
+	rep, err := Run(context.Background(), db, Options{})
+	require.NoError(t, err)
+	got := map[string]Drift{}
+	for _, d := range rep.Drifts {
+		if d.Column == "clippedCount" {
+			got[d.ID] = d
+		}
+	}
+	require.Len(t, got, 2)
+	assert.EqualValues(t, 0, got["n1"].Stored)
+	assert.EqualValues(t, 2, got["n1"].Actual)
+	assert.EqualValues(t, -1, got["n2"].Stored)
+	assert.EqualValues(t, 0, got["n2"].Actual)
+
+	_, err = Run(context.Background(), db, Options{Fix: true})
+	require.NoError(t, err)
+	var n1, n2 int64
+	require.NoError(t, db.Raw(`SELECT "clippedCount" FROM "note" WHERE id = 'n1'`).Scan(&n1).Error)
+	require.NoError(t, db.Raw(`SELECT "clippedCount" FROM "note" WHERE id = 'n2'`).Scan(&n2).Error)
+	assert.EqualValues(t, 2, n1)
+	assert.EqualValues(t, 0, n2)
+
+	rep, err = Run(context.Background(), db, Options{})
+	require.NoError(t, err)
+	assert.True(t, rep.OK(), "修正後は clean")
 }
 
 // 孤児は報告するが**削除しない**。カウンタは元データから導けるが、削除した行は
@@ -247,4 +285,62 @@ func TestRun_ReturnsErrorWhenOrphanCheckFails(t *testing.T) {
 	_, err := Run(context.Background(), db, Options{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "孤児検査")
+}
+
+// クリップを消しても clippedCount は減らない (本家と同じ)。保存値が実件数より
+// 大きいずれは平常時にも出るので、fsck が報告し -fix で下げられること。
+func TestRun_ClippedCountDriftAfterClipDeletion(t *testing.T) {
+	db := newTestDB(t)
+	seedUser(t, db, "u1")
+	seedNote(t, db, "n1", "u1")
+	require.NoError(t, db.Exec(`INSERT INTO "clip" (id, "userId", name) VALUES ('c1', 'u1', 'a')`).Error)
+	require.NoError(t, db.Exec(`INSERT INTO "clip_note" (id, "noteId", "clipId") VALUES ('cn1', 'n1', 'c1')`).Error)
+	require.NoError(t, db.Exec(`UPDATE "note" SET "clippedCount" = 1 WHERE id = 'n1'`).Error)
+	// clip の削除は clip_note を CASCADE で消すが、カウンタには触れない。
+	require.NoError(t, db.Exec(`DELETE FROM "clip" WHERE id = 'c1'`).Error)
+
+	rep, err := Run(context.Background(), db, Options{Fix: true})
+	require.NoError(t, err)
+	drifts := clippedCountDrifts(rep)
+	require.Len(t, drifts, 1)
+	assert.EqualValues(t, 1, drifts[0].Stored)
+	assert.EqualValues(t, 0, drifts[0].Actual)
+
+	var got int64
+	require.NoError(t, db.Raw(`SELECT "clippedCount" FROM "note" WHERE id = 'n1'`).Scan(&got).Error)
+	assert.EqualValues(t, 0, got)
+}
+
+// clippedCount は smallint なので、実件数が上限を超えるノートは 32767 で
+// 頭打ちにして書き戻す。頭打ちが無いと -fix の UPDATE が範囲外で失敗し続ける。
+func TestRun_ClippedCountActualIsCappedAtSmallintMax(t *testing.T) {
+	db := newTestDB(t)
+	seedUser(t, db, "u1")
+	seedNote(t, db, "n1", "u1")
+	require.NoError(t, db.Exec(`INSERT INTO "clip" (id, "userId", name)
+		SELECT 'c' || g, 'u1', 'c' || g FROM generate_series(1, 32768) g`).Error)
+	require.NoError(t, db.Exec(`INSERT INTO "clip_note" (id, "noteId", "clipId")
+		SELECT 'cn' || g, 'n1', 'c' || g FROM generate_series(1, 32768) g`).Error)
+
+	rep, err := Run(context.Background(), db, Options{Fix: true})
+	require.NoError(t, err, "-fix が範囲外で失敗しない")
+	drifts := clippedCountDrifts(rep)
+	require.Len(t, drifts, 1)
+	assert.EqualValues(t, 32767, drifts[0].Actual)
+
+	rep, err = Run(context.Background(), db, Options{})
+	require.NoError(t, err)
+	assert.True(t, rep.OK(), "頭打ちの値に直した後は clean")
+}
+
+// clippedCountDrifts returns only the clippedCount drifts. seedNote は
+// notesCount を更新しないので、他の列のずれも一緒に報告される。
+func clippedCountDrifts(rep Report) []Drift {
+	var out []Drift
+	for _, d := range rep.Drifts {
+		if d.Column == "clippedCount" {
+			out = append(out, d)
+		}
+	}
+	return out
 }
