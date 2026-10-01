@@ -185,19 +185,32 @@ func (s *Service) FindByID(ctx context.Context, id string) (*model.Relay, error)
 
 // MarkAccepted flips the status of the given relay to "accepted". Used
 // by the inbox Accept handler when it detects a follow-relay activity
-// whose sender is that relay.
+// whose sender is that relay. Only a relay that is still "requesting" is
+// updated; a late Accept for an accepted / rejected relay is ignored.
 func (s *Service) MarkAccepted(ctx context.Context, id string) error {
-	if err := s.repo.UpdateStatus(id, StatusAccepted); err != nil {
-		return err
-	}
-	s.invalidateCache()
-	return nil
+	return s.markFromRequesting(id, StatusAccepted)
 }
 
-// MarkRejected flips the status to "rejected".
+// MarkRejected flips the status to "rejected", under the same
+// "requesting only" condition as MarkAccepted.
 func (s *Service) MarkRejected(ctx context.Context, id string) error {
-	if err := s.repo.UpdateStatus(id, StatusRejected); err != nil {
+	return s.markFromRequesting(id, StatusRejected)
+}
+
+// markFromRequesting は本家 RelayService.updateRequestingRelayStatus
+// (2026.10.0) に揃え、status が requesting の行だけを書き換える。条件が
+// 無いと、relay (または relay を名乗れる相手) が後から Accept / Reject を
+// 送るだけで accepted と rejected を何度でも行き来させられる。管理者が
+// 登録し直さない限り、一度決まった応答は動かさない。
+func (s *Service) markFromRequesting(id, to string) error {
+	changed, err := s.repo.UpdateStatusFrom(id, StatusRequesting, to)
+	if err != nil {
 		return err
+	}
+	if !changed {
+		slog.Info("relay: ignoring status change for relay not in requesting state",
+			"relayId", id, "to", to)
+		return nil
 	}
 	s.invalidateCache()
 	return nil

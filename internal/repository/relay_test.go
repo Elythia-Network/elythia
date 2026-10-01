@@ -35,7 +35,17 @@ func TestRelayRepository_CRUD(t *testing.T) {
 	}
 	assert.True(t, hasRel2)
 
-	require.NoError(t, repo.UpdateStatus("rel_1", "accepted"))
+	changed, err := repo.UpdateStatusFrom("rel_1", "requesting", "accepted")
+	require.NoError(t, err)
+	assert.True(t, changed)
+	found, err = repo.FindByID("rel_1")
+	require.NoError(t, err)
+	assert.Equal(t, "accepted", found.Status)
+
+	// requesting でなくなった行は動かない (本家 updateRequestingRelayStatus)。
+	changed, err = repo.UpdateStatusFrom("rel_1", "requesting", "rejected")
+	require.NoError(t, err)
+	assert.False(t, changed)
 	found, err = repo.FindByID("rel_1")
 	require.NoError(t, err)
 	assert.Equal(t, "accepted", found.Status)
