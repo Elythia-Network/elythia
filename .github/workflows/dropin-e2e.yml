@@ -98,19 +98,19 @@ jobs:
         include:
           - name: swap-test
             make: dropin-swap-test
-            image: misskey/misskey:2026.9.1
+            image: misskey/misskey:2026.10.0
             compose: -f docker-compose.dropin.yml -f docker-compose.dropin.mk.yml -f docker-compose.dropin.fedibird.yml
           - name: mkgo-born
             make: dropin-mkgo-born-test
-            image: misskey/misskey:2026.9.1
+            image: misskey/misskey:2026.10.0
             compose: -f docker-compose.dropin.yml -f docker-compose.dropin.mk.yml
           - name: ed25519-verify
             make: dropin-fedibird-test
-            image: misskey/misskey:2026.9.1
+            image: misskey/misskey:2026.10.0
             compose: -f docker-compose.dropin.yml -f docker-compose.dropin.mk.yml -f docker-compose.dropin.fedibird.yml
           - name: federation
             make: federation-misskey-e2e
-            image: misskey/misskey:2026.9.1
+            image: misskey/misskey:2026.10.0
             compose: -f docker-compose.federation.misskey.yml
           - name: federation-mastodon
             make: federation-mastodon-e2e

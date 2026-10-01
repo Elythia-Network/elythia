@@ -4,7 +4,7 @@
 # を引き継ぐ。overlay 単独で起動することはないので明示は不要。
 #
 # spec は upstream Misskey TS の API 互換挙動を期待値として書いている。
-# 本 overlay は backend を `misskey/misskey:2026.9.1` に置き換えて、上流の
+# 本 overlay は backend を `misskey/misskey:2026.10.0` に置き換えて、上流の
 # 真の挙動で spec が pass することを baseline として確認する。
 # (mk-go 単体 stack は docker-compose.playwright.yml、両者で同 spec が
 # pass = drop-in 互換が保証される、という設計。)
@@ -24,10 +24,10 @@
 services:
   mkgo:
     # mk-go の追従先と同じ版に揃える。spec の selector は mk-go 同梱
-    # frontend (2026.9.1-mk.x) 基準で書かれているので、ここが古いと
+    # frontend (2026.10.0-mk.x) 基準で書かれているので、ここが古いと
     # UI spec が TS 側だけ落ちる (#2276)。MisskeyVersion を上げるときは
     # この tag も一緒に上げること。
-    image: misskey/misskey:2026.9.1
+    image: misskey/misskey:2026.10.0
     build: !reset null
     environment:
       NODE_TLS_REJECT_UNAUTHORIZED: "0"

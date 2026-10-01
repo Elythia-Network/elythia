@@ -18,8 +18,8 @@ var MkGoVersion = "1.4.0"
 
 // MisskeyVersion is the compatible Misskey version. Override at build time via:
 //
-//	go build -ldflags "-X github.com/shiroha-a/mk/internal/config.MisskeyVersion=2026.9.1"
-var MisskeyVersion = "2026.9.1"
+//	go build -ldflags "-X github.com/shiroha-a/mk/internal/config.MisskeyVersion=2026.10.0"
+var MisskeyVersion = "2026.10.0"
 
 // MkGoCommit is the source revision this binary was built from (short hash).
 //

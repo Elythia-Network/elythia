@@ -110,7 +110,7 @@ jobs:
           pnpm build
 
       - name: Pre-pull Misskey TS image
-        run: docker pull misskey/misskey:2026.9.1
+        run: docker pull misskey/misskey:2026.10.0
 
       # down → up → healthy 待ち → pytest を通しで実行する。
       - name: Run make diff-check

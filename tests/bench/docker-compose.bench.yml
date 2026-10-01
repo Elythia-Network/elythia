@@ -126,7 +126,7 @@ services:
     networks: [bench]
 
   misskey-app:
-    image: misskey/misskey:2026.9.1
+    image: misskey/misskey:2026.10.0
     environment:
       # NODE_ENV=developmentでRateLimiterServiceが全レートリミットを無効化する
       NODE_ENV: development

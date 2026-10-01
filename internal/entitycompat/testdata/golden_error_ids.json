@@ -784,6 +784,9 @@
   "roles/users": {
     "NO_SUCH_ROLE": "30aaaee3-4792-48dc-ab0d-cf501a575ac5"
   },
+  "sw/register": {
+    "INVALID_ENDPOINT": "4432adbe-17c0-4f9f-b43c-9ceb2f8910fe"
+  },
   "sw/update-registration": {
     "NO_SUCH_REGISTRATION": " b09d8066-8064-5613-efb6-0e963b21d012"
   },

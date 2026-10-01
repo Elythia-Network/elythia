@@ -1,4 +1,4 @@
-# Misskey TS (misskey/misskey:2026.9.1) config for the differential e2e diff
+# Misskey TS (misskey/misskey:2026.10.0) config for the differential e2e diff
 # stack (#2089). API-only (HTTP, no TLS): the diff-runner hits http://ts:3000.
 url: http://ts:3000/
 port: 3000

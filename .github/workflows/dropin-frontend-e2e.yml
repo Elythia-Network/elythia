@@ -88,7 +88,7 @@ jobs:
         # 内の同 image pull は docker daemon の cache hit で 0s で済む方が
         # 確実。playwright.yml (#816) と同じ判断。2 image を順次 pull。
         run: |
-          docker pull misskey/misskey:2026.9.1
+          docker pull misskey/misskey:2026.10.0
           docker pull cypress/included:15.11.0
 
       - name: Run dropin frontend e2e
