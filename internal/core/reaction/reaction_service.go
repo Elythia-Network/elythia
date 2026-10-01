@@ -351,8 +351,12 @@ func (s *Service) Create(user *model.User, noteID, rawReaction string) (string, 
 			return "", ErrAlreadyReacted
 		}
 		// 別のリアクションがすでにあるので置き換える
-		if _, err := s.reactionRepo.Delete(existing); err != nil {
+		affected, err := s.reactionRepo.Delete(existing)
+		if err != nil {
 			return "", err
+		}
+		if affected == 0 {
+			return "", ErrReactionNotFound
 		}
 		// 集計列も古いリアクションを-1
 		_ = s.countWriter.Increment(target.ID, existing.Reaction, -1)
