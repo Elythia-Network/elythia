@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shiroha-a/mk/internal/core/bubbleversus"
 	"github.com/shiroha-a/mk/internal/core/iplog"
 	"github.com/shiroha-a/mk/internal/core/iplookuplog"
 	"github.com/shiroha-a/mk/internal/core/signup"
@@ -355,4 +356,44 @@ func TestClean_IPLookupLogPruneFailureIsSwallowed(t *testing.T) {
 func TestIPLookupLogRetentionMatchesCore(t *testing.T) {
 	assert.Equal(t, iplookuplog.Retention, ipLookupLogRetention,
 		"監査記録の保持期間が core/iplookuplog から切り離されている (#3106)")
+}
+
+type fakeBubbleVersusPruner struct {
+	called    bool
+	gotCutoff time.Time
+	err       error
+}
+
+func (f *fakeBubbleVersusPruner) DeleteExpired(cutoff time.Time) (int64, error) {
+	f.called, f.gotCutoff = true, cutoff
+	return 1, f.err
+}
+
+// 対戦の記録は終局から 30 日で消す (#3232)。
+func TestClean_PrunesBubbleVersusRecords(t *testing.T) {
+	proc := NewCleanProcessor(&fakeUserIPPruner{}, &fakeRolePruner{}, &fakeGamePruner{}, &fakeCleanIDGen{},
+		&fakeAntennaDeactivator{}, testAntennaThreshold, &fakePendingPruner{})
+	pr := &fakeBubbleVersusPruner{}
+	proc.SetBubbleVersusRecordPruner(pr)
+
+	require.NoError(t, proc.Handle(context.Background(), driver.RawTask{TypeName: "test"}))
+	assert.True(t, pr.called, "対戦の記録が刈られていない")
+	assert.WithinDuration(t, time.Now().Add(-30*24*time.Hour), pr.gotCutoff, time.Minute)
+}
+
+// 刈り取りが失敗しても他の sub-task を止めない。
+func TestClean_BubbleVersusPruneFailureIsSwallowed(t *testing.T) {
+	ip := &fakeUserIPPruner{}
+	proc := NewCleanProcessor(ip, &fakeRolePruner{}, &fakeGamePruner{}, &fakeCleanIDGen{},
+		&fakeAntennaDeactivator{}, testAntennaThreshold, &fakePendingPruner{})
+	proc.SetBubbleVersusRecordPruner(&fakeBubbleVersusPruner{err: errors.New("db down")})
+
+	require.NoError(t, proc.Handle(context.Background(), driver.RawTask{TypeName: "test"}))
+	assert.False(t, ip.gotBefore.IsZero(), "失敗が他の sub-task を止めている")
+}
+
+// 保持期間は core/bubbleversus の値そのもの。
+func TestBubbleVersusRecordRetentionMatchesCore(t *testing.T) {
+	assert.Equal(t, bubbleversus.RecordRetention, bubbleVersusRecordRetention,
+		"対戦の記録の保持期間が core/bubbleversus から切り離されている (#3232)")
 }

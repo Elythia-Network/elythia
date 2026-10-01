@@ -1143,6 +1143,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// IP 照会の監査記録にも保持期間を掛ける (#3106)。**この行が無いと記録が永久に
 	// 残り、`moderation_log` に IP を書くのと変わらなくなる。**
 	cleanGenericProcessor.SetIPLookupLogPruner(repository.NewIPLookupLogRepository(s.db))
+	// 対戦の記録は終局から 30 日で消す (#3232)。
+	cleanGenericProcessor.SetBubbleVersusRecordPruner(repository.NewBubbleVersusRepository(s.db))
 	s.queueServer.Handle(queue.TaskTypeClean, cleanGenericProcessor.Handle)
 
 	// 分割アップロードセッションの GC (#2313): scheduler の cron (*/15) が

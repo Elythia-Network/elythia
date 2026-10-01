@@ -80,6 +80,13 @@ const (
 // MaxGameVersion bounds the engine version a report may claim.
 const MaxGameVersion = 1 << 20
 
+// RecordRetention is how long a match record is kept after it ended (#3232).
+// 終局しないまま放置された記録は、開始からこの期間で消える。
+//
+// **定義はここに 1 つ。** 消す側 (queue の clean) と、画面や doc で期間を
+// 説明する側が違う値を持つと、説明が嘘になる。
+const RecordRetention = 30 * 24 * time.Hour
+
 // Errors.
 var (
 	ErrNoSuchMatch     = errors.New("bubbleversus: no such match")

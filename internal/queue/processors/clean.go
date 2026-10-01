@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/shiroha-a/mk/internal/core/bubbleversus"
 	"github.com/shiroha-a/mk/internal/core/iplog"
 	"github.com/shiroha-a/mk/internal/core/iplookuplog"
 	"github.com/shiroha-a/mk/internal/queue/driver"
@@ -53,6 +54,11 @@ type (
 	IPLookupLogPruner interface {
 		DeleteOlderThan(t time.Time) (int64, error)
 	}
+	// BubbleVersusRecordPruner removes old bubble game versus records
+	// (repository.BubbleVersusRepository, #3232).
+	BubbleVersusRecordPruner interface {
+		DeleteExpired(cutoff time.Time) (int64, error)
+	}
 )
 
 const (
@@ -64,6 +70,9 @@ const (
 	// `core/iplookuplog` に 1 つ** — 保持期間を読み手に説明する側と刈る側が
 	// 違う値だと、画面や doc が嘘をつく (#3106)。
 	ipLookupLogRetention = iplookuplog.Retention
+	// bubbleVersusRecordRetention は対戦の記録を残す期間。**定義は
+	// `core/bubbleversus` に 1 つ** (理由は ipLookupLogRetention と同じ)。
+	bubbleVersusRecordRetention = bubbleversus.RecordRetention
 	// reversiOutdatedAfter は開始されないまま放置された reversi game を outdated
 	// と見なす猶予。upstream cleanOutdatedGames は now-10min の id を閾値にする。
 	reversiOutdatedAfter = 10 * time.Minute
@@ -95,6 +104,7 @@ type CleanProcessor struct {
 	antennaThreshold time.Duration
 	pending          PendingSignupPruner
 	ipLookupLog      IPLookupLogPruner
+	bubbleVersus     BubbleVersusRecordPruner
 }
 
 // SetIPLookupLogPruner wires the IP lookup audit retention (#3106).
@@ -102,6 +112,13 @@ type CleanProcessor struct {
 // **コンストラクタの引数にしない。** 既に 7 つあり、位置引数を増やすと全呼び出し元と
 // テストを触ることになる。nil なら sub-task は no-op。
 func (p *CleanProcessor) SetIPLookupLogPruner(pr IPLookupLogPruner) { p.ipLookupLog = pr }
+
+// SetBubbleVersusRecordPruner wires the bubble game versus record retention
+// (#3232). Like SetIPLookupLogPruner it is a setter so the constructor does not
+// grow; nil makes the sub-task a no-op.
+func (p *CleanProcessor) SetBubbleVersusRecordPruner(pr BubbleVersusRecordPruner) {
+	p.bubbleVersus = pr
+}
 
 // NewCleanProcessor constructs the processor. Any nil dependency disables its
 // sub-task (no-op) rather than panicking. antennaThreshold <= 0 also disables
@@ -154,6 +171,14 @@ func (p *CleanProcessor) Handle(_ context.Context, _ driver.Task) error {
 			slog.Warn("clean: prune ip lookup log failed", "err", err)
 		} else if n > 0 {
 			slog.Info("clean: pruned ip lookup log", "count", n)
+		}
+	}
+
+	if p.bubbleVersus != nil {
+		if n, err := p.bubbleVersus.DeleteExpired(now.Add(-bubbleVersusRecordRetention)); err != nil {
+			slog.Warn("clean: prune bubble game versus records failed", "err", err)
+		} else if n > 0 {
+			slog.Info("clean: pruned bubble game versus records", "count", n)
 		}
 	}
 
