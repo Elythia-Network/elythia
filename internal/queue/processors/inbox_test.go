@@ -148,7 +148,14 @@ func (s *stubInboxChartHook) OnInboxReceived(host string) {
 // against the supplied private key. Mirrors what the new handler emits.
 func signedInboxPayload(t *testing.T, key *activitypub.PrivateKey, body []byte) queue.InboxPayload {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "https://example.com/inbox", nil)
+	return signedInboxPayloadAt(t, key, body, "https://example.com/inbox")
+}
+
+// signedInboxPayloadAt is signedInboxPayload for an arbitrary inbox URL. Path
+// carries the RequestURI (path + query) exactly as the async inbox handler does.
+func signedInboxPayloadAt(t *testing.T, key *activitypub.PrivateKey, body []byte, target string) queue.InboxPayload {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, target, nil)
 	req.Host = "example.com"
 	digest := activitypub.SHA256Digest(body)
 	require.NoError(t, activitypub.SignRequest(req, key, digest, []string{"(request-target)", "date", "host", "digest"}))
@@ -164,8 +171,39 @@ func signedInboxPayload(t *testing.T, key *activitypub.PrivateKey, body []byte) 
 	return queue.InboxPayload{
 		Body:    body,
 		Method:  req.Method,
-		Path:    req.URL.Path,
+		Path:    req.URL.RequestURI(),
 		Headers: headers,
+	}
+}
+
+// 本家 7c9c38c04a: 送信側は `(request-target)` を path + query で署名する。
+// query 付きの inbox 宛てに署名された activity も、worker 側で組み直した
+// request で検証が通ること (空の `?` も含む)。
+func TestInboxProcessor_VerifiesSignatureWithQuery(t *testing.T) {
+	for _, target := range []string{"https://example.com/inbox?x=1", "https://example.com/inbox?"} {
+		t.Run(target, func(t *testing.T) {
+			priv, pub, err := activitypub.GenerateRSAKeypair()
+			require.NoError(t, err)
+			key, err := activitypub.NewPrivateKey("https://remote.example/users/alice#main-key", priv)
+			require.NoError(t, err)
+
+			host := "remote.example"
+			aliceURI := "https://remote.example/users/alice"
+			verifier := &stubVerifier{actor: &model.User{ID: "alice", Host: &host, URI: &aliceURI}, pubKey: pub}
+			stub := &stubFedProcessor{}
+			p := processors.NewInboxProcessor(stub)
+			p.SetSignatureVerifier(verifier)
+
+			body := []byte(`{"id":"https://remote.example/follows/1","type":"Follow","actor":"https://remote.example/users/alice"}`)
+			payload := signedInboxPayloadAt(t, key, body, target)
+			require.Contains(t, payload.Path, "?")
+
+			require.NoError(t, p.Handle(context.Background(), driver.RawTask{
+				TypeName: queue.TaskTypeInbox,
+				Body:     mustEncode(t, payload),
+			}))
+			require.Len(t, stub.calls, 1, "signature over path+query must verify in the worker")
+		})
 	}
 }
 

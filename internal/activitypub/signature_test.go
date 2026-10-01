@@ -520,3 +520,42 @@ func TestVerifyRequestWithKey_BadSignatureBase64(t *testing.T) {
 	req.Header.Set("Signature", `keyId="x",algorithm="rsa-sha256",headers="(request-target) date host",signature="!!notbase64!!"`)
 	assert.Error(t, VerifyRequestWithKey(req, pub, kt))
 }
+
+// 本家 7c9c38c04a (test/unit/ap-request.ts) の移植。`(request-target)` は
+// path + query で作り、空の `?` は残し、fragment は落とす。受信側も同じ形で
+// 組み直すので、server が受けた request で検証が通ることも合わせて見る。
+func TestSignRequest_RequestTargetIncludesQuery(t *testing.T) {
+	cases := []struct {
+		name   string
+		method string
+		url    string
+		want   string
+	}{
+		{"get with query", http.MethodGet, "https://remote.example/users/alice?page=2", "(request-target): get /users/alice?page=2"},
+		{"post with query", http.MethodPost, "https://remote.example/inbox?token=abc", "(request-target): post /inbox?token=abc"},
+		{"fragment dropped", http.MethodGet, "https://remote.example/users/alice?page=2#ignored", "(request-target): get /users/alice?page=2"},
+		{"empty query with fragment", http.MethodGet, "https://remote.example/outbox?#ignored", "(request-target): get /outbox?"},
+		{"empty query", http.MethodGet, "https://remote.example/outbox?", "(request-target): get /outbox?"},
+		{"no query", http.MethodGet, "https://remote.example/outbox", "(request-target): get /outbox"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			key, pub := newTestKey(t)
+			req, err := http.NewRequest(tc.method, tc.url, nil)
+			require.NoError(t, err)
+			require.NoError(t, SignRequest(req, key, "", []string{"(request-target)", "date", "host"}))
+
+			got, err := buildSigningString(req, []string{"(request-target)"})
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+
+			// 受信側が見る形 (request line の RequestURI を parse したもの) で検証する。
+			target := strings.TrimPrefix(tc.want, "(request-target): "+strings.ToLower(tc.method)+" ")
+			in := httptest.NewRequest(tc.method, target, nil)
+			in.Host = "remote.example"
+			in.Header.Set("Date", req.Header.Get("Date"))
+			in.Header.Set("Signature", req.Header.Get("Signature"))
+			require.NoError(t, VerifyRequest(in, pub))
+		})
+	}
+}
