@@ -118,6 +118,11 @@ func (c *HashtagChannel) OnRedisEvent(payload []byte) {
 	if anonRequireSigninDrop(payload, viewerIDFromCtx(c.ctx)) {
 		return
 	}
+	// 未ログインの viewer には meta.ugcVisibilityForVisitor を適用する
+	// (upstream NoteStreamingHidingService.filter)。
+	if anonUGCVisibilityDrop(c.ctx, payload, viewerIDFromCtx(c.ctx)) {
+		return
+	}
 	// per-subscriber 可視性 gate (#1549, fail-closed)。TS notesStream は全可視性を
 	// 流して consumer 側で isNoteVisibleForMe する設計に合わせる。
 	if !streamNoteVisibleForViewer(payload, viewerIDFromCtx(c.ctx), c.ctx.FollowingSnapshot()) {

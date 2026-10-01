@@ -49,6 +49,11 @@ func (c *ChannelTimelineChannel) OnRedisEvent(payload []byte) {
 	if anonRequireSigninDrop(payload, viewerIDFromCtx(c.ctx)) {
 		return
 	}
+	// 未ログインの viewer には meta.ugcVisibilityForVisitor を適用する
+	// (upstream NoteStreamingHidingService.filter)。
+	if anonUGCVisibilityDrop(c.ctx, payload, viewerIDFromCtx(c.ctx)) {
+		return
+	}
 	// per-subscriber 可視性 gate (#1549, fail-closed)。channel note は通常
 	// public だが、共通ゲートを通して非可視/壊れた payload を drop する。
 	if !streamNoteVisibleForViewer(payload, viewerIDFromCtx(c.ctx), c.ctx.FollowingSnapshot()) {

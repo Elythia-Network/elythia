@@ -44,6 +44,7 @@ type Manager struct {
 	muteBlockLookup MuteBlockSnapshotLookup
 	noteVisibility  NoteVisibilityChecker
 	policyProvider  role.PolicyProvider
+	ugcVisibility   UGCVisibilityLookup
 	lastActive      LastActiveRecorder
 
 	// revokeSettle は失効 event を受けてから実際に接続を閉じるまでの猶予。
@@ -161,6 +162,20 @@ func (m *Manager) SetPolicyProvider(p role.PolicyProvider) {
 	m.policyProvider = p
 }
 
+// UGCVisibilityLookup returns the current meta.ugcVisibilityForVisitor. It is
+// called per event for anonymous connections, so it must be cheap (backed by
+// the cached meta repository) and must reflect admin changes without a
+// restart.
+type UGCVisibilityLookup func() string
+
+// SetUGCVisibilityLookup wires the live meta.ugcVisibilityForVisitor lookup so
+// anonymous connections get the visitor policy on note channels and
+// noteUpdated events (upstream NoteStreamingHidingService / Connection). nil
+// disables the gate (fail-open, test/旧挙動).
+func (m *Manager) SetUGCVisibilityLookup(l UGCVisibilityLookup) {
+	m.ugcVisibility = l
+}
+
 // Accept implements api/streaming.ConnectionAcceptor. *websocket.Conn から
 // Connection を組み立て、Dispatcher 経由で channel framework に橋渡しする。
 //
@@ -210,6 +225,9 @@ func (m *Manager) Accept(ws *websocket.Conn, user *model.User, scopes []string, 
 	if m.noteVisibility != nil {
 		dispatcher.SetNoteVisibilityChecker(m.noteVisibility)
 	}
+	// 接続時に値を焼き込まず lookup ごと渡す。運営者が管理画面で締めたら、
+	// 張りっぱなしの匿名接続にも次の event から効かせるため。
+	dispatcher.SetUGCVisibilityLookup(m.ugcVisibility)
 	// upstream StreamingApiServerService と同じく、接続中は lastActiveDate を
 	// 5 分ごとに更新する (= onlineStatus の source)。
 	stopLastActive := m.trackLastActive(user)
@@ -347,6 +365,11 @@ func (m *Manager) HasMuteBlockSnapshotLookup() bool { return m.muteBlockLookup !
 
 // HasPolicyProvider reports whether the role policy provider was wired.
 func (m *Manager) HasPolicyProvider() bool { return m.policyProvider != nil }
+
+// HasUGCVisibilityLookup reports whether the meta.ugcVisibilityForVisitor
+// lookup was wired. 未配線だと匿名接続への visitor policy が素通しになる
+// (fail-open) ので、起動時検査に使う。
+func (m *Manager) HasUGCVisibilityLookup() bool { return m.ugcVisibility != nil }
 
 // subscribeManaged registers a process-wide bus handler and remembers how to
 // remove it again.
