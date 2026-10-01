@@ -242,6 +242,48 @@ func TestService_Create_ReplaceDeleteError(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// #3272: a concurrent replacement may remove the row after FindByPair but
+// before Delete. The loser must stop before decrementing the old count or
+// publishing removal/creation side effects.
+func TestService_Create_ReplaceConcurrentZeroAffected(t *testing.T) {
+	noteRepo := testutil.NewMockNoteRepository()
+	seedNote(noteRepo, "n1", "author", model.NoteVisibilityPublic)
+	noteRepo.ReactionCounts = map[string]map[string]int{
+		"n1": {"old": 1},
+	}
+	mock := testutil.NewMockNoteReactionRepository()
+	mock.Reactions["existing"] = &model.NoteReaction{
+		ID: "existing", UserID: "viewer", NoteID: "n1", Reaction: "old",
+	}
+	idGen, _ := id.NewGenerator("aidx")
+	svc := reaction.NewService(
+		noteRepo,
+		&zeroAffectedDeleteRepo{MockNoteReactionRepository: mock},
+		testutil.NewMockEmojiRepository(),
+		testutil.NewMockFollowingRepository(),
+		idGen,
+	)
+	notifications := &recordingNotificationHook{}
+	federation := &recordingFederationHook{}
+	stream := &recordingNoteStreamHook{}
+	svc.SetNotificationHook(notifications)
+	svc.SetFederationHook(federation)
+	svc.SetNoteStreamHook(stream)
+
+	_, err := svc.Create(&model.User{ID: "viewer"}, "n1", "new")
+
+	assert.ErrorIs(t, err, reaction.ErrReactionNotFound)
+	assert.Equal(t, map[string]int{"old": 1}, noteRepo.ReactionCounts["n1"])
+	assert.Equal(t, map[string]*model.NoteReaction{
+		"existing": {ID: "existing", UserID: "viewer", NoteID: "n1", Reaction: "old"},
+	}, mock.Reactions)
+	assert.Empty(t, notifications.events)
+	assert.Empty(t, federation.added)
+	assert.Empty(t, federation.removed)
+	assert.Empty(t, stream.reacted)
+	assert.Empty(t, stream.unreacted)
+}
+
 func TestService_Delete_NilUser(t *testing.T) {
 	svc, _, _, _, _ := newService(t)
 	err := svc.Delete(nil, "n")
