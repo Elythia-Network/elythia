@@ -4006,7 +4006,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/retention", chartsHandler.Retention)
 
 	// get-avatar-decorations — アバターデコレーション全件取得
-	avatarDecorationsHandler := avatardecorations.NewHandler(s.db, roleService.ExistingRoleIDSet)
+	avatarDecorationsHandler := avatardecorations.NewHandler(s.db, roleService.ExistingRoleIDSet, roleService.PublicRoleIDSet)
 	api.POST("/get-avatar-decorations", avatarDecorationsHandler.Get)
 
 	// email-address/available — メールアドレスの利用可否チェック (public)

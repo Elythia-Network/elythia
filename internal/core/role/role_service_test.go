@@ -187,13 +187,26 @@ func TestGetUserRoles_NoRoles(t *testing.T) {
 	assert.Empty(t, roles)
 }
 
-func TestService_IsExplorable(t *testing.T) {
+func TestService_IsPublicExplorable(t *testing.T) {
 	svc, roleRepo, _, _ := newTestService(t)
-	roleRepo.Roles["r1"] = &model.Role{ID: "r1", Name: "Public", IsExplorable: true}
-	roleRepo.Roles["r2"] = &model.Role{ID: "r2", Name: "Hidden", IsExplorable: false}
-	assert.True(t, svc.IsExplorable("r1"))
-	assert.False(t, svc.IsExplorable("r2"))
-	assert.False(t, svc.IsExplorable("missing"), "unknown role must be fail-closed")
+	roleRepo.Roles["r1"] = &model.Role{ID: "r1", Name: "Public", IsPublic: true, IsExplorable: true}
+	roleRepo.Roles["r2"] = &model.Role{ID: "r2", Name: "Hidden", IsPublic: true, IsExplorable: false}
+	roleRepo.Roles["r3"] = &model.Role{ID: "r3", Name: "Private", IsPublic: false, IsExplorable: true}
+	assert.True(t, svc.IsPublicExplorable("r1"))
+	assert.False(t, svc.IsPublicExplorable("r2"), "non-explorable role must not stream")
+	assert.False(t, svc.IsPublicExplorable("r3"), "explorable but non-public role must not stream")
+	assert.False(t, svc.IsPublicExplorable("missing"), "unknown role must be fail-closed")
+}
+
+// PublicRoleIDSet は isPublic なロールの id だけを返す (#17987)。
+func TestPublicRoleIDSet(t *testing.T) {
+	svc, roleRepo, _, _ := newTestService(t)
+	roleRepo.Roles["pub"] = &model.Role{ID: "pub", Name: "Pub", IsPublic: true}
+	roleRepo.Roles["priv"] = &model.Role{ID: "priv", Name: "Priv", IsPublic: false}
+
+	set, err := svc.PublicRoleIDSet()
+	require.NoError(t, err)
+	assert.Equal(t, map[string]bool{"pub": true}, set)
 }
 
 func TestGetUserRoles_WithRoles(t *testing.T) {
