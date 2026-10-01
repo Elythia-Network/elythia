@@ -7221,7 +7221,10 @@ func (m *MockAbuseReportRepository) HasOlderUnresolvedFromHost(host, beforeID st
 func (m *MockAbuseReportRepository) UpdateFields(id string, fields map[string]any) error {
 	r, ok := m.Reports[id]
 	if !ok {
-		return ErrNotFound
+		// 本物 (GORM の Updates) は該当行が無くてもエラーを返さないので合わせる。
+		// ErrNotFound を返すと、存在の確認を UpdateFields 任せにした handler の
+		// テストが、本番では 204 になるのに 404 で通ってしまう (#3259)。
+		return nil
 	}
 	if v, ok := fields["resolved"]; ok {
 		r.Resolved = v.(bool)
