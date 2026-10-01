@@ -772,6 +772,24 @@ func TestClient_EnqueueSystemWebhook(t *testing.T) {
 	tasks := listPending(t, newInspector(t), queue.WebhookQueueName)
 	require.Len(t, tasks, 1)
 	assert.Equal(t, queue.TaskTypeSystemWebhook, tasks[0].Type)
+	assert.Equal(t, 4, jobAttempts(t, tasks[0]), "本配送は本家と同じ総試行 4 回")
+}
+
+// テスト送信 (SingleAttempt) は本家の attempts: 1 と同じく 1 回だけ (#3262)。
+func TestClient_EnqueueSystemWebhook_SingleAttempt(t *testing.T) {
+	testutil.SkipIfNoDocker(t)
+	flushTestRedis(t)
+
+	c := queue.NewClient(newDriver(t))
+	defer func() { _ = c.Close() }()
+
+	require.NoError(t, c.EnqueueSystemWebhook(context.Background(), queue.WebhookPayload{
+		WebhookID: "sh1", EventType: "userCreated", Body: []byte(`{}`), SingleAttempt: true,
+	}))
+
+	tasks := listPending(t, newInspector(t), queue.WebhookQueueName)
+	require.Len(t, tasks, 1)
+	assert.Equal(t, 1, jobAttempts(t, tasks[0]))
 }
 
 func TestClient_EnqueueSystemWebhook_ClosedDriverFails(t *testing.T) {

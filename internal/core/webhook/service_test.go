@@ -259,6 +259,7 @@ func TestDispatchSystemTest_EnqueuesWithOverride(t *testing.T) {
 	assert.Equal(t, "https://override.example", enq.systemCalls[0].OverrideURL)
 	assert.Equal(t, "ovsecret", enq.systemCalls[0].OverrideSecret)
 	assert.Empty(t, enq.systemCalls[0].UserID, "system webhook は UserID を持たない")
+	assert.True(t, enq.systemCalls[0].SingleAttempt, "テスト送信は本家と同じく再試行しない (#3262)")
 }
 
 func TestDispatchSystemTest_NilSafe(t *testing.T) {

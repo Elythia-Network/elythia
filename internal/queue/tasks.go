@@ -350,6 +350,9 @@ type WebhookPayload struct {
 	// 保存済 webhook の latestStatus も汚さない (= テスト送信は別 URL なので)。
 	OverrideURL    string `json:"overrideUrl,omitempty"`
 	OverrideSecret string `json:"overrideSecret,omitempty"`
+	// SingleAttempt は再試行しない (1 回だけ送る)。本家はテスト送信を
+	// attempts: 1 で積む (WebhookTestService、#3262)。
+	SingleAttempt bool `json:"singleAttempt,omitempty"`
 }
 
 // NewUserWebhookTask serializes the payload into a driver.Task for

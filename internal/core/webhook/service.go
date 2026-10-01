@@ -149,8 +149,9 @@ func (s *Service) DispatchUserTest(webhookID, userID, eventType string, body any
 
 // DispatchSystemTest enqueues a single system webhook test delivery for
 // admin/system-webhook/test (#1542)。DispatchUserTest の system 版で、UserID は
-// 持たず、overrideURL/Secret が非空ならそちらへ送る。real delivery (processor) を
-// 経由するため header / envelope は本配送と完全に一致する。
+// 持たず、overrideURL が非空なら overrideURL / overrideSecret へ送る。real
+// delivery (processor) を経由するため header / envelope は本配送と完全に一致する。
+// 本家と同じく再試行しない (attempts: 1、#3262)。
 func (s *Service) DispatchSystemTest(webhookID, eventType string, body any, overrideURL, overrideSecret string) {
 	if s == nil || s.enqueuer == nil {
 		return
@@ -169,6 +170,7 @@ func (s *Service) DispatchSystemTest(webhookID, eventType string, body any, over
 		Body:           raw,
 		OverrideURL:    overrideURL,
 		OverrideSecret: overrideSecret,
+		SingleAttempt:  true,
 	}); err != nil {
 		slog.Warn("webhook: enqueue system test webhook failed",
 			"hookId", webhookID, "event", eventType, "err", err)

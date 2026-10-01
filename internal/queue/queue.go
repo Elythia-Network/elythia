@@ -444,10 +444,15 @@ func (c *Client) EnqueueUserWebhook(ctx context.Context, payload WebhookPayload)
 // EnqueueSystemWebhook puts a system webhook delivery task on the webhook queue.
 func (c *Client) EnqueueSystemWebhook(ctx context.Context, payload WebhookPayload) error {
 	body := mustMarshal(payload)
+	// #2106 L59: upstream 総試行 4 回に揃える (WithMaxRetry(3)+1=4)。
+	// テスト送信は本家と同じく 1 回だけ (#3262)。
+	maxRetry := 3
+	if payload.SingleAttempt {
+		maxRetry = 0
+	}
 	base := []driver.EnqueueOption{
 		driver.WithQueue(WebhookQueueName),
-		// #2106 L59: upstream 総試行 4 回に揃える (WithMaxRetry(3)+1=4)。
-		driver.WithMaxRetry(3),
+		driver.WithMaxRetry(maxRetry),
 		// user webhook と同様に custom backoff を付与する (#1408)。
 		driver.WithFederationBackoff(),
 	}
