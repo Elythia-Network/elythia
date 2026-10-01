@@ -109,7 +109,7 @@ jobs:
             "test_target": "playwright-ts-test",
             "down_target": "playwright-ts-down",
             "compose_args": "-f docker-compose.playwright.yml -f docker-compose.playwright.ts.yml",
-            "prepull": "docker pull misskey/misskey:2026.9.1",
+            "prepull": "docker pull misskey/misskey:2026.10.0",
             "timeout_minutes": 45,
             "continue_on_error": true
           }'

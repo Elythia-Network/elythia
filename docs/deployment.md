@@ -186,7 +186,7 @@ gh workflow run docker.yml -f tag=1.1.0
 TS版Misskeyのイメージからアセットをコピーすることも可能:
 
 ```dockerfile
-FROM misskey/misskey:2026.9.1 AS misskey-assets
+FROM misskey/misskey:2026.10.0 AS misskey-assets
 FROM ghcr.io/shiroha-a/mk:latest
 COPY --from=misskey-assets /misskey/built /frontend
 COPY --from=misskey-assets /misskey/packages/frontend/assets /client-assets

@@ -46,7 +46,7 @@ services:
     networks: [dropin_frontend]
 
   app-a:
-    image: misskey/misskey:2026.9.1
+    image: misskey/misskey:2026.10.0
     environment:
       NODE_TLS_REJECT_UNAUTHORIZED: "0"
     depends_on:
@@ -98,7 +98,7 @@ services:
     networks: [dropin_frontend]
 
   app-b:
-    image: misskey/misskey:2026.9.1
+    image: misskey/misskey:2026.10.0
     environment:
       NODE_TLS_REJECT_UNAUTHORIZED: "0"
     depends_on:
@@ -150,7 +150,7 @@ services:
     networks: [dropin_frontend]
 
   app-c:
-    image: misskey/misskey:2026.9.1
+    image: misskey/misskey:2026.10.0
     environment:
       NODE_TLS_REJECT_UNAUTHORIZED: "0"
     depends_on:

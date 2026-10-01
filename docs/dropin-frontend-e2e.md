@@ -138,10 +138,10 @@ baseline (all TS) ではこれらも全 pass するため、skip は `CYPRESS_MO
 `cypress.config.ts` で `setupNodeEvents` 内から `--ignore-certificate-errors`
 を electron に渡している。spec 側は何もしなくて良い。
 
-### `misskey/misskey:2026.9.1` の pull 失敗
+### `misskey/misskey:2026.10.0` の pull 失敗
 
 `docker login` 不要。network / rate limit の可能性。`make dropin-frontend-up`
-前に `docker pull misskey/misskey:2026.9.1` で先読みする手もある。
+前に `docker pull misskey/misskey:2026.10.0` で先読みする手もある。
 
 ### cypress runner のログが流れない
 

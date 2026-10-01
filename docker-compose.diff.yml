@@ -1,5 +1,5 @@
 # Differential e2e diff stack (#2089): runs mk-go and Misskey TS (both
-# 2026.9.1) side-by-side with independent DB/Redis, plus a pytest diff-runner
+# 2026.10.0) side-by-side with independent DB/Redis, plus a pytest diff-runner
 # that calls identical endpoints on both and reports value-level deviations the
 # entitycompat golden gate cannot catch.
 #
@@ -49,7 +49,7 @@ services:
       redis-mk: {condition: service_healthy}
     networks: [diff]
 
-  # --- Misskey TS side (mk-go と同じ 2026.9.1 に揃えてある) ---
+  # --- Misskey TS side (mk-go と同じ 2026.10.0 に揃えてある) ---
   postgres-ts:
     image: postgres:18-alpine
     environment: {POSTGRES_DB: misskey, POSTGRES_USER: misskey, POSTGRES_PASSWORD: testpass}
@@ -67,7 +67,7 @@ services:
     # mk-go の追従先と同じ版に揃える。ここが古いと upstream 自身の
     # バージョン間差分まで diff に出て偽陽性になる。MisskeyVersion を
     # 上げるときはこの tag も一緒に上げること。
-    image: misskey/misskey:2026.9.1
+    image: misskey/misskey:2026.10.0
     volumes:
       - ./tests/diff/ts.yml:/misskey/.config/default.yml:ro
     healthcheck:

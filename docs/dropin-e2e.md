@@ -149,10 +149,10 @@ xfail マーカーは 1 つも無く、すべて通常のアサートとして�
 
 ## トラブルシューティング
 
-### `misskey/misskey:2026.9.1` が pull できない
+### `misskey/misskey:2026.10.0` が pull できない
 
 `docker login` 等の認証不要。pull が失敗する場合は network / rate limit。
-compose 内で pull を再試行するか `docker pull misskey/misskey:2026.9.1` で
+compose 内で pull を再試行するか `docker pull misskey/misskey:2026.10.0` で
 先読みしておく。
 
 ### 連合 follow が timeout する

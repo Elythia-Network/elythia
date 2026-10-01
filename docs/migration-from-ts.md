@@ -290,7 +290,7 @@ Playwright spec (#744) を **298 ファイル / 40 directory** (directory は sp
 - **サーバーマシン統計** — `enableServerMachineStats` 有効時に gopsutil で CPU / メモリ / ディスク / ネットワークを 2 秒間隔で収集する。**コンテナで動かしている場合、既定では host の値が返る** (gopsutil は cgroup の制限値ではなくホストを見る)。コンテナに割り当てたリソースを見たい場合は別途 cgroup を読む必要がある
 - **search backend** — `notes/search` の provider は `fulltextSearch.provider` で切替。既定 `sqlLike` で **Meilisearch 不要のまま動く** (`lower(text) LIKE` による部分一致。**ILIKE ではない** — pg_bigm の GIN index が効かなくなるため)。upstream TS strict-mode (400 UNAVAILABLE) で揃えたい operator は `provider: "none"` を opt-in で選べる (#877)。Meilisearch / pgroonga は optional
 - **promo は作成できても表示されない** — `admin/promo/create` は 204 を返し DB 行も増えるが、**利用者へ提示する経路が upstream にも mk-go にも無い** (#2781)。告知・露出の機能として使えると期待しないこと。詳細は [api-compatibility.md](api-compatibility.md) の「既知の制限」
-- **upstream 2026.9.1 まで追従済** — 2026.3.2 → 2026.5.1 → 2026.5.4 → 2026.6.0 → 2026.7.0 → 2026.9.0 → 2026.9.1 と段階的に追従した (**2026.8.0 に stable は無い**)。各 release の差分は [docs/update/](update/) を参照 (`<yyyymm><nn>diff.md`)
+- **upstream 2026.10.0 まで追従済** — 2026.3.2 → 2026.5.1 → 2026.5.4 → 2026.6.0 → 2026.7.0 → 2026.9.0 → 2026.9.1 → 2026.10.0 と段階的に追従した (**2026.8.0 に stable は無い**)。各 release の差分は [docs/update/](update/) を参照 (`<yyyymm><nn>diff.md`)
 
 差分の網羅的な一覧は [divergence.md](divergence.md) を参照。
 

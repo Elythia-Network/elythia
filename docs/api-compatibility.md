@@ -1,6 +1,6 @@
 # API互換性状況
 
-対象バージョン: **Misskey 2026.9.1** (mk-go 1.4.0)
+対象バージョン: **Misskey 2026.10.0** (mk-go 1.4.0)
 最終更新: 2026-09-23
 
 本ドキュメントは互換性調査 (#107, #124) と、Playwright Phase 1-4 で発見・修正した drift backlog の**履歴**を集約したもの。
@@ -17,7 +17,7 @@
 
 ## 概要
 
-- **upstream catch-up**: **2026.9.1 まで追従完了**。2026.3.2 → 2026.5.1 → 2026.5.4 → 2026.6.0 → 2026.7.0 → 2026.9.0 → 2026.9.1 と段階的に追従した (**2026.8.0 に stable は無い**)。各 release 差分は [`docs/update/`](update/) を参照 (`<yyyymm><nn>diff.md`。`nn` は**対象 upstream release の patch 番号**で日付ではない。backend に変更が無い release は doc を作らないので番号は飛ぶ。同じディレクトリに `<yyyymmdd>-<issue>-triage.md` 形式の triage note も同居する)
+- **upstream catch-up**: **2026.10.0 まで追従完了**。2026.3.2 → 2026.5.1 → 2026.5.4 → 2026.6.0 → 2026.7.0 → 2026.9.0 → 2026.9.1 → 2026.10.0 と段階的に追従した (**2026.8.0 に stable は無い**)。各 release 差分は [`docs/update/`](update/) を参照 (`<yyyymm><nn>diff.md`。`nn` は**対象 upstream release の patch 番号**で日付ではない。backend に変更が無い release は doc を作らないので番号は飛ぶ。同じディレクトリに `<yyyymmdd>-<issue>-triage.md` 形式の triage note も同居する)
 - **本家 backend e2e**: Misskey 本家の `test/e2e/**` をテスト本体無改変で mk-go に向けて実行する基盤を整備し、**25 ファイル 1256 テストが全通過**。PR ごとに CI で回る。『通らないことが正しい』23 件は根拠付きで expected-failure として登録している ([`upstream-backend-e2e.md`](upstream-backend-e2e.md))
 - **Playwright e2e**: 298 spec ファイルを PR ごとに実行。Misskey TS backend に対しては upstream 追従時に実行し、spec が mk-go の挙動に引きずられていないかを検証する
 - **drift backlog**: Phase 1-4 の spec 整備中に発見した 40+ 件の drop-in 互換 drift は fix 済
@@ -360,7 +360,7 @@ drop-in テスト (#367) で発見した補完カラム:
   upstream に無い additive 拡張になる。
   ただし入力側だけは mk-go に意図的乖離がある — `admin/promo/create` は public
   以外の note を reject する (`docs/divergence.md` §7)
-- **upstream 2026.9.1 まで追従済** — `#947` (2026.3.2 → 2026.5.1) / `#1164` (2026.5.1 → 2026.5.4、LD-Signature 初期実装 + 2026.5.4 hardening 含む) を経て 2026.6.0 → 2026.7.0 → 2026.9.0 → 2026.9.1 まで完了。各 release 差分は [`docs/update/`](update/) を参照 (`<yyyymm><nn>diff.md`。`nn` は**対象 upstream release の patch 番号**で日付ではない。backend に変更が無い release は doc を作らないので番号は飛ぶ。同じディレクトリに `<yyyymmdd>-<issue>-triage.md` 形式の triage note も同居する)
+- **upstream 2026.10.0 まで追従済** — `#947` (2026.3.2 → 2026.5.1) / `#1164` (2026.5.1 → 2026.5.4、LD-Signature 初期実装 + 2026.5.4 hardening 含む) を経て 2026.6.0 → 2026.7.0 → 2026.9.0 → 2026.9.1 → 2026.10.0 まで完了。各 release 差分は [`docs/update/`](update/) を参照 (`<yyyymm><nn>diff.md`。`nn` は**対象 upstream release の patch 番号**で日付ではない。backend に変更が無い release は doc を作らないので番号は飛ぶ。同じディレクトリに `<yyyymmdd>-<issue>-triage.md` 形式の triage note も同居する)
 
 詳細は[TS版からの移行ガイド](migration-from-ts.md)の「既知の制限」セクションも参照。
 
