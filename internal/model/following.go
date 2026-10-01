@@ -22,3 +22,13 @@ type Following struct {
 }
 
 func (Following) TableName() string { return "following" }
+
+// FollowListViewer identifies who is reading a per-host follow relation
+// listing (federation/followers, federation/following), for the list owner's
+// visibility filter.
+type FollowListViewer struct {
+	// UserID is the viewer's user ID, or "" for an anonymous viewer.
+	UserID string
+	// Moderator skips the owner visibility filter.
+	Moderator bool
+}

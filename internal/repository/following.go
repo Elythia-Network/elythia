@@ -79,10 +79,16 @@ type FollowingRepository interface {
 	// (sinceID/untilID) instead of offset. Used by federation/followers to match
 	// upstream makePaginationQuery (#1732)。sinceID のみ指定時は id ASC、
 	// それ以外は id DESC。
-	ListFollowersByHostCursor(host, sinceID, untilID string, limit int) ([]*model.Following, error)
+	//
+	// viewer limits the rows to those whose owner (the followee) lets the
+	// viewer see their followers list; see model.FollowListViewer.
+	ListFollowersByHostCursor(host, sinceID, untilID string, limit int, viewer model.FollowListViewer) ([]*model.Following, error)
 	// ListFollowingByHostCursor is ListFollowingByHost with id cursor pagination.
 	// Used by federation/following (#1732)。
-	ListFollowingByHostCursor(host, sinceID, untilID string, limit int) ([]*model.Following, error)
+	//
+	// viewer limits the rows to those whose owner (the follower) lets the
+	// viewer see their following list; see model.FollowListViewer.
+	ListFollowingByHostCursor(host, sinceID, untilID string, limit int, viewer model.FollowListViewer) ([]*model.Following, error)
 	// ListFollowersBefore returns Following rows (followeeId = userID) with
 	// id < cursor (cursor 空なら最新から), ordered id DESC, up to limit. AP
 	// followers collection の cursor pagination 用 (#1877)。
@@ -364,9 +370,35 @@ func (r *followingRepository) ListFollowingByHost(host string, limit, offset int
 	return rows, nil
 }
 
+// followRelationVisibility restricts following rows to those the viewer may
+// see under the list owner's visibility setting. ownerColumn is the owner's
+// column on "following" ("followeeId" for a followers list, "followerId" for
+// a following list) and visibilityColumn the owner's matching user_profile
+// column. Mirrors upstream QueryService.generateFollowingRelationVisibilityQuery.
+//
+// 本家と同じく持ち主の user_profile を INNER JOIN するので、profile 行の無い
+// 持ち主の行は出ない。条件は LIMIT より前 (同じ WHERE) に置く — 取ってから
+// 間引くとページが欠け、カーソルも進まなくなる。
+func followRelationVisibility(q *gorm.DB, ownerColumn, visibilityColumn string, viewer model.FollowListViewer) *gorm.DB {
+	if viewer.Moderator {
+		return q
+	}
+	owner := `"following".` + ownerColumn
+	visibility := `"ownerProfile".` + visibilityColumn
+	q = q.Joins(`INNER JOIN "user_profile" "ownerProfile" ON "ownerProfile"."userId" = ` + owner)
+	if viewer.UserID == "" {
+		return q.Where(visibility + ` = 'public'`)
+	}
+	return q.Where(
+		`(`+visibility+` = 'public'`+
+			` OR `+owner+` = ?`+
+			` OR (`+visibility+` = 'followers' AND `+owner+` IN (SELECT "meFollowing"."followeeId" FROM "following" "meFollowing" WHERE "meFollowing"."followerId" = ?)))`,
+		viewer.UserID, viewer.UserID)
+}
+
 // ListFollowersByHostCursor is the cursor-paginated variant of
 // ListFollowersByHost (federation/followers, #1732)。
-func (r *followingRepository) ListFollowersByHostCursor(host, sinceID, untilID string, limit int) ([]*model.Following, error) {
+func (r *followingRepository) ListFollowersByHostCursor(host, sinceID, untilID string, limit int, viewer model.FollowListViewer) ([]*model.Following, error) {
 	// 列に入らない文字は保存された値に現れないので、一致しえない (#3025)。
 	// **引く前に弾く** — 比較の右辺に載せるとクエリごと落ちて 500 になる。
 	if !storable(host) {
@@ -378,15 +410,16 @@ func (r *followingRepository) ListFollowersByHostCursor(host, sinceID, untilID s
 	if limit > 100 {
 		limit = 100
 	}
-	q := r.db.Where(`"followeeHost" = ?`, host)
+	q := r.db.Model(&model.Following{}).Select(`"following".*`).Where(`"following"."followeeHost" = ?`, host)
+	q = followRelationVisibility(q, `"followeeId"`, `"followersVisibility"`, viewer)
 	if sinceID != "" {
-		q = q.Where("id > ?", sinceID)
+		q = q.Where(`"following"."id" > ?`, sinceID)
 	}
 	if untilID != "" {
-		q = q.Where("id < ?", untilID)
+		q = q.Where(`"following"."id" < ?`, untilID)
 	}
 	var rows []*model.Following
-	if err := q.Order(paginationOrder(sinceID, untilID, "id")).Limit(limit).Find(&rows).Error; err != nil {
+	if err := q.Order(paginationOrder(sinceID, untilID, `"following"."id"`)).Limit(limit).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	return rows, nil
@@ -394,7 +427,7 @@ func (r *followingRepository) ListFollowersByHostCursor(host, sinceID, untilID s
 
 // ListFollowingByHostCursor is the cursor-paginated variant of
 // ListFollowingByHost (federation/following, #1732)。
-func (r *followingRepository) ListFollowingByHostCursor(host, sinceID, untilID string, limit int) ([]*model.Following, error) {
+func (r *followingRepository) ListFollowingByHostCursor(host, sinceID, untilID string, limit int, viewer model.FollowListViewer) ([]*model.Following, error) {
 	// 列に入らない文字は保存された値に現れないので、一致しえない (#3025)。
 	// **引く前に弾く** — 比較の右辺に載せるとクエリごと落ちて 500 になる。
 	if !storable(host) {
@@ -406,15 +439,16 @@ func (r *followingRepository) ListFollowingByHostCursor(host, sinceID, untilID s
 	if limit > 100 {
 		limit = 100
 	}
-	q := r.db.Where(`"followerHost" = ?`, host)
+	q := r.db.Model(&model.Following{}).Select(`"following".*`).Where(`"following"."followerHost" = ?`, host)
+	q = followRelationVisibility(q, `"followerId"`, `"followingVisibility"`, viewer)
 	if sinceID != "" {
-		q = q.Where("id > ?", sinceID)
+		q = q.Where(`"following"."id" > ?`, sinceID)
 	}
 	if untilID != "" {
-		q = q.Where("id < ?", untilID)
+		q = q.Where(`"following"."id" < ?`, untilID)
 	}
 	var rows []*model.Following
-	if err := q.Order(paginationOrder(sinceID, untilID, "id")).Limit(limit).Find(&rows).Error; err != nil {
+	if err := q.Order(paginationOrder(sinceID, untilID, `"following"."id"`)).Limit(limit).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	return rows, nil

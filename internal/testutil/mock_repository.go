@@ -5933,6 +5933,9 @@ type MockFollowingRepository struct {
 	// Birthdays maps followeeID -> "YYYY-MM-DD" string used by
 	// ListFollowingByBirthday. 未登録のユーザーは誕生日なしとして扱う。
 	Birthdays map[string]string
+	// LastHostListViewer is the viewer passed to the last
+	// ListFollowersByHostCursor / ListFollowingByHostCursor call (nil if none).
+	LastHostListViewer *model.FollowListViewer
 }
 
 func NewMockFollowingRepository() *MockFollowingRepository {
@@ -6243,13 +6246,20 @@ func (m *MockFollowingRepository) hostCursorPage(match func(*model.Following) bo
 	return rows
 }
 
-func (m *MockFollowingRepository) ListFollowersByHostCursor(host, sinceID, untilID string, limit int) ([]*model.Following, error) {
+// ListFollowersByHostCursor records viewer in LastHostListViewer and returns
+// the host's rows. The owner visibility filter is not emulated (the mock has
+// no profiles); it is covered by the repository's real-DB tests.
+func (m *MockFollowingRepository) ListFollowersByHostCursor(host, sinceID, untilID string, limit int, viewer model.FollowListViewer) ([]*model.Following, error) {
+	m.LastHostListViewer = &viewer
 	return m.hostCursorPage(func(f *model.Following) bool {
 		return f.FolloweeHost != nil && *f.FolloweeHost == host
 	}, sinceID, untilID, limit), nil
 }
 
-func (m *MockFollowingRepository) ListFollowingByHostCursor(host, sinceID, untilID string, limit int) ([]*model.Following, error) {
+// ListFollowingByHostCursor records viewer in LastHostListViewer and returns
+// the host's rows (see ListFollowersByHostCursor).
+func (m *MockFollowingRepository) ListFollowingByHostCursor(host, sinceID, untilID string, limit int, viewer model.FollowListViewer) ([]*model.Following, error) {
+	m.LastHostListViewer = &viewer
 	return m.hostCursorPage(func(f *model.Following) bool {
 		return f.FollowerHost != nil && *f.FollowerHost == host
 	}, sinceID, untilID, limit), nil
