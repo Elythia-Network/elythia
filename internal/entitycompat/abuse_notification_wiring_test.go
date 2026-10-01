@@ -23,4 +23,6 @@ func TestAbuseReportNotifierIsWired(t *testing.T) {
 		"連合経由の通報 (Flag) で通知が一切出なくなる (#3256 と同じ形の穴)。")
 	assertWired(t, routerGo, "abuseCreatedNotifier.SetWebhook(webhookService, recipientRepo, coreabuse.UserLookups{Instances: instanceRepo, Emojis: emojiRepo}, idGen)",
 		"通報の abuseReport system webhook が、ローカルでも連合経由でも出なくなる。")
+	assertWired(t, routerGo, "abuseCreatedNotifier.SetMail(miscsmtp.SubjectBodySenderFromMeta(metaRepo, s.config.ProxySMTP), recipientRepo, userRepo, metaRepo)",
+		"通報のメールが、通知先にも meta.email にも届かなくなる (#3265)。")
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -163,4 +164,158 @@ func TestCreatedNotifier_ChannelsAreIndependent(t *testing.T) {
 	nilN.NotifyCreated(context.Background(), report, nil, nil)
 	n.NotifyCreated(context.Background(), nil, nil, nil)
 	assert.Len(t, hook.calls, 1)
+}
+
+type cnMail struct {
+	mu   sync.Mutex
+	sent []cnSent
+}
+
+type cnSent struct{ to, subject, body string }
+
+func (m *cnMail) send(to, subject, body string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sent = append(m.sent, cnSent{to, subject, body})
+}
+
+func (m *cnMail) snapshot() []cnSent {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]cnSent(nil), m.sent...)
+}
+
+type cnMeta struct{ meta *model.Meta }
+
+func (s cnMeta) Fetch() (*model.Meta, error) { return s.meta, nil }
+
+// 本家 notifyMail と同じく、有効なメール方式の通知先のうち、モデレーターで
+// メールアドレスを確認済みの利用者と、meta.email へ送る (#3265)。
+func TestCreatedNotifier_SendsMailToRecipients(t *testing.T) {
+	idGen, err := id.NewGenerator("aidx")
+	require.NoError(t, err)
+	ptr := func(s string) *string { return &s }
+
+	recipients := testutil.NewMockAbuseReportNotificationRecipientRepository()
+	for _, r := range []*model.AbuseReportNotificationRecipient{
+		{ID: "ok", Method: "email", IsActive: true, UserID: ptr("mod_ok")},
+		{ID: "inactive", Method: "email", IsActive: false, UserID: ptr("mod_inactive")},
+		{ID: "unverified", Method: "email", IsActive: true, UserID: ptr("mod_unverified")},
+		{ID: "notmod", Method: "email", IsActive: true, UserID: ptr("not_mod")},
+		{ID: "noemail", Method: "email", IsActive: true, UserID: ptr("mod_noemail")},
+		{ID: "hook", Method: "webhook", IsActive: true, SystemWebhookID: ptr("wh1")},
+		// webhook 方式の通知先には、利用者が入っていてもメールを送らない。
+		{ID: "hookuser", Method: "webhook", IsActive: true, UserID: ptr("mod_hook"), SystemWebhookID: ptr("wh2")},
+	} {
+		require.NoError(t, recipients.Create(r))
+	}
+	users := testutil.NewMockUserRepository()
+	for id, p := range map[string]*model.UserProfile{
+		"mod_ok":         {UserID: "mod_ok", Email: ptr("ok@example.test"), EmailVerified: true},
+		"mod_inactive":   {UserID: "mod_inactive", Email: ptr("inactive@example.test"), EmailVerified: true},
+		"mod_unverified": {UserID: "mod_unverified", Email: ptr("unverified@example.test")},
+		"not_mod":        {UserID: "not_mod", Email: ptr("notmod@example.test"), EmailVerified: true},
+		"mod_noemail":    {UserID: "mod_noemail", EmailVerified: true},
+		"mod_hook":       {UserID: "mod_hook", Email: ptr("hook@example.test"), EmailVerified: true},
+	} {
+		users.Profiles[id] = p
+	}
+	mods := cnMods{mods: []*model.User{{ID: "mod_ok"}, {ID: "mod_inactive"}, {ID: "mod_unverified"}, {ID: "mod_noemail"}, {ID: "mod_hook"}}}
+	mail := &cnMail{}
+
+	n := abuse.NewCreatedNotifier(nil, mods, nil)
+	n.SetMail(mail.send, recipients, users, cnMeta{meta: &model.Meta{Email: ptr("instance@example.test")}})
+	report := cnReport(t, idGen)
+	n.NotifyCreated(context.Background(), report, nil, nil)
+
+	require.Eventually(t, func() bool { return len(mail.snapshot()) == 2 }, time.Second, 5*time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
+	sent := mail.snapshot()
+	require.Len(t, sent, 2, "宛先は確認済みのモデレーター 1 人と meta.email だけ")
+	var tos []string
+	for _, s := range sent {
+		tos = append(tos, s.to)
+		assert.Equal(t, "New Abuse Report", s.subject, "本家と同じ件名")
+		assert.Equal(t, "spam", s.body, "本文は通報のコメント")
+	}
+	assert.ElementsMatch(t, []string{"ok@example.test", "instance@example.test"}, tos)
+}
+
+// 通知先も meta.email も無ければ送らない。メールを配線しなければ何もしない。
+func TestCreatedNotifier_NoMailWithoutAddresses(t *testing.T) {
+	idGen, err := id.NewGenerator("aidx")
+	require.NoError(t, err)
+	mail := &cnMail{}
+	n := abuse.NewCreatedNotifier(nil, cnMods{}, nil)
+	n.SetMail(mail.send, testutil.NewMockAbuseReportNotificationRecipientRepository(), testutil.NewMockUserRepository(), cnMeta{meta: &model.Meta{}})
+	n.NotifyCreated(context.Background(), cnReport(t, idGen), nil, nil)
+	time.Sleep(50 * time.Millisecond)
+	assert.Empty(t, mail.snapshot())
+}
+
+// 送信が遅くても NotifyCreated は待たない (通報の API や inbox を止めない)。
+func TestCreatedNotifier_MailDoesNotBlock(t *testing.T) {
+	idGen, err := id.NewGenerator("aidx")
+	require.NoError(t, err)
+	release := make(chan struct{})
+	defer close(release)
+	started := make(chan struct{}, 1)
+	blocking := func(string, string, string) {
+		started <- struct{}{}
+		<-release
+	}
+	email := "instance@example.test"
+	n := abuse.NewCreatedNotifier(nil, nil, nil)
+	n.SetMail(blocking, nil, nil, cnMeta{meta: &model.Meta{Email: &email}})
+
+	done := make(chan struct{})
+	go func() {
+		n.NotifyCreated(context.Background(), cnReport(t, idGen), nil, nil)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("NotifyCreated がメールの送信を待っている")
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("メールを送っていない")
+	}
+}
+
+// 空のメールアドレスには送らない (通知先の利用者も meta.email も)。
+func TestCreatedNotifier_SkipsEmptyAddresses(t *testing.T) {
+	idGen, err := id.NewGenerator("aidx")
+	require.NoError(t, err)
+	empty := ""
+	uid := "mod_empty"
+	recipients := testutil.NewMockAbuseReportNotificationRecipientRepository()
+	require.NoError(t, recipients.Create(&model.AbuseReportNotificationRecipient{ID: "r", Method: "email", IsActive: true, UserID: &uid}))
+	users := testutil.NewMockUserRepository()
+	users.Profiles[uid] = &model.UserProfile{UserID: uid, Email: &empty, EmailVerified: true}
+	mail := &cnMail{}
+	n := abuse.NewCreatedNotifier(nil, cnMods{mods: []*model.User{{ID: uid}}}, nil)
+	n.SetMail(mail.send, recipients, users, cnMeta{meta: &model.Meta{Email: &empty}})
+	n.NotifyCreated(context.Background(), cnReport(t, idGen), nil, nil)
+	time.Sleep(50 * time.Millisecond)
+	assert.Empty(t, mail.snapshot())
+}
+
+// SetMail は webhook の除外に使う通知先 (SetWebhook) を書き換えない。
+func TestCreatedNotifier_SetMailKeepsWebhookRecipients(t *testing.T) {
+	idGen, err := id.NewGenerator("aidx")
+	require.NoError(t, err)
+	inactive := "wh_inactive"
+	hookRecipients := testutil.NewMockAbuseReportNotificationRecipientRepository()
+	require.NoError(t, hookRecipients.Create(&model.AbuseReportNotificationRecipient{ID: "h", Method: "webhook", IsActive: false, SystemWebhookID: &inactive}))
+	hook := &cnWebhook{}
+	n := abuse.NewCreatedNotifier(nil, nil, nil)
+	n.SetWebhook(hook, hookRecipients, abuse.UserLookups{}, idGen)
+	n.SetMail((&cnMail{}).send, testutil.NewMockAbuseReportNotificationRecipientRepository(), testutil.NewMockUserRepository(), cnMeta{meta: &model.Meta{}})
+
+	n.NotifyCreated(context.Background(), cnReport(t, idGen), nil, nil)
+	require.Len(t, hook.calls, 1)
+	assert.Equal(t, []string{inactive}, hook.calls[0].excludes, "webhook の除外は SetWebhook で渡した通知先から作る")
 }
