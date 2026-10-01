@@ -1047,6 +1047,11 @@ func applyUserFields(u *model.User, fields map[string]any) {
 			if a, ok := v.(model.StringArray); ok {
 				u.Tags = a
 			}
+		case "emojis":
+			// core/user.UpdateProfile は model.StringArray で渡す (#3270)。
+			if a, ok := v.(model.StringArray); ok {
+				u.Emojis = a
+			}
 		}
 	}
 }

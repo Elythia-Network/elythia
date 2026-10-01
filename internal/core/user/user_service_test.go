@@ -1603,3 +1603,77 @@ func TestService_UpdateProfile_MeUpdatedCarriesOwnCounts(t *testing.T) {
 	assert.EqualValues(t, 42, m["followersCount"], "本人の meUpdated にフォロワー数が出ること")
 	assert.EqualValues(t, 7, m["followingCount"], "本人の meUpdated にフォロー数が出ること")
 }
+
+// #3270: i/update は本家と同じく、名前・プロフィール・補足情報・フォローされた
+// ときのメッセージから絵文字を取り出して user.emojis に書く。Person の `tag` の
+// 絵文字はこの列から描画するので、書かないと連合先で `:emoji:` が文字のまま出る。
+func TestService_UpdateProfile_WritesEmojis(t *testing.T) {
+	svc, repo, _, _ := newFullSvc(t)
+	repo.Users["u1"] = &model.User{ID: "u1", Username: "alice"}
+
+	_, err := svc.UpdateProfile("u1", user.UpdateInput{
+		Name:            ptr(ptr("Alice :cat: :cat:")),
+		Description:     ptr(ptr("hello :dog: and :cat:")),
+		Fields:          &[]user.FieldItem{{Name: ":key:", Value: "v :val:"}},
+		FollowedMessage: ptr(ptr("thanks :wave:")),
+	})
+	require.NoError(t, err)
+	// 項目ごとに重複を除き、項目をまたいでは除かない (本家と同じ)。
+	assert.Equal(t, []string{"cat", "dog", "cat", "key", "val", "wave"}, []string(repo.Users["u1"].Emojis))
+}
+
+// 名前と補足情報は parseSimple、プロフィールとフォローされたときのメッセージは
+// 完全な parser で読む (本家と同じ)。コードの中の `:emoji:` は後者では数えない。
+func TestService_UpdateProfile_EmojisParsedLikeUpstream(t *testing.T) {
+	svc, repo, _, _ := newFullSvc(t)
+	repo.Users["u1"] = &model.User{ID: "u1", Username: "alice"}
+
+	_, err := svc.UpdateProfile("u1", user.UpdateInput{
+		Name:            ptr(ptr("`:inname:`")),
+		Description:     ptr(ptr("`:indesc:`")),
+		Fields:          &[]user.FieldItem{{Name: "`:inkey:`", Value: "`:inval:`"}},
+		FollowedMessage: ptr(ptr("`:inmsg:`")),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"inname", "inkey", "inval"}, []string(repo.Users["u1"].Emojis))
+}
+
+// 送らなかった項目は保存済みの値を使い、どの項目を更新しても毎回書き直す (本家と
+// 同じ)。名前だけを変えても、プロフィールの絵文字は残る。
+func TestService_UpdateProfile_EmojisUseStoredValuesForOmittedFields(t *testing.T) {
+	svc, repo, _, _ := newFullSvc(t)
+	repo.Users["u1"] = &model.User{ID: "u1", Username: "alice", Emojis: model.StringArray{"stale"}}
+	_, err := svc.UpdateProfile("u1", user.UpdateInput{
+		Description:     ptr(ptr("desc :dog:")),
+		Fields:          &[]user.FieldItem{{Name: "k", Value: ":val:"}},
+		FollowedMessage: ptr(ptr("thanks :wave:")),
+	})
+	require.NoError(t, err)
+
+	_, err = svc.UpdateProfile("u1", user.UpdateInput{Name: ptr(ptr(":cat:"))})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"cat", "dog", "val", "wave"}, []string(repo.Users["u1"].Emojis))
+
+	// 絵文字を使わなくなったら空にする (NULL ではなく空配列)。
+	_, err = svc.UpdateProfile("u1", user.UpdateInput{
+		Name:            ptr(ptr("plain")),
+		Description:     ptr(ptr("")),
+		Fields:          &[]user.FieldItem{},
+		FollowedMessage: ptr(ptr("")),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, repo.Users["u1"].Emojis)
+	assert.Empty(t, []string(repo.Users["u1"].Emojis))
+}
+
+// プロフィールを読めない DB 障害は、更新ごと失敗させる (絵文字を空で書き直すと
+// 連合先から絵文字が消える)。行が無いだけなら保存値が無いものとして続ける。
+func TestService_UpdateProfile_EmojisProfileLookupErrorFails(t *testing.T) {
+	svc, repo, _, _ := newFullSvc(t)
+	repo.Users["u1"] = &model.User{ID: "u1", Username: "alice", Emojis: model.StringArray{"keep"}}
+	repo.FindProfileErr = errors.New("connection reset")
+
+	_, err := svc.UpdateProfile("u1", user.UpdateInput{Name: ptr(ptr("x"))})
+	require.Error(t, err)
+	assert.Equal(t, []string{"keep"}, []string(repo.Users["u1"].Emojis), "書き換えない")
+}

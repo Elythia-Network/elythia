@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shiroha-a/mk/internal/activitypub/mfm"
 	"github.com/shiroha-a/mk/internal/entity"
 	"github.com/shiroha-a/mk/internal/misc/hashtag"
 	"github.com/shiroha-a/mk/internal/misc/id"
@@ -649,6 +650,7 @@ func (s *Service) UpdateProfile(userID string, in UpdateInput) (*UserWithProfile
 		// Room と同じく []byte ではなく string で渡して bytea 化を防ぐ。
 		userFields["avatarDecorations"] = string(*in.AvatarDecorations)
 	}
+	var newFields []FieldItem
 	if in.Fields != nil {
 		// upstream Misskey TS 互換 (#956): name / value をそれぞれ trim して
 		// 両方非空の entry のみ残す。空 slice 渡しはクリア (= []) として
@@ -668,6 +670,7 @@ func (s *Service) UpdateProfile(userID string, in UpdateInput) (*UserWithProfile
 			return nil, err
 		}
 		profileFields["fields"] = string(raw)
+		newFields = normalized
 	}
 	if in.AlsoKnownAs != nil {
 		// 引越し元エイリアス (#1546)。upstream update.ts は要素 0 個なら null を
@@ -727,6 +730,12 @@ func (s *Service) UpdateProfile(userID string, in UpdateInput) (*UserWithProfile
 		}
 	}
 
+	emojis, err := s.profileEmojis(userID, existing, in, newFields)
+	if err != nil {
+		return nil, err
+	}
+	userFields["emojis"] = model.StringArray(emojis)
+
 	if err := s.userRepo.UpdateUser(userID, userFields); err != nil {
 		return nil, err
 	}
@@ -748,6 +757,62 @@ func (s *Service) UpdateProfile(userID string, in UpdateInput) (*UserWithProfile
 	// ため)。body は packed UserDetailed full object。
 	s.publishMeUpdated(bundle)
 	return bundle, nil
+}
+
+// profileEmojis returns the custom emoji names used in the user's name,
+// description, profile fields and followed message after the update, like
+// upstream i/update: the name and fields are read with parseSimple, the
+// description and followed message with the full parser, each source is
+// dedup'd on its own and the results are concatenated.
+//
+// 送らなかった項目は保存済みの値を使う (本家と同じく、どの項目を更新しても
+// 毎回まとめて書き直す)。Person の `tag` の絵文字はこの列から描画するので、
+// 書かないと連合先で名前やプロフィールの `:emoji:` が文字のまま出る (#3270)。
+func (s *Service) profileEmojis(userID string, existing *model.User, in UpdateInput, newFields []FieldItem) ([]string, error) {
+	profile, err := s.userRepo.FindProfileByUserID(userID)
+	if err != nil {
+		if !repository.IsNotFound(err) {
+			return nil, err
+		}
+		profile = nil
+	}
+
+	name := existing.Name
+	if in.Name != nil {
+		name = *in.Name
+	}
+	var description, followedMessage *string
+	if profile != nil {
+		description, followedMessage = profile.Description, profile.FollowedMessage
+	}
+	if in.Description != nil {
+		description = *in.Description
+	}
+	if in.FollowedMessage != nil {
+		followedMessage = *in.FollowedMessage
+	}
+	fields := newFields
+	if in.Fields == nil && profile != nil && len(profile.Fields) > 0 {
+		// 読めない保存値は補足情報が無いものとして扱う (本家は jsonb の配列を前提に
+		// している)。
+		_ = json.Unmarshal(profile.Fields, &fields)
+	}
+
+	emojis := []string{}
+	if name != nil {
+		emojis = append(emojis, mfm.ExtractCustomEmojis(mfm.ParseSimple(*name))...)
+	}
+	if description != nil {
+		emojis = append(emojis, mfm.ExtractCustomEmojis(mfm.Parse(*description))...)
+	}
+	for _, f := range fields {
+		emojis = append(emojis, mfm.ExtractCustomEmojis(mfm.ParseSimple(f.Name))...)
+		emojis = append(emojis, mfm.ExtractCustomEmojis(mfm.ParseSimple(f.Value))...)
+	}
+	if followedMessage != nil {
+		emojis = append(emojis, mfm.ExtractCustomEmojis(mfm.Parse(*followedMessage))...)
+	}
+	return emojis, nil
 }
 
 // applyMediaUpdate writes prefix+"Id" / prefix+"Url" / prefix+"Blurhash"
