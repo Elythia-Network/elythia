@@ -20,6 +20,7 @@ import (
 	"github.com/shiroha-a/mk/internal/api/apierr"
 	"github.com/shiroha-a/mk/internal/api/pagination"
 	"github.com/shiroha-a/mk/internal/config"
+	coreabuse "github.com/shiroha-a/mk/internal/core/abuse"
 	"github.com/shiroha-a/mk/internal/core/captcha"
 	coredrive "github.com/shiroha-a/mk/internal/core/drive"
 	"github.com/shiroha-a/mk/internal/core/emojiapplication"
@@ -4298,9 +4299,10 @@ func (h *Handler) AbuseReports(c echo.Context) error {
 	return c.JSON(http.StatusOK, out)
 }
 
-// packAbuseReport converts an abuse report into the wire shape shared by
-// admin/abuse-user-reports (list) and the abuseReportResolved system webhook
-// body (#1723). profByID は abuseUserProfiles で batch 解決した profile map。
+// packAbuseReport converts an abuse report into the wire shape of
+// admin/abuse-user-reports. profByID は abuseUserProfiles で batch 解決した
+// profile map。System Webhook の本文は形が違うので coreabuse.WebhookPayload で
+// 作る (#3260)。
 func (h *Handler) packAbuseReport(ctx context.Context, r *model.AbuseUserReport, profByID map[string]*model.UserProfile) packedAbuseReport {
 	p := packedAbuseReport{
 		ID:             r.ID,
@@ -4504,8 +4506,8 @@ func (h *Handler) ResolveAbuseReport(c echo.Context) error {
 // notifyAbuseReportResolved fires the abuseReportResolved system webhook for a
 // resolved report. 本家 AbuseReportNotificationService.notifySystemWebhook 相当:
 // inactive な notification recipient (method=webhook) が指す systemWebhookId を
-// excludes に渡し、残りの active system webhook へ packed report を配送する。
-// dispatcher / abuseRepo 未配線時は no-op (#1723)。
+// excludes に渡し、残りの active system webhook へ本家と同じ形の本文 (#3260) を
+// 配送する。dispatcher / abuseRepo 未配線時は no-op (#1723)。
 func (h *Handler) notifyAbuseReportResolved(ctx context.Context, reportID string) {
 	if h.systemWebhookDispatcher == nil || h.abuseRepo == nil {
 		return
@@ -4515,10 +4517,17 @@ func (h *Handler) notifyAbuseReportResolved(ctx context.Context, reportID string
 		slog.WarnContext(ctx, "abuseReportResolved: load report failed", "reportId", reportID, "err", err)
 		return
 	}
-	profByID := h.abuseUserProfiles([]*model.AbuseUserReport{report})
-	body := h.packAbuseReport(ctx, report, profByID)
+	// 本文は管理画面の API の形 (packAbuseReport) ではなく、本家の Webhook の形
+	// (#3260)。FindByID が利用者 3 人を Preload している。
+	body := coreabuse.WebhookPayload(report, report.Reporter, report.TargetUser, report.Assignee, h.abuseWebhookLookups(), h.idGen)
 	h.systemWebhookDispatcher.DispatchSystemExcluding(
 		corewebhook.SystemEventAbuseReportResolved, body, h.inactiveAbuseWebhookIDs())
+}
+
+// abuseWebhookLookups returns the lookups for the users in the abuse report
+// webhooks. 未配線の repository は nil のまま渡り、その部分を省く。
+func (h *Handler) abuseWebhookLookups() coreabuse.UserLookups {
+	return coreabuse.UserLookups{Instances: h.instanceRepo, Emojis: h.emojiRepo}
 }
 
 // inactiveAbuseWebhookIDs returns the systemWebhookId values of inactive

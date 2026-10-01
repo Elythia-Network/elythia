@@ -85,12 +85,10 @@ func TestCreatedNotifier_NotifiesEveryChannel(t *testing.T) {
 	// 方法が email の通知先は、無効でも webhook の除外に入れない (指す webhook が無い)。
 	emailHookID := "wh_email"
 	require.NoError(t, recipients.Create(&model.AbuseReportNotificationRecipient{ID: "rc3", Method: "email", IsActive: false, SystemWebhookID: &emailHookID}))
-	users := testutil.NewMockUserRepository()
-	desc := "reporter's bio"
-	users.Profiles["alice"] = &model.UserProfile{UserID: "alice", Description: &desc}
-
 	n := abuse.NewCreatedNotifier(inApp, cnMods{mods: []*model.User{{ID: "mod1"}, {ID: "mod2"}}}, admin)
-	n.SetWebhook(hook, recipients, users, idGen)
+	instName := "Remote"
+	lookups := abuse.UserLookups{Instances: wpInstances{rows: []*model.Instance{{Host: "remote.example", Name: &instName}}}}
+	n.SetWebhook(hook, recipients, lookups, idGen)
 
 	report := cnReport(t, idGen)
 	host := "remote.example"
@@ -112,20 +110,20 @@ func TestCreatedNotifier_NotifiesEveryChannel(t *testing.T) {
 	require.Len(t, hook.calls, 1)
 	assert.Equal(t, "abuseReport", hook.calls[0].eventType)
 	assert.Equal(t, []string{inactiveID}, hook.calls[0].excludes)
-	body, ok := hook.calls[0].body.(map[string]any)
-	require.True(t, ok)
-	assert.Equal(t, report.ID, body["id"])
-	assert.Equal(t, "alice", body["reporterId"])
-	assert.Equal(t, "bob", body["targetUserId"])
-	assert.Equal(t, false, body["resolved"])
-	assert.Equal(t, false, body["forwarded"])
-	assert.Nil(t, body["assignee"])
-	assert.Equal(t, "2026-01-02T03:04:05.000Z", body["createdAt"], "通報の id から作成時刻を出す")
-	require.NotNil(t, body["reporter"], "通報者を UserDetailed で載せる")
-	reporterBody, err := json.Marshal(body["reporter"])
+	// 本文の形は WebhookPayload のテストで固定する。ここでは渡した利用者が
+	// 載ることだけ見る。
+	raw, err := json.Marshal(hook.calls[0].body)
 	require.NoError(t, err)
-	assert.Contains(t, string(reporterBody), desc, "プロフィールを引いて載せる")
-	assert.NotNil(t, body["targetUser"], "対象を UserDetailed で載せる")
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(raw, &body))
+	assert.Equal(t, report.ID, body["id"])
+	assert.Equal(t, "remote.example", body["reporterHost"])
+	assert.Equal(t, "alice", body["reporter"].(map[string]any)["username"])
+	// SetWebhook で渡した lookups を本文に使う。Flag の通報者は必ずリモートなので、
+	// ここが抜けると Flag 経由の通報だけ instance が付かない。
+	assert.Equal(t, "Remote", body["reporter"].(map[string]any)["instance"].(map[string]any)["name"])
+	assert.Equal(t, "bob", body["targetUser"].(map[string]any)["username"])
+	assert.Nil(t, body["assignee"])
 }
 
 // 経路ごとに独立している。片方が未配線でも、残りは出る。
@@ -137,7 +135,7 @@ func TestCreatedNotifier_ChannelsAreIndependent(t *testing.T) {
 	// webhook だけ配線した (admin stream と通知欄が無い)。
 	hook := &cnWebhook{}
 	n := abuse.NewCreatedNotifier(nil, nil, nil)
-	n.SetWebhook(hook, nil, nil, idGen)
+	n.SetWebhook(hook, nil, abuse.UserLookups{}, idGen)
 	n.NotifyCreated(context.Background(), report, nil, nil)
 	require.Len(t, hook.calls, 1, "通知欄と admin stream が無くても webhook は出す")
 	body := hook.calls[0].body.(map[string]any)
@@ -149,7 +147,7 @@ func TestCreatedNotifier_ChannelsAreIndependent(t *testing.T) {
 	admin := &cnAdmin{}
 	hook2 := &cnWebhook{}
 	n2 := abuse.NewCreatedNotifier(inApp, cnMods{err: errors.New("db down")}, admin)
-	n2.SetWebhook(hook2, nil, nil, idGen)
+	n2.SetWebhook(hook2, nil, abuse.UserLookups{}, idGen)
 	n2.NotifyCreated(context.Background(), report, nil, nil)
 	assert.Empty(t, admin.calls)
 	assert.Len(t, inApp.reports, 1)

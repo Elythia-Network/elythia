@@ -3364,7 +3364,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	recipientRepo := repository.NewAbuseReportNotificationRecipientRepository(s.db)
 	// 通報の abuseReport system webhook (#1542)。local と Flag の両方に効く
 	// (#3256)。recipientRepo がここで揃うため本箇所で配線する。
-	abuseCreatedNotifier.SetWebhook(webhookService, recipientRepo, userRepo, idGen)
+	abuseCreatedNotifier.SetWebhook(webhookService, recipientRepo, coreabuse.UserLookups{Instances: instanceRepo, Emojis: emojiRepo}, idGen)
 	adminHandler := apiadmin.NewHandler(signupService, roleService, metaRepo, userRepo, idGen)
 	// モデレーターの suspend / unsuspend を local 由来として刻む (#2973)。
 	adminHandler.SetSuspensionOriginRepo(suspensionOriginRepo)

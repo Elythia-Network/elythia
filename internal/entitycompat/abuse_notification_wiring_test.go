@@ -21,6 +21,6 @@ func TestAbuseReportNotifierIsWired(t *testing.T) {
 		"ローカルの通報 (users/report-abuse) で通知が一切出なくなる。")
 	assertWired(t, routerGo, "federationProcessor.SetAbuseReportCreatedNotifier(abuseCreatedNotifier)",
 		"連合経由の通報 (Flag) で通知が一切出なくなる (#3256 と同じ形の穴)。")
-	assertWired(t, routerGo, "abuseCreatedNotifier.SetWebhook(webhookService, recipientRepo, userRepo, idGen)",
+	assertWired(t, routerGo, "abuseCreatedNotifier.SetWebhook(webhookService, recipientRepo, coreabuse.UserLookups{Instances: instanceRepo, Emojis: emojiRepo}, idGen)",
 		"通報の abuseReport system webhook が、ローカルでも連合経由でも出なくなる。")
 }
