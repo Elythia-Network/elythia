@@ -3365,6 +3365,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 通報の abuseReport system webhook (#1542)。local と Flag の両方に効く
 	// (#3256)。recipientRepo がここで揃うため本箇所で配線する。
 	abuseCreatedNotifier.SetWebhook(webhookService, recipientRepo, coreabuse.UserLookups{Instances: instanceRepo, Emojis: emojiRepo}, idGen)
+	// 通報のメール (#3265)。SMTP の設定は送るたびに meta から読み直すので、
+	// 未設定でも配線しておいてよい (そのときは送らない)。
+	abuseCreatedNotifier.SetMail(miscsmtp.SubjectBodySenderFromMeta(metaRepo, s.config.ProxySMTP), recipientRepo, userRepo, metaRepo)
 	adminHandler := apiadmin.NewHandler(signupService, roleService, metaRepo, userRepo, idGen)
 	// モデレーターの suspend / unsuspend を local 由来として刻む (#2973)。
 	adminHandler.SetSuspensionOriginRepo(suspensionOriginRepo)
