@@ -2,16 +2,26 @@
 // the rows they summarise.
 //
 // `user.followersCount` / `followingCount` / `notesCount` と
-// `note.repliesCount` / `renoteCount` は増減で維持されている。増減はベスト
+// `note.repliesCount` / `renoteCount` / `clippedCount` は増減で維持されている。増減はベスト
 // エフォート (戻り値を捨てる呼び出しがある) なので、失敗すればそのままずれる。
 // `instance` 側には RecomputeFollowCounts があるのに user / note 側には無く、
 // 一度ずれると管理者は SQL を手で書くしかなかった (#2473)。
 //
+// `note.clippedCount` は #1768 から clips/add-note と remove-note で増減している。
+// それより前にクリップした行はカウンタが 0 のまま残っているので、実件数
+// (`clip_note`) との突き合わせで直せる (#3291)。**平常時にもずれは出る** —
+// クリップの削除 (利用者の削除による cascade を含む) では、本家と同じく
+// カウンタを減らさないので、保存値が実件数より大きく残る。`-fix` で下げてよいが、
+// 下げるとクリップが消えたリモートノートは掃除の対象に戻る。
+// クリップ側の件数 (`clip.notesCount`) は非正規化しておらず (#2243)、検査の
+// 対象ではない。
+//
 // # 触ってはいけないもの
 //
-// **`clippedCount` / `pageCount` は検査しない。** mk-go はクリップ件数の非正規化
-// カウンタを**意図的に維持せず** clip_note を直接数える設計 (#2243)。常に 0 が
-// 正しい値なので、実件数と突き合わせると全件が drift として報告される。
+// **`note.pageCount` は検査しない。** 本家は PageService でページが参照する
+// ノートのカウンタを増減するが、mk-go はまだ実装していない (#3293)。実件数を数える元も
+// ページの content (JSON) の中にしか無いので、突き合わせると維持していない
+// ことによる差が全件 drift として報告される。
 package fsck
 
 import (
@@ -74,7 +84,7 @@ type counterCheck struct {
 
 // counterChecks are the counters fsck knows how to verify.
 //
-// clippedCount / pageCount は**意図的に除外**する (パッケージ doc 参照)。
+// pageCount は**意図的に除外**する (パッケージ doc 参照)。
 var counterChecks = []counterCheck{
 	{
 		table: "user", column: "followersCount",
@@ -115,6 +125,16 @@ var counterChecks = []counterCheck{
 		        LEFT JOIN (SELECT "renoteId" AS pid, COUNT(*) AS n FROM "note" WHERE "renoteId" IS NOT NULL GROUP BY "renoteId") r
 		          ON r.pid = t.id
 		        WHERE t."renoteCount" <> COALESCE(r.n, 0)`,
+	},
+	{
+		// 列は smallint なので、実件数は列に入る上限で頭打ちにする。そうしないと
+		// 32767 件を超えるノートは -fix の書き戻しが範囲外で失敗し続ける。
+		table: "note", column: "clippedCount",
+		query: `SELECT t.id AS id, t."clippedCount" AS stored, LEAST(COALESCE(c.n, 0), 32767) AS actual
+		        FROM "note" t
+		        LEFT JOIN (SELECT "noteId" AS nid, COUNT(*) AS n FROM "clip_note" GROUP BY "noteId") c
+		          ON c.nid = t.id
+		        WHERE t."clippedCount" <> LEAST(COALESCE(c.n, 0), 32767)`,
 	},
 }
 

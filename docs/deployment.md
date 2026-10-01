@@ -307,6 +307,7 @@ make migrate-up
 | `user.followersCount` / `followingCount` | `following` の実件数 |
 | `user.notesCount` | `note` の実件数 |
 | `note.repliesCount` / `renoteCount` | `note.replyId` / `renoteId` の実件数 |
+| `note.clippedCount` | `clip_note` の実件数 (列は smallint なので 32767 で頭打ち) |
 | 孤児行 | 存在しない user を参照する `note` / `drive_file` / `following` |
 
 これらのカウンタは増減で維持されており、増減はベストエフォート (戻り値を捨てる呼び出しが
@@ -319,9 +320,15 @@ make migrate-up
 
 ### 検査しないもの
 
-`clippedCount` / `pageCount` は**意図的に対象外**。mk-go はクリップ件数の非正規化カウンタを
-維持せず `clip_note` を直接数える設計なので、常に 0 が正しい値になる
-([divergence.md](divergence.md) 参照)。実件数と突き合わせると全件がずれとして報告される。
+`note.pageCount` は**未実装のため対象外**。本家はページが参照するノートのカウンタを増減するが、
+mk-go はまだ維持していない (#3293) ので、突き合わせると全件がずれとして報告される。
+
+`note.clippedCount` は検査する。#1768 から維持しているが、それより前にクリップした行は
+カウンタが 0 のまま残っているので、`-fix` で `clip_note` の実件数に直せる。
+
+**クリップを消すと平常時にもずれが出る。** クリップの削除 (利用者の削除による削除を含む) では、
+本家と同じくカウンタを減らさないので、保存値が実件数より大きく残る。`-fix` で下げてよいが、
+下げるとクリップが消えたリモートノートは掃除の対象に戻る (本家では残り続ける)。
 
 ## 設定の実効値を確認する
 
