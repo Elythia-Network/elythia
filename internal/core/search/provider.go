@@ -27,10 +27,12 @@ var ErrUnavailable = errors.New("search backend is not available")
 // external full-text search index (typically Meilisearch). SQL backends do not
 // use this type — they query the live `note` table directly.
 type NoteDocument struct {
-	ID        string   `json:"id"`
-	CreatedAt int64    `json:"createdAt"` // unix milliseconds
-	UserID    string   `json:"userId"`
-	UserHost  *string  `json:"userHost,omitempty"`
+	ID        string `json:"id"`
+	CreatedAt int64  `json:"createdAt"` // unix milliseconds
+	UserID    string `json:"userId"`
+	// UserHost is stored as null for local authors, like upstream. Older
+	// mk-go indexes omitted the attribute; buildFilter matches both.
+	UserHost  *string  `json:"userHost"`
 	ChannelID *string  `json:"channelId,omitempty"`
 	CW        *string  `json:"cw,omitempty"`
 	Text      *string  `json:"text,omitempty"`
@@ -51,6 +53,11 @@ type SearchOpts struct {
 	// nil = 無制限。sinceId/untilId cursor とは独立に AND される。
 	RangeStartAt *int64
 	RangeEndAt   *int64
+	// LocalUsersOnly restricts results to notes whose own author is local
+	// (`userHost IS NULL`), independent of Host. The notes/search handler sets
+	// it for anonymous visitors under meta.ugcVisibilityForVisitor=local
+	// (upstream SearchService).
+	LocalUsersOnly bool
 }
 
 // Pagination wraps the keyset pagination parameters used by SearchNote.

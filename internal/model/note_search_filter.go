@@ -9,4 +9,8 @@ type NoteSearchTagFilter struct {
 	Renote    *bool
 	Poll      *bool
 	WithFiles bool
+	// LocalUsersOnly restricts results to notes whose own author is local
+	// (`userHost IS NULL`), for anonymous visitors under
+	// meta.ugcVisibilityForVisitor=local.
+	LocalUsersOnly bool
 }

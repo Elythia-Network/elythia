@@ -31,9 +31,11 @@ func TestToDBFilter_AllFieldsMapped(t *testing.T) {
 		IncludeLocalRenotes:   &includeLocalRenotes,
 		MutedChannelIDs:       []string{"ch1", "ch2"},
 		FollowedChannelIDs:    []string{"chf1", "chf2"},
+		LocalUsersOnly:        true,
 	}
 
 	out := toDBFilter(in, "viewer1")
+	assert.True(t, out.LocalUsersOnly)
 
 	assert.True(t, out.WithFiles)
 	if assert.NotNil(t, out.WithRenotes) {

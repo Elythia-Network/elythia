@@ -406,3 +406,24 @@ func TestApplyFilter_PublicReplyPasses(t *testing.T) {
 	out := ApplyFilter([]*model.Note{n}, "alice", TimelineFilter{FollowingIDs: map[string]struct{}{"bob": {}}})
 	assert.Len(t, out, 1)
 }
+
+// LocalUsersOnly drops notes whose own author is remote but keeps a local
+// note that replies to / renotes a remote note (upstream leaves attached
+// remote notes visible for visitors under ugcVisibilityForVisitor=local).
+func TestApplyFilter_LocalUsersOnly(t *testing.T) {
+	remote := func(n *model.Note) { n.UserHost = strPtr("remote.example") }
+	renoteOfRemote := func(n *model.Note) {
+		n.RenoteID = strPtr("rn1")
+		n.RenoteUserHost = strPtr("remote.example")
+	}
+	notes := []*model.Note{makeNote("local"), makeNote("remote", remote), makeNote("renote", renoteOfRemote)}
+
+	got := ApplyFilter(notes, "", TimelineFilter{LocalUsersOnly: true})
+	ids := make([]string, 0, len(got))
+	for _, n := range got {
+		ids = append(ids, n.ID)
+	}
+	assert.Equal(t, []string{"local", "renote"}, ids)
+
+	assert.Len(t, ApplyFilter(notes, "", TimelineFilter{}), 3, "unset keeps remote authors")
+}

@@ -96,6 +96,11 @@ type NoteSearchFilter struct {
 	// SearchService.searchNoteByLike, which swaps the predicate when
 	// fulltextSearch.provider == "sqlPgroonga".
 	Pgroonga bool
+	// LocalUsersOnly restricts results to notes whose own author is local
+	// (`userHost IS NULL`). Set for anonymous visitors under
+	// meta.ugcVisibilityForVisitor=local (upstream
+	// QueryService.generateUgcVisibilityQueryForVisitor). Independent of Host.
+	LocalUsersOnly bool
 }
 
 // ReplyTargetCount is a (userID, count) pair returned by

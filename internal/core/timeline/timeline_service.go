@@ -514,6 +514,9 @@ func toDBFilter(f TimelineFilter, viewerID string) model.TimelineDBFilter {
 		// followed channel (mute 済除外) を home DB fallback に渡す (#1686)。
 		// home 以外の timeline では handler が空のまま渡す。
 		FollowedChannelIDs: f.FollowedChannelIDs,
+		// Redis 経路 (ApplyFilter) だけで落とすと、件数が欠けた分を埋める DB
+		// fallback がリモートのノートを持ってくるので、SQL 側にも渡す。
+		LocalUsersOnly: f.LocalUsersOnly,
 	}
 }
 

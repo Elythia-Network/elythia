@@ -73,6 +73,11 @@ type TimelineFilter struct {
 	// するため既に正しい)。DB fallback の ListHomeTimeline が
 	// `channelId IN (...)` で followed channel の note を home に含める。
 	FollowedChannelIDs []string
+	// LocalUsersOnly drops notes whose own author is remote. The handler sets
+	// it for anonymous visitors under meta.ugcVisibilityForVisitor=local
+	// (upstream FanoutTimelineEndpointService / generateUgcVisibilityQueryForVisitor).
+	// Reply / renote targets attached to a local note are kept, as upstream does.
+	LocalUsersOnly bool
 }
 
 // boolDefault returns *b if non-nil, else def.
@@ -179,6 +184,9 @@ func ApplyFilter(notes []*model.Note, viewerID string, f TimelineFilter) []*mode
 
 	out := make([]*model.Note, 0, len(notes))
 	for _, n := range notes {
+		if f.LocalUsersOnly && n.UserHost != nil {
+			continue
+		}
 		if f.WithFiles && len(n.FileIDs) == 0 {
 			continue
 		}

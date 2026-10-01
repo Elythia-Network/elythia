@@ -94,6 +94,8 @@ func (p *SQLLikeProvider) SearchNote(viewer *model.User, query string, opts Sear
 		Offset:       opts.Offset,
 		ViewerID:     viewerID,
 		Pgroonga:     p.pgroonga,
+		// LIMIT の前に絞らないと、ページがリモートのノートで埋まって件数が欠ける。
+		LocalUsersOnly: opts.LocalUsersOnly,
 	})
 	if err != nil {
 		return nil, err
