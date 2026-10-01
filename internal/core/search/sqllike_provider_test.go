@@ -143,3 +143,22 @@ func TestRangeBoundConversion(t *testing.T) {
 	// end は start より後ろの境界 (rangeEndAt+1 > rangeStartAt-1 で prefix も大)。
 	assert.Greater(t, rangeEndID(&at), rangeStartID(&at))
 }
+
+// LocalUsersOnly is passed down to the repository so that remote authors are
+// dropped before LIMIT (visitors under ugcVisibilityForVisitor=local).
+func TestSQLLikeProvider_LocalUsersOnly(t *testing.T) {
+	p, repo := newSQLLikeProviderForTest()
+	hello := "hello"
+	remote := "remote.example"
+	repo.Notes["n1"] = &model.Note{ID: "n1", UserID: "u1", Visibility: model.NoteVisibilityPublic, Text: &hello}
+	repo.Notes["n2"] = &model.Note{ID: "n2", UserID: "u2", UserHost: &remote, Visibility: model.NoteVisibilityPublic, Text: &hello}
+
+	out, err := p.SearchNote(nil, "hello", SearchOpts{LocalUsersOnly: true}, Pagination{Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	assert.Equal(t, "n1", out[0].ID)
+
+	out, err = p.SearchNote(nil, "hello", SearchOpts{}, Pagination{Limit: 10})
+	require.NoError(t, err)
+	assert.Len(t, out, 2)
+}

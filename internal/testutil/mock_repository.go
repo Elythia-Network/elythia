@@ -1593,6 +1593,9 @@ func (m *MockNoteRepository) SearchByFilter(f model.NoteSearchFilter) ([]*model.
 				}
 			}
 		}
+		if f.LocalUsersOnly && n.UserHost != nil {
+			return false
+		}
 		return true
 	}, f.UntilID, f.SinceID, limit), nil
 }
@@ -1933,6 +1936,9 @@ func (m *MockNoteRepository) SearchByTag(tagGroups [][]string, viewerID string, 
 		if filter.WithFiles && len(n.FileIDs) == 0 {
 			return false
 		}
+		if filter.LocalUsersOnly && n.UserHost != nil {
+			return false
+		}
 		for _, g := range groups {
 			if hasAll(n, g) {
 				return true
@@ -1964,8 +1970,11 @@ func (m *MockNoteRepository) ListLocalTimeline(limit int, sinceID, untilID strin
 	}, untilID, sinceID, limit), nil
 }
 
-func (m *MockNoteRepository) ListGlobalTimeline(limit int, sinceID, untilID string, _ model.TimelineDBFilter) ([]*model.Note, error) {
+func (m *MockNoteRepository) ListGlobalTimeline(limit int, sinceID, untilID string, f model.TimelineDBFilter) ([]*model.Note, error) {
 	return m.listFiltered(func(n *model.Note) bool {
+		if f.LocalUsersOnly && n.UserHost != nil {
+			return false
+		}
 		return string(n.Visibility) == "public" || string(n.Visibility) == "home"
 	}, untilID, sinceID, limit), nil
 }

@@ -15,6 +15,7 @@ import (
 	coreachievement "github.com/shiroha-a/mk/internal/core/achievement"
 	corenote "github.com/shiroha-a/mk/internal/core/note"
 	"github.com/shiroha-a/mk/internal/core/notesfilter"
+	"github.com/shiroha-a/mk/internal/core/ugcvisibility"
 	"github.com/shiroha-a/mk/internal/entity"
 	"github.com/shiroha-a/mk/internal/misc/id"
 	"github.com/shiroha-a/mk/internal/model"
@@ -141,14 +142,24 @@ func (h *Handler) Featured(c echo.Context) error {
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	notes, err := h.featuredNotes(c.Request().Context(), req.ChannelID, untilID, limit, req.Offset)
+	// upstream featured.ts は未ログインの閲覧者に generateUgcVisibilityQueryForVisitor
+	// を掛ける (`none` は空、`local` はリモートの投稿者のノートを除く)。
+	viewer := middleware.GetUser(c)
+	localOnly := false
+	if viewer == nil {
+		policy := h.ugcVisibilityNow()
+		if ugcvisibility.HidesAll(policy) {
+			return c.JSON(http.StatusOK, []any{})
+		}
+		localOnly = policy == ugcvisibility.Local
+	}
+	notes, err := h.featuredNotes(c.Request().Context(), req.ChannelID, untilID, limit, req.Offset, localOnly)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
 	// upstream featured.ts:99-107 は me の mute / 被block を isUserRelated で除外する
 	// (#1682)。users/featured-notes (#1547) と同じく被block / mute / instance-mute を
 	// post-fetch で除外する。blocked-host / suspended は別 follow-up。
-	viewer := middleware.GetUser(c)
 	notes, err = h.applyMuteBlock(viewer, notes)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
@@ -167,7 +178,31 @@ const (
 // the ranking reader is wired, falling back to the SQL count-DESC ranking when
 // it is unavailable or empty (fresh instance / Redis flush)。ranking 経路は
 // upstream featured.ts と同じく id DESC sort → untilId filter → limit。
-func (h *Handler) featuredNotes(ctx context.Context, channelID, untilID string, limit, offset int) ([]*model.Note, error) {
+//
+// localOnly drops notes whose own author is remote (anonymous visitors under
+// meta.ugcVisibilityForVisitor=local).
+func (h *Handler) featuredNotes(ctx context.Context, channelID, untilID string, limit, offset int, localOnly bool) ([]*model.Note, error) {
+	notes, err := h.fetchFeaturedNotes(ctx, channelID, untilID, limit, offset, localOnly)
+	if err != nil || !localOnly {
+		return notes, err
+	}
+	out := make([]*model.Note, 0, len(notes))
+	for _, n := range notes {
+		if n.UserHost == nil {
+			out = append(out, n)
+		}
+	}
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// fetchFeaturedNotes fetches the featured candidates before the localOnly
+// filter is applied by featuredNotes.
+func (h *Handler) fetchFeaturedNotes(ctx context.Context, channelID, untilID string, limit, offset int, localOnly bool) ([]*model.Note, error) {
+	// SQL fallback (ranking が無い / 空のとき) は upstream に無い経路なので、
+	// localOnly でも取得後に絞るだけにする (件数が欠けることがある)。
 	if h.featuredRanking == nil {
 		return h.noteRepo.ListFeatured(channelID, untilID, limit, offset)
 	}
@@ -182,7 +217,14 @@ func (h *Handler) featuredNotes(ctx context.Context, channelID, untilID string, 
 		// Redis ranking が空 / 取得失敗 (fresh instance 等) は SQL fallback。
 		return h.noteRepo.ListFeatured(channelID, untilID, limit, offset)
 	}
-	ids = sortAndPageFeaturedIDs(ids, untilID, limit)
+	// upstream は ranking の ID を全部引いてから userHost IS NULL で絞り、最後に
+	// limit で切る。localOnly で先に limit で切ると、上位がリモートのノートで
+	// 埋まったときに件数が欠けるので、切るのは featuredNotes で絞った後にする。
+	pageLimit := limit
+	if localOnly {
+		pageLimit = len(ids)
+	}
+	ids = sortAndPageFeaturedIDs(ids, untilID, pageLimit)
 	if len(ids) == 0 {
 		return []*model.Note{}, nil
 	}
@@ -453,6 +495,16 @@ func (h *Handler) SearchByTag(c echo.Context) error {
 	}
 	// reply/renote/poll/withFiles で絞る (upstream search-by-tag.ts、#1554)。
 	filter := model.NoteSearchTagFilter{Reply: req.Reply, Renote: req.Renote, Poll: req.Poll, WithFiles: req.WithFiles}
+	// upstream search-by-tag.ts は未ログインの閲覧者に generateVisibilityQuery
+	// (`none` で `1=0`) と generateUgcVisibilityQueryForVisitor (`local` で
+	// userHost IS NULL) を掛ける。`local` は LIMIT の前に SQL で絞る。
+	if viewer == nil {
+		policy := h.ugcVisibilityNow()
+		if ugcvisibility.HidesAll(policy) {
+			return c.JSON(http.StatusOK, []entity.NoteEntity{})
+		}
+		filter.LocalUsersOnly = policy == ugcvisibility.Local
+	}
 	notes, err := h.noteRepo.SearchByTag(tagGroups, viewerID, limit, sinceID, untilID, filter)
 	if err != nil {
 		// tag 検索失敗は従来どおり空配列で返す (TS 互換) が、visibility
@@ -718,17 +770,22 @@ func (h *Handler) ShowPartialBulk(c echo.Context) error {
 	if len(req.NoteIDs) == 0 {
 		return c.JSON(http.StatusOK, []any{})
 	}
+	viewer := middleware.GetUser(c)
+	// upstream fetchDiffs は ugcVisibilityForVisitor=none の未ログインの閲覧者に
+	// ノートを引く前に [] を返す。`local` は upstream も絞らない (TODO のまま)。
+	if h.visitorHidesAll(viewer) {
+		return c.JSON(http.StatusOK, []any{})
+	}
 	notes, err := h.noteRepo.FindManyByIDsWithUser(req.NoteIDs)
 	if err != nil {
 		return c.JSON(http.StatusOK, []any{})
 	}
-	viewer := middleware.GetUser(c)
 	// ShowPartialBulk は anonymous でも叩ける endpoint (router で RequireAuth()
 	// 無し) のため、followers / specified visibility のノートが任意の閲覧者に
 	// 漏洩しないよう FilterVisible に通す (#509、Devin #529 FLAG-1)。queryService
-	// 未配線時は fail-closed で空配列。なお本家 show-partial-bulk は可視性
-	// filter を持たないが、進行中の可視性 IDOR sweep と整合させるため mk-go では
-	// filter を維持する (#1538、shape のみ本家化、意図的な divergence)。
+	// 未配線時は fail-closed で空配列。upstream fetchDiffs も 2026.10.0 から
+	// isVisibleForMe でノートごとに可視性を確かめるようになり、挙動が揃った
+	// (以前はここを意図的な divergence としていた)。
 	if h.queryService == nil {
 		return c.JSON(http.StatusOK, []any{})
 	}

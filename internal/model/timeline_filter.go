@@ -66,6 +66,12 @@ type TimelineDBFilter struct {
 	// フィルタまで巻き込んで fanout が配った返信が消えるため、DB 専用の
 	// フラグとして分けている。
 	ExcludeRepliesToOthers bool
+	// LocalUsersOnly restricts results to notes whose own author is local
+	// (`userHost IS NULL`). Set for anonymous visitors under
+	// meta.ugcVisibilityForVisitor=local (upstream
+	// QueryService.generateUgcVisibilityQueryForVisitor). Attached reply /
+	// renote targets are not affected.
+	LocalUsersOnly bool
 }
 
 // PublicNotesFilter carries the optional filters of the upstream notes.ts

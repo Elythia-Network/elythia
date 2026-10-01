@@ -186,6 +186,15 @@ func (p *MeilisearchProvider) timestampOf(n *model.Note) int64 {
 	return t.UnixMilli()
 }
 
+// meiliLocalUserClause matches documents authored by local users.
+//
+// Meilisearch の `IS NULL` は「属性があって値が null」の文書にしか一致せず、
+// 属性そのものが無い文書には一致しない (v1.53.1 で実測)。以前の mk-go は
+// userHost を omitempty で索引していたので、ローカルの文書は属性を持たない。
+// 再索引しなくても既存の文書と TS 版が作った文書 (null で保存) の両方に効く
+// よう、`NOT EXISTS` と `IS NULL` の両方を見る。
+const meiliLocalUserClause = "(userHost NOT EXISTS OR userHost IS NULL)"
+
 // buildFilter renders a Meilisearch filter expression from the search opts
 // and pagination cursors.  Returns an empty string when no filters apply.
 func (p *MeilisearchProvider) buildFilter(opts SearchOpts, page Pagination) string {
@@ -212,10 +221,15 @@ func (p *MeilisearchProvider) buildFilter(opts SearchOpts, page Pagination) stri
 	}
 	if opts.Host != "" {
 		if opts.Host == "." {
-			clauses = append(clauses, "(userHost IS NULL)")
+			clauses = append(clauses, meiliLocalUserClause)
 		} else {
 			clauses = append(clauses, fmt.Sprintf("(userHost = %s)", quoteValue(opts.Host)))
 		}
+	}
+	// upstream searchNoteByMeilisearch は ugcVisibilityForVisitor=local の未ログイン
+	// の閲覧者に `userHost IS NULL` を足す。Host 指定とは独立に AND する。
+	if opts.LocalUsersOnly {
+		clauses = append(clauses, meiliLocalUserClause)
 	}
 	if len(clauses) == 0 {
 		return ""

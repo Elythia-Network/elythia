@@ -692,6 +692,12 @@ func (r *noteRepository) SearchByFilter(f model.NoteSearchFilter) ([]*model.Note
 			q = q.Where("\"userHost\" = ?", f.Host)
 		}
 	}
+	// 未ログインの閲覧者には、サーバーの ugcVisibilityForVisitor=local に従って
+	// ローカルの投稿者のノートだけを返す (upstream generateUgcVisibilityQueryForVisitor)。
+	// Host 指定とは独立に AND する。
+	if f.LocalUsersOnly {
+		q = q.Where(`"note"."userHost" IS NULL`)
+	}
 	if f.UntilID != "" {
 		q = q.Where("id < ?", f.UntilID)
 	}
@@ -1127,6 +1133,12 @@ func (r *noteRepository) SearchByTag(tagGroups [][]string, viewerID string, limi
 	if filter.WithFiles {
 		q = q.Where(`"fileIds" != '{}'`)
 	}
+	// 未ログインの閲覧者向けの ugcVisibilityForVisitor=local (upstream
+	// search-by-tag.ts の generateUgcVisibilityQueryForVisitor)。LIMIT の前に
+	// 絞らないと、ページがリモートのノートで埋まって件数が欠ける。
+	if filter.LocalUsersOnly {
+		q = q.Where(`"note"."userHost" IS NULL`)
+	}
 	q = q.Order(paginationOrder(sinceID, untilID, "id")).Limit(limit)
 	if sinceID != "" {
 		q = q.Where("id > ?", sinceID)
@@ -1168,6 +1180,11 @@ func (r *noteRepository) IncrementUserNotesCount(userID string, delta int) error
 
 // applyTimelineFilter adds common filter conditions to a GORM query builder.
 func applyTimelineFilter(q *gorm.DB, f model.TimelineDBFilter) *gorm.DB {
+	if f.LocalUsersOnly {
+		// 未ログインの閲覧者向けの ugcVisibilityForVisitor=local。ノート自身の
+		// 投稿者だけを見る (返信先・リノート先は upstream も残す)。
+		q = q.Where(`"note"."userHost" IS NULL`)
+	}
 	if f.WithFiles {
 		q = q.Where(`"fileIds" != '{}'`)
 	}

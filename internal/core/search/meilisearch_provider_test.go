@@ -1,6 +1,7 @@
 package search
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -251,7 +252,7 @@ func TestMeilisearchProvider_SearchNoteHappyPath(t *testing.T) {
 	assert.Equal(t, []string{"createdAt:desc"}, idx.lastSearchReq.Sort)
 	assert.Contains(t, idx.lastSearchReq.Filter, "userId = 'u1'")
 	assert.Contains(t, idx.lastSearchReq.Filter, "channelId = 'ch1'")
-	assert.Contains(t, idx.lastSearchReq.Filter, "userHost IS NULL")
+	assert.Contains(t, idx.lastSearchReq.Filter, meiliLocalUserClause)
 }
 
 func TestMeilisearchProvider_SearchNoteEmptyQueryRejected(t *testing.T) {
@@ -397,4 +398,27 @@ func TestMeilisearchProvider_BuildFilterEscapesValues(t *testing.T) {
 		Host:      `h\'x`,
 	}, Pagination{})
 	assert.Equal(t, `(userId = 'u\'1') AND (channelId = 'c\\') AND (userHost = 'h\\\'x')`, got)
+}
+
+// LocalUsersOnly adds the local-author clause (upstream searchNoteByMeilisearch
+// for visitors under ugcVisibilityForVisitor=local), and leaves the filter
+// alone when unset.
+//
+// 句は `IS NULL` だけでは足りない。属性の無い文書 (omitempty で索引した既存の
+// ローカルの文書) に一致しないので、未ログインの検索が常に空になる。
+func TestMeilisearchProvider_BuildFilterLocalUsersOnly(t *testing.T) {
+	p, _, _, _ := newProviderWithFake(t, IndexScopeGlobal)
+	assert.Equal(t, "(userHost NOT EXISTS OR userHost IS NULL)", p.buildFilter(SearchOpts{LocalUsersOnly: true}, Pagination{}))
+	assert.Equal(t, "(userHost NOT EXISTS OR userHost IS NULL)", p.buildFilter(SearchOpts{Host: "."}, Pagination{}))
+	assert.Equal(t, "", p.buildFilter(SearchOpts{}, Pagination{}))
+	assert.Equal(t, `(userHost = 'remote.example') AND (userHost NOT EXISTS OR userHost IS NULL)`,
+		p.buildFilter(SearchOpts{Host: "remote.example", LocalUsersOnly: true}, Pagination{}))
+}
+
+// Local authors are indexed with an explicit null userHost, like upstream,
+// so that `userHost IS NULL` filters written against upstream indexes match.
+func TestNoteDocument_LocalUserHostIsNull(t *testing.T) {
+	b, err := json.Marshal(NoteDocument{ID: "n1"})
+	require.NoError(t, err)
+	assert.Contains(t, string(b), `"userHost":null`)
 }

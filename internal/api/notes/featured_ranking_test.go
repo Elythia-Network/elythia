@@ -41,7 +41,7 @@ func TestFeaturedNotes_GlobalRankingPath(t *testing.T) {
 		noteRepo.Notes[fid] = &model.Note{ID: fid, UserID: "u", Visibility: "public", User: &model.User{ID: "u"}}
 	}
 	h.SetFeaturedRanking(&fakeFeaturedReader{global: []string{"b", "a", "c"}})
-	notes, err := h.featuredNotes(context.Background(), "", "", 10, 0)
+	notes, err := h.featuredNotes(context.Background(), "", "", 10, 0, false)
 	require.NoError(t, err)
 	// ranking 集合を id DESC で返す (upstream featured.ts)。
 	assert.Equal(t, []string{"c", "b", "a"}, featuredTestIDs(notes))
@@ -52,7 +52,7 @@ func TestFeaturedNotes_ChannelRankingPath(t *testing.T) {
 	ch := "ch1"
 	noteRepo.Notes["x"] = &model.Note{ID: "x", UserID: "u", Visibility: "public", ChannelID: &ch, User: &model.User{ID: "u"}}
 	h.SetFeaturedRanking(&fakeFeaturedReader{inCh: map[string][]string{"ch1": {"x"}}})
-	notes, err := h.featuredNotes(context.Background(), "ch1", "", 10, 0)
+	notes, err := h.featuredNotes(context.Background(), "ch1", "", 10, 0, false)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"x"}, featuredTestIDs(notes))
 }
@@ -63,7 +63,7 @@ func TestFeaturedNotes_UntilIDFilter(t *testing.T) {
 		noteRepo.Notes[fid] = &model.Note{ID: fid, UserID: "u", Visibility: "public", User: &model.User{ID: "u"}}
 	}
 	h.SetFeaturedRanking(&fakeFeaturedReader{global: []string{"a", "b", "c"}})
-	notes, err := h.featuredNotes(context.Background(), "", "c", 10, 0)
+	notes, err := h.featuredNotes(context.Background(), "", "c", 10, 0, false)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"b", "a"}, featuredTestIDs(notes))
 }
@@ -72,7 +72,7 @@ func TestFeaturedNotes_EmptyRankingFallsBackToSQL(t *testing.T) {
 	h, noteRepo, _ := newExtraHandler(t)
 	noteRepo.Notes["sql"] = &model.Note{ID: "sql", UserID: "u", Visibility: "public", User: &model.User{ID: "u"}}
 	h.SetFeaturedRanking(&fakeFeaturedReader{global: nil})
-	notes, err := h.featuredNotes(context.Background(), "", "", 10, 0)
+	notes, err := h.featuredNotes(context.Background(), "", "", 10, 0, false)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"sql"}, featuredTestIDs(notes))
 }
@@ -81,7 +81,7 @@ func TestFeaturedNotes_RankingErrorFallsBackToSQL(t *testing.T) {
 	h, noteRepo, _ := newExtraHandler(t)
 	noteRepo.Notes["sql"] = &model.Note{ID: "sql", UserID: "u", Visibility: "public", User: &model.User{ID: "u"}}
 	h.SetFeaturedRanking(&fakeFeaturedReader{globalErr: errors.New("redis down")})
-	notes, err := h.featuredNotes(context.Background(), "", "", 10, 0)
+	notes, err := h.featuredNotes(context.Background(), "", "", 10, 0, false)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"sql"}, featuredTestIDs(notes))
 }
@@ -89,7 +89,7 @@ func TestFeaturedNotes_RankingErrorFallsBackToSQL(t *testing.T) {
 func TestFeaturedNotes_UnwiredUsesSQL(t *testing.T) {
 	h, noteRepo, _ := newExtraHandler(t)
 	noteRepo.Notes["sql"] = &model.Note{ID: "sql", UserID: "u", Visibility: "public", User: &model.User{ID: "u"}}
-	notes, err := h.featuredNotes(context.Background(), "", "", 10, 0)
+	notes, err := h.featuredNotes(context.Background(), "", "", 10, 0, false)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"sql"}, featuredTestIDs(notes))
 }

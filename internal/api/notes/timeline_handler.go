@@ -12,6 +12,7 @@ import (
 	"github.com/shiroha-a/mk/internal/api/pagination"
 	"github.com/shiroha-a/mk/internal/core/role"
 	"github.com/shiroha-a/mk/internal/core/timeline"
+	"github.com/shiroha-a/mk/internal/core/ugcvisibility"
 	"github.com/shiroha-a/mk/internal/misc/id"
 	"github.com/shiroha-a/mk/internal/model"
 	"github.com/shiroha-a/mk/internal/server/middleware"
@@ -31,6 +32,10 @@ type TimelineRequest struct {
 	IncludeRenotedMyNotes *bool  `json:"includeRenotedMyNotes"`
 	IncludeLocalRenotes   *bool  `json:"includeLocalRenotes"`
 	AllowPartial          bool   `json:"allowPartial"`
+
+	// visitorPolicy is meta.ugcVisibilityForVisitor resolved once per request
+	// by serveTimeline (empty for signed-in viewers).
+	visitorPolicy string
 }
 
 // normalize validates limit against upstream の paramDef。ok=false は範囲外で、
@@ -129,6 +134,11 @@ func (h *Handler) GlobalTimeline(c echo.Context) error {
 			RenoteMutedUserIDs: h.loadRenoteMutedUserIDs(viewer),
 			BlockerIDs:         h.loadBlockerIDs(viewer),
 			MutedInstances:     h.loadMutedInstances(viewer),
+			// upstream global-timeline は未ログインの閲覧者に
+			// generateUgcVisibilityQueryForVisitor を掛ける (`local` ならリモートの
+			// 投稿者のノートを除く)。後から落とすとページが欠けるので filter に渡し、
+			// Redis 経路と DB 経路の両方で落とす。
+			LocalUsersOnly: req.visitorPolicy == ugcvisibility.Local,
 		}
 		return h.timelineService.GlobalTimeline(c.Request().Context(), viewer, req.UntilID, req.SinceID, *req.Limit, f)
 	}, false)
@@ -378,10 +388,17 @@ func (h *Handler) serveTimeline(
 		return c.JSON(http.StatusUnauthorized, apierr.Error("CREDENTIAL_REQUIRED", "Credential required.", "1384574d-a912-4b81-8601-c7b1c4085df1"))
 	}
 
-	// UGC visibility: 未ログインユーザーの閲覧を制限する (meta.ugcVisibilityForVisitor)。
-	// "none" → 空リスト、"local" → local timeline のみ許可 (global はブロック)。
-	if viewer == nil && h.ugcVisibilityNow() == "none" {
-		return c.JSON(http.StatusOK, []any{})
+	// UGC visibility: 未ログインの閲覧者に見せる範囲 (meta.ugcVisibilityForVisitor)。
+	// "none" は upstream generateVisibilityQuery の `1=0` と同じく全タイムラインで
+	// 空にする。"local" は global-timeline の取得側で投稿者がリモートのノートを
+	// 落とす (GlobalTimeline の LocalUsersOnly)。local-timeline は元から
+	// ローカルの投稿者だけで、home / hybrid はログイン必須なので対象外。
+	// 1 リクエストの中で値が変わらないよう、ここで 1 回だけ引いて req に載せる。
+	if viewer == nil {
+		req.visitorPolicy = h.ugcVisibilityNow()
+		if ugcvisibility.HidesAll(req.visitorPolicy) {
+			return c.JSON(http.StatusOK, []any{})
+		}
 	}
 
 	// experiment: first-page (cursor 無し) のみ JSON cache を引く。hit 時は DB +
@@ -389,7 +406,10 @@ func (h *Handler) serveTimeline(
 	// 従来通り c.JSON 経路を通る (= default 挙動は byte 一致のまま)。
 	var cacheKey string
 	if h.timelineCache != nil && req.SinceID == "" && req.UntilID == "" {
-		vid := "anon"
+		// 匿名の応答は ugcVisibilityForVisitor で中身が変わるので、設定ごとに
+		// 別のキーにする。同じキーだと、設定を締めた直後も TTL の間は締める前の
+		// 応答が返る。
+		vid := "anon:" + req.visitorPolicy
 		if viewer != nil {
 			vid = viewer.ID
 		}
