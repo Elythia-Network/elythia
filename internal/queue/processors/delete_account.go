@@ -23,7 +23,19 @@ type DeleteAccountProcessor struct {
 	// userRepo は Soft=false (local) 時の user 行物理削除に使う optional 依存 (#2230)。
 	// 未配線なら hard delete を skip し従来の soft 削除のままになる。
 	userRepo repository.UserRepository
+	// pageRepo はページを 1 件ずつ消して、参照するノートの pageCount を減らすのに
+	// 使う (#3293)。user 行の削除の CASCADE に任せると pageCount が減らない。
+	pageRepo repository.PageRepository
 }
+
+// SetPageRepo wires the PageRepository used to delete the user's pages one by
+// one so that the notes they reference get their pageCount decremented (#3293).
+func (p *DeleteAccountProcessor) SetPageRepo(r repository.PageRepository) {
+	p.pageRepo = r
+}
+
+// HasPageRepo reports whether SetPageRepo was wired.
+func (p *DeleteAccountProcessor) HasPageRepo() bool { return p.pageRepo != nil }
 
 // SetUserRepo wires the UserRepository used to physically delete the user row
 // for non-soft (local) account deletion (#2230). nil keeps the soft behavior.
@@ -69,6 +81,10 @@ func (p *DeleteAccountProcessor) Handle(ctx context.Context, t driver.Task) erro
 	}
 
 	if err := p.deleteNotes(ctx, payload.UserID); err != nil {
+		return err
+	}
+
+	if err := p.deletePages(ctx, payload.UserID); err != nil {
 		return err
 	}
 
@@ -160,6 +176,45 @@ func (p *DeleteAccountProcessor) deleteNotes(ctx context.Context, userID string)
 	if total > 0 {
 		slog.Info("delete-account: notes deleted",
 			"userId", userID, "count", total)
+	}
+	return nil
+}
+
+// deletePageBatchSize bounds how many pages are listed per loop iteration.
+const deletePageBatchSize = 100
+
+// deletePages deletes the user's pages through PageRepository.Delete so the
+// notes they reference get their pageCount decremented. upstream
+// DeleteAccountProcessorService も同じ理由でページを 1 件ずつ PageService.delete
+// で消している。
+func (p *DeleteAccountProcessor) deletePages(ctx context.Context, userID string) error {
+	if p.pageRepo == nil {
+		return nil
+	}
+	var total int
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		pages, err := p.pageRepo.ListByUser(userID, "", "", deletePageBatchSize, 0)
+		if err != nil {
+			slog.Error("delete-account: page listing failed", "userId", userID, "err", err)
+			return err
+		}
+		if len(pages) == 0 {
+			break
+		}
+		for _, pg := range pages {
+			if err := p.pageRepo.Delete(pg); err != nil {
+				slog.Error("delete-account: page deletion failed",
+					"userId", userID, "pageId", pg.ID, "err", err)
+				return err
+			}
+		}
+		total += len(pages)
+	}
+	if total > 0 {
+		slog.Info("delete-account: pages deleted", "userId", userID, "count", total)
 	}
 	return nil
 }

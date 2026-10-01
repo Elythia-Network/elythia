@@ -1171,6 +1171,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	deleteAccountProcessor := processors.NewDeleteAccountProcessor(noteRepo, driveFileRepo, followingRepo)
 	// #2230: local user の物理削除に userRepo を配線。未配線だと soft 削除止まりで行が残る。
 	deleteAccountProcessor.SetUserRepo(userRepo)
+	// #3293: ページを 1 件ずつ消して、参照するノートの pageCount を減らす。
+	deleteAccountProcessor.SetPageRepo(pageRepo)
 	s.queueServer.Handle(queue.TaskTypeDeleteAccount, deleteAccountProcessor.Handle)
 
 	// Per-pair Unfollow job (#587): admin/federation/remove-all-following
@@ -4496,6 +4498,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"匿名 visitor への channels/timeline の露出を ugcVisibilityForVisitor で gate できない"},
 		{"clips.ugcVisibility", clipsHandler.HasUGCVisibility(),
 			"匿名 visitor への clips/notes の露出を ugcVisibilityForVisitor で gate できない"},
+		{"deleteAccount.pageRepo", deleteAccountProcessor.HasPageRepo(),
+			"アカウント削除でページが user 行の CASCADE で消え、参照していたノートの pageCount が減らない (リモートのノートが掃除で消えなくなる)"},
 		{"feed.ugcVisibility", feedH.HasUGCVisibility(),
 			"ugcVisibilityForVisitor が none でも Web の feed (.rss / .atom / .json) を返す"},
 
