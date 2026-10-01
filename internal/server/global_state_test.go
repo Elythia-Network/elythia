@@ -55,6 +55,7 @@ func restoreProcessGlobals(t *testing.T) {
 		entity.SetInstanceIconURLLookup(nil)
 		entity.SetSilencedLookup(nil)
 		notehide.SetFollowingRepo(nil)
+		notehide.SetUGCVisibilityLookup(nil)
 		coretwofactor.SetTestMode(false)
 		meself.SetEnricher(nil)
 		// **latch も戻す。** `RequireSetup` は「利用者を観測した」を覚えるので、
@@ -133,6 +134,7 @@ func TestProcessGlobalsAreRestored(t *testing.T) {
 		"entity.SetMediaURLContext":        "router.go",
 		"entity.SetSilencedLookup":         "router.go",
 		"notehide.SetFollowingRepo":        "router.go",
+		"notehide.SetUGCVisibilityLookup":  "router.go",
 		"coretwofactor.SetTestMode":        "router.go",
 		"meself.SetEnricher":               "router.go",
 		"meta.SetLocalUserCounter":         "router.go",

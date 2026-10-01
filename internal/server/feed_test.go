@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/shiroha-a/mk/internal/core/ugcvisibility"
 	"github.com/shiroha-a/mk/internal/model"
 	"github.com/shiroha-a/mk/internal/repository"
 	"github.com/stretchr/testify/assert"
@@ -253,4 +254,49 @@ func TestFeed_NormalUserStillServed(t *testing.T) {
 		assert.Equal(t, http.StatusOK, rec.Code)
 		assert.Contains(t, rec.Body.String(), "hello")
 	}
+}
+
+// upstream getFeed と同じく、ugcVisibilityForVisitor が 'none' のときは feed を
+// 返さない。'local' / 'all' ではローカル利用者の feed をそのまま返す。
+// TryServe (実際のルーティング経路) で 3 形式すべてを見る。
+func TestFeed_UGCVisibilityForVisitor(t *testing.T) {
+	e := echo.New()
+	for _, tc := range []struct {
+		policy string
+		want   int
+	}{
+		{ugcvisibility.None, http.StatusNotFound},
+		{ugcvisibility.Local, http.StatusOK},
+		{ugcvisibility.All, http.StatusOK},
+	} {
+		for _, acct := range []string{"alice.rss", "alice.atom", "alice.json"} {
+			h := newFeedTestHandler(sampleFeedNotes())
+			policy := tc.policy
+			h.ugcVisibility = func() string { return policy }
+			rec := httptest.NewRecorder()
+			c := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)
+			handled, err := h.TryServe(c, acct)
+			require.True(t, handled, "%s/%s", tc.policy, acct)
+			code := rec.Code
+			var he *echo.HTTPError
+			if asHTTPError(err, &he) {
+				code = he.Code
+			} else {
+				require.NoError(t, err, "%s/%s", tc.policy, acct)
+			}
+			assert.Equal(t, tc.want, code, "%s/%s", tc.policy, acct)
+			if tc.want == http.StatusNotFound {
+				assert.NotContains(t, rec.Body.String(), "hello", "%s/%s", tc.policy, acct)
+			} else {
+				assert.Contains(t, rec.Body.String(), "hello", "%s/%s", tc.policy, acct)
+			}
+		}
+	}
+}
+
+// HasUGCVisibility backs the feed.ugcVisibility startup wiring check: an
+// unwired lookup silently falls back to `local`, so `none` would not 404.
+func TestFeedHandler_HasUGCVisibility(t *testing.T) {
+	assert.False(t, (&feedHandler{}).HasUGCVisibility(), "unwired lookup must be reported")
+	assert.True(t, (&feedHandler{ugcVisibility: func() string { return "none" }}).HasUGCVisibility())
 }

@@ -19,6 +19,10 @@
 //   - Top-level notes packed from IDs the viewer saved earlier (i/favorites):
 //     HideStoredNotes applies the FULL decision to them as well, because no
 //     other gate re-checks visibility on that path.
+//   - Anonymous viewers under meta.ugcVisibilityForVisitor = 'none': every
+//     note in the batch (top-level and embeds) is blanked, mirroring upstream
+//     NoteEntityService.shouldHideNote. 'local' is not applied here, matching
+//     upstream (which leaves it as a TODO).
 //
 // Streaming has its own per-connection gate in internal/stream/channels.
 package notehide
@@ -27,6 +31,7 @@ import (
 	"time"
 
 	corenote "github.com/shiroha-a/mk/internal/core/note"
+	"github.com/shiroha-a/mk/internal/core/ugcvisibility"
 	"github.com/shiroha-a/mk/internal/entity"
 	"github.com/shiroha-a/mk/internal/model"
 	"github.com/shiroha-a/mk/internal/repository"
@@ -41,6 +46,28 @@ var followingRepo repository.FollowingRepository
 // during server setup before requests are served.
 func SetFollowingRepo(r repository.FollowingRepository) {
 	followingRepo = r
+}
+
+// ugcVisibilityLookup returns the live meta.ugcVisibilityForVisitor. Wired once
+// at startup (router), like followingRepo. A nil lookup applies no
+// visitor-policy hiding.
+var ugcVisibilityLookup func() string
+
+// SetUGCVisibilityLookup wires the live lookup of
+// meta.ugcVisibilityForVisitor consulted for anonymous viewers. Call once
+// during server setup before requests are served; nil unwires it.
+func SetUGCVisibilityLookup(fn func() string) {
+	ugcVisibilityLookup = fn
+}
+
+// visitorHidesAll reports whether every packed note must be blanked for
+// viewer: an anonymous viewer while the instance policy is 'none'.
+func visitorHidesAll(viewer *model.User) bool {
+	// meta の参照はログイン済み viewer では不要なので、匿名のときだけ引く。
+	if viewer != nil || ugcVisibilityLookup == nil {
+		return false
+	}
+	return ugcvisibility.HidesAll(ugcVisibilityLookup())
 }
 
 // HideEmbeds blanks embedded renote/reply content that `viewer` is not allowed
@@ -115,8 +142,15 @@ func hideAt(viewer *model.User, packed []entity.NoteEntity, repo repository.Foll
 	if len(packed) == 0 {
 		return
 	}
+	// upstream shouldHideNote は匿名 viewer かつ ugcVisibilityForVisitor='none' の
+	// とき、pack するすべての note (埋め込みを含む) を hide する。follow 判定は
+	// 不要なので、他の判定より先に全件を blank する。
+	hideAll := visitorHidesAll(viewer)
 	follows := buildFollowSet(viewer, packed, repo, fullTopLevel)
 	for i := range packed {
+		if hideAll {
+			hideEveryLevel(&packed[i])
+		}
 		// HideNoteEntity が要素を mutate できるよう slice element の pointer を渡す。
 		if fullTopLevel {
 			// 保存済み ID から引いた note は可視性ゲートを通っていないので、
@@ -145,6 +179,18 @@ func hideAt(viewer *model.User, packed []entity.NoteEntity, repo repository.Foll
 			downgradeVisibilityIfNeeded(packed[i].Renote.Renote, nowMs)
 			downgradeVisibilityIfNeeded(packed[i].Renote.Reply, nowMs)
 		}
+	}
+}
+
+// hideEveryLevel blanks a top-level note and every embed the packer emits
+// (renote, reply, renote.renote, renote.reply).
+func hideEveryLevel(n *entity.NoteEntity) {
+	entity.HideNoteEntity(n)
+	entity.HideNoteEntity(n.Renote)
+	entity.HideNoteEntity(n.Reply)
+	if n.Renote != nil {
+		entity.HideNoteEntity(n.Renote.Renote)
+		entity.HideNoteEntity(n.Renote.Reply)
 	}
 }
 
