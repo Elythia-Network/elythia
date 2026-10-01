@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/shiroha-a/mk/internal/api/apierr"
 	"github.com/shiroha-a/mk/internal/api/pagination"
+	"github.com/shiroha-a/mk/internal/core/role"
 	"github.com/shiroha-a/mk/internal/core/timeline"
 	"github.com/shiroha-a/mk/internal/misc/id"
 	"github.com/shiroha-a/mk/internal/model"
@@ -42,16 +43,6 @@ func (r *TimelineRequest) normalize() bool {
 	r.Limit = &limit
 	return true
 }
-
-// Policy keys consumed by timeline gates. 値は role package の Policy* 定数と
-// 一致させる必要があり、ずれると gate が動かなくなるので doc コメントで
-// 参照を明記する。
-const (
-	// policyKeyLtlAvailable = role.PolicyLtlAvailable。
-	policyKeyLtlAvailable = "ltlAvailable"
-	// policyKeyGtlAvailable = role.PolicyGtlAvailable。
-	policyKeyGtlAvailable = "gtlAvailable"
-)
 
 // timelineAvailable reports whether the timeline endpoint gated by the
 // given policy key (= "ltlAvailable" / "gtlAvailable") is enabled for the
@@ -104,7 +95,7 @@ func (h *Handler) Timeline(c echo.Context) error {
 
 // LocalTimeline handles POST /api/notes/local-timeline.
 func (h *Handler) LocalTimeline(c echo.Context) error {
-	if !h.timelineAvailable(c, policyKeyLtlAvailable) {
+	if !h.timelineAvailable(c, role.PolicyLtlAvailable) {
 		return apierr.JSONLtlDisabled(c)
 	}
 	return h.serveTimeline(c, "local", func(viewer *model.User, req TimelineRequest) ([]*model.Note, error) {
@@ -125,7 +116,7 @@ func (h *Handler) LocalTimeline(c echo.Context) error {
 
 // GlobalTimeline handles POST /api/notes/global-timeline.
 func (h *Handler) GlobalTimeline(c echo.Context) error {
-	if !h.timelineAvailable(c, policyKeyGtlAvailable) {
+	if !h.timelineAvailable(c, role.PolicyGtlAvailable) {
 		return apierr.JSONGtlDisabled(c)
 	}
 	return h.serveTimeline(c, "global", func(viewer *model.User, req TimelineRequest) ([]*model.Note, error) {
@@ -149,7 +140,7 @@ func (h *Handler) HybridTimeline(c echo.Context) error {
 	// ltl 側 policy を見るのは「ローカルタイムライン + social の hybrid」だから)。
 	// ただしエラーコードは STL_DISABLED (Social TimeLine) で local の LTL_DISABLED
 	// とは別 UUID を返す (#1554、upstream hybrid-timeline.ts stlDisabled)。
-	if !h.timelineAvailable(c, policyKeyLtlAvailable) {
+	if !h.timelineAvailable(c, role.PolicyLtlAvailable) {
 		return apierr.JSONStlDisabled(c)
 	}
 	return h.serveTimeline(c, "hybrid", func(viewer *model.User, req TimelineRequest) ([]*model.Note, error) {
