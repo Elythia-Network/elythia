@@ -775,6 +775,25 @@ func TestClient_EnqueueSystemWebhook(t *testing.T) {
 	assert.Equal(t, 4, jobAttempts(t, tasks[0]), "本配送は本家と同じ総試行 4 回")
 }
 
+// 利用者の webhook も、テスト送信 (SingleAttempt) は 1 回だけ (#3278)。本配送は 4 回。
+func TestClient_EnqueueUserWebhook_Attempts(t *testing.T) {
+	testutil.SkipIfNoDocker(t)
+	for _, tt := range []struct {
+		single bool
+		want   int
+	}{{false, 4}, {true, 1}} {
+		flushTestRedis(t)
+		c := queue.NewClient(newDriver(t))
+		require.NoError(t, c.EnqueueUserWebhook(context.Background(), queue.WebhookPayload{
+			WebhookID: "w1", UserID: "u1", EventType: "note", Body: []byte(`{}`), SingleAttempt: tt.single,
+		}))
+		tasks := listPending(t, newInspector(t), queue.WebhookQueueName)
+		require.Len(t, tasks, 1)
+		assert.Equal(t, tt.want, jobAttempts(t, tasks[0]), "SingleAttempt=%v", tt.single)
+		_ = c.Close()
+	}
+}
+
 // テスト送信 (SingleAttempt) は本家の attempts: 1 と同じく 1 回だけ (#3262)。
 func TestClient_EnqueueSystemWebhook_SingleAttempt(t *testing.T) {
 	testutil.SkipIfNoDocker(t)

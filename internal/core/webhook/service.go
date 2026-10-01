@@ -119,7 +119,8 @@ func (s *Service) DispatchUser(userID, eventType string, body any) {
 
 // DispatchUserTest enqueues a single test delivery for i/webhooks/test (#1546).
 // 通常の DispatchUser と違い (1) 指定 webhookID 1 件だけに送り (= テスト対象を
-// 限定)、(2) overrideURL/Secret が非空なら保存済 webhook でなくそちらへ送る。
+// 限定)、(2) overrideURL が非空なら保存済 webhook でなく overrideURL /
+// overrideSecret へ送り、(3) 再試行しない (本家の attempts: 1、#3278)。
 // イベント購読 (h.On) は無視する (テストは任意の type を送れる)。
 func (s *Service) DispatchUserTest(webhookID, userID, eventType string, body any, overrideURL, overrideSecret string) {
 	if s == nil || s.enqueuer == nil {
@@ -141,6 +142,8 @@ func (s *Service) DispatchUserTest(webhookID, userID, eventType string, body any
 		Body:           raw,
 		OverrideURL:    overrideURL,
 		OverrideSecret: overrideSecret,
+		// 本家はテスト送信を attempts: 1 で積む (#3278)。
+		SingleAttempt: true,
 	}); err != nil {
 		slog.Warn("webhook: enqueue test webhook failed",
 			"hookId", webhookID, "event", eventType, "err", err)

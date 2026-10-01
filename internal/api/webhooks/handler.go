@@ -291,11 +291,11 @@ func (h *Handler) Test(c echo.Context) error {
 	var req struct {
 		WebhookID string `json:"webhookId"`
 		Type      string `json:"type"`
-		// Override (#1546): 指定すると保存済 webhook でなく override.url/secret へ
-		// 送る (保存せずに別 URL/secret でテスト送信できる、upstream test.ts)。
+		// Override (#1546): 保存済みの webhook に重ねて、別の URL / secret へ
+		// テスト送信する (upstream test.ts)。重ね方は下の dispatch の直前を参照。
 		Override *struct {
-			URL    string `json:"url"`
-			Secret string `json:"secret"`
+			URL    *string `json:"url"`
+			Secret *string `json:"secret"`
 		} `json:"override"`
 	}
 	if err := c.Bind(&req); err != nil || req.WebhookID == "" || req.Type == "" {
@@ -315,10 +315,19 @@ func (h *Handler) Test(c echo.Context) error {
 	}
 
 	if h.dispatcher != nil {
+		// 本家は保存済みの webhook に override を重ねる ({...webhook, ...override})。
+		// 片方だけ指定したときは、もう片方に保存済みの値を使う (#3278。
+		// admin/system-webhook/test の #3262 と同じ扱い)。url の空文字は送り先に
+		// ならないので、指定が無いのと同じに扱う。
 		overrideURL, overrideSecret := "", ""
-		if req.Override != nil {
-			overrideURL = req.Override.URL
-			overrideSecret = req.Override.Secret
+		if req.Override != nil && (req.Override.URL != nil || req.Override.Secret != nil) {
+			overrideURL, overrideSecret = webhook.URL, webhook.Secret
+			if req.Override.URL != nil && *req.Override.URL != "" {
+				overrideURL = *req.Override.URL
+			}
+			if req.Override.Secret != nil {
+				overrideSecret = *req.Override.Secret
+			}
 		}
 		// upstream WebhookTestService は type ごとに dummy note/user payload を
 		// 生成して送る (#1546)。テスト対象 webhook 1 件だけに、override 指定時は

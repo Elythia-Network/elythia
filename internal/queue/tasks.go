@@ -345,13 +345,14 @@ type WebhookPayload struct {
 	UserID    string          `json:"userId,omitempty"` // user webhooks only
 	EventType string          `json:"eventType"`
 	Body      json.RawMessage `json:"body"`
-	// OverrideURL / OverrideSecret は i/webhooks/test の override 用 (#1546)。
-	// 非空のとき processor は保存済 webhook の url/secret でなくこちらへ送り、
+	// OverrideURL / OverrideSecret はテスト送信 (i/webhooks/test と
+	// admin/system-webhook/test) の override 用 (#1546)。OverrideURL が非空の
+	// とき processor は保存済 webhook の url/secret でなくこちらへ送り、
 	// 保存済 webhook の latestStatus も汚さない (= テスト送信は別 URL なので)。
 	OverrideURL    string `json:"overrideUrl,omitempty"`
 	OverrideSecret string `json:"overrideSecret,omitempty"`
 	// SingleAttempt は再試行しない (1 回だけ送る)。本家はテスト送信を
-	// attempts: 1 で積む (WebhookTestService、#3262)。
+	// attempts: 1 で積む (WebhookTestService、#3262 / #3278)。
 	SingleAttempt bool `json:"singleAttempt,omitempty"`
 }
 
