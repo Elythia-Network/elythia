@@ -237,17 +237,22 @@ func (h *Handler) Unrenote(c echo.Context) error {
 	if err := c.Bind(&req); err != nil || req.NoteID == "" {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "noteId is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
-	// renoteId が指定ノートの自分のノートを探して削除
-	renote, err := h.noteRepo.FindRenoteByUser(user.ID, req.NoteID)
-	if err != nil && !repository.IsNotFound(err) {
+	if _, err := h.noteRepo.FindByID(req.NoteID); err != nil {
+		if !repository.IsNotFound(err) {
+			return apierr.JSONInternalError(c)
+		}
+		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_NOTE", "No such note.", "efd4a259-2442-496b-8dd7-b255aa1a160f"))
+	}
+	// renoteId が指定ノートの自分のノートを全て削除
+	renotes, err := h.noteRepo.ListRenotesByUser(user.ID, req.NoteID)
+	if err != nil {
 		// **DB 障害を not-found に丸めない** (#2792)。
 		return apierr.JSONInternalError(c)
 	}
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_NOTE", "No such note.", "efd4a259-2442-496b-8dd7-b255aa1a160f"))
-	}
-	if err := h.deleteService.Delete(user, renote.ID); err != nil {
-		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
+	for _, renote := range renotes {
+		if err := h.deleteService.Delete(user, renote.ID); err != nil {
+			return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
+		}
 	}
 	return c.NoContent(http.StatusNoContent)
 }

@@ -420,7 +420,7 @@ func TestGuardedLookupsRejectUnstorableValues(t *testing.T) {
 		{"NewNoteRepository.FindByIDWithRelations", func() error { _, err := NewNoteRepository(db).FindByIDWithRelations(bad); return err }},
 		{"NewNoteRepository.FindByURI", func() error { _, err := NewNoteRepository(db).FindByURI(bad); return err }},
 		{"NewNoteRepository.FindManyByIDsWithUser", func() error { _, err := NewNoteRepository(db).FindManyByIDsWithUser([]string{bad}); return err }},
-		{"NewNoteRepository.FindRenoteByUser", func() error { _, err := NewNoteRepository(db).FindRenoteByUser(bad, bad); return err }},
+		{"NewNoteRepository.ListRenotesByUser", func() error { _, err := NewNoteRepository(db).ListRenotesByUser(bad, bad); return err }},
 		{"NewNoteDraftRepository.FindByIDAndUser", func() error { _, err := NewNoteDraftRepository(db).FindByIDAndUser(bad, bad); return err }},
 		{"NewNoteDraftRepository.FindByID", func() error { _, err := NewNoteDraftRepository(db).FindByID(bad); return err }},
 		{"NewNoteReactionRepository.FindByPair", func() error { _, err := NewNoteReactionRepository(db).FindByPair(bad, bad); return err }},
