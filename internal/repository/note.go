@@ -161,6 +161,7 @@ type NoteRepository interface {
 	// viewerID は viewer 視点の visibility push-down 用。空文字は匿名
 	// (public/home のみ)。
 	ListFeaturedByUser(userID, viewerID, untilID string, limit int) ([]*model.Note, error)
+	// ListRenotesByUser returns all notes authored by userID that renote renoteID.
 	ListRenotesByUser(userID, renoteID string) ([]*model.Note, error)
 	// ListMentions returns notes mentioning userID that userID can see.
 	// visibility が空でなければ note.visibility = visibility の exact-match で
@@ -986,6 +987,7 @@ func (r *noteRepository) ListFeaturedByUser(userID, viewerID, untilID string, li
 	return pool, nil
 }
 
+// ListRenotesByUser returns all notes authored by userID that renote renoteID.
 func (r *noteRepository) ListRenotesByUser(userID, renoteID string) ([]*model.Note, error) {
 	if !storable(userID) || !storable(renoteID) {
 		return []*model.Note{}, nil
