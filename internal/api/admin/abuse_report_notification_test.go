@@ -608,3 +608,33 @@ func TestRecipientCreate_UpdatedAtFormat(t *testing.T) {
 }
 
 func ptr(s string) *string { return &s }
+
+// method を省いた部分更新でも、method に合わない側は書かずに NULL にする (#3264)。
+// 書けると、外部キーが CASCADE なので、無関係な利用者や System Webhook を
+// 消しただけで通知先ごと消える。
+func TestRecipientUpdate_PartialUpdateNullsMismatchedSide(t *testing.T) {
+	uid, whID := "u1", "w1"
+	t.Run("webhook row ignores userId", func(t *testing.T) {
+		h, repo := setupAbuseRecipientHandler(t,
+			// 以前の部分更新で userId が入ってしまった行も、更新で正す。
+			&model.AbuseReportNotificationRecipient{ID: "r1", Name: "hook", Method: "webhook", SystemWebhookID: &whID, UserID: &uid},
+		)
+		rec := doPost(h.AbuseReportNotificationRecipientUpdate, `{"id":"r1","userId":"u1","systemWebhookId":"w2"}`, adminUser)
+		require.Equal(t, http.StatusOK, rec.Code)
+		r := repo.Recipients["r1"]
+		assert.Nil(t, r.UserID, "webhook 方式の行に userId を書かない")
+		require.NotNil(t, r.SystemWebhookID)
+		assert.Equal(t, "w2", *r.SystemWebhookID)
+	})
+	t.Run("email row ignores systemWebhookId", func(t *testing.T) {
+		h, repo := setupAbuseRecipientHandler(t,
+			&model.AbuseReportNotificationRecipient{ID: "r1", Name: "mail", Method: "email", UserID: &uid, SystemWebhookID: &whID},
+		)
+		rec := doPost(h.AbuseReportNotificationRecipientUpdate, `{"id":"r1","systemWebhookId":"w1"}`, adminUser)
+		require.Equal(t, http.StatusOK, rec.Code)
+		r := repo.Recipients["r1"]
+		assert.Nil(t, r.SystemWebhookID, "email 方式の行に systemWebhookId を書かない")
+		require.NotNil(t, r.UserID, "email 方式の行の userId は残す")
+		assert.Equal(t, "u1", *r.UserID)
+	})
+}

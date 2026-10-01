@@ -328,11 +328,21 @@ func (h *Handler) AbuseReportNotificationRecipientUpdate(c echo.Context) error {
 				return c.JSON(code, body)
 			}
 		}
-		if req.UserID != nil {
-			fields["userId"] = *req.UserID
-		}
-		if req.SystemWebhookID != nil {
-			fields["systemWebhookId"] = *req.SystemWebhookID
+		// method に合わない側は書かず、本家と同じく常に NULL にする (#3264)。
+		// 本家の update は method が必須で、合わない側を NULL で上書きする。
+		// 書けてしまうと、外部キーが CASCADE なので、無関係な利用者や System
+		// Webhook を消しただけで通知先ごと消える。
+		switch before.Method {
+		case "email":
+			if req.UserID != nil {
+				fields["userId"] = *req.UserID
+			}
+			fields["systemWebhookId"] = nil
+		case "webhook":
+			if req.SystemWebhookID != nil {
+				fields["systemWebhookId"] = *req.SystemWebhookID
+			}
+			fields["userId"] = nil
 		}
 	}
 	if req.IsActive != nil {
