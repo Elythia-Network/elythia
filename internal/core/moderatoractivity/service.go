@@ -177,7 +177,7 @@ func (s *Service) Check() error {
 	remainingDays := int(remaining / (24 * time.Hour)) // floor (非負)
 	remainingHours := int(remaining / time.Hour)       // floor (非負)
 	if remainingDays <= warningRemainingDays && remainingHours%warningIntervalHours == 0 {
-		s.notifyInactiveModeratorsWarning(allMods, remainingDays, remainingHours)
+		s.notifyInactiveModeratorsWarning(allMods, remaining, remainingDays, remainingHours)
 	}
 	return nil
 }
@@ -200,7 +200,7 @@ func (s *Service) instanceLangs() []string {
 
 // notifyInactiveModeratorsWarning emails moderators and dispatches the warning
 // SystemWebhook (upstream notifyInactiveModeratorsWarning).
-func (s *Service) notifyInactiveModeratorsWarning(mods []*model.User, remainingDays, remainingHours int) {
+func (s *Service) notifyInactiveModeratorsWarning(mods []*model.User, remaining time.Duration, remainingDays, remainingHours int) {
 	profileByUser := s.profilesByUserID(mods)
 	metaLangs := s.instanceLangs()
 	if s.sendEmail != nil {
@@ -215,7 +215,10 @@ func (s *Service) notifyInactiveModeratorsWarning(mods []*model.User, remainingD
 	}
 	if s.webhook != nil {
 		s.webhook.DispatchSystem("inactiveModeratorsWarning", map[string]any{
+			// 本家の ModeratorInactivityRemainingTime と同じ 3 つ。time は残りの
+			// ミリ秒 (本家は Date の getTime の差) (#3261)。
 			"remainingTime": map[string]any{
+				"time":    remaining.Milliseconds(),
 				"asDays":  remainingDays,
 				"asHours": remainingHours,
 			},
