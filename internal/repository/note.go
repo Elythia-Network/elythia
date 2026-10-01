@@ -114,6 +114,11 @@ type NoteRepository interface {
 	// ListByChannelIDVisible を別メソッドに切り出さず本 signature に viewerID を
 	// 取り込む形に統合した (#1439 / #1441 と同じパターン)。
 	ListByChannelID(channelID, viewerID, untilID, sinceID string, limit int) ([]*model.Note, error)
+	// ListLocalByChannelID is ListByChannelID restricted to notes whose
+	// author is local (`note.userHost IS NULL`), applied before LIMIT. Used
+	// for anonymous visitors under ugcVisibilityForVisitor = local (upstream
+	// generateUgcVisibilityQueryForVisitor).
+	ListLocalByChannelID(channelID, viewerID, untilID, sinceID string, limit int) ([]*model.Note, error)
 	FindManyByIDsWithUser(ids []string) ([]*model.Note, error)
 	// ExistingNoteIDsOnPrimary returns the subset of ids that exist, reading
 	// from the primary DB even when read replicas are configured.
@@ -516,8 +521,22 @@ func (r *noteRepository) ListByUserIDFiltered(userID, viewerID, untilID, sinceID
 // underfilled-page / N+1 follower-check problems of post-fetch filtering
 // (#1440).
 func (r *noteRepository) ListByChannelID(channelID, viewerID, untilID, sinceID string, limit int) ([]*model.Note, error) {
+	return r.listByChannelID(channelID, viewerID, untilID, sinceID, limit, false)
+}
+
+// ListLocalByChannelID is ListByChannelID limited to local authors.
+func (r *noteRepository) ListLocalByChannelID(channelID, viewerID, untilID, sinceID string, limit int) ([]*model.Note, error) {
+	return r.listByChannelID(channelID, viewerID, untilID, sinceID, limit, true)
+}
+
+func (r *noteRepository) listByChannelID(channelID, viewerID, untilID, sinceID string, limit int, localOnly bool) ([]*model.Note, error) {
 	var notes []*model.Note
 	q := preloadNoteRelations(r.db).Where("\"channelId\" = ?", channelID)
+	// チャンネルには remote 利用者の返信も入る (返信先のチャンネルを引き継ぐ) ので、
+	// LIMIT の後で落とすとページが過少充填される。LIMIT 前に絞る。
+	if localOnly {
+		q = q.Where("\"userHost\" IS NULL")
+	}
 	// core/note.CanSeeNote と同じ可視性条件を LIMIT 前に SQL で絞る。
 	// post-fetch filter だとページが過少充填されるのと followers 判定が
 	// note ごとの N+1 になるため LIMIT 前に push down する (#1440)。

@@ -17,6 +17,7 @@ import (
 	corefollowing "github.com/shiroha-a/mk/internal/core/following"
 	"github.com/shiroha-a/mk/internal/core/notesfilter"
 	"github.com/shiroha-a/mk/internal/core/role"
+	"github.com/shiroha-a/mk/internal/core/ugcvisibility"
 	"github.com/shiroha-a/mk/internal/core/user"
 	"github.com/shiroha-a/mk/internal/entity"
 	"github.com/shiroha-a/mk/internal/misc/id"
@@ -177,6 +178,13 @@ func (h *Handler) ugcVisibilityNow() string {
 		return h.ugcVisibilityFn()
 	}
 	return h.ugcVisibility
+}
+
+// visitorHidesAllNotes reports whether ugcVisibilityForVisitor = none hides
+// every note from viewer. Mirrors upstream generateVisibilityQuery's
+// `me == null && ugcVisibilityForVisitor === 'none'` → `1=0`.
+func (h *Handler) visitorHidesAllNotes(viewer *model.User) bool {
+	return viewer == nil && ugcvisibility.HidesAll(h.ugcVisibilityNow())
 }
 
 // AbuseReportCreatedNotifier tells moderators about a newly created report
@@ -499,8 +507,15 @@ func (h *Handler) Show(c echo.Context) error {
 		// suspended user を除外する。moderator は素通し。
 		visible := make([]*user.UserWithProfile, 0, len(bundles))
 		users := make([]*model.User, 0, len(bundles))
+		// upstream show.ts は匿名 visitor かつ ugcVisibilityForVisitor='local' のとき
+		// where 句に `host: IsNull()` を足し、remote user をエラーにせず黙って省く。
+		// 'none' はこの経路では見ていない (単体指定と同じく upstream に合わせる)。
+		hideRemote := viewer == nil && h.ugcVisibilityNow() == ugcvisibility.Local
 		for _, b := range bundles {
 			if !iAmModerator && b.User.IsSuspended {
+				continue
+			}
+			if hideRemote && b.User.Host != nil {
 				continue
 			}
 			visible = append(visible, b)
@@ -804,7 +819,8 @@ func (h *Handler) Notes(c echo.Context) error {
 
 	// #2106 L9: upstream notes.ts は user 存在確認をせず単に note を query するため、存在しない
 	// userId では [] を返す (noSuchUser は meta の vestigial error)。404 でなく空配列に揃える。
-	if _, err := h.userService.ShowByID(req.UserID); err != nil {
+	target, err := h.userService.ShowByID(req.UserID)
+	if err != nil {
 		return c.JSON(http.StatusOK, []any{})
 	}
 
@@ -848,6 +864,15 @@ func (h *Handler) Notes(c echo.Context) error {
 	// viewer が target にブロックされている場合は空配列を返す (upstream
 	// notes.ts:96-101 の userIdsWhoBlockingMe.has(ps.userId) 早期 return、#1547)。
 	if h.isBlockedByTarget(viewer, req.UserID) {
+		return c.JSON(http.StatusOK, []entity.NoteEntity{})
+	}
+	// upstream users/notes.ts は匿名 visitor に generateUgcVisibilityQueryForVisitor
+	// (`none` → 1=0、`local` → note.userHost IS NULL) を掛ける。この一覧の行は全て
+	// target 本人の投稿で、note.userHost は投稿者の host を写した列なので、条件は
+	// target.Host だけで決まる。行単位で落とす代わりに入口で空を返すので、
+	// ページの過少充填も起きない。remote のノートを renote した local 利用者の
+	// 行は note.userHost が nil なので、upstream と同じく残る。
+	if viewer == nil && ugcvisibility.HidesNote(h.ugcVisibilityNow(), target.User.Host) {
 		return c.JSON(http.StatusOK, []entity.NoteEntity{})
 	}
 	// visibility は repository 側で LIMIT 前に push down する (#1418 review)。

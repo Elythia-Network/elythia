@@ -35,6 +35,12 @@ func (h *Handler) GetFrequentlyRepliedUsers(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, apierr.Error("NO_SUCH_USER", "No such user.", "e6965129-7b2a-40a4-bae2-cd84cd434822"))
 	}
 	viewer := middleware.GetUser(c)
+	// upstream は reply 集計の 2 つの query に generateVisibilityQuery を掛けるので、
+	// 匿名 visitor かつ ugcVisibilityForVisitor='none' なら何も集計されず [] になる。
+	// NO_SUCH_USER は query より前に投げるので、この順に並べる。
+	if h.visitorHidesAllNotes(viewer) {
+		return c.JSON(http.StatusOK, []any{})
+	}
 	var viewerID string
 	if viewer != nil {
 		viewerID = viewer.ID

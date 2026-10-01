@@ -360,14 +360,18 @@ func (s *Service) Search(query, searchType, sinceID, untilID string, limit, offs
 // Timeline returns notes posted to the channel, newest first. viewerID は
 // 閲覧者 ID (匿名は空文字)。public channel は誰でも見られるが、そこに投稿
 // された followers / specified note は viewer に応じて SQL で除外しないと
-// 非フォロワーへ流出する (#1440)。
-func (s *Service) Timeline(channelID, viewerID, untilID, sinceID string, limit int) ([]*model.Note, error) {
+// 非フォロワーへ流出する (#1440)。localOnly は投稿者が local のノートだけに
+// LIMIT 前で絞る (匿名 visitor への ugcVisibilityForVisitor = local)。
+func (s *Service) Timeline(channelID, viewerID, untilID, sinceID string, limit int, localOnly bool) ([]*model.Note, error) {
 	if _, err := s.repo.FindByID(channelID); err != nil {
 		// **DB 障害を not-found に丸めない** (#2799)。
 		if !repository.IsNotFound(err) {
 			return nil, err
 		}
 		return nil, ErrChannelNotFound
+	}
+	if localOnly {
+		return s.noteRepo.ListLocalByChannelID(channelID, viewerID, untilID, sinceID, limit)
 	}
 	return s.noteRepo.ListByChannelID(channelID, viewerID, untilID, sinceID, limit)
 }
