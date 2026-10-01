@@ -1,6 +1,7 @@
 package mfm
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -89,4 +90,22 @@ func TestCollectHashtags_WordBoundary(t *testing.T) {
 
 func TestCollectHashtags_AcrossMultipleTexts(t *testing.T) {
 	assert.Equal(t, []string{"foo", "bar"}, CollectHashtags("body #foo", "cw #bar"))
+}
+
+// ExtractCustomEmojis mirrors upstream extractCustomEmojisFromMfm: dedup'd in
+// first-appearance order, nested nodes included, names over 100 UTF-16 code
+// units skipped.
+func TestExtractCustomEmojis(t *testing.T) {
+	assert.Nil(t, ExtractCustomEmojis(nil))
+	assert.Equal(t, []string{"a", "b"}, ExtractCustomEmojis(Parse("**:a:** $[x2 :b:] :a:")))
+	assert.Nil(t, ExtractCustomEmojis(Parse("`:code:`")), "コードの中は emojiCode にならない")
+	assert.Equal(t, []string{"code"}, ExtractCustomEmojis(ParseSimple("`:code:`")), "parseSimple はコードを解釈しない")
+
+	long := strings.Repeat("a", 101)
+	limit := strings.Repeat("b", 100)
+	got := ExtractCustomEmojis([]*Node{
+		withProp(NodeEmojiCode, "name", long),
+		withProp(NodeEmojiCode, "name", limit),
+	})
+	assert.Equal(t, []string{limit}, got, "100 を超える名前は数えない")
 }
