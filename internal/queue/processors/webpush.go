@@ -16,6 +16,7 @@ import (
 	"github.com/shiroha-a/mk/internal/queue"
 	"github.com/shiroha-a/mk/internal/queue/driver"
 	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/shiroha-a/mk/internal/safehttp"
 )
 
 // Sender abstracts the webpush delivery call so the processor can be unit
@@ -29,7 +30,9 @@ type Sender interface {
 // HTTPClient は webpushlib.Options.HTTPClient に注入する outbound HTTP
 // client。SSRF-safe transport + forward proxy 経由の client を渡すと FCM /
 // Mozilla / Apple push endpoint への配送も operator の outbound 政策に従う
-// (#638)。nil なら webpush-go 既定の http.DefaultClient が使われる。
+// (#638)。nil のときは webpush-go 既定の http.DefaultClient ではなく、
+// defaultWebPushHTTPClient (allowedPrivateNetworks 無しの SSRF-safe client)
+// を使う。
 type LibraryWebPushSender struct {
 	HTTPClient webpushlib.HTTPClient
 }
@@ -39,12 +42,28 @@ type LibraryWebPushSender struct {
 // 受け取った opts は immutable に扱う: caller の Options を mutate しないよう
 // shallow copy してから HTTPClient を埋めて library に渡す。
 func (s LibraryWebPushSender) Send(ctx context.Context, sub *webpushlib.Subscription, message []byte, opts *webpushlib.Options) (*http.Response, error) {
-	if s.HTTPClient != nil && opts != nil && opts.HTTPClient == nil {
+	if opts != nil && opts.HTTPClient == nil {
+		// 本番は router が SSRF-safe な client を注入するが、注入を忘れた
+		// 呼び出し元でも http.DefaultClient (宛先の検査なし) に落ちないよう、
+		// 既定でも宛先を検査する client を使う。
+		client := s.HTTPClient
+		if client == nil {
+			client = defaultWebPushHTTPClient
+		}
 		copied := *opts
-		copied.HTTPClient = s.HTTPClient
+		copied.HTTPClient = client
 		opts = &copied
 	}
 	return webpushlib.SendNotificationWithContext(ctx, message, sub, opts)
+}
+
+// defaultWebPushHTTPClient is the outbound client LibraryWebPushSender falls
+// back to when none is injected. It refuses private / loopback destinations
+// (no allowedPrivateNetworks) and bounds each delivery like the production
+// client wired in internal/server.
+var defaultWebPushHTTPClient webpushlib.HTTPClient = &http.Client{
+	Timeout:   30 * time.Second,
+	Transport: safehttp.NewSSRFSafeTransport(nil),
 }
 
 // WebPushProcessor handles `webpush:notify` tasks by looking up a user's
@@ -129,6 +148,12 @@ func (p *WebPushProcessor) Handle(ctx context.Context, t driver.Task) error {
 		}
 		// readAllNotifications はフロント設定で抑制可能
 		if payload.Type == webpush.TypeReadAllNotifications && !sub.SendReadMessage {
+			continue
+		}
+		// 本家 PushNotificationService と同じく、配送先として使えない endpoint
+		// には送らない。登録時の検証が入る前に保存された行や、移行元の DB から
+		// 引き継いだ行が該当する。
+		if !webpush.IsValidEndpoint(sub.Endpoint) {
 			continue
 		}
 		if err := p.deliverOne(ctx, sub, message, vapidPublic, vapidPrivate); err != nil {

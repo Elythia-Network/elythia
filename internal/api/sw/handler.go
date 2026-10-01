@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/shiroha-a/mk/internal/api/apierr"
+	"github.com/shiroha-a/mk/internal/core/webpush"
 	"github.com/shiroha-a/mk/internal/misc/colfit"
 	"github.com/shiroha-a/mk/internal/misc/id"
 	"github.com/shiroha-a/mk/internal/model"
@@ -47,6 +48,12 @@ func (h *Handler) Register(c echo.Context) error {
 	// なので「見つからない」に丸めてはいけない数少ない形。
 	if !colfit.Storable(req.Endpoint) || !colfit.Storable(req.Auth) || !colfit.Storable(req.PublicKey) {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "endpoint, auth, and publickey must not contain an invalid character.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+	}
+	// 配送先として使える endpoint だけを受け付ける (本家 sw/register の
+	// invalidEndpoint と同じ code / id / 400)。本家と同じく既存の購読の確認より
+	// 前に断るので、不正な endpoint が already-subscribed で返ることもない。
+	if !webpush.IsValidEndpoint(req.Endpoint) {
+		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_ENDPOINT", "Invalid push endpoint.", "4432adbe-17c0-4f9f-b43c-9ceb2f8910fe"))
 	}
 
 	var swPublicKey *string

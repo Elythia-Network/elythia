@@ -380,3 +380,53 @@ func TestRegister_RejectsUnstorableValues(t *testing.T) {
 		assert.Empty(t, repo.subs, "弾いたはずの値で行を作っている")
 	}
 }
+
+// assertInvalidEndpoint checks that rec carries upstream's sw/register
+// invalidEndpoint error (code, id, kind and the default 400 status).
+func assertInvalidEndpoint(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	var resp struct {
+		Error struct {
+			Code string `json:"code"`
+			ID   string `json:"id"`
+			Kind string `json:"kind"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "INVALID_ENDPOINT", resp.Error.Code)
+	assert.Equal(t, "4432adbe-17c0-4f9f-b43c-9ceb2f8910fe", resp.Error.ID)
+	assert.Equal(t, "client", resp.Error.Kind)
+}
+
+func TestRegister_RejectsInvalidEndpoint(t *testing.T) {
+	for _, endpoint := range []string{
+		"http://push.example/1",
+		"https://user@push.example/1",
+		"https://user:pass@push.example/1",
+		"ftp://push.example/1",
+		"push.example/1",
+		"https:push.example/1",
+	} {
+		t.Run(endpoint, func(t *testing.T) {
+			h, repo := newTestHandler()
+			body, err := json.Marshal(map[string]any{"endpoint": endpoint, "auth": "a1", "publickey": "pk1"})
+			require.NoError(t, err)
+			rec := post(h.Register, string(body), &model.User{ID: "u1"})
+			assertInvalidEndpoint(t, rec)
+			assert.Empty(t, repo.subs)
+		})
+	}
+}
+
+// 既に同じ (userId, endpoint, auth, publickey) の行があっても、endpoint が
+// 不正なら already-subscribed ではなく INVALID_ENDPOINT を返す (本家は
+// 既存の確認より前に検証する)。
+func TestRegister_InvalidEndpointCheckedBeforeExisting(t *testing.T) {
+	h, repo := newTestHandler()
+	repo.subs["u1:http://push.example/1"] = &model.SwSubscription{
+		ID: "s1", UserID: "u1", Endpoint: "http://push.example/1", Auth: "a1", PublicKey: "pk1",
+	}
+	rec := post(h.Register, `{"endpoint":"http://push.example/1","auth":"a1","publickey":"pk1"}`, &model.User{ID: "u1"})
+	assertInvalidEndpoint(t, rec)
+}
