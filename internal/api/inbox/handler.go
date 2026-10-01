@@ -247,10 +247,14 @@ func (h *Handler) Inbox(c echo.Context) error {
 	if h.enqueuer != nil {
 		// Fast write path. signature の crypto 検証は worker 側で再現する。
 		// admitInbox を上で通しているので handler 側の presence check は不要。
+		// Path には query 込みの RequestURI を積む。送信側は `(request-target)` を
+		// path + query で署名するので (本家 7c9c38c04a / 同期経路の
+		// VerifyRequestCached も同じ)、URL.Path だと `/inbox?x=1` 宛ての署名が
+		// worker 側でだけ合わなくなる。
 		payload := queue.InboxPayload{
 			Body:    body,
 			Method:  c.Request().Method,
-			Path:    c.Request().URL.Path,
+			Path:    c.Request().URL.RequestURI(),
 			Headers: captureSignatureHeaders(c.Request()),
 		}
 		if err := h.enqueuer.EnqueueInbox(c.Request().Context(), payload); err != nil {

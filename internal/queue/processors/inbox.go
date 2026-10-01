@@ -694,6 +694,9 @@ func extractLDCreator(body []byte) string {
 // VerifyRequest can read for HTTP Signature verification. Path は signing
 // string の `(request-target)` 構築にだけ使われるため、scheme/host は
 // dummy で良い。Body は Digest header の再計算 (verify 側) に使われる。
+// Path は handler が積む RequestURI (query 込み、空の `?` も残る) で、
+// url.Parse がそのまま RawQuery / ForceQuery に戻すので RequestURI() で同じ
+// 文字列が再現される。古い payload は query を持たない path だけなので互換。
 func buildSignedRequest(payload queue.InboxPayload) (*http.Request, error) {
 	method := payload.Method
 	if method == "" {

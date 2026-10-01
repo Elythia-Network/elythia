@@ -497,6 +497,41 @@ func TestInbox_AsyncMode_DispatchesToQueue(t *testing.T) {
 	assert.Empty(t, followingRepo.Followings, "Process should NOT have been invoked synchronously")
 }
 
+// 非同期経路は query 込みの RequestURI を積む。worker と同じく placeholder
+// host で組み直した request で、送信側の署名 (path + query) が検証できること
+// (本家 7c9c38c04a)。URL.Path だけを積むと query が落ちて署名が合わない。
+func TestInbox_AsyncMode_PathKeepsQuery(t *testing.T) {
+	priv, pub, err := activitypub.GenerateRSAKeypair()
+	require.NoError(t, err)
+	key, err := activitypub.NewPrivateKey("https://remote.example/users/alice#main-key", priv)
+	require.NoError(t, err)
+
+	h, _, _ := newHandler(t, pub)
+	enq := &recordingEnqueuer{}
+	h.SetEnqueuer(enq)
+
+	body := []byte(`{"type":"Follow","actor":"https://remote.example/users/alice","object":"https://example.com/users/bob"}`)
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "https://example.com/inbox?x=1", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	require.NoError(t, activitypub.SignRequest(req, key, activitypub.SHA256Digest(body), []string{"(request-target)", "date", "host", "digest"}))
+	req.Host = "example.com"
+
+	require.NoError(t, h.Inbox(c))
+	require.Equal(t, http.StatusAccepted, rec.Code)
+	require.Len(t, enq.calls, 1)
+	got := enq.calls[0]
+	assert.Equal(t, "/inbox?x=1", got.Path)
+
+	rebuilt, err := http.NewRequest(got.Method, "http://placeholder"+got.Path, bytes.NewReader(got.Body))
+	require.NoError(t, err)
+	for k, v := range got.Headers {
+		rebuilt.Header.Set(k, v)
+	}
+	require.NoError(t, activitypub.VerifyRequest(rebuilt, pub))
+}
+
 // signature ヘッダ無しは即 401。RSA verify は走らないので fast path 成立。
 func TestInbox_AsyncMode_RejectsMissingSignatureHeader(t *testing.T) {
 	_, pub, err := activitypub.GenerateRSAKeypair()
