@@ -82,6 +82,16 @@ func TestPollsVote_NotVisible(t *testing.T) {
 	setAuthUser(c, &model.User{ID: "viewer"})
 	require.NoError(t, h.PollsVote(c))
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+
+	// An invisible note must be indistinguishable from a missing one (upstream
+	// vote.ts throws noSuchNote for both), so the whole body must match.
+	cMissing, recMissing := newJSONRequest(t, "/api/notes/polls/vote", `{"noteId":"ghost","choice":0}`)
+	setAuthUser(cMissing, &model.User{ID: "viewer"})
+	require.NoError(t, h.PollsVote(cMissing))
+	assert.Equal(t, recMissing.Code, rec.Code)
+	assert.JSONEq(t, recMissing.Body.String(), rec.Body.String())
+	assert.Contains(t, rec.Body.String(), `"code":"NO_SUCH_NOTE"`)
+	assert.Contains(t, rec.Body.String(), `"id":"ecafbd2e-c283-4d6d-aecb-1a0a33b75396"`)
 }
 
 func TestPollsVote_InvalidChoice(t *testing.T) {
