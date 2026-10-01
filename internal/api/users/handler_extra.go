@@ -302,6 +302,13 @@ func (h *Handler) Reactions(c echo.Context) error {
 	if !iAmModerator && h.isBlockedByTarget(viewer, req.UserID) {
 		return c.JSON(http.StatusOK, []any{})
 	}
+	// upstream reactions.ts の generateVisibilityQuery は匿名 visitor かつ
+	// ugcVisibilityForVisitor='none' のとき 1=0 になる。上の利用者検査
+	// (NO_SUCH_USER / IS_REMOTE_USER / REACTIONS_NOT_PUBLIC) は query より前に
+	// 投げるので、空配列はその後に返す。
+	if h.visitorHidesAllNotes(viewer) {
+		return c.JSON(http.StatusOK, []any{})
+	}
 
 	// reactor の reaction list を取得 (User / Note を Preload 済み)。
 	// userRepo と同じく test stub では noteReactionRepo を wire しないので、

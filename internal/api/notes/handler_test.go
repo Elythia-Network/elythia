@@ -939,6 +939,9 @@ func (f *failingNoteRepo) ListByUserIDFiltered(_, _, _, _ string, _ int, _, _, _
 func (f *failingNoteRepo) ListByChannelID(_, _, _, _ string, _ int) ([]*model.Note, error) {
 	return nil, nil
 }
+func (f *failingNoteRepo) ListLocalByChannelID(_, _, _, _ string, _ int) ([]*model.Note, error) {
+	return nil, nil
+}
 func (f *failingNoteRepo) FindManyByIDsWithUser(_ []string) ([]*model.Note, error) {
 	return nil, nil
 }

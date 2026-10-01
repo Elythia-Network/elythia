@@ -1649,6 +1649,17 @@ func (m *MockNoteRepository) ListByChannelID(channelID, viewerID, untilID, since
 	}, untilID, sinceID, limit), nil
 }
 
+// ListLocalByChannelID is ListByChannelID limited to local authors
+// (`userHost IS NULL`), mirroring the real repo.
+func (m *MockNoteRepository) ListLocalByChannelID(channelID, viewerID, untilID, sinceID string, limit int) ([]*model.Note, error) {
+	return m.listFiltered(func(n *model.Note) bool {
+		if n.ChannelID == nil || *n.ChannelID != channelID || n.UserHost != nil {
+			return false
+		}
+		return m.canViewerSeeNote(viewerID, n)
+	}, untilID, sinceID, limit), nil
+}
+
 func (m *MockNoteRepository) ListByUserID(userID string, untilID, sinceID string, limit int) ([]*model.Note, error) {
 	// listFiltered に委譲して他の List系と同じくASC-flip 挙動を継承する
 	// (#405 Devin指摘)。

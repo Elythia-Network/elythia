@@ -14,6 +14,7 @@ import (
 	"github.com/shiroha-a/mk/internal/api/pagination"
 	corechannel "github.com/shiroha-a/mk/internal/core/channel"
 	"github.com/shiroha-a/mk/internal/core/notesfilter"
+	"github.com/shiroha-a/mk/internal/core/ugcvisibility"
 	"github.com/shiroha-a/mk/internal/entity"
 	"github.com/shiroha-a/mk/internal/misc/id"
 	"github.com/shiroha-a/mk/internal/model"
@@ -59,7 +60,32 @@ type Handler struct {
 	// metaRepo は channels/timeline の blocked-host filter で meta.blockedHosts
 	// を引く (upstream generateBlockedHostQueryForNote)。
 	metaRepo repository.MetaRepository
+	// ugcVisibilityFn は meta.ugcVisibilityForVisitor の live lookup。
+	// channels/timeline の匿名 visitor への gate に使う。
+	ugcVisibilityFn func() string
 }
+
+// SetUGCVisibilityLookup wires a live lookup of meta.ugcVisibilityForVisitor.
+//
+// **毎回読む。** 起動時に焼き込むと、運営者が管理画面で締めても
+// プロセスを再起動するまで反映されない。
+func (h *Handler) SetUGCVisibilityLookup(fn func() string) {
+	h.ugcVisibilityFn = fn
+}
+
+// ugcVisibilityNow resolves the current policy ("" when unwired, which the
+// helpers treat as "all").
+func (h *Handler) ugcVisibilityNow() string {
+	if h.ugcVisibilityFn == nil {
+		return ""
+	}
+	return h.ugcVisibilityFn()
+}
+
+// HasUGCVisibility reports whether the visitor content visibility lookup was
+// wired. 未配線だと channels/timeline の匿名 visitor への gate が素通しになる。
+// 起動時検査に使う。
+func (h *Handler) HasUGCVisibility() bool { return h.ugcVisibilityFn != nil }
 
 // HasMetaRepo reports whether the blocked-host filter can read meta.
 //
@@ -619,13 +645,29 @@ func (h *Handler) Timeline(c echo.Context) error {
 	if viewer != nil {
 		viewerID = viewer.ID
 	}
+	// upstream channels/timeline.ts は匿名 visitor に generateUgcVisibilityQueryForVisitor
+	// (`none` → 1=0、`local` → note.userHost IS NULL) を掛ける。チャンネルの存在
+	// 検査 (NO_SUCH_CHANNEL) は query より前なので、`none` でも先に存在を確かめる。
+	policy := ""
+	if viewer == nil {
+		policy = h.ugcVisibilityNow()
+	}
+	if ugcvisibility.HidesAll(policy) {
+		if _, err := h.svc.Show(req.ChannelID); err != nil {
+			if errors.Is(err, corechannel.ErrChannelNotFound) {
+				return noSuchChannelTimeline(c)
+			}
+			return apierr.JSONInternalError(c)
+		}
+		return c.JSON(http.StatusOK, []any{})
+	}
 	// public channel に投稿された followers / specified note を非フォロワーに
 	// 返さないよう、visibility filter は service / repo 層で LIMIT 前に SQL
-	// push-down する (#1440)。
-	notes, err := h.svc.Timeline(req.ChannelID, viewerID, untilID, sinceID, limit)
+	// push-down する (#1440)。`local` の絞り込みも同じく LIMIT 前に掛ける。
+	notes, err := h.svc.Timeline(req.ChannelID, viewerID, untilID, sinceID, limit, policy == ugcvisibility.Local)
 	if err != nil {
 		if errors.Is(err, corechannel.ErrChannelNotFound) {
-			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_CHANNEL", "No such channel.", "4d0eeeba-a02c-4c3c-9966-ef60d38d2e7f"))
+			return noSuchChannelTimeline(c)
 		}
 		return apierr.JSONInternalError(c)
 	}
@@ -674,6 +716,11 @@ func (h *Handler) Timeline(c echo.Context) error {
 		out = append(out, pn)
 	}
 	return c.JSON(http.StatusOK, out)
+}
+
+// noSuchChannelTimeline writes channels/timeline's NO_SUCH_CHANNEL error.
+func noSuchChannelTimeline(c echo.Context) error {
+	return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_CHANNEL", "No such channel.", "4d0eeeba-a02c-4c3c-9966-ef60d38d2e7f"))
 }
 
 // channelToMap packs a channel into the misskey-compatible shape. bannerURL

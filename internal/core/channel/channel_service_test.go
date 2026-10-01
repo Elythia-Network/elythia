@@ -481,14 +481,34 @@ func TestTimeline_HappyPath(t *testing.T) {
 	repo.Channels["c1"] = &model.Channel{ID: "c1"}
 	cid := "c1"
 	noteRepo.Notes["n1"] = &model.Note{ID: "n1", ChannelID: &cid, Visibility: model.NoteVisibilityPublic}
-	rows, err := svc.Timeline("c1", "", "", "", 10)
+	rows, err := svc.Timeline("c1", "", "", "", 10, false)
 	require.NoError(t, err)
 	assert.Len(t, rows, 1)
 }
 
+// localOnly は投稿者が local のノートだけを返す (匿名 visitor への
+// ugcVisibilityForVisitor = local)。false なら remote の行も残る。
+func TestTimeline_LocalOnly(t *testing.T) {
+	svc, repo, _, noteRepo := newSvc(t)
+	repo.Channels["c1"] = &model.Channel{ID: "c1"}
+	cid := "c1"
+	host := "remote.example"
+	noteRepo.Notes["n1"] = &model.Note{ID: "n1", ChannelID: &cid, Visibility: model.NoteVisibilityPublic}
+	noteRepo.Notes["n2"] = &model.Note{ID: "n2", ChannelID: &cid, UserHost: &host, Visibility: model.NoteVisibilityPublic}
+
+	rows, err := svc.Timeline("c1", "", "", "", 10, true)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "n1", rows[0].ID)
+
+	rows, err = svc.Timeline("c1", "", "", "", 10, false)
+	require.NoError(t, err)
+	assert.Len(t, rows, 2)
+}
+
 func TestTimeline_ChannelNotFound(t *testing.T) {
 	svc, _, _, _ := newSvc(t)
-	_, err := svc.Timeline("missing", "", "", "", 10)
+	_, err := svc.Timeline("missing", "", "", "", 10, false)
 	assert.ErrorIs(t, err, channel.ErrChannelNotFound)
 }
 
@@ -533,7 +553,7 @@ func TestTimeline_VisibilityFilter(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rows, err := svc.Timeline("c1", tc.viewer, "", "", 50)
+			rows, err := svc.Timeline("c1", tc.viewer, "", "", 50, false)
 			require.NoError(t, err)
 			got := make([]string, 0, len(rows))
 			for _, n := range rows {

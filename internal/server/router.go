@@ -2690,6 +2690,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// channels/timeline の mute / block filter (#2345 の timelines 調査)。
 	channelsHandler.SetMuteBlockRepos(mutingRepo, blockingRepo, noteRepo)
 	channelsHandler.SetDriveFileRepo(driveFileRepo)
+	// channels/timeline の匿名 visitor への ugcVisibilityForVisitor gate。
+	// notes 側と同じ理由で無条件に配線し、毎回読む (#2708)。
+	channelsHandler.SetUGCVisibilityLookup(func() string { return metaUGCVisibility(metaRepo) })
 	// channels/create の canCreateChannel gate は #1020 で middleware に
 	// 昇格 (handler 内 RolePolicyChecker → middleware.RequireRolePolicy)。
 	api.POST("/channels/create", channelsHandler.Create,
@@ -2746,6 +2749,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	clipsHandler.SetQueryService(noteQueryService)           // #1456: AddNote の visibility gate
 	clipsHandler.SetMuteBlockRepos(mutingRepo, blockingRepo) // #1562: Notes の muted/blocked-user filter
 	clipsHandler.SetMetaRepo(metaRepo)                       // #1562: Notes の blocked-host filter
+	// clips/notes の匿名 visitor への ugcVisibilityForVisitor gate (notes 側と同じく無条件・毎回読む)。
+	clipsHandler.SetUGCVisibilityLookup(func() string { return metaUGCVisibility(metaRepo) })
 	api.POST("/clips/create", clipsHandler.Create, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:account"))
 	api.POST("/clips/show", clipsHandler.Show, middleware.RequireScope("read:account"))
 	api.POST("/clips/update", clipsHandler.Update, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:account"))
@@ -4475,6 +4480,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"匿名 visitor への note 露出を ugcVisibilityForVisitor で gate できない"},
 		{"users.ugcVisibility", usersHandler.HasUGCVisibility(),
 			"匿名 visitor への remote profile 露出を ugcVisibilityForVisitor で gate できない"},
+		{"channels.ugcVisibility", channelsHandler.HasUGCVisibility(),
+			"匿名 visitor への channels/timeline の露出を ugcVisibilityForVisitor で gate できない"},
+		{"clips.ugcVisibility", clipsHandler.HasUGCVisibility(),
+			"匿名 visitor への clips/notes の露出を ugcVisibilityForVisitor で gate できない"},
 
 		// ここから #2709 review。上と収載基準が同じなのに落ちていた分
 		// (無条件配線で、nil が空集合として素通しされる = 緩い側へ倒れる)。
