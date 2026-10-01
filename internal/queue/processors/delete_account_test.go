@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/shiroha-a/mk/internal/model"
@@ -242,4 +243,54 @@ func TestDeleteAccountProcessor_NoUserRepoSkipsHardDelete(t *testing.T) {
 	p := processors.NewDeleteAccountProcessor(testutil.NewMockNoteRepository(), testutil.NewMockDriveFileRepository(), testutil.NewMockFollowingRepository())
 	task := deleteAccountTask(t, queue.DeleteAccountPayload{UserID: "x", Soft: false})
 	require.NoError(t, p.Handle(context.Background(), task))
+}
+
+// recordingPageRepo records which pages were deleted through Delete, so the
+// test can tell them from pages that would only vanish by the user-row
+// CASCADE (which does not decrement pageCount).
+type recordingPageRepo struct {
+	*testutil.MockPageRepository
+	deleted []string
+}
+
+func (r *recordingPageRepo) Delete(p *model.Page) error {
+	r.deleted = append(r.deleted, p.ID)
+	return r.MockPageRepository.Delete(p)
+}
+
+// The user's pages are deleted one by one through PageRepository.Delete so
+// the notes they reference get their pageCount decremented (#3293), across
+// more than one listing batch; other users' pages stay.
+func TestDeleteAccountProcessor_DeletesPagesThroughRepository(t *testing.T) {
+	pages := &recordingPageRepo{MockPageRepository: testutil.NewMockPageRepository()}
+	for i := 0; i < 150; i++ {
+		id := fmt.Sprintf("pg-%03d", i)
+		pages.Pages[id] = &model.Page{ID: id, UserID: "target"}
+	}
+	pages.Pages["pg-other"] = &model.Page{ID: "pg-other", UserID: "other"}
+
+	p := processors.NewDeleteAccountProcessor(nil, nil, nil)
+	p.SetPageRepo(pages)
+	require.True(t, p.HasPageRepo())
+	require.NoError(t, p.Handle(context.Background(), deleteAccountTask(t, queue.DeleteAccountPayload{UserID: "target"})))
+
+	assert.Len(t, pages.deleted, 150)
+	assert.Len(t, pages.Pages, 1)
+	assert.Contains(t, pages.Pages, "pg-other")
+}
+
+type failingPageRepo struct {
+	*testutil.MockPageRepository
+}
+
+func (f *failingPageRepo) Delete(_ *model.Page) error { return errors.New("page boom") }
+
+// A page deletion error is returned so the job is retried.
+func TestDeleteAccountProcessor_PageErrorPropagates(t *testing.T) {
+	pages := &failingPageRepo{testutil.NewMockPageRepository()}
+	pages.Pages["pg-1"] = &model.Page{ID: "pg-1", UserID: "target"}
+	p := processors.NewDeleteAccountProcessor(nil, nil, nil)
+	p.SetPageRepo(pages)
+	require.Error(t, p.Handle(context.Background(), deleteAccountTask(t, queue.DeleteAccountPayload{UserID: "target"})))
+	assert.False(t, processors.NewDeleteAccountProcessor(nil, nil, nil).HasPageRepo())
 }
