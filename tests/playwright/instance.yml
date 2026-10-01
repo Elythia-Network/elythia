@@ -40,7 +40,8 @@ jobQueueDriver: mkq
 # notes/create (per-min 上限) / signup (per-IP) などで spec が cascade fail
 # するのを防ぐため。`disableEndpointRateLimits` は mk-go 独自拡張で TS image
 # 側は黙って無視 (= 効果は mk-go side のみ)。`enableIpRateLimit: false` も
-# 念のため明示。**production には絶対に入れない (CLAUDE.md にも warn)**。
+# 念のため明示。**production には絶対に入れない** (docs/configuration.md の
+# `disableEndpointRateLimits` の行。有効にすると起動時に warn ログも出る)。
 disableEndpointRateLimits: true
 enableIpRateLimit: false
 

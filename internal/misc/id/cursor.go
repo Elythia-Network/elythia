@@ -27,7 +27,7 @@ import (
 //   - sinceDate のみなら ms → aidx prefix に変換して sinceID とする
 //   - untilID / untilDate も同パターン
 //
-// mk-go の id 生成は aidx 固定 (CLAUDE.md Section 6 / `MK_ID=aidx`) なので、
+// mk-go の id 生成の既定は aidx (CLAUDE.md Section 6 / `MK_ID=aidx`) なので、
 // aidx 以外の generator (aid / meid / objectid / ulid) で動かしている operator
 // では本 helper は意図通り機能しない。それらの generator は drop-in 主流路で
 // 使われない既知の制限。

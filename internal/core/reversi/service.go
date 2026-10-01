@@ -1017,7 +1017,7 @@ func packGame(game *model.ReversiGame) map[string]any {
 	// user1 / user2 (UserLite 互換) はフロントエンドの GameBoard が対戦
 	// 相手のアバター描画などで必要とする。preload 済みなら埋め、nil なら
 	// キー省略。entity パッケージに依存せず最小限のフィールドだけ手で組み
-	// 立てる (#417 Devin review: CLAUDE.md layer rule core → entity 禁止)。
+	// 立てる (#417 のレビューでこの形にした)。
 	if game.User1 != nil {
 		out["user1"] = userLiteMap(game.User1)
 	}

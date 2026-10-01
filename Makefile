@@ -639,8 +639,10 @@ dropin-frontend-swap-test: ## TS-A → mk-A 切替まで含む frontend e2e
 # ライセンス境界のため、本家コードはすべて third_party/misskey/ の git submodule
 # 参照で扱う。mk-go のリポジトリには 1 行もコピーしない。
 #
-# CLAUDE.md の規約で「パッケージはホストに直接入れずコンテナ経由で動かす」と
-# 決まっているため、pnpm はすべて docker run で実行する。
+# `e2e-frontend-build` は pnpm を docker run で実行する。ビルドに使う Node の版と
+# distro を、upstream がコンテナでビルドするときの組み合わせにそろえるため
+# (下の #2921 の段落)。Makefile の pnpm がすべてそうなっているわけではない —
+# `upstream-e2e-deps` はホストの pnpm を使う。
 #
 # frontend e2e は Playwright に一本化した (#2437)。Cypress ラッパーは本家が
 # Cypress を廃止して参照先が消滅したため削除済み。spec は tests/playwright/。
