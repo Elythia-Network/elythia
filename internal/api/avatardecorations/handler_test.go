@@ -14,6 +14,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/shiroha-a/mk/internal/model"
+	"github.com/shiroha-a/mk/internal/server/middleware"
 	"github.com/shiroha-a/mk/internal/testutil"
 )
 
@@ -24,14 +25,35 @@ func init() {
 	testutil.ApplyMigrations(testDB)
 }
 
+// call invokes the handler as an anonymous caller.
 func call(t *testing.T, h *Handler) *httptest.ResponseRecorder {
+	t.Helper()
+	return callAs(t, h, nil)
+}
+
+// callAs invokes the handler as the given user (nil means anonymous).
+func callAs(t *testing.T, h *Handler, user *model.User) *httptest.ResponseRecorder {
 	t.Helper()
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{}`))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
-	require.NoError(t, h.Get(e.NewContext(req, rec)))
+	c := e.NewContext(req, rec)
+	if user != nil {
+		c.Set(string(middleware.UserContextKey), user)
+	}
+	require.NoError(t, h.Get(c))
 	return rec
+}
+
+var signedIn = &model.User{ID: "viewer"}
+
+func allRoles() (map[string]bool, error) {
+	return map[string]bool{"pubRole": true, "privRole": true}, nil
+}
+
+func publicRoles() (map[string]bool, error) {
+	return map[string]bool{"pubRole": true}, nil
 }
 
 func decode(t *testing.T, rec *httptest.ResponseRecorder) []map[string]any {
@@ -55,7 +77,7 @@ func seed(t *testing.T, roleIDs ...string) {
 func TestGet(t *testing.T) {
 	t.Run("returns the catalog with every field", func(t *testing.T) {
 		seed(t)
-		got := decode(t, call(t, NewHandler(testDB, nil)))
+		got := decode(t, call(t, NewHandler(testDB, nil, nil)))
 
 		require.Len(t, got, 1)
 		for _, k := range []string{
@@ -73,9 +95,9 @@ func TestGet(t *testing.T) {
 		seed(t, "roleA", "gone")
 		h := NewHandler(testDB, func() (map[string]bool, error) {
 			return map[string]bool{"roleA": true}, nil
-		})
+		}, nil)
 
-		got := decode(t, call(t, h))
+		got := decode(t, callAs(t, h, signedIn))
 		assert.Equal(t, []any{"roleA"}, got[0]["roleIdsThatCanBeUsedThisDecoration"])
 	})
 
@@ -85,28 +107,63 @@ func TestGet(t *testing.T) {
 		seed(t, "roleA", "gone")
 		h := NewHandler(testDB, func() (map[string]bool, error) {
 			return nil, errors.New("boom")
-		})
+		}, nil)
 
-		got := decode(t, call(t, h))
+		got := decode(t, callAs(t, h, signedIn))
 		assert.Equal(t, []any{"roleA", "gone"}, got[0]["roleIdsThatCanBeUsedThisDecoration"])
 	})
 
 	t.Run("unwired role provider keeps the ids verbatim", func(t *testing.T) {
 		seed(t, "roleA", "gone")
 
-		got := decode(t, call(t, NewHandler(testDB, nil)))
+		got := decode(t, callAs(t, NewHandler(testDB, nil, nil), signedIn))
 		assert.Equal(t, []any{"roleA", "gone"}, got[0]["roleIdsThatCanBeUsedThisDecoration"])
+	})
+
+	t.Run("anonymous caller sees only public role ids", func(t *testing.T) {
+		// 本家 2026.10.0 (#17987): 未ログインには isPublic なロールの ID だけを返す。
+		seed(t, "pubRole", "privRole", "gone")
+		h := NewHandler(testDB, allRoles, publicRoles)
+
+		got := decode(t, call(t, h))
+		assert.Equal(t, []any{"pubRole"}, got[0]["roleIdsThatCanBeUsedThisDecoration"])
+	})
+
+	t.Run("signed-in caller sees every existing role id", func(t *testing.T) {
+		seed(t, "pubRole", "privRole", "gone")
+		h := NewHandler(testDB, allRoles, publicRoles)
+
+		got := decode(t, callAs(t, h, signedIn))
+		assert.Equal(t, []any{"pubRole", "privRole"}, got[0]["roleIdsThatCanBeUsedThisDecoration"])
+	})
+
+	t.Run("anonymous caller gets no role ids when public lookup fails", func(t *testing.T) {
+		// **verbatim に倒さない。** 非公開ロールの ID が匿名に漏れる。
+		seed(t, "pubRole", "privRole")
+		h := NewHandler(testDB, allRoles, func() (map[string]bool, error) {
+			return nil, errors.New("boom")
+		})
+
+		got := decode(t, call(t, h))
+		assert.Equal(t, []any{}, got[0]["roleIdsThatCanBeUsedThisDecoration"])
+	})
+
+	t.Run("anonymous caller gets no role ids when public provider is unwired", func(t *testing.T) {
+		seed(t, "pubRole", "privRole")
+
+		got := decode(t, call(t, NewHandler(testDB, allRoles, nil)))
+		assert.Equal(t, []any{}, got[0]["roleIdsThatCanBeUsedThisDecoration"])
 	})
 
 	t.Run("no rows returns an empty array, not null", func(t *testing.T) {
 		require.NoError(t, testDB.Exec(`DELETE FROM "avatar_decoration"`).Error)
 
-		rec := call(t, NewHandler(testDB, nil))
+		rec := call(t, NewHandler(testDB, nil, nil))
 		assert.JSONEq(t, `[]`, rec.Body.String())
 	})
 
 	t.Run("unwired db returns an empty array", func(t *testing.T) {
-		rec := call(t, NewHandler(nil, nil))
+		rec := call(t, NewHandler(nil, nil, nil))
 		assert.JSONEq(t, `[]`, rec.Body.String())
 	})
 }

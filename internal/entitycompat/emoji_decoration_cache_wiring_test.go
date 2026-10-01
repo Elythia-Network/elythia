@@ -218,3 +218,11 @@ func callsAny(fn *ast.FuncDecl, names map[string]bool, recv func(ast.Expr) bool)
 	})
 	return hit
 }
+
+// get-avatar-decorations は、ログインしていない利用者に公開ロールの ID だけを
+// 返す (upstream 2026.10.0)。第 3 引数を全ロールの集合に取り違えると、テストの
+// 単体の handler は通ったまま、本番だけ非公開ロールの ID を返す。
+func TestAvatarDecorationRoleSetsAreWired(t *testing.T) {
+	assertWired(t, routerGo, "avatardecorations.NewHandler(s.db, roleService.ExistingRoleIDSet, roleService.PublicRoleIDSet)",
+		"ログインしていない利用者に、非公開ロールの ID を返してしまう。")
+}

@@ -37,15 +37,21 @@ func newAdminCh(ctx stream.ChannelContext, isMod bool) stream.Channel {
 	return NewAdminFactory(checker).New(ctx)
 }
 
-// mockExplorable is a test double for RoleExplorableChecker.
-type mockExplorable struct{ explorable map[string]bool }
+// mockExplorable is a test double for RoleExplorableChecker. A role streams
+// only when it is in both public and explorable, mirroring role.Service.
+type mockExplorable struct{ public, explorable map[string]bool }
 
-func (m mockExplorable) IsExplorable(roleID string) bool { return m.explorable[roleID] }
+func (m mockExplorable) IsPublicExplorable(roleID string) bool {
+	return m.public[roleID] && m.explorable[roleID]
+}
 
-// newRoleCh builds a roleTimeline channel where role "r1" is explorable per the
-// flag, via the gated factory (#1549).
+// newRoleCh builds a roleTimeline channel where role "r1" is public and
+// explorable per the flag, via the gated factory (#1549).
 func newRoleCh(ctx stream.ChannelContext, explorable bool) stream.Channel {
-	return NewRoleTimelineFactory(mockExplorable{explorable: map[string]bool{"r1": explorable}}).New(ctx)
+	return NewRoleTimelineFactory(mockExplorable{
+		public:     map[string]bool{"r1": true},
+		explorable: map[string]bool{"r1": explorable},
+	}).New(ctx)
 }
 
 // stubAntennaOwners is a test double for AntennaOwnerLookup. A miss returns
@@ -709,20 +715,69 @@ func TestRoleTimeline_Lifecycle(t *testing.T) {
 func TestRoleTimeline_MissingID(t *testing.T) {
 	ctx := newCtx(nil)
 	ch := newRoleCh(ctx, true)
-	// TS本家はroleId欠如時もinit成功とするため、errorは返さずno-op
-	err := ch.Init(json.RawMessage(`{}`))
-	assert.NoError(t, err)
+	// 本家 2026.10.0 は roleId が無ければ init で false を返し、接続を受け付けない。
+	for _, params := range []string{`{}`, `{"roleId":""}`} {
+		require.Error(t, ch.Init(json.RawMessage(params)), params)
+	}
 	assert.Empty(t, ctx.subs)
 }
 
-// #1549: roleTimeline now receives live notes; only isExplorable roles +
-// public-visibility notes are emitted (本家 role-timeline.ts parity).
-func TestRoleTimeline_NonExplorableDropped(t *testing.T) {
+// #1549: roleTimeline now receives live notes; only isPublic && isExplorable
+// roles + public-visibility notes are emitted (本家 role-timeline.ts parity)。
+// 非 explorable なロールは Init の時点で拒否する (#17987)。
+func TestRoleTimeline_NonExplorableRefused(t *testing.T) {
 	ctx := newCtx(nil)
 	ch := newRoleCh(ctx, false) // r1 NOT explorable
-	require.NoError(t, ch.Init(json.RawMessage(`{"roleId":"r1"}`)))
-	ch.OnRedisEvent([]byte(`{"id":"n1","visibility":"public"}`))
-	assert.Empty(t, ctx.sentType, "non-explorable role must not stream notes")
+	require.Error(t, ch.Init(json.RawMessage(`{"roleId":"r1"}`)))
+	assert.Empty(t, ctx.subs, "refused channel must not subscribe")
+}
+
+// explorable でも非公開のロールは、Init で拒否し、event も流さない (#17987)。
+func TestRoleTimeline_ExplorableButNotPublic(t *testing.T) {
+	t.Run("init refused", func(t *testing.T) {
+		ctx := newCtx(nil)
+		ch := NewRoleTimelineFactory(mockExplorable{
+			public:     map[string]bool{"r1": false},
+			explorable: map[string]bool{"r1": true},
+		}).New(ctx)
+		require.Error(t, ch.Init(json.RawMessage(`{"roleId":"r1"}`)))
+		assert.Empty(t, ctx.subs, "refused channel must not subscribe")
+	})
+
+	t.Run("event dropped after the role turns private", func(t *testing.T) {
+		// 接続後にロールが非公開へ変わった場合も、per-event の gate で止める。
+		ctx := newCtx(nil)
+		m := mockExplorable{
+			public:     map[string]bool{"r1": true},
+			explorable: map[string]bool{"r1": true},
+		}
+		ch := NewRoleTimelineFactory(m).New(ctx)
+		require.NoError(t, ch.Init(json.RawMessage(`{"roleId":"r1"}`)))
+		m.public["r1"] = false
+		ch.OnRedisEvent([]byte(`{"id":"n1","visibility":"public"}`))
+		assert.Empty(t, ctx.sentType, "non-public role must not stream notes")
+	})
+
+	t.Run("event dropped after the role turns non-explorable", func(t *testing.T) {
+		ctx := newCtx(nil)
+		m := mockExplorable{
+			public:     map[string]bool{"r1": true},
+			explorable: map[string]bool{"r1": true},
+		}
+		ch := NewRoleTimelineFactory(m).New(ctx)
+		require.NoError(t, ch.Init(json.RawMessage(`{"roleId":"r1"}`)))
+		m.explorable["r1"] = false
+		ch.OnRedisEvent([]byte(`{"id":"n1","visibility":"public"}`))
+		assert.Empty(t, ctx.sentType, "non-explorable role must not stream notes")
+	})
+}
+
+// checker が未配線なら Init を拒否する (fail-closed)。
+func TestRoleTimeline_UnwiredCheckerRefused(t *testing.T) {
+	ctx := newCtx(nil)
+	ch := NewRoleTimelineFactory(nil).New(ctx)
+	require.Error(t, ch.Init(json.RawMessage(`{"roleId":"r1"}`)))
+	assert.Empty(t, ctx.subs)
 }
 
 func TestRoleTimeline_NonPublicDropped(t *testing.T) {

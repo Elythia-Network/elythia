@@ -852,18 +852,22 @@ func (s *Service) IsAdministrator(userID string) bool {
 	return false
 }
 
-// IsExplorable reports whether the role's timeline is publicly streamable
-// (isExplorable). Used by the roleTimeline WS channel gate (#1549). Missing role
-// or lookup error returns false (fail-closed). Backed by the cached role list,
-// so no per-event DB query.
-func (s *Service) IsExplorable(roleID string) bool {
+// IsPublicExplorable reports whether the role's timeline is publicly
+// streamable: the role must be both isPublic and isExplorable. Used by the
+// roleTimeline WS channel gate (#1549). Missing role or lookup error returns
+// false (fail-closed). Backed by the cached role list, so no per-event DB query.
+//
+// 本家 2026.10.0 の role-timeline.ts は isPublic && isExplorable の両方を要求する
+// (#17987)。isExplorable だけを見ると、非公開ロールの所属者の note がロール ID を
+// 知っている人へ流れ、所属者が誰かを推測できてしまう。
+func (s *Service) IsPublicExplorable(roleID string) bool {
 	roles, err := s.listRolesCached()
 	if err != nil {
 		return false
 	}
 	for _, r := range roles {
 		if r.ID == roleID {
-			return r.IsExplorable
+			return r.IsPublic && r.IsExplorable
 		}
 	}
 	return false
@@ -1912,6 +1916,26 @@ func (s *Service) ExistingRoleIDSet() (map[string]bool, error) {
 	set := make(map[string]bool, len(roles))
 	for _, r := range roles {
 		set[r.ID] = true
+	}
+	return set, nil
+}
+
+// PublicRoleIDSet returns the set of current role ids whose isPublic is true.
+// get-avatar-decorations が未ログインの呼び出し元へ返すロール ID を絞るために使う。
+//
+// 本家 2026.10.0 の get-avatar-decorations.ts は、未ログインには isPublic な
+// ロールの ID だけを返す (#17987)。非公開ロールの ID を匿名で列挙できると、
+// そのロールの存在と ID が外へ漏れる。
+func (s *Service) PublicRoleIDSet() (map[string]bool, error) {
+	roles, err := s.roleRepo.List()
+	if err != nil {
+		return nil, err
+	}
+	set := make(map[string]bool, len(roles))
+	for _, r := range roles {
+		if r.IsPublic {
+			set[r.ID] = true
+		}
 	}
 	return set, nil
 }
