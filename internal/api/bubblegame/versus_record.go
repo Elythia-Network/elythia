@@ -156,7 +156,9 @@ func (h *VersusHandler) History(c echo.Context) error {
 		}
 		target = u.ID
 	}
-	out := make([]map[string]any, 0, limit)
+	// 確保量に利用者の値 (limit) を使わない。ResolveLimit で 100 までに収めているが、
+	// 静的解析 (CodeQL) はその上限を追えない。
+	out := []map[string]any{}
 	cursor := untilID
 	// 見せない対局 (ブロック・退会の処理中・凍結) を飛ばした分は引き直して、
 	// limit 件に達するか記録が尽きるまで集める。飛ばしたまま短いページを返すと、
