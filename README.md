@@ -179,7 +179,7 @@ go test -race -count=1 -shuffle=3 -timeout 10m \
 | [メディアプロキシの govips 評価](docs/mediaproxy-govips-evaluation.md) | 画像変換ライブラリの比較検討 |
 | [upstream追従手順](docs/upstream-catch-up.md) | Misskey TSの新リリース取り込みとsubmodule bump |
 | [設計メモ](docs/design/) | オートスケール、inbox verify、mkq等の設計判断 |
-| [upstream 差分](docs/update/) | Misskey TS 2026.3.2 → 2026.9.1 の backend 差分 (`<yyyymm><nn>diff.md`) と triage note |
+| [upstream 差分](docs/update/) | Misskey TS 2026.3.2 → 2026.10.0 の backend 差分 (`<yyyymm><nn>diff.md`) と triage note |
 
 ## ライセンス
 
