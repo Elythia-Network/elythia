@@ -153,14 +153,7 @@ func (h *Handler) Featured(c echo.Context) error {
 		}
 		localOnly = policy == ugcvisibility.Local
 	}
-	notes, err := h.featuredNotes(c.Request().Context(), req.ChannelID, untilID, limit, req.Offset, localOnly)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
-	}
-	// upstream featured.ts:99-107 は me の mute / 被block を isUserRelated で除外する
-	// (#1682)。users/featured-notes (#1547) と同じく被block / mute / instance-mute を
-	// post-fetch で除外する。blocked-host / suspended は別 follow-up。
-	notes, err = h.applyMuteBlock(viewer, notes)
+	notes, err := h.featuredNotes(c.Request().Context(), viewer, req.ChannelID, untilID, limit, req.Offset, localOnly)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
@@ -176,33 +169,48 @@ const (
 
 // featuredNotes returns featured notes from the engagement ranking (#1687) when
 // the ranking reader is wired, falling back to the SQL count-DESC ranking when
-// it is unavailable or empty (fresh instance / Redis flush)。ranking 経路は
-// upstream featured.ts と同じく id DESC sort → untilId filter → limit。
+// it is unavailable or empty (fresh instance / Redis flush). The ranking path
+// follows upstream featured.ts (2026.10.0): sort id DESC, drop ids >= untilId,
+// fetch every remaining note, filter, and only then cut to limit.
 //
 // localOnly drops notes whose own author is remote (anonymous visitors under
-// meta.ugcVisibilityForVisitor=local).
-func (h *Handler) featuredNotes(ctx context.Context, channelID, untilID string, limit, offset int, localOnly bool) ([]*model.Note, error) {
-	notes, err := h.fetchFeaturedNotes(ctx, channelID, untilID, limit, offset, localOnly)
-	if err != nil || !localOnly {
-		return notes, err
+// meta.ugcVisibilityForVisitor=local). viewer drives the mute / block filters.
+func (h *Handler) featuredNotes(ctx context.Context, viewer *model.User, channelID, untilID string, limit, offset int, localOnly bool) ([]*model.Note, error) {
+	notes, err := h.fetchFeaturedNotes(ctx, channelID, untilID, limit, offset)
+	if err != nil {
+		return nil, err
 	}
-	out := make([]*model.Note, 0, len(notes))
-	for _, n := range notes {
-		if n.UserHost == nil {
-			out = append(out, n)
+	if localOnly {
+		out := make([]*model.Note, 0, len(notes))
+		for _, n := range notes {
+			if n.UserHost == nil {
+				out = append(out, n)
+			}
 		}
+		notes = out
 	}
-	if len(out) > limit {
-		out = out[:limit]
+	// upstream featured.ts は me の mute / 被block を isUserRelated で除外する
+	// (#1682)。users/featured-notes (#1547) と同じく被block / mute / instance-mute を
+	// 取得後に除外し、blocked-host / suspended も applyMuteBlock が落とす (#1783)。
+	notes, err = h.applyMuteBlock(viewer, notes)
+	if err != nil {
+		return nil, err
 	}
-	return out, nil
+	// 本家 2026.10.0 は limit で切るのを絞り込みの後へ移した。先に切ると、上位が
+	// ミュート・ブロック相手やリモートの投稿者で埋まったときにページが欠ける。
+	if len(notes) > limit {
+		notes = notes[:limit]
+	}
+	return notes, nil
 }
 
-// fetchFeaturedNotes fetches the featured candidates before the localOnly
-// filter is applied by featuredNotes.
-func (h *Handler) fetchFeaturedNotes(ctx context.Context, channelID, untilID string, limit, offset int, localOnly bool) ([]*model.Note, error) {
+// fetchFeaturedNotes fetches the featured candidates before featuredNotes
+// filters them. The ranking path returns every ranked note below untilID; the
+// SQL fallback returns at most limit rows from offset.
+func (h *Handler) fetchFeaturedNotes(ctx context.Context, channelID, untilID string, limit, offset int) ([]*model.Note, error) {
 	// SQL fallback (ranking が無い / 空のとき) は upstream に無い経路なので、
-	// localOnly でも取得後に絞るだけにする (件数が欠けることがある)。
+	// これまでどおり limit / offset で引いてから絞る (件数が欠けることがある。
+	// docs/divergence.md)。
 	if h.featuredRanking == nil {
 		return h.noteRepo.ListFeatured(channelID, untilID, limit, offset)
 	}
@@ -217,14 +225,9 @@ func (h *Handler) fetchFeaturedNotes(ctx context.Context, channelID, untilID str
 		// Redis ranking が空 / 取得失敗 (fresh instance 等) は SQL fallback。
 		return h.noteRepo.ListFeatured(channelID, untilID, limit, offset)
 	}
-	// upstream は ranking の ID を全部引いてから userHost IS NULL で絞り、最後に
-	// limit で切る。localOnly で先に limit で切ると、上位がリモートのノートで
-	// 埋まったときに件数が欠けるので、切るのは featuredNotes で絞った後にする。
-	pageLimit := limit
-	if localOnly {
-		pageLimit = len(ids)
-	}
-	ids = sortAndPageFeaturedIDs(ids, untilID, pageLimit)
+	// ranking は現在と直前の窓から最大 (threshold+1)*2 件 (global 202 / channel 102)
+	// しか返さないので、全件を引いても取得量は有界。
+	ids = sortAndFilterFeaturedIDs(ids, untilID)
 	if len(ids) == 0 {
 		return []*model.Note{}, nil
 	}
@@ -248,10 +251,11 @@ func (h *Handler) cachedGlobalRanking(ctx context.Context) ([]string, error) {
 	return ids, nil
 }
 
-// sortAndPageFeaturedIDs sorts note IDs DESC, drops IDs >= untilID, and caps the
-// result to limit (upstream featured.ts の noteIds.sort / filter / slice)。入力
-// slice を破壊しないようコピーしてから操作する (cache 共有のため)。
-func sortAndPageFeaturedIDs(ids []string, untilID string, limit int) []string {
+// sortAndFilterFeaturedIDs sorts note IDs DESC and drops IDs >= untilID
+// (upstream featured.ts の noteIds.sort / filter)。limit で切るのは絞り込みの
+// 後なのでここでは切らない。入力 slice を破壊しないようコピーしてから操作する
+// (cache 共有のため)。
+func sortAndFilterFeaturedIDs(ids []string, untilID string) []string {
 	out := make([]string, len(ids))
 	copy(out, ids)
 	sort.Slice(out, func(i, j int) bool { return out[i] > out[j] })
@@ -263,9 +267,6 @@ func sortAndPageFeaturedIDs(ids []string, untilID string, limit int) []string {
 			}
 		}
 		out = filtered
-	}
-	if len(out) > limit {
-		out = out[:limit]
 	}
 	return out
 }
