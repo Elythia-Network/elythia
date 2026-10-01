@@ -25,8 +25,10 @@ type UserFinder interface {
 // VersusHandler handles bubble-game/versus/* (#3230). mk-go 独自の endpoint
 // (upstream にバブルゲームの対戦は無い)。
 type VersusHandler struct {
-	svc   *bubbleversus.Service
-	users UserFinder
+	svc     *bubbleversus.Service
+	users   UserFinder
+	records repository.BubbleVersusRepository
+	blocks  bubbleversus.BlockChecker
 }
 
 // NewVersusHandler constructs a VersusHandler.

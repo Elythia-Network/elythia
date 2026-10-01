@@ -3894,6 +3894,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/bubble-game/versus/decline", bubbleVersusHandler.Decline, middleware.RequireAuth(), middleware.RequireScope("write:account"))
 	api.POST("/bubble-game/versus/cancel", bubbleVersusHandler.Cancel, middleware.RequireAuth(), middleware.RequireScope("write:account"))
 	api.POST("/bubble-game/versus/report", bubbleVersusHandler.Report, middleware.RequireAuth(), middleware.RequireScope("write:account"))
+	// 対戦の記録 (#3232)。見せる範囲は handler の canView が決める。
+	bubbleVersusHandler.SetRecords(bubbleVersusRecordRepo, blockingService)
+	api.POST("/bubble-game/versus/history", bubbleVersusHandler.History, middleware.RequireAuth(), middleware.RequireScope("read:account"))
+	api.POST("/bubble-game/versus/record", bubbleVersusHandler.ShowRecord, middleware.RequireAuth(), middleware.RequireScope("read:account"))
+	api.POST("/bubble-game/versus/set-public", bubbleVersusHandler.SetPublic, middleware.RequireAuth(), middleware.RequireScope("write:account"))
 
 	// chat/* — Misskey v2026 チャット機能 (実データ)
 	chatHandler := apichat.NewHandler(chatRepo, idGen)
