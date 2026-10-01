@@ -50,9 +50,12 @@ func (f *fakeSwRepo) FindByUserID(userID string) ([]*model.SwSubscription, error
 	}
 	return f.data[userID], nil
 }
-func (f *fakeSwRepo) Create(_ *model.SwSubscription) error             { return nil }
-func (f *fakeSwRepo) Update(_ *model.SwSubscription) error             { return nil }
-func (f *fakeSwRepo) DeleteByEndpoint(_ string) error                  { return nil }
+func (f *fakeSwRepo) Create(_ *model.SwSubscription) error { return nil }
+func (f *fakeSwRepo) Update(_ *model.SwSubscription) error { return nil }
+func (f *fakeSwRepo) FindByEndpointAuthKey(_ *string, _, _, _ string) ([]*model.SwSubscription, error) {
+	return nil, errors.New("not used")
+}
+func (f *fakeSwRepo) DeleteByIDs(_ []string) error                     { return nil }
 func (f *fakeSwRepo) DeleteByUserAndEndpoint(_ string, _ string) error { return nil }
 
 func TestCache_GetFetchesFromRepo(t *testing.T) {

@@ -1,10 +1,12 @@
 package sw
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
+	"github.com/shiroha-a/mk/internal/core/webpush"
 	"github.com/shiroha-a/mk/internal/misc/id"
 	"github.com/shiroha-a/mk/internal/model"
 	"github.com/shiroha-a/mk/internal/repository"
@@ -30,7 +33,8 @@ type mockSwRepo struct {
 	// findErr injects an arbitrary error from FindByUserAndEndpoint regardless
 	// of map state. 非 NotFound DB error の handler 分岐 (#918 / #917 観測性
 	// pattern) を test するため。
-	findErr error
+	findErr   error
+	deleteErr error
 }
 
 func newMockSwRepo() *mockSwRepo {
@@ -86,10 +90,31 @@ func (m *mockSwRepo) Update(sub *model.SwSubscription) error {
 	return nil
 }
 
-func (m *mockSwRepo) DeleteByEndpoint(endpoint string) error {
-	for k, s := range m.subs {
-		if s.Endpoint == endpoint {
-			delete(m.subs, k)
+func (m *mockSwRepo) FindByEndpointAuthKey(userID *string, endpoint, auth, publicKey string) ([]*model.SwSubscription, error) {
+	if m.findErr != nil {
+		return nil, m.findErr
+	}
+	out := make([]*model.SwSubscription, 0)
+	for _, s := range m.subs {
+		if userID != nil && s.UserID != *userID {
+			continue
+		}
+		if s.Endpoint == endpoint && s.Auth == auth && s.PublicKey == publicKey {
+			out = append(out, s)
+		}
+	}
+	return out, nil
+}
+
+func (m *mockSwRepo) DeleteByIDs(ids []string) error {
+	if m.deleteErr != nil {
+		return m.deleteErr
+	}
+	for _, target := range ids {
+		for k, s := range m.subs {
+			if s.ID == target {
+				delete(m.subs, k)
+			}
 		}
 	}
 	return nil
@@ -118,7 +143,7 @@ func newTestHandler() (*Handler, *mockSwRepo) {
 	swKey := "test-sw-key"
 	metaRepo := &mockMetaRepo{meta: &model.Meta{SwPublicKey: &swKey}}
 	idGen, _ := id.NewGenerator("aidx")
-	return NewHandler(repo, metaRepo, idGen), repo
+	return NewHandler(repo, metaRepo, idGen, nil), repo
 }
 
 func post(handler func(echo.Context) error, body string, user *model.User) *httptest.ResponseRecorder {
@@ -202,7 +227,7 @@ func TestRegister_NoMeta(t *testing.T) {
 	repo := newMockSwRepo()
 	metaRepo := &mockMetaRepo{} // meta is nil
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(repo, metaRepo, idGen)
+	h := NewHandler(repo, metaRepo, idGen, nil)
 
 	rec := post(h.Register, `{"endpoint":"https://push.example/1","auth":"a1","publickey":"pk1"}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusOK, rec.Code)
@@ -267,6 +292,18 @@ func TestUpdateRegistration_Success(t *testing.T) {
 	assert.Equal(t, true, resp["sendReadMessage"])
 }
 
+// Updating a registration drops the owner's subscription cache, like
+// upstream update-registration's refreshCache.
+func TestUpdateRegistration_InvalidatesCache(t *testing.T) {
+	h, repo, inv := newUnregisterHandler()
+	repo.subs["u1:https://push.example/9"] = &model.SwSubscription{
+		UserID: "u1", Endpoint: "https://push.example/9", SendReadMessage: false,
+	}
+	rec := post(h.UpdateRegistration, `{"endpoint":"https://push.example/9","sendReadMessage":true}`, &model.User{ID: "u1"})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, []string{"u1"}, inv.users)
+}
+
 func TestUpdateRegistration_NoSendReadMessage(t *testing.T) {
 	h, repo := newTestHandler()
 	repo.subs["u1:https://push.example/1"] = &model.SwSubscription{
@@ -310,30 +347,206 @@ func TestUpdateRegistration_UpdateError(t *testing.T) {
 
 // --- Unregister ---
 
-func TestUnregister_WithUser(t *testing.T) {
-	h, repo := newTestHandler()
+// seedUnregisterSubs stores the same browser subscription for two accounts
+// (one browser shared by u1 and u2) plus an unrelated subscription of u1.
+func seedUnregisterSubs(repo *mockSwRepo) {
 	repo.subs["u1:https://push.example/1"] = &model.SwSubscription{
-		UserID: "u1", Endpoint: "https://push.example/1",
+		ID: "s1", UserID: "u1", Endpoint: "https://push.example/1", Auth: "a1", PublicKey: "pk1",
 	}
-	rec := post(h.Unregister, `{"endpoint":"https://push.example/1"}`, &model.User{ID: "u1"})
-	assert.Equal(t, http.StatusNoContent, rec.Code)
-	assert.Empty(t, repo.subs)
+	repo.subs["u2:https://push.example/1"] = &model.SwSubscription{
+		ID: "s2", UserID: "u2", Endpoint: "https://push.example/1", Auth: "a1", PublicKey: "pk1",
+	}
+	repo.subs["u1:https://push.example/other"] = &model.SwSubscription{
+		ID: "s3", UserID: "u1", Endpoint: "https://push.example/other", Auth: "a3", PublicKey: "pk3",
+	}
 }
 
-func TestUnregister_WithoutUser(t *testing.T) {
-	h, repo := newTestHandler()
-	repo.subs["u1:https://push.example/1"] = &model.SwSubscription{
-		UserID: "u1", Endpoint: "https://push.example/1",
+func remainingSubIDs(repo *mockSwRepo) []string {
+	ids := make([]string, 0, len(repo.subs))
+	for _, s := range repo.subs {
+		ids = append(ids, s.ID)
 	}
-	rec := post(h.Unregister, `{"endpoint":"https://push.example/1"}`, nil)
-	assert.Equal(t, http.StatusNoContent, rec.Code)
-	assert.Empty(t, repo.subs)
+	sort.Strings(ids)
+	return ids
 }
 
-func TestUnregister_InvalidParam(t *testing.T) {
-	h, _ := newTestHandler()
-	rec := post(h.Unregister, `{}`, &model.User{ID: "u1"})
+// recordingInvalidator records which users had their cache dropped.
+type recordingInvalidator struct{ users []string }
+
+func (r *recordingInvalidator) Invalidate(_ context.Context, userID string) {
+	r.users = append(r.users, userID)
+}
+
+func newUnregisterHandler() (*Handler, *mockSwRepo, *recordingInvalidator) {
+	repo := newMockSwRepo()
+	seedUnregisterSubs(repo)
+	inv := &recordingInvalidator{}
+	idGen, _ := id.NewGenerator("aidx")
+	return NewHandler(repo, &mockMetaRepo{}, idGen, inv), repo, inv
+}
+
+// assertInvalidParam checks upstream's schema-validation envelope for a
+// failed paramDef check.
+func assertInvalidParam(t *testing.T, rec *httptest.ResponseRecorder, param, reason string) {
+	t.Helper()
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	var resp struct {
+		Error struct {
+			Code string `json:"code"`
+			ID   string `json:"id"`
+			Kind string `json:"kind"`
+			Info struct {
+				Param  string `json:"param"`
+				Reason string `json:"reason"`
+			} `json:"info"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "INVALID_PARAM", resp.Error.Code)
+	assert.Equal(t, "3d81ceae-475f-4600-b2a8-2bc116157532", resp.Error.ID)
+	assert.Equal(t, "client", resp.Error.Kind)
+	assert.Equal(t, param, resp.Error.Info.Param)
+	assert.Equal(t, reason, resp.Error.Info.Reason)
+}
+
+// endpoint / auth / publickey are all required, as in upstream 2026.10.0, and
+// a rejected request deletes nothing even when the endpoint alone matches.
+func TestUnregister_RequiresEndpointAuthAndPublicKey(t *testing.T) {
+	cases := []struct {
+		name, body, missing string
+	}{
+		{"empty", `{}`, "endpoint"},
+		{"endpoint only", `{"endpoint":"https://push.example/1"}`, "auth"},
+		{"no publickey", `{"endpoint":"https://push.example/1","auth":"a1"}`, "publickey"},
+		{"no auth", `{"endpoint":"https://push.example/1","publickey":"pk1"}`, "auth"},
+	}
+	for _, tc := range cases {
+		for _, user := range []*model.User{nil, {ID: "u1"}} {
+			t.Run(tc.name, func(t *testing.T) {
+				h, repo, inv := newUnregisterHandler()
+				rec := post(h.Unregister, tc.body, user)
+				assertInvalidParam(t, rec, "#/required", "must have required property '"+tc.missing+"'")
+				assert.Equal(t, []string{"s1", "s2", "s3"}, remainingSubIDs(repo))
+				assert.Empty(t, inv.users)
+			})
+		}
+	}
+}
+
+func TestUnregister_RejectsNonStringParams(t *testing.T) {
+	for _, tc := range []struct{ body, param string }{
+		{`{"endpoint":1,"auth":"a1","publickey":"pk1"}`, "endpoint"},
+		{`{"endpoint":"https://push.example/1","auth":null,"publickey":"pk1"}`, "auth"},
+		{`{"endpoint":"https://push.example/1","auth":"a1","publickey":["pk1"]}`, "publickey"},
+	} {
+		h, repo, _ := newUnregisterHandler()
+		rec := post(h.Unregister, tc.body, nil)
+		assertInvalidParam(t, rec, "#/properties/"+tc.param+"/type", "must be string")
+		assert.Len(t, repo.subs, 3)
+	}
+}
+
+func TestUnregister_InvalidJSON(t *testing.T) {
+	h, repo, _ := newUnregisterHandler()
+	rec := post(h.Unregister, `{invalid`, nil)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Len(t, repo.subs, 3)
+}
+
+// A mismatching auth or publickey matches nothing: 204 and every row stays.
+func TestUnregister_WrongKeysDeleteNothing(t *testing.T) {
+	for _, body := range []string{
+		`{"endpoint":"https://push.example/1","auth":"wrong","publickey":"pk1"}`,
+		`{"endpoint":"https://push.example/1","auth":"a1","publickey":"wrong"}`,
+		`{"endpoint":"https://push.example/1","auth":"a3","publickey":"pk3"}`,
+	} {
+		for _, user := range []*model.User{nil, {ID: "u1"}} {
+			h, repo, inv := newUnregisterHandler()
+			rec := post(h.Unregister, body, user)
+			assert.Equal(t, http.StatusNoContent, rec.Code)
+			assert.Equal(t, []string{"s1", "s2", "s3"}, remainingSubIDs(repo), body)
+			assert.Empty(t, inv.users)
+		}
+	}
+}
+
+// Without a credential every account registered with the subscription is
+// removed (the browser drops the subscription itself), and each owner's cache
+// is refreshed once.
+func TestUnregister_AnonymousDeletesEveryAccountOfSubscription(t *testing.T) {
+	h, repo, inv := newUnregisterHandler()
+	rec := post(h.Unregister, `{"endpoint":"https://push.example/1","auth":"a1","publickey":"pk1"}`, nil)
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Equal(t, []string{"s3"}, remainingSubIDs(repo))
+	sort.Strings(inv.users)
+	assert.Equal(t, []string{"u1", "u2"}, inv.users)
+}
+
+// With a credential only the caller's own registration is removed.
+func TestUnregister_AuthenticatedDeletesOnlyOwn(t *testing.T) {
+	h, repo, inv := newUnregisterHandler()
+	rec := post(h.Unregister, `{"endpoint":"https://push.example/1","auth":"a1","publickey":"pk1"}`, &model.User{ID: "u1"})
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Equal(t, []string{"s2", "s3"}, remainingSubIDs(repo))
+	assert.Equal(t, []string{"u1"}, inv.users)
+}
+
+func TestUnregister_FindError(t *testing.T) {
+	h, repo, inv := newUnregisterHandler()
+	repo.findErr = errMock
+	rec := post(h.Unregister, `{"endpoint":"https://push.example/1","auth":"a1","publickey":"pk1"}`, nil)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Empty(t, inv.users)
+}
+
+func TestUnregister_DeleteError(t *testing.T) {
+	h, repo, inv := newUnregisterHandler()
+	repo.deleteErr = errMock
+	rec := post(h.Unregister, `{"endpoint":"https://push.example/1","auth":"a1","publickey":"pk1"}`, nil)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Len(t, repo.subs, 3)
+	assert.Empty(t, inv.users)
+}
+
+// The Web Push delivery reads subscriptions through webpush.SubscriptionCache
+// (memory 3 min / Redis 1 h). register and unregister must drop the entry so
+// the next delivery sees the change, as upstream's refreshCache does.
+func TestRegisterAndUnregister_RefreshSubscriptionCache(t *testing.T) {
+	repo := newMockSwRepo()
+	cache := webpush.NewSubscriptionCache(repo, nil)
+	idGen, _ := id.NewGenerator("aidx")
+	h := NewHandler(repo, &mockMetaRepo{}, idGen, cache)
+	ctx := context.Background()
+
+	subs, err := cache.Get(ctx, "u1")
+	require.NoError(t, err)
+	require.Empty(t, subs)
+
+	rec := post(h.Register, `{"endpoint":"https://push.example/1","auth":"a1","publickey":"pk1"}`, &model.User{ID: "u1"})
+	require.Equal(t, http.StatusOK, rec.Code)
+	subs, err = cache.Get(ctx, "u1")
+	require.NoError(t, err)
+	assert.Len(t, subs, 1, "register left the cached empty list in place")
+
+	rec = post(h.Unregister, `{"endpoint":"https://push.example/1","auth":"a1","publickey":"pk1"}`, nil)
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	subs, err = cache.Get(ctx, "u1")
+	require.NoError(t, err)
+	assert.Empty(t, subs, "unregister left the deleted subscription in the cache")
+}
+
+// already-subscribed creates nothing, so it does not need to touch the cache.
+func TestRegister_AlreadySubscribedKeepsCache(t *testing.T) {
+	repo := newMockSwRepo()
+	repo.subs["u1:https://push.example/1"] = &model.SwSubscription{
+		ID: "s1", UserID: "u1", Endpoint: "https://push.example/1", Auth: "a1", PublicKey: "pk1",
+	}
+	inv := &recordingInvalidator{}
+	idGen, _ := id.NewGenerator("aidx")
+	h := NewHandler(repo, &mockMetaRepo{}, idGen, inv)
+	rec := post(h.Register, `{"endpoint":"https://push.example/1","auth":"a1","publickey":"pk1"}`, &model.User{ID: "u1"})
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Empty(t, inv.users)
 }
 
 // failingSWRepo makes every subscription lookup look like a database failure.
@@ -357,7 +570,7 @@ func TestRegister_DBFailureIsNot2xx(t *testing.T) {
 	h := NewHandler(&failingSWRepo{
 		SwSubscriptionRepository: newMockSwRepo(),
 		err:                      errors.New("dial tcp 127.0.0.1:5432: connect: connection refused"),
-	}, metaRepo, idGen)
+	}, metaRepo, idGen, nil)
 
 	rec := post(h.Register, `{"endpoint":"https://push.example/e","auth":"a","publickey":"k"}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusInternalServerError, rec.Code,

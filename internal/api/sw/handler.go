@@ -1,6 +1,8 @@
 package sw
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -18,16 +20,32 @@ import (
 	"github.com/shiroha-a/mk/internal/server/middleware"
 )
 
+// SubscriptionCacheInvalidator drops the cached push subscriptions of a user so
+// that the next delivery re-reads them (upstream PushNotificationService
+// refreshCache). *webpush.SubscriptionCache satisfies it.
+type SubscriptionCacheInvalidator interface {
+	Invalidate(ctx context.Context, userID string)
+}
+
 // Handler handles Service Worker push notification endpoints.
 type Handler struct {
 	repo     repository.SwSubscriptionRepository
 	metaRepo repository.MetaRepository
 	idGen    id.Generator
+	cache    SubscriptionCacheInvalidator
 }
 
-// NewHandler creates a new SW handler.
-func NewHandler(repo repository.SwSubscriptionRepository, metaRepo repository.MetaRepository, idGen id.Generator) *Handler {
-	return &Handler{repo: repo, metaRepo: metaRepo, idGen: idGen}
+// NewHandler creates a new SW handler. cache must be the same instance the
+// Web Push delivery reads from; nil disables invalidation.
+func NewHandler(repo repository.SwSubscriptionRepository, metaRepo repository.MetaRepository, idGen id.Generator, cache SubscriptionCacheInvalidator) *Handler {
+	return &Handler{repo: repo, metaRepo: metaRepo, idGen: idGen, cache: cache}
+}
+
+// invalidate refreshes userID's cached subscriptions when a cache is wired.
+func (h *Handler) invalidate(ctx context.Context, userID string) {
+	if h.cache != nil {
+		h.cache.Invalidate(ctx, userID)
+	}
 }
 
 // Register handles POST /api/sw/register.
@@ -95,6 +113,9 @@ func (h *Handler) Register(c echo.Context) error {
 	if err := h.repo.Create(sub); err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
+	// 配送側は購読の一覧を memory 3 分 / Redis 1 時間 cache するので、落とさないと
+	// 新しい購読へ最長 1 時間届かない (本家 register.ts の refreshCache)。
+	h.invalidate(c.Request().Context(), user.ID)
 
 	return c.JSON(http.StatusOK, map[string]any{
 		"state":           "subscribed",
@@ -167,6 +188,9 @@ func (h *Handler) UpdateRegistration(c echo.Context) error {
 	if err := h.repo.Update(sub); err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
+	// upstream update-registration も refreshCache を呼ぶ。落とさないと配送側が
+	// 古い sendReadMessage を cache の TTL の間使い続ける。
+	h.invalidate(c.Request().Context(), user.ID)
 
 	return c.JSON(http.StatusOK, map[string]any{
 		"userId":          sub.UserID,
@@ -176,20 +200,68 @@ func (h *Handler) UpdateRegistration(c echo.Context) error {
 }
 
 // Unregister handles POST /api/sw/unregister.
+//
+// Accepts the same parameters as upstream 2026.10.0: endpoint, auth and
+// publickey are all required, and only subscriptions matching all three (and
+// the caller, when authenticated) are removed. No match is a silent 204.
 func (h *Handler) Unregister(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
-		Endpoint string `json:"endpoint"`
+		Endpoint  json.RawMessage `json:"endpoint"`
+		Auth      json.RawMessage `json:"auth"`
+		PublicKey json.RawMessage `json:"publickey"`
 	}
-	if err := c.Bind(&req); err != nil || req.Endpoint == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "endpoint is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
 	}
+	// 本家は paramDef の required: ['endpoint', 'auth', 'publickey'] を ajv で検証し、
+	// 最初に見つかった違反を info に載せる。required の検査が properties の型より先。
+	fields := []struct {
+		name string
+		raw  json.RawMessage
+	}{{"endpoint", req.Endpoint}, {"auth", req.Auth}, {"publickey", req.PublicKey}}
+	for _, f := range fields {
+		if f.raw == nil {
+			return c.JSON(http.StatusBadRequest, apierr.InvalidParamClient("#/required", "must have required property '"+f.name+"'"))
+		}
+	}
+	values := make([]string, len(fields))
+	for i, f := range fields {
+		if string(f.raw) == "null" || json.Unmarshal(f.raw, &values[i]) != nil {
+			return c.JSON(http.StatusBadRequest, apierr.InvalidParamClient("#/properties/"+f.name+"/type", "must be string"))
+		}
+	}
+	endpoint, auth, publicKey := values[0], values[1], values[2]
 
+	var userID *string
 	if user != nil {
-		_ = h.repo.DeleteByUserAndEndpoint(user.ID, req.Endpoint)
-	} else {
-		_ = h.repo.DeleteByEndpoint(req.Endpoint)
+		userID = &user.ID
 	}
-
+	subs, err := h.repo.FindByEndpointAuthKey(userID, endpoint, auth, publicKey)
+	if err != nil {
+		slog.Error("sw/unregister: FindByEndpointAuthKey failed", "err", err)
+		return apierr.JSONInternalError(c)
+	}
+	if len(subs) == 0 {
+		return c.NoContent(http.StatusNoContent)
+	}
+	ids := make([]string, len(subs))
+	for i, sub := range subs {
+		ids[i] = sub.ID
+	}
+	if err := h.repo.DeleteByIDs(ids); err != nil {
+		slog.Error("sw/unregister: DeleteByIDs failed", "err", err)
+		return apierr.JSONInternalError(c)
+	}
+	// 消した購読の持ち主ごとに cache を落とす (本家 unregister.ts の refreshCache)。
+	// 落とさないと、解除した端末へ最長 1 時間通知が送られ続ける。
+	seen := make(map[string]struct{}, len(subs))
+	for _, sub := range subs {
+		if _, ok := seen[sub.UserID]; ok {
+			continue
+		}
+		seen[sub.UserID] = struct{}{}
+		h.invalidate(c.Request().Context(), sub.UserID)
+	}
 	return c.NoContent(http.StatusNoContent)
 }

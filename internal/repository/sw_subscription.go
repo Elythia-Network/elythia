@@ -17,7 +17,12 @@ type SwSubscriptionRepository interface {
 	FindByUserID(userID string) ([]*model.SwSubscription, error)
 	Create(sub *model.SwSubscription) error
 	Update(sub *model.SwSubscription) error
-	DeleteByEndpoint(endpoint string) error
+	// FindByEndpointAuthKey returns every subscription matching the
+	// (endpoint, auth, publickey) triple, narrowed to userID when it is non-nil
+	// (upstream sw/unregister findBy). A value that can never be stored matches
+	// nothing and yields an empty result.
+	FindByEndpointAuthKey(userID *string, endpoint, auth, publicKey string) ([]*model.SwSubscription, error)
+	DeleteByIDs(ids []string) error
 	DeleteByUserAndEndpoint(userID, endpoint string) error
 }
 
@@ -69,8 +74,27 @@ func (r *swSubscriptionRepository) Update(sub *model.SwSubscription) error {
 	return r.db.Save(sub).Error
 }
 
-func (r *swSubscriptionRepository) DeleteByEndpoint(endpoint string) error {
-	return r.db.Where(`"endpoint" = ?`, endpoint).Delete(&model.SwSubscription{}).Error
+func (r *swSubscriptionRepository) FindByEndpointAuthKey(userID *string, endpoint, auth, publicKey string) ([]*model.SwSubscription, error) {
+	if !storable(endpoint) || !storable(auth) || !storable(publicKey) || (userID != nil && !storable(*userID)) {
+		return []*model.SwSubscription{}, nil
+	}
+	q := r.db.Where(`"endpoint" = ? AND "auth" = ? AND "publickey" = ?`, endpoint, auth, publicKey)
+	if userID != nil {
+		q = q.Where(`"userId" = ?`, *userID)
+	}
+	var subs []*model.SwSubscription
+	if err := q.Find(&subs).Error; err != nil {
+		return nil, err
+	}
+	return subs, nil
+}
+
+func (r *swSubscriptionRepository) DeleteByIDs(ids []string) error {
+	ids = storableIDs(ids)
+	if len(ids) == 0 {
+		return nil
+	}
+	return r.db.Where(`"id" IN ?`, ids).Delete(&model.SwSubscription{}).Error
 }
 
 func (r *swSubscriptionRepository) DeleteByUserAndEndpoint(userID, endpoint string) error {

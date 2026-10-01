@@ -125,6 +125,11 @@ var DefaultEndpointLimits = map[string]*EndpointLimit{
 	"notifications/create":            {Duration: time.Minute, Max: 10},
 	"notifications/test-notification": {Duration: time.Minute, Max: 10},
 
+	// ── Push notifications ─────────────────────────────
+	// 本家 2026.10.0 の sw/unregister と同じ 1 時間 30 回。credential 無しでも
+	// 叩けるので、未認証は IP bucket に載る。
+	"sw/unregister": {Duration: time.Hour, Max: 30},
+
 	// ── Pages ──────────────────────────────────────────
 	"pages/create": {Duration: time.Hour, Max: 10},
 	"pages/update": {Duration: time.Hour, Max: 300},
