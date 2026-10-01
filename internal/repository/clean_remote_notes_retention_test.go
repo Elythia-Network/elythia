@@ -61,8 +61,9 @@ func TestNoteRepository_DeleteExpiredRemoteNotes_Retention(t *testing.T) {
 			survives: false,
 		},
 		{
-			// upstream は clippedCount で判定するが mk-go はカウンタを維持しない
-			// ため (#2243)、clip_note を直接見ないとクリップを保護できない。
+			// upstream は clippedCount で判定する。mk-go も #1768 から維持しているが、
+			// それより前にクリップした行は 0 のままなので、clip_note を直接見ないと
+			// クリップを保護できない。
 			name: "クリップに入っているノートは残る",
 			protect: func(t *testing.T, noteID string) {
 				clip := &model.Clip{ID: "rtn_clip_" + noteID[8:], UserID: localUser.ID, Name: "c"}
@@ -102,6 +103,18 @@ func TestNoteRepository_DeleteExpiredRemoteNotes_Retention(t *testing.T) {
 			survives: true,
 		},
 		{
+			// ページの作成で pageCount が増える (#3293)。ページの content にしか
+			// 参照が無いので、カウンタを維持していないと保護されない。
+			name: "ローカルのページに埋め込まれたノートは残る",
+			protect: func(t *testing.T, noteID string) {
+				pg := newTestPage("rtn_pg_"+noteID[8:], localUser.ID, "rtn"+noteID[9:])
+				pg.Content = datatypes.JSON([]byte(`[{"type":"note","note":"` + noteID + `"}]`))
+				require.NoError(t, NewPageRepository(testDB).Create(pg))
+				t.Cleanup(func() { cleanupPage(t, pg.ID) })
+			},
+			survives: true,
+		},
+		{
 			// リモートユーザーのリアクションは保護しない (upstream の
 			// `"user"."host" IS NULL` 条件)。連合先の反応で無限に溜まるため。
 			name: "リモートユーザーのリアクションだけなら削除される",
@@ -135,9 +148,8 @@ func TestNoteRepository_DeleteExpiredRemoteNotes_Retention(t *testing.T) {
 }
 
 // TestNoteRepository_DeleteExpiredRemoteNotes_CountersBlockDeletion covers the
-// upstream `clippedCount = 0` / `pageCount = 0` conditions. mk-go はこれらの
-// カウンタを維持しないが、TS から切り戻したインスタンスでは値が入っているので
-// 条件は残してある。
+// upstream `clippedCount = 0` / `pageCount = 0` conditions. mk-go は
+// clippedCount を #1768 から、pageCount を #3293 から維持している。
 func TestNoteRepository_DeleteExpiredRemoteNotes_CountersBlockDeletion(t *testing.T) {
 	nr := NewNoteRepository(testDB)
 	host := "counters.example"
