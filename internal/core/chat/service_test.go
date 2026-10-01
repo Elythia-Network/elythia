@@ -696,28 +696,18 @@ func TestUnreact_PublishesUnreact(t *testing.T) {
 	assert.Equal(t, corechat.EventUnreact, pub.userCalls[0].eventType)
 }
 
-// **消えていないなら publish しない (#3037)。**
-//
-// 以前は無条件に publish していたので、**会話と無関係な利用者**が任意の
-// messageId を投げるだけでその DM / 部屋のストリームにイベントを注入でき、
-// `reaction` は利用者が決める文字列なのでそのまま相手の画面へ届いた。
-// `React` は参加者かどうかを 3 通りで検査するのに、こちらは何も見ていなかった。
-func TestUnreact_NonParticipantCannotInjectEvent(t *testing.T) {
+// **消えていないなら publish しない (#3037)。** 参加者でも、付けていない
+// リアクションを指定されたときはイベントを流さない。
+func TestUnreact_NotRemovedDoesNotPublish(t *testing.T) {
 	to := "bob"
 
 	for _, tt := range []struct {
 		name      string
 		reactions []string
-		actor     string
 		reaction  string
 	}{
-		{"会話と無関係な利用者", []string{"bob/👍"}, "mallory", "👍"},
-		// 参加者でも、付けていないリアクションは消えないので publish しない。
-		{"付けていないリアクション", []string{"bob/👍"}, "bob", "🎉"},
-		{"リアクションが 1 つも無い", nil, "bob", "👍"},
-		// **任意の文字列を流し込めない。** 消せるのは実際に保存されている
-		// `<自分の ID>/<reaction>` だけ。
-		{"任意の文字列", []string{"bob/👍"}, "mallory", "<script>alert(1)</script>"},
+		{"付けていないリアクション", []string{"bob/👍"}, "🎉"},
+		{"リアクションが 1 つも無い", nil, "👍"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			svc, repo, pub := newSvc(t)
@@ -726,14 +716,48 @@ func TestUnreact_NonParticipantCannotInjectEvent(t *testing.T) {
 				Reactions: tt.reactions,
 			}
 
-			require.NoError(t, svc.Unreact(context.Background(), "m1", &model.User{ID: tt.actor}, tt.reaction))
+			require.NoError(t, svc.Unreact(context.Background(), "m1", &model.User{ID: "bob"}, tt.reaction))
 			assert.Empty(t, pub.userCalls, "何も消えていないのにイベントを流している")
 			assert.Empty(t, pub.roomCalls)
 		})
 	}
 }
 
-// room 側も同じ。
+// **参加していない利用者の unreact はアクセスエラーにする。** 会話と無関係な
+// 利用者が任意の messageId と文字列を投げても、何も消さず何も流さない。
+// 存在しない id と同じエラーにして、存在を判別させない。
+func TestUnreact_NonParticipantIsAccessError(t *testing.T) {
+	to := "bob"
+	room := "r1"
+
+	for _, tt := range []struct {
+		name     string
+		msg      *model.ChatMessage
+		actor    string
+		reaction string
+	}{
+		{"DM の第三者", &model.ChatMessage{ID: "m1", FromUserID: "carol", ToUserID: &to, Reactions: []string{"bob/👍"}}, "mallory", "👍"},
+		{"任意の文字列", &model.ChatMessage{ID: "m1", FromUserID: "carol", ToUserID: &to, Reactions: []string{"bob/👍"}}, "mallory", "<script>alert(1)</script>"},
+		// 部屋を抜けた元メンバー。自分の古いリアクションが残っていても、
+		// 消して抜けた部屋へイベントを流すことはできない。
+		{"部屋を抜けた元メンバー", &model.ChatMessage{ID: "m1", FromUserID: "carol", ToRoomID: &room, Reactions: []string{"mallory/👍"}}, "mallory", "👍"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, repo, pub := newSvc(t)
+			repo.Rooms["r1"] = &model.ChatRoom{ID: "r1", OwnerID: "alice"}
+			repo.Messages["m1"] = tt.msg
+			before := append([]string(nil), tt.msg.Reactions...)
+
+			err := svc.Unreact(context.Background(), "m1", &model.User{ID: tt.actor}, tt.reaction)
+			require.ErrorIs(t, err, corechat.ErrMessageAccess)
+			assert.Equal(t, before, []string(repo.Messages["m1"].Reactions), "参加していないのにリアクションが消えている")
+			assert.Empty(t, pub.userCalls, "参加していないのにイベントを流している")
+			assert.Empty(t, pub.roomCalls, "参加していないのにイベントを流している")
+		})
+	}
+}
+
+// room 側: 非メンバーは拒否され、メンバーが自分で付けたものだけ消せて publish される。
 func TestUnreact_RoomPublishesOnlyWhenRemoved(t *testing.T) {
 	room := "r1"
 
@@ -744,11 +768,10 @@ func TestUnreact_RoomPublishesOnlyWhenRemoved(t *testing.T) {
 		Reactions: []string{"alice/👍"},
 	}
 
-	// 非メンバーが投げても何も起きない。
-	require.NoError(t, svc.Unreact(context.Background(), "m1", &model.User{ID: "mallory"}, "👍"))
+	err := svc.Unreact(context.Background(), "m1", &model.User{ID: "mallory"}, "👍")
+	require.ErrorIs(t, err, corechat.ErrMessageAccess)
 	assert.Empty(t, pub.roomCalls)
 
-	// 自分が付けたものは消せて、そのときだけ publish される。
 	require.NoError(t, svc.Unreact(context.Background(), "m1", &model.User{ID: "alice"}, "👍"))
 	require.Len(t, pub.roomCalls, 1)
 	assert.Equal(t, corechat.EventUnreact, pub.roomCalls[0].eventType)
@@ -757,13 +780,23 @@ func TestUnreact_RoomPublishesOnlyWhenRemoved(t *testing.T) {
 func TestReact_MessageNotFound(t *testing.T) {
 	svc, _, _ := newSvc(t)
 	err := svc.React(context.Background(), "ghost", &model.User{ID: "alice"}, "👍")
-	assert.ErrorIs(t, err, corechat.ErrNotFound)
+	assert.ErrorIs(t, err, corechat.ErrMessageAccess)
 }
 
 func TestUnreact_MessageNotFound(t *testing.T) {
 	svc, _, _ := newSvc(t)
 	err := svc.Unreact(context.Background(), "ghost", &model.User{ID: "alice"}, "👍")
-	assert.ErrorIs(t, err, corechat.ErrNotFound)
+	assert.ErrorIs(t, err, corechat.ErrMessageAccess)
+}
+
+// room の行が無い room メッセージもアクセスエラー。
+func TestReactUnreact_RoomMissing(t *testing.T) {
+	svc, repo, pub := newSvc(t)
+	room := "gone"
+	repo.Messages["m1"] = &model.ChatMessage{ID: "m1", FromUserID: "carol", ToRoomID: &room, Reactions: []string{"bob/👍"}}
+	assert.ErrorIs(t, svc.React(context.Background(), "m1", &model.User{ID: "bob"}, "🎉"), corechat.ErrMessageAccess)
+	assert.ErrorIs(t, svc.Unreact(context.Background(), "m1", &model.User{ID: "bob"}, "👍"), corechat.ErrMessageAccess)
+	assert.Empty(t, pub.roomCalls)
 }
 
 // --- #1541: React validation (own/others/member/limit/emoji) ---
@@ -774,7 +807,33 @@ func TestReact_OwnMessage(t *testing.T) {
 	to := "bob"
 	repo.Messages["m1"] = &model.ChatMessage{ID: "m1", FromUserID: "alice", ToUserID: &to}
 	err := svc.React(context.Background(), "m1", &model.User{ID: "alice"}, "👍")
-	assert.ErrorIs(t, err, corechat.ErrCannotReact)
+	assert.ErrorIs(t, err, corechat.ErrMessageAccess)
+}
+
+// 自分が member の部屋に送った自分のメッセージも、react / unreact できない。
+// DM なら受信者の検査でも弾かれるので、自分のメッセージの検査だけが効くのは
+// 部屋のメッセージ。
+// 自分のメッセージには react できない。unreact は本家どおり拒否しない (DM の
+// 送った側も、部屋のメンバーも、自分のリアクションを外せる)。
+func TestReactUnreact_OwnMessage(t *testing.T) {
+	t.Run("room", func(t *testing.T) {
+		svc, repo, pub := newSvc(t)
+		room := "r1"
+		repo.Rooms["r1"] = &model.ChatRoom{ID: "r1", OwnerID: "alice"}
+		repo.Messages["m1"] = &model.ChatMessage{ID: "m1", FromUserID: "alice", ToRoomID: &room, Reactions: []string{"alice/👍"}}
+		assert.ErrorIs(t, svc.React(context.Background(), "m1", &model.User{ID: "alice"}, "👍"), corechat.ErrMessageAccess)
+		require.NoError(t, svc.Unreact(context.Background(), "m1", &model.User{ID: "alice"}, "👍"))
+		assert.Empty(t, repo.Messages["m1"].Reactions)
+		assert.Len(t, pub.roomCalls, 1)
+	})
+	t.Run("dm sender", func(t *testing.T) {
+		svc, repo, _ := newSvc(t)
+		to := "bob"
+		repo.Messages["m1"] = &model.ChatMessage{ID: "m1", FromUserID: "alice", ToUserID: &to, Reactions: []string{"alice/👍"}}
+		assert.ErrorIs(t, svc.React(context.Background(), "m1", &model.User{ID: "alice"}, "👍"), corechat.ErrMessageAccess)
+		require.NoError(t, svc.Unreact(context.Background(), "m1", &model.User{ID: "alice"}, "👍"))
+		assert.Empty(t, repo.Messages["m1"].Reactions)
+	})
 }
 
 // 1-on-1 で受信者でない第三者は react できない。
@@ -783,7 +842,7 @@ func TestReact_OthersMessage1on1(t *testing.T) {
 	to := "bob"
 	repo.Messages["m1"] = &model.ChatMessage{ID: "m1", FromUserID: "carol", ToUserID: &to}
 	err := svc.React(context.Background(), "m1", &model.User{ID: "dave"}, "👍")
-	assert.ErrorIs(t, err, corechat.ErrCannotReact)
+	assert.ErrorIs(t, err, corechat.ErrMessageAccess)
 }
 
 // room メッセージは member でなければ react できない。
@@ -793,7 +852,7 @@ func TestReact_RoomNotMember(t *testing.T) {
 	repo.Rooms["r1"] = &model.ChatRoom{ID: "r1", OwnerID: "alice"}
 	repo.Messages["m1"] = &model.ChatMessage{ID: "m1", FromUserID: "carol", ToRoomID: &room}
 	err := svc.React(context.Background(), "m1", &model.User{ID: "dave"}, "👍")
-	assert.ErrorIs(t, err, corechat.ErrCannotReact)
+	assert.ErrorIs(t, err, corechat.ErrMessageAccess)
 }
 
 // 100 reaction を超えると拒否する。
@@ -807,6 +866,33 @@ func TestReact_TooManyReactions(t *testing.T) {
 	repo.Messages["m1"] = &model.ChatMessage{ID: "m1", FromUserID: "carol", ToUserID: &to, Reactions: reactions}
 	err := svc.React(context.Background(), "m1", &model.User{ID: "bob"}, "👍")
 	assert.ErrorIs(t, err, corechat.ErrTooManyReactions)
+}
+
+// **上限の検査はアクセス検査より後。** 参加していない利用者には、上限に
+// 達したメッセージでも存在しない場合と同じアクセスエラーを返す。
+func TestReact_TooManyReactionsCheckedAfterAccess(t *testing.T) {
+	to := "bob"
+	room := "r1"
+	reactions := make([]string, maxReactionsForTest)
+	for i := range reactions {
+		reactions[i] = "u/x"
+	}
+	for _, tt := range []struct {
+		name string
+		msg  *model.ChatMessage
+	}{
+		{"DM の第三者", &model.ChatMessage{ID: "m1", FromUserID: "carol", ToUserID: &to, Reactions: reactions}},
+		{"部屋の非メンバー", &model.ChatMessage{ID: "m1", FromUserID: "carol", ToRoomID: &room, Reactions: reactions}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, repo, _ := newSvc(t)
+			repo.Rooms["r1"] = &model.ChatRoom{ID: "r1", OwnerID: "alice"}
+			repo.Messages["m1"] = tt.msg
+			err := svc.React(context.Background(), "m1", &model.User{ID: "mallory"}, "👍")
+			require.ErrorIs(t, err, corechat.ErrMessageAccess)
+			assert.NotErrorIs(t, err, corechat.ErrTooManyReactions)
+		})
+	}
 }
 
 // 存在しない custom emoji は ErrNoSuchEmoji。

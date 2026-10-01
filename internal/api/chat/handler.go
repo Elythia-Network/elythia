@@ -1264,7 +1264,7 @@ func (h *Handler) ReactionsCreate(c echo.Context) error {
 	}
 	// service 経由で AddReaction + react stream event を発火する (#1549)。
 	if err := h.svc.React(c.Request().Context(), req.MessageID, user, req.Reaction); err != nil {
-		return apierr.JSONInternalError(c)
+		return reactionErr(c, err, chatReactNoSuchMessageID)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -1282,9 +1282,29 @@ func (h *Handler) ReactionsDelete(c echo.Context) error {
 	}
 	// service 経由で RemoveReaction + unreact stream event を発火する (#1549)。
 	if err := h.svc.Unreact(c.Request().Context(), req.MessageID, user, req.Reaction); err != nil {
-		return apierr.JSONInternalError(c)
+		return reactionErr(c, err, chatUnreactNoSuchMessageID)
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+// Error ids of NO_SUCH_MESSAGE on chat/messages/react and chat/messages/unreact
+// (upstream 2026.10.0). The reactions/create and reactions/delete aliases share
+// the same handlers and therefore the same ids.
+const (
+	chatReactNoSuchMessageID   = "9b5839b9-0ba0-4351-8c35-37082093d200"
+	chatUnreactNoSuchMessageID = "c39ea42f-e3ca-428a-ad57-390e0a711595"
+)
+
+// reactionErr maps a React / Unreact service error to a response. Access
+// errors (missing message, own message, not a participant) all become the
+// same 400 NO_SUCH_MESSAGE; every other error stays a generic 500 as upstream.
+func reactionErr(c echo.Context, err error, noSuchMessageID string) error {
+	// 存在しない場合と参加していない場合を同じ応答にし、メッセージの
+	// 存在をエラーから判別できないようにする (upstream と同じ)。
+	if errors.Is(err, corechat.ErrMessageAccess) {
+		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_MESSAGE", "No such message.", noSuchMessageID))
+	}
+	return apierr.JSONInternalError(c)
 }
 
 // --- Invitations ---
