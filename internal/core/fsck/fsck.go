@@ -16,12 +16,10 @@
 // クリップ側の件数 (`clip.notesCount`) は非正規化しておらず (#2243)、検査の
 // 対象ではない。
 //
-// # 触ってはいけないもの
-//
-// **`note.pageCount` は検査しない。** 本家は PageService でページが参照する
-// ノートのカウンタを増減するが、mk-go はまだ実装していない (#3293)。実件数を数える元も
-// ページの content (JSON) の中にしか無いので、突き合わせると維持していない
-// ことによる差が全件 drift として報告される。
+// `note.pageCount` は #3293 から、ページの作成・更新・削除で増減している
+// (本家 PageService と同じ)。それより前に作ったページが参照するノートは
+// migration 000107 で埋めたが、そちらは増やす向きにしか直さないので、参照が
+// 無いのに値が残っている行 (TS 由来の古い値など) はここで下げる。
 package fsck
 
 import (
@@ -83,8 +81,6 @@ type counterCheck struct {
 }
 
 // counterChecks are the counters fsck knows how to verify.
-//
-// pageCount は**意図的に除外**する (パッケージ doc 参照)。
 var counterChecks = []counterCheck{
 	{
 		table: "user", column: "followersCount",
@@ -135,6 +131,30 @@ var counterChecks = []counterCheck{
 		        LEFT JOIN (SELECT "noteId" AS nid, COUNT(*) AS n FROM "clip_note" GROUP BY "noteId") c
 		          ON c.nid = t.id
 		        WHERE t."clippedCount" <> LEAST(COALESCE(c.n, 0), 32767)`,
+	},
+	{
+		// 参照の集め方は本家 PageService.collectReferencedNotes と同じ
+		// (repository の referencedNoteIDs)。`type: note` の `note` (文字列) を、
+		// `type: section` の `children` を再帰的にたどって集め、ページごとに重複を
+		// 除く。content が配列でないページは何も参照しない。
+		table: "note", column: "pageCount",
+		query: `WITH RECURSIVE blocks AS (
+		          SELECT p.id AS pid, b.value AS blk
+		          FROM "page" p,
+		               jsonb_array_elements(CASE WHEN jsonb_typeof(p.content) = 'array' THEN p.content ELSE '[]'::jsonb END) b
+		          UNION ALL
+		          SELECT blocks.pid, c.value
+		          FROM blocks,
+		               jsonb_array_elements(CASE WHEN blocks.blk->>'type' = 'section' AND jsonb_typeof(blocks.blk->'children') = 'array'
+		                                         THEN blocks.blk->'children' ELSE '[]'::jsonb END) c
+		        ), refs AS (
+		          SELECT DISTINCT pid, blk->>'note' AS nid FROM blocks
+		          WHERE blk->>'type' = 'note' AND jsonb_typeof(blk->'note') = 'string'
+		        )
+		        SELECT t.id AS id, t."pageCount" AS stored, LEAST(COALESCE(r.n, 0), 32767) AS actual
+		        FROM "note" t
+		        LEFT JOIN (SELECT nid, COUNT(*) AS n FROM refs GROUP BY nid) r ON r.nid = t.id
+		        WHERE t."pageCount" <> LEAST(COALESCE(r.n, 0), 32767)`,
 	},
 }
 

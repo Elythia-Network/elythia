@@ -142,13 +142,44 @@ func TestRun_DetectsNoteCounters(t *testing.T) {
 	assert.EqualValues(t, 1, renotes)
 }
 
-// **pageCount を drift 扱いしないこと。**
-//
-// mk-go は pageCount を維持していない (本家は PageService で増減する)。実件数と
-// 突き合わせると、維持していないことによる差が全件 drift として報告される。
-func TestRun_IgnoresUnmaintainedPageCount(t *testing.T) {
-	for _, c := range counterChecks {
-		assert.NotEqualf(t, "pageCount", c.column, "pageCount は維持していない")
+// pageCount は #3293 から維持しているが、それより前に作ったページが参照する
+// ノートは 0 のまま残っている。ページの content から数え直して直す。
+func TestRun_DetectsPageCountDrift(t *testing.T) {
+	db := newTestDB(t)
+	seedUser(t, db, "u1")
+	for _, id := range []string{"n1", "n2", "n3", "3"} {
+		seedNote(t, db, id, "u1")
+	}
+	// p1 は n1 を 2 回 (1 回と数える)、section の中で n2 を参照する。p2 も n1 を参照する。
+	// p3 は content が配列でない (何も参照しない)。n3 は -1 になっている。
+	// children が配列でない section (本家の pages/create は各要素を object としか
+	// 検証しないので作れる) と、文字列でない note (id が "3" のノートと取り違えない)
+	// は数えず、検査全体も落とさない。
+	require.NoError(t, db.Exec(`INSERT INTO "page" (id, title, name, "userId", content) VALUES
+		('p1', 't', 'a', 'u1', '[{"type":"note","note":"n1"},{"type":"note","note":"n1"},{"type":"section","children":[{"type":"note","note":"n2"},{"type":"text","note":"n3"}]},{"type":"section","children":{"type":"note","note":"n3"}}]'),
+		('p2', 't', 'b', 'u1', '[{"type":"note","note":"n1"},{"type":"note","note":3}]'),
+		('p3', 't', 'c', 'u1', '{"type":"note","note":"n3"}')`).Error)
+	require.NoError(t, db.Exec(`UPDATE "note" SET "pageCount" = -1 WHERE id = 'n3'`).Error)
+
+	rep, err := Run(context.Background(), db, Options{})
+	require.NoError(t, err)
+	got := map[string]Drift{}
+	for _, d := range rep.Drifts {
+		if d.Column == "pageCount" {
+			got[d.ID] = d
+		}
+	}
+	require.Len(t, got, 3)
+	assert.EqualValues(t, 2, got["n1"].Actual)
+	assert.EqualValues(t, 1, got["n2"].Actual)
+	assert.EqualValues(t, 0, got["n3"].Actual)
+
+	_, err = Run(context.Background(), db, Options{Fix: true})
+	require.NoError(t, err)
+	rep, err = Run(context.Background(), db, Options{})
+	require.NoError(t, err)
+	for _, d := range rep.Drifts {
+		assert.NotEqual(t, "pageCount", d.Column, "修正後は pageCount のずれが残らない")
 	}
 }
 
