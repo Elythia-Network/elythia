@@ -19,7 +19,6 @@ import (
 	"github.com/shiroha-a/mk/internal/api/pagination"
 	"github.com/shiroha-a/mk/internal/core/notesfilter"
 	"github.com/shiroha-a/mk/internal/core/reaction"
-	corewebhook "github.com/shiroha-a/mk/internal/core/webhook"
 	"github.com/shiroha-a/mk/internal/entity"
 	"github.com/shiroha-a/mk/internal/misc/id"
 	"github.com/shiroha-a/mk/internal/model"
@@ -210,125 +209,12 @@ func (h *Handler) ReportAbuse(c echo.Context) error {
 	if err := h.abuseRepo.Create(report); err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
-	// 各 moderator/admin の admin stream へ newAbuseUserReport を配信する
-	// (#1549, upstream AbuseReportNotificationService)。best-effort。
-	h.notifyModeratorsOfAbuseReport(report)
-	// abuseReport system webhook を発火する (#1542, upstream
-	// AbuseReportService.report → notifySystemWebhook(reports, 'abuseReport'))。
-	// best-effort。
-	h.fireAbuseReportWebhook(report, me, target)
+	// 通知 (in-app / admin stream / abuseReport system webhook) は連合経由の
+	// Flag と同じ処理に任せる (#3256)。best-effort。
+	if h.abuseCreated != nil {
+		h.abuseCreated.NotifyCreated(c.Request().Context(), report, me, target)
+	}
 	return c.NoContent(http.StatusNoContent)
-}
-
-// fireAbuseReportWebhook dispatches the abuseReport system webhook on report
-// creation, mirroring upstream notifySystemWebhook (#1542)。inactive な
-// notification recipient (method=webhook) が指す systemWebhookId を excludes に
-// 渡す。dispatcher 未配線時は no-op。
-func (h *Handler) fireAbuseReportWebhook(report *model.AbuseUserReport, reporter, target *model.User) {
-	if h.systemWebhookDispatcher == nil {
-		return
-	}
-	// reporter / targetUser を UserDetailed で pack する (assignee は作成時点では
-	// 常に nil)。profile は 1 batch で解決する。
-	var profByID map[string]*model.UserProfile
-	if h.userRepo != nil {
-		ids := make([]string, 0, 2)
-		if reporter != nil {
-			ids = append(ids, reporter.ID)
-		}
-		if target != nil {
-			ids = append(ids, target.ID)
-		}
-		if profiles, err := h.userRepo.FindProfilesByUserIDs(ids); err == nil {
-			profByID = make(map[string]*model.UserProfile, len(profiles))
-			for _, p := range profiles {
-				profByID[p.UserID] = p
-			}
-		}
-	}
-	packUser := func(u *model.User) any {
-		if u == nil {
-			return nil
-		}
-		d := entity.PackUserDetailed(u, profByID[u.ID], h.idGen)
-		return &d
-	}
-	createdAt := ""
-	if t, err := h.idGen.ParseTime(report.ID); err == nil {
-		createdAt = t.UTC().Format("2006-01-02T15:04:05.000Z")
-	}
-	// admin/abuse-user-reports の packedAbuseReport と同 shape (#1542)。
-	body := map[string]any{
-		"id":             report.ID,
-		"createdAt":      createdAt,
-		"comment":        report.Comment,
-		"resolved":       false,
-		"reporterId":     report.ReporterID,
-		"targetUserId":   report.TargetUserID,
-		"assigneeId":     nil,
-		"reporter":       packUser(reporter),
-		"targetUser":     packUser(target),
-		"assignee":       nil,
-		"forwarded":      false,
-		"resolvedAs":     nil,
-		"moderationNote": "",
-	}
-	h.systemWebhookDispatcher.DispatchSystemExcluding(corewebhook.SystemEventAbuseReport, body, h.inactiveAbuseWebhookIDs())
-}
-
-// inactiveAbuseWebhookIDs returns the systemWebhookId values of inactive
-// abuse-report-notification recipients (method=webhook). 本家 notifySystemWebhook
-// の withoutWebhookIds 相当 (#1542)。recipientRepo 未配線 / 取得失敗時は nil。
-func (h *Handler) inactiveAbuseWebhookIDs() []string {
-	if h.recipientRepo == nil {
-		return nil
-	}
-	recipients, err := h.recipientRepo.List()
-	if err != nil {
-		return nil
-	}
-	var excludes []string
-	for _, r := range recipients {
-		if r.Method == "webhook" && !r.IsActive && r.SystemWebhookID != nil {
-			excludes = append(excludes, *r.SystemWebhookID)
-		}
-	}
-	return excludes
-}
-
-// notifyModeratorsOfAbuseReport notifies moderators/administrators of a new
-// report through two channels (#1549 / #2868)。未配線の側は no-op。失敗は
-// best-effort で握り潰す (report 自体は永続化済)。
-//
-//   - admin stream の newAbuseUserReport (#1549)。その瞬間に管理画面を開いて
-//     いる人に即座に届く。後から見返せない。通報ごとに流す。
-//   - 通知欄に残る in-app notification (#2868)。**upstream には無い** —
-//     あちらは email / system webhook / admin stream しか持たない。連打で
-//     通知欄が埋まらないよう core/abuse 側で絞る (#3200)。
-func (h *Handler) notifyModeratorsOfAbuseReport(report *model.AbuseUserReport) {
-	if h.abuseInAppNotifier != nil {
-		h.abuseInAppNotifier.NotifyNewReport(context.Background(), report)
-	}
-	if h.moderatorLister == nil || h.abuseNotifier == nil {
-		return
-	}
-	mods, err := h.moderatorLister.GetModerators()
-	if err != nil {
-		slog.Warn("report-abuse: list moderators failed", "err", err)
-		return
-	}
-	// upstream AbuseReportNotificationService.notifyAdminStream は
-	// {id, targetUserId, reporterId, comment} のみを送る (misskey-js
-	// newAbuseUserReport 型も同4 field)。shape を厳密に揃える。
-	body := map[string]any{
-		"id":           report.ID,
-		"targetUserId": report.TargetUserID,
-		"reporterId":   report.ReporterID,
-		"comment":      report.Comment,
-	}
-	for _, m := range mods {
-		h.abuseNotifier.PublishAdminEvent(m.ID, "newAbuseUserReport", body)
-	}
 }
 
 // Reactions handles POST /api/users/reactions.
