@@ -1,8 +1,13 @@
 package repository
 
 import (
+	"encoding/json"
+	"errors"
+
 	"github.com/shiroha-a/mk/internal/model"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // PageRepository provides data access for the `page` table.
@@ -37,8 +42,15 @@ func NewPageRepository(db *gorm.DB) PageRepository {
 	return &pageRepository{db: db}
 }
 
+// Create inserts p and increments pageCount of every note its content
+// references, in one transaction (upstream PageService.create).
 func (r *pageRepository) Create(p *model.Page) error {
-	return r.db.Create(p).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(p).Error; err != nil {
+			return err
+		}
+		return adjustNotePageCount(tx, referencedNoteIDs(p.Content), 1)
+	})
 }
 
 func (r *pageRepository) FindByID(id string) (*model.Page, error) {
@@ -77,15 +89,150 @@ func (r *pageRepository) FindByUserAndName(userID, name string) (*model.Page, er
 	return &p, nil
 }
 
+// UpdateFields applies fields to the page. When fields replaces the content,
+// pageCount of notes the page stopped referencing is decremented and that of
+// newly referenced notes is incremented, in the same transaction
+// (upstream PageService.update).
+//
+// 旧 content は行をロックしてから読む。ロックせずに読むと、同じページへの並行な
+// 更新が同じ旧 content を差分の基準にして、増減を二重に数える (本家も
+// `for_no_key_update` でロックする)。
 func (r *pageRepository) UpdateFields(pageID string, fields map[string]any) error {
 	if len(fields) == 0 {
 		return nil
 	}
-	return r.db.Model(&model.Page{}).Where("id = ?", pageID).Updates(fields).Error
+	newContent, hasContent := fields["content"]
+	if !hasContent {
+		return r.db.Model(&model.Page{}).Where("id = ?", pageID).Updates(fields).Error
+	}
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		var cur model.Page
+		err := tx.Clauses(clause.Locking{Strength: "NO KEY UPDATE"}).
+			Select("id", "content").First(&cur, "id = ?", pageID).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if err := tx.Model(&model.Page{}).Where("id = ?", pageID).Updates(fields).Error; err != nil {
+			return err
+		}
+		before := referencedNoteIDs(cur.Content)
+		after := referencedNoteIDs(contentBytes(newContent))
+		if err := adjustNotePageCount(tx, idsMissingFrom(before, after), -1); err != nil {
+			return err
+		}
+		return adjustNotePageCount(tx, idsMissingFrom(after, before), 1)
+	})
 }
 
+// Delete removes the page and decrements pageCount of every note its content
+// references, in one transaction (upstream PageService.delete).
+//
+// 引数の p.Content は呼び出し側が読んだ時点の値なので使わず、ロックして読み直した
+// content で数える。消えていれば何もしない (二重に減らさない)。
 func (r *pageRepository) Delete(p *model.Page) error {
-	return r.db.Delete(p).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		var cur model.Page
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id", "content").First(&cur, "id = ?", p.ID).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if err := tx.Delete(&model.Page{}, "id = ?", p.ID).Error; err != nil {
+			return err
+		}
+		return adjustNotePageCount(tx, referencedNoteIDs(cur.Content), -1)
+	})
+}
+
+// referencedNoteIDs returns the distinct note IDs a page content references.
+// Mirrors upstream PageService.collectReferencedNotes: `note` blocks whose
+// `note` is a string, descending into `section` blocks' `children`.
+// Unreadable content references nothing.
+func referencedNoteIDs(content []byte) []string {
+	var blocks []any
+	if err := json.Unmarshal(content, &blocks); err != nil {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	var out []string
+	var walk func([]any)
+	walk = func(bs []any) {
+		for _, b := range bs {
+			m, ok := b.(map[string]any)
+			if !ok {
+				continue
+			}
+			switch m["type"] {
+			case "note":
+				if id, ok := m["note"].(string); ok {
+					if _, dup := seen[id]; !dup {
+						seen[id] = struct{}{}
+						out = append(out, id)
+					}
+				}
+			case "section":
+				if children, ok := m["children"].([]any); ok {
+					walk(children)
+				}
+			}
+		}
+	}
+	walk(blocks)
+	return out
+}
+
+// contentBytes converts the value UpdateFields received for `content`.
+// page_service は jsonb 列へ渡すために string にして渡す (#3037)。
+func contentBytes(v any) []byte {
+	switch c := v.(type) {
+	case string:
+		return []byte(c)
+	case []byte:
+		return c
+	case json.RawMessage:
+		return c
+	case datatypes.JSON:
+		return c
+	default:
+		return nil
+	}
+}
+
+// idsMissingFrom returns the IDs in a that are not in b.
+func idsMissingFrom(a, b []string) []string {
+	in := make(map[string]struct{}, len(b))
+	for _, id := range b {
+		in[id] = struct{}{}
+	}
+	var out []string
+	for _, id := range a {
+		if _, ok := in[id]; !ok {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// adjustNotePageCount adds delta to pageCount of the given notes, keeping it
+// within the smallint range (0..32767).
+//
+// 0 で止めるのは他の note のカウンタと同じ (#3291)。上限で止めるのは、列の範囲を
+// 超えてページの作成・更新ごと失敗させないため。**int に広げてから足す** —
+// smallint のまま足すと LEAST に届く前に smallint の範囲外で落ちる。存在しない
+// ノートの id は 0 行の更新になるだけ。
+func adjustNotePageCount(tx *gorm.DB, noteIDs []string, delta int) error {
+	noteIDs = storableIDs(noteIDs)
+	if len(noteIDs) == 0 {
+		return nil
+	}
+	return tx.Model(&model.Note{}).Where("id IN ?", noteIDs).
+		UpdateColumn("pageCount", gorm.Expr(`LEAST(GREATEST("pageCount"::int + ?::int, 0), 32767)`, delta)).Error
 }
 
 // ListByUser returns the pages owned by userID with cursor (sinceID/untilID)
