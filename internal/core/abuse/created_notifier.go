@@ -5,7 +5,6 @@ import (
 	"log/slog"
 
 	corewebhook "github.com/shiroha-a/mk/internal/core/webhook"
-	"github.com/shiroha-a/mk/internal/entity"
 	"github.com/shiroha-a/mk/internal/misc/id"
 	"github.com/shiroha-a/mk/internal/model"
 )
@@ -33,11 +32,6 @@ type RecipientLister interface {
 	List() ([]*model.AbuseReportNotificationRecipient, error)
 }
 
-// ProfileFinder resolves user profiles for packing users into the webhook.
-type ProfileFinder interface {
-	FindProfilesByUserIDs(ids []string) ([]*model.UserProfile, error)
-}
-
 // CreatedNotifier tells moderators about a newly created abuse report through
 // every channel: the in-app notification, the admin stream and the
 // `abuseReport` system webhook (#3256).
@@ -58,7 +52,7 @@ type CreatedNotifier struct {
 
 	webhook    SystemWebhookDispatcher
 	recipients RecipientLister
-	profiles   ProfileFinder
+	lookups    UserLookups
 	idGen      id.Generator
 }
 
@@ -74,10 +68,10 @@ func NewCreatedNotifier(inApp ReportInAppNotifier, mods ModeratorLister, admin A
 // (無効にした通知先を除外に使う) が、通報の入口 (users の handler と
 // federation の processor) を組み立てた後でしか揃わない。同じ notifier を
 // 先に両方へ渡し、Webhook は後から足す。
-func (n *CreatedNotifier) SetWebhook(d SystemWebhookDispatcher, recipients RecipientLister, profiles ProfileFinder, idGen id.Generator) {
+func (n *CreatedNotifier) SetWebhook(d SystemWebhookDispatcher, recipients RecipientLister, lookups UserLookups, idGen id.Generator) {
 	n.webhook = d
 	n.recipients = recipients
-	n.profiles = profiles
+	n.lookups = lookups
 	n.idGen = idGen
 }
 
@@ -118,60 +112,12 @@ func (n *CreatedNotifier) publishAdminStream(report *model.AbuseUserReport) {
 }
 
 // dispatchWebhook fires the abuseReport system webhook (#1542)。本文は
-// admin/abuse-user-reports の packedAbuseReport と同じ形。
+// WebhookPayload (本家と同じ形、#3260)。作成時点なので担当者は居ない。
 func (n *CreatedNotifier) dispatchWebhook(report *model.AbuseUserReport, reporter, target *model.User) {
 	if n.webhook == nil {
 		return
 	}
-	var profByID map[string]*model.UserProfile
-	if n.profiles != nil {
-		ids := make([]string, 0, 2)
-		for _, u := range []*model.User{reporter, target} {
-			if u != nil {
-				ids = append(ids, u.ID)
-			}
-		}
-		if profiles, err := n.profiles.FindProfilesByUserIDs(ids); err == nil {
-			profByID = make(map[string]*model.UserProfile, len(profiles))
-			for _, p := range profiles {
-				profByID[p.UserID] = p
-			}
-		}
-	}
-	packUser := func(u *model.User) any {
-		if u == nil {
-			return nil
-		}
-		var d entity.UserDetailed
-		if n.idGen != nil {
-			d = entity.PackUserDetailed(u, profByID[u.ID], n.idGen)
-		} else {
-			d = entity.PackUserDetailed(u, profByID[u.ID])
-		}
-		return &d
-	}
-	createdAt := ""
-	if n.idGen != nil {
-		if t, err := n.idGen.ParseTime(report.ID); err == nil {
-			createdAt = t.UTC().Format("2006-01-02T15:04:05.000Z")
-		}
-	}
-	// assignee / resolvedAs は作成時点では常に空。forwarded も作成時点では false。
-	body := map[string]any{
-		"id":             report.ID,
-		"createdAt":      createdAt,
-		"comment":        report.Comment,
-		"resolved":       false,
-		"reporterId":     report.ReporterID,
-		"targetUserId":   report.TargetUserID,
-		"assigneeId":     nil,
-		"reporter":       packUser(reporter),
-		"targetUser":     packUser(target),
-		"assignee":       nil,
-		"forwarded":      false,
-		"resolvedAs":     nil,
-		"moderationNote": "",
-	}
+	body := WebhookPayload(report, reporter, target, nil, n.lookups, n.idGen)
 	n.webhook.DispatchSystemExcluding(corewebhook.SystemEventAbuseReport, body, n.inactiveWebhookIDs())
 }
 

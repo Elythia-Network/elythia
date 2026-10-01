@@ -2555,8 +2555,21 @@ func (s *stubSystemWebhookDispatcher) DispatchSystemTest(webhookID, eventType st
 func TestResolveAbuseReport_FiresResolvedWebhook(t *testing.T) {
 	h, _, _, _ := newTestHandler(t)
 	abuseRepo := testutil.NewMockAbuseReportRepository()
-	abuseRepo.Reports["r1"] = &model.AbuseUserReport{ID: "r1", ReporterID: "rep1", TargetUserID: "tgt1"}
+	reporterHost := "remote.example"
+	assigneeID := "mod1"
+	abuseRepo.Reports["r1"] = &model.AbuseUserReport{
+		ID: "r1", ReporterID: "rep1", TargetUserID: "tgt1", ReporterHost: &reporterHost,
+		Reporter:   &model.User{ID: "rep1", Username: "rep", Host: &reporterHost, FollowersCount: 3, Emojis: []string{"blob"}},
+		AssigneeID: &assigneeID, Assignee: &model.User{ID: assigneeID, Username: "mod"},
+	}
 	h.SetAbuseRepo(abuseRepo)
+	instanceRepo := testutil.NewMockInstanceRepository()
+	instanceName := "Remote"
+	instanceRepo.Instances[reporterHost] = &model.Instance{Host: reporterHost, Name: &instanceName}
+	h.SetInstanceRepo(instanceRepo)
+	emojiRepo := testutil.NewMockEmojiRepository()
+	emojiRepo.Emojis["e1"] = &model.Emoji{ID: "e1", Name: "blob", Host: &reporterHost, PublicURL: "https://remote.example/blob.png"}
+	h.SetEmojiRepo(emojiRepo)
 
 	recipientRepo := testutil.NewMockAbuseReportNotificationRecipientRepository()
 	inactiveID := "wh_inactive"
@@ -2591,6 +2604,20 @@ func TestResolveAbuseReport_FiresResolvedWebhook(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &body))
 	assert.Equal(t, "r1", body["id"])
 	assert.Equal(t, true, body["resolved"])
+	// 管理画面の API の形ではなく、本家の Webhook の形で送る (#3260)。
+	assert.Equal(t, "remote.example", body["reporterHost"])
+	assert.Contains(t, body, "targetUserHost")
+	reporter, ok := body["reporter"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "rep", reporter["username"])
+	assert.NotContains(t, reporter, "followersCount", "利用者は UserLite で載せる")
+	instance, ok := reporter["instance"].(map[string]any)
+	require.True(t, ok, "リモートの通報者に instance を付ける")
+	assert.Equal(t, "Remote", instance["name"])
+	assert.Equal(t, map[string]any{"blob": "https://remote.example/blob.png"}, reporter["emojis"], "絵文字の URL を解決する")
+	assignee, ok := body["assignee"].(map[string]any)
+	require.True(t, ok, "担当者も載せる")
+	assert.Equal(t, "mod", assignee["username"])
 }
 
 // dispatcher 未配線時は webhook を発火しないが resolve 自体は成功する (#1723)。
