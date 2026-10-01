@@ -10,6 +10,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	corenote "github.com/shiroha-a/mk/internal/core/note"
+	"github.com/shiroha-a/mk/internal/core/ugcvisibility"
 	"github.com/shiroha-a/mk/internal/model"
 	"github.com/shiroha-a/mk/internal/repository"
 )
@@ -239,9 +240,12 @@ type feedHandler struct {
 	// parseTime は note.id から投稿日時を得る。upstream も
 	// idService.parse(note.id).date を使っており、note 行に createdAt は無い。
 	parseTime func(id string) (time.Time, error)
-	profiles  func(userID string) *model.UserProfile
-	avatarURL func(u *model.User) string
-	toHTML    func(text string) string
+	// ugcVisibility は meta.ugcVisibilityForVisitor の live lookup。nil なら
+	// metaUGCVisibility の既定 ('local') として扱う。
+	ugcVisibility func() string
+	profiles      func(userID string) *model.UserProfile
+	avatarURL     func(u *model.User) string
+	toHTML        func(text string) string
 	// now は時間窓の判定に使う現在時刻。nil なら time.Now (テストで固定する)。
 	now func() time.Time
 }
@@ -278,6 +282,12 @@ func (h *feedHandler) serve(c echo.Context, username string, render func(*feedDa
 	if u.IsSuspended || u.RequireSigninToViewContents {
 		return echo.NewHTTPError(http.StatusNotFound)
 	}
+	// upstream getFeed は ugcVisibilityForVisitor が 'none' なら feed を返さない
+	// (404)。'local' で remote 利用者を外す条件は、この feed がローカル利用者
+	// だけを引く (feedUserResolver) ので常に満たされない。
+	if ugcvisibility.HidesAll(h.ugcVisibilityNow()) {
+		return echo.NewHTTPError(http.StatusNotFound)
+	}
 
 	data := h.build(u)
 	out, err := render(data)
@@ -285,6 +295,19 @@ func (h *feedHandler) serve(c echo.Context, username string, render func(*feedDa
 		return echo.NewHTTPError(http.StatusInternalServerError)
 	}
 	return c.Blob(http.StatusOK, contentType, out)
+}
+
+// HasUGCVisibility reports whether the meta.ugcVisibilityForVisitor lookup
+// was wired. 未配線だと ugcVisibilityNow が既定の `local` に倒れ、`none` に
+// しても feed が 404 にならないので、起動時検査で拾う。
+func (h *feedHandler) HasUGCVisibility() bool { return h.ugcVisibility != nil }
+
+// ugcVisibilityNow resolves the current meta.ugcVisibilityForVisitor.
+func (h *feedHandler) ugcVisibilityNow() string {
+	if h.ugcVisibility == nil {
+		return defaultUGCVisibilityForVisitor
+	}
+	return h.ugcVisibility()
 }
 
 func (h *feedHandler) build(u *model.User) *feedData {

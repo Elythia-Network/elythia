@@ -1794,6 +1794,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	notesHandler.SetClipRepos(clipRepo, clipNoteRepo, clipFavoriteRepo) // #1554: notes/clips
 
 	notehide.SetFollowingRepo(followingRepo)
+	// 匿名 viewer へ pack する note を ugcVisibilityForVisitor='none' で hide する
+	// (upstream NoteEntityService.shouldHideNote)。管理画面の変更を再起動なしで
+	// 反映するよう、起動時の値ではなく都度引く。
+	notehide.SetUGCVisibilityLookup(func() string { return metaUGCVisibility(metaRepo) })
 	// LocalTimeline / GlobalTimeline / HybridTimeline で ltlAvailable /
 	// gtlAvailable role policy を gate するために配線 (#1026)。匿名 viewer に
 	// 対しては GetUserPolicies("") が base policies を返すので、admin が
@@ -2487,11 +2491,12 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		feedHost = pu.Host
 	}
 	feedH := &feedHandler{
-		baseURL:   s.config.URL,
-		host:      feedHost,
-		users:     feedUserResolver{repo: userRepo},
-		notes:     noteRepo,
-		parseTime: idGen.ParseTime,
+		baseURL:       s.config.URL,
+		host:          feedHost,
+		users:         feedUserResolver{repo: userRepo},
+		notes:         noteRepo,
+		parseTime:     idGen.ParseTime,
+		ugcVisibility: func() string { return metaUGCVisibility(metaRepo) },
 		profiles: func(userID string) *model.UserProfile {
 			p, err := userRepo.FindProfileByUserID(userID)
 			if err != nil {
@@ -4491,6 +4496,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"匿名 visitor への channels/timeline の露出を ugcVisibilityForVisitor で gate できない"},
 		{"clips.ugcVisibility", clipsHandler.HasUGCVisibility(),
 			"匿名 visitor への clips/notes の露出を ugcVisibilityForVisitor で gate できない"},
+		{"feed.ugcVisibility", feedH.HasUGCVisibility(),
+			"ugcVisibilityForVisitor が none でも Web の feed (.rss / .atom / .json) を返す"},
 
 		// ここから #2709 review。上と収載基準が同じなのに落ちていた分
 		// (無条件配線で、nil が空集合として素通しされる = 緩い側へ倒れる)。
