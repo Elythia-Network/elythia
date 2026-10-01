@@ -127,7 +127,7 @@ func TestCheckRootUser(t *testing.T) {
 	// **DDL で再現しない (#3037 レビュー)。** `ALTER TABLE meta RENAME` は
 	// このパッケージの schema を書き換えるので、テストが途中で死ぬと
 	// `meta` の無い schema が残る。`ApplyMigrations` は台帳を見て作り直さない
-	// ため、以後このパッケージは永久に落ちる (CLAUDE.md §4 / #2756)。
+	// ため、以後このパッケージは永久に落ちる (docs/testing.md「DB を使うテストの分離」/ #2756)。
 	// 閉じた接続を渡せば同じ枝を踏めて、共有状態に触らない。
 	t.Run("meta を読めないなら fail", func(t *testing.T) {
 		closed := testutil.MustOpenTestDB()

@@ -108,7 +108,7 @@ func packDriveFile(f *model.DriveFile, idGen id.Generator, self bool) DriveFileE
 	}
 	var props DriveFileProperties
 	// model.Properties は datatypes.JSON (=[]byte)。パース失敗時は空struct
-	// で返して UI を壊さない (CLAUDE.md「エラー処理は best-effort」方針)。
+	// で返して UI を壊さない。
 	if len(f.Properties) > 0 {
 		_ = json.Unmarshal(f.Properties, &props)
 	}
