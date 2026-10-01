@@ -8319,13 +8319,14 @@ func (m *MockRelayRepository) ListByStatus(status string) ([]*model.Relay, error
 	return out, nil
 }
 
-func (m *MockRelayRepository) UpdateStatus(id, status string) error {
+// UpdateStatusFrom sets the status to `to` only when it is currently `from`.
+func (m *MockRelayRepository) UpdateStatusFrom(id, from, to string) (bool, error) {
 	r, ok := m.Relays[id]
-	if !ok {
-		return ErrNotFound
+	if !ok || r.Status != from {
+		return false, nil
 	}
-	r.Status = status
-	return nil
+	r.Status = to
+	return true, nil
 }
 
 func (m *MockRelayRepository) Delete(id string) error {

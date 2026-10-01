@@ -38,15 +38,16 @@ var (
 // for the inbox processor to toggle relay status on Accept / Reject
 // activities whose id matches `{baseURL}/activities/follow-relay/{id}`.
 type RelayStatusMarker interface {
+	// MarkAccepted / MarkRejected only change a relay that is still
+	// "requesting"; answers for an already settled relay are ignored.
 	MarkAccepted(ctx context.Context, id string) error
 	MarkRejected(ctx context.Context, id string) error
 	// FindByID returns the relay row identified by id, or an error when no
 	// such row exists.
 	//
 	// status を書き換える前に「送信元 actor がその relay 自身か」を確かめる
-	// ために要る。行が持っている identity は inbox URI だけなので、
-	// 突き合わせはその host と act.actor の host で行う
-	// (relayActorOwnsRelay)。
+	// ために要る。行が持っている identity は inbox URI だけなので、actor の
+	// inbox / sharedInbox との完全一致 (relayActorInboxMatches) で突き合わせる。
 	FindByID(ctx context.Context, id string) (*model.Relay, error)
 }
 
@@ -892,16 +893,13 @@ func matchFollowRelayID(uri, localBaseURL string) string {
 // relayActorOwnsRelay reports whether actorURI belongs to the same host as the
 // relay's registered inbox.
 //
-// relay 行は inbox URI しか identity を持たないので host で突き合わせる。
 // host は hostFromURI で punycode + 小文字に正規化してから比較するため、
 // `https://Relay.Example/actor` と `https://relay.example/inbox` は一致する。
 // port は host の一部として扱う (別 authority を同一視しない安全側)。
 //
-// 既知の限界: relay と同じ host に別 actor を立てられる相手 (マルチテナントな
-// relay サーバー) は依然としてその relay の status を動かせる。行が inbox URI
-// しか持たない以上ここが上限で、actor の advertise する inbox と管理者が
-// 登録した inbox が完全一致する保証は無い (末尾スラッシュ等で正当な relay を
-// 落とすほうが害が大きい)。
+// これは前段の安価な絞り込みで、本判定は relayActorInboxMatches (本家と同じ
+// inbox / sharedInbox の完全一致)。host だけだと、relay と同じ host に別 actor
+// を立てられる相手 (マルチテナントな relay サーバー) が status を動かせる。
 func relayActorOwnsRelay(actorURI string, rel *model.Relay) bool {
 	if rel == nil || rel.Inbox == "" || actorURI == "" {
 		return false
@@ -917,24 +915,57 @@ func relayActorOwnsRelay(actorURI string, rel *model.Relay) bool {
 	return actorHost == inboxHost
 }
 
+// relayActorInboxMatches reports whether the actor's inbox or sharedInbox is
+// exactly the inbox registered for the relay.
+//
+// 本家 2026.10.0 RelayService.updateRequestingRelayStatus の
+// `actor.inbox === relay.inbox || actor.sharedInbox === relay.inbox` と同じ
+// 完全一致にする。actor の inbox / sharedInbox は取り込み時に actor の host へ
+// 縛られている (resolver の validateActor 相当) ので、他 host の actor が relay
+// の inbox を名乗ることはできない。末尾スラッシュなどの表記揺れで一致しない
+// relay は本家でも requesting のまま止まるので、互換の範囲では緩めない。
+func relayActorInboxMatches(actor *model.User, rel *model.Relay) bool {
+	if actor == nil || rel == nil || rel.Inbox == "" {
+		return false
+	}
+	if actor.Inbox != nil && *actor.Inbox == rel.Inbox {
+		return true
+	}
+	return actor.SharedInbox != nil && *actor.SharedInbox == rel.Inbox
+}
+
 // relayStatusChangeAllowed reports whether the actor that signed an inbound
 // Accept / Reject may flip the status of the relay row referenced by relayID.
 //
 // kind はログ用の activity 種別 ("Accept" / "Reject")。検証に落ちたケースは
-// 呼び出し側で状態を変えずに drop する (ack して retry しない)。
-func (p *Processor) relayStatusChangeAllowed(actorURI, relayID, kind string) bool {
+// 呼び出し側で状態を変えずに drop する (ack して retry しない)。actor を引けない
+// ときだけは error を返し、呼び出し側はそれを返して再試行させる。
+func (p *Processor) relayStatusChangeAllowed(actorURI, relayID, kind string) (bool, error) {
 	rel, err := p.relayMarker.FindByID(context.Background(), relayID)
 	if err != nil || rel == nil {
 		slog.Info("federation: dropping relay "+kind+" for unknown relay",
 			"actor", actorURI, "relayId", relayID, "err", err)
-		return false
+		return false, nil
 	}
 	if !relayActorOwnsRelay(actorURI, rel) {
 		slog.Warn("federation: dropping forged relay "+kind+" (actor is not the relay)",
 			"actor", actorURI, "relayId", relayID, "relayInbox", rel.Inbox)
-		return false
+		return false, nil
 	}
-	return true
+	// 署名検証で actor は取り込み済みなので、通常は DB から引けて fetch しない。
+	// 引けないときは捨てずにエラーを返して再試行させる。通常の Follow の
+	// Accept / Reject と同じ扱いで、relay は Accept を送り直さないので、捨てると
+	// requesting のまま止まる。
+	actor, err := p.resolver.ResolveActor(actorURI)
+	if err != nil {
+		return false, fmt.Errorf("relay %s: resolve actor: %w", kind, err)
+	}
+	if !relayActorInboxMatches(actor, rel) {
+		slog.Warn("federation: dropping relay "+kind+" (actor inbox does not match relay inbox)",
+			"actor", actorURI, "relayId", relayID, "relayInbox", rel.Inbox)
+		return false, nil
+	}
+	return true, nil
 }
 
 // SetReversi wires the reversi federation dependencies. When any of the
@@ -1355,7 +1386,9 @@ func (p *Processor) handleUndoAnnounce(act genericActivity, inner genericActivit
 // followerからのフォローリクエストを承認した場合に、フォロー関係を確立する。
 // inner.id が自ホストの follow-relay URI で、かつ送信元 actor がその relay
 // 自身であれば relay の Accept とみなし、RelayStatusMarker.MarkAccepted を
-// 呼び出す (所有権検証は upstream に無い mk-go 側の硬化)。
+// 呼び出す。actor の inbox / sharedInbox と relay の inbox の完全一致は本家
+// 2026.10.0 と同じで、id が自ホストの URI であることと actor の host の照合は
+// mk-go 側の追加。status が requesting の relay だけが動く (MarkAccepted 側)。
 func (p *Processor) handleAccept(act genericActivity) error {
 	// こちらが送った QuoteRequest への承認 (FEP-044f、#3234)。object が id だけの
 	// 文字列でも来るので、下の Follow 用の解釈より先に見る。
@@ -1385,7 +1418,11 @@ func (p *Processor) handleAccept(act genericActivity) error {
 		// 送信元がその relay 自身でなければ状態を変えずに drop する。
 		// 通さないと、署名が通る任意のリモート actor が未承認 / 拒否済みの
 		// relay を accepted に倒せ、全公開ノートがその inbox へ流れ出す。
-		if !p.relayStatusChangeAllowed(act.Actor, relayID, "Accept") {
+		allowed, err := p.relayStatusChangeAllowed(act.Actor, relayID, "Accept")
+		if err != nil {
+			return err
+		}
+		if !allowed {
 			return nil
 		}
 		return p.relayMarker.MarkAccepted(context.Background(), relayID)
@@ -2509,7 +2546,11 @@ func (p *Processor) handleReject(act genericActivity) error {
 	if relayID := matchFollowRelayID(inner.ID, p.localBaseURL); relayID != "" && p.relayMarker != nil {
 		// Accept 側と同じ理由で送信元を検証する。こちらを通すと稼働中の
 		// relay 配送を任意の actor が無言で止められる。
-		if !p.relayStatusChangeAllowed(act.Actor, relayID, "Reject") {
+		allowed, err := p.relayStatusChangeAllowed(act.Actor, relayID, "Reject")
+		if err != nil {
+			return err
+		}
+		if !allowed {
 			return nil
 		}
 		return p.relayMarker.MarkRejected(context.Background(), relayID)

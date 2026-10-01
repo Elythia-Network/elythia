@@ -1825,11 +1825,28 @@ func relayAcceptBody(kind, actor, activityID string) []byte {
 	}`)
 }
 
+// seedRelayActor registers an already-fetched remote actor so the relay
+// ownership check resolves it from the user repository without fetching.
+func seedRelayActor(repo *testutil.MockUserRepository, uri, inbox, sharedInbox string) {
+	host := "relay.example"
+	now := time.Now()
+	u := &model.User{ID: "relayactor_" + uri, Username: "relay", UsernameLower: "relay",
+		Host: &host, URI: &uri, LastFetchedAt: &now}
+	if inbox != "" {
+		u.Inbox = &inbox
+	}
+	if sharedInbox != "" {
+		u.SharedInbox = &sharedInbox
+	}
+	repo.Users[u.ID] = u
+}
+
 func TestProcess_AcceptFollowRelay_MarksAccepted(t *testing.T) {
-	p, _, _, _ := newProcessor(t, aliceActor)
+	p, repo, _, _ := newProcessor(t, aliceActor)
 	p.SetLocalBaseURL("https://example.com")
 	marker := newFakeRelayMarker("rel123", "https://relay.example/inbox")
 	p.SetRelayMarker(marker)
+	seedRelayActor(repo, "https://relay.example/actor", "https://relay.example/inbox", "")
 
 	// 送信元は relay 自身 (inbox と同じ host)。
 	body := relayAcceptBody("Accept", "https://relay.example/actor",
@@ -1840,10 +1857,11 @@ func TestProcess_AcceptFollowRelay_MarksAccepted(t *testing.T) {
 }
 
 func TestProcess_RejectFollowRelay_MarksRejected(t *testing.T) {
-	p, _, _, _ := newProcessor(t, aliceActor)
+	p, repo, _, _ := newProcessor(t, aliceActor)
 	p.SetLocalBaseURL("https://example.com")
 	marker := newFakeRelayMarker("rel456", "https://relay.example/inbox")
 	p.SetRelayMarker(marker)
+	seedRelayActor(repo, "https://relay.example/actor", "https://relay.example/inbox", "")
 
 	body := relayAcceptBody("Reject", "https://relay.example/actor",
 		"https://example.com/activities/follow-relay/rel456")
@@ -1855,10 +1873,11 @@ func TestProcess_RejectFollowRelay_MarksRejected(t *testing.T) {
 // TestProcess_FollowRelay_HostNormalizedMatch は host 比較が punycode / 大小文字を
 // 揃えてから行われることを固定する (素の文字列比較へ退行すると落ちる)。
 func TestProcess_FollowRelay_HostNormalizedMatch(t *testing.T) {
-	p, _, _, _ := newProcessor(t, aliceActor)
+	p, repo, _, _ := newProcessor(t, aliceActor)
 	p.SetLocalBaseURL("https://example.com")
 	marker := newFakeRelayMarker("rel1", "https://xn--eckve.example/inbox")
 	p.SetRelayMarker(marker)
+	seedRelayActor(repo, "https://パイ.Example/actor", "https://xn--eckve.example/inbox", "")
 
 	body := relayAcceptBody("Accept", "https://パイ.Example/actor",
 		"https://example.com/activities/follow-relay/rel1")
@@ -1887,6 +1906,44 @@ func TestProcess_AcceptFollowRelay_ForeignActorDropped(t *testing.T) {
 			// 行の lookup 自体は行われている (= 検証を通って落ちた)。
 			assert.Equal(t, []string{"rel123"}, marker.lookups)
 		})
+	}
+}
+
+// 本家 2026.10.0 updateRequestingRelayStatus: 同じ host でも、inbox /
+// sharedInbox が relay の inbox と完全一致しない actor は relay を動かせない
+// (マルチテナントな relay サーバーで隣の actor が status を倒す経路)。
+// sharedInbox が一致すれば relay 自身として扱う。
+func TestProcess_FollowRelay_ExactInboxMatch(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		inbox, sharedInbox string
+		want               bool
+	}{
+		{"same host, other inbox", "https://relay.example/users/other/inbox", "", false},
+		{"same host, other inbox and shared inbox", "https://relay.example/users/other/inbox", "https://relay.example/other-shared", false},
+		{"trailing slash differs", "https://relay.example/inbox/", "", false},
+		{"no inbox at all", "", "", false},
+		{"shared inbox matches", "https://relay.example/users/relay/inbox", "https://relay.example/inbox", true},
+	} {
+		for _, kind := range []string{"Accept", "Reject"} {
+			t.Run(tc.name+"/"+kind, func(t *testing.T) {
+				p, repo, _, _ := newProcessor(t, aliceActor)
+				p.SetLocalBaseURL("https://example.com")
+				marker := newFakeRelayMarker("rel123", "https://relay.example/inbox")
+				p.SetRelayMarker(marker)
+				seedRelayActor(repo, "https://relay.example/users/other", tc.inbox, tc.sharedInbox)
+
+				body := relayAcceptBody(kind, "https://relay.example/users/other",
+					"https://example.com/activities/follow-relay/rel123")
+				require.NoError(t, p.Process(body))
+				changed := len(marker.accepted) + len(marker.rejected)
+				if tc.want {
+					assert.Equal(t, 1, changed)
+				} else {
+					assert.Zero(t, changed, "actor whose inbox is not the relay inbox changed the relay")
+				}
+			})
+		}
 	}
 }
 
@@ -2980,4 +3037,24 @@ func TestProcess_CreateDoesNotRenotifyOnRedelivery(t *testing.T) {
 	assert.Never(t, func() bool {
 		return len(hook.snapshot()) > 1
 	}, 200*time.Millisecond, 20*time.Millisecond)
+}
+
+// TestProcess_FollowRelay_UnresolvableActorIsRetried checks that an Accept /
+// Reject whose signer cannot be resolved returns an error so the inbox job is
+// retried, instead of being acked and dropped (a relay does not resend it).
+func TestProcess_FollowRelay_UnresolvableActorIsRetried(t *testing.T) {
+	for _, kind := range []string{"Accept", "Reject"} {
+		t.Run(kind, func(t *testing.T) {
+			p, _, _, _ := newProcessor(t, aliceActor)
+			p.SetLocalBaseURL("https://example.com")
+			marker := newFakeRelayMarker("rel123", "https://relay.example/inbox")
+			p.SetRelayMarker(marker)
+
+			body := relayAcceptBody(kind, "https://relay.example/actor",
+				"https://example.com/activities/follow-relay/rel123")
+			require.Error(t, p.Process(body))
+			assert.Empty(t, marker.accepted)
+			assert.Empty(t, marker.rejected)
+		})
+	}
 }

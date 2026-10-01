@@ -11,7 +11,9 @@ type RelayRepository interface {
 	FindByID(id string) (*model.Relay, error)
 	List() ([]*model.Relay, error)
 	ListByStatus(status string) ([]*model.Relay, error)
-	UpdateStatus(id, status string) error
+	// UpdateStatusFrom sets status to `to` only when the row's current status
+	// is `from`, and reports whether a row was updated.
+	UpdateStatusFrom(id, from, to string) (bool, error)
 	Delete(id string) error
 }
 
@@ -55,10 +57,18 @@ func (r *relayRepository) ListByStatus(status string) ([]*model.Relay, error) {
 	return rels, nil
 }
 
-func (r *relayRepository) UpdateStatus(id, status string) error {
-	return r.db.Model(&model.Relay{}).
-		Where(`"id" = ?`, id).
-		Update("status", status).Error
+// UpdateStatusFrom は現在の status を条件に含めた 1 文の UPDATE にする。
+// 読んでから書く 2 段にすると、遅れて届いた Accept / Reject が判定の後に
+// 割り込んで、確定済みの relay を書き換えうる (本家 updateRequestingRelayStatus も
+// `{ id, status: 'requesting' }` を条件に update する)。
+func (r *relayRepository) UpdateStatusFrom(id, from, to string) (bool, error) {
+	res := r.db.Model(&model.Relay{}).
+		Where(`"id" = ? AND "status" = ?`, id, from).
+		Update("status", to)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
 }
 
 func (r *relayRepository) Delete(id string) error {

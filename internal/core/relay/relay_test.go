@@ -179,6 +179,30 @@ func TestMarkRejected_UpdatesStatus(t *testing.T) {
 	assert.Equal(t, relay.StatusRejected, repo.Relays[rel.ID].Status)
 }
 
+// 本家 2026.10.0 updateRequestingRelayStatus: 応答を反映するのは requesting の
+// 行だけ。確定した relay に遅れて届いた Accept / Reject は status を動かさない。
+func TestMarkStatus_OnlyFromRequesting(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		from string
+		mark func(*relay.Service, string) error
+	}{
+		{"accepted then Reject", relay.StatusAccepted, func(s *relay.Service, id string) error { return s.MarkRejected(context.Background(), id) }},
+		{"rejected then Accept", relay.StatusRejected, func(s *relay.Service, id string) error { return s.MarkAccepted(context.Background(), id) }},
+		{"accepted then Accept", relay.StatusAccepted, func(s *relay.Service, id string) error { return s.MarkAccepted(context.Background(), id) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, repo, _, _ := newService(t)
+			rel, err := svc.Add(context.Background(), "https://r.example/inbox")
+			require.NoError(t, err)
+			repo.Relays[rel.ID].Status = tc.from
+
+			require.NoError(t, tc.mark(svc, rel.ID), "late answers are ignored, not errors")
+			assert.Equal(t, tc.from, repo.Relays[rel.ID].Status)
+		})
+	}
+}
+
 func TestMarkAccepted_InvalidatesCache(t *testing.T) {
 	svc, _, _, deliv := newService(t)
 	rel, err := svc.Add(context.Background(), "https://r.example/inbox")
@@ -262,11 +286,11 @@ func (f *failingRepo) Create(r *model.Relay) error {
 	}
 	return f.MockRelayRepository.Create(r)
 }
-func (f *failingRepo) UpdateStatus(id, status string) error {
+func (f *failingRepo) UpdateStatusFrom(id, from, to string) (bool, error) {
 	if f.updateErr != nil {
-		return f.updateErr
+		return false, f.updateErr
 	}
-	return f.MockRelayRepository.UpdateStatus(id, status)
+	return f.MockRelayRepository.UpdateStatusFrom(id, from, to)
 }
 func (f *failingRepo) ListByStatus(status string) ([]*model.Relay, error) {
 	if f.listErr != nil {
