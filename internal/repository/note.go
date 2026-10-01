@@ -379,12 +379,22 @@ func (r *noteRepository) CountLocalComments() (int64, error) {
 	return count, err
 }
 
-// IncrementCount adjusts a counter column on the note row by delta.
+// IncrementCount adjusts a counter column on the note row by delta. A
+// negative delta never takes the counter below 0.
 // 集計列の更新はGORMのUpdateColumnでSQL式を直接適用する。
+//
+// 減らすときは 0 で止める (#3291)。カウンタを維持する前に作られた行は実件数より
+// 小さいまま残っており (例: #1768 より前にクリップした行の clippedCount は 0)、
+// そこから減らすと負になる。負の clippedCount は API にそのまま出るうえ、
+// リモートノートの掃除の条件 (`clippedCount = 0`) に一致しなくなる。
 func (r *noteRepository) IncrementCount(noteID, column string, delta int) error {
+	expr := gorm.Expr("\""+column+"\" + ?", delta)
+	if delta < 0 {
+		expr = gorm.Expr("GREATEST(\""+column+"\" + ?, 0)", delta)
+	}
 	return r.db.Model(&model.Note{}).
 		Where("id = ?", noteID).
-		UpdateColumn(column, gorm.Expr("\""+column+"\" + ?", delta)).Error
+		UpdateColumn(column, expr).Error
 }
 
 // IncrementReaction increments (or decrements when delta<0) the value of a

@@ -1450,13 +1450,22 @@ func (m *MockNoteRepository) IncrementCount(noteID, column string, delta int) er
 	}
 	switch column {
 	case "renoteCount":
-		n.RenoteCount += int16(delta)
+		n.RenoteCount = floorZero(int(n.RenoteCount) + delta)
 	case "repliesCount":
-		n.RepliesCount += int16(delta)
+		n.RepliesCount = floorZero(int(n.RepliesCount) + delta)
 	case "clippedCount":
-		n.ClippedCount += int16(delta)
+		n.ClippedCount = floorZero(int(n.ClippedCount) + delta)
 	}
 	return nil
+}
+
+// floorZero mirrors the real repository's IncrementCount, which never takes a
+// counter below 0.
+func floorZero(v int) int16 {
+	if v < 0 {
+		return 0
+	}
+	return int16(v)
 }
 
 // IncrementReaction adjusts an in-memory reaction count map.
