@@ -45,9 +45,7 @@ type Handler struct {
 	blockingRepo       repository.BlockingRepository
 	rolePolicyProvider RolePolicyProvider
 	proxyFollow        ProxyFollowEnqueuer
-	moderatorLister    ModeratorLister
-	abuseNotifier      AbuseReportNotifier
-	abuseInAppNotifier AbuseReportInAppNotifier
+	abuseCreated       AbuseReportCreatedNotifier
 	mutingRepo         repository.MutingRepository
 	// channelMutingRepo は users/notes (withChannelNotes) の post-fetch filter で
 	// チャンネルミュートを効かせるために使う。未配線なら no-op。
@@ -102,25 +100,6 @@ type Handler struct {
 	// featuredRanking は users/featured-notes の per-user engagement ランキング
 	// (#1687)。nil 時 (= 未配線 / test) は SQL count-DESC fallback を使う。
 	featuredRanking FeaturedRankingReader
-	// systemWebhookDispatcher / recipientRepo は users/report-abuse 時に
-	// abuseReport system webhook を発火するために使う (#1542)。未配線なら発火しない。
-	systemWebhookDispatcher SystemWebhookDispatcher
-	recipientRepo           repository.AbuseReportNotificationRecipientRepository
-}
-
-// SystemWebhookDispatcher fires a system webhook event to subscribed webhooks,
-// excluding given ids. Implemented by *core/webhook.Service. report-abuse の
-// abuseReport 発火に使う (#1542)。
-type SystemWebhookDispatcher interface {
-	DispatchSystemExcluding(eventType string, body any, excludes []string)
-}
-
-// SetAbuseReportWebhook wires the system webhook dispatcher + notification
-// recipient repo so users/report-abuse fires the abuseReport system webhook
-// (#1542). nil dispatcher disables firing.
-func (h *Handler) SetAbuseReportWebhook(d SystemWebhookDispatcher, recipientRepo repository.AbuseReportNotificationRecipientRepository) {
-	h.systemWebhookDispatcher = d
-	h.recipientRepo = recipientRepo
 }
 
 // FeaturedRankingReader reads the per-user engagement ranking for
@@ -199,40 +178,17 @@ func (h *Handler) ugcVisibilityNow() string {
 	return h.ugcVisibility
 }
 
-// ModeratorLister lists moderator/administrator users for abuse-report fanout
-// (#1549)。実装は core/role.Service.GetModerators。
-type ModeratorLister interface {
-	GetModerators() ([]*model.User, error)
+// AbuseReportCreatedNotifier tells moderators about a newly created report
+// (in-app notification / admin stream / abuseReport system webhook)。実装は
+// core/abuse.CreatedNotifier で、連合経由の Flag も同じものを呼ぶ (#3256)。
+type AbuseReportCreatedNotifier interface {
+	NotifyCreated(ctx context.Context, report *model.AbuseUserReport, reporter, target *model.User)
 }
 
-// AbuseReportNotifier publishes admin stream events (newAbuseUserReport) to a
-// moderator's per-user admin stream (#1549)。実装は stream.AdminStreamPublisher。
-type AbuseReportNotifier interface {
-	PublishAdminEvent(userID, eventType string, body any)
-}
-
-// AbuseReportInAppNotifier leaves a new report in the moderators' notification
-// list (#2868)。実装は core/abuse.InAppNotifier。
-//
-// **admin stream (AbuseReportNotifier) では足りない。** あちらはその瞬間に
-// 管理画面を開いている人にしか届かず、後から見返せない。連打で通知欄が
-// 埋まらないよう絞るのも実装側 (#3200)。
-type AbuseReportInAppNotifier interface {
-	NotifyNewReport(ctx context.Context, report *model.AbuseUserReport)
-}
-
-// SetAbuseReportFanout wires the moderator lister + admin event notifier so
-// report-abuse fans out newAbuseUserReport to every moderator/admin (#1549).
-// 片方でも nil なら fanout を skip する (= test / 旧挙動)。
-func (h *Handler) SetAbuseReportFanout(lister ModeratorLister, notifier AbuseReportNotifier) {
-	h.moderatorLister = lister
-	h.abuseNotifier = notifier
-}
-
-// SetAbuseReportInAppNotifier wires the in-app notification for new reports
-// (#2868). nil なら通知を作らない (= test / 旧挙動)。
-func (h *Handler) SetAbuseReportInAppNotifier(n AbuseReportInAppNotifier) {
-	h.abuseInAppNotifier = n
+// SetAbuseReportCreatedNotifier wires the notifications for new reports.
+// nil なら通知しない (= test)。
+func (h *Handler) SetAbuseReportCreatedNotifier(n AbuseReportCreatedNotifier) {
+	h.abuseCreated = n
 }
 
 // SetUserRepo wires a UserRepository so users/notes filters out notes that

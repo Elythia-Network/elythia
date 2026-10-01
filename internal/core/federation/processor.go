@@ -83,16 +83,14 @@ type Processor struct {
 	quoteAnswers    QuoteAnswerHandler
 	abuseReportRepo repository.AbuseReportRepository
 	abuseIDGen      id.Generator
-	// abuseInAppNotifier はリモートからの通報 (AP Flag) をモデレーターの通知欄に
-	// 出す (#2868)。local の report-abuse と同じ実装 (core/abuse.InAppNotifier)
-	// を通すので、連打の絞り方 (#3200) も同じになる。nil なら通知しない。
-	//
-	// **admin stream と system webhook はこの経路では飛んでいない** (local 側の
-	// #1549 / #1542 が users handler にしかない既存の穴)。ここで in-app だけを
-	// 足すのは、通報の出どころで通知の有無が変わる非対称を作らないため。
-	abuseInAppNotifier AbuseInAppNotifier
-	pinningRepo        repository.UserNotePiningRepository
-	pinningIDGen       id.Generator
+	// abuseCreated はリモートからの通報 (AP Flag) をモデレーターに知らせる
+	// (通知欄 / admin stream / abuseReport system webhook)。ローカルの
+	// report-abuse と同じもの (core/abuse.CreatedNotifier) を呼ぶ (#3256)。
+	// 以前は通知欄だけをここで出しており、admin stream と system webhook が
+	// この経路だけ抜けていた。nil なら通知しない。
+	abuseCreated AbuseReportCreatedNotifier
+	pinningRepo  repository.UserNotePiningRepository
+	pinningIDGen id.Generator
 
 	// Reversi federation hooks (Phase 9.7). All four are set via
 	// SetReversi; if nil, reversi inbox types are treated as unsupported.
@@ -765,16 +763,17 @@ func (p *Processor) SetAbuseReportRepo(repo repository.AbuseReportRepository, id
 	p.abuseIDGen = idGen
 }
 
-// AbuseInAppNotifier leaves a new report in the moderators' notification list
-// (#2868)。実装は core/abuse.InAppNotifier (連打の絞りもそちら、#3200)。
-type AbuseInAppNotifier interface {
-	NotifyNewReport(ctx context.Context, report *model.AbuseUserReport)
+// AbuseReportCreatedNotifier tells moderators about a newly created report.
+// 実装は core/abuse.CreatedNotifier で、ローカルの report-abuse も同じものを
+// 呼ぶ (#3256)。
+type AbuseReportCreatedNotifier interface {
+	NotifyCreated(ctx context.Context, report *model.AbuseUserReport, reporter, target *model.User)
 }
 
-// SetAbuseReportNotification wires the in-app notification for reports that
-// arrive over ActivityPub (#2868)。nil なら通知しない。
-func (p *Processor) SetAbuseReportNotification(notifier AbuseInAppNotifier) {
-	p.abuseInAppNotifier = notifier
+// SetAbuseReportCreatedNotifier wires the notifications for reports that
+// arrive over ActivityPub. nil なら通知しない。
+func (p *Processor) SetAbuseReportCreatedNotifier(n AbuseReportCreatedNotifier) {
+	p.abuseCreated = n
 }
 
 // SetPinningRepo wires the note pinning repository for Add/Remove activities.
@@ -2695,15 +2694,20 @@ func (p *Processor) handleFlag(act genericActivity) error {
 		ReporterHost:   reporter.Host,
 	}
 	// ターゲットユーザーのホスト情報を取得
-	if target, err := p.userRepo.FindByID(targetUserID); err == nil {
+	target, err := p.userRepo.FindByID(targetUserID)
+	if err == nil {
 		report.TargetUserHost = target.Host
+	} else {
+		target = nil
 	}
 	if err := p.abuseReportRepo.Create(report); err != nil {
 		slog.Warn("failed to create abuse report from flag activity", "err", err)
 		return err
 	}
-	if p.abuseInAppNotifier != nil {
-		p.abuseInAppNotifier.NotifyNewReport(context.Background(), report)
+	// 通知 (通知欄 / admin stream / abuseReport system webhook) はローカルの
+	// 通報と同じ処理に任せる (#3256)。
+	if p.abuseCreated != nil {
+		p.abuseCreated.NotifyCreated(context.Background(), report, reporter, target)
 	}
 	return nil
 }
