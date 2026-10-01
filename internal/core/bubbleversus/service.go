@@ -3,8 +3,8 @@
 //
 // 盤面はそれぞれのクライアントが動かす (サーバーは物理演算を回せない)。サーバーの
 // 役目は、招待と成立、共通のシード・設定・開始時刻の配布、攻撃の中継、切断と
-// 制限時間の判定、終局の判定。**状態は Redis にだけ置く** (期限付き)。対戦の記録を
-// DB に残すのは後の段階 (#3232) で、ルールを遊んで固めてから形を決める。
+// 制限時間の判定、終局の判定。**対局の状態は Redis にだけ置く** (期限付き)。
+// 対戦の記録 (両者の報告と勝敗) は、報告と終局を受けた時点で DB に書く (#3232)。
 package bubbleversus
 
 import (
@@ -14,6 +14,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"math"
 	mrand "math/rand/v2"
 	"strings"
 	"time"
@@ -22,6 +24,7 @@ import (
 
 	"github.com/shiroha-a/mk/internal/misc/id"
 	"github.com/shiroha-a/mk/internal/model"
+	"github.com/shiroha-a/mk/internal/repository"
 )
 
 // Rules and limits of a match.
@@ -68,7 +71,14 @@ const (
 	ReasonTimeUp        = "timeUp"
 	ReasonDisconnected  = "disconnected"
 	ReasonInvalidReport = "invalidReport"
+	// ReasonOpponentEnded is a report sent after the opponent's report ended the
+	// match. It only records the board for the replay and never decides the
+	// outcome (#3232).
+	ReasonOpponentEnded = "opponentEnded"
 )
+
+// MaxGameVersion bounds the engine version a report may claim.
+const MaxGameVersion = 1 << 20
 
 // Errors.
 var (
@@ -143,11 +153,44 @@ type Publisher interface {
 
 // Service runs matches.
 type Service struct {
-	rdb    redis.UniversalClient
-	pub    Publisher
-	blocks BlockChecker
-	idGen  id.Generator
-	clock  func() time.Time
+	rdb     redis.UniversalClient
+	pub     Publisher
+	blocks  BlockChecker
+	idGen   id.Generator
+	clock   func() time.Time
+	records RecordStore
+}
+
+// RecordStore persists the record of a match (#3232). It is satisfied by
+// repository.BubbleVersusRepository.
+type RecordStore interface {
+	SaveReport(base repository.BubbleVersusMatchBase, slot int, report repository.BubbleVersusReport) error
+	Finish(base repository.BubbleVersusMatchBase, endedAt time.Time, winnerID *string, reason string) error
+}
+
+// SetRecordStore wires where match records are written. Without it nothing is
+// recorded.
+func (s *Service) SetRecordStore(rs RecordStore) { s.records = rs }
+
+func recordBase(m *Match) repository.BubbleVersusMatchBase {
+	return repository.BubbleVersusMatchBase{
+		ID: m.ID, User1ID: m.Players[0].UserID, User2ID: m.Players[1].UserID,
+		GameMode: m.GameMode, Seed: m.Seed, StartedAt: time.UnixMilli(m.StartAt).UTC(),
+	}
+}
+
+// recordFinish writes the outcome of an ended match.
+//
+// **失敗しても呼び出し元のエラーにしない。** 勝敗は Redis で既に確定している。
+// ここで失敗を返すと、クライアントが送り直しても「報告済み」で弾かれるだけで
+// 記録は戻らない。記録が欠けるだけなので、ログに残して進める。
+func (s *Service) recordFinish(m *Match) {
+	if s.records == nil {
+		return
+	}
+	if err := s.records.Finish(recordBase(m), time.UnixMilli(m.EndedAt).UTC(), m.WinnerID, m.Reason); err != nil {
+		slog.Warn("bubbleversus: record finish failed", "matchId", m.ID, "err", err)
+	}
 }
 
 // NewService constructs a Service.
@@ -596,8 +639,11 @@ func (s *Service) ClaimDisconnected(ctx context.Context, userID, matchID string)
 	if err != nil {
 		return nil, err
 	}
-	if ended && s.pub != nil {
-		s.pub.PublishMatch(m.ID, "ended", map[string]any{"winnerId": m.WinnerID, "reason": m.Reason})
+	if ended {
+		s.recordFinish(m)
+		if s.pub != nil {
+			s.pub.PublishMatch(m.ID, "ended", map[string]any{"winnerId": m.WinnerID, "reason": m.Reason})
+		}
 	}
 	return m, nil
 }
@@ -608,6 +654,9 @@ type Report struct {
 	Frame  int64
 	Reason string
 	Logs   [][]any
+	// GameVersion is the engine version the logs were made with. nil when the
+	// client did not send it (the replay then refuses to play the board).
+	GameVersion *int
 }
 
 // SubmitReport records userID's result and decides the match.
@@ -621,11 +670,17 @@ type Report struct {
 // のはあり得ないので、その報告は不正として報告した側の負けにする。
 func (s *Service) SubmitReport(ctx context.Context, userID, matchID string, r Report) (*Match, error) {
 	switch r.Reason {
-	case ReasonGameOver, ReasonSurrender, ReasonTimeUp:
+	case ReasonGameOver, ReasonSurrender, ReasonTimeUp, ReasonOpponentEnded:
 	default:
 		return nil, ErrInvalidReport
 	}
-	if r.Score < 0 || r.Frame < 0 || len(r.Logs) > MaxLogs {
+	// 記録の列は 32 bit (#3232)。収まらない値を受けると DB への書き込みが失敗して
+	// 記録が黙って欠けるので、ここで弾く。正当な対局で届く値ではない
+	// (5 分で約 18,000 フレーム)。
+	if r.Score < 0 || r.Frame < 0 || r.Score > math.MaxInt32 || r.Frame > math.MaxInt32 || len(r.Logs) > MaxLogs {
+		return nil, ErrInvalidReport
+	}
+	if r.GameVersion != nil && (*r.GameVersion < 1 || *r.GameVersion > MaxGameVersion) {
 		return nil, ErrInvalidReport
 	}
 	garbage, ok := garbageInLogs(r.Logs)
@@ -635,10 +690,12 @@ func (s *Service) SubmitReport(ctx context.Context, userID, matchID string, r Re
 
 	// 判定は全部 1 つの更新の中で行う。外で読んだ値で決めると、その後に届いた攻撃
 	// (Sent が増える) や相手の報告を見落として、正しい報告を不正と判定しうる。
-	// 記録そのものは残さない (#3232 で形を決めるまで)。サーバーが読むのは石の数だけで、
-	// 残すと 1 報告ごとに body の上限いっぱいの blob を Redis に 24 時間置ける。
+	// 記録そのもの (logs) は Redis に置かない。置くと 1 報告ごとに body の上限
+	// いっぱいの blob を Redis に 24 時間置ける。記録は更新の後で DB に書く (#3232)。
 	result := &Result{Score: r.Score, Frame: r.Frame, Reason: r.Reason, Garbage: garbage}
 	ended := false
+	slot := -1
+	var stored Result
 	m, err := s.update(ctx, matchID, func(m *Match) error {
 		ended = false
 		side := m.Side(userID)
@@ -651,10 +708,25 @@ func (s *Service) SubmitReport(ctx context.Context, userID, matchID string, r Re
 		if m.Players[side].Result != nil {
 			return ErrInvalidState
 		}
+		// 相手の終局を受けての報告は、終局した後にだけ受ける。終局前に受けると、
+		// 勝敗に効かない理由で自分の報告を済ませ、切断の判定 (相手の報告済みなら
+		// 切断ではない) を相手に使わせないことができる。
+		if r.Reason == ReasonOpponentEnded && m.Status != StatusEnded {
+			return ErrInvalidReport
+		}
+		slot = side
 		opp := m.Players[1-side].UserID
 		res := *result
 		m.Players[side].Result = &res
+		stored = res
 		if m.Status == StatusEnded {
+			// 終局後の報告 (opponentEnded など) は勝敗に効かないが、記録には残る。
+			// 石の数が相手の送った数を超える記録は、理由を invalidReport にして残す
+			// (申告どおりに残すと、リプレイに作り話の盤面が並ぶ)。
+			if garbage > m.Players[1-side].Sent {
+				res.Reason = ReasonInvalidReport
+				stored = res
+			}
 			return nil
 		}
 		var winner *string
@@ -683,6 +755,7 @@ func (s *Service) SubmitReport(ctx context.Context, userID, matchID string, r Re
 				winner = &opp
 			}
 		}
+		stored = res
 		m.Status = StatusEnded
 		m.EndedAt = s.now()
 		m.WinnerID = winner
@@ -693,10 +766,38 @@ func (s *Service) SubmitReport(ctx context.Context, userID, matchID string, r Re
 	if err != nil {
 		return nil, err
 	}
-	if ended && s.pub != nil {
-		s.pub.PublishMatch(m.ID, "ended", map[string]any{"winnerId": m.WinnerID, "reason": m.Reason})
+	s.recordReport(m, slot, stored, r)
+	if ended {
+		s.recordFinish(m)
+		if s.pub != nil {
+			s.pub.PublishMatch(m.ID, "ended", map[string]any{"winnerId": m.WinnerID, "reason": m.Reason})
+		}
 	}
 	return m, nil
+}
+
+// recordReport writes one player's report into the match record. Like
+// recordFinish it only logs failures.
+func (s *Service) recordReport(m *Match, slot int, res Result, r Report) {
+	if s.records == nil || slot < 0 {
+		return
+	}
+	entries := r.Logs
+	if entries == nil {
+		// ロビーでの投了は記録を持たない。null ではなく空の記録として残す。
+		entries = [][]any{}
+	}
+	logs, err := json.Marshal(entries)
+	if err != nil {
+		slog.Warn("bubbleversus: record report marshal failed", "matchId", m.ID, "err", err)
+		return
+	}
+	// 理由は報告の申告ではなく、判定した後の値 (不正なら invalidReport) を残す。
+	if err := s.records.SaveReport(recordBase(m), slot, repository.BubbleVersusReport{
+		Score: int(res.Score), Frame: int(res.Frame), Reason: res.Reason, GameVersion: r.GameVersion, Logs: logs,
+	}); err != nil {
+		slog.Warn("bubbleversus: record report failed", "matchId", m.ID, "err", err)
+	}
 }
 
 // garbageInLogs sums the stones in serialized logs ([frameDelta, op, arg])。
@@ -705,8 +806,8 @@ func garbageInLogs(logs [][]any) (int64, bool) {
 	var total int64
 	for _, l := range logs {
 		// 形はエンジンの serializeLogs と同じものだけ受ける: [fd, 0, x] / [fd, 1] /
-		// [fd, 2] / [fd, 3, count]。記録は残さないが、読まない要素に任意の値を
-		// 載せられる形は受けない。
+		// [fd, 2] / [fd, 3, count]。読まない要素に任意の値を載せられる形は受けない
+		// (記録は DB にそのまま残すので、形を締めないと任意の値の置き場になる)。
 		if len(l) < 2 || len(l) > 3 {
 			return 0, false
 		}
@@ -714,6 +815,12 @@ func garbageInLogs(logs [][]any) (int64, bool) {
 			if _, ok := v.(float64); !ok {
 				return 0, false
 			}
+		}
+		// 先頭はフレームの差分。エンジンは 0 以上の整数しか書かない。小数や負の値を
+		// 受けると、記録 (DB に残る) を再生したときに操作を当てる位置が決まらず、
+		// リプレイが途中から動かなくなる (#3232)。
+		if fd := l[0].(float64); fd < 0 || fd != math.Trunc(fd) {
+			return 0, false
 		}
 		op := l[1].(float64)
 		wantLen := 2

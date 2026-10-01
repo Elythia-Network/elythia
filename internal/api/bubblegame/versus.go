@@ -274,12 +274,14 @@ func (h *VersusHandler) Report(c echo.Context) error {
 		Frame   int64   `json:"frame"`
 		Reason  string  `json:"reason"`
 		Logs    [][]any `json:"logs"`
+		// エンジンの版 (#3232)。古いクライアントは送らないので省略できる。
+		GameVersion *int `json:"gameVersion"`
 	}
 	if ok, err := bindMatchID(c, &req, &req.MatchID); !ok {
 		return err
 	}
 	m, err := h.svc.SubmitReport(c.Request().Context(), me.ID, req.MatchID, bubbleversus.Report{
-		Score: req.Score, Frame: req.Frame, Reason: req.Reason, Logs: req.Logs,
+		Score: req.Score, Frame: req.Frame, Reason: req.Reason, Logs: req.Logs, GameVersion: req.GameVersion,
 	})
 	if err != nil {
 		return h.fail(c, err)

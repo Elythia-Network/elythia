@@ -278,3 +278,43 @@ func TestVersus_ULIDMatchID(t *testing.T) {
 	require.Regexp(t, `[A-Z]`, mid)
 	assert.Equal(t, http.StatusOK, post(e.h.Show, matchBody(mid), vAlice).Code)
 }
+
+type versionRecords struct{ versions []*int }
+
+func (v *versionRecords) SaveReport(_ repository.BubbleVersusMatchBase, _ int, r repository.BubbleVersusReport) error {
+	v.versions = append(v.versions, r.GameVersion)
+	return nil
+}
+
+func (*versionRecords) Finish(repository.BubbleVersusMatchBase, time.Time, *string, string) error {
+	return nil
+}
+
+// エンジンの版は記録まで届く (#3232)。範囲外は 400。
+func TestVersusReport_GameVersion(t *testing.T) {
+	e := newVersus(t)
+	recs := &versionRecords{}
+	e.svc.SetRecordStore(recs)
+	mid := e.invite(t)
+	require.Equal(t, http.StatusOK, post(e.h.Accept, matchBody(mid), vBob).Code)
+	ctx := t.Context()
+	_, err := e.svc.Ready(ctx, "alice", mid, true)
+	require.NoError(t, err)
+	_, err = e.svc.Ready(ctx, "bob", mid, true)
+	require.NoError(t, err)
+	*e.now = e.now.Add(bubbleversus.Countdown)
+
+	rec := post(e.h.Report, fmt.Sprintf(`{"matchId":%q,"score":1,"frame":1,"reason":"gameOver","logs":[],"gameVersion":0}`, mid), vBob)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Equal(t, "INVALID_REPORT", errorCode(t, rec.Body.Bytes()))
+
+	rec = post(e.h.Report, fmt.Sprintf(`{"matchId":%q,"score":1,"frame":1,"reason":"gameOver","logs":[],"gameVersion":4}`, mid), vBob)
+	require.Equal(t, http.StatusOK, rec.Code)
+	rec = post(e.h.Report, fmt.Sprintf(`{"matchId":%q,"score":2,"frame":2,"reason":"opponentEnded","logs":[]}`, mid), vAlice)
+	require.Equal(t, http.StatusOK, rec.Code, "終局後の opponentEnded は受ける")
+
+	require.Len(t, recs.versions, 2)
+	require.NotNil(t, recs.versions[0])
+	assert.Equal(t, 4, *recs.versions[0])
+	assert.Nil(t, recs.versions[1], "版を送らない報告は nil のまま")
+}
