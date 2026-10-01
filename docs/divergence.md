@@ -34,7 +34,7 @@ mk-go は drop-in 互換 (同じ DB / Redis / frontend を Misskey TS と共有�
 |---|---|---|---|
 | API endpoint | GET variant 23 + alias 4 + 分割アップロード 4 + 承認制 7 + 絵文字の申請 10 + exact assignment lookup 2 + admin 観測 8 + 配送のブレーカー 1 + 消えたインスタンスの片付け 2 + 連合のルール 5 + IP 検索 3 + バブルゲームの対戦 7 | chat 15 | **0** |
 | API レスポンスの additive field | 8 (`runtime` / `mkGoVersion` / `chunkedUpload` / `approvalRequiredForSignup` / `registrationClosed` / `signupApplicationForm` / `canRequestCustomEmojis` / `minimumUsernameLength`) | reversi packed game の `crc32` 等 | — |
-| DB テーブル | 18 (+ bookkeeping 2) | 0 | 0 |
+| DB テーブル | 19 (+ bookkeeping 2) | 0 | 0 |
 | DB カラム | 23 (+ 未使用の残存列 3) | 3 | 0 |
 | ActivityPub | Ed25519 / RemoteStatsFetcher ほか | reversi 連合 / chat 連合 | — |
 | config キー | 20 前後 | 0 | — |
@@ -135,7 +135,7 @@ upstream 由来のクライアントはそのまま通る (省略時は upstream
 
 **逆方向の欠落はゼロ** — upstream の `@Entity` 76 テーブルと全共有カラムを mk-go が superset で保持している。
 
-### 2-1. mk-go 独自テーブル (20)
+### 2-1. mk-go 独自テーブル (21)
 
 | テーブル | 由来 | 理由 |
 |---|---|---|
@@ -156,6 +156,7 @@ upstream 由来のクライアントはそのまま通る (省略時は upstream
 | `note_quote_authorization` | mk-go 独自 | ローカルの投稿の引用を承認した記録 (FEP-044f、#3234、§3-6)。リモートからの QuoteRequest に答えたものと、ローカル同士の引用に自分で発行したものが入る。1 行を承認の実体 (`QuoteAuthorization`) として配る。**消すと相手側の引用が未承認に戻る** — 第三者は引用を表示する前に承認を取得して確かめるので、行が無い (404) と承認が無いのと同じになる。引用される投稿への FK は `ON DELETE CASCADE` で、投稿を消せば承認も消える。作者が相手をブロックしたときも、その相手の引用への承認を消す (§3-6)。TS へ戻すとこのテーブルは読まれず承認が 404 になり、**これまでの引用が相手側で未承認に戻る** (再検証されたとき)。**純正へは還元できない行** (upstream は FEP-044f に対応していない) |
 | `note_quote_request` | mk-go 独自 | ローカルの利用者がリモートの投稿を引用したときに送った QuoteRequest と、その答えの記録 (FEP-044f、#3234、§3-6)。承認されたら承認 URI を引用する投稿の `quoteAuthorization` として配る。引用する投稿への FK は `ON DELETE CASCADE`。**消すと引用する投稿から `quoteAuthorization` が消え**、相手側の引用が再検証のときに未承認に戻る。TS へ戻したときも同じ。**純正へは還元できない行** |
 | `ip_lookup_log` | mk-go 独自 | IP とアカウントの対応を**誰がいつ引いたか**の記録 (#3106)。`admin/ip/*` は upstream に無い口 (#3104 / #3105) なので、その監査も upstream には無い。**`moderation_log` に入れない** — あちらは保持期間を持たず永久に残るのに、この記録に入るのは**照会に使った IP そのもの**で、IP とアカウントの対応と同じだけ機密性がある。`moderation_log` 全体に保持期間を入れると無関係な記録まで消えるので、専用テーブルを分けて 90 日で刈る (`user_ip` と同じ長さだが理由は別で、定数も別)。**結果そのものは記録しない** — 残すのは件数だけで、候補に出たアカウントや一致した IP は書かない (書くとこの表が第 2 の「IP とアカウントの対応」になる)。`user` への FK は張らない — 照会した人を消しても記録は残るのが監査として正しい (`signup_application` と同じ方針)。**純正へは還元できない行** (照会という機能自体が upstream に無い)。 |
+| `bubble_game_versus_record` | mk-go 独自 | バブルゲームの 1:1 対戦の記録 (#3232)。対戦そのもの (#3228) が upstream に無い。1 局 1 行で、両者の得点・理由・エンジンの版・操作の記録・公開の意思を持つ。**報告が届いた時点で書く** — 時間切れは両者の報告がそろうまで終局しないので先に来た側の記録を置く場所が要り、Redis には大きな記録を置かない方針 (#3230) のため DB に置く。**両者が公開にした対局だけ**を参加者以外 (ログイン済み・ブロック関係に無い人) に見せる — 相手の盤面と得点も一緒に出るので、片方の意思だけでは公開しない。`user` への FK は `ON DELETE CASCADE` で、**どちらかが退会したら相手の履歴からも消える**。終局から 30 日で定期処理が消す。TS は未知のテーブルを無視する。**純正へは還元できない行** |
 | `note_unread` | 準・独自 | upstream DB にも legacy 遺物として残るが 2026.7.0 の `models/` に entity は無く参照 0 件。mk-go はこれを実用し `/api/i` の `hasUnreadSpecifiedNotes` / `hasUnreadMentions` を Redis stream を舐めずに解決する。upstream legacy 版にある `noteChannelId` は mk-go の定義に無い (TS 製 DB では `CREATE TABLE IF NOT EXISTS` が no-op なので実害なし) |
 | `migrations` | drop-in 互換 | TypeORM の bookkeeping。mk-go 由来 DB に TS を後から繋いだ時に migration を再実行させないための seed。name は本家と同じ `ClassName+timestamp` 形式で 346 件を保持する (#2244 で短縮形から是正)。漏れは `TestMigrationSeed_CoversUpstream` が CI で検出する |
 | `schema_migrations` | tooling | golang-migrate 用 |
