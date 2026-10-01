@@ -83,7 +83,7 @@ type Service struct {
 	// rolePolicyProvider は PinNote の上限を role policy `pinLimit` で
 	// override するのに使う (#1029)。nil 時は MaxPinnedNotes 定数 fallback
 	// (= 旧挙動互換)。実装は core/role.Service。
-	rolePolicyProvider RolePolicyProvider
+	rolePolicyProvider role.PolicyProvider
 	// selfHostname は SearchByUsernameAndHost で「host==self-hostname → local
 	// 限定」を判定するために保持する (upstream UserSearchService と互換、
 	// #1064)。空文字なら remap を skip して "." 一致のみ local 限定にする。
@@ -103,17 +103,10 @@ type UsertagHook interface {
 	UpdateUsertags(userID string, isLocal bool, oldTags, newTags []string)
 }
 
-// RolePolicyProvider abstracts role-policy lookup used to override default
-// limits with admin-authored values. 実装は core/role.Service の
-// GetUserPolicies (#1029)。
-type RolePolicyProvider interface {
-	GetUserPolicies(userID string) map[string]any
-}
-
-// SetRolePolicyProvider wires a RolePolicyProvider so the user service can
+// SetRolePolicyProvider wires a role policy source so the user service can
 // honour role-policy overrides for limits like pinLimit (#1029). nil 時は
 // MaxPinnedNotes 定数 fallback の旧挙動を維持する。
-func (s *Service) SetRolePolicyProvider(p RolePolicyProvider) {
+func (s *Service) SetRolePolicyProvider(p role.PolicyProvider) {
 	s.rolePolicyProvider = p
 }
 

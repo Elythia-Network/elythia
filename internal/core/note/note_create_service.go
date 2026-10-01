@@ -217,18 +217,12 @@ type SilencingProvider interface {
 	IsSilenced(userID string) bool
 }
 
-// RolePolicyProvider abstracts role-policy lookup for the mentionLimit gate
-// (#2321)。循環依存を避けるため interface で受け取り、実装は core/role.Service。
-type RolePolicyProvider interface {
-	GetUserPolicies(userID string) map[string]any
-}
-
 // CreateService provides note creation logic.
 type CreateService struct {
 	noteRepo repository.NoteRepository
 	// rolePolicyProvider は mentionLimit の gate に使う (#2321)。nil なら
 	// DefaultMentionLimit にフォールバックする。
-	rolePolicyProvider RolePolicyProvider
+	rolePolicyProvider role.PolicyProvider
 	pollRepo           repository.PollRepository
 	followingRepo      repository.FollowingRepository
 	idGen              id.Generator
@@ -284,7 +278,7 @@ func (s *CreateService) SetUserRepo(r repository.UserRepository) {
 // SetRolePolicyProvider wires role-policy lookup so note creation honours the
 // per-user `mentionLimit` policy (#2321). nil (未配線 / test) のときは
 // DefaultMentionLimit にフォールバックする。
-func (s *CreateService) SetRolePolicyProvider(p RolePolicyProvider) {
+func (s *CreateService) SetRolePolicyProvider(p role.PolicyProvider) {
 	s.rolePolicyProvider = p
 }
 

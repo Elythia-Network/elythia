@@ -73,7 +73,7 @@ type Handler struct {
 	signinRecorder SigninRecorder
 	// userPolicies は作成直後の利用者の**実効** policy を返す (#2673)。
 	// 未配線なら従来どおり素の default にフォールバックする。
-	userPolicies UserPolicyResolver
+	userPolicies role.PolicyProvider
 	// emailDB は email-address/available の重複判定用 (#2791 で router.go の
 	// inline closure から移設)。
 	emailDB *gorm.DB
@@ -601,15 +601,9 @@ func (h *Handler) validateInvitationCode(code string, emailRequired bool) (*mode
 	return ticket, nil
 }
 
-// UserPolicyResolver resolves a user's effective role policies. Implemented by
-// role.Service.
-type UserPolicyResolver interface {
-	GetUserPolicies(userID string) map[string]any
-}
-
 // SetUserPolicyResolver wires the effective-policy source for the signup
 // response.
-func (h *Handler) SetUserPolicyResolver(r UserPolicyResolver) { h.userPolicies = r }
+func (h *Handler) SetUserPolicyResolver(r role.PolicyProvider) { h.userPolicies = r }
 
 // signupPolicies returns the policies advertised in the signup response.
 //

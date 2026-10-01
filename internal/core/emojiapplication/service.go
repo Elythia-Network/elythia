@@ -272,20 +272,15 @@ type Service struct {
 	// policies は申請の期間上限を引く先 (#2958)。**未配線なら上限を掛けない** —
 	// 掛けられないのに掛けたつもりになると、ロールを設定した運営者が
 	// 「効いている」と誤解する。既定値も 0 (無制限) なので挙動は変わらない。
-	policies PolicyProvider
+	policies role.PolicyProvider
 	// resets は枠の手動リセット (#2962) を読み書きする先。**未配線なら
 	// リセットは無かったものとして数える** — 配線を忘れた構成で枠が勝手に
 	// 広がるより、従来どおり厳しい側に倒れるほうが安全。
 	resets repository.EmojiApplicationQuotaResetRepository
 }
 
-// PolicyProvider resolves a user's effective role policies (#2958).
-type PolicyProvider interface {
-	GetUserPolicies(userID string) map[string]any
-}
-
 // SetPolicyProvider wires the role policy source used for the rolling quota.
-func (s *Service) SetPolicyProvider(p PolicyProvider) { s.policies = p }
+func (s *Service) SetPolicyProvider(p role.PolicyProvider) { s.policies = p }
 
 // HasPolicyProvider reports whether the quota can be enforced.
 func (s *Service) HasPolicyProvider() bool { return s.policies != nil }

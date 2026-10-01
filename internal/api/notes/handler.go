@@ -16,6 +16,7 @@ import (
 	"github.com/shiroha-a/mk/internal/core/notesfilter"
 	"github.com/shiroha-a/mk/internal/core/poll"
 	"github.com/shiroha-a/mk/internal/core/reaction"
+	"github.com/shiroha-a/mk/internal/core/role"
 	"github.com/shiroha-a/mk/internal/core/search"
 	"github.com/shiroha-a/mk/internal/core/timeline"
 	"github.com/shiroha-a/mk/internal/core/translate"
@@ -100,7 +101,7 @@ type Handler struct {
 	// ltlAvailable / gtlAvailable policy を gate するために使う (#1026)。
 	// 匿名 viewer (userID="") に対しても base policies を返す upstream 互換
 	// semantics で、middleware ではなく handler 内で gate する。
-	policyProvider TimelinePolicyProvider
+	policyProvider role.PolicyProvider
 	// scheduledNoteEnqueuer は drafts/create で `isActuallyScheduled=true`
 	// の draft を delayed queue に enqueue するための narrow interface (#1040)。
 	// nil 時は enqueue を skip する (= test fixture / queue 未配線パス互換)。
@@ -158,18 +159,11 @@ func (h *Handler) SetScheduledNoteEnqueuer(e ScheduledNoteEnqueuer) {
 	h.scheduledNoteEnqueuer = e
 }
 
-// TimelinePolicyProvider abstracts the role-policy lookup used by timeline
-// gating. core/role.Service が実装する。匿名 viewer (userID="") に対しては
-// base policies (DefaultPolicies + meta.policies) を返す upstream 互換挙動
-// を要求する (#1026)。
-type TimelinePolicyProvider interface {
-	GetUserPolicies(userID string) map[string]any
-}
-
-// SetPolicyProvider wires a TimelinePolicyProvider so timeline endpoints
-// gate access by ltlAvailable / gtlAvailable role policy (#1026). nil 時は
-// gate を skip する (= test 経路 / 旧挙動互換)。
-func (h *Handler) SetPolicyProvider(p TimelinePolicyProvider) {
+// SetPolicyProvider wires a role policy source so timeline endpoints gate
+// access by ltlAvailable / gtlAvailable (#1026). nil 時は gate を skip する
+// (= test 経路 / 旧挙動互換)。匿名 viewer (userID="") には base policies を
+// 返す upstream 互換 semantics を要求する。
+func (h *Handler) SetPolicyProvider(p role.PolicyProvider) {
 	h.policyProvider = p
 }
 

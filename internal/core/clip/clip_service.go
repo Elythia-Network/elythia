@@ -46,20 +46,15 @@ type Service struct {
 	clock    func() time.Time
 	// rolePolicyProvider は clipLimit / noteEachClipsLimit の gate に使う
 	// (#1029)。nil 時は gate skip。
-	rolePolicyProvider RolePolicyProvider
+	rolePolicyProvider role.PolicyProvider
 	// materializer はリレー由来で DB に無いノートを昇格させる (#2332)。
 	// clip_note.noteId が note への外部キー。
 	materializer NoteMaterializer
 }
 
-// RolePolicyProvider abstracts role-policy lookup for clip count limits (#1029)。
-type RolePolicyProvider interface {
-	GetUserPolicies(userID string) map[string]any
-}
-
-// SetRolePolicyProvider wires a RolePolicyProvider so Create / AddNote
+// SetRolePolicyProvider wires a role policy source so Create / AddNote
 // enforce the clipLimit / noteEachClipsLimit role policies (#1029).
-func (s *Service) SetRolePolicyProvider(p RolePolicyProvider) {
+func (s *Service) SetRolePolicyProvider(p role.PolicyProvider) {
 	s.rolePolicyProvider = p
 }
 

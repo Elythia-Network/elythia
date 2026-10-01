@@ -9,6 +9,7 @@ import (
 
 	corechannel "github.com/shiroha-a/mk/internal/core/channel"
 	"github.com/shiroha-a/mk/internal/core/note"
+	"github.com/shiroha-a/mk/internal/core/role"
 	"github.com/shiroha-a/mk/internal/misc/id"
 	"github.com/shiroha-a/mk/internal/model"
 	"github.com/shiroha-a/mk/internal/testutil"
@@ -2339,7 +2340,7 @@ func TestCreateService_MentionLimitFallsBackToDefault(t *testing.T) {
 	over := mentions(21)
 	under := mentions(20)
 
-	providers := map[string]note.RolePolicyProvider{
+	providers := map[string]role.PolicyProvider{
 		"未配線":               nil,
 		"policies が nil":    &stubRolePolicies{byUser: nil},
 		"該当ユーザーの policy 無し": &stubRolePolicies{byUser: map[string]map[string]any{"other": {"mentionLimit": 99}}},
