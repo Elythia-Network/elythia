@@ -262,6 +262,15 @@ func TestDispatchSystemTest_EnqueuesWithOverride(t *testing.T) {
 	assert.True(t, enq.systemCalls[0].SingleAttempt, "テスト送信は本家と同じく再試行しない (#3262)")
 }
 
+// 利用者の webhook のテスト送信も、本家と同じく再試行しない (#3278)。
+func TestDispatchUserTest_SingleAttempt(t *testing.T) {
+	enq := &fakeEnqueuer{}
+	svc := webhook.NewService(enq, nil, nil, "https://example.com")
+	svc.DispatchUserTest("w1", "u1", webhook.EventNote, map[string]any{}, "", "")
+	require.Len(t, enq.userCalls, 1)
+	assert.True(t, enq.userCalls[0].SingleAttempt)
+}
+
 func TestDispatchSystemTest_NilSafe(t *testing.T) {
 	var svc *webhook.Service
 	svc.DispatchSystemTest("w1", "abuseReport", nil, "", "")

@@ -422,16 +422,22 @@ func (c *Client) EnqueueWebPush(ctx context.Context, payload WebPushPayload) err
 }
 
 // EnqueueUserWebhook puts a user webhook delivery task on the webhook
-// queue. Retry policy: 4 attempts (4xx は processor 側で ErrSkipRetry と
-// して扱うため実際のリトライ対象は 5xx とネットワークエラーに限られる)。
+// queue. Retry policy: 4 attempts, or a single attempt when
+// payload.SingleAttempt is set (test sends). 4xx は processor 側で ErrSkipRetry
+// として扱うため実際のリトライ対象は 5xx とネットワークエラーに限られる。
 func (c *Client) EnqueueUserWebhook(ctx context.Context, payload WebhookPayload) error {
 	body := mustMarshal(payload)
+	// #2106 L59: upstream QueueService は BullMQ attempts:4 (= 総試行 4 回)。
+	// mkqdriver は WithMaxRetry(N)→WithAttempts(N+1) 変換なので総試行 4 には
+	// WithMaxRetry(3) が正しい (deliver/inbox と同じ total→MaxRetry 規約)。
+	// テスト送信は本家と同じく 1 回だけ (#3278)。
+	maxRetry := 3
+	if payload.SingleAttempt {
+		maxRetry = 0
+	}
 	base := []driver.EnqueueOption{
 		driver.WithQueue(WebhookQueueName),
-		// #2106 L59: upstream QueueService は BullMQ attempts:4 (= 総試行 4 回)。
-		// mkqdriver は WithMaxRetry(N)→WithAttempts(N+1) 変換なので総試行 4 には
-		// WithMaxRetry(3) が正しい (deliver/inbox と同じ total→MaxRetry 規約)。
-		driver.WithMaxRetry(3),
+		driver.WithMaxRetry(maxRetry),
 		// deliver/inbox と同じ custom backoff を webhook 配送にも付与する。
 		// worker 側 strategy は全 queue に登録済みなので enqueue 側で付けるだけで
 		// 段階的なリトライ間隔が効く (#1408)。

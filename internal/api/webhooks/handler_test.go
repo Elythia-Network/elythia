@@ -457,6 +457,34 @@ func TestTest_Success(t *testing.T) {
 	assert.Empty(t, disp.calls[0].overrideURL)
 }
 
+// override は保存済みの webhook に重ねる。片方だけ指定したら、もう片方は
+// 保存済みの値 (本家の {...webhook, ...override}、#3278)。
+func TestTest_OverrideMergesWithSaved(t *testing.T) {
+	for _, tt := range []struct {
+		name, override, wantURL, wantSecret string
+	}{
+		{"none", ``, "", ""},
+		{"empty object", `,"override":{}`, "", ""},
+		{"url only", `,"override":{"url":"https://override.example"}`, "https://override.example", "saved"},
+		{"secret only", `,"override":{"secret":"ov"}`, "https://saved.example", "ov"},
+		{"empty secret", `,"override":{"secret":""}`, "https://saved.example", ""},
+		{"empty url", `,"override":{"url":"","secret":"ov"}`, "https://saved.example", "ov"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, repo := newTestHandler()
+			repo.webhooks["w1"] = &model.Webhook{ID: "w1", UserID: "u1", URL: "https://saved.example", Secret: "saved"}
+			disp := &stubDispatcher{}
+			h.SetDispatcher(disp)
+
+			rec := post(h.Test, `{"webhookId":"w1","type":"note"`+tt.override+`}`, &model.User{ID: "u1"})
+			require.Equal(t, http.StatusNoContent, rec.Code)
+			require.Len(t, disp.calls, 1)
+			assert.Equal(t, tt.wantURL, disp.calls[0].overrideURL)
+			assert.Equal(t, tt.wantSecret, disp.calls[0].overrideSecret)
+		})
+	}
+}
+
 // #1546: override 指定で別 url/secret へ送る。
 func TestTest_Override(t *testing.T) {
 	h, repo := newTestHandler()
