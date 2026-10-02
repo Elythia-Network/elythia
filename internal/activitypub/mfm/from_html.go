@@ -9,8 +9,10 @@ import (
 	"golang.org/x/net/html/atom"
 )
 
-// urlRegex は MFM でそのままリンク化される URL パターン。TS本家と同じ。
-var urlRegex = regexp.MustCompile(`^https?://[\w/:%#@$&?()\[\]~.,=+\-]+$`)
+// urlRegex は MFM でそのままリンク化される URL パターン。TS本家の urlRegexFull と同じ
+// 文字の範囲で、`!` も含む (#3314)。以前は `!` が抜けていて、`!` を含む URL のリンクを
+// `<...>` で囲んでいた。
+var urlRegex = regexp.MustCompile(`^https?://[\w/:%#@$&?!()\[\]~.,=+\-]+$`)
 
 // FromHTML converts HTML (typically from an ActivityPub note `content` field)
 // into MFM markup. TS MfmService.fromHtml() と同等の変換を行う。
@@ -180,7 +182,11 @@ func analyzeAnchor(n *html.Node, b *strings.Builder) {
 	}
 	// テキストとURLが異なる場合。TS本家は urlRegex (部分一致) にマッチし
 	// かつ urlRegexFull (完全一致) にマッチしない場合に角括弧を付ける。
-	// 実質的には http(s):// で始まるが末尾に非URL文字を含む場合のみ角括弧。
+	// **本家とは意図的に違えている。** 本家の部分一致は scheme の直後に URL の文字が
+	// 1 文字以上あることを求めるので、`https://日本` は角括弧が付かず
+	// `[c](https://日本)` になり、mfm-js で読むとリンクにならず文字のまま残る。
+	// こちらは http(s):// で始まれば完全一致しないものを全部角括弧で囲み、
+	// `[c](<https://日本>)` としてリンクを保つ。
 	if strings.HasPrefix(href, "http://") || strings.HasPrefix(href, "https://") {
 		if urlRegex.MatchString(href) {
 			b.WriteString("[" + txt + "](" + href + ")")
