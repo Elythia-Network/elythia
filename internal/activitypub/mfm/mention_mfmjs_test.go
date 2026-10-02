@@ -10,7 +10,8 @@ import (
 
 // serializeTree renders nodes in the same compact form as the mfm-js script
 // used to produce the expectations below (type, the identifying prop, and
-// children in brackets). Links carry their URL and a trailing "!" when silent.
+// children in brackets). Links carry their URL and a trailing "!" when silent;
+// URLs written as `<https://...>` carry a trailing "<>".
 func serializeTree(nodes []*Node) string {
 	parts := make([]string, 0, len(nodes))
 	for _, n := range nodes {
@@ -26,6 +27,9 @@ func serializeTree(nodes []*Node) string {
 			head += ":" + fmt.Sprint(n.Props["hashtag"])
 		case NodeURL:
 			head += ":" + fmt.Sprint(n.Props["url"])
+			if brackets, _ := n.Props["brackets"].(bool); brackets {
+				head += "<>"
+			}
 		case NodeLink:
 			head += ":" + fmt.Sprint(n.Props["url"])
 			if silent, _ := n.Props["silent"].(bool); silent {

@@ -243,30 +243,11 @@ func (s *state) urlAltStop(pos int) int {
 	return len(s.src)
 }
 
-// readLinkTarget reads `<https://...>` (mfm-js urlAlt: up to '>' without a
-// space, brackets removed) or a plain URL (mfm-js url, via tryURL).
+// readLinkTarget reads `<https://...>` (mfm-js urlAlt, via readURLAlt) or a
+// plain URL (mfm-js url, via tryURL).
 func (s *state) readLinkTarget() (string, bool) {
 	if s.peek() == '<' {
-		start := s.pos + 1
-		bodyStart := start
-		switch {
-		case s.prefixAt(start, "https://"):
-			bodyStart += len("https://")
-		case s.prefixAt(start, "http://"):
-			bodyStart += len("http://")
-		default:
-			return "", false
-		}
-		// 閉じの `>` か空白 (mfm-js の space は半角空白・全角空白・タブで、改行は
-		// 含まない) まで読む。**1 文字ずつ読まない** — `[a](<https://x` の後に改行を
-		// 挟んで並べると、どの `](` からも末尾まで読むことになり入力長の 2 乗になる。
-		// 区切りの位置の索引から引く。
-		stop := s.urlAltStop(bodyStart)
-		if stop < 0 || stop >= len(s.src) || s.src[stop] != '>' || stop == bodyStart {
-			return "", false
-		}
-		s.pos = stop + 1
-		return s.src[start:stop], true
+		return s.readURLAlt()
 	}
 	n := s.tryURL()
 	if n == nil {
@@ -274,6 +255,53 @@ func (s *state) readLinkTarget() (string, bool) {
 	}
 	url, _ := n.Props["url"].(string)
 	return url, url != ""
+}
+
+// readURLAlt reads mfm-js's urlAlt `<https://...>` at the current position:
+// up to the closing '>' without a space, returning the URL without the
+// brackets. The position moves past '>' only on success.
+func (s *state) readURLAlt() (string, bool) {
+	if s.peek() != '<' {
+		return "", false
+	}
+	start := s.pos + 1
+	bodyStart := start
+	switch {
+	case s.prefixAt(start, "https://"):
+		bodyStart += len("https://")
+	case s.prefixAt(start, "http://"):
+		bodyStart += len("http://")
+	default:
+		return "", false
+	}
+	// 閉じの `>` か空白 (mfm-js の space は半角空白・全角空白・タブで、改行は
+	// 含まない) まで読む。**1 文字ずつ読まない** — `[a](<https://x` の後に改行を
+	// 挟んで並べると、どの `](` からも末尾まで読むことになり入力長の 2 乗になる。
+	// 区切りの位置の索引から引く。
+	stop := s.urlAltStop(bodyStart)
+	if stop < 0 || stop >= len(s.src) || s.src[stop] != '>' || stop == bodyStart {
+		return "", false
+	}
+	s.pos = stop + 1
+	return s.src[start:stop], true
+}
+
+// tryURLAlt parses mfm-js's urlAlt in text: `<https://...>` becomes a URL
+// node with the brackets prop.
+//
+// mfm-js は `<>` で囲むと、url の文字に無い日本語や記号も含めて 1 つの URL に
+// する。#3302 で url の文字を mfm-js に揃えたので、これが無いと
+// `<https://ja.wikipedia.org/wiki/日本>` が `wiki/` で切れる。
+func (s *state) tryURLAlt() *Node {
+	// リンクのラベルの中では URL にしない (mfm-js の notLinkLabel)。
+	if s.inLink {
+		return nil
+	}
+	url, ok := s.readURLAlt()
+	if !ok {
+		return nil
+	}
+	return &Node{Type: NodeURL, Props: map[string]any{"url": url, "brackets": true}}
 }
 
 // indexAll returns the offsets of every (possibly overlapping) occurrence of
@@ -673,6 +701,9 @@ func (s *state) parseFullOne() *Node {
 		return n
 	}
 	if n := s.tryStrikeTag(); n != nil {
+		return n
+	}
+	if n := s.tryURLAlt(); n != nil {
 		return n
 	}
 	if n := s.tryBoldAsta(); n != nil {
