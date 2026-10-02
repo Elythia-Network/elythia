@@ -105,12 +105,8 @@ type memoTable struct {
 	// 0 = 未構築、1 = 構築済み、-1 = 使えない (src が不正な UTF-8 か確保の上限)。
 	stops      [numStopKinds][]int32
 	stopsState [numStopKinds]int8
-	// parenOpens / parenClose は link の URL を読むための括弧の対応。
-	// parenOpens は '(' の位置 (昇順)、parenClose[i] はそれに対応する ')' の位置か
-	// -1。parenState は stopsState と同じ意味。
-	parenOpens []int32
-	parenClose []int32
-	parenState int8
+	// linkTargets は link の飛び先を位置ごとに読んだ結果 (linkTargetAt)。
+	linkTargets map[int32]linkTargetEntry
 }
 
 // stopKind names a construct that reads raw text up to a delimiter.
@@ -121,6 +117,7 @@ const (
 	stopMathBlockClose                 // \]
 	stopMathInline                     // \) or a newline
 	stopFnArgValue                     // ',', ' ' or ']'
+	stopURLAltEnd                      // '>', ' ', '\u3000' or '\t'
 	numStopKinds
 )
 
@@ -134,8 +131,9 @@ const (
 // 止まる位置を 1 度だけ列挙しておき、二分探索で引く。
 //
 // 元のループは rune 単位で進み、不正なバイトでは utf8.RuneLen(RuneError) = 3 で
-// 進む。区切りは全て ASCII なので、正しい UTF-8 ならバイト単位で探した最初の
-// 出現と一致するが、不正な UTF-8 では一致しないので元のループに任せる。
+// 進む。区切りは ASCII か U+3000 (先頭バイトで始まるので境界が一致する) なので、
+// 正しい UTF-8 ならバイト単位で探した最初の出現と一致するが、不正な UTF-8 では
+// 一致しないので元のループに任せる。
 func (m *memoTable) stopList(src string, kind stopKind) ([]int32, bool) {
 	switch m.stopsState[kind] {
 	case 1:
@@ -165,6 +163,12 @@ func (m *memoTable) stopList(src string, kind stopKind) ([]int32, bool) {
 				list = append(list, int32(i))
 			}
 		}
+	case stopURLAltEnd:
+		for i := 0; i < len(src); i++ {
+			if c := src[i]; c == '>' || c == ' ' || c == '\t' || strings.HasPrefix(src[i:], "\u3000") {
+				list = append(list, int32(i))
+			}
+		}
 	}
 	if !m.charge(4 * cap(list)) {
 		return nil, false
@@ -174,52 +178,102 @@ func (m *memoTable) stopList(src string, kind stopKind) ([]int32, bool) {
 	return list, true
 }
 
-// parenMatch returns the offset of the ')' that closes the '(' at open without
-// crossing whitespace, or -1 when there is none. ok is false when the caller
-// must fall back to reading rune by rune.
+// linkTargetEntry caches the link target parsed at one offset.
+type linkTargetEntry struct {
+	end int32
+	url string
+	ok  bool
+}
+
+// linkTargetEntryCost is the memory charged per cached link target, on top of
+// the URL itself.
+const linkTargetEntryCost = 48
+
+// linkTargetAt parses the link target starting at pos (just after "](") and
+// returns the URL and the offset right after it, like mfm-js's
+// alt([urlAlt, url]) in the link rule. ok is false when there is no URL.
 //
-// link の URL は「](」の直後から括弧の深さを数えて対応する ')' まで読み、空白に
-// 当たれば失敗する。「[a](」を並べると開始位置ごとに末尾まで読み直して入力長の
-// 2 乗になる (3000 バイトで仕事量 2300 万) ので、空白で区切った範囲の中の括弧の
-// 対応を 1 度だけ求めておく。URL の開始直前の '(' に対応する ')' が、元のループが
-// 深さ 0 に戻る位置そのもの。
-func (s *state) parenMatch(open int) (int, bool) {
+// 結果は位置ごとに覚える。多数の `[` が同じ「](」に届き、リンクが成立しない
+// 形 (`[[[[a](https://xxx...` で `)` が無いなど) では、同じ飛び先を `[` の数だけ
+// 読み直して入力長の 2 乗になる。3000 バイトでも仕事量の上限に届き、以降が
+// テキストになる (以前は飛び先を `)` まで何でも読んでいたので、括弧の対応を
+// 1 度だけ求める parenMatch で同じことを防いでいた)。
+func (s *state) linkTargetAt(pos int) (url string, end int, ok bool) {
 	m := s.memo
-	switch m.parenState {
-	case -1:
-		return 0, false
-	case 0:
-		m.parenState = -1
-		if !utf8.ValidString(s.src) {
-			return 0, false
-		}
-		var opens, closes, stack []int32
-		for i, r := range s.src {
-			switch {
-			case r == '(':
-				stack = append(stack, int32(len(opens)))
-				opens = append(opens, int32(i))
-				closes = append(closes, -1)
-			case r == ')':
-				if n := len(stack); n > 0 {
-					closes[stack[n-1]] = int32(i)
-					stack = stack[:n-1]
-				}
-			case unicode.IsSpace(r):
-				stack = stack[:0]
-			}
-		}
-		if !m.charge(4 * (cap(opens) + cap(closes) + cap(stack))) {
-			return 0, false
-		}
-		m.parenOpens, m.parenClose, m.parenState = opens, closes, 1
+	if e, hit := m.linkTargets[int32(pos)]; hit {
+		return e.url, int(e.end), e.ok
 	}
-	s.budget.used++
-	i := sort.Search(len(m.parenOpens), func(i int) bool { return int(m.parenOpens[i]) >= open })
-	if i == len(m.parenOpens) || int(m.parenOpens[i]) != open {
-		return -1, true
+	save := s.pos
+	s.pos = pos
+	url, ok = s.readLinkTarget()
+	end = s.pos
+	s.pos = save
+	if m.charge(linkTargetEntryCost + len(url)) {
+		if m.linkTargets == nil {
+			m.linkTargets = map[int32]linkTargetEntry{}
+		}
+		m.linkTargets[int32(pos)] = linkTargetEntry{end: int32(end), url: url, ok: ok}
 	}
-	return int(m.parenClose[i]), true
+	return url, end, ok
+}
+
+// urlAltStop returns the offset of the first '>' or space at or after pos
+// (len(src) when none), or -1 when the work budget runs out.
+func (s *state) urlAltStop(pos int) int {
+	save := s.pos
+	s.pos = pos
+	stop, ok := s.nextStop(stopURLAltEnd)
+	s.pos = save
+	if ok {
+		return stop
+	}
+	// 索引を作れないとき (メモの確保の上限に届いたとき。Parse は入口で UTF-8 を
+	// 正すので、不正な UTF-8 は内部の呼び出しからしか来ない) は 1 文字ずつ読むが、
+	// 読んだ分を仕事量に数えて上限で打ち切る。
+	for i := pos; i < len(s.src); {
+		if s.budget.used++; s.budget.exhausted() {
+			return -1
+		}
+		r, size := utf8.DecodeRuneInString(s.src[i:])
+		if r == '>' || r == ' ' || r == '\u3000' || r == '\t' {
+			return i
+		}
+		i += size
+	}
+	return len(s.src)
+}
+
+// readLinkTarget reads `<https://...>` (mfm-js urlAlt: up to '>' without a
+// space, brackets removed) or a plain URL (mfm-js url, via tryURL).
+func (s *state) readLinkTarget() (string, bool) {
+	if s.peek() == '<' {
+		start := s.pos + 1
+		bodyStart := start
+		switch {
+		case s.prefixAt(start, "https://"):
+			bodyStart += len("https://")
+		case s.prefixAt(start, "http://"):
+			bodyStart += len("http://")
+		default:
+			return "", false
+		}
+		// 閉じの `>` か空白 (mfm-js の space は半角空白・全角空白・タブで、改行は
+		// 含まない) まで読む。**1 文字ずつ読まない** — `[a](<https://x` の後に改行を
+		// 挟んで並べると、どの `](` からも末尾まで読むことになり入力長の 2 乗になる。
+		// 区切りの位置の索引から引く。
+		stop := s.urlAltStop(bodyStart)
+		if stop < 0 || stop >= len(s.src) || s.src[stop] != '>' || stop == bodyStart {
+			return "", false
+		}
+		s.pos = stop + 1
+		return s.src[start:stop], true
+	}
+	n := s.tryURL()
+	if n == nil {
+		return "", false
+	}
+	url, _ := n.Props["url"].(string)
+	return url, url != ""
 }
 
 // indexAll returns the offsets of every (possibly overlapping) occurrence of
@@ -795,6 +849,13 @@ func (s *state) collectTo(end int) []*Node {
 // --- Block-level parsers ---
 
 func (s *state) tryQuote() *Node {
+	// リンクのラベルの中では引用にしない (#3300)。mfm-js の inline には quote が
+	// 無いので、ラベルの中の `> ` は文字のまま。部分の state には inLink が
+	// 渡らないので、引用にするとラベルの中でメンション・ハッシュタグ・URL・
+	// 入れ子のリンクの判定を抜けてしまう。
+	if s.inLink {
+		return nil
+	}
 	// 行頭もしくはテキスト先頭のみ
 	if s.pos > 0 && s.src[s.pos-1] != '\n' {
 		return nil
@@ -1230,6 +1291,10 @@ func (s *state) tryMention() *Node {
 	if s.peek() != '@' {
 		return nil
 	}
+	// リンクのラベルの中ではメンションにしない (mfm-js の notLinkLabel)。
+	if s.inLink {
+		return nil
+	}
 	// 直前が英数字なら失敗
 	if s.pos > 0 && isAlphanumeric(s.prevRune()) {
 		return nil
@@ -1242,29 +1307,62 @@ func (s *state) tryMention() *Node {
 		return nil
 	}
 	var host string
+	hasHost := false
 	if !s.eof() && s.peek() == '@' {
+		hostStart := s.pos
 		s.advance(1)
-		host = s.consumeIdent()
-		if host == "" {
+		if h := s.consumeIdent(); h != "" {
+			host, hasHost = h, true
+		} else {
 			// @user@ のようなパターンはホスト無しに戻す
-			s.pos -= 1 // @ を戻す
+			s.pos = hostStart
 		}
 	}
-	// 末尾のドット・ハイフンを削る
-	username = strings.TrimRight(username, ".-")
-	host = strings.TrimRight(host, ".-")
-	if username == "" {
-		s.pos = save
-		return nil
+	end := s.pos
+
+	// 以下は mfm-js 0.26.0 の mention と同じ判定 (#3300)。
+	//   - host の末尾の `.` / `-` は削る。削って空になったら不正
+	//   - username の末尾の `.` / `-` は、host が無いときだけ削る。host があれば不正
+	//   - username / host が `.` / `-` で始まれば不正
+	// 不正なら読んだ範囲をまるごと文字にする (mfm-js は invalidMention で
+	// input.slice(index, resultIndex) を返す)。正しければ `@name@host` の長さだけ
+	// 進め、削った `.` / `-` は後ろの文字として残す。以前は削った分の位置を
+	// 戻していなかったので、`@a. hi` の `.` が出力から消えていた。
+	invalid := false
+	if hasHost {
+		if trimmed := strings.TrimRight(host, ".-"); len(trimmed) != len(host) {
+			host = trimmed
+			if host == "" {
+				invalid = true
+				hasHost = false
+			}
+		}
+	}
+	if trimmed := strings.TrimRight(username, ".-"); len(trimmed) != len(username) {
+		if !hasHost {
+			username = trimmed
+		} else {
+			invalid = true
+		}
+	}
+	if username == "" || strings.HasPrefix(username, ".") || strings.HasPrefix(username, "-") {
+		invalid = true
+	}
+	if hasHost && (strings.HasPrefix(host, ".") || strings.HasPrefix(host, "-")) {
+		invalid = true
+	}
+	if invalid {
+		return Text(s.src[save:end])
 	}
 
 	props := map[string]any{"username": username}
 	acct := "@" + username
-	if host != "" {
+	if hasHost {
 		props["host"] = host
 		acct += "@" + host
 	}
 	props["acct"] = acct
+	s.pos = save + len(acct)
 	return &Node{Type: NodeMention, Props: props}
 }
 
@@ -1283,6 +1381,10 @@ func (s *state) consumeIdent() string {
 
 func (s *state) tryHashtag() *Node {
 	if s.peek() != '#' {
+		return nil
+	}
+	// リンクのラベルの中ではハッシュタグにしない (mfm-js の notLinkLabel、#3300)。
+	if s.inLink {
 		return nil
 	}
 	if s.pos > 0 && isAlphanumeric(s.prevRune()) {
@@ -1431,15 +1533,19 @@ func (s *state) tryURL() *Node {
 	if !(s.hasPrefix("https://") || s.hasPrefix("http://")) {
 		return nil
 	}
+	// リンクのラベルの中では URL にしない (mfm-js の notLinkLabel、#3300)。
+	if s.inLink {
+		return nil
+	}
 	save := s.pos
 	start := s.pos
 
 	// プロトコル部分を消費
+	schemeLen := len("http://")
 	if s.hasPrefix("https://") {
-		s.advance(8)
-	} else {
-		s.advance(7)
+		schemeLen = len("https://")
 	}
+	s.advance(schemeLen)
 	if s.eof() {
 		s.pos = save
 		return nil
@@ -1452,7 +1558,9 @@ func (s *state) tryURL() *Node {
 	url = strings.TrimRight(url, ".,")
 	s.pos = start + len(url)
 
-	if len(url) <= 8 { // プロトコルのみ
+	// プロトコルのみなら URL にしない。以前は https:// の長さ (8) で比べていたので、
+	// `http://a` が URL にならなかった (mfm-js は scheme の後に 1 文字あればよい)。
+	if len(url) <= schemeLen {
 		s.pos = save
 		return nil
 	}
@@ -1515,38 +1623,15 @@ func (s *state) tryLink() *Node {
 	s.inLink = oldInLink
 	s.advance(2) // skip ](
 
-	urlStart := s.pos
-	if end, ok := s.parenMatch(urlStart - 1); ok {
-		if end <= urlStart {
-			s.pos = save
-			return nil
-		}
-		s.pos = end + 1
-		props := map[string]any{"url": s.src[urlStart:end], "silent": silent}
-		return &Node{Type: NodeLink, Props: props, Children: mergeText(labelNodes)}
-	}
-	parenDepth := 1
-	for !s.eof() && parenDepth > 0 {
-		ch := s.peek()
-		if ch == '(' {
-			parenDepth++
-		} else if ch == ')' {
-			parenDepth--
-			if parenDepth == 0 {
-				break
-			}
-		} else if ch == '\n' || unicode.IsSpace(ch) {
-			s.pos = save
-			return nil
-		}
-		s.advance(utf8.RuneLen(ch))
-	}
-	url := s.src[urlStart:s.pos]
-	if url == "" || !s.hasPrefix(")") {
+	// 飛び先は mfm-js と同じく URL (`https?://...` か `<https?://...>`) に限り、
+	// 直後に `)` が要る (#3300)。以前は `)` までを何でも受け付けたので、
+	// `[@a](x)` もリンクになり、ラベルの中の判定 (inLink) が本家と食い違った。
+	url, end, ok := s.linkTargetAt(s.pos)
+	if !ok || !s.prefixAt(end, ")") {
 		s.pos = save
 		return nil
 	}
-	s.advance(1) // skip )
+	s.pos = end + 1 // skip )
 
 	props := map[string]any{"url": url, "silent": silent}
 	return &Node{Type: NodeLink, Props: props, Children: mergeText(labelNodes)}
