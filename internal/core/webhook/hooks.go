@@ -2,6 +2,7 @@ package webhook
 
 import (
 	"encoding/json"
+	"log/slog"
 	"time"
 
 	corenote "github.com/shiroha-a/mk/internal/core/note"
@@ -188,9 +189,44 @@ func (h *ReactionCreateHook) OnReactionCreated(note *model.Note, reactor *model.
 	h.svc.DispatchUser(note.UserID, EventReaction, body)
 }
 
+// ProfileLookup loads the profile row of a user. repository.UserRepository
+// satisfies it.
+type ProfileLookup interface {
+	FindProfileByUserID(userID string) (*model.UserProfile, error)
+}
+
+// RelationApplier writes the viewer->target relation block (isFollowing,
+// isBlocking, memo, ...) onto a packed user and reports whether the viewer
+// follows the target. userrelation.Repos satisfies it.
+type RelationApplier interface {
+	Apply(detailed *entity.UserDetailed, viewerID string, target *model.User, profile *model.UserProfile) bool
+}
+
+// ModeratorChecker reports whether a user holds moderator privileges.
+type ModeratorChecker interface {
+	IsModerator(userID string) bool
+}
+
+// UserLookups resolves the parts of the packed user that come from other
+// tables. A nil lookup leaves that part out (test fixtures / partial wiring);
+// production wires all of them.
+type UserLookups struct {
+	Instances  entity.InstanceLookup
+	Emojis     entity.EmojiLookup
+	Profiles   ProfileLookup
+	Relations  RelationApplier
+	Moderators ModeratorChecker
+}
+
 // FollowingHook implements the following WebhookHook interface.
+//
+// 本家 UserFollowingService は follow / unfollow を
+// `pack(followee, follower, {schema: 'UserDetailedNotMe'})` (閲覧者はフォローした側)、
+// followed を `pack(follower, followee)` (既定の UserLite) で送る (#3269)。
 type FollowingHook struct {
-	svc *Service
+	svc     *Service
+	lookups UserLookups
+	idGen   id.Generator
 }
 
 // NewFollowingHook constructs a FollowingHook.
@@ -198,12 +234,21 @@ func NewFollowingHook(svc *Service) *FollowingHook {
 	return &FollowingHook{svc: svc}
 }
 
+// SetUserLookups wires the lookups used to pack the `user` of follow /
+// followed / unfollow bodies, and idGen to derive createdAt.
+func (h *FollowingHook) SetUserLookups(l UserLookups, idGen id.Generator) {
+	h.lookups = l
+	h.idGen = idGen
+}
+
 // OnFollow fires the `follow` event on the follower's webhooks.
 func (h *FollowingHook) OnFollow(follower, followee *model.User) {
 	if h == nil || h.svc == nil || follower == nil || followee == nil {
 		return
 	}
-	h.svc.DispatchUser(follower.ID, EventFollow, map[string]any{"user": packUser(followee)})
+	h.svc.DispatchUserLazy(follower.ID, EventFollow, func() (any, bool) {
+		return h.detailedBody(followee, follower)
+	})
 }
 
 // OnUnfollow fires the `unfollow` event on the follower's webhooks.
@@ -211,7 +256,9 @@ func (h *FollowingHook) OnUnfollow(follower, followee *model.User) {
 	if h == nil || h.svc == nil || follower == nil || followee == nil {
 		return
 	}
-	h.svc.DispatchUser(follower.ID, EventUnfollow, map[string]any{"user": packUser(followee)})
+	h.svc.DispatchUserLazy(follower.ID, EventUnfollow, func() (any, bool) {
+		return h.detailedBody(followee, follower)
+	})
 }
 
 // OnFollowed fires the `followed` event on the followee's webhooks.
@@ -219,7 +266,64 @@ func (h *FollowingHook) OnFollowed(follower, followee *model.User) {
 	if h == nil || h.svc == nil || follower == nil || followee == nil {
 		return
 	}
-	h.svc.DispatchUser(followee.ID, EventFollowed, map[string]any{"user": packUser(follower)})
+	h.svc.DispatchUserLazy(followee.ID, EventFollowed, func() (any, bool) {
+		lite := entity.PackUserLite(follower)
+		h.resolveLite(follower, &lite)
+		return map[string]any{"user": toMap(lite)}, true
+	})
+}
+
+// resolveLite fills instance and emojis on lite, like upstream UserLite.
+//
+// 本家はリモートの利用者に instance を付け、絵文字の URL を解決する。
+// PackUserLite だけではどちらも付かず、フォローの相手はリモートでありうるので
+// 差が出る。
+func (h *FollowingHook) resolveLite(u *model.User, lite *entity.UserLite) {
+	entity.NewInstanceResolver(h.lookups.Instances, u).FillUserLite(lite)
+	entity.NewEmojiResolver(h.lookups.Emojis, []*model.Note{{User: u}}).PopulateUserEmojis(u, lite)
+}
+
+// detailedBody packs target as UserDetailedNotMe seen by viewer. It returns
+// false when the profile cannot be loaded.
+//
+// 本家は profile を findOneByOrFail で読み、無ければ例外になって送らない。
+// profile 無しで組むと followersVisibility が既定の public に倒れ、伏せるべき
+// カウントが出るので、読めないときは送らない側に倒す。
+func (h *FollowingHook) detailedBody(target, viewer *model.User) (any, bool) {
+	// profile を読めないときは送らない。profile 無しで組むと公開範囲が既定の
+	// public に倒れ、伏せるべきカウントが出てしまう。配線が外れたとき (Profiles が
+	// nil) も同じく閉じる側に倒す。
+	if h.lookups.Profiles == nil {
+		slog.Warn("webhook: profile lookup is not wired; follow payload dropped", "userId", target.ID)
+		return nil, false
+	}
+	profile, err := h.lookups.Profiles.FindProfileByUserID(target.ID)
+	if err != nil || profile == nil {
+		slog.Warn("webhook: load profile for follow payload failed",
+			"userId", target.ID, "err", err)
+		return nil, false
+	}
+	d := entity.PackUserDetailed(target, profile, h.idGen)
+	h.resolveLite(target, &d.UserLite)
+	iAmModerator := h.lookups.Moderators != nil && h.lookups.Moderators.IsModerator(viewer.ID)
+	// 本家は閲覧者がモデレーターなら moderationNote と 2FA の 3 項目を足す
+	// (users/show と同じ扱い)。
+	if iAmModerator {
+		note := ""
+		if profile != nil && profile.ModerationNote != nil {
+			note = *profile.ModerationNote
+		}
+		d.ModerationNote = &note
+	}
+	entity.ApplyModeratorSecurityFields(&d, iAmModerator, profile)
+	viewerIsFollowing := false
+	if h.lookups.Relations != nil {
+		viewerIsFollowing = h.lookups.Relations.Apply(&d, viewer.ID, target, profile)
+	}
+	// フォロワー限定のカウントは、閲覧者がフォロワーのときだけ見せる。follow の
+	// 直後は関係の行があるので見え、unfollow の直後は見えない (本家と同じ)。
+	entity.GateCountVisibility(&d, false, iAmModerator, viewerIsFollowing)
+	return map[string]any{"user": toMap(d)}, true
 }
 
 // SignupHook implements the signup WebhookHook interface, firing the
@@ -254,8 +358,13 @@ func noteEntityToMap(packed entity.NoteEntity) map[string]any {
 // packUser turns a model.User into a generic map matching entity.UserLite.
 // 呼び出し元で u != nil は保証済み。
 func packUser(u *model.User) map[string]any {
-	packed := entity.PackUserLite(u)
-	raw, _ := json.Marshal(packed)
+	return toMap(entity.PackUserLite(u))
+}
+
+// toMap converts a packed entity into the generic map the webhook envelope
+// carries. json.Marshal/Unmarshal は正常値に対して失敗しない。
+func toMap(v any) map[string]any {
+	raw, _ := json.Marshal(v)
 	out := map[string]any{}
 	_ = json.Unmarshal(raw, &out)
 	return out

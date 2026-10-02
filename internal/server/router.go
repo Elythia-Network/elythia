@@ -556,7 +556,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	webhookReactionHook := corewebhook.NewReactionCreateHook(webhookService, idGen)
 	webhookReactionHook.SetFollowingRepo(followingRepo)
 	reactionService.SetWebhookHook(webhookReactionHook)
-	followingService.SetWebhookHook(corewebhook.NewFollowingHook(webhookService))
+	webhookFollowingHook := corewebhook.NewFollowingHook(webhookService)
+	followingService.SetWebhookHook(webhookFollowingHook)
 	signupService.SetWebhookHook(corewebhook.NewSignupHook(webhookService))
 	// Webhook delivery: SSRF-safe transport + forward proxy 経由で user-supplied
 	// URL に POST する (#638)。Timeout は processors 側の DefaultWebhookTimeout
@@ -1577,6 +1578,15 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		FollowRequest: followRequestRepo,
 		Memo:          repository.NewUserMemoRepository(s.db),
 	}
+	// follow / unfollow の Webhook は本家と同じく、フォローした側から見た
+	// UserDetailedNotMe で相手を送る。followed は UserLite (#3269)。
+	webhookFollowingHook.SetUserLookups(corewebhook.UserLookups{
+		Instances:  instanceRepo,
+		Emojis:     emojiRepo,
+		Profiles:   userRepo,
+		Relations:  listRelationRepos,
+		Moderators: roleService,
+	}, idGen)
 
 	// CAPTCHA service — meta から有効な provider を選択して構築する。
 	// meta 取得失敗時は captcha 無効として動作する (ログイン不能を避けるため)。
