@@ -89,6 +89,22 @@ func TestFromHTML(t *testing.T) {
 			want: "a <https://example.com/ä> d",
 		},
 		{
+			// 本家の urlRegexFull は `!` を含むので、囲まずにそのまま書く (#3314)。
+			name: "link with ! in url, same text",
+			html: `<p>a <a href="https://example.com/a!b">https://example.com/a!b</a> d</p>`,
+			want: "a https://example.com/a!b d",
+		},
+		{
+			name: "link with ! in url, different text",
+			html: `<p>a <a href="https://example.com/a!b">c</a> d</p>`,
+			want: "a [c](https://example.com/a!b) d",
+		},
+		{
+			name: "link with ! in url, without text",
+			html: `<p>a <a href="https://example.com/a!b"></a> d</p>`,
+			want: "a https://example.com/a!b d",
+		},
+		{
 			name: "mention",
 			html: `<p>a <a href="https://example.com/@user" class="u-url mention">@user</a> d</p>`,
 			want: "a @user@example.com d",
