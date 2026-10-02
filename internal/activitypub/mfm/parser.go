@@ -1789,7 +1789,9 @@ func (s *state) trySearch() *Node {
 			if !s.eof() {
 				s.advance(1) // skip \n
 			}
-			return &Node{Type: NodeSearch, Props: map[string]any{"query": query}}
+			// mfm-js はリンクの文字などに使う content を query + 区切り + ボタンの語で作る。
+			// trimmedLine は語で終わっているので、行全体がそのまま content になる。
+			return &Node{Type: NodeSearch, Props: map[string]any{"query": query, "content": trimmedLine}}
 		}
 	}
 	s.pos = save
