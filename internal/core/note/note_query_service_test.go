@@ -40,6 +40,30 @@ func TestQueryService_Show_Visible(t *testing.T) {
 	assert.Equal(t, "n1", got.ID)
 }
 
+func TestQueryService_ShowCurrent_UsesVisibilityACL(t *testing.T) {
+	svc, noteRepo, followingRepo := newQueryService(t)
+	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: "author", Visibility: model.NoteVisibilityFollowers}
+
+	_, err := svc.ShowCurrent(&model.User{ID: "stranger"}, "n1")
+	require.ErrorIs(t, err, note.ErrNoteNotFound)
+
+	followingRepo.Followings["f1"] = &model.Following{ID: "f1", FollowerID: "viewer", FolloweeID: "author"}
+	got, err := svc.ShowCurrent(&model.User{ID: "viewer"}, "n1")
+	require.NoError(t, err)
+	assert.Equal(t, "n1", got.ID)
+}
+
+func TestQueryService_ShowCurrent_NotFoundAndRepositoryError(t *testing.T) {
+	svc, noteRepo, _ := newQueryService(t)
+	_, err := svc.ShowCurrent(nil, "missing")
+	require.ErrorIs(t, err, note.ErrNoteNotFound)
+
+	want := errors.New("database unavailable")
+	noteRepo.FindErr = want
+	_, err = svc.ShowCurrent(nil, "n1")
+	require.ErrorIs(t, err, want)
+}
+
 // ShowForAPI は upstream Misskey TS の notes/show 互換挙動 (#799)。
 // visibility 違反でも note を返す (= ID 指定の lookup は公開する設計)。
 func TestQueryService_ShowForAPI_ReturnsFollowersNoteToStranger(t *testing.T) {
@@ -63,6 +87,14 @@ func TestQueryService_ShowForAPI_NotFound(t *testing.T) {
 	svc, _, _ := newQueryService(t)
 	_, err := svc.ShowForAPI("missing")
 	require.ErrorIs(t, err, note.ErrNoteNotFound)
+}
+
+func TestQueryService_ShowForAPIOnPrimary_ReturnsStoredNote(t *testing.T) {
+	svc, noteRepo, _ := newQueryService(t)
+	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: "author", Visibility: model.NoteVisibilitySpecified}
+	got, err := svc.ShowForAPIOnPrimary("n1")
+	require.NoError(t, err)
+	assert.Equal(t, "n1", got.ID)
 }
 
 // RequireVisible は #1443 で追加した public wrapper。favorites/create 等の

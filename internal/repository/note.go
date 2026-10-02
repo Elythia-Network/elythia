@@ -816,6 +816,7 @@ func (r *noteRepository) ExistingNoteIDsOnPrimary(ids []string) ([]string, error
 // FindManyByIDsWithUser returns the requested notes preserving the order of `ids`.
 // Notes that are not found are simply omitted from the result.
 func (r *noteRepository) FindManyByIDsWithUser(ids []string) ([]*model.Note, error) {
+	ids = storableIDs(ids)
 	return r.findManyByIDsWithUser(ids, false)
 }
 
@@ -990,6 +991,7 @@ func (r *noteRepository) findManyByIDsWithUser(ids []string, primary bool) ([]*m
 }
 
 func (r *noteRepository) FindManyByIDsWithUserOnPrimary(ids []string) ([]*model.Note, error) {
+	ids = storableIDs(ids)
 	return r.findManyByIDsWithUser(ids, true)
 }
 
