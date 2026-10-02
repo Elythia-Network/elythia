@@ -149,13 +149,18 @@ func TestParse_UnclosedCenterLinesStayLinear(t *testing.T) {
 	}
 }
 
-// TestParse_QuoteMemoSeparatesTopLevelCenter fixes that a quote run's memo
-// table keeps results computed where center is tried (the quote content's
-// top level) apart from results computed one level deeper, so the tree does not
-// depend on which depth read the shared table first.
+// TestParse_QuoteMemoSeparatesTopLevelCenter fixes the tree of an input whose
+// quote run could once be read from different top-level depths; it now matches
+// mfm-js 0.26.0.
+//
+// #3301 で quote などの block 構文を最上位と引用の中身でだけ試すようにしたので、
+// 1 つの表を別の最上位の深さから読む経路は無くなり、この入力は mfm-js と同じ木に
+// なる (最上位の center が 2 行目の閉じで閉じる)。最上位かどうかの軸は守りとして
+// 表に残しており、このテストはその入力で mfm-js と一致することを固定する。
 func TestParse_QuoteMemoSeparatesTopLevelCenter(t *testing.T) {
-	in := strings.Repeat("<b>", 18) + "\n><center>\n>></center>\n><center>*</center>"
+	q := strings.Repeat(">", 18) + " "
+	in := "<center>\n" + q + "<center>`</center>`\n" + q + "<center>y</center>\n" + q + "</center>"
 	assert.Equal(t,
-		"text:"+strings.Repeat("<b>", 18)+"\n|quote[center[quote[text:</center>]|text:<center>*]]",
+		"center[text:"+q+"<center>|inlineCode|text:\n"+q+"<center>y]|"+strings.Repeat("quote[", 18)+"text:</center>"+strings.Repeat("]", 18),
 		serializeTree(Parse(in)))
 }
