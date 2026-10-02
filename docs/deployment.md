@@ -1090,11 +1090,16 @@ IP とアカウントの対応を引く機能は、**照会そのものを別の
 `admin/get-user-ips` と `admin/show-user` の `signins` も記録する** — どちらも
 返すのは同じ「利用者 ↔ IP の対応」なので、外すと監査を迂回して同じものを引ける。
 
-同梱 frontend は、管理画面の利用者ページを開くだけでは `signins` を取得しない。
-折り畳まれた IP 欄を開いたときに `admin/get-user-ips` を初めて呼び、その実際の照会を
-監査へ残す。`admin/show-user` には `withSignins: false` を渡し、signin repository 自体を
-読まない。省略時と `true` は既存 client のため従来どおり `signins` を返し、IP を
-開示した場合だけ `kind: signins` の記録を残す。
+**`admin/show-user` は記録が増えやすい。** 現在同梱している管理画面の利用者ページは開くたびに
+この口を叩き、凍結・サイレンス・ロール変更・メモ保存などの操作のあとにも引き直す。
+`canSearchIpHistory` を持つ相手が利用者ページを 1 回開いて 1 操作すると、それだけで
+記録が 2 行増える (ログイン履歴が 0 件の利用者でも `resultCount: 0` の行が残る)。
+下の「記録の一覧は最新 10,100 件までしか遡れない」と合わせて考えること。
+
+`admin/show-user` は additive な `withSignins` を受け付ける。明示的に `false` を渡すと
+signin repository を読まず `signins: []` を返し、照会していないため監査も残さない。
+省略時と `true` は既存 client のため従来どおり `signins` を返し、IP を開示した場合だけ
+`kind: signins` の記録を残す。
 
 **監査の一覧 (`admin/ip/lookup-log`) を読んだことは記録しない。** 監査ログの閲覧を
 監査し続けると際限が無いので切ってあるが、**この応答にも照会に使った IP が並ぶ**
