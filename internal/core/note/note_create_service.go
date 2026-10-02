@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -1065,12 +1064,6 @@ func (s *CreateService) isThreadMuted(userID string, threadNote *model.Note) boo
 	return err == nil && muted
 }
 
-// mentionRegex matches @username and @username@host occurrences anywhere in
-// text. Misskey本家のクライアント実装(misskey-js)と同じく、ユーザー名は
-// 英数とアンダースコアおよびハイフンからなり、長さは制限しない。
-// ホスト部はドメイン形式 (英数・ハイフン・ドット) を許容する。
-var mentionRegex = regexp.MustCompile(`@([A-Za-z0-9_-]+)(?:@([A-Za-z0-9.\-]+))?`)
-
 // Mention represents a single user mention extracted from note text.
 type Mention struct {
 	Username string
@@ -1090,52 +1083,53 @@ func appendUniqueID(ids []string, id string) []string {
 // Misskeyのnote.mentions列はユーザーIDの配列だが、本サービスではユーザー解決を
 // 別レイヤで行う前提で、ここではユーザー名形式のままで返す。重複は除去する。
 func ExtractMentions(text string) []string {
-	matches := mentionRegex.FindAllStringSubmatch(text, -1)
-	if len(matches) == 0 {
+	mentions := ExtractMentionStructs(text)
+	if len(mentions) == 0 {
 		return nil
 	}
-	seen := make(map[string]struct{}, len(matches))
-	var out []string
-	for _, m := range matches {
-		username := m[1]
-		host := ""
-		if len(m) >= 3 {
-			host = m[2]
+	out := make([]string, 0, len(mentions))
+	for _, m := range mentions {
+		key := m.Username
+		if m.Host != "" {
+			key = m.Username + "@" + m.Host
 		}
-		key := username
-		if host != "" {
-			key = username + "@" + host
-		}
-		if _, dup := seen[key]; dup {
-			continue
-		}
-		seen[key] = struct{}{}
 		out = append(out, key)
 	}
 	return out
 }
 
-// ExtractMentionStructs returns the mentions as structured Mention values.
-// 主にNotificationServiceなどリモート/ローカル区別を要する呼び出し向け。
+// ExtractMentionStructs returns the mentions in text as structured Mention
+// values, ordered by first appearance and dedup'd by exact username and host.
+// Mirrors upstream extractMentions(mfm.parse(text)): only mention nodes of the
+// MFM tree count, so an "@" inside code, a link label, a URL or an e-mail
+// address is not a mention.
+//
+// 本家は正規表現ではなく、MFMのパーサが作ったmentionノードだけを使う
+// (misc/extract-mentions.ts)。正規表現で拾うと、メールアドレスやコードの中の
+// @がメンションになり、末尾の"."をhostに含めて宛先を落とす(#3304)。
 func ExtractMentionStructs(text string) []Mention {
-	matches := mentionRegex.FindAllStringSubmatch(text, -1)
-	if len(matches) == 0 {
+	if text == "" {
 		return nil
 	}
-	seen := make(map[string]struct{}, len(matches))
+	seen := make(map[Mention]struct{})
 	var out []Mention
-	for _, m := range matches {
-		username := m[1]
-		host := ""
-		if len(m) >= 3 {
-			host = m[2]
+	var walk func(n *mfm.Node)
+	walk = func(n *mfm.Node) {
+		if n.Type == mfm.NodeMention {
+			username, _ := n.Props["username"].(string)
+			host, _ := n.Props["host"].(string)
+			m := Mention{Username: username, Host: host}
+			if _, dup := seen[m]; !dup {
+				seen[m] = struct{}{}
+				out = append(out, m)
+			}
 		}
-		key := username + "@" + host
-		if _, dup := seen[key]; dup {
-			continue
+		for _, c := range n.Children {
+			walk(c)
 		}
-		seen[key] = struct{}{}
-		out = append(out, Mention{Username: username, Host: host})
+	}
+	for _, n := range mfm.Parse(text) {
+		walk(n)
 	}
 	return out
 }

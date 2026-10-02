@@ -561,8 +561,8 @@ func TestExtractMentions(t *testing.T) {
 		{"@alice and @alice again", []string{"alice"}},
 		// リモートメンション
 		{"hi @alice@example.com", []string{"alice@example.com"}},
-		// テキスト内の埋め込み
-		{"foo@bar baz@qux", []string{"bar", "qux"}},
+		// 直前が英数字の@はメンションにならない(本家のmfm-jsと同じ、#3304)
+		{"foo@bar baz@qux", nil},
 	}
 	for _, tc := range tests {
 		t.Run(tc.text, func(t *testing.T) {
@@ -580,6 +580,42 @@ func TestExtractMentionStructs(t *testing.T) {
 	assert.Equal(t, "example.com", out[1].Host)
 
 	assert.Empty(t, note.ExtractMentionStructs("nothing here"))
+}
+
+// TestExtractMentionStructs_MatchesMfmJs pins the mentions to what upstream
+// extractMentions(mfm.parse(text)) returns with mfm-js 0.26.0 (#3304).
+func TestExtractMentionStructs_MatchesMfmJs(t *testing.T) {
+	type m = note.Mention
+	tests := []struct {
+		name string
+		text string
+		want []m
+	}{
+		{"email address", "mail foo@example.com", nil},
+		{"trailing dot after host", "@user@host.example.", []m{{Username: "user", Host: "host.example"}}},
+		{"inline code", "`@code`", nil},
+		{"code block", "```\n@block\n```", nil},
+		{"link label", "[@alice](https://x.example)", nil},
+		{"silent link label", "?[@silent](https://x.example)", nil},
+		{"invalid hyphen before host", "@a-@h", nil},
+		{"url path", "https://x.example/@u", nil},
+		{"plain tag", "<plain>@p</plain>", nil},
+		{"trailing dot without host", "@user.", []m{{Username: "user"}}},
+		{"trailing hyphen without host", "@user-", []m{{Username: "user"}}},
+		{"parenthesized", "(@paren)", []m{{Username: "paren"}}},
+		{"second at sign", "@a@b@c", []m{{Username: "a", Host: "b"}}},
+		{"dot in username", "@a_b.c", []m{{Username: "a_b.c"}}},
+		{"case is kept", "@Alice @alice @alice@EXAMPLE.com", []m{{Username: "Alice"}, {Username: "alice"}, {Username: "alice", Host: "EXAMPLE.com"}}},
+		{"nested in bold and fn", "**@bold** $[x2 @fn]", []m{{Username: "bold"}, {Username: "fn"}}},
+		{"nested in center", "<center>@c</center>", []m{{Username: "c"}}},
+		{"nested in small, strike and italic", "<small>@s</small> ~~@st~~ <i>@it</i>", []m{{Username: "s"}, {Username: "st"}, {Username: "it"}}},
+		{"empty", "", nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, note.ExtractMentionStructs(tc.text))
+		})
+	}
 }
 
 func TestCreateService_ReplyTargetNotFound(t *testing.T) {
@@ -1962,6 +1998,28 @@ func TestCreateService_PublishesMentionToLocalUser(t *testing.T) {
 	require.NoError(t, err)
 	// local user (alice) にだけ mention emit、remote bob は skip。
 	assert.Equal(t, []string{"uA"}, pub.userIDsOf("mention"))
+}
+
+// An "@" that the MFM parser does not read as a mention (e-mail address, code,
+// link label) must neither land in note.Mentions nor notify the local user,
+// and a trailing "." must not be taken into the host (#3304).
+func TestCreateService_MentionsFollowMfmTree(t *testing.T) {
+	svc, _, _ := newCreateService(t)
+	userRepo := testutil.NewMockUserRepository()
+	userRepo.Users["uE"] = &model.User{ID: "uE", Username: "example", UsernameLower: "example"}
+	userRepo.Users["uC"] = &model.User{ID: "uC", Username: "code", UsernameLower: "code"}
+	userRepo.Users["uL"] = &model.User{ID: "uL", Username: "label", UsernameLower: "label"}
+	remoteHost := "host.example"
+	userRepo.Users["uR"] = &model.User{ID: "uR", Username: "user", UsernameLower: "user", Host: &remoteHost}
+	svc.SetUserRepo(userRepo)
+	pub := &stubMainStreamPublisher{}
+	svc.SetMainStreamPublisher(pub)
+
+	text := "mail foo@example `@code` [@label](https://x.example) @user@host.example."
+	created, err := svc.Create(note.CreateInput{User: &model.User{ID: "author1"}, Text: &text})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"uR"}, []string(created.Mentions))
+	assert.Empty(t, pub.userIDsOf("mention"))
 }
 
 func TestCreateService_SkipsMentionToSelf(t *testing.T) {

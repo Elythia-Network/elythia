@@ -5050,6 +5050,33 @@ func TestIngestNote_TagMentionsMergedWithTextMentions(t *testing.T) {
 	assert.Contains(t, mentions, "bob-local-id", "本文の @bob は user ID へ resolve される")
 }
 
+// An e-mail address in a remote note's text is not a mention in the MFM tree,
+// so the local user named after its domain must not be mentioned (#3304).
+func TestIngestNote_EmailAddressIsNotTextMention(t *testing.T) {
+	repo := testutil.NewMockUserRepository()
+	repo.Users["example-local-id"] = &model.User{
+		ID:            "example-local-id",
+		Username:      "example",
+		UsernameLower: "example",
+	}
+	noteRepo := testutil.NewMockNoteRepository()
+	urls := activitypub.NewURLBuilder("https://example.com")
+	idGen, _ := id.NewGenerator("aidx")
+	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+
+	body := []byte(`{ "@context": "https://www.w3.org/ns/activitystreams",
+		"id": "https://remote.example/notes/mail1",
+		"type": "Note",
+		"attributedTo": "https://remote.example/users/alice",
+		"content": "mail foo@example",
+		"to": ["https://www.w3.org/ns/activitystreams#Public"],
+		"cc": []
+	}`)
+	got, err := r.IngestNote(body)
+	require.NoError(t, err)
+	assert.Empty(t, []string(got.Mentions))
+}
+
 // TestUpdateRemoteNote_MentionsRecomputed confirms tag-derived mentions are
 // recomputed on inbound Update even if text is unchanged (#397)。
 func TestUpdateRemoteNote_MentionsRecomputed(t *testing.T) {
