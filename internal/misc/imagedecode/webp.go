@@ -9,6 +9,8 @@ import (
 	"image/draw"
 
 	"github.com/kovidgoyal/imaging"
+	"github.com/rwcarlsen/goexif/exif"
+	exif_tiff "github.com/rwcarlsen/goexif/tiff"
 )
 
 // ErrMalformedWebP reports that a WebP container could not be validated
@@ -345,7 +347,157 @@ func decodeCheckedWebP(data []byte) (image.Image, error) {
 	if err := checkImagingWebPMetadata(data); err != nil {
 		return nil, err
 	}
-	return imaging.Decode(bytes.NewReader(data), imaging.AutoOrientation(true))
+	decoded, _, err := imaging.DecodeAll(
+		bytes.NewReader(data),
+		imaging.AutoOrientation(false),
+		imaging.ColorSpace(imaging.NO_CHANGE_OF_COLORSPACE),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Normalize VP8 planes before imaging performs ICC conversion or EXIF
+	// orientation. Those transforms allocate RGB images via image.Image.At;
+	// doing them first would bake the studio-range values into RGB and make the
+	// original YCbCr planes impossible to recover accurately.
+	for _, frame := range decoded.Frames {
+		frame.Image = normalizeLossyWebPRange(frame.Image)
+	}
+	if decoded.DefaultImage != nil {
+		decoded.DefaultImage = normalizeLossyWebPRange(decoded.DefaultImage)
+	}
+	if err := applyWebPICC(decoded); err != nil {
+		return nil, err
+	}
+	if err := applyWebPOrientation(decoded); err != nil {
+		return nil, err
+	}
+	return decoded.SingleFrame(), nil
+}
+
+// applyWebPICC mirrors imaging's default sRGB conversion after the VP8 range
+// normalization. WebP metadata supports ICCP but not CICP, so no CICP branch
+// is needed here.
+func applyWebPICC(decoded *imaging.Image) error {
+	if decoded.Metadata == nil {
+		return nil
+	}
+	profile, err := decoded.Metadata.ICCProfile()
+	if err != nil || profile == nil {
+		return err
+	}
+	for _, frame := range decoded.Frames {
+		frame.Image, err = imaging.ConvertToSRGB(profile, imaging.Relative, true, frame.Image)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// applyWebPOrientation mirrors imaging.AutoOrientation(true), but runs after
+// the VP8 range and ICC conversions above.
+func applyWebPOrientation(decoded *imaging.Image) error {
+	if decoded.Metadata == nil {
+		return nil
+	}
+	exifData, err := decoded.Metadata.Exif()
+	if err != nil || exifData == nil {
+		return err
+	}
+	tag, err := exifData.Get(exif.Orientation)
+	if err != nil || tag == nil || tag.Format() != exif_tiff.IntVal {
+		return nil
+	}
+	orientation, err := tag.Int(0)
+	if err != nil {
+		return nil
+	}
+	switch orientation {
+	case 2:
+		decoded.FlipH()
+	case 3:
+		decoded.Rotate180()
+	case 4:
+		decoded.FlipV()
+	case 5:
+		decoded.Transpose()
+	case 6:
+		decoded.Rotate270()
+	case 7:
+		decoded.Transverse()
+	case 8:
+		decoded.Rotate90()
+	}
+	return nil
+}
+
+// normalizeLossyWebPRange converts the studio-range YCbCr planes returned by
+// the VP8 decoder into a straight-alpha NRGBA image. Eager conversion keeps
+// downstream imaging operations on their optimized concrete-image paths;
+// exposing the conversion through image.Image.At would allocate an interface
+// value for every source pixel during resize.
+//
+// This normalization deliberately lives in the WebP decoder instead of a
+// generic YCbCr helper: JPEG decoders have their own range semantics and must
+// not be changed based on the behavior observed for VP8.
+func normalizeLossyWebPRange(img image.Image) image.Image {
+	var (
+		ycbcr *image.YCbCr
+		alpha *image.NYCbCrA
+	)
+	switch src := img.(type) {
+	case *image.YCbCr:
+		ycbcr = src
+	case *image.NYCbCrA:
+		ycbcr = &src.YCbCr
+		alpha = src
+	default:
+		return img
+	}
+	b := ycbcr.Bounds()
+	dst := image.NewNRGBA(b)
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			r, g, bl := limitedYCbCrToRGB(
+				ycbcr.Y[ycbcr.YOffset(x, y)],
+				ycbcr.Cb[ycbcr.COffset(x, y)],
+				ycbcr.Cr[ycbcr.COffset(x, y)],
+			)
+			a := uint8(255)
+			if alpha != nil {
+				a = alpha.A[alpha.AOffset(x, y)]
+			}
+			i := dst.PixOffset(x, y)
+			dst.Pix[i] = r
+			dst.Pix[i+1] = g
+			dst.Pix[i+2] = bl
+			dst.Pix[i+3] = a
+		}
+	}
+	return dst
+}
+
+// limitedYCbCrToRGB applies the BT.601 studio-range conversion used by VP8.
+// The integer coefficients are the conventional 8-bit form of
+// 1.164*(Y-16), 1.596*Cr, 0.392*Cb, 0.813*Cr and 2.017*Cb.
+func limitedYCbCrToRGB(y, cb, cr uint8) (uint8, uint8, uint8) {
+	c := int(y) - 16
+	d := int(cb) - 128
+	e := int(cr) - 128
+	return clampWebPByte((298*c + 409*e + 128) >> 8),
+		clampWebPByte((298*c - 100*d - 208*e + 128) >> 8),
+		clampWebPByte((298*c + 516*d + 128) >> 8)
+}
+
+func clampWebPByte(v int) uint8 {
+	if v < 0 {
+		return 0
+	}
+	if v > 255 {
+		return 255
+	}
+	return uint8(v)
 }
 
 // checkImagingWebPMetadata replays how kovidgoyal/imaging (v1.8.21,

@@ -1368,8 +1368,10 @@ func decodeImage(data []byte, contentType string) (image.Image, error) {
 // デコード自体は成功しているので、**200 で真っ白 (完全透明) の画像が返る**
 // という気づきにくい壊れ方をする (リモート利用者のアイコンが出ない、#2591)。
 //
-// 単純な VP8 は `*image.YCbCr` になるので影響を受けない。ここで型を絞って
-// 変換するのは、NRGBA 化が画素あたりのコピーを 1 回増やすため。
+// **WebP は今はここに NYCbCrA で来ない。** `imagedecode` が lossy WebP の値域を
+// 直すときに `*image.NRGBA` へ変換する (#3309)。この分岐は、他のデコーダが
+// NYCbCrA を返したときの保険として残す。ここで型を絞って変換するのは、NRGBA 化が
+// 画素あたりのコピーを 1 回増やすため。
 func normalizeForResize(img image.Image) image.Image {
 	src, ok := img.(*image.NYCbCrA)
 	if !ok {
