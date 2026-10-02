@@ -1228,10 +1228,10 @@ func newHandlerWithPining(t *testing.T) (*Handler, *testutil.MockUserRepository,
 }
 
 func TestNote_AuthorPreferencesDoNotChangeFederationPublication(t *testing.T) {
-	h, userRepo, noteRepo, _ := newHandlerWithPining(t)
+	h, userRepo, noteRepo, piningRepo := newHandlerWithPining(t)
 	author := &model.User{ID: "u1", Username: "alice"}
 	hidden := 0
-	author.MakeNotesHiddenBefore = &hidden
+	followersOnly := 0
 	userRepo.Users[author.ID] = author
 	n := &model.Note{ID: "n1", UserID: author.ID, User: author, Visibility: model.NoteVisibilityPublic}
 	noteRepo.Notes[n.ID] = n
@@ -1243,19 +1243,28 @@ func TestNote_AuthorPreferencesDoNotChangeFederationPublication(t *testing.T) {
 	}
 	assert.Equal(t, http.StatusOK, status(), "ordinary public notes remain fetchable over ActivityPub")
 
+	pin := &model.UserNotePining{ID: "p1", UserID: author.ID, NoteID: n.ID}
+	require.NoError(t, piningRepo.Create(pin))
 	assert.Equal(t, http.StatusOK, status(), "pinning does not change public ActivityPub visibility")
 
-	n.Visibility = model.NoteVisibilityHome
-	assert.Equal(t, http.StatusOK, status(), "current home pin is federated")
+	author.MakeNotesHiddenBefore = &hidden
+	assert.Equal(t, http.StatusOK, status(), "makeNotesHiddenBefore does not suppress federation")
+	author.MakeNotesHiddenBefore = nil
+	author.MakeNotesFollowersOnlyBefore = &followersOnly
+	assert.Equal(t, http.StatusOK, status(), "makeNotesFollowersOnlyBefore does not suppress federation")
+	author.MakeNotesFollowersOnlyBefore = nil
+	author.RequireSigninToViewContents = true
+	assert.Equal(t, http.StatusOK, status(), "requireSigninToViewContents does not suppress federation")
 
+	author.RequireSigninToViewContents = false
 	n.Visibility = model.NoteVisibilityFollowers
 	assert.Equal(t, http.StatusNotFound, status(), "followers pin never becomes public AP")
 
 	n.Visibility = model.NoteVisibilityPublic
+	require.NoError(t, piningRepo.Delete(pin))
+	author.MakeNotesHiddenBefore = &hidden
+	author.MakeNotesFollowersOnlyBefore = &followersOnly
 	author.RequireSigninToViewContents = true
-	assert.Equal(t, http.StatusOK, status(), "web sign-in preference does not suppress federation")
-
-	author.RequireSigninToViewContents = false
 	assert.Equal(t, http.StatusOK, status(), "unpinning does not change public ActivityPub visibility")
 }
 
@@ -1874,9 +1883,10 @@ func TestNoteActivity_LocalNoteIsCreate(t *testing.T) {
 }
 
 func TestNoteActivity_AuthorPreferencesDoNotChangeFederationPublication(t *testing.T) {
-	h, userRepo, noteRepo, _ := newHandlerWithPining(t)
+	h, userRepo, noteRepo, piningRepo := newHandlerWithPining(t)
 	hidden := 0
-	author := &model.User{ID: "u1", Username: "alice", MakeNotesHiddenBefore: &hidden}
+	followersOnly := 0
+	author := &model.User{ID: "u1", Username: "alice"}
 	userRepo.Users[author.ID] = author
 	text := "published"
 	n := &model.Note{ID: "n1", UserID: author.ID, User: author, Visibility: model.NoteVisibilityPublic, Text: &text}
@@ -1888,11 +1898,22 @@ func TestNoteActivity_AuthorPreferencesDoNotChangeFederationPublication(t *testi
 	}
 	assert.Equal(t, http.StatusOK, status(), "ordinary public activity remains fetchable")
 
+	pin := &model.UserNotePining{ID: "p1", UserID: author.ID, NoteID: n.ID}
+	require.NoError(t, piningRepo.Create(pin))
 	assert.Equal(t, http.StatusOK, status(), "pinning does not change ActivityPub visibility")
 
+	author.MakeNotesHiddenBefore = &hidden
+	assert.Equal(t, http.StatusOK, status(), "makeNotesHiddenBefore does not suppress ActivityPub activity")
+	author.MakeNotesHiddenBefore = nil
+	author.MakeNotesFollowersOnlyBefore = &followersOnly
+	assert.Equal(t, http.StatusOK, status(), "makeNotesFollowersOnlyBefore does not suppress ActivityPub activity")
+	author.MakeNotesFollowersOnlyBefore = nil
 	author.RequireSigninToViewContents = true
-	assert.Equal(t, http.StatusOK, status(), "web sign-in preference does not suppress ActivityPub activity")
-	author.RequireSigninToViewContents = false
+	assert.Equal(t, http.StatusOK, status(), "requireSigninToViewContents does not suppress ActivityPub activity")
+
+	require.NoError(t, piningRepo.Delete(pin))
+	author.MakeNotesHiddenBefore = &hidden
+	author.MakeNotesFollowersOnlyBefore = &followersOnly
 	assert.Equal(t, http.StatusOK, status(), "unpinning does not change ActivityPub visibility")
 }
 

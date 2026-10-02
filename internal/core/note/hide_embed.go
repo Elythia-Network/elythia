@@ -199,7 +199,7 @@ func HidePinnedNoteByPrefsDecision(viewer *model.User, f EmbedFacts, follows fun
 }
 
 // AnonymousPublicationAllowed applies the publication-facing policy used by
-// SSR and ActivityPub. Intrinsic visibility must be public/home. A current pin
+// SSR. Intrinsic visibility must be public/home. A current pin
 // with missing author preferences fails closed because the anonymous exception
 // requires proof that sign-in is not required. Unpinned missing preferences
 // keep the legacy behaviour of the existing public endpoints.
