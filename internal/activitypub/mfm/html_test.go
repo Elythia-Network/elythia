@@ -49,7 +49,15 @@ func TestToHTML_Small(t *testing.T) {
 
 func TestToHTML_Center(t *testing.T) {
 	nodes := Parse("<center>centered</center>")
-	assert.Equal(t, `<div style="text-align:center">centered</div>`, ToHTML(nodes, testHost))
+	assert.Equal(t, `<div style="text-align: center;">centered</div>`, ToHTML(nodes, testHost))
+}
+
+// TestToHTML_CenterMidLineIsText fixes that a <center> in the middle of a line
+// stays text, as mfm-js reads it (#3328).
+func TestToHTML_CenterMidLineIsText(t *testing.T) {
+	nodes := Parse("x <center>a</center>")
+	assert.True(t, IsSimple(nodes))
+	assert.Equal(t, "x &lt;center&gt;a&lt;/center&gt;", ToHTML(nodes, testHost))
 }
 
 func TestToHTML_InlineCode(t *testing.T) {
