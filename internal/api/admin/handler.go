@@ -1169,8 +1169,10 @@ func (h *Handler) ShowUser(c echo.Context) error {
 	}
 
 	// Omitted keeps the upstream-compatible response shape and behaviour for
-	// existing clients. The control-panel page explicitly opts out until its IP
-	// folder is opened, so merely viewing the user does not read or audit IPs.
+	// existing clients. The bundled control-panel page (fork 2026.10.0-mk.1 and
+	// later) always opts out and loads admin/get-user-ips lazily (admins only)
+	// when its IP folder is opened, so merely viewing the user does not read or
+	// audit IPs.
 	withSignins := req.WithSignins == nil || *req.WithSignins
 	resp := h.packAdminUser(user, profile, showIPs, withSignins)
 	// **内部連絡用のキーは wire に出さない。** `signins` を引けたかどうかは
