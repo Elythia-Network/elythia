@@ -2140,6 +2140,79 @@ func TestShow_PinnedNotes_ExcludesNonVisibleFromBody(t *testing.T) {
 	assert.Equal(t, "pn_pub", first["id"])
 }
 
+func TestShow_PinnedNotes_PublicationExceptionMatrix(t *testing.T) {
+	h, userRepo := newTestHandler(t)
+	author := addTestUser(userRepo)
+	hidden := 0
+	author.MakeNotesHiddenBefore = &hidden
+
+	piningRepo := testutil.NewMockUserNotePiningRepository()
+	pin := &model.UserNotePining{ID: "pin", UserID: author.ID, NoteID: "note"}
+	require.NoError(t, piningRepo.Create(pin))
+	h.SetPiningRepo(piningRepo)
+
+	nr := h.noteRepo.(*testutil.MockNoteRepository)
+	text := "intentionally published"
+	n := &model.Note{ID: "note", UserID: author.ID, User: author, Text: &text, Visibility: model.NoteVisibilityPublic, Reactions: datatypes.JSON([]byte("{}"))}
+	nr.Notes[n.ID] = n
+
+	request := func(viewer *model.User) map[string]any {
+		rec := postStub(h.Show, `{"userId":"user1"}`, viewer)
+		require.Equal(t, http.StatusOK, rec.Code)
+		var response map[string]any
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+		return response
+	}
+	firstPinned := func(response map[string]any) map[string]any {
+		notes, ok := response["pinnedNotes"].([]any)
+		require.True(t, ok)
+		require.Len(t, notes, 1)
+		return notes[0].(map[string]any)
+	}
+
+	assert.Equal(t, text, firstPinned(request(nil))["text"], "anonymous public pin bypasses time lockdown")
+
+	author.RequireSigninToViewContents = true
+	assert.Nil(t, firstPinned(request(nil))["text"], "anonymous sign-in requirement is never bypassed")
+	assert.Equal(t, text, firstPinned(request(&model.User{ID: "viewer"}))["text"], "authenticated public pin bypasses author lockdown")
+
+	n.Visibility = model.NoteVisibilityFollowers
+	response := request(&model.User{ID: "viewer"})
+	notes, _ := response["pinnedNotes"].([]any)
+	assert.Empty(t, notes, "login alone must not bypass followers visibility")
+}
+
+func TestShow_PinnedNotes_ForeignAuthorDoesNotGetPublicationException(t *testing.T) {
+	h, userRepo := newTestHandler(t)
+	profileOwner := addTestUser(userRepo)
+	hidden := 0
+	foreignAuthor := &model.User{ID: "other", Username: "other", MakeNotesHiddenBefore: &hidden}
+	userRepo.Users[foreignAuthor.ID] = foreignAuthor
+
+	piningRepo := testutil.NewMockUserNotePiningRepository()
+	require.NoError(t, piningRepo.Create(&model.UserNotePining{
+		ID: "legacy-pin", UserID: profileOwner.ID, NoteID: "foreign-note",
+	}))
+	h.SetPiningRepo(piningRepo)
+
+	text := "not published by this profile owner"
+	nr := h.noteRepo.(*testutil.MockNoteRepository)
+	nr.Notes["foreign-note"] = &model.Note{
+		ID: "foreign-note", UserID: foreignAuthor.ID, User: foreignAuthor,
+		Text: &text, Visibility: model.NoteVisibilityPublic, Reactions: datatypes.JSON([]byte("{}")),
+	}
+
+	rec := postStub(h.Show, `{"userId":"user1"}`, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var response map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	notes, ok := response["pinnedNotes"].([]any)
+	require.True(t, ok)
+	require.Len(t, notes, 1)
+	got := notes[0].(map[string]any)
+	assert.Nil(t, got["text"], "a legacy pin row owned by another user must not bypass the note author's lockdown")
+}
+
 func TestShow_PinnedPage_Populated(t *testing.T) {
 	h, userRepo := newTestHandler(t)
 	addTestUser(userRepo)

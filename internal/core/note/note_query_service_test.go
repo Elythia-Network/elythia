@@ -65,6 +65,14 @@ func TestQueryService_ShowForAPI_NotFound(t *testing.T) {
 	require.ErrorIs(t, err, note.ErrNoteNotFound)
 }
 
+func TestQueryService_ShowForAPIOnPrimary_ReturnsStoredNote(t *testing.T) {
+	svc, noteRepo, _ := newQueryService(t)
+	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: "author", Visibility: model.NoteVisibilitySpecified}
+	got, err := svc.ShowForAPIOnPrimary("n1")
+	require.NoError(t, err)
+	assert.Equal(t, "n1", got.ID)
+}
+
 // RequireVisible は #1443 で追加した public wrapper。favorites/create 等の
 // mutation endpoint が「存在 + 閲覧可」を 1 ステップで確認するために使う。
 func TestQueryService_RequireVisible_NotFound(t *testing.T) {

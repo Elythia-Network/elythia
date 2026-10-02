@@ -111,6 +111,26 @@ func (s *QueryService) ShowForAPI(noteID string) (*model.Note, error) {
 	return nil, ErrNoteNotFound
 }
 
+// ShowForAPIOnPrimary is the primary-backed counterpart of ShowForAPI. The
+// notes/show response redaction depends on current visibility and the current
+// author requireSignin preference.
+func (s *QueryService) ShowForAPIOnPrimary(noteID string) (*model.Note, error) {
+	primary, ok := s.noteRepo.(repository.NotePrimaryReader)
+	if ok {
+		n, err := primary.FindByIDWithRelationsOnPrimary(noteID)
+		if err == nil {
+			return n, nil
+		}
+		if !repository.IsNotFound(err) {
+			return nil, err
+		}
+	}
+	if eph := s.readEphemeral(noteID); eph != nil {
+		return eph, nil
+	}
+	return nil, ErrNoteNotFound
+}
+
 // RequireVisible loads a single note and verifies the viewer can see it.
 // Returns ErrNoteNotFound when the note does not exist OR the viewer cannot
 // see it (followers / specified visibility). Used by mutation endpoints that

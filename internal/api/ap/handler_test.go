@@ -1227,10 +1227,52 @@ func newHandlerWithPining(t *testing.T) (*Handler, *testutil.MockUserRepository,
 	return h, userRepo, noteRepo, piningRepo
 }
 
+func TestNote_AuthorPreferencesDoNotChangeFederationPublication(t *testing.T) {
+	h, userRepo, noteRepo, piningRepo := newHandlerWithPining(t)
+	author := &model.User{ID: "u1", Username: "alice"}
+	hidden := 0
+	followersOnly := 0
+	userRepo.Users[author.ID] = author
+	n := &model.Note{ID: "n1", UserID: author.ID, User: author, Visibility: model.NoteVisibilityPublic}
+	noteRepo.Notes[n.ID] = n
+
+	status := func() int {
+		c, rec := newReq(t, "id", n.ID)
+		require.NoError(t, h.Note(c))
+		return rec.Code
+	}
+	assert.Equal(t, http.StatusOK, status(), "ordinary public notes remain fetchable over ActivityPub")
+
+	pin := &model.UserNotePining{ID: "p1", UserID: author.ID, NoteID: n.ID}
+	require.NoError(t, piningRepo.Create(pin))
+	assert.Equal(t, http.StatusOK, status(), "pinning does not change public ActivityPub visibility")
+
+	author.MakeNotesHiddenBefore = &hidden
+	assert.Equal(t, http.StatusOK, status(), "makeNotesHiddenBefore does not suppress federation")
+	author.MakeNotesHiddenBefore = nil
+	author.MakeNotesFollowersOnlyBefore = &followersOnly
+	assert.Equal(t, http.StatusOK, status(), "makeNotesFollowersOnlyBefore does not suppress federation")
+	author.MakeNotesFollowersOnlyBefore = nil
+	author.RequireSigninToViewContents = true
+	assert.Equal(t, http.StatusOK, status(), "requireSigninToViewContents does not suppress federation")
+
+	author.RequireSigninToViewContents = false
+	n.Visibility = model.NoteVisibilityFollowers
+	assert.Equal(t, http.StatusNotFound, status(), "followers pin never becomes public AP")
+
+	n.Visibility = model.NoteVisibilityPublic
+	require.NoError(t, piningRepo.Delete(pin))
+	author.MakeNotesHiddenBefore = &hidden
+	author.MakeNotesFollowersOnlyBefore = &followersOnly
+	author.RequireSigninToViewContents = true
+	assert.Equal(t, http.StatusOK, status(), "unpinning does not change public ActivityPub visibility")
+}
+
 func TestFeatured_ReturnsPinnedNotes(t *testing.T) {
 	h, userRepo, noteRepo, piningRepo := newHandlerWithPining(t)
-	userRepo.Users["u1"] = &model.User{ID: "u1", Username: "alice"}
-	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: "u1", Visibility: model.NoteVisibilityPublic}
+	author := &model.User{ID: "u1", Username: "alice"}
+	userRepo.Users["u1"] = author
+	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: "u1", User: author, Visibility: model.NoteVisibilityPublic}
 	require.NoError(t, piningRepo.Create(&model.UserNotePining{ID: "p1", UserID: "u1", NoteID: "n1"}))
 
 	c, rec := newReq(t, "id", "u1")
@@ -1245,6 +1287,30 @@ func TestFeatured_ReturnsPinnedNotes(t *testing.T) {
 	items, _ := col["orderedItems"].([]any)
 	require.Len(t, items, 1)
 	assert.NotNil(t, col["@context"], "served collection must carry @context")
+}
+
+func TestFeatured_AuthorPreferencesDoNotSuppressFederation(t *testing.T) {
+	h, userRepo, noteRepo, piningRepo := newHandlerWithPining(t)
+	hidden := 0
+	author := &model.User{ID: "u1", Username: "alice", MakeNotesHiddenBefore: &hidden}
+	userRepo.Users[author.ID] = author
+	visible := &model.Note{ID: "visible", UserID: author.ID, User: author, Visibility: model.NoteVisibilityPublic}
+	restrictedAuthor := *author
+	restrictedAuthor.RequireSigninToViewContents = true
+	restricted := &model.Note{ID: "restricted", UserID: author.ID, User: &restrictedAuthor, Visibility: model.NoteVisibilityPublic}
+	noteRepo.Notes[visible.ID] = visible
+	noteRepo.Notes[restricted.ID] = restricted
+	require.NoError(t, piningRepo.Create(&model.UserNotePining{ID: "p1", UserID: author.ID, NoteID: visible.ID}))
+	require.NoError(t, piningRepo.Create(&model.UserNotePining{ID: "p2", UserID: author.ID, NoteID: restricted.ID}))
+
+	c, rec := newReq(t, "id", author.ID)
+	require.NoError(t, h.Featured(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var col map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &col))
+	assert.Equal(t, float64(2), col["totalItems"])
+	assert.Contains(t, rec.Body.String(), "/notes/visible")
+	assert.Contains(t, rec.Body.String(), "/notes/restricted")
 }
 
 func TestFeatured_NoPins_EmptyCollection(t *testing.T) {
@@ -1270,12 +1336,13 @@ func TestFeatured_NoPins_EmptyCollection(t *testing.T) {
 // followers/specified/localOnly な pinned note は unauthenticated AP へ leak しない (#1876)。
 func TestFeatured_ExcludesNonPublicAndLocalOnly(t *testing.T) {
 	h, userRepo, noteRepo, piningRepo := newHandlerWithPining(t)
-	userRepo.Users["u1"] = &model.User{ID: "u1", Username: "alice"}
-	noteRepo.Notes["pub"] = &model.Note{ID: "pub", UserID: "u1", Visibility: model.NoteVisibilityPublic}
-	noteRepo.Notes["home"] = &model.Note{ID: "home", UserID: "u1", Visibility: model.NoteVisibilityHome}
-	noteRepo.Notes["fol"] = &model.Note{ID: "fol", UserID: "u1", Visibility: model.NoteVisibilityFollowers}
-	noteRepo.Notes["spec"] = &model.Note{ID: "spec", UserID: "u1", Visibility: model.NoteVisibilitySpecified}
-	noteRepo.Notes["lo"] = &model.Note{ID: "lo", UserID: "u1", Visibility: model.NoteVisibilityPublic, LocalOnly: true}
+	author := &model.User{ID: "u1", Username: "alice"}
+	userRepo.Users["u1"] = author
+	noteRepo.Notes["pub"] = &model.Note{ID: "pub", UserID: "u1", User: author, Visibility: model.NoteVisibilityPublic}
+	noteRepo.Notes["home"] = &model.Note{ID: "home", UserID: "u1", User: author, Visibility: model.NoteVisibilityHome}
+	noteRepo.Notes["fol"] = &model.Note{ID: "fol", UserID: "u1", User: author, Visibility: model.NoteVisibilityFollowers}
+	noteRepo.Notes["spec"] = &model.Note{ID: "spec", UserID: "u1", User: author, Visibility: model.NoteVisibilitySpecified}
+	noteRepo.Notes["lo"] = &model.Note{ID: "lo", UserID: "u1", User: author, Visibility: model.NoteVisibilityPublic, LocalOnly: true}
 	for i, nid := range []string{"pub", "home", "fol", "spec", "lo"} {
 		require.NoError(t, piningRepo.Create(&model.UserNotePining{ID: "p" + string(rune('1'+i)), UserID: "u1", NoteID: nid}))
 	}
@@ -1619,6 +1686,32 @@ func TestOutbox_Page_ExcludesNonPublic(t *testing.T) {
 	assert.Len(t, items, 1, "followers/specified/localOnly notes excluded from outbox")
 }
 
+func TestOutbox_Page_AuthorPreferencesDoNotSuppressFederation(t *testing.T) {
+	h, userRepo, noteRepo := newHandlerWithOutbox(t)
+	hidden := 0
+	author := &model.User{ID: "u1", Username: "alice", NotesCount: 3, MakeNotesHiddenBefore: &hidden}
+	userRepo.Users[author.ID] = author
+	text := "published"
+	noteRepo.Notes["locked"] = &model.Note{ID: "locked", UserID: author.ID, User: author, Visibility: model.NoteVisibilityPublic, Text: &text}
+	noteRepo.Notes["pinned"] = &model.Note{ID: "pinned", UserID: author.ID, User: author, Visibility: model.NoteVisibilityPublic, Text: &text}
+	restrictedAuthor := *author
+	restrictedAuthor.RequireSigninToViewContents = true
+	noteRepo.Notes["signin"] = &model.Note{ID: "signin", UserID: author.ID, User: &restrictedAuthor, Visibility: model.NoteVisibilityPublic, Text: &text}
+
+	pageBody := func() string {
+		c, rec := newReqQuery(t, "id", author.ID, "page=true")
+		require.NoError(t, h.Outbox(c))
+		require.Equal(t, http.StatusOK, rec.Code)
+		return rec.Body.String()
+	}
+	body := pageBody()
+	assert.Contains(t, body, "/notes/pinned")
+	assert.Contains(t, body, "/notes/locked", "time-based web preference does not suppress federation")
+	assert.Contains(t, body, "/notes/signin", "web sign-in preference does not suppress federation")
+
+	assert.Contains(t, pageBody(), "/notes/pinned", "unpinning does not remove an ordinary public note from federation")
+}
+
 // since_id 指定時は repo が ASC で返すのを handler が DESC に反転し、prev/next を
 // 正しい向き (prev=最新, next=最古) で出すこと (#1878 review M1)。
 func TestOutbox_Page_SinceReverse(t *testing.T) {
@@ -1787,6 +1880,41 @@ func TestNoteActivity_LocalNoteIsCreate(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "@context")
 	assert.Equal(t, "public, max-age=180", rec.Header().Get("Cache-Control"))
 	assert.Equal(t, "Accept", rec.Header().Get("Vary"))
+}
+
+func TestNoteActivity_AuthorPreferencesDoNotChangeFederationPublication(t *testing.T) {
+	h, userRepo, noteRepo, piningRepo := newHandlerWithPining(t)
+	hidden := 0
+	followersOnly := 0
+	author := &model.User{ID: "u1", Username: "alice"}
+	userRepo.Users[author.ID] = author
+	text := "published"
+	n := &model.Note{ID: "n1", UserID: author.ID, User: author, Visibility: model.NoteVisibilityPublic, Text: &text}
+	noteRepo.Notes[n.ID] = n
+	status := func() int {
+		c, rec := newReq(t, "id", n.ID)
+		require.NoError(t, h.NoteActivity(c))
+		return rec.Code
+	}
+	assert.Equal(t, http.StatusOK, status(), "ordinary public activity remains fetchable")
+
+	pin := &model.UserNotePining{ID: "p1", UserID: author.ID, NoteID: n.ID}
+	require.NoError(t, piningRepo.Create(pin))
+	assert.Equal(t, http.StatusOK, status(), "pinning does not change ActivityPub visibility")
+
+	author.MakeNotesHiddenBefore = &hidden
+	assert.Equal(t, http.StatusOK, status(), "makeNotesHiddenBefore does not suppress ActivityPub activity")
+	author.MakeNotesHiddenBefore = nil
+	author.MakeNotesFollowersOnlyBefore = &followersOnly
+	assert.Equal(t, http.StatusOK, status(), "makeNotesFollowersOnlyBefore does not suppress ActivityPub activity")
+	author.MakeNotesFollowersOnlyBefore = nil
+	author.RequireSigninToViewContents = true
+	assert.Equal(t, http.StatusOK, status(), "requireSigninToViewContents does not suppress ActivityPub activity")
+
+	require.NoError(t, piningRepo.Delete(pin))
+	author.MakeNotesHiddenBefore = &hidden
+	author.MakeNotesFollowersOnlyBefore = &followersOnly
+	assert.Equal(t, http.StatusOK, status(), "unpinning does not change ActivityPub visibility")
 }
 
 // pure renote は Announce になる (upstream packActivity)。

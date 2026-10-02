@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/shiroha-a/mk/internal/core/note"
 	"github.com/shiroha-a/mk/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -110,4 +111,24 @@ func TestShowForAPI_NoEphemeralReaderWired(t *testing.T) {
 	svc, _, _ := newQueryService(t)
 	_, err := svc.ShowForAPI("ghost")
 	assert.Error(t, err)
+}
+
+func TestShowForAPIOnPrimary_FallsBackToEphemeral(t *testing.T) {
+	svc, _, _ := newQueryService(t)
+	host := "remote.example"
+	svc.SetEphemeralReader(&stubEphemeralReader{notes: map[string]*model.Note{
+		"eph1": {ID: "eph1", UserID: "ra", UserHost: &host, Visibility: model.NoteVisibilityPublic},
+	}})
+
+	got, err := svc.ShowForAPIOnPrimary("eph1")
+	require.NoError(t, err)
+	assert.Equal(t, "eph1", got.ID)
+}
+
+func TestShowForAPIOnPrimary_MissingEverywhere(t *testing.T) {
+	svc, _, _ := newQueryService(t)
+	svc.SetEphemeralReader(&stubEphemeralReader{notes: map[string]*model.Note{}})
+
+	_, err := svc.ShowForAPIOnPrimary("missing")
+	require.ErrorIs(t, err, note.ErrNoteNotFound)
 }

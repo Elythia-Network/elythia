@@ -161,6 +161,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 時の invalidate が両方に反映される (#300 3-3)。
 	userRepo := s.userRepo
 	noteRepo := repository.NewNoteRepository(s.db)
+	if _, ok := noteRepo.(repository.NotePrimaryReader); !ok {
+		panic("repository.NewNoteRepository must implement NotePrimaryReader")
+	}
 	// cross-worker cache invalidation (#1740) のため concrete *CachedMetaRepository
 	// を保持する。internal event bus との配線は streamPubSub 生成箇所で行う。
 	cachedMeta := repository.NewCachedMetaRepositoryWithTTL(repository.NewMetaRepository(s.db), 5*time.Minute)
@@ -1753,6 +1756,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// Notes endpoints
 	notesHandler := notes.NewHandler(noteRepo, noteCreateService, noteDeleteService, noteQueryService, timelineService, reactionService, pollService, searchService, idGen)
+	notesHandler.SetPiningRepo(piningRepo)
 	// first-page timeline 応答を per-viewer 短期キャッシュ (hit 時に DB + pack +
 	// encode を skip)。opt-in (enableTimelineCache / MK_ENABLETIMELINECACHE)。
 	// staleness trade-off があるため default off。
@@ -2461,6 +2465,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		ssrMetaDeps{
 			User:         userRepo,
 			Note:         noteRepo,
+			Pining:       piningRepo,
 			Page:         pageRepo,
 			Clip:         clipRepo,
 			Flash:        flashRepo,

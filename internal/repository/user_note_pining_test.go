@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/shiroha-a/mk/internal/model"
@@ -90,6 +91,39 @@ func TestUserNotePiningRepository_ListByUser_CountByUser(t *testing.T) {
 	count, err := repo.CountByUser(user.ID)
 	require.NoError(t, err)
 	assert.Equal(t, 2, count)
+}
+
+func TestUserNotePiningRepository_CurrentPinReadsPrimary(t *testing.T) {
+	replicaSchema := "repo_pin_primary_replica"
+	require.NoError(t, testDB.Exec("CREATE SCHEMA IF NOT EXISTS "+replicaSchema).Error)
+	t.Cleanup(func() { testDB.Exec("DROP SCHEMA IF EXISTS " + replicaSchema + " CASCADE") })
+	require.NoError(t, testDB.Exec(fmt.Sprintf(
+		`CREATE TABLE IF NOT EXISTS %s."user_note_pining" (LIKE "user_note_pining" INCLUDING ALL)`, replicaSchema)).Error)
+
+	var primarySchema string
+	require.NoError(t, testDB.Raw("SELECT current_schema()").Scan(&primarySchema).Error)
+	gdb := openWithReplicaSchema(t, primarySchema, replicaSchema)
+	repo := NewUserNotePiningRepository(gdb)
+
+	user := insertTestUser(t, "upinprim", "pinprimary")
+	t.Cleanup(func() { cleanupUser(t, user.ID) })
+	note := insertTestNote(t, "npinprim", user.ID)
+	t.Cleanup(func() { testDB.Exec(`DELETE FROM "note" WHERE id = ?`, note.ID) })
+	pin := &model.UserNotePining{ID: "ppinprim", UserID: user.ID, NoteID: note.ID}
+	require.NoError(t, repo.Create(pin))
+	t.Cleanup(func() { testDB.Exec(`DELETE FROM "user_note_pining" WHERE id = ?`, pin.ID) })
+
+	var replicaRows []*model.UserNotePining
+	require.NoError(t, gdb.Where(`"userId" = ?`, user.ID).Find(&replicaRows).Error)
+	require.Empty(t, replicaRows, "test premise: an ordinary SELECT is routed to the stale replica")
+
+	found, err := repo.FindByPair(user.ID, note.ID)
+	require.NoError(t, err)
+	assert.Equal(t, pin.ID, found.ID)
+	rows, err := repo.ListByUser(user.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, pin.ID, rows[0].ID)
 }
 
 func TestUserNotePiningRepository_QueryErrors(t *testing.T) {

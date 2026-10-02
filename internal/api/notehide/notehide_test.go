@@ -476,3 +476,69 @@ func TestHideEmbedsAt_TreatVisibilityDowngrade(t *testing.T) {
 		t.Errorf("public note past makeNotesFollowersOnlyBefore window should downgrade to followers, got %q", packed[0].Visibility)
 	}
 }
+
+func TestHidePinnedNotesAt_AuthorPreferenceExceptionMatrix(t *testing.T) {
+	hidden := 0
+	requireSignin := true
+	base := entity.NoteEntity{
+		ID: "p", UserID: "author", CreatedAt: "2023-01-01T00:00:00.000Z",
+		User:       entity.UserLite{ID: "author", MakeNotesHiddenBefore: &hidden},
+		Visibility: "public", Text: heStr("published by pin"),
+		FileIDs: []string{}, Files: []any{}, VisibleUserIDs: []string{}, Mentions: []string{},
+	}
+
+	t.Run("anonymous public pin bypasses time lockdown without downgrade", func(t *testing.T) {
+		packed := []entity.NoteEntity{base}
+		hidePinnedNotesAt(nil, packed, followsRepo(), heNowMs)
+		if packed[0].IsHidden || packed[0].Text == nil || *packed[0].Text != "published by pin" {
+			t.Fatal("anonymous public pin must retain content")
+		}
+		if packed[0].Visibility != "public" {
+			t.Fatalf("pin exception must retain public visibility, got %q", packed[0].Visibility)
+		}
+	})
+
+	t.Run("followers-only-before does not downgrade a qualifying pin", func(t *testing.T) {
+		n := base
+		followersOnly := 0
+		n.User.MakeNotesFollowersOnlyBefore = &followersOnly
+		packed := []entity.NoteEntity{n}
+		hidePinnedNotesAt(nil, packed, followsRepo(), heNowMs)
+		if packed[0].IsHidden || packed[0].Text == nil {
+			t.Fatal("a qualifying public pin must bypass makeNotesFollowersOnlyBefore")
+		}
+		if packed[0].Visibility != "public" {
+			t.Fatalf("a qualifying pin must not be downgraded, got %q", packed[0].Visibility)
+		}
+	})
+
+	t.Run("anonymous sign-in-required pin remains hidden", func(t *testing.T) {
+		n := base
+		n.User.RequireSigninToViewContents = &requireSignin
+		packed := []entity.NoteEntity{n}
+		hidePinnedNotesAt(nil, packed, followsRepo(), heNowMs)
+		if !packed[0].IsHidden || packed[0].Text != nil {
+			t.Fatal("requireSigninToViewContents must hide an anonymous pin")
+		}
+	})
+
+	t.Run("authenticated sign-in-required public pin bypasses time lockdown", func(t *testing.T) {
+		n := base
+		n.User.RequireSigninToViewContents = &requireSignin
+		packed := []entity.NoteEntity{n}
+		hidePinnedNotesAt(&model.User{ID: "viewer"}, packed, followsRepo(), heNowMs)
+		if packed[0].IsHidden || packed[0].Text == nil {
+			t.Fatal("authenticated viewer must receive a public pin despite author preference gates")
+		}
+	})
+
+	t.Run("followers pin never gets exception", func(t *testing.T) {
+		n := base
+		n.Visibility = "followers"
+		packed := []entity.NoteEntity{n}
+		hidePinnedNotesAt(&model.User{ID: "viewer"}, packed, followsRepo(), heNowMs)
+		if !packed[0].IsHidden {
+			t.Fatal("followers pin must remain subject to author preference gates")
+		}
+	})
+}

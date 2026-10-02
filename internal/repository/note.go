@@ -247,6 +247,16 @@ type NoteRepository interface {
 	CountLocalComments() (int64, error)
 }
 
+// NotePrimaryReader exposes the small set of note reads whose authorization
+// decision must observe the primary immediately after pin, visibility or
+// author-preference changes. Ordinary timeline/list reads remain replica-safe.
+// Production wiring validates this capability once at startup.
+type NotePrimaryReader interface {
+	FindByIDWithUserOnPrimary(id string) (*model.Note, error)
+	FindByIDWithRelationsOnPrimary(id string) (*model.Note, error)
+	FindManyByIDsWithUserOnPrimary(ids []string) ([]*model.Note, error)
+}
+
 type noteRepository struct {
 	db *gorm.DB
 }
@@ -313,12 +323,34 @@ func (r *noteRepository) FindByIDWithUser(id string) (*model.Note, error) {
 	return &note, nil
 }
 
+func (r *noteRepository) FindByIDWithUserOnPrimary(id string) (*model.Note, error) {
+	if !storable(id) {
+		return nil, ErrNotFound
+	}
+	var note model.Note
+	if err := r.db.Clauses(dbresolver.Write).Preload("User").First(&note, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+	return &note, nil
+}
+
 func (r *noteRepository) FindByIDWithRelations(id string) (*model.Note, error) {
 	if !storable(id) {
 		return nil, ErrNotFound
 	}
 	var note model.Note
 	if err := preloadNoteRelations(r.db).First(&note, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+	return &note, nil
+}
+
+func (r *noteRepository) FindByIDWithRelationsOnPrimary(id string) (*model.Note, error) {
+	if !storable(id) {
+		return nil, ErrNotFound
+	}
+	var note model.Note
+	if err := preloadNoteRelations(r.db.Clauses(dbresolver.Write)).First(&note, "id = ?", id).Error; err != nil {
 		return nil, err
 	}
 	return &note, nil
@@ -777,6 +809,11 @@ func (r *noteRepository) ExistingNoteIDsOnPrimary(ids []string) ([]string, error
 // Notes that are not found are simply omitted from the result.
 func (r *noteRepository) FindManyByIDsWithUser(ids []string) ([]*model.Note, error) {
 	ids = storableIDs(ids)
+	return r.findManyByIDsWithUser(ids, false)
+}
+
+func (r *noteRepository) findManyByIDsWithUser(ids []string, primary bool) ([]*model.Note, error) {
+	ids = storableIDs(ids)
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -792,8 +829,14 @@ func (r *noteRepository) FindManyByIDsWithUser(ids []string) ([]*model.Note, err
 	// frontend が引用先を「削除されたノート」として描画する (packer の
 	// maxNoteEmbedDepth=2 / detail gate と一致)。reply embed は detail:false で
 	// 子を持たないため、reply target の子は辿らない。
+	db := func() *gorm.DB {
+		if primary {
+			return r.db.Clauses(dbresolver.Write)
+		}
+		return r.db
+	}
 	var notes []*model.Note
-	if err := r.db.Where("id IN ?", ids).Find(&notes).Error; err != nil {
+	if err := db().Where("id IN ?", ids).Find(&notes).Error; err != nil {
 		return nil, err
 	}
 	if len(notes) == 0 {
@@ -813,7 +856,7 @@ func (r *noteRepository) FindManyByIDsWithUser(ids []string) ([]*model.Note, err
 	subByID := make(map[string]*model.Note, len(subIDSet))
 	if len(subIDSet) > 0 {
 		var subs []*model.Note
-		if err := r.db.Where("id IN ?", mapKeys(subIDSet)).Find(&subs).Error; err != nil {
+		if err := db().Where("id IN ?", mapKeys(subIDSet)).Find(&subs).Error; err != nil {
 			return nil, err
 		}
 		for _, s := range subs {
@@ -854,7 +897,7 @@ func (r *noteRepository) FindManyByIDsWithUser(ids []string) ([]*model.Note, err
 	}
 	if len(lvl2IDSet) > 0 {
 		var lvl2 []*model.Note
-		if err := r.db.Where("id IN ?", mapKeys(lvl2IDSet)).Find(&lvl2).Error; err != nil {
+		if err := db().Where("id IN ?", mapKeys(lvl2IDSet)).Find(&lvl2).Error; err != nil {
 			return nil, err
 		}
 		for _, s := range lvl2 {
@@ -891,7 +934,7 @@ func (r *noteRepository) FindManyByIDsWithUser(ids []string) ([]*model.Note, err
 	}
 	if len(userIDSet) > 0 {
 		var users []*model.User
-		if err := r.db.Where("id IN ?", mapKeys(userIDSet)).Find(&users).Error; err != nil {
+		if err := db().Where("id IN ?", mapKeys(userIDSet)).Find(&users).Error; err != nil {
 			return nil, err
 		}
 		userByID := make(map[string]*model.User, len(users))
@@ -910,7 +953,7 @@ func (r *noteRepository) FindManyByIDsWithUser(ids []string) ([]*model.Note, err
 		noteIDs = append(noteIDs, n.ID)
 	}
 	var polls []*model.Poll
-	if err := r.db.Where(`"noteId" IN ?`, noteIDs).Find(&polls).Error; err != nil {
+	if err := db().Where(`"noteId" IN ?`, noteIDs).Find(&polls).Error; err != nil {
 		return nil, err
 	}
 	if len(polls) > 0 {
@@ -937,6 +980,11 @@ func (r *noteRepository) FindManyByIDsWithUser(ids []string) ([]*model.Note, err
 		}
 	}
 	return ordered, nil
+}
+
+func (r *noteRepository) FindManyByIDsWithUserOnPrimary(ids []string) ([]*model.Note, error) {
+	ids = storableIDs(ids)
+	return r.findManyByIDsWithUser(ids, true)
 }
 
 // mapKeys returns the keys of a string-set as a slice (順序不定)。

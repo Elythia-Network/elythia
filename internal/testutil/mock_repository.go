@@ -1372,6 +1372,10 @@ func (m *MockNoteRepository) FindByIDWithUser(id string) (*model.Note, error) {
 	return m.FindByID(id)
 }
 
+func (m *MockNoteRepository) FindByIDWithUserOnPrimary(id string) (*model.Note, error) {
+	return m.FindByIDWithUser(id)
+}
+
 // FindByIDWithRelations mirrors the production preloadNoteRelations behavior:
 // shallow-copy the stored note and embed Renote / Reply targets from the map
 // when their IDs are set (#425)。コピーに書き込むので、同じ note を
@@ -1393,6 +1397,10 @@ func (m *MockNoteRepository) FindByIDWithRelations(id string) (*model.Note, erro
 		}
 	}
 	return &out, nil
+}
+
+func (m *MockNoteRepository) FindByIDWithRelationsOnPrimary(id string) (*model.Note, error) {
+	return m.FindByIDWithRelations(id)
 }
 
 func (m *MockNoteRepository) FindByURI(uri string) (*model.Note, error) {
@@ -1763,6 +1771,10 @@ func (m *MockNoteRepository) FindManyByIDsWithUser(ids []string) ([]*model.Note,
 		}
 	}
 	return out, nil
+}
+
+func (m *MockNoteRepository) FindManyByIDsWithUserOnPrimary(ids []string) ([]*model.Note, error) {
+	return m.FindManyByIDsWithUser(ids)
 }
 
 func (m *MockNoteRepository) ListFeatured(channelID, untilID string, limit, offset int) ([]*model.Note, error) {
