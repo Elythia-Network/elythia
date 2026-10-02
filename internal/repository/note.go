@@ -250,11 +250,11 @@ type NoteRepository interface {
 // NotePrimaryReader exposes the small set of note reads whose authorization
 // decision must observe the primary immediately after pin, visibility or
 // author-preference changes. Ordinary timeline/list reads remain replica-safe.
+// Production wiring validates this capability once at startup.
 type NotePrimaryReader interface {
 	FindByIDWithUserOnPrimary(id string) (*model.Note, error)
 	FindByIDWithRelationsOnPrimary(id string) (*model.Note, error)
 	FindManyByIDsWithUserOnPrimary(ids []string) ([]*model.Note, error)
-	ListPublicByUserIDOnPrimary(userID string, untilID, sinceID string, limit int) ([]*model.Note, error)
 }
 
 type noteRepository struct {
@@ -464,12 +464,8 @@ func (r *noteRepository) ListByUserID(userID string, untilID, sinceID string, li
 }
 
 func (r *noteRepository) ListPublicByUserID(userID string, untilID, sinceID string, limit int) ([]*model.Note, error) {
-	return r.listPublicByUserID(r.db, userID, untilID, sinceID, limit)
-}
-
-func (r *noteRepository) listPublicByUserID(db *gorm.DB, userID string, untilID, sinceID string, limit int) ([]*model.Note, error) {
 	var notes []*model.Note
-	q := preloadNoteRelations(db).
+	q := preloadNoteRelations(r.db).
 		Where("\"userId\" = ?", userID).
 		Where("visibility IN ?", []string{"public", "home"}).
 		Where("\"localOnly\" = ?", false)
@@ -483,10 +479,6 @@ func (r *noteRepository) listPublicByUserID(db *gorm.DB, userID string, untilID,
 		return nil, err
 	}
 	return notes, nil
-}
-
-func (r *noteRepository) ListPublicByUserIDOnPrimary(userID string, untilID, sinceID string, limit int) ([]*model.Note, error) {
-	return r.listPublicByUserID(r.db.Clauses(dbresolver.Write), userID, untilID, sinceID, limit)
 }
 
 // ListByUserIDFiltered は ListByUserID に upstream 互換 filter を加えた版。

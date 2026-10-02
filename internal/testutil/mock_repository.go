@@ -1706,10 +1706,6 @@ func (m *MockNoteRepository) ListPublicByUserID(userID string, untilID, sinceID 
 	}, untilID, sinceID, limit), nil
 }
 
-func (m *MockNoteRepository) ListPublicByUserIDOnPrimary(userID string, untilID, sinceID string, limit int) ([]*model.Note, error) {
-	return m.ListPublicByUserID(userID, untilID, sinceID, limit)
-}
-
 // ListByUserIDFiltered は ListByUserID に upstream `users/notes` 互換の
 // filter 引数を適用した版。production GORM impl と同 logic で predicate に
 // 詰めて listFiltered に委譲する (#1021)。bool 4 引数は repository interface

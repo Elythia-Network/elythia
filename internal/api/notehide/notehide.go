@@ -87,6 +87,22 @@ func HidePinnedNotes(viewer *model.User, packed []entity.NoteEntity) {
 	hidePinnedNotesAt(viewer, packed, followingRepo, time.Now().UnixMilli())
 }
 
+// HideProfilePinnedNotes grants the current-pin exception only when the note
+// author is also the owner of the profile whose pin rows are being rendered.
+// Legacy Misskey databases can contain pin rows that point at another user's
+// note; those notes still receive the ordinary author-preference gates.
+func HideProfilePinnedNotes(viewer *model.User, packed []entity.NoteEntity, profileOwnerID string) {
+	nowMs := time.Now().UnixMilli()
+	for i := range packed {
+		one := packed[i : i+1]
+		if packed[i].UserID == profileOwnerID {
+			hidePinnedNotesAt(viewer, one, followingRepo, nowMs)
+		} else {
+			hideEmbedsAt(viewer, one, followingRepo, nowMs)
+		}
+	}
+}
+
 // HideStoredNotes is HideEmbeds plus the FULL hideNote decision on the
 // top-level notes (intrinsic followers/specified included), mirroring upstream
 // NoteEntityService.pack(note, me) without skipHide.

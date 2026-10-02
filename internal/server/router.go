@@ -161,6 +161,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 時の invalidate が両方に反映される (#300 3-3)。
 	userRepo := s.userRepo
 	noteRepo := repository.NewNoteRepository(s.db)
+	if _, ok := noteRepo.(repository.NotePrimaryReader); !ok {
+		panic("repository.NewNoteRepository must implement NotePrimaryReader")
+	}
 	// cross-worker cache invalidation (#1740) のため concrete *CachedMetaRepository
 	// を保持する。internal event bus との配線は streamPubSub 生成箇所で行う。
 	cachedMeta := repository.NewCachedMetaRepositoryWithTTL(repository.NewMetaRepository(s.db), 5*time.Minute)
@@ -2437,7 +2440,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	apHandler.SetKeypairExtraRepo(keypairExtraRepo)
 	apHandler.SetFollowingRepo(followingRepo) // #1877 followers/following collection
 	apHandler.SetNoteRepo(noteRepo)           // #1878 outbox collection
-	apHandler.SetPiningRepo(piningRepo)       // #3310 pinned-note publication policy
 	// ap/show が返す UserDetailedNotMe に viewer relation block を埋める (#1778)。
 	apHandler.SetRelationRepos(userrelation.Repos{
 		Following:     followingRepo,

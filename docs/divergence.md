@@ -51,7 +51,7 @@ mk-go は drop-in 互換 (同じ DB / Redis / frontend を Misskey TS と共有�
 - 匿名: 現在ピン留め中、`public` / `home`、かつ `requireSigninToViewContents=false` と確認できる場合だけ、`makeNotesHiddenBefore` / `makeNotesFollowersOnlyBefore` を迂回する。
 - 認証済み: 現在ピン留め中の `public` / `home` は作者ロックを迂回する。ログインしただけで `followers` / `specified` を読めるようにはならない。
 - 状態遷移: ここでいう「現在ピン留め中」は user profile の `user_note_pining` にリクエスト時点で行があることを指し、frontend の gitlink 等とは無関係である。unpin、visibility 変更、`requireSigninToViewContents` 変更は primary の現在値で判定し、保存済みノートの visibility や作者設定は変更しない。
-- 適用経路: `notes/show`、`users/show` の `pinnedNotes`、ノート permalink の SSR metadata、ActivityPub Note / Note activity / user outbox / featured collection。pin lookup または作者設定の確認に失敗した匿名の pin 例外は fail-closed とする。
+- 適用経路: `notes/show`、`users/show` の `pinnedNotes`、ノート permalink の SSR metadata。pin lookup または作者設定の確認に失敗した匿名の pin 例外は fail-closed とする。ActivityPub Note / Note activity / user outbox / featured collection は連合互換性のため従来どおり `visibility` と `localOnly` だけで公開可否を判定し、この Web 閲覧向け例外の対象外とする。
 
 これは vanilla Misskey の一般的な visibility 判定を置き換えるものではなく、mk-go が pin を作者の明示的な公開意思として一貫して扱うための限定的な divergence である。
 

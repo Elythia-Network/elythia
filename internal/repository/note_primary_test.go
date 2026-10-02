@@ -126,9 +126,6 @@ func TestNotePrimaryReader_UsesCurrentNoteAndAuthorValues(t *testing.T) {
 	assert.Equal(t, model.NoteVisibilityFollowers, many[0].Visibility)
 	assert.True(t, many[0].User.RequireSigninToViewContents)
 
-	public, err := repo.ListPublicByUserIDOnPrimary(user.ID, "", "", 20)
-	require.NoError(t, err)
-	assert.Empty(t, public, "the stale replica's public visibility must not enter an AP outbox")
 }
 
 // TestExistingNoteIDsOnPrimary_Subset は返す集合を固定する。

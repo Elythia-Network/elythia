@@ -1224,12 +1224,11 @@ func newHandlerWithPining(t *testing.T) (*Handler, *testutil.MockUserRepository,
 	querySvc := corenote.NewQueryService(noteRepo, nil)
 	keypairRepo := &memoryKeypairRepo{items: map[string]*model.UserKeypair{}}
 	h := NewHandler(activitypub.NewRenderer(activitypub.NewURLBuilder("https://example.com")), userSvc, querySvc, keypairRepo, idGen)
-	h.SetPiningRepo(piningRepo)
 	return h, userRepo, noteRepo, piningRepo
 }
 
-func TestNote_PinnedPublicationExceptionTransitions(t *testing.T) {
-	h, userRepo, noteRepo, piningRepo := newHandlerWithPining(t)
+func TestNote_AuthorPreferencesDoNotChangeFederationPublication(t *testing.T) {
+	h, userRepo, noteRepo, _ := newHandlerWithPining(t)
 	author := &model.User{ID: "u1", Username: "alice"}
 	hidden := 0
 	author.MakeNotesHiddenBefore = &hidden
@@ -1242,11 +1241,9 @@ func TestNote_PinnedPublicationExceptionTransitions(t *testing.T) {
 		require.NoError(t, h.Note(c))
 		return rec.Code
 	}
-	assert.Equal(t, http.StatusNotFound, status(), "ordinary time lockdown remains active before pinning")
+	assert.Equal(t, http.StatusOK, status(), "ordinary public notes remain fetchable over ActivityPub")
 
-	pin := &model.UserNotePining{ID: "p1", UserID: author.ID, NoteID: n.ID}
-	require.NoError(t, piningRepo.Create(pin))
-	assert.Equal(t, http.StatusOK, status(), "current public pin is federated")
+	assert.Equal(t, http.StatusOK, status(), "pinning does not change public ActivityPub visibility")
 
 	n.Visibility = model.NoteVisibilityHome
 	assert.Equal(t, http.StatusOK, status(), "current home pin is federated")
@@ -1256,11 +1253,10 @@ func TestNote_PinnedPublicationExceptionTransitions(t *testing.T) {
 
 	n.Visibility = model.NoteVisibilityPublic
 	author.RequireSigninToViewContents = true
-	assert.Equal(t, http.StatusNotFound, status(), "anonymous AP never bypasses sign-in requirement")
+	assert.Equal(t, http.StatusOK, status(), "web sign-in preference does not suppress federation")
 
 	author.RequireSigninToViewContents = false
-	require.NoError(t, piningRepo.Delete(pin))
-	assert.Equal(t, http.StatusNotFound, status(), "unpin immediately restores the ordinary lockdown")
+	assert.Equal(t, http.StatusOK, status(), "unpinning does not change public ActivityPub visibility")
 }
 
 func TestFeatured_ReturnsPinnedNotes(t *testing.T) {
@@ -1284,7 +1280,7 @@ func TestFeatured_ReturnsPinnedNotes(t *testing.T) {
 	assert.NotNil(t, col["@context"], "served collection must carry @context")
 }
 
-func TestFeatured_PinnedPublicationExceptionHonorsSignin(t *testing.T) {
+func TestFeatured_AuthorPreferencesDoNotSuppressFederation(t *testing.T) {
 	h, userRepo, noteRepo, piningRepo := newHandlerWithPining(t)
 	hidden := 0
 	author := &model.User{ID: "u1", Username: "alice", MakeNotesHiddenBefore: &hidden}
@@ -1303,9 +1299,9 @@ func TestFeatured_PinnedPublicationExceptionHonorsSignin(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	var col map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &col))
-	assert.Equal(t, float64(1), col["totalItems"])
+	assert.Equal(t, float64(2), col["totalItems"])
 	assert.Contains(t, rec.Body.String(), "/notes/visible")
-	assert.NotContains(t, rec.Body.String(), "/notes/restricted")
+	assert.Contains(t, rec.Body.String(), "/notes/restricted")
 }
 
 func TestFeatured_NoPins_EmptyCollection(t *testing.T) {
@@ -1601,7 +1597,6 @@ func newHandlerWithOutbox(t *testing.T) (*Handler, *testutil.MockUserRepository,
 	keypairRepo := &memoryKeypairRepo{items: map[string]*model.UserKeypair{}}
 	h := NewHandler(activitypub.NewRenderer(activitypub.NewURLBuilder("https://example.com")), userSvc, querySvc, keypairRepo, idGen)
 	h.SetNoteRepo(noteRepo)
-	h.SetPiningRepo(piningRepo)
 	return h, userRepo, noteRepo
 }
 
@@ -1682,9 +1677,8 @@ func TestOutbox_Page_ExcludesNonPublic(t *testing.T) {
 	assert.Len(t, items, 1, "followers/specified/localOnly notes excluded from outbox")
 }
 
-func TestOutbox_Page_AuthorLockdownUsesCurrentProfilePin(t *testing.T) {
+func TestOutbox_Page_AuthorPreferencesDoNotSuppressFederation(t *testing.T) {
 	h, userRepo, noteRepo := newHandlerWithOutbox(t)
-	piningRepo := h.piningRepo.(*testutil.MockUserNotePiningRepository)
 	hidden := 0
 	author := &model.User{ID: "u1", Username: "alice", NotesCount: 3, MakeNotesHiddenBefore: &hidden}
 	userRepo.Users[author.ID] = author
@@ -1694,9 +1688,6 @@ func TestOutbox_Page_AuthorLockdownUsesCurrentProfilePin(t *testing.T) {
 	restrictedAuthor := *author
 	restrictedAuthor.RequireSigninToViewContents = true
 	noteRepo.Notes["signin"] = &model.Note{ID: "signin", UserID: author.ID, User: &restrictedAuthor, Visibility: model.NoteVisibilityPublic, Text: &text}
-	pin := &model.UserNotePining{ID: "p1", UserID: author.ID, NoteID: "pinned"}
-	require.NoError(t, piningRepo.Create(pin))
-	require.NoError(t, piningRepo.Create(&model.UserNotePining{ID: "p2", UserID: author.ID, NoteID: "signin"}))
 
 	pageBody := func() string {
 		c, rec := newReqQuery(t, "id", author.ID, "page=true")
@@ -1705,12 +1696,11 @@ func TestOutbox_Page_AuthorLockdownUsesCurrentProfilePin(t *testing.T) {
 		return rec.Body.String()
 	}
 	body := pageBody()
-	assert.Contains(t, body, "/notes/pinned", "current profile pin publishes a locked public note")
-	assert.NotContains(t, body, "/notes/locked", "non-pinned note remains locked")
-	assert.NotContains(t, body, "/notes/signin", "anonymous outbox never bypasses requireSignin")
+	assert.Contains(t, body, "/notes/pinned")
+	assert.Contains(t, body, "/notes/locked", "time-based web preference does not suppress federation")
+	assert.Contains(t, body, "/notes/signin", "web sign-in preference does not suppress federation")
 
-	require.NoError(t, piningRepo.Delete(pin))
-	assert.NotContains(t, pageBody(), "/notes/pinned", "unpin immediately removes the publication exception")
+	assert.Contains(t, pageBody(), "/notes/pinned", "unpinning does not remove an ordinary public note from federation")
 }
 
 // since_id 指定時は repo が ASC で返すのを handler が DESC に反転し、prev/next を
@@ -1883,8 +1873,8 @@ func TestNoteActivity_LocalNoteIsCreate(t *testing.T) {
 	assert.Equal(t, "Accept", rec.Header().Get("Vary"))
 }
 
-func TestNoteActivity_AuthorLockdownUsesCurrentProfilePin(t *testing.T) {
-	h, userRepo, noteRepo, piningRepo := newHandlerWithPining(t)
+func TestNoteActivity_AuthorPreferencesDoNotChangeFederationPublication(t *testing.T) {
+	h, userRepo, noteRepo, _ := newHandlerWithPining(t)
 	hidden := 0
 	author := &model.User{ID: "u1", Username: "alice", MakeNotesHiddenBefore: &hidden}
 	userRepo.Users[author.ID] = author
@@ -1896,17 +1886,14 @@ func TestNoteActivity_AuthorLockdownUsesCurrentProfilePin(t *testing.T) {
 		require.NoError(t, h.NoteActivity(c))
 		return rec.Code
 	}
-	assert.Equal(t, http.StatusNotFound, status(), "non-pinned note remains locked")
+	assert.Equal(t, http.StatusOK, status(), "ordinary public activity remains fetchable")
 
-	pin := &model.UserNotePining{ID: "p1", UserID: author.ID, NoteID: n.ID}
-	require.NoError(t, piningRepo.Create(pin))
-	assert.Equal(t, http.StatusOK, status(), "current profile pin publishes the activity")
+	assert.Equal(t, http.StatusOK, status(), "pinning does not change ActivityPub visibility")
 
 	author.RequireSigninToViewContents = true
-	assert.Equal(t, http.StatusNotFound, status(), "anonymous activity never bypasses requireSignin")
+	assert.Equal(t, http.StatusOK, status(), "web sign-in preference does not suppress ActivityPub activity")
 	author.RequireSigninToViewContents = false
-	require.NoError(t, piningRepo.Delete(pin))
-	assert.Equal(t, http.StatusNotFound, status(), "unpin immediately restores lockdown")
+	assert.Equal(t, http.StatusOK, status(), "unpinning does not change ActivityPub visibility")
 }
 
 // pure renote は Announce になる (upstream packActivity)。

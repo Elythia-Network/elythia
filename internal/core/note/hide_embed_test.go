@@ -367,6 +367,16 @@ func TestHidePinnedNoteByPrefsDecision(t *testing.T) {
 	}
 }
 
+func TestAnonymousPublicationAllowed_PinnedUnknownPreferencesFailsClosed(t *testing.T) {
+	facts := EmbedFacts{Visibility: string(model.NoteVisibilityPublic), AuthorPrefsKnown: false}
+	if AnonymousPublicationAllowed(facts, true, hideTestNowMs) {
+		t.Fatal("an anonymous pin exception requires positively known author preferences")
+	}
+	if !AnonymousPublicationAllowed(facts, false, hideTestNowMs) {
+		t.Fatal("an ordinary public note keeps the legacy behavior when preferences are unavailable")
+	}
+}
+
 func TestShouldHideNoteByTime(t *testing.T) {
 	const now int64 = 1_700_000_000_000
 	tests := []struct {

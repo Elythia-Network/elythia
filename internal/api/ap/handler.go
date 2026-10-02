@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/shiroha-a/mk/internal/activitypub"
@@ -85,8 +84,7 @@ type Handler struct {
 	followingRepo repository.FollowingRepository
 	// noteRepo は outbox collection endpoint (#1878) の public note 取得 +
 	// pure renote の target URI 解決用。未配線なら outbox は 404。
-	noteRepo   repository.NoteRepository
-	piningRepo repository.UserNotePiningRepository
+	noteRepo repository.NoteRepository
 	// quoteAuthorizations は引用の承認の実体を配る (FEP-044f、#3234)。
 	quoteAuthorizations QuoteAuthorizationStore
 }
@@ -101,11 +99,6 @@ func (h *Handler) SetFollowingRepo(r repository.FollowingRepository) {
 // (#1878)。
 func (h *Handler) SetNoteRepo(r repository.NoteRepository) {
 	h.noteRepo = r
-}
-
-// SetPiningRepo wires current profile-pin lookups for AP publication policy.
-func (h *Handler) SetPiningRepo(r repository.UserNotePiningRepository) {
-	h.piningRepo = r
 }
 
 // SetRelationRepos wires the repositories used to populate the viewer relation
@@ -718,7 +711,7 @@ func (h *Handler) Note(c echo.Context) error {
 	// 公開ノートのみAPでフェッチ可能 (非ログインから取得されるため viewer=nil)。
 	// CanSeeNote(nil) は public / home を通すので、upstream の
 	// visibility ∈ {public, home} フィルタと一致する。
-	n, err := h.queryService.ShowCurrent(nil, noteID)
+	n, err := h.queryService.Show(nil, noteID)
 	if err != nil {
 		return c.NoContent(http.StatusNotFound)
 	}
@@ -751,9 +744,6 @@ func (h *Handler) Note(c echo.Context) error {
 	}
 	// upstream と同じキャッシュ指示 (public, max-age=180)。Vary: Accept を
 	// 立てているので AP 変種としてキャッシュされる。
-	if !h.anonymousNotePublicationAllowed(n, h.noteIsCurrentlyPinned(n)) {
-		return c.NoContent(http.StatusNotFound)
-	}
 	c.Response().Header().Set("Cache-Control", "public, max-age=180")
 	note := h.renderer.RenderNote(n, h.idGen)
 	return writeActivityJSON(c, note)
@@ -790,9 +780,6 @@ func (h *Handler) Featured(c echo.Context) error {
 		if n.LocalOnly || (n.Visibility != model.NoteVisibilityPublic && n.Visibility != model.NoteVisibilityHome) {
 			continue
 		}
-		if !h.anonymousNotePublicationAllowed(n, true) {
-			continue
-		}
 		rn := h.renderer.RenderNote(n, h.idGen)
 		// collection 直下に embed するので per-note @context は外す
 		// (upstream renderNote は bare object を返し、@context は collection 側のみ)。
@@ -806,44 +793,6 @@ func (h *Handler) Featured(c echo.Context) error {
 }
 
 // Followers handles GET /users/:id/followers (#1877)。
-func (h *Handler) noteIsCurrentlyPinned(n *model.Note) bool {
-	if h.piningRepo == nil || n == nil {
-		return false
-	}
-	p, err := h.piningRepo.FindByPair(n.UserID, n.ID)
-	return err == nil && p != nil
-}
-
-func (h *Handler) currentPinnedNoteIDs(userID string) map[string]struct{} {
-	ids := make(map[string]struct{})
-	if h.piningRepo == nil {
-		return ids
-	}
-	rows, err := h.piningRepo.ListByUser(userID)
-	if err != nil {
-		return ids
-	}
-	for _, row := range rows {
-		ids[row.NoteID] = struct{}{}
-	}
-	return ids
-}
-
-func (h *Handler) anonymousNotePublicationAllowed(n *model.Note, pinned bool) bool {
-	return corenote.AnonymousPublicationAllowed(corenote.FactsFromModel(n, h.noteCreatedAtMs(n)), pinned, time.Now().UnixMilli())
-}
-
-func (h *Handler) noteCreatedAtMs(n *model.Note) int64 {
-	if n == nil || h.idGen == nil {
-		return 0
-	}
-	t, err := h.idGen.ParseTime(n.ID)
-	if err != nil {
-		return 0
-	}
-	return t.UnixMilli()
-}
-
 func (h *Handler) Followers(c echo.Context) error {
 	return h.serveFollowCollection(c, true)
 }
@@ -1048,11 +997,7 @@ func (h *Handler) Outbox(c echo.Context) error {
 		return c.NoContent(http.StatusBadRequest)
 	}
 	const limit = 20
-	primary, ok := h.noteRepo.(repository.NotePrimaryReader)
-	if !ok {
-		return c.NoContent(http.StatusInternalServerError)
-	}
-	notes, err := primary.ListPublicByUserIDOnPrimary(userID, untilID, sinceID, limit)
+	notes, err := h.noteRepo.ListPublicByUserID(userID, untilID, sinceID, limit)
 	if err != nil {
 		return c.NoContent(http.StatusInternalServerError)
 	}
@@ -1064,12 +1009,7 @@ func (h *Handler) Outbox(c echo.Context) error {
 	}
 
 	items := make([]any, 0, len(notes))
-	pinnedNoteIDs := h.currentPinnedNoteIDs(userID)
 	for _, n := range notes {
-		_, pinned := pinnedNoteIDs[n.ID]
-		if !h.anonymousNotePublicationAllowed(n, pinned) {
-			continue
-		}
 		items = append(items, h.packOutboxActivity(bundle.User, n))
 	}
 
@@ -1103,7 +1043,7 @@ func (h *Handler) NoteActivity(c echo.Context) error {
 	if h.federationDisabled() {
 		return c.NoContent(http.StatusForbidden)
 	}
-	n, err := h.queryService.ShowCurrent(nil, c.Param("id"))
+	n, err := h.queryService.Show(nil, c.Param("id"))
 	if err != nil {
 		return c.NoContent(http.StatusNotFound)
 	}
@@ -1112,9 +1052,6 @@ func (h *Handler) NoteActivity(c echo.Context) error {
 	// {public, home} は CanSeeNote(nil) が担保し、localOnly はここで弾く
 	// (Note と同じ)。
 	if n.UserHost != nil || n.LocalOnly {
-		return c.NoContent(http.StatusNotFound)
-	}
-	if !h.anonymousNotePublicationAllowed(n, h.noteIsCurrentlyPinned(n)) {
 		return c.NoContent(http.StatusNotFound)
 	}
 	author := n.User

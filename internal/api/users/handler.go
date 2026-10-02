@@ -1497,7 +1497,7 @@ func (h *Handler) fillPinned(ctx context.Context, viewer *model.User, u *model.U
 						notes = notesfilter.FilterVisible(viewer, notes, h.followingRepo)
 						entities := entity.PackNotes(ctx, notes, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
 						h.fieldRes.Apply(entities, viewer)
-						notehide.HidePinnedNotes(viewer, entities)
+						notehide.HideProfilePinnedNotes(viewer, entities, u.ID)
 						packed := make([]any, 0, len(entities))
 						for _, pn := range entities {
 							packed = append(packed, pn)

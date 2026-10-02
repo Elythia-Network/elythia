@@ -498,6 +498,20 @@ func TestHidePinnedNotesAt_AuthorPreferenceExceptionMatrix(t *testing.T) {
 		}
 	})
 
+	t.Run("followers-only-before does not downgrade a qualifying pin", func(t *testing.T) {
+		n := base
+		followersOnly := 0
+		n.User.MakeNotesFollowersOnlyBefore = &followersOnly
+		packed := []entity.NoteEntity{n}
+		hidePinnedNotesAt(nil, packed, followsRepo(), heNowMs)
+		if packed[0].IsHidden || packed[0].Text == nil {
+			t.Fatal("a qualifying public pin must bypass makeNotesFollowersOnlyBefore")
+		}
+		if packed[0].Visibility != "public" {
+			t.Fatalf("a qualifying pin must not be downgraded, got %q", packed[0].Visibility)
+		}
+	})
+
 	t.Run("anonymous sign-in-required pin remains hidden", func(t *testing.T) {
 		n := base
 		n.User.RequireSigninToViewContents = &requireSignin
