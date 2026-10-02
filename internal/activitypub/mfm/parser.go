@@ -105,8 +105,8 @@ type memoTable struct {
 	// 0 = 未構築、1 = 構築済み、-1 = 使えない (src が不正な UTF-8 か確保の上限)。
 	stops      [numStopKinds][]int32
 	stopsState [numStopKinds]int8
-	// linkTargets は link の飛び先を位置ごとに読んだ結果 (linkTargetAt)。
-	linkTargets map[int32]linkTargetEntry
+	// linkTargets は link の飛び先を (位置, 深さ) ごとに読んだ結果 (linkTargetAt)。
+	linkTargets map[linkTargetKey]linkTargetEntry
 }
 
 // stopKind names a construct that reads raw text up to a delimiter.
@@ -178,6 +178,13 @@ func (m *memoTable) stopList(src string, kind stopKind) ([]int32, bool) {
 	return list, true
 }
 
+// linkTargetKey identifies a cached link target. URL の括弧を何段まで読めるかが
+// 深さで変わる (#3302) ので、位置だけで引くと深いところで読んだ失敗を浅い試行に
+// 使い回してしまう。
+type linkTargetKey struct {
+	pos, depth int32
+}
+
 // linkTargetEntry caches the link target parsed at one offset.
 type linkTargetEntry struct {
 	end int32
@@ -200,7 +207,8 @@ const linkTargetEntryCost = 48
 // 1 度だけ求める parenMatch で同じことを防いでいた)。
 func (s *state) linkTargetAt(pos int) (url string, end int, ok bool) {
 	m := s.memo
-	if e, hit := m.linkTargets[int32(pos)]; hit {
+	key := linkTargetKey{pos: int32(pos), depth: int32(s.depth)}
+	if e, hit := m.linkTargets[key]; hit {
 		return e.url, int(e.end), e.ok
 	}
 	save := s.pos
@@ -210,9 +218,9 @@ func (s *state) linkTargetAt(pos int) (url string, end int, ok bool) {
 	s.pos = save
 	if m.charge(linkTargetEntryCost + len(url)) {
 		if m.linkTargets == nil {
-			m.linkTargets = map[int32]linkTargetEntry{}
+			m.linkTargets = map[linkTargetKey]linkTargetEntry{}
 		}
-		m.linkTargets[int32(pos)] = linkTargetEntry{end: int32(end), url: url, ok: ok}
+		m.linkTargets[key] = linkTargetEntry{end: int32(end), url: url, ok: ok}
 	}
 	return url, end, ok
 }
@@ -1582,48 +1590,86 @@ func (s *state) tryURL() *Node {
 		return nil
 	}
 
-	// URL文字を消費 (括弧ネスト対応)
-	s.consumeURLChars()
-	url := s.src[start:s.pos]
-	// 末尾の句読点を削る
-	url = strings.TrimRight(url, ".,")
-	s.pos = start + len(url)
-
-	// プロトコルのみなら URL にしない。以前は https:// の長さ (8) で比べていたので、
-	// `http://a` が URL にならなかった (mfm-js は scheme の後に 1 文字あればよい)。
-	if len(url) <= schemeLen {
+	// URL の文字を読む。mfm-js の url と同じく、使える文字は ASCII の
+	// [.,a-z0-9_/:%#@$&?!~=+-] で、`(...)` / `[...]` は閉じているときだけ含める
+	// (#3302)。以前は空白と一部の記号以外を何でも含めたので、`https://e.x/p:あ`
+	// のように URL の後ろに続く文字まで URL にしていた。
+	end := s.urlItems(start+schemeLen, s.depth, true)
+	// 読んだ分を仕事量に数える。以前は advance が 1 バイトずつ数えていた。
+	s.budget.used += end - start
+	if end == start+schemeLen {
+		// scheme の後に 1 文字も無い (mfm-js の innerItem.many(1) が失敗する)。
 		s.pos = save
 		return nil
 	}
-	return withProp(NodeURL, "url", url)
+	url := s.src[start:end]
+	// 末尾の `.` / `,` は削り、後ろの文字として残す。削って scheme だけになったら、
+	// mfm-js は読んだ範囲をまるごと文字にする。
+	trimmed := strings.TrimRight(url, ".,")
+	if len(trimmed) <= schemeLen {
+		s.pos = end
+		return Text(url)
+	}
+	s.pos = start + len(trimmed)
+	return withProp(NodeURL, "url", trimmed)
 }
 
-func (s *state) consumeURLChars() {
-	for !s.eof() {
-		ch := s.peek()
-		if unicode.IsSpace(ch) || ch == '<' || ch == '>' || ch == '"' || ch == '\'' {
-			return
-		}
-		switch ch {
-		case '(':
-			s.advance(1)
-			s.consumeURLChars()
-			if !s.eof() && s.peek() == ')' {
-				s.advance(1)
-			}
-			continue
-		case '[':
-			s.advance(1)
-			s.consumeURLChars()
-			if !s.eof() && s.peek() == ']' {
-				s.advance(1)
-			}
-			continue
-		case ')', ']':
-			return
-		}
-		s.advance(utf8.RuneLen(ch))
+// isURLChar reports whether b is one of mfm-js's url characters
+// ([.,a-z0-9_/:%#@$&?!~=+-], case-insensitive).
+func isURLChar(b byte) bool {
+	switch {
+	case b >= 'a' && b <= 'z', b >= 'A' && b <= 'Z', b >= '0' && b <= '9':
+		return true
 	}
+	return strings.IndexByte(".,_/:%#@$&?!~=+-", b) >= 0
+}
+
+// urlItems reads mfm-js's `innerItem.many(0)` of the url rule from i and
+// returns where it stopped. depth is the nest depth the items are read at;
+// top marks the url's own items, which are not wrapped in nest.
+func (s *state) urlItems(i, depth int, top bool) int {
+	for {
+		next, ok := s.urlItem(i, depth, top)
+		if !ok {
+			return i
+		}
+		i = next
+	}
+}
+
+// urlItem reads one mfm-js url innerItem at i: a balanced `(...)` or `[...]`
+// whose contents are read one nest level deeper, or a single url character.
+//
+// mfm-js の nest(innerItem, urlChar) は深さを 1 つ上げてから、上限未満なら
+// innerItem を、届いていれば urlChar だけを読む (括弧は urlChar に無いので、そこで
+// 止まる)。url 直下の項目は nest を通らないので、上限に関係なく括弧を開ける。
+// 閉じが無ければ括弧ごと失敗し、URL はその手前で終わる。
+func (s *state) urlItem(i, depth int, top bool) (int, bool) {
+	if i >= len(s.src) {
+		return i, false
+	}
+	c := s.src[i]
+	if isURLChar(c) {
+		return i + 1, true
+	}
+	var closeCh byte
+	switch c {
+	case '(':
+		closeCh = ')'
+	case '[':
+		closeCh = ']'
+	default:
+		return i, false
+	}
+	if !top && depth >= s.nestLimit {
+		return i, false
+	}
+	s.budget.used++
+	j := s.urlItems(i+1, depth+1, false)
+	if j >= len(s.src) || s.src[j] != closeCh {
+		return i, false
+	}
+	return j + 1, true
 }
 
 func (s *state) tryLink() *Node {

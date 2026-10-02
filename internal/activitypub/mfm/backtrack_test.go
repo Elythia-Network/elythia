@@ -145,6 +145,8 @@ func TestParse_LocalSizedPathologicalInputsStayWithinBudget(t *testing.T) {
 		// 多数の `[` が同じ長い飛び先に届く形。飛び先を位置ごとに覚えないと、同じ
 		// URL を `[` の数だけ読み直す (#3300)。
 		"labels sharing a url":    strings.Repeat("[", 1000) + "a](https://" + strings.Repeat("x", 1978),
+		"unclosed url parens":     fill("", "https://a(", 3000),
+		"unclosed url brackets":   fill("<b>", "https://a[(", 3000),
 		"unclosed url alt":        fill("", "[a](<https://x\n", 3000),
 		"short quotes":            fill(strings.Repeat("<b>", 7), ":```js\n\n> ", 3000),
 		"quote lines under limit": fill(strings.Repeat("<b>", 20), "\n> ", 3000),
