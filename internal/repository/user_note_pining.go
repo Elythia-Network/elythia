@@ -3,6 +3,7 @@ package repository
 import (
 	"github.com/shiroha-a/mk/internal/model"
 	"gorm.io/gorm"
+	"gorm.io/plugin/dbresolver"
 )
 
 // UserNotePiningRepository provides data access for the `user_note_pining` table.
@@ -42,7 +43,9 @@ func (r *userNotePiningRepository) FindByPair(userID, noteID string) (*model.Use
 		return nil, ErrNotFound
 	}
 	var p model.UserNotePining
-	if err := r.db.Where("\"userId\" = ? AND \"noteId\" = ?", userID, noteID).First(&p).Error; err != nil {
+	if err := r.db.Clauses(dbresolver.Write).
+		Where("\"userId\" = ? AND \"noteId\" = ?", userID, noteID).
+		First(&p).Error; err != nil {
 		return nil, err
 	}
 	return &p, nil
@@ -50,7 +53,8 @@ func (r *userNotePiningRepository) FindByPair(userID, noteID string) (*model.Use
 
 func (r *userNotePiningRepository) ListByUser(userID string) ([]*model.UserNotePining, error) {
 	var rows []*model.UserNotePining
-	if err := r.db.Where("\"userId\" = ?", userID).
+	if err := r.db.Clauses(dbresolver.Write).
+		Where("\"userId\" = ?", userID).
 		Order("id DESC").
 		Find(&rows).Error; err != nil {
 		return nil, err

@@ -32,6 +32,29 @@ type EmbedFacts struct {
 	AuthorPrefsKnown             bool
 }
 
+// FactsFromModel converts a repository note into the policy's minimal facts.
+// createdAtMs is supplied by the caller because model.Note IDs are decoded by
+// the configured instance ID generator rather than stored as a time field.
+func FactsFromModel(n *model.Note, createdAtMs int64) EmbedFacts {
+	if n == nil {
+		return EmbedFacts{}
+	}
+	f := EmbedFacts{
+		AuthorID:       n.UserID,
+		Visibility:     string(n.Visibility),
+		VisibleUserIDs: n.VisibleUserIDs,
+		Mentions:       n.Mentions,
+		CreatedAtMs:    createdAtMs,
+	}
+	if n.User != nil {
+		f.AuthorPrefsKnown = true
+		f.RequireSigninToViewContents = n.User.RequireSigninToViewContents
+		f.MakeNotesHiddenBefore = n.User.MakeNotesHiddenBefore
+		f.MakeNotesFollowersOnlyBefore = n.User.MakeNotesFollowersOnlyBefore
+	}
+	return f
+}
+
 // HideEmbedDecision reports whether an embedded note described by facts must be
 // hidden (its content blanked) from viewer. It is a faithful port of upstream
 // Misskey NoteEntityService.treatVisibility followed by shouldHideNote (in that
@@ -147,6 +170,47 @@ func HideNoteByPrefsDecision(viewer *model.User, f EmbedFacts, follows func(auth
 		}
 	}
 	return false
+}
+
+// PinnedNoteBypassesAuthorPrefs reports whether a current profile pin is an
+// explicit publication exception to the author's time-based content gates.
+// The exception is deliberately narrow: only public/home notes qualify.
+// Anonymous viewers additionally require positively-known preferences with
+// requireSigninToViewContents disabled; missing author data therefore fails
+// closed. Authentication never replaces the note's ordinary visibility ACL.
+func PinnedNoteBypassesAuthorPrefs(viewer *model.User, f EmbedFacts, pinned bool) bool {
+	if !pinned || (f.Visibility != string(model.NoteVisibilityPublic) && f.Visibility != string(model.NoteVisibilityHome)) {
+		return false
+	}
+	if viewer == nil {
+		return f.AuthorPrefsKnown && !f.RequireSigninToViewContents
+	}
+	return true
+}
+
+// HidePinnedNoteByPrefsDecision is HideNoteByPrefsDecision with the narrowly
+// scoped current-pin exception above. Callers must still enforce intrinsic
+// followers/specified visibility, blocks and server visitor policy separately.
+func HidePinnedNoteByPrefsDecision(viewer *model.User, f EmbedFacts, follows func(authorID string) bool, nowMs int64, pinned bool) bool {
+	if PinnedNoteBypassesAuthorPrefs(viewer, f, pinned) {
+		return false
+	}
+	return HideNoteByPrefsDecision(viewer, f, follows, nowMs)
+}
+
+// AnonymousPublicationAllowed applies the publication-facing policy used by
+// SSR and ActivityPub. Intrinsic visibility must be public/home. A current pin
+// with missing author preferences fails closed because the anonymous exception
+// requires proof that sign-in is not required. Unpinned missing preferences
+// keep the legacy behaviour of the existing public endpoints.
+func AnonymousPublicationAllowed(f EmbedFacts, pinned bool, nowMs int64) bool {
+	if f.Visibility != string(model.NoteVisibilityPublic) && f.Visibility != string(model.NoteVisibilityHome) {
+		return false
+	}
+	if pinned && !f.AuthorPrefsKnown {
+		return false
+	}
+	return !HidePinnedNoteByPrefsDecision(nil, f, nil, nowMs, pinned)
 }
 
 // ShouldDowngradeVisibility reports whether a public/home note must have its

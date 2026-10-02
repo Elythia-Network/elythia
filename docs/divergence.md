@@ -44,6 +44,17 @@ mk-go は drop-in 互換 (同じ DB / Redis / frontend を Misskey TS と共有�
 
 ---
 
+## ピン留めノートと作者ロックの公開境界 (#3310)
+
+プロフィールに現在ピン留めされているノートは、作者が明示的に公開したものとして扱う。ただし例外は `public` / `home` に限り、`followers` / `specified` の通常の可視性 ACL、ブロック等の既存制約、匿名閲覧に対する `requireSigninToViewContents`、サーバー全体の visitor 制限は迂回しない。
+
+- 匿名: 現在ピン留め中、`public` / `home`、かつ `requireSigninToViewContents=false` と確認できる場合だけ、`makeNotesHiddenBefore` / `makeNotesFollowersOnlyBefore` を迂回する。
+- 認証済み: 現在ピン留め中の `public` / `home` は作者ロックを迂回する。ログインしただけで `followers` / `specified` を読めるようにはならない。
+- 状態遷移: ここでいう「現在ピン留め中」は user profile の `user_note_pining` にリクエスト時点で行があることを指し、frontend の gitlink 等とは無関係である。unpin、visibility 変更、`requireSigninToViewContents` 変更は primary の現在値で判定し、保存済みノートの visibility や作者設定は変更しない。
+- 適用経路: `notes/show`、`users/show` の `pinnedNotes`、ノート permalink の SSR metadata、ActivityPub Note / Note activity / user outbox / featured collection。pin lookup または作者設定の確認に失敗した匿名の pin 例外は fail-closed とする。
+
+これは vanilla Misskey の一般的な visibility 判定を置き換えるものではなく、mk-go が pin を作者の明示的な公開意思として一貫して扱うための限定的な divergence である。
+
 ## 1. API endpoint
 
 upstream の endpoint は `endpoints/` 配下 438 件 + `ApiServerService.ts` の fastify 直登録 6 件 (POST 5 / GET 1) = **444 件**。うち **444 件すべてを実装済み (coverage 100.0%)**。

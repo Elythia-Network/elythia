@@ -131,6 +131,42 @@ func TestSSRNotePage_NonPublicNoteHasNoMeta(t *testing.T) {
 	assert.NotContains(t, body, "secret")
 }
 
+func TestSSRNotePage_PinnedPublicationExceptionTransitions(t *testing.T) {
+	h, userRepo, noteRepo := newSSRTestHandler(t)
+	piningRepo := testutil.NewMockUserNotePiningRepository()
+	h.piningRepo = piningRepo
+	author := ssrTestUser("u1", "alice")
+	hidden := 0
+	author.MakeNotesHiddenBefore = &hidden
+	userRepo.Users[author.ID] = author
+	text := "published by pin"
+	n := &model.Note{ID: "n1", UserID: author.ID, User: author, Text: &text, Visibility: model.NoteVisibilityPublic}
+	noteRepo.Notes[n.ID] = n
+
+	body := func() string {
+		return ssrGet(t, h.NotePage, "/notes/n1", map[string]string{"id": "n1"}).Body.String()
+	}
+	assert.NotContains(t, body(), "misskey:note-id", "ordinary time lockdown remains active before pinning")
+
+	pin := &model.UserNotePining{ID: "p1", UserID: author.ID, NoteID: n.ID}
+	require.NoError(t, piningRepo.Create(pin))
+	assert.Contains(t, body(), `misskey:note-id`, "current public pin is published to anonymous SSR")
+
+	n.Visibility = model.NoteVisibilityHome
+	assert.Contains(t, body(), `misskey:note-id`, "current home pin is also an explicit publication")
+
+	n.Visibility = model.NoteVisibilityFollowers
+	assert.NotContains(t, body(), "misskey:note-id", "followers pin never becomes public SSR metadata")
+
+	n.Visibility = model.NoteVisibilityPublic
+	author.RequireSigninToViewContents = true
+	assert.NotContains(t, body(), "misskey:note-id", "sign-in requirement is never bypassed for anonymous SSR")
+
+	author.RequireSigninToViewContents = false
+	require.NoError(t, piningRepo.Delete(pin))
+	assert.NotContains(t, body(), "misskey:note-id", "unpin immediately restores the ordinary lockdown")
+}
+
 func TestSSRNotePage_UnknownNoteStillServesShell(t *testing.T) {
 	h, _, _ := newSSRTestHandler(t)
 	rec := ssrGet(t, h.NotePage, "/notes/ghost", map[string]string{"id": "ghost"})

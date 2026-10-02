@@ -5,11 +5,13 @@ import (
 	stdhtml "html"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
 	"github.com/shiroha-a/mk/internal/api/meta"
 	"github.com/shiroha-a/mk/internal/config"
+	corenote "github.com/shiroha-a/mk/internal/core/note"
 	"github.com/shiroha-a/mk/internal/entity"
 	"github.com/shiroha-a/mk/internal/frontendutil"
 	"github.com/shiroha-a/mk/internal/misc/id"
@@ -37,6 +39,7 @@ type ssrMetaHandler struct {
 
 	userRepo      repository.UserRepository
 	noteRepo      repository.NoteRepository
+	piningRepo    repository.UserNotePiningRepository
 	pageRepo      repository.PageRepository
 	clipRepo      repository.ClipRepository
 	flashRepo     repository.FlashRepository
@@ -54,6 +57,7 @@ type ssrMetaHandler struct {
 type ssrMetaDeps struct {
 	User         repository.UserRepository
 	Note         repository.NoteRepository
+	Pining       repository.UserNotePiningRepository
 	Page         repository.PageRepository
 	Clip         repository.ClipRepository
 	Flash        repository.FlashRepository
@@ -81,6 +85,7 @@ func newSSRMetaHandler(
 		clientEntry:   clientEntryFor(cfg),
 		userRepo:      deps.User,
 		noteRepo:      deps.Note,
+		piningRepo:    deps.Pining,
 		pageRepo:      deps.Page,
 		clipRepo:      deps.Clip,
 		flashRepo:     deps.Flash,
@@ -670,19 +675,24 @@ func (h *ssrMetaHandler) NotePage(c echo.Context) error {
 	if h.noteRepo == nil {
 		return h.renderPlain(c)
 	}
-	note, err := h.noteRepo.FindByIDWithUser(c.Param("id"))
+	primary, ok := h.noteRepo.(repository.NotePrimaryReader)
+	if !ok {
+		return h.renderPlain(c)
+	}
+	note, err := primary.FindByIDWithUserOnPrimary(c.Param("id"))
 	if err != nil || note == nil {
 		return h.renderPlain(c)
 	}
 	// visibility が public 以外の note は meta を出さない。クローラや
 	// リンク展開に非公開投稿の本文・著者を渡さないため (upstream も
 	// public 以外は SSR しない)。
-	if note.Visibility != model.NoteVisibilityPublic {
+	pinned := h.noteIsCurrentlyPinned(note)
+	if note.Visibility != model.NoteVisibilityPublic && !(pinned && note.Visibility == model.NoteVisibilityHome) {
 		return h.renderBareShell(c, noteIsRemote(note))
 	}
 	// 投稿者が「ログインしないと見せない」設定なら meta も出さない。
 	// upstream note ハンドラの `!note.user.requireSigninToViewContents` (#2533)。
-	if note.User != nil && note.User.RequireSigninToViewContents {
+	if !corenote.AnonymousPublicationAllowed(corenote.FactsFromModel(note, h.noteCreatedAtMs(note)), pinned, time.Now().UnixMilli()) {
 		return h.renderBareShell(c, noteIsRemote(note))
 	}
 	if !h.visibleToVisitor(note.UserHost) {
@@ -722,6 +732,25 @@ func (h *ssrMetaHandler) NotePage(c echo.Context) error {
 		CacheControl: ssrPermalinkCacheControl,
 		RobotsTag:    robotsTagsFor(profile),
 	})
+}
+
+func (h *ssrMetaHandler) noteIsCurrentlyPinned(n *model.Note) bool {
+	if h.piningRepo == nil || n == nil {
+		return false
+	}
+	p, err := h.piningRepo.FindByPair(n.UserID, n.ID)
+	return err == nil && p != nil
+}
+
+func (h *ssrMetaHandler) noteCreatedAtMs(n *model.Note) int64 {
+	if n == nil || h.idGen == nil {
+		return 0
+	}
+	t, err := h.idGen.ParseTime(n.ID)
+	if err != nil {
+		return 0
+	}
+	return t.UnixMilli()
 }
 
 // ClipPage serves `/clips/:clip`.

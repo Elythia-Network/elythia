@@ -1753,6 +1753,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// Notes endpoints
 	notesHandler := notes.NewHandler(noteRepo, noteCreateService, noteDeleteService, noteQueryService, timelineService, reactionService, pollService, searchService, idGen)
+	notesHandler.SetPiningRepo(piningRepo)
 	// first-page timeline 応答を per-viewer 短期キャッシュ (hit 時に DB + pack +
 	// encode を skip)。opt-in (enableTimelineCache / MK_ENABLETIMELINECACHE)。
 	// staleness trade-off があるため default off。
@@ -2436,6 +2437,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	apHandler.SetKeypairExtraRepo(keypairExtraRepo)
 	apHandler.SetFollowingRepo(followingRepo) // #1877 followers/following collection
 	apHandler.SetNoteRepo(noteRepo)           // #1878 outbox collection
+	apHandler.SetPiningRepo(piningRepo)       // #3310 pinned-note publication policy
 	// ap/show が返す UserDetailedNotMe に viewer relation block を埋める (#1778)。
 	apHandler.SetRelationRepos(userrelation.Repos{
 		Following:     followingRepo,
@@ -2461,6 +2463,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		ssrMetaDeps{
 			User:         userRepo,
 			Note:         noteRepo,
+			Pining:       piningRepo,
 			Page:         pageRepo,
 			Clip:         clipRepo,
 			Flash:        flashRepo,

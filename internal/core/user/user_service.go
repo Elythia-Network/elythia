@@ -1020,7 +1020,11 @@ func (s *Service) ListPinnedNotes(userID string) ([]*model.Note, error) {
 	for _, p := range pinings {
 		ids = append(ids, p.NoteID)
 	}
-	return s.noteRepo.FindManyByIDsWithUser(ids)
+	primary, ok := s.noteRepo.(repository.NotePrimaryReader)
+	if !ok {
+		return nil, repository.ErrNotFound
+	}
+	return primary.FindManyByIDsWithUserOnPrimary(ids)
 }
 
 // UpdateUserFields updates arbitrary fields on the user table.

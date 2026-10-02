@@ -1224,13 +1224,50 @@ func newHandlerWithPining(t *testing.T) (*Handler, *testutil.MockUserRepository,
 	querySvc := corenote.NewQueryService(noteRepo, nil)
 	keypairRepo := &memoryKeypairRepo{items: map[string]*model.UserKeypair{}}
 	h := NewHandler(activitypub.NewRenderer(activitypub.NewURLBuilder("https://example.com")), userSvc, querySvc, keypairRepo, idGen)
+	h.SetPiningRepo(piningRepo)
 	return h, userRepo, noteRepo, piningRepo
+}
+
+func TestNote_PinnedPublicationExceptionTransitions(t *testing.T) {
+	h, userRepo, noteRepo, piningRepo := newHandlerWithPining(t)
+	author := &model.User{ID: "u1", Username: "alice"}
+	hidden := 0
+	author.MakeNotesHiddenBefore = &hidden
+	userRepo.Users[author.ID] = author
+	n := &model.Note{ID: "n1", UserID: author.ID, User: author, Visibility: model.NoteVisibilityPublic}
+	noteRepo.Notes[n.ID] = n
+
+	status := func() int {
+		c, rec := newReq(t, "id", n.ID)
+		require.NoError(t, h.Note(c))
+		return rec.Code
+	}
+	assert.Equal(t, http.StatusNotFound, status(), "ordinary time lockdown remains active before pinning")
+
+	pin := &model.UserNotePining{ID: "p1", UserID: author.ID, NoteID: n.ID}
+	require.NoError(t, piningRepo.Create(pin))
+	assert.Equal(t, http.StatusOK, status(), "current public pin is federated")
+
+	n.Visibility = model.NoteVisibilityHome
+	assert.Equal(t, http.StatusOK, status(), "current home pin is federated")
+
+	n.Visibility = model.NoteVisibilityFollowers
+	assert.Equal(t, http.StatusNotFound, status(), "followers pin never becomes public AP")
+
+	n.Visibility = model.NoteVisibilityPublic
+	author.RequireSigninToViewContents = true
+	assert.Equal(t, http.StatusNotFound, status(), "anonymous AP never bypasses sign-in requirement")
+
+	author.RequireSigninToViewContents = false
+	require.NoError(t, piningRepo.Delete(pin))
+	assert.Equal(t, http.StatusNotFound, status(), "unpin immediately restores the ordinary lockdown")
 }
 
 func TestFeatured_ReturnsPinnedNotes(t *testing.T) {
 	h, userRepo, noteRepo, piningRepo := newHandlerWithPining(t)
-	userRepo.Users["u1"] = &model.User{ID: "u1", Username: "alice"}
-	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: "u1", Visibility: model.NoteVisibilityPublic}
+	author := &model.User{ID: "u1", Username: "alice"}
+	userRepo.Users["u1"] = author
+	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: "u1", User: author, Visibility: model.NoteVisibilityPublic}
 	require.NoError(t, piningRepo.Create(&model.UserNotePining{ID: "p1", UserID: "u1", NoteID: "n1"}))
 
 	c, rec := newReq(t, "id", "u1")
@@ -1245,6 +1282,30 @@ func TestFeatured_ReturnsPinnedNotes(t *testing.T) {
 	items, _ := col["orderedItems"].([]any)
 	require.Len(t, items, 1)
 	assert.NotNil(t, col["@context"], "served collection must carry @context")
+}
+
+func TestFeatured_PinnedPublicationExceptionHonorsSignin(t *testing.T) {
+	h, userRepo, noteRepo, piningRepo := newHandlerWithPining(t)
+	hidden := 0
+	author := &model.User{ID: "u1", Username: "alice", MakeNotesHiddenBefore: &hidden}
+	userRepo.Users[author.ID] = author
+	visible := &model.Note{ID: "visible", UserID: author.ID, User: author, Visibility: model.NoteVisibilityPublic}
+	restrictedAuthor := *author
+	restrictedAuthor.RequireSigninToViewContents = true
+	restricted := &model.Note{ID: "restricted", UserID: author.ID, User: &restrictedAuthor, Visibility: model.NoteVisibilityPublic}
+	noteRepo.Notes[visible.ID] = visible
+	noteRepo.Notes[restricted.ID] = restricted
+	require.NoError(t, piningRepo.Create(&model.UserNotePining{ID: "p1", UserID: author.ID, NoteID: visible.ID}))
+	require.NoError(t, piningRepo.Create(&model.UserNotePining{ID: "p2", UserID: author.ID, NoteID: restricted.ID}))
+
+	c, rec := newReq(t, "id", author.ID)
+	require.NoError(t, h.Featured(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var col map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &col))
+	assert.Equal(t, float64(1), col["totalItems"])
+	assert.Contains(t, rec.Body.String(), "/notes/visible")
+	assert.NotContains(t, rec.Body.String(), "/notes/restricted")
 }
 
 func TestFeatured_NoPins_EmptyCollection(t *testing.T) {
@@ -1270,12 +1331,13 @@ func TestFeatured_NoPins_EmptyCollection(t *testing.T) {
 // followers/specified/localOnly な pinned note は unauthenticated AP へ leak しない (#1876)。
 func TestFeatured_ExcludesNonPublicAndLocalOnly(t *testing.T) {
 	h, userRepo, noteRepo, piningRepo := newHandlerWithPining(t)
-	userRepo.Users["u1"] = &model.User{ID: "u1", Username: "alice"}
-	noteRepo.Notes["pub"] = &model.Note{ID: "pub", UserID: "u1", Visibility: model.NoteVisibilityPublic}
-	noteRepo.Notes["home"] = &model.Note{ID: "home", UserID: "u1", Visibility: model.NoteVisibilityHome}
-	noteRepo.Notes["fol"] = &model.Note{ID: "fol", UserID: "u1", Visibility: model.NoteVisibilityFollowers}
-	noteRepo.Notes["spec"] = &model.Note{ID: "spec", UserID: "u1", Visibility: model.NoteVisibilitySpecified}
-	noteRepo.Notes["lo"] = &model.Note{ID: "lo", UserID: "u1", Visibility: model.NoteVisibilityPublic, LocalOnly: true}
+	author := &model.User{ID: "u1", Username: "alice"}
+	userRepo.Users["u1"] = author
+	noteRepo.Notes["pub"] = &model.Note{ID: "pub", UserID: "u1", User: author, Visibility: model.NoteVisibilityPublic}
+	noteRepo.Notes["home"] = &model.Note{ID: "home", UserID: "u1", User: author, Visibility: model.NoteVisibilityHome}
+	noteRepo.Notes["fol"] = &model.Note{ID: "fol", UserID: "u1", User: author, Visibility: model.NoteVisibilityFollowers}
+	noteRepo.Notes["spec"] = &model.Note{ID: "spec", UserID: "u1", User: author, Visibility: model.NoteVisibilitySpecified}
+	noteRepo.Notes["lo"] = &model.Note{ID: "lo", UserID: "u1", User: author, Visibility: model.NoteVisibilityPublic, LocalOnly: true}
 	for i, nid := range []string{"pub", "home", "fol", "spec", "lo"} {
 		require.NoError(t, piningRepo.Create(&model.UserNotePining{ID: "p" + string(rune('1'+i)), UserID: "u1", NoteID: nid}))
 	}
@@ -1539,6 +1601,7 @@ func newHandlerWithOutbox(t *testing.T) (*Handler, *testutil.MockUserRepository,
 	keypairRepo := &memoryKeypairRepo{items: map[string]*model.UserKeypair{}}
 	h := NewHandler(activitypub.NewRenderer(activitypub.NewURLBuilder("https://example.com")), userSvc, querySvc, keypairRepo, idGen)
 	h.SetNoteRepo(noteRepo)
+	h.SetPiningRepo(piningRepo)
 	return h, userRepo, noteRepo
 }
 
@@ -1617,6 +1680,37 @@ func TestOutbox_Page_ExcludesNonPublic(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &page))
 	items, _ := page["orderedItems"].([]any)
 	assert.Len(t, items, 1, "followers/specified/localOnly notes excluded from outbox")
+}
+
+func TestOutbox_Page_AuthorLockdownUsesCurrentProfilePin(t *testing.T) {
+	h, userRepo, noteRepo := newHandlerWithOutbox(t)
+	piningRepo := h.piningRepo.(*testutil.MockUserNotePiningRepository)
+	hidden := 0
+	author := &model.User{ID: "u1", Username: "alice", NotesCount: 3, MakeNotesHiddenBefore: &hidden}
+	userRepo.Users[author.ID] = author
+	text := "published"
+	noteRepo.Notes["locked"] = &model.Note{ID: "locked", UserID: author.ID, User: author, Visibility: model.NoteVisibilityPublic, Text: &text}
+	noteRepo.Notes["pinned"] = &model.Note{ID: "pinned", UserID: author.ID, User: author, Visibility: model.NoteVisibilityPublic, Text: &text}
+	restrictedAuthor := *author
+	restrictedAuthor.RequireSigninToViewContents = true
+	noteRepo.Notes["signin"] = &model.Note{ID: "signin", UserID: author.ID, User: &restrictedAuthor, Visibility: model.NoteVisibilityPublic, Text: &text}
+	pin := &model.UserNotePining{ID: "p1", UserID: author.ID, NoteID: "pinned"}
+	require.NoError(t, piningRepo.Create(pin))
+	require.NoError(t, piningRepo.Create(&model.UserNotePining{ID: "p2", UserID: author.ID, NoteID: "signin"}))
+
+	pageBody := func() string {
+		c, rec := newReqQuery(t, "id", author.ID, "page=true")
+		require.NoError(t, h.Outbox(c))
+		require.Equal(t, http.StatusOK, rec.Code)
+		return rec.Body.String()
+	}
+	body := pageBody()
+	assert.Contains(t, body, "/notes/pinned", "current profile pin publishes a locked public note")
+	assert.NotContains(t, body, "/notes/locked", "non-pinned note remains locked")
+	assert.NotContains(t, body, "/notes/signin", "anonymous outbox never bypasses requireSignin")
+
+	require.NoError(t, piningRepo.Delete(pin))
+	assert.NotContains(t, pageBody(), "/notes/pinned", "unpin immediately removes the publication exception")
 }
 
 // since_id 指定時は repo が ASC で返すのを handler が DESC に反転し、prev/next を
@@ -1787,6 +1881,32 @@ func TestNoteActivity_LocalNoteIsCreate(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "@context")
 	assert.Equal(t, "public, max-age=180", rec.Header().Get("Cache-Control"))
 	assert.Equal(t, "Accept", rec.Header().Get("Vary"))
+}
+
+func TestNoteActivity_AuthorLockdownUsesCurrentProfilePin(t *testing.T) {
+	h, userRepo, noteRepo, piningRepo := newHandlerWithPining(t)
+	hidden := 0
+	author := &model.User{ID: "u1", Username: "alice", MakeNotesHiddenBefore: &hidden}
+	userRepo.Users[author.ID] = author
+	text := "published"
+	n := &model.Note{ID: "n1", UserID: author.ID, User: author, Visibility: model.NoteVisibilityPublic, Text: &text}
+	noteRepo.Notes[n.ID] = n
+	status := func() int {
+		c, rec := newReq(t, "id", n.ID)
+		require.NoError(t, h.NoteActivity(c))
+		return rec.Code
+	}
+	assert.Equal(t, http.StatusNotFound, status(), "non-pinned note remains locked")
+
+	pin := &model.UserNotePining{ID: "p1", UserID: author.ID, NoteID: n.ID}
+	require.NoError(t, piningRepo.Create(pin))
+	assert.Equal(t, http.StatusOK, status(), "current profile pin publishes the activity")
+
+	author.RequireSigninToViewContents = true
+	assert.Equal(t, http.StatusNotFound, status(), "anonymous activity never bypasses requireSignin")
+	author.RequireSigninToViewContents = false
+	require.NoError(t, piningRepo.Delete(pin))
+	assert.Equal(t, http.StatusNotFound, status(), "unpin immediately restores lockdown")
 }
 
 // pure renote は Announce になる (upstream packActivity)。

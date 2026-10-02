@@ -317,6 +317,56 @@ func TestHideNoteByPrefsDecision(t *testing.T) {
 	}
 }
 
+func TestPinnedNoteBypassesAuthorPrefs(t *testing.T) {
+	viewer := &model.User{ID: "viewer"}
+	cases := []struct {
+		name   string
+		viewer *model.User
+		facts  EmbedFacts
+		pinned bool
+		want   bool
+	}{
+		{"anonymous public pin", nil, EmbedFacts{Visibility: "public", AuthorPrefsKnown: true}, true, true},
+		{"anonymous home pin", nil, EmbedFacts{Visibility: "home", AuthorPrefsKnown: true}, true, true},
+		{"anonymous sign-in required", nil, EmbedFacts{Visibility: "public", RequireSigninToViewContents: true, AuthorPrefsKnown: true}, true, false},
+		{"anonymous unknown preferences fail closed", nil, EmbedFacts{Visibility: "public"}, true, false},
+		{"authenticated sign-in required", viewer, EmbedFacts{Visibility: "public", RequireSigninToViewContents: true, AuthorPrefsKnown: true}, true, true},
+		{"followers never bypasses", viewer, EmbedFacts{Visibility: "followers", AuthorPrefsKnown: true}, true, false},
+		{"specified never bypasses", viewer, EmbedFacts{Visibility: "specified", AuthorPrefsKnown: true}, true, false},
+		{"unpinned never bypasses", viewer, EmbedFacts{Visibility: "public", AuthorPrefsKnown: true}, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := PinnedNoteBypassesAuthorPrefs(tc.viewer, tc.facts, tc.pinned); got != tc.want {
+				t.Fatalf("PinnedNoteBypassesAuthorPrefs = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestHidePinnedNoteByPrefsDecision(t *testing.T) {
+	facts := EmbedFacts{
+		AuthorID:              "author",
+		Visibility:            "public",
+		MakeNotesHiddenBefore: ptrInt(0),
+		AuthorPrefsKnown:      true,
+	}
+	if HidePinnedNoteByPrefsDecision(nil, facts, followsSet(), hideTestNowMs, true) {
+		t.Fatal("anonymous public pin must bypass makeNotesHiddenBefore")
+	}
+	facts.RequireSigninToViewContents = true
+	if !HidePinnedNoteByPrefsDecision(nil, facts, followsSet(), hideTestNowMs, true) {
+		t.Fatal("requireSigninToViewContents must still hide an anonymous public pin")
+	}
+	if HidePinnedNoteByPrefsDecision(&model.User{ID: "viewer"}, facts, followsSet(), hideTestNowMs, true) {
+		t.Fatal("authenticated viewer must bypass author preferences on a public pin")
+	}
+	facts.Visibility = "followers"
+	if !HidePinnedNoteByPrefsDecision(&model.User{ID: "viewer"}, facts, followsSet(), hideTestNowMs, true) {
+		t.Fatal("followers pin must not bypass author preferences")
+	}
+}
+
 func TestShouldHideNoteByTime(t *testing.T) {
 	const now int64 = 1_700_000_000_000
 	tests := []struct {

@@ -1491,16 +1491,19 @@ func (h *Handler) fillPinned(ctx context.Context, viewer *model.User, u *model.U
 			// PinnedNoteIDs は意図的に filter 前の生 IDs (上記設計メモ参照)。
 			detailed.PinnedNoteIDs = ids
 			if h.noteRepo != nil {
-				if notes, err := h.noteRepo.FindManyByIDsWithUser(ids); err == nil {
-					notes = notesfilter.FilterVisible(viewer, notes, h.followingRepo)
-					entities := entity.PackNotes(ctx, notes, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
-					h.fieldRes.Apply(entities, viewer)
-					notehide.HideEmbeds(viewer, entities)
-					packed := make([]any, 0, len(entities))
-					for _, pn := range entities {
-						packed = append(packed, pn)
+				primary, ok := h.noteRepo.(repository.NotePrimaryReader)
+				if ok {
+					if notes, err := primary.FindManyByIDsWithUserOnPrimary(ids); err == nil {
+						notes = notesfilter.FilterVisible(viewer, notes, h.followingRepo)
+						entities := entity.PackNotes(ctx, notes, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
+						h.fieldRes.Apply(entities, viewer)
+						notehide.HidePinnedNotes(viewer, entities)
+						packed := make([]any, 0, len(entities))
+						for _, pn := range entities {
+							packed = append(packed, pn)
+						}
+						detailed.PinnedNotes = packed
 					}
-					detailed.PinnedNotes = packed
 				}
 			}
 		}

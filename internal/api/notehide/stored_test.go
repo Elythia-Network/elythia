@@ -29,7 +29,7 @@ func TestHideStoredAt_TopLevelFullDecision(t *testing.T) {
 	specifiedMe.VisibleUserIDs = []string{"viewer"}
 
 	packed := []entity.NoteEntity{unfollowed, followed, own, replyToMe, specifiedOther, specifiedMe}
-	hideAt(viewer, packed, repo, heNowMs, true)
+	hideAt(viewer, packed, repo, heNowMs, true, false)
 
 	want := map[string]bool{"f1": true, "f2": false, "f3": false, "f4": false, "s1": true, "s2": false}
 	for _, n := range packed {

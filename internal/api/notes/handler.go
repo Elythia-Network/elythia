@@ -33,6 +33,7 @@ import (
 // Handler handles note-related API endpoints.
 type Handler struct {
 	noteRepo        repository.NoteRepository
+	piningRepo      repository.UserNotePiningRepository
 	createService   *note.CreateService
 	deleteService   *note.DeleteService
 	queryService    *note.QueryService
@@ -117,6 +118,12 @@ type Handler struct {
 	// (upstream featured.ts の globalNotesRankingCache)。channel ranking は cache
 	// しない (channel ごとなので)。
 	featuredGlobalCache featuredGlobalRankingCache
+}
+
+// SetPiningRepo wires the repository used to verify that a notes/show target
+// is still pinned at request time.
+func (h *Handler) SetPiningRepo(r repository.UserNotePiningRepository) {
+	h.piningRepo = r
 }
 
 // FeaturedRankingReader reads the engagement ranking for notes/featured (#1687).
@@ -635,7 +642,11 @@ func (h *Handler) Show(c echo.Context) error {
 	packed := entity.PackNoteWithInstance(c.Request().Context(), n, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
 	s := []entity.NoteEntity{packed}
 	h.fieldResolver().Apply(s, viewer)
-	notehide.HideEmbeds(viewer, s)
+	if h.isCurrentlyPinned(n) {
+		notehide.HidePinnedNotes(viewer, s)
+	} else {
+		notehide.HideEmbeds(viewer, s)
+	}
 	// #2106 H1: ID-known doctrine (#799) で note は 200 で返すが、follower/specified を
 	// 見られない viewer (非フォロワー/匿名/非対象) には upstream NoteEntityService.hideNote
 	// 同様に本文 (text/cw/files/poll/visibleUserIds) を blank する。これを欠くと ID を
@@ -645,6 +656,14 @@ func (h *Handler) Show(c echo.Context) error {
 		entity.HideNoteEntity(&s[0])
 	}
 	return c.JSON(http.StatusOK, s[0])
+}
+
+func (h *Handler) isCurrentlyPinned(n *model.Note) bool {
+	if h.piningRepo == nil || n == nil {
+		return false
+	}
+	p, err := h.piningRepo.FindByPair(n.UserID, n.ID)
+	return err == nil && p != nil
 }
 
 // lookupForShow fetches the note for the /api/notes/show endpoint.
@@ -662,7 +681,7 @@ func (h *Handler) lookupForShow(noteID string) (*model.Note, error) {
 	if h.queryService == nil {
 		return nil, note.ErrNoteNotFound
 	}
-	return h.queryService.ShowForAPI(noteID)
+	return h.queryService.ShowForAPIOnPrimary(noteID)
 }
 
 // DeleteRequest is the request body for notes/delete.

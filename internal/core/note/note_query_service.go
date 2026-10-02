@@ -91,6 +91,27 @@ func (s *QueryService) Show(viewer *model.User, noteID string) (*model.Note, err
 	return n, nil
 }
 
+// ShowCurrent is Show backed by the primary database. It is used only when a
+// publication or authorization decision must observe visibility and author
+// preferences immediately after an update.
+func (s *QueryService) ShowCurrent(viewer *model.User, noteID string) (*model.Note, error) {
+	primary, ok := s.noteRepo.(repository.NotePrimaryReader)
+	if !ok {
+		return nil, ErrNoteNotFound
+	}
+	n, err := primary.FindByIDWithRelationsOnPrimary(noteID)
+	if err != nil {
+		if !repository.IsNotFound(err) {
+			return nil, err
+		}
+		return nil, ErrNoteNotFound
+	}
+	if !CanSeeNote(viewer, n, s.followingRepo) {
+		return nil, ErrNoteNotFound
+	}
+	return n, nil
+}
+
 // ShowForAPI returns the requested note for the HTTP /api/notes/show
 // endpoint without applying the followers-only / specified visibility
 // check. upstream Misskey TS が「ID を既に知っている viewer には公開する」
@@ -105,6 +126,26 @@ func (s *QueryService) ShowForAPI(noteID string) (*model.Note, error) {
 		return n, nil
 	}
 	// DB に無ければ ephemeral を見る。**materialize はしない** (#2332)。
+	if eph := s.readEphemeral(noteID); eph != nil {
+		return eph, nil
+	}
+	return nil, ErrNoteNotFound
+}
+
+// ShowForAPIOnPrimary is the primary-backed counterpart of ShowForAPI. The
+// notes/show response redaction depends on current visibility and the current
+// author requireSignin preference.
+func (s *QueryService) ShowForAPIOnPrimary(noteID string) (*model.Note, error) {
+	primary, ok := s.noteRepo.(repository.NotePrimaryReader)
+	if ok {
+		n, err := primary.FindByIDWithRelationsOnPrimary(noteID)
+		if err == nil {
+			return n, nil
+		}
+		if !repository.IsNotFound(err) {
+			return nil, err
+		}
+	}
 	if eph := s.readEphemeral(noteID); eph != nil {
 		return eph, nil
 	}
