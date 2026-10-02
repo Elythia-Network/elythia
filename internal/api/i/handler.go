@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/labstack/echo/v4"
+	"github.com/shiroha-a/mk/internal/activitypub"
 	"github.com/shiroha-a/mk/internal/api/apierr"
 	"github.com/shiroha-a/mk/internal/api/notehide"
 	"github.com/shiroha-a/mk/internal/core/avatardecoration"
@@ -139,7 +140,7 @@ type Handler struct {
 	// production では必ず wire する。
 	totpReplayGuard twofactor.ReplayGuard
 	// userRepo は movedTo / alsoKnownAs の URI→ローカルID 解決 (#1255) に使う。
-	// FindByURI による local lookup のみで remote fetch しない。
+	// ローカル actor URI は FindByID、それ以外は FindByURI で引き、remote fetch はしない。
 	userRepo repository.UserRepository
 	// driveFileRepo は i/import-* の fileId 所有権検証 (#1555) に使う。
 	// upstream Misskey の各 import endpoint は driveFilesRepository.findOneBy
@@ -249,11 +250,19 @@ func (h *Handler) SetUserRepo(r repository.UserRepository) {
 }
 
 // resolveUserIDByURI resolves an ActivityPub actor URI to a local user ID via
-// a local DB lookup only (no remote fetch). Returns ("", false) when unwired
-// or the URI is not known locally.
+// a local DB lookup only (no remote fetch). Canonical local actor URIs are
+// looked up by ID because local users have a NULL URI column; other URIs use
+// FindByURI. Returns ("", false) when unwired or the URI is not known locally.
 func (h *Handler) resolveUserIDByURI(uri string) (string, bool) {
 	if h.userRepo == nil {
 		return "", false
+	}
+	if id := activitypub.NewURLBuilder(h.serverURL).LocalUserIDFromURI(uri); id != "" {
+		u, err := h.userRepo.FindByID(id)
+		if err != nil || u == nil {
+			return "", false
+		}
+		return u.ID, true
 	}
 	u, err := h.userRepo.FindByURI(uri)
 	if err != nil || u == nil {
@@ -583,7 +592,8 @@ func (h *Handler) isSilenced(userID string) bool {
 	return h.roleProvider.IsSilenced(userID)
 }
 
-// SetServerURL sets the base URL used for email verification links.
+// SetServerURL sets the canonical instance URL used for email verification
+// links and local ActivityPub actor URI resolution.
 func (h *Handler) SetServerURL(u string) {
 	h.serverURL = u
 }
