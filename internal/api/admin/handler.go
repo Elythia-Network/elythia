@@ -4503,16 +4503,17 @@ func (h *Handler) ResolveAbuseReport(c echo.Context) error {
 	if err != nil || report == nil {
 		return c.JSON(http.StatusNotFound, apierr.ErrorWithKind("NO_SUCH_ABUSE_REPORT", "No such abuse report.", "ac3794dd-2ce4-d878-e546-73c60c06b398", apierr.KindServer))
 	}
-	// 更新前の行を控える。モックは同じポインタを書き換えるので、UpdateFields の
-	// 後に report を読むと更新後の値になる。本家のログも更新前の行を載せる。
-	before := *report
+	// 更新前の行を、通報の列だけで控える (#3267)。モックは同じポインタを
+	// 書き換えるので、UpdateFields の後に report を読むと更新後の値になる。
+	// 本家のログも更新前の行を載せる。
+	before := abuseReportLogRow(report)
 	if err := h.abuseRepo.UpdateFields(req.ReportID, fields); err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
 	}
 	// 本家 AbuseReportService.resolve と同じく resolveAbuseReport を残す (#3259)。
 	h.logModeration(c, moderationlog.LogResolveAbuseReport, map[string]any{
 		"reportId":   req.ReportID,
-		"report":     &before,
+		"report":     before,
 		"resolvedAs": fields["resolvedAs"],
 	})
 	// upstream AbuseReportService.resolve は notifySystemWebhook('abuseReportResolved')

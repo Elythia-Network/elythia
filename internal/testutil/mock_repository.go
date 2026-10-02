@@ -7313,6 +7313,11 @@ func (m *MockAbuseReportRepository) UpdateFields(id string, fields map[string]an
 			r.ModerationNote = s
 		}
 	}
+	if v, ok := fields["forwarded"]; ok {
+		if f, ok := v.(bool); ok {
+			r.Forwarded = f
+		}
+	}
 	if v, ok := fields["assigneeId"]; ok {
 		switch s := v.(type) {
 		case nil:

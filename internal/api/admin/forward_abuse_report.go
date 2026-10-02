@@ -39,6 +39,11 @@ func (h *Handler) ForwardAbuseUserReport(c echo.Context) error {
 		}
 		snapshot = s
 	}
+	// ログには、更新前の通報の列だけを載せる (#3267)。
+	var logRow *model.AbuseUserReport
+	if snapshot != nil {
+		logRow = abuseReportLogRow(snapshot)
+	}
 	// upstream AbuseReportService.forward の事前 guard: 対象がローカル
 	// (targetUserHost == null) か、既に forwarded の場合は forward 不可。順序は
 	// upstream に合わせ host==null を先に評価する。旧 mk-go はこれらを無視し
@@ -58,7 +63,7 @@ func (h *Handler) ForwardAbuseUserReport(c echo.Context) error {
 		if snapshot != nil {
 			h.logModeration(c, moderationlog.LogForwardAbuseReport, map[string]any{
 				"reportId": req.ReportID,
-				"report":   snapshot,
+				"report":   logRow,
 			})
 		}
 		return c.NoContent(http.StatusNoContent)
@@ -69,7 +74,7 @@ func (h *Handler) ForwardAbuseUserReport(c echo.Context) error {
 		if err := h.abuseRepo.UpdateFields(req.ReportID, map[string]any{"forwarded": true}); err == nil && snapshot != nil {
 			h.logModeration(c, moderationlog.LogForwardAbuseReport, map[string]any{
 				"reportId": req.ReportID,
-				"report":   snapshot,
+				"report":   logRow,
 			})
 		}
 	}

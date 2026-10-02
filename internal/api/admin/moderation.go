@@ -131,6 +131,7 @@ func (h *Handler) UpdateAbuseUserReport(c echo.Context) error {
 	// 更新前の値を控える (UpdateFields 後に before を参照すると、in-memory repo
 	// 実装では同一ポインタが書き換わって比較が壊れる)。
 	beforeNote := before.ModerationNote
+	logRow := abuseReportLogRow(before)
 	if err := h.abuseRepo.UpdateFields(req.ReportID, map[string]any{"moderationNote": note}); err != nil {
 		// 行があることは引いて確かめ済みなので、ここで失敗するのは DB の障害 (#2792)。
 		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
@@ -139,7 +140,7 @@ func (h *Handler) UpdateAbuseUserReport(c echo.Context) error {
 	if beforeNote != note {
 		h.logModeration(c, moderationlog.LogUpdateAbuseReportNote, map[string]any{
 			"reportId": req.ReportID,
-			"report":   before,
+			"report":   logRow,
 			"before":   beforeNote,
 			"after":    note,
 		})
