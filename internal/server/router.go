@@ -1893,6 +1893,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// inline closure から移設)。
 	usersHandler.SetMetaRepo(metaRepo)
 	usersHandler.SetLocalHost(localHost)
+	usersHandler.SetServerURL(s.config.URL)
 	usersHandler.SetChartHook(chartHooks)
 	// users/notes (withChannelNotes) の post-fetch filter でチャンネルミュートを効かせる。
 	usersHandler.SetChannelMutingRepo(channelMutingRepo)

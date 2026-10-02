@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/shiroha-a/mk/internal/activitypub"
 	"github.com/shiroha-a/mk/internal/api/apierr"
 	"github.com/shiroha-a/mk/internal/api/meself"
 	"github.com/shiroha-a/mk/internal/api/notehide"
@@ -77,6 +78,7 @@ type Handler struct {
 	// closure から移設)。
 	metaRepo  repository.MetaRepository
 	localHost string
+	serverURL string
 	// userRepo は users/notes / users/search-by-username-and-host 経由で
 	// 表示する note list の hardMutedWords filter (#787) に使う。
 	userRepo repository.UserRepository
@@ -229,12 +231,27 @@ func (h *Handler) SetUserRepo(r repository.UserRepository) {
 	h.userRepo = r
 }
 
+// SetServerURL records the canonical instance URL used to recognize local
+// ActivityPub actor URIs.
+func (h *Handler) SetServerURL(u string) {
+	h.serverURL = u
+}
+
 // resolveUserIDByURI resolves an ActivityPub actor URI to a local user ID via
-// a local DB lookup only (no remote fetch). Used by UserDetailed.ResolveMoveTargets
-// to fill movedTo / alsoKnownAs. Returns ("", false) when unwired or unknown.
+// a local DB lookup only (no remote fetch). Canonical local actor URIs are
+// looked up by ID because local users have a NULL URI column; other URIs use
+// FindByURI. Used by UserDetailed.ResolveMoveTargets to fill movedTo /
+// alsoKnownAs. Returns ("", false) when unwired or unknown.
 func (h *Handler) resolveUserIDByURI(uri string) (string, bool) {
 	if h.userRepo == nil {
 		return "", false
+	}
+	if id := activitypub.NewURLBuilder(h.serverURL).LocalUserIDFromURI(uri); id != "" {
+		u, err := h.userRepo.FindByID(id)
+		if err != nil || u == nil {
+			return "", false
+		}
+		return u.ID, true
 	}
 	u, err := h.userRepo.FindByURI(uri)
 	if err != nil || u == nil {
