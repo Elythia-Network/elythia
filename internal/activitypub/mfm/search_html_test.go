@@ -71,6 +71,11 @@ func TestSearch_MatchesUpstream(t *testing.T) {
 			`<a href="https://www.google.com/search?q=a%2Fb%3Fc%23d%25e%2Bf">a/b?c#d%e+f 検索</a>`},
 		{"日本語 😀 search", "日本語 😀", "日本語 😀 search",
 			`<a href="https://www.google.com/search?q=%E6%97%A5%E6%9C%AC%E8%AA%9E%20%F0%9F%98%80">日本語 😀 search</a>`},
+		// mfm-js は query の前後の空白を削らないので、URL にも空白が残る (#3325)
+		{" q  search", " q ", " q  search",
+			`<a href="https://www.google.com/search?q=%20q%20"> q  search</a>`},
+		{"x\t[SEARCH]", "x", "x\t[SEARCH]",
+			"<a href=\"https://www.google.com/search?q=x\">x\t[SEARCH]</a>"},
 		// `'` は encodeURIComponent が残すので、href 側の HTML エスケープで `&#39;` になる。
 		// 本家の escapeHtml は `&#039;` を出すが、HTML としての意味は同じ。
 		{"'a' search", "'a'", "'a' search",
