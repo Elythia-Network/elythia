@@ -66,7 +66,7 @@ func renderNode(b *strings.Builder, n *Node, host string) {
 		renderChildren(b, n.Children, host)
 		b.WriteString("</small>")
 	case NodeCenter:
-		b.WriteString(`<div style="text-align:center">`)
+		b.WriteString(`<div style="text-align: center;">`)
 		renderChildren(b, n.Children, host)
 		b.WriteString("</div>")
 	case NodePlain:

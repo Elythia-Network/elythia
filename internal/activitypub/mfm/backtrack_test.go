@@ -155,6 +155,11 @@ func TestParse_LocalSizedPathologicalInputsStayWithinBudget(t *testing.T) {
 		"quote lines with bold":   fill("", "<b>\n> ", 3000),
 		"deep mixed":              fill(strings.Repeat("<b>", 18), "~~$[x.a=b *", 3000),
 		"mixed":                   fill("", "<b>**~~$[x [<small><i>\\[`<plain>\\(", 3000),
+		// center は行の先頭ごとに試す。開きの直後から閉じを探す区間を毎回辿り直すと
+		// 行数の 2 乗になる (#3328)
+		"unclosed center lines": fill("", "<center>a\n", 3000),
+		"unclosed center crlf":  fill("", "\r\n<center>\r\n**", 3000),
+		"center lines at limit": fill("", strings.Repeat(">", 19)+" <center>a\n", 3000),
 	}
 	for name, in := range cases {
 		for _, simple := range []bool{false, true} {

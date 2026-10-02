@@ -41,6 +41,10 @@ type state struct {
 	nestLimit int
 	inLink    bool
 	simple    bool
+	// fullDepth is the depth at which this state reads with mfm-js's full
+	// parser (the top level, or the body of a quote). Children of nested
+	// constructs are deeper and read with the inline parser.
+	fullDepth int
 	memo      *memoTable
 	budget    *workBudget
 }
@@ -83,16 +87,17 @@ type slotMemo struct {
 // lines is parsed as a separate string with its own table (see quoteAt).
 //
 // parseOne の結果 (ノードと終了位置) は src 上の位置・深さ・link ラベルの中か
-// どうかだけで決まる (nestLimit と simple は 1 回の Parse の間は変わらない)。
-// 深さは nestLimit による打ち切りで、inLink は link を試すかどうかで結果を
-// 変えるので、どちらも表を分ける軸にする。病的な入力では全ての深さの全ての
+// どうか・その深さが block を読む最上位 (fullDepth) かどうかだけで決まる
+// (nestLimit と simple は 1 回の Parse の間は変わらない)。深さは nestLimit に
+// よる打ち切りで、inLink は link を試すかどうかで、最上位かどうかは center を
+// 試すかどうかで結果を変えるので、どれも表を分ける軸にする。病的な入力では全ての深さの全ての
 // 位置を読むので、hash map ではなく位置で引くページ単位の配列にしてある
 // (map だと実測で時間の過半が hash に消えた)。ページは触れたものだけ確保する。
 type memoTable struct {
 	srcLen    int
 	nestLimit int
 	budget    *workBudget
-	slots     []*slotMemo // [slot(depth, inLink)]
+	slots     []*slotMemo // [slot(depth, inLink, depth == fullDepth)]
 	// quoteStarts は ">" で始まる行の先頭位置 (昇順)。quoteOffsets / quoteRunOf は
 	// 同じ添字で、その行が塊の中身のどこから始まるかと、どの塊に属するか。
 	// quotesState は stopsState と同じ意味。
@@ -118,6 +123,7 @@ const (
 	stopMathInline                     // \) or a newline
 	stopFnArgValue                     // ',', ' ' or ']'
 	stopURLAltEnd                      // '>', ' ', '\u3000' or '\t'
+	stopCenterClose                    // </center>
 	numStopKinds
 )
 
@@ -151,6 +157,8 @@ func (m *memoTable) stopList(src string, kind stopKind) ([]int32, bool) {
 		list = indexAll(src, "</plain>")
 	case stopMathBlockClose:
 		list = indexAll(src, "\\]")
+	case stopCenterClose:
+		list = indexAll(src, "</center>")
 	case stopMathInline:
 		for i := 0; i < len(src); i++ {
 			if src[i] == '\n' || strings.HasPrefix(src[i:], "\\)") {
@@ -348,7 +356,8 @@ func newMemoTable(srcLen, nestLimit int, budget *workBudget) *memoTable {
 	return &memoTable{srcLen: srcLen, nestLimit: nestLimit, budget: budget}
 }
 
-// slotFor returns the pages of the slot for depth and inLink, allocating the
+// slotFor returns the pages of the slot for depth, inLink and whether depth is
+// the block-reading top level (atFull), allocating the
 // slot on first use, or nil when the position is out of range or the
 // allocation is refused.
 //
@@ -357,16 +366,19 @@ func newMemoTable(srcLen, nestLimit int, budget *workBudget) *memoTable {
 // 数千倍になる (3000 バイトで 13MB。1 表あたり入れ物 10KB、触れたスロットごとに
 // 4KB のページ)。入れ物はスロット単位で、ページは src の長さまでに切り詰めて
 // 確保し、どちらも charge に含める。
-func (m *memoTable) slotFor(pos, depth int, inLink bool) *slotMemo {
+func (m *memoTable) slotFor(pos, depth int, inLink, atFull bool) *slotMemo {
 	if depth < 0 || depth > m.nestLimit || pos < 0 || pos > m.srcLen {
 		return nil
 	}
-	i := depth * 2
+	i := depth * 4
 	if inLink {
+		i += 2
+	}
+	if atFull {
 		i++
 	}
 	if m.slots == nil {
-		n := (m.nestLimit + 1) * 2
+		n := (m.nestLimit + 1) * 4
 		if !m.charge(n * int(unsafe.Sizeof((*slotMemo)(nil)))) {
 			return nil
 		}
@@ -408,7 +420,7 @@ type quoteRun struct {
 // 2 乗になり (3000 バイトで仕事量 150 万、64KB の inbox 上限なら 2 乗で増える)、
 // 同じ quote を別の深さから読み直すたびに表を作り直すと入れ子の段数に対して
 // 指数的になる (11 段 125 バイトで仕事量の上限に届いた)。塊を 1 度だけ切り出し、
-// 1 つの表を全ての開始行と深さで共有する。表は深さをキーに含むので共有してよく、
+// 1 つの表を全ての開始行と深さで共有する。表は深さと、その深さが中身の最上位 (fullDepth) かどうかをキーに含むので共有してよく、
 // 塊の途中から読むときの直前の文字は改行なので、行頭の判定も直前の文字の判定も
 // 行ごとに切り出した場合と変わらない。
 //
@@ -516,8 +528,8 @@ func (m *memoTable) charge(n int) bool {
 }
 
 // oneEntry returns the cell for parseOne at pos, allocating its page.
-func (m *memoTable) oneEntry(pos, depth int, inLink bool) *memoEntry {
-	sm := m.slotFor(pos, depth, inLink)
+func (m *memoTable) oneEntry(pos, depth int, inLink, atFull bool) *memoEntry {
+	sm := m.slotFor(pos, depth, inLink, atFull)
 	if sm == nil {
 		return nil
 	}
@@ -535,8 +547,8 @@ func (m *memoTable) oneEntry(pos, depth int, inLink bool) *memoEntry {
 
 // scanEntry returns the cell holding end+1 of the child loop of kind started
 // at pos (0 = unknown), allocating its page.
-func (m *memoTable) scanEntry(pos, depth int, inLink bool, kind scanKind) *int32 {
-	sm := m.slotFor(pos, depth, inLink)
+func (m *memoTable) scanEntry(pos, depth int, inLink, atFull bool, kind scanKind) *int32 {
+	sm := m.slotFor(pos, depth, inLink, atFull)
 	if sm == nil {
 		return nil
 	}
@@ -655,7 +667,7 @@ func (s *state) parseOne() *Node {
 	}
 	// 閉じない <b> などは失敗するたびに 1 文字進めて、同じ位置を別の親から
 	// 読み直す。メモ化しないと入力長に対して指数時間になる
-	e := s.memo.oneEntry(s.pos, s.depth, s.inLink)
+	e := s.memo.oneEntry(s.pos, s.depth, s.inLink, s.depth == s.fullDepth)
 	if e == nil {
 		return s.parseFullOne()
 	}
@@ -813,7 +825,9 @@ func (s *state) prefixAt(pos int, p string) bool {
 func (s *state) stopsAt(kind scanKind) bool {
 	switch kind {
 	case scanCenter:
-		return s.hasPrefix("</center>")
+		// mfm-js は `notMatch(seq(newLine.option(), close))` で止まるので、閉じの
+		// 直前の改行は子に含めない
+		return s.centerCloseAt(s.pos)
 	case scanSmall:
 		return s.hasPrefix("</small>")
 	case scanBold:
@@ -851,7 +865,7 @@ func (s *state) scanEnd(kind scanKind) int {
 			end = s.pos
 			break
 		}
-		if e := s.memo.scanEntry(s.pos, s.depth, s.inLink, kind); e != nil && *e != 0 {
+		if e := s.memo.scanEntry(s.pos, s.depth, s.inLink, s.depth == s.fullDepth, kind); e != nil && *e != 0 {
 			end = int(*e) - 1
 			break
 		}
@@ -862,7 +876,7 @@ func (s *state) scanEnd(kind scanKind) int {
 		}
 	}
 	for _, p := range path {
-		if e := s.memo.scanEntry(p, s.depth, s.inLink, kind); e != nil {
+		if e := s.memo.scanEntry(p, s.depth, s.inLink, s.depth == s.fullDepth, kind); e != nil {
 			*e = int32(end) + 1
 		}
 	}
@@ -914,7 +928,7 @@ func (s *state) tryQuote() *Node {
 	save := s.pos
 	s.pos = run.end
 	children := s.nest(func() []*Node {
-		sub := &state{src: run.inner, pos: offset, depth: s.depth, nestLimit: s.nestLimit, memo: run.table, budget: s.budget}
+		sub := &state{src: run.inner, pos: offset, depth: s.depth, fullDepth: s.depth, nestLimit: s.nestLimit, memo: run.table, budget: s.budget}
 		return sub.parseNodes(false)
 	})
 	if children == nil {
@@ -1001,8 +1015,114 @@ func (s *state) tryMathBlock() *Node {
 	return nil
 }
 
+// tryCenterTag follows mfm-js 0.26.0's centerTag:
+//
+//	seq(newLine.option(), lineBegin, open, newLine.option(),
+//	    seq(notMatch(seq(newLine.option(), close)), nest(r.inline)).select(1).many(1),
+//	    newLine.option(), close, lineEnd, newLine.option())
+//
+// center は full にだけあり inline には無いので、装飾やリンクのラベルの子では
+// 読まない (#3328)。行の先頭で始まり閉じの直後が行の終わりのときだけ読み、
+// 開きの前・開きの直後・閉じの直前・閉じの直後の改行を 1 つずつ飲み込む。
+// 以前は <b> などと同じく行の途中でも読んだので、`x <center>a</center>` が
+// 連合へ送る HTML で中央寄せになり、IsSimple も false になっていた。
 func (s *state) tryCenterTag() *Node {
-	return s.tryHTMLTag("<center>", "</center>", NodeCenter, scanCenter)
+	const openTag, closeTag = "<center>", "</center>"
+	// mfm-js の深さ上限の位置は 1 文字ずつ文字として読まれるので、center にしない。
+	// link のラベルは深さを変えずに読むが、改行で止まるので行の先頭が来ず、
+	// ラベルの中で center が始まることは無い
+	if s.depth != s.fullDepth || s.depth >= s.nestLimit {
+		return nil
+	}
+	save := s.pos
+	s.advance(s.newlineLen())
+	if !s.atLineBegin() || !s.hasPrefix(openTag) {
+		s.pos = save
+		return nil
+	}
+	s.advance(len(openTag))
+	s.advance(s.newlineLen())
+	start := s.pos
+
+	var children []*Node
+	if s.depth+1 < s.nestLimit {
+		s.depth++
+		end := s.scanEnd(scanCenter)
+		// 閉じの直後が行の終わりかを、子を集める前に確かめる。集めてから捨てると、
+		// 開きを並べて最後だけ行末でない閉じを置いた入力で、開きの数だけ末尾まで
+		// 読み直して入力長の 2 乗になる。
+		if end > start && s.centerCloseAt(end) && s.lineEndAt(end+s.newlineLenAt(end)+len(closeTag)) {
+			children = s.collectTo(end)
+		}
+		s.depth--
+	} else if end := s.centerTextEnd(); end > start && s.centerCloseAt(end) {
+		// 子の深さが上限に届くと、mfm-js の nest は子を 1 文字ずつ文字として読む
+		children = []*Node{Text(s.src[start:end])}
+		s.pos = end
+	}
+	if children == nil {
+		s.pos = save
+		return nil
+	}
+	s.advance(s.newlineLen())
+	s.advance(len(closeTag))
+	if !s.eof() && s.peek() != '\n' && s.peek() != '\r' {
+		s.pos = save
+		return nil
+	}
+	s.advance(s.newlineLen())
+	return withChildren(NodeCenter, mergeText(children))
+}
+
+// centerCloseAt reports whether an optional newline and </center> follow pos.
+func (s *state) centerCloseAt(pos int) bool {
+	return s.prefixAt(pos+s.newlineLenAt(pos), "</center>")
+}
+
+// centerTextEnd returns where the children of a center whose children are
+// read as plain text stop: the first </center>, or the newline right before
+// it. Without a </center> it returns a position where centerCloseAt fails.
+func (s *state) centerTextEnd() int {
+	c, ok := s.nextStop(stopCenterClose)
+	if !ok {
+		c = len(s.src)
+		if i := strings.Index(s.remaining(), "</center>"); i >= 0 {
+			c = s.pos + i
+		}
+	}
+	switch {
+	case c-2 >= s.pos && s.src[c-2:c] == "\r\n":
+		return c - 2
+	case c-1 >= s.pos && (s.src[c-1] == '\n' || s.src[c-1] == '\r'):
+		return c - 1
+	}
+	return c
+}
+
+// newlineLen returns the length of the newline at the current position.
+func (s *state) newlineLen() int { return s.newlineLenAt(s.pos) }
+
+// lineEndAt reports whether pos is the end of input or a line break.
+func (s *state) lineEndAt(pos int) bool {
+	return pos >= len(s.src) || s.src[pos] == '\n' || s.src[pos] == '\r'
+}
+
+// newlineLenAt returns the length of the newline (CRLF, CR or LF, in
+// mfm-js's order) at pos, or 0.
+func (s *state) newlineLenAt(pos int) int {
+	switch {
+	case s.prefixAt(pos, "\r\n"):
+		return 2
+	case s.prefixAt(pos, "\r"), s.prefixAt(pos, "\n"):
+		return 1
+	}
+	return 0
+}
+
+// atLineBegin reports mfm-js's lineBegin: the start of the source or right
+// after CR or LF.
+func (s *state) atLineBegin() bool {
+	return s.pos == 0 || s.src[s.pos-1] == '\n' || s.src[s.pos-1] == '\r'
 }
 
 func (s *state) trySmallTag() *Node {
