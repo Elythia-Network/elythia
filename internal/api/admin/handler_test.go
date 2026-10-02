@@ -527,6 +527,22 @@ func (failingSigninRepo) ListByUserID(string, int, string, string) ([]*model.Sig
 	return nil, assertError{}
 }
 
+// countingSigninRepo proves that an admin/show-user response which opts out of
+// sign-in history does not merely redact the rows after querying them. The
+// repository itself must remain untouched so opening the surrounding page is
+// not an IP lookup.
+type countingSigninRepo struct {
+	calls   int
+	signins []*model.Signin
+}
+
+func (*countingSigninRepo) Create(*model.Signin) error { return nil }
+
+func (r *countingSigninRepo) ListByUserID(string, int, string, string) ([]*model.Signin, error) {
+	r.calls++
+	return r.signins, nil
+}
+
 // **`signins` の `ip` は `canSearchIpHistory` を持つ相手にだけ返す** (#3114)。
 //
 // ここは `signin` テーブルのログイン IP をそのまま返す口で、`admin/ip/*` が
@@ -606,6 +622,41 @@ func TestShowUser_SigninIPsRequirePolicy(t *testing.T) {
 		assert.Equal(t, uid, got.TargetUserID)
 		assert.Equal(t, 1, got.ResultCount)
 		// 共有キャッシュに残さない (IP が載る応答なので #3106 と同じ扱い)。
+		assert.Contains(t, rec.Header().Get("Cache-Control"), "no-store")
+	})
+
+	t.Run("withSignins false なら signin を取得せず監査にも残さない", func(t *testing.T) {
+		h, uid, _, _, roleRepo, assignRepo, audit := setup(t)
+		roleRepo.Roles["iprole"] = &model.Role{ID: "iprole", Name: "IP",
+			Policies: datatypes.JSON([]byte(`{"canSearchIpHistory":{"useDefault":false,"priority":1,"value":true}}`))}
+		assignRepo.Assignments["mod1:iprole"] = &model.RoleAssignment{ID: "as1", UserID: "mod1", RoleID: "iprole"}
+		repo := &countingSigninRepo{signins: []*model.Signin{{
+			ID: "signin1", UserID: uid, Success: true,
+		}}}
+		h.SetSigninRepo(repo)
+
+		rec := doPost(h.ShowUser, `{"userId":"`+uid+`","withSignins":false}`, &model.User{ID: "mod1"})
+		require.Equal(t, http.StatusOK, rec.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		assert.Equal(t, []any{}, resp["signins"])
+		assert.Equal(t, 0, repo.calls, "IP 欄を開いていないのに signin repository を読んでいる")
+		assert.Empty(t, audit.written, "IP を返していないのに監査に残している")
+		assert.Contains(t, rec.Header().Get("Cache-Control"), "no-store", "既存の管理情報の cache 保護を弱めている")
+		assert.NotContains(t, rec.Body.String(), "__signinsLoaded")
+	})
+
+	t.Run("withSignins true は従来通り取得して監査に残す", func(t *testing.T) {
+		h, uid, _, _, roleRepo, assignRepo, audit := setup(t)
+		roleRepo.Roles["iprole"] = &model.Role{ID: "iprole", Name: "IP",
+			Policies: datatypes.JSON([]byte(`{"canSearchIpHistory":{"useDefault":false,"priority":1,"value":true}}`))}
+		assignRepo.Assignments["mod1:iprole"] = &model.RoleAssignment{ID: "as1", UserID: "mod1", RoleID: "iprole"}
+
+		rec := doPost(h.ShowUser, `{"userId":"`+uid+`","withSignins":true}`, &model.User{ID: "mod1"})
+		require.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, "203.0.113.5", readSignin(t, rec)["ip"])
+		require.Len(t, audit.written, 1)
+		assert.Equal(t, model.IPLookupKindSignins, audit.written[0].Kind)
 		assert.Contains(t, rec.Header().Get("Cache-Control"), "no-store")
 	})
 

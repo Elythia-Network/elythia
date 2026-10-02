@@ -1106,7 +1106,8 @@ func (h *Handler) AccountsCreate(c echo.Context) error {
 // ShowUser handles POST /api/admin/show-user.
 func (h *Handler) ShowUser(c echo.Context) error {
 	var req struct {
-		UserID string `json:"userId"`
+		UserID      string `json:"userId"`
+		WithSignins *bool  `json:"withSignins"`
 	}
 	if err := c.Bind(&req); err != nil || req.UserID == "" {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "userId is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
@@ -1167,12 +1168,16 @@ func (h *Handler) ShowUser(c echo.Context) error {
 		slog.Error("admin/show-user: roleService is not wired; signin IPs are withheld")
 	}
 
-	resp := h.packAdminUser(user, profile, showIPs)
+	// Omitted keeps the upstream-compatible response shape and behaviour for
+	// existing clients. The control-panel page explicitly opts out until its IP
+	// folder is opened, so merely viewing the user does not read or audit IPs.
+	withSignins := req.WithSignins == nil || *req.WithSignins
+	resp := h.packAdminUser(user, profile, showIPs, withSignins)
 	// **内部連絡用のキーは wire に出さない。** `signins` を引けたかどうかは
 	// 監査の判断にだけ使う。
 	signinsOK, _ := resp[signinsLoadedKey].(bool)
 	delete(resp, signinsLoadedKey)
-	if showIPs {
+	if showIPs && withSignins {
 		// **実際に IP を返したときだけ記録する** (#3114 / #3106)。伏せた応答も、
 		// **引けずに空になった応答も**開示が起きていないので残さない — 記録すると
 		// 「本当に 0 件だった」と「DB が落ちていて何も返していない」が
@@ -1184,6 +1189,11 @@ func (h *Handler) ShowUser(c echo.Context) error {
 				TargetUserID: user.ID, ResultCount: len(signins),
 			})
 		}
+	}
+	// admin/show-user also contains other private moderation fields. Preserve
+	// the existing cache protection for authorized viewers even when this
+	// request intentionally omitted sign-in rows.
+	if showIPs {
 		noStoreIPLookup(c)
 	}
 	return c.JSON(http.StatusOK, resp)
@@ -1274,7 +1284,7 @@ func badgeRolesForMap(br *[]any) []any {
 const signinsLoadedKey = "__signinsLoaded"
 
 // packAdminUser returns a MeDetailed-equivalent response for admin endpoints.
-func (h *Handler) packAdminUser(u *model.User, profile *model.UserProfile, showIPs bool) map[string]any {
+func (h *Handler) packAdminUser(u *model.User, profile *model.UserProfile, showIPs, withSignins bool) map[string]any {
 	// upstream admin/show-user (show-user.ts:233-261) が返すのはこの 24 key
 	// だけで、UserLite / UserDetailed / MeDetailed は含まない。旧実装は
 	// PackUserDetailed をベースに 70 key 近くを返しており、id をはじめ
@@ -1343,9 +1353,15 @@ func (h *Handler) packAdminUser(u *model.User, profile *model.UserProfile, showI
 	}
 	// signins / roleAssigns は repo / service 未配線や lookup 失敗時も
 	// 空配列に fallback する (roles と同じ扱い、#888 / #1198)。
-	signins, signinsOK := h.packUserSignins(u.ID, showIPs)
-	resp["signins"] = signins
-	resp[signinsLoadedKey] = signinsOK
+	// withSignins=false は repository 自体を読まない。読み終えてから捨てる
+	// 実装では「IP 欄を開いた時だけ照会する」という境界にならない。
+	resp["signins"] = []map[string]any{}
+	resp[signinsLoadedKey] = false
+	if withSignins {
+		signins, signinsOK := h.packUserSignins(u.ID, showIPs)
+		resp["signins"] = signins
+		resp[signinsLoadedKey] = signinsOK
+	}
 	resp["roleAssigns"] = h.packUserRoleAssigns(u.ID)
 	if u.LastActiveDate != nil {
 		resp["lastActiveDate"] = u.LastActiveDate.UTC().Format("2006-01-02T15:04:05.000Z")
