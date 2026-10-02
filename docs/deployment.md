@@ -1090,11 +1090,11 @@ IP とアカウントの対応を引く機能は、**照会そのものを別の
 `admin/get-user-ips` と `admin/show-user` の `signins` も記録する** — どちらも
 返すのは同じ「利用者 ↔ IP の対応」なので、外すと監査を迂回して同じものを引ける。
 
-**`admin/show-user` は記録が増えやすい。** 管理画面の利用者ページは開くたびに
-この口を叩き、凍結・サイレンス・ロール変更・メモ保存などの操作のあとにも引き直す。
-`canSearchIpHistory` を持つ相手が利用者ページを 1 回開いて 1 操作すると、それだけで
-記録が 2 行増える (ログイン履歴が 0 件の利用者でも `resultCount: 0` の行が残る)。
-下の「記録の一覧は最新 10,100 件までしか遡れない」と合わせて考えること。
+同梱 frontend は、管理画面の利用者ページを開くだけでは `signins` を取得しない。
+折り畳まれた IP 欄を開いたときに `admin/get-user-ips` を初めて呼び、その実際の照会を
+監査へ残す。`admin/show-user` には `withSignins: false` を渡し、signin repository 自体を
+読まない。省略時と `true` は既存 client のため従来どおり `signins` を返し、IP を
+開示した場合だけ `kind: signins` の記録を残す。
 
 **監査の一覧 (`admin/ip/lookup-log`) を読んだことは記録しない。** 監査ログの閲覧を
 監査し続けると際限が無いので切ってあるが、**この応答にも照会に使った IP が並ぶ**
@@ -1115,7 +1115,7 @@ upstream からの意図的な逸脱。**ただし揃っているのは policy �
 | 権限 | モデレーター + `canSearchIpHistory` (既定 false) + scope `read:admin:user-ips` | **管理者** + scope | **モデレーター + `canSearchIpHistory`** + scope `read:admin:show-user` (policy が無ければ `ip` と `headers` は空) |
 | 監査 | 残る | 残る | **返したときだけ残る** |
 | レート制限 | 1 時間 120 回 | 1 時間 120 回 | **無し** |
-| `Cache-Control` | `no-store` | `no-store` | 返したときだけ `no-store` |
+| `Cache-Control` | `no-store` | `no-store` | policy がある応答は `withSignins: false` でも `no-store` (既存の管理情報の保護を維持) |
 | 件数 | 1 ページ 100 件 | 最新 30 件 | **全件** |
 | `meta.enableIpLogging` が無効 | 新しい観測が止まる | 同左 | **関係なく記録され続ける** |
 | 保持期間 | 90 日で刈る | 同左 | **刈らない (無期限)** |
