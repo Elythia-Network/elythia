@@ -131,16 +131,21 @@ func TestParse_LocalSizedPathologicalInputsStayWithinBudget(t *testing.T) {
 	// テキストになり出力が変わるので、メモ化や区切りの索引が効いていない経路は
 	// ここで落ちる (時間では見ない。-race 下では桁で遅くなる)
 	cases := map[string]string{
-		"unclosed bold":           strings.Repeat("<b>", 1000),
-		"unclosed link label":     strings.Repeat("[<b>", 750),
-		"quote chain bold":        quoteChain(20, "<b>"),
-		"quote chain italic":      quoteChain(20, "<i>"),
-		"quote chain fn":          quoteChain(20, "$[x "),
-		"unclosed plain":          fill("", "<plain>", 3000),
-		"unclosed math block":     fill("", "\\[", 3000),
-		"unclosed fn arg value":   fill("", "$[x.k=v", 3000),
-		"unclosed inline math":    fill("", "<b>\\(", 3000),
-		"unclosed link url":       fill(strings.Repeat("<b>", 20), "[a](", 3000),
+		"unclosed bold":         strings.Repeat("<b>", 1000),
+		"unclosed link label":   strings.Repeat("[<b>", 750),
+		"quote chain bold":      quoteChain(20, "<b>"),
+		"quote chain italic":    quoteChain(20, "<i>"),
+		"quote chain fn":        quoteChain(20, "$[x "),
+		"unclosed plain":        fill("", "<plain>", 3000),
+		"unclosed math block":   fill("", "\\[", 3000),
+		"unclosed fn arg value": fill("", "$[x.k=v", 3000),
+		"unclosed inline math":  fill("", "<b>\\(", 3000),
+		"unclosed link url":     fill(strings.Repeat("<b>", 20), "[a](", 3000),
+		"link urls":             fill(strings.Repeat("<b>", 20), "[a](https://x", 3000),
+		// 多数の `[` が同じ長い飛び先に届く形。飛び先を位置ごとに覚えないと、同じ
+		// URL を `[` の数だけ読み直す (#3300)。
+		"labels sharing a url":    strings.Repeat("[", 1000) + "a](https://" + strings.Repeat("x", 1978),
+		"unclosed url alt":        fill("", "[a](<https://x\n", 3000),
 		"short quotes":            fill(strings.Repeat("<b>", 7), ":```js\n\n> ", 3000),
 		"quote lines under limit": fill(strings.Repeat("<b>", 20), "\n> ", 3000),
 		"quote lines with bold":   fill("", "<b>\n> ", 3000),
@@ -219,4 +224,27 @@ func TestParse_MemoKeyGolden(t *testing.T) {
 			assert.Equal(t, tc.want, parseWithin(t, tc.in, 5*time.Second))
 		})
 	}
+}
+
+// `<https://...>` の飛び先は閉じの `>` か空白まで読む。改行では止まらないので、
+// 1 文字ずつ読むと `[a](<https://x` を改行を挟んで並べただけで、どの `](` からも
+// 末尾まで読んで入力長の 2 乗になる (#3300。1MB で 30 秒台)。区切りの位置の索引から
+// 引いていることを確かめる。時間で見ると CI の負荷で揺れるので、索引が作られて
+// 使われたことを見る。
+func TestParse_UnclosedURLAltUsesStopIndex(t *testing.T) {
+	s := newState(strings.Repeat("[a](<https://x\n", 2000), false)
+	mergeText(s.parseNodes(false))
+	assert.Equal(t, int8(1), s.memo.stopsState[stopURLAltEnd], "区切りの索引を作って引いていない")
+	assert.False(t, s.budget.exhausted())
+}
+
+// 区切りの索引を作れないとき (メモの上限に届いた、不正な UTF-8) は 1 文字ずつ
+// 読むが、読んだ分を仕事量に数えて上限で打ち切る。数えないと、上の形で入力長の
+// 2 乗になっても上限に届かない (#3300)。Parse は入口で UTF-8 を正すので、索引を
+// 作れない状態は state を直接作って再現する。
+func TestParse_UnclosedURLAltFallbackCountsWork(t *testing.T) {
+	s := newState(strings.Repeat("[a](<https://x\n", 14000), false)
+	s.memo.stopsState[stopURLAltEnd] = -1 // 索引を作れない状態
+	mergeText(s.parseNodes(false))
+	assert.True(t, s.budget.exhausted(), "1 文字ずつ読んだ分を仕事量に数えていない (used %d of %d)", s.budget.used, s.budget.limit)
 }
