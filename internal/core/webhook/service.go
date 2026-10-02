@@ -81,6 +81,17 @@ type Envelope struct {
 // eventType and enqueues a delivery job for each. 本家と同様に dispatch は
 // best-effort で、DB や enqueue のエラーはログに留めて返さない。
 func (s *Service) DispatchUser(userID, eventType string, body any) {
+	s.DispatchUserLazy(userID, eventType, func() (any, bool) { return body, true })
+}
+
+// DispatchUserLazy is DispatchUser with the body built on demand. build runs
+// at most once, and only when userID has an active webhook subscribed to
+// eventType; returning false drops the delivery.
+//
+// follow 系の本文は UserDetailedNotMe で、profile や関係の行を読む。Webhook を
+// 持たない利用者 (リモートの利用者を含む) のフォローのたびに読まないよう、
+// 購読者が居るときだけ組み立てる (#3269)。
+func (s *Service) DispatchUserLazy(userID, eventType string, build func() (any, bool)) {
 	if s == nil || s.enqueuer == nil || s.userRepo == nil {
 		return
 	}
@@ -91,9 +102,21 @@ func (s *Service) DispatchUser(userID, eventType string, body any) {
 		return
 	}
 	now := time.Now().UnixMilli()
+	var (
+		body  any
+		built bool
+	)
 	for _, h := range hooks {
 		if !slices.Contains([]string(h.On), eventType) {
 			continue
+		}
+		if !built {
+			var ok bool
+			body, ok = build()
+			if !ok {
+				return
+			}
+			built = true
 		}
 		// Envelope は map/string/int のみを含むため json.Marshal は失敗しない。
 		raw, _ := json.Marshal(Envelope{

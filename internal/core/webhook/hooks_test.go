@@ -342,6 +342,7 @@ func TestFollowingHook_FiresFollowAndFollowed(t *testing.T) {
 		ID: "h_followed", UserID: "bob", Active: true, On: model.StringArray{"followed"},
 	}
 	h := webhook.NewFollowingHook(svc)
+	wireFollowLookups(t, h, "bob")
 
 	follower := &model.User{ID: "alice", Username: "alice", UsernameLower: "alice"}
 	followee := &model.User{ID: "bob", Username: "bob", UsernameLower: "bob"}
@@ -362,6 +363,7 @@ func TestFollowingHook_Unfollow(t *testing.T) {
 		ID: "h_u", UserID: "alice", Active: true, On: model.StringArray{"unfollow"},
 	}
 	h := webhook.NewFollowingHook(svc)
+	wireFollowLookups(t, h, "bob")
 	h.OnUnfollow(
 		&model.User{ID: "alice", Username: "alice", UsernameLower: "alice"},
 		&model.User{ID: "bob", Username: "bob", UsernameLower: "bob"},
