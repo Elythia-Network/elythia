@@ -224,6 +224,26 @@ func TestNoteDeliveryHook_MentionedRemoteUser_Delivered(t *testing.T) {
 	assert.Equal(t, inbox, enq.calls[0].Inbox)
 }
 
+// An "@user@host" inside inline code is not a mention in the MFM tree, so it
+// must not be delivered to directly (#3304).
+func TestNoteDeliveryHook_MentionInCodeNotDelivered(t *testing.T) {
+	hook, enq, userRepo, _, keypairRepo, _ := newNoteDeliveryHook(t)
+	author := makeLocalAuthor(t, userRepo, keypairRepo)
+
+	host := "remote.example"
+	inbox := "https://remote.example/users/bob/inbox"
+	userRepo.Users["bob"] = &model.User{
+		ID: "bob", Username: "bob", UsernameLower: "bob", Host: &host, Inbox: &inbox,
+	}
+
+	note := makeNote(author.ID, model.NoteVisibilityPublic)
+	text := "see `@bob@remote.example`"
+	note.Text = &text
+	hook.OnNoteCreated(note, author)
+
+	assert.Empty(t, enq.calls)
+}
+
 func TestNoteDeliveryHook_MentionedRemoteUser_UnknownSkipped(t *testing.T) {
 	hook, enq, userRepo, _, keypairRepo, _ := newNoteDeliveryHook(t)
 	author := makeLocalAuthor(t, userRepo, keypairRepo)
