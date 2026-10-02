@@ -196,10 +196,52 @@ func TestParse_EmojiCode(t *testing.T) {
 	assert.Equal(t, "thinking", nodes[0].Props["name"])
 }
 
-func TestParse_EmojiCode_NotAfterAlpha(t *testing.T) {
-	nodes := Parse("a:thinking:")
-	require.Len(t, nodes, 1)
-	assert.Equal(t, NodeText, nodes[0].Type)
+// TestParse_EmojiCodeBoundaryMatchesMfmJs fixes the emojiCode boundary to
+// mfm-js 0.26.0 (#3297). Expected values were produced by running mfm-js's
+// parse / parseSimple on each input.
+//
+// mfm-js は閉じの `:` の直後が英数字かだけを見て、直前の文字は見ない。以前の
+// mk-go は逆に直前を見ていたので、`1:a:` や `@foo:a:` が絵文字にならず、
+// `:a:1` が絵文字になっていた。
+func TestParse_EmojiCodeBoundaryMatchesMfmJs(t *testing.T) {
+	cases := []struct {
+		in           string
+		full, simple []string
+	}{
+		{"1:a:", []string{"a"}, []string{"a"}},
+		{"a:b: c", []string{"b"}, []string{"b"}},
+		{"@foo:a:", []string{"a"}, []string{"a"}},
+		{"#tag:a:", []string{"a"}, []string{"a"}},
+		{":a:1", nil, nil},
+		{":a:b", nil, nil},
+		{"a:thinking:", []string{"thinking"}, []string{"thinking"}},
+		{":a:", []string{"a"}, []string{"a"}},
+		{":a: :b:", []string{"a", "b"}, []string{"a", "b"}},
+		{":a::b:", []string{"a", "b"}, []string{"a", "b"}},
+		{"a:b:c", nil, nil},
+		{"x :a:", []string{"a"}, []string{"a"}},
+		{"\u65e5\u672c:a:\u8a9e", []string{"a"}, []string{"a"}},
+		{":a:\u65e5\u672c", []string{"a"}, []string{"a"}},
+		{":a:_", []string{"a"}, []string{"a"}},
+		{":a:-", []string{"a"}, []string{"a"}},
+		{":A:Z", nil, nil},
+		{":a:\n", []string{"a"}, []string{"a"}},
+		{":a:.", []string{"a"}, []string{"a"}},
+		{"**:a:**", []string{"a"}, []string{"a"}},
+		{"(:a:)", []string{"a"}, []string{"a"}},
+		{":a+b-c_d:", []string{"a+b-c_d"}, []string{"a+b-c_d"}},
+		{"https://x.example/:a:", nil, []string{"a"}},
+		{"[l](https://x.example):a:", []string{"a"}, []string{"a"}},
+		{"`:a:`", nil, []string{"a"}},
+		{"::a::", []string{"a"}, []string{"a"}},
+		{":a:b:c:", []string{"c"}, []string{"c"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			assert.Equal(t, tc.full, emojiCodeNames(Parse(tc.in)), "parse")
+			assert.Equal(t, tc.simple, emojiCodeNames(ParseSimple(tc.in)), "parseSimple")
+		})
+	}
 }
 
 func TestParse_UnicodeEmoji(t *testing.T) {
@@ -621,4 +663,23 @@ func TestParse_ItalicAsta_AfterAlpha(t *testing.T) {
 	nodes := Parse("a*b*")
 	require.True(t, len(nodes) >= 1)
 	assert.Equal(t, NodeText, nodes[0].Type)
+}
+
+// emojiCodeNames returns the emojiCode names in nodes in document order
+// (mfm-js の `extract(nodes, n => n.type === 'emojiCode')` と同じ並び)。
+func emojiCodeNames(nodes []*Node) []string {
+	var out []string
+	var walk func(n *Node)
+	walk = func(n *Node) {
+		if n.Type == NodeEmojiCode {
+			out = append(out, n.Props["name"].(string))
+		}
+		for _, c := range n.Children {
+			walk(c)
+		}
+	}
+	for _, n := range nodes {
+		walk(n)
+	}
+	return out
 }

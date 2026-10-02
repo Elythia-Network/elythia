@@ -1355,10 +1355,10 @@ func (s *state) tryEmojiCode() *Node {
 	if s.peek() != ':' {
 		return nil
 	}
-	// 境界チェック
-	if s.pos > 0 && isAlphanumeric(s.prevRune()) {
-		return nil
-	}
+	// 区切りは mfm-js 0.26.0 の emojiCode と同じく**閉じの `:` の直後**だけを見る
+	// (#3297)。mfm-js の先頭側の `alt([lineBegin, side])` は今の位置 (`:` 自身) に
+	// notMatch を掛けるだけで直前の文字を見ないので、`1:a:` や `@foo:a:` も絵文字に
+	// なる。以前の mk-go は逆に直前の文字を見ていた。
 	save := s.pos
 	s.advance(1) // skip :
 	start := s.pos
@@ -1374,6 +1374,10 @@ func (s *state) tryEmojiCode() *Node {
 				break
 			}
 			s.advance(1)
+			// 閉じの直後が英数字なら絵文字にしない (mfm-js の `alt([lineEnd, side])`)。
+			if !s.eof() && isAlphanumeric(s.peek()) {
+				break
+			}
 			return withProp(NodeEmojiCode, "name", name)
 		}
 		if ch == '\n' || unicode.IsSpace(ch) {
