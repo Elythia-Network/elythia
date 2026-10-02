@@ -1,7 +1,6 @@
 package mediaproxy
 
 import (
-	"image"
 	"os"
 	"path/filepath"
 	"testing"
@@ -35,10 +34,8 @@ func lossyAlphaWebP(t *testing.T) []byte {
 func TestNormalizeForResize_KeepsPerPixelAlpha(t *testing.T) {
 	img, err := decodeImage(lossyAlphaWebP(t), "image/webp")
 	require.NoError(t, err)
-	ny, ok := img.(*image.NYCbCrA)
-	require.True(t, ok, "前提: lossy WebP + alpha は *image.NYCbCrA になる (got %T)", img)
-	require.NotEqual(t, image.YCbCrSubsampleRatio444, ny.SubsampleRatio,
-		"前提: サブサンプルされていること (4:4:4 の分岐は壊れていない)")
+	_, ok := img.(straightNRGBAImage)
+	require.True(t, ok, "前提: lossy WebP は straight-alpha pixel access を提供する (got %T)", img)
 
 	got := imaging.Clone(normalizeForResize(img))
 	at := func(x, y int) uint8 { return got.Pix[got.PixOffset(x, y)+3] }
@@ -47,10 +44,6 @@ func TestNormalizeForResize_KeepsPerPixelAlpha(t *testing.T) {
 	assert.EqualValues(t, 0, at(10, 64), "左半分は透明のまま")
 	assert.EqualValues(t, 255, at(120, 64), "右半分の不透明が残ること")
 
-	// 素の Clone との差で、この変換が実際に効いていることを示す。
-	raw := imaging.Clone(img)
-	assert.EqualValues(t, 0, raw.Pix[raw.PixOffset(120, 64)+3],
-		"前提: imaging.Clone は行の先頭画素の alpha を全体に広げる")
 }
 
 // **透明部の RGB も保つ。** `draw.Draw` / `At()` 経由だと 0 に潰れる。

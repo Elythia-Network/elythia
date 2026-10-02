@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"image/color"
 	"image/draw"
 
 	"github.com/kovidgoyal/imaging"
@@ -345,7 +346,194 @@ func decodeCheckedWebP(data []byte) (image.Image, error) {
 	if err := checkImagingWebPMetadata(data); err != nil {
 		return nil, err
 	}
-	return imaging.Decode(bytes.NewReader(data), imaging.AutoOrientation(true))
+	decoded, _, err := imaging.DecodeAll(
+		bytes.NewReader(data),
+		imaging.AutoOrientation(false),
+		imaging.ColorSpace(imaging.NO_CHANGE_OF_COLORSPACE),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Normalize VP8 planes before imaging performs ICC conversion or EXIF
+	// orientation. Those transforms allocate RGB images via image.Image.At;
+	// doing them first would bake the studio-range values into RGB and make the
+	// original YCbCr planes impossible to recover accurately.
+	for _, frame := range decoded.Frames {
+		frame.Image = normalizeLossyWebPRange(frame.Image)
+	}
+	if decoded.DefaultImage != nil {
+		decoded.DefaultImage = normalizeLossyWebPRange(decoded.DefaultImage)
+	}
+	if err := applyWebPICC(decoded); err != nil {
+		return nil, err
+	}
+	if err := applyWebPOrientation(decoded); err != nil {
+		return nil, err
+	}
+	return decoded.SingleFrame(), nil
+}
+
+// applyWebPICC mirrors imaging's default sRGB conversion after the VP8 range
+// normalization. WebP metadata supports ICCP but not CICP, so no CICP branch
+// is needed here.
+func applyWebPICC(decoded *imaging.Image) error {
+	if decoded.Metadata == nil {
+		return nil
+	}
+	profile, err := decoded.Metadata.ICCProfile()
+	if err != nil || profile == nil {
+		return err
+	}
+	for _, frame := range decoded.Frames {
+		frame.Image, err = imaging.ConvertToSRGB(profile, imaging.Relative, true, materializeLimitedRangeWebP(frame.Image))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// applyWebPOrientation mirrors imaging.AutoOrientation(true), but runs after
+// the VP8 range and ICC conversions above.
+func applyWebPOrientation(decoded *imaging.Image) error {
+	if decoded.Metadata == nil {
+		return nil
+	}
+	exifData, err := decoded.Metadata.Exif()
+	if err != nil || exifData == nil {
+		return err
+	}
+	tag, err := exifData.Get("Orientation")
+	if err != nil || tag == nil {
+		return nil
+	}
+	orientation, err := tag.Int(0)
+	if err != nil {
+		return nil
+	}
+	if orientation >= 2 && orientation <= 8 {
+		for _, frame := range decoded.Frames {
+			frame.Image = materializeLimitedRangeWebP(frame.Image)
+		}
+		decoded.DefaultImage = materializeLimitedRangeWebP(decoded.DefaultImage)
+	}
+	switch orientation {
+	case 2:
+		decoded.FlipH()
+	case 3:
+		decoded.Rotate180()
+	case 4:
+		decoded.FlipV()
+	case 5:
+		decoded.Transpose()
+	case 6:
+		decoded.Rotate270()
+	case 7:
+		decoded.Transverse()
+	case 8:
+		decoded.Rotate90()
+	}
+	return nil
+}
+
+// normalizeLossyWebPRange wraps the studio-range YCbCr planes returned by the
+// VP8 decoder with full-range RGB access. VP8L and images already converted by
+// imaging's ICC/orientation pipeline use RGB image types and pass through.
+//
+// This normalization deliberately lives in the WebP decoder instead of a
+// generic YCbCr helper: JPEG decoders have their own range semantics and must
+// not be changed based on the behavior observed for VP8.
+func normalizeLossyWebPRange(img image.Image) image.Image {
+	switch src := img.(type) {
+	case *image.YCbCr:
+		return &limitedRangeWebPImage{ycbcr: src}
+	case *image.NYCbCrA:
+		return &limitedRangeWebPImage{ycbcr: &src.YCbCr, alpha: src}
+	default:
+		return img
+	}
+}
+
+// limitedRangeWebPImage converts VP8 YCbCr samples lazily. This avoids an
+// additional full-size 4-byte-per-pixel buffer before resize/encode while
+// preserving the original decoder planes and alpha.
+type limitedRangeWebPImage struct {
+	ycbcr *image.YCbCr
+	alpha *image.NYCbCrA
+}
+
+func (*limitedRangeWebPImage) ColorModel() color.Model { return color.NRGBAModel }
+
+func (img *limitedRangeWebPImage) Bounds() image.Rectangle { return img.ycbcr.Bounds() }
+
+// PreservesTransparentRGB reports whether callers must use NRGBAAt instead of
+// the premultiplied color.Color path to retain RGB under zero alpha.
+func (img *limitedRangeWebPImage) PreservesTransparentRGB() bool { return img.alpha != nil }
+
+func (img *limitedRangeWebPImage) At(x, y int) color.Color {
+	return img.NRGBAAt(x, y)
+}
+
+// NRGBAAt exposes straight-alpha pixels to downstream image transforms. The
+// standard color.Color RGBA method premultiplies transparent RGB to zero, so
+// callers that need those channels can use this method without another decode.
+func (img *limitedRangeWebPImage) NRGBAAt(x, y int) color.NRGBA {
+	if !image.Pt(x, y).In(img.Bounds()) {
+		return color.NRGBA{}
+	}
+	r, g, b := limitedYCbCrToRGB(
+		img.ycbcr.Y[img.ycbcr.YOffset(x, y)],
+		img.ycbcr.Cb[img.ycbcr.COffset(x, y)],
+		img.ycbcr.Cr[img.ycbcr.COffset(x, y)],
+	)
+	a := uint8(255)
+	if img.alpha != nil {
+		a = img.alpha.A[img.alpha.AOffset(x, y)]
+	}
+	return color.NRGBA{R: r, G: g, B: b, A: a}
+}
+
+func materializeLimitedRangeWebP(img image.Image) image.Image {
+	src, ok := img.(*limitedRangeWebPImage)
+	if !ok {
+		return img
+	}
+	b := src.Bounds()
+	dst := image.NewNRGBA(b)
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			p := src.NRGBAAt(x, y)
+			i := dst.PixOffset(x, y)
+			dst.Pix[i] = p.R
+			dst.Pix[i+1] = p.G
+			dst.Pix[i+2] = p.B
+			dst.Pix[i+3] = p.A
+		}
+	}
+	return dst
+}
+
+// limitedYCbCrToRGB applies the BT.601 studio-range conversion used by VP8.
+// The integer coefficients are the conventional 8-bit form of
+// 1.164*(Y-16), 1.596*Cr, 0.392*Cb, 0.813*Cr and 2.017*Cb.
+func limitedYCbCrToRGB(y, cb, cr uint8) (uint8, uint8, uint8) {
+	c := int(y) - 16
+	d := int(cb) - 128
+	e := int(cr) - 128
+	return clampWebPByte((298*c + 409*e + 128) >> 8),
+		clampWebPByte((298*c - 100*d - 208*e + 128) >> 8),
+		clampWebPByte((298*c + 516*d + 128) >> 8)
+}
+
+func clampWebPByte(v int) uint8 {
+	if v < 0 {
+		return 0
+	}
+	if v > 255 {
+		return 255
+	}
+	return uint8(v)
 }
 
 // checkImagingWebPMetadata replays how kovidgoyal/imaging (v1.8.21,
