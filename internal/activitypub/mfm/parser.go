@@ -1582,6 +1582,14 @@ func (s *state) tryUnicodeEmoji() *Node {
 		if nextR == utf8.RuneError {
 			break
 		}
+		// ZWJ は後ろに絵文字が続くときだけ並びに含める。末尾の ZWJ は mfm-js と同じく
+		// 文字として残す (#3322)。
+		if nextR == 0x200D {
+			afterR, _ := utf8.DecodeRuneInString(rest[end+nextSize:])
+			if !isEmojiStart(afterR) {
+				break
+			}
+		}
 		if isEmojiContinuation(nextR) {
 			end += nextSize
 			continue
@@ -1879,11 +1887,9 @@ func isEmojiStart(r rune) bool {
 	if r >= 0x2B05 && r <= 0x2B55 { // Arrows, geometric
 		return true
 	}
-	if r >= 0x200D && r <= 0x200D { // ZWJ
-		return true
-	}
-	// 異体字セレクタ (U+FE00〜U+FE0F) と囲みキーキャップ (U+20E3) は絵文字の先頭に
-	// ならない (継続としてだけ読む)。単独で来ると mfm-js は文字にする (#3320)。
+	// 異体字セレクタ (U+FE00〜U+FE0F)・囲みキーキャップ (U+20E3)・ゼロ幅接合子
+	// (U+200D) は絵文字の先頭にならない (継続としてだけ読む)。単独で来ると mfm-js は
+	// 文字にする (#3320、#3322)。
 	if r == 0x203C || r == 0x2049 { // ‼ ⁉
 		return true
 	}
