@@ -85,7 +85,7 @@ func TestToHTML_Quote(t *testing.T) {
 func TestToHTML_Search(t *testing.T) {
 	nodes := Parse("hello search")
 	assert.Contains(t, ToHTML(nodes, testHost), `href="https://www.google.com/search?q=hello"`)
-	assert.Contains(t, ToHTML(nodes, testHost), "hello</a>")
+	assert.Contains(t, ToHTML(nodes, testHost), "hello search</a>")
 }
 
 func TestToHTML_URL(t *testing.T) {

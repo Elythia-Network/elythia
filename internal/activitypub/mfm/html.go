@@ -96,10 +96,13 @@ func renderNode(b *strings.Builder, n *Node, host string) {
 		renderChildren(b, n.Children, host)
 		b.WriteString("</blockquote>")
 	case NodeSearch:
+		// 本家 MfmService.toHtml と同じく、URL は encodeURIComponent 相当でエスケープし、
+		// リンクの文字には query ではなくボタンの語まで含む content を使う。
 		query, _ := n.Props["query"].(string)
-		escaped := url.QueryEscape(query)
-		b.WriteString(fmt.Sprintf(`<a href="https://www.google.com/search?q=%s">%s</a>`,
-			escaped, html.EscapeString(query)))
+		content, _ := n.Props["content"].(string)
+		b.WriteString(fmt.Sprintf(`<a href="%s">%s</a>`,
+			html.EscapeString("https://www.google.com/search?q="+encodeURIComponent(query)),
+			html.EscapeString(content)))
 	case NodeURL:
 		u, _ := n.Props["url"].(string)
 		b.WriteString(fmt.Sprintf(`<a href="%s">%s</a>`,
@@ -206,4 +209,36 @@ func renderChildren(b *strings.Builder, children []*Node, host string) {
 	for _, c := range children {
 		renderNode(b, c, host)
 	}
+}
+
+// encodeURIComponent percent-encodes s the same way as JavaScript's
+// encodeURIComponent: every byte of the UTF-8 encoding is escaped as %XX
+// (uppercase hex) except ASCII letters, digits and - _ . ! ~ * ' ( ).
+func encodeURIComponent(s string) string {
+	const hex = "0123456789ABCDEF"
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if isURIComponentUnreserved(c) {
+			b.WriteByte(c)
+			continue
+		}
+		b.WriteByte('%')
+		b.WriteByte(hex[c>>4])
+		b.WriteByte(hex[c&0x0F])
+	}
+	return b.String()
+}
+
+func isURIComponentUnreserved(c byte) bool {
+	switch {
+	case 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z', '0' <= c && c <= '9':
+		return true
+	}
+	switch c {
+	case '-', '_', '.', '!', '~', '*', '\'', '(', ')':
+		return true
+	}
+	return false
 }
