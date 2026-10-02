@@ -3,6 +3,7 @@ package imagedecode
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"image"
 	"image/color"
 	"testing"
@@ -88,14 +89,14 @@ func TestDecodeWebP_NormalizesLossyVariantsOnly(t *testing.T) {
 	t.Run("VP8", func(t *testing.T) {
 		img, err := Decode(encodeRangeWebP(t, webPRangeRamp(false), false))
 		require.NoError(t, err)
-		require.IsType(t, &limitedRangeWebPImage{}, img)
+		require.IsType(t, &image.NRGBA{}, img)
 		requireFullRange(t, img)
 	})
 
 	t.Run("VP8X with alpha", func(t *testing.T) {
 		img, err := Decode(encodeRangeWebP(t, webPRangeRamp(true), false))
 		require.NoError(t, err)
-		require.IsType(t, &limitedRangeWebPImage{}, img)
+		require.IsType(t, &image.NRGBA{}, img)
 		requireFullRange(t, img)
 		got := color.NRGBAModel.Convert(img.At(32, 12)).(color.NRGBA)
 		require.InDelta(t, 96, got.A, 1)
@@ -143,17 +144,29 @@ func TestDecodeWebP_NormalizesLossyVariantsOnly(t *testing.T) {
 	})
 }
 
-func TestNormalizeLossyWebPRange_DoesNotAllocatePixelBuffer(t *testing.T) {
-	src := image.NewYCbCr(image.Rect(0, 0, 4096, 4096), image.YCbCrSubsampleRatio420)
+func TestNormalizeLossyWebPRange_ResizeAllocationsStayConstant(t *testing.T) {
+	src := image.NewYCbCr(image.Rect(0, 0, 256, 256), image.YCbCrSubsampleRatio420)
 	got := normalizeLossyWebPRange(src)
-	require.IsType(t, &limitedRangeWebPImage{}, got)
-	wrapper := got.(*limitedRangeWebPImage)
-	require.Same(t, src, wrapper.ycbcr)
+	require.IsType(t, &image.NRGBA{}, got)
 
-	allocs := testing.AllocsPerRun(100, func() {
-		got = normalizeLossyWebPRange(src)
+	allocs := testing.AllocsPerRun(10, func() {
+		_ = imaging.Resize(got, 64, 64, imaging.Lanczos)
 	})
-	require.LessOrEqual(t, allocs, float64(1), "normalization must allocate only the small wrapper, not a pixel buffer")
+	require.LessOrEqual(t, allocs, float64(100), "resize allocations must not scale with the number of source pixels")
+}
+
+func TestDecodeWebP_TransparentPixelKeepsStraightRGB(t *testing.T) {
+	src := image.NewNRGBA(image.Rect(0, 0, 32, 32))
+	for y := 0; y < 32; y++ {
+		for x := 0; x < 32; x++ {
+			src.SetNRGBA(x, y, color.NRGBA{R: 240, G: 32, B: 16, A: 0})
+		}
+	}
+	img, err := Decode(encodeRangeWebP(t, src, false))
+	require.NoError(t, err)
+	got := img.(*image.NRGBA).NRGBAAt(16, 16)
+	require.Zero(t, got.A)
+	require.Greater(t, got.R, uint8(180), "transparent RGB must not be premultiplied away")
 }
 
 func syntheticWideGamutICC(t *testing.T) []byte {
@@ -237,6 +250,58 @@ func TestDecodeWebP_AnimatedVP8KeepsRangeAndMetadata(t *testing.T) {
 		}
 		require.True(t, transformed, "synthetic profile must exercise a non-no-op ICC conversion")
 	})
+}
+
+func TestDecodeWebP_AppliesEveryEXIFOrientation(t *testing.T) {
+	const width, height = 48, 32
+	src := image.NewNRGBA(image.Rect(0, 0, width, height))
+	values := [4]uint8{32, 96, 160, 224}
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			quadrant := 0
+			if x >= width/2 {
+				quadrant++
+			}
+			if y >= height/2 {
+				quadrant += 2
+			}
+			v := values[quadrant]
+			src.SetNRGBA(x, y, color.NRGBA{R: v, G: v, B: v, A: 255})
+		}
+	}
+	frame := lossyFrameChunks(t, src)
+	expected := map[int][4]uint8{
+		2: {values[1], values[0], values[3], values[2]},
+		3: {values[3], values[2], values[1], values[0]},
+		4: {values[2], values[3], values[0], values[1]},
+		5: {values[0], values[2], values[1], values[3]},
+		6: {values[2], values[0], values[3], values[1]},
+		7: {values[3], values[1], values[2], values[0]},
+		8: {values[1], values[3], values[0], values[2]},
+	}
+
+	for orientation := 2; orientation <= 8; orientation++ {
+		t.Run(fmt.Sprintf("orientation-%d", orientation), func(t *testing.T) {
+			data := riffWebP(
+				vp8xCanvas(webpFlagEXIF, width, height),
+				frame,
+				chunk("EXIF", exifOrientation(uint16(orientation))),
+			)
+			got, err := Decode(data)
+			require.NoError(t, err)
+			wantW, wantH := width, height
+			if orientation >= 5 {
+				wantW, wantH = height, width
+			}
+			require.Equal(t, image.Rect(0, 0, wantW, wantH), got.Bounds())
+
+			points := [4]image.Point{{wantW / 4, wantH / 4}, {3 * wantW / 4, wantH / 4}, {wantW / 4, 3 * wantH / 4}, {3 * wantW / 4, 3 * wantH / 4}}
+			for i, point := range points {
+				pixel := color.NRGBAModel.Convert(got.At(point.X, point.Y)).(color.NRGBA)
+				require.InDelta(t, expected[orientation][i], pixel.R, 12, "corner %d", i)
+			}
+		})
+	}
 }
 
 func absByteDiff(a, b uint8) int {

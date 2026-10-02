@@ -1370,26 +1370,7 @@ func decodeImage(data []byte, contentType string) (image.Image, error) {
 //
 // 単純な VP8 は `*image.YCbCr` になるので影響を受けない。ここで型を絞って
 // 変換するのは、NRGBA 化が画素あたりのコピーを 1 回増やすため。
-type straightNRGBAImage interface {
-	image.Image
-	NRGBAAt(x, y int) color.NRGBA
-}
-
-type transparentRGBImage interface {
-	straightNRGBAImage
-	PreservesTransparentRGB() bool
-}
-
 func normalizeForResize(img image.Image) image.Image {
-	if _, ok := img.(*image.NRGBA); ok {
-		return img
-	}
-	if src, ok := img.(transparentRGBImage); ok && src.PreservesTransparentRGB() {
-		b := src.Bounds()
-		dst := image.NewNRGBA(b)
-		copyStraightNRGBA(dst, src)
-		return dst
-	}
 	src, ok := img.(*image.NYCbCrA)
 	if !ok {
 		return img
@@ -1425,30 +1406,6 @@ func normalizeForResize(img image.Image) image.Image {
 	return dst
 }
 
-func copyStraightNRGBA(dst *image.NRGBA, src straightNRGBAImage) {
-	b := src.Bounds().Intersect(dst.Bounds())
-	for y := b.Min.Y; y < b.Max.Y; y++ {
-		for x := b.Min.X; x < b.Max.X; x++ {
-			p := src.NRGBAAt(x, y)
-			i := dst.PixOffset(x, y)
-			dst.Pix[i] = p.R
-			dst.Pix[i+1] = p.G
-			dst.Pix[i+2] = p.B
-			dst.Pix[i+3] = p.A
-		}
-	}
-}
-
-func copyImageToNRGBA(dst *image.NRGBA, src image.Image) {
-	if straight, ok := src.(straightNRGBAImage); ok {
-		if _, native := src.(*image.NRGBA); !native {
-			copyStraightNRGBA(dst, straight)
-			return
-		}
-	}
-	draw.Draw(dst, dst.Bounds(), src, src.Bounds().Min, draw.Src)
-}
-
 // resizeToHeight resizes image to the specified height while preserving aspect
 // ratio. 元画像がheight以下の場合は拡大し��い。
 func resizeToHeight(img image.Image, height int) image.Image {
@@ -1474,7 +1431,7 @@ func encodeWebP(img image.Image) ([]byte, error) {
 	// 互換性のため明示的に NRGBA に正規化しておく (chai2010 時代と同等の前段)。
 	bounds := img.Bounds()
 	nrgba := image.NewNRGBA(bounds)
-	copyImageToNRGBA(nrgba, img)
+	draw.Draw(nrgba, bounds, img, bounds.Min, draw.Src)
 
 	var buf bytes.Buffer
 	if err := webp.Encode(&buf, nrgba, webp.Options{Quality: webpQuality}); err != nil {
@@ -1488,7 +1445,7 @@ func encodeWebP(img image.Image) ([]byte, error) {
 func encodeAVIF(img image.Image) ([]byte, error) {
 	bounds := img.Bounds()
 	nrgba := image.NewNRGBA(bounds)
-	copyImageToNRGBA(nrgba, img)
+	draw.Draw(nrgba, bounds, img, bounds.Min, draw.Src)
 
 	var buf bytes.Buffer
 	if err := avif.Encode(&buf, nrgba, avif.Options{Quality: avifQuality, Speed: avifSpeed}); err != nil {

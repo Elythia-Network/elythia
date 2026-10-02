@@ -69,18 +69,18 @@ func decodeRangeOutput(t *testing.T, format OutputFormat, data []byte) image.Ima
 	return img
 }
 
-func TestNormalizeForResize_MaterializesOnlyAlphaWebP(t *testing.T) {
+func TestDecodeImage_MaterializesLossyWebPRange(t *testing.T) {
 	opaque, err := decodeImage(lossyWebPRangeFixture(t, false), "image/webp")
 	require.NoError(t, err)
+	require.IsType(t, &image.NRGBA{}, opaque)
 	require.Same(t, opaque, normalizeForResize(opaque),
-		"opaque VP8 must stay lazy instead of allocating a full-size NRGBA buffer")
+		"decoded VP8 must already use the resize library's optimized NRGBA path")
 
 	withAlpha, err := decodeImage(lossyWebPRangeFixture(t, true), "image/webp")
 	require.NoError(t, err)
-	normalized := normalizeForResize(withAlpha)
-	require.NotSame(t, withAlpha, normalized)
-	require.IsType(t, &image.NRGBA{}, normalized,
-		"alpha WebP needs materialization to preserve transparent RGB during resize")
+	require.IsType(t, &image.NRGBA{}, withAlpha)
+	require.Same(t, withAlpha, normalizeForResize(withAlpha),
+		"decoded alpha WebP must preserve straight RGB without another copy")
 }
 
 // TestProcessResize_WebPDecodeReencodePreservesRange is intentionally an

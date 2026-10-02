@@ -6,10 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"image"
-	"image/color"
 	"image/draw"
 
 	"github.com/kovidgoyal/imaging"
+	"github.com/rwcarlsen/goexif/exif"
+	exif_tiff "github.com/rwcarlsen/goexif/tiff"
 )
 
 // ErrMalformedWebP reports that a WebP container could not be validated
@@ -386,7 +387,7 @@ func applyWebPICC(decoded *imaging.Image) error {
 		return err
 	}
 	for _, frame := range decoded.Frames {
-		frame.Image, err = imaging.ConvertToSRGB(profile, imaging.Relative, true, materializeLimitedRangeWebP(frame.Image))
+		frame.Image, err = imaging.ConvertToSRGB(profile, imaging.Relative, true, frame.Image)
 		if err != nil {
 			return err
 		}
@@ -404,19 +405,13 @@ func applyWebPOrientation(decoded *imaging.Image) error {
 	if err != nil || exifData == nil {
 		return err
 	}
-	tag, err := exifData.Get("Orientation")
-	if err != nil || tag == nil {
+	tag, err := exifData.Get(exif.Orientation)
+	if err != nil || tag == nil || tag.Format() != exif_tiff.IntVal {
 		return nil
 	}
 	orientation, err := tag.Int(0)
 	if err != nil {
 		return nil
-	}
-	if orientation >= 2 && orientation <= 8 {
-		for _, frame := range decoded.Frames {
-			frame.Image = materializeLimitedRangeWebP(frame.Image)
-		}
-		decoded.DefaultImage = materializeLimitedRangeWebP(decoded.DefaultImage)
 	}
 	switch orientation {
 	case 2:
@@ -437,78 +432,47 @@ func applyWebPOrientation(decoded *imaging.Image) error {
 	return nil
 }
 
-// normalizeLossyWebPRange wraps the studio-range YCbCr planes returned by the
-// VP8 decoder with full-range RGB access. VP8L and images already converted by
-// imaging's ICC/orientation pipeline use RGB image types and pass through.
+// normalizeLossyWebPRange converts the studio-range YCbCr planes returned by
+// the VP8 decoder into a straight-alpha NRGBA image. Eager conversion keeps
+// downstream imaging operations on their optimized concrete-image paths;
+// exposing the conversion through image.Image.At would allocate an interface
+// value for every source pixel during resize.
 //
 // This normalization deliberately lives in the WebP decoder instead of a
 // generic YCbCr helper: JPEG decoders have their own range semantics and must
 // not be changed based on the behavior observed for VP8.
 func normalizeLossyWebPRange(img image.Image) image.Image {
+	var (
+		ycbcr *image.YCbCr
+		alpha *image.NYCbCrA
+	)
 	switch src := img.(type) {
 	case *image.YCbCr:
-		return &limitedRangeWebPImage{ycbcr: src}
+		ycbcr = src
 	case *image.NYCbCrA:
-		return &limitedRangeWebPImage{ycbcr: &src.YCbCr, alpha: src}
+		ycbcr = &src.YCbCr
+		alpha = src
 	default:
 		return img
 	}
-}
-
-// limitedRangeWebPImage converts VP8 YCbCr samples lazily. This avoids an
-// additional full-size 4-byte-per-pixel buffer before resize/encode while
-// preserving the original decoder planes and alpha.
-type limitedRangeWebPImage struct {
-	ycbcr *image.YCbCr
-	alpha *image.NYCbCrA
-}
-
-func (*limitedRangeWebPImage) ColorModel() color.Model { return color.NRGBAModel }
-
-func (img *limitedRangeWebPImage) Bounds() image.Rectangle { return img.ycbcr.Bounds() }
-
-// PreservesTransparentRGB reports whether callers must use NRGBAAt instead of
-// the premultiplied color.Color path to retain RGB under zero alpha.
-func (img *limitedRangeWebPImage) PreservesTransparentRGB() bool { return img.alpha != nil }
-
-func (img *limitedRangeWebPImage) At(x, y int) color.Color {
-	return img.NRGBAAt(x, y)
-}
-
-// NRGBAAt exposes straight-alpha pixels to downstream image transforms. The
-// standard color.Color RGBA method premultiplies transparent RGB to zero, so
-// callers that need those channels can use this method without another decode.
-func (img *limitedRangeWebPImage) NRGBAAt(x, y int) color.NRGBA {
-	if !image.Pt(x, y).In(img.Bounds()) {
-		return color.NRGBA{}
-	}
-	r, g, b := limitedYCbCrToRGB(
-		img.ycbcr.Y[img.ycbcr.YOffset(x, y)],
-		img.ycbcr.Cb[img.ycbcr.COffset(x, y)],
-		img.ycbcr.Cr[img.ycbcr.COffset(x, y)],
-	)
-	a := uint8(255)
-	if img.alpha != nil {
-		a = img.alpha.A[img.alpha.AOffset(x, y)]
-	}
-	return color.NRGBA{R: r, G: g, B: b, A: a}
-}
-
-func materializeLimitedRangeWebP(img image.Image) image.Image {
-	src, ok := img.(*limitedRangeWebPImage)
-	if !ok {
-		return img
-	}
-	b := src.Bounds()
+	b := ycbcr.Bounds()
 	dst := image.NewNRGBA(b)
 	for y := b.Min.Y; y < b.Max.Y; y++ {
 		for x := b.Min.X; x < b.Max.X; x++ {
-			p := src.NRGBAAt(x, y)
+			r, g, bl := limitedYCbCrToRGB(
+				ycbcr.Y[ycbcr.YOffset(x, y)],
+				ycbcr.Cb[ycbcr.COffset(x, y)],
+				ycbcr.Cr[ycbcr.COffset(x, y)],
+			)
+			a := uint8(255)
+			if alpha != nil {
+				a = alpha.A[alpha.AOffset(x, y)]
+			}
 			i := dst.PixOffset(x, y)
-			dst.Pix[i] = p.R
-			dst.Pix[i+1] = p.G
-			dst.Pix[i+2] = p.B
-			dst.Pix[i+3] = p.A
+			dst.Pix[i] = r
+			dst.Pix[i+1] = g
+			dst.Pix[i+2] = bl
+			dst.Pix[i+3] = a
 		}
 	}
 	return dst

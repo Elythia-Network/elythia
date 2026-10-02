@@ -1,6 +1,7 @@
 package mediaproxy
 
 import (
+	"image"
 	"os"
 	"path/filepath"
 	"testing"
@@ -34,8 +35,7 @@ func lossyAlphaWebP(t *testing.T) []byte {
 func TestNormalizeForResize_KeepsPerPixelAlpha(t *testing.T) {
 	img, err := decodeImage(lossyAlphaWebP(t), "image/webp")
 	require.NoError(t, err)
-	_, ok := img.(straightNRGBAImage)
-	require.True(t, ok, "前提: lossy WebP は straight-alpha pixel access を提供する (got %T)", img)
+	require.IsType(t, &image.NRGBA{}, img, "lossy WebP is materialized with straight alpha")
 
 	got := imaging.Clone(normalizeForResize(img))
 	at := func(x, y int) uint8 { return got.Pix[got.PixOffset(x, y)+3] }
