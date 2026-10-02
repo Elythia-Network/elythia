@@ -64,6 +64,7 @@ const (
 	scanBold
 	scanItalic
 	scanStrike
+	scanBig
 	scanBoldAsta
 	scanStrikeWave
 	scanFn
@@ -121,7 +122,6 @@ const (
 	stopPlainClose     stopKind = iota // </plain>
 	stopMathBlockClose                 // \]
 	stopMathInline                     // \) or a newline
-	stopFnArgValue                     // ',', ' ' or ']'
 	stopURLAltEnd                      // '>', ' ', '\u3000' or '\t'
 	stopCenterClose                    // </center>
 	numStopKinds
@@ -130,7 +130,7 @@ const (
 // stopList returns the sorted offsets in src where the scan of kind stops,
 // building it on first use. ok is false when the list cannot be used.
 //
-// <plain> / \[ / \( / $[x.k=v の値は開きの直後から区切りまで 1 文字ずつ読み、
+// <plain> / \[ / \( は開きの直後から区切りまで 1 文字ずつ読み、
 // 閉じなければ末尾まで読んで失敗する。開きを並べると開始位置ごとに同じ区間を
 // 読み直すので入力長の 2 乗になり、深さごとにも繰り返す (3000 バイトの
 // 「\[」の並びで仕事量 9000 万、ローカルの上限の入力でも仕事量の上限に届いた)。
@@ -162,12 +162,6 @@ func (m *memoTable) stopList(src string, kind stopKind) ([]int32, bool) {
 	case stopMathInline:
 		for i := 0; i < len(src); i++ {
 			if src[i] == '\n' || strings.HasPrefix(src[i:], "\\)") {
-				list = append(list, int32(i))
-			}
-		}
-	case stopFnArgValue:
-		for i := 0; i < len(src); i++ {
-			if c := src[i]; c == ',' || c == ' ' || c == ']' {
 				list = append(list, int32(i))
 			}
 		}
@@ -420,7 +414,10 @@ type quoteRun struct {
 // 2 乗になり (3000 バイトで仕事量 150 万、64KB の inbox 上限なら 2 乗で増える)、
 // 同じ quote を別の深さから読み直すたびに表を作り直すと入れ子の段数に対して
 // 指数的になる (11 段 125 バイトで仕事量の上限に届いた)。塊を 1 度だけ切り出し、
-// 1 つの表を全ての開始行と深さで共有する。表は深さと、その深さが中身の最上位 (fullDepth) かどうかをキーに含むので共有してよく、
+// 1 つの表を全ての開始行と深さで共有する。quote は最上位か引用の中身の最上位
+// からしか読まないので、1 つの表を読む state の fullDepth は 1 通りに決まり、
+// 表は深さをキーに含むので共有してよい (最上位かどうかの軸もキーに含めているが、
+// これは守り)。また、
 // 塊の途中から読むときの直前の文字は改行なので、行頭の判定も直前の文字の判定も
 // 行ごとに切り出した場合と変わらない。
 //
@@ -581,21 +578,24 @@ type workBudget struct {
 }
 
 // メモ化と区切り位置の索引で、閉じない構文を並べた入力も入力長に比例する仕事量に
-// なる。ただし比例定数は深さ (最大 21 段) の分だけ大きく、閉じない <b> を 18 段
-// 重ねた後ろに「~~$[x.a=b *」を並べると 1 バイトあたり約 240 になる (実測)。
-// 見落とした経路があっても 1 回の Parse が際限なく走らないよう、安全網として
-// 上限を置く。超えたら以降の未解析の位置は構文を試さずテキストとして読む。
+// なる。ただし比例定数は深さ (最大 21 段) の分だけ大きく、「>>」の後ろに
+// 「$[x.a=b __*https://a:」を並べると 1 バイトあたり約 85 になる (実測。閉じない
+// 装飾は #3301 から読んだ範囲ごと文字にするので、それだけを並べた形は 1 バイト
+// あたり 2 回)。見落とした経路があっても 1 回の Parse が際限なく走らないよう、
+// 安全網として上限を置く。超えたら以降の未解析の位置は構文を試さずテキストとして読む。
 //
 // 基礎分はローカルの本文上限 (3000 文字) の入力が届かない大きさにしてある。
-// 3000 バイトの病的な入力で実測した最大は約 71 万 (上の形) で、基礎分だけで
-// その 3 倍ある。長さを切り詰めずに届くリモートの本文は、病的な形なら上限か
-// メモ表の上限に届いて途中からテキストになる (通常の文章は 1 バイトあたり
-// 10 未満なので届かない)。
+// 3000 バイトの病的な入力で実測した最大は約 51 万 (「[」を 1000 個並べた後ろに
+// 長い飛び先を置く形。上の形は約 25 万) で、基礎分だけでその 4 倍ある。長さを
+// 切り詰めずに届くリモートの本文は、病的な形なら上限かメモ表の上限に届いて
+// 途中からテキストになる (通常の文章は 1 バイトあたり 2 未満なので仕事量の
+// 上限には届かない)。
 const (
 	workBudgetBase    = 1 << 21
 	workBudgetPerByte = 32
 	// memoByteLimit はメモ表が 1 回の Parse で確保してよい総量。3000 バイトの
-	// 病的な入力の実測は最大 4MB 程度で、12KB を超える病的な入力はここに届く。
+	// 病的な入力の実測は最大 3MB 程度で、病的な形は 17KB 程度から仕事量か
+	// ここの上限に届く。
 	memoByteLimit = 16 << 20
 )
 
@@ -658,6 +658,12 @@ func (s *state) parseOne() *Node {
 	s.budget.used++
 	if s.simple {
 		return s.parseSimpleOne()
+	}
+	// mfm-js の nest は、深さが上限に届いた子を構文として読まず 1 文字ずつ読む
+	// (alt([seq(nestable, parser), char]))。装飾は中身を閉じまで読むので、上限の
+	// 下でも閉じが無ければ読んだ範囲がまるごと文字になる。
+	if s.depth >= s.nestLimit {
+		return s.consumeChar()
 	}
 	// 深さ 0 かつ link ラベルの外で読む位置は最上位のループが 1 度ずつ読むだけで、
 	// 読み直されることが無い (子のループは深さ 1 以上か link ラベルの中)。
@@ -724,6 +730,9 @@ func (s *state) parseFullOne() *Node {
 		return n
 	}
 	if n := s.tryURLAlt(); n != nil {
+		return n
+	}
+	if n := s.tryBig(); n != nil {
 		return n
 	}
 	if n := s.tryBoldAsta(); n != nil {
@@ -836,14 +845,19 @@ func (s *state) stopsAt(kind scanKind) bool {
 		return s.hasPrefix("</i>")
 	case scanStrike:
 		return s.hasPrefix("</s>")
+	case scanBig:
+		return s.hasPrefix("***")
 	case scanBoldAsta:
-		return s.hasPrefix("**") || s.peek() == '\n'
+		// mfm-js の boldAsta は改行で止まらない (`**a⏎b**` は太字)。
+		return s.hasPrefix("**")
 	case scanStrikeWave:
-		return s.hasPrefix("~~") || s.peek() == '\n'
+		// mfm-js の newLine は CRLF / CR / LF のどれか。
+		return s.hasPrefix("~~") || s.peek() == '\n' || s.peek() == '\r'
 	case scanFn:
 		return s.peek() == ']'
 	case scanLinkLabel:
-		return s.peek() == ']' || s.peek() == '\n'
+		// ~~ と同じく、mfm-js の newLine は CR でも止まる
+		return s.peek() == ']' || s.peek() == '\n' || s.peek() == '\r'
 	}
 	return true
 }
@@ -902,6 +916,12 @@ func (s *state) collectTo(end int) []*Node {
 // --- Block-level parsers ---
 
 func (s *state) tryQuote() *Node {
+	// mfm-js の block 構文 (quote / codeBlock / mathBlock / search) は full でだけ
+	// 読み、inline (装飾や center の子) には無い。子で読むと、閉じのある装飾も
+	// 閉じを block に飲まれて丸ごと文字になり、後ろのメンションやタグが落ちる (#3301)。
+	if s.depth != s.fullDepth {
+		return nil
+	}
 	// リンクのラベルの中では引用にしない (#3300)。mfm-js の inline には quote が
 	// 無いので、ラベルの中の `> ` は文字のまま。部分の state には inLink が
 	// 渡らないので、引用にするとラベルの中でメンション・ハッシュタグ・URL・
@@ -914,10 +934,6 @@ func (s *state) tryQuote() *Node {
 		return nil
 	}
 	if !s.hasPrefix(">") {
-		return nil
-	}
-	// 深さ上限では nest が失敗するので、塊を引かずに失敗する (結果は同じ)
-	if s.depth >= s.nestLimit {
 		return nil
 	}
 	run, offset, ok := s.memo.quoteAt(s.src, s.pos)
@@ -939,6 +955,12 @@ func (s *state) tryQuote() *Node {
 }
 
 func (s *state) tryCodeBlock() *Node {
+	// mfm-js の block 構文 (quote / codeBlock / mathBlock / search) は full でだけ
+	// 読み、inline (装飾や center の子) には無い。子で読むと、閉じのある装飾も
+	// 閉じを block に飲まれて丸ごと文字になり、後ろのメンションやタグが落ちる (#3301)。
+	if s.depth != s.fullDepth {
+		return nil
+	}
 	if s.pos > 0 && s.src[s.pos-1] != '\n' {
 		return nil
 	}
@@ -984,6 +1006,12 @@ func (s *state) tryCodeBlock() *Node {
 }
 
 func (s *state) tryMathBlock() *Node {
+	// mfm-js の block 構文 (quote / codeBlock / mathBlock / search) は full でだけ
+	// 読み、inline (装飾や center の子) には無い。子で読むと、閉じのある装飾も
+	// 閉じを block に飲まれて丸ごと文字になり、後ろのメンションやタグが落ちる (#3301)。
+	if s.depth != s.fullDepth {
+		return nil
+	}
 	if !s.hasPrefix("\\[") {
 		return nil
 	}
@@ -1028,10 +1056,9 @@ func (s *state) tryMathBlock() *Node {
 // 連合へ送る HTML で中央寄せになり、IsSimple も false になっていた。
 func (s *state) tryCenterTag() *Node {
 	const openTag, closeTag = "<center>", "</center>"
-	// mfm-js の深さ上限の位置は 1 文字ずつ文字として読まれるので、center にしない。
-	// link のラベルは深さを変えずに読むが、改行で止まるので行の先頭が来ず、
-	// ラベルの中で center が始まることは無い
-	if s.depth != s.fullDepth || s.depth >= s.nestLimit {
+	// 装飾やリンクのラベルの子は fullDepth より深いので、ここで外れる。深さの
+	// 上限の位置は parseOne が 1 文字ずつ文字として読むので、ここへ来ない
+	if s.depth != s.fullDepth {
 		return nil
 	}
 	save := s.pos
@@ -1126,7 +1153,7 @@ func (s *state) atLineBegin() bool {
 }
 
 func (s *state) trySmallTag() *Node {
-	return s.tryHTMLTag("<small>", "</small>", NodeSmall, scanSmall)
+	return s.tryWrapped("<small>", "</small>", NodeSmall, scanSmall)
 }
 
 func (s *state) tryPlainTag() *Node {
@@ -1157,49 +1184,29 @@ func (s *state) tryPlainTag() *Node {
 }
 
 func (s *state) tryBoldTag() *Node {
-	return s.tryHTMLTag("<b>", "</b>", NodeBold, scanBold)
+	return s.tryWrapped("<b>", "</b>", NodeBold, scanBold)
 }
 
 func (s *state) tryItalicTag() *Node {
-	return s.tryHTMLTag("<i>", "</i>", NodeItalic, scanItalic)
+	return s.tryWrapped("<i>", "</i>", NodeItalic, scanItalic)
 }
 
 func (s *state) tryStrikeTag() *Node {
-	return s.tryHTMLTag("<s>", "</s>", NodeStrike, scanStrike)
-}
-
-// tryHTMLTag は <tag>...</tag> 形式のパースを試みる。children は再帰パースする。
-func (s *state) tryHTMLTag(open, close string, nodeType NodeType, kind scanKind) *Node {
-	if !s.hasPrefix(open) {
-		return nil
-	}
-	save := s.pos
-	s.advance(len(open))
-
-	// 深さ上限を超えたときは中身を読まず、開きタグの直後がそのまま閉じタグか
-	// だけを見る (空要素として成功しうる)
-	var children []*Node
-	if s.depth < s.nestLimit {
-		s.depth++
-		if end := s.scanEnd(kind); s.prefixAt(end, close) {
-			children = s.collectTo(end)
-		}
-		s.depth--
-	}
-	if s.hasPrefix(close) {
-		s.advance(len(close))
-		return withChildren(nodeType, mergeText(children))
-	}
-	s.pos = save
-	return nil
+	return s.tryWrapped("<s>", "</s>", NodeStrike, scanStrike)
 }
 
 // --- Inline parsers ---
 
-func (s *state) tryBoldAsta() *Node {
-	if !s.hasPrefix("**") {
-		return nil
+// tryBig parses mfm-js's big `***...***`, which becomes `$[tada ...]`.
+func (s *state) tryBig() *Node {
+	n := s.tryWrapped("***", "***", NodeFn, scanBig)
+	if n != nil && n.Type == NodeFn {
+		n.Props = map[string]any{"name": "tada"}
 	}
+	return n
+}
+
+func (s *state) tryBoldAsta() *Node {
 	return s.tryWrapped("**", "**", NodeBold, scanBoldAsta)
 }
 
@@ -1232,32 +1239,55 @@ func (s *state) tryItalicUnder() *Node {
 }
 
 func (s *state) tryStrikeWave() *Node {
-	if !s.hasPrefix("~~") {
-		return nil
-	}
 	return s.tryWrapped("~~", "~~", NodeStrike, scanStrikeWave)
 }
 
-// tryWrapped は open...close で囲まれた部分を再帰パースする。
-// children の途中に改行が来たら失敗する。
+// tryWrapped parses open, children up to close, and close, like mfm-js's
+// seqOrText(open, seq(notMatch(close), nest(inline)).select(1).many(1), close).
+// When open matches but the rest does not, it returns what it read as a single
+// text node. kind gives where the children stop.
+//
+// mfm-js の seqOrText は、開きが合って後ろが失敗すると、失敗した部品の手前まで
+// 読んだ範囲 (開き + 中身) をまるごと文字として返し、その位置では他の構文を
+// 試さない。中身は閉じか末尾 (~~ は改行) まで読むので、閉じが無ければ中の
+// カスタム絵文字やハッシュタグも文字に飲み込まれる (#3301)。以前は 1 文字だけ
+// 進めて読み直していたので、中の `:emoji:` や `#tag` を拾っていた。
 func (s *state) tryWrapped(open, close string, nodeType NodeType, kind scanKind) *Node {
+	if !s.hasPrefix(open) {
+		return nil
+	}
 	save := s.pos
 	s.advance(len(open))
-	if s.eof() || s.hasPrefix(close) || s.depth >= s.nestLimit {
-		s.pos = save
-		return nil
+	children, ok := s.wrappedBody(close, kind)
+	if !ok {
+		return Text(s.src[save:s.pos])
+	}
+	return withChildren(nodeType, children)
+}
+
+// wrappedBody reads mfm-js's `seq(notMatch(close), nest(inline)).many(1)` and
+// then close from the current position. On success it moves past close. On
+// failure it reports false with the position at the end of what seqOrText
+// keeps as text: unchanged when there are no children, or right after them
+// when close is missing.
+func (s *state) wrappedBody(close string, kind scanKind) ([]*Node, bool) {
+	if s.eof() || s.stopsAt(kind) {
+		return nil, false
 	}
 	s.depth++
 	end := s.scanEnd(kind)
-	if !s.prefixAt(end, close) {
-		s.depth--
-		s.pos = save
-		return nil
+	ok := s.prefixAt(end, close)
+	var children []*Node
+	if ok {
+		children = s.collectTo(end)
 	}
-	children := s.collectTo(end)
 	s.depth--
+	s.pos = end
+	if !ok {
+		return nil, false
+	}
 	s.advance(len(close))
-	return withChildren(nodeType, mergeText(children))
+	return mergeText(children), true
 }
 
 // tryWrappedAlphaSpace は英数字+空白のみを含むラップされた部分をパースする。
@@ -1350,100 +1380,93 @@ func (s *state) tryFn() *Node {
 	if !s.hasPrefix("$[") {
 		return nil
 	}
+	// mfm-js の fn は seqOrText("$[", 関数名, 引数.option(), " ", 中身, "]") で、
+	// 途中の部品が失敗すると、そこまで読んだ範囲を文字にする (tryWrapped と同じ)。
+	// 文字にする範囲を合わせるため、関数名と引数は mfm-js の正規表現が読む
+	// 範囲だけを読む。
 	save := s.pos
 	s.advance(2)
-	// 関数名をパース
-	nameStart := s.pos
-	for !s.eof() {
-		ch := s.peek()
-		if isASCIIAlphanumeric(ch) || ch == '_' {
-			s.advance(1)
-			continue
-		}
-		break
-	}
-	name := s.src[nameStart:s.pos]
+	name := s.readFnWord(isFnNameChar)
 	if name == "" {
-		s.pos = save
-		return nil
+		return Text(s.src[save:s.pos])
 	}
-
-	// 引数をパース (ドットで始まる)
-	var args map[string]any
-	if !s.eof() && s.peek() == '.' {
-		s.advance(1)
-		args = s.parseFnArgs()
-	}
-
-	// スペース区切り
-	if s.eof() || s.peek() != ' ' {
-		s.pos = save
-		return nil
+	args := s.readFnArgs()
+	if s.peek() != ' ' {
+		return Text(s.src[save:s.pos])
 	}
 	s.advance(1)
-
-	// children (] まで)。深さ上限を超えたときは中身を読まず、直後が ] かだけを見る
-	var children []*Node
-	if s.depth < s.nestLimit {
-		s.depth++
-		if end := s.scanEnd(scanFn); s.prefixAt(end, "]") {
-			children = s.collectTo(end)
-		}
-		s.depth--
+	children, ok := s.wrappedBody("]", scanFn)
+	if !ok {
+		return Text(s.src[save:s.pos])
 	}
-	if !s.hasPrefix("]") {
-		s.pos = save
-		return nil
-	}
-	s.advance(1)
 
 	props := map[string]any{"name": name}
 	if args != nil {
 		props["args"] = args
 	}
-	return &Node{Type: NodeFn, Props: props, Children: mergeText(children)}
+	return &Node{Type: NodeFn, Props: props, Children: children}
 }
 
-func (s *state) parseFnArgs() map[string]any {
-	args := map[string]any{}
-	for !s.eof() {
-		keyStart := s.pos
-		for !s.eof() {
-			ch := s.peek()
-			if isASCIIAlphanumeric(ch) || ch == '_' {
-				s.advance(1)
-				continue
-			}
-			break
-		}
-		key := s.src[keyStart:s.pos]
-		if key == "" {
-			break
-		}
-		if !s.eof() && s.peek() == '=' {
-			s.advance(1)
-			valStart := s.pos
-			if end, ok := s.nextStop(stopFnArgValue); ok {
-				s.pos = end
-			}
-			for !s.eof() {
-				ch := s.peek()
-				if ch == ',' || ch == ' ' || ch == ']' {
-					break
-				}
-				s.advance(utf8.RuneLen(ch))
-			}
-			args[key] = s.src[valStart:s.pos]
-		} else {
-			args[key] = true
-		}
-		if !s.eof() && s.peek() == ',' {
-			s.advance(1)
-			continue
-		}
-		break
+// isFnNameChar reports whether r is in mfm-js's /[a-z0-9_]/i, used for fn
+// names and argument keys.
+func isFnNameChar(r rune) bool {
+	return isASCIIAlphanumeric(r) || r == '_'
+}
+
+// isFnArgValueChar reports whether r is in mfm-js's /[a-z0-9_.-]/i, used for
+// fn argument values.
+func isFnArgValueChar(r rune) bool {
+	return isFnNameChar(r) || r == '.' || r == '-'
+}
+
+// readFnWord reads the longest run of runes satisfying ok and returns it.
+func (s *state) readFnWord(ok func(rune) bool) string {
+	start := s.pos
+	for !s.eof() && ok(s.peek()) {
+		s.advance(1) // ok は ASCII だけを受け付ける
 	}
-	return args
+	return s.src[start:s.pos]
+}
+
+// readFnArgs reads mfm-js's fn arguments `.k=v,k2` at the current position.
+// It returns nil, leaving the position unchanged, when there is no "." or no
+// valid first key. Otherwise it stops after the last complete argument, so a
+// trailing "," or "=" without a valid key or value is left unread, as in
+// mfm-js's arg.sep(",", 1) and seq("=", value).option().
+func (s *state) readFnArgs() map[string]any {
+	if s.peek() != '.' {
+		return nil
+	}
+	save := s.pos
+	s.advance(1)
+	if !isFnNameChar(s.peek()) {
+		s.pos = save
+		return nil
+	}
+	args := map[string]any{}
+	for {
+		key := s.readFnWord(isFnNameChar)
+		args[key] = true
+		if s.peek() == '=' {
+			eq := s.pos
+			s.advance(1)
+			if v := s.readFnWord(isFnArgValueChar); v != "" {
+				args[key] = v
+			} else {
+				s.pos = eq
+			}
+		}
+		if s.peek() != ',' {
+			return args
+		}
+		// "," の後ろに項目が無ければ、"," を読まずに終わる
+		comma := s.pos
+		s.advance(1)
+		if !isFnNameChar(s.peek()) {
+			s.pos = comma
+			return args
+		}
+	}
 }
 
 func (s *state) tryMention() *Node {
@@ -1857,17 +1880,24 @@ func (s *state) tryLink() *Node {
 		s.advance(1)
 	}
 
-	// label (] まで。途中の改行で失敗)
+	// label (] まで。途中の改行で失敗)。mfm-js はラベルを nest(labelInline) で
+	// 読むので、ラベルの中身は 1 段深い。深さを変えずに読むと、ラベルの中で
+	// 入れ子にできる段数が mfm-js より 1 段多くなる
 	oldInLink := s.inLink
 	s.inLink = true
+	s.depth++
 	end := s.scanEnd(scanLinkLabel)
-	if !s.prefixAt(end, "](") {
-		s.inLink = oldInLink
+	ok := s.prefixAt(end, "](")
+	var labelNodes []*Node
+	if ok {
+		labelNodes = s.collectTo(end)
+	}
+	s.depth--
+	s.inLink = oldInLink
+	if !ok {
 		s.pos = save
 		return nil
 	}
-	labelNodes := s.collectTo(end)
-	s.inLink = oldInLink
 	s.advance(2) // skip ](
 
 	// 飛び先は mfm-js と同じく URL (`https?://...` か `<https?://...>`) に限り、
@@ -1885,6 +1915,12 @@ func (s *state) tryLink() *Node {
 }
 
 func (s *state) trySearch() *Node {
+	// mfm-js の block 構文 (quote / codeBlock / mathBlock / search) は full でだけ
+	// 読み、inline (装飾や center の子) には無い。子で読むと、閉じのある装飾も
+	// 閉じを block に飲まれて丸ごと文字になり、後ろのメンションやタグが落ちる (#3301)。
+	if s.depth != s.fullDepth {
+		return nil
+	}
 	// 行頭から: "query 検索" / "query search" / "query [検索]" / "query [search]"
 	if s.pos > 0 && s.src[s.pos-1] != '\n' {
 		return nil
