@@ -1196,6 +1196,29 @@ func (r *Resolver) resolveActorOnceWithID(uri string, allowCrossHost bool, preas
 	// その間は一覧の公開範囲が未設定 (= public 扱い) になる。
 	followingVis, followersVis := r.followVisibilitiesOnCreate(actor.ID, actor.FollowingRaw, actor.FollowersRaw)
 	if err := r.userRepo.Create(user); err != nil {
+		// **同じ actor を別の経路が先に作っていたら、その行を使う** (#3299)。
+		// singleflight の鍵は経路ごとに分かれる (allowCrossHost / skipFeatured)
+		// ので、inbox の署名検証と ap/show などが同時に同じ actor を取り込むと、
+		// 両方がここまで来て片方が一意制約違反になる。そのまま返すと inbox の
+		// activity が捨てられる。upstream createPerson も duplicate key なら
+		// uri で引き直して使う。後続の処理 (profile など) は先に作った側が行う。
+		if repository.IsUniqueViolation(err) && user.URI != nil {
+			if existing, ferr := r.userRepo.FindByURI(*user.URI); ferr == nil && existing != nil {
+				// **鍵はこちらでも入れる。** 先に作った側は profile を作ってから鍵を
+				// 保存するので、その間に返すと inbox の署名検証が「鍵が無い」で
+				// 失敗し、activity がやはり捨てられる。upstream は user /
+				// user_profile / user_publickey を 1 つの transaction で作るので
+				// この隙間が無い。どちらも冪等で、同じ actor 文書から作る。
+				r.cachePublicKey(existing.ID, actor.PublicKey.ID, actor.PublicKey.PublicKeyPEM.String())
+				r.cacheAssertionMethods(existing.ID, actor.ID, actor.AssertionMethod)
+				// 先に作った側が featured を飛ばす経路 (featured の取り込み中の
+				// 著者の解決) だと誰も取り込まないので、upstream と同じくこちらで行う。
+				if !skipFeatured {
+					r.updateFeatured(existing, chain)
+				}
+				return existing, nil
+			}
+		}
 		return nil, err
 	}
 	// **凍結して作ったなら由来も刻む** (#2973)。刻まないと、この行は次の
