@@ -23,6 +23,8 @@ func serializeTree(nodes []*Node) string {
 			head += ":" + fmt.Sprint(n.Props["acct"])
 		case NodeEmojiCode:
 			head += ":" + fmt.Sprint(n.Props["name"])
+		case NodeUnicodeEmoji:
+			head += ":" + fmt.Sprint(n.Props["emoji"])
 		case NodeHashtag:
 			head += ":" + fmt.Sprint(n.Props["hashtag"])
 		case NodeURL:

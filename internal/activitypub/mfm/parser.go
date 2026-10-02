@@ -1561,7 +1561,16 @@ func (s *state) tryUnicodeEmoji() *Node {
 		return nil
 	}
 
-	// 絵文字判定: Emoji/Symbol カテゴリ + FE0F (variation selector) の組み合わせ
+	// キーキャップ (`#` `*` `0`〜`9` + 任意の U+FE0F + U+20E3) は mfm-js と同じく
+	// この形だけを 1 つの絵文字にし、後ろには続けない (#3320)。先頭が ASCII なので
+	// 下の判定では拾えず、以前は `#️⃣` がハッシュタグ、`1️⃣` が文字 `1` + 絵文字に
+	// なっていた。
+	if n := keycapLen(rest); n > 0 {
+		s.advance(n)
+		return withProp(NodeUnicodeEmoji, "emoji", rest[:n])
+	}
+
+	// 絵文字判定: 先頭は Emoji/Symbol の範囲の文字で、後ろに異体字セレクタ・ZWJ などが続く
 	if !isEmojiStart(r) {
 		return nil
 	}
@@ -1581,12 +1590,24 @@ func (s *state) tryUnicodeEmoji() *Node {
 	}
 
 	emoji := rest[:end]
-	// FE0F 単体は絵文字ではない
-	if emoji == "\ufe0f" {
-		return nil
-	}
 	s.advance(end)
 	return withProp(NodeUnicodeEmoji, "emoji", emoji)
+}
+
+// keycapLen returns the byte length of the keycap emoji sequence
+// ([#*0-9] U+FE0F? U+20E3) at the start of s, or 0 when there is none.
+func keycapLen(s string) int {
+	if s == "" || !(s[0] == '#' || s[0] == '*' || (s[0] >= '0' && s[0] <= '9')) {
+		return 0
+	}
+	n := 1
+	if strings.HasPrefix(s[n:], "\ufe0f") {
+		n += len("\ufe0f")
+	}
+	if !strings.HasPrefix(s[n:], "\u20e3") {
+		return 0
+	}
+	return n + len("\u20e3")
 }
 
 func (s *state) tryURL() *Node {
@@ -1861,13 +1882,9 @@ func isEmojiStart(r rune) bool {
 	if r >= 0x200D && r <= 0x200D { // ZWJ
 		return true
 	}
-	if r >= 0xFE00 && r <= 0xFE0F { // Variation selectors
-		return true
-	}
+	// 異体字セレクタ (U+FE00〜U+FE0F) と囲みキーキャップ (U+20E3) は絵文字の先頭に
+	// ならない (継続としてだけ読む)。単独で来ると mfm-js は文字にする (#3320)。
 	if r == 0x203C || r == 0x2049 { // ‼ ⁉
-		return true
-	}
-	if r == 0x20E3 { // Combining enclosing keycap
 		return true
 	}
 	if r >= 0x2100 && r <= 0x214F { // Letterlike symbols (™ etc)
