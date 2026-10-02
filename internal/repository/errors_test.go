@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
 
@@ -37,4 +39,21 @@ func TestIsNotFound(t *testing.T) {
 			assert.Equal(t, tt.want, IsNotFound(tt.err))
 		})
 	}
+}
+
+func TestIsUniqueViolation(t *testing.T) {
+	assert.False(t, IsUniqueViolation(nil))
+	assert.False(t, IsUniqueViolation(errors.New("x")))
+	assert.False(t, IsUniqueViolation(&pgconn.PgError{Code: "23503"}), "FK 違反は別物")
+	assert.True(t, IsUniqueViolation(&pgconn.PgError{Code: "23505"}))
+	assert.True(t, IsUniqueViolation(fmt.Errorf("wrap: %w", &pgconn.PgError{Code: "23505"})))
+
+	// 実 DB の一意制約違反 (GORM が返す形) も判定できる。
+	u := insertTestUser(t, "u_uniqv", "uniqvuser")
+	defer cleanupUser(t, u.ID)
+	dup := *u
+	dup.ID = "u_uniqv2"
+	err := NewUserRepository(testDB).Create(&dup)
+	require.Error(t, err)
+	assert.True(t, IsUniqueViolation(err), "%v", err)
 }

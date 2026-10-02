@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 )
 
@@ -29,4 +30,12 @@ func IsNotFound(err error) bool {
 	// `IsNotFound` が黙って false を返すと、**本物の not-found が 500 になる**。
 	// 4xx → 500 の向きに倒したぶん、この誤りは表に出やすい。
 	return errors.Is(err, ErrNotFound) || errors.Is(err, sql.ErrNoRows)
+}
+
+// IsUniqueViolation reports whether err is a PostgreSQL unique constraint
+// violation (SQLSTATE 23505), so callers can tell "someone else inserted the
+// same row first" from other failures without importing pgconn.
+func IsUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
