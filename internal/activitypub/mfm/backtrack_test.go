@@ -148,6 +148,8 @@ func TestParse_LocalSizedPathologicalInputsStayWithinBudget(t *testing.T) {
 		"unclosed url parens":     fill("", "https://a(", 3000),
 		"unclosed url brackets":   fill("<b>", "https://a[(", 3000),
 		"unclosed url alt":        fill("", "[a](<https://x\n", 3000),
+		"unclosed hashtag parens": fill("", "#a(", 3000),
+		"unclosed hashtag groups": fill(strings.Repeat("<b>", 20), "#a(「[（", 3000),
 		"short quotes":            fill(strings.Repeat("<b>", 7), ":```js\n\n> ", 3000),
 		"quote lines under limit": fill(strings.Repeat("<b>", 20), "\n> ", 3000),
 		"quote lines with bold":   fill("", "<b>\n> ", 3000),

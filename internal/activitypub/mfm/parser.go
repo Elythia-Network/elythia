@@ -1430,11 +1430,14 @@ func (s *state) tryHashtag() *Node {
 		return nil
 	}
 	save := s.pos
-	s.advance(1) // skip #
+	start := s.pos + 1 // skip #
 
-	start := s.pos
-	s.consumeHashtagContent()
-	tag := s.src[start:s.pos]
+	// mfm-js の hashtag と同じく、使える文字の並びと、閉じた括弧 (`()` / `[]` /
+	// `「」` / `（）`) だけを読む (#3318)。以前は `/` や `【】` も読み、閉じていない
+	// 括弧も読み進め、入れ子の上限も無かったので、`#tag/foo` を 1 つのタグにしていた。
+	end := s.hashtagItems(start, s.depth, true)
+	s.budget.used += end - start
+	tag := s.src[start:end]
 	if tag == "" {
 		s.pos = save
 		return nil
@@ -1444,52 +1447,70 @@ func (s *state) tryHashtag() *Node {
 		s.pos = save
 		return nil
 	}
+	s.pos = end
 	return &Node{Type: NodeHashtag, Props: map[string]any{"hashtag": tag}}
 }
 
-func (s *state) consumeHashtagContent() {
-	for !s.eof() {
-		ch := s.peek()
-		// ハッシュタグで無効な文字
-		if ch == '#' || unicode.IsSpace(ch) || ch == '.' || ch == ',' || ch == '!' ||
-			ch == '?' || ch == '\'' || ch == '"' || ch == ':' || ch == '<' || ch == '>' {
-			return
-		}
-		// 括弧のネスト
-		switch ch {
-		case '(':
-			s.advance(1)
-			s.consumeHashtagContent()
-			if !s.eof() && s.peek() == ')' {
-				s.advance(1)
-			}
-			continue
-		case '[':
-			s.advance(1)
-			s.consumeHashtagContent()
-			if !s.eof() && s.peek() == ']' {
-				s.advance(1)
-			}
-			continue
-		case '「':
-			s.advance(utf8.RuneLen(ch))
-			s.consumeHashtagContent()
-			if !s.eof() && s.peek() == '」' {
-				s.advance(utf8.RuneLen('」'))
-			}
-			continue
-		case '（':
-			s.advance(utf8.RuneLen(ch))
-			s.consumeHashtagContent()
-			if !s.eof() && s.peek() == '）' {
-				s.advance(utf8.RuneLen('）'))
-			}
-			continue
-		case ')', ']', '」', '）':
-			return
-		}
-		s.advance(utf8.RuneLen(ch))
+// isHashtagChar reports whether r is one of mfm-js's hashTagChar: anything but
+// the stop characters ` \u3000\t.,!?'"#:/[]【】()「」（）<>` and line breaks.
+func isHashtagChar(r rune) bool {
+	switch r {
+	case ' ', '\u3000', '\t', '\r', '\n', '.', ',', '!', '?', '\'', '"', '#', ':', '/',
+		'[', ']', '【', '】', '(', ')', '「', '」', '（', '）', '<', '>':
+		return false
 	}
+	return true
+}
+
+// hashtagOpenClose maps the brackets mfm-js's hashtag reads as a group to
+// their closing bracket.
+var hashtagOpenClose = map[rune]rune{'(': ')', '[': ']', '「': '」', '（': '）'}
+
+// hashtagItems reads mfm-js's `innerItem.many(0)` of the hashtag rule from i
+// and returns where it stopped. depth is the nest depth the items are read at;
+// top marks the hashtag's own items, which are not wrapped in nest.
+func (s *state) hashtagItems(i, depth int, top bool) int {
+	for {
+		next, ok := s.hashtagItem(i, depth, top)
+		if !ok {
+			return i
+		}
+		i = next
+	}
+}
+
+// hashtagItem reads one mfm-js hashtag innerItem at i: a balanced bracket group
+// whose contents are read one nest level deeper, or a single hashtag character.
+//
+// 括弧の中は mfm-js の nest(innerItem, hashTagChar) で、深さを 1 つ上げてから
+// 上限未満なら innerItem を、届いていれば hashTagChar だけを読む (括弧は
+// hashTagChar に無いので、そこで止まる)。タグ直下の項目は nest を通らないので、
+// 上限に関係なく括弧を開ける。閉じが無ければ括弧ごと失敗し、タグはその手前で終わる。
+func (s *state) hashtagItem(i, depth int, top bool) (int, bool) {
+	if i >= len(s.src) {
+		return i, false
+	}
+	r, size := utf8.DecodeRuneInString(s.src[i:])
+	if isHashtagChar(r) {
+		return i + size, true
+	}
+	closeCh, ok := hashtagOpenClose[r]
+	if !ok {
+		return i, false
+	}
+	if !top && depth >= s.nestLimit {
+		return i, false
+	}
+	s.budget.used++
+	j := s.hashtagItems(i+size, depth+1, false)
+	if j >= len(s.src) {
+		return i, false
+	}
+	c, csize := utf8.DecodeRuneInString(s.src[j:])
+	if c != closeCh {
+		return i, false
+	}
+	return j + csize, true
 }
 
 func (s *state) tryEmojiCode() *Node {
