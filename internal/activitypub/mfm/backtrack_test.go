@@ -193,7 +193,8 @@ func TestParse_QuoteChainKeepsNestedQuotes(t *testing.T) {
 		require.Equal(t, NodeQuote, n.Type)
 		quotes++
 		require.NotEmpty(t, n.Children)
-		assert.Equal(t, "~~a", strings.TrimSuffix(n.Children[0].textValue(), "\n"))
+		// 次の段の quote が直前の改行を読むので、改行は残らない (mfm-js と同じ。#3325)
+		assert.Equal(t, "~~a", n.Children[0].textValue())
 		if len(n.Children) < 2 {
 			break
 		}

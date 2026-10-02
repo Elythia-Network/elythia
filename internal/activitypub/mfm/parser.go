@@ -77,7 +77,7 @@ const (
 	memoPageSize = 1 << memoPageBits
 )
 
-// slotMemo holds the pages of one (depth, inLink) slot. A page covers
+// slotMemo holds the pages of one (depth, inLink, atFull) slot. A page covers
 // memoPageSize positions, or fewer at the end of a short source.
 type slotMemo struct {
 	one  [][]memoEntry
@@ -90,8 +90,9 @@ type slotMemo struct {
 // parseOne の結果 (ノードと終了位置) は src 上の位置・深さ・link ラベルの中か
 // どうか・その深さが block を読む最上位 (fullDepth) かどうかだけで決まる
 // (nestLimit と simple は 1 回の Parse の間は変わらない)。深さは nestLimit に
-// よる打ち切りで、inLink は link を試すかどうかで、最上位かどうかは center を
-// 試すかどうかで結果を変えるので、どれも表を分ける軸にする。病的な入力では全ての深さの全ての
+// よる打ち切りで、inLink は link を試すかどうかで、最上位かどうかは center・
+// 検索を試すかどうかとブロックの構文が前後の改行を読むかどうか (tryBlock) で
+// 結果を変えるので、どれも表を分ける軸にする。病的な入力では全ての深さの全ての
 // 位置を読むので、hash map ではなく位置で引くページ単位の配列にしてある
 // (map だと実測で時間の過半が hash に消えた)。ページは触れたものだけ確保する。
 type memoTable struct {
@@ -371,12 +372,16 @@ func (m *memoTable) slotFor(pos, depth int, inLink, atFull bool) *slotMemo {
 	if atFull {
 		i++
 	}
-	if m.slots == nil {
-		n := (m.nestLimit + 1) * 4
+	// 入れ物は、使ったうちで最も深いスロットまでだけ伸ばす。短い引用の中身は
+	// 浅い深さしか読まないので、全ての深さの分を先に確保すると、短い引用を
+	// 並べた入力で確保量の上限に届く (#3325)。伸ばすたびに新しい大きさの分を
+	// charge するので、数える量は実際の確保の高々 2 倍
+	if i >= len(m.slots) {
+		n := min(max(i+1, 2*len(m.slots)), (m.nestLimit+1)*4)
 		if !m.charge(n * int(unsafe.Sizeof((*slotMemo)(nil)))) {
 			return nil
 		}
-		m.slots = make([]*slotMemo, n)
+		m.slots = append(make([]*slotMemo, 0, n), m.slots...)[:n]
 	}
 	sm := m.slots[i]
 	if sm == nil {
@@ -747,16 +752,16 @@ func (s *state) parseFullOne() *Node {
 	if n := s.tryItalicUnder(); n != nil {
 		return n
 	}
-	if n := s.tryCodeBlock(); n != nil {
+	if n := s.tryBlock(1, 0, false, (*state).tryCodeBlock); n != nil {
 		return n
 	}
 	if n := s.tryInlineCode(); n != nil {
 		return n
 	}
-	if n := s.tryQuote(); n != nil {
+	if n := s.tryBlock(2, 1, false, (*state).tryQuote); n != nil {
 		return n
 	}
-	if n := s.tryMathBlock(); n != nil {
+	if n := s.tryBlock(1, 1, true, (*state).tryMathBlock); n != nil {
 		return n
 	}
 	if n := s.tryMathInline(); n != nil {
@@ -785,10 +790,75 @@ func (s *state) parseFullOne() *Node {
 	if n := s.tryURL(); n != nil {
 		return n
 	}
-	if n := s.trySearch(); n != nil {
+	if n := s.tryBlock(1, 1, false, (*state).trySearch); n != nil {
 		return n
 	}
 	return s.consumeChar()
+}
+
+// fullContext reports whether the current position is read by mfm-js's full
+// parser (the top level or the contents of a quote) rather than by the inline
+// parser of a construct's children. Only the full parser has the block
+// constructs and search.
+//
+// block 構文は full でだけ試す (#3301) ので、引用の中身の深さは最上位と同じに
+// なり、同じ深さの位置が full のこともそうでないこともある経路は今は無い。
+// メモの表は守りとして depth == fullDepth かどうかでも分けてある (slotFor)。
+// link のラベルは 1 段深く読む (#3301) ので深さの比較だけでも外れるが、
+// ラベルの中を full に数えないことを inLink でも明示しておく。
+func (s *state) fullContext() bool {
+	return !s.simple && !s.inLink && s.depth == s.fullDepth
+}
+
+// skipNewlines returns the position after up to n newlines (CRLF, CR or LF,
+// like mfm-js's newLine) starting at pos.
+func (s *state) skipNewlines(pos, n int) int {
+	for ; n > 0; n-- {
+		l := s.newlineLenAt(pos)
+		if l == 0 {
+			break
+		}
+		pos += l
+	}
+	return pos
+}
+
+// tryBlock tries a block construct the way mfm-js's full parser does: the
+// construct first reads up to lead newlines (newLine.option()) and, once it
+// matched, up to trail more newlines after it. When whole is set, the
+// construct must also start at a line begin and end at a line end (mfm-js's
+// lineBegin and lineEnd), which try does not check itself. Outside a full
+// context it fails without trying, as mfm-js's inline has no block constructs.
+//
+// mfm-js の検索・引用・コードブロック・数式ブロックは改行の位置から試され、
+// 前の改行を自分のノードに含める。改行の位置では次の行のハッシュタグ・
+// メンション・絵文字などはまだ試されないので、行頭がそれらでも検索になる
+// (#3325)。前の改行を読んで失敗したときは、改行を読まずにやり直さない
+// (mfm-js の option は後戻りしない)。後ろの改行は、引用が 2 つ、他は 1 つまで
+// 読む。引用の塊とコードブロックは、その 1 つ目を try が既に読んでいる。
+// center は前後の改行と行頭・行末を tryCenterTag が自分で確かめる (#3328) ので、
+// ここを通さない。
+//
+// 改行の位置から試すと、行の先頭と末尾を確かめない数式ブロックは前の行の
+// 改行を読んで行の途中のものまで拾い、検索より先に成功してしまうので、
+// full では whole で確かめる。
+func (s *state) tryBlock(lead, trail int, whole bool, try func(*state) *Node) *Node {
+	if !s.fullContext() {
+		return nil
+	}
+	save := s.pos
+	s.pos = s.skipNewlines(save, lead)
+	if whole && !s.atLineBegin() {
+		s.pos = save
+		return nil
+	}
+	n := try(s)
+	if n == nil || whole && !s.lineEndAt(s.pos) {
+		s.pos = save
+		return nil
+	}
+	s.pos = s.skipNewlines(s.pos, trail)
+	return n
 }
 
 // asciiText holds shared single-byte text nodes returned by consumeChar.
@@ -1914,44 +1984,89 @@ func (s *state) tryLink() *Node {
 	return &Node{Type: NodeLink, Props: props, Children: mergeText(labelNodes)}
 }
 
+// trySearch reads mfm-js's search: at a line begin, at least one character
+// followed by a space (U+0020, U+3000 or a tab), a button (`検索`, `search`,
+// `[検索]` or `[search]`, ASCII case-insensitive) and the line end. tryBlock
+// reads the newlines before and after it.
+//
+// query は語の前の文字列をそのまま (前後の空白も削らずに) 使い、content は
+// mfm-js と同じく query + 区切りの 1 文字 + ボタンの文字 (`[検索]` なら括弧も)
+// にする。content は HTML のリンクの文字に使う (#3327)。
+//
+// mfm-js の inline (装飾などの中身) には search が無いので、full で読む位置
+// だけで試す。以前は行を TrimSpace して語で終わるかだけを見ていたので、
+// `q検索` や `q 検索 ` も検索にしていた。行頭の位置で試していた間は、行頭の
+// ハッシュタグなどが先に読まれるので表に出にくかったが、改行の位置から試すと
+// 食い違う (#3325)。
 func (s *state) trySearch() *Node {
-	// mfm-js の block 構文 (quote / codeBlock / mathBlock / search) は full でだけ
-	// 読み、inline (装飾や center の子) には無い。子で読むと、閉じのある装飾も
-	// 閉じを block に飲まれて丸ごと文字になり、後ろのメンションやタグが落ちる (#3301)。
-	if s.depth != s.fullDepth {
+	if !s.fullContext() || !s.atLineBegin() {
 		return nil
 	}
-	// 行頭から: "query 検索" / "query search" / "query [検索]" / "query [search]"
-	if s.pos > 0 && s.src[s.pos-1] != '\n' {
-		return nil
-	}
-	save := s.pos
-	// 行末まで読む
-	lineStart := s.pos
-	for !s.eof() && s.peek() != '\n' {
-		s.advance(utf8.RuneLen(s.peek()))
-	}
-	line := s.src[lineStart:s.pos]
-
-	// 検索キーワードで終わるか確認
-	trimmedLine := strings.TrimSpace(line)
-	for _, suffix := range []string{" 検索", " search", " [検索]", " [search]", " Search", " SEARCH"} {
-		trimmedSuffix := strings.TrimSpace(suffix)
-		if strings.HasSuffix(trimmedLine, trimmedSuffix) {
-			query := strings.TrimSpace(trimmedLine[:len(trimmedLine)-len(trimmedSuffix)])
-			if query == "" {
-				continue
-			}
-			if !s.eof() {
-				s.advance(1) // skip \n
-			}
-			// mfm-js はリンクの文字などに使う content を query + 区切り + ボタンの語で作る。
-			// trimmedLine は語で終わっているので、行全体がそのまま content になる。
-			return &Node{Type: NodeSearch, Props: map[string]any{"query": query, "content": trimmedLine}}
+	// 語の前に 1 文字以上要る。行が区切りと語だけ (` 検索`) のときは、1 文字目を
+	// 読んだ後に区切りが残らないので、下のループで自然に失敗する
+	start := s.pos
+	i := start
+	defer func() { s.budget.used += i - start }()
+	for i < len(s.src) {
+		if c := s.src[i]; c == '\n' || c == '\r' {
+			break
+		}
+		_, size := utf8.DecodeRuneInString(s.src[i:])
+		i += size
+		if end, ok := s.searchButtonAt(i); ok {
+			s.pos = end
+			return &Node{Type: NodeSearch, Props: map[string]any{
+				"query":   s.src[start:i],
+				"content": s.src[start:end],
+			}}
 		}
 	}
-	s.pos = save
 	return nil
+}
+
+// searchButtonAt reports whether a space, a search button and the line end
+// follow at pos, and returns the position of the line end.
+func (s *state) searchButtonAt(pos int) (int, bool) {
+	switch {
+	case s.prefixAt(pos, " "), s.prefixAt(pos, "\t"):
+		pos++
+	case s.prefixAt(pos, "\u3000"):
+		pos += len("\u3000")
+	default:
+		return 0, false
+	}
+	var end int
+	if s.prefixAt(pos, "[") {
+		end = searchWordEnd(s.src, pos+1)
+		if end < 0 || !s.prefixAt(end, "]") {
+			return 0, false
+		}
+		end++
+	} else if end = searchWordEnd(s.src, pos); end < 0 {
+		return 0, false
+	}
+	if !s.lineEndAt(end) {
+		return 0, false
+	}
+	return end, true
+}
+
+// searchWordEnd returns the position after `検索` or ASCII case-insensitive
+// `search` at pos, or -1.
+func searchWordEnd(src string, pos int) int {
+	if strings.HasPrefix(src[pos:], "検索") {
+		return pos + len("検索")
+	}
+	const word = "search"
+	if len(src)-pos < len(word) {
+		return -1
+	}
+	for i := 0; i < len(word); i++ {
+		if c := src[pos+i]; c != word[i] && c != word[i]-'a'+'A' {
+			return -1
+		}
+	}
+	return pos + len(word)
 }
 
 // --- Helpers ---
