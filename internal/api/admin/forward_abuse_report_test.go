@@ -1,6 +1,7 @@
 package admin_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
@@ -11,10 +12,46 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestForwardAbuseUserReport(t *testing.T) {
-	h, _, _, _ := newTestHandler(t)
-	// reportId 欠落は 204 (forwarder 未配線, abuseRepo 未配線 → no-op)
-	assert.Equal(t, http.StatusNoContent, doPost(h.ForwardAbuseUserReport, `{}`, adminUser).Code)
+// reportId は本家の paramDef で required かつ format misskey:id なので、
+// 欠落・型違い・空文字・形式違反は ajv と同じ INVALID_PARAM (400) になり、
+// 通報を引かず転送もしない (#3330)。
+func TestForwardAbuseUserReport_InvalidReportID(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		body   string
+		param  string
+		reason string
+	}{
+		{"missing", `{}`, "#/required", "must have required property 'reportId'"},
+		{"null", `{"reportId":null}`, "#/properties/reportId/type", "must be string"},
+		{"number", `{"reportId":1}`, "#/properties/reportId/type", "must be string"},
+		{"empty", `{"reportId":""}`, "#/properties/reportId/format", `must match format "misskey:id"`},
+		{"bad format", `{"reportId":"r-1"}`, "#/properties/reportId/format", `must match format "misskey:id"`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, _ := setupAbuseReportHandler(t, remoteAbuseReport())
+			stub := &stubAbuseForwarder{}
+			h.SetAbuseForwarder(stub)
+			rec := doPost(h.ForwardAbuseUserReport, tt.body, adminUser)
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			var resp struct {
+				Error struct {
+					Code string `json:"code"`
+					ID   string `json:"id"`
+					Info struct {
+						Param  string `json:"param"`
+						Reason string `json:"reason"`
+					} `json:"info"`
+				} `json:"error"`
+			}
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+			assert.Equal(t, "INVALID_PARAM", resp.Error.Code)
+			assert.Equal(t, "3d81ceae-475f-4600-b2a8-2bc116157532", resp.Error.ID)
+			assert.Equal(t, tt.param, resp.Error.Info.Param)
+			assert.Equal(t, tt.reason, resp.Error.Info.Reason)
+			assert.Empty(t, stub.calledWith)
+		})
+	}
 }
 
 type stubAbuseForwarder struct {
@@ -67,13 +104,17 @@ func TestForwardAbuseUserReport_WritesModerationLog(t *testing.T) {
 	assert.Equal(t, "forwardAbuseReport", repo.Snapshot()[0].Type)
 }
 
-// ローカル対象 (targetUserHost == null) は forward 不可で 400。
+// ローカル対象 (targetUserHost == null) は forward 不可で 400 (本家は 500。意図的な差、docs/divergence.md)。
 func TestForwardAbuseUserReport_RejectsLocalTarget(t *testing.T) {
 	h, _ := setupAbuseReportHandler(t,
 		&model.AbuseUserReport{ID: "r1", TargetUserID: "u1", ReporterID: "u2"},
 	)
+	stub := &stubAbuseForwarder{}
+	h.SetAbuseForwarder(stub)
 	rec := doPost(h.ForwardAbuseUserReport, `{"reportId":"r1"}`, adminUser)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "INVALID_PARAM")
+	assert.Empty(t, stub.calledWith)
 }
 
 // abuseRepo wired で report が存在しなければ NO_SUCH_ABUSE_REPORT (404)。
@@ -85,14 +126,18 @@ func TestForwardAbuseUserReport_NotFound(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "8763e21b-d9bc-40be-acf6-54c1a6986493")
 }
 
-// 既に forwarded 済みの report は再 forward 不可で 400。
+// 既に forwarded 済みの report は再 forward 不可で 400 (本家は 500。意図的な差、docs/divergence.md)。
 func TestForwardAbuseUserReport_RejectsAlreadyForwarded(t *testing.T) {
 	host := "remote.example"
 	h, _ := setupAbuseReportHandler(t,
 		&model.AbuseUserReport{ID: "r1", TargetUserID: "u1", ReporterID: "u2", TargetUserHost: &host, Forwarded: true},
 	)
+	stub := &stubAbuseForwarder{}
+	h.SetAbuseForwarder(stub)
 	rec := doPost(h.ForwardAbuseUserReport, `{"reportId":"r1"}`, adminUser)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "INVALID_PARAM")
+	assert.Empty(t, stub.calledWith)
 }
 
 // abuseRepo が未配線だと存在を確かめられないので、204 ではなく

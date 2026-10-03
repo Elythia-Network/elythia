@@ -1,7 +1,9 @@
 package admin
 
 import (
+	"encoding/json"
 	"net/http"
+	"regexp"
 
 	"github.com/labstack/echo/v4"
 
@@ -12,16 +14,30 @@ import (
 
 // ForwardAbuseUserReport handles POST /api/admin/forward-abuse-user-report.
 //
-// 対象ユーザーがリモートの場合、system actor 署名で origin インスタンス
-// の inbox へ ActivityPub Flag を配送し、DB 側 forwarded=true も立てる。
-// ローカル通報の場合は配送スキップで DB フラグのみ更新する。
+// It delivers an ActivityPub Flag signed by the system actor to the inbox of
+// the target user's origin instance and sets forwarded=true. Reports against
+// a local user, or reports that have already been forwarded, are rejected
+// with 400 INVALID_PARAM (upstream answers 500; see docs/divergence.md).
 func (h *Handler) ForwardAbuseUserReport(c echo.Context) error {
-	var req struct {
-		ReportID string `json:"reportId"`
+	var body struct {
+		ReportID json.RawMessage `json:"reportId"`
 	}
-	_ = c.Bind(&req)
-	if req.ReportID == "" {
-		return c.NoContent(http.StatusNoContent)
+	if err := c.Bind(&body); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
+	// 本家の paramDef は reportId を required かつ format misskey:id にしており、
+	// 欠落・型違い・空文字は ajv が INVALID_PARAM (400) で弾く。旧 mk-go は
+	// 欠落と空文字を黙って 204 にしていた (#3330)。info は ajv の最初の違反
+	// (required → type → format の順) に合わせる。
+	if body.ReportID == nil {
+		return c.JSON(http.StatusBadRequest, apierr.InvalidParamClient("#/required", "must have required property 'reportId'"))
+	}
+	var reportID string
+	if string(body.ReportID) == "null" || json.Unmarshal(body.ReportID, &reportID) != nil {
+		return c.JSON(http.StatusBadRequest, apierr.InvalidParamClient("#/properties/reportId/type", "must be string"))
+	}
+	if !misskeyIDFormat.MatchString(reportID) {
+		return c.JSON(http.StatusBadRequest, apierr.InvalidParamClient("#/properties/reportId/format", `must match format "misskey:id"`))
 	}
 	// report が存在しなければ NO_SUCH_ABUSE_REPORT
 	// (upstream forward-abuse-user-report.ts:47-50)。abuseRepo が未配線だと
@@ -31,7 +47,7 @@ func (h *Handler) ForwardAbuseUserReport(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, noSuchForwardAbuseReport())
 	}
 	// snapshot for moderation log info (forwarded フラグが立つ前の状態)。
-	snapshot, err := h.abuseRepo.FindByID(req.ReportID)
+	snapshot, err := h.abuseRepo.FindByID(reportID)
 	// **DB 障害を not-found に丸めない** (#2792)。
 	if err != nil && !repository.IsNotFound(err) {
 		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
@@ -45,6 +61,9 @@ func (h *Handler) ForwardAbuseUserReport(c echo.Context) error {
 	// (targetUserHost == null) か、既に forwarded の場合は forward 不可。順序は
 	// upstream に合わせ host==null を先に評価する。旧 mk-go はこれらを無視し
 	// ローカル通報でも forwarded=true を立てていた。
+	// 本家は素の Error を投げるので INTERNAL_ERROR (500) になるが、利用者の
+	// 操作の誤りなので mk-go は 400 を返す。意図的な差として
+	// docs/divergence.md に記録している (#3330)。
 	if snapshot.TargetUserHost == nil {
 		return c.JSON(http.StatusBadRequest, apierr.InvalidParam("The target user host is null."))
 	}
@@ -52,11 +71,11 @@ func (h *Handler) ForwardAbuseUserReport(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, apierr.InvalidParam("The report has already been forwarded."))
 	}
 	if h.abuseForwarder != nil {
-		if err := h.abuseForwarder.ForwardReport(req.ReportID); err != nil {
+		if err := h.abuseForwarder.ForwardReport(reportID); err != nil {
 			return apierr.JSONInternalError(c)
 		}
 		h.logModeration(c, moderationlog.LogForwardAbuseReport, map[string]any{
-			"reportId": req.ReportID,
+			"reportId": reportID,
 			"report":   logRow,
 		})
 		return c.NoContent(http.StatusNoContent)
@@ -66,15 +85,19 @@ func (h *Handler) ForwardAbuseUserReport(c echo.Context) error {
 	// 更新の失敗を握りつぶして 204 を返さない。upstream は
 	// abuseUserReportsRepository.update の例外がそのまま INTERNAL_ERROR (500) に
 	// なり、moderation log も書かない (AbuseReportService.ts:135-150) (#3330)。
-	if err := h.abuseRepo.UpdateFields(req.ReportID, map[string]any{"forwarded": true}); err != nil {
+	if err := h.abuseRepo.UpdateFields(reportID, map[string]any{"forwarded": true}); err != nil {
 		return apierr.JSONInternalError(c)
 	}
 	h.logModeration(c, moderationlog.LogForwardAbuseReport, map[string]any{
-		"reportId": req.ReportID,
+		"reportId": reportID,
 		"report":   logRow,
 	})
 	return c.NoContent(http.StatusNoContent)
 }
+
+// misskeyIDFormat is the upstream ajv `misskey:id` format
+// (endpoint-base.ts: `/^[a-zA-Z0-9]+$/`).
+var misskeyIDFormat = regexp.MustCompile(`^[a-zA-Z0-9]+$`)
 
 // noSuchForwardAbuseReport is the NO_SUCH_ABUSE_REPORT error of
 // admin/forward-abuse-user-report.
