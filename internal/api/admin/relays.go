@@ -18,7 +18,9 @@ func (h *Handler) RelaysAdd(c echo.Context) error {
 	var req struct {
 		Inbox string `json:"inbox"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	// upstream add.ts は `new URL(inbox).protocol !== 'https:'` または URL parse
 	// 失敗で INVALID_URL を投げる。https 以外 (http:// / 非 URL / 空) を relay 行
 	// 作成前に弾く。Go の url.Parse は相対 URL でも err にならないので、scheme と
@@ -71,7 +73,9 @@ func (h *Handler) RelaysRemove(c echo.Context) error {
 		ID    string `json:"id"`
 		Inbox string `json:"inbox"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	if h.relayService != nil {
 		id := req.ID
 		if id == "" && req.Inbox != "" && h.adminDB != nil {

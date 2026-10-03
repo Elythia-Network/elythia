@@ -540,6 +540,22 @@ func TestPluginCaller_NilParamsSendsEmptyObject(t *testing.T) {
 	assert.Contains(t, string(raw), `"body":{}`)
 }
 
+// params が `null` に marshal される値 (nil の map / pointer) でも空オブジェクトを
+// 送ること。body が object でない呼び出しは INVALID_PARAM (#/type) になった
+// (#3330) ので、以前通っていた呼び出しが落ちる。
+func TestPluginCaller_NullMarshallingParamsSendEmptyObject(t *testing.T) {
+	api := &pluginAPI{echo: apiTestEcho(), host: "h"}
+	var nilMap map[string]any
+	var nilPtr *struct{ A string }
+	for name, params := range map[string]any{"nil map": nilMap, "nil pointer": nilPtr} {
+		t.Run(name, func(t *testing.T) {
+			raw, err := api.Anonymous().Call(context.Background(), "echo", params)
+			require.NoError(t, err)
+			assert.Contains(t, string(raw), `"body":{}`)
+		})
+	}
+}
+
 func TestPluginCaller_AsUserSendsNativeToken(t *testing.T) {
 	tok := "0123456789abcdef"
 	api := &pluginAPI{

@@ -148,7 +148,9 @@ func (h *Handler) ApplicationApply(c echo.Context) error {
 		// 署名付きトークン (#2806)。signup-application/form-token で発行する。
 		FormToken string `json:"formToken"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 
 	if !h.testMode && h.captchaSvc != nil {
 		tokens := captcha.CaptchaTokens{

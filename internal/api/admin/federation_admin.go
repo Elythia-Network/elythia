@@ -59,7 +59,9 @@ func (h *Handler) FederationDeleteAllFiles(c echo.Context) error {
 	var req struct {
 		Host string `json:"host"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	if req.Host == "" {
 		return c.NoContent(http.StatusNoContent)
 	}
@@ -86,7 +88,9 @@ func (h *Handler) FederationRefreshRemoteInstanceMetadata(c echo.Context) error 
 	var req struct {
 		Host string `json:"host"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	if h.instanceMetadataFetcher == nil || req.Host == "" {
 		return c.NoContent(http.StatusNoContent)
 	}
@@ -175,7 +179,9 @@ func (h *Handler) FederationRemoveAllFollowing(c echo.Context) error {
 	var req struct {
 		Host string `json:"host"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	if req.Host == "" || h.followingRepo == nil || h.unfollowEnqueuer == nil {
 		return c.NoContent(http.StatusNoContent)
 	}
@@ -287,7 +293,8 @@ func (h *Handler) FederationUpdateInstance(c echo.Context) error {
 	}
 	var req federationUpdateInstanceRequest
 	if err := c.Bind(&req); err != nil || req.Host == "" {
-		return c.NoContent(http.StatusNoContent)
+		// 本家は paramDef の ajv 検査で 400 にする (#3330)。
+		return apierr.JSONInvalidParam(c)
 	}
 	// upstream は lookup 前に toPuny(host) で punycode / 小文字化する。IDN / 大文字
 	// host でも instance を引けるよう正規化してから FindByHost / UpdateFields に渡す。

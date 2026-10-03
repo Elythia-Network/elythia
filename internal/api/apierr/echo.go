@@ -6,10 +6,32 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// BodyNotObjectContextKey is the echo.Context key the server's JSON binder
+// sets (to true) when it rejected an API request body that is not a JSON
+// object (null, array, string, number, boolean, or no body at all).
+const BodyNotObjectContextKey = "mk.apierr.bodyNotObject"
+
+// MarkBodyNotObject records on c that the request body was rejected for not
+// being a JSON object, so JSONInvalidParam answers with upstream's ajv info.
+func MarkBodyNotObject(c echo.Context) {
+	c.Set(BodyNotObjectContextKey, true)
+}
+
 // JSONInvalidParam writes a 400 INVALID_PARAM response to the client.
 // Optional msg overrides the default "Invalid param." text (UUID stays
 // fixed so frontend i18n lookups remain stable).
+//
+// When the binder marked the body as not being a JSON object
+// (MarkBodyNotObject), the response is upstream's ajv envelope for that case
+// instead: message "Invalid param." with info {param: "#/type", reason:
+// "must be object"}.
 func JSONInvalidParam(c echo.Context, msg ...string) error {
+	// 本家は全 endpoint の paramDef が type: 'object' で、body が object でない
+	// ときは ajv の最初の違反が必ず #/type になる (endpoint-base.ts)。handler が
+	// どの理由で INVALID_PARAM を返そうとしていても、本家ではこの違反が先に出る。
+	if notObject, _ := c.Get(BodyNotObjectContextKey).(bool); notObject {
+		return c.JSON(http.StatusBadRequest, InvalidParamClient("#/type", "must be object"))
+	}
 	return c.JSON(http.StatusBadRequest, InvalidParam(msg...))
 }
 

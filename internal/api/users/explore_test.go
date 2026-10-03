@@ -50,14 +50,15 @@ func TestList(t *testing.T) {
 		assert.Contains(t, rec.Body.String(), "INVALID_PARAM")
 	})
 
-	t.Run("malformed body returns an empty array, not a 400", func(t *testing.T) {
-		// explore ページは配列前提で `.map()` する。
+	t.Run("mistyped param returns 400 INVALID_PARAM", func(t *testing.T) {
+		// 本家は paramDef の ajv 検査で 400 にする (#3330)。読めない場合に
+		// 空配列で返すのは DB の失敗だけ。
 		h, repo := newTestHandler(t)
 		h.SetUserRepo(repo)
 
-		rec := postStub(h.List, `{`, nil)
-		assert.Equal(t, http.StatusOK, rec.Code)
-		assert.JSONEq(t, `[]`, rec.Body.String())
+		rec := postStub(h.List, `{"limit":"10"}`, nil)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Contains(t, rec.Body.String(), "INVALID_PARAM")
 	})
 
 	t.Run("unwired repo returns an empty array", func(t *testing.T) {

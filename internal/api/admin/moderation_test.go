@@ -14,9 +14,9 @@ import (
 // --- /admin/unset-user-avatar ---
 
 func TestUnsetUserAvatar(t *testing.T) {
-	t.Run("missing userId returns 204 noop", func(t *testing.T) {
+	t.Run("missing userId returns 400 INVALID_PARAM", func(t *testing.T) {
 		h, _, _, _ := newTestHandler(t)
-		assert.Equal(t, http.StatusNoContent, doPost(h.UnsetUserAvatar, `{}`, adminUser).Code)
+		assert.Equal(t, http.StatusBadRequest, doPost(h.UnsetUserAvatar, `{}`, adminUser).Code)
 	})
 	t.Run("clears avatarId / avatarUrl / avatarBlurhash", func(t *testing.T) {
 		h, repo, _, _ := newTestHandler(t)
@@ -37,9 +37,9 @@ func TestUnsetUserAvatar(t *testing.T) {
 // --- /admin/unset-user-banner ---
 
 func TestUnsetUserBanner(t *testing.T) {
-	t.Run("missing userId returns 204 noop", func(t *testing.T) {
+	t.Run("missing userId returns 400 INVALID_PARAM", func(t *testing.T) {
 		h, _, _, _ := newTestHandler(t)
-		assert.Equal(t, http.StatusNoContent, doPost(h.UnsetUserBanner, `{}`, adminUser).Code)
+		assert.Equal(t, http.StatusBadRequest, doPost(h.UnsetUserBanner, `{}`, adminUser).Code)
 	})
 	t.Run("clears bannerId / bannerUrl / bannerBlurhash", func(t *testing.T) {
 		h, repo, _, _ := newTestHandler(t)
@@ -60,9 +60,9 @@ func TestUnsetUserBanner(t *testing.T) {
 // --- /admin/update-user-note ---
 
 func TestUpdateUserNote(t *testing.T) {
-	t.Run("missing userId returns 204 noop", func(t *testing.T) {
+	t.Run("missing userId returns 400 INVALID_PARAM", func(t *testing.T) {
 		h, _, _, _ := newTestHandler(t)
-		assert.Equal(t, http.StatusNoContent, doPost(h.UpdateUserNote, `{}`, adminUser).Code)
+		assert.Equal(t, http.StatusBadRequest, doPost(h.UpdateUserNote, `{}`, adminUser).Code)
 	})
 	t.Run("writes moderationNote to user_profile", func(t *testing.T) {
 		h, repo, _, _ := newTestHandler(t)

@@ -109,7 +109,9 @@ func (h *Handler) List(c echo.Context) error {
 	var req struct {
 		UserID string `json:"userId"`
 	}
-	_ = c.Bind(&req) // userId は optional (upstream paramDef required:[])
+	if err := c.Bind(&req); err != nil { // userId は optional (upstream paramDef required:[])
+		return apierr.JSONInvalidParam(c)
+	}
 
 	var lists []*model.UserList
 	if req.UserID != "" {

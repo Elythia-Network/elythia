@@ -881,7 +881,12 @@ func (c *pluginCaller) Call(ctx context.Context, endpoint string, params any) (j
 		if err != nil {
 			return nil, fmt.Errorf("plugin: %s のパラメータを JSON 化できません: %w", endpoint, err)
 		}
-		body = b
+		// nil の map / pointer は `null` になる。body が object でないと
+		// endpoint が INVALID_PARAM (#/type) で弾くようになったので (#3330)、
+		// 「パラメータ無し」として {} に寄せ、以前通っていた呼び出しを壊さない。
+		if string(b) != "null" {
+			body = b
+		}
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "/api/"+endpoint, bytes.NewReader(body))

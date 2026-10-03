@@ -293,3 +293,26 @@ func TestJSONRateLimitExceeded(t *testing.T) {
 	assert.Equal(t, "RATE_LIMIT_EXCEEDED", errObj["code"])
 	assert.Equal(t, UUIDRateLimitExceeded, errObj["id"])
 }
+
+// TestJSONInvalidParam_BodyNotObject pins that once the binder marked the
+// body as not being a JSON object, JSONInvalidParam answers with upstream's
+// ajv envelope (#/type "must be object", default message) whatever message
+// the handler asked for, because ajv reports that violation first.
+func TestJSONInvalidParam_BodyNotObject(t *testing.T) {
+	code, body := invoke(t, func(c echo.Context) error {
+		MarkBodyNotObject(c)
+		return JSONInvalidParam(c, "userId is required.")
+	})
+	assert.Equal(t, http.StatusBadRequest, code)
+	errObj := body["error"].(map[string]any)
+	assert.Equal(t, "INVALID_PARAM", errObj["code"])
+	assert.Equal(t, UUIDInvalidParam, errObj["id"])
+	assert.Equal(t, "Invalid param.", errObj["message"])
+	assert.Equal(t, map[string]any{"param": "#/type", "reason": "must be object"}, errObj["info"])
+}
+
+func TestJSONInvalidParam_NoInfoWithoutMark(t *testing.T) {
+	_, body := invoke(t, func(c echo.Context) error { return JSONInvalidParam(c) })
+	_, hasInfo := body["error"].(map[string]any)["info"]
+	assert.False(t, hasInfo)
+}

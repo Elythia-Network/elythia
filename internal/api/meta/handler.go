@@ -93,7 +93,9 @@ func (h *Handler) Meta(c echo.Context) error {
 	var params struct {
 		Detail *bool `json:"detail"`
 	}
-	_ = c.Bind(&params)
+	if err := c.Bind(&params); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	detail := params.Detail == nil || *params.Detail
 
 	body, gen := h.respCache.get(detail)

@@ -17,7 +17,8 @@ func (h *Handler) AccountsDelete(c echo.Context) error {
 		UserID string `json:"userId"`
 	}
 	if err := c.Bind(&req); err != nil || req.UserID == "" {
-		return c.NoContent(http.StatusNoContent)
+		// 本家は paramDef の ajv 検査で 400 にする (#3330)。
+		return apierr.JSONInvalidParam(c)
 	}
 	// root / system アカウントの削除は連合を壊すため拒否する (#parity review F1)。
 	// **判定できないときは 500 に倒す** — 分からないまま不可逆な削除を通さない。
@@ -95,7 +96,8 @@ func (h *Handler) DeleteAccount(c echo.Context) error {
 		UserID string `json:"userId"`
 	}
 	if err := c.Bind(&req); err != nil || req.UserID == "" {
-		return c.NoContent(http.StatusNoContent)
+		// 本家は paramDef の ajv 検査で 400 にする (#3330)。
+		return apierr.JSONInvalidParam(c)
 	}
 	// root / system アカウントの削除は連合を壊すため拒否する (#parity review F1)。
 	// **判定できないときは 500 に倒す** — 分からないまま不可逆な削除を通さない。

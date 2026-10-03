@@ -715,7 +715,9 @@ func (h *Handler) RoomsDelete(c echo.Context) error {
 func (h *Handler) RoomsOwned(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req chatPageParams
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	sinceID, untilID, cursorOK := req.cursor()
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
@@ -735,7 +737,9 @@ func (h *Handler) RoomsOwned(c echo.Context) error {
 func (h *Handler) RoomsJoined(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req chatPageParams
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	sinceID, untilID, cursorOK := req.cursor()
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
@@ -1693,7 +1697,9 @@ func (h *Handler) InvitationsIgnore(c echo.Context) error {
 func (h *Handler) InvitationsInbox(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req chatPageParams
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	sinceID, untilID, cursorOK := req.cursor()
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
@@ -1812,7 +1818,9 @@ func (h *Handler) RoomsJoin(c echo.Context) error {
 func (h *Handler) RoomsJoining(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req chatPageParams
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	sinceID, untilID, cursorOK := req.cursor()
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
@@ -1893,7 +1901,9 @@ func (h *Handler) History(c echo.Context) error {
 		Limit int  `json:"limit"`
 		Room  bool `json:"room"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	if req.Limit <= 0 {
 		req.Limit = 10
 	}

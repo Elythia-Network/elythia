@@ -44,7 +44,9 @@ func (h *Handler) DraftsList(c echo.Context) error {
 		UntilDate *int64 `json:"untilDate"`
 		Scheduled *bool  `json:"scheduled"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	limit, limitOK := pagination.ResolveLimit(req.Limit, 30, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
@@ -714,7 +716,9 @@ func (h *Handler) PollsRecommendation(c echo.Context) error {
 		// true のとき全 channel poll を除外する (#1765。以前は []string だった)。
 		ExcludeChannels bool `json:"excludeChannels"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	if h.pollRepo == nil || h.noteRepo == nil {
 		return c.JSON(http.StatusOK, []entity.NoteEntity{})
 	}

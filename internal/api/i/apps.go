@@ -31,7 +31,9 @@ func (h *Handler) Apps(c echo.Context) error {
 	var req struct {
 		Sort string `json:"sort"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	tokens, err := h.accessTokenRepo.ListByUserIDPreloadApp(u.ID, req.Sort)
 	if err != nil {
 		return apierr.JSONInternalError(c)
@@ -120,7 +122,9 @@ func (h *Handler) AuthorizedApps(c echo.Context) error {
 		Offset int    `json:"offset"`
 		Sort   string `json:"sort"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	// limit: default 10, clamp 1..100 (authorized-apps.ts paramDef)。
 	limit := 10
 	if req.Limit != nil {

@@ -203,7 +203,9 @@ func (h *Handler) DriveFiles(c echo.Context) error {
 		Hostname  string `json:"hostname"`
 		Type      string `json:"type"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)

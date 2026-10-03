@@ -212,7 +212,12 @@ func (h *Handler) EmojiAddAliasesBulk(c echo.Context) error {
 		IDs     []string `json:"ids"`
 		Aliases []string `json:"aliases"`
 	}
-	if err := c.Bind(&req); err != nil || len(req.IDs) == 0 {
+	if err := c.Bind(&req); err != nil {
+		// 本家は paramDef の ajv 検査で 400 にする (#3330)。空の ids は本家でも
+		// 通るので、下で従来どおり何もせず 204 を返す。
+		return apierr.JSONInvalidParam(c)
+	}
+	if len(req.IDs) == 0 {
 		return c.NoContent(http.StatusNoContent)
 	}
 	if h.emojiRepo == nil {
@@ -448,7 +453,12 @@ func (h *Handler) EmojiDeleteBulk(c echo.Context) error {
 	var req struct {
 		IDs []string `json:"ids"`
 	}
-	if err := c.Bind(&req); err != nil || len(req.IDs) == 0 {
+	if err := c.Bind(&req); err != nil {
+		// 本家は paramDef の ajv 検査で 400 にする (#3330)。空の ids は本家でも
+		// 通るので、下で従来どおり何もせず 204 を返す。
+		return apierr.JSONInvalidParam(c)
+	}
+	if len(req.IDs) == 0 {
 		return c.NoContent(http.StatusNoContent)
 	}
 	if h.emojiRepo == nil {
@@ -547,7 +557,9 @@ func (h *Handler) EmojiListRemote(c echo.Context) error {
 		Limit     *int   `json:"limit"`
 		Offset    int    `json:"offset"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
@@ -589,7 +601,12 @@ func (h *Handler) EmojiRemoveAliasesBulk(c echo.Context) error {
 		IDs     []string `json:"ids"`
 		Aliases []string `json:"aliases"`
 	}
-	if err := c.Bind(&req); err != nil || len(req.IDs) == 0 {
+	if err := c.Bind(&req); err != nil {
+		// 本家は paramDef の ajv 検査で 400 にする (#3330)。空の ids は本家でも
+		// 通るので、下で従来どおり何もせず 204 を返す。
+		return apierr.JSONInvalidParam(c)
+	}
+	if len(req.IDs) == 0 {
 		return c.NoContent(http.StatusNoContent)
 	}
 	if h.emojiRepo == nil {
@@ -632,7 +649,12 @@ func (h *Handler) EmojiSetAliasesBulk(c echo.Context) error {
 		IDs     []string `json:"ids"`
 		Aliases []string `json:"aliases"`
 	}
-	if err := c.Bind(&req); err != nil || len(req.IDs) == 0 {
+	if err := c.Bind(&req); err != nil {
+		// 本家は paramDef の ajv 検査で 400 にする (#3330)。空の ids は本家でも
+		// 通るので、下で従来どおり何もせず 204 を返す。
+		return apierr.JSONInvalidParam(c)
+	}
+	if len(req.IDs) == 0 {
 		return c.NoContent(http.StatusNoContent)
 	}
 	if h.emojiRepo == nil {
@@ -669,7 +691,12 @@ func (h *Handler) EmojiSetCategoryBulk(c echo.Context) error {
 		IDs      []string `json:"ids"`
 		Category *string  `json:"category"`
 	}
-	if err := c.Bind(&req); err != nil || len(req.IDs) == 0 {
+	if err := c.Bind(&req); err != nil {
+		// 本家は paramDef の ajv 検査で 400 にする (#3330)。空の ids は本家でも
+		// 通るので、下で従来どおり何もせず 204 を返す。
+		return apierr.JSONInvalidParam(c)
+	}
+	if len(req.IDs) == 0 {
 		return c.NoContent(http.StatusNoContent)
 	}
 	if h.emojiRepo == nil {
@@ -705,7 +732,12 @@ func (h *Handler) EmojiSetLicenseBulk(c echo.Context) error {
 		IDs     []string `json:"ids"`
 		License *string  `json:"license"`
 	}
-	if err := c.Bind(&req); err != nil || len(req.IDs) == 0 {
+	if err := c.Bind(&req); err != nil {
+		// 本家は paramDef の ajv 検査で 400 にする (#3330)。空の ids は本家でも
+		// 通るので、下で従来どおり何もせず 204 を返す。
+		return apierr.JSONInvalidParam(c)
+	}
+	if len(req.IDs) == 0 {
 		return c.NoContent(http.StatusNoContent)
 	}
 	if h.emojiRepo == nil {

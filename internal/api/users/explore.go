@@ -38,8 +38,9 @@ func (h *Handler) SetLocalHost(host string) { h.localHost = host }
 //
 // POST /api/users
 //
-// **読めなくても 200 で空配列を返す。** upstream の explore ページは配列前提で
-// `.map()` するので、ここで 500 にするとページ全体が開かなくなる。
+// **DB から読めなくても 200 で空配列を返す。** upstream の explore ページは
+// 配列前提で `.map()` するので、ここで 500 にするとページ全体が開かなくなる。
+// 引数の不正は本家と同じく 400 INVALID_PARAM にする (#3330)。
 func (h *Handler) List(c echo.Context) error {
 	var req struct {
 		Limit    int    `json:"limit"`
@@ -50,7 +51,8 @@ func (h *Handler) List(c echo.Context) error {
 		Hostname string `json:"hostname"`
 	}
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusOK, []any{})
+		// 本家は paramDef の ajv 検査で 400 にする (#3330)。
+		return apierr.JSONInvalidParam(c)
 	}
 	// upstream users.ts:35 の state enum は ['all','alive'] (default 'all')。
 	// 範囲外 (moderator/admin 等の role state) は ajv が 400 で reject するので、

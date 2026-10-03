@@ -90,7 +90,7 @@ func (s *stubDeleteAccountEnqueuer) EnqueueDeleteAccount(payload queue.DeleteAcc
 
 func TestAccountsDelete(t *testing.T) {
 	h, _, _, _ := newTestHandler(t)
-	assert.Equal(t, http.StatusNoContent, doPost(h.AccountsDelete, `{}`, adminUser).Code)
+	assert.Equal(t, http.StatusBadRequest, doPost(h.AccountsDelete, `{}`, adminUser).Code)
 }
 
 func TestAccountsDelete_EnqueuesCascade(t *testing.T) {
@@ -107,7 +107,7 @@ func TestAccountsDelete_MissingUserIDSkipsEnqueue(t *testing.T) {
 	h, _, _, _ := newTestHandler(t)
 	stub := &stubDeleteAccountEnqueuer{}
 	h.SetDeleteAccountEnqueuer(stub)
-	assert.Equal(t, http.StatusNoContent,
+	assert.Equal(t, http.StatusBadRequest,
 		doPost(h.AccountsDelete, `{}`, adminUser).Code)
 	assert.Equal(t, 0, stub.called)
 }
@@ -191,21 +191,21 @@ func TestDeleteAccount_InvalidatesTargetTokenCache(t *testing.T) {
 		"DeleteAccount (admin variant) 成功時も同様")
 }
 
-// userId 空のときは UpdateUser を呼ばないので invalidate も skip する
-// (defensive、空打ちを避ける)。
+// userId 空のときは 400 で止まり、UpdateUser を呼ばないので invalidate も
+// skip する (本家は paramDef の required で弾く、#3330)。
 func TestAccountsDelete_EmptyUserIDDoesNotInvalidate(t *testing.T) {
 	h, _, _, _ := newTestHandler(t)
 	inv := &stubUserTokenInvalidator{}
 	h.SetUserTokenInvalidator(inv)
 
 	rec := doPost(h.AccountsDelete, `{}`, adminUser)
-	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Empty(t, inv.calls, "userId 空のとき invalidate は呼ばれない")
 }
 
 func TestDeleteAccountAdmin(t *testing.T) {
 	h, _, _, _ := newTestHandler(t)
-	assert.Equal(t, http.StatusNoContent, doPost(h.DeleteAccount, `{}`, adminUser).Code)
+	assert.Equal(t, http.StatusBadRequest, doPost(h.DeleteAccount, `{}`, adminUser).Code)
 }
 
 func TestDeleteAccount_EnqueuesCascade(t *testing.T) {

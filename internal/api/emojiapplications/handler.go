@@ -217,7 +217,9 @@ func (h *Handler) ListMine(c echo.Context) error {
 		Limit   int    `json:"limit"`
 		UntilID string `json:"untilId"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	if req.Limit <= 0 || req.Limit > 100 {
 		req.Limit = 30
 	}

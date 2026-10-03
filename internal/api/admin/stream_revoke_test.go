@@ -77,14 +77,14 @@ func TestDeleteAccount_RevokesTargetStreams(t *testing.T) {
 	assert.Equal(t, []string{"u9"}, rev.calls)
 }
 
-// userId が空なら何もしない (空の userId は「全員」の意味ではない)。
+// userId が空なら 400 で止まり何もしない (空の userId は「全員」の意味ではない)。
 func TestAccountsDelete_EmptyUserIDDoesNotRevokeStreams(t *testing.T) {
 	h, _, _, _ := newTestHandler(t)
 	rev := &stubUserStreamRevoker{}
 	h.SetUserStreamRevoker(rev)
 
 	rec := doPost(h.AccountsDelete, `{}`, adminUser)
-	require.Equal(t, http.StatusNoContent, rec.Code)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Empty(t, rev.calls)
 }
 

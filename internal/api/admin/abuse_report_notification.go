@@ -149,7 +149,9 @@ func (h *Handler) AbuseReportNotificationRecipientDelete(c echo.Context) error {
 	var req struct {
 		ID string `json:"id"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	if req.ID == "" {
 		return c.NoContent(http.StatusNoContent)
 	}
@@ -172,7 +174,9 @@ func (h *Handler) AbuseReportNotificationRecipientList(c echo.Context) error {
 	var req struct {
 		Method []string `json:"method"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	// upstream paramDef は method.items を enum: ['email','webhook'] で制約し、
 	// 範囲外は 400 で reject する。create / update と同じく enum 検証を行い、
 	// 不正値で「該当 0 件 (200+空)」と誤認させない。
@@ -220,7 +224,9 @@ func (h *Handler) AbuseReportNotificationRecipientShow(c echo.Context) error {
 	var req struct {
 		ID string `json:"id"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	r, err := h.recipientRepo.FindByID(req.ID)
 	if err != nil && !repository.IsNotFound(err) {
 		// **DB 障害を not-found に丸めない** (#2792)。

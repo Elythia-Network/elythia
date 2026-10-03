@@ -20,6 +20,8 @@ import (
 	ext "github.com/mmcdole/gofeed/extensions"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/shiroha-a/mk/internal/testutil"
 )
 
 const sampleRSS2 = `<?xml version="1.0" encoding="UTF-8"?>
@@ -1079,6 +1081,46 @@ func TestFetchRSS_PostPrefersBody(t *testing.T) {
 	require.NoError(t, h.Fetch(e.NewContext(req, rec)))
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "/from-body", gotPath)
+}
+
+// TestFetchRSS_PostIgnoresQuery pins that a POST reads only the body, as
+// upstream's ApiCallService does: an unbindable body or a url that is not a
+// string is 400 INVALID_PARAM, and a body without url is the required error,
+// even when the query carries a url (#3330).
+func TestFetchRSS_PostIgnoresQuery(t *testing.T) {
+	fetched := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fetched = true
+		fmt.Fprint(w, sampleRSS2)
+	}))
+	t.Cleanup(srv.Close)
+	h := newTestHandler(t, srv)
+
+	cases := []struct {
+		name, body, wantParam string
+	}{
+		{"unbindable body", `[]`, ""},
+		{"url is a number", `{"url":1}`, ""},
+		{"url is null", `{"url":null}`, ""},
+		{"url missing", `{}`, "url"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := echo.New()
+			req := httptest.NewRequest(http.MethodPost, "/api/fetch-rss?url="+url.QueryEscape(srv.URL), strings.NewReader(tc.body))
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			rec := httptest.NewRecorder()
+			require.NoError(t, h.Fetch(e.NewContext(req, rec)))
+			testutil.AssertInvalidParam(t, rec)
+			if tc.wantParam != "" {
+				assert.Contains(t, rec.Body.String(), `"param":"`+tc.wantParam+`"`)
+			} else {
+				// 型違いを「url が無い」と取り違えていないこと。
+				assert.NotContains(t, rec.Body.String(), `"param":"url"`)
+			}
+		})
+	}
+	assert.False(t, fetched, "query の url を取りに行ってはいけない")
 }
 
 // IPv6 リテラル (zone id 付き含む) が正規化で壊れないこと。

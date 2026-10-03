@@ -71,7 +71,9 @@ func (h *Handler) SignupApplicationList(c echo.Context) error {
 		Offset int    `json:"offset"`
 	}
 	// body 無しでも既定値で応答する (管理画面が引数なしで叩く)。
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 
 	limit := req.Limit
 	if limit <= 0 {

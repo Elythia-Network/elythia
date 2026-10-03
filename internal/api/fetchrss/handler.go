@@ -171,7 +171,12 @@ func (h *Handler) SetClock(now func() time.Time) {
 // URL 検証と error 体系は upstream 2026.7.0 の GHSA hardening (normalizeUrl +
 // INVALID_URL / FETCH_RSS_FAILED / FETCH_RSS_UNAVAILABLE) に揃える。
 func (h *Handler) Fetch(c echo.Context) error {
-	rawURL, provided := h.extractURL(c)
+	rawURL, provided, mistyped := h.extractURL(c)
+	if mistyped {
+		// object でない body (requireObjectBody が先に弾く) か、url が文字列で
+		// ない body。本家は ajv の型違いで 400 にする。
+		return apierr.JSONInvalidParam(c)
+	}
 	if !provided {
 		// upstream は url 欠落を ajv schema validation の INVALID_PARAM (400)
 		// で弾く (info に param/reason を含む)。param が存在して不正な場合は
@@ -256,23 +261,35 @@ func (h *Handler) Fetch(c echo.Context) error {
 }
 
 // extractURL pulls the url parameter and reports whether it was provided at
-// all (ajv の required 相当の判定に使う)。POST は upstream 同様 body を
-// 優先し、frontend の RSS widget が使う GET は query から取る。
-func (h *Handler) extractURL(c echo.Context) (string, bool) {
+// all (ajv の required 相当の判定に使う)。POST は upstream 同様 body だけを
+// 見て、frontend の RSS widget が使う GET は query から取る。
+//
+// mistyped is true when a POST body could not be read as {url: string}; the
+// caller answers it with INVALID_PARAM like upstream's ajv.
+func (h *Handler) extractURL(c echo.Context) (rawURL string, provided, mistyped bool) {
 	if c.Request().Method != http.MethodGet {
+		// 本家は POST では body しか params にしない (ApiCallService.ts の
+		// handleRequest)。bind に失敗したときや url が文字列でないときに
+		// query の url へ流れると、本家が 400 にする要求を通してしまう (#3330)。
 		var body struct {
-			URL *string `json:"url"`
+			URL json.RawMessage `json:"url"`
 		}
-		// Bind 失敗は「未指定」扱い (上位で INVALID_PARAM)。
-		_ = c.Bind(&body)
-		if body.URL != nil {
-			return strings.TrimSpace(*body.URL), true
+		if err := c.Bind(&body); err != nil {
+			return "", false, true
 		}
+		if body.URL == nil {
+			return "", false, false
+		}
+		var s string
+		if string(body.URL) == "null" || json.Unmarshal(body.URL, &s) != nil {
+			return "", false, true
+		}
+		return strings.TrimSpace(s), true, false
 	}
 	if qp := c.QueryParams(); len(qp["url"]) > 0 {
-		return strings.TrimSpace(qp.Get("url")), true
+		return strings.TrimSpace(qp.Get("url")), true, false
 	}
-	return "", false
+	return "", false, false
 }
 
 // normalizeFeedURL validates and canonicalizes the feed URL following

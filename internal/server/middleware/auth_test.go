@@ -1,7 +1,9 @@
 package middleware
 
 import (
+	"bytes"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -573,6 +575,143 @@ func TestAuthenticate_JSONBodyToken_BOMPrefix(t *testing.T) {
 	})
 
 	require.NoError(t, handler(c))
+}
+
+// TestAuthenticate_JSONBodyToken_ExactKey pins that the body token is read
+// from the exact key "i", as upstream's body['i'] does. encoding/json matches
+// struct fields case-insensitively, so a struct-based extraction accepted
+// {"I": token} and let a later "I" override "i" (#3330).
+func TestAuthenticate_JSONBodyToken_ExactKey(t *testing.T) {
+	userRepo := testutil.NewMockUserRepository()
+	tokenRepo := testutil.NewMockAccessTokenRepository()
+	userRepo.Tokens["exacttokenAAAAAA"] = &model.User{ID: "userA", Username: "a"}
+	userRepo.Tokens["exacttokenBBBBBB"] = &model.User{ID: "userB", Username: "b"}
+	auth := NewAuthMiddleware(userRepo, tokenRepo)
+
+	cases := []struct {
+		name   string
+		ct     string
+		body   string
+		wantID string
+	}{
+		{name: "upper-case key is not the token", body: `{"I":"exacttokenAAAAAA"}`, wantID: ""},
+		{name: "later case variant does not override", body: `{"i":"exacttokenAAAAAA","I":"exacttokenBBBBBB"}`, wantID: "userA"},
+		{name: "exact key still authenticates", body: `{"I":"exacttokenBBBBBB","i":"exacttokenAAAAAA"}`, wantID: "userA"},
+		{name: "non-string token is anonymous", body: `{"i":1}`, wantID: ""},
+		// 本家は application/json のときだけ body を object にする。
+		{name: "text/plain body is not parsed", ct: "text/plain", body: `{"i":"exacttokenAAAAAA"}`, wantID: ""},
+		{name: "body without content type is not parsed", ct: "-", body: `{"i":"exacttokenAAAAAA"}`, wantID: ""},
+		{name: "form body is not parsed as JSON", ct: "application/x-www-form-urlencoded", body: `{"i":"exacttokenAAAAAA"}`, wantID: ""},
+		{name: "JSON with parameters is parsed", ct: "Application/JSON; charset=utf-8", body: `{"i":"exacttokenBBBBBB"}`, wantID: "userB"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := echo.New()
+			req := httptest.NewRequest(http.MethodPost, "/api/i", strings.NewReader(tc.body))
+			switch tc.ct {
+			case "":
+				req.Header.Set("Content-Type", "application/json")
+			case "-":
+			default:
+				req.Header.Set("Content-Type", tc.ct)
+			}
+			c := e.NewContext(req, httptest.NewRecorder())
+			called := false
+			gotID := ""
+			handler := auth.Authenticate()(func(c echo.Context) error {
+				called = true
+				if u := GetUser(c); u != nil {
+					gotID = u.ID
+				}
+				return c.String(http.StatusOK, "ok")
+			})
+			require.NoError(t, handler(c))
+			require.True(t, called)
+			assert.Equal(t, tc.wantID, gotID)
+		})
+	}
+}
+
+// TestAuthenticate_QueryTokenOnlyOnGet pins that `?i=` authenticates only a
+// GET, where upstream uses the query as params; a POST reads the body only,
+// and a GET's body is never read (Fastify does not parse it) (#3330).
+func TestAuthenticate_QueryTokenOnlyOnGet(t *testing.T) {
+	userRepo := testutil.NewMockUserRepository()
+	userRepo.Tokens["querytokenAAAAAA"] = &model.User{ID: "userQ", Username: "q"}
+	auth := NewAuthMiddleware(userRepo, testutil.NewMockAccessTokenRepository())
+
+	cases := []struct {
+		name, method, target, body, wantID string
+	}{
+		{"GET query token", http.MethodGet, "/api/emojis?i=querytokenAAAAAA", "", "userQ"},
+		{"POST query token is ignored", http.MethodPost, "/api/i?i=querytokenAAAAAA", `{}`, ""},
+		{"POST body token", http.MethodPost, "/api/i?i=other", `{"i":"querytokenAAAAAA"}`, "userQ"},
+		{"GET body token is ignored", http.MethodGet, "/api/emojis", `{"i":"querytokenAAAAAA"}`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := echo.New()
+			req := httptest.NewRequest(tc.method, tc.target, strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			c := e.NewContext(req, httptest.NewRecorder())
+			called := false
+			gotID := ""
+			require.NoError(t, auth.Authenticate()(func(c echo.Context) error {
+				called = true
+				if u := GetUser(c); u != nil {
+					gotID = u.ID
+				}
+				return nil
+			})(c))
+			require.True(t, called)
+			assert.Equal(t, tc.wantID, gotID)
+		})
+	}
+}
+
+// TestAuthenticate_MultipartTokenFromBodyOnly pins that a multipart request
+// is authenticated by its body field "i" only, as upstream's
+// handleMultipartRequest reads fields['i']; a `?i=` on the URL is ignored
+// (#3330).
+func TestAuthenticate_MultipartTokenFromBodyOnly(t *testing.T) {
+	userRepo := testutil.NewMockUserRepository()
+	userRepo.Tokens["multitokenAAAAAA"] = &model.User{ID: "userM", Username: "m"}
+	auth := NewAuthMiddleware(userRepo, testutil.NewMockAccessTokenRepository())
+
+	cases := []struct {
+		name, target, field, wantID string
+	}{
+		{"query token only", "/api/drive/files/create?i=multitokenAAAAAA", "", ""},
+		{"body field token", "/api/drive/files/create", "multitokenAAAAAA", "userM"},
+		{"body field wins over query", "/api/drive/files/create?i=other", "multitokenAAAAAA", "userM"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			mw := multipart.NewWriter(&buf)
+			if tc.field != "" {
+				require.NoError(t, mw.WriteField("i", tc.field))
+			}
+			require.NoError(t, mw.WriteField("name", "a.txt"))
+			require.NoError(t, mw.Close())
+
+			e := echo.New()
+			req := httptest.NewRequest(http.MethodPost, tc.target, &buf)
+			req.Header.Set("Content-Type", mw.FormDataContentType())
+			c := e.NewContext(req, httptest.NewRecorder())
+			called := false
+			gotID := ""
+			require.NoError(t, auth.Authenticate()(func(c echo.Context) error {
+				called = true
+				if u := GetUser(c); u != nil {
+					gotID = u.ID
+				}
+				return nil
+			})(c))
+			require.True(t, called)
+			assert.Equal(t, tc.wantID, gotID)
+		})
+	}
 }
 
 func TestAuthenticate_JSONBodyToken_EmptyI(t *testing.T) {

@@ -27,7 +27,9 @@ func (h *Handler) InviteCreate(c echo.Context) error {
 		Count     int     `json:"count"`
 		ExpiresAt *string `json:"expiresAt"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	if req.Count <= 0 {
 		req.Count = 1
 	}
@@ -168,7 +170,9 @@ func (h *Handler) InviteList(c echo.Context) error {
 		Type   string `json:"type"`
 		Sort   string `json:"sort"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	limit, limitOK := pagination.ResolveLimit(req.Limit, 30, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)

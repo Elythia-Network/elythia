@@ -427,37 +427,50 @@ func extractToken(c echo.Context) string {
 		return strings.TrimPrefix(auth, "Bearer ")
 	}
 
-	// Query parameter
-	if t := c.QueryParam("i"); t != "" {
-		return t
+	// 本家は GET では query を params にし (`?i=` が token)、それ以外では body
+	// しか見ない (ApiCallService.ts の handleRequest / handleMultipartRequest)。
+	// POST の `?i=` を受けると、本家では匿名になる要求を認証してしまう (#3330)。
+	// GET の body は Fastify が読まないので、body の i も見ない。
+	req := c.Request()
+	if req.Method == http.MethodGet {
+		return c.QueryParam("i")
 	}
 
 	// multipart/form-data の "i" フィールド (ファイルアップロード時)
-	req := c.Request()
 	ct := req.Header.Get("Content-Type")
 	if strings.HasPrefix(ct, "multipart/form-data") {
-		if t := c.FormValue("i"); t != "" {
-			return t
-		}
-		return ""
+		// 本家 handleMultipartRequest は multipart の fields['i'] だけを見る。
+		// c.FormValue は URL の query も引くので、`?i=` だけで認証されてしまう
+		// (#3330)。PostFormValue は ParseMultipartForm 後の body の値だけを返す。
+		return req.PostFormValue("i")
 	}
 
 	// JSON body の "i" フィールド (Misskey-style)
 	// フロントエンドは全 API で POST {"i":"token", ...} を送信する。
 	// ボディを読んだ後にリセットし、後続ハンドラが再読み取り可能にする。
+	// 本家で body が object になるのは application/json のときだけ。text/plain
+	// は文字列のまま (body['i'] は undefined) で、Content-Type 無しや未知の型は
+	// Fastify が parse しない (#3330)。それらの body から token を拾わない。
+	if !IsJSONContentType(ct) {
+		return ""
+	}
 	if req.Body != nil && req.ContentLength != 0 {
 		body, err := io.ReadAll(req.Body)
 		if err == nil && len(body) > 0 {
 			// ボディをリセット (下流のJSONBodyParse/c.Bindには原文を渡す)
 			req.Body = io.NopCloser(bytes.NewReader(body))
-			var parsed struct {
-				I string `json:"i"`
-			}
 			// 本家 (secure-json-parse) はUTF-8 BOMを除去してからparseする
 			// ため、BOM付きbodyのtoken抽出もここで除去して揃える (#1609)。
 			// encoding/json はBOMを受理しないので除去しないと匿名扱いになる。
-			if json.Unmarshal(bytes.TrimPrefix(body, utf8BOM), &parsed) == nil && parsed.I != "" {
-				return parsed.I
+			//
+			// struct の field で受けると encoding/json がキーを大文字小文字を
+			// 無視して割り当て、`{"I": "<token>"}` でも認証が通ってしまう。本家は
+			// body['i'] を完全一致で読むので、map で受けて "i" だけを見る (#3330)。
+			var parsed map[string]json.RawMessage
+			var token string
+			if json.Unmarshal(bytes.TrimPrefix(body, utf8BOM), &parsed) == nil &&
+				json.Unmarshal(parsed["i"], &token) == nil && token != "" {
+				return token
 			}
 		}
 	}
