@@ -166,6 +166,11 @@ func TestParse_LocalSizedPathologicalInputsStayWithinBudget(t *testing.T) {
 		"unclosed center lines": fill("", "<center>a\n", 3000),
 		"unclosed center crlf":  fill("", "\r\n<center>\r\n**", 3000),
 		"center lines at limit": fill("", strings.Repeat(">", 19)+" <center>a\n", 3000),
+		// コードブロックは閉じの ``` の直後が行の終わりでなければならない。開きの行を
+		// 並べると、開きごとに末尾まで閉じを探して行数の 2 乗になる (#3329)
+		"unclosed code blocks":    fill("", "```a\n", 3000),
+		"unclosed code blocks cr": fill("", "```a\r", 3000),
+		"quoted code blocks":      fill("", "> ```a\r\n", 3000),
 	}
 	for name, in := range cases {
 		for _, simple := range []bool{false, true} {

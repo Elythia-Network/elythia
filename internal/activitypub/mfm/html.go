@@ -2,7 +2,6 @@ package mfm
 
 import (
 	"fmt"
-	"html"
 	"net/url"
 	"strconv"
 	"strings"
@@ -74,22 +73,22 @@ func renderNode(b *strings.Builder, n *Node, host string) {
 	case NodeInlineCode:
 		code, _ := n.Props["code"].(string)
 		b.WriteString("<code>")
-		b.WriteString(html.EscapeString(code))
+		b.WriteString(EscapeHTML(code))
 		b.WriteString("</code>")
 	case NodeBlockCode:
 		code, _ := n.Props["code"].(string)
 		b.WriteString("<pre><code>")
-		b.WriteString(html.EscapeString(code))
+		b.WriteString(EscapeHTML(code))
 		b.WriteString("</code></pre>")
 	case NodeMathInline:
 		formula, _ := n.Props["formula"].(string)
 		b.WriteString("<code>")
-		b.WriteString(html.EscapeString(formula))
+		b.WriteString(EscapeHTML(formula))
 		b.WriteString("</code>")
 	case NodeMathBlock:
 		formula, _ := n.Props["formula"].(string)
 		b.WriteString("<code>")
-		b.WriteString(html.EscapeString(formula))
+		b.WriteString(EscapeHTML(formula))
 		b.WriteString("</code>")
 	case NodeQuote:
 		b.WriteString("<blockquote>")
@@ -101,12 +100,12 @@ func renderNode(b *strings.Builder, n *Node, host string) {
 		query, _ := n.Props["query"].(string)
 		content, _ := n.Props["content"].(string)
 		b.WriteString(fmt.Sprintf(`<a href="%s">%s</a>`,
-			html.EscapeString("https://www.google.com/search?q="+encodeURIComponent(query)),
-			html.EscapeString(content)))
+			EscapeHTML("https://www.google.com/search?q="+encodeURIComponent(query)),
+			EscapeHTML(content)))
 	case NodeURL:
 		u, _ := n.Props["url"].(string)
 		b.WriteString(fmt.Sprintf(`<a href="%s">%s</a>`,
-			html.EscapeString(u), html.EscapeString(u)))
+			EscapeHTML(u), EscapeHTML(u)))
 	case NodeLink:
 		u, _ := n.Props["url"].(string)
 		// XSS防止: http/https以外のスキーム (javascript: 等) はリンク化しない
@@ -114,7 +113,7 @@ func renderNode(b *strings.Builder, n *Node, host string) {
 			renderChildren(b, n.Children, host)
 			break
 		}
-		b.WriteString(fmt.Sprintf(`<a href="%s">`, html.EscapeString(u)))
+		b.WriteString(fmt.Sprintf(`<a href="%s">`, EscapeHTML(u)))
 		renderChildren(b, n.Children, host)
 		b.WriteString("</a>")
 	case NodeMention:
@@ -129,11 +128,11 @@ func renderNode(b *strings.Builder, n *Node, host string) {
 			href = fmt.Sprintf("https://%s/@%s", mentionHost, username)
 		}
 		b.WriteString(fmt.Sprintf(`<a href="%s" class="u-url mention">%s</a>`,
-			html.EscapeString(href), html.EscapeString(acct)))
+			EscapeHTML(href), EscapeHTML(acct)))
 	case NodeHashtag:
 		tag, _ := n.Props["hashtag"].(string)
 		b.WriteString(fmt.Sprintf(`<a href="https://%s/tags/%s" rel="tag">#%s</a>`,
-			host, html.EscapeString(url.PathEscape(tag)), html.EscapeString(tag)))
+			host, EscapeHTML(url.PathEscape(tag)), EscapeHTML(tag)))
 	case NodeUnicodeEmoji:
 		emoji, _ := n.Props["emoji"].(string)
 		b.WriteString(emoji)
@@ -141,7 +140,7 @@ func renderNode(b *strings.Builder, n *Node, host string) {
 		name, _ := n.Props["name"].(string)
 		// ZWSP + :name: + ZWSP (TS版と同じ)
 		b.WriteString("\u200b:")
-		b.WriteString(html.EscapeString(name))
+		b.WriteString(EscapeHTML(name))
 		b.WriteString(":\u200b")
 	case NodeFn:
 		renderFn(b, n, host)
@@ -180,7 +179,7 @@ func renderFn(b *strings.Builder, n *Node, host string) {
 			b.WriteString("<ruby>")
 			renderChildren(b, n.Children, host)
 			b.WriteString("<rp>(</rp><rt>")
-			b.WriteString(html.EscapeString(rt))
+			b.WriteString(EscapeHTML(rt))
 			b.WriteString("</rt><rp>)</rp></ruby>")
 		} else {
 			b.WriteString("<i>")
@@ -198,12 +197,30 @@ func renderFn(b *strings.Builder, n *Node, host string) {
 func renderText(b *strings.Builder, text string) {
 	lines := strings.Split(text, "\n")
 	for i, line := range lines {
-		b.WriteString(html.EscapeString(line))
+		b.WriteString(EscapeHTML(line))
 		if i < len(lines)-1 {
 			b.WriteString("<br>")
 		}
 	}
 }
+
+// htmlEscaper mirrors upstream's escapeHtml (packages/backend/src/misc/escape-html.ts).
+var htmlEscaper = strings.NewReplacer(
+	"&", "&amp;",
+	"<", "&lt;",
+	">", "&gt;",
+	`"`, "&quot;",
+	"'", "&#039;",
+)
+
+// EscapeHTML escapes s exactly like upstream's escapeHtml, which MfmService
+// and ApRendererService use for the HTML they federate.
+//
+// html.EscapeString は `'` / `"` を `&#39;` / `&#34;` にする。意味は同じだが、
+// エスケープの表記を本家に揃えるため、本家と同じ置き換えにする。ToHTML の出力
+// 全体が本家とバイト単位で一致するわけではない (改行の `<br>` と `<br />`、
+// CR での改行の扱い、数式ブロックの `<pre>`、plain の `<span>` などは違う)。
+func EscapeHTML(s string) string { return htmlEscaper.Replace(s) }
 
 func renderChildren(b *strings.Builder, children []*Node, host string) {
 	for _, c := range children {
@@ -214,6 +231,12 @@ func renderChildren(b *strings.Builder, children []*Node, host string) {
 // encodeURIComponent percent-encodes s the same way as JavaScript's
 // encodeURIComponent: every byte of the UTF-8 encoding is escaped as %XX
 // (uppercase hex) except ASCII letters, digits and - _ . ! ~ * ' ( ).
+//
+// JavaScript の encodeURIComponent は孤立したサロゲートで URIError を投げるが、
+// ここへ来る文字列は検索構文の query だけで、Parse が入口で ToValidUTF8 を通した
+// 入力の部分文字列なので、常に正しい UTF-8 (サロゲートの符号も含まない) になる。
+// 不正なバイトの扱いを JavaScript に合わせる経路が無いので、バイトごとに
+// エスケープするままにしてある (#3329)。
 func encodeURIComponent(s string) string {
 	const hex = "0123456789ABCDEF"
 	var b strings.Builder

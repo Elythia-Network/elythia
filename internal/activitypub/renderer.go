@@ -715,7 +715,8 @@ func (r *Renderer) renderNote(n *model.Note, idGen id.Generator, approvalOf func
 		// 非 Misskey クライアント向けに content 末尾へ quote-inline span を
 		// 付ける (#1560、upstream ApRendererService.ts:436-441)。class名
 		// `quote-inline` は非 Misskey クライアントの quote 表示に使われる。
-		esc := html.EscapeString(quoteURI)
+		// エスケープは本家と同じく escapeHtml (`'` は `&#039;`、`"` は `&quot;`)
+		esc := mfm.EscapeHTML(quoteURI)
 		out.Content += `<br><br><span class="quote-inline">RE: <a href="` + esc + `">` + esc + `</a></span>`
 	}
 
@@ -1788,7 +1789,8 @@ func (r *Renderer) RenderMove(src *model.User, dstURI string) *Move {
 // される。生の本文をそのまま入れると `<script>` や `onerror=` が受信側の
 // content に HTML として載る (chat には入力時のサニタイズも無い)。RenderNote
 // と同じ mfm.Parse -> mfm.ToHTML を通すことで、text ノードは
-// html.EscapeString され、MFM は upstream と同じ HTML になる。
+// mfm.EscapeHTML (本家の escapeHtml と同じ置き換え) でエスケープされ、MFM は
+// ノートの content と同じ HTML になる。
 //
 // **source は常に出す (レビュー M1)。** RenderNote は「標準ノードだけなら
 // 省略」するが、`IsSimple` はカスタム絵文字 (`:name:`) を simple 扱いする一方、

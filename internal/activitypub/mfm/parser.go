@@ -122,9 +122,10 @@ type stopKind uint8
 const (
 	stopPlainClose     stopKind = iota // </plain>
 	stopMathBlockClose                 // \]
-	stopMathInline                     // \) or a newline
+	stopMathInline                     // \) or a newline (CR or LF)
 	stopURLAltEnd                      // '>', ' ', '\u3000' or '\t'
 	stopCenterClose                    // </center>
+	stopCodeBlockClose                 // a newline, ``` and a line end
 	numStopKinds
 )
 
@@ -162,7 +163,14 @@ func (m *memoTable) stopList(src string, kind stopKind) ([]int32, bool) {
 		list = indexAll(src, "</center>")
 	case stopMathInline:
 		for i := 0; i < len(src); i++ {
-			if src[i] == '\n' || strings.HasPrefix(src[i:], "\\)") {
+			// mfm-js の newLine は CR でも止まる
+			if src[i] == '\n' || src[i] == '\r' || strings.HasPrefix(src[i:], "\\)") {
+				list = append(list, int32(i))
+			}
+		}
+	case stopCodeBlockClose:
+		for i := 0; i < len(src); i++ {
+			if l := newlineLenIn(src, i); l > 0 && strings.HasPrefix(src[i+l:], "```") && lineEndIn(src, i+l+3) {
 				list = append(list, int32(i))
 			}
 		}
@@ -467,22 +475,29 @@ func (m *memoTable) buildQuotes(src string) bool {
 		b.Reset()
 		inRun = false
 	}
+	// 行は mfm-js の newLine (CRLF / CR / LF) で切る。各行の中身は改行を含まず、
+	// 中身は "\n" でつなぐ (mfm-js は contents.join("\n"))。LF だけで切ると、
+	// `> a\rb` の CR の後ろまで引用に入り、`\r> a` の CR の直後を行頭とみなさない。
 	for p := 0; p < len(src); {
-		e := strings.IndexByte(src[p:], '\n')
+		e := strings.IndexAny(src[p:], "\r\n")
 		if e < 0 {
 			e = len(src)
 		} else {
 			e += p
 		}
-		next := min(e+1, len(src))
+		next := e + newlineLenIn(src, e)
 		if src[p] != '>' {
 			flush(p)
 			p = next
 			continue
 		}
 		c := p + 1
-		if c < len(src) && (src[c] == ' ' || src[c] == '\t') {
+		// `>` の直後の空白は mfm-js の space.option() で、全角空白も 1 つ読む
+		switch {
+		case c < len(src) && (src[c] == ' ' || src[c] == '\t'):
 			c++
+		case strings.HasPrefix(src[c:], "\u3000"):
+			c += len("\u3000")
 		}
 		cost := lineCost + e - c + 1
 		if !inRun {
@@ -999,8 +1014,8 @@ func (s *state) tryQuote() *Node {
 	if s.inLink {
 		return nil
 	}
-	// 行頭もしくはテキスト先頭のみ
-	if s.pos > 0 && s.src[s.pos-1] != '\n' {
+	// 行頭もしくはテキスト先頭のみ。mfm-js の lineBegin は CR の直後も行頭とみなす
+	if !s.atLineBegin() {
 		return nil
 	}
 	if !s.hasPrefix(">") {
@@ -1031,48 +1046,66 @@ func (s *state) tryCodeBlock() *Node {
 	if s.depth != s.fullDepth {
 		return nil
 	}
-	if s.pos > 0 && s.src[s.pos-1] != '\n' {
-		return nil
-	}
-	if !s.hasPrefix("```") {
+	// mfm-js 0.26.0 の codeBlock:
+	//
+	//	seq(newLine.option(), lineBegin, mark, (notMatch(newLine) char)*, newLine,
+	//	    (notMatch(seq(newLine, mark, lineEnd)) char)+, newLine, mark, lineEnd,
+	//	    newLine.option())
+	//
+	// 前の改行は tryBlock が読む。改行は CRLF / CR / LF のどれでもよく、中身は
+	// 1 文字以上要る (` ```⏎⏎``` ` は文字)。閉じの ``` の直後は行の終わりでなければ
+	// ならない。以前は LF だけを見て、閉じの後ろの同じ行の文字も飲み込み、中身が
+	// 空でも受け付けていた。
+	if !s.atLineBegin() || !s.hasPrefix("```") {
 		return nil
 	}
 	save := s.pos
-	s.advance(3) // skip ```
-	// optional lang
-	langStart := s.pos
-	for !s.eof() && s.peek() != '\n' {
-		s.advance(utf8.RuneLen(s.peek()))
+	langStart := s.pos + 3
+	langEnd := len(s.src)
+	if i := strings.IndexAny(s.src[langStart:], "\r\n"); i >= 0 {
+		langEnd = langStart + i
 	}
-	lang := strings.TrimSpace(s.src[langStart:s.pos])
-	if s.eof() {
+	s.budget.used += langEnd - langStart
+	if langEnd == len(s.src) {
+		return nil
+	}
+	lang := strings.TrimSpace(s.src[langStart:langEnd])
+	codeStart := langEnd + s.newlineLenAt(langEnd)
+	s.pos = codeStart
+	closeAt, ok := s.codeBlockClose()
+	if !ok || closeAt == codeStart {
 		s.pos = save
 		return nil
 	}
-	s.advance(1) // skip \n
-
-	codeStart := s.pos
-	for !s.eof() {
-		if s.hasPrefix("\n```") {
-			code := s.src[codeStart:s.pos]
-			s.advance(4) // skip \n```
-			// 行末まで消費 (改行 or EOF)
-			for !s.eof() && s.peek() != '\n' {
-				s.advance(1)
-			}
-			if !s.eof() {
-				s.advance(1)
-			}
-			props := map[string]any{"code": code}
-			if lang != "" {
-				props["lang"] = lang
-			}
-			return &Node{Type: NodeBlockCode, Props: props}
-		}
-		s.advance(utf8.RuneLen(s.peek()))
+	code := s.src[codeStart:closeAt]
+	s.pos = closeAt + s.newlineLenAt(closeAt) + len("```")
+	s.advance(s.newlineLen())
+	props := map[string]any{"code": code}
+	if lang != "" {
+		props["lang"] = lang
 	}
-	s.pos = save
-	return nil
+	return &Node{Type: NodeBlockCode, Props: props}
+}
+
+// codeBlockClose returns the first position at or after the current one where
+// a newline, ``` and a line end follow. ok is false when there is none or the
+// work budget runs out.
+//
+// 開きを並べて閉じを置かない入力 (```a⏎ の繰り返し) では、開きごとに末尾まで
+// 探すと入力長の 2 乗になるので、閉じの位置の索引から引く。
+func (s *state) codeBlockClose() (int, bool) {
+	if c, ok := s.nextStop(stopCodeBlockClose); ok {
+		return c, c < len(s.src)
+	}
+	for i := s.pos; i < len(s.src); i++ {
+		if s.budget.used++; s.budget.exhausted() {
+			return 0, false
+		}
+		if l := s.newlineLenAt(i); l > 0 && s.prefixAt(i+l, "```") && s.lineEndAt(i+l+3) {
+			return i, true
+		}
+	}
+	return 0, false
 }
 
 func (s *state) tryMathBlock() *Node {
@@ -1200,17 +1233,30 @@ func (s *state) centerTextEnd() int {
 func (s *state) newlineLen() int { return s.newlineLenAt(s.pos) }
 
 // lineEndAt reports whether pos is the end of input or a line break.
-func (s *state) lineEndAt(pos int) bool {
-	return pos >= len(s.src) || s.src[pos] == '\n' || s.src[pos] == '\r'
+func (s *state) lineEndAt(pos int) bool { return lineEndIn(s.src, pos) }
+
+// lineEndIn reports mfm-js's lineEnd at pos in src: the end of src or CR or LF.
+func lineEndIn(src string, pos int) bool {
+	return pos >= len(src) || src[pos] == '\n' || src[pos] == '\r'
 }
 
 // newlineLenAt returns the length of the newline (CRLF, CR or LF, in
 // mfm-js's order) at pos, or 0.
-func (s *state) newlineLenAt(pos int) int {
-	switch {
-	case s.prefixAt(pos, "\r\n"):
-		return 2
-	case s.prefixAt(pos, "\r"), s.prefixAt(pos, "\n"):
+func (s *state) newlineLenAt(pos int) int { return newlineLenIn(s.src, pos) }
+
+// newlineLenIn returns the length of mfm-js's newLine at pos in src (CRLF,
+// CR or LF, tried in that order), or 0.
+func newlineLenIn(src string, pos int) int {
+	if pos < 0 || pos >= len(src) {
+		return 0
+	}
+	switch src[pos] {
+	case '\r':
+		if pos+1 < len(src) && src[pos+1] == '\n' {
+			return 2
+		}
+		return 1
+	case '\n':
 		return 1
 	}
 	return 0
@@ -1230,27 +1276,43 @@ func (s *state) tryPlainTag() *Node {
 	if !s.hasPrefix("<plain>") {
 		return nil
 	}
+	// mfm-js 0.26.0 の plainTag:
+	//
+	//	seq(open, newLine.option(),
+	//	    (notMatch(seq(newLine.option(), close)) char)+.text(),
+	//	    newLine.option(), close)
+	//
+	// 開きの直後と閉じの直前の改行を 1 つずつ中身から外し、中身は 1 文字以上要る
+	// (`<plain></plain>` は文字)。以前は開きから閉じまでをそのまま中身にしていた。
 	save := s.pos
-	s.advance(7) // <plain>
+	s.advance(len("<plain>"))
+	s.advance(s.newlineLen())
 	start := s.pos
-	if end, ok := s.nextStop(stopPlainClose); ok {
-		if end < len(s.src) {
-			s.pos = end + 8 // </plain>
-			return &Node{Type: NodePlain, Children: []*Node{Text(s.src[start:end])}}
+	c, ok := s.nextStop(stopPlainClose)
+	if !ok {
+		c = len(s.src)
+		if i := strings.Index(s.remaining(), "</plain>"); i >= 0 {
+			c = s.pos + i
 		}
+		s.budget.used += c - s.pos
+	}
+	if c >= len(s.src) {
 		s.pos = save
 		return nil
 	}
-	for !s.eof() {
-		if s.hasPrefix("</plain>") {
-			text := s.src[start:s.pos]
-			s.advance(8) // </plain>
-			return &Node{Type: NodePlain, Children: []*Node{Text(text)}}
-		}
-		s.advance(utf8.RuneLen(s.peek()))
+	end := c
+	switch {
+	case c-2 >= start && s.src[c-2:c] == "\r\n":
+		end = c - 2
+	case c-1 >= start && (s.src[c-1] == '\n' || s.src[c-1] == '\r'):
+		end = c - 1
 	}
-	s.pos = save
-	return nil
+	if end == start {
+		s.pos = save
+		return nil
+	}
+	s.pos = c + len("</plain>")
+	return &Node{Type: NodePlain, Children: []*Node{Text(s.src[start:end])}}
 }
 
 func (s *state) tryBoldTag() *Node {
@@ -1360,31 +1422,32 @@ func (s *state) wrappedBody(close string, kind scanKind) ([]*Node, bool) {
 	return mergeText(children), true
 }
 
-// tryWrappedAlphaSpace は英数字+空白のみを含むラップされた部分をパースする。
+// tryWrappedAlphaSpace parses mfm-js's `seq(mark, alt([alphaAndNum,
+// space]).many(1), mark)`: one or more ASCII letters, digits or spaces
+// (U+0020, U+3000 or a tab) between open and close.
+//
+// 以前は閉じまでの中身を unicode.IsSpace で確かめていたので、mfm-js の space に
+// 無い CR・NBSP・垂直タブなども中身にできた (`*a\rb*` が斜体になった)。
 func (s *state) tryWrappedAlphaSpace(open, close string, nodeType NodeType) *Node {
-	save := s.pos
-	s.advance(len(open))
-	start := s.pos
-	for !s.eof() {
-		if s.hasPrefix(close) {
-			content := s.src[start:s.pos]
-			if content == "" {
-				break
-			}
-			// 英数字+空白のみか確認
-			if !isAlphaSpaceOnly(content) {
-				break
-			}
-			s.advance(len(close))
-			return withChildren(nodeType, []*Node{Text(content)})
+	start := s.pos + len(open)
+	i := start
+	for i < len(s.src) {
+		if c := s.src[i]; isAlphanumeric(rune(c)) || c == ' ' || c == '\t' {
+			i++
+			continue
 		}
-		if s.peek() == '\n' {
-			break
+		if strings.HasPrefix(s.src[i:], "\u3000") {
+			i += len("\u3000")
+			continue
 		}
-		s.advance(utf8.RuneLen(s.peek()))
+		break
 	}
-	s.pos = save
-	return nil
+	s.budget.used += i - start
+	if i == start || !s.prefixAt(i, close) {
+		return nil
+	}
+	s.pos = i + len(close)
+	return withChildren(nodeType, []*Node{Text(s.src[start:i])})
 }
 
 func (s *state) tryInlineCode() *Node {
@@ -1404,7 +1467,8 @@ func (s *state) tryInlineCode() *Node {
 			s.advance(1)
 			return withProp(NodeInlineCode, "code", code)
 		}
-		if ch == '\n' || ch == 0xb4 { // ´ acute accent
+		// mfm-js の newLine は CR でも止まる
+		if ch == '\n' || ch == '\r' || ch == 0xb4 { // ´ acute accent
 			break
 		}
 		s.advance(utf8.RuneLen(ch))
@@ -1437,7 +1501,7 @@ func (s *state) tryMathInline() *Node {
 			s.advance(2)
 			return withProp(NodeMathInline, "formula", formula)
 		}
-		if s.peek() == '\n' {
+		if s.peek() == '\n' || s.peek() == '\r' {
 			break
 		}
 		s.advance(utf8.RuneLen(s.peek()))
@@ -1956,8 +2020,11 @@ func (s *state) tryLink() *Node {
 	oldInLink := s.inLink
 	s.inLink = true
 	s.depth++
+	labelStart := s.pos
 	end := s.scanEnd(scanLinkLabel)
-	ok := s.prefixAt(end, "](")
+	// ラベルは mfm-js の many(1) で 1 つ以上要る。空のラベル (`[](https://...)`) は
+	// リンクにせず、`[` を文字にして読み進める (以前は空の <a> を出していた)
+	ok := end > labelStart && s.prefixAt(end, "](")
 	var labelNodes []*Node
 	if ok {
 		labelNodes = s.collectTo(end)
@@ -2085,15 +2152,6 @@ func isAlphanumeric(r rune) bool {
 
 func isASCIIAlphanumeric(r rune) bool {
 	return isAlphanumeric(r)
-}
-
-func isAlphaSpaceOnly(s string) bool {
-	for _, r := range s {
-		if !isAlphanumeric(r) && !unicode.IsSpace(r) {
-			return false
-		}
-	}
-	return true
 }
 
 func isDigitsOnly(s string) bool {
