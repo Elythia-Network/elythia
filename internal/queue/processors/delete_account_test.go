@@ -238,11 +238,133 @@ func TestDeleteAccountProcessor_SoftKeepsUser(t *testing.T) {
 	assert.Contains(t, userRepo.Users, "remote", "soft delete must keep the user row as tombstone")
 }
 
+func TestDeleteAccountProcessor_SoftPreserveAccountTruthTable(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		soft        bool
+		preserve    bool
+		wantUser    bool
+		wantProfile bool
+	}{
+		{"local purge", false, false, false, false},
+		{"local preserve", false, true, true, true},
+		{"remote purge flag", true, false, true, true},
+		{"remote preserve", true, true, true, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			userRepo := testutil.NewMockUserRepository()
+			userRepo.Users["u"] = &model.User{ID: "u"}
+			userRepo.Profiles["u"] = &model.UserProfile{UserID: "u"}
+			p := processors.NewDeleteAccountProcessor(testutil.NewMockNoteRepository(), testutil.NewMockDriveFileRepository(), testutil.NewMockFollowingRepository())
+			p.SetUserRepo(userRepo)
+
+			require.NoError(t, p.Handle(context.Background(), deleteAccountTask(t, queue.DeleteAccountPayload{
+				UserID: "u", Soft: tt.soft, PreserveAccount: tt.preserve,
+			})))
+
+			_, userExists := userRepo.Users["u"]
+			_, profileExists := userRepo.Profiles["u"]
+			assert.Equal(t, tt.wantUser, userExists)
+			assert.Equal(t, tt.wantProfile, profileExists)
+		})
+	}
+}
+
+func TestDeleteAccountProcessor_PreserveStillRunsAllCleanup(t *testing.T) {
+	noteRepo := testutil.NewMockNoteRepository()
+	driveRepo := testutil.NewMockDriveFileRepository()
+	followingRepo := testutil.NewMockFollowingRepository()
+	pageRepo := &recordingPageRepo{MockPageRepository: testutil.NewMockPageRepository()}
+	userRepo := testutil.NewMockUserRepository()
+	uid := "target"
+	noteRepo.Notes["n-target"] = &model.Note{ID: "n-target", UserID: uid}
+	driveRepo.Files["f-target"] = &model.DriveFile{ID: "f-target", UserID: &uid}
+	followingRepo.Followings["fo-target"] = &model.Following{ID: "fo-target", FollowerID: uid, FolloweeID: "other"}
+	pageRepo.Pages["pg-target"] = &model.Page{ID: "pg-target", UserID: uid}
+	name := "Retained Name"
+	description := "Retained profile description"
+	email := "retained@example.com"
+	userRepo.Users[uid] = &model.User{ID: uid, Username: "retained", UsernameLower: "retained", Name: &name}
+	userRepo.Profiles[uid] = &model.UserProfile{UserID: uid, Description: &description, Email: &email}
+	p := processors.NewDeleteAccountProcessor(noteRepo, driveRepo, followingRepo)
+	p.SetPageRepo(pageRepo)
+	p.SetUserRepo(userRepo)
+
+	require.NoError(t, p.Handle(context.Background(), deleteAccountTask(t, queue.DeleteAccountPayload{
+		UserID: uid, PreserveAccount: true,
+	})))
+
+	assert.NotContains(t, noteRepo.Notes, "n-target")
+	assert.NotContains(t, driveRepo.Files, "f-target")
+	assert.NotContains(t, followingRepo.Followings, "fo-target")
+	assert.NotContains(t, pageRepo.Pages, "pg-target")
+	assert.Equal(t, []string{"pg-target"}, pageRepo.deleted, "#3293 page repository cleanup must still run")
+	require.Contains(t, userRepo.Users, uid)
+	require.Contains(t, userRepo.Profiles, uid)
+	assert.Equal(t, "retained", userRepo.Users[uid].Username, "preserve is retention, not anonymization")
+	assert.Equal(t, &name, userRepo.Users[uid].Name, "preserve must leave identifying user fields unchanged")
+	assert.Equal(t, &description, userRepo.Profiles[uid].Description, "preserve must leave profile fields unchanged")
+	assert.Equal(t, &email, userRepo.Profiles[uid].Email, "preserve must leave identifying profile fields unchanged")
+}
+
 // #2230: userRepo 未配線なら hard delete を skip する (従来の soft 挙動)。
 func TestDeleteAccountProcessor_NoUserRepoSkipsHardDelete(t *testing.T) {
 	p := processors.NewDeleteAccountProcessor(testutil.NewMockNoteRepository(), testutil.NewMockDriveFileRepository(), testutil.NewMockFollowingRepository())
 	task := deleteAccountTask(t, queue.DeleteAccountPayload{UserID: "x", Soft: false})
 	require.NoError(t, p.Handle(context.Background(), task))
+}
+
+type credentialUserRepo struct {
+	*testutil.MockUserRepository
+	calls int
+	err   error
+}
+
+func (r *credentialUserRepo) RevokeDeletedLocalCredentials(uid string) error {
+	r.calls++
+	if r.err != nil {
+		return r.err
+	}
+	return r.MockUserRepository.RevokeDeletedLocalCredentials(uid)
+}
+
+func TestDeleteAccountProcessor_Credentials(t *testing.T) {
+	for _, soft := range []bool{false, true} {
+		for _, preserve := range []bool{false, true} {
+			r := &credentialUserRepo{MockUserRepository: testutil.NewMockUserRepository()}
+			secret := "secret"
+			r.Users["u"] = &model.User{ID: "u", IsDeleted: true, Token: &secret}
+			r.Profiles["u"] = &model.UserProfile{UserID: "u", Password: &secret}
+			p := processors.NewDeleteAccountProcessor(testutil.NewMockNoteRepository(), testutil.NewMockDriveFileRepository(), testutil.NewMockFollowingRepository())
+			p.SetUserRepo(r)
+			require.NoError(t, p.Handle(context.Background(), deleteAccountTask(t, queue.DeleteAccountPayload{UserID: "u", Soft: soft, PreserveAccount: preserve})))
+			if !soft && preserve {
+				assert.Equal(t, 1, r.calls)
+				assert.Nil(t, r.Users["u"].Token)
+				assert.Nil(t, r.Profiles["u"].Password)
+			} else {
+				assert.Zero(t, r.calls)
+			}
+		}
+	}
+}
+
+func TestDeleteAccountProcessor_CredentialFailureRetriesBeforeCleanup(t *testing.T) {
+	notes := testutil.NewMockNoteRepository()
+	notes.Notes["n"] = &model.Note{ID: "n", UserID: "u"}
+	p := processors.NewDeleteAccountProcessor(notes, testutil.NewMockDriveFileRepository(), testutil.NewMockFollowingRepository())
+	task := deleteAccountTask(t, queue.DeleteAccountPayload{UserID: "u", PreserveAccount: true})
+	require.Error(t, p.Handle(context.Background(), task))
+	r := &credentialUserRepo{MockUserRepository: testutil.NewMockUserRepository(), err: errors.New("cleanup failure")}
+	p.SetUserRepo(r)
+	err := p.Handle(context.Background(), task)
+	require.ErrorIs(t, err, r.err)
+	assert.False(t, errors.Is(err, driver.ErrSkipRetry))
+	assert.Contains(t, notes.Notes, "n")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.ErrorIs(t, p.Handle(ctx, task), context.Canceled)
+	assert.Equal(t, 1, r.calls)
 }
 
 // recordingPageRepo records which pages were deleted through Delete, so the

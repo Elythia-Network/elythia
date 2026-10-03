@@ -192,7 +192,19 @@ func (s *Service) snapshotPolicyProviders() []policyProvider {
 // bounded per-provider LRU; plugins must explicitly invalidate affected inputs
 // after committed state changes.
 func (s *Service) GetUserPoliciesChecked(userID string) (map[string]any, error) {
-	return s.resolvePolicies(userID)
+	return s.resolvePolicies(userID, nil, true)
+}
+
+// GetUserPoliciesCheckedForKeys resolves policies using only providers that
+// declare at least one of keys. Native base/role policies are still resolved in
+// full. This lets a narrow authorization decision fail closed for providers
+// that can affect it without coupling the decision to unrelated plugins.
+func (s *Service) GetUserPoliciesCheckedForKeys(userID string, keys ...string) (map[string]any, error) {
+	providerKeys := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		providerKeys[key] = struct{}{}
+	}
+	return s.resolvePolicies(userID, providerKeys, true)
 }
 
 // resolvePolicies computes effective policies for userID, invoking registered
@@ -200,11 +212,16 @@ func (s *Service) GetUserPoliciesChecked(userID string) (map[string]any, error) 
 // applied. Provider failures return ErrEffectivePolicyProvider with the failed
 // providers' keys restored to native results. Native role-input failures return
 // their wrapped repository error without invoking providers.
-func (s *Service) resolvePolicies(userID string) (map[string]any, error) {
+func (s *Service) resolvePolicies(userID string, providerKeys map[string]struct{}, failOnMetaError bool) (out map[string]any, err error) {
 	providers := s.snapshotPolicyProviders()
 	// applyMetaBasePolicies が base を mutate するため共有 cache ではなく clone を使う。
 	base := DefaultPoliciesClone()
-	s.applyMetaBasePolicies(base)
+	if baseErr := s.applyMetaBasePolicies(base); baseErr != nil && failOnMetaError {
+		providers = nil
+		basePolicyErr := fmt.Errorf("role: effective policy base: %w", baseErr)
+		defer func() { err = joinBasePolicyError(basePolicyErr, err) }()
+	}
+	providers = policyProvidersForKeys(providers, providerKeys)
 	if userID == "" && len(providers) == 0 {
 		return s.applyServerCaps(base), nil
 	}
@@ -227,7 +244,7 @@ func (s *Service) resolvePolicies(userID string) (map[string]any, error) {
 	}
 	roleInputs := newRolePolicyInputs(roles)
 
-	out := make(map[string]any, len(base))
+	out = make(map[string]any, len(base))
 	for key, baseVal := range base {
 		out[key] = computePolicy(key, baseVal, roleInputs, nil)
 	}
@@ -360,6 +377,29 @@ func (s *Service) resolvePolicies(userID string) (map[string]any, error) {
 	default:
 		return out, nil
 	}
+}
+
+func policyProvidersForKeys(providers []policyProvider, keys map[string]struct{}) []policyProvider {
+	if keys == nil {
+		return providers
+	}
+	filtered := make([]policyProvider, 0, len(providers))
+	for _, provider := range providers {
+		for _, key := range provider.reg.Keys {
+			if _, ok := keys[key]; ok {
+				filtered = append(filtered, provider)
+				break
+			}
+		}
+	}
+	return filtered
+}
+
+func joinBasePolicyError(baseErr, resolveErr error) error {
+	if resolveErr == nil {
+		return baseErr
+	}
+	return errors.Join(baseErr, resolveErr)
 }
 
 // log returns the logger captured when the runtime was built, falling back to

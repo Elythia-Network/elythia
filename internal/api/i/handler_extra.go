@@ -15,6 +15,7 @@ import (
 	"github.com/shiroha-a/mk/internal/api/notehide"
 	"github.com/shiroha-a/mk/internal/api/pagination"
 	"github.com/shiroha-a/mk/internal/core/notification"
+	"github.com/shiroha-a/mk/internal/core/role"
 	"github.com/shiroha-a/mk/internal/entity"
 	"github.com/shiroha-a/mk/internal/misc"
 	"github.com/shiroha-a/mk/internal/misc/achievement"
@@ -134,6 +135,26 @@ func (h *Handler) ChangePassword(c echo.Context) error {
 // DeleteAccount handles POST /api/i/delete-account.
 func (h *Handler) DeleteAccount(c echo.Context) error {
 	u := middleware.GetUser(c)
+
+	checked, ok := h.roleProvider.(checkedRoleProvider)
+	if !ok {
+		slog.Error("i/delete-account: checked role provider is not wired")
+		return apierr.JSONInternalError(c)
+	}
+	policies, err := checked.GetUserPoliciesCheckedForKeys(u.ID, role.PolicyCanDeleteAccount, role.PolicyCanPurgeAccount)
+	if err != nil {
+		slog.Error("i/delete-account: cannot resolve effective policies", "err", err)
+		return apierr.JSONInternalError(c)
+	}
+	allowed, valid := policies[role.PolicyCanDeleteAccount].(bool)
+	if !valid || !allowed {
+		return apierr.JSONRolePermissionDenied(c)
+	}
+	preserveAccount := true
+	if canPurge, valid := policies[role.PolicyCanPurgeAccount].(bool); valid && canPurge {
+		preserveAccount = false
+	}
+
 	var req struct {
 		Password string `json:"password"`
 		Token    string `json:"token"`
@@ -224,8 +245,11 @@ func (h *Handler) DeleteAccount(c echo.Context) error {
 		h.accountDeletionFed.OnUserDeleted(u)
 	}
 	if h.deleteAccountEnqueuer != nil {
-		// 自己削除は常に local user なので Soft=false で user 行を物理削除する (#2230)。
-		if err := h.deleteAccountEnqueuer.EnqueueDeleteAccount(queue.DeleteAccountPayload{UserID: u.ID, Soft: false}); err != nil {
+		// 自己削除は常に local user。Soft=false は cleanup を行うが、
+		// PreserveAccount=true の場合は user/profile 行を物理削除しない。
+		if err := h.deleteAccountEnqueuer.EnqueueDeleteAccount(queue.DeleteAccountPayload{
+			UserID: u.ID, Soft: false, PreserveAccount: preserveAccount,
+		}); err != nil {
 			// enqueue 失敗は user 可視のエラーにしない (フラグは既に立っている)。
 			// 次回手動 retry / 再ログイン不可状態は維持されるため 204 を返す。
 			slog.Warn("i/delete-account: enqueue cascade failed", "userId", u.ID, "err", err)

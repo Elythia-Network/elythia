@@ -49,6 +49,13 @@ type RoleProvider interface {
 	HasRolePolicy(userID, policyKey string) bool
 }
 
+// checkedRoleProvider is used by authorization decisions that must distinguish
+// a resolved deny from failures in the native inputs or providers that declare
+// the decision's policy keys.
+type checkedRoleProvider interface {
+	GetUserPoliciesCheckedForKeys(userID string, keys ...string) (map[string]any, error)
+}
+
 // EmailSender sends an email message (subject + text + optional HTML).
 // SMTP 設定は実装側が Meta から読み取る。テストではスタブを注入する。
 // HTML 同送が必要なら Message.HTML を設定する (#600 item 4)。

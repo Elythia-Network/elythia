@@ -612,6 +612,7 @@ func TestEffectivePolicy_RoleLookupErrorSkipsProvidersAndRemainsDistinct(t *test
 		err:                          errors.New("role lookup failed"),
 	}
 	metaRepo := testutil.NewMockMetaRepository()
+	metaRepo.Meta = &model.Meta{ID: "x"}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := role.NewService(roleRepo, assignRepo, metaRepo, idGen)
 	var providerCalls atomic.Int32
@@ -626,6 +627,79 @@ func TestEffectivePolicy_RoleLookupErrorSkipsProvidersAndRemainsDistinct(t *test
 	assert.ErrorContains(t, err, "role lookup failed")
 	assert.False(t, policies["canSearchNotes"].(bool))
 	assert.Zero(t, providerCalls.Load())
+}
+
+func TestEffectivePolicy_MetaBaseFailureIsCheckedButUncheckedStillCallsProviders(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		breakMeta func(*testutil.MockMetaRepository)
+	}{
+		{"fetch", func(repo *testutil.MockMetaRepository) { repo.FetchErr = errors.New("meta unavailable") }},
+		{"malformed json", func(repo *testutil.MockMetaRepository) {
+			repo.Meta = &model.Meta{ID: "x", Policies: datatypes.JSON([]byte(`{"canDeleteAccount":`))}
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, roleRepo, assignRepo, metaRepo := newTestService(t)
+			metaRepo.Meta.Policies = datatypes.JSON([]byte(`{"canDeleteAccount":false}`))
+			tt.breakMeta(metaRepo)
+			var providerCalls atomic.Int32
+			registerProvider(t, svc, "account", []string{role.PolicyCanDeleteAccount}, func(context.Context, plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+				providerCalls.Add(1)
+				return []plugin.EffectivePolicyContribution{{Key: role.PolicyCanDeleteAccount, Value: false}}, nil
+			})
+
+			policies, err := svc.GetUserPoliciesChecked("u1")
+			require.Error(t, err)
+			assert.ErrorContains(t, err, "role: effective policy base")
+			assert.Equal(t, true, policies[role.PolicyCanDeleteAccount])
+			assert.Zero(t, providerCalls.Load())
+
+			roleRepo.Roles["deny"] = &model.Role{
+				ID:       "deny",
+				Policies: datatypes.JSON([]byte(`{"canDeleteAccount":{"useDefault":false,"priority":2,"value":false}}`)),
+			}
+			assign(t, assignRepo, "u1", "deny")
+			svc.InvalidateUserRoleCache("u1")
+			assert.Equal(t, false, svc.GetUserPolicies("u1")[role.PolicyCanDeleteAccount], "unchecked fallback keeps native role overrides")
+			assert.Equal(t, int32(1), providerCalls.Load(), "unchecked consumers keep the existing provider path")
+		})
+	}
+}
+
+func TestEffectivePolicy_CheckedForKeysIgnoresUnrelatedProviderFailures(t *testing.T) {
+	svc, _, _, _ := newTestService(t)
+	var unrelatedCalls atomic.Int32
+	registerProvider(t, svc, "unrelated", []string{"canSearchNotes"}, func(context.Context, plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+		unrelatedCalls.Add(1)
+		return nil, errors.New("unrelated provider failed")
+	})
+	var accountCalls atomic.Int32
+	registerProvider(t, svc, "account", []string{role.PolicyCanDeleteAccount, role.PolicyCanPurgeAccount}, func(context.Context, plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+		accountCalls.Add(1)
+		return []plugin.EffectivePolicyContribution{
+			{Key: role.PolicyCanDeleteAccount, Value: true},
+			{Key: role.PolicyCanPurgeAccount, Value: false},
+		}, nil
+	})
+
+	policies, err := svc.GetUserPoliciesCheckedForKeys("u1", role.PolicyCanDeleteAccount, role.PolicyCanPurgeAccount)
+	require.NoError(t, err)
+	assert.Equal(t, true, policies[role.PolicyCanDeleteAccount])
+	assert.Equal(t, false, policies[role.PolicyCanPurgeAccount])
+	assert.Zero(t, unrelatedCalls.Load())
+	assert.Equal(t, int32(1), accountCalls.Load())
+}
+
+func TestEffectivePolicy_CheckedForKeysReportsRelevantProviderFailure(t *testing.T) {
+	svc, _, _, _ := newTestService(t)
+	registerProvider(t, svc, "account", []string{role.PolicyCanDeleteAccount}, func(context.Context, plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+		return nil, errors.New("account provider failed")
+	})
+
+	policies, err := svc.GetUserPoliciesCheckedForKeys("u1", role.PolicyCanDeleteAccount, role.PolicyCanPurgeAccount)
+	require.ErrorIs(t, err, role.ErrEffectivePolicyProvider)
+	assert.Equal(t, true, policies[role.PolicyCanDeleteAccount], "failed provider restores the native value")
 }
 
 func TestEffectivePolicy_ProviderPanicCheckedRestoresDeclaredKeys(t *testing.T) {
@@ -1901,6 +1975,7 @@ func newCountingTestService(t *testing.T) (*role.Service, *testutil.MockRoleRepo
 	roleRepo := testutil.NewMockRoleRepository()
 	assignRepo := testutil.NewMockRoleAssignmentRepository(roleRepo)
 	metaRepo := testutil.NewMockMetaRepository()
+	metaRepo.Meta = &model.Meta{ID: "x"}
 	idGen, _ := id.NewGenerator("aidx")
 	counting := &countingAssignmentRepo{MockRoleAssignmentRepository: assignRepo}
 	return role.NewService(roleRepo, counting, metaRepo, idGen), roleRepo, assignRepo, counting

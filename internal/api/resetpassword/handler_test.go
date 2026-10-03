@@ -422,7 +422,8 @@ func TestSecureRandomHex(t *testing.T) {
 	assert.NotEqual(t, s, s2)
 }
 
-func (m *mockUserRepo) HardDeleteUser(string) error { return nil }
+func (m *mockUserRepo) HardDeleteUser(string) error                { return nil }
+func (m *mockUserRepo) RevokeDeletedLocalCredentials(string) error { return nil }
 
 // DeleteOrphanRemoteUsers implements repository.UserRepository (#2340).
 func (m *mockUserRepo) DeleteOrphanRemoteUsers(_, _ int) (int64, error) { return 0, nil }

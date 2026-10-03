@@ -216,6 +216,69 @@ func TestShow_NotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
+func TestShow_DeletedUserIsNotFound(t *testing.T) {
+	h, userRepo := newTestHandler(t)
+	user := addTestUser(userRepo)
+	user.IsDeleted = true
+
+	rec := postStub(h.Show, `{"userId":"user1"}`, nil)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+
+	rec = postStub(h.Show, `{"userIds":["user1"]}`, nil)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.JSONEq(t, `[]`, rec.Body.String())
+}
+
+func TestShow_DeletedLocalUserIsVisibleToModerator(t *testing.T) {
+	h, userRepo := newTestHandler(t)
+	user := addTestUser(userRepo)
+	user.IsDeleted = true
+	user.IsSuspended = true
+	h.SetModeratorChecker(visibilityModStub{modID: "u_mod"})
+	moderator := &model.User{ID: "u_mod"}
+
+	rec := postStub(h.Show, `{"userId":"user1"}`, moderator)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var single map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &single))
+	assert.Equal(t, "user1", single["id"])
+
+	rec = postStub(h.Show, `{"userIds":["user1"]}`, moderator)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var bulk []map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &bulk))
+	require.Len(t, bulk, 1)
+	assert.Equal(t, "user1", bulk[0]["id"])
+}
+
+func TestShow_DeletedRemoteUserKeepsUpstreamVisibility(t *testing.T) {
+	h, userRepo := newTestHandler(t)
+	host := "remote.example"
+	userRepo.Users["remote1"] = &model.User{
+		ID:                "remote1",
+		Username:          "alice",
+		UsernameLower:     "alice",
+		Host:              &host,
+		IsDeleted:         true,
+		AvatarDecorations: datatypes.JSON([]byte("[]")),
+	}
+	h.SetModeratorChecker(visibilityModStub{modID: "u_mod"})
+	viewer := &model.User{ID: "u_plain"}
+
+	rec := postStub(h.Show, `{"userId":"remote1"}`, viewer)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var single map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &single))
+	assert.Equal(t, "remote1", single["id"])
+
+	rec = postStub(h.Show, `{"userIds":["remote1"]}`, viewer)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var bulk []map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &bulk))
+	require.Len(t, bulk, 1)
+	assert.Equal(t, "remote1", bulk[0]["id"])
+}
+
 // stubRemoteResolver is a test double for coreuser.RemoteUserResolver.
 type stubRemoteResolver struct {
 	user *model.User

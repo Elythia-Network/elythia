@@ -224,6 +224,14 @@ const (
 	// 値を見る pattern (空文字 userID で同等)。
 	PolicyLtlAvailable = "ltlAvailable"
 	PolicyGtlAvailable = "gtlAvailable"
+
+	// PolicyCanDeleteAccount gates a user's own i/delete-account request.
+	// Administrators do not bypass this policy.
+	PolicyCanDeleteAccount = "canDeleteAccount"
+
+	// PolicyCanPurgeAccount controls whether self-delete may physically remove
+	// the user and profile rows. Administrators do not bypass this policy.
+	PolicyCanPurgeAccount = "canPurgeAccount"
 )
 
 // roleCacheTTL は GetUserRoles キャッシュの有効期限。Misskey TS 同等の
@@ -1192,34 +1200,39 @@ func policyUnlimitedOrAboveCap(v any, limit int) bool {
 func (s *Service) GetUserPolicies(userID string) map[string]any {
 	// 解決は resolvePolicies に委譲する (provider 失敗時は errorless で
 	// native-onlyの安全なmapを返す)。checked版はGetUserPoliciesCheckedがerrorを返す。
-	out, _ := s.resolvePolicies(userID)
+	out, _ := s.resolvePolicies(userID, nil, false)
 	return out
 }
 
 // applyMetaBasePolicies overlays `meta.policies` (admin UI 設定の base
-// override) onto the default policies map. Best-effort: meta fetch /
-// JSON unmarshal の失敗は silently skip して default のままにする
-// (= upstream TS と同じ fail-soft 挙動)。
+// override) onto the default policies map. Meta fetch and JSON errors are
+// returned so checked consumers can fail closed instead of silently using
+// permissive defaults. Unchecked consumers preserve the historical fail-soft
+// behavior: defaults/native roles and registered providers are still resolved.
 //
 // JSON unmarshal は数値を float64 に倒すため、key が DefaultPolicies で int
 // として宣言されている場合は明示的に int へ丸めて整合性を保つ (#1020 review:
 // consumer 側の `policies[key].(int)` type assert が float64 で panic する
 // regression を防ぐ)。base に無い未知 key は型情報が無いので素通し。
-func (s *Service) applyMetaBasePolicies(base map[string]any) {
+func (s *Service) applyMetaBasePolicies(base map[string]any) error {
 	if s.metaRepo == nil {
-		return
+		return nil
 	}
 	meta, err := s.metaRepo.Fetch()
-	if err != nil || meta == nil || len(meta.Policies) == 0 {
-		return
+	if err != nil {
+		return err
+	}
+	if meta == nil || len(meta.Policies) == 0 {
+		return nil
 	}
 	var metaPolicies map[string]any
 	if err := json.Unmarshal(meta.Policies, &metaPolicies); err != nil {
-		return
+		return err
 	}
 	for k, v := range metaPolicies {
 		base[k] = coerceToBaseType(base[k], v)
 	}
+	return nil
 }
 
 // coerceToBaseType normalises a JSON-decoded value (typically float64 for

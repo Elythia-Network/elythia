@@ -116,6 +116,25 @@ func TestUser_RemoteRedirectsToOrigin(t *testing.T) {
 	assert.Equal(t, "Accept", rec.Header().Get("Vary"))
 }
 
+func TestUser_RemoteDeletedRedirectsToOrigin(t *testing.T) {
+	h, userRepo, _, _ := newHandler(t)
+	host := "remote.example"
+	uri := "https://remote.example/users/abc"
+	userRepo.Users["u1"] = &model.User{
+		ID: "u1", Username: "alice", UsernameLower: "alice", Host: &host, URI: &uri, IsDeleted: true,
+	}
+
+	c, rec := newReq(t, "id", "u1")
+	require.NoError(t, h.User(c))
+	assert.Equal(t, http.StatusMovedPermanently, rec.Code)
+	assert.Equal(t, uri, rec.Header().Get("Location"))
+
+	c, rec = newAcctReq(t, "application/activity+json", "alice@remote.example")
+	require.NoError(t, h.UserByAcct(c))
+	assert.Equal(t, http.StatusMovedPermanently, rec.Code)
+	assert.Equal(t, uri, rec.Header().Get("Location"))
+}
+
 // uri の無いリモート actor はデータ異常。upstream と同じく 500。
 func TestUser_RemoteWithoutURIIs500(t *testing.T) {
 	h, userRepo, _, _ := newHandler(t)
@@ -144,6 +163,25 @@ func TestUser_SuspendedIsNotServedAP(t *testing.T) {
 	c, rec = newReq(t, "id", "u2")
 	require.NoError(t, h.User(c))
 	assert.Equal(t, http.StatusNotFound, rec.Code, "suspended なリモートは redirect もしない")
+}
+
+func TestUser_DeletedIsNotServed(t *testing.T) {
+	h, userRepo, _, keypairRepo := newHandler(t)
+	userRepo.Users["u1"] = &model.User{ID: "u1", Username: "alice", IsDeleted: true}
+	keypairRepo.items["u1"] = &model.UserKeypair{UserID: "u1", PublicKey: "PUB"}
+
+	c, rec := newReq(t, "id", "u1")
+	require.NoError(t, h.User(c))
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+
+	c, rec = newReq(t, "id", "u1")
+	c.Request().Header.Set(echo.HeaderAccept, "text/html")
+	require.NoError(t, h.User(c))
+	assert.Equal(t, http.StatusNotFound, rec.Code, "deleted local user must not redirect to the SPA")
+
+	c, rec = newReq(t, "acct", "alice")
+	require.NoError(t, h.UserByAcct(c))
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
 func TestUser_KeypairFetchError(t *testing.T) {

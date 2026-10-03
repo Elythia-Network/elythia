@@ -1622,6 +1622,9 @@ func TestUserRepository_CountLocalUsers_Error(t *testing.T) {
 func TestUserRepository_HardDeleteUser(t *testing.T) {
 	repo := NewUserRepository(testDB)
 	user := insertTestUser(t, "u_hd_1", "hduser")
+	usedUsernames := NewUsedUsernameRepository(testDB)
+	require.NoError(t, usedUsernames.Create(user.UsernameLower))
+	t.Cleanup(func() { testDB.Exec(`DELETE FROM "used_username" WHERE username = ?`, user.UsernameLower) })
 
 	text := "x"
 	require.NoError(t, testDB.Create(&model.Note{
@@ -1638,6 +1641,9 @@ func TestUserRepository_HardDeleteUser(t *testing.T) {
 	var nc int64
 	require.NoError(t, testDB.Model(&model.Note{}).Where(`"userId" = ?`, user.ID).Count(&nc).Error)
 	assert.Zero(t, nc, "notes must cascade on user delete")
+	reserved, err := usedUsernames.Exists(user.UsernameLower)
+	require.NoError(t, err)
+	assert.True(t, reserved, "hard delete must not remove used_username registration protection")
 
 	// 空 ID / 不在 ID は no-op (error にしない)。
 	require.NoError(t, repo.HardDeleteUser(""))

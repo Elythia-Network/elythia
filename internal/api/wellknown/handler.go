@@ -113,7 +113,7 @@ func (h *Handler) Webfinger(c echo.Context) error {
 	if bundle.User.Host != nil && *bundle.User.Host != "" {
 		return c.NoContent(http.StatusNotFound)
 	}
-	if bundle.User.IsSuspended {
+	if bundle.User.IsSuspended || bundle.User.IsDeleted {
 		return c.NoContent(http.StatusNotFound)
 	}
 

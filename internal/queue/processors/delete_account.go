@@ -79,6 +79,18 @@ func (p *DeleteAccountProcessor) Handle(ctx context.Context, t driver.Task) erro
 	if payload.UserID == "" {
 		return fmt.Errorf("delete-account: userId is required: %w", driver.ErrSkipRetry)
 	}
+	if !payload.Soft && payload.PreserveAccount {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if p.userRepo == nil {
+			return fmt.Errorf("delete-account: retained account credential cleanup is not wired")
+		}
+		// 長いコンテンツ削除より先に失効し、失敗時はジョブを再試行する。
+		if err := p.userRepo.RevokeDeletedLocalCredentials(payload.UserID); err != nil {
+			return fmt.Errorf("delete-account: revoke retained account credentials: %w", err)
+		}
+	}
 
 	if err := p.deleteNotes(ctx, payload.UserID); err != nil {
 		return err
@@ -124,7 +136,7 @@ func (p *DeleteAccountProcessor) Handle(ctx context.Context, t driver.Task) erro
 	// profile / keypair / 残りの従属行も消えるため、論理削除フラグだけ立った「凍結状態の
 	// tombstone」が残らずアカウントが完全に消える。remote user (Soft=true) は再連合での
 	// 復活を防ぐため行を残す (upstream DeleteAccountProcessorService の soft 分岐と同じ)。
-	if !payload.Soft && p.userRepo != nil {
+	if !payload.Soft && !payload.PreserveAccount && p.userRepo != nil {
 		if err := ctx.Err(); err != nil {
 			return err
 		}

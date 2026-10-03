@@ -391,6 +391,9 @@ type DeleteAccountPayload struct {
 	// Soft=false to physically remove the row so the account fully disappears
 	// (#2230). upstream DeleteAccountProcessorService の `job.data.soft` 準拠。
 	Soft bool `json:"soft"`
+	// PreserveAccount keeps the user and profile rows after the existing content
+	// cleanup. omitempty preserves the bytes and semantics of legacy payloads.
+	PreserveAccount bool `json:"preserveAccount,omitempty"`
 }
 
 // NewDeleteAccountTask serializes a DeleteAccountPayload into a driver.Task.

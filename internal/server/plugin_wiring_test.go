@@ -765,7 +765,9 @@ func newEffectivePolicyTestService(t *testing.T) (*corerole.Service, *testutil.M
 	assignmentRepo := testutil.NewMockRoleAssignmentRepository(roleRepo)
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	return corerole.NewService(roleRepo, assignmentRepo, testutil.NewMockMetaRepository(), idGen), roleRepo, assignmentRepo
+	metaRepo := testutil.NewMockMetaRepository()
+	metaRepo.Meta = &model.Meta{Policies: datatypes.JSON([]byte(`{}`))}
+	return corerole.NewService(roleRepo, assignmentRepo, metaRepo, idGen), roleRepo, assignmentRepo
 }
 
 func TestSetupPlugins_EffectivePolicyStartupOrderAndRegistration(t *testing.T) {

@@ -502,6 +502,15 @@ func (c *CachedUserRepository) HardDeleteUser(userID string) error {
 	return nil
 }
 
+// RevokeDeletedLocalCredentials invalidates cached user and profile secrets.
+func (c *CachedUserRepository) RevokeDeletedLocalCredentials(userID string) error {
+	if err := c.UserRepository.RevokeDeletedLocalCredentials(userID); err != nil {
+		return err
+	}
+	c.invalidate(userID)
+	return nil
+}
+
 // **DeleteOrphanRemoteUsers は意図的に override しない** (#2862)。
 //
 // 消えた userID を返さないので個別に invalidate できず、`invalidate("")` は

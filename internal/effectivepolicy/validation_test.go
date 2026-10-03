@@ -143,6 +143,19 @@ func TestValidatePolicyValue(t *testing.T) {
 	}
 }
 
+func TestAccountDeletionPolicyDefaultsAndTypes(t *testing.T) {
+	defaults := Defaults()
+	require.Equal(t, true, defaults["canDeleteAccount"])
+	require.Equal(t, true, defaults["canPurgeAccount"])
+
+	for _, key := range []string{"canDeleteAccount", "canPurgeAccount"} {
+		assert.True(t, ValidatePolicyValue(key, true), key)
+		assert.True(t, ValidatePolicyValue(key, false), key)
+		assert.False(t, ValidatePolicyValue(key, "true"), key)
+		assert.False(t, ValidatePolicyValue(key, 1), key)
+	}
+}
+
 // **置換は (Key, ReplaceRoleID) で一意。** (Key, Order) だけで判定すると、同じ key の
 // 2 つの role を同時に置換する plugin が「重複」で弾かれる。置換の Order は 0 しか
 // 選べないので、role ID を含めないと同時置換ができない。

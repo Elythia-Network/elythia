@@ -105,6 +105,8 @@ type UserRepository interface {
 	// delete-account cascade for local users (Soft=false) so the account fully
 	// disappears instead of lingering as a suspended tombstone (#2230).
 	HardDeleteUser(userID string) error
+	// RevokeDeletedLocalCredentials removes secrets without deleting retained rows.
+	RevokeDeletedLocalCredentials(userID string) error
 
 	// DeleteOrphanRemoteUsers removes remote users that nothing references,
 	// up to batchSize rows, and returns how many were deleted (#2340).

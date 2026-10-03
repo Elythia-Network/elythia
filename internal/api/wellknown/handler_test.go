@@ -159,6 +159,16 @@ func TestWebfinger_UserNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
+func TestWebfinger_DeletedUserIsNotFound(t *testing.T) {
+	h, repo := newHandler(t)
+	addUser(repo, "u1", "alice")
+	repo.Users["u1"].IsDeleted = true
+
+	c, rec := newReq(t, "/.well-known/webfinger?resource=acct:alice@example.com")
+	require.NoError(t, h.Webfinger(c))
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
 func TestHostMeta(t *testing.T) {
 	h, _ := newHandler(t)
 	c, rec := newReq(t, "/.well-known/host-meta")

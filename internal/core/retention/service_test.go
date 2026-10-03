@@ -439,7 +439,8 @@ func TestService_Aggregate_CorruptDataRowIsSkipped(t *testing.T) {
 	assert.Equal(t, 0, retentions.updateCalls)
 }
 
-func (s *stubUserRepo) HardDeleteUser(string) error { return nil }
+func (s *stubUserRepo) HardDeleteUser(string) error                { return nil }
+func (s *stubUserRepo) RevokeDeletedLocalCredentials(string) error { return nil }
 
 // DeleteOrphanRemoteUsers implements repository.UserRepository (#2340).
 func (s *stubUserRepo) DeleteOrphanRemoteUsers(_, _ int) (int64, error) { return 0, nil }
