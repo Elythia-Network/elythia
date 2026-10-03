@@ -3,6 +3,7 @@ package note
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -873,6 +874,20 @@ func (s *CreateService) Create(in CreateInput) (*model.Note, error) {
 		}
 	}
 
+	// 本家 insertNote と同じく、mentions のうちリモートの利用者を
+	// mentionedRemoteUsers 列に書く。連合で配る content のメンションの href は
+	// この列の url / uri から作る (#3329)。WebFinger で取ってきた利用者も入るよう、
+	// mentions が確定した後で書く。
+	if s.userRepo != nil && len(note.Mentions) > 0 {
+		if allMentionsLocal(note.Mentions, mentionRes.localUserIDs(), replyTarget) {
+			// ローカル同士の返信やメンションで、ノートの作成ごとに利用者の
+			// クエリを 1 回増やさない。結果は引いた場合と同じ `[]`
+			note.MentionedRemoteUsers = "[]"
+		} else {
+			note.MentionedRemoteUsers = s.mentionedRemoteUsersJSON(note.Mentions)
+		}
+	}
+
 	// Custom emoji 名抽出: text + cw を MFM parse して :code: トークンを集める
 	// (#629)。連合配信時に renderer.addEmojiTags が note.Emojis を walk して
 	// AP Note.tag に Emoji エントリを足すので、ここで埋めないと連合先で
@@ -1341,6 +1356,93 @@ func (r *mentionResolution) userIDs() []string {
 		out = appendUniqueID(out, id)
 	}
 	return out
+}
+
+// localUserIDs returns the IDs of the mentions resolved as local users.
+func (r *mentionResolution) localUserIDs() map[string]bool {
+	if r == nil {
+		return nil
+	}
+	local := make(map[string]bool)
+	for i, id := range r.ids {
+		if id != "" && r.hosts[i] == "" {
+			local[id] = true
+		}
+	}
+	return local
+}
+
+// allMentionsLocal reports whether every ID in mentions is already known to be
+// a local user: a mention resolved under this host, or the author of the
+// replied note when that note is local. Recipients of a specified note are
+// not known here, so they make it false.
+func allMentionsLocal(mentions []string, localMentionIDs map[string]bool, replyTarget *model.Note) bool {
+	for _, id := range mentions {
+		if localMentionIDs[id] {
+			continue
+		}
+		if replyTarget != nil && replyTarget.UserID == id && replyTarget.UserHost == nil {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// mentionedRemoteUsersJSON returns the `mentionedRemoteUsers` column for the
+// note's mentions: the remote users among them, in the same order, as upstream
+// NoteCreateService.insertNote writes it (uri, url from the user's profile,
+// username, host).
+//
+// 本家は利用者を引けないとノートの作成ごと失敗する。mk-go は作成を止めず、
+// 引けなかった分は列に入れない (メンションの href が自サーバーの /@acct になる
+// だけで、宛先や通知は mentions 列で決まる)。プロフィールを引けないときは url を
+// 省き、本家と同じく uri へのリンクにする。
+func (s *CreateService) mentionedRemoteUsersJSON(mentions []string) string {
+	users, err := s.userRepo.FindManyByIDs(mentions)
+	if err != nil {
+		slog.Warn("note: looking up mentioned users failed; mentionedRemoteUsers left empty", "err", err)
+		return "[]"
+	}
+	byID := make(map[string]*model.User, len(users))
+	var remoteIDs []string
+	for _, u := range users {
+		if u.Host != nil {
+			byID[u.ID] = u
+			remoteIDs = append(remoteIDs, u.ID)
+		}
+	}
+	urlByID := make(map[string]*string, len(remoteIDs))
+	if len(remoteIDs) > 0 {
+		profiles, err := s.userRepo.FindProfilesByUserIDs(remoteIDs)
+		if err != nil {
+			slog.Warn("note: looking up mentioned users' profiles failed; urls omitted", "err", err)
+		}
+		for _, p := range profiles {
+			urlByID[p.UserID] = p.URL
+		}
+	}
+	out := make([]mfm.MentionedRemoteUser, 0, len(remoteIDs))
+	for _, id := range mentions {
+		u, ok := byID[id]
+		if !ok {
+			continue
+		}
+		// 同じ利用者は mentions に 1 度しか入らないが、念のため 2 度目は書かない
+		delete(byID, id)
+		var uri string
+		if u.URI != nil {
+			uri = *u.URI
+		}
+		out = append(out, mfm.MentionedRemoteUser{URI: uri, URL: urlByID[id], Username: u.Username, Host: u.Host})
+	}
+	// JSON.stringify と同じく `<` `>` `&` をエスケープしない (url の query に
+	// `&` が入る)。要素は文字列とそのポインタだけなので、Encode は失敗しない
+	var b strings.Builder
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(out)
+	return strings.TrimSuffix(b.String(), "\n")
 }
 
 // lookupMentionsInDB resolves mentions against the user table only.

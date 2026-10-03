@@ -644,7 +644,9 @@ func (r *Renderer) renderNote(n *model.Note, idGen id.Generator, approvalOf func
 	var nodes []*mfm.Node
 	if text != "" {
 		nodes = mfm.Parse(text)
-		htmlContent = mfm.ToHTML(nodes, r.host)
+		// 本家 ApMfmService.getNoteHtml と同じく、ノートの mentionedRemoteUsers 列を
+		// 渡し、リモートのメンションをその利用者の url (無ければ uri) へリンクする
+		htmlContent = mfm.ToHTMLWithMentions(nodes, r.host, mfm.ParseMentionedRemoteUsers(n.MentionedRemoteUsers))
 	}
 
 	out := &Note{

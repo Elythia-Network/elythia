@@ -15,9 +15,9 @@ import (
 // 本家は改行を CRLF / CR / LF で切って `<br />` にし、plain を `<span>`、数式
 // ブロックを `<pre><code>` にする。ハッシュタグの href は encodeURIComponent、
 // link / url / メンションの href は `new URL().href` で作る。ruby は引数を見ずに
-// 子から作り、unixtime はミリ秒付きの ISO 8601 にする。リモートのメンションは
-// 本家ではメンション先のユーザーの url になるので、ここでは本家側にも
-// https://<host>/@<username> を渡して比べた。
+// 子から作り、unixtime はミリ秒付きの ISO 8601 にする。mentionedRemoteUsers は
+// 空で比べた (メンションは全て `${config.url}/${acct}` になる)。渡したときは
+// TestToHTMLWithMentions_MatchesUpstream が見る。
 func TestToHTML_MatchesUpstream(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"a\r\nb\rc\nd", "a<br />b<br />c<br />d"},
@@ -53,9 +53,9 @@ func TestToHTML_MatchesUpstream(t *testing.T) {
 		{"[l](<https://xn--a.com/>)", "[l](https://xn--a.com/)"},
 		{"[l](<https://e.x:99999/>)", "[l](https://e.x:99999/)"},
 		{"@alice", "<a href=\"https://example.com/@alice\" class=\"u-url mention\">@alice</a>"},
-		{"@bob@REMOTE.Example", "<a href=\"https://remote.example/@bob\" class=\"u-url mention\">@bob@REMOTE.Example</a>"},
+		{"@bob@REMOTE.Example", "<a href=\"https://example.com/@bob@REMOTE.Example\" class=\"u-url mention\">@bob@REMOTE.Example</a>"},
 		{"@u@例え.テスト", "<a href=\"https://example.com/@u\" class=\"u-url mention\">@u</a>@例え.テスト"},
-		{"@u@xn--a.com", "@u@xn--a.com"},
+		{"@u@xn--a.com", "<a href=\"https://example.com/@u@xn--a.com\" class=\"u-url mention\">@u@xn--a.com</a>"},
 		{"$[ruby 漢字 かんじ]", "<ruby>漢字<rp>(</rp><rt>かんじ</rt><rp>)</rp></ruby>"},
 		{"$[ruby a b c]", "<ruby>a<rp>(</rp><rt>b</rt><rp>)</rp></ruby>"},
 		{"$[ruby a  b]", "<ruby>a<rp>(</rp><rt></rt><rp>)</rp></ruby>"},
@@ -129,8 +129,10 @@ func TestToHTML_RubyTextIsEscaped(t *testing.T) {
 // TestToHTML_MentionHrefFailureIsText checks that a mention whose href cannot
 // be parsed as a URL is written as its acct, as upstream does.
 func TestToHTML_MentionHrefFailureIsText(t *testing.T) {
-	n := &Node{Type: NodeMention, Props: map[string]any{"username": "u", "host": "e.x:99999", "acct": "@u@<e>"}}
-	assert.Equal(t, "@u@&lt;e&gt;", ToHTML([]*Node{n}, testHost))
+	n := &Node{Type: NodeMention, Props: map[string]any{"username": "u", "host": "e.x", "acct": "@u@<e>"}}
+	broken := "https://e.x:99999/"
+	mentioned := []MentionedRemoteUser{{URI: "https://e.x/u", URL: &broken, Username: "u", Host: &[]string{"e.x"}[0]}}
+	assert.Equal(t, "@u@&lt;e&gt;", ToHTMLWithMentions([]*Node{n}, testHost, mentioned))
 }
 
 // TestParse_MathBlockMatchesMfmJs fixes the math block to mfm-js 0.26.0

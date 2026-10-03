@@ -16,7 +16,6 @@ import (
 	echomw "github.com/labstack/echo/v4/middleware"
 	"github.com/shiroha-a/mk/internal/activitypub"
 	"github.com/shiroha-a/mk/internal/activitypub/ld"
-	"github.com/shiroha-a/mk/internal/activitypub/mfm"
 	apiadmin "github.com/shiroha-a/mk/internal/api/admin"
 	apiannouncements "github.com/shiroha-a/mk/internal/api/announcements"
 	"github.com/shiroha-a/mk/internal/api/antennas"
@@ -2549,9 +2548,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			}
 			return entity.IdenticonURL(u)
 		},
-		toHTML: func(text string) string {
-			return mfm.ToHTML(mfm.Parse(text), feedHost)
-		},
+		toHTML: feedNoteHTML(feedHost),
 	}
 
 	// /@<acct> は AP のユーザー解決とフィードの入口を兼ねる。Echo のルータは

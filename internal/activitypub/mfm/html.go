@@ -5,22 +5,40 @@ import (
 	"strings"
 )
 
-// ToHTML converts MFM nodes to an HTML string.
+// ToHTML converts MFM nodes to an HTML string without any mentioned remote
+// users, i.e. every mention links to this server's `/@<acct>` page.
 // host はローカルホスト名 (例: "example.com")。
 // メンションやハッシュタグのリンク先URLの生成に使う。
 //
 // 出力は本家 MfmService.toHtml に揃えてある (文字列を連結するだけで、DOM を
-// 通した直列化はしない)。リモートのメンションの href だけは、本家がメンション先の
-// ユーザーの url を使うのに対し、DB を引かずに https://<host>/@<username> で作る。
+// 通した直列化はしない)。本家で mentionedRemoteUsers を渡さない呼び出し
+// (ApRendererService.renderPerson の summary) はこちらに当たる。
 func ToHTML(nodes []*Node, host string) string {
+	return ToHTMLWithMentions(nodes, host, nil)
+}
+
+// ToHTMLWithMentions converts MFM nodes to an HTML string like upstream
+// MfmService.toHtml(nodes, mentionedRemoteUsers): a mention of a user in
+// mentioned links to that user's url (or uri when url is empty).
+//
+// 本家はノートの本文 (ApMfmService.getNoteHtml) とフィード (FeedService) で、
+// ノートの mentionedRemoteUsers 列を渡す。
+func ToHTMLWithMentions(nodes []*Node, host string, mentioned []MentionedRemoteUser) string {
 	if len(nodes) == 0 {
 		return ""
 	}
+	hc := &htmlContext{host: host, mentioned: mentioned}
 	var b strings.Builder
 	for _, n := range nodes {
-		renderNode(&b, n, host)
+		renderNode(&b, n, hc)
 	}
 	return b.String()
+}
+
+// htmlContext carries the per-call inputs of ToHTMLWithMentions.
+type htmlContext struct {
+	host      string
+	mentioned []MentionedRemoteUser
 }
 
 // IsSimple reports whether the AST contains only "standard" node types
@@ -45,33 +63,33 @@ func isSimpleNode(n *Node) bool {
 	}
 }
 
-func renderNode(b *strings.Builder, n *Node, host string) {
+func renderNode(b *strings.Builder, n *Node, hc *htmlContext) {
 	switch n.Type {
 	case NodeText:
 		renderText(b, n.textValue())
 	case NodeBold:
 		b.WriteString("<b>")
-		renderChildren(b, n.Children, host)
+		renderChildren(b, n.Children, hc)
 		b.WriteString("</b>")
 	case NodeItalic:
 		b.WriteString("<i>")
-		renderChildren(b, n.Children, host)
+		renderChildren(b, n.Children, hc)
 		b.WriteString("</i>")
 	case NodeStrike:
 		b.WriteString("<del>")
-		renderChildren(b, n.Children, host)
+		renderChildren(b, n.Children, hc)
 		b.WriteString("</del>")
 	case NodeSmall:
 		b.WriteString("<small>")
-		renderChildren(b, n.Children, host)
+		renderChildren(b, n.Children, hc)
 		b.WriteString("</small>")
 	case NodeCenter:
 		b.WriteString(`<div style="text-align: center;">`)
-		renderChildren(b, n.Children, host)
+		renderChildren(b, n.Children, hc)
 		b.WriteString("</div>")
 	case NodePlain:
 		b.WriteString("<span>")
-		renderChildren(b, n.Children, host)
+		renderChildren(b, n.Children, hc)
 		b.WriteString("</span>")
 	case NodeInlineCode:
 		code, _ := n.Props["code"].(string)
@@ -95,7 +113,7 @@ func renderNode(b *strings.Builder, n *Node, host string) {
 		b.WriteString("</code></pre>")
 	case NodeQuote:
 		b.WriteString("<blockquote>")
-		renderChildren(b, n.Children, host)
+		renderChildren(b, n.Children, hc)
 		b.WriteString("</blockquote>")
 	case NodeSearch:
 		// 本家 MfmService.toHtml と同じく、URL は encodeURIComponent 相当でエスケープし、
@@ -124,28 +142,20 @@ func renderNode(b *strings.Builder, n *Node, host string) {
 		href, ok := whatwgHref(u)
 		if !ok {
 			b.WriteByte('[')
-			renderChildren(b, n.Children, host)
+			renderChildren(b, n.Children, hc)
 			b.WriteString("](")
 			b.WriteString(EscapeHTML(u))
 			b.WriteByte(')')
 			break
 		}
 		b.WriteString(fmt.Sprintf(`<a href="%s">`, EscapeHTML(href)))
-		renderChildren(b, n.Children, host)
+		renderChildren(b, n.Children, hc)
 		b.WriteString("</a>")
 	case NodeMention:
 		username, _ := n.Props["username"].(string)
 		mentionHost, _ := n.Props["host"].(string)
 		acct, _ := n.Props["acct"].(string)
-
-		// 本家はリモートのメンションの href に、メンション先のユーザーの url (無ければ
-		// uri) を使う。mk-go はここで DB を引かないので https://<host>/@<username>
-		// で近似する。どちらも `new URL().href` で正規化し、読めなければ acct の文字にする
-		hrefHost := host
-		if mentionHost != "" {
-			hrefHost = mentionHost
-		}
-		href, ok := whatwgHref("https://" + hrefHost + "/@" + username)
+		href, ok := whatwgHref(hc.mentionHref(username, mentionHost, acct))
 		if !ok {
 			b.WriteString(EscapeHTML(acct))
 			break
@@ -157,7 +167,7 @@ func renderNode(b *strings.Builder, n *Node, host string) {
 		// などを残すので、href が本家と違っていた (#3329)
 		tag, _ := n.Props["hashtag"].(string)
 		b.WriteString(fmt.Sprintf(`<a href="https://%s/tags/%s" rel="tag">#%s</a>`,
-			host, EscapeHTML(encodeURIComponent(tag)), EscapeHTML(tag)))
+			hc.host, EscapeHTML(encodeURIComponent(tag)), EscapeHTML(tag)))
 	case NodeUnicodeEmoji:
 		emoji, _ := n.Props["emoji"].(string)
 		b.WriteString(emoji)
@@ -168,11 +178,11 @@ func renderNode(b *strings.Builder, n *Node, host string) {
 		b.WriteString(EscapeHTML(name))
 		b.WriteString(":\u200b")
 	case NodeFn:
-		renderFn(b, n, host)
+		renderFn(b, n, hc)
 	}
 }
 
-func renderFn(b *strings.Builder, n *Node, host string) {
+func renderFn(b *strings.Builder, n *Node, hc *htmlContext) {
 	name, _ := n.Props["name"].(string)
 
 	switch name {
@@ -186,13 +196,13 @@ func renderFn(b *strings.Builder, n *Node, host string) {
 			}
 		}
 	case "ruby":
-		if renderRuby(b, n, host) {
+		if renderRuby(b, n, hc) {
 			return
 		}
 	}
 	// 不明な fn と、読めなかった unixtime / ruby は斜体にする (本家の fnDefault)
 	b.WriteString("<i>")
-	renderChildren(b, n.Children, host)
+	renderChildren(b, n.Children, hc)
 	b.WriteString("</i>")
 }
 
@@ -206,7 +216,7 @@ func renderFn(b *strings.Builder, n *Node, host string) {
 // 本家は escapeHtml(undefined) で TypeError を投げ、ノートの HTML を作れない。
 // 例外で配送や描画を止めるわけにいかないので、mk-go は斜体に戻す
 // (docs/divergence.md)。
-func renderRuby(b *strings.Builder, n *Node, host string) bool {
+func renderRuby(b *strings.Builder, n *Node, hc *htmlContext) bool {
 	switch len(n.Children) {
 	case 0:
 		return false
@@ -232,7 +242,7 @@ func renderRuby(b *strings.Builder, n *Node, host string) bool {
 		rt = last.textValue()
 	}
 	b.WriteString("<ruby>")
-	renderChildren(b, n.Children[:len(n.Children)-1], host)
+	renderChildren(b, n.Children[:len(n.Children)-1], hc)
 	b.WriteString("<rp>(</rp><rt>")
 	b.WriteString(EscapeHTML(jsTrim(rt)))
 	b.WriteString("</rt><rp>)</rp></ruby>")
@@ -273,9 +283,9 @@ var htmlEscaper = strings.NewReplacer(
 // エスケープの表記を本家に揃えるため、本家と同じ置き換えにする。
 func EscapeHTML(s string) string { return htmlEscaper.Replace(s) }
 
-func renderChildren(b *strings.Builder, children []*Node, host string) {
+func renderChildren(b *strings.Builder, children []*Node, hc *htmlContext) {
 	for _, c := range children {
-		renderNode(b, c, host)
+		renderNode(b, c, hc)
 	}
 }
 

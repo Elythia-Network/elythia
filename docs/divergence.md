@@ -1666,15 +1666,21 @@ entropy も sharp と一致する (gif は完全一致、他は差 0.03 以下)�
 
 **実測**: mfm-js 0.26.0 の parse と toHtml の写しを Node 26.4.0 で動かした結果と、構文木と HTML を突き合わせた。数え方は「本家が例外を投げる入力 (下の ruby) を除いた件数」で、違いの件数は HTML の文字列が一致しなかった入力の数。
 
-- 構文の断片を 1〜7 個つないだ乱数入力 15 万件 (3 回): 構文木は全件一致。HTML は 4 件だけ違い、全て下のリモートのメンションの差 (同じユーザーを大文字小文字違いで 2 回メンションした入力で、本家は最初に見つかったユーザーの url を使う)
+- 構文の断片を 1〜7 個つないだ乱数入力 15 万件 (3 回): 構文木は全件一致。HTML は 4 件だけ違い、全てリモートのメンションの href の差だった。この計測の時点の mk-go は href を `https://<host>/@<username>` で作っていたので、本家側にも同じ形の url を持つ mentionedRemoteUsers を渡して比べた (違った 4 件は、同じユーザーを大文字小文字違いで 2 回メンションした入力で、本家は最初に見つかったユーザーの url を使う)。その後、メンションの href を本家と同じ作り方にした (下の段落)
 - http(s) の URL の各部分をランダムに組んだ入力 36 万件 (4 回): 3 件だけ違い、全てホストに ZWNJ (U+200C) を含むもの (下の表)
 - Bidi の種別が違う文字を 4 文字まで並べたホスト 10.8 万件: 全件一致
+- メンションの href (`ToHTMLWithMentions`): 一致する要素・大文字小文字違い・url が空や無いとき・host が null や空の要素・同じ利用者が 2 つあるとき・`ſ` (U+017F) を含む username / host・正規化とエスケープ・読めない url / uri の 21 件 (`mention_href_test.go` と `html_upstream_test.go` の該当行): 全件一致
+
+**メンションの href (#3329)。** 本家と同じく、ノートの `mentionedRemoteUsers` 列から username と host を toLowerCase して一致する最初の利用者を探し、`url` (空なら `uri`) へリンクする。見つからないメンションは `<config.url>/<書かれたままの acct>` (`https://<host>/@user@host`) にする。列を渡すのは本家と同じくノートの `content` (`ApMfmService.getNoteHtml`) と RSS / Atom の本文 (`FeedService`) で、プロフィールの `summary` は本家も渡さない。列はローカルのノートの作成時に、本家 `insertNote` と同じ形 (`uri` / `url` / `username` / `host`、メンションの順) で書く。chat の `content` は列を持たないので渡さない。
 
 残っている差:
 
 | 項目 | 本家 | mk-go | 理由 |
 |---|---|---|---|
-| リモートのメンションの href | メンション先のユーザーの `url` (無ければ `uri`)。ユーザーを引けないメンションは `<config.url>/@user@host` | 常に `https://<host>/@<username>` | ToHTML は DB を引かない。Misskey と Mastodon の `url` はこの形なので、多くの場合は同じ |
+| メンション先の利用者の `url` / `uri` が http / https 以外 | `new URL()` が読めればリンクにする (`javascript:` も) | リンクにせず acct の文字にする | XSS 防止。値はリモートの actor が送ってきたもの。本家も actor を取り込むときに `url` を http(s) に限る (ApPersonService の checkHttps) ので、通常は差が出ない |
+| `mentionedRemoteUsers` 列が JSON として読めない | `JSON.parse` が投げ、ノートの HTML を作れない | 空の配列として扱う (全て自サーバーのリンクになる) | 例外で配送やフィードを止めない。列は mk-go か TS 版が書いたものしか入らない |
+| ノートの作成時にメンション先の利用者を引けない | ノートの作成ごと失敗する | 列を `[]` にして作成を続ける。プロフィールだけ引けないときは `url` を省く (`uri` へのリンクになる) | メンションの href が変わるだけで、宛先や通知は `mentions` 列で決まる |
+| リモートのノートの `mentionedRemoteUsers` 列 | 取り込むときにも書く | 書かない (既定の `[]`) | 列を読むのはローカルのノートの描画 (連合の `content` とフィード) だけ |
 | 子が 1 つで半角空白を含まない ruby (`$[ruby abc]`) と、1 つの子が文字でない ruby | `escapeHtml(undefined)` で TypeError を投げ、ノートの HTML を作れない | 斜体 (`<i>…</i>`) にする | 例外で配送や描画を止めない。本家の不明な fn と同じ形 |
 | http / https 以外の scheme の link | `new URL()` が読めればリンクにする (`javascript:` も) | リンクにせず `[文字](url)` の文字にする | XSS 防止。mfm-js の link は http(s) しか作らないので、Parse の結果では起きない |
 | ホストの ZWNJ (U+200C) の前後の検査 (CheckJoiners) | ada は「ZWNJ より前のどこかに Joining_Type が L / D の文字、後ろのどこかに R / D の文字」があれば通す | x/net/idna の判定 (RFC 5892 の正規表現に近く、間に非結合の文字を挟むと落とす。逆に ZWNJ の直後の非結合の文字で判定を打ち切って通すこともある) | Joining_Type の表は x/net/idna の中にあり外から呼べない。ペルシア語のように結合する文字の間に ZWNJ を置く普通の綴りはどちらも通る。違うのは `ب_` + ZWNJ + `ب` (Node だけ通す) や `ت` + ZWNJ + `,$0.` (mk-go だけ通す) のような形だけ |
