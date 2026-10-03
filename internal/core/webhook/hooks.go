@@ -1,11 +1,12 @@
 package webhook
 
 import (
+	"context"
 	"encoding/json"
-	"log/slog"
 	"time"
 
 	corenote "github.com/shiroha-a/mk/internal/core/note"
+	"github.com/shiroha-a/mk/internal/core/userpack"
 	"github.com/shiroha-a/mk/internal/entity"
 	"github.com/shiroha-a/mk/internal/misc/id"
 	"github.com/shiroha-a/mk/internal/model"
@@ -189,44 +190,25 @@ func (h *ReactionCreateHook) OnReactionCreated(note *model.Note, reactor *model.
 	h.svc.DispatchUser(note.UserID, EventReaction, body)
 }
 
-// ProfileLookup loads the profile row of a user. repository.UserRepository
-// satisfies it.
-type ProfileLookup interface {
-	FindProfileByUserID(userID string) (*model.UserProfile, error)
-}
-
-// RelationApplier writes the viewer->target relation block (isFollowing,
-// isBlocking, memo, ...) onto a packed user and reports whether the viewer
-// follows the target. userrelation.Repos satisfies it.
-type RelationApplier interface {
-	Apply(detailed *entity.UserDetailed, viewerID string, target *model.User, profile *model.UserProfile) bool
-}
-
-// ModeratorChecker reports whether a user holds moderator privileges.
-type ModeratorChecker interface {
-	IsModerator(userID string) bool
-}
-
-// UserLookups resolves the parts of the packed user that come from other
-// tables. A nil lookup leaves that part out (test fixtures / partial wiring);
-// production wires all of them.
-type UserLookups struct {
-	Instances  entity.InstanceLookup
-	Emojis     entity.EmojiLookup
-	Profiles   ProfileLookup
-	Relations  RelationApplier
-	Moderators ModeratorChecker
-}
+// ProfileLookup / RelationApplier / ModeratorChecker / UserLookups are the
+// lookups of the shared user packer (internal/core/userpack), kept here as
+// aliases for existing wiring.
+type (
+	ProfileLookup    = userpack.ProfileLookup
+	RelationApplier  = userpack.RelationApplier
+	ModeratorChecker = userpack.ModeratorChecker
+	UserLookups      = userpack.Lookups
+)
 
 // FollowingHook implements the following WebhookHook interface.
 //
 // 本家 UserFollowingService は follow / unfollow を
 // `pack(followee, follower, {schema: 'UserDetailedNotMe'})` (閲覧者はフォローした側)、
 // followed を `pack(follower, followee)` (既定の UserLite) で送る (#3269)。
+// main stream の同じイベントも同じ packer で組む (#3330)。
 type FollowingHook struct {
-	svc     *Service
-	lookups UserLookups
-	idGen   id.Generator
+	svc    *Service
+	packer *userpack.Packer
 }
 
 // NewFollowingHook constructs a FollowingHook.
@@ -237,28 +219,58 @@ func NewFollowingHook(svc *Service) *FollowingHook {
 // SetUserLookups wires the lookups used to pack the `user` of follow /
 // followed / unfollow bodies, and idGen to derive createdAt.
 func (h *FollowingHook) SetUserLookups(l UserLookups, idGen id.Generator) {
-	h.lookups = l
-	h.idGen = idGen
+	h.packer = userpack.New(l, idGen)
+}
+
+// SetUserPacker wires a packer shared with the main stream publisher, so the
+// webhook and the stream carry the same shape.
+func (h *FollowingHook) SetUserPacker(p *userpack.Packer) {
+	h.packer = p
 }
 
 // OnFollow fires the `follow` event on the follower's webhooks.
 func (h *FollowingHook) OnFollow(follower, followee *model.User) {
-	if h == nil || h.svc == nil || follower == nil || followee == nil {
-		return
-	}
-	h.svc.DispatchUserLazy(follower.ID, EventFollow, func() (any, bool) {
-		return h.detailedBody(followee, follower)
-	})
+	h.OnFollowPacked(follower, followee, h.ownPacker(follower, followee))
 }
 
 // OnUnfollow fires the `unfollow` event on the follower's webhooks.
 func (h *FollowingHook) OnUnfollow(follower, followee *model.User) {
-	if h == nil || h.svc == nil || follower == nil || followee == nil {
+	h.OnUnfollowPacked(follower, followee, h.ownPacker(follower, followee))
+}
+
+// OnFollowPacked fires the `follow` event with followee built by packed, which
+// the following service shares with the main stream (packed once).
+func (h *FollowingHook) OnFollowPacked(follower, followee *model.User, packed func() (entity.UserDetailed, bool)) {
+	h.dispatchDetailed(EventFollow, follower, followee, packed)
+}
+
+// OnUnfollowPacked fires the `unfollow` event with followee built by packed.
+func (h *FollowingHook) OnUnfollowPacked(follower, followee *model.User, packed func() (entity.UserDetailed, bool)) {
+	h.dispatchDetailed(EventUnfollow, follower, followee, packed)
+}
+
+func (h *FollowingHook) dispatchDetailed(event string, follower, followee *model.User, packed func() (entity.UserDetailed, bool)) {
+	if h == nil || h.svc == nil || follower == nil || followee == nil || packed == nil {
 		return
 	}
-	h.svc.DispatchUserLazy(follower.ID, EventUnfollow, func() (any, bool) {
-		return h.detailedBody(followee, follower)
+	h.svc.DispatchUserLazy(follower.ID, event, func() (any, bool) {
+		d, ok := packed()
+		if !ok {
+			return nil, false
+		}
+		return map[string]any{"user": toMap(d)}, true
 	})
+}
+
+// ownPacker builds followee as UserDetailedNotMe seen by follower with the
+// hook's own packer, for callers that do not share a packed value.
+func (h *FollowingHook) ownPacker(follower, followee *model.User) func() (entity.UserDetailed, bool) {
+	if h == nil || follower == nil || followee == nil {
+		return nil
+	}
+	return func() (entity.UserDetailed, bool) {
+		return h.userPacker().DetailedNotMe(context.Background(), followee, follower)
+	}
 }
 
 // OnFollowed fires the `followed` event on the followee's webhooks.
@@ -267,63 +279,23 @@ func (h *FollowingHook) OnFollowed(follower, followee *model.User) {
 		return
 	}
 	h.svc.DispatchUserLazy(followee.ID, EventFollowed, func() (any, bool) {
-		lite := entity.PackUserLite(follower)
-		h.resolveLite(follower, &lite)
-		return map[string]any{"user": toMap(lite)}, true
+		return map[string]any{"user": toMap(h.userPacker().Lite(follower))}, true
 	})
 }
 
-// resolveLite fills instance and emojis on lite, like upstream UserLite.
+// HasUserPacker reports whether the user packer was wired.
 //
-// 本家はリモートの利用者に instance を付け、絵文字の URL を解決する。
-// PackUserLite だけではどちらも付かず、フォローの相手はリモートでありうるので
-// 差が出る。
-func (h *FollowingHook) resolveLite(u *model.User, lite *entity.UserLite) {
-	entity.NewInstanceResolver(h.lookups.Instances, u).FillUserLite(lite)
-	entity.NewEmojiResolver(h.lookups.Emojis, []*model.Note{{User: u}}).PopulateUserEmojis(u, lite)
-}
+// 未配線だと follow / unfollow の Webhook は profile を確かめられないので送られず、
+// followed は instance と絵文字を解決しない形になる。起動時検査に使う。
+func (h *FollowingHook) HasUserPacker() bool { return h.packer != nil }
 
-// detailedBody packs target as UserDetailedNotMe seen by viewer. It returns
-// false when the profile cannot be loaded.
-//
-// 本家は profile を findOneByOrFail で読み、無ければ例外になって送らない。
-// profile 無しで組むと followersVisibility が既定の public に倒れ、伏せるべき
-// カウントが出るので、読めないときは送らない側に倒す。
-func (h *FollowingHook) detailedBody(target, viewer *model.User) (any, bool) {
-	// profile を読めないときは送らない。profile 無しで組むと公開範囲が既定の
-	// public に倒れ、伏せるべきカウントが出てしまう。配線が外れたとき (Profiles が
-	// nil) も同じく閉じる側に倒す。
-	if h.lookups.Profiles == nil {
-		slog.Warn("webhook: profile lookup is not wired; follow payload dropped", "userId", target.ID)
-		return nil, false
+// userPacker returns the wired packer, or one without lookups when unwired
+// (which drops the detailed bodies, see userpack.Packer.DetailedNotMe).
+func (h *FollowingHook) userPacker() *userpack.Packer {
+	if h.packer == nil {
+		return userpack.New(userpack.Lookups{}, nil)
 	}
-	profile, err := h.lookups.Profiles.FindProfileByUserID(target.ID)
-	if err != nil || profile == nil {
-		slog.Warn("webhook: load profile for follow payload failed",
-			"userId", target.ID, "err", err)
-		return nil, false
-	}
-	d := entity.PackUserDetailed(target, profile, h.idGen)
-	h.resolveLite(target, &d.UserLite)
-	iAmModerator := h.lookups.Moderators != nil && h.lookups.Moderators.IsModerator(viewer.ID)
-	// 本家は閲覧者がモデレーターなら moderationNote と 2FA の 3 項目を足す
-	// (users/show と同じ扱い)。
-	if iAmModerator {
-		note := ""
-		if profile != nil && profile.ModerationNote != nil {
-			note = *profile.ModerationNote
-		}
-		d.ModerationNote = &note
-	}
-	entity.ApplyModeratorSecurityFields(&d, iAmModerator, profile)
-	viewerIsFollowing := false
-	if h.lookups.Relations != nil {
-		viewerIsFollowing = h.lookups.Relations.Apply(&d, viewer.ID, target, profile)
-	}
-	// フォロワー限定のカウントは、閲覧者がフォロワーのときだけ見せる。follow の
-	// 直後は関係の行があるので見え、unfollow の直後は見えない (本家と同じ)。
-	entity.GateCountVisibility(&d, false, iAmModerator, viewerIsFollowing)
-	return map[string]any{"user": toMap(d)}, true
+	return h.packer
 }
 
 // SignupHook implements the signup WebhookHook interface, firing the

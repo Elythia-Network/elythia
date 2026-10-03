@@ -323,48 +323,13 @@ func (h *Handler) Test(c echo.Context) error {
 				overrideSecret = *req.Override.Secret
 			}
 		}
-		// upstream WebhookTestService は type ごとに dummy note/user payload を
-		// 生成して送る (#1546)。テスト対象 webhook 1 件だけに、override 指定時は
+		// upstream WebhookTestService は type ごとに pack した形の dummy note/user
+		// payload を生成して送る (#1546、#3330)。テスト対象 webhook 1 件だけに、override 指定時は
 		// その url/secret へ送る。
-		h.dispatcher.DispatchUserTest(webhook.ID, user.ID, req.Type, dummyWebhookBody(req.Type), overrideURL, overrideSecret)
+		h.dispatcher.DispatchUserTest(webhook.ID, user.ID, req.Type, dummyWebhookBody(req.Type, time.Now()), overrideURL, overrideSecret)
 	}
 
 	return c.NoContent(http.StatusNoContent)
-}
-
-// dummyWebhookBody builds a representative test payload per event type, matching
-// the body shape the real hooks emit (note events → {note}, reaction →
-// {note, userId, reaction}, follow events → {user}), so the webhook receiver can
-// validate its integration against production-like data (#1546).
-func dummyWebhookBody(eventType string) map[string]any {
-	dummyUser := map[string]any{
-		"id":        "dummy-user-1",
-		"name":      "Dummy User",
-		"username":  "dummy",
-		"host":      nil,
-		"avatarUrl": nil,
-		"createdAt": "2020-01-01T00:00:00.000Z",
-	}
-	dummyNote := map[string]any{
-		"id":         "dummy-note-1",
-		"createdAt":  "2020-01-01T00:00:00.000Z",
-		"userId":     "dummy-user-1",
-		"user":       dummyUser,
-		"text":       "This is a dummy note for testing purposes.",
-		"cw":         nil,
-		"visibility": "public",
-		"fileIds":    []string{},
-		"replyId":    nil,
-		"renoteId":   nil,
-	}
-	switch eventType {
-	case "follow", "followed", "unfollow":
-		return map[string]any{"user": dummyUser}
-	case "reaction":
-		return map[string]any{"note": dummyNote, "userId": "dummy-user-1", "reaction": "👍"}
-	default: // note / reply / renote / mention
-		return map[string]any{"note": dummyNote}
-	}
 }
 
 // HasRolePolicyProvider reports whether the role policy provider was wired.

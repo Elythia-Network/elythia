@@ -132,6 +132,7 @@ import (
 	coreurlpreview "github.com/shiroha-a/mk/internal/core/urlpreview"
 	coreuser "github.com/shiroha-a/mk/internal/core/user"
 	coreuserlist "github.com/shiroha-a/mk/internal/core/userlist"
+	"github.com/shiroha-a/mk/internal/core/userpack"
 	corewebhook "github.com/shiroha-a/mk/internal/core/webhook"
 	corewebpush "github.com/shiroha-a/mk/internal/core/webpush"
 	"github.com/shiroha-a/mk/internal/entity"
@@ -1580,13 +1581,18 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	}
 	// follow / unfollow の Webhook は本家と同じく、フォローした側から見た
 	// UserDetailedNotMe で相手を送る。followed は UserLite (#3269)。
-	webhookFollowingHook.SetUserLookups(corewebhook.UserLookups{
+	// main stream の同じイベントと blocking/create・delete の応答も同じ packer で
+	// 組む (#3330)。ピン留めと移行先を埋める側 (users の handler) は後で組み立てる
+	// ので、そこで SetDetailExtras する。
+	sharedUserPacker := userpack.New(userpack.Lookups{
 		Instances:  instanceRepo,
 		Emojis:     emojiRepo,
 		Profiles:   userRepo,
 		Relations:  listRelationRepos,
 		Moderators: roleService,
 	}, idGen)
+	webhookFollowingHook.SetUserPacker(sharedUserPacker)
+	followingService.SetUserPacker(sharedUserPacker)
 
 	// CAPTCHA service — meta から有効な provider を選択して構築する。
 	// meta 取得失敗時は captcha 無効として動作する (ログイン不能を避けるため)。
@@ -1937,6 +1943,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	usersHandler.SetNoteFieldResolver(noteFieldResolver)
 	usersHandler.SetUserRepo(userRepo)
 	usersHandler.SetNoteReactionRepo(reactionRepo)
+	sharedUserPacker.SetDetailExtras(usersHandler)
 	remoteStatsFetcher := corefederation.NewRemoteStatsFetcher(s.config.AllowedPrivateNetworks, s.config.UserAgent, s.outboundOpts()...)
 	// **連合を切った相手へ取りに行かない。** この経路は未認証の
 	// `/api/users/show` から呼ばれるので、放っておくと defederate した相手に
@@ -2336,6 +2343,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		Memo:          repository.NewUserMemoRepository(s.db),
 	})
 	blockingHandler.SetModeratorChecker(roleService) // #1985: blocking/list の count gate で moderator viewer 判定
+	blockingHandler.SetUserPacker(sharedUserPacker)  // #3330: create・delete の応答を本家の UserDetailedNotMe に揃える
 	api.POST("/blocking/create", blockingHandler.Create, middleware.RequireAuth(), middleware.RequireScope("write:blocks"))
 	api.POST("/blocking/delete", blockingHandler.Delete, middleware.RequireAuth(), middleware.RequireScope("write:blocks"))
 	api.POST("/blocking/list", blockingHandler.List, middleware.RequireAuth(), middleware.RequireScope("read:blocks"))
@@ -4484,6 +4492,16 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"サイレンスしたホストからのフォローが承認なしで通り、followers 限定ノートが配送される"},
 		{"resolver.silencedHostChecker", federationResolver.HasSilencedHostChecker(),
 			"silenced instance の remote public note が home へ降格されず public timeline に出る"},
+		// #3330: follow 系の main stream / Webhook と blocking/create・delete の
+		// 利用者を本家の UserDetailedNotMe に揃える packer。外すと従来の形に落ちる。
+		{"following.userPacker", followingService.HasUserPacker(),
+			"main stream の follow / unfollow が profile を読まない形に落ち、unfollow の後もフォロワー限定のカウントが見える"},
+		{"webhookFollowing.userPacker", webhookFollowingHook.HasUserPacker(),
+			"follow / unfollow の Webhook が送られなくなり、followed は instance と絵文字を欠く"},
+		{"userPacker.detailExtras", sharedUserPacker.HasDetailExtras(),
+			"follow 系の main stream / Webhook と blocking/create・delete で pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
+		{"blocking.userPacker", blockingHandler.HasUserPacker(),
+			"blocking/create・delete の応答が instance・絵文字・ピン留め・移行先・モデレーター向けの項目を欠く"},
 		{"following.blockingChecker", followingService.HasBlockingChecker(),
 			"ブロック関係を無視してフォローが成立する (自分がブロックした相手・自分をブロックしている相手の両方。後者は inbox の Follow も通す)"},
 		{"admin.ipLookupAudit", adminHandler.HasIPLookupAudit(),
