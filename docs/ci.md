@@ -285,6 +285,15 @@ make frontend-test
 
 eslint だけを回すなら `make frontend-lint` (実測 55 秒)。
 
+**`emoji-regex-check` が落ちたとき (#3324):** MFM の Unicode 絵文字の正規表現 (`internal/activitypub/mfm/emoji_regex_gen.go`) が、submodule に入っている mfm-js / emoji-data と食い違っている。`… is stale` なら mfm-js か emoji-data の版が上がったので、作り直して差分ごとコミットする。生成ツールが `no longer contains` や構文のエラーで落ちたら、mfm-js の `unicodeEmoji` の書き方か正規表現の構文が変わっているので、生成ツール (`tools/emojiregex/`) を直す。
+
+```bash
+make emoji-regex
+node internal/activitypub/mfm/testdata/emoji_mfmjs.mjs third_party/misskey \
+  > internal/activitypub/mfm/testdata/emoji_mfmjs.json
+GOWORK=off go test ./internal/activitypub/mfm/ ./tools/emojiregex/
+```
+
 **`make uds-frontend-build` / `e2e-frontend-build` は検証に使わないこと。** 本番が
 bind-mount している `third_party/misskey/built` を書き換えてしまう。`vue-tsc --noEmit` なら
 出力物を作らない。
