@@ -59,6 +59,9 @@ frontend-check: ## fork の frontend を型チェックし、submodule 依存の
 	# (#2892)。
 	MK_FRONTEND_GATES_REQUIRE_SUBMODULE=1 go test ./internal/server/ \
 		-run 'TestCreditImageOriginsCoverAboutMisskey|TestMkGoRolePolicyKeysAreListedInFrontend|TestReactionLongPressIsWired|TestReactableRemoteReactionIsWired|TestMkGoUpdatedDialogIsWired|TestEmojiApplicationIsWired|TestEveryPluginSlotHasAMountPoint|TestAutoLoadingComponentsShowRateLimit|TestRemoteImagesGoThroughMediaProxy|TestRemoteImageProxyGateClassifiesSources|TestEmojiDecorationErrorIDsMatchFrontend|TestStaffNotificationTypesAreOptOutable|TestNotificationBadgeClassesHaveNoPadding|TestEmojiRequestEntriesUseTheSharedHelper|TestCSSModulesHaveNoDuplicateClasses|TestCleanRemoteFilesButtonIsConditional|TestStreamResyncIsWiredInTimelines' -count=1
+	# MFM の Unicode 絵文字の正規表現と記録した版が、submodule の mfm-js / emoji-data と一致するか
+	# (#3324)。node_modules が無いと落ちる (skip しない)。
+	$(MAKE) emoji-regex-check
 	# **eslint も回す (#2906)。** CI は別 step で `pnpm eslint` を回しており、
 	# ここに無いと**手元で緑でも CI が落ちる**。#2903 で実際に踏んだ (デッドコードを
 	# 消したときの空行が @stylistic/no-multiple-empty-lines で落ちた)。個別ファイルに
@@ -339,6 +342,21 @@ test-fast: ## 全テストを -race 抜きで実行 (反復用。コミット前
 	# -count=1 は落とさない — -shuffle を外したときに (cached) で無検証の緑を
 	# 返すようになるため。
 	go test ./... -count=1 -shuffle=3
+
+.PHONY: emoji-regex emoji-regex-check
+emoji-regex: ## MFM の Unicode 絵文字の正規表現を mfm-js の emoji-data から生成 (#3324)
+	# 生成物 (internal/activitypub/mfm/emoji_regex_gen.go) を手で直さない。
+	# third_party/misskey に pnpm install 済みであること。mfm-js か emoji-data の版が
+	# 変わったら、mfm-js の期待値 (internal/activitypub/mfm/testdata/emoji_mfmjs.json) も
+	# testdata/emoji_mfmjs.mjs で作り直す (どちらかの版がずれるとテストが落ちる)。
+	GOWORK=off go run ./tools/emojiregex
+
+emoji-regex-check: ## 生成した絵文字の正規表現が submodule の mfm-js / emoji-data と一致するか検査
+	# **`make gates` には入れない** — node_modules が要る。frontend-check から呼ぶ。
+	# 生成物と snapshot の突き合わせは submodule 無しで `go test ./tools/emojiregex/`
+	# が見る。こちらは snapshot (正規表現と、mfm-js / emoji-data の版) が submodule に
+	# 入っているものと一致しているかを見る。
+	GOWORK=off go run ./tools/emojiregex -check
 
 plugin-doc-check: ## authoring.md の Go スニペットがコンパイルできるか検査
 	./tests/plugin-doc/check-snippets.sh

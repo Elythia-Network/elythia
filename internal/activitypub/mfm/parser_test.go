@@ -439,29 +439,42 @@ func TestParse_UnicodeEmoji_Arrow(t *testing.T) {
 }
 
 func TestParse_UnicodeEmoji_LetterlikeSymbol(t *testing.T) {
-	// ™ = U+2122
+	// ™ = U+2122。mfm-js (emoji-data の正規表現) は U+FE0F が続くときだけ絵文字にする (#3324)
 	nodes := Parse("™")
+	require.Len(t, nodes, 1)
+	assert.Equal(t, NodeText, nodes[0].Type)
+	nodes = Parse("™\ufe0f")
 	require.Len(t, nodes, 1)
 	assert.Equal(t, NodeUnicodeEmoji, nodes[0].Type)
 }
 
 func TestParse_UnicodeEmoji_ArrowRange(t *testing.T) {
-	// ← = U+2190
+	// ← = U+2190 は emoji-data の一覧に無いので、mfm-js と同じく文字 (#3324)。
+	// ↔ = U+2194 は一覧にある
 	nodes := Parse("←")
+	require.Len(t, nodes, 1)
+	assert.Equal(t, NodeText, nodes[0].Type)
+	nodes = Parse("↔")
 	require.Len(t, nodes, 1)
 	assert.Equal(t, NodeUnicodeEmoji, nodes[0].Type)
 }
 
 func TestParse_UnicodeEmoji_Copyright(t *testing.T) {
-	// © = U+00A9
+	// © = U+00A9。mfm-js は U+FE0F が続くときだけ絵文字にする (#3324)
 	nodes := Parse("©")
+	require.Len(t, nodes, 1)
+	assert.Equal(t, NodeText, nodes[0].Type)
+	nodes = Parse("©\ufe0f")
 	require.Len(t, nodes, 1)
 	assert.Equal(t, NodeUnicodeEmoji, nodes[0].Type)
 }
 
 func TestParse_UnicodeEmoji_Registered(t *testing.T) {
-	// ® = U+00AE
+	// ® = U+00AE。mfm-js は U+FE0F が続くときだけ絵文字にする (#3324)
 	nodes := Parse("®")
+	require.Len(t, nodes, 1)
+	assert.Equal(t, NodeText, nodes[0].Type)
+	nodes = Parse("®\ufe0f")
 	require.Len(t, nodes, 1)
 	assert.Equal(t, NodeUnicodeEmoji, nodes[0].Type)
 }
@@ -488,10 +501,10 @@ func TestParse_UnicodeEmoji_SupplementalSymbols(t *testing.T) {
 }
 
 func TestParse_UnicodeEmoji_ChessSymbol(t *testing.T) {
-	// 🩠 = U+1FA60 (not all fonts render)
+	// U+1FA00 (Chess Symbols) は emoji-data の一覧に無いので、mfm-js と同じく文字 (#3324)
 	nodes := Parse("\U0001FA00")
 	require.Len(t, nodes, 1)
-	assert.Equal(t, NodeUnicodeEmoji, nodes[0].Type)
+	assert.Equal(t, NodeText, nodes[0].Type)
 }
 
 func TestParse_UnicodeEmoji_ExtendedA(t *testing.T) {

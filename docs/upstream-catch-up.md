@@ -280,6 +280,19 @@ TypeORM の decorator から正規形を再現できないため **実 DB から
 同内容・別名の index があれば検出されるので、upstream 名に揃えるか
 `known_duplicate_indexes.json` に追加して `000068` の扱いを見直す (#2246)。
 
+### submodule bump 後に必須: MFM の絵文字の正規表現
+
+mk-go の MFM パーサは、mfm-js が依存する `@misskey-dev/emoji-data` の `emojiRegex` を Go の正規表現へ移したもの (`internal/activitypub/mfm/emoji_regex_gen.go`) で Unicode 絵文字を読む (#3324)。frontend の mfm-js の版か、それが依存する emoji-data の版が変わると、`make frontend-check` の `emoji-regex-check` が落ちる (正規表現が同じでも、snapshot に記録した版と食い違うため)。mfm-js の `unicodeEmoji` の書き方が変わったときも、生成ツールが前提の形を見つけられずに落ちる (下記)。
+
+```bash
+make emoji-regex     # 生成物と tools/emojiregex/testdata/source.txt を作り直す
+node internal/activitypub/mfm/testdata/emoji_mfmjs.mjs third_party/misskey \
+  > internal/activitypub/mfm/testdata/emoji_mfmjs.json   # mfm-js の期待値を作り直す
+GOWORK=off go test ./internal/activitypub/mfm/ ./tools/emojiregex/
+```
+
+生成ツールは、mfm-js の `unicodeEmoji` の書き方 (`regexp(RegExp(emojiRegex.source))` と、U+FE0F だけのときに文字を返す `map`) と、正規表現が使う構文 (`?` だけの量指定・サロゲートペア・決まった位置の否定の先読み) を前提にしている。前提が崩れると生成の時点で落ちるので、その場合は生成ツールを直す。
+
 ### submodule bump 後に必須: divergence doc の件数
 
 `golden_upstream_columns.json` を撮り直すと `TestDivergenceDoc_ColumnCountMatchesSchema` が動く。**upstream が列を DROP すると、その列は「mk-go 独自カラム」に転じる**ので `docs/divergence.md` §2-2 の件数が増える (`note_favorite.createdAt` がその経緯で独自列になっている)。
