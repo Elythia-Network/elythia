@@ -52,7 +52,8 @@ func (f *fakeRemoteUserResolver) ResolveByUsernameHost(username, host string) (*
 		return nil, errors.New("webfinger failed")
 	}
 	h := host
-	u := &model.User{ID: id, Username: username, UsernameLower: strings.ToLower(username), Host: &h}
+	uri := "https://" + host + "/users/" + id
+	u := &model.User{ID: id, Username: username, UsernameLower: strings.ToLower(username), Host: &h, URI: &uri}
 	f.mu.Lock()
 	f.repo.Users[id] = u
 	f.mu.Unlock()

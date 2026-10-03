@@ -52,7 +52,7 @@ func newFeedTestHandler(notes []*model.Note) *feedHandler {
 			return &model.UserProfile{FollowingVisibility: "public", FollowersVisibility: "public"}
 		},
 		avatarURL: func(*model.User) string { return "https://example.test/avatar.png" },
-		toHTML:    func(text string) string { return "<p>" + text + "</p>" },
+		toHTML:    func(text, _ string) string { return "<p>" + text + "</p>" },
 	}
 }
 
@@ -127,6 +127,35 @@ func TestFeed_JSON(t *testing.T) {
 	item := items[0].(map[string]any)
 	assert.Equal(t, "https://example.test/notes/n1", item["url"])
 	assert.Equal(t, "<p>hello</p>", item["content_html"])
+}
+
+// TestFeed_PassesMentionedRemoteUsers checks that the note's
+// mentionedRemoteUsers column reaches toHTML, as upstream FeedService passes
+// it to MfmService.toHtml.
+func TestFeed_PassesMentionedRemoteUsers(t *testing.T) {
+	notes := sampleFeedNotes()
+	notes[0].MentionedRemoteUsers = `[{"uri":"https://remote.example/users/1","username":"bob","host":"remote.example"}]`
+	h := newFeedTestHandler(notes)
+	var got string
+	h.toHTML = func(_, mentionedRemoteUsers string) string {
+		got = mentionedRemoteUsers
+		return ""
+	}
+	rec := doFeedReq(t, h.JSON, "alice")
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, notes[0].MentionedRemoteUsers, got)
+}
+
+// TestFeedNoteHTML checks that the feed's HTML links a remote mention to the
+// url in the mentionedRemoteUsers column and an unknown one to this server.
+func TestFeedNoteHTML(t *testing.T) {
+	toHTML := feedNoteHTML("example.test")
+	got := toHTML("@bob@remote.example @carol@other.example",
+		`[{"uri":"https://remote.example/users/1","url":"https://remote.example/@bob","username":"bob","host":"remote.example"}]`)
+	assert.Equal(t,
+		`<a href="https://remote.example/@bob" class="u-url mention">@bob@remote.example</a> `+
+			`<a href="https://example.test/@carol@other.example" class="u-url mention">@carol@other.example</a>`,
+		got)
 }
 
 // 存在しないユーザーは 404。upstream も同じ。

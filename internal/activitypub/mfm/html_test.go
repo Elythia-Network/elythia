@@ -116,13 +116,6 @@ func TestToHTML_Mention_Local(t *testing.T) {
 	assert.Contains(t, result, "@alice</a>")
 }
 
-func TestToHTML_Mention_Remote(t *testing.T) {
-	nodes := Parse("@bob@remote.example")
-	result := ToHTML(nodes, testHost)
-	assert.Contains(t, result, `href="https://remote.example/@bob"`)
-	assert.Contains(t, result, "@bob@remote.example</a>")
-}
-
 func TestToHTML_Hashtag(t *testing.T) {
 	nodes := Parse("#hello")
 	result := ToHTML(nodes, testHost)

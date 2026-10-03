@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/shiroha-a/mk/internal/activitypub/mfm"
 	corenote "github.com/shiroha-a/mk/internal/core/note"
 	"github.com/shiroha-a/mk/internal/core/ugcvisibility"
 	"github.com/shiroha-a/mk/internal/model"
@@ -245,7 +246,10 @@ type feedHandler struct {
 	ugcVisibility func() string
 	profiles      func(userID string) *model.UserProfile
 	avatarURL     func(u *model.User) string
-	toHTML        func(text string) string
+	// toHTML は note の本文と mentionedRemoteUsers 列から HTML を作る。本家
+	// FeedService も toHtml に列を渡すので、リモートのメンションはその利用者の
+	// url へのリンクになる。
+	toHTML func(text, mentionedRemoteUsers string) string
 	// now は時間窓の判定に使う現在時刻。nil なら time.Now (テストで固定する)。
 	now func() time.Time
 }
@@ -367,7 +371,7 @@ func (h *feedHandler) build(u *model.User) *feedData {
 			e.Summary = *n.CW
 		}
 		if n.Text != nil && *n.Text != "" && h.toHTML != nil {
-			e.Content = h.toHTML(*n.Text)
+			e.Content = h.toHTML(*n.Text, n.MentionedRemoteUsers)
 		}
 		data.Entries = append(data.Entries, e)
 	}
@@ -443,4 +447,13 @@ type feedUserResolver struct {
 
 func (r feedUserResolver) FindLocalByUsername(username string) (*model.User, error) {
 	return r.repo.FindByUsernameLower(strings.ToLower(username), nil)
+}
+
+// feedNoteHTML returns the feedHandler.toHTML that renders a note's text with
+// its mentionedRemoteUsers column, like upstream FeedService passes
+// JSON.parse(note.mentionedRemoteUsers) to MfmService.toHtml.
+func feedNoteHTML(host string) func(text, mentionedRemoteUsers string) string {
+	return func(text, mentionedRemoteUsers string) string {
+		return mfm.ToHTMLWithMentions(mfm.Parse(text), host, mfm.ParseMentionedRemoteUsers(mentionedRemoteUsers))
+	}
 }
