@@ -3,8 +3,10 @@
 package following
 
 import (
+	"context"
 	"errors"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/shiroha-a/mk/internal/entity"
@@ -119,6 +121,8 @@ type Service struct {
 	chartHook           ChartHook
 	webhookHook         WebhookHook
 	mainStreamPublisher MainStreamPublisher
+	// userPacker は main stream の follow 系イベントの利用者を Webhook と同じ形に組む (#3330)。
+	userPacker UserPacker
 	// relationReload は follow 変更を streaming connection へ通知する (#2400)。
 	relationReload RelationReloadPublisher
 	// silencedChecker は meta.silencedHosts の判定。未配線なら承認要求を
@@ -215,6 +219,112 @@ func (s *Service) SetWebhookHook(h WebhookHook) {
 // nil disables emit.
 func (s *Service) SetMainStreamPublisher(p MainStreamPublisher) {
 	s.mainStreamPublisher = p
+}
+
+// UserPacker packs the user carried by the follow-related main stream events.
+// *userpack.Packer satisfies it; the user webhooks use the same packer.
+type UserPacker interface {
+	Lite(u *model.User) entity.UserLite
+	DetailedNotMe(ctx context.Context, target, viewer *model.User) (entity.UserDetailed, bool)
+}
+
+// SetUserPacker wires the packer for the main stream follow / unfollow /
+// followed / receiveFollowRequest bodies. Unwired, the events carry the
+// legacy shape built from the user row alone (test fixtures).
+func (s *Service) SetUserPacker(p UserPacker) {
+	s.userPacker = p
+}
+
+// HasUserPacker reports whether the user packer was wired.
+//
+// 未配線だと main stream の follow / unfollow が profile を読まない従来の形に
+// 落ち、unfollow の後もフォロワー限定のカウントが見える。起動時検査に使う。
+func (s *Service) HasUserPacker() bool { return s.userPacker != nil }
+
+// PackedFollowWebhookHook is implemented by a WebhookHook that accepts the
+// followee already packed for the main stream, so one follow / unfollow packs
+// the user once (upstream publishes the same packed value to both).
+type PackedFollowWebhookHook interface {
+	OnFollowPacked(follower, followee *model.User, packed func() (entity.UserDetailed, bool))
+	OnUnfollowPacked(follower, followee *model.User, packed func() (entity.UserDetailed, bool))
+}
+
+// followeePacker returns a memoized builder of followee packed as
+// UserDetailedNotMe seen by follower, or nil when the packer is unwired.
+//
+// main stream と Webhook で共有し、組み立てを 1 回にする (本家は 1 回 pack した
+// 値を両方へ流す)。どちらも要らなければ一度も組まない。
+func (s *Service) followeePacker(follower, followee *model.User) func() (entity.UserDetailed, bool) {
+	if s.userPacker == nil {
+		return nil
+	}
+	return sync.OnceValues(func() (entity.UserDetailed, bool) {
+		return s.userPacker.DetailedNotMe(context.Background(), followee, follower)
+	})
+}
+
+// notifyFolloweeEvent emits `follow` / `unfollow` to the follower's webhooks
+// (when withWebhook) and main stream, packing followee at most once.
+func (s *Service) notifyFolloweeEvent(event string, follower, followee *model.User, isFollowing, withWebhook bool) {
+	packed := s.followeePacker(follower, followee)
+	if withWebhook && s.webhookHook != nil {
+		s.dispatchFolloweeWebhook(event, follower, followee, packed)
+	}
+	s.publishFolloweeEvent(event, follower, followee, isFollowing, packed)
+}
+
+func (s *Service) dispatchFolloweeWebhook(event string, follower, followee *model.User, packed func() (entity.UserDetailed, bool)) {
+	if p, ok := s.webhookHook.(PackedFollowWebhookHook); ok && packed != nil {
+		if event == "follow" {
+			p.OnFollowPacked(follower, followee, packed)
+		} else {
+			p.OnUnfollowPacked(follower, followee, packed)
+		}
+		return
+	}
+	if event == "follow" {
+		s.webhookHook.OnFollow(follower, followee)
+	} else {
+		s.webhookHook.OnUnfollow(follower, followee)
+	}
+}
+
+// publishFolloweeEvent publishes `follow` / `unfollow` to the follower's main
+// stream, carrying followee packed as UserDetailedNotMe seen by the follower.
+//
+// 本家 UserFollowingService は Webhook と同じ
+// `pack(followee, follower, {schema: 'UserDetailedNotMe'})` の値を流し、
+// フォローした側がローカルのときだけ publish する。関係の行は呼び出し時点の
+// ものを読むので、follow では isFollowing=true とフォロワー限定のカウントが、
+// unfollow では isFollowing=false と伏せたカウントが乗る。profile を読めない
+// ときは本家と同じく流さない。
+func (s *Service) publishFolloweeEvent(event string, follower, followee *model.User, isFollowing bool, packed func() (entity.UserDetailed, bool)) {
+	if s.mainStreamPublisher == nil || follower == nil || followee == nil || !follower.IsLocal() {
+		return
+	}
+	if packed == nil {
+		s.mainStreamPublisher.PublishMainEvent(follower.ID, event, entity.PackUserForFollowStreamEvent(followee, isFollowing, false, s.idGen))
+		return
+	}
+	d, ok := packed()
+	if !ok {
+		return
+	}
+	s.mainStreamPublisher.PublishMainEvent(follower.ID, event, d)
+}
+
+// publishFollowerLite publishes `followed` / `receiveFollowRequest` to the
+// followee's main stream, carrying follower packed as UserLite. 本家と同じく
+// followee がローカルのときだけ流す。
+func (s *Service) publishFollowerLite(event string, follower, followee *model.User) {
+	if s.mainStreamPublisher == nil || follower == nil || followee == nil || !followee.IsLocal() {
+		return
+	}
+	body := entity.PackUserLite(follower)
+	if s.userPacker != nil {
+		body = s.userPacker.Lite(follower)
+	}
+	s.mainStreamPublisher.PublishMainEvent(followee.ID, event, body)
 }
 
 // SetInstanceRepo wires an InstanceRepository so Follow / Unfollow /
@@ -385,13 +495,9 @@ func (s *Service) Follow(followerID, followeeID string, opts FollowOptions) (*Fo
 			s.federationHook.OnLocalFollowed(follower, followee)
 		}
 		// TS本家: UserFollowingService は `receiveFollowRequest` を
-		// followee の main stream に publish する。body は follower User。
-		// UserLite で送るのは他のWSイベント (notification内のuser等) と
-		// 揃える意図。Instance情報は PackUserLite に含まれないが、
-		// frontend は undefined 許容。
-		if s.mainStreamPublisher != nil {
-			s.mainStreamPublisher.PublishMainEvent(followeeID, "receiveFollowRequest", entity.PackUserLite(follower))
-		}
+		// followee の main stream に publish する。body は follower の UserLite
+		// (`pack(follower, followee)`)。
+		s.publishFollowerLite("receiveFollowRequest", follower, followee)
 		return &FollowResult{Request: req}, nil
 	}
 
@@ -433,18 +539,14 @@ func (s *Service) Follow(followerID, followeeID string, opts FollowOptions) (*Fo
 	}
 	// Webhookはfollower側で `follow`、followee側で `followed` を発火する。
 	if s.webhookHook != nil {
-		s.webhookHook.OnFollow(follower, followee)
 		s.webhookHook.OnFollowed(follower, followee)
 	}
 	// TS本家 UserFollowingService.follow() は follower の main に `follow`
-	// (相手側の User)、followee の main に `followed` (自分を follow した
-	// User) を publish する。frontend MkFollowButton.onFollowChangeが
-	// body.isFollowing / body.hasPendingFollowRequestFromYouを読むため、
-	// UserDetailed shapeでpackしてviewer依存フィールドも埋めておく。
-	if s.mainStreamPublisher != nil {
-		s.mainStreamPublisher.PublishMainEvent(followerID, "follow", entity.PackUserForFollowStreamEvent(followee, true, false, s.idGen))
-		s.mainStreamPublisher.PublishMainEvent(followeeID, "followed", entity.PackUserLite(follower))
-	}
+	// (相手側の UserDetailedNotMe)、followee の main に `followed` (自分を
+	// follow した UserLite) を publish する。frontend MkFollowButton.onFollowChange
+	// は body.isFollowing / body.hasPendingFollowRequestFromYou を読む。
+	s.notifyFolloweeEvent("follow", follower, followee, true, true)
+	s.publishFollowerLite("followed", follower, followee)
 
 	s.publishFollowingReload(followerID)
 	return &FollowResult{Following: f}, nil
@@ -535,15 +637,12 @@ func (s *Service) unfollow(followerID, followeeID string, opts unfollowOpts) err
 			if s.chartHook != nil {
 				s.chartHook.OnUnfollow(follower, followee)
 			}
-			if opts.notify && s.webhookHook != nil {
-				s.webhookHook.OnUnfollow(follower, followee)
-			}
 			// TS本家は自分が unfollow した相手を main に publish する
 			// (フォローボタン等の即時反映)。follow event と同様、UserDetailed
 			// shapeでisFollowing=false / hasPendingFollowRequestFromYou=falseを
 			// 明示的に埋める (frontendはこれらを直接代入するのでundefined不可)。
-			if opts.notify && s.mainStreamPublisher != nil {
-				s.mainStreamPublisher.PublishMainEvent(followerID, "unfollow", entity.PackUserForFollowStreamEvent(followee, false, false, s.idGen))
+			if opts.notify {
+				s.notifyFolloweeEvent("unfollow", follower, followee, false, true)
 			}
 		}
 	}
@@ -623,17 +722,14 @@ func (s *Service) AcceptRequest(followeeID, followerID string) error {
 				s.chartHook.OnFollow(follower, followee)
 			}
 			if s.webhookHook != nil {
-				s.webhookHook.OnFollow(follower, followee)
 				s.webhookHook.OnFollowed(follower, followee)
 			}
 			// Accept によって Following が成立するので、Follow() と同じく
 			// follower の main に `follow`、followee の main に `followed`
 			// を publish する (TS本家 UserFollowingService.acceptFollow
 			// と同等)。follow event body は UserDetailed + isFollowing=true。
-			if s.mainStreamPublisher != nil {
-				s.mainStreamPublisher.PublishMainEvent(req.FollowerID, "follow", entity.PackUserForFollowStreamEvent(followee, true, false, s.idGen))
-				s.mainStreamPublisher.PublishMainEvent(req.FolloweeID, "followed", entity.PackUserLite(follower))
-			}
+			s.notifyFolloweeEvent("follow", follower, followee, true, true)
+			s.publishFollowerLite("followed", follower, followee)
 		}
 	}
 	// Accept で Following が成立するので follower の snapshot が変わる (#2400)。
@@ -788,10 +884,10 @@ func (s *Service) publishFollowRequestResolved(followerID string, followee *mode
 	// 不要。federation processor 経由の Undo / Reject ではここに remote user ID
 	// が入ることがあるので明示的にスキップする。
 	follower, err := s.userRepo.FindByID(followerID)
-	if err != nil || !follower.IsLocal() {
+	if err != nil {
 		return
 	}
-	s.mainStreamPublisher.PublishMainEvent(followerID, "unfollow", entity.PackUserForFollowStreamEvent(followee, false, false, s.idGen))
+	s.notifyFolloweeEvent("unfollow", follower, followee, false, false)
 }
 
 // ListReceivedRequests returns follow requests received by userID. sinceID /

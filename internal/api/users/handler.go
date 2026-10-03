@@ -1458,6 +1458,16 @@ func buildRelationCandidates(viewer *model.User, bundleByID map[string]*user.Use
 	return candidates
 }
 
+// FillDetailedExtras fills the UserDetailed parts that need the users/show
+// dependencies: movedTo / alsoKnownAs (local lookup only) and pinnedNoteIds /
+// pinnedNotes / pinnedPageId / pinnedPage gated by viewer. It satisfies
+// userpack.DetailExtras so the follow stream / webhook bodies and
+// blocking/create・delete carry the same values as users/show.
+func (h *Handler) FillDetailedExtras(ctx context.Context, viewer, u *model.User, profile *model.UserProfile, d *entity.UserDetailed) {
+	d.ResolveMoveTargets(u, h.resolveUserIDByURI)
+	h.fillPinned(ctx, viewer, u, profile, d)
+}
+
 // fillPinned populates PinnedNoteIDs / PinnedNotes / PinnedPageID / PinnedPage
 // on the passed UserDetailed from the user's user_note_pining rows and
 // user_profile.pinnedPageId. Missing repos fall back to default empty/nil.

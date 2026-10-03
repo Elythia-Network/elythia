@@ -2,6 +2,7 @@
 package blocking
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -34,7 +35,28 @@ type Handler struct {
 	// moderator は blocking/list の埋め込み blockee の count gate で moderator
 	// viewer を判定する (#1985)。未配線なら non-moderator 扱い。
 	moderator ModeratorChecker
+	// packer は create / delete の応答を本家の UserDetailedNotMe と同じ形
+	// (instance・絵文字・ピン留め・移行先・モデレーター向けの項目) に組む (#3330)。
+	packer UserPacker
 }
+
+// UserPacker packs a user as UserDetailedNotMe seen by viewer.
+// *userpack.Packer satisfies it.
+type UserPacker interface {
+	DetailedNotMe(ctx context.Context, target, viewer *model.User) (entity.UserDetailed, bool)
+}
+
+// SetUserPacker wires the packer used by blocking/create・delete. Unwired, the
+// response is built from the user row, profile and relation block only.
+func (h *Handler) SetUserPacker(p UserPacker) {
+	h.packer = p
+}
+
+// HasUserPacker reports whether the user packer was wired.
+//
+// 未配線だと create / delete の応答が instance・絵文字・ピン留め・移行先・
+// モデレーター向けの項目を欠いた形に落ちる。起動時検査に使う。
+func (h *Handler) HasUserPacker() bool { return h.packer != nil }
 
 // NewHandler creates a new blocking Handler.
 // userRepo / idGen are required by blocking/list to embed the
@@ -126,6 +148,19 @@ func (h *Handler) respondPackedUser(c echo.Context, viewer *model.User, userID s
 	target, err := h.userRepo.FindByID(userID)
 	if err != nil || target == nil {
 		return c.NoContent(http.StatusNoContent)
+	}
+	// 本家は pack(blockee, blocker, {schema: 'UserDetailedNotMe'}) を返す。
+	//
+	// **profile を読めないときは従来の組み方に落とさない。** profile 無しで組むと
+	// followersVisibility が既定の public に倒れ、伏せるべきカウントが出る。本家は
+	// findOneByOrFail が例外を投げて 500 になる (ブロック / 解除そのものは済んで
+	// いる) ので、同じく INTERNAL_ERROR を返す。
+	if viewer != nil && h.packer != nil {
+		detailed, ok := h.packer.DetailedNotMe(c.Request().Context(), target, viewer)
+		if !ok {
+			return apierr.JSONInternalError(c)
+		}
+		return c.JSON(http.StatusOK, detailed)
 	}
 	profile, _ := h.userRepo.FindProfileByUserID(userID)
 	detailed := entity.PackUserDetailed(target, profile, h.idGen)
