@@ -1657,6 +1657,26 @@ entropy も sharp と一致する (gif は完全一致、他は差 0.03 以下)�
 
 `draw.Draw` / `At()` は逆に alpha は正しいが premultiplied なので**完全に透明な画素の RGB が 0 に潰れる**。`normalizeForResize` が Y / Cb / Cr / A の plane を自分で読んで両方とも正しく取る。**resize 経路だけでなく `processBadge` もここを通す**必要がある。
 
+### MFM の HTML 変換 (`mfm.ToHTML`)
+
+ノートの `content`、プロフィールの `summary`、chat の `content`、RSS / Atom の本文に使う。#3329 で本家 `MfmService.toHtml` にバイト単位で揃えた (改行は CRLF / CR / LF のどれも `<br />`、plain は `<span>`、数式ブロックは `<pre><code>`、ハッシュタグの href は `encodeURIComponent`、ruby / unixtime の出し方も本家どおり)。link / url / メンションの href は、本家の `new URL(x).href` を `internal/activitypub/mfm/whatwg_url.go` で書き写して正規化する (ホストの小文字化と IDN の punycode 化、IPv4 / IPv6 の正規化、既定のポートの削除、`.` / `..` の解決、パス・クエリ・フラグメントの % エスケープ)。合わせた先は本家が動く **Node 26 (ada 3.4)** で、Node 22 とはパスの `^` の扱いが違う。
+
+**実測**: mfm-js 0.26.0 の parse と toHtml の写しを Node 26.4.0 で動かした結果と、構文木と HTML を突き合わせた。数え方は「本家が例外を投げる入力 (下の ruby) を除いた件数」で、違いの件数は HTML の文字列が一致しなかった入力の数。
+
+- 構文の断片を 1〜7 個つないだ乱数入力 15 万件 (3 回): 構文木は全件一致。HTML は 4 件だけ違い、全て下のリモートのメンションの差 (同じユーザーを大文字小文字違いで 2 回メンションした入力で、本家は最初に見つかったユーザーの url を使う)
+- http(s) の URL の各部分をランダムに組んだ入力 36 万件 (4 回): 3 件だけ違い、全てホストに ZWNJ (U+200C) を含むもの (下の表)
+- Bidi の種別が違う文字を 4 文字まで並べたホスト 10.8 万件: 全件一致
+
+残っている差:
+
+| 項目 | 本家 | mk-go | 理由 |
+|---|---|---|---|
+| リモートのメンションの href | メンション先のユーザーの `url` (無ければ `uri`)。ユーザーを引けないメンションは `<config.url>/@user@host` | 常に `https://<host>/@<username>` | ToHTML は DB を引かない。Misskey と Mastodon の `url` はこの形なので、多くの場合は同じ |
+| 子が 1 つで半角空白を含まない ruby (`$[ruby abc]`) と、1 つの子が文字でない ruby | `escapeHtml(undefined)` で TypeError を投げ、ノートの HTML を作れない | 斜体 (`<i>…</i>`) にする | 例外で配送や描画を止めない。本家の不明な fn と同じ形 |
+| http / https 以外の scheme の link | `new URL()` が読めればリンクにする (`javascript:` も) | リンクにせず `[文字](url)` の文字にする | XSS 防止。mfm-js の link は http(s) しか作らないので、Parse の結果では起きない |
+| ホストの ZWNJ (U+200C) の前後の検査 (CheckJoiners) | ada は「ZWNJ より前のどこかに Joining_Type が L / D の文字、後ろのどこかに R / D の文字」があれば通す | x/net/idna の判定 (RFC 5892 の正規表現に近く、間に非結合の文字を挟むと落とす。逆に ZWNJ の直後の非結合の文字で判定を打ち切って通すこともある) | Joining_Type の表は x/net/idna の中にあり外から呼べない。ペルシア語のように結合する文字の間に ZWNJ を置く普通の綴りはどちらも通る。違うのは `ب_` + ZWNJ + `ب` (Node だけ通す) や `ت` + ZWNJ + `,$0.` (mk-go だけ通す) のような形だけ |
+| 非 ASCII のホストのその他の細部 | ada の UTS #46 | x/net/idna (Go 1.27 では Unicode 17 の表)。Bidi の検査は ada の実測に合わせた自前の判定 (`adaBidiLabelOK`)。mapping 後に `xn--` で始まるラベルの検査は、mapping のうち句点・NFKC・小文字化と主な無視される文字だけを近似する。区切りが先頭にしかない punycode (`xn---abc`) は x/net/idna が読まないので、区切りを外して検査する。非常に長い非 ASCII のラベル (`例a` を 1000 回繰り返した 2000 文字など) は、x/net/idna の punycode の符号化が桁あふれの検査で失敗するのでリンクにしない (Node はリンクにする) | ada の Bidi の検査は RFC 5893 と違い (先頭が L のラベルは最後の文字を見ないなど)、x/net/idna の mapping は外から呼べない。長いラベルは DNS のラベルの上限 (63 文字) を大きく超えるので実害は無い。上の乱数入力 (ホストは数文字) では ZWNJ 以外の差は出ていない |
+
 ---
 
 ## メンテナンス
