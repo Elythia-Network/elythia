@@ -3,6 +3,7 @@ package federation_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -217,6 +218,7 @@ func TestNoteDeliveryHook_MentionedRemoteUser_Delivered(t *testing.T) {
 	note := makeNote(author.ID, model.NoteVisibilityPublic)
 	text := "hi @bob@remote.example and @charlie"
 	note.Text = &text
+	note.Mentions = model.StringArray{"bob", "charlie"}
 	hook.OnNoteCreated(note, author)
 
 	// No followers exist — only the mention delivery enqueues (1 call).
@@ -251,6 +253,7 @@ func TestNoteDeliveryHook_MentionedRemoteUser_UnknownSkipped(t *testing.T) {
 	note := makeNote(author.ID, model.NoteVisibilityPublic)
 	text := "hi @ghost@unknown.example"
 	note.Text = &text
+	note.Mentions = model.StringArray{"ghost"}
 	hook.OnNoteCreated(note, author)
 
 	// Unknown user resolution fails — no enqueue.
@@ -258,7 +261,7 @@ func TestNoteDeliveryHook_MentionedRemoteUser_UnknownSkipped(t *testing.T) {
 }
 
 func TestNoteDeliveryHook_MentionedRemoteUser_Duplicate(t *testing.T) {
-	hook, enq, userRepo, _, keypairRepo, _ := newNoteDeliveryHook(t)
+	hook, enq, userRepo, _, keypairRepo, noteRepo := newNoteDeliveryHook(t)
 	author := makeLocalAuthor(t, userRepo, keypairRepo)
 
 	host := "remote.example"
@@ -271,15 +274,16 @@ func TestNoteDeliveryHook_MentionedRemoteUser_Duplicate(t *testing.T) {
 		Inbox:         &inbox,
 	}
 	userRepo.Users["bob"] = bob
-	// Two distinct @-tokens resolve to the same user ID (username alias case),
-	// so the mention delivery must dedup by user ID (not by mention token).
-	userRepo.FindByUsernameLowerFn = func(_ string, _ *string) (*model.User, error) {
-		return bob, nil
-	}
 
+	// The mention and the reply target are the same user, so the direct
+	// delivery must dedup by user ID.
+	replyID := "reply-target"
+	noteRepo.Notes[replyID] = &model.Note{ID: replyID, UserID: "bob"}
 	note := makeNote(author.ID, model.NoteVisibilityPublic)
-	text := "@bob@remote.example hi @bobalias@remote.example"
+	text := "@bob@remote.example hi"
 	note.Text = &text
+	note.ReplyID = &replyID
+	note.Mentions = model.StringArray{"bob"}
 	hook.OnNoteCreated(note, author)
 
 	// Deduped by user ID: only one enqueue.
@@ -304,6 +308,7 @@ func TestNoteDeliveryHook_MentionedRemoteUser_DeliverError_DoesNotPanic(t *testi
 	note := makeNote(author.ID, model.NoteVisibilityPublic)
 	text := "hi @bob@remote.example"
 	note.Text = &text
+	note.Mentions = model.StringArray{"bob"}
 	hook.OnNoteCreated(note, author) // panic しないこと
 	assert.Empty(t, enq.calls)
 }
@@ -826,4 +831,96 @@ func TestQuoteRequestDeliveryHook_SendApprovalDelete(t *testing.T) {
 
 	enq.err = assert.AnError
 	assert.Error(t, hook.SendApprovalDelete(author, bob, a))
+}
+
+// The direct delivery follows note.Mentions, which the create service resolves
+// from the text, the CW and the poll choices (#3330). A remote user mentioned
+// only in the CW must be delivered to, like upstream which delivers to every
+// remote user in mentionedUsers.
+func TestNoteDeliveryHook_MentionedRemoteUser_FollowsNoteMentions(t *testing.T) {
+	hook, enq, userRepo, _, keypairRepo, _ := newNoteDeliveryHook(t)
+	author := makeLocalAuthor(t, userRepo, keypairRepo)
+
+	host := "remote.example"
+	inbox := "https://remote.example/users/bob/inbox"
+	userRepo.Users["bob"] = &model.User{
+		ID: "bob", Username: "bob", UsernameLower: "bob", Host: &host, Inbox: &inbox,
+	}
+
+	note := makeNote(author.ID, model.NoteVisibilityPublic)
+	text := "no mention in the text"
+	cw := "cw for @bob@remote.example"
+	note.Text = &text
+	note.CW = &cw
+	note.Mentions = model.StringArray{"bob"}
+	hook.OnNoteCreated(note, author)
+
+	require.Len(t, enq.calls, 1)
+	assert.Equal(t, inbox, enq.calls[0].Inbox)
+}
+
+// A text mention that the create service did not put into note.Mentions
+// (noExtractMentions) is not delivered to directly; upstream passes
+// apMentions: [] and so has no mentioned user to deliver to.
+func TestNoteDeliveryHook_TextMentionOutsideNoteMentionsNotDelivered(t *testing.T) {
+	hook, enq, userRepo, _, keypairRepo, _ := newNoteDeliveryHook(t)
+	author := makeLocalAuthor(t, userRepo, keypairRepo)
+
+	host := "remote.example"
+	inbox := "https://remote.example/users/bob/inbox"
+	userRepo.Users["bob"] = &model.User{
+		ID: "bob", Username: "bob", UsernameLower: "bob", Host: &host, Inbox: &inbox,
+	}
+
+	note := makeNote(author.ID, model.NoteVisibilityPublic)
+	text := "hi @bob@remote.example"
+	note.Text = &text
+	hook.OnNoteCreated(note, author)
+
+	assert.Empty(t, enq.calls)
+}
+
+// A specified note's recipients are in note.Mentions too, but they are
+// delivered to by deliverToSpecified, so the mention delivery must skip them
+// instead of sending the same Create twice.
+func TestNoteDeliveryHook_SpecifiedRecipientInMentionsDeliveredOnce(t *testing.T) {
+	hook, enq, userRepo, _, keypairRepo, _ := newNoteDeliveryHook(t)
+	author := makeLocalAuthor(t, userRepo, keypairRepo)
+
+	host := "remote.example"
+	inbox := "https://remote.example/users/bob/inbox"
+	userRepo.Users["bob"] = &model.User{
+		ID: "bob", Username: "bob", UsernameLower: "bob", Host: &host, Inbox: &inbox,
+	}
+
+	note := makeNote(author.ID, model.NoteVisibilitySpecified)
+	note.VisibleUserIDs = model.StringArray{"bob"}
+	note.Mentions = model.StringArray{"bob"}
+	hook.OnNoteCreated(note, author)
+
+	require.Len(t, enq.calls, 1)
+	assert.Equal(t, inbox, enq.calls[0].Inbox)
+}
+
+// A failed lookup of the mentioned users drops the mention delivery (logged)
+// but keeps the other direct recipients.
+func TestNoteDeliveryHook_MentionLookupErrorKeepsReplyDelivery(t *testing.T) {
+	hook, enq, userRepo, _, keypairRepo, noteRepo := newNoteDeliveryHook(t)
+	author := makeLocalAuthor(t, userRepo, keypairRepo)
+
+	host := "remote.example"
+	inbox := "https://remote.example/users/bob/inbox"
+	userRepo.Users["bob"] = &model.User{
+		ID: "bob", Username: "bob", UsernameLower: "bob", Host: &host, Inbox: &inbox,
+	}
+	userRepo.FindManyByIDsErr = errors.New("connection refused")
+	replyID := "reply-target"
+	noteRepo.Notes[replyID] = &model.Note{ID: replyID, UserID: "bob"}
+
+	note := makeNote(author.ID, model.NoteVisibilityPublic)
+	note.ReplyID = &replyID
+	note.Mentions = model.StringArray{"bob"}
+	hook.OnNoteCreated(note, author)
+
+	require.Len(t, enq.calls, 1, "reply target is still delivered")
 }

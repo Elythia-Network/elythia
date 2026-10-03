@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"slices"
 
 	"github.com/shiroha-a/mk/internal/activitypub"
 	corenote "github.com/shiroha-a/mk/internal/core/note"
@@ -123,7 +124,8 @@ func (h *NoteDeliveryHook) OnNoteCreated(note *model.Note, author *model.User) {
 
 	// 以下の remote user にも直接配信する。フォロワー配信だけでは相手に
 	// 届かず、リプライ / 引用リノート / メンション通知が発生しない。
-	//   - ノート本文に含まれるメンションのリモートユーザー
+	//   - メンションされたリモートユーザー (note.Mentions の解決済み ID。本文・CW・
+	//     投票の選択肢から作成時に解決したもの。#3330)
 	//   - リプライ対象 (ReplyID) の作者がリモートの場合
 	//   - 引用リノート (Renote + text/cw/files/poll) の renote 元作者がリモートの場合
 	// フォロワー配信先と重複したユーザーは DeliverService 側でも deduplicate
@@ -172,19 +174,33 @@ func (h *NoteDeliveryHook) deliverToDirectRecipients(author *model.User, note *m
 		recipients = append(recipients, u)
 	}
 
-	// 1. text 中の mention
-	if note.Text != nil && *note.Text != "" {
-		for _, m := range corenote.ExtractMentionStructs(*note.Text) {
-			if m.Host == "" {
+	// 1. メンションされた利用者 (note.Mentions)。本家は mentionedUsers のうち
+	//    リモートの利用者へ直接配る。mentions は本文・CW・投票の選択肢から
+	//    解決済みの ID なので、ここで本文を読み直さない (読み直すと CW と選択肢の
+	//    メンション、`@user@<自ホスト>`、noExtractMentions の扱いが note.Mentions と
+	//    食い違う。#3330)。specified の宛先は deliverToSpecified が配るので除く。
+	if len(note.Mentions) > 0 {
+		ids := make([]string, 0, len(note.Mentions))
+		for _, id := range note.Mentions {
+			if note.Visibility == model.NoteVisibilitySpecified && slices.Contains(note.VisibleUserIDs, id) {
 				continue
 			}
-			host := m.Host
-			user, err := h.userRepo.FindByUsernameLower(m.Username, &host)
+			ids = append(ids, id)
+		}
+		if len(ids) > 0 {
+			users, err := h.userRepo.FindManyByIDs(ids)
 			if err != nil {
-				// 未解決リモート: 配信先を得られないのでスキップ
-				continue
+				slog.Warn("direct delivery: mentioned users lookup failed",
+					"noteId", note.ID, "err", err)
 			}
-			add(user)
+			byID := make(map[string]*model.User, len(users))
+			for _, u := range users {
+				byID[u.ID] = u
+			}
+			// mention の順序で配る。
+			for _, id := range ids {
+				add(byID[id])
+			}
 		}
 	}
 

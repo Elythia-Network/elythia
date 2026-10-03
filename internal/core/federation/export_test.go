@@ -45,8 +45,8 @@ func (r *Resolver) ResolveMentionedUserIDs(hrefs []string) ([]string, error) {
 }
 
 // ResolveTextMentionUserIDs exposes the unexported resolveTextMentionUserIDs for external tests.
-func (r *Resolver) ResolveTextMentionUserIDs(mentions []corenote.Mention) ([]string, error) {
-	return r.resolveTextMentionUserIDs(mentions)
+func (r *Resolver) ResolveTextMentionUserIDs(mentions []corenote.Mention, authorHost *string) ([]string, error) {
+	return r.resolveTextMentionUserIDs(mentions, authorHost)
 }
 
 // ProcessRemoteMove exposes the unexported processRemoteMove for external
