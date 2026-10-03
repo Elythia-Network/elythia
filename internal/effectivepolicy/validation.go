@@ -30,6 +30,8 @@ var defaults = map[string]any{
 	"canSearchUsers":             true,
 	"canUseTranslator":           true,
 	"canHideAds":                 false,
+	"canDeleteAccount":           true,
+	"canPurgeAccount":            true,
 	// upstream Misskey #17121のchannel作成権限。default trueで全員を許可し、
 	// adminがrole経由で個別userを絞る。
 	"canCreateChannel":       true,

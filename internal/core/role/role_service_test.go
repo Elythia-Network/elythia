@@ -24,6 +24,7 @@ func newTestService(t *testing.T) (*role.Service, *testutil.MockRoleRepository, 
 	roleRepo := testutil.NewMockRoleRepository()
 	assignRepo := testutil.NewMockRoleAssignmentRepository(roleRepo)
 	metaRepo := testutil.NewMockMetaRepository()
+	metaRepo.Meta = &model.Meta{ID: "x"}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := role.NewService(roleRepo, assignRepo, metaRepo, idGen)
 	return svc, roleRepo, assignRepo, metaRepo
@@ -363,8 +364,8 @@ func TestIsModerator_NoRole(t *testing.T) {
 }
 
 func TestIsAdministrator_MetaFetchError(t *testing.T) {
-	svc, _, _, _ := newTestService(t)
-	// metaRepo.Meta is nil → Fetch returns error
+	svc, _, _, metaRepo := newTestService(t)
+	metaRepo.FetchErr = errors.New("meta unavailable")
 	assert.False(t, svc.IsAdministrator("user1"))
 }
 
@@ -969,8 +970,8 @@ func TestIsModerator_RootUser(t *testing.T) {
 }
 
 func TestIsModerator_MetaFetchError(t *testing.T) {
-	svc, _, _, _ := newTestService(t)
-	// metaRepo.Meta = nil → Fetch error → isRootUser false → no roles → false
+	svc, _, _, metaRepo := newTestService(t)
+	metaRepo.FetchErr = errors.New("meta unavailable")
 	assert.False(t, svc.IsModerator("user1"))
 }
 
@@ -2223,7 +2224,7 @@ func TestIsAdministrator_EmptyRootUserIDFallsBackToIsRoot(t *testing.T) {
 // 締め出される。
 func TestIsAdministrator_MetaUnavailableFallsBackToIsRoot(t *testing.T) {
 	svc, _, _, metaRepo := newTestService(t)
-	metaRepo.Meta = nil // Fetch がエラーになる
+	metaRepo.FetchErr = errors.New("meta unavailable")
 	userRepo := testutil.NewMockUserRepository()
 	require.NoError(t, userRepo.Create(&model.User{ID: "alice", Username: "alice", IsRoot: true}))
 	svc.SetUserRepo(userRepo)

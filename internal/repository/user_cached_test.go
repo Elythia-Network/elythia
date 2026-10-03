@@ -931,6 +931,54 @@ func TestCachedUserRepository_RemoveBackupCodeKeepsCacheOnError(t *testing.T) {
 }
 
 // 削除に失敗したらキャッシュを落とさない (RemoveBackupCode と同じ判断)。
+func (c *countingUserRepo) RevokeDeletedLocalCredentials(userID string) error {
+	if c.hardDeleteErr != nil {
+		return c.hardDeleteErr
+	}
+	if u := c.users[userID]; u != nil {
+		u.Token = nil
+	}
+	if p := c.profiles[userID]; p != nil {
+		p.Password = nil
+	}
+	return nil
+}
+
+func TestCachedUserRepository_RevokeCredentialsInvalidates(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		inner := newCountingUserRepo()
+		secret := "secret"
+		inner.users["u1"] = &model.User{ID: "u1", Token: &secret}
+		inner.profiles["u1"] = &model.UserProfile{UserID: "u1", Password: &secret}
+		cached := repository.NewCachedUserRepositoryWithTTL(inner, time.Minute)
+		_, err := cached.FindByID("u1")
+		require.NoError(t, err)
+		_, err = cached.FindProfileByUserID("u1")
+		require.NoError(t, err)
+		if fail {
+			inner.hardDeleteErr = assert.AnError
+			require.ErrorIs(t, cached.RevokeDeletedLocalCredentials("u1"), assert.AnError)
+		} else {
+			require.NoError(t, cached.RevokeDeletedLocalCredentials("u1"))
+		}
+		u, err := cached.FindByID("u1")
+		require.NoError(t, err)
+		p, err := cached.FindProfileByUserID("u1")
+		require.NoError(t, err)
+		if fail {
+			assert.NotNil(t, u.Token)
+			assert.NotNil(t, p.Password)
+			assert.EqualValues(t, 1, inner.findByIDCalls.Load())
+			assert.EqualValues(t, 1, inner.findProfileByUserIDCalls.Load())
+		} else {
+			assert.Nil(t, u.Token)
+			assert.Nil(t, p.Password)
+			assert.EqualValues(t, 2, inner.findByIDCalls.Load())
+			assert.EqualValues(t, 2, inner.findProfileByUserIDCalls.Load())
+		}
+	}
+}
+
 func TestCachedUserRepository_HardDeleteUserKeepsCacheOnError(t *testing.T) {
 	inner := newCountingUserRepo()
 	inner.users["u1"] = &model.User{ID: "u1", Username: "alice"}

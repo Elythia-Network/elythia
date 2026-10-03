@@ -99,7 +99,7 @@ func TestRevokeToken_ForeignTokenDoesNotRevokeStreams(t *testing.T) {
 
 // 自己削除は全端末の WebSocket を閉じる。
 func TestDeleteAccount_RevokesAllUserStreams(t *testing.T) {
-	h, repo := newExtraHandler(t)
+	h, repo, _ := newDeleteAccountHandler(t)
 	user := setupUserWithPassword(repo, "u1", "pass")
 	log := &streamEventLog{}
 	h.SetStreamRevoker(loggingStreamRevoker{log})

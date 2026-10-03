@@ -865,6 +865,31 @@ func TestDecodeDeleteAccountPayload_MalformedReturnsError(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestDeleteAccountPayload_PreserveAccountWireCompatibility(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		payload queue.DeleteAccountPayload
+		want    string
+	}{
+		{"legacy local", queue.DeleteAccountPayload{UserID: "u1"}, `{"userId":"u1","soft":false}`},
+		{"preserve local", queue.DeleteAccountPayload{UserID: "u1", PreserveAccount: true}, `{"userId":"u1","soft":false,"preserveAccount":true}`},
+		{"legacy remote", queue.DeleteAccountPayload{UserID: "u1", Soft: true}, `{"userId":"u1","soft":true}`},
+		{"preserve remote", queue.DeleteAccountPayload{UserID: "u1", Soft: true, PreserveAccount: true}, `{"userId":"u1","soft":true,"preserveAccount":true}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			task := queue.NewDeleteAccountTask(tt.payload)
+			require.Equal(t, tt.want, string(task.Payload()))
+			got, err := queue.DecodeDeleteAccountPayload(task.Payload())
+			require.NoError(t, err)
+			require.Equal(t, tt.payload, got)
+		})
+	}
+
+	legacy, err := queue.DecodeDeleteAccountPayload([]byte(`{"userId":"u1","soft":false}`))
+	require.NoError(t, err)
+	require.False(t, legacy.PreserveAccount, "an old in-flight job keeps hard-delete semantics")
+}
+
 func TestClient_EnqueueUnfollow(t *testing.T) {
 	testutil.SkipIfNoDocker(t)
 	flushTestRedis(t)

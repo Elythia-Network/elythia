@@ -969,6 +969,16 @@ func TestUnsuspendUser_Success(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 }
 
+func TestUnsuspendUser_RejectsDeletedAccount(t *testing.T) {
+	h, userRepo, _, _ := newTestHandler(t)
+	userRepo.Users["u1"] = &model.User{ID: "u1", IsSuspended: true, IsDeleted: true}
+
+	rec := doPost(h.UnsuspendUser, `{"userId":"u1"}`, nil)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.True(t, userRepo.Users["u1"].IsSuspended, "a retained tombstone must not be revived")
+}
+
 func TestUnsuspendUser_NotFound(t *testing.T) {
 	h, _, _, _ := newTestHandler(t)
 	rec := doPost(h.UnsuspendUser, `{"userId":"ghost"}`, nil)

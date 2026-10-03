@@ -62,6 +62,10 @@ META_IGNORE = DEFAULT_IGNORE_KEYS | {
     # admin/get-user-ips は requireAdmin で policy を持たないため TS 側にキーが
     # 無い。docs/divergence.md に additive field として記載済み。
     "canSearchIpHistory",
+    # 本人退会と user/profile 行の物理削除を制御する (#3207) mk-go 独自
+    # policy。upstream には対応キーが無い。docs/divergence.md に additive
+    # field として記載済み。
+    "canDeleteAccount", "canPurgeAccount",
     # 承認制の登録 (#2554 / #2555) は mk-go 独自機能なので TS 側にキーが無い。
     # meta 直下と features の両方に出る (frontend は features を feature
     # detection に使うため片方だけだと検出できない)。docs/divergence.md に
@@ -131,6 +135,8 @@ USER_IGNORE = DEFAULT_IGNORE_KEYS | {
     # admin/get-user-ips は requireAdmin で policy を持たないため TS 側にキーが
     # 無い。docs/divergence.md に additive field として記載済み。
     "canSearchIpHistory",
+    # 本人退会と user/profile 行の物理削除を制御する (#3207)。同上。
+    "canDeleteAccount", "canPurgeAccount",
 }
 
 

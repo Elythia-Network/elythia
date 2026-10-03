@@ -1564,6 +1564,9 @@ func (h *Handler) UnsuspendUser(c echo.Context) error {
 		}
 		return c.JSON(http.StatusNotFound, apierr.Error("NO_SUCH_USER", "No such user.", "2b730f78-1179-461b-88ad-d24c9af1a5ce"))
 	}
+	if user.IsDeleted {
+		return c.JSON(http.StatusBadRequest, apierr.Error("ACCESS_DENIED", "Cannot unsuspend a deleted user.", "1fb7cb09-d46a-4fff-b8df-057708cce513"))
+	}
 
 	if err := h.userRepo.UpdateUser(req.UserID, map[string]any{"isSuspended": false}); err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))

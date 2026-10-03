@@ -10,6 +10,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/pquerna/otp/totp"
+	"github.com/shiroha-a/mk/internal/core/role"
 	"github.com/shiroha-a/mk/internal/core/twofactor"
 	"github.com/shiroha-a/mk/internal/model"
 	"github.com/shiroha-a/mk/internal/testutil"
@@ -125,6 +126,12 @@ func TestTwoFAGatedEndpoints_WrongPasswordKeepsBackupCode(t *testing.T) {
 				h, repo, _ = newWebAuthnHandler(t)
 			} else {
 				h, repo = newExtraHandler(t)
+			}
+			if tt.name == "delete-account" {
+				h.SetRoleProvider(&stubRoleProvider{policies: map[string]any{
+					role.PolicyCanDeleteAccount: true,
+					role.PolicyCanPurgeAccount:  true,
+				}})
 			}
 			user := setupUserWithPassword(repo, "u1", "oldpass")
 			enableTwoFactorWithBackupCodes(repo, "u1")
@@ -256,6 +263,12 @@ func TestTwoFAGatedEndpoints_SuccessConsumesExactlyOne(t *testing.T) {
 			} else {
 				h, repo = newExtraHandler(t)
 			}
+			if tt.name == "delete-account" {
+				h.SetRoleProvider(&stubRoleProvider{policies: map[string]any{
+					role.PolicyCanDeleteAccount: true,
+					role.PolicyCanPurgeAccount:  true,
+				}})
+			}
 			user := setupUserWithPassword(repo, "u1", "oldpass")
 			enableTwoFactorWithBackupCodes(repo, "u1")
 
@@ -318,6 +331,12 @@ func TestTwoFAGatedEndpoints_WrongPasswordReleasesReservation(t *testing.T) {
 				h, repo, _ = newWebAuthnHandler(t)
 			} else {
 				h, repo = newExtraHandler(t)
+			}
+			if tt.name == "delete-account" {
+				h.SetRoleProvider(&stubRoleProvider{policies: map[string]any{
+					role.PolicyCanDeleteAccount: true,
+					role.PolicyCanPurgeAccount:  true,
+				}})
 			}
 			user := setupUserWithPassword(repo, "u1", "oldpass")
 			enableTwoFactorWithBackupCodes(repo, "u1")

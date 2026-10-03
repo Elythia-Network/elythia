@@ -302,6 +302,9 @@ func (h *Handler) User(c echo.Context) error {
 		// 既存仕様: AP client は 404、browser も 404 (ID 不正)
 		return c.NoContent(http.StatusNotFound)
 	}
+	if bundle.User.IsDeleted && bundle.User.IsLocal() {
+		return c.NoContent(http.StatusNotFound)
+	}
 
 	if !wantsActivityJSON(c.Request().Header.Get("Accept")) {
 		// suspended local user は upstream Misskey TS と同じく 404。SPA の
@@ -332,8 +335,9 @@ func (h *Handler) User(c echo.Context) error {
 // (/@:acct)。upstream ActivityPubServerService.userInfo に相当する。
 func (h *Handler) apUserInfo(c echo.Context, bundle *coreuser.UserWithProfile) error {
 	// suspended は upstream の route query (isSuspended: false) 相当で、
-	// ローカル・リモートを問わず 404 (Person も redirect も返さない)。
-	if bundle.User.IsSuspended {
+	// ローカル・リモートを問わず 404 (Person も redirect も返さない)。retention
+	// した local deleted user も隠すが、remote deleted actor の redirect は維持する。
+	if bundle.User.IsSuspended || (bundle.User.IsDeleted && bundle.User.IsLocal()) {
 		return c.NoContent(http.StatusNotFound)
 	}
 	// リモート actor は原本 URI へリダイレクトする。無いと他サーバーがこの

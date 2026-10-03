@@ -568,6 +568,23 @@ func (m *MockUserRepository) HardDeleteUser(userID string) error {
 	return nil
 }
 
+func (m *MockUserRepository) RevokeDeletedLocalCredentials(userID string) error {
+	if user := m.Users[userID]; user != nil {
+		user.Token = nil
+	}
+	if profile := m.Profiles[userID]; profile != nil {
+		profile.Password = nil
+		profile.EmailVerifyCode = nil
+		profile.TwoFactorTempSecret = nil
+		profile.TwoFactorSecret = nil
+		profile.TwoFactorBackupSecret = model.StringArray{}
+		profile.TwoFactorEnabled = false
+		profile.SecurityKeysAvailable = false
+		profile.UsePasswordLessLogin = false
+	}
+	return nil
+}
+
 // assertProfileColumns validates the varchar columns that remote actor
 // ingestion writes on `user_profile`: `location` and `description`.
 //

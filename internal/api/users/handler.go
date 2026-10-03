@@ -525,7 +525,8 @@ func (h *Handler) Show(c echo.Context) error {
 			return apierr.JSONInternalError(c)
 		}
 		// upstream show.ts:136-141 は非 moderator に isSuspended:false を強制して
-		// suspended user を除外する。moderator は素通し。
+		// suspended user を除外する。物理削除待ちか行保持かを問わず local deleted
+		// user も非 moderator から隠すが、remote user と moderator の既存契約は維持する。
 		visible := make([]*user.UserWithProfile, 0, len(bundles))
 		users := make([]*model.User, 0, len(bundles))
 		// upstream show.ts は匿名 visitor かつ ugcVisibilityForVisitor='local' のとき
@@ -533,6 +534,9 @@ func (h *Handler) Show(c echo.Context) error {
 		// 'none' はこの経路では見ていない (単体指定と同じく upstream に合わせる)。
 		hideRemote := viewer == nil && h.ugcVisibilityNow() == ugcvisibility.Local
 		for _, b := range bundles {
+			if !iAmModerator && b.User.IsDeleted && b.User.IsLocal() {
+				continue
+			}
 			if !iAmModerator && b.User.IsSuspended {
 				continue
 			}
@@ -610,8 +614,12 @@ func (h *Handler) Show(c echo.Context) error {
 	}
 
 	// upstream show.ts:173-175: 非 moderator viewer に対して suspended user は
-	// 存在しないものとして扱い NO_SUCH_USER(4362f8dc...) を返す。moderator は
-	// 従来どおり閲覧できる。匿名/未配線は iAmModerator=false で fail-closed。
+	// 存在しないものとして扱い NO_SUCH_USER(4362f8dc...) を返す。物理削除待ちか
+	// 行保持かを問わず local deleted user も同様に隠すが、remote user と moderator
+	// の既存契約は維持する。匿名/未配線は iAmModerator=false で fail-closed。
+	if !iAmModerator && bundle.User.IsDeleted && bundle.User.IsLocal() {
+		return apierr.JSONNoSuchUser(c)
+	}
 	if !iAmModerator && bundle.User.IsSuspended {
 		return apierr.JSONNoSuchUser(c)
 	}
