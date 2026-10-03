@@ -138,6 +138,7 @@ import (
 	"github.com/shiroha-a/mk/internal/entity"
 	"github.com/shiroha-a/mk/internal/frontendutil"
 	"github.com/shiroha-a/mk/internal/misc/id"
+	"github.com/shiroha-a/mk/internal/misc/idnhost"
 	miscsmtp "github.com/shiroha-a/mk/internal/misc/smtp"
 	"github.com/shiroha-a/mk/internal/model"
 	"github.com/shiroha-a/mk/internal/queue"
@@ -818,6 +819,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	if u, err := urlpkg.Parse(s.config.URL); err == nil {
 		localHost = u.Host
 		apRenderer.SetHost(localHost)
+		// `@user@<自ホスト>` をローカルの利用者として解決する (#3330)。
+		// 既定ポートは剥がす (本家の config.host は `new URL().host`)。
+		noteCreateService.SetLocalHost(idnhost.HostPort(u))
 	}
 	// AP outbound client: SSRF-safe transport を適用 (#323)。
 	// config.AllowedPrivateNetworks で開発時の self-loop を許可できる。

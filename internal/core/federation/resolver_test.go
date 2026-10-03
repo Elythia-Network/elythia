@@ -4933,19 +4933,19 @@ func TestResolveTextMentionUserIDs(t *testing.T) {
 		ids, err := r.ResolveTextMentionUserIDs([]corenote.Mention{
 			{Username: "alice"},
 			{Username: "bob", Host: "remote.example"},
-		})
+		}, nil)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"local-id", "remote-id"}, ids)
 	})
 	t.Run("unknown user is skipped", func(t *testing.T) {
 		r, _ := mkResolver()
-		ids, err := r.ResolveTextMentionUserIDs([]corenote.Mention{{Username: "ghost"}})
+		ids, err := r.ResolveTextMentionUserIDs([]corenote.Mention{{Username: "ghost"}}, nil)
 		require.NoError(t, err, "not-found で止めている")
 		assert.Empty(t, ids)
 	})
 	t.Run("empty input", func(t *testing.T) {
 		r, _ := mkResolver()
-		ids, err := r.ResolveTextMentionUserIDs(nil)
+		ids, err := r.ResolveTextMentionUserIDs(nil, nil)
 		require.NoError(t, err)
 		assert.Nil(t, ids)
 	})
@@ -4953,8 +4953,46 @@ func TestResolveTextMentionUserIDs(t *testing.T) {
 		r, repo := mkResolver()
 		boom := errors.New("connection refused")
 		repo.FindByUsernameLowerFn = func(string, *string) (*model.User, error) { return nil, boom }
-		_, err := r.ResolveTextMentionUserIDs([]corenote.Mention{{Username: "alice"}})
+		_, err := r.ResolveTextMentionUserIDs([]corenote.Mention{{Username: "alice"}}, nil)
 		require.ErrorIs(t, err, boom)
+	})
+	// #3330: 本家は `@user@<自インスタンスのホスト>` をローカルの利用者として
+	// 解決する (RemoteUserResolveService.resolveUser)。大文字混じりでも同じ。
+	t.Run("own host resolves to the local user", func(t *testing.T) {
+		r, repo := mkResolver()
+		repo.Users["local-id"] = &model.User{ID: "local-id", Username: "alice", UsernameLower: "alice"}
+		remote := "remote.example"
+		ids, err := r.ResolveTextMentionUserIDs([]corenote.Mention{
+			{Username: "alice", Host: "Example.COM"},
+		}, &remote)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"local-id"}, ids)
+	})
+	// #3330: リモートの投稿のホスト無し `@bob` は書き手のホストの bob
+	// (`m.host ?? user.host`)。ローカルの bob に当ててはいけない。
+	t.Run("host-less mention of a remote note resolves on the author's host", func(t *testing.T) {
+		r, repo := mkResolver()
+		repo.Users["local-bob"] = &model.User{ID: "local-bob", Username: "bob", UsernameLower: "bob"}
+		remote := "remote.example"
+		repo.Users["remote-bob"] = &model.User{ID: "remote-bob", Username: "bob", UsernameLower: "bob", Host: &remote}
+		ids, err := r.ResolveTextMentionUserIDs([]corenote.Mention{{Username: "bob"}}, &remote)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"remote-bob"}, ids)
+
+		other := "other.example"
+		ids, err = r.ResolveTextMentionUserIDs([]corenote.Mention{{Username: "bob"}}, &other)
+		require.NoError(t, err)
+		assert.Empty(t, ids, "書き手のホストに居なければ解決しない (ローカルへ落とさない)")
+	})
+	// #3330: 本家は解決した利用者を ID で重複除去する。
+	t.Run("dedups by resolved user ID", func(t *testing.T) {
+		r, repo := mkResolver()
+		repo.Users["local-id"] = &model.User{ID: "local-id", Username: "Alice", UsernameLower: "alice"}
+		ids, err := r.ResolveTextMentionUserIDs([]corenote.Mention{
+			{Username: "Alice"}, {Username: "alice"}, {Username: "ALICE", Host: "example.com"},
+		}, nil)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"local-id"}, ids)
 	})
 }
 
@@ -5031,12 +5069,13 @@ func TestIngestNote_TagMentionsMergedWithTextMentions(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
-	// 本文 "@bob" → bob-local-id、tag → alice。両方が mentions に入ること。
+	// 本文 "@bob@example.com" (自インスタンスのホスト) → bob-local-id、tag → alice。
+	// 両方が mentions に入ること。ホスト無しの "@bob" は書き手のホストの bob (#3330)。
 	body := []byte(`{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/merge1",
 		"type": "Note",
 		"attributedTo": "https://remote.example/users/alice",
-		"content": "hi @bob",
+		"content": "hi @bob@example.com",
 		"to": ["https://example.com/users/alice"],
 		"cc": [],
 		"tag": [
@@ -5048,6 +5087,122 @@ func TestIngestNote_TagMentionsMergedWithTextMentions(t *testing.T) {
 	mentions := []string(got.Mentions)
 	assert.Contains(t, mentions, "alice")
 	assert.Contains(t, mentions, "bob-local-id", "本文の @bob は user ID へ resolve される")
+}
+
+// #3330: a host-less `@bob` in a remote note means bob on the author's
+// server (upstream `m.host ?? user.host`), never the local bob.
+func TestIngestNote_HostlessTextMentionResolvesOnAuthorHost(t *testing.T) {
+	repo := testutil.NewMockUserRepository()
+	repo.Users["bob-local-id"] = &model.User{ID: "bob-local-id", Username: "bob", UsernameLower: "bob"}
+	remote := "remote.example"
+	repo.Users["bob-remote-id"] = &model.User{ID: "bob-remote-id", Username: "bob", UsernameLower: "bob", Host: &remote}
+	noteRepo := testutil.NewMockNoteRepository()
+	urls := activitypub.NewURLBuilder("https://example.com")
+	idGen, _ := id.NewGenerator("aidx")
+	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+
+	body := []byte(`{ "@context": "https://www.w3.org/ns/activitystreams",
+		"id": "https://remote.example/notes/hostless1",
+		"type": "Note",
+		"attributedTo": "https://remote.example/users/alice",
+		"content": "hi @bob",
+		"to": ["https://www.w3.org/ns/activitystreams#Public"],
+		"cc": []
+	}`)
+	got, err := r.IngestNote(body)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"bob-remote-id"}, []string(got.Mentions))
+}
+
+// #3330: upstream NoteCreateService.create pushes the reply target's author
+// into mentionedUsers unless it is the note's author (`user.id !==
+// data.reply.userId`), then rejects when `Math.max(mentionedUsers.length,
+// apMentionRawCount) > mentionLimit` (NoteCreateService.ts:611-631). With 20
+// Mention tags (= the limit) a reply to someone else is 21 and rejected, while
+// a reply to the author's own note stays at 20 and is accepted.
+func TestIngestNote_MentionLimitCountsReplyTargetAuthor(t *testing.T) {
+	mkBody := func(id, inReplyTo string) []byte {
+		tags := make([]string, 0, corenote.DefaultMentionLimit)
+		for i := 0; i < corenote.DefaultMentionLimit; i++ {
+			tags = append(tags, fmt.Sprintf(`{"type": "Mention", "href": "https://example.com/users/local%d"}`, i))
+		}
+		return []byte(fmt.Sprintf(`{ "@context": "https://www.w3.org/ns/activitystreams",
+			"id": "https://remote.example/notes/%s",
+			"type": "Note",
+			"attributedTo": "https://remote.example/users/alice",
+			"content": "reply",
+			"inReplyTo": %q,
+			"to": ["https://www.w3.org/ns/activitystreams#Public"],
+			"cc": [],
+			"tag": [%s]
+		}`, id, inReplyTo, strings.Join(tags, ",")))
+	}
+	setup := func(t *testing.T) (*federation.Resolver, *testutil.MockNoteRepository, *model.User) {
+		t.Helper()
+		repo := testutil.NewMockUserRepository()
+		noteRepo := testutil.NewMockNoteRepository()
+		urls := activitypub.NewURLBuilder("https://example.com")
+		idGen, _ := id.NewGenerator("aidx")
+		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+		author, err := r.ResolveActor("https://remote.example/users/alice")
+		require.NoError(t, err)
+		return r, noteRepo, author
+	}
+
+	t.Run("reply to another user's local note is rejected", func(t *testing.T) {
+		r, noteRepo, _ := setup(t)
+		noteRepo.Notes["parent"] = &model.Note{ID: "parent", UserID: "someone-else"}
+		_, err := r.IngestNote(mkBody("r1", "https://example.com/notes/parent"))
+		require.ErrorIs(t, err, corenote.ErrContainsTooManyMentions)
+	})
+	t.Run("reply to another user's remote note is rejected", func(t *testing.T) {
+		r, noteRepo, _ := setup(t)
+		parentURI := "https://remote.example/notes/parent"
+		noteRepo.Notes["parent"] = &model.Note{ID: "parent", UserID: "someone-else", URI: &parentURI}
+		_, err := r.IngestNote(mkBody("r2", parentURI))
+		require.ErrorIs(t, err, corenote.ErrContainsTooManyMentions)
+	})
+	t.Run("reply to the author's own note is accepted", func(t *testing.T) {
+		r, noteRepo, author := setup(t)
+		parentURI := "https://remote.example/notes/own"
+		noteRepo.Notes["own"] = &model.Note{ID: "own", UserID: author.ID, URI: &parentURI}
+		got, err := r.IngestNote(mkBody("r3", parentURI))
+		require.NoError(t, err, "自分の投稿への返信は返信先の作者を数えない")
+		require.NotNil(t, got.ReplyID)
+		assert.Equal(t, "own", *got.ReplyID)
+	})
+}
+
+// #3330: upstream counts the reply target's author and a specified note's
+// recipients in mentionedUsers before comparing with mentionLimit, so a DM
+// with more recipients than the limit is rejected even without Mention tags.
+func TestIngestNote_MentionLimitCountsSpecifiedRecipients(t *testing.T) {
+	repo := testutil.NewMockUserRepository()
+	noteRepo := testutil.NewMockNoteRepository()
+	urls := activitypub.NewURLBuilder("https://example.com")
+	idGen, _ := id.NewGenerator("aidx")
+	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+
+	mkBody := func(n int) []byte {
+		to := make([]string, 0, n)
+		for i := 0; i < n; i++ {
+			to = append(to, fmt.Sprintf("%q", fmt.Sprintf("https://example.com/users/local%d", i)))
+		}
+		return []byte(fmt.Sprintf(`{ "@context": "https://www.w3.org/ns/activitystreams",
+			"id": "https://remote.example/notes/dm%d",
+			"type": "Note",
+			"attributedTo": "https://remote.example/users/alice",
+			"content": "secret",
+			"to": [%s],
+			"cc": []
+		}`, n, strings.Join(to, ",")))
+	}
+	_, err := r.IngestNote(mkBody(corenote.DefaultMentionLimit + 1))
+	require.ErrorIs(t, err, corenote.ErrContainsTooManyMentions)
+
+	got, err := r.IngestNote(mkBody(corenote.DefaultMentionLimit))
+	require.NoError(t, err, "上限ちょうどは通る")
+	assert.Len(t, []string(got.VisibleUserIDs), corenote.DefaultMentionLimit)
 }
 
 // An e-mail address in a remote note's text is not a mention in the MFM tree,

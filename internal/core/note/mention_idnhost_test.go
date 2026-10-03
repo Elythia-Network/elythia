@@ -44,7 +44,7 @@ func TestResolveMentionUserIDs_IDNHost(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got := svc.ResolveMentionUserIDsForTest([]corenote.Mention{
 				{Username: "idnuser", Host: tc.host},
-			})
+			}, nil)
 			assert.Equal(t, []string{"idn1"}, got, "host=%q のメンションが解決されること", tc.host)
 		})
 	}
@@ -52,7 +52,7 @@ func TestResolveMentionUserIDs_IDNHost(t *testing.T) {
 	t.Run("別の host は解決しない", func(t *testing.T) {
 		got := svc.ResolveMentionUserIDsForTest([]corenote.Mention{
 			{Username: "idnuser", Host: "other.example"},
-		})
+		}, nil)
 		assert.Empty(t, got)
 	})
 }

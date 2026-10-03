@@ -3228,7 +3228,7 @@ func (r *Resolver) ingestNoteWithCreated(body []byte, deliveringActorURI string,
 	var textMentions []string
 	if note.Text != nil {
 		var merr error
-		if textMentions, merr = r.resolveTextMentionUserIDs(corenote.ExtractMentionStructs(*note.Text)); merr != nil {
+		if textMentions, merr = r.resolveTextMentionUserIDs(corenote.ExtractMentionStructs(*note.Text), actor.Host); merr != nil {
 			return nil, false, fmt.Errorf("ingest note: %w", merr)
 		}
 	}
@@ -3238,27 +3238,6 @@ func (r *Resolver) ingestNoteWithCreated(body []byte, deliveringActorURI string,
 		return nil, false, fmt.Errorf("ingest note: %w", merr)
 	}
 	note.Mentions = mergeMentionIDs(textMentions, tagMentions)
-	// upstream Misskey #17167 (= 2026.5.0 fix / triage #1004): mentionLimit を
-	// 超える note は無効と扱い、保存せずに ErrContainsTooManyMentions を返す。
-	// caller (processor.handleCreate) が当該 sentinel を catch して queue retry
-	// 経路から除外することで、罠の inbox job が永続蓄積するのを防ぐ。
-	// upstream #17576: 制限判定は「解決できたユーザー数」(= len(note.Mentions)) でなく、
-	// remote が宣言した raw mention 数 (AP tag の Mention href ユニーク数) との max で
-	// 行う。一部しか解決できなくても大量 mention をすり抜けさせない。limit 値は
-	// corenote.DefaultMentionLimit (= 20)。local create path は role policy の
-	// 値を優先するようになったが (#2321)、こちらはリモートユーザーが対象で
-	// ローカルの role を持たないため既定値のみで判定する。
-	rawTagSet := make(map[string]struct{}, len(tagHrefs))
-	for _, h := range tagHrefs {
-		rawTagSet[h] = struct{}{}
-	}
-	effectiveMentions := len(note.Mentions)
-	if len(rawTagSet) > effectiveMentions {
-		effectiveMentions = len(rawTagSet)
-	}
-	if corenote.DefaultMentionLimit > 0 && effectiveMentions > corenote.DefaultMentionLimit {
-		return nil, false, corenote.ErrContainsTooManyMentions
-	}
 	// specified visibility では AP `to` 配列が宛先 actor URI 列。CanView の
 	// VisibleUserIDs チェック (core/note/visibility.go) で受信者が note を
 	// 参照できるよう、ここで ID へ解決して埋める (#397)。
@@ -3285,6 +3264,41 @@ func (r *Resolver) ingestNoteWithCreated(body []byte, deliveringActorURI string,
 			}
 		}
 		note.VisibleUserIDs = model.StringArray(visible)
+	}
+	// upstream Misskey #17167 (= 2026.5.0 fix / triage #1004): mentionLimit を
+	// 超える note は無効と扱い、保存せずに ErrContainsTooManyMentions を返す。
+	// caller (processor.handleCreate) が当該 sentinel を catch して queue retry
+	// 経路から除外することで、罠の inbox job が永続蓄積するのを防ぐ。
+	// upstream #17576: 制限判定は「解決できたユーザー数」でなく、remote が宣言した
+	// raw mention 数 (AP tag の Mention href ユニーク数) との max で行う。一部しか
+	// 解決できなくても大量 mention をすり抜けさせない。limit 値は
+	// corenote.DefaultMentionLimit (= 20)。local create path は role policy の
+	// 値を優先するようになったが (#2321)、こちらはリモートユーザーが対象で
+	// ローカルの role を持たないため既定値のみで判定する。
+	//
+	// 本家の「解決できたユーザー」(mentionedUsers) は mention に加えて、返信先の
+	// 作者 (自分への返信を除く) と specified の宛先を含む (NoteCreateService.create)。
+	// 宛先を数えないと、Mention tag を持たない DM で宛先を何人でも並べられる
+	// (#3330)。そのため宛先の解決を判定より前に行う。
+	rawTagSet := make(map[string]struct{}, len(tagHrefs))
+	for _, h := range tagHrefs {
+		rawTagSet[h] = struct{}{}
+	}
+	mentionedUsers := make(map[string]struct{})
+	for _, id := range note.Mentions {
+		mentionedUsers[id] = struct{}{}
+	}
+	if replyTarget != nil && replyTarget.UserID != note.UserID {
+		mentionedUsers[replyTarget.UserID] = struct{}{}
+	}
+	if note.Visibility == model.NoteVisibilitySpecified {
+		for _, id := range note.VisibleUserIDs {
+			mentionedUsers[id] = struct{}{}
+		}
+	}
+	effectiveMentions := max(len(mentionedUsers), len(rawTagSet))
+	if corenote.DefaultMentionLimit > 0 && effectiveMentions > corenote.DefaultMentionLimit {
+		return nil, false, corenote.ErrContainsTooManyMentions
 	}
 	// AP Note Tag配列からカスタム絵文字を抽出してDBにupsert
 	if actor.Host != nil {
@@ -3767,9 +3781,9 @@ func (r *Resolver) UpdateRemoteNote(body []byte, actorURI string) (*model.Note, 
 	)
 	switch {
 	case newText != "":
-		textMentions, merr = r.resolveTextMentionUserIDs(corenote.ExtractMentionStructs(newText))
+		textMentions, merr = r.resolveTextMentionUserIDs(corenote.ExtractMentionStructs(newText), existing.UserHost)
 	case existing.Text != nil:
-		textMentions, merr = r.resolveTextMentionUserIDs(corenote.ExtractMentionStructs(*existing.Text))
+		textMentions, merr = r.resolveTextMentionUserIDs(corenote.ExtractMentionStructs(*existing.Text), existing.UserHost)
 	}
 	if merr != nil {
 		return nil, fmt.Errorf("update remote note: %w", merr)
@@ -4032,15 +4046,25 @@ func (r *Resolver) resolveMentionedUserIDs(hrefs []string) ([]string, error) {
 // userRepo 未設定 / 未知ユーザーは skip する (NotificationService 等の
 // 既存後段は skip でも username fallback で動くが、mentions 列の query は
 // ID 完全一致なので残しても無駄)。
-func (r *Resolver) resolveTextMentionUserIDs(mentions []corenote.Mention) ([]string, error) {
+//
+// The host rules mirror upstream NoteCreateService.extractMentionedUsers: a
+// mention without a host belongs to the note author's host (`m.host ??
+// user.host`), and a mention of this instance's own host is a local user
+// (RemoteUserResolveService.resolveUser). The result is dedup'd by user ID.
+func (r *Resolver) resolveTextMentionUserIDs(mentions []corenote.Mention, authorHost *string) ([]string, error) {
 	if r.userRepo == nil || len(mentions) == 0 {
 		return nil, nil
 	}
 	out := make([]string, 0, len(mentions))
 	for _, m := range mentions {
+		// リモートの投稿のホスト無し `@bob` は、書き手のサーバーの bob を指す。
+		// ローカルの bob に解決すると、無関係なローカルの利用者に通知が飛ぶ。
+		h := m.Host
+		if h == "" && authorHost != nil {
+			h = *authorHost
+		}
 		var host *string
-		if m.Host != "" {
-			h := m.Host
+		if h != "" && !r.isSelfHost(punyHost(h)) {
 			host = &h
 		}
 		u, err := r.userRepo.FindByUsernameLower(m.Username, host)
@@ -4052,7 +4076,9 @@ func (r *Resolver) resolveTextMentionUserIDs(mentions []corenote.Mention) ([]str
 		if err != nil || u == nil {
 			continue
 		}
-		out = append(out, u.ID)
+		if !slices.Contains(out, u.ID) {
+			out = append(out, u.ID)
+		}
 	}
 	return out, nil
 }

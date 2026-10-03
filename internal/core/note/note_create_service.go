@@ -8,7 +8,6 @@ import (
 	"math"
 	"math/rand"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +16,7 @@ import (
 	"github.com/shiroha-a/mk/internal/entity"
 	"github.com/shiroha-a/mk/internal/misc/hashtag"
 	"github.com/shiroha-a/mk/internal/misc/id"
+	"github.com/shiroha-a/mk/internal/misc/idnhost"
 	"github.com/shiroha-a/mk/internal/misc/keyword"
 	"github.com/shiroha-a/mk/internal/model"
 	"github.com/shiroha-a/mk/internal/repository"
@@ -249,6 +249,9 @@ type CreateService struct {
 	featuredRanking     FeaturedRanking
 	// randFn は featured ランキング更新の 30% sampling 用。テストで固定する。
 	randFn func() float64
+	// localHost は自インスタンスのホスト (idnhost.Puny 済み)。`@user@<自ホスト>`
+	// をローカルの利用者として解決するのに使う。空なら判定しない。
+	localHost string
 }
 
 // FeaturedRanking abstracts the engagement ranking store (#1687). 循環依存回避の
@@ -272,6 +275,16 @@ func (s *CreateService) SetFeaturedRanking(r FeaturedRanking) {
 // SetUserRepo attaches a UserRepository for resolving mention usernames to IDs.
 func (s *CreateService) SetUserRepo(r repository.UserRepository) {
 	s.userRepo = r
+}
+
+// SetLocalHost sets this instance's own host (`config.url` authority) so a
+// mention such as `@alice@<this host>` resolves to the local user, as upstream
+// RemoteUserResolveService.resolveUser does.
+func (s *CreateService) SetLocalHost(host string) {
+	s.localHost = ""
+	if host != "" {
+		s.localHost = idnhost.Puny(host)
+	}
 }
 
 // SetRolePolicyProvider wires role-policy lookup so note creation honours the
@@ -537,24 +550,18 @@ func (s *CreateService) Create(in CreateInput) (*model.Note, error) {
 
 	// mention の解決はここで 1 回だけ行い、上限チェックと note.Mentions の
 	// 両方で使い回す (host ごとの batch query を二重に投げないため)。
-	var (
-		mentionUserIDs   []string
-		mentionRawCount  int
-		mentionsResolved bool
-	)
-	if in.Text != nil && *in.Text != "" {
-		mentions := ExtractMentionStructs(*in.Text)
-		// 上限の判定には NoExtractMentions でも text 中の mention を数える
-		// (AP 経路で tag 由来の mention に置き換える場合でも本文の量は効く)。
-		mentionRawCount = len(mentions)
-		if len(mentions) > 0 && !in.NoExtractMentions && s.userRepo != nil {
-			mentionUserIDs = s.resolveMentionUserIDs(mentions)
-			mentionsResolved = true
+	// 本家 (NoteCreateService.create) は本文・CW・投票の選択肢を合わせた構文木から
+	// メンションを取る。noExtractMentions のときは apMentions に [] が渡り、
+	// 本文のメンションは上限の数にも入らない。
+	var mentionUserIDs []string
+	if !in.NoExtractMentions && s.userRepo != nil {
+		if mentions := extractNoteMentions(in.Text, in.CW, in.Poll); len(mentions) > 0 {
+			mentionUserIDs = s.resolveMentionUserIDs(mentions, in.User.Host)
 		}
 	}
 
 	// mentionLimitチェック (role policiesの制限)
-	if err := s.checkMentionLimit(in, visibility, replyTarget, mentionUserIDs, mentionRawCount); err != nil {
+	if err := s.checkMentionLimit(in, visibility, replyTarget, mentionUserIDs); err != nil {
 		return nil, err
 	}
 
@@ -782,17 +789,16 @@ func (s *CreateService) Create(in CreateInput) (*model.Note, error) {
 		}
 	}
 
-	// メンションの抽出。ユーザー名+ホストをユーザーIDに解決する。
-	// ローカル (host="") は host IS NULL で、リモート (host!="") は
-	// host 列の等価比較で lookup する。未知のユーザーは単にスキップする
-	// (remote webfinger 解決は pre-lookup されている前提)。
+	// メンションの抽出。ユーザー名+ホストをユーザーIDに解決する (解決は上で
+	// 済ませてある。規則は resolveMentionUserIDs)。DB に無いユーザーは単に
+	// スキップする。
 	// userRepo が未設定のときは後方互換のため username 文字列をそのまま格納する。
-	if in.Text != nil && !in.NoExtractMentions {
+	if !in.NoExtractMentions {
 		if s.userRepo != nil {
-			if mentionsResolved && len(mentionUserIDs) > 0 {
+			if len(mentionUserIDs) > 0 {
 				note.Mentions = mentionUserIDs
 			}
-		} else {
+		} else if in.Text != nil {
 			note.Mentions = ExtractMentions(*in.Text)
 		}
 	}
@@ -1250,19 +1256,29 @@ func checkProhibitedWords(meta *model.Meta, text, cw *string, pollChoices []stri
 	return nil
 }
 
-// resolveMentionUserIDs maps `@username[@host]` mentions to local user IDs,
-// dropping the ones that do not resolve to a known user.
+// resolveMentionUserIDs maps `@username[@host]` mentions to user IDs, dropping
+// the ones that do not resolve to a known user and the duplicates (the same
+// user mentioned twice, e.g. `@Alice @alice`).
+//
+// Mirrors upstream NoteCreateService.extractMentionedUsers: a mention without a
+// host belongs to the author's host (`m.host ?? user.host`), and a mention of
+// this instance's own host is a local user (RemoteUserResolveService.resolveUser
+// compares `toPuny(host)` with `toPuny(config.host)`).
 //
 // host ごとに 1 query にまとめる (#300 1-5)。元実装は mention 数 N に対して
 // N 回 FindByUsernameLower を直列に叩いていたが、host 単位で IN(?) にして
 // ラウンドトリップを host 種類数まで削減する。
-func (s *CreateService) resolveMentionUserIDs(mentions []Mention) []string {
+func (s *CreateService) resolveMentionUserIDs(mentions []Mention, authorHost *string) []string {
 	if s.userRepo == nil || len(mentions) == 0 {
 		return nil
 	}
+	hostOf := func(m Mention) string {
+		return s.mentionLookupHost(m.Host, authorHost)
+	}
 	byHost := make(map[string][]string)
 	for _, m := range mentions {
-		byHost[m.Host] = append(byHost[m.Host], m.Username)
+		h := hostOf(m)
+		byHost[h] = append(byHost[h], m.Username)
 	}
 	// resolved[host][usernameLower] = userID
 	resolved := make(map[string]map[string]string, len(byHost))
@@ -1286,37 +1302,80 @@ func (s *CreateService) resolveMentionUserIDs(mentions []Mention) []string {
 	}
 	ids := make([]string, 0, len(mentions))
 	for _, mn := range mentions {
-		if hostMap, ok := resolved[mn.Host]; ok {
+		if hostMap, ok := resolved[hostOf(mn)]; ok {
 			if id, ok := hostMap[strings.ToLower(mn.Username)]; ok {
-				ids = append(ids, id)
+				// 本家は解決した利用者を ID で重複除去する。大文字小文字だけ違う
+				// `@Alice @alice` は別の mention ノードだが同じ利用者になる。
+				ids = appendUniqueID(ids, id)
 			}
 		}
 	}
 	return ids
 }
 
+// mentionLookupHost returns the host to look a mention up under: "" for a
+// local user, otherwise the mention's host (or the author's host when the
+// mention has none).
+func (s *CreateService) mentionLookupHost(host string, authorHost *string) string {
+	if host == "" && authorHost != nil {
+		host = *authorHost
+	}
+	if host != "" && s.localHost != "" && idnhost.Puny(host) == s.localHost {
+		return ""
+	}
+	return host
+}
+
+// extractNoteMentions returns the mentions of the note's text, CW and poll
+// choices in this order, like upstream which parses the three and concatenates
+// the trees before extractMentions.
+func extractNoteMentions(text, cw *string, poll *PollInput) []Mention {
+	var out []Mention
+	seen := make(map[Mention]struct{})
+	add := func(src string) {
+		for _, m := range ExtractMentionStructs(src) {
+			if _, dup := seen[m]; dup {
+				continue
+			}
+			seen[m] = struct{}{}
+			out = append(out, m)
+		}
+	}
+	if text != nil {
+		add(*text)
+	}
+	if cw != nil {
+		add(*cw)
+	}
+	if poll != nil {
+		for _, c := range poll.Choices {
+			add(c)
+		}
+	}
+	return out
+}
+
 // checkMentionLimit counts the note's mention targets and compares them against
 // the author's `mentionLimit` role policy (#2321).
 //
-// upstream NoteCreateService は text 中の mention に加えて、返信先の投稿者と
-// ダイレクト投稿の宛先 (visibleUsers) も同じ `mentionedUsers` 集合に入れて
-// 数える。text に mention が 1 つも無いダイレクト投稿でも上限に当たるのは
-// このため。宛先と text mention が同じ相手なら 1 件として数える。
+// Mirrors upstream NoteCreateService.create: the count is the number of
+// distinct users in `mentionedUsers`, which holds the resolved mentions, the
+// author of the reply target (unless it is the author) and, for a specified
+// note, the recipients. A mention that does not resolve to a user is not
+// counted. The local API passes no apMentionRawCount, so the max with it is a
+// no-op here (the AP path takes it in Resolver.IngestNote).
 //
-// 解決できなかった mention は upstream では数に入らないが、mk-go は存在しない
-// ユーザーへの mention を大量に含む note を弾くため文字列のまま数える (意図的
-// な差分。upstream 自身も AP 経路では raw 数との max を取る方針 #17576)。
-func (s *CreateService) checkMentionLimit(in CreateInput, visibility model.NoteVisibility, replyTarget *model.Note, mentionUserIDs []string, mentionRawCount int) error {
+// 以前は解決できなかった mention も文字列のまま数えていたが (#3330)、本家は
+// 数えない。解決できない mention は通知も配送も Mention tag も作らないので、
+// 数えないことで弾けなくなる害は無い。
+func (s *CreateService) checkMentionLimit(in CreateInput, visibility model.NoteVisibility, replyTarget *model.Note, mentionUserIDs []string) error {
 	targets := make(map[string]struct{})
 	for _, id := range mentionUserIDs {
 		targets[id] = struct{}{}
 	}
-	// 未解決の mention はどれが該当するか特定できないので、件数分だけ
-	// 一意なキーを足して数に入れる。
-	for i := len(mentionUserIDs); i < mentionRawCount; i++ {
-		targets["\x00unresolved:"+strconv.Itoa(i)] = struct{}{}
-	}
-	if replyTarget != nil {
+	// 本家は自分の投稿への返信では返信先の作者を足さない
+	// (`user.id !== data.reply.userId`)。
+	if replyTarget != nil && replyTarget.UserID != in.User.ID {
 		targets[replyTarget.UserID] = struct{}{}
 	}
 	if visibility == model.NoteVisibilitySpecified {

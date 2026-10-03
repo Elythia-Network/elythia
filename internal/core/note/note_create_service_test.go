@@ -1707,8 +1707,22 @@ func TestCreateService_SensitiveWordsEmptyMetaUnchanged(t *testing.T) {
 	assert.Equal(t, model.NoteVisibilityPublic, created.Visibility)
 }
 
+// withMentionableUsers wires a user repository holding the local users
+// user0..user<n-1> (the names the mention-limit tests write), so that their
+// mentions resolve. 本家は解決できた利用者だけを上限の数に入れる (#3330)。
+func withMentionableUsers(svc *note.CreateService, n int) *testutil.MockUserRepository {
+	repo := testutil.NewMockUserRepository()
+	for i := 0; i < n; i++ {
+		name := "user" + strPtr254Str(i)
+		repo.Users["id-"+name] = &model.User{ID: "id-" + name, Username: name, UsernameLower: name}
+	}
+	svc.SetUserRepo(repo)
+	return repo
+}
+
 func TestCreateService_ContainsTooManyMentions(t *testing.T) {
 	svc, _, _ := newCreateService(t)
+	withMentionableUsers(svc, 21)
 	// 21 メンションで default limit (20) 超過
 	mentions := ""
 	for i := 0; i < 21; i++ {
@@ -2343,6 +2357,7 @@ func TestCreateService_MentionLimitHonoursRolePolicy(t *testing.T) {
 
 	t.Run("policy が既定より緩ければ 20 超も通る", func(t *testing.T) {
 		svc, _, _ := newCreateService(t)
+		withMentionableUsers(svc, 30)
 		svc.SetRolePolicyProvider(&stubRolePolicies{byUser: map[string]map[string]any{
 			"u1": {"mentionLimit": 50},
 		}})
@@ -2353,6 +2368,7 @@ func TestCreateService_MentionLimitHonoursRolePolicy(t *testing.T) {
 
 	t.Run("policy が既定より厳しければ 20 未満でも弾く", func(t *testing.T) {
 		svc, _, _ := newCreateService(t)
+		withMentionableUsers(svc, 6)
 		svc.SetRolePolicyProvider(&stubRolePolicies{byUser: map[string]map[string]any{
 			"u1": {"mentionLimit": 5},
 		}})
@@ -2363,6 +2379,7 @@ func TestCreateService_MentionLimitHonoursRolePolicy(t *testing.T) {
 
 	t.Run("上限ちょうどは通る", func(t *testing.T) {
 		svc, _, _ := newCreateService(t)
+		withMentionableUsers(svc, 5)
 		svc.SetRolePolicyProvider(&stubRolePolicies{byUser: map[string]map[string]any{
 			"u1": {"mentionLimit": 5},
 		}})
@@ -2373,6 +2390,7 @@ func TestCreateService_MentionLimitHonoursRolePolicy(t *testing.T) {
 
 	t.Run("ユーザーごとに独立して効く", func(t *testing.T) {
 		svc, _, _ := newCreateService(t)
+		withMentionableUsers(svc, 30)
 		svc.SetRolePolicyProvider(&stubRolePolicies{byUser: map[string]map[string]any{
 			"strict": {"mentionLimit": 1},
 			"loose":  {"mentionLimit": 100},
@@ -2407,6 +2425,7 @@ func TestCreateService_MentionLimitFallsBackToDefault(t *testing.T) {
 	for name, p := range providers {
 		t.Run(name, func(t *testing.T) {
 			svc, _, _ := newCreateService(t)
+			withMentionableUsers(svc, 21)
 			if p != nil {
 				svc.SetRolePolicyProvider(p)
 			}
