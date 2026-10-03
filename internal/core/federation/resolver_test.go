@@ -4916,86 +4916,6 @@ func TestResolveMentionedUserIDs(t *testing.T) {
 	})
 }
 
-func TestResolveTextMentionUserIDs(t *testing.T) {
-	mkResolver := func() (*federation.Resolver, *testutil.MockUserRepository) {
-		repo := testutil.NewMockUserRepository()
-		noteRepo := testutil.NewMockNoteRepository()
-		urls := activitypub.NewURLBuilder("https://example.com")
-		idGen, _ := id.NewGenerator("aidx")
-		return federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen), repo
-	}
-	t.Run("resolves both local and remote to IDs", func(t *testing.T) {
-		r, repo := mkResolver()
-		repo.Users["local-id"] = &model.User{ID: "local-id", Username: "alice", UsernameLower: "alice"}
-		host := "remote.example"
-		repo.Users["remote-id"] = &model.User{ID: "remote-id", Username: "bob", UsernameLower: "bob", Host: &host}
-
-		ids, err := r.ResolveTextMentionUserIDs([]corenote.Mention{
-			{Username: "alice"},
-			{Username: "bob", Host: "remote.example"},
-		}, nil)
-		require.NoError(t, err)
-		assert.Equal(t, []string{"local-id", "remote-id"}, ids)
-	})
-	t.Run("unknown user is skipped", func(t *testing.T) {
-		r, _ := mkResolver()
-		ids, err := r.ResolveTextMentionUserIDs([]corenote.Mention{{Username: "ghost"}}, nil)
-		require.NoError(t, err, "not-found で止めている")
-		assert.Empty(t, ids)
-	})
-	t.Run("empty input", func(t *testing.T) {
-		r, _ := mkResolver()
-		ids, err := r.ResolveTextMentionUserIDs(nil, nil)
-		require.NoError(t, err)
-		assert.Nil(t, ids)
-	})
-	t.Run("lookup が引けないときは伝播する", func(t *testing.T) {
-		r, repo := mkResolver()
-		boom := errors.New("connection refused")
-		repo.FindByUsernameLowerFn = func(string, *string) (*model.User, error) { return nil, boom }
-		_, err := r.ResolveTextMentionUserIDs([]corenote.Mention{{Username: "alice"}}, nil)
-		require.ErrorIs(t, err, boom)
-	})
-	// #3330: 本家は `@user@<自インスタンスのホスト>` をローカルの利用者として
-	// 解決する (RemoteUserResolveService.resolveUser)。大文字混じりでも同じ。
-	t.Run("own host resolves to the local user", func(t *testing.T) {
-		r, repo := mkResolver()
-		repo.Users["local-id"] = &model.User{ID: "local-id", Username: "alice", UsernameLower: "alice"}
-		remote := "remote.example"
-		ids, err := r.ResolveTextMentionUserIDs([]corenote.Mention{
-			{Username: "alice", Host: "Example.COM"},
-		}, &remote)
-		require.NoError(t, err)
-		assert.Equal(t, []string{"local-id"}, ids)
-	})
-	// #3330: リモートの投稿のホスト無し `@bob` は書き手のホストの bob
-	// (`m.host ?? user.host`)。ローカルの bob に当ててはいけない。
-	t.Run("host-less mention of a remote note resolves on the author's host", func(t *testing.T) {
-		r, repo := mkResolver()
-		repo.Users["local-bob"] = &model.User{ID: "local-bob", Username: "bob", UsernameLower: "bob"}
-		remote := "remote.example"
-		repo.Users["remote-bob"] = &model.User{ID: "remote-bob", Username: "bob", UsernameLower: "bob", Host: &remote}
-		ids, err := r.ResolveTextMentionUserIDs([]corenote.Mention{{Username: "bob"}}, &remote)
-		require.NoError(t, err)
-		assert.Equal(t, []string{"remote-bob"}, ids)
-
-		other := "other.example"
-		ids, err = r.ResolveTextMentionUserIDs([]corenote.Mention{{Username: "bob"}}, &other)
-		require.NoError(t, err)
-		assert.Empty(t, ids, "書き手のホストに居なければ解決しない (ローカルへ落とさない)")
-	})
-	// #3330: 本家は解決した利用者を ID で重複除去する。
-	t.Run("dedups by resolved user ID", func(t *testing.T) {
-		r, repo := mkResolver()
-		repo.Users["local-id"] = &model.User{ID: "local-id", Username: "Alice", UsernameLower: "alice"}
-		ids, err := r.ResolveTextMentionUserIDs([]corenote.Mention{
-			{Username: "Alice"}, {Username: "alice"}, {Username: "ALICE", Host: "example.com"},
-		}, nil)
-		require.NoError(t, err)
-		assert.Equal(t, []string{"local-id"}, ids)
-	})
-}
-
 // TestIngestNote_SpecifiedDMPopulatesMentionsAndVisibleUserIDs covers the
 // #397 fix end-to-end: a specified DM whose body has no @mention but whose
 // AP `tag` array has a Mention to alice should still end up with alice in
@@ -5055,63 +4975,67 @@ func TestIngestNote_NonSpecifiedSkipsVisibleUserIDs(t *testing.T) {
 	assert.Empty(t, []string(got.VisibleUserIDs))
 }
 
-func TestIngestNote_TagMentionsMergedWithTextMentions(t *testing.T) {
-	repo := testutil.NewMockUserRepository()
-	// ローカル bob を MockUserRepository に登録 (FindByUsernameLower 解決用)。
-	// MockUserRepository は usernameLower で lookup する。
-	repo.Users["bob-local-id"] = &model.User{
-		ID:            "bob-local-id",
-		Username:      "bob",
-		UsernameLower: "bob",
-	}
-	noteRepo := testutil.NewMockNoteRepository()
-	urls := activitypub.NewURLBuilder("https://example.com")
-	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
-
-	// 本文 "@bob@example.com" (自インスタンスのホスト) → bob-local-id、tag → alice。
-	// 両方が mentions に入ること。ホスト無しの "@bob" は書き手のホストの bob (#3330)。
-	body := []byte(`{ "@context": "https://www.w3.org/ns/activitystreams", 
-		"id": "https://remote.example/notes/merge1",
-		"type": "Note",
-		"attributedTo": "https://remote.example/users/alice",
-		"content": "hi @bob@example.com",
-		"to": ["https://example.com/users/alice"],
-		"cc": [],
-		"tag": [
-			{"type": "Mention", "href": "https://example.com/users/alice", "name": "@alice"}
-		]
-	}`)
-	got, err := r.IngestNote(body)
-	require.NoError(t, err)
-	mentions := []string(got.Mentions)
-	assert.Contains(t, mentions, "alice")
-	assert.Contains(t, mentions, "bob-local-id", "本文の @bob は user ID へ resolve される")
-}
-
-// #3330: a host-less `@bob` in a remote note means bob on the author's
-// server (upstream `m.host ?? user.host`), never the local bob.
-func TestIngestNote_HostlessTextMentionResolvesOnAuthorHost(t *testing.T) {
+// #3330: upstream ApNoteService.createNote passes apMentions (the Mention
+// tags) to NoteCreateService and never extracts mentions from the body. A
+// body-only `@bob@<own host>` must not land in mentions (which drives the
+// mention notification and the followers-note visibility) nor in a specified
+// note's visibleUserIds.
+func TestIngestNote_MentionsComeFromTagsOnly(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
 	repo.Users["bob-local-id"] = &model.User{ID: "bob-local-id", Username: "bob", UsernameLower: "bob"}
 	remote := "remote.example"
-	repo.Users["bob-remote-id"] = &model.User{ID: "bob-remote-id", Username: "bob", UsernameLower: "bob", Host: &remote}
+	repo.Users["carol-remote-id"] = &model.User{ID: "carol-remote-id", Username: "carol", UsernameLower: "carol", Host: &remote}
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
 	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
-	body := []byte(`{ "@context": "https://www.w3.org/ns/activitystreams",
-		"id": "https://remote.example/notes/hostless1",
-		"type": "Note",
-		"attributedTo": "https://remote.example/users/alice",
-		"content": "hi @bob",
-		"to": ["https://www.w3.org/ns/activitystreams#Public"],
-		"cc": []
-	}`)
-	got, err := r.IngestNote(body)
-	require.NoError(t, err)
-	assert.Equal(t, []string{"bob-remote-id"}, []string(got.Mentions))
+	cases := []struct {
+		name, id, to string
+	}{
+		{"specified", "tagsonly-dm", `["https://example.com/users/alice"]`},
+		{"followers", "tagsonly-fo", `["https://remote.example/users/alice/followers"]`},
+		{"public", "tagsonly-pub", `["https://www.w3.org/ns/activitystreams#Public"]`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []byte(`{ "@context": "https://www.w3.org/ns/activitystreams",
+				"id": "https://remote.example/notes/` + tc.id + `",
+				"type": "Note",
+				"attributedTo": "https://remote.example/users/alice",
+				"content": "hi @bob@example.com @bob @carol",
+				"to": ` + tc.to + `,
+				"cc": [],
+				"tag": [
+					{"type": "Mention", "href": "https://example.com/users/alice", "name": "@alice"}
+				]
+			}`)
+			got, err := r.IngestNote(body)
+			require.NoError(t, err)
+			assert.Equal(t, []string{"alice"}, []string(got.Mentions), "本文だけのメンションは mentions に入らない")
+			assert.NotContains(t, []string(got.VisibleUserIDs), "bob-local-id")
+		})
+	}
+
+	t.Run("body mentions do not count toward the limit", func(t *testing.T) {
+		text := ""
+		for i := 0; i < corenote.DefaultMentionLimit+1; i++ {
+			name := fmt.Sprintf("u%d", i)
+			repo.Users[name] = &model.User{ID: name, Username: name, UsernameLower: name}
+			text += "@" + name + "@example.com "
+		}
+		body := []byte(`{ "@context": "https://www.w3.org/ns/activitystreams",
+			"id": "https://remote.example/notes/tagsonly-limit",
+			"type": "Note",
+			"attributedTo": "https://remote.example/users/alice",
+			"content": "` + text + `",
+			"to": ["https://www.w3.org/ns/activitystreams#Public"],
+			"cc": []
+		}`)
+		got, err := r.IngestNote(body)
+		require.NoError(t, err, "本家は本文のメンションを数えない")
+		assert.Empty(t, []string(got.Mentions))
+	})
 }
 
 // #3330: upstream ApAudienceService.parseAudience takes a specified note's
@@ -5353,6 +5277,35 @@ func TestUpdateRemoteNote_MentionsRecomputed(t *testing.T) {
 	got, err := r.UpdateRemoteNote(body, "")
 	require.NoError(t, err)
 	require.NotNil(t, got)
+	assert.Equal(t, []string{"alice"}, []string(got.Mentions))
+}
+
+// #3330: an Update takes mentions from the Mention tags only, like the create
+// path (upstream apMentions); a body-only `@bob@<own host>` is not added.
+func TestUpdateRemoteNote_MentionsComeFromTagsOnly(t *testing.T) {
+	repo := testutil.NewMockUserRepository()
+	repo.Users["bob-local-id"] = &model.User{ID: "bob-local-id", Username: "bob", UsernameLower: "bob"}
+	noteRepo := testutil.NewMockNoteRepository()
+	urls := activitypub.NewURLBuilder("https://example.com")
+	idGen, _ := id.NewGenerator("aidx")
+	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+
+	host := "remote.example"
+	uri := "https://remote.example/notes/edit-tags"
+	noteRepo.Notes["n-edit-tags"] = &model.Note{
+		ID: "n-edit-tags", UserID: "remote-alice", UserHost: &host, URI: &uri, Mentions: model.StringArray{},
+	}
+	body := []byte(`{ "@context": "https://www.w3.org/ns/activitystreams",
+		"id": "https://remote.example/notes/edit-tags",
+		"type": "Note",
+		"attributedTo": "https://remote.example/users/alice",
+		"content": "edited @bob@example.com",
+		"tag": [
+			{"type": "Mention", "href": "https://example.com/users/alice", "name": "@alice"}
+		]
+	}`)
+	got, err := r.UpdateRemoteNote(body, "")
+	require.NoError(t, err)
 	assert.Equal(t, []string{"alice"}, []string(got.Mentions))
 }
 
