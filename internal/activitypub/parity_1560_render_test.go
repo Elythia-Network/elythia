@@ -40,6 +40,22 @@ func TestRenderNote_QuoteInlineHTML(t *testing.T) {
 	assert.Equal(t, "https://remote.example/notes/orig", out.QuoteURL.String())
 }
 
+// TestRenderNote_QuoteInlineEscapesLikeUpstream checks that the quote-inline
+// link escapes the quoted URI with upstream's escapeHtml notation (#3329).
+//
+// 本家 ApRendererService は escapeHtml で `'` を `&#039;`、`"` を `&quot;` にする。
+func TestRenderNote_QuoteInlineEscapesLikeUpstream(t *testing.T) {
+	r := newRenderer()
+	r.SetNoteResolver(stubNoteResolver1560{uri: `https://remote.example/notes/a'b"c&d`})
+	idGen := newIDGen(t)
+	text := "my comment"
+	renoteID := "rt1"
+	n := &model.Note{ID: idGen.Generate(time.Now()), UserID: "u1", Visibility: model.NoteVisibilityPublic, Text: &text, RenoteID: &renoteID}
+	out := r.RenderNote(n, idGen)
+	const esc = `https://remote.example/notes/a&#039;b&quot;c&amp;d`
+	assert.Contains(t, out.Content, `<span class="quote-inline">RE: <a href="`+esc+`">`+esc+`</a></span>`)
+}
+
 // #1560 [LOW] RenderPerson: top-level sharedInbox + user.tags Hashtag。
 func TestRenderPerson_SharedInboxAndHashtags(t *testing.T) {
 	r := newRenderer()

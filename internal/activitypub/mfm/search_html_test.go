@@ -76,10 +76,10 @@ func TestSearch_MatchesUpstream(t *testing.T) {
 			`<a href="https://www.google.com/search?q=%20q%20"> q  search</a>`},
 		{"x\t[SEARCH]", "x", "x\t[SEARCH]",
 			"<a href=\"https://www.google.com/search?q=x\">x\t[SEARCH]</a>"},
-		// `'` は encodeURIComponent が残すので、href 側の HTML エスケープで `&#39;` になる。
-		// 本家の escapeHtml は `&#039;` を出すが、HTML としての意味は同じ。
+		// `'` は encodeURIComponent が残すので、href 側の HTML エスケープで、本家の
+		// escapeHtml と同じ `&#039;` になる (#3329)。
 		{"'a' search", "'a'", "'a' search",
-			`<a href="https://www.google.com/search?q=&#39;a&#39;">&#39;a&#39; search</a>`},
+			`<a href="https://www.google.com/search?q=&#039;a&#039;">&#039;a&#039; search</a>`},
 	}
 	for _, c := range cases {
 		t.Run(c.in, func(t *testing.T) {
