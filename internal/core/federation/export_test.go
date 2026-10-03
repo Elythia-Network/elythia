@@ -49,6 +49,12 @@ func (r *Resolver) ResolveTextMentionUserIDs(mentions []corenote.Mention, author
 	return r.resolveTextMentionUserIDs(mentions, authorHost)
 }
 
+// SpecifiedAudience exposes the unexported specifiedAudience for external tests.
+var SpecifiedAudience = specifiedAudience
+
+// ExceedsRemoteMentionLimit exposes the unexported exceedsRemoteMentionLimit for external tests.
+var ExceedsRemoteMentionLimit = exceedsRemoteMentionLimit
+
 // ProcessRemoteMove exposes the unexported processRemoteMove for external
 // tests (#2414)。refreshActor 経由では届かないゲート (クールダウン / 連鎖上限 /
 // URI 不一致) を直接突くために公開する。
