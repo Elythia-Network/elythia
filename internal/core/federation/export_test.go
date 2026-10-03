@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/shiroha-a/mk/internal/activitypub"
-	corenote "github.com/shiroha-a/mk/internal/core/note"
 	"github.com/shiroha-a/mk/internal/model"
 )
 
@@ -42,11 +41,6 @@ var MergeMentionIDs = mergeMentionIDs
 // ResolveMentionedUserIDs exposes the unexported resolveMentionedUserIDs for external tests.
 func (r *Resolver) ResolveMentionedUserIDs(hrefs []string) ([]string, error) {
 	return r.resolveMentionedUserIDs(hrefs)
-}
-
-// ResolveTextMentionUserIDs exposes the unexported resolveTextMentionUserIDs for external tests.
-func (r *Resolver) ResolveTextMentionUserIDs(mentions []corenote.Mention, authorHost *string) ([]string, error) {
-	return r.resolveTextMentionUserIDs(mentions, authorHost)
 }
 
 // SpecifiedAudience exposes the unexported specifiedAudience for external tests.

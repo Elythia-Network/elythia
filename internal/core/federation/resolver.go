@@ -3221,23 +3221,20 @@ func (r *Resolver) ingestNoteWithCreated(body []byte, deliveringActorURI string,
 				"actor", actor.ID, "noteId", replyTarget.ID, "choice", apNote.Name)
 		}
 	}
-	// メンション抽出は本文と AP `tag` 配列の Mention 両方から行う。本文だけだと
-	// specified DM (本文に @ が無いケース) で受信者を取りこぼす (#397)。
-	// 本文 @username / tag href のいずれも最終的に user ID へ解決して保存する
+	// メンションは AP `tag` 配列の Mention だけから取り、user ID へ解決して保存する
 	// (mentions 列はローカル create 経路と同じ user ID の配列にする)。
-	var textMentions []string
-	if note.Text != nil {
-		var merr error
-		if textMentions, merr = r.resolveTextMentionUserIDs(corenote.ExtractMentionStructs(*note.Text), actor.Host); merr != nil {
-			return nil, false, fmt.Errorf("ingest note: %w", merr)
-		}
-	}
+	//
+	// 本家 ApNoteService.createNote は apMentions (= tag の Mention) を
+	// NoteCreateService に渡し、本文からはメンションを取らない。以前は本文の
+	// `@user` も解決して tag の分と合わせていたが、それだと tag に無い
+	// `@alice@<自ホスト>` を本文に書くだけで、alice に通知が届き、フォロワー限定の
+	// 投稿も見えるようになっていた (#3330)。
 	tagHrefs := extractMentionTags(apNote.Tag)
 	tagMentions, merr := r.resolveMentionedUserIDs(tagHrefs)
 	if merr != nil {
 		return nil, false, fmt.Errorf("ingest note: %w", merr)
 	}
-	note.Mentions = mergeMentionIDs(textMentions, tagMentions)
+	note.Mentions = mergeMentionIDs(nil, tagMentions)
 	// specified visibility では AP `to` / `cc` の宛先 actor URI 列を ID へ解決して
 	// 埋める。CanView の VisibleUserIDs チェック (core/note/visibility.go) で受信者が
 	// note を参照できるようにするため (#397)。
@@ -3729,23 +3726,8 @@ func (r *Resolver) UpdateRemoteNote(body []byte, actorURI string) (*model.Note, 
 		return existing, nil
 	}
 	// text が変わらなくても tag 配列の Mention は AP Update で変化しうる (#397)。
-	// IngestNote と同じく本文と tag 両方から mention を集めて user ID 配列に
-	// 統一する (mentions 列の意味論を local create 経路と揃えるため)。下の上限の
-	// 判定に使うので、書き込みより前に解決する (#3330)。`existing.Text` はまだ
-	// 書き換えていないので、本文が来なかったときは保存済みの本文を読む。
-	var (
-		textMentions []string
-		merr         error
-	)
-	switch {
-	case newText != "":
-		textMentions, merr = r.resolveTextMentionUserIDs(corenote.ExtractMentionStructs(newText), existing.UserHost)
-	case existing.Text != nil:
-		textMentions, merr = r.resolveTextMentionUserIDs(corenote.ExtractMentionStructs(*existing.Text), existing.UserHost)
-	}
-	if merr != nil {
-		return nil, fmt.Errorf("update remote note: %w", merr)
-	}
+	// IngestNote と同じく tag の Mention だけを user ID 配列にする (本家
+	// ApNoteService.createNote の apMentions と同じ。本文からは取らない、#3330)。
 	tagHrefs := extractMentionTags(apNote.Tag)
 	tagMentions, merr := r.resolveMentionedUserIDs(tagHrefs)
 	if merr != nil {
@@ -3753,7 +3735,7 @@ func (r *Resolver) UpdateRemoteNote(body []byte, actorURI string) (*model.Note, 
 	}
 	// 作成時と同じく返信先の作者と specified の宛先も足す。足さないと、編集のたびに
 	// 作成時に入れたそれらが mentions から消える。
-	mentions := withImplicitMentions(existing, mergeMentionIDs(textMentions, tagMentions))
+	mentions := withImplicitMentions(existing, mergeMentionIDs(nil, tagMentions))
 	// メンション数の上限も編集経路に掛ける (#3330)。禁止語と同じく upstream には
 	// 対応物が無い (ノートの Update を取り込まない) が、掛けないと「上限内の note を
 	// 投げてから Update で Mention を増やす」で取り込み時の判定 (#17167 / #17576) を
@@ -4043,49 +4025,6 @@ func (r *Resolver) resolveMentionedUserIDs(hrefs []string) ([]string, error) {
 		}
 		seen[id] = struct{}{}
 		out = append(out, id)
-	}
-	return out, nil
-}
-
-// resolveTextMentionUserIDs maps text-derived `@username[@host]` mentions to
-// local model.User IDs. mentions 列の意味論を local create 経路 (user ID 配列)
-// と揃えるため、リモート受信 Note でも username → ID 解決を必ず通す (#397)。
-// userRepo 未設定 / 未知ユーザーは skip する (NotificationService 等の
-// 既存後段は skip でも username fallback で動くが、mentions 列の query は
-// ID 完全一致なので残しても無駄)。
-//
-// The host rules mirror upstream NoteCreateService.extractMentionedUsers: a
-// mention without a host belongs to the note author's host (`m.host ??
-// user.host`), and a mention of this instance's own host is a local user
-// (RemoteUserResolveService.resolveUser). The result is dedup'd by user ID.
-func (r *Resolver) resolveTextMentionUserIDs(mentions []corenote.Mention, authorHost *string) ([]string, error) {
-	if r.userRepo == nil || len(mentions) == 0 {
-		return nil, nil
-	}
-	out := make([]string, 0, len(mentions))
-	for _, m := range mentions {
-		// リモートの投稿のホスト無し `@bob` は、書き手のサーバーの bob を指す。
-		// ローカルの bob に解決すると、無関係なローカルの利用者に通知が飛ぶ。
-		h := m.Host
-		if h == "" && authorHost != nil {
-			h = *authorHost
-		}
-		var host *string
-		if h != "" && !r.isSelfHost(punyHost(h)) {
-			host = &h
-		}
-		u, err := r.userRepo.FindByUsernameLower(m.Username, host)
-		if err != nil && !repository.IsNotFound(err) {
-			// 上と同じ (#3121)。引けなかったものを「未知の相手」に潰すと、
-			// 通知の宛先が欠けたまま note が確定する。
-			return nil, fmt.Errorf("resolve text mention %q: %w", m.Username, err)
-		}
-		if err != nil || u == nil {
-			continue
-		}
-		if !slices.Contains(out, u.ID) {
-			out = append(out, u.ID)
-		}
 	}
 	return out, nil
 }
