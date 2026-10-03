@@ -150,7 +150,9 @@ func (h *Handler) RegistryKeys(c echo.Context) error {
 	}
 	u := middleware.GetUser(c)
 	var req registryScopeDomainRequest
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	req.Scope = normalizeRegistryScope(req.Scope)
 	if !validRegistryScope(req.Scope) || !storableRegistryValue("", req.Domain) {
 		return apierr.JSONInvalidParam(c)

@@ -1430,7 +1430,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		})
 	}
 
-	api := s.echo.Group("/api")
+	// POST / Match で登録する endpoint は、route の認証・権限の middleware の
+	// 後ろに body が object かの検査が付く (requireObjectBody、#3330)。
+	api := apiRoutes{s.echo.Group("/api")}
 
 	// 本家 ApiCallService #sendApiError 互換の WWW-Authenticate 付与 (#1608)。
 	// error envelope の kind を見て header を決めるため、応答を最初に
@@ -4189,7 +4191,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		enqueuer: s.queueClient,
 	}
 
-	if err := s.setupPlugins(api, registeredPlugins, openPluginStorage); err != nil {
+	// プラグインの route は本家に無い経路なので、body の検査を付けない素の group を渡す。
+	if err := s.setupPlugins(api.Group, registeredPlugins, openPluginStorage); err != nil {
 		s.pluginSetupErr = err
 		return
 	}

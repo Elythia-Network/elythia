@@ -24,7 +24,9 @@ func (h *Handler) RequestsSent(c echo.Context) error {
 		SinceDate *int64 `json:"sinceDate"`
 		UntilDate *int64 `json:"untilDate"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
 	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
 	if !cursorOK {

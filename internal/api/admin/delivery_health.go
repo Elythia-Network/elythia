@@ -67,7 +67,9 @@ func (h *Handler) FederationCloseDeliveryBreaker(c echo.Context) error {
 	var req struct {
 		Host string `json:"host"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	// **配送側と同じ規則で正規化する。** ブレーカーのキーは配送先 URL から
 	// `NormalizeGateHost` で作っているので、大文字や IDN をそのまま使うと別のキーを
 	// 消して 204 を返し、止まったまま「閉じた」ように見える。URL (`https://...`)
@@ -118,8 +120,11 @@ func (h *Handler) federationHealth(c echo.Context, provider DeliveryHealthProvid
 		// WindowSeconds は遡る秒数。上限は deliveryhealth.MaxWindow。
 		WindowSeconds int `json:"windowSeconds"`
 	}
-	// body 無しでも既定値で応答する (管理画面が引数なしで叩く)。
-	_ = c.Bind(&req)
+	// windowSeconds 省略 (`{}`) は既定値で応答する (管理画面が引数なしで叩く)。
+	// object でない body は本家の endpoint と同じく 400 にする (#3330)。
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 
 	window := defaultDeliveryHealthWindow
 	if req.WindowSeconds > 0 {

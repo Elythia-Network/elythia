@@ -86,7 +86,9 @@ func (h *Handler) AvatarDecorationsDelete(c echo.Context) error {
 	var req struct {
 		ID string `json:"id"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	if req.ID == "" {
 		return c.NoContent(http.StatusNoContent)
 	}

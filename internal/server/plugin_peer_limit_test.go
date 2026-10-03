@@ -235,7 +235,7 @@ plugins:
 }
 
 // peer の URL と BodyLimitByPath の表は `apiGroupPrefix` から組み立てるが、
-// router 側は `s.echo.Group("/api")` のリテラルを使う (既存の
+// router 側は `apiRoutes{s.echo.Group("/api")}` のリテラルを使う (既存の
 // `TestAPICompatDoc_MatchesRouter` がその形を固定しているため)。**別々の
 // リテラルなので、片方を変えると表だけが外れて上限が黙って /api の既定に戻る。**
 // 配線の gate は配線が「書かれていること」しか見ないので緑のままになる。
@@ -244,8 +244,8 @@ func TestAPIGroupPrefixMatchesRouter(t *testing.T) {
 	require.NoError(t, err)
 	// **`api :=` まで含めて照合する。** router には pprof など別の group も
 	// あるので、Group( だけを拾うと最初の 1 件を取って空振りする。
-	m := regexp.MustCompile(`(?m)^\s*api := s\.echo\.Group\("([^"]+)"\)`).FindSubmatch(src)
-	require.NotNil(t, m, "router.go に `api := s.echo.Group(\"...\")` が無い。書き方を変えたならこの gate も直すこと")
+	m := regexp.MustCompile(`(?m)^\s*api := apiRoutes\{s\.echo\.Group\("([^"]+)"\)\}`).FindSubmatch(src)
+	require.NotNil(t, m, "router.go に `api := apiRoutes{s.echo.Group(\"...\")}` が無い。書き方を変えたならこの gate も直すこと")
 	assert.Equal(t, apiGroupPrefix, string(m[1]),
 		"router の API グループと apiGroupPrefix がずれている。peer の受け口の本文上限が効かなくなる")
 }

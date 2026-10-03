@@ -19,7 +19,9 @@ func (h *Handler) Stats(c echo.Context) error {
 	var req struct {
 		Limit *int `json:"limit" query:"limit"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)

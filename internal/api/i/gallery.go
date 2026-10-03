@@ -16,7 +16,8 @@ import (
 // limit clamped to 100). Cursor 指定時は frontend Paginator が untilId
 // / sinceId を投げてくる経路 (#493)。
 //
-// ok=false は列に入らないカーソルで、呼び出し側は 400 を返すこと (#3025)。
+// ok=false は bind の失敗か列に入らないカーソルで、呼び出し側は 400 を返すこと
+// (#3025 / #3330)。
 func paginationFromRequest(c echo.Context) (limit, offset int, sinceID, untilID string, ok bool) {
 	var req struct {
 		Limit     *int   `json:"limit"`
@@ -26,7 +27,10 @@ func paginationFromRequest(c echo.Context) (limit, offset int, sinceID, untilID 
 		SinceDate *int64 `json:"sinceDate"`
 		UntilDate *int64 `json:"untilDate"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		// 本家は body の型違いや object でない body を ajv で 400 にする (#3330)。
+		return 0, 0, "", "", false
+	}
 	limit = 10
 	if req.Limit != nil {
 		limit = *req.Limit

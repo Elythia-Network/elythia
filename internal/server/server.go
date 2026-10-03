@@ -662,6 +662,8 @@ func newServer(cfg *config.Config, db *gorm.DB, redis *cache.RedisClients, plugi
 	// encoding/json (fastJSONSerializer の doc 参照: goccy は #542 の panic で
 	// revert、高速 encoder 化は #1142 で見送り)。
 	e.JSONSerializer = fastJSONSerializer{}
+	// body の無い API 呼び出しを本家と同じく INVALID_PARAM にする (apiBinder 参照)。
+	e.Binder = &apiBinder{}
 
 	// trustProxyからIPExtractorを構成。詳細は buildIPExtractor のコメント。
 	// **常に設定する。** 未設定のまま残すと Echo の RealIP は XFF の最左を

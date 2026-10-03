@@ -51,6 +51,12 @@ func signup(t *testing.T, username string, admin *userToken) *userToken {
 // apiPost は POST /api/<path> を呼ぶ。TS版 api(endpoint, params, user?) に対応。
 func apiPost(t *testing.T, path string, params map[string]any) *http.Response {
 	t.Helper()
+	// nil の map は `null` に marshal される。本家の endpoint は body が object で
+	// ないと ajv の #/type で 400 にするので (mk-go も同じ、#3330)、本家の
+	// test/utils.ts の api() と同じく「引数なし」は `{}` で送る。
+	if params == nil {
+		params = map[string]any{}
+	}
 	body, err := json.Marshal(params)
 	require.NoError(t, err)
 

@@ -50,3 +50,14 @@ func TestAssertFastifyError_500Internal(t *testing.T) {
 
 	AssertFastifyError(t, rec, http.StatusInternalServerError, "INTERNAL_ERROR")
 }
+
+func TestAssertInvalidParam(t *testing.T) {
+	rec := httptest.NewRecorder()
+	rec.Code = http.StatusBadRequest
+	body, _ := json.Marshal(map[string]any{
+		"error": map[string]any{"code": "INVALID_PARAM", "id": "3d81ceae-475f-4600-b2a8-2bc116157532"},
+	})
+	_, _ = rec.Body.Write(body)
+
+	AssertInvalidParam(t, rec)
+}

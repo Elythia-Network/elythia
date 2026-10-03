@@ -70,7 +70,9 @@ func (h *Handler) FederationCleanGoneInstance(c echo.Context) error {
 	var req struct {
 		Host string `json:"host"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	host := normalizeRequestHost(req.Host)
 	if host == "" {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "host is required.", "96c56be5-a921-44f6-b914-21bce995c2eb"))

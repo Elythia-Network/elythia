@@ -46,7 +46,9 @@ func (h *Handler) DriveUsage(c echo.Context) error {
 		ForceRecalc bool `json:"forceRecalc"`
 	}
 	// body 無しでも既定値で応答する (管理画面が引数なしで叩く)。
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 
 	res, err := h.driveUsage.Breakdown(req.ForceRecalc)
 	if err != nil {

@@ -252,7 +252,9 @@ func (h *Handler) Games(c echo.Context) error {
 		UntilDate *int64 `json:"untilDate"`
 		My        bool   `json:"my"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	if req.Limit <= 0 {
 		req.Limit = 10
 	}
@@ -361,7 +363,9 @@ func (h *Handler) Match(c echo.Context) error {
 		NoIrregularRules bool `json:"noIrregularRules"`
 		Multiple         bool `json:"multiple"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	_ = req.NoIrregularRules // accepted for paramDef parity; inert on specific-match
 
 	// acct 形式 (@user / @user@host) を local user id に解決する
@@ -553,7 +557,9 @@ func (h *Handler) CancelMatch(c echo.Context) error {
 	var req struct {
 		UserID string `json:"userId"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	ctx := c.Request().Context()
 	// userId 未指定 = ランダムマッチの取り消し。待機列から自分を外す (#2407)。
 	// upstream matchAnyUserCancel に対応する。ここで外さないと、取り消した

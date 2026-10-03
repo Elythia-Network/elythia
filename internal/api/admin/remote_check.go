@@ -47,7 +47,9 @@ func (h *Handler) FederationCheckHost(c echo.Context) error {
 		Host    string `json:"host"`
 		Account string `json:"account"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	host := normalizeRequestHost(req.Host)
 	if host == "" {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "host is required.", "345fdd87-c6e3-46ad-b768-1c08eebd726e"))

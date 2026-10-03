@@ -105,7 +105,9 @@ func (h *Handler) AdDelete(c echo.Context) error {
 	var req struct {
 		ID string `json:"id"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	if req.ID == "" {
 		return c.NoContent(http.StatusNoContent)
 	}
@@ -140,7 +142,9 @@ func (h *Handler) AdList(c echo.Context) error {
 		UntilDate  *int64 `json:"untilDate"`
 		Publishing *bool  `json:"publishing"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)

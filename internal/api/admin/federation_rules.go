@@ -146,7 +146,9 @@ func (h *Handler) FederationRuleHits(c echo.Context) error {
 		RuleID string `json:"ruleId"`
 		Limit  int    `json:"limit"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	if req.RuleID == "" {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "ruleId is required.", "c5b1c129-8d49-42bd-b946-0c2456dfbf39"))
 	}
@@ -216,7 +218,9 @@ func (h *Handler) FederationRuleDelete(c echo.Context) error {
 	var req struct {
 		RuleID string `json:"ruleId"`
 	}
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	if req.RuleID == "" {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "ruleId is required.", "c5b1c129-8d49-42bd-b946-0c2456dfbf39"))
 	}

@@ -79,7 +79,7 @@ func JSONBodyParse() echo.MiddlewareFunc {
 			if req.Method == http.MethodGet || req.Method == http.MethodHead || req.Method == http.MethodTrace {
 				return next(c)
 			}
-			if !isJSONContentType(req.Header.Get(echo.HeaderContentType)) {
+			if !IsJSONContentType(req.Header.Get(echo.HeaderContentType)) {
 				return next(c)
 			}
 
@@ -135,13 +135,13 @@ func isPoisonedJSON(body []byte) bool {
 	return hasPoisonedKey(v)
 }
 
-// isJSONContentType reports whether Fastify's content-type parser would
+// IsJSONContentType reports whether Fastify's content-type parser would
 // route the request to the application/json parser. Fastify only validates
 // the type/subtype token (lib/content-type.js) and tolerates malformed
 // parameter lists, while Go's mime.ParseMediaType rejects them — e.g. a
 // bare "charset" without value or duplicate parameters. On parse error we
 // therefore fall back to comparing the raw essence before the first ';'.
-func isJSONContentType(ct string) bool {
+func IsJSONContentType(ct string) bool {
 	essence, _, err := mime.ParseMediaType(ct)
 	if err == nil {
 		return essence == echo.MIMEApplicationJSON

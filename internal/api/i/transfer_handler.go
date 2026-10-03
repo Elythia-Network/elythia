@@ -74,7 +74,9 @@ func (h *Handler) exportHandler(exportType string) echo.HandlerFunc {
 			ExcludeMuting   bool `json:"excludeMuting"`
 			ExcludeInactive bool `json:"excludeInactive"`
 		}
-		_ = c.Bind(&req)
+		if err := c.Bind(&req); err != nil {
+			return apierr.JSONInvalidParam(c)
+		}
 		if err := h.transferEnqueuer.EnqueueExport(queue.ExportPayload{
 			UserID:          u.ID,
 			Type:            exportType,

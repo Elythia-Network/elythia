@@ -76,6 +76,12 @@ func resetDB(t *testing.T, srv *testServer) {
 // srvAPIPost は POST /api/<path> を指定サーバーに送る。
 func srvAPIPost(t *testing.T, srv *testServer, path string, params map[string]any) *http.Response {
 	t.Helper()
+	// nil の map は `null` に marshal される。本家の endpoint は body が object で
+	// ないと ajv の #/type で 400 にするので (mk-go も同じ、#3330)、本家の
+	// test/utils.ts の api() と同じく「引数なし」は `{}` で送る。
+	if params == nil {
+		params = map[string]any{}
+	}
 	body, err := json.Marshal(params)
 	require.NoError(t, err)
 
