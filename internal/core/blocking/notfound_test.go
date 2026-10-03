@@ -41,7 +41,7 @@ func TestBlock_DBFailureIsNotBlockeeNotFound(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	svc := blocking.NewService(
 		&failingUserRepo{MockUserRepository: testutil.NewMockUserRepository(), err: dbErr},
-		testutil.NewMockBlockingRepository(), testutil.NewMockFollowingRepository(), idGen)
+		testutil.NewMockBlockingRepository(), idGen)
 	// **materialize が走らないことまで見る** (呼び出し回数を見ないと、guard を
 	// materialize の後ろに戻す変異が生き残る)。
 	mat := &countingUserMaterializer{}
@@ -63,7 +63,7 @@ func TestUnblock_DBFailureIsNotNotBlocking(t *testing.T) {
 	require.NoError(t, userRepo.Create(&model.User{ID: "u2", Username: "u2", UsernameLower: "u2"}))
 	svc := blocking.NewService(userRepo, &dbFailingBlockingRepo{
 		MockBlockingRepository: testutil.NewMockBlockingRepository(), err: dbErr,
-	}, testutil.NewMockFollowingRepository(), idGen)
+	}, idGen)
 
 	err := svc.Unblock("u1", "u2")
 	require.Error(t, err)
