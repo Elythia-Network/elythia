@@ -40,7 +40,7 @@ func (s stubTransferDriveReader) Fetch(_ string) (*model.DriveFile, []byte, erro
 
 type stubBlockingSvc struct{}
 
-func (stubBlockingSvc) Block(_, blockeeID string) (*model.Blocking, error) {
+func (stubBlockingSvc) BlockSilent(_, blockeeID string) (*model.Blocking, error) {
 	return &model.Blocking{ID: "b_" + blockeeID}, nil
 }
 

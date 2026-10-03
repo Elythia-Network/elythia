@@ -1093,8 +1093,9 @@ func TestSuspendUser_CleansUpRelations(t *testing.T) {
 	assert.NotContains(t, frRepo.Requests, "r2")
 	assert.Contains(t, frRepo.Requests, "r3")
 
-	// outgoing follow のみ unfollow される。
+	// outgoing follow のみ unfollow される。本家 unFollowAll と同じく silent。
 	require.Len(t, enq.pairs, 2)
+	assert.Equal(t, []bool{true, true}, enq.silent)
 	set := map[[2]string]bool{}
 	for _, p := range enq.pairs {
 		set[p] = true

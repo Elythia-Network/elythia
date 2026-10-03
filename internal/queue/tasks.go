@@ -415,12 +415,42 @@ func DecodeDeleteAccountPayload(body []byte) (DeleteAccountPayload, error) {
 const TaskTypeUnfollow = "relationship:unfollow"
 
 // UnfollowPayload identifies the (follower, followee) pair to detach.
-// 本家 TS の {from: ThinUser, to: ThinUser, silent: true} に相当。
-// silent flag は notification 抑制用だが mk-go の Unfollow は元々
-// notification を出さない実装なので payload に含めない。
+// 本家 TS の RelationshipJobData {from, to, silent} に相当。Silent は本家
+// UserFollowingService.unfollow の silent と同じ意味で、main stream の
+// unfollow と Webhook を出さない (Undo(Follow) / Reject の配送はする)。本家は
+// admin/federation/remove-all-following と凍結時の unFollowAll が silent: true
+// で積み、アカウント移行の遅延 unfollow は付けない。
 type UnfollowPayload struct {
 	FollowerID string `json:"followerId"`
 	FolloweeID string `json:"followeeId"`
+	Silent     bool   `json:"silent,omitempty"`
+}
+
+// relationshipJobPair is the {from, to} part of upstream's RelationshipJobData
+// (QueueService.generateRelationshipJobData).
+//
+// TS 版から引き継いだ relationship キューのジョブは {from: {id}, to: {id},
+// silent, requestId, withReplies} の形で積まれている。mk-go の形
+// (followerId / followeeId など) とは鍵が違うので、mk-go の鍵が両方とも空の
+// ときだけこちらを読む。silent と withReplies は鍵が同じなので、各 payload の
+// フィールドがそのまま読む。
+type relationshipJobPair struct {
+	From *struct {
+		ID string `json:"id"`
+	} `json:"from"`
+	To *struct {
+		ID string `json:"id"`
+	} `json:"to"`
+}
+
+// upstreamPair returns the (from, to) IDs of an upstream-shaped job body, or
+// ok=false when the body has no {from, to}.
+func upstreamPair(body []byte) (from, to string, ok bool) {
+	var w relationshipJobPair
+	if err := json.Unmarshal(body, &w); err != nil || w.From == nil || w.To == nil {
+		return "", "", false
+	}
+	return w.From.ID, w.To.ID, true
 }
 
 // NewUnfollowTask serializes an UnfollowPayload into a driver.Task.
@@ -435,6 +465,12 @@ func DecodeUnfollowPayload(body []byte) (UnfollowPayload, error) {
 	if err := json.Unmarshal(body, &p); err != nil {
 		return UnfollowPayload{}, err
 	}
+	if p.FollowerID == "" && p.FolloweeID == "" {
+		// 本家 processUnfollow は from を follower、to を followee にする。
+		if from, to, ok := upstreamPair(body); ok {
+			p.FollowerID, p.FolloweeID = from, to
+		}
+	}
 	return p, nil
 }
 
@@ -446,12 +482,21 @@ const TaskTypeFollow = "relationship:follow"
 
 // FollowPayload identifies the (follower, followee) pair to attach.
 // 本家 TS の RelationshipJobData {from, to, silent, requestId, withReplies}
-// に相当。silent / requestId は mk-go の core/following.Follow が未対応の
-// ため payload に含めない (UnfollowPayload と同方針、core 対応時に追加)。
+// に相当。Silent は本家 follow の silent と同じ意味で、フォローした側の main
+// stream の follow と Webhook を出さない (本家はフォローのインポートが
+// silent: true で積む)。
+//
+// requestId は持たない。本家 follow はこれを、リモートからのフォローに返す
+// Accept と、ローカルからリモートへ送る Follow の id に使う。mk-go の
+// core/following.Follow はその id を外から受け取らず、配送側
+// (FollowingDeliveryHook) が自分で組み立てる。本家でも requestId を付けて
+// relationship キューに積む呼び出し元は無い (インポート・アカウント移行・
+// リストのプロキシはどれも付けない)。
 type FollowPayload struct {
 	FollowerID  string `json:"followerId"`
 	FolloweeID  string `json:"followeeId"`
 	WithReplies bool   `json:"withReplies,omitempty"`
+	Silent      bool   `json:"silent,omitempty"`
 }
 
 // NewFollowTask serializes a FollowPayload into a driver.Task.
@@ -466,6 +511,12 @@ func DecodeFollowPayload(body []byte) (FollowPayload, error) {
 	if err := json.Unmarshal(body, &p); err != nil {
 		return FollowPayload{}, err
 	}
+	if p.FollowerID == "" && p.FolloweeID == "" {
+		// 本家 processFollow は follow(from, to, ...)。
+		if from, to, ok := upstreamPair(body); ok {
+			p.FollowerID, p.FolloweeID = from, to
+		}
+	}
 	return p, nil
 }
 
@@ -474,11 +525,14 @@ func DecodeFollowPayload(body []byte) (FollowPayload, error) {
 const TaskTypeBlock = "relationship:block"
 
 // BlockPayload identifies the (blocker, blockee) pair to attach.
-// 本家 TS の RelationshipJobData {from, to, silent} に相当。silent は
-// mk-go の core/blocking.Block が未対応のため含めない。
+// 本家 TS の RelationshipJobData {from, to, silent} に相当。Silent は
+// core/blocking.BlockSilent を使う印 (外れたフォローと申請の unfollow を
+// main stream と Webhook に出さない)。本家は ImportBlockingProcessorService が
+// silent: true で積み、AccountMoveService.copyBlocking は付けない。
 type BlockPayload struct {
 	BlockerID string `json:"blockerId"`
 	BlockeeID string `json:"blockeeId"`
+	Silent    bool   `json:"silent,omitempty"`
 }
 
 // NewBlockTask serializes a BlockPayload into a driver.Task.
@@ -493,6 +547,12 @@ func DecodeBlockPayload(body []byte) (BlockPayload, error) {
 	if err := json.Unmarshal(body, &p); err != nil {
 		return BlockPayload{}, err
 	}
+	if p.BlockerID == "" && p.BlockeeID == "" {
+		// from がブロックする側 (本家 processBlock は block(from, to, silent))。
+		if from, to, ok := upstreamPair(body); ok {
+			p.BlockerID, p.BlockeeID = from, to
+		}
+	}
 	return p, nil
 }
 
@@ -501,6 +561,10 @@ func DecodeBlockPayload(body []byte) (BlockPayload, error) {
 const TaskTypeUnblock = "relationship:unblock"
 
 // UnblockPayload identifies the (blocker, blockee) pair to detach.
+//
+// 本家の job の silent は持たない。本家 processUnblock も silent を
+// UserBlockingService.unblock に渡さない (unblock は利用者向けのイベントを
+// 出さない)。
 type UnblockPayload struct {
 	BlockerID string `json:"blockerId"`
 	BlockeeID string `json:"blockeeId"`
@@ -517,6 +581,12 @@ func DecodeUnblockPayload(body []byte) (UnblockPayload, error) {
 	var p UnblockPayload
 	if err := json.Unmarshal(body, &p); err != nil {
 		return UnblockPayload{}, err
+	}
+	if p.BlockerID == "" && p.BlockeeID == "" {
+		// 本家 processUnblock は unblock(from, to)。
+		if from, to, ok := upstreamPair(body); ok {
+			p.BlockerID, p.BlockeeID = from, to
+		}
 	}
 	return p, nil
 }

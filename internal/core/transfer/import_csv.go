@@ -40,6 +40,9 @@ func (i *Importer) importFollowing(user *model.User, body []byte, jobWithReplies
 		if !withRepliesSet {
 			opts.WithReplies = jobWithReplies
 		}
+		// 本家 ImportFollowingProcessorService は silent: true でフォローを積む
+		// (取り込んだ件数だけ本人の main stream と Webhook に follow を出さない)。
+		opts.Silent = true
 		target, err := i.resolveTargetUser(acctStr)
 		if err != nil || target == nil {
 			res.Skipped++
@@ -109,7 +112,7 @@ func (i *Importer) importBlocking(user *model.User, body []byte) (*ImportResult,
 			res.Skipped++
 			continue
 		}
-		if _, err := i.deps.Blocking.Block(user.ID, target.ID); err != nil {
+		if _, err := i.deps.Blocking.BlockSilent(user.ID, target.ID); err != nil {
 			res.Skipped++
 			logSkip(ImportBlocking, line, err)
 			continue

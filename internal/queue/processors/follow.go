@@ -43,7 +43,7 @@ func (p *FollowProcessor) Handle(_ context.Context, t driver.Task) error {
 		return fmt.Errorf("follow: service not wired: %w", driver.ErrSkipRetry)
 	}
 	_, err = p.follower.Follow(payload.FollowerID, payload.FolloweeID,
-		following.FollowOptions{WithReplies: payload.WithReplies})
+		following.FollowOptions{WithReplies: payload.WithReplies, Silent: payload.Silent})
 	switch {
 	case err == nil:
 		return nil

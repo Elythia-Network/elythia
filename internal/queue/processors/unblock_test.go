@@ -33,6 +33,22 @@ func TestUnblockProcessor_Success(t *testing.T) {
 	assert.Equal(t, [2]string{"localA", "rA"}, fu.calls[0])
 }
 
+// TS 版から引き継いだ job ({from: {id}, to: {id}}) も処理する。mk-go の鍵が
+// あればそちらを優先する。本家 processUnblock は unblock(from, to)。
+func TestUnblockProcessor_UpstreamJobShape(t *testing.T) {
+	fu := &fakeUnblocker{}
+	p := processors.NewUnblockProcessor(fu)
+	task := driver.RawTask{TypeName: queue.TaskTypeUnblock, Body: []byte(`{"from":{"id":"blocker1"},"to":{"id":"blockee1"}}`)}
+	require.NoError(t, p.Handle(context.Background(), task))
+	assert.Equal(t, [][2]string{{"blocker1", "blockee1"}}, fu.calls)
+
+	fu = &fakeUnblocker{}
+	p = processors.NewUnblockProcessor(fu)
+	task = driver.RawTask{TypeName: queue.TaskTypeUnblock, Body: []byte(`{"blockerId":"a","blockeeId":"b","from":{"id":"x"},"to":{"id":"y"}}`)}
+	require.NoError(t, p.Handle(context.Background(), task))
+	assert.Equal(t, [][2]string{{"a", "b"}}, fu.calls)
+}
+
 // 既に解消済 (row 無し) は望む終状態なので成功扱い。
 func TestUnblockProcessor_NotBlocking_Success(t *testing.T) {
 	fu := &fakeUnblocker{err: blocking.ErrNotBlocking}

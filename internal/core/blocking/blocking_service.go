@@ -45,7 +45,28 @@ type Service struct {
 	userMaterializer UserMaterializer
 	// relationReload は block 変更を streaming connection へ通知する (#2400)。
 	relationReload RelationReloadPublisher
+	// unfollowPublisher は block で解除したフォローの unfollow を main stream と
+	// Webhook に出す (#3330)。実装は core/following.Service。
+	unfollowPublisher UnfollowPublisher
 }
+
+// UnfollowPublisher emits the `unfollow` main stream event and user webhook for
+// a following removed by a block. 実装は core/following.Service。
+type UnfollowPublisher interface {
+	PublishBlockUnfollow(followerID, followeeID string)
+}
+
+// SetUnfollowPublisher wires the unfollow notification for block-removed
+// followings.
+func (s *Service) SetUnfollowPublisher(p UnfollowPublisher) {
+	s.unfollowPublisher = p
+}
+
+// HasUnfollowPublisher reports whether the unfollow publisher was wired.
+//
+// 未配線だと、ブロックでフォローが外れても本人の画面のフォローボタンが
+// リロードまで戻らず、unfollow の Webhook も出ない。起動時検査に使う。
+func (s *Service) HasUnfollowPublisher() bool { return s.unfollowPublisher != nil }
 
 // FederationHook delivers Block / Undo(Block) AP activities to a remote
 // blockee on local block / unblock (#1560)。実装は core/federation。
@@ -70,7 +91,8 @@ func (s *Service) SetQuoteRevoker(r QuoteRevoker) {
 type FollowRequestCanceller interface {
 	// CancelFollowRequestsBetween cancels pending follow requests in both
 	// directions between a and b. 該当する request が無い場合は no-op。
-	CancelFollowRequestsBetween(a, b string) error
+	// silent は申請していた側へ unfollow を流さない (インポート用)。
+	CancelFollowRequestsBetween(a, b string, silent bool) error
 }
 
 // SetFollowRequestCanceller wires the pending-follow-request cleanup used by
@@ -135,6 +157,21 @@ func (s *Service) SetRelationReloadPublisher(p RelationReloadPublisher) {
 // Block creates a blocking relationship from blocker to blockee.
 // 既存のフォロー関係 (双方向) があれば自動的に解除する。
 func (s *Service) Block(blockerID, blockeeID string) (*model.Blocking, error) {
+	return s.block(blockerID, blockeeID, false)
+}
+
+// BlockSilent is Block without the `unfollow` main stream events and user
+// webhooks for the followings and follow requests it removes.
+//
+// 本家はブロックのインポートを silent: true でジョブに積み
+// (ImportBlockingProcessorService)、UserBlockingService.block の silent が
+// unfollow の publish と Webhook を止める。何百件も取り込むときに、利用者の
+// Webhook へ 1 件ずつ飛ばさないため。meUpdated は silent でも流す (本家と同じ)。
+func (s *Service) BlockSilent(blockerID, blockeeID string) (*model.Blocking, error) {
+	return s.block(blockerID, blockeeID, true)
+}
+
+func (s *Service) block(blockerID, blockeeID string, silent bool) (*model.Blocking, error) {
 	if blockerID == blockeeID {
 		return nil, ErrSelfBlock
 	}
@@ -180,13 +217,24 @@ func (s *Service) Block(blockerID, blockeeID string) (*model.Blocking, error) {
 		blockerUnfollowed = s.removeFollowing(blockerID, blockeeID)
 		blockeeUnfollowed = s.removeFollowing(blockeeID, blockerID)
 	}
+	// 本家 block は UserFollowingService.unfollow を双方向で呼ぶので、外れた
+	// フォローごとに、follower がローカルなら unfollow が main stream と Webhook
+	// に出る (silent のときは出さない)。
+	if !silent && s.unfollowPublisher != nil {
+		if blockerUnfollowed {
+			s.unfollowPublisher.PublishBlockUnfollow(blockerID, blockeeID)
+		}
+		if blockeeUnfollowed {
+			s.unfollowPublisher.PublishBlockUnfollow(blockeeID, blockerID)
+		}
+	}
 
 	// 保留中の follow request を双方向で取り消す。upstream
 	// UserBlockingService.block の cancelRequest 相当。
 	// **失敗しても block 自体は成立させる** (best-effort)。残すと、block 中に
 	// 承認されたときにフォロー関係が成立してしまう。
 	if s.followRequestCanceller != nil {
-		if err := s.followRequestCanceller.CancelFollowRequestsBetween(blockerID, blockeeID); err != nil {
+		if err := s.followRequestCanceller.CancelFollowRequestsBetween(blockerID, blockeeID, silent); err != nil {
 			slog.Warn("block: cancel pending follow requests failed",
 				"blocker", blockerID, "blockee", blockeeID, "err", err)
 		}

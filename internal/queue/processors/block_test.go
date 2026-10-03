@@ -16,16 +16,57 @@ import (
 )
 
 type fakeBlocker struct {
-	calls [][2]string
-	err   error
+	calls  [][2]string
+	silent []bool
+	err    error
 }
 
 func (f *fakeBlocker) Block(blockerID, blockeeID string) (*model.Blocking, error) {
+	return f.record(blockerID, blockeeID, false)
+}
+
+func (f *fakeBlocker) BlockSilent(blockerID, blockeeID string) (*model.Blocking, error) {
+	return f.record(blockerID, blockeeID, true)
+}
+
+func (f *fakeBlocker) record(blockerID, blockeeID string, silent bool) (*model.Blocking, error) {
 	f.calls = append(f.calls, [2]string{blockerID, blockeeID})
+	f.silent = append(f.silent, silent)
 	if f.err != nil {
 		return nil, f.err
 	}
 	return &model.Blocking{}, nil
+}
+
+// 本家 processBlock は job の silent を block に渡す。silent の job (インポート) は
+// BlockSilent、付いていない job (AccountMove の copyBlocking など) は Block を使う。
+func TestBlockProcessor_SilentUsesBlockSilent(t *testing.T) {
+	for _, tc := range []struct {
+		silent bool
+	}{{false}, {true}} {
+		fb := &fakeBlocker{}
+		p := processors.NewBlockProcessor(fb)
+		task := queue.NewBlockTask(queue.BlockPayload{BlockerID: "a", BlockeeID: "b", Silent: tc.silent})
+		require.NoError(t, p.Handle(context.Background(), task))
+		assert.Equal(t, []bool{tc.silent}, fb.silent)
+	}
+}
+
+// TS 版から引き継いだ job は本家の形 ({from: {id}, to: {id}, silent}) で積まれている。
+// from がブロックする側 (本家 processBlock は block(from, to, silent))。
+func TestBlockProcessor_UpstreamJobShape(t *testing.T) {
+	fb := &fakeBlocker{}
+	p := processors.NewBlockProcessor(fb)
+	task := driver.RawTask{TypeName: queue.TaskTypeBlock, Body: []byte(`{"from":{"id":"blocker1"},"to":{"id":"blockee1"},"silent":true}`)}
+	require.NoError(t, p.Handle(context.Background(), task))
+	assert.Equal(t, [][2]string{{"blocker1", "blockee1"}}, fb.calls)
+	assert.Equal(t, []bool{true}, fb.silent)
+
+	fb = &fakeBlocker{}
+	p = processors.NewBlockProcessor(fb)
+	task = driver.RawTask{TypeName: queue.TaskTypeBlock, Body: []byte(`{"blockerId":"a","blockeeId":"b","from":{"id":"x"},"to":{"id":"y"}}`)}
+	require.NoError(t, p.Handle(context.Background(), task))
+	assert.Equal(t, [][2]string{{"a", "b"}}, fb.calls, "mk-go の鍵を優先する")
 }
 
 func TestBlockProcessor_Success(t *testing.T) {

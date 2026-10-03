@@ -278,12 +278,14 @@ func TestUnblock_DeleteError(t *testing.T) {
 // recordingFollowRequestCanceller captures the pairs handed to
 // CancelFollowRequestsBetween so Block's cleanup can be asserted.
 type recordingFollowRequestCanceller struct {
-	calls [][2]string
-	err   error
+	calls  [][2]string
+	silent []bool
+	err    error
 }
 
-func (c *recordingFollowRequestCanceller) CancelFollowRequestsBetween(a, b string) error {
+func (c *recordingFollowRequestCanceller) CancelFollowRequestsBetween(a, b string, silent bool) error {
 	c.calls = append(c.calls, [2]string{a, b})
+	c.silent = append(c.silent, silent)
 	return c.err
 }
 
@@ -320,6 +322,7 @@ func TestBlock_CancelsPendingFollowRequests(t *testing.T) {
 	_, err := svc.Block("a", "b")
 	require.NoError(t, err)
 	assert.Equal(t, [][2]string{{"a", "b"}}, canceller.calls)
+	assert.Equal(t, []bool{false}, canceller.silent, "通常のブロックは silent にしない")
 }
 
 // 申請の取り消しに失敗しても block 自体は成立する (best-effort)。

@@ -2,6 +2,7 @@
 package ap
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,7 @@ import (
 	"github.com/shiroha-a/mk/internal/api/userrelation"
 	corenote "github.com/shiroha-a/mk/internal/core/note"
 	coreuser "github.com/shiroha-a/mk/internal/core/user"
+	"github.com/shiroha-a/mk/internal/core/userpack"
 	"github.com/shiroha-a/mk/internal/entity"
 	"github.com/shiroha-a/mk/internal/misc/id"
 	"github.com/shiroha-a/mk/internal/model"
@@ -57,6 +59,8 @@ type HostBlockChecker interface {
 
 // Handler handles ActivityPub resource endpoints.
 type Handler struct {
+	// detailExtras は UserDetailed のピン留め・移行先を users/show と同じ規則で埋める (#3330)。
+	detailExtras     userpack.DetailExtras
 	renderer         *activitypub.Renderer
 	userService      *coreuser.Service
 	queryService     *corenote.QueryService
@@ -682,6 +686,10 @@ func (h *Handler) packUserForAPI(viewer *model.User, u *model.User, profile *mod
 		return map[string]any{}
 	}
 	d := entity.PackUserDetailed(u, profile, h.idGen)
+	// ピン留めと移行先は users/show と同じ規則で埋める (#3330)。
+	if h.detailExtras != nil {
+		h.detailExtras.FillDetailedExtras(context.Background(), viewer, u, profile, &d)
+	}
 	// upstream は pack(user, me, {schema:'UserDetailedNotMe'}) で me!=null のとき
 	// relation block (isFollowing/isBlocking 等) を埋める。authed viewer に同じ
 	// relation を載せる (#1778)。anonymous / self は Apply 内で no-op。

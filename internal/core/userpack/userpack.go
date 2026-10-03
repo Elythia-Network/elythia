@@ -37,6 +37,24 @@ type DetailExtras interface {
 	FillDetailedExtras(ctx context.Context, viewer, u *model.User, profile *model.UserProfile, d *entity.UserDetailed)
 }
 
+// DetailTarget is one user of a list response whose detail extras are filled
+// in a batch.
+type DetailTarget struct {
+	User     *model.User
+	Profile  *model.UserProfile
+	Detailed *entity.UserDetailed
+}
+
+// DetailExtrasMany fills the DetailExtras parts for every user of a list
+// response with batched queries, the way upstream UserEntityService.packMany
+// does. The users API handler satisfies it.
+//
+// 本家 packMany はピン留めを閲覧者がいるときだけ IN でまとめて引く (匿名なら
+// pinnedNoteIds / pinnedNotes は空)。移行先とピン留めのページは利用者ごとに引く。
+type DetailExtrasMany interface {
+	FillDetailedExtrasMany(ctx context.Context, viewer *model.User, targets []DetailTarget)
+}
+
 // Lookups resolves the parts of the packed user that come from other tables.
 // A nil lookup leaves that part out (test fixtures / partial wiring), except
 // Profiles: without it DetailedNotMe refuses to pack. Production wires all.

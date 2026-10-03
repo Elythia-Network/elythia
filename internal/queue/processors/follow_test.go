@@ -45,6 +45,38 @@ func TestFollowProcessor_Success(t *testing.T) {
 	assert.True(t, ff.calls[0].opts.WithReplies, "payload の withReplies を FollowOptions に引き継ぐ")
 }
 
+// 本家 processFollow は job の silent / withReplies を follow に渡す。
+func TestFollowProcessor_PassesSilent(t *testing.T) {
+	ff := &fakeFollower{}
+	p := processors.NewFollowProcessor(ff)
+	task := queue.NewFollowTask(queue.FollowPayload{FollowerID: "a", FolloweeID: "b", Silent: true})
+	require.NoError(t, p.Handle(context.Background(), task))
+	require.Len(t, ff.calls, 1)
+	assert.True(t, ff.calls[0].opts.Silent)
+}
+
+// TS 版から引き継いだ job ({from: {id}, to: {id}, silent, withReplies}) も処理する。
+// mk-go の鍵があればそちらを優先する。
+func TestFollowProcessor_UpstreamJobShape(t *testing.T) {
+	ff := &fakeFollower{}
+	p := processors.NewFollowProcessor(ff)
+	task := driver.RawTask{TypeName: queue.TaskTypeFollow, Body: []byte(`{"from":{"id":"localA"},"to":{"id":"rA"},"silent":true,"withReplies":true,"requestId":"https://remote.example/follows/1"}`)}
+	require.NoError(t, p.Handle(context.Background(), task))
+	require.Len(t, ff.calls, 1)
+	assert.Equal(t, "localA", ff.calls[0].followerID)
+	assert.Equal(t, "rA", ff.calls[0].followeeID)
+	assert.True(t, ff.calls[0].opts.Silent)
+	assert.True(t, ff.calls[0].opts.WithReplies)
+
+	ff = &fakeFollower{}
+	p = processors.NewFollowProcessor(ff)
+	task = driver.RawTask{TypeName: queue.TaskTypeFollow, Body: []byte(`{"followerId":"a","followeeId":"b","from":{"id":"x"},"to":{"id":"y"}}`)}
+	require.NoError(t, p.Handle(context.Background(), task))
+	require.Len(t, ff.calls, 1)
+	assert.Equal(t, "a", ff.calls[0].followerID)
+	assert.Equal(t, "b", ff.calls[0].followeeID)
+}
+
 // 既に follow 済 / follow request 送信済は望む終状態なので成功扱い。
 func TestFollowProcessor_AlreadyFollowing_Success(t *testing.T) {
 	for _, sentinel := range []error{following.ErrAlreadyFollowing, following.ErrAlreadyRequested} {

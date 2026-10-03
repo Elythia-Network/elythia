@@ -57,6 +57,7 @@ func (h *Handler) GetFrequentlyRepliedUsers(c echo.Context) error {
 		}
 	}
 	out := make([]map[string]any, 0, len(rows))
+	var batch detailedBatch
 	for _, r := range rows {
 		bundle, err := h.userService.ShowByID(r.UserID)
 		if err != nil {
@@ -75,10 +76,12 @@ func (h *Handler) GetFrequentlyRepliedUsers(c echo.Context) error {
 		isMe := viewer != nil && viewer.ID == bundle.User.ID
 		entity.GateCountVisibility(&d, isMe, iAmModerator, viewerIsFollowing)
 		out = append(out, map[string]any{
-			"user":   d,
+			"user":   batch.add(d, bundle.User, bundle.Profile),
 			"weight": weight,
 		})
 	}
+	// 本家 get-frequently-replied-users は packMany(UserDetailed) (#3330)。
+	batch.fill(c.Request().Context(), h, viewer)
 	return c.JSON(http.StatusOK, out)
 }
 
@@ -206,7 +209,8 @@ func (h *Handler) UserRecommendation(c echo.Context) error {
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
-	out := make([]entity.UserDetailed, 0, len(users))
+	out := make([]*entity.UserDetailed, 0, len(users))
+	var batch detailedBatch
 	for _, u := range users {
 		profile := h.userService.GetProfile(u.ID)
 		d := entity.PackUserDetailed(u, profile, h.idGen)
@@ -217,8 +221,10 @@ func (h *Handler) UserRecommendation(c echo.Context) error {
 		// は false だが、moderator viewer には count を見せる upstream 挙動に揃える。
 		isMe := viewer != nil && viewer.ID == u.ID
 		entity.GateCountVisibility(&d, isMe, iAmModerator, viewerIsFollowing)
-		out = append(out, d)
+		out = append(out, batch.add(d, u, profile))
 	}
+	// 本家 users/recommendation は packMany(UserDetailed) (#3330)。
+	batch.fill(c.Request().Context(), h, viewer)
 	return c.JSON(http.StatusOK, out)
 }
 

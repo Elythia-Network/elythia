@@ -5,7 +5,11 @@ import (
 
 	corefollowing "github.com/shiroha-a/mk/internal/core/following"
 	"github.com/shiroha-a/mk/internal/core/transfer"
+	"github.com/shiroha-a/mk/internal/misc/id"
+	"github.com/shiroha-a/mk/internal/model"
+	"github.com/shiroha-a/mk/internal/testutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewFollowingServiceAdapter_ConstructsWithRealType(t *testing.T) {
@@ -19,4 +23,33 @@ func TestNewFollowingServiceAdapter_ConstructsWithRealType(t *testing.T) {
 	out, err := a.Follow("f", "g", transfer.FollowOptions{})
 	assert.NoError(t, err)
 	assert.Nil(t, out)
+}
+
+type adapterMainEvents struct{ events []string }
+
+func (a *adapterMainEvents) PublishMainEvent(userID, eventType string, _ any) {
+	a.events = append(a.events, userID+":"+eventType)
+}
+
+// adapter は Silent を core/following へ渡す。silent ならフォローした側の follow を
+// 流さず、followed は流す (本家 follow の silent と同じ)。
+func TestFollowingServiceAdapter_PassesSilent(t *testing.T) {
+	for _, tc := range []struct {
+		silent bool
+		want   []string
+	}{
+		{false, []string{"alice:follow", "bob:followed"}},
+		{true, []string{"bob:followed"}},
+	} {
+		userRepo := testutil.NewMockUserRepository()
+		userRepo.Users["alice"] = &model.User{ID: "alice", Username: "alice"}
+		userRepo.Users["bob"] = &model.User{ID: "bob", Username: "bob"}
+		idGen, _ := id.NewGenerator("aidx")
+		svc := corefollowing.NewService(userRepo, testutil.NewMockFollowingRepository(), testutil.NewMockFollowRequestRepository(), idGen)
+		events := &adapterMainEvents{}
+		svc.SetMainStreamPublisher(events)
+		_, err := transfer.NewFollowingServiceAdapter(svc).Follow("alice", "bob", transfer.FollowOptions{Silent: tc.silent})
+		require.NoError(t, err)
+		assert.Equal(t, tc.want, events.events)
+	}
 }

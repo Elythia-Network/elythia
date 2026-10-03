@@ -561,6 +561,11 @@ func (h *Handler) TwoFAKeyDone(c echo.Context) error {
 	})
 }
 
+// PublishMeUpdated emits `meUpdated` with the user's MeDetailed (unread
+// fields filled) to the user's main stream. core/following uses it when a
+// follow request is created, accepted or cancelled.
+func (h *Handler) PublishMeUpdated(userID string) { h.publishMeUpdated(userID) }
+
 // publishMeUpdated は upstream `meUpdated` event を main stream に流す。
 // 失敗は best-effort で握り潰す (publishing は副次的なので main flow を
 // 止めない)。userService.ShowByID で User + Profile を 1 度に取得する。

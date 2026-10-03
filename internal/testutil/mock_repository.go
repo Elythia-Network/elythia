@@ -3667,6 +3667,22 @@ func (m *MockUserNotePiningRepository) ListByUser(userID string) ([]*model.UserN
 	return rows, nil
 }
 
+// ListByUsers implements repository.UserNotePiningBatchReader.
+func (m *MockUserNotePiningRepository) ListByUsers(userIDs []string) ([]*model.UserNotePining, error) {
+	want := make(map[string]bool, len(userIDs))
+	for _, id := range userIDs {
+		want[id] = true
+	}
+	var rows []*model.UserNotePining
+	for _, p := range m.Pinings {
+		if want[p.UserID] {
+			rows = append(rows, p)
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].ID > rows[j].ID })
+	return rows, nil
+}
+
 func (m *MockUserNotePiningRepository) ReplaceByUser(userID string, pins []*model.UserNotePining) error {
 	if m.ReplaceErr != nil {
 		return m.ReplaceErr

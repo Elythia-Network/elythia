@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/shiroha-a/mk/internal/api/apierr"
 	"github.com/shiroha-a/mk/internal/config"
+	"github.com/shiroha-a/mk/internal/core/userpack"
 	"github.com/shiroha-a/mk/internal/entity"
 	"github.com/shiroha-a/mk/internal/misc"
 	"github.com/shiroha-a/mk/internal/misc/id"
@@ -21,9 +23,11 @@ import (
 
 // Handler handles MiAuth endpoints.
 type Handler struct {
-	repo  repository.AuthSessionRepository
-	cfg   *config.Config
-	idGen id.Generator
+	// detailExtras は UserDetailed のピン留め・移行先を users/show と同じ規則で埋める (#3330)。
+	detailExtras userpack.DetailExtras
+	repo         repository.AuthSessionRepository
+	cfg          *config.Config
+	idGen        id.Generator
 	// userRepo は miauth/:session/check で承認ユーザーを UserDetailedNotMe で
 	// pack するために使う (#1224)。未配線時は user フィールドを省く。
 	userRepo repository.UserRepository
@@ -224,7 +228,18 @@ func (h *Handler) packUserDetailed(u *model.User, userID string) any {
 	if h.userRepo != nil {
 		profile, _ = h.userRepo.FindProfileByUserID(userID)
 	}
-	return entity.PackUserDetailed(u, profile, h.idGen)
+	return h.packDetailedNotMe(u, profile)
+}
+
+// packDetailedNotMe packs u like upstream pack(user, null, {schema:
+// 'UserDetailedNotMe'}): the pinned notes / page and move targets are filled
+// as seen by an anonymous viewer.
+func (h *Handler) packDetailedNotMe(u *model.User, profile *model.UserProfile) entity.UserDetailed {
+	d := entity.PackUserDetailed(u, profile, h.idGen)
+	if h.detailExtras != nil {
+		h.detailExtras.FillDetailedExtras(context.Background(), nil, u, profile, &d)
+	}
+	return d
 }
 
 // GenToken handles POST /api/miauth/gen-token.
@@ -297,7 +312,9 @@ func (h *Handler) MiAuthCheck(c echo.Context) error {
 	if h.userRepo != nil {
 		if u, uerr := h.userRepo.FindByID(tok.UserID); uerr == nil && u != nil {
 			profile, _ := h.userRepo.FindProfileByUserID(u.ID)
-			resp["user"] = entity.PackUserDetailed(u, profile, h.idGen)
+			// 本家 ApiServerService の miauth check も pack(token.userId, null,
+			// {schema: 'UserDetailedNotMe'}) (#3330)。
+			resp["user"] = h.packDetailedNotMe(u, profile)
 		}
 	}
 	return c.JSON(http.StatusOK, resp)

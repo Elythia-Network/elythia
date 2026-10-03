@@ -26,15 +26,21 @@ type FollowingService interface {
 }
 
 // FollowOptions mirrors the relevant subset of corefollowing.FollowOptions
-// that CSV imports need to threading. Currently only WithReplies is parsed
-// from the CSV row.
+// that CSV imports need to threading. WithReplies is parsed from the CSV row;
+// Silent is always set by the following import.
 type FollowOptions struct {
 	WithReplies bool
+	// Silent suppresses the importer's `follow` main stream events and user
+	// webhooks (本家 ImportFollowingProcessorService は silent: true で積む)。
+	Silent bool
 }
 
 // BlockingService is the subset of core/blocking.Service used by imports.
 type BlockingService interface {
-	Block(blockerID, blockeeID string) (*model.Blocking, error)
+	// BlockSilent blocks without the unfollow main stream events / webhooks.
+	// 本家はブロックのインポートを silent: true で処理する
+	// (ImportBlockingProcessorService)。
+	BlockSilent(blockerID, blockeeID string) (*model.Blocking, error)
 }
 
 // MutingService is the subset of core/muting.Service used by imports.

@@ -7,7 +7,6 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/shiroha-a/mk/internal/api/apierr"
-	"github.com/shiroha-a/mk/internal/api/meself"
 	"github.com/shiroha-a/mk/internal/entity"
 	"github.com/shiroha-a/mk/internal/model"
 	"github.com/shiroha-a/mk/internal/repository"
@@ -89,7 +88,7 @@ func (h *Handler) List(c echo.Context) error {
 	ctx := c.Request().Context()
 	// moderator は可視性ゲートを越えて実数を見られる (users/show と同じ判定)。
 	iAmModerator := viewer != nil && h.moderatorChecker != nil && h.moderatorChecker.IsModerator(viewer.ID)
-	result := make([]any, 0, len(list))
+	var batch detailedBatch
 	for _, u := range list {
 		profile, _ := h.userRepo.FindProfileByUserID(u.ID)
 		// idGen を渡して createdAt を有効にする。未配線だと createdAt="" で
@@ -100,10 +99,11 @@ func (h *Handler) List(c echo.Context) error {
 		// **カウントの可視性ゲートを通す (#1558)。** ここを忘れると
 		// `followersVisibility: "private"` と実数が並んで返る (未認証でも)。
 		entity.GateCountVisibility(&d, viewerID == u.ID, iAmModerator, viewerIsFollowing)
-		// upstream の pack は isDetailed && isMe で MeDetailed を返す。
-		result = append(result, meself.Pack(ctx, d, u, profile, viewer))
+		batch.add(d, u, profile)
 	}
-	return c.JSON(http.StatusOK, result)
+	// ピン留めと移行先を本家 packMany と同じくまとめて埋める (#3330)。upstream の
+	// pack は isDetailed && isMe で MeDetailed を返す。
+	return c.JSON(http.StatusOK, batch.packAll(ctx, h, viewer))
 }
 
 // PinnedUsers serves the instance's featured accounts.
@@ -128,7 +128,8 @@ func (h *Handler) PinnedUsers(c echo.Context) error {
 	}
 	// moderator は可視性ゲートを越えて実数を見られる (users/show と同じ判定)。
 	iAmModerator := viewer != nil && h.moderatorChecker != nil && h.moderatorChecker.IsModerator(viewer.ID)
-	result := make([]entity.UserDetailed, 0, len(m.PinnedUsers))
+	result := make([]*entity.UserDetailed, 0, len(m.PinnedUsers))
+	var batch detailedBatch
 	for _, acct := range m.PinnedUsers {
 		username, host := ParseAcct(acct, h.localHost)
 		if username == "" {
@@ -144,8 +145,10 @@ func (h *Handler) PinnedUsers(c echo.Context) error {
 		viewerIsFollowing := h.viewerRelationRepos().Apply(&d, viewerID, u, profile)
 		// **カウントの可視性ゲートを通す (#1558)。**
 		entity.GateCountVisibility(&d, viewerID == u.ID, iAmModerator, viewerIsFollowing)
-		result = append(result, d)
+		result = append(result, batch.add(d, u, profile))
 	}
+	// 本家 pinned-users は packMany(users, me, {schema: 'UserDetailed'}) (#3330)。
+	batch.fill(c.Request().Context(), h, viewer)
 	return c.JSON(http.StatusOK, result)
 }
 
