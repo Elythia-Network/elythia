@@ -2,15 +2,16 @@ package mfm
 
 import (
 	"fmt"
-	"net/url"
-	"strconv"
 	"strings"
-	"time"
 )
 
 // ToHTML converts MFM nodes to an HTML string.
 // host はローカルホスト名 (例: "example.com")。
 // メンションやハッシュタグのリンク先URLの生成に使う。
+//
+// 出力は本家 MfmService.toHtml に揃えてある (文字列を連結するだけで、DOM を
+// 通した直列化はしない)。リモートのメンションの href だけは、本家がメンション先の
+// ユーザーの url を使うのに対し、DB を引かずに https://<host>/@<username> で作る。
 func ToHTML(nodes []*Node, host string) string {
 	if len(nodes) == 0 {
 		return ""
@@ -69,7 +70,9 @@ func renderNode(b *strings.Builder, n *Node, host string) {
 		renderChildren(b, n.Children, host)
 		b.WriteString("</div>")
 	case NodePlain:
+		b.WriteString("<span>")
 		renderChildren(b, n.Children, host)
+		b.WriteString("</span>")
 	case NodeInlineCode:
 		code, _ := n.Props["code"].(string)
 		b.WriteString("<code>")
@@ -87,9 +90,9 @@ func renderNode(b *strings.Builder, n *Node, host string) {
 		b.WriteString("</code>")
 	case NodeMathBlock:
 		formula, _ := n.Props["formula"].(string)
-		b.WriteString("<code>")
+		b.WriteString("<pre><code>")
 		b.WriteString(EscapeHTML(formula))
-		b.WriteString("</code>")
+		b.WriteString("</code></pre>")
 	case NodeQuote:
 		b.WriteString("<blockquote>")
 		renderChildren(b, n.Children, host)
@@ -103,17 +106,31 @@ func renderNode(b *strings.Builder, n *Node, host string) {
 			EscapeHTML("https://www.google.com/search?q="+encodeURIComponent(query)),
 			EscapeHTML(content)))
 	case NodeURL:
+		// 本家と同じく href は `new URL(url).href` で正規化し、文字は元の url の
+		// まま出す。URL として読めなければリンクにしない
 		u, _ := n.Props["url"].(string)
-		b.WriteString(fmt.Sprintf(`<a href="%s">%s</a>`,
-			EscapeHTML(u), EscapeHTML(u)))
-	case NodeLink:
-		u, _ := n.Props["url"].(string)
-		// XSS防止: http/https以外のスキーム (javascript: 等) はリンク化しない
-		if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
-			renderChildren(b, n.Children, host)
+		href, ok := whatwgHref(u)
+		if !ok {
+			b.WriteString(EscapeHTML(u))
 			break
 		}
-		b.WriteString(fmt.Sprintf(`<a href="%s">`, EscapeHTML(u)))
+		b.WriteString(fmt.Sprintf(`<a href="%s">%s</a>`,
+			EscapeHTML(href), EscapeHTML(u)))
+	case NodeLink:
+		// whatwgHref は http / https 以外を失敗にするので、javascript: などの
+		// scheme はリンクにならない (XSS 防止)。失敗は本家と同じく `[文字](url)` の
+		// 文字にする
+		u, _ := n.Props["url"].(string)
+		href, ok := whatwgHref(u)
+		if !ok {
+			b.WriteByte('[')
+			renderChildren(b, n.Children, host)
+			b.WriteString("](")
+			b.WriteString(EscapeHTML(u))
+			b.WriteByte(')')
+			break
+		}
+		b.WriteString(fmt.Sprintf(`<a href="%s">`, EscapeHTML(href)))
 		renderChildren(b, n.Children, host)
 		b.WriteString("</a>")
 	case NodeMention:
@@ -121,18 +138,26 @@ func renderNode(b *strings.Builder, n *Node, host string) {
 		mentionHost, _ := n.Props["host"].(string)
 		acct, _ := n.Props["acct"].(string)
 
-		var href string
-		if mentionHost == "" {
-			href = fmt.Sprintf("https://%s/@%s", host, username)
-		} else {
-			href = fmt.Sprintf("https://%s/@%s", mentionHost, username)
+		// 本家はリモートのメンションの href に、メンション先のユーザーの url (無ければ
+		// uri) を使う。mk-go はここで DB を引かないので https://<host>/@<username>
+		// で近似する。どちらも `new URL().href` で正規化し、読めなければ acct の文字にする
+		hrefHost := host
+		if mentionHost != "" {
+			hrefHost = mentionHost
+		}
+		href, ok := whatwgHref("https://" + hrefHost + "/@" + username)
+		if !ok {
+			b.WriteString(EscapeHTML(acct))
+			break
 		}
 		b.WriteString(fmt.Sprintf(`<a href="%s" class="u-url mention">%s</a>`,
 			EscapeHTML(href), EscapeHTML(acct)))
 	case NodeHashtag:
+		// 本家は encodeURIComponent でエスケープする。url.PathEscape は `&` `+` `=`
+		// などを残すので、href が本家と違っていた (#3329)
 		tag, _ := n.Props["hashtag"].(string)
 		b.WriteString(fmt.Sprintf(`<a href="https://%s/tags/%s" rel="tag">#%s</a>`,
-			host, EscapeHTML(url.PathEscape(tag)), EscapeHTML(tag)))
+			host, EscapeHTML(encodeURIComponent(tag)), EscapeHTML(tag)))
 	case NodeUnicodeEmoji:
 		emoji, _ := n.Props["emoji"].(string)
 		b.WriteString(emoji)
@@ -149,58 +174,86 @@ func renderNode(b *strings.Builder, n *Node, host string) {
 
 func renderFn(b *strings.Builder, n *Node, host string) {
 	name, _ := n.Props["name"].(string)
-	args, _ := n.Props["args"].(map[string]any)
 
 	switch name {
 	case "unixtime":
-		// $[unixtime 1234567890] → <time>
+		// 本家: new Date(parseInt(最初の子の文字, 10) * 1000).toISOString()。
+		// 最初の子が文字でなければ空文字を読んで失敗し、斜体に戻す
 		if len(n.Children) > 0 && n.Children[0].Type == NodeText {
-			text := n.Children[0].textValue()
-			if ts, err := strconv.ParseInt(strings.TrimSpace(text), 10, 64); err == nil {
-				t := time.Unix(ts, 0).UTC()
-				iso := t.Format(time.RFC3339)
+			if iso, ok := jsUnixtimeISO(n.Children[0].textValue()); ok {
 				b.WriteString(fmt.Sprintf(`<time datetime="%s">%s</time>`, iso, iso))
 				return
 			}
 		}
-		// フォールバック
-		b.WriteString("<i>")
-		renderChildren(b, n.Children, host)
-		b.WriteString("</i>")
 	case "ruby":
-		// $[ruby.rt=text base] → <ruby>
-		rt := ""
-		if args != nil {
-			if v, ok := args["rt"].(string); ok {
-				rt = v
-			}
+		if renderRuby(b, n, host) {
+			return
 		}
-		if rt != "" {
-			b.WriteString("<ruby>")
-			renderChildren(b, n.Children, host)
-			b.WriteString("<rp>(</rp><rt>")
-			b.WriteString(EscapeHTML(rt))
-			b.WriteString("</rt><rp>)</rp></ruby>")
-		} else {
-			b.WriteString("<i>")
-			renderChildren(b, n.Children, host)
-			b.WriteString("</i>")
-		}
-	default:
-		// 不明な fn は italic でフォールバック
-		b.WriteString("<i>")
-		renderChildren(b, n.Children, host)
-		b.WriteString("</i>")
 	}
+	// 不明な fn と、読めなかった unixtime / ruby は斜体にする (本家の fnDefault)
+	b.WriteString("<i>")
+	renderChildren(b, n.Children, host)
+	b.WriteString("</i>")
 }
 
-func renderText(b *strings.Builder, text string) {
-	lines := strings.Split(text, "\n")
-	for i, line := range lines {
-		b.WriteString(EscapeHTML(line))
-		if i < len(lines)-1 {
-			b.WriteString("<br>")
+// renderRuby writes upstream's ruby rendering and reports whether it did.
+//
+// 本家は ruby の引数 (`$[ruby.rt=x ...]`) を見ない。子が 1 つなら、その文字を
+// 半角空白で切って 1 つ目を本文、2 つ目をルビにする。子が 2 つ以上なら、最後の子
+// (文字でなければ空) を trim してルビにし、残りの子を本文にする。
+//
+// 子が 1 つで半角空白が無いとき (`$[ruby abc]`) や、1 つの子が文字でないときは、
+// 本家は escapeHtml(undefined) で TypeError を投げ、ノートの HTML を作れない。
+// 例外で配送や描画を止めるわけにいかないので、mk-go は斜体に戻す
+// (docs/divergence.md)。
+func renderRuby(b *strings.Builder, n *Node, host string) bool {
+	switch len(n.Children) {
+	case 0:
+		return false
+	case 1:
+		child := n.Children[0]
+		if child.Type != NodeText {
+			return false
 		}
+		parts := strings.Split(child.textValue(), " ")
+		if len(parts) < 2 {
+			return false
+		}
+		b.WriteString("<ruby>")
+		b.WriteString(EscapeHTML(parts[0]))
+		b.WriteString("<rp>(</rp><rt>")
+		b.WriteString(EscapeHTML(parts[1]))
+		b.WriteString("</rt><rp>)</rp></ruby>")
+		return true
+	}
+	last := n.Children[len(n.Children)-1]
+	rt := ""
+	if last.Type == NodeText {
+		rt = last.textValue()
+	}
+	b.WriteString("<ruby>")
+	renderChildren(b, n.Children[:len(n.Children)-1], host)
+	b.WriteString("<rp>(</rp><rt>")
+	b.WriteString(EscapeHTML(jsTrim(rt)))
+	b.WriteString("</rt><rp>)</rp></ruby>")
+	return true
+}
+
+// renderText writes a text node like upstream: lines split on CRLF, CR or LF
+// and joined with `<br />`.
+func renderText(b *strings.Builder, text string) {
+	for {
+		i := strings.IndexAny(text, "\r\n")
+		if i < 0 {
+			b.WriteString(EscapeHTML(text))
+			return
+		}
+		b.WriteString(EscapeHTML(text[:i]))
+		b.WriteString("<br />")
+		if text[i] == '\r' && i+1 < len(text) && text[i+1] == '\n' {
+			i++
+		}
+		text = text[i+1:]
 	}
 }
 
@@ -217,9 +270,7 @@ var htmlEscaper = strings.NewReplacer(
 // and ApRendererService use for the HTML they federate.
 //
 // html.EscapeString は `'` / `"` を `&#39;` / `&#34;` にする。意味は同じだが、
-// エスケープの表記を本家に揃えるため、本家と同じ置き換えにする。ToHTML の出力
-// 全体が本家とバイト単位で一致するわけではない (改行の `<br>` と `<br />`、
-// CR での改行の扱い、数式ブロックの `<pre>`、plain の `<span>` などは違う)。
+// エスケープの表記を本家に揃えるため、本家と同じ置き換えにする。
 func EscapeHTML(s string) string { return htmlEscaper.Replace(s) }
 
 func renderChildren(b *strings.Builder, children []*Node, host string) {
@@ -233,10 +284,10 @@ func renderChildren(b *strings.Builder, children []*Node, host string) {
 // (uppercase hex) except ASCII letters, digits and - _ . ! ~ * ' ( ).
 //
 // JavaScript の encodeURIComponent は孤立したサロゲートで URIError を投げるが、
-// ここへ来る文字列は検索構文の query だけで、Parse が入口で ToValidUTF8 を通した
-// 入力の部分文字列なので、常に正しい UTF-8 (サロゲートの符号も含まない) になる。
-// 不正なバイトの扱いを JavaScript に合わせる経路が無いので、バイトごとに
-// エスケープするままにしてある (#3329)。
+// ここへ来る文字列は検索構文の query とハッシュタグだけで、Parse が入口で
+// ToValidUTF8 を通した入力の部分文字列なので、常に正しい UTF-8 (サロゲートの
+// 符号も含まない) になる。不正なバイトの扱いを JavaScript に合わせる経路が無いので、
+// バイトごとにエスケープするままにしてある (#3329)。
 func encodeURIComponent(s string) string {
 	const hex = "0123456789ABCDEF"
 	var b strings.Builder

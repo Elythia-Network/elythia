@@ -1069,7 +1069,9 @@ func (s *state) tryCodeBlock() *Node {
 	if langEnd == len(s.src) {
 		return nil
 	}
-	lang := strings.TrimSpace(s.src[langStart:langEnd])
+	// mfm-js は言語名を String.prototype.trim で削る。Go の TrimSpace とは空白の
+	// 集合が違う (U+0085 を削らず U+FEFF を削る) ので、JS と同じ集合で削る (#3329)
+	lang := jsTrim(s.src[langStart:langEnd])
 	codeStart := langEnd + s.newlineLenAt(langEnd)
 	s.pos = codeStart
 	closeAt, ok := s.codeBlockClose()
@@ -1115,35 +1117,53 @@ func (s *state) tryMathBlock() *Node {
 	if s.depth != s.fullDepth {
 		return nil
 	}
+	// mfm-js 0.26.0 の mathBlock:
+	//
+	//	seq(newLine.option(), lineBegin, open, newLine.option(),
+	//	    seq(notMatch(seq(newLine.option(), close)), char).select(1).many(1),
+	//	    newLine.option(), close, lineEnd, newLine.option())
+	//
+	// 前後の改行と行頭・行末は tryBlock が見る。中身は開きの直後の改行を 1 つと、
+	// 閉じの直前の改行を 1 つ外すだけで、空白は削らない (`\[\tx\]` は "\tx")。
+	// 以前は前後の空白を TrimSpace で削っていたので、HTML の <code> の中身が
+	// 本家と違い、空白だけの中身 (`\[ \]`) は数式にならなかった (#3329)。
 	if !s.hasPrefix("\\[") {
 		return nil
 	}
 	save := s.pos
 	s.advance(2)
+	s.advance(s.newlineLen())
 	start := s.pos
-	if end, ok := s.nextStop(stopMathBlockClose); ok {
-		if end < len(s.src) {
-			if formula := strings.TrimSpace(s.src[start:end]); formula != "" {
-				s.pos = end + 2
-				return withProp(NodeMathBlock, "formula", formula)
-			}
+	closeAt, ok := s.nextStop(stopMathBlockClose)
+	if !ok {
+		// 索引を使えないとき (確保の上限) は直接探す。Parse が入口で正しい UTF-8 に
+		// 揃えており、区切りは ASCII なので、見つかる位置は索引と同じになる
+		closeAt = len(s.src)
+		if i := strings.Index(s.src[start:], "\\]"); i >= 0 {
+			closeAt = start + i
 		}
+		s.budget.used += closeAt - start
+	}
+	if closeAt >= len(s.src) {
 		s.pos = save
 		return nil
 	}
-	for !s.eof() {
-		if s.hasPrefix("\\]") {
-			formula := strings.TrimSpace(s.src[start:s.pos])
-			if formula == "" {
-				break
-			}
-			s.advance(2)
-			return withProp(NodeMathBlock, "formula", formula)
-		}
-		s.advance(utf8.RuneLen(s.peek()))
+	// 中身は「(改行) + 閉じ」が最初に読める位置で終わる。閉じの直前の改行
+	// (CRLF / CR / LF) が中身の範囲にあれば、そこが終わり
+	end := closeAt
+	switch {
+	case end-2 >= start && s.src[end-2:end] == "\r\n":
+		end -= 2
+	case end-1 >= start && (s.src[end-1] == '\n' || s.src[end-1] == '\r'):
+		end--
 	}
-	s.pos = save
-	return nil
+	// 中身は 1 文字以上要る。最初の位置で止まると many(1) が失敗する
+	if end == start {
+		s.pos = save
+		return nil
+	}
+	s.pos = closeAt + 2
+	return withProp(NodeMathBlock, "formula", s.src[start:end])
 }
 
 // tryCenterTag follows mfm-js 0.26.0's centerTag:

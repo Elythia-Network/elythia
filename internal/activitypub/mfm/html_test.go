@@ -19,7 +19,7 @@ func TestToHTML_PlainText(t *testing.T) {
 
 func TestToHTML_TextWithNewline(t *testing.T) {
 	nodes := Parse("hello\nworld")
-	assert.Equal(t, "hello<br>world", ToHTML(nodes, testHost))
+	assert.Equal(t, "hello<br />world", ToHTML(nodes, testHost))
 }
 
 func TestToHTML_HTMLEscape(t *testing.T) {
@@ -82,7 +82,7 @@ func TestToHTML_MathInline(t *testing.T) {
 
 func TestToHTML_MathBlock(t *testing.T) {
 	nodes := Parse(`\[E=mc^2\]`)
-	assert.Equal(t, "<code>E=mc^2</code>", ToHTML(nodes, testHost))
+	assert.Equal(t, "<pre><code>E=mc^2</code></pre>", ToHTML(nodes, testHost))
 }
 
 func TestToHTML_Quote(t *testing.T) {
@@ -105,8 +105,7 @@ func TestToHTML_URL(t *testing.T) {
 func TestToHTML_Link(t *testing.T) {
 	nodes := Parse("[label](https://example.com)")
 	result := ToHTML(nodes, testHost)
-	assert.Contains(t, result, `href="https://example.com"`)
-	assert.Contains(t, result, "label</a>")
+	assert.Equal(t, `<a href="https://example.com/">label</a>`, result)
 }
 
 func TestToHTML_Mention_Local(t *testing.T) {
@@ -146,22 +145,19 @@ func TestToHTML_EmojiCode(t *testing.T) {
 func TestToHTML_Plain(t *testing.T) {
 	nodes := Parse("<plain>**not bold**</plain>")
 	result := ToHTML(nodes, testHost)
-	assert.Equal(t, "**not bold**", result)
+	assert.Equal(t, "<span>**not bold**</span>", result)
 }
 
 func TestToHTML_Fn_Unixtime(t *testing.T) {
 	nodes := Parse("$[unixtime 0]")
 	result := ToHTML(nodes, testHost)
-	assert.Contains(t, result, "<time")
-	assert.Contains(t, result, "1970-01-01T00:00:00Z")
+	assert.Equal(t, `<time datetime="1970-01-01T00:00:00.000Z">1970-01-01T00:00:00.000Z</time>`, result)
 }
 
 func TestToHTML_Fn_Ruby(t *testing.T) {
-	nodes := Parse("$[ruby.rt=ruby base]")
+	nodes := Parse("$[ruby base ruby]")
 	result := ToHTML(nodes, testHost)
-	assert.Contains(t, result, "<ruby>")
-	assert.Contains(t, result, "<rt>ruby</rt>")
-	assert.Contains(t, result, "base")
+	assert.Equal(t, "<ruby>base<rp>(</rp><rt>ruby</rt><rp>)</rp></ruby>", result)
 }
 
 func TestToHTML_Fn_Unknown(t *testing.T) {
@@ -213,16 +209,17 @@ func TestToHTML_Fn_Ruby_NoArgs(t *testing.T) {
 }
 
 func TestToHTML_Link_JavascriptXSS(t *testing.T) {
-	// javascript: スキームはリンク化せずテキストのみ出力
+	// javascript: スキームはリンク化せず、本家が URL を読めないときと同じ
+	// `[文字](url)` の文字にする。mfm-js の link は http(s) しか作らないので
+	// 本家では起きないが、本家の `new URL()` は javascript: を読んでリンクにする
 	nodes := []*Node{{
 		Type:     NodeLink,
-		Props:    map[string]any{"url": "javascript:alert(1)"},
+		Props:    map[string]any{"url": `javascript:alert("1")`},
 		Children: []*Node{Text("click me")},
 	}}
 	result := ToHTML(nodes, testHost)
-	assert.NotContains(t, result, "javascript:")
+	assert.Equal(t, "[click me](javascript:alert(&quot;1&quot;))", result)
 	assert.NotContains(t, result, "<a")
-	assert.Contains(t, result, "click me")
 }
 
 func TestToHTML_Link_DataScheme(t *testing.T) {

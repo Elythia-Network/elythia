@@ -115,7 +115,7 @@ func TestParse_RemainingDivergencesExtraction(t *testing.T) {
 	// CR の直後の引用は、中の行の検索より先に引用になり、ハッシュタグが取れる
 	assert.Equal(t, []string{"t"}, CollectHashtags("\r> #t 検索"))
 	// 空のラベルのリンクは空の <a> にしない
-	assert.Equal(t, `[](<a href="https://e.x">https://e.x</a>)`, ToHTML(Parse("[](https://e.x)"), testHost))
+	assert.Equal(t, `[](<a href="https://e.x/">https://e.x</a>)`, ToHTML(Parse("[](https://e.x)"), testHost))
 	assert.True(t, IsSimple(Parse("`a\rb`")))
 	assert.True(t, IsSimple(Parse("<plain></plain>")))
 	assert.True(t, IsSimple(Parse("```\n\n```")))
@@ -191,17 +191,6 @@ func TestMathInline_FallbackMatchesIndex(t *testing.T) {
 	assert.Nil(t, newState("\\(a\rb\\)", false).tryMathInline())
 }
 
-// TestToHTML_RubyTextIsEscaped checks that the ruby text of `$[ruby.rt=...]`
-// is escaped. The parser only accepts [a-z0-9_.-] for argument values, so the
-// node is built directly to cover nodes from other sources.
-//
-// rt は属性ではなく要素の中身に書くので、エスケープが抜けると任意の HTML を
-// 連合先へ送ることになる。
-func TestToHTML_RubyTextIsEscaped(t *testing.T) {
-	n := &Node{Type: NodeFn, Props: map[string]any{"name": "ruby", "args": map[string]any{"rt": `<b>"'&`}}, Children: []*Node{Text("x")}}
-	assert.Equal(t, "<ruby>x<rp>(</rp><rt>&lt;b&gt;&quot;&#039;&amp;</rt><rp>)</rp></ruby>", ToHTML([]*Node{n}, testHost))
-}
-
 func nodesOf(n *Node) []*Node {
 	if n == nil {
 		return nil
@@ -218,7 +207,8 @@ func TestToHTML_EscapeMatchesUpstream(t *testing.T) {
 		{"`'\"&<>`", "<code>&#039;&quot;&amp;&lt;&gt;</code>"},
 		{"```\n'\"\n```", "<pre><code>&#039;&quot;</code></pre>"},
 		{`\('"\)`, "<code>&#039;&quot;</code>"},
-		{"<https://e.x/'a\"&>", `<a href="https://e.x/&#039;a&quot;&amp;">https://e.x/&#039;a&quot;&amp;</a>`},
+		// href は new URL().href で作るので `"` は %22 になる
+		{"<https://e.x/'a\"&>", `<a href="https://e.x/&#039;a%22&amp;">https://e.x/&#039;a&quot;&amp;</a>`},
 		{"[x'](<https://e.x/'a'>)", `<a href="https://e.x/&#039;a&#039;">x&#039;</a>`},
 		{"https://e.x/?a=1&b=2", `<a href="https://e.x/?a=1&amp;b=2">https://e.x/?a=1&amp;b=2</a>`},
 		{"@a'", `<a href="https://` + testHost + `/@a" class="u-url mention">@a</a>&#039;`},
