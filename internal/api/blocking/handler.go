@@ -12,6 +12,7 @@ import (
 	"github.com/shiroha-a/mk/internal/api/pagination"
 	"github.com/shiroha-a/mk/internal/api/userrelation"
 	coreblocking "github.com/shiroha-a/mk/internal/core/blocking"
+	"github.com/shiroha-a/mk/internal/core/userpack"
 	"github.com/shiroha-a/mk/internal/entity"
 	"github.com/shiroha-a/mk/internal/misc/id"
 	"github.com/shiroha-a/mk/internal/model"
@@ -38,7 +39,21 @@ type Handler struct {
 	// packer は create / delete の応答を本家の UserDetailedNotMe と同じ形
 	// (instance・絵文字・ピン留め・移行先・モデレーター向けの項目) に組む (#3330)。
 	packer UserPacker
+	// extras は一覧の利用者のピン留め・移行先をまとめて埋める (#3330)。
+	extras userpack.DetailExtrasMany
 }
+
+// SetDetailExtras wires the batch filler of pinnedNotes / pinnedPage / movedTo /
+// alsoKnownAs for the embedded users of blocking/list (#3330).
+func (h *Handler) SetDetailExtras(x userpack.DetailExtrasMany) {
+	h.extras = x
+}
+
+// HasDetailExtras reports whether the detail extras filler was wired.
+//
+// 未配線だと blocking/list の利用者の pinnedNotes などが空、movedTo / alsoKnownAs が
+// null のまま返る。起動時検査に使う。
+func (h *Handler) HasDetailExtras() bool { return h.extras != nil }
 
 // UserPacker packs a user as UserDetailedNotMe seen by viewer.
 // *userpack.Packer satisfies it.
@@ -210,7 +225,7 @@ func (h *Handler) List(c echo.Context) error {
 	}
 	// upstream frontend が item.blockee で MkUserCardMini を描画するので
 	// batch fetch で N+1 を回避しつつ user object を embed する。
-	blockeeMap := h.fetchBlockeeMap(user.ID, rows)
+	blockeeMap := h.fetchBlockeeMap(c.Request().Context(), user, rows)
 	const tsFormat = "2006-01-02T15:04:05.000Z"
 	out := make([]map[string]any, 0, len(rows))
 	for _, b := range rows {
@@ -239,10 +254,11 @@ func (h *Handler) List(c echo.Context) error {
 // (isBlocking=true 等) を付与するために使う。mute/list / renote-mute/list と
 // 揃える (upstream BlockingEntityService.packMany が UserDetailedNotMe + me で
 // pack するため、#1957-a)。
-func (h *Handler) fetchBlockeeMap(viewerID string, rows []*model.Blocking) map[string]entity.UserDetailed {
-	if h.userRepo == nil || len(rows) == 0 {
+func (h *Handler) fetchBlockeeMap(ctx context.Context, viewer *model.User, rows []*model.Blocking) map[string]entity.UserDetailed {
+	if h.userRepo == nil || len(rows) == 0 || viewer == nil {
 		return nil
 	}
+	viewerID := viewer.ID
 	ids := make([]string, 0, len(rows))
 	seen := make(map[string]struct{}, len(rows))
 	for _, b := range rows {
@@ -266,8 +282,8 @@ func (h *Handler) fetchBlockeeMap(viewerID string, rows []*model.Blocking) map[s
 		profileByUser[p.UserID] = p
 	}
 	iAmModerator := h.moderator != nil && viewerID != "" && h.moderator.IsModerator(viewerID)
-	out := make(map[string]entity.UserDetailed, len(users))
-	for _, u := range users {
+	packed := make([]entity.UserDetailed, len(users))
+	for i, u := range users {
 		d := entity.PackUserDetailed(u, profileByUser[u.ID], h.idGen)
 		// viewer->blockee の relation block を付与 (isBlocking=true 等)。Apply は
 		// viewerID 空 / self では no-op。relation 未配線 (test stub) でも安全。
@@ -275,7 +291,20 @@ func (h *Handler) fetchBlockeeMap(viewerID string, rows []*model.Blocking) map[s
 		// followers-only count を非フォロワーに leak させない (upstream packMany(_, me) の
 		// count gate、#1985)。blockee は viewer 自身ではないため isMe は常に false。
 		entity.GateCountVisibility(&d, u.ID == viewerID, iAmModerator, viewerIsFollowing)
-		out[u.ID] = d
+		packed[i] = d
+	}
+	// 本家 BlockingEntityService は相手を packMany (UserDetailedNotMe) で組むので、ピン留めと
+	// 移行先もまとめて埋める (#3330)。
+	if h.extras != nil && viewer != nil {
+		targets := make([]userpack.DetailTarget, 0, len(packed))
+		for i, u := range users {
+			targets = append(targets, userpack.DetailTarget{User: u, Profile: profileByUser[u.ID], Detailed: &packed[i]})
+		}
+		h.extras.FillDetailedExtrasMany(ctx, viewer, targets)
+	}
+	out := make(map[string]entity.UserDetailed, len(users))
+	for i, u := range users {
+		out[u.ID] = packed[i]
 	}
 	return out
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/shiroha-a/mk/internal/core/role"
 	"github.com/shiroha-a/mk/internal/core/ugcvisibility"
 	"github.com/shiroha-a/mk/internal/core/user"
+	"github.com/shiroha-a/mk/internal/core/userpack"
 	"github.com/shiroha-a/mk/internal/entity"
 	"github.com/shiroha-a/mk/internal/misc/id"
 	"github.com/shiroha-a/mk/internal/model"
@@ -543,9 +544,10 @@ func (h *Handler) Show(c echo.Context) error {
 		}
 		resolver := entity.NewInstanceResolver(h.instanceLookup(), users...)
 		// upstream show.ts:151-153 は userIds バルクモードでも schema 'UserDetailed'
-		// で pack する。旧実装は UserLite を返していた (#1547)。move 解決と remote
-		// stats fetch は list path 同様 N+1 回避のため bulk では行わない。
-		out := make([]any, 0, len(visible))
+		// で pack する。旧実装は UserLite を返していた (#1547)。remote stats fetch は
+		// list path 同様 N+1 回避のため bulk では行わない。ピン留めと移行先は本家
+		// packMany と同じく埋める (まとめて引く、#3330)。
+		var batch detailedBatch
 		viewerID := ""
 		if viewer != nil {
 			viewerID = viewer.ID
@@ -565,9 +567,10 @@ func (h *Handler) Show(c echo.Context) error {
 			viewerIsFollowing := h.viewerRelationRepos().Apply(&detailed, viewerID, b.User, b.Profile)
 			isMe := viewer != nil && viewer.ID == b.User.ID
 			entity.GateCountVisibility(&detailed, isMe, iAmModerator, viewerIsFollowing)
-			// upstream の pack は isDetailed && isMe で MeDetailed を返す。
-			out = append(out, meself.Pack(ctx, detailed, b.User, b.Profile, viewer))
+			batch.add(detailed, b.User, b.Profile)
 		}
+		// upstream の pack は isDetailed && isMe で MeDetailed を返す。
+		out := batch.packAll(ctx, h, viewer)
 		return c.JSON(http.StatusOK, out)
 	}
 
@@ -784,7 +787,7 @@ func (h *Handler) Search(c echo.Context) error {
 		viewerID = viewer.ID
 	}
 	ctx := c.Request().Context()
-	out := make([]any, 0, len(users))
+	var batch detailedBatch
 	for _, u := range users {
 		d := entity.PackUserDetailed(u, profiles[u.ID], h.idGen)
 		resolver.FillUserLite(&d.UserLite)
@@ -798,10 +801,11 @@ func (h *Handler) Search(c echo.Context) error {
 		viewerIsFollowing := h.viewerRelationRepos().Apply(&d, viewerID, u, profiles[u.ID])
 		isMe := viewer != nil && viewer.ID == u.ID
 		entity.GateCountVisibility(&d, isMe, iAmModerator, viewerIsFollowing)
-		// upstream の pack は isDetailed && isMe で MeDetailed を返す。
-		out = append(out, meself.Pack(ctx, d, u, profiles[u.ID], viewer))
+		batch.add(d, u, profiles[u.ID])
 	}
-	return c.JSON(http.StatusOK, out)
+	// ピン留めと移行先は本家 packMany と同じくまとめて埋める (#3330)。upstream の
+	// pack は isDetailed && isMe で MeDetailed を返す。
+	return c.JSON(http.StatusOK, batch.packAll(ctx, h, viewer))
 }
 
 // NotesRequest is the request body for users/notes.
@@ -1223,6 +1227,7 @@ func (h *Handler) packRelationItems(
 	iAmModerator := viewer != nil && h.moderatorChecker != nil && h.moderatorChecker.IsModerator(viewer.ID)
 
 	out := make([]relationItem, 0, len(rows))
+	var batch detailedBatch
 	for _, f := range rows {
 		item := relationItem{ID: f.ID, FollowerID: f.FollowerID, FolloweeID: f.FolloweeID}
 		if t, err := h.idGen.ParseTime(f.ID); err == nil {
@@ -1279,9 +1284,13 @@ func (h *Handler) packRelationItems(
 			} else {
 				item.Followee = &d
 			}
+			batch = append(batch, userpack.DetailTarget{User: b.User, Profile: b.Profile, Detailed: &d})
 		}
 		out = append(out, item)
 	}
+	// 本家 FollowingEntityService は相手を packMany (UserDetailedNotMe) で組むので、
+	// ピン留めと移行先もまとめて埋める (#3330)。
+	batch.fill(ctx, h, viewer)
 	return out
 }
 
@@ -1464,71 +1473,18 @@ func buildRelationCandidates(viewer *model.User, bundleByID map[string]*user.Use
 // userpack.DetailExtras so the follow stream / webhook bodies and
 // blocking/create・delete carry the same values as users/show.
 func (h *Handler) FillDetailedExtras(ctx context.Context, viewer, u *model.User, profile *model.UserProfile, d *entity.UserDetailed) {
-	d.ResolveMoveTargets(u, h.resolveUserIDByURI)
-	h.fillPinned(ctx, viewer, u, profile, d)
+	h.fillExtras(ctx, viewer, []userpack.DetailTarget{{User: u, Profile: profile, Detailed: d}}, true)
 }
 
 // fillPinned populates PinnedNoteIDs / PinnedNotes / PinnedPageID / PinnedPage
-// on the passed UserDetailed from the user's user_note_pining rows and
-// user_profile.pinnedPageId. Missing repos fall back to default empty/nil.
+// on the passed UserDetailed for users/show (single pack). viewer may be nil.
 //
-// viewer は users/show を叩いている認証ユーザー (匿名なら nil)。pinned note
-// の myReaction を埋めるために fieldRes.Apply に流す (#426)。
-//
-// 設計メモ — PinnedNoteIDs を visibility filter 前の生 ID 配列で返す理由 (#1489):
-//
-//   - pin = author の意図的な self-disclosure 行為。「followers にだけ見せる
-//     note を profile に固定する」と author が選んだ時点で、pinnedNoteIds が
-//     viewer に露出することは upstream Misskey TS でも同 shape (drop-in 互換)。
-//   - notes/show ShowForAPI doctrine の境界線上だが、author 自身が pin を選んで
-//     いる以上、ID-known な viewer に content が返るのは「意図された情報開示」
-//     の範疇とする (#1489 で議論)。
-//   - PinnedNotes 本体 (= 中身の埋め込み) は FilterVisible で絞るため、profile
-//     表示上は viewer から見えない pin はカード化されない。
-//   - pinning は per-user 上限が厳しい (= 数件) ので mass enumeration リスクは
-//     低い。
-//
-// この設計は Option A (現状維持 = upstream-aligned) を採用した結果 (#1489
-// wontfix)。Option B (IDs も filter) は frontend drop-in 互換と「author 意図」
-// に逆行するため不採用。
+// viewer は pinned note の myReaction を埋めるために fieldRes.Apply に流す (#426)。
+// 匿名の閲覧者にもピン留めを返す (本家の単体の pack と同じ)。
 func (h *Handler) fillPinned(ctx context.Context, viewer *model.User, u *model.User, profile *model.UserProfile, detailed *entity.UserDetailed) {
-	if h.piningRepo != nil {
-		if pinings, err := h.piningRepo.ListByUser(u.ID); err == nil && len(pinings) > 0 {
-			ids := make([]string, 0, len(pinings))
-			for _, p := range pinings {
-				ids = append(ids, p.NoteID)
-			}
-			// PinnedNoteIDs は意図的に filter 前の生 IDs (上記設計メモ参照)。
-			detailed.PinnedNoteIDs = ids
-			if h.noteRepo != nil {
-				primary, ok := h.noteRepo.(repository.NotePrimaryReader)
-				if ok {
-					if notes, err := primary.FindManyByIDsWithUserOnPrimary(ids); err == nil {
-						notes = notesfilter.FilterVisible(viewer, notes, h.followingRepo)
-						entities := entity.PackNotes(ctx, notes, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
-						h.fieldRes.Apply(entities, viewer)
-						notehide.HideProfilePinnedNotes(viewer, entities, u.ID)
-						packed := make([]any, 0, len(entities))
-						for _, pn := range entities {
-							packed = append(packed, pn)
-						}
-						detailed.PinnedNotes = packed
-					}
-				}
-			}
-		}
-	}
-
-	if profile != nil && profile.PinnedPageID != nil && *profile.PinnedPageID != "" {
-		detailed.PinnedPageID = profile.PinnedPageID
-		if h.pageRepo != nil {
-			if p, err := h.pageRepo.FindByID(*profile.PinnedPageID); err == nil && pinnedPageVisibleTo(p, viewer) {
-				// golden Page は user 必須。pinnedPage は profile user 自身の page
-				// なので owner=u を渡して user (UserLite) を埋める (#1266 follow-up)。
-				detailed.PinnedPage = entity.PackPageWithContext(p, entity.PackPageContext{IDGen: h.idGen, Owner: u})
-			}
-		}
-	}
+	targets := []userpack.DetailTarget{{User: u, Profile: profile, Detailed: detailed}}
+	h.fillPinnedNotes(ctx, viewer, targets)
+	h.fillPinnedPages(viewer, targets)
 }
 
 // HasRolePolicyProvider reports whether the role policy provider was wired.

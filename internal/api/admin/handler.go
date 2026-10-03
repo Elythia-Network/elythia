@@ -30,6 +30,7 @@ import (
 	"github.com/shiroha-a/mk/internal/core/role"
 	"github.com/shiroha-a/mk/internal/core/signup"
 	"github.com/shiroha-a/mk/internal/core/signupapplication"
+	"github.com/shiroha-a/mk/internal/core/userpack"
 	corewebhook "github.com/shiroha-a/mk/internal/core/webhook"
 	"github.com/shiroha-a/mk/internal/core/webpush"
 	"github.com/shiroha-a/mk/internal/effectivepolicy"
@@ -107,6 +108,8 @@ type UnfollowEnqueuer interface {
 
 // Handler handles admin API endpoints.
 type Handler struct {
+	// detailExtras は UserDetailed のピン留め・移行先を users/show と同じ規則で埋める (#3330)。
+	detailExtras  userpack.DetailExtras
 	signupService *signup.Service
 	roleService   *role.Service
 	metaRepo      repository.MetaRepository

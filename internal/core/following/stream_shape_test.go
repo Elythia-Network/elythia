@@ -209,11 +209,12 @@ func TestStream_AcceptRequestCarriesDetailedNotMe(t *testing.T) {
 	require.Len(t, callsOf(pub, "followed"), 1)
 }
 
-// 申請の取り消し・拒否で流す unfollow も同じ形で、申請中の印は消えている。
+// 申請の拒否・拒否された申請 (Reject(Follow)) で流す unfollow も同じ形で、申請中の
+// 印は消えている。取り消し (cancel) は本家と同じく unfollow を流さない。
 func TestStream_RequestResolvedCarriesDetailedNotMe(t *testing.T) {
 	for name, resolve := range map[string]func(*following.Service) error{
-		"cancel": func(s *following.Service) error { return s.CancelRequest("alice", "bob") },
-		"reject": func(s *following.Service) error { return s.RejectRequest("bob", "alice") },
+		"reject":       func(s *following.Service) error { return s.RejectRequest("bob", "alice") },
+		"remoteReject": func(s *following.Service) error { return s.RemoteReject("alice", "bob") },
 	} {
 		t.Run(name, func(t *testing.T) {
 			svc, userRepo, pub := newStreamSvc(t)

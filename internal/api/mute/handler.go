@@ -2,6 +2,7 @@
 package mute
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"github.com/shiroha-a/mk/internal/api/pagination"
 	"github.com/shiroha-a/mk/internal/api/userrelation"
 	coremuting "github.com/shiroha-a/mk/internal/core/muting"
+	"github.com/shiroha-a/mk/internal/core/userpack"
 	"github.com/shiroha-a/mk/internal/entity"
 	"github.com/shiroha-a/mk/internal/misc/id"
 	"github.com/shiroha-a/mk/internal/model"
@@ -37,7 +39,21 @@ type Handler struct {
 	// moderator は mute/list の埋め込み mutee の count gate で moderator viewer を
 	// 判定する (#1985)。未配線なら non-moderator 扱い。
 	moderator ModeratorChecker
+	// extras は一覧の利用者のピン留め・移行先をまとめて埋める (#3330)。
+	extras userpack.DetailExtrasMany
 }
+
+// SetDetailExtras wires the batch filler of pinnedNotes / pinnedPage / movedTo /
+// alsoKnownAs for the embedded users of mute/list (#3330).
+func (h *Handler) SetDetailExtras(x userpack.DetailExtrasMany) {
+	h.extras = x
+}
+
+// HasDetailExtras reports whether the detail extras filler was wired.
+//
+// 未配線だと mute/list の利用者の pinnedNotes などが空、movedTo / alsoKnownAs が
+// null のまま返る。起動時検査に使う。
+func (h *Handler) HasDetailExtras() bool { return h.extras != nil }
 
 // SetRelationRepos wires the repositories used to populate viewer-relation flags
 // on the embedded mutee in mute/list (#1912)。
@@ -156,7 +172,7 @@ func (h *Handler) List(c echo.Context) error {
 	// MkUserCardMini を描画する。userRepo が wire されていない場合は
 	// muteeId だけ返してフォールバック (legacy test)。本番ルートでは
 	// 必ず wire されるので batch fetch で N+1 を回避する。
-	muteeMap := h.fetchMuteeMap(user.ID, rows)
+	muteeMap := h.fetchMuteeMap(c.Request().Context(), user, rows)
 	const tsFormat = "2006-01-02T15:04:05.000Z"
 	out := make([]map[string]any, 0, len(rows))
 	for _, m := range rows {
@@ -186,10 +202,11 @@ func (h *Handler) List(c echo.Context) error {
 
 // fetchMuteeMap batches user + profile lookups for the muteeIds in rows so
 // the response build loop performs zero per-row DB queries.
-func (h *Handler) fetchMuteeMap(viewerID string, rows []*model.Muting) map[string]entity.UserDetailed {
-	if h.userRepo == nil || len(rows) == 0 {
+func (h *Handler) fetchMuteeMap(ctx context.Context, viewer *model.User, rows []*model.Muting) map[string]entity.UserDetailed {
+	if h.userRepo == nil || len(rows) == 0 || viewer == nil {
 		return nil
 	}
+	viewerID := viewer.ID
 	ids := make([]string, 0, len(rows))
 	seen := make(map[string]struct{}, len(rows))
 	for _, m := range rows {
@@ -212,15 +229,28 @@ func (h *Handler) fetchMuteeMap(viewerID string, rows []*model.Muting) map[strin
 		profileByUser[p.UserID] = p
 	}
 	iAmModerator := h.moderator != nil && viewerID != "" && h.moderator.IsModerator(viewerID)
-	out := make(map[string]entity.UserDetailed, len(users))
-	for _, u := range users {
+	packed := make([]entity.UserDetailed, len(users))
+	for i, u := range users {
 		d := entity.PackUserDetailed(u, profileByUser[u.ID], h.idGen)
 		// viewer-relation flag を付与 (#1912)。mute 一覧なので isMuted=true が出る。
 		viewerIsFollowing := h.relation.Apply(&d, viewerID, u, profileByUser[u.ID])
 		// followers-only count を非フォロワーに leak させない (upstream packMany(_, me) の
 		// count gate、#1985)。mutee は viewer 自身ではないため isMe は常に false。
 		entity.GateCountVisibility(&d, u.ID == viewerID, iAmModerator, viewerIsFollowing)
-		out[u.ID] = d
+		packed[i] = d
+	}
+	// 本家 MutingEntityService は相手を packMany (UserDetailedNotMe) で組むので、ピン留めと
+	// 移行先もまとめて埋める (#3330)。
+	if h.extras != nil && viewer != nil {
+		targets := make([]userpack.DetailTarget, 0, len(packed))
+		for i, u := range users {
+			targets = append(targets, userpack.DetailTarget{User: u, Profile: profileByUser[u.ID], Detailed: &packed[i]})
+		}
+		h.extras.FillDetailedExtrasMany(ctx, viewer, targets)
+	}
+	out := make(map[string]entity.UserDetailed, len(users))
+	for i, u := range users {
+		out[u.ID] = packed[i]
 	}
 	return out
 }

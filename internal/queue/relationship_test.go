@@ -78,6 +78,41 @@ func TestNewBlockTask_RoundTrip(t *testing.T) {
 	require.Equal(t, payload, got)
 }
 
+// silent は往復で保たれ、本家の {from, to, silent} の形も読める。mk-go の形が
+// あればそちらを優先する。
+func TestDecodeBlockPayload_SilentAndUpstreamShape(t *testing.T) {
+	got, err := queue.DecodeBlockPayload(queue.NewBlockTask(queue.BlockPayload{BlockerID: "a", BlockeeID: "b", Silent: true}).Payload())
+	require.NoError(t, err)
+	assert.Equal(t, queue.BlockPayload{BlockerID: "a", BlockeeID: "b", Silent: true}, got)
+
+	got, err = queue.DecodeBlockPayload([]byte(`{"from":{"id":"x"},"to":{"id":"y"},"silent":true}`))
+	require.NoError(t, err)
+	assert.Equal(t, queue.BlockPayload{BlockerID: "x", BlockeeID: "y", Silent: true}, got)
+
+	got, err = queue.DecodeBlockPayload([]byte(`{"blockerId":"a","blockeeId":"b","from":{"id":"x"},"to":{"id":"y"}}`))
+	require.NoError(t, err)
+	assert.Equal(t, queue.BlockPayload{BlockerID: "a", BlockeeID: "b"}, got)
+}
+
+// 本家の形でも from / to の片方しか無い job は ID を埋めない (worker 側で
+// 必須の検査に落ちて再試行せずに捨てる)。
+func TestDecodeRelationshipPayloads_PartialUpstreamShape(t *testing.T) {
+	for _, body := range []string{`{"from":{"id":"x"}}`, `{"to":{"id":"y"}}`, `{}`} {
+		b, err := queue.DecodeBlockPayload([]byte(body))
+		require.NoError(t, err, body)
+		assert.Equal(t, queue.BlockPayload{}, b, body)
+		ub, err := queue.DecodeUnblockPayload([]byte(body))
+		require.NoError(t, err, body)
+		assert.Equal(t, queue.UnblockPayload{}, ub, body)
+		f, err := queue.DecodeFollowPayload([]byte(body))
+		require.NoError(t, err, body)
+		assert.Equal(t, queue.FollowPayload{}, f, body)
+		uf, err := queue.DecodeUnfollowPayload([]byte(body))
+		require.NoError(t, err, body)
+		assert.Equal(t, queue.UnfollowPayload{}, uf, body)
+	}
+}
+
 func TestDecodeBlockPayload_MalformedReturnsError(t *testing.T) {
 	_, err := queue.DecodeBlockPayload([]byte(`not-json`))
 	require.Error(t, err)

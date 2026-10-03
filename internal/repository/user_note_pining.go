@@ -21,6 +21,15 @@ type UserNotePiningRepository interface {
 	ReplaceByUser(userID string, pins []*model.UserNotePining) error
 }
 
+// UserNotePiningBatchReader lists the pins of many users in one query.
+//
+// 一覧の応答 (users/followers など) でピン留めを利用者ごとに引くと N+1 になる。
+// 本家 UserEntityService.packMany もピン留めを IN でまとめて引く。
+type UserNotePiningBatchReader interface {
+	// ListByUsers returns the pins of userIDs ordered by id DESC.
+	ListByUsers(userIDs []string) ([]*model.UserNotePining, error)
+}
+
 type userNotePiningRepository struct {
 	db *gorm.DB
 }
@@ -55,6 +64,21 @@ func (r *userNotePiningRepository) ListByUser(userID string) ([]*model.UserNoteP
 	var rows []*model.UserNotePining
 	if err := r.db.Clauses(dbresolver.Write).
 		Where("\"userId\" = ?", userID).
+		Order("id DESC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func (r *userNotePiningRepository) ListByUsers(userIDs []string) ([]*model.UserNotePining, error) {
+	userIDs = storableIDs(userIDs)
+	if len(userIDs) == 0 {
+		return nil, nil
+	}
+	var rows []*model.UserNotePining
+	if err := r.db.Clauses(dbresolver.Write).
+		Where("\"userId\" IN ?", userIDs).
 		Order("id DESC").
 		Find(&rows).Error; err != nil {
 		return nil, err

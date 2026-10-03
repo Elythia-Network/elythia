@@ -13,13 +13,49 @@ import (
 )
 
 type fakeUnfollower struct {
-	calls [][2]string
-	err   error
+	calls  [][2]string
+	silent []bool
+	err    error
 }
 
 func (f *fakeUnfollower) Unfollow(followerID, followeeID string) error {
 	f.calls = append(f.calls, [2]string{followerID, followeeID})
+	f.silent = append(f.silent, false)
 	return f.err
+}
+
+func (f *fakeUnfollower) UnfollowWithoutNotify(followerID, followeeID string) error {
+	f.calls = append(f.calls, [2]string{followerID, followeeID})
+	f.silent = append(f.silent, true)
+	return f.err
+}
+
+// 本家 processUnfollow は job の silent を unfollow に渡す。
+func TestUnfollowProcessor_SilentUsesUnfollowWithoutNotify(t *testing.T) {
+	for _, silent := range []bool{false, true} {
+		uf := &fakeUnfollower{}
+		p := processors.NewUnfollowProcessor(uf)
+		task := queue.NewUnfollowTask(queue.UnfollowPayload{FollowerID: "a", FolloweeID: "b", Silent: silent})
+		require.NoError(t, p.Handle(context.Background(), task))
+		assert.Equal(t, []bool{silent}, uf.silent)
+	}
+}
+
+// TS 版から引き継いだ job ({from: {id}, to: {id}, silent}) も処理する。mk-go の
+// 鍵があればそちらを優先する。
+func TestUnfollowProcessor_UpstreamJobShape(t *testing.T) {
+	uf := &fakeUnfollower{}
+	p := processors.NewUnfollowProcessor(uf)
+	task := driver.RawTask{TypeName: queue.TaskTypeUnfollow, Body: []byte(`{"from":{"id":"follower1"},"to":{"id":"followee1"},"silent":true}`)}
+	require.NoError(t, p.Handle(context.Background(), task))
+	assert.Equal(t, [][2]string{{"follower1", "followee1"}}, uf.calls)
+	assert.Equal(t, []bool{true}, uf.silent)
+
+	uf = &fakeUnfollower{}
+	p = processors.NewUnfollowProcessor(uf)
+	task = driver.RawTask{TypeName: queue.TaskTypeUnfollow, Body: []byte(`{"followerId":"a","followeeId":"b","from":{"id":"x"},"to":{"id":"y"}}`)}
+	require.NoError(t, p.Handle(context.Background(), task))
+	assert.Equal(t, [][2]string{{"a", "b"}}, uf.calls)
 }
 
 func TestUnfollowProcessor_Success(t *testing.T) {

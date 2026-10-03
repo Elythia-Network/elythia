@@ -79,7 +79,12 @@ func (h *Handler) AccountsFindByEmail(c echo.Context) error {
 	// includeSecrets 限定 field が漏れる (#1847、#1822 と同 class)。UserDetailed に
 	// 揃えて過剰露出を防ぐ (ShowUsers と同方針)。生 model.User の内部 field
 	// (inbox/sharedInbox/usernameLower) も UserDetailed では出ない。
-	return c.JSON(http.StatusOK, h.packModeratorVisibleUser(user, profile))
+	d := h.packModeratorVisibleUser(user, profile)
+	// ピン留めと移行先は本家 pack(user, null) と同じく匿名の閲覧者として埋める (#3330)。
+	if h.detailExtras != nil {
+		h.detailExtras.FillDetailedExtras(c.Request().Context(), nil, user, profile, &d)
+	}
+	return c.JSON(http.StatusOK, d)
 }
 
 // DeleteAccount handles POST /api/admin/delete-account. AccountsDelete と

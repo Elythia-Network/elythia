@@ -122,12 +122,14 @@ func TestFederationRemoveAllFollowing(t *testing.T) {
 // which (follower, followee) pairs the admin handler scheduled. Misskey TS
 // の queueService.createUnfollowJob 相当を mock するための test double。
 type stubUnfollowEnqueuer struct {
-	pairs [][2]string
-	err   error
+	pairs  [][2]string
+	silent []bool
+	err    error
 }
 
 func (s *stubUnfollowEnqueuer) EnqueueUnfollow(p queue.UnfollowPayload) error {
 	s.pairs = append(s.pairs, [2]string{p.FollowerID, p.FolloweeID})
+	s.silent = append(s.silent, p.Silent)
 	return s.err
 }
 
@@ -169,6 +171,8 @@ func TestFederationRemoveAllFollowing_EnqueuesAllPairs(t *testing.T) {
 	}
 	assert.True(t, pairsSet[[2]string{"rA", "localA"}])
 	assert.True(t, pairsSet[[2]string{"rB", "localB"}])
+	// 本家 remove-all-following は silent: true で積む。
+	assert.Equal(t, []bool{true, true}, enq.silent)
 }
 
 // 依存未配線 / host 未指定では no-op で 204

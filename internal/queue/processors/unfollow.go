@@ -13,6 +13,7 @@ import (
 // needs. パッケージ間の循環依存を避けるため interface で受け取る。
 type Unfollower interface {
 	Unfollow(followerID, followeeID string) error
+	UnfollowWithoutNotify(followerID, followeeID string) error
 }
 
 // ErrNotFollowing is returned by Unfollower implementations when the
@@ -49,7 +50,13 @@ func (p *UnfollowProcessor) Handle(_ context.Context, t driver.Task) error {
 	if p.unfollower == nil {
 		return fmt.Errorf("unfollow: service not wired: %w", driver.ErrSkipRetry)
 	}
-	if err := p.unfollower.Unfollow(payload.FollowerID, payload.FolloweeID); err != nil {
+	// 本家 processUnfollow は job の silent を unfollow に渡す。silent なら main
+	// stream の unfollow と Webhook を出さない (配送はする)。
+	unfollow := p.unfollower.Unfollow
+	if payload.Silent {
+		unfollow = p.unfollower.UnfollowWithoutNotify
+	}
+	if err := unfollow(payload.FollowerID, payload.FolloweeID); err != nil {
 		// 既に解消済 (row 無し) は成功扱い - 冪等吸収。
 		if isNotFollowingError(err) {
 			return nil

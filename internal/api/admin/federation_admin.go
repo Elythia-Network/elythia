@@ -154,9 +154,12 @@ func (h *Handler) cleanupSuspendedUserRelations(userID string) {
 			break
 		}
 		for _, f := range rows {
+			// 本家 unFollowAll は silent: true で積む (利用者の main stream と
+			// Webhook に unfollow を 1 件ずつ出さない)。
 			if err := h.unfollowEnqueuer.EnqueueUnfollow(queue.UnfollowPayload{
 				FollowerID: f.FollowerID,
 				FolloweeID: f.FolloweeID,
+				Silent:     true,
 			}); err != nil {
 				slog.Warn("admin suspend: enqueue unfollow failed",
 					"follower", f.FollowerID, "followee", f.FolloweeID, "err", err)
@@ -192,9 +195,11 @@ func (h *Handler) FederationRemoveAllFollowing(c echo.Context) error {
 			break
 		}
 		for _, f := range rows {
+			// 本家 remove-all-following は silent: true で積む。
 			if err := h.unfollowEnqueuer.EnqueueUnfollow(queue.UnfollowPayload{
 				FollowerID: f.FollowerID,
 				FolloweeID: f.FolloweeID,
+				Silent:     true,
 			}); err != nil {
 				// enqueue 失敗は個別ペアで握りつぶす - admin 操作の best-effort
 				// として残りの enqueue を妨げない。Worker retry が効かないため

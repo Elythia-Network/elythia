@@ -15,6 +15,7 @@ import (
 // needs (テスト差し替えのため interface で受け取る)。
 type Blocker interface {
 	Block(blockerID, blockeeID string) (*model.Blocking, error)
+	BlockSilent(blockerID, blockeeID string) (*model.Blocking, error)
 }
 
 // BlockProcessor handles per-pair Block queue jobs. Misskey TS の
@@ -41,7 +42,13 @@ func (p *BlockProcessor) Handle(_ context.Context, t driver.Task) error {
 	if p.blocker == nil {
 		return fmt.Errorf("block: service not wired: %w", driver.ErrSkipRetry)
 	}
-	_, err = p.blocker.Block(payload.BlockerID, payload.BlockeeID)
+	// 本家 processBlock は job の silent をそのまま block に渡す (インポートは
+	// silent: true)。
+	block := p.blocker.Block
+	if payload.Silent {
+		block = p.blocker.BlockSilent
+	}
+	_, err = block(payload.BlockerID, payload.BlockeeID)
 	switch {
 	case err == nil:
 		return nil

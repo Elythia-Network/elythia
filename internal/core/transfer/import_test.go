@@ -38,7 +38,7 @@ type fakeBlockingService struct {
 	err   error
 }
 
-func (f *fakeBlockingService) Block(blockerID, blockeeID string) (*model.Blocking, error) {
+func (f *fakeBlockingService) BlockSilent(blockerID, blockeeID string) (*model.Blocking, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -169,6 +169,17 @@ func TestImport_Following_ThreadsWithReplies(t *testing.T) {
 	assert.Equal(t, 1, res.Applied)
 	require.Len(t, fs.calls, 1)
 	assert.True(t, fs.lastOpts.WithReplies, "FollowOptions.WithReplies should be propagated from CSV row")
+}
+
+// 本家 ImportFollowingProcessorService はフォローを silent: true で積む。
+func TestImport_Following_IsSilent(t *testing.T) {
+	deps, user, fs, _, _, _ := newImporterDeps(t, []byte("bob\n"))
+	imp := transfer.NewImporter(deps)
+	res, err := imp.Import(context.Background(), user.ID, transfer.ImportFollowing, "fid")
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Applied)
+	require.Len(t, fs.callsOpts, 1)
+	assert.True(t, fs.callsOpts[0].Silent)
 }
 
 // #1058: withReplies field を省略した CSV row では default false が threading

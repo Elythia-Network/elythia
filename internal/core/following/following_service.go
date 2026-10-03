@@ -59,6 +59,14 @@ type FollowOptions struct {
 	// newly created row. fanout 層が follower の per-followee setting として
 	// 参照する (#1056 / PR #1055)。
 	WithReplies bool
+	// Silent suppresses the follower's `follow` main stream event and user
+	// webhook when the following is created directly.
+	//
+	// 本家 follow の silent と同じ (insertFollowingDoc の `!silent` が止めるのは
+	// フォローした側の follow だけで、followed・通知・申請の経路は変えない)。
+	// フォローの CSV インポート (core/transfer) と、silent の付いた
+	// relationship キューの follow ジョブが使う。
+	Silent bool
 }
 
 // NotificationHook is invoked after follow/follow-request events to create
@@ -123,6 +131,9 @@ type Service struct {
 	mainStreamPublisher MainStreamPublisher
 	// userPacker は main stream の follow 系イベントの利用者を Webhook と同じ形に組む (#3330)。
 	userPacker UserPacker
+	// meUpdatedPublisher はフォロー申請の作成・承認・取り消しで followee に
+	// meUpdated を流す (#3330)。
+	meUpdatedPublisher MeUpdatedPublisher
 	// relationReload は follow 変更を streaming connection へ通知する (#2400)。
 	relationReload RelationReloadPublisher
 	// silencedChecker は meta.silencedHosts の判定。未配線なら承認要求を
@@ -240,6 +251,37 @@ func (s *Service) SetUserPacker(p UserPacker) {
 // 未配線だと main stream の follow / unfollow が profile を読まない従来の形に
 // 落ち、unfollow の後もフォロワー限定のカウントが見える。起動時検査に使う。
 func (s *Service) HasUserPacker() bool { return s.userPacker != nil }
+
+// MeUpdatedPublisher emits `meUpdated` (the user's own MeDetailed) to a local
+// user's main stream. The `i` API handler satisfies it.
+type MeUpdatedPublisher interface {
+	PublishMeUpdated(userID string)
+}
+
+// SetMeUpdatedPublisher wires the meUpdated publisher used when a follow request
+// is created, accepted or cancelled.
+func (s *Service) SetMeUpdatedPublisher(p MeUpdatedPublisher) {
+	s.meUpdatedPublisher = p
+}
+
+// HasMeUpdatedPublisher reports whether the meUpdated publisher was wired.
+//
+// 未配線だとフォロー申請の作成・承認・取り消しで followee の
+// hasPendingReceivedFollowRequest がリロードまで変わらない。起動時検査に使う。
+func (s *Service) HasMeUpdatedPublisher() bool { return s.meUpdatedPublisher != nil }
+
+// publishMeUpdated emits `meUpdated` to u when u is local.
+//
+// 本家は createFollowRequest / acceptFollowRequest / cancelFollowRequest で
+// followee を MeDetailed で pack して流す (受け取った申請の印
+// hasPendingReceivedFollowRequest が変わるため)。リモートの利用者には
+// 購読する接続が無い。
+func (s *Service) publishMeUpdated(u *model.User) {
+	if s.meUpdatedPublisher == nil || u == nil || !u.IsLocal() {
+		return
+	}
+	s.meUpdatedPublisher.PublishMeUpdated(u.ID)
+}
 
 // PackedFollowWebhookHook is implemented by a WebhookHook that accepts the
 // followee already packed for the main stream, so one follow / unfollow packs
@@ -498,6 +540,7 @@ func (s *Service) Follow(followerID, followeeID string, opts FollowOptions) (*Fo
 		// followee の main stream に publish する。body は follower の UserLite
 		// (`pack(follower, followee)`)。
 		s.publishFollowerLite("receiveFollowRequest", follower, followee)
+		s.publishMeUpdated(followee)
 		return &FollowResult{Request: req}, nil
 	}
 
@@ -545,7 +588,9 @@ func (s *Service) Follow(followerID, followeeID string, opts FollowOptions) (*Fo
 	// (相手側の UserDetailedNotMe)、followee の main に `followed` (自分を
 	// follow した UserLite) を publish する。frontend MkFollowButton.onFollowChange
 	// は body.isFollowing / body.hasPendingFollowRequestFromYou を読む。
-	s.notifyFolloweeEvent("follow", follower, followee, true, true)
+	if !opts.Silent {
+		s.notifyFolloweeEvent("follow", follower, followee, true, true)
+	}
 	s.publishFollowerLite("followed", follower, followee)
 
 	s.publishFollowingReload(followerID)
@@ -557,14 +602,15 @@ func (s *Service) Unfollow(followerID, followeeID string) error {
 	return s.unfollow(followerID, followeeID, unfollowOpts{deliver: true, notify: true})
 }
 
-// UnfollowSilent removes the following without delivering an Undo(Follow) to a
-// remote followee, mirroring upstream UserFollowingService.remoteReject which
-// cleans up the local relation (and publishes the main-stream unfollow event)
-// without any AP delivery. Used by inbound Reject(Follow) handling (#2106 N11)
-// so that receiving a Reject does not bounce a spurious Undo(Follow) back to the
-// rejecter. The normal Unfollow path still federates.
-func (s *Service) UnfollowSilent(followerID, followeeID string) error {
-	return s.unfollow(followerID, followeeID, unfollowOpts{deliver: false, notify: true})
+// UnfollowWithoutNotify removes the following and delivers Undo(Follow) /
+// Reject like Unfollow, but emits no main-stream `unfollow` event or user
+// webhook.
+//
+// 本家 UserFollowingService.unfollow の silent=true と同じ。relationship キューの
+// silent な unfollow (admin/federation/remove-all-following、凍結時の
+// unFollowAll) が使う。
+func (s *Service) UnfollowWithoutNotify(followerID, followeeID string) error {
+	return s.unfollow(followerID, followeeID, unfollowOpts{deliver: true})
 }
 
 // UnfollowQuiet removes the following without any AP delivery, main-stream
@@ -711,7 +757,7 @@ func (s *Service) AcceptRequest(followeeID, followerID string) error {
 		s.notificationHook.OnFollowAccepted(req.FollowerID, req.FolloweeID)
 		s.notificationHook.OnFollowed(req.FollowerID, req.FolloweeID)
 	}
-	if s.federationHook != nil || s.chartHook != nil || s.webhookHook != nil || s.mainStreamPublisher != nil {
+	if s.federationHook != nil || s.chartHook != nil || s.webhookHook != nil || s.mainStreamPublisher != nil || s.meUpdatedPublisher != nil {
 		follower, ferr := s.userRepo.FindByID(req.FollowerID)
 		followee, eerr := s.userRepo.FindByID(req.FolloweeID)
 		if ferr == nil && eerr == nil {
@@ -730,6 +776,9 @@ func (s *Service) AcceptRequest(followeeID, followerID string) error {
 			// と同等)。follow event body は UserDetailed + isFollowing=true。
 			s.notifyFolloweeEvent("follow", follower, followee, true, true)
 			s.publishFollowerLite("followed", follower, followee)
+			// 本家 acceptFollowRequest は最後に followee へ meUpdated を流す
+			// (受け取った申請が 1 件減る)。
+			s.publishMeUpdated(followee)
 		}
 	}
 	// Accept で Following が成立するので follower の snapshot が変わる (#2400)。
@@ -738,8 +787,31 @@ func (s *Service) AcceptRequest(followeeID, followerID string) error {
 	return nil
 }
 
+// requestEvents selects the main stream / webhook events emitted when a
+// pending follow request is removed.
+//
+// 本家は申請を消す経路ごとに流すものが違う。following/requests/cancel と
+// AP の Undo(Follow) (cancelFollowRequest) は followee に meUpdated だけ、
+// following/requests/reject (rejectFollowRequest) は follower に unfollow と
+// Webhook だけ、ブロックに伴う取り消し (UserBlockingService.cancelRequest) は
+// その両方を流す。
+type requestEvents struct {
+	// meUpdated は followee がローカルなら followee の main に meUpdated を流す。
+	meUpdated bool
+	// unfollow は follower がローカルなら follower の main に unfollow を流し、
+	// Webhook の unfollow も出す。
+	unfollow bool
+}
+
 // RejectRequest rejects a pending follow request received by the followee.
+//
+// 本家 rejectFollowRequest と同じく、follower がローカルなら unfollow を
+// main stream と Webhook に出す (publishUnfollow)。meUpdated は流さない。
 func (s *Service) RejectRequest(followeeID, followerID string) error {
+	return s.rejectRequest(followeeID, followerID, requestEvents{unfollow: true})
+}
+
+func (s *Service) rejectRequest(followeeID, followerID string, ev requestEvents) error {
 	req, err := s.followRequestRepo.FindByPair(followerID, followeeID)
 	if err != nil {
 		// **DB 障害を not-found に丸めない** (#2799)。
@@ -757,24 +829,26 @@ func (s *Service) RejectRequest(followeeID, followerID string) error {
 	if s.notificationHook != nil {
 		s.notificationHook.OnFollowRejected(req.FollowerID, req.FolloweeID)
 	}
-	// federation / main publish 両方が未配線なら DB lookup を省く。
-	if s.federationHook == nil && s.mainStreamPublisher == nil {
+	// 配送も通知も未配線なら DB lookup を省く。
+	if !s.needsRequestUsers() {
 		return nil
 	}
 	followee, eerr := s.userRepo.FindByID(followeeID)
 	if eerr != nil {
 		return nil
 	}
+	follower, ferr := s.userRepo.FindByID(followerID)
 	// リモート follower からの pending request を reject したときに Reject(Follow)
 	// を配信して相手側の following を解消する (本家
 	// UserFollowingService.rejectFollowRequest 相当)。OnLocalUnfollowed は
 	// follower=remote / followee=local 時に Reject を送る分岐を持っている。
-	if s.federationHook != nil {
-		if follower, ferr := s.userRepo.FindByID(followerID); ferr == nil {
-			s.federationHook.OnLocalUnfollowed(follower, followee)
-		}
+	if s.federationHook != nil && ferr == nil {
+		s.federationHook.OnLocalUnfollowed(follower, followee)
 	}
-	s.publishFollowRequestResolved(followerID, followee)
+	if ferr != nil {
+		follower = nil
+	}
+	s.publishRequestRemoved(follower, followee, ev)
 	return nil
 }
 
@@ -784,7 +858,14 @@ func (s *Service) RejectRequest(followeeID, followerID string) error {
 // 送って pending FollowRequest を取り消してもらう必要がある。送らないと相手
 // 側に stale なリクエストが残り、後で承認されても local には Following が
 // 存在しない矛盾状態になる。
+//
+// 本家 cancelFollowRequest と同じく、流すのは followee の meUpdated だけ。
+// follower へ unfollow は流さない (フォローボタンは API の応答で戻す)。
 func (s *Service) CancelRequest(followerID, followeeID string) error {
+	return s.cancelRequest(followerID, followeeID, requestEvents{meUpdated: true})
+}
+
+func (s *Service) cancelRequest(followerID, followeeID string, ev requestEvents) error {
 	req, err := s.followRequestRepo.FindByPair(followerID, followeeID)
 	if err != nil {
 		// **DB 障害を not-found に丸めない** (#2799)。
@@ -796,9 +877,9 @@ func (s *Service) CancelRequest(followerID, followeeID string) error {
 	if err := s.followRequestRepo.Delete(req); err != nil {
 		return err
 	}
-	// Unfollow と同じ guard: hooks / publisher のいずれもが未配線なら DB
-	// lookup 自体を省く。テスト時に userRepo が minimal でも影響しない。
-	if s.federationHook == nil && s.mainStreamPublisher == nil {
+	// hooks / publisher のいずれもが未配線なら DB lookup 自体を省く。テスト時に
+	// userRepo が minimal でも影響しない。
+	if !s.needsRequestUsers() {
 		return nil
 	}
 	followee, eerr := s.userRepo.FindByID(followeeID)
@@ -807,15 +888,46 @@ func (s *Service) CancelRequest(followerID, followeeID string) error {
 	}
 	// federationHook.OnLocalUnfollowed は shouldDeliverFollow でローカル →
 	// リモート条件を判定するので、ローカル followee の場合は自動的に no-op。
-	// 呼ぶには follower も必要なので follower の lookup もここで行う
-	// (失敗時は federation hook だけスキップして streaming publish は続行)。
-	if s.federationHook != nil {
-		if follower, ferr := s.userRepo.FindByID(followerID); ferr == nil {
-			s.federationHook.OnLocalUnfollowed(follower, followee)
-		}
+	// follower の lookup に失敗したときは配送と follower 宛ての通知だけ飛ばし、
+	// followee の meUpdated は続ける。
+	follower, ferr := s.userRepo.FindByID(followerID)
+	if s.federationHook != nil && ferr == nil {
+		s.federationHook.OnLocalUnfollowed(follower, followee)
 	}
-	s.publishFollowRequestResolved(followerID, followee)
+	if ferr != nil {
+		follower = nil
+	}
+	s.publishRequestRemoved(follower, followee, ev)
 	return nil
+}
+
+// needsRequestUsers reports whether removing a follow request has any side
+// effect that needs the user rows.
+func (s *Service) needsRequestUsers() bool {
+	return s.federationHook != nil || s.mainStreamPublisher != nil || s.webhookHook != nil || s.meUpdatedPublisher != nil
+}
+
+// publishRequestRemoved emits the events selected by ev after a follow request
+// was removed. follower may be nil when it could not be loaded.
+func (s *Service) publishRequestRemoved(follower, followee *model.User, ev requestEvents) {
+	if ev.meUpdated {
+		s.publishMeUpdated(followee)
+	}
+	if ev.unfollow {
+		s.publishUnfollow(follower, followee)
+	}
+}
+
+// publishUnfollow emits `unfollow` to a local follower's main stream and user
+// webhooks, carrying followee packed as UserDetailedNotMe seen by follower.
+//
+// 本家 UserFollowingService.publishUnfollow (と、ブロック・unfollow の同じ形の
+// 処理) は follower がローカルのときだけ出す。
+func (s *Service) publishUnfollow(follower, followee *model.User) {
+	if follower == nil || followee == nil || !follower.IsLocal() {
+		return
+	}
+	s.notifyFolloweeEvent("unfollow", follower, followee, false, true)
 }
 
 // CancelFollowRequestsBetween cancels any pending follow requests between a and
@@ -823,18 +935,22 @@ func (s *Service) CancelRequest(followerID, followeeID string) error {
 // UserBlockingService.block の cancelRequest 双方向呼び出し相当。
 //
 // **申請を出した側の locality で後始末が変わる。**
-//   - follower が local: CancelRequest 経路。follower の main stream に
-//     unfollow を流し、followee が remote なら Undo(Follow) を配送する。
+//   - follower が local: CancelRequest 経路。followee が remote なら
+//     Undo(Follow) を配送する。
 //   - follower が remote: RejectRequest 経路。followee 側に残る
 //     receiveFollowRequest 通知を掃除し、remote follower に Reject を配送する
 //     (相手側の pending request も解消させる)。
 //
+// 流すものはどちらの経路でも本家 UserBlockingService.cancelRequest と同じで、
+// followee がローカルなら meUpdated、follower がローカルで silent でなければ
+// unfollow (main stream と Webhook)。silent はインポートしたブロック用。
+//
 // 該当する request が無い direction は no-op。2 方向のうち先に失敗したものを
 // 返すが、呼び出し元 (block) は warn に留めて block を成立させる。
-func (s *Service) CancelFollowRequestsBetween(a, b string) error {
+func (s *Service) CancelFollowRequestsBetween(a, b string, silent bool) error {
 	var firstErr error
 	for _, dir := range [2][2]string{{a, b}, {b, a}} {
-		if err := s.cancelOneFollowRequest(dir[0], dir[1]); err != nil && firstErr == nil {
+		if err := s.cancelOneFollowRequest(dir[0], dir[1], silent); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
@@ -844,7 +960,7 @@ func (s *Service) CancelFollowRequestsBetween(a, b string) error {
 // cancelOneFollowRequest cancels the (followerID → followeeID) request if it
 // exists, choosing the path that performs the right cleanup for the follower's
 // locality. Request が無い場合は no-op (ErrRequestNotFound を返さない)。
-func (s *Service) cancelOneFollowRequest(followerID, followeeID string) error {
+func (s *Service) cancelOneFollowRequest(followerID, followeeID string, silent bool) error {
 	if _, err := s.followRequestRepo.FindByPair(followerID, followeeID); err != nil {
 		// **DB 障害を not-found に丸めない (#2799)。** 呼び出し元が warn に
 		// 出せるよう種別は残す。
@@ -853,10 +969,11 @@ func (s *Service) cancelOneFollowRequest(followerID, followeeID string) error {
 		}
 		return err
 	}
-	// local からの申請取り消しは follower の stream 更新と remote followee への
-	// Undo(Follow) を伴う CancelRequest 経路に寄せる。
+	ev := requestEvents{meUpdated: true, unfollow: !silent}
+	// local からの申請取り消しは remote followee への Undo(Follow) を伴う
+	// cancelRequest 経路に寄せる。
 	if follower, err := s.userRepo.FindByID(followerID); err == nil && follower != nil && follower.IsLocal() {
-		if err := s.CancelRequest(followerID, followeeID); err != nil && !errors.Is(err, ErrRequestNotFound) {
+		if err := s.cancelRequest(followerID, followeeID, ev); err != nil && !errors.Is(err, ErrRequestNotFound) {
 			return err
 		}
 		return nil
@@ -864,30 +981,60 @@ func (s *Service) cancelOneFollowRequest(followerID, followeeID string) error {
 	// remote からの申請、または follower を引けないときは followee 側の通知を
 	// 掃除して Reject を送る経路にする。userRepo の一時障害でも行の削除は進む。
 	// 事前確認後に並行して消えた request は no-op にする (accept との競合)。
-	if err := s.RejectRequest(followeeID, followerID); err != nil && !errors.Is(err, ErrRequestNotFound) {
+	if err := s.rejectRequest(followeeID, followerID, ev); err != nil && !errors.Is(err, ErrRequestNotFound) {
 		return err
 	}
 	return nil
 }
 
-// publishFollowRequestResolved notifies the local follower via the main stream
-// that a pending follow request has been resolved (rejected or canceled).
-// frontend MkFollowButton listens to `unfollow` events and resets
-// isFollowing / hasPendingFollowRequestFromYou to false, giving users a live
-// reset without reloading. Callers must pass the pre-loaded followee to avoid
-// a redundant DB lookup.
-func (s *Service) publishFollowRequestResolved(followerID string, followee *model.User) {
-	if s.mainStreamPublisher == nil || followee == nil {
+// RemoteReject handles an inbound Reject(Follow) from a remote followee: it
+// removes the pending follow request and the following (if any) without any AP
+// delivery, then emits `unfollow` to the local follower's main stream and user
+// webhooks.
+//
+// 本家 UserFollowingService.remoteReject と同じ。申請も関係の行も消すだけで
+// 何も配送せず (#2106 N11)、publishUnfollow は行が無くても 1 回だけ出す。
+// 以前は UnfollowSilent と CancelRequest を続けて呼んでいたので、申請を
+// 拒否されたときに Webhook が出ず、rejecter へ Undo(Follow) を送り返していた。
+func (s *Service) RemoteReject(followerID, followeeID string) error {
+	if req, err := s.followRequestRepo.FindByPair(followerID, followeeID); err == nil {
+		if err := s.followRequestRepo.Delete(req); err != nil {
+			return err
+		}
+	} else if !repository.IsNotFound(err) {
+		// **DB 障害を not-found に丸めない** (#2799)。
+		return err
+	}
+	if err := s.unfollow(followerID, followeeID, unfollowOpts{}); err != nil && !errors.Is(err, ErrNotFollowing) {
+		return err
+	}
+	if s.mainStreamPublisher == nil && s.webhookHook == nil {
+		return nil
+	}
+	follower, ferr := s.userRepo.FindByID(followerID)
+	followee, eerr := s.userRepo.FindByID(followeeID)
+	if ferr != nil || eerr != nil {
+		return nil
+	}
+	s.publishUnfollow(follower, followee)
+	return nil
+}
+
+// PublishBlockUnfollow emits `unfollow` for a following removed by a block.
+//
+// 本家 UserBlockingService.block は UserFollowingService.unfollow を双方向で
+// 呼ぶので、follower がローカルなら main stream と Webhook に unfollow が出る。
+// mk-go の block は関係の行を blocking 側で消すので、通知だけをここで出す。
+func (s *Service) PublishBlockUnfollow(followerID, followeeID string) {
+	if s.mainStreamPublisher == nil && s.webhookHook == nil {
 		return
 	}
-	// follower がリモートなら local WebSocket subscriber はいないので publish
-	// 不要。federation processor 経由の Undo / Reject ではここに remote user ID
-	// が入ることがあるので明示的にスキップする。
-	follower, err := s.userRepo.FindByID(followerID)
-	if err != nil {
+	follower, ferr := s.userRepo.FindByID(followerID)
+	followee, eerr := s.userRepo.FindByID(followeeID)
+	if ferr != nil || eerr != nil {
 		return
 	}
-	s.notifyFolloweeEvent("unfollow", follower, followee, false, false)
+	s.publishUnfollow(follower, followee)
 }
 
 // ListReceivedRequests returns follow requests received by userID. sinceID /

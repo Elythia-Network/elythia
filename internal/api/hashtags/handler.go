@@ -11,6 +11,7 @@ import (
 	"github.com/shiroha-a/mk/internal/api/meself"
 	"github.com/shiroha-a/mk/internal/api/pagination"
 	"github.com/shiroha-a/mk/internal/api/userrelation"
+	"github.com/shiroha-a/mk/internal/core/userpack"
 	"github.com/shiroha-a/mk/internal/entity"
 	"github.com/shiroha-a/mk/internal/misc/colfit"
 	"github.com/shiroha-a/mk/internal/misc/id"
@@ -28,7 +29,21 @@ type Handler struct {
 	relation userrelation.Repos
 	// idGen は note ID parse / createdAt 抽出に使う (#2106 L25)。未配線時は aidx に fallback。
 	idGen id.Generator
+	// extras は hashtags/users の利用者のピン留め・移行先をまとめて埋める (#3330)。
+	extras userpack.DetailExtrasMany
 }
+
+// SetDetailExtras wires the batch filler of pinnedNotes / pinnedPage / movedTo /
+// alsoKnownAs for hashtags/users (#3330).
+func (h *Handler) SetDetailExtras(x userpack.DetailExtrasMany) {
+	h.extras = x
+}
+
+// HasDetailExtras reports whether the detail extras filler was wired.
+//
+// 未配線だと hashtags/users の pinnedNotes などが空、movedTo / alsoKnownAs が
+// null のまま返る。起動時検査に使う。
+func (h *Handler) HasDetailExtras() bool { return h.extras != nil }
 
 // NewHandler creates a new hashtags Handler.
 func NewHandler(db *gorm.DB) *Handler {
@@ -461,17 +476,31 @@ func (h *Handler) Users(c echo.Context) error {
 		viewerID = viewer.ID
 	}
 	ctx := c.Request().Context()
-	out := make([]any, 0, len(users))
-	for _, u := range users {
+	packed := make([]entity.UserDetailed, len(users))
+	for i, u := range users {
 		d := entity.PackUserDetailed(u, profByID[u.ID], gen)
 		// 認証 caller には viewer->user の relation block を付与 (匿名/self は no-op、#1957-a)。
 		viewerIsFollowing := h.relation.Apply(&d, viewerID, u, profByID[u.ID])
 		// **カウントの可視性ゲートを通す (#1558)。** `sort:"+follower"` が
 		// 使えるので、忘れると非公開のカウントで並べ替えて読める。
 		entity.GateCountVisibility(&d, viewerID == u.ID, false, viewerIsFollowing)
+		packed[i] = d
+	}
+	// 本家は packMany(users, me, {schema: 'UserDetailed'}) なので、ピン留めと
+	// 移行先もまとめて埋める (#3330)。匿名の閲覧者にはピン留めを出さない (本家
+	// packMany と同じ)。
+	if h.extras != nil {
+		targets := make([]userpack.DetailTarget, 0, len(users))
+		for i, u := range users {
+			targets = append(targets, userpack.DetailTarget{User: u, Profile: profByID[u.ID], Detailed: &packed[i]})
+		}
+		h.extras.FillDetailedExtrasMany(ctx, viewer, targets)
+	}
+	out := make([]any, 0, len(users))
+	for i, u := range users {
 		// upstream の pack は isDetailed && isMe で MeDetailed を返すので、
 		// 結果に自分が混ざるときは自分だけ MeDetailed になる。
-		out = append(out, meself.Pack(ctx, d, u, profByID[u.ID], viewer))
+		out = append(out, meself.Pack(ctx, packed[i], u, profByID[u.ID], viewer))
 	}
 	return c.JSON(http.StatusOK, out)
 }

@@ -14,7 +14,6 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/shiroha-a/mk/internal/api/apierr"
-	"github.com/shiroha-a/mk/internal/api/meself"
 	"github.com/shiroha-a/mk/internal/api/notehide"
 	"github.com/shiroha-a/mk/internal/api/pagination"
 	"github.com/shiroha-a/mk/internal/core/notesfilter"
@@ -597,7 +596,7 @@ func (h *Handler) SearchByUsernameAndHost(c echo.Context) error {
 	}
 	profiles := h.userService.GetProfilesByUserIDs(ids)
 	ctx := c.Request().Context()
-	result := make([]any, 0, len(users))
+	var batch detailedBatch
 	for _, u := range users {
 		d := entity.PackUserDetailed(u, profiles[u.ID], h.idGen)
 		resolver.FillUserLite(&d.UserLite)
@@ -609,10 +608,11 @@ func (h *Handler) SearchByUsernameAndHost(c echo.Context) error {
 		// 解く。これが無いと followers-only count が非フォロワーに leak する (#1980、users/search と対称)。
 		isMe := viewer != nil && viewer.ID == u.ID
 		entity.GateCountVisibility(&d, isMe, iAmModerator, viewerIsFollowing)
-		// upstream の pack は isDetailed && isMe で MeDetailed を返す。
-		result = append(result, meself.Pack(ctx, d, u, profiles[u.ID], viewer))
+		batch.add(d, u, profiles[u.ID])
 	}
-	return c.JSON(http.StatusOK, result)
+	// ピン留めと移行先は本家 packMany と同じくまとめて埋める (#3330)。upstream の
+	// pack は isDetailed && isMe で MeDetailed を返す。
+	return c.JSON(http.StatusOK, batch.packAll(ctx, h, viewer))
 }
 
 // UpdateMemo handles POST /api/users/update-memo.

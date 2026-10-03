@@ -25,5 +25,6 @@ func (a *FollowingServiceAdapter) Follow(followerID, followeeID string, opts Fol
 	}
 	return a.svc.Follow(followerID, followeeID, corefollowing.FollowOptions{
 		WithReplies: opts.WithReplies,
+		Silent:      opts.Silent,
 	})
 }

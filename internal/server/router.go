@@ -575,6 +575,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// block 時に保留中の follow request を双方向で取り消す。upstream
 	// UserBlockingService.block の cancelRequest 相当。
 	blockingService.SetFollowRequestCanceller(followingService)
+	// block で外れたフォローの unfollow を main stream と Webhook に出す (#3330)。
+	blockingService.SetUnfollowPublisher(followingService)
 	mutingService := coremuting.NewService(userRepo, mutingRepo, idGen)
 	renoteMutingService := coremuting.NewRenoteService(userRepo, renoteMutingRepo, idGen)
 	followingService.SetBlockingChecker(blockingService)
@@ -2022,6 +2024,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	registryRepo := repository.NewRegistryRepository(s.db)
 	iHandler := i.NewHandler(userService, idGen)
 	iHandler.SetUserRepo(userRepo)
+	// フォロー申請の作成・承認・取り消しで followee に meUpdated を流す (#3330)。
+	followingService.SetMeUpdatedPublisher(iHandler)
 	iHandler.SetRoleProvider(roleService)
 	iHandler.SetTOTPReplayGuard(totpReplayGuard)
 	// 現在のパスワードを照合する i/* の照合失敗をアカウント単位で数える。
@@ -2317,6 +2321,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// Hashtags endpoints (Phase 6)
 	hashtagsHandler := apihashtags.NewHandler(s.db)
+	hashtagsHandler.SetDetailExtras(usersHandler)       // #3330: hashtags/users のピン留め・移行先
 	hashtagsHandler.SetIDGen(idGen)                     // #2106 L25: 設定済 ID generator を共有 (毎回 aidx 生成を廃止)
 	hashtagsHandler.SetRelationRepos(listRelationRepos) // #1957-a: hashtags/users の embed user に relation
 	api.POST("/hashtags/list", hashtagsHandler.List)
@@ -2345,6 +2350,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// Blocking endpoints
 	blockingHandler := blocking.NewHandler(blockingService, userRepo, idGen)
+	blockingHandler.SetDetailExtras(usersHandler) // #3330: blocking/list のピン留め・移行先
 	// blocking/create・delete のレスポンスに viewer→blockee の relation block
 	// (isBlocking 等) を載せるための共有 resolver 依存 (#1802)。
 	blockingHandler.SetRelationRepos(userrelation.Repos{
@@ -2363,6 +2369,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// Mute endpoints
 	muteHandler := mute.NewHandler(mutingService, userRepo, idGen)
+	muteHandler.SetDetailExtras(usersHandler) // #3330: mute/list のピン留め・移行先
 	muteHandler.SetRelationRepos(listRelationRepos)
 	muteHandler.SetModeratorChecker(roleService) // #1985: mute/list の count gate で moderator viewer 判定
 	api.POST("/mute/create", muteHandler.Create, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:mutes"))
@@ -2371,6 +2378,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// Renote mute endpoints
 	renoteMuteHandler := renotemute.NewHandler(renoteMutingService, userRepo, idGen)
+	renoteMuteHandler.SetDetailExtras(usersHandler) // #3330: renote-mute/list のピン留め・移行先
 	renoteMuteHandler.SetRelationRepos(listRelationRepos)
 	renoteMuteHandler.SetModeratorChecker(roleService) // #1985: renote-mute/list の count gate で moderator viewer 判定
 	api.POST("/renote-mute/create", renoteMuteHandler.Create, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:mutes"))
@@ -2460,6 +2468,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// ActivityPub resource endpoints
 	apHandler := ap.NewHandler(apRenderer, userService, noteQueryService, keypairRepo, idGen)
+	apHandler.SetDetailExtras(usersHandler) // #3330: ap/show の利用者のピン留め・移行先
 	apHandler.SetRemote(apFetcher, federationResolver)
 	// ap/show の federation-allow gate (#1557)。instanceService が blocked /
 	// federation policy を判定する。local host は port 無しの hostname
@@ -2806,6 +2815,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// Pages endpoints (Phase 4.5)
 	pagesHandler := pages.NewHandler(pageService, idGen)
+	pagesHandler.SetDetailExtras(usersHandler) // #3330: pageEvent の利用者のピン留め・移行先
 	// page content の image block / eyeCatchingImageId から drive file を解決して
 	// attachedFiles / eyeCatchingImage を埋める (#1662)。
 	pagesHandler.SetDriveFileRepo(driveFileRepo)
@@ -3423,6 +3433,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 未設定でも配線しておいてよい (そのときは送らない)。
 	abuseCreatedNotifier.SetMail(miscsmtp.SubjectBodySenderFromMeta(metaRepo, s.config.ProxySMTP), recipientRepo, userRepo, metaRepo)
 	adminHandler := apiadmin.NewHandler(signupService, roleService, metaRepo, userRepo, idGen)
+	adminHandler.SetDetailExtras(usersHandler) // #3330: admin/accounts/find-by-email のピン留め・移行先
 	// モデレーターの suspend / unsuspend を local 由来として刻む (#2973)。
 	adminHandler.SetSuspensionOriginRepo(suspensionOriginRepo)
 	// catalog 更新を entity 側 packer に即時反映する (#2258)。TTL 任せだと
@@ -3866,6 +3877,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// auth/* — MiAuth/OAuth セッション
 	authSessionRepo := repository.NewAuthSessionRepository(s.db)
 	authHandler := apiauth.NewHandler(authSessionRepo, s.config, idGen)
+	authHandler.SetDetailExtras(usersHandler) // #3330: auth/session/userkey・miauth check のピン留め・移行先
 	api.POST("/auth/session/generate", authHandler.SessionGenerate)
 	api.POST("/auth/session/show", authHandler.SessionShow)
 	api.POST("/auth/session/userkey", authHandler.SessionUserkey)
@@ -4515,6 +4527,27 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"follow 系の main stream / Webhook と blocking/create・delete で pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
 		{"blocking.userPacker", blockingHandler.HasUserPacker(),
 			"blocking/create・delete の応答が instance・絵文字・ピン留め・移行先・モデレーター向けの項目を欠く"},
+		{"following.meUpdatedPublisher", followingService.HasMeUpdatedPublisher(),
+			"フォロー申請の作成・承認・取り消しで meUpdated が流れず、受け取った申請の印がリロードまで変わらない"},
+		{"blocking.unfollowPublisher", blockingService.HasUnfollowPublisher(),
+			"ブロックでフォローが外れても unfollow の main stream と Webhook が出ない"},
+		// #3330: 一覧・単体の UserDetailed のピン留め・移行先を users/show と同じ規則で埋める。
+		{"hashtags.detailExtras", hashtagsHandler.HasDetailExtras(),
+			"hashtags/users の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
+		{"blocking.detailExtras", blockingHandler.HasDetailExtras(),
+			"blocking/list の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
+		{"mute.detailExtras", muteHandler.HasDetailExtras(),
+			"mute/list の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
+		{"renoteMute.detailExtras", renoteMuteHandler.HasDetailExtras(),
+			"renote-mute/list の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
+		{"ap.detailExtras", apHandler.HasDetailExtras(),
+			"ap/show の利用者の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
+		{"pages.detailExtras", pagesHandler.HasDetailExtras(),
+			"pageEvent の利用者の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
+		{"admin.detailExtras", adminHandler.HasDetailExtras(),
+			"admin/accounts/find-by-email の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
+		{"auth.detailExtras", authHandler.HasDetailExtras(),
+			"auth/session/userkey と miauth の check の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
 		{"following.blockingChecker", followingService.HasBlockingChecker(),
 			"ブロック関係を無視してフォローが成立する (自分がブロックした相手・自分をブロックしている相手の両方。後者は inbox の Follow も通す)"},
 		{"admin.ipLookupAudit", adminHandler.HasIPLookupAudit(),

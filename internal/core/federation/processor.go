@@ -2578,19 +2578,18 @@ func (p *Processor) handleReject(act genericActivity) error {
 		}
 		return err
 	}
+	// Reject されるのはこちらが送った Follow なので、follower はローカルの利用者の
+	// はず。本家 rejectFollow と同じく、ローカルでなければ何もしない
+	// (`skip: follower is not a local user`)。
+	if !follower.IsLocal() {
+		return nil
+	}
 	// 既存のフォローがあれば解除する。pending な follow request も同様。
-	// #2106 N11: upstream remoteReject は AP 配送を伴わない内部削除なので、federating な
-	// Unfollow ではなく UnfollowSilent を使い、rejecter へ余計な Undo(Follow) を逆配送
-	// しない (Following 行が残るエッジケースでの連合ノイズ / 相手の重複処理を防ぐ)。
-	if err := p.followingService.UnfollowSilent(follower.ID, followee.ID); err != nil &&
-		!errors.Is(err, corefollowing.ErrNotFollowing) {
-		return err
-	}
-	if err := p.followingService.CancelRequest(follower.ID, followee.ID); err != nil &&
-		!errors.Is(err, corefollowing.ErrRequestNotFound) {
-		return err
-	}
-	return nil
+	// #2106 N11: upstream remoteReject は AP 配送を伴わない内部削除なので、rejecter へ
+	// 余計な Undo(Follow) を逆配送しない (Following 行が残るエッジケースでの連合ノイズ /
+	// 相手の重複処理を防ぐ)。申請だけが残っていた場合も同じで、unfollow の通知
+	// (main stream と Webhook) は本家と同じく 1 回だけ出す (#3330)。
+	return p.followingService.RemoteReject(follower.ID, followee.ID)
 }
 
 // handleBlock processes an inbound Block activity. リモートユーザーがローカル

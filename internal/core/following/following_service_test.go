@@ -704,26 +704,27 @@ func TestCancelRequest_InvokesUnfollowHook(t *testing.T) {
 	assert.Equal(t, []string{"alice->bob"}, fed.unfollowed)
 }
 
-func TestCancelRequest_PublishesUnfollowEvent(t *testing.T) {
-	// frontend MkFollowButton は main channel の unfollow event を受けて
-	// ボタンを「フォロー」表示にリセットする。CancelRequest でも publish する
-	// ことでリロードなしの UI 更新を実現する。
+func TestCancelRequest_PublishesOnlyMeUpdated(t *testing.T) {
+	// 本家 cancelFollowRequest は followee に meUpdated を流すだけで、follower に
+	// unfollow も Webhook も出さない (フォローボタンは API の応答で戻す)。
 	svc, userRepo, _, _ := newSvc(t)
 	addUser(t, userRepo, "alice", false)
 	addUser(t, userRepo, "bob", true)
 	pub := &stubMainStreamPublisher{}
 	svc.SetMainStreamPublisher(pub)
+	me := &recordingMeUpdated{}
+	svc.SetMeUpdatedPublisher(me)
+	wh := &recordingWebhookHook{}
+	svc.SetWebhookHook(wh)
 	_, err := svc.Follow("alice", "bob", following.FollowOptions{})
 	require.NoError(t, err)
-	// Follow() 内の receiveFollowRequest は followee (bob) 宛。cancel 分を
-	// 観察するためリセット。
 	pub.calls = nil
+	me.users = nil
 
 	require.NoError(t, svc.CancelRequest("alice", "bob"))
-	require.Len(t, pub.calls, 1)
-	assert.Equal(t, "alice", pub.calls[0].userID)
-	assert.Equal(t, "unfollow", pub.calls[0].eventType)
-	assertFollowStreamBody(t, pub.calls[0].body, "bob", false, false)
+	assert.Empty(t, pub.calls, "follower に unfollow を流さない")
+	assert.Equal(t, []string{"bob"}, me.users, "followee に meUpdated を流す")
+	assert.Zero(t, wh.unfollows, "Webhook の unfollow を出さない")
 }
 
 // selectiveFindFailRepo makes FindByPair fail for a single pair so error
@@ -756,7 +757,7 @@ func (r *followerLookupFailRepo) FindByID(id string) (*model.User, error) {
 
 func TestCancelFollowRequestsBetween_NoRequestsIsNoop(t *testing.T) {
 	svc, _, _, _ := newSvc(t)
-	require.NoError(t, svc.CancelFollowRequestsBetween("alice", "bob"))
+	require.NoError(t, svc.CancelFollowRequestsBetween("alice", "bob", false))
 }
 
 func TestCancelFollowRequestsBetween_LocalFollowerUsesCancelPath(t *testing.T) {
@@ -770,7 +771,7 @@ func TestCancelFollowRequestsBetween_LocalFollowerUsesCancelPath(t *testing.T) {
 	fed := &stubFederationHook{}
 	svc.SetFederationHook(fed)
 
-	require.NoError(t, svc.CancelFollowRequestsBetween("bob", "alice"))
+	require.NoError(t, svc.CancelFollowRequestsBetween("bob", "alice", false))
 	assert.Empty(t, frRepo.Requests)
 	assert.Empty(t, hook.rejects, "local follower の取り消しは Reject 通知の掃除を伴わない")
 	assert.Equal(t, []string{"alice->bob"}, fed.unfollowed, "CancelRequest 経路は unfollow hook を呼ぶ")
@@ -786,7 +787,7 @@ func TestCancelFollowRequestsBetween_RemoteFollowerUsesRejectPath(t *testing.T) 
 	hook := &recordingHook{}
 	svc.SetNotificationHook(hook)
 
-	require.NoError(t, svc.CancelFollowRequestsBetween("bob", "remote1"))
+	require.NoError(t, svc.CancelFollowRequestsBetween("bob", "remote1", false))
 	assert.Empty(t, frRepo.Requests)
 	assert.Equal(t, []string{"remote1->bob"}, hook.rejects, "remote follower の取り消しは followee 側の通知を掃除する")
 }
@@ -798,7 +799,7 @@ func TestCancelFollowRequestsBetween_BothDirections(t *testing.T) {
 	require.NoError(t, frRepo.Create(&model.FollowRequest{ID: "r1", FollowerID: "alice", FolloweeID: "bob"}))
 	require.NoError(t, frRepo.Create(&model.FollowRequest{ID: "r2", FollowerID: "bob", FolloweeID: "alice"}))
 
-	require.NoError(t, svc.CancelFollowRequestsBetween("alice", "bob"))
+	require.NoError(t, svc.CancelFollowRequestsBetween("alice", "bob", false))
 	assert.Empty(t, frRepo.Requests, "双方向の申請が消える")
 }
 
@@ -813,7 +814,7 @@ func TestCancelFollowRequestsBetween_ContinuesAfterError(t *testing.T) {
 	require.NoError(t, frRepo.Create(&model.FollowRequest{ID: "r2", FollowerID: "bob", FolloweeID: "alice"}))
 	svc := newSvcWith(userRepo, testutil.NewMockFollowingRepository(), frRepo)
 
-	err := svc.CancelFollowRequestsBetween("alice", "bob")
+	err := svc.CancelFollowRequestsBetween("alice", "bob", false)
 	assert.ErrorIs(t, err, errStub, "失敗した direction の error を返す")
 	assert.Empty(t, frRepo.Requests, "1 方向が失敗してももう片方は処理する")
 }
@@ -828,7 +829,7 @@ func TestCancelFollowRequestsBetween_FollowerLookupFailureStillDeletes(t *testin
 	require.NoError(t, frRepo.Create(&model.FollowRequest{ID: "r1", FollowerID: "alice", FolloweeID: "bob"}))
 	svc := newSvcWith(userRepo, testutil.NewMockFollowingRepository(), frRepo)
 
-	require.NoError(t, svc.CancelFollowRequestsBetween("bob", "alice"))
+	require.NoError(t, svc.CancelFollowRequestsBetween("bob", "alice", false))
 	assert.Empty(t, frRepo.Requests, "lookup 失敗でも申請行は消える")
 }
 
@@ -844,7 +845,7 @@ func TestCancelFollowRequestsBetween_CancelRequestErrorPropagates(t *testing.T) 
 	require.NoError(t, frRepo.Create(&model.FollowRequest{ID: "r1", FollowerID: "alice", FolloweeID: "bob"}))
 	svc := newSvcWith(userRepo, testutil.NewMockFollowingRepository(), frRepo)
 
-	err := svc.CancelFollowRequestsBetween("alice", "bob")
+	err := svc.CancelFollowRequestsBetween("alice", "bob", false)
 	assert.ErrorIs(t, err, errStub, "削除失敗は握り潰さない")
 }
 
@@ -861,7 +862,7 @@ func TestCancelFollowRequestsBetween_RejectRequestErrorPropagates(t *testing.T) 
 	require.NoError(t, frRepo.Create(&model.FollowRequest{ID: "r1", FollowerID: "remote1", FolloweeID: "bob"}))
 	svc := newSvcWith(userRepo, testutil.NewMockFollowingRepository(), frRepo)
 
-	err := svc.CancelFollowRequestsBetween("bob", "remote1")
+	err := svc.CancelFollowRequestsBetween("bob", "remote1", false)
 	assert.ErrorIs(t, err, errStub, "削除失敗は握り潰さない")
 }
 
@@ -1468,10 +1469,10 @@ func TestFollow_NoInstanceRepoStillWorks(t *testing.T) {
 	assert.Len(t, fRepo.Followings, 1)
 }
 
-// #2106 N11: UnfollowSilent は Undo(Follow) を逆配送しない (federationHook 不発火) が、
+// #2106 N11: RemoteReject は Undo(Follow) を逆配送しない (federationHook 不発火) が、
 // main stream の unfollow event は upstream remoteReject 同様に publish する。
-func TestUnfollowSilent_DoesNotFederateButPublishes(t *testing.T) {
-	svc, userRepo, _, _ := newSvc(t)
+func TestRemoteReject_DoesNotFederateButPublishes(t *testing.T) {
+	svc, userRepo, fRepo, _ := newSvc(t)
 	addUser(t, userRepo, "alice", false)
 	addUser(t, userRepo, "bob", false)
 	_, err := svc.Follow("alice", "bob", following.FollowOptions{})
@@ -1483,8 +1484,9 @@ func TestUnfollowSilent_DoesNotFederateButPublishes(t *testing.T) {
 	pub := &stubMainStreamPublisher{}
 	svc.SetMainStreamPublisher(pub)
 
-	require.NoError(t, svc.UnfollowSilent("alice", "bob"))
-	assert.Empty(t, fed.unfollowed, "UnfollowSilent は Undo(Follow) を逆配送しない")
+	require.NoError(t, svc.RemoteReject("alice", "bob"))
+	assert.Empty(t, fed.unfollowed, "RemoteReject は Undo(Follow) を逆配送しない")
+	assert.Empty(t, fRepo.Followings)
 	require.Len(t, pub.calls, 1, "main stream の unfollow event は publish する")
 	assert.Equal(t, "unfollow", pub.calls[0].eventType)
 }
