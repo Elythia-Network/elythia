@@ -924,3 +924,64 @@ func TestNoteDeliveryHook_MentionLookupErrorKeepsReplyDelivery(t *testing.T) {
 
 	require.Len(t, enq.calls, 1, "reply target is still delivered")
 }
+
+// A specified reply always has the reply author among its recipients (the
+// create path adds them), so the reply-target delivery must not send the same
+// Create a second time (#3330). Upstream's DeliverManager merges the
+// recipients into one set.
+func TestNoteDeliveryHook_SpecifiedReplyAuthorDeliveredOnce(t *testing.T) {
+	hook, enq, userRepo, _, keypairRepo, noteRepo := newNoteDeliveryHook(t)
+	author := makeLocalAuthor(t, userRepo, keypairRepo)
+
+	host := "remote.example"
+	bobInbox := "https://remote.example/users/bob/inbox"
+	carolInbox := "https://remote.example/users/carol/inbox"
+	userRepo.Users["bob"] = &model.User{
+		ID: "bob", Username: "bob", UsernameLower: "bob", Host: &host, Inbox: &bobInbox,
+	}
+	userRepo.Users["carol"] = &model.User{
+		ID: "carol", Username: "carol", UsernameLower: "carol", Host: &host, Inbox: &carolInbox,
+	}
+	noteRepo.Notes["bobnote"] = &model.Note{ID: "bobnote", UserID: "bob"}
+	noteRepo.Notes["carolnote"] = &model.Note{ID: "carolnote", UserID: "carol", Visibility: model.NoteVisibilityPublic}
+
+	replyID := "bobnote"
+	renoteID := "carolnote"
+	text := "quote reply"
+	note := makeNote(author.ID, model.NoteVisibilitySpecified)
+	note.Text = &text
+	note.ReplyID = &replyID
+	note.RenoteID = &renoteID
+	note.VisibleUserIDs = model.StringArray{"bob", "carol"}
+	note.Mentions = model.StringArray{"bob", "carol"}
+	hook.OnNoteCreated(note, author)
+
+	inboxes := make([]string, 0, len(enq.calls))
+	for _, c := range enq.calls {
+		inboxes = append(inboxes, c.Inbox)
+	}
+	assert.ElementsMatch(t, []string{bobInbox, carolInbox}, inboxes)
+}
+
+// A non-specified note keeps delivering to the reply author even when a stray
+// visibleUserIds value is left on the row.
+func TestNoteDeliveryHook_NonSpecifiedIgnoresVisibleUserIDsForDedup(t *testing.T) {
+	hook, enq, userRepo, _, keypairRepo, noteRepo := newNoteDeliveryHook(t)
+	author := makeLocalAuthor(t, userRepo, keypairRepo)
+
+	host := "remote.example"
+	inbox := "https://remote.example/users/bob/inbox"
+	userRepo.Users["bob"] = &model.User{
+		ID: "bob", Username: "bob", UsernameLower: "bob", Host: &host, Inbox: &inbox,
+	}
+	noteRepo.Notes["bobnote"] = &model.Note{ID: "bobnote", UserID: "bob"}
+
+	replyID := "bobnote"
+	note := makeNote(author.ID, model.NoteVisibilityFollowers)
+	note.ReplyID = &replyID
+	note.VisibleUserIDs = model.StringArray{"bob"}
+	hook.OnNoteCreated(note, author)
+
+	require.Len(t, enq.calls, 1)
+	assert.Equal(t, inbox, enq.calls[0].Inbox)
+}

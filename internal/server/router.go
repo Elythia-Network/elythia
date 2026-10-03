@@ -869,6 +869,14 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	userService.SetRemoteUserResolver(corefederation.NewRemoteUserResolver(
 		webfingerClient, federationResolver, userRepo, localHost,
 	))
+	// notes/create の DB に無いリモートの利用者へのメンションも同じ経路で取りに行く
+	// (本家 NoteCreateService.extractMentionedUsers → RemoteUserResolveService、#3330)。
+	// 連合しないホストには WebFinger を投げない (hostBlocker は instanceService が
+	// できた後で下の federationResolver と一緒に渡す)。
+	noteMentionResolver := corefederation.NewRemoteUserResolver(
+		webfingerClient, federationResolver, userRepo, localHost,
+	)
+	noteCreateService.SetRemoteUserResolver(noteMentionResolver)
 
 	// Instance management (Phase 3 Step H)
 	instanceService := coreinstance.NewService(instanceRepo, metaRepo, idGen)
@@ -890,6 +898,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// resolver の入口 (fetchActor / resolveNoteOnce / IngestNoteWithCreated) に
 	// 適用する。deliver_service / inboxProcessor と同じ instanceService を共有。
 	federationResolver.SetHostBlockChecker(instanceService)
+	noteMentionResolver.SetHostBlockChecker(instanceService)
 	federationResolver.SetSilencedHostChecker(instanceService)      // #2106 N14: silenced host の public note を home 降格
 	federationResolver.SetMediaSilencedHostChecker(instanceService) // #3218: media silenced host の添付をセンシティブに
 	// 連合のルール (#3090)。ホスト単位の設定 (上の hostBlocker / silenced) に

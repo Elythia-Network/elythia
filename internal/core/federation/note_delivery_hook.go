@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"slices"
 
 	"github.com/shiroha-a/mk/internal/activitypub"
 	corenote "github.com/shiroha-a/mk/internal/core/note"
@@ -161,6 +160,14 @@ func (h *NoteDeliveryHook) deliverToDirectRecipients(author *model.User, note *m
 		return
 	}
 	seen := make(map[string]struct{})
+	// specified の宛先は deliverToSpecified が配り終えている。返信先の作者は
+	// 作成時に宛先へ足されるので、ここで除かないと同じ相手へ 2 回配る (#3330)。
+	// 本家は DeliverManager が宛先を 1 つの集合にまとめるので 1 回だけ届く。
+	if note.Visibility == model.NoteVisibilitySpecified {
+		for _, id := range note.VisibleUserIDs {
+			seen[id] = struct{}{}
+		}
+	}
 	recipients := make([]*model.User, 0, 3)
 
 	add := func(u *model.User) {
@@ -182,7 +189,7 @@ func (h *NoteDeliveryHook) deliverToDirectRecipients(author *model.User, note *m
 	if len(note.Mentions) > 0 {
 		ids := make([]string, 0, len(note.Mentions))
 		for _, id := range note.Mentions {
-			if note.Visibility == model.NoteVisibilitySpecified && slices.Contains(note.VisibleUserIDs, id) {
+			if _, dup := seen[id]; dup {
 				continue
 			}
 			ids = append(ids, id)

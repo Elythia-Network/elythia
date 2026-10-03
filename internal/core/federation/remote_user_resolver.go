@@ -31,6 +31,19 @@ type RemoteUserResolver struct {
 	resolver  actorResolver
 	userRepo  repository.UserRepository
 	localHost string // 自ホスト. host が一致したら webfinger をスキップする.
+	// hostBlocker, when set, skips hosts the instance does not federate with
+	// before the WebFinger request.
+	hostBlocker HostBlockChecker
+}
+
+// ErrRemoteUserHostNotAllowed is returned by ResolveByUsernameHost for a host
+// the instance does not federate with (blocked, or outside the allowlist).
+var ErrRemoteUserHostNotAllowed = errors.New("remote user resolver: host is not allowed")
+
+// SetHostBlockChecker makes ResolveByUsernameHost skip blocked / not-allowed
+// hosts without sending the WebFinger request.
+func (r *RemoteUserResolver) SetHostBlockChecker(c HostBlockChecker) {
+	r.hostBlocker = c
 }
 
 // NewRemoteUserResolver constructs a RemoteUserResolver.
@@ -66,6 +79,12 @@ func (r *RemoteUserResolver) ResolveByUsernameHost(username, host string) (*mode
 	}
 	if r.webfinger == nil || r.resolver == nil {
 		return nil, errors.New("remote user resolver: webfinger or resolver not configured")
+	}
+	// 連合しないホストには WebFinger も投げない。本家 resolveUser は WebFinger を
+	// 投げてから createPerson で弾くが、mk-go の ResolveActor も同じホストを
+	// 弾くので結果 (解決できない) は変わらず、外向きのリクエストだけが減る。
+	if r.hostBlocker != nil && (r.hostBlocker.IsBlocked(host) || !r.hostBlocker.IsAllowed(host)) {
+		return nil, ErrRemoteUserHostNotAllowed
 	}
 	uri, err := r.webfinger.LookupActorURI(username, host)
 	if err != nil {

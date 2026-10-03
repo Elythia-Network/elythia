@@ -3238,11 +3238,15 @@ func (r *Resolver) ingestNoteWithCreated(body []byte, deliveringActorURI string,
 		return nil, false, fmt.Errorf("ingest note: %w", merr)
 	}
 	note.Mentions = mergeMentionIDs(textMentions, tagMentions)
-	// specified visibility では AP `to` 配列が宛先 actor URI 列。CanView の
-	// VisibleUserIDs チェック (core/note/visibility.go) で受信者が note を
-	// 参照できるよう、ここで ID へ解決して埋める (#397)。
+	// specified visibility では AP `to` / `cc` の宛先 actor URI 列を ID へ解決して
+	// 埋める。CanView の VisibleUserIDs チェック (core/note/visibility.go) で受信者が
+	// note を参照できるようにするため (#397)。
+	//
+	// 本家 ApAudienceService.parseAudience は `to` と `cc` の両方から public と
+	// 投稿者の followers を除いた残りを宛先にする。以前は `to` だけを見ていたので、
+	// `cc` に置かれた宛先が DM を読めなかった (#3330)。
 	if note.Visibility == model.NoteVisibilitySpecified {
-		visible, verr := r.resolveMentionedUserIDs(apNote.To)
+		visible, verr := r.resolveMentionedUserIDs(specifiedAudience(actor, apNote.To, apNote.CC))
 		if verr != nil {
 			return nil, false, fmt.Errorf("ingest note: %w", verr)
 		}
@@ -3265,6 +3269,11 @@ func (r *Resolver) ingestNoteWithCreated(body []byte, deliveringActorURI string,
 		}
 		note.VisibleUserIDs = model.StringArray(visible)
 	}
+	// 返信先の作者と specified の宛先も mentions に入れる (本家
+	// NoteCreateService.create が mentionedUsers に足してから insert.mentions に
+	// 書く。ローカルの作成経路と同じ形)。入れないと、Mention tag の無い DM の宛先に
+	// mention 通知が届かず、notes/mentions にも出ない (#3330)。
+	note.Mentions = withImplicitMentions(note, note.Mentions)
 	// upstream Misskey #17167 (= 2026.5.0 fix / triage #1004): mentionLimit を
 	// 超える note は無効と扱い、保存せずに ErrContainsTooManyMentions を返す。
 	// caller (processor.handleCreate) が当該 sentinel を catch して queue retry
@@ -3280,24 +3289,7 @@ func (r *Resolver) ingestNoteWithCreated(body []byte, deliveringActorURI string,
 	// 作者 (自分への返信を除く) と specified の宛先を含む (NoteCreateService.create)。
 	// 宛先を数えないと、Mention tag を持たない DM で宛先を何人でも並べられる
 	// (#3330)。そのため宛先の解決を判定より前に行う。
-	rawTagSet := make(map[string]struct{}, len(tagHrefs))
-	for _, h := range tagHrefs {
-		rawTagSet[h] = struct{}{}
-	}
-	mentionedUsers := make(map[string]struct{})
-	for _, id := range note.Mentions {
-		mentionedUsers[id] = struct{}{}
-	}
-	if replyTarget != nil && replyTarget.UserID != note.UserID {
-		mentionedUsers[replyTarget.UserID] = struct{}{}
-	}
-	if note.Visibility == model.NoteVisibilitySpecified {
-		for _, id := range note.VisibleUserIDs {
-			mentionedUsers[id] = struct{}{}
-		}
-	}
-	effectiveMentions := max(len(mentionedUsers), len(rawTagSet))
-	if corenote.DefaultMentionLimit > 0 && effectiveMentions > corenote.DefaultMentionLimit {
+	if exceedsRemoteMentionLimit(note, note.Mentions, tagHrefs) {
 		return nil, false, corenote.ErrContainsTooManyMentions
 	}
 	// AP Note Tag配列からカスタム絵文字を抽出してDBにupsert
@@ -3736,6 +3728,42 @@ func (r *Resolver) UpdateRemoteNote(body []byte, actorURI string) (*model.Note, 
 			"uri", truncateRunes(apNote.ID, noteURIMaxRunes), "noteId", existing.ID)
 		return existing, nil
 	}
+	// text が変わらなくても tag 配列の Mention は AP Update で変化しうる (#397)。
+	// IngestNote と同じく本文と tag 両方から mention を集めて user ID 配列に
+	// 統一する (mentions 列の意味論を local create 経路と揃えるため)。下の上限の
+	// 判定に使うので、書き込みより前に解決する (#3330)。`existing.Text` はまだ
+	// 書き換えていないので、本文が来なかったときは保存済みの本文を読む。
+	var (
+		textMentions []string
+		merr         error
+	)
+	switch {
+	case newText != "":
+		textMentions, merr = r.resolveTextMentionUserIDs(corenote.ExtractMentionStructs(newText), existing.UserHost)
+	case existing.Text != nil:
+		textMentions, merr = r.resolveTextMentionUserIDs(corenote.ExtractMentionStructs(*existing.Text), existing.UserHost)
+	}
+	if merr != nil {
+		return nil, fmt.Errorf("update remote note: %w", merr)
+	}
+	tagHrefs := extractMentionTags(apNote.Tag)
+	tagMentions, merr := r.resolveMentionedUserIDs(tagHrefs)
+	if merr != nil {
+		return nil, fmt.Errorf("update remote note: %w", merr)
+	}
+	// 作成時と同じく返信先の作者と specified の宛先も足す。足さないと、編集のたびに
+	// 作成時に入れたそれらが mentions から消える。
+	mentions := withImplicitMentions(existing, mergeMentionIDs(textMentions, tagMentions))
+	// メンション数の上限も編集経路に掛ける (#3330)。禁止語と同じく upstream には
+	// 対応物が無い (ノートの Update を取り込まない) が、掛けないと「上限内の note を
+	// 投げてから Update で Mention を増やす」で取り込み時の判定 (#17167 / #17576) を
+	// 素通りできる。数え方は IngestNote と同じ。弾くときは禁止語と同じく更新を
+	// 捨てて ack する (書き込みより前に判定する理由も同じ)。
+	if exceedsRemoteMentionLimit(existing, mentions, tagHrefs) {
+		slog.Info("federation: dropping inbound note update with too many mentions",
+			"uri", truncateRunes(apNote.ID, noteURIMaxRunes), "noteId", existing.ID)
+		return existing, nil
+	}
 	// 連合のルール (#3090) も編集に掛ける。掛けないと「条件に当たらない投稿を
 	// 作ってから Update で差し替える」で素通りできる。判定は更新後の値で行う。
 	var ruleDecision fedrule.Decision
@@ -3772,27 +3800,6 @@ func (r *Resolver) UpdateRemoteNote(body []byte, actorURI string) (*model.Note, 
 		fields["text"] = &newText
 		existing.Text = &newText
 	}
-	// text が変わらなくても tag 配列の Mention は AP Update で変化しうる (#397)。
-	// IngestNote と同じく本文と tag 両方から mention を集めて user ID 配列に
-	// 統一する (mentions 列の意味論を local create 経路と揃えるため)。
-	var (
-		textMentions []string
-		merr         error
-	)
-	switch {
-	case newText != "":
-		textMentions, merr = r.resolveTextMentionUserIDs(corenote.ExtractMentionStructs(newText), existing.UserHost)
-	case existing.Text != nil:
-		textMentions, merr = r.resolveTextMentionUserIDs(corenote.ExtractMentionStructs(*existing.Text), existing.UserHost)
-	}
-	if merr != nil {
-		return nil, fmt.Errorf("update remote note: %w", merr)
-	}
-	tagMentions, merr := r.resolveMentionedUserIDs(extractMentionTags(apNote.Tag))
-	if merr != nil {
-		return nil, fmt.Errorf("update remote note: %w", merr)
-	}
-	mentions := mergeMentionIDs(textMentions, tagMentions)
 	if !slices.Equal([]string(existing.Mentions), []string(mentions)) {
 		fields["mentions"] = mentions
 		existing.Mentions = mentions
@@ -4384,6 +4391,83 @@ func deriveVisibility(to, cc []string) model.NoteVisibility {
 		return model.NoteVisibilityFollowers
 	}
 	return model.NoteVisibilitySpecified
+}
+
+// exceedsRemoteMentionLimit reports whether a remote note with the given
+// resolved mentions and raw Mention tag hrefs is over the mention limit.
+//
+// Mirrors upstream NoteCreateService.create for AP notes: the count is the
+// larger of the distinct resolved users (`mentionedUsers` = the mentions, the
+// reply target's author unless it is the note's author, and for a specified
+// note its recipients) and the number of distinct Mention hrefs
+// (`apMentionRawCount`, #17576). n must carry ReplyUserID, Visibility and
+// VisibleUserIDs.
+func exceedsRemoteMentionLimit(n *model.Note, mentions, tagHrefs []string) bool {
+	rawTagSet := make(map[string]struct{}, len(tagHrefs))
+	for _, h := range tagHrefs {
+		rawTagSet[h] = struct{}{}
+	}
+	mentionedUsers := make(map[string]struct{}, len(mentions))
+	for _, id := range mentions {
+		mentionedUsers[id] = struct{}{}
+	}
+	if n.ReplyUserID != nil && *n.ReplyUserID != "" && *n.ReplyUserID != n.UserID {
+		mentionedUsers[*n.ReplyUserID] = struct{}{}
+	}
+	if n.Visibility == model.NoteVisibilitySpecified {
+		for _, id := range n.VisibleUserIDs {
+			mentionedUsers[id] = struct{}{}
+		}
+	}
+	effective := max(len(mentionedUsers), len(rawTagSet))
+	return corenote.DefaultMentionLimit > 0 && effective > corenote.DefaultMentionLimit
+}
+
+// withImplicitMentions appends to mentions the users upstream
+// NoteCreateService.create adds to mentionedUsers besides the Mention tags: the
+// reply target's author (unless it is the note's author), then for a specified
+// note its recipients. n must carry UserID, ReplyUserID, Visibility and
+// VisibleUserIDs. The result is dedup'd and never nil.
+func withImplicitMentions(n *model.Note, mentions model.StringArray) model.StringArray {
+	var extra []string
+	if n.ReplyUserID != nil && *n.ReplyUserID != "" && *n.ReplyUserID != n.UserID {
+		extra = append(extra, *n.ReplyUserID)
+	}
+	if n.Visibility == model.NoteVisibilitySpecified {
+		extra = append(extra, n.VisibleUserIDs...)
+	}
+	return mergeMentionIDs(mentions, extra)
+}
+
+// specifiedAudience returns the addressees of a specified note: `to` then `cc`,
+// without the public collection and the author's followers collection,
+// de-duplicated. Mirrors upstream ApAudienceService.parseAudience
+// (`unique(concat([toGroups.other, ccGroups.other]))`).
+func specifiedAudience(actor *model.User, to, cc []string) []string {
+	followers := ""
+	if actor != nil {
+		switch {
+		case actor.FollowersURI != nil && *actor.FollowersURI != "":
+			followers = *actor.FollowersURI
+		case actor.URI != nil && *actor.URI != "":
+			followers = *actor.URI + "/followers"
+		}
+	}
+	var out []string
+	seen := make(map[string]struct{})
+	for _, list := range [][]string{to, cc} {
+		for _, id := range list {
+			if hasPublicAudience([]string{id}) || (followers != "" && id == followers) {
+				continue
+			}
+			if _, dup := seen[id]; dup {
+				continue
+			}
+			seen[id] = struct{}{}
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // hasPublicAudience reports whether list contains the AS public collection in
