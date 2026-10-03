@@ -218,8 +218,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	suspensionOriginRepo := repository.NewUserSuspensionOriginRepository(s.db)
 	instanceRepo := repository.NewInstanceRepository(s.db)
 	// instance.{followersCount,followingCount} は following service の
-	// adjustInstanceCountsForFollowing (Follow/Unfollow/AcceptRequest) と
-	// blocking service の auto-unfollow で incremental に維持される
+	// adjustInstanceCountsForFollowing (Follow/Unfollow/AcceptRequest) で
+	// incremental に維持される。block による解除も following.Service の
+	// UnfollowForBlock を通るので同じ経路に乗る
 	// (admin/overview の federation pie chart の data source)。起動時の
 	// backfill は、再起動時点での following テーブルとの整合性回復 +
 	// direct DB 改変や過去の counter drift への安全網として残す (#421)。
@@ -568,14 +569,17 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	s.queueServer.Handle(queue.TaskTypeSystemWebhook, webhookProcessor.HandleSystem)
 
 	// Blocking & Muting
-	blockingService := coreblocking.NewService(userRepo, blockingRepo, followingRepo, idGen)
-	// Block→自動 unfollow 経路でも remote instance counter を更新 (#596)
-	blockingService.SetInstanceRepo(instanceRepo)
+	blockingService := coreblocking.NewService(userRepo, blockingRepo, idGen)
 	// block 時に保留中の follow request を双方向で取り消す。upstream
 	// UserBlockingService.block の cancelRequest 相当。
 	blockingService.SetFollowRequestCanceller(followingService)
-	// block で外れたフォローの unfollow を main stream と Webhook に出す (#3330)。
-	blockingService.SetUnfollowPublisher(followingService)
+	// block で既存のフォローを双方向に解除する。following.Service の unfollow を
+	// 通すので、カウント・チャート・Undo(Follow) / Reject(Follow) の配送・
+	// unfollow のイベントが通常の解除と同じになる (#3330)。
+	blockingService.SetUnfollower(followingService)
+	// block で、ブロックされた側のリストからブロックした人を外す
+	// (本家 removeFromList、#3330)。
+	blockingService.SetUserListRepo(userListRepo)
 	mutingService := coremuting.NewService(userRepo, mutingRepo, idGen)
 	renoteMutingService := coremuting.NewRenoteService(userRepo, renoteMutingRepo, idGen)
 	followingService.SetBlockingChecker(blockingService)
@@ -4529,8 +4533,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"blocking/create・delete の応答が instance・絵文字・ピン留め・移行先・モデレーター向けの項目を欠く"},
 		{"following.meUpdatedPublisher", followingService.HasMeUpdatedPublisher(),
 			"フォロー申請の作成・承認・取り消しで meUpdated が流れず、受け取った申請の印がリロードまで変わらない"},
-		{"blocking.unfollowPublisher", blockingService.HasUnfollowPublisher(),
-			"ブロックでフォローが外れても unfollow の main stream と Webhook が出ない"},
+		{"blocking.unfollower", blockingService.HasUnfollower(),
+			"ブロックしても既存のフォローが外れず、相手のサーバーへ Undo(Follow) / Reject(Follow) も届かない"},
+		{"blocking.userListRepo", blockingService.HasUserListRepo(),
+			"ブロックしても、ブロックされた側のリストにブロックした人が残り、リストのタイムラインに投稿が流れ続ける"},
 		// #3330: 一覧・単体の UserDetailed のピン留め・移行先を users/show と同じ規則で埋める。
 		{"hashtags.detailExtras", hashtagsHandler.HasDetailExtras(),
 			"hashtags/users の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},

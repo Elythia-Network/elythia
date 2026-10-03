@@ -607,7 +607,8 @@ func newProcessorWithBlocking(t *testing.T) (*federation.Processor, *testutil.Mo
 	idGen, _ := id.NewGenerator("aidx")
 	resolver := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
 	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen)
-	blockingSvc := coreblocking.NewService(repo, blockingRepo, followingRepo, idGen)
+	blockingSvc := coreblocking.NewService(repo, blockingRepo, idGen)
+	blockingSvc.SetUnfollower(followingSvc)
 	processor := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo)
 	processor.SetBlockingService(blockingSvc)
 	return processor, repo, blockingRepo

@@ -26,11 +26,9 @@ var (
 
 // Service manages user blocking relationships.
 type Service struct {
-	userRepo      repository.UserRepository
-	blockingRepo  repository.BlockingRepository
-	followingRepo repository.FollowingRepository
-	instanceRepo  repository.InstanceRepository // optional, for #596 incremental counters
-	idGen         id.Generator
+	userRepo     repository.UserRepository
+	blockingRepo repository.BlockingRepository
+	idGen        id.Generator
 	// federationHook は local user が remote user を (un)block した際に
 	// Block / Undo(Block) を相手 inbox へ配信する (#1560)。nil なら配信しない。
 	federationHook FederationHook
@@ -45,28 +43,54 @@ type Service struct {
 	userMaterializer UserMaterializer
 	// relationReload は block 変更を streaming connection へ通知する (#2400)。
 	relationReload RelationReloadPublisher
-	// unfollowPublisher は block で解除したフォローの unfollow を main stream と
-	// Webhook に出す (#3330)。実装は core/following.Service。
-	unfollowPublisher UnfollowPublisher
+	// unfollower は block で既存のフォローを双方向に解除する (#3330)。
+	// 実装は core/following.Service。nil ならフォローを解除しない。
+	unfollower Unfollower
+	// userListRepo は block で、ブロックされた側のリストからブロックした人を
+	// 外すのに使う (#3330)。nil なら外さない。
+	userListRepo repository.UserListRepository
 }
 
-// UnfollowPublisher emits the `unfollow` main stream event and user webhook for
-// a following removed by a block. 実装は core/following.Service。
-type UnfollowPublisher interface {
-	PublishBlockUnfollow(followerID, followeeID string)
-}
-
-// SetUnfollowPublisher wires the unfollow notification for block-removed
-// followings.
-func (s *Service) SetUnfollowPublisher(p UnfollowPublisher) {
-	s.unfollowPublisher = p
-}
-
-// HasUnfollowPublisher reports whether the unfollow publisher was wired.
+// SetUserListRepo wires the user list repository used by Block to remove the
+// blocker from the blockee's lists (#3330).
 //
-// 未配線だと、ブロックでフォローが外れても本人の画面のフォローボタンが
-// リロードまで戻らず、unfollow の Webhook も出ない。起動時検査に使う。
-func (s *Service) HasUnfollowPublisher() bool { return s.unfollowPublisher != nil }
+// 本家 UserBlockingService.block は removeFromList(blockee, blocker) で、
+// ブロックされた側が持つ全てのリストからブロックした人を外す。外さないと、
+// ブロックされた側のリストのタイムラインにブロックした人の投稿が流れ続ける。
+func (s *Service) SetUserListRepo(r repository.UserListRepository) {
+	s.userListRepo = r
+}
+
+// HasUserListRepo reports whether the user list repository was wired.
+// 起動時検査に使う。
+func (s *Service) HasUserListRepo() bool { return s.userListRepo != nil }
+
+// Unfollower removes a following on behalf of a block. 実装は
+// core/following.Service。
+type Unfollower interface {
+	// UnfollowForBlock removes the follower→followee following if it exists.
+	// A missing following is not an error. silent suppresses only the
+	// `unfollow` main stream event and user webhook; counts, charts and AP
+	// delivery (Undo(Follow) / Reject(Follow)) still happen.
+	UnfollowForBlock(followerID, followeeID string, silent bool) error
+}
+
+// SetUnfollower wires the following removal used by Block (#3330).
+//
+// 本家 UserBlockingService.block は UserFollowingService.unfollow を双方向で
+// 呼ぶ。解除の本体 (行の削除、移行済みならカウントを触らない規則、利用者と
+// インスタンスのカウント、チャート、Undo(Follow) / Reject(Follow) の配送、
+// unfollow のイベント、following snapshot の再読込) を following.Service の
+// 1 か所に寄せるため、block 側では行を消さずにこれへ委ねる。以前は block 側で
+// 行とカウントだけを直接いじっていたので、配送もチャートも抜けていた。
+func (s *Service) SetUnfollower(u Unfollower) {
+	s.unfollower = u
+}
+
+// HasUnfollower reports whether the unfollower was wired.
+//
+// 未配線だと、ブロックしても既存のフォローが残る。起動時検査に使う。
+func (s *Service) HasUnfollower() bool { return s.unfollower != nil }
 
 // FederationHook delivers Block / Undo(Block) AP activities to a remote
 // blockee on local block / unblock (#1560)。実装は core/federation。
@@ -116,27 +140,17 @@ func (s *Service) SetFederationHook(h FederationHook) {
 }
 
 // NewService constructs a UserBlockingService.
-// followingRepo は省略可だが、指定されているとブロック時に既存のフォロー関係を
-// 自動解除する。
+// ブロック時の既存フォローの解除は SetUnfollower で配線する。
 func NewService(
 	userRepo repository.UserRepository,
 	blockingRepo repository.BlockingRepository,
-	followingRepo repository.FollowingRepository,
 	idGen id.Generator,
 ) *Service {
 	return &Service{
-		userRepo:      userRepo,
-		blockingRepo:  blockingRepo,
-		followingRepo: followingRepo,
-		idGen:         idGen,
+		userRepo:     userRepo,
+		blockingRepo: blockingRepo,
+		idGen:        idGen,
 	}
-}
-
-// SetInstanceRepo wires an InstanceRepository so the auto-unfollow side effect
-// of Block also adjusts remote instance followers/following counts (#596)。
-// 未配線でも本機能には影響しない (起動時 RecomputeFollowCounts が安全網)。
-func (s *Service) SetInstanceRepo(r repository.InstanceRepository) {
-	s.instanceRepo = r
 }
 
 // RelationReloadPublisher notifies streaming connections that a viewer's
@@ -211,23 +225,16 @@ func (s *Service) block(blockerID, blockeeID string, silent bool) (*model.Blocki
 		return nil, err
 	}
 
-	// 既存のフォロー関係を双方向で解除する。fold-in counterも調整する。
-	var blockerUnfollowed, blockeeUnfollowed bool
-	if s.followingRepo != nil {
-		blockerUnfollowed = s.removeFollowing(blockerID, blockeeID)
-		blockeeUnfollowed = s.removeFollowing(blockeeID, blockerID)
-	}
-	// 本家 block は UserFollowingService.unfollow を双方向で呼ぶので、外れた
-	// フォローごとに、follower がローカルなら unfollow が main stream と Webhook
-	// に出る (silent のときは出さない)。
-	if !silent && s.unfollowPublisher != nil {
-		if blockerUnfollowed {
-			s.unfollowPublisher.PublishBlockUnfollow(blockerID, blockeeID)
-		}
-		if blockeeUnfollowed {
-			s.unfollowPublisher.PublishBlockUnfollow(blockeeID, blockerID)
-		}
-	}
+	// 既存のフォロー関係を双方向で解除する。本家 block の
+	// `userFollowingService.unfollow(blocker, blockee, silent)` と逆向きの 2 回に
+	// 当たり、Undo(Follow) / Reject(Follow) は向きごとに 1 回だけ出る。どちらも
+	// 下の Block の配送より前に積む (本家も Promise.all を待ってから Block を
+	// 配送する)。
+	s.unfollowForBlock(blockerID, blockeeID, silent)
+	s.unfollowForBlock(blockeeID, blockerID, silent)
+	// ブロックされた側のリストからブロックした人を外す。本家 removeFromList と
+	// 同じく、向きはこの 1 方向だけで、silent でも外し、イベントは出さない。
+	s.removeFromLists(blockeeID, blockerID)
 
 	// 保留中の follow request を双方向で取り消す。upstream
 	// UserBlockingService.block の cancelRequest 相当。
@@ -250,34 +257,65 @@ func (s *Service) block(blockerID, blockeeID string, silent bool) (*model.Blocki
 		s.federationHook.OnBlocked(blockerID, blockeeID)
 	}
 
-	s.publishBlockReload(blockerID, blockeeID, blockerUnfollowed, blockeeUnfollowed)
+	s.publishBlockReload(blockeeID)
 	return b, nil
 }
 
-// publishBlockReload notifies both sides of a block/unblock (#2400).
+// unfollowForBlock removes the follower→followee following through the wired
+// Unfollower.
+//
+// 失敗しても block は成立させる (best-effort)。mk-go は block 行を先に作るので、
+// ここで中断すると申請の取り消しと Block の配送が抜ける。
+func (s *Service) unfollowForBlock(followerID, followeeID string, silent bool) {
+	if s.unfollower == nil {
+		return
+	}
+	if err := s.unfollower.UnfollowForBlock(followerID, followeeID, silent); err != nil {
+		slog.Warn("block: unfollow failed",
+			"follower", followerID, "followee", followeeID, "err", err)
+	}
+}
+
+// removeFromLists removes userID from every user list owned by listOwnerID.
+//
+// 本家 UserBlockingService.removeFromList と同じく、メンバーの行を消すだけで
+// userListMemberRemoved / userRemoved は流さない (本家もリポジトリを直接
+// delete している)。失敗しても block は成立させる (best-effort)。
+func (s *Service) removeFromLists(listOwnerID, userID string) {
+	if s.userListRepo == nil {
+		return
+	}
+	lists, err := s.userListRepo.ListsContainingMember(listOwnerID, userID)
+	if err != nil {
+		slog.Warn("block: list memberships lookup failed",
+			"owner", listOwnerID, "user", userID, "err", err)
+		return
+	}
+	for _, l := range lists {
+		if err := s.userListRepo.RemoveMember(l.ID, userID); err != nil {
+			slog.Warn("block: remove from list failed",
+				"list", l.ID, "user", userID, "err", err)
+		}
+	}
+}
+
+// publishBlockReload notifies the blockee's streams of a block (#2400).
 //
 // **向きに注意。** MuteBlockSnapshot が持つのは `BlockingMe` (= 自分を block して
 // いる人) なので、block/unblock で mute-block snapshot が変わるのは **blockee 側**。
 // ここを blocker 側にすると「block したのに相手の画面に流れ続ける」形で残る。
 //
-// あわせて Block は既存 follow を双方向で解除しうる。**実際に解除された側だけ**
-// following の通知を出す。無条件に出すと、follow 関係の無い相手を block した
-// ときにも reload が 2 回飛び、接続中の全 connection で無駄な DB 往復が起きる。
+// Block が外したフォローの following snapshot は、解除を担う following.Service
+// の unfollow が**実際に解除した側だけ**に通知する。ここでも出すと同じ接続へ
+// reload が 2 回飛ぶ。
 //
 // Unblock は follow を復元しないので本関数を使わず、mute-block だけを直接
 // 通知している。
-func (s *Service) publishBlockReload(blockerID, blockeeID string, blockerUnfollowed, blockeeUnfollowed bool) {
+func (s *Service) publishBlockReload(blockeeID string) {
 	if s.relationReload == nil {
 		return
 	}
-	// blockee: BlockingMe が増える。
 	s.relationReload.PublishMuteBlockReload(blockeeID)
-	if blockerUnfollowed {
-		s.relationReload.PublishFollowingReload(blockerID)
-	}
-	if blockeeUnfollowed {
-		s.relationReload.PublishFollowingReload(blockeeID)
-	}
 }
 
 // Unblock removes a blocking relationship.
@@ -319,46 +357,6 @@ func (s *Service) List(blockerID, sinceID, untilID string, limit, offset int) ([
 		limit = 10
 	}
 	return s.blockingRepo.ListByBlocker(blockerID, sinceID, untilID, limit, offset)
-}
-
-// removeFollowing deletes a follow edge if it exists and adjusts counters.
-// エラーは握り潰し (ベストエフォート)。
-//
-// IMPORTANT: instance counter 調整ロジックは following.Service の
-// adjustInstanceCountsForFollowing と **mirror で維持** すること。循環依存
-// 回避のため共通 helper にせず inline しているので、片方変更時には他方も
-// 揃える (#596 / PR #626 review)。
-// 戻り値は「実際に follow row を消したか」。streaming の following snapshot は
-// 解除が起きたときだけ取り直せばよく、無条件に通知すると block のたびに無駄な
-// reload と DB 往復が 2 回増える (#2400)。
-func (s *Service) removeFollowing(followerID, followeeID string) bool {
-	f, err := s.followingRepo.FindByPair(followerID, followeeID)
-	if err != nil {
-		return false
-	}
-	if err := s.followingRepo.Delete(f); err != nil {
-		return false
-	}
-	_ = s.userRepo.IncrementFollowingCount(followerID, -1)
-	_ = s.userRepo.IncrementFollowersCount(followeeID, -1)
-	// remote instance の集計列も -1 する (#596)。block→自動 unfollow 経路で
-	// follow row が消えるので following.Service.Unfollow と同じ調整が必要。
-	// 失敗は warn-log で観測 signal を残す (following.Service と同様)。
-	if s.instanceRepo != nil {
-		if f.FollowerHost != nil {
-			if err := s.instanceRepo.IncrementFollowersCount(*f.FollowerHost, -1); err != nil {
-				slog.Warn("instance counter: followersCount adjust failed (block path)",
-					"host", *f.FollowerHost, "delta", -1, "err", err)
-			}
-		}
-		if f.FolloweeHost != nil {
-			if err := s.instanceRepo.IncrementFollowingCount(*f.FolloweeHost, -1); err != nil {
-				slog.Warn("instance counter: followingCount adjust failed (block path)",
-					"host", *f.FolloweeHost, "delta", -1, "err", err)
-			}
-		}
-	}
-	return true
 }
 
 // UserMaterializer promotes a relay-only author out of the ephemeral store

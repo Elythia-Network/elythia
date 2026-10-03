@@ -381,12 +381,7 @@ func (s *Service) SetInstanceRepo(r repository.InstanceRepository) {
 // 該当 remote instance の followersCount / followingCount を delta 分動かす。
 // delta は +1 (create) / -1 (delete)。両 host が non-nil なら両方更新。
 // best-effort: 失敗しても呼び出し元には伝えない (起動時 RecomputeFollowCounts
-// で eventually 復旧)。
-//
-// IMPORTANT: blocking.Service.removeFollowing も同等の調整を inline で
-// 行っている。循環依存回避のため共通 helper にしていないので、本関数の
-// counter 調整ロジックを変えるときは blocking 側も **mirror で維持** する
-// (PR #626 review)。
+// で eventually 復旧)。block による解除も UnfollowForBlock 経由でここを通る。
 func (s *Service) adjustInstanceCountsForFollowing(f *model.Following, delta int) {
 	if s.instanceRepo == nil || delta == 0 {
 		return
@@ -680,15 +675,19 @@ func (s *Service) unfollow(followerID, followeeID string, opts unfollowOpts) err
 			if opts.deliver && s.federationHook != nil {
 				s.federationHook.OnLocalUnfollowed(follower, followee)
 			}
-			if s.chartHook != nil {
+			// チャートもカウントと同じく、どちらかが移行済みなら触らない。本家
+			// decrementFollowing は perUserFollowingChart / instanceChart の更新を
+			// `!movedToUri` の分岐の中でだけ行う (移行済みの側は "TODO: adjust
+			// charts" のまま何もしない)。
+			if s.chartHook != nil && !moved {
 				s.chartHook.OnUnfollow(follower, followee)
 			}
 			// TS本家は自分が unfollow した相手を main に publish する
-			// (フォローボタン等の即時反映)。follow event と同様、UserDetailed
-			// shapeでisFollowing=false / hasPendingFollowRequestFromYou=falseを
-			// 明示的に埋める (frontendはこれらを直接代入するのでundefined不可)。
+			// (フォローボタン等の即時反映)。本家 unfollow の
+			// `!silent && isLocalUser(follower)` と同じく、follower がローカルの
+			// ときだけ main stream と Webhook に出す。
 			if opts.notify {
-				s.notifyFolloweeEvent("unfollow", follower, followee, false, true)
+				s.publishUnfollow(follower, followee)
 			}
 		}
 	}
@@ -1020,21 +1019,20 @@ func (s *Service) RemoteReject(followerID, followeeID string) error {
 	return nil
 }
 
-// PublishBlockUnfollow emits `unfollow` for a following removed by a block.
+// UnfollowForBlock removes the follower→followee following for a block, with
+// the same side effects as Unfollow. A missing following is not an error.
+// silent suppresses only the `unfollow` main stream event and user webhook.
 //
-// 本家 UserBlockingService.block は UserFollowingService.unfollow を双方向で
-// 呼ぶので、follower がローカルなら main stream と Webhook に unfollow が出る。
-// mk-go の block は関係の行を blocking 側で消すので、通知だけをここで出す。
-func (s *Service) PublishBlockUnfollow(followerID, followeeID string) {
-	if s.mainStreamPublisher == nil && s.webhookHook == nil {
-		return
+// 本家 UserBlockingService.block は UserFollowingService.unfollow(blocker,
+// blockee, silent) を双方向で呼ぶ。silent が止めるのは unfollow の publish と
+// Webhook だけで、カウント・チャート・Undo(Follow) / Reject(Follow) の配送は
+// silent でも行う (ブロックのインポートでも相手のサーバーへ解除を伝える)。
+func (s *Service) UnfollowForBlock(followerID, followeeID string, silent bool) error {
+	err := s.unfollow(followerID, followeeID, unfollowOpts{deliver: true, notify: !silent})
+	if errors.Is(err, ErrNotFollowing) {
+		return nil
 	}
-	follower, ferr := s.userRepo.FindByID(followerID)
-	followee, eerr := s.userRepo.FindByID(followeeID)
-	if ferr != nil || eerr != nil {
-		return
-	}
-	s.publishUnfollow(follower, followee)
+	return err
 }
 
 // ListReceivedRequests returns follow requests received by userID. sinceID /

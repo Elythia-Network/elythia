@@ -190,17 +190,56 @@ func TestCancelFollowRequestsBetween_SilentSkipsUnfollow(t *testing.T) {
 	assert.Zero(t, r.wh.unfollows)
 }
 
-// ブロックで外れたフォローは、follower がローカルなら unfollow を出す。
-func TestPublishBlockUnfollow(t *testing.T) {
-	r := newRequestEventsSvc(t, localUser("alice", false), localUser("bob", false), remoteUser("carol", false))
-	r.svc.PublishBlockUnfollow("alice", "bob")
-	assert.Equal(t, []string{"alice:unfollow"}, r.events())
-	assert.Equal(t, 1, r.wh.unfollows)
+// ブロックで外れるフォローは通常の unfollow と同じ後始末を通る (#3330)。本家
+// UserBlockingService.block は UserFollowingService.unfollow(blocker, blockee,
+// silent) を双方向で呼ぶので、行の削除・カウント・チャート・配送・unfollow の
+// イベントが揃う。follower がローカルのときだけ unfollow を出す。
+func TestUnfollowForBlock(t *testing.T) {
+	cases := []struct {
+		name       string
+		follower   *model.User
+		silent     bool
+		wantEvents []string
+		wantHooks  int
+	}{
+		{"local follower gets unfollow", localUser("alice", false), false, []string{"alice:unfollow"}, 1},
+		{"silent suppresses only the events", localUser("alice", false), true, []string{}, 0},
+		{"remote follower gets no unfollow", remoteUser("carol", false), false, []string{}, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newRequestEventsSvc(t, tc.follower, localUser("bob", false))
+			chart := &recordingChartHook{}
+			r.svc.SetChartHook(chart)
+			_, err := r.svc.Follow(tc.follower.ID, "bob", following.FollowOptions{})
+			require.NoError(t, err)
+			r.reset()
+			chart.unfollows = nil
 
-	r.reset()
-	r.svc.PublishBlockUnfollow("carol", "bob")
-	assert.Empty(t, r.events(), "リモートの follower には出さない")
-	assert.Zero(t, r.wh.unfollows)
+			require.NoError(t, r.svc.UnfollowForBlock(tc.follower.ID, "bob", tc.silent))
+
+			still, err := r.svc.IsFollowing(tc.follower.ID, "bob")
+			require.NoError(t, err)
+			assert.False(t, still, "the following row is removed")
+			assert.Equal(t, 0, tc.follower.FollowingCount)
+			assert.Equal(t, [][2]string{{tc.follower.ID, "bob"}}, chart.unfollows,
+				"charts are updated even when silent")
+			// 配送の要否 (Undo(Follow) / Reject(Follow) / ローカル同士は無し) は
+			// federationHook の実装が向きで決める。silent でも渡す。
+			assert.Equal(t, []string{tc.follower.ID + "->bob"}, r.fed.unfollowed,
+				"AP delivery is requested even when silent")
+			assert.Equal(t, tc.wantEvents, r.events())
+			assert.Equal(t, tc.wantHooks, r.wh.unfollows)
+		})
+	}
+}
+
+// フォローしていない向きはエラーにしない (block は関係の有無を問わず両方向を呼ぶ)。
+func TestUnfollowForBlock_NotFollowingIsNoop(t *testing.T) {
+	r := newRequestEventsSvc(t, localUser("alice", false), localUser("bob", false))
+	require.NoError(t, r.svc.UnfollowForBlock("alice", "bob", false))
+	assert.Empty(t, r.events())
+	assert.Empty(t, r.fed.unfollowed, "nothing is delivered without a following")
 }
 
 func TestService_HasMeUpdatedPublisher(t *testing.T) {

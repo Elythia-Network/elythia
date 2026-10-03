@@ -45,11 +45,12 @@ func TestService_Block_NotifiesBlockeeNotBlocker(t *testing.T) {
 // follow 関係が無い相手を block したときは following の通知を出さない。
 // 無条件に出すと接続中の全 connection で無駄な DB 往復が起きる。
 func TestService_Block_NoFollowingNotifyWhenNotFollowing(t *testing.T) {
-	svc, userRepo, _, _ := newSvc(t)
+	svc, userRepo, _, _, followingSvc := newSvcWithFollowing(t)
 	addUser(userRepo, "alice")
 	addUser(userRepo, "bob")
 	pub := &recordingReloadPublisher{}
 	svc.SetRelationReloadPublisher(pub)
+	followingSvc.SetRelationReloadPublisher(pub)
 
 	_, err := svc.Block("alice", "bob")
 	require.NoError(t, err)
@@ -58,9 +59,10 @@ func TestService_Block_NoFollowingNotifyWhenNotFollowing(t *testing.T) {
 	assert.Empty(t, pub.following, "解除する follow が無ければ通知しない")
 }
 
-// 実際に解除された側だけ following の通知を出す。
+// 実際に解除された側だけ following の通知を出す。通知は解除を担う
+// following.Service が出し、blocking 側では重ねない (重ねると同じ接続へ 2 回飛ぶ)。
 func TestService_Block_NotifiesUnfollowedSideOnly(t *testing.T) {
-	svc, userRepo, _, fRepo := newSvc(t)
+	svc, userRepo, _, fRepo, followingSvc := newSvcWithFollowing(t)
 	addUser(userRepo, "alice")
 	addUser(userRepo, "bob")
 	// alice → bob の片方向 follow だけを張る。
@@ -69,12 +71,13 @@ func TestService_Block_NotifiesUnfollowedSideOnly(t *testing.T) {
 	}))
 	pub := &recordingReloadPublisher{}
 	svc.SetRelationReloadPublisher(pub)
+	followingSvc.SetRelationReloadPublisher(pub)
 
 	_, err := svc.Block("alice", "bob")
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{"alice"}, pub.following,
-		"follow を持っていた alice 側だけ通知する")
+		"follow を持っていた alice 側だけ、1 回だけ通知する")
 }
 
 // unblock は follow を復元しないので following の通知は出さない。

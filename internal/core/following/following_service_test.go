@@ -1580,16 +1580,20 @@ func TestFollow_CarefulBot_NonBotFollowerFollowsDirectly(t *testing.T) {
 //
 // アカウント移行時に PostMoveProcess が「unfollow せずカウントだけ落とす」調整を
 // 先に済ませているので、ここで無条件に減らすと二重に減る。
+//
+// チャートも同じ分岐の中でだけ更新する (本家は移行済みの側を "TODO: adjust
+// charts" のまま触らない)。
 func TestUnfollow_SkipsCountAdjustmentWhenMoved(t *testing.T) {
 	cases := []struct {
 		name         string
 		movedUser    string // movedToUri を立てるユーザー ("" ならどちらも未移行)
 		wantFollow   int    // unfollow 後の alice.FollowingCount
 		wantFollower int    // unfollow 後の bob.FollowersCount
+		wantCharts   int    // chartHook.OnUnfollow の呼び出し回数
 	}{
-		{"未移行なら通常どおり減らす", "", 0, 0},
-		{"follower が移行済みなら触らない", "alice", 1, 1},
-		{"followee が移行済みなら触らない", "bob", 1, 1},
+		{"未移行なら通常どおり減らす", "", 0, 0, 1},
+		{"follower が移行済みなら触らない", "alice", 1, 1, 0},
+		{"followee が移行済みなら触らない", "bob", 1, 1, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1600,6 +1604,8 @@ func TestUnfollow_SkipsCountAdjustmentWhenMoved(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, 1, userRepo.Users["alice"].FollowingCount)
 			require.Equal(t, 1, userRepo.Users["bob"].FollowersCount)
+			chart := &recordingChartHook{}
+			svc.SetChartHook(chart)
 
 			if tc.movedUser != "" {
 				moved := "https://elsewhere.example/users/x"
@@ -1612,6 +1618,7 @@ func TestUnfollow_SkipsCountAdjustmentWhenMoved(t *testing.T) {
 			assert.Empty(t, fRepo.Followings, "the following row is always removed")
 			assert.Equal(t, tc.wantFollow, userRepo.Users["alice"].FollowingCount)
 			assert.Equal(t, tc.wantFollower, userRepo.Users["bob"].FollowersCount)
+			assert.Len(t, chart.unfollows, tc.wantCharts)
 		})
 	}
 }
