@@ -2,8 +2,11 @@ package entitycompat
 
 import (
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // pluginbuildExemptDockerfiles lists Dockerfiles that build cmd/misskey but are
@@ -277,4 +280,47 @@ func commandBuildIndex(cmd string) int {
 		}
 	}
 	return -1
+}
+
+// looksLikeDockerfile reports whether path names a container build file.
+//
+// **接頭辞一致では足りず、部分一致では広すぎる。** `bundled.Dockerfile` のように
+// 接尾辞で書くのも `Containerfile` (OCI / podman の綴り) も正規の命名なので
+// 接頭辞だけだと黙って走査から外れるが、単純な部分一致にすると
+// `pluginbuild_dockerfile_test.go` のような **Go ソースまで Dockerfile として
+// 読む** (実測でそうなった)。名前そのもの / `<name>.` 始まり / `.<name>` 終わりの
+// 3 通りに絞る。
+func looksLikeDockerfile(path string) bool {
+	base := strings.ToLower(filepath.Base(path))
+	for _, name := range []string{"dockerfile", "containerfile"} {
+		if base == name || strings.HasPrefix(base, name+".") || strings.HasSuffix(base, "."+name) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestLooksLikeDockerfile pins which file names the Dockerfile scans pick up.
+func TestLooksLikeDockerfile(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{"Dockerfile", true},
+		{"Dockerfile.bundled", true},
+		{"deploy/uds/Dockerfile.mkgo", true},
+		{"bundled.Dockerfile", true},
+		{"Containerfile", true},
+		{"containerfile.dev", true},
+		// Go / md のソースを混ぜると、doc やテストに書いた例を Dockerfile として
+		// 読んでしまう (実測で `pluginbuild_dockerfile_test.go` が入った)。
+		{"internal/entitycompat/pluginbuild_dockerfile_test.go", false},
+		{"docs/dockerfile-notes.md", false},
+		{"Makefile", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			require.Equal(t, tt.want, looksLikeDockerfile(tt.path))
+		})
+	}
 }

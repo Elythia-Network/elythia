@@ -91,5 +91,5 @@ frontend/packages/*/built
 !frontend/node_modules/@misskey-dev/emoji-assets
 !frontend/node_modules/@misskey-dev/emoji-assets/**
 !frontend/node_modules/.pnpm/*emoji-assets*/**
-# frontend/built (SPA のビルド成果物) は外さない。Dockerfile.bundled の assets-local と
-# 連合 e2e の Dockerfile.mkgo が COPY する。
+# frontend/built (SPA のビルド成果物) は外さない。連合 e2e の Dockerfile.mkgo が
+# COPY する (Dockerfile.bundled は image の中でビルドし直すので使わない)。

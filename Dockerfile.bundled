@@ -1,54 +1,32 @@
 # フロントエンドアセットを同梱した mk-go イメージ。
 #
-# 既存の `Dockerfile` はホスト側で `pnpm install && pnpm build` 済みであること
-# を前提に submodule からアセットを COPY し、SPA 本体 (約 200MB) は
-# `frontend/built` の bind-mount で渡す。そのため
+# 既存の `Dockerfile` はアセットのうち静的なものだけを焼き込み、SPA 本体
+# (約 200MB) は `frontend/built` の bind-mount で渡す。そのため publish した
+# イメージが単体では起動できない。こちらは frontend/ を image の中でビルドして
+# 同梱するので、pull しただけで起動できる。ホストの frontend/built や
+# node_modules には一切依存しない (検証目的のビルドで本番の配信元を壊さない)。
 #
-#   - イメージのビルドがホストの状態に依存して再現しない
-#   - bind-mount 先が本番の配信元と同一で、検証目的のビルドで本番を壊せる
-#   - publish したイメージが単体で起動できない
-#
-# という問題がある。こちらは fork が publish するアセット専用イメージから
-# すべてを COPY するので、submodule のホスト状態に一切依存せず、pull した
-# だけで起動できる。
-#
-# 既存の `Dockerfile` / `docker-compose.yml` / `make docker-*` は変更していない。
-# 従来のビルド&起動フローはそのまま使える。
+# 以前は fork (shiroha-a/misskey-ts) が publish する assets image を digest で
+# 引いていた。frontend を本体へ取り込んだので、ここでビルドする (#3379)。
+# プラグインの frontend も常に含まれる (以前の ASSETS_SOURCE=local は要らない)。
 #
 # 使い方:
 #   docker build -f Dockerfile.bundled -t mk-go:bundled .
 #   docker compose -f docker-compose.image.yml up -d   (publish 済みイメージを pull)
 
-# **tag と digest を併記する。** tag は付け替えられるので、tag だけだと fork 側で
-# 同じ tag を publish し直したとき (あるいは registry の書き込み権を奪われたとき)
-# に中身が黙って変わる。digest があると BuildKit は tag を無視して digest で
-# pull する。tag を残すのは doc の pin 行と突き合わせるため
-# (`make submodulepin-check`)。**tag を上げたら digest も必ず取り直す** — 古い
-# digest のままだと tag だけ新しい古い frontend が焼き込まれる。docker.yml の
-# `build-and-push-bundled` が tag と digest の対応を registry に問い合わせて確かめる。
-# 取り直し方は docs/upstream-catch-up.md。
-ARG MISSKEY_ASSETS_IMAGE=ghcr.io/shiroha-a/misskey-ts-assets:2026.10.0-mk.5@sha256:97f5905b2f7af79137c8fe389b6c4293780afea29e1994060731cdf21148a49d
-
-# アセットの供給元。既定は external (公式のアセットイメージ) で、プラグインの
-# frontend を含めたいときだけ local に切り替える (#2940)。
+# Stage 1: プラグインの組み込み用ファイルを生成する
 #
-# **最初の FROM より前に宣言しなければならない。** FROM の変数展開に使えるのは
-# global ARG だけで、stage の中で宣言したものは展開に参加しない。しかも
-# `--build-arg` を渡しても救われない (未宣言の build-arg は metaArgs に入らない)
-# ので、置き場所を間違えると `assets-` という不正な stage 名になり **既定の
-# ビルドまで落ちる**。
-ARG ASSETS_SOURCE=external
-
-# Stage 1: Go binary
-#
-# 既存 Dockerfile の builder stage と同じ手順。ただし submodule のアセットを
-# 参照しないので、`pnpm install` 済みかどうかの事前チェックは不要。
+# plugins/ に置かれたプラグインをビルドに取り込む (#2940)。生成物は gitignore
+# されているので、ここで生成しないと **image だけプラグイン無しになる**。しかも
+# エラーにならないので、運営者は「入ったつもり」で起動できてしまう。生成物は
+# Go 側 (cmd/misskey/plugins_generated.go) と frontend 側
+# (server-plugins.generated.ts など) の両方で、下の 2 つの stage が使う。
 #
 # patch version まで固定する (`Dockerfile` と同じ理由)。go.mod の `go` directive
-# と揃っていることを CI の `vulncheck` job が見る。上の assets image と同じく
-# tag だけでは中身が固定されないので、base image も digest を併記する
-# (`Dockerfile` と同じ値。更新は dependabot の `docker` が digest ごと上げる)。
-FROM golang:1.27.1-alpine@sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414 AS builder
+# と揃っていることを CI の `vulncheck` job が見る。tag だけでは中身が固定されない
+# ので digest を併記する (`Dockerfile` と同じ値。更新は dependabot の `docker` が
+# digest ごと上げる)。
+FROM golang:1.27.1-alpine@sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414 AS plugingen
 
 # git は go mod download 時の private module fetch に使う (通常の Dockerfile と同じ)。
 # plugins/ のプラグインが private な依存を持つ場合にここで要る。
@@ -58,22 +36,23 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-
-# `-tags nodynamic` は必須。CGO_ENABLED=0 だけでは gen2brain/webp の purego
-# (dlopen) 経路が残って musl に動的リンクされ、distroless で
-# `exec /app/misskey: no such file or directory` になる (#619)。
-#
-# plugins/ に置かれたプラグインをビルドに取り込む (#2940)。生成物は gitignore
-# されているので、ここで生成しないと **image だけプラグイン無しになる**。しかも
-# エラーにならないので、運営者は「入ったつもり」で起動できてしまう。
-#
-# **frontend を持つプラグインを含めるには ASSETS_SOURCE=local が要る。** 既定の
-# assets イメージは mk-go 公式のビルドなので、プラグインの .vue は入っていない。
-# pluginbuild は submodule 未取得かつ frontend を持つプラグインがあるとき明示的に
-# 落ちるので、片肺で組み込まれた image が黙って出来ることはない。
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     GOWORK=off go run ./tools/pluginbuild && \
+    mkdir -p /gen/src && \
+    cp frontend/packages/frontend/src/server-plugins.generated.ts /gen/src/ && \
+    if [ -f frontend/packages/frontend/mk-plugins.generated.json ]; then \
+        cp frontend/packages/frontend/mk-plugins.generated.json /gen/; \
+    fi
+
+# Stage 2: Go binary
+#
+# `-tags nodynamic` は必須。CGO_ENABLED=0 だけでは gen2brain/webp の purego
+# (dlopen) 経路が残って musl に動的リンクされ、distroless で
+# `exec /app/misskey: no such file or directory` になる (#619)。
+FROM plugingen AS builder
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 go build -tags nodynamic -trimpath -ldflags="-s -w" -o /app/built/misskey ./cmd/misskey && \
     CGO_ENABLED=0 go build -tags nodynamic -trimpath -ldflags="-s -w" -o /app/built/migrate ./cmd/migrate && \
     CGO_ENABLED=0 go build -tags nodynamic -trimpath -ldflags="-s -w" -o /app/built/backfill-remote-host ./cmd/backfill-remote-host && \
@@ -81,34 +60,56 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 go build -tags nodynamic -trimpath -ldflags="-s -w" -o /app/built/backfill-avatar-public-url ./cmd/backfill-avatar-public-url && \
     CGO_ENABLED=0 go build -tags nodynamic -trimpath -ldflags="-s -w" -o /app/built/backfill-instance-counts ./cmd/backfill-instance-counts
 
-# Stage 2: フロントエンドアセット
+# Stage 3: frontend
 #
-# fork (shiroha-a/misskey-ts) が `X.Y.Z-mk.N` タグごとに publish する
-# `FROM scratch` のデータイメージ。backend を含まないので 228MB
-# (Misskey フルイメージは 1.66GB)。
+# frontend/ の SPA をビルドする。手順は CI (frontend.yml) と同じだが、配るのに
+# 要る 4 つの成果物 (frontend / sw / frontend-embed と、それらが依存する
+# workspace package) だけに絞る。
 #
-# タグは submodule のタグと 1:1 で対応させること。ずれるとフロントエンドと
-# backend の実装がちぐはぐになる。`make version` で両方を確認できる。
-FROM ${MISSKEY_ASSETS_IMAGE} AS assets-external
-
-# プラグインの frontend を含む SPA を自前でビルドしたときの供給元 (#2940)。
-# 公式の assets イメージにはプラグインの .vue が入っていないので、frontend を
-# 持つプラグインを組み込むときは build context 側でビルドした成果物を使う。
-# 中身は Dockerfile.assets が作る 5 つと同じ形にしてある (ずれると runtime stage
-# の COPY が落ちる)。
+# **`--platform=$BUILDPLATFORM` で動かす。** 成果物は JS と静的ファイルだけで
+# アーキテクチャに依存しないので、別アーキテクチャの image を作るときにエミュ
+# レーションでビルドしない (数倍遅くなる)。
 #
-# **使わない stage は BuildKit がビルドしない**ので、ASSETS_SOURCE=external の
-# ときに frontend/built が無くても問題ない。
-FROM scratch AS assets-local
-COPY frontend/built /built
-COPY frontend/packages/frontend/assets /frontend-assets
-COPY frontend/assets /backend-assets
-COPY frontend/repo-assets /repo-assets
-COPY frontend/node_modules/@misskey-dev/emoji-assets/built /emoji-assets
+# **Node の版は frontend/.node-version と揃える。** 揃っていることを
+# internal/entitycompat の bundled_node_version_test が見る。tag だけでは中身が
+# 固定されないので digest を併記する。
+FROM --platform=$BUILDPLATFORM node:26.4.0-trixie@sha256:b46a10d964ad15136ebdf9012142131481caa0697d7a4d4eafe4bbabd818f876 AS frontend
 
-FROM assets-${ASSETS_SOURCE} AS assets
+# frontend / sw / i18n / misskey-js など 7 パッケージが NODE_ENV を見ており、
+# production でないと minify されず _DEV_ フラグも立つ。
+ENV NODE_ENV=production
+ENV npm_config_store_dir=/pnpm-store
 
-# Stage 3: Runtime
+WORKDIR /work/frontend
+
+# pnpm は package.json の packageManager から入れる (Node 26 には corepack が
+# 同梱されていない)。`pnpm fetch` は lock だけで依存を取得し、node_modules/.pnpm まで
+# 作る (依存の postinstall もここで走る)。ソースより先に行って、ソースの変更で
+# 取り直さないようにする。
+COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
+RUN node -e "console.log(JSON.parse(require('node:fs').readFileSync('./package.json')).packageManager)" | xargs npm install -g
+RUN --mount=type=cache,target=/pnpm-store pnpm fetch --frozen-lockfile
+
+# build context はホストの frontend/built を含む (.dockerignore は UDS 構成と連合 e2e の
+# ために残している) ので、持ち込んだ古い成果物を下で消してから作る。
+COPY frontend/ ./
+# プラグインの frontend は ../../../plugins/*/frontend から import される
+# (packages/frontend/tsconfig.json)。生成物は Stage 1 が作ったものを使う。
+# manifest (mk-plugins.generated.json) は frontend を持つプラグインがあるときにしか
+# 作られないので、Stage 1 が /gen に集めたものをディレクトリごと重ねる。
+COPY plugins/ /work/plugins/
+# build context に入っているホストの古い生成物を消してから重ねる。manifest は
+# Stage 1 が作らなかったときに古いものが残り、使われない alias が入る。
+RUN rm -f packages/frontend/src/server-plugins.generated.ts packages/frontend/mk-plugins.generated.json
+COPY --from=plugingen /gen/ packages/frontend/
+RUN --mount=type=cache,target=/pnpm-store \
+    rm -rf built && \
+    pnpm install --offline --frozen-lockfile && \
+    pnpm build-pre && \
+    pnpm --filter frontend... --filter sw... --filter frontend-embed... build && \
+    pnpm build-assets
+
+# Stage 4: Runtime
 FROM gcr.io/distroless/static-debian13:latest@sha256:58133991db06659feaabe0f4e97a35cebf15ef4ea08f8a4c6d2ee5f75e4aa6a0
 
 WORKDIR /app
@@ -129,13 +130,14 @@ COPY --from=builder /app/built/backfill-instance-counts /app/backfill-instance-c
 COPY --from=builder /app/migration /app/migration
 COPY .config/docker.yml.example /app/.config/default.yml
 
-# アセットはすべて assets イメージ由来。submodule には触れない。
-COPY --from=assets /backend-assets  /app/static-assets
-COPY --from=assets /repo-assets     /app/repo-assets
-COPY --from=assets /emoji-assets/twemoji      /app/twemoji
-COPY --from=assets /emoji-assets/fluent-emoji /app/fluent-emoji
-COPY --from=assets /built           /app/frontend
-COPY --from=assets /frontend-assets /app/client-assets
+# アセットはすべて frontend stage から取る。ホストの frontend/built や
+# node_modules には依存しない。
+COPY --from=frontend /work/frontend/assets                  /app/static-assets
+COPY --from=frontend /work/frontend/repo-assets             /app/repo-assets
+COPY --from=frontend /work/frontend/node_modules/@misskey-dev/emoji-assets/built/twemoji      /app/twemoji
+COPY --from=frontend /work/frontend/node_modules/@misskey-dev/emoji-assets/built/fluent-emoji /app/fluent-emoji
+COPY --from=frontend /work/frontend/built                   /app/frontend
+COPY --from=frontend /work/frontend/packages/frontend/assets /app/client-assets
 
 ENV MISSKEY_STATIC_DIR=/app/static-assets \
     MISSKEY_REPO_ASSETS_DIR=/app/repo-assets \

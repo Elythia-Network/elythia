@@ -167,7 +167,7 @@ gh workflow run docker.yml -f tag=1.1.0
 > `1.0.0` に `-bundled` は存在しない。アセット同梱イメージは 1.1.0 で追加された機能で、
 > 1.0.0 のツリーには `Dockerfile.bundled` が無いため。
 
-同梱アセットは fork (`shiroha-a/misskey-ts`) が publish する `ghcr.io/shiroha-a/misskey-ts-assets:<tag>` 由来で、**mk-go 独自のフロントエンド変更を含む**。
+同梱アセットは本体の `frontend/` を image の中でビルドしたもので (#3379)、**mk-go 独自のフロントエンド変更を含む**。
 
 > **注意**: 下記のように upstream の `misskey/misskey` イメージからアセットをコピーする方法もあるが、その場合 **mk-go 独自のフロントエンド変更が失われる** (チャット・リバーシの連合が UI 上で「非対応」表示に戻る等)。drop-in 互換の検証目的でなければ `bundled` イメージを使うこと。
 

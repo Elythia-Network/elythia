@@ -41,8 +41,8 @@ jobs:
       # fork 上の PR / dispatch で checkout が not our ref で落ちる。
       mk_repository: ${{ github.repository }}
       mk_ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      # nowplaying は frontend を持つので、SPA を自前でビルドする経路
-      # (ASSETS_SOURCE=local) まで通る。**ref は固定する** — dispatch の input を
+      # nowplaying は frontend を持つので、Dockerfile.bundled の中でプラグインの
+      # .vue を含めて SPA をビルドする経路まで通る。**ref は固定する** — dispatch の input を
       # そのまま埋め込むと、改行を含む値で行を増やして任意のリポジトリを
       # clone させられる。
       plugins: |
