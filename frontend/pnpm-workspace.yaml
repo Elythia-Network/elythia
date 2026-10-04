@@ -67,6 +67,9 @@ overrides:
   undici@^7: 7.29.1
   undici@^6: 6.28.1
   '@tabler/icons-webfont>sharp': '-'
+  # exifreader が指す 0.9.10 に high の advisory (GHSA-965w-775f-mr7g など) があるため、
+  # 修正版へ上げる (mk-go #3379)。本家が追従したら外す。
+  '@xmldom/xmldom@0.9.10': 0.9.12
 engineStrict: true
 saveExact: true
 shellEmulator: true
