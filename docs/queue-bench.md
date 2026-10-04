@@ -1,6 +1,6 @@
 # Queue bench (#563)
 
-ジョブキュー配送スループットを **2 stack** (Misskey TS BullMQ / mk-go mkq) で公正比較するベンチマーク基盤。HTTP latency 用 `tests/bench/` とは別運用。
+ジョブキュー配送スループットを **2 stack** (Misskey TS BullMQ / mk-go mkq) で公正比較するベンチマーク基盤。HTTP latency 用 `tests/bench/http/` とは別運用。
 
 > **以前は asynq を含む 3-way だった。** mk-go の asynq driver は #2985 で削除したので、
 > harness からも外してある。下の実測表のうち日付が #2985 より前のものには asynq 行が
@@ -53,7 +53,7 @@ make queue-bench-inbound
 # 4b) inbound 計測 (Announce 経路、#1158 等で利用)
 INBOUND_ACTIVITY_TYPE=announce make queue-bench-inbound
 
-# 5) report 生成 (tests/queue-bench/results/queue-report.md)
+# 5) report 生成 (tests/bench/queue/results/queue-report.md)
 make queue-bench-report
 
 # まとめて: queue-bench-all (seed → outbound → inbound → report)
@@ -65,7 +65,7 @@ make queue-bench-down
 
 ## 結果ファイル
 
-`tests/queue-bench/results/`:
+`tests/bench/queue/results/`:
 
 - `outbound.json` — 生データ (per-stack drain time / hits / depth time series)
 - `inbound.json` — faker.send 統計 + per-receiver drain (最後に走った activity type の値で上書き)
@@ -142,7 +142,7 @@ mk-go は新規 DB 初期化時 `meta.federation='none'` (= 連合無効) で立
 
 ### Network allowlist
 
-mk-go の SSRF 防止 (`allowedPrivateNetworks`) は production default で private IP を block する。bench 内の `blackhole` / faker / 他 stack は Docker network の private IP なので、bench config (`tests/queue-bench/common/mk-mkq.yml`) で `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` を allowlist 化している。
+mk-go の SSRF 防止 (`allowedPrivateNetworks`) は production default で private IP を block する。bench 内の `blackhole` / faker / 他 stack は Docker network の private IP なので、bench config (`tests/bench/queue/common/mk-mkq.yml`) で `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` を allowlist 化している。
 
 ## 関連
 

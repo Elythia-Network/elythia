@@ -4,7 +4,7 @@
 # auto) を比較する。docker-compose 自体は scenario non-aware で、config
 # は scripts/run.sh が configs/<scenario>.yml を選択して mount する。
 #
-# 共通基盤 (blackhole / certs / nginx) は tests/queue-bench/ から
+# 共通基盤 (blackhole / certs / nginx) は tests/bench/queue/ から
 # Dockerfile / asset を流用する。stack を並べず 1 つで逐次実行する分、
 # resource overhead は queue-bench より小さい。
 #
@@ -42,12 +42,12 @@ services:
       - certs:/certs
     networks: [bench]
 
-  # blackhole は tests/queue-bench/blackhole の Dockerfile / Go source を
+  # blackhole は tests/bench/queue/blackhole の Dockerfile / Go source を
   # そのまま reuse (context は repo root)。本 bench 用にコピーしない。
   blackhole:
     build:
-      context: ../..
-      dockerfile: tests/queue-bench/blackhole/Dockerfile
+      context: ../../..
+      dockerfile: tests/bench/queue/blackhole/Dockerfile
     networks: [bench]
 
   postgres:
@@ -78,7 +78,7 @@ services:
   # default にして、その後 docker compose cp + restart で config を差し替える。
   app:
     build:
-      context: ../..
+      context: ../../..
       dockerfile: tests/federation/common/Dockerfile.mkgo
     environment:
       SSL_CERT_FILE: /certs/bundle.pem

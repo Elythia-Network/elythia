@@ -49,20 +49,20 @@ drive-files/
 /compose.uds.yaml
 
 # Benchmark results
-tests/bench/results/*.json
-tests/bench/results/*.md
-tests/bench/results/profiles/
-tests/queue-bench/results/*.json
-tests/queue-bench/results/*.md
+tests/bench/http/results/*.json
+tests/bench/http/results/*.md
+tests/bench/http/results/profiles/
+tests/bench/queue/results/*.json
+tests/bench/queue/results/*.md
 # faker の go build の出力 (#1517 で誤って追跡されていた。#3373 で外した)
-tests/queue-bench/faker/faker
-!tests/bench/results/.gitkeep
+tests/bench/queue/faker/faker
+!tests/bench/http/results/.gitkeep
 # #1158 effect の before/after reference data (#1163 で計測)。reader が
 # bench を再走らせなくても docs/queue-bench.md の表と数値を突き合わせて
 # verify できるよう、この 2 ファイルだけ track する。他の *.json は
 # bench 走るたびに上書きされる ephemeral data なので gitignore のまま。
-!tests/queue-bench/results/inbound-announce-before.json
-!tests/queue-bench/results/inbound-announce-after.json
+!tests/bench/queue/results/inbound-announce-before.json
+!tests/bench/queue/results/inbound-announce-after.json
 
 # Claude Code local state。rules/ だけは共有する (#3248)。
 # `.claude/` と書くとディレクトリごと除外され、中の再包含が効かないので `/*` にする

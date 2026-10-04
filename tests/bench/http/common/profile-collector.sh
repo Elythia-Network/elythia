@@ -1,6 +1,6 @@
 #!/bin/sh
 # Capture pprof profiles from the mk-go app container while k6 is running
-# the per-scenario load. See `tests/bench/docker-compose.bench.yml` for how
+# the per-scenario load. See `tests/bench/http/compose.yml` for how
 # this is wired into the bench profile.
 #
 # Output layout (under $OUT, default /output/profiles):

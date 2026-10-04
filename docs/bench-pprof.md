@@ -1,7 +1,7 @@
 # Bench profiling (pprof)
 
-`tests/bench/docker-compose.bench.yml` で `make bench-up && make bench-run` を実行すると、
-k6 シナリオと並走して mk-go の pprof profile が `tests/bench/results/profiles/` に
+`tests/bench/http/compose.yml` で `make bench-up && make bench-run` を実行すると、
+k6 シナリオと並走して mk-go の pprof profile が `tests/bench/http/results/profiles/` に
 書き出される。`#413` チューニングロードマップの実測根拠として使う。
 
 Misskey TS 側はここでは取らない (Node.js は別ツール、本ロードマップは Go 側が対象)。
@@ -32,16 +32,16 @@ goroutine snapshot も取得する。
 ```sh
 make bench-up
 make bench-run
-ls tests/bench/results/profiles/
+ls tests/bench/http/results/profiles/
 
 # scenario ごとの CPU hot path を見る
-go tool pprof -http :8080 tests/bench/results/profiles/cpu-users-show.pb.gz
+go tool pprof -http :8080 tests/bench/http/results/profiles/cpu-users-show.pb.gz
 
 # heap の steady-state allocation を見る
-go tool pprof -http :8080 tests/bench/results/profiles/heap-post.pb.gz
+go tool pprof -http :8080 tests/bench/http/results/profiles/heap-post.pb.gz
 
 # allocator の累積 hot path
-go tool pprof -http :8080 tests/bench/results/profiles/allocs-post.pb.gz
+go tool pprof -http :8080 tests/bench/http/results/profiles/allocs-post.pb.gz
 
 make bench-down
 ```
@@ -55,7 +55,7 @@ make bench-down
 | 変数 | 既定 | 用途 |
 |------|------|------|
 | `HOST` | `app-mkgo:3000` | pprof endpoint の host:port |
-| `SCENARIO_DURATION` | `31` | k6 シナリオ 1 つの長さ (秒)。`tests/bench/k6/lib/config.js` と一致させる |
+| `SCENARIO_DURATION` | `31` | k6 シナリオ 1 つの長さ (秒)。`tests/bench/http/k6/lib/config.js` と一致させる |
 | `PROFILE_SECONDS` | `25` | 1 シナリオあたりの CPU profile 採取秒数 |
 | `SCENARIOS` | `ping meta local-timeline users-show i notes-create` | profile 名に使うシナリオ列 |
 

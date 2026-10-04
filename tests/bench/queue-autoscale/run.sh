@@ -96,4 +96,4 @@ echo "============================================================"
 echo "[run.sh] generating report"
 echo "============================================================"
 python3 report.py
-echo "[run.sh] done; see tests/queue-bench-autoscale/results/report.md"
+echo "[run.sh] done; see tests/bench/queue-autoscale/results/report.md"

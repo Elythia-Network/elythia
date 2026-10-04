@@ -13,7 +13,7 @@ Job queue auto-scale (`jobQueueAutoScale: true`) と **固定 worker 数**運用
 ## 構成
 
 ```
-tests/queue-bench-autoscale/
+tests/bench/queue-autoscale/
 ├── README.md                   (本ファイル)
 ├── docker-compose.yml          単一 mkq stack (postgres + redis + app + nginx + blackhole)
 ├── configs/
@@ -38,7 +38,7 @@ tests/queue-bench-autoscale/
 make queue-bench-autoscale-run
 
 # 結果確認
-less tests/queue-bench-autoscale/results/report.md
+less tests/bench/queue-autoscale/results/report.md
 
 # cleanup
 make queue-bench-autoscale-down
@@ -75,7 +75,7 @@ OUTBOUND_NOTES=50 FOLLOWERS=100 DRAIN_TIMEOUT_S=600 \
 - **Outbound deliver burst のみ** (inbox burst は未実装、follow-up で対応可能)
 - **単一 mkq stack** で逐次実行 (= 計測中の host 負荷が scenario 間で揺れる可能性、各 scenario の間に `compose down -v` でクリーンアップして state leak は防ぐ)
 - **single-host bench** (multi-pod 分散シナリオは対象外、ADR §3.5 multi-pod 非ゴールと整合)
-- **既存 `tests/queue-bench/`** (TS / mkq の 2-way 比較) とは独立、同時に走らせない (volume / network 名は別だが host CPU を奪い合う)
+- **既存 `tests/bench/queue/`** (TS / mkq の 2-way 比較) とは独立、同時に走らせない (volume / network 名は別だが host CPU を奪い合う)
 
 ## 関連
 

@@ -55,7 +55,7 @@ func TestTestComposeFilesAreSelfContained(t *testing.T) {
 	}
 	sort.Strings(files)
 	// **拾えなかったら落とす。** 実在する対象を名指しで要求する。
-	for _, must := range []string{"tests/upstream-e2e/compose.yml", "tests/queue-bench/docker-compose.queue-bench.yml"} {
+	for _, must := range []string{"tests/upstream-e2e/compose.yml", "tests/bench/queue/compose.yml"} {
 		require.Containsf(t, files, must, "検証用の compose の列挙が %s を拾えていない", must)
 	}
 

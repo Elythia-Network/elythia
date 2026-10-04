@@ -59,7 +59,9 @@ docs
 tests/dropin
 tests/dropin-frontend
 tests/playwright
-tests/bench
+# ベンチのうち http だけを削る。queue の blackhole / faker は Dockerfile が repo root
+# の context から COPY するので残す (#3373 で tests/bench/ の下へまとめた)。
+tests/bench/http
 
 # submodule の依存。実測 1.2GB あり、frontend をビルドしたコンテキストの大半を
 # 占める。**`**/node_modules` にはできない** — それだと
