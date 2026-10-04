@@ -10,6 +10,10 @@
 #
 # 使い方: make queue-bench-autoscale-run
 
+# project 名を専用の名前にする (#3373)。無いとディレクトリ名がそのまま project 名に
+# なり、置き場所を変えると名前も変わる。
+name: mk-queue-bench-autoscale
+
 services:
   certs:
     image: alpine:3.21
