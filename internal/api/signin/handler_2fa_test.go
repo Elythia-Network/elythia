@@ -67,7 +67,14 @@ type inMemorySK struct {
 }
 
 func (r *inMemorySK) Create(_ *model.UserSecurityKey) error { return nil }
-func (r *inMemorySK) FindByID(_ string) (*model.UserSecurityKey, error) {
+func (r *inMemorySK) FindByID(id string) (*model.UserSecurityKey, error) {
+	for _, keys := range r.keys {
+		for _, k := range keys {
+			if k.ID == id {
+				return k, nil
+			}
+		}
+	}
 	return nil, testutil.ErrNotFound
 }
 func (r *inMemorySK) ListByUser(userID string) ([]*model.UserSecurityKey, error) {

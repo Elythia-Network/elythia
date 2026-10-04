@@ -251,7 +251,7 @@ func scanRecordRefs(t *testing.T, root string) []recordSite {
 // **引数の数だけで絞らない。** 監査ログの `Record(iplookuplog.Entry{...})` は 1 引数
 // なので入らないが、`rec := h.ipRecorder.Record; rec(a, b)` と書くと呼び出し側が
 // `*ast.Ident` になり、引数 2 の `.Record(` としては現れない。**署名検証より前に
-// 呼ばれる `resolvePasskeyUser` にその形を仕込む変異が、静的ゲートも振る舞いテストも
+// 呼ばれる `resolvePasskeyUser` (今の `resolvePasskeyKey`) にその形を仕込む変異が、静的ゲートも振る舞いテストも
 // 素通りした** (実測)。メソッド値として持ち出す形も call site として数える。
 //
 // **型の位置とフィールドアクセスは除く。** `a.Record{}` / `var r a.Record` /

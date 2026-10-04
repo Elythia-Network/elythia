@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"log"
 	"net/http/httptest"
 	"os"
@@ -224,60 +223,36 @@ func TestFinishPasskeyLogin_BadCredential(t *testing.T) {
 	require.NoError(t, svc.putPasskeySession(context.Background(), "ctx", makeFakeSessionData()))
 	req := httptest.NewRequest("POST", "/", strings.NewReader(`{"id":"x","rawId":"x","type":"public-key","response":{}}`))
 	req.Header.Set("Content-Type", "application/json")
-	resolver := func(rawID, userHandle []byte) (*model.User, []*model.UserSecurityKey, error) {
+	resolver := func(string) (*model.User, []*model.UserSecurityKey, error) {
 		return &model.User{ID: "alice"}, nil, nil
 	}
-	_, _, err = svc.FinishPasskeyLogin(context.Background(), "ctx", req, resolver)
-	assert.Error(t, err)
+	_, _, err = svc.FinishPasskeyLogin(context.Background(), "ctx", "x", req, resolver)
+	assert.ErrorIs(t, err, ErrWebAuthnVerificationFailed)
+	assert.NotErrorIs(t, err, ErrWebAuthnAssertionNotVerified)
 }
 
-// FinishPasskeyLogin の resolver closure を発火させる path。assertion body
-// は go-webauthn upstream の TestFinishLoginFailure 用 fixture を流用 (RPID =
-// webauthn.io)。resolver が err を返すと FinishDiscoverableLogin が err 伝播
-// するので、closure 内の `if err != nil` 分岐をカバーできる。
+// The resolver runs after the challenge is consumed and before the assertion
+// is parsed, like upstream's getdel → findOneBy → verify. Its error is
+// returned as is.
 func TestFinishPasskeyLogin_ResolverError(t *testing.T) {
 	requireRedis(t)
 	twofaTestRedis.FlushAll(context.Background())
-	svc, err := NewWebAuthnService("https://webauthn.io", "Misskey", twofaTestRedis.Client)
+	svc, err := NewWebAuthnService("https://example.com", "Misskey", twofaTestRedis.Client)
 	require.NoError(t, err)
+	require.NoError(t, svc.putPasskeySession(context.Background(), "ctx", &webauthn.SessionData{Challenge: "c"}))
 
-	const (
-		credentialID = "AI7D5q2P0LS-Fal9ZT7CHM2N5BLbUunF92T8b6iYC199bO2kagSuU05-5dZGqb1SP0A0lyTWng"
-		userHandle   = "0ToAAAAAAAAAAA"
-		challenge    = "E4PTcIH_HfX1pC6Sigk1SC9NAlgeztN0439vi8z_c9k"
-	)
-
-	byteUserHandle, _ := base64.RawURLEncoding.DecodeString(userHandle)
-	// passkey (discoverable) session は UserID 空 が必須 (go-webauthn が
-	// ValidatePasskeyLogin の先頭でチェックする)。
-	sd := &webauthn.SessionData{
-		Challenge: challenge,
+	// body は読めない形でよい。resolver が先に呼ばれることを確かめる。
+	req := httptest.NewRequest("POST", "/", strings.NewReader(`not-json`))
+	var gotID string
+	resolver := func(id string) (*model.User, []*model.UserSecurityKey, error) {
+		gotID = id
+		return nil, nil, ErrWebAuthnUnknownKey
 	}
-	require.NoError(t, svc.putPasskeySession(context.Background(), "ctx", sd))
-
-	body := []byte(`{
-		"id":"` + credentialID + `",
-		"rawId":"` + credentialID + `",
-		"type":"public-key",
-		"response":{
-			"authenticatorData":"dKbqkhPJnC90siSSsyDPQCYqlMGpUKA5fyklC2CEHvBFXJJiGa3OAAI1vMYKZIsLJfHwVQMANwCOw-atj9C0vhWpfWU-whzNjeQS21Lpxfdk_G-omAtffWztpGoErlNOfuXWRqm9Uj9ANJck1p6lAQIDJiABIVggKAhfsdHcBIc0KPgAcRyAIK_-Vi-nCXHkRHPNaCMBZ-4iWCBxB8fGYQSBONi9uvq0gv95dGWlhJrBwCsj_a4LJQKVHQ",
-			"clientDataJSON":"eyJjaGFsbGVuZ2UiOiJFNFBUY0lIX0hmWDFwQzZTaWdrMVNDOU5BbGdlenROMDQzOXZpOHpfYzlrIiwibmV3X2tleXNfbWF5X2JlX2FkZGVkX2hlcmUiOiJkbyBub3QgY29tcGFyZSBjbGllbnREYXRhSlNPTiBhZ2FpbnN0IGEgdGVtcGxhdGUuIFNlZSBodHRwczovL2dvby5nbC95YWJQZXgiLCJvcmlnaW4iOiJodHRwczovL3dlYmF1dGhuLmlvIiwidHlwZSI6IndlYmF1dGhuLmdldCJ9",
-			"signature":"MEUCIBtIVOQxzFYdyWQyxaLR0tik1TnuPhGVhXVSNgFwLmN5AiEAnxXdCq0UeAVGWxOaFcjBZ_mEZoXqNboY5IkQDdlWZYc",
-			"userHandle":"` + userHandle + `"
-		}
-	}`)
-
-	req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	resolveCalled := false
-	resolver := func(rawID, userHandleArg []byte) (*model.User, []*model.UserSecurityKey, error) {
-		resolveCalled = true
-		assert.Equal(t, byteUserHandle, userHandleArg)
-		return nil, nil, errors.New("resolver fail")
-	}
-	_, _, err = svc.FinishPasskeyLogin(context.Background(), "ctx", req, resolver)
-	assert.Error(t, err)
-	assert.True(t, resolveCalled, "resolver closure must be invoked when body parses")
+	_, _, err = svc.FinishPasskeyLogin(context.Background(), "ctx", "AAEC", req, resolver)
+	assert.ErrorIs(t, err, ErrWebAuthnUnknownKey)
+	assert.Equal(t, "AAEC", gotID)
+	_, err = svc.takePasskeySession(context.Background(), "ctx")
+	assert.ErrorIs(t, err, ErrWebAuthnSessionNotFound, "the challenge must be consumed even when the key is unknown")
 }
 
 // --- userAdapter ---
@@ -574,7 +549,7 @@ func TestBeginPasskeyLogin_PutSessionFails(t *testing.T) {
 func TestFinishPasskeyLogin_NotConfigured(t *testing.T) {
 	svc := &WebAuthnService{}
 	req := httptest.NewRequest("POST", "/", strings.NewReader(""))
-	_, _, err := svc.FinishPasskeyLogin(context.Background(), "ctx", req, nil)
+	_, _, err := svc.FinishPasskeyLogin(context.Background(), "ctx", "", req, nil)
 	assert.ErrorIs(t, err, ErrWebAuthnNotConfigured)
 }
 
@@ -584,7 +559,7 @@ func TestFinishPasskeyLogin_SessionMissing(t *testing.T) {
 	svc, err := NewWebAuthnService("https://example.com", "Misskey", twofaTestRedis.Client)
 	require.NoError(t, err)
 	req := httptest.NewRequest("POST", "/", strings.NewReader(""))
-	_, _, err = svc.FinishPasskeyLogin(context.Background(), "ghost", req, nil)
+	_, _, err = svc.FinishPasskeyLogin(context.Background(), "ghost", "", req, nil)
 	assert.ErrorIs(t, err, ErrWebAuthnSessionNotFound)
 }
 

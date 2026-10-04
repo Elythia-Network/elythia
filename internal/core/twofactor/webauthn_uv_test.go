@@ -226,8 +226,8 @@ func TestPasskeyLogin_RequiresUV(t *testing.T) {
 	svc := newSoftService(t)
 	auth := newSoftAuthenticator(t)
 	keys := []*model.UserSecurityKey{auth.securityKey(softUser.ID, 0)}
-	resolve := func(_, userHandle []byte) (*model.User, []*model.UserSecurityKey, error) {
-		require.Equal(t, softUser.ID, string(userHandle))
+	resolve := func(id string) (*model.User, []*model.UserSecurityKey, error) {
+		require.Equal(t, keys[0].ID, id)
 		return softUser, keys, nil
 	}
 
@@ -235,13 +235,13 @@ func TestPasskeyLogin_RequiresUV(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, protocol.VerificationPreferred, a.Response.UserVerification,
 		"options は upstream と同じ preferred")
-	_, _, err = svc.FinishPasskeyLogin(context.Background(), "ctx-uv",
+	_, _, err = svc.FinishPasskeyLogin(context.Background(), "ctx-uv", keys[0].ID,
 		auth.assert(a.Response.Challenge.String(), softUser.ID, false, 0), resolve)
 	requireUVRejected(t, err)
 
 	a, err = svc.BeginPasskeyLogin(context.Background(), "ctx-uv2")
 	require.NoError(t, err)
-	u, cred, err := svc.FinishPasskeyLogin(context.Background(), "ctx-uv2",
+	u, cred, err := svc.FinishPasskeyLogin(context.Background(), "ctx-uv2", keys[0].ID,
 		auth.assert(a.Response.Challenge.String(), softUser.ID, true, 0), resolve)
 	require.NoError(t, err)
 	assert.Equal(t, softUser, u)
@@ -306,12 +306,12 @@ func TestLogin_RejectsCounterRollback(t *testing.T) {
 			svc := newSoftService(t)
 			auth := newSoftAuthenticator(t)
 			keys := []*model.UserSecurityKey{auth.securityKey(softUser.ID, tc.stored)}
-			resolve := func(_, _ []byte) (*model.User, []*model.UserSecurityKey, error) {
+			resolve := func(string) (*model.User, []*model.UserSecurityKey, error) {
 				return softUser, keys, nil
 			}
 			a, err := svc.BeginPasskeyLogin(context.Background(), "ctx-counter")
 			require.NoError(t, err)
-			_, _, err = svc.FinishPasskeyLogin(context.Background(), "ctx-counter",
+			_, _, err = svc.FinishPasskeyLogin(context.Background(), "ctx-counter", keys[0].ID,
 				auth.assert(a.Response.Challenge.String(), softUser.ID, true, tc.counter), resolve)
 			if tc.reject {
 				assert.ErrorIs(t, err, ErrWebAuthnCounterRollback)

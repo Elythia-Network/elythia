@@ -1,12 +1,14 @@
 package twofactor
 
 import (
+	"bytes"
 	"context"
 	cryptorand "crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -29,7 +31,21 @@ var (
 	// ErrWebAuthnCounterRollback is returned when the assertion's signature
 	// counter did not advance past the stored value, which signals a cloned
 	// authenticator.
-	ErrWebAuthnCounterRollback = errors.New("twofactor: webauthn signature counter did not increase")
+	// It wraps ErrWebAuthnVerificationFailed, since upstream rejects such an
+	// assertion with the same error as any other verification failure.
+	ErrWebAuthnCounterRollback = fmt.Errorf("%w: signature counter did not increase", ErrWebAuthnVerificationFailed)
+	// ErrWebAuthnVerificationFailed is returned by FinishPasskeyLogin when the
+	// assertion is rejected for any reason other than a signature that does
+	// not verify (upstream's IdentifiableError b18c89a7).
+	ErrWebAuthnVerificationFailed = errors.New("twofactor: webauthn verification failed")
+	// ErrWebAuthnUnknownKey is returned by FinishPasskeyLogin (through the
+	// PasskeyKeyResolver) when no stored key has the assertion's credential
+	// id (upstream's IdentifiableError 36b96a7d).
+	ErrWebAuthnUnknownKey = errors.New("twofactor: unknown webauthn key")
+	// ErrWebAuthnAssertionNotVerified is returned by FinishPasskeyLogin when
+	// the assertion is well formed but its signature does not verify
+	// (upstream's verifySignInWithPasskeyAuthentication returns null).
+	ErrWebAuthnAssertionNotVerified = errors.New("twofactor: webauthn assertion not verified")
 )
 
 // webAuthnSessionTTL bounds how long a registration / authentication challenge
@@ -364,11 +380,13 @@ func (s *WebAuthnService) takeLoginSession(ctx context.Context, userID string) (
 	return &sd, nil
 }
 
-// PasskeyUserResolver is the lookup callback supplied by the API layer to map
-// a passkey credential (rawID + userHandle) back to a model.User and the user's
-// security keys list. The handler closes over the repositories so this package
-// stays free of repository dependencies.
-type PasskeyUserResolver func(rawID, userHandle []byte) (*model.User, []*model.UserSecurityKey, error)
+// PasskeyKeyResolver is the lookup callback supplied by the API layer to map
+// the credential id of a passkey assertion (the `id` member of the
+// credential JSON) to the stored key's owner and the owner's security keys.
+// It returns ErrWebAuthnUnknownKey (possibly wrapped) when no stored key has
+// that id. The handler closes over the repositories so this package stays
+// free of repository dependencies.
+type PasskeyKeyResolver func(credentialID string) (*model.User, []*model.UserSecurityKey, error)
 
 // BeginPasskeyLogin starts a passwordless ("usernameless") authentication
 // challenge. Misskey TS upstream の SigninWithPasskeyApiService が呼ぶ
@@ -392,42 +410,89 @@ func (s *WebAuthnService) BeginPasskeyLogin(ctx context.Context, ctxID string) (
 	return assertion, nil
 }
 
-// FinishPasskeyLogin verifies a passwordless assertion response. The browser
-// returns a credential whose `userHandle` carries the user id we stored at
-// registration time; resolver is invoked to load the User and its security
-// keys for verification.
+// FinishPasskeyLogin verifies a passwordless assertion response in the order
+// of upstream WebAuthnService.verifySignInWithPasskeyAuthentication:
 //
-// 戻り値の *model.User は signin 成功時のユーザー、*webauthn.Credential は
+//  1. take (and consume) the challenge: ErrWebAuthnSessionNotFound
+//  2. look up the key by credentialID via resolve: ErrWebAuthnUnknownKey
+//  3. verify the assertion: ErrWebAuthnVerificationFailed (or
+//     ErrWebAuthnCounterRollback, which also matches it)
+//  4. a signature that does not verify: ErrWebAuthnAssertionNotVerified
+//
+// Any other error (Redis or the resolver failing) is returned as is.
+//
+// 戻り値の *model.User は resolve が返したユーザー、*webauthn.Credential は
 // 更新された counter を含むので caller は UserSecurityKeyRepository.UpdateCounter
 // で永続化する責務を負う。
-func (s *WebAuthnService) FinishPasskeyLogin(ctx context.Context, ctxID string, req *http.Request, resolve PasskeyUserResolver) (*model.User, *webauthn.Credential, error) {
+func (s *WebAuthnService) FinishPasskeyLogin(ctx context.Context, ctxID, credentialID string, req *http.Request, resolve PasskeyKeyResolver) (*model.User, *webauthn.Credential, error) {
 	if s == nil || s.wa == nil {
 		return nil, nil, ErrWebAuthnNotConfigured
 	}
+	// 本家は challenge を getdel してから鍵を引く。鍵が見つからなくても
+	// challenge は消費済みになる。
 	sd, err := s.takePasskeySession(ctx, ctxID)
+	if err != nil {
+		return nil, nil, err
+	}
+	user, keys, err := resolve(credentialID)
 	if err != nil {
 		return nil, nil, err
 	}
 	// 保存した値に依らず required で検証する。upstream も
 	// `requireUserVerification: true` で検証している。
 	sd.UserVerification = protocol.VerificationRequired
-	var resolvedUser *model.User
-	handler := func(rawID, userHandle []byte) (webauthn.User, error) {
-		u, keys, err := resolve(rawID, userHandle)
-		if err != nil {
-			return nil, err
-		}
-		resolvedUser = u
-		return &userAdapter{user: u, keys: keys}, nil
-	}
-	cred, err := s.wa.FinishDiscoverableLogin(handler, *sd, req)
+	parsed, err := protocol.ParseCredentialRequestResponse(req)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("%w: %w", ErrWebAuthnVerificationFailed, err)
+	}
+	// 本家は `response.id` で引いた鍵で検証し、@simplewebauthn は id と
+	// rawId が違えば throw する。go-webauthn は rawId で鍵を選ぶので、ここで
+	// 揃えないと id で引いた鍵とは別の鍵で検証してしまう。
+	if base64.RawURLEncoding.EncodeToString(parsed.RawID) != credentialID {
+		return nil, nil, fmt.Errorf("%w: credential id and rawId differ", ErrWebAuthnVerificationFailed)
+	}
+	adapter := &userAdapter{user: user, keys: keys}
+	handler := func(_, _ []byte) (webauthn.User, error) { return adapter, nil }
+	cred, err := s.wa.ValidateDiscoverableLogin(handler, *sd, parsed)
+	if err != nil {
+		if isSignatureMismatch(err) && !counterRolledBack(adapter, parsed) {
+			return nil, nil, fmt.Errorf("%w: %w", ErrWebAuthnAssertionNotVerified, err)
+		}
+		return nil, nil, fmt.Errorf("%w: %w", ErrWebAuthnVerificationFailed, err)
 	}
 	if err := checkCounter(cred); err != nil {
 		return nil, nil, err
 	}
-	return resolvedUser, cred, nil
+	return user, cred, nil
+}
+
+// isSignatureMismatch reports whether err is go-webauthn's report of a
+// well-formed signature that does not verify against the stored public key.
+//
+// @simplewebauthn はこの場合だけ throw せず `verified: false` を返し、本家は
+// それを 932c904e にする。go-webauthn は同じ type (`invalid_signature`) を
+// 公開鍵や署名が読めないときにも返すが、そちらは内側の error を持つので
+// 区別できる (@simplewebauthn ではどちらも throw になる)。
+func isSignatureMismatch(err error) bool {
+	var perr *protocol.Error
+	return errors.As(err, &perr) && perr.Type == protocol.ErrAssertionSignature.Type && perr.Err == nil
+}
+
+// counterRolledBack reports whether the assertion's signature counter fails
+// the check @simplewebauthn makes before it verifies the signature.
+//
+// @simplewebauthn は counter を署名より先に検査して throw する
+// (verifyAuthenticationResponse.js)。go-webauthn は署名を先に見るので、両方が
+// 駄目な assertion を本家と同じ b18c89a7 にするにはここで counter を見る。
+func counterRolledBack(adapter *userAdapter, parsed *protocol.ParsedCredentialAssertionData) bool {
+	got := parsed.Response.AuthenticatorData.Counter
+	for _, c := range adapter.WebAuthnCredentials() {
+		if bytes.Equal(c.ID, parsed.RawID) {
+			stored := c.Authenticator.SignCount
+			return (got > 0 || stored > 0) && got <= stored
+		}
+	}
+	return false
 }
 
 // putPasskeySession overwrites any in-flight passkey challenge for the
@@ -460,6 +525,24 @@ func (s *WebAuthnService) takePasskeySession(ctx context.Context, ctxID string) 
 		return nil, err
 	}
 	return &sd, nil
+}
+
+// CredentialRequest returns a copy of orig whose body is the
+// browser-supplied attestation / assertion JSON. go-webauthn parses the
+// credential off an *http.Request body, while the API handlers receive it
+// as one member of the JSON body they have already read.
+//
+// signin と i/2fa の両方が使う。以前は 2 つの package に別々の実装があり、
+// i/2fa の方は URL を文字列から組み直して失敗しうる形 (失敗すると
+// INVALID_PARAM) のまま残っていた。clone なら失敗する経路が無い (#3330)。
+func CredentialRequest(orig *http.Request, body []byte) *http.Request {
+	req := orig.Clone(orig.Context())
+	req.Method = http.MethodPost
+	req.Header.Set("Content-Type", "application/json")
+	req.Body = io.NopCloser(bytes.NewReader(body))
+	req.ContentLength = int64(len(body))
+	req.GetBody = nil
+	return req
 }
 
 // --- persistence helpers --------------------------------------------------
