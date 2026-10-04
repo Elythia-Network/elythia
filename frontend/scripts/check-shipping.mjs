@@ -22,6 +22,7 @@
 
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { execaSync } from 'execa';
 
 import { DEFAULT_INTEGRATION_REFS, findClosestMergeBase, gitLines, gitMergeBase, gitPaths } from './lib/git.mjs';
@@ -69,8 +70,8 @@ function resolveMergeBase(explicitRef) {
  */
 function listChangedFiles(base) {
 	return [...new Set([
-		...gitPaths(['diff', '--name-only', '-z', `${base}...HEAD`]),
-		...gitPaths(['diff', '--name-only', '-z', 'HEAD']),
+		...gitPaths(['diff', '--relative', '--name-only', '-z', `${base}...HEAD`]),
+		...gitPaths(['diff', '--relative', '--name-only', '-z', 'HEAD']),
 		...gitPaths(['ls-files', '--others', '--exclude-standard', '-z']),
 	])].sort();
 }
@@ -229,8 +230,10 @@ function main() {
 	}
 
 	try {
-		const repoRoot = gitLines(['rev-parse', '--show-toplevel'])[0];
-		if (repoRoot === undefined) throw new OperationalError('git リポジトリの外で実行された');
+		// mk-go では frontend/ が git のルートではない (#3379)。check-spdx.mjs と同じく
+		// このスクリプトの 1 つ上を基準にし、git diff は --relative で揃える。
+		if (gitLines(['rev-parse', '--show-toplevel'])[0] === undefined) throw new OperationalError('git リポジトリの外で実行された');
+		const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 		process.chdir(repoRoot);
 
 		const base = resolveMergeBase(baseRef);

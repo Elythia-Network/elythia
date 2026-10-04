@@ -28,14 +28,12 @@
 
 import { lstatSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, extname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { DEFAULT_INTEGRATION_REFS, findClosestMergeBase, gitLines, gitMergeBase, gitPaths } from './lib/git.mjs';
 
 /** CI の対象ディレクトリ。この配列を CI とローカル検査の両方が使う。 */
 const TARGET_DIRECTORIES = [
-	'packages/backend/migration',
-	'packages/backend/src',
-	'packages/backend/test',
 	'packages/frontend-shared/@types',
 	'packages/frontend-shared/js',
 	'packages/frontend-builder',
@@ -141,8 +139,8 @@ function resolveMergeBase(explicitRef) {
 function listLocalChanges(explicitRef) {
 	const base = resolveMergeBase(explicitRef);
 	return new Set([
-		...gitPaths(['diff', '--name-only', '--diff-filter=d', '-z', `${base}...HEAD`]),
-		...gitPaths(['diff', '--name-only', '--diff-filter=d', '-z', 'HEAD']),
+		...gitPaths(['diff', '--relative', '--name-only', '--diff-filter=d', '-z', `${base}...HEAD`]),
+		...gitPaths(['diff', '--relative', '--name-only', '--diff-filter=d', '-z', 'HEAD']),
 		...gitPaths(['ls-files', '--others', '--exclude-standard', '-z']),
 	]);
 }
@@ -278,12 +276,17 @@ function main() {
 	}
 
 	try {
-		const root = gitLines(['rev-parse', '--show-toplevel'])[0];
-		if (root === undefined) throw new OperationalError('git リポジトリの外で実行された');
-		process.chdir(root);
+		// mk-go では frontend/ が git のルートではない (#3379)。対象のパスは frontend/
+		// 基準なので、git のルートではなくこのスクリプトの 1 つ上へ移る。git diff も
+		// --relative で同じ基準に揃える。
+		if (gitLines(['rev-parse', '--show-toplevel'])[0] === undefined) throw new OperationalError('git リポジトリの外で実行された');
+		process.chdir(fileURLToPath(new URL('..', import.meta.url)));
 
 		const includeUntracked = options.mode !== 'ci';
 		let targets = listTargetFiles(includeUntracked);
+		// 1 つも拾えないのは、対象のディレクトリの付け替え漏れか実行場所の誤り。黙って
+		// 「0 ファイルが通過した」と緑にしない (mk-go #3379 で実際にそうなっていた)。
+		if (targets.length === 0) throw new OperationalError('SPDX の検査対象が 1 つも見つからない (TARGET_DIRECTORIES か実行場所を確かめる)');
 		/** @type {string[]} */ const fixed = [];
 
 		if (options.mode === 'fix') {

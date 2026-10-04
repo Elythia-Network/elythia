@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { load as loadYaml } from 'js-yaml';
 import { buildTarball } from './tarball.mjs';
 
-const configDir = fileURLToPath(new URL('../.config', import.meta.url));
+const configDir = fileURLToPath(new URL('../../.config', import.meta.url));
 const configPath = process.env.MISSKEY_CONFIG_YML
 	? path.resolve(configDir, process.env.MISSKEY_CONFIG_YML)
 	: process.env.NODE_ENV === 'test'
