@@ -11,7 +11,7 @@ import pluginJson5 from './lib/vite-plugin-json5.js';
 import { pluginRemoveUnrefI18n } from '../frontend-builder/rollup-plugin-remove-unref-i18n';
 import { Features } from 'lightningcss';
 
-const url = process.env.NODE_ENV === 'development' ? (loadYaml(await fsp.readFile('../../.config/default.yml', 'utf-8')) as any).url : null;
+const url = process.env.NODE_ENV === 'development' ? (loadYaml(await fsp.readFile('../../../.config/default.yml', 'utf-8')) as any).url : null;
 const host = url ? (new URL(url)).hostname : undefined;
 
 const extensions = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.json', '.json5', '.svg', '.sass', '.scss', '.css', '.vue'];
@@ -99,7 +99,7 @@ export function getConfig(): UserConfig {
 				'@/': __dirname + '/src/',
 				'@@/': __dirname + '/../frontend-shared/',
 				'/client-assets/': __dirname + '/assets/',
-				'/static-assets/': __dirname + '/../backend/assets/',
+				'/static-assets/': __dirname + '/../../assets/',
 				'/fluent-emoji/': '@misskey-dev/emoji-assets/fluent-emoji/',
 			},
 		},

@@ -1,5 +1,4 @@
 packages:
-  - packages/backend
   - packages/frontend-shared
   - packages/frontend
   - packages/frontend-builder
@@ -12,6 +11,8 @@ packages:
   - packages/misskey-reversi
   - packages/misskey-bubble-game
   - packages-private/*
+  # backend を取り込まないので動かない (mk-go #3379)
+  - '!packages-private/diagnostics-backend'
 allowBuilds:
   '@nestjs/core': true
   '@parcel/watcher': true
