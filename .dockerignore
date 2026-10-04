@@ -76,3 +76,13 @@ third_party/misskey/node_modules
 # packages/backend/node_modules/... はそこへの symlink なので、
 # **再包含するのは実体側**。外すと COPY が not found で落ちる (実測)。
 !third_party/misskey/node_modules/.pnpm/*emoji-assets*/**
+
+# 本体へ取り込んだ frontend/ (#3379) の依存とビルド成果物。手元で pnpm を回すと
+# node_modules だけで 1GB 近くになり、`COPY . .` の build context に入る。
+# P4b で image が frontend/ から emoji-assets を取るようになったら、上の
+# third_party と同じく実体側だけを再包含する。
+frontend/node_modules
+frontend/packages/*/node_modules
+frontend/packages-private/*/node_modules
+frontend/built
+frontend/packages/*/built
