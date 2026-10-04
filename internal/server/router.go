@@ -319,6 +319,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// incremental 更新する (#596)。未配線でも本機能には影響しないが、admin
 	// dashboard の federation pie chart が起動直後以外で 0 に偏る。
 	followingService.SetInstanceRepo(instanceRepo)
+	// 本家と同じく meta.enableStatsForFederatedInstances が false なら集計列を
+	// 動かさない (#3330)。cachedMeta なので follow ごとの DB 往復は無い。
+	followingService.SetInstanceStatsGate(corefollowing.MetaInstanceStatsGate(metaRepo))
 
 	// Timeline services (Redis-backed fanout)
 	// keyPrefix で TS 本家と同じ `<host>:list:*` 名前空間に揃える (#362)。
@@ -1285,6 +1288,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	if m, err := metaRepo.Fetch(); err == nil {
 		chartHooks.ChartsForRemoteUser = m.EnableChartsForRemoteUser
 		chartHooks.ChartsForFederatedInst = m.EnableChartsForFederatedInstances
+		chartHooks.StatsForFederatedInst = m.EnableStatsForFederatedInstances
 	}
 	// 各サービスへ chart hook を注入する。Set* は nil 安全なので順序は不問。
 	noteCreateService.SetChartHook(chartHooks)

@@ -1,0 +1,22 @@
+-- #3330: `user."uri"` に index を張る。
+--
+-- **リモートの利用者を URI で引く経路が毎回 seq scan になっていた。** actor の
+-- 解決 (`resolver.go` の FindByURI)、受信 activity の actor 照合、アカウント移行の
+-- 移行先の確認などが `WHERE uri = ?` で引く。upstream は `MiUser.uri` に
+-- `@Index()` を持ち、Init migration (1000000000000-Init) で
+-- `IDX_be623adaa4c566baf5d29ce0c8` を作っている。mk-go の 000001 はこれを
+-- 持っていなかったので、**mk-go が一から作った DB にだけ** index が無い。
+--
+-- **名前と定義は upstream に揃える。** TS 製 DB には同名の index が既にあるので
+-- `IF NOT EXISTS` で何もしない。名前を変えたり partial (`WHERE uri IS NOT NULL`)
+-- にしたりすると、TS 製 DB で二重に作られる (`IF NOT EXISTS` は名前でしか存在を
+-- 判定しない。000091 と同じ方針)。
+--
+-- `user` はリモートの利用者を全部抱えるので、CONCURRENTLY で書き込みを block
+-- せずに構築する (000045 / 000091 と同じ)。**CONCURRENTLY は transaction 外・
+-- 単一文でしか実行できない**ので、この file は 1 文だけで構成する。
+--
+-- 失敗時の回復は 000057 と同じ: INVALID な index が残ったら
+-- `DROP INDEX CONCURRENTLY IF EXISTS "IDX_be623adaa4c566baf5d29ce0c8";` してから
+-- `schema_migrations` を直前 version へ戻して再適用する。
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_be623adaa4c566baf5d29ce0c8" ON "user" ("uri");

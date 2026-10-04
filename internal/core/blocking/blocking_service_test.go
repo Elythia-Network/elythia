@@ -236,8 +236,11 @@ func TestBlock_DecrementsInstanceCounters(t *testing.T) {
 	_, err := svc.Block("alice_local", "remote_user")
 	require.NoError(t, err)
 	assert.Empty(t, fr.Followings)
-	// remote 側 follower カウントが -1
-	assert.Equal(t, 4, instanceRepo.Instances[host].FollowersCount)
+	// 本家 UserBlockingService.block は userFollowingService.unfollow →
+	// decrementFollowing を通るので、remote → local の解除は remote 側の
+	// followingCount を -1 する (#3330)。followersCount は触らない。
+	assert.Equal(t, 6, instanceRepo.Instances[host].FollowingCount)
+	assert.Equal(t, 5, instanceRepo.Instances[host].FollowersCount)
 }
 
 // recordingFederationHook captures hook fires so we can assert that Block /

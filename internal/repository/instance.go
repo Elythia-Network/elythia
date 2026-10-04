@@ -287,13 +287,18 @@ func (r *instanceRepository) List(filter model.InstanceListFilter) ([]*model.Ins
 // columns of every instance row from the live `following` table. Used at
 // startup to backfill stale zeros until incremental hooks land (#421)。
 //
-// 命名は本家 Misskey と揃える:
-//   - `followersCount`: 当該リモートインスタンスの user が **我々を**
-//     何人 follow しているか (= 受信側 = subscribing)。SQL では
-//     follower.host = X を数える。
-//   - `followingCount`: 我々のローカル user が **当該インスタンスの user
-//     を** 何人 follow しているか (= 配信側 = publishing)。SQL では
-//     followee.host = X を数える。
+// 列の意味は本家 Misskey と揃える (UserFollowingService.insertFollowingDoc /
+// decrementFollowing が足す向き、#3330)。どちらも「その host の側から見た」数:
+//   - `followingCount`: 当該リモートインスタンスの user が**ローカルの user を**
+//     何人 follow しているか (= 我々の投稿を購読している側 = publishing)。
+//     SQL では follower.host = X かつ followee がローカルの行を数える。
+//   - `followersCount`: ローカルの user が**当該インスタンスの user を**何人
+//     follow しているか (= 我々が購読している側 = subscribing)。SQL では
+//     followee.host = X かつ follower がローカルの行を数える。
+//
+// federation/instances の subscribing / publishing と federation/stats の上位は
+// この意味で読んでいる。以前はここが逆向きに数えていたので、起動のたびに
+// TS 版が正しく積んだ値も入れ替わっていた。
 //
 // Reset → backfill の二段構え: 過去 follow が消えた host (= subquery に
 // 出てこない) は subquery JOIN だと UPDATE 対象外になり、古い非ゼロ値が
@@ -311,34 +316,34 @@ func (r *instanceRepository) RecomputeFollowCounts() error {
 		).Error; err != nil {
 			return err
 		}
-		// followersCount = COUNT of remote followers per host (follower.host).
-		// "How many users on host X follow any local user" ≒ they subscribe to us.
-		const followers = `
-UPDATE "instance" SET "followersCount" = c.cnt
-FROM (
-  SELECT u.host AS host, COUNT(*)::int AS cnt
-  FROM "following" f
-  JOIN "user" u ON f."followerId" = u.id
-  WHERE u.host IS NOT NULL
-  GROUP BY u.host
-) c
-WHERE "instance".host = c.host`
-		if err := tx.Exec(followers).Error; err != nil {
-			return err
-		}
-		// followingCount = COUNT of remote followees per host (followee.host).
-		// "How many users on host X are followed by any local user" ≒ we publish to them.
+		// followingCount = remote follower (host X) → local followee の行数。
 		const following = `
 UPDATE "instance" SET "followingCount" = c.cnt
 FROM (
-  SELECT u.host AS host, COUNT(*)::int AS cnt
+  SELECT fr.host AS host, COUNT(*)::int AS cnt
   FROM "following" f
-  JOIN "user" u ON f."followeeId" = u.id
-  WHERE u.host IS NOT NULL
-  GROUP BY u.host
+  JOIN "user" fr ON f."followerId" = fr.id
+  JOIN "user" fe ON f."followeeId" = fe.id
+  WHERE fr.host IS NOT NULL AND fe.host IS NULL
+  GROUP BY fr.host
 ) c
 WHERE "instance".host = c.host`
-		return tx.Exec(following).Error
+		if err := tx.Exec(following).Error; err != nil {
+			return err
+		}
+		// followersCount = local follower → remote followee (host X) の行数。
+		const followers = `
+UPDATE "instance" SET "followersCount" = c.cnt
+FROM (
+  SELECT fe.host AS host, COUNT(*)::int AS cnt
+  FROM "following" f
+  JOIN "user" fr ON f."followerId" = fr.id
+  JOIN "user" fe ON f."followeeId" = fe.id
+  WHERE fe.host IS NOT NULL AND fr.host IS NULL
+  GROUP BY fe.host
+) c
+WHERE "instance".host = c.host`
+		return tx.Exec(followers).Error
 	})
 }
 

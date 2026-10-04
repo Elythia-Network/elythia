@@ -1367,8 +1367,9 @@ func TestService_FederationHook_OnAccept_UserLookupFailure(t *testing.T) {
 
 // --- Instance counter incremental hook (#596) ---
 
-// remote follower → local followee: instance(remote).followersCount += 1
-func TestFollow_RemoteFollower_BumpsInstanceFollowers(t *testing.T) {
+// remote follower → local followee: instance(remote).followingCount += 1
+// (本家 insertFollowingDoc の isRemoteUser(follower) 分岐、#3330)。
+func TestFollow_RemoteFollower_BumpsInstanceFollowing(t *testing.T) {
 	svc, userRepo, _, _ := newSvc(t)
 	instanceRepo := testutil.NewMockInstanceRepository()
 	host := "remote.example"
@@ -1382,12 +1383,13 @@ func TestFollow_RemoteFollower_BumpsInstanceFollowers(t *testing.T) {
 	_, err := svc.Follow("remote_user", "alice_local", following.FollowOptions{})
 	require.NoError(t, err)
 
-	assert.Equal(t, 1, instanceRepo.Instances[host].FollowersCount)
-	assert.Equal(t, 0, instanceRepo.Instances[host].FollowingCount)
+	assert.Equal(t, 0, instanceRepo.Instances[host].FollowersCount)
+	assert.Equal(t, 1, instanceRepo.Instances[host].FollowingCount)
 }
 
-// local follower → remote followee: instance(remote).followingCount += 1
-func TestFollow_LocalFollowsRemote_BumpsInstanceFollowing(t *testing.T) {
+// local follower → remote followee: instance(remote).followersCount += 1
+// (本家 insertFollowingDoc の isRemoteUser(followee) 分岐、#3330)。
+func TestFollow_LocalFollowsRemote_BumpsInstanceFollowers(t *testing.T) {
 	svc, userRepo, _, _ := newSvc(t)
 	instanceRepo := testutil.NewMockInstanceRepository()
 	host := "remote.example"
@@ -1401,8 +1403,8 @@ func TestFollow_LocalFollowsRemote_BumpsInstanceFollowing(t *testing.T) {
 	_, err := svc.Follow("alice_local", "remote_user", following.FollowOptions{})
 	require.NoError(t, err)
 
-	assert.Equal(t, 0, instanceRepo.Instances[host].FollowersCount)
-	assert.Equal(t, 1, instanceRepo.Instances[host].FollowingCount)
+	assert.Equal(t, 1, instanceRepo.Instances[host].FollowersCount)
+	assert.Equal(t, 0, instanceRepo.Instances[host].FollowingCount)
 }
 
 // Unfollow で counter -1
@@ -1419,10 +1421,18 @@ func TestUnfollow_DecrementsInstanceCounters(t *testing.T) {
 
 	_, err := svc.Follow("remote_user", "alice_local", following.FollowOptions{})
 	require.NoError(t, err)
-	assert.Equal(t, 6, instanceRepo.Instances[host].FollowersCount)
+	assert.Equal(t, 4, instanceRepo.Instances[host].FollowingCount)
 
 	require.NoError(t, svc.Unfollow("remote_user", "alice_local"))
+	assert.Equal(t, 3, instanceRepo.Instances[host].FollowingCount)
+	assert.Equal(t, 5, instanceRepo.Instances[host].FollowersCount, "remote → local は followersCount を触らない")
+
+	_, err = svc.Follow("alice_local", "remote_user", following.FollowOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 6, instanceRepo.Instances[host].FollowersCount)
+	require.NoError(t, svc.Unfollow("alice_local", "remote_user"))
 	assert.Equal(t, 5, instanceRepo.Instances[host].FollowersCount)
+	assert.Equal(t, 3, instanceRepo.Instances[host].FollowingCount, "local → remote は followingCount を触らない")
 }
 
 // Local→local follow ではどの instance counter も動かない (host=nil)
@@ -1455,8 +1465,81 @@ func TestAcceptRequest_BumpsInstanceCounters(t *testing.T) {
 	}
 
 	require.NoError(t, svc.AcceptRequest("alice_local", "remote_user"))
-	// follower=remote → followersCount on remote host += 1
-	assert.Equal(t, 1, instanceRepo.Instances[host].FollowersCount)
+	// follower=remote → followingCount on remote host += 1
+	assert.Equal(t, 1, instanceRepo.Instances[host].FollowingCount)
+	assert.Equal(t, 0, instanceRepo.Instances[host].FollowersCount)
+}
+
+// TestFollow_InstanceStatsGateOff_LeavesCounters pins the upstream
+// meta.enableStatsForFederatedInstances gate: when it is false, follow and
+// unfollow in either direction do not touch the instance counters.
+func TestFollow_InstanceStatsGateOff_LeavesCounters(t *testing.T) {
+	svc, userRepo, _, _ := newSvc(t)
+	instanceRepo := testutil.NewMockInstanceRepository()
+	host := "remote.example"
+	instanceRepo.Instances[host] = &model.Instance{Host: host, FollowersCount: 5, FollowingCount: 3}
+	svc.SetInstanceRepo(instanceRepo)
+	metaRepo := testutil.NewMockMetaRepository()
+	metaRepo.Meta = &model.Meta{EnableStatsForFederatedInstances: false}
+	svc.SetInstanceStatsGate(following.MetaInstanceStatsGate(metaRepo))
+
+	addUser(t, userRepo, "alice_local", false)
+	remote := addUser(t, userRepo, "remote_user", false)
+	remote.Host = &host
+
+	_, err := svc.Follow("remote_user", "alice_local", following.FollowOptions{})
+	require.NoError(t, err)
+	_, err = svc.Follow("alice_local", "remote_user", following.FollowOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 5, instanceRepo.Instances[host].FollowersCount)
+	assert.Equal(t, 3, instanceRepo.Instances[host].FollowingCount)
+
+	require.NoError(t, svc.Unfollow("remote_user", "alice_local"))
+	assert.Equal(t, 3, instanceRepo.Instances[host].FollowingCount)
+
+	// 運営者が有効に戻したら次の操作から集計する (meta を毎回読む)。
+	metaRepo.Meta.EnableStatsForFederatedInstances = true
+	require.NoError(t, svc.Unfollow("alice_local", "remote_user"))
+	assert.Equal(t, 4, instanceRepo.Instances[host].FollowersCount)
+}
+
+// TestFollow_RemoteRemote_DoesNotTouchInstance pins that only follows with a
+// local side are counted, matching upstream's if / else if branches.
+func TestFollow_RemoteRemote_DoesNotTouchInstance(t *testing.T) {
+	svc, userRepo, _, _ := newSvc(t)
+	instanceRepo := testutil.NewMockInstanceRepository()
+	h1, h2 := "one.example", "two.example"
+	instanceRepo.Instances[h1] = &model.Instance{Host: h1}
+	instanceRepo.Instances[h2] = &model.Instance{Host: h2}
+	svc.SetInstanceRepo(instanceRepo)
+
+	a := addUser(t, userRepo, "remote_a", false)
+	a.Host = &h1
+	b := addUser(t, userRepo, "remote_b", false)
+	b.Host = &h2
+
+	_, err := svc.Follow("remote_a", "remote_b", following.FollowOptions{})
+	require.NoError(t, err)
+	for _, h := range []string{h1, h2} {
+		assert.Zero(t, instanceRepo.Instances[h].FollowersCount, h)
+		assert.Zero(t, instanceRepo.Instances[h].FollowingCount, h)
+	}
+}
+
+// TestMetaInstanceStatsGate covers the gate's fallbacks: a missing repository
+// or an unreadable meta reports enabled (the upstream default).
+func TestMetaInstanceStatsGate(t *testing.T) {
+	assert.True(t, following.MetaInstanceStatsGate(nil)())
+
+	metaRepo := testutil.NewMockMetaRepository()
+	assert.True(t, following.MetaInstanceStatsGate(metaRepo)(), "no meta row")
+	metaRepo.Meta = &model.Meta{EnableStatsForFederatedInstances: true}
+	assert.True(t, following.MetaInstanceStatsGate(metaRepo)())
+	metaRepo.Meta.EnableStatsForFederatedInstances = false
+	assert.False(t, following.MetaInstanceStatsGate(metaRepo)())
+
+	metaRepo.FetchErr = errors.New("db down")
+	assert.True(t, following.MetaInstanceStatsGate(metaRepo)())
 }
 
 // SetInstanceRepo 未配線でも従来 path は動く (regression 防止)

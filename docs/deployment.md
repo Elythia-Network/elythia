@@ -385,7 +385,7 @@ worker 数は既定値がキューごとに違い、`stuck 検出` は**キュ�
 
 ```
   ok    config.url   https://example.com
-  ok    database     接続 ok / migration version 107
+  ok    database     接続 ok / migration version 108
   ok    database-health dead tuple と VACUUM に問題なし (121 テーブル)
   ok    root user    meta.rootUserId 設定済み
   ok    redis        接続 ok
@@ -1257,3 +1257,7 @@ policy さえあればログイン IP が読める。**
 - 起動時に並走する race による微小なズレ
 
 drift は起動時の `RecomputeFollowCounts` で完全に再計算されるため、admin dashboard の federation pie chart に違和感が出たら **mk-go プロセスを再起動** すれば即時整合する。再起動以外で recompute を強制する API はまだ無い (将来 admin endpoint 化を検討)。
+
+列の意味は本家と同じで、どちらも**その host の側から見た**数 (#3330)。`followingCount` はその host の利用者がローカルの利用者をフォローしている数 (federation/instances の `publishing`)、`followersCount` はローカルの利用者がその host の利用者をフォローしている数 (`subscribing`)。#3330 より前の mk-go は incremental 更新・起動時の再計算ともに**逆向きに数えていた**ので、それまでに mk-go を起動したことのある DB では 2 列の値が入れ替わっている (TS 版が正しく積んだ値も、mk-go の起動時の再計算で入れ替わる)。#3330 を含む版に上げて**一度起動すれば、再計算で正しい向きに戻る**。一方、instance chart (`__chart__instance` の `following` / `followers`) の過去の行は作り直さないので、更新前の期間は 2 系列が入れ替わったまま残る。
+
+`meta.enableStatsForFederatedInstances` を false にすると、本家と同じく Follow / Unfollow はこの 2 列も instance chart の following / followers も動かさない。ただし**起動時の `RecomputeFollowCounts` はこの設定に関係なく走る** (本家には起動時の再計算そのものが無い。docs/divergence.md の 5 節)。chart 側の判定は他の chart の設定と同じく起動時の値で、変更は再起動で反映される。

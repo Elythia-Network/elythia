@@ -46,6 +46,10 @@ type Hooks struct {
 	// デフォルトは true (Misskey のデフォルトと一致)。
 	ChartsForRemoteUser    bool
 	ChartsForFederatedInst bool
+	// StatsForFederatedInst mirrors meta.enableStatsForFederatedInstances.
+	// Upstream nests the follow-related instance chart updates inside this
+	// flag, so the instance following / followers charts need both flags.
+	StatsForFederatedInst bool
 }
 
 // Config bundles every chart pointer alongside the id generator. The
@@ -81,6 +85,7 @@ func New(cfg Config) *Hooks {
 		IDGen:                  cfg.IDGen,
 		ChartsForRemoteUser:    true,
 		ChartsForFederatedInst: true,
+		StatsForFederatedInst:  true,
 	}
 	if v := mk(cfg.Notes, func(c *chart.Chart) any { return charts.NewNotesChart(c) }); v != nil {
 		h.Notes = v.(*charts.NotesChart)
@@ -190,12 +195,17 @@ func (h *Hooks) commitFollow(follower, followee *model.User, isFollow bool) {
 			_ = h.PerUserFollowing.Update(follower, followee, isFollow)
 		}
 	}
-	if h.Instance != nil && h.ChartsForFederatedInst {
+	// 本家 UserFollowingService は instanceChart の更新を
+	// enableStatsForFederatedInstances の分岐の中でだけ行い、向きは instance の
+	// 集計列と同じ「その host の側から見た」数 (#3330)。remote → local は
+	// その host の利用者がフォローしている側なので updateFollowing、
+	// local → remote はフォローされている側なので updateFollowers。
+	if h.Instance != nil && h.StatsForFederatedInst && h.ChartsForFederatedInst {
 		if isRemote(follower) && !isRemote(followee) {
-			_ = h.Instance.UpdateFollowers(*follower.Host, isFollow)
+			_ = h.Instance.UpdateFollowing(*follower.Host, isFollow)
 		}
 		if !isRemote(follower) && isRemote(followee) {
-			_ = h.Instance.UpdateFollowing(*followee.Host, isFollow)
+			_ = h.Instance.UpdateFollowers(*followee.Host, isFollow)
 		}
 	}
 }
