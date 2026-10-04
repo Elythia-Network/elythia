@@ -11,26 +11,27 @@
 // Columns added with `ALTER TABLE ... ADD COLUMN` are safe (idempotent on both
 // shapes) and are therefore ignored.
 //
-// Regenerate whenever the third_party/misskey submodule is bumped:
+// Regenerate whenever UPSTREAM_MISSKEY_VERSION is bumped (run `make upstream-fetch` first):
 //
 //	go run ./tools/schemadrift
 package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
+
+	"github.com/shiroha-a/mk/internal/upstreamsrc"
 )
 
 const (
-	upstreamModelsDir     = "third_party/misskey/packages/backend/src/models"
-	upstreamMigrationsDir = "third_party/misskey/packages/backend/migration"
-	goldenPath            = "internal/entitycompat/testdata/golden_upstream_columns.json"
-	migrationsGoldenPath  = "internal/entitycompat/testdata/golden_upstream_migrations.json"
+	goldenPath           = "internal/entitycompat/testdata/golden_upstream_columns.json"
+	migrationsGoldenPath = "internal/entitycompat/testdata/golden_upstream_migrations.json"
 )
 
 var (
@@ -49,13 +50,23 @@ var (
 )
 
 func main() {
+	// 本家は submodule ではなく .cache/misskey/<版> から読む (#3378)。
+	up, _ := upstreamsrc.Dir(".")
+	modelsFlag := flag.String("models", filepath.Join(up, "packages/backend/src/models"), "path to Misskey backend models dir")
+	migrationsFlag := flag.String("migrations", filepath.Join(up, "packages/backend/migration"), "path to Misskey backend migration dir")
+	flag.Parse()
+	upstreamModelsDir, upstreamMigrationsDir := *modelsFlag, *migrationsFlag
+	if err := upstreamsrc.Check(upstreamModelsDir); err != nil {
+		fmt.Fprintln(os.Stderr, "schemadrift:", err)
+		os.Exit(1)
+	}
 	tables, err := collect(upstreamModelsDir)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "schemadrift:", err)
 		os.Exit(1)
 	}
 	if len(tables) == 0 {
-		fmt.Fprintf(os.Stderr, "schemadrift: no entities found under %s (submodule missing?)\n", upstreamModelsDir)
+		fmt.Fprintf(os.Stderr, "schemadrift: no entities found under %s\n", upstreamModelsDir)
 		os.Exit(1)
 	}
 	blob, err := json.MarshalIndent(tables, "", "  ")
@@ -75,7 +86,7 @@ func main() {
 		os.Exit(1)
 	}
 	if len(migrations) == 0 {
-		fmt.Fprintf(os.Stderr, "schemadrift: no migrations found under %s (submodule missing?)\n", upstreamMigrationsDir)
+		fmt.Fprintf(os.Stderr, "schemadrift: no migrations found under %s\n", upstreamMigrationsDir)
 		os.Exit(1)
 	}
 	mblob, err := json.MarshalIndent(migrations, "", "  ")

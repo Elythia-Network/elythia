@@ -348,7 +348,7 @@ drop-in テスト (#367) で発見した補完カラム:
   **`promo_note` を読んで利用者へ提示する経路が upstream にも無い**
   (2026.7.0 の backend で `promoNote` / `promoRead` を参照するのは endpoint 2 本と
   DI / model 定義だけ。`grep -rlni` で 8 ファイル、内訳は
-  [`upstream-catch-up.md`](upstream-catch-up.md) の「submodule bump 後に必須」)。
+  [`upstream-catch-up.md`](upstream-catch-up.md) の「本家の版を上げた後に必須」)。
   **frontend の menu 項目も無い** — `_promote()` 関数
   (`packages/frontend/src/utility/get-note-menu.ts:279`) と `promote` locale
   (`locales/*.yml:559`) は残っているが、どちらも参照ゼロ。menu 項目は upstream

@@ -5,7 +5,7 @@
 // (which mirrors the OpenAPI `components.schemas`) for exactly the schemas the
 // entitycompat family table references, and written to
 // internal/entitycompat/testdata/golden_schemas.json. Regenerate it whenever
-// the third_party/misskey submodule is bumped to a new upstream version.
+// UPSTREAM_MISSKEY_VERSION is bumped (run `make upstream-fetch` first).
 //
 // Usage:
 //
@@ -18,18 +18,27 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/shiroha-a/mk/internal/entitycompat"
+	"github.com/shiroha-a/mk/internal/upstreamsrc"
 )
 
 func main() {
-	typesPath := flag.String("types", "third_party/misskey/packages/misskey-js/src/autogen/types.ts", "path to misskey-js autogen types.ts")
+	// 本家は submodule ではなく .cache/misskey/<版> から読む (#3378)。版のファイルが
+	// 読めなければ up は空になり、下の Check が取得の案内を出して落ちる。
+	up, _ := upstreamsrc.Dir(".")
+	typesPath := flag.String("types", filepath.Join(up, "packages/misskey-js/src/autogen/types.ts"), "path to misskey-js autogen types.ts")
 	outPath := flag.String("out", "internal/entitycompat/testdata/golden_schemas.json", "golden snapshot output path")
 	unionOut := flag.String("union-out", "internal/entitycompat/testdata/golden_unions.json", "golden union snapshot output path")
 	report := flag.Bool("report", false, "print a full drift report after regenerating")
 	flag.Parse()
+	if err := upstreamsrc.Check(*typesPath); err != nil {
+		fmt.Fprintln(os.Stderr, "shapediff:", err)
+		os.Exit(1)
+	}
 
 	data, err := os.ReadFile(*typesPath)
 	if err != nil {

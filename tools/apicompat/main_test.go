@@ -3,11 +3,14 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/shiroha-a/mk/internal/upstreamsrc"
 )
 
 func TestReadMkRoutesFromStdin(t *testing.T) {
@@ -177,8 +180,9 @@ func TestRunErrorsOnMissingTSDir(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing ts dir, got nil")
 	}
-	if !strings.Contains(err.Error(), "collect TS endpoints") {
-		t.Errorf("error should mention collect TS endpoints, got: %v", err)
+	// 本家が無いときは、取得の案内を出して読む前に落とす (#3378)。
+	if !errors.Is(err, upstreamsrc.ErrNotFetched) || !strings.Contains(err.Error(), "make upstream-fetch") {
+		t.Errorf("error should be ErrNotFetched with the fetch hint, got: %v", err)
 	}
 }
 

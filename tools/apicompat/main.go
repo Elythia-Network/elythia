@@ -4,7 +4,7 @@
 // Usage:
 //
 //	apicompat \
-//	  -ts-endpoints-dir third_party/misskey/packages/backend/src/server/api/endpoints \
+//	  -ts-endpoints-dir .cache/misskey/<version>/packages/backend/src/server/api/endpoints \
 //	  -mk-routes /tmp/mk-routes.json \
 //	  -out docs/api-compat.md
 //
@@ -23,7 +23,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
+
+	"github.com/shiroha-a/mk/internal/upstreamsrc"
 )
 
 func main() {
@@ -40,12 +43,17 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	// flag.Parse はエラー時 usage を fs.Output() に書く。test 中の noisy
 	// 出力を避けるため stderr に向ける (本番では os.Stderr が渡る)。
 	fs.SetOutput(stderr)
-	tsDir := fs.String("ts-endpoints-dir", "third_party/misskey/packages/backend/src/server/api/endpoints", "path to Misskey TS endpoint .ts files")
-	tsDirectFile := fs.String("ts-api-server-service", "third_party/misskey/packages/backend/src/server/api/ApiServerService.ts", "path to Misskey TS ApiServerService.ts (fastify 直登録 endpoint の抽出元)")
+	// 本家は submodule ではなく .cache/misskey/<版> から読む (#3378)。
+	up, _ := upstreamsrc.Dir(".")
+	tsDir := fs.String("ts-endpoints-dir", filepath.Join(up, "packages/backend/src/server/api/endpoints"), "path to Misskey TS endpoint .ts files")
+	tsDirectFile := fs.String("ts-api-server-service", filepath.Join(up, "packages/backend/src/server/api/ApiServerService.ts"), "path to Misskey TS ApiServerService.ts (fastify 直登録 endpoint の抽出元)")
 	mkRoutesPath := fs.String("mk-routes", "", "path to JSON output of `misskey -dump-routes` (default: stdin)")
 	outPath := fs.String("out", "", "output markdown path (default: stdout)")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("parse args: %w", err)
+	}
+	if err := upstreamsrc.Check(*tsDir); err != nil {
+		return err
 	}
 
 	tsEndpoints, err := collectTSEndpoints(*tsDir)

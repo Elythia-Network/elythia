@@ -197,6 +197,14 @@
 - **本家を読むテストは「無ければ skip」の形を保ち、CI では skip を禁じる** (今の `MK_FRONTEND_GATES_REQUIRE_SUBMODULE` と同じ形)。skip が成功扱いになる問題 (#2892) を持ち込まない
 - **取得方法は手元と CI で分ける** (Q3)。手元は共有の bare mirror を 1 つ持ち、版ごとに worktree で展開する (追従作業で旧版と新版を並べるため。2 回目以降の取得が速い)。CI は今と同じく `actions/checkout` で毎回取る (shallow)
 
+P3 (#3378) で上のとおりにした (2026-10-05)。
+
+- 場所は `internal/upstreamsrc` が返す。**submodule へ戻す経路は作らなかった** — P4 で fork が消えたときに、黙って fork を読んでいたことが隠れるため。本家が無ければ「`make upstream-fetch` を実行する」と出して落ちる
+- skip を禁じる変数は `MK_UPSTREAM_REQUIRE`。本家を読むテストは今 `achievement` の 1 本で、`make upstream-check` (golden を本家から作り直して差分が無いこと + このテスト) が立てる。`apicompat` workflow が回す
+- 本家 backend e2e の 3 ファイルは `tests/upstream-e2e/harness/` に置き、実行のたびに本家の `packages/backend/` へコピーする。vitest の設定を本家の外に置いたまま走らせる形は、設定ファイルの import が設定ファイルの場所から解決されて失敗するので採らない
+- 試算: fork と本家は、比較対象として読むパス (`packages/backend/src` / `migration` / `misskey-js/src/autogen`) で差分が 0。本家から作り直した golden 11 個 (`make shapecheck-gen` が書く全て) は、commit 済みのものとバイト一致した
+- `UPSTREAM_MISSKEY_VERSION`・`config.MisskeyVersion`・e2e の `misskey/misskey:<版>` が揃っていることを `TestUpstreamVersionIsConsistent` が見る
+
 ### D3. 本家 backend から借りているアセット
 
 - `packages/backend/assets` (favicon・アイコン等): **`frontend/assets/` に置く** (Q6)。本家では backend 側にあるが、配信しているのは画面向けの画像なので実態に合う
@@ -328,7 +336,7 @@ P4 (bind mount の元が `third_party/misskey/built` から `frontend/built` に
 | P1 | 追従方式の試算と、取り込む範囲の確定 (#3370、2026-10-04 に完了) | しない |
 | P1b | 復路の保証をやめる (D9、#3191)。宣言は P6 の版の CHANGELOG | しない |
 | P2 | テスト関連の配置の整理 (D6。#3373、2026-10-04 に完了) | しない |
-| P3 | 本家の参照を `.cache/misskey` へ分離 (D2)。この時点では frontend はまだ submodule のまま。fork の `packages/backend` にある、本家 backend e2e を mk-go へ向けて走らせる 3 ファイル (`test-server-mkgo/entry.ts` など) を `tests/` へ移す | しない |
+| P3 | 本家の参照を `.cache/misskey` へ分離 (D2。#3378、2026-10-05 に完了)。この時点では frontend はまだ submodule のまま。fork の `packages/backend` にある、本家 backend e2e を mk-go へ向けて走らせる 3 ファイル (`test-server-mkgo/entry.ts` など) を `tests/` へ移す | しない |
 | P4 | frontend の取り込み (D1 / D3 / D4 / D5)、submodule と fork の廃止。frontend の CI の required 化とライセンスの表示 (R8 / D12)、本番の切り替え (D13) を含む。あわせて、`@misskey-dev/emoji-assets` を frontend の依存に持ち直す (今は backend の `node_modules` から取っている)、Node.js の版を本家の `Dockerfile` でなく `.node-version` から読む、fork の assets image (`Dockerfile.assets` と publish の workflow。`Dockerfile.bundled` が使う) を本体の workflow でのビルドに置き換える (R2)、`misskey-js` の型の生成 (`build-misskey-js-with-types`) が使う `api.json` の作り方を決める (`api.json` は本家のソースに無く、本家 backend をビルドして `generate-api-json` で作る生成物。`.cache/misskey` で本家 backend をビルドするか、本体の API から作るか) | しない |
 | P5 | 正式な名前 (**決定: Elythia**) と、プラグインの呼び名 (**決定: 据え置き**) の決定。どちらも 2026-09-30 | — |
 | P5b | リポジトリの移管 (D10)。コードの名前は変えず、旧 URL からの転送で動くことを確かめる | する |

@@ -84,7 +84,7 @@ allowlistに登録済みのドリフトを修正すると、そのエントリ�
 
 ### upstream catch-up時
 
-`third_party/misskey`を新バージョンにbumpしたら、goldenスナップショットを再生成してcommitする:
+`UPSTREAM_MISSKEY_VERSION`を新バージョンに書き換えて`make upstream-fetch`で本家を取得したら、goldenスナップショットを再生成してcommitする(goldenは`.cache/misskey/<版>/`の本家から作る。#3378):
 
 ```bash
 make shapecheck-gen   # testdata/golden_schemas.json を再生成
@@ -198,7 +198,7 @@ L0/L2/L3がdriftを出しても、**修正の前に現misskey-ts実装を確認�
 
 - **vestigial field**: 契約には残るが機能削除済みのfield(例: `antenna.notify`はカラム削除済でpackerが定数`false`を返す)。goldenにあってもmk-goで実装し直すのは誤り。
 - **endpoint取り違え**: goldenの同名schemaが別endpointの契約のことがある(例: `EmojiDetailed`は`admin/emoji/list`、`EmojiDetailedAdmin`は`v2/admin/emoji/list`)。
-- 確認先: `third_party/misskey/.../core/entities/*EntityService.ts`(packer)、endpoint定義の`res`スキーマ、migration。
+- 確認先: `.cache/misskey/<版>/.../core/entities/*EntityService.ts`(packer)、endpoint定義の`res`スキーマ、migration。
 
 ## gateの盲点と補い方
 

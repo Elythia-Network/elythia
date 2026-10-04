@@ -7,7 +7,7 @@
 // code is right. This tool extracts every endpoint's (code -> id) map from the
 // backend endpoint definitions and writes it to
 // internal/entitycompat/testdata/golden_error_ids.json. Regenerate it whenever
-// the third_party/misskey submodule is bumped to a new upstream version.
+// UPSTREAM_MISSKEY_VERSION is bumped (run `make upstream-fetch` first).
 //
 // Usage:
 //
@@ -24,6 +24,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/shiroha-a/mk/internal/upstreamsrc"
 )
 
 // codeIDRe matches a Misskey meta.errors entry. All 459 upstream entries place
@@ -47,11 +49,18 @@ var (
 var kindStatus = map[string]int{"client": 400, "permission": 403, "server": 500}
 
 func main() {
-	epDir := flag.String("endpoints", "third_party/misskey/packages/backend/src/server/api/endpoints", "path to Misskey backend endpoints dir")
+	// 本家は submodule ではなく .cache/misskey/<版> から読む (#3378)。版のファイルが
+	// 読めなければ up は空になり、下の Check が取得の案内を出して落ちる。
+	up, _ := upstreamsrc.Dir(".")
+	epDir := flag.String("endpoints", filepath.Join(up, "packages/backend/src/server/api/endpoints"), "path to Misskey backend endpoints dir")
 	out := flag.String("out", "internal/entitycompat/testdata/golden_error_ids.json", "golden id snapshot output path")
 	statusOut := flag.String("status-out", "internal/entitycompat/testdata/golden_error_status.json", "golden explicit-status snapshot output path")
 	kindsOut := flag.String("kinds-out", "internal/entitycompat/testdata/golden_error_kinds.json", "golden explicit-kind snapshot output path")
 	flag.Parse()
+	if err := upstreamsrc.Check(*epDir); err != nil {
+		fmt.Fprintln(os.Stderr, "erroriddiff:", err)
+		os.Exit(1)
+	}
 
 	golden := map[string]map[string]string{}
 	status := map[string]map[string]int{}

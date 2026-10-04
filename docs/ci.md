@@ -103,7 +103,7 @@ PR を出すと十数個の check が走る。**どれが何を見ていて、�
 | `analyze (go)` / `analyze (actions)` | CodeQL | **自分のコード**の静的解析 (Go の全 module と workflow の式) | 未計測 | 手元では回せない (CodeQL CLI が要る)。Code scanning alerts で見る |
 | `frontend-check` | CI | fork frontend の型 (`vue-tsc --noEmit`) + submodule のソースを読むゲート + eslint (`src/**/*.{ts,vue}`) + vitest + `make plugins-all` と統合バイナリの build | 3〜4 min | 下の「frontend-check の手元再現」。**`make frontend-check` は型・ゲート・eslint まで** (#2906) |
 | `plugin-tests` | CI | 同梱プラグインのテスト (別 module なので `go list ./...` に入らない) | 1 min | `make plugin-test` |
-| `apicompat` | apicompat | **`docs/api-compat.md` が実態とずれていないか** (生成物なので再生成して diff を見る) | 未計測 | `make apicompat` (**プラグイン抜き + testMode が要る**。手順は docs/development.md) |
+| `apicompat` | apicompat | **`docs/api-compat.md` が実態とずれていないか** (生成物なので再生成して diff を見る)。あわせて golden が本家の版に追いついているか (`make upstream-check`、#3378) | 未計測 | `make apicompat` (**プラグイン抜き + testMode が要る**。手順は docs/development.md) |
 | `e2e (1/4)` 〜 `4/4` | Upstream backend e2e | **本家の backend e2e 1256 テスト**が mk-go に対して通るか | 3-7 min | `make upstream-e2e` |
 | `diff` | Diff e2e | mk-go と TS の**レスポンスの値**が一致するか (endpoint 比較 35 件) | 4 min | `make diff-check` |
 | `swap-test` | Drop-in e2e | TS→mk 切替で state が保たれるか | 5 min | `make dropin-swap-test` |
@@ -316,7 +316,7 @@ PR では回らない。失敗は Actions 上で確認して別 PR で対処す�
 
 | workflow | 内容 | 実行方法 |
 |---|---|---|
-| Playwright (`spec (ts 1/4)` 〜 `4/4`) | 同じ spec を **Misskey TS backend** に対して実行し、spec が mk-go の挙動に引きずられていないかを検証 | upstream 追従で submodule を bump したとき |
+| Playwright (`spec (ts 1/4)` 〜 `4/4`) | 同じ spec を **Misskey TS backend** に対して実行し、spec が mk-go の挙動に引きずられていないかを検証 | upstream 追従で本家の版を上げたとき |
 | Docker (`workflow_dispatch`) | 過去のリリースタグから image を publish し直す | `gh workflow run docker.yml -f tag=1.1.1` |
 
 `spec (ts …)` を常時回さないのは、upstream が変わらない限り答えが変わらないため。詳細は
@@ -600,10 +600,11 @@ checkout / setup-go を除くと step は実行順に 4 つ。**required job な
 #### `upstream-backend-e2e` workflow (PR トリガー)
 
 - `.github/workflows/upstream-backend-e2e.yml` で Misskey 本家の backend e2e
-  (`third_party/misskey/packages/backend/test/e2e/**`) を mk-go に向けて実行する。
-  テスト本体は無改変で、vitest の `globalSetup` / `setupFiles` だけを差し替える。
+  (本家の `packages/backend/test/e2e/**`) を mk-go に向けて実行する。本家は
+  `UPSTREAM_MISSKEY_VERSION` の版を `.cache/misskey/<版>` に checkout する (#3378)。
+  テスト本体は無改変で、vitest の `globalSetup` / `setupFiles` (`tests/upstream-e2e/harness/`) だけを差し替える。
 - `pull_request` で paths (`internal/**` / `cmd/**` / `migration/**` /
-  `tests/upstream-e2e/**` / `third_party/misskey` / `Makefile` / `go.mod` /
+  `tests/upstream-e2e/**` / `UPSTREAM_MISSKEY_VERSION` / `Makefile` / `go.mod` /
   `go.sum` / 当 workflow) に該当する変更のみ発火。`workflow_dispatch` で任意の
   ref に対して手動実行も可。
 - **4 シャード並列** (`--shard=i/4`)。`fail-fast: false`。**プロセス内では
@@ -638,16 +639,17 @@ checkout / setup-go を除くと step は実行順に 4 つ。**required job な
   実態とずれていないか**を見る。あれは生成物で CLAUDE.md も「手で直さない」と書いているが、
   **再生成が人手に頼っていた**ので、route を足しても upstream が endpoint を増やしても
   マトリクスは黙って古くなる。読む人は「mk-go only 59 件」のような数字を現状だと思う。
-- **既存のどの job にも相乗りできない。** submodule (TS の endpoints を読む) と DB / Redis
-  (route dump がサーバーを組み立てる) の両方が要るが、`test-shards` は `third_party/misskey`
-  を checkout せず、`frontend-check` は DB を持たない。
+- **既存のどの job にも相乗りできない。** 本家 (TS の endpoints を読む) と DB / Redis
+  (route dump がサーバーを組み立てる) の両方が要るが、`test-shards` は本家を checkout せず、
+  `frontend-check` は DB を持たない。本家を取得するので、golden の追いつき
+  (`make upstream-check`) もこの workflow で見る (#3378)。
 - **config は `tests/upstream-e2e/mkgo.yml`。** `testMode: true` が要る — 無いと
   `/api/reset-db` が route に載らず、マトリクスが「TS 側に存在するが未実装 1 件」に化ける。
   接続先だけ `MK_*` で service container へ向ける。
 - **プラグインは入らない前提。** 同梱の 2 つは `disabled: true` なので `pluginbuild` が
   skip する (#2701)。自前プラグインを `plugins/` に置いた手元で回すと 19 行混入するが、
   clean checkout では起きない。
-- PR の required check には**含めない**。判定材料に submodule の内容が入るので、こちらの
+- PR の required check には**含めない**。判定材料に本家の内容が入るので、こちらの
   コードを触っていない PR でも upstream の bump で赤くなりうる。
 
 #### `frontend-check` job (ci.yml)

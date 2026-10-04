@@ -6,6 +6,8 @@
 # 成果物で image に入る必要があるため。
 **/.git
 .tmp
+# 比較対象の本家 (make upstream-fetch、#3378)。node_modules 入りの木になるので必ず外す
+.cache
 .env
 .env.test
 built
