@@ -465,3 +465,64 @@ func TestInstanceRepository_ListPeerHosts(t *testing.T) {
 	}
 	assert.Equal(t, []string{"alpha.peers.example", "down.peers.example", "zeta.peers.example"}, ours)
 }
+
+// TestInstanceRepository_RecomputeFollowCounts pins the upstream column
+// semantics (#3330): followingCount counts remote(host) → local follows and
+// followersCount counts local → remote(host) follows. Remote → remote rows and
+// stale values on instances without follows must not survive.
+func TestInstanceRepository_RecomputeFollowCounts(t *testing.T) {
+	repo := NewInstanceRepository(testDB)
+	insts := []*model.Instance{
+		newTestInstance("i_rfc_1", "rfc1.example"),
+		newTestInstance("i_rfc_2", "rfc2.example"),
+		newTestInstance("i_rfc_3", "rfc3.example"),
+	}
+	insts[2].FollowersCount = 9
+	insts[2].FollowingCount = 9
+	for _, inst := range insts {
+		require.NoError(t, repo.Create(inst))
+		t.Cleanup(func() { cleanupInstance(t, inst.ID) })
+	}
+
+	seedHostUser := func(id string, host *string) {
+		require.NoError(t, testDB.Exec(
+			`INSERT INTO "user" (id, "updatedAt", username, "usernameLower", token, host) VALUES (?, NOW(), ?, ?, ?, ?)`,
+			id, "u_"+id, "u_"+id, "tok_"+id, host,
+		).Error)
+		t.Cleanup(func() { testDB.Exec(`DELETE FROM "user" WHERE id = ?`, id) })
+	}
+	h1, h2 := "rfc1.example", "rfc2.example"
+	seedHostUser("rfc_l1", nil)
+	seedHostUser("rfc_l2", nil)
+	seedHostUser("rfc_r1a", &h1)
+	seedHostUser("rfc_r1b", &h1)
+	seedHostUser("rfc_r2", &h2)
+
+	follows := [][2]string{
+		{"rfc_r1a", "rfc_l1"}, {"rfc_r1b", "rfc_l1"}, {"rfc_r1a", "rfc_l2"}, // rfc1 → local: 3
+		{"rfc_l1", "rfc_r1a"},                      // local → rfc1: 1
+		{"rfc_l1", "rfc_r2"}, {"rfc_l2", "rfc_r2"}, // local → rfc2: 2
+		{"rfc_r1b", "rfc_r2"}, // remote → remote: 数えない
+	}
+	for i, f := range follows {
+		id := "rfc_f" + string(rune('a'+i))
+		require.NoError(t, testDB.Exec(
+			`INSERT INTO "following" (id, "followerId", "followeeId") VALUES (?, ?, ?)`, id, f[0], f[1],
+		).Error)
+		t.Cleanup(func() { testDB.Exec(`DELETE FROM "following" WHERE id = ?`, id) })
+	}
+
+	require.NoError(t, repo.RecomputeFollowCounts())
+
+	want := map[string][2]int{ // host → {followingCount, followersCount}
+		"rfc1.example": {3, 1},
+		"rfc2.example": {0, 2},
+		"rfc3.example": {0, 0},
+	}
+	for host, w := range want {
+		got, err := repo.FindByHost(host)
+		require.NoError(t, err)
+		assert.Equal(t, w[0], got.FollowingCount, "%s followingCount", host)
+		assert.Equal(t, w[1], got.FollowersCount, "%s followersCount", host)
+	}
+}

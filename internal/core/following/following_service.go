@@ -139,6 +139,9 @@ type Service struct {
 	// silencedChecker は meta.silencedHosts の判定。未配線なら承認要求を
 	// 増やさない (= 従来どおり) が、production では必ず配線する。
 	silencedChecker SilencedHostChecker
+	// instanceStatsEnabled は meta.enableStatsForFederatedInstances を読む。
+	// 未配線なら本家の既定値 (true) と同じく常に集計する。
+	instanceStatsEnabled func() bool
 }
 
 // SilencedHostChecker reports whether a remote host is silenced.
@@ -377,28 +380,68 @@ func (s *Service) SetInstanceRepo(r repository.InstanceRepository) {
 	s.instanceRepo = r
 }
 
+// SetInstanceStatsGate wires the meta.enableStatsForFederatedInstances lookup.
+// When the function returns false, follow / unfollow no longer touch the
+// instance followersCount / followingCount columns. Unwired means enabled,
+// which is the upstream default.
+func (s *Service) SetInstanceStatsGate(enabled func() bool) {
+	s.instanceStatsEnabled = enabled
+}
+
+// MetaInstanceStatsGate returns a gate for SetInstanceStatsGate that reads
+// meta.enableStatsForFederatedInstances on every call. A nil repository or a
+// failed fetch reports enabled (the upstream default).
+func MetaInstanceStatsGate(metaRepo repository.MetaRepository) func() bool {
+	return func() bool {
+		if metaRepo == nil {
+			return true
+		}
+		m, err := metaRepo.Fetch()
+		if err != nil || m == nil {
+			// 読めないときは既定値 (true) に倒す。集計列は best-effort で、
+			// 起動時の RecomputeFollowCounts が整合を取り直す。
+			return true
+		}
+		return m.EnableStatsForFederatedInstances
+	}
+}
+
 // adjustInstanceCountsForFollowing は Following 行の create / delete 時に
 // 該当 remote instance の followersCount / followingCount を delta 分動かす。
-// delta は +1 (create) / -1 (delete)。両 host が non-nil なら両方更新。
+// delta は +1 (create) / -1 (delete)。
 // best-effort: 失敗しても呼び出し元には伝えない (起動時 RecomputeFollowCounts
 // で eventually 復旧)。block による解除も UnfollowForBlock 経由でここを通る。
+//
+// 列の向きは本家 UserFollowingService.insertFollowingDoc / decrementFollowing に
+// 揃える (#3330)。instance の列は「その host の側から見た」数なので:
+//   - remote → local のフォローは、その host の利用者が**フォローしている**数
+//     なので followingCount を動かす
+//   - local → remote のフォローは、その host の利用者が**フォローされている**数
+//     なので followersCount を動かす
+//
+// 以前は逆に足していたので、federation/instances の subscribing / publishing と
+// federation/stats の上位が入れ替わっていた。片側がローカルの組だけを数えるのも
+// 本家の if / else if と同じ。
 func (s *Service) adjustInstanceCountsForFollowing(f *model.Following, delta int) {
 	if s.instanceRepo == nil || delta == 0 {
 		return
 	}
-	// instance(followerHost).followersCount: その host の user が follower
-	// として参加している follow 行の数。
-	if f.FollowerHost != nil {
-		if err := s.instanceRepo.IncrementFollowersCount(*f.FollowerHost, delta); err != nil {
-			slog.Warn("instance counter: followersCount adjust failed",
+	// 本家は meta.enableStatsForFederatedInstances が false なら instance の
+	// 集計列を一切動かさない。
+	if s.instanceStatsEnabled != nil && !s.instanceStatsEnabled() {
+		return
+	}
+	followerRemote := f.FollowerHost != nil && *f.FollowerHost != ""
+	followeeRemote := f.FolloweeHost != nil && *f.FolloweeHost != ""
+	switch {
+	case followerRemote && !followeeRemote:
+		if err := s.instanceRepo.IncrementFollowingCount(*f.FollowerHost, delta); err != nil {
+			slog.Warn("instance counter: followingCount adjust failed",
 				"host", *f.FollowerHost, "delta", delta, "err", err)
 		}
-	}
-	// instance(followeeHost).followingCount: その host の user が followee
-	// として参加している follow 行の数。
-	if f.FolloweeHost != nil {
-		if err := s.instanceRepo.IncrementFollowingCount(*f.FolloweeHost, delta); err != nil {
-			slog.Warn("instance counter: followingCount adjust failed",
+	case !followerRemote && followeeRemote:
+		if err := s.instanceRepo.IncrementFollowersCount(*f.FolloweeHost, delta); err != nil {
+			slog.Warn("instance counter: followersCount adjust failed",
 				"host", *f.FolloweeHost, "delta", delta, "err", err)
 		}
 	}

@@ -383,9 +383,11 @@ func TestHooks_OnFollow_RemoteFollowsLocal(t *testing.T) {
 	loc := &model.User{ID: "dave"}
 	h.hooks.OnFollow(rem, loc)
 	h.saveAll(t)
-	// instance.followers fired on the remote host
+	// 本家 UserFollowingService.insertFollowingDoc: remote → local は
+	// instanceChart.updateFollowing(follower.host) (#3330)。
 	row := h.repos.instance.hour["e.x"][0]
-	assert.Equal(t, int64(1), toInt64(row.Cols["followers.total"]))
+	assert.Equal(t, int64(1), toInt64(row.Cols["following.total"]))
+	assert.Equal(t, int64(0), toInt64(row.Cols["followers.total"]))
 }
 
 func TestHooks_OnUnfollow_LocalFollowsRemote(t *testing.T) {
@@ -394,8 +396,46 @@ func TestHooks_OnUnfollow_LocalFollowsRemote(t *testing.T) {
 	rem := &model.User{ID: "ed", Host: strPtr("other.test")}
 	h.hooks.OnUnfollow(loc, rem)
 	h.saveAll(t)
+	// 本家 decrementFollowing: local → remote は
+	// instanceChart.updateFollowers(followee.host, false) (#3330)。
 	row := h.repos.instance.hour["other.test"][0]
-	assert.Equal(t, int64(-1), toInt64(row.Cols["following.total"]))
+	assert.Equal(t, int64(-1), toInt64(row.Cols["followers.total"]))
+	assert.Equal(t, int64(0), toInt64(row.Cols["following.total"]))
+}
+
+// TestHooks_OnFollow_InstanceChartNeedsStatsFlag pins that the follow-related
+// instance chart is skipped when meta.enableStatsForFederatedInstances is off,
+// even if enableChartsForFederatedInstances is on (upstream nests the chart
+// update inside the stats flag).
+func TestHooks_OnFollow_InstanceChartNeedsStatsFlag(t *testing.T) {
+	cases := []struct {
+		name          string
+		stats, charts bool
+		want          bool
+	}{
+		{name: "both on", stats: true, charts: true, want: true},
+		{name: "stats off", stats: false, charts: true, want: false},
+		{name: "charts off", stats: true, charts: false, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			require.True(t, h.hooks.StatsForFederatedInst, "New defaults to the upstream default (true)")
+			h.hooks.StatsForFederatedInst = tc.stats
+			h.hooks.ChartsForFederatedInst = tc.charts
+			h.hooks.OnFollow(&model.User{ID: "carol", Host: strPtr("e.x")}, &model.User{ID: "dave"})
+			h.hooks.OnFollow(&model.User{ID: "dave"}, &model.User{ID: "erin", Host: strPtr("f.x")})
+			h.saveAll(t)
+			if tc.want {
+				assert.Len(t, h.repos.instance.hour["e.x"], 1)
+				assert.Len(t, h.repos.instance.hour["f.x"], 1)
+			} else {
+				assert.Empty(t, h.repos.instance.hour)
+			}
+			// per-user following chart は stats フラグと無関係に動く。
+			assert.NotEmpty(t, h.repos.puFollow.hour["dave"])
+		})
+	}
 }
 
 func TestHooks_OnFollow_NilUsers(t *testing.T) {
