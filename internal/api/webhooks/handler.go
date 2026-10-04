@@ -112,15 +112,15 @@ func (h *Handler) Create(c echo.Context) error {
 		On     []string `json:"on"`
 	}
 	if err := c.Bind(&req); err != nil || req.Name == "" || req.URL == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "name and url are required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	// upstream i/webhooks/create.ts は required:['name','url','on']。on 欠落 (nil) は
 	// ajv 同様 400 で弾く (空配列 [] は present 扱いで許容、#2027)。
 	if req.On == nil {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "on is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	if !validateOnArray(req.On) {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "on must contain only webhookEventTypes values.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 
 	// webhookLimit role policy gate (#1029)。policy 経由で取得した上限と
@@ -174,7 +174,7 @@ func (h *Handler) Show(c echo.Context) error {
 		WebhookID string `json:"webhookId"`
 	}
 	if err := c.Bind(&req); err != nil || req.WebhookID == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "webhookId is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 
 	w, err := h.repo.FindByIDAndUserID(req.WebhookID, user.ID)
@@ -201,10 +201,10 @@ func (h *Handler) Update(c echo.Context) error {
 		Active    *bool                     `json:"active"`
 	}
 	if err := c.Bind(&req); err != nil || req.WebhookID == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "webhookId is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	if !validateOnArray(req.On) {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "on must contain only webhookEventTypes values.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 
 	w, err := h.repo.FindByIDAndUserID(req.WebhookID, user.ID)
@@ -255,7 +255,7 @@ func (h *Handler) Delete(c echo.Context) error {
 		WebhookID string `json:"webhookId"`
 	}
 	if err := c.Bind(&req); err != nil || req.WebhookID == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "webhookId is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 
 	if _, err := h.repo.FindByIDAndUserID(req.WebhookID, user.ID); err != nil {
@@ -293,10 +293,10 @@ func (h *Handler) Test(c echo.Context) error {
 		} `json:"override"`
 	}
 	if err := c.Bind(&req); err != nil || req.WebhookID == "" || req.Type == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "webhookId and type are required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	if !isValidWebhookEventType(req.Type) {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "type must be one of: mention, unfollow, follow, followed, note, reply, renote, reaction.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 
 	webhook, err := h.repo.FindByIDAndUserID(req.WebhookID, user.ID)

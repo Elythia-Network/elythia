@@ -62,7 +62,7 @@ func (h *Handler) SessionGenerate(c echo.Context) error {
 		AppSecret string `json:"appSecret"`
 	}
 	if err := c.Bind(&req); err != nil || req.AppSecret == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "appSecret is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 
 	app, err := h.repo.FindAppBySecret(req.AppSecret)
@@ -96,7 +96,7 @@ func (h *Handler) SessionShow(c echo.Context) error {
 		Token string `json:"token"`
 	}
 	if err := c.Bind(&req); err != nil || req.Token == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "token is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 
 	session, err := h.repo.FindSessionByToken(req.Token)
@@ -127,7 +127,7 @@ func (h *Handler) Accept(c echo.Context) error {
 		Token string `json:"token"`
 	}
 	if err := c.Bind(&req); err != nil || req.Token == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "token is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 
 	session, err := h.repo.FindSessionByToken(req.Token)
@@ -175,7 +175,7 @@ func (h *Handler) SessionUserkey(c echo.Context) error {
 		Token     string `json:"token"`
 	}
 	if err := c.Bind(&req); err != nil || req.AppSecret == "" || req.Token == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "appSecret and token are required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 
 	app, err := h.repo.FindAppBySecret(req.AppSecret)
@@ -254,7 +254,7 @@ func (h *Handler) GenToken(c echo.Context) error {
 		Permission  []string `json:"permission"`
 	}
 	if err := c.Bind(&req); err != nil || req.Permission == nil {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "permission is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 
 	tokenStr := misc.SecureRandomHex(32)

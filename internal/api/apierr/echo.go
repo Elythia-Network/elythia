@@ -17,22 +17,63 @@ func MarkBodyNotObject(c echo.Context) {
 	c.Set(BodyNotObjectContextKey, true)
 }
 
-// JSONInvalidParam writes a 400 INVALID_PARAM response to the client.
-// Optional msg overrides the default "Invalid param." text (UUID stays
-// fixed so frontend i18n lookups remain stable).
-//
-// When the binder marked the body as not being a JSON object
-// (MarkBodyNotObject), the response is upstream's ajv envelope for that case
-// instead: message "Invalid param." with info {param: "#/type", reason:
-// "must be object"}.
-func JSONInvalidParam(c echo.Context, msg ...string) error {
+// castFailureContextKey is the echo.Context key MarkCastFailure stores the
+// failed param under.
+const castFailureContextKey = "mk.apierr.castFailure"
+
+// castFailure is the param MarkCastFailure recorded.
+type castFailure struct {
+	param, typ string
+}
+
+// MarkCastFailure records on c that param (of paramDef type typ: "boolean",
+// "number" or "integer") could not be cast from its string value, so
+// JSONInvalidParam and JSONInvalidParamClient answer with InvalidParamCast.
+func MarkCastFailure(c echo.Context, param, typ string) {
+	c.Set(castFailureContextKey, castFailure{param: param, typ: typ})
+}
+
+// markedFailure returns the envelope a marked request must be answered
+// with, or nil when c carries no mark.
+func markedFailure(c echo.Context) map[string]any {
+	// 本家は型の変換 (ApiCallService.ts の call) を ajv より先に行うので、
+	// 変換の失敗を body の #/type より先に見る。
+	if cf, ok := c.Get(castFailureContextKey).(castFailure); ok {
+		return InvalidParamCast(cf.param, cf.typ)
+	}
 	// 本家は全 endpoint の paramDef が type: 'object' で、body が object でない
 	// ときは ajv の最初の違反が必ず #/type になる (endpoint-base.ts)。handler が
 	// どの理由で INVALID_PARAM を返そうとしていても、本家ではこの違反が先に出る。
 	if notObject, _ := c.Get(BodyNotObjectContextKey).(bool); notObject {
-		return c.JSON(http.StatusBadRequest, InvalidParamClient("#/type", "must be object"))
+		return InvalidParamClient("#/type", "must be object")
+	}
+	return nil
+}
+
+// JSONInvalidParam writes a 400 INVALID_PARAM response to the client.
+// Optional msg overrides the default "Invalid param." text (UUID stays
+// fixed so frontend i18n lookups remain stable).
+//
+// When the binder marked the request, the response is upstream's envelope
+// for that case instead: InvalidParamCast for a query / multipart value that
+// could not be cast (MarkCastFailure), or info {param: "#/type", reason:
+// "must be object"} for a body that is not a JSON object
+// (MarkBodyNotObject).
+func JSONInvalidParam(c echo.Context, msg ...string) error {
+	if e := markedFailure(c); e != nil {
+		return c.JSON(http.StatusBadRequest, e)
 	}
 	return c.JSON(http.StatusBadRequest, InvalidParam(msg...))
+}
+
+// JSONInvalidParamClient writes a 400 InvalidParamClient(param, reason)
+// response, or the marked envelope when the binder marked the request (see
+// JSONInvalidParam).
+func JSONInvalidParamClient(c echo.Context, param, reason string) error {
+	if e := markedFailure(c); e != nil {
+		return c.JSON(http.StatusBadRequest, e)
+	}
+	return c.JSON(http.StatusBadRequest, InvalidParamClient(param, reason))
 }
 
 // JSONInternalError writes a 500 INTERNAL_ERROR response to the client.

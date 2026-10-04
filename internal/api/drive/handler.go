@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/labstack/echo/v4"
 	"github.com/shiroha-a/mk/internal/api/apierr"
@@ -273,11 +274,84 @@ func readAtMost(r io.Reader, maxBytes int64) ([]byte, error) {
 // 障害が見えない。#2792 と同じ判断で 5xx に倒し、ログにも残す。
 var errMultipartIO = errors.New("drive: multipart io")
 
+// uploadBoolFields are drive/files/create's boolean params in paramDef
+// order (endpoints/drive/files/create.ts).
+var uploadBoolFields = []string{"isSensitive", "force"}
+
+// multipartField returns the value of the multipart text field key when
+// the body carries it exactly once.
+//
+// 本家は multipart の field だけを params にする (handleMultipartRequest)。
+// c.FormValue は URL の query も引くので使わない。同じ名前の field が 2 つ
+// あると本家では値が undefined になる (@fastify/multipart が配列にし、
+// `'value' in v` が偽になる) ので、未指定と同じに扱う。
+func multipartField(c echo.Context, key string) (string, bool) {
+	form, err := c.MultipartForm()
+	if err != nil {
+		return "", false
+	}
+	vs := form.Value[key]
+	if len(vs) != 1 {
+		return "", false
+	}
+	return vs[0], true
+}
+
+// multipartBool returns the boolean field key (false when absent).
+// uploadFieldError must have accepted the request.
+func multipartBool(c echo.Context, key string) bool {
+	v, _ := multipartField(c, key)
+	var b bool
+	_ = json.Unmarshal([]byte(v), &b)
+	return b
+}
+
+// uploadFieldError returns the INVALID_PARAM envelope upstream answers
+// drive/files/create's boolean fields with, or nil when they are fine.
+//
+// 本家の call() は ajv より先に、boolean の param の文字列を JSON.parse で変換
+// し、失敗すると 0b5f1631 を返す (ApiCallService.ts の "Cast non JSON
+// input")。変換できても真偽値でなければ ("1" や "null")、ajv が
+// `#/properties/<key>/type` で落とす。以前は "true" 以外を全て false と
+// 読んでいた。
+func uploadFieldError(c echo.Context) map[string]any {
+	for _, key := range uploadBoolFields {
+		if v, ok := multipartField(c, key); ok && !json.Valid([]byte(v)) {
+			return apierr.InvalidParamCast(key, "boolean")
+		}
+	}
+	// ajv は paramDef の properties の順 (folderId, name, comment, isSensitive,
+	// force) に見て最初の違反を返す。comment の maxLength (512) は真偽値の型
+	// より先に出る。
+	if v, _ := multipartField(c, "comment"); v != "" && !colfit.Fits(v, maxDriveCommentLength) {
+		if utf8.RuneCountInString(v) > maxDriveCommentLength {
+			return apierr.InvalidParamClient("#/properties/comment/maxLength", "must NOT have more than 512 characters")
+		}
+		// 長さは収まるが列に入らない (NUL / 不正な UTF-8) 値。本家に同じ検査は無い。
+		return apierr.InvalidParam()
+	}
+	for _, key := range uploadBoolFields {
+		v, ok := multipartField(c, key)
+		if !ok {
+			continue
+		}
+		var parsed any
+		_ = json.Unmarshal([]byte(v), &parsed)
+		if _, isBool := parsed.(bool); !isBool {
+			return apierr.InvalidParamClient("#/properties/"+key+"/type", "must be boolean")
+		}
+	}
+	return nil
+}
+
 // FilesCreate handles POST /api/drive/files/create.
 // multipart/form-data with the file under "file"; optional fields: name,
 // folderId, comment, isSensitive, force.
 func (h *Handler) FilesCreate(c echo.Context) error {
 	user := middleware.GetUser(c)
+	if e := uploadFieldError(c); e != nil {
+		return c.JSON(http.StatusBadRequest, e)
+	}
 
 	// 読み切る前に上限を引く (`readMultipartFile` の doc 参照)。
 	maxBytes, _ := h.svc.MaxUploadBytes(user)
@@ -323,10 +397,8 @@ func (h *Handler) FilesCreate(c echo.Context) error {
 	// (upstream `ps.name ?? file.name` は '' を nullish 扱いしないため、
 	// 明示 '' は trim 後 null → 'untitled' になる) (#1564 review)。
 	name := filename
-	if form, ferr := c.MultipartForm(); ferr == nil && form != nil {
-		if vs, ok := form.Value["name"]; ok && len(vs) > 0 {
-			name = vs[0]
-		}
+	if v, ok := multipartField(c, "name"); ok {
+		name = v
 	}
 	name = strings.TrimSpace(name)
 	if name == "" || name == "blob" {
@@ -335,22 +407,15 @@ func (h *Handler) FilesCreate(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_FILE_NAME", "Invalid file name.", "f449b209-0c60-4e51-84d5-29486263bfd4"))
 	}
 	in.Name = name
-	if v := c.FormValue("folderId"); v != "" {
+	if v, _ := multipartField(c, "folderId"); v != "" {
 		in.FolderID = &v
 	}
-	if v := c.FormValue("comment"); v != "" {
-		// upstream paramDef は comment maxLength=512 (#1564)。
-		if !colfit.Fits(v, maxDriveCommentLength) {
-			return apierr.JSONInvalidParam(c)
-		}
+	// comment の長さは uploadFieldError が検査済み。
+	if v, _ := multipartField(c, "comment"); v != "" {
 		in.Comment = &v
 	}
-	if c.FormValue("isSensitive") == "true" {
-		in.IsSensitive = true
-	}
-	if c.FormValue("force") == "true" {
-		in.Force = true
-	}
+	in.IsSensitive = multipartBool(c, "isSensitive")
+	in.Force = multipartBool(c, "force")
 
 	f, err := h.svc.Upload(c.Request().Context(), in)
 	if err != nil {

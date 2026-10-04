@@ -435,7 +435,7 @@ func (h *Handler) APIGet(c echo.Context) error {
 		URI string `json:"uri"`
 	}
 	if err := c.Bind(&req); err != nil || req.URI == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "uri is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 
 	// ローカルURIからオブジェクトを解決
@@ -464,7 +464,7 @@ func (h *Handler) APIShow(c echo.Context) error {
 		URI string `json:"uri"`
 	}
 	if err := c.Bind(&req); err != nil || req.URI == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "uri is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 
 	// URI を解析して host を得る。http(s) でない / host 無しは URI_INVALID

@@ -181,7 +181,7 @@ func (h *Handler) mapChatErr(c echo.Context, err error) error {
 	case errors.Is(err, corechat.ErrForbidden):
 		return c.JSON(http.StatusBadRequest, apierr.Error("ACCESS_DENIED", "Access denied.", "1fb7cb09-d46a-4fff-b8df-057708cce513"))
 	case errors.Is(err, corechat.ErrInvalidTarget):
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "toUserId or toRoomId is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	case errors.Is(err, corechat.ErrChatBlocked):
 		// recipient が sender を block している (upstream YOU_HAVE_BEEN_BLOCKED)。
 		return c.JSON(http.StatusBadRequest, apierr.Error("YOU_HAVE_BEEN_BLOCKED", "You cannot send a message because you have been blocked by this user.", "c15a5199-7422-4968-941a-2a462c478f7d"))
@@ -532,7 +532,7 @@ func (h *Handler) AttachedChatMessages(c echo.Context) error {
 		UntilDate *int64 `json:"untilDate"`
 	}
 	if err := c.Bind(&req); err != nil || req.FileID == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "fileId is required.", "6b7f9d2c-1e4a-4b8c-9d3e-7a5f0c2b1e88"))
+		return apierr.JSONInvalidParam(c)
 	}
 	// upstream paramDef は limit を minimum:1 / maximum:100 / default:10 で
 	// clamp する。> 100 は default に落とさず max へ clamp して挙動を揃える。
@@ -583,12 +583,12 @@ func (h *Handler) RoomsCreate(c echo.Context) error {
 		Description string `json:"description"`
 	}
 	if err := c.Bind(&req); err != nil || req.Name == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "name is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	// upstream paramDef は name maxLength:256 / description maxLength:1024
 	// (chat/rooms/create.ts)。超過は schema validation で弾かれるため INVALID_PARAM。
 	if utf8.RuneCountInString(req.Name) > 256 || utf8.RuneCountInString(req.Description) > 1024 {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "name or description is too long.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	room := &model.ChatRoom{
 		ID: h.idGen.Generate(time.Now()), Name: req.Name,
@@ -616,7 +616,7 @@ func (h *Handler) RoomsShow(c echo.Context) error {
 		RoomID string `json:"roomId"`
 	}
 	if err := c.Bind(&req); err != nil || req.RoomID == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "roomId is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	room, err := h.repo.FindRoomByID(req.RoomID)
 	if err != nil && !repository.IsNotFound(err) {
@@ -645,12 +645,12 @@ func (h *Handler) RoomsUpdate(c echo.Context) error {
 		Description string `json:"description"`
 	}
 	if err := c.Bind(&req); err != nil || req.RoomID == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "roomId is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	// upstream paramDef は name maxLength:256 / description maxLength:1024
 	// (chat/rooms/update.ts)。
 	if utf8.RuneCountInString(req.Name) > 256 || utf8.RuneCountInString(req.Description) > 1024 {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "name or description is too long.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	room, err := h.repo.FindRoomByID(req.RoomID)
 	if err != nil && !repository.IsNotFound(err) {
@@ -680,7 +680,7 @@ func (h *Handler) RoomsDelete(c echo.Context) error {
 		RoomID string `json:"roomId"`
 	}
 	if err := c.Bind(&req); err != nil || req.RoomID == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "roomId is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	room, err := h.repo.FindRoomByID(req.RoomID)
 	if err != nil && !repository.IsNotFound(err) {
@@ -763,7 +763,7 @@ func (h *Handler) RoomsLeave(c echo.Context) error {
 		RoomID string `json:"roomId"`
 	}
 	if err := c.Bind(&req); err != nil || req.RoomID == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "roomId is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	// service 経由で membership 削除 + remote member/owner への Remove 連合配信
 	// (#1364)。service 未配線時 (federation disabled の旧構成) は repo 直叩きで
@@ -786,7 +786,7 @@ func (h *Handler) RoomsMute(c echo.Context) error {
 		Mute bool `json:"mute"`
 	}
 	if err := c.Bind(&req); err != nil || req.RoomID == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "roomId is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	m, err := h.repo.FindMembership(user.ID, req.RoomID)
 	if err != nil && !repository.IsNotFound(err) {
@@ -809,7 +809,7 @@ func (h *Handler) RoomsUnmute(c echo.Context) error {
 		RoomID string `json:"roomId"`
 	}
 	if err := c.Bind(&req); err != nil || req.RoomID == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "roomId is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	m, err := h.repo.FindMembership(user.ID, req.RoomID)
 	if err != nil {
@@ -828,7 +828,7 @@ func (h *Handler) RoomsTransferOwnership(c echo.Context) error {
 		UserID string `json:"userId"`
 	}
 	if err := c.Bind(&req); err != nil || req.RoomID == "" || req.UserID == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "roomId and userId are required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	room, err := h.repo.FindRoomByID(req.RoomID)
 	if err != nil && !repository.IsNotFound(err) {
@@ -918,7 +918,7 @@ func (h *Handler) MessagesCreate(c echo.Context) error {
 		FileID   *string `json:"fileId"`
 	}
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "Invalid parameters.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	if h.svc == nil {
 		// 未wire時のフォールバック (テスト互換)
@@ -930,7 +930,7 @@ func (h *Handler) MessagesCreate(c echo.Context) error {
 	toRoom := req.ToRoomID != nil && *req.ToRoomID != ""
 	toUser := req.ToUserID != nil && *req.ToUserID != ""
 	if !toRoom && !toUser {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "toUserId or toRoomId is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	// upstream create-to-room.ts:77-91 は file/content 検証より先に room 存在を
 	// 確認し、無ければ noSuchRoom を返す。mk-go は単一 handler なので room path で
@@ -961,7 +961,7 @@ func (h *Handler) MessagesCreate(c echo.Context) error {
 	// upstream paramDef は text maxLength:2000 (create-to-user.ts/create-to-room.ts)。
 	// 超過は schema validation 段階で弾かれるため INVALID_PARAM 相当で reject する。
 	if utf8.RuneCountInString(text) > 2000 {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "text is too long.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	fileID := ""
 	if req.FileID != nil {
@@ -1078,7 +1078,7 @@ func (h *Handler) MessagesShow(c echo.Context) error {
 		MessageID string `json:"messageId"`
 	}
 	if err := c.Bind(&req); err != nil || req.MessageID == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "messageId is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	msg, err := h.repo.FindMessageByID(req.MessageID)
 	if err != nil && !repository.IsNotFound(err) {
@@ -1110,7 +1110,7 @@ func (h *Handler) MessagesUpdate(c echo.Context) error {
 		Text      *string `json:"text"`
 	}
 	if err := c.Bind(&req); err != nil || req.MessageID == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "messageId is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	if h.svc == nil {
 		// legacy fallback
@@ -1145,7 +1145,7 @@ func (h *Handler) MessagesDelete(c echo.Context) error {
 		MessageID string `json:"messageId"`
 	}
 	if err := c.Bind(&req); err != nil || req.MessageID == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "messageId is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	if h.svc == nil {
 		msg, err := h.repo.FindMessageByID(req.MessageID)
@@ -1172,7 +1172,7 @@ func (h *Handler) MessagesRead(c echo.Context) error {
 		MessageID string `json:"messageId"`
 	}
 	if err := c.Bind(&req); err != nil || req.MessageID == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "messageId is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	if h.svc != nil {
 		if err := h.svc.MarkReadByMessageID(c.Request().Context(), user.ID, req.MessageID); err != nil {
@@ -1193,7 +1193,7 @@ func (h *Handler) Messages(c echo.Context) error {
 		Limit  int    `json:"limit"`
 	}
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "Invalid parameters.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	var msgs []*model.ChatMessage
 	if req.RoomID != "" {
@@ -1232,7 +1232,7 @@ func (h *Handler) MessagesSearch(c echo.Context) error {
 		RoomID string `json:"roomId"`
 	}
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "Invalid parameters.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	// roomId 指定時は upstream search.ts と同じく room が存在し、かつ自分が member
 	// (owner 含む) でなければ NO_SUCH_ROOM を返す (存在しない room も非 member も
@@ -1321,7 +1321,7 @@ func (h *Handler) InvitationsCreate(c echo.Context) error {
 		UserID string `json:"userId"`
 	}
 	if err := c.Bind(&req); err != nil || req.RoomID == "" || req.UserID == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "roomId and userId are required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	// owner だけが招待を作成・連合できる。これが無いと任意の認証ユーザーが
 	// owner の鍵で署名された Invite を remote へなりすまし送信できてしまう
@@ -1404,7 +1404,7 @@ func (h *Handler) InvitationsDelete(c echo.Context) error {
 		InvitationID string `json:"invitationId"`
 	}
 	if err := c.Bind(&req); err != nil || req.InvitationID == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "invitationId is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	// **招待の所在と権限の有無を応答で区別しない。** 区別すると invitationId を
 	// 総当たりして「その id が存在するか」だけを引き出せる。
@@ -1438,7 +1438,7 @@ func (h *Handler) InvitationsAccept(c echo.Context) error {
 		RoomID       string `json:"roomId"`
 	}
 	if err := c.Bind(&req); err != nil || req.RoomID == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "roomId is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	// pending invitation がある場合のみ accept できる。これが無いと招待無しに
 	// membership が作られ、任意 room owner へ未承諾 Accept が飛ぶ (#1206 review)。
@@ -1485,7 +1485,7 @@ func (h *Handler) InvitationsReject(c echo.Context) error {
 		RoomID string `json:"roomId"`
 	}
 	if err := c.Bind(&req); err != nil || req.RoomID == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "roomId is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	// pending invitation がある場合のみ reject できる (任意 room owner への
 	// 未承諾 Reject 送信を防ぐ、#1206 review)。
@@ -1514,7 +1514,7 @@ func (h *Handler) MembersBan(c echo.Context) error {
 		UserID string `json:"userId"`
 	}
 	if err := c.Bind(&req); err != nil || req.RoomID == "" || req.UserID == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "roomId and userId are required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	// **owner だけが実行できる。** 隣の members/update-membership と同じ形。
 	// room の所在と権限の有無を応答で区別しない (どちらも NO_SUCH_ROOM)。

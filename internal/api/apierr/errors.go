@@ -50,8 +50,13 @@ func ErrorWithKind(code, message, id, kind string) map[string]any {
 // and must match the upstream Misskey implementation so that clients can identify
 // errors by their `id` field.
 const (
-	UUIDInvalidParam  = "3d81ceae-475f-4600-b2a8-2bc116157532"
-	UUIDInternalError = "5d37dbcb-891e-41ca-a3d6-e690c97775ac"
+	UUIDInvalidParam = "3d81ceae-475f-4600-b2a8-2bc116157532"
+	// UUIDInvalidParamCast は upstream `ApiCallService.ts` の call() が、GET の query と
+	// multipart の field を paramDef の boolean / number / integer へ JSON.parse で
+	// 変換できなかったときに投げる INVALID_PARAM の UUID。ajv の検査失敗
+	// (UUIDInvalidParam) とは別の id で、ajv より先に出る。
+	UUIDInvalidParamCast = "0b5f1631-7c1a-41a6-b399-cce335f34d85"
+	UUIDInternalError    = "5d37dbcb-891e-41ca-a3d6-e690c97775ac"
 	// UUIDNotFound は Misskey TS 上流に対応する汎用 NOT_FOUND code が存在
 	// しない (上流は endpoint 固有 NO_SUCH_* を使う) ため mk-go 固有の
 	// 安定 UUID を発番する。frontend 側の i18n には未対応だが、code+id 組
@@ -218,7 +223,8 @@ const (
 // InvalidParam returns a 400 INVALID_PARAM error response. The optional
 // msg argument overrides the default "Invalid param." human-readable text;
 // the UUID is fixed regardless so frontend i18n lookups remain stable
-// (Misskey TS の INVALID_PARAM は単一 UUID で message は dev 向け説明)。
+// (Misskey TS の ajv の検査失敗は単一 UUID で message は dev 向け説明。型の変換の
+// 失敗だけは別の UUID で、InvalidParamCast が返す)。
 //
 // Only msg[0] is used; subsequent values are silently ignored. An empty
 // string ("") is treated the same as no argument and falls back to the
@@ -247,6 +253,20 @@ func InvalidParamClient(param, reason string) map[string]any {
 	e["error"].(map[string]any)["info"] = map[string]any{
 		"param":  param,
 		"reason": reason,
+	}
+	return e
+}
+
+// InvalidParamCast returns the INVALID_PARAM envelope upstream sends when a
+// GET query value or a multipart field cannot be cast to the param's type
+// (ApiCallService.ts call(): `JSON.parse` failed for a boolean / number /
+// integer param). param is the param name as sent and typ the paramDef
+// type, so info is {param: "limit", reason: "cannot cast to integer"}.
+func InvalidParamCast(param, typ string) map[string]any {
+	e := Error("INVALID_PARAM", "Invalid param.", UUIDInvalidParamCast)
+	e["error"].(map[string]any)["info"] = map[string]any{
+		"param":  param,
+		"reason": "cannot cast to " + typ,
 	}
 	return e
 }

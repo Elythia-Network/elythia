@@ -156,7 +156,7 @@ func (h *Handler) serveInstance(c echo.Context, ch *chart.Chart, requireHost boo
 	}
 	var req Request
 	if err := c.Bind(&req); err != nil {
-		return invalidParam(c, &paramError{param: "#", reason: "Invalid request body."})
+		return apierr.JSONInvalidParamClient(c, "#", "Invalid request body.")
 	}
 	span, amount, cursor, perr := h.parseRequest(&req)
 	if perr != nil {
@@ -180,7 +180,7 @@ func (h *Handler) servePerUser(c echo.Context, ch *chart.Chart) error {
 	}
 	var req Request
 	if err := c.Bind(&req); err != nil {
-		return invalidParam(c, &paramError{param: "#", reason: "Invalid request body."})
+		return apierr.JSONInvalidParamClient(c, "#", "Invalid request body.")
 	}
 	span, amount, cursor, perr := h.parseRequest(&req)
 	if perr != nil {

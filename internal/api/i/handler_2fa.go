@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/labstack/echo/v4"
 	"github.com/shiroha-a/mk/internal/api/apierr"
@@ -44,7 +45,7 @@ func (h *Handler) TwoFARegister(c echo.Context) error {
 		Token    string `json:"token"`
 	}
 	if err := c.Bind(&req); err != nil || req.Password == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "password is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	profile, perr := h.userService.GetProfileErr(user.ID)
 	// **DB 障害を「パスワード未設定」にしない** (#2799)。
@@ -135,7 +136,7 @@ func (h *Handler) TwoFADone(c echo.Context) error {
 		Token string `json:"token"`
 	}
 	if err := c.Bind(&req); err != nil || req.Token == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "token is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 
 	profile, perr := h.userService.GetProfileErr(user.ID)
@@ -143,7 +144,7 @@ func (h *Handler) TwoFADone(c echo.Context) error {
 		return apierr.JSONInternalError(c)
 	}
 	if profile == nil || profile.TwoFactorTempSecret == nil {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "2FA registration not started.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 
 	// ValidateWithReplay は同一コードの replay を refuse する (RFC 6238 §5.2)。
@@ -199,7 +200,7 @@ func (h *Handler) TwoFAUnregister(c echo.Context) error {
 		Token    string `json:"token"`
 	}
 	if err := c.Bind(&req); err != nil || req.Password == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "password is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	profile, perr := h.userService.GetProfileErr(user.ID)
 	// **DB 障害を「パスワード未設定」にしない** (#2799)。
@@ -431,6 +432,14 @@ func (h *Handler) verify2FAToken(ctx context.Context, profile *model.UserProfile
 // API 直叩き経路の defense-in-depth として backend でも enforce する。
 const twoFAKeyNameMaxLen = 30
 
+// twoFAKeyNameTooLong answers a key name longer than twoFAKeyNameMaxLen with
+// the ajv error upstream reports for it.
+//
+// ajv の maxLength は code point で数えるので、長さも byte でなく rune で比べる。
+func twoFAKeyNameTooLong(c echo.Context) error {
+	return c.JSON(http.StatusBadRequest, apierr.InvalidParamClient("#/properties/name/maxLength", "must NOT have more than 30 characters"))
+}
+
 // TwoFARegisterKey handles POST /api/i/2fa/register-key.
 // 1 段階目: パスワード + 2FA token 認証 + WebAuthn registration challenge を返す。
 // レスポンスは Misskey TS upstream と同じく PublicKeyCredentialCreationOptions
@@ -456,7 +465,7 @@ func (h *Handler) TwoFARegisterKey(c echo.Context) error {
 		Token    string `json:"token"`
 	}
 	if err := c.Bind(&req); err != nil || req.Password == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "password is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	user, profile, ok := h.requireWebAuthn(c, req.Password, "38769596-efe2-4faf-9bec-abbb3f2cd9ba")
 	if !ok {
@@ -499,13 +508,13 @@ func (h *Handler) TwoFAKeyDone(c echo.Context) error {
 		Credential json.RawMessage `json:"credential"`
 	}
 	if err := c.Bind(&req); err != nil || req.Password == "" || len(req.Credential) == 0 {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "password / credential are required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	if req.Name == "" {
 		req.Name = "Security Key"
 	}
-	if len(req.Name) > twoFAKeyNameMaxLen {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "name is too long.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+	if utf8.RuneCountInString(req.Name) > twoFAKeyNameMaxLen {
+		return twoFAKeyNameTooLong(c)
 	}
 	user, profile, ok := h.requireWebAuthn(c, req.Password, "0d7ec6d2-e652-443e-a7bf-9ee9a0cd77b0")
 	if !ok {
@@ -528,7 +537,7 @@ func (h *Handler) TwoFAKeyDone(c echo.Context) error {
 	// JSON-RPC 経由で受け取った credential を新しい http.Request にラップして渡す。
 	httpReq, err := wrapWebAuthnRequest(c.Request(), req.Credential)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "invalid credential payload.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	cred, err := h.webauthnSvc.FinishRegistration(c.Request().Context(), user, existing, httpReq)
 	if err != nil {
@@ -621,7 +630,7 @@ func (h *Handler) TwoFARemoveKey(c echo.Context) error {
 		CredentialID string `json:"credentialId"`
 	}
 	if err := c.Bind(&req); err != nil || req.Password == "" || req.CredentialID == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "password and credentialId are required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	if h.webauthnSvc == nil || h.securityKeyRepo == nil {
 		return c.JSON(http.StatusServiceUnavailable, apierr.Error("UNAVAILABLE", "WebAuthn is not configured.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
@@ -693,12 +702,12 @@ func (h *Handler) TwoFAUpdateKey(c echo.Context) error {
 		Name         string `json:"name"`
 	}
 	if err := c.Bind(&req); err != nil || req.CredentialID == "" || req.Name == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "credentialId / name are required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	// upstream paramDef は name: { minLength: 1, maxLength: 30 }。TwoFAKeyDone と
 	// 同じく API 直叩き経路の defense-in-depth として上限も enforce する (#1952)。
-	if len(req.Name) > twoFAKeyNameMaxLen {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "name is too long.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+	if utf8.RuneCountInString(req.Name) > twoFAKeyNameMaxLen {
+		return twoFAKeyNameTooLong(c)
 	}
 	// upstream update-key.ts は paramDef を {name, credentialId} のみで宣言し、
 	// secure:true の session 認証だけで password を再確認しない。standard misskey-js
@@ -751,7 +760,7 @@ func (h *Handler) TwoFAPasswordLess(c echo.Context) error {
 		Value bool `json:"value"`
 	}
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "invalid request body.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	user := middleware.GetUser(c)
 	if user == nil {
