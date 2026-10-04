@@ -77,6 +77,10 @@ remote user の表示と ActivityPub redirect は upstream 互換の挙動を維
 chat などの retained content は残し、この差分では公開停止を追加しない。
 webhook / push 登録は資格情報の cleanup で削除するが、既に送信中の処理や別キューの
 payload を取り消すものではない。worker の cleanup が完了するまでは登録が残りうる。
+push 登録を消したときは、Web Push の配送が読む購読キャッシュ (Redis の
+`userSwSubscriptions:{userId}` と、削除を実行したプロセスのメモリ上の層) も破棄
+する。物理削除で `sw_subscription` が FK cascade で消える場合も同じく破棄する。
+他のプロセスのメモリ上の層は、TTL (3 分) が切れるまで残りうる。
 cleanup 済みコンテンツを復元できる機能でもない。また、物理削除する場合も再登録防止用の
 `used_username` は削除しない。
 
