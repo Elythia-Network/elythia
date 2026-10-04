@@ -12,24 +12,24 @@
 ## 1. クローンとビルド
 
 ```bash
-git clone --recursive https://github.com/shiroha-a/mk.git mk-go
+git clone https://github.com/shiroha-a/mk.git mk-go
 cd mk-go
 go build -o built/misskey ./cmd/misskey
 ```
 
-`--recursive` でsubmodule (`third_party/misskey`) も取得される。
+フロントエンドのソースは本体の `frontend/` (Misskey TS の fork を取り込んだ pnpm workspace) に含まれているので、submodule の取得は要らない。
 
 ## 2. フロントエンド資産の準備
 
 mk-goはMisskey-TSと同じフロントエンドを利用する。2つの方法がある。
 
-### 方法A: submoduleのフロントエンドをビルド (推奨)
+### 方法A: 同梱のフロントエンド (`frontend/`) をビルド (推奨)
 
 ```bash
 make e2e-frontend-build
 ```
 
-Docker内でフロントエンドがビルドされ、成果物は `third_party/misskey/built/` 配下に配置される。mk-goはデフォルトでこのパスを参照するため、環境変数の設定は不要。
+Docker内でフロントエンドがビルドされ、成果物は `frontend/built/` 配下に配置される (ビルドの前に `make plugins` も走る)。mk-goはデフォルトでこのパスを参照するため、環境変数の設定は不要。
 
 ### 方法B: 既存のMisskey-TSのビルド済み資産を使う
 
@@ -237,8 +237,8 @@ docker compose stop web
 新しいインスタンスをDocker Composeで立ち上げる場合は以下で起動できる:
 
 ```bash
-# 1. 起動前に必ずフロントエンドをビルドする (submodule + node_modules を取得し、
-#    third_party/misskey/built/ に SPA 成果物を生成する)。
+# 1. 起動前に必ずフロントエンドをビルドする (frontend/ の node_modules を取得し、
+#    frontend/built/ に SPA 成果物を生成する)。
 make e2e-frontend-build
 
 # 2. 起動 (初回は image build も走る)
@@ -250,9 +250,9 @@ DB マイグレーションが自動適用される (空 DB でも、TS から s
 そのため上記の 2 ステップだけで mk-go が PostgreSQL および Redis と共に起動する。
 詳細は `docker-compose.yml` を参照。
 
-`make e2e-frontend-build` で生成した `third_party/misskey/built`(SPA の vite 成果物、約200MB)は、`docker-compose.yml` が bind-mount でコンテナに渡す（`MISSKEY_FRONTEND_DIR` 等で参照）。static-assets / twemoji / fluent-emoji / repo-assets は image に焼き込まれるためマウント不要。**この frontend ビルドを忘れると SPA の JS/CSS が 404 になりフロントエンドが表示されない**ので注意。
+`make e2e-frontend-build` で生成した `frontend/built`(SPA の vite 成果物、約200MB)は、`docker-compose.yml` が bind-mount でコンテナに渡す（`MISSKEY_FRONTEND_DIR` 等で参照）。static-assets / twemoji / fluent-emoji / repo-assets は image に焼き込まれるためマウント不要。**この frontend ビルドを忘れると SPA の JS/CSS が 404 になりフロントエンドが表示されない**ので注意。
 
-> bare-metal 起動(バイナリを repo root から実行)の場合は、mk-go がデフォルトで `third_party/misskey/built/` 等の相対パスを参照するため環境変数の設定は不要。docker では WORKDIR が `/app` で相対パスが効かないため、上記の bind-mount + 環境変数で渡す。
+> bare-metal 起動(バイナリを repo root から実行)の場合は、mk-go がデフォルトで `frontend/built/` 等の相対パスを参照するため環境変数の設定は不要。docker では WORKDIR が `/app` で相対パスが効かないため、上記の bind-mount + 環境変数で渡す。
 
 ### Docker container の UID
 
@@ -323,24 +323,24 @@ Playwright spec (#744) を **298 ファイル / 40 directory** (directory は sp
 ### ページが「Loading...」のまま進まない
 
 - フロントエンド資産のパスが正しいか確認する
-- 方法Aの場合: `ls third_party/misskey/built/_frontend_vite_/manifest.json`
+- 方法Aの場合: `ls frontend/built/_frontend_vite_/manifest.json`
 - 方法Bの場合: `ls $MISSKEY_FRONTEND_DIR/manifest.json`
 
 ### スタイル/CSSが崩れる
 
 - プロダクションビルドを使用していることを確認する (Viteのdevモードではない)
-- `manifest.json` のエントリにCSSファイルが含まれていることを確認する: `cat third_party/misskey/built/_frontend_vite_/manifest.json | grep css`
+- `manifest.json` のエントリにCSSファイルが含まれていることを確認する: `cat frontend/built/_frontend_vite_/manifest.json | grep css` (方法Bは `$MISSKEY_FRONTEND_DIR/manifest.json`)
 
 ### 絵文字が表示されない
 
 - twemoji SVGファイルが配置されているか確認する
-- 方法A: `ls third_party/misskey/packages/backend/node_modules/@misskey-dev/emoji-assets/built/twemoji/1f44d.svg`
+- 方法A: `ls frontend/node_modules/@misskey-dev/emoji-assets/built/twemoji/1f44d.svg`
 - 方法B: `ls $MISSKEY_TWEMOJI_DIR/1f44d.svg`
 
 ### favicon/アイコンが表示されない
 
 - static assets のパスを確認する
-- 方法A: `ls third_party/misskey/packages/backend/assets/icons/192.png`
+- 方法A: `ls frontend/assets/icons/192.png`
 - 方法B: `ls $MISSKEY_STATIC_DIR/icons/192.png`
 
 ### 再起動後にタイムラインが空になる
@@ -361,4 +361,4 @@ Playwright spec (#744) を **298 ファイル / 40 directory** (directory は sp
 ## 関連ドキュメント
 
 - [docs/playwright.md](./playwright.md) — Playwright による frontend / API の e2e (mk-go backend と Misskey TS backend の両方に対して実行する)
-- [docs/upstream-catch-up.md](./upstream-catch-up.md) — Misskey TS upstream の新 release を mk-go に取り込む際の triage / submodule bump / Wave 単位 PR 運用と、submodule bump PR マージ後の `git pull --recurse-submodules` 等の追従手順
+- [docs/upstream-catch-up.md](./upstream-catch-up.md) — Misskey TS upstream の新 release を mk-go に取り込む際の triage / Wave 単位 PR 運用と、取り込んだ版へ上げた後の追従手順

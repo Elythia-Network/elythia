@@ -35,8 +35,8 @@ upstream と食い違っていても気付けない**。
 
 ただし **TS backend は `workflow_dispatch` 専用**で、PR では回らない。TS baseline の
 価値は「spec が mk-go の挙動を正解として書かれていないか」を検出する一点にあり、
-**upstream が変わらない限り答えも変わらない**ので、常時回す意味が薄いため。submodule を
-bump したときに回す (`docs/upstream-catch-up.md`)。
+**upstream が変わらない限り答えも変わらない**ので、常時回す意味が薄いため。追従する本家の版を
+上げたときに回す (`docs/upstream-catch-up.md`)。
 
 ## CI での扱い
 
@@ -128,7 +128,7 @@ $L 2>&1 | grep msg=csp-report | grep -oE 'documentUri=\S+' | sort | uniq -c
 コマンドが `"?` にしてあるのはこのため。
 
 `/about-misskey` を単独で開いて 8 秒待つと **62 件**で、
-`third_party/misskey/packages/frontend/src/pages/about-misskey.vue` の外部 `<img>`
+`frontend/packages/frontend/src/pages/about-misskey.vue` の外部 `<img>`
 の枚数と一致する (contributor 6 + sponsors 6 + patron 50)。`loading="lazy"` も
 `v-if` も折りたたみも無いので、ページを開いた時点で全部読まれる。上の 124 件は
 spec が `/about-misskey` を 2 回開いた時点の実測で、**#2700 の

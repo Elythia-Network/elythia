@@ -451,7 +451,7 @@ make shapecheck-gen                                        # golden_upstream_mig
 
 **内部整合だけでは足りない。** 上の gate は 3 箇所が互いに一致することしか見ないので、**3 つが揃って同じだけ間違っている**状態を通す。実際 develop では §1-1 が 53、生成物が 49、真値が 58 だった (#2640)。§1-1 の内訳表に数えられていなかったのは `admin/server-plugins` / `admin/server-metrics` / `admin/self-check` / `admin/federation/{delivery,inbox}-health` の 5 件で、うち 4 件は生成物の側には載っていた (= 突き合わせていれば気付けた)。
 
-upstream の endpoint 一覧を `tools/apicompat` から直接引くことはできない (**`test-shards` job は submodule を checkout しない**。`submodules: recursive` があるのは `frontend-check` だけ)。ただし `make apicompat` の生成物は commit されているので、そちらを経由すれば submodule 無しで突き合わせられる。
+upstream の endpoint 一覧を `tools/apicompat` から直接引くことはできない (**`test-shards` job は submodule を checkout しない**。#3379 で frontend を `frontend/` へ取り込んでからは、submodule を checkout する job は無い)。ただし `make apicompat` の生成物は commit されているので、そちらを経由すれば submodule 無しで突き合わせられる。
 
 この gate が落ちたとき**どちらが古いかは中身を見ないと決まらない**。api-compat.md 側が古いなら `make apicompat` で再生成する (route dump に stack が要る)。divergence.md 側が古いなら §1-1 の表・見出し・冒頭サマリの 3 箇所すべてを直す。
 

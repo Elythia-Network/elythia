@@ -21,8 +21,8 @@ Misskey互換のGoバックエンド実装。TypeScript/NestJS製の[Misskey](ht
 フロントエンドアセットを同梱した `bundled` イメージを使う。ビルドが一切要らない。
 
 動かすだけなら [`docker` ブランチ](https://github.com/shiroha-a/mk/tree/docker)を使う。
-compose と設定のひな形だけが入った orphan ブランチで、Go のソースも Misskey の
-submodule も含まないため数十 KB で済む (`develop` は `.git` だけで 672MB ある)。
+compose と設定のひな形だけが入った orphan ブランチで、Go のソースも frontend の
+ソースも含まないため数十 KB で済む (`develop` は `.git` だけで 672MB ある)。
 
 ```bash
 git clone --depth 1 -b docker https://github.com/shiroha-a/mk.git mk
@@ -46,7 +46,7 @@ make image-up
 ### ソースからビルドする (Docker Compose)
 
 ```bash
-git clone --recursive https://github.com/shiroha-a/mk.git
+git clone https://github.com/shiroha-a/mk.git
 cd mk
 ```
 
@@ -56,7 +56,7 @@ cd mk
 make e2e-frontend-build
 ```
 
-SPA の JS/CSS は約 200MB あるため image に焼き込まず、`third_party/misskey/built` を bind-mount で渡している。これを省くとフロントエンドのアセットが 404 になり画面が表示されない。
+フロントエンドは本体の `frontend/` (Misskey TS の fork を取り込んだ pnpm workspace) からビルドする。SPA の JS/CSS は約 200MB あるため image に焼き込まず、成果物の `frontend/built` を bind-mount で渡している。これを省くとフロントエンドのアセットが 404 になり画面が表示されない。
 
 ### 2. 設定ファイルを用意する
 
@@ -105,7 +105,7 @@ make uds-update      # UDS 構成
 
 注意点:
 
-- **`git pull` だけでは submodule が更新されない**。親リポのポインタが動くだけで `third_party/misskey/` の中身は古いまま。`make pull` (または `git pull --recurse-submodules`) を使う
+- **`frontend/` のソースが動いたらフロントエンドを再ビルドする**。成果物の `frontend/built` は git の管理の外にあり、`git pull` では変わらない。`make pull` (内部で `make update`) は、再ビルドが要るかどうかを知らせる。`make *-update` は再ビルドまで行う
 - **フロントエンドを再ビルドしたら必ず mk-go を再起動する**。エントリポイントを起動時に 1 回だけ解決してキャッシュするため、再起動しないと消えた古いファイルを参照し続けて 404 になる。**`docker compose up -d` では再起動されない** — イメージと設定が変わらなければコンテナは作り直されず、フロントエンドは bind-mount なので何も変わらないため。`make *-update` / `make *-restart` は `restart` を明示したうえで、配信中のアセットが実在するかまで検証する (#2885)
 - **ビルド中はフロントエンドが 404 になる**。配信中のディレクトリを作り直すため。ビルドが失敗した場合は 404 のまま残るので、成功するまで直すこと
 - ブラウザ側に Service Worker が残っている場合はハードリロードする
@@ -117,7 +117,7 @@ make uds-update      # UDS 構成
 前提: Go 1.27+、PostgreSQL 18推奨 (16以降で動作、CI検証は18)、Redis 7+、Docker (テスト用)
 
 ```bash
-git clone --recursive https://github.com/shiroha-a/mk.git
+git clone https://github.com/shiroha-a/mk.git
 cd mk
 
 # 設定ファイルを作成 (→ docs/configuration.md 参照)
@@ -177,7 +177,7 @@ go test -race -count=1 -shuffle=3 -timeout 10m \
 | [queue-bench](docs/queue-bench.md) | BullMQ / mkq の 2-way 比較 (#563) |
 | [ベンチプロファイリング](docs/bench-pprof.md) | k6負荷時のpprof取得と解析 |
 | [メディアプロキシの govips 評価](docs/mediaproxy-govips-evaluation.md) | 画像変換ライブラリの比較検討 |
-| [upstream追従手順](docs/upstream-catch-up.md) | Misskey TSの新リリース取り込みとsubmodule bump |
+| [upstream追従手順](docs/upstream-catch-up.md) | Misskey TSの新リリース取り込み |
 | [設計メモ](docs/design/) | オートスケール、inbox verify、mkq等の設計判断 |
 | [upstream 差分](docs/update/) | Misskey TS 2026.3.2 → 2026.10.0 の backend 差分 (`<yyyymm><nn>diff.md`) と triage note |
 

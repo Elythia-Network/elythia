@@ -47,29 +47,35 @@ PR を出すと十数個の check が走る。**required なのは `build` / `te
 残りは非ブロッキング。どれが何を見ていて落ちたとき何を疑うかは [CI で回る項目](ci.md) に
 まとめてある。
 
-## fork frontend (`third_party/misskey`) を触るとき
+## fork frontend (`frontend/`) を触るとき
 
 mk-go 1.0 以降は fork frontend を独自に進化させる。Go 側の `make check` だけでは
-frontend の規約違反を拾えないので、submodule を変える PR では以下も確認する。
+frontend の規約違反を拾えないので、`frontend/` を変える PR では以下も確認する。
 
-### submodule の系列
+### 変更の置き場所
 
-mk が追跡するのは fork の **`mk-2026.x.x` 系列**であり、fork `develop` ではない。
-misskey-ts への PR は base を mk の gitlink が指す系列に合わせ、mk 側では
-[upstream-catch-up.md の祖先確認](upstream-catch-up.md#mk-固有パッチだけを載せるときrelease-bump-以外)
-を bump 前に必ず行う。
+frontend は #3379 で Misskey TS の fork (submodule `third_party/misskey`) から
+本体の `frontend/` (pnpm workspace) へ取り込んだ。frontend の変更は `frontend/` を
+直接直し、Go 側の変更と同じ PR に入れてよい。fork 側へ commit して gitlink を
+上げる手順は要らない。
 
 ### 手元での確認（CI `frontend-check` job 相当）
 
-`make frontend-check` は**型 (`vue-tsc`) + submodule のソースを読むゲート + eslint** まで (#2892 / #2906)。job 全体はさらに vitest と `make plugins-all` / 統合バイナリの build も走る。下のブロックが eslint を再度呼ぶのは、CI も別 step (`Lint (eslint)`) で回しているのを揃えているため。
+`make frontend-check` は**型 (`vue-tsc`) + `frontend/` のソースを読むゲート + eslint** まで (#2892 / #2906)。job 全体はさらに vitest と `make plugins-all` / 統合バイナリの build も走る。下のブロックが eslint を再度呼ぶのは、CI も別 step (`Lint (eslint)`) で回しているのを揃えているため。
+
+`make plugins-all` は workspace のビルドより先に回す。生成物の
+`server-plugins.generated.ts` は git で追跡していない (#3379) ので、無いと
+frontend のビルドが import で落ちる。Node の版は `frontend/.node-version` に揃える。
 
 ```bash
-cd third_party/misskey && pnpm install && pnpm build-pre && pnpm -r build
 make plugins-all && go build -o /dev/null ./cmd/misskey   # CI と同じ統合ビルド
+cd frontend && pnpm install && pnpm build-pre && pnpm -r build && cd ..
 make frontend-check
-cd third_party/misskey/packages/frontend && pnpm eslint
+cd frontend/packages/frontend && pnpm eslint && cd ../../..
 make frontend-test
 ```
+
+**本番を動かしているチェックアウトでは `pnpm -r build` / `pnpm build` を流さないこと。** frontend 自身のビルドが `frontend/built` を消してから作り直すので、そこを bind mount している本番が 404 になる (#3379 の切り替え後)。手元の検証は別の worktree で行う。
 
 `make uds-frontend-build` / `make e2e-frontend-build` は本番の `built/` を書き換えるので
 検証には使わない ([development.md](development.md))。
@@ -269,11 +275,12 @@ AGPL-3.0 が求めるのはライセンス全文を添えること (§4) と、�
 misskey-project` は upstream Misskey の著作権表示なので、mk-go 自身のコードに
 付けると**帰属が逆になる**。実際に `plugin/` の 3 ファイルがその状態だった。
 
-**fork frontend (`third_party/misskey`) は別。** 上流のヘッダーを消すのは §4 の
-「既存の告知をそのまま残す」に反する。AGPL 管轄ディレクトリへ新規ファイルを足す
-ときも、submodule 側の `scripts/check-spdx.mjs` が落とすのでヘッダーが要る。
-`tools/pluginbuild` が生成する `server-plugins.generated.ts` がそこに入るのも
-同じ理由で、あれは Go 側の方針の例外ではなく submodule 側の要件。
+**fork frontend (`frontend/`) は別。** 本体へ取り込んだ後も、上流の SPDX ヘッダーは
+そのまま残す。消すのは §4 の「既存の告知をそのまま残す」に反する。AGPL 管轄
+ディレクトリへ新規ファイルを足すときも、`frontend/scripts/check-spdx.mjs`
+(CI の `frontend` workflow が回す) が落とすのでヘッダーが要る。`tools/pluginbuild`
+が生成する `server-plugins.generated.ts` がヘッダーを持つのも同じ理由で、あれは
+Go 側の方針の例外ではなく `frontend/` 側の要件。
 
 ## 変更の経緯 (旧 CLAUDE.md の更新記録)
 

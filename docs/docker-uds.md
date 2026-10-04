@@ -1,6 +1,6 @@
 # docker-compose で動かす UDS-only スタック
 
-Phase 12-1 で入った UNIX domain socket (UDS) 対応を使って、mk-go の全コンポーネントを TCP 無しで動かす参照デプロイメントです。ブラウザ側には本家 Misskey の vite ビルド成果物をそのまま配信するので、`http://localhost/` を開けば Misskey の UI が出ます。
+Phase 12-1 で入った UNIX domain socket (UDS) 対応を使って、mk-go の全コンポーネントを TCP 無しで動かす参照デプロイメントです。ブラウザ側には同梱フロントエンド (`frontend/`、Misskey の fork) の vite ビルド成果物を配信するので、`http://localhost/` を開けば Misskey の UI が出ます。
 
 - nginx が受けるのは host の 80 番だけ (HTTP のみ)
 - nginx → mk-go は UDS (`/run/mkgo/mkgo.sock`)
@@ -12,12 +12,7 @@ Phase 12-1 で入った UNIX domain socket (UDS) 対応を使って、mk-go の�
 ## 前提条件
 
 - Docker と docker compose v2
-- `third_party/misskey` サブモジュールの初期化 (**tag はスーパープロジェクトが pin しています**。実際に何が pin されているかは `git -C third_party/misskey describe --tags`)
-- host 側のインストールは不要です。フロントエンドのビルドも docker 経由で行います。
-
-```sh
-git submodule update --init --recursive third_party/misskey
-```
+- host 側のインストールは不要です。フロントエンドは本体の `frontend/` (#3379 で取り込んだ pnpm workspace) から docker 経由でビルドします。submodule の初期化は要りません。
 
 ## 初回セットアップ
 
@@ -31,9 +26,11 @@ make uds-init
 
 `uds-init` は order-only prerequisite で実装されているので、ファイルが既にある場合は何もしません (`.example` を更新してもローカル編集は上書きされない)。`uds-build` / `uds-up` / `uds-restart` / `uds-down` / `uds-down-v` / `uds-logs` / `uds-ps` も同じ prerequisite を持つため、コピー忘れでエラーになることはありません (`uds-frontend-build` は compose / config を参照しないので対象外。`uds-rebuild` 自身は prerequisite を持ちませんが、呼び出す `uds-build` が満たします)。
 
-### 1. 本家フロントエンドのビルド
+### 1. フロントエンドのビルド
 
-初回のみ、本家 Misskey の vite ビルドを行います (3〜10 分)。`make uds-frontend-build` は既存の `e2e-frontend-build` と同一のターゲットで、**submodule 自身の `Dockerfile` の `ARG NODE_VERSION`** (`26.4.0-trixie` の形で版と distro の両方を持つ) が指す image の中で `pnpm install --frozen-lockfile && pnpm build` を走らせます。pnpm の版も submodule の `packageManager` から取ります (#2921)。以前は `node:22-bookworm` 固定で、CI が `.node-version` を見るのに本番のビルドだけ Node 22 という食い違いがあり、しかも `node:22-bookworm` の 22.22.2 は `engines.node` の下限ちょうどでした。
+初回のみ、`frontend/` の vite ビルドを行います (3〜10 分)。`make uds-frontend-build` は既存の `e2e-frontend-build` と同一のターゲットで、`node:<版>-<distro>` の image の中で `pnpm install --frozen-lockfile && pnpm build` を走らせます。Node の版は `frontend/.node-version` (CI の `node-version-file` と同じもの) から、distro は Makefile の `FRONTEND_NODE_DISTRO` (既定 `trixie`) から取ります。pnpm の版は `frontend/package.json` の `packageManager` から取ります (#2921)。以前は `node:22-bookworm` 固定で、CI が `.node-version` を見るのに本番のビルドだけ Node 22 という食い違いがあり、しかも `node:22-bookworm` の 22.22.2 は `engines.node` の下限ちょうどでした。
+
+ビルドの前に `make plugins` が走り、`plugins/` に置いたプラグインの frontend の登録 (`frontend/packages/frontend/src/server-plugins.generated.ts`) を生成します。このファイルは git で追跡していないので、`frontend/` を手で直接ビルドするときも先に `make plugins` を実行してください。
 
 ```sh
 make uds-frontend-build
@@ -41,16 +38,17 @@ make uds-frontend-build
 
 終了すると以下のパスに成果物ができます。`compose.uds.yaml` が read-only で bind mount します。
 
-- `third_party/misskey/built/_frontend_vite_/manifest.json`
-- `third_party/misskey/built/_frontend_dist_/`
+- `frontend/built/_frontend_vite_/manifest.json`
+- `frontend/built/_frontend_dist_/`
 
-なお `pnpm install --frozen-lockfile` が本家のnode_modulesも生成するため、以下も同時に揃います。これらは `deploy/uds/Dockerfile.mkgo` が `COPY` で runtime image に焼き込み、mk-go の `/twemoji/*` / `/fluent-emoji/*` / `/assets/*` ルートから配信します。
+なお `pnpm install --frozen-lockfile` が `frontend/` の node_modules も生成するため、絵文字のアセットも同時に揃います。これらと、git で追跡しているアセットは `deploy/uds/Dockerfile.mkgo` が `COPY` で runtime image に焼き込み、mk-go の `/twemoji/*` / `/fluent-emoji/*` / `/assets/*` / `/static-assets/*` ルートから配信します。
 
-- `third_party/misskey/packages/backend/node_modules/@misskey-dev/emoji-assets/built/twemoji/` (twemoji SVG set)
-- `third_party/misskey/packages/backend/node_modules/@misskey-dev/emoji-assets/built/fluent-emoji/` (実績バッジ / 通知アイコン)
-- `third_party/misskey/assets/` (`ai.png` 等、約684KB)
+- `frontend/node_modules/@misskey-dev/emoji-assets/built/twemoji/` (twemoji SVG set。`pnpm install` で揃う)
+- `frontend/node_modules/@misskey-dev/emoji-assets/built/fluent-emoji/` (実績バッジ / 通知アイコン。`pnpm install` で揃う)
+- `frontend/repo-assets/` (`ai.png` 等、約684KB。git で追跡)
+- `frontend/assets/` (favicon やアイコン等。git で追跡)
 
-`make uds-frontend-build` を省略すると image ビルド時にこれらの存在チェックが fail してビルドが止まります。
+`make uds-frontend-build` を省略すると、image ビルド時に絵文字のアセットの存在チェックが fail してビルドが止まります。
 
 ### 2. スタックの起動
 
@@ -137,20 +135,11 @@ docker inspect mk-mkgo-1 --format '{{.HostConfig.LogConfig.Config}}'
 
 ## トラブルシューティング
 
-### `third_party/misskey` 自体が空 (submodule 未初期化)
+### `frontend/built` が無い
 
-`compose.uds.yaml` は `./third_party/misskey/built` と `./third_party/misskey/packages/frontend/assets` を read-only で bind mount しています。submodule をまだ取得していない場合、このディレクトリが空になっていて mount source が存在せず `uds-up` がエラーで止まります。
+`compose.uds.yaml` は `./frontend/built` と `./frontend/packages/frontend/assets` を read-only で bind mount しています。`make uds-frontend-build` を先に実行してください。bind mount の source が存在しないと `uds-up` が失敗します。
 
-```sh
-git submodule update --init --recursive third_party/misskey
-make uds-frontend-build
-```
-
-submodule のチェックアウト先は本リポジトリで pin 済みです (現在の値は `git -C third_party/misskey describe --tags` で確認できます。**doc に版を書くと bump のたびに腐る**ので書きません)。
-
-### `third_party/misskey/built` が無い
-
-`make uds-frontend-build` を先に実行してください。bind mount の source が存在しないと `uds-up` が失敗します。
+#3379 より前の版から上げた環境で、`compose.uds.yaml` がまだ `./third_party/misskey/built` を指している場合は、[デプロイの切り替え手順](deployment.md#frontend-を本体へ取り込んだ版へ上げる-3379)に従って向け直してください。
 
 ### マイグレーションが失敗してコンテナが crash loop する
 

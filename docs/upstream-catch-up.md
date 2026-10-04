@@ -4,6 +4,8 @@ mk-go は `third_party/misskey` submodule で Misskey TS の特定 release tag �
 
 本書は **submodule bump を含む PR がマージされた後、各開発者 / operator が必要な手順** と、**新 upstream release が出た時の triage 運用** を説明する。
 
+> **#3379 以降、frontend は submodule ではなく本体の `frontend/` (fork から取り込んだ pnpm workspace) からビルドする。** submodule はまだ残っているが (#3379 の段階 P4d で外す)、frontend の供給元としてはもう読まない。本書のうち submodule の working tree・fork の commit / tag を frontend の更新手段として書いている箇所 (1-1 〜 1-3、2-5) は、frontend の配信物には届かない。frontend の変更は `frontend/` を直接直す ([contributing.md](contributing.md))。本家の版の frontend 側を `frontend/` へ当てる手順は [project-restructure.md の D4](design/project-restructure.md) で設計している。
+
 ---
 
 ## 1. 既存環境への適用 (= submodule bump PR マージ後)
@@ -42,7 +44,7 @@ git -C third_party/misskey log --oneline HEAD -1
 
 ### 1-4. frontend asset の rebuild が必要なケース
 
-`third_party/misskey/packages/frontend/` の vite ビルド成果物を mk-go が serve しているため、submodule bump 後に **frontend asset を再ビルド** しないと UI に古い JS が残る:
+`frontend/packages/frontend/` の vite ビルド成果物 (`frontend/built`) を mk-go が serve しているため、`frontend/` が変わった後に **frontend asset を再ビルド** しないと UI に古い JS が残る (#3379 より前は `third_party/misskey` の成果物を配信していた):
 
 ```bash
 make uds-frontend-build
@@ -53,17 +55,17 @@ make uds-frontend-build
 
 ### 1-5. UDS production stack の再ビルド
 
-`compose.uds.yaml` ([リポジトリにあるのは `.example` 版](../compose.uds.yaml.example)) で本番運用している場合、Misskey TS の prebuilt image を pull しているわけではなく **mk-go バイナリ + submodule の静的アセットを image に焼き込んでビルドしている** ([`deploy/uds/Dockerfile.mkgo`](../deploy/uds/Dockerfile.mkgo) の `COPY . .` 経由)。submodule update + frontend rebuild 後に image を作り直さないと古い asset が image にキャッシュされたまま:
+`compose.uds.yaml` ([リポジトリにあるのは `.example` 版](../compose.uds.yaml.example)) で本番運用している場合、Misskey TS の prebuilt image を pull しているわけではなく **mk-go バイナリ + `frontend/` の静的アセットを image に焼き込んでビルドしている** ([`deploy/uds/Dockerfile.mkgo`](../deploy/uds/Dockerfile.mkgo) の `COPY . .` 経由)。`frontend/` の更新 + frontend rebuild 後に image を作り直さないと古い asset が image にキャッシュされたまま:
 
 ```bash
-# 1-1 / 1-2 と 1-4 を済ませた状態 (= submodule + frontend asset が最新) で
+# pull と 1-4 を済ませた状態 (= frontend/ + frontend asset が最新) で
 make uds-build      # image を作り直す
 make uds-restart    # 再起動 + 配信アセットの検証
 ```
 
 **重要**:
-- **image の作り直しと再起動は別の話で、両方要る**。image に焼き込むのは `deploy/uds/Dockerfile.mkgo` が `COPY` する 4 つ — static-assets (`packages/backend/assets`)、repo-assets (`third_party/misskey/assets`)、twemoji、fluent-emoji。submodule bump でこれらが変わるので `uds-build` が要る
-- **SPA のアセット (`built/_frontend_vite_`) は image に入らない**。bind-mount で渡しているので `uds-frontend-build` (1-4) の出力がそのまま配信される
+- **image の作り直しと再起動は別の話で、両方要る**。image に焼き込むのは `deploy/uds/Dockerfile.mkgo` が `COPY` する 4 つ — static-assets (`frontend/assets`)、repo-assets (`frontend/repo-assets`)、twemoji、fluent-emoji (`frontend/node_modules/@misskey-dev/emoji-assets` から)。`frontend/` の更新でこれらが変わるので `uds-build` が要る
+- **SPA のアセット (`frontend/built/_frontend_vite_`) は image に入らない**。bind-mount で渡しているので `uds-frontend-build` (1-4) の出力がそのまま配信される。ただし `compose.uds.yaml` がまだ `./third_party/misskey/built` を指している場合は誰も mount していないので、先に [デプロイの切り替え手順](deployment.md#frontend-を本体へ取り込んだ版へ上げる-3379) を済ませる
 - **`--build` を付けても再起動は保証されない**。compose は image と設定が変わらなければコンテナを作り直さないので、bind-mount しか変わっていない場合は何も起きず、mk-go は起動時にキャッシュした古いエントリを配り続ける (#2885)。`make uds-restart` は `restart` を明示したうえで配信中のアセットが実在するかまで検証する
 - **その検証は bind-mount の SPA アセットしか見ない**。image 側の asset (twemoji 等) が古いままでも緑になるので、`uds-build` を省かないこと
 - `make uds-frontend-build` を skip すると Dockerfile builder の sanity check (`test -f .../1f004.svg` 等) で早期 fail する
@@ -135,6 +137,8 @@ triage で判定した item を `gh issue create` で 1 件 1 issue として起
 各 commit は `2026.X.Y Wave N (M/N): <要約>` 命名で、`Closes #<sub-issue>` で sub-issue を自動 close する。
 
 ### 2-5. submodule bump 時の fork 運用
+
+> **#3379 以降、この節の fork の commit・tag・gitlink の bump は frontend のビルドに届かない** (冒頭の注記)。下の手順と採番規則は、submodule と pin の検査 (`make submodulepin-check`、`build` job) が残っている間の記録として置いている。
 
 mk-go は `shiroha-a/misskey-ts` fork を経由して submodule を pin している (= upstream の release tag + mk 固有のパッチを cherry-pick したもの)。新 release を取り込む手順:
 
@@ -288,7 +292,7 @@ mk-go の MFM パーサは、mfm-js が依存する `@misskey-dev/emoji-data` �
 
 ```bash
 make emoji-regex     # 生成物と tools/emojiregex/testdata/source.txt を作り直す
-node internal/activitypub/mfm/testdata/emoji_mfmjs.mjs third_party/misskey \
+node internal/activitypub/mfm/testdata/emoji_mfmjs.mjs frontend \
   > internal/activitypub/mfm/testdata/emoji_mfmjs.json   # mfm-js の期待値を作り直す
 GOWORK=off go test ./internal/activitypub/mfm/ ./tools/emojiregex/
 ```

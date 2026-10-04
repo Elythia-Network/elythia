@@ -1751,7 +1751,7 @@ entropy も sharp と一致する (gif は完全一致、他は差 0.03 以下)�
 - **本家 e2e に対する適合**: `make upstream-e2e` (Misskey 本家の `test/e2e/**` を無改変で mk-go に向けて実行)。**意図的な差分は `tests/upstream-e2e/known-divergences.json` に根拠付きで登録し、expected-failure として扱う。** skip ではないので、乖離が解消して通るようになったら逆に落ちて気付ける。本ドキュメントに載せた divergence のうち API 挙動に現れるものは、原則この一覧にも entry がある ([upstream-backend-e2e.md](upstream-backend-e2e.md))
 - **コード内の divergence 注記**: `grep -rn "#2106 L" internal/` で全件を辿れる
 - **upstream 追従時**: `docs/update/` に release ごとの diff doc を追加し、そこで確定した divergence を本ドキュメントへ反映する。golden の再生成 (`make shapecheck-gen`) と TypeORM seed の追加も必要 ([upstream-catch-up.md](upstream-catch-up.md))
-- **fork frontend の変更**: `third_party/misskey` に custom commit を積んで tag を打ち、mk 側の submodule pin を bump する。純正へ還元できない (= 純正 backend が対応しない) ものだけを置く方針。tag は機能追加が `X.Y.Z-mk.N`、**直前の数字タグの後追い修正はその N に英字を足す** (`-mk.22` の修正なら `-mk.22a`、次が `-mk.22b`)。**世代をまたぐ修正は新しい数字を取る** — 英字は列の順序を保つためのものなので、`-mk.24` の後に `-mk.12a` を打つと `git describe --tags` が後戻りして見える。先例は `-mk.23` (`fix(frontend):` で `-mk.12` の取りこぼしを直したが数字を取った)、`-mk.25` (同じく #2934 の取りこぼし)、`-mk.28` (#2347 の取りこぼしで、世代そのものが違う)
+- **fork frontend の変更**: #3379 以降は本体の `frontend/` を直接直す ([contributing.md](contributing.md))。fork へ commit して pin を上げても frontend のビルドには届かない。以下は取り込み前の手順で、§4-2 の tag はそれで積んだ記録。取り込み前は `third_party/misskey` に custom commit を積んで tag を打ち、mk 側の submodule pin を bump していた。純正へ還元できない (= 純正 backend が対応しない) ものだけを置く方針。tag は機能追加が `X.Y.Z-mk.N`、**直前の数字タグの後追い修正はその N に英字を足す** (`-mk.22` の修正なら `-mk.22a`、次が `-mk.22b`)。**世代をまたぐ修正は新しい数字を取る** — 英字は列の順序を保つためのものなので、`-mk.24` の後に `-mk.12a` を打つと `git describe --tags` が後戻りして見える。先例は `-mk.23` (`fix(frontend):` で `-mk.12` の取りこぼしを直したが数字を取った)、`-mk.25` (同じく #2934 の取りこぼし)、`-mk.28` (#2347 の取りこぼしで、世代そのものが違う)
 
 ## 関連ドキュメント
 
