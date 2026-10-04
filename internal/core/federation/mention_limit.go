@@ -74,5 +74,20 @@ func exceedsRemoteMentionLimit(n *model.Note, mentions, tagHrefs []string, limit
 // exceedsMentionLimit is exceedsRemoteMentionLimit with the author's
 // mentionLimit policy, looked up only when the note has mentions.
 func (r *Resolver) exceedsMentionLimit(n *model.Note, mentions, tagHrefs []string) bool {
-	return exceedsRemoteMentionLimit(n, mentions, tagHrefs, func() int { return r.mentionLimitFor(n.UserID) })
+	return exceedsRemoteMentionLimit(n, mentions, tagHrefs, r.lazyMentionLimit(n.UserID))
+}
+
+// lazyMentionLimit returns a function that looks the mentionLimit policy of
+// userID up on its first call and returns the same value afterwards.
+//
+// 取り込みの 1 回の中では、未知の actor の取得の上限と、取り込みの上限判定で
+// 同じ値を使い、policy を 1 回だけ引く。呼ばれなければ引かない。
+func (r *Resolver) lazyMentionLimit(userID string) func() int {
+	loaded, limit := false, 0
+	return func() int {
+		if !loaded {
+			limit, loaded = r.mentionLimitFor(userID), true
+		}
+		return limit
+	}
 }

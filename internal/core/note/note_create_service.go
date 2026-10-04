@@ -270,6 +270,15 @@ type RemoteUserResolver interface {
 	ResolveByUsernameHost(username, host string) (*model.User, error)
 }
 
+// RemoteUserResyncer is implemented by a RemoteUserResolver that re-syncs a
+// stored remote user whose data is older than 24 hours, as upstream
+// RemoteUserResolveService.resolveUser does for a user found in the DB.
+type RemoteUserResyncer interface {
+	// NeedsResync reports whether ResyncIfStale would contact the remote server.
+	NeedsResync(u *model.User) bool
+	ResyncIfStale(u *model.User) (*model.User, error)
+}
+
 // SetRemoteUserResolver wires the resolver used to fetch mentioned remote
 // users that are not in the DB, as upstream RemoteUserResolveService.resolveUser
 // does. nil keeps mention resolution DB-only.
@@ -751,7 +760,10 @@ func (s *CreateService) Create(in CreateInput) (*model.Note, error) {
 	// 解決できる acct だけなら本家も同じく弾く。これが無いと、応答しないホストへの
 	// メンションを数百並べるだけで、投稿のハンドラを分単位で止められる。
 	// 取った後は件数が上の見積もり以下にしかならないので、判定し直しは要らない。
-	if mentionRes != nil && len(mentionRes.fetchable) > 0 && s.remoteUserResolver != nil {
+	//
+	// 保存から 24 時間を過ぎた利用者の再同期 (本家 resolveUser) も同じ枠で行う。
+	// こちらは既に上の数に入っているので、件数の見積もりは増やさない。
+	if mentionRes.hasRemoteWork() && s.remoteUserResolver != nil {
 		accts, _ := mentionRes.fetchableAccts()
 		if n := mentionTargetCount(in, visibility, replyTarget, mentionUserIDs) + len(accts); n > s.mentionLimitFor(in.User.ID) {
 			return nil, ErrContainsTooManyMentions
@@ -1350,6 +1362,9 @@ type mentionResolution struct {
 	// fetchable lists the indices of remote mentions the DB lookup answered
 	// with "no such user", i.e. the ones to resolve via WebFinger.
 	fetchable []int
+	// stale maps the indices of remote mentions the DB answered with a user
+	// whose data is due for a re-sync to that user.
+	stale map[int]*model.User
 }
 
 // userIDs returns the resolved user IDs in mention order, dedup'd by ID.
@@ -1473,8 +1488,8 @@ func (s *CreateService) lookupMentionsInDB(mentions []Mention, authorHost *strin
 		r.hosts[i] = h
 		byHost[h] = append(byHost[h], m.Username)
 	}
-	// resolved[host][usernameLower] = userID
-	resolved := make(map[string]map[string]string, len(byHost))
+	// resolved[host][usernameLower] = user
+	resolved := make(map[string]map[string]*model.User, len(byHost))
 	for host, names := range byHost {
 		var hostPtr *string
 		if host != "" {
@@ -1488,19 +1503,28 @@ func (s *CreateService) lookupMentionsInDB(mentions []Mention, authorHost *strin
 			// DB の障害を外向きのリクエストに化けさせないため (#2792 と同じ理由)。
 			continue
 		}
-		m := make(map[string]string, len(users))
+		m := make(map[string]*model.User, len(users))
 		for _, u := range users {
-			m[u.UsernameLower] = u.ID
+			m[u.UsernameLower] = u
 		}
 		resolved[host] = m
 	}
+	resyncer, _ := s.remoteUserResolver.(RemoteUserResyncer)
 	for i, mn := range mentions {
 		hostMap, ok := resolved[r.hosts[i]]
 		if !ok {
 			continue
 		}
-		if id, ok := hostMap[strings.ToLower(mn.Username)]; ok {
-			r.ids[i] = id
+		if u, ok := hostMap[strings.ToLower(mn.Username)]; ok {
+			r.ids[i] = u.ID
+			// 本家 resolveUser は DB にあった利用者も、保存から 24 時間を過ぎて
+			// いれば WebFinger から取り直す (下の fetchRemoteMentions で行う)。
+			if r.hosts[i] != "" && resyncer != nil && resyncer.NeedsResync(u) {
+				if r.stale == nil {
+					r.stale = make(map[int]*model.User)
+				}
+				r.stale[i] = u
+			}
 			continue
 		}
 		// ローカルの利用者は取りに行く先が無い (本家も findOneBy の結果だけ)。
@@ -1570,30 +1594,82 @@ func isUnreachableHostError(err error) bool {
 	return errors.As(err, &netErr)
 }
 
+// staleAccts groups r.stale by acct, in mention order, with the stored user of
+// each acct.
+func (r *mentionResolution) staleAccts() ([]remoteMentionAcct, map[remoteMentionAcct][]int, map[remoteMentionAcct]*model.User) {
+	byAcct := make(map[remoteMentionAcct][]int)
+	users := make(map[remoteMentionAcct]*model.User)
+	var order []remoteMentionAcct
+	if r == nil {
+		return nil, byAcct, users
+	}
+	for i := range r.mentions {
+		u, ok := r.stale[i]
+		if !ok {
+			continue
+		}
+		a := remoteMentionAcct{strings.ToLower(r.mentions[i].Username), r.hosts[i]}
+		if _, ok := byAcct[a]; !ok {
+			order = append(order, a)
+			users[a] = u
+		}
+		byAcct[a] = append(byAcct[a], i)
+	}
+	return order, byAcct, users
+}
+
+// hasRemoteWork reports whether fetchRemoteMentions has anything to do.
+func (r *mentionResolution) hasRemoteWork() bool {
+	return r != nil && (len(r.fetchable) > 0 || len(r.stale) > 0)
+}
+
+// remoteMentionJob is one acct for fetchRemoteMentions: an unknown acct to
+// resolve (stored == nil) or a stored user to re-sync.
+type remoteMentionJob struct {
+	acct    remoteMentionAcct
+	stored  *model.User
+	indices []int
+}
+
 // fetchRemoteMentions resolves the fetchable mentions of r through the
-// RemoteUserResolver, filling r.ids in place. A failed fetch leaves the mention
-// unresolved, like upstream's `resolveUser(...).catch(() => null)`.
+// RemoteUserResolver and re-syncs the stale ones, filling r.ids in place. A
+// failed fetch leaves the mention unresolved, like upstream's
+// `resolveUser(...).catch(() => null)`; so does a failed re-sync, since
+// upstream's resolveUser throws for it too.
 //
 // The fetches run at most remoteMentionFetchConcurrency at a time, share one
 // overall deadline, and skip the rest of a host once that host turned out to be
 // unreachable. The caller caps the number of accts (see Create).
 func (s *CreateService) fetchRemoteMentions(r *mentionResolution) {
-	if r == nil || len(r.fetchable) == 0 || s.remoteUserResolver == nil {
+	if !r.hasRemoteWork() || s.remoteUserResolver == nil {
 		return
 	}
 	// 同じ利用者を大文字小文字違いで並べても、取りに行くのは 1 回にする。
 	order, byAcct := r.fetchableAccts()
+	staleOrder, staleByAcct, staleUsers := r.staleAccts()
 	r.fetchable = nil
+	r.stale = nil
+	jobs := make([]remoteMentionJob, 0, len(order)+len(staleOrder))
+	for _, a := range order {
+		jobs = append(jobs, remoteMentionJob{acct: a, indices: byAcct[a]})
+	}
+	resyncer, _ := s.remoteUserResolver.(RemoteUserResyncer)
+	if resyncer != nil {
+		for _, a := range staleOrder {
+			jobs = append(jobs, remoteMentionJob{acct: a, stored: staleUsers[a], indices: staleByAcct[a]})
+		}
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), s.remoteMentionFetchTimeout())
 	defer cancel()
 
 	type result struct {
-		k  int
-		id string
+		k      int
+		id     string
+		failed bool
 	}
 	// 締め切りの後に返ってきた goroutine が詰まらないよう、全件分の容量を取る。
-	results := make(chan result, len(order))
+	results := make(chan result, len(jobs))
 	sem := make(chan struct{}, remoteMentionFetchConcurrency)
 	var deadMu sync.Mutex
 	deadHosts := make(map[string]struct{})
@@ -1606,7 +1682,7 @@ func (s *CreateService) fetchRemoteMentions(r *mentionResolution) {
 
 	pending := 0
 launch:
-	for k, a := range order {
+	for k, job := range jobs {
 		select {
 		case sem <- struct{}{}:
 		case <-ctx.Done():
@@ -1614,7 +1690,7 @@ launch:
 		}
 		// 到達できなかったホストの残りは取りに行かない。応答しないホストへの
 		// メンションを並べても、待つのは並列数ぶんの 1 巡だけになる。
-		if isDead(a.host) || ctx.Err() != nil {
+		if isDead(job.acct.host) || ctx.Err() != nil {
 			<-sem
 			if ctx.Err() != nil {
 				break launch
@@ -1622,7 +1698,7 @@ launch:
 			continue
 		}
 		pending++
-		go func(k int, a remoteMentionAcct) {
+		go func(k int, job remoteMentionJob) {
 			res := result{k: k}
 			// defer は逆順に走る: 結果を送る → sem を返す。到達不能の印は sem を
 			// 返す前に付くので、次に起動される goroutine は必ずそれを見る。
@@ -1631,31 +1707,42 @@ launch:
 			defer func() {
 				// 外部の応答を扱う経路なので、panic で投稿ごと落とさない。
 				if rec := recover(); rec != nil {
-					slog.Error("note create: remote mention resolve panicked", "host", a.host, "panic", rec)
+					slog.Error("note create: remote mention resolve panicked", "host", job.acct.host, "panic", rec)
 				}
 			}()
-			u, err := s.remoteUserResolver.ResolveByUsernameHost(a.usernameLower, a.host)
+			var (
+				u   *model.User
+				err error
+			)
+			if job.stored != nil {
+				u, err = resyncer.ResyncIfStale(job.stored)
+			} else {
+				u, err = s.remoteUserResolver.ResolveByUsernameHost(job.acct.usernameLower, job.acct.host)
+			}
 			if err != nil {
+				res.failed = true
 				if isUnreachableHostError(err) {
 					deadMu.Lock()
-					deadHosts[a.host] = struct{}{}
+					deadHosts[job.acct.host] = struct{}{}
 					deadMu.Unlock()
 				}
 				return
 			}
 			if u != nil {
 				res.id = u.ID
+			} else {
+				res.failed = true
 			}
-		}(k, a)
+		}(k, job)
 	}
 
-	got := make([]string, len(order))
+	got := make([]result, len(jobs))
 collect:
 	for pending > 0 {
 		select {
 		case res := <-results:
 			pending--
-			got[res.k] = res.id
+			got[res.k] = res
 		case <-ctx.Done():
 			// 取得中のものは待たない。resolver の HTTP client は自前の timeout で
 			// 終わり、結果は上の容量付きの channel に捨てられる。
@@ -1663,12 +1750,21 @@ collect:
 			break collect
 		}
 	}
-	for k, a := range order {
-		if got[k] == "" {
-			continue
-		}
-		for _, i := range byAcct[a] {
-			r.ids[i] = got[k]
+	for k, job := range jobs {
+		res := got[k]
+		switch {
+		case res.id != "":
+			for _, i := range job.indices {
+				r.ids[i] = res.id
+			}
+		case job.stored != nil && res.failed:
+			// 再同期に失敗した利用者へのメンションは本家と同じく落とす
+			// (resolveUser が投げ、extractMentionedUsers の catch で null になる)。
+			// 締め切りや到達不能のホストで試さなかった分は、失敗を確かめていない
+			// ので DB の利用者のまま残す。
+			for _, i := range job.indices {
+				r.ids[i] = ""
+			}
 		}
 	}
 }

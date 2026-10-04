@@ -78,3 +78,30 @@ func (r *Resolver) MarkKeyFetchFailed(userID string) { r.markKeyFetchFailed(user
 // **同じ値を push 側 (`handleAdd`) と pull 側 (`resolveFeaturedNotes`) が使う**
 // ので、片方だけ変えたらテストが落ちる形にしておく。
 const FeaturedPinLimit = featuredPinLimit
+
+// SetInboundMentionFetchBudget overrides inboundMentionFetchBudget for one test.
+func SetInboundMentionFetchBudget(t interface{ Cleanup(func()) }, d time.Duration) {
+	prev := inboundMentionFetchBudget
+	inboundMentionFetchBudget = d
+	t.Cleanup(func() { inboundMentionFetchBudget = prev })
+}
+
+// HoldMentionFetchSlots takes every unknown-actor fetch slot until release is
+// called, as if other inbox workers were fetching.
+func (r *Resolver) HoldMentionFetchSlots() (release func()) {
+	n := cap(r.mentionFetch.slots)
+	for range n {
+		r.mentionFetch.slots <- struct{}{}
+	}
+	return func() {
+		for range n {
+			<-r.mentionFetch.slots
+		}
+	}
+}
+
+// InboundMentionFetchSlots exposes inboundMentionFetchSlots for external tests.
+const InboundMentionFetchSlots = inboundMentionFetchSlots
+
+// InboundMentionFailureTTL exposes inboundMentionFailureTTL for external tests.
+const InboundMentionFailureTTL = inboundMentionFailureTTL

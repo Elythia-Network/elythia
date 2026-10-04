@@ -970,6 +970,13 @@ func applyUserFields(u *model.User, fields map[string]any) {
 			if t, ok := v.(*time.Time); ok {
 				u.LastFetchedAt = t
 			}
+		case "uri":
+			switch s := v.(type) {
+			case string:
+				u.URI = &s
+			case *string:
+				u.URI = s
+			}
 		case "isLocked":
 			if b, ok := v.(bool); ok {
 				u.IsLocked = b
