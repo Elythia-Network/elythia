@@ -1157,7 +1157,7 @@ func (p *Processor) handleUndoAccept(act genericActivity, inner genericActivity)
 		return nil
 	}
 	var follower *model.User
-	if localID := p.resolver.ExtractLocalUserID(followerURI); localID != "" {
+	if localID := p.resolver.localUserIDFromAPID(followerURI); localID != "" {
 		follower, err = p.userRepo.FindByID(localID)
 	} else {
 		follower, err = p.userRepo.FindByURI(followerURI)
@@ -1440,7 +1440,7 @@ func (p *Processor) handleAccept(act genericActivity) error {
 	// ローカルユーザーはURIカラムがNULLなのでFindByURIでは見つからない。
 	// ローカルURI（/users/{id}）からIDを抽出してFindByIDで検索する。
 	var follower *model.User
-	if localID := p.resolver.ExtractLocalUserID(followerURI); localID != "" {
+	if localID := p.resolver.localUserIDFromAPID(followerURI); localID != "" {
 		follower, err = p.userRepo.FindByID(localID)
 	} else {
 		follower, err = p.userRepo.FindByURI(followerURI)
@@ -1723,8 +1723,9 @@ func (p *Processor) handleCreate(act genericActivity, signer *model.User) error 
 		// ので queue retry に乗せず ack して drop する。upstream は同種 error を
 		// IdentifiableError('9f466dab-...') で switch する patch だが、mk-go は
 		// sentinel error の errors.Is で同等の non-retry 化を行う。
+		// 上限は投稿者の role policy で決まる (#3330) ので、既定値を記録しない。
 		slog.Info("federation: dropping inbound note exceeding mentionLimit",
-			"actor", act.Actor, "limit", corenote.DefaultMentionLimit)
+			"actor", act.Actor)
 		return nil
 	}
 	if errors.Is(err, ErrHostNotAllowed) {
@@ -2123,7 +2124,7 @@ func (p *Processor) handleAnnounce(act genericActivity, signer *model.User) erro
 	// followers=to[followers] shape を正しく判定する)。実装が送らない exotic shape
 	// (cc のみ Public 等) での upstream parseAudience との差、および specified renote の
 	// visibleUsers / 通知の扱いは #1864 で別途対応する。
-	renoteVisibility := deriveVisibility(decodeAudience(act.To), decodeAudience(act.CC))
+	renoteVisibility := deriveVisibility(announcer, decodeAudience(act.To), decodeAudience(act.CC))
 	// upstream NoteCreateService は renote の visibility を対象 note 以下に clamp する
 	// (home note は public で renote できず home に落ちる)。target は上の gate で
 	// public/home に限定済みなので、home target に対する public boost を home に
@@ -2685,7 +2686,8 @@ func (p *Processor) handleFlag(act genericActivity) error {
 	// upstream flag() は object URI を config.url + '/users/' prefix の LOCAL
 	// user URI に絞ってから user id に map し users[0] を報告対象にする
 	// (#1560、ApInboxService.ts:560-577)。mk-go も ExtractLocalUserID で
-	// `{baseURL}/users/{id}` 形式のローカル URI だけを対象にする。旧実装は
+	// `{baseURL}/users/...` 形式のローカル URI だけを対象にし、本家と同じく最後の
+	// 段を ID として引く (`/users/{id}/followers` は誰にも当たらない、#3330)。旧実装は
 	// 任意 host の user/note URI を受け、note 作者 (リモート可) まで fallback
 	// して別 instance のユーザーを誤って報告し得た。
 	var targetUserID string
@@ -3065,7 +3067,10 @@ func (p *Processor) handleChatCreate(sender *model.User, noteURI, content, mfmSo
 	}
 	recipient, err := p.userRepo.FindByURI(to)
 	if err != nil {
-		if localID := p.resolver.ExtractLocalUserID(to); localID != "" {
+		// chat は cherrypick 由来で本家に対応が無いので、ExtractLocalUserID
+		// (本家 fetchPerson の最後の段) ではなく従来どおり `users` の次の段で読む
+		// (#3330)。
+		if localID := p.resolver.localUserIDFromAPID(to); localID != "" {
 			recipient, err = p.userRepo.FindByID(localID)
 		}
 		if err != nil {
@@ -3145,10 +3150,11 @@ func (p *Processor) handleChatMessage(act genericActivity) error {
 		return fmt.Errorf("chat message: resolve sender: %w", err)
 	}
 	// ローカルユーザーはDB上URI==nilのためFindByURIでは解決できない。
-	// handleAcceptと同じパターンでExtractLocalUserID→FindByIDにフォールバック。
+	// handleAcceptと同じパターンでlocalUserIDFromAPID→FindByIDにフォールバック
+	// (chat は本家に対応が無いので、従来どおり `users` の次の段で読む、#3330)。
 	recipient, err := p.userRepo.FindByURI(raw.To)
 	if err != nil {
-		if localID := p.resolver.ExtractLocalUserID(raw.To); localID != "" {
+		if localID := p.resolver.localUserIDFromAPID(raw.To); localID != "" {
 			recipient, err = p.userRepo.FindByID(localID)
 		}
 		if err != nil {

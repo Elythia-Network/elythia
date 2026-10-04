@@ -4833,13 +4833,31 @@ func TestResolveMentionedUserIDs(t *testing.T) {
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
 		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		plantLocalUsers(repo, "alice", "bob")
 
 		ids, err := r.ResolveMentionedUserIDs([]string{
 			"https://example.com/users/alice",
 			"https://example.com/users/bob/inbox", // 末尾サフィックス付き
+			"https://example.com/users/ghost",     // 実在しない
 		})
 		require.NoError(t, err)
-		assert.Equal(t, []string{"alice", "bob"}, ids)
+		// 本家 fetchPerson は最後の段 (`inbox`) を ID として引くので bob には解決せず、
+		// 実在しない ID (`inbox` / `ghost`) は落とす (#3330)。
+		assert.Equal(t, []string{"alice"}, ids)
+	})
+
+	// 実在の確認はまとめて 1 回で引く (Mention を並べるだけで N 回の問い合わせに
+	// しない)。引けなかったときは「実在しない」に潰さず伝播する (#3121)。
+	t.Run("local IDs are verified in one lookup and errors propagate", func(t *testing.T) {
+		repo := testutil.NewMockUserRepository()
+		noteRepo := testutil.NewMockNoteRepository()
+		urls := activitypub.NewURLBuilder("https://example.com")
+		idGen, _ := id.NewGenerator("aidx")
+		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		boom := errors.New("connection refused")
+		repo.FindManyByIDsErr = boom
+		_, err := r.ResolveMentionedUserIDs([]string{"https://example.com/users/alice"})
+		require.ErrorIs(t, err, boom)
 	})
 
 	t.Run("known remote URI resolved via userRepo.FindByURI", func(t *testing.T) {
@@ -4879,6 +4897,7 @@ func TestResolveMentionedUserIDs(t *testing.T) {
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
 		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		plantLocalUsers(repo, "alice")
 
 		ids, err := r.ResolveMentionedUserIDs([]string{
 			"https://example.com/users/alice",
@@ -4924,6 +4943,7 @@ func TestResolveMentionedUserIDs(t *testing.T) {
 func TestIngestNote_SpecifiedDMPopulatesMentionsAndVisibleUserIDs(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
 	// alice はローカル mk-A のユーザー (URI = https://example.com/users/alice)
+	plantLocalUsers(repo, "alice")
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
@@ -4952,6 +4972,7 @@ func TestIngestNote_SpecifiedDMPopulatesMentionsAndVisibleUserIDs(t *testing.T) 
 func TestIngestNote_NonSpecifiedSkipsVisibleUserIDs(t *testing.T) {
 	// public visibility なら VisibleUserIDs は埋めない (空のまま)。
 	repo := testutil.NewMockUserRepository()
+	plantLocalUsers(repo, "alice")
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
@@ -4985,6 +5006,7 @@ func TestIngestNote_MentionsComeFromTagsOnly(t *testing.T) {
 	repo.Users["bob-local-id"] = &model.User{ID: "bob-local-id", Username: "bob", UsernameLower: "bob"}
 	remote := "remote.example"
 	repo.Users["carol-remote-id"] = &model.User{ID: "carol-remote-id", Username: "carol", UsernameLower: "carol", Host: &remote}
+	plantLocalUsers(repo, "alice")
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
@@ -5045,6 +5067,7 @@ func TestIngestNote_SpecifiedRecipientsIncludeCC(t *testing.T) {
 	remote := "remote.example"
 	carolURI := "https://remote.example/users/carol"
 	repo.Users["carol-remote-id"] = &model.User{ID: "carol-remote-id", Username: "carol", UsernameLower: "carol", Host: &remote, URI: &carolURI}
+	plantLocalUsers(repo, "bob", "dave")
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
@@ -5075,6 +5098,7 @@ func TestIngestNote_MentionsIncludeRecipientsAndReplyAuthor(t *testing.T) {
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
 	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	plantLocalUsers(repo, "carol", "dave")
 	noteRepo.Notes["bobnote"] = &model.Note{ID: "bobnote", UserID: "bob", Visibility: model.NoteVisibilitySpecified, VisibleUserIDs: model.StringArray{"carol"}}
 
 	body := []byte(`{ "@context": "https://www.w3.org/ns/activitystreams",
@@ -5156,6 +5180,7 @@ func TestIngestNote_MentionLimitCountsReplyTargetAuthor(t *testing.T) {
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
 		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+		plantNumberedLocalUsers(repo, corenote.DefaultMentionLimit)
 		author, err := r.ResolveActor("https://remote.example/users/alice")
 		require.NoError(t, err)
 		return r, noteRepo, author
@@ -5194,6 +5219,7 @@ func TestIngestNote_MentionLimitCountsSpecifiedRecipients(t *testing.T) {
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
 	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	plantNumberedLocalUsers(repo, corenote.DefaultMentionLimit+1)
 
 	mkBody := func(n int) []byte {
 		to := make([]string, 0, n)
@@ -5252,6 +5278,7 @@ func TestUpdateRemoteNote_MentionsRecomputed(t *testing.T) {
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
 	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	plantLocalUsers(repo, "alice")
 
 	// 既存リモートノート (mentions 空)
 	host := "remote.example"
@@ -5285,6 +5312,7 @@ func TestUpdateRemoteNote_MentionsRecomputed(t *testing.T) {
 func TestUpdateRemoteNote_MentionsComeFromTagsOnly(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
 	repo.Users["bob-local-id"] = &model.User{ID: "bob-local-id", Username: "bob", UsernameLower: "bob"}
+	plantLocalUsers(repo, "alice")
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
@@ -5332,6 +5360,7 @@ func TestUpdateRemoteNote_DropsTooManyMentions(t *testing.T) {
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
 		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+		plantNumberedLocalUsers(repo, corenote.DefaultMentionLimit+1)
 		host := "remote.example"
 		uri := "https://remote.example/notes/edit-limit"
 		original := "original"
@@ -5393,9 +5422,24 @@ func TestExceedsRemoteMentionLimit(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, federation.ExceedsRemoteMentionLimit(tc.note, tc.mentions, tc.hrefs))
+			assert.Equal(t, tc.want, federation.ExceedsRemoteMentionLimit(tc.note, tc.mentions, tc.hrefs, limit))
 		})
 	}
+	// 本家の条件は `count > 0 && count > mentionLimit` なので、mentionLimit=0 は
+	// メンション 1 件から弾き、メンションの無い note は通す。
+	t.Run("limit zero rejects a single mention", func(t *testing.T) {
+		assert.True(t, federation.ExceedsRemoteMentionLimit(&model.Note{UserID: self}, ids("m", 1), nil, 0))
+	})
+	t.Run("limit zero rejects a single raw href", func(t *testing.T) {
+		assert.True(t, federation.ExceedsRemoteMentionLimit(&model.Note{UserID: self}, nil, ids("h", 1), 0))
+	})
+	t.Run("limit zero passes a note without mentions", func(t *testing.T) {
+		assert.False(t, federation.ExceedsRemoteMentionLimit(&model.Note{UserID: self}, nil, nil, 0))
+	})
+	t.Run("custom limit is honoured", func(t *testing.T) {
+		assert.False(t, federation.ExceedsRemoteMentionLimit(&model.Note{UserID: self}, ids("m", 3), nil, 3))
+		assert.True(t, federation.ExceedsRemoteMentionLimit(&model.Note{UserID: self}, ids("m", 4), nil, 3))
+	})
 }
 
 // 同一 URI への並行 ResolveActor 呼び出しは singleflight で 1 回の HTTP
@@ -6948,6 +6992,7 @@ func TestIngestNote_MentionLimitBoundaryAccepted(t *testing.T) {
 		if i > 1 {
 			tagJSON += ","
 		}
+		plantLocalUsers(repo, "u"+strconv.Itoa(i))
 		tagJSON += `{"type": "Mention", "href": "https://example.com/users/u` + strconv.Itoa(i) + `"}`
 	}
 	body := []byte(`{ "@context": "https://www.w3.org/ns/activitystreams", 

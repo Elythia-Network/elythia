@@ -906,6 +906,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	noteMentionResolver.SetHostBlockChecker(instanceService)
 	federationResolver.SetSilencedHostChecker(instanceService)      // #2106 N14: silenced host の public note を home 降格
 	federationResolver.SetMediaSilencedHostChecker(instanceService) // #3218: media silenced host の添付をセンシティブに
+	// 受信した note の mentionLimit を投稿者 (リモート) の role policy から引く (#3330)。
+	// 未配線だと既定値 20 固定になり、base policy やリモート向けのロールが効かない。
+	federationResolver.SetRolePolicyProvider(roleService)
 	// 連合のルール (#3090)。ホスト単位の設定 (上の hostBlocker / silenced) に
 	// 追加の層として重ねる。activity のルールは inbox の署名検証の後
 	// (dispatchActivity の入口)、投稿のルールは取り込みの全経路で評価する。
@@ -4521,6 +4524,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"サイレンスしたホストからのフォローが承認なしで通り、followers 限定ノートが配送される"},
 		{"resolver.silencedHostChecker", federationResolver.HasSilencedHostChecker(),
 			"silenced instance の remote public note が home へ降格されず public timeline に出る"},
+		{"resolver.rolePolicyProvider", federationResolver.HasRolePolicyProvider(),
+			"受信した note の mentionLimit が既定値 20 固定になり、base policy やリモートに当たるロールで絞った上限が効かない (#3330)"},
 		// #3330: follow 系の main stream / Webhook と blocking/create・delete の
 		// 利用者を本家の UserDetailedNotMe に揃える packer。外すと従来の形に落ちる。
 		{"following.userPacker", followingService.HasUserPacker(),

@@ -449,6 +449,9 @@ type Resolver struct {
 	// silencedChecker は remote note ingest 時に meta.silencedHosts 該当 host の
 	// public note を home に降格する判定に使う (#2106 N14)。未配線時は降格しない。
 	silencedChecker SilencedHostChecker
+	// rolePolicyProvider は受信した note の mentionLimit を投稿者の role policy
+	// から引くのに使う (#3330)。nil なら corenote.DefaultMentionLimit。
+	rolePolicyProvider RolePolicyProvider
 
 	// prohibitedWordsProvider は meta.prohibitedWords の読み取り元。nil なら
 	// hostBlocker から optional interface で拾う (prohibitedWords() を参照)。
@@ -1155,6 +1158,11 @@ func (r *Resolver) resolveActorOnceWithID(uri string, allowCrossHost bool, preas
 	if shared := remoteURIValue(actor.ID, "user.sharedInbox", remoteSharedInbox(actor)); shared != "" {
 		user.SharedInbox = &shared
 	}
+	// 受信したノートの可視性の判定 (deriveVisibility) が followersUri と完全一致で
+	// 比べるので保存する (本家 ApPersonService.createPerson の followersUri、#3330)。
+	if followers := remoteURIValue(actor.ID, "user.followersUri", actor.Followers.String()); followers != "" {
+		user.FollowersURI = &followers
+	}
 	if featured := remoteURIValue(actor.ID, "user.featured", actor.Featured.String()); featured != "" {
 		user.Featured = &featured
 	}
@@ -1687,6 +1695,12 @@ func (r *Resolver) refreshActor(existing *model.User, uri string, skipFeatured b
 		fields["sharedInbox"] = &shared
 		existing.SharedInbox = &shared
 	}
+	// 本家 updatePerson と同じく、actor が followers を出していなければ既存値を残す
+	// (`person.followers ? getApId(...) : undefined`)。
+	if followers := remoteURIValue(actor.ID, "user.followersUri", actor.Followers.String()); followers != "" {
+		fields["followersUri"] = &followers
+		existing.FollowersURI = &followers
+	}
 	if featured := remoteURIValue(actor.ID, "user.featured", actor.Featured.String()); featured != "" {
 		fields["featured"] = &featured
 		existing.Featured = &featured
@@ -2101,6 +2115,10 @@ func (r *Resolver) fetchActor(uri string, allowCrossHost bool) (*activitypub.Per
 		slog.Warn("federation: dropping endpoints.sharedInbox with different host",
 			"uri", uri, "sharedInbox", actor.Endpoints.SharedInbox.String())
 		actor.Endpoints.SharedInbox = ""
+	}
+	if name, ok := actorCollectionsOnActorHost(&actor); !ok {
+		slog.Warn("federation: actor collection host mismatch", "uri", uri, "collection", name)
+		return nil, ErrInvalidActor
 	}
 	// preferredUsername は user.username / usernameLower (varchar(128) NOT NULL)
 	// にそのまま入る。upstream validateActor と同じ条件で弾く (#2662)。素通しすると
@@ -3044,7 +3062,7 @@ func (r *Resolver) ingestNoteWithCreated(body []byte, deliveringActorURI string,
 		UserID:     actor.ID,
 		UserHost:   actor.Host,
 		URI:        &noteURI,
-		Visibility: deriveVisibility(apNote.To, apNote.CC),
+		Visibility: deriveVisibility(actor, apNote.To, apNote.CC),
 	}
 	// HTML 版の permalink。Mastodon 系では `id` (AP object) と `url` (Web ページ)
 	// が別なので、保存しないとクライアントが原文ページへ辿れない (#2729)。
@@ -3277,16 +3295,16 @@ func (r *Resolver) ingestNoteWithCreated(body []byte, deliveringActorURI string,
 	// 経路から除外することで、罠の inbox job が永続蓄積するのを防ぐ。
 	// upstream #17576: 制限判定は「解決できたユーザー数」でなく、remote が宣言した
 	// raw mention 数 (AP tag の Mention href ユニーク数) との max で行う。一部しか
-	// 解決できなくても大量 mention をすり抜けさせない。limit 値は
-	// corenote.DefaultMentionLimit (= 20)。local create path は role policy の
-	// 値を優先するようになったが (#2321)、こちらはリモートユーザーが対象で
-	// ローカルの role を持たないため既定値のみで判定する。
+	// 解決できなくても大量 mention をすり抜けさせない。limit 値は投稿者の role
+	// policy の mentionLimit。本家は投稿者がリモートでも roleService.getUserPolicies
+	// を引くので、base policy の変更や、リモートの利用者に割り当てた / 条件で当たる
+	// ロールが効く (#3330。以前は既定値 20 固定だった)。
 	//
 	// 本家の「解決できたユーザー」(mentionedUsers) は mention に加えて、返信先の
 	// 作者 (自分への返信を除く) と specified の宛先を含む (NoteCreateService.create)。
 	// 宛先を数えないと、Mention tag を持たない DM で宛先を何人でも並べられる
 	// (#3330)。そのため宛先の解決を判定より前に行う。
-	if exceedsRemoteMentionLimit(note, note.Mentions, tagHrefs) {
+	if r.exceedsMentionLimit(note, note.Mentions, tagHrefs) {
 		return nil, false, corenote.ErrContainsTooManyMentions
 	}
 	// AP Note Tag配列からカスタム絵文字を抽出してDBにupsert
@@ -3741,7 +3759,7 @@ func (r *Resolver) UpdateRemoteNote(body []byte, actorURI string) (*model.Note, 
 	// 投げてから Update で Mention を増やす」で取り込み時の判定 (#17167 / #17576) を
 	// 素通りできる。数え方は IngestNote と同じ。弾くときは禁止語と同じく更新を
 	// 捨てて ack する (書き込みより前に判定する理由も同じ)。
-	if exceedsRemoteMentionLimit(existing, mentions, tagHrefs) {
+	if r.exceedsMentionLimit(existing, mentions, tagHrefs) {
 		slog.Info("federation: dropping inbound note update with too many mentions",
 			"uri", truncateRunes(apNote.ID, noteURIMaxRunes), "noteId", existing.ID)
 		return existing, nil
@@ -3884,9 +3902,37 @@ func (r *Resolver) UpdateRemoteNote(body []byte, actorURI string) (*model.Note, 
 	return existing, nil
 }
 
-// ExtractLocalUserID returns the user ID for a URI matching the local
-// /users/{id} pattern, or "" if the URI does not match.
+// ExtractLocalUserID returns the user ID a local `{url}/users/...` URI names
+// the way upstream ApPersonService.fetchPerson and ApInboxService.flag read
+// it: the last path segment (`uri.split('/').pop()`). It returns "" for a URI
+// outside `{url}/users/`.
+//
+// 以前は `/users/{id}` の直後で切っていたので、`/users/{id}/followers` のような
+// ローカルの利用者の collection の URI がその利用者に解決され、メンション・
+// specified の宛先・通報の対象になっていた。本家は最後の段 (`followers`) を
+// ID として引くので誰にも解決しない (#3330)。Accept の actor のように本家が
+// getUserFromApId で読む箇所と、本家に対応の無い chat の宛先は
+// localUserIDFromAPID を使う。
 func (r *Resolver) ExtractLocalUserID(uri string) string {
+	if r.urls == nil {
+		return ""
+	}
+	prefix := r.urls.UserURI("")
+	if !strings.HasPrefix(uri, prefix) {
+		return ""
+	}
+	rest := uri[len(prefix):]
+	if i := strings.LastIndex(rest, "/"); i >= 0 {
+		rest = rest[i+1:]
+	}
+	return rest
+}
+
+// localUserIDFromAPID returns the user ID a local `{url}/users/{id}[/...]` URI
+// names the way upstream ApDbResolverService.getUserFromApId reads it: the
+// path segment right after `users`, ignoring the rest (parseUri). It returns
+// "" for a URI outside `{url}/users/`.
+func (r *Resolver) localUserIDFromAPID(uri string) string {
 	if r.urls == nil {
 		return ""
 	}
@@ -4002,12 +4048,18 @@ func (r *Resolver) resolveMentionedUserIDs(hrefs []string) ([]string, error) {
 	if len(hrefs) == 0 {
 		return nil, nil
 	}
+	existingLocal, err := r.existingLocalUserIDs(hrefs)
+	if err != nil {
+		return nil, err
+	}
 	seen := make(map[string]struct{}, len(hrefs))
 	out := make([]string, 0, len(hrefs))
 	for _, href := range hrefs {
 		var id string
 		if local := r.ExtractLocalUserID(href); local != "" {
-			id = local
+			if _, ok := existingLocal[local]; ok || existingLocal == nil {
+				id = local
+			}
 		} else if r.userRepo != nil {
 			u, err := r.userRepo.FindByURI(href)
 			switch {
@@ -4290,78 +4342,6 @@ func remoteEmojiLicense(v *string) *string {
 	return &out
 }
 
-// deriveVisibility maps an AS to/cc audience pair to a Misskey visibility,
-// mirroring upstream ApAudienceService.parseAudience (#1864):
-//
-//   - to に Public があれば public
-//   - cc に Public があれば home
-//   - to / cc のいずれかに followers があれば followers
-//   - それ以外 (specific actor 列挙) は specified
-//
-// Public は upstream isPublic と同じく full IRI / as:Public / 裸 Public の 3 形式を
-// 受ける。followers collection の判定は upstream isFollowers のような actor の
-// followersUri 厳密一致ではなく /followers サフィックスで近似する。このため別 actor の
-// followers URL が to/cc に入っていると upstream の specified でなく followers になる等の
-// 差は出るが、to/cc は note の author (Announce では announcer) が自分の note/boost に
-// 対して設定するものなので、緩めても自分のコンテンツの可視性が変わるだけで第三者の
-// note を露出させることはない。
-//
-// #2106 L31 (documented limitation): mk-go は remote user の followersUri を保持しないため
-// upstream ApAudienceService.isFollowers (`id === actor.followersUri ?? actor.uri+'/followers'`)
-// の厳密一致を行えず suffix heuristic で近似する。exotic audience (他人の followers collection
-// を to/cc に含む note) で upstream が specified に倒すところを followers に倒す微差が残る
-// (#1864 の既知トレードオフ)。将来 followersUri を保持・参照できるようになったら厳密化する。
-func deriveVisibility(to, cc []string) model.NoteVisibility {
-	hasFollowers := func(list []string) bool {
-		for _, v := range list {
-			if strings.HasSuffix(v, "/followers") {
-				return true
-			}
-		}
-		return false
-	}
-	if hasPublicAudience(to) {
-		return model.NoteVisibilityPublic
-	}
-	if hasPublicAudience(cc) {
-		return model.NoteVisibilityHome
-	}
-	if hasFollowers(to) || hasFollowers(cc) {
-		return model.NoteVisibilityFollowers
-	}
-	return model.NoteVisibilitySpecified
-}
-
-// exceedsRemoteMentionLimit reports whether a remote note with the given
-// resolved mentions and raw Mention tag hrefs is over the mention limit.
-//
-// Mirrors upstream NoteCreateService.create for AP notes: the count is the
-// larger of the distinct resolved users (`mentionedUsers` = the mentions, the
-// reply target's author unless it is the note's author, and for a specified
-// note its recipients) and the number of distinct Mention hrefs
-// (`apMentionRawCount`, #17576). n must carry ReplyUserID, Visibility and
-// VisibleUserIDs.
-func exceedsRemoteMentionLimit(n *model.Note, mentions, tagHrefs []string) bool {
-	rawTagSet := make(map[string]struct{}, len(tagHrefs))
-	for _, h := range tagHrefs {
-		rawTagSet[h] = struct{}{}
-	}
-	mentionedUsers := make(map[string]struct{}, len(mentions))
-	for _, id := range mentions {
-		mentionedUsers[id] = struct{}{}
-	}
-	if n.ReplyUserID != nil && *n.ReplyUserID != "" && *n.ReplyUserID != n.UserID {
-		mentionedUsers[*n.ReplyUserID] = struct{}{}
-	}
-	if n.Visibility == model.NoteVisibilitySpecified {
-		for _, id := range n.VisibleUserIDs {
-			mentionedUsers[id] = struct{}{}
-		}
-	}
-	effective := max(len(mentionedUsers), len(rawTagSet))
-	return corenote.DefaultMentionLimit > 0 && effective > corenote.DefaultMentionLimit
-}
-
 // withImplicitMentions appends to mentions the users upstream
 // NoteCreateService.create adds to mentionedUsers besides the Mention tags: the
 // reply target's author (unless it is the note's author), then for a specified
@@ -4383,15 +4363,7 @@ func withImplicitMentions(n *model.Note, mentions model.StringArray) model.Strin
 // de-duplicated. Mirrors upstream ApAudienceService.parseAudience
 // (`unique(concat([toGroups.other, ccGroups.other]))`).
 func specifiedAudience(actor *model.User, to, cc []string) []string {
-	followers := ""
-	if actor != nil {
-		switch {
-		case actor.FollowersURI != nil && *actor.FollowersURI != "":
-			followers = *actor.FollowersURI
-		case actor.URI != nil && *actor.URI != "":
-			followers = *actor.URI + "/followers"
-		}
-	}
+	followers := authorFollowersURI(actor)
 	var out []string
 	seen := make(map[string]struct{})
 	for _, list := range [][]string{to, cc} {

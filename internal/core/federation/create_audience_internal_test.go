@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/shiroha-a/mk/internal/activitypub"
+	"github.com/shiroha-a/mk/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -50,7 +51,7 @@ func TestMergeCreateAudience(t *testing.T) {
 		assert.Equal(t, []string{followers}, []string(note.To))
 		assert.Equal(t, []string{activitypub.Public}, []string(note.CC))
 		// union された to/cc から home が導出される (followers in to + Public in cc)。
-		assert.Equal(t, "home", string(deriveVisibility(note.To, note.CC)))
+		assert.Equal(t, "home", string(deriveVisibility(remoteActor(actor), note.To, note.CC)))
 	})
 
 	t.Run("union_dedups_and_preserves_activity_then_object_order", func(t *testing.T) {
@@ -90,7 +91,7 @@ func TestMergeCreateAudience(t *testing.T) {
 
 		note := decodeMergedNote(t, mergeCreateAudience(act))
 		assert.Equal(t, []string{activitypub.Public}, []string(note.To))
-		assert.Equal(t, "public", string(deriveVisibility(note.To, note.CC)))
+		assert.Equal(t, "public", string(deriveVisibility(remoteActor(actor), note.To, note.CC)))
 	})
 
 	// upstream の parseAudience は getApIds -> getApId なので `{"id": ...}` 形式の
@@ -113,7 +114,7 @@ func TestMergeCreateAudience(t *testing.T) {
 
 		note := decodeMergedNote(t, mergeCreateAudience(act))
 		assert.Equal(t, []string{activitypub.Public, followers}, []string(note.To))
-		assert.Equal(t, "public", string(deriveVisibility(note.To, note.CC)))
+		assert.Equal(t, "public", string(deriveVisibility(remoteActor(actor), note.To, note.CC)))
 	})
 
 	// 読めない要素は落とす。upstream は getApId が throw して note ごと reject
@@ -196,7 +197,7 @@ func TestMergeCreateAudience(t *testing.T) {
 		merged := mergeCreateAudience(act)
 		assert.Equal(t, []byte(obj), []byte(merged))
 		note := decodeMergedNote(t, merged)
-		assert.Equal(t, "public", string(deriveVisibility(note.To, note.CC)))
+		assert.Equal(t, "public", string(deriveVisibility(remoteActor(actor), note.To, note.CC)))
 	})
 
 	t.Run("empty_object_returns_input", func(t *testing.T) {
@@ -282,32 +283,64 @@ func TestEncodeAudienceIfChanged(t *testing.T) {
 	})
 }
 
+// remoteActor returns a remote user whose actor URI is uri and whose
+// followersUri is unknown.
+func remoteActor(uri string) *model.User {
+	host := "remote.example"
+	return &model.User{ID: "remote-" + uri, URI: &uri, Host: &host}
+}
+
 // TestDeriveVisibility seals the parseAudience-faithful mapping (#1864):
 // to-Public→public, cc-Public→home (no followers-in-to requirement),
-// followers in to OR cc→followers, else specified. Also covers the
-// as:Public / bare Public aliases upstream isPublic accepts.
+// the author's own followers collection in to OR cc→followers, else
+// specified. Also covers the as:Public / bare Public aliases upstream
+// isPublic accepts.
 func TestDeriveVisibility(t *testing.T) {
-	const followers = "https://remote.example/users/alice/followers"
+	// Mastodon 形式: actor が /users/alice、followers は uri + "/followers"。
+	const mastodonActor = "https://remote.example/users/alice"
+	const mastodonFollowers = mastodonActor + "/followers"
+	// Misskey 形式: actor が /users/<id>、followers も uri + "/followers"。
+	const misskeyActor = "https://misskey.example/users/9abcdefghi"
+	const misskeyFollowers = misskeyActor + "/followers"
+	// followersUri が uri + "/followers" と異なる実装。
+	const customActor = "https://blog.example/author/carol"
+	const customFollowers = "https://blog.example/wp-json/activitypub/1.0/actors/1/followers"
+	custom := remoteActor(customActor)
+	cf := customFollowers
+	custom.FollowersURI = &cf
+	// 他人の followers collection。本家 isFollowers は一致しないので other に入れる。
+	const otherFollowers = "https://remote.example/users/bob/followers"
+
+	mastodon := remoteActor(mastodonActor)
 	cases := []struct {
-		name string
-		to   []string
-		cc   []string
-		want string
+		name  string
+		actor *model.User
+		to    []string
+		cc    []string
+		want  string
 	}{
-		{"to has Public", []string{activitypub.Public}, []string{followers}, "public"},
-		{"unlisted: followers in to, Public in cc", []string{followers}, []string{activitypub.Public}, "home"},
-		{"cc-only Public, no followers in to", nil, []string{activitypub.Public}, "home"},
-		{"cc-only Public with mention in to", []string{"https://x/u1"}, []string{activitypub.Public}, "home"},
-		{"followers in to only", []string{followers}, nil, "followers"},
-		{"followers in cc only", nil, []string{followers}, "followers"},
-		{"specified: only mentions", []string{"https://x/u1"}, nil, "specified"},
-		{"empty audience", nil, nil, "specified"},
-		{"as:Public alias in to", []string{"as:Public"}, nil, "public"},
-		{"bare Public alias in cc", nil, []string{"Public"}, "home"},
+		{"to has Public", mastodon, []string{activitypub.Public}, []string{mastodonFollowers}, "public"},
+		{"unlisted: followers in to, Public in cc", mastodon, []string{mastodonFollowers}, []string{activitypub.Public}, "home"},
+		{"cc-only Public, no followers in to", mastodon, nil, []string{activitypub.Public}, "home"},
+		{"cc-only Public with mention in to", mastodon, []string{"https://x/u1"}, []string{activitypub.Public}, "home"},
+		{"mastodon followers in to only", mastodon, []string{mastodonFollowers}, nil, "followers"},
+		{"mastodon followers in cc only", mastodon, nil, []string{mastodonFollowers}, "followers"},
+		{"misskey followers in to", remoteActor(misskeyActor), []string{misskeyFollowers}, nil, "followers"},
+		{"stored followersUri in to", custom, []string{customFollowers}, nil, "followers"},
+		{"uri-derived followers ignored when followersUri is stored", custom, []string{customActor + "/followers"}, nil, "specified"},
+		{"another actor's followers collection is not followers", mastodon, []string{otherFollowers}, nil, "specified"},
+		{"another actor's followers in cc is not followers", mastodon, []string{"https://x/u1"}, []string{otherFollowers}, "specified"},
+		{"followers with trailing slash is not followers", mastodon, []string{mastodonFollowers + "/"}, nil, "specified"},
+		{"nil actor never matches followers", nil, []string{mastodonFollowers}, nil, "specified"},
+		{"actor without uri never matches followers", &model.User{}, []string{"/followers"}, nil, "specified"},
+		{"specified: only mentions", mastodon, []string{"https://x/u1"}, nil, "specified"},
+		{"empty audience", mastodon, nil, nil, "specified"},
+		{"as:Public alias in to", mastodon, []string{"as:Public"}, nil, "public"},
+		{"bare Public alias in cc", mastodon, nil, []string{"Public"}, "home"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, string(deriveVisibility(tc.to, tc.cc)))
+			assert.Equal(t, tc.want, string(deriveVisibility(tc.actor, tc.to, tc.cc)))
 		})
 	}
 }
