@@ -96,7 +96,8 @@ func (r *instanceRepository) UpdateFields(host string, fields map[string]any) er
 // usersCount / notesCount / followingCount / followersCount などの集計列向け。
 //
 // 減らすときは 0 で止める (#3330)。notesCount / usersCount は #3330 まで mk-go が
-// 動かしておらず、既存の行は実件数より小さい (notesCount は 0 のまま)。そこへ
+// 動かしておらず、既存の行は実件数より小さい (notesCount は 0 のまま。
+// cmd/backfill-instance-counts で数え直すまで)。そこへ
 // 更新前に取り込んだ投稿の削除が来ると負になる。note の IncrementCount (#3291)
 // と同じ扱い。
 func (r *instanceRepository) IncrementCount(host, column string, delta int) error {

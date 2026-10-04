@@ -434,7 +434,8 @@ CLAUDE.md の Section 1 / 2 にあった表とツリーを、#3248 でここへ�
 │   ├── backfill-note-tags/ # note.tags を NFKC 正規化し直す一回限りのバッチ
 │   ├── backfill-remote-host/ # 保存済みリモート host を punycode 正規化し直すバッチ
 │   ├── backfill-emoji-system-file/ # 承認済み自作絵文字の画像を system 所有へ複製し直すバッチ
-│   └── backfill-avatar-public-url/ # アイコン / バナーの URL を公開用へ寄せ直すバッチ
+│   ├── backfill-avatar-public-url/ # アイコン / バナーの URL を公開用へ寄せ直すバッチ
+│   └── backfill-instance-counts/ # instance の notesCount / usersCount を数え直すバッチ
 ├── internal/               # 全26ディレクトリ (`git ls-tree -d HEAD internal/ | wc -l`)
 │   ├── config/             # 設定ローダー（Misskey YAML互換）
 │   ├── db/                 # GORM の PostgreSQL 接続配線

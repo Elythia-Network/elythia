@@ -725,6 +725,99 @@ SQL migration として書けない一回限りの正規化は、独立したバ
 **稼働中の本体プロセスに影響しない使い捨てコンテナ**で流す。entrypoint を差し替えるのは
 `docker-compose.yml` の `migrate` サービスと同じ手法。
 
+### `backfill-instance-counts` — instance の `notesCount` / `usersCount` を数え直す (#3330)
+
+`instance.notesCount` / `usersCount` (`federation/instances` の `notesCount` / `usersCount`、
+`+notes` / `+users` の並び順) は、#3330 まで mk-go が動かしていなかった。それより前に
+mk-go が作った instance 行は **`notesCount` が 0、`usersCount` が行を作ったときの 1 のまま**
+残っている。#3330 からリモートの投稿・利用者の取り込みで増減を積むようになったが、
+積むのは差分なので過去の分は埋まらない。このバッチで実件数へ数え直す。
+
+**数え方は本家の instance chart の total と同じ** (`chart/charts/instance.ts` の
+`tickMajor`)。
+
+| 列 | 数えるもの |
+|---|---|
+| `notesCount` | `note."userHost"` がその host の行。renote も含む |
+| `usersCount` | `user.host` がその host の行。削除済み (`isDeleted`)・凍結中も含む |
+
+本家の集計列は累積値で、投稿の作成 (`NoteCreateService`、renote を含む全経路) で足し、
+`NoteDeleteService` で引き、利用者は `ApPersonService.createPerson` で足すだけで引かない。
+リモートのアカウント削除 (`DeleteAccountProcessorService`) は投稿も利用者の行も直接
+消すので、**どちらの列も引かない**。長く動いた本家の値は実件数より大きくなりうるが、
+その履歴は DB に残らないので復元できない。そのため本家自身が chart に使う
+「いまの実件数」を正とする。**`meta.enableStatsForFederatedInstances` に関係なく
+数え直す** (本家は設定が false の間は積まない)。
+
+instance 行の無い host は数えない (行を作らない)。値が既に正しい行は書かない
+(`IS DISTINCT FROM` で外れる) ので、何度流しても同じ結果になる。
+
+```bash
+# まず差分を見る (書き込まない)
+docker compose run --rm --no-deps --entrypoint /app/backfill-instance-counts app \
+  -config /app/.config/default.yml -dry-run
+
+# 実行
+docker compose run --rm --no-deps --entrypoint /app/backfill-instance-counts app \
+  -config /app/.config/default.yml -batch 100 -sleep-ms 200
+```
+
+**`--no-deps` を付ける** (理由は `backfill-emoji-system-file` と同じ)。UDS 構成では
+サービス名が `mkgo` になる (`docker compose -f compose.uds.yaml run --rm --no-deps
+--entrypoint /app/backfill-instance-counts mkgo ...`)。**バイナリが入るのはこのバッチを
+含む版のイメージから**なので、先にイメージを作り直す。バイナリ直接実行なら
+`go run ./cmd/backfill-instance-counts -config .config/default.yml -dry-run`。
+
+**無指定で書き込み、`-dry-run` で抑止する**側の作法 (`backfill-avatar-public-url` と同じ)。
+
+出力は差分のある行ごとに `instance <host> notesCount <旧> -> <新> usersCount <旧> -> <新>`、
+最後に `done [...]: scanned=<走査した instance 行> changed=<差分のあった行>
+notesCountDelta=<新 - 旧の合計> usersCountDelta=<同>`。本実行の `changed` は書いた行数。
+中断したら `-from <最後に出た cursor>` で続きから流せる (失敗したバッチは 1 本の
+UPDATE なので、まるごと書かれていない)。
+
+**TS から引き継いだ DB では、値が下がる行 (差分がマイナス) が出るのが正常。** TS 版が
+積んだ累積値は、リモートのアカウント削除で投稿と利用者の行が消えても引かれないので、
+実件数より大きく残っている。このバッチはそれを実件数へ下げる。
+
+**#3330 を含む版に上げてから流す。** それより前の版で流すと、値は直っても以後の
+増減を積まないので、また実件数から離れていく。
+
+**負荷とロック。** instance 行を id 順に `-batch` 件ずつ区切り、1 バッチを
+**数える SELECT と書く UPDATE の 2 文**で処理する。件数は host ごとに
+`note."userHost"` / `user.host` の index の該当範囲だけを読む (note の全件走査には
+ならない。ローカルの投稿は読まない。どちらの index も本家の初期 migration が作り、
+mk-go の `000001` も作るので、TS から引き継いだ DB でも mk-go 生まれの DB でもある)。
+数える文は行ロックを取らない。書く文は数えた値を `VALUES` で受け取るだけで集計を
+含まず、値が変わる行だけを書くので、instance 行のロックを持つのはその短い UPDATE の
+間だけになる (その間、同じ行を更新する処理 — 受信時の `latestRequestReceivedAt` の
+更新や集計列の書き込み — は待たされる)。**1 本の `UPDATE ... FROM (集計)` にしない**
+こと: `MATERIALIZED` の CTE でも planner が Nested Loop を選ぶと「1 行数えて書く →
+次を数える」が交互に進み、先に書いた行のロックを残りの集計の間ずっと握る。
+読む量の目安は「リモートの投稿の総数 + リモートの利用者の総数」の index 範囲で、
+1 バッチの数える時間はその中で最も投稿の多い host に引っ張られる
+(手元の計測: 合成した note 500 万行・instance 5000 行で、投稿 100 万件の host を含む
+100 件分の集計が 64ms、index がキャッシュに載り visibility map が埋まった状態。本番では
+ディスク読みと heap の確認でこれより遅くなる)。`-sleep-ms` で間を空けられる。
+
+**稼働中に流すと、少しずれうる。** 本体はリモートの投稿・利用者の増減を 30 秒の窓で
+合算してから書く (`instance.CounterBuffer`)。バッチは集計した時点の件数を書くので、
+
+- **集計より前に取り込まれ、まだ窓の中にある分は二重に数えられる** (集計に入り、窓の
+  書き込みでもう一度足される)
+- **集計の後・書き込みの前に窓が書いた分は失われる** (バッチの値で上書きされる。
+  書く時点で値が既に一致していればその行は書かない)
+
+どちらも 1 host あたり「窓 1 つ分 + 1 バッチの時間」のあいだの増減が上限で、
+集計列は best-effort の統計なので許容している。気になるなら空いている時間帯に
+流すか、終わってから `-dry-run` をもう一度当てて差分を見る (もう一度流しても同じ
+大きさのずれが起こりうるので、0 にならないことはある)。
+
+**mk-go の再起動と重ねない。** 起動時の `RecomputeFollowCounts` も instance の複数行を
+1 本の UPDATE で書くので、バッチの書き込みと重なると行を取る順が食い違い、まれに
+deadlock で片方が失敗する (バッチ側は id の順に渡しているが、行を取る順は planner
+次第)。バッチが落ちたら `-from` で流し直せばよい。
+
 ### `backfill-avatar-public-url` — アイコン / バナーの URL を公開用へ寄せ直す
 
 `user.avatarUrl` / `user.bannerUrl` は drive ファイルの**原本**を指していた。原本は
@@ -855,7 +948,8 @@ compose の `run` はサービスの volume をそのまま引き継ぐ。別の
 冪等。途中で失敗しても、作れた複製の分だけ進んだ状態から再実行して安全。
 
 **既定は dry-run で、書き込みには `-apply` が要る。** 姉妹バッチ
-(`backfill-remote-host` / `backfill-note-tags` / `backfill-avatar-public-url`) は
+(`backfill-remote-host` / `backfill-note-tags` / `backfill-avatar-public-url` /
+`backfill-instance-counts`) は
 **逆** (無指定で書き込み、`-dry-run` で抑止) なので、手が覚えているほうで打たないこと。`-dry-run` と `-apply`
 を両方渡すと落ちる。
 
