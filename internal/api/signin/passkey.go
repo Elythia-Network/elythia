@@ -1,9 +1,11 @@
 package signin
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/shiroha-a/mk/internal/api/apierr"
 	"github.com/shiroha-a/mk/internal/model"
 	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/shiroha-a/mk/internal/server/middleware"
 )
 
 // SigninWithPasskey handles POST /api/signin-with-passkey.
@@ -26,20 +29,19 @@ import (
 //     から返ってきた assertion を検証する。成功すると `usePasswordLessLogin` が
 //     有効なユーザに対し signinResponse: { finished, id, i } を返す。
 func (h *Handler) SigninWithPasskey(c echo.Context) error {
-	var req struct {
-		Credential json.RawMessage `json:"credential"`
-		Context    string          `json:"context"`
-	}
-	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, errBody("ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+	credential, ctxRaw, err := readPasskeyBody(c)
+	if err != nil {
+		return err
 	}
 
 	if h.webauthnSvc == nil {
 		return c.JSON(http.StatusServiceUnavailable, errBody("5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
 
-	// Step 1: credential が無ければ challenge を発行する。
-	if len(req.Credential) == 0 {
+	// Step 1: credential が無ければ challenge を発行する。本家は `if
+	// (!credential)` なので、JS で falsy な値 (`null` / `false` / `0` / `""`)
+	// も無いものとして扱う (#3330)。
+	if !jsonTruthy(credential) {
 		ctxID, err := newPasskeyContext()
 		if err != nil {
 			return c.JSON(http.StatusInternalServerError, errBody("5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
@@ -68,24 +70,64 @@ func (h *Handler) SigninWithPasskey(c echo.Context) error {
 	// 素通しすると、この値が (a) **Redis のキーの一部**になり
 	// (`twofa:webauthn:passkey:<context>`)、(b) 失敗時に**そのままログへ出る**。
 	// どちらも未認証で任意長・任意バイト列を渡せる面なので、閉じておく。
-	if !validPasskeyContext(req.Context) {
+	//
+	// 本家は `typeof context !== 'string'` も同じ 400 で返す。以前は文字列で
+	// ない context を bind のエラーとして本家に無い独自の id (`ed1d7571-…`)
+	// で返していた (#3330)。
+	var passkeyCtx string
+	if json.Unmarshal(ctxRaw, &passkeyCtx) != nil || !validPasskeyContext(passkeyCtx) {
 		return c.JSON(http.StatusBadRequest, errBody("1658cc2e-4495-461f-aee4-d403cdf073c1"))
 	}
 
-	httpReq, err := wrapWebAuthnRequest(c.Request(), req.Credential)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, errBody("ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
-	}
+	httpReq := wrapWebAuthnRequest(c.Request(), credential)
 
-	user, cred, err := h.webauthnSvc.FinishPasskeyLogin(c.Request().Context(), req.Context, httpReq, h.resolvePasskeyUser)
+	user, cred, err := h.webauthnSvc.FinishPasskeyLogin(c.Request().Context(), passkeyCtx, httpReq, h.resolvePasskeyUser)
 	if err != nil {
 		// frontend には汎用 403 を返すが backend log には何で落ちたかを残す
 		// (#707 の調査用)。原因例: challenge mismatch / origin / RPID 不一致 /
 		// credential format problem / user_handle 解決失敗。
-		slog.Warn("signin: webauthn FinishPasskeyLogin failed", "context", req.Context, "err", err)
+		slog.Warn("signin: webauthn FinishPasskeyLogin failed", "context", passkeyCtx, "err", err)
 		return c.JSON(http.StatusForbidden, errBody("b18c89a7-5b5e-4cec-bb5b-0419f332d430"))
 	}
 	return h.finishPasskeySignin(c, user, cred)
+}
+
+// readPasskeyBody returns the raw `credential` and `context` values of a
+// signin-with-passkey body the way upstream reads `body['credential']` and
+// `body.context` off Fastify's request.body. A body that is not a JSON
+// object (an array, a string, a number, a boolean, null, a text/plain body
+// or no body) has neither value. It returns an error only for a JSON body
+// that is not valid JSON, which JSONBodyParse answers before the handler in
+// production.
+//
+// 本家は body の型を検査しない (endpoint-base の外なので ajv も通らない)。
+// 以前は c.Bind で struct に読み、配列の body や文字列でない context を独自の
+// id (`ed1d7571-…`) の 400 にしていたが、本家では配列や文字列の body は
+// credential が undefined になって challenge を返し、文字列でない context は
+// 1658cc2e の 400 になる (#3330)。
+// 本家で null や body 無しは `body['credential']` が TypeError で 500 になる。
+// mk-go はそれを再現せず、credential が無いものとして challenge を返す
+// (docs/divergence.md)。
+func readPasskeyBody(c echo.Context) (credential, ctx json.RawMessage, err error) {
+	req := c.Request()
+	if req.Body == nil || !middleware.IsJSONContentType(req.Header.Get(echo.HeaderContentType)) {
+		return nil, nil, nil
+	}
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, nil, echo.NewHTTPError(http.StatusBadRequest).SetInternal(err)
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return nil, nil, nil
+	}
+	if !json.Valid(body) {
+		return nil, nil, echo.NewHTTPError(http.StatusBadRequest, "invalid JSON body")
+	}
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(body, &obj) != nil {
+		return nil, nil, nil
+	}
+	return obj["credential"], obj["context"], nil
 }
 
 // resolvePasskeyUser is the PasskeyUserResolver passed into

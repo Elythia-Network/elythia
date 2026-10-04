@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"io"
 	"log/slog"
@@ -22,6 +23,7 @@ import (
 	miscsmtp "github.com/shiroha-a/mk/internal/misc/smtp"
 	"github.com/shiroha-a/mk/internal/model"
 	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/shiroha-a/mk/internal/server/middleware"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
@@ -180,7 +182,7 @@ func (h *Handler) Signin(c echo.Context) error {
 		McaptchaResponse    string `json:"m-captcha-response"`
 		TestcaptchaResponse string `json:"testcaptcha-response"`
 	}
-	if err := c.Bind(&req); err != nil || req.Username == "" {
+	if err := decodeSigninBody(c, &req); err != nil || req.Username == "" {
 		return c.JSON(http.StatusBadRequest, errBody("6cc579cc-885d-43d8-95c2-b8c7fc963280"))
 	}
 
@@ -299,7 +301,7 @@ func (h *Handler) SigninFlow(c echo.Context) error {
 		McaptchaResponse    string `json:"m-captcha-response"`
 		TestcaptchaResponse string `json:"testcaptcha-response"`
 	}
-	if err := c.Bind(&req); err != nil || req.Username == "" {
+	if err := decodeSigninBody(c, &req); err != nil || req.Username == "" {
 		return c.JSON(http.StatusBadRequest, errBody("6cc579cc-885d-43d8-95c2-b8c7fc963280"))
 	}
 
@@ -365,7 +367,7 @@ func (h *Handler) SigninFlow(c echo.Context) error {
 	// ない。許容すると、正しい password でも 403 (「パスワードが違います」) を
 	// 返し、身に覚えのない失敗ログイン履歴まで残す。
 	tolerateUnavailable := profile.UsePasswordLessLogin && profile.TwoFactorEnabled &&
-		len(req.Credential) > 0 && (req.Token == nil || *req.Token == "")
+		jsonTruthy(req.Credential) && (req.Token == nil || *req.Token == "")
 
 	scheme, passwordOK, handled := h.verifyPasswordTolerant(c, user.ID, storedPassword, *req.Password, tolerateUnavailable)
 	if handled {
@@ -460,17 +462,17 @@ func (h *Handler) SigninFlow(c echo.Context) error {
 	}
 
 	// Step 3 (Key): credential が来ていれば WebAuthn assertion を検証する。
-	if len(req.Credential) > 0 {
+	// 本家は `else if (body.credential)` で、JS の truthy で見る。`null` /
+	// `false` / `0` / `""` は credential が無いものとして次の分岐 (challenge の
+	// 発行) へ進む (#3330)。
+	if jsonTruthy(req.Credential) {
 		if !passwordOK && !profile.UsePasswordLessLogin {
 			return h.fail(c, user, http.StatusForbidden, "932c904e-9460-45b7-9ce6-7ed33be7eb2c")
 		}
 		if !hasKeys || h.webauthnSvc == nil {
 			return h.fail(c, user, http.StatusForbidden, "93b86c4b-72f9-40eb-9815-798928603d1e")
 		}
-		httpReq, werr := wrapWebAuthnRequest(c.Request(), req.Credential)
-		if werr != nil {
-			return c.JSON(http.StatusBadRequest, errBody("ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
-		}
+		httpReq := wrapWebAuthnRequest(c.Request(), req.Credential)
 		// UV (PIN / 生体認証) は FinishLogin が常に要求する (upstream と同じ)。
 		// password が合っていないのにここへ来る usePasswordLessLogin の利用者は
 		// 鍵が唯一の要素になるので、UV が無いと鍵を拾った相手がそれだけで
@@ -770,19 +772,78 @@ func errBody(id string) map[string]any {
 	}
 }
 
+// signinDecodeOptions are encoding/json's v1 semantics except that object
+// keys bind to struct fields only on an exact (case-sensitive) match.
+var signinDecodeOptions = jsonv2.JoinOptions(json.DefaultOptionsV1(), jsonv2.MatchCaseInsensitiveNames(false))
+
+// decodeSigninBody decodes a signin body into dst, matching object keys
+// exactly like upstream reads `body['username']` off the parsed JS object.
+// Only an application/json body is read; any other body leaves dst as is,
+// since upstream never gets a usable object from it (Fastify answers
+// form-urlencoded with 415, text/plain becomes a string and multipart leaves
+// the body undefined).
+//
+// 本番では server の JSONSerializer も完全一致で読むが (#3330)、c.Bind は
+// 配線に依存する (echo の既定の serializer は大文字小文字を無視するので、
+// `{"CREDENTIAL": ...}` が credential に入る)。signin は資格情報を受ける経路
+// なので、handler 自身で本家と同じ読み方に固定する。
+func decodeSigninBody(c echo.Context, dst any) error {
+	req := c.Request()
+	if req.Body == nil || !middleware.IsJSONContentType(req.Header.Get(echo.HeaderContentType)) {
+		return nil
+	}
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return err
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return nil
+	}
+	return jsonv2.Unmarshal(body, dst, signinDecodeOptions)
+}
+
 // wrapWebAuthnRequest builds a fresh *http.Request whose body is the
 // browser-supplied attestation/assertion JSON. go-webauthn parses the body
 // directly off the request, so we cannot pass through the original Echo
 // request (its body has already been consumed by Bind()).
-func wrapWebAuthnRequest(orig *http.Request, body json.RawMessage) (*http.Request, error) {
-	req, err := http.NewRequestWithContext(orig.Context(), http.MethodPost, orig.URL.String(), bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header = orig.Header.Clone()
+//
+// 以前は URL を文字列から組み直していて、失敗したときに本家に無い独自の id
+// (`ed1d7571-…`) の 400 を返していた。clone なら失敗する経路が無い (#3330)。
+func wrapWebAuthnRequest(orig *http.Request, body json.RawMessage) *http.Request {
+	req := orig.Clone(orig.Context())
+	req.Method = http.MethodPost
 	req.Header.Set("Content-Type", "application/json")
 	req.Body = io.NopCloser(bytes.NewReader(body))
-	return req, nil
+	req.ContentLength = int64(len(body))
+	req.GetBody = nil
+	return req
+}
+
+// jsonTruthy reports whether a raw JSON value is truthy in the JavaScript
+// sense. An absent value, null, false, 0 and "" are falsy; everything else,
+// including empty arrays and objects, is truthy.
+func jsonTruthy(raw json.RawMessage) bool {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 {
+		return false
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		// 数値のレンジ外 (`1e999`) などは JS では Infinity で truthy。
+		return true
+	}
+	switch t := v.(type) {
+	case nil:
+		return false
+	case bool:
+		return t
+	case float64:
+		return t != 0
+	case string:
+		return t != ""
+	default:
+		return true
+	}
 }
 
 // encodeCredID returns the storage key (base64url) for a webauthn credential

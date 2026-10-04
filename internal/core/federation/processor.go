@@ -232,6 +232,10 @@ func (p *Processor) HasLocalBaseURL() bool { return p.localBaseURL != "" }
 // 対策として localBaseURL 配下の URI ("{baseURL}/users/{id}") を検出し、
 // ID パートを抜き出して FindByID で lookup する。リモートユーザーは従来通り
 // FindByURI で解決する。
+//
+// 使うのは本家に対応の無い reversi の招待と chat room の招待の宛先だけ。
+// Follow / Block とその Undo は本家が getUserFromApId で引くので
+// userFromAPID を使う (#3330)。
 func (p *Processor) resolveTargetUser(uri string) (*model.User, error) {
 	if p.localBaseURL != "" {
 		prefix := p.localBaseURL + "/users/"
@@ -1033,9 +1037,17 @@ func (p *Processor) handleFollow(act genericActivity) error {
 	if err != nil {
 		return err
 	}
-	followee, err := p.resolveTargetUser(followeeURI)
+	// 本家 follow() は getUserFromApId で引く (自ホストかは host で判定し、
+	// `/users/{id}` の id だけを読む。削除済みの利用者は引かない)。
+	// 見つからなければ本家は 'skip: followee not found' で ack する。以前は
+	// error を返して inbox の retry を使い切っていた (#3330)。DB 障害は retry
+	// させるために伝播する (#3115 と同じ扱い)。
+	followee, err := p.userFromAPID(followeeURI)
 	if err != nil {
-		return errors.New("unknown followee")
+		if repository.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("follow: lookup followee: %w", err)
 	}
 	// upstream follow() は followee が remote の場合 'skip: フォローしようと
 	// しているユーザーはローカルユーザーではありません' で明示的に拒否する
@@ -1222,9 +1234,13 @@ func (p *Processor) handleUndoFollow(act genericActivity, inner genericActivity)
 	if err != nil {
 		return err
 	}
-	followee, err := p.resolveTargetUser(followeeURI)
+	// 本家 undoFollow() も getUserFromApId で引き、見つからなければ skip (#3330)。
+	followee, err := p.userFromAPID(followeeURI)
 	if err != nil {
-		return errors.New("unknown followee")
+		if repository.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("undo follow: lookup followee: %w", err)
 	}
 	// #2106 L30: upstream undoFollow は followee が remote (host != null) なら skip する
 	// (handleFollow の gate と対称)。remote→remote の Undo を DB 走査 / counter 経路に
@@ -2629,11 +2645,14 @@ func (p *Processor) handleBlock(act genericActivity) error {
 	if err != nil {
 		return err
 	}
-	// ローカルユーザーは user.uri が NULL なので FindByURI では解決できない。
-	// resolveTargetUser が localBaseURL prefix パターンから ID を抽出する。
-	blockee, err := p.resolveTargetUser(blockeeURI)
+	// 本家 block() は getUserFromApId で引き、見つからなければ skip (#3330)。
+	// ローカルユーザーは user.uri が NULL なので、URI から ID を読んで引く。
+	blockee, err := p.userFromAPID(blockeeURI)
 	if err != nil {
-		return errors.New("unknown blockee")
+		if repository.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("block: lookup blockee: %w", err)
 	}
 	// ローカルユーザーのみ対象
 	if blockee.Host != nil {
@@ -2661,10 +2680,13 @@ func (p *Processor) handleUndoBlock(act genericActivity, inner genericActivity) 
 	if err != nil {
 		return err
 	}
-	// Block と同様、ローカルユーザー解決は resolveTargetUser で行う。
-	blockee, err := p.resolveTargetUser(blockeeURI)
+	// 本家 undoBlock() も getUserFromApId で引き、見つからなければ skip (#3330)。
+	blockee, err := p.userFromAPID(blockeeURI)
 	if err != nil {
-		return errors.New("unknown blockee")
+		if repository.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("undo block: lookup blockee: %w", err)
 	}
 	// #2106 L30: upstream undoBlock は blockee が remote (host != null) なら skip する
 	// (handleBlock の gate と対称)。

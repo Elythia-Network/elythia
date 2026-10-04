@@ -54,7 +54,7 @@ func (p *Processor) handleReversiInvite(act genericActivity) error {
 		return errors.New("reversi invite: missing recipient")
 	}
 	// ローカルユーザーの user.uri は DB 上 NULL なので FindByURI では解決
-	// できない。inbound Follow と同じ resolveTargetUser を使って
+	// できない。localBaseURL の接頭辞から ID を読む resolveTargetUser を使って
 	// `{localBaseURL}/users/{id}` 形式もローカル ID として解決する。
 	invitee, err := p.resolveTargetUser(toURI)
 	if err != nil {
