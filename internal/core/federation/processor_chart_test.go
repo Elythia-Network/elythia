@@ -53,15 +53,17 @@ func (h *recordingNoteChartHook) expectNoMoreCalls(t *testing.T, settle time.Dur
 	}
 }
 
-// federation handleCreate must fire NoteChartHook.OnNoteCreated exactly once
-// for a fresh inbound Create(Note), and must NOT fire it for a redelivered
-// (= dedup-hit) Create with the same URI (#1156). 旧実装は chart hook が一切
-// 呼ばれず、PerUserNotesChart の inc 列がリモートユーザーで +1 されない
-// regression を引き起こしていた。
+// An inbound Create(Note) must fire the note chart hook exactly once for a
+// fresh note and must NOT fire it for a redelivered (= dedup-hit) Create with
+// the same URI (#1156). Since #3330 the resolver fires it (it creates the
+// note), so the processor's own hook must stay silent on Create or the note
+// would be counted twice.
 func TestProcess_CreateNote_FiresChartHook_FreshOnly(t *testing.T) {
 	env := newFullProcessor(t, aliceActor)
 	hook := newRecordingNoteChartHook()
-	env.processor.SetNoteChartHook(hook)
+	env.resolver.SetNoteChartHook(hook)
+	processorHook := newRecordingNoteChartHook()
+	env.processor.SetNoteChartHook(processorHook)
 
 	require.NoError(t, env.processor.Process([]byte(noteCreateBody)))
 	noteID := hook.waitForOne(t)
@@ -71,6 +73,31 @@ func TestProcess_CreateNote_FiresChartHook_FreshOnly(t *testing.T) {
 	// created=false を返すので chart hook は再発火してはいけない。
 	require.NoError(t, env.processor.Process([]byte(noteCreateBody)))
 	hook.expectNoMoreCalls(t, 200*time.Millisecond)
+	processorHook.expectNoMoreCalls(t, 50*time.Millisecond)
+}
+
+// TestProcess_Announce_RemoteTargetCountedOnce pins that a note the resolver
+// creates while resolving something else (here: the target of an Announce)
+// is counted as a creation, like upstream where every ApNoteService.createNote
+// goes through NoteCreateService (#3330). Before, only inbound Create was
+// counted while DeleteService subtracted every note, driving notesCount down.
+// A second Announce of the known target must not count it again.
+func TestProcess_Announce_RemoteTargetCountedOnce(t *testing.T) {
+	env, targetURI, aliasURI := newAnnounceTargetEnv(t)
+	resolverHook := newRecordingNoteChartHook()
+	env.resolver.SetNoteChartHook(resolverHook)
+	processorHook := newRecordingNoteChartHook()
+	env.processor.SetNoteChartHook(processorHook)
+
+	require.NoError(t, env.processor.Process(announceBody("https://remote.example/announces/c1", targetURI)))
+	target := findIngestedRemoteNote(t, env.noteRepo, targetURI)
+	assert.Equal(t, target.ID, resolverHook.waitForOne(t), "the newly fetched target is counted by the resolver")
+	renoteID := processorHook.waitForOne(t)
+	assert.NotEqual(t, target.ID, renoteID, "the processor counts the renote row it creates")
+
+	require.NoError(t, env.processor.Process(announceBody("https://remote.example/announces/c2", aliasURI)))
+	processorHook.waitForOne(t)
+	resolverHook.expectNoMoreCalls(t, 200*time.Millisecond)
 }
 
 // handleAnnounce (= 純粋な Boost) で chart hook が renote 作成時に発火する

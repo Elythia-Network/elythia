@@ -112,6 +112,32 @@ func TestInstanceRepository_IncrementCount(t *testing.T) {
 	assert.Equal(t, 2, got.UsersCount)
 }
 
+// TestInstanceRepository_IncrementCount_FloorsAtZero pins that a decrement
+// never takes a counter below 0 (#3330): rows created before mk-go maintained
+// notesCount still hold 0, and deleting a note ingested before the upgrade
+// must not make it negative.
+func TestInstanceRepository_IncrementCount_FloorsAtZero(t *testing.T) {
+	repo := NewInstanceRepository(testDB)
+	inst := newTestInstance("i_ir_floor", "floor.example")
+	inst.UsersCount = 1
+	require.NoError(t, repo.Create(inst))
+	defer cleanupInstance(t, inst.ID)
+
+	require.NoError(t, repo.IncrementCount("floor.example", "notesCount", -1))
+	require.NoError(t, repo.IncrementCount("floor.example", "usersCount", -3))
+	got, err := repo.FindByHost("floor.example")
+	require.NoError(t, err)
+	assert.Equal(t, 0, got.NotesCount)
+	assert.Equal(t, 0, got.UsersCount)
+
+	// 0 で止めた後も加算は普通に効く。
+	require.NoError(t, repo.IncrementCount("floor.example", "notesCount", 2))
+	require.NoError(t, repo.IncrementCount("floor.example", "notesCount", -1))
+	got, err = repo.FindByHost("floor.example")
+	require.NoError(t, err)
+	assert.Equal(t, 1, got.NotesCount)
+}
+
 // #1777: host filter は LIKE metacharacter を escape する。"a_b" は literal
 // underscore 一致になり、"axb.example" を wildcard で誤マッチしない。
 func TestInstanceRepository_List_HostFilterEscapesLikeMetachars(t *testing.T) {
@@ -468,8 +494,9 @@ func TestInstanceRepository_ListPeerHosts(t *testing.T) {
 
 // TestInstanceRepository_RecomputeFollowCounts pins the upstream column
 // semantics (#3330): followingCount counts remote(host) → local follows and
-// followersCount counts local → remote(host) follows. Remote → remote rows and
-// stale values on instances without follows must not survive.
+// followersCount counts local → remote(host) follows. Remote → remote rows,
+// rows involving a moved account and stale values on instances without
+// follows must not survive.
 func TestInstanceRepository_RecomputeFollowCounts(t *testing.T) {
 	repo := NewInstanceRepository(testDB)
 	insts := []*model.Instance{
@@ -484,30 +511,41 @@ func TestInstanceRepository_RecomputeFollowCounts(t *testing.T) {
 		t.Cleanup(func() { cleanupInstance(t, inst.ID) })
 	}
 
-	seedHostUser := func(id string, host *string) {
+	hosts := map[string]*string{}
+	seedHostUser := func(id string, host *string, movedTo *string) {
+		hosts[id] = host
 		require.NoError(t, testDB.Exec(
-			`INSERT INTO "user" (id, "updatedAt", username, "usernameLower", token, host) VALUES (?, NOW(), ?, ?, ?, ?)`,
-			id, "u_"+id, "u_"+id, "tok_"+id, host,
+			`INSERT INTO "user" (id, "updatedAt", username, "usernameLower", token, host, "movedToUri") VALUES (?, NOW(), ?, ?, ?, ?, ?)`,
+			id, "u_"+id, "u_"+id, "tok_"+id, host, movedTo,
 		).Error)
 		t.Cleanup(func() { testDB.Exec(`DELETE FROM "user" WHERE id = ?`, id) })
 	}
 	h1, h2 := "rfc1.example", "rfc2.example"
-	seedHostUser("rfc_l1", nil)
-	seedHostUser("rfc_l2", nil)
-	seedHostUser("rfc_r1a", &h1)
-	seedHostUser("rfc_r1b", &h1)
-	seedHostUser("rfc_r2", &h2)
+	moved, empty := "https://rfc2.example/users/new", ""
+	seedHostUser("rfc_l1", nil, nil)
+	seedHostUser("rfc_l2", nil, nil)
+	seedHostUser("rfc_lm", nil, &moved) // 移行済みのローカル
+	seedHostUser("rfc_r1a", &h1, nil)
+	seedHostUser("rfc_r1b", &h1, &empty) // 空文字は移行済みとみなさない
+	seedHostUser("rfc_r2", &h2, nil)
+	seedHostUser("rfc_r2m", &h2, &moved) // 移行済みのリモート
 
 	follows := [][2]string{
 		{"rfc_r1a", "rfc_l1"}, {"rfc_r1b", "rfc_l1"}, {"rfc_r1a", "rfc_l2"}, // rfc1 → local: 3
 		{"rfc_l1", "rfc_r1a"},                      // local → rfc1: 1
 		{"rfc_l1", "rfc_r2"}, {"rfc_l2", "rfc_r2"}, // local → rfc2: 2
 		{"rfc_r1b", "rfc_r2"}, // remote → remote: 数えない
+		{"rfc_l1", "rfc_r2m"}, // 移行済みのリモートへ: 数えない
+		{"rfc_r2m", "rfc_l2"}, // 移行済みのリモートから: 数えない
+		{"rfc_lm", "rfc_r1a"}, // 移行済みのローカルから: 数えない
+		{"rfc_r1a", "rfc_lm"}, // 移行済みのローカルへ: 数えない
 	}
 	for i, f := range follows {
 		id := "rfc_f" + string(rune('a'+i))
+		// 非正規化列は本番の作成経路 (following.Service) と同じく利用者の host を写す。
 		require.NoError(t, testDB.Exec(
-			`INSERT INTO "following" (id, "followerId", "followeeId") VALUES (?, ?, ?)`, id, f[0], f[1],
+			`INSERT INTO "following" (id, "followerId", "followeeId", "followerHost", "followeeHost") VALUES (?, ?, ?, ?, ?)`,
+			id, f[0], f[1], hosts[f[0]], hosts[f[1]],
 		).Error)
 		t.Cleanup(func() { testDB.Exec(`DELETE FROM "following" WHERE id = ?`, id) })
 	}
@@ -525,4 +563,41 @@ func TestInstanceRepository_RecomputeFollowCounts(t *testing.T) {
 		assert.Equal(t, w[0], got.FollowingCount, "%s followingCount", host)
 		assert.Equal(t, w[1], got.FollowersCount, "%s followersCount", host)
 	}
+}
+
+// TestInstanceRepository_RecomputeFollowCounts_SkipsUnchangedRows pins that
+// the startup recompute only writes instance rows whose counts change, so it
+// does not lock every instance row (#3330). A row's xmin changes only when the
+// row is rewritten.
+func TestInstanceRepository_RecomputeFollowCounts_SkipsUnchangedRows(t *testing.T) {
+	repo := NewInstanceRepository(testDB)
+	ok := newTestInstance("i_rfcu_1", "rfcu1.example") // follow なし、0 のまま
+	stale := newTestInstance("i_rfcu_2", "rfcu2.example")
+	stale.FollowersCount = 4
+	for _, inst := range []*model.Instance{ok, stale} {
+		require.NoError(t, repo.Create(inst))
+		t.Cleanup(func() { cleanupInstance(t, inst.ID) })
+	}
+	xmin := func(id string) string {
+		var rows []string
+		require.NoError(t, testDB.Raw(`SELECT xmin::text FROM "instance" WHERE id = ?`, id).Scan(&rows).Error)
+		require.Len(t, rows, 1)
+		return rows[0]
+	}
+	okBefore, staleBefore := xmin(ok.ID), xmin(stale.ID)
+
+	require.NoError(t, repo.RecomputeFollowCounts())
+
+	assert.Equal(t, okBefore, xmin(ok.ID), "a row whose counts are already right must not be rewritten")
+	assert.NotEqual(t, staleBefore, xmin(stale.ID), "a stale row must be rewritten")
+	got, err := repo.FindByHost("rfcu2.example")
+	require.NoError(t, err)
+	assert.Equal(t, 0, got.FollowersCount)
+}
+
+func TestInstanceRepository_RecomputeFollowCounts_DBError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	repo := NewInstanceRepository(testDB.WithContext(ctx))
+	assert.Error(t, repo.RecomputeFollowCounts())
 }

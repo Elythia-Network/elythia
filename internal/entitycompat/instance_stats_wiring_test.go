@@ -15,7 +15,12 @@ import "testing"
 // **引数まで照合する** — `SetInstanceStatsGate(nil)` や、chart 側へ別のフラグを
 // 代入する取り違えも落ちる。gate そのものの挙動は internal/core/following の
 // TestMetaInstanceStatsGate と TestFollow_InstanceStatsGateOff_LeavesCounters、
-// chart 側は charthook の TestHooks_OnFollow_InstanceChartNeedsStatsFlag が見る。
+// chart 側は charthook の TestHooks_OnFollow_InstanceChartNeedsStatsFlag と
+// TestHooks_SetMetaSource、移行は internal/core/move の
+// TestPostMoveProcess_AdjustsInstanceFollowers が見る。
+//
+// instance の notesCount / usersCount (InstanceCounter) と移行の followersCount
+// (SetInstanceStats) も、未配線なら黙って数えないだけなので同じく照合する。
 func TestInstanceStatsGateIsWired(t *testing.T) {
 	assertWired(t, routerGo,
 		"followingService.SetInstanceStatsGate(corefollowing.MetaInstanceStatsGate(metaRepo))",
@@ -25,4 +30,19 @@ func TestInstanceStatsGateIsWired(t *testing.T) {
 		"chartHooks.StatsForFederatedInst = m.EnableStatsForFederatedInstances",
 		"enableStatsForFederatedInstances を切っても、instance chart の\n"+
 			"following / followers が更新され続ける (#3330)")
+	assertWired(t, routerGo,
+		"chartHooks.SetMetaSource(metaRepo.Fetch)",
+		"admin で enableStatsForFederatedInstances などを切り替えても、chart と\n"+
+			"instance の集計列が再起動まで前の設定のまま動く (#3330)")
+	assertWired(t, routerGo,
+		"federationResolver.SetNoteChartHook(chartHooks)",
+		"inbound Create や解決のついでに取り込んだリモートの投稿が、notes chart にも\n"+
+			"instance の notesCount にも数えられない (削除だけが引く) (#3330)")
+	assertWired(t, routerGo,
+		"chartHooks.InstanceCounter = instanceCounterBuffer",
+		"instance の notesCount / usersCount が一切増減しない (#3330)")
+	assertWired(t, routerGo,
+		"accountMover.SetInstanceStats(instanceRepo, corefollowing.MetaInstanceStatsGate(metaRepo), chartHooks)",
+		"リモートアカウントが移行しても、その instance の followersCount と\n"+
+			"chart が減らない (#3330)")
 }

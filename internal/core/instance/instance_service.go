@@ -148,10 +148,16 @@ func (s *Service) SetMetadataFetcher(f MetadataFetcher) {
 
 // RegisterFromHost ensures an instance row exists for the given host. If a row
 // already exists it is returned as-is; otherwise a fresh row is created with
-// firstRetrievedAt set to now and usersCount = 1. 新規作成成功時には
+// firstRetrievedAt set to now and usersCount = 0. 新規作成成功時には
 // metadataFetcher (設定されていれば) を best-effort で呼び nodeinfo を取り込む。
 //
 // 呼び出し元: Resolver でリモートユーザーを新規取り込みした直後。
+//
+// usersCount は 0 で作る。本家 FederatedInstanceService.fetchOrRegister も列の
+// 既定値 (0) で作り、加算は ApPersonService.createPerson が
+// enableStatsForFederatedInstances の下で別に行う。mk-go の加算は chart hook
+// (charthook.Hooks.OnRemoteUserCreated) が持つので、ここで 1 にすると最初の
+// 利用者が 2 回数えられる (#3330)。
 func (s *Service) RegisterFromHost(host string) (*model.Instance, error) {
 	if host == "" {
 		return nil, errors.New("host is required")
@@ -164,7 +170,6 @@ func (s *Service) RegisterFromHost(host string) (*model.Instance, error) {
 		ID:               s.idGen.Generate(now),
 		Host:             host,
 		FirstRetrievedAt: now,
-		UsersCount:       1,
 		SuspensionState:  model.SuspensionStateNone,
 	}
 	if err := s.repo.Create(inst); err != nil {

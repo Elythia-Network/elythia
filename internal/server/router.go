@@ -1290,6 +1290,17 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		chartHooks.ChartsForFederatedInst = m.EnableChartsForFederatedInstances
 		chartHooks.StatsForFederatedInst = m.EnableStatsForFederatedInstances
 	}
+	// 上の 3 つは起動時の写しで、読めなかったときの代わり。本家は meta をその場で
+	// 読むので、admin での切り替えが再起動を待たずに効くよう毎回 cachedMeta を
+	// 読ませる (#3330)。
+	chartHooks.SetMetaSource(metaRepo.Fetch)
+	// instance の notesCount / usersCount (#3330)。本家と同じく chart hook の
+	// enableStatsForFederatedInstances の分岐の中で動かす。notesCount の加算は
+	// inbox の最頻経路なので、本家の CollapsedQueue と同じく窓で合算してから書く。
+	instanceCounterBuffer := coreinstance.NewCounterBuffer(instanceRepo, 30*time.Second)
+	instanceCounterBuffer.Start(context.Background())
+	s.registerShutdownHook(func(_ context.Context) { instanceCounterBuffer.Close() })
+	chartHooks.InstanceCounter = instanceCounterBuffer
 	// 各サービスへ chart hook を注入する。Set* は nil 安全なので順序は不問。
 	noteCreateService.SetChartHook(chartHooks)
 	noteDeleteService.SetChartHook(chartHooks)
@@ -1334,6 +1345,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// なり、削除 (-1) だけが note_delete_service 経由で記録されてマイナス側に
 	// しか動かなくなる drop-in regression が発生する。
 	federationProcessor.SetNoteChartHook(chartHooks)
+	// resolver が新しく作った note (inbound Create、返信元・引用・Announce の
+	// 対象など) は resolver 側で数える (#3330)。processor は Announce の renote
+	// 行だけを数えるので、こちらも配線しないと Create が一切数えられない。
+	federationResolver.SetNoteChartHook(chartHooks)
 
 	// Hashtag service: ノート作成 (local / federation 両経路) で hashtag table の
 	// mentionedUsersCount / mentionedUserIds を更新する (#680)。/api/hashtags/list
@@ -2105,6 +2120,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	accountMover.SetBlockQueue(s.queueClient)
 	accountMover.SetRoleAssigner(roleService)
 	accountMover.SetAntennaMover(antennaService)
+	// 本家 adjustFollowingCounts と同じく、旧アカウントがリモートなら instance の
+	// followersCount をローカルのフォロワー数ぶん減らし、chart も動かす (#3330)。
+	accountMover.SetInstanceStats(instanceRepo, corefollowing.MetaInstanceStatsGate(metaRepo), chartHooks)
 	iHandler.SetAccountMover(accountMover)
 	// #2414: リモートアカウントの移行を検知したら、同じ引き継ぎ処理を走らせる。
 	// federation → core/move の一方向依存で循環しない。

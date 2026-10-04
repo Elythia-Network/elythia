@@ -27,8 +27,10 @@ func TestService_RegisterFromHost_New(t *testing.T) {
 	got, err := svc.RegisterFromHost("alpha.example")
 	require.NoError(t, err)
 	assert.Equal(t, "alpha.example", got.Host)
-	assert.Equal(t, 1, got.UsersCount)
-	assert.NotEmpty(t, repo.Instances["alpha.example"])
+	// 本家 fetchOrRegister と同じく 0 で作る。最初の利用者の加算は chart hook
+	// (OnRemoteUserCreated) が行うので、ここで 1 にすると 2 重に数える (#3330)。
+	assert.Equal(t, 0, got.UsersCount)
+	assert.Equal(t, 0, repo.Instances["alpha.example"].UsersCount)
 }
 
 func TestService_RegisterFromHost_Existing(t *testing.T) {

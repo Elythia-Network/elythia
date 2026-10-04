@@ -91,12 +91,22 @@ func (r *instanceRepository) UpdateFields(host string, fields map[string]any) er
 	return r.db.Model(&model.Instance{}).Where("host = ?", host).Updates(fields).Error
 }
 
-// IncrementCount adjusts a counter column on the instance row by delta.
+// IncrementCount adjusts a counter column on the instance row by delta. A
+// negative delta never takes the counter below 0.
 // usersCount / notesCount / followingCount / followersCount などの集計列向け。
+//
+// 減らすときは 0 で止める (#3330)。notesCount / usersCount は #3330 まで mk-go が
+// 動かしておらず、既存の行は実件数より小さい (notesCount は 0 のまま)。そこへ
+// 更新前に取り込んだ投稿の削除が来ると負になる。note の IncrementCount (#3291)
+// と同じ扱い。
 func (r *instanceRepository) IncrementCount(host, column string, delta int) error {
+	expr := gorm.Expr("\""+column+"\" + ?", delta)
+	if delta < 0 {
+		expr = gorm.Expr("GREATEST(\""+column+"\" + ?, 0)", delta)
+	}
 	return r.db.Model(&model.Instance{}).
 		Where("host = ?", host).
-		UpdateColumn(column, gorm.Expr("\""+column+"\" + ?", delta)).Error
+		UpdateColumn(column, expr).Error
 }
 
 // ListForRefresh implements the periodic metadata refresh query (#393).
@@ -291,7 +301,7 @@ func (r *instanceRepository) List(filter model.InstanceListFilter) ([]*model.Ins
 // decrementFollowing が足す向き、#3330)。どちらも「その host の側から見た」数:
 //   - `followingCount`: 当該リモートインスタンスの user が**ローカルの user を**
 //     何人 follow しているか (= 我々の投稿を購読している側 = publishing)。
-//     SQL では follower.host = X かつ followee がローカルの行を数える。
+//     SQL では "followerHost" = X かつ "followeeHost" IS NULL の行を数える。
 //   - `followersCount`: ローカルの user が**当該インスタンスの user を**何人
 //     follow しているか (= 我々が購読している側 = subscribing)。SQL では
 //     followee.host = X かつ follower がローカルの行を数える。
@@ -300,51 +310,63 @@ func (r *instanceRepository) List(filter model.InstanceListFilter) ([]*model.Ins
 // この意味で読んでいる。以前はここが逆向きに数えていたので、起動のたびに
 // TS 版が正しく積んだ値も入れ替わっていた。
 //
-// Reset → backfill の二段構え: 過去 follow が消えた host (= subquery に
-// 出てこない) は subquery JOIN だと UPDATE 対象外になり、古い非ゼロ値が
-// 永遠に残ってしまう (#421 Devin review)。先に全 instance を 0 にしてから
-// 該当 host のみ再上書きすることで、follow を全部解除した instance も
-// 確実に 0 へ戻す。
+// host は following の非正規化列 ("followerHost" / "followeeHost") で読み、
+// user を JOIN しない。本家の instance chart (tickMajor) も同じ列で数えている。
+// mk-go がフォロー行を作る経路 (following.Service の Follow / AcceptRequest) は
+// どちらも利用者の host をそのまま写すので、ローカル側は NULL、リモート側は
+// user.host と同じ値になる。
 //
-// 3 つの UPDATE は単一トランザクションでまとめる: reset だけ先に走って
-// 後段で fail すると全 instance が永続的に 0 になってしまうため (#421
-// Devin review)。
+// **どちらかが移行済みの行は数えない** (#3330)。本家と一致するのは、移行した
+// リモートアカウントをローカルの利用者がフォローしている行の followersCount
+// (adjustFollowingCounts が人数ぶん引き、行は残す) と、移行の後に作られた行
+// (insertFollowingDoc が数えない) だけ。移行したアカウント自身のフォロー、
+// ローカルのアカウントの移行、proxy の行は本家では数えたまま残るので、そこは
+// 本家より小さくなる (docs/divergence.md の 5 節)。全部数えると、本家が引いた
+// 分まで起動のたびに戻ってしまう。移行済みの利用者はごく少ないので、全 user と
+// JOIN せず、移行済みの id の集合に対する anti join にしている。
+//
+// **1 本の UPDATE で、値が変わる行だけを書く** (#3330)。以前は全 instance を 0 に
+// してから数え直す 3 本の UPDATE を 1 トランザクションで流していたので、起動の
+// たびに全行を書き換え、その間すべての instance 行のロックを握っていた (連合中の
+// inbox / 配送が instance 行を更新すると待たされる)。いまは instance 全行に
+// LEFT JOIN して、follow が無い host も COALESCE で 0 として比べるので、
+// follow を全部解除した instance も 0 へ戻る (以前の reset が守っていた性質)。
+// 値が既に正しい行は WHERE で外れ、書き込みもロックも起きない。
 func (r *instanceRepository) RecomputeFollowCounts() error {
-	return r.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Exec(
-			`UPDATE "instance" SET "followersCount" = 0, "followingCount" = 0`,
-		).Error; err != nil {
-			return err
-		}
-		// followingCount = remote follower (host X) → local followee の行数。
-		const following = `
-UPDATE "instance" SET "followingCount" = c.cnt
-FROM (
-  SELECT fr.host AS host, COUNT(*)::int AS cnt
+	const q = `
+WITH moved AS (
+  SELECT id FROM "user" WHERE "movedToUri" IS NOT NULL AND "movedToUri" <> ''
+), counted AS (
+  SELECT f."followerHost", f."followeeHost"
   FROM "following" f
-  JOIN "user" fr ON f."followerId" = fr.id
-  JOIN "user" fe ON f."followeeId" = fe.id
-  WHERE fr.host IS NOT NULL AND fe.host IS NULL
-  GROUP BY fr.host
-) c
-WHERE "instance".host = c.host`
-		if err := tx.Exec(following).Error; err != nil {
-			return err
-		}
-		// followersCount = local follower → remote followee (host X) の行数。
-		const followers = `
-UPDATE "instance" SET "followersCount" = c.cnt
-FROM (
-  SELECT fe.host AS host, COUNT(*)::int AS cnt
-  FROM "following" f
-  JOIN "user" fr ON f."followerId" = fr.id
-  JOIN "user" fe ON f."followeeId" = fe.id
-  WHERE fe.host IS NOT NULL AND fr.host IS NULL
-  GROUP BY fe.host
-) c
-WHERE "instance".host = c.host`
-		return tx.Exec(followers).Error
-	})
+  WHERE (f."followerHost" IS NULL) <> (f."followeeHost" IS NULL)
+    AND NOT EXISTS (SELECT 1 FROM moved m WHERE m.id = f."followerId")
+    AND NOT EXISTS (SELECT 1 FROM moved m WHERE m.id = f."followeeId")
+), following_counts AS (
+  SELECT "followerHost" AS host, COUNT(*)::int AS cnt
+  FROM counted
+  WHERE "followerHost" IS NOT NULL
+  GROUP BY "followerHost"
+), followers_counts AS (
+  SELECT "followeeHost" AS host, COUNT(*)::int AS cnt
+  FROM counted
+  WHERE "followeeHost" IS NOT NULL
+  GROUP BY "followeeHost"
+), wanted AS (
+  SELECT i.id,
+         COALESCE(fg.cnt, 0) AS following,
+         COALESCE(fr.cnt, 0) AS followers
+  FROM "instance" i
+  LEFT JOIN following_counts fg ON fg.host = i.host
+  LEFT JOIN followers_counts fr ON fr.host = i.host
+)
+UPDATE "instance" AS t
+SET "followingCount" = w.following, "followersCount" = w.followers
+FROM wanted w
+WHERE t.id = w.id
+  AND (t."followingCount" IS DISTINCT FROM w.following
+       OR t."followersCount" IS DISTINCT FROM w.followers)`
+	return r.db.Exec(q).Error
 }
 
 // IncrementFollowersCount は atomic UPDATE で instance(host).followersCount

@@ -251,14 +251,22 @@ func (r *Resolver) ephemeralNoteByURI(uri string) *model.Note {
 // ephemeral 側の ID と DB 行の ID は別物 (先に ephemeral として採番したものは
 // materialize 時にのみ引き継がれる) なので、FTT に残った旧 ID も除かないと
 // hydrate で ephemeral 側が拾われ続ける。
-func (r *Resolver) dropSupersededEphemeral(uri, visibility string, author *model.User) {
+//
+// It reports whether an ephemeral entry for uri existed.
+//
+// 戻り値は「ephemeral に同じ投稿があったか」(#3330)。ephemeral に入れた時点で
+// note の chart と instance の notesCount は数えてあるので、呼び出し側はこれが
+// true なら作成として数え直さない (materialize の EnsureNote が数えないのと
+// 同じ)。DropNote が失敗しても true を返す — 数えたのは ephemeral に入れた
+// ときで、消せたかどうかとは関係ない。
+func (r *Resolver) dropSupersededEphemeral(uri, visibility string, author *model.User) bool {
 	if r.ephemeralSink == nil || uri == "" {
-		return
+		return false
 	}
 	ctx := context.Background()
 	oldID, err := r.ephemeralSink.NoteIDByURI(ctx, uri)
 	if err != nil || oldID == "" {
-		return
+		return false
 	}
 	if derr := r.ephemeralSink.DropNote(ctx, oldID, uri); derr != nil {
 		slog.Warn("federation: failed to drop superseded ephemeral note", "uri", uri, "err", derr)
@@ -266,6 +274,7 @@ func (r *Resolver) dropSupersededEphemeral(uri, visibility string, author *model
 	if r.ephemeralTimeline != nil && author != nil {
 		r.ephemeralTimeline.RemoveNoteID(oldID, author, visibility, author.Host)
 	}
+	return true
 }
 
 // resolveNoteAuthor resolves a note's author, keeping relay-only authors out
@@ -407,6 +416,7 @@ type Resolver struct {
 	moveProcessor      RemoteMoveProcessor
 	instanceTracker    InstanceTracker             // optional: ホスト発見を通知
 	chartHook          ChartHook                   // optional: 新規 remote user の集計
+	noteChartHook      NoteChartHook               // optional: 新しく取り込んだ note の集計 (#3330)
 	hashtagHook        HashtagHook                 // optional: per-tag mentionedUsersCount 集計 (#680)
 	publickeyRepo      PublickeyStore              // optional: 公開鍵の永続化 (RSA)
 	publickeyExtraRepo PublickeyExtraStore         // optional: 追加公開鍵 (Ed25519 / Multikey) の永続化
@@ -526,6 +536,28 @@ func (r *Resolver) SetInstanceTracker(t InstanceTracker) {
 // been freshly created. nil 渡しは無効化と同義。
 func (r *Resolver) SetChartHook(h ChartHook) {
 	r.chartHook = h
+}
+
+// SetNoteChartHook attaches a NoteChartHook invoked for every note this
+// resolver newly creates (inbound Create, and notes fetched while resolving
+// replies, quotes, Announce targets or featured collections). nil disables it.
+func (r *Resolver) SetNoteChartHook(h NoteChartHook) {
+	r.noteChartHook = h
+}
+
+// fireNoteCreated runs the note chart hook for a freshly created note.
+//
+// 本家は ApNoteService.createNote → NoteCreateService.create を通る全経路で
+// notes chart と instance の notesCount を数える。以前の mk-go は inbox の
+// Create を処理する processor だけが hook を呼んでいたので、返信元・引用・
+// Announce の対象などを解決のついでに取り込んだ投稿は数えず、その削除
+// (DeleteService) では引いていた (#3330)。作成の数え方をここ 1 か所に寄せ、
+// 削除と経路を揃える。dedup hit (created=false) では呼ばない。
+func (r *Resolver) fireNoteCreated(note *model.Note) {
+	if r.noteChartHook == nil || note == nil {
+		return
+	}
+	safeGoFedHook(func() { r.noteChartHook.OnNoteCreated(note) })
 }
 
 // SetHashtagHook attaches a HashtagHook invoked after a remote note has
@@ -3432,6 +3464,10 @@ func (r *Resolver) ingestNoteWithCreated(body []byte, deliveringActorURI string,
 		// repliesCount / renoteCount の増分と poll 行の作成は行わない。前者は
 		// 対象が DB に無い可能性があり、後者は poll.noteId が note への FK を
 		// 持つため行を作れない。hashtag 集計も DB 書き込みなので行わない。
+		//
+		// chart は数える。以前 processor が呼んでいたときも ephemeral の投稿を
+		// 数えていたので、その挙動を変えない。
+		r.fireNoteCreated(note)
 		return note, true, nil
 	}
 	if err := r.noteRepo.Create(note); err != nil {
@@ -3464,13 +3500,17 @@ func (r *Resolver) ingestNoteWithCreated(body []byte, deliveringActorURI string,
 	}
 	// 同じ投稿が先に relay 経由で ephemeral に入っていたら落とす。放置すると
 	// timeline の合成で DB 行と ephemeral の両方が出て二重表示になる (#2332)。
-	r.dropSupersededEphemeral(apNote.ID, string(note.Visibility), actor)
+	supersededEphemeral := r.dropSupersededEphemeral(apNote.ID, string(note.Visibility), actor)
 	// hashtag table の mentionedUsersCount / userIds 更新 (#680 / #719)。
 	// hook 実装 (core/hashtag.Service) が内部で goroutine を起こす
 	// fire-and-forget 設計なので、IngestNote から見ると即時 return する。
 	// inbox processor の drain time が tag 数に比例して伸びる退行を回避。
 	if r.hashtagHook != nil && len(note.Tags) > 0 {
 		r.hashtagHook.OnNoteCreated(note, actor)
+	}
+	// ephemeral に入っていた投稿は、そこで既に数えてある (#3330)。
+	if !supersededEphemeral {
+		r.fireNoteCreated(note)
 	}
 	return note, true, nil
 }
