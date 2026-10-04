@@ -18,7 +18,7 @@
 | `catalog-check` | システムカタログのクエリが schema で絞られているか検査 |
 | `notfound-check` | repository の lookup error を種別を見ずに 4xx にしていないか検査 |
 | `nulparam-check` | 列に入らない値 (NUL) が SQL の bind parameter に載らないか検査 |
-| `compose-check` | 配布する compose にログの上限があるか検査 |
+| `compose-check` | 配布する compose のログの上限と、検証用 compose の置き場所・相対パス・name: を検査 |
 | `testflags-check` | make test が CI と同じテスト条件で走るか検査 |
 | `migrationdoc-check` | migration の本数を述べた doc が実態と合っているか検査 |
 | `mdtable-check` | md の表の各行がヘッダと同じ列数か検査 (溢れたセルは描画時に捨てられる) |
