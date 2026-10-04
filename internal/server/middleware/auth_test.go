@@ -680,10 +680,13 @@ func TestAuthenticate_MultipartTokenFromBodyOnly(t *testing.T) {
 
 	cases := []struct {
 		name, target, field, wantID string
+		upperCT                     bool
 	}{
-		{"query token only", "/api/drive/files/create?i=multitokenAAAAAA", "", ""},
-		{"body field token", "/api/drive/files/create", "multitokenAAAAAA", "userM"},
-		{"body field wins over query", "/api/drive/files/create?i=other", "multitokenAAAAAA", "userM"},
+		{"query token only", "/api/drive/files/create?i=multitokenAAAAAA", "", "", false},
+		{"body field token", "/api/drive/files/create", "multitokenAAAAAA", "userM", false},
+		{"body field wins over query", "/api/drive/files/create?i=other", "multitokenAAAAAA", "userM", false},
+		// Content-Type の型は大文字小文字を区別しない (Fastify も RequireMultipartFile も同じ)。
+		{"upper-case content type", "/api/drive/files/create", "multitokenAAAAAA", "userM", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -697,7 +700,11 @@ func TestAuthenticate_MultipartTokenFromBodyOnly(t *testing.T) {
 
 			e := echo.New()
 			req := httptest.NewRequest(http.MethodPost, tc.target, &buf)
-			req.Header.Set("Content-Type", mw.FormDataContentType())
+			ct := mw.FormDataContentType()
+			if tc.upperCT {
+				ct = strings.Replace(ct, "multipart/form-data", "Multipart/Form-Data", 1)
+			}
+			req.Header.Set("Content-Type", ct)
 			c := e.NewContext(req, httptest.NewRecorder())
 			called := false
 			gotID := ""

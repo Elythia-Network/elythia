@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/shiroha-a/mk/internal/api/apierr"
 	corechat "github.com/shiroha-a/mk/internal/core/chat"
 	"github.com/shiroha-a/mk/internal/core/moderationlog"
 	"github.com/shiroha-a/mk/internal/entitycompat/shapetest"
@@ -802,7 +803,7 @@ func TestMessagesCreate_TextTooLong(t *testing.T) {
 	long := strings.Repeat("a", 2001)
 	rec := post(h.MessagesCreate, `{"text":"`+long+`","toUserId":"u2"}`, u1)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assertErrorCode(t, rec, "INVALID_PARAM", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8")
+	assertErrorCode(t, rec, "INVALID_PARAM", apierr.UUIDInvalidParam)
 }
 
 // text は trim されて保存される (前後の空白除去)。
@@ -822,14 +823,14 @@ func TestRoomsCreate_NameTooLong(t *testing.T) {
 	h, _ := newTestHandler()
 	rec := post(h.RoomsCreate, `{"name":"`+strings.Repeat("a", 257)+`"}`, u1)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assertErrorCode(t, rec, "INVALID_PARAM", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8")
+	assertErrorCode(t, rec, "INVALID_PARAM", apierr.UUIDInvalidParam)
 }
 
 func TestRoomsCreate_DescriptionTooLong(t *testing.T) {
 	h, _ := newTestHandler()
 	rec := post(h.RoomsCreate, `{"name":"ok","description":"`+strings.Repeat("a", 1025)+`"}`, u1)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assertErrorCode(t, rec, "INVALID_PARAM", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8")
+	assertErrorCode(t, rec, "INVALID_PARAM", apierr.UUIDInvalidParam)
 }
 
 // RoomsUpdate も同じく maxLength を強制する。
@@ -838,7 +839,7 @@ func TestRoomsUpdate_DescriptionTooLong(t *testing.T) {
 	repo.Rooms["r1"] = &model.ChatRoom{ID: "r1", OwnerID: u1.ID}
 	rec := post(h.RoomsUpdate, `{"roomId":"r1","description":"`+strings.Repeat("a", 1025)+`"}`, u1)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assertErrorCode(t, rec, "INVALID_PARAM", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8")
+	assertErrorCode(t, rec, "INVALID_PARAM", apierr.UUIDInvalidParam)
 }
 
 func TestMessagesDelete_Service(t *testing.T) {

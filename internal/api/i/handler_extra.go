@@ -477,15 +477,25 @@ func (h *Handler) RegenerateToken(c echo.Context) error {
 func (h *Handler) ClaimAchievement(c echo.Context) error {
 	u := middleware.GetUser(c)
 	var req struct {
-		Name string `json:"name"`
+		Name json.RawMessage `json:"name"`
 	}
-	if err := c.Bind(&req); err != nil || req.Name == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "name is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
 	}
-	// upstream の paramDef `name: { enum: ACHIEVEMENT_TYPES }` と同じく未知の
-	// 実績名は弾く (bogus 実績の記録 / 通知汚染を防ぐ)。
-	if !achievement.IsValidType(req.Name) {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "unknown achievement.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+	// 本家の paramDef は `required: ['name']` と
+	// `name: { type: 'string', enum: ACHIEVEMENT_TYPES }` で、ajv は required、
+	// type、enum の順に見て最初の違反を info に載せる。null は required を
+	// 満たし、type で落ちる。空文字は enum の違反になる。
+	if req.Name == nil {
+		return c.JSON(http.StatusBadRequest, apierr.InvalidParamClient("#/required", "must have required property 'name'"))
+	}
+	var name string
+	if string(req.Name) == "null" || json.Unmarshal(req.Name, &name) != nil {
+		return c.JSON(http.StatusBadRequest, apierr.InvalidParamClient("#/properties/name/type", "must be string"))
+	}
+	// 未知の実績名は弾く (bogus 実績の記録 / 通知汚染を防ぐ)。
+	if !achievement.IsValidType(name) {
+		return c.JSON(http.StatusBadRequest, apierr.InvalidParamClient("#/properties/name/enum", "must be equal to one of the allowed values"))
 	}
 
 	profile := h.userService.GetProfile(u.ID)
@@ -501,14 +511,14 @@ func (h *Handler) ClaimAchievement(c echo.Context) error {
 
 	// 既に獲得済みか確認
 	for _, a := range achievements {
-		if a["name"] == req.Name {
+		if a["name"] == name {
 			return c.NoContent(http.StatusNoContent)
 		}
 	}
 
 	// 新しい実績を追加
 	achievements = append(achievements, map[string]any{
-		"name":       req.Name,
+		"name":       name,
 		"unlockedAt": time.Now().UnixMilli(),
 	})
 	data, _ := json.Marshal(achievements)
@@ -524,9 +534,9 @@ func (h *Handler) ClaimAchievement(c echo.Context) error {
 		if _, err := h.achievementNotifier.Create(c.Request().Context(), notification.CreateInput{
 			NotifieeID: u.ID,
 			Type:       notification.TypeAchievementEarned,
-			Extra:      map[string]any{"achievement": req.Name},
+			Extra:      map[string]any{"achievement": name},
 		}); err != nil {
-			slog.Warn("claim-achievement: notification create failed", "user", u.ID, "achievement", req.Name, "err", err)
+			slog.Warn("claim-achievement: notification create failed", "user", u.ID, "achievement", name, "err", err)
 		}
 	}
 

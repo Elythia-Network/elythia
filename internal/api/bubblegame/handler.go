@@ -46,11 +46,11 @@ func (h *Handler) Register(c echo.Context) error {
 		GameVersion int     `json:"gameVersion"`
 	}
 	if err := c.Bind(&req); err != nil || req.Seed == "" || req.GameMode == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "score, seed, logs, gameMode, gameVersion are required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	// upstream register.ts paramDef は score:{minimum:0}。負値を ajv 同様 400 で弾く (#2027)。
 	if req.Score < 0 {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "score must be >= 0.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return c.JSON(http.StatusBadRequest, apierr.InvalidParamClient("#/properties/score/minimum", "must be >= 0"))
 	}
 
 	// シード検証: seedはUnixタイムスタンプ文字列
@@ -78,11 +78,11 @@ func (h *Handler) Register(c echo.Context) error {
 	// 弾かないと**任意の認証ユーザーが 500 を起こせる**。`seed` は上で
 	// `ParseInt` を通っているので数字だけ (列幅 1024 に収まる)。
 	if !colfit.Fits(req.GameMode, bubbleGameModeMaxRunes) {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "gameMode is invalid.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	logsJSON, _ := json.Marshal(req.Logs)
 	if !colfit.JSONStorable(logsJSON) {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "logs is invalid.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	record := &model.BubbleGameRecord{
 		ID:          h.idGen.Generate(now),
@@ -117,7 +117,7 @@ func (h *Handler) Ranking(c echo.Context) error {
 		gameMode = req.GameMode
 	}
 	if gameMode == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "gameMode is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 
 	records, err := h.repo.Ranking(gameMode, 10)

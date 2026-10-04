@@ -438,7 +438,8 @@ func extractToken(c echo.Context) string {
 
 	// multipart/form-data の "i" フィールド (ファイルアップロード時)
 	ct := req.Header.Get("Content-Type")
-	if strings.HasPrefix(ct, "multipart/form-data") {
+	// 型は大文字小文字を区別しないので、RequireMultipartFile と同じ判定を使う。
+	if isMultipartFormData(ct) {
 		// 本家 handleMultipartRequest は multipart の fields['i'] だけを見る。
 		// c.FormValue は URL の query も引くので、`?i=` だけで認証されてしまう
 		// (#3330)。PostFormValue は ParseMultipartForm 後の body の値だけを返す。

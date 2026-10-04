@@ -58,14 +58,14 @@ func (h *Handler) Register(c echo.Context) error {
 		SendReadMessage bool   `json:"sendReadMessage"`
 	}
 	if err := c.Bind(&req); err != nil || req.Endpoint == "" || req.Auth == "" || req.PublicKey == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "endpoint, auth, and publickey are required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	// **列に入らない値はここで断る (#3025)。** 下の重複チェックは
 	// `IsNotFound` を「重複ではない」と読んで新規登録へ落ちるので、通すと
 	// INSERT が SQLSTATE 22021 で落ちて 500 になる。**書き込みも必ず失敗する値**
 	// なので「見つからない」に丸めてはいけない数少ない形。
 	if !colfit.Storable(req.Endpoint) || !colfit.Storable(req.Auth) || !colfit.Storable(req.PublicKey) {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "endpoint, auth, and publickey must not contain an invalid character.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	// 配送先として使える endpoint だけを受け付ける (本家 sw/register の
 	// invalidEndpoint と同じ code / id / 400)。本家と同じく既存の購読の確認より
@@ -133,7 +133,7 @@ func (h *Handler) ShowRegistration(c echo.Context) error {
 		Endpoint string `json:"endpoint"`
 	}
 	if err := c.Bind(&req); err != nil || req.Endpoint == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "endpoint is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 
 	sub, err := h.repo.FindByUserAndEndpoint(user.ID, req.Endpoint)
@@ -166,7 +166,7 @@ func (h *Handler) UpdateRegistration(c echo.Context) error {
 		SendReadMessage *bool  `json:"sendReadMessage"`
 	}
 	if err := c.Bind(&req); err != nil || req.Endpoint == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "endpoint is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 
 	sub, err := h.repo.FindByUserAndEndpoint(user.ID, req.Endpoint)

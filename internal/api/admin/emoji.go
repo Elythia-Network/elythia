@@ -520,7 +520,7 @@ func (h *Handler) EmojiImportZip(c echo.Context) error {
 		FileID string `json:"fileId"`
 	}
 	if err := c.Bind(&req); err != nil || req.FileID == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "fileId is required.", "5f4c9d8a-7c39-4bfa-9dcb-09f17e0f7a25"))
+		return apierr.JSONInvalidParam(c)
 	}
 	// upstream import-zip.ts:30 は drive file の存在確認をせず無条件で
 	// createImportCustomEmojisJob を enqueue する (存在しなければ job が後で失敗)。

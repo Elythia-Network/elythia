@@ -35,6 +35,13 @@ var nonEndpointAPIRoutes = map[string]bool{
 	"/api/clear-browser-cache":   true,
 }
 
+// multipartUploadRoutes are the routes of upstream's requireFile endpoints
+// (`meta.requireFile: true` in endpoints/*.ts; drive/files/create is the
+// only one). ApiServerService.ts routes them to handleMultipartRequest,
+// which middleware.RequireMultipartFile mirrors. mk-go's own multipart
+// endpoint (drive/files/create-chunked/append) is not one of them.
+var multipartUploadRoutes = []string{"/api/drive/files/create"}
+
 // isAPIEndpointRoute reports whether c was routed to an /api endpoint whose
 // upstream counterpart validates params with an ajv `type: 'object'` schema.
 func isAPIEndpointRoute(c echo.Context) bool {
@@ -81,9 +88,18 @@ type apiBinder struct {
 // and ApiCallService passes it to ajv as the params, which fails `type:
 // 'object'`. An empty application/json body never gets here: JSONBodyParse
 // answers it with FST_ERR_CTP_EMPTY_JSON_BODY first, as Fastify does.
+//
+// For a GET request to an API endpoint it first rejects, with errQueryCast,
+// a query value that upstream cannot cast to its param's type (see
+// checkQueryCasts).
 func (b *apiBinder) Bind(i any, c echo.Context) error {
-	err := b.DefaultBinder.Bind(i, c)
 	req := c.Request()
+	if req.Method == http.MethodGet && isAPIEndpointRoute(c) {
+		if err := checkQueryCasts(c, reflect.TypeOf(i)); err != nil {
+			return err
+		}
+	}
+	err := b.DefaultBinder.Bind(i, c)
 	if req.Method == http.MethodGet || req.Method == http.MethodHead || !isAPIEndpointRoute(c) || !expectsObject(reflect.TypeOf(i)) {
 		return err
 	}
@@ -98,6 +114,84 @@ func (b *apiBinder) Bind(i any, c echo.Context) error {
 	}
 	apierr.MarkBodyNotObject(c)
 	return errBodyNotObject
+}
+
+// errQueryCast is returned by c.Bind when a GET query value cannot be cast
+// to its field's type. The binder also calls apierr.MarkCastFailure, so the
+// handler's apierr.JSONInvalidParam answers with upstream's cast error.
+var errQueryCast = echo.NewHTTPError(http.StatusBadRequest, "cannot cast query param")
+
+// checkQueryCasts mirrors the "Cast non JSON input" step of upstream's
+// ApiCallService.call for GET: every boolean / number / integer param whose
+// query value is a single string goes through JSON.parse, and a value that
+// does not parse is answered with INVALID_PARAM 0b5f1631 {param, reason:
+// "cannot cast to <type>"} before ajv runs. The params are the `query`
+// tagged fields of t (the same fields echo binds); a bool field is a
+// boolean param, an integer field an integer param and a float field a
+// number param. Fields are checked in declaration order and the first
+// failure is reported (upstream walks paramDef.properties in its order).
+func checkQueryCasts(c echo.Context, t reflect.Type) error {
+	t = derefType(t)
+	if t == nil || t.Kind() != reflect.Struct {
+		return nil
+	}
+	query := c.QueryParams()
+	if len(query) == 0 {
+		return nil
+	}
+	if param, typ, ok := firstCastFailure(t, query); ok {
+		apierr.MarkCastFailure(c, param, typ)
+		return errQueryCast
+	}
+	return nil
+}
+
+// firstCastFailure walks t's fields like echo's query binder does
+// (untagged struct fields are descended into) and returns the first
+// `query` param whose value JSON.parse would reject.
+func firstCastFailure(t reflect.Type, query map[string][]string) (param, typ string, ok bool) {
+	for i := range t.NumField() {
+		f := t.Field(i)
+		name := f.Tag.Get("query")
+		if name == "" {
+			if ft := derefType(f.Type); ft.Kind() == reflect.Struct && !decodesItself(ft) {
+				if param, typ, ok := firstCastFailure(ft, query); ok {
+					return param, typ, true
+				}
+			}
+			continue
+		}
+		typ := castType(f.Type)
+		if typ == "" {
+			continue
+		}
+		// 本家は値が文字列のときだけ変換する。同じキーが 2 回来ると Fastify の
+		// querystring は配列にするので変換されず、ajv の型の検査に回る。キーは
+		// 完全一致で引く (本家の paramDef のキーは大文字小文字を区別する)。
+		vs := query[name]
+		if len(vs) != 1 {
+			continue
+		}
+		if !json.Valid([]byte(vs[0])) {
+			return name, typ, true
+		}
+	}
+	return "", "", false
+}
+
+// castType returns the paramDef type upstream casts for a field of type t
+// ("boolean", "integer" or "number"), or "" when no cast applies.
+func castType(t reflect.Type) string {
+	switch derefType(t).Kind() {
+	case reflect.Bool:
+		return "boolean"
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return "integer"
+	case reflect.Float32, reflect.Float64:
+		return "number"
+	}
+	return ""
 }
 
 // isTextPlain reports whether Fastify's built-in text/plain parser handles

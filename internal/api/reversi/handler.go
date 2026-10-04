@@ -348,7 +348,7 @@ func (h *Handler) ShowGame(c echo.Context) error {
 		GameID string `json:"gameId"`
 	}
 	if err := c.Bind(&req); err != nil || req.GameID == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "gameId is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	game, err := h.repo.FindByID(req.GameID)
 	if err != nil && !repository.IsNotFound(err) {
@@ -640,7 +640,7 @@ func (h *Handler) Surrender(c echo.Context) error {
 		GameID string `json:"gameId"`
 	}
 	if err := c.Bind(&req); err != nil || req.GameID == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "gameId is required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 
 	// federation Leave を送るために winner (= 相手) を先に引いておく。
@@ -723,7 +723,7 @@ func (h *Handler) Verify(c echo.Context) error {
 	// crc32 は upstream verify.ts:38-41 で required (gameId と同列)。欠落を
 	// 黙って desynced=false にすると client 側の desync が一生検出されない。
 	if err := c.Bind(&req); err != nil || req.GameID == "" || req.CRC32 == "" {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "gameId and crc32 are required.", "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"))
+		return apierr.JSONInvalidParam(c)
 	}
 	game, err := h.repo.FindByID(req.GameID)
 	if err != nil && !repository.IsNotFound(err) {

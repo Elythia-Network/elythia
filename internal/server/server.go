@@ -746,6 +746,12 @@ func newServer(cfg *config.Config, db *gorm.DB, redis *cache.RedisClients, plugi
 	}
 	e.Use(middleware.COOP(cfg.CrossOriginOpenerPolicy))
 
+	// 本家の requireFile endpoint (drive/files/create) は、token を読む前に
+	// multipart の file を取り出し、取れなければ本文の無い 400 を返す
+	// (ApiCallService.ts の handleMultipartRequest)。無効な token の 401 より
+	// 先に答えるため、auth.Authenticate より前に置く (#3330)。
+	e.Use(middleware.RequireMultipartFile(multipartUploadRoutes...))
+
 	// WWW-Authenticate は auth.Authenticate より外側に置く。auth は無効 token に
 	// 対して自分で 401 を書くので、内側 (api グループ) に置くと middleware まで
 	// 到達せずヘッダが付かない。/streaming の 401 も同じ経路なので、ここに
