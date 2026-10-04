@@ -408,6 +408,8 @@ make shapecheck-gen                                     # golden_upstream_column
 
 ## Migration seed gate（drop-in 復路）
 
+**復路は保証しない(#3191)が、このgateはrequiredのまま残す。** seedは、どこまで戻れるかを測る`mkgo-born`の前提で、足す手間も小さいため。
+
 `TestMigrationSeed_CoversUpstream`は、TypeORMのbookkeepingテーブル`migrations`へのseedが、upstreamの全migrationを網羅していることを検証する。
 
 mk-goで動かしたDBに本家Misskeyを繋ぎ直したとき、TypeORMは

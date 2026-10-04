@@ -221,7 +221,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_xxx" ON "yyy" ("zzz");
 | `make dropin-up` `dropin-test` `dropin-down` `dropin-logs` | TS 2 インスタンスの federation smoke | [Drop-in e2e](dropin-e2e.md) |
 | `make dropin-mk-up` `dropin-mk-test` `dropin-mk-down` `dropin-mk-logs` | 上記の backend を mk-go に差し替えた overlay | 同上 |
 | `make dropin-swap-test` | TS → mk-go 切替の state preservation を通しで検証 | 同上 |
-| `make dropin-mkgo-born-test` | **mk-go 生まれの DB を TS に引き渡せるか** (= ロックインの有無) | 同上 |
+| `make dropin-mkgo-born-test` | **mk-go 生まれの DB を TS に引き渡せるか** (測る対象。保証はしない、#3191) | 同上 |
 | `make dropin-fedibird-test` | Fedibird-like AP mock との Ed25519 双方向 verify | 同上 |
 | `make dropin-frontend-baseline` `dropin-frontend-up` `dropin-frontend-down` `dropin-frontend-logs` | 3 TS インスタンス + cypress | [Drop-in frontend e2e](dropin-frontend-e2e.md) |
 | `make dropin-frontend-mk-up` `dropin-frontend-mk-down` `dropin-frontend-swap-test` | 上記の mk-go overlay と切替シナリオ | 同上 |
@@ -334,7 +334,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_xxx" ON "yyy" ("zzz");
 | `spec (mk-go 1/4)` 〜 `4/4` | Playwright | ブラウザからの統合互換。TS backend での実行は `workflow_dispatch` のみ |
 | `e2e (1/4)` 〜 `4/4` | Upstream backend e2e | 本家の backend e2e が mk-go に対して通るか |
 | `diff` | Diff e2e | mk-go と TS の**レスポンスの値**が一致するか |
-| `swap-test` / `mkgo-born` / `ed25519-verify` / `federation` / `federation-mastodon` | Drop-in e2e | 切替・ロックイン・Ed25519・実連合 (Misskey TS / Mastodon) の 5 シナリオ |
+| `swap-test` / `mkgo-born` / `ed25519-verify` / `federation` / `federation-mastodon` | Drop-in e2e | 切替・TS へ戻す経路の測定・Ed25519・実連合 (Misskey TS / Mastodon) の 5 シナリオ |
 
 どれが何を守っているかの対比は [ci.md](ci.md) にまとめてある。
 

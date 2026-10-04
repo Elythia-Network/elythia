@@ -11,6 +11,8 @@
 #   7. mk-A backend を停止して TS-A に戻す (#1082 SHOULD shape)
 #   8. TS-A 起動 healthy 待ち + nginx-a restart
 #   9. test_swap_roundtrip_verify.py で TS 戻し後の連合継続を確認
+#      (6b-9 の復路とその準備は守る対象ではなく測る対象。#3191、docs/dropin-e2e.md の
+#      「復路は測る対象」)
 #  10. cleanup
 #
 # pytest セッションを跨いで docker compose を切り替える必要があるため、

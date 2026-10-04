@@ -609,8 +609,8 @@ dropin-swap-test: ## TS → mk-go 切替の state preservation を通しで検�
 # walks through する。ed25519 P2-P5 が実 federation 経路で動くことを担保する
 # nightly 用 e2e。
 # mk-go 生まれの DB を TS に引き渡す経路 (#2379)。swap test (TS→mk-go→TS) とは
-# 別物で、TS が一度も触っていない schema を受け取る。運用上はロックインの有無
-# そのもの (mk-go で始めた人が Misskey に移れるか)。
+# 別物で、TS が一度も触っていない schema を受け取る。mk-go で始めた人が Misskey に
+# どこまで移れるかを測る (保証はしない、#3191)。
 dropin-mkgo-born-test: ## mk-go 生まれの DB を TS に引き渡せるか検証
 	./tests/dropin/run-mkgo-born-test.sh
 

@@ -107,7 +107,7 @@ PR を出すと十数個の check が走る。**どれが何を見ていて、�
 | `e2e (1/4)` 〜 `4/4` | Upstream backend e2e | **本家の backend e2e 1256 テスト**が mk-go に対して通るか | 3-7 min | `make upstream-e2e` |
 | `diff` | Diff e2e | mk-go と TS の**レスポンスの値**が一致するか (endpoint 比較 35 件) | 4 min | `make diff-check` |
 | `swap-test` | Drop-in e2e | TS→mk 切替で state が保たれるか | 5 min | `make dropin-swap-test` |
-| `mkgo-born` | Drop-in e2e | **mk-go 生まれの DB を TS に引き渡せるか** (= ロックインの有無) | 5 min | `make dropin-mkgo-born-test` |
+| `mkgo-born` | Drop-in e2e | **mk-go 生まれの DB を TS に引き渡せるか** (測る対象。保証はしない、#3191) | 5 min | `make dropin-mkgo-born-test` |
 | `ed25519-verify` | Drop-in e2e | Fedibird-like mock との Ed25519 双方向 verify | 5 min | `make dropin-fedibird-test` |
 | `federation` | Drop-in e2e | 本物の Misskey TS との実連合 (follow/note/reaction/renote/reply/mention/delete) | 4 min | `make federation-misskey-e2e` |
 | `federation-mastodon` | Drop-in e2e | 本物の Mastodon との引用の承認 (FEP-044f): 双方向の引用が承認済みになるか、取り消しが双方向で効くか | 未計測 | `make federation-mastodon-e2e` |
@@ -156,8 +156,9 @@ enum・index 名・default のどれかが TypeORM の期待とずれていれ�
 `TestMigrationSeed_CoversUpstream` は seed 一覧と upstream の migration file を
 **静的に突き合わせる**だけで、実際に TS を起動して確かめてはいない。
 
-運用上これは**ロックインの有無そのもの**にあたる。「mk-go で始めた人が Misskey に
-移れるか」に答えられるのはこの経路だけで、実際この経路の初回実行で、RSA 秘密鍵が
+「mk-go で始めた人が Misskey に移れるか」に答えられるのはこの経路だけ。移れることは
+保証しない (#3191) が、どこまで移れるかを測るために残している
+([dropin-e2e.md の「復路は測る対象」](dropin-e2e.md#復路は測る対象-3191))。実際この経路の初回実行で、RSA 秘密鍵が
 PKCS#1 のため TS 側の送信連合が全滅する不具合が見つかっている (#2380)。
 
 ### `e2e` (本家 backend e2e) が落ちたとき
@@ -548,7 +549,7 @@ checkout / setup-go を除くと step は実行順に 4 つ。**required job な
 
 - `mkgo-born` は `swap-test` と似て見えるが **DB を作った側が違う** (前者は mk-go の
   migration、後者は TypeORM)。TS が一度も触っていない schema を受け取るのは前者だけで、
-  運用上は**ロックインの有無そのもの**にあたる。`TestMigrationSeed_CoversUpstream` は
+  どこまで移れるかを測る唯一の経路にあたる (保証はしない、#3191)。`TestMigrationSeed_CoversUpstream` は
   seed 一覧と upstream migration file の静的な突き合わせに過ぎず、実際に TS を起動して
   確かめてはいない。
 

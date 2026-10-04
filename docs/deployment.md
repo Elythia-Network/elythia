@@ -715,7 +715,7 @@ sudo systemctl restart misskey    # systemd の場合
 >
 > **down が用意されていても戻せない migration がある。** `000081` は孤児行を、`000082` は chat room の owner が持つ membership / 招待行を DELETE するが、どちらも削除した行の内容を保存していないので down は no-op。詳細は [TS版からの移行](migration-from-ts.md#破壊的なマイグレーション)。
 
-Misskey TS へ戻す場合は[TS版からの移行](migration-from-ts.md)を参照。
+Misskey TS へ戻すことは保証しない (#3191)。戻す場合の注意と、今どこまで戻れるかは[TS版からの移行](migration-from-ts.md#misskey-tsへのロールバック)を参照。
 
 ## 後始末バッチ
 
