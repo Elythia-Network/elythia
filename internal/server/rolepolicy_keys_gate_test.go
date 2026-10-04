@@ -35,13 +35,10 @@ import (
 var notInFrontendUI = map[string]string{}
 
 func TestMkGoRolePolicyKeysAreListedInFrontend(t *testing.T) {
-	root := filepath.Join(repoRootDir(t), "third_party", "misskey")
+	root := filepath.Join(repoRootDir(t), "frontend")
 	consts := filepath.Join(root, "packages", "misskey-js", "src", "consts.ts")
 	if _, err := os.Stat(consts); err != nil {
-		if os.Getenv("MK_FRONTEND_GATES_REQUIRE_SUBMODULE") != "" {
-			require.NoError(t, err, "submodule を要求する job なのに %s を読めない", consts)
-		}
-		t.Skipf("submodule が無い (checkout する job でのみ検査する)")
+		require.NoError(t, err, "frontend/ は追跡しているので、%s を読めないのはパスの誤り", consts)
 	}
 	upstream := parseUpstreamRolePolicies(t, consts)
 	require.NotEmpty(t, upstream, "misskey-js の rolePolicies を読めなかった")

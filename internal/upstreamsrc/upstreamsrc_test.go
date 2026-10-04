@@ -113,5 +113,5 @@ func TestRequired(t *testing.T) {
 	t.Setenv(EnvRequire, "")
 	assert.False(t, Required())
 	t.Setenv(EnvRequire, "true")
-	assert.True(t, Required(), "空でなければ有効 (MK_FRONTEND_GATES_REQUIRE_SUBMODULE と同じ約束)")
+	assert.True(t, Required(), "空でなければ有効")
 }

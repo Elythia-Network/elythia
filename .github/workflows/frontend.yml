@@ -21,14 +21,17 @@ name: frontend
 
 on:
   pull_request:
-    paths:
+    paths: &frontend-paths
       - "frontend/**"
       - ".github/workflows/frontend.yml"
+      # frontend のビルドが import する server-plugins.generated.ts は、
+      # make plugins-all がここから生成する (#3379)
+      - "plugins/**"
+      - "plugin/**"
+      - "tools/pluginbuild/**"
   push:
     branches: [develop]
-    paths:
-      - "frontend/**"
-      - ".github/workflows/frontend.yml"
+    paths: *frontend-paths
   workflow_dispatch:
 
 permissions:
@@ -54,6 +57,17 @@ jobs:
           node-version-file: frontend/.node-version
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
+
+      # pluginbuild の生成物 (server-plugins.generated.ts) は追跡していない (#3379)
+      # ので、frontend をビルドする前に書き出す。同梱サンプルの frontend も型と
+      # ビルドの対象に入れるため、既定無効のものも含める plugins-all を使う。
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Generate plugin artifacts
+        working-directory: .
+        run: make plugins-all
 
       # package.json と lock の食い違いは --frozen-lockfile が落とす (lock は本家の
       # lock を当てずに作り直す。設計 D4)。
@@ -101,6 +115,17 @@ jobs:
           node-version-file: frontend/.node-version
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
+
+      # pluginbuild の生成物 (server-plugins.generated.ts) は追跡していない (#3379)
+      # ので、frontend をビルドする前に書き出す。同梱サンプルの frontend も型と
+      # ビルドの対象に入れるため、既定無効のものも含める plugins-all を使う。
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Generate plugin artifacts
+        working-directory: .
+        run: make plugins-all
 
       - run: pnpm i --frozen-lockfile
 

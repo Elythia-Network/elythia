@@ -29,7 +29,7 @@ on:
       - "cmd/**"
       - "migration/**"
       - "tests/diff/**"
-      - "third_party/misskey"
+      - "frontend/**"
       - "Makefile"
       - "go.mod"
       - "go.sum"
@@ -53,35 +53,33 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref || github.ref }}
-          # mkgo image が third_party/misskey のアセットを COPY する。
-          submodules: recursive
 
-      # Dockerfile.mkgo が third_party/misskey/built を COPY するので、
+      # Dockerfile.mkgo が frontend/built を COPY するので、
       # docker build より前に host で pnpm build しておく。dropin-e2e.yml と
       # 同じ戦略で actions/cache に pin する。
-      # **cache key は submodule の commit SHA で取る。** `pnpm-lock.yaml` の
-      # hash だと、submodule のソースを変えても lock が動かない限り cache hit に
+      # **cache key は frontend/ の木の SHA で取る。** `pnpm-lock.yaml` の
+      # hash だと、frontend/ のソースを変えても lock が動かない限り cache hit に
       # なり、**古い `built/` が使われる** (#2786 で実際に踏んだ。fork の
       # `boot.js` を直したのに CI では反映されず spec が落ちた)。
-      - name: Resolve misskey submodule SHA
+      - name: Resolve frontend tree SHA
         id: misskey-sha
-        run: echo "sha=$(git rev-parse HEAD:third_party/misskey)" >> "$GITHUB_OUTPUT"
+        run: echo "sha=$(git rev-parse HEAD:frontend)" >> "$GITHUB_OUTPUT"
 
       - name: Cache misskey workspace (built + node_modules)
         id: cache-misskey
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            third_party/misskey/node_modules
-            third_party/misskey/packages/*/node_modules
-            third_party/misskey/built
+            frontend/node_modules
+            frontend/packages/*/node_modules
+            frontend/built
           key: misskey-workspace-${{ runner.os }}-${{ steps.misskey-sha.outputs.sha }}
 
       - name: Set up pnpm
         if: steps.cache-misskey.outputs.cache-hit != 'true'
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
-          # pnpm のバージョンは submodule 側 package.json の packageManager から
+          # pnpm のバージョンは frontend/package.json の packageManager から
           # 取る。mk リポジトリ直下には package.json が無い。
           #
           # **corepack を使わない (#2914)。** Node.js 26 の配布物に corepack は
@@ -93,18 +91,27 @@ jobs:
           # ので、`prepare pnpm@latest` を挟んでも workspace 内で走るのは 11.25.0
           # (実測)。ここで消えるのは corepack への依存と、使われない 12.x を毎回
           # ダウンロードしていた無駄。
-          package_json_file: third_party/misskey/package.json
+          package_json_file: frontend/package.json
 
       - name: Set up Node.js
         if: steps.cache-misskey.outputs.cache-hit != 'true'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version-file: third_party/misskey/.node-version
+          node-version-file: frontend/.node-version
 
-      - name: Build third_party/misskey frontend bundle
+      # pluginbuild の生成物 (server-plugins.generated.ts) は追跡していない (#3379)
+      # ので、frontend をビルドする前に書き出す。
+      - name: Set up Go (pluginbuild)
         if: steps.cache-misskey.outputs.cache-hit != 'true'
-        working-directory: third_party/misskey
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Build frontend bundle
+        if: steps.cache-misskey.outputs.cache-hit != 'true'
+        working-directory: frontend
         run: |
+          (cd .. && GOWORK=off go run ./tools/pluginbuild)
           pnpm install --frozen-lockfile
           pnpm build
 

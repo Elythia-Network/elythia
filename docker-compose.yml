@@ -32,7 +32,7 @@ services:
         condition: service_completed_successfully
     environment:
       # ビルド済みフロントエンド (SPA) の配信元。下の volumes で host の
-      # `third_party/misskey/built` を /frontend に bind-mount し、ここを指す。
+      # `frontend/built` を /frontend に bind-mount し、ここを指す。
       # static-assets / twemoji / fluent-emoji / repo-assets は image に焼き込み
       # 済み (Dockerfile 参照) なので mount 不要。service worker (_sw_dist_) は
       # MISSKEY_FRONTEND_DIR の親ディレクトリから自動解決される。
@@ -47,13 +47,13 @@ services:
       # `sudo chown -R 991:991 ./files` を実行すること。
       - ./files:/app/drive-files
       # ビルド済みフロントエンド成果物。起動前に host で `make e2e-frontend-build`
-      # を実行して `third_party/misskey/built/{_frontend_vite_,_frontend_dist_,
+      # を実行して `frontend/built/{_frontend_vite_,_frontend_dist_,
       # _sw_dist_}` を生成しておくこと。約 200MB あるため image には焼き込まず
       # mount で渡す (UDS 版 compose と同方針)。これが無いと SPA の JS/CSS が
       # 404 になりフロントエンドが表示されない。
-      - ./third_party/misskey/built:/frontend:ro
+      - ./frontend/built:/frontend:ro
       # client assets (バブルゲーム / フラッシュ等が参照)。
-      - ./third_party/misskey/packages/frontend/assets:/client-assets:ro
+      - ./frontend/packages/frontend/assets:/client-assets:ro
       # 設定ファイルを上書きする場合 (cp .config/docker.yml.example
       # .config/docker.yml して編集後にコメントを外す):
       # - ./.config/docker.yml:/app/.config/default.yml:ro

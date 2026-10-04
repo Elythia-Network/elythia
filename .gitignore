@@ -100,3 +100,9 @@ plugins/*
 go.work
 go.work.sum
 cmd/misskey/plugins_generated.go
+
+# pluginbuild (make plugins) の生成物 (#3379)。frontend はこれを import するので、
+# frontend をビルドする前に make plugins を回す。追跡すると make plugins のたびに
+# 作業ツリーが dirty になり、運営者の git pull が止まりうる。
+/frontend/packages/frontend/src/server-plugins.generated.ts
+/frontend/packages/frontend/mk-plugins.generated.json

@@ -192,7 +192,7 @@ func matchingParen(expr string, open int) int {
 // feRoot returns the fork frontend's `packages` directory.
 func feRoot(t *testing.T) string {
 	t.Helper()
-	return filepath.Join(repoRootDir(t), "third_party", "misskey", "packages")
+	return filepath.Join(repoRootDir(t), "frontend", "packages")
 }
 
 // readFrontendSource reads a file under `packages/` with comments removed.
@@ -513,10 +513,7 @@ var gridImageColumns = []string{
 func TestRemoteImagesGoThroughMediaProxy(t *testing.T) {
 	probe := filepath.Join(feRoot(t), "frontend", "src", "pages", "admin", "custom-emojis-manager.remote.vue")
 	if _, err := os.Stat(probe); err != nil {
-		if os.Getenv("MK_FRONTEND_GATES_REQUIRE_SUBMODULE") != "" {
-			require.NoError(t, err, "submodule を要求する job なのに %s を読めない", probe)
-		}
-		t.Skipf("submodule が無い (checkout する job でのみ検査する)")
+		require.NoError(t, err, "frontend/ は追跡しているので、%s を読めないのはパスの誤り", probe)
 	}
 
 	t.Run("grid image columns are a closed world", func(t *testing.T) {
@@ -780,7 +777,7 @@ func TestRemoteImagesGoThroughMediaProxy(t *testing.T) {
 // synthetic sources (#2964).
 //
 // **実コードだけを見ていると、検出する側の枝が一度も実行されない。** いまの
-// submodule は全て正しい書き方なので、`enclosingObject` の「`bindTo` を持たない
+// frontend/ は全て正しい書き方なので、`enclosingObject` の「`bindTo` を持たない
 // `type: 'image'` を除外する」枝も、`isProxiedExpr` の「proxy を通らない葉を
 // 見つける」枝も一度も通らない。その状態だと**判定を常に真 / 常に偽へ書き換える
 // 変異が素通りする**。#2792 の `secretfield-check` が「検出ロジックは人工の

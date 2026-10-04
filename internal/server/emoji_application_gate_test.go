@@ -149,13 +149,10 @@ func TestEmojiApplicationIsWired(t *testing.T) {
 		"%s が realtime の申請 lookup を配線していない。開いたままだと通知が届かない", router)
 
 	// frontend 側。申請ページと審査タブが実在すること。
-	fe := filepath.Join(root, "third_party", "misskey", "packages", "frontend")
+	fe := filepath.Join(root, "frontend", "packages", "frontend")
 	page := filepath.Join(fe, "src", "pages", "emoji-request.vue")
 	if _, err := os.Stat(page); err != nil {
-		if os.Getenv("MK_FRONTEND_GATES_REQUIRE_SUBMODULE") != "" {
-			require.NoError(t, err, "submodule を要求する job なのに %s を読めない", page)
-		}
-		t.Skipf("submodule が無い (checkout する job でのみ検査する)")
+		require.NoError(t, err, "frontend/ は追跡しているので、%s を読めないのはパスの誤り", page)
 	}
 
 	// 「自分の申請」の画像プレビュー (#2989)。**未配線だと承認済みと未承認の

@@ -34,20 +34,19 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 COPY . .
 
-# third_party/misskey (submodule) がruntime stageのCOPY対象になるので、
-# ビルド前に初期化されているか確認する。CIは docker.yml 側で submodules:
-# recursive を指定して取得する。ローカル build 時はユーザに指示を出す。
-RUN test -f third_party/misskey/packages/backend/assets/favicon.ico || \
-    (echo "ERROR: third_party/misskey submodule not initialized (or partial clone)." && \
-     echo "Run: git submodule update --init --recursive" && exit 1)
+# frontend/ (#3379 で本体へ取り込んだ) の静的アセットが runtime stage の COPY 対象に
+# なるので、build context に入っているか先に確かめる。.dockerignore を広げすぎた
+# ときに、COPY の not found より分かりやすい形で落とす。
+RUN test -f frontend/assets/favicon.ico || \
+    (echo "ERROR: frontend/assets is missing (incomplete checkout or .dockerignore)." && exit 1)
 
 # twemojiは本家frontendがUnicode絵文字描画に使うSVG set。pnpm installで
 # node_modulesに hoistされる前提 (make e2e-frontend-build等で install済み)。
 # upstream 2026.5.2 #17381 で `@discordapp/twemoji/dist/svg` から
 # `@misskey-dev/emoji-assets/built/twemoji` に asset path が移行。
-RUN test -f third_party/misskey/packages/backend/node_modules/@misskey-dev/emoji-assets/built/twemoji/1f004.svg || \
+RUN test -f frontend/node_modules/@misskey-dev/emoji-assets/built/twemoji/1f004.svg || \
     (echo "ERROR: twemoji assets not found (pnpm install not run?)." && \
-     echo "Run: make e2e-frontend-build (installs third_party/misskey node_modules)" && exit 1)
+     echo "Run: make e2e-frontend-build (installs frontend/ node_modules)" && exit 1)
 
 # Go の build cache (`$GOCACHE` = /root/.cache/go-build) と module cache を
 # BuildKit cache mount として永続化する。再ビルド時に変更の無いパッケージは
@@ -117,27 +116,28 @@ COPY --from=builder /app/migration /app/migration
 
 # 本家のpackages/backend/assets (favicon / icons等) をimageに焼き込む。
 # bind-mountなしでも /favicon.ico / /static-assets/* 等が serve できる
-# (issue #346)。third_party/misskey はsubmoduleなのでビルド前に
-# `git submodule update --init --recursive` が必要。
-COPY --from=builder /app/third_party/misskey/packages/backend/assets /app/static-assets
+# (issue #346)。本家では packages/backend/assets にあり、本体では frontend/assets
+# に置いている (#3379、設計 D3)。
+COPY --from=builder /app/frontend/assets /app/static-assets
 ENV MISSKEY_STATIC_DIR=/app/static-assets
 
 # repo-level assets (ai.png等)。frontendが /assets/ai.png で参照する
-# (mascotImageUrl のデフォルト)。submodule直下 (issue #360)。
-COPY --from=builder /app/third_party/misskey/assets /app/repo-assets
+# (mascotImageUrl のデフォルト)。本家の直下の assets/ を frontend/repo-assets に
+# 置いている (issue #360、#3379)。
+COPY --from=builder /app/frontend/repo-assets /app/repo-assets
 ENV MISSKEY_REPO_ASSETS_DIR=/app/repo-assets
 
 # twemoji SVG set (Unicode絵文字描画)。frontendが /twemoji/<codepoint>.svg
 # で参照する。約18MB (issue #359)。upstream 2026.5.2 #17381 で
 # `@misskey-dev/emoji-assets/built/twemoji` に asset path が移行した。
-COPY --from=builder /app/third_party/misskey/packages/backend/node_modules/@misskey-dev/emoji-assets/built/twemoji /app/twemoji
+COPY --from=builder /app/frontend/node_modules/@misskey-dev/emoji-assets/built/twemoji /app/twemoji
 ENV MISSKEY_TWEMOJI_DIR=/app/twemoji
 
 # fluent-emoji PNG set。frontend が実績バッジ / notification icon を
 # /fluent-emoji/<hex>.png で参照する。twemoji と同じ @misskey-dev/emoji-assets
 # パッケージに含まれる (upstream 2026.5.2 #17381)。これが無いと実績バッジ等が
 # 404 になる (deploy/uds/Dockerfile.mkgo では焼き込み済みだが main は欠落していた)。
-COPY --from=builder /app/third_party/misskey/packages/backend/node_modules/@misskey-dev/emoji-assets/built/fluent-emoji /app/fluent-emoji
+COPY --from=builder /app/frontend/node_modules/@misskey-dev/emoji-assets/built/fluent-emoji /app/fluent-emoji
 ENV MISSKEY_FLUENT_EMOJI_DIR=/app/fluent-emoji
 
 # デフォルト設定ファイルをコピー (docker-compose でマウント上書き可能)。

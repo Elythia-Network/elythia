@@ -37,8 +37,8 @@ import (
 // 大きくなる。同じ `.vue` をソースとして読むゲートは `credit_origins_gate_test.go`
 // に前例がある。
 //
-// **submodule を checkout する job でしか動かせない** (同上)。`make frontend-check`
-// が `MK_FRONTEND_GATES_REQUIRE_SUBMODULE` を渡して skip を禁じる。
+// **frontend/ は本体で追跡している (#3379) ので skip しない。** 読めないのはパスの
+// 誤りで、required の `test` で落ちる。
 func TestStreamResyncIsWiredInTimelines(t *testing.T) {
 	notifications := readResyncWiringSource(t, "frontend/src/components/MkStreamingNotificationsTimeline.vue")
 	notes := readResyncWiringSource(t, "frontend/src/components/MkStreamingNotesTimeline.vue")
@@ -95,21 +95,18 @@ func TestStreamResyncIsWiredInTimelines(t *testing.T) {
 		"通知側は queue の件数を描画しないので、積むと利用者から見えなくなる")
 }
 
-// readResyncWiringSource は submodule 内の SFC をコメント除去して読む。無ければ
-// skip する (ただし `MK_FRONTEND_GATES_REQUIRE_SUBMODULE` があるときは失敗させる)。
+// readResyncWiringSource は frontend/ の SFC をコメント除去して読む。無ければ落とす
+// (frontend/ は本体で追跡している、#3379)。
 //
 // **コメントアウトして残すのは消すのと同じ。** 同パッケージの他の gate と同じ
 // 判断で `stripComments` を通す。`_disconnected_` を不在で見る検査があるので、
 // 説明文に出てくる語を拾わないためでもある。
 func readResyncWiringSource(t *testing.T, rel string) string {
 	t.Helper()
-	full := filepath.Join(repoRootDir(t), "third_party", "misskey", "packages", rel)
+	full := filepath.Join(repoRootDir(t), "frontend", "packages", rel)
 	raw, err := os.ReadFile(full)
 	if err != nil {
-		if os.Getenv("MK_FRONTEND_GATES_REQUIRE_SUBMODULE") != "" {
-			require.NoErrorf(t, err, "submodule を要求する job なのに %s を読めない", rel)
-		}
-		t.Skipf("%s が無い (submodule を checkout する job でのみ検査する)", rel)
+		require.NoErrorf(t, err, "frontend/ は追跡しているので、%s を読めないのはパスの誤り", rel)
 	}
 	return stripComments(string(raw))
 }

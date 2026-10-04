@@ -2,7 +2,7 @@
 #
 # 既存の `Dockerfile` はホスト側で `pnpm install && pnpm build` 済みであること
 # を前提に submodule からアセットを COPY し、SPA 本体 (約 200MB) は
-# `third_party/misskey/built` の bind-mount で渡す。そのため
+# `frontend/built` の bind-mount で渡す。そのため
 #
 #   - イメージのビルドがホストの状態に依存して再現しない
 #   - bind-mount 先が本番の配信元と同一で、検証目的のビルドで本番を壊せる
@@ -98,13 +98,13 @@ FROM ${MISSKEY_ASSETS_IMAGE} AS assets-external
 # の COPY が落ちる)。
 #
 # **使わない stage は BuildKit がビルドしない**ので、ASSETS_SOURCE=external の
-# ときに third_party/misskey/built が無くても問題ない。
+# ときに frontend/built が無くても問題ない。
 FROM scratch AS assets-local
-COPY third_party/misskey/built /built
-COPY third_party/misskey/packages/frontend/assets /frontend-assets
-COPY third_party/misskey/packages/backend/assets /backend-assets
-COPY third_party/misskey/assets /repo-assets
-COPY third_party/misskey/packages/backend/node_modules/@misskey-dev/emoji-assets/built /emoji-assets
+COPY frontend/built /built
+COPY frontend/packages/frontend/assets /frontend-assets
+COPY frontend/assets /backend-assets
+COPY frontend/repo-assets /repo-assets
+COPY frontend/node_modules/@misskey-dev/emoji-assets/built /emoji-assets
 
 FROM assets-${ASSETS_SOURCE} AS assets
 

@@ -1,13 +1,13 @@
 // Regenerates emoji_mfmjs.json, the expected trees of TestParse_UnicodeEmojiMatchesMfmJs,
 // by running mfm-js on every entry of the emoji-data list that mfm-js depends on.
 //
-//   node internal/activitypub/mfm/testdata/emoji_mfmjs.mjs third_party/misskey > internal/activitypub/mfm/testdata/emoji_mfmjs.json
+//   node internal/activitypub/mfm/testdata/emoji_mfmjs.mjs frontend > internal/activitypub/mfm/testdata/emoji_mfmjs.json
 //
 // The serialization matches serializeTree in mention_mfmjs_test.go.
 import fs from 'node:fs';
 import path from 'node:path';
 
-const misskey = process.argv[2] ?? 'third_party/misskey';
+const misskey = process.argv[2] ?? 'frontend';
 const mfmjsDir = fs.realpathSync(path.join(misskey, 'packages/frontend/node_modules/mfm-js'));
 const dataDir = path.join(path.dirname(mfmjsDir), '@misskey-dev/emoji-data');
 const mfm = await import(path.join(mfmjsDir, 'built/index.mjs'));

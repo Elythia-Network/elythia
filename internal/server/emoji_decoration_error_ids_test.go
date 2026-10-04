@@ -22,14 +22,11 @@ import (
 // **同じ理由で、backend の UUID を変えると向こうの文面が黙って消える。** ここで
 // 両方を突き合わせて、片側更新を止める。
 func TestEmojiDecorationErrorIDsMatchFrontend(t *testing.T) {
-	path := filepath.Join(repoRootDir(t), "third_party", "misskey",
+	path := filepath.Join(repoRootDir(t), "frontend",
 		"packages", "frontend", "src", "pages", "settings", "avatar-decoration.vue")
 	src, err := os.ReadFile(path)
 	if err != nil {
-		if os.Getenv("MK_FRONTEND_GATES_REQUIRE_SUBMODULE") != "" {
-			require.NoError(t, err, "submodule を要求する job なのに %s を読めない", path)
-		}
-		t.Skipf("submodule が無い (checkout する job でのみ検査する)")
+		require.NoError(t, err, "frontend/ は追跡しているので、%s を読めないのはパスの誤り", path)
 	}
 
 	// `const ERR_X = '<uuid>';` を拾う。**書式が変わって 1 つも拾えなければ落とす**

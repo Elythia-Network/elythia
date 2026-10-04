@@ -155,7 +155,7 @@ func (d *dev) banner() {
 	fmt.Printf(`plugindev: %s を監視します
 
   frontend の HMR は Vite dev server が担います。別の端末で起動してください:
-    cd third_party/misskey/packages/frontend && pnpm watch
+    cd frontend/packages/frontend && pnpm watch
 
   backend はここで自動的に再ビルド・再起動します。
   Ctrl-C で終了します。

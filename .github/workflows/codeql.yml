@@ -49,14 +49,14 @@ jobs:
       matrix:
         # **Go と Actions だけを見る。**
         #
-        # `javascript-typescript` は入れない。submodule の外にある .ts/.js/.vue は
+        # `javascript-typescript` は入れない。frontend/ の外にある .ts/.js/.vue は
         # 実測 340 ファイルで、その大半が `tests/playwright/specs/**` (うち 189 は
         # upstream 由来の UI spec)。production のコードではないので、拾っても
         # ノイズにしかならない。同じ理由で `python` (tests/bench, tests/diff,
         # tests/dropin, tests/federation の検証基盤) も入れない。
         #
-        # fork frontend (`third_party/misskey`) は checkout していないので対象外。
-        # あれは upstream のコードで、こちらが直せる範囲ではない。
+        # frontend/ (#3379 で本体へ取り込んだ本家の木) も今は対象外。大半は upstream の
+        # コードで、入れるかは frontend の CI を required にする段階 (#3379 の P4e) で決める。
         #
         # `actions` は入れる価値がある。workflow は 12 本あり、`pull_request` の
         # コンテキストを式に埋める形 (script injection) はレビューで見落としやすい。

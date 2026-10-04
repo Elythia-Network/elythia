@@ -24,14 +24,11 @@ import (
 // **registry を truth にする。** 一覧を 2 箇所に置くのをやめられない以上、
 // 少なくとも食い違いは検出する。
 func TestStaffNotificationTypesAreOptOutable(t *testing.T) {
-	path := filepath.Join(repoRootDir(t), "third_party", "misskey",
+	path := filepath.Join(repoRootDir(t), "frontend",
 		"packages", "frontend", "src", "pages", "admin", "roles.policy-editor.vue")
 	src, err := os.ReadFile(path)
 	if err != nil {
-		if os.Getenv("MK_FRONTEND_GATES_REQUIRE_SUBMODULE") != "" {
-			require.NoError(t, err, "submodule を要求する job なのに %s を読めない", path)
-		}
-		t.Skipf("submodule が無い (checkout する job でのみ検査する)")
+		require.NoError(t, err, "frontend/ は追跡しているので、%s を読めないのはパスの誤り", path)
 	}
 
 	// `const mkGoOptOutTargetTypes = ['a', 'b'] as const;` を読む。

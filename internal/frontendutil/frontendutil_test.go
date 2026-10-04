@@ -16,7 +16,7 @@ import (
 
 func TestFrontendDir_Default(t *testing.T) {
 	t.Setenv("MISSKEY_FRONTEND_DIR", "")
-	assert.Equal(t, filepath.Join("third_party/misskey", "built", "_frontend_vite_"), FrontendDir())
+	assert.Equal(t, filepath.Join("frontend", "built", "_frontend_vite_"), FrontendDir())
 }
 
 func TestFrontendDir_EnvOverride(t *testing.T) {
@@ -26,7 +26,7 @@ func TestFrontendDir_EnvOverride(t *testing.T) {
 
 func TestFrontendDistDir_Default(t *testing.T) {
 	t.Setenv("MISSKEY_FRONTEND_DIST_DIR", "")
-	assert.Equal(t, filepath.Join("third_party/misskey", "built", "_frontend_dist_"), FrontendDistDir())
+	assert.Equal(t, filepath.Join("frontend", "built", "_frontend_dist_"), FrontendDistDir())
 }
 
 func TestFrontendDistDir_EnvOverride(t *testing.T) {
@@ -37,7 +37,7 @@ func TestFrontendDistDir_EnvOverride(t *testing.T) {
 func TestSwDistDir_Default(t *testing.T) {
 	t.Setenv("MISSKEY_SW_DIST_DIR", "")
 	t.Setenv("MISSKEY_FRONTEND_DIR", "")
-	assert.Equal(t, filepath.Join("third_party/misskey", "built", "_sw_dist_"), SwDistDir())
+	assert.Equal(t, filepath.Join("frontend", "built", "_sw_dist_"), SwDistDir())
 }
 
 func TestSwDistDir_EnvOverride(t *testing.T) {
@@ -47,7 +47,7 @@ func TestSwDistDir_EnvOverride(t *testing.T) {
 
 func TestClientAssetsDir_Default(t *testing.T) {
 	t.Setenv("MISSKEY_CLIENT_ASSETS_DIR", "")
-	assert.Equal(t, filepath.Join("third_party/misskey", "packages", "frontend", "assets"), ClientAssetsDir())
+	assert.Equal(t, filepath.Join("frontend", "packages", "frontend", "assets"), ClientAssetsDir())
 }
 
 func TestClientAssetsDir_EnvOverride(t *testing.T) {
@@ -60,7 +60,7 @@ func TestTwemojiDir_Default(t *testing.T) {
 	// upstream 2026.5.2 #17381 で twemoji の serve path が
 	// @discordapp/twemoji/dist/svg → @misskey-dev/emoji-assets/built/twemoji に
 	// 移行した (#1164 Phase A)。
-	assert.Equal(t, filepath.Join("third_party/misskey", "packages", "backend", "node_modules", "@misskey-dev", "emoji-assets", "built", "twemoji"), TwemojiDir())
+	assert.Equal(t, filepath.Join("frontend", "node_modules", "@misskey-dev", "emoji-assets", "built", "twemoji"), TwemojiDir())
 }
 
 func TestTwemojiDir_EnvOverride(t *testing.T) {
@@ -73,7 +73,7 @@ func TestFluentEmojiDir_Default(t *testing.T) {
 	// upstream 2026.5.2 #17381 で fluent-emoji の serve path が
 	// fluent-emojis/dist (submodule) → @misskey-dev/emoji-assets/built/fluent-emoji
 	// に移行した (twemoji と同 commit、#1167)。
-	assert.Equal(t, filepath.Join("third_party/misskey", "packages", "backend", "node_modules", "@misskey-dev", "emoji-assets", "built", "fluent-emoji"), FluentEmojiDir())
+	assert.Equal(t, filepath.Join("frontend", "node_modules", "@misskey-dev", "emoji-assets", "built", "fluent-emoji"), FluentEmojiDir())
 }
 
 func TestFluentEmojiDir_EnvOverride(t *testing.T) {
@@ -83,7 +83,7 @@ func TestFluentEmojiDir_EnvOverride(t *testing.T) {
 
 func TestStaticDir_Default(t *testing.T) {
 	t.Setenv("MISSKEY_STATIC_DIR", "")
-	assert.Equal(t, filepath.Join("third_party/misskey", "packages", "backend", "assets"), StaticDir())
+	assert.Equal(t, filepath.Join("frontend", "assets"), StaticDir())
 }
 
 func TestStaticDir_EnvOverride(t *testing.T) {
@@ -93,7 +93,7 @@ func TestStaticDir_EnvOverride(t *testing.T) {
 
 func TestRepoAssetsDir_Default(t *testing.T) {
 	t.Setenv("MISSKEY_REPO_ASSETS_DIR", "")
-	assert.Equal(t, filepath.Join("third_party/misskey", "assets"), RepoAssetsDir())
+	assert.Equal(t, filepath.Join("frontend", "repo-assets"), RepoAssetsDir())
 }
 
 func TestRepoAssetsDir_EnvOverride(t *testing.T) {
@@ -363,7 +363,7 @@ func TestFrontendEmbedDir_Default(t *testing.T) {
 	t.Setenv("MISSKEY_FRONTEND_DIR", "")
 	t.Setenv("MISSKEY_FRONTEND_EMBED_DIR", "")
 	assert.Equal(t,
-		filepath.Join("third_party/misskey", "built", "_frontend_embed_vite_"),
+		filepath.Join("frontend", "built", "_frontend_embed_vite_"),
 		FrontendEmbedDir())
 }
 

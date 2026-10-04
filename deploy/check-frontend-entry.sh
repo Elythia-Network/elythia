@@ -80,7 +80,7 @@ entry=$(printf '%s' "$index" | sed -n "s/.*CLIENT_ENTRY = '\([^']*\)'.*/\1/p" | 
 if [ -z "$entry" ]; then
 	if printf '%s' "$index" | grep -q 'CLIENT_ENTRY = null'; then
 		printf '\033[31m==> CLIENT_ENTRY が null: ビルド済みアセットが見えていない\033[0m\n' >&2
-		printf '    third_party/misskey/built を作ってから mk-go を再起動すること。\n' >&2
+		printf '    frontend/built を作ってから (make uds-frontend-build) mk-go を再起動すること。\n' >&2
 		exit 1
 	fi
 	printf '\033[31m==> index から CLIENT_ENTRY を取り出せない (書式が変わった?): %s/\033[0m\n' "$url" >&2

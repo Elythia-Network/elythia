@@ -34,21 +34,21 @@ COPY --from=builder /app/migration /app/migration
 
 # Frontend asset bundle (Playwright frontend operation 用)。本家 Dockerfile と
 # 同 layout で COPY + 環境変数で path を bind する。host で `make e2e-frontend-build`
-# が実行され `third_party/misskey/built/` 系が存在することが前提。federation /
+# が実行され `frontend/built/` 系が存在することが前提。federation /
 # drop-in test で frontend 不要の場合は単に reference されないだけで害はない。
-COPY --from=builder /app/third_party/misskey/built/_frontend_vite_ /app/built/_frontend_vite_
-COPY --from=builder /app/third_party/misskey/built/_frontend_dist_ /app/built/_frontend_dist_
-COPY --from=builder /app/third_party/misskey/built/_sw_dist_ /app/built/_sw_dist_
+COPY --from=builder /app/frontend/built/_frontend_vite_ /app/built/_frontend_vite_
+COPY --from=builder /app/frontend/built/_frontend_dist_ /app/built/_frontend_dist_
+COPY --from=builder /app/frontend/built/_sw_dist_ /app/built/_sw_dist_
 # embed 専用 bundle (#2389)。通常 SPA とは別 build なので別ディレクトリ。
 # これが無いと /embed_vite/* が 404 になる (dev モード以外では dev server へ proxy しない)。
-COPY --from=builder /app/third_party/misskey/built/_frontend_embed_vite_ /app/built/_frontend_embed_vite_
-COPY --from=builder /app/third_party/misskey/packages/frontend/assets /app/client-assets
+COPY --from=builder /app/frontend/built/_frontend_embed_vite_ /app/built/_frontend_embed_vite_
+COPY --from=builder /app/frontend/packages/frontend/assets /app/client-assets
 # upstream 2026.5.2 #17381 で `@discordapp/twemoji/dist/svg` から
 # `@misskey-dev/emoji-assets/built/twemoji` に asset path が移行 (本体
 # Dockerfile では追従済、本ファイルは drift していたので合わせる)。
-COPY --from=builder /app/third_party/misskey/packages/backend/node_modules/@misskey-dev/emoji-assets/built/twemoji /app/twemoji
-COPY --from=builder /app/third_party/misskey/packages/backend/assets /app/static-assets
-COPY --from=builder /app/third_party/misskey/assets /app/repo-assets
+COPY --from=builder /app/frontend/node_modules/@misskey-dev/emoji-assets/built/twemoji /app/twemoji
+COPY --from=builder /app/frontend/assets /app/static-assets
+COPY --from=builder /app/frontend/repo-assets /app/repo-assets
 ENV MISSKEY_FRONTEND_DIR=/app/built/_frontend_vite_
 ENV MISSKEY_FRONTEND_DIST_DIR=/app/built/_frontend_dist_
 ENV MISSKEY_SW_DIST_DIR=/app/built/_sw_dist_

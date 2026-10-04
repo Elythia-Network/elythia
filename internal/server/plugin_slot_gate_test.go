@@ -24,10 +24,9 @@ import (
 //  2. `<MkPluginSlot name="...">` がどこかにあること
 //  3. **そのファイルが MkPluginSlot を import していること**
 //
-// **このゲートは `make check` でも走る。** submodule があれば
-// `MK_FRONTEND_GATES_REQUIRE_SUBMODULE` 無しでも skip されないので、手元では
-// `go test ./...` で落ちる。CI の `test-shards` は submodule を checkout しない
-// ので skip され、`frontend-check` job だけが実際に検査する (#2892)。
+// **このゲートは `make check` でも、CI の required の `test` でも走る。** frontend/
+// を本体で追跡するようになった (#3379) ので、以前のように「submodule を checkout
+// する `frontend-check` だけが検査する」(#2892) 形ではない。
 //
 // 3 を見るのは、`MkPluginSlot.vue` が `components/global/` ではないので
 // **グローバル登録されていない**ため。import を落とすと Vue は解決できない
@@ -121,13 +120,10 @@ var (
 )
 
 func TestEveryPluginSlotHasAMountPoint(t *testing.T) {
-	fe := filepath.Join(repoRootDir(t), "third_party", "misskey", "packages", "frontend")
+	fe := filepath.Join(repoRootDir(t), "frontend", "packages", "frontend")
 	api := filepath.Join(fe, "src", "plugin-api.ts")
 	if _, err := os.Stat(api); err != nil {
-		if os.Getenv("MK_FRONTEND_GATES_REQUIRE_SUBMODULE") != "" {
-			require.NoError(t, err, "submodule を要求する job なのに %s を読めない", api)
-		}
-		t.Skipf("submodule が無い (checkout する job でのみ検査する)")
+		require.NoError(t, err, "frontend/ は追跡しているので、%s を読めないのはパスの誤り", api)
 	}
 
 	declared := declaredSlotNames(t, api)

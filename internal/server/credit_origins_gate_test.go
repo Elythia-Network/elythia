@@ -20,20 +20,13 @@ import (
 // それを弾いて壊れた画像に戻る — **その状態は 62 枚が全滅していた #2892 以前と
 // 同じで、誰も気付かないまま恒久化する**。
 //
-// **submodule を checkout する job でしか動かせない。** `test-shards` は
-// `third_party/misskey` を取らないので、そこでは skip する。ただし skip は
-// 成功として扱われるので、**submodule がある前提の job では
-// `MK_FRONTEND_GATES_REQUIRE_SUBMODULE` を渡して skip を禁じる**
-// (`plugin-tests` の `MK_PLUGIN_TESTS_REQUIRE_DB` と同じ形)。`make frontend-check`
-// がそれを渡す。
+// **frontend/ は本体で追跡している (#3379) ので skip しない。** 読めないのはパスの
+// 誤りで、required の `test` で落ちる。
 func TestCreditImageOriginsCoverAboutMisskey(t *testing.T) {
-	rel := "third_party/misskey/packages/frontend/src/pages/about-misskey.vue"
+	rel := "frontend/packages/frontend/src/pages/about-misskey.vue"
 	body, err := os.ReadFile(filepath.Join(repoRootDir(t), rel))
 	if err != nil {
-		if os.Getenv("MK_FRONTEND_GATES_REQUIRE_SUBMODULE") != "" {
-			require.NoError(t, err, "submodule を要求する job なのに %s を読めない", rel)
-		}
-		t.Skipf("%s が無い (submodule を checkout する job でのみ検査する)", rel)
+		require.NoError(t, err, "frontend/ は追跡しているので、%s を読めないのはパスの誤り", rel)
 	}
 
 	// 静的な `src="https://..."` (メンバー 6 + スポンサー 6) と、`patronsWithIcon` の

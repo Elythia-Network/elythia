@@ -53,15 +53,12 @@ var lineCommentRe = regexp.MustCompile(`(?m)//.*$`)
 // どちらも偽陽性 (検査していないのに落ちる) で、現 corpus では起きない。
 // 起きたら行を分けること。
 func TestReactionLongPressIsWired(t *testing.T) {
-	root := filepath.Join(repoRootDir(t), "third_party", "misskey", "packages", "frontend")
+	root := filepath.Join(repoRootDir(t), "frontend", "packages", "frontend")
 	component := filepath.Join(root, "src", "components", "MkReactionsViewer.reaction.vue")
 	utility := filepath.Join(root, "src", "utility", "long-press.ts")
 
 	if _, err := os.Stat(component); err != nil {
-		if os.Getenv("MK_FRONTEND_GATES_REQUIRE_SUBMODULE") != "" {
-			require.NoError(t, err, "submodule を要求する job なのに %s を読めない", component)
-		}
-		t.Skipf("submodule が無い (checkout する job でのみ検査する)")
+		require.NoError(t, err, "frontend/ は追跡しているので、%s を読めないのはパスの誤り", component)
 	}
 
 	_, err := os.Stat(utility)
@@ -117,14 +114,11 @@ func stripComments(src string) string {
 //   - コンポーネントの配線 (import / 呼び出し / 設定の読み出し / 押せるかの判定)
 //   - 設定の定義と設定画面 (`preferences/def.ts` / `pages/settings/preferences.vue`)
 func TestReactableRemoteReactionIsWired(t *testing.T) {
-	root := filepath.Join(repoRootDir(t), "third_party", "misskey", "packages", "frontend")
+	root := filepath.Join(repoRootDir(t), "frontend", "packages", "frontend")
 	component := filepath.Join(root, "src", "components", "MkReactionsViewer.reaction.vue")
 
 	if _, err := os.Stat(component); err != nil {
-		if os.Getenv("MK_FRONTEND_GATES_REQUIRE_SUBMODULE") != "" {
-			require.NoError(t, err, "submodule を要求する job なのに %s を読めない", component)
-		}
-		t.Skipf("submodule が無い (checkout する job でのみ検査する)")
+		require.NoError(t, err, "frontend/ は追跡しているので、%s を読めないのはパスの誤り", component)
 	}
 
 	utility := filepath.Join(root, "src", "utility", "reaction-alternative.ts")
