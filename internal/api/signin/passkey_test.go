@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/labstack/echo/v4"
 	"github.com/shiroha-a/mk/internal/api/signin"
 	"github.com/shiroha-a/mk/internal/core/twofactor"
 	"github.com/shiroha-a/mk/internal/model"
+	"github.com/shiroha-a/mk/internal/server/middleware"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
@@ -107,11 +110,26 @@ func TestSigninWithPasskey_VerifyBadCredential(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
-// JSON body が壊れている場合は 400。
+// JSON body が壊れている場合は、本番では handler の前で JSONBodyParse が
+// Fastify の FST_ERR_CTP_INVALID_JSON_BODY を返す (本家も handler の前で
+// body を parse する)。handler を直接呼んだときは 400 の HTTPError を返し、
+// 本家に無い独自の id (`ed1d7571-…`) の本文は書かない (#3330)。
 func TestSigninWithPasskey_BadBody(t *testing.T) {
 	h, _ := newTestHandler(t)
-	rec := doPost(h.SigninWithPasskey, `not-json`)
+
+	rec := doPost(middleware.JSONBodyParse()(h.SigninWithPasskey), `not-json`)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"code":"FST_ERR_CTP_INVALID_JSON_BODY"`)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/signin-with-passkey", strings.NewReader(`not-json`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	direct := httptest.NewRecorder()
+	err := h.SigninWithPasskey(e.NewContext(req, direct))
+	var he *echo.HTTPError
+	require.ErrorAs(t, err, &he)
+	assert.Equal(t, http.StatusBadRequest, he.Code)
+	assert.NotContains(t, direct.Body.String(), "ed1d7571")
 }
 
 // Step 1 中に entropy 枯渇 → 500。readRandom seam を差し替える。

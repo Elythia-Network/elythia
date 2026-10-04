@@ -211,14 +211,15 @@ func TestProcess_FollowAlreadyFollowing(t *testing.T) {
 }
 
 func TestProcess_FollowUnknownFollowee(t *testing.T) {
-	p, _, _, _ := newProcessor(t, aliceActor)
+	p, _, followingRepo, _ := newProcessor(t, aliceActor)
 	body := []byte(`{
 		"type": "Follow",
 		"actor": "https://remote.example/users/alice",
 		"object": "https://example.com/users/ghost"
 	}`)
-	err := p.Process(body)
-	assert.Error(t, err)
+	// 本家 follow() は 'skip: followee not found' で ack する (#3330)。
+	require.NoError(t, p.Process(body))
+	assert.Empty(t, followingRepo.Followings)
 }
 
 func TestProcess_FollowResolveError(t *testing.T) {
@@ -386,8 +387,8 @@ func TestProcess_UndoUnknownFollowee(t *testing.T) {
 		"actor": "https://remote.example/users/alice",
 		"object": {"type":"Follow","actor":"x","object":"https://example.com/users/ghost"}
 	}`)
-	err := p.Process(undo)
-	assert.Error(t, err)
+	// 本家 undoFollow() は 'skip: followee not found' で ack する (#3330)。
+	require.NoError(t, p.Process(undo))
 }
 
 func TestProcess_UndoMissingObject(t *testing.T) {
@@ -494,7 +495,7 @@ func TestProcess_UndoNestedObjectInvalid(t *testing.T) {
 // 自体は読まない。効いているのは型エラーを握ることだけ。)
 func TestProcess_UndoFollow_InnerActorEmbeddedObject(t *testing.T) {
 	p, repo, followingRepo, _ := newProcessor(t, aliceActor)
-	// **local user は本番と同じく uri NULL。** `resolveTargetUser` の
+	// **local user は本番と同じく uri NULL。** `userFromAPID` の
 	// local-ID 分岐を通すために base URL を配線する。
 	p.SetLocalBaseURL("https://example.com")
 	// remote follower alice が local followee bob をフォロー済み。
@@ -617,7 +618,7 @@ func newProcessorWithBlocking(t *testing.T) (*federation.Processor, *testutil.Mo
 func TestProcess_BlockHappyPath(t *testing.T) {
 	p, repo, blockingRepo := newProcessorWithBlocking(t)
 	// 実本番のローカルユーザー row は user.uri が NULL なので、この条件で
-	// test する (handleBlock が resolveTargetUser で ID 解決することを検証)。
+	// test する (handleBlock が userFromAPID で ID 解決することを検証)。
 	p.SetLocalBaseURL("https://example.com")
 	repo.Users["bob"] = &model.User{ID: "bob", Username: "bob"}
 

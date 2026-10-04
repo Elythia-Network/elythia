@@ -210,3 +210,61 @@ func idText(e ast.Expr) string {
 	}
 	return "<expr>"
 }
+
+// TestRetiredCustomIDIsGone fails when a non-test file under internal/api
+// still carries ed1d7571-a3ac-4370-899c-0dbe5e230cc8 as a string literal, in
+// any response shape (apierr.Error or a bare {error: {id}} body).
+//
+// この id は mk-go が発番した独自のもので、本家のどの応答にも無い。
+// TestInvalidParamIDLint は apierr.Error / ErrorWithKind で組む INVALID_PARAM
+// しか見ないので、signin の errBody のような `{error: {id}}` だけの本文で返して
+// いた箇所 (signin-flow / signin-with-passkey、#3330) は拾えなかった。
+func TestRetiredCustomIDIsGone(t *testing.T) {
+	const retired = "ed1d7571-a3ac-4370-899c-0dbe5e230cc8"
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// CLAUDE.md Section 4: ディスクではなく git ls-files で列挙する。
+	cmd := exec.Command("git", "ls-files", "--", "*.go")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git ls-files: %v", err)
+	}
+	scanned := map[string]bool{}
+	var hits []string
+	fset := token.NewFileSet()
+	for _, rel := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if rel == "" || strings.HasSuffix(rel, "_test.go") {
+			continue
+		}
+		f, perr := parser.ParseFile(fset, filepath.Join(root, rel), nil, 0)
+		if perr != nil {
+			t.Fatal(perr)
+		}
+		rel = filepath.ToSlash(rel)
+		scanned[rel] = true
+		ast.Inspect(f, func(n ast.Node) bool {
+			lit, isLit := n.(*ast.BasicLit)
+			if !isLit || lit.Kind != token.STRING {
+				return true
+			}
+			if s, uerr := strconv.Unquote(lit.Value); uerr == nil && strings.Contains(s, retired) {
+				hits = append(hits, rel+":"+strconv.Itoa(fset.Position(lit.Pos()).Line))
+			}
+			return true
+		})
+	}
+	// 抽出が空振りしていないことの下限。#3330 で id を外した file を名指しで
+	// 要求する。
+	for _, want := range []string{"signin/handler.go", "signin/passkey.go", "auth/handler.go"} {
+		if !scanned[want] {
+			t.Errorf("%s was not scanned (the extraction is broken)", want)
+		}
+	}
+	sort.Strings(hits)
+	if len(hits) > 0 {
+		t.Errorf("mk-go's own id %s is still returned (upstream has no such id):\n  - %s", retired, strings.Join(hits, "\n  - "))
+	}
+}
