@@ -5,16 +5,19 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"io"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/labstack/echo/v4"
 	"github.com/shiroha-a/mk/internal/api/apierr"
+	"github.com/shiroha-a/mk/internal/core/twofactor"
 	"github.com/shiroha-a/mk/internal/model"
 	"github.com/shiroha-a/mk/internal/repository"
-	"github.com/shiroha-a/mk/internal/server/middleware"
 )
 
 // SigninWithPasskey handles POST /api/signin-with-passkey.
@@ -79,75 +82,145 @@ func (h *Handler) SigninWithPasskey(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, errBody("1658cc2e-4495-461f-aee4-d403cdf073c1"))
 	}
 
-	httpReq := wrapWebAuthnRequest(c.Request(), credential)
+	httpReq := twofactor.CredentialRequest(c.Request(), credential)
 
-	user, cred, err := h.webauthnSvc.FinishPasskeyLogin(c.Request().Context(), passkeyCtx, httpReq, h.resolvePasskeyUser)
+	// 鍵の持ち主が引けなかったとき (user 行が無いか remote) は、本家と同じく
+	// 検証を通したあとで 652f899f にする。
+	ownerMissing := false
+	credID, credIDKind := passkeyCredentialID(credential)
+	resolve := func(id string) (*model.User, []*model.UserSecurityKey, error) {
+		u, keys, missing, err := h.resolvePasskeyKey(id, credIDKind)
+		ownerMissing = missing
+		return u, keys, err
+	}
+	user, cred, err := h.webauthnSvc.FinishPasskeyLogin(c.Request().Context(), passkeyCtx, credID, httpReq, resolve)
 	if err != nil {
-		// frontend には汎用 403 を返すが backend log には何で落ちたかを残す
-		// (#707 の調査用)。原因例: challenge mismatch / origin / RPID 不一致 /
-		// credential format problem / user_handle 解決失敗。
+		// root cause (challenge mismatch / origin / RPID 不一致 / credential
+		// format problem 等) は backend log に残す (#707 の調査用)。
 		slog.Warn("signin: webauthn FinishPasskeyLogin failed", "context", passkeyCtx, "err", err)
-		return c.JSON(http.StatusForbidden, errBody("b18c89a7-5b5e-4cec-bb5b-0419f332d430"))
+		if id, ok := passkeyFailureID(err); ok {
+			return c.JSON(http.StatusForbidden, errBody(id))
+		}
+		// **Redis / DB の障害は認証の失敗にしない** (#2792)。本家は
+		// IdentifiableError でない例外も同じ catch で 403 にし、id が
+		// undefined の `{"error":{}}` を返す。
+		return apierr.JSONInternalError(c)
+	}
+	if ownerMissing {
+		user = nil
 	}
 	return h.finishPasskeySignin(c, user, cred)
 }
 
-// readPasskeyBody returns the raw `credential` and `context` values of a
-// signin-with-passkey body the way upstream reads `body['credential']` and
-// `body.context` off Fastify's request.body. A body that is not a JSON
-// object (an array, a string, a number, a boolean, null, a text/plain body
-// or no body) has neither value. It returns an error only for a JSON body
-// that is not valid JSON, which JSONBodyParse answers before the handler in
-// production.
+// passkeyFailureID maps a FinishPasskeyLogin error to the error id upstream
+// SigninWithPasskeyApiService answers with 403. It reports false for errors
+// that are not authentication failures (Redis or the database failing).
 //
-// 本家は body の型を検査しない (endpoint-base の外なので ajv も通らない)。
+// 本家は verifySignInWithPasskeyAuthentication が投げた IdentifiableError の
+// id をそのまま返し (`SigninWithPasskeyApiService.ts` の catch)、null が返った
+// ときだけ 932c904e にする。以前の mk-go は全て b18c89a7 にしていた (#3330)。
+func passkeyFailureID(err error) (string, bool) {
+	switch {
+	case errors.Is(err, twofactor.ErrWebAuthnSessionNotFound):
+		return "2d16e51c-007b-4edd-afd2-f7dd02c947f6", true
+	case errors.Is(err, twofactor.ErrWebAuthnUnknownKey):
+		return "36b96a7d-b547-412d-aeed-2d611cdc8cdc", true
+	case errors.Is(err, twofactor.ErrWebAuthnAssertionNotVerified):
+		return "932c904e-9460-45b7-9ce6-7ed33be7eb2c", true
+	case errors.Is(err, twofactor.ErrWebAuthnVerificationFailed):
+		return "b18c89a7-5b5e-4cec-bb5b-0419f332d430", true
+	}
+	return "", false
+}
+
+// credentialIDKind classifies the `id` member of a passkey credential.
+type credentialIDKind int
+
+const (
+	// credentialIDMissing: the credential is not an object, or its id is
+	// absent or null.
+	credentialIDMissing credentialIDKind = iota
+	// credentialIDNotString: the id is present but not a string.
+	credentialIDNotString
+	// credentialIDString: the id is a string.
+	credentialIDString
+)
+
+// passkeyCredentialID returns the `id` member of the credential JSON, which
+// upstream looks the stored security key up by (`findOneBy({ id: response.id })`).
+func passkeyCredentialID(credential json.RawMessage) (string, credentialIDKind) {
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(credential, &obj) != nil {
+		return "", credentialIDMissing
+	}
+	raw, ok := obj["id"]
+	if !ok || string(bytes.TrimSpace(raw)) == "null" {
+		return "", credentialIDMissing
+	}
+	var id string
+	if json.Unmarshal(raw, &id) != nil {
+		return "", credentialIDNotString
+	}
+	return id, credentialIDString
+}
+
+// readPasskeyBody returns the raw `credential` and `context` members of a
+// signin-with-passkey body (see readSigninObject).
+//
 // 以前は c.Bind で struct に読み、配列の body や文字列でない context を独自の
 // id (`ed1d7571-…`) の 400 にしていたが、本家では配列や文字列の body は
 // credential が undefined になって challenge を返し、文字列でない context は
 // 1658cc2e の 400 になる (#3330)。
-// 本家で null や body 無しは `body['credential']` が TypeError で 500 になる。
-// mk-go はそれを再現せず、credential が無いものとして challenge を返す
-// (docs/divergence.md)。
 func readPasskeyBody(c echo.Context) (credential, ctx json.RawMessage, err error) {
-	req := c.Request()
-	if req.Body == nil || !middleware.IsJSONContentType(req.Header.Get(echo.HeaderContentType)) {
-		return nil, nil, nil
-	}
-	body, err := io.ReadAll(req.Body)
+	obj, err := readSigninObject(c)
 	if err != nil {
-		return nil, nil, echo.NewHTTPError(http.StatusBadRequest).SetInternal(err)
-	}
-	if len(bytes.TrimSpace(body)) == 0 {
-		return nil, nil, nil
-	}
-	if !json.Valid(body) {
-		return nil, nil, echo.NewHTTPError(http.StatusBadRequest, "invalid JSON body")
-	}
-	var obj map[string]json.RawMessage
-	if json.Unmarshal(body, &obj) != nil {
-		return nil, nil, nil
+		return nil, nil, err
 	}
 	return obj["credential"], obj["context"], nil
 }
 
-// resolvePasskeyUser is the PasskeyUserResolver passed into
-// twofactor.FinishPasskeyLogin. クロージャを named method として切り出してある
-// のは、resolver の error 伝搬経路を unit test から直接 exercise しやすくする
-// ため。
-func (h *Handler) resolvePasskeyUser(_, userHandle []byte) (*model.User, []*model.UserSecurityKey, error) {
-	userID := string(userHandle)
-	u, ferr := h.userRepo.FindByID(userID)
-	if ferr != nil {
-		return nil, nil, ferr
+// resolvePasskeyKey is the PasskeyKeyResolver passed into
+// twofactor.FinishPasskeyLogin. It looks the stored security key up by its
+// credential id and returns the key's owner with that key alone, which is
+// the key upstream verifies the assertion with. ownerMissing reports that
+// the key exists but its owner is not a local user; the returned user is
+// then a stand-in carrying the owner id so that the assertion can still be
+// verified before the handler answers 652f899f.
+//
+// クロージャではなく named method にしてあるのは、分岐を unit test から
+// 直接叩けるようにするため。
+func (h *Handler) resolvePasskeyKey(credentialID string, kind credentialIDKind) (user *model.User, keys []*model.UserSecurityKey, ownerMissing bool, err error) {
+	switch kind {
+	case credentialIDMissing:
+		// 本家は id が無いと `findOneBy({ id: undefined })` の条件を TypeORM が
+		// 落として任意の鍵を返し、@simplewebauthn が `Missing credential ID` で
+		// throw するので b18c89a7 になる (鍵が 1 件も無い instance だけ 36b96a7d)。
+		return nil, nil, false, fmt.Errorf("%w: credential id missing", twofactor.ErrWebAuthnVerificationFailed)
+	case credentialIDNotString:
+		return nil, nil, false, fmt.Errorf("%w: credential id is not a string", twofactor.ErrWebAuthnUnknownKey)
 	}
-	if h.securityKeyRepo == nil {
-		return u, nil, nil
+	// 列に入らない値 (NUL / 不正な UTF-8) はどの鍵の id とも一致しない。
+	// DB に渡すと PostgreSQL がエラーにして 500 になる。
+	if h.securityKeyRepo == nil || !utf8.ValidString(credentialID) || strings.ContainsRune(credentialID, 0) {
+		return nil, nil, false, twofactor.ErrWebAuthnUnknownKey
 	}
-	keys, kerr := h.securityKeyRepo.ListByUser(userID)
-	if kerr != nil {
-		return nil, nil, kerr
+	key, err := h.securityKeyRepo.FindByID(credentialID)
+	if repository.IsNotFound(err) {
+		return nil, nil, false, twofactor.ErrWebAuthnUnknownKey
 	}
-	return u, keys, nil
+	if err != nil {
+		return nil, nil, false, err
+	}
+	keys = []*model.UserSecurityKey{key}
+	u, err := h.userRepo.FindByID(key.UserID)
+	if err != nil && !repository.IsNotFound(err) {
+		return nil, nil, false, err
+	}
+	// 本家は `findOneBy({ id, host: IsNull() })` が null なら 652f899f。
+	if err != nil || !u.IsLocal() {
+		return &model.User{ID: key.UserID}, keys, true, nil
+	}
+	return u, keys, false, nil
 }
 
 // finishPasskeySignin handles the post-verify branch of /api/signin-with-passkey:

@@ -2,6 +2,7 @@ package signin
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/labstack/echo/v4"
+	"github.com/shiroha-a/mk/internal/core/twofactor"
 	"github.com/shiroha-a/mk/internal/misc/password"
 	"github.com/shiroha-a/mk/internal/model"
 	"github.com/shiroha-a/mk/internal/testutil"
@@ -75,13 +77,13 @@ func TestNewPasskeyContext_RandError(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// errSecurityKeyRepo は ListByUser で err を返す stub。resolvePasskeyUser の
-// kerr 伝搬経路を exercise するために使う。
+// errSecurityKeyRepo は FindByID で DB 障害を返す stub。resolvePasskeyKey が
+// 障害を unknown key (36b96a7d) に丸めないことを確かめるために使う。
 type errSecurityKeyRepo struct{}
 
 func (errSecurityKeyRepo) Create(*model.UserSecurityKey) error { return nil }
 func (errSecurityKeyRepo) FindByID(string) (*model.UserSecurityKey, error) {
-	return nil, testutil.ErrNotFound
+	return nil, assert.AnError
 }
 func (errSecurityKeyRepo) ListByUser(string) ([]*model.UserSecurityKey, error) {
 	return nil, assert.AnError
@@ -92,48 +94,153 @@ func (errSecurityKeyRepo) Delete(string, string) error             { return nil 
 func (errSecurityKeyRepo) DeleteByUser(string) error               { return nil }
 func (errSecurityKeyRepo) CountByUser(string) (int64, error)       { return 0, nil }
 
-// resolvePasskeyUser は user 不在 / securityKeyRepo nil / ListByUser err / 正常
-// の 4 分岐を持つ。webauthn 経由では signature verify を通せないので named method
-// として直接 unit test する (#705)。
-func TestResolvePasskeyUser_UserNotFound(t *testing.T) {
-	repo := testutil.NewMockUserRepository()
-	h := NewHandler(repo)
-	_, _, err := h.resolvePasskeyUser(nil, []byte("ghost"))
-	assert.Error(t, err)
-}
-
-func TestResolvePasskeyUser_NoSecurityKeyRepo(t *testing.T) {
+func newResolveHandler(t *testing.T) (*Handler, *testutil.MockUserRepository) {
+	t.Helper()
 	repo := testutil.NewMockUserRepository()
 	repo.Users["u1"] = &model.User{ID: "u1"}
 	h := NewHandler(repo)
-	u, keys, err := h.resolvePasskeyUser(nil, []byte("u1"))
-	assert.NoError(t, err)
-	assert.NotNil(t, u)
-	assert.Nil(t, keys)
+	h.SetWebAuthn(nil, &inMemorySKInternal{keys: map[string][]*model.UserSecurityKey{
+		"u1": {{ID: "AAEC", UserID: "u1"}, {ID: "AwQF", UserID: "u1"}},
+	}})
+	return h, repo
 }
 
-func TestResolvePasskeyUser_ListByUserError(t *testing.T) {
-	repo := testutil.NewMockUserRepository()
-	repo.Users["u1"] = &model.User{ID: "u1"}
-	h := NewHandler(repo)
-	h.SetWebAuthn(nil, errSecurityKeyRepo{})
-	_, _, err := h.resolvePasskeyUser(nil, []byte("u1"))
-	assert.Error(t, err)
+// resolvePasskeyKey looks the key up by the credential id like upstream's
+// `findOneBy({ id: response.id })` and hands only that key to the verifier.
+func TestResolvePasskeyKey_Success(t *testing.T) {
+	h, _ := newResolveHandler(t)
+	u, keys, missing, err := h.resolvePasskeyKey("AwQF", credentialIDString)
+	require.NoError(t, err)
+	assert.False(t, missing)
+	assert.Equal(t, "u1", u.ID)
+	require.Len(t, keys, 1)
+	assert.Equal(t, "AwQF", keys[0].ID)
 }
 
-func TestResolvePasskeyUser_Success(t *testing.T) {
-	repo := testutil.NewMockUserRepository()
-	repo.Users["u1"] = &model.User{ID: "u1"}
-	h := NewHandler(repo)
-	h.SetWebAuthn(nil, &inMemorySKInternal{
-		keys: map[string][]*model.UserSecurityKey{
-			"u1": {{ID: "AAEC"}},
-		},
+func TestResolvePasskeyKey_UnknownKey(t *testing.T) {
+	h, _ := newResolveHandler(t)
+	for name, id := range map[string]string{
+		"not stored":   "ZZZZ",
+		"empty string": "",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, _, _, err := h.resolvePasskeyKey(id, credentialIDString)
+			assert.ErrorIs(t, err, twofactor.ErrWebAuthnUnknownKey)
+		})
+	}
+	// 列に入らない値は DB に渡さない。渡すと PostgreSQL のエラーになるので、
+	// FindByID が失敗する stub で「引いていない」ことを確かめる。
+	for name, id := range map[string]string{
+		"NUL":          "AA\x00EC",
+		"invalid utf8": "AA\xffEC",
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := NewHandler(testutil.NewMockUserRepository())
+			h.SetWebAuthn(nil, errSecurityKeyRepo{})
+			_, _, _, err := h.resolvePasskeyKey(id, credentialIDString)
+			assert.ErrorIs(t, err, twofactor.ErrWebAuthnUnknownKey)
+		})
+	}
+	t.Run("id is not a string", func(t *testing.T) {
+		_, _, _, err := h.resolvePasskeyKey("", credentialIDNotString)
+		assert.ErrorIs(t, err, twofactor.ErrWebAuthnUnknownKey)
 	})
-	u, keys, err := h.resolvePasskeyUser(nil, []byte("u1"))
-	assert.NoError(t, err)
-	assert.NotNil(t, u)
-	assert.Len(t, keys, 1)
+	t.Run("no key repository", func(t *testing.T) {
+		h := NewHandler(testutil.NewMockUserRepository())
+		_, _, _, err := h.resolvePasskeyKey("AAEC", credentialIDString)
+		assert.ErrorIs(t, err, twofactor.ErrWebAuthnUnknownKey)
+	})
+}
+
+// A missing id makes upstream's TypeORM drop the condition and @simplewebauthn
+// throw `Missing credential ID`, so it is a verification failure (b18c89a7),
+// not an unknown key.
+func TestResolvePasskeyKey_MissingIDIsVerificationFailure(t *testing.T) {
+	h, _ := newResolveHandler(t)
+	_, _, _, err := h.resolvePasskeyKey("", credentialIDMissing)
+	assert.ErrorIs(t, err, twofactor.ErrWebAuthnVerificationFailed)
+	assert.NotErrorIs(t, err, twofactor.ErrWebAuthnUnknownKey)
+}
+
+func TestResolvePasskeyKey_DatabaseErrorsAreNotAuthFailures(t *testing.T) {
+	t.Run("key lookup", func(t *testing.T) {
+		h := NewHandler(testutil.NewMockUserRepository())
+		h.SetWebAuthn(nil, errSecurityKeyRepo{})
+		_, _, _, err := h.resolvePasskeyKey("AAEC", credentialIDString)
+		assert.ErrorIs(t, err, assert.AnError)
+		assert.NotErrorIs(t, err, twofactor.ErrWebAuthnUnknownKey)
+	})
+	t.Run("owner lookup", func(t *testing.T) {
+		h, repo := newResolveHandler(t)
+		repo.FindErr = assert.AnError
+		_, _, _, err := h.resolvePasskeyKey("AAEC", credentialIDString)
+		assert.ErrorIs(t, err, assert.AnError)
+	})
+}
+
+// The owner not being a local user is reported after verification
+// (652f899f), so the resolver hands back a stand-in with the owner id.
+func TestResolvePasskeyKey_OwnerMissing(t *testing.T) {
+	t.Run("no user row", func(t *testing.T) {
+		h, repo := newResolveHandler(t)
+		delete(repo.Users, "u1")
+		u, keys, missing, err := h.resolvePasskeyKey("AAEC", credentialIDString)
+		require.NoError(t, err)
+		assert.True(t, missing)
+		assert.Equal(t, "u1", u.ID)
+		assert.Len(t, keys, 1)
+	})
+	t.Run("remote user", func(t *testing.T) {
+		h, repo := newResolveHandler(t)
+		host := "remote.example"
+		repo.Users["u1"].Host = &host
+		u, _, missing, err := h.resolvePasskeyKey("AAEC", credentialIDString)
+		require.NoError(t, err)
+		assert.True(t, missing)
+		assert.Nil(t, u.Host, "the stand-in must not be the remote user row")
+	})
+}
+
+func TestPasskeyCredentialID(t *testing.T) {
+	cases := []struct {
+		cred string
+		id   string
+		kind credentialIDKind
+	}{
+		{`{"id":"AAEC"}`, "AAEC", credentialIDString},
+		{`{"id":""}`, "", credentialIDString},
+		{`{"id":null}`, "", credentialIDMissing},
+		{`{"id":1}`, "", credentialIDNotString},
+		{`{"id":{"a":1}}`, "", credentialIDNotString},
+		{`{}`, "", credentialIDMissing},
+		{`true`, "", credentialIDMissing},
+		{`"AAEC"`, "", credentialIDMissing},
+		{`[]`, "", credentialIDMissing},
+	}
+	for _, tc := range cases {
+		t.Run(tc.cred, func(t *testing.T) {
+			id, kind := passkeyCredentialID(json.RawMessage(tc.cred))
+			assert.Equal(t, tc.id, id)
+			assert.Equal(t, tc.kind, kind)
+		})
+	}
+}
+
+func TestPasskeyFailureID(t *testing.T) {
+	cases := map[error]string{
+		twofactor.ErrWebAuthnSessionNotFound:      "2d16e51c-007b-4edd-afd2-f7dd02c947f6",
+		twofactor.ErrWebAuthnUnknownKey:           "36b96a7d-b547-412d-aeed-2d611cdc8cdc",
+		twofactor.ErrWebAuthnAssertionNotVerified: "932c904e-9460-45b7-9ce6-7ed33be7eb2c",
+		twofactor.ErrWebAuthnVerificationFailed:   "b18c89a7-5b5e-4cec-bb5b-0419f332d430",
+		twofactor.ErrWebAuthnCounterRollback:      "b18c89a7-5b5e-4cec-bb5b-0419f332d430",
+	}
+	for err, want := range cases {
+		id, ok := passkeyFailureID(fmt.Errorf("wrapped: %w", err))
+		assert.True(t, ok, err.Error())
+		assert.Equal(t, want, id, err.Error())
+	}
+	_, ok := passkeyFailureID(assert.AnError)
+	assert.False(t, ok, "infrastructure errors are not authentication failures")
 }
 
 // inMemorySKInternal: helpers_test.go (内部 package) からも使える簡易 stub。
@@ -143,7 +250,14 @@ type inMemorySKInternal struct {
 }
 
 func (r *inMemorySKInternal) Create(*model.UserSecurityKey) error { return nil }
-func (r *inMemorySKInternal) FindByID(string) (*model.UserSecurityKey, error) {
+func (r *inMemorySKInternal) FindByID(id string) (*model.UserSecurityKey, error) {
+	for _, keys := range r.keys {
+		for _, k := range keys {
+			if k.ID == id {
+				return k, nil
+			}
+		}
+	}
 	return nil, testutil.ErrNotFound
 }
 func (r *inMemorySKInternal) ListByUser(userID string) ([]*model.UserSecurityKey, error) {

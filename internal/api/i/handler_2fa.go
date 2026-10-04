@@ -1,11 +1,9 @@
 package i
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -20,21 +18,6 @@ import (
 	"github.com/shiroha-a/mk/internal/server/middleware"
 	"gorm.io/gorm"
 )
-
-// wrapWebAuthnRequest builds a fresh *http.Request whose body is the
-// browser-supplied attestation/assertion JSON. go-webauthn parses the body
-// directly off the request, so we cannot pass through the original Echo
-// request (its body has already been consumed by Bind()).
-func wrapWebAuthnRequest(orig *http.Request, body json.RawMessage) (*http.Request, error) {
-	req, err := http.NewRequestWithContext(orig.Context(), http.MethodPost, orig.URL.String(), bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header = orig.Header.Clone()
-	req.Header.Set("Content-Type", "application/json")
-	req.Body = io.NopCloser(bytes.NewReader(body))
-	return req, nil
-}
 
 // TwoFARegister handles POST /api/i/2fa/register.
 // TOTP秘密鍵を生成してtempSecretに保存、QRコードURLを返す。
@@ -535,10 +518,7 @@ func (h *Handler) TwoFAKeyDone(c echo.Context) error {
 
 	// go-webauthn の FinishRegistration は *http.Request からボディを読むので、
 	// JSON-RPC 経由で受け取った credential を新しい http.Request にラップして渡す。
-	httpReq, err := wrapWebAuthnRequest(c.Request(), req.Credential)
-	if err != nil {
-		return apierr.JSONInvalidParam(c)
-	}
+	httpReq := twofactor.CredentialRequest(c.Request(), req.Credential)
 	cred, err := h.webauthnSvc.FinishRegistration(c.Request().Context(), user, existing, httpReq)
 	if err != nil {
 		slog.Warn("2fa: webauthn FinishRegistration failed", "userId", user.ID, "err", err)

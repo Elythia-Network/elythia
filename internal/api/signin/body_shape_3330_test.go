@@ -102,12 +102,13 @@ func TestSigninWithPasskey_NonStringContextIsInvalidContext(t *testing.T) {
 }
 
 // A truthy credential that is not an assertion object is handed to the
-// verifier like upstream does, which fails with b18c89a7.
+// verifier like upstream does, which fails with b18c89a7 (its `id` is
+// undefined, so @simplewebauthn throws `Missing credential ID`).
 func TestSigninWithPasskey_TruthyNonObjectCredentialIsVerified(t *testing.T) {
 	h := newPasskeyTestHandler(t)
 	for _, cred := range []string{`true`, `"x"`, `1`, `[]`} {
 		t.Run(cred, func(t *testing.T) {
-			body := `{"credential":` + cred + `,"context":"00112233445566778899aabbccddeeff"}`
+			body := `{"credential":` + cred + `,"context":"` + passkeyChallengeContext(t, h) + `"}`
 			rec := doPost(h.SigninWithPasskey, body)
 			require.Equal(t, http.StatusForbidden, rec.Code)
 			assert.Contains(t, rec.Body.String(), "b18c89a7-5b5e-4cec-bb5b-0419f332d430")
@@ -123,8 +124,7 @@ func TestSigninFlow_KeysMatchExactly(t *testing.T) {
 		h, repo := newTestHandler(t)
 		createTestUser(repo, "alice", "pass")
 		rec := doPost(h.SigninFlow, `{"USERNAME":"alice","password":"pass"}`)
-		require.Equal(t, http.StatusBadRequest, rec.Code)
-		assert.Contains(t, rec.Body.String(), "6cc579cc-885d-43d8-95c2-b8c7fc963280")
+		assertEmpty400(t, rec)
 	})
 	t.Run("legacy signin: USERNAME is not username", func(t *testing.T) {
 		h, repo := newTestHandler(t)
