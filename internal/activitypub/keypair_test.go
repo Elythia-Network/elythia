@@ -18,7 +18,8 @@ func TestGenerateAndParseKeypair(t *testing.T) {
 	// 秘密鍵は PKCS#8 (`BEGIN PRIVATE KEY`) でなければならない。upstream の署名は
 	// Rust 製 slacc の RsaKeyPair.fromPem() で読み、**PKCS#1 を受け付けない**。
 	// PKCS#1 で出すと、mk-go が作ったユーザーを TS に引き渡したとき送信側の連合が
-	// 全滅する (#2379 の経路検証で発見、#2378 で修正)。
+	// 全滅する (#2379 の経路検証で発見、#2378 で修正)。TS へ引き渡すこと (復路) は
+	// 保証しない (#3191) が、本家と同じ形式で出しておく。mk-go 自身は両方を読める。
 	assert.Contains(t, priv, "BEGIN PRIVATE KEY")
 	assert.NotContains(t, priv, "RSA PRIVATE KEY", "PKCS#1 は TS が読めない")
 	assert.Contains(t, pub, "PUBLIC KEY")

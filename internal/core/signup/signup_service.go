@@ -466,8 +466,8 @@ func (s *Service) SignupWithHost(username, password string, isInitialSetup bool,
 		AvatarDecorations: []byte("[]"),
 		// drop-in 互換 (#785): Misskey TS と同じ意味で初回 signup user を
 		// isRoot=true でマークしておく。mk-go pure 経路では meta.rootUserId
-		// で root を判定するので冗長だが、TS との bidirectional drop-in を
-		// 担保するためマーカーを揃える。
+		// で root を判定するので冗長だが、TS から引き継いだ DB の root と同じ
+		// 形に揃えておく。
 		IsRoot: isInitialSetup,
 		Host:   host,
 	}

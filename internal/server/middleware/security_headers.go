@@ -10,7 +10,7 @@ import (
 //
 // **`includeSubDomains` は付けない。** upstream が付けていないのに mk-go だけ
 // 付けると、同じドメインの別サブドメインを平文で運用している構成を切替の瞬間に
-// 壊す。値を揃えておけば TS ↔ mk-go の往復で挙動が変わらない。
+// 壊す。値を揃えておけば TS から切り替えたときに挙動が変わらない。
 const hstsValue = "max-age=15552000; preload"
 
 // HSTS returns a GLOBAL middleware that sets `Strict-Transport-Security`.

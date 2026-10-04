@@ -25,9 +25,8 @@ const staticAssetCacheControl = "public, max-age=2592000, immutable"
 // 単体で開かれたときに何も実行できないようにする。`style-src 'unsafe-inline'` は
 // SVG が持つ inline style を壊さないための upstream 由来の緩和。
 //
-// 値は upstream の文字列そのまま。**独自に強めない。** これらの route は
-// drop-in で TS backend にも切り替わりうるので、mk-go でだけ厳しくすると
-// 「mk-go に載せると表示が壊れる」形の差になる。
+// 値は upstream の文字列そのまま。**独自に強めない。** mk-go でだけ厳しくすると、
+// TS から切り替えたときに「mk-go に載せると表示が壊れる」形の差になる。
 const assetCSP = "default-src 'none'; style-src 'unsafe-inline'"
 
 // serveStaticAssetDir mirrors echo.Echo.Static(prefix, root) but attaches

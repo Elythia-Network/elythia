@@ -211,8 +211,8 @@ type Meta struct {
 	// MinimumUsernameLength は新規登録で取れる username の最小文字数 (#3015)。
 	// **mk-go 独自** — upstream の `localUsernameSchema` は `^\w{1,20}$` 固定で
 	// 設定できない。既定 1 なので既存インスタンスの挙動は変わらない。
-	// 上限側は設定可能にしない (20 を超えると TS へ戻した瞬間に frontend で
-	// 弾かれる。#800 と同型)。
+	// 上限側は設定可能にしない。mk-go 自身の username の検証も 1〜20 文字で
+	// (signup の localUsernamePattern)、本家の frontend もその前提で作られている。
 	MinimumUsernameLength int `gorm:"column:minimumUsernameLength;default:1" json:"minimumUsernameLength"`
 
 	// DeepL (2)

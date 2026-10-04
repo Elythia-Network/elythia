@@ -860,8 +860,7 @@ func (s *Service) Upload(ctx context.Context, in UploadInput) (*model.DriveFile,
 		// upstream DriveService.save は useObjectStorage で true/false を
 		// 出し分ける。ここを true 固定にしていたため、オブジェクトストレージに
 		// 保存したファイルまで「ローカル保存」と記録され、`/files/:accessKey`
-		// がローカルを見に行って 404 になっていた (#2315)。TS へ切り戻した
-		// ときも FileServerService が同じ列を見るので drop-in にも効く。
+		// がローカルを見に行って 404 になっていた (#2315)。
 		StoredInternal:     storedInternal,
 		URL:                url,
 		ThumbnailURL:       thumbnailURL,

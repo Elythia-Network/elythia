@@ -20,6 +20,7 @@ type UserIP struct {
 	// LastSeenAt / ObservationCount are mk-go 独自列 (#3103)。`UNIQUE (userId, ip)`
 	// で 1 ペア 1 行しか持てないので、最終観測と観測回数を出すには列が要る。
 	// **純正はこの 2 列を知らない**ので DEFAULT を持たせてある (migration 000094)。
+	// TS へ戻したときに TS の INSERT が通るための DEFAULT で、復路は保証しない (#3191)。
 	LastSeenAt       time.Time `gorm:"column:lastSeenAt" json:"lastSeenAt"`
 	ObservationCount int       `gorm:"column:observationCount" json:"observationCount"`
 }

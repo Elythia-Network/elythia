@@ -1982,9 +1982,11 @@ func (h *Handler) maybeAutoGenerateVAPID(fields map[string]any) error {
 // other registration modes (mk-go, #3186).
 //
 // **有効な間は disableRegistration を立てる。** 外から見た値 (nodeinfo の
-// `openRegistrations` / `/api/meta` の `features.registration`) を本家と同じにするため
-// と、TS へ戻したときに招待制へ落とすため (新しい列は無視される)。利用者の指定より
-// 優先する — 閉じたまま登録が開いた値を残すと、TS へ戻したときに開く。
+// `openRegistrations` / `/api/meta` の `features.registration`) は registrationClosed と
+// OR を取って計算するのでこれが無くても閉じるが、admin/meta が返す生の
+// `disableRegistration` (本家の管理画面が読む値) も閉じた状態に揃える。利用者の指定より
+// 優先する。当初は TS へ戻したときに招待制へ落とすことも理由だったが、復路は保証
+// しなくなった (#3191)。
 //
 // **承認制は外さない。** 閉じている間も申請者が状態を照会できるように (照会は承認制の
 // 入口で、閉じている間も開けてある) と、解除したときに元の受け付け方へ戻れるように。

@@ -6,7 +6,8 @@
 //
 // upstream Misskey は全経路で cost 8 固定。mk-go は既定 10 で、運用者が
 // 設定で上げられる (bcrypt のハッシュは `$2a$NN$` に cost が埋まっているので、
-// **上げても drop-in で TS 側が検証できる**)。
+// **cost が混在しても同じ関数で検証できる**。TS から引き継いだハッシュ (cost 8) も
+// そのまま検証できる)。
 package password
 
 import (
