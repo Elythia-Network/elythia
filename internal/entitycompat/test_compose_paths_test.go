@@ -219,3 +219,40 @@ func isTrackedPath(tracked map[string]bool, p string) bool {
 	}
 	return false
 }
+
+// operatorComposeFiles are the compose files distributed to operators. They
+// are the only compose files allowed at the repository root.
+var operatorComposeFiles = []string{
+	"compose.uds.yaml.example",
+	"docker-compose.image.yml",
+	"docker-compose.yml",
+}
+
+// rootComposePattern matches compose files (and their templates) at the
+// repository root.
+var rootComposePattern = regexp.MustCompile(`^(docker-)?compose[^/]*\.ya?ml(\.example)?$`)
+
+// rootComposeFiles returns the compose files tracked at the repository root.
+func rootComposeFiles(t *testing.T, root string) []string {
+	t.Helper()
+	var out []string
+	for p := range gitTrackedSet(t, root) {
+		if !strings.Contains(p, "/") && rootComposePattern.MatchString(p) {
+			out = append(out, p)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// TestRootComposeFilesAreOperatorOnly pins the repository root to the
+// operator-facing compose files (#3373).
+//
+// 検証用の compose を直下に置くと、`name:` を忘れたときに project 名が
+// ディレクトリ名 (`mk`) になり、このリポジトリで動いている本番に合流しうる
+// (CLAUDE.md Section 0)。検証用は tests/<スイート>/ に置き、
+// TestTestComposeFilesAreSelfContained の対象にする。
+func TestRootComposeFilesAreOperatorOnly(t *testing.T) {
+	require.Equal(t, operatorComposeFiles, rootComposeFiles(t, repoRoot(t)),
+		"リポジトリ直下には運営者向けの compose だけを置く。検証用は tests/<スイート>/ へ")
+}

@@ -30,15 +30,12 @@ const (
 // 既定無効のテンプレート (video-thumb) にも `#  logging: *default-logging` を
 // 書いてあるが、それが正しいかはこの gate では担保できない。
 //
-// **一覧は手で持つ。** root には検証用の compose が 8 つあるので `git ls-files`
-// の列挙が使えない。配布物を足したらここにも足すこと。
+// **一覧は `git ls-files` で直下から列挙する。** 検証用の compose は tests/ の
+// 各スイートへ移した (#3373) ので、直下にあるのは配布物だけになった
+// (TestRootComposeFilesAreOperatorOnly が固定する)。
 func TestComposeServicesHaveLogLimits(t *testing.T) {
 	root := repoRoot(t)
-	for _, name := range []string{
-		"docker-compose.yml",
-		"docker-compose.image.yml",
-		"compose.uds.yaml.example",
-	} {
+	for _, name := range rootComposeFiles(t, root) {
 		t.Run(name, func(t *testing.T) {
 			raw, err := os.ReadFile(filepath.Join(root, name))
 			if err != nil {

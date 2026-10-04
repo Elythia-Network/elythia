@@ -1252,8 +1252,8 @@ testflags-check: ## make test が CI と同じテスト条件で走るか検査
 	go test ./internal/entitycompat/... -run 'TestMakeTestMatchesCIConditions|TestDocsQuoteTheCIShuffleSeed' -count=1 -v
 
 .PHONY: compose-check
-compose-check: ## 配布する compose にログの上限があるか検査
-	go test ./internal/entitycompat/... -run 'TestComposeServicesHaveLogLimits' -count=1 -v
+compose-check: ## 配布する compose のログの上限と、検証用 compose の置き場所・相対パス・name: を検査
+	go test ./internal/entitycompat/... -run 'TestComposeServicesHaveLogLimits|TestRootComposeFilesAreOperatorOnly|TestTestComposeFilesAreSelfContained|TestTestComposeUntrackedSourcesAreUsed' -count=1 -v
 
 .PHONY: catalog-check
 catalog-check: ## システムカタログのクエリが schema で絞られているか検査
