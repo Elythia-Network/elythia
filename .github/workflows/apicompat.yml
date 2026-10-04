@@ -5,11 +5,15 @@
 # upstream が endpoint を増やしてもマトリクスは黙って古くなる。読む人は
 # 「mk-go only 59 件」のような数字を現状だと思って判断する。
 #
-# **既存のどの job にも相乗りできない。** submodule (TS の endpoints を読む) と
+# **既存のどの job にも相乗りできない。** 本家 (TS の endpoints を読む) と
 # DB / Redis (route dump がサーバーを組み立てる) の両方が要るが、`test-shards` は
-# `third_party/misskey` を checkout せず、`frontend-check` は DB を持たない。
+# 本家を checkout せず、`frontend-check` は DB を持たない。
 #
-# **required check には含めない。** 判定材料に submodule の内容が入るので、こちらの
+# **本家を取得するので、golden の追いつき (`make upstream-check`) もここで見る**
+# (#3378)。本家から golden を作り直して差分が無いことと、本家を読むテストが skip
+# されずに通ることを確かめる。
+#
+# **required check には含めない。** 判定材料に本家の内容が入るので、こちらの
 # コードを触っていない PR でも upstream の bump で赤くなりうる (`vulncheck` と同じ理由)。
 name: apicompat
 
@@ -18,8 +22,11 @@ on:
     paths:
       - 'internal/api/**'
       - 'internal/server/router.go'
-      - 'third_party/misskey'
-      - 'tools/apicompat/**'
+      - 'UPSTREAM_MISSKEY_VERSION'
+      - 'tools/**'
+      - 'internal/upstreamsrc/**'
+      - 'internal/entitycompat/**'
+      - 'internal/misc/achievement/**'
       - 'docs/api-compat.md'
       - 'Makefile'
       - '.github/workflows/apicompat.yml'
@@ -72,13 +79,30 @@ jobs:
       MK_REDIS_PORT: '6379'
 
     steps:
+      # submodule (fork) は checkout しない。本家は下で別に取得し、`make build` の
+      # pluginbuild は同梱プラグインが既定無効なので frontend が無くても通る。
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Read upstream version
+        id: upstream
+        run: echo "version=$(cat UPSTREAM_MISSKEY_VERSION)" >> "$GITHUB_OUTPUT"
+
+      # 比較対象の本家。`make upstream-fetch` の手元の取得先と同じ場所に置く。
+      - name: Check out upstream Misskey
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          submodules: recursive
+          repository: misskey-dev/misskey
+          ref: ${{ steps.upstream.outputs.version }}
+          path: .cache/misskey/${{ steps.upstream.outputs.version }}
+          fetch-depth: 1
+          persist-credentials: false
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+
+      - name: Check golden against upstream
+        run: make upstream-check
 
       # route dump はサーバーを組み立てるので、schema が無いと起動時に落ちる。
       - name: Apply migrations

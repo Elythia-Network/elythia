@@ -2,7 +2,7 @@
 
 mk-go は Misskey (TypeScript/NestJS) のバックエンドを Go で書き換えたプロジェクトです。
 本ドキュメントは各レイヤ・パッケージが**どのような責務を持ち、Misskey-TS のどこに対応するか**を
-詳述します。upstream の参照実装は `third_party/misskey/packages/backend/`（submodule）。
+詳述します。upstream の参照実装は `make upstream-fetch` が取得する `.cache/misskey/<版>/packages/backend/`（版は `UPSTREAM_MISSKEY_VERSION`、#3378）。
 
 ## 0. 設計思想
 

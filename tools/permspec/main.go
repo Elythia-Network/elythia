@@ -7,7 +7,7 @@
 // it to internal/entitycompat/testdata/golden_permissions.json. The gate then
 // checks that mk-go's router middleware is never LOOSER than this level
 // (a privilege-escalation / missing-auth guard). Regenerate whenever the
-// third_party/misskey submodule is bumped.
+// UPSTREAM_MISSKEY_VERSION is bumped (run `make upstream-fetch` first).
 //
 // Usage:
 //
@@ -23,6 +23,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/shiroha-a/mk/internal/upstreamsrc"
 )
 
 // meta のフラグは行頭インデント 1 つの位置にしか現れない。**行頭を固定しないと
@@ -58,10 +60,17 @@ func level(s string) string {
 }
 
 func main() {
-	epDir := flag.String("endpoints", "third_party/misskey/packages/backend/src/server/api/endpoints", "path to Misskey backend endpoints dir")
+	// 本家は submodule ではなく .cache/misskey/<版> から読む (#3378)。版のファイルが
+	// 読めなければ up は空になり、下の Check が取得の案内を出して落ちる。
+	up, _ := upstreamsrc.Dir(".")
+	epDir := flag.String("endpoints", filepath.Join(up, "packages/backend/src/server/api/endpoints"), "path to Misskey backend endpoints dir")
 	out := flag.String("out", "internal/entitycompat/testdata/golden_permissions.json", "golden snapshot output path")
 	kindsOut := flag.String("kinds-out", "internal/entitycompat/testdata/golden_oauth_kinds.json", "OAuth kind golden output path")
 	flag.Parse()
+	if err := upstreamsrc.Check(*epDir); err != nil {
+		fmt.Fprintln(os.Stderr, "permspec:", err)
+		os.Exit(1)
+	}
 
 	perms := map[string]string{}
 	kinds := map[string]string{}

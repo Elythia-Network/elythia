@@ -3,7 +3,7 @@
 // (TestSecureDrift). A secure endpoint must be reachable only via the user's
 // native session token, not a third-party app / MiAuth access token. The gate
 // checks mk-go applies middleware.RequireSecure to each. Regenerate whenever the
-// third_party/misskey submodule is bumped.
+// UPSTREAM_MISSKEY_VERSION is bumped (run `make upstream-fetch` first).
 //
 // Usage:
 //
@@ -20,14 +20,23 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/shiroha-a/mk/internal/upstreamsrc"
 )
 
 var secureRe = regexp.MustCompile(`\bsecure:\s*true`)
 
 func main() {
-	epDir := flag.String("endpoints", "third_party/misskey/packages/backend/src/server/api/endpoints", "path to Misskey backend endpoints dir")
+	// 本家は submodule ではなく .cache/misskey/<版> から読む (#3378)。版のファイルが
+	// 読めなければ up は空になり、下の Check が取得の案内を出して落ちる。
+	up, _ := upstreamsrc.Dir(".")
+	epDir := flag.String("endpoints", filepath.Join(up, "packages/backend/src/server/api/endpoints"), "path to Misskey backend endpoints dir")
 	out := flag.String("out", "internal/entitycompat/testdata/golden_secure_endpoints.json", "golden snapshot output path")
 	flag.Parse()
+	if err := upstreamsrc.Check(*epDir); err != nil {
+		fmt.Fprintln(os.Stderr, "securespec:", err)
+		os.Exit(1)
+	}
 
 	var secure []string
 	err := filepath.WalkDir(*epDir, func(path string, d fs.DirEntry, err error) error {

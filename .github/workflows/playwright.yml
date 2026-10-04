@@ -19,7 +19,7 @@ name: Playwright
 #
 # TS backend は workflow_dispatch 専用 (plan job で matrix を切り替え)。これは
 # 暫定措置ではなく、**upstream 追従のタイミングだけ回す**という運用上の決定
-# (docs/upstream-catch-up.md「submodule bump 後に必須: TS baseline で
+# (docs/upstream-catch-up.md「本家の版を上げた後に必須: TS baseline で
 # Playwright を回す」)。
 #
 # TS baseline の価値は「spec が mk-go の挙動を正解として書かれていないか」を

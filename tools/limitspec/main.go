@@ -8,7 +8,7 @@
 // omitted limit returns a different page size. This tool extracts every
 // endpoint's (default, maximum) and writes it to
 // internal/entitycompat/testdata/golden_limit_specs.json. Regenerate whenever
-// the third_party/misskey submodule is bumped.
+// UPSTREAM_MISSKEY_VERSION is bumped (run `make upstream-fetch` first).
 //
 // Usage:
 //
@@ -25,6 +25,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/shiroha-a/mk/internal/upstreamsrc"
 )
 
 // limitRe captures a `limit: { type: 'integer', ... }` paramDef body so the
@@ -42,9 +44,16 @@ type limitSpec struct {
 }
 
 func main() {
-	epDir := flag.String("endpoints", "third_party/misskey/packages/backend/src/server/api/endpoints", "path to Misskey backend endpoints dir")
+	// 本家は submodule ではなく .cache/misskey/<版> から読む (#3378)。版のファイルが
+	// 読めなければ up は空になり、下の Check が取得の案内を出して落ちる。
+	up, _ := upstreamsrc.Dir(".")
+	epDir := flag.String("endpoints", filepath.Join(up, "packages/backend/src/server/api/endpoints"), "path to Misskey backend endpoints dir")
 	out := flag.String("out", "internal/entitycompat/testdata/golden_limit_specs.json", "golden snapshot output path")
 	flag.Parse()
+	if err := upstreamsrc.Check(*epDir); err != nil {
+		fmt.Fprintln(os.Stderr, "limitspec:", err)
+		os.Exit(1)
+	}
 
 	specs := map[string]limitSpec{}
 	err := filepath.WalkDir(*epDir, func(path string, d fs.DirEntry, err error) error {

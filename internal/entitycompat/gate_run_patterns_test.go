@@ -256,6 +256,8 @@ func TestGateRunPatternsResolve(t *testing.T) {
 	// exit 0 になり、検査が止まったことに気付けない。#2857 が塞いだのと同じ型が
 	// このぶんだけ残っていた。
 	targets = append(targets, "frontend-check")
+	// `upstream-check` も本家の取得が要るので `gates:` の外に置いてある (#3378)。
+	targets = append(targets, "upstream-check")
 
 	seen := make(map[string]bool)
 	for _, target := range targets {

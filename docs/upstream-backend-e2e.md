@@ -1,6 +1,6 @@
 # 本家 backend e2e を mk-go に向けて回す
 
-Misskey 本家 (`third_party/misskey`) の backend e2e (`packages/backend/test/e2e/**`) を、
+Misskey 本家 (`make upstream-fetch` が取得する `.cache/misskey/<版>/`、#3378) の backend e2e (`packages/backend/test/e2e/**`) を、
 そのまま mk-go に対して実行するハーネス。API 互換性の regression を検出する。
 
 **テスト本体には一切手を入れない。** 差し替えるのは vitest 設定の 2 点だけで、
@@ -10,9 +10,9 @@ Misskey 本家 (`third_party/misskey`) の backend e2e (`packages/backend/test/e
 
 | ファイル | 役割 |
 |---|---|
-| `third_party/misskey/packages/backend/vitest.config.e2e.mkgo.ts` | `globalSetup` と `setupFiles` を差し替えた vitest 設定 |
-| `third_party/misskey/packages/backend/test-server-mkgo/entry.ts` | NestJS アプリの代わりに mk-go バイナリを子プロセスとして起動する |
-| `third_party/misskey/packages/backend/test/setup.e2e.mkgo.ts` | 各ファイルの前に `/api/reset-db` を叩く。既知乖離の expected-failure もここで立てる |
+| `tests/upstream-e2e/harness/vitest.config.e2e.mkgo.ts` | `globalSetup` と `setupFiles` を差し替えた vitest 設定 |
+| `tests/upstream-e2e/harness/test-server-mkgo/entry.ts` | NestJS アプリの代わりに mk-go バイナリを子プロセスとして起動する。`MKGO_BIN` / `MKGO_CONFIG` / `MKGO_CWD` が無ければ落ちる |
+| `tests/upstream-e2e/harness/test/setup.e2e.mkgo.ts` | 各ファイルの前に `/api/reset-db` を叩く。既知乖離の expected-failure もここで立てる (一覧は `MKGO_CWD` から読む) |
 | `tests/upstream-e2e/compose.yml` | ローカル実行用の PostgreSQL / Redis |
 | `tests/upstream-e2e/mkgo.yml` | 本家 `.github/misskey/test.yml` の mk-go 版 |
 | `tests/upstream-e2e/known-divergences.json` | 『通らないことが正しい』テストの一覧 |
@@ -29,7 +29,8 @@ Redis 56312 / mk-go 61812)。おかげでローカルの compose と CI の serv
 ## 実行
 
 ```bash
-# 初回: submodule 側の依存を用意する (submodule を bump したときも再実行)
+# 初回: 本家を取得し (make upstream-fetch)、本家側の依存を用意する
+# (UPSTREAM_MISSKEY_VERSION を上げたときも再実行)
 make upstream-e2e-deps
 
 # DB/Redis を起動してマイグレーションを適用

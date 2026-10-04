@@ -1,11 +1,13 @@
 name: Upstream backend e2e
 
-# Misskey 本家の backend e2e (third_party/misskey の test/e2e/**) を mk-go に
-# 向けて実行し、API 互換性の regression を検知する。
+# Misskey 本家の backend e2e (本家の test/e2e/**) を mk-go に向けて実行し、
+# API 互換性の regression を検知する。
 #
-# テスト本体には一切手を入れず、submodule 側の vitest 設定 2 ファイル
-# (globalSetup = mk-go バイナリの起動、setupFiles = /api/reset-db) だけを
-# 差し替えている。上流でテストが増えれば自動的に検証対象も増える。
+# 本家は UPSTREAM_MISSKEY_VERSION の版を .cache/misskey/<版> に checkout する
+# (#3378。fork の submodule は読まない)。テスト本体には一切手を入れず、
+# tests/upstream-e2e/harness/ の vitest 設定 (globalSetup = mk-go バイナリの
+# 起動、setupFiles = /api/reset-db) を本家の packages/backend/ へコピーして
+# 差し替える。上流でテストが増えれば自動的に検証対象も増える。
 #
 # 『通らないことが正しい』テストは tests/upstream-e2e/known-divergences.json に
 # 根拠付きで登録し、vitest の expected-failure (task.fails) として扱う。skip では
@@ -16,7 +18,7 @@ name: Upstream backend e2e
 #   checks には入れない**ので、落ちても merge はブロックされない。実行に
 #   4 シャード並列でも 4 分前後かかるうえ、1200 件超のテストで flaky 要素が
 #   あるため merge ブロッカーには適さない
-# - workflow_dispatch: upstream 追従で submodule を bump したときに手動で発火できる
+# - workflow_dispatch: upstream 追従で UPSTREAM_MISSKEY_VERSION を上げたときに手動で発火できる
 #
 # 非ブロッキングを `continue-on-error: true` で実現しないこと。あれは job を
 # 成功扱いにするので失敗が完全に不可視になる。job は正しく失敗させ、required
@@ -32,7 +34,7 @@ on:
       - "cmd/**"
       - "migration/**"
       - "tests/upstream-e2e/**"
-      - "third_party/misskey"
+      - "UPSTREAM_MISSKEY_VERSION"
       - "Makefile"
       - "go.mod"
       - "go.sum"
@@ -102,8 +104,21 @@ jobs:
           # pull_request では github.ref が refs/pull/<n>/merge になるので PR の
           # 内容が checkout される。workflow_dispatch のときだけ inputs.ref。
           ref: ${{ inputs.ref || github.ref }}
-          # test/e2e/** と vitest 設定は submodule 側にある。
-          submodules: recursive
+
+      - name: Read upstream version
+        id: upstream
+        run: echo "version=$(cat UPSTREAM_MISSKEY_VERSION)" >> "$GITHUB_OUTPUT"
+
+      # 本家そのもの。`make upstream-fetch` の手元の取得先と同じ場所に置くので、
+      # Makefile の経路は手元と同じになる (upstream-fetch は取得済みとして通る)。
+      - name: Check out upstream Misskey
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: misskey-dev/misskey
+          ref: ${{ steps.upstream.outputs.version }}
+          path: .cache/misskey/${{ steps.upstream.outputs.version }}
+          fetch-depth: 1
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -114,17 +129,17 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
-          # pnpm のバージョンは submodule 側 package.json の packageManager から
-          # 取る。mk リポジトリ直下には package.json が無いので、既定のまま
-          # だと "No pnpm version is specified" で落ちる。
-          package_json_file: third_party/misskey/package.json
+          # pnpm のバージョンは本家の package.json の packageManager から取る。
+          # mk リポジトリ直下には package.json が無いので、既定のままだと
+          # "No pnpm version is specified" で落ちる。
+          package_json_file: .cache/misskey/${{ steps.upstream.outputs.version }}/package.json
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version-file: third_party/misskey/.node-version
+          node-version-file: .cache/misskey/${{ steps.upstream.outputs.version }}/.node-version
           cache: pnpm
-          cache-dependency-path: third_party/misskey/pnpm-lock.yaml
+          cache-dependency-path: .cache/misskey/${{ steps.upstream.outputs.version }}/pnpm-lock.yaml
 
       # pnpm install / misskey-js build / test config の生成をまとめて行う。
       # ローカルの `make upstream-e2e` と同じ経路を通すため、個別 step に

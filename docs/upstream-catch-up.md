@@ -92,7 +92,7 @@ migration 連番は `migration/00NNNN_*.up.sql` の命名規則に従う (= 各 
 `gh issue create --title "Tracker: Misskey TS <prev> → <new> への upstream 追従"` で tracker を作成。次の内容を含める:
 
 - 対象 release tag (例: `2026.5.1`)
-- backend 関連 commits 一覧 (`git -C third_party/misskey log --oneline --no-merges <prev>..<new> -- packages/backend/src/ packages/backend/migration/`)
+- backend 関連 commits 一覧 (`git -C .cache/misskey/mirror.git log --oneline --no-merges <prev>..<new> -- packages/backend/src/ packages/backend/migration/`。本家は `make upstream-fetch` が取得する bare repository から読む (#3378)。`<new>` の tag は `git -C .cache/misskey/mirror.git fetch --no-tags origin "refs/tags/<new>:refs/tags/<new>"` で足す)
 - 関連 frontend / TS-only 変更の参考リスト
 - 完了条件 (= sub-issue 全 close + submodule bump PR マージ)
 
@@ -101,7 +101,7 @@ migration 連番は `migration/00NNNN_*.up.sql` の命名規則に従う (= 各 
 `docs/update/yyyymmdd-<tracker-issue>-triage.md` を新規作成。前例: `docs/update/20260512-947-triage.md`。
 
 各 upstream commit について:
-- `git -C third_party/misskey show <sha>` で diff 精読
+- `git -C .cache/misskey/mirror.git show <sha>` で diff 精読
 - mk-go 該当箇所を `grep` で特定し file_path:line_number で記録
 - Gap 判定 (`既対応 / 部分対応 / 未対応 / 影響なし`)
 - 推定難易度 (`S / M / L / N/A`)
@@ -124,7 +124,7 @@ triage で判定した item を `gh issue create` で 1 件 1 issue として起
 
 実装方針 (PR #998 で確立):
 
-1. **Infrastructure 先行**: submodule bump (新 tag) + `MisskeyVersion` 定数更新 + hardcode 修正
+1. **Infrastructure 先行**: `UPSTREAM_MISSKEY_VERSION` を新しい版にして `make upstream-fetch`、`MisskeyVersion` 定数と e2e の `misskey/misskey:<版>` を揃える (`TestUpstreamVersionIsConsistent` が見る、#3378)、submodule bump (新 tag。P4 までは frontend の供給元として残る) + hardcode 修正
 2. **Wave 1 (close 候補)**: comment + regression test で意思表明
 3. **Wave 2 (S 難易度)**: 1 commit / 1 sub-issue (or 関連を bundle) で順次
 4. **Wave 3 (M 難易度)**: PR 1 本ずつ / commit 1 件ずつで review しやすく
@@ -241,10 +241,11 @@ git diff --diff-filter=D --name-only "$OLD" "$NEW" | wc -l   # 削除ファイ�
 
 **CI は祖先関係の巻き戻りを検出しない。** `build` job は gitlink の SHA が fork に **push 済みか**は見るが、fast-forward 可能か（祖先関係）は見ない。`build` / `test` / `lint` の required check は submodule を checkout しない。`frontend-check` は型・eslint・vitest を見るが、**ファイルが消えても型が通る**場合がある。pointer の妥当性は上のコマンドで人手確認する。
 
-### submodule bump 後に必須: shape drift snapshot の再生成
+### 本家の版を上げた後に必須: shape drift snapshot の再生成
 
-`third_party/misskey` を bump したら、entity shape drift gate の golden snapshot を
-再生成して commit すること。新バージョンで追加 / 変更された契約フィールドが次回の
+`UPSTREAM_MISSKEY_VERSION` を新しい版に書き換えて `make upstream-fetch` で本家を取得したら、
+entity shape drift gate の golden snapshot を再生成して commit すること (#3378 から、
+golden は submodule ではなく `.cache/misskey/<版>/` の本家から作る)。新バージョンで追加 / 変更された契約フィールドが次回の
 `TestEntityShapeDrift` に反映される。
 
 ```bash
@@ -256,7 +257,7 @@ git add internal/entitycompat/testdata/
 
 詳細は [shape-drift.md](./shape-drift.md)。
 
-### submodule bump 後に必須: TypeORM migrations seed の追加
+### 本家の版を上げた後に必須: TypeORM migrations seed の追加
 
 upstream に新しい migration が入った場合、`migrations` テーブルへの seed も追加する。
 これが漏れると、mk-go で動かした DB に本家を繋ぎ直したときに TypeORM が当該
@@ -271,7 +272,7 @@ migration を未実行と判定して**再実行**し、適用済み DDL への 
 入っていないまま seed すると、本家が「適用済み」と誤認して skip し、schema が
 ずれたまま放置される。DDL が未実装なら先に mk-go 側の migration を書く。
 
-### submodule bump 後に必須: index golden の再生成
+### 本家の版を上げた後に必須: index golden の再生成
 
 upstream が index を足した場合、`golden_upstream_indexes.json` も撮り直す。これは
 TypeORM の decorator から正規形を再現できないため **実 DB から採る** 必要がある
@@ -281,7 +282,7 @@ TypeORM の decorator から正規形を再現できないため **実 DB から
 同内容・別名の index があれば検出されるので、upstream 名に揃えるか
 `known_duplicate_indexes.json` に追加して `000068` の扱いを見直す (#2246)。
 
-### submodule bump 後に必須: MFM の絵文字の正規表現
+### 本家の版を上げた後に必須: MFM の絵文字の正規表現
 
 mk-go の MFM パーサは、mfm-js が依存する `@misskey-dev/emoji-data` の `emojiRegex` を Go の正規表現へ移したもの (`internal/activitypub/mfm/emoji_regex_gen.go`) で Unicode 絵文字を読む (#3324)。frontend の mfm-js の版か、それが依存する emoji-data の版が変わると、`make frontend-check` の `emoji-regex-check` が落ちる (正規表現が同じでも、snapshot に記録した版と食い違うため)。mfm-js の `unicodeEmoji` の書き方が変わったときも、生成ツールが前提の形を見つけられずに落ちる (下記)。
 
@@ -294,13 +295,13 @@ GOWORK=off go test ./internal/activitypub/mfm/ ./tools/emojiregex/
 
 生成ツールは、mfm-js の `unicodeEmoji` の書き方 (`regexp(RegExp(emojiRegex.source))` と、U+FE0F だけのときに文字を返す `map`) と、正規表現が使う構文 (`?` だけの量指定・サロゲートペア・決まった位置の否定の先読み) を前提にしている。前提が崩れると生成の時点で落ちるので、その場合は生成ツールを直す。
 
-### submodule bump 後に必須: divergence doc の件数
+### 本家の版を上げた後に必須: divergence doc の件数
 
 `golden_upstream_columns.json` を撮り直すと `TestDivergenceDoc_ColumnCountMatchesSchema` が動く。**upstream が列を DROP すると、その列は「mk-go 独自カラム」に転じる**ので `docs/divergence.md` §2-2 の件数が増える (`note_favorite.createdAt` がその経緯で独自列になっている)。
 
 落ちたら doc の件数・内訳・冒頭サマリ・表の行をまとめて直す。gate は 4 箇所すべてを見るので、どれか 1 つを直し忘れると通らない (#2634)。
 
-### submodule bump 後に必須: promo の表示経路が upstream に入っていないか見る
+### 本家の版を上げた後に必須: promo の表示経路が upstream に入っていないか見る
 
 **promo (`admin/promo/create` / `promo/read`)** は upstream にも mk-go にも
 **表示経路が無い** — 作成と既読化はできて DB 行も増えるが、`promo_note` を読んで
@@ -316,7 +317,7 @@ menu も 2024-09 の #14554 で消えている。**再実装される見込み�
 bump 後に確認する:
 
 ```bash
-grep -rlni "promonote\|promoread" third_party/misskey/packages/backend/src/
+grep -rlni "promonote\|promoread" .cache/misskey/<版>/packages/backend/src/
 ```
 
 期待は **8 件** (case-insensitive にしてあるのは型名 `MiPromoNote` や
@@ -334,21 +335,17 @@ server/api/endpoints/admin/promo/create.ts     ← 表示経路はここに無�
 `docs/divergence.md` §7 の promo 行を更新する。増えていれば表示経路が入った可能性、
 減っていれば endpoint が削除された可能性。
 
-**0 件や `No such file or directory` が出たら、まず submodule の checkout を疑う**
-(`git submodule update --init`)。checkout 済みで 0 件なら、upstream 側でパス構成が
-変わっている。
+**0 件や `No such file or directory` が出たら、まず本家の取得を疑う**
+(`make upstream-fetch`)。取得済みで 0 件なら、upstream 側でパス構成が変わっている。
 
-**CI の Go テストでは検出できない。** submodule を checkout する job は 8 つある
-(`ci.yml` の `frontend-check`、diff-e2e の `diff`、docker の `build-and-push`、
-dropin-e2e の `dropin`、dropin-frontend-e2e の `frontend-e2e`、playwright の `spec`、
-queue-bench-smoke の `smoke`、upstream-backend-e2e の `e2e`) が、**いずれも Go
-テストを実行する step を持たない**。Go テストが走る `test-shards` / `plugin-tests`
-の checkout に `submodules` 指定は無いので、submodule を読むテストは CI では常に
-skip され gate にならない。ローカルの tripwire として書くなら
-`internal/misc/achievement/types_test.go` の `TestTypes_MatchUpstream` が同型
-(submodule を読み、不在なら `t.Skipf`)。
+**CI の Go テストでは検出できない。** Go テストが走る `test-shards` / `plugin-tests`
+は本家を取得しないので、本家を読むテストはそこでは skip される。本家を取得して
+skip を禁じて回すのは `apicompat` workflow の `make upstream-check` だけ (#3378) で、
+そこに足すなら `internal/misc/achievement/types_test.go` の `TestTypes_MatchUpstream`
+が同型 (`internal/upstreamsrc` で本家を探し、不在なら skip、`MK_UPSTREAM_REQUIRE`
+が立っていれば落ちる)。
 
-### submodule bump 後に必須: 比較対象の TS image を全部揃える
+### 本家の版を上げた後に必須: 比較対象の TS image を全部揃える
 
 mk-go と Misskey TS を並べて比較するハーネスは、**比較対象の image tag を
 `MisskeyVersion` と同じ版に上げる**こと。ここがずれていると upstream 自身の
@@ -400,7 +397,7 @@ diff harness の `META_IGNORE` には `app192IconUrl` / `app512IconUrl` /
 `admin/meta` にしか無く公開 `/api/meta` には元から含まれない = **mk-go の余剰
 フィールド**で、版ずれが誤診断を固定していた (#2303)。
 
-### submodule bump 後に必須: TS baseline で Playwright を回す
+### 本家の版を上げた後に必須: TS baseline で Playwright を回す
 
 ```bash
 gh workflow run playwright.yml --ref <branch> -f ref=<branch>   # TS backend も含めて実行される

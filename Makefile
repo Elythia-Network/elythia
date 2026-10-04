@@ -655,8 +655,9 @@ dropin-frontend-swap-test: ## TS-A → mk-A 切替まで含む frontend e2e
 
 # 本家フロントエンドの取得とビルド。
 #
-# ライセンス境界のため、本家コードはすべて third_party/misskey/ の git submodule
-# 参照で扱う。mk-go のリポジトリには 1 行もコピーしない。
+# 本家のフロントエンドは third_party/misskey/ の git submodule (fork) から取る。
+# P4 (#3379) で frontend/ へ取り込むまでの形。比較対象の本家は submodule ではなく
+# .cache/misskey/<版> から読む (make upstream-fetch、#3378)。
 #
 # `e2e-frontend-build` は pnpm を docker run で実行する。ビルドに使う Node の版と
 # distro を、upstream がコンテナでビルドするときの組み合わせにそろえるため
@@ -1010,11 +1011,66 @@ diff-logs: ## 差分比較ハーネスのログを表示
 # ポートは本家 .github/misskey/test.yml に合わせてある (54312 / 56312 / 61812)。
 UPSTREAM_E2E_COMPOSE=tests/upstream-e2e/compose.yml
 UPSTREAM_E2E_CONFIG=tests/upstream-e2e/mkgo.yml
-UPSTREAM_E2E_MISSKEY=third_party/misskey
+# 本家そのもの (`make upstream-fetch` の取得先) で走らせる (#3378)。mk-go へ向ける
+# ための 3 ファイルは tests/upstream-e2e/harness/ に置き、upstream-e2e-test が
+# 実行のたびに本家の packages/backend/ へコピーする (編集がすぐ効くように deps
+# ではなく test の側で写す)。vitest の設定を本家の外に置いたまま本家のテストを
+# 走らせる形は採らない — 設定ファイルの import (`vitest/config`、本家の
+# `./vitest.config.js`) は設定ファイルの場所から解決されるので、tests/ には
+# node_modules が無く失敗する。symlink も vite が実体のパスへ解決するので同じ。
+UPSTREAM_E2E_MISSKEY=$(UPSTREAM_DIR)
+UPSTREAM_E2E_HARNESS=tests/upstream-e2e/harness
 UPSTREAM_E2E_BACKEND=$(UPSTREAM_E2E_MISSKEY)/packages/backend
 
+##@ 本家 (比較対象)
+# 比較対象の本家 Misskey は submodule ではなく `.cache/misskey/<版>/` から読む
+# (#3378)。版は UPSTREAM_MISSKEY_VERSION の 1 行で、tools とテストは
+# internal/upstreamsrc 経由で同じ場所を見る。MK_UPSTREAM_DIR で場所を変えられる。
+#
+# **`$(shell)` は使わない** (gaterun-check の前提、REVISION_LDFLAGS の注記を参照)。
+# 版は `$(file <...)` で読む。ファイルを読むだけで、`make -pn` に副作用は無い。
+UPSTREAM_MISSKEY_VERSION := $(file <UPSTREAM_MISSKEY_VERSION)
+UPSTREAM_DIR ?= $(if $(MK_UPSTREAM_DIR),$(MK_UPSTREAM_DIR),.cache/misskey/$(UPSTREAM_MISSKEY_VERSION))
+# 版ごとの worktree の元になる bare repository。2 回目以降の取得と、追従作業で
+# 旧版と新版を並べるときに速い (設計 D2 / Q3)。
+UPSTREAM_MIRROR ?= .cache/misskey/mirror.git
+UPSTREAM_REMOTE ?= https://github.com/misskey-dev/misskey.git
+
+# 取得済みなら版を確かめて何もしない。**版が違う worktree は上書きしない** —
+# 手で直した跡があるかもしれないので、消してから取り直すよう案内して落ちる。
+# `worktree prune` は、worktree を `rm -rf` だけで消したときに mirror 側に残る
+# 登録を掃除する (残っていると `worktree add` が already registered で落ちる)。
+# 初回の clone は、submodule が本家の objects を持っていればそれを借りて
+# ダウンロードを省く (`--reference-if-able` + `--dissociate`)。
+upstream-fetch: ## UPSTREAM_MISSKEY_VERSION の本家を .cache/misskey/<版> へ取得
+	@set -e; v="$(UPSTREAM_MISSKEY_VERSION)"; d="$(UPSTREAM_DIR)"; \
+	if [ -z "$$v" ]; then echo "UPSTREAM_MISSKEY_VERSION が読めない" >&2; exit 1; fi; \
+	if [ -e "$$d/.git" ]; then \
+		got=$$(git -C "$$d" describe --tags --exact-match 2>/dev/null || true); \
+		if [ "$$got" = "$$v" ]; then echo "upstream $$v: $$d (取得済み)"; exit 0; fi; \
+		echo "$$d は $$v ではない ($${got:-tag 無し})。git -C $(UPSTREAM_MIRROR) worktree remove --force $$d で消してから取り直す" >&2; exit 1; \
+	fi; \
+	if [ -e "$$d" ]; then echo "$$d が git の worktree ではない。消してから取り直す" >&2; exit 1; fi; \
+	if [ ! -d "$(UPSTREAM_MIRROR)" ]; then \
+		ref=; if [ -e third_party/misskey/.git ]; then ref=$$(git -C third_party/misskey rev-parse --path-format=absolute --git-common-dir); fi; \
+		git clone --bare --no-tags $${ref:+--reference-if-able "$$ref" --dissociate} "$(UPSTREAM_REMOTE)" "$(UPSTREAM_MIRROR)"; \
+	fi; \
+	git -C "$(UPSTREAM_MIRROR)" fetch --no-tags origin "refs/tags/$$v:refs/tags/$$v"; \
+	git -C "$(UPSTREAM_MIRROR)" worktree prune; \
+	case "$$d" in /*) p="$$d" ;; *) p="$(CURDIR)/$$d" ;; esac; \
+	git -C "$(UPSTREAM_MIRROR)" worktree add --detach "$$p" "refs/tags/$$v"; \
+	echo "upstream $$v: $$d"
+
+# golden が本家の版に追いついているか。本家から作り直して差分が無いことと、
+# 本家を読むテストが skip されずに通ることを見る。本家を取得する
+# apicompat.yml が回す (本家を読まない `make gates` には入れない)。
+upstream-check: ## golden と本家を読むテストが UPSTREAM_MISSKEY_VERSION の本家と一致するか検査
+	$(MAKE) shapecheck-gen
+	git diff --exit-code -- internal/entitycompat/testdata
+	MK_UPSTREAM_REQUIRE=1 go test ./internal/misc/achievement/... -run 'TestTypes_MatchUpstream' -count=1 -v
+
 ##@ e2e: 本家 backend e2e
-# submodule 側の依存を用意する。初回と submodule bump 後にだけ必要。
+# 本家の取得先の依存を用意する。初回と UPSTREAM_MISSKEY_VERSION を上げた後にだけ必要。
 #
 #  - misskey-js: exports が built/ を指すのでビルドしないと test/e2e が import できない。
 #    frontend まで含む `pnpm build` (5-10 分) は e2e には不要なので呼ばない。
@@ -1023,7 +1079,7 @@ UPSTREAM_E2E_BACKEND=$(UPSTREAM_E2E_MISSKEY)/packages/backend
 #    NODE_ENV=test で .config/test.yml から生成しておく必要がある。
 #  - build-pre: loadConfig() は built/meta.json も readFileSync する (無いと ENOENT)。
 #    frontend の manifest は existsSync 判定なので無くてよい。
-upstream-e2e-deps: ## 本家 backend e2e に必要な submodule 側の依存を用意 (初回のみ)
+upstream-e2e-deps: upstream-fetch ## 本家 backend e2e に必要な本家側の依存を用意 (初回のみ)
 	cd $(UPSTREAM_E2E_MISSKEY) && \
 		pnpm install --frozen-lockfile && \
 		pnpm build-pre && \
@@ -1048,6 +1104,7 @@ upstream-e2e-migrate: ## e2e 用 DB にマイグレーションを適用
 VITEST_ARGS ?=
 
 upstream-e2e-test: build ## 本家 backend e2e を mk-go に対して実行 (VITEST_ARGS で引数追加)
+	cp -R $(UPSTREAM_E2E_HARNESS)/. $(UPSTREAM_E2E_BACKEND)/
 	cd $(UPSTREAM_E2E_BACKEND) && \
 		MKGO_BIN=$(CURDIR)/built/misskey \
 		MKGO_CONFIG=$(CURDIR)/$(UPSTREAM_E2E_CONFIG) \
@@ -1062,15 +1119,15 @@ upstream-e2e-down: ## 本家 backend e2e 用のスタックを撤去 (volume ご
 # API compatibility matrix ― mk-go と Misskey TS の API endpoint 実装状況を
 # 突き合わせて docs/api-compat.md を生成する。
 #
-# - APICOMPAT_TS_DIR: TS endpoints ディレクトリ。submodule に依存。
+# - APICOMPAT_TS_DIR: TS endpoints ディレクトリ。本家の取得先 (`make upstream-fetch`) に依存。
 # - APICOMPAT_CONFIG: --dump-routes 時に読み込む mk-go config。DB/Redis 接続
 #   は必須なので、docker compose up された stack を持っていることが前提。
 # - APICOMPAT_ROUTES: dump-routes が書き出す中間ファイルの path。
 #   `$(BUILD_DIR)` 配下にして hermetic に保つ ( /tmp 共有事故を避ける)。
-APICOMPAT_TS_DIR    ?= third_party/misskey/packages/backend/src/server/api/endpoints
+APICOMPAT_TS_DIR    ?= $(UPSTREAM_DIR)/packages/backend/src/server/api/endpoints
 # fastify 直登録 endpoint (signup / signin-flow / miauth check / instance peers)
 # の抽出元。endpoints/ の file-walk では拾えないので source から直接読む。
-APICOMPAT_TS_DIRECT ?= third_party/misskey/packages/backend/src/server/api/ApiServerService.ts
+APICOMPAT_TS_DIRECT ?= $(UPSTREAM_DIR)/packages/backend/src/server/api/ApiServerService.ts
 APICOMPAT_CONFIG    ?= .config/default.yml
 APICOMPAT_ROUTES    ?= $(BUILD_DIR)/apicompat-routes.json
 APICOMPAT_OUT       ?= docs/api-compat.md
@@ -1107,8 +1164,8 @@ apicompat: apicompat-routes apicompat-render ## API 互換性マトリクス doc
 # TestEntityShapeDrift gate として自動実行される。詳細は docs/shape-drift.md。
 
 # golden snapshot (testdata/golden_schemas.json + golden_error_ids.json) を
-# submodule から再生成する。third_party/misskey を upstream catch-up で bump
-# したら必ず実行し、生成された snapshot を commit すること。
+# 本家 (`make upstream-fetch` の取得先) から再生成する。UPSTREAM_MISSKEY_VERSION
+# を上げたら必ず実行し、生成された snapshot を commit すること。
 ##@ 静的 parity ゲート (サーバー・Docker 不要)
 shapecheck-gen: ## shape drift の golden snapshot を再生成
 	go run ./tools/shapediff

@@ -239,7 +239,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 | `playwright` | PR(paths限定) | | ブラウザのe2e(4 shard) |
 | `upstream-backend-e2e` | PR(paths限定) | | 本家のbackend e2eを無改変で実行(4 shard) |
 | `diff-e2e` | PR(paths限定) | | TSとの値レベルの差分 |
-| `apicompat` | PR(paths限定) | | `docs/api-compat.md`が実態と一致しているか |
+| `apicompat` | PR(paths限定) | | `docs/api-compat.md`が実態と一致しているか、goldenが本家の版に追いついているか(`make upstream-check`) |
 | `build-with-plugins-selftest` | PR(paths限定) | | 運営者向けreusable workflowのビルド |
 | `docker` | `main` / `develop` / tagへのpush、PR | | imageがビルドできるか。PR以外ではimageをpublishする |
 | `docker-branch` | `develop`へのpush(paths限定) | | composeだけを載せた配布用ブランチ`docker`を更新 |
@@ -290,6 +290,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 
 このファイル自体を変えたときだけ、1行で追記します(新しいものを上に)。経緯の本文はリンク先にあります。個別のfixの履歴は`CHANGELOG.md`にあります。
 
+- 2026-10-05: 比較対象の本家を`.cache/misskey`から読むようにしたので、Section 8の`apicompat`の行を更新した (#3378) → [docs/ci.md](docs/ci.md)
 - 2026-10-04: Goのe2eを`tests/`へ移したのでSection 2の構成を更新した (#3373) → [docs/design/project-restructure.md](docs/design/project-restructure.md)
 - 2026-10-04: 復路の保証をやめたことを冒頭の方針とSection 8に反映した (#3191) → [docs/dropin-e2e.md](docs/dropin-e2e.md#復路は測る対象-3191)
 - 2026-10-01: 他の人のClaudeが読むことを前提に作り直した。更新記録とSection 8の本文をdocsへ移し、運営者の運用を`CLAUDE.local.md`へ、docsの取り込みを`.claude/rules/`へ分けた (#3248)

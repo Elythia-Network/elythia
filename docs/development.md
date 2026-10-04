@@ -230,6 +230,8 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_xxx" ON "yyy" ("zzz");
 | `make federation-mastodon-e2e` `federation-mastodon-down` | 本物の Mastodon を立てて引用の承認 (FEP-044f) を確かめる。前者は起動から撤去まで通し (CI の `federation-mastodon` シナリオと同じ) | 同上 |
 | `make e2e-submodule-init` | submodule を初期化 (本家フロントエンドの取得)。e2e 系の前提 | — |
 | `make playwright-up` `playwright-test` `playwright-down` | Playwright によるフロントエンド / API テスト | [Playwright](playwright.md) |
+| `make upstream-fetch` | 比較対象の本家 (`UPSTREAM_MISSKEY_VERSION` の版) を `.cache/misskey/<版>/` へ取得する。golden の再生成・本家 backend e2e・apicompat の前提 (#3378) | [本家への追従](upstream-catch-up.md) |
+| `make upstream-check` | golden と本家を読むテストが本家の版と一致するか (本家から作り直して差分が無いこと)。`apicompat` workflow が回す | [shape drift](shape-drift.md) |
 | `make upstream-e2e-deps` `upstream-e2e-up` `upstream-e2e-migrate` `upstream-e2e-test` `upstream-e2e-down` | Misskey 本家の backend e2e をテスト本体無改変で mk-go に向けて実行 | [本家 backend e2e](upstream-backend-e2e.md) |
 
 ### ベンチマーク
@@ -430,7 +432,7 @@ make dropin-fedibird-test    # mock ↔ mk-A の Ed25519 inbound/outbound 検証
 
 # 本家 backend e2e (#2347) — Misskey 本家の test/e2e/** をそのまま mk-go に
 # 向けて実行する。テスト本体は無改変。詳細は docs/upstream-backend-e2e.md。
-make upstream-e2e-deps       # submodule 側の依存を用意 (初回 / submodule bump 後)
+make upstream-e2e-deps       # 本家を取得し、本家側の依存を用意 (初回 / UPSTREAM_MISSKEY_VERSION を上げた後)
 make upstream-e2e-up         # e2e 用 PostgreSQL / Redis を起動
 make upstream-e2e-migrate    # e2e 用 DB にマイグレーションを適用
 make upstream-e2e-test       # mk-go をビルドして vitest を実行 (FILE= で 1 ファイル指定可)

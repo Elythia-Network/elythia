@@ -342,13 +342,13 @@ PR ごとに `.github/workflows/diff-e2e.yml` が実行する (required check �
 
 ## 本家 backend e2e
 
-Misskey 本家の backend e2e (`third_party/misskey/packages/backend/test/e2e/**`) を、
+Misskey 本家の backend e2e (`make upstream-fetch` が取得する `.cache/misskey/<版>/packages/backend/test/e2e/**`、#3378) を、
 **テスト本体に一切手を入れずに** mk-go へ向けて実行する。差し替えるのは vitest 設定の
 2 点 (globalSetup = mk-go バイナリの起動、setupFiles = `/api/reset-db`) だけなので、
 上流でテストが増えれば自動的に検証対象も増える。
 
 ```bash
-make upstream-e2e-deps         # 初回 / submodule bump 後
+make upstream-e2e-deps         # 初回 / UPSTREAM_MISSKEY_VERSION を上げた後 (本家の取得も行う)
 make upstream-e2e-up           # PostgreSQL / Redis
 make upstream-e2e-migrate
 make upstream-e2e-test         # FILE=test/e2e/note.ts で 1 ファイルだけも可

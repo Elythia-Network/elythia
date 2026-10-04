@@ -39,6 +39,8 @@ Thumbs.db
 
 # Temporary files
 .tmp/
+# 比較対象の本家 (make upstream-fetch、#3378)
+.cache/
 
 # Config (user-specific). Track example templates only; operator
 # copies them locally (default.yml / docker.yml).
