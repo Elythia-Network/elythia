@@ -5,6 +5,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/shiroha-a/mk/internal/api/apierr"
+	"github.com/shiroha-a/mk/internal/api/meself"
 	"github.com/shiroha-a/mk/internal/api/pagination"
 	"github.com/shiroha-a/mk/internal/entity"
 	"github.com/shiroha-a/mk/internal/misc/id"
@@ -45,7 +46,7 @@ func (h *Handler) Followers(c echo.Context) error {
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
-	return c.JSON(http.StatusOK, h.packFollowings(viewer.UserID, rows))
+	return c.JSON(http.StatusOK, h.packFollowings(c, rows))
 }
 
 // Following handles POST /api/federation/following.
@@ -65,7 +66,7 @@ func (h *Handler) Following(c echo.Context) error {
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
-	return c.JSON(http.StatusOK, h.packFollowings(viewer.UserID, rows))
+	return c.JSON(http.StatusOK, h.packFollowings(c, rows))
 }
 
 // Users handles POST /api/federation/users.
@@ -95,20 +96,35 @@ func (h *Handler) Users(c echo.Context) error {
 	// createdAt/notesCount/followersCount/description/fields/roles 等が欠落して
 	// いた (#1544)。UserDetailed で pack して shape を揃える。user_profile は
 	// 1 batch で解決して N+1 を回避。
-	viewerID := viewerIDOf(c)
-	iAmModerator := h.moderator != nil && viewerID != "" && h.moderator.IsModerator(viewerID)
-	profByID := h.userProfiles(users)
-	out := make([]entity.UserDetailed, 0, len(users))
-	for _, u := range users {
-		d := entity.PackUserDetailed(u, profByID[u.ID], h.idGen)
-		// 認証 caller には viewer->user の relation block を付与 (匿名/self は no-op、#1957-a)。
-		viewerIsFollowing := h.relation.Apply(&d, viewerID, u, profByID[u.ID])
-		// followers-only count を非フォロワー (federation/* は requireCredential:false なので
-		// 匿名含む) に leak させない (upstream packMany(users, me) の count gate、#1988)。
-		entity.GateCountVisibility(&d, u.ID == viewerID, iAmModerator, viewerIsFollowing)
-		out = append(out, d)
+	return c.JSON(http.StatusOK, h.packUsers(c, users, h.userProfiles(users)))
+}
+
+// packUsers packs users as upstream packMany(users, me, {schema:
+// 'UserDetailed'}) seen by the caller, in order.
+//
+// 関係・カウントのゲート (匿名含む、#1957-a / #1988)・モデレーター向けの項目・
+// ピン留め・移行先・instance・絵文字は共有の packer に任せる (#3330)。本家の
+// pack は isMe なら MeDetailed を返すので、閲覧者自身は meself.Pack で昇格する。
+func (h *Handler) packUsers(c echo.Context, users []*model.User, profiles map[string]*model.UserProfile) []any {
+	out := make([]any, len(users))
+	if len(users) == 0 {
+		return out
 	}
-	return c.JSON(http.StatusOK, out)
+	viewer := middleware.GetUser(c)
+	ctx := c.Request().Context()
+	if h.packer == nil {
+		// 配線が外れた構成では素の UserDetailed を返す (packer が既定で
+		// 非公開のカウントを伏せるので、漏れる側には倒れない)。
+		for i, u := range users {
+			out[i] = entity.PackUserDetailed(u, profiles[u.ID], h.idGen)
+		}
+		return out
+	}
+	packed := h.packer.DetailedMany(ctx, viewer, users, profiles)
+	for i, u := range users {
+		out[i] = meself.Pack(ctx, packed[i], u, profiles[u.ID], viewer)
+	}
+	return out
 }
 
 // followListViewer describes the caller for the owner visibility filter of
@@ -132,6 +148,17 @@ func viewerIDOf(c echo.Context) string {
 		return u.ID
 	}
 	return ""
+}
+
+// packedFollowing is the upstream FollowingEntityService.pack shape with
+// populateFollowee. Followee is any because the caller's own entry is
+// MeDetailed (upstream pack returns MeDetailed when isMe).
+type packedFollowing struct {
+	ID         string `json:"id"`
+	CreatedAt  string `json:"createdAt"`
+	FolloweeID string `json:"followeeId"`
+	FollowerID string `json:"followerId"`
+	Followee   any    `json:"followee,omitempty"`
 }
 
 // userProfiles batch-loads the user_profile rows for the given users keyed by
@@ -182,69 +209,63 @@ func parseHostPage(c echo.Context) (hostPageRequest, bool) {
 }
 
 // packFollowings converts Following rows into the upstream
-// FollowingEntityService.pack shape (id / createdAt / followeeId / followerId
-// + populated followee).
+// FollowingEntityService.packMany shape (id / createdAt / followeeId /
+// followerId + populated followee).
 //
 // 本家 federation/{followers,following}.ts は packMany(..., {populateFollowee:
 // true}) を呼ぶため followee (UserDetailedNotMe) を必ず embed する。followee の
-// User+UserProfile は ID をまとめて 1 度引いて N+1 を避ける。userRepo が nil の
-// 場合 (= test 等で未配線) は followee を埋めずに id 系フィールドだけ返す。
-func (h *Handler) packFollowings(viewerID string, rows []*model.Following) []entity.Following {
-	lookup := h.followeeLookup(rows)
-	iAmModerator := h.moderator != nil && viewerID != "" && h.moderator.IsModerator(viewerID)
-	out := make([]entity.Following, 0, len(rows))
+// User+UserProfile は ID をまとめて 1 度引いて N+1 を避け、packMany と同じく
+// まとめて pack する (#3330)。userRepo が nil の場合 (= test 等で未配線) は
+// followee を埋めずに id 系フィールドだけ返す。
+func (h *Handler) packFollowings(c echo.Context, rows []*model.Following) []packedFollowing {
+	users, profiles := h.followees(rows)
+	packed := h.packUsers(c, users, profiles)
+	byID := make(map[string]any, len(users))
+	for i, u := range users {
+		byID[u.ID] = packed[i]
+	}
+	out := make([]packedFollowing, 0, len(rows))
 	for _, f := range rows {
 		// populateFollowee=true / populateFollower=false (本家と同じ)。
-		pf := entity.PackFollowing(f, true, false, lookup, h.idGen)
-		// embed followee に viewer 視点の relation block を付与 (#1957-a)。
-		if pf.Followee != nil {
-			if u, p := lookup(f.FolloweeID); u != nil {
-				viewerIsFollowing := h.relation.Apply(pf.Followee, viewerID, u, p)
-				// followers-only count を非フォロワー (匿名含む) に leak させない
-				// (upstream FollowingEntityService が followee を pack(_, me) で gate、#1988)。
-				entity.GateCountVisibility(pf.Followee, u.ID == viewerID, iAmModerator, viewerIsFollowing)
+		pf := packedFollowing{ID: f.ID, FolloweeID: f.FolloweeID, FollowerID: f.FollowerID}
+		if h.idGen != nil {
+			if t, err := h.idGen.ParseTime(f.ID); err == nil {
+				pf.CreatedAt = t.UTC().Format("2006-01-02T15:04:05.000Z")
 			}
+		}
+		if d, ok := byID[f.FolloweeID]; ok {
+			pf.Followee = d
 		}
 		out = append(out, pf)
 	}
 	return out
 }
 
-// followeeLookup batch-loads the followee User + UserProfile for the given
-// rows and returns a closure resolving userID → (User, UserProfile). When
-// userRepo is nil or a user is missing the closure returns (nil, nil) so the
-// corresponding followee stays nil.
-func (h *Handler) followeeLookup(rows []*model.Following) entity.UserProfileLookup {
+// followees batch-loads the distinct followee users of rows and their
+// profiles. When userRepo is nil or the lookup fails it returns no users, so
+// every followee stays absent.
+func (h *Handler) followees(rows []*model.Following) ([]*model.User, map[string]*model.UserProfile) {
 	if h.userRepo == nil || len(rows) == 0 {
-		return func(string) (*model.User, *model.UserProfile) { return nil, nil }
+		return nil, nil
 	}
+	seen := make(map[string]struct{}, len(rows))
 	ids := make([]string, 0, len(rows))
 	for _, f := range rows {
+		if _, ok := seen[f.FolloweeID]; ok {
+			continue
+		}
+		seen[f.FolloweeID] = struct{}{}
 		ids = append(ids, f.FolloweeID)
 	}
-	users, err := h.userRepo.FindManyByIDs(ids)
+	found, err := h.userRepo.FindManyByIDs(ids)
 	if err != nil {
-		return func(string) (*model.User, *model.UserProfile) { return nil, nil }
+		return nil, nil
 	}
-	userIdx := make(map[string]*model.User, len(users))
-	for _, u := range users {
+	users := make([]*model.User, 0, len(found))
+	for _, u := range found {
 		if u != nil {
-			userIdx[u.ID] = u
+			users = append(users, u)
 		}
 	}
-	profIdx := make(map[string]*model.UserProfile)
-	if profiles, err := h.userRepo.FindProfilesByUserIDs(ids); err == nil {
-		for _, p := range profiles {
-			if p != nil {
-				profIdx[p.UserID] = p
-			}
-		}
-	}
-	return func(uid string) (*model.User, *model.UserProfile) {
-		u, ok := userIdx[uid]
-		if !ok {
-			return nil, nil
-		}
-		return u, profIdx[uid]
-	}
+	return users, h.userProfiles(users)
 }

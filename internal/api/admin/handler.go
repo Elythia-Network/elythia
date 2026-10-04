@@ -18,6 +18,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/shiroha-a/mk/internal/api/apierr"
+	"github.com/shiroha-a/mk/internal/api/meself"
 	"github.com/shiroha-a/mk/internal/api/pagination"
 	"github.com/shiroha-a/mk/internal/config"
 	coreabuse "github.com/shiroha-a/mk/internal/core/abuse"
@@ -109,7 +110,9 @@ type UnfollowEnqueuer interface {
 // Handler handles admin API endpoints.
 type Handler struct {
 	// detailExtras は UserDetailed のピン留め・移行先を users/show と同じ規則で埋める (#3330)。
-	detailExtras  userpack.DetailExtras
+	detailExtras userpack.DetailExtras
+	// listPacker は一覧の利用者を本家 packMany と同じ形に組む (#3330)。
+	listPacker    userpack.ListPacker
 	signupService *signup.Service
 	roleService   *role.Service
 	metaRepo      repository.MetaRepository
@@ -1259,14 +1262,16 @@ func (h *Handler) ShowUsers(c echo.Context) error {
 	// 専用 field が一覧経由で漏れ、show-user の admin guard を迂回できてしまう
 	// (moderator が admin の連絡先や signin IP を取得可能)。一覧は UserDetailed
 	// に揃えて過剰露出を防ぐ。
-	result := make([]entity.UserDetailed, 0, len(users))
-	for _, u := range users {
-		d := entity.PackUserDetailed(u, profileByUser[u.ID], h.idGen)
-		// **モデレーターにはカウントを見せる** (upstream
-		// `UserEntityService.pack` は `isMe || iAmModerator` に実数を返す)。
-		// packer は既定で伏せるので、ここでゲートを通さないと 0 になる。
-		entity.GateCountVisibility(&d, false, true, false)
-		result = append(result, d)
+	//
+	// 本家と同じく packMany(users, me) で組む。モデレーターにはカウントと
+	// moderationNote・2FA の項目を見せ、関係・ピン留め・移行先・instance・絵文字も
+	// まとめて埋める。自分自身は MeDetailed になる (#3330)。
+	ctx := c.Request().Context()
+	viewer := middleware.GetUser(c)
+	packed := h.packUsersMany(ctx, viewer, users, profileByUser)
+	result := make([]any, 0, len(users))
+	for i, u := range users {
+		result = append(result, meself.Pack(ctx, packed[i], u, profileByUser[u.ID], viewer))
 	}
 	return c.JSON(http.StatusOK, result)
 }
@@ -3098,7 +3103,8 @@ func (h *Handler) RolesUsers(c echo.Context) error {
 	// 包むため互換のため同じ envelope に揃える (UI の Roles 詳細ページが
 	// assignment.user を直接参照している)。createdAt は assignment.id (ULID) から
 	// 復元 (User と同じく ID 由来 timestamp)。
-	result := make([]map[string]any, 0, len(assignments))
+	kept := make([]*model.RoleAssignment, 0, len(assignments))
+	users := make([]*model.User, 0, len(assignments))
 	for _, a := range assignments {
 		if a.User == nil {
 			// role_assignment は残っているのに user 行が消えているデータ不整合。
@@ -3108,6 +3114,19 @@ func (h *Handler) RolesUsers(c echo.Context) error {
 				"assignmentId", a.ID, "userId", a.UserID, "roleId", a.RoleID)
 			continue
 		}
+		kept = append(kept, a)
+		users = append(users, a.User)
+	}
+	// upstream users.ts:95 は packMany(users, me, {schema:'UserDetailed'})。
+	// packAdminUser を使うと email / signins / roleAssigns 等の admin 専用
+	// field が read:admin:roles scope に漏れる (show-user の admin guard 迂回)。
+	// ShowUsers と同様 UserDetailed に揃えて過剰露出を防ぐ (#1822)。ピン留め・
+	// 移行先・instance・絵文字・関係もまとめて埋め、自分自身は MeDetailed (#3330)。
+	ctx := c.Request().Context()
+	viewer := middleware.GetUser(c)
+	packed := h.packUsersMany(ctx, viewer, users, profileByUser)
+	result := make([]map[string]any, 0, len(kept))
+	for i, a := range kept {
 		createdAt := ""
 		if t, err := h.idGen.ParseTime(a.ID); err == nil {
 			createdAt = t.UTC().Format("2006-01-02T15:04:05.000Z")
@@ -3121,11 +3140,7 @@ func (h *Handler) RolesUsers(c echo.Context) error {
 		result = append(result, map[string]any{
 			"id":        a.ID,
 			"createdAt": createdAt,
-			// upstream users.ts:95 は packMany(users, me, {schema:'UserDetailed'})。
-			// packAdminUser を使うと email / signins / roleAssigns 等の admin 専用
-			// field が read:admin:roles scope に漏れる (show-user の admin guard 迂回)。
-			// ShowUsers と同様 UserDetailed に揃えて過剰露出を防ぐ (#1822)。
-			"user":      h.packModeratorVisibleUser(a.User, profileByUser[a.User.ID]),
+			"user":      meself.Pack(ctx, packed[i], a.User, profileByUser[a.User.ID], viewer),
 			"expiresAt": expiresAt,
 		})
 	}
@@ -4291,8 +4306,9 @@ func (h *Handler) AbuseReports(c echo.Context) error {
 		if r == nil {
 			return c.JSON(http.StatusOK, []packedAbuseReport{})
 		}
-		profByID := h.abuseUserProfiles([]*model.AbuseUserReport{r})
-		return c.JSON(http.StatusOK, []packedAbuseReport{h.packAbuseReport(c.Request().Context(), r, profByID)})
+		ctx := c.Request().Context()
+		single := []*model.AbuseUserReport{r}
+		return c.JSON(http.StatusOK, []packedAbuseReport{h.packAbuseReport(ctx, r, h.abuseUsers(ctx, single))})
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1173)。
 	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
@@ -4313,21 +4329,20 @@ func (h *Handler) AbuseReports(c echo.Context) error {
 	// した createdAt 文字列を response に注入する。ShowModerationLogs と
 	// 同パターン (#1116)。embedded struct で既存 field を JSON inline、
 	// CreatedAt だけ上乗せする。
-	// reporter / targetUser / assignee に紐づく profile を 1 batch で解決して
-	// UserDetailed を pack する (N+1 回避)。
-	profByID := h.abuseUserProfiles(reports)
+	// reporter / targetUser / assignee を 1 batch で UserDetailed に pack する (N+1 回避)。
+	ctx := c.Request().Context()
+	users := h.abuseUsers(ctx, reports)
 	out := make([]packedAbuseReport, 0, len(reports))
 	for _, r := range reports {
-		out = append(out, h.packAbuseReport(c.Request().Context(), r, profByID))
+		out = append(out, h.packAbuseReport(ctx, r, users))
 	}
 	return c.JSON(http.StatusOK, out)
 }
 
 // packAbuseReport converts an abuse report into the wire shape of
-// admin/abuse-user-reports. profByID は abuseUserProfiles で batch 解決した
-// profile map。System Webhook の本文は形が違うので coreabuse.WebhookPayload で
-// 作る (#3260)。
-func (h *Handler) packAbuseReport(ctx context.Context, r *model.AbuseUserReport, profByID map[string]*model.UserProfile) packedAbuseReport {
+// admin/abuse-user-reports. users は abuseUsers で batch に pack した利用者。
+// System Webhook の本文は形が違うので coreabuse.WebhookPayload で作る (#3260)。
+func (h *Handler) packAbuseReport(ctx context.Context, r *model.AbuseUserReport, users map[string]*entity.UserDetailed) packedAbuseReport {
 	p := packedAbuseReport{
 		ID:             r.ID,
 		Comment:        r.Comment,
@@ -4341,9 +4356,9 @@ func (h *Handler) packAbuseReport(ctx context.Context, r *model.AbuseUserReport,
 		// 生 model.User を inline すると usernameLower / inbox 等の内部
 		// field が漏れ、UserDetailedNotMe 固有 field も欠ける。UserDetailed
 		// で pack する。
-		Reporter:   h.packAbuseUser(r.Reporter, profByID),
-		TargetUser: h.packAbuseUser(r.TargetUser, profByID),
-		Assignee:   h.packAbuseUser(r.Assignee, profByID),
+		Reporter:   abuseUser(r.Reporter, users),
+		TargetUser: abuseUser(r.TargetUser, users),
+		Assignee:   abuseUser(r.Assignee, users),
 	}
 	if s, err := aidxCreatedAtString(h.idGen, r.ID); err == nil {
 		p.CreatedAt = s
@@ -4358,14 +4373,16 @@ func (h *Handler) packAbuseReport(ctx context.Context, r *model.AbuseUserReport,
 	return p
 }
 
-// abuseUserProfiles batch-fetches the profiles of every reporter / targetUser /
-// assignee referenced by the reports, keyed by user ID (N+1 回避)。
-func (h *Handler) abuseUserProfiles(reports []*model.AbuseUserReport) map[string]*model.UserProfile {
-	if h.userRepo == nil {
-		return nil
-	}
+// abuseUsers packs every reporter / targetUser / assignee referenced by the
+// reports in one batch, keyed by user ID.
+//
+// 本家 AbuseUserReportEntityService.packMany は 3 者をまとめて
+// packMany(users, null, {schema: 'UserDetailedNotMe'}) で組む。閲覧者が null
+// なので、呼んだモデレーターにもフォロワー限定のカウントや moderationNote は
+// 出ず、ピン留めも空になる (#3330)。
+func (h *Handler) abuseUsers(ctx context.Context, reports []*model.AbuseUserReport) map[string]*entity.UserDetailed {
 	seen := map[string]struct{}{}
-	ids := make([]string, 0, len(reports)*3)
+	users := make([]*model.User, 0, len(reports)*3)
 	add := func(u *model.User) {
 		if u == nil {
 			return
@@ -4374,47 +4391,49 @@ func (h *Handler) abuseUserProfiles(reports []*model.AbuseUserReport) map[string
 			return
 		}
 		seen[u.ID] = struct{}{}
-		ids = append(ids, u.ID)
+		users = append(users, u)
 	}
 	for _, r := range reports {
 		add(r.Reporter)
 		add(r.TargetUser)
 		add(r.Assignee)
 	}
-	if len(ids) == 0 {
-		return nil
-	}
-	profiles, err := h.userRepo.FindProfilesByUserIDs(ids)
-	if err != nil {
-		return nil
-	}
-	byID := make(map[string]*model.UserProfile, len(profiles))
-	for _, p := range profiles {
-		byID[p.UserID] = p
-	}
-	return byID
+	return h.packUsersByID(ctx, nil, users)
 }
 
-// packAbuseUser packs a related user as UserDetailed (= UserDetailedNotMe shape).
-// Returns nil (-> JSON null) when u is nil so the assignee key stays present.
-func (h *Handler) packAbuseUser(u *model.User, profByID map[string]*model.UserProfile) *entity.UserDetailed {
+// packUsersByID batch-loads the profiles of users and packs them with
+// packUsersMany, keyed by user ID. profile の取得失敗は致命にせず、profile 無しで組む。
+func (h *Handler) packUsersByID(ctx context.Context, viewer *model.User, users []*model.User) map[string]*entity.UserDetailed {
+	out := make(map[string]*entity.UserDetailed, len(users))
+	if len(users) == 0 {
+		return out
+	}
+	profByID := map[string]*model.UserProfile{}
+	if h.userRepo != nil {
+		ids := make([]string, 0, len(users))
+		for _, u := range users {
+			ids = append(ids, u.ID)
+		}
+		if profiles, err := h.userRepo.FindProfilesByUserIDs(ids); err == nil {
+			for _, p := range profiles {
+				profByID[p.UserID] = p
+			}
+		}
+	}
+	packed := h.packUsersMany(ctx, viewer, users, profByID)
+	for i, u := range users {
+		out[u.ID] = &packed[i]
+	}
+	return out
+}
+
+// abuseUser returns the packed user for u, or nil (-> JSON null) when u is
+// nil so the assignee key stays present.
+func abuseUser(u *model.User, packed map[string]*entity.UserDetailed) *entity.UserDetailed {
 	if u == nil {
 		return nil
 	}
-	d := h.packModeratorVisibleUser(u, profByID[u.ID])
-	return &d
-}
-
-// packModeratorVisibleUser packs a user for a moderator-only response.
-//
-// **カウントのゲートを通す。** packer は `followersVisibility` /
-// `followingVisibility` が public でないカウントを既定で伏せるので、通さないと
-// モデレーター向けの画面で 0 になる。upstream `UserEntityService.pack` は
-// `isMe || iAmModerator` に実数を返す。
-func (h *Handler) packModeratorVisibleUser(u *model.User, profile *model.UserProfile) entity.UserDetailed {
-	d := entity.PackUserDetailed(u, profile, h.idGen)
-	entity.GateCountVisibility(&d, false, true, false)
-	return d
+	return packed[u.ID]
 }
 
 // packedAbuseReport mirrors the upstream abuse-user-reports res schema
@@ -4620,9 +4639,23 @@ func (h *Handler) ShowModerationLogs(c echo.Context) error {
 	}
 	// upstream は user を UserDetailedNotMe (optional:false) で pack する。生 model.User
 	// を埋めると usernameLower/inbox 等の内部列が漏れ avatarUrl 等 packed field も欠ける。
-	// actor (moderator) の profile は重複が多いので distinct user で 1 度だけ fetch して
-	// pack する (#1539)。
-	profileByUser := map[string]*model.UserProfile{}
+	// actor (moderator) は重複が多いので distinct user をまとめて pack する (#1539)。
+	// 本家 ModerationLogEntityService.packMany は packMany(users, null) なので、
+	// 閲覧者は null として扱う (ピン留めは空、カウントは匿名のゲート、#3330)。
+	ctx := c.Request().Context()
+	seen := map[string]struct{}{}
+	actors := make([]*model.User, 0, len(logs))
+	for _, l := range logs {
+		if l.User == nil {
+			continue
+		}
+		if _, ok := seen[l.User.ID]; ok {
+			continue
+		}
+		seen[l.User.ID] = struct{}{}
+		actors = append(actors, l.User)
+	}
+	packedActors := h.packUsersByID(ctx, nil, actors)
 	out := make([]map[string]any, 0, len(logs))
 	for _, l := range logs {
 		m := map[string]any{
@@ -4637,18 +4670,11 @@ func (h *Handler) ShowModerationLogs(c echo.Context) error {
 			// idGen は wired されているのに parse 失敗した場合のみログに残す。
 			// 非 aidx 形式の legacy ID 等で createdAt が出せない時に frontend
 			// 側で「Invalid Date」が出る原因を後追いできるようにする。
-			slog.DebugContext(c.Request().Context(), "modlog: createdAt derive failed",
+			slog.DebugContext(ctx, "modlog: createdAt derive failed",
 				"logId", l.ID, "err", err)
 		}
 		if l.User != nil {
-			prof, ok := profileByUser[l.UserID]
-			if !ok {
-				if h.userRepo != nil {
-					prof, _ = h.userRepo.FindProfileByUserID(l.UserID)
-				}
-				profileByUser[l.UserID] = prof
-			}
-			m["user"] = h.packModeratorVisibleUser(l.User, prof)
+			m["user"] = packedActors[l.User.ID]
 		}
 		out = append(out, m)
 	}

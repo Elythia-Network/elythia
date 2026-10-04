@@ -15,6 +15,7 @@ import (
 	"github.com/shiroha-a/mk/internal/api/roles"
 	"github.com/shiroha-a/mk/internal/api/userrelation"
 	corerole "github.com/shiroha-a/mk/internal/core/role"
+	"github.com/shiroha-a/mk/internal/core/userpack"
 	"github.com/shiroha-a/mk/internal/entitycompat/shapetest"
 	"github.com/shiroha-a/mk/internal/misc/id"
 	"github.com/shiroha-a/mk/internal/model"
@@ -370,7 +371,7 @@ func TestUsers_EmbedsViewerRelation(t *testing.T) {
 	require.NoError(t, assignRepo.Create(&model.RoleAssignment{ID: "ra1", RoleID: "r1", UserID: "alice"}))
 	followingRepo := testutil.NewMockFollowingRepository()
 	followingRepo.Followings["f1"] = &model.Following{ID: "f1", FollowerID: "viewer1", FolloweeID: "alice"}
-	h.SetRelationRepos(userrelation.Repos{Following: followingRepo})
+	h.SetListPacker(userpack.New(userpack.Lookups{Relations: userrelation.Repos{Following: followingRepo}}, nil))
 
 	// 認証 viewer: isFollowing=true。
 	vc := newCtxWithViewer(`{"roleId":"r1"}`, "viewer1")

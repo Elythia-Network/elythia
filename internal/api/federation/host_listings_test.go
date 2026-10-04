@@ -231,7 +231,7 @@ func TestUsers_EmbedsViewerRelation(t *testing.T) {
 	followingRepo := testutil.NewMockFollowingRepository()
 	followingRepo.Followings["f1"] = &model.Following{ID: "f1", FollowerID: "local1", FolloweeID: "r1"}
 	h.SetFollowingRepo(followingRepo)
-	h.SetRelationRepos(userrelation.Repos{Following: followingRepo})
+	setListPacker(h, userrelation.Repos{Following: followingRepo}, fakeModerator{ids: map[string]bool{"mod1": true}})
 
 	// 認証 viewer local1: r1 を follow しているので isFollowing=true。
 	rec := postBodyAs(h.Users, `{"host":"remote.example","limit":10}`, "local1")
@@ -270,7 +270,7 @@ func TestFollowers_FolloweeCarriesViewerRelation(t *testing.T) {
 	// viewer1 -> rf1 の follow (isFollowing 検出用)。
 	followingRepo.Followings["f_viewer"] = &model.Following{ID: "f_viewer", FollowerID: "viewer1", FolloweeID: "rf1"}
 	h.SetFollowingRepo(followingRepo)
-	h.SetRelationRepos(userrelation.Repos{Following: followingRepo})
+	setListPacker(h, userrelation.Repos{Following: followingRepo}, fakeModerator{ids: map[string]bool{"mod1": true}})
 
 	// 認証 viewer: embed followee に isFollowing=true。
 	rec := postBodyAs(h.Followers, `{"host":"remote.example","limit":10}`, "viewer1")
@@ -308,7 +308,7 @@ func TestUsers_GatesFollowersCount(t *testing.T) {
 		FollowingVisibility: model.FollowingVisibilityPublic,
 	}
 	h.SetUserRepo(userRepo)
-	h.SetRelationRepos(userrelation.Repos{Following: testutil.NewMockFollowingRepository()})
+	setListPacker(h, userrelation.Repos{Following: testutil.NewMockFollowingRepository()}, fakeModerator{ids: map[string]bool{"mod1": true}})
 
 	// 匿名 caller: followers-only count は 0 に潰される。
 	rec := postBody(h.Users, `{"host":"remote.example","limit":10}`)
@@ -346,7 +346,7 @@ func TestFollowers_FolloweeGatesFollowersCount(t *testing.T) {
 	followingRepo := testutil.NewMockFollowingRepository()
 	followingRepo.Followings["f_listed"] = &model.Following{ID: "f_listed", FollowerID: "someone", FolloweeID: "rf1", FolloweeHost: &remote}
 	h.SetFollowingRepo(followingRepo)
-	h.SetRelationRepos(userrelation.Repos{Following: followingRepo})
+	setListPacker(h, userrelation.Repos{Following: followingRepo}, fakeModerator{ids: map[string]bool{"mod1": true}})
 
 	// 匿名: embed followee の followers-only count は 0。
 	rec := postBody(h.Followers, `{"host":"remote.example","limit":10}`)
@@ -377,7 +377,7 @@ func TestFollowing_FolloweeGatesFollowersCount(t *testing.T) {
 	// federation/following は followerHost=remote の行が対象 (embed されるのは followee=lf1)。
 	followingRepo.Followings["f_listed"] = &model.Following{ID: "f_listed", FollowerID: "someone", FollowerHost: &remote, FolloweeID: "lf1"}
 	h.SetFollowingRepo(followingRepo)
-	h.SetRelationRepos(userrelation.Repos{Following: followingRepo})
+	setListPacker(h, userrelation.Repos{Following: followingRepo}, fakeModerator{ids: map[string]bool{"mod1": true}})
 
 	rec := postBody(h.Following, `{"host":"remote.example","limit":10}`)
 	require.Equal(t, http.StatusOK, rec.Code)

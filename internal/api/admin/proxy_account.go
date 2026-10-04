@@ -5,6 +5,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/shiroha-a/mk/internal/api/apierr"
+	"github.com/shiroha-a/mk/internal/api/meself"
 	"github.com/shiroha-a/mk/internal/core/moderationlog"
 	"github.com/shiroha-a/mk/internal/entity"
 )
@@ -43,6 +44,15 @@ func (h *Handler) UpdateProxyAccount(c echo.Context) error {
 		})
 	}
 	// 更新後 profile を再取得して MeDetailed を返す (upstream schema 'MeDetailed')。
+	//
+	// 本家は pack(proxy.id, proxy, {schema: 'MeDetailed'}) で、proxy 自身を閲覧者に
+	// する。ピン留め・移行先も proxy から見た形で埋め、createdAt と policies など
+	// MeDetailed の項目は他の self 経路と同じく meself.PackMe で揃える (#3330)。
 	profile, _ := h.userRepo.FindProfileByUserID(proxy.ID)
-	return c.JSON(http.StatusOK, entity.PackMeDetailed(proxy, profile))
+	ctx := c.Request().Context()
+	d := entity.PackUserDetailed(proxy, profile, h.idGen)
+	if h.detailExtras != nil {
+		h.detailExtras.FillDetailedExtras(ctx, proxy, proxy, profile, &d)
+	}
+	return c.JSON(http.StatusOK, meself.PackMe(ctx, d, proxy, profile))
 }

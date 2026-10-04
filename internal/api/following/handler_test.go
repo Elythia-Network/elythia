@@ -12,6 +12,7 @@ import (
 	"github.com/shiroha-a/mk/internal/api/userrelation"
 	corefollowing "github.com/shiroha-a/mk/internal/core/following"
 	coreuser "github.com/shiroha-a/mk/internal/core/user"
+	"github.com/shiroha-a/mk/internal/core/userpack"
 	"github.com/shiroha-a/mk/internal/entitycompat/shapetest"
 	"github.com/shiroha-a/mk/internal/misc/id"
 	"github.com/shiroha-a/mk/internal/model"
@@ -370,13 +371,13 @@ func TestList_EmbedsRelationFlags(t *testing.T) {
 	uSvc := coreuser.NewService(userRepo, nil, nil, nil)
 	h := NewHandler(fSvc, uSvc)
 	h.SetIDGen(idGen)
-	h.SetRelationRepos(userrelation.Repos{
+	h.SetListPacker(userpack.New(userpack.Lookups{Relations: userrelation.Repos{
 		Following:     fRepo,
 		Blocking:      testutil.NewMockBlockingRepository(),
 		Muting:        testutil.NewMockMutingRepository(),
 		RenoteMuting:  testutil.NewMockRenoteMutingRepository(),
 		FollowRequest: frRepo,
-	})
+	}}, idGen))
 
 	addUser(userRepo, "alice", false)
 	bob := addUser(userRepo, "bob", false)

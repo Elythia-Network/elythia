@@ -11,7 +11,6 @@ import (
 	"github.com/shiroha-a/mk/internal/api/pagination"
 	corepage "github.com/shiroha-a/mk/internal/core/page"
 	coreuser "github.com/shiroha-a/mk/internal/core/user"
-	"github.com/shiroha-a/mk/internal/core/userpack"
 	"github.com/shiroha-a/mk/internal/entity"
 	"github.com/shiroha-a/mk/internal/misc/colfit"
 	"github.com/shiroha-a/mk/internal/misc/id"
@@ -43,8 +42,9 @@ type UserBundleSource interface {
 
 // Handler handles page-related API endpoints.
 type Handler struct {
-	// detailExtras は UserDetailed のピン留め・移行先を users/show と同じ規則で埋める (#3330)。
-	detailExtras        userpack.DetailExtras
+	// userPacker は pageEvent の利用者を本家 pack(me.id, {id: page.userId}) と同じく
+	// ページの持ち主から見た形に組む (#3330)。
+	userPacker          UserPacker
 	svc                 *corepage.Service
 	idGen               id.Generator
 	mainStreamPublisher MainStreamPublisher
@@ -527,19 +527,10 @@ func (h *Handler) PagePush(c echo.Context) error {
 		// 経由で将来実装が変わる可能性に備えて防御的にcheck。
 		return c.NoContent(http.StatusNoContent)
 	}
-	user := entity.PackUserDetailed(bundle.User, bundle.Profile, h.idGen)
-	// 本家は pack(me.id, {id: page.userId}, {schema: 'UserDetailed'}) で、ページの
-	// 持ち主を閲覧者にしてピン留めと移行先を埋める (#3330)。
-	if h.detailExtras != nil {
-		owner := caller
-		if p.UserID != caller.ID {
-			if ob, oerr := h.userSource.ShowByID(p.UserID); oerr == nil && ob != nil && ob.User != nil {
-				owner = ob.User
-			} else {
-				owner = nil
-			}
-		}
-		h.detailExtras.FillDetailedExtras(c.Request().Context(), owner, bundle.User, bundle.Profile, &user)
+	user, ok := h.packPusher(c.Request().Context(), bundle, p.UserID)
+	if !ok {
+		// 本家は profile を findOneByOrFail で読むので、読めなければ例外で送らない。
+		return apierr.JSONInternalError(c)
 	}
 	body := map[string]any{
 		"pageId": p.ID,

@@ -528,7 +528,6 @@ func (h *Handler) Show(c echo.Context) error {
 		// suspended user を除外する。物理削除待ちか行保持かを問わず local deleted
 		// user も非 moderator から隠すが、remote user と moderator の既存契約は維持する。
 		visible := make([]*user.UserWithProfile, 0, len(bundles))
-		users := make([]*model.User, 0, len(bundles))
 		// upstream show.ts は匿名 visitor かつ ugcVisibilityForVisitor='local' のとき
 		// where 句に `host: IsNull()` を足し、remote user をエラーにせず黙って省く。
 		// 'none' はこの経路では見ていない (単体指定と同じく upstream に合わせる)。
@@ -544,13 +543,11 @@ func (h *Handler) Show(c echo.Context) error {
 				continue
 			}
 			visible = append(visible, b)
-			users = append(users, b.User)
 		}
-		resolver := entity.NewInstanceResolver(h.instanceLookup(), users...)
 		// upstream show.ts:151-153 は userIds バルクモードでも schema 'UserDetailed'
 		// で pack する。旧実装は UserLite を返していた (#1547)。remote stats fetch は
-		// list path 同様 N+1 回避のため bulk では行わない。ピン留めと移行先は本家
-		// packMany と同じく埋める (まとめて引く、#3330)。
+		// list path 同様 N+1 回避のため bulk では行わない。ピン留め・移行先・
+		// instance・絵文字は本家 packMany と同じく batch.packAll でまとめて埋める (#3330)。
 		var batch detailedBatch
 		viewerID := ""
 		if viewer != nil {
@@ -559,8 +556,6 @@ func (h *Handler) Show(c echo.Context) error {
 		ctx := c.Request().Context()
 		for _, b := range visible {
 			detailed := entity.PackUserDetailed(b.User, b.Profile, h.idGen)
-			resolver.FillUserLite(&detailed.UserLite)
-			h.populateUserEmojis(b.User, &detailed.UserLite)
 			h.applyModerationNote(&detailed, iAmModerator, b.Profile)
 			entity.ApplyModeratorSecurityFields(&detailed, iAmModerator, b.Profile)
 			// #2106 N2: バルク show も他のマルチユーザー path (search / recommendation 等) 同様に
@@ -767,18 +762,9 @@ func (h *Handler) Search(c echo.Context) error {
 
 	iAmModerator := viewer != nil && h.moderatorChecker != nil && h.moderatorChecker.IsModerator(viewer.ID)
 
-	resolver := entity.NewInstanceResolver(h.instanceLookup(), users...)
-
 	// detail は default true。false のとき UserLite を返す (upstream search.ts:56、#1547)。
 	if req.Detail != nil && !*req.Detail {
-		out := make([]entity.UserLite, 0, len(users))
-		for _, u := range users {
-			lite := entity.PackUserLite(u)
-			resolver.FillUserLite(&lite)
-			h.populateUserEmojis(u, &lite)
-			out = append(out, lite)
-		}
-		return c.JSON(http.StatusOK, out)
+		return c.JSON(http.StatusOK, h.packLites(users))
 	}
 
 	// users/search が検索結果 N 件ぶん per-row GetProfile を呼んでいた N+1 を
@@ -798,8 +784,6 @@ func (h *Handler) Search(c echo.Context) error {
 	var batch detailedBatch
 	for _, u := range users {
 		d := entity.PackUserDetailed(u, profiles[u.ID], h.idGen)
-		resolver.FillUserLite(&d.UserLite)
-		h.populateUserEmojis(u, &d.UserLite)
 		// moderator viewer には moderationNote を出す (#1558、users/show と対称)。
 		h.applyModerationNote(&d, iAmModerator, profiles[u.ID])
 		entity.ApplyModeratorSecurityFields(&d, iAmModerator, profiles[u.ID])
@@ -1206,12 +1190,6 @@ func (h *Handler) packRelationItems(
 		}
 	}
 
-	remoteUsers := make([]*model.User, 0, len(bundleByID))
-	for _, b := range bundleByID {
-		remoteUsers = append(remoteUsers, b.User)
-	}
-	resolver := entity.NewInstanceResolver(h.instanceLookup(), remoteUsers...)
-
 	// viewer 視点の follow relation を 2 batch query で先に解決しておく
 	// (#1144)。viewer が nil (= unauthenticated) なら lookup skip して
 	// 全 user の flag を nil 維持 (upstream も me が nil の経路では
@@ -1249,8 +1227,6 @@ func (h *Handler) packRelationItems(
 		}
 		if b, ok := bundleByID[target]; ok {
 			d := entity.PackUserDetailed(b.User, b.Profile, h.idGen)
-			resolver.FillUserLite(&d.UserLite)
-			h.populateUserEmojis(b.User, &d.UserLite)
 			isMe := viewer != nil && viewer.ID == b.User.ID
 			isFollowing := false
 			if viewer != nil && viewer.ID != b.User.ID {
@@ -1297,7 +1273,7 @@ func (h *Handler) packRelationItems(
 		out = append(out, item)
 	}
 	// 本家 FollowingEntityService は相手を packMany (UserDetailedNotMe) で組むので、
-	// ピン留めと移行先もまとめて埋める (#3330)。
+	// ピン留め・移行先・instance・絵文字もまとめて埋める (#3330)。
 	batch.fill(ctx, h, viewer)
 	return out
 }
