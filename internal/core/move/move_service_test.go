@@ -1251,7 +1251,7 @@ func TestMove_DelayedUnfollowListFailureIsBestEffort(t *testing.T) {
 // 直接引く (upstream の `fetchPerson` と同じ扱い)。
 func TestMove_LocalDestinationResolvedFromDB(t *testing.T) {
 	const srcURI = "https://local.example/users/src"
-	const dstURI = "https://local.example/users/other"
+	const dstURI = "https://local.example/users/dst"
 
 	resolver := &fakeResolver{
 		byURI:    map[string]*model.User{},
@@ -1269,4 +1269,36 @@ func TestMove_LocalDestinationResolvedFromDB(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, moved.MovedToURI)
 	assert.Equal(t, dstURI, *moved.MovedToURI)
+}
+
+// #3330: ExtractLocalUserID reads the last segment of any `{url}/` URI (like
+// upstream fetchPerson), so a non-canonical local URI can name the
+// destination. The canonical actor URI, not the given one, is what gets
+// stored in movedToUri / alsoKnownAs and delivered.
+func TestMove_LocalDestinationStoresCanonicalURI(t *testing.T) {
+	const srcURI = "https://local.example/users/src"
+	const givenURI = "https://local.example/notes/dst"
+	const canonical = "https://local.example/users/dst"
+
+	resolver := &fakeResolver{
+		byURI:    map[string]*model.User{},
+		localIDs: map[string]string{givenURI: "dst"},
+	}
+	deliverer := &fakeDeliverer{}
+	svc, userRepo, _ := newService(resolver, deliverer)
+	src := &model.User{ID: "src", Username: "me"}
+	userRepo.Users["src"] = src
+	userRepo.Users["dst"] = &model.User{ID: "dst", Username: "other", AlsoKnownAs: strPtr(srcURI)}
+
+	require.NoError(t, svc.Move(src, givenURI))
+
+	moved, err := userRepo.FindByID("src")
+	require.NoError(t, err)
+	require.NotNil(t, moved.MovedToURI)
+	assert.Equal(t, canonical, *moved.MovedToURI)
+	require.NotNil(t, moved.AlsoKnownAs)
+	assert.Equal(t, canonical, *moved.AlsoKnownAs)
+	require.NotEmpty(t, deliverer.body)
+	assert.Contains(t, string(deliverer.body), canonical)
+	assert.NotContains(t, string(deliverer.body), givenURI)
 }

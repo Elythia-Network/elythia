@@ -779,7 +779,7 @@ func TestProcess_FlagObjectFormURIs(t *testing.T) {
 	p.SetAbuseReportRepo(abuseRepo, idGenFlag)
 
 	// **local user は本番と同じく uri NULL。** handleFlag は
-	// `ExtractLocalUserID` → `FindByID` で解決する (#1560 で「任意 host の
+	// `flagTargetUserID` → `FindManyByIDs` で解決する (#1560 で「任意 host の
 	// URI を受ける」旧実装を潰した硬化)。偽の uri を持たせると `FindByURI`
 	// に差し戻す変異が素通りする。
 	repo.Users["bob"] = &model.User{ID: "bob", Username: "bob"}
@@ -1438,35 +1438,39 @@ func TestProcess_AcceptFollowerLookupFailurePropagates(t *testing.T) {
 // Reject も同じ (#3115)。**Accept と Reject は同じ決定の裏表**なので、片方だけ
 // 直すと「承認は拾えるが拒否は落ちる」という非対称が残る。
 //
-// **Accept と経路が違う。** あちらは `resolver.ExtractLocalUserID` (URL builder 由来)
-// で分岐するが、Reject は `resolveTargetUser` = `Processor.localBaseURL` で分岐する。
-// `SetLocalBaseURL` を呼ばないと**常に `FindByURI` 側**へ落ちるので、`FindErr`
-// だけを立てたテストは分岐に到達せず緑のまま通る (実測)。両方を試す。
+// follower は Accept と同じく userFromAPID で引く (#3330)。ローカルの URI は
+// `FindByID`、リモートの URI は `FindByURI` に分かれるので両方を試す。
+// `FindByURIErr` をまとめて立てると actor (alice) の解決が先に落ち、follower の
+// lookup に到達しないまま緑になるので、リモート側は follower の URI だけを落とす。
 func TestProcess_RejectFollowerLookupFailurePropagates(t *testing.T) {
 	cases := []struct {
-		name         string
-		localBaseURL string
-		arm          func(*testutil.MockUserRepository, error)
+		name        string
+		followerURI string
+		arm         func(*testutil.MockUserRepository, error)
 	}{
 		{
-			name:         "localBaseURL あり (FindByID)",
-			localBaseURL: "https://example.com",
-			arm:          func(r *testutil.MockUserRepository, e error) { r.FindErr = e },
+			name:        "ローカルの follower (FindByID)",
+			followerURI: "https://example.com/users/ghost",
+			arm:         func(r *testutil.MockUserRepository, e error) { r.FindErr = e },
 		},
 		{
-			name: "localBaseURL なし (FindByURI)",
-			arm:  func(r *testutil.MockUserRepository, e error) { r.FindByURIErr = e },
+			name:        "リモートの follower (FindByURI)",
+			followerURI: "https://other.example/users/ghost",
+			arm: func(r *testutil.MockUserRepository, e error) {
+				r.FindByURIHook = func(uri string) error {
+					if uri == "https://other.example/users/ghost" {
+						return e
+					}
+					return nil
+				}
+			},
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			p, repo, _, _ := newProcessor(t, aliceActor)
-			if tc.localBaseURL != "" {
-				p.SetLocalBaseURL(tc.localBaseURL)
-			}
-			// **actor の解決を先に済ませておく。** `FindByURIErr` を立てると
-			// `ResolveActor` も落ちてしまい、その手前で return されて
-			// follower の lookup に到達しない。
+			// **actor の解決を先に済ませておく。** 未取り込みの actor は fetch に
+			// 回り、follower の lookup の手前で別の失敗をしうる。
 			dummyURI := "https://example.com/users/dummy"
 			repo.Users["dummy"] = &model.User{ID: "dummy", Username: "dummy", URI: &dummyURI}
 			require.NoError(t, p.Process([]byte(`{"type":"Follow","actor":"https://remote.example/users/alice","object":"https://example.com/users/dummy"}`)))
@@ -1477,7 +1481,7 @@ func TestProcess_RejectFollowerLookupFailurePropagates(t *testing.T) {
 				"actor": "https://remote.example/users/alice",
 				"object": {
 					"type": "Follow",
-					"actor": "https://example.com/users/ghost",
+					"actor": "` + tc.followerURI + `",
 					"object": "https://remote.example/users/alice"
 				}
 			}`)
@@ -1591,7 +1595,7 @@ func TestProcess_LookupFailuresPropagate(t *testing.T) {
 	t.Run("Undo(Accept) の follower が引けない", func(t *testing.T) {
 		p, repo, _, _ := newProcessor(t, aliceActor)
 		const actor = "https://remote.example/users/alice"
-		// **follower はローカル利用者**なので `ExtractLocalUserID` → `FindByID`
+		// **follower はローカル利用者**なので `userFromAPID` → `FindByID`
 		// を通る (`FindByURI` ではない)。凍結判定は `FindByURI` なので干渉しない。
 		repo.FindErr = boom
 		body := []byte(`{"type":"Undo","actor":"` + actor + `","object":{"type":"Accept","actor":"` + actor + `",` +

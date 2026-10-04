@@ -3945,26 +3945,56 @@ func (r *Resolver) UpdateRemoteNote(body []byte, actorURI string) (*model.Note, 
 	return existing, nil
 }
 
-// ExtractLocalUserID returns the user ID a local `{url}/users/...` URI names
-// the way upstream ApPersonService.fetchPerson and ApInboxService.flag read
-// it: the last path segment (`uri.split('/').pop()`). It returns "" for a URI
-// outside `{url}/users/`.
+// ExtractLocalUserID returns the user ID a local URI names the way upstream
+// ApPersonService.fetchPerson reads it: a URI under `{url}/` (a plain string
+// prefix, not a host comparison) names the user whose ID is its last path
+// segment (`uri.split('/').pop()`). It returns "" for any other URI.
 //
 // 以前は `/users/{id}` の直後で切っていたので、`/users/{id}/followers` のような
 // ローカルの利用者の collection の URI がその利用者に解決され、メンション・
-// specified の宛先・通報の対象になっていた。本家は最後の段 (`followers`) を
-// ID として引くので誰にも解決しない (#3330)。Accept の actor のように本家が
-// getUserFromApId で読む箇所 (WebFinger の self を含む) と、本家に対応の無い
-// chat の宛先は localUserIDFromAPID / LocalUserIDFromURI (parseLocalURI) を使う。
+// specified の宛先の対象になっていた。本家は最後の段 (`followers`) を ID として
+// 引くので誰にも解決しない (#3330)。
+//
+// **host ではなく文字列の接頭辞で見る。** 本家 fetchPerson は
+// `uri.startsWith(`${config.url}/`)` で、`config.url` は `new URL(...).origin`
+// (scheme + 小文字の host + 既定でない port)。`http://` を名乗るものや
+// `:443` を付けたものは、host が自分でも接頭辞に当たらず、続く createPerson が
+// isUriLocal (host 比較) で `cannot resolve local user` を投げるので、誰にも
+// 解決しない。mk-go の呼び出し側 (resolveMentionedUserIDs) も、ここで "" なら
+// FindByURI に回り、ローカルの利用者は uri を持たないので同じく解決しない。
+// host で見るように変えると、本家が捨てるそれらの URI をローカルの利用者に
+// 解決してしまう。
+//
+// 接頭辞は `{url}/users/` ではなく `{url}/` (本家と同じ)。通報 (Flag) は本家が
+// `{url}/users/` で絞るので flagTargetUserID を使う。Accept の actor のように
+// 本家が getUserFromApId で読む箇所 (WebFinger の self を含む) と、本家に対応の
+// 無い chat の宛先は localUserIDFromAPID / LocalUserIDFromURI (parseLocalURI) を使う。
 func (r *Resolver) ExtractLocalUserID(uri string) string {
 	if r.urls == nil {
 		return ""
 	}
-	prefix := r.urls.UserURI("")
-	if !strings.HasPrefix(uri, prefix) {
+	// UserURI("") = `{url}/users/`。URLBuilder は baseURL を公開しないので、
+	// 既存の組み立てから `{url}/` を取り出す。
+	return lastSegmentUnder(uri, strings.TrimSuffix(r.urls.UserURI(""), "users/"))
+}
+
+// flagTargetUserID returns the user ID an inbound Flag object URI names the
+// way upstream ApInboxService.flag reads it: a URI under `{url}/users/` names
+// the user whose ID is its last path segment (`uri.split('/').at(-1)`).
+func (r *Resolver) flagTargetUserID(uri string) string {
+	if r.urls == nil {
 		return ""
 	}
-	rest := uri[len(prefix):]
+	return lastSegmentUnder(uri, r.urls.UserURI(""))
+}
+
+// lastSegmentUnder returns the last `/`-separated segment of uri when uri
+// starts with prefix, and "" otherwise.
+func lastSegmentUnder(uri, prefix string) string {
+	rest, ok := strings.CutPrefix(uri, prefix)
+	if !ok {
+		return ""
+	}
 	if i := strings.LastIndex(rest, "/"); i >= 0 {
 		rest = rest[i+1:]
 	}
