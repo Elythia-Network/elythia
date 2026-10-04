@@ -540,7 +540,7 @@ def test_note_with_poll_parity(mkgo, ts):
 # `clips/notes` に sinceId を投げるが、3 箇所とも `res.sort(compareBy(s => s.id))`
 # で**両辺を並べ替えてから**比較しており、集合しか見ていない (順序回帰は落ちない)。
 #
-# **無かったのは mk-go 側で管理するゲート**で、`tests/` / `test/` には 1 本も無い。
+# **無かったのは mk-go 側で管理するゲート**で、`tests/` には 1 本も無い。
 #
 # 各テストは diff (mk-go と TS が一致するか) に加えて **向きそのものを直接
 # assert する**。diff だけだと「両方 DESC」でも通ってしまい、TS 側の実装に

@@ -132,7 +132,7 @@ cd mk && docker compose up -d
 |---|---|
 | `make fmt` | `gofmt -s -w .` |
 | `make lint` | `go vet ./...` |
-| `make golangci-lint` | `errcheck` / `govet` / `ineffassign` / `staticcheck`。`go vet` だけでは見えない層を埋める。設定は `.golangci.yml`。**既定の打ち切り (同一メッセージ 3 件 / linter 50 件) を外してある** — 切り詰めるだけなので赤が緑になることはないが、直すたびに隠れていた分が出てきて「全部直してから有効化する」が成立しない。`unused` / `ST1003` / `ST1012` / `SA1019` はすべて有効 (2026-09-22 に全件処理して 0 件。SA1019 は 10 件すべて移行、`unused` は 20 件を削除)。除外は `test/e2e_federation` のパッケージ名 (`.golangci.yml` の rule) 1 つだけ。`QF*` (28) と `S1016` は恒久的に無効 |
+| `make golangci-lint` | `errcheck` / `govet` / `ineffassign` / `staticcheck`。`go vet` だけでは見えない層を埋める。設定は `.golangci.yml`。**既定の打ち切り (同一メッセージ 3 件 / linter 50 件) を外してある** — 切り詰めるだけなので赤が緑になることはないが、直すたびに隠れていた分が出てきて「全部直してから有効化する」が成立しない。`unused` / `ST1003` / `ST1012` / `SA1019` はすべて有効 (2026-09-22 に全件処理して 0 件。SA1019 は 10 件すべて移行、`unused` は 20 件を削除)。除外は `tests/e2e-federation` のパッケージ名 (`.golangci.yml` の rule) 1 つだけ。`QF*` (28) と `S1016` は恒久的に無効 |
 | `make actionlint` | GitHub Actions の workflow を検査 (式の typo・存在しない `needs` 参照・`runs-on` の誤り・`run:` の中のシェルを shellcheck 経由で)。**CodeQL の `actions` とは別物** — あちらは script injection などのセキュリティを見るが、式が壊れているかは見ない。`lint` job から `make` 経由で呼ぶので、版の定義は Makefile に 1 つだけ置く |
 | `make test` | `go test ./... -v -race -count=1 -shuffle=3` (CI と同じテスト実行条件。PostgreSQL が要る → [testing.md](testing.md)) |
 | `make test-fast` | `-race` 抜き (反復用)。**コミット前の検査ではない** — CI で落ちるものが手元で緑になる |
