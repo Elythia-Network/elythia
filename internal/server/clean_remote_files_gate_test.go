@@ -24,18 +24,13 @@ var cleanRemoteFilesDisabledRe = regexp.MustCompile(`disabled:\s*([^,\n]+)`)
 // vitest は全部緑になる (判定関数のテストは utility しか見ない)。症状は
 // 「ボタンが押せない」だけで、エラーもログも出ない。#2892 / #2934 と同じ型。
 //
-// **submodule を checkout する job でしか動かせない** ので、無いときは skip する。
-// ただし skip は成功として扱われるため、submodule がある前提の job では
-// `MK_FRONTEND_GATES_REQUIRE_SUBMODULE` を渡して skip を禁じる
-// (`make frontend-check` がそれを渡す)。
+// **frontend/ は本体で追跡している (#3379) ので skip しない。** 読めないのはパスの
+// 誤りで、required の `test` で落ちる。
 func TestCleanRemoteFilesButtonIsConditional(t *testing.T) {
-	rel := "third_party/misskey/packages/frontend/src/pages/admin/files.vue"
+	rel := "frontend/packages/frontend/src/pages/admin/files.vue"
 	body, err := os.ReadFile(filepath.Join(repoRootDir(t), rel))
 	if err != nil {
-		if os.Getenv("MK_FRONTEND_GATES_REQUIRE_SUBMODULE") != "" {
-			require.NoError(t, err, "submodule を要求する job なのに %s を読めない", rel)
-		}
-		t.Skipf("%s が無い (submodule を checkout する job でのみ検査する)", rel)
+		require.NoError(t, err, "frontend/ は追跡しているので、%s を読めないのはパスの誤り", rel)
 	}
 	src := string(body)
 

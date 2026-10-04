@@ -54,19 +54,15 @@ jobs:
           # tag input が指定されていればそのタグを、無ければ通常どおり
           # イベントの ref を build する。
           ref: ${{ inputs.tag || github.ref }}
-          # third_party/misskey (packages/backend/assets など) がDockerfileの
-          # COPY対象になるため、submoduleを取得しないとbuildが失敗する。
-          submodules: recursive
           # この job は GHCR へ publish する (packages: write)。後続は git の
-          # 認証を使わない (submodule はこの step の中で取り終える) ので、
-          # token を `.git/config` に残して pnpm install の lifecycle script
-          # などから読める状態にしない。
+          # 認証を使わないので、token を `.git/config` に残して pnpm install の
+          # lifecycle script などから読める状態にしない。
           persist-credentials: false
 
       - name: Set up pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
-          # pnpm のバージョンは submodule 側 package.json の packageManager から
+          # pnpm のバージョンは frontend/package.json の packageManager から
           # 取る。mk リポジトリ直下には package.json が無い。
           #
           # **corepack を使わない (#2914)。** Node.js 26 の配布物に corepack は
@@ -78,19 +74,19 @@ jobs:
           # ので、`prepare pnpm@latest` を挟んでも workspace 内で走るのは 11.25.0
           # (実測)。ここで消えるのは corepack への依存と、使われない 12.x を毎回
           # ダウンロードしていた無駄。
-          package_json_file: third_party/misskey/package.json
+          package_json_file: frontend/package.json
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version-file: third_party/misskey/.node-version
+          node-version-file: frontend/.node-version
 
       # Dockerfileが /twemoji (本家frontendの絵文字SVG set) をCOPYするが、
-      # その実体は third_party/misskey/packages/backend/node_modules/@misskey-dev/emoji-assets/built/twemoji
+      # その実体は frontend/node_modules/@misskey-dev/emoji-assets/built/twemoji
       # 配下にあり、pnpm install 後にしか存在しない。runner上で事前にinstallして
-      # Docker build contextに含める (issue #359)。
-      - name: Install third_party/misskey node_modules
-        working-directory: third_party/misskey
+      # Docker build contextに含める (issue #359、#3379 で frontend/ の依存にした)。
+      - name: Install frontend/ node_modules
+        working-directory: frontend
         run: |
           pnpm install --frozen-lockfile
 
@@ -170,8 +166,8 @@ jobs:
           ref: ${{ inputs.tag || github.ref }}
           # publish する job なので認証情報を残さない (build-and-push と同じ理由)。
           persist-credentials: false
-        # submodule は不要。Dockerfile.bundled は third_party/misskey を参照せず、
-        # アセットを assets image から取る。
+        # Dockerfile.bundled はアセットを assets image から取る (P4c で本体の
+        # frontend/ からのビルドに置き換える、#3379)。
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1

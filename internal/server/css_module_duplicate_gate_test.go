@@ -39,12 +39,9 @@ var cssModuleClassRe = regexp.MustCompile(`(?m)^\.([A-Za-z_][A-Za-z0-9_-]*) \{`)
 var cssPropertyRe = regexp.MustCompile(`(?m)^\s*([a-z-]+)\s*:`)
 
 func TestCSSModulesHaveNoDuplicateClasses(t *testing.T) {
-	fe := filepath.Join(repoRootDir(t), "third_party", "misskey", "packages", "frontend", "src")
+	fe := filepath.Join(repoRootDir(t), "frontend", "packages", "frontend", "src")
 	if _, err := os.Stat(fe); err != nil {
-		if os.Getenv("MK_FRONTEND_GATES_REQUIRE_SUBMODULE") != "" {
-			require.NoError(t, err, "submodule を要求する job なのに %s を読めない", fe)
-		}
-		t.Skipf("submodule が無い (checkout する job でのみ検査する)")
+		require.NoError(t, err, "frontend/ は追跡しているので、%s を読めないのはパスの誤り", fe)
 	}
 
 	for _, rel := range cssModuleDuplicateTargets {

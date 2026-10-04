@@ -57,13 +57,10 @@ func bindsRateLimitedNotice(src string) bool {
 }
 
 func TestAutoLoadingComponentsShowRateLimit(t *testing.T) {
-	fe := filepath.Join(repoRootDir(t), "third_party", "misskey", "packages", "frontend", "src")
+	fe := filepath.Join(repoRootDir(t), "frontend", "packages", "frontend", "src")
 	components := filepath.Join(fe, "components")
 	if _, err := os.Stat(components); err != nil {
-		if os.Getenv("MK_FRONTEND_GATES_REQUIRE_SUBMODULE") != "" {
-			require.NoError(t, err, "submodule を要求する job なのに %s を読めない", components)
-		}
-		t.Skipf("submodule が無い (checkout する job でのみ検査する)")
+		require.NoError(t, err, "frontend/ は追跡しているので、%s を読めないのはパスの誤り", components)
 	}
 
 	// **`src` 全体を歩く (レビュー 2 周目 M-3)。** 当初は `components/` 直下

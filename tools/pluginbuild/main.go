@@ -49,10 +49,10 @@ const frontendEntry = "frontend/index.ts"
 
 // Frontend generation targets, relative to the repository root.
 const (
-	frontendGeneratedTS   = "third_party/misskey/packages/frontend/src/server-plugins.generated.ts"
-	frontendManifestJSON  = "third_party/misskey/packages/frontend/mk-plugins.generated.json"
+	frontendGeneratedTS   = "frontend/packages/frontend/src/server-plugins.generated.ts"
+	frontendManifestJSON  = "frontend/packages/frontend/mk-plugins.generated.json"
 	frontendAliasPrefix   = "@mkplugin/"
-	frontendSrcRelToFront = "third_party/misskey/packages/frontend"
+	frontendSrcRelToFront = "frontend/packages/frontend"
 )
 
 // manifest is the marker file's content.
@@ -191,11 +191,12 @@ func formatDiscovered(p discovered) string {
 		p.dir, p.name, p.modulePath, p.hasFrontend, note)
 }
 
-// writeFrontend generates the files the fork's Vite build reads.
+// writeFrontend generates the files the frontend's Vite build reads.
 //
 // frontend を持たないプラグインしか無い場合でも、生成物は「空」の形で書く。
-// 消してしまうと、フォーク側にコミットしてある既定の空ファイルとの差分になり、
-// submodule が dirty のままになる。
+// frontend はこのファイルを import するので、無いとビルドが落ちる。生成物は
+// 追跡しない (#3379。追跡すると `make plugins` のたびに作業ツリーが dirty になり、
+// 運営者の `git pull` が止まりうる)。
 func writeFrontend(root string, found []discovered) error {
 	withFrontend := make([]discovered, 0, len(found))
 	for _, p := range found {
@@ -206,15 +207,15 @@ func writeFrontend(root string, found []discovered) error {
 
 	tsPath := filepath.Join(root, frontendGeneratedTS)
 
-	// submodule 未取得でも Go だけのビルドは通したい。ただし frontend を持つ
-	// プラグインがあるのに書けない場合は**黙って落とさない** — 機能が片肺で
-	// 組み込まれ、動かない理由が分からなくなる。
+	// frontend/ が無い木 (Go だけを取り出した build context など) でも Go だけの
+	// ビルドは通したい。ただし frontend を持つプラグインがあるのに書けない場合は
+	// **黙って落とさない** — 機能が片肺で組み込まれ、動かない理由が分からなくなる。
 	if _, err := os.Stat(filepath.Dir(tsPath)); os.IsNotExist(err) {
 		if len(withFrontend) == 0 {
 			return nil
 		}
 		return fmt.Errorf(
-			"frontend を持つプラグインがありますが %s がありません (git submodule update --init --recursive を実行してください)",
+			"frontend を持つプラグインがありますが %s がありません (frontend/ を含む checkout で実行してください)",
 			filepath.Dir(frontendGeneratedTS))
 	}
 

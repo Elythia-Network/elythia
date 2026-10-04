@@ -27,11 +27,10 @@ jobs:
 
       # submodule の pointer が fork へ push 済みかを見る (#2845)。
       #
-      # **required check で submodule を取っているものが 1 つも無い。** ci.yml で
-      # `submodules: recursive` を指定しているのは frontend-check だけで、build /
-      # test-shards / lint はいずれも取らない。submodule を取る他の workflow
-      # (diff-e2e / playwright / upstream-backend-e2e / dropin-e2e / docker) も全て
-      # 非 required。したがって pointer が未 push の SHA を指していても **required は
+      # **required check で submodule を取っているものが 1 つも無い。** #3379 で
+      # frontend を本体へ取り込んでから、ci.yml で `submodules: recursive` を指定して
+      # いる job は無い (P4d でこの検査ごと消す)。他の workflow も submodule を
+      # 取らなくなった。したがって pointer が未 push の SHA を指していても **required は
       # 全部緑のままマージでき**、develop に誰も解決できない pointer が載る。復旧は
       # その commit を持っている本人にしかできない。
       #
@@ -483,11 +482,13 @@ jobs:
       - name: Golangci-lint
         run: make golangci-lint
 
-  # fork frontend (third_party/misskey) の型チェック。
+  # frontend/ (#3379 で fork から取り込んだ) の型チェック。同梱サンプルの
+  # プラグインを取り込んだ状態での型・統合バイナリのビルド・eslint・vitest を見る。
+  # frontend.yml (#3379) と重なる部分は P4e でまとめる。
   #
-  # 1.0 以降 fork frontend は mk-go 独自に進化させる方針なので、型崩れを
+  # 1.0 以降 frontend は mk-go 独自に進化させる方針なので、型崩れを
   # 検出する手段が要る。`make uds-frontend-build` / `e2e-frontend-build` は
-  # 本番が bind-mount している third_party/misskey/built を書き換えるため
+  # 本番が bind-mount している frontend/built を書き換えるため
   # 検証には使えない。vue-tsc --noEmit なら出力物を作らず型だけ見られる。
   #
   # required check には入れない (build / test / lint の 3 つが required)。
@@ -496,25 +497,36 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          submodules: recursive
 
       - name: Set up pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
-          # pnpm のバージョンは submodule 側 package.json の packageManager から
+          # pnpm のバージョンは frontend/package.json の packageManager から
           # 取る。mk リポジトリ直下には package.json が無い。
-          package_json_file: third_party/misskey/package.json
+          package_json_file: frontend/package.json
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version-file: third_party/misskey/.node-version
+          node-version-file: frontend/.node-version
           cache: pnpm
-          cache-dependency-path: third_party/misskey/pnpm-lock.yaml
+          cache-dependency-path: frontend/pnpm-lock.yaml
 
-      - name: Install misskey workspace dependencies
-        working-directory: third_party/misskey
+      # 同梱サンプルの frontend を取り込んでから型を見る。これが無いと
+      # plugin-api.ts を壊してもサンプル側では検出されない。サンプルは
+      # mk-plugin.yml で既定無効 (#2495) なので、disabled も含める
+      # plugins-all を使う。**workspace のビルドより先に回す** — 生成物
+      # (server-plugins.generated.ts) は追跡していない (#3379) ので、無いと
+      # frontend のビルドが import で落ちる。
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Generate plugin artifacts
+        run: make plugins-all
+
+      - name: Install frontend workspace dependencies
+        working-directory: frontend
         run: pnpm install --frozen-lockfile
 
       # frontend の型解決には workspace package の生成物が要る。i18n (locales の
@@ -524,19 +536,8 @@ jobs:
       #
       # frontend 自身のビルド (build-assets) は型チェックに不要なので呼ばない。
       - name: Build workspace packages
-        working-directory: third_party/misskey
+        working-directory: frontend
         run: pnpm build-pre && pnpm -r build
-
-      # 同梱サンプルの frontend を取り込んでから型を見る。これが無いと
-      # plugin-api.ts を壊してもサンプル側では検出されない。サンプルは
-      # mk-plugin.yml で既定無効 (#2495) なので、disabled も含める
-      # plugins-all を使う。
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-
-      - name: Generate plugin artifacts
-        run: make plugins-all
 
       # 生成した glue (plugins_generated.go) を含む統合バイナリのコンパイルも
       # 見る。build job の `Vet bundled plugins` は各プラグインを単体で vet する
@@ -565,7 +566,7 @@ jobs:
       # 依存インストールと workspace ビルドは上の step で済んでいるので、
       # 追加コストは eslint の実行時間だけ。
       - name: Lint (eslint)
-        working-directory: third_party/misskey/packages/frontend
+        working-directory: frontend/packages/frontend
         run: pnpm eslint
 
       # fork frontend の vitest (#2844)。**どの workflow でも実行されていなかった。**
@@ -580,7 +581,7 @@ jobs:
       # 依存インストールと workspace ビルドは上の step で済んでいるので、追加
       # コストは vitest の実行時間だけ。手元の再現は `make frontend-test`。
       - name: Unit test (vitest)
-        working-directory: third_party/misskey/packages/frontend
+        working-directory: frontend/packages/frontend
         run: pnpm test
 
   vulncheck:

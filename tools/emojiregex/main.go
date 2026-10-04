@@ -8,7 +8,7 @@
 //
 // Usage:
 //
-//	go run ./tools/emojiregex            # regenerate from third_party/misskey
+//	go run ./tools/emojiregex            # regenerate from frontend/
 //	go run ./tools/emojiregex -check     # fail when the outputs are stale
 //
 // The regex source is also written to a snapshot file so that the tests of
@@ -31,7 +31,7 @@ import (
 )
 
 const (
-	defaultMisskeyDir = "third_party/misskey"
+	defaultMisskeyDir = "frontend"
 	defaultOut        = "internal/activitypub/mfm/emoji_regex_gen.go"
 	defaultSnapshot   = "tools/emojiregex/testdata/source.txt"
 )

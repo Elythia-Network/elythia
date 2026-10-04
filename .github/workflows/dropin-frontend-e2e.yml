@@ -39,16 +39,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # stage 3 の mk-go image build (tests/federation/common/Dockerfile.mkgo)
-          # が third_party/misskey/built/ と assets/ を COPY するので、submodule
-          # を展開しないと "failed to calculate checksum ... not found" で死ぬ。
-          submodules: recursive
 
       - name: Set up pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
-          # pnpm のバージョンは submodule 側 package.json の packageManager から
+          # pnpm のバージョンは frontend/package.json の packageManager から
           # 取る。mk リポジトリ直下には package.json が無い。
           #
           # **corepack を使わない (#2914)。** Node.js 26 の配布物に corepack は
@@ -60,20 +55,28 @@ jobs:
           # ので、`prepare pnpm@latest` を挟んでも workspace 内で走るのは 11.25.0
           # (実測)。ここで消えるのは corepack への依存と、使われない 12.x を毎回
           # ダウンロードしていた無駄。
-          package_json_file: third_party/misskey/package.json
+          package_json_file: frontend/package.json
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version-file: third_party/misskey/.node-version
+          node-version-file: frontend/.node-version
 
       # frontend bundle (built/_frontend_vite_ / _frontend_dist_ / _sw_dist_) は
       # repo に commit されていないのでここで生成する。playwright workflow が
       # 同じことをしており、こちらだけ欠けていたため stage 2 (cypress baseline)
       # を通過した後の stage 3 で必ず docker build に失敗していた。
-      - name: Build third_party/misskey frontend bundle
-        working-directory: third_party/misskey
+      # pluginbuild の生成物 (server-plugins.generated.ts) は追跡していない (#3379)
+      # ので、frontend をビルドする前に書き出す。
+      - name: Set up Go (pluginbuild)
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Build frontend bundle
+        working-directory: frontend
         run: |
+          (cd .. && GOWORK=off go run ./tools/pluginbuild)
           pnpm install --frozen-lockfile
           pnpm build
 

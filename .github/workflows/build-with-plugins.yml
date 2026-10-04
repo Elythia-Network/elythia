@@ -89,14 +89,13 @@ jobs:
       image: ${{ steps.target.outputs.tags }}
       digest: ${{ steps.build.outputs.digest }}
     steps:
-      # submodule を取る。frontend を持つプラグインがあるかの判定 (pluginbuild) と、
-      # ある場合の SPA ビルドに third_party/misskey が要る。
+      # frontend を持つプラグインがあるかの判定 (pluginbuild) と、ある場合の SPA
+      # ビルドに frontend/ が要る (#3379 で本体へ取り込んだので、submodule は取らない)。
       - name: Checkout mk-go
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ inputs.mk_repository }}
           ref: ${{ inputs.mk_ref }}
-          submodules: recursive
           # 後続は mk-go の git 操作を一切しない (プラグインの clone は
           # plugins/<name>/ に作る別リポジトリで、この認証情報を使わない)。
           # 残すと `.git/config` に token が載ったまま、第三者のプラグインの
@@ -203,14 +202,14 @@ jobs:
         if: steps.wiring.outputs.frontend == 'true'
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
-          # 版は submodule 側 package.json の packageManager から取る。
-          package_json_file: third_party/misskey/package.json
+          # 版は frontend/package.json の packageManager から取る。
+          package_json_file: frontend/package.json
 
       - name: Set up Node.js
         if: steps.wiring.outputs.frontend == 'true'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version-file: third_party/misskey/.node-version
+          node-version-file: frontend/.node-version
 
       # 公式の assets イメージにはプラグインの .vue が入っていないので、frontend を
       # 持つプラグインがあるときは SPA を自前でビルドする。手順は fork 側の
@@ -219,7 +218,7 @@ jobs:
       # _DEV_ フラグも立つ。
       - name: Build frontend with plugins
         if: steps.wiring.outputs.frontend == 'true'
-        working-directory: third_party/misskey
+        working-directory: frontend
         env:
           NODE_ENV: production
         run: |

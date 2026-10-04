@@ -92,8 +92,7 @@ func Check(path string) error {
 }
 
 // Required reports whether MK_UPSTREAM_REQUIRE asks tests to fail instead of
-// skipping when the checkout is absent. Any non-empty value enables it, as
-// with MK_FRONTEND_GATES_REQUIRE_SUBMODULE.
+// skipping when the checkout is absent. Any non-empty value enables it.
 func Required() bool {
 	return os.Getenv(EnvRequire) != ""
 }

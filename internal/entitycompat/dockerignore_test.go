@@ -35,7 +35,6 @@ var excludedFromBuildContext = map[string]string{
 	".cache/misskey/mirror.git/HEAD":      "比較対象の本家 (make upstream-fetch、#3378)。node_modules 入りの木と 400MB 近い bare repository で、image には要らない",
 	"frontend/node_modules/.modules.yaml": "取り込んだ frontend/ の依存 (#3379)。手元で pnpm を回すと 1GB 近くになる",
 	"frontend/packages/frontend/node_modules/vue/x": "同じく workspace ごとの node_modules",
-	"frontend/built/_frontend_vite_/manifest.json":  "frontend/ のビルド成果物",
 	"deploy/uds/config/default.yml":                 "同上 (本番 UDS)",
 	"compose.uds.yaml":                              "本番 UDS の compose。environment にパスワード類を持つ",
 	".pnpm-store/v3/files/00/abc":                   "pnpm のストア。実測 3.8GB でコンテキストの大半を占める",
@@ -57,21 +56,25 @@ var excludedFromBuildContext = map[string]string{
 // **触られやすいもの** (同じディレクトリに既に除外が並んでいる / 除外を広げる
 // 誘惑がある) に絞ってある。
 var keptInBuildContext = map[string]string{
-	".config/docker.yml.example":                              "Dockerfile / Dockerfile.bundled が /app/.config/default.yml として COPY する",
-	"third_party/misskey/built/meta.json":                     "SPA の成果物。assets-local stage が built ごと COPY する",
-	"third_party/misskey/packages/backend/assets/favicon.ico": "builder stage が submodule の初期化チェックに使う",
-	"tests/federation/common/mkgo-entrypoint.sh":              "連合 e2e の Dockerfile が COPY する。`tests/` はここに 4 つ除外が並んでいて blanket 除外に倒れやすい",
-	"tests/bench/queue/blackhole/main.go":                     "queue-bench の blackhole の Dockerfile が repo root の context から COPY する。隣の tests/bench/http を除外しているので tests/bench ごと除外に倒れやすい (#3373)",
-	"tests/bench/queue/faker/main.go":                         "queue-bench の faker の Dockerfile が同じく COPY する",
+	".config/docker.yml.example":                 "Dockerfile / Dockerfile.bundled が /app/.config/default.yml として COPY する",
+	"frontend/built/meta.json":                   "SPA の成果物。assets-local stage が built ごと COPY する",
+	"frontend/assets/favicon.ico":                "builder stage が frontend/ の存在チェックに使う (#3379)",
+	"tests/federation/common/mkgo-entrypoint.sh": "連合 e2e の Dockerfile が COPY する。`tests/` はここに 4 つ除外が並んでいて blanket 除外に倒れやすい",
+	"tests/bench/queue/blackhole/main.go":        "queue-bench の blackhole の Dockerfile が repo root の context から COPY する。隣の tests/bench/http を除外しているので tests/bench ごと除外に倒れやすい (#3373)",
+	"tests/bench/queue/faker/main.go":            "queue-bench の faker の Dockerfile が同じく COPY する",
 	// **symlink 経路と実体経路の両方を持つ。** Dockerfile が COPY するのは
-	// symlink 側 (`packages/backend/node_modules/...`) だが、pnpm は実体を
+	// symlink 側 (`frontend/node_modules/@misskey-dev/...`) だが、pnpm は実体を
 	// `.pnpm/` 配下に置く。判定は字句だけで symlink を辿らないので、**片方しか
 	// 守らないと `**/node_modules` や `packages/*/node_modules` への変更で
 	// symlink が落ち、gate は緑のまま全ビルドが壊れる** (実測)。しかもその形は
 	// `.dockerignore` 自身が名指しで警告しているもので、guard のエラーは
 	// 「pnpm install not run?」と事実と逆を指す。
-	"third_party/misskey/packages/backend/node_modules/@misskey-dev/emoji-assets/built/twemoji/1f004.svg":                                    "Dockerfile が COPY する symlink 経路",
-	"third_party/misskey/node_modules/.pnpm/@misskey-dev+emoji-assets@17.0.3/node_modules/@misskey-dev/emoji-assets/built/twemoji/1f004.svg": "同じものの実体経路。`!` の再包含が効いているかを見る",
+	// **symlink のエントリ自体も持つ。** 子の `/**` だけを再包含すると、判定上は
+	// 子が残るのに、Docker は symlink のエントリそのものを落として COPY が
+	// `not found` で失敗する (実測)。子のパスだけでは、この 1 行を消しても緑のまま。
+	"frontend/node_modules/@misskey-dev/emoji-assets":                                                                             "Dockerfile が COPY で辿る symlink のエントリ自体",
+	"frontend/node_modules/@misskey-dev/emoji-assets/built/twemoji/1f004.svg":                                                     "Dockerfile が COPY する symlink 経路",
+	"frontend/node_modules/.pnpm/@misskey-dev+emoji-assets@17.0.3/node_modules/@misskey-dev/emoji-assets/built/twemoji/1f004.svg": "同じものの実体経路。`!` の再包含が効いているかを見る",
 }
 
 // TestDockerignoreExcludesSecretsAndUserData checks the shared .dockerignore

@@ -248,8 +248,8 @@ func TestRenderFrontendList_WithPlugins(t *testing.T) {
 	assert.Contains(t, out, "serverPlugins: PluginDefinition[] = [p0, p1];")
 }
 
-// **frontend を持たないプラグインだけの場合も生成物は空の形で書く。** 消すと
-// フォークにコミットしてある既定ファイルとの差分になり submodule が汚れる。
+// **frontend を持たないプラグインだけの場合も生成物は空の形で書く。** frontend は
+// このファイルを import するので、無いとビルドが落ちる (生成物は追跡していない、#3379)。
 func TestWriteFrontend_BackendOnlyStillWritesEmptyList(t *testing.T) {
 	root := fakeRepoWithFrontend(t)
 
@@ -286,8 +286,8 @@ func TestWriteFrontend_GeneratesAliasesRelativeToViteConfig(t *testing.T) {
 	// **エントリファイルまで指すこと。** ディレクトリだと rolldown が index を
 	// 自動解決せず "Is a directory" で落ちる (tsconfig の paths は解決するので
 	// 型チェックでは気付けない、実際に本番ビルドで踏んだ)。
-	assert.Equal(t, "../../../../plugins/ui/frontend/index.ts", m.Aliases["@mkplugin/ui"])
-	assert.Equal(t, []string{"../../../../plugins"}, m.Allow)
+	assert.Equal(t, "../../../plugins/ui/frontend/index.ts", m.Aliases["@mkplugin/ui"])
+	assert.Equal(t, []string{"../../../plugins"}, m.Allow)
 	for _, v := range m.Aliases {
 		assert.False(t, filepath.IsAbs(v), "絶対パスを書かない")
 	}
@@ -340,7 +340,7 @@ func TestWriteFrontend_UnwritableTSIsError(t *testing.T) {
 
 // mustRel は固定値同士なので失敗しないが、失敗しても呼び出し元を壊さない。
 func TestMustRel(t *testing.T) {
-	assert.Equal(t, filepath.Join("..", "..", "..", "..", "plugins"),
+	assert.Equal(t, filepath.Join("..", "..", "..", "plugins"),
 		mustRel(frontendSrcRelToFront, "plugins"))
 	// 相対化できない組み合わせでは target をそのまま返す。
 	assert.Equal(t, "/abs", mustRel("rel", "/abs"))
@@ -354,7 +354,7 @@ func fakeRepoWithFrontend(t *testing.T) string {
 	return root
 }
 
-// submodule 未取得でも Go だけのビルドは通す。frontend を持たないプラグインしか
+// frontend/ が無い木でも Go だけのビルドは通す。frontend を持たないプラグインしか
 // 無ければ、書けなくても問題は無い。
 func TestWriteFrontend_MissingForkIsSkippedWhenNoFrontend(t *testing.T) {
 	root := fakeRepo(t) // frontend ディレクトリを作らない
@@ -368,7 +368,7 @@ func TestWriteFrontend_MissingForkIsErrorWhenFrontendNeeded(t *testing.T) {
 
 	err := writeFrontend(root, []discovered{{name: "ui", dir: "plugins/ui", hasFrontend: true}})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "submodule")
+	assert.Contains(t, err.Error(), "frontend/ を含む checkout")
 }
 
 // --- run ---

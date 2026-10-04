@@ -2,7 +2,7 @@
 #
 # **パターンはパス全体で照合される。** スラッシュを含まないパターンは root 直下に
 # しかマッチしないので、入れ子にも効かせたいものは `**/` を前置する (#2942)。
-# `built` を `**/built` にしないのは、`third_party/misskey/built` が SPA の
+# `built` を `**/built` にしないのは、`frontend/built` が SPA の
 # 成果物で image に入る必要があるため。
 **/.git
 .tmp
@@ -79,10 +79,17 @@ third_party/misskey/node_modules
 
 # 本体へ取り込んだ frontend/ (#3379) の依存とビルド成果物。手元で pnpm を回すと
 # node_modules だけで 1GB 近くになり、`COPY . .` の build context に入る。
-# P4b で image が frontend/ から emoji-assets を取るようになったら、上の
-# third_party と同じく実体側だけを再包含する。
 frontend/node_modules
 frontend/packages/*/node_modules
 frontend/packages-private/*/node_modules
-frontend/built
 frontend/packages/*/built
+# ただし emoji-assets だけは image に入る。Dockerfile が /twemoji と /fluent-emoji を
+# ここから COPY する。上の third_party と同じく、pnpm が実体を置く .pnpm 側を
+# 再包含する。third_party と違い、COPY が通る symlink (frontend/node_modules/
+# @misskey-dev/emoji-assets) も除外した frontend/node_modules の中にあるので、
+# symlink の側も戻す。
+!frontend/node_modules/@misskey-dev/emoji-assets
+!frontend/node_modules/@misskey-dev/emoji-assets/**
+!frontend/node_modules/.pnpm/*emoji-assets*/**
+# frontend/built (SPA のビルド成果物) は外さない。Dockerfile.bundled の assets-local と
+# 連合 e2e の Dockerfile.mkgo が COPY する。

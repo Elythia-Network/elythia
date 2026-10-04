@@ -21,14 +21,11 @@ import (
 // 判定は「`.t_*` の宣言ブロックに padding が無いこと」。他の要素
 // (`.abuseReportCommands` 等) は対象外で、バッジの色分けクラスだけを見る。
 func TestNotificationBadgeClassesHaveNoPadding(t *testing.T) {
-	path := filepath.Join(repoRootDir(t), "third_party", "misskey",
+	path := filepath.Join(repoRootDir(t), "frontend",
 		"packages", "frontend", "src", "components", "MkNotification.vue")
 	src, err := os.ReadFile(path)
 	if err != nil {
-		if os.Getenv("MK_FRONTEND_GATES_REQUIRE_SUBMODULE") != "" {
-			require.NoError(t, err, "submodule を要求する job なのに %s を読めない", path)
-		}
-		t.Skipf("submodule が無い (checkout する job でのみ検査する)")
+		require.NoError(t, err, "frontend/ は追跡しているので、%s を読めないのはパスの誤り", path)
 	}
 
 	// `.t_xxx {` から次の `}` までを 1 ブロックとして取る。

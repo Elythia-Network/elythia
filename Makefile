@@ -12,8 +12,8 @@
 	dropin-mkgo-born-test \
 	dropin-frontend-up dropin-frontend-down dropin-frontend-baseline dropin-frontend-logs \
 	dropin-frontend-mk-up dropin-frontend-mk-down dropin-frontend-swap-test \
-	e2e-submodule-init e2e-frontend-build \
-	uds-init uds-frontend-build uds-build uds-rebuild uds-restart uds-up uds-down uds-down-v uds-logs uds-ps \
+	e2e-frontend-build \
+	uds-init uds-layout-check uds-frontend-build uds-build uds-rebuild uds-restart uds-up uds-down uds-down-v uds-logs uds-ps \
 	bench-up bench-run bench-down bench-logs \
 	apicompat apicompat-routes apicompat-render \
 	test-fast shapecheck shapecheck-gen shapecheck-report errorid-check limitspec-check perm-check wiring-check catalog-check notfound-check nulparam-check compose-check testflags-check gaterun-check secretfield-check ipshape-check iprecord-check submodulepin-check \
@@ -43,23 +43,33 @@ check: fmt lint actionlint golangci-lint test ## コミット前に必須 (lint 
 
 gates: shapecheck errorid-check limitspec-check perm-check wiring-check catalog-check notfound-check nulparam-check compose-check testflags-check migrationdoc-check mdtable-check notiftype-check pluginembed-check dockerignore-check secretfield-check ipshape-check iprecord-check sqlbind-check submodulepin-check gaterun-check ## 静的 parity ゲートを一括実行
 
-version: ## mk-go / 互換 Misskey / submodule のバージョンを表示
+version: ## mk-go / 互換 Misskey / 追従している本家のバージョンを表示
 	@printf "mk-go            : %s\n" "$$(sed -n 's/^var MkGoVersion = "\(.*\)"/\1/p' internal/config/config.go)"
 	@printf "互換 Misskey     : %s\n" "$$(sed -n 's/^var MisskeyVersion = "\(.*\)"/\1/p' internal/config/config.go)"
-	@printf "submodule (fork) : %s\n" "$$(git -C third_party/misskey describe --tags 2>/dev/null || echo '(未取得)')"
+	@printf "追従している本家 : %s\n" "$$(cat UPSTREAM_MISSKEY_VERSION 2>/dev/null || echo '(不明)')"
 
-frontend-check: ## fork の frontend を型チェックし、submodule 依存のゲートを回す
-	# uds-frontend-build / e2e-frontend-build は本番が bind-mount している
-	# third_party/misskey/built を書き換えるため、検証目的では使わないこと。
+# frontend-check / frontend-lint / frontend-test は、frontend が import する
+# pluginbuild の生成物を前提にする (追跡していない、#3379)。無いと vue-tsc などが
+# 解決できずに落ちる。**無いときだけ作る。** `plugins` を前提にすると、CI が先に `make plugins-all`
+# (既定無効の同梱サンプルを含める、#2495) で作ったものを、サンプル抜きで
+# 書き直してしまう。plugin-api.ts を壊してもサンプル側で検出されなくなる。
+FRONTEND_PLUGINS_GENERATED = frontend/packages/frontend/src/server-plugins.generated.ts
+
+$(FRONTEND_PLUGINS_GENERATED):
+	GOWORK=off go run ./tools/pluginbuild
+
+frontend-check: | $(FRONTEND_PLUGINS_GENERATED) ## frontend/ を型チェックし、frontend を読むゲートを回す
+	# uds-frontend-build / e2e-frontend-build (と frontend/ での pnpm build /
+	# pnpm -r build) は本番が bind-mount している frontend/built を書き換えるため、
+	# 本番のチェックアウトで検証目的に使わないこと。
 	# 型を見るだけならこちらで済む (Docker 不要、出力物も作らない)。
-	cd third_party/misskey/packages/frontend && npx vue-tsc --noEmit
-	# submodule のソースを読むゲート。**`make gates` には入れない** — あちらは
-	# submodule 無しでも回る前提で、ここを混ぜると checkout していない環境で
-	# skip され「検査していないのに緑」になる。REQUIRE を渡して skip を禁じる
-	# (#2892)。
-	MK_FRONTEND_GATES_REQUIRE_SUBMODULE=1 go test ./internal/server/ \
+	cd frontend/packages/frontend && npx vue-tsc --noEmit
+	# frontend/ のソースを読むゲート。frontend/ を本体で追跡するようになった (#3379)
+	# ので skip せず、required の `test` でも走る。frontend を触ったときに手元で
+	# まとめて回せるよう、ここにも残す。
+	go test ./internal/server/ \
 		-run 'TestCreditImageOriginsCoverAboutMisskey|TestMkGoRolePolicyKeysAreListedInFrontend|TestReactionLongPressIsWired|TestReactableRemoteReactionIsWired|TestMkGoUpdatedDialogIsWired|TestEmojiApplicationIsWired|TestEveryPluginSlotHasAMountPoint|TestAutoLoadingComponentsShowRateLimit|TestRemoteImagesGoThroughMediaProxy|TestRemoteImageProxyGateClassifiesSources|TestEmojiDecorationErrorIDsMatchFrontend|TestStaffNotificationTypesAreOptOutable|TestNotificationBadgeClassesHaveNoPadding|TestEmojiRequestEntriesUseTheSharedHelper|TestCSSModulesHaveNoDuplicateClasses|TestCleanRemoteFilesButtonIsConditional|TestStreamResyncIsWiredInTimelines' -count=1
-	# MFM の Unicode 絵文字の正規表現と記録した版が、submodule の mfm-js / emoji-data と一致するか
+	# MFM の Unicode 絵文字の正規表現と記録した版が、frontend の mfm-js / emoji-data と一致するか
 	# (#3324)。node_modules が無いと落ちる (skip しない)。
 	$(MAKE) emoji-regex-check
 	# **eslint も回す (#2906)。** CI は別 step で `pnpm eslint` を回しており、
@@ -72,7 +82,7 @@ frontend-check: ## fork の frontend を型チェックし、submodule 依存の
 	$(MAKE) frontend-lint
 
 .PHONY: frontend-lint
-frontend-lint: ## fork の frontend を eslint で検査 (CI と同じ範囲)
+frontend-lint: | $(FRONTEND_PLUGINS_GENERATED) ## frontend/ の frontend を eslint で検査 (CI と同じ範囲)
 	# CI の `Lint (eslint)` step と同じ。範囲は package.json の script が持つ
 	# (`--quiet "src/**/*.{ts,vue}"`)。**`eslint .` にしないこと** — upstream が
 	# lint していない test/ まで拾い、追従のたびに他人の負債で落ちる。
@@ -82,14 +92,15 @@ frontend-lint: ## fork の frontend を eslint で検査 (CI と同じ範囲)
 	# ずれた)。CI は `pnpm eslint` だが手元に pnpm があるとは限らないので、
 	# 同じ script を呼べる npx/npm 側に寄せる (frontend-check / frontend-test も
 	# npx を使っている)。
-	cd third_party/misskey/packages/frontend && npm run --silent eslint
+	cd frontend/packages/frontend && npm run --silent eslint
 
 .PHONY: frontend-test
-frontend-test: ## fork の frontend の vitest を実行
-	# upstream の `pnpm --filter frontend test` と同じ。CI は frontend-check job で
-	# 回す (#2844)。workspace package の生成物が要るので、初回や submodule bump 後は
-	# 先に `cd third_party/misskey && pnpm install && pnpm build-pre && pnpm -r build`。
-	cd third_party/misskey/packages/frontend && npx vitest --run --globals --config vitest.config.unit.ts
+frontend-test: | $(FRONTEND_PLUGINS_GENERATED) ## frontend/ の frontend の vitest を実行
+	# upstream の `pnpm --filter frontend test` と同じ。CI は frontend workflow で
+	# 回す (#3379)。workspace package の生成物が要るので、初回や本家の版を上げた後は
+	# 先に `cd frontend && pnpm install && pnpm build` (plugins は前提として走る)。
+	# この pnpm build は frontend/built を作り直すので、本番のチェックアウトでは流さない。
+	cd frontend/packages/frontend && npx vitest --run --globals --config vitest.config.unit.ts
 
 diff-check: ## 差分比較ハーネスを作り直して実行 (クリーン DB 前提)
 	$(MAKE) diff-down
@@ -134,36 +145,42 @@ e2e-down-all: ## 検証用スタックを一括撤去 (本番 project mk は対�
 
 ##@ 更新 (運用)
 
-# submodule の中でビルドが書き換える tracked ファイル。`make plugins` (pluginbuild) が
-# server-plugins.generated.ts を、`pnpm -r build` の i18n パッケージが locale.ts を
-# 上書きするので、一度でもビルドしたワークツリーは常に dirty になる。**dirty なまま gitlink が動くと `git pull --recurse-submodules` は checkout に
-# 失敗する** — つまり frontend の再ビルドが要る回 (= submodule bump 回) に限って必ず
-# 止まり、しかも親リポだけ進んだ混在状態で止まる (#2885 のレビューで判明)。
+# frontend/ の中でビルドが書き換える tracked ファイル。`pnpm -r build` の i18n
+# パッケージが locale.ts を上書きするので、一度でもビルドしたワークツリーは dirty に
+# なる。**dirty なまま上流がこのファイルを変えると `git pull` は止まる** — つまり
+# frontend の再ビルドが要る回に限って止まる (#2885 で submodule について判明した
+# のと同じ型。#3379 で frontend/ を本体へ取り込んだので、本体の側で同じことが起きる)。
+# pluginbuild の生成物 (server-plugins.generated.ts) は #3379 で追跡をやめた。
 #
 # **生成物だけ**戻す。それ以外の変更が残っていれば git 自身が止めるので、
 # frontend に手を入れている最中の作業を黙って捨てることはない。
+FRONTEND_GENERATED = \
+	frontend/packages/i18n/src/autogen/locale.ts
+# submodule (third_party/misskey) は P4d (#3379) で外すまで残る。以前の `make plugins`
+# / `pnpm build` が書いた生成物で dirty なままだと、gitlink が動く回 (外す回を含む) に
+# `git pull --recurse-submodules` が checkout で止まるので、外すまでは戻し続ける。
 SUBMODULE_GENERATED = \
 	packages/frontend/src/server-plugins.generated.ts \
 	packages/i18n/src/autogen/locale.ts
 
-update: ## submodule ごと pull し、frontend 再ビルドの要否を知らせる
+update: ## pull し、frontend 再ビルドの要否を知らせる
+	@git checkout -- $(FRONTEND_GENERATED) 2>/dev/null || true
 	@for f in $(SUBMODULE_GENERATED); do \
 		git -C third_party/misskey checkout -- "$$f" 2>/dev/null || true; \
 	done
-	@before=$$(git -C third_party/misskey rev-parse HEAD 2>/dev/null); \
+	@before=$$(git rev-parse HEAD:frontend 2>/dev/null); \
 	if ! git pull --recurse-submodules; then \
 		printf "\033[31m==> pull に失敗した\033[0m\n"; \
-		printf "    submodule に手を入れている場合は third_party/misskey で\n"; \
-		printf "    変更を commit / stash してからやり直すこと。\n"; \
+		printf "    frontend/ に手を入れている場合は、変更を commit してからやり直すこと。\n"; \
 		exit 1; \
 	fi; \
-	after=$$(git -C third_party/misskey rev-parse HEAD 2>/dev/null); \
+	after=$$(git rev-parse HEAD:frontend 2>/dev/null); \
 	if [ "$$before" != "$$after" ]; then \
-		printf "\n\033[33m==> submodule が更新された。frontend の再ビルドが必要\033[0m\n"; \
+		printf "\n\033[33m==> frontend/ が更新された。frontend の再ビルドが必要\033[0m\n"; \
 		printf "    make docker-update   (Docker Compose 構成)\n"; \
 		printf "    make uds-update      (UDS 本番構成)\n"; \
 	else \
-		printf "\n==> submodule に変更なし。frontend の再ビルドは不要\n"; \
+		printf "\n==> frontend/ に変更なし。frontend の再ビルドは不要\n"; \
 	fi
 
 # plugins/*/ のうち独立した git リポジトリのものを更新する。同梱プラグイン
@@ -290,7 +307,7 @@ plugins-all: ## disabled のプラグインも含めて生成 (CI 検証用)
 
 # プラグイン開発用。ソースを監視して 生成 → ビルド → 再起動 を繰り返す (#2477)。
 # frontend の HMR は別端末の Vite dev server が担う:
-#   cd third_party/misskey/packages/frontend && pnpm watch
+#   cd frontend/packages/frontend && pnpm watch
 # GOWORK=off は plugindev 自体を stale な go.work から守るために要る (消した
 # プラグインを指したままだと go run が起動すらしない)。内側の
 # go build ./cmd/misskey は plugindev が GOWORK= で明示的に戻すので、
@@ -312,7 +329,7 @@ run: build ## build して起動
 # 呼び出し側が MK_DEV を export していればそちらを優先する。
 # (recipe の中に置くと make -n / 実行時にこのコメントが echo されるので外に置く)
 dev: ## go run で直接起動 (ビルド済みフロントが無ければ Vite dev server を使う)
-	@if [ -z "$${MK_DEV+x}" ] && [ ! -d "$${MISSKEY_FRONTEND_DIR:-third_party/misskey/built/_frontend_vite_}" ]; then \
+	@if [ -z "$${MK_DEV+x}" ] && [ ! -d "$${MISSKEY_FRONTEND_DIR:-frontend/built/_frontend_vite_}" ]; then \
 		echo "make dev: ビルド済みフロントが無いので MK_DEV=1 で起動します (Vite dev server を localhost:5173 で立てること)"; \
 		export MK_DEV=1; \
 	fi; \
@@ -347,16 +364,16 @@ test-fast: ## 全テストを -race 抜きで実行 (反復用。コミット前
 .PHONY: emoji-regex emoji-regex-check
 emoji-regex: ## MFM の Unicode 絵文字の正規表現を mfm-js の emoji-data から生成 (#3324)
 	# 生成物 (internal/activitypub/mfm/emoji_regex_gen.go) を手で直さない。
-	# third_party/misskey に pnpm install 済みであること。mfm-js か emoji-data の版が
+	# frontend/ に pnpm install 済みであること。mfm-js か emoji-data の版が
 	# 変わったら、mfm-js の期待値 (internal/activitypub/mfm/testdata/emoji_mfmjs.json) も
 	# testdata/emoji_mfmjs.mjs で作り直す (どちらかの版がずれるとテストが落ちる)。
 	GOWORK=off go run ./tools/emojiregex
 
-emoji-regex-check: ## 生成した絵文字の正規表現が submodule の mfm-js / emoji-data と一致するか検査
+emoji-regex-check: ## 生成した絵文字の正規表現が frontend/ の mfm-js / emoji-data と一致するか検査
 	# **`make gates` には入れない** — node_modules が要る。frontend-check から呼ぶ。
-	# 生成物と snapshot の突き合わせは submodule 無しで `go test ./tools/emojiregex/`
-	# が見る。こちらは snapshot (正規表現と、mfm-js / emoji-data の版) が submodule に
-	# 入っているものと一致しているかを見る。
+	# 生成物と snapshot の突き合わせは node_modules 無しで `go test ./tools/emojiregex/`
+	# が見る。こちらは snapshot (正規表現と、mfm-js / emoji-data の版) が frontend/ に
+	# pnpm install したものと一致しているかを見る。
 	GOWORK=off go run ./tools/emojiregex -check
 
 plugin-doc-check: ## authoring.md の Go スニペットがコンパイルできるか検査
@@ -655,9 +672,8 @@ dropin-frontend-swap-test: ## TS-A → mk-A 切替まで含む frontend e2e
 
 # 本家フロントエンドの取得とビルド。
 #
-# 本家のフロントエンドは third_party/misskey/ の git submodule (fork) から取る。
-# P4 (#3379) で frontend/ へ取り込むまでの形。比較対象の本家は submodule ではなく
-# .cache/misskey/<版> から読む (make upstream-fetch、#3378)。
+# フロントエンドは本体の frontend/ (#3379 で fork から取り込んだ pnpm workspace) から
+# ビルドする。比較対象の本家は .cache/misskey/<版> から読む (make upstream-fetch、#3378)。
 #
 # `e2e-frontend-build` は pnpm を docker run で実行する。ビルドに使う Node の版と
 # distro を、upstream がコンテナでビルドするときの組み合わせにそろえるため
@@ -666,12 +682,13 @@ dropin-frontend-swap-test: ## TS-A → mk-A 切替まで含む frontend e2e
 #
 # frontend e2e は Playwright に一本化した (#2437)。Cypress ラッパーは本家が
 # Cypress を廃止して参照先が消滅したため削除済み。spec は tests/playwright/。
-# **base image は upstream 自身の Dockerfile から取る (#2921)。**
-# `third_party/misskey/Dockerfile` の `ARG NODE_VERSION` は `26.4.0-trixie` の形で、
-# **版と distro の両方**を持つ。upstream がコンテナでビルドするときの組み合わせ
-# そのものなので、こちらで distro を決め打つより確か
-# (`docs/update/20260700diff.md` も「base image は submodule bump 時に要確認」と
-# 書いていた)。recipe の中で読む — `$(shell ...)` は使わない (260 行目の理由)。
+# **Node の版は frontend/.node-version から、distro は FRONTEND_NODE_DISTRO から取る。**
+# 以前は upstream の Dockerfile の `ARG NODE_VERSION` (`26.4.0-trixie` の形で、版と
+# distro の両方を持つ) から取っていた (#2921) が、#3379 で本家の Dockerfile は
+# 取り込まなくなった。版は CI (`node-version-file`) と同じ .node-version を見て、
+# distro は upstream 2026.10.0 の Dockerfile と同じ trixie を置く。本家の版を上げた
+# ときは、本家の Dockerfile の distro が変わっていないかを確かめる。
+# recipe の中で読む — `$(shell ...)` は使わない (REVISION_LDFLAGS の理由)。
 #
 # 以前は `node:22-bookworm` 固定で、CI が `.node-version` (Node 26) を使うのに
 # **本番のビルドだけ Node 22** という食い違いがあった。しかも `packages/backend` の
@@ -679,15 +696,11 @@ dropin-frontend-swap-test: ## TS-A → mk-A 切替まで含む frontend e2e
 # ちょうど**。upstream が下限を上げた瞬間に本番のビルドだけが engines で弾かれ、
 # CI は緑のまま気付けない。
 E2E_WORKDIR=/work
+FRONTEND_NODE_DISTRO ?= trixie
 
-# submodule を初期化し、Misskey 本家のフロントエンドソースを取得する。
 ##@ frontend build
-e2e-submodule-init: ## submodule を初期化 (本家フロントエンドの取得)
-	git submodule update --init --recursive third_party/misskey
-
-# 本家フロントエンドを Docker 内でビルドする。数分〜10 分程度かかる。
-# 成果物は third_party/misskey/packages/frontend/... 配下に出力される。
-# パッチは submodule (shiroha-a/misskey-ts、tag 2026.5.4-mk.0) に直接コミット済み。
+# frontend/ を Docker 内でビルドする。数分〜10 分程度かかる。
+# 成果物は frontend/built と frontend/packages/*/built に出力される。
 #
 # CI=true を渡す理由: upstream 2026.5.2 で pnpm 10 → 11 に移行 (#17400 dep bump
 # 系)、pnpm 11 は previous install (node_modules) を消す前に prompt を出す挙動が
@@ -698,7 +711,7 @@ e2e-submodule-init: ## submodule を初期化 (本家フロントエンドの取
 # **corepack は使わない (#2921)。** Node.js 26 の配布物に corepack は含まれて
 # いない (`node:26-bookworm` で `command not found` を実測)。`.node-version` に
 # 追従して image を上げると同時に踏むので、`npm i -g pnpm@<packageManager>` に
-# 変えてある。**版は submodule の `packageManager` から取る** — CI は #2914 で
+# 変えてある。**版は frontend/package.json の `packageManager` から取る** — CI は #2914 で
 # `pnpm/action-setup` + `package_json_file` に寄せてあり、これで両者が同じ
 # 定義を見る。
 #
@@ -714,13 +727,14 @@ e2e-submodule-init: ## submodule を初期化 (本家フロントエンドの取
 # (devcontainer は postCreate.sh がそうする)。ずれた場合はホスト側で
 # `pnpm install` を流し直せば直る。
 e2e-frontend-build: plugins ## フロントエンドをビルド (本番の bind-mount 先を上書きするので注意)
-	@node_tag=$$(sed -n 's/^ARG NODE_VERSION=\(.*\)$$/\1/p' third_party/misskey/Dockerfile | head -1); \
+	@node_ver=$$(tr -d '[:space:]' < frontend/.node-version); \
+	node_tag="$$node_ver-$(FRONTEND_NODE_DISTRO)"; \
 	pnpm_ver=$$(sed -n 's/.*"packageManager"[[:space:]]*:[[:space:]]*"pnpm@\([^"+]*\).*/\1/p' \
-		third_party/misskey/package.json | head -1); \
-	if [ -z "$$node_tag" ]; then echo "third_party/misskey/Dockerfile の ARG NODE_VERSION を読めない" >&2; exit 1; fi; \
+		frontend/package.json | head -1); \
+	if [ -z "$$node_ver" ]; then echo "frontend/.node-version を読めない" >&2; exit 1; fi; \
 	if [ -z "$$pnpm_ver" ]; then echo "package.json の packageManager を読めない" >&2; exit 1; fi; \
 	echo "==> node:$$node_tag / pnpm@$$pnpm_ver でビルドする"; \
-	docker run --rm -e CI=true -v $(PWD):$(E2E_WORKDIR) -w $(E2E_WORKDIR)/third_party/misskey \
+	docker run --rm -e CI=true -v $(PWD):$(E2E_WORKDIR) -w $(E2E_WORKDIR)/frontend \
 		"node:$$node_tag" \
 		bash -lc "npm i -g pnpm@$$pnpm_ver && pnpm install --frozen-lockfile && pnpm build"
 
@@ -742,18 +756,34 @@ $(UDS_CONFIG):
 ##@ 本番 UDS (実行注意)
 uds-init: | $(UDS_COMPOSE) $(UDS_CONFIG) ## UDS 構成を初期化
 
-# 本家 vite フロントエンドを docker 内でビルドする。初回は 3〜10 分程度かかる。
+# frontend/ を docker 内でビルドする。初回は 3〜10 分程度かかる。
 # 既存 e2e-frontend-build のエイリアス (成果物先が同じなので共有して OK)。
-uds-frontend-build: e2e-frontend-build ## 本番向けフロントエンドをビルド (本番の配信物を差し替える)
+# **出力先は frontend/built** (#3379 から。以前は third_party/misskey/built)。本番の
+# compose が bind mount する元も合わせて変える (docs/deployment.md の切り替え手順)。
+# 検査を先に終わらせてからビルドする (前提に並べると -j で並行して走る)。
+uds-frontend-build: uds-layout-check ## 本番向けフロントエンドをビルド (本番の配信物を差し替える)
+	$(MAKE) e2e-frontend-build
+
+# #3379 より前の compose.uds.yaml (gitignore 済み) は third_party/misskey の
+# built と assets を bind mount している。この版でも submodule の木は残るので、
+# そのまま uds-update すると新しい frontend/built を作っても誰も mount せず、
+# 古い SPA を警告無しで配り続ける (entry の検証も通ってしまう)。切り替え手順を
+# 踏むまで止める。
+uds-layout-check:
+	@if [ -f $(UDS_COMPOSE) ] && grep -nE '^[^#]*third_party/misskey([/:"]|$$)' $(UDS_COMPOSE); then \
+		echo "==> $(UDS_COMPOSE) がまだ third_party/misskey を mount している。" >&2; \
+		echo "    docs/deployment.md の「frontend を本体へ取り込んだ版へ上げる (#3379)」に従って向け直す" >&2; \
+		exit 1; \
+	fi
 
 # revision は build-arg で渡す。**Dockerfile の中では git を呼べない** —
 # `.dockerignore` が `.git` を落とすので、コンテキストにリポジトリが入らない。
-uds-build: | $(UDS_COMPOSE) $(UDS_CONFIG) ## UDS スタックのイメージをビルド
+uds-build: uds-layout-check | $(UDS_COMPOSE) $(UDS_CONFIG) ## UDS スタックのイメージをビルド
 	MKGO_COMMIT=$$(git rev-parse --short HEAD 2>/dev/null) \
 	MKGO_FRONTEND_VERSION=$$(git -C third_party/misskey describe --tags 2>/dev/null) \
 	docker compose -f $(UDS_COMPOSE) build
 
-uds-up: | $(UDS_COMPOSE) $(UDS_CONFIG) ## UDS スタックを起動
+uds-up: uds-layout-check | $(UDS_COMPOSE) $(UDS_CONFIG) ## UDS スタックを起動
 	docker compose -f $(UDS_COMPOSE) up -d --build
 
 uds-rebuild: ## frontend と image をまとめてビルド (本番の配信物を差し替える)
@@ -764,7 +794,7 @@ uds-rebuild: ## frontend と image をまとめてビルド (本番の配信物�
 # bind mount なので、frontend だけ更新したときは mkgo が再起動されず、起動時に
 # キャッシュした古い entry を配り続ける (実体は新しいビルドで消えているので
 # 404、#2885)。restart を明示し、配信中の entry が実在するかまで確かめる。
-uds-restart: | $(UDS_COMPOSE) $(UDS_CONFIG) ## mkgo を再起動して配信アセットを検証
+uds-restart: uds-layout-check | $(UDS_COMPOSE) $(UDS_CONFIG) ## mkgo を再起動して配信アセットを検証
 	@before=$$(docker compose -f $(UDS_COMPOSE) ps -q mkgo 2>/dev/null); \
 	docker compose -f $(UDS_COMPOSE) up -d || exit 1; \
 	after=$$(docker compose -f $(UDS_COMPOSE) ps -q mkgo 2>/dev/null); \

@@ -137,11 +137,12 @@ func TestToJSON_ControlAndSurrogate(t *testing.T) {
 // **同梱テーマを全件通せること。** ここが通らないと、既定テーマを設定した
 // 時点でクライアントが落ちる。
 func TestToJSON_BundledThemes(t *testing.T) {
-	dir := filepath.Join("..", "..", "..", "third_party", "misskey",
-		"packages", "frontend-shared", "themes")
+	// frontend/ は本体で追跡している (#3379)。以前は submodule を読み、無ければ
+	// skip していたので、CI では一度も走っていなかった。
+	dir := filepath.Join("..", "..", "..", "frontend", "packages", "frontend-shared", "themes")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		t.Skipf("同梱テーマが見つからない: %v", err)
+		t.Fatalf("同梱テーマが見つからない: %v", err)
 	}
 
 	count := 0

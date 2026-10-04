@@ -26,7 +26,7 @@ on:
       # この job だけ。
       - "plugin/**"
       - "go.mod"
-      - "third_party/misskey"
+      - "frontend/**"
   workflow_dispatch:
 
 jobs:

@@ -2,7 +2,7 @@
 #
 # 既存の docker-compose.yml との違い:
 #   - `build:` を持たない (publish 済みの bundled image を pull する)
-#   - `third_party/misskey/built` の bind-mount が無い (アセットは image 同梱)
+#   - `frontend/built` の bind-mount が無い (アセットは image 同梱)
 #   - したがって事前の `make e2e-frontend-build` が要らない
 #
 # ソースからビルドしたい場合は従来どおり docker-compose.yml を使う。こちらは

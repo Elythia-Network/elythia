@@ -10,7 +10,8 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-const frontendBase = "third_party/misskey"
+// frontendBase は本体へ取り込んだ frontend/ (#3379)。以前は submodule の third_party/misskey。
+const frontendBase = "frontend"
 
 // FrontendDir returns the path to built frontend assets.
 // 環境変数 MISSKEY_FRONTEND_DIR で上書き可能。
@@ -70,8 +71,8 @@ func ClientAssetsDir() string {
 }
 
 // TwemojiDir returns the path to twemoji SVG files.
-// 環境変数 MISSKEY_TWEMOJI_DIR で上書き可能。pnpm の hoisted node_modules は
-// packages/backend 配下に配置されるため、そちらを参照する。
+// 環境変数 MISSKEY_TWEMOJI_DIR で上書き可能。emoji-assets は本家では backend の
+// 依存だが、frontend/ の直下の依存として持つ (#3379、設計 D3)。
 //
 // upstream 2026.5.2 #17381 で `@discordapp/twemoji/dist/svg` から
 // `@misskey-dev/emoji-assets/built/twemoji` に asset 配信元が移行した。
@@ -81,7 +82,7 @@ func TwemojiDir() string {
 	if v := os.Getenv("MISSKEY_TWEMOJI_DIR"); v != "" {
 		return v
 	}
-	return filepath.Join(frontendBase, "packages", "backend", "node_modules", "@misskey-dev", "emoji-assets", "built", "twemoji")
+	return filepath.Join(frontendBase, "node_modules", "@misskey-dev", "emoji-assets", "built", "twemoji")
 }
 
 // FluentEmojiDir returns the path to fluent-emoji PNG files. frontend の
@@ -105,17 +106,17 @@ func FluentEmojiDir() string {
 	if v := os.Getenv("MISSKEY_FLUENT_EMOJI_DIR"); v != "" {
 		return v
 	}
-	return filepath.Join(frontendBase, "packages", "backend", "node_modules", "@misskey-dev", "emoji-assets", "built", "fluent-emoji")
+	return filepath.Join(frontendBase, "node_modules", "@misskey-dev", "emoji-assets", "built", "fluent-emoji")
 }
 
 // StaticDir returns the path to static assets (icons, splash, favicon etc.).
-// 環境変数 MISSKEY_STATIC_DIR で上書き可能。本家 TS では packages/backend/assets
-// が /static-assets として配信される。
+// 環境変数 MISSKEY_STATIC_DIR で上書き可能。本家 TS の packages/backend/assets に
+// 当たり、/static-assets として配信される。本体では frontend/assets に置く (#3379、D3)。
 func StaticDir() string {
 	if v := os.Getenv("MISSKEY_STATIC_DIR"); v != "" {
 		return v
 	}
-	return filepath.Join(frontendBase, "packages", "backend", "assets")
+	return filepath.Join(frontendBase, "assets")
 }
 
 // RepoAssetsDir returns the path to the top-level repository assets directory
@@ -125,7 +126,7 @@ func RepoAssetsDir() string {
 	if v := os.Getenv("MISSKEY_REPO_ASSETS_DIR"); v != "" {
 		return v
 	}
-	return filepath.Join(frontendBase, "assets")
+	return filepath.Join(frontendBase, "repo-assets")
 }
 
 // ClientEntryInfo holds the Vite entry point script, CSS dependencies, and

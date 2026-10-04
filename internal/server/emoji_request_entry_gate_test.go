@@ -39,12 +39,9 @@ var emojiRequestEntryFiles = map[string]emojiRequestEntry{
 const emojiRequestEntryHelper = "@/utility/emoji-request-entry.js"
 
 func TestEmojiRequestEntriesUseTheSharedHelper(t *testing.T) {
-	fe := filepath.Join(repoRootDir(t), "third_party", "misskey", "packages", "frontend", "src")
+	fe := filepath.Join(repoRootDir(t), "frontend", "packages", "frontend", "src")
 	if _, err := os.Stat(filepath.Join(fe, "utility", "emoji-request-entry.ts")); err != nil {
-		if os.Getenv("MK_FRONTEND_GATES_REQUIRE_SUBMODULE") != "" {
-			require.NoError(t, err, "submodule を要求する job なのにヘルパーを読めない")
-		}
-		t.Skipf("submodule が無い (checkout する job でのみ検査する)")
+		require.NoError(t, err, "frontend/ は追跡しているので、ヘルパーを読めないのはパスの誤り")
 	}
 
 	// 生の policy 判定。ヘルパーへ寄せたあとにこれが戻ると、そこだけ条件が

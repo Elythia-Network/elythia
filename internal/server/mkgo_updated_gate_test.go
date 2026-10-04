@@ -71,17 +71,14 @@ var (
 // コメントは落としてから探す — コメントアウトして残すのは消すのと同じ
 // (#2856 が `wiring-check` で `/* */` に対して踏んだ型)。
 func TestMkGoUpdatedDialogIsWired(t *testing.T) {
-	root := filepath.Join(repoRootDir(t), "third_party", "misskey", "packages", "frontend")
+	root := filepath.Join(repoRootDir(t), "frontend", "packages", "frontend")
 	utility := filepath.Join(root, "src", "utility", "check-client-update.ts")
 	boot := filepath.Join(root, "src", "boot", "common.ts")
 	mainBoot := filepath.Join(root, "src", "boot", "main-boot.ts")
 	dialog := filepath.Join(root, "src", "components", "MkUpdated.vue")
 
 	if _, err := os.Stat(boot); err != nil {
-		if os.Getenv("MK_FRONTEND_GATES_REQUIRE_SUBMODULE") != "" {
-			require.NoError(t, err, "submodule を要求する job なのに %s を読めない", boot)
-		}
-		t.Skipf("submodule が無い (checkout する job でのみ検査する)")
+		require.NoError(t, err, "frontend/ は追跡しているので、%s を読めないのはパスの誤り", boot)
 	}
 
 	read := func(path string) string {
