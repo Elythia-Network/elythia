@@ -1226,6 +1226,11 @@ func TestFollowers_PopulatesIsFollowedFromViewer(t *testing.T) {
 	require.NoError(t, err)
 	_, err = fSvc.Follow("alice", "bob", corefollowing.FollowOptions{})
 	require.NoError(t, err)
+	// 本番と同じく関係の repo をすべて配線する (未配線の関係は、一覧共通の
+	// packer が項目ごと出さない)。
+	h.SetBlockingRepo(testutil.NewMockBlockingRepository())
+	h.SetMutingRepo(testutil.NewMockMutingRepository())
+	h.SetRenoteMutingRepo(testutil.NewMockRenoteMutingRepository())
 
 	rec := postStub(h.Followers, `{"userId":"user1"}`, repo.Users["bob"])
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -1239,7 +1244,7 @@ func TestFollowers_PopulatesIsFollowedFromViewer(t *testing.T) {
 	assert.Equal(t, false, follower["isFollowing"])
 	// #1249: isFollowing が present のため misskey_dart は WithRelations variant を
 	// 選び、isBlocking/isBlocked/isMuted/isRenoteMuted も非null bool として cast
-	// する。EnsureRelationFlags で false 埋めされ全て present であること。
+	// する。関係が無ければ false で、全て present であること。
 	for _, key := range []string{"isBlocking", "isBlocked", "isMuted", "isRenoteMuted", "hasPendingFollowRequestFromYou", "hasPendingFollowRequestToYou"} {
 		v, present := follower[key]
 		assert.True(t, present, "%s must be present (WithRelations variant)", key)
@@ -2419,6 +2424,7 @@ func TestFollowers_PopulatesBlockMute(t *testing.T) {
 	muteRepo := testutil.NewMockMutingRepository()
 	require.NoError(t, muteRepo.Create(&model.Muting{ID: "mu1", MuterID: "bob", MuteeID: "alice"}))
 	h.SetMutingRepo(muteRepo)
+	h.SetRenoteMutingRepo(testutil.NewMockRenoteMutingRepository())
 
 	rec := postStub(h.Followers, `{"userId":"user1"}`, repo.Users["bob"])
 	require.Equal(t, http.StatusOK, rec.Code)
