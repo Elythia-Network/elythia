@@ -356,11 +356,11 @@ mk-go と Misskey TS を並べて比較するハーネスは、**比較対象の
 
 | ファイル | 対象 |
 |---|---|
-| `docker-compose.diff.yml` | 差分比較ハーネス ([diff-e2e.md](./diff-e2e.md)) |
-| `docker-compose.playwright.ts.yml` | Playwright の TS baseline |
+| `tests/diff/compose.yml` | 差分比較ハーネス ([diff-e2e.md](./diff-e2e.md)) |
+| `tests/playwright/compose.ts.yml` | Playwright の TS baseline |
 | `.github/workflows/playwright.yml` | 上記の pre-pull (tag が sync していないと pull が無駄になる) |
 | `.github/workflows/diff-e2e.yml` | diff ハーネスの pre-pull。**compose 側だけ上げて忘れやすい** (#2877 で実際に残した) |
-| `docker-compose.dropin.yml` / `docker-compose.dropin-frontend.yml` / `docker-compose.federation.misskey.yml` | drop-in / 実連合の TS インスタンス |
+| `tests/dropin/compose.yml` / `tests/dropin-frontend/compose.yml` / `tests/federation/compose.misskey.yml` | drop-in / 実連合の TS インスタンス |
 | `.github/workflows/dropin-e2e.yml` / `dropin-frontend-e2e.yml` | 上記の pre-pull と matrix |
 | `tests/bench/` / `tests/queue-bench/` の compose | 性能比較の対象 |
 | `Dockerfile.bundled` の `MISSKEY_ASSETS_IMAGE` | **配る image に焼く frontend**。これだけは TS image ではなく fork の assets image (`ghcr.io/shiroha-a/misskey-ts-assets:<tag>-mk.N`) で、**submodule のタグと 1:1 で対応させる**。ずれると 2026.9.0 の backend に古い frontend を載せた image を配ることになる。`make submodulepin-check` が `docs/divergence.md` の pin 行と突き合わせる (#3011) |

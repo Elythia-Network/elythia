@@ -112,8 +112,8 @@ jobs:
         if: failure()
         run: |
           mkdir -p /tmp/dropin-frontend-logs
-          if [ -d tests/dropin_frontend/cypress/cypress ]; then
-            cp -r tests/dropin_frontend/cypress/cypress /tmp/dropin-frontend-logs/ || true
+          if [ -d tests/dropin-frontend/cypress/cypress ]; then
+            cp -r tests/dropin-frontend/cypress/cypress /tmp/dropin-frontend-logs/ || true
           fi
 
       - name: Upload logs on failure
@@ -128,8 +128,8 @@ jobs:
       - name: Final teardown
         if: always()
         run: |
-          docker compose -f docker-compose.dropin-frontend.yml \
-            -f docker-compose.dropin-frontend.mk.yml down -v \
+          docker compose -f tests/dropin-frontend/compose.yml \
+            -f tests/dropin-frontend/compose.mk.yml down -v \
             >/dev/null 2>&1 || true
 
   # nightly が壊れたまま放置されるのを防ぐ。schedule 実行が失敗したときだけ

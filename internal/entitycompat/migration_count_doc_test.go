@@ -260,8 +260,8 @@ var migrationCountClaims = []struct {
 	{"docs/architecture.md", `うち (\d+) 件は mk-go が自分で作ったものの除去`, "destructive_mkgo", 0, "破壊的なうち mk-go 由来のもの"},
 	{"docs/deployment.md", `原則追加のみだが、例外が (\d+) 件ある`, "destructive", 0, "破壊的なマイグレーションの件数"},
 	{"docs/api-compatibility.md", `原則追加のみだが、例外が (\d+) 件ある`, "destructive", 0, "破壊的なマイグレーションの件数"},
-	{"docker-compose.dropin.mk.yml", `原則追加のみ。例外は (\d+) 件`, "destructive", 0, "破壊的なマイグレーションの件数"},
-	{"docker-compose.dropin.mk.yml", `うち (\d+) 件は mk-go が自分で作ったものの除去`, "destructive_mkgo", 0, "破壊的なうち mk-go 由来のもの"},
+	{"tests/dropin/compose.mk.yml", `原則追加のみ。例外は (\d+) 件`, "destructive", 0, "破壊的なマイグレーションの件数"},
+	{"tests/dropin/compose.mk.yml", `うち (\d+) 件は mk-go が自分で作ったものの除去`, "destructive_mkgo", 0, "破壊的なうち mk-go 由来のもの"},
 
 	{"docs/architecture.md", `宣言があるのは (\d+) 本だけ`, "dataloss", 0, "`-- data loss:` 宣言のある down"},
 	{"docs/migration-from-ts.md", `あるのは (\d+) 本だけで`, "dataloss", 0, "`-- data loss:` 宣言のある down"},

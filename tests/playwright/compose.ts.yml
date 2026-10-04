@@ -1,25 +1,27 @@
-# docker-compose.playwright.ts.yml — #744 Phase 1 TS validation overlay.
+# tests/playwright/compose.ts.yml — #744 Phase 1 TS validation overlay.
 #
-# project name は base (docker-compose.playwright.yml) の `name: mk-playwright`
-# を引き継ぐ。overlay 単独で起動することはないので明示は不要。
+# project name は base (tests/playwright/compose.yml) と同じ `mk-playwright` を
+# 書いておく (#3373)。単体で使われても project 名がディレクトリ名にならない。
 #
 # spec は upstream Misskey TS の API 互換挙動を期待値として書いている。
 # 本 overlay は backend を `misskey/misskey:2026.10.0` に置き換えて、上流の
 # 真の挙動で spec が pass することを baseline として確認する。
-# (mk-go 単体 stack は docker-compose.playwright.yml、両者で同 spec が
+# (mk-go 単体 stack は tests/playwright/compose.yml、両者で同 spec が
 # pass = drop-in 互換が保証される、という設計。)
 #
 # 使い方:
 #   docker compose \
-#     -f docker-compose.playwright.yml \
-#     -f docker-compose.playwright.ts.yml up -d --build
+#     -f tests/playwright/compose.yml \
+#     -f tests/playwright/compose.ts.yml up -d --build
 #   docker compose \
-#     -f docker-compose.playwright.yml \
-#     -f docker-compose.playwright.ts.yml --profile test \
+#     -f tests/playwright/compose.yml \
+#     -f tests/playwright/compose.ts.yml --profile test \
 #     run --rm playwright-runner
 #
 # Service name `mkgo` は base から引き継ぎ (= playwright runner の env も
 # 変えなくて済む)。中身は TS image に置き換える形。
+
+name: mk-playwright
 
 services:
   mkgo:
@@ -53,7 +55,7 @@ services:
       # mk-go base と config を共有 (instance.yml は両 backend 互換)。
       # mk-go base の mount path は /app/.config/default.yml だが、TS image は
       # /misskey/.config/default.yml で読むので path だけ overlay で書き換え。
-      - ./tests/playwright/instance.yml:/misskey/.config/default.yml:ro
+      - ./instance.yml:/misskey/.config/default.yml:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS -X POST -H 'Content-Type: application/json' -d '{}' http://localhost:3000/api/ping | grep -q pong"]
       interval: 5s

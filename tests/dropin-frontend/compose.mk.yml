@@ -1,24 +1,27 @@
-# docker-compose.dropin-frontend.mk.yml — Phase 14-3 (#394) overlay.
+# tests/dropin-frontend/compose.mk.yml — Phase 14-3 (#394) overlay.
 #
-# project name は base (docker-compose.dropin-frontend.yml) の
-# `name: mk-dropin-frontend` を引き継ぐ (#804 follow-up)。
+# project name は base (tests/dropin-frontend/compose.yml) と同じ
+# `mk-dropin-frontend` を書いておく (#804 follow-up、#3373)。単体で使われても
+# project 名がディレクトリ名にならない。
 #
 # 使い方:
 #   docker compose \
-#     -f docker-compose.dropin-frontend.yml \
-#     -f docker-compose.dropin-frontend.mk.yml up -d --build
+#     -f tests/dropin-frontend/compose.yml \
+#     -f tests/dropin-frontend/compose.mk.yml up -d --build
 #
 # app-a (Misskey TS) を mk-go ビルドに差し替える overlay。postgres-a /
 # redis-a / nginx-a / instance B / instance C はベースから引き継ぐので、
 # nginx-a の upstream (`app-a:3000`) はそのまま mk-go を指す。
 #
-# Phase 13-2 の `docker-compose.dropin.mk.yml` と同じ pattern。
+# Phase 13-2 の `tests/dropin/compose.mk.yml` と同じ pattern。
+
+name: mk-dropin-frontend
 
 services:
   app-a:
     image: ""
     build:
-      context: .
+      context: ../..
       # tests/federation/common/Dockerfile.mkgo は migrate + server を両方
       # ビルドして entrypoint で migrate up を走らせる。mk-go の migration
       # は idempotent (CREATE TYPE は DO $$ EXCEPTION 包、ALTER TABLE は
@@ -30,7 +33,7 @@ services:
       SSL_CERT_FILE: /certs/bundle.pem
       TZ: Asia/Tokyo
     volumes:
-      - ./tests/dropin_frontend/instance_a_mk.yml:/app/.config/default.yml:ro
+      - ./instance_a_mk.yml:/app/.config/default.yml:ro
       - certs:/certs:ro
     # mk-go の healthcheck は GET /healthz (TS は POST /api/ping)。
     # distroless image (#621) には wget が無いので binary 自身に -healthcheck

@@ -1,12 +1,12 @@
-# docker-compose.dropin.mk.yml — Phase 13-2 (#367) overlay.
+# tests/dropin/compose.mk.yml — Phase 13-2 (#367) overlay.
 #
-# project name は base (docker-compose.dropin.yml) の `name: mk-dropin` を
-# 引き継ぐ (#804 follow-up)。
+# project name は base (tests/dropin/compose.yml) と同じ `mk-dropin` を書いておく
+# (#804 follow-up、#3373)。単体で使われても project 名がディレクトリ名にならない。
 #
-# 使い方:
+# 使い方 (リポジトリ直下から):
 #   docker compose \
-#     -f docker-compose.dropin.yml \
-#     -f docker-compose.dropin.mk.yml up -d --build
+#     -f tests/dropin/compose.yml \
+#     -f tests/dropin/compose.mk.yml up -d --build
 #
 # このオーバーレイは `app-a` (Misskey TS) を mk-go ビルドに差し替える。
 # postgres-a / redis-a / nginx-a / instance B 系列はベースから引き継ぐので、
@@ -17,13 +17,15 @@
 # のようにハードコードしているため。サービス名を変えると nginx config も書き
 # 換える必要があり、TS↔mk swap シナリオの外科性が損なわれる。
 
+name: mk-dropin
+
 services:
   app-a:
     # 既存 TS image を上書きする (compose merge ルールで image / build /
     # entrypoint が overlay 側に置き換わる)。
     image: ""
     build:
-      context: .
+      context: ../..
       # 既存の federation 用 Dockerfile を再利用する。migrate と server を
       # 両方ビルドし、entrypoint で migrate up → server start する構成。
       # mk-go のマイグレーションは TS schema に対して原則追加のみ。例外は 17 件
@@ -40,7 +42,7 @@ services:
       SSL_CERT_FILE: /certs/bundle.pem
       TZ: Asia/Tokyo
     volumes:
-      - ./tests/dropin/instance_a_mk.yml:/app/.config/default.yml:ro
+      - ./instance_a_mk.yml:/app/.config/default.yml:ro
       - certs:/certs:ro
     # mk-go の /healthz は GET なので TS の healthcheck (POST /api/ping) と
     # 命令が違う。差し替え後は GET /healthz で healthy を判定する。

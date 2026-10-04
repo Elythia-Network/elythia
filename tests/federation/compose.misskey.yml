@@ -10,7 +10,7 @@ services:
       sh -c "apk add --no-cache openssl >/dev/null 2>&1 && /gen-certs.sh"
     volumes:
       - certs:/certs
-      - ./tests/federation/common/gen-certs.sh:/gen-certs.sh:ro
+      - ./common/gen-certs.sh:/gen-certs.sh:ro
 
   # ── mk-go Instance ─────────────────────────────────────────
   postgres-mkgo:
@@ -39,7 +39,7 @@ services:
 
   app-mkgo:
     build:
-      context: .
+      context: ../..
       dockerfile: tests/federation/common/Dockerfile.mkgo
     environment:
       # Self-signed cert バンドルを Go トラストストアに読ませる。
@@ -55,7 +55,7 @@ services:
         condition: service_completed_successfully
     volumes:
       - certs:/certs:ro
-      - ./tests/federation/common/mkgo.yml:/app/.config/default.yml:ro
+      - ./common/mkgo.yml:/app/.config/default.yml:ro
     # distroless image (#621) には wget が無いので binary 自身に -healthcheck
     # フラグを通して叩かせる (cmd/misskey の -healthcheck mode)。
     healthcheck:
@@ -69,7 +69,7 @@ services:
   nginx-mkgo:
     image: nginx:alpine
     volumes:
-      - ./tests/federation/common/nginx-mkgo-ssl.conf:/etc/nginx/nginx.conf:ro
+      - ./common/nginx-mkgo-ssl.conf:/etc/nginx/nginx.conf:ro
       - certs:/certs:ro
     depends_on:
       app-mkgo:
@@ -114,14 +114,14 @@ services:
       redis-mk:
         condition: service_healthy
     volumes:
-      - ./tests/federation/misskey/misskey.yml:/misskey/.config/default.yml:ro
+      - ./misskey/misskey.yml:/misskey/.config/default.yml:ro
     networks:
       - federation
 
   nginx-mk:
     image: nginx:alpine
     volumes:
-      - ./tests/federation/misskey/nginx-misskey-ssl.conf:/etc/nginx/nginx.conf:ro
+      - ./misskey/nginx-misskey-ssl.conf:/etc/nginx/nginx.conf:ro
       - certs:/certs:ro
     depends_on:
       misskey-app:
@@ -140,7 +140,7 @@ services:
   test-runner:
     profiles: ["test"]
     build:
-      context: ./tests/federation
+      context: .
       dockerfile: common/Dockerfile
     environment:
       MKGO_URL: https://mkgo
@@ -149,7 +149,7 @@ services:
       MISSKEY_DOMAIN: misskey
       PYTHONDONTWRITEBYTECODE: "1"
     volumes:
-      - ./tests/federation:/tests:ro
+      - .:/tests:ro
     working_dir: /tests/misskey
     depends_on:
       nginx-mkgo:

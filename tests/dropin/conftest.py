@@ -14,7 +14,7 @@ import sys
 import pytest
 
 # `tests/federation/common/` is mounted at /tests/federation_common in the
-# test-runner (see docker-compose.dropin.yml). Reuse `conftest_base.py`
+# test-runner (see tests/dropin/compose.yml). Reuse `conftest_base.py`
 # since mk-go's federation suite already maintains a
 # Misskey-compatible API client there.
 _COMMON_DIR = "/tests/federation_common"

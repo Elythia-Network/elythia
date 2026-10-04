@@ -24,12 +24,12 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$REPO_ROOT"
 
-BASE=docker-compose.dropin.yml
-OVERLAY=docker-compose.dropin.mk.yml
+BASE=tests/dropin/compose.yml
+OVERLAY=tests/dropin/compose.mk.yml
 # fedibird mock を同居させる (#2376)。mock は RSA と Ed25519 の両方の鍵を持つ
 # ので、「mk-go が Ed25519 で連合していた相手と、TS に戻したあと RSA で継続
 # できるか」を実測できる。TS-A / TS-B の挙動には影響しない (別サービス)。
-FEDIBIRD=docker-compose.dropin.fedibird.yml
+FEDIBIRD=tests/dropin/compose.fedibird.yml
 
 # 失敗時の診断情報を残してから stack を落とす。
 #

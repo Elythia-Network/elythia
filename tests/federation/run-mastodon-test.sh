@@ -16,7 +16,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$REPO_ROOT"
 
-COMPOSE=docker-compose.federation.mastodon.yml
+COMPOSE=tests/federation/compose.mastodon.yml
 
 cleanup() {
   status=$?

@@ -1,12 +1,12 @@
-# docker-compose.dropin-frontend.yml — Phase 14-1 (#381).
+# tests/dropin-frontend/compose.yml — Phase 14-1 (#381).
 #
 # 3 インスタンス (A, B, C) の Misskey TS + cypress runner で drop-in 互換を
 # フロントエンド視点から検証するための基盤。Phase 14-2 で spec マトリクスを
 # 拡充し、Phase 14-3 で app-a を mk-go に差し替える overlay を追加する。
 #
 # 使い方:
-#   docker compose -f docker-compose.dropin-frontend.yml up -d
-#   docker compose -f docker-compose.dropin-frontend.yml --profile test run --rm cypress-runner
+#   docker compose -f tests/dropin-frontend/compose.yml up -d
+#   docker compose -f tests/dropin-frontend/compose.yml --profile test run --rm cypress-runner
 
 # project name を別に分離 (#804 follow-up)。default `mk` だと UDS 本番の
 # container 群と衝突するので明示的に切る。
@@ -20,7 +20,7 @@ services:
       sh -c "apk add --no-cache openssl >/dev/null 2>&1 && /gen-certs.sh"
     volumes:
       - certs:/certs
-      - ./tests/dropin_frontend/gen-certs.sh:/gen-certs.sh:ro
+      - ./gen-certs.sh:/gen-certs.sh:ro
 
   # ── Instance A (Misskey TS) ────────────────────────────────
   postgres-a:
@@ -53,7 +53,7 @@ services:
       postgres-a: {condition: service_healthy}
       redis-a: {condition: service_healthy}
     volumes:
-      - ./tests/dropin_frontend/instance_a.yml:/misskey/.config/default.yml:ro
+      - ./instance_a.yml:/misskey/.config/default.yml:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS -X POST -H 'Content-Type: application/json' -d '{}' http://localhost:3000/api/ping | grep -q pong"]
       interval: 5s
@@ -65,7 +65,7 @@ services:
   nginx-a:
     image: nginx:alpine
     volumes:
-      - ./tests/dropin_frontend/nginx_a.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx_a.conf:/etc/nginx/nginx.conf:ro
       - certs:/certs:ro
     depends_on:
       app-a: {condition: service_healthy}
@@ -105,7 +105,7 @@ services:
       postgres-b: {condition: service_healthy}
       redis-b: {condition: service_healthy}
     volumes:
-      - ./tests/dropin_frontend/instance_b.yml:/misskey/.config/default.yml:ro
+      - ./instance_b.yml:/misskey/.config/default.yml:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS -X POST -H 'Content-Type: application/json' -d '{}' http://localhost:3000/api/ping | grep -q pong"]
       interval: 5s
@@ -117,7 +117,7 @@ services:
   nginx-b:
     image: nginx:alpine
     volumes:
-      - ./tests/dropin_frontend/nginx_b.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx_b.conf:/etc/nginx/nginx.conf:ro
       - certs:/certs:ro
     depends_on:
       app-b: {condition: service_healthy}
@@ -157,7 +157,7 @@ services:
       postgres-c: {condition: service_healthy}
       redis-c: {condition: service_healthy}
     volumes:
-      - ./tests/dropin_frontend/instance_c.yml:/misskey/.config/default.yml:ro
+      - ./instance_c.yml:/misskey/.config/default.yml:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS -X POST -H 'Content-Type: application/json' -d '{}' http://localhost:3000/api/ping | grep -q pong"]
       interval: 5s
@@ -169,7 +169,7 @@ services:
   nginx-c:
     image: nginx:alpine
     volumes:
-      - ./tests/dropin_frontend/nginx_c.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx_c.conf:/etc/nginx/nginx.conf:ro
       - certs:/certs:ro
     depends_on:
       app-c: {condition: service_healthy}
@@ -200,15 +200,15 @@ services:
       # cypress は project ディレクトリ配下に `cypress/` を一時的に作って
       # 内部状態を置くため ro だと EROFS になる。rw で mount し、生成物は
       # .gitignore 側で除外する。
-      - ./tests/dropin_frontend/cypress:/work
+      - ./cypress:/work
     working_dir: /work
     # cypress/included は ENTRYPOINT ["cypress"] なので command は 引数のみ。
     command: ["run", "--config-file", "cypress.config.ts"]
     depends_on:
       # cypress は `https://a`, `https://b`, `https://c` (nginx の alias)
       # 経由で通信するので nginx-* を待つ必要がある。app-* は nginx-* が
-      # healthy を待つので間接的に起動順は保障される (既存 `docker-compose.
-      # dropin.yml` の test-runner も同じ pattern)。Devin #385 #1。
+      # healthy を待つので間接的に起動順は保障される (既存
+      # `tests/dropin/compose.yml` の test-runner も同じ pattern)。Devin #385 #1。
       nginx-a: {condition: service_started}
       nginx-b: {condition: service_started}
       nginx-c: {condition: service_started}

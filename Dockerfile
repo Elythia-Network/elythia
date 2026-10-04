@@ -95,8 +95,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 #
 # 注意: distroless は shell も wget も持たないので、healthcheck は
 # `/app/misskey -healthcheck` で binary 自身に叩かせる (cmd/misskey/main.go
-# の -healthcheck フラグ)。docker-compose.dropin*.mk.yml /
-# docker-compose.federation.misskey.yml で使用。
+# の -healthcheck フラグ)。tests/dropin*/compose.mk.yml /
+# tests/federation/compose.misskey.yml で使用。
 #
 # tag を省くと `latest` になり、いつ build したかで中身が変わる。builder と
 # 同じく digest で固定する (distroless の更新は dependabot が digest ごと上げる)。

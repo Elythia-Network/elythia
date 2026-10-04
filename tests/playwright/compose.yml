@@ -1,4 +1,4 @@
-# docker-compose.playwright.yml — #744 Phase 1 PR-1
+# tests/playwright/compose.yml — #744 Phase 1 PR-1
 #
 # Playwright e2e 基盤の最小構成。mk-go 単体 + postgres + redis + Playwright
 # runner で API/streaming を target に spec を実行する。frontend は本 PR
@@ -6,10 +6,10 @@
 # 後続 PR で frontend bundling を追加するときに導入する)。
 #
 # 使い方:
-#   docker compose -f docker-compose.playwright.yml up -d --build
-#   docker compose -f docker-compose.playwright.yml --profile test \
+#   docker compose -f tests/playwright/compose.yml up -d --build
+#   docker compose -f tests/playwright/compose.yml --profile test \
 #     run --rm playwright-runner
-#   docker compose -f docker-compose.playwright.yml down -v
+#   docker compose -f tests/playwright/compose.yml down -v
 
 # project name は repo dir 名 (default = `mk`) と衝突して UDS 本番の
 # `mk-postgres-1` / `mk-redis-1` / `mk-mkgo-1` container を取り合うので、
@@ -42,7 +42,7 @@ services:
 
   mkgo:
     build:
-      context: .
+      context: ../..
       # tests/federation/common/Dockerfile.mkgo は migrate + server を両方
       # build して entrypoint で migrate up を走らせる。Playwright phase 1
       # は federation 不要なので最小 binary 起動 + migrate up で十分。
@@ -50,7 +50,7 @@ services:
     environment:
       TZ: Asia/Tokyo
     volumes:
-      - ./tests/playwright/instance.yml:/app/.config/default.yml:ro
+      - ./instance.yml:/app/.config/default.yml:ro
     healthcheck:
       test: ["CMD", "/app/misskey", "-healthcheck", "-config", ".config/default.yml"]
       interval: 5s
@@ -71,7 +71,7 @@ services:
   # 同時に通す (= `.` を含む hostname、go-webauthn が要求)。
   nginx-tls:
     build:
-      context: ./tests/playwright/nginx
+      context: ./nginx
       dockerfile: Dockerfile
     depends_on:
       mkgo: {condition: service_healthy}
@@ -85,7 +85,7 @@ services:
   playwright-runner:
     profiles: [test]
     build:
-      context: ./tests/playwright
+      context: .
       dockerfile: Dockerfile.runner
     environment:
       # mkgo backend への接続先。spec から fixtures 経由で参照する。
@@ -101,7 +101,7 @@ services:
       # spec ファイルと playwright.config.ts は test 実行時に変更されること
       # があるので bind mount で読み込む。生成物 (test-results/) は host に
       # 残るので gitignore で除外する。
-      - ./tests/playwright:/work
+      - .:/work
       # bind mount が image 焼き付けの /work/node_modules を上書きしないよう
       # anonymous volume で保護する。これにより npm install (Dockerfile.runner)
       # の結果が container 内で生き続ける。

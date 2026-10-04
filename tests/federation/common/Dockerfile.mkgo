@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 #
-# Dockerfile used only by docker-compose.federation.*.yml to run mk-go
+# Dockerfile used only by tests/federation/compose.*.yml to run mk-go
 # inside federation tests. Unlike the main Dockerfile it also builds the
 # migrate binary and runs migrations before starting the server.
 #

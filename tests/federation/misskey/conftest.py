@@ -8,7 +8,7 @@ import sys
 import pytest
 
 # `common/` is mounted alongside this directory inside the test-runner
-# container (see docker-compose.federation.misskey.yml). Add it to sys.path
+# container (see tests/federation/compose.misskey.yml). Add it to sys.path
 # so we can import the shared helpers.
 _COMMON_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "common")
 if _COMMON_DIR not in sys.path:

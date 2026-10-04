@@ -6,7 +6,7 @@
 // Backend-dependent expectations.
 //
 // spec は mk-go / Misskey TS の両 backend で走らせて drop-in 互換を検証する
-// (docker-compose.playwright.ts.yml)。ただし mk-go には docs/divergence.md に
+// (tests/playwright/compose.ts.yml)。ただし mk-go には docs/divergence.md に
 // 記録済みの意図的な差分があり、そこだけは backend ごとに期待値を変える必要が
 // ある。差分そのものを spec から消すと mk-go 側の検証が緩くなるので、
 // 「どちらでも通る」ゆるい assert ではなく backend ごとの厳密値を使う。

@@ -30,7 +30,6 @@ on:
       - "migration/**"
       - "tests/diff/**"
       - "third_party/misskey"
-      - "docker-compose.diff.yml"
       - "Makefile"
       - "go.mod"
       - "go.sum"
@@ -120,8 +119,8 @@ jobs:
         if: failure()
         run: |
           mkdir -p /tmp/diff-logs
-          docker compose -f docker-compose.diff.yml logs > /tmp/diff-logs/compose.log 2>&1 || true
-          docker compose -f docker-compose.diff.yml ps   > /tmp/diff-logs/ps.log 2>&1 || true
+          docker compose -f tests/diff/compose.yml logs > /tmp/diff-logs/compose.log 2>&1 || true
+          docker compose -f tests/diff/compose.yml ps   > /tmp/diff-logs/ps.log 2>&1 || true
 
       - name: Upload logs artifact on failure
         if: failure()
@@ -134,4 +133,4 @@ jobs:
 
       - name: Final teardown
         if: always()
-        run: docker compose -f docker-compose.diff.yml down -v >/dev/null 2>&1 || true
+        run: docker compose -f tests/diff/compose.yml down -v >/dev/null 2>&1 || true

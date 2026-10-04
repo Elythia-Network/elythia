@@ -238,7 +238,7 @@ func newSvc(t *testing.T) *Service {
 
 ## 連合テスト
 
-`docker-compose.federation.misskey.yml`でmk-goとMisskey TSの2インスタンスを起動し、AP通信をテストする。
+`tests/federation/compose.misskey.yml`でmk-goとMisskey TSの2インスタンスを起動し、AP通信をテストする。
 
 ```bash
 # ビルド + 起動
@@ -367,7 +367,7 @@ state preservation や frontend 視点の drop-in 互換を検証する 2 系統
 
 ### Drop-in e2e (pytest, `tests/dropin/`)
 
-Misskey TS 2 インスタンス (TS-A / TS-B) を起動して federation smoke を実行する基盤に、`docker-compose.dropin.mk.yml` overlay で TS-A の backend を mk-A に差し替えて **state 引き継ぎ** を検証する。
+Misskey TS 2 インスタンス (TS-A / TS-B) を起動して federation smoke を実行する基盤に、`tests/dropin/compose.mk.yml` overlay で TS-A の backend を mk-A に差し替えて **state 引き継ぎ** を検証する。
 
 ```bash
 make dropin-up                 # TS-A / TS-B 起動 (smoke baseline)
@@ -394,7 +394,7 @@ PR ごとに `.github/workflows/dropin-e2e.yml` が **5 シナリオ**を並列�
 相互運用できるかは実際に喋らせないと分からない。ユニットテストは「自分で署名して
 自分で検証する」ことしか保証しない。
 
-### Drop-in frontend e2e (cypress, `tests/dropin_frontend/`)
+### Drop-in frontend e2e (cypress, `tests/dropin-frontend/`)
 
 3 Misskey TS インスタンス (A/B/C) + cypress runner で実ブラウザから frontend 視点の drop-in 互換を検証する。Phase 14-3 (#394) で TS-A → mk-A 切替後も spec が pass することを e2e 確認 (`CYPRESS_MODE=baseline|swap` で skip 制御)。
 

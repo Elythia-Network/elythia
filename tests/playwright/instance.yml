@@ -1,7 +1,7 @@
 # `https://mkgo.local` (= nginx tls proxy alias) 経由で叩く。WebAuthn の
 # RPID は URL の hostname (= `mkgo.local`) を使うため `.` を含む host が
 # 必須 (go-webauthn が単一ラベルを reject)。詳細は
-# docker-compose.playwright.yml の nginx-tls service コメント参照
+# tests/playwright/compose.yml の nginx-tls service コメント参照
 # (#817 part2)。
 url: https://mkgo.local/
 port: 3000
@@ -32,7 +32,7 @@ redisForTimelines:
 id: aidx
 
 # mk-go binary 用の job queue driver。default は mkq だが、Playwright env では
-# 明示して default 変更時の意図せぬ切替を防ぐ。TS image (docker-compose.playwright.ts.yml
+# 明示して default 変更時の意図せぬ切替を防ぐ。TS image (tests/playwright/compose.ts.yml
 # overlay) では BullMQ 固定で、本キーは TS 側に渡されても無視されるので副作用なし。
 jobQueueDriver: mkq
 
@@ -58,7 +58,7 @@ enableIpRateLimit: false
 # spec は壊れた状態でも緑になる。
 #
 # `frontendContentSecurityPolicy` は mk-go 独自キーで、TS image
-# (docker-compose.playwright.ts.yml overlay) 側は黙って無視する。
+# (tests/playwright/compose.ts.yml overlay) 側は黙って無視する。
 frontendContentSecurityPolicy: enforce
 
 # **意図的に有効にしてある。** mk-go は /tarball/ を配信しないので、この設定が
@@ -67,12 +67,12 @@ frontendContentSecurityPolicy: enforce
 # 「設定が true でも providesTarball は false で、tarball リンクが 1 本も出ない」
 # ことを見るので、ここを false に戻すとその検査が空振りする (#2700)。
 #
-# TS image (docker-compose.playwright.ts.yml overlay) 側ではこの設定が素直に効いて
+# TS image (tests/playwright/compose.ts.yml overlay) 側ではこの設定が素直に効いて
 # providesTarball が true になるが、`specs/upstream` に tarball を見る spec は無い。
 publishTarballInsteadOfProvideRepositoryUrl: true
 
-# 注: 本 config は mk-go binary (docker-compose.playwright.yml) と TS image
-# (docker-compose.playwright.ts.yml overlay) の **両方で共有** する。差分が
+# 注: 本 config は mk-go binary (tests/playwright/compose.yml) と TS image
+# (tests/playwright/compose.ts.yml overlay) の **両方で共有** する。差分が
 # 発生したら別 file に分けるが、現状 db/redis hostname も同じなので 1 file
 # で済む。
 #

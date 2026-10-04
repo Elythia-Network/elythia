@@ -33,11 +33,11 @@ services:
     networks: [diff]
   mkgo:
     build:
-      context: .
+      context: ../..
       dockerfile: tests/federation/common/Dockerfile.mkgo
     environment: {TZ: Asia/Tokyo}
     volumes:
-      - ./tests/diff/mkgo.yml:/app/.config/default.yml:ro
+      - ./mkgo.yml:/app/.config/default.yml:ro
     healthcheck:
       test: ["CMD", "/app/misskey", "-healthcheck", "-config", ".config/default.yml"]
       interval: 5s
@@ -69,7 +69,7 @@ services:
     # 上げるときはこの tag も一緒に上げること。
     image: misskey/misskey:2026.10.0
     volumes:
-      - ./tests/diff/ts.yml:/misskey/.config/default.yml:ro
+      - ./ts.yml:/misskey/.config/default.yml:ro
     healthcheck:
       # Misskey image has curl (not wget); /api/ping は JSON body 必須 (空 POST は 400)。
       test: ["CMD-SHELL", "curl -fsS -X POST -H 'Content-Type: application/json' -d '{}' http://localhost:3000/api/ping || exit 1"]
@@ -86,13 +86,13 @@ services:
   diff-runner:
     profiles: [test]
     build:
-      context: ./tests/diff
+      context: .
       dockerfile: Dockerfile.runner
     environment:
       MKGO_URL: http://mkgo:3000
       TS_URL: http://ts:3000
     volumes:
-      - ./tests/diff:/work
+      - .:/work
     working_dir: /work
     depends_on:
       mkgo: {condition: service_healthy}
