@@ -57,7 +57,7 @@ var excludedFromBuildContext = map[string]string{
 // 誘惑がある) に絞ってある。
 var keptInBuildContext = map[string]string{
 	".config/docker.yml.example":                 "Dockerfile / Dockerfile.bundled が /app/.config/default.yml として COPY する",
-	"frontend/built/meta.json":                   "SPA の成果物。assets-local stage が built ごと COPY する",
+	"frontend/built/meta.json":                   "SPA の成果物。連合 e2e の Dockerfile.mkgo が COPY する",
 	"frontend/assets/favicon.ico":                "builder stage が frontend/ の存在チェックに使う (#3379)",
 	"tests/federation/common/mkgo-entrypoint.sh": "連合 e2e の Dockerfile が COPY する。`tests/` はここに 4 つ除外が並んでいて blanket 除外に倒れやすい",
 	"tests/bench/queue/blackhole/main.go":        "queue-bench の blackhole の Dockerfile が repo root の context から COPY する。隣の tests/bench/http を除外しているので tests/bench ごと除外に倒れやすい (#3373)",

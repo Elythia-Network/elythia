@@ -151,9 +151,8 @@ jobs:
   # `Dockerfile` からアセット非同梱の image を作るので、既存のビルド&起動
   # フローには影響しない。
   #
-  # アセットは fork が publish する専用 image から COPY するため、この job は
-  # submodule も pnpm install も必要としない (= 既存 job のような事前準備が
-  # 一切要らない)。
+  # frontend は Dockerfile.bundled の中でビルドする (#3379) ので、この job は
+  # pnpm install などの事前準備を必要としない。
   build-and-push-bundled:
     runs-on: ubuntu-latest
     env:
@@ -166,60 +165,9 @@ jobs:
           ref: ${{ inputs.tag || github.ref }}
           # publish する job なので認証情報を残さない (build-and-push と同じ理由)。
           persist-credentials: false
-        # Dockerfile.bundled はアセットを assets image から取る (P4c で本体の
-        # frontend/ からのビルドに置き換える、#3379)。
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-
-      # Dockerfile.bundled の assets image は `<tag>@sha256:<digest>` で固定して
-      # いる。BuildKit は digest を優先して tag を見ないので、**tag だけ上げて
-      # digest を取り直し忘れると、新しい tag を名乗る古い frontend が焼き込まれる**。
-      # `make submodulepin-check` は tag しか突き合わせられない (ネットワークを
-      # 使わない) ので、registry に問い合わせるのはここで行う。
-      # fork 側が同じ tag を publish し直した場合もここで落ちる (= 中身が変わった
-      # ことに気付ける)。
-      #
-      # **過去タグの再 publish (`-f tag=1.1.1`) では digest が無いのが正しい。**
-      # digest の併記はこの検査より後に入ったので、既存リリースタグの
-      # Dockerfile.bundled は tag だけを持つ。そこで落とすと冒頭の「取りこぼしは
-      # こちらで拾う」経路が bundled だけ塞がる。tag input があって digest が
-      # 無いときは照合を skip して warning を出す (タグを打ち直すのは破壊的なので、
-      # 当時の Dockerfile のまま焼くしかない)。tag input が無いのに digest が
-      # 無いのは pin の付け忘れなので落とす (bundled_assets_pin_test と同じ判定)。
-      - name: Assets image digest matches its tag
-        env:
-          INPUT_TAG: ${{ inputs.tag }}
-        run: |
-          set -euo pipefail
-          ref=$(sed -n 's/^ARG MISSKEY_ASSETS_IMAGE=//p' Dockerfile.bundled)
-          if [ -z "$ref" ]; then
-            # 過去タグは ARG の書き方自体が違いうる。照合できないだけで build は
-            # 当時の Dockerfile のまま成立するので、tag input のときは落とさない。
-            if [ -n "$INPUT_TAG" ]; then
-              echo "::warning::$INPUT_TAG の Dockerfile.bundled から MISSKEY_ASSETS_IMAGE を読めなかった。digest の照合を skip する"
-              exit 0
-            fi
-            echo "::error::Dockerfile.bundled から MISSKEY_ASSETS_IMAGE を読めなかった" >&2
-            exit 1
-          fi
-          image=${ref%@*}
-          pinned=${ref#*@}
-          if [ "$image" = "$ref" ]; then
-            if [ -n "$INPUT_TAG" ]; then
-              echo "::warning::$INPUT_TAG の Dockerfile.bundled は assets image を digest で固定していない ($ref)。digest の照合を skip して当時の tag のまま build する"
-              exit 0
-            fi
-            echo "::error::Dockerfile.bundled の MISSKEY_ASSETS_IMAGE ($ref) に digest が無い" >&2
-            exit 1
-          fi
-          # --raw は manifest のバイト列そのものを返すので、その sha256 が digest になる。
-          actual="sha256:$(docker buildx imagetools inspect --raw "$image" | sha256sum | cut -d' ' -f1)"
-          echo "tag=$image pinned=$pinned registry=$actual"
-          if [ "$pinned" != "$actual" ]; then
-            echo "::error::$image の digest が Dockerfile.bundled の pin と違う (pin: $pinned / registry: $actual)。tag を上げたなら digest も取り直すこと (docs/upstream-catch-up.md)" >&2
-            exit 1
-          fi
 
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
@@ -255,5 +203,9 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # **scope を分ける。** 既定の scope は build-and-push と共有で、並行して
+          # 走る 2 つの job が書いた index を互いに上書きする。#3379 から frontend の
+          # ビルド (依存込みで約 1.2GB) をこの image の中で行うので、取り合いで
+          # キャッシュを失うと毎回 frontend をビルドし直すことになる。
+          cache-from: type=gha,scope=bundled
+          cache-to: type=gha,mode=max,scope=bundled

@@ -29,9 +29,8 @@
 # 固定しても workflow 自体は `uses:` の ref で解決されるので防げない)。
 # docs/plugins/operating.md も同じ書き方にしてある。
 #
-# **frontend を持つプラグインは扱えない。** この image の SPA は assets イメージ
-# から COPY するので .vue を反映する経路が無い。指定するとビルドが明示的に
-# 失敗する (pluginbuild が submodule 未取得を検出して落ちる)。
+# **frontend を持つプラグインも扱える。** Dockerfile.bundled が image の中で
+# frontend/ をビルドするので、組み込んだプラグインの .vue も SPA に入る (#3379)。
 name: Build with plugins
 
 on:
@@ -89,8 +88,7 @@ jobs:
       image: ${{ steps.target.outputs.tags }}
       digest: ${{ steps.build.outputs.digest }}
     steps:
-      # frontend を持つプラグインがあるかの判定 (pluginbuild) と、ある場合の SPA
-      # ビルドに frontend/ が要る (#3379 で本体へ取り込んだので、submodule は取らない)。
+      # frontend/ は本体に入っている (#3379) ので、submodule は取らない。
       - name: Checkout mk-go
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -99,7 +97,7 @@ jobs:
           # 後続は mk-go の git 操作を一切しない (プラグインの clone は
           # plugins/<name>/ に作る別リポジトリで、この認証情報を使わない)。
           # 残すと `.git/config` に token が載ったまま、第三者のプラグインの
-          # コードや pnpm install の lifecycle script が走る。
+          # コードが走る。
           persist-credentials: false
 
       - name: Set up Go
@@ -121,8 +119,7 @@ jobs:
       #
       # **token の設定と clone を同じ step に置き、抜けるときに必ず消す。**
       # `--global` に書いたまま step を終えると、後続の `go run ./tools/pluginbuild`
-      # や `pnpm install` (依存パッケージの lifecycle script を実行する) からも
-      # `~/.gitconfig` 経由で token が読める。clone が要るのはこの step だけ。
+      # (プラグインの go.mod を解決する) からも `~/.gitconfig` 経由で token が読める。clone が要るのはこの step だけ。
       # trap は EXIT に掛けるので、pluginresolve が失敗して `set -e` で抜ける
       # ときも消える。消し損ねたら step ごと落とす (token が残ったまま後続へ
       # 進ませない)。
@@ -142,11 +139,8 @@ jobs:
           fi
           printf '%s\n' "$MK_PLUGINS" | go run ./tools/pluginresolve
 
-      # プラグインの配線を生成し、frontend を持つものがあるかを判定する。
-      # **`ls plugins/*/frontend` では判定できない** — mk-plugin.yml で無効化
-      # されているプラグインは組み込まれないので、pluginbuild の判断に従う。
-      # 生成は Dockerfile 側でも走る (冪等)。ここで走らせるのは SPA のビルドが
-      # 生成物 (server-plugins.generated.ts) を必要とするため。
+      # プラグインの配線を生成し、要求したプラグインが実際に組み込まれるかを
+      # 突き合わせる。生成は Dockerfile 側でも走る (冪等)。
       - name: Generate plugin wiring
         id: wiring
         env:
@@ -191,41 +185,6 @@ jobs:
               esac
             done < "$RUNNER_TEMP/requested.txt"
           fi
-
-          if printf '%s' "$out" | grep -q 'frontend=true'; then
-            echo "frontend=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "frontend=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Set up pnpm
-        if: steps.wiring.outputs.frontend == 'true'
-        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          # 版は frontend/package.json の packageManager から取る。
-          package_json_file: frontend/package.json
-
-      - name: Set up Node.js
-        if: steps.wiring.outputs.frontend == 'true'
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: frontend/.node-version
-
-      # 公式の assets イメージにはプラグインの .vue が入っていないので、frontend を
-      # 持つプラグインがあるときは SPA を自前でビルドする。手順は fork 側の
-      # Dockerfile.assets と同じ。**NODE_ENV=production が要る** — frontend / sw /
-      # i18n など 7 パッケージがこれを見ており、production でないと minify されず
-      # _DEV_ フラグも立つ。
-      - name: Build frontend with plugins
-        if: steps.wiring.outputs.frontend == 'true'
-        working-directory: frontend
-        env:
-          NODE_ENV: production
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm build-pre
-          pnpm --filter frontend... --filter sw... --filter frontend-embed... build
-          pnpm build-assets
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -281,11 +240,6 @@ jobs:
           platforms: linux/amd64
           push: ${{ inputs.push }}
           tags: ${{ steps.target.outputs.tags }}
-          # frontend を持つプラグインがあれば、直前でビルドした SPA を使う。
-          # 無ければ公式の assets イメージ (既定) のままにして、pnpm のビルドを
-          # まるごと省く。
-          build-args: |
-            ASSETS_SOURCE=${{ steps.wiring.outputs.frontend == 'true' && 'local' || 'external' }}
           labels: |
             org.opencontainers.image.title=mk-go
             org.opencontainers.image.description=mk-go built with operator-selected plugins
@@ -297,6 +251,8 @@ jobs:
           #
           # **`--mount=type=cache` の中身は cache-to では運ばれない** (min でも max
           # でも空。実測)。runner は毎回まっさらなので Go のビルドはどちらでも
-          # 走り直す。max が追加で救うのは `apk add` と `go mod download` の 2 step
-          # だけで、その対価が 421 MB の layer になる。
+          # 走り直す。max にすると `apk add` と `go mod download` に加えて frontend
+          # stage (`pnpm fetch` の層だけで約 1.2GB) も救えるが、その分が呼び出し元の枠を
+          # 圧迫する。min のままにする代わりに、frontend は毎回ビルドし直す
+          # (手元の冷えたビルドで frontend stage だけ約 3 分、#3379)。
           cache-to: type=gha,mode=min

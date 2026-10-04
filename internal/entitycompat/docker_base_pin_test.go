@@ -31,9 +31,8 @@ var pinnedBaseImageRe = regexp.MustCompile(`^[^@\s:]+(?::\d+)?(?:/[^@\s:]+)*:[^@
 //
 // **tag は付け替えられる。** `golang:1.27.1-alpine` のような patch version の
 // tag でも公式 image は alpine の更新などで publish し直すし、distroless は tag を
-// 省くと `latest` になる。assets image を digest で固定した (Dockerfile.bundled)
-// のと同じ理由で、builder / runtime も固定する。`${...}` を含む FROM は build arg
-// で決まるので対象外 (`MISSKEY_ASSETS_IMAGE` は bundled_assets_pin_test が見る)。
+// 省くと `latest` になる。builder / frontend / runtime のどれも固定する。
+// `${...}` を含む FROM は build arg で決まるので対象外。
 func TestDistributedDockerfileBaseImagesArePinnedByDigest(t *testing.T) {
 	checked := 0
 	for _, path := range distributedDockerfiles {

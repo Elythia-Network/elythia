@@ -36,7 +36,7 @@ make build          # または docker build / make uds-build
 
 `Dockerfile` / `Dockerfile.bundled` / `deploy/uds/Dockerfile.mkgo` のいずれも生成ツールを実行するので、`plugins/` に置いた状態でイメージをビルドすれば取り込まれる。
 
-`Dockerfile.bundled` は SPA を同梱するが、その供給元は既定で mk-go 公式のアセットイメージ（`ghcr.io/shiroha-a/misskey-ts-assets`）なので、**プラグインのフロントエンドは入らない**。含めるには SPA を自前でビルドしたうえで `--build-arg ASSETS_SOURCE=local` を渡す。下記の GitHub Actions 経由ならこの判定は自動で行われる。
+`Dockerfile.bundled` は `frontend/` を image の中でビルドして SPA を同梱するので、組み込んだプラグインのフロントエンドもそのまま入る (#3379)。以前の `--build-arg ASSETS_SOURCE=local` は要らない。
 
 ### フロントエンドを持つプラグイン
 
@@ -79,9 +79,9 @@ jobs:
 - **`permissions` は呼び出す側で宣言する。** publish するなら `packages: write` が要る。reusable workflow 側では宣言していない — あちらで書くと呼び出し元の権限以下にしか設定できず、権限を持たない呼び出し（fork からの PR など）は `push: false` でも run ごと拒否されるため
 - **`mk_ref` にこの機能を含む版を指す。** リリース `1.3.0` には `tools/pluginresolve` が無いので、指定するとビルドが「no required module provides package」で落ちる。`1.4.0` 以降のタグか、その先のコミット SHA を指すこと
 - **ref は必須だが、それだけでは内容は固定されない。** タグ・ブランチ・コミット SHA のいずれも書けるので、`main` と書けば実質的に既定ブランチを追うことになる。省略を許さないのは「どの版を取るかを毎回書かせる」ためで、**内容まで固定したいならコミット SHA か、動かさない運用のタグを指すこと**。ブランチを指した場合、この文書の冒頭にある「特定のバージョンを名指しで含める」という前提は成立しない（作者のアカウントが侵害されれば、次のビルドで任意のコードが入る）
-- **フロントエンドを持つプラグインは自動で判定される。** 1つでもあれば SPA を自前でビルドして同梱し、無ければ公式のアセットイメージを使ってフロントエンドのビルドを丸ごと省く。判定は `mk-plugin.yml` で無効化されているものを除いた実際の組み込み対象に対して行われる
+- **フロントエンドを持つプラグインもそのまま入る。** SPA は `Dockerfile.bundled` の中で毎回ビルドするので、指定の仕方は変わらない (#3379)
 - **指定したプラグインが組み込まれなかったらビルドが落ちる。** `mk-plugin.yml` が `disabled: true` のプラグインは生成ツールが黙って読み飛ばすため、突き合わせないと「指定したのに1つも入っていないイメージ」が成功扱いで publish される
-- **private なプラグインは `plugin_token` を渡す。** `https://github.com/` の URL 書き換えで差し込むので、プラグインの指定行に token を書く必要はない（書いた場合はビルドが弾く。指定行は秘密として扱われないので、ログに平文で残るため）。書き換えはプラグインを clone する step の中だけで有効で、抜けるとき (失敗時も) に消すので、後続の `pnpm install` や go のビルドからは token を読めない。**token に持たせる権限はプラグインのリポジトリの読み取りだけにする**
+- **private なプラグインは `plugin_token` を渡す。** `https://github.com/` の URL 書き換えで差し込むので、プラグインの指定行に token を書く必要はない（書いた場合はビルドが弾く。指定行は秘密として扱われないので、ログに平文で残るため）。書き換えはプラグインを clone する step の中だけで有効で、抜けるとき (失敗時も) に消すので、後続の生成ツール (プラグインの go.mod を解決する) や image のビルドからは token を読めない。**token に持たせる権限はプラグインのリポジトリの読み取りだけにする**
 - `push: false` を渡すとビルドだけ行い、publish しない。`image` は `ghcr.io/...` のみ受け付ける（ログイン先が ghcr.io に固定されているため）
 
 `mk_repository` を渡せば mk-go 自体を fork したものにも向けられる。

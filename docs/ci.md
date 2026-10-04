@@ -113,8 +113,8 @@ PR を出すと十数個の check が走る。**どれが何を見ていて、�
 | `federation` | Drop-in e2e | 本物の Misskey TS との実連合 (follow/note/reaction/renote/reply/mention/delete) | 4 min | `make federation-misskey-e2e` |
 | `federation-mastodon` | Drop-in e2e | 本物の Mastodon との引用の承認 (FEP-044f): 双方向の引用が承認済みになるか、取り消しが双方向で効くか | 未計測 | `make federation-mastodon-e2e` |
 | `spec (mk-go 1/4)` 〜 `4/4` | Playwright | ブラウザからの統合互換 (298 spec ファイル) | 4-9 min | `make playwright-check` |
-| `build-and-push` / `-bundled` | Docker | image がビルドできるか (PR では push しない) | 4 min | `docker build -f Dockerfile .` |
-| `build / build` | Build with plugins (selftest) | 運営者向けの reusable workflow が通るか。外部プラグインを実際に clone し、frontend を持つので SPA の自前ビルド (`ASSETS_SOURCE=local`) まで走る。**`docker build --check` では見えない範囲** (pluginbuild / go build が通るか、`assets-local` の COPY 元が context に実在するか、pnpm の symlink を越えられるか) を確認できるのはこの check だけ | 6 min | paths に該当する PR で自動発火する。手動なら `gh workflow run build-with-plugins-selftest.yml --ref <branch>` (default branch にある場合のみ) |
+| `build-and-push` / `-bundled` | Docker | image がビルドできるか (PR では push しない)。`-bundled` は image の中で frontend もビルドする (#3379) | 4 min (`-bundled` はキャッシュが冷えていると frontend の分だけ延びる。手元の冷えたビルドで frontend stage だけ約 3 分) | `docker build -f Dockerfile .` / `docker build -f Dockerfile.bundled .` |
+| `build / build` | Build with plugins (selftest) | 運営者向けの reusable workflow が通るか。外部プラグインを実際に clone し、frontend を持つので `Dockerfile.bundled` の中でプラグインの .vue を含めた SPA のビルドまで走る。**`docker build --check` では見えない範囲** (pluginbuild / go build / frontend のビルドが通るか、生成物とプラグインの frontend が frontend stage に届くか) を確認できるのはこの check だけ | 6 min | paths に該当する PR で自動発火する。手動なら `gh workflow run build-with-plugins-selftest.yml --ref <branch>` (default branch にある場合のみ) |
 
 ### e2e 系が「何を守っているか」の違い
 
@@ -700,9 +700,9 @@ checkout / setup-go を除くと step は実行順に 4 つ。**required job な
 - **`permissions` を宣言していない。** reusable workflow の permissions は caller の
   権限以下にしか設定できず、宣言すると caller がそれを持たない場合に run ごと
   拒否される (`push: false` でも同じ)。publish する caller が `packages: write` を書く。
-- frontend を持つプラグインがあるかは `pluginbuild` の出力で判定し、あるときだけ
-  SPA を自前でビルドして `ASSETS_SOURCE=local` で焼き込む。無ければ公式の
-  assets イメージを使って pnpm のビルドを丸ごと省く。
+- SPA は `Dockerfile.bundled` の中で毎回ビルドするので、frontend を持つプラグインも
+  そのまま入る (#3379。以前はホストでビルドして `ASSETS_SOURCE=local` で焼き込み、
+  無ければ fork の assets image を使っていた)。
 - **要求したプラグインが組み込まれたかを突き合わせる。** `disabled: true` は黙って
   skip されるので、見ないと「指定したのに 0 個入っている image」が緑で出る。
 - `build-with-plugins-selftest.yml` が `pull_request` (paths フィルタ) と
@@ -712,8 +712,8 @@ checkout / setup-go を除くと step は実行順に 4 つ。**required job な
   job 名 + callee の job 名) で、`gh pr checks` の一覧には現れないので
   `gh run list --workflow build-with-plugins-selftest.yml` で見る。実測 6 分。
   **`docker build --check` が見ない範囲を押さえるのはこれだけ** — stage 名の解決は
-  `--check` で分かるが、`pluginbuild` と `go build` が実際に通るか、`assets-local` の
-  COPY 元が context に実在するか、pnpm の symlink を越えられるかは RUN / COPY を
+  `--check` で分かるが、`pluginbuild` と `go build` と frontend のビルドが実際に
+  通るか、生成物とプラグインの frontend が frontend stage に届くかは RUN / COPY を
   実行しないと分からない。
 - PR の required check には**含めない** (外部リポジトリの clone に依存するため)。
 

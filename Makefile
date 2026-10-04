@@ -1269,19 +1269,16 @@ mdtable-check: ## md の表の各行がヘッダと同じ列数か検査 (溢れ
 	go test ./internal/entitycompat/... -run 'TestMarkdownTablesDoNotDropContent' -count=1 -v
 
 .PHONY: submodulepin-check
-submodulepin-check: ## fork frontend の pin が doc / gitlink / bundled image で一致しているか検査
+submodulepin-check: ## fork frontend の pin が doc / gitlink で一致しているか検査
 	# submodule に commit して fork へ push したあと、親リポの gitlink を上げ
 	# 忘れる片側更新が実際に起きた (#2963)。doc には新しい tag を書き、fork の
 	# branch と tag も push 済みなのに gitlink だけ古い、という状態で CI 28
 	# チェックが全部緑のままマージされた。SHA で突き合わせるので submodule の
 	# checkout は要らない。
 	#
-	# 配る bundled image が焼き込む assets image の tag も同じ輪に入れてある
-	# (#3011)。古い tag でも image はビルドできるので CI は落ちず、配った先に
-	# だけ古い frontend が載る。実測で develop は 29 世代ずれていた (pin されていた
-	# `mk.0` から数えた間隔。数字付きの tag 30 個から 1 を引いた値で、英字付きを
-	# 含めると 62 個から 1 を引いて 61)。
-	go test ./internal/entitycompat/... -run 'TestSubmodulePinMatchesDoc|TestSubmodulePinTagMatchesTable|TestBundledAssetsPinMatchesDoc|TestAssetsPinScanners' -count=1 -v
+	# 配る bundled image は frontend/ を image の中でビルドするようになった (#3379)
+	# ので、以前ここで見ていた assets image の tag は無くなった。
+	go test ./internal/entitycompat/... -run 'TestSubmodulePinMatchesDoc|TestSubmodulePinTagMatchesTable' -count=1 -v
 
 .PHONY: secretfield-check
 secretfield-check: ## モデルの秘密フィールドが json:"-" を保っているか検査
