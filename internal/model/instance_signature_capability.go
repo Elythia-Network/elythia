@@ -6,8 +6,8 @@ import "time"
 // table.
 //
 // mk-go 独自テーブルで、リモートインスタンスがどの署名方式に対応しているかを
-// host 単位に記録する。TS は本テーブルを認識しないので drop-in で TS へ戻しても
-// 壊れない (instance_secret / user_publickey_extra と同じ扱い)。
+// host 単位に記録する。TS は本テーブルを認識しない (instance_secret /
+// user_publickey_extra と同じ扱い)。
 //
 // 各列は独立した観測系統から独立したタイミングで書かれる。ある系統の記録が別系統
 // の記録を消さないよう、更新は必ず列単位の部分 upsert で行うこと (#2393)。

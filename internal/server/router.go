@@ -204,6 +204,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// mk-go 自身は両形式を読めるが **Misskey TS は PKCS#8 しか読めない** ので、
 	// そのまま TS へ引き渡すとそのユーザーの送信側の連合が全滅する (受信は動くので
 	// 片方向だけ静かに壊れる)。既存インスタンスを救うため起動時に変換する。
+	// TS へ引き渡すこと (復路) は保証しなくなった (#3191) が、鍵の形式は本家と揃えておく。
 	//
 	// 変換するのは PEM のエンコーディングだけで鍵そのものは変わらない。公開鍵も
 	// 鍵 ID も不変なので連合相手から見て何も変わらない。冪等なので毎回走ってよく、
@@ -1685,7 +1686,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// apisignup.TicketStore (FindByCode + MarkUsed) を superset として満たす。
 	// 旧 gormTicketStore wrapper を直接 repo に置き換え (#610 item 1)。
 	// 承認制の登録 (#2554 / #2555)。承認待ちを user 行として持たず、専用
-	// テーブルに閉じ込める。TS へ切り替えても承認待ちが有効化されない。
+	// テーブルに閉じ込める。user 行にすると、user を読む全ての経路に「承認待ちを
+	// 除く」条件が要る (当初は TS へ切り替えても有効化されないことも理由だったが、
+	// 復路は保証しなくなった。#3191)。
 	// signup (申請・登録) と admin (審査) の両方が同じインスタンスを見る。
 	signupApplicationService := signupapplication.NewService(
 		repository.NewSignupApplicationRepository(s.db), idGen)

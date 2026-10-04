@@ -13,9 +13,8 @@ const (
 
 // UserSuspensionOrigin records who decided the current suspension state (#2973).
 //
-// **`user` に列を足さず別テーブルにしてある。** TS は未知の列も無視するので列
-// 追加でも復路は壊れないが、別テーブルなら TS 側から一切見えないため drop-in の
-// 面で更に安全 (`relay_observed_user` / `signup_application` と同じ判断)。
+// **`user` に列を足さず別テーブルにしてある** (`relay_observed_user` /
+// `signup_application` と同じ判断。理由は RelayObservedUser を参照)。
 type UserSuspensionOrigin struct {
 	UserID    string    `gorm:"column:userId;type:varchar(32);primaryKey" json:"userId"`
 	Origin    string    `gorm:"column:origin;type:varchar(16);not null" json:"origin"`

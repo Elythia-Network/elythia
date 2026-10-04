@@ -48,7 +48,8 @@ func (r *userKeypairRepository) FindByUserID(userID string) (*model.UserKeypair,
 // (#2378)。mk-go 自身は両形式を読めるので動いてしまうが、**Misskey TS は
 // PKCS#8 しか読めない** (署名は Rust 製 slacc の RsaKeyPair.fromPem で、
 // PKCS#1 では `no items found` になる)。そのまま TS へ引き渡すと、そのユーザー
-// の送信側の連合が全滅する。受信は動くので片方向だけ静かに壊れる。
+// の送信側の連合が全滅する。受信は動くので片方向だけ静かに壊れる。TS へ引き渡す
+// こと (復路) は保証しなくなった (#3191) が、鍵の形式は本家と揃えておく。
 //
 // 変換するのは **PEM のエンコーディングだけ**で、鍵そのものは変わらない。
 // 公開鍵も鍵 ID も不変なので、連合相手から見て何も変わらない。

@@ -45,9 +45,10 @@ func SecureRandomString(length int, chars string) string {
 
 // NativeTokenLength is how many characters a native session token has.
 //
-// **16 から動かせない。** Misskey TS の `isNativeUserToken` は長さだけで native
+// **16 のまま揃えておく。** Misskey TS の `isNativeUserToken` は長さだけで native
 // token とアプリのアクセストークンを判別する (`token.length === 16`) ので、
-// 伸ばすと drop-in で TS に引き渡したときアプリのトークンとして扱われる。
+// 伸ばすと drop-in で TS に引き渡したときアプリのトークンとして扱われる。TS へ
+// 引き渡すこと (復路) は保証しない (#3191) が、伸ばす理由も無いので本家と揃えておく。
 const NativeTokenLength = 16
 
 // NewNativeToken returns a fresh native session token.

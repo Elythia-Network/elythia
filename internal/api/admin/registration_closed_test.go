@@ -23,8 +23,7 @@ func TestUpdateMeta_RegistrationClosed(t *testing.T) {
 		wantApprovalRequired    bool
 	}{
 		{
-			// nodeinfo / features.registration を本家と同じ値にし、TS へ戻したとき
-			// 招待制に落とすため。
+			// admin/meta が返す生の disableRegistration も閉じた状態に揃えるため。
 			name:                    "誰でも登録できる状態から閉じると招待制の値も立つ",
 			current:                 &model.Meta{ID: "x"},
 			body:                    `{"registrationClosed":true}`,

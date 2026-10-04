@@ -181,8 +181,9 @@ func TestUserIPMigration_LeavesUnparsableValuesAlone(t *testing.T) {
 }
 
 // 既存行の `lastSeenAt` は `createdAt` から埋まり、NOT NULL と DEFAULT が付く。
-// **DEFAULT が無いと drop-in の復路が壊れる** — 純正はこの 2 列を知らないので
-// `(createdAt, userId, ip)` だけを INSERT する。
+// **DEFAULT が無いと TS へ戻したときに INSERT が落ちる** — 純正はこの 2 列を知らないので
+// `(createdAt, userId, ip)` だけを INSERT する。復路は保証しない (#3191) が、今戻せる
+// 範囲として測っている。
 func TestUserIPMigration_BackfillsAndKeepsTSInsertsWorking(t *testing.T) {
 	db := ipMigrationDB(t)
 	resetPreMigrationUserIP(t, db)

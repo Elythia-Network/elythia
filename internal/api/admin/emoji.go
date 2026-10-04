@@ -62,11 +62,11 @@ func emojiBodyFits(v *string, max int) bool {
 // オブジェクトストレージ構成では超えうる。通すと `Create` /
 // `UpdateFields` が SQLSTATE 22001 で落ち、**操作者には直しようのない 5xx** になる。
 //
-// **列は広げない。** upstream も 512 (`models/Emoji.ts`) なので広げると TS が
-// 保存できない値が入り、`emoji` は共有テーブルなので upstream 由来の列を `ALTER`
-// すると復路が壊れる (down で narrow できない)。**URL は切らない** — 途中で切った
-// URL は別物で、取りに行っても無駄なうえ壊れた参照を保存することになる
-// (#3018 の `url` 直接指定と同じ判断)。
+// **列は今のところ広げない。** upstream も 512 (`models/Emoji.ts`)。広げない理由は
+// もともと TS へ戻すこと (復路) で、広げた後に入った値は down で narrow できない。
+// 復路は保証しなくなった (#3191) ので、広げて 5xx を無くすことは将来の
+// 選択肢になる。**URL は切らない** — 途中で切った URL は別物で、取りに行っても
+// 無駄なうえ壊れた参照を保存することになる (#3018 の `url` 直接指定と同じ判断)。
 //
 // **これで 5xx が全部消えるわけではない。** `Storage.Put` が返す URL は
 // `base (+ prefix) + accessKey` で、`accessKey` は 32 桁の hex 固定なので、

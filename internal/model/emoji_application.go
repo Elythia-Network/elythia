@@ -36,8 +36,10 @@ const (
 // EmojiApplication represents the `emoji_application` table (#2934).
 //
 // One row is one request to register a custom emoji. 承認までは `emoji` 行を
-// 作らない — 承認待ちを `emoji` に隠し列で持たせると、TS に切り替えた瞬間に
-// 未承認の絵文字が全部有効になる (TS は mk-go 独自の列を知らない)。
+// 作らない — 承認待ちを `emoji` に隠し列で持たせると、`emoji` を読む全ての経路
+// (本家と共有する packer・連合・キャッシュ) に「未承認なら除く」条件を足すことになる。
+// 当初は TS に切り替えた瞬間に未承認の絵文字が全部有効になることも理由だった
+// (復路は保証しなくなった。#3191)。
 // `signup_application` (#2555) が `user` に対して採ったのと同じ形。
 type EmojiApplication struct {
 	ID string `gorm:"column:id;type:varchar(32);primaryKey" json:"id"`

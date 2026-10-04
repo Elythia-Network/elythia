@@ -20,9 +20,9 @@ import (
 // prefix のオブジェクトストレージ構成では超える。通すと `Create` / `UpdateFields` が
 // SQLSTATE 22001 で落ち、**操作者には直しようのない 5xx** になっていた。
 //
-// **列は広げない** — upstream も 512 で、`emoji` は共有テーブルなので upstream 由来の
-// 列を `ALTER` すると復路が壊れる (広げた後に入った値は narrow できないので down が
-// 書けない)。**URL は切らない** — 切った URL は別物 (#3018 と同じ判断)。
+// **列は今のところ広げない** — upstream も 512。広げない理由はもともと復路 (広げた後に
+// 入った値は narrow できないので down が書けない) で、復路を保証しなくなった (#3191)
+// 今は将来の選択肢になる。**URL は切らない** — 切った URL は別物 (#3018 と同じ判断)。
 //
 // **これで 5xx が全部消えるわけではない** — 射程は `internal/api/admin/emoji.go` の
 // `emojiFileURLFits` の doc に書いてある (`drive_file` の派生 URL も varchar(512) なので、
