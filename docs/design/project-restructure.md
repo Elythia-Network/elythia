@@ -2,7 +2,7 @@
 
 **Status**: Draft (#3180、2026-09-24。正式名は 2026-09-30 に決定) / **Scope**: リポジトリ全体の構成、改名の範囲、本家 Misskey への追従方式
 
-未決事項 (末尾) はすべて決まった (2026-09-30)。段階を進めるごとにこの文書を更新する。作業の進み具合は #3180 と、段階ごとの sub-issue で管理する。
+未決事項 (末尾) はすべて決まった (2026-09-30)。再編の機会にあわせて行うこと (R6〜R8、D10〜D13) を 2026-10-04 に足した。段階を進めるごとにこの文書を更新する。作業の進み具合は #3180 と、段階ごとの sub-issue で管理する。
 
 ---
 
@@ -103,11 +103,32 @@
 - 既に入っている migration は書き換えない (復路のために付けた列や形は残す)
 - 運営者への宣言は、改名 (P6) を出す版の CHANGELOG の Note で行う
 
+### R6. 改名の版を 2.0.0 にする
+
+改名の版は **2.0.0** にする (2026-10-04 決定)。モジュールパス・配布イメージ名・nodeinfo の `software.name`・プラグインのマニフェストと宣言・`mkGoFrontendVersion` の廃止・復路の保証をやめる宣言 (R5) が同じ版で変わるので、運営者とプラグイン作者に互換性の区切りを 1 つの番号で伝える。
+
+### R7. 実行バイナリを 1 つにまとめる
+
+**実行バイナリを `elythia` 1 つにし、用途をサブコマンドで分ける** (2026-10-04 決定)。バイナリ名が変わる機会 (R1) にあわせて行う。
+
+- 今の `cmd/` には、本体 (`misskey`)・`migrate`・一回限りの後始末バッチ 5 つ (`backfill-avatar-public-url` / `backfill-emoji-system-file` / `backfill-instance-counts` / `backfill-note-tags` / `backfill-remote-host`) がある (数え方: `ls cmd/`)。バッチを足すたびに Dockerfile 3 つ (`Dockerfile` / `Dockerfile.bundled` / `deploy/uds/Dockerfile.mkgo`) へ build と COPY の行を足している
+- 目標の形は `elythia serve` / `elythia migrate` / `elythia backfill <名前>`。本番でのバッチの流し方は `docker exec <container> elythia backfill <名前> -dry-run` に揃う
+- 役目を終えたバッチは、まとめるときに残すか撤去するかを決める (例: `backfill-remote-host` は 2026-10-04 の本番の dry-run で差分が 0 件)
+
+### R8. 再編の機会にあわせて整えること
+
+構成が動く段階に寄せて、次の 3 つを行う (2026-10-04 決定)。
+
+- **frontend の CI を required check にする。** 今の `frontend-check` は submodule の都合で required から外している。frontend を本体に取り込めば外す理由が無くなるので、`build` / `test` / `lint` に並べる。frontend の依存の更新も本体の仕組み (Dependabot など) に載せる
+- **ライセンスと著作権の表示を整える。** frontend を取り込むと本家 Misskey (AGPL-3.0) のコードが本体に入る。`frontend/` に本家の `LICENSE` / `COPYING` を残し、リポジトリ直下に由来を説明する `NOTICE` を置く
+- **`docs/divergence.md` を分ける。** 今は 1 ファイルに REST・連合・MFM・frontend・意図的な安全側の差が混ざっている (1764 行。数え方: `wc -l docs/divergence.md`)。P7 で領域ごとのファイルに分け、読んでいるゲート (`TestDivergenceDoc` など) も合わせて直す
+
 ### 非機能要件
 
 - 各段階の PR は単体で build / test が通り、本番 (UDS) を止めずに移行できること
 - rebase and merge の方針どおり、各コミットが単体でビルドできること
 - 本家への追従の手間が今 (rebase 1 回) より大きく悪化しないこと。試算で確かめる
+- 本番 (UDS) の切り替えが要る段階は、手順を先に `docs/deployment.md` に書き、隔離した環境で一度通してから本番に当てること (D13)
 
 ## 現状の把握 (2026-09-24 時点)
 
@@ -229,6 +250,40 @@ tests/
 - **復路を理由にした設計の記述を仕分ける。** model / api / repository のコメントと migration の注記のうち、往路にも要るものは残し、復路だけのためのものは実態に合わせて書き直す
 - **宣言は P6 の版に載せる。** 作業は先に develop へ入れるが、「TS へ戻せることを保証しない」を運営者に告げる CHANGELOG の Note は、改名を出す版に載せる。運営者にとっての互換性の区切りを 1 回にまとめる
 
+### D10. リポジトリの移管を独立した段階にする
+
+**移管 (D7) は、コードの改名 (P6) より前に単独で行う** (2026-10-04 決定)。移管で動くものが多いので、コードの改名と同じ日にまとめると、壊れたときに原因を切り分けにくい。先に移管だけを済ませ、GitHub の旧 URL からの転送で今のコードがそのまま動くことを確かめてから、P6 で名前を変える。
+
+移管の前後で確かめるもの:
+
+- GHCR の package の置き場所と権限 (配布イメージの publish が新しい organization で通るか)
+- Actions の secrets / variables、branch protection と required check、CodeQL
+- 運営者のリポジトリから呼ばれている reusable workflow (`build-with-plugins`) の参照先
+- 手元の `origin` の URL と、`gh` の呼び出しを本家に飛ばさないためのフック (`--repo` の指定)
+- 独立リポジトリのプラグイン 4 つと、それらが本体を参照している箇所
+
+### D11. 実行バイナリのサブコマンド化 (R7)
+
+- `cmd/elythia` に 1 つの main を置き、今の各 `cmd/*` の main は関数として呼ぶ形にする。flag は今と同じものをサブコマンドの flag として受ける
+- Dockerfile は `elythia` だけを build / COPY する。entrypoint の migrate の呼び出し (`mkgo-entrypoint`) も `elythia migrate` に変える
+- 旧名のバイナリは置かない (R1 と同じく改名の版で切り替える)。`docs/deployment.md` の後始末バッチの手順を新しい呼び方に書き換える
+
+### D12. ライセンスの表示 (R8)
+
+- `frontend/` に本家の `LICENSE` / `COPYING` を取り込み時のまま置く
+- リポジトリ直下の `NOTICE` に、`frontend/` が Misskey (AGPL-3.0) に由来すること、本家の版 (`UPSTREAM_MISSKEY_VERSION`) を追っていることを書く
+- P4 の完了条件に含める
+
+### D13. 本番の切り替え手順
+
+P4 (bind mount の元が `third_party/misskey/built` から `frontend/built` に変わる)、D10 (移管)、P6 (配布イメージ名・バイナリ名が変わる) は本番の構成に触る。各段階で次を完了条件にする。
+
+1. 手順を `docs/deployment.md` に書く (gitignore されたローカルの `compose.uds.yaml` の書き換えを含む)
+2. 本番と同じ構成を隔離した名前の compose で立て、その手順を一度通す
+3. 本番に当てる。`make uds-update` は切り離して実行する
+
+本番を触る hazard の記述 (Makefile のコメント、運営者のメモ) も同じ段階で新しいパスに合わせる。
+
 ## 段階 (sub-issue の単位)
 
 名前が決まらなくてもできる段階を先に進める。
@@ -239,13 +294,17 @@ tests/
 | P1b | 復路の保証をやめる (D9、#3191)。宣言は P6 の版の CHANGELOG | しない |
 | P2 | テスト関連の配置の整理 (D6) | しない |
 | P3 | 本家の参照を `.cache/misskey` へ分離 (D2)。この時点では frontend はまだ submodule のまま | しない |
-| P4 | frontend の取り込み (D1 / D3 / D4 / D5)、submodule と fork の廃止 | しない |
+| P4 | frontend の取り込み (D1 / D3 / D4 / D5)、submodule と fork の廃止。frontend の CI の required 化とライセンスの表示 (R8 / D12)、本番の切り替え (D13) を含む | しない |
 | P5 | 正式な名前 (**決定: Elythia**) と、プラグインの呼び名 (**決定: 据え置き**) の決定。どちらも 2026-09-30 | — |
-| P6 | 改名 (D7) | する |
-| P6b | プラグインまわりの名前の移行 (D8)。連合に出る nodeinfo の宣言を含むので P6 とは別 PR にする | する |
-| P7 | ドキュメント・CLAUDE.md の整理 | する |
+| P5b | リポジトリの移管 (D10)。コードの名前は変えず、旧 URL からの転送で動くことを確かめる | する |
+| P6 | 改名 (D7) と実行バイナリのサブコマンド化 (R7 / D11)。2.0.0 として出す (R6) | する |
+| P6b | プラグインまわりの名前の移行 (D8)。連合に出る nodeinfo の宣言を含むので P6 とは別 PR にするが、同じ版で出す | する |
+| P7 | ドキュメント・CLAUDE.md の整理。`docs/divergence.md` の分割 (R8) を含む | する |
 
+- **P1 (試算) を最初に済ませる。** 追従の方式 (D4) が実用になるかで P4 の作業量が変わる。2026.9.0 → 2026.9.1 に加えて、直近の 2026.9.1 → 2026.10.0 でも当てて確かめる。P1b と P2 は他の段階と触るファイルが重ならないので、P1 と並行して進める
 - P1b を P3 / P4 より先に置くのは、TS を立てる e2e の読み先が動く段階で `mkgo-born` を「守る」対象から「測る」対象に変えておくため (D9)
+- P5b (移管) を P6 より先に分けるのは、移管で動くもの (D10) とコードの改名で動くものを別々に確かめるため
+- P6 と P6b を同じ版で出すのは、運営者が上げる手間 (イメージ名・バイナリ名・マニフェスト名・nodeinfo の宣言) を 1 回にまとめるため
 - P3 を P4 より先に分けるのは、「本家を読む側」と「自分たちの frontend を読む側」を別々に切り替えて、壊れたときにどちらが原因か分かるようにするため
 - 各段階は本番 (UDS) の更新手順 (`make uds-update`) を壊さないこと。P4 は本番の compose (gitignore されたローカルの `compose.uds.yaml`) の bind mount の書き換えが要るので、移行手順を書いてから行う
 
