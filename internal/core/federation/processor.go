@@ -248,6 +248,40 @@ func (p *Processor) resolveTargetUser(uri string) (*model.User, error) {
 	return p.userRepo.FindByURI(uri)
 }
 
+// userFromAPID looks up the user an AP id names the way upstream
+// ApDbResolverService.getUserFromApId does: a URI on this instance's host
+// names the user whose ID is the segment after `/users/` (parseLocalURI, so
+// `?` and `#` are not part of it), any other URI names the user with that
+// uri. A deleted user is not found. It returns a repository not-found error
+// when there is no such user.
+//
+// 本家は local / remote のどちらも `isDeleted: false` で引く。以前の Accept /
+// Undo(Accept) / Reject は削除済みの利用者も引き、削除済みの利用者を follower
+// としてフォローの承認・解除を進めていた (#3330)。
+// ローカルの host で `/users/` 以外を指すものは、本家と同じく誰にも当てない
+// (本家は `parsed.type !== 'users'` で null)。
+func (p *Processor) userFromAPID(uri string) (*model.User, error) {
+	var (
+		u   *model.User
+		err error
+	)
+	if id, local := p.resolver.LocalUserIDFromURI(uri); local {
+		if id == "" {
+			return nil, repository.ErrNotFound
+		}
+		u, err = p.userRepo.FindByID(id)
+	} else {
+		u, err = p.userRepo.FindByURI(uri)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if u == nil || u.IsDeleted {
+		return nil, repository.ErrNotFound
+	}
+	return u, nil
+}
+
 // ChatMessageReceiver handles inbound Misskey:ChatMessage activities.
 type ChatMessageReceiver interface {
 	// mfmSource は相手が併記した MFM の原文 (`source` / `_misskey_content`)。
@@ -1156,12 +1190,7 @@ func (p *Processor) handleUndoAccept(act genericActivity, inner genericActivity)
 	if err != nil || followerURI == "" {
 		return nil
 	}
-	var follower *model.User
-	if localID := p.resolver.localUserIDFromAPID(followerURI); localID != "" {
-		follower, err = p.userRepo.FindByID(localID)
-	} else {
-		follower, err = p.userRepo.FindByURI(followerURI)
-	}
+	follower, err := p.userFromAPID(followerURI)
 	if err != nil {
 		// **#3115 が Accept / Reject で確立した原則の裏返し** (#3116)。ack すると
 		// job が retry されず、**accept を撤回された相手をフォローし続ける**。
@@ -1437,14 +1466,7 @@ func (p *Processor) handleAccept(act genericActivity) error {
 	if err != nil {
 		return nil
 	}
-	// ローカルユーザーはURIカラムがNULLなのでFindByURIでは見つからない。
-	// ローカルURI（/users/{id}）からIDを抽出してFindByIDで検索する。
-	var follower *model.User
-	if localID := p.resolver.localUserIDFromAPID(followerURI); localID != "" {
-		follower, err = p.userRepo.FindByID(localID)
-	} else {
-		follower, err = p.userRepo.FindByURI(followerURI)
-	}
+	follower, err := p.userFromAPID(followerURI)
 	if err != nil {
 		// **not-found だけ ack する** (#3115)。その利用者が居ないことは retry
 		// しても変わらないので、7 回 retry (試行は計 8 回、
@@ -2564,11 +2586,11 @@ func (p *Processor) handleReject(act genericActivity) error {
 	if err != nil {
 		return err
 	}
-	// ローカルユーザーは user.uri が NULL なので resolveTargetUser で ID
-	// 解決する。これをやらないと FindByURI が fail して reject が silent drop
-	// されてしまい、ローカル側の FollowRequest が消えずに永遠に pending の
+	// ローカルユーザーは user.uri が NULL なので、URI から ID を読んで引く
+	// (userFromAPID)。これをやらないと FindByURI が fail して reject が silent
+	// drop されてしまい、ローカル側の FollowRequest が消えずに永遠に pending の
 	// ままになる。
-	follower, err := p.resolveTargetUser(followerURI)
+	follower, err := p.userFromAPID(followerURI)
 	if err != nil {
 		// **Accept と同じ扱い** (#3115)。not-found は retry しても変わらないので
 		// ack するが、**DB 障害を ack すると job が成功扱いになって retry されず**、
@@ -2685,23 +2707,16 @@ func (p *Processor) handleFlag(act genericActivity) error {
 	}
 	// upstream flag() は object URI を config.url + '/users/' prefix の LOCAL
 	// user URI に絞ってから user id に map し users[0] を報告対象にする
-	// (#1560、ApInboxService.ts:560-577)。mk-go も ExtractLocalUserID で
+	// (#1560、ApInboxService.ts:560-577)。mk-go も flagTargetUserID で
 	// `{baseURL}/users/...` 形式のローカル URI だけを対象にし、本家と同じく最後の
 	// 段を ID として引く (`/users/{id}/followers` は誰にも当たらない、#3330)。旧実装は
 	// 任意 host の user/note URI を受け、note 作者 (リモート可) まで fallback
 	// して別 instance のユーザーを誤って報告し得た。
-	var targetUserID string
-	for _, uri := range uris {
-		localID := p.resolver.ExtractLocalUserID(uri)
-		if localID == "" {
-			continue
-		}
-		if u, err := p.userRepo.FindByID(localID); err == nil && u != nil {
-			targetUserID = u.ID
-			break
-		}
+	target, err := p.flagTargetUser(uris)
+	if err != nil {
+		return err
 	}
-	if targetUserID == "" {
+	if target == nil {
 		// ローカル user を 1 件も解決できない Flag は ack して drop する
 		// (リモート対象や不正 URI。retry しても解決しないため error にしない)。
 		slog.Info("federation: skipping Flag with no resolvable local target", "actor", act.Actor)
@@ -2728,19 +2743,15 @@ func (p *Processor) handleFlag(act genericActivity) error {
 	// 通報の趣旨は残る。
 	comment := remoteText(content.Content+"\n"+string(urisJSON), abuseReportCommentMaxRunes)
 	report := &model.AbuseUserReport{
-		ID:             p.abuseIDGen.Generate(nowFn()),
-		TargetUserID:   targetUserID,
-		ReporterID:     reporter.ID,
-		Comment:        comment,
-		TargetUserHost: nil,
+		ID:           p.abuseIDGen.Generate(nowFn()),
+		TargetUserID: target.ID,
+		ReporterID:   reporter.ID,
+		Comment:      comment,
+		// 対象の行は flagTargetUser で引いたものをそのまま使う。以前は ID から
+		// 引き直し、その失敗を握り潰して TargetUserHost を nil (= ローカル扱い)
+		// のまま保存しえた (#3330)。
+		TargetUserHost: target.Host,
 		ReporterHost:   reporter.Host,
-	}
-	// ターゲットユーザーのホスト情報を取得
-	target, err := p.userRepo.FindByID(targetUserID)
-	if err == nil {
-		report.TargetUserHost = target.Host
-	} else {
-		target = nil
 	}
 	if err := p.abuseReportRepo.Create(report); err != nil {
 		slog.Warn("failed to create abuse report from flag activity", "err", err)
@@ -2752,6 +2763,50 @@ func (p *Processor) handleFlag(act genericActivity) error {
 		p.abuseCreated.NotifyCreated(context.Background(), report, reporter, target)
 	}
 	return nil
+}
+
+// flagTargetUser picks the user an inbound Flag reports among its object
+// URIs, the way upstream ApInboxService.flag does: among the existing users
+// named by the `{url}/users/...` URIs (flagTargetUserID), the one with the
+// smallest ID. It returns nil when none of them exists.
+//
+// **本家は `findBy({ id: In(userIds) })` の users[0] で、ORDER BY を持たない。**
+// 返る順は PostgreSQL の plan 次第で、利用者の表が大きく ID が少数なら主キーの
+// Index Scan (ID の昇順) になり、表が小さいか ID が多いと Seq Scan / Bitmap Heap
+// Scan (物理的な並び) になる。mk-go は普段の plan と同じ ID の昇順に固定する
+// (URI の並び順の先頭ではない、#3330)。本家と同じく host と isDeleted では
+// 絞らない。
+//
+// 引けなかったことを「誰も居ない」に潰さない (#3121)。潰すと job が ack されて
+// retry されず、通報が届かない。
+func (p *Processor) flagTargetUser(uris []string) (*model.User, error) {
+	var ids []string
+	seen := make(map[string]struct{}, len(uris))
+	for _, uri := range uris {
+		id := p.resolver.flagTargetUserID(uri)
+		if id == "" {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	users, err := p.userRepo.FindManyByIDs(ids)
+	if err != nil {
+		return nil, fmt.Errorf("flag: lookup target users: %w", err)
+	}
+	var target *model.User
+	for _, u := range users {
+		if u != nil && (target == nil || u.ID < target.ID) {
+			target = u
+		}
+	}
+	return target, nil
 }
 
 // handleMove processes an inbound Move activity. アカウント移行通知を受けて

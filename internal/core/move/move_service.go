@@ -166,17 +166,25 @@ func (s *Service) Move(src *model.User, dstURI string) error {
 	if s.resolver == nil {
 		return ErrNoSuchUser
 	}
-	dst, err := s.resolveDestination(dstURI)
+	dst, viaLocalURI, err := s.resolveDestination(dstURI)
 	if err != nil || dst == nil {
 		return ErrNoSuchUser
 	}
 	// 解決後の dst URI は resolver が正規化した形 (actor.id) を使う。
 	// これが空なら遷移先が AP 的に不正。
+	//
+	// ローカルの移行先は uri 列を持たないので、受け取った dstURI ではなく
+	// canonical な actor URI を組み立てる。ExtractLocalUserID は `{url}/` 配下の
+	// 最後の段を読む (本家 fetchPerson と同じ) ので、`{url}/notes/<id>` のような
+	// 非 canonical な URI でも解決でき、それをそのまま movedToUri に保存して
+	// 配ると、相手のサーバーは移行先を引けない (#3330)。
 	dstCanonical := ""
-	if dst.URI != nil {
+	switch {
+	case dst.URI != nil && *dst.URI != "":
 		dstCanonical = *dst.URI
-	}
-	if dstCanonical == "" {
+	case viaLocalURI:
+		dstCanonical = s.urls.UserURI(dst.ID)
+	default:
 		dstCanonical = dstURI
 	}
 	if !alsoKnownAsIncludes(dst.AlsoKnownAs, srcURI) {
@@ -229,12 +237,15 @@ func (s *Service) Move(src *model.User, dstURI string) error {
 //
 // `ResolveActor` は自ホストの actor URI を拒否する (shadow user 行を作らせない
 // ため)。同一インスタンス内の移行はそれとは別の話なので、ローカル URI は
-// `user` 行から直接引く (upstream の `fetchPerson` と同じ扱い)。
-func (s *Service) resolveDestination(dstURI string) (*model.User, error) {
+// `user` 行から直接引く (upstream の `fetchPerson` と同じ扱い)。viaLocalURI
+// reports whether dstURI was read as a local URI.
+func (s *Service) resolveDestination(dstURI string) (dst *model.User, viaLocalURI bool, err error) {
 	if localID := s.resolver.ExtractLocalUserID(dstURI); localID != "" {
-		return s.userRepo.FindByID(localID)
+		dst, err = s.userRepo.FindByID(localID)
+		return dst, true, err
 	}
-	return s.resolver.ResolveActor(dstURI)
+	dst, err = s.resolver.ResolveActor(dstURI)
+	return dst, false, err
 }
 
 // alsoKnownAsIncludes returns true if the csv alsoKnownAs field contains uri.

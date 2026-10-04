@@ -45,7 +45,7 @@ func TestExtractLocalUserID_LastSegment(t *testing.T) {
 		{"https://example.com/users/bob/followers", "followers"},
 		{"https://example.com/users/bob/following", "following"},
 		{"https://example.com/users/bob/", ""},
-		{"https://example.com/notes/bob", ""},
+		{"https://example.com/notes/bob", "bob"},
 		{"https://remote.example/users/bob", ""},
 	}
 	for _, tc := range cases {

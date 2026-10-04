@@ -39,5 +39,6 @@ func TestLocalUserIDFromAPID(t *testing.T) {
 	t.Run("no URL builder", func(t *testing.T) {
 		assert.Empty(t, (&Resolver{}).localUserIDFromAPID("https://example.com/users/bob"))
 		assert.Empty(t, (&Resolver{}).ExtractLocalUserID("https://example.com/users/bob"))
+		assert.Empty(t, (&Resolver{}).flagTargetUserID("https://example.com/users/bob"))
 	})
 }
