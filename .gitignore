@@ -54,6 +54,8 @@ tests/bench/results/*.md
 tests/bench/results/profiles/
 tests/queue-bench/results/*.json
 tests/queue-bench/results/*.md
+# faker の go build の出力 (#1517 で誤って追跡されていた。#3373 で外した)
+tests/queue-bench/faker/faker
 !tests/bench/results/.gitkeep
 # #1158 effect の before/after reference data (#1163 で計測)。reader が
 # bench を再走らせなくても docs/queue-bench.md の表と数値を突き合わせて
