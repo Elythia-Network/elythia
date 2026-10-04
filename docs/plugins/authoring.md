@@ -554,7 +554,11 @@ Misskey のコンポーネント（`MkInput` など）を使うなら前者。�
 
 ```ts
 import { MkInput, MkButton, MkFolder, MkLoading } from '@/plugin-api.js';
+// 2026.10.0-mk.5 から
+import { MkSelect, MkSwitch, MkAvatar, MkUserName, MkTime, PageWithHeader, useMkSelect, definePage, getUsers } from '@/plugin-api.js';
 ```
+
+`getUsers(ids)` は ID の重複を除き、`users/show` を 100 件ずつ呼んで公開ユーザー情報 (`PluginUser`) を返す。見えないユーザー (存在しない・凍結中など) は結果から黙って消えるので、件数は入力以下になり順序も保証しない。形式が不正な ID が混ざると、その 100 件のまとまりごと失敗する。`PluginUser` は misskey-js の `UserLite` そのままで (MkAvatar / MkUserName にそのまま渡すため)、upstream が型を変えると一緒に変わる。
 
 **ここに出ているものだけが「壊さないと約束する範囲」。** プラグインは同じバンドルに入るので技術的には何でも import できるが、それ以外は upstream のリファクタで黙って壊れる。必要なものがあれば mk-go 側に要求すること。
 
@@ -971,8 +975,11 @@ host.api<T>(endpoint, params)
 PluginPage: { path, component, navTitle?, navIcon?, admin? }
 
 型: SlotName / SlotUser / SlotContext / SlotMount / SlotComponent / SlotRenderer
-    PluginPage / PageRegistration
+    PluginPage / PageRegistration / PluginUser
+関数: getUsers(ids)
 再公開: MkInput / MkButton / MkFolder / MkLoading
+        MkSelect / MkSwitch / MkAvatar / MkUserName / MkTime / PageWithHeader
+        useMkSelect / definePage
 ```
 
 ## やってはいけないこと
