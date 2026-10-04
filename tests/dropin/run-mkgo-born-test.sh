@@ -36,8 +36,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$REPO_ROOT"
 
-BASE=docker-compose.dropin.yml
-OVERLAY=docker-compose.dropin.mk.yml
+BASE=tests/dropin/compose.yml
+OVERLAY=tests/dropin/compose.mk.yml
 DIAG_DIR=${DIAG_DIR:-/tmp/dropin-logs}
 
 cleanup() {

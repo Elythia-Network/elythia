@@ -30,7 +30,7 @@ services:
       CERT_DOMAINS: mkgo mastodon
     volumes:
       - certs:/certs
-      - ./tests/federation/common/gen-certs.sh:/gen-certs.sh:ro
+      - ./common/gen-certs.sh:/gen-certs.sh:ro
 
   # ── mk-go ──────────────────────────────────────────────────
   postgres-mkgo:
@@ -57,7 +57,7 @@ services:
 
   app-mkgo:
     build:
-      context: .
+      context: ../..
       dockerfile: tests/federation/common/Dockerfile.mkgo
     environment:
       SSL_CERT_FILE: /certs/bundle.pem
@@ -68,7 +68,7 @@ services:
       certs: {condition: service_completed_successfully}
     volumes:
       - certs:/certs:ro
-      - ./tests/federation/common/mkgo.yml:/app/.config/default.yml:ro
+      - ./common/mkgo.yml:/app/.config/default.yml:ro
     healthcheck:
       test: ["CMD", "/app/misskey", "-healthcheck", "-config", ".config/default.yml"]
       interval: 3s
@@ -79,7 +79,7 @@ services:
   nginx-mkgo:
     image: nginx:alpine
     volumes:
-      - ./tests/federation/common/nginx-mkgo-ssl.conf:/etc/nginx/nginx.conf:ro
+      - ./common/nginx-mkgo-ssl.conf:/etc/nginx/nginx.conf:ro
       - certs:/certs:ro
     depends_on:
       app-mkgo: {condition: service_healthy}
@@ -122,8 +122,8 @@ services:
       redis-masto: {condition: service_healthy}
     volumes:
       - masto-shared:/shared
-      - ./tests/federation/mastodon/setup.sh:/setup/setup.sh:ro
-      - ./tests/federation/mastodon/create_token.rb:/setup/create_token.rb:ro
+      - ./mastodon/setup.sh:/setup/setup.sh:ro
+      - ./mastodon/create_token.rb:/setup/create_token.rb:ro
     networks: [federation]
 
   masto-web:
@@ -158,7 +158,7 @@ services:
   nginx-masto:
     image: nginx:alpine
     volumes:
-      - ./tests/federation/mastodon/nginx-mastodon-ssl.conf:/etc/nginx/nginx.conf:ro
+      - ./mastodon/nginx-mastodon-ssl.conf:/etc/nginx/nginx.conf:ro
       - certs:/certs:ro
     depends_on:
       masto-web: {condition: service_healthy}
@@ -171,7 +171,7 @@ services:
   test-runner:
     profiles: ["test"]
     build:
-      context: ./tests/federation
+      context: .
       dockerfile: common/Dockerfile
     environment:
       MKGO_URL: https://mkgo
@@ -181,7 +181,7 @@ services:
       MASTODON_TOKEN_FILE: /shared/mastodon_token
       PYTHONDONTWRITEBYTECODE: "1"
     volumes:
-      - ./tests/federation:/tests:ro
+      - .:/tests:ro
       - masto-shared:/shared:ro
     working_dir: /tests/mastodon
     depends_on:

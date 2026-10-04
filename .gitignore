@@ -70,14 +70,14 @@ tests/queue-bench/results/*.md
 CLAUDE.local.md
 __pycache__/
 
-# Cypress runtime artifacts (tests/dropin_frontend/cypress and e2e/cypress 配下)
+# Cypress runtime artifacts (tests/dropin-frontend/cypress and e2e/cypress 配下)
 **/cypress/videos/
 **/cypress/screenshots/
 **/cypress/downloads/
 **/cypress/node_modules/
 **/cypress/.cache/
 # cypress 15 は project dir 配下に `cypress/` を tmp として作ることがある
-tests/dropin_frontend/cypress/cypress/
+tests/dropin-frontend/cypress/cypress/
 
 # drop-in test orchestrator が失敗時に吐くログ (local fallback)
 .dropin-logs/

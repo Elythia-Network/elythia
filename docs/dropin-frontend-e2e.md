@@ -27,7 +27,7 @@ Misskey TS の実フロントエンドが期待する挙動を cypress で固定
 baseline は 3 台とも TS。instance A を mk-go に差し替える overlay がある。
 
 ```
-tests/dropin_frontend/
+tests/dropin-frontend/
   gen-certs.sh                # a / b / c + bundle.pem 用自己署名証明書
   instance_a.yml              # TS 用 default.yml (A)
   instance_a_mk.yml           # A を mk-go に差し替えたときの設定
@@ -52,8 +52,8 @@ tests/dropin_frontend/
   run-frontend-baseline.sh    # baseline orchestrator
   run-frontend-swap-test.sh   # TS-A → mk-A 切替の orchestrator
 
-docker-compose.dropin-frontend.yml     # TS-A / TS-B / TS-C stack
-docker-compose.dropin-frontend.mk.yml  # instance A を mk-go に差し替える overlay
+tests/dropin-frontend/compose.yml     # TS-A / TS-B / TS-C stack
+tests/dropin-frontend/compose.mk.yml  # instance A を mk-go に差し替える overlay
 ```
 
 ## 実行
@@ -64,7 +64,7 @@ make dropin-frontend-baseline
 
 # 手動で stack だけ上げて中に入りたいとき
 make dropin-frontend-up
-docker compose -f docker-compose.dropin-frontend.yml --profile test run --rm cypress-runner
+docker compose -f tests/dropin-frontend/compose.yml --profile test run --rm cypress-runner
 make dropin-frontend-down
 
 # ログ追跡
@@ -94,7 +94,7 @@ remote image ingest (#378) / reaction deliver (#369) の条件整備が必要)�
 
 ## Phase 14-3: mk-go 差し替え overlay + swap orchestrator
 
-`docker-compose.dropin-frontend.mk.yml` overlay + `tests/dropin_frontend/run-frontend-swap-test.sh` orchestrator で、**TS-A backend を mk-go に差し替えた後も cypress spec が pass する** ことを検証する。
+`tests/dropin-frontend/compose.mk.yml` overlay + `tests/dropin-frontend/run-frontend-swap-test.sh` orchestrator で、**TS-A backend を mk-go に差し替えた後も cypress spec が pass する** ことを検証する。
 
 ### 実行
 

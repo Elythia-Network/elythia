@@ -161,6 +161,6 @@ helper 経由が 178 で、`upstream/ui/signin.spec.ts` だけ signin フォー�
 
 - spec は backend-agnostic (= TS / mk-go 両方で同 spec が pass するべき)
 - 失敗 = 非互換 / regression として issue 化する運用
-- pytest 版の drop-in e2e (`tests/dropin/`) / cypress 版 (`tests/dropin_frontend/`) は
+- pytest 版の drop-in e2e (`tests/dropin/`) / cypress 版 (`tests/dropin-frontend/`) は
   別系統として並走する。前者は TS ↔ mk-go の切替、後者は 3 TS インスタンスでの
   frontend 互換を見ており、守備範囲が重ならない

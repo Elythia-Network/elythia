@@ -54,14 +54,8 @@ on:
       - "Makefile"
       - "go.mod"
       - "go.sum"
-      - "docker-compose.federation.misskey.yml"
-      - "docker-compose.federation.mastodon.yml"
-      # drop-in stack の定義そのもの。ここが抜けていると compose を壊す変更で
-      # workflow が**発火せず緑に見える**。frontend 用の
-      # `docker-compose.dropin-frontend*.yml` は別 workflow の管轄なので含めない。
-      - "docker-compose.dropin.yml"
-      - "docker-compose.dropin.mk.yml"
-      - "docker-compose.dropin.fedibird.yml"
+      # drop-in stack の定義 (tests/dropin/compose*.yml) は上の tests/dropin/** に
+      # 含まれる。frontend 用の compose は別 workflow の管轄。
       - ".github/workflows/dropin-e2e.yml"
   workflow_dispatch:
     inputs:
@@ -99,23 +93,23 @@ jobs:
           - name: swap-test
             make: dropin-swap-test
             image: misskey/misskey:2026.10.0
-            compose: -f docker-compose.dropin.yml -f docker-compose.dropin.mk.yml -f docker-compose.dropin.fedibird.yml
+            compose: -f tests/dropin/compose.yml -f tests/dropin/compose.mk.yml -f tests/dropin/compose.fedibird.yml
           - name: mkgo-born
             make: dropin-mkgo-born-test
             image: misskey/misskey:2026.10.0
-            compose: -f docker-compose.dropin.yml -f docker-compose.dropin.mk.yml
+            compose: -f tests/dropin/compose.yml -f tests/dropin/compose.mk.yml
           - name: ed25519-verify
             make: dropin-fedibird-test
             image: misskey/misskey:2026.10.0
-            compose: -f docker-compose.dropin.yml -f docker-compose.dropin.mk.yml -f docker-compose.dropin.fedibird.yml
+            compose: -f tests/dropin/compose.yml -f tests/dropin/compose.mk.yml -f tests/dropin/compose.fedibird.yml
           - name: federation
             make: federation-misskey-e2e
             image: misskey/misskey:2026.10.0
-            compose: -f docker-compose.federation.misskey.yml
+            compose: -f tests/federation/compose.misskey.yml
           - name: federation-mastodon
             make: federation-mastodon-e2e
             image: ghcr.io/mastodon/mastodon:v4.7.2
-            compose: -f docker-compose.federation.mastodon.yml --profile test
+            compose: -f tests/federation/compose.mastodon.yml --profile test
     name: ${{ matrix.name }}
 
     steps:

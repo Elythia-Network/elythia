@@ -57,7 +57,7 @@ dist
 .github
 docs
 tests/dropin
-tests/dropin_frontend
+tests/dropin-frontend
 tests/playwright
 tests/bench
 

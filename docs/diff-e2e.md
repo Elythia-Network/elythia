@@ -21,7 +21,7 @@ upstream と一致するか」(計算結果・正規化・順序・条件分岐�
 ## アーキテクチャ
 
 ```
-docker-compose.diff.yml  (隔離 stack、production UDS には触れない)
+tests/diff/compose.yml   (隔離 stack、production UDS には触れない)
 ├─ mkgo  (build: tests/federation/common/Dockerfile.mkgo, config: tests/diff/mkgo.yml)
 │   ├─ postgres-mk / redis-mk
 ├─ ts    (image: misskey/misskey:2026.10.0, config: tests/diff/ts.yml)
@@ -68,7 +68,7 @@ make diff-down    # stop + volume ごと破棄
 | `tests/diff/test_endpoints.py` | endpoint 別の差分テスト (35 件) |
 | `tests/diff/{mkgo,ts}.yml` | 各 instance の config |
 | `tests/diff/Dockerfile.runner` | pytest + requests の runner image |
-| `docker-compose.diff.yml` | 2 backend + DB/Redis + runner |
+| `tests/diff/compose.yml` | 2 backend + DB/Redis + runner |
 
 ## ignore-list 戦略
 

@@ -26,9 +26,9 @@ tests/dropin/
   test_fedibird_ed25519.py        # Fedibird-like mock との verify
   fedibird_mock/                  # Ed25519 を expose する AP mock
 
-docker-compose.dropin.yml           # TS-A / TS-B stack
-docker-compose.dropin.mk.yml        # instance A を mk-go に差し替える overlay
-docker-compose.dropin.fedibird.yml  # fedibird-like mock の overlay
+tests/dropin/compose.yml            # TS-A / TS-B stack
+tests/dropin/compose.mk.yml         # instance A を mk-go に差し替える overlay
+tests/dropin/compose.fedibird.yml   # fedibird-like mock の overlay
 ```
 
 ### なぜ共通 harness が `tests/federation/common/` にあるのか
@@ -64,7 +64,7 @@ make dropin-logs
 
 ## Phase 13-2: mk-go 差し替え (drop-in swap)
 
-`docker-compose.dropin.mk.yml` overlay と bash orchestrator
+`tests/dropin/compose.mk.yml` overlay と bash orchestrator
 (`tests/dropin/run-swap-test.sh`) で「TS-A backend を mk-go に差し替えても DB /
 Redis 上の state がそのまま引き継がれる」ことを e2e で検証する。
 

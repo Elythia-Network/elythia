@@ -16,7 +16,7 @@
 // data-cy-* selector 経由で specs/ui/*.spec.ts (signin / post_note /
 // content_pages_extra 等) に分離した。なお drop-in 切替シナリオ (= TS から
 // mk-go へ DB を引き継いで切替) を視点にした視覚回帰は cypress
-// (`tests/dropin_frontend/`) 側で別途 cover している。
+// (`tests/dropin-frontend/`) 側で別途 cover している。
 
 import { expect, test } from '@playwright/test';
 import { isTsBackend } from '../../../../fixtures/backend';

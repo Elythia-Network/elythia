@@ -112,11 +112,12 @@ playwright-check: ## Playwright を作り直して実行 (クリーン DB 前提
 # 検証用 compose ファイルだけを列挙する。
 E2E_COMPOSE_FILES = \
 	docker-compose.image.yml \
-	docker-compose.diff.yml \
-	docker-compose.playwright.yml \
-	docker-compose.dropin.yml \
-	docker-compose.dropin-frontend.yml \
-	docker-compose.federation.misskey.yml \
+	tests/diff/compose.yml \
+	tests/playwright/compose.yml \
+	tests/dropin/compose.yml \
+	tests/dropin-frontend/compose.yml \
+	tests/federation/compose.misskey.yml \
+	tests/federation/compose.mastodon.yml \
 	tests/bench/docker-compose.bench.yml \
 	tests/queue-bench/docker-compose.queue-bench.yml
 
@@ -526,8 +527,8 @@ image-build: ## bundled image を手元でビルドする (publish 前の確認�
 
 
 # Federation tests ― 本家 Misskey と実際に立ち上げて連合動作を検証する。
-# 各ターゲット (misskey / mastodon / pleroma / ...) ごとに docker-compose.federation.<target>.yml を用意する。
-FEDERATION_MISSKEY_COMPOSE=docker-compose.federation.misskey.yml
+# 各ターゲット (misskey / mastodon / pleroma / ...) ごとに tests/federation/compose.<target>.yml を用意する。
+FEDERATION_MISSKEY_COMPOSE=tests/federation/compose.misskey.yml
 
 ##@ e2e: 連合
 federation-misskey-build: ## 連合テスト用 Misskey イメージをビルド
@@ -551,7 +552,7 @@ federation-misskey-logs: ## 連合テストスタックのログを表示
 	docker compose -f $(FEDERATION_MISSKEY_COMPOSE) logs -f
 
 # 本物の Mastodon を相手にした実連合 e2e (#3234)。引用の承認 (FEP-044f) を見る。
-FEDERATION_MASTODON_COMPOSE=docker-compose.federation.mastodon.yml
+FEDERATION_MASTODON_COMPOSE=tests/federation/compose.mastodon.yml
 
 federation-mastodon-e2e: ## Mastodon との連合テストを起動から撤去まで通しで実行
 	./tests/federation/run-mastodon-test.sh
@@ -562,7 +563,7 @@ federation-mastodon-down: ## Mastodon との連合テストスタックを撤去
 # Drop-in e2e (#365) ― Misskey TS 2 インスタンス (A, B) を立ち上げて
 # 連合基盤を検証する。Phase 13-1 では TS ↔ TS の smoke test のみ。
 # Phase 13-2 以降で mk 差し替え overlay を追加する予定。
-DROPIN_COMPOSE=docker-compose.dropin.yml
+DROPIN_COMPOSE=tests/dropin/compose.yml
 
 ##@ e2e: drop-in 互換
 dropin-up: ## drop-in e2e スタック (TS 2 インスタンス) を起動
@@ -580,7 +581,7 @@ dropin-logs: ## drop-in e2e スタックのログを表示
 # Drop-in mk overlay (#367) — instance A の backend を mk-go に差し替えた
 # 状態で TS-A 用 stack を起動する。連合先 (instance B) は TS のままなので
 # mk ↔ TS federation も同時に検証できる。
-DROPIN_MK_OVERLAY=docker-compose.dropin.mk.yml
+DROPIN_MK_OVERLAY=tests/dropin/compose.mk.yml
 
 dropin-mk-up: ## drop-in e2e に mk-go overlay を適用して起動
 	docker compose -f $(DROPIN_COMPOSE) -f $(DROPIN_MK_OVERLAY) up -d --build
@@ -620,7 +621,7 @@ dropin-fedibird-test: ## Fedibird-like AP mock との Ed25519 双方向 verify
 # Drop-in frontend e2e (#380 / Phase 14) ― 3 Misskey TS インスタンス上で
 # cypress を回して、共有 TS フロントエンドから観測可能なアクティビティの
 # 整合性を検証する基盤。Phase 14-1 は baseline (all TS) のみ。
-DROPIN_FRONTEND_COMPOSE=docker-compose.dropin-frontend.yml
+DROPIN_FRONTEND_COMPOSE=tests/dropin-frontend/compose.yml
 
 dropin-frontend-up: ## drop-in frontend e2e スタックを起動
 	docker compose -f $(DROPIN_FRONTEND_COMPOSE) up -d
@@ -634,12 +635,12 @@ dropin-frontend-logs: ## drop-in frontend e2e のログを表示
 # baseline: all TS な状態で cypress spec が全 pass することを確認する
 # (Phase 14-1 #381)。
 dropin-frontend-baseline: ## 3 TS インスタンス + cypress で baseline spec を実行
-	./tests/dropin_frontend/run-frontend-baseline.sh
+	./tests/dropin-frontend/run-frontend-baseline.sh
 
 # Phase 14-3 (#394): TS-A → mk-A 切替後も cypress spec が引き続き pass する
 # ことを確認する swap test orchestrator。baseline 実行 → TS-A 停止 → mk-A
 # 起動 → swap モードで cypress 再実行、を bash で順次制御する。
-DROPIN_FRONTEND_MK_OVERLAY=docker-compose.dropin-frontend.mk.yml
+DROPIN_FRONTEND_MK_OVERLAY=tests/dropin-frontend/compose.mk.yml
 
 # mk-go overlay を直接立ち上げる (手動デバッグ用)。DB は clean からだが、
 # Phase 14-3 の本 test は `dropin-frontend-swap-test` を使う。
@@ -650,7 +651,7 @@ dropin-frontend-mk-down: ## drop-in frontend e2e の mk overlay を撤去
 	docker compose -f $(DROPIN_FRONTEND_COMPOSE) -f $(DROPIN_FRONTEND_MK_OVERLAY) --profile test down -v
 
 dropin-frontend-swap-test: ## TS-A → mk-A 切替まで含む frontend e2e
-	./tests/dropin_frontend/run-frontend-swap-test.sh
+	./tests/dropin-frontend/run-frontend-swap-test.sh
 
 # 本家フロントエンドの取得とビルド。
 #
@@ -931,7 +932,7 @@ queue-bench-autoscale-logs: ## autoscale ベンチのログを表示
 # upstream Misskey TS 互換挙動を期待値に書いた spec を mk-go backend に
 # 対して走らせ、drop-in 互換 regression を検出する。Phase 1 PR-1 では
 # 基盤 + smoke 1 spec のみ。後続 PR で spec 拡充 + CI 統合する。
-PLAYWRIGHT_COMPOSE=docker-compose.playwright.yml
+PLAYWRIGHT_COMPOSE=tests/playwright/compose.yml
 
 ##@ e2e: Playwright
 playwright-up: ## Playwright スタック (mk-go backend) を起動
@@ -962,7 +963,7 @@ playwright-logs: ## Playwright スタックのログを表示
 # 同 spec を upstream Misskey TS image (= 真の互換挙動の baseline) に対しても
 # 走らせる。両方で pass = drop-in 互換が確認される、片方のみ pass = drift /
 # spec 誤りとして調査対象。
-PLAYWRIGHT_TS_OVERLAY=docker-compose.playwright.ts.yml
+PLAYWRIGHT_TS_OVERLAY=tests/playwright/compose.ts.yml
 
 playwright-ts-up: ## Playwright スタック (Misskey TS backend) を起動
 	docker compose -f $(PLAYWRIGHT_COMPOSE) -f $(PLAYWRIGHT_TS_OVERLAY) up -d --build
@@ -982,7 +983,7 @@ playwright-ts-down: ## Playwright TS スタックを撤去
 # 並列に立て、同一 endpoint のレスポンスを diff して entitycompat
 # golden gate がカバーしない値レベル乖離を検出する。詳細は docs/diff-e2e.md。
 # 隔離 stack (own network/volumes)、production UDS には触れない。
-DIFF_COMPOSE=docker-compose.diff.yml
+DIFF_COMPOSE=tests/diff/compose.yml
 
 ##@ e2e: 差分比較ハーネス
 diff-up: ## 差分比較ハーネスのスタックを起動

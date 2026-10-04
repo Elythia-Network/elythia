@@ -16,9 +16,9 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$REPO_ROOT"
 
-BASE=docker-compose.dropin.yml
-MK_OVERLAY=docker-compose.dropin.mk.yml
-FEDIBIRD_OVERLAY=docker-compose.dropin.fedibird.yml
+BASE=tests/dropin/compose.yml
+MK_OVERLAY=tests/dropin/compose.mk.yml
+FEDIBIRD_OVERLAY=tests/dropin/compose.fedibird.yml
 
 cleanup() {
   echo "===> cleanup"

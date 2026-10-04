@@ -8,15 +8,15 @@
 #   4. cypress で swap spec を実行 (DB-A / Redis-A 共有のまま)
 #   5. 両 run の結果を比較
 #
-# cypress runner は docker-compose.dropin-frontend.yml の `--profile test`
+# cypress runner は tests/dropin-frontend/compose.yml の `--profile test`
 # service。CYPRESS_MODE env で spec 側から mode を識別する。
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$REPO_ROOT"
 
-BASE=docker-compose.dropin-frontend.yml
-OVERLAY=docker-compose.dropin-frontend.mk.yml
+BASE=tests/dropin-frontend/compose.yml
+OVERLAY=tests/dropin-frontend/compose.mk.yml
 
 cleanup() {
   echo "===> cleanup"

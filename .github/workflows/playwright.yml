@@ -41,7 +41,6 @@ on:
       - "migration/**"
       - "tests/playwright/**"
       - "third_party/misskey"
-      - "docker-compose.playwright*.yml"
       - "Makefile"
       - "go.mod"
       - "go.sum"
@@ -88,7 +87,7 @@ jobs:
             "up_target": "playwright-up",
             "test_target": "playwright-test",
             "down_target": "playwright-down",
-            "compose_args": "-f docker-compose.playwright.yml",
+            "compose_args": "-f tests/playwright/compose.yml",
             "prepull": "",
             "timeout_minutes": 25,
             "continue_on_error": false
@@ -98,7 +97,7 @@ jobs:
           # run step は step 終了で shell が exit するため継続が保証されない。
           # foreground で待ち、compose up 内の同 image pull を daemon cache
           # hit (0s) にする方が確実。version は
-          # docker-compose.playwright.ts.yml と sync させること。
+          # tests/playwright/compose.ts.yml と sync させること。
           #
           # continue_on_error: TS backend は upstream 追従時に手動で回して
           # 差分を洗い出すための道具なので、赤でも他 job を巻き込まない。
@@ -108,7 +107,7 @@ jobs:
             "up_target": "playwright-ts-up",
             "test_target": "playwright-ts-test",
             "down_target": "playwright-ts-down",
-            "compose_args": "-f docker-compose.playwright.yml -f docker-compose.playwright.ts.yml",
+            "compose_args": "-f tests/playwright/compose.yml -f tests/playwright/compose.ts.yml",
             "prepull": "docker pull misskey/misskey:2026.10.0",
             "timeout_minutes": 45,
             "continue_on_error": true

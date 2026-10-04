@@ -20,7 +20,7 @@ services:
       sh -c "apk add --no-cache openssl >/dev/null 2>&1 && /gen-certs.sh"
     volumes:
       - certs:/certs
-      - ./tests/dropin/gen-certs.sh:/gen-certs.sh:ro
+      - ./gen-certs.sh:/gen-certs.sh:ro
 
   # ── Instance A (Misskey TS) ────────────────────────────────
   postgres-a:
@@ -57,7 +57,7 @@ services:
       redis-a:
         condition: service_healthy
     volumes:
-      - ./tests/dropin/instance_a.yml:/misskey/.config/default.yml:ro
+      - ./instance_a.yml:/misskey/.config/default.yml:ro
     # POST /api/ping が pong を返すまでを healthy と判定する。Misskey TS は
     # 起動に 20-60s かかるので start_period に余裕を持たせる。
     healthcheck:
@@ -72,7 +72,7 @@ services:
   nginx-a:
     image: nginx:alpine
     volumes:
-      - ./tests/dropin/nginx_a.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx_a.conf:/etc/nginx/nginx.conf:ro
       - certs:/certs:ro
     depends_on:
       # service_healthy にすることで Misskey 初期化中に nginx が 502 を
@@ -123,7 +123,7 @@ services:
       redis-b:
         condition: service_healthy
     volumes:
-      - ./tests/dropin/instance_b.yml:/misskey/.config/default.yml:ro
+      - ./instance_b.yml:/misskey/.config/default.yml:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS -X POST -H 'Content-Type: application/json' -d '{}' http://localhost:3000/api/ping | grep -q pong"]
       interval: 5s
@@ -136,7 +136,7 @@ services:
   nginx-b:
     image: nginx:alpine
     volumes:
-      - ./tests/dropin/nginx_b.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx_b.conf:/etc/nginx/nginx.conf:ro
       - certs:/certs:ro
     depends_on:
       app-b:
@@ -154,7 +154,7 @@ services:
     # 既存の tests/federation/common/Dockerfile は pytest + httpx + 共通
     # conftest_base をインストールする。そのまま流用する。
     build:
-      context: ./tests/federation
+      context: ../federation
       dockerfile: common/Dockerfile
     environment:
       A_URL: https://a
@@ -166,8 +166,8 @@ services:
       # drop-in テストはルートとして tests/dropin を参照するが、shared
       # `conftest_base.py` は tests/federation/common/ にあるので両方を
       # マウントする (tests/dropin/conftest.py が sys.path に追加する)。
-      - ./tests/dropin:/tests/dropin:ro
-      - ./tests/federation/common:/tests/federation_common:ro
+      - .:/tests/dropin:ro
+      - ../federation/common:/tests/federation_common:ro
     working_dir: /tests/dropin
     depends_on:
       nginx-a:

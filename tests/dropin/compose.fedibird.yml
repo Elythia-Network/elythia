@@ -1,13 +1,13 @@
 # Drop-in fedibird overlay (#1083).
 #
-# 既存 dropin stack (docker-compose.dropin.yml + docker-compose.dropin.mk.yml)
+# 既存 dropin stack (tests/dropin/compose.yml + compose.mk.yml)
 # に Fedibird-like ActivityPub mock を追加する overlay。
 #
-# Usage:
+# Usage (リポジトリ直下から):
 #   docker compose \
-#     -f docker-compose.dropin.yml \
-#     -f docker-compose.dropin.mk.yml \
-#     -f docker-compose.dropin.fedibird.yml up -d --build
+#     -f tests/dropin/compose.yml \
+#     -f tests/dropin/compose.mk.yml \
+#     -f tests/dropin/compose.fedibird.yml up -d --build
 #
 # orchestrator: tests/dropin/run-fedibird-test.sh
 
@@ -16,7 +16,7 @@ name: mk-dropin
 services:
   fedibird-mock:
     build:
-      context: ./tests/dropin/fedibird_mock
+      context: ./fedibird_mock
     environment:
       FEDIBIRD_DOMAIN: fedibird-mock.test
       # gen-certs.sh はドメイン名でファイルを作る (fedibird-mock.test.crt)。
