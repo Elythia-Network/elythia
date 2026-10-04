@@ -67,9 +67,22 @@ overrides:
   undici@^7: 7.29.1
   undici@^6: 6.28.1
   '@tabler/icons-webfont>sharp': '-'
-  # exifreader が指す 0.9.10 に high の advisory (GHSA-965w-775f-mr7g など) があるため、
-  # 修正版へ上げる (mk-go #3379)。本家が追従したら外す。
+  # 以下は、lock が指す版に high の advisory があるため修正版へ上げる (mk-go #3379)。
+  # どれも開発・ビルド・テストの道具の推移的な依存で、配る bundle には入らない。
+  # 本家が追従したら外す。braces (<=3.0.3) は修正版が無く、http-cache-semantics は
+  # 修正版 4.3.0 が minimumReleaseAge に満たないので、この 2 つは残る。
   '@xmldom/xmldom@0.9.10': 0.9.12
+  axios@<1.20.0: 1.20.0
+  brace-expansion@<1.1.20: 1.1.21
+  brace-expansion@>=2.0.0 <2.1.6: 2.1.7
+  brace-expansion@>=4.0.0 <5.0.11: 5.0.12
+  fast-uri@<3.1.7: 3.1.8
+  fastify@<5.12.2: 5.12.5
+  find-my-way@<9.7.0: 9.9.0
+  immutable@<5.1.8: 5.1.9
+  joi@<18.2.6: 18.2.9
+  js-cookie@<3.0.7: 3.0.8
+  js-yaml@>=4.0.0 <4.3.2: 4.3.2
 engineStrict: true
 saveExact: true
 shellEmulator: true
