@@ -1103,9 +1103,22 @@ upstream-e2e-migrate: ## e2e 用 DB にマイグレーションを適用
 # を実行中に消す。シャードごとに DB を分けるのが前提。
 VITEST_ARGS ?=
 
+# **mk-go が配る静的なファイルも本家の取得先から取る** (#3378)。favicon や絵文字の
+# 画像 (`test/e2e/fetch-resource.ts` が見る) は、既定では submodule の
+# packages/backend/assets と、そこへ pnpm install した emoji-assets から配る。この
+# e2e は submodule を checkout しない (CI) ので、本家の取得先 (upstream-e2e-deps が
+# pnpm install 済み) を環境変数で指す。値は mk-go の cwd (MKGO_CWD = リポジトリ
+# 直下) から解決される。entry.ts は環境変数をそのまま mk-go へ渡す。
+UPSTREAM_E2E_ASSETS_ENV = \
+	MISSKEY_STATIC_DIR=$(UPSTREAM_E2E_BACKEND)/assets \
+	MISSKEY_REPO_ASSETS_DIR=$(UPSTREAM_E2E_MISSKEY)/assets \
+	MISSKEY_TWEMOJI_DIR=$(UPSTREAM_E2E_BACKEND)/node_modules/@misskey-dev/emoji-assets/built/twemoji \
+	MISSKEY_FLUENT_EMOJI_DIR=$(UPSTREAM_E2E_BACKEND)/node_modules/@misskey-dev/emoji-assets/built/fluent-emoji
+
 upstream-e2e-test: build ## 本家 backend e2e を mk-go に対して実行 (VITEST_ARGS で引数追加)
 	cp -R $(UPSTREAM_E2E_HARNESS)/. $(UPSTREAM_E2E_BACKEND)/
 	cd $(UPSTREAM_E2E_BACKEND) && \
+		$(UPSTREAM_E2E_ASSETS_ENV) \
 		MKGO_BIN=$(CURDIR)/built/misskey \
 		MKGO_CONFIG=$(CURDIR)/$(UPSTREAM_E2E_CONFIG) \
 		MKGO_CWD=$(CURDIR) \
