@@ -16,7 +16,7 @@ Orchestrator (`run.sh`) wraps this to iterate across 3 scenarios
 (fixed16, fixed64, auto) by `compose down -v` + re-up with the right
 config mount between each invocation, ensuring clean per-scenario state.
 
-Reuses the seeding pattern from tests/queue-bench/common/seed.py
+Reuses the seeding pattern from tests/bench/queue/common/seed.py
 (simplified to a single stack).
 """
 from __future__ import annotations

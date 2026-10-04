@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Markdown comparison report generator (#1126 / #1120 tracker).
 
-Reads tests/queue-bench-autoscale/results/{fixed16,fixed64,auto}.json
+Reads tests/bench/queue-autoscale/results/{fixed16,fixed64,auto}.json
 and writes results/report.md as a 3-way comparison table per ADR §7.3.
 """
 from __future__ import annotations
@@ -67,7 +67,7 @@ def main() -> None:
         "",
         "- Single mkq stack on localhost (1 postgres + 1 redis + 1 mk-go app)",
         f"- Burst: {notes} notes × {followers} followers = **{expected} deliver jobs / scenario**",
-        f"- Driver: tests/queue-bench-autoscale/driver/bench-driver.py",
+        f"- Driver: tests/bench/queue-autoscale/driver/bench-driver.py",
         "- Per scenario: `compose down -v` between runs for clean DB / Redis state",
         "",
         "## Scenarios",

@@ -127,8 +127,8 @@ def render_profiles_section(profiles: list[Path], profiles_dir: str | None) -> l
         "解析例:",
         "",
         "```sh",
-        f"go tool pprof -http :8080 tests/bench/results/{rel_dir}/cpu-users-show.pb.gz",
-        f"go tool pprof -http :8080 tests/bench/results/{rel_dir}/heap-post.pb.gz",
+        f"go tool pprof -http :8080 tests/bench/http/results/{rel_dir}/cpu-users-show.pb.gz",
+        f"go tool pprof -http :8080 tests/bench/http/results/{rel_dir}/heap-post.pb.gz",
         "```",
     ])
     return lines

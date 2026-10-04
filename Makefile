@@ -118,8 +118,8 @@ E2E_COMPOSE_FILES = \
 	tests/dropin-frontend/compose.yml \
 	tests/federation/compose.misskey.yml \
 	tests/federation/compose.mastodon.yml \
-	tests/bench/docker-compose.bench.yml \
-	tests/queue-bench/docker-compose.queue-bench.yml
+	tests/bench/http/compose.yml \
+	tests/bench/queue/compose.yml
 
 # 使われている profile を全部渡す。**`down` は有効な profile の container しか
 # 消さない**ので、付けないと seed / runner 系が残る。存在しない profile 名を
@@ -789,8 +789,8 @@ uds-ps: | $(UDS_COMPOSE) ## UDS スタックのコンテナ一覧
 
 # Benchmark ― mk-go vs 本家 Misskey のストレステスト比較。
 # k6 (Docker) で同一エンドポイントに負荷をかけ、レイテンシ・スループットを比較する。
-# 結果は tests/bench/results/report.md に出力される。
-BENCH_COMPOSE=tests/bench/docker-compose.bench.yml
+# 結果は tests/bench/http/results/report.md に出力される。
+BENCH_COMPOSE=tests/bench/http/compose.yml
 
 ##@ ベンチマーク
 bench-up: ## k6 ベンチのスタックを起動
@@ -813,7 +813,7 @@ bench-logs: ## k6 ベンチのログを表示
 
 # Queue bench (#563): deliver/inbox throughput comparison between
 # Misskey TS (BullMQ) and mk-go (mkq). asynq driver は #2985 で削除。
-QUEUE_BENCH_COMPOSE=tests/queue-bench/docker-compose.queue-bench.yml
+QUEUE_BENCH_COMPOSE=tests/bench/queue/compose.yml
 
 queue-bench-up: ## queue-bench スタックを起動
 	docker compose -f $(QUEUE_BENCH_COMPOSE) up -d --build
@@ -915,8 +915,8 @@ queue-bench-logs: ## queue-bench のログを表示
 # 3 scenario (fixed16 / fixed64 / auto) を同一 mkq stack で逐次実行し、
 # drain time / Redis client count を比較する。queue-bench との同居・
 # 並列実行は想定しない (port は publish していないが volume / network 名は
-# 別)。詳細: tests/queue-bench-autoscale/README.md (or docs/queue-bench.md)
-AUTOSCALE_BENCH_DIR=tests/queue-bench-autoscale
+# 別)。詳細: tests/bench/queue-autoscale/README.md (or docs/queue-bench.md)
+AUTOSCALE_BENCH_DIR=tests/bench/queue-autoscale
 
 queue-bench-autoscale-run: ## worker 数 fixed16 / fixed64 / auto を比較実行
 	cd $(AUTOSCALE_BENCH_DIR) && ./run.sh

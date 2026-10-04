@@ -13,8 +13,8 @@ services:
 
   blackhole:
     build:
-      context: ../..
-      dockerfile: tests/queue-bench/blackhole/Dockerfile
+      context: ../../..
+      dockerfile: tests/bench/queue/blackhole/Dockerfile
     command: ["-addr", ":80"]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost/healthz"]
@@ -25,8 +25,8 @@ services:
 
   faker:
     build:
-      context: ../..
-      dockerfile: tests/queue-bench/faker/Dockerfile
+      context: ../../..
+      dockerfile: tests/bench/queue/faker/Dockerfile
     command: ["-host", "faker"]
     environment:
       FAKER_HOST: faker
@@ -68,7 +68,7 @@ services:
 
   app-mkq:
     build:
-      context: ../..
+      context: ../../..
       dockerfile: tests/federation/common/Dockerfile.mkgo
     environment:
       SSL_CERT_FILE: /certs/bundle.pem

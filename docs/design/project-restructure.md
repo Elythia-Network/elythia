@@ -72,7 +72,7 @@
 - `test/` (Go の e2e) を `tests/` へまとめる
 - 検証用の compose を各スイートの中へ移し、全てに `name:` を付ける (本番 project `mk` への合流を防ぐ)
 - ベンチを `tests/bench/` の下にまとめ、名前の揺れを揃える
-- リポジトリ直下には運営者向けの compose (`docker-compose.yml` / `docker-compose.image.yml` / `compose.uds.yaml.example`) だけを残し、`docker-compose.yml` にも `name:` を付ける
+- リポジトリ直下には運営者向けの compose (`docker-compose.yml` / `docker-compose.image.yml` / `compose.uds.yaml.example`) だけを残す。`docker-compose.yml` への `name:` は、named volume の名前が変わり既存の運営者が DB の volume を見失うので、P6 で移行手順と一緒に行う (#3373)
 
 ### R4. プラグインまわりの名前を Elythia に揃える
 
@@ -245,16 +245,21 @@ tests/
 ├── diff/             ← compose.yml
 ├── dropin/           ← compose.yml / compose.mk.yml / compose.fedibird.yml
 ├── dropin-frontend/  ← dropin_frontend を改名、compose をここへ
-├── federation/       ← compose.misskey.yml
-├── upstream-e2e/
+├── federation/       ← compose.misskey.yml / compose.mastodon.yml
+├── upstream-e2e/     ← compose.yml
 ├── plugin-doc/
 └── bench/
-    ├── http/ (bench)  queue/ (queue-bench)  queue-autoscale/  resource/
+    ├── http/ (bench、compose.yml)  queue/ (queue-bench、compose.yml)  queue-autoscale/  resource/
 ```
 
-- CI のカバレッジ閾値は ImportPath の `/e2e` の部分一致なので、`tests/e2e` / `tests/e2e-federation` でも 0% 例外が続く (確認は P2 で)
-- compose の相対パスはファイルの置き場所が基準になるので、移すと build context と bind mount がずれる。`--project-directory` で基準をリポジトリ直下に固定するか、パスを書き換えるかを P2 で決める
-- overlay にも `name:` を付けるか、Makefile からしか起動しない前提にするかも P2 で決める
+ファイル名は 2 つだけ据え置いた。`queue-autoscale/docker-compose.yml` は `cd` して `-f` 無しで起動し、同じ場所に `docker-compose.override.yml` を書き出すため。`resource/compose.ts.yaml` は単体で使う TS 側の構成で、呼び出し側の名前を変える利点が無いため。
+
+P2 (#3373) で上のとおりにした (2026-10-04)。
+
+- CI のカバレッジ閾値は ImportPath の `/e2e` の部分一致なので、`tests/e2e` / `tests/e2e-federation` でも 0% 例外が続く。shard の割り当ても変わらないことを確かめた
+- **compose の相対パスは書き換えた** (`--project-directory` で基準をリポジトリ直下に固定する案は採らない)。`tests/` の下の既存の compose と書き方が揃い、`--project-directory` の付け忘れ (bind mount が空のディレクトリとして作られる) と、`name:` の無いファイルの project 名が `mk` に戻る危険を避けるため。移す前と後で `docker compose config` の解決結果が同じことを、使っている組み合わせごとに確かめた
+- **overlay にもベースと同じ `name:` を付けた**
+- これらは `make compose-check` のゲート (`internal/entitycompat/test_compose_paths_test.go`) が固定する: `tests/` の下の compose が `name:` を持ち `mk` でない、overlay の `name:` がベースと同じ、独立した compose 同士で重ならない、相対パスが git で追跡されたものを指す、直下の compose が運営者向けの 3 つだけ
 
 ### D7. 改名
 
@@ -322,12 +327,12 @@ P4 (bind mount の元が `third_party/misskey/built` から `frontend/built` に
 |---|---|---|
 | P1 | 追従方式の試算と、取り込む範囲の確定 (#3370、2026-10-04 に完了) | しない |
 | P1b | 復路の保証をやめる (D9、#3191)。宣言は P6 の版の CHANGELOG | しない |
-| P2 | テスト関連の配置の整理 (D6) | しない |
+| P2 | テスト関連の配置の整理 (D6。#3373、2026-10-04 に完了) | しない |
 | P3 | 本家の参照を `.cache/misskey` へ分離 (D2)。この時点では frontend はまだ submodule のまま。fork の `packages/backend` にある、本家 backend e2e を mk-go へ向けて走らせる 3 ファイル (`test-server-mkgo/entry.ts` など) を `tests/` へ移す | しない |
 | P4 | frontend の取り込み (D1 / D3 / D4 / D5)、submodule と fork の廃止。frontend の CI の required 化とライセンスの表示 (R8 / D12)、本番の切り替え (D13) を含む。あわせて、`@misskey-dev/emoji-assets` を frontend の依存に持ち直す (今は backend の `node_modules` から取っている)、Node.js の版を本家の `Dockerfile` でなく `.node-version` から読む、fork の assets image (`Dockerfile.assets` と publish の workflow。`Dockerfile.bundled` が使う) を本体の workflow でのビルドに置き換える (R2)、`misskey-js` の型の生成 (`build-misskey-js-with-types`) が使う `api.json` の作り方を決める (`api.json` は本家のソースに無く、本家 backend をビルドして `generate-api-json` で作る生成物。`.cache/misskey` で本家 backend をビルドするか、本体の API から作るか) | しない |
 | P5 | 正式な名前 (**決定: Elythia**) と、プラグインの呼び名 (**決定: 据え置き**) の決定。どちらも 2026-09-30 | — |
 | P5b | リポジトリの移管 (D10)。コードの名前は変えず、旧 URL からの転送で動くことを確かめる | する |
-| P6 | 改名 (D7) と実行バイナリのサブコマンド化 (R7 / D11)。2.0.0 として出す (R6) | する |
+| P6 | 改名 (D7) と実行バイナリのサブコマンド化 (R7 / D11)。2.0.0 として出す (R6)。`docker-compose.yml` に `name:` を付ける (R3。named volume の移行手順と一緒に) | する |
 | P6b | プラグインまわりの名前の移行 (D8)。連合に出る nodeinfo の宣言を含むので P6 とは別 PR にするが、同じ版で出す | する |
 | P7 | ドキュメント・CLAUDE.md の整理。`docs/divergence.md` の分割 (R8) を含む | する |
 

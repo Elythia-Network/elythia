@@ -10,7 +10,7 @@ name: Queue-bench smoke (nightly)
 #   失敗 mode の両方を catch する (= issue #1163 history table の Run 2/3
 #   で観測された後者の manifestation もカバー)。実際の load 計測は
 #   手動 / 別タスクで継続。
-# - inbound 結果 (`tests/queue-bench/results/inbound.json`) を assert step
+# - inbound 結果 (`tests/bench/queue/results/inbound.json`) を assert step
 #   でパースして「全 stack が ok==sent」を verify。partial ok=0 だと
 #   driver_inbound 自体は exit 0 で抜けるので、assertion なしでは regression
 #   を検知できない。
@@ -139,7 +139,7 @@ jobs:
         run: |
           python3 << 'PYEOF'
           import json, sys
-          with open("tests/queue-bench/results/inbound.json") as f:
+          with open("tests/bench/queue/results/inbound.json") as f:
               d = json.load(f)
           stats = d["send"]["stats"]
           # **1 件も測っていないなら落とす (#2917)。** 空の stats で
@@ -189,9 +189,9 @@ jobs:
         if: failure()
         run: |
           mkdir -p /tmp/queue-bench-logs
-          docker compose -f tests/queue-bench/docker-compose.queue-bench.yml logs \
+          docker compose -f tests/bench/queue/compose.yml logs \
             > /tmp/queue-bench-logs/compose.log 2>&1 || true
-          docker compose -f tests/queue-bench/docker-compose.queue-bench.yml ps \
+          docker compose -f tests/bench/queue/compose.yml ps \
             > /tmp/queue-bench-logs/ps.log 2>&1 || true
 
       - name: Upload logs artifact on failure

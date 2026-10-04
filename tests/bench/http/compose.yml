@@ -10,7 +10,7 @@ services:
       sh -c "apk add --no-cache openssl >/dev/null 2>&1 && /gen-certs.sh"
     volumes:
       - certs:/certs
-      - ../federation/common/gen-certs.sh:/gen-certs.sh:ro
+      - ../../federation/common/gen-certs.sh:/gen-certs.sh:ro
 
   # ── mk-go Stack ────────────────────────────────────────────
   postgres-mkgo:
@@ -47,7 +47,7 @@ services:
 
   app-mkgo:
     build:
-      context: ../..
+      context: ../../..
       dockerfile: tests/federation/common/Dockerfile.mkgo
     environment:
       SSL_CERT_FILE: /certs/bundle.pem
@@ -68,7 +68,7 @@ services:
       certs: { condition: service_completed_successfully }
     volumes:
       - certs:/certs:ro
-      - ../federation/common/mkgo.yml:/app/.config/default.yml:ro
+      - ../../federation/common/mkgo.yml:/app/.config/default.yml:ro
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/healthz"]
       interval: 3s
@@ -84,7 +84,7 @@ services:
   nginx-mkgo:
     image: nginx:alpine
     volumes:
-      - ../federation/common/nginx-mkgo-ssl.conf:/etc/nginx/nginx.conf:ro
+      - ../../federation/common/nginx-mkgo-ssl.conf:/etc/nginx/nginx.conf:ro
       - certs:/certs:ro
     depends_on:
       app-mkgo: { condition: service_healthy }
@@ -146,7 +146,7 @@ services:
   nginx-mk:
     image: nginx:alpine
     volumes:
-      - ../federation/misskey/nginx-misskey-ssl.conf:/etc/nginx/nginx.conf:ro
+      - ../../federation/misskey/nginx-misskey-ssl.conf:/etc/nginx/nginx.conf:ro
       - certs:/certs:ro
     depends_on:
       misskey-app:

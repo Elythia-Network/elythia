@@ -362,15 +362,15 @@ mk-go と Misskey TS を並べて比較するハーネスは、**比較対象の
 | `.github/workflows/diff-e2e.yml` | diff ハーネスの pre-pull。**compose 側だけ上げて忘れやすい** (#2877 で実際に残した) |
 | `tests/dropin/compose.yml` / `tests/dropin-frontend/compose.yml` / `tests/federation/compose.misskey.yml` | drop-in / 実連合の TS インスタンス |
 | `.github/workflows/dropin-e2e.yml` / `dropin-frontend-e2e.yml` | 上記の pre-pull と matrix |
-| `tests/bench/` / `tests/queue-bench/` の compose | 性能比較の対象 |
+| `tests/bench/http/` / `tests/bench/queue/` の compose | 性能比較の対象 |
 | `Dockerfile.bundled` の `MISSKEY_ASSETS_IMAGE` | **配る image に焼く frontend**。これだけは TS image ではなく fork の assets image (`ghcr.io/shiroha-a/misskey-ts-assets:<tag>-mk.N`) で、**submodule のタグと 1:1 で対応させる**。ずれると 2026.9.0 の backend に古い frontend を載せた image を配ることになる。`make submodulepin-check` が `docs/divergence.md` の pin 行と突き合わせる (#3011) |
 
 **`Dockerfile.bundled` は表に無かったせいで実際に 23 世代遅れた** (#2877 の時点で
 `2026.7.0-mk.10`。数え方は fork の `*-mk.*` タグを `2026.7.0-mk.10` より後で数えた値で、
 `mk.11`〜`mk.22` の 12 個に加えて `mk.22a`〜`mk.22j` の 10 個と `2026.9.0-mk.0` を含む)。
 **古い tag でも image は問題なくビルドできる**ので、腐っても CI は落ちない —
-落ちるのは配った先だけ。`tests/bench/` も同じ性質で、こちらはどの workflow からも
-参照されていない (`tests/queue-bench/` は nightly の `queue-bench-smoke.yml` が引く)。
+落ちるのは配った先だけ。`tests/bench/http/` も同じ性質で、こちらはどの workflow からも
+参照されていない (`tests/bench/queue/` は nightly の `queue-bench-smoke.yml` が引く)。
 assets image は fork 側の `Publish frontend assets image` workflow が `*-mk.*` タグで
 発火して publish するので、**submodule のタグを push した後**に上げること
 (`gh run list --repo shiroha-a/misskey-ts` で success を確認できる)。

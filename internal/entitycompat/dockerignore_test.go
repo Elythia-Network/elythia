@@ -57,6 +57,8 @@ var keptInBuildContext = map[string]string{
 	"third_party/misskey/built/meta.json":                     "SPA の成果物。assets-local stage が built ごと COPY する",
 	"third_party/misskey/packages/backend/assets/favicon.ico": "builder stage が submodule の初期化チェックに使う",
 	"tests/federation/common/mkgo-entrypoint.sh":              "連合 e2e の Dockerfile が COPY する。`tests/` はここに 4 つ除外が並んでいて blanket 除外に倒れやすい",
+	"tests/bench/queue/blackhole/main.go":                     "queue-bench の blackhole の Dockerfile が repo root の context から COPY する。隣の tests/bench/http を除外しているので tests/bench ごと除外に倒れやすい (#3373)",
+	"tests/bench/queue/faker/main.go":                         "queue-bench の faker の Dockerfile が同じく COPY する",
 	// **symlink 経路と実体経路の両方を持つ。** Dockerfile が COPY するのは
 	// symlink 側 (`packages/backend/node_modules/...`) だが、pnpm は実体を
 	// `.pnpm/` 配下に置く。判定は字句だけで symlink を辿らないので、**片方しか
