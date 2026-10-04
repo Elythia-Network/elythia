@@ -34,6 +34,45 @@ func (h *Handler) FillDetailedExtrasMany(ctx context.Context, viewer *model.User
 	h.fillExtras(ctx, viewer, targets, false)
 }
 
+// listPacker returns the packer of the UserDetailed lists this handler serves
+// (explore, pinned-users, recommendation, search, ...). It is built from the
+// handler's own dependencies, so it needs no extra wiring.
+//
+// 一覧の組み方を userpack.Packer.DetailedMany に一本化する。handler ごとに
+// PackUserDetailed から組むと、モデレーター向けの項目や関係のまとめ引きを
+// 経路ごとに書き忘れる (#3330 で explore・pinned-users・recommendation が
+// moderationNote を欠き、関係を利用者ごとに 10 回引いていた)。
+func (h *Handler) listPacker() *userpack.Packer {
+	l := userpack.Lookups{
+		Instances:  h.instanceLookup(),
+		Emojis:     h.emojiLookup(),
+		Relations:  h.viewerRelationRepos(),
+		ExtrasMany: h,
+	}
+	if h.moderatorChecker != nil {
+		l.Moderators = h.moderatorChecker
+	}
+	return userpack.New(l, h.idGen)
+}
+
+// packDetailedMany packs users as upstream packMany(users, me, {schema:
+// 'UserDetailed'}) does. profiles may miss users (their counts stay closed).
+func (h *Handler) packDetailedMany(ctx context.Context, viewer *model.User, users []*model.User, profiles map[string]*model.UserProfile) []entity.UserDetailed {
+	return h.listPacker().DetailedMany(ctx, viewer, users, profiles)
+}
+
+// packDetailedAll is packDetailedMany serialized like meself.Pack: the
+// viewer's own entry becomes MeDetailed (upstream pack returns MeDetailed when
+// isDetailed && isMe).
+func (h *Handler) packDetailedAll(ctx context.Context, viewer *model.User, users []*model.User, profiles map[string]*model.UserProfile) []any {
+	packed := h.packDetailedMany(ctx, viewer, users, profiles)
+	out := make([]any, len(users))
+	for i, u := range users {
+		out[i] = meself.Pack(ctx, packed[i], u, profiles[u.ID], viewer)
+	}
+	return out
+}
+
 // fillUserLites resolves instance / emojis of the packed users of a list
 // response in one batch (本家 packMany の instance と emojis)。
 func (h *Handler) fillUserLites(users []*model.User, lites []*entity.UserLite) {
@@ -237,25 +276,7 @@ func (h *Handler) fillPinnedPages(viewer *model.User, targets []userpack.DetailT
 // extras are filled in one batch before the response is written.
 type detailedBatch []userpack.DetailTarget
 
-// add stores a copy of d and returns the pointer the extras will be filled into.
-func (b *detailedBatch) add(d entity.UserDetailed, u *model.User, profile *model.UserProfile) *entity.UserDetailed {
-	dd := d
-	*b = append(*b, userpack.DetailTarget{User: u, Profile: profile, Detailed: &dd})
-	return &dd
-}
-
 // fill fills the detail extras of every collected user.
 func (b detailedBatch) fill(ctx context.Context, h *Handler, viewer *model.User) {
 	h.FillDetailedExtrasMany(ctx, viewer, b)
-}
-
-// packAll fills the extras and serializes every user like meself.Pack (the
-// viewer's own entry becomes MeDetailed).
-func (b detailedBatch) packAll(ctx context.Context, h *Handler, viewer *model.User) []any {
-	b.fill(ctx, h, viewer)
-	out := make([]any, 0, len(b))
-	for _, t := range b {
-		out = append(out, meself.Pack(ctx, *t.Detailed, t.User, t.Profile, viewer))
-	}
-	return out
 }

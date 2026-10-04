@@ -546,30 +546,19 @@ func (h *Handler) Show(c echo.Context) error {
 		}
 		// upstream show.ts:151-153 は userIds バルクモードでも schema 'UserDetailed'
 		// で pack する。旧実装は UserLite を返していた (#1547)。remote stats fetch は
-		// list path 同様 N+1 回避のため bulk では行わない。ピン留め・移行先・
-		// instance・絵文字は本家 packMany と同じく batch.packAll でまとめて埋める (#3330)。
-		var batch detailedBatch
-		viewerID := ""
-		if viewer != nil {
-			viewerID = viewer.ID
+		// list path 同様 N+1 回避のため bulk では行わない。モデレーター向けの項目・
+		// 関係 (#2106 N2)・カウントのゲート・ピン留め・移行先・instance・絵文字は
+		// 本家 packMany と同じく DetailedMany でまとめて組み、関係は getRelations と
+		// 同じく関係ごとに 1 回の IN で引く (#3330)。自分の行は MeDetailed になる。
+		users := make([]*model.User, len(visible))
+		profiles := make(map[string]*model.UserProfile, len(visible))
+		for i, b := range visible {
+			users[i] = b.User
+			if b.Profile != nil {
+				profiles[b.User.ID] = b.Profile
+			}
 		}
-		ctx := c.Request().Context()
-		for _, b := range visible {
-			detailed := entity.PackUserDetailed(b.User, b.Profile, h.idGen)
-			h.applyModerationNote(&detailed, iAmModerator, b.Profile)
-			entity.ApplyModeratorSecurityFields(&detailed, iAmModerator, b.Profile)
-			// #2106 N2: バルク show も他のマルチユーザー path (search / recommendation 等) 同様に
-			// viewer relation (isFollowing/isBlocking/isMuted/hasPendingFollowRequest* 等) を解決する。
-			// upstream show.ts:151 の packMany は getRelations を batch で当てる。最大 100 件なので
-			// per-user Apply で許容範囲。viewerIsFollowing は GateCountVisibility に渡し、follower の
-			// non-public count が誤って 0 化されないようにする。
-			viewerIsFollowing := h.viewerRelationRepos().Apply(&detailed, viewerID, b.User, b.Profile)
-			isMe := viewer != nil && viewer.ID == b.User.ID
-			entity.GateCountVisibility(&detailed, isMe, iAmModerator, viewerIsFollowing)
-			batch.add(detailed, b.User, b.Profile)
-		}
-		// upstream の pack は isDetailed && isMe で MeDetailed を返す。
-		out := batch.packAll(ctx, h, viewer)
+		out := h.packDetailedAll(c.Request().Context(), viewer, users, profiles)
 		return c.JSON(http.StatusOK, out)
 	}
 
@@ -760,44 +749,18 @@ func (h *Handler) Search(c echo.Context) error {
 		return apierr.JSONInternalError(c)
 	}
 
-	iAmModerator := viewer != nil && h.moderatorChecker != nil && h.moderatorChecker.IsModerator(viewer.ID)
-
 	// detail は default true。false のとき UserLite を返す (upstream search.ts:56、#1547)。
 	if req.Detail != nil && !*req.Detail {
 		return c.JSON(http.StatusOK, h.packLites(users))
 	}
 
 	// users/search が検索結果 N 件ぶん per-row GetProfile を呼んでいた N+1 を
-	// 1 batch query に置換する (#517)。Profile が見つからない user は
-	// PackUserDetailed が nil profile を許容するのでそのまま渡る。
-	ids := make([]string, 0, len(users))
-	for _, u := range users {
-		ids = append(ids, u.ID)
-	}
-	profiles := h.userService.GetProfilesByUserIDs(ids)
-
-	viewerID := ""
-	if viewer != nil {
-		viewerID = viewer.ID
-	}
+	// 1 batch query に置換する (#517)。本家 search.ts は packMany(users, me,
+	// {schema}) なので、モデレーター向けの項目・関係 (#1980)・カウントのゲート・
+	// ピン留め・移行先を DetailedMany でまとめて組む (#3330)。profile が読めない
+	// 利用者のカウントは本人とモデレーター以外に伏せる。
 	ctx := c.Request().Context()
-	var batch detailedBatch
-	for _, u := range users {
-		d := entity.PackUserDetailed(u, profiles[u.ID], h.idGen)
-		// moderator viewer には moderationNote を出す (#1558、users/show と対称)。
-		h.applyModerationNote(&d, iAmModerator, profiles[u.ID])
-		entity.ApplyModeratorSecurityFields(&d, iAmModerator, profiles[u.ID])
-		// upstream search.ts は packMany(users, me, {schema}) で embed user に viewer
-		// 視点の relation block を付ける (#1980)。Apply は匿名/self で no-op。戻り値の
-		// isFollowing を count visibility gate (#1558) に渡す (以前は hardcode false)。
-		viewerIsFollowing := h.viewerRelationRepos().Apply(&d, viewerID, u, profiles[u.ID])
-		isMe := viewer != nil && viewer.ID == u.ID
-		entity.GateCountVisibility(&d, isMe, iAmModerator, viewerIsFollowing)
-		batch.add(d, u, profiles[u.ID])
-	}
-	// ピン留めと移行先は本家 packMany と同じくまとめて埋める (#3330)。upstream の
-	// pack は isDetailed && isMe で MeDetailed を返す。
-	return c.JSON(http.StatusOK, batch.packAll(ctx, h, viewer))
+	return c.JSON(http.StatusOK, h.packDetailedAll(ctx, viewer, users, h.userService.GetProfilesByUserIDs(userIDs(users))))
 }
 
 // NotesRequest is the request body for users/notes.
@@ -974,7 +937,6 @@ func (h *Handler) listRelations(c echo.Context, followers bool) error {
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
 	}
-	// **viewer は username 解決より前に読む。** 下の匿名 gate が要る。
 	viewer := middleware.GetUser(c)
 	// userId 指定が無ければ username(+host) から解決する (upstream followers.ts:60-71、
 	// #1547)。usernameLower + host で findOne。
@@ -982,24 +944,18 @@ func (h *Handler) listRelations(c echo.Context, followers bool) error {
 		if req.Username == "" {
 			return apierr.JSONInvalidParam(c)
 		}
-		// **users/show と同じ匿名 gate をここにも掛ける** (handler.go の Show に
-		// ある #2106 S3 の判定)。`users/followers` / `users/following` は
-		// auth middleware が無く**未認証で叩ける**のに、`ShowByUsername` は
-		// ローカル DB が miss すると WebFinger + actor fetch へ落ちる。gate が
-		// 無いと、認証不要の POST 1 回ごとに未知のリモート host への outbound
-		// HTTP とリモート user 行の作成を外部から強制できる (= `ShowByUsernameDB`
-		// の doc コメントが `/@:acct` について書いているのと同じ増幅面)。
-		if req.Host != nil && *req.Host != "" && viewer == nil && h.ugcVisibilityNow() == "local" {
-			return jsonNoSuchUserForRelations(c, followers)
-		}
+		// **DB だけを引く。** 本家 followers.ts / following.ts は usersRepository.findOneBy
+		// だけで、未知の acct を WebFinger で取りに行かない (#3330)。以前は
+		// ShowByUsername を使っていたので、未認証の POST 1 回ごとに未知のリモート
+		// host への外向きリクエストとリモートの利用者の行の作成を起こせた (そのため
+		// 匿名の visitor だけ host 指定を弾く gate を置いていたが、DB だけを引くなら
+		// 外向きの通信は起きないので、本家と同じく gate も置かない)。
 		// #2106 L10: Followers/Following も Show と同じく lookup 前に trim する。
-		bundle, err := h.userService.ShowByUsername(strings.ToLower(strings.TrimSpace(req.Username)), req.Host)
+		bundle, err := h.userService.ShowByUsernameDB(strings.ToLower(strings.TrimSpace(req.Username)), req.Host)
 		if err != nil || bundle == nil {
-			// Show と同じく DB 障害は 500 に倒す (#2792 / #2996)。
-			// `ErrFailedToResolveRemoteUser` は「引けたが解決できない」なので
-			// not-found 側に寄せる (この endpoint に専用の error code は無い)。
-			if err != nil && !errors.Is(err, user.ErrUserNotFound) &&
-				!errors.Is(err, user.ErrFailedToResolveRemoteUser) {
+			// Show と同じく DB 障害は 500 に倒す (#2792 / #2996)。見つからなければ
+			// 本家と同じ NO_SUCH_USER (endpoint ごとの id)。
+			if err != nil && !errors.Is(err, user.ErrUserNotFound) {
 				return apierr.JSONInternalError(c)
 			}
 			return jsonNoSuchUserForRelations(c, followers)

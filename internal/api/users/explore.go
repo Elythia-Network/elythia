@@ -7,7 +7,6 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/shiroha-a/mk/internal/api/apierr"
-	"github.com/shiroha-a/mk/internal/entity"
 	"github.com/shiroha-a/mk/internal/model"
 	"github.com/shiroha-a/mk/internal/repository"
 	"github.com/shiroha-a/mk/internal/server/middleware"
@@ -87,25 +86,33 @@ func (h *Handler) List(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusOK, []any{})
 	}
+	// 本家 users.ts は packMany(users, me, {schema: 'UserDetailed'})。モデレーター
+	// 向けの項目・関係・カウントのゲート・ピン留め・移行先を DetailedMany で
+	// まとめて組み、profile と関係は一覧ぶんを IN でまとめて引く (#3330)。
 	ctx := c.Request().Context()
-	// moderator は可視性ゲートを越えて実数を見られる (users/show と同じ判定)。
-	iAmModerator := viewer != nil && h.moderatorChecker != nil && h.moderatorChecker.IsModerator(viewer.ID)
-	var batch detailedBatch
-	for _, u := range list {
-		profile, _ := h.userRepo.FindProfileByUserID(u.ID)
-		// idGen を渡して createdAt を有効にする。未配線だと createdAt="" で
-		// misskey_dart の DateTimeConverter が FormatException で落ちる (#1251)。
-		d := entity.PackUserDetailed(u, profile, h.idGen)
-		// 認証 caller には viewer->user の relation block を付与 (#1957-a)。
-		viewerIsFollowing := h.viewerRelationRepos().Apply(&d, viewerID, u, profile)
-		// **カウントの可視性ゲートを通す (#1558)。** ここを忘れると
-		// `followersVisibility: "private"` と実数が並んで返る (未認証でも)。
-		entity.GateCountVisibility(&d, viewerID == u.ID, iAmModerator, viewerIsFollowing)
-		batch.add(d, u, profile)
+	return c.JSON(http.StatusOK, h.packDetailedAll(ctx, viewer, list, h.profilesByUserIDs(list)))
+}
+
+// profilesByUserIDs loads the profiles of users with one IN query. A failed
+// lookup yields an empty map, so the users are packed with closed counts
+// (GateCountVisibility) instead of failing the whole list.
+func (h *Handler) profilesByUserIDs(users []*model.User) map[string]*model.UserProfile {
+	out := make(map[string]*model.UserProfile, len(users))
+	if len(users) == 0 || h.userRepo == nil {
+		return out
 	}
-	// ピン留めと移行先を本家 packMany と同じくまとめて埋める (#3330)。upstream の
-	// pack は isDetailed && isMe で MeDetailed を返す。
-	return c.JSON(http.StatusOK, batch.packAll(ctx, h, viewer))
+	ids := make([]string, len(users))
+	for i, u := range users {
+		ids[i] = u.ID
+	}
+	profiles, err := h.userRepo.FindProfilesByUserIDs(ids)
+	if err != nil {
+		return out
+	}
+	for _, p := range profiles {
+		out[p.UserID] = p
+	}
+	return out
 }
 
 // PinnedUsers serves the instance's featured accounts.
@@ -123,15 +130,7 @@ func (h *Handler) PinnedUsers(c echo.Context) error {
 	if err != nil || m == nil || len(m.PinnedUsers) == 0 {
 		return c.JSON(http.StatusOK, []any{})
 	}
-	viewerID := ""
-	viewer := middleware.GetUser(c)
-	if viewer != nil {
-		viewerID = viewer.ID
-	}
-	// moderator は可視性ゲートを越えて実数を見られる (users/show と同じ判定)。
-	iAmModerator := viewer != nil && h.moderatorChecker != nil && h.moderatorChecker.IsModerator(viewer.ID)
-	result := make([]*entity.UserDetailed, 0, len(m.PinnedUsers))
-	var batch detailedBatch
+	users := make([]*model.User, 0, len(m.PinnedUsers))
 	for _, acct := range m.PinnedUsers {
 		username, host := ParseAcct(acct, h.localHost)
 		if username == "" {
@@ -141,17 +140,13 @@ func (h *Handler) PinnedUsers(c echo.Context) error {
 		if err != nil {
 			continue
 		}
-		profile, _ := h.userRepo.FindProfileByUserID(u.ID)
-		d := entity.PackUserDetailed(u, profile, h.idGen)
-		// 認証 caller には viewer->user の relation block を付与 (#1957-a)。
-		viewerIsFollowing := h.viewerRelationRepos().Apply(&d, viewerID, u, profile)
-		// **カウントの可視性ゲートを通す (#1558)。**
-		entity.GateCountVisibility(&d, viewerID == u.ID, iAmModerator, viewerIsFollowing)
-		result = append(result, batch.add(d, u, profile))
+		users = append(users, u)
 	}
-	// 本家 pinned-users は packMany(users, me, {schema: 'UserDetailed'}) (#3330)。
-	batch.fill(c.Request().Context(), h, viewer)
-	return c.JSON(http.StatusOK, result)
+	// 本家 pinned-users は packMany(users, me, {schema: 'UserDetailed'})。
+	// モデレーター向けの項目も含めて DetailedMany で組み、自分の行は本家の pack と
+	// 同じく MeDetailed にする (#3330)。
+	ctx := c.Request().Context()
+	return c.JSON(http.StatusOK, h.packDetailedAll(ctx, middleware.GetUser(c), users, h.profilesByUserIDs(users)))
 }
 
 // ParseAcct splits an `@user@host` string into its username and host parts.

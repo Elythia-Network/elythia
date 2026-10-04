@@ -135,3 +135,45 @@ func TestFillLites(t *testing.T) {
 	require.NotNil(t, lite.Instance)
 	assert.Equal(t, "https://remote.example/blobcat.png", lite.Emojis["blobcat"])
 }
+
+// manyRelations records whether DetailedMany used the batch applier.
+type manyRelations struct {
+	fakeRelations
+	manyCalls, singleCalls int
+	viewerID               string
+}
+
+func (m *manyRelations) Apply(d *entity.UserDetailed, v string, u *model.User, p *model.UserProfile) bool {
+	m.singleCalls++
+	return m.fakeRelations.Apply(d, v, u, p)
+}
+
+func (m *manyRelations) ApplyMany(viewerID string, details []*entity.UserDetailed, users []*model.User, profiles []*model.UserProfile) []bool {
+	m.manyCalls++
+	m.viewerID = viewerID
+	out := make([]bool, len(details))
+	for i := range details {
+		out[i] = m.fakeRelations.Apply(details[i], viewerID, users[i], profiles[i])
+	}
+	return out
+}
+
+// 関係はまとめて引ける applier ならまとめて引く (本家 packMany の getRelations、
+// #3330)。戻り値の isFollowing はカウントのゲートに渡る。
+func TestDetailedMany_UsesBatchRelations(t *testing.T) {
+	rel := &manyRelations{fakeRelations: fakeRelations{following: true}}
+	p := userpack.New(userpack.Lookups{Relations: rel}, nil)
+	users := []*model.User{target(), {ID: "u2", Username: "u2", FollowersCount: 9}}
+	profiles := map[string]*model.UserProfile{target().ID: privateProfile(target().ID), "u2": privateProfile("u2")}
+
+	out := p.DetailedMany(context.Background(), &model.User{ID: "v1"}, users, profiles)
+	assert.Equal(t, 1, rel.manyCalls)
+	assert.Zero(t, rel.singleCalls, "利用者ごとに Apply しない")
+	assert.Equal(t, "v1", rel.viewerID)
+	assert.EqualValues(t, 7, out[0].FollowersCount, "followers 限定のカウントは follower に見せる")
+	assert.EqualValues(t, 9, out[1].FollowersCount)
+
+	// 匿名の閲覧者は空の viewerID で渡す。
+	p.DetailedMany(context.Background(), nil, users, profiles)
+	assert.Equal(t, "", rel.viewerID)
+}

@@ -12,7 +12,6 @@ import (
 	"github.com/shiroha-a/mk/internal/api/pagination"
 	"github.com/shiroha-a/mk/internal/api/userrelation"
 	"github.com/shiroha-a/mk/internal/core/userpack"
-	"github.com/shiroha-a/mk/internal/entity"
 	"github.com/shiroha-a/mk/internal/misc/colfit"
 	"github.com/shiroha-a/mk/internal/misc/id"
 	"github.com/shiroha-a/mk/internal/misc/searchnorm"
@@ -31,7 +30,21 @@ type Handler struct {
 	idGen id.Generator
 	// extras は hashtags/users の利用者のピン留め・移行先をまとめて埋める (#3330)。
 	extras userpack.DetailExtrasMany
+	// moderators は閲覧者がモデレーターかを判定する。本家 packMany はモデレーターに
+	// moderationNote と 2FA の項目を足し、カウントのゲートを外す (#3330)。
+	moderators userpack.ModeratorChecker
 }
+
+// SetModeratorChecker wires the moderator check of hashtags/users (#3330).
+func (h *Handler) SetModeratorChecker(m userpack.ModeratorChecker) {
+	h.moderators = m
+}
+
+// HasModeratorChecker reports whether the moderator check was wired.
+//
+// 未配線だとモデレーターにも moderationNote などが出ず、非公開のカウントも
+// 0 のまま返る。起動時検査に使う。
+func (h *Handler) HasModeratorChecker() bool { return h.moderators != nil }
 
 // SetDetailExtras wires the batch filler of pinnedNotes / pinnedPage / movedTo /
 // alsoKnownAs for hashtags/users (#3330).
@@ -471,31 +484,18 @@ func (h *Handler) Users(c echo.Context) error {
 		return apierr.JSONInternalError(c)
 	}
 	viewer := middleware.GetUser(c)
-	viewerID := ""
-	if viewer != nil {
-		viewerID = viewer.ID
-	}
 	ctx := c.Request().Context()
-	packed := make([]entity.UserDetailed, len(users))
-	for i, u := range users {
-		d := entity.PackUserDetailed(u, profByID[u.ID], gen)
-		// 認証 caller には viewer->user の relation block を付与 (匿名/self は no-op、#1957-a)。
-		viewerIsFollowing := h.relation.Apply(&d, viewerID, u, profByID[u.ID])
-		// **カウントの可視性ゲートを通す (#1558)。** `sort:"+follower"` が
-		// 使えるので、忘れると非公開のカウントで並べ替えて読める。
-		entity.GateCountVisibility(&d, viewerID == u.ID, false, viewerIsFollowing)
-		packed[i] = d
-	}
-	// 本家は packMany(users, me, {schema: 'UserDetailed'}) なので、ピン留めと
-	// 移行先もまとめて埋める (#3330)。匿名の閲覧者にはピン留めを出さない (本家
-	// packMany と同じ)。
-	if h.extras != nil {
-		targets := make([]userpack.DetailTarget, 0, len(users))
-		for i, u := range users {
-			targets = append(targets, userpack.DetailTarget{User: u, Profile: profByID[u.ID], Detailed: &packed[i]})
-		}
-		h.extras.FillDetailedExtrasMany(ctx, viewer, targets)
-	}
+	// 本家は packMany(users, me, {schema: 'UserDetailed'})。モデレーター向けの
+	// 項目・関係・カウントのゲート (`sort:"+follower"` で非公開のカウントを並べ
+	// 替えて読めないよう、#1558)・ピン留め・移行先を DetailedMany でまとめて組み、
+	// 関係は getRelations と同じく関係ごとに 1 回の IN で引く (#3330)。匿名の
+	// 閲覧者にはピン留めを出さない (本家 packMany と同じ)。
+	packer := userpack.New(userpack.Lookups{
+		Relations:  h.relation,
+		Moderators: h.moderators,
+		ExtrasMany: h.extras,
+	}, gen)
+	packed := packer.DetailedMany(ctx, viewer, users, profByID)
 	out := make([]any, 0, len(users))
 	for i, u := range users {
 		// upstream の pack は isDetailed && isMe で MeDetailed を返すので、

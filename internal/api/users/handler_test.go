@@ -1314,6 +1314,8 @@ func TestFollowers_AppliesRemoteStatsOverride(t *testing.T) {
 		FollowingCount:    3,  // ローカル観測値
 		AvatarDecorations: datatypes.JSON([]byte("[]")),
 	}
+	// profile 無しの利用者はカウントを伏せる (#3330) ので、実際の行と同じく profile を置く。
+	repo.Profiles["remote-alice"] = &model.UserProfile{UserID: "remote-alice"}
 	// remote-alice が user1 を follow → list に出る。
 	fSvc := h.followingService
 	_, err := fSvc.Follow("remote-alice", "user1", corefollowing.FollowOptions{})
@@ -1356,6 +1358,8 @@ func TestFollowing_AppliesRemoteStatsOverride(t *testing.T) {
 		FollowingCount:    3,
 		AvatarDecorations: datatypes.JSON([]byte("[]")),
 	}
+	// profile 無しの利用者はカウントを伏せる (#3330) ので、実際の行と同じく profile を置く。
+	repo.Profiles["remote-charlie"] = &model.UserProfile{UserID: "remote-charlie"}
 	fSvc := h.followingService
 	// user1 follows charlie → charlie が followee として list される。
 	_, err := fSvc.Follow("user1", "remote-charlie", corefollowing.FollowOptions{})
@@ -1392,6 +1396,8 @@ func TestFollowers_RemoteStatsOverride_FallsBackOnFetchError(t *testing.T) {
 		Host:              &remoteHost,
 		AvatarDecorations: datatypes.JSON([]byte("[]")),
 	}
+	// profile 無しの利用者はカウントを伏せる (#3330) ので、実際の行と同じく profile を置く。
+	repo.Profiles["remote-dora"] = &model.UserProfile{UserID: "remote-dora"}
 	fSvc := h.followingService
 	_, err := fSvc.Follow("remote-dora", "user1", corefollowing.FollowOptions{})
 	require.NoError(t, err)

@@ -74,7 +74,7 @@ func (c *WebFingerClient) LookupActorURI(username, host string) (string, error) 
 	// `"https://" + host + "/.well-known/webfinger"` を組むだけなので、
 	// `a.example/x` ならパス注入、`a.example@b.example` なら url.Parse の
 	// host が `b.example` になって authority がすり替わる。ここに来る host は
-	// `POST /api/users/followers` のような**未認証で叩ける経路**から渡るので、
+	// `POST /api/users/show` (host 指定) のような**未認証で叩ける経路**から渡るので、
 	// 呼び出し側の `idnhost.Puny` (punycode プロファイル。ASCII は素通し) を
 	// 唯一の砦にできない。
 	//

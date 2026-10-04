@@ -107,10 +107,14 @@ type UserDetailed struct {
 	// `GateCountVisibility` が「見せてよい閲覧者へ入れ直す」ために使う。
 	actualFollowersCount int
 	actualFollowingCount int
-	FollowingCount       int    `json:"followingCount"`
-	NotesCount           int    `json:"notesCount"`
-	FollowersVisibility  string `json:"followersVisibility"`
-	FollowingVisibility  string `json:"followingVisibility"`
+	// profileMissing は profile 無しで組んだ印 (JSON には出さない)。公開範囲が
+	// 分からないので、GateCountVisibility は本人とモデレーター以外にカウントを
+	// 伏せる。visibility が空のままだと public 扱いに倒れて漏れるため (#3330)。
+	profileMissing      bool
+	FollowingCount      int    `json:"followingCount"`
+	NotesCount          int    `json:"notesCount"`
+	FollowersVisibility string `json:"followersVisibility"`
+	FollowingVisibility string `json:"followingVisibility"`
 	// ChatScope は 1-on-1 チャットの受信許可レベル (#692)。FE の
 	// /settings/privacy が `i/update` レスポンスから直接 `$i.chatScope` に
 	// 反映するため、この field を expose しないと UI が保存後に古い値で
@@ -619,6 +623,7 @@ func PackUserDetailed(u *model.User, profile *model.UserProfile, idGens ...id.Ge
 	// 持つので呼び忘れようがない。
 	d.actualFollowersCount = u.FollowersCount
 	d.actualFollowingCount = u.FollowingCount
+	d.profileMissing = profile == nil
 	if profile == nil || !isCountPublic(string(profile.FollowersVisibility)) {
 		d.FollowersCount = 0
 	}
@@ -659,8 +664,19 @@ func isCountPublic(visibility string) bool {
 // UserDetailed when the viewer must not see them, mirroring upstream's null →
 // 0 for restricted (followers / private) visibility (#1558)。d.FollowersVisibility
 // / d.FollowingVisibility は PackUserDetailed が profile から埋めた値を読む。
+//
+// A user packed without a profile (the row could not be read) has unknown
+// visibility, so its counts are shown only to the user themself and to
+// moderators, who may see them whatever the setting.
 func GateCountVisibility(d *UserDetailed, isMe, isModerator, isFollowing bool) {
 	// **packer が既に伏せている。** ここは見せてよい閲覧者へ入れ直す側。
+	if d.profileMissing && !isMe && !isModerator {
+		// 本家は profile を findOneByOrFail で読むので、読めなければ応答しない。
+		// mk-go は一覧ごと落とさず、公開範囲を問わず見てよい閲覧者にだけ見せる。
+		d.FollowersCount = 0
+		d.FollowingCount = 0
+		return
+	}
 	if countVisible(d.FollowersVisibility, isMe, isModerator, isFollowing) {
 		d.FollowersCount = d.actualFollowersCount
 	} else {
@@ -801,11 +817,12 @@ func OverrideRemoteCounts(d *UserDetailed, followers, following int) {
 	}
 	d.actualFollowersCount = followers
 	d.actualFollowingCount = following
-	// 現在の表示値が伏せられていなければ、そのまま新しい値を見せる。
-	if d.FollowersCount != 0 || isCountPublic(d.FollowersVisibility) {
+	// 現在の表示値が伏せられていなければ、そのまま新しい値を見せる。profile 無し
+	// (公開範囲が分からない) ときは visibility が空でも public 扱いにしない。
+	if d.FollowersCount != 0 || (!d.profileMissing && isCountPublic(d.FollowersVisibility)) {
 		d.FollowersCount = followers
 	}
-	if d.FollowingCount != 0 || isCountPublic(d.FollowingVisibility) {
+	if d.FollowingCount != 0 || (!d.profileMissing && isCountPublic(d.FollowingVisibility)) {
 		d.FollowingCount = following
 	}
 }

@@ -46,7 +46,6 @@ func (h *Handler) GetFrequentlyRepliedUsers(c echo.Context) error {
 	if viewer != nil {
 		viewerID = viewer.ID
 	}
-	iAmModerator := viewer != nil && h.moderatorChecker != nil && h.moderatorChecker.IsModerator(viewer.ID)
 	rows, err := h.noteRepo.CountReplyTargets(req.UserID, viewerID, limit)
 	if err != nil {
 		return apierr.JSONInternalError(c)
@@ -57,32 +56,38 @@ func (h *Handler) GetFrequentlyRepliedUsers(c echo.Context) error {
 			peak = r.Count
 		}
 	}
-	out := make([]map[string]any, 0, len(rows))
-	var batch detailedBatch
-	for _, r := range rows {
-		bundle, err := h.userService.ShowByID(r.UserID)
-		if err != nil {
-			continue
-		}
+	// 返信先の利用者と profile は 2 回の問い合わせでまとめて引く (#3330)。本家も
+	// packMany でまとめて組む。以前は返信先ごとに ShowByID を呼んでいた。
+	ids := make([]string, len(rows))
+	weightByID := make(map[string]float64, len(rows))
+	for i, r := range rows {
+		ids[i] = r.UserID
 		// peak>0 は上で rows が非空なら必ず真だが、念のためガード。
-		weight := 0.0
 		if peak > 0 {
-			weight = float64(r.Count) / float64(peak)
+			weightByID[r.UserID] = float64(r.Count) / float64(peak)
 		}
-		d := entity.PackUserDetailed(bundle.User, bundle.Profile, h.idGen)
-		// 認証 viewer には viewer->user の relation block を付与 (upstream packMany(users, me)、#1973)。
-		viewerIsFollowing := h.viewerRelationRepos().Apply(&d, viewerID, bundle.User, bundle.Profile)
-		// followers-only count を非フォロワーに leak させない (upstream UserEntityService の
-		// count gate、#1985)。
-		isMe := viewer != nil && viewer.ID == bundle.User.ID
-		entity.GateCountVisibility(&d, isMe, iAmModerator, viewerIsFollowing)
-		out = append(out, map[string]any{
-			"user":   batch.add(d, bundle.User, bundle.Profile),
-			"weight": weight,
-		})
 	}
-	// 本家 get-frequently-replied-users は packMany(UserDetailed) (#3330)。
-	batch.fill(c.Request().Context(), h, viewer)
+	bundles, err := h.userService.ShowManyByIDs(ids)
+	if err != nil {
+		return apierr.JSONInternalError(c)
+	}
+	users := make([]*model.User, 0, len(bundles))
+	profiles := make(map[string]*model.UserProfile, len(bundles))
+	for _, b := range bundles {
+		users = append(users, b.User)
+		if b.Profile != nil {
+			profiles[b.User.ID] = b.Profile
+		}
+	}
+	// 本家 get-frequently-replied-users は packMany(users, me, {schema:
+	// 'UserDetailed'})。モデレーター向けの項目・関係 (#1973)・カウントのゲート
+	// (#1985)・ピン留め・移行先を DetailedMany でまとめて組み、返信先に閲覧者
+	// 本人が居ればその行は本家の pack と同じく MeDetailed にする (#3330)。
+	packed := h.packDetailedAll(c.Request().Context(), viewer, users, profiles)
+	out := make([]map[string]any, len(users))
+	for i, u := range users {
+		out[i] = map[string]any{"user": packed[i], "weight": weightByID[u.ID]}
+	}
 	return c.JSON(http.StatusOK, out)
 }
 
@@ -228,28 +233,24 @@ func (h *Handler) UserRecommendation(c echo.Context) error {
 		return apierr.JSONInvalidParam(c)
 	}
 	req.Limit = &limit
-	iAmModerator := viewer != nil && h.moderatorChecker != nil && h.moderatorChecker.IsModerator(viewer.ID)
 	users, err := h.userService.ListRecommendations(viewer.ID, time.Now().AddDate(0, 0, -7), limit, req.Offset)
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
-	out := make([]*entity.UserDetailed, 0, len(users))
-	var batch detailedBatch
-	for _, u := range users {
-		profile := h.userService.GetProfile(u.ID)
-		d := entity.PackUserDetailed(u, profile, h.idGen)
-		// 認証 viewer には viewer->user の relation block を付与 (upstream packMany(users, me)、#1973)。
-		viewerIsFollowing := h.viewerRelationRepos().Apply(&d, viewer.ID, u, profile)
-		// followers-only count を非フォロワーに leak させない (upstream UserEntityService の
-		// count gate、#1985)。recommendation は未フォロー/非 self のみ返すため通常 isMe/isFollowing
-		// は false だが、moderator viewer には count を見せる upstream 挙動に揃える。
-		isMe := viewer != nil && viewer.ID == u.ID
-		entity.GateCountVisibility(&d, isMe, iAmModerator, viewerIsFollowing)
-		out = append(out, batch.add(d, u, profile))
+	// 本家 users/recommendation は packMany(users, me, {schema: 'UserDetailed'})。
+	// モデレーター向けの項目も含めて DetailedMany で組み、profile と関係は IN で
+	// まとめて引く (#3330)。自分自身は候補から外れているので MeDetailed にはならない。
+	ctx := c.Request().Context()
+	return c.JSON(http.StatusOK, h.packDetailedMany(ctx, viewer, users, h.userService.GetProfilesByUserIDs(userIDs(users))))
+}
+
+// userIDs returns the IDs of users in order.
+func userIDs(users []*model.User) []string {
+	ids := make([]string, len(users))
+	for i, u := range users {
+		ids[i] = u.ID
 	}
-	// 本家 users/recommendation は packMany(UserDetailed) (#3330)。
-	batch.fill(c.Request().Context(), h, viewer)
-	return c.JSON(http.StatusOK, out)
+	return ids
 }
 
 // UsersBulk handles POST /api/users — bulk user lookup.
