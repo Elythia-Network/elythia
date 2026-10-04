@@ -3,6 +3,7 @@ package repository
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -17,17 +18,24 @@ const upstreamUserURIIndex = "IDX_be623adaa4c566baf5d29ce0c8"
 // is exactly ("uri"), scoped to the package schema.
 func userURIIndexDefs(t *testing.T) map[string]string {
 	t.Helper()
+	// `indexdef` を WHERE に書かない。`indexdef` の条件は index の pg_class だけを
+	// 参照するので、plan によってはその scan まで押し下げられ、schema で絞る前に
+	// 全 schema の index で `pg_get_indexdef` が呼ばれる。並行して走る他の
+	// パッケージがその index を消していると `could not open relation with OID` で
+	// 落ちる (#3365)。SELECT の列は絞り込みの後に評価されるので、定義は取ってから
+	// Go の側で見る。
 	var rows []struct {
 		Indexname string
 		Indexdef  string
 	}
 	require.NoError(t, testDB.Raw(`
 		SELECT indexname, indexdef FROM pg_indexes
-		WHERE schemaname = current_schema() AND tablename = 'user'
-		  AND indexdef LIKE '%USING btree (uri)%'`).Scan(&rows).Error)
-	out := make(map[string]string, len(rows))
+		WHERE schemaname = current_schema() AND tablename = 'user'`).Scan(&rows).Error)
+	out := map[string]string{}
 	for _, r := range rows {
-		out[r.Indexname] = r.Indexdef
+		if strings.Contains(r.Indexdef, "USING btree (uri)") {
+			out[r.Indexname] = r.Indexdef
+		}
 	}
 	return out
 }
