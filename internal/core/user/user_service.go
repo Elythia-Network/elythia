@@ -69,6 +69,13 @@ type RemoteUserResolver interface {
 	ResolveByUsernameHost(username, host string) (*model.User, error)
 }
 
+// RemoteUserResyncer is implemented by a RemoteUserResolver that can re-sync a
+// stored remote user whose data is stale (upstream RemoteUserResolveService.
+// resolveUser re-syncs a user found in the DB after 24 hours).
+type RemoteUserResyncer interface {
+	ResyncIfStale(u *model.User) (*model.User, error)
+}
+
 // Service provides user-related business logic.
 type Service struct {
 	userRepo            repository.UserRepository
@@ -257,6 +264,21 @@ func (s *Service) ShowManyByIDs(ids []string) ([]*UserWithProfile, error) {
 // resolver 未設定の場合は ErrUserNotFound を返し (後方互換)、設定済みで解決
 // に失敗した場合は ErrFailedToResolveRemoteUser を返す。
 func (s *Service) ShowByUsername(username string, host *string) (*UserWithProfile, error) {
+	return s.showByUsername(username, host, false)
+}
+
+// ResolveByUsername is ShowByUsername for users/show, which upstream answers
+// with RemoteUserResolveService.resolveUser whenever a host is given: besides
+// fetching an unknown remote user, a stored remote user whose lastFetchedAt is
+// older than 24 hours is re-synced (WebFinger + actor fetch) before it is
+// returned, and a failed re-sync is ErrFailedToResolveRemoteUser.
+//
+// users/followers / users/following は本家が DB だけを引くので、こちらを使わない。
+func (s *Service) ResolveByUsername(username string, host *string) (*UserWithProfile, error) {
+	return s.showByUsername(username, host, true)
+}
+
+func (s *Service) showByUsername(username string, host *string, resync bool) (*UserWithProfile, error) {
 	// **正規化は repository に任せる。** `FindByUsernameLower` が引く直前に
 	// `idnhost.Puny` を掛けるので (#2704)、ここで掛けると二度手間になるだけ。
 	//
@@ -268,6 +290,17 @@ func (s *Service) ShowByUsername(username string, host *string) (*UserWithProfil
 	// (経路ごとの症状は docs/deployment.md)。
 	u, err := s.userRepo.FindByUsernameLower(username, host)
 	if err == nil {
+		// 本家 users/show は host 付きなら毎回 resolveUser を通り、保存から 24 時間を
+		// 過ぎたリモートの利用者は WebFinger から取り直す (待ってから返す)。
+		if resync && host != nil && *host != "" {
+			if rs, ok := s.remoteResolver.(RemoteUserResyncer); ok {
+				synced, rerr := rs.ResyncIfStale(u)
+				if rerr != nil || synced == nil {
+					return nil, ErrFailedToResolveRemoteUser
+				}
+				u = synced
+			}
+		}
 		profile, _ := s.userRepo.FindProfileByUserID(u.ID)
 		return &UserWithProfile{User: u, Profile: profile}, nil
 	}

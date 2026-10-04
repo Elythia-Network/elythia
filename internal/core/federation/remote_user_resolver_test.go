@@ -2,6 +2,8 @@ package federation_test
 
 import (
 	"errors"
+	"net/url"
+	"strings"
 	"testing"
 
 	corefederation "github.com/shiroha-a/mk/internal/core/federation"
@@ -32,6 +34,25 @@ type fakeActorResolver struct {
 func (f *fakeActorResolver) ResolveActor(uri string) (*model.User, error) {
 	f.uri = uri
 	return f.user, f.err
+}
+
+func (f *fakeActorResolver) RefreshActor(uri string) (*model.User, error) {
+	f.uri = uri
+	return f.user, f.err
+}
+
+// LocalUserIDFromURI mirrors Resolver.LocalUserIDFromURI for the fixed local
+// host "local.example".
+func (f *fakeActorResolver) LocalUserIDFromURI(uri string) (string, bool) {
+	u, err := url.Parse(uri)
+	if err != nil || u.Host != "local.example" {
+		return "", false
+	}
+	parts := strings.Split(u.Path, "/")
+	if len(parts) < 3 || parts[1] != "users" {
+		return "", true
+	}
+	return parts[2], true
 }
 
 func TestRemoteUserResolver_ResolveByUsernameHost_Success(t *testing.T) {

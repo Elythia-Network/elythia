@@ -21,6 +21,15 @@ func TestLocalUserIDFromAPID(t *testing.T) {
 		{"https://example.com/users/bob/", "bob"},
 		{"https://example.com/notes/bob", ""},
 		{"https://remote.example/users/bob", ""},
+		// 本家の parseUri はホストで判定し、scheme は見ない。
+		{"http://example.com/users/bob", "bob"},
+		{"https://EXAMPLE.com/users/bob", "bob"},
+		{"https://example.com/users", ""},
+		{"https://example.com/users/", ""},
+		{"https://example.com/", ""},
+		// pathname はエスケープされたまま割る。
+		{"https://example.com/users/a%2Fb/x", "a%2Fb"},
+		{"::bad", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.uri, func(t *testing.T) {

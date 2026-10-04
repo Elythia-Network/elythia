@@ -592,7 +592,7 @@ func (h *Handler) Show(c echo.Context) error {
 		}
 		// #2106 L10: upstream show.ts は lookup 前に username を trim する。前後空白を含む
 		// リクエストでも usernameLower 一致するよう揃える。
-		bundle, err = h.userService.ShowByUsername(strings.TrimSpace(*req.Username), req.Host)
+		bundle, err = h.userService.ResolveByUsername(strings.TrimSpace(*req.Username), req.Host)
 	}
 
 	if err != nil {

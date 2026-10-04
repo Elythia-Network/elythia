@@ -871,17 +871,19 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// apClient.DisableRedirect() の影響を受けないようにする。Timeout は
 	// user-facing API 経由で呼ばれるので応答性優先で 10s に設定する。
 	webfingerClient := activitypub.NewWebFingerClient(s.outboundClient(10*time.Second), s.config.UserAgent)
-	userService.SetRemoteUserResolver(corefederation.NewRemoteUserResolver(
-		webfingerClient, federationResolver, userRepo, localHost,
-	))
 	// notes/create の DB に無いリモートの利用者へのメンションも同じ経路で取りに行く
 	// (本家 NoteCreateService.extractMentionedUsers → RemoteUserResolveService、#3330)。
 	// 連合しないホストには WebFinger を投げない (hostBlocker は instanceService が
 	// できた後で下の federationResolver と一緒に渡す)。
-	noteMentionResolver := corefederation.NewRemoteUserResolver(
+	//
+	// **1 つの instance を共有する。** 同じ acct の解決・再同期を singleflight で
+	// まとめるので、users/show と notes/create (と reversi) が別々に持つと、
+	// 同じ acct への WebFinger が経路の数だけ並ぶ。
+	remoteUserResolver := corefederation.NewRemoteUserResolver(
 		webfingerClient, federationResolver, userRepo, localHost,
 	)
-	noteCreateService.SetRemoteUserResolver(noteMentionResolver)
+	userService.SetRemoteUserResolver(remoteUserResolver)
+	noteCreateService.SetRemoteUserResolver(remoteUserResolver)
 
 	// Instance management (Phase 3 Step H)
 	instanceService := coreinstance.NewService(instanceRepo, metaRepo, idGen)
@@ -903,7 +905,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// resolver の入口 (fetchActor / resolveNoteOnce / IngestNoteWithCreated) に
 	// 適用する。deliver_service / inboxProcessor と同じ instanceService を共有。
 	federationResolver.SetHostBlockChecker(instanceService)
-	noteMentionResolver.SetHostBlockChecker(instanceService)
+	remoteUserResolver.SetHostBlockChecker(instanceService)
 	federationResolver.SetSilencedHostChecker(instanceService)      // #2106 N14: silenced host の public note を home 降格
 	federationResolver.SetMediaSilencedHostChecker(instanceService) // #3218: media silenced host の添付をセンシティブに
 	// 受信した note の mentionLimit を投稿者 (リモート) の role policy から引く (#3330)。
@@ -3932,11 +3934,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		s.outboundClient(10*time.Second),
 	))
 	// #417 P3: /match の acct 引数で未キャッシュのリモートユーザーを
-	// WebFinger 経由で取り込めるようにする。ここで webfingerClient /
-	// federationResolver は既存の users/show 用と同じインスタンスを再利用。
-	reversiHandler.SetRemoteUserLookup(corefederation.NewRemoteUserResolver(
-		webfingerClient, federationResolver, userRepo, localHost,
-	))
+	// WebFinger 経由で取り込めるようにする。users/show / notes/create と同じ
+	// resolver を共有する (連合しないホストの skip もこれで効く)。
+	reversiHandler.SetRemoteUserLookup(remoteUserResolver)
 	// Service 側にも federation 一式を注入して state 変化時に Update / Leave を
 	// 配信できるようにする (#417 P1)。fedCache も Service 側で
 	// session→game 解決に必要なので忘れず設定する。
