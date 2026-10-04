@@ -26,6 +26,46 @@ type DeleteAccountProcessor struct {
 	// pageRepo はページを 1 件ずつ消して、参照するノートの pageCount を減らすのに
 	// 使う (#3293)。user 行の削除の CASCADE に任せると pageCount が減らない。
 	pageRepo repository.PageRepository
+	// pushCache は sw_subscription 行を消した後に購読キャッシュを捨てるのに使う。
+	// 捨てないと、削除後に作られた通知が Redis の 1 時間 TTL が切れるまで
+	// 消したはずの購読へ push され続ける。
+	pushCache PushSubscriptionCacheInvalidator
+}
+
+// PushSubscriptionCacheInvalidator drops the cached push subscriptions of a
+// user so that the next Web Push delivery re-reads them from the database.
+// *webpush.SubscriptionCache satisfies it.
+type PushSubscriptionCacheInvalidator interface {
+	Invalidate(ctx context.Context, userID string)
+}
+
+// SetPushSubscriptionCache wires the cache that Web Push delivery reads
+// subscriptions from. It must be the same instance the WebPushProcessor uses;
+// nil disables invalidation.
+func (p *DeleteAccountProcessor) SetPushSubscriptionCache(c PushSubscriptionCacheInvalidator) {
+	p.pushCache = c
+}
+
+// HasPushSubscriptionCache reports whether SetPushSubscriptionCache was wired.
+func (p *DeleteAccountProcessor) HasPushSubscriptionCache() bool { return p.pushCache != nil }
+
+// pushCacheInvalidateTimeout bounds the Redis call made to drop the cached
+// push subscriptions.
+const pushCacheInvalidateTimeout = 5 * time.Second
+
+// invalidatePushSubscriptions drops the cached push subscriptions of userID
+// after its sw_subscription rows were deleted.
+//
+// 行を消した後に job の ctx が cancel されると Redis の Del が失敗し、Invalidate は
+// エラーを返さないので job は完了扱いのままキャッシュが最大 1 時間残る。
+// 行の削除はもう確定しているので、cancel を切り離した ctx に上限だけ付けて呼ぶ。
+func (p *DeleteAccountProcessor) invalidatePushSubscriptions(ctx context.Context, userID string) {
+	if p.pushCache == nil {
+		return
+	}
+	local, cancel := context.WithTimeout(context.WithoutCancel(ctx), pushCacheInvalidateTimeout)
+	defer cancel()
+	p.pushCache.Invalidate(local, userID)
 }
 
 // SetPageRepo wires the PageRepository used to delete the user's pages one by
@@ -90,6 +130,7 @@ func (p *DeleteAccountProcessor) Handle(ctx context.Context, t driver.Task) erro
 		if err := p.userRepo.RevokeDeletedLocalCredentials(payload.UserID); err != nil {
 			return fmt.Errorf("delete-account: revoke retained account credentials: %w", err)
 		}
+		p.invalidatePushSubscriptions(ctx, payload.UserID)
 	}
 
 	if err := p.deleteNotes(ctx, payload.UserID); err != nil {
@@ -145,6 +186,8 @@ func (p *DeleteAccountProcessor) Handle(ctx context.Context, t driver.Task) erro
 				"userId", payload.UserID, "err", err)
 			return err
 		}
+		// sw_subscription は user 行の CASCADE で消えるので、購読キャッシュも捨てる。
+		p.invalidatePushSubscriptions(ctx, payload.UserID)
 		slog.Info("delete-account: user row deleted", "userId", payload.UserID)
 	}
 	return nil

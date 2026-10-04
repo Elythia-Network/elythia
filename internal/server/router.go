@@ -1199,6 +1199,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	deleteAccountProcessor.SetUserRepo(userRepo)
 	// #3293: ページを 1 件ずつ消して、参照するノートの pageCount を減らす。
 	deleteAccountProcessor.SetPageRepo(pageRepo)
+	// #3207: 消した sw_subscription が購読キャッシュに残って push され続けないよう、
+	// Web Push の配送が読むのと同じキャッシュを渡す。
+	deleteAccountProcessor.SetPushSubscriptionCache(webPushCache)
 	s.queueServer.Handle(queue.TaskTypeDeleteAccount, deleteAccountProcessor.Handle)
 
 	// Per-pair Unfollow job (#587): admin/federation/remove-all-following
@@ -4606,6 +4609,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"匿名 visitor への clips/notes の露出を ugcVisibilityForVisitor で gate できない"},
 		{"deleteAccount.pageRepo", deleteAccountProcessor.HasPageRepo(),
 			"アカウント削除でページが user 行の CASCADE で消え、参照していたノートの pageCount が減らない (リモートのノートが掃除で消えなくなる)"},
+		{"deleteAccount.pushSubscriptionCache", deleteAccountProcessor.HasPushSubscriptionCache(),
+			"アカウント削除で sw_subscription を消しても購読キャッシュが残り、削除後の通知が最大 1 時間、消したはずの購読へ push され続ける"},
 		{"feed.ugcVisibility", feedH.HasUGCVisibility(),
 			"ugcVisibilityForVisitor が none でも Web の feed (.rss / .atom / .json) を返す"},
 

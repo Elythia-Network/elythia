@@ -416,3 +416,141 @@ func TestDeleteAccountProcessor_PageErrorPropagates(t *testing.T) {
 	require.Error(t, p.Handle(context.Background(), deleteAccountTask(t, queue.DeleteAccountPayload{UserID: "target"})))
 	assert.False(t, processors.NewDeleteAccountProcessor(nil, nil, nil).HasPageRepo())
 }
+
+// recordingPushCache records the user IDs whose push subscription cache was
+// invalidated, along with the state of the context it received.
+type recordingPushCache struct {
+	invalidated []string
+	ctxErrs     []error
+	deadlines   []bool
+}
+
+func (c *recordingPushCache) Invalidate(ctx context.Context, userID string) {
+	c.invalidated = append(c.invalidated, userID)
+	c.ctxErrs = append(c.ctxErrs, ctx.Err())
+	_, ok := ctx.Deadline()
+	c.deadlines = append(c.deadlines, ok)
+}
+
+// cancelingUserRepo cancels the job context right after the rows are deleted,
+// simulating a job timeout or shutdown that lands between the deletion and the
+// cache invalidation.
+type cancelingUserRepo struct {
+	*testutil.MockUserRepository
+	cancel context.CancelFunc
+}
+
+func (r *cancelingUserRepo) RevokeDeletedLocalCredentials(uid string) error {
+	defer r.cancel()
+	return r.MockUserRepository.RevokeDeletedLocalCredentials(uid)
+}
+
+func (r *cancelingUserRepo) HardDeleteUser(uid string) error {
+	defer r.cancel()
+	return r.MockUserRepository.HardDeleteUser(uid)
+}
+
+// 行を消した直後に job の ctx が cancel されても、Invalidate には cancel されて
+// いない (ただし上限付きの) ctx が渡ること。cancel 済みの ctx だと Redis の Del が
+// 失敗し、キャッシュが最大 1 時間残る。
+func TestDeleteAccountProcessor_InvalidateSurvivesJobCancel(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		preserve bool
+	}{
+		{"local purge", false},
+		{"local preserve", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			userRepo := &cancelingUserRepo{MockUserRepository: testutil.NewMockUserRepository(), cancel: cancel}
+			userRepo.Users["u"] = &model.User{ID: "u", IsDeleted: true}
+			userRepo.Profiles["u"] = &model.UserProfile{UserID: "u"}
+			cache := &recordingPushCache{}
+			p := processors.NewDeleteAccountProcessor(nil, nil, nil)
+			p.SetUserRepo(userRepo)
+			p.SetPushSubscriptionCache(cache)
+
+			// preserve は後続の cleanup が cancel を見て error を返すが、
+			// 資格情報の削除とキャッシュの破棄はその前に済んでいる。
+			_ = p.Handle(ctx, deleteAccountTask(t, queue.DeleteAccountPayload{UserID: "u", PreserveAccount: tt.preserve}))
+			require.Error(t, ctx.Err(), "the job context must be canceled by the repository")
+			require.Equal(t, []string{"u"}, cache.invalidated)
+			assert.NoError(t, cache.ctxErrs[0], "Invalidate must receive a live context")
+			assert.True(t, cache.deadlines[0], "Invalidate must receive a bounded context")
+		})
+	}
+}
+
+// sw_subscription 行を消す経路 (保持時の資格情報削除と、user 行の CASCADE) では
+// 購読キャッシュを捨てる。remote は sw_subscription を持たず、行も消さない。
+func TestDeleteAccountProcessor_InvalidatesPushSubscriptionCache(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		soft     bool
+		preserve bool
+		want     []string
+	}{
+		{"local purge", false, false, []string{"u"}},
+		{"local preserve", false, true, []string{"u"}},
+		{"remote purge flag", true, false, nil},
+		{"remote preserve", true, true, nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			userRepo := testutil.NewMockUserRepository()
+			userRepo.Users["u"] = &model.User{ID: "u", IsDeleted: true}
+			userRepo.Profiles["u"] = &model.UserProfile{UserID: "u"}
+			cache := &recordingPushCache{}
+			p := processors.NewDeleteAccountProcessor(testutil.NewMockNoteRepository(), testutil.NewMockDriveFileRepository(), testutil.NewMockFollowingRepository())
+			p.SetUserRepo(userRepo)
+			p.SetPushSubscriptionCache(cache)
+
+			require.NoError(t, p.Handle(context.Background(), deleteAccountTask(t, queue.DeleteAccountPayload{
+				UserID: "u", Soft: tt.soft, PreserveAccount: tt.preserve,
+			})))
+			assert.Equal(t, tt.want, cache.invalidated)
+		})
+	}
+}
+
+// 資格情報の削除に失敗したときは行が残っているので、キャッシュを捨てずに再試行へ回す。
+func TestDeleteAccountProcessor_RevokeFailureKeepsPushSubscriptionCache(t *testing.T) {
+	r := &credentialUserRepo{MockUserRepository: testutil.NewMockUserRepository(), err: errors.New("revoke failure")}
+	cache := &recordingPushCache{}
+	p := processors.NewDeleteAccountProcessor(testutil.NewMockNoteRepository(), testutil.NewMockDriveFileRepository(), testutil.NewMockFollowingRepository())
+	p.SetUserRepo(r)
+	p.SetPushSubscriptionCache(cache)
+
+	err := p.Handle(context.Background(), deleteAccountTask(t, queue.DeleteAccountPayload{UserID: "u", PreserveAccount: true}))
+	require.ErrorIs(t, err, r.err)
+	assert.Empty(t, cache.invalidated)
+}
+
+// failingHardDeleteUserRepo fails HardDeleteUser so the job is retried.
+type failingHardDeleteUserRepo struct {
+	*testutil.MockUserRepository
+	err error
+}
+
+func (r *failingHardDeleteUserRepo) HardDeleteUser(string) error { return r.err }
+
+// 物理削除に失敗したときも、キャッシュを捨てずに再試行へ回す。
+func TestDeleteAccountProcessor_HardDeleteFailureKeepsPushSubscriptionCache(t *testing.T) {
+	r := &failingHardDeleteUserRepo{MockUserRepository: testutil.NewMockUserRepository(), err: errors.New("hard delete failure")}
+	cache := &recordingPushCache{}
+	p := processors.NewDeleteAccountProcessor(testutil.NewMockNoteRepository(), testutil.NewMockDriveFileRepository(), testutil.NewMockFollowingRepository())
+	p.SetUserRepo(r)
+	p.SetPushSubscriptionCache(cache)
+
+	err := p.Handle(context.Background(), deleteAccountTask(t, queue.DeleteAccountPayload{UserID: "u"}))
+	require.ErrorIs(t, err, r.err)
+	assert.Empty(t, cache.invalidated)
+}
+
+func TestDeleteAccountProcessor_HasPushSubscriptionCache(t *testing.T) {
+	p := processors.NewDeleteAccountProcessor(nil, nil, nil)
+	assert.False(t, p.HasPushSubscriptionCache())
+	p.SetPushSubscriptionCache(&recordingPushCache{})
+	assert.True(t, p.HasPushSubscriptionCache())
+}
