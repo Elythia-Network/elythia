@@ -2,7 +2,7 @@
 
 **Status**: Draft (#3180、2026-09-24。正式名は 2026-09-30 に決定) / **Scope**: リポジトリ全体の構成、改名の範囲、本家 Misskey への追従方式
 
-未決事項 (末尾) はすべて決まった (2026-09-30)。再編の機会にあわせて行うこと (R6〜R8、D10〜D13) を 2026-10-04 に足した。段階を進めるごとにこの文書を更新する。作業の進み具合は #3180 と、段階ごとの sub-issue で管理する。
+未決事項 (末尾) はすべて決まった (2026-09-30)。再編の機会にあわせて行うこと (R6〜R8、D10〜D13) を 2026-10-04 に足した。P1 の試算 (#3370) の結果で D1 / D3 / D4 を確定した (2026-10-04)。段階を進めるごとにこの文書を更新する。作業の進み具合は #3180 と、段階ごとの sub-issue で管理する。
 
 ---
 
@@ -127,7 +127,7 @@
 
 - 各段階の PR は単体で build / test が通り、本番 (UDS) を止めずに移行できること
 - rebase and merge の方針どおり、各コミットが単体でビルドできること
-- 本家への追従の手間が今 (rebase 1 回) より大きく悪化しないこと。試算で確かめる
+- 本家への追従の手間が今 (rebase 1 回) より大きく悪化しないこと。P1 (#3370) の試算で、過去 3 回とも同じ量だと確かめた
 - 本番 (UDS) の切り替えが要る段階は、手順を先に `docs/deployment.md` に書き、隔離した環境で一度通してから本番に当てること (D13)
 
 ## 現状の把握 (2026-09-24 時点)
@@ -160,10 +160,12 @@
 <リポジトリ>/
 ├── cmd/ internal/ plugin/ tools/ migration/ ...   (Go の backend は直下のまま)
 ├── frontend/                  ← 本家の monorepo から backend を除いた部分 (pnpm workspace)
-│   ├── package.json / pnpm-workspace.yaml / pnpm-lock.yaml / .node-version / build.ts / scripts/
+│   ├── package.json / pnpm-workspace.yaml / pnpm-lock.yaml / .node-version / patches/ / scripts/
 │   ├── packages/frontend, frontend-shared, frontend-embed, sw, i18n, misskey-js, ...
+│   ├── packages-private/
 │   ├── locales/
 │   ├── assets/                ← 本家 backend から借りていた静的アセット (D3)
+│   ├── repo-assets/           ← 本家の直下の assets/ (ai.png など。D3)
 │   └── built/                 ← ビルド成果物 (gitignore。本番はここを bind mount)
 ├── tests/                     ← R3
 ├── deploy/
@@ -172,32 +174,60 @@
 ```
 
 - **Go は直下に残す。** 本家に倣って `backend/` へ移す案もあるが、Go のパスが全て変わるうえ得るものが少ない。
-- **frontend に取り込む範囲は「本家の monorepo から `packages/backend` を除いたもの」**。画面本体 (`packages/frontend`) だけでは動かず、`misskey-js` / `frontend-shared` / `sw` / `i18n` / `locales` などを workspace として持つ必要がある。取り込む範囲の正確な一覧は P1 の試算で決める。
+- **frontend に取り込む範囲は「本家の monorepo から `packages/backend` を除いたもの」**。画面本体 (`packages/frontend`) だけでは動かず、`misskey-js` / `frontend-shared` / `sw` / `i18n` / `locales` などを workspace として持つ必要がある。一覧は P1 (#3370) で次のとおり確定した。
+
+| 区分 | 本家のパス |
+|---|---|
+| 取り込む | `package.json`、`pnpm-workspace.yaml`、`.node-version`、`patches/`、`scripts/`、`locales/`、`packages/` (`packages/backend` を除く)、`packages-private/`、`LICENSE`・`COPYING` (D12)、`.gitattributes` (改行を LF に揃える指定。本体には無い)、`.gitignore` (`built/` などの生成物)、`assets/` (`repo-assets/` へ。D3)、`packages/backend/assets/` (`assets/` へ。D3) |
+| 作り直す | `pnpm-lock.yaml` (D4) |
+| 取り込まない | `packages/backend` (アセットを除く)、`.github/`、`.config/`、`Dockerfile`、`Dockerfile.assets` (fork 独自。P4 で置き換える)、`compose*.yml`、`healthcheck.sh`、`Procfile`、`.dockerignore`・`.dockleignore` (本体の Dockerfile が持つ)、`.gitmodules`、文書類 (`CHANGELOG.md`・`CONTRIBUTING.md`・`README.md`・`CODE_OF_CONDUCT.md`・`ROADMAP.md`・`SECURITY.md`)、AI エージェント向けの設定 (`.agents/`・`.claude/`・`AGENTS.md`・`CLAUDE.md`)、エディタと bot の設定 (`.vscode/`・`.devcontainer/`・`.editorconfig`・`.vsls.json`・`.coderabbit.yaml`・`codecov.yml`・`crowdin.yml`・`renovate.json5`)、`idea/` |
+
+- 取り込んだ `package.json` / `pnpm-workspace.yaml` からは `packages/backend` を外す。直下の `package.json` に残る backend 向けの script (`migrate` など) は動かないが、追従の衝突を減らすため消さずに置く。
+- `packages-private/diagnostics-backend` は `packages/backend` を測る道具なので、取り込んでも動かない。P4 で外すか残すかを決める。
+- **付け替えに伴って直す参照が 2 系統ある。** どちらも独自変更として残り、追従で衝突しうる。
+  - vite の alias `'/static-assets/'` が `../backend/assets/` を指している (`packages/frontend/vite.config.ts` と `packages/frontend-embed/vite.config.ts`)。`frontend/assets/` へ向け直す
+  - `scripts/build-assets.mjs` と vite の開発時の設定が `.config/default.yml` を読む。本番のビルドは読めなくても進むが、開発サーバーは本体の設定を読む形に直す
 
 ### D2. 本家の参照 (`.cache/misskey`)
 
 - `UPSTREAM_MISSKEY_VERSION` に追従している本家の版を 1 行で書く (submodule の gitlink の代わり)
 - `make upstream-fetch` がその版を `.cache/misskey/<版>/` へ取得する。tools とテストは環境変数 (例 `MK_UPSTREAM_DIR`、既定 `.cache/misskey/$(cat UPSTREAM_MISSKEY_VERSION)`) で場所を受け取る
-- golden は既にコミット済みの testdata なので、本家のソースが要るのは追従時の再生成、本家を読むゲート、本家 backend e2e、apicompat だけ
+- golden は既にコミット済みの testdata なので、本家のソースが要るのは追従時の再生成、本家を読むゲート、本家 backend e2e、apicompat だけ (`misskey-js` の型の生成に使う `api.json` を本家 backend のビルドで作る場合は、追従時の再生成に含める。P4 で決める)
 - CI で本家を読む job は `actions/checkout` で `misskey-dev/misskey` を `UPSTREAM_MISSKEY_VERSION` の ref で `.cache/misskey/...` へ取得する
 - **本家を読むテストは「無ければ skip」の形を保ち、CI では skip を禁じる** (今の `MK_FRONTEND_GATES_REQUIRE_SUBMODULE` と同じ形)。skip が成功扱いになる問題 (#2892) を持ち込まない
 - **取得方法は手元と CI で分ける** (Q3)。手元は共有の bare mirror を 1 つ持ち、版ごとに worktree で展開する (追従作業で旧版と新版を並べるため。2 回目以降の取得が速い)。CI は今と同じく `actions/checkout` で毎回取る (shallow)
 
 ### D3. 本家 backend から借りているアセット
 
-- `packages/backend/assets` (favicon・アイコン等): **`frontend/assets/` に置く** (Q6)。本家では backend 側にあるが、配信しているのは画面向けの画像なので実態に合う。追従時に差分を当てる対象が frontend 側の 1 か所にまとまる
+- `packages/backend/assets` (favicon・アイコン等): **`frontend/assets/` に置く** (Q6)。本家では backend 側にあるが、配信しているのは画面向けの画像なので実態に合う
+- **本家の直下の `assets/` (`ai.png`・バナーなど) は `frontend/repo-assets/` に移す** (2026-10-04、#3370)。本家の monorepo の直下には既に `assets/` があり、Q6 のままでは名前がぶつかる。本体はこれを image の中で `/app/repo-assets` として配信しているので、名前をそれに揃える
+- 追従で差分を当てるときのパスの付け替えは、この 2 か所になる (D4)。
 - `@misskey-dev/emoji-assets`: frontend の workspace の依存として持つ (本家では backend の依存だが、使うのは画像ファイルだけ)。Dockerfile は `frontend/node_modules/...` から取る
 - `.dockerignore` の再包含の記述 (pnpm の実体側を再包含している) も新しいパスに合わせる
 
 ### D4. 本家への追従 (`make upstream-sync`)
 
 1. 本家の objects を手元に取る (`git fetch upstream-misskey --tags`、remote は本体リポジトリに追加するが branch は作らない)
-2. `git diff <旧版> <新版> -- <frontend 側のパス>` を `git apply --3way --directory=frontend` で当てる。`packages/backend/assets` は `frontend/assets/` へ当てる
-3. 衝突はファイル単位で衝突マーカーとして残る。解いてコミットし、`UPSTREAM_MISSKEY_VERSION` を上げる
-4. backend 側の変更は今と同じく triage して Go に移植する (docs/upstream-catch-up.md)
+2. **変更されたパスを、D1 の 3 区分のどれかに分類する。** どれにも当たらないパス (本家が直下に新しく足したファイルなど) があれば止める。「取り込む」で絞るだけだと、新しいパスが黙って落ちるため
+3. 付け替え先ごとに `git diff --binary --no-renames <旧版> <新版> -- <パス>` を取り、`git apply --3way` で当てる。`--directory` は 1 回に 1 つしか指定できないので、3 回に分ける。`--no-renames` で rename をファイルの削除と追加として扱い、付け替えた先で rename の元のパスを探さずに済むようにする
+   - `packages/backend/assets/` → `frontend/assets/` (`-p4 --directory=frontend/assets`)
+   - `assets/` → `frontend/repo-assets/` (`-p2 --directory=frontend/repo-assets`)
+   - それ以外の「取り込む」パス → `frontend/` の下の同じパス (`--directory=frontend`)。pathspec に `':(exclude)packages/backend'` を添える。添えないと backend の差分が `frontend/packages/backend/` へ新しいファイルとして当たる
+4. `pnpm-lock.yaml` は当てる対象から外し、**直前の `frontend/pnpm-lock.yaml` を基点に** `frontend/` で `pnpm install --lockfile-only` を実行して作り直す。本家の lock は使わない。backend を外した lock は本家の lock より約 4800 行少なく (2026.10.0 で実測)、本家の lock の差分は毎回衝突するため。`--lockfile-only` は lock に無い依存と範囲が変わった依存をその時点の最新に解決するので、本家が試した組とずれうる。作り直した lock の差分を目視し、`package.json` で変わった依存以外が動いていないことを確かめる
+5. 衝突はファイル単位で衝突マーカーとして残る。解いてコミットし、`UPSTREAM_MISSKEY_VERSION` を上げる
+6. backend 側の変更は今と同じく triage して Go に移植する (docs/upstream-catch-up.md)
 
 - 今の fork の rebase (`rebase --onto`) と比べて、衝突の解き方が「コミット単位」から「ファイル単位」になる。独自変更の一覧は git の履歴ではなく `docs/divergence.md` §4-2 で保つ
-- **この方式で 2026.9.0 → 2026.9.1 がどう当たるかを P1 で試算してから確定する**
+- 取り込まないパスを絞り込みで外すのは、本家が版ごとに `.github/workflows` などを変えるため (2026.9.1 では `.github/workflows` だけで 24 ファイル)。外さないと、無いファイルへの差分として当たらない。
+- **P1 (#3370) の試算:** 過去 3 回の追従を scratch で再現し、今の方式 (独自コミットを 1 件ずつ当て直す) と比べた。どちらも衝突の量は同じで、衝突したファイル以外は実際の `-mk.0` の木 (backend を除く) と完全に一致した。試算では `packages/backend` 以外の差分をまとめて当てた。D1 の「取り込む」パスだけに絞ると、当てるファイルはさらに減る (表の「うち「取り込む」パス」の列)
+
+| 追従 | 本家の差分 (backend 以外、`.github` なども含む) | うち「取り込む」パス | 独自コミット | 今の方式 | D4 の方式 |
+|---|---|---|---|---|---|
+| 2026.7.0 → 2026.9.0 | 138 ファイル | 105 ファイル | 50 | 1 回止まる、1 ファイル | 1 ファイル、1 か所 |
+| 2026.9.0 → 2026.9.1 | 45 ファイル | 19 ファイル | 151 | 衝突なし | 衝突なし |
+| 2026.9.1 → 2026.10.0 | 20 ファイル | 16 ファイル | 170 | 1 回止まる、3 ファイル | 3 ファイル、5 か所 |
+
+- 数え方: ファイル数は `git diff --name-only <旧版> <新版>` を、`packages/backend` を除いて (2 列目)、または D1 の「取り込む」パスに絞って `--no-renames` で (3 列目) 数えた。`packages/backend/assets` の変更は 3 回とも 0。独自コミットは `git rev-list --count --no-merges <旧版>..<その版の最後の -mk タグ>`
 
 ### D5. 版と表示
 
@@ -290,18 +320,18 @@ P4 (bind mount の元が `third_party/misskey/built` から `frontend/built` に
 
 | 段階 | 内容 | 名前に依存 |
 |---|---|---|
-| P1 | 追従方式の試算と、取り込む範囲の確定 | しない |
+| P1 | 追従方式の試算と、取り込む範囲の確定 (#3370、2026-10-04 に完了) | しない |
 | P1b | 復路の保証をやめる (D9、#3191)。宣言は P6 の版の CHANGELOG | しない |
 | P2 | テスト関連の配置の整理 (D6) | しない |
-| P3 | 本家の参照を `.cache/misskey` へ分離 (D2)。この時点では frontend はまだ submodule のまま | しない |
-| P4 | frontend の取り込み (D1 / D3 / D4 / D5)、submodule と fork の廃止。frontend の CI の required 化とライセンスの表示 (R8 / D12)、本番の切り替え (D13) を含む | しない |
+| P3 | 本家の参照を `.cache/misskey` へ分離 (D2)。この時点では frontend はまだ submodule のまま。fork の `packages/backend` にある、本家 backend e2e を mk-go へ向けて走らせる 3 ファイル (`test-server-mkgo/entry.ts` など) を `tests/` へ移す | しない |
+| P4 | frontend の取り込み (D1 / D3 / D4 / D5)、submodule と fork の廃止。frontend の CI の required 化とライセンスの表示 (R8 / D12)、本番の切り替え (D13) を含む。あわせて、`@misskey-dev/emoji-assets` を frontend の依存に持ち直す (今は backend の `node_modules` から取っている)、Node.js の版を本家の `Dockerfile` でなく `.node-version` から読む、fork の assets image (`Dockerfile.assets` と publish の workflow。`Dockerfile.bundled` が使う) を本体の workflow でのビルドに置き換える (R2)、`misskey-js` の型の生成 (`build-misskey-js-with-types`) が使う `api.json` の作り方を決める (`api.json` は本家のソースに無く、本家 backend をビルドして `generate-api-json` で作る生成物。`.cache/misskey` で本家 backend をビルドするか、本体の API から作るか) | しない |
 | P5 | 正式な名前 (**決定: Elythia**) と、プラグインの呼び名 (**決定: 据え置き**) の決定。どちらも 2026-09-30 | — |
 | P5b | リポジトリの移管 (D10)。コードの名前は変えず、旧 URL からの転送で動くことを確かめる | する |
 | P6 | 改名 (D7) と実行バイナリのサブコマンド化 (R7 / D11)。2.0.0 として出す (R6) | する |
 | P6b | プラグインまわりの名前の移行 (D8)。連合に出る nodeinfo の宣言を含むので P6 とは別 PR にするが、同じ版で出す | する |
 | P7 | ドキュメント・CLAUDE.md の整理。`docs/divergence.md` の分割 (R8) を含む | する |
 
-- **P1 (試算) を最初に済ませる。** 追従の方式 (D4) が実用になるかで P4 の作業量が変わる。2026.9.0 → 2026.9.1 に加えて、直近の 2026.9.1 → 2026.10.0 でも当てて確かめる。P1b と P2 は他の段階と触るファイルが重ならないので、P1 と並行して進める
+- **P1 (試算) を最初に済ませた (#3370)。** 追従の方式 (D4) が実用になるかで P4 の作業量が変わるため。2026.7.0 → 2026.9.0、2026.9.0 → 2026.9.1、2026.9.1 → 2026.10.0 の 3 回で確かめた。P1b と P2 は他の段階と触るファイルが重ならないので、P1 と並行して進める
 - P1b を P3 / P4 より先に置くのは、TS を立てる e2e の読み先が動く段階で `mkgo-born` を「守る」対象から「測る」対象に変えておくため (D9)
 - P5b (移管) を P6 より先に分けるのは、移管で動くもの (D10) とコードの改名で動くものを別々に確かめるため
 - P6 と P6b を同じ版で出すのは、運営者が上げる手間 (イメージ名・バイナリ名・マニフェスト名・nodeinfo の宣言) を 1 回にまとめるため
@@ -315,7 +345,7 @@ P4 (bind mount の元が `third_party/misskey/built` から `frontend/built` に
 - ~~Q3. 本家の取得方法~~ → **手元は共有の bare mirror + worktree、CI は毎回 shallow** (2026-09-30、D2)
 - ~~Q4. 旧名の配布イメージの猶予期間~~ → **設けない**。改名の版で旧名での publish を止め、移転を案内する (2026-09-30)
 - ~~Q5. 旧 URL (`/about-mkgo` など) の転送を残す期間~~ → **転送しない** (2026-09-30)
-- ~~Q6. `assets/` (D3) の名前と置き場所~~ → **`frontend/assets/`** (2026-09-30、D3)
+- ~~Q6. `assets/` (D3) の名前と置き場所~~ → **`frontend/assets/`** (2026-09-30、D3)。本家の直下の `assets/` は `frontend/repo-assets/` へ移す (2026-10-04、#3370)
 - ~~Q7. `mkGoFrontendVersion` の新しい形式~~ → **廃止する** (2026-09-30、D5)。frontend だけの版という概念が要らない
 - ~~Q9. プラグインの旧名を読み続ける猶予期間~~ → **設けない** (2026-09-30、D8)。旧名だけのマニフェストはビルドエラーにする
 
@@ -323,4 +353,4 @@ P4 (bind mount の元が `third_party/misskey/built` から `frontend/built` に
 
 - **本番の更新手順が変わる。** bind mount の元 (`third_party/misskey/built`) と、`uds-frontend-build` の出力先が変わる。本番を触る hazard (ビルドが配信物を消してから作る、i18n のビルドが本番の locales へ書く) は新しいパスでも同じなので、Makefile と memory の記述を合わせて更新する
 - **独立リポジトリのプラグイン 4 つ** は P6 でモジュールパスが変わると import を直すまでビルドできない。P6 と同時にそれぞれ更新する
-- **追従の手間が増えうる。** P1 の試算で悪化の度合いを確かめ、許容できなければ D4 を見直す
+- ~~**追従の手間が増えうる。**~~ P1 (#3370) の試算で、過去 3 回とも今の方式と同じ量だった
