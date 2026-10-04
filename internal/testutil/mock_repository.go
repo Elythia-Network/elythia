@@ -4023,15 +4023,17 @@ func (m *MockInstanceRepository) IncrementCount(host, column string, delta int) 
 	if !ok {
 		return ErrNotFound
 	}
+	// 本物の IncrementCount と同じく 0 で止める。
+	add := func(v int) int { return max(v+delta, 0) }
 	switch column {
 	case "usersCount":
-		inst.UsersCount += delta
+		inst.UsersCount = add(inst.UsersCount)
 	case "notesCount":
-		inst.NotesCount += delta
+		inst.NotesCount = add(inst.NotesCount)
 	case "followingCount":
-		inst.FollowingCount += delta
+		inst.FollowingCount = add(inst.FollowingCount)
 	case "followersCount":
-		inst.FollowersCount += delta
+		inst.FollowersCount = add(inst.FollowersCount)
 	}
 	return nil
 }

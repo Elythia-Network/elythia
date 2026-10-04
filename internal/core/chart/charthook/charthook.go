@@ -10,6 +10,11 @@
 // All adapter methods are best-effort: chart errors are intentionally
 // swallowed because the upstream services treat hook failures as
 // non-fatal (matching Misskey TS).
+//
+// The hooks also drive the instance notesCount / usersCount counters through
+// InstanceCounter, because upstream updates those counters at the same call
+// sites and under the same meta.enableStatsForFederatedInstances branch as the
+// instance chart.
 package charthook
 
 import (
@@ -47,9 +52,75 @@ type Hooks struct {
 	ChartsForRemoteUser    bool
 	ChartsForFederatedInst bool
 	// StatsForFederatedInst mirrors meta.enableStatsForFederatedInstances.
-	// Upstream nests the follow-related instance chart updates inside this
-	// flag, so the instance following / followers charts need both flags.
+	// Upstream nests the note / user / follow-related instance chart updates
+	// inside this flag, so those instance charts need both flags.
 	StatsForFederatedInst bool
+
+	// InstanceCounter receives the instance notesCount / usersCount
+	// increments. nil disables them.
+	InstanceCounter InstanceCounter
+
+	// metaSource, when set, is read on every event so meta flag changes take
+	// effect without a restart. The three fields above are the fallback.
+	metaSource func() (*model.Meta, error)
+}
+
+// InstanceCounter accumulates increments of an instance counter column
+// (notesCount / usersCount). Implemented by instance.CounterBuffer.
+type InstanceCounter interface {
+	Add(host, column string, delta int)
+}
+
+// Instance counter column names passed to InstanceCounter.Add.
+const (
+	instanceNotesCount = "notesCount"
+	instanceUsersCount = "usersCount"
+)
+
+// SetMetaSource makes the hooks read the meta flags from fetch on every
+// event instead of the snapshot fields. A failed fetch falls back to the
+// fields.
+func (h *Hooks) SetMetaSource(fetch func() (*model.Meta, error)) {
+	h.metaSource = fetch
+}
+
+// flagSet is the effective meta flags for one event.
+type flagSet struct {
+	remoteUser bool
+	fedCharts  bool
+	fedStats   bool
+}
+
+// flags returns the meta flags to apply to the current event.
+//
+// 本家は meta をその場で読むので、admin で切り替えると次のイベントから効く。
+// 起動時に一度だけ写した値で判定すると、切り替えが再起動まで反映されない。
+// metaSource は cachedMeta の Fetch で、イベントごとの DB 往復は無い。
+func (h *Hooks) flags() flagSet {
+	f := flagSet{
+		remoteUser: h.ChartsForRemoteUser,
+		fedCharts:  h.ChartsForFederatedInst,
+		fedStats:   h.StatsForFederatedInst,
+	}
+	if h.metaSource == nil {
+		return f
+	}
+	m, err := h.metaSource()
+	if err != nil || m == nil {
+		return f
+	}
+	return flagSet{
+		remoteUser: m.EnableChartsForRemoteUser,
+		fedCharts:  m.EnableChartsForFederatedInstances,
+		fedStats:   m.EnableStatsForFederatedInstances,
+	}
+}
+
+// addInstanceCount forwards one counter increment when a counter is wired.
+func (h *Hooks) addInstanceCount(host, column string, delta int) {
+	if h.InstanceCounter != nil {
+		h.InstanceCounter.Add(host, column, delta)
+	}
 }
 
 // Config bundles every chart pointer alongside the id generator. The
@@ -135,15 +206,22 @@ func (h *Hooks) OnNoteCreated(note *model.Note) {
 	if h == nil || note == nil {
 		return
 	}
+	f := h.flags()
 	if h.Notes != nil {
 		_ = h.Notes.Update(note, true)
 	}
 	noteIsRemote := note.UserHost != nil && *note.UserHost != ""
-	if h.PerUserNotes != nil && note.UserID != "" && (h.ChartsForRemoteUser || !noteIsRemote) {
+	if h.PerUserNotes != nil && note.UserID != "" && (f.remoteUser || !noteIsRemote) {
 		_ = h.PerUserNotes.Update(note.UserID, note, true)
 	}
-	if h.Instance != nil && noteIsRemote && h.ChartsForFederatedInst {
-		_ = h.Instance.UpdateNote(*note.UserHost, note, true)
+	// 本家 NoteCreateService.postNoteCreated は instance の notesCount と
+	// instanceChart.updateNote を enableStatsForFederatedInstances の分岐の
+	// 中でだけ行い、chart はさらに enableChartsForFederatedInstances を見る (#3330)。
+	if noteIsRemote && f.fedStats {
+		h.addInstanceCount(*note.UserHost, instanceNotesCount, 1)
+		if h.Instance != nil && f.fedCharts {
+			_ = h.Instance.UpdateNote(*note.UserHost, note, true)
+		}
 	}
 	// 書き込みアクティブユーザー: ローカルユーザーのみカウントする。
 	if h.ActiveUsers != nil && note.UserID != "" && (note.UserHost == nil || *note.UserHost == "") {
@@ -158,15 +236,20 @@ func (h *Hooks) OnNoteDeleted(note *model.Note) {
 	if h == nil || note == nil {
 		return
 	}
+	f := h.flags()
 	if h.Notes != nil {
 		_ = h.Notes.Update(note, false)
 	}
 	noteIsRemote := note.UserHost != nil && *note.UserHost != ""
-	if h.PerUserNotes != nil && note.UserID != "" && (h.ChartsForRemoteUser || !noteIsRemote) {
+	if h.PerUserNotes != nil && note.UserID != "" && (f.remoteUser || !noteIsRemote) {
 		_ = h.PerUserNotes.Update(note.UserID, note, false)
 	}
-	if h.Instance != nil && noteIsRemote && h.ChartsForFederatedInst {
-		_ = h.Instance.UpdateNote(*note.UserHost, note, false)
+	// 本家 NoteDeleteService.delete も作成と同じ入れ子 (#3330)。
+	if noteIsRemote && f.fedStats {
+		h.addInstanceCount(*note.UserHost, instanceNotesCount, -1)
+		if h.Instance != nil && f.fedCharts {
+			_ = h.Instance.UpdateNote(*note.UserHost, note, false)
+		}
 	}
 }
 
@@ -187,11 +270,12 @@ func (h *Hooks) commitFollow(follower, followee *model.User, isFollow bool) {
 	if h == nil || follower == nil || followee == nil {
 		return
 	}
+	f := h.flags()
 	if h.PerUserFollowing != nil {
 		// リモートユーザーのチャートは ChartsForRemoteUser で制御
 		followerRemote := isRemote(follower)
 		followeeRemote := isRemote(followee)
-		if h.ChartsForRemoteUser || (!followerRemote && !followeeRemote) {
+		if f.remoteUser || (!followerRemote && !followeeRemote) {
 			_ = h.PerUserFollowing.Update(follower, followee, isFollow)
 		}
 	}
@@ -200,13 +284,43 @@ func (h *Hooks) commitFollow(follower, followee *model.User, isFollow bool) {
 	// 集計列と同じ「その host の側から見た」数 (#3330)。remote → local は
 	// その host の利用者がフォローしている側なので updateFollowing、
 	// local → remote はフォローされている側なので updateFollowers。
-	if h.Instance != nil && h.StatsForFederatedInst && h.ChartsForFederatedInst {
+	if h.Instance != nil && f.fedStats && f.fedCharts {
 		if isRemote(follower) && !isRemote(followee) {
 			_ = h.Instance.UpdateFollowing(*follower.Host, isFollow)
 		}
 		if !isRemote(follower) && isRemote(followee) {
 			_ = h.Instance.UpdateFollowers(*followee.Host, isFollow)
 		}
+	}
+}
+
+// OnFollowersMovedAway records the chart side of upstream
+// AccountMoveService.adjustFollowingCounts: the local followers of oldAccount
+// each lose one following, and when oldAccount is remote its instance loses
+// followers. The instance followersCount column itself is adjusted by the
+// move service.
+//
+// 本家は perUserFollowingChart をフォロワーごとに 1 回ずつ減らし、
+// instanceChart.updateFollowers(host, false) は**人数に関わらず 1 回だけ**
+// 呼ぶ (集計列のほうは人数ぶん減らす)。chart の値が人数とずれるのも本家の
+// とおりに写している (#3330)。instance chart は他のフォロー系と同じく
+// enableStatsForFederatedInstances の分岐の中。
+func (h *Hooks) OnFollowersMovedAway(oldAccount *model.User, localFollowerIDs []string) {
+	if h == nil || oldAccount == nil || len(localFollowerIDs) == 0 {
+		return
+	}
+	f := h.flags()
+	oldRemote := isRemote(oldAccount)
+	if h.PerUserFollowing != nil && (f.remoteUser || !oldRemote) {
+		for _, followerID := range localFollowerIDs {
+			if followerID == "" {
+				continue
+			}
+			_ = h.PerUserFollowing.Update(&model.User{ID: followerID}, oldAccount, false)
+		}
+	}
+	if h.Instance != nil && oldRemote && f.fedStats && f.fedCharts {
+		_ = h.Instance.UpdateFollowers(*oldAccount.Host, false)
 	}
 }
 
@@ -241,14 +355,18 @@ func (h *Hooks) commitDrive(file *model.DriveFile, isAdditional bool) {
 	if h == nil || file == nil {
 		return
 	}
+	f := h.flags()
 	if h.Drive != nil {
 		_ = h.Drive.Update(file, isAdditional)
 	}
 	fileIsRemote := file.UserHost != nil && *file.UserHost != ""
-	if h.PerUserDrive != nil && file.UserID != nil && *file.UserID != "" && (h.ChartsForRemoteUser || !fileIsRemote) {
+	if h.PerUserDrive != nil && file.UserID != nil && *file.UserID != "" && (f.remoteUser || !fileIsRemote) {
 		_ = h.PerUserDrive.Update(file, isAdditional)
 	}
-	if h.Instance != nil && fileIsRemote && h.ChartsForFederatedInst {
+	// 本家 DriveService は instanceChart.updateDrive を
+	// enableChartsForFederatedInstances だけで判定する (stats の分岐の外)。
+	// instance に drive の集計列は無い。
+	if h.Instance != nil && fileIsRemote && f.fedCharts {
 		_ = h.Instance.UpdateDrive(file, isAdditional)
 	}
 }
@@ -264,8 +382,18 @@ func (h *Hooks) OnRemoteUserCreated(user *model.User) {
 	if h.Users != nil {
 		_ = h.Users.Update(user, true)
 	}
-	if h.Instance != nil && user.Host != nil && *user.Host != "" && h.ChartsForFederatedInst {
-		_ = h.Instance.NewUser(*user.Host)
+	// 本家 ApPersonService.createPerson は instance の usersCount の加算と
+	// instanceChart.newUser を enableStatsForFederatedInstances の分岐の中で
+	// 行い、chart はさらに enableChartsForFederatedInstances を見る (#3330)。
+	if !isRemote(user) {
+		return
+	}
+	f := h.flags()
+	if f.fedStats {
+		h.addInstanceCount(*user.Host, instanceUsersCount, 1)
+		if h.Instance != nil && f.fedCharts {
+			_ = h.Instance.NewUser(*user.Host)
+		}
 	}
 }
 
@@ -281,7 +409,9 @@ func (h *Hooks) OnInboxReceived(host string) {
 	if h.Federation != nil && host != "" {
 		_ = h.Federation.Inbox(host)
 	}
-	if h.Instance != nil && host != "" {
+	// 本家 InboxProcessorService は instanceChart.requestReceived を
+	// enableChartsForFederatedInstances の下でだけ呼ぶ (#3330)。
+	if h.Instance != nil && host != "" && h.flags().fedCharts {
 		_ = h.Instance.RequestReceived(host)
 	}
 }
@@ -302,7 +432,9 @@ func (h *Hooks) OnDelivered(host string, succeeded bool) {
 	if h.Federation != nil && host != "" {
 		_ = h.Federation.Delivered(host, succeeded)
 	}
-	if h.Instance != nil && host != "" {
+	// 本家 DeliverProcessorService も instanceChart.requestSent を
+	// enableChartsForFederatedInstances の下でだけ呼ぶ (#3330)。
+	if h.Instance != nil && host != "" && h.flags().fedCharts {
 		_ = h.Instance.RequestSent(host, succeeded)
 	}
 }

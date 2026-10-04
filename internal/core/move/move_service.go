@@ -105,6 +105,33 @@ type Service struct {
 	blockQueue   BlockEnqueuer
 	roleAssigner RoleAssigner
 	antennaMover AntennaMover
+
+	// instance の集計列と chart (#3330)。未設定なら触らない。
+	instanceCounter      InstanceFollowersCounter
+	instanceStatsEnabled func() bool
+	chartHook            ChartHook
+}
+
+// InstanceFollowersCounter adjusts instance(host).followersCount. Implemented
+// by repository.InstanceRepository.
+type InstanceFollowersCounter interface {
+	IncrementFollowersCount(host string, delta int) error
+}
+
+// ChartHook records the chart side of the follower adjustment on a move.
+// Implemented by charthook.Hooks.
+type ChartHook interface {
+	OnFollowersMovedAway(oldAccount *model.User, localFollowerIDs []string)
+}
+
+// SetInstanceStats wires the instance followersCount adjustment and the
+// chart hook used by adjustFollowingCounts. enabled mirrors
+// meta.enableStatsForFederatedInstances; nil means enabled (the upstream
+// default). Any argument may be nil.
+func (s *Service) SetInstanceStats(counter InstanceFollowersCounter, enabled func() bool, chartHook ChartHook) {
+	s.instanceCounter = counter
+	s.instanceStatsEnabled = enabled
+	s.chartHook = chartHook
 }
 
 // SetFollowQueue wires the queue used to schedule follower migration jobs.
@@ -433,6 +460,33 @@ func (s *Service) adjustFollowingCounts(localFollowerIDs []string, src *model.Us
 			slog.Warn("move: decrement followee's followersCount failed",
 				"followeeID", followeeID, "err", err)
 		}
+	}
+	s.adjustInstanceFollowers(localFollowerIDs, src)
+}
+
+// adjustInstanceFollowers mirrors the instance-stats and chart tail of
+// upstream adjustFollowingCounts.
+//
+// 本家は旧アカウントがリモートで enableStatsForFederatedInstances が true の
+// とき、その instance の followersCount を**ローカルのフォロワー数ぶん**減らす
+// (followersCount は「ローカルの利用者がその host の利用者をフォローしている数」
+// なので、旧アカウントをフォローしていたローカルの人数がそのまま抜ける)。
+// フォロー行は残すので、後で行を消す unfollow は移行済みのガードでカウントを
+// 触らず、二重には減らない。
+//
+// chart (per-user following と instance followers) は charthook 側で本家と同じ
+// 条件を見る。本家ではこの部分が followee の数の調整より後ろにあり、followee の
+// 一覧の取得が失敗すると例外でここまで来ない。呼び出し位置をそれに合わせている。
+func (s *Service) adjustInstanceFollowers(localFollowerIDs []string, src *model.User) {
+	if s.instanceCounter != nil && src.Host != nil && *src.Host != "" &&
+		(s.instanceStatsEnabled == nil || s.instanceStatsEnabled()) {
+		if err := s.instanceCounter.IncrementFollowersCount(*src.Host, -len(localFollowerIDs)); err != nil {
+			slog.Warn("move: decrement instance followersCount failed",
+				"host", *src.Host, "followers", len(localFollowerIDs), "err", err)
+		}
+	}
+	if s.chartHook != nil {
+		s.chartHook.OnFollowersMovedAway(src, localFollowerIDs)
 	}
 }
 

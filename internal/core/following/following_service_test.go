@@ -1748,3 +1748,60 @@ func TestUnfollowQuiet_NoDeliveryNoNotification(t *testing.T) {
 	assert.Equal(t, 0, userRepo.Users["bob"].FollowersCount)
 	assert.ErrorIs(t, svc.UnfollowQuiet("alice", "bob"), following.ErrNotFollowing)
 }
+
+// 移行済みアカウントが絡むフォローでは、行は作るがカウント・instance の集計列・
+// chart を動かさない (#3330)。本家 insertFollowingDoc の
+// `if (!followeeUser.movedToUri && !followerUser.movedToUri)` と同じガードで、
+// Follow も AcceptRequest (承認) も insertFollowingDoc を通る。unfollow 側の
+// ガード (TestUnfollow_SkipsCountAdjustmentWhenMoved) と対になる。
+func TestFollow_SkipsCountsWhenMoved(t *testing.T) {
+	host := "remote.example"
+	const movedURI = "https://elsewhere.example/users/x"
+	cases := []struct {
+		name      string
+		movedUser string // movedToUri を立てるユーザー ("" ならどちらも未移行)
+		movedTo   string // 立てる movedToUri の値 (空文字は未移行とみなす)
+		accept    bool   // true なら承認制アカウントへの申請を承認する経路
+		want      int    // remote.FollowingCount / alice.FollowersCount / instance.FollowingCount
+	}{
+		{name: "follow: neither moved", want: 1},
+		{name: "follow: empty movedToUri is not moved", movedUser: "alice", movedTo: "", want: 1},
+		{name: "follow: follower moved", movedUser: "remote", movedTo: movedURI, want: 0},
+		{name: "follow: followee moved", movedUser: "alice", movedTo: movedURI, want: 0},
+		{name: "accept: neither moved", accept: true, want: 1},
+		{name: "accept: follower moved", movedUser: "remote", movedTo: movedURI, accept: true, want: 0},
+		{name: "accept: followee moved", movedUser: "alice", movedTo: movedURI, accept: true, want: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, userRepo, fRepo, _ := newSvc(t)
+			instanceRepo := testutil.NewMockInstanceRepository()
+			instanceRepo.Instances[host] = &model.Instance{Host: host}
+			svc.SetInstanceRepo(instanceRepo)
+			chart := &recordingChartHook{}
+			svc.SetChartHook(chart)
+
+			addUser(t, userRepo, "alice", tc.accept)
+			remote := addUser(t, userRepo, "remote", false)
+			remote.Host = &host
+			if tc.movedUser != "" {
+				moved := tc.movedTo
+				userRepo.Users[tc.movedUser].MovedToURI = &moved
+			}
+
+			res, err := svc.Follow("remote", "alice", following.FollowOptions{})
+			require.NoError(t, err)
+			if tc.accept {
+				require.NotNil(t, res.Request)
+				require.NoError(t, svc.AcceptRequest("alice", "remote"))
+			}
+
+			// 行はガードに関係なく作る。
+			assert.Len(t, fRepo.Followings, 1, "the following row is always created")
+			assert.Equal(t, tc.want, userRepo.Users["remote"].FollowingCount)
+			assert.Equal(t, tc.want, userRepo.Users["alice"].FollowersCount)
+			assert.Equal(t, tc.want, instanceRepo.Instances[host].FollowingCount)
+			assert.Len(t, chart.follows, tc.want)
+		})
+	}
+}

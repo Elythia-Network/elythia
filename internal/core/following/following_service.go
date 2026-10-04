@@ -594,16 +594,25 @@ func (s *Service) Follow(followerID, followeeID string, opts FollowOptions) (*Fo
 		return nil, err
 	}
 
-	// counterの更新は失敗しても致命ではないが、現状はerror伝播
-	if err := s.userRepo.IncrementFollowingCount(followerID, 1); err != nil {
-		return nil, err
+	// どちらかが移行済みなら、カウント・instance の集計列・chart を動かさない。
+	// 本家 insertFollowingDoc の `if (!followeeUser.movedToUri &&
+	// !followerUser.movedToUri)` と同じガードで、unfollow 側
+	// (decrementFollowing) と対になる (#3330)。片側だけ守ると、移行済みの
+	// アカウントへのフォロー (リモートからの Follow は拒否されない) で増えた
+	// カウントが、解除のときには減らずに残る。
+	moved := isMoved(follower) || isMoved(followee)
+	if !moved {
+		// counterの更新は失敗しても致命ではないが、現状はerror伝播
+		if err := s.userRepo.IncrementFollowingCount(followerID, 1); err != nil {
+			return nil, err
+		}
+		if err := s.userRepo.IncrementFollowersCount(followeeID, 1); err != nil {
+			return nil, err
+		}
+		// remote instance の集計列を incremental 更新 (#596)。failure は warn-log
+		// のみで握り潰し、起動時 RecomputeFollowCounts が安全網。
+		s.adjustInstanceCountsForFollowing(f, 1)
 	}
-	if err := s.userRepo.IncrementFollowersCount(followeeID, 1); err != nil {
-		return nil, err
-	}
-	// remote instance の集計列を incremental 更新 (#596)。failure は warn-log
-	// のみで握り潰し、起動時 RecomputeFollowCounts が安全網。
-	s.adjustInstanceCountsForFollowing(f, 1)
 
 	if s.notificationHook != nil {
 		s.notificationHook.OnFollowed(followerID, followeeID)
@@ -615,7 +624,7 @@ func (s *Service) Follow(followerID, followeeID string, opts FollowOptions) (*Fo
 		// 呼ぶと original ID が失われ、相手が Accept をマッチングできない)。
 		s.federationHook.OnLocalFollowed(follower, followee)
 	}
-	if s.chartHook != nil {
+	if s.chartHook != nil && !moved {
 		s.chartHook.OnFollow(follower, followee)
 	}
 	// Webhookはfollower側で `follow`、followee側で `followed` を発火する。
@@ -782,14 +791,19 @@ func (s *Service) AcceptRequest(followeeID, followerID string) error {
 	if err := s.followingRepo.Create(f); err != nil {
 		return err
 	}
-	if err := s.userRepo.IncrementFollowingCount(req.FollowerID, 1); err != nil {
-		return err
+	// 承認でも本家は insertFollowingDoc を通るので、Follow と同じ移行済みの
+	// ガードを掛ける (#3330)。
+	moved := hasMoved(s.userRepo, req.FollowerID) || hasMoved(s.userRepo, req.FolloweeID)
+	if !moved {
+		if err := s.userRepo.IncrementFollowingCount(req.FollowerID, 1); err != nil {
+			return err
+		}
+		if err := s.userRepo.IncrementFollowersCount(req.FolloweeID, 1); err != nil {
+			return err
+		}
+		// remote instance counter +1 (#596)
+		s.adjustInstanceCountsForFollowing(f, 1)
 	}
-	if err := s.userRepo.IncrementFollowersCount(req.FolloweeID, 1); err != nil {
-		return err
-	}
-	// remote instance counter +1 (#596)
-	s.adjustInstanceCountsForFollowing(f, 1)
 	if s.notificationHook != nil {
 		// follower側には「follow request accepted」、followee側には通常の
 		// follow と同じく「follow」通知を作る (TS本家 insertFollowingDoc が
@@ -806,7 +820,7 @@ func (s *Service) AcceptRequest(followeeID, followerID string) error {
 			if s.federationHook != nil {
 				s.federationHook.OnLocalFollowAccepted(follower, followee)
 			}
-			if s.chartHook != nil {
+			if s.chartHook != nil && !moved {
 				s.chartHook.OnFollow(follower, followee)
 			}
 			if s.webhookHook != nil {
@@ -1135,10 +1149,15 @@ func hasMoved(userRepo repository.UserRepository, userID string) bool {
 		return false
 	}
 	u, err := userRepo.FindByID(userID)
-	if err != nil || u == nil {
+	if err != nil {
 		return false
 	}
-	return u.MovedToURI != nil && *u.MovedToURI != ""
+	return isMoved(u)
+}
+
+// isMoved reports whether u has a non-empty movedToUri.
+func isMoved(u *model.User) bool {
+	return u != nil && u.MovedToURI != nil && *u.MovedToURI != ""
 }
 
 // HasBlockingChecker reports whether the blocking checker was wired.

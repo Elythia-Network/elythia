@@ -31,6 +31,7 @@ type fullProcessorEnv struct {
 	noteRepo     *testutil.MockNoteRepository
 	reactionRepo *testutil.MockNoteReactionRepository
 	emojiRepo    *testutil.MockEmojiRepository
+	resolver     *federation.Resolver
 }
 
 func newFullProcessor(t *testing.T, fetcherBody string) *fullProcessorEnv {
@@ -60,7 +61,7 @@ func newFullProcessorFetcher(t *testing.T, fetcher federation.HTTPFetcher) *full
 	reactionSvc := corereaction.NewService(noteRepo, reactionRepo, emojiRepo, followingRepo, idGen)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	p := federation.NewProcessor(resolver, followingSvc, reactionSvc, deleteSvc, userRepo, noteRepo)
-	return &fullProcessorEnv{processor: p, userRepo: userRepo, noteRepo: noteRepo, reactionRepo: reactionRepo, emojiRepo: emojiRepo}
+	return &fullProcessorEnv{processor: p, userRepo: userRepo, noteRepo: noteRepo, reactionRepo: reactionRepo, emojiRepo: emojiRepo, resolver: resolver}
 }
 
 const noteCreateBody = `{
