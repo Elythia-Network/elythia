@@ -352,7 +352,8 @@ func TestDocsQuoteTheCIShuffleSeed(t *testing.T) {
 	}
 	checked := 0
 	for _, rel := range strings.Fields(string(out)) {
-		if strings.HasPrefix(rel, "third_party/") {
+		// 本家から取り込んだ frontend/ (#3379) と submodule は、こちらの CI の条件を書く場所ではない。
+		if strings.HasPrefix(rel, "third_party/") || strings.HasPrefix(rel, "frontend/") {
 			continue
 		}
 		for _, m := range shuffleSeedPattern.FindAllStringSubmatch(readRepoFile(t, rel), -1) {

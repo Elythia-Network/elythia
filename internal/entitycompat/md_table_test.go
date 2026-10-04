@@ -236,7 +236,9 @@ func splitTableCells(line string) []string {
 //
 // **`git ls-files` で見る** (`migrationdoc-check` と同じ理由、#2857)。ディスクを
 // 走査すると、`git add` を忘れた新規 doc が手元では検査されて CI で初めてずれる。
-// submodule の中は `git ls-files` に出ないので、fork frontend の md は対象外。
+// **`frontend/` は除く** (#3379)。本家から取り込んだ木で、md も本家のもの
+// (`locales/README.md`、misskey-js の API レポートなど)。本家の書き方で落ちると、
+// 追従のたびに他人の書いた表を直すことになる。
 func trackedMarkdownFiles(t *testing.T, root string) []string {
 	t.Helper()
 	cmd := exec.Command("git", "ls-files", "*.md")
@@ -246,7 +248,7 @@ func trackedMarkdownFiles(t *testing.T, root string) []string {
 
 	var files []string
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line != "" {
+		if line != "" && !strings.HasPrefix(line, "frontend/") {
 			files = append(files, line)
 		}
 	}
