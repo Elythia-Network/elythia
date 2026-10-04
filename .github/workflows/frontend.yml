@@ -1,0 +1,130 @@
+# frontend/ (本家 Misskey から取り込んだ pnpm workspace、#3379) の CI。
+#
+# 本家 (fork) が回していた workflow のうち、frontend に関わるものをここへ移す。
+# backend 向けのもの (test-backend / test-federation / validate-api-json など) と
+# 本家の運用向けのもの (docker / release / labeler など) は持ってこない。
+#
+# - frontend-lint: 9 workspace の eslint、typecheck (frontend / sw / misskey-js)、
+#   check-dts、SPDX ヘッダー、locale の検証、misskey-js の API レポート
+# - frontend-test: 本番設定でのビルド、frontend の vitest、misskey-js のテスト
+# - frontend: 上の 2 つを集約する。required にするときはこの名前だけを
+#   branch protection に入れる (`test` と同じ形。job を足しても protection を
+#   触らずに済む)
+#
+# **今は required にしていない** (#3379 の P4e で required にする)。非ブロッキングを
+# `continue-on-error` で表さないこと — job が成功扱いになり、失敗が見えなくなる。
+#
+# **ビルドを先に行う。** typecheck・check-dts・API レポート・テストは、workspace の
+# 各パッケージ (misskey-js、i18n など) の built/ を読む。ビルドの前に回すと
+# 「モジュールが見つからない」で落ちる (手元で実測)。
+name: frontend
+
+on:
+  pull_request:
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: frontend
+
+jobs:
+  frontend-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: frontend/package.json
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: frontend/.node-version
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      # package.json と lock の食い違いは --frozen-lockfile が落とす (lock は本家の
+      # lock を当てずに作り直す。設計 D4)。
+      - run: pnpm i --frozen-lockfile
+
+      - run: pnpm build
+
+      - name: eslint
+        run: >-
+          pnpm --no-bail
+          --filter frontend --filter frontend-shared --filter frontend-builder
+          --filter frontend-embed --filter icons-subsetter --filter sw
+          --filter misskey-js --filter misskey-bubble-game --filter misskey-reversi
+          run eslint
+
+      - name: typecheck
+        run: pnpm --no-bail --filter frontend --filter sw --filter misskey-js run typecheck
+
+      - run: pnpm check-dts
+
+      - name: check-dts self test
+        run: node --test scripts/check-dts.test.mjs
+
+      - name: SPDX headers
+        run: node scripts/check-spdx.mjs --ci
+
+      - name: Verify locales
+        run: pnpm --filter i18n run verify
+
+      - name: misskey-js API report
+        run: pnpm --filter misskey-js api-prod
+
+  frontend-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: frontend/package.json
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: frontend/.node-version
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - run: pnpm i --frozen-lockfile
+
+      # 本番設定のビルドが通ること (本家の test-production.yml に当たる)。
+      - name: Production build
+        run: pnpm build
+
+      - name: frontend unit tests
+        run: pnpm --filter frontend test
+
+      - name: misskey-js tests
+        run: pnpm --filter misskey-js test
+
+  frontend:
+    if: always()
+    needs: [frontend-lint, frontend-test]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - name: Check results
+        run: |
+          if [ "${{ needs.frontend-lint.result }}" != "success" ] || [ "${{ needs.frontend-test.result }}" != "success" ]; then
+            echo "frontend-lint: ${{ needs.frontend-lint.result }} / frontend-test: ${{ needs.frontend-test.result }}"
+            exit 1
+          fi
