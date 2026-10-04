@@ -1,0 +1,267 @@
+# プロジェクトの構成の再編 (正式改名・frontend の組み込み・テスト配置の整理・プラグインまわりの名前の整理)
+
+**Status**: Draft (#3180、2026-09-24。正式名は 2026-09-30 に決定) / **Scope**: リポジトリ全体の構成、改名の範囲、本家 Misskey への追従方式
+
+未決事項 (末尾) はすべて決まった (2026-09-30)。段階を進めるごとにこの文書を更新する。作業の進み具合は #3180 と、段階ごとの sub-issue で管理する。
+
+---
+
+## 目的
+
+仮称「mk-go」を正式な名前 **Elythia** に改め、同じ機会に次の 3 つを見直す。
+
+1. 同梱 frontend を本体リポジトリへ組み込み、`third_party/` をなくす
+2. テスト関連の配置を整理する
+3. プラグインまわりで旧名 (mk / mk-go) を含む名前を Elythia に揃える。**「plugin」という呼び名そのものは変えない** (2026-09-30 決定)
+
+名前が変わるとモジュールパス・リポジトリ名・イメージ名・パスがほぼ全て動くので、構成の見直しを別の機会に分けると同じ箇所を 2 度書き換えることになる。
+
+あわせて、TS Misskey への復路の保証をやめる (#3191、R5)。構成の再編そのものではないが、TS を立てて確かめる e2e の読み先が P3 / P4 で動くことと、運営者にとっての互換性の区切りを改名の版に 1 回でまとめるために、同じ段階の表で扱う。
+
+## 要件
+
+### R1. 改名
+
+**名前は `Elythia` (2026-09-30 決定)。** 置き場所は GitHub organization の `Elythia-Network`。
+
+**機械が読む名前はすべて小文字にする。** 大文字を使うのは画面とドキュメントの表示 (`Elythia` / `Elythia-Network`) だけ。
+
+- GHCR はイメージ名に大文字を受け付けない
+- Go のモジュールプロキシは大文字を `!e` のようにエスケープする (`github.com/!elythia-!network/...`)
+- GitHub は大文字小文字を区別しないので、小文字のモジュールパスでも同じリポジトリに届く
+
+| 用途 | 名前 |
+|---|---|
+| 表示 (画面・ドキュメント) | `Elythia` |
+| nodeinfo `software.name` | `elythia` |
+| User-Agent | `Elythia/<version> (<url>)` |
+| GitHub のリポジトリ | `Elythia-Network/elythia` (URL は `github.com/elythia-network/elythia` でも届く) |
+| Go のモジュールパス | `github.com/elythia-network/elythia` |
+| プラグインのモジュール | `github.com/elythia-network/elythia-plugin-<名前>` |
+| プラグインのマニフェスト | `elythia-plugin.yml` |
+| nodeinfo のプラグインの宣言 | `metadata.elythiaPlugins` |
+| 配布イメージ | `ghcr.io/elythia-network/elythia` (`-bundled` も同じ置き場所) |
+| 実行バイナリ | `elythia` (`cmd/elythia`、`built/elythia`) |
+| frontend のページ | `/about-elythia` (旧 `/about-mkgo` は転送) |
+
+| 対象 | 扱い |
+|---|---|
+| nodeinfo `software.name`、User-Agent | `elythia` / `Elythia/<version> (<url>)` にする |
+| Go のモジュールパス (`github.com/shiroha-a/mk`)、プラグインのモジュール名 (`github.com/shiroha-a/mk-plugin-*`) | `github.com/elythia-network/...` にする。独立リポジトリのプラグイン 4 つ (fedwatch / genshin / hsr / nowplaying) も追従させる |
+| GitHub のリポジトリ (`shiroha-a/mk`) | `Elythia-Network` へ移管し、名前を `elythia` にする (GitHub が旧 URL から転送する。D7) |
+| 配布イメージ (`ghcr.io/shiroha-a/mk`、`-bundled`) | `ghcr.io/elythia-network/elythia` にする。**旧名での配布は改名の版で止める** (Q4)。旧名の最後の版と CHANGELOG の Note で移転を案内する |
+| 実行バイナリ名 (`cmd/misskey`、`built/misskey`) | `elythia` にする |
+| frontend のページ名 (`/about-mkgo` など) と画面の文言 | `/about-elythia` と表示名 `Elythia` にする。**旧 URL は転送しない** (Q5。専用ページをわざわざブックマークする人はいない) |
+| ドキュメント | 新しい名前にする。CHANGELOG と CLAUDE.md の更新記録の過去の記述は書き換えない |
+| 関数名などコード上の識別子 | 据え置き |
+| `/api/meta` の `mkGoVersion` / `mkGoCommit`、`internal/core/procstats` の `mkGo` | 据え置き (同梱 frontend と外部クライアントが読む wire の項目)。nodeinfo の `mkGoPlugins` は連合で使う宣言なので R4 で改める |
+| `/api/meta` の `mkGoFrontendVersion` | **廃止する** (Q7、D5)。frontend を本体と同じ版で管理するので、frontend だけの版という概念が要らない |
+| 環境変数の接頭辞 `MK_` | 据え置き (運営者の設定を壊さない) |
+
+### R2. frontend の組み込み
+
+- fork (`shiroha-a/misskey-ts`) の中身を本体の `frontend/` へ取り込み、以降は本体のコミットとして編集する
+- fork リポジトリはアーカイブする。assets イメージは本体の workflow でビルドする
+- `third_party/` をなくす。本家は git 管理外で必要なときだけ取得する
+- 本家への追従を 1 コマンドで回せるようにする (版間の差分のうち frontend 側だけを 3-way で当てる)
+- frontend の版は本体の版に揃える。`-mk.N` のタグと pin まわりの仕組みは廃止する
+- frontend と backend を 1 つの PR / 1 つのコミットで変更できること
+
+### R3. テスト関連の配置
+
+- `test/` (Go の e2e) を `tests/` へまとめる
+- 検証用の compose を各スイートの中へ移し、全てに `name:` を付ける (本番 project `mk` への合流を防ぐ)
+- ベンチを `tests/bench/` の下にまとめ、名前の揺れを揃える
+- リポジトリ直下には運営者向けの compose (`docker-compose.yml` / `docker-compose.image.yml` / `compose.uds.yaml.example`) だけを残し、`docker-compose.yml` にも `name:` を付ける
+
+### R4. プラグインまわりの名前を Elythia に揃える
+
+**「plugin」という呼び名は変えない (2026-09-30 決定)。** 当初は Misskey 本家の frontend にある**クライアントプラグイン** (AiScript、`/settings/plugin`) と紛らわしいので語ごと変える案だったが、据え置くことにした。紛らわしさは今と同じく、管理 API の名前空間を分けて避ける (`admin/server-plugins`、`internal/api/admin/server_plugins.go`)。
+
+変えるのは、**旧名 (mk / mk-go) を名前に含むものだけ**。R1 の「機械が読む名前は小文字」に従う。
+
+| 対象 | 今の名前 | 扱い |
+|---|---|---|
+| マニフェスト | `mk-plugin.yml` | `elythia-plugin.yml` にする。旧名は読まない (Q9、D8) |
+| プラグインのモジュール名・リポジトリ名 | `github.com/shiroha-a/mk-plugin-*` | `github.com/elythia-network/elythia-plugin-*` にする (R1 のモジュールパス変更と同時) |
+| nodeinfo の宣言 (連合) | `metadata.mkGoPlugins` | `metadata.elythiaPlugins` にする。旧名は出さず、読まない (Q9、D8) |
+| 公開パッケージ | `plugin/` (`plugintest` / `peercache` を含む) | 据え置き。import パスは R1 のモジュールパス変更で `github.com/elythia-network/elythia/plugin` に変わる |
+| 置き場 | `plugins/` | 据え置き |
+| 運営者の設定キー | `plugins.<name>.*` | 据え置き |
+| 管理 API | `admin/server-plugins` | 据え置き |
+| プラグインごとの DB schema | `plugin_<name>` | 据え置き (移行は要らない) |
+| プラグインのジョブキュー | `plugin:<name>` | 据え置き (移行は要らない) |
+| 相手サーバーのプラグインを呼ぶ経路 (連合) | `/plugin/<name>/...` | 据え置き |
+| ツール・生成物・ドキュメント | `tools/pluginbuild` / `plugindev` / `pluginresolve`、`*plugins.generated.*`、`docs/plugins/` | 据え置き。文面の「mk-go」は R1 のドキュメントの改名で Elythia にする |
+| 内部のコード上の識別子 | `pluginstore`、`PluginQueuePrefix` など | 据え置き (R1 と同じ) |
+
+### R5. TS Misskey への復路の保証をやめる (#3191)
+
+- **往路 (TS → この実装) は引き続き保証する。** TS の DB をそのまま引き継ぐための互換は守る
+- **復路 (この実装の DB を TS へ渡して戻ること) は保証しない。** 今後の変更に、TS へ戻せることを理由にした制約を課さない
+- 復路を確かめる CI (`dropin-e2e` の `mkgo-born`) は残し、今どこまで戻れるかを**測る**用途に変える
+- 既に入っている migration は書き換えない (復路のために付けた列や形は残す)
+- 運営者への宣言は、改名 (P6) を出す版の CHANGELOG の Note で行う
+
+### 非機能要件
+
+- 各段階の PR は単体で build / test が通り、本番 (UDS) を止めずに移行できること
+- rebase and merge の方針どおり、各コミットが単体でビルドできること
+- 本家への追従の手間が今 (rebase 1 回) より大きく悪化しないこと。試算で確かめる
+
+## 現状の把握 (2026-09-24 時点)
+
+数え方: 参照ファイル数は `git grep -l 'third_party' -- ':!third_party' | wc -l`、テストは `git grep -l 'third_party/misskey' -- '*_test.go'`、workflow は `grep -l 'submodules:' .github/workflows/*.yml`。fork の独自コミットは `git -C third_party/misskey rev-list --count --no-merges 2026.9.1..2026.9.1-mk.0` (151 個、153 ファイル / +18,523 / -374)。
+
+### `third_party/misskey` の参照 (109 ファイル) は 3 種類に分かれる
+
+| 種類 | 参照元 | 移行先 |
+|---|---|---|
+| **自分たちの frontend** | `internal/frontendutil` の既定値 (`frontendBase = "third_party/misskey"`、`MISSKEY_FRONTEND_*` で上書き可)、`Dockerfile.bundled` (`built/`・`packages/frontend/assets`・`assets/`)、`compose.uds.yaml.example` の bind mount (`./third_party/misskey/built:/frontend`)、`tools/pluginbuild` / `plugindev` (`packages/frontend/src/server-plugins.generated.ts` などを書く)、`make frontend-check` / `frontend-test`、Playwright のビルド | `frontend/` |
+| **比較対象の本家** | tools 7 つ (`apicompat` / `erroriddiff` / `limitspec` / `permspec` / `securespec` (以上 `packages/backend/src/server/api/endpoints`)、`schemadrift` (`packages/backend/migration`・`src/models`)、`shapediff` (`packages/misskey-js/src/autogen/types.ts`))、テスト 9 ファイル、本家 backend e2e (`tests/upstream-e2e`)、promo の確認 | `.cache/misskey/<版>/` (git 管理外) |
+| **本家の backend パッケージから借りているもの** | `Dockerfile` / `Dockerfile.bundled` が `packages/backend/assets` (favicon・アイコン = `static-assets`) と `packages/backend/node_modules/@misskey-dev/emoji-assets` (twemoji / fluent-emoji) を焼き込む | 下の D3 で決める |
+
+### submodule を checkout している workflow (10 本)
+
+`ci.yml` (frontend-check)、`docker.yml`、`diff-e2e.yml`、`apicompat.yml`、`queue-bench-smoke.yml`、`dropin-frontend-e2e.yml`、`playwright.yml`、`upstream-backend-e2e.yml`、`dropin-e2e.yml`、`build-with-plugins.yml`
+
+### テスト関連の配置
+
+- `test/`: `e2e`、`e2e_federation` (Go)
+- `tests/`: `bench` / `diff` / `dropin` / `dropin_frontend` / `federation` / `playwright` / `plugin-doc` / `queue-bench` / `queue-bench-autoscale` / `resource-bench` / `upstream-e2e`
+- 直下の compose 12 個のうち検証用が 9 個。`name:` が無いのは `docker-compose.yml` と overlay 3 個 (`dropin-frontend.mk` / `dropin.mk` / `playwright.ts`)
+
+## 設計
+
+### D1. 目標の構成
+
+```
+<リポジトリ>/
+├── cmd/ internal/ plugin/ tools/ migration/ ...   (Go の backend は直下のまま)
+├── frontend/                  ← 本家の monorepo から backend を除いた部分 (pnpm workspace)
+│   ├── package.json / pnpm-workspace.yaml / pnpm-lock.yaml / .node-version / build.ts / scripts/
+│   ├── packages/frontend, frontend-shared, frontend-embed, sw, i18n, misskey-js, ...
+│   ├── locales/
+│   ├── assets/                ← 本家 backend から借りていた静的アセット (D3)
+│   └── built/                 ← ビルド成果物 (gitignore。本番はここを bind mount)
+├── tests/                     ← R3
+├── deploy/
+├── UPSTREAM_MISSKEY_VERSION   ← 追従している本家の版 (例: 2026.9.1)
+└── .cache/misskey/<版>/        ← 本家そのもの。gitignore。make upstream-fetch で取得
+```
+
+- **Go は直下に残す。** 本家に倣って `backend/` へ移す案もあるが、Go のパスが全て変わるうえ得るものが少ない。
+- **frontend に取り込む範囲は「本家の monorepo から `packages/backend` を除いたもの」**。画面本体 (`packages/frontend`) だけでは動かず、`misskey-js` / `frontend-shared` / `sw` / `i18n` / `locales` などを workspace として持つ必要がある。取り込む範囲の正確な一覧は P1 の試算で決める。
+
+### D2. 本家の参照 (`.cache/misskey`)
+
+- `UPSTREAM_MISSKEY_VERSION` に追従している本家の版を 1 行で書く (submodule の gitlink の代わり)
+- `make upstream-fetch` がその版を `.cache/misskey/<版>/` へ取得する。tools とテストは環境変数 (例 `MK_UPSTREAM_DIR`、既定 `.cache/misskey/$(cat UPSTREAM_MISSKEY_VERSION)`) で場所を受け取る
+- golden は既にコミット済みの testdata なので、本家のソースが要るのは追従時の再生成、本家を読むゲート、本家 backend e2e、apicompat だけ
+- CI で本家を読む job は `actions/checkout` で `misskey-dev/misskey` を `UPSTREAM_MISSKEY_VERSION` の ref で `.cache/misskey/...` へ取得する
+- **本家を読むテストは「無ければ skip」の形を保ち、CI では skip を禁じる** (今の `MK_FRONTEND_GATES_REQUIRE_SUBMODULE` と同じ形)。skip が成功扱いになる問題 (#2892) を持ち込まない
+- **取得方法は手元と CI で分ける** (Q3)。手元は共有の bare mirror を 1 つ持ち、版ごとに worktree で展開する (追従作業で旧版と新版を並べるため。2 回目以降の取得が速い)。CI は今と同じく `actions/checkout` で毎回取る (shallow)
+
+### D3. 本家 backend から借りているアセット
+
+- `packages/backend/assets` (favicon・アイコン等): **`frontend/assets/` に置く** (Q6)。本家では backend 側にあるが、配信しているのは画面向けの画像なので実態に合う。追従時に差分を当てる対象が frontend 側の 1 か所にまとまる
+- `@misskey-dev/emoji-assets`: frontend の workspace の依存として持つ (本家では backend の依存だが、使うのは画像ファイルだけ)。Dockerfile は `frontend/node_modules/...` から取る
+- `.dockerignore` の再包含の記述 (pnpm の実体側を再包含している) も新しいパスに合わせる
+
+### D4. 本家への追従 (`make upstream-sync`)
+
+1. 本家の objects を手元に取る (`git fetch upstream-misskey --tags`、remote は本体リポジトリに追加するが branch は作らない)
+2. `git diff <旧版> <新版> -- <frontend 側のパス>` を `git apply --3way --directory=frontend` で当てる。`packages/backend/assets` は `frontend/assets/` へ当てる
+3. 衝突はファイル単位で衝突マーカーとして残る。解いてコミットし、`UPSTREAM_MISSKEY_VERSION` を上げる
+4. backend 側の変更は今と同じく triage して Go に移植する (docs/upstream-catch-up.md)
+
+- 今の fork の rebase (`rebase --onto`) と比べて、衝突の解き方が「コミット単位」から「ファイル単位」になる。独自変更の一覧は git の履歴ではなく `docs/divergence.md` §4-2 で保つ
+- **この方式で 2026.9.0 → 2026.9.1 がどう当たるかを P1 で試算してから確定する**
+
+### D5. 版と表示
+
+- **frontend の版 = 本体の版。`mkGoFrontendVersion` は廃止する** (Q7)。読んでいるのは同梱 frontend の `/about-mkgo` の表示だけで (2026-09-30 に確認)、更新ダイアログの判定には使っていない (`check-client-update.ts` のコメントも「fork のタグでは判定できない」として使っていない)。追従している本家の版は `/api/meta` の `version` に既に出ている。ビルド時に埋める `MkGoFrontendVersion` の ldflags (`Makefile` と `Dockerfile` / `deploy/uds/Dockerfile.mkgo`) と、`tests/diff` の除外も合わせて消す
+- `-mk.N` のタグ、`submodulepin-check`、`bundled_assets_pin_test`、`docs/divergence.md` の pin 行は廃止または置き換える
+- `docs/divergence.md` §4-2 (独自変更の一覧) は tag 列を PR 番号に置き換える
+
+### D6. テスト関連の配置
+
+```
+tests/
+├── e2e/              ← test/e2e
+├── e2e-federation/   ← test/e2e_federation (Go のパッケージ名は据え置き)
+├── playwright/       ← compose.yml / compose.ts.yml
+├── diff/             ← compose.yml
+├── dropin/           ← compose.yml / compose.mk.yml / compose.fedibird.yml
+├── dropin-frontend/  ← dropin_frontend を改名、compose をここへ
+├── federation/       ← compose.misskey.yml
+├── upstream-e2e/
+├── plugin-doc/
+└── bench/
+    ├── http/ (bench)  queue/ (queue-bench)  queue-autoscale/  resource/
+```
+
+- CI のカバレッジ閾値は ImportPath の `/e2e` の部分一致なので、`tests/e2e` / `tests/e2e-federation` でも 0% 例外が続く (確認は P2 で)
+- compose の相対パスはファイルの置き場所が基準になるので、移すと build context と bind mount がずれる。`--project-directory` で基準をリポジトリ直下に固定するか、パスを書き換えるかを P2 で決める
+- overlay にも `name:` を付けるか、Makefile からしか起動しない前提にするかも P2 で決める
+
+### D7. 改名
+
+- **リポジトリは作り直さずに移管 (transfer) する。** issue・PR・スター・履歴が残り、旧 URL から GitHub が転送する。移管と同時に名前を `mk` から `elythia` に変える。移管の後は、手元の `origin` の URL と、CI / workflow に書いたリポジトリ名を直す
+- **fork frontend (`shiroha-a/misskey-ts`) は移管しない。** P4 で本体の `frontend/` へ取り込んでアーカイブするため
+- モジュールパスの変更は `go mod edit -module` と import の一括置換。プラグインの公開パッケージ (`plugin/`) の import パスも変わるので、プラグインの作者向けに移行の案内を書く
+- リポジトリ名の変更は GitHub の転送に任せるが、`go get` の旧パスは転送されない (モジュールパスは go.mod の宣言が正)
+- 配布イメージは**旧名での publish を改名の版で止める** (Q4)。旧名の最後の版に移転の案内を載せ、CHANGELOG の Note にも書く
+- nodeinfo / UA の変更は連合先の一覧に出る名前が変わる。CHANGELOG の Note に書く
+
+### D8. プラグインまわりの名前の移行 (R4)
+
+呼び名を変えないので、**保存されたデータ (DB schema・ジョブキュー) の移行は要らない。** 移すのは、旧名を含む名前のうち運営者とプラグイン作者と連合先に見えるものだけ。**旧名を読む猶予期間は設けない** (Q9)。代わりに、旧名のまま上げた運営者が黙って壊れないようにする。
+
+- **マニフェスト** (`mk-plugin.yml` → `elythia-plugin.yml`): 旧名は読まない。**ただし旧名だけがあるディレクトリは、黙って skip せずビルドエラーにする** (新しい名前へ変えるよう案内する)。黙って skip すると、プラグインが組み込まれていない image が緑で出来る (#2940 で `disabled: true` について踏んだのと同じ形)
+- **nodeinfo の宣言** (`metadata.mkGoPlugins` → `metadata.elythiaPlugins`): 旧名は出さず、読まない。**その間、旧版のままの相手とはプラグインどうしの連合が止まる** (相手は新しい key を知らないので、こちらを対応サーバーと見なさない)。プラグインの連合の経路 (`/plugin/<name>/...`) は変わらないので、相手が上げれば戻る。CHANGELOG の Note に書く
+- **モジュール名** (`mk-plugin-*` → `elythia-plugin-*`): R1 のモジュールパス変更と同時に行う。独立リポジトリのプラグイン 4 つも同じ段階で追従させ、プラグイン作者向けの移行の案内 (D7) にまとめる
+
+### D9. 復路の保証をやめる (R5)
+
+- **`mkgo-born` の失敗の扱いを変える。** これまでは失敗したら設計を直して復路を守っていた。今後は、意図的な変更で失敗したら設計を戻さずにシナリオの期待値を更新し、**何が戻らなくなったか**を `docs/migration-from-ts.md` に記録する。記録は「今の版で TS へ戻したとき、何が残り何が失われるか」を運営者が確かめられる形にする
+- **P3 / P4 より前に済ませる。** P3 と P4 では TS を立てる e2e (`mkgo-born` / `swap-test`) の読み先も動く。復路を保証したままだと `mkgo-born` を落とさないことが P3 / P4 の完了条件になり、壊れたときに「構成を変えたせいか、復路の互換が崩れたせいか」を毎回切り分けることになる。先に測る運用へ変えておけば、P3 / P4 では記録するだけで済む
+- **復路を理由にした設計の記述を仕分ける。** model / api / repository のコメントと migration の注記のうち、往路にも要るものは残し、復路だけのためのものは実態に合わせて書き直す
+- **宣言は P6 の版に載せる。** 作業は先に develop へ入れるが、「TS へ戻せることを保証しない」を運営者に告げる CHANGELOG の Note は、改名を出す版に載せる。運営者にとっての互換性の区切りを 1 回にまとめる
+
+## 段階 (sub-issue の単位)
+
+名前が決まらなくてもできる段階を先に進める。
+
+| 段階 | 内容 | 名前に依存 |
+|---|---|---|
+| P1 | 追従方式の試算と、取り込む範囲の確定 | しない |
+| P1b | 復路の保証をやめる (D9、#3191)。宣言は P6 の版の CHANGELOG | しない |
+| P2 | テスト関連の配置の整理 (D6) | しない |
+| P3 | 本家の参照を `.cache/misskey` へ分離 (D2)。この時点では frontend はまだ submodule のまま | しない |
+| P4 | frontend の取り込み (D1 / D3 / D4 / D5)、submodule と fork の廃止 | しない |
+| P5 | 正式な名前 (**決定: Elythia**) と、プラグインの呼び名 (**決定: 据え置き**) の決定。どちらも 2026-09-30 | — |
+| P6 | 改名 (D7) | する |
+| P6b | プラグインまわりの名前の移行 (D8)。連合に出る nodeinfo の宣言を含むので P6 とは別 PR にする | する |
+| P7 | ドキュメント・CLAUDE.md の整理 | する |
+
+- P1b を P3 / P4 より先に置くのは、TS を立てる e2e の読み先が動く段階で `mkgo-born` を「守る」対象から「測る」対象に変えておくため (D9)
+- P3 を P4 より先に分けるのは、「本家を読む側」と「自分たちの frontend を読む側」を別々に切り替えて、壊れたときにどちらが原因か分かるようにするため
+- 各段階は本番 (UDS) の更新手順 (`make uds-update`) を壊さないこと。P4 は本番の compose (gitignore されたローカルの `compose.uds.yaml`) の bind mount の書き換えが要るので、移行手順を書いてから行う
+
+## 未決事項
+
+- ~~Q1. 正式な名前 (P5)~~ → **Elythia** に決定 (2026-09-30)。置き場所は `Elythia-Network`、機械が読む名前は小文字 (R1)
+- ~~Q2. fork の履歴を持ち込むか~~ → **スナップショットとして取り込む** (2026-09-30)。独自変更の経緯は `docs/divergence.md` §4-2 と、アーカイブした fork で追う
+- ~~Q3. 本家の取得方法~~ → **手元は共有の bare mirror + worktree、CI は毎回 shallow** (2026-09-30、D2)
+- ~~Q4. 旧名の配布イメージの猶予期間~~ → **設けない**。改名の版で旧名での publish を止め、移転を案内する (2026-09-30)
+- ~~Q5. 旧 URL (`/about-mkgo` など) の転送を残す期間~~ → **転送しない** (2026-09-30)
+- ~~Q6. `assets/` (D3) の名前と置き場所~~ → **`frontend/assets/`** (2026-09-30、D3)
+- ~~Q7. `mkGoFrontendVersion` の新しい形式~~ → **廃止する** (2026-09-30、D5)。frontend だけの版という概念が要らない
+- ~~Q9. プラグインの旧名を読み続ける猶予期間~~ → **設けない** (2026-09-30、D8)。旧名だけのマニフェストはビルドエラーにする
+
+## リスク
+
+- **本番の更新手順が変わる。** bind mount の元 (`third_party/misskey/built`) と、`uds-frontend-build` の出力先が変わる。本番を触る hazard (ビルドが配信物を消してから作る、i18n のビルドが本番の locales へ書く) は新しいパスでも同じなので、Makefile と memory の記述を合わせて更新する
+- **独立リポジトリのプラグイン 4 つ** は P6 でモジュールパスが変わると import を直すまでビルドできない。P6 と同時にそれぞれ更新する
+- **追従の手間が増えうる。** P1 の試算で悪化の度合いを確かめ、許容できなければ D4 を見直す
