@@ -132,7 +132,7 @@ upstream の `makePaginationQuery` は **`sinceId` / `sinceDate` 単独のとき
 「2 ページ目がおかしい」という形で利用者に出る。
 
 **元から無防備だったわけではない。** 本家 backend e2e の
-`third_party/misskey/packages/backend/test/e2e/timelines.ts` が `users/notes` の
+`.cache/misskey/<版>/packages/backend/test/e2e/timelines.ts` (`make upstream-fetch` で取得) が `users/notes` の
 `sinceId` 単独 (ASC) と `sinceId` + `untilId` (DESC) を `deepStrictEqual` で
 リテラル配列に固定しており、これは mk-go に対しても実行されている (vitest の
 exclude にも `known-divergences.json` にも入っていない。`describe.each` の
@@ -176,7 +176,8 @@ proxyAccountName) のノイズを吸収するためのもの。version-gap 由�
 ## 既知の制約・今後
 
 - 公式 image の公開は upstream release から遅れる。追従直後に version を厳密に
-  合わせたい場合は third_party/misskey からの source build に切り替える。
+  合わせたい場合は、`make upstream-fetch` で取得した `.cache/misskey/<版>` からの source build に
+  切り替える。
 - endpoint を足すときは ignore-path の調整 (endpoint 固有ノイズの洗い出し) が
   伴う。**ignore-list を安易に広げないこと** — 空振りさせると本物の乖離が埋もれる。
   追加時は `docs/divergence.md` に対応する記述があるかを確認する。

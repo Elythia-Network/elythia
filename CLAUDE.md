@@ -73,7 +73,8 @@ plugin/         プラグインがimportする公開パッケージ
 plugins/        プラグイン本体(gitignore済み。同梱するものだけ例外)
 migration/      NNNNNN_name.up.sql / .down.sql
 tests/          Goのe2e(`tests/e2e` / `tests/e2e-federation`)と、Go以外の検証基盤
-third_party/misskey/  forkしたMisskey TS(submodule。frontendの供給元)
+frontend/       本家Misskeyから取り込んだfrontend(pnpm workspace、#3379)
+third_party/misskey/  以前のfrontendの供給元だったsubmodule(frontendとしてはもう読まない。#3379で外す)
 tools/          parityゲートとコード生成のCLI
 docs/           ドキュメント
 ```
@@ -231,7 +232,8 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 | `ci.yml` test | push / PR | ○ | 4 shardで`-race -count=1 -shuffle=3`、パッケージごとのカバレッジ閾値 |
 | `ci.yml` lint | push / PR | ○ | vet / gofmt / actionlint / golangci-lint / テストfixtureのID重複 |
 | `ci.yml` plugin-tests | push / PR | | 同梱プラグインのテスト、`authoring.md`のスニペットのコンパイル |
-| `ci.yml` frontend-check | push / PR | | fork frontendの型チェック、eslint、vitest、submoduleを読むゲート |
+| `ci.yml` frontend-check | push / PR | | `frontend/`の型チェック、eslint、vitest、同梱プラグインを含めた統合バイナリのビルド |
+| `frontend` | PR / push(paths限定) | | `frontend/`の本家由来の検査(9 workspaceのeslint、typecheck、SPDX、locale、本番ビルド、vitest) |
 | `ci.yml` vulncheck | push / PR | | govulncheck、`go.mod`とDockerfileのGoの版の一致 |
 | `dependency-review` | PR | | PRが持ち込む依存の既知脆弱性 |
 | `codeql` | PR / push / 週1回 | | Goとworkflowの静的解析 |
@@ -290,6 +292,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 
 このファイル自体を変えたときだけ、1行で追記します(新しいものを上に)。経緯の本文はリンク先にあります。個別のfixの履歴は`CHANGELOG.md`にあります。
 
+- 2026-10-05: frontendを`frontend/`から読むようにしたので、Section 2の構成とSection 8の`frontend-check`の行を更新し、`frontend`の行を足した (#3379) → [docs/deployment.md](docs/deployment.md#frontend-を本体へ取り込んだ版へ上げる-3379)
 - 2026-10-05: 比較対象の本家を`.cache/misskey`から読むようにしたので、Section 8の`apicompat`の行を更新した (#3378) → [docs/ci.md](docs/ci.md)
 - 2026-10-04: Goのe2eを`tests/`へ移したのでSection 2の構成を更新した (#3373) → [docs/design/project-restructure.md](docs/design/project-restructure.md)
 - 2026-10-04: 復路の保証をやめたことを冒頭の方針とSection 8に反映した (#3191) → [docs/dropin-e2e.md](docs/dropin-e2e.md#復路は測る対象-3191)

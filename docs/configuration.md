@@ -336,15 +336,15 @@ mk-go 側のマイグレーションには含めていない。pgroonga 拡張�
 
 | 環境変数 | 用途 |
 |---|---|
-| `MISSKEY_FRONTEND_DIR` | ビルド済み SPA (vite 出力)。既定 `third_party/misskey/built/_frontend_vite_` |
-| `MISSKEY_FRONTEND_DIST_DIR` | locales / fonts 等の dist。既定 `third_party/misskey/built/_frontend_dist_` |
+| `MISSKEY_FRONTEND_DIR` | ビルド済み SPA (vite 出力)。既定 `frontend/built/_frontend_vite_` |
+| `MISSKEY_FRONTEND_DIST_DIR` | locales / fonts 等の dist。既定 `frontend/built/_frontend_dist_` |
 | `MISSKEY_FRONTEND_EMBED_DIR` | embed 用の vite 出力。**既定値は `MISSKEY_FRONTEND_DIR` の sibling として解決される** — 別の変数を要求すると設定漏れに気付けないまま `/embed_vite/*` が 404 になるため (以前は dev server proxy へ落ちて 502 だった。dev モード以外では proxy しない) |
 | `MISSKEY_SW_DIST_DIR` | service worker の出力。既定値の解決は embed と同じ |
-| `MISSKEY_FLUENT_EMOJI_DIR` | fluent-emoji ディレクトリ (実績バッジ / 通知アイコン) |
-| `MISSKEY_TWEMOJI_DIR` | Twemojiアセットディレクトリ |
-| `MISSKEY_CLIENT_ASSETS_DIR` | クライアントアセットディレクトリ |
-| `MISSKEY_STATIC_DIR` | 静的ファイルディレクトリ (backend/assets: favicon等) |
-| `MISSKEY_REPO_ASSETS_DIR` | リポジトリ直下アセット (ai.png, banner等) |
+| `MISSKEY_FLUENT_EMOJI_DIR` | fluent-emoji ディレクトリ (実績バッジ / 通知アイコン)。既定 `frontend/node_modules/@misskey-dev/emoji-assets/built/fluent-emoji` |
+| `MISSKEY_TWEMOJI_DIR` | Twemojiアセットディレクトリ。既定 `frontend/node_modules/@misskey-dev/emoji-assets/built/twemoji` |
+| `MISSKEY_CLIENT_ASSETS_DIR` | クライアントアセットディレクトリ。既定 `frontend/packages/frontend/assets` |
+| `MISSKEY_STATIC_DIR` | 静的ファイルディレクトリ (favicon等。本家の `packages/backend/assets` に当たる)。既定 `frontend/assets` |
+| `MISSKEY_REPO_ASSETS_DIR` | 本家のリポジトリ直下のアセット (ai.png, banner等)。既定 `frontend/repo-assets` |
 
 ## テスト用環境変数
 

@@ -73,7 +73,7 @@ EXPLAIN SELECT id FROM note WHERE lower(text) LIKE '%検索語%';
 最も簡単な起動方法。PostgreSQL、Redis、mk-goの3サービスをTCPで接続する。
 
 ```bash
-git clone --recursive https://github.com/shiroha-a/mk.git
+git clone https://github.com/shiroha-a/mk.git
 cd mk
 
 # フロントエンドビルド (初回のみ、3-10分)
@@ -180,8 +180,8 @@ gh workflow run docker.yml -f tag=1.1.0
 - `MISSKEY_TWEMOJI_DIR` — twemoji SVG
 - `MISSKEY_FLUENT_EMOJI_DIR` — fluent-emoji (実績バッジ / 通知アイコン)
 - `MISSKEY_CLIENT_ASSETS_DIR` — クライアントアセット
-- `MISSKEY_STATIC_DIR` — 静的ファイル (backend/assets: favicon等)
-- `MISSKEY_REPO_ASSETS_DIR` — リポジトリ直下の共通アセット (ai.png, banner等)
+- `MISSKEY_STATIC_DIR` — 静的ファイル (favicon等。本家の `packages/backend/assets`、本体の `frontend/assets`)
+- `MISSKEY_REPO_ASSETS_DIR` — 本家のリポジトリ直下の共通アセット (ai.png, banner等。本体の `frontend/repo-assets`)
 
 TS版Misskeyのイメージからアセットをコピーすることも可能:
 
@@ -495,18 +495,18 @@ WantedBy=multi-user.target
 
 ## フロントエンド配信
 
-mk-goはMisskeyのSPAフロントエンドをそのまま配信する。フロントエンドは`third_party/misskey`サブモジュールからビルドする。
+mk-goはMisskeyのSPAフロントエンドをそのまま配信する。フロントエンドは本体の`frontend/` (Misskey TSのforkを取り込んだpnpm workspace、#3379) からビルドし、成果物は`frontend/built`に出る。ビルドの前に`make plugins`で`frontend/packages/frontend/src/server-plugins.generated.ts`を生成する (git で追跡していない。`make e2e-frontend-build` / `make uds-frontend-build`は自分で`make plugins`を呼ぶ)。
 
-> **submodule bump 後の追従手順** (= 新 Misskey TS release を取り込んだ PR をマージした後):
-> 詳細は [upstream-catch-up.md](./upstream-catch-up.md#1-既存環境への適用--submodule-bump-pr-マージ後) 参照。`git pull` だけでは submodule の working tree は更新されないため、`git pull --recurse-submodules` または `git submodule update --init --recursive` が必要。frontend asset の再ビルドと再起動は `make uds-update` (または `make uds-rebuild && make uds-restart`) がまとめて行う。**`make uds-frontend-build` 単体で止めないこと** — 再起動しないと配信物と HTML がずれて 404 になる。
+> **`frontend/` が更新された版へ上げた後の追従手順**:
+> 本家の新しい release を取り込んだ版などで `frontend/` が動いたら、frontend asset の再ビルドと再起動が要る。`make uds-update` (または `make uds-rebuild && make uds-restart`) がまとめて行う。**`make uds-frontend-build` 単体で止めないこと** — 再起動しないと配信物と HTML がずれて 404 になる。詳細は[アップデート](#アップデート)。
 
 環境変数でアセットディレクトリを指定:
 
 | 環境変数 | 内容 |
 |---|---|
-| `MISSKEY_FRONTEND_DIR` | viteビルド出力 (`built/_frontend_vite_`) |
-| `MISSKEY_FRONTEND_DIST_DIR` | dist出力 (`built/_frontend_dist_`) |
-| `MISSKEY_CLIENT_ASSETS_DIR` | クライアントアセット (`packages/frontend/assets`) |
+| `MISSKEY_FRONTEND_DIR` | viteビルド出力 (既定 `frontend/built/_frontend_vite_`) |
+| `MISSKEY_FRONTEND_DIST_DIR` | dist出力 (既定 `frontend/built/_frontend_dist_`) |
+| `MISSKEY_CLIENT_ASSETS_DIR` | クライアントアセット (既定 `frontend/packages/frontend/assets`) |
 
 ## 逆プロキシ (nginx)
 
@@ -643,8 +643,8 @@ mk-goはTS版と同じPostgreSQL/Redisを共有できるため、バイナリの
 
 どの構成でも共通する原則は 3 つ。
 
-1. **`git pull` だけでは submodule が更新されない**。親リポの gitlink ポインタが動くだけで `third_party/misskey/` の実ファイルは古いまま残る。`git pull --recurse-submodules` を使うか、`git config submodule.recurse true` を一度実行しておく
-2. **submodule が動いたらフロントエンドを再ビルドする**。SPA のアセットは image に焼き込まず bind-mount で渡しているため、submodule だけ進めても配信物は変わらない
+1. **`frontend/` のソースは本体と一緒に `git pull` で更新される** (#3379 で submodule から本体へ取り込んだ)。ただし成果物の `frontend/built` は git の管理の外にあり、pull しても変わらない
+2. **`frontend/` が動いたらフロントエンドを再ビルドする**。SPA のアセットは image に焼き込まず bind-mount で渡しているため、ソースだけ進めても配信物は変わらない。`make update` (`make pull` も呼ぶ) は、`frontend/` が動いたかどうかを知らせる
 3. **フロントエンドを再ビルドしたら mk-go を再起動する**。エントリポイント (`scripts/<hash>.js`) を起動時に 1 回だけ解決してキャッシュする実装なので、再起動しないと消えた古いファイルを指し続けて 404 になる。bind-mount であっても再起動は必要
 
 **1.3.0 より後へ上げるときは、先に `backfill-remote-host` を流す (#2996)。** リモート
@@ -661,12 +661,14 @@ AP の acct 解決が 404 になる)。メンションは WebFinger で既存の
 
 **壊れても CSS では気付けない。** vite のファイル名は内容ハッシュなので、内容が変わらない CSS は再ビルド後も同じ名前で作り直され 200 を返し続ける。判定にはエントリの JS を直接叩く必要がある。`make *-restart` が呼ぶ [`deploy/check-frontend-entry.sh`](../deploy/check-frontend-entry.sh) はそこまで見て、404 なら非ゼロで落ちる。
 
+**#3379 より前の版から UDS 構成を上げるときは、先に[frontend を本体へ取り込んだ版へ上げる](#frontend-を本体へ取り込んだ版へ上げる-3379)の手順を踏む。** compose の bind mount の元と、frontend のビルドの出力先が変わるため。
+
 マイグレーションは構成によって適用方法が違う (下記参照)。golang-migrate が `schema_migrations` で適用済みバージョンを管理するため、何度流しても冪等。
 
 ### Docker Compose (TCP / UDS 共通)
 
 ```bash
-# 本体・submodule・plugins/ の独立リポジトリをまとめて更新し、
+# 本体と plugins/ の独立リポジトリをまとめて更新し、
 # ビルド → 再起動 → 配信アセットの検証まで通す
 make uds-update      # UDS 本番構成
 make docker-update   # Docker Compose 構成
@@ -675,7 +677,7 @@ make docker-update   # Docker Compose 構成
 段階的に実行したい場合は分解できる。
 
 ```bash
-make pull            # 本体 + submodule + プラグイン
+make pull            # 本体 + プラグイン
 make uds-rebuild     # フロントエンド + イメージ (docker 構成では docker-rebuild)
 make uds-restart     # 再起動 + 配信アセットの検証 (同 docker-restart)
 ```
@@ -691,11 +693,11 @@ make uds-restart     # 再起動 + 配信アセットの検証 (同 docker-resta
 ### バイナリ直接実行
 
 ```bash
-# 本体・submodule・plugins/ の独立リポジトリをまとめて更新する。
+# 本体と plugins/ の独立リポジトリをまとめて更新する。
 # make build は plugins を組み込むので、git pull だけだとプラグインが古いまま焼き込まれる。
 make pull
 
-# third_party/misskey が動いていた場合のみ
+# frontend/ が動いていた場合のみ (make pull の中の make update が知らせる)
 make e2e-frontend-build
 
 make build
@@ -706,6 +708,93 @@ make migrate-up
 # 再起動
 sudo systemctl restart misskey    # systemd の場合
 ```
+
+### frontend を本体へ取り込んだ版へ上げる (#3379)
+
+この版から、同梱の frontend は submodule (`third_party/misskey`) ではなく、本体の `frontend/` からビルドして配る。UDS 構成 (`compose.uds.yaml`) で運用している場合は、compose の bind mount の元と、frontend のビルドの出力先が変わる。**手順どおりに進めないと、frontend の配信物が空になり 404 を返す。**
+
+`compose.uds.yaml` がまだ `third_party/misskey` を mount している間は、`make uds-frontend-build` / `uds-build` / `uds-up` / `uds-restart` (と、それらを呼ぶ `uds-update` / `uds-rebuild`) がエラーで止まる (`make uds-layout-check`)。新しい `frontend/built` を作っても誰も mount せず、古い frontend を警告無しで配り続けるのを防ぐため。下の 1 で mount を向け直すと通る。
+
+変わるもの:
+
+| | これまで | この版から |
+|---|---|---|
+| frontend のビルドの出力先 (`make uds-frontend-build`) | `third_party/misskey/built` | `frontend/built` |
+| compose の bind mount (`/frontend`) | `./third_party/misskey/built` | `./frontend/built` |
+| compose の bind mount (`/misskey/packages/frontend/assets`) | `./third_party/misskey/packages/frontend/assets` | `./frontend/packages/frontend/assets` |
+
+#### 1. 配信物を git の管理の外へ退避する
+
+submodule を外すコミットを pull したとき、submodule の作業ツリー (`built/` を含む) が残るかどうかは git の版と設定で変わる。配信中のものを git の操作から切り離すため、先に退避して mount を向け直す。
+
+```bash
+SAVE=/srv/mk-frontend-save     # git の管理の外。運用に合わせて選ぶ
+mkdir -p "$SAVE"
+cp -a third_party/misskey/built "$SAVE/built"
+cp -a third_party/misskey/packages/frontend/assets "$SAVE/assets"
+```
+
+`compose.uds.yaml` の 2 行を、退避した先の絶対パスへ書き換える。
+
+```yaml
+      - /srv/mk-frontend-save/built:/frontend:ro
+      - /srv/mk-frontend-save/assets:/misskey/packages/frontend/assets:ro
+```
+
+```bash
+make uds-restart     # 起動し直して、配信アセットを検証する
+```
+
+#### 2. 新しい版を pull する
+
+```bash
+git pull --ff-only
+```
+
+#### 3. `frontend/` からビルドする
+
+```bash
+mkdir -p .tmp && rm -f .tmp/uds-frontend-build.log   # 前回のログの exit= を読まないように消す
+nohup setsid sh -c 'make uds-frontend-build; echo "exit=$?"' > .tmp/uds-frontend-build.log 2>&1 &
+# 終わるまで待つ (数分かかる)。最後の行が exit=0 であることを確かめる
+until grep -q '^exit=' .tmp/uds-frontend-build.log 2>/dev/null; do sleep 10; done
+tail -n 1 .tmp/uds-frontend-build.log | grep -qx 'exit=0' && echo OK || echo "失敗した。.tmp/uds-frontend-build.log を見る"
+```
+
+出力先は `frontend/built` で、まだどこからも mount されていないので、ビルドの途中でも配信には影響しない。**終わる前や失敗したまま 4 へ進まないこと** — 空や作りかけの `frontend/built` を mount することになり、404 を返す。失敗したら、1 で退避した配信物を mount したまま直してやり直す。
+
+#### 4. compose を新しいパスへ向ける
+
+`compose.uds.yaml` の 2 行を書き換える。build-arg の `MKGO_FRONTEND_VERSION` はこの版ではそのまま残してよい (submodule を外す後の版で消える)。
+
+```yaml
+      - ./frontend/built:/frontend:ro
+      - ./frontend/packages/frontend/assets:/misskey/packages/frontend/assets:ro
+```
+
+#### 5. image を作り直して再起動する
+
+image の静的アセットと絵文字の COPY 元が変わるので、作り直しが要る。
+
+```bash
+mkdir -p .tmp && rm -f .tmp/uds-build.log   # 前回のログの exit= を読まないように消す
+nohup setsid sh -c 'make uds-build; echo "exit=$?"' > .tmp/uds-build.log 2>&1 &
+until grep -q '^exit=' .tmp/uds-build.log 2>/dev/null; do sleep 10; done
+tail -n 1 .tmp/uds-build.log | grep -qx 'exit=0' && echo OK || echo "失敗した。.tmp/uds-build.log を見る"
+# OK と出たときだけ再起動する。失敗したまま再起動すると、古い image で新しい mount を読む
+make uds-restart
+```
+
+`make uds-restart` の最後の検証 (`deploy/check-frontend-entry.sh`) が通れば切り替えは終わり。
+
+#### 6. 片付け (submodule を外す版を pull した後)
+
+```bash
+git submodule deinit -f third_party/misskey 2>/dev/null || true
+rm -rf third_party .git/modules/third_party
+```
+
+退避した `$SAVE` は、新しい版で問題が無いことを確かめてから消す。
 
 ### 切り戻し
 

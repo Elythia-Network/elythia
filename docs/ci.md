@@ -101,7 +101,8 @@ PR を出すと十数個の check が走る。**どれが何を見ていて、�
 | `vulncheck` | CI | 依存・Go stdlib の**到達可能な**既知脆弱性 + Go version の pin 整合 | 1 min | `GOOS=linux govulncheck ./...` |
 | `review` | Dependency review | PR が**新しく持ち込む**依存に既知の脆弱性が無いか (base と head の差分を比較、high 以上で失敗) | 未計測 | 手元では回せない (GitHub の advisory DB を引く) |
 | `analyze (go)` / `analyze (actions)` | CodeQL | **自分のコード**の静的解析 (Go の全 module と workflow の式) | 未計測 | 手元では回せない (CodeQL CLI が要る)。Code scanning alerts で見る |
-| `frontend-check` | CI | fork frontend の型 (`vue-tsc --noEmit`) + submodule のソースを読むゲート + eslint (`src/**/*.{ts,vue}`) + vitest + `make plugins-all` と統合バイナリの build | 3〜4 min | 下の「frontend-check の手元再現」。**`make frontend-check` は型・ゲート・eslint まで** (#2906) |
+| `frontend-check` | CI | `frontend/` の型 (`vue-tsc --noEmit`) + `frontend/` のソースを読むゲート + `emoji-regex-check` + eslint (`src/**/*.{ts,vue}`) + vitest + `make plugins-all` と統合バイナリの build | 3〜4 min | 下の「frontend-check の手元再現」。**`make frontend-check` は型・ゲート・eslint まで** (#2906) |
+| `frontend` | frontend | `frontend-lint` (9 workspace の eslint、typecheck、check-dts、SPDX ヘッダー、locale、misskey-js の API レポート) と `frontend-test` (本番設定のビルド、frontend の vitest、misskey-js のテスト) の集約。paths で `frontend/**` などに絞る。#3379 の P4e で required にする予定 | 未計測 | `cd frontend && pnpm install && pnpm build` の後、`.github/workflows/frontend.yml` の各 step |
 | `plugin-tests` | CI | 同梱プラグインのテスト (別 module なので `go list ./...` に入らない) | 1 min | `make plugin-test` |
 | `apicompat` | apicompat | **`docs/api-compat.md` が実態とずれていないか** (生成物なので再生成して diff を見る)。あわせて golden が本家の版に追いついているか (`make upstream-check`、#3378) | 未計測 | `make apicompat` (**プラグイン抜き + testMode が要る**。手順は docs/development.md) |
 | `e2e (1/4)` 〜 `4/4` | Upstream backend e2e | **本家の backend e2e 1256 テスト**が mk-go に対して通るか | 3-7 min | `make upstream-e2e` |
@@ -270,38 +271,41 @@ package load エラーで解析が空振りしうる。**ローカルの `go` �
 
 ### `frontend-check` が落ちたとき
 
-fork frontend (`third_party/misskey`) の型・eslint・vitest のいずれか、または
-submodule のソースを読むゲートの失敗 (#2892)。型・ゲート・eslint は
+`frontend/` (#3379 で本体へ取り込んだ fork frontend) の型・eslint・vitest のいずれか、
+`frontend/` のソースを読むゲート (#2892)、または `emoji-regex-check` の失敗。型・ゲート・eslint は
 `make frontend-check` で再現する (#2906)。**vitest はそこに入っていない**
 (`make frontend-test`)。
 
 **手元再現（CI job 全体）:**
 
+`make plugins-all` を workspace のビルドより先に回す。frontend が import する
+`frontend/packages/frontend/src/server-plugins.generated.ts` は追跡しておらず (#3379)、
+無いとビルドが import で落ちる。
+
 ```bash
-cd third_party/misskey && pnpm install && pnpm build-pre && pnpm -r build
-make plugins-all && go build -o /dev/null ./cmd/misskey
+make plugins-all
+cd frontend && pnpm install --frozen-lockfile && pnpm build-pre && pnpm -r build && cd ..
+go build -o /dev/null ./cmd/misskey
 make frontend-check
 make frontend-test
 ```
 
+**本番を動かしているチェックアウトでは `pnpm -r build` / `pnpm build` を流さないこと。** frontend 自身のビルドが `frontend/built` を消してから作り直すので、そこを bind mount している本番が 404 になる (#3379 の切り替え後)。手元の検証は別の worktree で行う。
+
 eslint だけを回すなら `make frontend-lint` (実測 55 秒)。
 
-**`emoji-regex-check` が落ちたとき (#3324):** MFM の Unicode 絵文字の正規表現 (`internal/activitypub/mfm/emoji_regex_gen.go`) が、submodule に入っている mfm-js / emoji-data と食い違っている。`… is stale` なら mfm-js か emoji-data の版が上がったので、作り直して差分ごとコミットする。生成ツールが `no longer contains` や構文のエラーで落ちたら、mfm-js の `unicodeEmoji` の書き方か正規表現の構文が変わっているので、生成ツール (`tools/emojiregex/`) を直す。
+**`emoji-regex-check` が落ちたとき (#3324):** MFM の Unicode 絵文字の正規表現 (`internal/activitypub/mfm/emoji_regex_gen.go`) が、`frontend/` に pnpm install した mfm-js / emoji-data と食い違っている。`… is stale` なら mfm-js か emoji-data の版が上がったので、作り直して差分ごとコミットする。生成ツールが `no longer contains` や構文のエラーで落ちたら、mfm-js の `unicodeEmoji` の書き方か正規表現の構文が変わっているので、生成ツール (`tools/emojiregex/`) を直す。
 
 ```bash
 make emoji-regex
-node internal/activitypub/mfm/testdata/emoji_mfmjs.mjs third_party/misskey \
+node internal/activitypub/mfm/testdata/emoji_mfmjs.mjs frontend \
   > internal/activitypub/mfm/testdata/emoji_mfmjs.json
 GOWORK=off go test ./internal/activitypub/mfm/ ./tools/emojiregex/
 ```
 
 **`make uds-frontend-build` / `e2e-frontend-build` は検証に使わないこと。** 本番が
-bind-mount している `third_party/misskey/built` を書き換えてしまう。`vue-tsc --noEmit` なら
-出力物を作らない。
-
-**submodule の gitlink 巻き戻り（祖先関係）はこの job でも検出できない。** 型が通るだけで
-ファイルが消えている場合がある。pointer の確認は
-[upstream-catch-up.md](upstream-catch-up.md#mk-固有パッチだけを載せるときrelease-bump-以外)。
+bind-mount している (または切り替え後に bind-mount する) `frontend/built` を書き換えてしまう。
+`vue-tsc --noEmit` なら出力物を作らない。
 
 ## nightly のみ
 
@@ -373,8 +377,8 @@ git ls-remote https://github.com/actions/checkout 'refs/tags/v7*'
 
 **「手元では通るのに CI で落ちる」場合、手元の生成物を疑う。** 過去に何度も踏んでいる。
 
-- `third_party/misskey/built/*` — 過去の docker build が root 所有で残っていることがある
-- `packages/*/built` — 同上。`i18n` / `misskey-bubble-game` が無いと frontend の型が通らない
+- `frontend/built/*` (#3379 より前の版では `third_party/misskey/built/*`) — 過去の docker build が root 所有で残っていることがある
+- `frontend/packages/*/built` — 同上。`i18n` / `misskey-bubble-game` が無いと frontend の型が通らない
 - `built/.config.json` / `built/meta.json` — 本家の `loadConfig()` が読む生成物
 
 CI はまっさらな環境なので、手元にある生成物が要件を隠す。新しく CI に載せる workflow は
@@ -517,10 +521,11 @@ checkout / setup-go を除くと step は実行順に 4 つ。**required job な
 - `.github/workflows/codeql.yml` が CodeQL で**自分のコード**を静的解析する。
   `vulncheck` が依存を見るのに対し、こちらはテストが通っていても残る「書いていない分岐」や
   「通ってはいるが危険な形」を拾う。
-- **見るのは `go` と `actions` の 2 つだけ。** submodule の外にある .ts/.js/.vue は実測
+- **見るのは `go` と `actions` の 2 つだけ。** `frontend/` の外にある .ts/.js/.vue は実測
   340 ファイルで大半が `tests/playwright/specs/**` (うち 189 は upstream 由来の UI spec)、
   Python も `tests/` の検証基盤なので、`javascript-typescript` / `python` は入れない。
-  fork frontend は checkout していないので対象外 (upstream のコード)。
+  `frontend/` (#3379 で取り込んだ fork frontend) も今は対象外。大半は upstream のコードで、
+  入れるかは frontend の CI を required にする段階 (#3379 の P4e) で決める。
 - **autobuild を使わない。** 同梱プラグイン (`plugins/*/go.mod`) は別 module で
   `go build ./...` に含まれないため、`git ls-files` で列挙して個別にビルドする
   (`plugin-tests` job が独立しているのと同じ理由)。`go.work` は gitignore 済みなので
@@ -654,17 +659,37 @@ checkout / setup-go を除くと step は実行順に 4 つ。**required job な
 
 #### `frontend-check` job (ci.yml)
 
-- fork frontend (`third_party/misskey`) を `vue-tsc --noEmit` で型チェックする。1.0 以降
-  fork frontend は mk-go 独自に進化させる方針なので、型崩れの検出手段が要る。
-- **submodule のソースを読むゲートもここで回す** (#2892)。`test-shards` は
-  `third_party/misskey` を checkout しないので、そちらでは skip するしかない。
-  skip は成功として扱われるため、この job では `MK_FRONTEND_GATES_REQUIRE_SUBMODULE`
-  を渡して skip を禁じる (`plugin-tests` の `MK_PLUGIN_TESTS_REQUIRE_DB` と同じ形)。
-  **`make gates` には入れない** — あちらは submodule 無しで回る前提で、混ぜると
-  checkout していない環境で「検査していないのに緑」になる。
+- `frontend/` (#3379 で本体へ取り込んだ fork frontend) を `vue-tsc --noEmit` で型チェックする。
+  1.0 以降 fork frontend は mk-go 独自に進化させる方針なので、型崩れの検出手段が要る。
+- 手順は checkout (submodule 無し) → `frontend/package.json` から pnpm を用意 → setup-go →
+  `make plugins-all` → `frontend/` で `pnpm install --frozen-lockfile` と
+  `pnpm build-pre && pnpm -r build` → `go build ./cmd/misskey` → `make frontend-check` →
+  eslint → vitest。**`make plugins-all` は workspace のビルドより先に回す** —
+  `frontend/packages/frontend/src/server-plugins.generated.ts` は追跡しておらず (#3379)、
+  無いとビルドが import で落ちる。
+- **`frontend/` のソースを読むゲート** (`internal/server/*_gate_test.go`、#2892) は
+  `make frontend-check` でも回るが、本体は required の `test` (`test-shards`) で走る。
+  `frontend/` を本体で追跡するようになったので、読めなければ skip せずに落ちる
+  (#3379 より前は submodule を checkout しない `test-shards` で skip し、この job だけが
+  `MK_FRONTEND_GATES_REQUIRE_SUBMODULE` で skip を禁じていた。この環境変数はもう無い)。
+- `emoji-regex-check` はこの job (`make frontend-check`) でだけ回る。`frontend/` の
+  node_modules が要るので **`make gates` には入れない**。
 - `make uds-frontend-build` / `e2e-frontend-build` は本番が bind-mount している
-  `third_party/misskey/built` を書き換えるため**検証には使えない**。
-- required check (build / test / lint) には**含めない**。
+  (または切り替え後に bind-mount する) `frontend/built` を書き換えるため**検証には使えない**。
+- required check (build / test / lint) には**含めない**。frontend の required check は
+  `frontend` workflow の集約 job `frontend` で、#3379 の P4e で required にする。
+
+#### `frontend` workflow (frontend.yml)
+
+- `.github/workflows/frontend.yml`。本家 (fork) が回していた workflow のうち frontend に
+  関わるものを移した (#3379)。`frontend-lint` (9 workspace の eslint、frontend / sw /
+  misskey-js の typecheck、check-dts、SPDX ヘッダー、locale の検証、misskey-js の API
+  レポート) と `frontend-test` (本番設定でのビルド、frontend の vitest、misskey-js の
+  テスト) を、集約 job `frontend` が束ねる (`test` と同じ形で、required にするときは
+  この名前だけを branch protection に入れる)。
+- 発火は `frontend/**`・`plugins/**`・`plugin/**`・`tools/pluginbuild/**` と workflow
+  自身を触った PR と develop への push、および `workflow_dispatch`。
+- **今は required にしていない** (#3379 の P4e で required にする)。
 
 #### `build-with-plugins` workflow (reusable) / `build-with-plugins-selftest` (PR トリガー)
 

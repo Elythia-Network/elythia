@@ -8,7 +8,7 @@ VS Codeの[Dev Containers](https://code.visualstudio.com/docs/devcontainers/cont
 
 `.devcontainer/`の構成:
 - Go 1.27 + PostgreSQL + Redis (network_mode: host)
-- golang-migrate がプリインストール。Node.js / pnpm は `postCreate.sh` が submodule の `.node-version` / `packageManager` を読んで入れる (#2921。image に入るのは bootstrap 用の Node だけ)
+- golang-migrate がプリインストール。Node.js / pnpm は `postCreate.sh` が `frontend/` の `.node-version` / `package.json` の `packageManager` を読んで入れる (#2921。image に入るのは bootstrap 用の Node だけ)
 - `postCreate.sh`で初期化
 
 `postCreate.sh` が `.config/default.yml` を example から複製し (`.config/*` は gitignore なので clone 直後は存在せず、無いと `failed to load config` で落ちる)、migration まで流す。`TEST_DB_*` は compose が渡すので `.env.test` は要らない。
@@ -33,7 +33,7 @@ make dev
 **テストを回すには PostgreSQL を自分で用意する。** Redis は testcontainers が立てるが、DB を使うテストの大半は外部の PostgreSQL に直接つなぐ。既定の接続先とロール / DB の作り方は [testing.md](testing.md) を参照。
 
 ```bash
-git clone --recursive https://github.com/shiroha-a/mk.git
+git clone https://github.com/shiroha-a/mk.git
 cd mk
 
 # 設定ファイルを作成
@@ -61,8 +61,8 @@ make dev
 |---|---|
 | `make check` | `fmt` → `lint` → `actionlint` → `golangci-lint` → `test`。コミット前に必須 |
 | `make gates` | 静的 parity ゲートを一括実行 (内訳は下の「静的 parity ゲート」表) |
-| `make version` | mk-go / 互換 Misskey / submodule のバージョンを表示 |
-| `make frontend-check` | 同梱フロントエンドの型チェック (`vue-tsc --noEmit`)、**submodule のソースを読むゲート**、**eslint** (#2906)。ビルド成果物を作らないので安全。ゲートを `make gates` に入れないのは、あちらが submodule 無しで回る前提で、混ぜると checkout していない環境で skip され「検査していないのに緑」になるため (#2892)。**vitest は入っていない** (`make frontend-test`) — CI の同名 job はそれと `make plugins-all` / 統合バイナリの build を別 step で走らせる |
+| `make version` | mk-go / 互換 Misskey / 追従している本家 (`UPSTREAM_MISSKEY_VERSION`) のバージョンを表示 |
+| `make frontend-check` | `frontend/` の型チェック (`vue-tsc --noEmit`)、**`frontend/` のソースを読むゲート**、**eslint** (#2906)。ビルド成果物を作らないので安全。ゲートは `frontend/` を本体で追跡するようになった (#3379) ので skip せず `make test` でも走るが、frontend を触ったときに手元でまとめて回せるよう、ここにも残している。**vitest は入っていない** (`make frontend-test`) — CI の同名 job はそれと `make plugins-all` / 統合バイナリの build を別 step で走らせる |
 | `make diff-check` | 差分比較ハーネスを作り直して実行 (クリーン DB 前提のため) |
 | `make playwright-check` | Playwright を作り直して実行 (同上) |
 | `make e2e-down-all` | 検証用スタックを一括撤去。**本番 project `mk` は対象外** |
@@ -93,9 +93,9 @@ cd mk && docker compose up -d
 
 | ターゲット | 内容 |
 |---|---|
-| `make update` | `git pull --recurse-submodules` して、フロントエンド再ビルドの要否を知らせる |
+| `make update` | `git pull --recurse-submodules` して、`frontend/` が動いたか (フロントエンド再ビルドの要否) を知らせる |
 | `make pull-plugins` | `plugins/` 配下の独立リポジトリを pull |
-| `make pull` | `update` + `pull-plugins` (本体・submodule・プラグインを一括) |
+| `make pull` | `update` + `pull-plugins` (本体とプラグインを一括) |
 | `make docker-rebuild` | フロントエンド + イメージをビルド (Docker Compose 構成) |
 | `make docker-restart` | `app` を再起動して配信エントリを検証 (Docker Compose 構成) |
 | `make docker-update` | pull → ビルド → 再起動 → 検証 (Docker Compose 構成) |
@@ -118,13 +118,13 @@ cd mk && docker compose up -d
 | ターゲット | 内容 |
 |---|---|
 | `make build` | `./built/misskey`にバイナリ生成 |
-| `make dev` | `go run`で直接起動。**ビルド済みフロント (`third_party/misskey/built/_frontend_vite_`、`MISSKEY_FRONTEND_DIR` で上書き可) が無ければ `MK_DEV=1` を立てて**、`/vite/*` を Vite dev server (`localhost:5173`) へ流す。mk-go は dev モード (`dev: true` / `MK_DEV=1`) でしか dev server へ proxy せず、それ以外でビルド出力が無いと `/vite/*` は 404 になる — 以前は「無ければ proxy」だったので、本番でビルド出力が欠けると認証なしで `localhost:5173` へ reverse proxy されていた。ビルド済みでも dev server を使いたいときは `MK_DEV=1 make dev` |
+| `make dev` | `go run`で直接起動。**ビルド済みフロント (`frontend/built/_frontend_vite_`、`MISSKEY_FRONTEND_DIR` で上書き可) が無ければ `MK_DEV=1` を立てて**、`/vite/*` を Vite dev server (`localhost:5173`) へ流す。mk-go は dev モード (`dev: true` / `MK_DEV=1`) でしか dev server へ proxy せず、それ以外でビルド出力が無いと `/vite/*` は 404 になる — 以前は「無ければ proxy」だったので、本番でビルド出力が欠けると認証なしで `localhost:5173` へ reverse proxy されていた。ビルド済みでも dev server を使いたいときは `MK_DEV=1 make dev` |
 | `make run` | build + 実行 |
 | `make clean` | ビルド成果物を削除 |
 | `make tidy` | `go mod tidy`。**このリポジトリでは private plugin の解決に失敗するので使えない**。依存追加は `go get`、`go.sum` の充足検証は **`GOWORK=off go build`**。**`-mod=readonly` では効かない** — Go 1.16 以降それは既定値で、素の `go build` と同じ。効いていないのは `go.work` のほうで、workspace があると `go.sum` ではなく `go.work.sum` が使われ、`go.sum` から行を消しても**どちらの書き方でも exit 0 になる** (実測)。CI は `go.work` を持たない (生成物で gitignore 済み) ので、既存の `go build ./...` が既に検証している (→ [プラグインの書き方](plugins/authoring.md)) |
 | `make plugins` | `plugins/` を走査して組み込み用ファイルを生成 (#2480)。`make build` が内部で呼ぶ |
 | `make plugins-all` | `disabled` のプラグインも含めて生成 (CI 検証用) |
-| `make emoji-regex` | MFM の Unicode 絵文字の正規表現 (`internal/activitypub/mfm/emoji_regex_gen.go`) を、mfm-js が依存する `@misskey-dev/emoji-data` の `emojiRegex` から生成 (#3324)。`third_party/misskey` に `pnpm install` 済みであること。生成物は手で直さない |
+| `make emoji-regex` | MFM の Unicode 絵文字の正規表現 (`internal/activitypub/mfm/emoji_regex_gen.go`) を、mfm-js が依存する `@misskey-dev/emoji-data` の `emojiRegex` から生成 (#3324)。`frontend/` に `pnpm install` 済みであること。生成物は手で直さない |
 
 ### コード品質
 
@@ -140,7 +140,7 @@ cd mk && docker compose up -d
 | `make plugin-vet` | 同梱プラグインを`go vet` + 既定無効を検査（CIの`build` jobの2 step相当） |
 | `make plugin-test` | 同梱プラグインのテスト (別 module なので `./...` に含まれない) |
 | `make plugin-doc-check` | `docs/plugins/authoring.md` の Go スニペットが実際にコンパイルできるか |
-| `make emoji-regex-check` | `make emoji-regex` の生成物と snapshot (正規表現と mfm-js / emoji-data の版) が、submodule の mfm-js と emoji-data から作り直したものと一致するか。node_modules が要るので `make gates` ではなく `make frontend-check` から呼ばれる (#3324) |
+| `make emoji-regex-check` | `make emoji-regex` の生成物と snapshot (正規表現と mfm-js / emoji-data の版) が、`frontend/` の mfm-js と emoji-data から作り直したものと一致するか。node_modules が要るので `make gates` ではなく `make frontend-check` から呼ばれる (#3324) |
 | `make frontend-lint` | fork frontend の eslint。CI `frontend-check` job の Lint step と同じで、範囲は `package.json` の script が持つ (`--quiet "src/**/*.{ts,vue}"`)。`make frontend-check` から呼ばれる (#2906)。実測 55 秒 |
 | `make frontend-test` | fork frontend の vitest (`test/unit/**/*.test.ts`)。CI `frontend-check` job の Unit test step と同じ |
 | `make plugin-dev` | プラグインを編集しながら動かす (`PLUGIN=plugins/status`) |
@@ -228,7 +228,6 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_xxx" ON "yyy" ("zzz");
 | `make federation-misskey-build` `federation-misskey-up` `federation-misskey-test` `federation-misskey-down` `federation-misskey-logs` | Misskey 本家インスタンスを立てて実際に連合させる | [ActivityPub連合](federation.md) |
 | `make federation-misskey-e2e` | 上記を起動から撤去まで通しで実行 (CI の `federation` シナリオと同じ) | 同上 |
 | `make federation-mastodon-e2e` `federation-mastodon-down` | 本物の Mastodon を立てて引用の承認 (FEP-044f) を確かめる。前者は起動から撤去まで通し (CI の `federation-mastodon` シナリオと同じ) | 同上 |
-| `make e2e-submodule-init` | submodule を初期化 (本家フロントエンドの取得)。e2e 系の前提 | — |
 | `make playwright-up` `playwright-test` `playwright-down` | Playwright によるフロントエンド / API テスト | [Playwright](playwright.md) |
 | `make upstream-fetch` | 比較対象の本家 (`UPSTREAM_MISSKEY_VERSION` の版) を `.cache/misskey/<版>/` へ取得する。golden の再生成・本家 backend e2e・apicompat の前提 (#3378) | [本家への追従](upstream-catch-up.md) |
 | `make upstream-check` | golden と本家を読むテストが本家の版と一致するか (本家から作り直して差分が無いこと)。`apicompat` workflow が回す | [shape drift](shape-drift.md) |
@@ -251,9 +250,9 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_xxx" ON "yyy" ("zzz");
 | `make uds-rebuild` | フロントエンド + イメージをまとめてビルド |
 | `make uds-restart` | `mkgo` を再起動して配信エントリを検証 |
 
-> **警告**: `make uds-frontend-build` と `make e2e-frontend-build` は `third_party/misskey/built` に出力する。**本番コンテナがこのディレクトリを bind-mount している**ため、「ビルドが通るか確かめるだけ」のつもりで実行すると配信中のアセットが差し替わる。mk-go はエントリポイントを起動時に 1 回だけ解決してキャッシュするので、ハッシュが変わると HTML が消えたファイルを指したまま **404 でフロントが起動しなくなる**。
+> **警告**: `make uds-frontend-build` と `make e2e-frontend-build` は `frontend/built` に出力する (#3379 より前は `third_party/misskey/built`)。**本番コンテナがこのディレクトリを bind-mount している**ため、「ビルドが通るか確かめるだけ」のつもりで実行すると配信中のアセットが差し替わる。mk-go はエントリポイントを起動時に 1 回だけ解決してキャッシュするので、ハッシュが変わると HTML が消えたファイルを指したまま **404 でフロントが起動しなくなる**。
 >
-> - フロントの型チェックだけなら `third_party/misskey/packages/frontend` で `npx vue-tsc --noEmit` / `npx eslint` を直接叩く (Docker 不要で速い)
+> - フロントの型チェックだけなら `make frontend-check`、または `frontend/packages/frontend` で `npx vue-tsc --noEmit` / `npm run eslint` を直接叩く (Docker 不要で速い)。`frontend/` を手でビルドするときは、先に `make plugins` で `server-plugins.generated.ts` を生成する (git で追跡していない)
 > - 本番へ反映する意図で実行した場合は、続けてコンテナを再起動すること
 
 ## コーディング規約
@@ -330,7 +329,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_xxx" ON "yyy" ("zzz");
 | check | workflow | 内容 |
 |---|---|---|
 | `vulncheck` | CI | 依存・Go stdlib の**到達可能な**既知脆弱性 + Go version の pin 整合 |
-| `frontend-check` | CI | fork frontend の型 (`vue-tsc --noEmit`) + submodule のソースを読むゲート + eslint + vitest + `make plugins-all` と統合バイナリの build。**`make frontend-check` は型・ゲート・eslint まで** (#2906) なので、job 全体は [ci.md](ci.md) の手元再現を使う |
+| `frontend-check` | CI | `frontend/` の型 (`vue-tsc --noEmit`) + `frontend/` のソースを読むゲート + eslint + vitest + `make plugins-all` と統合バイナリの build。**`make frontend-check` は型・ゲート・eslint まで** (#2906) なので、job 全体は [ci.md](ci.md) の手元再現を使う |
 | `plugin-tests` | CI | 同梱プラグインのテスト (別 module なので `go list ./...` に入らない) |
 | `build-and-push` / `-bundled` | Docker | image がビルドできるか (PR では push しない) |
 | `spec (mk-go 1/4)` 〜 `4/4` | Playwright | ブラウザからの統合互換。TS backend での実行は `workflow_dispatch` のみ |
@@ -394,7 +393,7 @@ make plugins-all            # disabled のものも含める (CI 検証用)
 make plugin-dev             # 編集しながら動かす (PLUGIN=plugins/status)
 
 # 更新 (運用)
-make pull                   # 本体 + submodule + plugins/ の独立リポジトリを一括 pull
+make pull                   # 本体 + plugins/ の独立リポジトリを一括 pull
 make uds-update             # pull → ビルド → 再起動 → 配信 entry の検証 (UDS 本番)
 make docker-update          # 同上 (Docker Compose 構成)
 make uds-restart            # mkgo を再起動して配信 entry を検証だけする
@@ -454,7 +453,7 @@ make federation-misskey-e2e  # 本物の Misskey TS との実連合を起動か�
 make federation-mastodon-e2e # 本物の Mastodon と引用の承認 (FEP-044f) を通しで (#3234)
 make diff-check              # mk-go と TS のレスポンスを値レベルで diff (#2078)
 make playwright-check        # Playwright を作り直して実行
-make frontend-check          # fork frontend の型チェック + submodule 依存のゲート + eslint
+make frontend-check          # frontend/ の型チェック + frontend/ を読むゲート + eslint
 make frontend-lint           # eslint だけ (CI と同じ範囲、実測 55 秒)
 make e2e-down-all            # 検証用スタックを一括撤去 (**本番 project `mk` は対象外**)
 ```

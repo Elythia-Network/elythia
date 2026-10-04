@@ -34,16 +34,16 @@ GOWORK=off go run ./tools/plugindev -plugin plugins/status -config .config/dev.y
 別の端末で Vite dev server を立てる。
 
 ```bash
-cd third_party/misskey/packages/frontend && pnpm watch
+cd frontend/packages/frontend && pnpm watch
 ```
 
 `make plugin-dev` 側が `MK_DEV=1` を立てているので、mk-go は `/vite/*` をここへ流す。プラグインの `.vue` / `.ts` を編集すると HMR が効く。
 
-プラグインのソースは `packages/frontend` の外にあるが、`mk-plugins.generated.json` の `allow` に `plugins/` が入るので dev server が配信できる（生成は `make plugins` か `make plugin-dev` が行う）。
+プラグインのソースは `packages/frontend` の外にあるが、`mk-plugins.generated.json` の `allow` に `plugins/` が入るので dev server が配信できる（生成は `make plugins` か `make plugin-dev` が行う）。同じく生成物の `server-plugins.generated.ts` は git で追跡していないので、dev server を立てる前に一度 `make plugins` か `make plugin-dev` を実行しておく。
 
 ### node_modules の所有者に注意
 
-`make uds-frontend-build` / `make e2e-frontend-build` は **Docker の中で root として** `pnpm install` するため、`third_party/misskey/node_modules` が root 所有になる。この状態でローカルの `pnpm watch` を起動すると失敗する。
+`make uds-frontend-build` / `make e2e-frontend-build` は **Docker の中で root として** `pnpm install` するため、`frontend/node_modules` と `frontend/packages/*/node_modules` が root 所有になる。この状態でローカルの `pnpm watch` を起動すると失敗する。
 
 ```
 Error: EACCES: permission denied, open '.../node_modules/.vite-temp/vite.config.ts.timestamp-....mjs'
@@ -53,11 +53,11 @@ Error: EACCES: permission denied, open '.../node_modules/.vite-temp/vite.config.
 
 ```bash
 # A. 所有者を自分に移す (以後 Docker ビルドを使わないなら)
-sudo chown -R "$(id -un):$(id -gn)" third_party/misskey/node_modules
+sudo chown -R "$(id -un):$(id -gn)" frontend/node_modules frontend/packages/*/node_modules
 
 # B. dev server も Docker で動かす
-docker run --rm -it -v "$(pwd)":/work -w /work/third_party/misskey/packages/frontend \
-  -p 5173:5173 "node:$(sed -n 's/^ARG NODE_VERSION=\(.*\)$/\1/p' third_party/misskey/Dockerfile)" npx vite --host
+docker run --rm -it -v "$(pwd)":/work -w /work/frontend/packages/frontend \
+  -p 5173:5173 "node:$(tr -d '[:space:]' < frontend/.node-version)-trixie" npx vite --host
 ```
 
 ## 確認できること

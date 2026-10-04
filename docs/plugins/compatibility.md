@@ -7,7 +7,7 @@ mk-go 本体を変更する人向け。**公開面を広げてよい条件**と�
 | | 場所 |
 |---|---|
 | Go | `plugin/` と `plugin/peercache/` と `plugin/plugintest/` |
-| TypeScript | `third_party/misskey/packages/frontend/src/plugin-api.ts` |
+| TypeScript | `frontend/packages/frontend/src/plugin-api.ts` |
 | HTTP | `/api/plugin/<name>/` の名前空間 |
 | ページ | `/plugin/<name>/` と `/admin/plugin/<name>/` の名前空間 |
 | ナビ | `navbarItemDef` の `plugin:<name>` キー |
@@ -118,7 +118,7 @@ go run ./tools/pluginspec -write
 |---|---|---|
 | `build` の `Vet bundled plugins` | 各プラグインを `go vet` (テストファイルも含めてコンパイル) | ○ |
 | `plugin-tests` | 各プラグインのテストを実行 (`replace` で本体の公開面に対してコンパイルされる) | × |
-| `frontend-check` | `make plugins-all` (`-include-disabled`) → 統合バイナリのビルド → `vue-tsc` + submodule 依存のゲート | × |
+| `frontend-check` | `make plugins-all` (`-include-disabled`) → 統合バイナリのビルド → `vue-tsc` + `frontend/` を読むゲート | × |
 
 required なのは `build` だけ (`docs/ci.md` の required check は `build` / `test` / `lint` の 3 つ)。`plugin-tests` / `frontend-check` だけが落ちる壊れ方はマージをブロックしない。
 

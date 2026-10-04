@@ -40,7 +40,7 @@ make build          # または docker build / make uds-build
 
 ### フロントエンドを持つプラグイン
 
-`third_party/misskey` (submodule) が取得済みである必要がある。未取得のまま frontend 付きプラグインを置くと、生成の時点でエラーになる。
+フロントエンドは本体の `frontend/` からビルドする (#3379)。生成ツールは `frontend/packages/frontend/src/server-plugins.generated.ts` を書き出し、frontend のビルドはこれを import する。このファイルは追跡していないので、frontend をビルドする前に `make plugins` を実行しておく。
 
 **フロントエンドのビルド後は mk-go の再起動が必須。** mk-go は起動時に一度だけ manifest を読むので、ビルドしただけでは古いファイルを指したままになる（存在しないファイルを指すと画面が真っ白になる）。
 
@@ -172,7 +172,7 @@ disabled: true
 
 既定無効なのは、同梱プラグインが**ビルドに含まれているだけで有効になる**ため。`plugin_wiring.go`はRoutes/Jobsの登録より先に専用schemaを開いてmigrationを適用するので、設定していなくても`plugin_<name>` schemaとテーブルができる。schemaを開けない環境では起動そのものが失敗する。cloneしただけで全運営者のバイナリ・フロント・DBに入る状態にしない。
 
-**この既定は`build` jobの`Check bundled plugins are disabled by default`が見ている**（#2701）。検証のために一時的に外して戻し忘れるのを止めるため。手元で動かすだけなら`make plugin-dev PLUGIN=plugins/<name>`を使うと`mk-plugin.yml`を触らずに済む（ビルド生成物である`server-plugins.generated.ts`はsubmodule側でtrackedなので書き換わる）。
+**この既定は`build` jobの`Check bundled plugins are disabled by default`が見ている**（#2701）。検証のために一時的に外して戻し忘れるのを止めるため。手元で動かすだけなら`make plugin-dev PLUGIN=plugins/<name>`を使うと`mk-plugin.yml`を触らずに済む（ビルド生成物である`server-plugins.generated.ts`は書き換わるが、gitで追跡していないので差分には出ない）。
 
 ## 入っているものを確認する
 

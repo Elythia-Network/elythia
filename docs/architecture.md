@@ -9,7 +9,7 @@ mk-go は Misskey (TypeScript/NestJS) のバックエンドを Go で書き換�
 - **wire 互換が最優先**: REST API 応答 shape・エラーコード・ActivityPub の wire format を upstream と一致させる。
 - **Go らしい再構成**: TS のパターンをそのまま移植せず、明示的 interface・エラー値・構造体埋め込みで書き直す。
 - **互換を機械的に守る**: golden/shapetest・drift detector・値レベル diff harness・drop-in e2e で乖離を CI 検出する（§8）。
-- **1.0 以降の方針**: 完全互換 backend から「互換を保ちつつ frontend (third_party/misskey fork) も独自進化させる Misskey ファミリー fork」へ。API 拡張は additive-only、ActivityPub は硬く互換維持、REST は自フロント主導でケースバイケース。
+- **1.0 以降の方針**: 完全互換 backend から「互換を保ちつつ frontend (Misskey TS の fork。#3379 で本体の `frontend/` へ取り込んだ) も独自進化させる Misskey ファミリー fork」へ。API 拡張は additive-only、ActivityPub は硬く互換維持、REST は自フロント主導でケースバイケース。
 
 ---
 
@@ -326,7 +326,7 @@ hook: Fanout / Federation / Notification / Webhook / Chart / Index / BlockingChe
 
 ## 7. parity 品質ゲート（互換性の moat）
 
-wire 互換を機械的に守る多層防御。upstream は **official `misskey/misskey` Docker image** を使うため、`third_party/misskey`（自フロント fork）の改造とは独立して機能する。
+wire 互換を機械的に守る多層防御。upstream は **official `misskey/misskey` Docker image** を使うため、`frontend/`（自フロント fork）の改造とは独立して機能する。
 
 | 仕組み | 内容 | docs |
 |---|---|---|
@@ -477,7 +477,8 @@ CLAUDE.md の Section 1 / 2 にあった表とツリーを、#3248 でここへ�
 ├── tools/                  # parity ゲート / コード生成のCLI群（apicompat、shapediff、pluginbuild 等）
 ├── migration/              # golang-migrate用SQLファイル（`NNNNNN_name.up.sql` / `.down.sql`）
 ├── tests/                  # Go の e2e（`tests/e2e` / `tests/e2e-federation`）と、Go 以外の検証基盤（playwright / diff / dropin / bench / upstream-e2e 等）
-├── third_party/misskey/    # fork した Misskey TS（submodule。フロントエンドの供給元）
+├── frontend/               # 同梱フロントエンド。fork した Misskey TS を取り込んだ pnpm workspace（#3379）
+├── third_party/misskey/    # 取り込む前の fork の submodule。もう読まない（#3379 の段階 P4d で外す）
 ├── deploy/                 # デプロイ用の補助資材（UDS 構成、pg_bigm 入り postgres image）
 ├── .config/                # 設定ファイル（Misskey互換YAML）
 │   ├── default.yml.example # ローカル開発用テンプレート (track 対象)
