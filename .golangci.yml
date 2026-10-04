@@ -82,18 +82,16 @@ linters:
       - std-error-handling
 
     rules:
-      # **`test/e2e_federation` のパッケージ名だけ ST1003 から外す。**
-      # ここは upstream の e2e と対応を取るためディレクトリ名を保っており、
-      # パッケージ名もそれに合わせている。外部から import されないテスト専用
-      # パッケージなので、名前を変える実益が無い一方、ディレクトリ名まで
-      # 変えると `internal/` の実コード 2 ファイルを含む 24 箇所に波及する
-      # (数え方: `git grep -oI e2e_federation -- '*.go' | wc -l`。**code だけで数える** —
-      # doc を含めると、この数字に言及した doc 自身が数を変えてしまう)。
+      # **`tests/e2e-federation` のパッケージ名 `e2e_federation` だけ ST1003 から外す。**
+      # ディレクトリ名は `tests/` の他のスイートの多数派に合わせてハイフンにした (#3373)
+      # が、Go のパッケージ名にハイフンは使えないので、下線のまま残している。外部から
+      # import されないテスト専用パッケージなので、`e2efederation` などへ変える実益が
+      # 無い (変えるなら `package` 句 7 か所と、コメントやログの文字列 17 か所)。
       # **CI のカバレッジ閾値は ImportPath の `/e2e` で判定する** (`ci.yml` の
       # `pkg ~ /\/e2e/` で unanchored な部分一致) ので、**名前が `e2e` で
       # 始まる限り** 0% 例外は維持される (`federatione2e` のように後ろへ
       # 回すと外れて 90% になる)。
-      - path: ^test/e2e_federation/
+      - path: ^tests/e2e-federation/
         text: should not use underscores in package names
         linters:
           - staticcheck

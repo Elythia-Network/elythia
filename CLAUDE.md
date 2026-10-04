@@ -72,7 +72,7 @@ internal/       本体。依存の向きは api → core → repository → mode
 plugin/         プラグインがimportする公開パッケージ
 plugins/        プラグイン本体(gitignore済み。同梱するものだけ例外)
 migration/      NNNNNN_name.up.sql / .down.sql
-test/ tests/    Goのe2e / Go以外の検証基盤
+tests/          Goのe2e(`tests/e2e` / `tests/e2e-federation`)と、Go以外の検証基盤
 third_party/misskey/  forkしたMisskey TS(submodule。frontendの供給元)
 tools/          parityゲートとコード生成のCLI
 docs/           ドキュメント
@@ -290,6 +290,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 
 このファイル自体を変えたときだけ、1行で追記します(新しいものを上に)。経緯の本文はリンク先にあります。個別のfixの履歴は`CHANGELOG.md`にあります。
 
+- 2026-10-04: Goのe2eを`tests/`へ移したのでSection 2の構成を更新した (#3373) → [docs/design/project-restructure.md](docs/design/project-restructure.md)
 - 2026-10-04: 復路の保証をやめたことを冒頭の方針とSection 8に反映した (#3191) → [docs/dropin-e2e.md](docs/dropin-e2e.md#復路は測る対象-3191)
 - 2026-10-01: 他の人のClaudeが読むことを前提に作り直した。更新記録とSection 8の本文をdocsへ移し、運営者の運用を`CLAUDE.local.md`へ、docsの取り込みを`.claude/rules/`へ分けた (#3248)
 - 2026-09-30: `federation-mastodon-e2e`シナリオを追加 (#3234) → [docs/ci.md](docs/ci.md#変更の経緯-旧-claudemd-の更新記録)

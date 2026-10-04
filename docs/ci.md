@@ -56,8 +56,8 @@ PR を出すと十数個の check が走る。**どれが何を見ていて、�
 
 **段階的な有効化は完了した。** `unused` / `ST1003` (命名) / `ST1012` (error var 名) /
 `SA1019` (非推奨 API) はすべて有効で、恒久的に無効なのは `QF*` と `S1016` だけ。
-除外は 1 つだけ — `test/e2e_federation` の**パッケージ名** (ディレクトリ名まで変えると
-24 箇所に波及するため。`git grep -oI e2e_federation -- '*.go' | wc -l`)。
+除外は 1 つだけ — `tests/e2e-federation` の**パッケージ名** `e2e_federation` (Go のパッケージ名に
+ハイフンは使えないので下線のまま残している。理由は `.golangci.yml` のコメント)。
 
 誤検知は `//nolint:staticcheck // 理由` をその行に置く。理由を必ず書く。
 
@@ -482,7 +482,7 @@ checkout / setup-go を除くと step は実行順に 4 つ。**required job な
   成立しない。**`checks` は既定を置き換える**ので、既定の無効化も明示的に書き出してある
   (書かないと ST1000 / ST1020 / ST1021 等が黙って有効になる)。**段階的な無効化は残っていない**
   — `unused` / `ST1003` / `ST1012` / `SA1019` はすべて有効で、恒久的に無効なのは `QF*` と
-  `S1016` だけ。**除外は 1 つ** — `.golangci.yml` の rule が 1 件 (`test/e2e_federation` の
+  `S1016` だけ。**除外は 1 つ** — `.golangci.yml` の rule が 1 件 (`tests/e2e-federation` の
   パッケージ名 / ST1003) **だけ**。**これは有効化した 4 check に対する数**で、
   `exclusions.presets` の `std-error-handling` (実測 253 件を抑止) は別枠。
   `//nolint:staticcheck` はリポジトリ全体で 2 件 (SA9010 / SA1012) で、どちらも

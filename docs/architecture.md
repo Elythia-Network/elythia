@@ -476,8 +476,7 @@ CLAUDE.md の Section 1 / 2 にあった表とツリーを、#3248 でここへ�
 ├── plugins/                # プラグイン本体。gitignore 済で同梱するものだけ例外指定
 ├── tools/                  # parity ゲート / コード生成のCLI群（apicompat、shapediff、pluginbuild 等）
 ├── migration/              # golang-migrate用SQLファイル（`NNNNNN_name.up.sql` / `.down.sql`）
-├── test/                   # Go の e2e（`test/e2e` / `test/e2e_federation`）
-├── tests/                  # Go 以外の検証基盤（playwright / diff / dropin / bench / upstream-e2e 等）
+├── tests/                  # Go の e2e（`tests/e2e` / `tests/e2e-federation`）と、Go 以外の検証基盤（playwright / diff / dropin / bench / upstream-e2e 等）
 ├── third_party/misskey/    # fork した Misskey TS（submodule。フロントエンドの供給元）
 ├── deploy/                 # デプロイ用の補助資材（UDS 構成、pg_bigm 入り postgres image）
 ├── .config/                # 設定ファイル（Misskey互換YAML）

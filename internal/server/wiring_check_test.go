@@ -10,7 +10,7 @@ import (
 
 // #2674: 未配線でも動いてしまう依存の検査。setupRoutes 自体は 1300 行超で
 // 単体テストから呼べないので、判定ロジックだけを純粋関数として切り出して固定する。
-// 実際の配線が消えたときに落ちることは test/e2e (server.New を呼ぶ) が担保する。
+// 実際の配線が消えたときに落ちることは tests/e2e (server.New を呼ぶ) が担保する。
 
 // padWired pads deps up to criticalWiringCount with satisfied entries so the
 // table-size floor does not interfere with tests about missing-reporting.
