@@ -153,7 +153,7 @@ make image-build       # ghcr.io/shiroha-a/mk:bundled をローカルにビル�
 `bundled` / `latest` は develop の最新を指す **可変タグ**。本番ではバージョンを固定する。
 
 ```bash
-MK_IMAGE=ghcr.io/shiroha-a/mk:1.4.0-bundled docker compose up -d
+MK_IMAGE=ghcr.io/shiroha-a/mk:1.5.0-bundled docker compose up -d
 ```
 
 リリースタグを push すると `<version>` と `<version>-bundled` が publish される
@@ -391,7 +391,7 @@ worker 数は既定値がキューごとに違い、`stuck 検出` は**キュ�
   ok    redis        接続 ok
   FAIL  webfinger    status 403 (連合が無効)
         インスタンス設定の `federation` が `none` になっている。連合するなら管理画面で有効にする
-  ok    nodeinfo     mk-go 1.4.0
+  ok    nodeinfo     mk-go 1.5.0
   warn  actor        assertionMethod (Ed25519) が無い
         RSA だけでも連合できる。Ed25519 を公開すると対応実装との署名検証が軽くなる
   ok    tls          証明書の残り 68 日
