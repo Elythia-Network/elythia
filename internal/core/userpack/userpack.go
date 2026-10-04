@@ -25,6 +25,16 @@ type RelationApplier interface {
 	Apply(detailed *entity.UserDetailed, viewerID string, target *model.User, profile *model.UserProfile) bool
 }
 
+// RelationManyApplier is RelationApplier for every user of a list response:
+// details[i] receives the relation block from viewerID to targets[i], with one
+// query per relation instead of one per user. userrelation.Repos satisfies it.
+//
+// 本家 packMany は getRelations で閲覧者の関係をまとめて引く。利用者ごとに
+// Apply すると 1 人あたり 10 回の問い合わせになる (#3330)。
+type RelationManyApplier interface {
+	ApplyMany(viewerID string, details []*entity.UserDetailed, targets []*model.User, profiles []*model.UserProfile) []bool
+}
+
 // ModeratorChecker reports whether a user holds moderator privileges.
 type ModeratorChecker interface {
 	IsModerator(userID string) bool
@@ -188,10 +198,28 @@ func (p *Packer) DetailedNotMe(ctx context.Context, target, viewer *model.User) 
 	return d, true
 }
 
+// applyRelationsMany writes the viewer->target relation blocks of a list
+// response, batched when the applier supports it.
+func (p *Packer) applyRelationsMany(viewerID string, details []*entity.UserDetailed, users []*model.User, profiles []*model.UserProfile) []bool {
+	if p.lookups.Relations == nil {
+		return make([]bool, len(users))
+	}
+	if many, ok := p.lookups.Relations.(RelationManyApplier); ok {
+		return many.ApplyMany(viewerID, details, users, profiles)
+	}
+	out := make([]bool, len(users))
+	for i, u := range users {
+		out[i] = p.lookups.Relations.Apply(details[i], viewerID, u, profiles[i])
+	}
+	return out
+}
+
 // DetailedMany packs users as upstream packMany(users, viewer, {schema:
 // 'UserDetailed'}) does, in the order of users. viewer may be nil (upstream
 // packMany(users, null)). profiles supplies the user_profile rows; a user
-// without one is packed with the packer defaults.
+// without one is packed with the packer defaults and its counts are shown
+// only to the user themself and to moderators. The relation blocks are read
+// with one query per relation when Relations implements RelationManyApplier.
 //
 // The viewer's own entry is returned as UserDetailed; callers whose list can
 // contain the viewer promote it with meself.Pack (upstream returns MeDetailed
@@ -211,9 +239,12 @@ func (p *Packer) DetailedMany(ctx context.Context, viewer *model.User, users []*
 		viewerID = viewer.ID
 	}
 	iAmModerator := viewer != nil && p.lookups.Moderators != nil && p.lookups.Moderators.IsModerator(viewer.ID)
+	details := make([]*entity.UserDetailed, len(users))
+	profs := make([]*model.UserProfile, len(users))
 	for i, u := range users {
 		profile := profiles[u.ID]
-		d := entity.PackUserDetailed(u, profile, p.idGen)
+		out[i] = entity.PackUserDetailed(u, profile, p.idGen)
+		d := &out[i]
 		if iAmModerator {
 			note := ""
 			if profile != nil && profile.ModerationNote != nil {
@@ -221,21 +252,14 @@ func (p *Packer) DetailedMany(ctx context.Context, viewer *model.User, users []*
 			}
 			d.ModerationNote = &note
 		}
-		entity.ApplyModeratorSecurityFields(&d, iAmModerator, profile)
-		viewerIsFollowing := false
-		if p.lookups.Relations != nil {
-			viewerIsFollowing = p.lookups.Relations.Apply(&d, viewerID, u, profile)
-		}
-		isMe := viewerID == u.ID
-		entity.GateCountVisibility(&d, isMe, iAmModerator, viewerIsFollowing)
-		if profile == nil && !isMe && !iAmModerator {
-			// profile が無いと公開範囲が packer の既定 (public) に倒れ、伏せるべき
-			// カウントが出る。本家は profile を findOneByOrFail で読むので、読めない
-			// ときは本人とモデレーター以外には伏せる (閉じる側に倒す)。
-			d.FollowersCount = 0
-			d.FollowingCount = 0
-		}
-		out[i] = d
+		entity.ApplyModeratorSecurityFields(d, iAmModerator, profile)
+		details[i], profs[i] = d, profile
+	}
+	following := p.applyRelationsMany(viewerID, details, users, profs)
+	for i, u := range users {
+		// profile が無い利用者は GateCountVisibility が本人とモデレーター以外に
+		// 伏せる (PackUserDetailed が印を付ける)。
+		entity.GateCountVisibility(details[i], viewerID == u.ID, iAmModerator, following[i])
 	}
 	if p.lookups.ExtrasMany != nil {
 		targets := make([]DetailTarget, len(users))

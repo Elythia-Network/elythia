@@ -49,48 +49,59 @@ func (r Repos) Apply(detailed *entity.UserDetailed, viewerID string, target *mod
 	}
 
 	var (
-		isFollowing, isFollowed      bool
-		isBlocking, isBlocked        bool
-		isMuted, isRenoteMuted       bool
-		hasPendingFrom, hasPendingTo bool
-		followRec                    *model.Following
-		memo                         *model.UserMemo
-		wg                           sync.WaitGroup
+		rel relation
+		wg  sync.WaitGroup
 	)
 
 	if r.Following != nil {
 		wg.Add(3)
-		go func() { defer wg.Done(); isFollowing, _ = r.Following.Exists(viewerID, target.ID) }()
-		go func() { defer wg.Done(); isFollowed, _ = r.Following.Exists(target.ID, viewerID) }()
-		go func() { defer wg.Done(); followRec, _ = r.Following.FindByPair(viewerID, target.ID) }()
+		go func() { defer wg.Done(); rel.isFollowing, _ = r.Following.Exists(viewerID, target.ID) }()
+		go func() { defer wg.Done(); rel.isFollowed, _ = r.Following.Exists(target.ID, viewerID) }()
+		go func() { defer wg.Done(); rel.followRec, _ = r.Following.FindByPair(viewerID, target.ID) }()
 	}
 	if r.Blocking != nil {
 		wg.Add(2)
-		go func() { defer wg.Done(); isBlocking, _ = r.Blocking.Exists(viewerID, target.ID) }()
-		go func() { defer wg.Done(); isBlocked, _ = r.Blocking.Exists(target.ID, viewerID) }()
+		go func() { defer wg.Done(); rel.isBlocking, _ = r.Blocking.Exists(viewerID, target.ID) }()
+		go func() { defer wg.Done(); rel.isBlocked, _ = r.Blocking.Exists(target.ID, viewerID) }()
 	}
 	if r.Muting != nil {
 		wg.Add(1)
-		go func() { defer wg.Done(); isMuted, _ = r.Muting.Exists(viewerID, target.ID) }()
+		go func() { defer wg.Done(); rel.isMuted, _ = r.Muting.Exists(viewerID, target.ID) }()
 	}
 	if r.RenoteMuting != nil {
 		wg.Add(1)
-		go func() { defer wg.Done(); isRenoteMuted, _ = r.RenoteMuting.Exists(viewerID, target.ID) }()
+		go func() { defer wg.Done(); rel.isRenoteMuted, _ = r.RenoteMuting.Exists(viewerID, target.ID) }()
 	}
 	if r.FollowRequest != nil {
 		wg.Add(2)
-		go func() { defer wg.Done(); hasPendingFrom, _ = r.FollowRequest.Exists(viewerID, target.ID) }()
-		go func() { defer wg.Done(); hasPendingTo, _ = r.FollowRequest.Exists(target.ID, viewerID) }()
+		go func() { defer wg.Done(); rel.hasPendingFrom, _ = r.FollowRequest.Exists(viewerID, target.ID) }()
+		go func() { defer wg.Done(); rel.hasPendingTo, _ = r.FollowRequest.Exists(target.ID, viewerID) }()
 	}
 	if r.Memo != nil {
 		wg.Add(1)
-		go func() { defer wg.Done(); memo, _ = r.Memo.FindByPair(viewerID, target.ID) }()
+		go func() { defer wg.Done(); rel.memo, _ = r.Memo.FindByPair(viewerID, target.ID) }()
 	}
 
 	wg.Wait()
+	return r.write(detailed, rel, profile)
+}
 
+// relation is the viewer->target relation state read from the repositories.
+type relation struct {
+	isFollowing, isFollowed      bool
+	isBlocking, isBlocked        bool
+	isMuted, isRenoteMuted       bool
+	hasPendingFrom, hasPendingTo bool
+	followRec                    *model.Following
+	memo                         *model.UserMemo
+}
+
+// write stores rel onto detailed and reports whether the viewer follows the
+// target. Apply と ApplyMany が同じ書き方をするよう 1 箇所にまとめる。
+func (r Repos) write(detailed *entity.UserDetailed, rel relation, profile *model.UserProfile) bool {
 	viewerIsFollowing := false
 	if r.Following != nil {
+		isFollowing, isFollowed := rel.isFollowing, rel.isFollowed
 		detailed.IsFollowing = &isFollowing
 		detailed.IsFollowed = &isFollowed
 		viewerIsFollowing = isFollowing
@@ -100,13 +111,14 @@ func (r Repos) Apply(detailed *entity.UserDetailed, viewerID string, target *mod
 		// 無い / notify 未設定でも default を出す (#1558)。
 		none := "none"
 		withReplies := false
-		if followRec != nil {
-			if followRec.Notify != nil {
-				detailed.Notify = followRec.Notify
+		if rel.followRec != nil {
+			if rel.followRec.Notify != nil {
+				notify := *rel.followRec.Notify
+				detailed.Notify = &notify
 			} else {
 				detailed.Notify = &none
 			}
-			withReplies = followRec.WithReplies
+			withReplies = rel.followRec.WithReplies
 		} else {
 			detailed.Notify = &none
 		}
@@ -119,21 +131,26 @@ func (r Repos) Apply(detailed *entity.UserDetailed, viewerID string, target *mod
 		}
 	}
 	if r.Blocking != nil {
+		isBlocking, isBlocked := rel.isBlocking, rel.isBlocked
 		detailed.IsBlocking = &isBlocking
 		detailed.IsBlocked = &isBlocked
 	}
 	if r.Muting != nil {
+		isMuted := rel.isMuted
 		detailed.IsMuted = &isMuted
 	}
 	if r.RenoteMuting != nil {
+		isRenoteMuted := rel.isRenoteMuted
 		detailed.IsRenoteMuted = &isRenoteMuted
 	}
 	if r.FollowRequest != nil {
+		hasPendingFrom, hasPendingTo := rel.hasPendingFrom, rel.hasPendingTo
 		detailed.HasPendingFollowRequestFromYou = &hasPendingFrom
 		detailed.HasPendingFollowRequestToYou = &hasPendingTo
 	}
-	if r.Memo != nil && memo != nil {
-		detailed.Memo = &memo.Memo
+	if r.Memo != nil && rel.memo != nil {
+		memo := rel.memo.Memo
+		detailed.Memo = &memo
 	}
 	return viewerIsFollowing
 }

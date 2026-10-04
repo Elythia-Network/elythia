@@ -579,33 +579,11 @@ func (h *Handler) SearchByUsernameAndHost(c echo.Context) error {
 		return c.JSON(http.StatusOK, h.packLites(users))
 	}
 
-	viewer := middleware.GetUser(c)
-	viewerID := ""
-	if viewer != nil {
-		viewerID = viewer.ID
-	}
-	iAmModerator := viewer != nil && h.moderatorChecker != nil && h.moderatorChecker.IsModerator(viewer.ID)
-	ids := make([]string, 0, len(users))
-	for _, u := range users {
-		ids = append(ids, u.ID)
-	}
-	profiles := h.userService.GetProfilesByUserIDs(ids)
+	// 本家 search-by-username-and-host は packMany(users, me, {schema:'UserDetailed'})。
+	// モデレーター向けの項目・関係 (#1980)・カウントのゲート・ピン留め・移行先を
+	// DetailedMany でまとめて組み、自分の行は MeDetailed にする (#3330)。
 	ctx := c.Request().Context()
-	var batch detailedBatch
-	for _, u := range users {
-		d := entity.PackUserDetailed(u, profiles[u.ID], h.idGen)
-		// upstream search-by-username-and-host は packMany(users, me, {schema:'UserDetailed'})
-		// で embed user に viewer 視点の relation block を付ける (#1980)。匿名/self で no-op。
-		viewerIsFollowing := h.viewerRelationRepos().Apply(&d, viewerID, u, profiles[u.ID])
-		// upstream pack は count gate (followersVisibility=followers 等) を isFollowing で
-		// 解く。これが無いと followers-only count が非フォロワーに leak する (#1980、users/search と対称)。
-		isMe := viewer != nil && viewer.ID == u.ID
-		entity.GateCountVisibility(&d, isMe, iAmModerator, viewerIsFollowing)
-		batch.add(d, u, profiles[u.ID])
-	}
-	// ピン留めと移行先は本家 packMany と同じくまとめて埋める (#3330)。upstream の
-	// pack は isDetailed && isMe で MeDetailed を返す。
-	return c.JSON(http.StatusOK, batch.packAll(ctx, h, viewer))
+	return c.JSON(http.StatusOK, h.packDetailedAll(ctx, middleware.GetUser(c), users, h.userService.GetProfilesByUserIDs(userIDs(users))))
 }
 
 // UpdateMemo handles POST /api/users/update-memo.

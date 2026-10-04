@@ -92,3 +92,45 @@ func TestPackUserDetailed_EmptyVisibilityIsPublic(t *testing.T) {
 	d := PackUserDetailed(u, &model.UserProfile{UserID: "u"})
 	require.Equal(t, 11, d.FollowersCount, "未設定は既定 (public) として扱う")
 }
+
+// profile 無しで組んだ利用者は公開範囲が分からないので、GateCountVisibility は
+// 本人とモデレーター以外にカウントを伏せる。visibility が空のままだと public
+// 扱いに倒れ、DB 障害のあいだ非公開のカウントが一覧から漏れていた (#3330)。
+func TestGateCountVisibility_ProfileMissingIsClosed(t *testing.T) {
+	t.Parallel()
+
+	u := &model.User{ID: "u", Username: "u", FollowersCount: 42, FollowingCount: 7}
+	for _, c := range []struct {
+		name                     string
+		isMe, isMod, isFollowing bool
+		wantFollowers            int
+		wantFollowing            int
+	}{
+		{"anonymous / stranger", false, false, false, 0, 0},
+		{"follower", false, false, true, 0, 0},
+		{"self", true, false, false, 42, 7},
+		{"moderator", false, true, false, 42, 7},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d := PackUserDetailed(u, nil)
+			GateCountVisibility(&d, c.isMe, c.isMod, c.isFollowing)
+			require.Equal(t, c.wantFollowers, d.FollowersCount)
+			require.Equal(t, c.wantFollowing, d.FollowingCount)
+		})
+	}
+}
+
+// profile 無しの利用者は、リモートの統計で上書きしても伏せたままにする。
+func TestOverrideRemoteCounts_ProfileMissingStaysClosed(t *testing.T) {
+	t.Parallel()
+
+	host := "remote.example"
+	u := &model.User{ID: "u", Username: "u", Host: &host, FollowersCount: 5, FollowingCount: 3}
+	d := PackUserDetailed(u, nil)
+	OverrideRemoteCounts(&d, 1000, 250)
+	require.Equal(t, 0, d.FollowersCount)
+	require.Equal(t, 0, d.FollowingCount)
+	GateCountVisibility(&d, false, true, false) // moderator
+	require.Equal(t, 1000, d.FollowersCount, "見てよい閲覧者には上書きした値を見せる")
+	require.Equal(t, 250, d.FollowingCount)
+}

@@ -333,6 +333,7 @@ func (s *Service) showByUsername(username string, host *string, resync bool) (*U
 // 未知の acct は 404 を返す。ShowByUsername の remote fallback をここで使うと、
 // 認証不要の GET 1 回ごとに WebFinger + actor fetch の outbound HTTP とリモート
 // user 行の作成を外部から強制できてしまう (upstream に無い増幅面)。
+// users/followers / users/following も本家が DB だけを引くのでこちらを使う (#3330)。
 func (s *Service) ShowByUsernameDB(username string, host *string) (*UserWithProfile, error) {
 	u, err := s.userRepo.FindByUsernameLower(username, host)
 	if err != nil {
