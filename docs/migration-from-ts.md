@@ -73,7 +73,7 @@ id: aidx             # Misskey-TS側のID生成方式と一致させること
 
 mk-goの追加テーブルを作り、共有テーブルを upstream の形に揃える。**Misskey-TSが書いたデータは原則として保持される** (例外は `000081` / `000084` / `000085` / `000094`、後述)。`000082` も行を DELETE するが、対象は upstream Misskey に無い `transfer-ownership` が作った行だけで TS 由来のものは含まない。
 
-共有テーブルにも触るものが 17 件あるので、内容と復路への影響を[破壊的なマイグレーション](#破壊的なマイグレーション)にまとめてある。**先に読むこと。**
+共有テーブルにも触るものが 17 件あるので、内容と、TS へ戻したときの影響 (保証はしない) を[破壊的なマイグレーション](#破壊的なマイグレーション)にまとめてある。**先に読むこと。**
 
 ```bash
 # ローカルビルドの場合
@@ -97,7 +97,7 @@ docker compose exec app /app/migrate -config .config/default.yml -direction up
 | `000056` | `note.uri` の重複行を DELETE (最小 `id` を残す) | **mk-go固有の race で作られた重複コピーの除去** (#1527)。`IngestNote` の `FindByURI` → `Create` が並行すると同一 URI の行が増えていた。`000057` で UNIQUE index を張る前提として要る |
 | `000064` | `registration_ticket_pendingUserId_fkey` を DROP | mk-goが `000026` で余分に張った FK (#2083)。upstream の `pendingUserId` は無制約 `varchar`。この FK があると確認メール再送防止が必ず FK 違反で no-op になっていた |
 | `000067` | `migrations` の seed 行を DELETE + 正式名へ `UPDATE` + 未 seed 分を `INSERT` | **`000029` が seed した mk-go 由来の行を直すもの** (#2244)。TypeORM は `name` 列の文字列一致で未実行判定するので、短縮形のままだと TS 復帰時に本家 migration が再実行される |
-| `000068` | 冗長な index を DROP | **落とすのは mk-go の migration が作った index だけ**。upstream 由来の index は絶対に触らない (触ると本家が再作成できず復路が壊れるため) |
+| `000068` | 冗長な index を DROP | **落とすのは mk-go の migration が作った index だけ**。upstream 由来の index は絶対に触らない (TS 生まれの DB と mk-go 生まれの DB で index の名前を揃え、後の migration (`000083` など) が upstream の名前を前提に書けるようにするため。当初の理由は TS へ戻したときに本家が再作成できないことだったが、そちらは今は保証しない) |
 | `000080` | `note` の自己参照 FK (`renoteId` / `replyId`) を DROP | **upstream 追随。** 本家も 2025.8.0 の `1753868431598-remove_note_constraints.js` でこの 2 本を削除しており、現在の `MiNote` は `createForeignKeyConstraints: false` で FK を作らない |
 | `000081` | 孤児化した `note` 行を DELETE + 痕跡列を NULL 化 | **TS が書いた行が対象になりうる 1 つ目。** 下記参照 |
 | `000082` | owner が持つ `chat_room_membership` / `chat_room_invitation` を DELETE | **`transfer-ownership` だけが作れる行の除去** (#2858)。この endpoint は upstream Misskey に無い (出自は [乖離一覧](divergence.md))。upstream は owner に membership 行を作らず (`ChatService.ts` の `concat({userId: room.ownerId, isMuted: false})`)、owner 宛の招待も `createRoomInvitation` が弾くので TS 生まれの DB には存在しない |
@@ -152,7 +152,7 @@ DELETE の対象はこの残骸で、条件は
 操作の結果は 1 つ目と区別できない。AGPL 13 条の観点では案内が無い状態のほうが問題なので
 埋める側に倒してある。別の URL を出したい operator は admin 画面で設定し直せる。
 
-**復路 (TS へ戻す) では operator が設定し直すこと。** mk-go が入れた値が残っていると、
+**TS へ戻す場合 (保証はしない) は operator が設定し直すこと。** mk-go が入れた値が残っていると、
 TS 側は「Misskey を改変したバージョン」として mk-go のリポジトリを案内し続ける。
 `down` は no-op なので自動では戻らない (up 後に operator が同じ値を明示設定した行と
 区別できないため)。
@@ -263,14 +263,26 @@ mk-go のコンテナは Misskey-TS と同じ **UID/GID 991** で起動する。
 
 ## Misskey-TSへのロールバック
 
-Misskey-TSに戻す場合の手順:
+**mk-go の DB を Misskey-TS へ戻すこと (復路) は保証しない (#3191)。** 往路 (Misskey-TS の DB をそのまま引き継ぐこと) は引き続き保証する。今後の変更には、TS へ戻せることを理由にした制約を課さない。戻せる可能性を残したいなら、**移行の前に取った DB のバックアップから戻す**のが確実な方法になる。
+
+それでも戻す場合の手順:
 
 1. mk-goを停止する
 2. 従来通りMisskey-TSを起動する
 
-データベースは双方向に互換性があり、mk-goが追加したテーブルはMisskey-TSからは無視される。
+今の版でどこまで戻れるかは、`make dropin-mkgo-born-test` (mk-go 生まれの DB を TS に引き渡す) と `make dropin-swap-test` の復路の段階 (TS → mk-go → TS) で**測っている**。どちらも守る対象ではなく、意図的な変更で通らなくなったら期待値を更新し、何が戻らなくなったかを下の「[戻らなくなったもの](#戻らなくなったもの)」に記録する (手順は [dropin-e2e.md](dropin-e2e.md#復路は測る対象-3191))。mk-go が追加したテーブルは Misskey-TS からは無視される。
 
-ただし [破壊的なマイグレーション](#破壊的なマイグレーション) の 17 件は戻らない。うち 13 件は mk-go が自分で作ったものの除去・初期化か upstream 追随なので**戻す必要が無い**。`000056` / `000081` / `000082` が消した行と `000053` / `000067` / `000084` / `000085` が上書きした値は、down が `SELECT 1;` の no-op なので復元できない。**`000094` は down を持つが、それでも戻らない** — 消すのは自分で足した列と index だけで、正規化した `ip` の値と統合で消えた行は復元できない (統合前の行数も個別の観測時刻も残っていない)。**`000084` / `000085` が書き換えるのは `meta."repositoryUrl"` と `meta."feedbackUrl"` なので、TS へ戻すときは admin 画面で設定し直すこと** (mk-go のリポジトリと issues を案内したままになる)。この経路を CI で検証しているのは `make dropin-swap-test` (TS → mk-go → TS) で、`make dropin-mkgo-born-test` は逆に mk-go 生まれの DB を TS に引き渡せるかを見ている。
+[破壊的なマイグレーション](#破壊的なマイグレーション) の 17 件は戻らない。うち 13 件は mk-go が自分で作ったものの除去・初期化か upstream 追随なので**戻す必要が無い**。`000056` / `000081` / `000082` が消した行と `000053` / `000067` / `000084` / `000085` が上書きした値は、down が `SELECT 1;` の no-op なので復元できない。**`000094` は down を持つが、それでも戻らない** — 消すのは自分で足した列と index だけで、正規化した `ip` の値と統合で消えた行は復元できない (統合前の行数も個別の観測時刻も残っていない)。**`000084` / `000085` が書き換えるのは `meta."repositoryUrl"` と `meta."feedbackUrl"` なので、TS へ戻すときは admin 画面で設定し直すこと** (mk-go のリポジトリと issues を案内したままになる)。この経路を CI で測っているのは `make dropin-swap-test` (TS → mk-go → TS) で、`make dropin-mkgo-born-test` は逆に mk-go 生まれの DB を TS に引き渡せるかを見ている。
+
+migration の注記やコードのコメントには、TS へ戻せることを設計の理由にした記述が残っている。**それらは当時の判断の記録で、今は保証ではない。** 往路にも要る制約 (upstream 由来の index を触らない、TS が書いた RSA 鍵のテーブルをそのまま読む、など) は、往路の理由で引き続き守る。
+
+### 戻らなくなったもの
+
+復路の検証 (`mkgo-born` / `swap-test` の復路の段階) が、mk-go の意図的な変更で通らなくなったときに 1 行ずつ足す。書式は「版 / 落ちた段階 / TS へ戻したときに失われるもの、または起きること / 変更の PR」。
+
+| 版 | 落ちた段階 | 戻したときに失われるもの・起きること | PR |
+|---|---|---|---|
+| (まだ無い) | | | |
 
 ## drop-in 互換性の現状 (2026-05-09 時点)
 

@@ -380,8 +380,8 @@ PR ごとに `.github/workflows/dropin-e2e.yml` が **5 シナリオ**を並列�
 
 | check 名 | make target | 見ているもの |
 |---|---|---|
-| `swap-test` | `dropin-swap-test` | TS→mk 切替で state が保たれるか (#374) |
-| `mkgo-born` | `dropin-mkgo-born-test` | **mk-go 生まれの DB を TS に引き渡せるか** (= ロックインの有無、#2383) |
+| `swap-test` | `dropin-swap-test` | TS→mk 切替で state が保たれるか (#374)。TS へ戻す stage 6b-9 は測る対象 (#3191) |
+| `mkgo-born` | `dropin-mkgo-born-test` | **mk-go 生まれの DB を TS に引き渡せるか** (#2383。測る対象で、保証はしない、#3191) |
 | `ed25519-verify` | `dropin-fedibird-test` | Fedibird-like mock との Ed25519 双方向 verify (#1083) |
 | `federation` | `federation-misskey-e2e` | 本物の Misskey TS を相手にした実連合 (#2362) |
 | `federation-mastodon` | `federation-mastodon-e2e` | 本物の Mastodon を相手にした引用の承認 (FEP-044f、#3234) |

@@ -14,7 +14,7 @@ mk-go が持つ「純正 Misskey (misskey-dev/misskey) には無い、または�
 
 ## このドキュメントの位置づけ
 
-mk-go は drop-in 互換 (同じ DB / Redis / frontend を Misskey TS と共有し、backend だけ差し替えられる) を最優先とする。したがって「差分」は無条件に悪ではなく、次の 4 種類に分かれる。
+mk-go は Misskey TS からの drop-in 移行 (同じ DB / Redis / frontend を引き継ぎ、backend だけ差し替えられる) を最優先とする。TS へ戻せること (復路) は保証しない (#3191)。このドキュメントで、TS へ戻したときの挙動を理由にしている記述 (別テーブルにした理由、seed の gate など) は当時の判断の記録で、今は保証ではない。したがって「差分」は無条件に悪ではなく、次の 4 種類に分かれる。
 
 | 分類 | 意味 | 扱い |
 |---|---|---|
@@ -560,7 +560,7 @@ Mastodon 4.5 以降は、引用に**引用される側の承認**を求める (F
 
 | チャンネル | 内容 |
 |---|---|
-| `notifications` | **mk-go 独自**。upstream の 18 チャンネルに無い (upstream は `main` に通知を流す)。通知だけを購読したいクライアント向け。**これに依存するクライアントは Misskey TS では動かない**ので、drop-in で戻す可能性があるなら `main` を使うこと |
+| `notifications` | **mk-go 独自**。upstream の 18 チャンネルに無い (upstream は `main` に通知を流す)。通知だけを購読したいクライアント向け。**これに依存するクライアントは Misskey TS では動かない**ので、Misskey TS でも動かしたいクライアントは `main` を使うこと |
 | `bubbleVersus` | **mk-go 独自** (#3230)。バブルゲームの対戦の招待と、その返事 (受けた・断った・取り消した) を本人へ届ける。`read:account` |
 | `bubbleVersusMatch` | **mk-go 独自** (#3230)。対戦 1 つ分 (`matchId` を渡す)。**参加者しかつなげない** (観戦は無い)。準備・攻撃・盤面の要約・切断の申告を受け、開始・攻撃・終局を流す。終局の報告は記録が大きいので API (`bubble-game/versus/report`) で送る。`read:account` |
 

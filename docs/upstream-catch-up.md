@@ -263,6 +263,7 @@ upstream に新しい migration が入った場合、`migrations` テーブル�
 migration を未実行と判定して**再実行**し、適用済み DDL への `ADD COLUMN` 重複や
 `DROP COLUMN` によるデータ喪失につながりうる (#2244)。
 
+復路は保証しない (#3191) が、この seed は `mkgo-born` で戻れる範囲を測る前提なので引き続き足す。
 `TestMigrationSeed_CoversUpstream` が漏れを検出するので、落ちたら
 `migration/000067_migrations_typeorm_names.up.sql` と同じ形式で seed を足す。
 

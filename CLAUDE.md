@@ -11,7 +11,7 @@
 - **ActivityPubの連合の互換性は必ず守る。** 他のサーバーから見て、Misskeyと同じように振る舞う
 - **REST APIは、本家のクライアントがそのまま動く互換性を保つ。** 独自の拡張は、フィールドやエンドポイントの**追加だけ**で行う。既存のものの意味を変えない
 - **frontendはMisskeyのforkで、独自に手を入れてよい**
-- **TS版Misskeyからの移行は保証する。** TS版のDBをそのまま引き継いで起動できるようにする。TS版へ戻せること(復路)の保証は、#3191でやめる予定
+- **TS版Misskeyからの移行は保証する。** TS版のDBをそのまま引き継いで起動できるようにする。TS版へ戻せること(復路)は保証しない(#3191)。今どこまで戻れるかは`dropin-e2e`で測っており、戻らなくなったものは[docs/migration-from-ts.md](docs/migration-from-ts.md#戻らなくなったもの)に記録する
 - 本家と意図的に違える挙動は、理由と一緒に[docs/divergence.md](docs/divergence.md)に記録する
 
 読み方:
@@ -235,7 +235,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 | `ci.yml` vulncheck | push / PR | | govulncheck、`go.mod`とDockerfileのGoの版の一致 |
 | `dependency-review` | PR | | PRが持ち込む依存の既知脆弱性 |
 | `codeql` | PR / push / 週1回 | | Goとworkflowの静的解析 |
-| `dropin-e2e` | PR(paths限定) | | TS↔mk切替、実Misskey / Mastodonとの連合など5シナリオ |
+| `dropin-e2e` | PR(paths限定) | | TS→mkの切替(往路)、TSへ戻す復路の測定、実Misskey / Mastodonとの連合など5シナリオ |
 | `playwright` | PR(paths限定) | | ブラウザのe2e(4 shard) |
 | `upstream-backend-e2e` | PR(paths限定) | | 本家のbackend e2eを無改変で実行(4 shard) |
 | `diff-e2e` | PR(paths限定) | | TSとの値レベルの差分 |
@@ -290,6 +290,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 
 このファイル自体を変えたときだけ、1行で追記します(新しいものを上に)。経緯の本文はリンク先にあります。個別のfixの履歴は`CHANGELOG.md`にあります。
 
+- 2026-10-04: 復路の保証をやめたことを冒頭の方針とSection 8に反映した (#3191) → [docs/dropin-e2e.md](docs/dropin-e2e.md#復路は測る対象-3191)
 - 2026-10-01: 他の人のClaudeが読むことを前提に作り直した。更新記録とSection 8の本文をdocsへ移し、運営者の運用を`CLAUDE.local.md`へ、docsの取り込みを`.claude/rules/`へ分けた (#3248)
 - 2026-09-30: `federation-mastodon-e2e`シナリオを追加 (#3234) → [docs/ci.md](docs/ci.md#変更の経緯-旧-claudemd-の更新記録)
 - 2026-09-26: actionとbase imageをSHA / digestで固定 → [docs/ci.md](docs/ci.md#変更の経緯-旧-claudemd-の更新記録)
