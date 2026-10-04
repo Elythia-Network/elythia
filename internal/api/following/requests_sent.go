@@ -6,7 +6,6 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/shiroha-a/mk/internal/api/apierr"
 	"github.com/shiroha-a/mk/internal/api/pagination"
-	"github.com/shiroha-a/mk/internal/entity"
 	"github.com/shiroha-a/mk/internal/misc/id"
 	"github.com/shiroha-a/mk/internal/server/middleware"
 )
@@ -40,16 +39,5 @@ func (h *Handler) RequestsSent(c echo.Context) error {
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
-	out := make([]ListRequestsResponseItem, 0, len(rows))
-	for _, r := range rows {
-		item := ListRequestsResponseItem{ID: r.ID}
-		if b, err := h.userService.ShowByID(r.FollowerID); err == nil {
-			item.Follower = entity.PackUserLite(b.User)
-		}
-		if b, err := h.userService.ShowByID(r.FolloweeID); err == nil {
-			item.Followee = entity.PackUserLite(b.User)
-		}
-		out = append(out, item)
-	}
-	return c.JSON(http.StatusOK, out)
+	return c.JSON(http.StatusOK, h.packRequests(rows))
 }

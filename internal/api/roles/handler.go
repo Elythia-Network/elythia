@@ -6,10 +6,11 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/shiroha-a/mk/internal/api/apierr"
+	"github.com/shiroha-a/mk/internal/api/meself"
 	"github.com/shiroha-a/mk/internal/api/notehide"
-	"github.com/shiroha-a/mk/internal/api/userrelation"
 	"github.com/shiroha-a/mk/internal/core/notesfilter"
 	"github.com/shiroha-a/mk/internal/core/role"
+	"github.com/shiroha-a/mk/internal/core/userpack"
 	"github.com/shiroha-a/mk/internal/entity"
 	"github.com/shiroha-a/mk/internal/misc/id"
 	"github.com/shiroha-a/mk/internal/model"
@@ -41,9 +42,10 @@ type Handler struct {
 	mutingRepo        repository.MutingRepository
 	blockingRepo      repository.BlockingRepository
 	channelMutingRepo repository.ChannelMutingRepository
-	// relation は roles/users の embed user に viewer 視点の relation block を
-	// 付与する (upstream packMany(users, me))。未配線 / 匿名では no-op (#1973)。
-	relation userrelation.Repos
+	// packer は roles/users の embed user を本家 packMany(users, me) と同じ形
+	// (関係・カウントのゲート・モデレーター向けの項目・ピン留め・移行先・instance・
+	// 絵文字) に組む (#1973、#3330)。未配線なら素の UserDetailed を返す。
+	packer userpack.ListPacker
 	// metaRepo は roles/notes の blocked-host filter で meta.blockedHosts を
 	// 引く (upstream generateBlockedHostQueryForNote)。
 	metaRepo repository.MetaRepository
@@ -63,11 +65,17 @@ func (h *Handler) SetMetaRepo(r repository.MetaRepository) {
 	h.metaRepo = r
 }
 
-// SetRelationRepos wires the repositories used to populate viewer-relative
-// relation fields on roles/users embedded users (#1973). Unset = relations omitted.
-func (h *Handler) SetRelationRepos(r userrelation.Repos) {
-	h.relation = r
+// SetListPacker wires the packer of the users embedded in roles/users
+// (#1973, #3330).
+func (h *Handler) SetListPacker(p userpack.ListPacker) {
+	h.packer = p
 }
+
+// HasListPacker reports whether the list packer was wired.
+//
+// 未配線だと roles/users の利用者に関係・ピン留め・移行先・instance・絵文字が
+// 載らない。起動時検査に使う。
+func (h *Handler) HasListPacker() bool { return h.packer != nil }
 
 // SetUserRepo wires a UserRepository so roles/notes filters out notes that
 // match the viewer's hardMutedWords (#787).
@@ -240,27 +248,39 @@ func (h *Handler) Users(c echo.Context) error {
 
 	// reporter/assignee と同様に user_profile を 1 batch で解決して UserDetailed を
 	// pack する (N+1 回避)。userRepo 未配線時は profile なしで pack する。
-	viewerID := ""
-	if v := middleware.GetUser(c); v != nil {
-		viewerID = v.ID
-	}
+	viewer := middleware.GetUser(c)
 	profByID := h.assignmentProfiles(assigns)
-	out := make([]any, 0, len(assigns))
+	kept := make([]*model.RoleAssignment, 0, len(assigns))
+	users := make([]*model.User, 0, len(assigns))
 	for _, a := range assigns {
 		if a.User == nil {
 			// preload 失敗 (user 削除等) は upstream では userId fallback だが、
 			// UserDetailed を組めないため skip する (defensive)。
 			continue
 		}
-		d := entity.PackUserDetailed(a.User, profByID[a.UserID], h.idGen)
-		// 認証 viewer には viewer->user の relation block を付与 (匿名/self は no-op、#1973)。
-		viewerIsFollowing := h.relation.Apply(&d, viewerID, a.User, profByID[a.UserID])
-		// **カウントの可視性ゲートを通す (#1558)。** 忘れると
-		// `followersVisibility: "private"` と実数が並んで未認証に返る。
-		entity.GateCountVisibility(&d, viewerID == a.User.ID, false, viewerIsFollowing)
+		kept = append(kept, a)
+		users = append(users, a.User)
+	}
+	ctx := c.Request().Context()
+	var packed []entity.UserDetailed
+	if h.packer != nil {
+		// 本家は packMany(users, me, {schema: 'UserDetailed'})。関係 (#1973)・カウントの
+		// ゲート (#1558)・モデレーター向けの項目・ピン留め・移行先・instance・絵文字を
+		// まとめて埋める (#3330)。
+		packed = h.packer.DetailedMany(ctx, viewer, users, profByID)
+	} else {
+		// 配線が外れた構成では素の UserDetailed (packer の既定で非公開のカウントは伏せる)。
+		packed = make([]entity.UserDetailed, len(users))
+		for i, u := range users {
+			packed[i] = entity.PackUserDetailed(u, profByID[u.ID], h.idGen)
+		}
+	}
+	out := make([]any, 0, len(kept))
+	for i, a := range kept {
 		out = append(out, map[string]any{
-			"id":   a.ID,
-			"user": d,
+			"id": a.ID,
+			// 本家の pack は isMe なら MeDetailed を返す。
+			"user": meself.Pack(ctx, packed[i], a.User, profByID[a.UserID], viewer),
 		})
 	}
 	return c.JSON(http.StatusOK, out)

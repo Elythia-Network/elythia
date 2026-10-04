@@ -421,6 +421,7 @@ func (h *Handler) ListsGetMemberships(c echo.Context) error {
 		return apierr.JSONInternalError(c)
 	}
 	out := make([]map[string]any, 0, len(members))
+	users := make([]*model.User, 0, len(members))
 	for _, m := range members {
 		// User relation が取れない orphan membership は skip (UserLite を pack
 		// できないため。通常は FK で存在保証される)。
@@ -435,9 +436,14 @@ func (h *Handler) ListsGetMemberships(c echo.Context) error {
 			"id":          m.ID,
 			"createdAt":   createdAt,
 			"userId":      m.UserID,
-			"user":        entity.PackUserLite(m.User),
 			"withReplies": m.WithReplies,
 		})
+		users = append(users, m.User)
+	}
+	// 本家 packMembershipsMany は利用者を packMany (UserLite) で組むので、instance と
+	// 絵文字もまとめて埋める (#3330)。
+	for i, lite := range h.packLites(users) {
+		out[i]["user"] = lite
 	}
 	return c.JSON(http.StatusOK, out)
 }

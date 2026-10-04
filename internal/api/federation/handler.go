@@ -9,9 +9,9 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/shiroha-a/mk/internal/api/apierr"
 	"github.com/shiroha-a/mk/internal/api/pagination"
-	"github.com/shiroha-a/mk/internal/api/userrelation"
 	corefederation "github.com/shiroha-a/mk/internal/core/federation"
 	coreinstance "github.com/shiroha-a/mk/internal/core/instance"
+	"github.com/shiroha-a/mk/internal/core/userpack"
 	"github.com/shiroha-a/mk/internal/entity"
 	"github.com/shiroha-a/mk/internal/misc/id"
 	"github.com/shiroha-a/mk/internal/model"
@@ -55,9 +55,10 @@ type Handler struct {
 	// で createdAt を aidx ID から導出するために使う。nil の場合 createdAt は
 	// 空文字列になる (= 互換性は維持しつつ degrade)。
 	idGen id.Generator
-	// relation は embed する user/followee に viewer 視点の relation block を
-	// 付与する (upstream packMany(users, me))。未配線 / 匿名では no-op (#1957-a)。
-	relation userrelation.Repos
+	// packer は embed する user/followee を本家 packMany(users, me) と同じ形
+	// (関係・カウントのゲート・モデレーター向けの項目・ピン留め・移行先・instance・
+	// 絵文字) に組む (#1957-a、#3330)。未配線なら素の UserDetailed を返す。
+	packer userpack.ListPacker
 	// capabilities は instance ごとの署名方式観測 (#2393)。未配線なら
 	// signatureCapability は null。
 	capabilities SignatureCapabilityLookup
@@ -89,11 +90,17 @@ func (h *Handler) SetResolver(r ActorResolver) {
 	h.resolver = r
 }
 
-// SetRelationRepos wires the repositories used to populate viewer-relative
-// relation fields on embedded users/followees (#1957-a). Unset = relations omitted.
-func (h *Handler) SetRelationRepos(r userrelation.Repos) {
-	h.relation = r
+// SetListPacker wires the packer of the users embedded in federation/users,
+// federation/followers and federation/following (#1957-a, #3330).
+func (h *Handler) SetListPacker(p userpack.ListPacker) {
+	h.packer = p
 }
+
+// HasListPacker reports whether the list packer was wired.
+//
+// 未配線だと federation/users・followers・following の利用者に関係・ピン留め・
+// 移行先・instance・絵文字が載らない。起動時検査に使う。
+func (h *Handler) HasListPacker() bool { return h.packer != nil }
 
 // SetSignatureCapabilityLookup wires the store that reports which signature
 // scheme each remote host uses (#2393).

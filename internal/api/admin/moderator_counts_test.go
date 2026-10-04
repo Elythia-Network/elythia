@@ -25,7 +25,7 @@ func TestShowUsers_ShowsCountsToModerator(t *testing.T) {
 		UserID: "u1", FollowersVisibility: "followers", FollowingVisibility: "private",
 	}
 
-	rec := doPost(h.ShowUsers, `{"limit":10}`, nil)
+	rec := doPost(h.ShowUsers, `{"limit":10}`, adminUser)
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	var resp []map[string]any
@@ -36,8 +36,9 @@ func TestShowUsers_ShowsCountsToModerator(t *testing.T) {
 	assert.EqualValues(t, 7, resp[0]["followingCount"])
 }
 
-// find-by-email も同じ (モデレーター専用の endpoint)。
-func TestAccountsFindByEmail_ShowsCountsToModerator(t *testing.T) {
+// find-by-email は本家が pack(user, null) で組むので、呼んだ管理者にも
+// 非公開のカウントを見せない (匿名の閲覧者と同じ、#3330)。public は見える。
+func TestAccountsFindByEmail_GatesCountsAsAnonymous(t *testing.T) {
 	h, userRepo, _, _ := newTestHandler(t)
 	userRepo.Users["u1"] = &model.User{
 		ID: "u1", Username: "a", FollowersCount: 42, FollowingCount: 7,
@@ -47,13 +48,22 @@ func TestAccountsFindByEmail_ShowsCountsToModerator(t *testing.T) {
 		FollowersVisibility: "followers", FollowingVisibility: "private",
 	}
 
-	rec := doPost(h.AccountsFindByEmail, `{"email":"x@example.test"}`, nil)
+	rec := doPost(h.AccountsFindByEmail, `{"email":"x@example.test"}`, adminUser)
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	var resp map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.EqualValues(t, 0, resp["followersCount"])
+	assert.EqualValues(t, 0, resp["followingCount"])
+	_, hasNote := resp["moderationNote"]
+	assert.False(t, hasNote, "閲覧者 null なので moderationNote は出さない")
+
+	userRepo.Profiles["u1"].FollowersVisibility = "public"
+	rec = doPost(h.AccountsFindByEmail, `{"email":"x@example.test"}`, adminUser)
+	require.Equal(t, http.StatusOK, rec.Code)
+	resp = nil
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	assert.EqualValues(t, 42, resp["followersCount"])
-	assert.EqualValues(t, 7, resp["followingCount"])
 }
 
 func strptr(s string) *string { return &s }

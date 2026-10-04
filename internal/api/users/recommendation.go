@@ -8,6 +8,7 @@ import (
 	"github.com/shiroha-a/mk/internal/api/apierr"
 	"github.com/shiroha-a/mk/internal/api/pagination"
 	"github.com/shiroha-a/mk/internal/entity"
+	"github.com/shiroha-a/mk/internal/model"
 	"github.com/shiroha-a/mk/internal/server/middleware"
 )
 
@@ -152,18 +153,41 @@ func (h *Handler) GetFollowingUsersByBirthday(c echo.Context) error {
 	}
 	// 本家は「今日以降の最寄りの誕生日の日付」を "YYYY-MM-DD" で返す。
 	now := time.Now()
-	out := make([]map[string]any, 0, len(rows))
+	// 相手は 1 回でまとめて引く (行ごとに ShowByID を呼ぶと N+1 になる、#3330)。
+	// 本家も packMany に ID を渡して一括で引く。UserLite なので profile は引かない。
+	// 引けない行は従来どおり飛ばし、並びは rows の順を保つ。
+	ids := make([]string, 0, len(rows))
 	for _, r := range rows {
-		bundle, err := h.userService.ShowByID(r.FolloweeID)
-		if err != nil {
+		ids = append(ids, r.FolloweeID)
+	}
+	found, err := h.userService.FindManyByIDs(ids)
+	if err != nil {
+		return apierr.JSONInternalError(c)
+	}
+	byID := make(map[string]*model.User, len(found))
+	for _, u := range found {
+		if u != nil {
+			byID[u.ID] = u
+		}
+	}
+	out := make([]map[string]any, 0, len(rows))
+	users := make([]*model.User, 0, len(rows))
+	for _, r := range rows {
+		u, ok := byID[r.FolloweeID]
+		if !ok {
 			continue
 		}
 		birthday := nextBirthdayDate(r.Birthday, now)
 		out = append(out, map[string]any{
 			"id":       r.FolloweeID,
 			"birthday": birthday,
-			"user":     entity.PackUserLite(bundle.User),
 		})
+		users = append(users, u)
+	}
+	// 本家は packMany(users, me, {schema: 'UserLite'}) なので、instance と絵文字も
+	// まとめて埋める (#3330)。
+	for i, lite := range h.packLites(users) {
+		out[i]["user"] = lite
 	}
 	return c.JSON(http.StatusOK, out)
 }

@@ -123,26 +123,28 @@ func (h *Handler) Reactions(c echo.Context) error {
 		return apierr.JSONInternalError(c)
 	}
 
-	// リモート user の instance を 1 回の batch fetch で resolve する。
-	reactionUsers := make([]*model.User, 0, len(rows))
-	for _, r := range rows {
+	// 本家 NoteReactionEntityService.packMany は利用者を packMany (UserLite) で組む
+	// ので、リモートの利用者の instance と絵文字をまとめて埋める (#3330)。
+	lites := make([]entity.UserLite, len(rows))
+	litePtrs := make([]*entity.UserLite, len(rows))
+	reactors := make([]*model.User, len(rows))
+	for i, r := range rows {
 		if r.User != nil {
-			reactionUsers = append(reactionUsers, r.User)
+			lites[i] = entity.PackUserLite(r.User)
+			litePtrs[i], reactors[i] = &lites[i], r.User
 		}
 	}
-	resolver := entity.NewInstanceResolver(h.instanceLookup(), reactionUsers...)
+	entity.FillUserLites(h.instanceLookup(), h.emojiLookup(), reactors, litePtrs)
 
 	out := make([]map[string]any, 0, len(rows))
-	for _, r := range rows {
+	for i, r := range rows {
 		createdAt := ""
 		if t, err := h.idGen.ParseTime(r.ID); err == nil {
 			createdAt = t.UTC().Format("2006-01-02T15:04:05.000Z")
 		}
 		var userField any = map[string]any{"id": r.UserID}
 		if r.User != nil {
-			lite := entity.PackUserLite(r.User)
-			resolver.FillUserLite(&lite)
-			userField = lite
+			userField = lites[i]
 		}
 		out = append(out, map[string]any{
 			"id":        r.ID,

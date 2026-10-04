@@ -389,6 +389,10 @@ func (h *Handler) Reactions(c echo.Context) error {
 		noteByID[ne.ID] = ne
 	}
 
+	// 本家 packManyWithNote は利用者を packMany (UserLite) で組むので、instance と
+	// 絵文字もまとめて埋める (#3330)。
+	liteByUser := h.packLitesByID(reactionUsers(rows))
+
 	out := make([]map[string]any, 0, len(rows))
 	for _, r := range rows {
 		entry := map[string]any{
@@ -402,7 +406,7 @@ func (h *Handler) Reactions(c echo.Context) error {
 			entry["createdAt"] = t.UTC().Format("2006-01-02T15:04:05.000Z")
 		}
 		if r.User != nil {
-			entry["user"] = entity.PackUserLite(r.User)
+			entry["user"] = liteByUser[r.User.ID]
 		}
 		if r.Note != nil {
 			if ne, ok := noteByID[r.Note.ID]; ok {
@@ -569,19 +573,10 @@ func (h *Handler) SearchByUsernameAndHost(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
-	resolver := entity.NewInstanceResolver(h.instanceLookup(), users...)
-
 	// detail=false → UserLite。default (true) は UserDetailed (upstream は
 	// detail default true で UserDetailed pack、#1547)。旧実装は常に UserLite。
 	if req.Detail != nil && !*req.Detail {
-		result := make([]entity.UserLite, 0, len(users))
-		for _, u := range users {
-			lite := entity.PackUserLite(u)
-			resolver.FillUserLite(&lite)
-			h.populateUserEmojis(u, &lite)
-			result = append(result, lite)
-		}
-		return c.JSON(http.StatusOK, result)
+		return c.JSON(http.StatusOK, h.packLites(users))
 	}
 
 	viewer := middleware.GetUser(c)
@@ -599,8 +594,6 @@ func (h *Handler) SearchByUsernameAndHost(c echo.Context) error {
 	var batch detailedBatch
 	for _, u := range users {
 		d := entity.PackUserDetailed(u, profiles[u.ID], h.idGen)
-		resolver.FillUserLite(&d.UserLite)
-		h.populateUserEmojis(u, &d.UserLite)
 		// upstream search-by-username-and-host は packMany(users, me, {schema:'UserDetailed'})
 		// で embed user に viewer 視点の relation block を付ける (#1980)。匿名/self で no-op。
 		viewerIsFollowing := h.viewerRelationRepos().Apply(&d, viewerID, u, profiles[u.ID])

@@ -1967,6 +1967,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	usersHandler.SetUserRepo(userRepo)
 	usersHandler.SetNoteReactionRepo(reactionRepo)
 	sharedUserPacker.SetDetailExtras(usersHandler)
+	sharedUserPacker.SetDetailExtrasMany(usersHandler) // #3330: 一覧の DetailedMany のピン留め・移行先・instance・絵文字
 	remoteStatsFetcher := corefederation.NewRemoteStatsFetcher(s.config.AllowedPrivateNetworks, s.config.UserAgent, s.outboundOpts()...)
 	// **連合を切った相手へ取りに行かない。** この経路は未認証の
 	// `/api/users/show` から呼ばれるので、放っておくと defederate した相手に
@@ -2716,7 +2717,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	federationHandler.SetUserRepo(userRepo)
 	federationHandler.SetIDGen(idGen)
 	federationHandler.SetResolver(federationResolver)
-	federationHandler.SetRelationRepos(listRelationRepos) // #1957-a: followers/following/users の embed user に relation
+	federationHandler.SetListPacker(sharedUserPacker) // #1957-a / #3330: followers/following/users の embed user を本家 packMany と同じ形に
 	// moderationNote は公開エンドポイントで moderator にのみ返す (情報漏洩対策)。
 	federationHandler.SetModeratorChecker(roleService)
 	// instance 一覧 / show-instance の signatureCapability field (#2393)。
@@ -2821,7 +2822,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// Pages endpoints (Phase 4.5)
 	pagesHandler := pages.NewHandler(pageService, idGen)
-	pagesHandler.SetDetailExtras(usersHandler) // #3330: pageEvent の利用者のピン留め・移行先
+	pagesHandler.SetUserPacker(sharedUserPacker) // #3330: pageEvent の利用者を持ち主から見た本家 pack と同じ形に
 	// page content の image block / eyeCatchingImageId から drive file を解決して
 	// attachedFiles / eyeCatchingImage を埋める (#1662)。
 	pagesHandler.SetDriveFileRepo(driveFileRepo)
@@ -3326,7 +3327,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// Following endpoints
 	followingHandler := following.NewHandler(followingService, userService)
 	followingHandler.SetIDGen(idGen)
-	followingHandler.SetRelationRepos(listRelationRepos)
+	followingHandler.SetListPacker(sharedUserPacker) // #1912 / #3330: following/list・requests/* の embed user を本家 packMany と同じ形に
 	api.POST("/following/create", followingHandler.Create, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:following"))
 	api.POST("/following/delete", followingHandler.Delete, middleware.RequireAuth(), middleware.RequireScope("write:following"))
 	api.POST("/following/list", followingHandler.List, middleware.RequireAuth(), middleware.RequireScope("read:following"))
@@ -3363,7 +3364,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	rolesHandler.SetNoteFieldResolver(noteFieldResolver)
 	rolesHandler.SetUserRepo(userRepo)
 	rolesHandler.SetMuteBlockRepos(mutingRepo, blockingRepo, channelMutingRepo) // #1544: Notes の mute/block/channel-mute filter
-	rolesHandler.SetRelationRepos(listRelationRepos)                            // #1973: roles/users の embed user に viewer-relation
+	rolesHandler.SetListPacker(sharedUserPacker)                                // #1973 / #3330: roles/users の embed user を本家 packMany と同じ形に
 	api.POST("/roles/list", rolesHandler.List, middleware.RequireAuth(), middleware.RequireScope("read:account"))
 	api.POST("/roles/show", rolesHandler.Show)
 	api.POST("/roles/assignment-show", rolesHandler.AssignmentShow, middleware.RequireAuth(), middleware.RequireScope("read:account"))
@@ -3439,7 +3440,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 未設定でも配線しておいてよい (そのときは送らない)。
 	abuseCreatedNotifier.SetMail(miscsmtp.SubjectBodySenderFromMeta(metaRepo, s.config.ProxySMTP), recipientRepo, userRepo, metaRepo)
 	adminHandler := apiadmin.NewHandler(signupService, roleService, metaRepo, userRepo, idGen)
-	adminHandler.SetDetailExtras(usersHandler) // #3330: admin/accounts/find-by-email のピン留め・移行先
+	adminHandler.SetDetailExtras(usersHandler)   // #3330: find-by-email・update-proxy-account のピン留め・移行先
+	adminHandler.SetListPacker(sharedUserPacker) // #3330: show-users・roles/users・abuse-user-reports・show-moderation-logs の利用者を本家 packMany と同じ形に
 	// モデレーターの suspend / unsuspend を local 由来として刻む (#2973)。
 	adminHandler.SetSuspensionOriginRepo(suspensionOriginRepo)
 	// catalog 更新を entity 側 packer に即時反映する (#2258)。TTL 任せだと
@@ -3919,6 +3921,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// reversi/* — オセロゲーム (実データ)
 	reversiHandler := apireversi.NewHandler(reversiRepo, idGen)
 	reversiHandler.SetService(reversiService)
+	reversiHandler.SetLiteFiller(sharedUserPacker) // #3330: invitations の招待者の instance・絵文字
 	reversiHandler.SetFederation(s.config.URL, deliverService, reversiFedCache, userRepo)
 	reversiHandler.SetStreamPublisher(reversiPublisher)
 	// #417 P3: reversi 連合対応ホストのみ Invite を送る。Federation check
@@ -4553,10 +4556,22 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"renote-mute/list の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
 		{"ap.detailExtras", apHandler.HasDetailExtras(),
 			"ap/show の利用者の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
-		{"pages.detailExtras", pagesHandler.HasDetailExtras(),
-			"pageEvent の利用者の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
+		{"pages.userPacker", pagesHandler.HasUserPacker(),
+			"pageEvent の利用者に、ページの持ち主から見た関係・カウント・ピン留め・移行先が載らない"},
 		{"admin.detailExtras", adminHandler.HasDetailExtras(),
-			"admin/accounts/find-by-email の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
+			"admin/accounts/find-by-email と admin/update-proxy-account の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
+		{"userpack.detailExtrasMany", sharedUserPacker.HasDetailExtrasMany(),
+			"共有 packer で組む一覧 (federation・following・roles・admin) の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
+		{"federation.listPacker", federationHandler.HasListPacker(),
+			"federation/users・followers・following の利用者に関係・ピン留め・移行先・instance・絵文字が載らない"},
+		{"following.listPacker", followingHandler.HasListPacker(),
+			"following/list の followee に関係・ピン留め・instance などが載らず、following/requests/* の利用者に instance・絵文字が載らない"},
+		{"roles.listPacker", rolesHandler.HasListPacker(),
+			"roles/users の利用者に関係・ピン留め・移行先・instance・絵文字が載らない"},
+		{"reversi.liteFiller", reversiHandler.HasLiteFiller(),
+			"reversi/invitations のリモートの招待者に instance・絵文字が載らない"},
+		{"admin.listPacker", adminHandler.HasListPacker(),
+			"admin/show-users・roles/users・abuse-user-reports・show-moderation-logs の利用者にピン留め・移行先・instance・絵文字が載らない"},
 		{"auth.detailExtras", authHandler.HasDetailExtras(),
 			"auth/session/userkey と miauth の check の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
 		{"following.blockingChecker", followingService.HasBlockingChecker(),

@@ -22,7 +22,63 @@ import (
 // ページと移行先は利用者ごとに解決する。mk-go はピン留めのノートとページを
 // まとめて引き、利用者の数に比例して問い合わせが増えないようにする。
 func (h *Handler) FillDetailedExtrasMany(ctx context.Context, viewer *model.User, targets []userpack.DetailTarget) {
+	if len(targets) == 0 {
+		return
+	}
+	users := make([]*model.User, len(targets))
+	lites := make([]*entity.UserLite, len(targets))
+	for i, t := range targets {
+		users[i], lites[i] = t.User, &t.Detailed.UserLite
+	}
+	h.fillUserLites(users, lites)
 	h.fillExtras(ctx, viewer, targets, false)
+}
+
+// fillUserLites resolves instance / emojis of the packed users of a list
+// response in one batch (本家 packMany の instance と emojis)。
+func (h *Handler) fillUserLites(users []*model.User, lites []*entity.UserLite) {
+	entity.FillUserLites(h.instanceLookup(), h.emojiLookup(), users, lites)
+}
+
+// packLites packs users as upstream packMany(users) packs UserLite lists:
+// instance and emojis are resolved in one batch.
+func (h *Handler) packLites(users []*model.User) []entity.UserLite {
+	out := make([]entity.UserLite, len(users))
+	lites := make([]*entity.UserLite, len(users))
+	for i, u := range users {
+		out[i] = entity.PackUserLite(u)
+		lites[i] = &out[i]
+	}
+	h.fillUserLites(users, lites)
+	return out
+}
+
+// packLitesByID is packLites keyed by user ID, for responses that embed the
+// same user in several rows.
+func (h *Handler) packLitesByID(users []*model.User) map[string]entity.UserLite {
+	lites := h.packLites(users)
+	out := make(map[string]entity.UserLite, len(lites))
+	for i, u := range users {
+		out[u.ID] = lites[i]
+	}
+	return out
+}
+
+// reactionUsers returns the distinct reactors of rows.
+func reactionUsers(rows []*model.NoteReaction) []*model.User {
+	seen := make(map[string]struct{}, len(rows))
+	out := make([]*model.User, 0, len(rows))
+	for _, r := range rows {
+		if r.User == nil {
+			continue
+		}
+		if _, ok := seen[r.User.ID]; ok {
+			continue
+		}
+		seen[r.User.ID] = struct{}{}
+		out = append(out, r.User)
+	}
+	return out
 }
 
 // fillExtras is the shared body of FillDetailedExtras (single pack) and

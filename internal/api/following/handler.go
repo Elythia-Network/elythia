@@ -8,9 +8,9 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/shiroha-a/mk/internal/api/apierr"
 	"github.com/shiroha-a/mk/internal/api/pagination"
-	"github.com/shiroha-a/mk/internal/api/userrelation"
 	corefollowing "github.com/shiroha-a/mk/internal/core/following"
 	coreuser "github.com/shiroha-a/mk/internal/core/user"
+	"github.com/shiroha-a/mk/internal/core/userpack"
 	"github.com/shiroha-a/mk/internal/entity"
 	"github.com/shiroha-a/mk/internal/misc/id"
 	"github.com/shiroha-a/mk/internal/model"
@@ -24,17 +24,23 @@ type Handler struct {
 	// idGen は /api/following/list の Following.createdAt 生成で使う。nil
 	// なら createdAt は空文字列で返す (= 互換性は維持しつつ degrade)。
 	idGen id.Generator
-	// relation は following/list の埋め込み followee に viewer-relation flag
-	// (isFollowing 等) を付与するための repo 束 (#1912)。未配線なら flag は omit
-	// (= legacy 挙動)。upstream は followee を UserDetailedNotMe + me で pack する。
-	relation userrelation.Repos
+	// packer は following/list の埋め込み followee (UserDetailedNotMe) と
+	// following/requests/* の follower / followee (UserLite) を本家 packMany と
+	// 同じ形に組む (#1912、#3330)。未配線なら関係・ピン留め・instance などを欠く。
+	packer userpack.ListPacker
 }
 
-// SetRelationRepos wires the repositories used to populate viewer-relation flags
-// on the embedded followee in following/list (#1912)。
-func (h *Handler) SetRelationRepos(r userrelation.Repos) {
-	h.relation = r
+// SetListPacker wires the packer of the users embedded in following/list and
+// following/requests/{list,sent} (#1912, #3330).
+func (h *Handler) SetListPacker(p userpack.ListPacker) {
+	h.packer = p
 }
+
+// HasListPacker reports whether the list packer was wired.
+//
+// 未配線だと following/list の followee に関係・ピン留め・移行先・instance・絵文字が
+// 載らず、following/requests/* の利用者に instance・絵文字が載らない。起動時検査に使う。
+func (h *Handler) HasListPacker() bool { return h.packer != nil }
 
 // NewHandler creates a new following Handler.
 func NewHandler(followingService *corefollowing.Service, userService *coreuser.Service) *Handler {
@@ -272,33 +278,89 @@ func (h *Handler) List(c echo.Context) error {
 		followeeIDs = append(followeeIDs, r.FolloweeID)
 	}
 	bundles, _ := h.userService.ShowManyByIDs(followeeIDs)
-	userIdx := make(map[string]*coreuser.UserWithProfile, len(bundles))
+	users := make([]*model.User, 0, len(bundles))
+	profiles := make(map[string]*model.UserProfile, len(bundles))
 	for _, b := range bundles {
 		if b != nil && b.User != nil {
-			userIdx[b.User.ID] = b
+			users = append(users, b.User)
+			profiles[b.User.ID] = b.Profile
 		}
 	}
-	lookup := func(uid string) (*model.User, *model.UserProfile) {
-		if b, ok := userIdx[uid]; ok {
-			return b.User, b.Profile
-		}
-		return nil, nil
+	// 埋め込み followee は本家 FollowingEntityService.packMany と同じく
+	// packMany(followees, me) で組む。関係 (#1912。自分の following 一覧なので
+	// isFollowing=true)、カウントのゲート、ピン留め・移行先・instance・絵文字を
+	// まとめて埋める (#3330)。自分はフォローできないので MeDetailed は混ざらない。
+	followees := h.packDetailed(c, me, users, profiles)
+	packedByID := make(map[string]*entity.UserDetailed, len(users))
+	for i, u := range users {
+		packedByID[u.ID] = &followees[i]
 	}
+	lookup := func(string) (*model.User, *model.UserProfile) { return nil, nil }
 
 	out := make([]entity.Following, 0, len(rows))
 	for _, r := range rows {
-		packed := entity.PackFollowing(r, true, false, lookup, h.idGen)
-		// 埋め込み followee に viewer-relation flag を付与する (#1912)。upstream は
-		// followee を UserDetailedNotMe + me で pack し isFollowing 等を出す。これは
-		// 自分の following 一覧なので isFollowing=true が出る。
-		if packed.Followee != nil {
-			if b, ok := userIdx[r.FolloweeID]; ok {
-				h.relation.Apply(packed.Followee, me.ID, b.User, b.Profile)
-			}
-		}
+		packed := entity.PackFollowing(r, false, false, lookup, h.idGen)
+		packed.Followee = packedByID[r.FolloweeID]
 		out = append(out, packed)
 	}
 	return c.JSON(http.StatusOK, out)
+}
+
+// packDetailed packs users as upstream packMany(users, viewer) through the
+// shared list packer. Without one it falls back to the bare UserDetailed
+// (packer の既定で非公開のカウントは伏せたまま)。
+func (h *Handler) packDetailed(c echo.Context, viewer *model.User, users []*model.User, profiles map[string]*model.UserProfile) []entity.UserDetailed {
+	if h.packer != nil {
+		return h.packer.DetailedMany(c.Request().Context(), viewer, users, profiles)
+	}
+	out := make([]entity.UserDetailed, len(users))
+	for i, u := range users {
+		out[i] = entity.PackUserDetailed(u, profiles[u.ID], h.idGen)
+	}
+	return out
+}
+
+// packRequests packs follow requests as upstream FollowRequestEntityService.
+// packMany: follower / followee are UserLite packed in one batch.
+//
+// 旧実装は行ごとに ShowByID を 2 回呼び、instance と絵文字も埋めていなかった (#3330)。
+func (h *Handler) packRequests(rows []*model.FollowRequest) []ListRequestsResponseItem {
+	ids := make([]string, 0, len(rows)*2)
+	seen := make(map[string]struct{}, len(rows)*2)
+	for _, r := range rows {
+		for _, uid := range []string{r.FollowerID, r.FolloweeID} {
+			if _, ok := seen[uid]; ok {
+				continue
+			}
+			seen[uid] = struct{}{}
+			ids = append(ids, uid)
+		}
+	}
+	bundles, _ := h.userService.ShowManyByIDs(ids)
+	lites := make([]entity.UserLite, 0, len(bundles))
+	users := make([]*model.User, 0, len(bundles))
+	for _, b := range bundles {
+		if b != nil && b.User != nil {
+			lites = append(lites, entity.PackUserLite(b.User))
+			users = append(users, b.User)
+		}
+	}
+	if h.packer != nil {
+		ptrs := make([]*entity.UserLite, len(users))
+		for i := range users {
+			ptrs[i] = &lites[i]
+		}
+		h.packer.FillLites(users, ptrs)
+	}
+	byID := make(map[string]entity.UserLite, len(users))
+	for i, u := range users {
+		byID[u.ID] = lites[i]
+	}
+	out := make([]ListRequestsResponseItem, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, ListRequestsResponseItem{ID: r.ID, Follower: byID[r.FollowerID], Followee: byID[r.FolloweeID]})
+	}
+	return out
 }
 
 // ListRequests handles POST /api/following/requests/list.
@@ -329,16 +391,5 @@ func (h *Handler) ListRequests(c echo.Context) error {
 		return apierr.JSONInternalError(c)
 	}
 
-	out := make([]ListRequestsResponseItem, 0, len(requests))
-	for _, r := range requests {
-		item := ListRequestsResponseItem{ID: r.ID}
-		if b, err := h.userService.ShowByID(r.FollowerID); err == nil {
-			item.Follower = entity.PackUserLite(b.User)
-		}
-		if b, err := h.userService.ShowByID(r.FolloweeID); err == nil {
-			item.Followee = entity.PackUserLite(b.User)
-		}
-		out = append(out, item)
-	}
-	return c.JSON(http.StatusOK, out)
+	return c.JSON(http.StatusOK, h.packRequests(requests))
 }
