@@ -256,6 +256,7 @@ func TestAssertUserColumns_RejectsOversizedIdentity(t *testing.T) {
 		{"inbox", 512, func(u *model.User, v *string) { u.Inbox = v }},
 		{"sharedInbox", 512, func(u *model.User, v *string) { u.SharedInbox = v }},
 		{"featured", 512, func(u *model.User, v *string) { u.Featured = v }},
+		{"followersUri", 512, func(u *model.User, v *string) { u.FollowersURI = v }},
 		{"movedToUri", 512, func(u *model.User, v *string) { u.MovedToURI = v }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

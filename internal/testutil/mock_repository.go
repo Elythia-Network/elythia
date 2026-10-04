@@ -222,6 +222,7 @@ func assertUserColumns(u *model.User) error {
 		{"user.inbox", u.Inbox, 512},
 		{"user.sharedInbox", u.SharedInbox, 512},
 		{"user.featured", u.Featured, 512},
+		{"user.followersUri", u.FollowersURI, 512},
 		{"user.movedToUri", u.MovedToURI, 512},
 	} {
 		if c.value == nil {
@@ -960,6 +961,10 @@ func applyUserFields(u *model.User, fields map[string]any) {
 		case "sharedInbox":
 			if s, ok := v.(*string); ok {
 				u.SharedInbox = s
+			}
+		case "followersUri":
+			if s, ok := v.(*string); ok {
+				u.FollowersURI = s
 			}
 		case "lastFetchedAt":
 			if t, ok := v.(*time.Time); ok {

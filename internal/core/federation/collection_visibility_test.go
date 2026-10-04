@@ -152,12 +152,10 @@ func TestResolveActor_FollowCollectionVisibilityOnCreate(t *testing.T) {
 		{name: "embedded collection with only totalItems is private", followers: `{"id":"` + cvFollowersURI + `","type":"OrderedCollection","totalItems":5}`, want: priv},
 		{name: "embedded non-collection is private", followers: `{"id":"` + cvFollowersURI + `","type":"Note","first":"x"}`, want: priv},
 		{name: "embedded collection without id is private", followers: `{"type":"OrderedCollection","first":"x"}`, want: priv},
-		{name: "embedded collection on another host is private", followers: `{"id":"https://other.example/followers","type":"OrderedCollection","first":"x"}`, want: priv},
-		{name: "collection IRI on another host is private and not fetched", followers: quoted("https://other.example/followers"), want: priv},
+		// 別ホストの collection は actor ごと拒否する (TestResolveActor_CrossHostCollectionRejectsActor)。
 		{name: "array value is private", followers: `["` + cvFollowersURI + `"]`, want: priv},
 		{name: "fragment URL is private", followers: quoted(cvFollowersURI + "#x"),
 			followerDoc: cvCollection(cvFollowersURI, "OrderedCollection", `"first":"x"`), want: priv},
-		{name: "local URL is private", followers: quoted("https://example.com/users/abc/followers"), want: priv},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -294,23 +292,70 @@ func TestRefreshActor_BackfilledProfileTransientErrorIsPrivate(t *testing.T) {
 	assert.Equal(t, model.FollowingVisibilityPublic, p.FollowingVisibility)
 }
 
-// TestResolveActor_CrossHostCollectionNotFetched checks that a collection
-// IRI on another host is neither fetched nor trusted, even when that host
-// would serve a public collection (upstream validateActor binds the
-// collection host to the actor).
-func TestResolveActor_CrossHostCollectionNotFetched(t *testing.T) {
+// TestResolveActor_CrossHostCollectionRejectsActor checks that an actor whose
+// outbox / followers / following is on another host is rejected as a whole and
+// the collection is never fetched, as upstream ApPersonService.validateActor
+// throws `invalid Actor: ${collection} has different host` (#3330).
+func TestResolveActor_CrossHostCollectionRejectsActor(t *testing.T) {
 	const other = "https://other.example/followers"
+	cases := []struct {
+		name  string
+		extra string
+	}{
+		{"followers IRI", `,"followers":"` + other + `"`},
+		{"embedded followers", `,"followers":{"id":"` + other + `","type":"OrderedCollection","first":"x"}`},
+		{"followers on this instance", `,"followers":"https://example.com/users/abc/followers"`},
+		{"following IRI", `,"following":"` + other + `"`},
+		{"outbox IRI", `,"outbox":"https://other.example/outbox"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := cvActorDoc("", "")
+			doc = doc[:len(doc)-1] + tc.extra + "}"
+			f := &collectionFetcher{
+				docs: map[string]string{
+					cvActorURI: doc,
+					other:      cvCollection(other, "OrderedCollection", `"first":"x"`),
+				},
+			}
+			r, repo := newCollectionResolver(t, f)
+			_, err := r.ResolveActor(cvActorURI)
+			require.ErrorIs(t, err, federation.ErrInvalidActor)
+			assert.Empty(t, repo.Users, "actor を作らない")
+			assert.NotContains(t, f.calls, other)
+		})
+	}
+
+	t.Run("same host collections are accepted", func(t *testing.T) {
+		doc := cvActorDoc(quoted(cvFollowersURI), quoted(cvFollowingURI))
+		doc = doc[:len(doc)-1] + `,"outbox":"https://remote.example/users/carol/outbox"}`
+		f := &collectionFetcher{docs: map[string]string{cvActorURI: doc}, errs: map[string]error{}}
+		r, _ := newCollectionResolver(t, f)
+		_, err := r.ResolveActor(cvActorURI)
+		require.NoError(t, err)
+	})
+}
+
+// #3330: a refresh whose actor now declares a cross-host collection is
+// rejected like creation (upstream updatePerson also runs validateActor), so
+// the stored followersUri is not replaced with the other host's value.
+func TestRefreshActor_CrossHostCollectionKeepsStoredActor(t *testing.T) {
 	f := &collectionFetcher{
 		docs: map[string]string{
-			cvActorURI: cvActorDoc(quoted(other), ""),
-			other:      cvCollection(other, "OrderedCollection", `"first":"x"`),
+			cvActorURI:     cvActorDoc(quoted(cvFollowersURI), ""),
+			cvFollowersURI: cvCollection(cvFollowersURI, "OrderedCollection", `"first":"x"`),
 		},
+		errs: map[string]error{},
 	}
 	r, repo := newCollectionResolver(t, f)
 	user, err := r.ResolveActor(cvActorURI)
 	require.NoError(t, err)
-	assert.Equal(t, model.FollowingVisibilityPrivate, cvProfile(t, repo, user.ID).FollowersVisibility)
-	assert.NotContains(t, f.calls, other)
+	require.NotNil(t, repo.Users[user.ID].FollowersURI)
+
+	f.docs[cvActorURI] = cvActorDoc(quoted("https://other.example/followers"), "")
+	_, _ = r.ForceResolveActor(cvActorURI)
+	require.NotNil(t, repo.Users[user.ID].FollowersURI)
+	assert.Equal(t, cvFollowersURI, *repo.Users[user.ID].FollowersURI, "別ホストの followers で上書きしない")
 }
 
 // TestResolveActor_FragmentCollectionNotFetched checks that a collection IRI

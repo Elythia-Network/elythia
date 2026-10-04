@@ -469,7 +469,7 @@ func (s *CreateService) Create(in CreateInput) (*model.Note, error) {
 	// reply/renote 先を取得する。reply 先の channel を継承する re-scoping (#1859) と
 	// channel-force / silencing が effective channel に依存するため、channel 判定より
 	// 前に fetch する。fetch error は後段の validation block で報告するので、報告順
-	// (reply → renote) は変わらない。ReplyID / RenoteID の fetch は独立なので並列に
+	// (renote → reply) は変わらない。ReplyID / RenoteID の fetch は独立なので並列に
 	// 走らせる (#300 2-5)。
 	var (
 		replyTarget, renoteTarget *model.Note
@@ -562,106 +562,18 @@ func (s *CreateService) Create(in CreateInput) (*model.Note, error) {
 		}
 	}
 
-	// プロhibited wordsチェック (meta.prohibitedWordsマッチ)。#2106 N12: poll choices も検査。
-	var prohibitedPollChoices []string
-	if in.Poll != nil {
-		prohibitedPollChoices = in.Poll.Choices
-	}
-	if err := checkProhibitedWords(meta, in.Text, in.CW, prohibitedPollChoices); err != nil {
-		return nil, err
-	}
-
-	// mention の解決はここで 1 回だけ行い、上限チェックと note.Mentions の
-	// 両方で使い回す (host ごとの batch query を二重に投げないため)。
-	// 本家 (NoteCreateService.create) は本文・CW・投票の選択肢を合わせた構文木から
-	// メンションを取る。noExtractMentions のときは apMentions に [] が渡り、
-	// 本文のメンションは上限の数にも入らない。
-	//
-	// DB に無いリモートの利用者は WebFinger で取りに行く (下の fetchRemoteMentions)。
-	// ここでは DB の分だけで上限を判定する。取りに行っても数は増えるだけなので、
-	// ここで超えていれば外向きのリクエストを出さずに弾ける。
-	var mentionRes *mentionResolution
-	if !in.NoExtractMentions && s.userRepo != nil {
-		if mentions := extractNoteMentions(in.Text, in.CW, in.Poll); len(mentions) > 0 {
-			mentionRes = s.lookupMentionsInDB(mentions, in.User.Host)
-		}
-	}
-	mentionUserIDs := mentionRes.userIDs()
-
-	// mentionLimitチェック (role policiesの制限)
-	if err := s.checkMentionLimit(in, visibility, replyTarget, mentionUserIDs); err != nil {
-		return nil, err
-	}
-
-	// pollのexpiresAtが既に過去なら弾く
-	if in.Poll != nil && in.Poll.ExpiresAt != nil && in.Poll.ExpiresAt.Before(time.Now()) {
-		return nil, ErrCannotCreateAlreadyExpiredPoll
-	}
+	// 検証の順は本家に揃える (#3330): NoteCreateService.fetchAndCreate のファイル →
+	// 引用 (renote) → 返信 → 投票の期限 → チャンネル、続いて create の禁止語 →
+	// メンション数。複数の誤りを含む投稿で返すエラーが本家と同じになる。以前は
+	// 禁止語とメンション数を先に見ていたので、DB で解決したメンションだけで上限を
+	// 超える投稿は、返信先が無い・ファイルが無いなどの誤りより先に
+	// CONTAINS_TOO_MANY_MENTIONS になっていた。
 
 	// fileIdsのうち存在しないIDがあれば弾く
 	if err := s.checkFileIDs(in.User.ID, in.FileIDs); err != nil {
 		return nil, err
 	}
 
-	// user 指定 channel の存在チェック (空文字正規化済 specifiedChannelID)。reply
-	// 継承で得た channel は元 note が属する実在 channel なので検証不要 (#1859)。
-	// channelHook 未設定なら channel 機能無効として扱いエラーは返さない。
-	// 注: reply 先 channel が削除済の極端ケースでは upstream (findOneBy→null で
-	// channel=null) と異なり dangling な channelId を残す。mk-go に channel 削除
-	// 経路が無く到達しない上、OnNotePosted も no-op で無害なため許容する。
-	if specifiedChannelID != nil && s.channelHook != nil {
-		if err := s.channelHook.EnsureChannelExists(*specifiedChannelID); err != nil {
-			// **DB 障害を not-found に丸めない** (#2792)。丸めると障害が
-			// NO_SUCH_CHANNEL (400) に化け、監視でも 5xx が立たない。
-			if errors.Is(err, ErrChannelNotFound) {
-				return nil, ErrChannelNotFound
-			}
-			return nil, fmt.Errorf("ensure channel exists: %w", err)
-		}
-	}
-
-	// reply/renote 先の取得 (FindByIDWithUser) は visibility 決定のため上方へ移動済。
-	// ここでは取得済みの replyTarget / renoteTarget を validation に使う。報告順は
-	// reply → renote。
-	if in.ReplyID != nil {
-		if replyFetchErr != nil {
-			// **DB 障害を not-found に丸めない** (#2799)。lookup が上の
-			// goroutine に hoist されているので gate の射程外 — ここは
-			// テストが唯一の回帰検知になる。
-			if !repository.IsNotFound(replyFetchErr) {
-				return nil, replyFetchErr
-			}
-			return nil, ErrReplyTargetNotFound
-		}
-		t := replyTarget
-		// 可視性チェックを先に行う。FindByIDWithUserは無条件に行を返すため、
-		// 不可視noteに対して別error (pure renote 等) を返すと「対象noteが
-		// 何であるか」を攻撃者が推測できる情報漏洩になる。Devin review #270。
-		if !CanSeeNote(in.User, t, s.followingRepo) {
-			return nil, ErrCannotReplyToInvisibleNote
-		}
-		// pure renote (renoteIdあり、text/files/poll/cwなし) への返信は許可しない
-		if IsPureRenote(t) {
-			return nil, ErrCannotReplyToAPureRenote
-		}
-		// specified可視性noteへの返信時は visibility も specified でなければ拒否
-		if t.Visibility == model.NoteVisibilitySpecified && visibility != model.NoteVisibilitySpecified {
-			return nil, ErrCannotReplyToSpecifiedVisibility
-		}
-		// reply対象のユーザーに block されていたら拒否
-		if t.UserID != in.User.ID {
-			if err := s.checkBlocked(t.UserID, in.User.ID); err != nil {
-				return nil, err
-			}
-		}
-		// 返信対象の可視性に応じて段階クランプする (upstream 2026.7.0 #17747)。
-		visibility = ClampVisibilityForReply(t.Visibility, visibility)
-		// local-only な対象への reply は local-only にする (channel 外のみ、
-		// upstream:541-543)。
-		if t.LocalOnly && effectiveChannelID == nil {
-			localOnly = true
-		}
-	}
 	if in.RenoteID != nil {
 		if renoteFetchErr != nil {
 			// **DB 障害を not-found に丸めない** (#2799、reply 側と同じ)。
@@ -729,6 +641,102 @@ func (s *CreateService) Create(in CreateInput) (*model.Note, error) {
 				return nil, err
 			}
 		}
+	}
+
+	// reply/renote 先の取得 (FindByIDWithUser) は visibility 決定のため上方へ移動済。
+	// ここでは取得済みの replyTarget / renoteTarget を validation に使う。報告順は
+	// 本家 fetchAndCreate と同じ renote → reply。
+	if in.ReplyID != nil {
+		if replyFetchErr != nil {
+			// **DB 障害を not-found に丸めない** (#2799)。lookup が上の
+			// goroutine に hoist されているので gate の射程外 — ここは
+			// テストが唯一の回帰検知になる。
+			if !repository.IsNotFound(replyFetchErr) {
+				return nil, replyFetchErr
+			}
+			return nil, ErrReplyTargetNotFound
+		}
+		t := replyTarget
+		// 可視性チェックを先に行う。FindByIDWithUserは無条件に行を返すため、
+		// 不可視noteに対して別error (pure renote 等) を返すと「対象noteが
+		// 何であるか」を攻撃者が推測できる情報漏洩になる。Devin review #270。
+		if !CanSeeNote(in.User, t, s.followingRepo) {
+			return nil, ErrCannotReplyToInvisibleNote
+		}
+		// pure renote (renoteIdあり、text/files/poll/cwなし) への返信は許可しない
+		if IsPureRenote(t) {
+			return nil, ErrCannotReplyToAPureRenote
+		}
+		// specified可視性noteへの返信時は visibility も specified でなければ拒否
+		if t.Visibility == model.NoteVisibilitySpecified && visibility != model.NoteVisibilitySpecified {
+			return nil, ErrCannotReplyToSpecifiedVisibility
+		}
+		// reply対象のユーザーに block されていたら拒否
+		if t.UserID != in.User.ID {
+			if err := s.checkBlocked(t.UserID, in.User.ID); err != nil {
+				return nil, err
+			}
+		}
+		// 返信対象の可視性に応じて段階クランプする (upstream 2026.7.0 #17747)。
+		visibility = ClampVisibilityForReply(t.Visibility, visibility)
+		// local-only な対象への reply は local-only にする (channel 外のみ、
+		// upstream:541-543)。
+		if t.LocalOnly && effectiveChannelID == nil {
+			localOnly = true
+		}
+	}
+
+	// pollのexpiresAtが既に過去なら弾く
+	if in.Poll != nil && in.Poll.ExpiresAt != nil && in.Poll.ExpiresAt.Before(time.Now()) {
+		return nil, ErrCannotCreateAlreadyExpiredPoll
+	}
+
+	// user 指定 channel の存在チェック (空文字正規化済 specifiedChannelID)。reply
+	// 継承で得た channel は元 note が属する実在 channel なので検証不要 (#1859)。
+	// channelHook 未設定なら channel 機能無効として扱いエラーは返さない。
+	// 注: reply 先 channel が削除済の極端ケースでは upstream (findOneBy→null で
+	// channel=null) と異なり dangling な channelId を残す。mk-go に channel 削除
+	// 経路が無く到達しない上、OnNotePosted も no-op で無害なため許容する。
+	if specifiedChannelID != nil && s.channelHook != nil {
+		if err := s.channelHook.EnsureChannelExists(*specifiedChannelID); err != nil {
+			// **DB 障害を not-found に丸めない** (#2792)。丸めると障害が
+			// NO_SUCH_CHANNEL (400) に化け、監視でも 5xx が立たない。
+			if errors.Is(err, ErrChannelNotFound) {
+				return nil, ErrChannelNotFound
+			}
+			return nil, fmt.Errorf("ensure channel exists: %w", err)
+		}
+	}
+
+	// プロhibited wordsチェック (meta.prohibitedWordsマッチ)。#2106 N12: poll choices も検査。
+	var prohibitedPollChoices []string
+	if in.Poll != nil {
+		prohibitedPollChoices = in.Poll.Choices
+	}
+	if err := checkProhibitedWords(meta, in.Text, in.CW, prohibitedPollChoices); err != nil {
+		return nil, err
+	}
+
+	// mention の解決はここで 1 回だけ行い、上限チェックと note.Mentions の
+	// 両方で使い回す (host ごとの batch query を二重に投げないため)。
+	// 本家 (NoteCreateService.create) は本文・CW・投票の選択肢を合わせた構文木から
+	// メンションを取る。noExtractMentions のときは apMentions に [] が渡り、
+	// 本文のメンションは上限の数にも入らない。
+	//
+	// DB に無いリモートの利用者は WebFinger で取りに行く (下の fetchRemoteMentions)。
+	// ここでは DB の分だけで上限を判定する。取りに行っても数は増えるだけなので、
+	// ここで超えていれば外向きのリクエストを出さずに弾ける。
+	var mentionRes *mentionResolution
+	if !in.NoExtractMentions && s.userRepo != nil {
+		if mentions := extractNoteMentions(in.Text, in.CW, in.Poll); len(mentions) > 0 {
+			mentionRes = s.lookupMentionsInDB(mentions, in.User.Host)
+		}
+	}
+	mentionUserIDs := mentionRes.userIDs()
+
+	// mentionLimitチェック (role policiesの制限)
+	if err := s.checkMentionLimit(in, visibility, replyTarget, mentionUserIDs); err != nil {
+		return nil, err
 	}
 
 	// DB に無いリモートの利用者へのメンションを WebFinger + actor の取得で解決する
@@ -1767,10 +1775,20 @@ func mentionTargetCount(in CreateInput, visibility model.NoteVisibility, replyTa
 // of an unexpected type. fail-soft にするのは、policy が引けないことを理由に
 // 投稿そのものを止めるのは過剰なため (上限は既定値で効き続ける)。
 func (s *CreateService) mentionLimitFor(userID string) int {
-	if s.rolePolicyProvider == nil || userID == "" {
+	return MentionLimitFor(s.rolePolicyProvider, userID)
+}
+
+// MentionLimitFor resolves userID's effective `mentionLimit` role policy from
+// p, falling back to DefaultMentionLimit when p is nil or the policy is absent
+// or of an unexpected type. It applies to remote users as well: upstream
+// NoteCreateService.create reads `roleService.getUserPolicies(user.id)` for
+// every author, so the base policies and the roles assigned to (or
+// conditionally matching) a remote user govern its inbound notes too.
+func MentionLimitFor(p role.PolicyProvider, userID string) int {
+	if p == nil || userID == "" {
 		return DefaultMentionLimit
 	}
-	policies := s.rolePolicyProvider.GetUserPolicies(userID)
+	policies := p.GetUserPolicies(userID)
 	if policies == nil {
 		return DefaultMentionLimit
 	}
@@ -1786,10 +1804,9 @@ func (s *CreateService) mentionLimitFor(userID string) int {
 // 直接 role.DefaultPolicies() を import すると循環依存になるため、同期を保つ
 // 意図で本家TSの現行既定値 (20) を const として直書きしている。
 //
-// local の note 作成では role policy の値が優先され、本定数は provider 未配線 /
-// policy 不在時のフォールバックとして使う (#2321)。連合の inbound 経路
-// (Resolver.IngestNote) はリモートユーザーがローカルの role を持たないため、
-// 引き続き本定数のみで判定する。
+// ローカルの note 作成でも連合の inbound 経路 (Resolver.IngestNote) でも role
+// policy の値が優先され (#2321 / #3330)、本定数は provider 未配線 / policy 不在時の
+// フォールバックとして使う。
 const DefaultMentionLimit = 20
 
 // checkFileIDs verifies all provided fileIds exist and belong to the user.

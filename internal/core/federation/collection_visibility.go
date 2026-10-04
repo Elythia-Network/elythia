@@ -77,9 +77,12 @@ func jsonTruthy(raw json.RawMessage) bool {
 // Collection / OrderedCollection, and it is public when it carries `first`,
 // `items` or `orderedItems`.
 //
-// The collection id must be on the actor's host. upstream validateActor
-// rejects the whole actor otherwise; mk-go keeps the actor and only treats
-// the collection as unusable.
+// The collection id must be on the actor's host. Like upstream validateActor,
+// fetchActor already rejects an actor whose collection IRI or embedded id is on
+// another host (actorCollectionsOnActorHost); this check stays as a second
+// line and covers what that one cannot read, such as an embedded collection
+// without an id, for which mk-go keeps the actor and only treats the
+// collection as unusable.
 func (r *Resolver) isPublicCollection(actorID string, raw json.RawMessage) (bool, error) {
 	if !jsonTruthy(raw) {
 		return false, nil

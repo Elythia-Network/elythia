@@ -46,8 +46,15 @@ func (r *Resolver) ResolveMentionedUserIDs(hrefs []string) ([]string, error) {
 // SpecifiedAudience exposes the unexported specifiedAudience for external tests.
 var SpecifiedAudience = specifiedAudience
 
-// ExceedsRemoteMentionLimit exposes the unexported exceedsRemoteMentionLimit for external tests.
-var ExceedsRemoteMentionLimit = exceedsRemoteMentionLimit
+// ExceedsRemoteMentionLimit exposes the unexported exceedsRemoteMentionLimit
+// for external tests, with a fixed limit.
+func ExceedsRemoteMentionLimit(n *model.Note, mentions, tagHrefs []string, limit int) bool {
+	return exceedsRemoteMentionLimit(n, mentions, tagHrefs, func() int { return limit })
+}
+
+// ExceedsRemoteMentionLimitFunc exposes exceedsRemoteMentionLimit with a lazy
+// limit, so tests can observe whether the limit is looked up.
+var ExceedsRemoteMentionLimitFunc = exceedsRemoteMentionLimit
 
 // ProcessRemoteMove exposes the unexported processRemoteMove for external
 // tests (#2414)。refreshActor 経由では届かないゲート (クールダウン / 連鎖上限 /

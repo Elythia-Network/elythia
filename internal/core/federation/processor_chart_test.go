@@ -192,6 +192,15 @@ func TestProcess_AnnounceVisibilityFromAudience(t *testing.T) {
 			cc:   `[]`,
 			want: model.NoteVisibilityFollowers,
 		},
+		{
+			// 本家 isFollowers は announcer 自身の followers との完全一致なので、
+			// 他人の followers collection は followers にならない (#3330)。
+			name: "another actor's followers is not followers",
+			id:   "vis-other-followers",
+			to:   `["https://remote.example/users/bob/followers"]`,
+			cc:   `[]`,
+			want: model.NoteVisibilitySpecified,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

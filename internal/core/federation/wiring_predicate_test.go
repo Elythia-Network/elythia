@@ -51,3 +51,17 @@ func TestResolver_HasSilencedHostChecker(t *testing.T) {
 type stubWiringSilencedHost struct{}
 
 func (stubWiringSilencedHost) IsSilenced(string) bool { return false }
+
+type stubWiringRolePolicies struct{}
+
+func (stubWiringRolePolicies) GetUserPolicies(string) map[string]any { return nil }
+
+// #3330: 受信した note の mentionLimit を投稿者の role policy から引く依存。
+func TestResolver_HasRolePolicyProvider(t *testing.T) {
+	assert.False(t, (&Resolver{}).HasRolePolicyProvider(), "未配線なら false")
+
+	r := &Resolver{}
+	r.SetRolePolicyProvider(stubWiringRolePolicies{})
+	assert.True(t, r.HasRolePolicyProvider(), "配線したら true")
+	assert.False(t, r.HasSilencedHostChecker(), "他の述語は満たされないこと")
+}
