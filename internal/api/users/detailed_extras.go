@@ -271,12 +271,3 @@ func (h *Handler) fillPinnedPages(viewer *model.User, targets []userpack.DetailT
 		}
 	}
 }
-
-// detailedBatch collects the packed users of a list response so their detail
-// extras are filled in one batch before the response is written.
-type detailedBatch []userpack.DetailTarget
-
-// fill fills the detail extras of every collected user.
-func (b detailedBatch) fill(ctx context.Context, h *Handler, viewer *model.User) {
-	h.FillDetailedExtrasMany(ctx, viewer, b)
-}

@@ -3,6 +3,7 @@ package users
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -1070,16 +1071,20 @@ func (h *Handler) gateRelationVisibility(c echo.Context, targetID string, viewer
 	return false, nil
 }
 
-// relationItem represents a single entry in followers/following lists.
+// relationItem is one entry of users/followers and users/following: upstream
+// FollowingEntityService.pack with populateFollower (followers) or
+// populateFollowee (following). Follower / Followee are any because the
+// viewer's own entry is MeDetailed (upstream pack returns MeDetailed when
+// isMe).
 type relationItem struct {
 	ID string `json:"id"`
 	// CreatedAt は misskey_dart の Following.fromJson が非null String として
 	// cast するため必須 (#1243)。following row の ID (aidx) から復元する。
-	CreatedAt  string               `json:"createdAt"`
-	FollowerID string               `json:"followerId"`
-	FolloweeID string               `json:"followeeId"`
-	Follower   *entity.UserDetailed `json:"follower,omitempty"`
-	Followee   *entity.UserDetailed `json:"followee,omitempty"`
+	CreatedAt  string `json:"createdAt"`
+	FolloweeID string `json:"followeeId"`
+	FollowerID string `json:"followerId"`
+	Followee   any    `json:"followee,omitempty"`
+	Follower   any    `json:"follower,omitempty"`
 }
 
 func (h *Handler) collectFollowers(ctx context.Context, req FollowersRequest, viewer *model.User) ([]relationItem, error) {
@@ -1087,7 +1092,7 @@ func (h *Handler) collectFollowers(ctx context.Context, req FollowersRequest, vi
 	if err != nil {
 		return nil, err
 	}
-	return h.packRelationItems(ctx, rows, true, viewer), nil
+	return h.packRelationItems(ctx, rows, true, viewer)
 }
 
 func (h *Handler) collectFollowing(ctx context.Context, req FollowersRequest, viewer *model.User) ([]relationItem, error) {
@@ -1095,239 +1100,124 @@ func (h *Handler) collectFollowing(ctx context.Context, req FollowersRequest, vi
 	if err != nil {
 		return nil, err
 	}
-	return h.packRelationItems(ctx, rows, false, viewer), nil
+	return h.packRelationItems(ctx, rows, false, viewer)
 }
 
-// packRelationItems builds the response slice for users/followers and
-// users/following. followers=true means embed the follower side, false means
-// embed the followee side. ShowManyByIDs (#503) で 1 batch query にまとめ、
-// map で O(1) 解決して旧 ShowByID per-row N+1 を解消する (#300 2-3)。instance は
-// 引き続き batch 1 回で resolve する (#277)。
+// packRelationItems builds the response of users/followers (followers=true,
+// the follower side is populated) and users/following (followers=false, the
+// followee side), the way upstream FollowingEntityService.packMany does: the
+// populated users are packed together through packMany(users, me,
+// {schema: 'UserDetailedNotMe'}) and the viewer's own entry is MeDetailed.
+//
+// 利用者の組み立ては一覧共通の DetailedMany に任せる (#3330)。以前は handler
+// が PackUserDetailed から自前で組んでいたので、notify / withReplies / memo と、
+// モデレーター向けの moderationNote・2FA の項目を欠き、閲覧者自身も MeDetailed
+// にならなかった。関係・ピン留め・移行先・instance・絵文字はまとめて引くので、
+// 行数に比例して問い合わせは増えない。
 //
 // **cursor (sinceId/untilId) はここでは見ない。** collect 側が SQL に渡している。
 // ここで掛ける形に戻すと、LIMIT のあとに捨てることになり 2 ページ目が空になる
 // (#2711)。
 //
-// viewer が non-nil なら follow relation flag (isFollowing / isFollowed) を
-// `FilterFollowing` / `FilterFollowedBy` の 2 batch query で埋める (#1144、
-// frontend MkUserInfo の `followsYou` ラベル + MkFollowButton の初期 state
-// が正しく描画されるのに必要)。viewer が自分自身を含む list 経路でも viewer
-// と list 内 user の id 一致時は relation lookup を skip する (= self-flag
-// は意味なし)。
+// 相手の利用者を読めなければ error を返す (呼び元が 500 にする)。相手の行が
+// 無い following の行は、本家の innerJoinAndSelect と同じく応答から落とす。
+// frontend の follow-list は follower / followee を非 null として描くので、
+// 相手の欠けた要素を返すと一覧ごと描画が落ちる。
 func (h *Handler) packRelationItems(
 	ctx context.Context,
 	rows []*model.Following,
 	followers bool,
 	viewer *model.User,
-) []relationItem {
-	idSet := make(map[string]struct{}, len(rows))
-	for _, f := range rows {
-		var target string
+) ([]relationItem, error) {
+	target := func(f *model.Following) string {
 		if followers {
-			target = f.FollowerID
-		} else {
-			target = f.FolloweeID
+			return f.FollowerID
 		}
-		if target != "" {
-			idSet[target] = struct{}{}
+		return f.FolloweeID
+	}
+	ids := make([]string, 0, len(rows))
+	seen := make(map[string]struct{}, len(rows))
+	for _, f := range rows {
+		uid := target(f)
+		if _, ok := seen[uid]; ok || uid == "" {
+			continue
 		}
+		seen[uid] = struct{}{}
+		ids = append(ids, uid)
 	}
 
-	bundleByID := make(map[string]*user.UserWithProfile, len(idSet))
-	if len(idSet) > 0 {
-		ids := make([]string, 0, len(idSet))
-		for id := range idSet {
-			ids = append(ids, id)
+	var (
+		users    []*model.User
+		profiles map[string]*model.UserProfile
+	)
+	if len(ids) > 0 {
+		bundles, err := h.userService.ShowManyByIDs(ids)
+		if err != nil {
+			return nil, fmt.Errorf("load related users: %w", err)
 		}
-		if bundles, err := h.userService.ShowManyByIDs(ids); err == nil {
-			for _, b := range bundles {
-				bundleByID[b.User.ID] = b
+		users = make([]*model.User, 0, len(bundles))
+		profiles = make(map[string]*model.UserProfile, len(bundles))
+		for _, b := range bundles {
+			if b == nil || b.User == nil {
+				continue
+			}
+			users = append(users, b.User)
+			if b.Profile != nil {
+				profiles[b.User.ID] = b.Profile
 			}
 		}
 	}
+	packed := h.packDetailedMany(ctx, viewer, users, profiles)
+	h.overrideRemoteStats(ctx, viewer, users, packed)
 
-	// viewer 視点の follow relation を 2 batch query で先に解決しておく
-	// (#1144)。viewer が nil (= unauthenticated) なら lookup skip して
-	// 全 user の flag を nil 維持 (upstream も me が nil の経路では
-	// UserDetailedNotMe の relation field を omit する)。
-	followingMap, followedMap := h.batchFollowRelations(viewer, bundleByID)
-	// pending follow request も同じく 2 batch query で解決 (#1144 #2)。
-	// MkFollowButton が `hasPendingFollowRequestFromYou` で表示分岐するため
-	// `isFollowing` だけだと「pending 中なのに Follow ボタン」が出る regression
-	// になる。upstream UserDetailedNotMe schema と整合させる。
-	pendingFromMap, pendingToMap := h.batchPendingRequestRelations(viewer, bundleByID)
-	// #2106 N3: block/mute relation も batch query で実値を解決する (旧 best-effort false を是正)。
-	blockingMap, blockedMap, mutingMap, renoteMutingMap := h.batchBlockMuteRelations(viewer)
-
-	// remote user の notes/followers/following count を origin instance の
-	// /api/users/show から fetch して上書き (#1146)。Show 経路 (handler.go:329)
-	// と同 logic だが、本 list 経路では N 件並列 fetch で N round-trip を回避
-	// する (singleflight が同 key dedup、cache 1h で次 scroll は HTTP 0)。
-	remoteStatsMap := h.batchRemoteStatsOverride(ctx, bundleByID)
-
-	// count visibility gate (#1558) 用。moderator viewer は全 count を見られる。
-	iAmModerator := viewer != nil && h.moderatorChecker != nil && h.moderatorChecker.IsModerator(viewer.ID)
-
+	byID := make(map[string]any, len(users))
+	for i, u := range users {
+		byID[u.ID] = meself.Pack(ctx, packed[i], u, profiles[u.ID], viewer)
+	}
 	out := make([]relationItem, 0, len(rows))
-	var batch detailedBatch
 	for _, f := range rows {
 		item := relationItem{ID: f.ID, FollowerID: f.FollowerID, FolloweeID: f.FolloweeID}
 		if t, err := h.idGen.ParseTime(f.ID); err == nil {
 			item.CreatedAt = t.UTC().Format("2006-01-02T15:04:05.000Z")
 		}
-		var target string
-		if followers {
-			target = f.FollowerID
-		} else {
-			target = f.FolloweeID
+		d, ok := byID[target(f)]
+		if !ok {
+			continue
 		}
-		if b, ok := bundleByID[target]; ok {
-			d := entity.PackUserDetailed(b.User, b.Profile, h.idGen)
-			isMe := viewer != nil && viewer.ID == b.User.ID
-			isFollowing := false
-			if viewer != nil && viewer.ID != b.User.ID {
-				isFollowing = followingMap[b.User.ID]
-				isFollowed := followedMap[b.User.ID]
-				d.IsFollowing = &isFollowing
-				d.IsFollowed = &isFollowed
-				pendingFrom := pendingFromMap[b.User.ID]
-				pendingTo := pendingToMap[b.User.ID]
-				d.HasPendingFollowRequestFromYou = &pendingFrom
-				d.HasPendingFollowRequestToYou = &pendingTo
-				// #2106 N3: misskey_dart の UserDetailed union は isFollowing が present だと
-				// UserDetailedNotMeWithRelations を選び isBlocking/isBlocked/isMuted/isRenoteMuted も
-				// 非null bool として cast する (#1249)。旧実装は best-effort false に倒していたが、
-				// upstream getRelations 同様 batch query (viewer の outgoing/incoming を 1 query ずつ)
-				// で実値を埋める。
-				isBlocking := blockingMap[b.User.ID]
-				isBlocked := blockedMap[b.User.ID]
-				isMuted := mutingMap[b.User.ID]
-				isRenoteMuted := renoteMutingMap[b.User.ID]
-				d.IsBlocking = &isBlocking
-				d.IsBlocked = &isBlocked
-				d.IsMuted = &isMuted
-				d.IsRenoteMuted = &isRenoteMuted
-				d.EnsureRelationFlags() // 残った nil field を defensive に false で埋める
-				// follower にだけ followedMessage を見せる (#1558)。
-				if isFollowing && b.Profile != nil {
-					entity.SetFollowedMessageForFollower(&d, b.Profile.FollowedMessage)
-				}
-			}
-			if stats := remoteStatsMap[b.User.ID]; stats != nil {
-				d.NotesCount = stats.NotesCount
-				entity.OverrideRemoteCounts(&d, stats.FollowersCount, stats.FollowingCount)
-			}
-			// count visibility gate は remote stats override の後に適用する (#1558)。
-			entity.GateCountVisibility(&d, isMe, iAmModerator, isFollowing)
-			if followers {
-				item.Follower = &d
-			} else {
-				item.Followee = &d
-			}
-			batch = append(batch, userpack.DetailTarget{User: b.User, Profile: b.Profile, Detailed: &d})
+		if followers {
+			item.Follower = d
+		} else {
+			item.Followee = d
 		}
 		out = append(out, item)
 	}
-	// 本家 FollowingEntityService は相手を packMany (UserDetailedNotMe) で組むので、
-	// ピン留め・移行先・instance・絵文字もまとめて埋める (#3330)。
-	batch.fill(ctx, h, viewer)
-	return out
+	return out, nil
 }
 
-// batchFollowRelations resolves viewer's follow relations against the
-// candidate user set in 2 batch queries (followingRepo.FilterFollowings
-// FromAnchor / ToAnchor). Returns nil maps if viewer or repo is nil so
-// callers can skip safely.
-func (h *Handler) batchFollowRelations(viewer *model.User, bundleByID map[string]*user.UserWithProfile) (map[string]bool, map[string]bool) {
-	if viewer == nil || h.followingRepo == nil || len(bundleByID) == 0 {
-		return nil, nil
-	}
-	candidates := buildRelationCandidates(viewer, bundleByID)
-	if len(candidates) == 0 {
-		return nil, nil
-	}
-	followingMap := make(map[string]bool, len(candidates))
-	followedMap := make(map[string]bool, len(candidates))
-	if ids, err := h.followingRepo.FilterFollowingsFromAnchor(viewer.ID, candidates); err == nil {
-		for _, id := range ids {
-			followingMap[id] = true
-		}
-	}
-	if ids, err := h.followingRepo.FilterFollowingsToAnchor(viewer.ID, candidates); err == nil {
-		for _, id := range ids {
-			followedMap[id] = true
-		}
-	}
-	return followingMap, followedMap
-}
-
-// batchBlockMuteRelations resolves viewer's block/mute relations across the whole
-// candidate set in a few batch queries, mirroring upstream getRelations (#2106 N3):
-// blocking = viewer blocks candidate, blocked = candidate blocks viewer, muting /
-// renoteMuting = viewer mutes / renote-mutes candidate. viewer の outgoing/incoming を
-// 1 query ずつ取得して set 化するので per-user N+1 を避けられる (候補との照合は呼び元)。
-// viewer nil / repo 未配線時は nil map (= 各 dimension を解決しない、best-effort)。
-func (h *Handler) batchBlockMuteRelations(viewer *model.User) (blocking, blocked, muting, renoteMuting map[string]bool) {
-	if viewer == nil {
-		return nil, nil, nil, nil
-	}
-	toSet := func(ids []string) map[string]bool {
-		m := make(map[string]bool, len(ids))
-		for _, id := range ids {
-			m[id] = true
-		}
-		return m
-	}
-	if h.blockingRepo != nil {
-		if ids, err := h.blockingRepo.ListBlockeeIDs(viewer.ID); err == nil {
-			blocking = toSet(ids)
-		}
-		if ids, err := h.blockingRepo.ListBlockerIDs(viewer.ID); err == nil {
-			blocked = toSet(ids)
-		}
-	}
-	if h.mutingRepo != nil {
-		if ids, err := h.mutingRepo.ListMuteeIDs(viewer.ID); err == nil {
-			muting = toSet(ids)
-		}
-	}
-	if h.renoteMutingRepo != nil {
-		if ids, err := h.renoteMutingRepo.ListMuteeIDs(viewer.ID); err == nil {
-			renoteMuting = toSet(ids)
-		}
-	}
-	return blocking, blocked, muting, renoteMuting
-}
-
-// batchPendingRequestRelations resolves viewer's pending follow_request
-// relations across the candidate user set in 2 batch queries
-// (followRequestRepo.FilterPendingFromAnchor / ToAnchor). Returns nil maps
-// if viewer or repo is nil so callers can skip safely.
+// overrideRemoteStats replaces notesCount / followersCount / followingCount of
+// the remote users of a list with the values their origin server reports
+// (#1146), then re-applies the count visibility gate.
 //
-// `hasPendingFollowRequestFromYou` / `hasPendingFollowRequestToYou` を
-// list 経路で埋めないと frontend MkFollowButton が「pending 中なのに
-// `Follow` ボタン」を表示する drift になる (#1144 #2)。
-func (h *Handler) batchPendingRequestRelations(viewer *model.User, bundleByID map[string]*user.UserWithProfile) (map[string]bool, map[string]bool) {
-	if viewer == nil || h.followRequestRepo == nil || len(bundleByID) == 0 {
-		return nil, nil
+// mk-go 独自 (docs/divergence.md の RemoteStatsFetcher)。DetailedMany が掛けた
+// カウントのゲートは元の値に対するものなので、差し替えた値に掛け直す。
+func (h *Handler) overrideRemoteStats(ctx context.Context, viewer *model.User, users []*model.User, packed []entity.UserDetailed) {
+	stats := h.batchRemoteStatsOverride(ctx, users)
+	if len(stats) == 0 {
+		return
 	}
-	candidates := buildRelationCandidates(viewer, bundleByID)
-	if len(candidates) == 0 {
-		return nil, nil
-	}
-	fromMap := make(map[string]bool, len(candidates))
-	toMap := make(map[string]bool, len(candidates))
-	if ids, err := h.followRequestRepo.FilterPendingFromAnchor(viewer.ID, candidates); err == nil {
-		for _, id := range ids {
-			fromMap[id] = true
+	iAmModerator := viewer != nil && h.moderatorChecker != nil && h.moderatorChecker.IsModerator(viewer.ID)
+	for i, u := range users {
+		s := stats[u.ID]
+		if s == nil {
+			continue
 		}
+		d := &packed[i]
+		d.NotesCount = s.NotesCount
+		entity.OverrideRemoteCounts(d, s.FollowersCount, s.FollowingCount)
+		isMe := viewer != nil && viewer.ID == u.ID
+		isFollowing := d.IsFollowing != nil && *d.IsFollowing
+		entity.GateCountVisibility(d, isMe, iAmModerator, isFollowing)
 	}
-	if ids, err := h.followRequestRepo.FilterPendingToAnchor(viewer.ID, candidates); err == nil {
-		for _, id := range ids {
-			toMap[id] = true
-		}
-	}
-	return fromMap, toMap
 }
 
 // remoteStatsBatchTimeout caps the wall-clock time the list response will
@@ -1340,7 +1230,7 @@ func (h *Handler) batchPendingRequestRelations(viewer *model.User, bundleByID ma
 const remoteStatsBatchTimeout = 5 * time.Second
 
 // batchRemoteStatsOverride fans out RemoteStatsFetcher.Fetch goroutines for
-// every remote user in bundleByID and returns the resulting stats keyed by
+// every remote user in users and returns the resulting stats keyed by
 // user ID. Local users (host == nil) are skipped. fetcher が未配線 / list
 // に remote user 0 件なら nil を返して caller が override loop を skip できる
 // (#1146)。
@@ -1354,19 +1244,19 @@ const remoteStatsBatchTimeout = 5 * time.Second
 // を被せた派生 ctx を全 goroutine に渡し、deadline 超過 / client abort
 // どちらでも fetcher 内部の HTTP client が ctx cancel を受けて即時 return
 // する (= 取りこぼした user は silent fallback で local count 維持)。
-func (h *Handler) batchRemoteStatsOverride(ctx context.Context, bundleByID map[string]*user.UserWithProfile) map[string]*RemoteUserStatsView {
-	if h.remoteStatsFetcher == nil || len(bundleByID) == 0 {
+func (h *Handler) batchRemoteStatsOverride(ctx context.Context, users []*model.User) map[string]*RemoteUserStatsView {
+	if h.remoteStatsFetcher == nil || len(users) == 0 {
 		return nil
 	}
 	type job struct {
 		userID, host, username string
 	}
-	jobs := make([]job, 0, len(bundleByID))
-	for id, b := range bundleByID {
-		if b.User.Host == nil || *b.User.Host == "" {
+	jobs := make([]job, 0, len(users))
+	for _, u := range users {
+		if u.Host == nil || *u.Host == "" {
 			continue
 		}
-		jobs = append(jobs, job{userID: id, host: *b.User.Host, username: b.User.Username})
+		jobs = append(jobs, job{userID: u.ID, host: *u.Host, username: u.Username})
 	}
 	if len(jobs) == 0 {
 		return nil
@@ -1391,20 +1281,6 @@ func (h *Handler) batchRemoteStatsOverride(ctx context.Context, bundleByID map[s
 	}
 	wg.Wait()
 	return out
-}
-
-// buildRelationCandidates returns the candidate user IDs for viewer-relative
-// batch relation lookups, excluding viewer's own id (= self-flag has no
-// meaning, matches upstream `UserDetailedNotMe` semantics).
-func buildRelationCandidates(viewer *model.User, bundleByID map[string]*user.UserWithProfile) []string {
-	candidates := make([]string, 0, len(bundleByID))
-	for id := range bundleByID {
-		if id == viewer.ID {
-			continue
-		}
-		candidates = append(candidates, id)
-	}
-	return candidates
 }
 
 // FillDetailedExtras fills the UserDetailed parts that need the users/show
