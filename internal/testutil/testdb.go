@@ -271,7 +271,7 @@ const migrationLedgerTable = "testutil_applied_migrations"
 // 一過性の失敗 (並行 DDL / lock timeout / 新しい migration の実バグ) が恒久的に
 // 隠れる。
 //
-// 既存 schema への再適用でエラーになるのは実測で **108 本中 2 本だけ**
+// 既存 schema への再適用でエラーになるのは実測で **115 本中 2 本だけ**
 // (`000001_initial` の制約重複と `000075_signup_application`)。どちらも
 // 1 ファイル = 1 つの暗黙トランザクションなので丸ごとロールバックし、列枠を
 // 食わない。**列枠を食う `000033` (ADD) / `000036` (DROP) は成功する側**なので、
