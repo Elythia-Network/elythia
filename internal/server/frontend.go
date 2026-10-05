@@ -434,7 +434,6 @@ func buildMetaJSON(cfg *config.Config, m *model.Meta, proxyAccountResolver meta.
 		"mkGoVersion": config.MkGoVersion,
 		// /api/meta と同じ additive field (#2700)。
 		"mkGoCommit":                config.MkGoCommit,
-		"mkGoFrontendVersion":       config.MkGoFrontendVersion,
 		"name":                      m.Name,
 		"shortName":                 m.ShortName,
 		"uri":                       cfg.URL,

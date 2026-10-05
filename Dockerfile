@@ -62,7 +62,7 @@ RUN test -f frontend/node_modules/@misskey-dev/emoji-assets/built/twemoji/1f004.
 # videoThumbnailGenerator API) への HTTP/UDS 呼び出しで実現するので、ここに
 # ffmpeg バイナリを同梱する必要は無い (#637 M2)。
 #
-# ビルドした revision と同梱 frontend の版を埋め込む (#2700)。**Dockerfile の
+# ビルドした revision を埋め込む (#2700)。**Dockerfile の
 # 中では git を呼べない** — `.dockerignore` が `.git` を落とすのでコンテキストに
 # リポジトリが入らない。渡し忘れたときは空のまま埋まり、/about-mkgo 側が
 # 「不明」として表示を省く。
@@ -72,8 +72,7 @@ RUN test -f frontend/node_modules/@misskey-dev/emoji-assets/built/twemoji/1f004.
 # make plugins を実行済みなら COPY で入るが、それに依存すると再現性が無い)。
 # プラグインが 1 つも無ければ何も生成せず、素の go build と同じになる。
 ARG MKGO_COMMIT=
-ARG MKGO_FRONTEND_VERSION=
-ENV REVISION_LDFLAGS="-X github.com/shiroha-a/mk/internal/config.MkGoCommit=${MKGO_COMMIT} -X github.com/shiroha-a/mk/internal/config.MkGoFrontendVersion=${MKGO_FRONTEND_VERSION}"
+ENV REVISION_LDFLAGS="-X github.com/shiroha-a/mk/internal/config.MkGoCommit=${MKGO_COMMIT}"
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \

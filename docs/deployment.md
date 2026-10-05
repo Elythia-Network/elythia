@@ -765,7 +765,7 @@ tail -n 1 .tmp/uds-frontend-build.log | grep -qx 'exit=0' && echo OK || echo "�
 
 #### 4. compose を新しいパスへ向ける
 
-`compose.uds.yaml` の 2 行を書き換える。build-arg の `MKGO_FRONTEND_VERSION` はこの版ではそのまま残してよい (submodule を外す後の版で消える)。
+`compose.uds.yaml` の 2 行を書き換える。build-arg に `MKGO_FRONTEND_VERSION` が残っていれば消してよい (#3379 で廃止した。残っていても使われない)。
 
 ```yaml
       - ./frontend/built:/frontend:ro

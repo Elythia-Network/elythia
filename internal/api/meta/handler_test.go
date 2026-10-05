@@ -775,18 +775,16 @@ func TestMeta_ExposesMkGoVersionSeparately(t *testing.T) {
 	assert.NotEqual(t, resp["version"], resp["mkGoVersion"], "両者は別物として出す")
 }
 
-// ビルドした revision と同梱 frontend の版を additive に出すこと (#2700)。
-// /about-mkgo が「mk-go 1.3.0 (abc1234)」「Misskey 2026.9.0-mk.3」として使う。
+// ビルドした revision を additive に出すこと (#2700)。/about-mkgo が
+// 「mk-go 1.3.0 (abc1234)」として使う。同梱 frontend の版 (mkGoFrontendVersion) は
+// frontend を本体へ取り込んで版が本体と同じになったので出さない (#3379)。
 func TestMeta_ExposesBuildRevision(t *testing.T) {
 	// ldflags で埋める package 変数なので、テストからは書き換えて戻す。
 	// **プロセス共有なので必ず復元する** — `-shuffle` を掛けた CI で、
 	// 後続のテストが偽の値を見ることになる (#2795)。
-	prevCommit, prevFrontend := config.MkGoCommit, config.MkGoFrontendVersion
-	t.Cleanup(func() {
-		config.MkGoCommit, config.MkGoFrontendVersion = prevCommit, prevFrontend
-	})
+	prevCommit := config.MkGoCommit
+	t.Cleanup(func() { config.MkGoCommit = prevCommit })
 	config.MkGoCommit = "abc1234"
-	config.MkGoFrontendVersion = "2026.9.0-mk.3"
 
 	h, metaRepo := newTestHandler()
 	metaRepo.Meta = &model.Meta{ID: "x"}
@@ -800,19 +798,16 @@ func TestMeta_ExposesBuildRevision(t *testing.T) {
 	var resp map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	assert.Equal(t, "abc1234", resp["mkGoCommit"])
-	assert.Equal(t, "2026.9.0-mk.3", resp["mkGoFrontendVersion"])
+	assert.NotContains(t, resp, "mkGoFrontendVersion", "廃止した field (#3379)")
 }
 
 // 埋め込みの無いビルド (`go run` / build-arg を渡さない image) では空文字で
 // 出す。**field ごと落とさない** — 値の有無で表示を決めるのは frontend 側の
 // 責務で、キーが消えると「古い mk-go か、埋め忘れか」を区別できなくなる。
 func TestMeta_BuildRevisionIsEmptyWhenNotEmbedded(t *testing.T) {
-	prevCommit, prevFrontend := config.MkGoCommit, config.MkGoFrontendVersion
-	t.Cleanup(func() {
-		config.MkGoCommit, config.MkGoFrontendVersion = prevCommit, prevFrontend
-	})
+	prevCommit := config.MkGoCommit
+	t.Cleanup(func() { config.MkGoCommit = prevCommit })
 	config.MkGoCommit = ""
-	config.MkGoFrontendVersion = ""
 
 	h, metaRepo := newTestHandler()
 	metaRepo.Meta = &model.Meta{ID: "x"}
@@ -826,9 +821,7 @@ func TestMeta_BuildRevisionIsEmptyWhenNotEmbedded(t *testing.T) {
 	var resp map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	require.Contains(t, resp, "mkGoCommit", "埋まっていなくてもキーは出す")
-	require.Contains(t, resp, "mkGoFrontendVersion")
 	assert.Equal(t, "", resp["mkGoCommit"])
-	assert.Equal(t, "", resp["mkGoFrontendVersion"])
 }
 
 // #2313: 分割アップロードの能力告知。未対応構成では field ごと出さないので、

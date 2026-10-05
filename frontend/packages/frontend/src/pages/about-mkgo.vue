@@ -156,7 +156,6 @@ const UPSTREAM_MISSKEY_REPOSITORY_URL = 'https://github.com/misskey-dev/misskey'
 const mkGoMeta = instance as typeof instance & {
 	mkGoVersion?: string;
 	mkGoCommit?: string;
-	mkGoFrontendVersion?: string;
 };
 const mkGoVersion = mkGoMeta.mkGoVersion ?? null;
 
@@ -168,14 +167,15 @@ const backendVersion = computed(() => {
 	return commit ? `mk-go ${mkGoVersion} (${commit})` : `mk-go ${mkGoVersion}`;
 });
 
-// フロントエンドの版。**fork のタグ (`2026.9.0-mk.3`) を出す。**
-// mk-go が同梱ビルド時の `git describe` を additive に返すのでそれを使い、
-// 無ければ build 時定数 (= upstream の package.json 版) に落とす。
+// フロントエンドの版。build 時定数 (= 追従している本家の package.json の版) を出す。
+// 以前は fork のタグ (`2026.9.0-mk.3`) を mk-go から受け取って出していたが、
+// frontend を本体へ取り込んで独自の版を持たなくなった (#3379)。独自の変更の
+// 有無は上の mk-go の版で分かる。
 //
 // **`instance.version` は使わない。** あれは backend が名乗る互換 Misskey 版で、
 // この行が示したいフロントエンドの出どころとは別物 (`about.overview.vue` の
 // サーバー情報欄は逆に backend の申告値を出す。見ているものが違う)。
-const frontendVersion = computed(() => `Misskey ${mkGoMeta.mkGoFrontendVersion || version}`);
+const frontendVersion = computed(() => `Misskey ${version}`);
 
 // このサーバーが動かしているコードの案内先。未設定 (null / 空文字 / upstream の列
 // DEFAULT のまま) なら出さない。

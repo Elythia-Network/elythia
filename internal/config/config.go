@@ -30,17 +30,6 @@ var MisskeyVersion = "2026.10.0"
 //	go build -ldflags "-X github.com/shiroha-a/mk/internal/config.MkGoCommit=abc1234"
 var MkGoCommit = ""
 
-// MkGoFrontendVersion is the version of the fork frontend bundled with this
-// build (`third_party/misskey`), typically its git tag such as "2026.9.0-mk.3".
-//
-// **frontend を bind mount で差し替えている構成では実物とずれうる。** これが
-// 名乗るのは「このバイナリをビルドしたときの submodule pin」で、`make uds-rebuild`
-// のように両方を同時にビルドする経路でしか一致は保証されない。MkGoCommit と同じく
-// 空になりうる。Override at build time via:
-//
-//	go build -ldflags "-X github.com/shiroha-a/mk/internal/config.MkGoFrontendVersion=2026.9.0-mk.3"
-var MkGoFrontendVersion = ""
-
 // MkGoRepositoryURL is the canonical source repository of mk-go itself.
 //
 // AGPL-3.0 section 13 で求められる「動いているコードに対応するソース」の案内は
