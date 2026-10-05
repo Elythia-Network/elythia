@@ -182,6 +182,20 @@ jobs:
             (cd "$dir" && GOWORK=off go vet ./...)
           done
 
+      # 生成した glue (plugins_generated.go) を含む統合バイナリのコンパイルも
+      # 見る。上の `Vet bundled plugins` は各プラグインを単体で vet するだけなので、
+      # Register の配線 (cmd/misskey 側) や workspace の依存解決の崩れは検出できない。
+      # 同梱サンプルは既定無効なので、`make build` を経由する他の workflow には
+      # この経路が無い (#2495)。**Node が要らないので、毎回走る build に置く** —
+      # frontend workflow は Go だけの変更で lint を skip するので、そちらに置くと
+      # cmd/misskey の変更を見逃す (#3379。以前は frontend-check job にあった)。
+      # 生成された go.work を使うので GOWORK は無効化しない。job の最後に置くのは、
+      # 生成物 (go.work など) が前の step に影響しないようにするため。
+      - name: Build integrated binary with sample plugins
+        run: |
+          make plugins-all
+          go build -o /dev/null ./cmd/misskey
+
   # 各shardは並列に走るが、checkは `test-shards (N)` という名前で個別に登録される。
   # ブランチ保護が `test` という名前のcheckを要求するため、後段の `test` job が
   # 全shardを束ねて単一の `test` checkを公開する (needs: test-shards)。
@@ -481,108 +495,6 @@ jobs:
       # これは分単位なので、速い検査で落ちるものは先に落とす。
       - name: Golangci-lint
         run: make golangci-lint
-
-  # frontend/ (#3379 で fork から取り込んだ) の型チェック。同梱サンプルの
-  # プラグインを取り込んだ状態での型・統合バイナリのビルド・eslint・vitest を見る。
-  # frontend.yml (#3379) と重なる部分は P4e でまとめる。
-  #
-  # 1.0 以降 frontend は mk-go 独自に進化させる方針なので、型崩れを
-  # 検出する手段が要る。`make uds-frontend-build` / `e2e-frontend-build` は
-  # 本番が bind-mount している frontend/built を書き換えるため
-  # 検証には使えない。vue-tsc --noEmit なら出力物を作らず型だけ見られる。
-  #
-  # required check には入れない (build / test / lint の 3 つが required)。
-  frontend-check:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          # pnpm のバージョンは frontend/package.json の packageManager から
-          # 取る。mk リポジトリ直下には package.json が無い。
-          package_json_file: frontend/package.json
-
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: frontend/.node-version
-          cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
-
-      # 同梱サンプルの frontend を取り込んでから型を見る。これが無いと
-      # plugin-api.ts を壊してもサンプル側では検出されない。サンプルは
-      # mk-plugin.yml で既定無効 (#2495) なので、disabled も含める
-      # plugins-all を使う。**workspace のビルドより先に回す** — 生成物
-      # (server-plugins.generated.ts) は追跡していない (#3379) ので、無いと
-      # frontend のビルドが import で落ちる。
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-
-      - name: Generate plugin artifacts
-        run: make plugins-all
-
-      - name: Install frontend workspace dependencies
-        working-directory: frontend
-        run: pnpm install --frozen-lockfile
-
-      # frontend の型解決には workspace package の生成物が要る。i18n (locales の
-      # 型定義) と misskey-bubble-game を落とすと `Cannot find module 'i18n'` 系で
-      # 44 件こける。どれが要るかを絞り込むより `-r build` で全部作る方が、上流が
-      # 依存を増やしたときに壊れない。
-      #
-      # frontend 自身のビルド (build-assets) は型チェックに不要なので呼ばない。
-      - name: Build workspace packages
-        working-directory: frontend
-        run: pnpm build-pre && pnpm -r build
-
-      # 生成した glue (plugins_generated.go) を含む統合バイナリのコンパイルも
-      # 見る。build job の `Vet bundled plugins` は各プラグインを単体で vet する
-      # だけなので、Register の配線や workspace の依存解決の崩れは検出できない。サンプルが既定無効に
-      # なったことで `make build` を経由する他の workflow からもこの経路が
-      # 消えたため、ここで担保する (#2495)。生成された go.work を使うので
-      # GOWORK は無効化しない。
-      - name: Build integrated binary with sample plugin
-        run: go build -o /dev/null ./cmd/misskey
-
-      - name: Type check (vue-tsc)
-        run: make frontend-check
-
-      # fork frontend の eslint (#2843)。**型だけでは足りない。** 1.0 以降
-      # fork frontend は mk-go 独自に進化させる方針で、独自コードは増え続ける
-      # (docs/divergence.md §4-2)。型は vue-tsc が見るが、それ以外の規約違反は
-      # 誰も見ていなかった。実際 mk-go 独自ファイル 2 つに commit 済みの
-      # 違反が 4 箇所残っていた (2026.7.0-mk.22j で修正)。
-      #
-      # upstream AGENTS.md も「変更を出す前の最低チェック」に pnpm lint
-      # (typecheck + eslint) を挙げている。範囲はその `pnpm eslint` と同じ
-      # `src/**/*.{ts,vue}` にする — **`eslint .` にしないこと**。upstream が
-      # lint していない test/ まで拾い、追従のたびに他人の負債で落ちる
-      # (実測で test/ 込みだと 115 件)。
-      #
-      # 依存インストールと workspace ビルドは上の step で済んでいるので、
-      # 追加コストは eslint の実行時間だけ。
-      - name: Lint (eslint)
-        working-directory: frontend/packages/frontend
-        run: pnpm eslint
-
-      # fork frontend の vitest (#2844)。**どの workflow でも実行されていなかった。**
-      # spec は 20 本あるが ci.yml にも他の workflow にも実行箇所が無く、
-      # dropin-frontend-e2e は cypress で別物。
-      #
-      # #2831 で実際に効いた: frontend の修正 (WebSocket 再接続時の未読件数の
-      # 再同期) は in-flight 重複排除 / スロットル / 世代カウンタの 3 つのガードが
-      # 相互作用する実装なのに、敵対的レビューの「テストがゼロ」という指摘に対して
-      # **テスト基盤が無いこと**を理由に見送っている。
-      #
-      # 依存インストールと workspace ビルドは上の step で済んでいるので、追加
-      # コストは vitest の実行時間だけ。手元の再現は `make frontend-test`。
-      - name: Unit test (vitest)
-        working-directory: frontend/packages/frontend
-        run: pnpm test
 
   vulncheck:
     runs-on: ubuntu-latest

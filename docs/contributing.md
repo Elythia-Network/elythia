@@ -43,7 +43,7 @@ make check  # fmt → lint → actionlint → golangci-lint → test
 
 CIで`gofmt`差分チェック、`go vet`、actionlint、golangci-lint、カバレッジ閾値チェックが走る。
 
-PR を出すと十数個の check が走る。**required なのは `build` / `test` / `lint` の 3 つだけ**で、
+PR を出すと十数個の check が走る。**required なのは `build` / `test` / `lint` / `frontend` の 4 つだけ**で、
 残りは非ブロッキング。どれが何を見ていて落ちたとき何を疑うかは [CI で回る項目](ci.md) に
 まとめてある。
 
@@ -59,9 +59,11 @@ frontend は #3379 で Misskey TS の fork (submodule `third_party/misskey`) か
 直接直し、Go 側の変更と同じ PR に入れてよい。fork 側へ commit して gitlink を
 上げる手順は要らない。
 
-### 手元での確認（CI `frontend-check` job 相当）
+### 手元での確認（CI `frontend` workflow 相当）
 
-`make frontend-check` は**型 (`vue-tsc`) + `frontend/` のソースを読むゲート + eslint** まで (#2892 / #2906)。job 全体はさらに vitest と `make plugins-all` / 統合バイナリの build も走る。下のブロックが eslint を再度呼ぶのは、CI も別 step (`Lint (eslint)`) で回しているのを揃えているため。
+CI では `.github/workflows/frontend.yml` の集約 job `frontend` が required check になっている。中身は `frontend-lint` (9 workspace の eslint、typecheck、check-dts、SPDX ヘッダー、locale、misskey-js の API レポート、`emoji-regex-check`) と `frontend-test` (本番設定のビルド、frontend の vitest、misskey-js のテスト) で、詳細は [ci.md](ci.md) にある。
+
+手元では `make frontend-check` (target。CI の job ではない) が**型 (`vue-tsc`) + `frontend/` のソースを読むゲート + `emoji-regex-check` + frontend の eslint** までをまとめて回す (#2892 / #2906 / #3324)。vitest は `make frontend-test`。frontend 以外の workspace の eslint や check-dts などは、`frontend.yml` の各 step を `frontend/` で叩く。
 
 `make plugins-all` は workspace のビルドより先に回す。生成物の
 `server-plugins.generated.ts` は git で追跡していない (#3379) ので、無いと
@@ -69,9 +71,8 @@ frontend のビルドが import で落ちる。Node の版は `frontend/.node-ve
 
 ```bash
 make plugins-all && go build -o /dev/null ./cmd/misskey   # CI と同じ統合ビルド
-cd frontend && pnpm install && pnpm build-pre && pnpm -r build && cd ..
+cd frontend && pnpm install && pnpm build && cd ..
 make frontend-check
-cd frontend/packages/frontend && pnpm eslint && cd ../../..
 make frontend-test
 ```
 

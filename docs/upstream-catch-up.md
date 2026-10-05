@@ -242,7 +242,7 @@ git rev-list --count "$NEW..$OLD"    # 失われる mk 独自コミット数。0
 git diff --diff-filter=D --name-only "$OLD" "$NEW" | wc -l   # 削除ファイル。0 であること
 ```
 
-**CI は祖先関係の巻き戻りを検出しない。** `build` job は gitlink の SHA が fork に **push 済みか**は見るが、fast-forward 可能か（祖先関係）は見ない。`build` / `test` / `lint` の required check は submodule を checkout しない。`frontend-check` は型・eslint・vitest を見るが、**ファイルが消えても型が通る**場合がある。pointer の妥当性は上のコマンドで人手確認する。
+**CI は祖先関係の巻き戻りを検出しない。** `build` job は gitlink の SHA が fork に **push 済みか**は見るが、fast-forward 可能か（祖先関係）は見ない。`build` / `test` / `lint` / `frontend` の required check は submodule を checkout しない (`frontend` が型・eslint・vitest を見るのは本体の `frontend/` で、そちらでも**ファイルが消えても型が通る**場合がある)。pointer の妥当性は上のコマンドで人手確認する。
 
 ### 本家の版を上げた後に必須: shape drift snapshot の再生成
 
@@ -287,7 +287,7 @@ TypeORM の decorator から正規形を再現できないため **実 DB から
 
 ### 本家の版を上げた後に必須: MFM の絵文字の正規表現
 
-mk-go の MFM パーサは、mfm-js が依存する `@misskey-dev/emoji-data` の `emojiRegex` を Go の正規表現へ移したもの (`internal/activitypub/mfm/emoji_regex_gen.go`) で Unicode 絵文字を読む (#3324)。frontend の mfm-js の版か、それが依存する emoji-data の版が変わると、`make frontend-check` の `emoji-regex-check` が落ちる (正規表現が同じでも、snapshot に記録した版と食い違うため)。mfm-js の `unicodeEmoji` の書き方が変わったときも、生成ツールが前提の形を見つけられずに落ちる (下記)。
+mk-go の MFM パーサは、mfm-js が依存する `@misskey-dev/emoji-data` の `emojiRegex` を Go の正規表現へ移したもの (`internal/activitypub/mfm/emoji_regex_gen.go`) で Unicode 絵文字を読む (#3324)。frontend の mfm-js の版か、それが依存する emoji-data の版が変わると、`emoji-regex-check` (CI では `frontend` workflow の `frontend-lint`、手元では `make frontend-check` から呼ばれる) が落ちる (正規表現が同じでも、snapshot に記録した版と食い違うため)。mfm-js の `unicodeEmoji` の書き方が変わったときも、生成ツールが前提の形を見つけられずに落ちる (下記)。
 
 ```bash
 make emoji-regex     # 生成物と tools/emojiregex/testdata/source.txt を作り直す

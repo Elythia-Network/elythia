@@ -62,7 +62,7 @@ mk-go 本体を変更する人向け。**公開面を広げてよい条件**と�
 
 `plugin-api.ts` が再公開している Misskey のコンポーネント（`MkInput` 等）は、upstream が props を変えると壊れる。
 
-これは**受け入れている**。見た目の完全一致と引き換えのコストで、どのプラグイン機構でも追従は必要という判断。`frontend-check`（`vue-tsc`）で検出できる。
+これは**受け入れている**。見た目の完全一致と引き換えのコストで、どのプラグイン機構でも追従は必要という判断。CI の `frontend`（`vue-tsc`）と手元の `make frontend-check` で検出できる。
 
 ## 公開面を広げてよい条件
 
@@ -117,10 +117,11 @@ go run ./tools/pluginspec -write
 | job | 見るもの | required |
 |---|---|---|
 | `build` の `Vet bundled plugins` | 各プラグインを `go vet` (テストファイルも含めてコンパイル) | ○ |
+| `build` の `Build integrated binary with sample plugins` | `make plugins-all` (`-include-disabled`) → 統合バイナリのビルド。毎回走る | ○ |
 | `plugin-tests` | 各プラグインのテストを実行 (`replace` で本体の公開面に対してコンパイルされる) | × |
-| `frontend-check` | `make plugins-all` (`-include-disabled`) → 統合バイナリのビルド → `vue-tsc` + `frontend/` を読むゲート | × |
+| `frontend` (`frontend.yml`) | `make plugins-all` (`-include-disabled`) → frontend のビルド・`vue-tsc`・vitest。`plugins/` か `plugin/` を触った PR では必ず走る | ○ |
 
-required なのは `build` だけ (`docs/ci.md` の required check は `build` / `test` / `lint` の 3 つ)。`plugin-tests` / `frontend-check` だけが落ちる壊れ方はマージをブロックしない。
+required なのは `build` と `frontend` (`docs/ci.md` の required check は `build` / `test` / `lint` / `frontend` の 4 つ)。`plugin-tests` だけが落ちる壊れ方はマージをブロックしない。
 
 `plugins/*` は gitignore されているが、`!plugins/status/` と `!plugins/trustlevel/` (#2586) で例外指定してある。**どちらも `mk-plugin.yml` で既定無効**なので、clone して `make build` してもバイナリにもフロントにも入らない。`status` は #2495 から。`trustlevel` は #2586 で `disabled: true` 付きで同梱したあと、#2585 の実測を採るために一度外し、実測が終わって #2701 で戻している。既定無効であることは `build` job の `Check bundled plugins are disabled by default` が見る。
 

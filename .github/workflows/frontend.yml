@@ -7,12 +7,12 @@
 # - frontend-lint: 9 workspace の eslint、typecheck (frontend / sw / misskey-js)、
 #   check-dts、SPDX ヘッダー、locale の検証、misskey-js の API レポート
 # - frontend-test: 本番設定でのビルド、frontend の vitest、misskey-js のテスト
-# - frontend: 上の 2 つを集約する。required にするときはこの名前だけを
-#   branch protection に入れる (`test` と同じ形。job を足しても protection を
-#   触らずに済む)
+# - frontend: 上の 2 つを集約する。**required check はこの名前だけ** (`test` と
+#   同じ形。job を足しても branch protection を触らずに済む、#3379)
 #
-# **今は required にしていない** (#3379 の P4e で required にする)。非ブロッキングを
-# `continue-on-error` で表さないこと — job が成功扱いになり、失敗が見えなくなる。
+# **paths で絞らず、毎回起動する。** required check は、workflow が起動しないと
+# 「結果待ち」のまま PR をマージできなくする。frontend に関係するかは changes job が
+# 差分から判定し、関係なければ lint と test を skip して frontend だけを成功させる。
 #
 # **ビルドを先に行う。** typecheck・check-dts・API レポート・テストは、workspace の
 # 各パッケージ (misskey-js、i18n など) の built/ を読む。ビルドの前に回すと
@@ -21,17 +21,8 @@ name: frontend
 
 on:
   pull_request:
-    paths: &frontend-paths
-      - "frontend/**"
-      - ".github/workflows/frontend.yml"
-      # frontend のビルドが import する server-plugins.generated.ts は、
-      # make plugins-all がここから生成する (#3379)
-      - "plugins/**"
-      - "plugin/**"
-      - "tools/pluginbuild/**"
   push:
     branches: [develop]
-    paths: *frontend-paths
   workflow_dispatch:
 
 permissions:
@@ -42,7 +33,71 @@ defaults:
     working-directory: frontend
 
 jobs:
+  # frontend に関係する変更があるかを判定する。**判定に迷ったら true に倒す** —
+  # 誤って false にすると、frontend を壊す PR が required を緑のまま通る。
+  # パスの一覧は internal/entitycompat の frontend_changes_test が、実際の git の
+  # 差分で振る舞いを確かめている。
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      frontend: ${{ steps.diff.outputs.frontend }}
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Detect frontend changes
+        id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          case "$EVENT" in
+            pull_request) base=$PR_BASE ;;
+            push) base=$PUSH_BEFORE ;;
+            *) base= ;;
+          esac
+          # 手動実行と、比べる先が無い push (ブランチの作成など) は全部回す。
+          if [ -z "$base" ] || [ "$base" = 0000000000000000000000000000000000000000 ]; then
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # force-push の後は before が clone に無い (fetch-depth: 0 でも孤立した
+          # commit は取れない)。比べられないので全部回す。
+          if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # frontend のビルドが import する生成物は plugins/ から pluginbuild が作り、
+          # job は make plugins-all (Makefile / go.mod) を通す。絵文字の正規表現は
+          # tools/emojiregex が生成し、frontend/ の mfm-js と突き合わせる。
+          #
+          # **パイプで grep -q に渡さない。** grep -q は最初の一致で抜けるので、
+          # 一覧がパイプのバッファ (約 64KiB) を超えると書き手が SIGPIPE で落ち、
+          # pipefail の下では if が false 側へ進む。変更の多い PR (本家への追従など)
+          # ほど frontend=false になり、required を素通りする (実測)。
+          #
+          # **--no-renames を付ける。** リネーム検出が効くと --name-only は移動先しか
+          # 出さないので、frontend/ の外へ移す PR が false になる。core.quotePath を
+          # 切るのは、日本語などのパスが "frontend/\346..." と引用されて ^frontend/ に
+          # 一致しなくなるため。
+          files=$(git -c core.quotePath=false diff --no-renames --name-only "$base" HEAD)
+          if grep -qE '^(frontend/|plugins/|plugin/|tools/pluginbuild/|tools/emojiregex/|internal/activitypub/mfm/emoji_regex_gen\.go$|\.github/workflows/frontend\.yml$|Makefile$|go\.(mod|sum)$)' <<< "$files"; then
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "frontend=false" >> "$GITHUB_OUTPUT"
+          fi
+
   frontend-lint:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -100,7 +155,16 @@ jobs:
       - name: misskey-js API report
         run: pnpm --filter misskey-js api-prod
 
+      # MFM の Unicode 絵文字の正規表現が、frontend/ に pnpm install した mfm-js /
+      # emoji-data と一致しているか (#3324)。node_modules が要るので make gates には
+      # 入れず、ここで回す。(以前は ci.yml の frontend-check job にあった、#3379)
+      - name: Emoji regex matches mfm-js
+        working-directory: .
+        run: make emoji-regex-check
+
   frontend-test:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -141,15 +205,28 @@ jobs:
 
   frontend:
     if: always()
-    needs: [frontend-lint, frontend-test]
+    needs: [changes, frontend-lint, frontend-test]
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: .
     steps:
+      # 関係しない変更では lint と test は skipped になる。そのときだけ成功とし、
+      # changes 自体が落ちたときや、関係するのに skipped / cancelled のときは落とす。
       - name: Check results
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          FRONTEND: ${{ needs.changes.outputs.frontend }}
+          LINT: ${{ needs.frontend-lint.result }}
+          TEST: ${{ needs.frontend-test.result }}
         run: |
-          if [ "${{ needs.frontend-lint.result }}" != "success" ] || [ "${{ needs.frontend-test.result }}" != "success" ]; then
-            echo "frontend-lint: ${{ needs.frontend-lint.result }} / frontend-test: ${{ needs.frontend-test.result }}"
+          echo "changes: $CHANGES (frontend=$FRONTEND) / frontend-lint: $LINT / frontend-test: $TEST"
+          if [ "$CHANGES" != "success" ]; then
+            exit 1
+          fi
+          if [ "$FRONTEND" = "false" ]; then
+            exit 0
+          fi
+          if [ "$LINT" != "success" ] || [ "$TEST" != "success" ]; then
             exit 1
           fi
