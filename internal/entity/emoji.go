@@ -1,6 +1,6 @@
 package entity
 
-import "github.com/shiroha-a/mk/internal/model"
+import "github.com/elythia-network/elythia/internal/model"
 
 // EmojiDetailed is the emoji representation returned by admin emoji endpoints.
 // Matches the TypeScript EmojiDetailed schema (packDetailed).

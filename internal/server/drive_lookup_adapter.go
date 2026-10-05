@@ -1,8 +1,8 @@
 package server
 
 import (
-	coremediaproxy "github.com/shiroha-a/mk/internal/core/mediaproxy"
-	"github.com/shiroha-a/mk/internal/repository"
+	coremediaproxy "github.com/elythia-network/elythia/internal/core/mediaproxy"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // driveFileLookupAdapter bridges repository.DriveFileRepository to the

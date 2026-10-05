@@ -11,8 +11,8 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/safehttp"
 	lru "github.com/hashicorp/golang-lru/v2"
-	"github.com/shiroha-a/mk/internal/safehttp"
 	"golang.org/x/sync/singleflight"
 )
 

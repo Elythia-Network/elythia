@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/shiroha-a/mk/internal/core/following"
-	"github.com/shiroha-a/mk/internal/queue"
-	"github.com/shiroha-a/mk/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/core/following"
+	"github.com/elythia-network/elythia/internal/queue"
+	"github.com/elythia-network/elythia/internal/queue/driver"
 )
 
 // Follower is the narrow subset of core/following.Service the processor

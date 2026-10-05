@@ -1,6 +1,6 @@
 package testutil
 
-import "github.com/shiroha-a/mk/internal/repository"
+import "github.com/elythia-network/elythia/internal/repository"
 
 // 集約の動機を最大化する compile-time assertion (#709)。ChatRepository に
 // 新メソッドが追加されたとき、各 test ファイルを介さず mock 自身が

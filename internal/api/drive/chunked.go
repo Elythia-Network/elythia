@@ -7,10 +7,10 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/elythia-network/elythia/internal/api/apierr"
+	coredrive "github.com/elythia-network/elythia/internal/core/drive"
+	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/labstack/echo/v4"
-	"github.com/shiroha-a/mk/internal/api/apierr"
-	coredrive "github.com/shiroha-a/mk/internal/core/drive"
-	"github.com/shiroha-a/mk/internal/server/middleware"
 )
 
 // Error codes for the chunked upload endpoints (#2313).

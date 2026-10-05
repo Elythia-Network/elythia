@@ -11,10 +11,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/effectivepolicy"
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/effectivepolicy"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )

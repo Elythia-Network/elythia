@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // MockChatRepository is an in-memory implementation of repository.ChatRepository

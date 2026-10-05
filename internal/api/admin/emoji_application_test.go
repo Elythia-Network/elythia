@@ -10,18 +10,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/labstack/echo/v4"
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/testutil"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	apiadmin "github.com/shiroha-a/mk/internal/api/admin"
-	"github.com/shiroha-a/mk/internal/core/drive"
-	"github.com/shiroha-a/mk/internal/core/emojiapplication"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/repository"
-	"github.com/shiroha-a/mk/internal/safehttp"
+	apiadmin "github.com/elythia-network/elythia/internal/api/admin"
+	"github.com/elythia-network/elythia/internal/core/drive"
+	"github.com/elythia-network/elythia/internal/core/emojiapplication"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
+	"github.com/elythia-network/elythia/internal/safehttp"
 )
 
 // stubEmojiReviewer records calls and returns canned results.

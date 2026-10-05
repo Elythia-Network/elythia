@@ -14,7 +14,7 @@ import (
 
 	"github.com/shiroha-a/mkq"
 
-	"github.com/shiroha-a/mk/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/queue/driver"
 )
 
 // Server runs a per-queue worker pool, dispatching jobs to handlers

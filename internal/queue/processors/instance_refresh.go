@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/queue/driver"
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // InstanceRefreshFetcher is the narrow interface the InstanceRefreshProcessor

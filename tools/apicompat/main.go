@@ -26,7 +26,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/shiroha-a/mk/internal/upstreamsrc"
+	"github.com/elythia-network/elythia/internal/upstreamsrc"
 )
 
 func main() {

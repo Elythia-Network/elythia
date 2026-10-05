@@ -4,12 +4,12 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/shiroha-a/mk/internal/activitypub"
-	"github.com/shiroha-a/mk/internal/core/fedrule"
-	"github.com/shiroha-a/mk/internal/misc/hashtag"
-	"github.com/shiroha-a/mk/internal/misc/searchnorm"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/activitypub"
+	"github.com/elythia-network/elythia/internal/core/fedrule"
+	"github.com/elythia-network/elythia/internal/misc/hashtag"
+	"github.com/elythia-network/elythia/internal/misc/searchnorm"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // RuleEvaluator applies the admin-defined federation rules (#3090).

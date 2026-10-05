@@ -364,10 +364,10 @@ func parseRoutes(t *testing.T, path string) map[string][]string {
 
 	// import alias -> package dir basename (aliased and bare forms).
 	alias2dir := map[string]string{}
-	for _, m := range regexp.MustCompile(`(\w+)\s+"github\.com/shiroha-a/mk/(internal/api/[\w/]+)"`).FindAllStringSubmatch(s, -1) {
+	for _, m := range regexp.MustCompile(`(\w+)\s+"github\.com/elythia-network/elythia/(internal/api/[\w/]+)"`).FindAllStringSubmatch(s, -1) {
 		alias2dir[m[1]] = filepath.Base(m[2])
 	}
-	for _, m := range regexp.MustCompile(`\n\s+"github\.com/shiroha-a/mk/(internal/api/[\w/]+)"`).FindAllStringSubmatch(s, -1) {
+	for _, m := range regexp.MustCompile(`\n\s+"github\.com/elythia-network/elythia/(internal/api/[\w/]+)"`).FindAllStringSubmatch(s, -1) {
 		b := filepath.Base(m[1])
 		if _, ok := alias2dir[b]; !ok {
 			alias2dir[b] = b

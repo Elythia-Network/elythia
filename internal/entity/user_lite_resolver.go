@@ -1,6 +1,6 @@
 package entity
 
-import "github.com/shiroha-a/mk/internal/model"
+import "github.com/elythia-network/elythia/internal/model"
 
 // FillUserLites resolves UserLite.instance and UserLite.emojis of lites[i]
 // from users[i] with batched lookups, mirroring the per-user parts of upstream

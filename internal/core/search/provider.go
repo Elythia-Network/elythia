@@ -10,7 +10,7 @@ package search
 import (
 	"errors"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // ErrEmptyQuery is returned by Service / Provider when the caller passes a

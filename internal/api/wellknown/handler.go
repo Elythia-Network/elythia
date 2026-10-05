@@ -7,11 +7,11 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/elythia-network/elythia/internal/activitypub"
+	"github.com/elythia-network/elythia/internal/core/user"
+	"github.com/elythia-network/elythia/internal/misc/permissions"
+	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/labstack/echo/v4"
-	"github.com/shiroha-a/mk/internal/activitypub"
-	"github.com/shiroha-a/mk/internal/core/user"
-	"github.com/shiroha-a/mk/internal/misc/permissions"
-	"github.com/shiroha-a/mk/internal/repository"
 )
 
 // Handler handles webfinger / host-meta / nodeinfo discovery.

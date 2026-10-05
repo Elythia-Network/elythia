@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/misc/keyword"
+	"github.com/elythia-network/elythia/internal/safehttp"
 	"github.com/redis/go-redis/v9"
-	"github.com/shiroha-a/mk/internal/misc/keyword"
-	"github.com/shiroha-a/mk/internal/safehttp"
 	"golang.org/x/net/html/charset"
 )
 

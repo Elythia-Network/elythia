@@ -7,7 +7,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // MetaStorage is a Storage that resolves the concrete backend from the `meta`

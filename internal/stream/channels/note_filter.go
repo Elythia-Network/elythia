@@ -6,12 +6,12 @@ import (
 	"strings"
 	"time"
 
-	corenote "github.com/shiroha-a/mk/internal/core/note"
-	"github.com/shiroha-a/mk/internal/core/ugcvisibility"
-	"github.com/shiroha-a/mk/internal/core/wordmute"
-	"github.com/shiroha-a/mk/internal/entity"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/stream"
+	corenote "github.com/elythia-network/elythia/internal/core/note"
+	"github.com/elythia-network/elythia/internal/core/ugcvisibility"
+	"github.com/elythia-network/elythia/internal/core/wordmute"
+	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/stream"
 )
 
 // injectRenoteMyReaction sets note.renote.myReaction for a pure renote whose

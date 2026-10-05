@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/apierr"
 )
 
 // field is one multipart text field; a slice keeps order and allows repeats.

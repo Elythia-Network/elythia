@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"testing"
 
-	corechat "github.com/shiroha-a/mk/internal/core/chat"
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/stream"
-	"github.com/shiroha-a/mk/internal/testutil"
+	corechat "github.com/elythia-network/elythia/internal/core/chat"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/stream"
+	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

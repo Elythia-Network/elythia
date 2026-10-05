@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/activitypub/mfm"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/model"
 	"github.com/google/uuid"
-	"github.com/shiroha-a/mk/internal/activitypub/mfm"
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/model"
 )
 
 // publishedLayout is the millisecond ISO8601 layout (JS Date.toISOString()) used

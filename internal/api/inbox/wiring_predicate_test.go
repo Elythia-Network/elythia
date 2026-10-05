@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/shiroha-a/mk/internal/queue"
+	"github.com/elythia-network/elythia/internal/queue"
 )
 
 // #2682: 起動時の配線検査が見る述語。false 側を固定する。弱める変異

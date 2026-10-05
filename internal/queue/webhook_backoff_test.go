@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/queue/driver"
 )
 
 // recordingClient is a driver.Client that captures the enqueue options of the

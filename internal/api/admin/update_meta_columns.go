@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // updateMetaProtectedColumns は `admin/update-meta` の汎用経路から書かせない列。

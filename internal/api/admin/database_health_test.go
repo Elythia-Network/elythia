@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/core/dbhealth"
+	"github.com/elythia-network/elythia/internal/core/dbhealth"
 )
 
 type stubDBHealth struct {

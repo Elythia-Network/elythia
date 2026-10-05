@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/pluginspec"
+	"github.com/elythia-network/elythia/internal/pluginspec"
 )
 
 // TestPluginSurfaceDrift is the public-API gate for plugin/ (#2478).

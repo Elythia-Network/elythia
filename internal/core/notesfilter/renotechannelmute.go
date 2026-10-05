@@ -1,6 +1,6 @@
 package notesfilter
 
-import "github.com/shiroha-a/mk/internal/model"
+import "github.com/elythia-network/elythia/internal/model"
 
 // ApplyRenoteChannelMute drops notes that renote/quote a note posted to one of
 // the viewer's muted channels, mirroring upstream channels/timeline.ts which

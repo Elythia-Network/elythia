@@ -11,7 +11,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/shiroha-a/mk/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/apierr"
 )
 
 // apiErrorEnvelope is the subset of the Misskey API error envelope needed to

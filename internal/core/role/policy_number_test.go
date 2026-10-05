@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/shiroha-a/mk/internal/core/role"
+	"github.com/elythia-network/elythia/internal/core/role"
 )
 
 func TestPolicyNumber(t *testing.T) {

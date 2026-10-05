@@ -3,9 +3,9 @@ package admin
 import (
 	"net/http"
 
+	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/core/procstats"
 	"github.com/labstack/echo/v4"
-	"github.com/shiroha-a/mk/internal/config"
-	"github.com/shiroha-a/mk/internal/core/procstats"
 )
 
 // SetProcStatsDeps wires the providers used by admin/server-metrics (#2395).

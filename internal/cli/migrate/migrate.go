@@ -13,8 +13,8 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 
-	"github.com/shiroha-a/mk/internal/cli/cliflag"
-	"github.com/shiroha-a/mk/internal/config"
+	"github.com/elythia-network/elythia/internal/cli/cliflag"
+	"github.com/elythia-network/elythia/internal/config"
 )
 
 // sourceURL is where golang-migrate reads the migrations from, relative to the

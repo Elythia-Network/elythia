@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/queue/driver"
 )
 
 // QuoteRequestResender sends again the QuoteRequests that are still pending

@@ -8,9 +8,9 @@ import (
 	"github.com/labstack/echo/v4"
 	"gorm.io/gorm"
 
-	corerole "github.com/shiroha-a/mk/internal/core/role"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/server/middleware"
+	corerole "github.com/elythia-network/elythia/internal/core/role"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/server/middleware"
 )
 
 // RoleSetProvider returns the set of role IDs that currently exist.

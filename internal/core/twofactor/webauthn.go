@@ -14,10 +14,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/model"
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/redis/go-redis/v9"
-	"github.com/shiroha-a/mk/internal/model"
 )
 
 // Errors returned by WebAuthnService.

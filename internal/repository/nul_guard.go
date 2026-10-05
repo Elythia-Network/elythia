@@ -1,6 +1,6 @@
 package repository
 
-import "github.com/shiroha-a/mk/internal/misc/colfit"
+import "github.com/elythia-network/elythia/internal/misc/colfit"
 
 // storable reports whether a caller-supplied value can match stored data.
 //

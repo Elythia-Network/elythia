@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/misc/idnhost"
+	"github.com/elythia-network/elythia/internal/misc/idnhost"
 )
 
 // SensitiveDetector scores media content for NSFW likelihood.

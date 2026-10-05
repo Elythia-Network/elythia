@@ -15,7 +15,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/entitycompat"
+	"github.com/elythia-network/elythia/internal/entitycompat"
 )
 
 // Assert fails t with a clear message for each gated (HIGH/MED) shape drift

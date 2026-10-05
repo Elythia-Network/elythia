@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/queue/processors"
+	"github.com/elythia-network/elythia/internal/queue/processors"
 )
 
 // 疎通の診断 (#3055) が読む格下げフラグは、配送側が立てるものと同じキーを見る。

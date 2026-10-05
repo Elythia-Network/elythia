@@ -7,9 +7,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	coreuser "github.com/shiroha-a/mk/internal/core/user"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/testutil"
+	coreuser "github.com/elythia-network/elythia/internal/core/user"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 // failingUserListRepo makes every list lookup look like a database failure.

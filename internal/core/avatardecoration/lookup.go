@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // cacheTTL controls how long the resolver serves cached entries before going

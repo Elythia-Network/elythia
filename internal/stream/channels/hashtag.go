@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"sync"
 
-	"github.com/shiroha-a/mk/internal/misc/searchnorm"
-	"github.com/shiroha-a/mk/internal/stream"
+	"github.com/elythia-network/elythia/internal/misc/searchnorm"
+	"github.com/elythia-network/elythia/internal/stream"
 )
 
 // hashtagSeenCap bounds the per-connection dedupe set; when exceeded it is

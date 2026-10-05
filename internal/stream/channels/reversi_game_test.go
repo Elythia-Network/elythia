@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	corereversi "github.com/shiroha-a/mk/internal/core/reversi"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/stream"
+	corereversi "github.com/elythia-network/elythia/internal/core/reversi"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/stream"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/datatypes"

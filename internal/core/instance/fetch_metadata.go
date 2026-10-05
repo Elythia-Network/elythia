@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/misc/colfit"
-	"github.com/shiroha-a/mk/internal/misc/csscolor"
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/misc/colfit"
+	"github.com/elythia-network/elythia/internal/misc/csscolor"
+	"github.com/elythia-network/elythia/internal/repository"
 	"golang.org/x/net/html"
 )
 

@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // CachedMetaRepository wraps a MetaRepository with a time-based in-memory

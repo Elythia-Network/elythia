@@ -6,9 +6,9 @@ import (
 	"errors"
 	"log/slog"
 
-	"github.com/shiroha-a/mk/internal/core/bubbleversus"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/stream"
+	"github.com/elythia-network/elythia/internal/core/bubbleversus"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/stream"
 )
 
 // bubbleVersusMaxState bounds the board summary a player relays to the

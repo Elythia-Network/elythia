@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/redis/go-redis/v9"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/repository"
 )
 
 // Cache TTL constants chosen to match the upstream Misskey RedisKVCache

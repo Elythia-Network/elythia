@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/pgarray"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/pgarray"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )

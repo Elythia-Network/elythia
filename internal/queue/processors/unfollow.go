@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/shiroha-a/mk/internal/queue"
-	"github.com/shiroha-a/mk/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/queue"
+	"github.com/elythia-network/elythia/internal/queue/driver"
 )
 
 // Unfollower is the narrow subset of core/following.Service the processor

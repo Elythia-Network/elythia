@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/shiroha-a/mk/internal/core/chart"
-	"github.com/shiroha-a/mk/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/core/chart"
+	"github.com/elythia-network/elythia/internal/queue/driver"
 )
 
 // ChartProcessor implements the periodic tick / resync / clean handlers

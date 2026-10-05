@@ -3,7 +3,7 @@ package muting_test
 import (
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/core/muting"
+	"github.com/elythia-network/elythia/internal/core/muting"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

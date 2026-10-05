@@ -3,7 +3,7 @@ package notes
 import (
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/testutil"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 // SetDraftRepo / SetDriveFileRepo の 0% 経路をカバーする。setter は単純な

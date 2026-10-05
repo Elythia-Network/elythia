@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/core/chart"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/core/chart"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 func newTestEngine(t *testing.T, schema chart.Schema) (*chart.Chart, *fakeRepo, *fakeClock) {

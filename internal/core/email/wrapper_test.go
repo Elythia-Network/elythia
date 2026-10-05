@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	coreemail "github.com/shiroha-a/mk/internal/core/email"
+	coreemail "github.com/elythia-network/elythia/internal/core/email"
 	"github.com/stretchr/testify/assert"
 )
 

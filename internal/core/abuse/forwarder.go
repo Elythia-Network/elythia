@@ -9,8 +9,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/shiroha-a/mk/internal/activitypub"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/activitypub"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // ReportStore is the narrow subset of repository.AbuseReportRepository that

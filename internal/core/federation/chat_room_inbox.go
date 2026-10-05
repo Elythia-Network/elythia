@@ -7,9 +7,9 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/shiroha-a/mk/internal/activitypub"
-	corechat "github.com/shiroha-a/mk/internal/core/chat"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/activitypub"
+	corechat "github.com/elythia-network/elythia/internal/core/chat"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // ChatRoomReceiver wires the chat service's room-federation operations into the

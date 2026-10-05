@@ -4,11 +4,11 @@ import (
 	"net/http"
 	"testing"
 
-	apisignup "github.com/shiroha-a/mk/internal/api/signup"
-	coresignup "github.com/shiroha-a/mk/internal/core/signup"
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/testutil"
+	apisignup "github.com/elythia-network/elythia/internal/api/signup"
+	coresignup "github.com/elythia-network/elythia/internal/core/signup"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -4,7 +4,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/shiroha-a/mk/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/queue/driver"
 )
 
 // RetentionAggregator is the narrow interface the daily retention job needs.

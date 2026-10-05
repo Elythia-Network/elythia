@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 
-	"github.com/shiroha-a/mk/internal/misc/idnhost"
+	"github.com/elythia-network/elythia/internal/misc/idnhost"
 )
 
 // HostColumn identifies one remote-host column to normalize.

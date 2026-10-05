@@ -7,7 +7,7 @@ import (
 	"maps"
 	"unicode/utf8"
 
-	"github.com/shiroha-a/mk/internal/queue"
+	"github.com/elythia-network/elythia/internal/queue"
 )
 
 // Service builds Web Push delivery jobs and enqueues them.

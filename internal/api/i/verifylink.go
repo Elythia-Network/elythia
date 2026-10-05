@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 	"golang.org/x/net/html"
 )
 

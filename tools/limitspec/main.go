@@ -26,7 +26,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/shiroha-a/mk/internal/upstreamsrc"
+	"github.com/elythia-network/elythia/internal/upstreamsrc"
 )
 
 // limitRe captures a `limit: { type: 'integer', ... }` paramDef body so the

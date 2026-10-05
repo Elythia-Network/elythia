@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // stubMetaFetcher is a fake MetaFetcher for sender helper tests.

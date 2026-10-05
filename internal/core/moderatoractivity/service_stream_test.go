@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	coreannouncement "github.com/shiroha-a/mk/internal/core/announcement"
-	"github.com/shiroha-a/mk/internal/model"
+	coreannouncement "github.com/elythia-network/elythia/internal/core/announcement"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 type capturedMainEvent struct {

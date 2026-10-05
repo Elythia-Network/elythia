@@ -6,12 +6,12 @@ import (
 	"net/http"
 	"slices"
 
+	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/misc/credkey"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
-	"github.com/shiroha-a/mk/internal/api/apierr"
-	"github.com/shiroha-a/mk/internal/misc/credkey"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/server/middleware"
 )
 
 // ConnectionAcceptor receives an upgraded WebSocket connection, an optional

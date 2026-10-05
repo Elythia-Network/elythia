@@ -13,9 +13,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/queue"
-	"github.com/shiroha-a/mk/internal/queue/driver"
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/queue"
+	"github.com/elythia-network/elythia/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // WebhookStatusRecorder is the subset of repository methods the processor

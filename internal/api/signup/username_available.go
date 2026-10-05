@@ -6,9 +6,9 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/shiroha-a/mk/internal/api/apierr"
-	coresignup "github.com/shiroha-a/mk/internal/core/signup"
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/api/apierr"
+	coresignup "github.com/elythia-network/elythia/internal/core/signup"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // SetUsernameLookups wires the repositories POST /api/username/available needs.

@@ -3,10 +3,10 @@ package server
 import (
 	"context"
 
+	apiadmin "github.com/elythia-network/elythia/internal/api/admin"
+	"github.com/elythia-network/elythia/internal/queue"
+	"github.com/elythia-network/elythia/internal/stream"
 	"github.com/redis/go-redis/v9"
-	apiadmin "github.com/shiroha-a/mk/internal/api/admin"
-	"github.com/shiroha-a/mk/internal/queue"
-	"github.com/shiroha-a/mk/internal/stream"
 )
 
 // jobQueueRedisInfo adapts the job-queue go-redis client to the admin handler's

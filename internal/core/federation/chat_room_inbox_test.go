@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	corechat "github.com/shiroha-a/mk/internal/core/chat"
-	"github.com/shiroha-a/mk/internal/core/federation"
-	"github.com/shiroha-a/mk/internal/model"
+	corechat "github.com/elythia-network/elythia/internal/core/chat"
+	"github.com/elythia-network/elythia/internal/core/federation"
+	"github.com/elythia-network/elythia/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

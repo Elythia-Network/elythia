@@ -3,8 +3,8 @@ package entity
 import (
 	"encoding/json"
 
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // PackSignin converts a model.Signin into the map shape returned by the

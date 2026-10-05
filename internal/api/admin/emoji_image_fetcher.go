@@ -7,10 +7,10 @@ import (
 	"net/url"
 	"path"
 
-	"github.com/shiroha-a/mk/internal/core/drive"
-	"github.com/shiroha-a/mk/internal/core/emojiapplication"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/safehttp"
+	"github.com/elythia-network/elythia/internal/core/drive"
+	"github.com/elythia-network/elythia/internal/core/emojiapplication"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/safehttp"
 )
 
 // MaxEmojiImageBytes caps the response read from a remote emoji image so a

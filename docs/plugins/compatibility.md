@@ -58,6 +58,31 @@ mk-go 本体を変更する人向け。**公開面を広げてよい条件**と�
 2. `APIVersion` を上げる
 3. 同梱プラグイン (`plugins/status/` / `plugins/trustlevel/`) を追従させる（サンプルが壊れたまま残らないように）
 
+### Go のモジュールパスの変更 (#3394)
+
+2.0 で、本体の Go のモジュールパスが `github.com/shiroha-a/mk` から `github.com/elythia-network/elythia` に変わった。公開パッケージの import パスも `github.com/elythia-network/elythia/plugin` (`plugintest` / `peercache` / `imagedecode` を含む) に変わる。中身と `plugin.APIVersion` は変えていない。
+
+古いパスのままのプラグインは、`make plugins` が次のように止める (無効化したプラグインは止めない)。
+
+```
+pluginbuild: plugins/foo: go.mod が以前のモジュールパス github.com/shiroha-a/mk を参照しています。…
+```
+
+プラグインのディレクトリで次を流す。`go.mod` の `require` と `replace` を付け替え、`.go` の import を書き換える。
+
+```bash
+go mod edit \
+  -droprequire=github.com/shiroha-a/mk -dropreplace=github.com/shiroha-a/mk \
+  -require=github.com/elythia-network/elythia@v0.0.0 \
+  -replace=github.com/elythia-network/elythia=../..
+grep -rlZ --include='*.go' '"github.com/shiroha-a/mk/' . \
+  | xargs -0 -r sed -i 's#"github.com/shiroha-a/mk/#"github.com/elythia-network/elythia/#g'
+gofmt -w .
+```
+
+- 書き換えた後のプラグインは、2.0 より前の本体ではビルドできない。本体と同じ版の組み合わせで上げる
+- プラグイン自身のモジュール名 (`module` 行) は変えなくても動く。同梱プラグインは `github.com/elythia-network/elythia-plugin-<名前>` にそろえた
+
 ### 上流追従による破壊
 
 `plugin-api.ts` が再公開している Misskey のコンポーネント（`MkInput` 等）は、upstream が props を変えると壊れる。

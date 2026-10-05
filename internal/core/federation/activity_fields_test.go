@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/shiroha-a/mk/internal/core/federation"
+	"github.com/elythia-network/elythia/internal/core/federation"
 )
 
 // ExtractActivityFields は inbox gate と同じ unwrap+Normalize を **1 パス**で

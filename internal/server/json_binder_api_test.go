@@ -14,11 +14,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/api/admin"
-	"github.com/shiroha-a/mk/internal/api/apierr"
-	apiauth "github.com/shiroha-a/mk/internal/api/auth"
-	"github.com/shiroha-a/mk/internal/server/middleware"
-	"github.com/shiroha-a/mk/internal/testutil"
+	"github.com/elythia-network/elythia/internal/api/admin"
+	"github.com/elythia-network/elythia/internal/api/apierr"
+	apiauth "github.com/elythia-network/elythia/internal/api/auth"
+	"github.com/elythia-network/elythia/internal/server/middleware"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 // TestDeserialize_DecoderSemanticsKept pins the parts of the old

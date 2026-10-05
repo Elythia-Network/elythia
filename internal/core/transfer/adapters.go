@@ -1,7 +1,7 @@
 package transfer
 
 import (
-	corefollowing "github.com/shiroha-a/mk/internal/core/following"
+	corefollowing "github.com/elythia-network/elythia/internal/core/following"
 )
 
 // FollowingServiceAdapter wraps core/following.Service so that its Follow

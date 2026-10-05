@@ -1,4 +1,4 @@
-module github.com/shiroha-a/mk
+module github.com/elythia-network/elythia
 
 go 1.27.1
 

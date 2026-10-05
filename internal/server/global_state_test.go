@@ -13,14 +13,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/api/meself"
-	apimeta "github.com/shiroha-a/mk/internal/api/meta"
-	"github.com/shiroha-a/mk/internal/api/notehide"
-	corenote "github.com/shiroha-a/mk/internal/core/note"
-	coretwofactor "github.com/shiroha-a/mk/internal/core/twofactor"
-	"github.com/shiroha-a/mk/internal/entity"
-	"github.com/shiroha-a/mk/internal/frontendutil"
-	"github.com/shiroha-a/mk/internal/misc/password"
+	"github.com/elythia-network/elythia/internal/api/meself"
+	apimeta "github.com/elythia-network/elythia/internal/api/meta"
+	"github.com/elythia-network/elythia/internal/api/notehide"
+	corenote "github.com/elythia-network/elythia/internal/core/note"
+	coretwofactor "github.com/elythia-network/elythia/internal/core/twofactor"
+	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/frontendutil"
+	"github.com/elythia-network/elythia/internal/misc/password"
 )
 
 // restoreProcessGlobals undoes the process-wide state that `New` /

@@ -11,7 +11,7 @@ package main
 import (
 	"os"
 
-	"github.com/shiroha-a/mk/internal/cli"
+	"github.com/elythia-network/elythia/internal/cli"
 )
 
 func main() {

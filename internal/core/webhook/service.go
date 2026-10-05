@@ -14,9 +14,9 @@ import (
 	"slices"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/queue"
+	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/google/uuid"
-	"github.com/shiroha-a/mk/internal/queue"
-	"github.com/shiroha-a/mk/internal/repository"
 )
 
 // Event types recognized by user webhooks, mirroring Misskey's

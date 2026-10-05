@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/shiroha-a/mk/internal/core/ugcvisibility"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/core/ugcvisibility"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // PubSubBus is the minimal pubsub interface that Dispatcher needs. core/event.

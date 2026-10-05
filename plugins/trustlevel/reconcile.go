@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shiroha-a/mk/plugin"
+	"github.com/elythia-network/elythia/plugin"
 )
 
 // reconciler walks local users and grants the role to those that qualify.

@@ -22,9 +22,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/shiroha-a/mk/internal/misc/keyword"
-	"github.com/shiroha-a/mk/internal/misc/searchnorm"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/misc/keyword"
+	"github.com/elythia-network/elythia/internal/misc/searchnorm"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // Limits on what a rule may hold. 評価は受信のたびに走るので、ルールの数と

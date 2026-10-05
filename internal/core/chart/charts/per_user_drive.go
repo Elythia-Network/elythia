@@ -3,8 +3,8 @@ package charts
 import (
 	"errors"
 
-	"github.com/shiroha-a/mk/internal/core/chart"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/core/chart"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // SchemaPerUserDrive returns the schema for the per-user "perUserDrive"

@@ -10,7 +10,7 @@ import (
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 func seedCountsInstance(t *testing.T, id, host string, notes, users int) {

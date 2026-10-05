@@ -3,7 +3,7 @@ package admin
 import (
 	"errors"
 
-	"github.com/shiroha-a/mk/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/misc/id"
 )
 
 // ErrIDGenMissing is returned when aidxCreatedAtString is called with a nil

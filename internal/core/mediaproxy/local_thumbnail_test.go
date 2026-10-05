@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	coredrive "github.com/shiroha-a/mk/internal/core/drive"
+	coredrive "github.com/elythia-network/elythia/internal/core/drive"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

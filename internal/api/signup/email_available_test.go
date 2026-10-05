@@ -10,9 +10,9 @@ import (
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 
-	apisignup "github.com/shiroha-a/mk/internal/api/signup"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/testutil"
+	apisignup "github.com/elythia-network/elythia/internal/api/signup"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 var emailTestDB *gorm.DB

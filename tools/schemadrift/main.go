@@ -26,7 +26,7 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/shiroha-a/mk/internal/upstreamsrc"
+	"github.com/elythia-network/elythia/internal/upstreamsrc"
 )
 
 const (

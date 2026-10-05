@@ -10,9 +10,9 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/redis/go-redis/v9"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/repository"
 )
 
 // --- Federation ID cache (existing) ---

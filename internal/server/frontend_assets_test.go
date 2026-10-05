@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/config"
+	"github.com/elythia-network/elythia/internal/config"
 )
 
 // **本番でビルド成果物が欠けていても dev server へは流さない。**

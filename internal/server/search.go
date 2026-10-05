@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/shiroha-a/mk/internal/config"
-	coresearch "github.com/shiroha-a/mk/internal/core/search"
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/config"
+	coresearch "github.com/elythia-network/elythia/internal/core/search"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // buildSearchProvider selects the search.Provider implementation based on the

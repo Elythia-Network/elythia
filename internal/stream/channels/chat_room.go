@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"log/slog"
 
-	corechat "github.com/shiroha-a/mk/internal/core/chat"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/stream"
+	corechat "github.com/elythia-network/elythia/internal/core/chat"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/stream"
 )
 
 // ChatRoomChannel forwards chat room events (message / edited / deleted /

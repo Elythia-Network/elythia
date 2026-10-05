@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"sort"
 
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // MaxTimelineLength caps the number of IDs kept in each Redis timeline list.

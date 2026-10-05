@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/core/bubbleversus"
-	"github.com/shiroha-a/mk/internal/core/iplog"
-	"github.com/shiroha-a/mk/internal/core/iplookuplog"
-	"github.com/shiroha-a/mk/internal/core/signup"
-	"github.com/shiroha-a/mk/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/core/bubbleversus"
+	"github.com/elythia-network/elythia/internal/core/iplog"
+	"github.com/elythia-network/elythia/internal/core/iplookuplog"
+	"github.com/elythia-network/elythia/internal/core/signup"
+	"github.com/elythia-network/elythia/internal/queue/driver"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

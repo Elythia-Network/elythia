@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/safehttp"
+	"github.com/elythia-network/elythia/internal/safehttp"
 )
 
 // outboundOpts returns the safehttp options shared across every outbound

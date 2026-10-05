@@ -1,6 +1,6 @@
 package entity
 
-import "github.com/shiroha-a/mk/internal/model"
+import "github.com/elythia-network/elythia/internal/model"
 
 // InstanceLookup is the minimal interface required to batch-fetch instance
 // rows for UserLite.Instance populate. 循環依存を避けるため interface で受け

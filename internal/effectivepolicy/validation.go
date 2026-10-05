@@ -7,7 +7,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/shiroha-a/mk/plugin"
+	"github.com/elythia-network/elythia/plugin"
 )
 
 var defaults = map[string]any{

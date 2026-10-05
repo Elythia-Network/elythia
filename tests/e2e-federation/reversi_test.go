@@ -21,8 +21,8 @@ import (
 	"testing"
 	"time"
 
+	corereversi "github.com/elythia-network/elythia/internal/core/reversi"
 	goredis "github.com/redis/go-redis/v9"
-	corereversi "github.com/shiroha-a/mk/internal/core/reversi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"

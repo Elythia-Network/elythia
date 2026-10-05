@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/queue/driver"
 )
 
 // chunkedUploadGCBatch bounds one run so a large backlog cannot hold the

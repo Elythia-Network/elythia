@@ -8,15 +8,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/activitypub/mfm"
-	"github.com/shiroha-a/mk/internal/entity"
-	"github.com/shiroha-a/mk/internal/misc/hashtag"
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/misc/idnhost"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/activitypub/mfm"
+	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/misc/hashtag"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/misc/idnhost"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 
-	"github.com/shiroha-a/mk/internal/core/role"
+	"github.com/elythia-network/elythia/internal/core/role"
 )
 
 // MaxPinnedNotes is the upper limit on pinned notes per user.

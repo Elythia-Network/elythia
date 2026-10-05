@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // EmojiSource is the narrow slice of the emoji repository the resolver needs.

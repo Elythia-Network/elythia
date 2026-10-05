@@ -13,13 +13,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/config"
-	coredeliveryhealth "github.com/shiroha-a/mk/internal/core/deliveryhealth"
-	coreinstance "github.com/shiroha-a/mk/internal/core/instance"
-	"github.com/shiroha-a/mk/internal/core/remotecheck"
-	"github.com/shiroha-a/mk/internal/core/selfcheck"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/config"
+	coredeliveryhealth "github.com/elythia-network/elythia/internal/core/deliveryhealth"
+	coreinstance "github.com/elythia-network/elythia/internal/core/instance"
+	"github.com/elythia-network/elythia/internal/core/remotecheck"
+	"github.com/elythia-network/elythia/internal/core/selfcheck"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // 疎通の診断 (#3055) は宛先を管理者が指定する口なので、配線する client は

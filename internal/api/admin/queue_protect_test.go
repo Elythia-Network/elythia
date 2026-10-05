@@ -3,7 +3,7 @@ package admin
 import (
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/queue"
+	"github.com/elythia-network/elythia/internal/queue"
 	"github.com/stretchr/testify/require"
 )
 

@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/upstreamsrc"
+	"github.com/elythia-network/elythia/internal/upstreamsrc"
 )
 
 func TestIsValidType(t *testing.T) {

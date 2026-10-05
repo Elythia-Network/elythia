@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/model"
 	"github.com/gorilla/websocket"
-	"github.com/shiroha-a/mk/internal/model"
 )
 
 // Conn is the subset of *websocket.Conn that Connection actually uses. テスト

@@ -12,9 +12,9 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/shiroha-a/mk/internal/queue"
-	"github.com/shiroha-a/mk/internal/queue/driver/mkqdriver"
-	"github.com/shiroha-a/mk/internal/testutil"
+	"github.com/elythia-network/elythia/internal/queue"
+	"github.com/elythia-network/elythia/internal/queue/driver/mkqdriver"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 // newSchedulerForTest constructs a Scheduler against the mkq driver bound

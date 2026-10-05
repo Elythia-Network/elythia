@@ -9,9 +9,9 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/shiroha-a/mk/internal/config"
-	"github.com/shiroha-a/mk/internal/core/dbhealth"
-	"github.com/shiroha-a/mk/internal/core/selfcheck"
+	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/core/dbhealth"
+	"github.com/elythia-network/elythia/internal/core/selfcheck"
 )
 
 // doctorTimeout bounds the whole run so a hung dependency does not leave the

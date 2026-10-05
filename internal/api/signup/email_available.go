@@ -7,9 +7,9 @@ import (
 	"github.com/labstack/echo/v4"
 	"gorm.io/gorm"
 
-	"github.com/shiroha-a/mk/internal/api/apierr"
-	coreemail "github.com/shiroha-a/mk/internal/core/email"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/api/apierr"
+	coreemail "github.com/elythia-network/elythia/internal/core/email"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // SetEmailAvailabilityDB wires the database POST /api/email-address/available

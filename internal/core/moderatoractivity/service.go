@@ -9,8 +9,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/l10n"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/l10n"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 const (

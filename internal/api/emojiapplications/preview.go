@@ -1,7 +1,7 @@
 package emojiapplications
 
 import (
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // Preview describes the image shown for one application (#2989).

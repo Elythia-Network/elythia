@@ -5,7 +5,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/shiroha-a/mk/internal/core/serverstats"
+	"github.com/elythia-network/elythia/internal/core/serverstats"
 )
 
 // ServerInfo returns the public subset of server machine statistics.

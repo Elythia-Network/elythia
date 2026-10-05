@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/core/reaction"
-	"github.com/shiroha-a/mk/internal/queue/driver"
-	"github.com/shiroha-a/mk/internal/testutil"
+	"github.com/elythia-network/elythia/internal/core/reaction"
+	"github.com/elythia-network/elythia/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
 

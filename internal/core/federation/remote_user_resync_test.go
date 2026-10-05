@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	corefederation "github.com/shiroha-a/mk/internal/core/federation"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/testutil"
+	corefederation "github.com/elythia-network/elythia/internal/core/federation"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 // countingWebFinger is a concurrency-safe WebFinger fake that counts lookups and

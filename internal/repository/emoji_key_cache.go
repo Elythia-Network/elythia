@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // emojiKeyCache is the bounded, TTL-limited (name, host) → rows cache behind

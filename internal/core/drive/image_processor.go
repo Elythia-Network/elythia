@@ -14,7 +14,7 @@ import (
 	"github.com/gen2brain/webp"
 	"github.com/kovidgoyal/imaging"
 
-	"github.com/shiroha-a/mk/internal/misc/imagedecode"
+	"github.com/elythia-network/elythia/internal/misc/imagedecode"
 	_ "golang.org/x/image/bmp"
 	_ "golang.org/x/image/tiff"
 	_ "golang.org/x/image/webp"

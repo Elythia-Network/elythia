@@ -3,13 +3,13 @@ package users
 import (
 	"context"
 
-	"github.com/shiroha-a/mk/internal/api/meself"
-	"github.com/shiroha-a/mk/internal/api/notehide"
-	"github.com/shiroha-a/mk/internal/core/notesfilter"
-	"github.com/shiroha-a/mk/internal/core/userpack"
-	"github.com/shiroha-a/mk/internal/entity"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/api/meself"
+	"github.com/elythia-network/elythia/internal/api/notehide"
+	"github.com/elythia-network/elythia/internal/core/notesfilter"
+	"github.com/elythia-network/elythia/internal/core/userpack"
+	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // FillDetailedExtrasMany fills movedTo / alsoKnownAs, pinnedNoteIds /

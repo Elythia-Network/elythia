@@ -6,13 +6,13 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/elythia-network/elythia/internal/api/apierr"
+	coreemail "github.com/elythia-network/elythia/internal/core/email"
+	"github.com/elythia-network/elythia/internal/l10n"
+	miscsmtp "github.com/elythia-network/elythia/internal/misc/smtp"
+	"github.com/elythia-network/elythia/internal/repository"
+	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/labstack/echo/v4"
-	"github.com/shiroha-a/mk/internal/api/apierr"
-	coreemail "github.com/shiroha-a/mk/internal/core/email"
-	"github.com/shiroha-a/mk/internal/l10n"
-	miscsmtp "github.com/shiroha-a/mk/internal/misc/smtp"
-	"github.com/shiroha-a/mk/internal/repository"
-	"github.com/shiroha-a/mk/internal/server/middleware"
 )
 
 // generateVerifyCode returns a random 16-char hex code for email verification.

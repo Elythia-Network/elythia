@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/misc/password"
+	"github.com/elythia-network/elythia/internal/misc/password"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

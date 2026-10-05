@@ -3,8 +3,8 @@ package emojiapplications_test
 import (
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/api/emojiapplications"
-	"github.com/shiroha-a/mk/internal/testutil"
+	"github.com/elythia-network/elythia/internal/api/emojiapplications"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 // TestListMine_BindErrorIsInvalidParam pins that a body list-mine cannot bind

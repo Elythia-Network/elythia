@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/server/middleware"
+	"github.com/elythia-network/elythia/internal/server/middleware"
 )
 
 // Referrer-Policy は全応答に付く。除外は設けていないので、path によらず同じ値。

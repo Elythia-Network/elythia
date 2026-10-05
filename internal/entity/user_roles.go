@@ -4,7 +4,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // UserRolesLookup resolves the roles currently assigned to a user. Mirrors

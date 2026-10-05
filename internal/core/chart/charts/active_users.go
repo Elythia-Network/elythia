@@ -3,7 +3,7 @@ package charts
 import (
 	"time"
 
-	"github.com/shiroha-a/mk/internal/core/chart"
+	"github.com/elythia-network/elythia/internal/core/chart"
 )
 
 // Window thresholds for the registeredWithin* / registeredOutside*

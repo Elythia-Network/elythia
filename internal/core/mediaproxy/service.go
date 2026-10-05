@@ -25,23 +25,23 @@ import (
 	// blank import すると他 image format (PNG/JPEG/WebP/...) の自動 dispatch
 	// を破壊する。**`_ "github.com/ftrvxmtrx/tga"` を絶対追加しないこと**。
 
+	"github.com/elythia-network/elythia/internal/misc/imagedecode"
 	"github.com/gen2brain/avif"
 	_ "github.com/gen2brain/heic" // HEIC/HEIF input decode (iPhone uploads)
 	_ "github.com/gen2brain/jpegxl"
 	"github.com/gen2brain/webp"
 	"github.com/kovidgoyal/imaging"
 	_ "github.com/mrjoshuak/go-jpeg2000" // JP2/J2K input decode (#734)
-	"github.com/shiroha-a/mk/internal/misc/imagedecode"
-	_ "github.com/spakin/netpbm" // PBM/PGM/PPM/PAM input decode (#672 Phase 1)
+	_ "github.com/spakin/netpbm"         // PBM/PGM/PPM/PAM input decode (#672 Phase 1)
 	_ "golang.org/x/image/bmp"
 	_ "golang.org/x/image/tiff"
 	_ "golang.org/x/image/webp"
 
 	"golang.org/x/sync/semaphore"
 
-	coredrive "github.com/shiroha-a/mk/internal/core/drive"
-	"github.com/shiroha-a/mk/internal/misc/colfit"
-	"github.com/shiroha-a/mk/internal/safehttp"
+	coredrive "github.com/elythia-network/elythia/internal/core/drive"
+	"github.com/elythia-network/elythia/internal/misc/colfit"
+	"github.com/elythia-network/elythia/internal/safehttp"
 )
 
 // ProxyMode enumerates the image processing modes.

@@ -1,6 +1,6 @@
 package backfill
 
-import "github.com/shiroha-a/mk/internal/cli/cliflag"
+import "github.com/elythia-network/elythia/internal/cli/cliflag"
 
 // NoteTags implements "elythia backfill note-tags": it normalizes existing
 // note.tags to the NFKC + lowercase form that NoteCreateService now stores for

@@ -17,8 +17,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/core/mediaproxy"
-	"github.com/shiroha-a/mk/internal/entity"
+	"github.com/elythia-network/elythia/internal/core/mediaproxy"
+	"github.com/elythia-network/elythia/internal/entity"
 )
 
 // TestProxySigAcceptedByMediaproxy guarantees the HMAC the builder appends to an

@@ -8,7 +8,7 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/shiroha-a/mk/internal/config"
+	"github.com/elythia-network/elythia/internal/config"
 )
 
 // queueOnlyMux builds the tiny HTTP surface a queue-only node exposes.

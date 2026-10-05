@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/core/passwordguard"
 	"github.com/labstack/echo/v4"
-	"github.com/shiroha-a/mk/internal/api/apierr"
-	"github.com/shiroha-a/mk/internal/core/passwordguard"
 	"golang.org/x/crypto/bcrypt"
 )
 

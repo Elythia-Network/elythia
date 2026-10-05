@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/activitypub/ld"
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/activitypub/ld"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // LDSignatureVerifier verifies the optional LD-Signature on an inbound

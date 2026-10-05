@@ -3,7 +3,7 @@ package testutil
 import (
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // TestFeaturedPoolSizeMatchesRepo は #1491 review B 指摘の drift 検出。

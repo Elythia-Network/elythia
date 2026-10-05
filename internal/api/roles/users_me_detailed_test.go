@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/api/userrelation"
-	"github.com/shiroha-a/mk/internal/core/userpack"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/api/userrelation"
+	"github.com/elythia-network/elythia/internal/core/userpack"
+	"github.com/elythia-network/elythia/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

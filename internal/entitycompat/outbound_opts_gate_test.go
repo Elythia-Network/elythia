@@ -32,12 +32,12 @@ func TestOutboundConstructorsReceiveSharedOptions(t *testing.T) {
 	qualified := variadicSafehttpOptionFuncs(t)
 	require.NotEmpty(t, qualified, "`...safehttp.Option` を受ける関数を 1 つも拾えていない")
 	// 代表例が入っていること (抽出が壊れたら空振りする)。
-	assert.True(t, qualified["github.com/shiroha-a/mk/internal/core/emojimeta.NewFetcher"],
+	assert.True(t, qualified["github.com/elythia-network/elythia/internal/core/emojimeta.NewFetcher"],
 		"emojimeta.NewFetcher を拾えていない")
-	assert.True(t, qualified["github.com/shiroha-a/mk/internal/server.oauthDiscoveryTransport"],
+	assert.True(t, qualified["github.com/elythia-network/elythia/internal/server.oauthDiscoveryTransport"],
 		"oauthDiscoveryTransport を拾えていない")
 
-	const serverPkg = "github.com/shiroha-a/mk/internal/server"
+	const serverPkg = "github.com/elythia-network/elythia/internal/server"
 	var missing []string
 	for _, file := range serverSourceFiles(t) {
 		fset := token.NewFileSet()
@@ -106,7 +106,7 @@ func TestOutboundConstructorsReceiveSharedOptions(t *testing.T) {
 func variadicSafehttpOptionFuncs(t *testing.T) map[string]bool {
 	t.Helper()
 	out := map[string]bool{}
-	const modulePrefix = "github.com/shiroha-a/mk/"
+	const modulePrefix = "github.com/elythia-network/elythia/"
 	err := filepath.Walk(filepath.Join(".."), func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return err
@@ -294,7 +294,7 @@ func forwardableOptionParams(f *ast.File) map[string]string {
 }
 
 // safehttpPkgPath is the package that declares Option.
-const safehttpPkgPath = "github.com/shiroha-a/mk/internal/safehttp"
+const safehttpPkgPath = "github.com/elythia-network/elythia/internal/safehttp"
 
 // isSafehttpOption reports whether expr names safehttp.Option, resolving the
 // import alias.

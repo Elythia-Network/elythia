@@ -10,10 +10,10 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/shiroha-a/mk/internal/api/apierr"
-	"github.com/shiroha-a/mk/internal/core/federation"
-	"github.com/shiroha-a/mk/internal/core/remotecheck"
-	"github.com/shiroha-a/mk/internal/core/selfcheck"
+	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/core/federation"
+	"github.com/elythia-network/elythia/internal/core/remotecheck"
+	"github.com/elythia-network/elythia/internal/core/selfcheck"
 )
 
 // remoteCheckTimeout bounds one diagnosis. 検査は 8 つで、相手が応答しない

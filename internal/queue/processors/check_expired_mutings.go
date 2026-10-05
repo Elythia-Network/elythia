@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/queue/driver"
 )
 
 // ExpiredMutingPruner is the narrow interface the checkExpiredMutings job

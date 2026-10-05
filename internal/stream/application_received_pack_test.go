@@ -5,10 +5,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	corenotification "github.com/shiroha-a/mk/internal/core/notification"
-	"github.com/shiroha-a/mk/internal/entity"
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/model"
+	corenotification "github.com/elythia-network/elythia/internal/core/notification"
+	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // 申請の受付通知を realtime でも pack できること (#2987)。

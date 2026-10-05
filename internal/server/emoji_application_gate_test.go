@@ -11,7 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/core/emojiapplication"
+	"github.com/elythia-network/elythia/internal/core/emojiapplication"
 )
 
 // 絵文字の登録申請 (#2934) の配線を照合する正規表現。

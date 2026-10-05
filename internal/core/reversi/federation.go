@@ -4,8 +4,8 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/elythia-network/elythia/internal/model"
 	"github.com/google/uuid"
-	"github.com/shiroha-a/mk/internal/model"
 )
 
 // PendingGameLookup is the minimal interface for finding a pending reversi

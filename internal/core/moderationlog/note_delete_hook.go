@@ -3,7 +3,7 @@ package moderationlog
 import (
 	"context"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // NoteDeleteHook adapts the moderation-log Service to core/note's

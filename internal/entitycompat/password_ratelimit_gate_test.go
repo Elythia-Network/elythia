@@ -12,12 +12,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/server/middleware"
+	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-const modulePath = "github.com/shiroha-a/mk/"
+const modulePath = "github.com/elythia-network/elythia/"
 
 // passwordVerifiers are the (import path, function) pairs that compare a
 // user-supplied password against the stored hash.

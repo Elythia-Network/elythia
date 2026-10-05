@@ -15,13 +15,13 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/shiroha-a/mk/internal/cli/cliflag"
-	"github.com/shiroha-a/mk/internal/config"
-	"github.com/shiroha-a/mk/internal/core/cache"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/redislog"
-	mksentry "github.com/shiroha-a/mk/internal/sentry"
-	"github.com/shiroha-a/mk/internal/server"
+	"github.com/elythia-network/elythia/internal/cli/cliflag"
+	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/core/cache"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/redislog"
+	mksentry "github.com/elythia-network/elythia/internal/sentry"
+	"github.com/elythia-network/elythia/internal/server"
 )
 
 // shutdownTimeout bounds the graceful shutdown after a signal.

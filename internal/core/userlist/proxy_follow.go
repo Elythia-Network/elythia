@@ -5,8 +5,8 @@ package userlist
 import (
 	"log/slog"
 
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/queue"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/queue"
 )
 
 // SystemAccountFetcher fetches a system account by kind (e.g. "proxy").

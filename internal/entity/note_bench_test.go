@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/model"
 	"gorm.io/datatypes"
 )
 

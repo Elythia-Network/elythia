@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/shiroha-a/mk/internal/activitypub"
+	"github.com/elythia-network/elythia/internal/activitypub"
 )
 
 // SignerProvider supplies the parsed private key (typically the

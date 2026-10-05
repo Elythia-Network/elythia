@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/datatypes"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 func insertRemoteSampleUser(t *testing.T, id, username, host string, fetched *time.Time, suspended, deleted bool) {

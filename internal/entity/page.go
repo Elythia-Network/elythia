@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // PackPage converts a model.Page into the map shape returned by /api/pages/*

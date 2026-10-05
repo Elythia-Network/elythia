@@ -3,7 +3,7 @@ package meta
 import (
 	"sync/atomic"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // localUserCounter reports how many local users exist. 起動時に 1 度だけ

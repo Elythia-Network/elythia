@@ -1,7 +1,7 @@
 package ap
 
 import (
-	"github.com/shiroha-a/mk/internal/core/userpack"
+	"github.com/elythia-network/elythia/internal/core/userpack"
 )
 
 // SetDetailExtras wires the filler of pinnedNotes / pinnedPage / movedTo /

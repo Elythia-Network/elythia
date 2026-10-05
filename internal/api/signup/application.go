@@ -7,13 +7,13 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/core/captcha"
+	coresignup "github.com/elythia-network/elythia/internal/core/signup"
+	"github.com/elythia-network/elythia/internal/core/signupapplication"
+	"github.com/elythia-network/elythia/internal/core/signupform"
+	"github.com/elythia-network/elythia/internal/model"
 	"github.com/labstack/echo/v4"
-	"github.com/shiroha-a/mk/internal/api/apierr"
-	"github.com/shiroha-a/mk/internal/core/captcha"
-	coresignup "github.com/shiroha-a/mk/internal/core/signup"
-	"github.com/shiroha-a/mk/internal/core/signupapplication"
-	"github.com/shiroha-a/mk/internal/core/signupform"
-	"github.com/shiroha-a/mk/internal/model"
 )
 
 // approvalTicketTTL bounds how long the internally minted invite stays usable.

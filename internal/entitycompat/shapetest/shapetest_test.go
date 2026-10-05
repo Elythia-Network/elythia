@@ -3,7 +3,7 @@ package shapetest_test
 import (
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/entitycompat/shapetest"
+	"github.com/elythia-network/elythia/internal/entitycompat/shapetest"
 )
 
 // recorder captures t.Errorf so a test can assert on what Assert reported.

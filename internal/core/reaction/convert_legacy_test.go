@@ -3,7 +3,7 @@ package reaction_test
 import (
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/core/reaction"
+	"github.com/elythia-network/elythia/internal/core/reaction"
 	"github.com/stretchr/testify/assert"
 )
 

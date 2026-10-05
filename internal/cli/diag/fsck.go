@@ -6,8 +6,8 @@ import (
 	"io"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/cli/cliflag"
-	"github.com/shiroha-a/mk/internal/core/fsck"
+	"github.com/elythia-network/elythia/internal/cli/cliflag"
+	"github.com/elythia-network/elythia/internal/core/fsck"
 )
 
 // fsckTimeout bounds the whole run. 集計クエリは全表走査になるので、

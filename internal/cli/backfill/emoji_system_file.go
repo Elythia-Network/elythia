@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/shiroha-a/mk/internal/cli/cliflag"
-	coredrive "github.com/shiroha-a/mk/internal/core/drive"
-	"github.com/shiroha-a/mk/internal/maintenance"
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/cli/cliflag"
+	coredrive "github.com/elythia-network/elythia/internal/core/drive"
+	"github.com/elythia-network/elythia/internal/maintenance"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // **承認経路と同じ複製を使っていることを型で固定する。** ここが満たされなくなるのは

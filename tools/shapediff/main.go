@@ -22,8 +22,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/shiroha-a/mk/internal/entitycompat"
-	"github.com/shiroha-a/mk/internal/upstreamsrc"
+	"github.com/elythia-network/elythia/internal/entitycompat"
+	"github.com/elythia-network/elythia/internal/upstreamsrc"
 )
 
 func main() {

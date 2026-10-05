@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/shiroha-a/mk/internal/core/blocking"
-	"github.com/shiroha-a/mk/internal/queue"
-	"github.com/shiroha-a/mk/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/core/blocking"
+	"github.com/elythia-network/elythia/internal/queue"
+	"github.com/elythia-network/elythia/internal/queue/driver"
 )
 
 // Unblocker is the narrow subset of core/blocking.Service the unblock

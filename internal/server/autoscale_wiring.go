@@ -8,12 +8,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/config"
-	"github.com/shiroha-a/mk/internal/queue"
-	"github.com/shiroha-a/mk/internal/queue/autoscale"
-	"github.com/shiroha-a/mk/internal/queue/driver"
-	queuemetrics "github.com/shiroha-a/mk/internal/queue/metrics"
-	"github.com/shiroha-a/mk/internal/queue/runtimestats"
+	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/queue"
+	"github.com/elythia-network/elythia/internal/queue/autoscale"
+	"github.com/elythia-network/elythia/internal/queue/driver"
+	queuemetrics "github.com/elythia-network/elythia/internal/queue/metrics"
+	"github.com/elythia-network/elythia/internal/queue/runtimestats"
 )
 
 // defaultMinWorkers is the per-queue worker lower bound when MinWorkers

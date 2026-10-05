@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/labstack/echo/v4"
-	"github.com/shiroha-a/mk/internal/api/apierr"
 )
 
 // NewEchoHandler constructs a Handler for the public `/api/test` endpoint.

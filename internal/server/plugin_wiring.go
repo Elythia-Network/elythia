@@ -18,15 +18,15 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	apiadmin "github.com/shiroha-a/mk/internal/api/admin"
-	coredrive "github.com/shiroha-a/mk/internal/core/drive"
-	corerole "github.com/shiroha-a/mk/internal/core/role"
-	"github.com/shiroha-a/mk/internal/pluginstore"
-	"github.com/shiroha-a/mk/internal/queue"
-	"github.com/shiroha-a/mk/internal/queue/driver"
-	"github.com/shiroha-a/mk/internal/repository"
-	"github.com/shiroha-a/mk/internal/server/middleware"
-	"github.com/shiroha-a/mk/plugin"
+	apiadmin "github.com/elythia-network/elythia/internal/api/admin"
+	coredrive "github.com/elythia-network/elythia/internal/core/drive"
+	corerole "github.com/elythia-network/elythia/internal/core/role"
+	"github.com/elythia-network/elythia/internal/pluginstore"
+	"github.com/elythia-network/elythia/internal/queue"
+	"github.com/elythia-network/elythia/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/repository"
+	"github.com/elythia-network/elythia/internal/server/middleware"
+	"github.com/elythia-network/elythia/plugin"
 )
 
 // pluginRoutePrefix namespaces every plugin endpoint.

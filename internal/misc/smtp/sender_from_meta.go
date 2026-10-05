@@ -3,7 +3,7 @@ package smtp
 import (
 	"log/slog"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // MetaFetcher is the minimal interface needed to look up the current

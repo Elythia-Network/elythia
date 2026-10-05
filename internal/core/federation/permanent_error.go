@@ -3,8 +3,8 @@ package federation
 import (
 	"errors"
 
-	"github.com/shiroha-a/mk/internal/activitypub"
-	corereaction "github.com/shiroha-a/mk/internal/core/reaction"
+	"github.com/elythia-network/elythia/internal/activitypub"
+	corereaction "github.com/elythia-network/elythia/internal/core/reaction"
 )
 
 // isPermanentSkipError reports whether err represents a permanent failure

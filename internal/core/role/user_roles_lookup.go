@@ -3,7 +3,7 @@ package role
 import (
 	"log/slog"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // UserRolesLookupAdapter wraps a role.Service so that entity.PackUserLite /

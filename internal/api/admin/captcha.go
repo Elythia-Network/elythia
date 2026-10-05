@@ -4,10 +4,10 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/core/captcha"
+	"github.com/elythia-network/elythia/internal/model"
 	"github.com/labstack/echo/v4"
-	"github.com/shiroha-a/mk/internal/api/apierr"
-	"github.com/shiroha-a/mk/internal/core/captcha"
-	"github.com/shiroha-a/mk/internal/model"
 )
 
 // supportedCaptchaProviders mirrors upstream CaptchaService.supportedCaptchaProviders.

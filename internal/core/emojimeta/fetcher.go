@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/safehttp"
+	"github.com/elythia-network/elythia/internal/safehttp"
 )
 
 // ErrUnsupported is returned when the origin server has no per-name endpoint we

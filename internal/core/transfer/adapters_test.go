@@ -3,11 +3,11 @@ package transfer_test
 import (
 	"testing"
 
-	corefollowing "github.com/shiroha-a/mk/internal/core/following"
-	"github.com/shiroha-a/mk/internal/core/transfer"
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/testutil"
+	corefollowing "github.com/elythia-network/elythia/internal/core/following"
+	"github.com/elythia-network/elythia/internal/core/transfer"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -7,7 +7,7 @@ import (
 
 	"github.com/shiroha-a/mkq"
 
-	"github.com/shiroha-a/mk/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/queue/driver"
 )
 
 // Client implements driver.Client over a Driver's pre-defined

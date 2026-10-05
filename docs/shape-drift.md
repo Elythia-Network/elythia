@@ -146,7 +146,7 @@ L2のfixtureは「packerが正しく呼ばれれば」を見るが、handlerがp
 L3は**handler unit testが実際に返したJSON**を golden に突き合わせる。各api packageの既存テストに1行足すだけ:
 
 ```go
-import "github.com/shiroha-a/mk/internal/entitycompat/shapetest"
+import "github.com/elythia-network/elythia/internal/entitycompat/shapetest"
 
 func TestCreate_Success(t *testing.T) {
     // ... handlerを叩いて rec.Body を得る ...

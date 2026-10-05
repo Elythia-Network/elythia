@@ -1,6 +1,6 @@
 package search
 
-import "github.com/shiroha-a/mk/internal/model"
+import "github.com/elythia-network/elythia/internal/model"
 
 // NoopProvider is the Provider used when the operator opts into TS-strict
 // drop-in compat (= fulltextSearch.provider="none")。upstream Misskey TS は

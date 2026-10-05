@@ -18,9 +18,9 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
-	"github.com/shiroha-a/mk/internal/cli/cliflag"
-	"github.com/shiroha-a/mk/internal/config"
-	"github.com/shiroha-a/mk/internal/maintenance"
+	"github.com/elythia-network/elythia/internal/cli/cliflag"
+	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/maintenance"
 )
 
 // defaultConfigPath is the -config default the batches have always used: the

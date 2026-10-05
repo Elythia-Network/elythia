@@ -6,9 +6,9 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	coretransfer "github.com/shiroha-a/mk/internal/core/transfer"
-	"github.com/shiroha-a/mk/internal/queue"
-	"github.com/shiroha-a/mk/internal/server/middleware"
+	coretransfer "github.com/elythia-network/elythia/internal/core/transfer"
+	"github.com/elythia-network/elythia/internal/queue"
+	"github.com/elythia-network/elythia/internal/server/middleware"
 )
 
 // ExportEnqueuer is the subset of the queue client this endpoint needs.

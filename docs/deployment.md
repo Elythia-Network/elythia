@@ -853,6 +853,23 @@ Docker Compose 構成 (`compose.uds.yaml` が無い) でも同じ手順でよい
 
 **後始末バッチは、流す image の版の呼び方に合わせる。** この版より前の image には `elythia` が無いので、旧版のまま流すときは `--entrypoint /app/backfill-<名前>` を使う。
 
+### Go のモジュールパスを変えた版へ上げる (#3394)
+
+この版から、Go のモジュールパスが `github.com/shiroha-a/mk` から `github.com/elythia-network/elythia` に変わる。プラグインを組み込んでおらず、自前のビルドで `-ldflags -X` を渡していない構成では、手で直すものは無い。**自前のビルドで `-X github.com/shiroha-a/mk/internal/config.MkGoVersion=...` のように渡している場合は、パスを書き換える。** 古いパスの `-X` は link が警告なしに無視するので、版と commit が空のまま出荷される。
+
+**プラグインを `plugins/` に置いている場合は、プラグインの側も新しいパスに追従した版へ上げる。** 古いパスのままのプラグインがあると、`make build` (Docker のビルドと `build-with-plugins` も同じ) は、プラグインの組み込み用のコードを作る段階で次のように止まる (黙って動かない状態にはならない)。
+
+```
+pluginbuild: plugins/foo: go.mod が以前のモジュールパス github.com/shiroha-a/mk を参照しています。…
+```
+
+- 同梱プラグイン (`plugins/status` / `plugins/trustlevel`) は追従済み
+- 運営者のリポジトリから `build-with-plugins` を呼んでいる場合も、`plugins:` に並べたプラグインの ref を、追従した版へ上げる。**逆に、本体をこの版より前に固定したまま、プラグインの ref に `main` のような動く名前を渡していると、プラグインが追従した時点でビルドが止まる**ので、本体とプラグインは組にして上げる
+- 自分で書いたプラグインの直し方は[プラグインの互換性](plugins/compatibility.md#go-のモジュールパスの変更-3394)にある
+- `go.mod` だけを直して `.go` の import を直し忘れると、`go build` が `no required module provides package github.com/shiroha-a/mk/...` で止まる
+
+**この版より前へ戻すときは、プラグインも追従する前の版へ戻す。** 本体だけを戻すと、追従した後のプラグインが古い本体に合わず、ビルドが止まる。
+
 ### 切り戻し
 
 `schema_migrations` のバージョンが進んでいるので、バイナリだけ戻すと古い mk-go が新しいスキーマを読むことになる。追加のみのマイグレーション (`ADD COLUMN` / `CREATE TABLE` / `CREATE INDEX`) であれば旧バイナリでも動くが、破壊的な変更を含むリリースでは `make migrate-down` (1 段) を必要な回数繰り返して戻す。リリースノートで破壊的変更の有無を確認すること。

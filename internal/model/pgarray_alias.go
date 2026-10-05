@@ -1,6 +1,6 @@
 package model
 
-import "github.com/shiroha-a/mk/internal/pgarray"
+import "github.com/elythia-network/elythia/internal/pgarray"
 
 // PostgreSQL の配列カラム (`text[]` / `varchar[]` / `int[]`) を扱う型。
 //

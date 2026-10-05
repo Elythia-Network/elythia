@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // Errors returned by captcha verification.

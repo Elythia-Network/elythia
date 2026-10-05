@@ -1,6 +1,6 @@
 package backfill
 
-import "github.com/shiroha-a/mk/internal/cli/cliflag"
+import "github.com/elythia-network/elythia/internal/cli/cliflag"
 
 // InstanceCounts implements "elythia backfill instance-counts": it recomputes
 // `instance.notesCount` / `instance.usersCount` from the note / user tables

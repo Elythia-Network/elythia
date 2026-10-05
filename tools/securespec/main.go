@@ -21,7 +21,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/shiroha-a/mk/internal/upstreamsrc"
+	"github.com/elythia-network/elythia/internal/upstreamsrc"
 )
 
 var secureRe = regexp.MustCompile(`\bsecure:\s*true`)

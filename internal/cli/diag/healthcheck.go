@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/config"
+	"github.com/elythia-network/elythia/internal/config"
 )
 
 // healthcheckTimeout is the maximum time healthcheck waits for the local

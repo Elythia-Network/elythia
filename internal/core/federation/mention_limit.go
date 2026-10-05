@@ -1,8 +1,8 @@
 package federation
 
 import (
-	corenote "github.com/shiroha-a/mk/internal/core/note"
-	"github.com/shiroha-a/mk/internal/model"
+	corenote "github.com/elythia-network/elythia/internal/core/note"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // RolePolicyProvider resolves a user's effective role policies. It has the

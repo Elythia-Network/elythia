@@ -11,12 +11,12 @@ import (
 	"time"
 
 	webpushlib "github.com/SherClockHolmes/webpush-go"
-	"github.com/shiroha-a/mk/internal/core/webpush"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/queue"
-	"github.com/shiroha-a/mk/internal/queue/driver"
-	"github.com/shiroha-a/mk/internal/repository"
-	"github.com/shiroha-a/mk/internal/safehttp"
+	"github.com/elythia-network/elythia/internal/core/webpush"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/queue"
+	"github.com/elythia-network/elythia/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/repository"
+	"github.com/elythia-network/elythia/internal/safehttp"
 )
 
 // Sender abstracts the webpush delivery call so the processor can be unit

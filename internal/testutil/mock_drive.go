@@ -4,7 +4,7 @@ import (
 	sortpkg "sort"
 	"strings"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // MockDriveFileRepository is a test double for repository.DriveFileRepository.

@@ -269,10 +269,10 @@ MKGO_VERSION ?=
 MISSKEY_VERSION ?=
 LDFLAGS=-s -w
 ifneq ($(MKGO_VERSION),)
-LDFLAGS += -X github.com/shiroha-a/mk/internal/config.MkGoVersion=$(MKGO_VERSION)
+LDFLAGS += -X github.com/elythia-network/elythia/internal/config.MkGoVersion=$(MKGO_VERSION)
 endif
 ifneq ($(MISSKEY_VERSION),)
-LDFLAGS += -X github.com/shiroha-a/mk/internal/config.MisskeyVersion=$(MISSKEY_VERSION)
+LDFLAGS += -X github.com/elythia-network/elythia/internal/config.MisskeyVersion=$(MISSKEY_VERSION)
 endif
 
 # ビルドした revision。/about-mkgo が「mk-go 1.3.0 (abc1234)」として出す (#2700)。
@@ -287,7 +287,7 @@ endif
 #
 # git が無い / リポジトリ外でビルドした場合は空のまま。読む側が「不明」として
 # 扱うので、ここで `unknown` のような値を作らない (表示に出てしまう)。
-REVISION_LDFLAGS = -X github.com/shiroha-a/mk/internal/config.MkGoCommit=$$(git rev-parse --short HEAD 2>/dev/null)
+REVISION_LDFLAGS = -X github.com/elythia-network/elythia/internal/config.MkGoCommit=$$(git rev-parse --short HEAD 2>/dev/null)
 
 ##@ 開発
 plugins: ## plugins/ を走査して組み込み用ファイルを生成 (#2480)
@@ -304,7 +304,7 @@ plugins-all: ## disabled のプラグインも含めて生成 (CI 検証用)
 # GOWORK=off は plugindev 自体を stale な go.work から守るために要る (消した
 # プラグインを指したままだと go run が起動すらしない)。内側の
 # go build ./cmd/elythia は plugindev が GOWORK= で明示的に戻すので、
-# ここで off にしても生成物の mk-plugin-* は go.work 経由で解決できる。
+# ここで off にしても生成物が import するプラグインのモジュールは go.work 経由で解決できる。
 plugin-dev: ## プラグインを編集しながら動かす (PLUGIN=plugins/status)
 	GOWORK=off go run ./tools/plugindev $(if $(PLUGIN),-plugin $(PLUGIN),)
 

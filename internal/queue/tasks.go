@@ -3,7 +3,7 @@ package queue
 import (
 	"encoding/json"
 
-	"github.com/shiroha-a/mk/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/queue/driver"
 )
 
 // TaskTypeDeliver is the task type used for outbound ActivityPub

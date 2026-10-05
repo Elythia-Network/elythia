@@ -8,9 +8,9 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // pageNameRe mirrors upstream pageNameSchema (Page.ts): 1-256 文字で、空白 /

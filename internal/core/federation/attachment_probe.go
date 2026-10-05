@@ -24,7 +24,7 @@ import (
 	// transitive deps).
 	_ "golang.org/x/image/webp"
 
-	coredrive "github.com/shiroha-a/mk/internal/core/drive"
+	coredrive "github.com/elythia-network/elythia/internal/core/drive"
 )
 
 // attachmentFetchTimeout は AP Document attachment の先頭取得に使う

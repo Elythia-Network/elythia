@@ -1,8 +1,8 @@
 package backfill
 
 import (
-	"github.com/shiroha-a/mk/internal/cli/cliflag"
-	"github.com/shiroha-a/mk/internal/maintenance"
+	"github.com/elythia-network/elythia/internal/cli/cliflag"
+	"github.com/elythia-network/elythia/internal/maintenance"
 )
 
 // RemoteHost implements "elythia backfill remote-host": it normalizes every

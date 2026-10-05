@@ -5,9 +5,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/core/role"
+	"github.com/elythia-network/elythia/internal/model"
 	"github.com/gorilla/websocket"
-	"github.com/shiroha-a/mk/internal/core/role"
-	"github.com/shiroha-a/mk/internal/model"
 )
 
 // HardMuteRulesLookup returns the persisted hardMutedWords (raw jsonb) for

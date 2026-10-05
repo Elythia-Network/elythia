@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/core/wordmute"
+	"github.com/elythia-network/elythia/internal/core/wordmute"
 	"github.com/stretchr/testify/assert"
 )
 

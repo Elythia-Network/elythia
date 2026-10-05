@@ -3,7 +3,7 @@ package webpush_test
 import (
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/core/webpush"
+	"github.com/elythia-network/elythia/internal/core/webpush"
 	"github.com/stretchr/testify/assert"
 )
 

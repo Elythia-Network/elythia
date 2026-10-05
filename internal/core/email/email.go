@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // Validation failure reasons — match the original Misskey's

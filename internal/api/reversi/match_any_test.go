@@ -8,10 +8,10 @@ import (
 
 	"errors"
 
+	corereversi "github.com/elythia-network/elythia/internal/core/reversi"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/model"
 	"github.com/redis/go-redis/v9"
-	corereversi "github.com/shiroha-a/mk/internal/core/reversi"
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

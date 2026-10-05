@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // MediaURLContext rewrites remote-origin media URLs so they are served through

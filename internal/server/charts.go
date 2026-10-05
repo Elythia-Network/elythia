@@ -1,10 +1,10 @@
 package server
 
 import (
-	apicharts "github.com/shiroha-a/mk/internal/api/charts"
-	"github.com/shiroha-a/mk/internal/charttick"
-	"github.com/shiroha-a/mk/internal/core/chart"
-	corechartcharts "github.com/shiroha-a/mk/internal/core/chart/charts"
+	apicharts "github.com/elythia-network/elythia/internal/api/charts"
+	"github.com/elythia-network/elythia/internal/charttick"
+	"github.com/elythia-network/elythia/internal/core/chart"
+	corechartcharts "github.com/elythia-network/elythia/internal/core/chart/charts"
 	"gorm.io/gorm"
 )
 

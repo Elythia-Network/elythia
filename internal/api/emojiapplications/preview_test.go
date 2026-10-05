@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	"github.com/shiroha-a/mk/internal/api/emojiapplications"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/api/emojiapplications"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // 「自分の申請」の画像プレビュー (#2989)。**参照先は申請の状態と種別で決まる。**

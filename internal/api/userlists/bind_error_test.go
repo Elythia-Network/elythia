@@ -3,8 +3,8 @@ package userlists_test
 import (
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/testutil"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 // TestList_BindErrorIsInvalidParam pins that a body users/lists/list cannot

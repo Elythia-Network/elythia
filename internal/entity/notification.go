@@ -8,9 +8,9 @@ package entity
 // want to avoid the transitive dependency should pass primitives instead.
 
 import (
-	"github.com/shiroha-a/mk/internal/core/notification"
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/core/notification"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // NotificationItem bundles a notification record with its already-resolved

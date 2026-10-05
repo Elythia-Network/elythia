@@ -3,7 +3,7 @@ package role_test
 import (
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/core/role"
+	"github.com/elythia-network/elythia/internal/core/role"
 	"github.com/stretchr/testify/assert"
 )
 
