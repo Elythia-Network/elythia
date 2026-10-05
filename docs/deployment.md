@@ -643,7 +643,7 @@ mk-goはTS版と同じPostgreSQL/Redisを共有できるため、バイナリの
 
 どの構成でも共通する原則は 3 つ。
 
-1. **`frontend/` のソースは本体と一緒に `git pull` で更新される** (#3379 で submodule から本体へ取り込んだ)。ただし成果物の `frontend/built` は git の管理の外にあり、pull しても変わらない
+1. **`frontend/` のソースは本体と一緒に `git pull` で更新される** (#3379 で本体へ取り込んだ)。ただし成果物の `frontend/built` は git の管理の外にあり、pull しても変わらない
 2. **`frontend/` が動いたらフロントエンドを再ビルドする**。SPA のアセットは image に焼き込まず bind-mount で渡しているため、ソースだけ進めても配信物は変わらない。`make update` (`make pull` も呼ぶ) は、`frontend/` が動いたかどうかを知らせる
 3. **フロントエンドを再ビルドしたら mk-go を再起動する**。エントリポイント (`scripts/<hash>.js`) を起動時に 1 回だけ解決してキャッシュする実装なので、再起動しないと消えた古いファイルを指し続けて 404 になる。bind-mount であっても再起動は必要
 
@@ -789,10 +789,24 @@ make uds-restart
 
 #### 6. 片付け (submodule を外す版を pull した後)
 
+submodule を外す版 (#3379 の段階 P4d-2) を pull しても、git は作業ツリーの `third_party/` を消さず、未追跡のディレクトリとして残す。mk-go はもう読まないので消してよい。**消す前に、compose が 4 で `frontend/` を向いていることを確かめる。** `make uds-layout-check` は、`compose.uds.yaml` がまだ `third_party/misskey` を mount していれば止まる。
+
 ```bash
-git submodule deinit -f third_party/misskey 2>/dev/null || true
-rm -rf third_party .git/modules/third_party
+# layout-check が止めたら何も消さない (行を並べるだけだと、止まっても次の行が走る)
+if make uds-layout-check; then
+  git config --remove-section submodule.third_party/misskey 2>/dev/null || true
+  # third_party/ の中には、以前 docker の中で pnpm install した root 所有のファイルが
+  # 残っていることがあり、一般ユーザーの rm では消しきれない。使い捨てのコンテナで消す
+  docker run --rm -v "$PWD":/w alpine rm -rf /w/third_party
+  rm -rf .git/modules/third_party
+fi
 ```
+
+Docker Compose 構成 (`compose.uds.yaml` が無い) でも同じ手順でよい。`make uds-layout-check` は `compose.uds.yaml` が無ければ素通りする。
+
+`.git/config` に残る submodule の設定 (`[submodule "third_party/misskey"]`) も外す。gitlink が無くなった後は `git submodule deinit` が対象を見つけられないので、`git config` で消す。
+
+`.git/modules/third_party` は、submodule の git ディレクトリが残っている場所。通常の clone (`.git` がディレクトリ) を前提にしている。`git worktree` で作った作業ツリーでは `.git` がファイルで、場所が変わるので、この部分は消さなくてよい (残っても動作には影響しない)。
 
 退避した `$SAVE` は、新しい版で問題が無いことを確かめてから消す。
 

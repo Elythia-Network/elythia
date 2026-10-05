@@ -106,3 +106,7 @@ cmd/misskey/plugins_generated.go
 # 作業ツリーが dirty になり、運営者の git pull が止まりうる。
 /frontend/packages/frontend/src/server-plugins.generated.ts
 /frontend/packages/frontend/mk-plugins.generated.json
+
+# #3379 で外した submodule の残り。片付ける前に `git add -A` すると、中の .git を
+# 埋め込みリポジトリとして gitlink で追加してしまう。片付けの手順は docs/deployment.md。
+/third_party/

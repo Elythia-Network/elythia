@@ -410,13 +410,9 @@ CLAUDE.md の Section 8 にあった各 workflow / job の説明を、#3248 で�
 
 #### `build`ジョブ
 
-checkout / setup-go を除くと step は実行順に 4 つ。**required job なので、コンパイル以外の理由でも赤くなる。**
+checkout / setup-go を除くと step は実行順に 3 つ。**required job なので、コンパイル以外の理由でも赤くなる。**
 
 - `go build ./...`で全パッケージのビルド確認。
-- **`Check submodule commit is pushed` step** で、`third_party/misskey` の gitlink が
-  指す commit が fork に push 済みか、`docs/divergence.md` の pin 行が指す tag が
-  その commit と一致するかを見る (#2969)。submodule を上げたときに fork への push や
-  tag の push を忘れると、ここで落ちる。
 - **`Check bundled plugins are disabled by default` step** で、tracked な
   `plugins/*/mk-plugin.yml` が全て `disabled: true` を持つことを見る (#2701)。
   **検証のために一時的に外して戻し忘れる**のを止めるため (trustlevel が実際に

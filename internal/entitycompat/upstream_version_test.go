@@ -34,7 +34,7 @@ func TestUpstreamVersionIsConsistent(t *testing.T) {
 	found := map[string]bool{}
 	for p := range gitTrackedSet(t, root) {
 		if strings.HasPrefix(p, "docs/") || strings.HasPrefix(p, "migration/") ||
-			strings.HasPrefix(p, "third_party/") || p == "CHANGELOG.md" {
+			p == "CHANGELOG.md" {
 			continue
 		}
 		if !strings.HasSuffix(p, ".yml") && !strings.HasSuffix(p, ".yaml") {

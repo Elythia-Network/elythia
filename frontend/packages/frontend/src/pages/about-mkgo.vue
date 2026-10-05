@@ -37,13 +37,18 @@ SPDX-License-Identifier: AGPL-3.0-only
 			<!--
 				AGPL-3.0 section 13 が求める「動いているコードに対応するソース」の案内。
 				**operator が申告した URL が最優先**で、mk-go をさらに改変している場合は
-				そちらが正しい案内先になる。mk-go 本体 / フロントエンドへのリンクは
-				about-misskey が misskey-dev を「オリジナル」として出すのと同じ位置づけ。
+				そちらが正しい案内先になる。mk-go 本体へのリンクは about-misskey が
+				misskey-dev を「オリジナル」として出すのと同じ位置づけ。
 
-				**警告 (sourceCodeIsNotYetProvided) は出さない。** mk-go 本体と
-				フロントエンドのリンクは常に出るので、「ソースが 1 つも案内されていない」
-				状態は起こらない。upstream の about-misskey はこの 2 本を持たないので
-				警告が要るが、ここで同じ文言を出すと事実に反する。
+				**警告 (sourceCodeIsNotYetProvided) は出さない。** mk-go 本体のリポジトリは
+				このサーバーの案内先か mk-go 本体のどちらかとして常に出るので、「ソースが
+				1 つも案内されていない」状態は起こらない。upstream の about-misskey は
+				この案内を持たないので警告が要るが、ここで同じ文言を出すと事実に反する。
+
+				**フロントエンドの行は持たない。** 以前は fork (shiroha-a/misskey-ts) を別に
+				案内していたが、#3379 で frontend を mk-go 本体へ取り込んだので、mk-go 本体の
+				リンクがこの画面のソースも案内する (AGPL 13 条が対象にする「動いている
+				コード」全体)。
 			-->
 			<FormSection>
 				<template #label>{{ i18n.ts.sourceCode }}</template>
@@ -58,16 +63,6 @@ SPDX-License-Identifier: AGPL-3.0-only
 					<FormLink v-if="serverRepositoryUrl !== MKGO_REPOSITORY_URL" data-testid="about-mkgo-upstream-source" :to="MKGO_REPOSITORY_URL" external>
 						<template #icon><i class="ti ti-brand-golang"></i></template>
 						{{ i18n.ts._aboutMkGo.sourceCodeOfMkGo }}
-						<template #suffix>GitHub</template>
-					</FormLink>
-					<!--
-						**フロントエンドは別リポジトリにある。** mk-go 本体だけを案内すると、
-						いま表示されているこの画面のソースが案内から漏れる (AGPL 13 条が
-						対象にするのは「動いているコード」全体)。
-					-->
-					<FormLink data-testid="about-mkgo-frontend-source" :to="MKGO_FRONTEND_REPOSITORY_URL" external>
-						<template #icon><i class="ti ti-brand-vue"></i></template>
-						{{ i18n.ts._aboutMkGo.sourceCodeOfFrontend }}
 						<template #suffix>GitHub</template>
 					</FormLink>
 					<FormLink :to="`${MKGO_REPOSITORY_URL}/blob/develop/LICENSE`" external>
@@ -137,11 +132,6 @@ import { definePage } from '@/page.js';
 // 別物として並べる。backend 側は internal/config.MkGoRepositoryURL に同じ値を持ち、
 // meta.repositoryUrl の既定値と nodeinfo の software.repository がそれを使う (#2700)。
 const MKGO_REPOSITORY_URL = 'https://github.com/shiroha-a/mk';
-
-// フロントエンドの供給元。**Go で書き直したのはサーバーサイドだけ**で、この画面は
-// Misskey のフロントエンドに mk-go 向けの変更を載せたもの。mk-go 本体の submodule
-// (`third_party/misskey`) として辿れるが、案内としては明示的に出す。
-const MKGO_FRONTEND_REPOSITORY_URL = 'https://github.com/shiroha-a/misskey-ts';
 
 // Misskey 本体のリポジトリ。**この値が入っているのは「未設定」を意味する。**
 // `meta.repositoryUrl` の列 DEFAULT が upstream 互換でこの URL になっており、

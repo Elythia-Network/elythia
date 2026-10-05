@@ -74,7 +74,6 @@ plugins/        プラグイン本体(gitignore済み。同梱するものだけ
 migration/      NNNNNN_name.up.sql / .down.sql
 tests/          Goのe2e(`tests/e2e` / `tests/e2e-federation`)と、Go以外の検証基盤
 frontend/       本家Misskeyから取り込んだfrontend(pnpm workspace、#3379)
-third_party/misskey/  以前のfrontendの供給元だったsubmodule(frontendとしてはもう読まない。#3379で外す)
 tools/          parityゲートとコード生成のCLI
 docs/           ドキュメント
 ```
@@ -238,7 +237,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 
 | workflow / job | 発火 | required | 見ているもの |
 |---|---|---|---|
-| `ci.yml` build | push / PR | ○ | `go build ./...`、submoduleのcommitがforkにpush済みで`docs/divergence.md`のpinのtagと一致するか、同梱プラグインの`disabled: true`、同梱プラグインの`go vet`、同梱プラグインを含めた統合バイナリのビルド |
+| `ci.yml` build | push / PR | ○ | `go build ./...`、同梱プラグインの`disabled: true`、同梱プラグインの`go vet`、同梱プラグインを含めた統合バイナリのビルド |
 | `ci.yml` test | push / PR | ○ | 4 shardで`-race -count=1 -shuffle=3`、パッケージごとのカバレッジ閾値 |
 | `ci.yml` lint | push / PR | ○ | vet / gofmt / actionlint / golangci-lint / テストfixtureのID重複 |
 | `ci.yml` plugin-tests | push / PR | | 同梱プラグインのテスト、`authoring.md`のスニペットのコンパイル |
@@ -301,6 +300,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 
 このファイル自体を変えたときだけ、1行で追記します(新しいものを上に)。経緯の本文はリンク先にあります。個別のfixの履歴は`CHANGELOG.md`にあります。
 
+- 2026-10-05: submodule(`third_party/misskey`)を外したので、Section 2の構成とSection 8の`build`の行を更新した (#3379) → [docs/divergence.md](docs/divergence.md#4-2b-frontend-の独自変更-3379-で取り込んだ後)
 - 2026-10-05: `frontend`をrequired checkにし、`ci.yml`の`frontend-check` jobをそこへまとめた。Section 3 / 5 / 8に反映し、Section 5にfrontendの節と`.claude/rules/frontend.md`を足した (#3379) → [docs/ci.md](docs/ci.md)
 - 2026-10-05: frontendを`frontend/`から読むようにしたので、Section 2の構成とSection 8の`frontend-check`の行を更新し、`frontend`の行を足した (#3379) → [docs/deployment.md](docs/deployment.md#frontend-を本体へ取り込んだ版へ上げる-3379)
 - 2026-10-05: 比較対象の本家を`.cache/misskey`から読むようにしたので、Section 8の`apicompat`の行を更新した (#3378) → [docs/ci.md](docs/ci.md)

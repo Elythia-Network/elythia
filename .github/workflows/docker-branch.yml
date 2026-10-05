@@ -3,7 +3,7 @@ name: Docker branch
 # 「pull して動かすだけ」の orphan ブランチ `docker` を生成する。
 #
 # ルート README のクイックスタートは `git clone` から始まるが、動かすだけの人に
-# 672MB の .git を落とさせている (submodule 込みならさらに 1.4GB)。実際に必要な
+# 672MB の .git を落とさせている。実際に必要な
 # のは compose 1 つと設定のひな形だけなので、それだけを置いたブランチを配る。
 #
 #   git clone --depth 1 -b docker https://github.com/shiroha-a/mk.git mk
@@ -44,7 +44,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        # submodule は不要。配布物は compose と設定のひな形だけ。
+        # 配布物は compose と設定のひな形だけ。
         with:
           # push は $RUNNER_TEMP に作り直した別リポジトリから、token を URL に
           # 明示して行う。checkout の認証情報は使わないので残さない。

@@ -4,7 +4,7 @@ name: Upstream backend e2e
 # API 互換性の regression を検知する。
 #
 # 本家は UPSTREAM_MISSKEY_VERSION の版を .cache/misskey/<版> に checkout する
-# (#3378。fork の submodule は読まない)。テスト本体には一切手を入れず、
+# (#3378)。テスト本体には一切手を入れず、
 # tests/upstream-e2e/harness/ の vitest 設定 (globalSetup = mk-go バイナリの
 # 起動、setupFiles = /api/reset-db) を本家の packages/backend/ へコピーして
 # 差し替える。上流でテストが増えれば自動的に検証対象も増える。

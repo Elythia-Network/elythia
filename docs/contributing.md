@@ -54,10 +54,10 @@ frontend の規約違反を拾えないので、`frontend/` を変える PR で�
 
 ### 変更の置き場所
 
-frontend は #3379 で Misskey TS の fork (submodule `third_party/misskey`) から
+frontend は #3379 で Misskey TS の fork (`shiroha-a/misskey-ts`) から
 本体の `frontend/` (pnpm workspace) へ取り込んだ。frontend の変更は `frontend/` を
-直接直し、Go 側の変更と同じ PR に入れてよい。fork 側へ commit して gitlink を
-上げる手順は要らない。
+直接直し、Go 側の変更と同じ PR に入れてよい。fork はアーカイブしたので、fork へ
+commit する手順は無い。
 
 ### 手元での確認（CI `frontend` workflow 相当）
 
@@ -250,7 +250,7 @@ rate limit の例:
   Medium / Low で最も繰り返された型がこれ (射程の過大主張・fail-open・偽陽性)。
   手本は `docs/divergence.md` §4-1 の「固定できるのは mk-go 側だけで、
   『upstream は 18』『名前も upstream に揃えてある』は検証していない
-  (`test-shards` は submodule を checkout しない)」
+  (`test-shards` は本家のソースを取得しない)」
 
 ## コーディング規約
 

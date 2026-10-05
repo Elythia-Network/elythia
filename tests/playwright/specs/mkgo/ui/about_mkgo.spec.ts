@@ -6,7 +6,7 @@
 // /about-mkgo が AGPL-3.0 section 13 の案内として成立していることを実ブラウザで
 // 見る (#2700)。
 //
-// **`mkgo/` に置く。** `/about-mkgo` は fork frontend にしか無いので、公式 image
+// **`mkgo/` に置く。** `/about-mkgo` は mk-go の frontend にしか無いので、公式 image
 // を使う `playwright-ts-test` では必ず 404 になる。
 //
 // Go 側のテストは `EnsureInitial` が repositoryUrl を入れることと meta が
@@ -28,7 +28,8 @@ import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 
 const MKGO_REPOSITORY_URL = 'https://github.com/shiroha-a/mk';
-const MKGO_FRONTEND_REPOSITORY_URL = 'https://github.com/shiroha-a/misskey-ts';
+// #3379 で frontend を本体へ取り込む前に、frontend のソースとして案内していた fork。
+const OLD_FRONTEND_REPOSITORY_URL = 'https://github.com/shiroha-a/misskey-ts';
 
 test.describe('UI: /about-mkgo', () => {
   test.setTimeout(60_000);
@@ -61,10 +62,12 @@ test.describe('UI: /about-mkgo', () => {
     await expect(serverSource).toBeVisible({ timeout: 20_000 });
     await expect(serverSource).toHaveAttribute('href', /^https?:\/\//);
 
-    // **フロントエンドのソース。** Go で書き直したのはサーバーサイドだけで、
-    // いま表示されている画面は別リポジトリにある。これが消えると「動いている
-    // コード」の案内が片側だけになる。
-    await expect(page.locator(`a[href="${MKGO_FRONTEND_REPOSITORY_URL}"]`)).toBeVisible();
+    // **mk-go 本体のソース。** #3379 で frontend を本体へ取り込んだので、いま表示されて
+    // いる画面のソースもここで案内される。このサーバーの案内先と同じ URL なら
+    // そちらとして、違えば mk-go 本体として、どちらかで必ず出る。アーカイブした
+    // fork を「frontend のソース」として案内し続けていないことも見る。
+    await expect(page.locator(`a[href="${MKGO_REPOSITORY_URL}"]`).first()).toBeVisible();
+    await expect(page.locator(`a[href="${OLD_FRONTEND_REPOSITORY_URL}"]`)).toHaveCount(0);
 
     // ライセンスの提示。AGPL であることが分かる導線が消えたら落とす。
     await expect(page.locator(`a[href="${MKGO_REPOSITORY_URL}/blob/develop/LICENSE"]`)).toBeVisible();

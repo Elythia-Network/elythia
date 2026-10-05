@@ -88,7 +88,7 @@ jobs:
       image: ${{ steps.target.outputs.tags }}
       digest: ${{ steps.build.outputs.digest }}
     steps:
-      # frontend/ は本体に入っている (#3379) ので、submodule は取らない。
+      # frontend/ は本体に入っている (#3379)。
       - name: Checkout mk-go
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

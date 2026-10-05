@@ -17,7 +17,7 @@ cd mk-go
 go build -o built/misskey ./cmd/misskey
 ```
 
-フロントエンドのソースは本体の `frontend/` (Misskey TS の fork を取り込んだ pnpm workspace) に含まれているので、submodule の取得は要らない。
+フロントエンドのソースは本体の `frontend/` (Misskey TS の fork を取り込んだ pnpm workspace) に含まれている。
 
 ## 2. フロントエンド資産の準備
 

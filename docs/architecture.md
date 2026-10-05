@@ -478,7 +478,6 @@ CLAUDE.md の Section 1 / 2 にあった表とツリーを、#3248 でここへ�
 ├── migration/              # golang-migrate用SQLファイル（`NNNNNN_name.up.sql` / `.down.sql`）
 ├── tests/                  # Go の e2e（`tests/e2e` / `tests/e2e-federation`）と、Go 以外の検証基盤（playwright / diff / dropin / bench / upstream-e2e 等）
 ├── frontend/               # 同梱フロントエンド。fork した Misskey TS を取り込んだ pnpm workspace（#3379）
-├── third_party/misskey/    # 取り込む前の fork の submodule。もう読まない（#3379 の段階 P4d で外す）
 ├── deploy/                 # デプロイ用の補助資材（UDS 構成、pg_bigm 入り postgres image）
 ├── .config/                # 設定ファイル（Misskey互換YAML）
 │   ├── default.yml.example # ローカル開発用テンプレート (track 対象)
