@@ -124,7 +124,7 @@ func (d Definition) Validate() error {
 		return fmt.Errorf("plugin: Name %q が不正です (使えるのは小文字英数字とハイフンのみ)", d.Name)
 	}
 	if d.APIVersion != APIVersion {
-		return fmt.Errorf("plugin %q: APIVersion %d はこの mk-go (APIVersion %d) と互換がありません",
+		return fmt.Errorf("plugin %q: APIVersion %d はこの Elythia (APIVersion %d) と互換がありません",
 			d.Name, d.APIVersion, APIVersion)
 	}
 	if d.PeerMaxBody < 0 {

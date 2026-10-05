@@ -340,7 +340,7 @@ func TestVersion2_1_PeeredPlugins(t *testing.T) {
 	var out map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
 	meta, _ := out["metadata"].(map[string]any)
-	_, present := meta["mkGoPlugins"]
+	_, present := meta["elythiaPlugins"]
 	assert.False(t, present, "宣言が無ければキーごと出さない")
 
 	h.SetPeeredPlugins([]string{"demo"})
@@ -350,7 +350,9 @@ func TestVersion2_1_PeeredPlugins(t *testing.T) {
 
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
 	meta, _ = out["metadata"].(map[string]any)
-	assert.Equal(t, []any{"demo"}, meta["mkGoPlugins"])
+	assert.Equal(t, []any{"demo"}, meta["elythiaPlugins"])
+	_, legacy := meta["mkGoPlugins"]
+	assert.False(t, legacy, "改名 (#3400) より前の key は出さない")
 }
 
 // --- server-side cache (upstream MemorySingleCache 相当) ---
@@ -542,13 +544,13 @@ func TestNodeinfo_SettersInvalidateCache(t *testing.T) {
 
 	out := getNodeinfo(t, h.Version2_1)
 	meta := out["metadata"].(map[string]any)
-	_, present := meta["mkGoPlugins"]
+	_, present := meta["elythiaPlugins"]
 	require.False(t, present)
 
 	h.SetPeeredPlugins([]string{"demo"})
 	out = getNodeinfo(t, h.Version2_1)
 	meta = out["metadata"].(map[string]any)
-	assert.Equal(t, []any{"demo"}, meta["mkGoPlugins"], "setter 後は build し直す")
+	assert.Equal(t, []any{"demo"}, meta["elythiaPlugins"], "setter 後は build し直す")
 }
 
 // 「受け付けない」(#3186) は、列だけが立っていても登録不可と名乗る。

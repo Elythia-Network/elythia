@@ -33,7 +33,7 @@ func testLister(t *testing.T, handler http.HandlerFunc, local ...string) (*nodeI
 func TestNodeInfoPeerLister_ReadsDeclaredPlugins(t *testing.T) {
 	l, hits := testLister(t, func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/nodeinfo/2.1", r.URL.Path)
-		_, _ = w.Write([]byte(`{"metadata":{"mkGoPlugins":["demo","other"]}}`))
+		_, _ = w.Write([]byte(`{"metadata":{"elythiaPlugins":["demo","other"]}}`))
 	})
 
 	got, err := l.Plugins(context.Background(), "other.example")
@@ -47,13 +47,25 @@ func TestNodeInfoPeerLister_ReadsDeclaredPlugins(t *testing.T) {
 	assert.Equal(t, int32(1), hits.Load(), "2 回目はキャッシュから返す")
 }
 
-// mkGoPlugins を持たない相手 (Misskey TS など) は「持っていない」。
+// elythiaPlugins を持たない相手 (Misskey TS など) は「持っていない」。
 func TestNodeInfoPeerLister_NonMkGoInstance(t *testing.T) {
 	l, _ := testLister(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"software":{"name":"misskey"},"metadata":{"nodeName":"x"}}`))
 	})
 
 	got, err := l.Plugins(context.Background(), "ts.example")
+	require.NoError(t, err)
+	assert.Empty(t, got)
+}
+
+// 改名 (#3400) より前の版が出す `mkGoPlugins` は読まない (設計 D8)。相手が上げる
+// までプラグインの連合は止まるが、旧名を読み続ける猶予は設けない。
+func TestNodeInfoPeerLister_IgnoresLegacyKey(t *testing.T) {
+	l, _ := testLister(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"software":{"name":"mk-go"},"metadata":{"mkGoPlugins":["demo"]}}`))
+	})
+
+	got, err := l.Plugins(context.Background(), "old.example")
 	require.NoError(t, err)
 	assert.Empty(t, got)
 }
@@ -68,7 +80,7 @@ func TestNodeInfoPeerLister_DoesNotCacheFailures(t *testing.T) {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		_, _ = w.Write([]byte(`{"metadata":{"mkGoPlugins":["demo"]}}`))
+		_, _ = w.Write([]byte(`{"metadata":{"elythiaPlugins":["demo"]}}`))
 	})
 
 	_, err := l.Plugins(context.Background(), "flaky.example")
@@ -101,7 +113,7 @@ func TestNodeInfoPeerLister_NegativeTTLIsShorter(t *testing.T) {
 // 1 host あたりの大きさを外から膨らませられる。
 func TestNodeInfoPeerLister_KeepsOnlyLocalPlugins(t *testing.T) {
 	l, _ := testLister(t, func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"metadata":{"mkGoPlugins":["demo","junk1","junk2","junk3"]}}`))
+		_, _ = w.Write([]byte(`{"metadata":{"elythiaPlugins":["demo","junk1","junk2","junk3"]}}`))
 	}, "demo")
 
 	got, err := l.Plugins(context.Background(), "other.example")
@@ -120,7 +132,7 @@ func TestNodeInfoPeerLister_KeepsOnlyLocalPlugins(t *testing.T) {
 func TestNodeInfoPeerLister_TTLUsesRawList(t *testing.T) {
 	l, _ := testLister(t, func(w http.ResponseWriter, _ *http.Request) {
 		// 相手は peered プラグインを持っているが、こちらのものは 1 つも無い。
-		_, _ = w.Write([]byte(`{"metadata":{"mkGoPlugins":["theirs1","theirs2"]}}`))
+		_, _ = w.Write([]byte(`{"metadata":{"elythiaPlugins":["theirs1","theirs2"]}}`))
 	}, "demo")
 
 	got, err := l.Plugins(context.Background(), "other.example")
@@ -139,7 +151,7 @@ func TestNodeInfoPeerLister_TTLUsesRawList(t *testing.T) {
 // だけ表が伸びる。**外から増やせる**ので上限を置く。
 func TestNodeInfoPeerLister_BoundsHosts(t *testing.T) {
 	l, _ := testLister(t, func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"metadata":{"mkGoPlugins":["demo"]}}`))
+		_, _ = w.Write([]byte(`{"metadata":{"elythiaPlugins":["demo"]}}`))
 	}, "demo")
 
 	// **毎回見る。** ループの後で 1 回だけ数えると、`<` / `<=` の取り違えが

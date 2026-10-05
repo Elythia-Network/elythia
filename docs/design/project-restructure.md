@@ -54,7 +54,7 @@
 | frontend のページ名 (`/about-mkgo` など) と画面の文言 | `/about-elythia` と表示名 `Elythia` にする。**旧 URL は転送しない** (Q5。専用ページをわざわざブックマークする人はいない) |
 | ドキュメント | 新しい名前にする。CHANGELOG と CLAUDE.md の更新記録の過去の記述は書き換えない |
 | 関数名などコード上の識別子 | 据え置き |
-| `/api/meta` の `mkGoVersion` / `mkGoCommit`、`internal/core/procstats` の `mkGo` | 据え置き (同梱 frontend と外部クライアントが読む wire の項目)。nodeinfo の `mkGoPlugins` は連合で使う宣言なので R4 で改める |
+| `/api/meta` の `mkGoVersion` / `mkGoCommit`、`internal/core/procstats` の `mkGo` | 据え置き (同梱 frontend と外部クライアントが読む wire の項目)。nodeinfo の `mkGoPlugins` は連合で使う宣言なので R4 で改める (#3400 で `elythiaPlugins` にした) |
 | `/api/meta` の `mkGoFrontendVersion` | **廃止する** (Q7、D5)。frontend を本体と同じ版で管理するので、frontend だけの版という概念が要らない |
 | 環境変数の接頭辞 `MK_` | 据え置き (運営者の設定を壊さない) |
 

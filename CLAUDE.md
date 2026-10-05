@@ -4,7 +4,7 @@
 
 ## このプロジェクトについて
 
-**Elythia(旧称mk-go)は、Misskeyとの互換性を保ったまま、独自の機能を育てているGo製のMisskey系サーバーです。** 改名の作業は#3180で進めています。関数名などコード上の識別子、`/api/meta`の`mkGoVersion` / `mkGoCommit`、環境変数の接頭辞`MK_`は、改名の後も据え置きます(例外はnodeinfoの`mkGoPlugins`で、[設計](docs/design/project-restructure.md)のR4で改めます)。
+**Elythia(旧称mk-go)は、Misskeyとの互換性を保ったまま、独自の機能を育てているGo製のMisskey系サーバーです。** 改名の作業は#3180で進めています。関数名などコード上の識別子、`/api/meta`の`mkGoVersion` / `mkGoCommit`、環境変数の接頭辞`MK_`は、改名の後も据え置きます(例外はnodeinfoの宣言で、`mkGoPlugins`から`elythiaPlugins`に改めた。#3400)。
 
 出発点は、Misskey(TypeScript/NestJS)のバックエンドをGoで書き換えるリライトでした。本家との互換を一通り満たした今は、次の方針で開発しています。
 
@@ -301,6 +301,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 
 このファイル自体を変えたときだけ、1行で追記します(新しいものを上に)。経緯の本文はリンク先にあります。個別のfixの履歴は`CHANGELOG.md`にあります。
 
+- 2026-10-06: nodeinfoの宣言を`elythiaPlugins`にしたので、冒頭の据え置く識別子の例外を更新した (#3400) → [docs/plugin-peer-protocol.md](docs/plugin-peer-protocol.md)
 - 2026-10-06: 本文の名前をElythiaにし、冒頭に旧称と据え置く識別子を書いた (#3394) → [docs/design/project-restructure.md](docs/design/project-restructure.md)
 - 2026-10-06: User-Agentを`Elythia/<version> (<url>)`にしたので、Section 6を更新した (#3394) → [docs/divergence.md](docs/divergence.md)
 - 2026-10-05: 実行バイナリを`elythia`1つにまとめたので、Section 2の構成、Section 3の`make tidy`の行、Section 9の`migrate`の行を更新した (#3394) → [docs/design/project-restructure.md](docs/design/project-restructure.md)

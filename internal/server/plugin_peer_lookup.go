@@ -72,9 +72,10 @@ func newNodeInfoPeerLister(client *http.Client, local []string) *nodeInfoPeerLis
 	return &nodeInfoPeerLister{
 		client: client,
 		local:  set,
-		// well-known を辿らず 2.1 を直接見る。mk-go 同士でしか使わない経路
-		// なので相手の nodeinfo の場所は分かっている。**相手が mk-go でなければ
-		// mkGoPlugins が無いだけ**で、誤って送ることはない。
+		// well-known を辿らず 2.1 を直接見る。同じソフト同士でしか使わない経路
+		// なので相手の nodeinfo の場所は分かっている。**相手が対応していなければ
+		// elythiaPlugins が無いだけ**で、誤って送ることはない。改名 (#3400) より前の
+		// 版が出す `mkGoPlugins` は読まない (設計 D8)。
 		urlFor: func(host string) string { return "https://" + host + "/nodeinfo/2.1" },
 		cache:  map[string]peerLookupEntry{},
 	}
@@ -182,11 +183,11 @@ func (l *nodeInfoPeerLister) fetch(ctx context.Context, host string) ([]string, 
 
 	var parsed struct {
 		Metadata struct {
-			MkGoPlugins []string `json:"mkGoPlugins"`
+			ElythiaPlugins []string `json:"elythiaPlugins"`
 		} `json:"metadata"`
 	}
 	if err := json.NewDecoder(io.LimitReader(res.Body, peerLookupMaxBody)).Decode(&parsed); err != nil {
 		return nil, err
 	}
-	return parsed.Metadata.MkGoPlugins, nil
+	return parsed.Metadata.ElythiaPlugins, nil
 }

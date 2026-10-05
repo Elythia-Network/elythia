@@ -298,7 +298,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_xxx" ON "yyy" ("zzz");
 `ci.yml`は`main`と`develop`へのpush/PR、`frontend.yml`はPRと`develop`へのpushで実行される。branch protectionのrequired checksは`build` / `test` / `lint`と、`.github/workflows/frontend.yml`の`frontend`の4つ。
 
 #### buildジョブ
-`go build ./...`で全パッケージのビルド確認。続けて同梱サンプルが`mk-plugin.yml`で既定無効のままかを検査し (#2701)、同梱プラグインを`go vet`し、最後に同梱サンプル入りの統合バイナリ (`make plugins-all && go build ./cmd/elythia`、#2495) をビルドする (#3379 で`frontend-check` jobから移した。Nodeが要らないので毎回走るここに置く)。**required jobなので、コンパイル以外の理由でも赤くなる**。手元の再現は`make plugin-vet`と、統合バイナリは`make plugins-all && go build -o /dev/null ./cmd/elythia`。
+`go build ./...`で全パッケージのビルド確認。続けて同梱サンプルが`elythia-plugin.yml`で既定無効のままかを検査し (#2701)、同梱プラグインを`go vet`し、最後に同梱サンプル入りの統合バイナリ (`make plugins-all && go build ./cmd/elythia`、#2495) をビルドする (#3379 で`frontend-check` jobから移した。Nodeが要らないので毎回走るここに置く)。**required jobなので、コンパイル以外の理由でも赤くなる**。手元の再現は`make plugin-vet`と、統合バイナリは`make plugins-all && go build -o /dev/null ./cmd/elythia`。
 
 #### test-shardsジョブ + testジョブ
 - `shard: [1,2,3,4]`の4-way matrixで並列実行。各shardが独立したPostgreSQL 18 / Redis 7のサービスコンテナを持つ

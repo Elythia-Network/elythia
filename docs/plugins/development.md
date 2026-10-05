@@ -73,11 +73,11 @@ docker run --rm -it -v "$(pwd)":/work -w /work/frontend/packages/frontend \
 
 **プラグインを置いたのに読み込まれない**
 
-`mk-plugin.yml` と `go.mod` の両方が要る。片方だけだと検出されない（`go.mod` が無い場合は明示的なエラーになる）。
+`elythia-plugin.yml` と `go.mod` の両方が要る。片方だけだと検出されない（`go.mod` が無い場合は明示的なエラーになる）。
 
 **`make plugin-dev` では動くのに `make build` に入らない**
 
-`mk-plugin.yml` に `disabled: true` が残っていないかを見る。`PLUGIN=` で名指しした監視対象は disabled でも含めて動かす（既定無効の同梱サンプルを tracked ファイルの編集なしで開発するため）が、本番ビルドは含めない。
+`elythia-plugin.yml` に `disabled: true` が残っていないかを見る。`PLUGIN=` で名指しした監視対象は disabled でも含めて動かす（既定無効の同梱サンプルを tracked ファイルの編集なしで開発するため）が、本番ビルドは含めない。
 
 **既定無効のプラグインを開発したいのに読み込まれない**
 

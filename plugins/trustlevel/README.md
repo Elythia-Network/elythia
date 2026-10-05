@@ -15,7 +15,7 @@
 make build     # plugins/ を走査してビルドに取り込む
 ```
 
-`plugins/` に置いても**既定では無効**。`mk-plugin.yml` に `disabled: true` があり
+`plugins/` に置いても**既定では無効**。`elythia-plugin.yml` に `disabled: true` があり
 `make build` の対象から外れる (同梱サンプルなので、clone しただけの人のビルドに
 勝手に入らないようにしてある)。有効にするには `disabled: true` の行を消す。
 
@@ -27,7 +27,7 @@ vite ビルドまでは走らない。手順は環境ごとに違うので [デ�
 を見ること。
 
 **手元で動かしてみるだけなら `make plugin-dev PLUGIN=plugins/trustlevel`。**
-tracked ファイル (`mk-plugin.yml`) を編集せずに済む。`disabled: true` を消して
+tracked ファイル (`elythia-plugin.yml`) を編集せずに済む。`disabled: true` を消して
 push すると、同梱サンプルが既定無効であることを見る CI (`build` job の
 `Check bundled plugins are disabled by default`) が落ちる。
 
