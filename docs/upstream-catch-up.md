@@ -1,48 +1,32 @@
 # Misskey TS upstream 追従アップデート手順
 
-mk-go は `third_party/misskey` submodule で Misskey TS の特定 release tag を pin して、frontend asset + drop-in 互換性の参照点として利用している。upstream の新 release が出るたびに backend 差分の triage + 取り込み + submodule bump を行う必要がある。
+mk-go の `frontend/` は、本家 Misskey の monorepo から `packages/backend` を除いたもののスナップショットに、mk-go 独自の変更を載せたもの (#3379)。追従している本家の版はリポジトリ直下の `UPSTREAM_MISSKEY_VERSION` に 1 行で書き、比較対象の本家のソースは `make upstream-fetch` で `.cache/misskey/<版>/` に取る (bare mirror の `.cache/misskey/mirror.git` から版ごとに worktree を作る。#3378)。本家の新しい release が出るたびに、frontend の差分の取り込み (`make upstream-sync`) と、backend の差分の triage + Go への移植と、版を上げる作業を行う。
 
-本書は **submodule bump を含む PR がマージされた後、各開発者 / operator が必要な手順** と、**新 upstream release が出た時の triage 運用** を説明する。
+本書は **本家の版を上げた PR がマージされた後、各開発者 / operator が必要な手順** (1 章) と、**本家の新しい release が出た時の取り込み手順** (2 章) を説明する。
 
-> **#3379 の段階 P4d-2 で submodule `third_party/misskey` を外した。** frontend は本体の `frontend/` (fork から取り込んだ pnpm workspace) からビルドし、比較対象の本家のソースは `make upstream-fetch` で `.cache/misskey/<版>/` に取る (#3378)。上の 2 段落と、本書のうち submodule の working tree・fork の commit / tag・gitlink の bump を書いている節 (1-1 〜 1-3、2-5) は、取り込む前の fork の運用の記録で、今の手順ではない。これらの節は `make upstream-sync` を使う手順に書き直す (#3379 の段階 P4d-3、設計は [project-restructure.md の D4](design/project-restructure.md))。それまで frontend の変更は `frontend/` を直接直す ([contributing.md](contributing.md))。
+> **#3379 より前の運用。** frontend は submodule が指す fork (アーカイブ済み) から供給していて、追従は fork の上での載せ替えと tag の採番、gitlink の bump だった。fork の tag の採番規則と、その頃の独自変更の一覧は凍結した記録として [divergence.md §4-2](divergence.md#4-2-fork-frontend-の独自変更) に残っている。今の独自変更は §4-2b に PR 番号で書く (2-4)。
 
 ---
 
-## 1. 既存環境への適用 (= submodule bump PR マージ後)
+## 1. 既存環境への適用 (= 本家の版を上げた PR のマージ後)
 
-`git pull` だけでは submodule の working tree は更新されない (= 親リポの gitlink ポインタが移動するのみ)。`third_party/misskey/` 配下の実 file を新 release に揃えるには明示的な submodule update が必要。
-
-### 1-1. 推奨: 1 コマンドで pull + submodule update
-
-```bash
-git pull --recurse-submodules
-```
-
-このフラグは `git pull` 単体だと毎回つける必要がある。常時 on にしたい場合は次の設定を 1 度実行:
-
-```bash
-git config submodule.recurse true
-```
-
-→ 以後 `git pull` / `git checkout` / `git merge` で自動的に submodule も追従する。`.git/config` (= repo local) に書かれるため、他開発者には伝播しない。各人が一度設定すること。
-
-### 1-2. 手動 (一括設定なし)
+### 1-1. pull
 
 ```bash
 git pull
-git submodule update --init --recursive
 ```
 
-### 1-3. 確認
+`frontend/` は本体で追跡しているので、`git pull` だけで新しい版の frontend のソースが揃う。
+
+golden の再生成・本家 backend e2e・apicompat のように本家のソースを読む作業をするときだけ、新しい版の本家を取得する (起動とビルドには要らない)。
 
 ```bash
-git -C third_party/misskey describe --tags HEAD
-# → 例: 2026.5.1-mk.0
-git -C third_party/misskey log --oneline HEAD -1
-# → 例: 8c292244e7 fix(frontend): add null guard for MkModal content children[0]
+make upstream-fetch   # UPSTREAM_MISSKEY_VERSION の版を .cache/misskey/<版>/ へ取得
 ```
 
-### 1-4. frontend asset の rebuild が必要なケース
+古い版の worktree は残るので、要らなければ `git -C .cache/misskey/mirror.git worktree remove --force .cache/misskey/<古い版>` で消す。
+
+### 1-2. frontend asset の rebuild が必要なケース
 
 `frontend/packages/frontend/` の vite ビルド成果物 (`frontend/built`) を mk-go が serve しているため、`frontend/` が変わった後に **frontend asset を再ビルド** しないと UI に古い JS が残る (#3379 より前は `third_party/misskey` の成果物を配信していた):
 
@@ -53,28 +37,28 @@ make uds-frontend-build
 
 数分〜10分かかる。docker daemon が必要。UDS / dropin / e2e いずれも同じビルド成果物を共有する。
 
-### 1-5. UDS production stack の再ビルド
+### 1-3. UDS production stack の再ビルド
 
 `compose.uds.yaml` ([リポジトリにあるのは `.example` 版](../compose.uds.yaml.example)) で本番運用している場合、Misskey TS の prebuilt image を pull しているわけではなく **mk-go バイナリ + `frontend/` の静的アセットを image に焼き込んでビルドしている** ([`deploy/uds/Dockerfile.mkgo`](../deploy/uds/Dockerfile.mkgo) の `COPY . .` 経由)。`frontend/` の更新 + frontend rebuild 後に image を作り直さないと古い asset が image にキャッシュされたまま:
 
 ```bash
-# pull と 1-4 を済ませた状態 (= frontend/ + frontend asset が最新) で
+# pull と 1-2 を済ませた状態 (= frontend/ + frontend asset が最新) で
 make uds-build      # image を作り直す
 make uds-restart    # 再起動 + 配信アセットの検証
 ```
 
 **重要**:
 - **image の作り直しと再起動は別の話で、両方要る**。image に焼き込むのは `deploy/uds/Dockerfile.mkgo` が `COPY` する 4 つ — static-assets (`frontend/assets`)、repo-assets (`frontend/repo-assets`)、twemoji、fluent-emoji (`frontend/node_modules/@misskey-dev/emoji-assets` から)。`frontend/` の更新でこれらが変わるので `uds-build` が要る
-- **SPA のアセット (`frontend/built/_frontend_vite_`) は image に入らない**。bind-mount で渡しているので `uds-frontend-build` (1-4) の出力がそのまま配信される。ただし `compose.uds.yaml` がまだ `./third_party/misskey/built` を指している場合は誰も mount していないので、先に [デプロイの切り替え手順](deployment.md#frontend-を本体へ取り込んだ版へ上げる-3379) を済ませる
+- **SPA のアセット (`frontend/built/_frontend_vite_`) は image に入らない**。bind-mount で渡しているので `uds-frontend-build` (1-2) の出力がそのまま配信される。ただし `compose.uds.yaml` がまだ `./third_party/misskey/built` を指している場合は誰も mount していないので、先に [デプロイの切り替え手順](deployment.md#frontend-を本体へ取り込んだ版へ上げる-3379) を済ませる
 - **`--build` を付けても再起動は保証されない**。compose は image と設定が変わらなければコンテナを作り直さないので、bind-mount しか変わっていない場合は何も起きず、mk-go は起動時にキャッシュした古いエントリを配り続ける (#2885)。`make uds-restart` は `restart` を明示したうえで配信中のアセットが実在するかまで検証する
 - **その検証は bind-mount の SPA アセットしか見ない**。image 側の asset (twemoji 等) が古いままでも緑になるので、`uds-build` を省かないこと
 - `make uds-frontend-build` を skip すると Dockerfile builder の sanity check (`test -f .../1f004.svg` 等) で早期 fail する
 
-`postgres` / `valkey` / `nginx` / `video-thumb` 等の外部 image は Misskey 無関係なので submodule bump で影響を受けない。
+`postgres` / `valkey` / `nginx` / `video-thumb` 等の外部 image は Misskey 無関係なので、本家の版を上げても影響を受けない。
 
-### 1-6. migration 適用
+### 1-4. migration 適用
 
-submodule bump PR には mk-go 側の migration が同梱されることが多い (例: PR #998 の `migration/000048_avatar_decoration_category.{up,down}.sql`)。本番環境では:
+本家の版を上げる PR には mk-go 側の migration が同梱されることが多い (例: PR #998 の `migration/000048_avatar_decoration_category.{up,down}.sql`)。本番環境では:
 
 ```bash
 # 接続先は -config (既定 .config/default.yml) から決まる
@@ -87,20 +71,20 @@ migration 連番は `migration/00NNNN_*.up.sql` の命名規則に従う (= 各 
 
 ## 2. 新 upstream release 取り込み手順 (= 開発側)
 
-新 Misskey TS release が出た時、mk-go 側で必要な作業フロー:
+新 Misskey TS release が出た時、mk-go 側で必要な作業フロー。**1 回の追従は 1 PR にまとめ、段階ごとにコミットを分ける** (frontend の取り込み、版を上げる作業、backend の移植の各 item)。各コミットが単体でビルドとテストを通すこと (CLAUDE.md Section 7)。
 
 ### 2-1. tracker issue を起票
 
 `gh issue create --title "Tracker: Misskey TS <prev> → <new> への upstream 追従"` で tracker を作成。次の内容を含める:
 
 - 対象 release tag (例: `2026.5.1`)
-- backend 関連 commits 一覧 (`git -C .cache/misskey/mirror.git log --oneline --no-merges <prev>..<new> -- packages/backend/src/ packages/backend/migration/`。本家は `make upstream-fetch` が取得する bare repository から読む (#3378)。`<new>` の tag は `git -C .cache/misskey/mirror.git fetch --no-tags origin "refs/tags/<new>:refs/tags/<new>"` で足す)
+- backend 関連 commits 一覧 (`git -C .cache/misskey/mirror.git log --oneline --no-merges <prev>..<new> -- packages/backend/src/ packages/backend/migration/`。本家は `make upstream-fetch` が取得する bare repository から読む (#3378)。`<new>` の tag は `git -C .cache/misskey/mirror.git fetch --no-tags origin "refs/tags/<new>:refs/tags/<new>"` で足す。`make upstream-sync TO=<new> DRY=1` (2-4) も両方の tag を mirror へ取る)
 - 関連 frontend / TS-only 変更の参考リスト
-- 完了条件 (= sub-issue 全 close + submodule bump PR マージ)
+- 完了条件 (= sub-issue 全 close + 追従 PR のマージ)
 
 ### 2-2. triage doc を作成
 
-`docs/update/yyyymmdd-<tracker-issue>-triage.md` を新規作成。前例: `docs/update/20260512-947-triage.md`。
+release ごとの差分 doc `docs/update/<yyyymm><nn>diff.md` (命名は 3 章。直近は [`20261000diff.md`](./update/20261000diff.md)) を新規作成する。古い前例には `docs/update/yyyymmdd-<tracker-issue>-triage.md` (`docs/update/20260512-947-triage.md`) の形もある。
 
 各 upstream commit について:
 - `git -C .cache/misskey/mirror.git show <sha>` で diff 精読
@@ -122,128 +106,101 @@ triage で判定した item を `gh issue create` で 1 件 1 issue として起
 
 **注意**: GitHub の cross-repo 自動 link を避けるため、upstream PR 参照は `upstream PR <N>` (plain text、`misskey-dev/misskey#N` 形式は使わない) と書く。
 
-### 2-4. submodule bump + Wave 単位の実装 PR
+### 2-4. frontend の差分を当てる (`make upstream-sync`)
+
+`develop` から切ったブランチで行う。設計は [project-restructure.md の D4](design/project-restructure.md#d4-本家への追従-make-upstream-sync) で、区分の表は同じ文書の D1。
+
+**1. 分類だけを見る。**
+
+```bash
+make upstream-sync TO=<新しい版> DRY=1
+```
+
+mirror (`.cache/misskey/mirror.git`、無ければ作る) に今の版 (`UPSTREAM_MISSKEY_VERSION`) と `TO` の tag を取り、`tools/upstreamsync` がそれを本体のリポジトリの `refs/upstream/<版>` へ取り込んで、変更されたパスを D1 の区分で数える。
+
+| 区分 | 本家のパス | 扱い |
+|---|---|---|
+| 取り込む | `packages/` (`packages/backend` を除く)、`packages-private/`、`locales/`、`scripts/`、`patches/`、直下の `package.json` など | `frontend/` の下の同じパスへ当てる |
+| 付け替える | `packages/backend/assets/` / 直下の `assets/` | `frontend/assets/` / `frontend/repo-assets/` へ当てる (D3) |
+| 作り直す | `pnpm-lock.yaml` | 当てない。手順 4 で作り直す |
+| 取り込まない | `packages/backend` (アセットを除く)、`.github/`、`.config/`、`Dockerfile`、文書類など | 当てない |
+
+**どの区分にも当たらないパスがあると、何も当てずに止まる。** 本家が直下に新しく足したファイルや、submodule の gitlink の変更が該当する。「取り込む」で絞るだけだと新しいパスが黙って落ちるため。止まったら、そのパスの区分を決めて `tools/upstreamsync/main.go` の表 (`importFiles` / `importDirs` / `skipFiles` / `skipDirs`) と設計 D1 の表の両方に足し、`go test ./tools/upstreamsync/` を通してからやり直す。
+
+**2. 当てる。**
+
+```bash
+make upstream-sync TO=<新しい版>
+```
+
+**`frontend/` に commit していない変更があると断る。** 衝突をファイル単位で解くので、手を入れている最中の変更と本家の差分が混ざらないようにするため。当てるのは `git apply --3way` で、付け替え先ごとに 3 回 (`frontend/` / `frontend/assets/` / `frontend/repo-assets/`) に分けて実行する。rename は削除と追加として扱う。
+
+当てる前に全 pass を `git apply --3way --check` で確かめ、1 つでも当たらない差分 (frontend/ に無いファイルや、追跡していないファイルへの変更) があれば何も当てずに止まる。そのときは区分を見直すか、frontend/ を本家に揃えてからやり直す。
+
+衝突しなかったファイルは index に載る。衝突したテキストのファイルは衝突マーカー付きで作業ツリーに残り、index では unmerged になる (`git diff --name-only --diff-filter=U` で一覧できる)。**バイナリが衝突したときはマーカーが付かず、mk-go 側の内容のまま unmerged になる**ので、本家の版を採るなら `git checkout --theirs -- <パス>` で入れ替える。最後に「次にやること」が表示され、衝突が残っていれば終了コードは 0 にならない。
+
+**3. 衝突を解く。** mk-go 独自の frontend の変更は [divergence.md §4-2b](divergence.md#4-2b-frontend-の独自変更-3379-で取り込んだ後) に PR 番号で記録している。衝突したら、その箇所がどの行の変更かを §4-2b で引いて判断する。
+
+- **本家が同じことを直していたら、mk-go の変更を落として本家の形を採り、§4-2b の行を更新する** (消すか、落とした経緯を書く)。§4-2b は「純正へ還元できない差分の一覧」として読むので、本家に入ったものを残さない
+- 本家の変更と mk-go の変更が両立するなら、両方を残す形に解く
+
+解いたら `git add` する。取り込みのコミットは衝突を解いた後の 1 つにまとめる。
+
+**4. lock を作り直す。**
+
+```bash
+make upstream-sync-lock
+```
+
+`frontend/pnpm-lock.yaml` を、**直前の lock を基点に** `pnpm install --lockfile-only` で作り直す (node の container の中で実行する。docker daemon が必要)。本家の lock は使わない。backend を外した lock は本家の lock と大きく違い、本家の lock の差分は毎回衝突するため。
+
+**作り直した lock の差分を目で見る。** `package.json` で変わった依存以外が動いていないことを確かめる。`--lockfile-only` は、lock に無い依存と範囲が変わった依存をその時点の最新に解決するので、本家が試した組とずれうる。`frontend/pnpm-workspace.yaml` の `minimumReleaseAge` (公開から 7 日) に満たない版は選ばれないので、本家が出たばかりの版を指定していると解決に失敗するか、古い版に落ちる。
+
+**5. frontend を検査する。**
+
+```bash
+make frontend-check   # 型チェックと、frontend を読むゲート
+make frontend-lint
+make frontend-test    # 先に cd frontend && pnpm install && pnpm build
+```
+
+mfm-js か emoji-data の版が変わっていたら、下の「MFM の絵文字の正規表現」の手順も要る。
+
+`tools/upstreamsync` が本体に置いた `refs/upstream/<版>` は branch でも tag でもないので push されない。要らなくなったら `git update-ref -d refs/upstream/<版>` で消してよい (次の追従でも、今の版の ref は取り直す)。
+
+### 2-5. 本家の版を上げる
+
+frontend の取り込みと同じ PR で、版を次の場所で揃えて上げる。揃っていることは `internal/entitycompat` の `TestUpstreamVersionIsConsistent` が見る (#3378)。
+
+- `UPSTREAM_MISSKEY_VERSION`
+- `internal/config/config.go` の `MisskeyVersion`
+- e2e で TS 側として立てる `misskey/misskey:<版>` の tag (下の「比較対象の TS image を全部揃える」)
+
+上げたら `make upstream-fetch` で新しい版の本家を取得し、下の「本家の版を上げた後に必須」の節を順に済ませる (golden の再生成、TypeORM migrations seed、index golden など)。`frontend/package.json` の版は `make upstream-sync` が本家の差分として上げるので、手で直さない (`/about-mkgo` はこの版を出す)。
+
+### 2-6. backend の移植 (Wave 単位のコミット)
 
 実装方針 (PR #998 で確立):
 
-1. **Infrastructure 先行**: `UPSTREAM_MISSKEY_VERSION` を新しい版にして `make upstream-fetch`、`MisskeyVersion` 定数と e2e の `misskey/misskey:<版>` を揃える (`TestUpstreamVersionIsConsistent` が見る、#3378)、submodule bump (新 tag。P4 までは frontend の供給元として残る) + hardcode 修正
+1. **Infrastructure 先行**: frontend の取り込み (2-4) と版を上げる作業 (2-5)、hardcode 修正
 2. **Wave 1 (close 候補)**: comment + regression test で意思表明
 3. **Wave 2 (S 難易度)**: 1 commit / 1 sub-issue (or 関連を bundle) で順次
-4. **Wave 3 (M 難易度)**: PR 1 本ずつ / commit 1 件ずつで review しやすく
-5. **Wave 4 (L 難易度)**: submodule bump とセット (例: 削除 endpoint)
+4. **Wave 3 (M 難易度)**: commit 1 件ずつで review しやすく
+5. **Wave 4 (L 難易度)**: 削除 endpoint など、版を上げる作業と切り離せないもの
 6. **Final audit**: 残り upstream commits も triage 突き合わせて drift を確認、結果を triage doc 末尾に追記
 7. **Follow-up**: review で挙がった improvement を nit commit で取り込む
 
-各 commit は `2026.X.Y Wave N (M/N): <要約>` 命名で、`Closes #<sub-issue>` で sub-issue を自動 close する。
+コミットメッセージは CLAUDE.md Section 7 の `<種類> <対象>: <要約> (#issue番号)` の形にする (例: 2026.10.0 の追従 #3285 の `Fix sw: 購読の解除で本家 2026.10.0 と同じパラメータを受け付ける (#3285)`)。sub-issue を閉じるコミットには `Closes #<sub-issue>` を入れる。
 
-### 2-5. submodule bump 時の fork 運用
+### 2-7. 試算: 過去の追従を `make upstream-sync` で分類する
 
-> **#3379 以降、この節の fork の commit・tag・gitlink の bump は frontend のビルドに届かない** (冒頭の注記)。下の手順と採番規則は、submodule と pin の検査 (`make submodulepin-check`、`build` job の step。どちらも #3379 の P4d-2 で消した) があった頃の記録として置いている。
+`tools/upstreamsync` を作ったとき (#3379 の段階 P4d-3)、過去 3 回の追従を DRY=1 で分類し、3 回とも分類できないパスが無いことを確かめた。「取り込む」パスの件数は、設計 D4 の試算 (#3370) と同じ。
 
-mk-go は `shiroha-a/misskey-ts` fork を経由して submodule を pin している (= upstream の release tag + mk 固有のパッチを cherry-pick したもの)。新 release を取り込む手順:
-
-```bash
-cd third_party/misskey
-git fetch upstream <tag>
-# 例: <tag>=2026.5.1
-git checkout -b <tag>-fix <tag>
-git cherry-pick <既存 patch sha>  # 例: 79ccc36ec0 (MkModal null guard)
-git tag <tag>-mk.0
-git push origin <tag>-fix
-git push origin <tag>-mk.0
-cd -
-git add third_party/misskey
-# commit + PR
-```
-
-#### fork タグの採番規則
-
-形式は `<upstream release>-mk.<N>[<英字>]`（例: `2026.9.0-mk.39`、`2026.9.0-mk.34c`）。
-**lightweight tag** で、fork の `mk-<upstream release>` 系列の先端に打つ。
-
-| 進めるもの | いつ | 例 |
-|---|---|---|
-| 数字 (`N`) | **新機能**、および**直前の数字タグとは無関係な修正** | `mk.38` → `mk.39` |
-| 英字 | **直前の数字タグで入れた変更の後追い修正** | `mk.39` → `mk.39a` → `mk.39b` |
-
-**英字は「直前の数字タグの後始末」に限る。** バグ修正だから英字、ではない —
-**世代をまたぐ修正は新しい数字を取る**。英字は列の順序を保つためのもので、`-mk.24` の後に
-`-mk.12a` を打つと `git describe --tags` が後戻りして見えるため (先例は `-mk.23` /
-`-mk.25` / `-mk.28`。規則の出どころは `docs/divergence.md` の「fork frontend の変更」で、
-`assertForkTagSequence` の GoDoc も同じことを書いている)。
-
-**1 PR = 1 タグ。** frontend に複数コミットを積む PR でも打つタグは 1 つで、`docs/divergence.md`
-§4-2 の表も 1 行になる。1 コミット = 1 タグにしないのは、表を「還元不能な差分の一覧」として
-読むときの単位が PR だから。
-
-**`N` は upstream release ごとに 0 から数え直す。** 取り込み直後の素の状態が `-mk.0` で、
-載せ替え (`git rebase --onto <新 release> <旧 release>`) で持ち込んだ custom commit も
-`-mk.0` に含める。§4-2 の tag 列は「その変更が**最初に入った世代**」なので、載せ替えても
-古い `2026.7.0-mk.*` の行はそのまま残す。
-
-**英字が `z` に達したら数字を上げる。** 26 回も後追いの修正が要る変更はもう別物とみなす。
-実測では 2026.9.0 の 82 タグを通して英字の最長連続は 8 なので、通常は到達しない。
-
-**`fix` のコミットでも数字を取ることがある。** `2026.9.0` の数字タグ 40 件のうち 13 件は
-`fix(...)` だが (`mk.1` / `mk.2` / `mk.4` …)、**どれも直前の数字タグとは無関係な修正**なので
-規則どおり。commit prefix と採番は 1 対 1 ではない — 見るのは「直前の数字タグの後始末か」
-であって、`feat` か `fix` かではない。
-
-**過去のタグは振り直さない。** タグは push 済みで、fork 側の
-`Publish frontend assets image` workflow が `*-mk.*` で
-`ghcr.io/shiroha-a/misskey-ts-assets:<tag>` を publish してきた。過去のリリースの
-`Dockerfile.bundled` はこれを tag で (1.5.0 は digest も併記して) 引いているので、打ち直すと配布物との対応が壊れる。
-
-タグを打ったら、**親リポ側で 3 箇所を同時に更新する**（順序は「submodule に commit →
-fork へ push → tag を push → 親リポの gitlink と doc」。逆順だと CI の checkout が
-`not our ref` で死ぬ）:
-
-- `docs/divergence.md` の pin 行（tag と**短縮 SHA の併記**。当時は `make submodulepin-check` が gitlink と突き合わせていた）
-- `docs/divergence.md` §4-2 の表に 1 行
-- 同ファイル冒頭サマリの件数と範囲（`TestDivergenceDoc_*` が表と突き合わせる）
-
-当時、機械で守られていたのはこのうち「表の連番が規則どおりか」（`assertForkTagSequence`。
-数字 +1 か、同じ数字への次の英字しか許さない。凍結した §4-2 に対して今も回る）と
-「pin 行 ↔ gitlink」「tag → commit」(`make submodulepin-check` と CI の `build` job。
-どちらも P4d-2 で消した)。
-
-**数字と英字のどちらを選ぶかは機械では見ていないし、見られない。** 判定には「この修正は
-直前の数字タグで入れた変更の後始末か」という意味判断が要り、commit の件名からは導けない。
-`fix` なら英字という形なら機械化できるが、それは上のとおり規則と違う (#3141 で検討して
-採らなかった。実測で 121 タグはすべて規則どおりで、止めるべきドリフトが無かった。
-`docs(` や `Revert:` の commit も実在するので `feat` / `fix` の二択にも寄せられない)。
-
-
-#### mk 固有パッチだけを載せるとき（release bump 以外）
-
-upstream release の取り込み以外で fork frontend だけを直す PR でも、**submodule の gitlink は同じ規律で扱う**。
-
-mk の `develop` が追跡しているのは fork の **`mk-2026.x.x` 系列**（例: `mk-2026.9.0`）であり、fork の `develop` とは別系列。系列ごとに独自コミットが積まれており、**misskey-ts 側の PR を `develop` にマージしただけでは mk の submodule 系列には入らない**。差分の大きさは時期で変わるので、**fork 側** (`third_party/misskey`) で次を実行する:
-
-```bash
-cd third_party/misskey
-git fetch origin develop mk-2026.9.0   # 例: mk が指す系列
-git rev-list --left-right --count origin/develop...origin/mk-2026.9.0
-```
-
-| やること | 理由 |
+| 追従 | 「取り込む」パス |
 |---|---|
-| misskey-ts の PR base を **mk が指している `mk-2026.x.x`** に合わせる | マージ後に submodule を fast-forward で載せられる |
-| mk 側の bump 前に祖先関係を確認する | 誤った SHA だと fork 独自コミットが巻き戻る |
-| **閉じた PR の head SHA** を gitlink に使わない | 別系列・古い base のコミットを指しやすい |
-
-bump 前の確認（`third_party/misskey` 内で実行）:
-
-```bash
-OLD=<現在の mk develop が指す submodule SHA>
-NEW=<misskey-ts PR マージ後に載せたい SHA>
-
-git merge-base --is-ancestor "$OLD" "$NEW" && echo "fast-forward 可"
-git rev-list --count "$NEW..$OLD"    # 失われる mk 独自コミット数。0 であること
-git diff --diff-filter=D --name-only "$OLD" "$NEW" | wc -l   # 削除ファイル。0 であること
-```
-
-**CI は祖先関係の巻き戻りを検出しない。** `build` job は gitlink の SHA が fork に **push 済みか**は見るが、fast-forward 可能か（祖先関係）は見ない。`build` / `test` / `lint` / `frontend` の required check は submodule を checkout しない (`frontend` が型・eslint・vitest を見るのは本体の `frontend/` で、そちらでも**ファイルが消えても型が通る**場合がある)。pointer の妥当性は上のコマンドで人手確認する。
+| 2026.7.0 → 2026.9.0 | 105 ファイル |
+| 2026.9.0 → 2026.9.1 | 19 ファイル |
+| 2026.9.1 → 2026.10.0 | 16 ファイル |
 
 ### 本家の版を上げた後に必須: shape drift snapshot の再生成
 
@@ -316,9 +273,9 @@ GOWORK=off go test ./internal/activitypub/mfm/ ./tools/emojiregex/
 (`a54de07260`)、2021-03 に「クライアントサイドで実装したいため」無効化され
 (`73df95c42d`)、2022-09 にファイルごと削除された (`786f1d8be8`)。frontend の
 menu も 2024-09 の #14554 で消えている。**再実装される見込みは低いが、endpoint は
-残っているので bump ごとに一応見る。**
+残っているので版を上げるごとに一応見る。**
 
-bump 後に確認する:
+版を上げた後に確認する:
 
 ```bash
 grep -rlni "promonote\|promoread" .cache/misskey/<版>/packages/backend/src/
