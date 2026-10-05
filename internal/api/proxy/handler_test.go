@@ -1,12 +1,14 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"image"
 	"image/color"
 	"image/png"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -510,6 +512,11 @@ func TestHandle_InternalError_WithFallback(t *testing.T) {
 }
 
 func TestHandle_InternalError_NoFallback(t *testing.T) {
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/javascript")
 		_, _ = w.Write([]byte("not an image"))
@@ -542,6 +549,11 @@ func TestHandle_InternalError_NoFallback(t *testing.T) {
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	assert.Contains(t, rec.Header().Get("Cache-Control"), "max-age=300")
+	// 500 の原因がログに残る (#3383)。status だけでは変換の失敗と区別できない。
+	assert.Contains(t, logs.String(), "mediaproxy: proxy failed")
+	assert.Contains(t, logs.String(), `err="mediaproxy: rejected MIME type`)
+	assert.Contains(t, logs.String(), "mode=default")
+	assert.Contains(t, logs.String(), "url="+url)
 }
 
 func TestHandle_CacheHeaders(t *testing.T) {
