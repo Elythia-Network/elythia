@@ -237,6 +237,15 @@ P3 (#3378) で上のとおりにした (2026-10-05)。
 
 - 数え方: ファイル数は `git diff --name-only <旧版> <新版>` を、`packages/backend` を除いて (2 列目)、または D1 の「取り込む」パスに絞って `--no-renames` で (3 列目) 数えた。`packages/backend/assets` の変更は 3 回とも 0。独自コミットは `git rev-list --count --no-merges <旧版>..<その版の最後の -mk タグ>`
 
+P4d-3 (#3379) で上のとおりに作った (2026-10-05)。
+
+- `make upstream-sync TO=<版>` が `tools/upstreamsync` を呼ぶ。手順 3 の pathspec は、`:(exclude)packages/backend` を添える代わりに、手順 2 で分類したパスをそのまま渡す。手順 1 は、remote を足す代わりに mirror (`.cache/misskey/mirror.git`、D2 と共有) から両方の tag を本体の `refs/upstream/<版>` へ取り込む形にした。branch も tag も作らないので push の対象にならない
+- 区分に当たらないパスに加えて、本家の submodule (gitlink) の変更があっても止める。frontend/ へ当てると gitlink が入るため
+- **当てる前に全 pass を `git apply --3way --check` で確かめ、1 つでも当たらなければ何も当てない。** `--3way` は衝突でない失敗 (frontend/ に無いファイルへの変更など) があると pass を丸ごと取り消すので、確かめずに当てると半端な状態になる (レビューで実測)
+- frontend/ に commit していない変更があれば当てない。衝突をファイル単位で解くので、本家の差分と手元の作業が混ざらないようにする
+- 手順 4 の lock の作り直しは `make upstream-sync-lock` (node の container で `pnpm install --lockfile-only`)
+- 試算の 3 回の差分を `DRY=1` で分類すると、どれも区分に当たらないパスは 0 件で、「取り込む」の件数は上の表と一致した
+
 ### D5. 版と表示
 
 - **frontend の版 = 本体の版。`mkGoFrontendVersion` は廃止する** (Q7)。読んでいるのは同梱 frontend の `/about-mkgo` の表示だけで (2026-09-30 に確認)、更新ダイアログの判定には使っていない (`check-client-update.ts` のコメントも「fork のタグでは判定できない」として使っていない)。追従している本家の版は `/api/meta` の `version` に既に出ている。ビルド時に埋める `MkGoFrontendVersion` の ldflags (`Makefile` と `Dockerfile` / `deploy/uds/Dockerfile.mkgo`) と、`tests/diff` の除外も合わせて消す
@@ -337,7 +346,7 @@ P4 (bind mount の元が `third_party/misskey/built` から `frontend/built` に
 | P1b | 復路の保証をやめる (D9、#3191)。宣言は P6 の版の CHANGELOG | しない |
 | P2 | テスト関連の配置の整理 (D6。#3373、2026-10-04 に完了) | しない |
 | P3 | 本家の参照を `.cache/misskey` へ分離 (D2。#3378、2026-10-05 に完了)。この時点では frontend はまだ submodule のまま。fork の `packages/backend` にある、本家 backend e2e を mk-go へ向けて走らせる 3 ファイル (`test-server-mkgo/entry.ts` など) を `tests/` へ移す | しない |
-| P4 | frontend の取り込み (D1 / D3 / D4 / D5)、submodule と fork の廃止。frontend の CI の required 化とライセンスの表示 (R8 / D12)、本番の切り替え (D13) を含む。あわせて、`@misskey-dev/emoji-assets` を frontend の依存に持ち直す (今は backend の `node_modules` から取っている)、Node.js の版を本家の `Dockerfile` でなく `.node-version` から読む、fork の assets image (`Dockerfile.assets` と publish の workflow。`Dockerfile.bundled` が使う) を本体の workflow でのビルドに置き換える (R2)、`misskey-js` の型の生成 (`build-misskey-js-with-types`) が使う `api.json` の作り方を決める (`api.json` は本家のソースに無く、本家 backend をビルドして `generate-api-json` で作る生成物。`.cache/misskey` で本家 backend をビルドするか、本体の API から作るか) | しない |
+| P4 | **2026-10-05 に完了** (#3379。P4a #3382、P4b #3384 と本番の切り替え、P4c #3385、P4e #3386、P4d #3387 / #3388 / #3389)。`api.json` の作り方は決めずに残した (後の issue で決める)。frontend の取り込み (D1 / D3 / D4 / D5)、submodule と fork の廃止。frontend の CI の required 化とライセンスの表示 (R8 / D12)、本番の切り替え (D13) を含む。あわせて、`@misskey-dev/emoji-assets` を frontend の依存に持ち直す (今は backend の `node_modules` から取っている)、Node.js の版を本家の `Dockerfile` でなく `.node-version` から読む、fork の assets image (`Dockerfile.assets` と publish の workflow。`Dockerfile.bundled` が使う) を本体の workflow でのビルドに置き換える (R2)、`misskey-js` の型の生成 (`build-misskey-js-with-types`) が使う `api.json` の作り方を決める (`api.json` は本家のソースに無く、本家 backend をビルドして `generate-api-json` で作る生成物。`.cache/misskey` で本家 backend をビルドするか、本体の API から作るか) | しない |
 | P5 | 正式な名前 (**決定: Elythia**) と、プラグインの呼び名 (**決定: 据え置き**) の決定。どちらも 2026-09-30 | — |
 | P5b | リポジトリの移管 (D10)。コードの名前は変えず、旧 URL からの転送で動くことを確かめる | する |
 | P6 | 改名 (D7) と実行バイナリのサブコマンド化 (R7 / D11)。2.0.0 として出す (R6)。`docker-compose.yml` に `name:` を付ける (R3。named volume の移行手順と一緒に) | する |
