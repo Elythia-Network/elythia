@@ -57,6 +57,9 @@ func (c *countingEmojiRepo) FindManyByIDs(_ []string) ([]*model.Emoji, error) { 
 func (c *countingEmojiRepo) FindManyByNamesAndHost(_ []string, _ *string) ([]*model.Emoji, error) {
 	return nil, nil
 }
+func (c *countingEmojiRepo) FindManyByKeys(_ []model.EmojiKey) ([]*model.Emoji, error) {
+	return nil, nil
+}
 func (c *countingEmojiRepo) ListWithFilter(_, _ string, _ bool, _, _ string, _, _ int) ([]*model.Emoji, error) {
 	return nil, nil
 }

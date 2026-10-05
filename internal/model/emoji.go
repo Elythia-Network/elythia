@@ -24,6 +24,21 @@ type Emoji struct {
 
 func (Emoji) TableName() string { return "emoji" }
 
+// EmojiKey identifies a custom emoji by its (name, host) pair. Host is ""
+// for local emojis (host IS NULL in the emoji table).
+type EmojiKey struct {
+	Name string `json:"name"`
+	Host string `json:"host"`
+}
+
+// EmojiKeyOf returns the EmojiKey of e.
+func EmojiKeyOf(e *Emoji) EmojiKey {
+	if e.Host == nil {
+		return EmojiKey{Name: e.Name}
+	}
+	return EmojiKey{Name: e.Name, Host: *e.Host}
+}
+
 // EmojiV2Filter holds parameters for v2 admin emoji listing.
 type EmojiV2Filter struct {
 	Query    *EmojiV2Query

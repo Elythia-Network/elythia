@@ -206,5 +206,9 @@ func (r *failingEmojiRepo) FindManyByNamesAndHost(names []string, host *string) 
 	return r.inner.FindManyByNamesAndHost(names, host)
 }
 
+func (r *failingEmojiRepo) FindManyByKeys(keys []model.EmojiKey) ([]*model.Emoji, error) {
+	return r.inner.FindManyByKeys(keys)
+}
+
 // sanity: time import stay
 var _ = time.Now

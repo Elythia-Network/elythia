@@ -63,6 +63,15 @@ type EmojiRepository interface {
 	// FindManyByNamesAndHost returns emojis matching any of the given names for
 	// a specific host. host=nil searches local emojis (host IS NULL).
 	FindManyByNamesAndHost(names []string, host *string) ([]*model.Emoji, error)
+	// FindManyByKeys returns emojis matching any of the given (name, host)
+	// pairs, across hosts. It exists for display paths (resolving emoji URLs
+	// for packed notes / users) and **may be served from a cache**:
+	// CachedEmojiRepository answers it from a bounded TTL cache. Use
+	// FindManyByNamesAndHost when the result feeds a write decision.
+	//
+	// On error the returned slice may still hold the rows that were resolved
+	// (e.g. cache hits), so display callers can use it as a partial result.
+	FindManyByKeys(keys []model.EmojiKey) ([]*model.Emoji, error)
 	// ListRemoteWithFilter mirrors ListWithFilter for remote emojis. host empty
 	// matches any remote host.
 	ListRemoteWithFilter(query, host, sinceID, untilID string, limit, offset int) ([]*model.Emoji, error)
@@ -167,6 +176,57 @@ func (r *emojiRepository) FindManyByNamesAndHost(names []string, host *string) (
 		return nil, err
 	}
 	return emojis, nil
+}
+
+// emojiKeysChunk caps the number of (name, host) pairs per FindManyByKeys
+// query. PostgreSQL のバインド変数は 1 クエリ 65535 個までなので、1 組で 2 個
+// 使う remote の pair が大量に来ても上限に届かない大きさで区切る。
+const emojiKeysChunk = 500
+
+func (r *emojiRepository) FindManyByKeys(keys []model.EmojiKey) ([]*model.Emoji, error) {
+	// 列に入らない文字 (NUL など) を含む値は保存された行に現れないので、一致
+	// しえない。**1 つでも IN に載せるとクエリごと落ち**、同じ呼び出しの他の
+	// 絵文字まで解決できなくなるので、引く前に落とす (#3025 と同じ扱い)。
+	valid := make([]model.EmojiKey, 0, len(keys))
+	for _, k := range keys {
+		if storable(k.Name) && storable(k.Host) {
+			valid = append(valid, k)
+		}
+	}
+	var out []*model.Emoji
+	var firstErr error
+	for start := 0; start < len(valid); start += emojiKeysChunk {
+		end := min(start+emojiKeysChunk, len(valid))
+		var remote [][]any
+		var local []string
+		for _, k := range valid[start:end] {
+			if k.Host == "" {
+				local = append(local, k.Name)
+			} else {
+				remote = append(remote, []any{k.Name, k.Host})
+			}
+		}
+		q := r.db.Model(&model.Emoji{})
+		switch {
+		case len(remote) > 0 && len(local) > 0:
+			q = q.Where("(name, host) IN ?", remote).Or("host IS NULL AND name IN ?", local)
+		case len(remote) > 0:
+			q = q.Where("(name, host) IN ?", remote)
+		default:
+			q = q.Where("host IS NULL AND name IN ?", local)
+		}
+		var rows []*model.Emoji
+		if err := q.Find(&rows).Error; err != nil {
+			// 1 つの chunk が落ちても残りは引く。表示の経路は返った行を使うので、
+			// ここで止めると落ちた chunk より後の絵文字まで出なくなる。
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		out = append(out, rows...)
+	}
+	return out, firstErr
 }
 
 func (r *emojiRepository) ListRemoteWithFilter(query, host, sinceID, untilID string, limit, offset int) ([]*model.Emoji, error) {

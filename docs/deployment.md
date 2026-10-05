@@ -466,6 +466,17 @@ MK_ONLY_QUEUE=1 ./built/misskey -config .config/default.yml
 - 管理画面の `serverStats` は **Web ノードのホスト**の値しか出ない。配送ノードの
   CPU / メモリは別途 Prometheus (`enableMetrics`) 等で見る
 - 配送ノードを 0 台にすると**ジョブが処理されない**。最低 1 台は必要
+- **プロセスごとのキャッシュは Redis の pub/sub (`redisForPubsub`) で揃える。**
+  例えばノートやユーザーに載せる絵文字 URL の解決 (#3383) は各プロセスのメモリに
+  持ち、リモート絵文字の作成・更新は配送ノードの受信処理で起きる。書いたプロセスが
+  `internal:emojiCacheInvalidated` を publish し、他のプロセスは該当する絵文字だけを
+  落とす。publish は書き込みとは別の goroutine から行い、送り切れずに 1024 件
+  溜まったら「全体を落とす」1 件に畳む (受信処理を Redis の応答待ちで止めない)。
+  停止時は溜まっている分を最大 2 秒かけて送ってから止まる (締め切りの直前に送り始めた 1 件は、自分の 2 秒の timeout まで続くので、最悪で約 4 秒)。
+  **通知が届かない場合の上限は TTL** で、絵文字の更新・削除は 10 分、「その絵文字は
+  無い」は 1 分残りうる。該当するのは、Redis の再接続中などで publish を取りこぼした
+  場合、停止処理の 2 秒で送り切れなかった場合と送信側が止まった後の書き込み
+  (停止中にまだ走っている受信ジョブなど)、DB を直接書く後始末バッチ
 - **更新は配送ノードを先に行う。** AP の配送ジョブは署名鍵を payload に載せず
   `signerUserId` から配送時に引く形になっている。Web ノードだけを新しくすると、
   新しい形のジョブを古い配送ノードが受け取り、鍵を取り出せない。**古いノードは
@@ -1146,7 +1157,8 @@ WHERE e.host IS NULL AND NOT (df."userId" IS NULL AND df."userHost" IS NULL);
 直した 3 件を含め、ローカル絵文字 21 件すべてが system 所有を参照している)。
 
 **稼働中の本体には即座には伝わらない。** バッチは DB を直接書き、`emojiUpdated` も
-publish しない。サーバー側は `emoji` のキャッシュ (5 分) とアバターデコレーションの
+publish しない。サーバー側は `emoji` のキャッシュ (`/api/emojis` の一覧が 5 分、
+ノートやユーザーに載せる絵文字 URL の解決が 10 分、#3383) とアバターデコレーションの
 絵文字キャッシュ (30 秒)、**ブラウザ側は同梱 frontend が 1 時間**持つ
 (`packages/frontend/src/custom-emojis.ts`。IndexedDB、使えない環境では localStorage)。
 再起動は要らない。
