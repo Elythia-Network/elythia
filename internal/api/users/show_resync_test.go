@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/datatypes"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // resyncStubResolver is a RemoteUserResolver that also re-syncs stored users.

@@ -6,8 +6,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/testutil"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 const blobEmojiTag = `"tag": [{"type":"Emoji","name":":blob:","icon":{"type":"Image","url":"https://remote.example/emoji/blob.png"}}]`

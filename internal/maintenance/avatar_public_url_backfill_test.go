@@ -8,7 +8,7 @@ import (
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 func seedAvatarFile(t *testing.T, id, url string, webpublic *string) *model.DriveFile {

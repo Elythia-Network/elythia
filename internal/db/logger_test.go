@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/config"
+	"github.com/elythia-network/elythia/internal/config"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"

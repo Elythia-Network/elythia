@@ -3,7 +3,7 @@ package repository
 import (
 	"errors"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )

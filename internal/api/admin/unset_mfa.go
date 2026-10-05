@@ -6,10 +6,10 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/shiroha-a/mk/internal/api/apierr"
-	"github.com/shiroha-a/mk/internal/core/moderationlog"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/core/moderationlog"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // UnsetMfa handles POST /api/admin/unset-mfa (upstream 2026.7.0 #17614).

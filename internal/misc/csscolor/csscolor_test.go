@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/shiroha-a/mk/internal/misc/csscolor"
+	"github.com/elythia-network/elythia/internal/misc/csscolor"
 )
 
 // 実物の tinycolor2 が返した値と 1 件ずつ突き合わせる。

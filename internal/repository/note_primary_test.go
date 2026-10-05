@@ -11,8 +11,8 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 	"gorm.io/plugin/dbresolver"
 
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/testutil"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 // TestExistingNoteIDsOnPrimary_ReadsPrimaryNotReplica は #2719 の要を固定する。

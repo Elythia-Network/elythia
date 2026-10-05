@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/effectivepolicy"
+	"github.com/elythia-network/elythia/internal/effectivepolicy"
 )
 
 // mk-go 固有の role policy キーは fork frontend の 2 箇所で列挙されている。

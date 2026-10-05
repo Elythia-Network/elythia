@@ -36,8 +36,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/shiroha-a/mk/internal/queue"
-	"github.com/shiroha-a/mk/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/queue"
+	"github.com/elythia-network/elythia/internal/queue/driver"
 )
 
 // standardQueues is the label set every pull-mode gauge is emitted for,

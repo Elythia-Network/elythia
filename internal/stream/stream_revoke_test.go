@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/misc/credkey"
+	"github.com/elythia-network/elythia/internal/model"
 	"github.com/gorilla/websocket"
-	"github.com/shiroha-a/mk/internal/misc/credkey"
-	"github.com/shiroha-a/mk/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

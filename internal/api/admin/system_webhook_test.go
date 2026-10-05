@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/entity"
-	"github.com/shiroha-a/mk/internal/entitycompat/shapetest"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/testutil"
+	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/entitycompat/shapetest"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

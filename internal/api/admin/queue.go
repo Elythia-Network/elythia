@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/activitypub"
+	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/core/moderationlog"
+	"github.com/elythia-network/elythia/internal/queue"
 	"github.com/labstack/echo/v4"
-	"github.com/shiroha-a/mk/internal/activitypub"
-	"github.com/shiroha-a/mk/internal/api/apierr"
-	"github.com/shiroha-a/mk/internal/core/moderationlog"
-	"github.com/shiroha-a/mk/internal/queue"
 )
 
 // operatorProtectedTaskTypes are job types the queue-wide admin operations

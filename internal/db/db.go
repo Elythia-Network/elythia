@@ -10,7 +10,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/config"
+	"github.com/elythia-network/elythia/internal/config"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"

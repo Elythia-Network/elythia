@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/core/role"
+	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/labstack/echo/v4"
-	"github.com/shiroha-a/mk/internal/api/apierr"
-	"github.com/shiroha-a/mk/internal/core/role"
-	"github.com/shiroha-a/mk/internal/entity"
 	"gorm.io/gorm"
 )
 

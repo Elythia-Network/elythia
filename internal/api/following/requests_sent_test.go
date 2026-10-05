@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"testing"
 
-	corefollowing "github.com/shiroha-a/mk/internal/core/following"
-	"github.com/shiroha-a/mk/internal/model"
+	corefollowing "github.com/elythia-network/elythia/internal/core/following"
+	"github.com/elythia-network/elythia/internal/model"
 	"github.com/stretchr/testify/assert"
 )
 

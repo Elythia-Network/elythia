@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/entity"
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/model"
 	"gorm.io/datatypes"
 
 	"github.com/stretchr/testify/assert"

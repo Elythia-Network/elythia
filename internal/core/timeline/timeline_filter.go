@@ -3,7 +3,7 @@ package timeline
 import (
 	"strings"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // idInSet reports whether the (nilable) id is present in set.

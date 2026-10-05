@@ -5,7 +5,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/shiroha-a/mk/plugin"
+	"github.com/elythia-network/elythia/plugin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

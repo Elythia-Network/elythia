@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/core/chart"
+	"github.com/elythia-network/elythia/internal/core/chart"
 )
 
 // fakeRepo is an in-memory chart.Repository tailored for the wrappers

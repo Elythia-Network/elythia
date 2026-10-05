@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // #3200: 通報の通知はまとめているので、未対応の件数を載せて後続に気付けるようにする。

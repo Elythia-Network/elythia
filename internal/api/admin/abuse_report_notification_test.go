@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	apiadmin "github.com/shiroha-a/mk/internal/api/admin"
-	"github.com/shiroha-a/mk/internal/entitycompat/shapetest"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/testutil"
+	apiadmin "github.com/elythia-network/elythia/internal/api/admin"
+	"github.com/elythia-network/elythia/internal/entitycompat/shapetest"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

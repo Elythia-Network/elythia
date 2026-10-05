@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/elythia-network/elythia/internal/config"
 	"github.com/labstack/echo/v4"
-	"github.com/shiroha-a/mk/internal/config"
 )
 
 // OpenAPISpec serves /api.json.

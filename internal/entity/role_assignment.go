@@ -3,7 +3,7 @@ package entity
 import (
 	"time"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // PackRoleAssignmentLookup builds the exact-assignment response shared by the

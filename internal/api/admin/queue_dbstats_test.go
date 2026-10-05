@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	apiadmin "github.com/shiroha-a/mk/internal/api/admin"
+	apiadmin "github.com/elythia-network/elythia/internal/api/admin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

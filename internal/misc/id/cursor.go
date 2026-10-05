@@ -3,7 +3,7 @@ package id
 import (
 	"time"
 
-	"github.com/shiroha-a/mk/internal/misc/colfit"
+	"github.com/elythia-network/elythia/internal/misc/colfit"
 )
 
 // NormalizeCursor converts upstream Misskey pagination params (sinceId /

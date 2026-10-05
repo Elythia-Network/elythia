@@ -11,10 +11,10 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/core/role"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/repository"
-	"github.com/shiroha-a/mk/internal/safemath"
+	"github.com/elythia-network/elythia/internal/core/role"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
+	"github.com/elythia-network/elythia/internal/safemath"
 	"gorm.io/datatypes"
 )
 

@@ -15,10 +15,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/core/role"
-	"github.com/shiroha-a/mk/internal/misc/colfit"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/core/role"
+	"github.com/elythia-network/elythia/internal/misc/colfit"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // Errors returned by Service. 呼び出し側 (API 層) が HTTP の形へ落とす。

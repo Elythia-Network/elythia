@@ -7,11 +7,11 @@ import (
 	"sort"
 	"testing"
 
+	apimeta "github.com/elythia-network/elythia/internal/api/meta"
+	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/labstack/echo/v4"
-	apimeta "github.com/shiroha-a/mk/internal/api/meta"
-	"github.com/shiroha-a/mk/internal/config"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
 

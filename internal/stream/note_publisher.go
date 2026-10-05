@@ -6,13 +6,13 @@ import (
 	"log/slog"
 	"sync"
 
-	coredrive "github.com/shiroha-a/mk/internal/core/drive"
-	corenote "github.com/shiroha-a/mk/internal/core/note"
-	"github.com/shiroha-a/mk/internal/core/notesfilter"
-	corenotification "github.com/shiroha-a/mk/internal/core/notification"
-	"github.com/shiroha-a/mk/internal/entity"
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/model"
+	coredrive "github.com/elythia-network/elythia/internal/core/drive"
+	corenote "github.com/elythia-network/elythia/internal/core/note"
+	"github.com/elythia-network/elythia/internal/core/notesfilter"
+	corenotification "github.com/elythia-network/elythia/internal/core/notification"
+	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // PubSubPublisher abstracts the Publish side of core/event.PubSubService.

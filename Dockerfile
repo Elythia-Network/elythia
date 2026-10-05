@@ -72,7 +72,7 @@ RUN test -f frontend/node_modules/@misskey-dev/emoji-assets/built/twemoji/1f004.
 # make plugins を実行済みなら COPY で入るが、それに依存すると再現性が無い)。
 # プラグインが 1 つも無ければ何も生成せず、素の go build と同じになる。
 ARG MKGO_COMMIT=
-ENV REVISION_LDFLAGS="-X github.com/shiroha-a/mk/internal/config.MkGoCommit=${MKGO_COMMIT}"
+ENV REVISION_LDFLAGS="-X github.com/elythia-network/elythia/internal/config.MkGoCommit=${MKGO_COMMIT}"
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \

@@ -20,9 +20,9 @@ import (
 	"encoding/json"
 	"sync"
 
-	"github.com/shiroha-a/mk/internal/core/role"
-	"github.com/shiroha-a/mk/internal/entity"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/core/role"
+	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // Enricher fills the MeDetailed fields that only a handler with the full

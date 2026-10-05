@@ -5,13 +5,13 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/core/iplookuplog"
+	"github.com/elythia-network/elythia/internal/core/serverstats"
+	"github.com/elythia-network/elythia/internal/misc/colfit"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/labstack/echo/v4"
-	"github.com/shiroha-a/mk/internal/api/apierr"
-	"github.com/shiroha-a/mk/internal/core/iplookuplog"
-	"github.com/shiroha-a/mk/internal/core/serverstats"
-	"github.com/shiroha-a/mk/internal/misc/colfit"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/server/middleware"
 )
 
 // GetIndexStats handles POST /api/admin/get-index-stats.

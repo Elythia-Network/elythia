@@ -7,9 +7,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	drive "github.com/shiroha-a/mk/internal/core/drive"
-	"github.com/shiroha-a/mk/internal/entity"
-	"github.com/shiroha-a/mk/internal/model"
+	drive "github.com/elythia-network/elythia/internal/core/drive"
+	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // #1564 parity sweep のサービス層テスト群。

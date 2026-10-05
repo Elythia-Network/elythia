@@ -14,11 +14,11 @@ import (
 	"os"
 	"testing"
 
+	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/core/cache"
+	"github.com/elythia-network/elythia/internal/server"
+	"github.com/elythia-network/elythia/internal/testutil"
 	goredis "github.com/redis/go-redis/v9"
-	"github.com/shiroha-a/mk/internal/config"
-	"github.com/shiroha-a/mk/internal/core/cache"
-	"github.com/shiroha-a/mk/internal/server"
-	"github.com/shiroha-a/mk/internal/testutil"
 )
 
 // テスト全体で共有するサーバーとベースURL

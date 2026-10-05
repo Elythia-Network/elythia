@@ -8,10 +8,10 @@ import (
 	"net/url"
 	"path"
 
-	coredrive "github.com/shiroha-a/mk/internal/core/drive"
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/safehttp"
+	coredrive "github.com/elythia-network/elythia/internal/core/drive"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/safehttp"
 )
 
 // defaultURLUploadMaxBytes caps a remote download when no explicit limit is

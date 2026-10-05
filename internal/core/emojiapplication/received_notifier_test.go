@@ -8,10 +8,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/core/emojiapplication"
-	"github.com/shiroha-a/mk/internal/core/notification"
-	"github.com/shiroha-a/mk/internal/core/role"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/core/emojiapplication"
+	"github.com/elythia-network/elythia/internal/core/notification"
+	"github.com/elythia-network/elythia/internal/core/role"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 type recordingNotifier struct {

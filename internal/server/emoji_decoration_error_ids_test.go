@@ -8,8 +8,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/api/apierr"
-	apii "github.com/shiroha-a/mk/internal/api/i"
+	"github.com/elythia-network/elythia/internal/api/apierr"
+	apii "github.com/elythia-network/elythia/internal/api/i"
 )
 
 // 同梱 frontend は絵文字デコレーションの保存エラーに独自の文面を出す (#2975)。

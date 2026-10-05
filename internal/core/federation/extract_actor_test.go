@@ -3,7 +3,7 @@ package federation_test
 import (
 	"testing"
 
-	corefed "github.com/shiroha-a/mk/internal/core/federation"
+	corefed "github.com/elythia-network/elythia/internal/core/federation"
 	"github.com/stretchr/testify/assert"
 )
 

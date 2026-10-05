@@ -7,8 +7,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/shiroha-a/mk/internal/queue/driver"
-	queuemetrics "github.com/shiroha-a/mk/internal/queue/metrics"
+	"github.com/elythia-network/elythia/internal/queue/driver"
+	queuemetrics "github.com/elythia-network/elythia/internal/queue/metrics"
 )
 
 // newQueueMetrics constructs a Metrics bundle and binds it to the given

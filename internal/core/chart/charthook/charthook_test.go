@@ -13,10 +13,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/core/chart"
-	corecharts "github.com/shiroha-a/mk/internal/core/chart/charts"
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/core/chart"
+	corecharts "github.com/elythia-network/elythia/internal/core/chart/charts"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // fakeRepo is a tiny in-memory chart.Repository sufficient to drive

@@ -12,10 +12,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/datatypes"
 
-	"github.com/shiroha-a/mk/internal/core/userpack"
-	"github.com/shiroha-a/mk/internal/entity"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/testutil"
+	"github.com/elythia-network/elythia/internal/core/userpack"
+	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 // countingPiningRepo counts the per-user and the batched pin lookups.

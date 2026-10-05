@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/core/bubbleversus"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/core/bubbleversus"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 func decodeEnvelope(t *testing.T, payload any) (string, map[string]any) {

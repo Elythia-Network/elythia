@@ -3,7 +3,7 @@ package channels
 import (
 	"encoding/json"
 
-	"github.com/shiroha-a/mk/internal/stream"
+	"github.com/elythia-network/elythia/internal/stream"
 )
 
 // muteBlockUserProbe carries just the author host needed for the instance-mute

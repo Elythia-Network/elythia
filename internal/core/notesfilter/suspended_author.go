@@ -1,6 +1,6 @@
 package notesfilter
 
-import "github.com/shiroha-a/mk/internal/model"
+import "github.com/elythia-network/elythia/internal/model"
 
 // HasSuspendedAuthor reports whether the note itself, its reply target, or its
 // renote target was written by a suspended user.

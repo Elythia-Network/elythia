@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/core/notification"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/core/notification"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // ModeratorLister lists moderator/administrator users. 実装は core/role.Service。

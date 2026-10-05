@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/activitypub"
-	"github.com/shiroha-a/mk/internal/misc/colfit"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/activitypub"
+	"github.com/elythia-network/elythia/internal/misc/colfit"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // QuoteRequestStore records the quote requests local notes send (#3234).

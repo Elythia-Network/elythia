@@ -3,9 +3,9 @@ package notehide
 import (
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/core/ugcvisibility"
-	"github.com/shiroha-a/mk/internal/entity"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/core/ugcvisibility"
+	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // setUGCPolicy wires a fixed policy and restores the unwired state afterwards,

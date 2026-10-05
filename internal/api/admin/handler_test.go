@@ -12,22 +12,22 @@ import (
 	"testing"
 	"time"
 
+	apiadmin "github.com/elythia-network/elythia/internal/api/admin"
+	coredrive "github.com/elythia-network/elythia/internal/core/drive"
+	"github.com/elythia-network/elythia/internal/core/moderationlog"
+	"github.com/elythia-network/elythia/internal/core/role"
+	"github.com/elythia-network/elythia/internal/core/signup"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
+	"github.com/elythia-network/elythia/internal/server/middleware"
+	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/labstack/echo/v4"
-	apiadmin "github.com/shiroha-a/mk/internal/api/admin"
-	coredrive "github.com/shiroha-a/mk/internal/core/drive"
-	"github.com/shiroha-a/mk/internal/core/moderationlog"
-	"github.com/shiroha-a/mk/internal/core/role"
-	"github.com/shiroha-a/mk/internal/core/signup"
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/repository"
-	"github.com/shiroha-a/mk/internal/server/middleware"
-	"github.com/shiroha-a/mk/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/datatypes"
 
-	"github.com/shiroha-a/mk/internal/core/iplookuplog"
+	"github.com/elythia-network/elythia/internal/core/iplookuplog"
 )
 
 const adminInternalErrorJSON = `{"error":{"message":"Internal error.","code":"INTERNAL_ERROR","id":"5d37dbcb-891e-41ca-a3d6-e690c97775ac","kind":"server"}}`

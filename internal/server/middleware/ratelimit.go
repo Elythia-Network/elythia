@@ -12,11 +12,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/core/role"
+	"github.com/elythia-network/elythia/internal/safemath"
 	"github.com/labstack/echo/v4"
 	"github.com/redis/go-redis/v9"
-	"github.com/shiroha-a/mk/internal/api/apierr"
-	"github.com/shiroha-a/mk/internal/core/role"
-	"github.com/shiroha-a/mk/internal/safemath"
 )
 
 // EndpointLimit defines rate limit parameters for an API endpoint.

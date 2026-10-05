@@ -19,10 +19,10 @@ import (
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 
-	"github.com/shiroha-a/mk/internal/config"
-	"github.com/shiroha-a/mk/internal/core/fsck"
-	"github.com/shiroha-a/mk/internal/core/selfcheck"
-	"github.com/shiroha-a/mk/internal/testutil"
+	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/core/fsck"
+	"github.com/elythia-network/elythia/internal/core/selfcheck"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 // unreachablePort is a TCP port nothing listens on, so dialing it fails fast.

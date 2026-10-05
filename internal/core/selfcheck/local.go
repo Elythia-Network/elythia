@@ -10,7 +10,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 
-	"github.com/shiroha-a/mk/internal/core/dbhealth"
+	"github.com/elythia-network/elythia/internal/core/dbhealth"
 )
 
 // LocalDeps are the dependencies the local checks inspect. どれも nil 可で、

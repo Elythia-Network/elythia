@@ -3,7 +3,7 @@ package metrics
 import (
 	"time"
 
-	"github.com/shiroha-a/mk/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/queue/driver"
 )
 
 // Observer adapts driver observations into the Prometheus histograms

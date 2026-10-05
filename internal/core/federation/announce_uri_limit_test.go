@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/core/federation"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/core/federation"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // 列に入らない id の Announce は renote を作らないこと (#2723)。

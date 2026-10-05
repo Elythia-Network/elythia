@@ -1,7 +1,7 @@
 package timeline
 
 import (
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // metaRepoCacheLimits is the production MetaCacheLimitsProvider that reads

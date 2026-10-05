@@ -15,9 +15,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/config"
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/plugin"
+	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/plugin"
 )
 
 // 宣言と運営者の設定から実効上限を決める。**宣言だけでは既定値を超えられない**

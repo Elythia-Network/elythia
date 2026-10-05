@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/queue"
+	"github.com/elythia-network/elythia/internal/queue"
 )
 
 // **deliver job の署名鍵が `admin/queue/jobs` から読めないこと。**

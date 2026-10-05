@@ -5,9 +5,9 @@ import (
 	"log/slog"
 	"slices"
 
-	"github.com/shiroha-a/mk/internal/misc/searchnorm"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/misc/searchnorm"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // CacheLimits captures the four per-user timeline cache caps that

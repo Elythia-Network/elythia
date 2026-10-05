@@ -3,7 +3,7 @@ package repository
 import (
 	"time"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // FollowingRowsFromAnchorReader returns the following rows from anchorID to

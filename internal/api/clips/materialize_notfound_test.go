@@ -7,9 +7,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	corenote "github.com/shiroha-a/mk/internal/core/note"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/testutil"
+	corenote "github.com/elythia-network/elythia/internal/core/note"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 // dbFailingWithUserRepo fails the lookup RequireVisible actually uses.

@@ -5,12 +5,12 @@ import (
 	"errors"
 	"time"
 
-	coredeliveryhealth "github.com/shiroha-a/mk/internal/core/deliveryhealth"
-	corefederation "github.com/shiroha-a/mk/internal/core/federation"
-	coreinstance "github.com/shiroha-a/mk/internal/core/instance"
-	"github.com/shiroha-a/mk/internal/core/remotecheck"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/repository"
+	coredeliveryhealth "github.com/elythia-network/elythia/internal/core/deliveryhealth"
+	corefederation "github.com/elythia-network/elythia/internal/core/federation"
+	coreinstance "github.com/elythia-network/elythia/internal/core/instance"
+	"github.com/elythia-network/elythia/internal/core/remotecheck"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // remoteCheckHTTPTimeout bounds each request of the remote diagnosis.

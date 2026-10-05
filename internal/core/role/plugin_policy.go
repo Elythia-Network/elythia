@@ -13,9 +13,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/effectivepolicy"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/plugin"
+	"github.com/elythia-network/elythia/internal/effectivepolicy"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/plugin"
 )
 
 // ErrEffectivePolicyProvider is returned by GetUserPoliciesChecked when a

@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/repository"
 	"golang.org/x/sync/singleflight"
 )
 

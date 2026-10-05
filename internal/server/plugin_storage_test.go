@@ -13,10 +13,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/config"
-	"github.com/shiroha-a/mk/internal/pluginstore"
-	"github.com/shiroha-a/mk/internal/testutil"
-	"github.com/shiroha-a/mk/plugin"
+	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/pluginstore"
+	"github.com/elythia-network/elythia/internal/testutil"
+	"github.com/elythia-network/elythia/plugin"
 )
 
 // testDBConfig points a Config at the shared test database, so dbBackedStorage

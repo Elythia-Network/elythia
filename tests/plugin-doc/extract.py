@@ -16,9 +16,9 @@ HEADER = '''import (
 \t"net/http"
 \t"testing"
 
-\t"github.com/shiroha-a/mk/plugin"
-\t"github.com/shiroha-a/mk/plugin/peercache"
-\t"github.com/shiroha-a/mk/plugin/plugintest"
+\t"github.com/elythia-network/elythia/plugin"
+\t"github.com/elythia-network/elythia/plugin/peercache"
+\t"github.com/elythia-network/elythia/plugin/plugintest"
 \t"github.com/stretchr/testify/assert"
 \t"github.com/stretchr/testify/require"
 )

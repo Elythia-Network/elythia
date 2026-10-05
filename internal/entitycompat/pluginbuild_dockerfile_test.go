@@ -26,7 +26,7 @@ var pluginbuildExemptDockerfiles = map[string]string{
 // mkgoBuildVerbs and mkgoBuildTargets identify a command that compiles mk-go.
 //
 // **どちらも 1 つの文字列に頼らない。** `./cmd/elythia` だけを探す形は module path
-// (`github.com/shiroha-a/mk/cmd/elythia`) やワイルドカード (`./cmd/...`) で書かれた
+// (`github.com/elythia-network/elythia/cmd/elythia`) やワイルドカード (`./cmd/...`) で書かれた
 // Dockerfile を builder 集合から黙って落とす。動詞側も同じで、`go install` に
 // 変えるだけで検査対象から外れる。**落ちたものは allowlist にも載らないので
 // gate は鳴らないまま検査が減る** (「1 つも拾えなかったら落とす」は全部消えた

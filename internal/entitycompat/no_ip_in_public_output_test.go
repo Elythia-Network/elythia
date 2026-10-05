@@ -18,9 +18,9 @@ import (
 	"testing"
 	"unicode"
 
-	"github.com/shiroha-a/mk/internal/activitypub"
-	"github.com/shiroha-a/mk/internal/entity"
-	"github.com/shiroha-a/mk/internal/entitycompat/ipscanfixture"
+	"github.com/elythia-network/elythia/internal/activitypub"
+	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/entitycompat/ipscanfixture"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -288,8 +288,8 @@ func TestTypeRefsResolvesNamedTypes(t *testing.T) {
 	const src = `package p
 
 import (
-	m "github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/entity"
+	m "github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/entity"
 )
 
 type Box[T any] struct{ V T }

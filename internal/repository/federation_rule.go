@@ -3,7 +3,7 @@ package repository
 import (
 	"gorm.io/gorm"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // FederationRuleRepository stores the mk-go-only federation rules (#3090).

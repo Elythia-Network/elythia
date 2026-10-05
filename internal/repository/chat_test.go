@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/misc/idnhost"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/misc/idnhost"
+	"github.com/elythia-network/elythia/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

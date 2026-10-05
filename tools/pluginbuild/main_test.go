@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/plugin"
+	"github.com/elythia-network/elythia/plugin"
 )
 
 func TestParseArgs(t *testing.T) {
@@ -90,6 +90,75 @@ func TestDiscover_MissingGoModIsError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "go.mod がありません")
 	assert.Contains(t, err.Error(), "独立した Go module")
+}
+
+// 以前のモジュールパスのままのプラグインは、生成の段階で直し方を示して止める (#3394)。
+func TestDiscover_LegacyModulePathIsError(t *testing.T) {
+	root := t.TempDir()
+	dir := writePlugin(t, root, "old", "example.com/old", validMarker())
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte(
+		"module github.com/shiroha-a/mk-plugin-old\n\ngo 1.27.1\n\n"+
+			"require github.com/shiroha-a/mk v0.0.0\n\n"+
+			"replace github.com/shiroha-a/mk => ../..\n"), 0o644))
+
+	_, err := discover(root, "", include{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "github.com/shiroha-a/mk")
+	assert.Contains(t, err.Error(), hostModulePath)
+	assert.Contains(t, err.Error(), "docs/plugins/compatibility.md")
+}
+
+// 無効化したプラグインは、古いパスのままでも止めない (外して残せるようにする)。
+func TestDiscover_DisabledLegacyPluginIsSkipped(t *testing.T) {
+	root := t.TempDir()
+	dir := writePlugin(t, root, "old", "example.com/old", "name: old\napiVersion: 1\ndisabled: true\n")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte(
+		"module example.com/old\n\nrequire github.com/shiroha-a/mk v0.0.0\n"), 0o644))
+
+	found, err := discover(root, "", include{})
+	require.NoError(t, err)
+	assert.Empty(t, found)
+}
+
+func TestCheckLegacyModulePath(t *testing.T) {
+	cases := []struct {
+		name  string
+		gomod string
+		bad   bool
+	}{
+		{"single-line require", "module example.com/x\nrequire github.com/shiroha-a/mk v0.0.0\n", true},
+		{"require block", "module example.com/x\nrequire (\n\tgithub.com/shiroha-a/mk v0.0.0\n)\n", true},
+		{"raw-quoted path", "module example.com/x\nrequire `github.com/shiroha-a/mk` v0.0.0\n", true},
+		{"quoted path", "module example.com/x\nrequire \"github.com/shiroha-a/mk\" v0.0.0\n", true},
+		{"replace only", "module example.com/x\nreplace github.com/shiroha-a/mk => ../..\n", true},
+		{"new path", "module example.com/x\nrequire github.com/elythia-network/elythia v0.0.0\nreplace github.com/elythia-network/elythia => ../..\n", false},
+		{"own legacy-style module name", "module github.com/shiroha-a/mk-plugin-x\n", false},
+		{"queue dependency", "module example.com/x\nrequire github.com/shiroha-a/mkq v1.1.1\n", false},
+		{"subpackage-like path", "module example.com/x\nrequire github.com/shiroha-a/mk/v2 v2.0.0\n", false},
+		{"comment only", "module example.com/x\n// moved from github.com/shiroha-a/mk\n", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "go.mod")
+			require.NoError(t, os.WriteFile(path, []byte(c.gomod), 0o644))
+			err := checkLegacyModulePath(path)
+			if c.bad {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+
+	assert.Error(t, checkLegacyModulePath(filepath.Join(t.TempDir(), "missing.mod")))
+}
+
+// hostModulePath は本体の go.mod の module 行と一致していなければならない。
+// 生成物の import と、古いパスの案内に使っているので、片方だけ変えると壊れる。
+func TestHostModulePathMatchesGoMod(t *testing.T) {
+	got, err := modulePath(filepath.Join("..", "..", "go.mod"))
+	require.NoError(t, err)
+	assert.Equal(t, hostModulePath, got)
 }
 
 // apiVersion 不一致はコンパイル前に落とす。Go のコンパイルエラーや起動時
@@ -378,7 +447,7 @@ func fakeRepo(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"),
-		[]byte("module github.com/shiroha-a/mk\n\ngo 1.26.5\n"), 0o644))
+		[]byte("module github.com/elythia-network/elythia\n\ngo 1.26.5\n"), 0o644))
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "cmd", "elythia"), 0o755))
 	return root
 }
@@ -534,7 +603,7 @@ func TestRun_MissingRootGoModIsError(t *testing.T) {
 func TestRun_UnwritableTargetIsError(t *testing.T) {
 	root := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"),
-		[]byte("module github.com/shiroha-a/mk\n\ngo 1.26.5\n"), 0o644))
+		[]byte("module github.com/elythia-network/elythia\n\ngo 1.26.5\n"), 0o644))
 	// cmd/elythia/ を作らないので generated file が書けない。
 	writePlugin(t, filepath.Join(root, "plugins"), "hello", "example.com/hello", validMarker())
 

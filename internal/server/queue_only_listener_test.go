@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/config"
-	queuemetrics "github.com/shiroha-a/mk/internal/queue/metrics"
+	"github.com/elythia-network/elythia/internal/config"
+	queuemetrics "github.com/elythia-network/elythia/internal/queue/metrics"
 )
 
 // queue role の最小 mux は /healthz を返す。ここが無いと

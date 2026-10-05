@@ -16,7 +16,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/shiroha-a/mk/internal/pluginspec"
+	"github.com/elythia-network/elythia/internal/pluginspec"
 )
 
 func main() {

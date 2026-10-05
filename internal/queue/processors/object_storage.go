@@ -8,10 +8,10 @@ import (
 	"log/slog"
 	"time"
 
-	coredrive "github.com/shiroha-a/mk/internal/core/drive"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/queue"
-	"github.com/shiroha-a/mk/internal/queue/driver"
+	coredrive "github.com/elythia-network/elythia/internal/core/drive"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/queue"
+	"github.com/elythia-network/elythia/internal/queue/driver"
 )
 
 // cleanRemoteFilesBatchSize は 1 バッチで処理するファイル数。

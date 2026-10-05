@@ -3,7 +3,7 @@ package notesummary_test
 import (
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/misc/notesummary"
+	"github.com/elythia-network/elythia/internal/misc/notesummary"
 	"github.com/stretchr/testify/assert"
 )
 

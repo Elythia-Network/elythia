@@ -7,9 +7,9 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/shiroha-a/mk/internal/api/apierr"
-	"github.com/shiroha-a/mk/internal/core/moderationlog"
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/core/moderationlog"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // ForwardAbuseUserReport handles POST /api/admin/forward-abuse-user-report.

@@ -8,7 +8,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/server/middleware"
+	"github.com/elythia-network/elythia/internal/server/middleware"
 )
 
 // restrictedProbePaths は応答を実際に確かめる対象。**`noCORSPaths` を回さない**

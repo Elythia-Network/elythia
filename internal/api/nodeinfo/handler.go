@@ -8,11 +8,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/config"
+	corereversi "github.com/elythia-network/elythia/internal/core/reversi"
+	"github.com/elythia-network/elythia/internal/core/role"
+	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/labstack/echo/v4"
-	"github.com/shiroha-a/mk/internal/config"
-	corereversi "github.com/shiroha-a/mk/internal/core/reversi"
-	"github.com/shiroha-a/mk/internal/core/role"
-	"github.com/shiroha-a/mk/internal/repository"
 	"golang.org/x/sync/singleflight"
 )
 

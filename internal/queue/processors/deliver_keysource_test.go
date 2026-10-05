@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/queue"
+	"github.com/elythia-network/elythia/internal/queue"
 )
 
 // newTestKeyPEM mints a throwaway RSA key. `deliver_test.go` の

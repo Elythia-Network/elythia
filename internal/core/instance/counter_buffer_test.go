@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/core/instance"
+	"github.com/elythia-network/elythia/internal/core/instance"
 )
 
 type counterCall struct {

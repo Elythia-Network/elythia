@@ -4,9 +4,9 @@ import (
 	"context"
 	"log/slog"
 
-	corewebhook "github.com/shiroha-a/mk/internal/core/webhook"
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/model"
+	corewebhook "github.com/elythia-network/elythia/internal/core/webhook"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // ReportInAppNotifier leaves a new report in the moderators' notification

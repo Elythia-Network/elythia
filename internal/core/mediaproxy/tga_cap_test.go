@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/misc/imagedecode"
+	"github.com/elythia-network/elythia/internal/misc/imagedecode"
 	"github.com/stretchr/testify/require"
 )
 

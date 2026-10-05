@@ -3,7 +3,7 @@ package server
 import (
 	"log/slog"
 
-	"github.com/shiroha-a/mk/plugin"
+	"github.com/elythia-network/elythia/plugin"
 )
 
 /*

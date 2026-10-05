@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/config"
-	"github.com/shiroha-a/mk/internal/frontendutil"
+	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/frontendutil"
 )
 
 // writeViteManifest lays down a minimal built-asset tree and points the

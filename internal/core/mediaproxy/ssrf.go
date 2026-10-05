@@ -3,7 +3,7 @@ package mediaproxy
 import (
 	"net/http"
 
-	"github.com/shiroha-a/mk/internal/safehttp"
+	"github.com/elythia-network/elythia/internal/safehttp"
 )
 
 // ErrSSRFBlocked is re-exported from safehttp for backward compatibility with

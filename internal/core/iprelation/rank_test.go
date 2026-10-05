@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/core/iprelation"
+	"github.com/elythia-network/elythia/internal/core/iprelation"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

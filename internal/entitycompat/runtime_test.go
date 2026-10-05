@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/core/notification"
-	corerole "github.com/shiroha-a/mk/internal/core/role"
-	"github.com/shiroha-a/mk/internal/entity"
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/core/notification"
+	corerole "github.com/elythia-network/elythia/internal/core/role"
+	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/model"
 	"gorm.io/datatypes"
 )
 

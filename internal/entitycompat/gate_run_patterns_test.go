@@ -84,7 +84,7 @@ func packageDir(operand string) string {
 	p := strings.TrimSuffix(operand, "...")
 	p = strings.TrimSuffix(p, "/")
 	p = strings.TrimPrefix(p, "./")
-	p = strings.TrimPrefix(p, "github.com/shiroha-a/mk")
+	p = strings.TrimPrefix(p, "github.com/elythia-network/elythia")
 	p = strings.TrimPrefix(p, "/")
 	if p == "" {
 		return "."

@@ -15,8 +15,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/pgarray"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/pgarray"
 )
 
 // **モデルを JSON 化したときに秘密が出ないことを固定する。**

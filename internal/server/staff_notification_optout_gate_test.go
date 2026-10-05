@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/core/notification"
+	"github.com/elythia-network/elythia/internal/core/notification"
 )
 
 // 運営向けに配られる通知は、**利用者が自分では切れない** (#2987)。個人設定の

@@ -6,11 +6,11 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/shiroha-a/mk/internal/api/apierr"
-	"github.com/shiroha-a/mk/internal/core/moderationlog"
-	"github.com/shiroha-a/mk/internal/misc/idnhost"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/queue"
+	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/core/moderationlog"
+	"github.com/elythia-network/elythia/internal/misc/idnhost"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/queue"
 )
 
 // toPunyHost normalizes a host the same way upstream UtilityService.toPuny does

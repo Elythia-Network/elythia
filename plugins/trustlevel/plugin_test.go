@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/elythia-network/elythia/plugin"
+	"github.com/elythia-network/elythia/plugin/plugintest"
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/shiroha-a/mk/plugin"
-	"github.com/shiroha-a/mk/plugin/plugintest"
 )
 
 /*

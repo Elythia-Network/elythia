@@ -1,9 +1,9 @@
 package notesfilter
 
 import (
-	corenote "github.com/shiroha-a/mk/internal/core/note"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/repository"
+	corenote "github.com/elythia-network/elythia/internal/core/note"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // FilterVisible drops notes the viewer is not allowed to see, per

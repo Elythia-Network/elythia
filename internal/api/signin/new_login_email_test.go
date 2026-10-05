@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	miscsmtp "github.com/shiroha-a/mk/internal/misc/smtp"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/testutil"
+	miscsmtp "github.com/elythia-network/elythia/internal/misc/smtp"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/misc/ipnorm"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/misc/ipnorm"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // Observer persists one observation. Implemented by repository.UserIPRepository.

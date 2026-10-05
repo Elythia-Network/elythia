@@ -7,10 +7,10 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	apiusers "github.com/shiroha-a/mk/internal/api/users"
-	"github.com/shiroha-a/mk/internal/entity"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/repository"
+	apiusers "github.com/elythia-network/elythia/internal/api/users"
+	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // avatarStaticFallback is the path the frontend treats as the

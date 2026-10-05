@@ -12,7 +12,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/plugin/dbresolver"
 
-	"github.com/shiroha-a/mk/internal/testutil"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 func openDB(t *testing.T) *gorm.DB {

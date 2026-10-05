@@ -6,8 +6,8 @@ package maintenance
 import (
 	"slices"
 
-	"github.com/shiroha-a/mk/internal/misc/hashtag"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/misc/hashtag"
+	"github.com/elythia-network/elythia/internal/model"
 	"gorm.io/gorm"
 )
 

@@ -7,13 +7,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	apiadmin "github.com/shiroha-a/mk/internal/api/admin"
-	"github.com/shiroha-a/mk/internal/core/role"
-	"github.com/shiroha-a/mk/internal/core/signup"
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/repository"
-	"github.com/shiroha-a/mk/internal/testutil"
+	apiadmin "github.com/elythia-network/elythia/internal/api/admin"
+	"github.com/elythia-network/elythia/internal/core/role"
+	"github.com/elythia-network/elythia/internal/core/signup"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 // failingUserRepo makes every FindByID look like a database failure rather

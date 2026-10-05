@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // importFollowing parses a CSV body of `acct[,key=value...]` lines and applies

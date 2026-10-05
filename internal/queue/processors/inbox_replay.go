@@ -8,7 +8,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/shiroha-a/mk/internal/activitypub"
+	"github.com/elythia-network/elythia/internal/activitypub"
 )
 
 // InboxReplayGuard remembers activities that were already processed, so the

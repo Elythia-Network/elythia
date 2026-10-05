@@ -3,8 +3,8 @@ package maintenance
 import (
 	"gorm.io/gorm"
 
-	"github.com/shiroha-a/mk/internal/entity"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // AvatarPublicURLBackfillResult reports the outcome of one keyset batch.

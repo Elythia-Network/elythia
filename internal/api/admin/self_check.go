@@ -4,8 +4,8 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/elythia-network/elythia/internal/core/selfcheck"
 	"github.com/labstack/echo/v4"
-	"github.com/shiroha-a/mk/internal/core/selfcheck"
 )
 
 // SelfCheckRunner runs the federation / dependency self-checks.

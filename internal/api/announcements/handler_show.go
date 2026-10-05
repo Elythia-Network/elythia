@@ -3,10 +3,10 @@ package announcements
 import (
 	"net/http"
 
+	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/repository"
+	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/labstack/echo/v4"
-	"github.com/shiroha-a/mk/internal/api/apierr"
-	"github.com/shiroha-a/mk/internal/repository"
-	"github.com/shiroha-a/mk/internal/server/middleware"
 )
 
 // Show handles POST /api/announcements/show.

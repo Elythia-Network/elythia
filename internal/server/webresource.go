@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/labstack/echo/v4"
-	"github.com/shiroha-a/mk/internal/config"
-	"github.com/shiroha-a/mk/internal/repository"
 )
 
 // webResourceHandler serves the non-API web resources upstream exposes from

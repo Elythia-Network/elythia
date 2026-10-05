@@ -12,8 +12,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/shiroha-a/mk/internal/activitypub/mfm"
-	"github.com/shiroha-a/mk/internal/misc/searchnorm"
+	"github.com/elythia-network/elythia/internal/activitypub/mfm"
+	"github.com/elythia-network/elythia/internal/misc/searchnorm"
 )
 
 // MaxUserTags は user.tags に格納する hashtag の最大件数。upstream

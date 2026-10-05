@@ -3,8 +3,8 @@ package processors
 import (
 	"context"
 
-	"github.com/shiroha-a/mk/internal/core/reaction"
-	"github.com/shiroha-a/mk/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/core/reaction"
+	"github.com/elythia-network/elythia/internal/queue/driver"
 )
 
 // ReactionFlushProcessor handles the periodic reaction buffer flush task.

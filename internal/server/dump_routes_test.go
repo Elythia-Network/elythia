@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/config"
+	"github.com/elythia-network/elythia/internal/config"
 )
 
 // TestDumpRoutes builds a minimal Server with a stub echo router and verifies

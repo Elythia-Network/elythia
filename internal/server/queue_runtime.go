@@ -3,9 +3,9 @@ package server
 import (
 	"time"
 
-	apiadmin "github.com/shiroha-a/mk/internal/api/admin"
-	"github.com/shiroha-a/mk/internal/queue/driver"
-	"github.com/shiroha-a/mk/internal/queue/runtimestats"
+	apiadmin "github.com/elythia-network/elythia/internal/api/admin"
+	"github.com/elythia-network/elythia/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/queue/runtimestats"
 )
 
 // queueRuntimeAdapter implements apiadmin.QueueRuntimeProvider by combining

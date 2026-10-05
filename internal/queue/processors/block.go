@@ -5,10 +5,10 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/shiroha-a/mk/internal/core/blocking"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/queue"
-	"github.com/shiroha-a/mk/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/core/blocking"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/queue"
+	"github.com/elythia-network/elythia/internal/queue/driver"
 )
 
 // Blocker is the narrow subset of core/blocking.Service the block processor

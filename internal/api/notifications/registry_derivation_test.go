@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/core/notification"
+	"github.com/elythia-network/elythia/internal/core/notification"
 )
 
 // TestTypeListsAreDerivedFromRegistry asserts the API-level type lists are

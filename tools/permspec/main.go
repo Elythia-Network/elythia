@@ -24,7 +24,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/shiroha-a/mk/internal/upstreamsrc"
+	"github.com/elythia-network/elythia/internal/upstreamsrc"
 )
 
 // meta のフラグは行頭インデント 1 つの位置にしか現れない。**行頭を固定しないと

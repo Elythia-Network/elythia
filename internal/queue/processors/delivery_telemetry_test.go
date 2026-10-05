@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/core/deliveryhealth"
-	"github.com/shiroha-a/mk/internal/queue/processors"
+	"github.com/elythia-network/elythia/internal/core/deliveryhealth"
+	"github.com/elythia-network/elythia/internal/queue/processors"
 )
 
 // recordingTelemetry captures every RecordDelivery call.

@@ -21,11 +21,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/safehttp"
+	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/labstack/echo/v4"
 	"github.com/mmcdole/gofeed"
-	"github.com/shiroha-a/mk/internal/api/apierr"
-	"github.com/shiroha-a/mk/internal/safehttp"
-	"github.com/shiroha-a/mk/internal/server/middleware"
 	"golang.org/x/sync/singleflight"
 )
 

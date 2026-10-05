@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"log/slog"
 
-	"github.com/shiroha-a/mk/internal/activitypub"
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/activitypub"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // ProfileUpdateDeliveryHook implements api/i.ProfileUpdateHook by rendering an

@@ -6,11 +6,11 @@ import (
 	"net/http"
 	"testing"
 
-	apiadmin "github.com/shiroha-a/mk/internal/api/admin"
-	coredrive "github.com/shiroha-a/mk/internal/core/drive"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/safehttp"
-	"github.com/shiroha-a/mk/internal/testutil"
+	apiadmin "github.com/elythia-network/elythia/internal/api/admin"
+	coredrive "github.com/elythia-network/elythia/internal/core/drive"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/safehttp"
+	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

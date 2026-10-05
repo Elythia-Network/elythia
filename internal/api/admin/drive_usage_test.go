@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/core/driveusage"
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/core/driveusage"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // stubDriveUsage records the forceRecalc it was asked for.

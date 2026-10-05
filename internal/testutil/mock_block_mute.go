@@ -4,7 +4,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // MockBlockingRepository is a test double for repository.BlockingRepository.

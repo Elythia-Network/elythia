@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/shiroha-a/mk/internal/misc/colfit"
+	"github.com/elythia-network/elythia/internal/misc/colfit"
 )
 
 // Form limits (#2570).

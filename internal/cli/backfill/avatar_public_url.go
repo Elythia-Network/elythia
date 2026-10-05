@@ -1,6 +1,6 @@
 package backfill
 
-import "github.com/shiroha-a/mk/internal/cli/cliflag"
+import "github.com/elythia-network/elythia/internal/cli/cliflag"
 
 // AvatarPublicURL implements "elythia backfill avatar-public-url": it rewrites
 // stored `user.avatarUrl` / `user.bannerUrl` to the public (metadata-stripped)

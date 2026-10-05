@@ -4,7 +4,7 @@ package l10n
 import (
 	"strings"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // LangBilingual is used when neither profile.lang nor meta.langs yields a known

@@ -4,9 +4,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/misc/idnhost"
-	"github.com/shiroha-a/mk/internal/misc/keyword"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/misc/idnhost"
+	"github.com/elythia-network/elythia/internal/misc/keyword"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // Actor is what the rules know about the sender.

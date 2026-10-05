@@ -4,16 +4,16 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/core/transfer"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/queue"
+	"github.com/elythia-network/elythia/internal/repository"
+	"github.com/elythia-network/elythia/internal/safemath"
+	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/labstack/echo/v4"
-	"github.com/shiroha-a/mk/internal/api/apierr"
-	"github.com/shiroha-a/mk/internal/core/transfer"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/queue"
-	"github.com/shiroha-a/mk/internal/repository"
-	"github.com/shiroha-a/mk/internal/safemath"
-	"github.com/shiroha-a/mk/internal/server/middleware"
 
-	"github.com/shiroha-a/mk/internal/core/role"
+	"github.com/elythia-network/elythia/internal/core/role"
 )
 
 // ImportFileReader reads a drive file's content synchronously. Satisfied by

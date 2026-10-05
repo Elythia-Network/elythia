@@ -5,12 +5,12 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/shiroha-a/mk/internal/api/apierr"
-	"github.com/shiroha-a/mk/internal/core/moderationlog"
-	"github.com/shiroha-a/mk/internal/misc"
-	"github.com/shiroha-a/mk/internal/misc/password"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/core/moderationlog"
+	"github.com/elythia-network/elythia/internal/misc"
+	"github.com/elythia-network/elythia/internal/misc/password"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // ResetPassword handles POST /api/admin/reset-password.

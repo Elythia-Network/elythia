@@ -3,7 +3,7 @@ package role
 import (
 	"time"
 
-	"github.com/shiroha-a/mk/internal/safemath"
+	"github.com/elythia-network/elythia/internal/safemath"
 )
 
 // PolicyNumber normalizes a numeric policy value into a float.

@@ -12,9 +12,9 @@ import (
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/core/cache"
 	redis "github.com/redis/go-redis/v9"
-	"github.com/shiroha-a/mk/internal/config"
-	"github.com/shiroha-a/mk/internal/core/cache"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

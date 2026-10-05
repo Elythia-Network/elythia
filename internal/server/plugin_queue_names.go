@@ -1,8 +1,8 @@
 package server
 
 import (
-	"github.com/shiroha-a/mk/internal/queue"
-	"github.com/shiroha-a/mk/plugin"
+	"github.com/elythia-network/elythia/internal/queue"
+	"github.com/elythia-network/elythia/plugin"
 )
 
 // pluginJobQueueNames returns the queues the worker must consume for the

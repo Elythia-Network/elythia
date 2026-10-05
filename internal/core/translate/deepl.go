@@ -12,7 +12,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/shiroha-a/mk/internal/safehttp"
+	"github.com/elythia-network/elythia/internal/safehttp"
 )
 
 var (

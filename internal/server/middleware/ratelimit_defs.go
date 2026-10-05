@@ -3,7 +3,7 @@ package middleware
 import (
 	"time"
 
-	"github.com/shiroha-a/mk/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/apierr"
 )
 
 // DefaultEndpointLimits defines per-endpoint rate limits matching

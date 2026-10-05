@@ -1,6 +1,6 @@
 package federation
 
-import "github.com/shiroha-a/mk/internal/model"
+import "github.com/elythia-network/elythia/internal/model"
 
 // deriveVisibility maps an AS to/cc audience pair addressed by actor to a
 // Misskey visibility, mirroring upstream ApAudienceService.parseAudience

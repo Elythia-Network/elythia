@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/core/chart"
+	"github.com/elythia-network/elythia/internal/core/chart"
 )
 
 func newActiveUsersTestEngine(t *testing.T) (*chart.Chart, *fakeRepo, *fakeClock) {

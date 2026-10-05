@@ -4,11 +4,11 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/elythia-network/elythia/internal/api/apierr"
+	corefollowing "github.com/elythia-network/elythia/internal/core/following"
+	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/labstack/echo/v4"
-	"github.com/shiroha-a/mk/internal/api/apierr"
-	corefollowing "github.com/shiroha-a/mk/internal/core/following"
-	"github.com/shiroha-a/mk/internal/entity"
-	"github.com/shiroha-a/mk/internal/server/middleware"
 )
 
 // Invalidate handles POST /api/following/invalidate.

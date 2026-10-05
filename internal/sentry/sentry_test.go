@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/config"
+	mksentry "github.com/elythia-network/elythia/internal/sentry"
 	sentrygo "github.com/getsentry/sentry-go"
 	"github.com/labstack/echo/v4"
-	"github.com/shiroha-a/mk/internal/config"
-	mksentry "github.com/shiroha-a/mk/internal/sentry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

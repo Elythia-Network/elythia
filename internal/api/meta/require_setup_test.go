@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 	"github.com/stretchr/testify/assert"
 )
 

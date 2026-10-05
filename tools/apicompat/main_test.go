@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/upstreamsrc"
+	"github.com/elythia-network/elythia/internal/upstreamsrc"
 )
 
 func TestReadMkRoutesFromStdin(t *testing.T) {

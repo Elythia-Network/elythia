@@ -6,9 +6,9 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/queue"
-	"github.com/shiroha-a/mk/internal/queue/driver"
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/queue"
+	"github.com/elythia-network/elythia/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // DeleteAccountProcessor cascades through a user's related rows (notes,

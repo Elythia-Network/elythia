@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/shiroha-a/mk/internal/testutil"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 // #2683: 起動時の配線検査が見る述語。**false を返す側を必ず固定する。**

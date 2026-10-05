@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/safehttp"
+	"github.com/elythia-network/elythia/internal/safehttp"
 )
 
 // リモートから取れなかったことと「無い」ことを混ぜない (#3034)。

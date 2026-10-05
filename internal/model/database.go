@@ -1,8 +1,8 @@
 package model
 
 import (
-	"github.com/shiroha-a/mk/internal/config"
-	"github.com/shiroha-a/mk/internal/db"
+	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/db"
 	"gorm.io/gorm"
 )
 

@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/activitypub"
+	"github.com/elythia-network/elythia/internal/activitypub"
 )
 
 func TestPeerRateLimiter_BurstThenRefill(t *testing.T) {

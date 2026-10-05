@@ -9,15 +9,15 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/shiroha-a/mk/internal/api/meta"
-	"github.com/shiroha-a/mk/internal/config"
-	corenote "github.com/shiroha-a/mk/internal/core/note"
-	"github.com/shiroha-a/mk/internal/entity"
-	"github.com/shiroha-a/mk/internal/frontendutil"
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/misc/notesummary"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/api/meta"
+	"github.com/elythia-network/elythia/internal/config"
+	corenote "github.com/elythia-network/elythia/internal/core/note"
+	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/frontendutil"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/misc/notesummary"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // ssrMetaHandler serves the SPA shell with entity-specific <meta> tags for the

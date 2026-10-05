@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 	"gorm.io/datatypes"
 )
 

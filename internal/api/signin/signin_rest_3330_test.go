@@ -10,12 +10,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/api/signin"
-	"github.com/shiroha-a/mk/internal/core/captcha"
-	"github.com/shiroha-a/mk/internal/core/twofactor"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/repository"
-	"github.com/shiroha-a/mk/internal/testutil"
+	"github.com/elythia-network/elythia/internal/api/signin"
+	"github.com/elythia-network/elythia/internal/core/captcha"
+	"github.com/elythia-network/elythia/internal/core/twofactor"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 // assertEmpty400 asserts upstream's `reply.code(400); return;`: a 400 with

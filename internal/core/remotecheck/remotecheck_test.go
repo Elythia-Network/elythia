@@ -16,11 +16,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/activitypub"
-	"github.com/shiroha-a/mk/internal/core/deliveryhealth"
-	"github.com/shiroha-a/mk/internal/core/federation"
-	"github.com/shiroha-a/mk/internal/core/selfcheck"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/activitypub"
+	"github.com/elythia-network/elythia/internal/core/deliveryhealth"
+	"github.com/elythia-network/elythia/internal/core/federation"
+	"github.com/elythia-network/elythia/internal/core/selfcheck"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // remote is a fake remote server. webfinger は resource ごとの応答を持つ。

@@ -9,12 +9,12 @@ import (
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 
-	"github.com/shiroha-a/mk/internal/activitypub"
-	corefederation "github.com/shiroha-a/mk/internal/core/federation"
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/repository"
-	"github.com/shiroha-a/mk/internal/testutil"
+	"github.com/elythia-network/elythia/internal/activitypub"
+	corefederation "github.com/elythia-network/elythia/internal/core/federation"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 func openResyncDB(t *testing.T) *gorm.DB {

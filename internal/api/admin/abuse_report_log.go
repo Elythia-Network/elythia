@@ -1,6 +1,6 @@
 package admin
 
-import "github.com/shiroha-a/mk/internal/model"
+import "github.com/elythia-network/elythia/internal/model"
 
 // abuseReportLogRow returns a copy of r that carries only the
 // abuse_user_report columns, for the `report` field of the

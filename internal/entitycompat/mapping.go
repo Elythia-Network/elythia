@@ -3,7 +3,7 @@ package entitycompat
 import (
 	"reflect"
 
-	"github.com/shiroha-a/mk/internal/entity"
+	"github.com/elythia-network/elythia/internal/entity"
 )
 
 // Layer pairs one mk-go struct with the golden schema it must conform to.

@@ -50,7 +50,7 @@ var (
 	pluginDocTypeRe   = regexp.MustCompile(`^type ([A-Z][A-Za-z0-9_]*) interface\s*\{?$`)
 	pluginDocMethodRe = regexp.MustCompile(`^[ \t]+([A-Z][A-Za-z0-9_]*)(\(.*)$`)
 
-	pluginDocGoSectionStart = "### Go (`github.com/shiroha-a/mk/plugin`)"
+	pluginDocGoSectionStart = "### Go (`github.com/elythia-network/elythia/plugin`)"
 	pluginDocGoSectionEnd   = "### TypeScript"
 )
 

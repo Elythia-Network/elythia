@@ -13,8 +13,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/shiroha-a/mk/internal/api/apierr"
-	"github.com/shiroha-a/mk/internal/server/middleware"
+	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/server/middleware"
 )
 
 // errBodyNotObject is returned by c.Bind when an API endpoint received a body

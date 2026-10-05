@@ -12,10 +12,10 @@ import (
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 
-	"github.com/shiroha-a/mk/internal/cli/cliflag"
-	"github.com/shiroha-a/mk/internal/config"
-	"github.com/shiroha-a/mk/internal/core/fsck"
-	"github.com/shiroha-a/mk/internal/redislog"
+	"github.com/elythia-network/elythia/internal/cli/cliflag"
+	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/core/fsck"
+	"github.com/elythia-network/elythia/internal/redislog"
 )
 
 // defaultConfigPath is the -config default these subcommands have always used.

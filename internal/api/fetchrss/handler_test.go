@@ -21,7 +21,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/testutil"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 const sampleRSS2 = `<?xml version="1.0" encoding="UTF-8"?>

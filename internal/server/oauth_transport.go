@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/shiroha-a/mk/internal/safehttp"
+	"github.com/elythia-network/elythia/internal/safehttp"
 )
 
 // checkIPRangeEnvKey mirrors the environment variable 本家 OAuth2ProviderService

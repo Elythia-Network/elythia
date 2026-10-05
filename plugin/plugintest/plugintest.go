@@ -38,9 +38,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/effectivepolicy"
-	"github.com/shiroha-a/mk/internal/pluginstore"
-	"github.com/shiroha-a/mk/plugin"
+	"github.com/elythia-network/elythia/internal/effectivepolicy"
+	"github.com/elythia-network/elythia/internal/pluginstore"
+	"github.com/elythia-network/elythia/plugin"
 )
 
 // Harness builds the fake environment a plugin sees.

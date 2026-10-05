@@ -3,8 +3,8 @@ package channels
 import (
 	"encoding/json"
 
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/stream"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/stream"
 )
 
 // DriveChannel forwards drive file life-cycle events scoped to the

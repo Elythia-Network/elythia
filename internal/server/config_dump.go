@@ -6,9 +6,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/shiroha-a/mk/internal/config"
-	"github.com/shiroha-a/mk/internal/queue"
-	"github.com/shiroha-a/mk/internal/queue/driver/mkqdriver"
+	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/queue"
+	"github.com/elythia-network/elythia/internal/queue/driver/mkqdriver"
 )
 
 // ConfigDump is the resolved view of an instance's configuration.

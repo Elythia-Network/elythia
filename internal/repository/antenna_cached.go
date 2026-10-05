@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // defaultAntennaCacheTTL is the backstop for a missed invalidation.

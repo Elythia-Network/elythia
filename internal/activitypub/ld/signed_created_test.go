@@ -3,7 +3,7 @@ package ld_test
 import (
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/activitypub/ld"
+	"github.com/elythia-network/elythia/internal/activitypub/ld"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

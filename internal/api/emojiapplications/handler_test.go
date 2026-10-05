@@ -13,11 +13,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	"github.com/shiroha-a/mk/internal/api/emojiapplications"
-	"github.com/shiroha-a/mk/internal/core/emojiapplication"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/repository"
-	"github.com/shiroha-a/mk/internal/server/middleware"
+	"github.com/elythia-network/elythia/internal/api/emojiapplications"
+	"github.com/elythia-network/elythia/internal/core/emojiapplication"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
+	"github.com/elythia-network/elythia/internal/server/middleware"
 )
 
 type stubApps struct {

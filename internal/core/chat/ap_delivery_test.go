@@ -4,11 +4,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/activitypub"
-	corechat "github.com/shiroha-a/mk/internal/core/chat"
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/testutil"
+	"github.com/elythia-network/elythia/internal/activitypub"
+	corechat "github.com/elythia-network/elythia/internal/core/chat"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

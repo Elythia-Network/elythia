@@ -1,7 +1,7 @@
 package server
 
 import (
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // metaUGCVisibility returns meta.ugcVisibilityForVisitor, falling back to the

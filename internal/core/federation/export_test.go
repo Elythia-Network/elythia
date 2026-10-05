@@ -3,8 +3,8 @@ package federation
 import (
 	"time"
 
-	"github.com/shiroha-a/mk/internal/activitypub"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/activitypub"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // ExtractEmojiTags exposes the unexported extractEmojiTags for external tests.

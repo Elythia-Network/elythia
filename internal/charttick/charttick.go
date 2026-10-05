@@ -7,7 +7,7 @@ package charttick
 import (
 	"context"
 
-	"github.com/shiroha-a/mk/internal/core/chart"
+	"github.com/elythia-network/elythia/internal/core/chart"
 	"gorm.io/gorm"
 )
 

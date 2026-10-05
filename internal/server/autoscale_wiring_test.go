@@ -12,10 +12,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/config"
-	"github.com/shiroha-a/mk/internal/queue/driver"
-	queuemetrics "github.com/shiroha-a/mk/internal/queue/metrics"
-	"github.com/shiroha-a/mk/internal/queue/runtimestats"
+	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/queue/driver"
+	queuemetrics "github.com/elythia-network/elythia/internal/queue/metrics"
+	"github.com/elythia-network/elythia/internal/queue/runtimestats"
 )
 
 // scriptableDriver is a driver.Driver fake whose WorkerCount /

@@ -7,9 +7,9 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/shiroha-a/mk/internal/entity"
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // ProfileLookup loads the profile row of a user. repository.UserRepository

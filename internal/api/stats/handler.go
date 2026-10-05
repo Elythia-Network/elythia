@@ -10,8 +10,8 @@ import (
 	"github.com/labstack/echo/v4"
 	"gorm.io/gorm"
 
-	"github.com/shiroha-a/mk/internal/core/chart"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/core/chart"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // ChartReader is the subset of *chart.Chart this endpoint needs.

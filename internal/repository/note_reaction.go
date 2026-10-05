@@ -3,8 +3,8 @@ package repository
 import (
 	"errors"
 
+	"github.com/elythia-network/elythia/internal/model"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/shiroha-a/mk/internal/model"
 	"gorm.io/gorm"
 )
 

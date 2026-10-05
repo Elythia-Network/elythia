@@ -3,7 +3,7 @@ package queue
 import (
 	"time"
 
-	"github.com/shiroha-a/mk/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/queue/driver"
 )
 
 // MaintenanceQueueName is the queue used for low-priority maintenance

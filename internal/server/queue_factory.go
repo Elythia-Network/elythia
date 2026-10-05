@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/config"
-	"github.com/shiroha-a/mk/internal/queue"
-	"github.com/shiroha-a/mk/internal/queue/driver"
-	"github.com/shiroha-a/mk/internal/queue/driver/mkqdriver"
+	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/queue"
+	"github.com/elythia-network/elythia/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/queue/driver/mkqdriver"
 )
 
 // buildQueueDriver constructs the queue driver selected by config.

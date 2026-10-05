@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/core/notification"
+	"github.com/elythia-network/elythia/internal/core/notification"
 )
 
 func abuseNotification() *notification.Notification {

@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/shiroha-a/mk/plugin"
+	"github.com/elythia-network/elythia/plugin"
 )
 
 // **ゼロ値が既定。** 遅延なし・再試行なし・重複排除なしで積む。

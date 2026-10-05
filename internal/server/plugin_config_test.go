@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/config"
-	"github.com/shiroha-a/mk/plugin"
+	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/plugin"
 )
 
 // **既定は有効。** ビルドに含めた時点で運営者は意図して選んでいるので、

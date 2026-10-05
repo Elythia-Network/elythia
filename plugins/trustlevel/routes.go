@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/shiroha-a/mk/plugin"
+	"github.com/elythia-network/elythia/plugin"
 )
 
 func jobs(ctx plugin.Context, j plugin.Jobs) error {

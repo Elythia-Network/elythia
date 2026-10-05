@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	corenote "github.com/shiroha-a/mk/internal/core/note"
-	"github.com/shiroha-a/mk/internal/model"
+	corenote "github.com/elythia-network/elythia/internal/core/note"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // exportableFor reports whether a note referenced by the exporting user's

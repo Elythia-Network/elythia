@@ -9,10 +9,10 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/misc/redact"
 	sentrygo "github.com/getsentry/sentry-go"
 	"github.com/labstack/echo/v4"
-	"github.com/shiroha-a/mk/internal/config"
-	"github.com/shiroha-a/mk/internal/misc/redact"
 )
 
 // flushTimeout is the maximum duration to block draining queued events when

@@ -16,17 +16,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/activitypub/mfm"
-	"github.com/shiroha-a/mk/internal/entity"
-	"github.com/shiroha-a/mk/internal/misc/hashtag"
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/misc/idnhost"
-	"github.com/shiroha-a/mk/internal/misc/keyword"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/activitypub/mfm"
+	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/misc/hashtag"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/misc/idnhost"
+	"github.com/elythia-network/elythia/internal/misc/keyword"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 
-	corechannel "github.com/shiroha-a/mk/internal/core/channel"
-	"github.com/shiroha-a/mk/internal/core/role"
+	corechannel "github.com/elythia-network/elythia/internal/core/channel"
+	"github.com/elythia-network/elythia/internal/core/role"
 )
 
 // featured ランキング更新の sampling rate / note 年齢上限 (upstream

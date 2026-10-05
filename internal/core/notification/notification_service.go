@@ -11,9 +11,9 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/redis/go-redis/v9"
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/repository"
 )
 
 // Type enumerates the supported notification types.

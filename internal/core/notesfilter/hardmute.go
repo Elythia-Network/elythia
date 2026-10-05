@@ -7,8 +7,8 @@
 package notesfilter
 
 import (
-	"github.com/shiroha-a/mk/internal/core/wordmute"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/core/wordmute"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // ProfileLookup is the minimal subset of repository.UserRepository this

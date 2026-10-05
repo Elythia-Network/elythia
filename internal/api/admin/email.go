@@ -3,9 +3,9 @@ package admin
 import (
 	"net/http"
 
+	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/misc/smtp"
 	"github.com/labstack/echo/v4"
-	"github.com/shiroha-a/mk/internal/api/apierr"
-	"github.com/shiroha-a/mk/internal/misc/smtp"
 )
 
 // SendEmail handles POST /api/admin/send-email.

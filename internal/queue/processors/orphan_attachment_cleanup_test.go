@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/queue/driver"
-	"github.com/shiroha-a/mk/internal/queue/processors"
+	"github.com/elythia-network/elythia/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/queue/processors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

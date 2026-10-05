@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/queue/driver"
 )
 
 // mustMarshal serializes a payload via json.Marshal. mk-go の queue

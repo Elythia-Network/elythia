@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/elythia-network/elythia/internal/core/twofactor"
+	"github.com/elythia-network/elythia/internal/model"
 	"github.com/pquerna/otp/totp"
 	goredis "github.com/redis/go-redis/v9"
-	"github.com/shiroha-a/mk/internal/core/twofactor"
-	"github.com/shiroha-a/mk/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -13,11 +13,11 @@ import (
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/elythia-network/elythia/internal/activitypub"
+	"github.com/elythia-network/elythia/internal/queue"
+	"github.com/elythia-network/elythia/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/queue/processors"
 	goredis "github.com/redis/go-redis/v9"
-	"github.com/shiroha-a/mk/internal/activitypub"
-	"github.com/shiroha-a/mk/internal/queue"
-	"github.com/shiroha-a/mk/internal/queue/driver"
-	"github.com/shiroha-a/mk/internal/queue/processors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

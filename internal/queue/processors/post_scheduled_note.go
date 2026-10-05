@@ -15,12 +15,12 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/core/note"
-	"github.com/shiroha-a/mk/internal/core/notification"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/queue"
-	"github.com/shiroha-a/mk/internal/queue/driver"
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/core/note"
+	"github.com/elythia-network/elythia/internal/core/notification"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/queue"
+	"github.com/elythia-network/elythia/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // ScheduledNoteDraftRepo is the narrow subset of NoteDraftRepository required

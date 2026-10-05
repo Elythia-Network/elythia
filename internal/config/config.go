@@ -7,18 +7,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/misc/password"
+	"github.com/elythia-network/elythia/internal/misc/password"
 	"github.com/spf13/viper"
 )
 
 // MkGoVersion is the mk-go version. Override at build time via:
 //
-//	go build -ldflags "-X github.com/shiroha-a/mk/internal/config.MkGoVersion=1.5.0"
+//	go build -ldflags "-X github.com/elythia-network/elythia/internal/config.MkGoVersion=1.5.0"
 var MkGoVersion = "1.5.0"
 
 // MisskeyVersion is the compatible Misskey version. Override at build time via:
 //
-//	go build -ldflags "-X github.com/shiroha-a/mk/internal/config.MisskeyVersion=2026.10.0"
+//	go build -ldflags "-X github.com/elythia-network/elythia/internal/config.MisskeyVersion=2026.10.0"
 var MisskeyVersion = "2026.10.0"
 
 // MkGoCommit is the source revision this binary was built from (short hash).
@@ -27,7 +27,7 @@ var MisskeyVersion = "2026.10.0"
 // build-arg) で、`go build ./...` や `go run` では入らない。読む側は空を
 // 「不明」として扱い、表示しないこと。Override at build time via:
 //
-//	go build -ldflags "-X github.com/shiroha-a/mk/internal/config.MkGoCommit=abc1234"
+//	go build -ldflags "-X github.com/elythia-network/elythia/internal/config.MkGoCommit=abc1234"
 var MkGoCommit = ""
 
 // MkGoRepositoryURL is the canonical source repository of mk-go itself.

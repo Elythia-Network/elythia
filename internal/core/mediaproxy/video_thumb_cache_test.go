@@ -2,7 +2,7 @@ package mediaproxy
 
 import (
 	"context"
-	"github.com/shiroha-a/mk/internal/misc/imagedecode"
+	"github.com/elythia-network/elythia/internal/misc/imagedecode"
 	"hash/crc32"
 	"io"
 	"net/http"

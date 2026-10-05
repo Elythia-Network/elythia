@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/stream"
+	"github.com/elythia-network/elythia/internal/stream"
 
 	"github.com/stretchr/testify/require"
 )

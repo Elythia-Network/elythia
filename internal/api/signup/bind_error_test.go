@@ -3,7 +3,7 @@ package signup_test
 import (
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/testutil"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 // TestApplicationApply_BindErrorIsInvalidParam pins that a body

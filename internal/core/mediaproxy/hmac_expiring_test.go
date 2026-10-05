@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/core/mediaproxy"
+	"github.com/elythia-network/elythia/internal/core/mediaproxy"
 )
 
 var expSecret = []byte("s3cret")

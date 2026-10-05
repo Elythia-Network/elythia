@@ -1,8 +1,8 @@
 package entity
 
 import (
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // DriveFileLookup batch-fetches drive files by ID. Implemented by

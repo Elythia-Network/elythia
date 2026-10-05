@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/shiroha-a/mk/internal/core/transfer"
-	"github.com/shiroha-a/mk/internal/queue"
-	"github.com/shiroha-a/mk/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/core/transfer"
+	"github.com/elythia-network/elythia/internal/queue"
+	"github.com/elythia-network/elythia/internal/queue/driver"
 )
 
 // ExportProcessor handles `export` tasks by delegating to transfer.Exporter.

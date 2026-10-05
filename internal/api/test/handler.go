@@ -12,9 +12,9 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/labstack/echo/v4"
 	"github.com/redis/go-redis/v9"
-	"github.com/shiroha-a/mk/internal/repository"
 	"gorm.io/gorm"
 )
 

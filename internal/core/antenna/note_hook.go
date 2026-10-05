@@ -1,6 +1,6 @@
 package antenna
 
-import "github.com/shiroha-a/mk/internal/model"
+import "github.com/elythia-network/elythia/internal/model"
 
 // NoteCreateHook adapts antenna.Service to core/note.AntennaHook so that
 // NoteCreateService can fan newly-created notes out to matching antennas

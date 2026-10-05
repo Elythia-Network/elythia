@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/core/chart"
+	"github.com/elythia-network/elythia/internal/core/chart"
 )
 
 // stubChart returns a fixed Result and records the query it was given.

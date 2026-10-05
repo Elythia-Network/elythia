@@ -3,8 +3,8 @@ package diag
 import (
 	"fmt"
 
-	"github.com/shiroha-a/mk/internal/config"
-	"github.com/shiroha-a/mk/internal/server"
+	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/server"
 )
 
 // ConfigDump implements "elythia config-dump": it prints the resolved

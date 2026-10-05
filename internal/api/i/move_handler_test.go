@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/core/move"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/core/move"
+	"github.com/elythia-network/elythia/internal/model"
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/crypto/bcrypt"
 )

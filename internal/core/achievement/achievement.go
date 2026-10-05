@@ -15,9 +15,9 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/core/notification"
-	misc "github.com/shiroha-a/mk/internal/misc/achievement"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/core/notification"
+	misc "github.com/elythia-network/elythia/internal/misc/achievement"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // Server-side granted achievement type names. Keep in sync with

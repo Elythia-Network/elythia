@@ -17,7 +17,7 @@ package imagedecode
 import (
 	"image"
 
-	"github.com/shiroha-a/mk/internal/misc/imagedecode"
+	"github.com/elythia-network/elythia/internal/misc/imagedecode"
 )
 
 // MaxImagePixels returns the declared width*height ceiling used for images a

@@ -6,17 +6,17 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/pagination"
+	corepage "github.com/elythia-network/elythia/internal/core/page"
+	coreuser "github.com/elythia-network/elythia/internal/core/user"
+	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/misc/colfit"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
+	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/labstack/echo/v4"
-	"github.com/shiroha-a/mk/internal/api/apierr"
-	"github.com/shiroha-a/mk/internal/api/pagination"
-	corepage "github.com/shiroha-a/mk/internal/core/page"
-	coreuser "github.com/shiroha-a/mk/internal/core/user"
-	"github.com/shiroha-a/mk/internal/entity"
-	"github.com/shiroha-a/mk/internal/misc/colfit"
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/repository"
-	"github.com/shiroha-a/mk/internal/server/middleware"
 )
 
 // MainStreamPublisher emits events to a user's `main` WebSocket channel.

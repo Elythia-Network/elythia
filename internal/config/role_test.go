@@ -3,7 +3,7 @@ package config_test
 import (
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/config"
+	"github.com/elythia-network/elythia/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

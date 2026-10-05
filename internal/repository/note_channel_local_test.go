@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/datatypes"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // channels/timeline の匿名 visitor + ugcVisibilityForVisitor='local' (upstream

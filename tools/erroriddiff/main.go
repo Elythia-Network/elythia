@@ -25,7 +25,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/shiroha-a/mk/internal/upstreamsrc"
+	"github.com/elythia-network/elythia/internal/upstreamsrc"
 )
 
 // codeIDRe matches a Misskey meta.errors entry. All 459 upstream entries place

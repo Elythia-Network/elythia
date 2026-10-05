@@ -35,16 +35,16 @@ module github.com/you/mk-plugin-myplugin
 
 go 1.27.1
 
-require github.com/shiroha-a/mk v0.0.0
+require github.com/elythia-network/elythia v0.0.0
 
-replace github.com/shiroha-a/mk => ../..
+replace github.com/elythia-network/elythia => ../..
 ```
 
 **`replace` は要る。** `make build` は生成される `go.work` で解決できるが、**`make plugin-test` は `GOWORK=off` で回す**ので、これが無いと `missing go.sum entry` で落ちる。同梱プラグインは全部この形。
 
 **独立した Go module である必要がある。** これは形式ではなく、Go の internal ルールにより「mk-go の内部パッケージを import できない」ことを保証する仕組み。`go.mod` を持たないディレクトリはビルド時にエラーになる。
 
-依存を足すときは自分の module の中で `go get` する。**リポジトリのルートで `go mod tidy` を走らせないこと** — 生成物 `cmd/elythia/plugins_generated.go` が `github.com/shiroha-a/mk-plugin-*` を import しており、private repo だと解決に失敗する。
+依存を足すときは自分の module の中で `go get` する。**リポジトリのルートで `go mod tidy` を走らせないこと** — 生成物 `cmd/elythia/plugins_generated.go` が各プラグインのモジュール (上の例では `github.com/you/mk-plugin-myplugin`) を import しており、private repo だと解決に失敗する。
 
 ### `plugin.go`
 
@@ -53,7 +53,7 @@ replace github.com/shiroha-a/mk => ../..
 ```go
 package myplugin
 
-import "github.com/shiroha-a/mk/plugin"
+import "github.com/elythia-network/elythia/plugin"
 
 var Plugin = plugin.Definition{
 	Name:       "myplugin",
@@ -798,7 +798,7 @@ require.NoError(t, jobs.Run(t, "prune", ""))
 `plugin/plugintest` は golden (`TestPluginSurfaceDrift`) の対象ではあるが、doc との
 突き合わせは行われない — この 2 つは **golden の diff をレビューで見ること**。
 
-### Go (`github.com/shiroha-a/mk/plugin/peercache`)
+### Go (`github.com/elythia-network/elythia/plugin/peercache`)
 
 ```
 const DefaultTTL
@@ -820,7 +820,7 @@ func (*Cache) Store(context.Context, string, any, bool) error
 func (*Cache) Sweep(context.Context) error
 ```
 
-### Go (`github.com/shiroha-a/mk/plugin/imagedecode`)
+### Go (`github.com/elythia-network/elythia/plugin/imagedecode`)
 
 取得した画像を本体と同じ上限でデコードする。**`plugin` 本体とは別パッケージ**
 なので、使うプラグインだけが画像ライブラリの依存を持つ (`plugin/peercache` が
@@ -832,7 +832,7 @@ func DecodeImage([]byte) (image.Image, error)
 func DecodeImageWithPixelCap([]byte, int64) (image.Image, error)
 ```
 
-### Go (`github.com/shiroha-a/mk/plugin`)
+### Go (`github.com/elythia-network/elythia/plugin`)
 
 ```
 const APIVersion

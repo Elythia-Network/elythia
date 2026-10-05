@@ -11,10 +11,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/shiroha-a/mk/internal/cli/backfill"
-	"github.com/shiroha-a/mk/internal/cli/diag"
-	"github.com/shiroha-a/mk/internal/cli/migrate"
-	"github.com/shiroha-a/mk/internal/cli/serve"
+	"github.com/elythia-network/elythia/internal/cli/backfill"
+	"github.com/elythia-network/elythia/internal/cli/diag"
+	"github.com/elythia-network/elythia/internal/cli/migrate"
+	"github.com/elythia-network/elythia/internal/cli/serve"
 )
 
 // Command is one subcommand. A command with Sub dispatches its first argument

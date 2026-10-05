@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/queue"
+	"github.com/elythia-network/elythia/internal/queue"
 )
 
 // AllQueueNames が queue 名の唯一の出どころであること (#2690)。

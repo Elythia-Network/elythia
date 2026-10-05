@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/labstack/echo/v4"
-	"github.com/shiroha-a/mk/internal/api/apierr"
 )
 
 // Achievements handles POST /api/users/achievements.

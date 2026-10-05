@@ -5,8 +5,8 @@ import (
 	"errors"
 	"log/slog"
 
-	"github.com/shiroha-a/mk/internal/core/notification"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/core/notification"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // InAppNotifier is the subset of the notification service this package needs.

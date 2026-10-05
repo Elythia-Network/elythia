@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	corechannel "github.com/shiroha-a/mk/internal/core/channel"
-	"github.com/shiroha-a/mk/internal/core/note"
-	"github.com/shiroha-a/mk/internal/core/role"
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/testutil"
+	corechannel "github.com/elythia-network/elythia/internal/core/channel"
+	"github.com/elythia-network/elythia/internal/core/note"
+	"github.com/elythia-network/elythia/internal/core/role"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

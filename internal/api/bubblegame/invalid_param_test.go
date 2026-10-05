@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/apierr"
 )
 
 // TestBubbleGame_InvalidParamShape pins upstream's ajv envelope for

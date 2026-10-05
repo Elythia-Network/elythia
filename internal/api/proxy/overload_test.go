@@ -12,9 +12,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/config"
-	"github.com/shiroha-a/mk/internal/core/mediaproxy"
-	"github.com/shiroha-a/mk/internal/safehttp"
+	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/core/mediaproxy"
+	"github.com/elythia-network/elythia/internal/safehttp"
 )
 
 // 過負荷で落とした応答の wire 上の形を固定する (#3032)。

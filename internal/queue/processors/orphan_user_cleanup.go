@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/queue/driver"
 )
 
 // orphanUserBatchSize bounds one DELETE so a large backlog cannot hold the

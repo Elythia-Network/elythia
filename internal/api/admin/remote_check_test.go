@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/core/remotecheck"
-	"github.com/shiroha-a/mk/internal/core/selfcheck"
+	"github.com/elythia-network/elythia/internal/core/remotecheck"
+	"github.com/elythia-network/elythia/internal/core/selfcheck"
 )
 
 type stubRemoteChecker struct {

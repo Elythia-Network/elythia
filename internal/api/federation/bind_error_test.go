@@ -3,7 +3,7 @@ package federation
 import (
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/testutil"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 // TestStats_BindErrorIsInvalidParam pins that a body federation/stats cannot

@@ -12,9 +12,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/core/deliveryhealth"
-	"github.com/shiroha-a/mk/internal/queue/driver"
-	"github.com/shiroha-a/mk/internal/queue/processors"
+	"github.com/elythia-network/elythia/internal/core/deliveryhealth"
+	"github.com/elythia-network/elythia/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/queue/processors"
 )
 
 // 期限付きの配送 (#3238、引用の承認の QuoteRequest) は、期限を過ぎていれば送らない。

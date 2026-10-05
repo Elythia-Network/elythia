@@ -11,8 +11,8 @@ import (
 	"path"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/safehttp"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/safehttp"
 )
 
 // ExportCustomEmojis is the export type for the custom-emoji ZIP archive

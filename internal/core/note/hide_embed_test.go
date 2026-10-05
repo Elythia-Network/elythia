@@ -3,7 +3,7 @@ package note
 import (
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 func ptrInt(v int) *int { return &v }

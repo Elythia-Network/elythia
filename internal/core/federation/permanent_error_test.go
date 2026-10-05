@@ -6,8 +6,8 @@ import (
 	"net"
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/activitypub"
-	corereaction "github.com/shiroha-a/mk/internal/core/reaction"
+	"github.com/elythia-network/elythia/internal/activitypub"
+	corereaction "github.com/elythia-network/elythia/internal/core/reaction"
 	"github.com/stretchr/testify/assert"
 )
 

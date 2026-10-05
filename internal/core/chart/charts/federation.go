@@ -1,7 +1,7 @@
 package charts
 
 import (
-	"github.com/shiroha-a/mk/internal/core/chart"
+	"github.com/elythia-network/elythia/internal/core/chart"
 )
 
 // SchemaFederation returns the schema for the instance-wide

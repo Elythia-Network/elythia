@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/misc/colfit"
+	"github.com/elythia-network/elythia/internal/misc/colfit"
 )
 
 func TestFits(t *testing.T) {

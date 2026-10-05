@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/shiroha-a/mk/internal/safehttp"
+	"github.com/elythia-network/elythia/internal/safehttp"
 )
 
 // MaxBodyBytes caps the response body size for FetchJSON / FetchUnsigned to

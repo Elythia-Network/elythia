@@ -8,8 +8,8 @@ import (
 	"log/slog"
 	"strings"
 
-	corereversi "github.com/shiroha-a/mk/internal/core/reversi"
-	"github.com/shiroha-a/mk/internal/model"
+	corereversi "github.com/elythia-network/elythia/internal/core/reversi"
+	"github.com/elythia-network/elythia/internal/model"
 	"gorm.io/datatypes"
 )
 

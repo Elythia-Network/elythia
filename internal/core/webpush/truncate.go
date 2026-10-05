@@ -6,7 +6,7 @@ package webpush
 import (
 	"maps"
 
-	"github.com/shiroha-a/mk/internal/misc/notesummary"
+	"github.com/elythia-network/elythia/internal/misc/notesummary"
 )
 
 // Push types recognized by the Misskey service worker (sw.js).

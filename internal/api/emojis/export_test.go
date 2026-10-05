@@ -11,10 +11,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	coretransfer "github.com/shiroha-a/mk/internal/core/transfer"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/queue"
-	"github.com/shiroha-a/mk/internal/server/middleware"
+	coretransfer "github.com/elythia-network/elythia/internal/core/transfer"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/queue"
+	"github.com/elythia-network/elythia/internal/server/middleware"
 )
 
 type stubEnqueuer struct {

@@ -5,10 +5,10 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/core/bubbleversus"
-	"github.com/shiroha-a/mk/internal/core/iplog"
-	"github.com/shiroha-a/mk/internal/core/iplookuplog"
-	"github.com/shiroha-a/mk/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/core/bubbleversus"
+	"github.com/elythia-network/elythia/internal/core/iplog"
+	"github.com/elythia-network/elythia/internal/core/iplookuplog"
+	"github.com/elythia-network/elythia/internal/queue/driver"
 )
 
 // Narrow interfaces the daily clean job depends on. Each is satisfied by the

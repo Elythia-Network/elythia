@@ -1,7 +1,7 @@
 package queue
 
 import (
-	"github.com/shiroha-a/mk/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/queue/driver"
 )
 
 // InspectorInfo aliases driver.InspectorInfo so callers depend on

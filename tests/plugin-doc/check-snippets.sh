@@ -39,11 +39,11 @@ module plugindoccheck
 go $(awk '/^go [0-9]/ {print $2; exit}' "$repo/go.mod")
 
 require (
-	github.com/shiroha-a/mk v0.0.0
+	github.com/elythia-network/elythia v0.0.0
 	$testify
 )
 
-replace github.com/shiroha-a/mk => $repo
+replace github.com/elythia-network/elythia => $repo
 EOF
 cp "$repo/go.sum" "$work/go.sum"
 

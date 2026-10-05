@@ -1,6 +1,6 @@
 package federation
 
-import "github.com/shiroha-a/mk/internal/activitypub"
+import "github.com/elythia-network/elythia/internal/activitypub"
 
 // actorCollectionsOnActorHost reports whether the actor's outbox, followers and
 // following collections (when present) are on the actor's own host. When one

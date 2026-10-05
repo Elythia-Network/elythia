@@ -9,9 +9,9 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/core/mediaproxy"
 	"github.com/labstack/echo/v4"
-	"github.com/shiroha-a/mk/internal/config"
-	"github.com/shiroha-a/mk/internal/core/mediaproxy"
 )
 
 // statusClientClosedRequest is nginx's non-standard 499, used when the client

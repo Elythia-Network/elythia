@@ -5,16 +5,16 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/api/apierr"
+	coreemail "github.com/elythia-network/elythia/internal/core/email"
+	"github.com/elythia-network/elythia/internal/l10n"
+	"github.com/elythia-network/elythia/internal/misc"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/misc/password"
+	miscsmtp "github.com/elythia-network/elythia/internal/misc/smtp"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/labstack/echo/v4"
-	"github.com/shiroha-a/mk/internal/api/apierr"
-	coreemail "github.com/shiroha-a/mk/internal/core/email"
-	"github.com/shiroha-a/mk/internal/l10n"
-	"github.com/shiroha-a/mk/internal/misc"
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/misc/password"
-	miscsmtp "github.com/shiroha-a/mk/internal/misc/smtp"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/repository"
 )
 
 // EmailSender sends an email message (subject + text + optional HTML).

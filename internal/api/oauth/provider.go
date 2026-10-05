@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/misc"
+	"github.com/elythia-network/elythia/internal/misc/permissions"
+	"github.com/elythia-network/elythia/internal/model"
 	"github.com/labstack/echo/v4"
-	"github.com/shiroha-a/mk/internal/misc"
-	"github.com/shiroha-a/mk/internal/misc/permissions"
-	"github.com/shiroha-a/mk/internal/model"
 )
 
 // tokenLen is the length of generated authorization codes and access tokens.

@@ -9,10 +9,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/cli/backfill"
-	"github.com/shiroha-a/mk/internal/cli/diag"
-	"github.com/shiroha-a/mk/internal/cli/migrate"
-	"github.com/shiroha-a/mk/internal/cli/serve"
+	"github.com/elythia-network/elythia/internal/cli/backfill"
+	"github.com/elythia-network/elythia/internal/cli/diag"
+	"github.com/elythia-network/elythia/internal/cli/migrate"
+	"github.com/elythia-network/elythia/internal/cli/serve"
 )
 
 // recorder builds a command table whose runners record the path they were

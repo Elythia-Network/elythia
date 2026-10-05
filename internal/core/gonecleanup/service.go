@@ -13,10 +13,10 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/shiroha-a/mk/internal/core/following"
-	coreinstance "github.com/shiroha-a/mk/internal/core/instance"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/repository"
+	"github.com/elythia-network/elythia/internal/core/following"
+	coreinstance "github.com/elythia-network/elythia/internal/core/instance"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // MaxPerRun bounds how many follow relations one Clean removes. 残りは

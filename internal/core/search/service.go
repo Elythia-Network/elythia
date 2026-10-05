@@ -1,6 +1,6 @@
 package search
 
-import "github.com/shiroha-a/mk/internal/model"
+import "github.com/elythia-network/elythia/internal/model"
 
 // Service is the facade that callers (handlers / hooks) interact with.
 // It delegates to a single Provider configured at construction time.

@@ -12,15 +12,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/api/meta"
+	"github.com/elythia-network/elythia/internal/api/oauth"
+	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/core/role"
+	"github.com/elythia-network/elythia/internal/core/signup"
+	"github.com/elythia-network/elythia/internal/frontendutil"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/labstack/echo/v4"
-	"github.com/shiroha-a/mk/internal/api/meta"
-	"github.com/shiroha-a/mk/internal/api/oauth"
-	"github.com/shiroha-a/mk/internal/config"
-	"github.com/shiroha-a/mk/internal/core/role"
-	"github.com/shiroha-a/mk/internal/core/signup"
-	"github.com/shiroha-a/mk/internal/frontendutil"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/repository"
 	"gorm.io/datatypes"
 )
 

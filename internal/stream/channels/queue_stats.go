@@ -3,7 +3,7 @@ package channels
 import (
 	"encoding/json"
 
-	"github.com/shiroha-a/mk/internal/stream"
+	"github.com/elythia-network/elythia/internal/stream"
 )
 
 // QueueStatsChannel broadcasts job queue statistics.

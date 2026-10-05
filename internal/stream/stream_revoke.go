@@ -7,8 +7,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/misc/credkey"
 	"github.com/gorilla/websocket"
-	"github.com/shiroha-a/mk/internal/misc/credkey"
 )
 
 // StreamRevokeTopic は資格情報の失効 (トークン再生成 / アクセストークン失効 /

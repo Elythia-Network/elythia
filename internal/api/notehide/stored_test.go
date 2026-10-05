@@ -3,8 +3,8 @@ package notehide
 import (
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/entity"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // **保存済み ID から引いた top-level note にも intrinsic な判定を掛けること。**

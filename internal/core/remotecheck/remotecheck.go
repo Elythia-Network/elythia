@@ -19,11 +19,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shiroha-a/mk/internal/activitypub"
-	"github.com/shiroha-a/mk/internal/core/deliveryhealth"
-	"github.com/shiroha-a/mk/internal/core/federation"
-	"github.com/shiroha-a/mk/internal/core/selfcheck"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/activitypub"
+	"github.com/elythia-network/elythia/internal/core/deliveryhealth"
+	"github.com/elythia-network/elythia/internal/core/federation"
+	"github.com/elythia-network/elythia/internal/core/selfcheck"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // maxBodyBytes bounds every response body the checks read.

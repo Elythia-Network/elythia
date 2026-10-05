@@ -483,7 +483,7 @@ CLAUDE.md の Section 1 / 2 にあった表とツリーを、#3248 でここへ�
 ├── Makefile
 ├── Dockerfile
 ├── docker-compose.yml      # **`name:` が無い**。単体で使うと本番 project `mk` に合流する
-└── go.mod                  # Moduleパス: github.com/shiroha-a/mk
+└── go.mod                  # Moduleパス: github.com/elythia-network/elythia
 ```
 
 `built/` と `drive-files/` は gitignored な生成物 / ローカルストレージ。

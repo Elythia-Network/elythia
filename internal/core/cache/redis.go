@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/elythia-network/elythia/internal/config"
 	"github.com/redis/go-redis/v9"
-	"github.com/shiroha-a/mk/internal/config"
 )
 
 // RedisClients holds multiple Redis connections for different purposes.

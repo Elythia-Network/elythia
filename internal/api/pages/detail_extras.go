@@ -3,10 +3,10 @@ package pages
 import (
 	"context"
 
-	"github.com/shiroha-a/mk/internal/api/meself"
-	coreuser "github.com/shiroha-a/mk/internal/core/user"
-	"github.com/shiroha-a/mk/internal/entity"
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/api/meself"
+	coreuser "github.com/elythia-network/elythia/internal/core/user"
+	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // UserPacker packs target as UserDetailed seen by viewer, the way upstream

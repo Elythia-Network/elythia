@@ -1,6 +1,6 @@
 package notesfilter
 
-import "github.com/shiroha-a/mk/internal/model"
+import "github.com/elythia-network/elythia/internal/model"
 
 // ApplySuspended drops notes whose author is suspended, mirroring upstream
 // QueryService.generateSuspendedUserQueryForNote (applied via

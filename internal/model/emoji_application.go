@@ -3,7 +3,7 @@ package model
 import (
 	"time"
 
-	"github.com/shiroha-a/mk/internal/pgarray"
+	"github.com/elythia-network/elythia/internal/pgarray"
 )
 
 // EmojiApplication status values.

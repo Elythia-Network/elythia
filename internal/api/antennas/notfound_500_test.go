@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	coreantenna "github.com/shiroha-a/mk/internal/core/antenna"
-	"github.com/shiroha-a/mk/internal/model"
-	"github.com/shiroha-a/mk/internal/testutil"
+	coreantenna "github.com/elythia-network/elythia/internal/core/antenna"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 // dbFailingAntennaRepo makes every antenna lookup look like a database failure.

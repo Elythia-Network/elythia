@@ -6,10 +6,10 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
-	"github.com/shiroha-a/mk/internal/activitypub"
+	"github.com/elythia-network/elythia/internal/activitypub"
 	"testing"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

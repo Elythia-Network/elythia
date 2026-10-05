@@ -1,6 +1,6 @@
 package notesfilter
 
-import "github.com/shiroha-a/mk/internal/model"
+import "github.com/elythia-network/elythia/internal/model"
 
 // ApplyThreadMute drops notes belonging to a thread the viewer has muted,
 // mirroring upstream QueryService.generateMutedNoteThreadQuery (#1554)。

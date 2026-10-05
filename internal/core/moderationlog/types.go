@@ -16,7 +16,7 @@
 //     out of scope for the current modlog rollout
 package moderationlog
 
-import "github.com/shiroha-a/mk/internal/model"
+import "github.com/elythia-network/elythia/internal/model"
 
 // LogType is the discriminant string persisted as moderation_log.type.
 // Values must match Misskey TS verbatim so the shared frontend and any

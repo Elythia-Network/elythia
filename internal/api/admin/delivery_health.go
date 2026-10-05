@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/core/deliveryhealth"
+	"github.com/elythia-network/elythia/internal/core/federation"
 	"github.com/labstack/echo/v4"
-	"github.com/shiroha-a/mk/internal/api/apierr"
-	"github.com/shiroha-a/mk/internal/core/deliveryhealth"
-	"github.com/shiroha-a/mk/internal/core/federation"
 )
 
 // DeliveryHealthProvider exposes the aggregated per-host delivery view.

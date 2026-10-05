@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shiroha-a/mk/internal/core/federation"
+	"github.com/elythia-network/elythia/internal/core/federation"
 )
 
 // **認可の判断と本処理が同じ document を別々に正規化する。** 同じ canonical へ

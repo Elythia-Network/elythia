@@ -3,7 +3,7 @@ package note
 import (
 	"slices"
 
-	"github.com/shiroha-a/mk/internal/model"
+	"github.com/elythia-network/elythia/internal/model"
 )
 
 // EmbedFacts carries the minimal, source-agnostic facts HideEmbedDecision needs

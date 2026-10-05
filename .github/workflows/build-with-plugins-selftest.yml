@@ -45,7 +45,11 @@ jobs:
       # .vue を含めて SPA をビルドする経路まで通る。**ref は固定する** — dispatch の input を
       # そのまま埋め込むと、改行を含む値で行を増やして任意のリポジトリを
       # clone させられる。
+      # **ref は commit の SHA にする。** `main` のような動く名前だと、プラグインが
+      # 本体の破壊的な変更 (モジュールパスの変更、#3394) に追従した時点で、
+      # 追従する前の develop から切った PR が落ちる。プラグインを上げるときは、
+      # 本体の変更と同じ PR でこの SHA を進める。
       plugins: |
-        nowplaying https://github.com/shiroha-a/mk-plugin-nowplaying main
+        nowplaying https://github.com/shiroha-a/mk-plugin-nowplaying 38df8b64eca0430ab2074b7e87facf0833778b24
       # publish はしない。検証したいのはビルドが通ることだけ。
       push: false

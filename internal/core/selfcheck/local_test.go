@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/elythia-network/elythia/internal/core/dbhealth"
+	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/redis/go-redis/v9"
-	"github.com/shiroha-a/mk/internal/core/dbhealth"
-	"github.com/shiroha-a/mk/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/labstack/echo/v4"
-	"github.com/shiroha-a/mk/internal/repository"
 )
 
 // Misskey TSのgen-identicon.tsと同じ仕様で生成する
