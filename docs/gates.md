@@ -23,7 +23,7 @@
 | `migrationdoc-check` | migration の本数を述べた doc が実態と合っているか検査 |
 | `mdtable-check` | md の表の各行がヘッダと同じ列数か検査 (溢れたセルは描画時に捨てられる) |
 | `notiftype-check` | 通知タイプの一覧が 1 箇所から導出されているか検査 |
-| `pluginembed-check` | mk-go をビルドする Dockerfile が pluginbuild を go build より前に実行するか検査 |
+| `pluginembed-check` | Elythia をビルドする Dockerfile が pluginbuild を go build より前に実行するか検査 |
 | `dockerignore-check` | .dockerignore がシークレットと利用者データを除外しているか検査 |
 | `secretfield-check` | モデルの秘密フィールドが json:"-" を保っているか検査 |
 | `ipshape-check` | レスポンス / 連合の shape に IP が出ていないか検査 |

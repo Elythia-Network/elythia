@@ -1,6 +1,6 @@
-# mk-go
+# Elythia
 
-Misskey互換のGoバックエンド実装 [mk-go](https://github.com/shiroha-a/mk) を、
+Misskey互換のGoバックエンド実装 [Elythia](https://github.com/shiroha-a/mk) を、
 **ビルド無しで動かすためだけ**のブランチ。
 
 必要なのはこの3ファイルだけで、Goのソースもフロントエンドのソースも含まない。

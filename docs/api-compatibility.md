@@ -1,6 +1,6 @@
 # API互換性状況
 
-対象バージョン: **Misskey 2026.10.0** (mk-go 1.5.0)
+対象バージョン: **Misskey 2026.10.0** (Elythia 1.5.0)
 最終更新: 2026-09-23
 
 本ドキュメントは互換性調査 (#107, #124) と、Playwright Phase 1-4 で発見・修正した drift backlog の**履歴**を集約したもの。
@@ -18,8 +18,8 @@
 ## 概要
 
 - **upstream catch-up**: **2026.10.0 まで追従完了**。2026.3.2 → 2026.5.1 → 2026.5.4 → 2026.6.0 → 2026.7.0 → 2026.9.0 → 2026.9.1 → 2026.10.0 と段階的に追従した (**2026.8.0 に stable は無い**)。各 release 差分は [`docs/update/`](update/) を参照 (`<yyyymm><nn>diff.md`。`nn` は**対象 upstream release の patch 番号**で日付ではない。backend に変更が無い release は doc を作らないので番号は飛ぶ。同じディレクトリに `<yyyymmdd>-<issue>-triage.md` 形式の triage note も同居する)
-- **本家 backend e2e**: Misskey 本家の `test/e2e/**` をテスト本体無改変で mk-go に向けて実行する基盤を整備し、**25 ファイル 1256 テストが全通過**。PR ごとに CI で回る。『通らないことが正しい』23 件は根拠付きで expected-failure として登録している ([`upstream-backend-e2e.md`](upstream-backend-e2e.md))
-- **Playwright e2e**: 298 spec ファイルを PR ごとに実行。Misskey TS backend に対しては upstream 追従時に実行し、spec が mk-go の挙動に引きずられていないかを検証する
+- **本家 backend e2e**: Misskey 本家の `test/e2e/**` をテスト本体無改変で Elythia に向けて実行する基盤を整備し、**25 ファイル 1256 テストが全通過**。PR ごとに CI で回る。『通らないことが正しい』23 件は根拠付きで expected-failure として登録している ([`upstream-backend-e2e.md`](upstream-backend-e2e.md))
+- **Playwright e2e**: 298 spec ファイルを PR ごとに実行。Misskey TS backend に対しては upstream 追従時に実行し、spec が Elythia の挙動に引きずられていないかを検証する
 - **drift backlog**: Phase 1-4 の spec 整備中に発見した 40+ 件の drop-in 互換 drift は fix 済
 
 ## エンドポイントカバー率 (Playwright Phase 1-4 時点)
@@ -42,7 +42,7 @@ smoke 範囲外 (WebSocket / 複雑 mutation / federation delivery / cron / push
 | i/* | favorites / pin / follow_requests / registry / revoke_token / webhooks / 2FA TOTP / 2FA Passkey | ✅ Phase 1-4 verified |
 | drive/* | create / find / find-by-hash / folders / mutate | ✅ Phase 2 verified |
 | reactions/* | create / delete / replace / different / users_reactions | ✅ Phase 2 verified |
-| chat/* | DM / room / messaging_notification / extra | ✅ Phase 2 / 4 verified (mk-go 独自設計部分含む) |
+| chat/* | DM / room / messaging_notification / extra | ✅ Phase 2 / 4 verified (Elythia 独自設計部分含む) |
 | notifications/* | reaction / mention / follow / reply / renote / follow_request / mark_all_as_read / control | ✅ Phase 2-3 verified |
 | timeline/* | home / local / global / hybrid | ✅ Phase 2 verified |
 | emoji/* | custom_emoji_reaction / lifecycle / bulk / import_zip | ✅ Phase 2 verified |
@@ -93,7 +93,7 @@ method に関わらず 404 を返す (#2822。200 だと送信側が「受け口
 
 ### Playwright Phase 1-4 由来の drift backlog (#798 ~ #944)
 
-Playwright spec を両 backend で走らせる中で観測した「TS と mk-go で挙動が違う」 drift を 40+ 件 fix。代表的なもの (一部 PR バンドル含む):
+Playwright spec を両 backend で走らせる中で観測した「TS と Elythia で挙動が違う」 drift を 40+ 件 fix。代表的なもの (一部 PR バンドル含む):
 
 #### auth / signup / signin
 | # | 内容 |
@@ -108,7 +108,7 @@ Playwright spec を両 backend で走らせる中で観測した「TS と mk-go 
 | #799 | notes/show で visibility 違反時の挙動 (200 で stub note を返す) |
 | #874 | timeline endpoint で user mute filter を追加 (#892 / #894 で perf 最適化) |
 | #876 | users/lists/list の N+1 query を batch fetch に最適化 |
-| #877 | notes/search の external search backend 互換: `fulltextSearch.provider: "none"` を opt-in で追加し upstream TS strict-mode (400 UNAVAILABLE) に揃える経路を提供 (mk-go 既定は SQL LIKE fallback で従来通り動く) |
+| #877 | notes/search の external search backend 互換: `fulltextSearch.provider: "none"` を opt-in で追加し upstream TS strict-mode (400 UNAVAILABLE) に揃える経路を提供 (Elythia 既定は SQL LIKE fallback で従来通り動く) |
 | #878 | users/search-by-username-and-host の suspend filter |
 
 #### drive
@@ -168,7 +168,7 @@ Playwright spec を両 backend で走らせる中で観測した「TS と mk-go 
 | #940 | 遅延配送 remote note の createdAt drift (AP `published` を採用 + clock skew/floor guard) |
 | #941 | カスタム絵文字 (リアクション / picker) のアニメ pass-through (mediaproxy で gif/apng を resize しない) |
 | #942 | URL summary 文字化け (Shift_JIS / EUC-JP / ISO-2022-JP の自動正規化) |
-| #943 | リモートユーザー counts (notesCount / followersCount / followingCount) を origin から fetch する mk-go 独自拡張 (#945 で LRU cache 化) |
+| #943 | リモートユーザー counts (notesCount / followersCount / followingCount) を origin から fetch する Elythia 独自拡張 (#945 で LRU cache 化) |
 
 ## ActivityPub互換性
 
@@ -215,7 +215,7 @@ upstream / 他実装が出してくる variant に対するロバスト性:
 
 ### チャンネルカバー率
 
-**upstream の 18 チャンネルをすべて実装**し、mk-go 独自の `notifications` を
+**upstream の 18 チャンネルをすべて実装**し、Elythia 独自の `notifications` を
 加えて 19。#125 で欠損 9 チャンネルを追加した。
 
 `notifications` は upstream に無い (upstream は `main` チャンネルで通知を流す)
@@ -228,13 +228,13 @@ upstream / 他実装が出してくる variant に対するロバスト性:
 - `pong`応答の実装
 - パラメータバリデーション強化
 
-## mk-go 独自の挙動 / 拡張
+## Elythia 独自の挙動 / 拡張
 
-upstream Misskey TS と異なる、mk-go ならではの実装:
+upstream Misskey TS と異なる、Elythia ならではの実装:
 
 ### RemoteStatsFetcher (#943)
 
-Misskey TS の `users/show` は **自インスタンスで観測した範囲** のみで notesCount / followersCount / followingCount を集計するため、リモートユーザーの数値が実体より小さく表示される。mk-go は user.Host が non-local の場合、 origin instance の `/api/users/show` を https POST で叩いて公開 counts を取得し、上書き表示する。
+Misskey TS の `users/show` は **自インスタンスで観測した範囲** のみで notesCount / followersCount / followingCount を集計するため、リモートユーザーの数値が実体より小さく表示される。Elythia は user.Host が non-local の場合、 origin instance の `/api/users/show` を https POST で叩いて公開 counts を取得し、上書き表示する。
 
 - 1 時間 TTL の LRU cache (size cap 10000、`hashicorp/golang-lru/v2`、#945)
 - SSRF guard: `safehttp.NewSSRFSafeTransport` 経由 (private IP / metadata service block)
@@ -252,7 +252,7 @@ Misskey TS の `users/show` は **自インスタンスで観測した範囲** �
 
 ### inbox processor の verify-in-worker 化 (#565)
 
-upstream は HTTP handler の中で AP signature verify を同期実行するため、悪意ある unsigned activity が手前で増えると HTTP 受信スループットが低下する。mk-go は HTTP handler は body + signature header だけを payload に詰めて 202 即返し、signature verify / host block / instance touch / chart hook を inbox worker (queue processor) 側で実行することで HTTP 受信 rps が **TS の 2.6-2.8x** (queue-bench で確認)。
+upstream は HTTP handler の中で AP signature verify を同期実行するため、悪意ある unsigned activity が手前で増えると HTTP 受信スループットが低下する。Elythia は HTTP handler は body + signature header だけを payload に詰めて 202 即返し、signature verify / host block / instance touch / chart hook を inbox worker (queue processor) 側で実行することで HTTP 受信 rps が **TS の 2.6-2.8x** (queue-bench で確認)。
 
 ### mkq driver (#571 audit / #2985)
 
@@ -282,11 +282,11 @@ TS版の`.config/default.yml`をそのまま使用可能。以下の設定もGo�
 
 Go側のマイグレーション (000001〜) はTS版テーブルに対して原則追加のみだが、例外が 17 件ある ([migration-from-ts.md](migration-from-ts.md#破壊的なマイグレーション))。TS版のマイグレーションで作成される全テーブルは維持される。
 
-**mk-go 固有のテーブル (upstream に対応するものが無い) は 18 件:**
+**Elythia 固有のテーブル (upstream に対応するものが無い) は 18 件:**
 
 > [divergence.md](divergence.md) §2-1 は同じものを **21** と数えている。差は 3 件で、
 > あちらは `note_unread` (upstream DB には legacy として残るが 2026.7.0 の `models/` に
-> entity が無く参照 0 件。mk-go はこれを実用している) と bookkeeping 2 件
+> entity が無く参照 0 件。Elythia はこれを実用している) と bookkeeping 2 件
 > (`migrations` / `schema_migrations`) を加える。CI の
 > `TestDivergenceDoc_TableCountMatchesSchema` がその定義で固定している。矛盾ではなく
 > 母集団の取り方の違い。
@@ -310,12 +310,12 @@ Go側のマイグレーション (000001〜) はTS版テーブルに対して原
 | `note_quote_request` | 引用の承認を求めた記録 (FEP-044f、#3234) | `000102` |
 | `bubble_game_versus_record` | バブルゲームの対戦の記録 (#3232) | `000105` |
 
-mk-go の migration が作るテーブルは 121。上記 18 件と golang-migrate 台帳の
+Elythia の migration が作るテーブルは 121。上記 18 件と golang-migrate 台帳の
 `schema_migrations` を除く **102 はすべて upstream にも存在する** (TypeORM 台帳の
 `migrations` を含む)。
 
-mk-go は schema を自前の migration で 0 から作るので、**「mk-go の migration が
-作る = mk-go が足した」ではない**。`password_reset_request` / `signin` /
+Elythia は schema を自前の migration で 0 から作るので、**「Elythia の migration が
+作る = Elythia が足した」ではない**。`password_reset_request` / `signin` /
 `channel_favorite` / `channel_muting` / `clip_favorite` / `user_list_favorite` /
 `retention_aggregation` / `system_account` / `used_username` /
 `note_thread_muting` はいずれも upstream のテーブルで、drop-in の可否には影響
@@ -355,10 +355,10 @@ drop-in テスト (#367) で発見した補完カラム:
   #14554 (2024-09) でコメントアウトごと削除済み。到達するのは API を
   直接叩く場合とサードパーティクライアントだけで、そこでは 204 が返るので
   **成功したように見えて誰にも表示されない**。
-  mk-go はこの状態を忠実に再現している (endpoint を消すと 444/444 の
+  Elythia はこの状態を忠実に再現している (endpoint を消すと 444/444 の
   カバレッジが崩れ、drop-in 切替でも挙動が変わるため)。表示経路を足すなら
   upstream に無い additive 拡張になる。
-  ただし入力側だけは mk-go に意図的乖離がある — `admin/promo/create` は public
+  ただし入力側だけは Elythia に意図的乖離がある — `admin/promo/create` は public
   以外の note を reject する (`docs/divergence.md` §7)
 - **upstream 2026.10.0 まで追従済** — `#947` (2026.3.2 → 2026.5.1) / `#1164` (2026.5.1 → 2026.5.4、LD-Signature 初期実装 + 2026.5.4 hardening 含む) を経て 2026.6.0 → 2026.7.0 → 2026.9.0 → 2026.9.1 → 2026.10.0 まで完了。各 release 差分は [`docs/update/`](update/) を参照 (`<yyyymm><nn>diff.md`。`nn` は**対象 upstream release の patch 番号**で日付ではない。backend に変更が無い release は doc を作らないので番号は飛ぶ。同じディレクトリに `<yyyymmdd>-<issue>-triage.md` 形式の triage note も同居する)
 

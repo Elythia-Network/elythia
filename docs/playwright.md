@@ -1,17 +1,17 @@
 # Playwright e2e
 
-mk-go のフロントエンド / API を実ブラウザから検証する e2e。spec は
+Elythia のフロントエンド / API を実ブラウザから検証する e2e。spec は
 `tests/playwright/specs/` にあり、現在 298 ファイル
 (`find tests/playwright/specs -name '*.spec.ts' | wc -l`)。
 
 Cypress からの移行完了に伴い、frontend e2e はこちらに一本化した (#2437)。本家も
-Cypress を廃止して Playwright へ移行しており、参照先が消滅したため mk-go 側の
+Cypress を廃止して Playwright へ移行しており、参照先が消滅したため Elythia 側の
 Cypress ラッパー (`e2e/cypress`) は削除した。
 
 ## 実行
 
 ```bash
-# mk-go backend に対して実行
+# Elythia backend に対して実行
 make playwright-up      # postgres / redis / mkgo を起動
 make playwright-test    # spec 実行
 make playwright-down    # volume ごと撤去
@@ -27,14 +27,14 @@ make playwright-ts-down
 ## なぜ TS backend にも投げるのか
 
 spec は **upstream Misskey TS の API 互換挙動を期待値として書いている**。
-mk-go に対してだけ回すと「mk-go がその通り動く」ことしか分からず、**期待値自体が
+Elythia に対してだけ回すと「Elythia がその通り動く」ことしか分からず、**期待値自体が
 upstream と食い違っていても気付けない**。
 
 同じ spec を本家 backend にも投げて両方 pass することで、期待値が upstream の
 実挙動と一致していることを担保する。
 
 ただし **TS backend は `workflow_dispatch` 専用**で、PR では回らない。TS baseline の
-価値は「spec が mk-go の挙動を正解として書かれていないか」を検出する一点にあり、
+価値は「spec が Elythia の挙動を正解として書かれていないか」を検出する一点にあり、
 **upstream が変わらない限り答えも変わらない**ので、常時回す意味が薄いため。追従する本家の版を
 上げたときに回す (`docs/upstream-catch-up.md`)。
 
@@ -153,11 +153,11 @@ host を読ませる経路は開かない。**上の内訳と件数は #2892 よ
 作り直す案もあったが、**upstream のプロジェクトメンバー・スポンサー・パトロンは
 消さない**方針を採った (upstream が頻繁に更新するファイルなので、書き換えると追従の
 たびにコンフリクトを手で解くことになる。[乖離一覧](divergence.md) の `2026.9.0-mk.3`
-の行)。**media proxy 経由にも落とせない** — mk-go の proxy は upstream と違い open
+の行)。**media proxy 経由にも落とせない** — Elythia の proxy は upstream と違い open
 proxy ではなく、allowlist は DB に実在する URL だけを通すので、静的にハードコード
 された URL は 403 になる (実測)。謝辞を残す以上、CSP を足す以外に表示させる道が無い。
 
-mk-go 独自の `/about-elythia` (#3394 より前は `/about-mkgo`) がコントリビューターをテキストリンクにしてあるのは別の
+Elythia 独自の `/about-elythia` (#3394 より前は `/about-mkgo`) がコントリビューターをテキストリンクにしてあるのは別の
 理由 (新規ファイルなので最初から外部画像を持たせる必要が無い)。
 
 ### embed も enforce の対象
@@ -227,4 +227,4 @@ viewer 資産で `.js` が 7 本出るので除外に入れてある。
 
 - [ci.md](ci.md) — CI 全体の構成
 - [dropin-e2e.md](dropin-e2e.md) — drop-in 切替の検証 (別系統)
-- [upstream-backend-e2e.md](upstream-backend-e2e.md) — 本家の backend e2e を mk-go に向ける (別系統)
+- [upstream-backend-e2e.md](upstream-backend-e2e.md) — 本家の backend e2e を Elythia に向ける (別系統)

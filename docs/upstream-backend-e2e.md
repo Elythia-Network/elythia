@@ -1,7 +1,7 @@
-# 本家 backend e2e を mk-go に向けて回す
+# 本家 backend e2e を Elythia に向けて回す
 
 Misskey 本家 (`make upstream-fetch` が取得する `.cache/misskey/<版>/`、#3378) の backend e2e (`packages/backend/test/e2e/**`) を、
-そのまま mk-go に対して実行するハーネス。API 互換性の regression を検出する。
+そのまま Elythia に対して実行するハーネス。API 互換性の regression を検出する。
 
 **テスト本体には一切手を入れない。** 差し替えるのは vitest 設定の 2 点だけで、
 上流でテストが増えれば自動的に検証対象も増える。
@@ -11,19 +11,19 @@ Misskey 本家 (`make upstream-fetch` が取得する `.cache/misskey/<版>/`、
 | ファイル | 役割 |
 |---|---|
 | `tests/upstream-e2e/harness/vitest.config.e2e.mkgo.ts` | `globalSetup` と `setupFiles` を差し替えた vitest 設定 |
-| `tests/upstream-e2e/harness/test-server-mkgo/entry.ts` | NestJS アプリの代わりに mk-go バイナリを子プロセスとして起動する。`MKGO_BIN` / `MKGO_CONFIG` / `MKGO_CWD` が無ければ落ちる |
+| `tests/upstream-e2e/harness/test-server-mkgo/entry.ts` | NestJS アプリの代わりに Elythia バイナリを子プロセスとして起動する。`MKGO_BIN` / `MKGO_CONFIG` / `MKGO_CWD` が無ければ落ちる |
 | `tests/upstream-e2e/harness/test/setup.e2e.mkgo.ts` | 各ファイルの前に `/api/reset-db` を叩く。既知乖離の expected-failure もここで立てる (一覧は `MKGO_CWD` から読む) |
 | `tests/upstream-e2e/compose.yml` | ローカル実行用の PostgreSQL / Redis |
-| `tests/upstream-e2e/mkgo.yml` | 本家 `.github/misskey/test.yml` の mk-go 版 |
+| `tests/upstream-e2e/mkgo.yml` | 本家 `.github/misskey/test.yml` の Elythia 版 |
 | `tests/upstream-e2e/known-divergences.json` | 『通らないことが正しい』テストの一覧 |
 
 ポートは本家 `.github/misskey/test.yml` に合わせてある (PostgreSQL 54312 /
-Redis 56312 / mk-go 61812)。おかげでローカルの compose と CI の service
+Redis 56312 / Elythia 61812)。おかげでローカルの compose と CI の service
 コンテナで同じ設定ファイルを使い回せる。
 
 本家 `setup.e2e.ts` は `initTestDb(false)` で TypeORM のエンティティ定義から
-スキーマを作り直すが、それをやると mk-go の migration にしか無いテーブル
-(`relay_observed_user` 等) が消える。代わりに mk-go の `/api/reset-db` で全
+スキーマを作り直すが、それをやると Elythia の migration にしか無いテーブル
+(`relay_observed_user` 等) が消える。代わりに Elythia の `/api/reset-db` で全
 テーブルを truncate している (`schema_migrations` は保護される)。
 
 ## 実行
@@ -65,7 +65,7 @@ make upstream-e2e-down
   「Compiled configuration file not found」で落ちる
 
 `make upstream-e2e-test` は `built/elythia` を先にビルドする。テスト側の
-ハーネスがそのバイナリを子プロセスとして起動するので、mk-go を手で立ち上げて
+ハーネスがそのバイナリを子プロセスとして起動するので、Elythia を手で立ち上げて
 おく必要はない。**むしろ手動で 61812 を掴んでいると、ハーネスの再起動
 (`/env` 経由) が `address already in use` で失敗し、環境変数を変えたはずの
 テストが古いプロセスに当たって誤った結果になる。**
@@ -74,15 +74,15 @@ make upstream-e2e-down
 
 `vitest.config.e2e.mkgo.ts` の `exclude` で 4 ファイルを外している。いずれも
 **本家の TypeScript 実装を同じ DB に対して起動してしまう**もので、TypeORM が
-スキーマを張り直して mk-go の migration にしか無いテーブル / カラムを消すため、
-以降 mk-go が起動できず後続の全ファイルが道連れになる。
+スキーマを張り直して Elythia の migration にしか無いテーブル / カラムを消すため、
+以降 Elythia が起動できず後続の全ファイルが道連れになる。
 
 - `move.ts` — `initTestDb(false)` でスキーマを作り直す
 - `exports.ts` / `synalio/abuse-report.ts` / `synalio/user-create.ts` — `startJobQueue()` で本家のジョブキューをプロセス内に起動する
 
 ## 既知の乖離 (expected-failure)
 
-mk-go では『通らないことが正しい』テストがある。mk-go 独自の role policy、
+Elythia では『通らないことが正しい』テストがある。Elythia 独自の role policy、
 意図的に採用していない上流の検索順序、ジョブワーカーを同一プロセスで動かす
 ことによるハーネスの構造差など。
 
@@ -120,7 +120,7 @@ entry は `file` / `reason` / `names` の 3 キー。**`names` は配列**で、
 
 **4 シャード並列** (`--shard=i/4`、`fail-fast: false`)。check 名は `e2e (1/4)` 〜
 `4/4` で、実測 3-7 min。**プロセス内では並列にできない** — upstream の vitest 設定が
-`maxWorkers: 1` で、かつ setupFiles がファイルごとに mk-go の `/api/reset-db`
+`maxWorkers: 1` で、かつ setupFiles がファイルごとに Elythia の `/api/reset-db`
 (全テーブル truncate) を叩くため、同じ DB に 2 ファイルを並行させると片方が相手の
 フィクスチャを実行中に消す。job を分ければ PostgreSQL / Redis の service container も
 別に立つ (#2609)。
@@ -129,5 +129,5 @@ entry は `file` / `reason` / `names` の 3 キー。**`names` は配列**で、
 成功扱いにするので失敗が完全に不可視になる。job は正しく失敗させ、required に
 入れないことで非ブロッキングにする。
 
-失敗時は mk-go のログが `upstream-e2e-mkgo-log-<shard>` artifact として 14 日残る。
+失敗時は Elythia のログが `upstream-e2e-mkgo-log-<shard>` artifact として 14 日残る。
 vitest の出力だけでは「サーバーが何を返したか」が分からないことが多い。

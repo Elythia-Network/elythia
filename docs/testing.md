@@ -11,12 +11,12 @@
 | ユニットテスト | APIハンドラ、サービスロジック | モック | `go test ./internal/api/...` |
 | 統合テスト | リポジトリ、Redis連携 | 実 PostgreSQL (`TEST_DB_*`) + Redis (testcontainers) | `go test ./internal/core/...` |
 | E2Eテスト (Playwright) | フロントエンド操作 / API | 実DB + フロントエンド | `make playwright-test` (詳細は[Playwright](playwright.md)) |
-| 連合テスト | mk-go ↔ 本物の Misskey TS の AP 通信 | Docker Compose多段 | `make federation-misskey-e2e` (起動から撤去まで通し。個別に叩くなら `-up` → `-test` → `-down`) |
-| 連合テスト (Mastodon) | mk-go ↔ 本物の Mastodon の引用の承認 (FEP-044f) | Docker Compose多段 | `make federation-mastodon-e2e` (起動から撤去まで通し) |
+| 連合テスト | Elythia ↔ 本物の Misskey TS の AP 通信 | Docker Compose多段 | `make federation-misskey-e2e` (起動から撤去まで通し。個別に叩くなら `-up` → `-test` → `-down`) |
+| 連合テスト (Mastodon) | Elythia ↔ 本物の Mastodon の引用の承認 (FEP-044f) | Docker Compose多段 | `make federation-mastodon-e2e` (起動から撤去まで通し) |
 | Drop-in e2e (pytest) | TS-A backend を mk-A に差し替えて state preservation 検証 | TS 2 instance + mk overlay | `make dropin-swap-test` (#365 / #367 / #372 / #374、詳細は[dropin-e2e.md](dropin-e2e.md)) |
 | Drop-in frontend e2e (cypress) | 3 TS instance + mk overlay swap で frontend 視点の互換 | cypress + 3 TS + mk-A | `make dropin-frontend-swap-test` (#380 / #381 / #387 / #394、詳細は[dropin-frontend-e2e.md](dropin-frontend-e2e.md)) |
-| Playwright e2e | mk-go と Misskey TS の両 backend で API/frontend 統合互換を検証 | Docker Compose 全部 | `tests/playwright/` 配下 (#744、298 spec ファイル。PR ごとに mk-go、upstream 追従時に TS backend) |
-| 本家 backend e2e | Misskey 本家の `test/e2e/**` をテスト本体無改変で mk-go に向けて実行 | PostgreSQL / Redis + mk-go バイナリ | `make upstream-e2e` (#2347、25 ファイル 1256 テスト。詳細は[upstream-backend-e2e.md](upstream-backend-e2e.md)) |
+| Playwright e2e | Elythia と Misskey TS の両 backend で API/frontend 統合互換を検証 | Docker Compose 全部 | `tests/playwright/` 配下 (#744、298 spec ファイル。PR ごとに Elythia、upstream 追従時に TS backend) |
+| 本家 backend e2e | Misskey 本家の `test/e2e/**` をテスト本体無改変で Elythia に向けて実行 | PostgreSQL / Redis + Elythia バイナリ | `make upstream-e2e` (#2347、25 ファイル 1256 テスト。詳細は[upstream-backend-e2e.md](upstream-backend-e2e.md)) |
 
 ## 手元の準備
 
@@ -238,7 +238,7 @@ func newSvc(t *testing.T) *Service {
 
 ## 連合テスト
 
-`tests/federation/compose.misskey.yml`でmk-goとMisskey TSの2インスタンスを起動し、AP通信をテストする。
+`tests/federation/compose.misskey.yml`でElythiaとMisskey TSの2インスタンスを起動し、AP通信をテストする。
 
 ```bash
 # ビルド + 起動
@@ -258,13 +258,13 @@ make federation-misskey-down
 
 ## Playwright e2e (drop-in 互換)
 
-`tests/playwright/` 配下の spec を mk-go と Misskey TS の **両 backend** で並列実行し、drop-in 互換 regression を PR ごとに検出する基盤。
+`tests/playwright/` 配下の spec を Elythia と Misskey TS の **両 backend** で並列実行し、drop-in 互換 regression を PR ごとに検出する基盤。
 
 - 範囲: 298 spec ファイル (upstream 290 = ui 194 / api 96、mkgo 8) / 40 directory (spec を直接含むもの。`find ... -printf '%h\n' | sort -u | wc -l`)
 - トリガー: `pull_request` (paths フィルタ) + `workflow_dispatch`。**nightly ではない** (#2291 で移行)。`.github/workflows/playwright.yml`
 - **4 シャード並列** (`--shard=i/4`、`fail-fast: false`)。1 スタックに対しては直列でしか回せない (共有の root と instance meta を spec が取り合う) ので、並列度はシャードごとに独立した stack を立てて稼ぐ (#2609)
 - **TS backend は `workflow_dispatch` 専用**で PR では回らない。upstream が変わらない限り答えも変わらないため、追従する本家の版を上げたタイミングだけ回す
-- spec は原則 **backend-agnostic** (= URL 切替だけで両 backend で動く)、spec 失敗 = drop-in 互換 regression として issue 化。例外は `specs/mkgo/` の 8 件 (mk-go 独自機能を見るので公式 image では通らない)。`make playwright-ts-test` が `specs/upstream` に絞ることで除外している
+- spec は原則 **backend-agnostic** (= URL 切替だけで両 backend で動く)、spec 失敗 = drop-in 互換 regression として issue 化。例外は `specs/mkgo/` の 8 件 (Elythia 独自機能を見るので公式 image では通らない)。`make playwright-ts-test` が `specs/upstream` に絞ることで除外している
 
 ### spec を書くときの注意: root の per-user quota
 
@@ -303,7 +303,7 @@ Playwright で発見した drift は LCD 化 → strict 化 のサイクルで�
 1. spec を書いて両 backend で走らせる
 2. 挙動が異なる場合は `expect([200, 204]).toContain(...)` 等の **LCD (Lowest Common Denominator)** で吸収して両 backend pass させる
 3. LCD のコメントで drift 内容を記録、別 issue として起票
-4. drift fix PR で mk-go 側を strict 仕様 (= upstream Misskey TS の挙動) に揃える
+4. drift fix PR で Elythia 側を strict 仕様 (= upstream Misskey TS の挙動) に揃える
 5. 同 PR で spec の LCD を strict (`expect(...).toBe(204)` 等) に格上げ
 
 **実績**: Phase 1-4 で 40+ 件の drift を fix。詳細は [api-compatibility.md](api-compatibility.md) の
@@ -311,11 +311,11 @@ Playwright で発見した drift は LCD 化 → strict 化 のサイクルで�
 
 ## 差分比較 e2e (値レベル)
 
-mk-go と Misskey TS に**同一リクエストを投げてレスポンスを値レベルで diff** する
+Elythia と Misskey TS に**同一リクエストを投げてレスポンスを値レベルで diff** する
 (#2078、endpoint 比較 35 件)。守備範囲が他のゲートと違う。
 
 pytest の総数は 48 だが、うち 13 は `diff_core.py` (差分の取り方そのもの) の
-ユニットテストで、**mk-go と TS を突き合わせているのは 35 件**。
+ユニットテストで、**Elythia と TS を突き合わせているのは 35 件**。
 
 | ゲート | 見ているもの |
 |---|---|
@@ -343,8 +343,8 @@ PR ごとに `.github/workflows/diff-e2e.yml` が実行する (required check �
 ## 本家 backend e2e
 
 Misskey 本家の backend e2e (`make upstream-fetch` が取得する `.cache/misskey/<版>/packages/backend/test/e2e/**`、#3378) を、
-**テスト本体に一切手を入れずに** mk-go へ向けて実行する。差し替えるのは vitest 設定の
-2 点 (globalSetup = mk-go バイナリの起動、setupFiles = `/api/reset-db`) だけなので、
+**テスト本体に一切手を入れずに** Elythia へ向けて実行する。差し替えるのは vitest 設定の
+2 点 (globalSetup = Elythia バイナリの起動、setupFiles = `/api/reset-db`) だけなので、
 上流でテストが増えれば自動的に検証対象も増える。
 
 ```bash
@@ -381,16 +381,16 @@ PR ごとに `.github/workflows/dropin-e2e.yml` が **5 シナリオ**を並列�
 | check 名 | make target | 見ているもの |
 |---|---|---|
 | `swap-test` | `dropin-swap-test` | TS→mk 切替で state が保たれるか (#374)。TS へ戻す stage 6b-9 は測る対象 (#3191) |
-| `mkgo-born` | `dropin-mkgo-born-test` | **mk-go 生まれの DB を TS に引き渡せるか** (#2383。測る対象で、保証はしない、#3191) |
+| `mkgo-born` | `dropin-mkgo-born-test` | **Elythia 生まれの DB を TS に引き渡せるか** (#2383。測る対象で、保証はしない、#3191) |
 | `ed25519-verify` | `dropin-fedibird-test` | Fedibird-like mock との Ed25519 双方向 verify (#1083) |
 | `federation` | `federation-misskey-e2e` | 本物の Misskey TS を相手にした実連合 (#2362) |
 | `federation-mastodon` | `federation-mastodon-e2e` | 本物の Mastodon を相手にした引用の承認 (FEP-044f、#3234) |
 
 `swap-test` と `mkgo-born` は似て見えるが **DB を作った側が違う** (前者は TypeORM、
-後者は mk-go の migration)。TS が一度も触っていない schema を受け取るのは後者だけ。
+後者は Elythia の migration)。TS が一度も触っていない schema を受け取るのは後者だけ。
 
 `make dropin-fedibird-test` は Fedibird-like な AP mock を立てて **Ed25519 署名の
-双方向 verify** を検証する (#1083)。Ed25519 は mk-go 独自の先行実装なので、他実装と
+双方向 verify** を検証する (#1083)。Ed25519 は Elythia 独自の先行実装なので、他実装と
 相互運用できるかは実際に喋らせないと分からない。ユニットテストは「自分で署名して
 自分で検証する」ことしか保証しない。
 

@@ -44,8 +44,8 @@ check: fmt lint actionlint golangci-lint test ## コミット前に必須 (lint 
 
 gates: shapecheck errorid-check limitspec-check perm-check wiring-check catalog-check notfound-check nulparam-check compose-check testflags-check migrationdoc-check mdtable-check notiftype-check pluginembed-check dockerignore-check secretfield-check ipshape-check iprecord-check sqlbind-check gaterun-check ## 静的 parity ゲートを一括実行
 
-version: ## mk-go / 互換 Misskey / 追従している本家のバージョンを表示
-	@printf "mk-go            : %s\n" "$$(sed -n 's/^var MkGoVersion = "\(.*\)"/\1/p' internal/config/config.go)"
+version: ## Elythia / 互換 Misskey / 追従している本家のバージョンを表示
+	@printf "Elythia          : %s\n" "$$(sed -n 's/^var MkGoVersion = "\(.*\)"/\1/p' internal/config/config.go)"
 	@printf "互換 Misskey     : %s\n" "$$(sed -n 's/^var MisskeyVersion = "\(.*\)"/\1/p' internal/config/config.go)"
 	@printf "追従している本家 : %s\n" "$$(cat UPSTREAM_MISSKEY_VERSION 2>/dev/null || echo '(不明)')"
 
@@ -593,16 +593,16 @@ dropin-logs: ## drop-in e2e スタックのログを表示
 # mk ↔ TS federation も同時に検証できる。
 DROPIN_MK_OVERLAY=tests/dropin/compose.mk.yml
 
-dropin-mk-up: ## drop-in e2e に mk-go overlay を適用して起動
+dropin-mk-up: ## drop-in e2e に Elythia overlay を適用して起動
 	docker compose -f $(DROPIN_COMPOSE) -f $(DROPIN_MK_OVERLAY) up -d --build
 
-dropin-mk-test: ## mk-go overlay に対する smoke test を実行
+dropin-mk-test: ## Elythia overlay に対する smoke test を実行
 	docker compose -f $(DROPIN_COMPOSE) -f $(DROPIN_MK_OVERLAY) --profile test run --rm test-runner
 
-dropin-mk-down: ## mk-go overlay を撤去
+dropin-mk-down: ## Elythia overlay を撤去
 	docker compose -f $(DROPIN_COMPOSE) -f $(DROPIN_MK_OVERLAY) --profile test down -v
 
-dropin-mk-logs: ## mk-go overlay のログを表示
+dropin-mk-logs: ## Elythia overlay のログを表示
 	docker compose -f $(DROPIN_COMPOSE) -f $(DROPIN_MK_OVERLAY) logs -f
 
 # Drop-in swap シナリオ (#367): TS-A → mk-A 切替で state が引き継げることを
@@ -612,7 +612,7 @@ dropin-mk-logs: ## mk-go overlay のログを表示
 #   3. TS-A backend を停止
 #   4. overlay で mk-A 起動 (DB-A / Redis-A はそのまま)
 #   5. test_swap_verify.py で state preserved + 新規 federation を確認
-dropin-swap-test: ## TS → mk-go 切替の state preservation を通しで検証
+dropin-swap-test: ## TS → Elythia 切替の state preservation を通しで検証
 	./tests/dropin/run-swap-test.sh
 
 # Drop-in fedibird-mock e2e (#1083) — base + mk + fedibird overlay の stack で
@@ -622,7 +622,7 @@ dropin-swap-test: ## TS → mk-go 切替の state preservation を通しで検�
 # mk-go 生まれの DB を TS に引き渡す経路 (#2379)。swap test (TS→mk-go→TS) とは
 # 別物で、TS が一度も触っていない schema を受け取る。mk-go で始めた人が Misskey に
 # どこまで移れるかを測る (保証はしない、#3191)。
-dropin-mkgo-born-test: ## mk-go 生まれの DB を TS に引き渡せるか検証
+dropin-mkgo-born-test: ## Elythia 生まれの DB を TS に引き渡せるか検証
 	./tests/dropin/run-mkgo-born-test.sh
 
 dropin-fedibird-test: ## Fedibird-like AP mock との Ed25519 双方向 verify
@@ -959,7 +959,7 @@ queue-bench-autoscale-logs: ## autoscale ベンチのログを表示
 PLAYWRIGHT_COMPOSE=tests/playwright/compose.yml
 
 ##@ e2e: Playwright
-playwright-up: ## Playwright スタック (mk-go backend) を起動
+playwright-up: ## Playwright スタック (Elythia backend) を起動
 	docker compose -f $(PLAYWRIGHT_COMPOSE) up -d --build
 
 # PLAYWRIGHT_ARGS は runner の `playwright` に素通しする追加引数。CI が
@@ -970,7 +970,7 @@ playwright-up: ## Playwright スタック (mk-go backend) を起動
 # 丸ごと置き換わるので、`test` を明示してから追加する。
 PLAYWRIGHT_ARGS ?=
 
-playwright-test: ## Playwright spec を実行 (mk-go backend、PLAYWRIGHT_ARGS で引数追加)
+playwright-test: ## Playwright spec を実行 (Elythia backend、PLAYWRIGHT_ARGS で引数追加)
 	# `--build` を付けて runner image を rebuild check させる。package.json
 	# 更新時に node_modules が古いままにならないよう、毎回 build context を
 	# 確認する (cache hit なら ms 単位で済むので overhead 無視可)。
@@ -1013,7 +1013,7 @@ DIFF_COMPOSE=tests/diff/compose.yml
 diff-up: ## 差分比較ハーネスのスタックを起動
 	docker compose -f $(DIFF_COMPOSE) up -d --build
 
-diff-test: ## mk-go ↔ TS の値レベル diff を実行
+diff-test: ## Elythia ↔ TS の値レベル diff を実行
 	docker compose -f $(DIFF_COMPOSE) --profile test run --rm --build diff-runner
 
 diff-down: ## 差分比較ハーネスのスタックを撤去
@@ -1174,7 +1174,7 @@ UPSTREAM_E2E_ASSETS_ENV = \
 	MISSKEY_TWEMOJI_DIR=$(UPSTREAM_E2E_BACKEND)/node_modules/@misskey-dev/emoji-assets/built/twemoji \
 	MISSKEY_FLUENT_EMOJI_DIR=$(UPSTREAM_E2E_BACKEND)/node_modules/@misskey-dev/emoji-assets/built/fluent-emoji
 
-upstream-e2e-test: build ## 本家 backend e2e を mk-go に対して実行 (VITEST_ARGS で引数追加)
+upstream-e2e-test: build ## 本家 backend e2e を Elythia に対して実行 (VITEST_ARGS で引数追加)
 	cp -R $(UPSTREAM_E2E_HARNESS)/. $(UPSTREAM_E2E_BACKEND)/
 	cd $(UPSTREAM_E2E_BACKEND) && \
 		$(UPSTREAM_E2E_ASSETS_ENV) \
@@ -1348,7 +1348,7 @@ dockerignore-check: ## .dockerignore がシークレットと利用者データ�
 	go test ./internal/entitycompat/... -run 'TestDockerignore' -count=1 -v
 
 .PHONY: pluginembed-check
-pluginembed-check: ## mk-go をビルドする Dockerfile が pluginbuild を go build より前に実行するか検査
+pluginembed-check: ## Elythia をビルドする Dockerfile が pluginbuild を go build より前に実行するか検査
 	# 組み込みを忘れた image は **エラーにならない** — plugins/ に置いたのに
 	# 入っていない mk-go が黙って出来る。#2940 で Dockerfile.bundled が実際に
 	# そうなっていた。生成が go build の後でも同じ結果になるので順序も見る。

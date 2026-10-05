@@ -104,10 +104,10 @@ PR を出すと十数個の check が走る。**どれが何を見ていて、�
 | `analyze (go)` / `analyze (actions)` | CodeQL | **自分のコード**の静的解析 (Go の全 module と workflow の式) | 未計測 | 手元では回せない (CodeQL CLI が要る)。Code scanning alerts で見る |
 | `plugin-tests` | CI | 同梱プラグインのテスト (別 module なので `go list ./...` に入らない) | 1 min | `make plugin-test` |
 | `apicompat` | apicompat | **`docs/api-compat.md` が実態とずれていないか** (生成物なので再生成して diff を見る)。あわせて golden が本家の版に追いついているか (`make upstream-check`、#3378) | 未計測 | `make apicompat` (**プラグイン抜き + testMode が要る**。手順は docs/development.md) |
-| `e2e (1/4)` 〜 `4/4` | Upstream backend e2e | **本家の backend e2e 1256 テスト**が mk-go に対して通るか | 3-7 min | `make upstream-e2e` |
-| `diff` | Diff e2e | mk-go と TS の**レスポンスの値**が一致するか (endpoint 比較 35 件) | 4 min | `make diff-check` |
+| `e2e (1/4)` 〜 `4/4` | Upstream backend e2e | **本家の backend e2e 1256 テスト**が Elythia に対して通るか | 3-7 min | `make upstream-e2e` |
+| `diff` | Diff e2e | Elythia と TS の**レスポンスの値**が一致するか (endpoint 比較 35 件) | 4 min | `make diff-check` |
 | `swap-test` | Drop-in e2e | TS→mk 切替で state が保たれるか | 5 min | `make dropin-swap-test` |
-| `mkgo-born` | Drop-in e2e | **mk-go 生まれの DB を TS に引き渡せるか** (測る対象。保証はしない、#3191) | 5 min | `make dropin-mkgo-born-test` |
+| `mkgo-born` | Drop-in e2e | **Elythia 生まれの DB を TS に引き渡せるか** (測る対象。保証はしない、#3191) | 5 min | `make dropin-mkgo-born-test` |
 | `ed25519-verify` | Drop-in e2e | Fedibird-like mock との Ed25519 双方向 verify | 5 min | `make dropin-fedibird-test` |
 | `federation` | Drop-in e2e | 本物の Misskey TS との実連合 (follow/note/reaction/renote/reply/mention/delete) | 4 min | `make federation-misskey-e2e` |
 | `federation-mastodon` | Drop-in e2e | 本物の Mastodon との引用の承認 (FEP-044f): 双方向の引用が承認済みになるか、取り消しが双方向で効くか | 未計測 | `make federation-mastodon-e2e` |
@@ -125,7 +125,7 @@ PR を出すと十数個の check が走る。**どれが何を見ていて、�
 | `diff` | **同じ入力に対する値そのもの** |
 | shape drift (`test` に含まれる) | フィールドの有無・型 |
 | `swap-test` | DB を引き継いだときに壊れないか |
-| `mkgo-born` | **mk-go が作った DB を TS が受け取れるか** |
+| `mkgo-born` | **Elythia が作った DB を TS が受け取れるか** |
 | `federation` / `ed25519-verify` | 他実装と実際に喋れるか |
 | `vulncheck` | **自分のコードではなく依存**に既知の穴が無いか (develop に入った後、到達可能なものだけ) |
 | `review` | **入る前**に、その PR が持ち込む依存に既知の穴が無いか (到達可能性は見ない) |
@@ -148,22 +148,22 @@ CodeQL はその逆で、**依存ではなく自分のコード**をパターン
 
 |  | DB を作ったのは | 経路 |
 |---|---|---|
-| `swap-test` | TypeORM | TS → mk-go → TS |
-| `mkgo-born` | **mk-go の migration** | mk-go → TS |
+| `swap-test` | TypeORM | TS → Elythia → TS |
+| `mkgo-born` | **Elythia の migration** | Elythia → TS |
 
 後者の方が厳しい。TS が一度も触っていない schema を受け取るので、カラム型・制約・
 enum・index 名・default のどれかが TypeORM の期待とずれていれば起動しない。
 `TestMigrationSeed_CoversUpstream` は seed 一覧と upstream の migration file を
 **静的に突き合わせる**だけで、実際に TS を起動して確かめてはいない。
 
-「mk-go で始めた人が Misskey に移れるか」に答えられるのはこの経路だけ。移れることは
+「Elythia で始めた人が Misskey に移れるか」に答えられるのはこの経路だけ。移れることは
 保証しない (#3191) が、どこまで移れるかを測るために残している
 ([dropin-e2e.md の「復路は測る対象」](dropin-e2e.md#復路は測る対象-3191))。実際この経路の初回実行で、RSA 秘密鍵が
 PKCS#1 のため TS 側の送信連合が全滅する不具合が見つかっている (#2380)。
 
 ### `e2e` (本家 backend e2e) が落ちたとき
 
-まず **意図的な乖離かどうか**を判断する。mk-go では『通らないことが正しい』テストが
+まず **意図的な乖離かどうか**を判断する。Elythia では『通らないことが正しい』テストが
 あり、`tests/upstream-e2e/known-divergences.json` に根拠付きで登録して expected-failure
 として扱っている。
 
@@ -177,7 +177,7 @@ PKCS#1 のため TS 側の送信連合が全滅する不具合が見つかって
 
 **ignore-list を安易に広げないこと。** 空振りさせると本物の乖離が埋もれる。
 
-mk-go 独自の additive field が原因なら `tests/diff/test_endpoints.py` の ignore-list に
+Elythia 独自の additive field が原因なら `tests/diff/test_endpoints.py` の ignore-list に
 **理由付きで**登録する。その際 [divergence.md](divergence.md) に対応する記述があるかを
 確認すること。`META_IGNORE` と `USER_IGNORE` は別定義で後者は前者を継承していないので、
 `policies` のように両方に現れるキーは両方へ足す必要がある。
@@ -199,7 +199,7 @@ workflow が後から集めたもの。前者がある場合はそちらが本�
 
 | 落ちた段階 | 意味 |
 |---|---|
-| stage 4b (TS-A healthy 待ちで timeout) | mk-go の migration が作った schema を TypeORM が受け付けなかった |
+| stage 4b (TS-A healthy 待ちで timeout) | Elythia の migration が作った schema を TypeORM が受け付けなかった |
 | stage 4d (migrations digest 不一致) | migration seed (`000029`) に漏れがあり TS が再実行した |
 | stage 5 (pytest) | schema は通ったがデータを読めない / 連合が続かない |
 
@@ -328,7 +328,7 @@ PR では回らない。失敗は Actions 上で確認して別 PR で対処す�
 
 | workflow | 内容 | 実行方法 |
 |---|---|---|
-| Playwright (`spec (ts 1/4)` 〜 `4/4`) | 同じ spec を **Misskey TS backend** に対して実行し、spec が mk-go の挙動に引きずられていないかを検証 | upstream 追従で本家の版を上げたとき |
+| Playwright (`spec (ts 1/4)` 〜 `4/4`) | 同じ spec を **Misskey TS backend** に対して実行し、spec が Elythia の挙動に引きずられていないかを検証 | upstream 追従で本家の版を上げたとき |
 | Docker (`workflow_dispatch`) | 過去のリリースタグから image を publish し直す | `gh workflow run docker.yml -f tag=1.1.1` |
 
 `spec (ts …)` を常時回さないのは、upstream が変わらない限り答えが変わらないため。詳細は
@@ -378,7 +378,7 @@ git ls-remote https://github.com/actions/checkout 'refs/tags/v7*'
 あわせて **publish する job の `actions/checkout` には `persist-credentials: false` を
 付ける** (`docker.yml` の 2 job / `docker-branch.yml` / `build-with-plugins.yml`)。
 付けないと token が `.git/config` に残ったまま、後続の `pnpm install` の lifecycle script や
-第三者のプラグインのコードが走る。いずれの job も checkout 後に mk-go の git 認証を使って
+第三者のプラグインのコードが走る。いずれの job も checkout 後に Elythia の git 認証を使って
 いない (`docker-branch.yml` の push は token を URL に明示した別リポジトリから行う)。
 
 ## 落ちたときの一般的な注意
@@ -551,12 +551,12 @@ checkout / setup-go を除くと step は実行順に 3 つ。**required job な
   | check 名 | 実行内容 |
   |---|---|
   | `swap-test` | `make dropin-swap-test` — TS→mk 切替の state preservation (#374) |
-  | `mkgo-born` | `make dropin-mkgo-born-test` — mk-go 生まれの DB を TS に引き渡せるか (#2379 / #2383) |
+  | `mkgo-born` | `make dropin-mkgo-born-test` — Elythia 生まれの DB を TS に引き渡せるか (#2379 / #2383) |
   | `ed25519-verify` | `make dropin-fedibird-test` — Fedibird-like AP mock との Ed25519 双方向 verify (#1083 / #2360) |
   | `federation` | `make federation-misskey-e2e` — 本物の Misskey TS を相手にした実連合 (#2362) |
   | `federation-mastodon` | `make federation-mastodon-e2e` — 本物の Mastodon を相手にした引用の承認 (FEP-044f、#3234) |
 
-- `mkgo-born` は `swap-test` と似て見えるが **DB を作った側が違う** (前者は mk-go の
+- `mkgo-born` は `swap-test` と似て見えるが **DB を作った側が違う** (前者は Elythia の
   migration、後者は TypeORM)。TS が一度も触っていない schema を受け取るのは前者だけで、
   どこまで移れるかを測る唯一の経路にあたる (保証はしない、#3191)。`TestMigrationSeed_CoversUpstream` は
   seed 一覧と upstream migration file の静的な突き合わせに過ぎず、実際に TS を起動して
@@ -609,7 +609,7 @@ checkout / setup-go を除くと step は実行順に 3 つ。**required job な
 #### `upstream-backend-e2e` workflow (PR トリガー)
 
 - `.github/workflows/upstream-backend-e2e.yml` で Misskey 本家の backend e2e
-  (本家の `packages/backend/test/e2e/**`) を mk-go に向けて実行する。本家は
+  (本家の `packages/backend/test/e2e/**`) を Elythia に向けて実行する。本家は
   `UPSTREAM_MISSKEY_VERSION` の版を `.cache/misskey/<版>` に checkout する (#3378)。
   テスト本体は無改変で、vitest の `globalSetup` / `setupFiles` (`tests/upstream-e2e/harness/`) だけを差し替える。
 - `pull_request` で paths (`internal/**` / `cmd/**` / `migration/**` /
@@ -618,7 +618,7 @@ checkout / setup-go を除くと step は実行順に 3 つ。**required job な
   ref に対して手動実行も可。
 - **4 シャード並列** (`--shard=i/4`)。`fail-fast: false`。**プロセス内では
   並列にできない**: upstream の vitest 設定が `maxWorkers: 1` で、かつ
-  setupFiles がファイルごとに mk-go の `/api/reset-db` (全テーブル truncate) を
+  setupFiles がファイルごとに Elythia の `/api/reset-db` (全テーブル truncate) を
   叩くため、同じ DB に 2 ファイルを並行させると片方が相手のフィクスチャを
   実行中に消す。job を分ければ PostgreSQL / Redis の service container も
   別に立つ (#2609)。
@@ -628,11 +628,11 @@ checkout / setup-go を除くと step は実行順に 3 つ。**required job な
 - 『通らないことが正しい』テストは `tests/upstream-e2e/known-divergences.json` に
   根拠付きで登録し、expected-failure (`task.fails`) として扱う。skip ではないので
   乖離が解消したテストは逆に落ち、一覧の陳腐化に気付ける。
-- 失敗時は mk-go のログを `upstream-e2e-mkgo-log-<shard>` artifact として 14 日保持。
+- 失敗時は Elythia のログを `upstream-e2e-mkgo-log-<shard>` artifact として 14 日保持。
 
 #### `diff-e2e` workflow (PR トリガー)
 
-- `.github/workflows/diff-e2e.yml` が `make diff-check` を実行し、mk-go と Misskey TS に
+- `.github/workflows/diff-e2e.yml` が `make diff-check` を実行し、Elythia と Misskey TS に
   同一リクエストを投げて**レスポンスを値レベルで diff** する (#2078 / #2368、endpoint 比較 35 件)。
 - 守備範囲が他のゲートと違う。本家 backend e2e は「本家のテストが通るか」、shape drift は
   「フィールドの有無・型」、diff-e2e は「**同じ入力に対する値そのもの**」を見る。shape が
@@ -664,7 +664,7 @@ checkout / setup-go を除くと step は実行順に 3 つ。**required job な
 #### `frontend` workflow (frontend.yml)
 
 - `.github/workflows/frontend.yml`。本家 (fork) が回していた workflow のうち frontend に
-  関わるものを移した (#3379)。1.0 以降 fork frontend は mk-go 独自に進化させる方針なので、
+  関わるものを移した (#3379)。1.0 以降 fork frontend は Elythia 独自に進化させる方針なので、
   型崩れやビルドの崩れの検出手段が要る。以前は `ci.yml` の `frontend-check` job が
   型・eslint・vitest などを見ていたが、#3379 の P4e でこの workflow へ寄せて job を消した
   (`make frontend-check` は手元用の target として残っている)。
@@ -711,7 +711,7 @@ checkout / setup-go を除くと step は実行順に 3 つ。**required job な
 - `build-with-plugins.yml` は **`workflow_call` 専用**。運営者が自分のリポジトリから
   「使いたいプラグインのリスト」を渡して呼ぶと、それらを `plugins/` へ clone して
   `Dockerfile.bundled` を build し、**呼び出し元の GHCR** へ publish する (#2940)。
-  mk-go 側はビルド基盤も成果物も持たない。
+  Elythia 側はビルド基盤も成果物も持たない。
 - **`permissions` を宣言していない。** reusable workflow の permissions は caller の
   権限以下にしか設定できず、宣言すると caller がそれを持たない場合に run ごと
   拒否される (`push: false` でも同じ)。publish する caller が `packages: write` を書く。

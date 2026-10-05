@@ -61,7 +61,7 @@ make dev
 |---|---|
 | `make check` | `fmt` → `lint` → `actionlint` → `golangci-lint` → `test`。コミット前に必須 |
 | `make gates` | 静的 parity ゲートを一括実行 (内訳は下の「静的 parity ゲート」表) |
-| `make version` | mk-go / 互換 Misskey / 追従している本家 (`UPSTREAM_MISSKEY_VERSION`) のバージョンを表示 |
+| `make version` | Elythia / 互換 Misskey / 追従している本家 (`UPSTREAM_MISSKEY_VERSION`) のバージョンを表示 |
 | `make frontend-check` | `frontend/` の型チェック (`vue-tsc --noEmit`)、**`frontend/` のソースを読むゲート**、**eslint** (#2906)。ビルド成果物を作らないので安全。ゲートは `frontend/` を本体で追跡するようになった (#3379) ので skip せず `make test` でも走るが、frontend を触ったときに手元でまとめて回せるよう、ここにも残している。**vitest は入っていない** (`make frontend-test`)。CI に同名の job はもう無く、CI では `frontend` workflow (`.github/workflows/frontend.yml`) が型・eslint・vitest・`emoji-regex-check` などを回す。同梱サンプル入りの統合バイナリの build は required の `build` job にある (#3379) |
 | `make diff-check` | 差分比較ハーネスを作り直して実行 (クリーン DB 前提のため) |
 | `make playwright-check` | Playwright を作り直して実行 (同上) |
@@ -101,7 +101,7 @@ cd mk && docker compose up -d
 | `make docker-update` | pull → ビルド → 再起動 → 検証 (Docker Compose 構成) |
 | `make uds-rebuild` `make uds-restart` `make uds-update` | 同上 (UDS 本番構成) |
 
-`docker-update` / `uds-update` は**フロントエンドの再ビルドと再起動を必ずセットで実行する**。mk-go はエントリポイントを起動時に 1 回だけ解決してキャッシュするため、ビルドだけして再起動しないと HTML が消えた古い `scripts/<hash>.js` を指したまま 404 になる。
+`docker-update` / `uds-update` は**フロントエンドの再ビルドと再起動を必ずセットで実行する**。Elythia はエントリポイントを起動時に 1 回だけ解決してキャッシュするため、ビルドだけして再起動しないと HTML が消えた古い `scripts/<hash>.js` を指したまま 404 になる。
 
 **`up -d` では再起動されない。** compose はイメージと設定が変わらなければコンテナを作り直さないが、フロントエンドは bind-mount なので、フロントエンドだけ更新したときは何も変わらない。そのため `*-restart` は `restart` を明示したうえで、[`deploy/check-frontend-entry.sh`](../deploy/check-frontend-entry.sh) で**配信中のエントリが実在するか**まで確かめ、404 なら非ゼロで落ちる (#2885。2026-09-07 に本番で実際に踏んだ)。
 
@@ -118,7 +118,7 @@ cd mk && docker compose up -d
 | ターゲット | 内容 |
 |---|---|
 | `make build` | `./built/elythia`にバイナリ生成 |
-| `make dev` | `go run`で直接起動。**ビルド済みフロント (`frontend/built/_frontend_vite_`、`MISSKEY_FRONTEND_DIR` で上書き可) が無ければ `MK_DEV=1` を立てて**、`/vite/*` を Vite dev server (`localhost:5173`) へ流す。mk-go は dev モード (`dev: true` / `MK_DEV=1`) でしか dev server へ proxy せず、それ以外でビルド出力が無いと `/vite/*` は 404 になる — 以前は「無ければ proxy」だったので、本番でビルド出力が欠けると認証なしで `localhost:5173` へ reverse proxy されていた。ビルド済みでも dev server を使いたいときは `MK_DEV=1 make dev` |
+| `make dev` | `go run`で直接起動。**ビルド済みフロント (`frontend/built/_frontend_vite_`、`MISSKEY_FRONTEND_DIR` で上書き可) が無ければ `MK_DEV=1` を立てて**、`/vite/*` を Vite dev server (`localhost:5173`) へ流す。Elythia は dev モード (`dev: true` / `MK_DEV=1`) でしか dev server へ proxy せず、それ以外でビルド出力が無いと `/vite/*` は 404 になる — 以前は「無ければ proxy」だったので、本番でビルド出力が欠けると認証なしで `localhost:5173` へ reverse proxy されていた。ビルド済みでも dev server を使いたいときは `MK_DEV=1 make dev` |
 | `make run` | build + 実行 |
 | `make clean` | ビルド成果物を削除 |
 | `make tidy` | `go mod tidy`。**このリポジトリでは private plugin の解決に失敗するので使えない**。依存追加は `go get`、`go.sum` の充足検証は **`GOWORK=off go build`**。**`-mod=readonly` では効かない** — Go 1.16 以降それは既定値で、素の `go build` と同じ。効いていないのは `go.work` のほうで、workspace があると `go.sum` ではなく `go.work.sum` が使われ、`go.sum` から行を消しても**どちらの書き方でも exit 0 になる** (実測)。CI は `go.work` を持たない (生成物で gitignore 済み) ので、既存の `go build ./...` が既に検証している (→ [プラグインの書き方](plugins/authoring.md)) |
@@ -199,7 +199,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_xxx" ON "yyy" ("zzz");
 | `make migrationdoc-check` | migration の本数を述べた doc が実態と合っているか (#2874)。**gate が見るのは 7 ファイル 21 箇所**。1 本足したとき実際に動くのはその一部で、#2866 (000082) では 17 箇所、**うち 5 箇所が漏れた**。総本数 / 破壊的なマイグレーションの件数 / `-- data loss:` 宣言の本数 / 作られるテーブル数と、down が no-op のものの**一覧**を突き合わせる。**一覧が本体** — 件数だけだと「1 本足して 1 本消す」で素通りする。**破壊的の件数は doc 自身の表の行数を truth にする** — migration の中身から「共有テーブルか」を判定すると upstream に無いテーブルを触るものまで拾う。対象外は 3 つ — 「51 本」(2 つの doc で定義が違うのに同じ数)、「102」(「上記 9 件」の定義に依存)、「データを不可逆に変えるのはこのうち 8 本」(機械判定できない)。拾えなかったら落とす |
 | `make mdtable-check` | tracked な md の表の各行がヘッダと同じ列数か (#2930)。**GFM は溢れたセルを黙って捨てる**ので、ソースに書いた内容が GitHub 上で読めなくなる。原因はほぼセル区切りとして働くパイプで、**コードスパンの中でも働く** (`\\|` へエスケープする)。`docs/divergence.md` の 1 行で**描画が 599 文字あるべきところ 394 文字で止まり、205 文字 (34.2%) が読めなかった**。**見るのは列数だけ** — コードスパンの対応付けを自前で持つ案は、次の周で**二重バッククォートのコードスパンを含む行**を落とした (#2857 の「自前パーサに継ぎ足すと手当てするたびに隣の穴が開く」型)。取りこぼす側 (列数が一致したままコードスパンが割れる形など) はテストの doc コメントに明記してある。現 corpus (表 227 個) に対し偽陽性 0 |
 | `make notiftype-check` | 通知タイプの一覧が `internal/core/notification` の registry 1 箇所から導出されているか (#2898)。**値の一致だけでは足りない** — リテラルへ書き戻しても書いた時点の中身は同じなので値比較は通り、落ちるのは core に型を足した後 = 一番検出したい瞬間に検出できない。導出している「形」を AST で固定してある |
-| `make pluginembed-check` | mk-go をビルドする Dockerfile が `pluginbuild` を **`go build` より前に** 実行するか (#2940)。**組み込みを忘れてもエラーにならない** — `plugins/` に置いたのに入っていない image が黙って出来て、運営者は「入ったつもり」で起動できる。`Dockerfile.bundled` が実際にそうなっていた。検出は `go build` / `go install` × `cmd/elythia` / `cmd/...` の組で行い、**行継続は畳んでから**判定する (折り返した瞬間に検査対象から消えるのを防ぐ)。シェルの行末コメント (` #`) に退避させた `pluginbuild` も実行されないものとして扱う。組み込まない Dockerfile は理由付きで allowlist に登録する (連合 e2e 用など) |
+| `make pluginembed-check` | Elythia をビルドする Dockerfile が `pluginbuild` を **`go build` より前に** 実行するか (#2940)。**組み込みを忘れてもエラーにならない** — `plugins/` に置いたのに入っていない image が黙って出来て、運営者は「入ったつもり」で起動できる。`Dockerfile.bundled` が実際にそうなっていた。検出は `go build` / `go install` × `cmd/elythia` / `cmd/...` の組で行い、**行継続は畳んでから**判定する (折り返した瞬間に検査対象から消えるのを防ぐ)。シェルの行末コメント (` #`) に退避させた `pluginbuild` も実行されないものとして扱う。組み込まない Dockerfile は理由付きで allowlist に登録する (連合 e2e 用など) |
 | `make dockerignore-check` | `.dockerignore` がシークレットと利用者データを除外しているか (#2942)。**`.dockerignore` は全 build context 共通**なので、1 行落ちると `Dockerfile` / `Dockerfile.bundled` / `deploy/uds` / e2e の各 stack に同時に効く。`drive-files` (既定の drive の置き場所) と operator-local な設定が実際に抜けていた。**配る image には入らない** (最終 stage が明示パスの `COPY --from=builder` しか持たないため) が、build context と builder stage の layer には入り、`cache-to` を設定していればキャッシュ経由で読める。`!` による打ち消しと per-Dockerfile な `<名前>.dockerignore` の存在も見る。判定は自前ではなく `moby/patternmatcher` (Docker 本体の実装) に解かせる。**「残るべきものが残るか」も見る**ので、除外を広げすぎて COPY 元を巻き込む変更 (`.config/*.y*ml` → `.config/*`、`frontend/node_modules` → `**/node_modules` など) もここで落ちる。サイズの問題は対象にしていない (転送が遅くなるだけで、落ちても気付ける) |
 | `make secretfield-check` | モデルの秘密フィールドが `json:"-"` を保っているか。**モデルをそのまま JSON 化する経路がある**ので、タグ 1 つが唯一の防波堤になっているフィールドがある。実測で `model.User.Token` のタグを外しても `make gates` も全テストも緑のままだった (native token を取れると、そのユーザーとして API を叩けるので権限ゲートを全て迂回できる)。**名前だけでは判定できない** — `Meta` の captcha secret は `admin/meta` が管理画面へ返すし、drive の `accessKey` は URL の構成要素で秘密ではない。そこで #2792 と同じ allowlist 方式にし、出してよいものには理由を書かせる。**allowlist は検出集合と突き合わせる** — 実在しないキーを書いても無視される形だと、守っているつもりで何も検査していない状態になる (初版が実際にそうで、`Meta.SensitiveMediaDetectionAPIKey` を登録していたが正規表現が `ApiKey` しか見ておらず `APIKey` に一致していなかった)。ただしそれが守るのは**allowlist に該当があるキーだけ**なので、該当が全て `json:"-"` 側にある alternative (`Pass` / `Code`) は `mustDetectSecretFields` で別に固定する。静的なタグ検査に加えて、代表的な型を実際に `json.Marshal` して秘密が出ないことも見る。**タグを書き忘れた形も拾う** — `encoding/json` はタグの無い exported フィールドを Go の名前でそのまま出すので、そこを skip すると「フィールドを足してタグを忘れる」という最頻のミスが素通りする。**逆に「落とすと壊れる」側も固定する** — モデルを直接 marshal する経路は 6 系統あり (moderation log / ephemeral store / webpush cache / `admin/relays` などレスポンス本体がモデルそのもの / `packedRecipient` のようにモデルを埋め込む struct / jsonb 列の往復)、`Meta.SMTPPass` や `RegistrationTicket.Code` のタグを落とすと監査記録が黙って欠ける (実際に一度壊した) |
 | `make ipshape-check` | 利用者向けレスポンスと連合出力の shape に IP が出ていないか (#3136)。#3066 の完了条件の担保が `shapecheck` の golden 照合しか無く、**フィールドを足す変更は緑のまま通っていた** (実測: `UserLite` に `json:"lastIPs"` を足して `make shapecheck` は PASS)。**AST で全 struct の json タグを読む** — reflect で型を手で並べる形は `entity.MeDetailed` (= `/api/i`) を落としていた。走査は `internal/entity` / `internal/activitypub` に加えて `internal/api` / `internal/server` / `internal/stream` (handler がファイル内に宣言した response struct も stream の payload も wire の形になる)。実測は要素 2,332 / ユニークキー 755。**語の切り方は片側に寄せると穴が開く** — 大文字のたびに割ると `lastIPs` が、「小文字/数字の直後の大文字」だけだと `IPAddr` が素通りする (両方とも実測)。`IPaddress` のように割れない綴りのために `address` 系の alternative も要る。**キーの走査だけでは入れ子が見えない**ので、`internal/` 全体から「自分の JSON キーに IP を持つ型」を導出し、公開 shape がそれを**推移的に**参照していないことも見る (`model.User` は自分では持たないが `avatar.requestIp` を出す)。interface と関数型は伝播させない (混ぜると repository 一式が誤検出になる)。収集ロジックは `ipscanfixture` / `ipbearingfixture` / `marshalerfixture` を実際に `json.Marshal` した結果と突き合わせて固定する (`testdata/` に置くとコンパイルされず突き合わせられない)。**「違反 0 件が正常」な検査は抽出側にも下限が要る** — 参照側に置き忘れて、収集を潰す 1 行で本物の漏れが素通りした。走査の縮みは**ファイル単位**で見る (件数と代表キーだけだと大きなファイルさえ残れば通る)。**射程外**は `map[string]any` を手で組む経路、走査対象外に宣言した型を `c.JSON` にそのまま渡す形 (`/api/server-info`)、`remoteAddr` のように語として `ip` を取り出せない綴り |
@@ -214,16 +214,16 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_xxx" ON "yyy" ("zzz");
 
 | ターゲット | 内容 | 詳細 |
 |---|---|---|
-| `make playwright-up` `playwright-test` `playwright-down` `playwright-logs` | mk-go backend に対する Playwright spec | — |
+| `make playwright-up` `playwright-test` `playwright-down` `playwright-logs` | Elythia backend に対する Playwright spec | — |
 | `make playwright-ts-up` `playwright-ts-test` `playwright-ts-down` | 同じ spec を Misskey TS backend に対して実行し、drop-in 互換を担保する | — |
-| `make diff-up` `diff-test` `diff-down` `diff-logs` | mk-go と TS に同一リクエストを投げてレスポンスを値レベルで diff | [差分比較ハーネス](diff-e2e.md) |
+| `make diff-up` `diff-test` `diff-down` `diff-logs` | Elythia と TS に同一リクエストを投げてレスポンスを値レベルで diff | [差分比較ハーネス](diff-e2e.md) |
 | `make dropin-up` `dropin-test` `dropin-down` `dropin-logs` | TS 2 インスタンスの federation smoke | [Drop-in e2e](dropin-e2e.md) |
-| `make dropin-mk-up` `dropin-mk-test` `dropin-mk-down` `dropin-mk-logs` | 上記の backend を mk-go に差し替えた overlay | 同上 |
-| `make dropin-swap-test` | TS → mk-go 切替の state preservation を通しで検証 | 同上 |
-| `make dropin-mkgo-born-test` | **mk-go 生まれの DB を TS に引き渡せるか** (測る対象。保証はしない、#3191) | 同上 |
+| `make dropin-mk-up` `dropin-mk-test` `dropin-mk-down` `dropin-mk-logs` | 上記の backend を Elythia に差し替えた overlay | 同上 |
+| `make dropin-swap-test` | TS → Elythia 切替の state preservation を通しで検証 | 同上 |
+| `make dropin-mkgo-born-test` | **Elythia 生まれの DB を TS に引き渡せるか** (測る対象。保証はしない、#3191) | 同上 |
 | `make dropin-fedibird-test` | Fedibird-like AP mock との Ed25519 双方向 verify | 同上 |
 | `make dropin-frontend-baseline` `dropin-frontend-up` `dropin-frontend-down` `dropin-frontend-logs` | 3 TS インスタンス + cypress | [Drop-in frontend e2e](dropin-frontend-e2e.md) |
-| `make dropin-frontend-mk-up` `dropin-frontend-mk-down` `dropin-frontend-swap-test` | 上記の mk-go overlay と切替シナリオ | 同上 |
+| `make dropin-frontend-mk-up` `dropin-frontend-mk-down` `dropin-frontend-swap-test` | 上記の Elythia overlay と切替シナリオ | 同上 |
 | `make federation-misskey-build` `federation-misskey-up` `federation-misskey-test` `federation-misskey-down` `federation-misskey-logs` | Misskey 本家インスタンスを立てて実際に連合させる | [ActivityPub連合](federation.md) |
 | `make federation-misskey-e2e` | 上記を起動から撤去まで通しで実行 (CI の `federation` シナリオと同じ) | 同上 |
 | `make federation-mastodon-e2e` `federation-mastodon-down` | 本物の Mastodon を立てて引用の承認 (FEP-044f) を確かめる。前者は起動から撤去まで通し (CI の `federation-mastodon` シナリオと同じ) | 同上 |
@@ -232,13 +232,13 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_xxx" ON "yyy" ("zzz");
 | `make upstream-check` | golden と本家を読むテストが本家の版と一致するか (本家から作り直して差分が無いこと)。`apicompat` workflow が回す | [shape drift](shape-drift.md) |
 | `make upstream-sync TO=<版>` | 本家の新しい版の差分のうち、`frontend/` が取り込むパスだけを 3-way で当てる (設計 D4、#3379)。区分に当たらないパスがあれば何も当てずに止まる。`DRY=1` で分類だけを表示 | [本家への追従](upstream-catch-up.md) |
 | `make upstream-sync-lock` | `frontend/pnpm-lock.yaml` を、直前の lock を基点に package.json から作り直す (`pnpm install --lockfile-only`、node の container で実行) | [本家への追従](upstream-catch-up.md) |
-| `make upstream-e2e-deps` `upstream-e2e-up` `upstream-e2e-migrate` `upstream-e2e-test` `upstream-e2e-down` | Misskey 本家の backend e2e をテスト本体無改変で mk-go に向けて実行 | [本家 backend e2e](upstream-backend-e2e.md) |
+| `make upstream-e2e-deps` `upstream-e2e-up` `upstream-e2e-migrate` `upstream-e2e-test` `upstream-e2e-down` | Misskey 本家の backend e2e をテスト本体無改変で Elythia に向けて実行 | [本家 backend e2e](upstream-backend-e2e.md) |
 
 ### ベンチマーク
 
 | ターゲット | 内容 | 詳細 |
 |---|---|---|
-| `make bench-up` `bench-run` `bench-down` `bench-logs` | k6 で mk-go と Misskey 本家に同一負荷をかけて比較 | [pprof プロファイリング](bench-pprof.md) |
+| `make bench-up` `bench-run` `bench-down` `bench-logs` | k6 で Elythia と Misskey 本家に同一負荷をかけて比較 | [pprof プロファイリング](bench-pprof.md) |
 | `make queue-bench-all` (`queue-bench-up` `queue-bench-seed` `queue-bench-outbound` `queue-bench-inbound` `queue-bench-report` `queue-bench-down` `queue-bench-logs`) | BullMQ / mkq の 2-way スループット比較 | [queue-bench](queue-bench.md) |
 | `make queue-bench-autoscale-run` `queue-bench-autoscale-down` `queue-bench-autoscale-logs` | worker 数 fixed16 / fixed64 / auto の drain time 比較 | [オートスケール設計](design/auto-scale-job-workers.md) |
 
@@ -251,7 +251,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_xxx" ON "yyy" ("zzz");
 | `make uds-rebuild` | フロントエンド + イメージをまとめてビルド |
 | `make uds-restart` | `mkgo` を再起動して配信エントリを検証 |
 
-> **警告**: `make uds-frontend-build` と `make e2e-frontend-build` は `frontend/built` に出力する (#3379 より前は `third_party/misskey/built`)。**本番コンテナがこのディレクトリを bind-mount している**ため、「ビルドが通るか確かめるだけ」のつもりで実行すると配信中のアセットが差し替わる。mk-go はエントリポイントを起動時に 1 回だけ解決してキャッシュするので、ハッシュが変わると HTML が消えたファイルを指したまま **404 でフロントが起動しなくなる**。
+> **警告**: `make uds-frontend-build` と `make e2e-frontend-build` は `frontend/built` に出力する (#3379 より前は `third_party/misskey/built`)。**本番コンテナがこのディレクトリを bind-mount している**ため、「ビルドが通るか確かめるだけ」のつもりで実行すると配信中のアセットが差し替わる。Elythia はエントリポイントを起動時に 1 回だけ解決してキャッシュするので、ハッシュが変わると HTML が消えたファイルを指したまま **404 でフロントが起動しなくなる**。
 >
 > - フロントの型チェックだけなら `make frontend-check`、または `frontend/packages/frontend` で `npx vue-tsc --noEmit` / `npm run eslint` を直接叩く (Docker 不要で速い)。`frontend/` を手でビルドするときは、先に `make plugins` で `server-plugins.generated.ts` を生成する (git で追跡していない)
 > - 本番へ反映する意図で実行した場合は、続けてコンテナを再起動すること
@@ -338,8 +338,8 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_xxx" ON "yyy" ("zzz");
 | `plugin-tests` | CI | 同梱プラグインのテスト (別 module なので `go list ./...` に入らない) |
 | `build-and-push` / `-bundled` | Docker | image がビルドできるか (PR では push しない) |
 | `spec (mk-go 1/4)` 〜 `4/4` | Playwright | ブラウザからの統合互換。TS backend での実行は `workflow_dispatch` のみ |
-| `e2e (1/4)` 〜 `4/4` | Upstream backend e2e | 本家の backend e2e が mk-go に対して通るか |
-| `diff` | Diff e2e | mk-go と TS の**レスポンスの値**が一致するか |
+| `e2e (1/4)` 〜 `4/4` | Upstream backend e2e | 本家の backend e2e が Elythia に対して通るか |
+| `diff` | Diff e2e | Elythia と TS の**レスポンスの値**が一致するか |
 | `swap-test` / `mkgo-born` / `ed25519-verify` / `federation` / `federation-mastodon` | Drop-in e2e | 切替・TS へ戻す経路の測定・Ed25519・実連合 (Misskey TS / Mastodon) の 5 シナリオ |
 
 どれが何を守っているかの対比は [ci.md](ci.md) にまとめてある。
@@ -405,7 +405,7 @@ make uds-update             # pull → ビルド → 再起動 → 配信 entry 
 make docker-update          # 同上 (Docker Compose 構成)
 make uds-restart            # mkgo を再起動して配信 entry を検証だけする
                             # **`up -d` は再起動を保証しない** — frontend は bind mount
-                            # なので frontend だけ更新すると recreate されず、mk-go が
+                            # なので frontend だけ更新すると recreate されず、Elythia が
                             # 起動時にキャッシュした古い entry を配り続ける (#2885)
 
 # マイグレーション（接続先は -config、既定 .config/default.yml から決まる）
@@ -425,7 +425,7 @@ make dropin-up              # TS-A / TS-B stack 起動
 make dropin-test            # pytest smoke test 実行
 make dropin-down            # stack + volume 全削除
 
-# Drop-in mk overlay + swap test (#367) — instance A の backend を mk-go に
+# Drop-in mk overlay + swap test (#367) — instance A の backend を Elythia に
 # 差し替える e2e シナリオ。
 make dropin-mk-up           # base + mk overlay (clean DB から mk-A 起動)
 make dropin-mk-test         # mk-A に対する smoke test
@@ -436,12 +436,12 @@ make dropin-swap-test       # TS-then-mk 切替シナリオ (bash orchestrator)
 # 双方向 Ed25519 verify を検証する e2e。
 make dropin-fedibird-test    # mock ↔ mk-A の Ed25519 inbound/outbound 検証
 
-# 本家 backend e2e (#2347) — Misskey 本家の test/e2e/** をそのまま mk-go に
+# 本家 backend e2e (#2347) — Misskey 本家の test/e2e/** をそのまま Elythia に
 # 向けて実行する。テスト本体は無改変。詳細は docs/upstream-backend-e2e.md。
 make upstream-e2e-deps       # 本家を取得し、本家側の依存を用意 (初回 / UPSTREAM_MISSKEY_VERSION を上げた後)
 make upstream-e2e-up         # e2e 用 PostgreSQL / Redis を起動
 make upstream-e2e-migrate    # e2e 用 DB にマイグレーションを適用
-make upstream-e2e-test       # mk-go をビルドして vitest を実行 (FILE= で 1 ファイル指定可)
+make upstream-e2e-test       # Elythia をビルドして vitest を実行 (FILE= で 1 ファイル指定可)
 make upstream-e2e            # 上記 4 つを一括実行
 make upstream-e2e-down       # volume ごと撤去
 
@@ -455,10 +455,10 @@ make dropin-frontend-mk-up       # mk overlay だけ立ち上げ (clean DB の m
 make dropin-frontend-mk-down     # mk overlay cleanup
 
 # その他の e2e / 検証
-make dropin-mkgo-born-test   # mk-go 生まれの DB を TS に引き渡せるか (#2383)
+make dropin-mkgo-born-test   # Elythia 生まれの DB を TS に引き渡せるか (#2383)
 make federation-misskey-e2e  # 本物の Misskey TS との実連合を起動から撤去まで通しで (#2362)
 make federation-mastodon-e2e # 本物の Mastodon と引用の承認 (FEP-044f) を通しで (#3234)
-make diff-check              # mk-go と TS のレスポンスを値レベルで diff (#2078)
+make diff-check              # Elythia と TS のレスポンスを値レベルで diff (#2078)
 make playwright-check        # Playwright を作り直して実行
 make frontend-check          # frontend/ の型チェック + frontend/ を読むゲート + eslint
 make frontend-lint           # eslint だけ (CI と同じ範囲、実測 55 秒)

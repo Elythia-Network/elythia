@@ -27,7 +27,7 @@
 | `deliver_service.go` | 配信ジョブのエンキュー。フォロワーのInbox収集、ホストブロック判定 |
 | `processor.go` | 受信Activityのディスパッチ (Follow, Create, Like, Announce, Delete, Update等) |
 | `published_time.go` | AP `published` を parse + clock skew (5min) / 過去 10 年 floor で fallback (#940) |
-| `remote_stats.go` | リモート user の notesCount/followersCount/followingCount を origin の `/api/users/show` から取得 (mk-go 独自拡張、#943)。LRU cache size cap 10000 (#945)、SSRF guard 経由 |
+| `remote_stats.go` | リモート user の notesCount/followersCount/followingCount を origin の `/api/users/show` から取得 (Elythia 独自拡張、#943)。LRU cache size cap 10000 (#945)、SSRF guard 経由 |
 | `note_delivery_hook.go` | ノート公開時にCreate/Announceを配信 |
 | `following_delivery_hook.go` | フォロー/アンフォロー/承認時にFollow/Undo/Acceptを配信 |
 | `reaction_delivery_hook.go` | リアクション時にLikeを配信 |
@@ -95,7 +95,7 @@ HTTP Signature からは言えない。これを埋めるのが LD-Signature。
   **生 body を処理してはいけない** — AS2 context の `"@vocab": "_:"` により、context で
   定義されていない語 (`_misskey_content` など) は URDNA2015 で blank node 述語として
   捨てられ署名に含まれないので、転送者が署名済み activity にそういうキーを足すと
-  原著者名義の本文を差し替えられる (以前の mk-go がそうだった)。compact 後の文書では
+  原著者名義の本文を差し替えられる (以前の Elythia がそうだった)。compact 後の文書では
   署名外の述語は `_:<name>` のキーで残り、handler からは見えない
 - **`signature.created` が過去 7 日 / 未来 1 時間の外なら拒否する。欠落・複数・読めない
   値も拒否する** (upstream には無い。転送経路の replay 対策。divergence 登録済み)。
@@ -211,11 +211,11 @@ upstream / 他実装が出してくる variant に対するロバスト性:
 | `alsoKnownAs` の array / string 双方受け入れ | 対応済 (#1000、upstream #17275)。`APIDList` (単一 string / 配列に加えて `{"id": ...}` 要素も拾い、読めない要素は落とす) |
 | 存在しない Actor の Delete を ignore | 対応済 (#1001、upstream #17294)。無いと 404 で queue retry に乗り続ける |
 | リレー由来 Announce で renote を作らず元 note を直接 publish | 対応済 (#1002、upstream #17308) |
-| ブロック中インスタンスの inbox job 蓄積防止 | **設計上不要** (#1003)。upstream は NoteCreate 深部の `Instance is blocked` を error handler で捕まえて retry を防ぐが、mk-go は verify-in-worker (#565) で signature verify 直後に block check するので body parse にすら届かない |
+| ブロック中インスタンスの inbox job 蓄積防止 | **設計上不要** (#1003)。upstream は NoteCreate 深部の `Instance is blocked` を error handler で捕まえて retry を防ぐが、Elythia は verify-in-worker (#565) で signature verify 直後に block check するので body parse にすら届かない |
 
-## RemoteStatsFetcher (mk-go 独自拡張、#943)
+## RemoteStatsFetcher (Elythia 独自拡張、#943)
 
-upstream Misskey TS の `users/show` は **自インスタンスで観測した範囲** のみで notesCount / followersCount / followingCount を集計するため、リモートユーザーの数値が実体より小さく表示される。mk-go は user.Host が non-local の場合、origin instance の `/api/users/show` を https POST で叩いて公開 counts を取得し、上書き表示する。
+upstream Misskey TS の `users/show` は **自インスタンスで観測した範囲** のみで notesCount / followersCount / followingCount を集計するため、リモートユーザーの数値が実体より小さく表示される。Elythia は user.Host が non-local の場合、origin instance の `/api/users/show` を https POST で叩いて公開 counts を取得し、上書き表示する。
 
 - LRU cache: size cap 10000 / positive TTL 1h / negative TTL 5min (#945)
 - SSRF guard: `safehttp.NewSSRFSafeTransport` 経由

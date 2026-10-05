@@ -1,6 +1,6 @@
 # Differential e2e diff harness (#2089)
 
-mk-go と Misskey TS の**実 API レスポンスを並べて diff** し、静的コード比較や
+Elythia と Misskey TS の**実 API レスポンスを並べて diff** し、静的コード比較や
 entitycompat golden gate では拾えない**値レベルの乖離**を検出するハーネス。
 
 ## なぜ必要か
@@ -9,12 +9,12 @@ entitycompat golden gate では拾えない**値レベルの乖離**を検出す
 
 - **entitycompat golden gate**: error code/id/HTTP status と entity field の
   **presence (shape)** を golden と突き合わせる。
-- **dropin / playwright e2e**: TS ↔ mk-go 切替が成立するか、フロントから見た
+- **dropin / playwright e2e**: TS ↔ Elythia 切替が成立するか、フロントから見た
   挙動が壊れないかを検証する。
 
 これらは「field が**存在するか**」「shape が合うか」は見るが、「field の**値**が
 upstream と一致するか」(計算結果・正規化・順序・条件分岐の差) は検証しない。
-本ハーネスはそこを埋める: **同一の入力に対する mk-go と TS の出力 JSON を field
+本ハーネスはそこを埋める: **同一の入力に対する Elythia と TS の出力 JSON を field
 単位で diff** し、instance 固有のノイズ (id/時刻/host 等) を除いた残差を parity
 乖離の候補として報告する。
 
@@ -32,7 +32,7 @@ tests/diff/compose.yml   (隔離 stack、production UDS には触れない)
 
 - **API-only (HTTP, no TLS/federation)**: runner は両 backend を `:3000` で直接
   叩く。WebAuthn/secure-context は不要なので nginx TLS 層は省く。
-- **version**: mk-go・TS ともに **2026.10.0** で一致している。かつては公式 image が
+- **version**: Elythia・TS ともに **2026.10.0** で一致している。かつては公式 image が
   1 minor 遅れており version-gap のノイズを ignore-list で吸収していたが、その必要は
   無くなった。追従直後で公式 image が未公開の期間だけ、再び gap が生じうる。
 - **隔離 (重要)**: compose 先頭で `name: mkdiff` を指定し専用 project に固定する。
@@ -106,7 +106,7 @@ make diff-test     # スタックが既に上がっている場合
 
 pytest の総数は 48 で、内訳は:
 
-- **endpoint 比較 35 件** (`test_endpoints.py`) — mk-go と TS に同じリクエストを
+- **endpoint 比較 35 件** (`test_endpoints.py`) — Elythia と TS に同じリクエストを
   投げて値を突き合わせるもの
 - diff-core の unit test 13 件 (`test_diff_core.py`) — 差分の取り方そのものの検証。
   stdlib のみなので `python3 tests/diff/test_diff_core.py` で単体実行できる
@@ -124,7 +124,7 @@ timeline / users/notes / drive folders / drive files / admin announcements)。
 
 cursor ページングはフロントの「もっと新しいものを読む」(`fetchNewer`) の中核で、
 upstream の `makePaginationQuery` は **`sinceId` / `sinceDate` 単独のときだけ ASC**
-で返す。mk-go は `internal/repository/pagination.go` の `paginationOrder` で同じ
+で返す。Elythia は `internal/repository/pagination.go` の `paginationOrder` で同じ
 規則を持つ (#2713 / PR #2764。数え方で 9 とも 12 とも書かれるが、**実際に
 向きが変わったのは repository 関数 9 つ**で、残りは据え置き 1
 (`emoji.go ListRemoteWithFilter` は upstream 自体が DESC) と挙動不変の helper
@@ -134,7 +134,7 @@ upstream の `makePaginationQuery` は **`sinceId` / `sinceDate` 単独のとき
 **元から無防備だったわけではない。** 本家 backend e2e の
 `.cache/misskey/<版>/packages/backend/test/e2e/timelines.ts` (`make upstream-fetch` で取得) が `users/notes` の
 `sinceId` 単独 (ASC) と `sinceId` + `untilId` (DESC) を `deepStrictEqual` で
-リテラル配列に固定しており、これは mk-go に対しても実行されている (vitest の
+リテラル配列に固定しており、これは Elythia に対しても実行されている (vitest の
 exclude にも `known-divergences.json` にも入っていない。`describe.each` の
 FTT on/off で計 4 実行)。
 
@@ -143,7 +143,7 @@ FTT on/off で計 4 実行)。
 `res.sort(compareBy(s => s.id))` で**両辺を並べ替えてから**比較しており、
 集合しか見ていない (順序回帰は落ちない)。
 
-無かったのは **mk-go 側で管理するゲート**で、`tests/` / `test/` を横断して
+無かったのは **Elythia 側で管理するゲート**で、`tests/` / `test/` を横断して
 `sinceId` を grep すると 0 件だった。しかも **#2713 が実際に直した経路
 (drive folder / note draft / abuse report / chat / invite / reversi) は
 1 つも入っていなかった**。
@@ -153,7 +153,7 @@ FTT on/off で計 4 実行)。
 | endpoint | repository | 選んだ理由 |
 |---|---|---|
 | `notes/timeline` | `note.go ListHomeTimeline` | fanout 経由 (`sinceId` 付きは #2720 で必ず DB へ倒れる)。実利用が最も多い。**`meta.enableFanoutTimelineDbFallback` が off だと空が返る** (#2762、§5.6 参照) ので、そのときは `got=[]` で落ちる |
-| `users/notes` | `note.go ListByUserIDFiltered` | fanout を通らない直行経路。本家 e2e も見ているが、あちらは mk-go 単体の assert で値の突き合わせはしない |
+| `users/notes` | `note.go ListByUserIDFiltered` | fanout を通らない直行経路。本家 e2e も見ているが、あちらは Elythia 単体の assert で値の突き合わせはしない |
 | `drive/folders` | `drive_folder.go ListByUser` | **#2764 が実際に直した経路**。note 系は元から ASC だったので、そこだけ見ても #2713 の回帰は捕まらない (mock 側は #2764 で `SortMockPage` に揃っているので、こちらは単体テストでも見える) |
 | `drive/files` | `drive_file.go ListByUser` | 追加時点では **mock (`MockDriveFileRepository.ListByUser`) が sinceID 単独の ASC を実装しておらず**、単体テストからは順序回帰が見えなかった。#2766 で揃えたので今は mock でも見えるが、mock は production の SQL を実行しないので実 API 側のゲートは残す。frontend の MkDrive が `sinceId: '0'` で読む。**`sort` は渡さない** — production も upstream も sort 指定時は `paginationOrder` を通らず固定 order を使い、MkDrive も `-createdAt` のとき sort を送らない |
 | `admin/announcements/list` | `announcement.go ListForAdmin` | note / drive 以外の repository |
@@ -164,7 +164,7 @@ reverse する」実装を素通しする。それは順序は合うが**返す�
 (最古 n 件ではなく最新 n 件) ので、ページに穴が空く。実運用のリクエストも
 この形で、paginator の `fetchNewer` は limit 30 を投げる。
 
-各テストは diff (mk-go と TS が一致するか) に加えて**向きそのものを直接
+各テストは diff (Elythia と TS が一致するか) に加えて**向きそのものを直接
 assert する**。diff だけだと「両方 DESC」でも通ってしまい、TS 側の実装に
 依存してしまうため。
 
