@@ -44,7 +44,7 @@ type limitSpec struct {
 }
 
 func main() {
-	// 本家は submodule ではなく .cache/misskey/<版> から読む (#3378)。版のファイルが
+	// 本家は .cache/misskey/<版> から読む (#3378)。版のファイルが
 	// 読めなければ up は空になり、下の Check が取得の案内を出して落ちる。
 	up, _ := upstreamsrc.Dir(".")
 	epDir := flag.String("endpoints", filepath.Join(up, "packages/backend/src/server/api/endpoints"), "path to Misskey backend endpoints dir")

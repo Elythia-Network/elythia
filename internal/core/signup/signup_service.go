@@ -22,7 +22,7 @@ import (
 )
 
 // localUsernamePattern は upstream Misskey TS の `localUsernameSchema`
-// (= third_party の models/User.ts:319) に整合する username 検証 regex。
+// (= 本家の packages/backend/src/models/User.ts:319) に整合する username 検証 regex。
 // `^\w{1,20}$` 相当で `\w` = [a-zA-Z0-9_]、length 1-20。
 //
 // Go の regexp は RE2 default で `\w` が ASCII の [0-9A-Za-z_] に限定されるため

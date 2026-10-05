@@ -50,7 +50,7 @@ var (
 )
 
 func main() {
-	// 本家は submodule ではなく .cache/misskey/<版> から読む (#3378)。
+	// 本家は .cache/misskey/<版> から読む (#3378)。
 	up, _ := upstreamsrc.Dir(".")
 	modelsFlag := flag.String("models", filepath.Join(up, "packages/backend/src/models"), "path to Misskey backend models dir")
 	migrationsFlag := flag.String("migrations", filepath.Join(up, "packages/backend/migration"), "path to Misskey backend migration dir")

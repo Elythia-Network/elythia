@@ -17,7 +17,7 @@ import (
 )
 
 // webhookEventTypes mirrors upstream Misskey TS の webhookEventTypes constant
-// (third_party/misskey/.../models/Webhook.ts)。i/webhooks/test の type enum
+// (packages/backend/src/.../models/Webhook.ts)。i/webhooks/test の type enum
 // validation で使用 (#937)。
 var webhookEventTypes = map[string]struct{}{
 	"mention":  {},
@@ -278,7 +278,7 @@ func (h *Handler) Delete(c echo.Context) error {
 // に渡し、通常の配信パイプラインを通して登録済み webhook に送信する。
 //
 // upstream Misskey TS の paramDef は webhookId + type を required + type に
-// webhookEventTypes enum check を強制している (third_party/misskey/.../i/
+// webhookEventTypes enum check を強制している (packages/backend/src/.../i/
 // webhooks/test.ts、#937)。
 func (h *Handler) Test(c echo.Context) error {
 	user := middleware.GetUser(c)

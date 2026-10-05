@@ -9,7 +9,7 @@ import (
 // DefaultEndpointLimits defines per-endpoint rate limits matching
 // Misskey TS upstream. Endpoints not listed here have no rate limit.
 //
-// Source: third_party/misskey/packages/backend/src/server/api/endpoints/
+// Source: upstream packages/backend/src/server/api/endpoints/
 //
 // rateLimitFactor (role policies) は RateLimiter.SetPolicyProvider 経由で
 // runtime に反映される (PR #617 / #606 item 4)。

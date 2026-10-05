@@ -7,7 +7,7 @@
 //
 // upstream Misskey TS の `/api/signup-pending` は handler 全体を try-catch
 // で囲み、catch 節で `throw new FastifyReplyError(400, ...)` を投げる
-// (third_party の SignupApiService.ts:285-287)。既知 error も unknown error
+// (本家の SignupApiService.ts:285-287)。既知 error も unknown error
 // も **status 400 + Fastify-style reply error shape** で返る:
 //
 //   {"statusCode":400,"error":"Bad Request","message":<string>}

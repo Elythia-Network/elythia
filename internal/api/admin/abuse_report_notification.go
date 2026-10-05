@@ -91,7 +91,7 @@ func (h *Handler) AbuseReportNotificationRecipientCreate(c echo.Context) error {
 	//   required: ['isActive', 'name', 'method']
 	//   method.enum: ['email', 'webhook']
 	// + method='email' で userId 必須、method='webhook' で systemWebhookId 必須
-	// の相関 check (third_party/misskey/.../notification-recipient/create.ts、#929)。
+	// の相関 check (packages/backend/src/.../notification-recipient/create.ts、#929)。
 	// nil-repo branch より先に validate して、不正リクエストを早期 reject する。
 	if req.Name == "" || req.Method == "" || req.IsActive == nil {
 		return c.JSON(http.StatusBadRequest, apierr.InvalidParam("name / method / isActive are required."))

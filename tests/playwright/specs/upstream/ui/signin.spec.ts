@@ -6,7 +6,7 @@
 // UI 操作で signin → 認証済 home の hydration を verify する spec。
 //
 // upstream Misskey の Cypress と同じ data-cy-* selector を使う (=
-// `third_party/misskey/cypress/support/commands.ts` を参照)。Vue 内部 class
+// 本家の `cypress/support/commands.ts` を参照)。Vue 内部 class
 // 名 / id は build ごとに変わるが data-cy-* は明示的に test 用 fixture と
 // して維持されているので fragility が低い。
 //

@@ -24,7 +24,7 @@ func TestIsValidType(t *testing.T) {
 	}
 }
 
-// Misskey ACHIEVEMENT_TYPES の件数 (submodule 不在の CI でも効く軽量 tripwire)。
+// Misskey ACHIEVEMENT_TYPES の件数 (本家のソースが無い CI でも効く軽量 tripwire)。
 func TestCount(t *testing.T) {
 	if got := Count(); got != 78 {
 		t.Errorf("Count() = %d, want 78 (Misskey ACHIEVEMENT_TYPES)", got)

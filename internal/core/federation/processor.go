@@ -1523,7 +1523,7 @@ func (p *Processor) handleAccept(act genericActivity) error {
 // mergeCreateAudience unions the Create activity's to/cc onto the carried Note
 // object's to/cc and fills the object's attributedTo from the activity actor
 // when absent, mirroring upstream ApInboxService.create
-// (third_party/misskey/.../ApInboxService.ts:403-417). The merged JSON is what
+// (packages/backend/src/.../ApInboxService.ts:403-417). The merged JSON is what
 // IngestNoteWithCreated parses, so visibility (public/home/followers/specified)
 // and visibleUserIds are derived from the combined audience rather than the
 // Note object's own to/cc only (#1560).

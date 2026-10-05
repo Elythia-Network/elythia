@@ -282,7 +282,7 @@ func TestNoSuchChannel(t *testing.T) {
 
 // TestUUIDConstants_MatchUpstream guards against drift between the Go
 // constants and the upstream Misskey error UUIDs. The values on the right
-// are copied verbatim from third_party/misskey/packages/backend/src/server/
+// are copied verbatim from upstream packages/backend/src/server/
 // api/endpoints/.../meta.errors blocks and must never be edited without
 // updating the corresponding upstream reference.
 func TestUUIDConstants_MatchUpstream(t *testing.T) {

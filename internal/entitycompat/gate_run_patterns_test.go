@@ -251,7 +251,7 @@ func TestGateRunPatternsResolve(t *testing.T) {
 		t.Fatal("Makefile の `gates:` から前提を 1 つも読めなかった")
 	}
 	// **`gates:` の外にあるゲート target も見る (#2898)。** `frontend-check` は
-	// submodule のソースを読むので意図的に `gates:` から外してあるが、そこで
+	// frontend/ のソースを読むので意図的に `gates:` から外してあるが、そこで
 	// 名指しされたテストが消えても `go test -run` は `[no tests to run]` で
 	// exit 0 になり、検査が止まったことに気付けない。#2857 が塞いだのと同じ型が
 	// このぶんだけ残っていた。

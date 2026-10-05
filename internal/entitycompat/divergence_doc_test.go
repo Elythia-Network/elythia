@@ -37,10 +37,10 @@ import (
 // develop では §1-1 が 53、生成物の docs/api-compat.md が 49、真値が 58 だった (#2640)。
 //
 // upstream の endpoint 一覧を tools/apicompat から直接引くことはできない
-// (**どの CI job も本家のソースを checkout しない**。本家は `make upstream-fetch` で
+// (**test-shards は本家のソースを取得しない**。本家は `make upstream-fetch` で
 // 取る `.cache/misskey` にしか無い、#3378 / #3379)。ただし
 // **`make apicompat` の生成物は commit されている**ので、それを経由すれば
-// submodule 無しでも突き合わせられる (TestDivergenceDoc_EndpointCountMatchesAPICompat)。
+// 本家のソース無しでも突き合わせられる (TestDivergenceDoc_EndpointCountMatchesAPICompat)。
 
 var (
 	divergenceHeadingRe = regexp.MustCompile(`^### (\d+-\d+)\. .*?\((\d+)`)
@@ -439,7 +439,7 @@ var apiCompatOnlyRe = regexp.MustCompile(`^- mk-go only \(TS spec 外\): \*\*(\d
 
 // forkTagSummaryRe matches the summary row
 // `| fork frontend の独自変更 | 23 tag (`-mk.0` ～ `-mk.22`) | — | — |`.
-// **範囲は base 込みで書く。** submodule を bump すると `-mk.N` は 0 に戻るので、
+// **範囲は base 込みで書く。** fork の base を上げると `-mk.N` は 0 に戻るので、
 // `-mk.0 ～ -mk.1` のような表記だと base をまたいだ範囲が読めない (#2879)。
 var forkTagSummaryRe = regexp.MustCompile("^\\| fork frontend の独自変更 \\| (\\d+) tag \\(`([0-9.]+-mk\\.\\d+[a-z]*)` ～ `([0-9.]+-mk\\.\\d+[a-z]*)`\\)")
 
@@ -456,7 +456,7 @@ var forkTagRowRe = regexp.MustCompile("^\\| `([0-9.]+)-mk\\.(\\d+[a-z]*)` \\|")
 // **うち 4 件は生成物の側には載っていた** (= 突き合わせていれば気付けた、#2640)。
 //
 // docs/api-compat.md は `make apicompat` が生成して commit されているので、
-// **submodule を checkout しない test-shards job からでも読める**。upstream の
+// **本家のソースを持たない test-shards job からでも読める**。upstream の
 // endpoint 一覧を直接引けないという制約は、この生成物を経由すれば回避できる。
 func TestDivergenceDoc_EndpointCountMatchesAPICompat(t *testing.T) {
 	blob, err := os.ReadFile(filepath.Join("..", "..", "docs", "api-compat.md"))
@@ -487,11 +487,11 @@ func TestDivergenceDoc_EndpointCountMatchesAPICompat(t *testing.T) {
 
 // TestDivergenceDoc_ForkFrontendTagsMatchTable asserts that the summary's tag
 // count and range agree with §4-2's rows. サマリは 10 tag と言い、表には 11 行
-// あり、実際の submodule には 23 個の tag があった (#2640)。
+// あり、実際の fork には 23 個の tag があった (#2640)。
 //
-// **捕まえるのは前 2 つの食い違いだけ。** submodule 側が進んだことは検出できない
-// (test-shards job は submodule を checkout しない) ので、サマリと表を両方据え置けば
-// すり抜ける。submodule bump の PR で表を足すのは人の仕事。
+// **捕まえるのは前 2 つの食い違いだけ。** fork 側が進んだことは検出できなかった
+// (CI は fork の tag を見ない) ので、サマリと表を両方据え置けばすり抜けた。§4-2 は
+// #3379 で凍結した記録になり、行は足さない。
 func TestDivergenceDoc_ForkFrontendTagsMatchTable(t *testing.T) {
 	lines := readDivergenceDoc(t)
 
@@ -534,7 +534,7 @@ tag を足したら**サマリの件数と範囲、§4-2 の表の両方**を直
 		t.Errorf(`docs/divergence.md のサマリの範囲は %s ～ %s だが、§4-2 の表は %s ～ %s。`,
 			lo, hi, tags[0], tags[len(tags)-1])
 	}
-	// **連番は base ごとに見る。** submodule を bump すると `-mk.N` は 0 に戻るので
+	// **連番は base ごとに見る。** fork の base を上げると `-mk.N` は 0 に戻るので
 	// (`2026.7.0-mk.22j` の次が `2026.9.0-mk.0`)、base をまたいで通し番号を期待すると
 	// 必ず落ちる。#2879 の取り込みで実際に踏んだ。
 	//
@@ -707,7 +707,7 @@ func TestAPICompatDoc_MatchesRouter(t *testing.T) {
 	// **セクションを見る。** 生成物は「TS 側に存在するが mk-go で未実装」も同じ
 	// 行書式で出す。全行を拾うと、upstream が endpoint を足した直後 (= 生成物が
 	// 正しい状態) に「api-compat.md にあって router.go に無い」で落ち、しかも
-	// 診断が逆を指す。submodule bump のたびに現実的に起きる。
+	// 診断が逆を指す。本家の版を上げるたびに現実的に起きる。
 	doc := map[string]bool{}
 	inScope := false
 	for _, line := range strings.Split(string(blob), "\n") {
@@ -922,8 +922,8 @@ var docChannelRowRe = regexp.MustCompile("^\\| `([a-zA-Z]+)` \\|")
 //
 // **固定できるのは「doc の一覧 == mk-go の登録」だけ。** §4-1 のもう半分の主張
 // 「upstream は 18」「名前も upstream に揃えてある」は検証していない — test-shards は
-// submodule を checkout しないため。doc と実装を同時に間違えれば通る。upstream 側の
-// 増減も検出できないので、submodule bump の PR で人が見る。
+// 本家のソースを取得しないため。doc と実装を同時に間違えれば通る。upstream 側の
+// 増減も検出できないので、本家の版を上げる PR で人が見る。
 func TestDivergenceDoc_StreamChannelsMatchRegistry(t *testing.T) {
 	// 走査は `TestAPICompatDoc_MatchesRouter` と揃えて package 全体。router.go
 	// だけを見ると別ファイルからの登録を取りこぼす。
