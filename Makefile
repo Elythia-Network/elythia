@@ -39,7 +39,7 @@ check: fmt lint actionlint golangci-lint test ## コミット前に必須 (lint 
 	#
 	# **required check の全部ではない。** `build` job (`go build ./...` と同梱
 	# プラグインの vet → `make plugin-vet`、同梱サンプル入りの統合バイナリ →
-	# `make plugins-all && go build ./cmd/misskey`)、`lint` job の重複 fixture ID 検査、
+	# `make plugins-all && go build ./cmd/elythia`)、`lint` job の重複 fixture ID 検査、
 	# `test` のカバレッジ閾値は再現しない。
 
 gates: shapecheck errorid-check limitspec-check perm-check wiring-check catalog-check notfound-check nulparam-check compose-check testflags-check migrationdoc-check mdtable-check notiftype-check pluginembed-check dockerignore-check secretfield-check ipshape-check iprecord-check sqlbind-check gaterun-check ## 静的 parity ゲートを一括実行
@@ -248,7 +248,7 @@ uds-update: ## pull → ビルド → 再起動 → 検証 (UDS 本番構成)
 
 
 # Binary output
-BINARY=misskey
+BINARY=elythia
 BUILD_DIR=./built
 
 # Go parameters
@@ -303,16 +303,16 @@ plugins-all: ## disabled のプラグインも含めて生成 (CI 検証用)
 #   cd frontend/packages/frontend && pnpm watch
 # GOWORK=off は plugindev 自体を stale な go.work から守るために要る (消した
 # プラグインを指したままだと go run が起動すらしない)。内側の
-# go build ./cmd/misskey は plugindev が GOWORK= で明示的に戻すので、
+# go build ./cmd/elythia は plugindev が GOWORK= で明示的に戻すので、
 # ここで off にしても生成物の mk-plugin-* は go.work 経由で解決できる。
 plugin-dev: ## プラグインを編集しながら動かす (PLUGIN=plugins/status)
 	GOWORK=off go run ./tools/plugindev $(if $(PLUGIN),-plugin $(PLUGIN),)
 
-build: plugins ## バイナリを ./built/misskey に生成
-	go build $(GOFLAGS) -ldflags "$(LDFLAGS) $(REVISION_LDFLAGS)" -o $(BUILD_DIR)/$(BINARY) ./cmd/misskey
+build: plugins ## バイナリを ./built/elythia に生成
+	go build $(GOFLAGS) -ldflags "$(LDFLAGS) $(REVISION_LDFLAGS)" -o $(BUILD_DIR)/$(BINARY) ./cmd/elythia
 
 run: build ## build して起動
-	$(BUILD_DIR)/$(BINARY) -config .config/default.yml
+	$(BUILD_DIR)/$(BINARY) serve -config .config/default.yml
 
 # **ビルド済みフロントが無いときだけ MK_DEV=1 を立てる。** mk-go は dev モード
 # (`dev: true` / MK_DEV=1) でしか `/vite/*` を dev server へ流さない —
@@ -326,7 +326,7 @@ dev: ## go run で直接起動 (ビルド済みフロントが無ければ Vite 
 		echo "make dev: ビルド済みフロントが無いので MK_DEV=1 で起動します (Vite dev server を localhost:5173 で立てること)"; \
 		export MK_DEV=1; \
 	fi; \
-	go run ./cmd/misskey -config .config/default.yml
+	go run ./cmd/elythia serve -config .config/default.yml
 
 clean: ## ビルド成果物を削除
 	rm -rf $(BUILD_DIR)
@@ -420,7 +420,7 @@ golangci-lint: ## golangci-lint (errcheck / govet / ineffassign / staticcheck)
 	# CI もこの target を呼ぶので、版の定義はここ 1 箇所だけ。
 	#
 	# **CI と同じ条件で回すために `GOWORK=off` を付ける。**
-	# `make build` を一度でも回すと `go.work` と `cmd/misskey/plugins_generated.go`
+	# `make build` を一度でも回すと `go.work` と `cmd/elythia/plugins_generated.go`
 	# が出来る。CI は clean checkout でどちらも持たないので、揃えないと手元だけ
 	# 結果が変わる (actionlint の shellcheck で踏んだのと同じ型)。
 	#
@@ -443,7 +443,7 @@ golangci-lint: ## golangci-lint (errcheck / govet / ineffassign / staticcheck)
 	# `the Go language version (go1.26) used to build golangci-lint is lower than
 	# the targeted Go version (1.27.1)` で止まる (Go 1.27.1 への更新で実測)。
 	@set -e; \
-	gen=cmd/misskey/plugins_generated.go; bak=""; \
+	gen=cmd/elythia/plugins_generated.go; bak=""; \
 	if [ -f "$$gen" ]; then bak=$$(mktemp); cp -p "$$gen" "$$bak"; rm -f "$$gen"; fi; \
 	trap 'if [ -n "$$bak" ]; then cp -p "$$bak" "$$gen"; rm -f "$$bak"; fi' EXIT INT TERM; \
 	gover=$$(awk '/^go [0-9]/ {print $$2; exit}' go.mod); \
@@ -478,14 +478,14 @@ actionlint: ## GitHub Actions の workflow を検査
 # 別の DB へ流すなら -config を渡すか MK_DB_* で上書きする。
 ##@ マイグレーション
 migrate-up: ## マイグレーションを最新まで適用
-	go run ./cmd/migrate -direction up
+	go run ./cmd/elythia migrate -direction up
 
-# **-steps 1 は必須。** cmd/migrate は steps 未指定 (0) を「全部」と解釈するので、
+# **-steps 1 は必須。** `elythia migrate` は steps 未指定 (0) を「全部」と解釈するので、
 # 付け忘れると 1 段のつもりで全 down が走り 全テーブルが消える。
 # 適用済みが 0 件のときは golang-migrate が "file does not exist" で exit 1 する
 # (steps 指定時は ErrNoChange に落ちないため)。冪等に叩くなら呼び出し側で吸収する。
 migrate-down: ## マイグレーションを 1 段階ロールバック
-	go run ./cmd/migrate -direction down -steps 1
+	go run ./cmd/elythia migrate -direction down -steps 1
 
 migrate-create: ## 新規マイグレーションファイルを作成
 	@read -p "Migration name: " name; \
@@ -1150,7 +1150,7 @@ upstream-e2e-up: ## 本家 backend e2e 用の PostgreSQL / Redis を起動
 	docker compose -f $(UPSTREAM_E2E_COMPOSE) up -d --wait
 
 upstream-e2e-migrate: ## e2e 用 DB にマイグレーションを適用
-	go run ./cmd/migrate -config $(UPSTREAM_E2E_CONFIG) -direction up
+	go run ./cmd/elythia migrate -config $(UPSTREAM_E2E_CONFIG) -direction up
 
 # FILE で 1 ファイルだけ流せる: make upstream-e2e-test FILE=test/e2e/note.ts
 # VITEST_ARGS は vitest に素通しする追加引数。CI が `--shard=i/N` を渡して
@@ -1178,7 +1178,7 @@ upstream-e2e-test: build ## 本家 backend e2e を mk-go に対して実行 (VIT
 	cp -R $(UPSTREAM_E2E_HARNESS)/. $(UPSTREAM_E2E_BACKEND)/
 	cd $(UPSTREAM_E2E_BACKEND) && \
 		$(UPSTREAM_E2E_ASSETS_ENV) \
-		MKGO_BIN=$(CURDIR)/built/misskey \
+		MKGO_BIN=$(CURDIR)/built/$(BINARY) \
 		MKGO_CONFIG=$(CURDIR)/$(UPSTREAM_E2E_CONFIG) \
 		MKGO_CWD=$(CURDIR) \
 		npx --no vitest run --config vitest.config.e2e.mkgo.ts $(VITEST_ARGS) $(FILE)
@@ -1192,7 +1192,7 @@ upstream-e2e-down: ## 本家 backend e2e 用のスタックを撤去 (volume ご
 # 突き合わせて docs/api-compat.md を生成する。
 #
 # - APICOMPAT_TS_DIR: TS endpoints ディレクトリ。本家の取得先 (`make upstream-fetch`) に依存。
-# - APICOMPAT_CONFIG: --dump-routes 時に読み込む mk-go config。DB/Redis 接続
+# - APICOMPAT_CONFIG: dump-routes 時に読み込む mk-go config。DB/Redis 接続
 #   は必須なので、docker compose up された stack を持っていることが前提。
 # - APICOMPAT_ROUTES: dump-routes が書き出す中間ファイルの path。
 #   `$(BUILD_DIR)` 配下にして hermetic に保つ ( /tmp 共有事故を避ける)。
@@ -1204,12 +1204,12 @@ APICOMPAT_CONFIG    ?= .config/default.yml
 APICOMPAT_ROUTES    ?= $(BUILD_DIR)/apicompat-routes.json
 APICOMPAT_OUT       ?= docs/api-compat.md
 
-# mk-go binary を build → --dump-routes で route 一覧を JSON dump。
+# mk-go binary を build → `elythia dump-routes` で route 一覧を JSON dump。
 # DB / Redis 接続を必要とするので make docker-up 等で stack を立てた状態で
 # 実行すること。
 apicompat-routes: build ## route 一覧を JSON dump (stack 起動が必要)
 	mkdir -p $(dir $(APICOMPAT_ROUTES))
-	$(BUILD_DIR)/$(BINARY) -config $(APICOMPAT_CONFIG) -dump-routes -dump-routes-out $(APICOMPAT_ROUTES)
+	$(BUILD_DIR)/$(BINARY) dump-routes -config $(APICOMPAT_CONFIG) -dump-routes-out $(APICOMPAT_ROUTES)
 
 # 既存 APICOMPAT_ROUTES JSON だけ comparator にかけて matrix を再生成する
 # (DB / Redis 接続不要)。matrix の format / category 表示を iterate する時に
@@ -1352,7 +1352,7 @@ pluginembed-check: ## mk-go をビルドする Dockerfile が pluginbuild を go
 	# 組み込みを忘れた image は **エラーにならない** — plugins/ に置いたのに
 	# 入っていない mk-go が黙って出来る。#2940 で Dockerfile.bundled が実際に
 	# そうなっていた。生成が go build の後でも同じ結果になるので順序も見る。
-	# 検出は動詞 (go build / go install) と対象 (cmd/misskey / cmd/...) の共起で
+	# 検出は動詞 (go build / go install) と対象 (cmd/elythia / cmd/...) の共起で
 	# 行い、行継続は畳んでから判定する。組み込まない Dockerfile は理由付きで
 	# allowlist に登録する。
 	go test ./internal/entitycompat/... -run 'TestDockerfilesEmbedPlugins' -count=1 -v

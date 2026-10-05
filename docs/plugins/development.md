@@ -67,7 +67,7 @@ docker run --rm -it -v "$(pwd)":/work -w /work/frontend/packages/frontend \
 | プラグインが読み込まれたか | 起動ログの `plugin loaded`（名前・版・ルート/ジョブの有無・migration 数・schema） |
 | 無効化されているか | `plugin disabled` |
 | 消したプラグインのデータ | `使われていないプラグインのデータが残っています` |
-| dev モードか | 起動時の警告と `-config-dump` の「frontend 配信元」 |
+| dev モードか | 起動時の警告と `elythia config-dump` の「frontend 配信元」 |
 
 ## よくある詰まり
 

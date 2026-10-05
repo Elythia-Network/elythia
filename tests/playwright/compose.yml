@@ -52,7 +52,7 @@ services:
     volumes:
       - ./instance.yml:/app/.config/default.yml:ro
     healthcheck:
-      test: ["CMD", "/app/misskey", "-healthcheck", "-config", ".config/default.yml"]
+      test: ["CMD", "/app/elythia", "healthcheck", "-config", ".config/default.yml"]
       interval: 5s
       timeout: 5s
       retries: 30

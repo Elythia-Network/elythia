@@ -573,7 +573,7 @@ func (h *Handler) EmojiListRemote(c echo.Context) error {
 	// から equality 突合する。保存側も #2706 で同じ正規化を掛けるようになったので、
 	// IDN / 大文字混在の host param を正規化しないと match しない (#1948-13)。
 	// **非正規化のまま保存された行は引けない** — 完全一致なので、`Mixed.Example` の
-	// ような表記で入った emoji は `cmd/backfill-remote-host` を流すまで出てこない
+	// ような表記で入った emoji は `elythia backfill remote-host` を流すまで出てこない
 	// (user の acct 解決も #2996 で同じになった)。
 	host := req.Host
 	if host != "" {

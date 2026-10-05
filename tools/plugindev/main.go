@@ -190,7 +190,7 @@ func (d *dev) rebuildAndRestart(ctx context.Context) error {
 	// 無く go.work 経由でしか解決できないので、呼び出し側から GOWORK=off を
 	// 継承すると `no required module provides package` で落ちる。空文字列は Go では
 	// auto 扱いで、exec.Cmd の env は後勝ちなので上の GOWORK=off を打ち消せる。
-	if err := d.exec(ctx, "go", []string{"build", "-o", bin, "./cmd/misskey"}, "GOWORK="); err != nil {
+	if err := d.exec(ctx, "go", []string{"build", "-o", bin, "./cmd/elythia"}, "GOWORK="); err != nil {
 		return fmt.Errorf("ビルドに失敗しました: %w", err)
 	}
 
@@ -209,7 +209,7 @@ func (d *dev) exec(ctx context.Context, name string, args []string, env ...strin
 
 // startServer launches mk-go in dev mode.
 func (d *dev) startServer(bin string) error {
-	cmd := exec.Command(bin, "-config", d.configPath)
+	cmd := exec.Command(bin, "serve", "-config", d.configPath)
 	// **MK_DEV=1 を必ず立てる。** ビルド済みのフロントが残っていても、
 	// dev では Vite dev server を見に行くようにする (#2477)。
 	cmd.Env = append(os.Environ(), "MK_DEV=1")

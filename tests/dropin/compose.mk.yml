@@ -46,10 +46,10 @@ services:
       - certs:/certs:ro
     # mk-go の /healthz は GET なので TS の healthcheck (POST /api/ping) と
     # 命令が違う。差し替え後は GET /healthz で healthy を判定する。
-    # distroless image (#621) には wget が無いので binary 自身に -healthcheck
-    # フラグを通して叩かせる (cmd/misskey の -healthcheck mode)。
+    # distroless image (#621) には wget が無いので binary 自身に
+    # `elythia healthcheck` で叩かせる。
     healthcheck:
-      test: ["CMD", "/app/misskey", "-healthcheck", "-config", ".config/default.yml"]
+      test: ["CMD", "/app/elythia", "healthcheck", "-config", ".config/default.yml"]
       interval: 5s
       timeout: 5s
       retries: 30

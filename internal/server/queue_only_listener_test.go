@@ -15,7 +15,7 @@ import (
 )
 
 // queue role の最小 mux は /healthz を返す。ここが無いと
-// `/app/misskey -healthcheck` (Dockerfile が使う) が必ず失敗し、コンテナの
+// `elythia healthcheck` (Dockerfile が使う) が必ず失敗し、コンテナの
 // ヘルスチェックを外さないと運用できないノードになる (#2459)。
 func TestQueueOnlyMux_ServesHealthz(t *testing.T) {
 	s := &Server{config: &config.Config{}}

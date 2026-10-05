@@ -5,7 +5,7 @@
 設定ファイルはMisskey互換のYAML形式。CLIフラグで指定する:
 
 ```bash
-./built/misskey -config .config/default.yml
+./built/elythia serve -config .config/default.yml
 ```
 
 ### 初回セットアップ
@@ -82,7 +82,7 @@ cp .config/docker.yml.example .config/docker.yml
 - 証明書の検証に失敗したときの起動エラーには、書いた設定に合わせた対処を添える (`ssl: true` なら「以前は検証していなかった」旨と `sslrootcert` / `rejectUnauthorized: false`、`sslmode` を明示していれば `sslrootcert` / `sslmode: require`、`sslrootcert` を指定していればその CA ファイルと `db.host` の確認)。
 - **環境変数で渡すなら設定ファイルにキーを書いておく。** `db.extra.*` は `bindEnvKeys()` に登録していないので、`MK_DB_EXTRA_SSL` / `MK_DB_EXTRA_SSLMODE` / `MK_DB_EXTRA_SSLROOTCERT` は**設定ファイルに同じキー (`extra:` の下の `ssl:` 等) があるときだけ**効く (下の「環境変数オーバーライド」を参照)。ファイルに無いまま export しても黙って平文で繋ぐ。
 - **UNIX ソケット (`host` が `/` 始まり) では TLS を張らない** (`sslmode=disable` 固定)。
-- `cmd/migrate` / `misskey doctor` / backfill 系の CLI も本体と同じ接続設定 (TLS・パスワードのエスケープ) を使う。
+- `elythia migrate` / `elythia doctor` / `elythia backfill` などのサブコマンドも本体と同じ接続設定 (TLS・パスワードのエスケープ) を使う。
 
 ### Redis (`redis.*`)
 
@@ -365,11 +365,11 @@ CIでのテスト実行時に使用。Redis は testcontainers が立てるが�
 
 ## マイグレーションの接続先
 
-`cmd/migrate` は **`DATABASE_URL` を読まない**。`-config` (既定 `.config/default.yml`) を読み、`db.*` から DSN を組み立てる。TLS (`db.extra`) とパスワードのエスケープは本体と同じ規則に従う (以前は `db.extra.ssl` を見ずに常に平文で繋いでいた)。
+`elythia migrate` は **`DATABASE_URL` を読まない**。`-config` (既定 `.config/default.yml`) を読み、`db.*` から DSN を組み立てる。TLS (`db.extra`) とパスワードのエスケープは本体と同じ規則に従う (以前は `db.extra.ssl` を見ずに常に平文で繋いでいた)。
 
 ```bash
 make migrate-up                                    # .config/default.yml へ
-go run ./cmd/migrate -config .config/other.yml     # 別の設定ファイルへ
+go run ./cmd/elythia migrate -config .config/other.yml   # 別の設定ファイルへ
 MK_DB_HOST=other-host make migrate-up              # 個別キーだけ環境変数で上書き
 ```
 

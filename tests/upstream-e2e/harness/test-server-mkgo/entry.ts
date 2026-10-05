@@ -68,7 +68,7 @@ async function waitForReady(timeoutMs = 60_000): Promise<void> {
 async function startMkGo(): Promise<void> {
 	const out = openSync(MKGO_LOG, 'a');
 
-	proc = spawn(MKGO_BIN, ['-config', MKGO_CONFIG], {
+	proc = spawn(MKGO_BIN, ['serve', '-config', MKGO_CONFIG], {
 		cwd: MKGO_CWD,
 		env: { ...process.env, ...extraEnv },
 		stdio: ['ignore', out, out],

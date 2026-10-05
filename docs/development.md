@@ -117,7 +117,7 @@ cd mk && docker compose up -d
 
 | ターゲット | 内容 |
 |---|---|
-| `make build` | `./built/misskey`にバイナリ生成 |
+| `make build` | `./built/elythia`にバイナリ生成 |
 | `make dev` | `go run`で直接起動。**ビルド済みフロント (`frontend/built/_frontend_vite_`、`MISSKEY_FRONTEND_DIR` で上書き可) が無ければ `MK_DEV=1` を立てて**、`/vite/*` を Vite dev server (`localhost:5173`) へ流す。mk-go は dev モード (`dev: true` / `MK_DEV=1`) でしか dev server へ proxy せず、それ以外でビルド出力が無いと `/vite/*` は 404 になる — 以前は「無ければ proxy」だったので、本番でビルド出力が欠けると認証なしで `localhost:5173` へ reverse proxy されていた。ビルド済みでも dev server を使いたいときは `MK_DEV=1 make dev` |
 | `make run` | build + 実行 |
 | `make clean` | ビルド成果物を削除 |
@@ -151,7 +151,7 @@ cd mk && docker compose up -d
 |---|---|
 | `make migrate-up` | 最新まで適用 |
 | `make migrate-down` | 1段階ロールバック (`-steps 1`) |
-| `go run ./cmd/migrate -direction down` | **全段ロールバック**。`-steps` 未指定は「全部」の意味で、全テーブルが消える |
+| `go run ./cmd/elythia migrate -direction down` | **全段ロールバック**。`-steps` 未指定は「全部」の意味で、全テーブルが消える |
 | `make migrate-create` | 新規マイグレーションファイル作成 |
 
 #### 大規模テーブルへの index 追加
@@ -199,7 +199,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_xxx" ON "yyy" ("zzz");
 | `make migrationdoc-check` | migration の本数を述べた doc が実態と合っているか (#2874)。**gate が見るのは 7 ファイル 21 箇所**。1 本足したとき実際に動くのはその一部で、#2866 (000082) では 17 箇所、**うち 5 箇所が漏れた**。総本数 / 破壊的なマイグレーションの件数 / `-- data loss:` 宣言の本数 / 作られるテーブル数と、down が no-op のものの**一覧**を突き合わせる。**一覧が本体** — 件数だけだと「1 本足して 1 本消す」で素通りする。**破壊的の件数は doc 自身の表の行数を truth にする** — migration の中身から「共有テーブルか」を判定すると upstream に無いテーブルを触るものまで拾う。対象外は 3 つ — 「51 本」(2 つの doc で定義が違うのに同じ数)、「102」(「上記 9 件」の定義に依存)、「データを不可逆に変えるのはこのうち 8 本」(機械判定できない)。拾えなかったら落とす |
 | `make mdtable-check` | tracked な md の表の各行がヘッダと同じ列数か (#2930)。**GFM は溢れたセルを黙って捨てる**ので、ソースに書いた内容が GitHub 上で読めなくなる。原因はほぼセル区切りとして働くパイプで、**コードスパンの中でも働く** (`\\|` へエスケープする)。`docs/divergence.md` の 1 行で**描画が 599 文字あるべきところ 394 文字で止まり、205 文字 (34.2%) が読めなかった**。**見るのは列数だけ** — コードスパンの対応付けを自前で持つ案は、次の周で**二重バッククォートのコードスパンを含む行**を落とした (#2857 の「自前パーサに継ぎ足すと手当てするたびに隣の穴が開く」型)。取りこぼす側 (列数が一致したままコードスパンが割れる形など) はテストの doc コメントに明記してある。現 corpus (表 227 個) に対し偽陽性 0 |
 | `make notiftype-check` | 通知タイプの一覧が `internal/core/notification` の registry 1 箇所から導出されているか (#2898)。**値の一致だけでは足りない** — リテラルへ書き戻しても書いた時点の中身は同じなので値比較は通り、落ちるのは core に型を足した後 = 一番検出したい瞬間に検出できない。導出している「形」を AST で固定してある |
-| `make pluginembed-check` | mk-go をビルドする Dockerfile が `pluginbuild` を **`go build` より前に** 実行するか (#2940)。**組み込みを忘れてもエラーにならない** — `plugins/` に置いたのに入っていない image が黙って出来て、運営者は「入ったつもり」で起動できる。`Dockerfile.bundled` が実際にそうなっていた。検出は `go build` / `go install` × `cmd/misskey` / `cmd/...` の組で行い、**行継続は畳んでから**判定する (折り返した瞬間に検査対象から消えるのを防ぐ)。シェルの行末コメント (` #`) に退避させた `pluginbuild` も実行されないものとして扱う。組み込まない Dockerfile は理由付きで allowlist に登録する (連合 e2e 用など) |
+| `make pluginembed-check` | mk-go をビルドする Dockerfile が `pluginbuild` を **`go build` より前に** 実行するか (#2940)。**組み込みを忘れてもエラーにならない** — `plugins/` に置いたのに入っていない image が黙って出来て、運営者は「入ったつもり」で起動できる。`Dockerfile.bundled` が実際にそうなっていた。検出は `go build` / `go install` × `cmd/elythia` / `cmd/...` の組で行い、**行継続は畳んでから**判定する (折り返した瞬間に検査対象から消えるのを防ぐ)。シェルの行末コメント (` #`) に退避させた `pluginbuild` も実行されないものとして扱う。組み込まない Dockerfile は理由付きで allowlist に登録する (連合 e2e 用など) |
 | `make dockerignore-check` | `.dockerignore` がシークレットと利用者データを除外しているか (#2942)。**`.dockerignore` は全 build context 共通**なので、1 行落ちると `Dockerfile` / `Dockerfile.bundled` / `deploy/uds` / e2e の各 stack に同時に効く。`drive-files` (既定の drive の置き場所) と operator-local な設定が実際に抜けていた。**配る image には入らない** (最終 stage が明示パスの `COPY --from=builder` しか持たないため) が、build context と builder stage の layer には入り、`cache-to` を設定していればキャッシュ経由で読める。`!` による打ち消しと per-Dockerfile な `<名前>.dockerignore` の存在も見る。判定は自前ではなく `moby/patternmatcher` (Docker 本体の実装) に解かせる。**「残るべきものが残るか」も見る**ので、除外を広げすぎて COPY 元を巻き込む変更 (`.config/*.y*ml` → `.config/*`、`frontend/node_modules` → `**/node_modules` など) もここで落ちる。サイズの問題は対象にしていない (転送が遅くなるだけで、落ちても気付ける) |
 | `make secretfield-check` | モデルの秘密フィールドが `json:"-"` を保っているか。**モデルをそのまま JSON 化する経路がある**ので、タグ 1 つが唯一の防波堤になっているフィールドがある。実測で `model.User.Token` のタグを外しても `make gates` も全テストも緑のままだった (native token を取れると、そのユーザーとして API を叩けるので権限ゲートを全て迂回できる)。**名前だけでは判定できない** — `Meta` の captcha secret は `admin/meta` が管理画面へ返すし、drive の `accessKey` は URL の構成要素で秘密ではない。そこで #2792 と同じ allowlist 方式にし、出してよいものには理由を書かせる。**allowlist は検出集合と突き合わせる** — 実在しないキーを書いても無視される形だと、守っているつもりで何も検査していない状態になる (初版が実際にそうで、`Meta.SensitiveMediaDetectionAPIKey` を登録していたが正規表現が `ApiKey` しか見ておらず `APIKey` に一致していなかった)。ただしそれが守るのは**allowlist に該当があるキーだけ**なので、該当が全て `json:"-"` 側にある alternative (`Pass` / `Code`) は `mustDetectSecretFields` で別に固定する。静的なタグ検査に加えて、代表的な型を実際に `json.Marshal` して秘密が出ないことも見る。**タグを書き忘れた形も拾う** — `encoding/json` はタグの無い exported フィールドを Go の名前でそのまま出すので、そこを skip すると「フィールドを足してタグを忘れる」という最頻のミスが素通りする。**逆に「落とすと壊れる」側も固定する** — モデルを直接 marshal する経路は 6 系統あり (moderation log / ephemeral store / webpush cache / `admin/relays` などレスポンス本体がモデルそのもの / `packedRecipient` のようにモデルを埋め込む struct / jsonb 列の往復)、`Meta.SMTPPass` や `RegistrationTicket.Code` のタグを落とすと監査記録が黙って欠ける (実際に一度壊した) |
 | `make ipshape-check` | 利用者向けレスポンスと連合出力の shape に IP が出ていないか (#3136)。#3066 の完了条件の担保が `shapecheck` の golden 照合しか無く、**フィールドを足す変更は緑のまま通っていた** (実測: `UserLite` に `json:"lastIPs"` を足して `make shapecheck` は PASS)。**AST で全 struct の json タグを読む** — reflect で型を手で並べる形は `entity.MeDetailed` (= `/api/i`) を落としていた。走査は `internal/entity` / `internal/activitypub` に加えて `internal/api` / `internal/server` / `internal/stream` (handler がファイル内に宣言した response struct も stream の payload も wire の形になる)。実測は要素 2,332 / ユニークキー 755。**語の切り方は片側に寄せると穴が開く** — 大文字のたびに割ると `lastIPs` が、「小文字/数字の直後の大文字」だけだと `IPAddr` が素通りする (両方とも実測)。`IPaddress` のように割れない綴りのために `address` 系の alternative も要る。**キーの走査だけでは入れ子が見えない**ので、`internal/` 全体から「自分の JSON キーに IP を持つ型」を導出し、公開 shape がそれを**推移的に**参照していないことも見る (`model.User` は自分では持たないが `avatar.requestIp` を出す)。interface と関数型は伝播させない (混ぜると repository 一式が誤検出になる)。収集ロジックは `ipscanfixture` / `ipbearingfixture` / `marshalerfixture` を実際に `json.Marshal` した結果と突き合わせて固定する (`testdata/` に置くとコンパイルされず突き合わせられない)。**「違反 0 件が正常」な検査は抽出側にも下限が要る** — 参照側に置き忘れて、収集を潰す 1 行で本物の漏れが素通りした。走査の縮みは**ファイル単位**で見る (件数と代表キーだけだと大きなファイルさえ残れば通る)。**射程外**は `map[string]any` を手で組む経路、走査対象外に宣言した型を `c.JSON` にそのまま渡す形 (`/api/server-info`)、`remoteAddr` のように語として `ip` を取り出せない綴り |
@@ -298,7 +298,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_xxx" ON "yyy" ("zzz");
 `ci.yml`は`main`と`develop`へのpush/PR、`frontend.yml`はPRと`develop`へのpushで実行される。branch protectionのrequired checksは`build` / `test` / `lint`と、`.github/workflows/frontend.yml`の`frontend`の4つ。
 
 #### buildジョブ
-`go build ./...`で全パッケージのビルド確認。続けて同梱サンプルが`mk-plugin.yml`で既定無効のままかを検査し (#2701)、同梱プラグインを`go vet`し、最後に同梱サンプル入りの統合バイナリ (`make plugins-all && go build ./cmd/misskey`、#2495) をビルドする (#3379 で`frontend-check` jobから移した。Nodeが要らないので毎回走るここに置く)。**required jobなので、コンパイル以外の理由でも赤くなる**。手元の再現は`make plugin-vet`と、統合バイナリは`make plugins-all && go build -o /dev/null ./cmd/misskey`。
+`go build ./...`で全パッケージのビルド確認。続けて同梱サンプルが`mk-plugin.yml`で既定無効のままかを検査し (#2701)、同梱プラグインを`go vet`し、最後に同梱サンプル入りの統合バイナリ (`make plugins-all && go build ./cmd/elythia`、#2495) をビルドする (#3379 で`frontend-check` jobから移した。Nodeが要らないので毎回走るここに置く)。**required jobなので、コンパイル以外の理由でも赤くなる**。手元の再現は`make plugin-vet`と、統合バイナリは`make plugins-all && go build -o /dev/null ./cmd/elythia`。
 
 #### test-shardsジョブ + testジョブ
 - `shard: [1,2,3,4]`の4-way matrixで並列実行。各shardが独立したPostgreSQL 18 / Redis 7のサービスコンテナを持つ
@@ -366,9 +366,11 @@ CLAUDE.md の Section 3 にあった一覧を、#3248 でここへ移した。�
 
 すべて`Makefile`経由で実行できます。
 
+**実行バイナリを`elythia`にまとめる前 (#3394 より前) のコミットへ戻ると、`make build`が作った`cmd/elythia/plugins_generated.go`が残り、`go build ./...`が落ちる** (main関数の無いpackage mainになる)。戻した先で`make plugins`は消さないので、手で消す。逆に新しいコミットへ進むと、古い`cmd/misskey/plugins_generated.go`は`make plugins`が消す。
+
 ```bash
 # ビルド
-make build                  # ./built/misskey に実行ファイル生成
+make build                  # ./built/elythia に実行ファイル生成
 make dev                    # go run で直接起動（開発用）
 make run                    # build + 実行
 
@@ -409,7 +411,7 @@ make uds-restart            # mkgo を再起動して配信 entry を検証だ�
 # マイグレーション（接続先は -config、既定 .config/default.yml から決まる）
 make migrate-up             # 最新まで適用
 make migrate-down           # 1段階ロールバック (-steps 1)
-go run ./cmd/migrate -direction down   # 全段ロールバック (破壊的。全テーブルが消える)
+go run ./cmd/elythia migrate -direction down   # 全段ロールバック (破壊的。全テーブルが消える)
 make migrate-create         # 新規マイグレーションファイル作成（プロンプト対話）
 
 # Docker
@@ -467,8 +469,9 @@ make e2e-down-all            # 検証用スタックを一括撤去 (**本番 pr
 このファイルの上の節、CI 上の対応は [docs/ci.md](ci.md)。
 
 エントリポイント：
-- メインサーバー: `./cmd/misskey -config .config/default.yml`
-- マイグレーション: `./cmd/migrate -direction up`
+- 実行バイナリ: `./cmd/elythia` (サブコマンドは `elythia help` で一覧。処理は `internal/cli/`)
+- メインサーバー: `go run ./cmd/elythia serve -config .config/default.yml`
+- マイグレーション: `go run ./cmd/elythia migrate -direction up`
 
 ## 変更の経緯 (旧 CLAUDE.md の更新記録)
 
@@ -551,7 +554,7 @@ CLAUDE.md の「更新記録」に書かれていた本文を、#3248 でここ�
   asynqdriver の rate limiter でしか直接使っていなかった。ただし **消しきれない** —
   `echo/v4/middleware` が要るので `// indirect` へ移す (`go mod tidy` はこのリポジトリでは
   使えないので手で動かし、`GOWORK=off go build ./...` で充足を確認した。**手元は
-  `cmd/misskey/plugins_generated.go` が private plugin を import するので、退避してから
+  `cmd/elythia/plugins_generated.go` (#3394 より前は `cmd/misskey/`) が private plugin を import するので、退避してから
   でないと go.sum の検証にならない**)。
   **queue-bench は 2-way (TS ↔ mkq) にした。** 実測表は当時測った値の記録なので残し、
   「#2985 より前の表には asynq 行がある」と注記した。
@@ -738,7 +741,7 @@ CLAUDE.md の「更新記録」に書かれていた本文を、#3248 でここ�
   長さより後ろへ書くので backing array を共有していても見えない (実測で変異が素通り)。
   既存要素の書き換えで直接見る形に直し、変異検証に合格させた。
   **`typecheck` が落ちると他の linter が全部黙る。** 自前プラグインを入れている手元では
-  `cmd/misskey/plugins_generated.go` が private module を import するので `GOWORK=off` だと
+  `cmd/elythia/plugins_generated.go` (#3394 より前は `cmd/misskey/`) が private module を import するので `GOWORK=off` だと
   そうなる (実測で無関係なパッケージの指摘が消えた)。`make golangci-lint` は生成物を退避して
   戻す (trap 付き。**`cp -p` にしないと** mktemp の 0600 を引き継いで mode が 644 → 600 になる)。
   **`go.work` が変えるのは解析対象ではなく build list。** `./...` は module 境界を越えないので

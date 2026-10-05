@@ -326,6 +326,8 @@ P2 (#3373) で上のとおりにした (2026-10-04)。
 - `cmd/elythia` に 1 つの main を置き、今の各 `cmd/*` の main は関数として呼ぶ形にする。flag は今と同じものをサブコマンドの flag として受ける
 - Dockerfile は `elythia` だけを build / COPY する。entrypoint の migrate の呼び出し (`mkgo-entrypoint`) も `elythia migrate` に変える
 - 旧名のバイナリは置かない (R1 と同じく改名の版で切り替える)。`docs/deployment.md` の後始末バッチの手順を新しい呼び方に書き換える
+- **例外 (期限付き): `/app/migrate` だけは 2.x の間残す。** 配布イメージの `:bundled` は develop への push ごとに出るので、古い compose (`migrate` サービスの `entrypoint: ["/app/migrate"]`) のまま `docker compose pull && up -d` した運営者の migration が新しい image で落ちる。`Dockerfile` / `Dockerfile.bundled` の image に `/app/migrate` を `elythia` への symlink として置き、`elythia` はその名前で起動されたときだけ、以前の flag のまま `migrate` として動く (`internal/cli` の `RunAs`)。**3.0 で撤去する。** compose が直接呼んでいたのは migrate だけなので、他の旧名は残さない (#3394)
+- image の `PATH` の先頭に `/app` を置き、`docker exec <container> elythia backfill <名前>` をパス無しで呼べるようにする。UDS の `mkgo-entrypoint` は引数があればそのまま `elythia` に渡す (`compose run mkgo backfill ...` がサーバーをもう 1 つ起動しないように)
 
 ### D12. ライセンスの表示 (R8)
 

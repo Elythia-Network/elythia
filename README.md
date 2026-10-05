@@ -129,7 +129,7 @@ make migrate-up
 
 # ビルド & 起動
 make build
-./built/misskey -config .config/default.yml
+./built/elythia serve -config .config/default.yml
 
 # 開発モード (go run)
 make dev

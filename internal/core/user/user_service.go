@@ -286,7 +286,7 @@ func (s *Service) showByUsername(username string, host *string, resync bool) (*U
 	// (WebFinger) へ落ちる。**行は増えない** — 解決先の actor URI は変わらないので
 	// `ResolveActor` の `FindByURI` が既存行に当たる。増えるのは**呼ばれるたびの
 	// 外向きリクエスト**のほうで、`LookupActorURI` にキャッシュは無い。
-	// `backfill-remote-host` を流していない環境で上げるとこの形になる
+	// `elythia backfill remote-host` を流していない環境で上げるとこの形になる
 	// (経路ごとの症状は docs/deployment.md)。
 	u, err := s.userRepo.FindByUsernameLower(username, host)
 	if err == nil {

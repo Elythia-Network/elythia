@@ -21,7 +21,7 @@ import (
 // 取り込み側 (`resolver.hostFromURI`) も #2706 で同じ正規化を掛けるので、保存形と
 // 引き当ては同じ値になる。**backfill 前に非正規化で保存された行は引けない** —
 // この lookup は完全一致で、#2996 以降は acct 経路も同じになった。
-// `cmd/backfill-remote-host` を流すこと。
+// `elythia backfill remote-host` を流すこと。
 //
 // **既定ポートの扱いだけは違う。** `hostFromURI` は `https://h:443` を `h` として
 // 保存するようになったが (連合ゲートの綴り回避を塞ぐため)、`Puny` はポートを

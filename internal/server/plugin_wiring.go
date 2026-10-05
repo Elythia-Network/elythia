@@ -280,7 +280,7 @@ func serverPluginInfos(plugins []plugin.Definition, settings map[string]map[stri
 		s := settings[def.Name]
 
 		// **設定はキー名だけを出す。** どのキーが秘密かは判別できないので、
-		// -config-dump と同じく値は既定で全部マスクする方針に合わせる。
+		// `elythia config-dump` と同じく値は既定で全部マスクする方針に合わせる。
 		keys := make([]string, 0, len(s))
 		for k := range s {
 			if isReservedPluginKey(k) {

@@ -373,7 +373,7 @@ func (h *Handler) resolvePreview(app *model.EmojiApplication) Preview {
 //
 // **申請元は見ない。** #2966 以降、承認時の画像は system 所有の drive ファイルへ
 // 複製されるので、申請者が元ファイルを消してもアカウントを消しても出せる。
-// **#2966 以前に承認された行は `backfill-emoji-system-file` (#2990) を流すまで
+// **#2966 以前に承認された行は `elythia backfill emoji-system-file` (#2990) を流すまで
 // 成り立たない** (申請者所有のファイルを参照したまま)。
 func (h *Handler) approvedPreview(app *model.EmojiApplication) Preview {
 	out := Preview{Source: PreviewSourceApprovedEmoji}

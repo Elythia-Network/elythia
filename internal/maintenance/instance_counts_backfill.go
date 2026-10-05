@@ -147,7 +147,7 @@ func BackfillInstanceCountsBatch(db *gorm.DB, fromID string, batchSize int, dryR
 		// 書く文は数えた値を受け取るだけで集計を含まない。比較は書く時点の
 		// 値に対して行うので、数えた後に CounterBuffer が書いて既に一致した行は
 		// 書かない。一致しない行は数えた時点の件数で上書きする (その間の増減は
-		// 失われる。docs/deployment.md の backfill-instance-counts)。
+		// 失われる。docs/deployment.md の backfill instance-counts)。
 		vals := make([]instanceCountValue, 0, len(diffs))
 		for _, d := range diffs {
 			vals = append(vals, instanceCountValue{ID: d.ID, Notes: d.Notes, Users: d.Users})

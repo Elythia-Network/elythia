@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// pluginbuildExemptDockerfiles lists Dockerfiles that build cmd/misskey but are
+// pluginbuildExemptDockerfiles lists Dockerfiles that build cmd/elythia but are
 // allowed not to embed plugins, with the reason each is safe.
 //
 // **理由付きの allowlist にするのが要点。** 「プラグインを組み込まない
@@ -25,15 +25,15 @@ var pluginbuildExemptDockerfiles = map[string]string{
 
 // mkgoBuildVerbs and mkgoBuildTargets identify a command that compiles mk-go.
 //
-// **どちらも 1 つの文字列に頼らない。** `./cmd/misskey` だけを探す形は module path
-// (`github.com/shiroha-a/mk/cmd/misskey`) やワイルドカード (`./cmd/...`) で書かれた
+// **どちらも 1 つの文字列に頼らない。** `./cmd/elythia` だけを探す形は module path
+// (`github.com/shiroha-a/mk/cmd/elythia`) やワイルドカード (`./cmd/...`) で書かれた
 // Dockerfile を builder 集合から黙って落とす。動詞側も同じで、`go install` に
 // 変えるだけで検査対象から外れる。**落ちたものは allowlist にも載らないので
 // gate は鳴らないまま検査が減る** (「1 つも拾えなかったら落とす」は全部消えた
 // ときしか効かない)。
 var (
 	mkgoBuildVerbs   = []string{"go build", "go install"}
-	mkgoBuildTargets = []string{"cmd/misskey", "cmd/..."}
+	mkgoBuildTargets = []string{"cmd/elythia", "cmd/..."}
 )
 
 // TestDockerfilesEmbedPlugins checks that every Dockerfile building the mk-go
@@ -78,7 +78,7 @@ func TestDockerfilesEmbedPlugins(t *testing.T) {
 	// **拾えなかったら落とす。** 命名や配置が変わって空振りすると、検査して
 	// いないのに緑になる (compose-check / mdtable-check と同じ判断)。
 	if len(builders) == 0 {
-		t.Fatal("cmd/misskey をビルドする Dockerfile を 1 つも見つけられませんでした")
+		t.Fatal("cmd/elythia をビルドする Dockerfile を 1 つも見つけられませんでした")
 	}
 
 	used := map[string]bool{}
@@ -119,7 +119,7 @@ func TestDockerfilesEmbedPlugins(t *testing.T) {
 					"コメントの位置を見直してください", b.path)
 				continue
 			}
-			t.Errorf("%s は cmd/misskey をビルドしますが pluginbuild を実行していません。"+
+			t.Errorf("%s は cmd/elythia をビルドしますが pluginbuild を実行していません。"+
 				"plugins/ に置いたプラグインが入らない image が黙って出来ます。"+
 				"組み込まないなら pluginbuildExemptDockerfiles に理由付きで登録してください", b.path)
 			continue
@@ -134,7 +134,7 @@ func TestDockerfilesEmbedPlugins(t *testing.T) {
 	// 呼ぶようになったものが residue として残らないようにする。
 	for path := range pluginbuildExemptDockerfiles {
 		if !used[path] {
-			t.Errorf("pluginbuildExemptDockerfiles の %s は cmd/misskey をビルドする Dockerfile として見つかりませんでした", path)
+			t.Errorf("pluginbuildExemptDockerfiles の %s は cmd/elythia をビルドする Dockerfile として見つかりませんでした", path)
 		}
 	}
 }
@@ -201,7 +201,7 @@ func foldContinuations(body string) string {
 // buildsMkGo reports whether the Dockerfile compiles the mk-go binary.
 //
 // **検出は広く取る。** 動詞と対象が同じコマンドに現れることを要求すると、
-// 対象を `ARG MK_MAIN=./cmd/misskey` のような変数に入れただけで builder 集合から
+// 対象を `ARG MK_MAIN=./cmd/elythia` のような変数に入れただけで builder 集合から
 // 黙って消える。**落ちたものは allowlist にも載らないので gate は鳴らない。**
 // 余計に検査する側 (対象文字列がコメント外のどこかにあるだけ) は、pluginbuild を
 // 呼ぶか理由を書くかを求めるだけなので安全側に倒れる。

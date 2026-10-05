@@ -12,7 +12,7 @@
 // `/api/admin/foo`) で扱う。`ApiServerService.ts` が fastify 直登録する
 // auth 系 path は filename-derived の集合に乗らないので、comparator 側で
 // `tsRouterDirectPOSTPaths` を hardcode で補っている。
-// mk-go 側は `cmd/misskey -dump-routes` が出す JSON を入力に取り、`/api/*`
+// mk-go 側は `elythia dump-routes` が出す JSON を入力に取り、`/api/*`
 // prefix の route のみを対象にする。POST は両側比較、それ以外の method は
 // "GET variant" 等の mk-go only 拡張として分類する。
 package main
@@ -47,7 +47,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	up, _ := upstreamsrc.Dir(".")
 	tsDir := fs.String("ts-endpoints-dir", filepath.Join(up, "packages/backend/src/server/api/endpoints"), "path to Misskey TS endpoint .ts files")
 	tsDirectFile := fs.String("ts-api-server-service", filepath.Join(up, "packages/backend/src/server/api/ApiServerService.ts"), "path to Misskey TS ApiServerService.ts (fastify 直登録 endpoint の抽出元)")
-	mkRoutesPath := fs.String("mk-routes", "", "path to JSON output of `misskey -dump-routes` (default: stdin)")
+	mkRoutesPath := fs.String("mk-routes", "", "path to JSON output of `elythia dump-routes` (default: stdin)")
 	outPath := fs.String("out", "", "output markdown path (default: stdout)")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("parse args: %w", err)

@@ -53,7 +53,7 @@ for i in $(seq 1 30); do
 done
 
 echo "=== Config file ==="
-# cmd/migrate も mk-go 本体も -config (既定 .config/default.yml) を必ず読む。
+# `elythia migrate` も `elythia serve` も -config (既定 .config/default.yml) を必ず読む。
 # .config/* は gitignore なので clone 直後は存在せず、無いと failed to load config
 # で落ちる。DB / Redis の向き先は compose の MK_DB_* / MK_REDIS_* が上書きする。
 # url は example の https://example.tld/ のまま残る。開発中に絶対 URL を

@@ -373,13 +373,13 @@ func TestWriteFrontend_MissingForkIsErrorWhenFrontendNeeded(t *testing.T) {
 
 // --- run ---
 
-// fakeRepo builds a repo root with go.mod and cmd/misskey/.
+// fakeRepo builds a repo root with go.mod and cmd/elythia/.
 func fakeRepo(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"),
 		[]byte("module github.com/shiroha-a/mk\n\ngo 1.26.5\n"), 0o644))
-	require.NoError(t, os.MkdirAll(filepath.Join(root, "cmd", "misskey"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "cmd", "elythia"), 0o755))
 	return root
 }
 
@@ -411,6 +411,62 @@ func TestRun_RemovesStaleArtifacts(t *testing.T) {
 
 	assert.NoFileExists(t, genPath)
 	assert.NoFileExists(t, workPath)
+}
+
+// **改名前の生成物を消す (#3394)。** cmd/misskey/ に残ると main 関数の無い
+// package main になり、`go build ./...` が落ちる。ディレクトリは空になったときだけ消す。
+func TestRun_RemovesLegacyGeneratedFile(t *testing.T) {
+	for _, withPlugin := range []bool{false, true} {
+		root := fakeRepo(t)
+		if withPlugin {
+			writePlugin(t, filepath.Join(root, "plugins"), "hello", "example.com/hello", validMarker())
+		}
+		legacy := filepath.Join(root, legacyGeneratedFile)
+		require.NoError(t, os.MkdirAll(filepath.Dir(legacy), 0o755))
+		require.NoError(t, os.WriteFile(legacy, []byte(renderRegistration(nil)), 0o644))
+
+		require.NoError(t, run(root, "plugins", include{}))
+
+		assert.NoFileExists(t, legacy)
+		assert.NoDirExists(t, filepath.Dir(legacy))
+	}
+
+	root := fakeRepo(t)
+	legacy := filepath.Join(root, legacyGeneratedFile)
+	keep := filepath.Join(filepath.Dir(legacy), "notes.txt")
+	require.NoError(t, os.MkdirAll(filepath.Dir(legacy), 0o755))
+	require.NoError(t, os.WriteFile(legacy, []byte(renderRegistration(nil)), 0o644))
+	require.NoError(t, os.WriteFile(keep, []byte("mine"), 0o644))
+
+	require.NoError(t, run(root, "plugins", include{}))
+
+	assert.NoFileExists(t, legacy)
+	assert.FileExists(t, keep, "files the operator put there must survive")
+}
+
+// 生成物の見出しで始まらないファイルは、同じ名前でも消さない (利用者が置いたもの
+// かもしれない)。ディレクトリも残す。
+func TestRun_KeepsHandWrittenFileAtLegacyPath(t *testing.T) {
+	root := fakeRepo(t)
+	legacy := filepath.Join(root, legacyGeneratedFile)
+	require.NoError(t, os.MkdirAll(filepath.Dir(legacy), 0o755))
+	require.NoError(t, os.WriteFile(legacy, []byte("package main\n\n// mine\n"), 0o644))
+
+	require.NoError(t, run(root, "plugins", include{}))
+
+	assert.FileExists(t, legacy)
+}
+
+// 改名前の生成物を消せないときは止める (黙って続けると go build ./... で落ちる)。
+func TestRun_LegacyGeneratedFileThatCannotBeRemoved(t *testing.T) {
+	root := fakeRepo(t)
+	legacy := filepath.Join(root, legacyGeneratedFile)
+	// 中身のあるディレクトリにすると os.Remove が失敗する。
+	require.NoError(t, os.MkdirAll(filepath.Join(legacy, "x"), 0o755))
+
+	err := run(root, "plugins", include{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "plugins_generated.go")
 }
 
 // プラグインが無い状態で 2 回走らせても失敗しない (消すものが無い)。
@@ -466,7 +522,7 @@ func TestDiscover_UnreadableDirIsError(t *testing.T) {
 // go.mod が無い状態で生成しようとしたらエラーにする。go directive を写せない。
 func TestRun_MissingRootGoModIsError(t *testing.T) {
 	root := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(root, "cmd", "misskey"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "cmd", "elythia"), 0o755))
 	writePlugin(t, filepath.Join(root, "plugins"), "hello", "example.com/hello", validMarker())
 
 	err := run(root, "plugins", include{})
@@ -479,7 +535,7 @@ func TestRun_UnwritableTargetIsError(t *testing.T) {
 	root := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"),
 		[]byte("module github.com/shiroha-a/mk\n\ngo 1.26.5\n"), 0o644))
-	// cmd/misskey/ を作らないので generated file が書けない。
+	// cmd/elythia/ を作らないので generated file が書けない。
 	writePlugin(t, filepath.Join(root, "plugins"), "hello", "example.com/hello", validMarker())
 
 	err := run(root, "plugins", include{})

@@ -14,7 +14,7 @@
 ```bash
 git clone https://github.com/shiroha-a/mk.git mk-go
 cd mk-go
-go build -o built/misskey ./cmd/misskey
+go build -o built/elythia ./cmd/elythia
 ```
 
 フロントエンドのソースは本体の `frontend/` (Misskey TS の fork を取り込んだ pnpm workspace) に含まれている。
@@ -77,10 +77,10 @@ mk-goの追加テーブルを作り、共有テーブルを upstream の形に�
 
 ```bash
 # ローカルビルドの場合
-go run ./cmd/migrate -direction up
+go run ./cmd/elythia migrate -direction up
 
 # Docker imageの場合 (migrateバイナリが同梱されている)
-docker compose exec app /app/migrate -config .config/default.yml -direction up
+docker compose exec app /app/elythia migrate -config .config/default.yml -direction up
 ```
 
 これによりGo側で必要な追加テーブル (`app`, `auth_session`, `webhook`, `sw_subscription`, `chat_room`, `chat_message`, `bubble_game_record` 等) が作成される。
@@ -215,7 +215,7 @@ docker compose stop web
 ## 6. mk-goの起動
 
 ```bash
-./built/misskey -config .config/default.yml
+./built/elythia serve -config .config/default.yml
 ```
 
 方法Bで環境変数を使う場合は、**`source .env` では効かない** (`.env` に `export` が無いのでシェル変数にしかならず、子プロセスへ渡らない)。`set -a; . ./.env; set +a` で読み込むか、各行を `export` して起動する。

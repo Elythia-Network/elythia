@@ -70,7 +70,7 @@ CI では `.github/workflows/frontend.yml` の集約 job `frontend` が required
 frontend のビルドが import で落ちる。Node の版は `frontend/.node-version` に揃える。
 
 ```bash
-make plugins-all && go build -o /dev/null ./cmd/misskey   # CI と同じ統合ビルド
+make plugins-all && go build -o /dev/null ./cmd/elythia   # CI と同じ統合ビルド
 cd frontend && pnpm install && pnpm build && cd ..
 make frontend-check
 make frontend-test

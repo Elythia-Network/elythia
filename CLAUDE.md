@@ -60,7 +60,7 @@
 ## 2. 構成
 
 ```
-cmd/            実行バイナリ(misskey / migrate / 一回限りのbackfillバッチ)
+cmd/elythia/    実行バイナリ`elythia`。`serve` / `migrate` / `backfill <名前>`などのサブコマンドで呼び分ける
 internal/       本体。依存の向きは api → core → repository → model
   api/          APIハンドラ(エンドポイント単位のサブディレクトリ)
   core/         ビジネスロジック
@@ -68,6 +68,7 @@ internal/       本体。依存の向きは api → core → repository → mode
   model/        DBモデル
   entity/       レスポンス用DTO(ドメインロジックを入れない)
   activitypub/  連合(Inbox / Deliver / Renderer / Resolver / 署名)
+  cli/          `elythia`のサブコマンドの処理(`cmd/elythia`はこれを呼ぶだけ)
   queue/ stream/ server/ config/ testutil/ ほか
 plugin/         プラグインがimportする公開パッケージ
 plugins/        プラグイン本体(gitignore済み。同梱するものだけ例外)
@@ -98,7 +99,7 @@ make frontend-lint / frontend-test   # frontend/のeslint / vitest
 ```
 
 - 全targetは`make help`で見られる。説明は[docs/development.md](docs/development.md)にある
-- **`make tidy`は使わない。** `plugins/`にプラグインを置いた環境では、生成される`cmd/misskey/plugins_generated.go`がプラグインのmoduleをimportするので失敗する。置いていない環境でも、CIと結果がずれる
+- **`make tidy`は使わない。** `plugins/`にプラグインを置いた環境では、生成される`cmd/elythia/plugins_generated.go`がプラグインのmoduleをimportするので失敗する。置いていない環境でも、CIと結果がずれる
 - **Goの版を上げたら、`make plugins`で`go.work`を作り直す。** `go.work`は生成物で、作り直さないと古い版のtoolchainが選ばれ、ビルドが`requires go >= ...`で落ちる
 - **`make uds-*`と`make docker-*`は運営者の環境向け。** 手元の検証には使わない
 
@@ -282,7 +283,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 - `MK_`で始まる環境変数で設定を上書きできる。ネストしたキーは`_`でつなぐ(例: `MK_DB_HOST`)
 - **`MK_*`は設定ファイルより優先される。** exportしたまま`internal/config`のテストを回すと落ちる
 - **設定ファイルにも`bindEnvKeys()`にも無いキーは、`MK_`では作れない。** exampleでコメントアウトされている`meilisearch:`などは、まずyml側のコメントを外す
-- `cmd/migrate`は`DATABASE_URL`を読まない。`-config`か`MK_DB_*`で接続先を決める
+- `elythia migrate`は`DATABASE_URL`を読まない。`-config`か`MK_DB_*`で接続先を決める
 - 全キーの一覧は`internal/config/config.go`の`bindEnvKeys()`にある。運用向けの説明は[docs/configuration.md](docs/configuration.md)
 
 ## 10. 開発方針
@@ -300,6 +301,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 
 このファイル自体を変えたときだけ、1行で追記します(新しいものを上に)。経緯の本文はリンク先にあります。個別のfixの履歴は`CHANGELOG.md`にあります。
 
+- 2026-10-05: 実行バイナリを`elythia`1つにまとめたので、Section 2の構成、Section 3の`make tidy`の行、Section 9の`migrate`の行を更新した (#3394) → [docs/design/project-restructure.md](docs/design/project-restructure.md)
 - 2026-10-05: submodule(`third_party/misskey`)を外したので、Section 2の構成とSection 8の`build`の行を更新した (#3379) → [docs/divergence.md](docs/divergence.md#4-2b-frontend-の独自変更-3379-で取り込んだ後)
 - 2026-10-05: `frontend`をrequired checkにし、`ci.yml`の`frontend-check` jobをそこへまとめた。Section 3 / 5 / 8に反映し、Section 5にfrontendの節と`.claude/rules/frontend.md`を足した (#3379) → [docs/ci.md](docs/ci.md)
 - 2026-10-05: frontendを`frontend/`から読むようにしたので、Section 2の構成とSection 8の`frontend-check`の行を更新し、`frontend`の行を足した (#3379) → [docs/deployment.md](docs/deployment.md#frontend-を本体へ取り込んだ版へ上げる-3379)

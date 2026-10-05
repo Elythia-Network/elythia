@@ -44,7 +44,7 @@ replace github.com/shiroha-a/mk => ../..
 
 **独立した Go module である必要がある。** これは形式ではなく、Go の internal ルールにより「mk-go の内部パッケージを import できない」ことを保証する仕組み。`go.mod` を持たないディレクトリはビルド時にエラーになる。
 
-依存を足すときは自分の module の中で `go get` する。**リポジトリのルートで `go mod tidy` を走らせないこと** — 生成物 `cmd/misskey/plugins_generated.go` が `github.com/shiroha-a/mk-plugin-*` を import しており、private repo だと解決に失敗する。
+依存を足すときは自分の module の中で `go get` する。**リポジトリのルートで `go mod tidy` を走らせないこと** — 生成物 `cmd/elythia/plugins_generated.go` が `github.com/shiroha-a/mk-plugin-*` を import しており、private repo だと解決に失敗する。
 
 ### `plugin.go`
 

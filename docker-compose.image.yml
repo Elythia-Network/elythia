@@ -74,8 +74,8 @@ services:
   migrate:
     logging: *default-logging
     image: ${MK_IMAGE:-ghcr.io/shiroha-a/mk:bundled}
-    entrypoint: ["/app/migrate"]
-    command: ["-config", ".config/default.yml", "-direction", "up"]
+    entrypoint: ["/app/elythia"]
+    command: ["migrate", "-config", ".config/default.yml", "-direction", "up"]
     depends_on:
       db:
         condition: service_healthy

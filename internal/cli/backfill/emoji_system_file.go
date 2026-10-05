@@ -1,6 +1,25 @@
-// Command backfill-emoji-system-file duplicates the applicant-owned drive file
-// behind every already-approved `kind = own` custom emoji application into a
-// system-owned drive file, and repoints the emoji at that copy (#2990).
+package backfill
+
+import (
+	"fmt"
+	"io"
+
+	"github.com/shiroha-a/mk/internal/cli/cliflag"
+	coredrive "github.com/shiroha-a/mk/internal/core/drive"
+	"github.com/shiroha-a/mk/internal/maintenance"
+	"github.com/shiroha-a/mk/internal/misc/id"
+	"github.com/shiroha-a/mk/internal/repository"
+)
+
+// **承認経路と同じ複製を使っていることを型で固定する。** ここが満たされなくなるのは
+// `drive.Service` 側の複製が消えたか形が変わったときで、そうなると別実装を書き足す
+// 誘惑が生まれる (= 片方だけ直る形)。
+var _ maintenance.SystemFileCopier = (*coredrive.Service)(nil)
+
+// EmojiSystemFile implements "elythia backfill emoji-system-file": it
+// duplicates the applicant-owned drive file behind every already-approved
+// `kind = own` custom emoji application into a system-owned drive file, and
+// repoints the emoji at that copy (#2990).
 //
 // #2966 は**承認経路だけ**を直した。それ以前に承認された絵文字は申請者所有の drive
 // ファイルの URL を参照したままなので、申請者が drive から元ファイルを消すか、
@@ -24,61 +43,36 @@
 // ローカル FS にあり、既定の探索先は相対パスの ./drive-files (mk-go 本体と同じ)。
 // 違う場所に置いている構成では -drive-dir で渡す。
 //
-//	backfill-emoji-system-file -config .config/default.yml
-//	backfill-emoji-system-file -config .config/default.yml -apply
-package main
+//	elythia backfill emoji-system-file -config .config/default.yml
+//	elythia backfill emoji-system-file -config .config/default.yml -apply
+func EmojiSystemFile(args []string) int { return emojiSystemFile(defaultEnv(), args) }
 
-import (
-	"context"
-	"flag"
-	"fmt"
-	"io"
-	"log"
-	"os"
-	"os/signal"
-	"syscall"
-
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
-
-	"github.com/shiroha-a/mk/internal/config"
-	coredrive "github.com/shiroha-a/mk/internal/core/drive"
-	"github.com/shiroha-a/mk/internal/maintenance"
-	"github.com/shiroha-a/mk/internal/misc/id"
-	"github.com/shiroha-a/mk/internal/repository"
-)
-
-// **承認経路と同じ複製を使っていることを型で固定する。** ここが満たされなくなるのは
-// `drive.Service` 側の複製が消えたか形が変わったときで、そうなると別実装を書き足す
-// 誘惑が生まれる (= 片方だけ直る形)。
-var _ maintenance.SystemFileCopier = (*coredrive.Service)(nil)
-
-func main() {
-	cfgPath := flag.String("config", "/app/.config/default.yml", "path to mk-go config file")
-	driveDir := flag.String("drive-dir", "./drive-files", "local drive storage directory (storedInternal rows)")
-	limit := flag.Int("limit", 0, "examine at most N applications (0 = no cap)")
-	apply := flag.Bool("apply", false, "actually write; without this the run is a dry-run")
+func emojiSystemFile(e env, args []string) int {
+	fs, cfgPath := newFlags(e, "emoji-system-file")
+	driveDir := fs.String("drive-dir", "./drive-files", "local drive storage directory (storedInternal rows)")
+	limit := fs.Int("limit", 0, "examine at most N applications (0 = no cap)")
+	apply := fs.Bool("apply", false, "actually write; without this the run is a dry-run")
 	// **`-dry-run` も受ける。** 既定が dry-run なので不要だが、姉妹バッチ
-	// (`backfill-remote-host` / `backfill-note-tags`) はこちらの綴りで書かせる。
-	// 定義していないと `flag provided but not defined` で落ちるだけなので危険は
-	// 無いが、手が覚えている綴りが通らないのは無駄な往復になる。
-	dryRun := flag.Bool("dry-run", false, "explicitly request a dry-run (already the default)")
-	flag.Parse()
+	// (remote-host / note-tags) はこちらの綴りで書かせる。定義していないと
+	// `flag provided but not defined` で落ちるだけなので危険は無いが、手が覚えている
+	// 綴りが通らないのは無駄な往復になる。
+	dryRun := fs.Bool("dry-run", false, "explicitly request a dry-run (already the default)")
+	if code, ok := cliflag.Parse(fs, args); !ok {
+		return code
+	}
 	if *dryRun && *apply {
-		log.Fatalf("-dry-run と -apply は同時に指定できない")
+		e.logger.Printf("-dry-run と -apply は同時に指定できない")
+		return 1
 	}
 
-	cfg, err := config.Load(*cfgPath)
-	if err != nil {
-		log.Fatalf("load config: %v", err)
-	}
-	db, err := gorm.Open(postgres.Open(cfg.DSN()), &gorm.Config{})
-	if err != nil {
-		log.Fatalf("open db: %v", err)
+	cfg, db, ok := open(e, *cfgPath)
+	if !ok {
+		return 1
 	}
 	idGen, err := id.NewGenerator(cfg.ID)
 	if err != nil {
-		log.Fatalf("id generator %q: %v", cfg.ID, err)
+		e.logger.Printf("id generator %q: %v", cfg.ID, err)
+		return 1
 	}
 
 	metaRepo := repository.NewMetaRepository(db)
@@ -100,23 +94,25 @@ func main() {
 
 	// **Ctrl-C / SIGTERM で途中まで残す。** 中断すると残りの行は処理しないが、
 	// そこまでに作った複製と絵文字の更新はそのまま生きる (冪等なので再実行で続く)。
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := e.signalContext()
 	defer stop()
 
-	res, err := maintenance.BackfillEmojiSystemFiles(ctx, db, driveSvc,
+	res, err := e.emojiBackfill(ctx, db, driveSvc,
 		// **`Apply` をそのまま渡す。** ここで否定を挟むと、書き間違い 1 つで
 		// 既定が「全部書く」に反転する (options のゼロ値は何も書かない側)。
 		maintenance.EmojiSystemFileBackfillOptions{Apply: *apply, Limit: *limit})
-	// **エラーでも途中までの結果を出す。** `log.Fatalf` で捨てると、複製を作った
-	// 行があったことが運用者に伝わらない (次の実行で `already` になるだけなので
-	// 壊れはしないが、中断のたびに「何も起きなかった」ように見える)。
-	report(os.Stderr, res, *apply, err)
+	// **エラーでも途中までの結果を出す。** 捨てると、複製を作った行があったことが
+	// 運用者に伝わらない (次の実行で `already` になるだけなので壊れはしないが、
+	// 中断のたびに「何も起きなかった」ように見える)。
+	report(e.stderr, res, *apply, err)
 	if err != nil {
-		log.Fatalf("backfill: %v", err)
+		e.logger.Printf("backfill: %v", err)
+		return 1
 	}
 	if res.NeedsAttention() {
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }
 
 // report prints every non-trivial row and the totals.

@@ -33,8 +33,10 @@ docker compose up -d
 
 ## 設定
 
-`url` は必須項目で、ひな形のままだと `https://example.tld/` になっている。
-ローカルで試すだけなら環境変数で足りる。
+`url` は必須項目で、compose が環境変数 `MK_URL` (既定 `http://localhost:3000/`) で
+渡している。**`MK_*` は設定ファイルより優先される**ので、実際のアドレスは
+設定ファイルの `url` ではなく `MK_URL` で渡す (同じディレクトリの `.env` に
+`MK_URL=https://...` と書けば毎回渡さずに済む)。ローカルで試すだけなら既定のままでよい。
 
 ```bash
 MK_URL=http://localhost:3000/ docker compose up -d
@@ -50,29 +52,63 @@ MK_URL=http://localhost:3000/ docker compose up -d
 
 ```bash
 cp .config/docker.yml.example .config/docker.yml
-# .config/docker.yml の url を実際のアドレスに変更する
+# url 以外の設定を .config/docker.yml で変える (url は上の MK_URL で渡す)
 ```
 
-そのうえで `docker-compose.yml` の **`app` と `migrate` の両方**にある
-volumes のコメントを外す。**片方だけ外すとマイグレーションと本体が別の DB を
-見る**ので必ず両方。
+そのうえで、同じディレクトリに `docker-compose.override.yml` を作り、
+**`app` と `migrate` の両方**に設定ファイルを mount する。**片方だけだと
+マイグレーションと本体が別の DB を見る**ので必ず両方。
 
 ```yaml
-- ./.config/docker.yml:/app/.config/default.yml:ro
+services:
+  app:
+    volumes:
+      - ./.config/docker.yml:/app/.config/default.yml:ro
+  migrate:
+    volumes:
+      - ./.config/docker.yml:/app/.config/default.yml:ro
 ```
+
+`docker compose` は `docker-compose.override.yml` を自動で重ねて読む。
+**手元の変更は `docker-compose.yml` を直接書き換えずにこちらへ置く。**
+下の「更新」で `docker-compose.yml` は配布元の内容で上書きされる。
 
 ## 更新
 
+**以前の手順で `docker-compose.yml` の volumes のコメントを外していた場合は、先に
+上の「設定」のとおり `docker-compose.override.yml` へ移す。** 下の `git reset --hard` が
+`docker-compose.yml` を配布元の内容に戻すので、移さないと設定ファイルの mount が
+黙って外れ、焼き込みのひな形の設定のまま起動する (エラーにならない)。`git diff` で
+手元の変更を確かめてから進める。
+
 ```bash
+# compose も image と一緒に更新する。image だけ新しくすると、compose が
+# 古い呼び方のまま残る (2.0.0 で実行バイナリを elythia 1 つにまとめた、#3394)
+git fetch --depth 1 origin docker
+git reset --hard FETCH_HEAD
 docker compose pull
 docker compose up -d
 ```
 
+**`git pull` は使えない。** このブランチは更新のたびに履歴を持たない 1 コミットで
+作り直されるので、`git pull` は「履歴が繋がらない」として止まる。
+
+**`git reset --hard` は、このブランチが持つファイル (`docker-compose.yml` /
+`.config/docker.yml.example` / `README.md`) への手元の変更を捨てる。** 手元の変更は
+`docker-compose.override.yml` に置く (上の「設定」)。`.config/docker.yml`・
+`docker-compose.override.yml`・`files/` はこのブランチに無いファイルなので残る。
+
 `bundled` タグは `develop` の最新を指す。バージョンを固定したい場合は
-`MK_IMAGE` で明示する。
+`MK_IMAGE` で明示する。**古い版に固定するときは、その版の compose を使う**
+(このブランチの compose は最新の image の呼び方に合わせてある)。その版の
+compose はリリースのタグから取れる (タグ名に `v` は付かない)。**固定している間は
+上の「更新」の手順を使わない** (`git reset --hard` が compose を最新に戻し、古い image と
+食い違って起動しなくなる)。版を変えるときは、その版の compose を取り直す。
 
 ```bash
-MK_IMAGE=ghcr.io/shiroha-a/mk:1.1.1-bundled docker compose up -d
+curl -fsSL -o docker-compose.yml \
+  https://raw.githubusercontent.com/shiroha-a/mk/1.5.0/docker-compose.image.yml
+MK_IMAGE=ghcr.io/shiroha-a/mk:1.5.0-bundled docker compose up -d
 ```
 
 利用できるタグは [GHCR のページ](https://github.com/shiroha-a/mk/pkgs/container/mk)

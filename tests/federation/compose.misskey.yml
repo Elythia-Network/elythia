@@ -56,10 +56,10 @@ services:
     volumes:
       - certs:/certs:ro
       - ./common/mkgo.yml:/app/.config/default.yml:ro
-    # distroless image (#621) には wget が無いので binary 自身に -healthcheck
-    # フラグを通して叩かせる (cmd/misskey の -healthcheck mode)。
+    # distroless image (#621) には wget が無いので binary 自身に
+    # `elythia healthcheck` で叩かせる。
     healthcheck:
-      test: ["CMD", "/app/misskey", "-healthcheck", "-config", ".config/default.yml"]
+      test: ["CMD", "/app/elythia", "healthcheck", "-config", ".config/default.yml"]
       interval: 3s
       timeout: 5s
       retries: 20

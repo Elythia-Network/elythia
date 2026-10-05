@@ -1,4 +1,5 @@
 # Binary
+/elythia
 /misskey
 /misskey-go
 /built/
@@ -99,7 +100,7 @@ plugins/*
 !plugins/trustlevel/
 go.work
 go.work.sum
-cmd/misskey/plugins_generated.go
+cmd/elythia/plugins_generated.go
 
 # pluginbuild (make plugins) の生成物 (#3379)。frontend はこれを import するので、
 # frontend をビルドする前に make plugins を回す。追跡すると make plugins のたびに

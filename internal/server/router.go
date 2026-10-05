@@ -3632,7 +3632,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	adminHandler.SetEmojiApplicationRepo(emojiApplicationRepo)
 	// 連合セルフ診断 (#2463)。migration 本数は起動時に数えず 0 を渡す
 	// (server 側は既に migrate 済みで動いている前提。適用漏れの検出は
-	// `misskey -doctor` の担当で、あちらは同梱ファイルを数えられる)。
+	// `elythia doctor` の担当で、あちらは同梱ファイルを数えられる)。
 	// DB の健全性 (#3095)。統計はプライマリから読み、1 分キャッシュする。
 	dbHealth := dbhealth.NewService(s.db, s.config.DBReplications && len(s.config.DBSlaves) > 0)
 	adminHandler.SetDatabaseHealth(dbHealth)

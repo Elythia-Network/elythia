@@ -14,7 +14,7 @@
 // # 生成物
 //
 //	go.work                           plugins/* をワークスペースに含める
-//	cmd/misskey/plugins_generated.go  各プラグインを import して Register する
+//	cmd/elythia/plugins_generated.go  各プラグインを import して Register する
 //
 // どちらも gitignore 済み。プラグインが 1 つも無ければ**何も生成しない**ので、
 // 素の `go build ./...` はそのまま通る。
@@ -41,7 +41,17 @@ import (
 const markerFile = "mk-plugin.yml"
 
 // generatedFile is written into the main package.
-const generatedFile = "cmd/misskey/plugins_generated.go"
+const generatedFile = "cmd/elythia/plugins_generated.go"
+
+// legacyGeneratedFile is where generatedFile lived before the executables were
+// merged into cmd/elythia (#3394).
+//
+// 古い checkout には gitignore された生成物だけが cmd/misskey/ に残る。main 関数の
+// 無い package main になるので、残したままだと `go build ./...` が落ちる。
+const legacyGeneratedFile = "cmd/misskey/plugins_generated.go"
+
+// generatedHeaderPrefix starts every Go file this tool writes.
+const generatedHeaderPrefix = "// Code generated"
 
 // frontendEntry is the plugin-relative path of its frontend entry point.
 // 存在しなければ backend だけのプラグインとして扱う。
@@ -127,6 +137,9 @@ func parseArgs(args []string) (root, dir string, inc include) {
 func run(root, pluginDir string, inc include) error {
 	found, err := discover(root, pluginDir, inc)
 	if err != nil {
+		return err
+	}
+	if err := removeLegacyGenerated(root); err != nil {
 		return err
 	}
 
@@ -444,6 +457,36 @@ func renderRegistration(found []discovered) string {
 	}
 	b.WriteString("}\n")
 	return b.String()
+}
+
+// removeLegacyGenerated deletes legacyGeneratedFile and, when that leaves
+// its directory empty, the directory too.
+//
+// **生成物の見出しで始まるときだけ消す。** 同じ名前で利用者が手で置いたファイル
+// かもしれないので、見出しが無ければ触らずに警告だけ出す。ディレクトリも、
+// 他のファイルが残っていれば触らない。
+func removeLegacyGenerated(root string) error {
+	path := filepath.Join(root, legacyGeneratedFile)
+	body, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("%s を読めません: %w", legacyGeneratedFile, err)
+	}
+	if !strings.HasPrefix(string(body), generatedHeaderPrefix) {
+		fmt.Fprintf(os.Stderr, "pluginbuild: %s は生成物の見出しで始まらないので消しません。"+
+			"残っていると go build ./... が落ちるので、不要なら手で消してください\n", legacyGeneratedFile)
+		return nil
+	}
+	if err := removeIfExists(path); err != nil {
+		return err
+	}
+	dir := filepath.Dir(path)
+	if entries, err := os.ReadDir(dir); err == nil && len(entries) == 0 {
+		return removeIfExists(dir)
+	}
+	return nil
 }
 
 // removeIfExists deletes path when present.

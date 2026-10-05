@@ -33,7 +33,7 @@ services:
       TEST_DB_SSLMODE: disable
       TEST_REDIS_HOST: localhost
       TEST_REDIS_PORT: "6379"
-      # cmd/migrate は DATABASE_URL を読まない。-config (既定 .config/default.yml)
+      # `elythia migrate` は DATABASE_URL を読まない。-config (既定 .config/default.yml)
       # を必ず読むので、**設定ファイルが無いと MK_DB_* があっても起動しない**
       # (MK_DB_* はファイルの値を上書きするだけ)。複製は postCreate.sh が行う。
 
