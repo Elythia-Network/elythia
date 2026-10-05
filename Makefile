@@ -38,7 +38,8 @@ check: fmt lint actionlint golangci-lint test ## コミット前に必須 (lint 
 	# 一度も走らない (レビューで指摘された)。
 	#
 	# **required check の全部ではない。** `build` job (`go build ./...` と同梱
-	# プラグインの vet → `make plugin-vet`)、`lint` job の重複 fixture ID 検査、
+	# プラグインの vet → `make plugin-vet`、同梱サンプル入りの統合バイナリ →
+	# `make plugins-all && go build ./cmd/misskey`)、`lint` job の重複 fixture ID 検査、
 	# `test` のカバレッジ閾値は再現しない。
 
 gates: shapecheck errorid-check limitspec-check perm-check wiring-check catalog-check notfound-check nulparam-check compose-check testflags-check migrationdoc-check mdtable-check notiftype-check pluginembed-check dockerignore-check secretfield-check ipshape-check iprecord-check sqlbind-check submodulepin-check gaterun-check ## 静的 parity ゲートを一括実行
@@ -300,8 +301,8 @@ REVISION_LDFLAGS = -X github.com/shiroha-a/mk/internal/config.MkGoCommit=$$(git 
 plugins: ## plugins/ を走査して組み込み用ファイルを生成 (#2480)
 	GOWORK=off go run ./tools/pluginbuild
 
-# CI の frontend-check が使う。同梱サンプルは mk-plugin.yml で既定無効なので、
-# 既定の走査では frontend の検証対象から外れてしまう (#2495)。
+# CI の build job と frontend workflow が使う。同梱サンプルは mk-plugin.yml で既定無効なので、
+# 既定の走査では検証対象から外れてしまう (#2495)。
 plugins-all: ## disabled のプラグインも含めて生成 (CI 検証用)
 	GOWORK=off go run ./tools/pluginbuild -include-disabled
 

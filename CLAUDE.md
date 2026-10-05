@@ -94,7 +94,8 @@ make test-fast               # -race抜き。反復用で、コミット前の�
 make gates                   # 静的なparityゲートを一括(サーバー・Docker不要)
 make plugin-test             # 同梱プラグインのテスト(別moduleなので./...に入らない)
 make migrate-up / migrate-down   # downは1段だけ戻す
-make frontend-check          # fork frontendの型チェック + eslint
+make frontend-check          # frontend/の型チェック + frontendを読むゲート + 絵文字の正規表現 + eslint
+make frontend-lint / frontend-test   # frontend/のeslint / vitest
 ```
 
 - 全targetは`make help`で見られる。説明は[docs/development.md](docs/development.md)にある
@@ -151,6 +152,15 @@ make frontend-check          # fork frontendの型チェック + eslint
 - early returnでネストを浅くする
 - エラーは`fmt.Errorf("context: %w", err)`で包む
 - **`//nolint`は、対象の行の行末に置く。** 独立した行に置くと、続くブロック全体が検査されなくなる。理由も書く
+
+### frontend(`frontend/`)
+
+`frontend/`は本家Misskeyのfrontendを取り込んだpnpm workspaceで、本体のコミットとして直接直す(#3379)。詳細は[docs/contributing.md](docs/contributing.md#fork-frontend-frontend-を触るとき)にある。
+
+- **`frontend/`を触ったら、`make frontend-check` / `make frontend-lint` / `make frontend-test`も通す。** `make check`はGoしか見ない。CIではrequiredの`frontend`が見る
+- **新しいファイルにも本家と同じSPDXヘッダーを付ける。** `frontend/scripts/check-spdx.mjs`が落とす。Go側の「SPDXを付けない」方針とは逆
+- **本番のチェックアウトで`pnpm build` / `pnpm -r build` / `make e2e-frontend-build`を検証目的に流さない。** `frontend/built`を消してから作り直すので、そこをbind mountしている本番が404になる。検証は別のworktreeで行う
+- 生成物の`server-plugins.generated.ts`は追跡していない。無ければ`make plugins`で作る
 
 ### コメントとドキュメントの言語
 
@@ -224,16 +234,15 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 
 ## 8. CI
 
-**required check は`build` / `test` / `lint`の3つです。** 手元で`make check`を通せば、ほぼ再現できます。
+**required check は`build` / `test` / `lint` / `frontend`の4つです。** 手元で`make check`を通せば、ほぼ再現できます。`frontend/`を触ったときは、Section 5の`make frontend-*`も通します。
 
 | workflow / job | 発火 | required | 見ているもの |
 |---|---|---|---|
-| `ci.yml` build | push / PR | ○ | `go build ./...`、submoduleのcommitがforkにpush済みで`docs/divergence.md`のpinのtagと一致するか、同梱プラグインの`disabled: true`、同梱プラグインの`go vet` |
+| `ci.yml` build | push / PR | ○ | `go build ./...`、submoduleのcommitがforkにpush済みで`docs/divergence.md`のpinのtagと一致するか、同梱プラグインの`disabled: true`、同梱プラグインの`go vet`、同梱プラグインを含めた統合バイナリのビルド |
 | `ci.yml` test | push / PR | ○ | 4 shardで`-race -count=1 -shuffle=3`、パッケージごとのカバレッジ閾値 |
 | `ci.yml` lint | push / PR | ○ | vet / gofmt / actionlint / golangci-lint / テストfixtureのID重複 |
 | `ci.yml` plugin-tests | push / PR | | 同梱プラグインのテスト、`authoring.md`のスニペットのコンパイル |
-| `ci.yml` frontend-check | push / PR | | `frontend/`の型チェック、eslint、vitest、同梱プラグインを含めた統合バイナリのビルド |
-| `frontend` | PR / push(paths限定) | | `frontend/`の本家由来の検査(9 workspaceのeslint、typecheck、SPDX、locale、本番ビルド、vitest) |
+| `frontend` | push / PR | ○ | `frontend/`の検査(9 workspaceのeslint、typecheck、SPDX、locale、本番ビルド、vitest)、絵文字の正規表現。frontendに関係しない変更ではlintとtestをskipし、集約jobの`frontend`だけが成功する |
 | `ci.yml` vulncheck | push / PR | | govulncheck、`go.mod`とDockerfileのGoの版の一致 |
 | `dependency-review` | PR | | PRが持ち込む依存の既知脆弱性 |
 | `codeql` | PR / push / 週1回 | | Goとworkflowの静的解析 |
@@ -292,6 +301,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 
 このファイル自体を変えたときだけ、1行で追記します(新しいものを上に)。経緯の本文はリンク先にあります。個別のfixの履歴は`CHANGELOG.md`にあります。
 
+- 2026-10-05: `frontend`をrequired checkにし、`ci.yml`の`frontend-check` jobをそこへまとめた。Section 3 / 5 / 8に反映し、Section 5にfrontendの節と`.claude/rules/frontend.md`を足した (#3379) → [docs/ci.md](docs/ci.md)
 - 2026-10-05: frontendを`frontend/`から読むようにしたので、Section 2の構成とSection 8の`frontend-check`の行を更新し、`frontend`の行を足した (#3379) → [docs/deployment.md](docs/deployment.md#frontend-を本体へ取り込んだ版へ上げる-3379)
 - 2026-10-05: 比較対象の本家を`.cache/misskey`から読むようにしたので、Section 8の`apicompat`の行を更新した (#3378) → [docs/ci.md](docs/ci.md)
 - 2026-10-04: Goのe2eを`tests/`へ移したのでSection 2の構成を更新した (#3373) → [docs/design/project-restructure.md](docs/design/project-restructure.md)

@@ -62,7 +62,7 @@ make dev
 | `make check` | `fmt` → `lint` → `actionlint` → `golangci-lint` → `test`。コミット前に必須 |
 | `make gates` | 静的 parity ゲートを一括実行 (内訳は下の「静的 parity ゲート」表) |
 | `make version` | mk-go / 互換 Misskey / 追従している本家 (`UPSTREAM_MISSKEY_VERSION`) のバージョンを表示 |
-| `make frontend-check` | `frontend/` の型チェック (`vue-tsc --noEmit`)、**`frontend/` のソースを読むゲート**、**eslint** (#2906)。ビルド成果物を作らないので安全。ゲートは `frontend/` を本体で追跡するようになった (#3379) ので skip せず `make test` でも走るが、frontend を触ったときに手元でまとめて回せるよう、ここにも残している。**vitest は入っていない** (`make frontend-test`) — CI の同名 job はそれと `make plugins-all` / 統合バイナリの build を別 step で走らせる |
+| `make frontend-check` | `frontend/` の型チェック (`vue-tsc --noEmit`)、**`frontend/` のソースを読むゲート**、**eslint** (#2906)。ビルド成果物を作らないので安全。ゲートは `frontend/` を本体で追跡するようになった (#3379) ので skip せず `make test` でも走るが、frontend を触ったときに手元でまとめて回せるよう、ここにも残している。**vitest は入っていない** (`make frontend-test`)。CI に同名の job はもう無く、CI では `frontend` workflow (`.github/workflows/frontend.yml`) が型・eslint・vitest・`emoji-regex-check` などを回す。同梱サンプル入りの統合バイナリの build は required の `build` job にある (#3379) |
 | `make diff-check` | 差分比較ハーネスを作り直して実行 (クリーン DB 前提のため) |
 | `make playwright-check` | Playwright を作り直して実行 (同上) |
 | `make e2e-down-all` | 検証用スタックを一括撤去。**本番 project `mk` は対象外** |
@@ -140,9 +140,9 @@ cd mk && docker compose up -d
 | `make plugin-vet` | 同梱プラグインを`go vet` + 既定無効を検査（CIの`build` jobの2 step相当） |
 | `make plugin-test` | 同梱プラグインのテスト (別 module なので `./...` に含まれない) |
 | `make plugin-doc-check` | `docs/plugins/authoring.md` の Go スニペットが実際にコンパイルできるか |
-| `make emoji-regex-check` | `make emoji-regex` の生成物と snapshot (正規表現と mfm-js / emoji-data の版) が、`frontend/` の mfm-js と emoji-data から作り直したものと一致するか。node_modules が要るので `make gates` ではなく `make frontend-check` から呼ばれる (#3324) |
-| `make frontend-lint` | fork frontend の eslint。CI `frontend-check` job の Lint step と同じで、範囲は `package.json` の script が持つ (`--quiet "src/**/*.{ts,vue}"`)。`make frontend-check` から呼ばれる (#2906)。実測 55 秒 |
-| `make frontend-test` | fork frontend の vitest (`test/unit/**/*.test.ts`)。CI `frontend-check` job の Unit test step と同じ |
+| `make emoji-regex-check` | `make emoji-regex` の生成物と snapshot (正規表現と mfm-js / emoji-data の版) が、`frontend/` の mfm-js と emoji-data から作り直したものと一致するか。node_modules が要るので `make gates` には入れず、手元では `make frontend-check` から、CI では `frontend` workflow の `frontend-lint` job から呼ばれる (#3324) |
+| `make frontend-lint` | fork frontend の eslint。CI `frontend` workflow の `frontend-lint` job の eslint step のうち frontend の分と同じで、範囲は `package.json` の script が持つ (`--quiet "src/**/*.{ts,vue}"`)。`make frontend-check` から呼ばれる (#2906)。実測 55 秒 |
+| `make frontend-test` | fork frontend の vitest (`test/unit/**/*.test.ts`)。CI `frontend` workflow の `frontend-test` job の frontend unit tests step と同じ |
 | `make plugin-dev` | プラグインを編集しながら動かす (`PLUGIN=plugins/status`) |
 
 ### マイグレーション
@@ -292,12 +292,12 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_xxx" ON "yyy" ("zzz");
 
 ## CI/CD
 
-### 必須チェック (`.github/workflows/ci.yml`)
+### 必須チェック (`.github/workflows/ci.yml` / `frontend.yml`)
 
-`main`と`develop`へのpush/PRで実行される。branch protectionのrequired checksは`build` / `test` / `lint`の3つ。
+`ci.yml`は`main`と`develop`へのpush/PR、`frontend.yml`はPRと`develop`へのpushで実行される。branch protectionのrequired checksは`build` / `test` / `lint`と、`.github/workflows/frontend.yml`の`frontend`の4つ。
 
 #### buildジョブ
-`go build ./...`で全パッケージのビルド確認。続けて同梱サンプルが`mk-plugin.yml`で既定無効のままかを検査し (#2701)、同梱プラグインを`go vet`する。**required jobなので、コンパイル以外の理由でも赤くなる**。手元の再現は`make plugin-vet`。
+`go build ./...`で全パッケージのビルド確認。続けて同梱サンプルが`mk-plugin.yml`で既定無効のままかを検査し (#2701)、同梱プラグインを`go vet`し、最後に同梱サンプル入りの統合バイナリ (`make plugins-all && go build ./cmd/misskey`、#2495) をビルドする (#3379 で`frontend-check` jobから移した。Nodeが要らないので毎回走るここに置く)。**required jobなので、コンパイル以外の理由でも赤くなる**。手元の再現は`make plugin-vet`と、統合バイナリは`make plugins-all && go build -o /dev/null ./cmd/misskey`。
 
 #### test-shardsジョブ + testジョブ
 - `shard: [1,2,3,4]`の4-way matrixで並列実行。各shardが独立したPostgreSQL 18 / Redis 7のサービスコンテナを持つ
@@ -322,6 +322,11 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_xxx" ON "yyy" ("zzz");
 - 重複 fixture ID の検出
 - **golangci-lint** (`make golangci-lint`) — errcheck / govet / ineffassign / staticcheck
 
+#### frontendジョブ (`.github/workflows/frontend.yml`)
+- `ci.yml`ではなく別のworkflowにあり、pathsで絞らずに毎回起動する。`changes`ジョブが差分からfrontendに関係する変更か (`frontend/`・`plugins/`・`plugin/`・`tools/pluginbuild/`・`tools/emojiregex/`・`internal/activitypub/mfm/emoji_regex_gen.go`・workflow自身・`Makefile`・`go.mod` / `go.sum`。リネームは移動元と移動先の両方を見る) を判定し、関係なければ`frontend-lint` / `frontend-test`をskipする
+- `frontend`ジョブは`if: always()`で両者を束ねる集約ジョブ。関係しない差分では成功し、関係する差分では両方の成功を要求する。`changes`が落ちたら失敗する
+- 中身と手元での再現は[ci.md](ci.md)にある。手元用の`make frontend-check`は残っているが、CIの同名ジョブは#3379で無くなった
+
 ### 非ブロッキングのPRチェック
 
 以下はPRで走るが**required checksには入っていない**ので、落ちてもマージはブロックされない。赤いチェックとして表示されるので、内容を確認して別PRで対処する。
@@ -329,7 +334,6 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_xxx" ON "yyy" ("zzz");
 | check | workflow | 内容 |
 |---|---|---|
 | `vulncheck` | CI | 依存・Go stdlib の**到達可能な**既知脆弱性 + Go version の pin 整合 |
-| `frontend-check` | CI | `frontend/` の型 (`vue-tsc --noEmit`) + `frontend/` のソースを読むゲート + eslint + vitest + `make plugins-all` と統合バイナリの build。**`make frontend-check` は型・ゲート・eslint まで** (#2906) なので、job 全体は [ci.md](ci.md) の手元再現を使う |
 | `plugin-tests` | CI | 同梱プラグインのテスト (別 module なので `go list ./...` に入らない) |
 | `build-and-push` / `-bundled` | Docker | image がビルドできるか (PR では push しない) |
 | `spec (mk-go 1/4)` 〜 `4/4` | Playwright | ブラウザからの統合互換。TS backend での実行は `workflow_dispatch` のみ |

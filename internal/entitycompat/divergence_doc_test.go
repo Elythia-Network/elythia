@@ -37,8 +37,8 @@ import (
 // develop では §1-1 が 53、生成物の docs/api-compat.md が 49、真値が 58 だった (#2640)。
 //
 // upstream の endpoint 一覧を tools/apicompat から直接引くことはできない
-// (**test-shards job は submodule を checkout しない**。.github/workflows/ci.yml で
-// `submodules: recursive` を指定しているのは frontend-check だけ)。ただし
+// (**どの CI job も本家のソースを checkout しない**。本家は `make upstream-fetch` で
+// 取る `.cache/misskey` にしか無い、#3378 / #3379)。ただし
 // **`make apicompat` の生成物は commit されている**ので、それを経由すれば
 // submodule 無しでも突き合わせられる (TestDivergenceDoc_EndpointCountMatchesAPICompat)。
 

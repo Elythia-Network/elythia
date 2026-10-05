@@ -7,7 +7,7 @@
 #
 # **既存のどの job にも相乗りできない。** 本家 (TS の endpoints を読む) と
 # DB / Redis (route dump がサーバーを組み立てる) の両方が要るが、`test-shards` は
-# 本家を checkout せず、`frontend-check` は DB を持たない。
+# 本家を checkout せず、`frontend` workflow は DB を持たない。
 #
 # **本家を取得するので、golden の追いつき (`make upstream-check`) もここで見る**
 # (#3378)。本家から golden を作り直して差分が無いことと、本家を読むテストが skip

@@ -4,7 +4,7 @@ PR を出すと十数個の check が走る。**どれが何を見ていて、�
 
 ## 全体像
 
-`build` / `test` / `lint` の 3 つだけが **required check** (これが赤いとマージできない)。
+`build` / `test` / `lint` / `frontend` の 4 つだけが **required check** (これが赤いとマージできない)。
 残りは非ブロッキングで、落ちても merge 自体は可能。ただし非ブロッキングは「無視してよい」
 意味ではなく、**merge をブロックするには不確実性が高い**という判断にすぎない。赤いまま
 放置すると誰も見なくなるので、原因を切り分けてから進めること。
@@ -17,9 +17,10 @@ PR を出すと十数個の check が走る。**どれが何を見ていて、�
 
 | check | workflow | 見ているもの | 手元での再現 |
 |---|---|---|---|
-| `build` | CI | 全パッケージがコンパイルできるか + 同梱プラグインの `go vet` + 同梱サンプルが既定無効か | `go build ./...` / `make plugin-vet` |
+| `build` | CI | 全パッケージがコンパイルできるか + 同梱プラグインの `go vet` + 同梱サンプルが既定無効か + 同梱サンプル入りの統合バイナリ (`make plugins-all && go build ./cmd/misskey`、#2495) | `go build ./...` / `make plugin-vet` / `make plugins-all && go build -o /dev/null ./cmd/misskey` |
 | `lint` | CI | `go vet` + **actionlint** + `gofmt -s -d` の差分 + 重複 fixture ID + **golangci-lint** | `make lint` / `make actionlint` / `make fmt` / `make golangci-lint` |
 | `test` | CI | 4-way shard の集約。どれか 1 つでも落ちれば赤 | `make test` |
+| `frontend` | frontend | `frontend-lint` (9 workspace の eslint、typecheck、check-dts、SPDX ヘッダー、locale、misskey-js の API レポート、`emoji-regex-check`) と `frontend-test` (本番設定のビルド、frontend の vitest、misskey-js のテスト) の集約。frontend に関係しない差分では両方を skip して成功する | 下の「`frontend` が落ちたとき」 |
 
 ### `test` が落ちたとき
 
@@ -101,8 +102,6 @@ PR を出すと十数個の check が走る。**どれが何を見ていて、�
 | `vulncheck` | CI | 依存・Go stdlib の**到達可能な**既知脆弱性 + Go version の pin 整合 | 1 min | `GOOS=linux govulncheck ./...` |
 | `review` | Dependency review | PR が**新しく持ち込む**依存に既知の脆弱性が無いか (base と head の差分を比較、high 以上で失敗) | 未計測 | 手元では回せない (GitHub の advisory DB を引く) |
 | `analyze (go)` / `analyze (actions)` | CodeQL | **自分のコード**の静的解析 (Go の全 module と workflow の式) | 未計測 | 手元では回せない (CodeQL CLI が要る)。Code scanning alerts で見る |
-| `frontend-check` | CI | `frontend/` の型 (`vue-tsc --noEmit`) + `frontend/` のソースを読むゲート + `emoji-regex-check` + eslint (`src/**/*.{ts,vue}`) + vitest + `make plugins-all` と統合バイナリの build | 3〜4 min | 下の「frontend-check の手元再現」。**`make frontend-check` は型・ゲート・eslint まで** (#2906) |
-| `frontend` | frontend | `frontend-lint` (9 workspace の eslint、typecheck、check-dts、SPDX ヘッダー、locale、misskey-js の API レポート) と `frontend-test` (本番設定のビルド、frontend の vitest、misskey-js のテスト) の集約。paths で `frontend/**` などに絞る。#3379 の P4e で required にする予定 | 未計測 | `cd frontend && pnpm install && pnpm build` の後、`.github/workflows/frontend.yml` の各 step |
 | `plugin-tests` | CI | 同梱プラグインのテスト (別 module なので `go list ./...` に入らない) | 1 min | `make plugin-test` |
 | `apicompat` | apicompat | **`docs/api-compat.md` が実態とずれていないか** (生成物なので再生成して diff を見る)。あわせて golden が本家の版に追いついているか (`make upstream-check`、#3378) | 未計測 | `make apicompat` (**プラグイン抜き + testMode が要る**。手順は docs/development.md) |
 | `e2e (1/4)` 〜 `4/4` | Upstream backend e2e | **本家の backend e2e 1256 テスト**が mk-go に対して通るか | 3-7 min | `make upstream-e2e` |
@@ -269,22 +268,31 @@ package load エラーで解析が空振りしうる。**ローカルの `go` �
 同梱プラグイン (`plugins/*/go.mod`) のビルドが壊れている。こちらは `build` job と
 `plugin-tests` job でも落ちるはずなので、そちらを先に見る。
 
-### `frontend-check` が落ちたとき
+### `frontend` が落ちたとき
 
-`frontend/` (#3379 で本体へ取り込んだ fork frontend) の型・eslint・vitest のいずれか、
-`frontend/` のソースを読むゲート (#2892)、または `emoji-regex-check` の失敗。型・ゲート・eslint は
-`make frontend-check` で再現する (#2906)。**vitest はそこに入っていない**
-(`make frontend-test`)。
+`frontend` は集約 job なので、**落ちた `frontend-lint` / `frontend-test` のログ**を見る。
+`changes` が落ちたときも赤になる (判定できないまま緑にしないため)。
 
-**手元再現（CI job 全体）:**
+- `frontend-lint`: 9 workspace の eslint、typecheck (frontend は `vue-tsc --noEmit`、ほかに sw / misskey-js)、
+  check-dts とその self test、SPDX ヘッダー、locale の検証、misskey-js の API レポート、
+  `emoji-regex-check` (#3324) のいずれか
+- `frontend-test`: 本番設定のビルド、frontend の vitest、misskey-js のテストのいずれか
+
+`frontend/` のソースを読むゲート (`internal/server/*_gate_test.go`、#2892) はこの workflow ではなく
+required の `test` で走る。
+
+**手元再現:**
 
 `make plugins-all` を workspace のビルドより先に回す。frontend が import する
 `frontend/packages/frontend/src/server-plugins.generated.ts` は追跡しておらず (#3379)、
-無いとビルドが import で落ちる。
+無いとビルドが import で落ちる。`make frontend-check` は frontend の型・ゲート・
+`emoji-regex-check`・frontend の eslint までを手元でまとめて回す target (CI の job ではない)。
+**vitest はそこに入っていない** (`make frontend-test`)。ほかの workspace の eslint や check-dts などは
+`.github/workflows/frontend.yml` の各 step をそのまま叩く。
 
 ```bash
 make plugins-all
-cd frontend && pnpm install --frozen-lockfile && pnpm build-pre && pnpm -r build && cd ..
+cd frontend && pnpm install --frozen-lockfile && pnpm build && cd ..
 go build -o /dev/null ./cmd/misskey
 make frontend-check
 make frontend-test
@@ -292,7 +300,7 @@ make frontend-test
 
 **本番を動かしているチェックアウトでは `pnpm -r build` / `pnpm build` を流さないこと。** frontend 自身のビルドが `frontend/built` を消してから作り直すので、そこを bind mount している本番が 404 になる (#3379 の切り替え後)。手元の検証は別の worktree で行う。
 
-eslint だけを回すなら `make frontend-lint` (実測 55 秒)。
+eslint (frontend だけ) を回すなら `make frontend-lint` (実測 55 秒)。
 
 **`emoji-regex-check` が落ちたとき (#3324):** MFM の Unicode 絵文字の正規表現 (`internal/activitypub/mfm/emoji_regex_gen.go`) が、`frontend/` に pnpm install した mfm-js / emoji-data と食い違っている。`… is stale` なら mfm-js か emoji-data の版が上がったので、作り直して差分ごとコミットする。生成ツールが `no longer contains` や構文のエラーで落ちたら、mfm-js の `unicodeEmoji` の書き方か正規表現の構文が変わっているので、生成ツール (`tools/emojiregex/`) を直す。
 
@@ -524,8 +532,8 @@ checkout / setup-go を除くと step は実行順に 4 つ。**required job な
 - **見るのは `go` と `actions` の 2 つだけ。** `frontend/` の外にある .ts/.js/.vue は実測
   340 ファイルで大半が `tests/playwright/specs/**` (うち 189 は upstream 由来の UI spec)、
   Python も `tests/` の検証基盤なので、`javascript-typescript` / `python` は入れない。
-  `frontend/` (#3379 で取り込んだ fork frontend) も今は対象外。大半は upstream のコードで、
-  入れるかは frontend の CI を required にする段階 (#3379 の P4e) で決める。
+  `frontend/` (#3379 で取り込んだ fork frontend) も引き続き対象外。大半は upstream のコードで、
+  frontend の CI を required にした段階 (#3379 の P4e) でも入れず、判断は後の issue に送った。
 - **autobuild を使わない。** 同梱プラグイン (`plugins/*/go.mod`) は別 module で
   `go build ./...` に含まれないため、`git ls-files` で列挙して個別にビルドする
   (`plugin-tests` job が独立しているのと同じ理由)。`go.work` は gitignore 済みなので
@@ -646,7 +654,7 @@ checkout / setup-go を除くと step は実行順に 4 つ。**required job な
   マトリクスは黙って古くなる。読む人は「mk-go only 59 件」のような数字を現状だと思う。
 - **既存のどの job にも相乗りできない。** 本家 (TS の endpoints を読む) と DB / Redis
   (route dump がサーバーを組み立てる) の両方が要るが、`test-shards` は本家を checkout せず、
-  `frontend-check` は DB を持たない。本家を取得するので、golden の追いつき
+  `frontend` workflow は DB を持たない。本家を取得するので、golden の追いつき
   (`make upstream-check`) もこの workflow で見る (#3378)。
 - **config は `tests/upstream-e2e/mkgo.yml`。** `testMode: true` が要る — 無いと
   `/api/reset-db` が route に載らず、マトリクスが「TS 側に存在するが未実装 1 件」に化ける。
@@ -657,39 +665,50 @@ checkout / setup-go を除くと step は実行順に 4 つ。**required job な
 - PR の required check には**含めない**。判定材料に本家の内容が入るので、こちらの
   コードを触っていない PR でも upstream の bump で赤くなりうる。
 
-#### `frontend-check` job (ci.yml)
-
-- `frontend/` (#3379 で本体へ取り込んだ fork frontend) を `vue-tsc --noEmit` で型チェックする。
-  1.0 以降 fork frontend は mk-go 独自に進化させる方針なので、型崩れの検出手段が要る。
-- 手順は checkout (submodule 無し) → `frontend/package.json` から pnpm を用意 → setup-go →
-  `make plugins-all` → `frontend/` で `pnpm install --frozen-lockfile` と
-  `pnpm build-pre && pnpm -r build` → `go build ./cmd/misskey` → `make frontend-check` →
-  eslint → vitest。**`make plugins-all` は workspace のビルドより先に回す** —
-  `frontend/packages/frontend/src/server-plugins.generated.ts` は追跡しておらず (#3379)、
-  無いとビルドが import で落ちる。
-- **`frontend/` のソースを読むゲート** (`internal/server/*_gate_test.go`、#2892) は
-  `make frontend-check` でも回るが、本体は required の `test` (`test-shards`) で走る。
-  `frontend/` を本体で追跡するようになったので、読めなければ skip せずに落ちる
-  (#3379 より前は submodule を checkout しない `test-shards` で skip し、この job だけが
-  `MK_FRONTEND_GATES_REQUIRE_SUBMODULE` で skip を禁じていた。この環境変数はもう無い)。
-- `emoji-regex-check` はこの job (`make frontend-check`) でだけ回る。`frontend/` の
-  node_modules が要るので **`make gates` には入れない**。
-- `make uds-frontend-build` / `e2e-frontend-build` は本番が bind-mount している
-  (または切り替え後に bind-mount する) `frontend/built` を書き換えるため**検証には使えない**。
-- required check (build / test / lint) には**含めない**。frontend の required check は
-  `frontend` workflow の集約 job `frontend` で、#3379 の P4e で required にする。
-
 #### `frontend` workflow (frontend.yml)
 
 - `.github/workflows/frontend.yml`。本家 (fork) が回していた workflow のうち frontend に
-  関わるものを移した (#3379)。`frontend-lint` (9 workspace の eslint、frontend / sw /
-  misskey-js の typecheck、check-dts、SPDX ヘッダー、locale の検証、misskey-js の API
-  レポート) と `frontend-test` (本番設定でのビルド、frontend の vitest、misskey-js の
-  テスト) を、集約 job `frontend` が束ねる (`test` と同じ形で、required にするときは
-  この名前だけを branch protection に入れる)。
-- 発火は `frontend/**`・`plugins/**`・`plugin/**`・`tools/pluginbuild/**` と workflow
-  自身を触った PR と develop への push、および `workflow_dispatch`。
-- **今は required にしていない** (#3379 の P4e で required にする)。
+  関わるものを移した (#3379)。1.0 以降 fork frontend は mk-go 独自に進化させる方針なので、
+  型崩れやビルドの崩れの検出手段が要る。以前は `ci.yml` の `frontend-check` job が
+  型・eslint・vitest などを見ていたが、#3379 の P4e でこの workflow へ寄せて job を消した
+  (`make frontend-check` は手元用の target として残っている)。
+- job は 4 つ。
+  - `changes`: 毎回動き、`git diff --name-only <base> HEAD` で frontend に関係する変更が
+    あるかを判定する。対象は `frontend/`・`plugins/`・`plugin/`・`tools/pluginbuild/`・
+    `tools/emojiregex/`・`internal/activitypub/mfm/emoji_regex_gen.go`・workflow 自身・
+    `Makefile`・`go.mod` / `go.sum`。リネームは移動元と移動先の両方を見る
+    (`--no-renames`)。手動実行と、比べる先が無い push (ブランチの作成など) は
+    関係ありとして扱う。**迷ったら関係ありに倒す** — 誤って
+    関係なしにすると、frontend を壊す PR が required を緑のまま通る。パスの一覧は
+    `internal/entitycompat` の `frontend_changes_test` が実際の git の差分で確かめている
+  - `frontend-lint`: `make plugins-all` → `pnpm i --frozen-lockfile` → `pnpm build` →
+    9 workspace の eslint、typecheck (frontend / sw / misskey-js。frontend は `vue-tsc --noEmit`)、
+    check-dts とその self test、SPDX ヘッダー、locale の検証、misskey-js の API レポート、
+    `make emoji-regex-check` (#3324)。同梱サンプル入りの統合バイナリの build (#2495) は、
+    Node が要らないので毎回走る required の `build` job に置いた (Go だけの変更で
+    `cmd/misskey` 側の配線が崩れても拾えるように)
+  - `frontend-test`: `make plugins-all` → `pnpm i --frozen-lockfile` → 本番設定のビルド →
+    frontend の vitest、misskey-js のテスト
+  - `frontend`: 集約 job (`if: always()`)。`changes` が関係なしと判定したら (lint と test は
+    skipped) 成功し、関係ありなら両方の success を要求する。`changes` 自体が落ちたら落ちる
+- **required check はこの集約 job `frontend` だけ** (`test` と同じ形。job を足しても
+  branch protection を触らずに済む)。
+- **paths で絞らず、毎回起動する。** required check は、workflow が起動しないと
+  「結果待ち」のまま PR をマージできなくする。関係するかの判定は `changes` が受け持つ。
+- **`make plugins-all` は workspace のビルドより先に回す** —
+  `frontend/packages/frontend/src/server-plugins.generated.ts` は追跡しておらず (#3379)、
+  無いとビルドが import で落ちる。typecheck・check-dts・API レポート・テストは workspace の
+  各パッケージの `built/` を読むので、ビルドも先に行う。
+- **`frontend/` のソースを読むゲート** (`internal/server/*_gate_test.go`、#2892) は
+  この workflow ではなく required の `test` (`test-shards`) で走る (`make frontend-check` でも回る)。
+  `frontend/` を本体で追跡するようになったので、読めなければ skip せずに落ちる
+  (#3379 より前は submodule を checkout しない `test-shards` で skip し、`ci.yml` の
+  `frontend-check` job だけが `MK_FRONTEND_GATES_REQUIRE_SUBMODULE` で skip を禁じていた。
+  この環境変数はもう無い)。
+- `emoji-regex-check` は `frontend-lint` (と手元の `make frontend-check`) でだけ回る。
+  `frontend/` の node_modules が要るので **`make gates` には入れない**。
+- `make uds-frontend-build` / `e2e-frontend-build` は本番が bind-mount している
+  (または切り替え後に bind-mount する) `frontend/built` を書き換えるため**検証には使えない**。
 
 #### `build-with-plugins` workflow (reusable) / `build-with-plugins-selftest` (PR トリガー)
 
