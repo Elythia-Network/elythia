@@ -260,6 +260,21 @@ func (h *Handler) Handle(c echo.Context) error {
 		if errors.Is(err, mediaproxy.ErrTooLarge) {
 			return c.NoContent(http.StatusRequestEntityTooLarge)
 		}
+		// **原因をログに残す (#3383)。** status だけでは区別できず、本番の 500 の
+		// 原因を確かめられなかった。ここに来るのは、取得の失敗 (502 / 504)・不正な
+		// URL (400)・404・大きすぎる (413) のどれでもないもの。主にリモートが
+		// 404 / 410 以外の非 2xx (401 / 403 / 429 / 5xx) を返したとき
+		// (`remote returned %d`)、表示できない MIME が来たとき、ストレージの障害。
+		// 画像の変換の失敗は原本かダミーを返すので、ここには来ない。許可確認の
+		// DB 障害は 503 で別に返る。
+		//
+		// **未認証の利用者がこのログを生成できる。** allowlist 済みの URL の相手が
+		// 常に 403 を返せば 1 リクエスト 1 行になる。shed / blocked target と同じく、
+		// 1 リクエスト 1 行でローテーションは #2828 で効いているので Warn で残す。
+		// リモートの 403 が常態的に多いと分かったら、`remote returned` だけ Info に
+		// 下げるかサンプリングを検討する。url は shed / blocked と同じ値 (sig は
+		// 別のパラメータなので含まれない)。
+		slog.Warn("mediaproxy: proxy failed", "url", rawURL, "mode", mode.String(), "err", err)
 		if c.QueryParam("fallback") != "" {
 			return h.serveFallback(c)
 		}
