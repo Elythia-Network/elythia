@@ -46,8 +46,8 @@ var (
 	divergenceHeadingRe = regexp.MustCompile(`^### (\d+-\d+)\. .*?\((\d+)`)
 	// §2-2 の見出しは `(23 = 実使用 20 + 未使用の残存 3)`。
 	divergenceBreakdownRe = regexp.MustCompile(`\((\d+) = 実使用 (\d+) \+ 未使用の残存 (\d+)\)`)
-	// §2-2 の直後の散文は `実際に読み書きするのは 20 件** (cherrypick 由来 3 + mk-go 独自 17)`。
-	divergenceProseRe = regexp.MustCompile(`読み書きするのは (\d+) 件\*\* \(cherrypick 由来 (\d+) \+ mk-go 独自 (\d+)\)`)
+	// §2-2 の直後の散文は `実際に読み書きするのは 20 件** (cherrypick 由来 3 + Elythia 独自 17)`。
+	divergenceProseRe = regexp.MustCompile(`読み書きするのは (\d+) 件\*\* \(cherrypick 由来 (\d+) \+ Elythia 独自 (\d+)\)`)
 	// サマリ表の `| DB テーブル | 10 (+ bookkeeping 2) | ...`。
 	summaryTableRe = regexp.MustCompile(`^\| DB テーブル \| (\d+) \(\+ bookkeeping (\d+)\)`)
 	// サマリ表の `| DB カラム | 17 (+ 未使用の残存列 3) | 3 |`。
@@ -205,7 +205,7 @@ func TestDivergenceDoc_ColumnCountMatchesSchema(t *testing.T) {
 
 	pm := divergenceProseRe.FindStringSubmatch(section)
 	if pm == nil {
-		t.Fatal("§2-2 の散文が `読み書きするのは N 件** (cherrypick 由来 A + mk-go 独自 B)` の形でない")
+		t.Fatal("§2-2 の散文が `読み書きするのは N 件** (cherrypick 由来 A + Elythia 独自 B)` の形でない")
 	}
 	proseInUse, cherrypick, mkOwn := atoi(t, pm[1]), atoi(t, pm[2]), atoi(t, pm[3])
 	if proseInUse != inUse {

@@ -17,7 +17,7 @@ plugin loaded name=status version=1.0.0 routes=true jobs=true migrations=1 schem
 
 - `PLUGIN=` を省くと `plugins/` 全体を監視する
 - `-config` で設定ファイルを変えられる（既定は `.config/default.yml`）。**ただし `make plugin-dev` は追加引数を転送しない**ので、渡すなら `go run ./tools/plugindev` を直接叩く（後述）
-- 監視対象は**指定したディレクトリだけ**。mk-go 本体を触っている間に再起動し続けることはない
+- 監視対象は**指定したディレクトリだけ**。Elythia 本体を触っている間に再起動し続けることはない
 - `MK_DEV=1` が自動で立つので、ビルド済みのフロントが残っていても Vite dev server を見に行く
 
 **開発用の設定ファイルを別に用意することを勧める。** 本番と同じ設定を使うと、本番の DB に接続してしまう。
@@ -37,7 +37,7 @@ GOWORK=off go run ./tools/plugindev -plugin plugins/status -config .config/dev.y
 cd frontend/packages/frontend && pnpm watch
 ```
 
-`make plugin-dev` 側が `MK_DEV=1` を立てているので、mk-go は `/vite/*` をここへ流す。プラグインの `.vue` / `.ts` を編集すると HMR が効く。
+`make plugin-dev` 側が `MK_DEV=1` を立てているので、Elythia は `/vite/*` をここへ流す。プラグインの `.vue` / `.ts` を編集すると HMR が効く。
 
 プラグインのソースは `packages/frontend` の外にあるが、`mk-plugins.generated.json` の `allow` に `plugins/` が入るので dev server が配信できる（生成は `make plugins` か `make plugin-dev` が行う）。同じく生成物の `server-plugins.generated.ts` は git で追跡していないので、dev server を立てる前に一度 `make plugins` か `make plugin-dev` を実行しておく。
 
@@ -85,7 +85,7 @@ docker run --rm -it -v "$(pwd)":/work -w /work/frontend/packages/frontend \
 
 **フロントを再ビルドしたのに変わらない**
 
-mk-go は起動時に一度だけ manifest を読む。**ビルド後は必ず再起動する。** ブラウザ側の Service Worker も掴んでいることがあるのでハードリロードする。
+Elythia は起動時に一度だけ manifest を読む。**ビルド後は必ず再起動する。** ブラウザ側の Service Worker も掴んでいることがあるのでハードリロードする。
 
 **プラグインを消したらビルドが落ちる**
 

@@ -123,7 +123,7 @@ func destructiveMigrationRows(t *testing.T) []string {
 	body, err := os.ReadFile(filepath.Join(repoRoot(t), "docs/migration-from-ts.md"))
 	require.NoError(t, err)
 	// **見出しが取れなかったら落とす。** 全文へフォールバックすると
-	// `#### mk-go 内での切り戻し` 配下の第 2 の表まで拾って 10 → 14 になり、
+	// `#### Elythia 内での切り戻し` 配下の第 2 の表まで拾って 10 → 14 になり、
 	// 「14 に直せ」と読めるメッセージが出る (実測)。
 	i := strings.Index(string(body), "### 破壊的なマイグレーション")
 	require.GreaterOrEqual(t, i, 0,
@@ -198,7 +198,7 @@ var tsAffectingDestructivePattern = regexp.MustCompile("残る (\\d+) 件 \\(((?
 // 機械判定できない (`000081` は条件付きの DELETE、`000084` は入っている値が列
 // DEFAULT のままかどうかで意味が変わる)。一覧は 1 行に列挙されているので拾える。
 //
-// これがあることで「うち N 件は mk-go 側だけが作るもの」を offset ではなく
+// これがあることで「うち N 件は Elythia 側だけが作るもの」を offset ではなく
 // **引き算の結果**として検証できる。#2700 で 2 件目 (`000084`) が出たときに
 // offset `-1` を `-2` へ動かす誘惑があったが、それは「正しい数字を書いた人に
 // 誤った数字へ直させる」方向に効くので、数え方のほうを直した。
@@ -210,7 +210,7 @@ func tsAffectingDestructiveMigrations(t *testing.T) []string {
 	m := tsAffectingDestructivePattern.FindSubmatch(body)
 	require.NotNil(t, m, "docs/migration-from-ts.md で TS が書いた値に当たる migration の一覧が拾えない。"+
 		"**書式を変えたならこの gate の正規表現も直すこと** — 拾えないまま放置すると、"+
-		"「うち N 件は mk-go 側だけが作るもの」が検査されないまま緑になる")
+		"「うち N 件は Elythia 側だけが作るもの」が検査されないまま緑になる")
 
 	listed := regexp.MustCompile(`\d{6}`).FindAllString(string(m[2]), -1)
 	stated, err := strconv.Atoi(string(m[1]))
@@ -253,11 +253,11 @@ var migrationCountClaims = []struct {
 
 	{"docs/migration-from-ts.md", `共有テーブルにも触るものが (\d+) 件あるので`, "destructive", 0, "破壊的なマイグレーションの件数 (導入部)"},
 	{"docs/migration-from-ts.md", `共有テーブルに触るものが (\d+) 件ある`, "destructive", 0, "破壊的なマイグレーションの件数 (本文)"},
-	{"docs/migration-from-ts.md", `\*\*うち (\d+) 件は mk-go 側だけが作るもの`, "destructive_mkgo", 0, "破壊的なうち mk-go 由来のもの"},
+	{"docs/migration-from-ts.md", `\*\*うち (\d+) 件は Elythia 側だけが作るもの`, "destructive_mkgo", 0, "破壊的なうち mk-go 由来のもの"},
 	{"docs/migration-from-ts.md", `破壊的なマイグレーション\]\(#破壊的なマイグレーション\) の (\d+) 件は戻らない`, "destructive", 0, "破壊的なマイグレーションの件数 (切り戻し節)"},
-	{"docs/migration-from-ts.md", `うち (\d+) 件は mk-go が自分で作ったものの除去`, "destructive_mkgo", 0, "破壊的なうち mk-go 由来のもの"},
+	{"docs/migration-from-ts.md", `うち (\d+) 件は Elythia が自分で作ったものの除去`, "destructive_mkgo", 0, "破壊的なうち mk-go 由来のもの"},
 	{"docs/architecture.md", `例外が (\d+) 件あり`, "destructive", 0, "破壊的なマイグレーションの件数"},
-	{"docs/architecture.md", `うち (\d+) 件は mk-go が自分で作ったものの除去`, "destructive_mkgo", 0, "破壊的なうち mk-go 由来のもの"},
+	{"docs/architecture.md", `うち (\d+) 件は Elythia が自分で作ったものの除去`, "destructive_mkgo", 0, "破壊的なうち mk-go 由来のもの"},
 	{"docs/deployment.md", `原則追加のみだが、例外が (\d+) 件ある`, "destructive", 0, "破壊的なマイグレーションの件数"},
 	{"docs/api-compatibility.md", `原則追加のみだが、例外が (\d+) 件ある`, "destructive", 0, "破壊的なマイグレーションの件数"},
 	{"tests/dropin/compose.mk.yml", `原則追加のみ。例外は (\d+) 件`, "destructive", 0, "破壊的なマイグレーションの件数"},

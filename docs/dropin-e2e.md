@@ -1,6 +1,6 @@
 # Drop-in e2e テスト (#364, Phase 13-1〜)
 
-Misskey TS から mk-go への **drop-in 切替互換** を自動検証する e2e テスト基盤。
+Misskey TS から Elythia への **drop-in 切替互換** を自動検証する e2e テスト基盤。
 #362 で露呈した Redis キー名前空間違い / HTML→MFM 変換の取りこぼしのような
 互換ギャップを、手動テストに頼らず CI / on-demand で再発検知することを目的とする。
 
@@ -10,30 +10,30 @@ Misskey TS から mk-go への **drop-in 切替互換** を自動検証する e2
 tests/dropin/
   gen-certs.sh                    # 自己署名証明書 (a, b 用)
   instance_a.yml / instance_b.yml # Misskey TS 設定
-  instance_a_mk.yml               # mk-A に差し替えたときの mk-go 設定
+  instance_a_mk.yml               # mk-A に差し替えたときの Elythia 設定
   nginx_a.conf / nginx_b.conf     # SSL 前段
   conftest.py                     # pytest fixtures (tests/federation/common/ の Client を再利用)
   test_smoke.py                   # federation smoke
-  run-swap-test.sh                # TS → mk-go → TS の orchestrator
-  run-mkgo-born-test.sh           # mk-go 生まれの DB を TS に引き渡す orchestrator
+  run-swap-test.sh                # TS → Elythia → TS の orchestrator
+  run-mkgo-born-test.sh           # Elythia 生まれの DB を TS に引き渡す orchestrator
   run-fedibird-test.sh            # Ed25519 双方向 verify の orchestrator
   test_swap_setup.py              # swap 前の seed
-  test_swap_seed_mkgo_only.py     # mk-go 独自機能の残留データを作る
+  test_swap_seed_mkgo_only.py     # Elythia 独自機能の残留データを作る
   test_swap_seed_ed25519_peer.py  # Ed25519 peer の seed
   test_swap_verify.py             # mk-A 上での state 引き継ぎ検証
   test_swap_roundtrip_verify.py   # TS-A へ戻したあとの検証
-  test_mkgo_born_verify.py        # mk-go 生まれ DB を受けた TS の検証
+  test_mkgo_born_verify.py        # Elythia 生まれ DB を受けた TS の検証
   test_fedibird_ed25519.py        # Fedibird-like mock との verify
   fedibird_mock/                  # Ed25519 を expose する AP mock
 
 tests/dropin/compose.yml            # TS-A / TS-B stack
-tests/dropin/compose.mk.yml         # instance A を mk-go に差し替える overlay
+tests/dropin/compose.mk.yml         # instance A を Elythia に差し替える overlay
 tests/dropin/compose.fedibird.yml   # fedibird-like mock の overlay
 ```
 
 ### なぜ共通 harness が `tests/federation/common/` にあるのか
 
-mk-go は既に `tests/federation/` で mk-go ↔ Misskey TS 連合テストを持っており、
+Elythia は既に `tests/federation/` で Elythia ↔ Misskey TS 連合テストを持っており、
 そこに `MisskeyLikeClient` (httpx ベース) が整備済である。drop-in テストは
 さらに TS ↔ TS (後続フェーズで TS ↔ mk) に広げるだけなので client は共有する。
 
@@ -58,14 +58,14 @@ make dropin-logs
 ## Phase 進捗
 
 - [x] Phase 13-1 (#365): TS ↔ TS 基盤 + smoke test
-- [x] Phase 13-2 (#367): mk-go 差し替え overlay + swap シナリオ test
+- [x] Phase 13-2 (#367): Elythia 差し替え overlay + swap シナリオ test
 - [x] Phase 13-3 (#372): 機能マトリクス拡充 (visibility 種別 / userList / specified DM)
 - [x] Phase 13-4 (#374): GitHub Actions 統合 (当時は nightly。#2291 で PR トリガーへ移行)
 
-## Phase 13-2: mk-go 差し替え (drop-in swap)
+## Phase 13-2: Elythia 差し替え (drop-in swap)
 
 `tests/dropin/compose.mk.yml` overlay と bash orchestrator
-(`tests/dropin/run-swap-test.sh`) で「TS-A backend を mk-go に差し替えても DB /
+(`tests/dropin/run-swap-test.sh`) で「TS-A backend を Elythia に差し替えても DB /
 Redis 上の state がそのまま引き継がれる」ことを e2e で検証する。
 
 ### 通常実行
@@ -78,7 +78,7 @@ make dropin-swap-test
 #   1.  TS-A + TS-B stack (+ fedibird mock) 起動 → healthy 待ち
 #   2.  pytest test_swap_setup.py   (alice/bob/follow/baseline note)
 #   3.  docker compose stop app-a   (TS-A backend 停止、DB / Redis は維持)
-#   4.  overlay で app-a を mk-go ビルドに差し替えて起動
+#   4.  overlay で app-a を Elythia ビルドに差し替えて起動
 #   5.  mk-A healthy 待ち → nginx-a を再起動して upstream を張り替え
 #   6.  pytest test_swap_verify.py  (timeline 残存、新規 reply / reaction の連合)
 #   6b. pytest test_swap_seed_{mkgo_only,ed25519_peer}.py (残留データと peer を作る)
@@ -92,7 +92,7 @@ make dropin-swap-test
 **復路 (stage 7-9) まで含めて 1 本のシナリオだが、守る対象は往路 (stage 1-6、6b を除く) だけ。**
 TS へ戻せることは保証しない (#3191) ので、stage 6b-9 は今どこまで戻れるかを**測る**
 段階として扱う ([復路は測る対象](#復路は測る対象-3191))。stage 6b は復路の準備なので測る側に入る。
-stage 6b で mk-go 独自機能の行をわざと残し、TS がそれを持ったまま起動・pack できるかを stage 9 で確かめる (#2372)。
+stage 6b で Elythia 独自機能の行をわざと残し、TS がそれを持ったまま起動・pack できるかを stage 9 で確かめる (#2372)。
 
 ### 手動運用 (デバッグ向け)
 
@@ -136,7 +136,7 @@ xfail マーカーは 1 つも無く、すべて通常のアサートとして�
 | TS へ戻すと actor が `assertionMethod` を出さなくなる | `test_roundtrip_alice_actor_no_longer_exposes_assertion_method` |
 | TS-A から投稿して bob が受け取れる | `test_roundtrip_alice_can_post_and_bob_receives` |
 | bob が TS-A の note にリアクションできる | `test_roundtrip_bob_can_react_to_alice_note` |
-| mk-go 独自の chat / reversi 行が残っていても TS が動く | `test_roundtrip_ts_survives_remote_{chat,reversi}_rows` |
+| Elythia 独自の chat / reversi 行が残っていても TS が動く | `test_roundtrip_ts_survives_remote_{chat,reversi}_rows` |
 | TS が alice の timeline を pack できる | `test_roundtrip_ts_can_still_pack_alice_timeline` |
 | RSA へ戻した相手と mock が配送できる | `test_roundtrip_mock_can_still_deliver_with_rsa` |
 | TS が Ed25519 peer を pack できる | `test_roundtrip_ts_can_pack_ed25519_peer` |
@@ -173,8 +173,8 @@ compose 内で pull を再試行するか `docker pull misskey/misskey:2026.10.0
 
 | check 名 | make target | 見ているもの |
 |---|---|---|
-| `swap-test` | `dropin-swap-test` | TS→mk-go 切替で state が保たれるか (往路)。TS へ戻す stage 6b-9 は測る対象 |
-| `mkgo-born` | `dropin-mkgo-born-test` | mk-go 生まれの DB を TS に引き渡せるか (測る対象) |
+| `swap-test` | `dropin-swap-test` | TS→Elythia 切替で state が保たれるか (往路)。TS へ戻す stage 6b-9 は測る対象 |
+| `mkgo-born` | `dropin-mkgo-born-test` | Elythia 生まれの DB を TS に引き渡せるか (測る対象) |
 | `ed25519-verify` | `dropin-fedibird-test` | Fedibird-like mock との Ed25519 双方向 verify |
 | `federation` | `federation-misskey-e2e` | 本物の Misskey TS との実連合 |
 | `federation-mastodon` | `federation-mastodon-e2e` | 本物の Mastodon との引用の承認 (FEP-044f) |
@@ -210,17 +210,17 @@ PR の required check には**入れない**。理由:
 
 |  | DB を作ったのは | 経路 |
 |---|---|---|
-| `swap-test` | TypeORM | TS → mk-go → TS |
-| `mkgo-born` | **mk-go の migration** | mk-go → TS |
+| `swap-test` | TypeORM | TS → Elythia → TS |
+| `mkgo-born` | **Elythia の migration** | Elythia → TS |
 
 後者の方が厳しい。TS は一度も触っていない schema を受け取るので、カラム型・制約・
 enum・index 名・default のどれかが TypeORM の期待とずれていれば起動しない。
 `TestMigrationSeed_CoversUpstream` は seed 一覧と upstream migration file の
 **静的な突き合わせ**に過ぎず、実際に TS を起動して確かめてはいない。
 
-「mk-go で始めた人が Misskey に移れるか」に答えられるのはこの経路だけ。移れることは
+「Elythia で始めた人が Misskey に移れるか」に答えられるのはこの経路だけ。移れることは
 保証しない (#3191) が、どこまで移れるかを測る唯一の手段として残している。実際この経路の初回実行で、RSA 秘密鍵が
-PKCS#1 のため TS 側の送信連合が全滅する不具合が見つかっている (#2380)。mk-go の
+PKCS#1 のため TS 側の送信連合が全滅する不具合が見つかっている (#2380)。Elythia の
 `ParseRSAPrivateKey` は PKCS#1 / PKCS#8 の両方を読めるため、**コードを読む限りでは
 何も問題が無いように見える**類のバグだった。
 
@@ -228,7 +228,7 @@ PKCS#1 のため TS 側の送信連合が全滅する不具合が見つかって
 
 | 落ちた段階 | 意味 |
 |---|---|
-| stage 4b (TS-A healthy 待ちで timeout) | mk-go の migration が作った schema を TypeORM が受け付けなかった |
+| stage 4b (TS-A healthy 待ちで timeout) | Elythia の migration が作った schema を TypeORM が受け付けなかった |
 | stage 4d (migrations digest 不一致) | TypeORM の `migrations` seed に漏れがあり TS が再実行した。追加する場所は **`000067`** (`ClassName + timestamp` 形式)。`000029` は短縮形で seed した初版で、`000067` がそれを本家と同じ形へ書き換えている |
 | stage 5 (pytest) | schema は通ったがデータを読めない / 連合が続かない |
 
@@ -239,12 +239,12 @@ TS へ戻せること (復路) は保証しない。`mkgo-born` と `swap-test` 
 
 復路の検証が落ちたときの手順:
 
-1. **往路も落ちていないかを見る。** 次の段階が落ちているなら、それは mk-go 側の回帰なので
+1. **往路も落ちていないかを見る。** 次の段階が落ちているなら、それは Elythia 側の回帰なので
    直す。復路の段階だけが落ちているときに次へ進む
    - `swap-test` の stage 1-6 (6b を除く): TS の DB を引き継ぐ往路
-   - `mkgo-born` の stage 0-2: 空の DB から mk-go を起動してデータを作る段階で、TS は関わらない
-   - `swap-test` の stage 6b のうち、mk-go の API が 5xx を返した、または Ed25519 署名の Follow を
-     受理しなかったもの: 復路の準備の段階だが、見ているのは mk-go 自身の振る舞い
+   - `mkgo-born` の stage 0-2: 空の DB から Elythia を起動してデータを作る段階で、TS は関わらない
+   - `swap-test` の stage 6b のうち、Elythia の API が 5xx を返した、または Ed25519 署名の Follow を
+     受理しなかったもの: 復路の準備の段階だが、見ているのは Elythia 自身の振る舞い
 2. **原因が意図的な変更かを確かめる。** 意図していない変更 (seed の漏れ、型の取り違えなど)
    で落ちているなら、従来どおり直す。直す手間が小さいなら、戻れる範囲を広げておくのは
    構わない
@@ -259,6 +259,6 @@ TS へ戻せること (復路) は保証しない。`mkgo-born` と `swap-test` 
    に 1 行足す (版 / 落ちた段階 / TS へ戻したときに失われるもの、または起きること / PR)
 5. **PR の本文に書く。** 運営者向けの CHANGELOG の Note に載せるかは、リリースのときに決める
 
-`mkgo-born` が作るデータは `test_swap_setup.py` の分 (user・follow・公開範囲違いの note・リスト など) だけで、mk-go 独自の機能 (承認制の
+`mkgo-born` が作るデータは `test_swap_setup.py` の分 (user・follow・公開範囲違いの note・リスト など) だけで、Elythia 独自の機能 (承認制の
 申請、絵文字の申請など) の行は作っていない。測る範囲を広げる場合は、`swap-test` の
 `test_swap_seed_mkgo_only.py` と同じ形で seed を足す。

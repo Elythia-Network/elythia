@@ -1,11 +1,11 @@
 # docker-compose で動かす UDS-only スタック
 
-Phase 12-1 で入った UNIX domain socket (UDS) 対応を使って、mk-go の全コンポーネントを TCP 無しで動かす参照デプロイメントです。ブラウザ側には同梱フロントエンド (`frontend/`、Misskey の fork) の vite ビルド成果物を配信するので、`http://localhost/` を開けば Misskey の UI が出ます。
+Phase 12-1 で入った UNIX domain socket (UDS) 対応を使って、Elythia の全コンポーネントを TCP 無しで動かす参照デプロイメントです。ブラウザ側には同梱フロントエンド (`frontend/`、Misskey の fork) の vite ビルド成果物を配信するので、`http://localhost/` を開けば Misskey の UI が出ます。
 
 - nginx が受けるのは host の 80 番だけ (HTTP のみ)
-- nginx → mk-go は UDS (`/run/mkgo/mkgo.sock`)
-- mk-go → postgres は UDS (`/var/run/postgresql/.s.PGSQL.5432`)
-- mk-go → valkey は UDS (`/run/valkey/valkey.sock`、`port 0` で TCP 完全無効)
+- nginx → Elythia は UDS (`/run/mkgo/mkgo.sock`)
+- Elythia → postgres は UDS (`/var/run/postgresql/.s.PGSQL.5432`)
+- Elythia → valkey は UDS (`/run/valkey/valkey.sock`、`port 0` で TCP 完全無効)
 
 既存の `docker-compose.yml` (TCP 版 quick-start) とは別ファイル (`compose.uds.yaml`) として併存しているので、従来の `docker compose up -d` 体験は壊れません。
 
@@ -41,7 +41,7 @@ make uds-frontend-build
 - `frontend/built/_frontend_vite_/manifest.json`
 - `frontend/built/_frontend_dist_/`
 
-なお `pnpm install --frozen-lockfile` が `frontend/` の node_modules も生成するため、絵文字のアセットも同時に揃います。これらと、git で追跡しているアセットは `deploy/uds/Dockerfile.mkgo` が `COPY` で runtime image に焼き込み、mk-go の `/twemoji/*` / `/fluent-emoji/*` / `/assets/*` / `/static-assets/*` ルートから配信します。
+なお `pnpm install --frozen-lockfile` が `frontend/` の node_modules も生成するため、絵文字のアセットも同時に揃います。これらと、git で追跡しているアセットは `deploy/uds/Dockerfile.mkgo` が `COPY` で runtime image に焼き込み、Elythia の `/twemoji/*` / `/fluent-emoji/*` / `/assets/*` / `/static-assets/*` ルートから配信します。
 
 - `frontend/node_modules/@misskey-dev/emoji-assets/built/twemoji/` (twemoji SVG set。`pnpm install` で揃う)
 - `frontend/node_modules/@misskey-dev/emoji-assets/built/fluent-emoji/` (実績バッジ / 通知アイコン。`pnpm install` で揃う)
@@ -61,7 +61,7 @@ make uds-up
 1. `postgres` — `/var/run/postgresql/.s.PGSQL.5432` を作成
 2. `valkey` — `/run/valkey/valkey.sock` を作成 (TCP は `port 0` で無効)
 3. `mkgo` — マイグレーション実行後、`/run/mkgo/mkgo.sock` で HTTP listen
-4. `nginx` — host の 80 番で受けて mk-go の socket に proxy
+4. `nginx` — host の 80 番で受けて Elythia の socket に proxy
 
 ```sh
 make uds-ps
@@ -143,7 +143,7 @@ docker inspect mk-mkgo-1 --format '{{.HostConfig.LogConfig.Config}}'
 
 ### マイグレーションが失敗してコンテナが crash loop する
 
-`mkgo-entrypoint.sh` は `set -e` で migrate を実行してから mk-go server を起動します。migrate が失敗するとそのまま container exit し、`restart: unless-stopped` のため compose が再起動 → 同じエラーで再度 exit、というループに入ります。
+`mkgo-entrypoint.sh` は `set -e` で migrate を実行してから Elythia server を起動します。migrate が失敗するとそのまま container exit し、`restart: unless-stopped` のため compose が再起動 → 同じエラーで再度 exit、というループに入ります。
 
 検出方法:
 
@@ -162,11 +162,11 @@ docker compose -f compose.uds.yaml logs mkgo | tail -50  # mkgo だけ、過去�
 
 ### `/healthz` が 404 になる
 
-mk-go 側の実装変更で `/healthz` のパスが変わっている可能性があります。`internal/server/router.go` を grep して、存在するパスに合わせてください。**healthcheck を定義しているのは `compose.uds.yaml` の mkgo service** で、`deploy/uds/Dockerfile.mkgo` には `HEALTHCHECK` 命令はありません (Dockerfile がやっているのは curl の同梱だけ)。
+Elythia 側の実装変更で `/healthz` のパスが変わっている可能性があります。`internal/server/router.go` を grep して、存在するパスに合わせてください。**healthcheck を定義しているのは `compose.uds.yaml` の mkgo service** で、`deploy/uds/Dockerfile.mkgo` には `HEALTHCHECK` 命令はありません (Dockerfile がやっているのは curl の同梱だけ)。
 
 ### nginx が `connect() to unix:/run/mkgo/mkgo.sock failed (13: Permission denied)`
 
-`chmodSocket: "666"` が正しく反映されていません。`deploy/uds/config/default.yml` を確認してください。mk-go の起動ログは `starting Misskey server socket=<path> url=<url>` の形 (`[server] listening on unix:` という行は出ません)。実際のパーミッションは `ls -l` で直接見るのが確実です。
+`chmodSocket: "666"` が正しく反映されていません。`deploy/uds/config/default.yml` を確認してください。Elythia の起動ログは `starting Misskey server socket=<path> url=<url>` の形 (`[server] listening on unix:` という行は出ません)。実際のパーミッションは `ls -l` で直接見るのが確実です。
 
 ### valkey への接続が `resource temporarily unavailable` で失敗する
 
@@ -374,8 +374,8 @@ docker logs mk-mkgo-1 | grep -c "worker stop error"          # 同 50 前後
 | ファイル | 役割 |
 |---------|------|
 | `compose.uds.yaml` (`.example` から生成) | 全サービスを繋ぐ compose エントリポイント |
-| `deploy/uds/Dockerfile.mkgo` | mk-go runtime image (migrate 同梱 + curl) |
+| `deploy/uds/Dockerfile.mkgo` | Elythia runtime image (migrate 同梱 + curl) |
 | `deploy/uds/mkgo-entrypoint.sh` | migrate → exec misskey |
 | `deploy/uds/nginx/mkgo.conf` | UDS upstream + WebSocket upgrade 付き nginx 設定 |
 | `deploy/uds/valkey/valkey.conf` | `port 0` + UNIX socket listen の valkey 設定 |
-| `deploy/uds/config/default.yml` (`.example` から生成) | UDS 前提の mk-go 設定 |
+| `deploy/uds/config/default.yml` (`.example` から生成) | UDS 前提の Elythia 設定 |

@@ -1,6 +1,6 @@
 # Entity shape drift gate (Layer 0 / 2 / 3)
 
-mk-goのentity DTO構造体・packer出力・実HTTPレスポンスを、Misskey API契約(misskey-jsの`types.ts`=OpenAPI `components.schemas`のミラー)とフィールド単位で突き合わせ、**3rd-partyクライアントのshape crashを引き起こすドリフト**を検出するゲート。
+Elythiaのentity DTO構造体・packer出力・実HTTPレスポンスを、Misskey API契約(misskey-jsの`types.ts`=OpenAPI `components.schemas`のミラー)とフィールド単位で突き合わせ、**3rd-partyクライアントのshape crashを引き起こすドリフト**を検出するゲート。
 
 サーバー/ブラウザ/Docker不要で、決定的・ミリ秒で動く。CIでは`go test ./...`の一部として自動実行される(`TestEntityShapeDrift` + `Test*ShapeL2` + 各handler testの`shapetest.Assert`)。
 
@@ -16,7 +16,7 @@ L0は宣言を全網羅、L2/L3は「実際に出た値」を見るので**宣�
 
 ## なぜ必要か
 
-Misskey互換クライアント(Miria等)は、misskey-jsの型に従ってレスポンスをデシリアライズする。`text: string`(non-null)と宣言された欄をmk-goが`null`で返したり、必須欄を省略すると、クライアントは非nullキャストに失敗してクラッシュする。
+Misskey互換クライアント(Miria等)は、misskey-jsの型に従ってレスポンスをデシリアライズする。`text: string`(non-null)と宣言された欄をElythiaが`null`で返したり、必須欄を省略すると、クライアントは非nullキャストに失敗してクラッシュする。
 
 これは本質的に**スキーマ(shape)の不一致**であって、Playwrightやdrop-in E2Eのようなブラウザ越しの挙動テストで間接的に検出する問題ではない。本ゲートは契約レベルで直接diffを取るため、flakyゼロ・全フィールド網羅で検出できる。
 
@@ -45,22 +45,22 @@ golden側は**commit済みスナップショット**を読むため、テスト�
 
 | Kind | Severity | 意味 |
 |---|---|---|
-| `missing` (required) | HIGH | golden必須欄をmk-goが全く出さない |
+| `missing` (required) | HIGH | golden必須欄をElythiaが全く出さない |
 | `missing` (optional) | LOW | golden optional欄が無い(非ブロッキング) |
-| `nullable` | HIGH | goldenがnon-nullなのにmk-goが`null`を出しうる(omitempty無しポインタ) |
-| `omit` | MED | goldenが必須なのにmk-goが`omitempty`で省略しうる |
-| `extra` | INFO | mk-go独自欄(拡張/alias候補) |
+| `nullable` | HIGH | goldenがnon-nullなのにElythiaが`null`を出しうる(omitempty無しポインタ) |
+| `omit` | MED | goldenが必須なのにElythiaが`omitempty`で省略しうる |
+| `extra` | INFO | Elythia独自欄(拡張/alias候補) |
 | `layer` | INFO | 同family内の別layerに存在(配置違いだが出力上は存在) |
 
 ゲートは**HIGH/MED**のみをブロック対象とする。LOW/INFOはレポートのみ。
 
 ## マッピングの考え方
 
-goldenはユーザー shapeを合成可能な部品(`UserLite` / `UserDetailedNotMeOnly` / `MeDetailedOnly`)に分解し、mk-goは構造体埋め込みでこれを写している。よって各埋め込みlayerを対応する`*Only`スキーマに突き合わせる。standaloneなentity(Note等)はfamily of one。
+goldenはユーザー shapeを合成可能な部品(`UserLite` / `UserDetailedNotMeOnly` / `MeDetailedOnly`)に分解し、Elythiaは構造体埋め込みでこれを写している。よって各埋め込みlayerを対応する`*Only`スキーマに突き合わせる。standaloneなentity(Note等)はfamily of one。
 
 ### 対象外
 
-- **Notification**: golden側がtype別のdiscriminated union、mk-go側も`PackNotification`が`map[string]any`を手組みするため、reflection(L0)は届かない。**L2**(fixtureでpacker出力を検証)と**L3**(`/api/i/notifications`の実HTTP応答を`ValidateResponse`のunion dispatchで検証)でカバーする。
+- **Notification**: golden側がtype別のdiscriminated union、Elythia側も`PackNotification`が`map[string]any`を手組みするため、reflection(L0)は届かない。**L2**(fixtureでpacker出力を検証)と**L3**(`/api/i/notifications`の実HTTP応答を`ValidateResponse`のunion dispatchで検証)でカバーする。
 
 ## 運用
 
@@ -132,8 +132,8 @@ map-based packer(`map[string]any`を手組みするもの)はL0のreflectionが�
 
 L2導入時点で検出された実ドリフト:
 
-- `type=pollVote` / `type=importCompleted`(HIGH): mk-goが出す通知typeがgolden union(`pollEnded` / `exportCompleted`)に無い。strictクライアントがdispatchできない。
-- `noteId`(INFO): mk-goが通知に足す独自欄(契約外、非ブロッキング)。
+- `type=pollVote` / `type=importCompleted`(HIGH): Elythiaが出す通知typeがgolden union(`pollEnded` / `exportCompleted`)に無い。strictクライアントがdispatchできない。
+- `noteId`(INFO): Elythiaが通知に足す独自欄(契約外、非ブロッキング)。
 
 ### まだ残る射程外
 
@@ -185,7 +185,7 @@ parserは`FieldShape.Elem`に要素型(`string`/`number`/`boolean`/`object`/`arr
 
 ## lineage判定: vanilla か cherrypick 派生か
 
-goldenは**vanilla Misskey**のmisskey-jsから生成される。一方mk-goの一部endpointは**yojo-art/cherrypick**由来で、vanillaと契約が異なる:
+goldenは**vanilla Misskey**のmisskey-jsから生成される。一方Elythiaの一部endpointは**yojo-art/cherrypick**由来で、vanillaと契約が異なる:
 
 - **`/api/chat/*`**: cherrypick federated chat由来。ただし`ChatRoom`/`ChatMessage`はvanillaとshapeが一致したのでgate済み。
 - **`/api/reversi/*`**: yojo-art/cherrypick + **連合対戦拡張**。`crc32`等のvanilla goldenに無い独自field・federation関連で乖離が大きく、**vanilla golden gateの対象外**。
@@ -196,7 +196,7 @@ goldenは**vanilla Misskey**のmisskey-jsから生成される。一方mk-goの�
 
 L0/L2/L3がdriftを出しても、**修正の前に現misskey-ts実装を確認する**。golden(契約)とMisskeyの実packer出力がズレているケースがあるため:
 
-- **vestigial field**: 契約には残るが機能削除済みのfield(例: `antenna.notify`はカラム削除済でpackerが定数`false`を返す)。goldenにあってもmk-goで実装し直すのは誤り。
+- **vestigial field**: 契約には残るが機能削除済みのfield(例: `antenna.notify`はカラム削除済でpackerが定数`false`を返す)。goldenにあってもElythiaで実装し直すのは誤り。
 - **endpoint取り違え**: goldenの同名schemaが別endpointの契約のことがある(例: `EmojiDetailed`は`admin/emoji/list`、`EmojiDetailedAdmin`は`v2/admin/emoji/list`)。
 - 確認先: `.cache/misskey/<版>/.../core/entities/*EntityService.ts`(packer)、endpoint定義の`res`スキーマ、migration。
 
@@ -226,7 +226,7 @@ L3拡大の過程で検出・修正した実ドリフトの代表例(いずれ�
 
 shape gateがレスポンス**ボディ**の契約を守るのに対し、これは**エラーレスポンスのid**を守る別ゲート(`TestErrorIDDrift`)。
 
-Misskeyのエラーは`{code, message, id}`形式で、クライアントは`code`だけでなく**endpoint固有のUUID `id`**でエラーを識別する。mk-goは「1 code = 1 UUID使い回し」になりがちだが、Misskeyは**endpointごとに別id**を割り当てる(例: `NO_SUCH_WEBHOOK`はshow/update/delete/testで4つ別id)。idがズレると`code`が正しくてもdrop-inクライアントがエラーを誤分類する。
+Misskeyのエラーは`{code, message, id}`形式で、クライアントは`code`だけでなく**endpoint固有のUUID `id`**でエラーを識別する。Elythiaは「1 code = 1 UUID使い回し」になりがちだが、Misskeyは**endpointごとに別id**を割り当てる(例: `NO_SUCH_WEBHOOK`はshow/update/delete/testで4つ別id)。idがズレると`code`が正しくてもdrop-inクライアントがエラーを誤分類する。
 
 ### 仕組み
 
@@ -263,7 +263,7 @@ gateは「golden と突合できた数の下限」から**「inlineが復活し�
 
 - **reversi/* ・ chat/***: cherrypick派生。idもvanillaへ寄せない(`errorIDExcludedPrefixes`)。
 - **不正UUIDのgolden値はskip**: upstreamのtypoでidが壊れている箇所(`sw/update-registration`は先頭スペース、`i/2fa/update-key`等は非hex文字を含む)は揃える対象が無いため、`validUUID`で弾く(自己文書化された除外)。
-- **mk-go独自code・route未解決**: 対応するMisskey契約が無いので対象外(driftではない)。
+- **Elythia独自code・route未解決**: 対応するMisskey契約が無いので対象外(driftではない)。
 
 確実に解決できたケースのみgateする方針なので、誤検出より見落としに倒している。
 
@@ -284,9 +284,9 @@ upstream bump時は`make shapecheck-gen`で全goldenを再生成してcommit。�
 
 `TestErrorHTTPStatusDrift`は、エラーレスポンスの**HTTPステータス**をgateする。ただし**Misskeyが明示的にステータスを固定しているエラーだけ**を対象にする。
 
-Misskeyの`ApiCallService`は`httpStatusCode` → 無ければ`kind`既定(`client`→400 / `permission`→403 / `server`→500)でステータスを決め、`kind`既定値は`client`。実態として**459エラー中431件(93.9%)が未指定=400**で、mk-goは`NO_SUCH_*`に404、`ACCESS_DENIED`に403というセマンティックなステータスを返す。misskey-jsは`status===200`以外を一律errorとしてbodyを読むため400/404を区別せず、**全部400に倒すのは設計上の損失**(REST的セマンティクスを失う)。
+Misskeyの`ApiCallService`は`httpStatusCode` → 無ければ`kind`既定(`client`→400 / `permission`→403 / `server`→500)でステータスを決め、`kind`既定値は`client`。実態として**459エラー中431件(93.9%)が未指定=400**で、Elythiaは`NO_SUCH_*`に404、`ACCESS_DENIED`に403というセマンティックなステータスを返す。misskey-jsは`status===200`以外を一律errorとしてbodyを読むため400/404を区別せず、**全部400に倒すのは設計上の損失**(REST的セマンティクスを失う)。
 
-そこで本gateは「Misskeyが`httpStatusCode`または非デフォルト`kind`を明示している」契約(28件)だけを golden 化(`tools/erroriddiff`が`golden_error_status.json`に出力、暗黙400は記録しない)。mk-goが各endpointで返すステータス(inline `c.JSON(http.StatusX, ...)` / `JSONXxx` wrapper)を解決して突合する。
+そこで本gateは「Misskeyが`httpStatusCode`または非デフォルト`kind`を明示している」契約(28件)だけを golden 化(`tools/erroriddiff`が`golden_error_status.json`に出力、暗黙400は記録しない)。Elythiaが各endpointで返すステータス(inline `c.JSON(http.StatusX, ...)` / `JSONXxx` wrapper)を解決して突合する。
 
 検出・整合した実例(本gate新設時):
 
@@ -299,12 +299,12 @@ Misskeyの`ApiCallService`は`httpStatusCode` → 無ければ`kind`既定(`clie
 
 `TestErrorKindDrift`は、エラーenvelopeの`kind` discriminator(`client`/`server`/`permission`)をgateする(#1608)。
 
-Misskeyの`ApiCallService.send()`は全エラーenvelopeに`kind`を必ず含め(`ApiError`の既定は`client`)、`#sendApiError`が`kind`からWWW-Authenticateヘッダを導出する(`client`→`error="invalid_request"`、`permission`+`PERMISSION_DENIED`→`error="insufficient_scope"`)。mk-go側は`apierr.Error()`が`kind:"client"`を、明示が要る箇所は`apierr.ErrorWithKind()`が任意のkindを出す。ヘッダ付与は`/api` groupの`WWWAuthenticate` middlewareが横断で行う。
+Misskeyの`ApiCallService.send()`は全エラーenvelopeに`kind`を必ず含め(`ApiError`の既定は`client`)、`#sendApiError`が`kind`からWWW-Authenticateヘッダを導出する(`client`→`error="invalid_request"`、`permission`+`PERMISSION_DENIED`→`error="insufficient_scope"`)。Elythia側は`apierr.Error()`が`kind:"client"`を、明示が要る箇所は`apierr.ErrorWithKind()`が任意のkindを出す。ヘッダ付与は`/api` groupの`WWWAuthenticate` middlewareが横断で行う。
 
 gateは2方向:
 
 - **明示kind**: `tools/erroriddiff`がupstreamのエラー定義から`kind`明示エントリだけを`golden_error_kinds.json`へ抽出(現行9件: `NO_SUCH_ABUSE_REPORT`等が`server`、`i`の`USER_IS_DELETED`が`permission`)。解決できたemissionのkindはこれと一致しなければならない。
-- **暗黙client**: kind goldenに無くても`golden_error_ids.json`にcodeがある(=upstreamがそのendpointで定義する)エラーは、既定の`client`を要求する。mk-go独自code・route未解決はid gateと同じ方針で対象外。
+- **暗黙client**: kind goldenに無くても`golden_error_ids.json`にcodeがある(=upstreamがそのendpointで定義する)エラーは、既定の`client`を要求する。Elythia独自code・route未解決はid gateと同じ方針で対象外。
 
 実行・golden再生成はid gateと同じ`make errorid-check` / `make shapecheck-gen`。
 
@@ -312,7 +312,7 @@ gateは2方向:
 
 `TestLimitSpecDrift`は、list endpointの`limit`の**default / maximum**をMisskeyの`paramDef`と整合させるgate。
 
-Misskeyは`limit: { type:'integer', minimum, maximum, default }`を宣言し、ajvが**default補完 + 範囲外reject**する。mk-goはhandlerでimperativeにclampしていたため、default/max値がupstreamとずれると「limit省略時の件数」や「上限」が変わる(`limit`省略時に10件返すべきが30件返る等)。
+Misskeyは`limit: { type:'integer', minimum, maximum, default }`を宣言し、ajvが**default補完 + 範囲外reject**する。Elythiaはhandlerでimperativeにclampしていたため、default/max値がupstreamとずれると「limit省略時の件数」や「上限」が変わる(`limit`省略時に10件返すべきが30件返る等)。
 
 ### 仕組み
 
@@ -329,13 +329,13 @@ make shapecheck-gen   # golden_limit_specs.json も再生成
 
 ## Permission drift gate（アクセス制御）
 
-`TestPermissionDrift`は、mk-goのrouter middlewareがMisskeyの宣言する**アクセス要件より緩くない**ことを検証するセキュリティgate。
+`TestPermissionDrift`は、Elythiaのrouter middlewareがMisskeyの宣言する**アクセス要件より緩くない**ことを検証するセキュリティgate。
 
-Misskeyは各endpointのmetaで`requireAdmin`/`requireModerator`/`requireCredential`を宣言する(階層: public < auth < moderator < admin)。mk-goはrouterで`middleware.RequireAuth`/`RequireModerator`/`RequireAdmin`/`RequireRolePolicy`を適用する。`tools/permspec`がMisskey metaから`endpoint→level`のgolden(`golden_permissions.json`)を生成し、gateがrouterのmiddleware levelと突合する。
+Misskeyは各endpointのmetaで`requireAdmin`/`requireModerator`/`requireCredential`を宣言する(階層: public < auth < moderator < admin)。Elythiaはrouterで`middleware.RequireAuth`/`RequireModerator`/`RequireAdmin`/`RequireRolePolicy`を適用する。`tools/permspec`がMisskey metaから`endpoint→level`のgolden(`golden_permissions.json`)を生成し、gateがrouterのmiddleware levelと突合する。
 
 ### looser方向のみgate
 
-mk-goが**Misskeyより緩い**(= 権限昇格 / 認証欠落)ケースのみを失敗扱いにする:
+Elythiaが**Misskeyより緩い**(= 権限昇格 / 認証欠落)ケースのみを失敗扱いにする:
 
 - mk public だが Misskey requireCredential → 匿名アクセス可(認証欠落)
 - mk moderator だが Misskey requireAdmin → moderatorがadmin専用に到達(権限昇格)
@@ -358,13 +358,13 @@ make shapecheck-gen   # golden_permissions.json も再生成
 
 ## Secure drift gate（app token 制限）
 
-`TestSecureDrift`は、Misskeyの`secure: true` endpoint(password変更 / 2FA / data export-import / authorized-apps 等のaccount-security系、51件)が、mk-goで`middleware.RequireSecure`を適用していることを検証する。
+`TestSecureDrift`は、Misskeyの`secure: true` endpoint(password変更 / 2FA / data export-import / authorized-apps 等のaccount-security系、51件)が、Elythiaで`middleware.RequireSecure`を適用していることを検証する。
 
-**逆向きも見る (#2877)。** golden に無い endpoint に `RequireSecure` が付いていたら落とす。片方向のままだと、upstream が `secure` を外したとき (2026.9.0 の `i/revoke-token` がまさにそれ) に golden から消えるだけで、mk-go 側に `RequireSecure` が残っていても緑のまま通る = サードパーティアプリから叩けるようにする変更が**機能していなくても検出できない**。意図的に厳しくする場合は `secureStricterThanUpstream` に理由付きで登録する (現在は空)。
+**逆向きも見る (#2877)。** golden に無い endpoint に `RequireSecure` が付いていたら落とす。片方向のままだと、upstream が `secure` を外したとき (2026.9.0 の `i/revoke-token` がまさにそれ) に golden から消えるだけで、Elythia 側に `RequireSecure` が残っていても緑のまま通る = サードパーティアプリから叩けるようにする変更が**機能していなくても検出できない**。意図的に厳しくする場合は `secureStricterThanUpstream` に理由付きで登録する (現在は空)。
 
 Misskeyの`secure`は「native session token のみ許可、第三者app/OAuth/MiAuth access token 不可」(ApiCallServiceの`isSecure = user != null && token == null`)。これが無いと、有効なaccess tokenを持つ第三者appがpassword変更や2FA解除を駆動できてしまう。
 
-mk-goは全認証がtoken経由(session無し)で、native token = `users.token`、app/MiAuthは別の`access_tokens`行。`RequireSecure`は`*user.Token == GetToken(c)`でnative判定し、一致しなければ403 ACCESS_DENIED(Misskey id `56f35758-...`)。`tools/securespec`が`secure: true` endpointのgolden(`golden_secure_endpoints.json`)を生成し、gateがrouter登録(複数行inline含む括弧バランスparse)に`RequireSecure`があるか突合する。
+Elythiaは全認証がtoken経由(session無し)で、native token = `users.token`、app/MiAuthは別の`access_tokens`行。`RequireSecure`は`*user.Token == GetToken(c)`でnative判定し、一致しなければ403 ACCESS_DENIED(Misskey id `56f35758-...`)。`tools/securespec`が`secure: true` endpointのgolden(`golden_secure_endpoints.json`)を生成し、gateがrouter登録(複数行inline含む括弧バランスparse)に`RequireSecure`があるか突合する。
 
 ## OAuth scope drift gate（meta.kind）
 
@@ -384,9 +384,9 @@ make shapecheck-gen   # golden_permissions.json / golden_secure_endpoints.json /
 
 ## Schema drift gate（drop-in で生えない列）
 
-`TestSchemaDrift_CreateOnlyColumns`は、mk-goのmigrationが**`CREATE TABLE IF NOT EXISTS`の中でしか定義していない列**のうち、upstreamのentityに存在しないものを検出する。
+`TestSchemaDrift_CreateOnlyColumns`は、Elythiaのmigrationが**`CREATE TABLE IF NOT EXISTS`の中でしか定義していない列**のうち、upstreamのentityに存在しないものを検出する。
 
-Misskey TSが既に作ったテーブルに対して`CREATE TABLE IF NOT EXISTS`はno-opになるため、この形の列は**TS製DBにだけ生えない**。upstreamにも同名の列があればTS側が作っているので問題ないが、mk-go独自の列は生えず、読み書きすると drop-in 環境でのみ`column "..." of relation "..." does not exist`で落ちる。新規にmk-goから作ったDBでは`CREATE TABLE`が実際に走るため再現せず、通常のテストでは踏まない。
+Misskey TSが既に作ったテーブルに対して`CREATE TABLE IF NOT EXISTS`はno-opになるため、この形の列は**TS製DBにだけ生えない**。upstreamにも同名の列があればTS側が作っているので問題ないが、Elythia独自の列は生えず、読み書きすると drop-in 環境でのみ`column "..." of relation "..." does not exist`で落ちる。新規にElythiaから作ったDBでは`CREATE TABLE`が実際に走るため再現せず、通常のテストでは踏まない。
 
 実際に`app.createdAt` / `auth_session.createdAt` / `clip.notesCount`の3本がこの形で紛れ込んでいた(#2243)。`ALTER TABLE ... ADD COLUMN`で追加した列は両方のshapeで冪等に効くのでgateの対象外。
 
@@ -397,7 +397,7 @@ Misskey TSが既に作ったテーブルに対して`CREATE TABLE IF NOT EXISTS`
 
 `tools/schemadrift`がupstream entityの`@Entity('table')` + `@Column`系decoratorからテーブル別の列一覧をgolden(`golden_upstream_columns.json`)に出力し、gateがmigrationのparse結果と突合する。
 
-fresh な mk-go DB にだけ残るが誰も読み書きしない列は、テスト内の`createOnlyAllowlist`に理由付きで登録する。**その列を使い始めるときは必ずallowlistから外すこと**(使うなら(b)のmigrationが要る)。
+fresh な Elythia DB にだけ残るが誰も読み書きしない列は、テスト内の`createOnlyAllowlist`に理由付きで登録する。**その列を使い始めるときは必ずallowlistから外すこと**(使うなら(b)のmigrationが要る)。
 
 ### 運用
 
@@ -412,7 +412,7 @@ make shapecheck-gen                                     # golden_upstream_column
 
 `TestMigrationSeed_CoversUpstream`は、TypeORMのbookkeepingテーブル`migrations`へのseedが、upstreamの全migrationを網羅していることを検証する。
 
-mk-goで動かしたDBに本家Misskeyを繋ぎ直したとき、TypeORMは
+Elythiaで動かしたDBに本家Misskeyを繋ぎ直したとき、TypeORMは
 
 ```js
 allMigrations.filter(m => !executed.find(e => e.name === m.name))
@@ -424,7 +424,7 @@ nameは原則class名だが、`name = '...'`プロパティがあればそちら
 
 `tools/schemadrift`がupstreamのmigrationファイルからname一覧をgolden(`golden_upstream_migrations.json`)に出力し、gateがmigration SQL中のTypeORM形式name literalと突合する。
 
-**seedを追加する前に、そのmigrationのDDLがmk-go側にも入っているか必ず確認すること。** 入っていないままseedすると、TS側が「適用済み」と誤認してskipし、schemaがずれたまま放置される。
+**seedを追加する前に、そのmigrationのDDLがElythia側にも入っているか必ず確認すること。** 入っていないままseedすると、TS側が「適用済み」と誤認してskipし、schemaがずれたまま放置される。
 
 `make dropin-swap-test`のstage 8dにも、TS復帰後に`migrations`テーブルが変化していないことのassertを入れている(ただしこちらはTS製DBから始まるshapeなので general guard であって、本gateの代替にはならない)。
 
@@ -470,12 +470,12 @@ wire 上の名前 (`chName`) は `chatRoom`。#2640 の初稿はファイル名�
 「チャンネル名も upstream に揃えてある」として並べており、**18 件中 11 件が実在
 しない名前**だった。人が目で照合すると通る類の誤り。
 
-doc 側は §4-1 の表 (mk-go 独自) と ```text フェンス (upstream 由来) の和を母集団に、
+doc 側は §4-1 の表 (Elythia 独自) と ```text フェンス (upstream 由来) の和を母集団に、
 実装側は `internal/server/` 非テスト `.go` 全体の `streamRegistry.Register*` を見る。
 呼び出しの総数と抽出できた数が一致することも見る (名前が定数経由だったり英字以外を
 含むと registry から丸ごと消えるため)。
 
-**固定できるのは「doc の一覧 == mk-go の登録」だけ。** §4-1 のもう半分の主張
+**固定できるのは「doc の一覧 == Elythia の登録」だけ。** §4-1 のもう半分の主張
 「upstream は 18」「名前も upstream に揃えてある」は検証していない — `test-shards`
 job は本家のソースを取得しないため。doc と実装を同時に間違った名前へ変えれば
 この gate は通る。upstream が 19 個目を足した / 名前を変えた場合も検出できないので、
@@ -485,7 +485,7 @@ job は本家のソースを取得しないため。doc と実装を同時に間
 
 `docs/api-compat.md` の endpoint 行 == `router.go` が静的登録する `/api/*`。POST と GET の
 両方を見る (「endpoint を足す操作は必ず POST を伴う」は成り立たない —
-`/api/v1/instance/peers` は upstream 側も `get()` 直登録で mk-go も `api.GET` 一本)。
+`/api/v1/instance/peers` は upstream 側も `get()` 直登録で Elythia も `api.GET` 一本)。
 
 **錨そのものが腐ると、それを見る gate も一緒に無力化する。** 上の
 `EndpointCountMatchesAPICompat` は divergence.md と api-compat.md の一致しか見ないので、
@@ -495,8 +495,8 @@ endpoint を足して**どちらも更新しない**と両方が古いまま緑�
 route dump には stack が要るのでテストからは呼べない。代わりに router.go の
 `api.POST(` / `api.GET(` / `api.Match(chartMethods, ` を静的に抽出して突き合わせる。
 同梱プラグインのルート (`/api/plugin/*`) は literal で現れないので母集団から外す。
-生成物側は「mk-go 側にしかない」「両方に存在する」の 2 セクションだけを見る
-(「TS 側に存在するが mk-go で未実装」を混ぜると、upstream が endpoint を足した直後 =
+生成物側は「`mk-go 側にしかない`」「両方に存在する」の 2 セクションだけを見る
+(「`TS 側に存在するが mk-go で未実装`」を混ぜると、upstream が endpoint を足した直後 =
 生成物が正しい状態で落ちる)。
 
 **静的抽出は取りこぼすと gate が緩くなる方向に倒れる**ので、fail-closed を 3 段に
@@ -541,11 +541,11 @@ route dump には stack が要るのでテストからは呼べない。代わ�
 
 件数だけでなく**行の存在**も見る。§2-2 は table と column の両方で照合する — 列名だけで探すと、`createdAt` のように複数テーブルにある名前は他の行に残っているせいで行が丸ごと消えても素通りする。
 
-**`golden_upstream_columns.json` を撮り直すとこの gate が動く。** upstream が列を DROP するとその列が「mk-go 独自」に転じて §2-2 の件数が増えるので、本家の版を上げる PR で落ちる (`note_favorite.createdAt` がまさにその経緯で独自列になっている)。落ちたら doc の件数と行を実態に合わせること。
+**`golden_upstream_columns.json` を撮り直すとこの gate が動く。** upstream が列を DROP するとその列が「Elythia 独自」に転じて §2-2 の件数が増えるので、本家の版を上げる PR で落ちる (`note_favorite.createdAt` がまさにその経緯で独自列になっている)。落ちたら doc の件数と行を実態に合わせること。
 
 ## Index naming gate / migration idempotency gate（drop-in で二重化・停止しない）
 
-drop-in では mk-go の migration が **Misskey TS の作った既存 DB** にも流れる(`docs/migration-from-ts.md`)。upstream が既に作った構造と衝突しないよう、2 つの静的 gate を置いている。
+drop-in では Elythia の migration が **Misskey TS の作った既存 DB** にも流れる(`docs/migration-from-ts.md`)。upstream が既に作った構造と衝突しないよう、2 つの静的 gate を置いている。
 
 ### `TestMigrationIdempotency_RequiresIfExists`
 
@@ -559,16 +559,16 @@ column "category" of relation "avatar_decoration" already exists
 
 ### `TestIndexNaming_NoNewUpstreamDuplicates`
 
-mk-go が upstream と同内容の index を**別名で**追加するのを防ぐ。
+Elythia が upstream と同内容の index を**別名で**追加するのを防ぐ。
 
-mk-go は `IDX_<table>_<col>`、upstream (TypeORM) は `IDX_e5848eac4940934e23dbc17581` のような hash 名を使う。`CREATE INDEX IF NOT EXISTS` は **index 名**でしか存在判定しないので、定義が同一でも名前が違えば新規作成され、TS 製 DB では index が二重化する。
+Elythia は `IDX_<table>_<col>`、upstream (TypeORM) は `IDX_e5848eac4940934e23dbc17581` のような hash 名を使う。`CREATE INDEX IF NOT EXISTS` は **index 名**でしか存在判定しないので、定義が同一でも名前が違えば新規作成され、TS 製 DB では index が二重化する。
 
-実測 (Misskey TS 2026.7.0 が作った DB に mk-go の全 migration を適用):
+実測 (Misskey TS 2026.7.0 が作った DB に Elythia の全 migration を適用):
 
 | | index 数 |
 |---|---|
 | TS のみ | 442 |
-| mk-go migration 適用後 | 639 (+197) |
+| Elythia migration 適用後 | 639 (+197) |
 | `000068` 適用後 | 474 (165 本を削除、upstream 由来は 0 本削除) |
 
 `note` は最大テーブルなので GIN index の二重化は INSERT / UPDATE のたびに 2 本分の更新コストがかかる。読み取り性能には効かないが書き込みスループットと容量に効く。

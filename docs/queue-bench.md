@@ -1,6 +1,6 @@
 # Queue bench (#563)
 
-ジョブキュー配送スループットを **2 stack** (Misskey TS BullMQ / mk-go mkq) で公正比較するベンチマーク基盤。HTTP latency 用 `tests/bench/http/` とは別運用。
+ジョブキュー配送スループットを **2 stack** (Misskey TS BullMQ / Elythia mkq) で公正比較するベンチマーク基盤。HTTP latency 用 `tests/bench/http/` とは別運用。
 
 > **以前は asynq を含む 3-way だった。** mk-go の asynq driver は #2985 で削除したので、
 > harness からも外してある。下の実測表のうち日付が #2985 より前のものには asynq 行が
@@ -134,15 +134,15 @@ inbound bench で TS instance を sender に使うと、TS 側の deliver throug
 
 ### Federation flag 注意
 
-mk-go は新規 DB 初期化時 `meta.federation='none'` (= 連合無効) で立ち上がる。seed が DB 直接 UPDATE で `federation='all'` にしたあと、app の meta cache (5min TTL) を再読み込みさせるため `make queue-bench-seed` の最後で `app-mkq` / `app-ts` を restart する。
+Elythia は新規 DB 初期化時 `meta.federation='none'` (= 連合無効) で立ち上がる。seed が DB 直接 UPDATE で `federation='all'` にしたあと、app の meta cache (5min TTL) を再読み込みさせるため `make queue-bench-seed` の最後で `app-mkq` / `app-ts` を restart する。
 
-**app を restart したら nginx front も必ず restart する (#2917)。** nginx は upstream をホスト名で書くと**起動時に一度だけ**名前解決するので、`restart` で app の IP が入れ替わると**古いアドレスを掴んだまま相手側の app へ繋ぐ**。conf も docker DNS も正しいまま、`nginx-ts` が `app-mkq` へ繋がるといった形になり、Host が食い違って inbound が全件 401 になる (mk-go は `ErrInboxHostMismatch`、TS も `ActivityPubServerService` が同じ判定を持つ)。`queue-bench-seed` は app が healthy になってから nginx を restart し、**各 front が自分の app に繋がっていること** (`/api/meta` の `uri` が自分のホストか) を確かめてから抜ける。**TCP が開いているかだけでは足りない** — 誤配線した front もlistener は生きていて 200 を返すため。
+**app を restart したら nginx front も必ず restart する (#2917)。** nginx は upstream をホスト名で書くと**起動時に一度だけ**名前解決するので、`restart` で app の IP が入れ替わると**古いアドレスを掴んだまま相手側の app へ繋ぐ**。conf も docker DNS も正しいまま、`nginx-ts` が `app-mkq` へ繋がるといった形になり、Host が食い違って inbound が全件 401 になる (Elythia は `ErrInboxHostMismatch`、TS も `ActivityPubServerService` が同じ判定を持つ)。`queue-bench-seed` は app が healthy になってから nginx を restart し、**各 front が自分の app に繋がっていること** (`/api/meta` の `uri` が自分のホストか) を確かめてから抜ける。**TCP が開いているかだけでは足りない** — 誤配線した front もlistener は生きていて 200 を返すため。
 
 #2364 は同じ罠の別経路 (`--force-recreate` が依存を作り直す) で、そちらは `--no-deps` で塞いである。**doc に書かなかったせいで 2 度踏んだ**ので、ここに残す。
 
 ### Network allowlist
 
-mk-go の SSRF 防止 (`allowedPrivateNetworks`) は production default で private IP を block する。bench 内の `blackhole` / faker / 他 stack は Docker network の private IP なので、bench config (`tests/bench/queue/common/mk-mkq.yml`) で `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` を allowlist 化している。
+Elythia の SSRF 防止 (`allowedPrivateNetworks`) は production default で private IP を block する。bench 内の `blackhole` / faker / 他 stack は Docker network の private IP なので、bench config (`tests/bench/queue/common/mk-mkq.yml`) で `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` を allowlist 化している。
 
 ## 関連
 

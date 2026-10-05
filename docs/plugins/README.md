@@ -9,7 +9,7 @@
 | プラグインを**入れる** | [運営者向け](operating.md) — 導入・無効化・**権限の話** |
 | プラグインを**書く** | [作者向け](authoring.md) — 手順とリファレンス |
 | プラグインを**開発する** | [開発環境](development.md) — `make plugin-dev` と HMR |
-| mk-go 本体を**変える** | [互換性ポリシー](compatibility.md) — 公開面を広げてよい条件 |
+| Elythia 本体を**変える** | [互換性ポリシー](compatibility.md) — 公開面を広げてよい条件 |
 | peer の **wire を変える** | [peer プロトコル](../plugin-peer-protocol.md) — エンベロープ / 署名 / 上限 / 適用範囲 |
 
 プラグインができるのは、
@@ -19,19 +19,19 @@
 - プロフィール / 設定画面への描画
 - **独自ページ** (`/plugin/<name>/...`) とナビゲーション項目
 - **管理画面** (`/admin/plugin/<name>/...`)
-- **同じプラグインを入れた mk-go 同士の通信** (ActivityPub には出ない)
+- **同じプラグインを入れた Elythia 同士の通信** (ActivityPub には出ない)
 
 動く実例は [`plugins/status/`](../../plugins/status/)。外部サービスに依存しないので、組み込んで動かしながら読める。ただし**既定では無効**（`mk-plugin.yml`の`disabled: true`）。読みながら動かすだけなら`make plugin-dev PLUGIN=plugins/status`を使うと`mk-plugin.yml`を触らずに済む。その行を消して再ビルドしてもよいが、消したままpushすると`build` jobの`Check bundled plugins are disabled by default`が落ちる。
 
 ## 仕組みの要点
 
-**ビルド時に組み込む。** 実行時に読み込むのではなく、mk-go 本体と一緒にコンパイルする。
+**ビルド時に組み込む。** 実行時に読み込むのではなく、Elythia 本体と一緒にコンパイルする。
 
 ```
 plugins/<name>/ に置く → make build → 再起動
 ```
 
-理由は、mk-go が `CGO_ENABLED=0` の完全静的バイナリで distroless 上で動くため。動的ライブラリの読み込みも外部インタプリタの実行もできない。
+理由は、Elythia が `CGO_ENABLED=0` の完全静的バイナリで distroless 上で動くため。動的ライブラリの読み込みも外部インタプリタの実行もできない。
 
 副次的に、**内部の変更でプラグインが壊れたときビルドが落ちて即座に分かる**。実行時読み込みだと本番で静かに壊れる。
 
@@ -43,7 +43,7 @@ plugins/<name>/ に置く → make build → 再起動
 
 | | 内容 |
 |---|---|
-| **A. 約束の範囲** | `plugin/` と `plugin-api.ts` が提供するもの。mk-go 側が壊さないと約束する |
+| **A. 約束の範囲** | `plugin/` と `plugin-api.ts` が提供するもの。Elythia 側が壊さないと約束する |
 | **B. 技術的に可能な範囲** | **制限は無い**。プラグインは同一プロセスの Go コードで、`os` も `net/http` も使える |
 
 A だけを読むと「プラグインはこの範囲しか触れない」と受け取れるが、**そうではない**。詳細は[運営者向け](operating.md)を参照。

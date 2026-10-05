@@ -1,8 +1,8 @@
-# mk-go
+# Elythia
 
 Misskey互換のGoバックエンド実装。TypeScript/NestJS製の[Misskey](https://github.com/misskey-dev/misskey)と同一のDB・Redis・フロントエンドを共有し、バックエンドを差し替えられる。
 
-互換バージョン: **Misskey 2026.10.0** (mk-go `1.5.0`)
+互換バージョン: **Misskey 2026.10.0** (Elythia `1.5.0`)
 
 ## 特徴
 
@@ -12,7 +12,7 @@ Misskey互換のGoバックエンド実装。TypeScript/NestJS製の[Misskey](ht
 - ActivityPub連合対応（HTTP Signatures、リモートオブジェクト解決、配信キュー）
 - ジョブキューは `mkq` (BullMQ wire-compat)
 - Playwright e2e (298 spec ファイル) を PR ごとに実行。upstream 追従時は Misskey TS backend に対しても回して drop-in 互換を検証
-- `RemoteStatsFetcher` でリモートユーザーの notesCount / followersCount / followingCount を origin から取得 (mk-go 独自拡張)
+- `RemoteStatsFetcher` でリモートユーザーの notesCount / followersCount / followingCount を origin から取得 (Elythia 独自拡張)
 
 ## クイックスタート
 
@@ -106,7 +106,7 @@ make uds-update      # UDS 構成
 注意点:
 
 - **`frontend/` のソースが動いたらフロントエンドを再ビルドする**。成果物の `frontend/built` は git の管理の外にあり、`git pull` では変わらない。`make pull` (内部で `make update`) は、再ビルドが要るかどうかを知らせる。`make *-update` は再ビルドまで行う
-- **フロントエンドを再ビルドしたら必ず mk-go を再起動する**。エントリポイントを起動時に 1 回だけ解決してキャッシュするため、再起動しないと消えた古いファイルを参照し続けて 404 になる。**`docker compose up -d` では再起動されない** — イメージと設定が変わらなければコンテナは作り直されず、フロントエンドは bind-mount なので何も変わらないため。`make *-update` / `make *-restart` は `restart` を明示したうえで、配信中のアセットが実在するかまで検証する (#2885)
+- **フロントエンドを再ビルドしたら必ず Elythia を再起動する**。エントリポイントを起動時に 1 回だけ解決してキャッシュするため、再起動しないと消えた古いファイルを参照し続けて 404 になる。**`docker compose up -d` では再起動されない** — イメージと設定が変わらなければコンテナは作り直されず、フロントエンドは bind-mount なので何も変わらないため。`make *-update` / `make *-restart` は `restart` を明示したうえで、配信中のアセットが実在するかまで検証する (#2885)
 - **ビルド中はフロントエンドが 404 になる**。配信中のディレクトリを作り直すため。ビルドが失敗した場合は 404 のまま残るので、成功するまで直すこと
 - ブラウザ側に Service Worker が残っている場合はハードリロードする
 
@@ -168,11 +168,11 @@ go test -race -count=1 -shuffle=3 -timeout 10m \
 | [Playwright](docs/playwright.md) | Playwrightによるフロントエンド / API テスト |
 | [Drop-in e2e (pytest)](docs/dropin-e2e.md) | TS-A backend を mk-A に差し替えた state preservation 検証 |
 | [Drop-in frontend e2e (cypress)](docs/dropin-frontend-e2e.md) | 3 TS instance + cypress で frontend 視点の互換 |
-| [差分比較ハーネス](docs/diff-e2e.md) | mk-go と TS の実APIレスポンスを値レベルでdiff |
+| [差分比較ハーネス](docs/diff-e2e.md) | Elythia と TS の実APIレスポンスを値レベルでdiff |
 | [シェイプドリフト検出](docs/shape-drift.md) | レスポンス形状・エラーID・権限のドリフトを検出する静的ゲート |
-| [本家 backend e2e](docs/upstream-backend-e2e.md) | Misskey 本家の `test/e2e/**` を無改変で mk-go に向けて実行する |
+| [本家 backend e2e](docs/upstream-backend-e2e.md) | Misskey 本家の `test/e2e/**` を無改変で Elythia に向けて実行する |
 | [プラグイン](docs/plugins/) | ビルド時組み込みプラグインの書き方・運用 |
-| [プラグイン peer プロトコル](docs/plugin-peer-protocol.md) | mk-go 同士でだけ通じる署名付き HTTP チャネルの wire 仕様 |
+| [プラグイン peer プロトコル](docs/plugin-peer-protocol.md) | Elythia 同士でだけ通じる署名付き HTTP チャネルの wire 仕様 |
 | [UDSデプロイ](docs/docker-uds.md) | UNIXドメインソケット構成 |
 | [queue-bench](docs/queue-bench.md) | BullMQ / mkq の 2-way 比較 (#563) |
 | [ベンチプロファイリング](docs/bench-pprof.md) | k6負荷時のpprof取得と解析 |

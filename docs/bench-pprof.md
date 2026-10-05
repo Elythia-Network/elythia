@@ -1,7 +1,7 @@
 # Bench profiling (pprof)
 
 `tests/bench/http/compose.yml` で `make bench-up && make bench-run` を実行すると、
-k6 シナリオと並走して mk-go の pprof profile が `tests/bench/http/results/profiles/` に
+k6 シナリオと並走して Elythia の pprof profile が `tests/bench/http/results/profiles/` に
 書き出される。`#413` チューニングロードマップの実測根拠として使う。
 
 Misskey TS 側はここでは取らない (Node.js は別ツール、本ロードマップは Go 側が対象)。

@@ -4,7 +4,7 @@
 
 **プラグインはサーバーと同じ権限で動く。** サンドボックスは無い。運営者はあなたを信頼して組み込む。
 
-これは自由であると同時に責任でもある。外部への通信、ファイルの読み書き、実行時間、どれも mk-go は制限しない。
+これは自由であると同時に責任でもある。外部への通信、ファイルの読み書き、実行時間、どれも Elythia は制限しない。
 
 ## 作る
 
@@ -42,7 +42,7 @@ replace github.com/elythia-network/elythia => ../..
 
 **`replace` は要る。** `make build` は生成される `go.work` で解決できるが、**`make plugin-test` は `GOWORK=off` で回す**ので、これが無いと `missing go.sum entry` で落ちる。同梱プラグインは全部この形。
 
-**独立した Go module である必要がある。** これは形式ではなく、Go の internal ルールにより「mk-go の内部パッケージを import できない」ことを保証する仕組み。`go.mod` を持たないディレクトリはビルド時にエラーになる。
+**独立した Go module である必要がある。** これは形式ではなく、Go の internal ルールにより「Elythia の内部パッケージを import できない」ことを保証する仕組み。`go.mod` を持たないディレクトリはビルド時にエラーになる。
 
 依存を足すときは自分の module の中で `go get` する。**リポジトリのルートで `go mod tidy` を走らせないこと** — 生成物 `cmd/elythia/plugins_generated.go` が各プラグインのモジュール (上の例では `github.com/you/mk-plugin-myplugin`) を import しており、private repo だと解決に失敗する。
 
@@ -124,7 +124,7 @@ return plugin.Blob{
 
 主な用途は画像のプロキシ。本体の CSP は `img-src` を `'self' data: blob:` + 固定 2 host (upstream のクレジットページ用、#2892) に絞っているので、**プラグインが指す外部の画像は `<img>` で直接読めない**。同一オリジンで配信すれば CSP を緩めずに済む。
 
-mk-go は `filesHandler` と同じ 3 点を必ず付ける。
+Elythia は `filesHandler` と同じ 3 点を必ず付ける。
 
 - **`Content-Type` を allowlist に通す。** image / audio / video 以外は `application/octet-stream` に矯正される（upstream `FileServerUtils.getSafeContentType` と同じ規則）。`text/html` や `image/svg+xml` をそのまま流すと**同一オリジンの XSS** になり、Misskey のフロントは `account` を localStorage に置くのでアカウント乗っ取りと同じになるため。`nosniff` はブラウザの MIME 推測を止めるだけで、Content-Type が**実際に** `text/html` のときには何も止めない
 - `Content-Security-Policy: default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'`
@@ -153,11 +153,11 @@ if _, err := db.ExecContext(req.Context(), `INSERT INTO items DEFAULT VALUES`); 
 }
 ```
 
-GORM を使いたければプラグイン側で包む（`postgres.New(postgres.Config{Conn: db})`）。mk-go が GORM を使っているのは内部の選択であって契約ではない。
+GORM を使いたければプラグイン側で包む（`postgres.New(postgres.Config{Conn: db})`）。Elythia が GORM を使っているのは内部の選択であって契約ではない。
 
 ### 守ること
 
-- **mk-go 本体のテーブルに触れない。** ノートの可視性判定はアプリケーション側にあり DB には無いので、`SELECT * FROM note` は非公開ノートを含む。本体のデータは API 経由で取る
+- **Elythia 本体のテーブルに触れない。** ノートの可視性判定はアプリケーション側にあり DB には無いので、`SELECT * FROM note` は非公開ノートを含む。本体のデータは API 経由で取る
 - **冪等に書く。** ストレージへの書き込みと API 呼び出しは同じトランザクションに入れられない
 - 一度適用した version の SQL を書き換えても再実行されない。変更は新しい version で
 
@@ -177,13 +177,13 @@ if _, err := ctx.API().AsUser(userID).Call(req.Context(), "notes/create", params
 return raw, nil
 ```
 
-mk-go の既存エンドポイントをプロセス内で呼ぶ。**可視性・権限・レート制限が自動的に効く**ので、モデレーション状態などを自前で持たなくてよい。
+Elythia の既存エンドポイントをプロセス内で呼ぶ。**可視性・権限・レート制限が自動的に効く**ので、モデレーション状態などを自前で持たなくてよい。
 
 **`Call` の第 1 引数は `context.Context`。** `plugin.Context` は満たさないので `ctx` を渡すとコンパイルできない。ルートの中なら `req.Context()`、ジョブの中なら受け取った `context.Context` を渡す。
 
 `AsUser` はその利用者として振る舞う（レート制限もその利用者のものが適用される）。「すべてを迂回する」経路は用意していない。管理操作が必要なら管理者の ID を渡す。
 
-**`AsUser` が載せるのはその利用者の native token で、OAuth の scope は付かない。** つまり `AsUser(req.UserID())` は「呼び出し元が持っていた権限」ではなく「その利用者が持つ全権」で呼ぶ。だから mk-go は**プラグインのルートに第三者アプリのアクセストークンを入れない**（本体が 403 `PERMISSION_DENIED` を返す）。ネイティブのログイントークン（同梱フロントエンドや公式アプリ）と未認証だけが到達する。
+**`AsUser` が載せるのはその利用者の native token で、OAuth の scope は付かない。** つまり `AsUser(req.UserID())` は「呼び出し元が持っていた権限」ではなく「その利用者が持つ全権」で呼ぶ。だから Elythia は**プラグインのルートに第三者アプリのアクセストークンを入れない**（本体が 403 `PERMISSION_DENIED` を返す）。ネイティブのログイントークン（同梱フロントエンドや公式アプリ）と未認証だけが到達する。
 
 upstream が `kind` を宣言しない資格情報必須エンドポイントで app token を一律拒否するのと同じ規則で、プラグインのルートには `kind` にあたる宣言が無いためこちら側に倒してある。第三者アプリから叩かせたい処理は、プラグインのルートではなく本体のエンドポイント（scope が宣言されている）に置くこと。
 
@@ -288,10 +288,10 @@ func routes(ctx plugin.Context, r plugin.Router) error {
 | 重複排除 | `WithDedup` で抑制されたときも `Enqueue` は `nil` を返す。**積めたかどうかは区別できない** |
 | ロール | 積むのはどのプロセスからでもできる。処理するのは queue ロールのプロセスだけ |
 
-worker の起動・停止時の待ち合わせ・実行時間の上限は mk-go が持つ。**プラグインが自分で
+worker の起動・停止時の待ち合わせ・実行時間の上限は Elythia が持つ。**プラグインが自分で
 worker を起こす経路は用意しない** — プラグインの数だけ同じバグを書くことになる。
 
-**ただし 1 回の実行に上限がある。** mk-go は job の handler を既定 1 時間で
+**ただし 1 回の実行に上限がある。** Elythia は job の handler を既定 1 時間で
 打ち切る (#2658、`queueHandlerDeadlineSeconds`)。超えると job は失敗扱いになり、
 cron と `WithMaxAttempts` を付けていない enqueue はそこで捨てられる。**打ち切られても
 handler 自体は止まらない** (Go では goroutine を殺せない) ので、DB 接続を
@@ -306,7 +306,7 @@ handler 自体は止まらない** (Go では goroutine を殺せない) ので�
 
 起動中に呼んだ`ctx.Go()`は、全pluginのstorage、migration、`EffectivePolicies`、`Routes`、`Jobs`とhost側のroute配線が成功するまで開始されない。起動に失敗した場合は保留した処理を破棄する。起動成功後の呼び出しは直ちに開始する。cancelやdrainは提供しないため、正常終了時の停止が必要な処理はplugin側で終了条件を持つこと。
 
-> **プラグインが素の `go` を書くとプロセスごと落ちる。** Go は他 goroutine の panic を回収できず、mk-go 側の recover では止められない。
+> **プラグインが素の `go` を書くとプロセスごと落ちる。** Go は他 goroutine の panic を回収できず、Elythia 側の recover では止められない。
 
 ## 効果ポリシー
 
@@ -560,7 +560,7 @@ import { MkSelect, MkSwitch, MkAvatar, MkUserName, MkTime, PageWithHeader, useMk
 
 `getUsers(ids)` は ID の重複を除き、`users/show` を 100 件ずつ呼んで公開ユーザー情報 (`PluginUser`) を返す。見えないユーザー (存在しない・凍結中など) は結果から黙って消えるので、件数は入力以下になり順序も保証しない。形式が不正な ID が混ざると、その 100 件のまとまりごと失敗する。`PluginUser` は misskey-js の `UserLite` そのままで (MkAvatar / MkUserName にそのまま渡すため)、upstream が型を変えると一緒に変わる。
 
-**ここに出ているものだけが「壊さないと約束する範囲」。** プラグインは同じバンドルに入るので技術的には何でも import できるが、それ以外は upstream のリファクタで黙って壊れる。必要なものがあれば mk-go 側に要求すること。
+**ここに出ているものだけが「壊さないと約束する範囲」。** プラグインは同じバンドルに入るので技術的には何でも import できるが、それ以外は upstream のリファクタで黙って壊れる。必要なものがあれば Elythia 側に要求すること。
 
 ### API 呼び出し
 
@@ -572,7 +572,7 @@ const res = await host.api<T>('plugin/myplugin/me', { ... });
 
 ## 他のインスタンスとやりとりする
 
-同じプラグインを入れている **mk-go 同士**でだけ通信できる (#2537)。wire の形は
+同じプラグインを入れている **Elythia 同士**でだけ通信できる (#2537)。wire の形は
 [peer プロトコル](../plugin-peer-protocol.md) にある。
 
 ```go
@@ -619,10 +619,10 @@ var Plugin = plugin.Definition{
 起動時に warn が出る。
 
 **ActivityPub には出ない。** AP に載せると不具合の症状が他人のサーバー側に出るうえ、
-一度公開した形は後から塞げないため、mk-go 専用の経路に閉じてある。相手が Misskey や
+一度公開した形は後から塞げないため、Elythia 専用の経路に閉じてある。相手が Misskey や
 Mastodon でも影響しない代わりに、**相手も同じプラグインを持っていることが前提**になる。
 
-mk-go が面倒を見るもの:
+Elythia が面倒を見るもの:
 
 | | |
 |---|---|
@@ -636,7 +636,7 @@ mk-go が面倒を見るもの:
 プラグインが面倒を見るもの:
 
 - **payload の中身と値域**。相手は同じプラグインを持っているだけで、善良とは限らない
-- **payload の版**。mk-go は中身を解釈しないので、形を変えたときの互換は自分で保つ
+- **payload の版**。Elythia は中身を解釈しないので、形を変えたときの互換は自分で保つ
 - **`OnReply` の冪等性**。キューに載るので、worker が途中で落ちれば同じ交換が
   積み直される。**複数回呼ばれうる**ので、加算や追記はそのままでは二重になる
 - **取り直し**。`OnReply` は**届かないことがある** (相手が落ちている / 再送の上限)。
@@ -735,7 +735,7 @@ return raw, nil
 `Peered` を立てると nodeinfo の `metadata.mkGoPlugins` にプラグイン名が出る。宣言して
 いないプラグインは名前も出ない (入れている拡張を全部晒さないため)。
 
-`_` で始まるパスは mk-go の予約なので、プラグインからは登録できない (受け口を奪えない
+`_` で始まるパスは Elythia の予約なので、プラグインからは登録できない (受け口を奪えない
 ようにするため)。
 
 ### テストする
@@ -786,7 +786,7 @@ jobs := plugintest.New(t).WithDB(db).Jobs(Plugin)
 require.NoError(t, jobs.Run(t, "prune", ""))
 ```
 
-**DB はフェイクにしない。** SQL の挙動を模した偽物は本物とずれ、通ったのに本番で落ちるテストになる。`plugintest` も migration の適用は mk-go 本体と同じ実装を使っている。
+**DB はフェイクにしない。** SQL の挙動を模した偽物は本物とずれ、通ったのに本番で落ちるテストになる。`plugintest` も migration の適用は Elythia 本体と同じ実装を使っている。
 
 ## 公開面の一覧
 
@@ -987,7 +987,7 @@ PluginPage: { path, component, navTitle?, navIcon?, admin? }
 | | 理由 |
 |---|---|
 | ActivityPub に関わるものを触る | 公開していない。不具合の症状が他人のサーバー側に出て、自分では気づけない |
-| mk-go 本体のテーブルを読む | 可視性判定を迂回する。非公開ノートが混ざる |
+| Elythia 本体のテーブルを読む | 可視性判定を迂回する。非公開ノートが混ざる |
 | `plugin-api.ts` に無いコンポーネントを import する | upstream のリファクタで黙って壊れる |
 | 取得元の `Content-Type` をそのまま `Blob` に流す | 本体が allowlist で矯正するので XSS にはならないが、画像のつもりが `application/octet-stream` になってダウンロードになる |
 | 素の `go` で goroutine を起動する | panic でプロセスごと落ちる。`ctx.Go()` を使う |

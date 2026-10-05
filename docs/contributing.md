@@ -49,7 +49,7 @@ PR を出すと十数個の check が走る。**required なのは `build` / `te
 
 ## fork frontend (`frontend/`) を触るとき
 
-mk-go 1.0 以降は fork frontend を独自に進化させる。Go 側の `make check` だけでは
+Elythia 1.0 以降は fork frontend を独自に進化させる。Go 側の `make check` だけでは
 frontend の規約違反を拾えないので、`frontend/` を変える PR では以下も確認する。
 
 ### 変更の置き場所
@@ -248,7 +248,7 @@ rate limit の例:
   誤認させる分だけ有害
 - **gate を doc で説明するときは、その gate が検査していない半分も書く。** 7 周の
   Medium / Low で最も繰り返された型がこれ (射程の過大主張・fail-open・偽陽性)。
-  手本は `docs/divergence.md` §4-1 の「固定できるのは mk-go 側だけで、
+  手本は `docs/divergence.md` §4-1 の「固定できるのは Elythia 側だけで、
   『upstream は 18』『名前も upstream に揃えてある』は検証していない
   (`test-shards` は本家のソースを取得しない)」
 
@@ -269,11 +269,11 @@ rate limit の例:
 
 AGPL-3.0 が求めるのはライセンス全文を添えること (§4) と、改変の告知 (§5a)、
 ネットワーク越しの利用者へのソース提供 (§13) で、**各ファイルのヘッダーは条件では
-ない**。GPL の付録 "How to Apply These Terms" が推奨しているだけで、mk-go は
+ない**。GPL の付録 "How to Apply These Terms" が推奨しているだけで、Elythia は
 `LICENSE` と README の表記で足りている。
 
 **上流 TS からヘッダーをコピーしないこと。** `SPDX-FileCopyrightText: syuilo and
-misskey-project` は upstream Misskey の著作権表示なので、mk-go 自身のコードに
+misskey-project` は upstream Misskey の著作権表示なので、Elythia 自身のコードに
 付けると**帰属が逆になる**。実際に `plugin/` の 3 ファイルがその状態だった。
 
 **fork frontend (`frontend/`) は別。** 本体へ取り込んだ後も、上流の SPDX ヘッダーは

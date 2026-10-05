@@ -1,7 +1,7 @@
 # Drop-in frontend e2e テスト (#380, Phase 14-)
 
 Misskey TS の実フロントエンドが期待する挙動を cypress で固定し、TS-A backend
-を mk-go に差し替えた時も同じ挙動が得られるかを検証する e2e 基盤。
+を Elythia に差し替えた時も同じ挙動が得られるかを検証する e2e 基盤。
 
 ## 目的
 
@@ -24,13 +24,13 @@ Misskey TS の実フロントエンドが期待する挙動を cypress で固定
 ```
 
 3 インスタンス (A / B / C) + 各々独立の Postgres / Redis / nginx + cypress runner。
-baseline は 3 台とも TS。instance A を mk-go に差し替える overlay がある。
+baseline は 3 台とも TS。instance A を Elythia に差し替える overlay がある。
 
 ```
 tests/dropin-frontend/
   gen-certs.sh                # a / b / c + bundle.pem 用自己署名証明書
   instance_a.yml              # TS 用 default.yml (A)
-  instance_a_mk.yml           # A を mk-go に差し替えたときの設定
+  instance_a_mk.yml           # A を Elythia に差し替えたときの設定
   instance_b.yml / instance_c.yml
   nginx_a.conf / nginx_b.conf / nginx_c.conf   # SSL 前段
   cypress/
@@ -53,7 +53,7 @@ tests/dropin-frontend/
   run-frontend-swap-test.sh   # TS-A → mk-A 切替の orchestrator
 
 tests/dropin-frontend/compose.yml     # TS-A / TS-B / TS-C stack
-tests/dropin-frontend/compose.mk.yml  # instance A を mk-go に差し替える overlay
+tests/dropin-frontend/compose.mk.yml  # instance A を Elythia に差し替える overlay
 ```
 
 ## 実行
@@ -75,7 +75,7 @@ make dropin-frontend-logs
 
 - [x] Phase 14-1 (#381): 3 TS 基盤 + cypress smoke spec
 - [x] Phase 14-2 (#387): spec マトリクス拡充 (visibility / userList / cross-instance / delete)
-- [x] Phase 14-3 (#394): mk-go 差し替え overlay + swap orchestrator + nightly CI
+- [x] Phase 14-3 (#394): Elythia 差し替え overlay + swap orchestrator + nightly CI
 
 ## Phase 14-2 カバー spec
 
@@ -92,9 +92,9 @@ make dropin-frontend-logs
 attachment / emoji / reaction は Phase 14-2.5 以降 (admin emoji 投入フロー / 
 remote image ingest (#378) / reaction deliver (#369) の条件整備が必要)。
 
-## Phase 14-3: mk-go 差し替え overlay + swap orchestrator
+## Phase 14-3: Elythia 差し替え overlay + swap orchestrator
 
-`tests/dropin-frontend/compose.mk.yml` overlay + `tests/dropin-frontend/run-frontend-swap-test.sh` orchestrator で、**TS-A backend を mk-go に差し替えた後も cypress spec が pass する** ことを検証する。
+`tests/dropin-frontend/compose.mk.yml` overlay + `tests/dropin-frontend/run-frontend-swap-test.sh` orchestrator で、**TS-A backend を Elythia に差し替えた後も cypress spec が pass する** ことを検証する。
 
 ### 実行
 
@@ -106,7 +106,7 @@ make dropin-frontend-swap-test
 #   1. TS-A / TS-B / TS-C stack 起動 (baseline)
 #   2. CYPRESS_MODE=baseline で cypress run (7 ファイル / 15 test)
 #   3. docker compose stop app-a (TS-A backend 停止、DB / Redis は維持)
-#   4. overlay で app-a を mk-go に差し替えて起動
+#   4. overlay で app-a を Elythia に差し替えて起動
 #   5. CYPRESS_MODE=swap で cypress run (skipInSwap の 4 test を除く 11 本)
 #   6. teardown
 ```
