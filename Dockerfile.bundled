@@ -78,7 +78,9 @@ FROM --platform=$BUILDPLATFORM node:26.4.0-trixie@sha256:b46a10d964ad15136ebdf90
 # frontend / sw / i18n / misskey-js など 7 パッケージが NODE_ENV を見ており、
 # production でないと minify されず _DEV_ フラグも立つ。
 ENV NODE_ENV=production
-ENV npm_config_store_dir=/pnpm-store
+# pnpm 11 は npm_config_* を読まないので pnpm_config_* で渡す (実測)。npm_config_store_dir
+# だった間は cache mount の /pnpm-store が使われず、毎回取り直していた。
+ENV pnpm_config_store_dir=/pnpm-store
 
 WORKDIR /work/frontend
 

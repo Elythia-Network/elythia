@@ -252,7 +252,8 @@ jobs:
           # **`--mount=type=cache` の中身は cache-to では運ばれない** (min でも max
           # でも空。実測)。runner は毎回まっさらなので Go のビルドはどちらでも
           # 走り直す。max にすると `apk add` と `go mod download` に加えて frontend
-          # stage (`pnpm fetch` の層だけで約 1.2GB) も救えるが、その分が呼び出し元の枠を
+          # stage (`pnpm fetch` の層。#3379 の P4c で約 1.2GB と実測した値は pnpm の store を
+          # 層に含んでいた頃のもので、cache mount へ移した今はそれより小さい) も救えるが、その分が呼び出し元の枠を
           # 圧迫する。min のままにする代わりに、frontend は毎回ビルドし直す
           # (手元の冷えたビルドで frontend stage だけ約 3 分、#3379)。
           cache-to: type=gha,mode=min
