@@ -284,8 +284,9 @@ ifneq ($(MISSKEY_VERSION),)
 LDFLAGS += -X github.com/shiroha-a/mk/internal/config.MisskeyVersion=$(MISSKEY_VERSION)
 endif
 
-# ビルドした revision と同梱 frontend の版。/about-mkgo が
-# 「mk-go 1.3.0 (abc1234)」「Misskey 2026.9.0-mk.3」として出す (#2700)。
+# ビルドした revision。/about-mkgo が「mk-go 1.3.0 (abc1234)」として出す (#2700)。
+# 同梱 frontend の版 (MkGoFrontendVersion) は、frontend を本体へ取り込んで版が
+# 本体と同じになったので廃止した (#3379)。
 #
 # **`$(shell ...)` は使わない。** make の parse 時に必ず走るので、target と
 # 無関係な `make help` でも git を呼ぶことになるうえ、`gaterun-check` が
@@ -295,7 +296,7 @@ endif
 #
 # git が無い / リポジトリ外でビルドした場合は空のまま。読む側が「不明」として
 # 扱うので、ここで `unknown` のような値を作らない (表示に出てしまう)。
-REVISION_LDFLAGS = -X github.com/shiroha-a/mk/internal/config.MkGoCommit=$$(git rev-parse --short HEAD 2>/dev/null) -X github.com/shiroha-a/mk/internal/config.MkGoFrontendVersion=$$(git -C third_party/misskey describe --tags 2>/dev/null)
+REVISION_LDFLAGS = -X github.com/shiroha-a/mk/internal/config.MkGoCommit=$$(git rev-parse --short HEAD 2>/dev/null)
 
 ##@ 開発
 plugins: ## plugins/ を走査して組み込み用ファイルを生成 (#2480)
@@ -781,7 +782,6 @@ uds-layout-check:
 # `.dockerignore` が `.git` を落とすので、コンテキストにリポジトリが入らない。
 uds-build: uds-layout-check | $(UDS_COMPOSE) $(UDS_CONFIG) ## UDS スタックのイメージをビルド
 	MKGO_COMMIT=$$(git rev-parse --short HEAD 2>/dev/null) \
-	MKGO_FRONTEND_VERSION=$$(git -C third_party/misskey describe --tags 2>/dev/null) \
 	docker compose -f $(UDS_COMPOSE) build
 
 uds-up: uds-layout-check | $(UDS_COMPOSE) $(UDS_CONFIG) ## UDS スタックを起動

@@ -999,12 +999,9 @@ func extractEmbeddedMeta(t *testing.T, body string) map[string]any {
 // fetchInstance を待たずに描けるので、こちらに無いと初回描画でだけ版が欠ける。
 func TestFrontendHTML_EmbedsBuildRevision(t *testing.T) {
 	// ldflags で埋める package 変数。プロセス共有なので必ず戻す (#2795)。
-	prevCommit, prevFrontend := config.MkGoCommit, config.MkGoFrontendVersion
-	t.Cleanup(func() {
-		config.MkGoCommit, config.MkGoFrontendVersion = prevCommit, prevFrontend
-	})
+	prevCommit := config.MkGoCommit
+	t.Cleanup(func() { config.MkGoCommit = prevCommit })
 	config.MkGoCommit = "abc1234"
-	config.MkGoFrontendVersion = "2026.9.0-mk.3"
 
 	cfg := &config.Config{URL: "https://example.test", Version: "0.0.1-test"}
 	repo := testutil.NewMockMetaRepository()
@@ -1018,7 +1015,7 @@ func TestFrontendHTML_EmbedsBuildRevision(t *testing.T) {
 
 	parsed := extractEmbeddedMeta(t, rec.Body.String())
 	assert.Equal(t, "abc1234", parsed["mkGoCommit"])
-	assert.Equal(t, "2026.9.0-mk.3", parsed["mkGoFrontendVersion"])
+	assert.NotContains(t, parsed, "mkGoFrontendVersion", "廃止した field (#3379)")
 }
 
 // SSR 埋め込み meta の providesTarball も /api/meta と同じく設定を無視して

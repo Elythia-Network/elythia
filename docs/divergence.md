@@ -100,7 +100,7 @@ upstream の endpoint は `endpoints/` 配下 438 件 + `ApiServerService.ts` �
 | `admin/queue/show-job` / `admin/queue/jobs` | `data` | mk-go は payload を `{"type": …, "body": <base64>}` で包んで保存するので、upstream のように Bull の `job.data` をそのまま返すと Data タブが base64 の塊になって読めない。**包みの形は保ったまま `body` だけ decode して返す** (#2689)。upstream の job data はそのまま読める形なので、この包みは mk-go 固有 |
 | `admin/queue/show-job` / `admin/queue/jobs` | `failedReason` / `returnValue` | **golden (upstream の宣言 schema) は required だが、upstream の実装自身が満たしていない。** Bull の job は失敗するまで `failedReason` を持たないので upstream の `packJobData` は `undefined` を返し、JSON からは消える。frontend は `v-if="job.failedReason != null"` / `job.returnValue != null` で出し分けるため、schema に寄せて空文字や `{}` を常に出すと**成功した job にも赤い警告アイコン付きの空の Failed reason 行と空の Return value タブ**が出る。upstream の**実装**に合わせて値が無ければ出さない (#2689)。golden は生成物なので直さず、テストは `shapetest.AssertExcept` で理由付きに例外化する |
 | `/api/meta` (+ SSR 埋め込み meta) | `mkGoVersion` | mk-go の実装バージョン。`version` は drop-in 互換のため**互換 Misskey バージョン**を返す契約 (第三者クライアントの feature detection / frontend `_error_.vue` の版ずれ検出が依存) なので別 field にした (#2274) |
-| `/api/meta` (+ SSR 埋め込み meta) | `mkGoCommit` / `mkGoFrontendVersion` | ビルドした revision (短縮ハッシュ) と、同梱した fork frontend の版 (`git describe --tags`、例 `2026.9.0-mk.3`)。`/about-mkgo` が「mk-go 1.3.0 (abc1234)」「Misskey 2026.9.0-mk.3」として出す (#2700)。**埋めるのはビルド側**で、`go run` や build-arg を渡さない `docker compose build` では空文字になる (キーは出す — 消すと「古い mk-go か埋め忘れか」を区別できない)。`.dockerignore` が `.git` を落とすので Dockerfile 内では git を呼べず、`make uds-build` / `make build` が値を渡す。**frontend を bind mount で差し替えた構成では `mkGoFrontendVersion` が実物とずれる** — 名乗っているのは「このバイナリをビルドしたときの submodule pin」で、`make uds-rebuild` のように両方を同時にビルドする経路でしか一致は保証されない |
+| `/api/meta` (+ SSR 埋め込み meta) | `mkGoCommit` | ビルドした revision (短縮ハッシュ)。`/about-mkgo` が「mk-go 1.3.0 (abc1234)」として出す (#2700)。**埋めるのはビルド側**で、`go run` や build-arg を渡さない `docker compose build` では空文字になる (キーは出す — 消すと「古い mk-go か埋め忘れか」を区別できない)。`.dockerignore` が `.git` を落とすので Dockerfile 内では git を呼べず、`make uds-build` / `make build` が値を渡す。以前は同梱した fork frontend の版 (`mkGoFrontendVersion`、`git describe --tags` の例 `2026.9.0-mk.3`) も出していたが、frontend を本体へ取り込んで版が本体と同じになったので廃止した (#3379) |
 | `/api/meta` (+ SSR 埋め込み meta) | `approvalRequiredForSignup` | 承認制の登録 (#2554 / #2555) の有効/無効。登録ページが分岐に使うので公開する (`emailRequiredForSignup` と同じ扱い)。**`features` 側にも出す** — frontend は `features` を feature detection に使うため、片方だけだと検出できない。`admin/meta` にも出す (管理画面のトグルが読む) |
 | `/api/meta` (+ SSR 埋め込み meta) / `admin/meta` | `registrationClosed` | 新規登録をどの経路からも受け付けない (#3186)。入口と登録画面が「招待制」ではなく「受け付けていない」と出すのに使う。**外から見える登録可否は本家の field で表す** — 閉じている間は `disableRegistration: true` / `features.registration: false`、nodeinfo も `openRegistrations: false` を返すので、この field を知らないクライアントやサーバー一覧も登録不可として扱う (列を直接書き換えられた場合にも備えて、返す側でも `registrationClosed` を見る)。閉じている間、`signup` (招待コード付きを含む) / `signup-application/apply` / `signup-application/register` / `signup-pending` は mk-go 独自のエラー `REGISTRATION_CLOSED` (403) を返す。招待コードの誤り (`INVITATION_CODE_INVALID`) と分けて、利用者がコードの打ち間違いと読まないようにするため。`signup-application/status` (照会) と `admin/accounts/create` は止めない |
 | `/api/meta` (+ SSR 埋め込み meta) | `signupApplicationForm` | 承認制の申請フォームの定義 (#2570)。申請ページが描画に使うので公開する。項目は `{ label, type, required, maxLength }` の配列で、未設定なら空配列。**回答のラベルはここから埋める** — クライアントに送らせると申請者が審査画面に偽のラベルを流し込める |
@@ -799,9 +799,11 @@ upstream が `jobState` の型を autogen (`AdminQueueJobsRequest['state'][numbe
 | `packages/i18n/src/autogen/locale.ts` | 生成物 (`pnpm --filter i18n generate`)。**`_abuseReportForm` の JSDoc も入る** — `2026.9.0-mk.1` が生成し直していなかった分で、次に誰がビルドしても出る差分 |
 
 **バージョンはバックエンドとフロントエンドを対で出す。** Go で書き直したのは
-バックエンドだけなので、`mk-go 1.3.0 (abc1234)` と `Misskey 2026.9.0-mk.3` が
-並ぶだけで構成が伝わる (それぞれ `mkGoCommit` / `mkGoFrontendVersion` を使う。
-§1-1b)。
+バックエンドだけなので、`mk-go 1.3.0 (abc1234)` と `Misskey 2026.10.0` (どちらも例) が
+並ぶだけで構成が伝わる (前者は `mkGoCommit` を使う。§1-1b)。フロントエンドの行は
+追従している本家の版 (frontend の `package.json`) を出す。以前は fork のタグ
+(`2026.9.0-mk.3`、`mkGoFrontendVersion`) を出していたが、frontend を本体へ取り込んで
+独自の版を持たなくなった (#3379)。
 
 **ソースコードの案内は 3 つのリポジトリを並べる。** upstream の `about-misskey` が
 「このサーバーの改変版リポジトリ / Misskey 原典」の 2 段なのに対し、mk-go では

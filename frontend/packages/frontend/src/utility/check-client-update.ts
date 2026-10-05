@@ -42,9 +42,9 @@ function bumped(current: string, last: string | null): boolean {
 // **mkGoVersion を基準にする (#2939)。** Misskey 側の版は upstream 追従のときしか
 // 動かないので、fork の変更を何度重ねても利用者には一度も出なかった。
 //
-// **frontend の fork タグ (mkGoFrontendVersion) では判定できない** — compareVersions は
-// 英字サフィックスを見ないので `mk.9a` と `mk.9` が等しい扱いになる (実測)。
-// mkGoVersion は素の semver なのでその問題が無い。
+// 以前あった frontend の fork タグ (mkGoFrontendVersion、#3379 で廃止) でも判定
+// できなかった — compareVersions は英字サフィックスを見ないので `mk.9a` と `mk.9` が
+// 等しい扱いになる (実測)。mkGoVersion は素の semver なのでその問題が無い。
 export function resolveClientUpdate(args: {
 	misskeyVersion: string;
 	mkGoVersion: string | null;

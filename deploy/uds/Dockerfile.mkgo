@@ -52,13 +52,12 @@ RUN test -f frontend/node_modules/@misskey-dev/emoji-assets/built/fluent-emoji/1
     (echo "ERROR: fluent-emoji assets not found (pnpm install not run?)." && \
      echo "Run: make uds-frontend-build (installs frontend/ node_modules)" && exit 1)
 
-# ビルドした revision と同梱 frontend の版を埋め込む (#2700)。**Dockerfile の
+# ビルドした revision を埋め込む (#2700)。**Dockerfile の
 # 中では git を呼べない** — `.dockerignore` が `.git` を落とすのでコンテキストに
 # リポジトリが入らない。渡し忘れたときは空のまま埋まり、/about-mkgo 側が
 # 「不明」として表示を省く (誤った値を出すよりよい)。
 ARG MKGO_COMMIT=
-ARG MKGO_FRONTEND_VERSION=
-ENV REVISION_LDFLAGS="-X github.com/shiroha-a/mk/internal/config.MkGoCommit=${MKGO_COMMIT} -X github.com/shiroha-a/mk/internal/config.MkGoFrontendVersion=${MKGO_FRONTEND_VERSION}"
+ENV REVISION_LDFLAGS="-X github.com/shiroha-a/mk/internal/config.MkGoCommit=${MKGO_COMMIT}"
 
 # Go の build cache + module cache を BuildKit cache mount として永続化 (#432)。
 #
