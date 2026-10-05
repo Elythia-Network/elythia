@@ -5,8 +5,9 @@ name: Docker
 # - develop / main への push と `v*` タグ push で実 push する。
 # - PR では build だけ行って、動く Dockerfile かどうかを検証する (push はしない)。
 #
-# image 名は `${{ github.repository }}` をそのまま使うので、upstream では
-# `ghcr.io/shiroha-a/mk`、fork では `ghcr.io/nananek/mk-go` になる。
+# image 名は `${{ github.repository }}` を小文字にしたもの。upstream では
+# `ghcr.io/shiroha-a/mk` (移管の後は `ghcr.io/elythia-network/elythia`)、
+# fork では `ghcr.io/nananek/mk-go` になる。
 
 on:
   push:
@@ -108,6 +109,13 @@ jobs:
       #   - `sha-<shortsha>` (immutable 参照用)
       #   - git tag (v* 押した時)
       #   - `latest` (default branch = develop への push 時)
+      # GHCR は image 名に大文字を受け付けない。移管先の organization
+      # (`Elythia-Network`) は大文字を含むので、小文字へ落とす (#3394)。
+      # metadata-action も images を小文字にするが、それに頼らず明示する
+      # (build-with-plugins.yml と同じ)。
+      - name: Lowercase image name
+        run: echo "IMAGE_NAME=${IMAGE_NAME,,}" >> "$GITHUB_ENV"
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
@@ -176,6 +184,13 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      # GHCR は image 名に大文字を受け付けない。移管先の organization
+      # (`Elythia-Network`) は大文字を含むので、小文字へ落とす (#3394)。
+      # metadata-action も images を小文字にするが、それに頼らず明示する
+      # (build-with-plugins.yml と同じ)。
+      - name: Lowercase image name
+        run: echo "IMAGE_NAME=${IMAGE_NAME,,}" >> "$GITHUB_ENV"
 
       - name: Extract metadata
         id: meta
