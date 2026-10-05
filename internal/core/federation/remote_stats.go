@@ -84,7 +84,7 @@ type cachedRemoteStats struct {
 // optional safehttp.Option (e.g. WithProxy)。
 //
 // userAgent は outbound request に set する User-Agent header 値で、通常は
-// `cfg.UserAgent` (= `mk-go/<ver> (<url>)` 形式) を渡す。空欄なら header は
+// `cfg.UserAgent` (= `Elythia/<ver> (<url>)` 形式) を渡す。空欄なら header は
 // 設定しない (= Go default の `Go-http-client/1.1` が送られる、test path)。
 //
 // urlpreview / mediaproxy と同じく safehttp 経由で組み立てる pattern (#943

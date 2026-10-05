@@ -30,6 +30,24 @@ var MisskeyVersion = "2026.10.0"
 //	go build -ldflags "-X github.com/elythia-network/elythia/internal/config.MkGoCommit=abc1234"
 var MkGoCommit = ""
 
+// SoftwareName is the machine-facing name of this software, used as the
+// nodeinfo `software.name` (#3394).
+//
+// 以前は `mk-go`。相手の名前で振る舞いを変える箇所は、旧名を名乗る版とも連合が
+// 続くので旧名も受け付ける (絵文字のメタ情報の取得先は LegacySoftwareName、
+// 画像プロキシのループ検出は LegacyUserAgentProduct)。
+const SoftwareName = "elythia"
+
+// LegacySoftwareName is the nodeinfo `software.name` used before #3394.
+const LegacySoftwareName = "mk-go"
+
+// UserAgentProduct is the product token of the outbound User-Agent
+// (`Elythia/<version> (<url>)`, #3394).
+const UserAgentProduct = "Elythia"
+
+// LegacyUserAgentProduct is the product token used before #3394.
+const LegacyUserAgentProduct = "mk-go"
+
 // MkGoRepositoryURL is the canonical source repository of mk-go itself.
 //
 // AGPL-3.0 section 13 で求められる「動いているコードに対応するソース」の案内は
@@ -553,7 +571,7 @@ type Config struct {
 //
 // **frontend 側は 2 箇所ある** (`about-misskey.vue` の tarball リンクと
 // `about.overview.vue` の `repositoryUrl || /tarball/...` フォールバック)。ルートを
-// 実装したときはこのメソッドを直すだけでは足りず、mk-go 独自の `about-mkgo.vue` にも
+// 実装したときはこのメソッドを直すだけでは足りず、mk-go 独自の `about-elythia.vue` にも
 // tarball の分岐を足す必要がある (現状は意図的に持っていない)。
 func (c *Config) ProvidesTarball() bool {
 	return false
@@ -858,7 +876,7 @@ func resolve(src *Source) (*Config, error) {
 		NSFWDetectorURL:              strings.TrimRight(src.NSFWDetectorURL, "/"),
 		NSFWDetectorAuthHeader:       src.NSFWDetectorAuthHeader,
 		NSFWDetectorTimeout:          src.NSFWDetectorTimeout,
-		UserAgent:                    fmt.Sprintf("mk-go/%s (%s)", MkGoVersion, src.URL),
+		UserAgent:                    fmt.Sprintf("%s/%s (%s)", UserAgentProduct, MkGoVersion, src.URL),
 		PerChannelMaxNoteCacheCount:  perChannelMaxNoteCacheCount,
 		PerUserNotificationsMaxCount: perUserNotificationsMaxCount,
 		DeactivateAntennaThreshold:   deactivateAntennaThreshold,

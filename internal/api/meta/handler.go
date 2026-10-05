@@ -168,7 +168,7 @@ func (h *Handler) buildMeta(detail bool) (map[string]any, error) {
 		// upstream の `localUsernameSchema` は `^\w{1,20}$` 固定なので
 		// 対応する field が無い。
 		"minimumUsernameLength": signup.EffectiveMinimumUsernameLength(m),
-		// ビルドした revision (#2700)。/about-mkgo が「mk-go 1.3.0 (abc1234)」として
+		// ビルドした revision (#2700)。/about-elythia が「Elythia 1.3.0 (abc1234)」として
 		// 出す。以前は同梱 frontend の版 (mkGoFrontendVersion) も出していたが、
 		// frontend を本体へ取り込んで版が本体と同じになったので廃止した (#3379)。
 		// **埋まっていないビルドでは空文字**になる (`go run` や build-arg を

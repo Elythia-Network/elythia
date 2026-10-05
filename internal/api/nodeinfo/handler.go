@@ -373,7 +373,7 @@ func (h *Handler) buildDocument(version string) map[string]any {
 	// を持ち、2.0 は repository を delete (homepage は残す)、2.1 は homepage=repository。
 	// mk-go は homepage=repository=softwareRepository で両 version に homepage を出す (#1925)。
 	software := map[string]any{
-		"name":     "mk-go",
+		"name":     config.SoftwareName,
 		"version":  config.MkGoVersion,
 		"homepage": softwareRepository,
 	}

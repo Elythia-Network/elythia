@@ -72,8 +72,8 @@ shape や挙動を検証する spec。
 1 件も無かった。むしろ `i/profile_extra.spec.ts` のように **mk-go 拡張を明示的に scope
 外としている** spec もある。
 
-`mkgo/` の 8 件はいずれも公式 image では通らない。`ui/about_mkgo.spec.ts` (#2700)
-は mk-go 固有ページ `/about-mkgo` を開く。`ui/boot_error_reload.spec.ts`
+`mkgo/` の 8 件はいずれも公式 image では通らない。`ui/about_elythia.spec.ts` (#2700)
+は mk-go 固有ページ `/about-elythia` を開く。`ui/boot_error_reload.spec.ts`
 (#2786) は fork の `2026.7.0-mk.22c` で足した `#mkBootReload` を見る。
 `ui/csp_enforce.spec.ts` (#2788) は mk-go 独自キー
 `frontendContentSecurityPolicy` が返す CSP header を見るので、公式 image では

@@ -122,7 +122,7 @@ services:
       # ビルドした revision (#2700)。Dockerfile 内では
       # `.dockerignore` が `.git` を落とすので git を呼べず、build-arg で渡す。
       # `make uds-build` が git から埋める。手で `docker compose build` を叩いた
-      # ときは空になり、/about-mkgo 側が表示を省く。
+      # ときは空になり、/about-elythia 側が表示を省く。
       args:
         MKGO_COMMIT: ${MKGO_COMMIT:-}
     depends_on:

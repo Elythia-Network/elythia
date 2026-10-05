@@ -129,7 +129,7 @@ DELETE の対象はこの残骸で、条件は
 
 #### `000084` について
 
-`meta."repositoryUrl"` が「未設定」のままだと、frontend の `/about-mkgo` と
+`meta."repositoryUrl"` が「未設定」のままだと、frontend の `/about-elythia` と
 `MkSourceCodeAvailablePopup` がソースコードの案内を出せない。AGPL-3.0 section 13 が
 求める案内が既定で存在しない状態なので埋める (#2700)。
 

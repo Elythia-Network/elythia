@@ -88,7 +88,7 @@ func newRequestCtx(method, target string) (echo.Context, *httptest.ResponseRecor
 func TestFetchRSS_BasicRSS2(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Contains(t, r.Header.Get("Accept"), "application/rss+xml")
-		// mk-go/<ver> 相当の UA が付くことを guard する。UA 必須の RSS
+		// Elythia/<ver> 相当の UA が付くことを guard する。UA 必須の RSS
 		// 配信サーバ (Cloudflare 含む) で 403 にならない契約の regression 検知。
 		assert.Equal(t, testUserAgent, r.Header.Get("User-Agent"))
 		w.Header().Set("Content-Type", "application/rss+xml")

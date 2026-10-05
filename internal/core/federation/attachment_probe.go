@@ -24,6 +24,7 @@ import (
 	// transitive deps).
 	_ "golang.org/x/image/webp"
 
+	"github.com/elythia-network/elythia/internal/config"
 	coredrive "github.com/elythia-network/elythia/internal/core/drive"
 )
 
@@ -83,7 +84,8 @@ func fetchAttachmentProbe(ctx context.Context, httpClient *http.Client, rawURL s
 		return attachmentProbe{}, fmt.Errorf("federation: build attachment request: %w", err)
 	}
 	// User-Agent を付けないと Cloudflare 等の WAF に弾かれることがあるので明示する。
-	req.Header.Set("User-Agent", "mk-go (+attachment-probe)")
+	// 名前は他の外向きの経路と同じ製品名にそろえる (#3394)。
+	req.Header.Set("User-Agent", config.UserAgentProduct+" (+attachment-probe)")
 	req.Header.Set("Range", fmt.Sprintf("bytes=0-%d", attachmentFetchMaxBytes-1))
 
 	resp, err := httpClient.Do(req)

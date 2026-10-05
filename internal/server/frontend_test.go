@@ -995,7 +995,7 @@ func extractEmbeddedMeta(t *testing.T, body string) map[string]any {
 	return parsed
 }
 
-// SSR 埋め込み meta にもビルドの revision を載せること (#2700)。/about-mkgo は
+// SSR 埋め込み meta にもビルドの revision を載せること (#2700)。/about-elythia は
 // fetchInstance を待たずに描けるので、こちらに無いと初回描画でだけ版が欠ける。
 func TestFrontendHTML_EmbedsBuildRevision(t *testing.T) {
 	// ldflags で埋める package 変数。プロセス共有なので必ず戻す (#2795)。

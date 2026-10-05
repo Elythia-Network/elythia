@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/safehttp"
 )
 
@@ -94,10 +95,10 @@ type misskeyEmojiResponse struct {
 // リモート絵文字の 88% を占める。
 func SupportsHost(softwareName string) bool {
 	switch strings.ToLower(strings.TrimSpace(softwareName)) {
-	// **mk-go 自身を落とさないこと。** mk-go の nodeinfo は `software.name = "mk-go"`
-	// (`internal/api/nodeinfo/handler.go`) で、`/api/emoji` は実装済み。落とすと
-	// mk-go 同士のインポートが常に unsupported になる。
-	case "misskey", "mk-go", "cherrypick", "sharkey", "yojo-art", "cluckey", "firefish", "iceshrimp":
+	// **自分自身を落とさないこと。** nodeinfo の `software.name` は `elythia`
+	// (#3394 より前の版は `mk-go`。`internal/config.SoftwareName`) で、`/api/emoji` は
+	// 実装済み。落とすと同じソフト同士のインポートが常に unsupported になる。
+	case "misskey", config.SoftwareName, config.LegacySoftwareName, "cherrypick", "sharkey", "yojo-art", "cluckey", "firefish", "iceshrimp":
 		return true
 	default:
 		return false

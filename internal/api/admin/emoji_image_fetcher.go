@@ -42,7 +42,7 @@ type EmojiImageFetcherImpl struct {
 
 // NewEmojiImageFetcher builds a fetcher bound to an SSRF-safe HTTP client and
 // the local drive service. userAgent should normally be cfg.UserAgent so feed
-// servers see the same `mk-go/<ver>` identification used everywhere else.
+// servers see the same `Elythia/<ver>` identification used everywhere else.
 func NewEmojiImageFetcher(httpClient *http.Client, driveSvc *drive.Service, userAgent string) *EmojiImageFetcherImpl {
 	return &EmojiImageFetcherImpl{
 		httpClient: httpClient,

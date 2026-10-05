@@ -103,9 +103,10 @@ func TestFetchAttachmentProbe_HTMLIsNotAnImage(t *testing.T) {
 }
 
 func TestFetchAttachmentProbe_RequestsOnlyTheHead(t *testing.T) {
-	var gotRange string
+	var gotRange, gotUA string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotRange = r.Header.Get("Range")
+		gotUA = r.Header.Get("User-Agent")
 		w.WriteHeader(http.StatusPartialContent)
 		_, _ = w.Write(renderTestPNG(t, 3, 3))
 	}))
@@ -115,6 +116,8 @@ func TestFetchAttachmentProbe_RequestsOnlyTheHead(t *testing.T) {
 	require.NoError(t, err, "206 を失敗扱いにしている")
 	assert.Equal(t, "image/png", p.MIME)
 	assert.Equal(t, "bytes=0-65535", gotRange)
+	// 相手のサーバーに出る名前 (#3394)。
+	assert.Equal(t, "Elythia (+attachment-probe)", gotUA)
 }
 
 // countingBody hands out 2MiB of zero bytes and records how much the caller

@@ -42,7 +42,7 @@
 | nodeinfo のプラグインの宣言 | `metadata.elythiaPlugins` |
 | 配布イメージ | `ghcr.io/elythia-network/elythia` (`-bundled` も同じ置き場所) |
 | 実行バイナリ | `elythia` (`cmd/elythia`、`built/elythia`) |
-| frontend のページ | `/about-elythia` (旧 `/about-mkgo` は転送) |
+| frontend のページ | `/about-elythia` (旧 `/about-mkgo` は転送しない。Q5) |
 
 | 対象 | 扱い |
 |---|---|

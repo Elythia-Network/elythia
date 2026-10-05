@@ -16,7 +16,7 @@ const defaultMetaID = "x"
 // singleton meta row is created.
 //
 // AGPL-3.0 section 13 が求める「動いているコードに対応するソース」の案内先で、
-// frontend は /about-mkgo と MkSourceCodeAvailablePopup でこれを読む。列 DEFAULT
+// frontend は /about-elythia と MkSourceCodeAvailablePopup でこれを読む。列 DEFAULT
 // (migration/000029) は upstream 互換のため misskey-dev/misskey のままだが、GORM は
 // *string の nil を NULL として明示挿入するので**列 DEFAULT は効かない**。ここで
 // 入れないと新規インスタンスの案内が空 (= 警告だけ) になる (#2700)。

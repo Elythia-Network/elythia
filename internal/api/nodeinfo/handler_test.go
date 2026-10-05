@@ -31,7 +31,7 @@ func TestVersion2_1(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	assert.Equal(t, "2.1", resp["version"])
 	sw := resp["software"].(map[string]any)
-	assert.Equal(t, "mk-go", sw["name"])
+	assert.Equal(t, "elythia", sw["name"])
 	assert.Equal(t, config.MkGoVersion, sw["version"])
 	// #1925: 2.1 は homepage=repository=softwareRepository。
 	assert.Equal(t, softwareRepository, sw["homepage"])
@@ -114,7 +114,7 @@ func TestVersion2_0(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	assert.Equal(t, "2.0", resp["version"])
 	sw := resp["software"].(map[string]any)
-	assert.Equal(t, "mk-go", sw["name"])
+	assert.Equal(t, "elythia", sw["name"])
 	_, hasRepo := sw["repository"]
 	assert.False(t, hasRepo, "schema 2.0 は software.repository を含めない")
 	// #1925: 2.0 は repository を delete するが homepage は残す。

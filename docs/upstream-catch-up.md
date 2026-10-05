@@ -176,7 +176,7 @@ frontend の取り込みと同じ PR で、版を次の場所で揃えて上げ�
 - `internal/config/config.go` の `MisskeyVersion`
 - e2e で TS 側として立てる `misskey/misskey:<版>` の tag (下の「比較対象の TS image を全部揃える」)
 
-上げたら `make upstream-fetch` で新しい版の本家を取得し、下の「本家の版を上げた後に必須」の節を順に済ませる (golden の再生成、TypeORM migrations seed、index golden など)。`frontend/package.json` の版は `make upstream-sync` が本家の差分として上げるので、手で直さない (`/about-mkgo` はこの版を出す)。
+上げたら `make upstream-fetch` で新しい版の本家を取得し、下の「本家の版を上げた後に必須」の節を順に済ませる (golden の再生成、TypeORM migrations seed、index golden など)。`frontend/package.json` の版は `make upstream-sync` が本家の差分として上げるので、手で直さない (`/about-elythia` はこの版を出す)。
 
 ### 2-6. backend の移植 (Wave 単位のコミット)
 

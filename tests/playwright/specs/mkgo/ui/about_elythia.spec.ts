@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-// /about-mkgo が AGPL-3.0 section 13 の案内として成立していることを実ブラウザで
+// /about-elythia が AGPL-3.0 section 13 の案内として成立していることを実ブラウザで
 // 見る (#2700)。
 //
-// **`mkgo/` に置く。** `/about-mkgo` は mk-go の frontend にしか無いので、公式 image
+// **`mkgo/` に置く。** `/about-elythia` は mk-go の frontend にしか無いので、公式 image
 // を使う `playwright-ts-test` では必ず 404 になる。
 //
 // Go 側のテストは `EnsureInitial` が repositoryUrl を入れることと meta が
@@ -31,7 +31,7 @@ const MKGO_REPOSITORY_URL = 'https://github.com/shiroha-a/mk';
 // #3379 で frontend を本体へ取り込む前に、frontend のソースとして案内していた fork。
 const OLD_FRONTEND_REPOSITORY_URL = 'https://github.com/shiroha-a/misskey-ts';
 
-test.describe('UI: /about-mkgo', () => {
+test.describe('UI: /about-elythia', () => {
   test.setTimeout(60_000);
 
   // ページの前提。meta が空だとページ側はリンクを 1 本落とすだけなので、
@@ -50,15 +50,15 @@ test.describe('UI: /about-mkgo', () => {
     expect(meta.providesTarball, 'providesTarball が true。mk-go に /tarball/ は無い').toBe(false);
   });
 
-  test('renders the mk-go page with source, license and Misskey attribution', async ({ page, baseURL }) => {
-    const resp = await page.goto(`${baseURL}/about-mkgo`, { waitUntil: 'domcontentloaded' });
+  test('renders the Elythia page with source, license and Misskey attribution', async ({ page, baseURL }) => {
+    const resp = await page.goto(`${baseURL}/about-elythia`, { waitUntil: 'domcontentloaded' });
     expect(resp!.status()).toBe(200);
 
     // **このサーバーが動かしているコードの案内。** repositoryUrl が未設定
     // (NULL / 空 / upstream の列 DEFAULT のまま) だとページ側が落とすので、
     // EnsureInitial と migration 000084 の回帰はここで落ちる。mk-go 本体への
     // リンクとは href が一致しうるため、`data-testid` で区別する。
-    const serverSource = page.locator('[data-testid="about-mkgo-server-source"] a');
+    const serverSource = page.locator('[data-testid="about-elythia-server-source"] a');
     await expect(serverSource).toBeVisible({ timeout: 20_000 });
     await expect(serverSource).toHaveAttribute('href', /^https?:\/\//);
 
@@ -76,21 +76,21 @@ test.describe('UI: /about-mkgo', () => {
     await expect(page.locator('a[href="/about-misskey"]')).toBeVisible();
   });
 
-  // **tarball リンクを見るのは /about-misskey と /about。** `about-mkgo.vue` は
+  // **tarball リンクを見るのは /about-misskey と /about。** `about-elythia.vue` は
   // tarball の分岐を持たないので、そこで数えても常に 0 で空振りする。この 2 つが
   // `instance.providesTarball` を読む唯一の場所 (fork 全体を grep して確認)。
   test('no tarball link is rendered even though the config enables it', async ({ page, baseURL }) => {
     await page.goto(`${baseURL}/about-misskey`, { waitUntil: 'domcontentloaded' });
     // ページの mount を待ってから数える (mount 前は何も無いので必ず 0 になる)。
-    await expect(page.locator('a[href="/about-mkgo"]')).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('a[href="/about-elythia"]')).toBeVisible({ timeout: 20_000 });
     await expect(page.locator('a[href^="/tarball/"]')).toHaveCount(0);
 
     await page.goto(`${baseURL}/about`, { waitUntil: 'domcontentloaded' });
-    await expect(page.locator('a[href="/about-mkgo"]').first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('a[href="/about-elythia"]').first()).toBeVisible({ timeout: 20_000 });
     await expect(page.locator('a[href^="/tarball/"]')).toHaveCount(0);
   });
 
-  // エントランス右上の GitHub リボン。#2700 が導線 3 箇所を `/about-mkgo` へ向けた
+  // エントランス右上の GitHub リボン。#2700 が導線 3 箇所を `/about-elythia` へ向けた
   // ときの取りこぼしで、#2890 で直した。**upstream が触るファイルの 1 行**なので、
   // 追従で元の外部リンク (Misskey 本体のリポジトリ) に戻されたらここで落ちる。
   //
@@ -105,17 +105,17 @@ test.describe('UI: /about-mkgo', () => {
     // いない構造で、実際には svg が右上に描画されクリックも届く)。
     // href の一致で行き先を固定し、描画は svg 側で見る。
     const ribbon = page.locator('a.github-corner');
-    await expect(ribbon).toHaveAttribute('href', '/about-mkgo', { timeout: 20_000 });
+    await expect(ribbon).toHaveAttribute('href', '/about-elythia', { timeout: 20_000 });
     await expect(page.locator('a.github-corner svg')).toBeVisible();
   });
 
-  test('navigates from /about-mkgo to /about-misskey and back', async ({ page, baseURL }) => {
-    await page.goto(`${baseURL}/about-mkgo`, { waitUntil: 'domcontentloaded' });
+  test('navigates from /about-elythia to /about-misskey and back', async ({ page, baseURL }) => {
+    await page.goto(`${baseURL}/about-elythia`, { waitUntil: 'domcontentloaded' });
     await page.locator('a[href="/about-misskey"]').first().click();
     await page.waitForURL('**/about-misskey', { timeout: 20_000 });
 
     // 逆向きの導線。upstream のページからも mk-go 側へ戻れること。
-    await page.locator('a[href="/about-mkgo"]').first().click();
-    await page.waitForURL('**/about-mkgo', { timeout: 20_000 });
+    await page.locator('a[href="/about-elythia"]').first().click();
+    await page.waitForURL('**/about-elythia', { timeout: 20_000 });
   });
 });

@@ -114,7 +114,7 @@ type cacheEntry struct {
 // string. Pass a client whose Transport is safehttp.NewSSRFSafeTransport(...)
 // so private IPs and non-http(s) schemes never leak through this endpoint.
 // userAgent should normally be cfg.UserAgent so feed servers see the same
-// `mk-go/<ver>` identification used everywhere else.
+// `Elythia/<ver>` identification used everywhere else.
 func New(httpClient *http.Client, userAgent string) *Handler {
 	return &Handler{
 		httpClient: httpClient,
@@ -461,7 +461,7 @@ func (h *Handler) fetchFeed(ctx context.Context, feedURL string) (*gofeed.Feed, 
 	req.Header.Set("Accept", "application/rss+xml, */*")
 	if h.userAgent != "" {
 		// UA 必須の RSS 配信サーバ (Cloudflare 含む) で 403 にならないように
-		// するため、他の outbound 経路と同じ mk-go/<ver> UA を送る。
+		// するため、他の outbound 経路と同じ Elythia/<ver> UA を送る。
 		req.Header.Set("User-Agent", h.userAgent)
 	}
 

@@ -76,11 +76,14 @@ func (h *Handler) Handle(c echo.Context) error {
 	if ua == "" {
 		return c.String(http.StatusBadRequest, "User-Agent is required")
 	}
-	// #2106 L43: mk-go の outbound UA は "mk-go/" 始まり (#774 で Misskey/ から rename)。
-	// upstream の "misskey/" 判定だけだと自身の proxy 経由リクエストを recursive 検出できず
-	// loop/増幅防御が効かないため両方を見る。
+	// #2106 L43: 自身の outbound UA は "Elythia/" 始まり (#3394。それより前は "mk-go/"、
+	// #774 で Misskey/ から rename)。upstream の "misskey/" 判定だけだと自身の proxy 経由
+	// リクエストを recursive 検出できず loop/増幅防御が効かないため、どれも見る。旧名は
+	// 改名より前の版を動かしている相手のために残す。
 	lowerUA := strings.ToLower(ua)
-	if strings.Contains(lowerUA, "misskey/") || strings.Contains(lowerUA, "mk-go/") {
+	if strings.Contains(lowerUA, "misskey/") ||
+		strings.Contains(lowerUA, strings.ToLower(config.UserAgentProduct)+"/") ||
+		strings.Contains(lowerUA, config.LegacyUserAgentProduct+"/") {
 		return c.String(http.StatusForbidden, "Proxy is recursive")
 	}
 

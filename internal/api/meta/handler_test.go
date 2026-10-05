@@ -775,8 +775,8 @@ func TestMeta_ExposesMkGoVersionSeparately(t *testing.T) {
 	assert.NotEqual(t, resp["version"], resp["mkGoVersion"], "両者は別物として出す")
 }
 
-// ビルドした revision を additive に出すこと (#2700)。/about-mkgo が
-// 「mk-go 1.3.0 (abc1234)」として使う。同梱 frontend の版 (mkGoFrontendVersion) は
+// ビルドした revision を additive に出すこと (#2700)。/about-elythia が
+// 「Elythia 1.3.0 (abc1234)」として使う。同梱 frontend の版 (mkGoFrontendVersion) は
 // frontend を本体へ取り込んで版が本体と同じになったので出さない (#3379)。
 func TestMeta_ExposesBuildRevision(t *testing.T) {
 	// ldflags で埋める package 変数なので、テストからは書き換えて戻す。

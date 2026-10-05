@@ -9,7 +9,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 	<div class="_spacer" style="--MI_SPACER-w: 600px; --MI_SPACER-min: 20px;">
 		<div class="_gaps_m">
 			<div v-panel :class="$style.banner">
-				<div :class="$style.bannerName">mk-go</div>
+				<div :class="$style.bannerName">Elythia</div>
 				<div v-if="mkGoVersion" :class="$style.bannerVersion">v{{ mkGoVersion }}</div>
 			</div>
 
@@ -53,14 +53,14 @@ SPDX-License-Identifier: AGPL-3.0-only
 			<FormSection>
 				<template #label>{{ i18n.ts.sourceCode }}</template>
 				<div class="_gaps_s">
-					<FormLink v-if="serverRepositoryUrl" data-testid="about-mkgo-server-source" :to="serverRepositoryUrl" external>
+					<FormLink v-if="serverRepositoryUrl" data-testid="about-elythia-server-source" :to="serverRepositoryUrl" external>
 						<template #icon><i class="ti ti-code"></i></template>
 						{{ i18n.ts._aboutMkGo.sourceCodeOfThisServer }}
 					</FormLink>
 					<div v-if="serverRepositoryUrl" :class="$style.caption">
 						{{ i18n.ts._aboutMkGo.sourceCodeOfThisServerDescription }}
 					</div>
-					<FormLink v-if="serverRepositoryUrl !== MKGO_REPOSITORY_URL" data-testid="about-mkgo-upstream-source" :to="MKGO_REPOSITORY_URL" external>
+					<FormLink v-if="serverRepositoryUrl !== MKGO_REPOSITORY_URL" data-testid="about-elythia-upstream-source" :to="MKGO_REPOSITORY_URL" external>
 						<template #icon><i class="ti ti-brand-golang"></i></template>
 						{{ i18n.ts._aboutMkGo.sourceCodeOfMkGo }}
 						<template #suffix>GitHub</template>
@@ -150,11 +150,11 @@ const mkGoMeta = instance as typeof instance & {
 const mkGoVersion = mkGoMeta.mkGoVersion ?? null;
 
 // バックエンドの版。ビルド時に revision を埋めていれば短縮ハッシュを添える
-// (`mk-go 1.3.0 (abc1234)`)。`go run` や build-arg を渡さない image では空に
+// (`Elythia 1.3.0 (abc1234)`)。`go run` や build-arg を渡さない image では空に
 // なるので、そのときは版だけ出す。
 const backendVersion = computed(() => {
 	const commit = mkGoMeta.mkGoCommit;
-	return commit ? `mk-go ${mkGoVersion} (${commit})` : `mk-go ${mkGoVersion}`;
+	return commit ? `Elythia ${mkGoVersion} (${commit})` : `Elythia ${mkGoVersion}`;
 });
 
 // フロントエンドの版。build 時定数 (= 追従している本家の package.json の版) を出す。

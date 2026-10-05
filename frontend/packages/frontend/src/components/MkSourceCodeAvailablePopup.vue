@@ -28,7 +28,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 			<I18n :src="i18n.ts.correspondingSourceIsAvailable" tag="span">
 				<template #anchor>
 					<!-- mk-go: ソースの案内は mk-go 側のページが持つ (#2700) -->
-					<MkA to="/about-mkgo" class="_link">{{ i18n.ts.aboutMkGo }}</MkA>
+					<MkA to="/about-elythia" class="_link">{{ i18n.ts.aboutMkGo }}</MkA>
 				</template>
 			</I18n>
 		</div>

@@ -454,7 +454,7 @@ popularTags: "人気のタグ"
 userList: "リスト"
 about: "情報"
 aboutMisskey: "Misskeyについて"
-aboutMkGo: "mk-goについて"
+aboutMkGo: "Elythiaについて"
 administrator: "管理者"
 token: "確認コード"
 2fa: "二要素認証"
@@ -924,7 +924,7 @@ troubleshooting: "トラブルシューティング"
 useBlurEffect: "UIにぼかし効果を使用"
 learnMore: "詳しく"
 misskeyUpdated: "Misskeyが更新されました！"
-mkGoUpdated: "mk-goが更新されました！"
+mkGoUpdated: "Elythiaが更新されました！"
 whatIsNew: "更新情報を見る"
 translate: "翻訳"
 translatedFrom: "{x}から翻訳"
@@ -2342,12 +2342,12 @@ _aboutMisskey:
   projectMembers: "プロジェクトメンバー"
 
 _aboutMkGo:
-  about: "mk-goは、Misskey互換のバックエンド実装です。"
+  about: "Elythiaは、Misskey互換のバックエンド実装です。"
   backend: "バックエンド"
   frontend: "フロントエンド"
   sourceCodeOfThisServer: "このサーバーのソースコード"
   sourceCodeOfThisServerDescription: "このサーバーで実際に動作しているコードです。改変されている場合は、改変後のコードがここから入手できます。"
-  sourceCodeOfMkGo: "mk-go本体(バックエンドとフロントエンド)"
+  sourceCodeOfMkGo: "Elythia本体(バックエンドとフロントエンド)"
   sourceCodeOfFrontend: "フロントエンド(Misskeyのフォーク)"
   license: "ライセンス"
   contributors: "コントリビューター"
@@ -4077,7 +4077,7 @@ _mkgoIpRelated:
 _driveUsage:
   tab: "使用量"
   databaseOnly: "ここに出るのはデータベースが把握している量 (drive_fileのsizeの合計) です。オブジェクトストレージに実際に置かれている量とは、削除の失敗や孤児があればずれます。"
-  unavailable: "使用量を取得できませんでした。純正のMisskeyバックエンドにはこの機能がないため常に取得できません。mk-goで出ない場合はサーバーのログを確認してください。"
+  unavailable: "使用量を取得できませんでした。純正のMisskeyバックエンドにはこの機能がないため常に取得できません。Elythiaで出ない場合はサーバーのログを確認してください。"
   byKind: "種類別"
   byKindNote: "「添付・アップロード」は利用者のドライブにある実体すべてです。一度も添付していないファイルも含みます。"
   byHost: "ホスト別 (上位{n}件)"
@@ -4085,7 +4085,7 @@ _driveUsage:
   files: "{n}件"
   linkOnly: "うち実体なし{n}件"
   nothing: "対象がありません。"
-  remoteNoBytes: "リモートの{n}件はすべて実体を持たない参照です。mk-goはリモートメディアをローカルにキャッシュしないため、使用量には乗りません。"
+  remoteNoBytes: "リモートの{n}件はすべて実体を持たない参照です。Elythiaはリモートメディアをローカルにキャッシュしないため、使用量には乗りません。"
   calculatedAt: "集計: {at} ({ms}ms)"
   _kind:
     attachment: "添付・アップロード"
@@ -4095,7 +4095,7 @@ _driveUsage:
     other: "その他"
 
 _mkgoUnsupported:
-  remoteMediaCache: "mk-goはリモートメディアをローカルにキャッシュしない設計のため、この設定は動作しません。相手サーバーが削除したメディアの複製を保持しないこと、および他サーバー由来のコンテンツを自サーバーのストレージに保存しないことを優先しています。値はMisskeyへ戻したときのために保存されます。"
+  remoteMediaCache: "Elythiaはリモートメディアをローカルにキャッシュしない設計のため、この設定は動作しません。相手サーバーが削除したメディアの複製を保持しないこと、および他サーバー由来のコンテンツを自サーバーのストレージに保存しないことを優先しています。値はMisskeyへ戻したときのために保存されます。"
 
 _mkgoCleanRemoteFiles:
   noTarget: "削除対象なし"

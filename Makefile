@@ -275,7 +275,7 @@ ifneq ($(MISSKEY_VERSION),)
 LDFLAGS += -X github.com/elythia-network/elythia/internal/config.MisskeyVersion=$(MISSKEY_VERSION)
 endif
 
-# ビルドした revision。/about-mkgo が「mk-go 1.3.0 (abc1234)」として出す (#2700)。
+# ビルドした revision。/about-elythia が「Elythia 1.3.0 (abc1234)」として出す (#2700)。
 # 同梱 frontend の版 (MkGoFrontendVersion) は、frontend を本体へ取り込んで版が
 # 本体と同じになったので廃止した (#3379)。
 #
