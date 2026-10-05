@@ -25,7 +25,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 		</div>
 	</div>
 
-	<div :class="$style.version">mk-go {{ metrics.version.mkGo }} / Misskey {{ metrics.version.misskey }}</div>
+	<div :class="$style.version">Elythia {{ metrics.version.mkGo }} / Misskey {{ metrics.version.misskey }}</div>
 </div>
 </template>
 

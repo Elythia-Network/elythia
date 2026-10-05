@@ -227,9 +227,10 @@ export const ROUTE_DEF = [{
 	path: '/about-misskey',
 	component: page(() => import('@/pages/about-misskey.vue')),
 }, {
-	// mk-go: 実際に動いている実装の説明とソースコードの案内 (#2700)
-	path: '/about-mkgo',
-	component: page(() => import('@/pages/about-mkgo.vue')),
+	// mk-go: 実際に動いている実装の説明とソースコードの案内 (#2700)。
+	// 改名 (#3394) で /about-mkgo から移した。旧 URL は転送しない (設計 Q5)
+	path: '/about-elythia',
+	component: page(() => import('@/pages/about-elythia.vue')),
 }, {
 	// mk-go: カスタム絵文字の登録申請 (#2934)。**loginRequired にする** —
 	// 申請も一覧も自分のアカウントに紐づくので、ログアウト状態で開いても

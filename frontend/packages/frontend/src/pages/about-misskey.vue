@@ -18,7 +18,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 							ただし実際に動いているのは mk-go なので、実装の版も併記する (#2274)。
 							純正 backend では mkGoVersion が無いため表示されない。
 						-->
-						<div v-if="mkGoVersion" class="mkGoVersion">mk-go v{{ mkGoVersion }}</div>
+						<div v-if="mkGoVersion" class="mkGoVersion">Elythia v{{ mkGoVersion }}</div>
 						<span v-for="emoji in easterEggEmojis" :key="emoji.id" class="emoji" :data-physics-x="emoji.left" :data-physics-y="emoji.top" :class="{ _physics_circle_: !emoji.emoji.startsWith(':') }">
 							<MkCustomEmoji v-if="emoji.emoji[0] === ':'" class="emoji" :name="emoji.emoji" :normal="true" :noStyle="true" :fallbackToImage="true"/>
 							<MkEmoji v-else class="emoji unicode" :emoji="emoji.emoji" :normal="true" :noStyle="true"/>
@@ -36,7 +36,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 					upstream が頻繁に更新するので、書き換えると追従のたびに手で
 					コンフリクトを解くことになる。
 				-->
-				<FormLink to="/about-mkgo">
+				<FormLink to="/about-elythia">
 					<template #icon><i class="ti ti-info-circle"></i></template>
 					{{ i18n.ts.aboutMkGo }}
 				</FormLink>

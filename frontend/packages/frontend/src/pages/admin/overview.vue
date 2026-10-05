@@ -13,7 +13,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 		<!-- mk-go 独自。プロセスの健康状態は他の統計より先に目に入る位置に置く。 -->
 		<MkFoldableSection class="item">
-			<template #header>mk-go</template>
+			<template #header>Elythia</template>
 			<XMkGo/>
 		</MkFoldableSection>
 

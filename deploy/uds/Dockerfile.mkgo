@@ -54,7 +54,7 @@ RUN test -f frontend/node_modules/@misskey-dev/emoji-assets/built/fluent-emoji/1
 
 # ビルドした revision を埋め込む (#2700)。**Dockerfile の
 # 中では git を呼べない** — `.dockerignore` が `.git` を落とすのでコンテキストに
-# リポジトリが入らない。渡し忘れたときは空のまま埋まり、/about-mkgo 側が
+# リポジトリが入らない。渡し忘れたときは空のまま埋まり、/about-elythia 側が
 # 「不明」として表示を省く (誤った値を出すよりよい)。
 ARG MKGO_COMMIT=
 ENV REVISION_LDFLAGS="-X github.com/elythia-network/elythia/internal/config.MkGoCommit=${MKGO_COMMIT}"

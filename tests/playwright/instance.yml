@@ -63,7 +63,7 @@ frontendContentSecurityPolicy: enforce
 
 # **意図的に有効にしてある。** mk-go は /tarball/ を配信しないので、この設定が
 # 効いてしまうと frontend が `/tarball/misskey-<version>.tar.gz` へのリンクを出し、
-# SPA catchall が HTML を 200 で返す (404 にすらならない)。`about_mkgo.spec.ts` が
+# SPA catchall が HTML を 200 で返す (404 にすらならない)。`about_elythia.spec.ts` が
 # 「設定が true でも providesTarball は false で、tarball リンクが 1 本も出ない」
 # ことを見るので、ここを false に戻すとその検査が空振りする (#2700)。
 #

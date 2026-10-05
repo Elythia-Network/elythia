@@ -132,7 +132,7 @@ $L 2>&1 | grep msg=csp-report | grep -oE 'documentUri=\S+' | sort | uniq -c
 の枚数と一致する (contributor 6 + sponsors 6 + patron 50)。`loading="lazy"` も
 `v-if` も折りたたみも無いので、ページを開いた時点で全部読まれる。上の 124 件は
 spec が `/about-misskey` を 2 回開いた時点の実測で、**#2700 の
-`specs/mkgo/ui/about_mkgo.spec.ts` が 2 回開くようになったので現在は 4 回**
+`specs/mkgo/ui/about_elythia.spec.ts` が 2 回開くようになったので現在は 4 回**
 (件数は 248 前後になる)。**開く回数を変えたらこの数も動く** — 内訳の妥当性は
 「62 × 開いた回数」で確かめること。
 
@@ -157,7 +157,7 @@ host を読ませる経路は開かない。**上の内訳と件数は #2892 よ
 proxy ではなく、allowlist は DB に実在する URL だけを通すので、静的にハードコード
 された URL は 403 になる (実測)。謝辞を残す以上、CSP を足す以外に表示させる道が無い。
 
-mk-go 独自の `/about-mkgo` がコントリビューターをテキストリンクにしてあるのは別の
+mk-go 独自の `/about-elythia` (#3394 より前は `/about-mkgo`) がコントリビューターをテキストリンクにしてあるのは別の
 理由 (新規ファイルなので最初から外部画像を持たせる必要が無い)。
 
 ### embed も enforce の対象

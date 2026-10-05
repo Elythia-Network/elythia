@@ -29,7 +29,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 				純正 backend では mkGoVersion が無いので従来どおり Misskey 行だけになる。
 			-->
 			<MkKeyValue v-if="mkGoVersion" :copy="mkGoVersion">
-				<template #key>mk-go</template>
+				<template #key>Elythia</template>
 				<template #value>{{ mkGoVersion }}</template>
 			</MkKeyValue>
 			<MkKeyValue :copy="serverMisskeyVersion">
@@ -38,7 +38,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 			</MkKeyValue>
 			<div v-html="i18n.tsx.poweredByMisskeyDescription({ name: instance.name ?? host })">
 			</div>
-			<FormLink to="/about-mkgo">
+			<FormLink to="/about-elythia">
 				<template #icon><i class="ti ti-info-circle"></i></template>
 				{{ i18n.ts.aboutMkGo }}
 			</FormLink>

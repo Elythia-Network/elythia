@@ -18,7 +18,7 @@
 	"divergences": [
 		{
 			"file": "test/e2e/nodeinfo.ts",
-			"reason": "software.name は mk-go 自身を名乗る。実装の識別子であって互換性の対象ではない (連合先が Misskey として扱えるかは softwareName ではなく AP の shape で決まる)。",
+			"reason": "software.name は自身の名前 (elythia。#3394 より前は mk-go) を名乗る。実装の識別子であって互換性の対象ではない (連合先が Misskey として扱えるかは softwareName ではなく AP の shape で決まる)。",
 			"names": [
 				"nodeinfo > nodeinfo 2.1",
 				"nodeinfo > nodeinfo 2.0"

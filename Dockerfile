@@ -64,7 +64,7 @@ RUN test -f frontend/node_modules/@misskey-dev/emoji-assets/built/twemoji/1f004.
 #
 # ビルドした revision を埋め込む (#2700)。**Dockerfile の
 # 中では git を呼べない** — `.dockerignore` が `.git` を落とすのでコンテキストに
-# リポジトリが入らない。渡し忘れたときは空のまま埋まり、/about-mkgo 側が
+# リポジトリが入らない。渡し忘れたときは空のまま埋まり、/about-elythia 側が
 # 「不明」として表示を省く。
 #
 # plugins/ に置かれたプラグインをビルドに取り込む (#2480)。生成物は gitignore

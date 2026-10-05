@@ -29,7 +29,7 @@ META_IGNORE = DEFAULT_IGNORE_KEYS | {
     # バージョンを返す契約なので、mk-go の実装版は別 field にしている (#2274)。
     # TS 側に存在しないのが仕様。
     "mkGoVersion",
-    # ビルドした revision (#2700)。/about-mkgo が「mk-go 1.3.0 (abc1234)」として
+    # ビルドした revision (#2700)。/about-elythia が「Elythia 1.3.0 (abc1234)」として
     # 出す。TS 側に
     # 対応物が無い。docs/divergence.md に additive field として記載済み。
     # **埋め込みの無いビルドでは空文字**になるので、値ではなくキーごと無視する

@@ -393,7 +393,7 @@ worker 数は既定値がキューごとに違い、`stuck 検出` は**キュ�
   ok    redis        接続 ok
   FAIL  webfinger    status 403 (連合が無効)
         インスタンス設定の `federation` が `none` になっている。連合するなら管理画面で有効にする
-  ok    nodeinfo     mk-go 1.5.0
+  ok    nodeinfo     elythia 1.5.0
   warn  actor        assertionMethod (Ed25519) が無い
         RSA だけでも連合できる。Ed25519 を公開すると対応実装との署名検証が軽くなる
   ok    tls          証明書の残り 68 日

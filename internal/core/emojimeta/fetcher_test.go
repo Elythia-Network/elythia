@@ -10,13 +10,15 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/elythia-network/elythia/internal/config"
 )
 
 func TestSupportsHost(t *testing.T) {
 	// 本番の実測でリモート絵文字の 91% を占める。**実際に叩いて 200 を確認した
 	// software だけを入れる** — 推測で足すと 404 を待つ時間と相手の負荷が無駄になる。
 	// 大文字混じりの値が実在する (`Iceshrimp.NET`) ので lowercase 比較。
-	for _, sw := range []string{"misskey", "Misskey", " cherrypick ", "sharkey", "yojo-art", "mk-go", "cluckey", "firefish", "iceshrimp"} {
+	for _, sw := range []string{"misskey", "Misskey", " cherrypick ", "sharkey", "yojo-art", "elythia", "mk-go", "cluckey", "firefish", "iceshrimp"} {
 		assert.True(t, SupportsHost(sw), "%q は per-name endpoint を持つ", sw)
 	}
 	// Mastodon 系は per-name endpoint が無い。一覧取得は実装しないので不支持。
@@ -217,10 +219,11 @@ func TestFetch_RejectsHostWithSeparators(t *testing.T) {
 	}
 }
 
-// mk-go 自身も per-name endpoint を持つ。落とすと mk-go 同士のインポートが
-// 常に unsupported になる。
-func TestSupportsHost_IncludesMkGo(t *testing.T) {
-	assert.True(t, SupportsHost("mk-go"))
+// 自分自身も per-name endpoint を持つ。落とすと同じソフト同士のインポートが常に
+// unsupported になる。改名 (#3394) より前の版の名前も受け付ける。
+func TestSupportsHost_IncludesSelf(t *testing.T) {
+	assert.True(t, SupportsHost(config.SoftwareName))
+	assert.True(t, SupportsHost(config.LegacySoftwareName))
 }
 
 // `Fetch` が host から URL を組んで取得するところまでを通す。

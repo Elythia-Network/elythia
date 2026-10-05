@@ -144,7 +144,7 @@ class TestNodeInfo:
     def test_mkgo_nodeinfo(self, mkgo: MisskeyLikeClient, alice: dict) -> None:
         info = mkgo.nodeinfo()
         assert "software" in info
-        assert info["software"]["name"].lower() in {"misskey", "mk-go", "mkgo", "mk"}
+        assert info["software"]["name"].lower() in {"misskey", "elythia", "mk-go", "mkgo", "mk"}
         assert "protocols" in info
         assert "activitypub" in info["protocols"]
 

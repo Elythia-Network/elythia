@@ -179,7 +179,7 @@ make frontend-lint / frontend-test   # frontend/のeslint / vitest
 
 - **レスポンスのフィールド名・型・エラーコード・エラーIDは、本家と一致させる。** 独自の拡張は追加だけにする(冒頭の方針)
 - 版は`internal/config/config.go`の`MisskeyVersion` / `MkGoVersion`で管理する
-- User-Agentは`mk-go/<version> (<url>)`の形にする
+- User-Agentは`Elythia/<version> (<url>)`の形にする(`internal/config.UserAgentProduct`。#3394より前は`mk-go`)
 - IDは`internal/misc/id/`のジェネレータで作る(既定は`aidx`)。モデルから直接`uuid`を呼ばない
 - 内部エラーは`slog`で記録し、利用者には汎用のメッセージを返す
 - Redisは用途ごとに別のクライアントとして扱う(`default` / `pubsub` / `jobQueue` / `timelines` / `reactions`)。接続先が同じでも分ける
@@ -301,6 +301,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 
 このファイル自体を変えたときだけ、1行で追記します(新しいものを上に)。経緯の本文はリンク先にあります。個別のfixの履歴は`CHANGELOG.md`にあります。
 
+- 2026-10-06: User-Agentを`Elythia/<version> (<url>)`にしたので、Section 6を更新した (#3394) → [docs/divergence.md](docs/divergence.md)
 - 2026-10-05: 実行バイナリを`elythia`1つにまとめたので、Section 2の構成、Section 3の`make tidy`の行、Section 9の`migrate`の行を更新した (#3394) → [docs/design/project-restructure.md](docs/design/project-restructure.md)
 - 2026-10-05: submodule(`third_party/misskey`)を外したので、Section 2の構成とSection 8の`build`の行を更新した (#3379) → [docs/divergence.md](docs/divergence.md#4-2b-frontend-の独自変更-3379-で取り込んだ後)
 - 2026-10-05: `frontend`をrequired checkにし、`ci.yml`の`frontend-check` jobをそこへまとめた。Section 3 / 5 / 8に反映し、Section 5にfrontendの節と`.claude/rules/frontend.md`を足した (#3379) → [docs/ci.md](docs/ci.md)
