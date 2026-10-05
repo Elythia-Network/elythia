@@ -2,6 +2,7 @@ package mediaproxy
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/shiroha-a/mk/internal/testutil"
@@ -130,4 +131,70 @@ func TestDBAllowlistChecker_UserBannerURL(t *testing.T) {
 	ok, err := checker.IsAllowedURL(ctx, "https://remote.example/banner-allow.png")
 	assert.NoError(t, err)
 	assert.True(t, ok)
+}
+
+// TestAllowlistQueryUsesIndexes checks that every table in the allowlist query
+// can be answered from indexes.
+//
+// **OR でつないだ列のうち 1 列でも index が無いと、そのテーブルは全件走査になる**
+// (#3383。本番で画像 1 枚ごとに 7,383 ページを読んでいた)。テストの DB は小さく、
+// planner は放っておくと index があっても seq scan を選ぶので、`enable_seqscan` を
+// 切って「index で答えられるか」だけを見る。切っても index が無ければ Seq Scan が
+// 残る (コストを大きくするだけで、禁止はしない)。
+//
+// **見ているのは「index で引けるか」まで。** 列が複合 index の先頭以外にあるだけでも
+// Bitmap Index Scan が選ばれ、このテストは通るが実際には index を全部読む。URL 列の
+// index は単独の列で張ること。
+func TestAllowlistQueryUsesIndexes(t *testing.T) {
+	db := openTestDB(t)
+
+	var plan []string
+	err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(`SET LOCAL enable_seqscan = off`).Error; err != nil {
+			return err
+		}
+		return tx.Raw(`EXPLAIN `+allowlistSQL, allowlistArgs("https://remote.example/a.png")...).Scan(&plan).Error
+	})
+	require.NoError(t, err)
+	joined := strings.Join(plan, "\n")
+	require.NotEmpty(t, plan, "EXPLAIN が空")
+	// 4 テーブル全部を見ていることの下限。抽出が空振りして緑にならないように。
+	for _, table := range []string{`"user"`, "drive_file", "emoji", "instance"} {
+		assert.Containsf(t, joined, table, "実行計画に %s が無い:\n%s", table, joined)
+	}
+	assert.NotContainsf(t, joined, "Seq Scan",
+		"許可確認に index の無い列がある (OR の列は全部 index が要る):\n%s", joined)
+}
+
+// TestAllowlistIndexesAcceptLongMultibyteURLs checks that the allowlist indexes
+// do not reject long remote URLs.
+//
+// **btree は 1 行 2704 bytes を超える値を入れられない** (#3383 のレビューで実測)。
+// user."avatarUrl" / drive_file.src は varchar(1024) で、リモートの actor は多バイトの
+// 文字を 1024 字まで送れる (resolver.go の remoteMediaURL は rune 数で切る)。btree に
+// すると INSERT / UPDATE ごと落ち、actor を作れない・更新できない (#2662 と同じ形で
+// 受信のたびに fetch し直す) ので、この 2 列は hash index にしている。
+func TestAllowlistIndexesAcceptLongMultibyteURLs(t *testing.T) {
+	db := openTestDB(t)
+	checker := NewDBAllowlistChecker(db)
+	// 1 字 3 bytes の漢字を 1000 字 (3000 bytes 超)。**同じ字を並べない** — index の
+	// 値は圧縮されるので、繰り返しだと上限に収まってしまい、btree でも通る (実測)。
+	var b strings.Builder
+	b.WriteString("https://remote.example/")
+	for i := 0; i < 1000; i++ {
+		b.WriteRune(rune(0x4E00 + (i*7919)%20000))
+	}
+	long := b.String()
+
+	cleanupRow(t, db, "user", "test-allow-long1")
+	require.NoError(t, db.Exec(`INSERT INTO "user" (id, "updatedAt", username, "usernameLower", "avatarUrl", token)
+		VALUES ('test-allow-long1', NOW(), 'allowlong1', 'allowlong1', ?, 'tok-allow-long1')`, long).Error)
+
+	ok, err := checker.IsAllowedURL(context.Background(), long)
+	require.NoError(t, err)
+	assert.True(t, ok)
+
+	cleanupRow(t, db, "drive_file", "test-allow-long-df1")
+	require.NoError(t, db.Exec(`INSERT INTO "drive_file" (id, "userId", md5, name, type, size, comment, properties, "storedInternal", url, "accessKey", src, "isLink")
+		VALUES ('test-allow-long-df1', 'test-allow-long1', 'x', 'x', 'image/png', 0, NULL, '{}', false, 'https://remote.example/long-df.png', NULL, ?, true)`, long).Error)
 }

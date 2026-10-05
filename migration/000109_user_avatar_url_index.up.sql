@@ -1,0 +1,35 @@
+-- #3383: 画像プロキシの許可確認 (internal/core/mediaproxy/allowlist.go の
+-- allowlistSQL) が引く URL 列に index を張る。この file から 000115 までの 7 本で 1 組。
+--
+-- **許可確認が 4 テーブルとも全件走査になっていた。** 署名の無い画像プロキシの
+-- リクエスト (通常の絵文字表示など) は、取得元の URL が DB に載っているかを
+--   user ("avatarUrl" / "bannerUrl")、drive_file (url / "thumbnailUrl" /
+--   "webpublicUrl" / src / uri)、emoji ("originalUrl" / "publicUrl")、
+--   instance ("iconUrl" / "faviconUrl")
+-- の OR で確かめる。OR でつないだ列のうち 1 列でも index が無いと、PostgreSQL は
+-- そのテーブルで BitmapOr を使えず全件走査になる。本番 (TS 製 DB から移行) で
+-- 一致しない URL を 1 回 EXPLAIN (ANALYZE, BUFFERS) すると 24.6ms・7,383 ページ
+-- (約 58MB) を読んでいた。タイムラインを遡ると未知の画像がまとめて来るので、
+-- 並行して重なって 0.6〜3.8 秒になっていた。
+--
+-- 本家 Misskey TS のこれらの列には index が無い (本家は画像の取得前にこの照合を
+-- しない)。mk-go 独自の名前で作っても TS 製 DB で二重にはならない。NULL を許す列は
+-- 部分 index (`WHERE ... IS NOT NULL`) にする (`col = $1` から NOT NULL が導けるので
+-- 照合に使える)。
+--
+-- 大きいテーブルもあるので CONCURRENTLY で書き込みを block せずに構築する。
+-- **CONCURRENTLY は transaction 外・単一文でしか実行できない**ので、1 file 1 文に
+-- 分けている (000059〜000061 と同じ)。失敗時の回復は 000057 と同じ: INVALID な
+-- index が残ったら `DROP INDEX CONCURRENTLY IF EXISTS "<名前>";` してから
+-- `schema_migrations` を直前 version へ戻して再適用する。
+--
+-- **"avatarUrl" と drive_file.src (000111) は hash index にする。** どちらも
+-- varchar(1024) で、btree は 1 行 2704 bytes を超える値を入れられない。リモートの
+-- actor は多バイトの文字を 1024 字まで送れる (resolver.go の remoteMediaURL は rune 数で
+-- 切る) ので、btree だと INSERT / UPDATE ごと落ち、actor を作れない・更新できない
+-- (#2662 と同じ形で、受信のたびに fetch し直す)。照合は等価比較だけなので hash で
+-- 足り、hash は値の長さに上限が無く BitmapOr にも入る。この組で足すほかの列は
+-- varchar(512) 以下で、4 bytes の文字だけでも上限に収まるので btree にする。
+-- (許可確認が引く drive_file の url / uri も varchar(1024) だが、既存の btree
+-- (000059 / 000040) が同じ上限を以前から持っている。この組では触らない)
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_user_avatarUrl" ON "user" USING hash ("avatarUrl") WHERE "avatarUrl" IS NOT NULL;
