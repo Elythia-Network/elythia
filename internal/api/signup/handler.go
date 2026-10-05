@@ -187,7 +187,7 @@ func registrationClosedError(c echo.Context) error {
 //
 // upstream Misskey TS は \`/api/signup\` の username 重複を Fastify-style
 // reply error 形式 \`{statusCode:400, error:"Bad Request",
-// message:"Error: DUPLICATED_USERNAME"}\` で返す (third_party の
+// message:"Error: DUPLICATED_USERNAME"}\` で返す (本家の
 // SignupApiService.ts:174 で \`throw new FastifyReplyError(400,
 // 'DUPLICATED_USERNAME')\`)。mk-go も同 status / shape に揃える
 // (#798 で status / code、#802 で body shape)。

@@ -46,7 +46,7 @@ func ErrorWithKind(code, message, id, kind string) map[string]any {
 
 // Canonical UUIDs for frequently-used error codes.
 // Any handler returning these codes should use the constants to prevent drift.
-// UUIDs are sourced from third_party/misskey/packages/backend/src/server/api/endpoints/
+// UUIDs are sourced from upstream packages/backend/src/server/api/endpoints/
 // and must match the upstream Misskey implementation so that clients can identify
 // errors by their `id` field.
 const (
@@ -100,7 +100,7 @@ const (
 	UUIDPermissionDenied = "1370e5b7-d4eb-4566-bb1d-7748ee6a1838"
 
 	// UUIDRestrictedByRole は upstream `i/update` の `restrictedByRole` UUID
-	// (third_party/misskey/.../endpoints/i/update.ts:115)。policy 制限により
+	// (packages/backend/src/.../endpoints/i/update.ts:115)。policy 制限により
 	// 個別フィールドの更新を拒否する経路で使う (#1024)。
 	// `RolePermissionDenied` (= requiredRolePolicy 違反) と区別する: 後者は
 	// endpoint 全体への access 拒否、本 code はフィールド単位の制限。
@@ -144,12 +144,12 @@ const (
 	UUIDScheduledAtMustBeInFuture = "b34d0c1b-996f-4e34-a428-c636d98df457" // scheduledAt <= now
 
 	// UUIDNoSuchEmoji は upstream `admin/emoji/update` の `noSuchEmoji` UUID
-	// (third_party/misskey/.../endpoints/admin/emoji/update.ts:24)。mk-go の
+	// (packages/backend/src/.../endpoints/admin/emoji/update.ts:24)。mk-go の
 	// 旧実装は `684b7e7e-...` という typo'd 値を返していた regression を
 	// upstream に揃え直す (#729)。
 	UUIDNoSuchEmoji = "684dec9d-a8c2-4364-9aa8-456c49cb1dc8"
 
-	// UUIDs for notes/create errors (third_party/misskey/.../endpoints/notes/create.ts).
+	// UUIDs for notes/create errors (packages/backend/src/.../endpoints/notes/create.ts).
 	UUIDNoSuchRenoteTarget                                         = "b5c90186-4ab0-49c8-9bba-a1f76c282ba4"
 	UUIDCannotRenoteToAPureRenote                                  = "fd4cc33e-2a37-48dd-99cc-9b806eb2031a"
 	UUIDCannotRenoteDueToVisibility                                = "be9529e9-fe72-4de0-ae43-0b363c4938af"
@@ -165,14 +165,14 @@ const (
 	UUIDContainsProhibitedWords                                    = "aa6e01d3-a85c-669d-758a-76aab43af334"
 	UUIDContainsTooManyMentions                                    = "4de0363a-3046-481b-9b0f-feff3e211025"
 
-	// UUID for rate limiting (third_party/misskey/.../ApiCallService.ts).
+	// UUID for rate limiting (packages/backend/src/.../ApiCallService.ts).
 	UUIDRateLimitExceeded = "d5826d14-3982-4d2e-8011-b9e9f02499ef"
 
 	// UUID for signin / signin-flow / signin-with-passkey rate limiting
-	// (third_party/misskey/.../SigninApiService.ts、SigninWithPasskeyApiService.ts).
+	// (packages/backend/src/.../SigninApiService.ts、SigninWithPasskeyApiService.ts).
 	UUIDTooManyAuthenticationFailures = "22d05606-fbcf-421a-a2db-b32610dcfd1b"
 
-	// UUID for users/show (third_party/misskey/.../endpoints/users/show.ts).
+	// UUID for users/show (packages/backend/src/.../endpoints/users/show.ts).
 	UUIDFailedToResolveRemoteUser = "ef7b9be4-9cba-4e6f-ab41-90ed171c7d3c"
 
 	// UUIDPasswordVerificationUnavailable は password 検証の枠を取れなかったとき
@@ -204,7 +204,7 @@ const (
 	UUIDNoSecurityKey = "f9c54d7f-d4c2-4d3c-9a8g-a70daac86512"
 
 	// UUIDNoSuchNoteDraft は upstream `notes/drafts/{update,delete}` 共通の
-	// `noSuchNoteDraft` UUID (third_party/misskey/.../notes/drafts/update.ts)。
+	// `noSuchNoteDraft` UUID (packages/backend/src/.../notes/drafts/update.ts)。
 	// code は upstream に合わせて `NO_SUCH_NOTE_DRAFT` を使う (#688 / #673
 	// Phase B)。
 	UUIDNoSuchNoteDraft = "49cd6b9d-848e-41ee-b0b9-adaca711a6b1"

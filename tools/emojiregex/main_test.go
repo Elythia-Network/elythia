@@ -27,7 +27,7 @@ func readSnapshot(t *testing.T) regexSource {
 // snapshot of the emoji-data regex and requires it to be byte-identical.
 //
 // 生成物を手で直した、あるいは生成ツールを直して作り直し忘れたときにここで落ちる。
-// submodule の node_modules が無くても回るように、元の正規表現は snapshot から読む。
+// frontend/ の node_modules が無くても回るように、元の正規表現は snapshot から読む。
 // snapshot 自体 (正規表現と mfm-js / emoji-data の版) が frontend/ の node_modules と一致しているかは `make emoji-regex-check` (CI では frontend workflow の frontend-lint、手元では make frontend-check から呼ぶ) で見る。
 func TestGeneratedFileIsUpToDate(t *testing.T) {
 	src := readSnapshot(t)

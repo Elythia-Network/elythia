@@ -10,7 +10,7 @@
 // The detector needs no running server, no browser, and no Docker, so it runs
 // as a fast deterministic `go test` gate. The golden contract is consumed from
 // a committed snapshot (testdata/golden_schemas.json) regenerated from the
-// pinned submodule on upstream catch-up, keeping the gate hermetic.
+// upstream source in .cache/misskey/<version> on upstream catch-up, keeping the gate hermetic.
 package entitycompat
 
 import (

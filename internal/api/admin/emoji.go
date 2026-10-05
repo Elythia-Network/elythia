@@ -267,7 +267,7 @@ func (h *Handler) EmojiAddAliasesBulk(c echo.Context) error {
 // (#670)。fetcher 未配線時は src の URL をそのまま継承する legacy 挙動を
 // 維持する (テスト容易性 + 未配線環境での graceful degradation 用)。
 //
-// ref: third_party/misskey/packages/backend/src/server/api/endpoints/admin/emoji/copy.ts
+// ref: 本家の packages/backend/src/server/api/endpoints/admin/emoji/copy.ts
 func (h *Handler) EmojiCopy(c echo.Context) error {
 	// **上書き項目は mk-go 独自の additive パラメータ** (#2698)。upstream の
 	// paramDef は `emojiId` のみ必須なので、足しても既存の呼び出しは通る。

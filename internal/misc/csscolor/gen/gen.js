@@ -2,7 +2,7 @@
 //
 // 使い方 (tinycolor2 の package ディレクトリで実行する):
 //
-//   cd third_party/misskey/packages/backend/node_modules/tinycolor2
+//   cd .cache/misskey/<版>/packages/backend/node_modules/tinycolor2
 //   node <repo>/internal/misc/csscolor/gen/gen.js <repo>
 //
 // `Math.random` は使わない (生成物を commit するので、同じ入力から同じ

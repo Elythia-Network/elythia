@@ -24,7 +24,7 @@ import (
 // 両方の shape で冪等に効くので対象外。
 //
 // golden snapshot は `go run ./tools/schemadrift` で再生成する
-// (third_party/misskey を bump したら実行すること)。
+// (UPSTREAM_MISSKEY_VERSION を上げたら実行すること)。
 func TestSchemaDrift_CreateOnlyColumns(t *testing.T) {
 	upstream := loadUpstreamColumns(t)
 	createOnly, alterAdded, _ := parseMigrations(t)

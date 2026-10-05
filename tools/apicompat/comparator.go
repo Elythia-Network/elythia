@@ -152,7 +152,7 @@ var fastifyDirectRe = regexp.MustCompile(`fastify\.(post|get)\s*(?:<[\s\S]*?>)?\
 // collectTSDirectRoutes parses ApiServerService.ts and returns the routes it
 // registers straight on fastify (i.e. outside endpoints/).
 //
-// 以前は path を hardcode していたが、submodule bump のたびに手で追随する
+// 以前は path を hardcode していたが、本家の版を上げるたびに手で追随する
 // 必要があり実際に古くなっていた (`/miauth/:session/check` が漏れ、
 // `GET /v1/instance/peers` は method 違いで検出対象ですらなかった)。
 // source から直接読むことで bump 時の追随漏れを構造的に無くす。

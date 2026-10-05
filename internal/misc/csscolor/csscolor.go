@@ -11,10 +11,12 @@
 // tinycolor がそう畳むからで、CSS の仕様ではない。
 //
 // `names.go` と `vectors_test.go` は**実物の tinycolor2 から生成したもの**で、
-// 手で書き足さない。submodule の tinycolor2 を上げたときは
-// `internal/misc/csscolor/gen/gen.js` を実行して作り直す:
+// 手で書き足さない。本家の tinycolor2 が上がったときは
+// `internal/misc/csscolor/gen/gen.js` を実行して作り直す (写しているのは本家 backend の
+// FetchInstanceMetadataService なので、本家の取得先の tinycolor2 を使う。
+// `make upstream-e2e-deps` で pnpm install 済みになる):
 //
-//	cd third_party/misskey/packages/backend/node_modules/tinycolor2
+//	cd .cache/misskey/<版>/packages/backend/node_modules/tinycolor2
 //	node /path/to/mk/internal/misc/csscolor/gen/gen.js /path/to/mk
 //
 // 生成しなおしたら **`gofmt -w internal/misc/csscolor/` を掛けてから**

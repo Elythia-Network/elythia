@@ -10,7 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// frontendBase は本体へ取り込んだ frontend/ (#3379)。以前は submodule の third_party/misskey。
+// frontendBase は本体へ取り込んだ frontend/ (#3379)。
 const frontendBase = "frontend"
 
 // FrontendDir returns the path to built frontend assets.
@@ -76,7 +76,7 @@ func ClientAssetsDir() string {
 //
 // upstream 2026.5.2 #17381 で `@discordapp/twemoji/dist/svg` から
 // `@misskey-dev/emoji-assets/built/twemoji` に asset 配信元が移行した。
-// drop-in 互換のため mk-go も同 path を参照する (旧 path は submodule bump 後
+// drop-in 互換のため mk-go も同 path を参照する (旧 path は本家の版を上げた後
 // に node_modules から消えるため falls back しない)。
 func TwemojiDir() string {
 	if v := os.Getenv("MISSKEY_TWEMOJI_DIR"); v != "" {

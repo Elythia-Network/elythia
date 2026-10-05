@@ -13,7 +13,7 @@ import "github.com/labstack/echo/v4"
 // `qr-scanner` パッケージ経由で `getUserMedia` を呼ぶ (`pages/qr.read.vue`)。
 // 落とすと許可を求める前に `NotAllowedError` になり、タブを開くたびにエラー
 // ダイアログが出て機能が死ぬ。**判断する前に `node_modules` と
-// `third_party/misskey/built/` も見ること。**
+// `frontend/built/` も見ること。**
 //
 // 実際に確認したうえで選んだ (ソース・`node_modules`・ビルド成果物を grep):
 //

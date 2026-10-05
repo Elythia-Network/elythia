@@ -12,7 +12,7 @@
 //	go run ./tools/emojiregex -check     # fail when the outputs are stale
 //
 // The regex source is also written to a snapshot file so that the tests of
-// this package can check the generated file without the submodule.
+// this package can check the generated file without frontend/node_modules.
 package main
 
 import (

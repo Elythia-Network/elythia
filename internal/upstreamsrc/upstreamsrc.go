@@ -81,9 +81,6 @@ func Locate(root string) (string, error) {
 }
 
 // Check fails with ErrNotFetched when path does not exist.
-//
-// submodule へ戻す経路は持たない。P4 で fork が消えたときに、黙って fork を
-// 読んでいたことが隠れるため (#3378)。
 func Check(path string) error {
 	if _, err := os.Stat(path); err != nil {
 		return fmt.Errorf("%w: %s が無い。`make upstream-fetch` で本家を取得するか、%s で場所を指定する", ErrNotFetched, path, EnvDir)

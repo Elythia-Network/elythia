@@ -531,7 +531,7 @@ def test_note_with_poll_parity(mkgo, ts):
 # 投げるので、向きが逆だとページが飛ぶ。
 #
 # **本家 backend e2e には既に 2 本ある** —
-# `third_party/misskey/packages/backend/test/e2e/timelines.ts` が `users/notes` の
+# `packages/backend/test/e2e/timelines.ts` が `users/notes` の
 # sinceId 単独 (ASC) と sinceId+untilId (DESC) を `deepStrictEqual` でリテラル配列に
 # 固定していて、これは mk-go に対しても実行されている (exclude にも
 # known-divergences にも入っていない。`describe.each` の FTT on/off で計 4 実行)。

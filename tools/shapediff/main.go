@@ -27,7 +27,7 @@ import (
 )
 
 func main() {
-	// 本家は submodule ではなく .cache/misskey/<版> から読む (#3378)。版のファイルが
+	// 本家は .cache/misskey/<版> から読む (#3378)。版のファイルが
 	// 読めなければ up は空になり、下の Check が取得の案内を出して落ちる。
 	up, _ := upstreamsrc.Dir(".")
 	typesPath := flag.String("types", filepath.Join(up, "packages/misskey-js/src/autogen/types.ts"), "path to misskey-js autogen types.ts")

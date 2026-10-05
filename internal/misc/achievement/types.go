@@ -5,7 +5,7 @@
 package achievement
 
 // types is the set of valid achievement type names. Keep in sync with
-// Misskey's ACHIEVEMENT_TYPES when the submodule is bumped.
+// Misskey's ACHIEVEMENT_TYPES when the upstream version is bumped.
 var types = map[string]struct{}{
 	"notes1": {}, "notes10": {}, "notes100": {}, "notes500": {}, "notes1000": {},
 	"notes5000": {}, "notes10000": {}, "notes20000": {}, "notes30000": {}, "notes40000": {},

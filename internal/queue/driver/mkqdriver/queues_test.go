@@ -10,13 +10,13 @@ import (
 //
 // この表は「あるべき姿」ではなく現在の実態を固定するもの。queue を増減する
 // こと自体は正しい変更なので、期待値を更新して通せばよい。ただしその際に
-// **fork (third_party/misskey) の `packages/misskey-js/src/consts.ts` の
-// `queueTypes` も必ず合わせること。** 管理画面のジョブキュータブは API 応答
+// **`frontend/packages/misskey-js/src/consts.ts` の `queueTypes` も必ず
+// 合わせること。** 管理画面のジョブキュータブは API 応答
 // ではなくその定数から生成されるため、ずれると存在しない queue のタブが常時
 // ゼロ表示になり、実在する queue が画面から見えなくなる (#2323)。
 //
 // 同期はコメントでの指示しか無く、実際 #2403 で relationship を足すまで
-// 検出手段が無かった。Go 側から submodule のファイルを読むのは CI 構成に
+// 検出手段が無かった。Go 側から frontend のファイルを読むのは CI 構成に
 // 依存して脆いので、代わりにここで一覧を固定して更新時に目に入るようにする。
 func TestQueueNames(t *testing.T) {
 	assert.Equal(t, []string{

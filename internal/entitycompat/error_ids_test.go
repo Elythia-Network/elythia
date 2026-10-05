@@ -19,7 +19,7 @@ import (
 // embeddedErrorIDsJSON is the committed golden per-endpoint error-id snapshot
 // (endpoint path -> code -> UUID), extracted from Misskey's meta.errors by
 // `go run ./tools/erroriddiff`. It is embedded so the gate runs without the
-// third_party submodule present (CI does not check it out).
+// upstream source present (CI does not fetch it).
 //
 //go:embed testdata/golden_error_ids.json
 var embeddedErrorIDsJSON []byte

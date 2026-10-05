@@ -32,7 +32,7 @@ const (
 	// 上限を置かないと 1KB で 1 コアを任意時間焼ける。
 	//
 	// 4 なら最悪 1.6ms。**Misskey も Mastodon も明示ラベルを出さない**
-	// (`third_party/misskey` の renderer に `_:` は 1 件も無い) ので、正当な
+	// (本家の renderer に `_:` は 1 件も無い) ので、正当な
 	// activity がここに掛かることはまず無い。ノート本文にたまたま `_:x` の
 	// 形が現れる可能性は残るが、4 個までは通る。
 	maxBlankNodeLabels = 4
