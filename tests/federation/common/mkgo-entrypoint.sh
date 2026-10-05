@@ -6,7 +6,7 @@ set -e
 cd /app
 
 echo "[mkgo-entrypoint] running migrations..."
-/app/migrate -config /app/.config/default.yml -direction up
+/app/elythia migrate -config /app/.config/default.yml -direction up
 
 echo "[mkgo-entrypoint] starting misskey server..."
-exec /app/misskey -config /app/.config/default.yml
+exec /app/elythia serve -config /app/.config/default.yml

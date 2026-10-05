@@ -48,7 +48,7 @@ type Chart struct {
 	// tick が紛れ込む。**件数がずれるだけでなく、sink が並行安全でなければ
 	// データ競合になる。**
 	//
-	// production では `cmd/misskey/main.go` が起動時に `slog.SetDefault` を
+	// production では `elythia serve` (internal/cli/serve) が起動時に `slog.SetDefault` を
 	// 済ませてから chart を組み立てるので挙動は同じ。
 	logger atomic.Pointer[slog.Logger]
 

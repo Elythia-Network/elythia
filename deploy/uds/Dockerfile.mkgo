@@ -2,8 +2,8 @@
 #
 # Dockerfile used by compose.uds.yaml to run mk-go under the UDS-only stack.
 #
-# Unlike the main Dockerfile it also builds the migrate binary (so the
-# entrypoint can apply schema migrations before starting the server) and
+# Unlike the main Dockerfile its entrypoint runs `elythia migrate` (to apply
+# schema migrations before starting the server with `elythia serve`) and it
 # installs curl into the runtime image so that the healthcheck can talk to
 # the mk-go UNIX socket with `curl --unix-socket`.
 #
@@ -68,12 +68,7 @@ ENV REVISION_LDFLAGS="-X github.com/shiroha-a/mk/internal/config.MkGoCommit=${MK
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     GOWORK=off go run ./tools/pluginbuild \
- && go build -trimpath -ldflags="-s -w $REVISION_LDFLAGS" -o /app/built/misskey ./cmd/misskey \
- && go build -trimpath -ldflags="-s -w" -o /app/built/migrate ./cmd/migrate \
- && go build -trimpath -ldflags="-s -w" -o /app/built/backfill-remote-host ./cmd/backfill-remote-host \
- && go build -trimpath -ldflags="-s -w" -o /app/built/backfill-emoji-system-file ./cmd/backfill-emoji-system-file \
- && go build -trimpath -ldflags="-s -w" -o /app/built/backfill-avatar-public-url ./cmd/backfill-avatar-public-url \
- && go build -trimpath -ldflags="-s -w" -o /app/built/backfill-instance-counts ./cmd/backfill-instance-counts
+ && go build -trimpath -ldflags="-s -w $REVISION_LDFLAGS" -o /app/built/elythia ./cmd/elythia
 
 FROM alpine:3.21@sha256:ce64758a109eb420d874a118f87920e625e12d3634e03b4a5573fd9f6e5d3507
 
@@ -87,13 +82,13 @@ RUN addgroup -g 65532 -S mkgo && adduser -u 65532 -S -G mkgo -H -D mkgo
 
 WORKDIR /app
 
-COPY --from=builder --chown=65532:65532 /app/built/misskey /app/misskey
-COPY --from=builder --chown=65532:65532 /app/built/migrate /app/migrate
-# 後始末バッチ。entrypoint を差し替えた使い捨てコンテナで流す (#2706)。
-COPY --from=builder --chown=65532:65532 /app/built/backfill-remote-host /app/backfill-remote-host
-COPY --from=builder --chown=65532:65532 /app/built/backfill-emoji-system-file /app/backfill-emoji-system-file
-COPY --from=builder --chown=65532:65532 /app/built/backfill-avatar-public-url /app/backfill-avatar-public-url
-COPY --from=builder --chown=65532:65532 /app/built/backfill-instance-counts /app/backfill-instance-counts
+# 実行バイナリは elythia 1 つ (#3394)。entrypoint が `elythia migrate` の後に
+# `elythia serve` を起動する。後始末バッチは `elythia backfill <名前>` を、
+# entrypoint を差し替えた使い捨てコンテナで流す (#2706)。
+COPY --from=builder --chown=65532:65532 /app/built/elythia /app/elythia
+# `docker exec <container> elythia backfill <名前>` のように、パス無しで呼べるように
+# する (設計 R7)。他の Dockerfile と同じく既定の PATH を書き下して /app を足す。
+ENV PATH=/app:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 COPY --from=builder --chown=65532:65532 /app/migration /app/migration
 
 # 本家のpackages/backend/assets (favicon / icons / apple-touch-icon / robots.txtなど)

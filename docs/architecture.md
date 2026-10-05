@@ -63,7 +63,7 @@ mk-go は Misskey (TypeScript/NestJS) のバックエンドを Go で書き換�
 | `internal/stream/channels/*` | `server/api/stream/channels/*` | WS チャンネル |
 | `internal/misc/id` | `core/IdService` | ID 生成 (aidx 既定) |
 | `internal/safehttp` | `core/HttpRequestService`(の SSRF guard) | private-network 拒否 transport |
-| `internal/config` + `cmd/misskey` | `config.ts` + `boot/` | 設定・起動 |
+| `internal/config` + `internal/cli` | `config.ts` + `boot/` | 設定・起動 |
 | `internal/server/router.go` | NestJS `MainModule`/`ServerModule` の配線 | DI 相当を手動で |
 
 ---
@@ -278,7 +278,7 @@ dispatcher が shareable channel の共有・pong ack を upstream `Connection.t
 | `internal/misc/id` | `core/IdService` | ID 生成 (aidx 既定 / aid/meid/ulid/objectid) |
 | `internal/safehttp` | `core/HttpRequestService` の private-network guard | SSRF-safe transport（urlpreview/mediaproxy/federation で共用） |
 | `internal/misc/notesummary` | （push 本文生成） | 通知/Web Push の本文要約 |
-| `internal/config` + `cmd/misskey` | `config.ts` + `boot/` | Viper 設定解決・起動 |
+| `internal/config` + `internal/cli` | `config.ts` + `boot/` | Viper 設定解決・起動 |
 | `internal/entitycompat` | （golden 突合の自前基盤） | autogen 型に対する shape 検証（§8） |
 
 ---
@@ -376,7 +376,7 @@ make migrate-down    # 1 段ロールバック
 make migrate-create  # 新規作成
 
 # 全段ロールバック (破壊的。全テーブルが消える)
-go run ./cmd/migrate -direction down
+go run ./cmd/elythia migrate -direction down
 ```
 
 ## 技術スタックとディレクトリ構成 (旧 CLAUDE.md Section 1 / 2)
@@ -429,14 +429,9 @@ CLAUDE.md の Section 1 / 2 にあった表とツリーを、#3248 でここへ�
 ```
 /
 ├── cmd/
-│   ├── misskey/            # メインバイナリのエントリポイント
-│   ├── migrate/            # マイグレーションCLIツール
-│   ├── backfill-note-tags/ # note.tags を NFKC 正規化し直す一回限りのバッチ
-│   ├── backfill-remote-host/ # 保存済みリモート host を punycode 正規化し直すバッチ
-│   ├── backfill-emoji-system-file/ # 承認済み自作絵文字の画像を system 所有へ複製し直すバッチ
-│   ├── backfill-avatar-public-url/ # アイコン / バナーの URL を公開用へ寄せ直すバッチ
-│   └── backfill-instance-counts/ # instance の notesCount / usersCount を数え直すバッチ
-├── internal/               # 全26ディレクトリ (`git ls-tree -d HEAD internal/ | wc -l`)
+│   └── elythia/            # 実行バイナリ。internal/cli を呼ぶだけ
+├── internal/               # 全28ディレクトリ (`git ls-tree -d HEAD internal/ | wc -l`)
+│   ├── cli/                # elythia のサブコマンド (serve / migrate / backfill <名前> / doctor / fsck / config-dump / healthcheck / dump-routes)
 │   ├── config/             # 設定ローダー（Misskey YAML互換）
 │   ├── db/                 # GORM の PostgreSQL 接続配線
 │   ├── server/             # HTTPサーバーのセットアップ、ルーティング、ミドルウェア
@@ -465,7 +460,7 @@ CLAUDE.md の Section 1 / 2 にあった表とツリーを、#3248 でここへ�
 │   ├── effectivepolicy/    # ロールポリシーの host schema (本番の解決とプラグイン検証で共有)
 │   ├── l10n/               # サーバーが送るメール文面のロケール解決
 │   ├── safemath/           # 固定幅へ寄せるときに飽和させる算術ヘルパー
-│   ├── maintenance/        # SQL migration として書けない後始末バッチ（`cmd/` の CLI から手動で回す）
+│   ├── maintenance/        # SQL migration として書けない後始末バッチ（`elythia backfill <名前>` で手動で回す）
 │   ├── frontendutil/       # 同梱フロントエンドの資産配信ヘルパー
 │   ├── pgarray/            # database/sql 用の PostgreSQL 配列型
 │   ├── sentry/             # sentry-go の配線

@@ -19,7 +19,7 @@
 # plugins/ に置かれたプラグインをビルドに取り込む (#2940)。生成物は gitignore
 # されているので、ここで生成しないと **image だけプラグイン無しになる**。しかも
 # エラーにならないので、運営者は「入ったつもり」で起動できてしまう。生成物は
-# Go 側 (cmd/misskey/plugins_generated.go) と frontend 側
+# Go 側 (cmd/elythia/plugins_generated.go) と frontend 側
 # (server-plugins.generated.ts など) の両方で、下の 2 つの stage が使う。
 #
 # patch version まで固定する (`Dockerfile` と同じ理由)。go.mod の `go` directive
@@ -49,16 +49,12 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 #
 # `-tags nodynamic` は必須。CGO_ENABLED=0 だけでは gen2brain/webp の purego
 # (dlopen) 経路が残って musl に動的リンクされ、distroless で
-# `exec /app/misskey: no such file or directory` になる (#619)。
+# `exec /app/elythia: no such file or directory` になる (#619)。
 FROM plugingen AS builder
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build -tags nodynamic -trimpath -ldflags="-s -w" -o /app/built/misskey ./cmd/misskey && \
-    CGO_ENABLED=0 go build -tags nodynamic -trimpath -ldflags="-s -w" -o /app/built/migrate ./cmd/migrate && \
-    CGO_ENABLED=0 go build -tags nodynamic -trimpath -ldflags="-s -w" -o /app/built/backfill-remote-host ./cmd/backfill-remote-host && \
-    CGO_ENABLED=0 go build -tags nodynamic -trimpath -ldflags="-s -w" -o /app/built/backfill-emoji-system-file ./cmd/backfill-emoji-system-file && \
-    CGO_ENABLED=0 go build -tags nodynamic -trimpath -ldflags="-s -w" -o /app/built/backfill-avatar-public-url ./cmd/backfill-avatar-public-url && \
-    CGO_ENABLED=0 go build -tags nodynamic -trimpath -ldflags="-s -w" -o /app/built/backfill-instance-counts ./cmd/backfill-instance-counts
+    CGO_ENABLED=0 go build -tags nodynamic -trimpath -ldflags="-s -w" -o /out/bin/elythia ./cmd/elythia && \
+    ln -s elythia /out/bin/migrate
 
 # Stage 3: frontend
 #
@@ -116,19 +112,24 @@ FROM gcr.io/distroless/static-debian13:latest@sha256:58133991db06659feaabe0f4e97
 
 WORKDIR /app
 
-COPY --from=builder /app/built/misskey /app/misskey
-COPY --from=builder /app/built/migrate /app/migrate
-# 後始末バッチ。runtime は distroless で shell が無いので、entrypoint を差し替えた
-# 使い捨てコンテナで流す (手順は docs/deployment.md の「後始末バッチ」)。
+# 実行バイナリは elythia 1 つ (#3394)。サーバー・migration・後始末バッチを
+# サブコマンドで呼び分ける。runtime は distroless で shell が無いので、バッチは
+# command を差し替えた使い捨てコンテナで流す (手順は docs/deployment.md の「後始末バッチ」)。
 #   docker compose -f docker-compose.image.yml run --rm --no-deps \
-#     --entrypoint /app/backfill-emoji-system-file app -config /app/.config/default.yml
-# **`Dockerfile` と揃えること。** bundled にだけ入っていないと、bundled image を
-# 配っている構成 (docker-compose.image.yml が既定で指す) で doc の手順がそのまま
-# 落ちる。
-COPY --from=builder /app/built/backfill-remote-host /app/backfill-remote-host
-COPY --from=builder /app/built/backfill-emoji-system-file /app/backfill-emoji-system-file
-COPY --from=builder /app/built/backfill-avatar-public-url /app/backfill-avatar-public-url
-COPY --from=builder /app/built/backfill-instance-counts /app/backfill-instance-counts
+#     app backfill emoji-system-file -config /app/.config/default.yml
+# **ENTRYPOINT / CMD の形は `Dockerfile` と揃えること。** bundled image を配っている
+# 構成 (docker-compose.image.yml が既定で指す) で doc の手順がそのまま落ちる。
+# `/app/migrate` は `elythia` への symlink。古い compose の migrate サービス
+# (`entrypoint: ["/app/migrate"]`) のまま新しい image を pull した運営者の migration を
+# 止めないための、D11 の期限付きの例外 (2.x の間だけ。3.0 で撤去)。elythia は
+# この名前で起動されると、以前の flag のまま migrate として動く (internal/cli)。
+# **ディレクトリごと COPY する。** 単独のファイルとして COPY すると symlink が辿られ、
+# バイナリの実体がもう 1 つ image に入る (実測)。
+COPY --from=builder /out/bin/ /app/
+# `docker exec <container> elythia backfill <名前>` のように、パス無しで呼べるように
+# する (設計 R7)。distroless は ENV で既存の PATH を参照できる shell を持たないので、
+# 既定の PATH を書き下して先頭に /app を足す。
+ENV PATH=/app:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 COPY --from=builder /app/migration /app/migration
 COPY .config/docker.yml.example /app/.config/default.yml
 
@@ -155,5 +156,5 @@ EXPOSE 3000
 # ドライブの保存先は 991:991 が書き込める所有権にすること (#621)。
 USER 991:991
 
-ENTRYPOINT ["/app/misskey"]
-CMD ["-config", ".config/default.yml"]
+ENTRYPOINT ["/app/elythia"]
+CMD ["serve", "-config", ".config/default.yml"]

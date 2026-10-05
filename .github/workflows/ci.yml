@@ -91,17 +91,17 @@ jobs:
 
       # 生成した glue (plugins_generated.go) を含む統合バイナリのコンパイルも
       # 見る。上の `Vet bundled plugins` は各プラグインを単体で vet するだけなので、
-      # Register の配線 (cmd/misskey 側) や workspace の依存解決の崩れは検出できない。
+      # Register の配線 (cmd/elythia 側) や workspace の依存解決の崩れは検出できない。
       # 同梱サンプルは既定無効なので、`make build` を経由する他の workflow には
       # この経路が無い (#2495)。**Node が要らないので、毎回走る build に置く** —
       # frontend workflow は Go だけの変更で lint を skip するので、そちらに置くと
-      # cmd/misskey の変更を見逃す (#3379。以前は frontend-check job にあった)。
+      # cmd/elythia の変更を見逃す (#3379。以前は frontend-check job にあった)。
       # 生成された go.work を使うので GOWORK は無効化しない。job の最後に置くのは、
       # 生成物 (go.work など) が前の step に影響しないようにするため。
       - name: Build integrated binary with sample plugins
         run: |
           make plugins-all
-          go build -o /dev/null ./cmd/misskey
+          go build -o /dev/null ./cmd/elythia
 
   # 各shardは並列に走るが、checkは `test-shards (N)` という名前で個別に登録される。
   # ブランチ保護が `test` という名前のcheckを要求するため、後段の `test` job が

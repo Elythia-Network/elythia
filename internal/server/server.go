@@ -880,7 +880,7 @@ type DumpedRoutes struct {
 }
 
 // DumpRoutes writes all registered Echo routes as JSON to w.
-// `cmd/misskey -dump-routes` から呼ばれ、tools/apicompat が Misskey TS の
+// `elythia dump-routes` から呼ばれ、tools/apicompat が Misskey TS の
 // endpoint 集合 (filename-derived + ApiServerService 直登録) と突き合わせる
 // ための入力になる。echo 内部の "/*" catch-all 等は除外しない (caller 側で
 // 正規化する想定)。出力 path は string sort で安定化。

@@ -43,7 +43,7 @@ const peerMinMaxBody int64 = 1 << 10
 //
 // **完全一致で引いてはいけない。** viper は設定ファイル由来の map キーを
 // 小文字化するので、`.config/default.yml` に camelCase で書いた値は
-// `peermaxbody` で届く (`docs/plugins/operating.md` の -config-dump の例が
+// `peermaxbody` で届く (`docs/plugins/operating.md` の config-dump の例が
 // `status.maxlength` になっているのはこのため)。一致しないと運営者の設定が
 // 一度も効かず、**絞る方向の設定も黙って無視される**。
 const peerMaxBodyKey = "peerMaxBody"

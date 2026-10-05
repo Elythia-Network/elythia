@@ -195,7 +195,7 @@ func (r *userRepository) FindByUsernameLower(username string, host *string) (*mo
 // **生の形にも当てる互換経路は #2996 で撤去した。** #2706 以降は保存側
 // (`hostFromURI`) が正規化するので、新しく入る行は正規形しか持たない。それ以前に
 // 取り込んだ非正規化の行が残っている環境では**その行がどの acct 経路からも
-// 引けなくなる**ので、アップグレード前に `backfill-remote-host` を流すこと
+// 引けなくなる**ので、アップグレード前に `elythia backfill remote-host` を流すこと
 // (`-dry-run` で `updated=0` を確認できる。手順は docs/deployment.md)。
 //
 // 式にせず値で比べるのは `(usernameLower, host)` の index を効かせたままにするため。

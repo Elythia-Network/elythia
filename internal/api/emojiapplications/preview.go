@@ -32,7 +32,7 @@ const (
 	// **承認済みは申請元を見ない。** #2966 以降、承認時の画像は system 所有の
 	// drive ファイルへ複製されるので、申請者が元ファイルを消してもアカウントを
 	// 消しても、承認済みの申請には画像が出せる。**#2966 以前に承認された行は
-	// `backfill-emoji-system-file` (#2990) を流すまでこれが成り立たない** —
+	// `elythia backfill emoji-system-file` (#2990) を流すまでこれが成り立たない** —
 	// あちらは申請者所有のファイルを参照したままなので、消されると出せなくなる。
 	PreviewSourceApprovedEmoji PreviewSource = "approvedEmoji"
 )

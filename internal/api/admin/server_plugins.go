@@ -29,7 +29,7 @@ type ServerPluginInfo struct {
 	Migrations        int    `json:"migrations"`
 	Schema            string `json:"schema"`
 	// ConfigKeys lists the setting keys only. **値は返さない** — どのキーが
-	// 秘密かを mk-go は判別できないので、-config-dump と同じく既定で全部
+	// 秘密かを mk-go は判別できないので、`elythia config-dump` と同じく既定で全部
 	// マスクする方針に合わせる。
 	ConfigKeys []string `json:"configKeys"`
 }

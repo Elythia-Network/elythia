@@ -321,7 +321,7 @@ func (m *MockUserRepository) FindByUsernameLower(username string, host *string) 
 //
 // **生の形にも当てる互換経路は #2996 で撤去した。** 保存側も #2706 で正規化する
 // ので、正規形どうしの完全一致で引ける。非正規化のまま残っている行は引けなく
-// なる (それが撤去の意味で、`backfill-remote-host` を流してから上げる前提)。
+// なる (それが撤去の意味で、`elythia backfill remote-host` を流してから上げる前提)。
 func hostMatches(query, stored string) bool {
 	return stored == idnhost.Puny(query)
 }

@@ -106,7 +106,7 @@ jobs:
 
       # route dump はサーバーを組み立てるので、schema が無いと起動時に落ちる。
       - name: Apply migrations
-        run: go run ./cmd/migrate -config tests/upstream-e2e/mkgo.yml -direction up
+        run: go run ./cmd/elythia migrate -config tests/upstream-e2e/mkgo.yml -direction up
 
       # **プラグインは入らない前提。** 同梱の 2 つは `disabled: true` なので
       # `pluginbuild` が skip する (#2701)。自前プラグインを `plugins/` に置いた

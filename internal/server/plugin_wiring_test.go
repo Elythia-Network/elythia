@@ -1266,7 +1266,7 @@ func TestServerPluginInfos_ReflectsDefinitionsAndConfig(t *testing.T) {
 		{Name: "gameinfo", APIVersion: plugin.APIVersion, Routes: routes},
 	}
 	// **キーは小文字で渡す。** Viper は YAML のキーを全て小文字化するので、
-	// 実運用の config.Plugins に camelCase のキーは現れない (-config-dump の
+	// 実運用の config.Plugins に camelCase のキーは現れない (config-dump の
 	// `status.maxlength` 表示と同じ)。テストが camelCase を「仕様」として
 	// 見せないようにする。
 	settings := map[string]map[string]any{

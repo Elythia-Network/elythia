@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1.7
 #
 # Dockerfile used only by tests/federation/compose.*.yml to run mk-go
-# inside federation tests. Unlike the main Dockerfile it also builds the
-# migrate binary and runs migrations before starting the server.
+# inside federation tests. Unlike the main Dockerfile its entrypoint runs
+# `elythia migrate` before starting the server.
 #
 # Build context must be the repository root.
 # `# syntax=` directive は BuildKit cache mount 用 (#432)。
@@ -19,8 +19,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 COPY . .
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    go build -trimpath -ldflags="-s -w" -o /app/built/misskey ./cmd/misskey \
- && go build -trimpath -ldflags="-s -w" -o /app/built/migrate ./cmd/migrate
+    go build -trimpath -ldflags="-s -w" -o /app/built/elythia ./cmd/elythia
 
 FROM alpine:3.21
 
@@ -28,8 +27,7 @@ RUN apk add --no-cache ca-certificates tzdata wget
 
 WORKDIR /app
 
-COPY --from=builder /app/built/misskey /app/misskey
-COPY --from=builder /app/built/migrate /app/migrate
+COPY --from=builder /app/built/elythia /app/elythia
 COPY --from=builder /app/migration /app/migration
 
 # Frontend asset bundle (Playwright frontend operation 用)。本家 Dockerfile と

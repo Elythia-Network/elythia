@@ -127,7 +127,7 @@ plugins:
 
 ### 秘密情報
 
-**`-config-dump` では `enabled` 以外の値をマスクする。** どのキーが秘密かを mk-go は判別できないので、既定で全部隠す。
+**`elythia config-dump` では `enabled` 以外の値をマスクする。** どのキーが秘密かを mk-go は判別できないので、既定で全部隠す。
 
 ```
   plugin: status          有効
@@ -176,7 +176,7 @@ disabled: true
 
 ## 入っているものを確認する
 
-**コントロールパネル → プラグイン → サーバープラグイン**（`/admin/server-plugins`、モデレーター以上）に一覧が出る。バージョン・有効/無効・機能（API/ジョブ/フロントエンド）・schema・migration数・設定キー（値はマスク。キー名は`-config-dump`と同じく小文字で表示される）・宣言ページへのリンク、および後述の残存データがここで確認できる。
+**コントロールパネル → プラグイン → サーバープラグイン**（`/admin/server-plugins`、モデレーター以上）に一覧が出る。バージョン・有効/無効・機能（API/ジョブ/フロントエンド）・schema・migration数・設定キー（値はマスク。キー名は`elythia config-dump`と同じく小文字で表示される）・宣言ページへのリンク、および後述の残存データがここで確認できる。
 
 起動ログにも出る。
 
@@ -185,7 +185,7 @@ INFO plugin loaded name=status version=1.0.0 routes=true jobs=true migrations=1 
 INFO plugin disabled name=foo version=0.2.0
 ```
 
-`-config-dump` にも設定と有効・無効が出る。
+`elythia config-dump` にも設定と有効・無効が出る。
 
 ## 消したあとのデータ
 

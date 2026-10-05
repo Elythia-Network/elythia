@@ -17,7 +17,7 @@ PR を出すと十数個の check が走る。**どれが何を見ていて、�
 
 | check | workflow | 見ているもの | 手元での再現 |
 |---|---|---|---|
-| `build` | CI | 全パッケージがコンパイルできるか + 同梱プラグインの `go vet` + 同梱サンプルが既定無効か + 同梱サンプル入りの統合バイナリ (`make plugins-all && go build ./cmd/misskey`、#2495) | `go build ./...` / `make plugin-vet` / `make plugins-all && go build -o /dev/null ./cmd/misskey` |
+| `build` | CI | 全パッケージがコンパイルできるか + 同梱プラグインの `go vet` + 同梱サンプルが既定無効か + 同梱サンプル入りの統合バイナリ (`make plugins-all && go build ./cmd/elythia`、#2495) | `go build ./...` / `make plugin-vet` / `make plugins-all && go build -o /dev/null ./cmd/elythia` |
 | `lint` | CI | `go vet` + **actionlint** + `gofmt -s -d` の差分 + 重複 fixture ID + **golangci-lint** | `make lint` / `make actionlint` / `make fmt` / `make golangci-lint` |
 | `test` | CI | 4-way shard の集約。どれか 1 つでも落ちれば赤 | `make test` |
 | `frontend` | frontend | `frontend-lint` (9 workspace の eslint、typecheck、check-dts、SPDX ヘッダー、locale、misskey-js の API レポート、`emoji-regex-check`) と `frontend-test` (本番設定のビルド、frontend の vitest、misskey-js のテスト) の集約。frontend に関係しない差分では両方を skip して成功する | 下の「`frontend` が落ちたとき」 |
@@ -47,7 +47,7 @@ PR を出すと十数個の check が走る。**どれが何を見ていて、�
 を入れてある。
 
 **`(typecheck)` が出た run は不完全。** typecheck が落ちると他の linter の結果が
-報告されない。自前プラグインを `plugins/` に置いていると `cmd/misskey/plugins_generated.go`
+報告されない。自前プラグインを `plugins/` に置いていると `cmd/elythia/plugins_generated.go`
 が private module を import するので、**`GOWORK=off` を付けて回すと**起きる (`go.work` が
 あるまま素で叩けば解決するが、それだと CI と条件が変わる)。`make golangci-lint` は生成物を
 退避して回すので手元では踏まない。
@@ -293,7 +293,7 @@ required の `test` で走る。
 ```bash
 make plugins-all
 cd frontend && pnpm install --frozen-lockfile && pnpm build && cd ..
-go build -o /dev/null ./cmd/misskey
+go build -o /dev/null ./cmd/elythia
 make frontend-check
 make frontend-test
 ```
@@ -682,7 +682,7 @@ checkout / setup-go を除くと step は実行順に 3 つ。**required job な
     check-dts とその self test、SPDX ヘッダー、locale の検証、misskey-js の API レポート、
     `make emoji-regex-check` (#3324)。同梱サンプル入りの統合バイナリの build (#2495) は、
     Node が要らないので毎回走る required の `build` job に置いた (Go だけの変更で
-    `cmd/misskey` 側の配線が崩れても拾えるように)
+    `cmd/elythia` 側の配線が崩れても拾えるように)
   - `frontend-test`: `make plugins-all` → `pnpm i --frozen-lockfile` → 本番設定のビルド →
     frontend の vitest、misskey-js のテスト
   - `frontend`: 集約 job (`if: always()`)。`changes` が関係なしと判定したら (lint と test は

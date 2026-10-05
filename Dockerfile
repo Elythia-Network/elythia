@@ -77,12 +77,8 @@ ENV REVISION_LDFLAGS="-X github.com/shiroha-a/mk/internal/config.MkGoCommit=${MK
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     GOWORK=off go run ./tools/pluginbuild && \
-    CGO_ENABLED=0 go build -tags nodynamic -trimpath -ldflags="-s -w $REVISION_LDFLAGS" -o /app/built/misskey ./cmd/misskey && \
-    CGO_ENABLED=0 go build -tags nodynamic -trimpath -ldflags="-s -w" -o /app/built/migrate ./cmd/migrate && \
-    CGO_ENABLED=0 go build -tags nodynamic -trimpath -ldflags="-s -w" -o /app/built/backfill-remote-host ./cmd/backfill-remote-host && \
-    CGO_ENABLED=0 go build -tags nodynamic -trimpath -ldflags="-s -w" -o /app/built/backfill-emoji-system-file ./cmd/backfill-emoji-system-file && \
-    CGO_ENABLED=0 go build -tags nodynamic -trimpath -ldflags="-s -w" -o /app/built/backfill-avatar-public-url ./cmd/backfill-avatar-public-url && \
-    CGO_ENABLED=0 go build -tags nodynamic -trimpath -ldflags="-s -w" -o /app/built/backfill-instance-counts ./cmd/backfill-instance-counts
+    CGO_ENABLED=0 go build -tags nodynamic -trimpath -ldflags="-s -w $REVISION_LDFLAGS" -o /out/bin/elythia ./cmd/elythia && \
+    ln -s elythia /out/bin/migrate
 
 # Stage 2: Runtime
 #
@@ -92,9 +88,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # ので apk add は不要。
 #
 # 注意: distroless は shell も wget も持たないので、healthcheck は
-# `/app/misskey -healthcheck` で binary 自身に叩かせる (cmd/misskey/main.go
-# の -healthcheck フラグ)。tests/dropin*/compose.mk.yml /
-# tests/federation/compose.misskey.yml で使用。
+# `/app/elythia healthcheck` で binary 自身に叩かせる (internal/cli/diag)。
+# tests/dropin*/compose.mk.yml / tests/federation/compose.misskey.yml で使用。
 #
 # tag を省くと `latest` になり、いつ build したかで中身が変わる。builder と
 # 同じく digest で固定する (distroless の更新は dependabot が digest ごと上げる)。
@@ -102,15 +97,21 @@ FROM gcr.io/distroless/static-debian13:latest@sha256:58133991db06659feaabe0f4e97
 
 WORKDIR /app
 
-COPY --from=builder /app/built/misskey /app/misskey
-COPY --from=builder /app/built/migrate /app/migrate
-# 後始末バッチ。runtime は distroless で shell が無いので、entrypoint を差し替えた
-# 使い捨てコンテナで流す (#2706)。
-#   docker compose run --rm --entrypoint /app/backfill-remote-host app -dry-run
-COPY --from=builder /app/built/backfill-remote-host /app/backfill-remote-host
-COPY --from=builder /app/built/backfill-emoji-system-file /app/backfill-emoji-system-file
-COPY --from=builder /app/built/backfill-avatar-public-url /app/backfill-avatar-public-url
-COPY --from=builder /app/built/backfill-instance-counts /app/backfill-instance-counts
+# 実行バイナリは elythia 1 つ (#3394)。サーバー・migration・後始末バッチを
+# サブコマンドで呼び分ける。runtime は distroless で shell が無いので、バッチは
+# command を差し替えた使い捨てコンテナで流す (#2706)。
+#   docker compose run --rm --no-deps app backfill remote-host -dry-run
+# `/app/migrate` は `elythia` への symlink。古い compose の migrate サービス
+# (`entrypoint: ["/app/migrate"]`) のまま新しい image を pull した運営者の migration を
+# 止めないための、D11 の期限付きの例外 (2.x の間だけ。3.0 で撤去)。elythia は
+# この名前で起動されると、以前の flag のまま migrate として動く (internal/cli)。
+# **ディレクトリごと COPY する。** 単独のファイルとして COPY すると symlink が辿られ、
+# バイナリの実体がもう 1 つ image に入る (実測)。
+COPY --from=builder /out/bin/ /app/
+# `docker exec <container> elythia backfill <名前>` のように、パス無しで呼べるように
+# する (設計 R7)。distroless は ENV で既存の PATH を参照できる shell を持たないので、
+# 既定の PATH を書き下して先頭に /app を足す。
+ENV PATH=/app:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 COPY --from=builder /app/migration /app/migration
 
 # 本家のpackages/backend/assets (favicon / icons等) をimageに焼き込む。
@@ -156,5 +157,7 @@ EXPOSE 3000
 # drop-in 互換を壊すので使わない。
 USER 991:991
 
-ENTRYPOINT ["/app/misskey"]
-CMD ["-config", ".config/default.yml"]
+# ENTRYPOINT はバイナリだけにして、サブコマンドは CMD に置く。compose の
+# command を差し替えるだけで migrate や backfill を同じ image で流せる。
+ENTRYPOINT ["/app/elythia"]
+CMD ["serve", "-config", ".config/default.yml"]

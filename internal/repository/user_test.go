@@ -1724,7 +1724,7 @@ func TestUserRepository_FindByUsernameLower_IDNHost(t *testing.T) {
 
 // **非正規化のまま保存された行は引けなくなる (#2996)。** #2706 以降は保存側が
 // 正規化するので新しい行は正規形しか持たないが、それ以前の行が残っている環境で
-// 上げるとこの形になる。**アップグレード前に `backfill-remote-host` を流す前提**
+// 上げるとこの形になる。**アップグレード前に `elythia backfill remote-host` を流す前提**
 // (`-dry-run` で `updated=0` を確認できる)。
 //
 // 「引けなくなる」を固定しておかないと、撤去の代償が doc にしか無い状態になる。

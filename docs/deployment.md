@@ -121,6 +121,8 @@ mkdir -p files && sudo chown -R 991:991 files
 docker compose up -d
 ```
 
+更新は `git fetch --depth 1 origin docker && git reset --hard FETCH_HEAD` の後に `docker compose pull && docker compose up -d`。`docker` ブランチは更新のたびに履歴を持たない 1 コミットで作り直されるので、**`git pull` は使えない**。`reset --hard` はブランチのファイルへの手元の変更を捨てるので、手元の変更は `docker-compose.override.yml` に置く (詳しくはブランチの `README.md`)。
+
 ソースを持っている場合は Makefile から同じことができる。
 
 ```bash
@@ -150,7 +152,7 @@ make image-build       # ghcr.io/shiroha-a/mk:bundled をローカルにビル�
 | `ghcr.io/shiroha-a/mk:bundled` | Goバイナリ + マイグレーション + [後始末バッチ](#後始末バッチ) + **フロントエンドアセット同梱** | pull して即起動 |
 | `ghcr.io/shiroha-a/mk:latest` | Goバイナリ + マイグレーション + [後始末バッチ](#後始末バッチ) | アセットを別途用意する構成 |
 
-`bundled` / `latest` は develop の最新を指す **可変タグ**。本番ではバージョンを固定する。
+`bundled` / `latest` は develop の最新を指す **可変タグ**。本番ではバージョンを固定する。**古い版に固定するときは、その版の compose を使う** (compose は同じ版の image の呼び方に合わせてある。2.0.0 で実行バイナリを `elythia` にまとめた、#3394)。
 
 ```bash
 MK_IMAGE=ghcr.io/shiroha-a/mk:1.5.0-bundled docker compose up -d
@@ -270,7 +272,7 @@ make build
 make migrate-up
 
 # 起動
-./built/misskey -config .config/default.yml
+./built/elythia serve -config .config/default.yml
 ```
 
 前提条件: Go 1.27+ (ビルド時)、PostgreSQL 18推奨 (16以降で動作、CI検証は18)、Redis 7+。
@@ -282,8 +284,8 @@ make migrate-up
 非正規化カウンタが実データとずれていないかを検査する。
 
 ```bash
-./built/misskey -config .config/default.yml -fsck        # 検査のみ (既定)
-./built/misskey -config .config/default.yml -fsck -fix   # カウンタを直す
+./built/elythia fsck -config .config/default.yml        # 検査のみ (既定)
+./built/elythia fsck -config .config/default.yml -fix   # カウンタを直す
 ```
 
 ```
@@ -333,7 +335,7 @@ make migrate-up
 ## 設定の実効値を確認する
 
 ```bash
-./built/misskey -config .config/default.yml -config-dump
+./built/elythia config-dump -config .config/default.yml
 ```
 
 **サーバーを起動しない**ので、DB / Redis に繋がらない状態でも使える。
@@ -380,7 +382,7 @@ worker 数は既定値がキューごとに違い、`stuck 検出` は**キュ�
 まず走らせると早い。
 
 ```bash
-./built/misskey -config .config/default.yml -doctor
+./built/elythia doctor -config .config/default.yml
 ```
 
 ```
@@ -427,10 +429,10 @@ warn は「見ておくべき」であって「壊れている」ではないた
 
 ```bash
 # Web ノード: HTTP を提供し、ジョブは積むだけで処理しない
-MK_ONLY_SERVER=1 ./built/misskey -config .config/default.yml
+MK_ONLY_SERVER=1 ./built/elythia serve -config .config/default.yml
 
 # 配送ノード: ジョブを処理する。API は生えない
-MK_ONLY_QUEUE=1 ./built/misskey -config .config/default.yml
+MK_ONLY_QUEUE=1 ./built/elythia serve -config .config/default.yml
 ```
 
 **設定ファイルは両ノードで同じものを使う。** 同じ DB・同じ Redis を向けていることが
@@ -453,10 +455,10 @@ MK_ONLY_QUEUE=1 ./built/misskey -config .config/default.yml
 | chart のメモリバッファ flush | ○ | ○ |
 
 配送ノードは `/healthz` だけ応答する (`enableMetrics` が真なら `/metrics` も)。
-これにより `./built/misskey -healthcheck` と Dockerfile の healthcheck が
+これにより `./built/elythia healthcheck` と Dockerfile の healthcheck が
 **どちらのノードでもそのまま使える**。
 
-なお `-healthcheck` は `127.0.0.1:<port>` を叩くので、`socket` で UDS 運用している
+なお `elythia healthcheck` は `127.0.0.1:<port>` を叩くので、`socket` で UDS 運用している
 場合は role に関係なく使えない (従来からの制限)。
 
 ### 注意
@@ -496,7 +498,7 @@ After=network.target postgresql.service redis.service
 Type=simple
 User=misskey
 WorkingDirectory=/opt/misskey
-ExecStart=/opt/misskey/misskey -config /opt/misskey/.config/default.yml
+ExecStart=/opt/misskey/elythia serve -config /opt/misskey/.config/default.yml
 Restart=always
 RestartSec=5
 
@@ -658,7 +660,7 @@ mk-goはTS版と同じPostgreSQL/Redisを共有できるため、バイナリの
 2. **`frontend/` が動いたらフロントエンドを再ビルドする**。SPA のアセットは image に焼き込まず bind-mount で渡しているため、ソースだけ進めても配信物は変わらない。`make update` (`make pull` も呼ぶ) は、`frontend/` が動いたかどうかを知らせる
 3. **フロントエンドを再ビルドしたら mk-go を再起動する**。エントリポイント (`scripts/<hash>.js`) を起動時に 1 回だけ解決してキャッシュする実装なので、再起動しないと消えた古いファイルを指し続けて 404 になる。bind-mount であっても再起動は必要
 
-**1.3.0 より後へ上げるときは、先に `backfill-remote-host` を流す (#2996)。** リモート
+**1.3.0 より後へ上げるときは、先に `backfill remote-host` を流す (#2996)。** リモート
 host の読み取り側にあった、非正規化のまま保存された行むけの互換経路を撤去した。流して
 いない環境で上げると**非正規化の行が DB から引けなくなる** (`users/show` が呼ばれる
 たび、その acct へメンションした投稿 (`notes/create`) のたびに WebFinger を叩く、
@@ -666,7 +668,7 @@ AP の acct 解決が 404 になる)。メンションは WebFinger で既存の
 配送はされるが、取得が締め切り (20 秒) や到達不能で落ちると、その投稿ではメンションが
 外れて配送されない (#3330)。**保存側を正規化したのが 1.3.0 なので、それより古い版から上げる場合ほど
 対象行は多い。** 確認方法と手順は[後始末バッチ](#後始末バッチ)の
-`backfill-remote-host`。
+`backfill remote-host` (上げる前の版の image では `/app/backfill-remote-host`)。
 
 **`docker compose up -d` は再起動を保証しない。** compose はイメージと設定が変わらなければコンテナを作り直さないが、フロントエンドは bind-mount なのでフロントエンドだけ更新したときは何も変わらない。原則 3 を満たすには `restart` を明示するか、それを行う `make uds-restart` / `make docker-restart` を使う。2026-09-07 にこれで本番のフロントエンドが 10 分近く起動しなくなった (#2885)。
 
@@ -821,11 +823,41 @@ Docker Compose 構成 (`compose.uds.yaml` が無い) でも同じ手順でよい
 
 退避した `$SAVE` は、新しい版で問題が無いことを確かめてから消す。
 
+### 実行バイナリを `elythia` 1 つにまとめた版へ上げる (#3394)
+
+この版から、実行バイナリは `elythia` 1 つになり、用途をサブコマンドで呼び分ける。旧名のバイナリは置かない (配布イメージの `/app/migrate` の互換を除く。下を参照)。**引数無しの `elythia` はサーバーを起動せず、使い方を出して exit 2 で終わる**ので、旧名から機械的に置き換えただけの起動行はその場で止まる (黙って別の動作にはならない)。
+
+| | これまで | この版から |
+|---|---|---|
+| 起動 | `misskey -config <path>` | `elythia serve -config <path>` |
+| migration | `migrate -config <path> -direction up` | `elythia migrate -config <path> -direction up` |
+| 後始末バッチ | `backfill-<名前> ...` | `elythia backfill <名前> ...` |
+| healthcheck | `misskey -healthcheck -config <path>` | `elythia healthcheck -config <path>` |
+| doctor / fsck / config-dump | `misskey -config <path> -doctor` など | `elythia doctor -config <path>` など (`fsck` の `-fix` はそのまま) |
+| route の dump | `misskey -config <path> -dump-routes -dump-routes-out <file>` | `elythia dump-routes -config <path> -dump-routes-out <file>` |
+| image の中のパス | `/app/misskey`・`/app/migrate`・`/app/backfill-<名前>` | `/app/elythia` (`Dockerfile` / `Dockerfile.bundled` の配布イメージには、互換のための `/app/migrate` もある。下を参照)。`PATH` に `/app` が入るので `docker exec <container> elythia ...` で呼べる |
+| image の ENTRYPOINT / CMD | `["/app/misskey"]` / `["-config", ".config/default.yml"]` | `["/app/elythia"]` / `["serve", "-config", ".config/default.yml"]` |
+| `make build` の出力 | `built/misskey` | `built/elythia` |
+
+各 flag の名前と意味は変わらない。サブコマンドの後ろに、これまでと同じ flag を渡す。
+
+**配布イメージの `/app/migrate` は 2.x の間だけ残す。** `Dockerfile` / `Dockerfile.bundled` の image (`ghcr.io/shiroha-a/mk` の `latest` / `bundled` とリリースのタグ) には `/app/migrate` が `elythia` への symlink として入っていて、その名前で起動すると以前の flag のまま `elythia migrate` として動く。古い compose の `migrate` サービス (`entrypoint: ["/app/migrate"]`) のまま新しい image を pull しても migration は止まらない。**3.0 で撤去する**ので、それまでに compose を新しいものへ差し替えること。他の旧名 (`/app/misskey`・`/app/backfill-<名前>`) は残さない。**UDS の image (`deploy/uds/Dockerfile.mkgo`) には `/app/migrate` を置かない** (entrypoint が `elythia migrate` を呼ぶので要らない)。
+
+構成ごとに手で直すもの:
+
+- **Docker Compose (TCP / bundled)**: リポジトリの `docker-compose.yml` / `docker-compose.image.yml` は追従済み。手元で書き換えている場合は、`migrate` サービスの `entrypoint: ["/app/migrate"]` を `["/app/elythia"]` に、`command` の先頭に `"migrate"` を足す。`app` に `command: ["-config", ...]` を足している場合は先頭に `"serve"` を足す (足さないと exit 2 で起動しない)。healthcheck を足している場合は `["CMD", "/app/elythia", "healthcheck", "-config", ".config/default.yml"]` にする
+- **Docker Compose (UDS)**: image の entrypoint (`deploy/uds/mkgo-entrypoint.sh`) が `elythia migrate` → `elythia serve` を呼ぶので、`compose.uds.yaml` の書き換えは要らない (`compose.uds.yaml.example` の healthcheck は curl で `/healthz` を叩くだけで、バイナリ名に依存しない)。image を作り直して再起動する。手で `docker compose exec mkgo /app/migrate ...` を叩いていた手順は `elythia migrate ...` に変わる。UDS image の entrypoint は、引数を渡すと migrate と serve をせずにそのまま `elythia` に渡すので、`docker compose -f compose.uds.yaml run --rm --no-deps mkgo backfill <名前> ...` の形でも流せる
+- **バイナリ直接実行 (systemd)**: `ExecStart` を `<dir>/elythia serve -config <path>` に変える。`make build` は `built/elythia` を作り、古い `built/misskey` は残るので消しておく
+- **監視・スクリプト**: `-healthcheck` / `-doctor` / `-fsck` / `-config-dump` / `-dump-routes` の flag で呼んでいるものはサブコマンドに直す
+- **ソースから使っている場合**: `make plugins` (`make build` も呼ぶ) を一度回す。プラグインの組み込み用の生成物の置き場所が `cmd/misskey/` から `cmd/elythia/` に変わり、古い checkout に残った `cmd/misskey/plugins_generated.go` を回さないままにすると `go build ./...` が落ちる (`make plugins` が消す)
+
+**後始末バッチは、流す image の版の呼び方に合わせる。** この版より前の image には `elythia` が無いので、旧版のまま流すときは `--entrypoint /app/backfill-<名前>` を使う。
+
 ### 切り戻し
 
 `schema_migrations` のバージョンが進んでいるので、バイナリだけ戻すと古い mk-go が新しいスキーマを読むことになる。追加のみのマイグレーション (`ADD COLUMN` / `CREATE TABLE` / `CREATE INDEX`) であれば旧バイナリでも動くが、破壊的な変更を含むリリースでは `make migrate-down` (1 段) を必要な回数繰り返して戻す。リリースノートで破壊的変更の有無を確認すること。
 
-> **`go run ./cmd/migrate -direction down` を本番で叩かないこと。** `-steps` を省くと「全部」の意味になり、全 down マイグレーションが走って 全テーブルが消える。
+> **`elythia migrate -direction down` を本番で叩かないこと。** `-steps` を省くと「全部」の意味になり、全 down マイグレーションが走って 全テーブルが消える。
 >
 > **down が用意されていても戻せない migration がある。** `000081` は孤児行を、`000082` は chat room の owner が持つ membership / 招待行を DELETE するが、どちらも削除した行の内容を保存していないので down は no-op。詳細は [TS版からの移行](migration-from-ts.md#破壊的なマイグレーション)。
 
@@ -833,13 +865,13 @@ Misskey TS へ戻すことは保証しない (#3191)。戻す場合の注意と�
 
 ## 後始末バッチ
 
-SQL migration として書けない一回限りの正規化は、独立したバイナリで流す。**migration と
+SQL migration として書けない一回限りの正規化は、`elythia backfill <名前>` で流す。**migration と
 違って自動では走らない**ので、運用者が明示的に実行する必要がある。
 
-**稼働中の本体プロセスに影響しない使い捨てコンテナ**で流す。entrypoint を差し替えるのは
-`docker-compose.yml` の `migrate` サービスと同じ手法。
+**稼働中の本体プロセスに影響しない使い捨てコンテナ**で流す。entrypoint を `/app/elythia` に
+差し替えて、サブコマンドを渡す。`docker-compose.yml` の `migrate` サービスと同じ手法。
 
-### `backfill-instance-counts` — instance の `notesCount` / `usersCount` を数え直す (#3330)
+### `backfill instance-counts` — instance の `notesCount` / `usersCount` を数え直す (#3330)
 
 `instance.notesCount` / `usersCount` (`federation/instances` の `notesCount` / `usersCount`、
 `+notes` / `+users` の並び順) は、#3330 まで mk-go が動かしていなかった。それより前に
@@ -868,21 +900,21 @@ instance 行の無い host は数えない (行を作らない)。値が既に�
 
 ```bash
 # まず差分を見る (書き込まない)
-docker compose run --rm --no-deps --entrypoint /app/backfill-instance-counts app \
+docker compose run --rm --no-deps --entrypoint /app/elythia app backfill instance-counts \
   -config /app/.config/default.yml -dry-run
 
 # 実行
-docker compose run --rm --no-deps --entrypoint /app/backfill-instance-counts app \
+docker compose run --rm --no-deps --entrypoint /app/elythia app backfill instance-counts \
   -config /app/.config/default.yml -batch 100 -sleep-ms 200
 ```
 
-**`--no-deps` を付ける** (理由は `backfill-emoji-system-file` と同じ)。UDS 構成では
+**`--no-deps` を付ける** (理由は `backfill emoji-system-file` と同じ)。UDS 構成では
 サービス名が `mkgo` になる (`docker compose -f compose.uds.yaml run --rm --no-deps
---entrypoint /app/backfill-instance-counts mkgo ...`)。**バイナリが入るのはこのバッチを
+--entrypoint /app/elythia mkgo backfill instance-counts ...`)。**バイナリが入るのはこのバッチを
 含む版のイメージから**なので、先にイメージを作り直す。バイナリ直接実行なら
-`go run ./cmd/backfill-instance-counts -config .config/default.yml -dry-run`。
+`go run ./cmd/elythia backfill instance-counts -config .config/default.yml -dry-run`。
 
-**無指定で書き込み、`-dry-run` で抑止する**側の作法 (`backfill-avatar-public-url` と同じ)。
+**無指定で書き込み、`-dry-run` で抑止する**側の作法 (`backfill avatar-public-url` と同じ)。
 
 出力は差分のある行ごとに `instance <host> notesCount <旧> -> <新> usersCount <旧> -> <新>`、
 最後に `done [...]: scanned=<走査した instance 行> changed=<差分のあった行>
@@ -932,7 +964,7 @@ mk-go の `000001` も作るので、TS から引き継いだ DB でも mk-go �
 deadlock で片方が失敗する (バッチ側は id の順に渡しているが、行を取る順は planner
 次第)。バッチが落ちたら `-from` で流し直せばよい。
 
-### `backfill-avatar-public-url` — アイコン / バナーの URL を公開用へ寄せ直す
+### `backfill avatar-public-url` — アイコン / バナーの URL を公開用へ寄せ直す
 
 `user.avatarUrl` / `user.bannerUrl` は drive ファイルの**原本**を指していた。原本は
 アップロードされたバイト列そのままで、`/files/:accessKey` は変換せずに返すため、
@@ -988,19 +1020,19 @@ id が実行中に変わるともう片方も書けない。冪等なので**も
 
 ```bash
 # まず件数を見る
-docker compose run --rm --no-deps --entrypoint /app/backfill-avatar-public-url app \
+docker compose run --rm --no-deps --entrypoint /app/elythia app backfill avatar-public-url \
   -config /app/.config/default.yml -dry-run
 
 # 実行
-docker compose run --rm --no-deps --entrypoint /app/backfill-avatar-public-url app \
+docker compose run --rm --no-deps --entrypoint /app/elythia app backfill avatar-public-url \
   -config /app/.config/default.yml -batch 1000 -sleep-ms 200
 ```
 
-**`--no-deps` を付ける** (理由は下の `backfill-emoji-system-file` と同じ)。UDS 構成では
+**`--no-deps` を付ける** (理由は下の `backfill emoji-system-file` と同じ)。UDS 構成では
 サービス名が `mkgo` になる。バイナリ直接実行なら
-`go run ./cmd/backfill-avatar-public-url -config .config/default.yml -dry-run`。
+`go run ./cmd/elythia backfill avatar-public-url -config .config/default.yml -dry-run`。
 
-**無指定で書き込み、`-dry-run` で抑止する**側の作法。`backfill-emoji-system-file` だけが
+**無指定で書き込み、`-dry-run` で抑止する**側の作法。`backfill emoji-system-file` だけが
 逆 (既定 dry-run + `-apply`) なので打ち間違えないこと。
 
 出力の `updated` は**「書く必要があった件数」**で、実行中に変わって書けなかった行も
@@ -1020,7 +1052,7 @@ docker compose run --rm --no-deps --entrypoint /app/backfill-avatar-public-url a
 配送を起こすには利用者が一度プロフィールを更新する必要がある (アイコンを
 設定し直せば同時に両方が片付く)。
 
-### `backfill-emoji-system-file` — 承認済み自作絵文字の画像を system 所有へ複製 (#2990)
+### `backfill emoji-system-file` — 承認済み自作絵文字の画像を system 所有へ複製 (#2990)
 
 #2966 より前に承認された `kind = own` のカスタム絵文字申請は、作られた絵文字が
 **申請者所有の drive ファイルの URL をそのまま参照している**。申請者がそのファイルを
@@ -1038,11 +1070,11 @@ drive から消すか、アカウントを削除した時点で表示できな�
 
 ```bash
 # まず分類だけ見る (既定は dry-run)
-docker compose run --rm --no-deps --entrypoint /app/backfill-emoji-system-file app \
+docker compose run --rm --no-deps --entrypoint /app/elythia app backfill emoji-system-file \
   -config /app/.config/default.yml
 
 # 実行
-docker compose run --rm --no-deps --entrypoint /app/backfill-emoji-system-file app \
+docker compose run --rm --no-deps --entrypoint /app/elythia app backfill emoji-system-file \
   -config /app/.config/default.yml -apply
 ```
 
@@ -1050,8 +1082,8 @@ docker compose run --rm --no-deps --entrypoint /app/backfill-emoji-system-file a
 ので、stack を落とした状態で叩くと**読み取りだけのつもりで migration まで走る**。
 
 UDS 構成ではサービス名が異なるので `docker compose -f ... run --rm --no-deps
---entrypoint /app/backfill-emoji-system-file mkgo ...` の形になる。バイナリ直接実行なら
-`go run ./cmd/backfill-emoji-system-file -config .config/default.yml`。
+--entrypoint /app/elythia mkgo backfill emoji-system-file ...` の形になる。バイナリ直接実行なら
+`go run ./cmd/elythia backfill emoji-system-file -config .config/default.yml`。
 
 **保存先の解決はサーバーと同じ。** オブジェクトストレージを有効にしていれば複製もそちら
 へ書き、`storedInternal = true` の行 (移行前に保存されたもの) はローカル FS から読む。
@@ -1062,8 +1094,8 @@ compose の `run` はサービスの volume をそのまま引き継ぐ。別の
 冪等。途中で失敗しても、作れた複製の分だけ進んだ状態から再実行して安全。
 
 **既定は dry-run で、書き込みには `-apply` が要る。** 姉妹バッチ
-(`backfill-remote-host` / `backfill-note-tags` / `backfill-avatar-public-url` /
-`backfill-instance-counts`) は
+(`backfill remote-host` / `backfill note-tags` / `backfill avatar-public-url` /
+`backfill instance-counts`) は
 **逆** (無指定で書き込み、`-dry-run` で抑止) なので、手が覚えているほうで打たないこと。`-dry-run` と `-apply`
 を両方渡すと落ちる。
 
@@ -1172,7 +1204,7 @@ publish しない。サーバー側は `emoji` のキャッシュ (`/api/emojis`
 ぶんのストレージ使用量はチャートの累積値に加算されない (行の中身は承認経路が作るものと
 同じ)。
 
-### `backfill-remote-host` — 保存済みリモート host の punycode 正規化 (#2706)
+### `backfill remote-host` — 保存済みリモート host の punycode 正規化 (#2706)
 
 `hostFromURI` は #2706 から保存時に正規化 (小文字化 + punycode) を掛けるが、それ以前に
 取り込んだ行は `Mixed.Example` のような生の表記のまま残る。
@@ -1229,11 +1261,11 @@ acct 解決も #2996 で両当たりを撤去したので引けない。
 
 ```bash
 # まず件数を見積もる (書き込まない)
-docker compose run --rm --no-deps --entrypoint /app/backfill-remote-host app \
+docker compose run --rm --no-deps --entrypoint /app/elythia app backfill remote-host \
   -config /app/.config/default.yml -dry-run
 
 # 実行。負荷を絞りたければ -batch / -sleep-ms
-docker compose run --rm --no-deps --entrypoint /app/backfill-remote-host app \
+docker compose run --rm --no-deps --entrypoint /app/elythia app backfill remote-host \
   -config /app/.config/default.yml -batch 1000 -sleep-ms 200
 ```
 
@@ -1248,10 +1280,10 @@ docker compose run --rm --no-deps --entrypoint /app/backfill-remote-host app \
 走査行数が膨らむ。`-batch` / `-sleep-ms` で絞ること。
 
 UDS 構成ではサービス名が異なるので `docker compose -f compose.uds.yaml run --rm
---no-deps --entrypoint /app/backfill-remote-host mkgo ...` の形になる (`mkgo` も
+--no-deps --entrypoint /app/elythia mkgo backfill remote-host ...` の形になる (`mkgo` も
 `depends_on` に `condition: service_healthy` を持つので `--no-deps` は同じく要る)。
 バイナリ直接実行なら
-`go run ./cmd/backfill-remote-host -config .config/default.yml -dry-run`。
+`go run ./cmd/elythia backfill remote-host -config .config/default.yml -dry-run`。
 
 **流すのは「いま動いている版」のバッチにすること。** 対象の列一覧はリリースごとに
 増えるので、**まだ適用していない migration が作る列**を持つ版で流すとそこで落ちる。
@@ -1263,7 +1295,7 @@ backfill chat_room.host (cursor=""): ERROR: column "host" does not exist (SQLSTA
 `chat_room.host` は #2994 の `000090` が作る列で、**それを取り込む前の DB には無い**
 (1.3.0 のタグ時点では `000083` まで)。
 `docker compose run` は現在の image を使うので **pull の前に流せば自然に避けられる**が、
-`git pull` 済みのツリーで `go run ./cmd/backfill-remote-host` を叩くと踏む
+`git pull` 済みのツリーで `go run ./cmd/elythia backfill remote-host` を叩くと踏む
 (自分でビルドしたバイナリを持ち込む場合も同じ)。
 
 **それで取りこぼしは生じない。** 対象一覧はその版の schema をちょうど覆う —

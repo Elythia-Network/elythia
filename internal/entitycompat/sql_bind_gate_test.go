@@ -118,12 +118,13 @@ var sqlFormatMustDetect = []struct{ Key, Want string }{
 	{"internal/entitycompat/sqlbindfixture/sample.go#UnsafeConcatenatedFormat", "WHERE"},
 	{"internal/maintenance/host_backfill.go#BackfillHostColumnBatch", "SELECT"},
 	{"internal/repository/poll.go#IncrementVote", "votes["},
-	// **`internal/` だけを名指しにしない。** 走査の内訳は internal 175 / cmd 2 /
-	// plugin 3 (実測) なので、`cmd` か `plugin` を root から外しても違反集合も
-	// 名指しも一切変わらず、5 サイトが黙って検査対象から消える (#3136 と同じ型)。
-	// cmd の名指しは以前 cmd/migrate の DSN 組み立てだったが、DSN は
-	// config.DatabaseURL へ寄せたので healthcheck の URL に替えた。
-	{"cmd/misskey/main.go#runHealthcheck", "/healthz"},
+	// **`internal/` だけを名指しにしない。** `plugin` を root から外しても違反集合も
+	// 名指しも変わらなければ、そこのサイトが黙って検査対象から消える (#3136 と同じ型)。
+	// cmd にも以前は名指しがあったが、実行バイナリを cmd/elythia 1 つにまとめた
+	// とき (#3394) に処理を internal/cli へ移したので、cmd には書式文字列が残って
+	// いない。healthcheck の URL は移った先で名指しする。cmd を root に残すのは、
+	// 後から cmd に処理を書き足したときに拾うため。
+	{"internal/cli/diag/healthcheck.go#runHealthcheck", "/healthz"},
 	{"plugin/api.go#Error", "plugin: API"},
 }
 

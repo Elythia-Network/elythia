@@ -413,7 +413,7 @@ CLAUDE.md の「更新記録」に書かれていた本文を、#3248 でここ�
   (`internal/repository/migration_roundtrip_test.go`)。**書いた瞬間に本物のバグを 1 件
   見つけた** — `000001_initial.down.sql` が `DROP TABLE IF EXISTS "schema_migrations"` を
   持っており、golang-migrate が自分で管理するテーブルを消していた。`Down()` は全 down の
-  あとに `TRUNCATE schema_migrations` を撃つので、**`go run ./cmd/migrate -direction down`
+  あとに `TRUNCATE schema_migrations` を撃つので、**`go run ./cmd/elythia migrate -direction down`
   (CLAUDE.md Section 3 が全段ロールバックとして案内している手順) は毎回最後に
   `relation does not exist (SQLSTATE 42P01)` で落ちていた**。`make migrate-down`
   (`-steps 1`) も version 1 のときは同じ理由で落ちる。**全段 down の後は
@@ -422,7 +422,7 @@ CLAUDE.md の「更新記録」に書かれていた本文を、#3248 でここ�
   直した。
   **`testutil.ApplyMigrations` では代用できない。** あちらの `findMigrationFiles` は
   `*.up.sql` しか glob しないので **down を 1 本も実行しない**。加えて up 側も `db.Exec` の
-  エラーを握り潰す (`continue`) ので壊れた SQL でも緑になる。本番の `cmd/migrate` と同じ
+  エラーを握り潰す (`continue`) ので壊れた SQL でも緑になる。本番の `elythia migrate` と同じ
   golang-migrate + pgx5 driver に流す。
   **down は書いた時点でしか実行されない。** 97 本あって、後から up 側だけ直して対応が
   崩れても誰も気付けない。壊れているのは**戻したくなった当日**に分かる。

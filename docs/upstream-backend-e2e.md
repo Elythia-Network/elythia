@@ -64,7 +64,7 @@ make upstream-e2e-down
   js-yaml を含めないため)。生成しておかないと globalSetup が
   「Compiled configuration file not found」で落ちる
 
-`make upstream-e2e-test` は `built/misskey` を先にビルドする。テスト側の
+`make upstream-e2e-test` は `built/elythia` を先にビルドする。テスト側の
 ハーネスがそのバイナリを子プロセスとして起動するので、mk-go を手で立ち上げて
 おく必要はない。**むしろ手動で 61812 を掴んでいると、ハーネスの再起動
 (`/env` 経由) が `address already in use` で失敗し、環境変数を変えたはずの

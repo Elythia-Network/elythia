@@ -330,7 +330,7 @@ redis:
 #
 # The legacy 'asynq' driver was removed in mk-go (#2985). If your config
 # still pins it, mk-go — and every CLI that loads this file, including
-# cmd/migrate — refuses to start: set 'mkq' or delete the line.
+# `elythia migrate` — refuses to start: set 'mkq' or delete the line.
 #
 # Migrating is ONE-WAY. asynq's jobs live under `asynq:{<queue>}:*` in
 # Redis and mkq (`bull:*`) never sees them, so anything still queued is
