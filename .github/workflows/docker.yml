@@ -205,7 +205,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           # **scope を分ける。** 既定の scope は build-and-push と共有で、並行して
           # 走る 2 つの job が書いた index を互いに上書きする。#3379 から frontend の
-          # ビルド (依存込みで約 1.2GB) をこの image の中で行うので、取り合いで
+          # ビルド (#3379 の P4c で依存込みの層が約 1.2GB と実測。pnpm の store を
+          # cache mount へ移す前の値で、今はそれより小さい) をこの image の中で行うので、取り合いで
           # キャッシュを失うと毎回 frontend をビルドし直すことになる。
           cache-from: type=gha,scope=bundled
           cache-to: type=gha,mode=max,scope=bundled
