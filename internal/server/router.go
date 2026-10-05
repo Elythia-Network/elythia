@@ -183,7 +183,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// emoji の ListLocal はタイムライン描画ごとに毎回フルスキャンしていた
 	// hot path だが、絵文字テーブルの mutation は admin 経由のみで頻度が低い。
 	// 5 分 TTL の in-memory cache + mutation 時 invalidate で DB 負荷を消す
-	// (#300 3-6)。
+	// (#300 3-6)。ノートを詰めるときの (name, host) → URL の解決も、同じ
+	// wrapper の cache でページをまたいで使い回す (#3383、他プロセスへの
+	// invalidation の配線は internalPubSub の emojiCacheInvalidated)。
 	emojiRepo := repository.NewCachedEmojiRepository(repository.NewEmojiRepository(s.db))
 	// 絵文字由来のアバターデコレーション (#2975) の解決に使う。**catalog と同じ形の
 	// TTL cache だが、載せるのはローカルかつ非センシティブなものだけ**で、その
@@ -2997,6 +2999,66 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	})
 	internalPubSub.Subscribe(context.Background(), "antennaUpdated", func([]byte) {
 		cachedAntenna.Invalidate()
+	})
+
+	// #3383: 絵文字の (name, host) cache の cross-worker invalidation。
+	// リモート絵文字の作成・更新は連合の受信 (MK_ONLY_QUEUE のプロセス) で
+	// 起き、それを表示に使うのは API のプロセスなので、繋がないと作られた
+	// 絵文字が負キャッシュの TTL (1 分) の間、更新・削除が正の TTL (10 分) の
+	// 間反映されない。
+	//
+	// **書き込んだプロセスは自分で精密に落とし済み**なので、自分の publish は
+	// 受け流す (rolesUpdated と同じ)。受信側は ApplyRemoteInvalidation で落とし、
+	// hook を呼ばないので通知の投げ合いにならない。
+	//
+	// **publish は書き込みの経路から切り離す。** upsertEmojis は絵文字 1 つごとに
+	// Create / UpdateFields を呼ぶので、同期で publish すると Redis が詰まった
+	// ときに受信が「絵文字数 x timeout」止まる。queue が溢れたら全体の
+	// invalidation に畳む (黙って捨てない)。publish 自体の失敗は TTL が上限になる。
+	emojiCacheSender := idGen.Generate(time.Now())
+	type emojiCacheMessage struct {
+		From string                            `json:"from"`
+		Inv  repository.EmojiCacheInvalidation `json:"inv"`
+	}
+	emojiInvalidationQueue := repository.NewEmojiInvalidationQueue(1024, func(inv repository.EmojiCacheInvalidation) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := internalPubSub.Publish(ctx, "emojiCacheInvalidated", emojiCacheMessage{From: emojiCacheSender, Inv: inv}); err != nil {
+			slog.Warn("emoji: publish emojiCacheInvalidated failed", "err", err)
+		}
+	})
+	// 停止時は Run が溜まっている分を最大 2 秒 (送信中の 1 件の timeout を足すと最悪約 4 秒)
+	// かけて送ってから返る。プロセスが
+	// 先に終わると送れないので、shutdown の deadline の範囲でその完了を待つ。
+	// Run が返った後の書き込み (停止中にまだ走っている受信ジョブ) は送られず、
+	// TTL が上限になる。
+	emojiInvalidationCtx, stopEmojiInvalidation := context.WithCancel(context.Background())
+	emojiInvalidationDone := make(chan struct{})
+	go func() {
+		defer close(emojiInvalidationDone)
+		emojiInvalidationQueue.Run(emojiInvalidationCtx)
+	}()
+	s.registerShutdownHook(func(ctx context.Context) {
+		stopEmojiInvalidation()
+		select {
+		case <-emojiInvalidationDone:
+		case <-ctx.Done():
+		}
+	})
+	emojiRepo.SetInvalidationHook(emojiInvalidationQueue.Enqueue)
+	internalPubSub.Subscribe(context.Background(), "emojiCacheInvalidated", func(payload []byte) {
+		var msg emojiCacheMessage
+		if err := json.Unmarshal(payload, &msg); err != nil {
+			// **読めない通知は全体を落とす側に倒す。** 何を落とすべきか分からない
+			// まま捨てると、TTL の間古い絵文字を出し続ける。
+			slog.Warn("emoji: malformed emojiCacheInvalidated", "err", err)
+			emojiRepo.ApplyRemoteInvalidation(repository.EmojiCacheInvalidation{All: true})
+			return
+		}
+		if msg.From == emojiCacheSender {
+			return
+		}
+		emojiRepo.ApplyRemoteInvalidation(msg.Inv)
 	})
 
 	// pollVoted / reacted / unreacted / deleted を noteStream:<id> に publish

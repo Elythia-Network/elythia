@@ -56,6 +56,15 @@ type EmojiLookup interface {
 	FindManyByNamesAndHost(names []string, host *string) ([]*model.Emoji, error)
 }
 
+// EmojiKeyLookup is the optional cross-host batch lookup. When the
+// EmojiLookup handed to NewEmojiResolver also implements it, all (name, host)
+// pairs are resolved in one call instead of one call per host.
+// repository.CachedEmojiRepository implements it with a cache shared across
+// requests, so the next timeline page does not fetch the same emojis (#3383).
+type EmojiKeyLookup interface {
+	FindManyByKeys(keys []model.EmojiKey) ([]*model.Emoji, error)
+}
+
 // EmojiResolver caches (name, host) → URL lookups so that packers can
 // populate Emojis maps without repeating DB queries. InstanceResolverと同
 // パターンで、1回のhost別batch fetch後にO(1)参照する。
@@ -134,6 +143,24 @@ func NewEmojiResolver(lookup EmojiLookup, notes []*model.Note) *EmojiResolver {
 			addNames([]string{pair.name}, hostPtr)
 		}
 	}
+	if kl, ok := lookup.(EmojiKeyLookup); ok {
+		keys := make([]model.EmojiKey, 0, len(hostNames))
+		for host, nameSet := range hostNames {
+			for n := range nameSet {
+				keys = append(keys, model.EmojiKey{Name: n, Host: host})
+			}
+		}
+		// エラーでも返った行 (cache に載っていた分など) は使う。host 単位で
+		// 引いていた従来の経路も、失敗した host を飛ばして残りは解決していた。
+		if len(keys) > 0 {
+			emojis, _ := kl.FindManyByKeys(keys)
+			for _, e := range emojis {
+				k := model.EmojiKeyOf(e)
+				r.cache[k.Name+"@"+k.Host] = emojiDisplayURL(e)
+			}
+		}
+		return r
+	}
 	// hostごとにbatch fetch
 	for host, nameSet := range hostNames {
 		names := make([]string, 0, len(nameSet))
@@ -149,14 +176,19 @@ func NewEmojiResolver(lookup EmojiLookup, notes []*model.Note) *EmojiResolver {
 			continue
 		}
 		for _, e := range emojis {
-			url := e.PublicURL
-			if url == "" {
-				url = e.OriginalURL
-			}
-			r.cache[e.Name+"@"+host] = url
+			r.cache[e.Name+"@"+host] = emojiDisplayURL(e)
 		}
 	}
 	return r
+}
+
+// emojiDisplayURL is the URL an emoji is shown with: PublicURL, falling back
+// to OriginalURL.
+func emojiDisplayURL(e *model.Emoji) string {
+	if e.PublicURL != "" {
+		return e.PublicURL
+	}
+	return e.OriginalURL
 }
 
 // PopulateNoteEmojis resolves emoji names stored in note.Emojis to URLs and

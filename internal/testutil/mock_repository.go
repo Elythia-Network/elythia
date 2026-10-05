@@ -2763,6 +2763,24 @@ func (m *MockEmojiRepository) FindManyByNamesAndHost(names []string, host *strin
 	return out, nil
 }
 
+// FindManyByKeys returns emojis matching any of the given (name, host) pairs.
+func (m *MockEmojiRepository) FindManyByKeys(keys []model.EmojiKey) ([]*model.Emoji, error) {
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	want := make(map[model.EmojiKey]struct{}, len(keys))
+	for _, k := range keys {
+		want[k] = struct{}{}
+	}
+	var out []*model.Emoji
+	for _, e := range m.Emojis {
+		if _, ok := want[model.EmojiKeyOf(e)]; ok {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
 func (m *MockEmojiRepository) Delete(id string) error {
 	if m.DeleteErr != nil {
 		return m.DeleteErr
