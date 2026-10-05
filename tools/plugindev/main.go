@@ -172,7 +172,7 @@ func (d *dev) rebuildAndRestart(ctx context.Context) error {
 	// 生成ツール自体が起動できなくなるため。
 	args := []string{"run", "./tools/pluginbuild"}
 	if d.pluginDir != "" {
-		// -plugin で名指しした監視対象は mk-plugin.yml で disabled でも含める。
+		// -plugin で名指しした監視対象は elythia-plugin.yml で disabled でも含める。
 		// 既定無効の同梱サンプルを、tracked ファイルの編集 (= dirty tree) を
 		// 強いずに開発できるようにするため。
 		//

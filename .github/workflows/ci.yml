@@ -35,7 +35,7 @@ jobs:
       # 意図的に外し、実測が終わって #2585 が close されても戻っていなかった
       # (#2701)。恒久的に有効にする方針にするならこの step を変える。手元で
       # 動かすだけなら `make plugin-dev PLUGIN=plugins/<name>` を使う
-      # (`mk-plugin.yml` を触らずに済む。docs/plugins/development.md)。
+      # (`elythia-plugin.yml` を触らずに済む。docs/plugins/development.md)。
       #
       # **判定は git ls-files + grep だけで完結させる。** `pluginbuild` に読ませる
       # ほうが parser 一致で厳密だが、`pluginbuild` は git ではなく**ディレクトリ**を
@@ -54,12 +54,12 @@ jobs:
       # 今度は**危険側**に開く。
       - name: Check bundled plugins are disabled by default
         run: |
-          files=$(git ls-files 'plugins/*/mk-plugin.yml')
+          files=$(git ls-files 'plugins/*/elythia-plugin.yml')
           # **空でも緑にしない。** `plugins/` の移動や marker 名の変更で列挙が
           # 空振りすると、検査していないのに通ってしまう (plugin-tests job の
           # 同型ステップと同じ guard)。
           if [ -z "$files" ]; then
-            echo "同梱プラグインの mk-plugin.yml が 1 つも見つかりません (列挙が壊れています)"
+            echo "同梱プラグインの elythia-plugin.yml が 1 つも見つかりません (列挙が壊れています)"
             exit 1
           fi
           fail=0

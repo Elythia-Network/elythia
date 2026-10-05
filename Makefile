@@ -293,7 +293,7 @@ REVISION_LDFLAGS = -X github.com/elythia-network/elythia/internal/config.MkGoCom
 plugins: ## plugins/ を走査して組み込み用ファイルを生成 (#2480)
 	GOWORK=off go run ./tools/pluginbuild
 
-# CI の build job と frontend workflow が使う。同梱サンプルは mk-plugin.yml で既定無効なので、
+# CI の build job と frontend workflow が使う。同梱サンプルは elythia-plugin.yml で既定無効なので、
 # 既定の走査では検証対象から外れてしまう (#2495)。
 plugins-all: ## disabled のプラグインも含めて生成 (CI 検証用)
 	GOWORK=off go run ./tools/pluginbuild -include-disabled
@@ -374,8 +374,8 @@ plugin-doc-check: ## authoring.md の Go スニペットがコンパイルでき
 
 plugin-vet: ## 同梱プラグインの既定無効を検査 + go vet (CI の build job の 2 step 相当)
 	@set -e; \
-	markers=$$(git ls-files 'plugins/*/mk-plugin.yml'); \
-	if [ -z "$$markers" ]; then echo "同梱プラグインの mk-plugin.yml が見つかりません (列挙が壊れています)"; exit 1; fi; \
+	markers=$$(git ls-files 'plugins/*/elythia-plugin.yml'); \
+	if [ -z "$$markers" ]; then echo "同梱プラグインの elythia-plugin.yml が見つかりません (列挙が壊れています)"; exit 1; fi; \
 	fail=0; \
 	for f in $$markers; do \
 		if grep -qE '^disabled:[[:space:]]*true[[:space:]]*$$' "$$f"; then echo "ok   $$f"; \

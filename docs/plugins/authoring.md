@@ -10,14 +10,14 @@
 
 ```
 plugins/myplugin/
-├── mk-plugin.yml       これがあるものだけがプラグインとして扱われる
+├── elythia-plugin.yml  これがあるものだけがプラグインとして扱われる
 ├── go.mod              **必須**
 ├── plugin.go
 └── frontend/           UI が要る場合だけ
     └── index.ts
 ```
 
-### `mk-plugin.yml`
+### `elythia-plugin.yml`
 
 ```yaml
 name: myplugin
@@ -31,7 +31,7 @@ apiVersion: 1
 ### `go.mod`
 
 ```
-module github.com/you/mk-plugin-myplugin
+module github.com/you/elythia-plugin-myplugin
 
 go 1.27.1
 
@@ -44,7 +44,7 @@ replace github.com/elythia-network/elythia => ../..
 
 **独立した Go module である必要がある。** これは形式ではなく、Go の internal ルールにより「Elythia の内部パッケージを import できない」ことを保証する仕組み。`go.mod` を持たないディレクトリはビルド時にエラーになる。
 
-依存を足すときは自分の module の中で `go get` する。**リポジトリのルートで `go mod tidy` を走らせないこと** — 生成物 `cmd/elythia/plugins_generated.go` が各プラグインのモジュール (上の例では `github.com/you/mk-plugin-myplugin`) を import しており、private repo だと解決に失敗する。
+依存を足すときは自分の module の中で `go get` する。**リポジトリのルートで `go mod tidy` を走らせないこと** — 生成物 `cmd/elythia/plugins_generated.go` が各プラグインのモジュール (上の例では `github.com/you/elythia-plugin-myplugin`) を import しており、private repo だと解決に失敗する。
 
 ### `plugin.go`
 
@@ -732,7 +732,7 @@ return raw, nil
 **想定した命名規則から外れていれば捨てる** (相手が渡した文字列をそのまま URL に
 しない)。
 
-`Peered` を立てると nodeinfo の `metadata.mkGoPlugins` にプラグイン名が出る。宣言して
+`Peered` を立てると nodeinfo の `metadata.elythiaPlugins` にプラグイン名が出る (#3400 より前は `mkGoPlugins`)。宣言して
 いないプラグインは名前も出ない (入れている拡張を全部晒さないため)。
 
 `_` で始まるパスは Elythia の予約なので、プラグインからは登録できない (受け口を奪えない

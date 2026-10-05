@@ -414,7 +414,7 @@ checkout / setup-go を除くと step は実行順に 3 つ。**required job な
 
 - `go build ./...`で全パッケージのビルド確認。
 - **`Check bundled plugins are disabled by default` step** で、tracked な
-  `plugins/*/mk-plugin.yml` が全て `disabled: true` を持つことを見る (#2701)。
+  `plugins/*/elythia-plugin.yml` が全て `disabled: true` を持つことを見る (#2701)。
   **検証のために一時的に外して戻し忘れる**のを止めるため (trustlevel が実際に
   そうなっていた)。判定は `git ls-files` + grep だけで完結させてある —
   `pluginbuild` に読ませるほうが parser 一致で厳密だが、`pluginbuild` は git では

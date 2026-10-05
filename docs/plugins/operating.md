@@ -20,7 +20,7 @@
 
 ```bash
 # 1. plugins/ にプラグインを置く
-git clone https://example.com/mk-plugin-foo plugins/foo
+git clone https://example.com/elythia-plugin-foo plugins/foo
 
 # 2. ビルド
 make build          # または docker build / make uds-build
@@ -68,8 +68,8 @@ jobs:
     with:
       mk_ref: <同じタグ または コミット SHA>
       plugins: |
-        weather    https://github.com/foo/mk-plugin-weather  v1.2.0
-        nowplaying https://github.com/bar/mk-plugin-np       0123456789abcdef0123456789abcdef01234567
+        weather    https://github.com/foo/elythia-plugin-weather  v1.2.0
+        nowplaying https://github.com/bar/elythia-plugin-np       0123456789abcdef0123456789abcdef01234567
     secrets:
       plugin_token: ${{ secrets.PLUGIN_TOKEN }}   # private なプラグインを使う場合のみ
 ```
@@ -80,7 +80,7 @@ jobs:
 - **`mk_ref` にこの機能を含む版を指す。** リリース `1.3.0` には `tools/pluginresolve` が無いので、指定するとビルドが「no required module provides package」で落ちる。`1.4.0` 以降のタグか、その先のコミット SHA を指すこと
 - **ref は必須だが、それだけでは内容は固定されない。** タグ・ブランチ・コミット SHA のいずれも書けるので、`main` と書けば実質的に既定ブランチを追うことになる。省略を許さないのは「どの版を取るかを毎回書かせる」ためで、**内容まで固定したいならコミット SHA か、動かさない運用のタグを指すこと**。ブランチを指した場合、この文書の冒頭にある「特定のバージョンを名指しで含める」という前提は成立しない（作者のアカウントが侵害されれば、次のビルドで任意のコードが入る）
 - **フロントエンドを持つプラグインもそのまま入る。** SPA は `Dockerfile.bundled` の中で毎回ビルドするので、指定の仕方は変わらない (#3379)
-- **指定したプラグインが組み込まれなかったらビルドが落ちる。** `mk-plugin.yml` が `disabled: true` のプラグインは生成ツールが黙って読み飛ばすため、突き合わせないと「指定したのに1つも入っていないイメージ」が成功扱いで publish される
+- **指定したプラグインが組み込まれなかったらビルドが落ちる。** `elythia-plugin.yml` が `disabled: true` のプラグインは生成ツールが黙って読み飛ばすため、突き合わせないと「指定したのに1つも入っていないイメージ」が成功扱いで publish される
 - **private なプラグインは `plugin_token` を渡す。** `https://github.com/` の URL 書き換えで差し込むので、プラグインの指定行に token を書く必要はない（書いた場合はビルドが弾く。指定行は秘密として扱われないので、ログに平文で残るため）。書き換えはプラグインを clone する step の中だけで有効で、抜けるとき (失敗時も) に消すので、後続の生成ツール (プラグインの go.mod を解決する) や image のビルドからは token を読めない。**token に持たせる権限はプラグインのリポジトリの読み取りだけにする**
 - `push: false` を渡すとビルドだけ行い、publish しない。`image` は `ghcr.io/...` のみ受け付ける（ログイン先が ghcr.io に固定されているため）
 
@@ -152,9 +152,9 @@ plugins:
 
 問題のあるプラグインを止めるのに再ビルドと再デプロイを要求すると障害対応に間に合わないため、この経路を用意してある。
 
-### ビルドから外す（`mk-plugin.yml`）
+### ビルドから外す（`elythia-plugin.yml`）
 
-プラグインの`mk-plugin.yml`に書く。
+プラグインの`elythia-plugin.yml`に書く。
 
 ```yaml
 disabled: true
@@ -168,11 +168,11 @@ disabled: true
 
 同梱しているのは`plugins/status/`と`plugins/trustlevel/`の2つ。
 
-**どちらもこの仕組みで既定無効**。動かしたい場合は該当する`mk-plugin.yml`から`disabled: true`の行を消して再ビルドする。
+**どちらもこの仕組みで既定無効**。動かしたい場合は該当する`elythia-plugin.yml`から`disabled: true`の行を消して再ビルドする。
 
 既定無効なのは、同梱プラグインが**ビルドに含まれているだけで有効になる**ため。`plugin_wiring.go`はRoutes/Jobsの登録より先に専用schemaを開いてmigrationを適用するので、設定していなくても`plugin_<name>` schemaとテーブルができる。schemaを開けない環境では起動そのものが失敗する。cloneしただけで全運営者のバイナリ・フロント・DBに入る状態にしない。
 
-**この既定は`build` jobの`Check bundled plugins are disabled by default`が見ている**（#2701）。検証のために一時的に外して戻し忘れるのを止めるため。手元で動かすだけなら`make plugin-dev PLUGIN=plugins/<name>`を使うと`mk-plugin.yml`を触らずに済む（ビルド生成物である`server-plugins.generated.ts`は書き換わるが、gitで追跡していないので差分には出ない）。
+**この既定は`build` jobの`Check bundled plugins are disabled by default`が見ている**（#2701）。検証のために一時的に外して戻し忘れるのを止めるため。手元で動かすだけなら`make plugin-dev PLUGIN=plugins/<name>`を使うと`elythia-plugin.yml`を触らずに済む（ビルド生成物である`server-plugins.generated.ts`は書き換わるが、gitで追跡していないので差分には出ない）。
 
 ## 入っているものを確認する
 

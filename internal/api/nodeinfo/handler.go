@@ -382,11 +382,12 @@ func (h *Handler) buildDocument(version string) map[string]any {
 		software["repository"] = softwareRepository
 	}
 
-	// mk-go 独自。相手が「同じプラグインを持っているか」を判断するのに使う
+	// 独自の宣言。相手が「同じプラグインを持っているか」を判断するのに使う
 	// (#2537)。宣言が無ければキーごと出さない — 使っていないインスタンスが
-	// 余計な情報を晒さないようにする。
+	// 余計な情報を晒さないようにする。#3400 で `mkGoPlugins` から改めた。旧名は
+	// 出さない (改名より前の版の相手とは、相手が上げるまでプラグインの連合が止まる)。
 	if len(h.peeredPlugins) > 0 {
-		metadata["mkGoPlugins"] = h.peeredPlugins
+		metadata["elythiaPlugins"] = h.peeredPlugins
 	}
 
 	return map[string]any{

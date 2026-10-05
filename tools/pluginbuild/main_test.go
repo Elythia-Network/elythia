@@ -92,6 +92,60 @@ func TestDiscover_MissingGoModIsError(t *testing.T) {
 	assert.Contains(t, err.Error(), "独立した Go module")
 }
 
+// 旧名のマニフェストだけがあるディレクトリは、黙って飛ばさずに止める (#3400)。
+// 飛ばすと、プラグインが組み込まれていない image が緑で出来上がる。
+func TestDiscover_LegacyManifestOnlyIsError(t *testing.T) {
+	for name, marker := range map[string]string{
+		"enabled":  validMarker(),
+		"disabled": "name: hello\napiVersion: 1\ndisabled: true\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			dir := writePlugin(t, root, "old", "example.com/old", "")
+			require.NoError(t, os.WriteFile(filepath.Join(dir, legacyMarkerFile), []byte(marker), 0o644))
+
+			_, err := discover(root, "", include{})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), legacyMarkerFile)
+			assert.Contains(t, err.Error(), markerFile)
+			assert.Contains(t, err.Error(), "docs/plugins/compatibility.md")
+		})
+	}
+}
+
+// 旧名が壊れた symlink でも、置いてある以上は改名し忘れなので止める。
+func TestDiscover_LegacyManifestBrokenSymlinkIsError(t *testing.T) {
+	root := t.TempDir()
+	dir := writePlugin(t, root, "old", "example.com/old", "")
+	require.NoError(t, os.Symlink(filepath.Join(dir, "missing.yml"), filepath.Join(dir, legacyMarkerFile)))
+
+	_, err := discover(root, "", include{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), legacyMarkerFile)
+}
+
+// 新しい名前があれば、旧名が残っていてもそちらを読む (コピーして改名したときなど)。
+func TestDiscover_NewManifestWinsOverLegacy(t *testing.T) {
+	root := t.TempDir()
+	dir := writePlugin(t, root, "hello", "example.com/hello", validMarker())
+	require.NoError(t, os.WriteFile(filepath.Join(dir, legacyMarkerFile), []byte("name: legacy\napiVersion: 999\n"), 0o644))
+
+	found, err := discover(root, "", include{})
+	require.NoError(t, err)
+	require.Len(t, found, 1)
+	assert.Equal(t, "hello", found[0].name)
+}
+
+// 作業用ディレクトリ (マーカーがどちらも無い) は今までどおり黙って飛ばす。
+func TestDiscover_NoManifestAtAllIsSkipped(t *testing.T) {
+	root := t.TempDir()
+	writePlugin(t, root, "scratch", "example.com/scratch", "")
+
+	found, err := discover(root, "", include{})
+	require.NoError(t, err)
+	assert.Empty(t, found)
+}
+
 // 以前のモジュールパスのままのプラグインは、生成の段階で直し方を示して止める (#3394)。
 func TestDiscover_LegacyModulePathIsError(t *testing.T) {
 	root := t.TempDir()

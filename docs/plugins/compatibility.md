@@ -50,7 +50,7 @@ Elythia 本体を変更する人向け。**公開面を広げてよい条件**�
 
 既存のシグネチャ変更、削除、意味の変更。
 
-**`plugin.APIVersion` を上げる。** 合わないプラグインは `mk-plugin.yml` の `apiVersion` 検査でビルド時に落ちる。黙って動かない状態にはならない。
+**`plugin.APIVersion` を上げる。** 合わないプラグインは `elythia-plugin.yml` の `apiVersion` 検査でビルド時に落ちる。黙って動かない状態にはならない。
 
 破壊的変更を入れるときは、
 
@@ -82,6 +82,19 @@ gofmt -w .
 
 - 書き換えた後のプラグインは、2.0 より前の本体ではビルドできない。本体と同じ版の組み合わせで上げる
 - プラグイン自身のモジュール名 (`module` 行) は変えなくても動く。同梱プラグインは `github.com/elythia-network/elythia-plugin-<名前>` にそろえた
+
+### マニフェストの改名 (#3400)
+
+2.0 で、プラグインのマニフェストの名前が `mk-plugin.yml` から `elythia-plugin.yml` に変わった。中身の書式はそのままで、名前を変えるだけでよい。
+
+```bash
+git mv mk-plugin.yml elythia-plugin.yml   # git で管理していなければ mv
+```
+
+- 旧名は読まない。**旧名のマニフェストだけがあるディレクトリは、`make plugins` が止める** (`disabled: true` を書いていても止める)。黙って飛ばすと、プラグインが組み込まれていない image が出来上がるため
+- 新しい名前があれば、旧名のファイルが残っていても新しい方を読む
+- nodeinfo の宣言も `metadata.mkGoPlugins` から `metadata.elythiaPlugins` に変わった。`Peered` を宣言しているプラグインは、相手が 2.0 より前の版のあいだ、相手を対応サーバーと見なさない ([Peer のプロトコル](../plugin-peer-protocol.md#相手が持っているかの判定))
+- マニフェストの名前を変えたプラグインも、2.0 より前の本体では検出されない。本体と同じ版の組み合わせで上げる
 
 ### 上流追従による破壊
 
@@ -148,7 +161,7 @@ go run ./tools/pluginspec -write
 
 required なのは `build` と `frontend` (`docs/ci.md` の required check は `build` / `test` / `lint` / `frontend` の 4 つ)。`plugin-tests` だけが落ちる壊れ方はマージをブロックしない。
 
-`plugins/*` は gitignore されているが、`!plugins/status/` と `!plugins/trustlevel/` (#2586) で例外指定してある。**どちらも `mk-plugin.yml` で既定無効**なので、clone して `make build` してもバイナリにもフロントにも入らない。`status` は #2495 から。`trustlevel` は #2586 で `disabled: true` 付きで同梱したあと、#2585 の実測を採るために一度外し、実測が終わって #2701 で戻している。既定無効であることは `build` job の `Check bundled plugins are disabled by default` が見る。
+`plugins/*` は gitignore されているが、`!plugins/status/` と `!plugins/trustlevel/` (#2586) で例外指定してある。**どちらも `elythia-plugin.yml` で既定無効**なので、clone して `make build` してもバイナリにもフロントにも入らない。`status` は #2495 から。`trustlevel` は #2586 で `disabled: true` 付きで同梱したあと、#2585 の実測を採るために一度外し、実測が終わって #2701 で戻している。既定無効であることは `build` job の `Check bundled plugins are disabled by default` が見る。
 
 ## 変更時のチェック
 

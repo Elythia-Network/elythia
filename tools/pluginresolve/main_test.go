@@ -118,7 +118,7 @@ func TestClone_PinsRequestedRef(t *testing.T) {
 			root := t.TempDir()
 			require.NoError(t, clone(root, spec{name: "p", url: origin, ref: tt.ref}))
 
-			body, err := os.ReadFile(filepath.Join(root, "plugins", "p", "mk-plugin.yml"))
+			body, err := os.ReadFile(filepath.Join(root, "plugins", "p", "elythia-plugin.yml"))
 			require.NoError(t, err)
 			require.Contains(t, string(body), tt.want)
 
@@ -255,7 +255,7 @@ func newOriginRepo(t *testing.T) (dir, firstSHA, secondSHA string) {
 	}
 	write := func(version string) {
 		t.Helper()
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "mk-plugin.yml"),
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "elythia-plugin.yml"),
 			[]byte("name: p\nversion: "+version+"\n"), 0o644))
 	}
 

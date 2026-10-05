@@ -19,7 +19,7 @@
 #       with:
 #         mk_ref: "<同じタグ または コミット SHA>"
 #         plugins: |
-#           weather https://github.com/foo/mk-plugin-weather v1.2.0
+#           weather https://github.com/foo/elythia-plugin-weather v1.2.0
 #       secrets:
 #         plugin_token: ${{ secrets.PLUGIN_TOKEN }}   # private plugin を使う場合のみ
 #
@@ -151,7 +151,7 @@ jobs:
           printf '%s\n' "$out"
 
           # **要求したプラグインが実際に組み込まれたかを突き合わせる。**
-          # pluginbuild は mk-plugin.yml が `disabled: true` のプラグインを
+          # pluginbuild は elythia-plugin.yml が `disabled: true` のプラグインを
           # 黙って skip して exit 0 で終わる。しかも `disabled: true` は
           # このプロジェクト自身が同梱プラグインに要求している書き方 (#2701) なので、
           # 作者がそれに倣っていれば必ず踏む。見ないと **指定した N 個のうち
@@ -162,11 +162,11 @@ jobs:
           # 「組み込まれていない」と判定されて落ちるので、空振りはしない。
           #
           # **突き合わせるのはディレクトリ名。** pluginbuild が最初に出す名前は
-          # `mk-plugin.yml` の `name:` で、置いたディレクトリ名とは限らない。
+          # `elythia-plugin.yml` の `name:` で、置いたディレクトリ名とは限らない。
           # 運営者が指定できるのはディレクトリ名だけなので、そちらで照合しないと
           # **正しく組み込まれたプラグインで落ちる** (しかも診断が disabled を
           # 疑わせる方向になり、事実と逆を指す)。`dir=` は name より前に出るので、
-          # mk-plugin.yml の `name:` に細工しても別プラグインの行は偽装できない。
+          # elythia-plugin.yml の `name:` に細工しても別プラグインの行は偽装できない。
           #
           # `GOWORK=off` が要る。ここは pluginbuild が go.work を書いた後に走る
           # 唯一の `go run ./tools/*` で、付けないとプラグイン側の go.mod の問題が
@@ -179,7 +179,7 @@ jobs:
               case "$out" in
                 *"dir=plugins/${name} "*) ;;
                 *)
-                  echo "::error::プラグイン ${name} が組み込まれませんでした。mk-plugin.yml が disabled: true になっていないか確認してください"
+                  echo "::error::プラグイン ${name} が組み込まれませんでした。elythia-plugin.yml が disabled: true になっていないか確認してください"
                   exit 1
                   ;;
               esac
