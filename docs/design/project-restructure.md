@@ -72,7 +72,7 @@
 - `test/` (Go の e2e) を `tests/` へまとめる
 - 検証用の compose を各スイートの中へ移し、全てに `name:` を付ける (本番 project `mk` への合流を防ぐ)
 - ベンチを `tests/bench/` の下にまとめ、名前の揺れを揃える
-- リポジトリ直下には運営者向けの compose (`docker-compose.yml` / `docker-compose.image.yml` / `compose.uds.yaml.example`) だけを残す。`docker-compose.yml` への `name:` は、named volume の名前が変わり既存の運営者が DB の volume を見失うので、P6 で移行手順と一緒に行う (#3373)
+- リポジトリ直下には運営者向けの compose (`docker-compose.yml` / `docker-compose.image.yml` / `compose.uds.yaml.example`) だけを残す。**`docker-compose.yml` には `name:` を付けない** (2026-10-06 に変更。以前は「P6 で移行手順と一緒に付ける」としていた、#3394)。付けると、既存の運営者が古いスタックを止めてから上げる手順 (`down` → `git pull` → `up -d`) で、新しい project 名の空の volume から initdb・migration まで進み、空のインスタンスが同じ URL で公開される (`setupPassword` が未設定なら最初の管理者を第三者が作れる)。`.env` の `COMPOSE_PROJECT_NAME` で避けられるが、手順を読まずに上げた運営者を守れない。volume の名前だけを以前のものに固定する案は、古いスタックが動いたまま上げると新旧の PostgreSQL が同じ volume を開くので採らない。本番 (UDS) のホストで project `mk` に合流する危険は、そのホストで `docker-*` を叩かないという運用のルール (CLAUDE.md Section 0 の 8) で防ぐ。**`docker-compose.image.yml` (docker ブランチ) の `name: mk-image` も同じ理由で据え置く** (2026-10-06。移管の後に変えるのは既定のイメージ名だけ)
 
 ### R4. プラグインまわりの名前を Elythia に揃える
 
@@ -358,7 +358,7 @@ P4 (bind mount の元が `third_party/misskey/built` から `frontend/built` に
 | P4 | **2026-10-05 に完了** (#3379。P4a #3382、P4b #3384 と本番の切り替え、P4c #3385、P4e #3386、P4d #3387 / #3388 / #3389)。`api.json` の作り方は決めずに残した (後の issue で決める)。frontend の取り込み (D1 / D3 / D4 / D5)、submodule と fork の廃止。frontend の CI の required 化とライセンスの表示 (R8 / D12)、本番の切り替え (D13) を含む。あわせて、`@misskey-dev/emoji-assets` を frontend の依存に持ち直す (今は backend の `node_modules` から取っている)、Node.js の版を本家の `Dockerfile` でなく `.node-version` から読む、fork の assets image (`Dockerfile.assets` と publish の workflow。`Dockerfile.bundled` が使う) を本体の workflow でのビルドに置き換える (R2)、`misskey-js` の型の生成 (`build-misskey-js-with-types`) が使う `api.json` の作り方を決める (`api.json` は本家のソースに無く、本家 backend をビルドして `generate-api-json` で作る生成物。`.cache/misskey` で本家 backend をビルドするか、本体の API から作るか) | しない |
 | P5 | 正式な名前 (**決定: Elythia**) と、プラグインの呼び名 (**決定: 据え置き**) の決定。どちらも 2026-09-30 | — |
 | P5b | リポジトリの移管 (D10)。P6 / P6b を `develop` に入れた後、2.0.0 を出す前に行う (2026-10-05 に順番を変更) | する |
-| P6 | 改名 (D7) と実行バイナリのサブコマンド化 (R7 / D11)。2.0.0 として出す (R6)。`docker-compose.yml` に `name:` を付ける (R3。named volume の移行手順と一緒に) | する |
+| P6 | 改名 (D7) と実行バイナリのサブコマンド化 (R7 / D11)。2.0.0 として出す (R6)。`docker-compose.yml` には `name:` を付けない (R3、2026-10-06 に変更) | する |
 | P6b | プラグインまわりの名前の移行 (D8)。連合に出る nodeinfo の宣言を含むので P6 とは別 PR にするが、同じ版で出す | する |
 | P7 | ドキュメント・CLAUDE.md の整理。`docs/divergence.md` の分割 (R8) を含む | する |
 
