@@ -65,17 +65,10 @@ tests/playwright
 # の context から COPY するので残す (#3373 で tests/bench/ の下へまとめた)。
 tests/bench/http
 
-# submodule の依存。実測 1.2GB あり、frontend をビルドしたコンテキストの大半を
-# 占める。**`**/node_modules` にはできない** — それだと
-# `packages/backend/node_modules/` 配下の symlink まで落ち、Dockerfile が
-# COPY する `@misskey-dev/emoji-assets/built/...` が解決できなくなる (#2942)。
-third_party/misskey/node_modules
-# ただし emoji-assets だけは image に入る。Dockerfile / Dockerfile.bundled が
-# /twemoji と /fluent-emoji を **ここから** COPY するので、除外すると
-# runtime で絵文字が全滅する。pnpm は実体を .pnpm 配下に置き、
-# packages/backend/node_modules/... はそこへの symlink なので、
-# **再包含するのは実体側**。外すと COPY が not found で落ちる (実測)。
-!third_party/misskey/node_modules/.pnpm/*emoji-assets*/**
+# #3379 で外した submodule の残り。pull しても git は未追跡になった third_party/ を
+# 消さないので、片付けるまでは node_modules (実測 1.2GB) ごと build context に入る
+# (`COPY . .`)。片付けの手順は docs/deployment.md。
+third_party
 
 # 本体へ取り込んだ frontend/ (#3379) の依存とビルド成果物。手元で pnpm を回すと
 # node_modules だけで 1GB 近くになり、`COPY . .` の build context に入る。
@@ -84,10 +77,10 @@ frontend/packages/*/node_modules
 frontend/packages-private/*/node_modules
 frontend/packages/*/built
 # ただし emoji-assets だけは image に入る。Dockerfile が /twemoji と /fluent-emoji を
-# ここから COPY する。上の third_party と同じく、pnpm が実体を置く .pnpm 側を
-# 再包含する。third_party と違い、COPY が通る symlink (frontend/node_modules/
-# @misskey-dev/emoji-assets) も除外した frontend/node_modules の中にあるので、
-# symlink の側も戻す。
+# ここから COPY する。pnpm が実体を置く .pnpm 側を再包含し、COPY が通る symlink
+# (frontend/node_modules/@misskey-dev/emoji-assets) も除外した frontend/node_modules
+# の中にあるので、symlink の側も戻す。**`**/node_modules` にはできない** — 再包含が
+# 効かなくなり、COPY が not found で落ちる (#2942、実測)。
 !frontend/node_modules/@misskey-dev/emoji-assets
 !frontend/node_modules/@misskey-dev/emoji-assets/**
 !frontend/node_modules/.pnpm/*emoji-assets*/**

@@ -580,18 +580,18 @@ reversiGame roleTimeline serverStats userList
 この一覧と上の表の合計が `internal/server` の `streamRegistry` 登録名と一致すること
 は `TestDivergenceDoc_StreamChannelsMatchRegistry` が固定する。ただし固定できるのは
 **mk-go 側だけ**で、「upstream は 18」「名前も upstream に揃えてある」の検証は入って
-いない (`test-shards` は submodule を checkout しない)。upstream が増減した場合は
-submodule bump の PR で人が見る。
+いない (`test-shards` は本家のソースを取得しない)。upstream が増減した場合は
+本家の版を上げる PR で人が見る。
 
 ---
 
 ## 4-2. fork frontend の独自変更
 
-`third_party/misskey` fork (`shiroha-a/misskey-ts`) に載せている frontend の custom commit。**原則として**純正へ還元できない (= 純正 backend が対応しない) ものだけを置く方針。
+**#3379 で frontend を本体へ取り込むまで**、fork (`shiroha-a/misskey-ts`、取り込んだ後にアーカイブした) に載せていた frontend の custom commit。**この表は凍結した記録で、行は足さない。** tag はアーカイブした fork で辿れる。取り込んだ後の独自変更は [§4-2b](#4-2b-frontend-の独自変更-3379-で取り込んだ後) に PR 番号で書く。以下は当時の方針。**原則として**純正へ還元できない (= 純正 backend が対応しない) ものだけを置く方針。
 
 **還元できるものを一時的に置く場合は、その行に必ず明記する。** 純正にも同じ不具合があるものをここへ置くと、この表を「還元不能な差分の一覧」として読む運用 (upstream 追従時に残す / 落とすを判断する材料) が壊れる。純正へ取り込まれた時点で revert する対象なので、行を読んだだけでそれが分かる必要がある。現時点の該当は `2026.7.0-mk.22h` / `2026.7.0-mk.22i` / `2026.7.0-mk.22j` / `2026.9.0-mk.1` / `2026.9.0-mk.2` / `2026.9.0-mk.2a` / `2026.9.0-mk.8e` / `2026.9.0-mk.8f` / `2026.9.0-mk.15` / `2026.9.0-mk.15a` / `2026.9.0-mk.15b` / `2026.9.0-mk.15c` / `2026.9.0-mk.16` / `2026.9.0-mk.16a` / `2026.9.0-mk.16b` / `2026.9.1-mk.5` の 16 行 (**base を省略しない** — bump で `-mk.N` は 0 に戻るので省略形は曖昧になる)。
 
-**現在の pin は `2026.10.0-mk.5` (`608be306`)。** `2026.9.1-mk.*` までの行はすべて 2026.10.0 への
+**最後の pin は `2026.10.0-mk.5` (`608be306`)** で、この tag の木を `frontend/` へ取り込んだ (#3379)。 `2026.9.1-mk.*` までの行はすべて 2026.10.0 への
 載せ替え (custom commit 170 個のうち 168 個を `2026.10.0` の上へ cherry-pick、衝突 0 件) で
 `2026.10.0-mk.0` に入っている。外した 2 個は本家に取り込まれたもの (`2026.7.0-mk.0` の
 `MkModal` の null guard と、`2026.9.0-mk.40` のプロフィールの pull to refresh)。
@@ -805,19 +805,20 @@ upstream が `jobState` の型を autogen (`AdminQueueJobsRequest['state'][numbe
 (`2026.9.0-mk.3`、`mkGoFrontendVersion`) を出していたが、frontend を本体へ取り込んで
 独自の版を持たなくなった (#3379)。
 
-**ソースコードの案内は 3 つのリポジトリを並べる。** upstream の `about-misskey` が
+**ソースコードの案内は 2 つのリポジトリを並べる。** upstream の `about-misskey` が
 「このサーバーの改変版リポジトリ / Misskey 原典」の 2 段なのに対し、mk-go では
-「このサーバー (`instance.repositoryUrl`) / mk-go 本体 (サーバーサイド) /
-フロントエンド (`shiroha-a/misskey-ts`)」を出し、そのうえで Misskey 原典へ繋ぐ。
+「このサーバー (`instance.repositoryUrl`) / mk-go 本体 (バックエンドとフロントエンド)」を
+出し、そのうえで Misskey 原典へ繋ぐ。以前は 3 つ目としてフロントエンドの fork
+(`shiroha-a/misskey-ts`) を出していたが、#3379 で frontend を mk-go 本体へ取り込んだので
+外した。
 
 - **1 つ目を省くと**、operator が mk-go をさらに改変した場合に AGPL 13 条の
   案内先が間違ったものになる
-- **フロントエンドを省くと、いま表示されている画面のソースが案内から漏れる。**
-  Go で書き直したのは**サーバーサイドだけ**で、画面は Misskey のフロントエンドに
-  mk-go 向けの変更を載せたもの (この表の tag 一覧がその変更にあたる)。mk-go 本体の
-  submodule として辿れはするが、13 条が対象にするのは「動いているコード」全体なので
-  明示的に出す。ページ本文にも「フロントエンドは Misskey のものを利用している」旨を
-  書いてある
+- **フロントエンドは mk-go 本体の案内に含まれる。** Go で書き直したのは
+  **サーバーサイドだけ**で、画面は Misskey のフロントエンドに mk-go 向けの変更を
+  載せたもの。#3379 で `frontend/` として本体に取り込んだので、mk-go 本体のリンクが
+  「動いているコード」全体 (13 条の対象) を案内する。ページ本文にも「フロントエンドは
+  Misskey のものを利用している」旨を書いてある
 
 **コントリビューターにアバター画像を出していない。** 新規ページなので最初から外部
 画像を持たせる必要が無く、名前だけで用は足りる (#2892 で `avatars.githubusercontent.com`
@@ -842,6 +843,17 @@ upstream が `jobState` の型を autogen (`AdminQueueJobsRequest['state'][numbe
 | `pages/admin/job-queue.job.vue` | Timeline の試行を `attemptsAt` の実時刻で並べる。upstream は `timestamp + i` という架空の時刻 (作成 i ミリ秒後) でイベントを作り表示だけ `at ?` にしていたが、Bull は attempt ごとの時刻を保存しないので**並べるための時刻がそもそも無い**。全試行が「作成直後」に固まって時系列として嘘になり `(+delta)` も無意味だった (#2689)。mkq が記録するようになったので実時刻で出す (#2692)。記録が無い job は回数だけを Processed 行に添える (架空の時刻には戻さない) |
 
 `runtime` block が無い応答 (純正 backend) では該当 UI を出さない。
+
+---
+
+## 4-2b. frontend の独自変更 (#3379 で取り込んだ後)
+
+#3379 で frontend を本体の `frontend/` へ取り込んだ後の、純正と違える frontend の変更。方針は §4-2 と同じで、**原則として**純正へ還元できない (= 純正 backend が対応しない) ものだけを置き、還元できるものを一時的に置く場合はその行に明記する。fork の tag の代わりに、変更を入れた PR の番号を鍵にする。frontend は独自の版を持たない (`/about-mkgo` は追従している本家の版を出す) ので、版は書かない。
+
+| PR | 内容 |
+|---|---|
+| #3387 | `/about-mkgo` のフロントエンドの版を、fork のタグ (`mkGoFrontendVersion`) でなく追従している本家の版 (frontend の `package.json`) で出す。backend の `mkGoFrontendVersion` を廃止したのに合わせた (#3379) |
+| #3388 | `/about-mkgo` のソースコードの案内からフロントエンドの fork (`shiroha-a/misskey-ts`) の行を外す。mk-go 本体のリンクがフロントエンドも案内する。「mk-go本体」の文言を「バックエンドとフロントエンド」にした |
 
 ---
 
@@ -1218,7 +1230,7 @@ status で分岐するクライアントが壊れるため、drop-in 互換を�
 | `i/revoke-token` を凍結アカウントが叩く | **204 で失効できる。** upstream の `isSuspended` 判定は `ApiCallService` の `requireCredential \|\| requireModerator \|\| requireAdmin` ブロックの中にあり、この endpoint は 2026.9.0 でそのどれも宣言しなくなった (アクセストークン自身を失効させるため)。`AuthenticateService` にも suspended チェックは無い | **403 `YOUR_ACCOUNT_SUSPENDED`。** mk-go は `Authenticate` が凍結ユーザーを anonymous に落とす構造 (#1559) なので、分岐を置かないと 401 `CREDENTIAL_REQUIRED` になり upstream の 204 からさらに遠のく。403 のほうが「凍結ゆえに拒否した」ことが伝わるので採った (#2877) |
 | `invite/delete` の存在しない ID | `NO_SUCH_INVITE_CODE` (400) | **204 を返す** (= idempotent)。取り消しは「無くなっていること」が目的なので、既に無い状態を失敗にしない。ただし **DB 障害は 204 に潰さず 500 を返す** (#2812) — 取り消し系で 204 を返すと、消えたと思って戻ったあとも ticket が生きている |
 | `i/update` の使えない `avatarDecorations` 要素 | 未知の id とロール制限に掛かる要素を **`filter` で黙って落として 200** を返す。throw するのは配列長が `avatarDecorationLimit` を超えたときだけ (`endpoints/i/update.ts:416-418`)。`noSuchAvatarDecoration` に相当する error 定義自体が存在しない | **要素ごとに 400 を返す** (`NO_SUCH_AVATAR_DECORATION` / `RESTRICTED_BY_ROLE`)。どちらの code も mk-go 固有。**利用者が黙って装飾を失わない**代わりに、使えなくなった要素 (削除されたデコレーション、ロールを失った要素、#2975 の絵文字) を外すまでそのリクエストは通らない。クライアントは `avatarDecorations` を配列ごと送り直す作りなので、**無関係な装飾を編集しようとしても落ちる**。**#2975 以前からの挙動**で、絵文字対応で新しく生まれたものではない |
-| `admin/show-user` の `signins` | **policy を見ずにログイン IP を全件返す。** `requireModerator` だけで守られており、`signin` の json-schema は `ip` を `optional: false, nullable: false` で宣言する | **`canSearchIpHistory` を持つ相手にだけ返す** (#3114)。持たない相手には `ip` を**空文字**に、**`headers` を空 object** にする — key を消すことも null にすることも schema が許さないため。**`headers` を忘れると意味が無い** — 本番構成の nginx が `X-Real-IP` / `X-Forwarded-For` を必ず付けるので、`ip` だけ潰してもキー 1 つ隣で同じ IP が読める (敵対的レビューで実測)。**返したときだけ `ip_lookup_log` に記録し** (`kind` は `signins`)、`Cache-Control: no-store` も付ける。#3276 で additive な `withSignins` を追加し、**`false` のときは repository 自体を読まず `signins: []` を返す**。省略 / `true` は後方互換のため従来どおり。`withSignins: false` でも、既存の管理情報の cache 保護を弱めないため、policy がある応答の `Cache-Control: no-store` は維持する。**mk-go が自分で作った権限境界との不整合を解消するもの** — #3104 は「IP とアカウントの対応は既定でモデレーターに開かない」と決めており、その根拠は upstream の `admin/get-user-ips` が `requireAdmin` であることだった。同じ種類の情報をモデレーター権限だけで全件返す口が残っていると、policy が門として成立しない。**表示している UI は upstream にも fork にも無い**ので、伏せても画面上の実害は無い (数え方: `third_party/misskey/packages/` の `.ts` / `.vue` から `node_modules` / `built` / `backend/src` を除いて `signins` を grep すると、misskey-js の型定義と、監査の一覧の kind のラベル (`ip-lookup-log.vue` の `case 'signins'`) の 2 件だけが残る)。**`PackSignin` 自体は変えていない** — あれは本人向けの main stream の `signin` イベントでも使うので、自分の IP を自分が見る経路は保つ。**残る差は 4 つ** — レート制限が無い / 件数の上限が無い / `meta.enableIpLogging` を無効にしても記録され続ける / 保持期間が無い。**scope も別** (`read:admin:show-user`)。**伏せたことは応答から分からない** — `ip: ""` / `headers: {}` は「記録が無い」と区別が付かず、policy を確かめられなかったときも同じ応答になる |
+| `admin/show-user` の `signins` | **policy を見ずにログイン IP を全件返す。** `requireModerator` だけで守られており、`signin` の json-schema は `ip` を `optional: false, nullable: false` で宣言する | **`canSearchIpHistory` を持つ相手にだけ返す** (#3114)。持たない相手には `ip` を**空文字**に、**`headers` を空 object** にする — key を消すことも null にすることも schema が許さないため。**`headers` を忘れると意味が無い** — 本番構成の nginx が `X-Real-IP` / `X-Forwarded-For` を必ず付けるので、`ip` だけ潰してもキー 1 つ隣で同じ IP が読める (敵対的レビューで実測)。**返したときだけ `ip_lookup_log` に記録し** (`kind` は `signins`)、`Cache-Control: no-store` も付ける。#3276 で additive な `withSignins` を追加し、**`false` のときは repository 自体を読まず `signins: []` を返す**。省略 / `true` は後方互換のため従来どおり。`withSignins: false` でも、既存の管理情報の cache 保護を弱めないため、policy がある応答の `Cache-Control: no-store` は維持する。**mk-go が自分で作った権限境界との不整合を解消するもの** — #3104 は「IP とアカウントの対応は既定でモデレーターに開かない」と決めており、その根拠は upstream の `admin/get-user-ips` が `requireAdmin` であることだった。同じ種類の情報をモデレーター権限だけで全件返す口が残っていると、policy が門として成立しない。**表示している UI は upstream にも fork にも無い**ので、伏せても画面上の実害は無い (数え方: 当時の `third_party/misskey/packages/` の `.ts` / `.vue` から `node_modules` / `built` / `backend/src` を除いて `signins` を grep すると、misskey-js の型定義と、監査の一覧の kind のラベル (`ip-lookup-log.vue` の `case 'signins'`) の 2 件だけが残る)。**`PackSignin` 自体は変えていない** — あれは本人向けの main stream の `signin` イベントでも使うので、自分の IP を自分が見る経路は保つ。**残る差は 4 つ** — レート制限が無い / 件数の上限が無い / `meta.enableIpLogging` を無効にしても記録され続ける / 保持期間が無い。**scope も別** (`read:admin:show-user`)。**伏せたことは応答から分からない** — `ip: ""` / `headers: {}` は「記録が無い」と区別が付かず、policy を確かめられなかったときも同じ応答になる |
 | `admin/get-user-ips` | **監査もレート制限も無い。** `requireAdmin` で守られているだけで、誰がいつどの利用者の IP を見たかはどこにも残らず、回数の上限も無い (`Cache-Control` は `/api/*` 共通の `private, max-age=0, must-revalidate` だけで、ブラウザの private cache への保存は許される) | **照会として記録し、1 時間 120 回 (利用者単位) に絞り、`Cache-Control: no-store` を付ける** (#3106)。mk-go は同じ「利用者 ↔ IP の対応」を返す口を 2 本足した (#3104 / #3105) ので、そちらだけ監査すると**この口が監査の抜け道になる**。wire に出る shape は変えていない — 足したのは記録 (サーバー側) とヘッダと上限だけで、**429 が返りうる点だけが新しい** |
 | パスワードを照合する `i/*` (`i/change-password` / `i/delete-account` / `i/regenerate-token` / `i/update-email` / `i/move` / `i/2fa/register` / `unregister` / `register-key` / `key-done` / `remove-key`) | **照合失敗を数えない。** `i/update-email` (1h 3) と `i/move` (1 日 5) の route 上限を除いて各 endpoint の `meta` に `limit` が無く、token を持つ相手は `INCORRECT_PASSWORD` を見ながら現在のパスワードを無制限に総当たりできる | **照合に失敗した回数を 2 段で数え、どちらかが尽きたら照合せずに 429 `RATE_LIMIT_EXCEEDED` を返す** (`internal/core/passwordguard`)。(アカウント, 接続元の範囲 = IPv4 /24・IPv6 /64) ごとに 1 時間 10 回、アカウント全体で 1 時間 100 回。key は全 endpoint で共通なので、1 アカウントあたりの試行は endpoint の数によらずアカウント全体の枠で止まる。native token を盗まれただけの段階でパスワードまで割られると、token を失効させても signin し直せるため。**route ごとのレート制限にはしない** — limiter は `RequireAuth` / `RequireSecure` より前に走り、成否に関係なく user bucket を消費するので、被害者の token を持つだけの第三者 (scope 不問) が `i/regenerate-token` を使い切れる。token 漏洩時の唯一の対処を攻撃者が止められてしまう。**アカウント単位の枠だけにもしない** — token を盗んだ攻撃者がわざと 10 回間違えるだけで被害者の `i/regenerate-token` が 429 になる。接続元の範囲ごとの枠を主にしたので、妨害にはアカウント全体の枠 (100 回) を使い切る必要があり、接続元の範囲を 10 以上用意しなければならない。**それでも妨害は残る** — 多数の範囲を持つ攻撃者は枠を使い切れる。総当たりを止めることと引き換え。正しいパスワードと、照合しなかったリクエスト (検証枠が取れなかった 503 など) は数えない。予約してから照合するので、並行で投げても照合に進めるのは上限まで。予約と取り消しはリクエストの取り消しに引きずられない ctx で行う (切断で予約が失敗すると fail-open で数えない照合が走るため)。`i/change-password` に以前あった mk-go 独自の route 上限 (1h 10 + 1s) も同じ理由で外した。一覧は `TestPasswordChecksAreFailureLimited` が handler の AST から見る (照合より前に guard を呼ぶこと) |
 | AID/AIDXの上限外timestamp | AIDは8桁を超えて固定長を外れ、AIDXは下位8桁へwrapする | **base36 8桁の最大値へ飽和する。** 固定長を維持し、時系列順序の逆転を防ぐ安全側乖離 (#2672) |
@@ -1737,7 +1749,7 @@ entropy も sharp と一致する (gif は完全一致、他は差 0.03 以下)�
 
 ## メンテナンス
 
-- **API endpoint の差分**: `make apicompat` で `docs/api-compat.md` を自動生成する (DB / Redis 稼働が必要)。upstream 側の fastify 直登録 endpoint は `ApiServerService.ts` から自動抽出するので、submodule bump 時の追随漏れは起きない。
+- **API endpoint の差分**: `make apicompat` で `docs/api-compat.md` を自動生成する (DB / Redis 稼働が必要)。upstream 側の fastify 直登録 endpoint は `ApiServerService.ts` から自動抽出するので、本家の版を上げたときの追随漏れは起きない。
   生成には DB / Redis 稼働が必要なので、使い捨ての postgres / valkey を `docker run` で立てて `-dump-routes` を回す (compose を使うと本番 UDS の project へ合流する事故があるため使わない)
 - **entity shape の差分**: `docs/shape-drift.md` の L0 / L2 / L3 gate が CI で自動検出する
 - **DB schema / migration の drop-in 安全性**: 以下の gate が CI で強制する (詳細は [shape-drift.md](shape-drift.md))
@@ -1748,12 +1760,12 @@ entropy も sharp と一致する (gif は完全一致、他は差 0.03 以下)�
 - **本ドキュメントの件数**: `TestDivergenceDoc_*` 6 件が CI で強制する (§1-1 の内部整合と生成物との突き合わせ、§2-1 / §2-2 の実 schema との突き合わせ、§4-1 の streaming チャンネル、§4-2 の fork tag)。別途 `TestAPICompatDoc_MatchesRouter` が §1-1 の突き合わせ先 (`docs/api-compat.md`) を router.go と照合し、**錨が腐らないこと**を担保する。
   - §1-1 は (a) 見出し・表・サマリの内部整合と、(b) **`docs/api-compat.md` (= `make apicompat` の生成物) との突き合わせ**。(a) だけでは 3 箇所が揃って同じだけ間違っている状態を通す (develop では §1-1 が 53、生成物が 49、真値が 58 だった。5 件のうち 4 件は生成物の側には載っていたので、突き合わせていれば気付けた、#2640)
   - §2-1 / §2-2 は**実 schema (migration + `golden_upstream_columns.json`) との突き合わせ**。件数だけでなく行の有無も見るので、テーブル・カラムを足して表を更新し忘れると落ちる (#2634)
-  - §4-2 の fork frontend tag は冒頭サマリの件数・範囲・連番と突き合わせる。**submodule 側が進んだことは検出できない** (`test-shards` job は submodule を checkout しないため)。サマリと表を両方据え置くとすり抜ける
+  - §4-2 の fork frontend tag は冒頭サマリの件数・範囲・連番と突き合わせる。§4-2 は #3379 で凍結した記録なので、表とサマリはもう動かない
 - **値レベルの差分**: `make diff-test` (mk-go ↔ TS の応答を値単位で diff)
 - **本家 e2e に対する適合**: `make upstream-e2e` (Misskey 本家の `test/e2e/**` を無改変で mk-go に向けて実行)。**意図的な差分は `tests/upstream-e2e/known-divergences.json` に根拠付きで登録し、expected-failure として扱う。** skip ではないので、乖離が解消して通るようになったら逆に落ちて気付ける。本ドキュメントに載せた divergence のうち API 挙動に現れるものは、原則この一覧にも entry がある ([upstream-backend-e2e.md](upstream-backend-e2e.md))
 - **コード内の divergence 注記**: `grep -rn "#2106 L" internal/` で全件を辿れる
 - **upstream 追従時**: `docs/update/` に release ごとの diff doc を追加し、そこで確定した divergence を本ドキュメントへ反映する。golden の再生成 (`make shapecheck-gen`) と TypeORM seed の追加も必要 ([upstream-catch-up.md](upstream-catch-up.md))
-- **fork frontend の変更**: #3379 以降は本体の `frontend/` を直接直す ([contributing.md](contributing.md))。fork へ commit して pin を上げても frontend のビルドには届かない。以下は取り込み前の手順で、§4-2 の tag はそれで積んだ記録。取り込み前は `third_party/misskey` に custom commit を積んで tag を打ち、mk 側の submodule pin を bump していた。純正へ還元できない (= 純正 backend が対応しない) ものだけを置く方針。tag は機能追加が `X.Y.Z-mk.N`、**直前の数字タグの後追い修正はその N に英字を足す** (`-mk.22` の修正なら `-mk.22a`、次が `-mk.22b`)。**世代をまたぐ修正は新しい数字を取る** — 英字は列の順序を保つためのものなので、`-mk.24` の後に `-mk.12a` を打つと `git describe --tags` が後戻りして見える。先例は `-mk.23` (`fix(frontend):` で `-mk.12` の取りこぼしを直したが数字を取った)、`-mk.25` (同じく #2934 の取りこぼし)、`-mk.28` (#2347 の取りこぼしで、世代そのものが違う)
+- **frontend の変更**: #3379 以降は本体の `frontend/` を直接直し ([contributing.md](contributing.md))、純正と違える挙動なら [§4-2b](#4-2b-frontend-の独自変更-3379-で取り込んだ後) に PR 番号で 1 行足す。§4-2 の tag は取り込む前に fork で積んだ記録 (凍結)
 
 ## 関連ドキュメント
 

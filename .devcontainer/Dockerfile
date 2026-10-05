@@ -8,9 +8,9 @@ RUN apt-get update && apt-get install -y postgresql-client && rm -rf /var/lib/ap
 
 # Node.js (フロントエンドビルド用)。
 #
-# **ここで入れるのは bootstrap 用。** 実際に使う版は postCreate.sh が submodule の
+# **ここで入れるのは bootstrap 用。** 実際に使う版は postCreate.sh が frontend/ の
 # `.node-version` / `packageManager` を読んで入れ直す (#2921)。image のビルド時点
-# では submodule が未取得なので、ここでは読めない。
+# ではリポジトリが mount されていないので、ここでは読めない。
 #
 # **corepack は使わない。** Node.js 26 の配布物に含まれていないので、
 # `.node-version` に追従した瞬間に `command not found` になる。pnpm は

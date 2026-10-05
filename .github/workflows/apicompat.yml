@@ -79,7 +79,7 @@ jobs:
       MK_REDIS_PORT: '6379'
 
     steps:
-      # submodule (fork) は checkout しない。本家は下で別に取得し、`make build` の
+      # 本家は下で別に取得する。`make build` の
       # pluginbuild は同梱プラグインが既定無効なので frontend が無くても通る。
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

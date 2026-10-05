@@ -29,7 +29,6 @@
 | `ipshape-check` | レスポンス / 連合の shape に IP が出ていないか検査 |
 | `iprecord-check` | 利用者の IP を記録する call site が allowlist の外に増えていないか検査 |
 | `sqlbind-check` | 値をクォート内へ差し込まずバインドしているか検査 |
-| `submodulepin-check` | fork frontend の pin が doc / gitlink で一致しているか検査 |
 | `gaterun-check` | gates の -run が名指しするテストが実在するか検査 |
 
 ## 変更の経緯 (旧 CLAUDE.md の更新記録)

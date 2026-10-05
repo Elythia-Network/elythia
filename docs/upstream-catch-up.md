@@ -4,7 +4,7 @@ mk-go は `third_party/misskey` submodule で Misskey TS の特定 release tag �
 
 本書は **submodule bump を含む PR がマージされた後、各開発者 / operator が必要な手順** と、**新 upstream release が出た時の triage 運用** を説明する。
 
-> **#3379 以降、frontend は submodule ではなく本体の `frontend/` (fork から取り込んだ pnpm workspace) からビルドする。** submodule はまだ残っているが (#3379 の段階 P4d で外す)、frontend の供給元としてはもう読まない。本書のうち submodule の working tree・fork の commit / tag を frontend の更新手段として書いている箇所 (1-1 〜 1-3、2-5) は、frontend の配信物には届かない。frontend の変更は `frontend/` を直接直す ([contributing.md](contributing.md))。本家の版の frontend 側を `frontend/` へ当てる手順は [project-restructure.md の D4](design/project-restructure.md) で設計している。
+> **#3379 の段階 P4d-2 で submodule `third_party/misskey` を外した。** frontend は本体の `frontend/` (fork から取り込んだ pnpm workspace) からビルドし、比較対象の本家のソースは `make upstream-fetch` で `.cache/misskey/<版>/` に取る (#3378)。上の 2 段落と、本書のうち submodule の working tree・fork の commit / tag・gitlink の bump を書いている節 (1-1 〜 1-3、2-5) は、取り込む前の fork の運用の記録で、今の手順ではない。これらの節は `make upstream-sync` を使う手順に書き直す (#3379 の段階 P4d-3、設計は [project-restructure.md の D4](design/project-restructure.md))。それまで frontend の変更は `frontend/` を直接直す ([contributing.md](contributing.md))。
 
 ---
 
@@ -138,7 +138,7 @@ triage で判定した item を `gh issue create` で 1 件 1 issue として起
 
 ### 2-5. submodule bump 時の fork 運用
 
-> **#3379 以降、この節の fork の commit・tag・gitlink の bump は frontend のビルドに届かない** (冒頭の注記)。下の手順と採番規則は、submodule と pin の検査 (`make submodulepin-check`、`build` job) が残っている間の記録として置いている。
+> **#3379 以降、この節の fork の commit・tag・gitlink の bump は frontend のビルドに届かない** (冒頭の注記)。下の手順と採番規則は、submodule と pin の検査 (`make submodulepin-check`、`build` job の step。どちらも #3379 の P4d-2 で消した) があった頃の記録として置いている。
 
 mk-go は `shiroha-a/misskey-ts` fork を経由して submodule を pin している (= upstream の release tag + mk 固有のパッチを cherry-pick したもの)。新 release を取り込む手順:
 
@@ -198,13 +198,14 @@ git add third_party/misskey
 fork へ push → tag を push → 親リポの gitlink と doc」。逆順だと CI の checkout が
 `not our ref` で死ぬ）:
 
-- `docs/divergence.md` の pin 行（tag と**短縮 SHA の併記**。`make submodulepin-check` が gitlink と突き合わせる）
+- `docs/divergence.md` の pin 行（tag と**短縮 SHA の併記**。当時は `make submodulepin-check` が gitlink と突き合わせていた）
 - `docs/divergence.md` §4-2 の表に 1 行
 - 同ファイル冒頭サマリの件数と範囲（`TestDivergenceDoc_*` が表と突き合わせる）
 
-機械で守られているのはこのうち「表の連番が規則どおりか」（`assertForkTagSequence`。
-数字 +1 か、同じ数字への次の英字しか許さない）と「pin 行 ↔ gitlink」「tag → commit」
-(`make submodulepin-check` と CI の `build` job)。
+当時、機械で守られていたのはこのうち「表の連番が規則どおりか」（`assertForkTagSequence`。
+数字 +1 か、同じ数字への次の英字しか許さない。凍結した §4-2 に対して今も回る）と
+「pin 行 ↔ gitlink」「tag → commit」(`make submodulepin-check` と CI の `build` job。
+どちらも P4d-2 で消した)。
 
 **数字と英字のどちらを選ぶかは機械では見ていないし、見られない。** 判定には「この修正は
 直前の数字タグで入れた変更の後始末か」という意味判断が要り、commit の件名からは導けない。
@@ -248,7 +249,7 @@ git diff --diff-filter=D --name-only "$OLD" "$NEW" | wc -l   # 削除ファイ�
 
 `UPSTREAM_MISSKEY_VERSION` を新しい版に書き換えて `make upstream-fetch` で本家を取得したら、
 entity shape drift gate の golden snapshot を再生成して commit すること (#3378 から、
-golden は submodule ではなく `.cache/misskey/<版>/` の本家から作る)。新バージョンで追加 / 変更された契約フィールドが次回の
+golden は `.cache/misskey/<版>/` の本家から作る)。新バージョンで追加 / 変更された契約フィールドが次回の
 `TestEntityShapeDrift` に反映される。
 
 ```bash
@@ -372,7 +373,7 @@ mk-go と Misskey TS を並べて比較するハーネスは、**比較対象の
 もこの表に入っていて、表に載せた後も実際に置き去りになった (#2877 / #3011)。#3379 で
 frontend を image の中でビルドするようになったので、その pin は無くなった。
 
-**探し方は `grep -rn 'misskey/misskey:' --include='*.yml' --include='*.yaml' --include='*.md' . | grep -v third_party`。**
+**探し方は `git grep -n 'misskey/misskey:' -- '*.yml' '*.yaml' '*.md'`。**
 表を手で追うより確実で、doc の散文に埋まった版数 (`docs/dropin-e2e.md` のトラブルシュート等) も拾える。
 
 **除外リストの「version-gap」注記は、版を揃えたら必ず読み直す。** 実例として、

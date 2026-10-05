@@ -12,7 +12,7 @@ Phase 12-1 で入った UNIX domain socket (UDS) 対応を使って、mk-go の�
 ## 前提条件
 
 - Docker と docker compose v2
-- host 側のインストールは不要です。フロントエンドは本体の `frontend/` (#3379 で取り込んだ pnpm workspace) から docker 経由でビルドします。submodule の初期化は要りません。
+- host 側のインストールは不要です。フロントエンドは本体の `frontend/` (#3379 で取り込んだ pnpm workspace) から docker 経由でビルドします。
 
 ## 初回セットアップ
 

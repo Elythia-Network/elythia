@@ -1,4 +1,4 @@
-# Resource consumption comparison stack for Misskey TS (upstream submodule).
+# Resource consumption comparison stack for Misskey TS (official upstream image).
 #
 # Intended to run alongside the UDS mk-go stack (compose.uds.yaml) so that
 # `docker stats` can compare memory / CPU / storage between mk-go and TS
@@ -6,7 +6,8 @@
 #
 # - postgres: 18-alpine (matches mk-go's pg version)
 # - redis:    7-alpine (upstream-default)
-# - web:      built from third_party/misskey (submodule, 2026.5.1-mk.x)
+# - web:      the official misskey/misskey image of UPSTREAM_MISSKEY_VERSION
+#             (TestUpstreamVersionIsConsistent keeps the tag in sync)
 #
 # Project name is separated so it does not collide with the running mk-go
 # stack. Only the web port is exposed on the host (13000) and nginx is
@@ -47,7 +48,7 @@ services:
     restart: unless-stopped
 
   web:
-    image: mk-bench-ts-web:latest
+    image: misskey/misskey:2026.10.0
     depends_on:
       db:
         condition: service_healthy

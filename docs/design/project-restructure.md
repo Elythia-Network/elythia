@@ -241,7 +241,7 @@ P3 (#3378) で上のとおりにした (2026-10-05)。
 
 - **frontend の版 = 本体の版。`mkGoFrontendVersion` は廃止する** (Q7)。読んでいるのは同梱 frontend の `/about-mkgo` の表示だけで (2026-09-30 に確認)、更新ダイアログの判定には使っていない (`check-client-update.ts` のコメントも「fork のタグでは判定できない」として使っていない)。追従している本家の版は `/api/meta` の `version` に既に出ている。ビルド時に埋める `MkGoFrontendVersion` の ldflags (`Makefile` と `Dockerfile` / `deploy/uds/Dockerfile.mkgo`) と、`tests/diff` の除外も合わせて消す
 - `-mk.N` のタグ、`submodulepin-check`、`bundled_assets_pin_test`、`docs/divergence.md` の pin 行は廃止または置き換える
-- `docs/divergence.md` §4-2 (独自変更の一覧) は tag 列を PR 番号に置き換える
+- `docs/divergence.md` §4-2 (独自変更の一覧) は ~~tag 列を PR 番号に置き換える~~ **#3379 で取り込むまでの記録として凍結し、取り込んだ後の変更は PR 番号を鍵にした新しい節 (§4-2b) に書く** (P4d-2 で変更)。143 行の tag を PR 番号へ置き換えると対応表を作る手間が大きく、アーカイブした fork の tag との対応も失われるため
 
 ### D6. テスト関連の配置
 

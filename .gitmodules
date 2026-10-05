@@ -1,3 +1,0 @@
-[submodule "third_party/misskey"]
-	path = third_party/misskey
-	url = https://github.com/shiroha-a/misskey-ts.git

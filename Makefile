@@ -16,7 +16,7 @@
 	uds-init uds-layout-check uds-frontend-build uds-build uds-rebuild uds-restart uds-up uds-down uds-down-v uds-logs uds-ps \
 	bench-up bench-run bench-down bench-logs \
 	apicompat apicompat-routes apicompat-render \
-	test-fast shapecheck shapecheck-gen shapecheck-report errorid-check limitspec-check perm-check wiring-check catalog-check notfound-check nulparam-check compose-check testflags-check gaterun-check secretfield-check ipshape-check iprecord-check submodulepin-check \
+	test-fast shapecheck shapecheck-gen shapecheck-report errorid-check limitspec-check perm-check wiring-check catalog-check notfound-check nulparam-check compose-check testflags-check gaterun-check secretfield-check ipshape-check iprecord-check \
 	diff-up diff-test diff-down diff-logs \
 	upstream-e2e upstream-e2e-deps upstream-e2e-up upstream-e2e-down upstream-e2e-migrate upstream-e2e-test
 
@@ -42,7 +42,7 @@ check: fmt lint actionlint golangci-lint test ## コミット前に必須 (lint 
 	# `make plugins-all && go build ./cmd/misskey`)、`lint` job の重複 fixture ID 検査、
 	# `test` のカバレッジ閾値は再現しない。
 
-gates: shapecheck errorid-check limitspec-check perm-check wiring-check catalog-check notfound-check nulparam-check compose-check testflags-check migrationdoc-check mdtable-check notiftype-check pluginembed-check dockerignore-check secretfield-check ipshape-check iprecord-check sqlbind-check submodulepin-check gaterun-check ## 静的 parity ゲートを一括実行
+gates: shapecheck errorid-check limitspec-check perm-check wiring-check catalog-check notfound-check nulparam-check compose-check testflags-check migrationdoc-check mdtable-check notiftype-check pluginembed-check dockerignore-check secretfield-check ipshape-check iprecord-check sqlbind-check gaterun-check ## 静的 parity ゲートを一括実行
 
 version: ## mk-go / 互換 Misskey / 追従している本家のバージョンを表示
 	@printf "mk-go            : %s\n" "$$(sed -n 's/^var MkGoVersion = "\(.*\)"/\1/p' internal/config/config.go)"
@@ -157,20 +157,11 @@ e2e-down-all: ## 検証用スタックを一括撤去 (本番 project mk は対�
 # frontend に手を入れている最中の作業を黙って捨てることはない。
 FRONTEND_GENERATED = \
 	frontend/packages/i18n/src/autogen/locale.ts
-# submodule (third_party/misskey) は P4d (#3379) で外すまで残る。以前の `make plugins`
-# / `pnpm build` が書いた生成物で dirty なままだと、gitlink が動く回 (外す回を含む) に
-# `git pull --recurse-submodules` が checkout で止まるので、外すまでは戻し続ける。
-SUBMODULE_GENERATED = \
-	packages/frontend/src/server-plugins.generated.ts \
-	packages/i18n/src/autogen/locale.ts
 
 update: ## pull し、frontend 再ビルドの要否を知らせる
 	@git checkout -- $(FRONTEND_GENERATED) 2>/dev/null || true
-	@for f in $(SUBMODULE_GENERATED); do \
-		git -C third_party/misskey checkout -- "$$f" 2>/dev/null || true; \
-	done
 	@before=$$(git rev-parse HEAD:frontend 2>/dev/null); \
-	if ! git pull --recurse-submodules; then \
+	if ! git pull; then \
 		printf "\033[31m==> pull に失敗した\033[0m\n"; \
 		printf "    frontend/ に手を入れている場合は、変更を commit してからやり直すこと。\n"; \
 		exit 1; \
@@ -212,7 +203,7 @@ pull-plugins: ## plugins/ 配下の独立リポジトリを pull
 		exit 1; \
 	fi
 
-pull: ## 本体・submodule・プラグインをまとめて pull
+pull: ## 本体とプラグインをまとめて pull
 	$(MAKE) update
 	$(MAKE) pull-plugins
 
@@ -767,7 +758,8 @@ uds-frontend-build: uds-layout-check ## 本番向けフロントエンドをビ�
 	$(MAKE) e2e-frontend-build
 
 # #3379 より前の compose.uds.yaml (gitignore 済み) は third_party/misskey の
-# built と assets を bind mount している。この版でも submodule の木は残るので、
+# built と assets を bind mount している。submodule を外した後も作業ツリーには古い
+# third_party/ が残りうる (git は未追跡になったディレクトリを消さない) ので、
 # そのまま uds-update すると新しい frontend/built を作っても誰も mount せず、
 # 古い SPA を警告無しで配り続ける (entry の検証も通ってしまう)。切り替え手順を
 # 踏むまで止める。
@@ -1031,7 +1023,7 @@ diff-logs: ## 差分比較ハーネスのログを表示
 	docker compose -f $(DIFF_COMPOSE) logs -f
 
 # Misskey 本家の backend e2e (test/e2e/**) を mk-go に向けて実行する。
-# テスト本体には手を入れず、submodule 側の vitest 設定 2 ファイル
+# テスト本体には手を入れず、本家の取得先 (.cache/misskey) の vitest 設定 2 ファイル
 # (globalSetup / setupFiles) だけを差し替えている。上流でテストが増えれば
 # 自動的にこちらの検証対象も増える。詳細は docs/upstream-backend-e2e.md。
 #
@@ -1054,7 +1046,7 @@ UPSTREAM_E2E_HARNESS=tests/upstream-e2e/harness
 UPSTREAM_E2E_BACKEND=$(UPSTREAM_E2E_MISSKEY)/packages/backend
 
 ##@ 本家 (比較対象)
-# 比較対象の本家 Misskey は submodule ではなく `.cache/misskey/<版>/` から読む
+# 比較対象の本家 Misskey は `.cache/misskey/<版>/` から読む
 # (#3378)。版は UPSTREAM_MISSKEY_VERSION の 1 行で、tools とテストは
 # internal/upstreamsrc 経由で同じ場所を見る。MK_UPSTREAM_DIR で場所を変えられる。
 #
@@ -1071,8 +1063,6 @@ UPSTREAM_REMOTE ?= https://github.com/misskey-dev/misskey.git
 # 手で直した跡があるかもしれないので、消してから取り直すよう案内して落ちる。
 # `worktree prune` は、worktree を `rm -rf` だけで消したときに mirror 側に残る
 # 登録を掃除する (残っていると `worktree add` が already registered で落ちる)。
-# 初回の clone は、submodule が本家の objects を持っていればそれを借りて
-# ダウンロードを省く (`--reference-if-able` + `--dissociate`)。
 upstream-fetch: ## UPSTREAM_MISSKEY_VERSION の本家を .cache/misskey/<版> へ取得
 	@set -e; v="$(UPSTREAM_MISSKEY_VERSION)"; d="$(UPSTREAM_DIR)"; \
 	if [ -z "$$v" ]; then echo "UPSTREAM_MISSKEY_VERSION が読めない" >&2; exit 1; fi; \
@@ -1083,8 +1073,7 @@ upstream-fetch: ## UPSTREAM_MISSKEY_VERSION の本家を .cache/misskey/<版> �
 	fi; \
 	if [ -e "$$d" ]; then echo "$$d が git の worktree ではない。消してから取り直す" >&2; exit 1; fi; \
 	if [ ! -d "$(UPSTREAM_MIRROR)" ]; then \
-		ref=; if [ -e third_party/misskey/.git ]; then ref=$$(git -C third_party/misskey rev-parse --path-format=absolute --git-common-dir); fi; \
-		git clone --bare --no-tags $${ref:+--reference-if-able "$$ref" --dissociate} "$(UPSTREAM_REMOTE)" "$(UPSTREAM_MIRROR)"; \
+		git clone --bare --no-tags "$(UPSTREAM_REMOTE)" "$(UPSTREAM_MIRROR)"; \
 	fi; \
 	git -C "$(UPSTREAM_MIRROR)" fetch --no-tags origin "refs/tags/$$v:refs/tags/$$v"; \
 	git -C "$(UPSTREAM_MIRROR)" worktree prune; \
@@ -1135,9 +1124,9 @@ upstream-e2e-migrate: ## e2e 用 DB にマイグレーションを適用
 VITEST_ARGS ?=
 
 # **mk-go が配る静的なファイルも本家の取得先から取る** (#3378)。favicon や絵文字の
-# 画像 (`test/e2e/fetch-resource.ts` が見る) は、既定では submodule の
-# packages/backend/assets と、そこへ pnpm install した emoji-assets から配る。この
-# e2e は submodule を checkout しない (CI) ので、本家の取得先 (upstream-e2e-deps が
+# 画像 (`test/e2e/fetch-resource.ts` が見る) は、既定では frontend/assets と、
+# frontend/ へ pnpm install した emoji-assets から配る。この e2e は frontend/ に
+# pnpm install しない (CI) ので、本家の取得先 (upstream-e2e-deps が
 # pnpm install 済み) を環境変数で指す。値は mk-go の cwd (MKGO_CWD = リポジトリ
 # 直下) から解決される。entry.ts は環境変数をそのまま mk-go へ渡す。
 UPSTREAM_E2E_ASSETS_ENV = \
@@ -1268,18 +1257,6 @@ mdtable-check: ## md の表の各行がヘッダと同じ列数か検査 (溢れ
 	# 中でも働く** (`\|` へエスケープする)。#2930 で実際に踏んだ。
 	# **見るのは列数だけ。** 取りこぼす形はテストの doc コメントに明記してある。
 	go test ./internal/entitycompat/... -run 'TestMarkdownTablesDoNotDropContent' -count=1 -v
-
-.PHONY: submodulepin-check
-submodulepin-check: ## fork frontend の pin が doc / gitlink で一致しているか検査
-	# submodule に commit して fork へ push したあと、親リポの gitlink を上げ
-	# 忘れる片側更新が実際に起きた (#2963)。doc には新しい tag を書き、fork の
-	# branch と tag も push 済みなのに gitlink だけ古い、という状態で CI 28
-	# チェックが全部緑のままマージされた。SHA で突き合わせるので submodule の
-	# checkout は要らない。
-	#
-	# 配る bundled image は frontend/ を image の中でビルドするようになった (#3379)
-	# ので、以前ここで見ていた assets image の tag は無くなった。
-	go test ./internal/entitycompat/... -run 'TestSubmodulePinMatchesDoc|TestSubmodulePinTagMatchesTable' -count=1 -v
 
 .PHONY: secretfield-check
 secretfield-check: ## モデルの秘密フィールドが json:"-" を保っているか検査

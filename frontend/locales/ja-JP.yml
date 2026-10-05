@@ -2347,7 +2347,7 @@ _aboutMkGo:
   frontend: "フロントエンド"
   sourceCodeOfThisServer: "このサーバーのソースコード"
   sourceCodeOfThisServerDescription: "このサーバーで実際に動作しているコードです。改変されている場合は、改変後のコードがここから入手できます。"
-  sourceCodeOfMkGo: "mk-go本体(バックエンド)"
+  sourceCodeOfMkGo: "mk-go本体(バックエンドとフロントエンド)"
   sourceCodeOfFrontend: "フロントエンド(Misskeyのフォーク)"
   license: "ライセンス"
   contributors: "コントリビューター"

@@ -8,6 +8,11 @@ set -eu
 
 OUT="${1:-/tmp/resource-bench.md}"
 
+# TS 側の image は compose.ts.yaml と同じく UPSTREAM_MISSKEY_VERSION の公式 image。
+# 版を書き写すと、本家の版を上げたときにここだけずれる。
+REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+TS_IMAGE="misskey/misskey:$(tr -d '[:space:]' < "$REPO_ROOT/UPSTREAM_MISSKEY_VERSION")"
+
 # Container names. mk-go runs in project `mk` (compose.uds.yaml), TS bench
 # runs in project `mk-bench-ts` (compose.ts.yaml).
 MKGO_APP="mk-mkgo-1"
@@ -127,7 +132,7 @@ echo >> "$OUT"
 echo '```' >> "$OUT"
 {
 	echo "REPO:TAG  SIZE"
-	for ref in mk-mkgo:latest mk-bench-ts-web:latest postgres:18-alpine redis:7-alpine valkey/valkey:8-alpine; do
+	for ref in mk-mkgo:latest "$TS_IMAGE" postgres:18-alpine redis:7-alpine valkey/valkey:8-alpine; do
 		size=$(docker image inspect "$ref" --format '{{.Size}}' 2>/dev/null || echo 0)
 		printf '%s  %s\n' "$ref" "$(human_bytes "$size")"
 	done

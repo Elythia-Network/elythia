@@ -39,7 +39,7 @@ Misskey互換クライアント(Miria等)は、misskey-jsの型に従ってレ�
 | `internal/entitycompat/schema_drift_test.go` | migration の列 ↔ upstream entity (`TestSchemaDrift_CreateOnlyColumns`) |
 | `internal/entitycompat/migration_seed_test.go` | TypeORM `migrations` seed の網羅 (`TestMigrationSeed_CoversUpstream`) |
 
-golden側は**commit済みスナップショット**を読むため、テスト時にsubmoduleを必要としない(hermetic)。
+golden側は**commit済みスナップショット**を読むため、テスト時に本家のソースを必要としない(hermetic)。
 
 ## 検出するドリフトの種類
 
@@ -257,7 +257,7 @@ gateは「golden と突合できた数の下限」から**「inlineが復活し�
 
 ### golden
 
-`tools/erroriddiff`がMisskeyの`endpoints/*.ts`の`meta.errors`から`endpoint → {code: id}`を抽出し、`internal/entitycompat/testdata/golden_error_ids.json`へ生成・embedする(third_party非依存でCI実行可)。
+`tools/erroriddiff`がMisskeyの`endpoints/*.ts`の`meta.errors`から`endpoint → {code: id}`を抽出し、`internal/entitycompat/testdata/golden_error_ids.json`へ生成・embedする(本家のソース非依存でCI実行可)。
 
 ### 除外（lineage / upstream typo）
 
@@ -451,7 +451,7 @@ make shapecheck-gen                                        # golden_upstream_mig
 
 **内部整合だけでは足りない。** 上の gate は 3 箇所が互いに一致することしか見ないので、**3 つが揃って同じだけ間違っている**状態を通す。実際 develop では §1-1 が 53、生成物が 49、真値が 58 だった (#2640)。§1-1 の内訳表に数えられていなかったのは `admin/server-plugins` / `admin/server-metrics` / `admin/self-check` / `admin/federation/{delivery,inbox}-health` の 5 件で、うち 4 件は生成物の側には載っていた (= 突き合わせていれば気付けた)。
 
-upstream の endpoint 一覧を `tools/apicompat` から直接引くことはできない (**`test-shards` job は submodule を checkout しない**。#3379 で frontend を `frontend/` へ取り込んでからは、submodule を checkout する job は無い)。ただし `make apicompat` の生成物は commit されているので、そちらを経由すれば submodule 無しで突き合わせられる。
+upstream の endpoint 一覧を `tools/apicompat` から直接引くことはできない (**本家のソースは `make upstream-fetch` で取る `.cache/misskey` にしか無く、`test-shards` job は取得しない**。#3378 / #3379)。ただし `make apicompat` の生成物は commit されているので、そちらを経由すれば本家のソース無しで突き合わせられる。
 
 この gate が落ちたとき**どちらが古いかは中身を見ないと決まらない**。api-compat.md 側が古いなら `make apicompat` で再生成する (route dump に stack が要る)。divergence.md 側が古いなら §1-1 の表・見出し・冒頭サマリの 3 箇所すべてを直す。
 
@@ -459,7 +459,7 @@ upstream の endpoint 一覧を `tools/apicompat` から直接引くことはで
 
 冒頭サマリの `N tag (-mk.X ～ -mk.Y)` == §4-2 の表の行数と範囲。tag 番号が連番であることも見る。
 
-サマリは 10 tag と言い、表には 11 行あり、実際の submodule には 23 個の tag があった (#2640)。**この gate が捕まえるのは前 2 つの食い違いだけ**で、3 つ目 (= submodule 側が進んだこと) は検出できない — `test-shards` job は submodule を checkout しないため、サマリと表を両方据え置けば submodule が先に進んでもすり抜ける。submodule bump の PR で表を足すのは人の仕事。
+サマリは 10 tag と言い、表には 11 行あり、実際の fork には 23 個の tag があった (#2640)。**この gate が捕まえるのは前 2 つの食い違いだけ**で、3 つ目 (= fork 側が進んだこと) は検出できなかった — CI は fork の tag を見ないため、サマリと表を両方据え置けばすり抜けた。§4-2 は #3379 で凍結した記録になり、行は足さない。取り込んだ後の変更は §4-2b に PR 番号で書く。
 
 ### `TestDivergenceDoc_StreamChannelsMatchRegistry`
 
@@ -477,9 +477,9 @@ doc 側は §4-1 の表 (mk-go 独自) と ```text フェンス (upstream 由来
 
 **固定できるのは「doc の一覧 == mk-go の登録」だけ。** §4-1 のもう半分の主張
 「upstream は 18」「名前も upstream に揃えてある」は検証していない — `test-shards`
-job は submodule を checkout しないため。doc と実装を同時に間違った名前へ変えれば
+job は本家のソースを取得しないため。doc と実装を同時に間違った名前へ変えれば
 この gate は通る。upstream が 19 個目を足した / 名前を変えた場合も検出できないので、
-**submodule bump の PR で人が見る**。
+**本家の版を上げる PR で人が見る**。
 
 ### `TestAPICompatDoc_MatchesRouter`
 
@@ -541,7 +541,7 @@ route dump には stack が要るのでテストからは呼べない。代わ�
 
 件数だけでなく**行の存在**も見る。§2-2 は table と column の両方で照合する — 列名だけで探すと、`createdAt` のように複数テーブルにある名前は他の行に残っているせいで行が丸ごと消えても素通りする。
 
-**`golden_upstream_columns.json` を撮り直すとこの gate が動く。** upstream が列を DROP するとその列が「mk-go 独自」に転じて §2-2 の件数が増えるので、submodule bump の PR で落ちる (`note_favorite.createdAt` がまさにその経緯で独自列になっている)。落ちたら doc の件数と行を実態に合わせること。
+**`golden_upstream_columns.json` を撮り直すとこの gate が動く。** upstream が列を DROP するとその列が「mk-go 独自」に転じて §2-2 の件数が増えるので、本家の版を上げる PR で落ちる (`note_favorite.createdAt` がまさにその経緯で独自列になっている)。落ちたら doc の件数と行を実態に合わせること。
 
 ## Index naming gate / migration idempotency gate（drop-in で二重化・停止しない）
 

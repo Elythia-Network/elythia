@@ -2293,7 +2293,7 @@ _aboutMkGo:
   frontend: "Frontend"
   sourceCodeOfThisServer: "Source code of this server"
   sourceCodeOfThisServerDescription: "The code actually running on this server. If it has been modified, the modified code is available here."
-  sourceCodeOfMkGo: "mk-go itself (backend)"
+  sourceCodeOfMkGo: "mk-go itself (backend and frontend)"
   sourceCodeOfFrontend: "Frontend (a fork of Misskey)"
   license: "License"
   contributors: "Contributors"
