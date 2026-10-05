@@ -1089,6 +1089,45 @@ upstream-check: ## golden と本家を読むテストが UPSTREAM_MISSKEY_VERSIO
 	git diff --exit-code -- internal/entitycompat/testdata
 	MK_UPSTREAM_REQUIRE=1 go test ./internal/misc/achievement/... -run 'TestTypes_MatchUpstream' -count=1 -v
 
+# 本家の新しい版 (TO=<版>) の差分のうち、frontend/ が取り込むパスだけを 3-way で当てる
+# (設計 D4、#3379)。手順の全体は docs/upstream-catch-up.md。
+#
+#  - mirror (upstream-fetch と共有) に今の版と TO の tag を取ってから、本体の
+#    refs/upstream/ へ取り込む。--3way は当てる前の blob を手元で探すため
+#  - 変更されたパスを D1 の区分で分け、どれにも当たらないパス (本家が直下に新しく
+#    足したものなど) があれば何も当てずに止める
+#  - 衝突はファイル単位で衝突マーカーとして残る。pnpm-lock.yaml は当てず、
+#    `make upstream-sync-lock` で作り直す
+#  - DRY=1 なら分類だけを表示する (DRY に 1 / true / yes 以外を入れても当てる)
+upstream-sync: ## 本家の新しい版 (TO=<版>) の frontend 側の差分を frontend/ へ当てる
+	@set -e; to="$(TO)"; from="$(UPSTREAM_MISSKEY_VERSION)"; \
+	if [ -z "$$to" ]; then echo "TO=<本家の版> を指定する (例: make upstream-sync TO=2026.11.0)" >&2; exit 1; fi; \
+	if [ -z "$$from" ]; then echo "UPSTREAM_MISSKEY_VERSION が読めない" >&2; exit 1; fi; \
+	if [ ! -d "$(UPSTREAM_MIRROR)" ]; then git clone --bare --no-tags "$(UPSTREAM_REMOTE)" "$(UPSTREAM_MIRROR)"; fi; \
+	git -C "$(UPSTREAM_MIRROR)" fetch --no-tags origin "refs/tags/$$from:refs/tags/$$from" "refs/tags/$$to:refs/tags/$$to"; \
+	GOWORK=off go run ./tools/upstreamsync -from "$$from" -to "$$to" -source "$(UPSTREAM_MIRROR)" $(if $(filter 1 true yes,$(DRY)),-dry-run)
+
+# frontend/pnpm-lock.yaml を、**直前の lock を基点に** package.json から作り直す (D4)。
+# 本家の lock は使わない (backend を外した lock は本家より約 4800 行少なく、本家の lock の
+# 差分は毎回衝突する)。--lockfile-only なので node_modules と frontend/built は触らない。
+# 作り直した lock の差分を目で見て、package.json で変わった依存以外が動いていないことを
+# 確かめる (--lockfile-only は lock に無い依存と範囲が変わった依存をその時点の最新に解決する)。
+#
+# **store は container の中に置く** (`pnpm_config_store_dir`)。既定のままだと mount の根
+# (frontend/) に root 所有の frontend/.pnpm-store ができ、Dockerfile.bundled の
+# `COPY frontend/` にも入る。pnpm 11 は `npm_config_*` を読まないので `pnpm_config_*` で
+# 渡す (実測)。**コメントは recipe の中に置かない** — 行継続の途中に挟むとそこで shell が
+# 分かれ、後ろの docker run から変数が見えなくなる。
+upstream-sync-lock: ## frontend/pnpm-lock.yaml を package.json から作り直す (upstream-sync の後)
+	@node_ver=$$(tr -d '[:space:]' < frontend/.node-version); \
+	pnpm_ver=$$(sed -n 's/.*"packageManager"[[:space:]]*:[[:space:]]*"pnpm@\([^"+]*\).*/\1/p' \
+		frontend/package.json | head -1); \
+	if [ -z "$$node_ver" ] || [ -z "$$pnpm_ver" ]; then echo "frontend/.node-version か packageManager を読めない" >&2; exit 1; fi; \
+	docker run --rm -e CI=true -e pnpm_config_store_dir=/tmp/pnpm-store \
+		-v "$(CURDIR)/frontend:/work/frontend" -w /work/frontend \
+		"node:$$node_ver-$(FRONTEND_NODE_DISTRO)" \
+		bash -lc "npm i -g pnpm@$$pnpm_ver && pnpm install --lockfile-only"
+
 ##@ e2e: 本家 backend e2e
 # 本家の取得先の依存を用意する。初回と UPSTREAM_MISSKEY_VERSION を上げた後にだけ必要。
 #
