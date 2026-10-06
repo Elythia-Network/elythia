@@ -64,7 +64,7 @@ jobs:
       contents: read
       packages: write
     # reusable workflow もタグかコミット SHA で固定する (@main にしない。下記)
-    uses: shiroha-a/mk/.github/workflows/build-with-plugins.yml@<タグ または コミット SHA>
+    uses: Elythia-Network/elythia/.github/workflows/build-with-plugins.yml@<タグ または コミット SHA>
     with:
       mk_ref: <同じタグ または コミット SHA>
       plugins: |

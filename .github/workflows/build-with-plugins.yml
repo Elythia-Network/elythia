@@ -15,7 +15,7 @@
 #       permissions:
 #         contents: read
 #         packages: write          # publish するなら caller 側で宣言する
-#       uses: shiroha-a/mk/.github/workflows/build-with-plugins.yml@<タグ または コミット SHA>
+#       uses: Elythia-Network/elythia/.github/workflows/build-with-plugins.yml@<タグ または コミット SHA>
 #       with:
 #         mk_ref: "<同じタグ または コミット SHA>"
 #         plugins: |
@@ -49,7 +49,7 @@ on:
         description: "mk-go のリポジトリ (fork して使う場合のみ変更する)"
         required: false
         type: string
-        default: shiroha-a/mk
+        default: Elythia-Network/elythia
       image:
         description: "publish 先の image。既定は ghcr.io/<呼び出し元リポジトリ>"
         required: false

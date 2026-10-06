@@ -6,7 +6,7 @@ name: Docker
 # - PR では build だけ行って、動く Dockerfile かどうかを検証する (push はしない)。
 #
 # image 名は `${{ github.repository }}` を小文字にしたもの。upstream では
-# `ghcr.io/shiroha-a/mk` (移管の後は `ghcr.io/elythia-network/elythia`)、
+# `ghcr.io/elythia-network/elythia` (#3394 の移管より前は `ghcr.io/shiroha-a/mk`)、
 # fork では `ghcr.io/nananek/mk-go` になる。
 
 on:

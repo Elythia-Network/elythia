@@ -184,7 +184,7 @@ func TestRemoteUsesPinning(t *testing.T) {
 		{name: "docker short digest", body: step("      - uses: docker://alpine@sha256:abcd")},
 		{name: "local action", body: step("      - uses: ./.github/actions/setup"), skipped: true},
 		{name: "local reusable workflow", body: "jobs:\n  a:\n    uses: ./.github/workflows/build-with-plugins.yml\n", skipped: true},
-		{name: "commented example", body: "#       uses: shiroha-a/mk/.github/workflows/build-with-plugins.yml@main\njobs: {}\n", skipped: true},
+		{name: "commented example", body: "#       uses: Elythia-Network/elythia/.github/workflows/build-with-plugins.yml@main\njobs: {}\n", skipped: true},
 		{name: "not a uses key", body: step("      - with: actions/checkout@v7"), skipped: true},
 		{name: "uses inside run text", body: step("      - run: |\n          echo 'uses: actions/checkout@v7'"), skipped: true},
 	}

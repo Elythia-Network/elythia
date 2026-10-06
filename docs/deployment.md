@@ -73,8 +73,8 @@ EXPLAIN SELECT id FROM note WHERE lower(text) LIKE '%検索語%';
 最も簡単な起動方法。PostgreSQL、Redis、Elythiaの3サービスをTCPで接続する。
 
 ```bash
-git clone https://github.com/shiroha-a/mk.git
-cd mk
+git clone https://github.com/Elythia-Network/elythia.git
+cd elythia
 
 # フロントエンドビルド (初回のみ、3-10分)
 make e2e-frontend-build
@@ -111,10 +111,10 @@ docker compose up -d
 フロントエンドアセットを同梱した `bundled` イメージを pull するだけで起動できる。**フロントエンドのビルドもイメージのビルドも要らない。**
 
 動かすだけならソースを clone する必要は無い。compose と設定のひな形だけを置いた
-[`docker` ブランチ](https://github.com/shiroha-a/mk/tree/docker)を使う (数十 KB)。
+[`docker` ブランチ](https://github.com/Elythia-Network/elythia/tree/docker)を使う (数十 KB)。
 
 ```bash
-git clone --depth 1 -b docker https://github.com/shiroha-a/mk.git mk
+git clone --depth 1 -b docker https://github.com/Elythia-Network/elythia.git mk
 cd mk
 
 mkdir -p files && sudo chown -R 991:991 files
@@ -138,7 +138,7 @@ make image-down        # 停止
 手元の変更を反映したい場合は先にイメージを作る。
 
 ```bash
-make image-build       # ghcr.io/shiroha-a/mk:bundled をローカルにビルド
+make image-build       # ghcr.io/elythia-network/elythia:bundled をローカルにビルド
 ```
 
 ソースからビルドする従来の構成 (`docker-compose.yml` / `make docker-*`) はそのまま使える。こちらは置き換えではなく並立する選択肢。
@@ -149,14 +149,16 @@ make image-build       # ghcr.io/shiroha-a/mk:bundled をローカルにビル�
 
 | イメージ | 内容 | 用途 |
 |---|---|---|
-| `ghcr.io/shiroha-a/mk:bundled` | Goバイナリ + マイグレーション + [後始末バッチ](#後始末バッチ) + **フロントエンドアセット同梱** | pull して即起動 |
-| `ghcr.io/shiroha-a/mk:latest` | Goバイナリ + マイグレーション + [後始末バッチ](#後始末バッチ) | アセットを別途用意する構成 |
+| `ghcr.io/elythia-network/elythia:bundled` | Goバイナリ + マイグレーション + [後始末バッチ](#後始末バッチ) + **フロントエンドアセット同梱** | pull して即起動 |
+| `ghcr.io/elythia-network/elythia:latest` | Goバイナリ + マイグレーション + [後始末バッチ](#後始末バッチ) | アセットを別途用意する構成 |
 
 `bundled` / `latest` は develop の最新を指す **可変タグ**。本番ではバージョンを固定する。**古い版に固定するときは、その版の compose を使う** (compose は同じ版の image の呼び方に合わせてある。2.0.0 で実行バイナリを `elythia` にまとめた、#3394)。
 
 ```bash
 MK_IMAGE=ghcr.io/shiroha-a/mk:1.5.0-bundled docker compose up -d
 ```
+
+**2.0.0 より前の版は、以前の置き場所 `ghcr.io/shiroha-a/mk` にある** ([タグの一覧](https://github.com/users/shiroha-a/packages/container/package/mk)。リポジトリを `Elythia-Network/elythia` へ移した 2.0.0 から、イメージの置き場所も変わった。#3394)。
 
 リリースタグを push すると `<version>` と `<version>-bundled` が publish される
 (`.github/workflows/docker.yml`)。過去のリリースを後追いで publish したい場合は
@@ -173,7 +175,7 @@ gh workflow run docker.yml -f tag=1.1.0
 
 > **注意**: 下記のように upstream の `misskey/misskey` イメージからアセットをコピーする方法もあるが、その場合 **Elythia 独自のフロントエンド変更が失われる** (チャット・リバーシの連合が UI 上で「非対応」表示に戻る等)。drop-in 互換の検証目的でなければ `bundled` イメージを使うこと。
 
-`ghcr.io/shiroha-a/mk:latest`等のprebuilt imageにはGoバイナリとマイグレーションSQLのみが含まれ、フロントエンドアセットは同梱されていない。prebuilt imageを使用する場合は以下の環境変数でアセットディレクトリを指定する必要がある:
+`ghcr.io/elythia-network/elythia:latest`等のprebuilt imageにはGoバイナリとマイグレーションSQLのみが含まれ、フロントエンドアセットは同梱されていない。prebuilt imageを使用する場合は以下の環境変数でアセットディレクトリを指定する必要がある:
 
 - `MISSKEY_FRONTEND_DIR` — viteビルド出力
 - `MISSKEY_FRONTEND_DIST_DIR` — dist出力 (locales, fonts)
@@ -189,7 +191,7 @@ TS版Misskeyのイメージからアセットをコピーすることも可能:
 
 ```dockerfile
 FROM misskey/misskey:2026.10.0 AS misskey-assets
-FROM ghcr.io/shiroha-a/mk:latest
+FROM ghcr.io/elythia-network/elythia:latest
 COPY --from=misskey-assets /misskey/built /frontend
 COPY --from=misskey-assets /misskey/packages/frontend/assets /client-assets
 COPY --from=misskey-assets /misskey/packages/backend/node_modules/@misskey-dev/emoji-assets/built/twemoji /twemoji
@@ -369,8 +371,8 @@ stuck 検出行は全キュー分出るほか `frontend 配信元` / `maxFileSiz
 キューまわりは設定ファイルを読んだだけでは効く値が分からないものが多い。
 worker 数は既定値がキューごとに違い、`stuck 検出` は**キューごと**・
 `handler 期限` は**task type ごと**に対象外があり、実 worker 数の上限は隔離ぶんを含めて設定値を
-超えうる ([#2657](https://github.com/shiroha-a/mk/issues/2657) /
-[#2658](https://github.com/shiroha-a/mk/issues/2658))。**自分のインスタンスで
+超えうる ([#2657](https://github.com/Elythia-Network/elythia/issues/2657) /
+[#2658](https://github.com/Elythia-Network/elythia/issues/2658))。**自分のインスタンスで
 実際にいくつになっているか**はここでしか分からない。
 
 パスワード・鍵・proxy の認証情報はマスクされる。設定の有無だけは分かるようにしてある
@@ -387,7 +389,7 @@ worker 数は既定値がキューごとに違い、`stuck 検出` は**キュ�
 
 ```
   ok    config.url   https://example.com
-  ok    database     接続 ok / migration version 115
+  ok    database     接続 ok / migration version 116
   ok    database-health dead tuple と VACUUM に問題なし (121 テーブル)
   ok    root user    meta.rootUserId 設定済み
   ok    redis        接続 ok
@@ -650,7 +652,7 @@ upstream以外の設定はTCP構成と同じ。
 
 既存のMisskey (TypeScript版)からの移行手順は[TS版からの移行ガイド](migration-from-ts.md)を参照。
 
-ElythiaはTS版と同じPostgreSQL/Redisを共有できるため、バイナリの差し替えだけで移行可能。マイグレーションはTS版テーブルに対して原則追加のみだが、例外が 17 件ある ([TS版からの移行](migration-from-ts.md#破壊的なマイグレーション))。
+ElythiaはTS版と同じPostgreSQL/Redisを共有できるため、バイナリの差し替えだけで移行可能。マイグレーションはTS版テーブルに対して原則追加のみだが、例外が 18 件ある ([TS版からの移行](migration-from-ts.md#破壊的なマイグレーション))。
 
 ## アップデート
 
@@ -697,7 +699,7 @@ make uds-restart     # 再起動 + 配信アセットの検証 (同 docker-resta
 
 **フロントエンドのビルドは配信中のディレクトリを直接作り直す** (`packages/frontend/build.ts` が出力先を消してから作る)。ビルド開始から再起動完了までフロントエンドは 404 になる。#2885 の事故では、ビルド完了 (13:02:52) から再起動 (13:12:36) まででも **9 分 44 秒**、ビルド開始からならさらに長い窓ができた。**ビルドが失敗した場合はその窓が閉じない** — 配信物が消えたまま残るので、成功するまで直すこと。無停止で入れ替えたい場合は別ディレクトリにビルドして差し替える構成が要る。
 
-> **注意**: `docker-*` 系は `docker-compose.yml` を使うが、このファイルは `name:` を持たないため project 名がディレクトリ名 (`mk`) になり、**UDS 本番と同じ project に合流する**。本番 UDS を動かしているホストでは `uds-*` 系だけを使うこと。
+> **注意**: `docker-*` 系は `docker-compose.yml` を使うが、このファイルは `name:` を持たないため project 名がディレクトリ名 (以前の手順で clone した環境なら `mk`) になり、**UDS 本番と同じ project に合流する**。本番 UDS を動かしているホストでは `uds-*` 系だけを使うこと。
 
 マイグレーションは構成によって適用者が違う。Docker Compose 構成では one-shot の `migrate` サービスが `app` の起動前に自動適用し、`docker compose up -d` が完了した時点で適用済み。UDS 構成には `migrate` サービスが無く、mkgo の entrypoint が起動のたびに流す (したがって再起動には migration の時間が含まれる)。
 
@@ -841,7 +843,7 @@ Docker Compose 構成 (`compose.uds.yaml` が無い) でも同じ手順でよい
 
 各 flag の名前と意味は変わらない。サブコマンドの後ろに、これまでと同じ flag を渡す。
 
-**配布イメージの `/app/migrate` は 2.x の間だけ残す。** `Dockerfile` / `Dockerfile.bundled` の image (`ghcr.io/shiroha-a/mk` の `latest` / `bundled` とリリースのタグ) には `/app/migrate` が `elythia` への symlink として入っていて、その名前で起動すると以前の flag のまま `elythia migrate` として動く。古い compose の `migrate` サービス (`entrypoint: ["/app/migrate"]`) のまま新しい image を pull しても migration は止まらない。**3.0 で撤去する**ので、それまでに compose を新しいものへ差し替えること。他の旧名 (`/app/misskey`・`/app/backfill-<名前>`) は残さない。**UDS の image (`deploy/uds/Dockerfile.mkgo`) には `/app/migrate` を置かない** (entrypoint が `elythia migrate` を呼ぶので要らない)。
+**配布イメージの `/app/migrate` は 2.x の間だけ残す。** `Dockerfile` / `Dockerfile.bundled` の image (`ghcr.io/elythia-network/elythia` の `latest` / `bundled` とリリースのタグ) には `/app/migrate` が `elythia` への symlink として入っていて、その名前で起動すると以前の flag のまま `elythia migrate` として動く。古い compose の `migrate` サービス (`entrypoint: ["/app/migrate"]`) のまま新しい image を pull しても migration は止まらない。**3.0 で撤去する**ので、それまでに compose を新しいものへ差し替えること。他の旧名 (`/app/misskey`・`/app/backfill-<名前>`) は残さない。**UDS の image (`deploy/uds/Dockerfile.mkgo`) には `/app/migrate` を置かない** (entrypoint が `elythia migrate` を呼ぶので要らない)。
 
 構成ごとに手で直すもの:
 
@@ -879,6 +881,16 @@ pluginbuild: plugins/foo: go.mod が以前のモジュールパス github.com/sh
 - 同梱プラグイン (`plugins/status` / `plugins/trustlevel`) は追従済み
 - `Peered` を宣言しているプラグインは、nodeinfo の宣言の名前も変わる (`mkGoPlugins` → `elythiaPlugins`)。相手がこの版より前のあいだは、プラグインどうしの連合が止まる。相手が上げれば戻る
 - この版より前へ戻すときは、プラグインも名前を変える前の版へ戻す
+
+### リポジトリとイメージの置き場所を移した版へ上げる (#3394)
+
+2.0.0 から、リポジトリは `Elythia-Network/elythia`、配布イメージは `ghcr.io/elythia-network/elythia` に移った。旧 URL (`https://github.com/shiroha-a/mk`) は GitHub が転送するので git の操作は続けて使えるが、**旧イメージ `ghcr.io/shiroha-a/mk` は移した時点で更新が止まっている** (エラーにはならず、古い版のまま動き続ける)。
+
+- **Docker Compose (docker ブランチ)**: docker ブランチの `README.md` の「更新」の手順 (`git fetch` と `git reset --hard`) で compose を取り直す。新しい compose は既定で新しいイメージを使う。`.env` の `MK_IMAGE` や `docker-compose.override.yml` でイメージを指定しているなら、`ghcr.io/elythia-network/elythia:<タグ>` に書き換える
+- **Docker Compose (ソースからビルド) / UDS / バイナリ直接実行**: イメージは手元で作るので、変えるものは無い。remote の URL は転送で動くが、`git remote set-url origin https://github.com/Elythia-Network/elythia.git` で直しておく
+- **`build-with-plugins` を呼んでいる場合**: `uses:` を `Elythia-Network/elythia/.github/workflows/build-with-plugins.yml@<タグ または コミット SHA>` に、`mk_repository` を渡しているなら `Elythia-Network/elythia` に書き換える
+- **DB**: migration `000116` が、`meta.repositoryUrl` / `meta.feedbackUrl` のうち以前の既定値のままの行を新しい URL にする。自分で設定した値には触らない
+- 2.0.0 より前の版のイメージは、以前の置き場所 (`ghcr.io/shiroha-a/mk`) に残っている
 
 ### 切り戻し
 

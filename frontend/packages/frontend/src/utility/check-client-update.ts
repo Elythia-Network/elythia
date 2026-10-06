@@ -89,5 +89,5 @@ export function resolveClientUpdate(args: {
 // CHANGELOG の見出しは `## 1.3.0` なので GitHub のアンカーは `#130`。外れても
 // CHANGELOG の先頭に着地し、最新版が一番上にある。
 export function mkGoChangelogUrl(version: string): string {
-	return `https://github.com/shiroha-a/mk/blob/main/CHANGELOG.md#${version.replace(/\./g, '')}`;
+	return `https://github.com/Elythia-Network/elythia/blob/main/CHANGELOG.md#${version.replace(/\./g, '')}`;
 }

@@ -8,9 +8,10 @@ import (
 // legacyMigrateDockerfiles are the distributed images that must keep
 // /app/migrate as a symlink to elythia during 2.x (#3394).
 //
-// **名指しで要求する。** 配布イメージ (`ghcr.io/shiroha-a/mk` の latest / bundled) は
+// **名指しで要求する。** 配布イメージ (`ghcr.io/elythia-network/elythia` の latest / bundled) は
 // develop への push ごとに出るので、古い compose の migrate サービス
-// (`entrypoint: ["/app/migrate"]`) のまま pull した運営者の migration は、この 2 つの
+// (`entrypoint: ["/app/migrate"]`) のまま `MK_IMAGE` だけを新しいイメージに変えた運営者
+// (以前の置き場所 `ghcr.io/shiroha-a/mk` は #3394 の移管で更新が止まっている) の migration は、この 2 つの
 // Dockerfile が symlink を持っているかどうかだけで決まる。行を消しても build は
 // 通り、壊れるのは運営者の手元で初めて分かる。UDS の image は entrypoint が
 // `elythia migrate` を呼ぶので対象外。3.0 で互換を撤去するときにこのテストも消す。

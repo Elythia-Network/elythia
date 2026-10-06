@@ -14,7 +14,7 @@
 #   make image-down    # 停止
 #
 # 手元の変更を反映したい場合は先に bundled image を自前ビルドする:
-#   docker build -f Dockerfile.bundled -t ghcr.io/shiroha-a/mk:bundled .
+#   docker build -f Dockerfile.bundled -t ghcr.io/elythia-network/elythia:bundled .
 
 # 本番 UDS スタックと同じ project 名 (= ディレクトリ名の mk) に合流しないよう
 # 明示する。docker-compose.yml は name: を持たないため project 名がディレクトリ
@@ -43,7 +43,7 @@ services:
   app:
     logging: *default-logging
     # MK_IMAGE で上書きできる。手元でビルドした image を試すときに使う。
-    image: ${MK_IMAGE:-ghcr.io/shiroha-a/mk:bundled}
+    image: ${MK_IMAGE:-ghcr.io/elythia-network/elythia:bundled}
     ports:
       - "${MK_PORT:-3000}:3000"
     depends_on:
@@ -73,7 +73,7 @@ services:
   # golang-migrate が適用済みバージョンを管理するので何度流しても冪等。
   migrate:
     logging: *default-logging
-    image: ${MK_IMAGE:-ghcr.io/shiroha-a/mk:bundled}
+    image: ${MK_IMAGE:-ghcr.io/elythia-network/elythia:bundled}
     entrypoint: ["/app/elythia"]
     command: ["migrate", "-config", ".config/default.yml", "-direction", "up"]
     depends_on:

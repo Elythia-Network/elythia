@@ -125,7 +125,7 @@ describe('resolveClientUpdate persistence', () => {
 describe('mkGoChangelogUrl', () => {
 	test('builds the anchor from the version', () => {
 		expect(mkGoChangelogUrl('1.3.0'))
-			.toBe('https://github.com/shiroha-a/mk/blob/main/CHANGELOG.md#130');
+			.toBe('https://github.com/Elythia-Network/elythia/blob/main/CHANGELOG.md#130');
 	});
 
 	test('strips every dot, not just the first', () => {

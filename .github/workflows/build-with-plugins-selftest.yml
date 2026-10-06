@@ -37,7 +37,7 @@ jobs:
     # ローカル参照なので、この PR / ブランチの build-with-plugins.yml が使われる。
     uses: ./.github/workflows/build-with-plugins.yml
     with:
-      # fork でも回るように、自分のリポジトリを見る。既定の shiroha-a/mk 固定だと
+      # fork でも回るように、自分のリポジトリを見る。既定の Elythia-Network/elythia 固定だと
       # fork 上の PR / dispatch で checkout が not our ref で落ちる。
       mk_repository: ${{ github.repository }}
       mk_ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -50,6 +50,6 @@ jobs:
       # 追従する前の develop から切った PR が落ちる。プラグインを上げるときは、
       # 本体の変更と同じ PR でこの SHA を進める。
       plugins: |
-        nowplaying https://github.com/shiroha-a/mk-plugin-nowplaying ee75dd58f05f6450d9dd9251806b4384680d5b82
+        nowplaying https://github.com/Elythia-Network/elythia-plugin-nowplaying ee75dd58f05f6450d9dd9251806b4384680d5b82
       # publish はしない。検証したいのはビルドが通ることだけ。
       push: false

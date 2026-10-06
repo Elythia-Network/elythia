@@ -6,7 +6,7 @@ name: Docker branch
 # 672MB の .git を落とさせている。実際に必要な
 # のは compose 1 つと設定のひな形だけなので、それだけを置いたブランチを配る。
 #
-#   git clone --depth 1 -b docker https://github.com/shiroha-a/mk.git mk
+#   git clone --depth 1 -b docker https://github.com/Elythia-Network/elythia.git mk
 #   cd mk && docker compose up -d
 #
 # 生成物は毎回 1 コミットだけの orphan ブランチで、履歴ごと作り直す (force-push)。

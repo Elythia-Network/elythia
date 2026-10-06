@@ -12,7 +12,7 @@
 ## 1. クローンとビルド
 
 ```bash
-git clone https://github.com/shiroha-a/mk.git mk-go
+git clone https://github.com/Elythia-Network/elythia.git mk-go
 cd mk-go
 go build -o built/elythia ./cmd/elythia
 ```
@@ -73,7 +73,7 @@ id: aidx             # Misskey-TS側のID生成方式と一致させること
 
 Elythiaの追加テーブルを作り、共有テーブルを upstream の形に揃える。**Misskey-TSが書いたデータは原則として保持される** (例外は `000081` / `000084` / `000085` / `000094`、後述)。`000082` も行を DELETE するが、対象は upstream Misskey に無い `transfer-ownership` が作った行だけで TS 由来のものは含まない。
 
-共有テーブルにも触るものが 17 件あるので、内容と、TS へ戻したときの影響 (保証はしない) を[破壊的なマイグレーション](#破壊的なマイグレーション)にまとめてある。**先に読むこと。**
+共有テーブルにも触るものが 18 件あるので、内容と、TS へ戻したときの影響 (保証はしない) を[破壊的なマイグレーション](#破壊的なマイグレーション)にまとめてある。**先に読むこと。**
 
 ```bash
 # ローカルビルドの場合
@@ -87,7 +87,7 @@ docker compose exec app /app/elythia migrate -config .config/default.yml -direct
 
 ### 破壊的なマイグレーション
 
-「追加のみ」ではない。共有テーブルに触るものが 17 件ある。**うち 13 件は Elythia 側だけが作るもの (列 / FK / index / seed / 重複行 / 譲渡が残した membership) の除去、その初期化、または upstream 追随で、Misskey-TS が書いた列の値には影響しない。残る 4 件 (`000081` / `000084` / `000085` / `000094`) は TS が書いた値にも当たる。**
+「追加のみ」ではない。共有テーブルに触るものが 18 件ある。**うち 14 件は Elythia 側だけが作るもの (列 / FK / index / seed / 重複行 / 譲渡が残した membership) の除去、その初期化、または upstream 追随で、Misskey-TS が書いた列の値には影響しない。残る 4 件 (`000081` / `000084` / `000085` / `000094`) は TS が書いた値にも当たる。**
 
 | migration | 内容 | 位置づけ |
 |---|---|---|
@@ -108,6 +108,7 @@ docker compose exec app /app/elythia migrate -config .config/default.yml -direct
 | `000095` | `IDX_user_ip_ip_lastSeenAt` を DROP して `("ip","lastSeenAt" DESC,"userId")` の複合 index を作る | **落とすのは Elythia の `000094` が作った index だけ** — upstream の `user_ip` は `userId` と `UNIQUE (userId, ip)` しか持たないので、TS 由来の index には触らない (`000068` / `000083` と同じ方針)。張り替えるのは、関連候補の抽出 (#3105) が 1 つの IP から取る件数を上限で打ち切るため、`userId` まで index に乗っていないと**同じ最終観測が固まっているときに上限が保証されない**から。down は対称 (旧を作り直して新を落とす) で、行は触らない |
 | `000106` | `abuse_report_notification_recipient` の FK を張り替え (`SET NULL` の Elythia 名 2 本を DROP し、本家と同じ名前の `CASCADE` 3 本を足す) | **upstream 追随** (#3264)。本家 `1713656541000-abuse-report-notification.js` と同じ 3 本 (`userId` -> `user` / `user_profile`、`systemWebhookId` -> `system_webhook`) にする。**TS 製 DB には元から本家の 3 本があるので何もしない** (名前で有無を見て足す)。行は消さない — 直す前に `SET NULL` で宛先が NULL になった通知先は残る。**外部キーを張る前に、本家では作れない形の値を NULL にする** — `user_profile` の無い利用者を指す `userId` (残すと検証で失敗して migration が止まる) と、method に合わない側の参照 (webhook 方式の行の `userId`、email 方式の行の `systemWebhookId`。残すと CASCADE で無関係な削除に巻き込まれて通知先ごと消える)。どれも TS が書く値には当たらず、down でも戻らない |
 | `000107` | `note."pageCount"` をページの content から数え直して backfill (`UPDATE`) | **upstream 追随** (#3293)。Elythia はページの作成・更新・削除で `pageCount` を増減していなかったので、それより前に作ったページが参照するノートを本家と同じ数え方 (`PageService.collectReferencedNotes`) で埋める。**増やす向きにしか直さない** (参照されているノートだけを触る)。TS が維持していれば同じ値になっているので **TS 製 DB では何も変わらない**。down は戻さない (0 に戻すと掃除の保護が外れる) |
+| `000116` | `meta."repositoryUrl"` / `meta."feedbackUrl"` のうち、`000084` / `000085` か起動時の `EnsureInitial` が入れた以前の既定値 (`https://github.com/shiroha-a/mk`、`.../issues/new`) と同じ行を新しい URL で `UPDATE` | **Elythia が自分で入れた値の更新。** リポジトリを `Elythia-Network/elythia` へ移した (#3394) ため。TS が書いた値 (`misskey-dev` の既定値や operator の値) には触らない。down は新しい URL の行を以前の既定値に戻す (旧 URL は GitHub が転送するので開ける) |
 
 #### `000081` について
 
@@ -167,7 +168,7 @@ TS 側は「Misskey を改変したバージョン」として Elythia のリポ
 載る (`internal/api/nodeinfo/handler.go`) ので、未設定だと他インスタンスや一覧サイトから
 見ても欠ける。実際に本番の nodeinfo は `feedbackUrl: null` だった。
 
-既定値は **Elythia の issues** (`https://github.com/shiroha-a/mk/issues/new`)。upstream が
+既定値は **Elythia の issues** (`https://github.com/Elythia-Network/elythia/issues/new`)。upstream が
 列 DEFAULT に Misskey 本体の issues を置いているのと同じ位置づけで、**「ソフトウェアへの
 フィードバック先」**にあたる。「このサーバーへのフィードバック」を受けたい operator は
 admin 画面 (全般 → 情報) で上書きする。
@@ -272,7 +273,7 @@ Elythia のコンテナは Misskey-TS と同じ **UID/GID 991** で起動する�
 
 今の版でどこまで戻れるかは、`make dropin-mkgo-born-test` (Elythia 生まれの DB を TS に引き渡す) と `make dropin-swap-test` の復路の段階 (TS → Elythia → TS) で**測っている**。どちらも守る対象ではなく、意図的な変更で通らなくなったら期待値を更新し、何が戻らなくなったかを下の「[戻らなくなったもの](#戻らなくなったもの)」に記録する (手順は [dropin-e2e.md](dropin-e2e.md#復路は測る対象-3191))。Elythia が追加したテーブルは Misskey-TS からは無視される。
 
-[破壊的なマイグレーション](#破壊的なマイグレーション) の 17 件は戻らない。うち 13 件は Elythia が自分で作ったものの除去・初期化か upstream 追随なので**戻す必要が無い**。`000056` / `000081` / `000082` が消した行と `000053` / `000067` / `000084` / `000085` が上書きした値は、down が `SELECT 1;` の no-op なので復元できない。**`000094` は down を持つが、それでも戻らない** — 消すのは自分で足した列と index だけで、正規化した `ip` の値と統合で消えた行は復元できない (統合前の行数も個別の観測時刻も残っていない)。**`000084` / `000085` が書き換えるのは `meta."repositoryUrl"` と `meta."feedbackUrl"` なので、TS へ戻すときは admin 画面で設定し直すこと** (Elythia のリポジトリと issues を案内したままになる)。この経路を CI で測っているのは `make dropin-swap-test` (TS → Elythia → TS) で、`make dropin-mkgo-born-test` は逆に Elythia 生まれの DB を TS に引き渡せるかを見ている。
+[破壊的なマイグレーション](#破壊的なマイグレーション) の 18 件は戻らない。うち 14 件は Elythia が自分で作ったものの除去・初期化か upstream 追随なので**戻す必要が無い**。`000056` / `000081` / `000082` が消した行と `000053` / `000067` / `000084` / `000085` が上書きした値は、down が `SELECT 1;` の no-op なので復元できない。**`000094` は down を持つが、それでも戻らない** — 消すのは自分で足した列と index だけで、正規化した `ip` の値と統合で消えた行は復元できない (統合前の行数も個別の観測時刻も残っていない)。**`000084` / `000085` が書き換えるのは `meta."repositoryUrl"` と `meta."feedbackUrl"` なので、TS へ戻すときは admin 画面で設定し直すこと** (Elythia のリポジトリと issues を案内したままになる)。この経路を CI で測っているのは `make dropin-swap-test` (TS → Elythia → TS) で、`make dropin-mkgo-born-test` は逆に Elythia 生まれの DB を TS に引き渡せるかを見ている。
 
 migration の注記やコードのコメントには、TS へ戻せることを設計の理由にした記述が残っている。**それらは当時の判断の記録で、今は保証ではない。** 往路にも要る制約 (upstream 由来の index を触らない、TS が書いた RSA 鍵のテーブルをそのまま読む、など) は、往路の理由で引き続き守る。
 
