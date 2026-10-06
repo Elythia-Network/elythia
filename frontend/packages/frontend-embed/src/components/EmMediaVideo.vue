@@ -50,7 +50,8 @@ defineProps<{
 
 .videoOverlayPlayButton {
 	background: var(--MI_THEME-accent);
-	color: #fff;
+	// Elythia: アクセントが淡いテーマ (Elythia Dark など) でも読めるよう、テーマの色を使う
+	color: var(--MI_THEME-fgOnAccent);
 	padding: 1rem;
 	border-radius: 99rem;
 
