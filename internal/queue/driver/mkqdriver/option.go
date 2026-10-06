@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 
-	"github.com/shiroha-a/mkq"
+	"github.com/elythia-network/mkq"
 
 	"github.com/elythia-network/elythia/internal/queue/driver"
 )

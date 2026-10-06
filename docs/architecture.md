@@ -402,7 +402,7 @@ CLAUDE.md の Section 1 / 2 にあった表とツリーを、#3248 でここへ�
 |-----------|---------|------|
 | PostgreSQL Driver | **pgx/v5** (`jackc/pgx/v5`) | PostgreSQL接続 |
 | Redis | **go-redis v9** (`redis/go-redis/v9`) | キャッシュ、PubSub |
-| Job Queue | **mkq** (`shiroha-a/mkq`) | BullMQ wire互換のRedisジョブキュー。**唯一のdriver** (legacyの`asynq`は#2985で削除) |
+| Job Queue | **mkq** (`elythia-network/mkq`) | BullMQ wire互換のRedisジョブキュー。**唯一のdriver** (legacyの`asynq`は#2985で削除) |
 | Search | **meilisearch-go** | Meilisearch連携 |
 | Object Storage | **aws-sdk-go-v2/s3** | S3互換ストレージ |
 

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/queue/driver"
-	"github.com/shiroha-a/mkq"
+	"github.com/elythia-network/mkq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

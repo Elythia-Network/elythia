@@ -90,6 +90,8 @@ github.com/docker/go-units v0.5.0 h1:69rxXcBk27SvSaaxTtLh/8llcHD8vYHT7WSdRZ/jvr4
 github.com/docker/go-units v0.5.0/go.mod h1:fgPhTUdO+D/Jk86RDLlptpiXQzgHJF7gydDDbaIK4Dk=
 github.com/ebitengine/purego v0.10.0 h1:QIw4xfpWT6GWTzaW5XEKy3HXoqrJGx1ijYHzTF0/ISU=
 github.com/ebitengine/purego v0.10.0/go.mod h1:iIjxzd6CiRiOG0UyXP+V1+jWqUXVjPKLAI0mRfJZTmQ=
+github.com/elythia-network/mkq v1.5.0 h1:rblw5ZU8WJKPYukz0dWuWB1WqQ9Zq+Xh64H+ONBWSEA=
+github.com/elythia-network/mkq v1.5.0/go.mod h1:P2IxPDkoYKypg2A2c4fjJ3hhbtU4YqhTziP6v1fywHY=
 github.com/felixge/httpsnoop v1.0.4 h1:NFTV2Zj1bL4mc9sqWACXbQFVBBg2W3GPvqp8/ESS2Wg=
 github.com/felixge/httpsnoop v1.0.4/go.mod h1:m8KPJKqk1gH5J9DgRY2ASl2lWCfGKXixSwevea8zH2U=
 github.com/forPelevin/gomoji v1.4.1 h1:7U+Bl8o6RV/dOQz7coQFWj/jX6Ram6/cWFOuFDEPEUo=
@@ -310,14 +312,6 @@ github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd h1:CmH9+J6ZSsIjUK
 github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd/go.mod h1:hPqNNc0+uJM6H+SuU8sEs5K5IQeKccPqeSjfgcKGgPk=
 github.com/sagikazarmark/locafero v0.11.0 h1:1iurJgmM9G3PA/I+wWYIOw/5SyBtxapeHDcg+AAIFXc=
 github.com/sagikazarmark/locafero v0.11.0/go.mod h1:nVIGvgyzw595SUSUE6tvCp3YYTeHs15MvlmU87WwIik=
-github.com/shiroha-a/mkq v1.0.8 h1:YYRIAATdwKbB3fi98LABivsXW5FHaj0GlL3gMuBqFkI=
-github.com/shiroha-a/mkq v1.0.8/go.mod h1:9Bkl66iC0fOhAK0WSyCGMj/ZtX6plny8BwR8FGA+XYA=
-github.com/shiroha-a/mkq v1.1.1 h1:a3Or1vh5yjaU7KrnvFchWCt18CJtBK4jG/gRxPeg5tg=
-github.com/shiroha-a/mkq v1.1.1/go.mod h1:PcQLon1efsYEvU/lzCsANfmfza4CyfGqotGpdF5El5E=
-github.com/shiroha-a/mkq v1.2.0 h1:nepI4xNkb+r5VB3gfcOvLPnIpgdM/Pg0ldlMoZ04XZE=
-github.com/shiroha-a/mkq v1.2.0/go.mod h1:PcQLon1efsYEvU/lzCsANfmfza4CyfGqotGpdF5El5E=
-github.com/shiroha-a/mkq v1.4.0 h1:gGHnKgnSTny8uplTXNgEoxsEwoYS61r7pjEmlLuKbpQ=
-github.com/shiroha-a/mkq v1.4.0/go.mod h1:/R/0K8ZbKVhnPVjEw6VxOwPhfdgVJCxARxGqZLBNS/Q=
 github.com/shirou/gopsutil/v4 v4.26.3 h1:2ESdQt90yU3oXF/CdOlRCJxrP+Am1aBYubTMTfxJ1qc=
 github.com/shirou/gopsutil/v4 v4.26.3/go.mod h1:LZ6ewCSkBqUpvSOf+LsTGnRinC6iaNUNMGBtDkJBaLQ=
 github.com/sirupsen/logrus v1.9.4 h1:TsZE7l11zFCLZnZ+teH4Umoq5BhEIfIzfRDZ1Uzql2w=

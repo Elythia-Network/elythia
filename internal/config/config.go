@@ -293,7 +293,7 @@ type Source struct {
 
 	// JobQueueDriver selects the worker / inspector implementation
 	// behind internal/queue. "mkq" (the only driver) uses the
-	// BullMQ-compatible shiroha-a/mkq library. Empty / unset = "mkq".
+	// BullMQ-compatible elythia-network/mkq library. Empty / unset = "mkq".
 	// The legacy "asynq" value was removed in #2985 and now fails at
 	// startup with a migration hint.
 	JobQueueDriver string `mapstructure:"jobQueueDriver"`
