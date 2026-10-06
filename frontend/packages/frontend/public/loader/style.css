@@ -9,134 +9,172 @@ html {
 	color: var(--MI_THEME-fg);
 }
 
+/*
+ * Elythia: 起動画面は夜空にする。
+ *
+ * **利用者のテーマに依らず、色を固定する。** スプラッシュはテーマが適用される
+ * 前の一瞬を埋めるもので、テーマの背景色に合わせても読み込みの途中で色が
+ * 変わるだけになる。配色は既定アイコンの夜空と三日月から取った。
+ *
+ * 星は boot.js が #splashSky (canvas) に描く。ここで描くのは背景・星雲・
+ * アイコンだけで、スクリプトが動かなくても夜空とアイコンは出る。
+ */
 #splash {
 	position: fixed;
 	z-index: 10000;
-	top: 0;
-	left: 0;
-	width: 100vw;
-	height: 100vh;
+	inset: 0;
+	overflow: hidden;
 	cursor: wait;
-	background-color: var(--MI_THEME-bg);
+	background: radial-gradient(140% 100% at 50% 110%, #1b1d4a 0%, #0a112e 45%, #060a1f 100%);
 	opacity: 1;
 	transition: opacity 0.5s ease;
-}
-
-#splashIcon {
-	position: absolute;
-	top: 0;
-	right: 0;
-	bottom: 0;
-	left: 0;
-	margin: auto;
-	width: 64px;
-	height: 64px;
-	border-radius: 10px;
-	pointer-events: none;
+	isolation: isolate;
 }
 
 /*
- * mk-go: 起動時のスピナー (#2549)。
+ * 星雲。**filter: blur を使わない。** 画面全体の大きさの要素にぼかしをかけると、
+ * 起動処理と同じ時間帯に GPU の負荷が跳ねる。closest-side の放射グラデーション
+ * だけで縁は十分に柔らかい。
  *
- * 6 つの点が 1 つずつ外から集まってきて、揃ってから 1 回転し、また散る。
- * 起動時に何かを待っている状況に合う形として選んだ。
- *
- * **色はサーバー設定のテーマカラー。** shell が --splash-color を出す。
- * `--MI_THEME-accent` は利用者が選んだテーマの色なので人によって変わるが、
- * スプラッシュはテーマが適用される前に出るものなので、サーバーが決めた色の
- * 方が筋が通る。出ていなければ従来どおり accent に落ちる。
+ * **大きさは vmax で決める。** % だと縦長の画面で縦に引き伸ばされ、雲でなく
+ * 光の筋に見える。
  */
-#splashSpinner {
+#splash .splashNebula {
 	position: absolute;
-	top: 0;
-	right: 0;
-	bottom: 0;
-	left: 0;
-	margin: auto;
-	width: 70px;
-	height: 70px;
-	/* アイコン (64px) の下端から 17px 空く。**大きさを変えたらここも変える** —
-	   70px のままだと隙間が 3px しかなく詰まって見える。 */
-	transform: translateY(84px);
-	color: var(--splash-color, var(--MI_THEME-accent));
+	z-index: 0;
+	border-radius: 50%;
+	opacity: 0.55;
 	pointer-events: none;
 }
 
-#splashSpinner > svg {
+#splash .splashNebula.n1 {
+	width: 50vmax;
+	height: 40vmax;
+	left: -10%;
+	top: 8%;
+	background: radial-gradient(closest-side, rgba(166, 155, 251, 0.45), rgba(166, 155, 251, 0));
+	animation: splashDrift1 22s ease-in-out infinite alternate;
+}
+
+#splash .splashNebula.n2 {
+	width: 45vmax;
+	height: 38vmax;
+	right: -12%;
+	bottom: -6%;
+	background: radial-gradient(closest-side, rgba(253, 221, 207, 0.22), rgba(253, 221, 207, 0));
+	animation: splashDrift2 26s ease-in-out infinite alternate;
+}
+
+#splash .splashNebula.n3 {
+	width: 34vmax;
+	height: 28vmax;
+	left: 38%;
+	top: -12%;
+	background: radial-gradient(closest-side, rgba(204, 195, 247, 0.3), rgba(204, 195, 247, 0));
+	animation: splashDrift1 30s ease-in-out infinite alternate-reverse;
+}
+
+#splashSky {
 	position: absolute;
-	top: 0;
-	left: 0;
+	z-index: 1;
+	inset: 0;
 	width: 100%;
 	height: 100%;
-	overflow: visible;
+	pointer-events: none;
 }
 
-#splashSpinner .pkt {
-	fill: currentColor;
+#splashMark {
+	position: absolute;
+	z-index: 2;
+	left: 50%;
+	top: 50%;
+	/* 大きさは以前のスプラッシュ (upstream) と同じ 64px。夜空を主役にする */
+	width: 64px;
+	height: 64px;
+	transform: translate(-50%, -50%);
+	animation: splashAppear 1.6s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+	pointer-events: none;
 }
 
-/*
- * **回転する層と半径方向に動く層を分ける。** 1 つの要素で両方やると
- * transform が衝突して、集まる動きが回転に巻き取られる。
- */
-#splashSpinner .rig {
-	/* **viewBox 座標での中心。** transform-box の既定は view-box なので、
-	   原点は viewBox の左上から測られる。SVG 側で `<g transform="translate(...)">`
-	   に包むと要素のローカル座標とここがずれ、回転軸が中心から外れて首を振る。 */
-	transform-origin: 76px 76px;
-	animation: splashHold 2.45s ease-in-out infinite;
+/* アイコンの後ろの光の輪 */
+#splashMark::before {
+	content: "";
+	position: absolute;
+	z-index: 0;
+	inset: -70%;
+	border-radius: 50%;
+	background: radial-gradient(closest-side, rgba(204, 195, 247, 0.38), rgba(166, 155, 251, 0.12) 55%, rgba(166, 155, 251, 0));
+	animation: splashHalo 5s ease-in-out infinite;
 }
 
-#splashSpinner .pkt {
-	animation: splashGather 2.45s ease-in-out infinite;
+/* id は upstream の _splash.tsx と同じものを残す */
+#splashIcon {
+	position: relative;
+	z-index: 1;
+	display: block;
+	width: 100%;
+	height: 100%;
+	border-radius: 24%;
+	box-shadow: 0 0 0 1px rgba(204, 195, 247, 0.18), 0 0 30px rgba(166, 155, 251, 0.35);
+	animation: splashFloat 7s ease-in-out infinite;
 }
 
-/* 1 拍 0.35s の 7 拍で 1 周 (2.45s)。点は 1 拍の 0.28 倍 = 約 0.098s ずつ
-   遅れて出る。**速さを変えるなら周期と遅れを同じ比で動かすこと** —
-   周期だけ縮めると点の間隔が開いたままになり、1 つずつ来る感じが消える。 */
-#splashSpinner .p2 { animation-delay: 0.1s; }
-#splashSpinner .p3 { animation-delay: 0.2s; }
-#splashSpinner .p4 { animation-delay: 0.29s; }
-#splashSpinner .p5 { animation-delay: 0.39s; }
-#splashSpinner .p6 { animation-delay: 0.49s; }
-
-/*
- * 集まる間は止まり、揃ってから 1 回転する。
- * **回りっぱなしにすると「集まった」ことが伝わらない。**
- */
-@keyframes splashHold {
-	0%, 30% {
-		transform: rotate(0deg);
-	}
-	72%, 100% {
-		transform: rotate(360deg);
-	}
+@keyframes splashDrift1 {
+	from { transform: translate(0, 0) scale(1); }
+	to { transform: translate(6%, 4%) scale(1.12); }
 }
 
-@keyframes splashGather {
-	0% {
-		transform: translateY(-52px);
+@keyframes splashDrift2 {
+	from { transform: translate(0, 0) scale(1.05); }
+	to { transform: translate(-7%, -5%) scale(0.95); }
+}
+
+@keyframes splashAppear {
+	from {
 		opacity: 0;
+		transform: translate(-50%, -46%) scale(0.94);
+		filter: blur(6px);
 	}
-	18%, 72% {
-		transform: translateY(-22px);
+	to {
 		opacity: 1;
-	}
-	92%, 100% {
-		transform: translateY(-52px);
-		opacity: 0;
+		transform: translate(-50%, -50%) scale(1);
+		filter: blur(0);
 	}
 }
 
+@keyframes splashFloat {
+	0%, 100% { transform: translateY(0); }
+	50% { transform: translateY(-5px); }
+}
+
+@keyframes splashHalo {
+	0%, 100% {
+		opacity: 0.65;
+		transform: scale(0.92);
+	}
+	50% {
+		opacity: 1;
+		transform: scale(1.06);
+	}
+}
+
+/*
+ * 動きを減らす設定では、夜空とアイコンを止めた絵として出す。
+ * アプリ側の「アニメーション」設定が切られているときは、boot.js が
+ * #splash に .splashStill を付ける。
+ */
 @media (prefers-reduced-motion: reduce) {
-	/* 動かさない設定でも「読み込み中」であることは伝える必要がある。
-	   点を静止させたうえで薄く見せる。 */
-	#splashSpinner .rig,
-	#splashSpinner .pkt {
+	#splash .splashNebula,
+	#splashMark,
+	#splashMark::before,
+	#splashIcon {
 		animation: none;
 	}
-	#splashSpinner .pkt {
-		transform: translateY(-22px);
-		opacity: 0.5;
-	}
+}
+
+#splash.splashStill .splashNebula,
+#splash.splashStill #splashMark,
+#splash.splashStill #splashMark::before,
+#splash.splashStill #splashIcon {
+	animation: none;
 }

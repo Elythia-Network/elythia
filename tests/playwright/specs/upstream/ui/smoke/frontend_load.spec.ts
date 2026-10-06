@@ -62,18 +62,14 @@ test.describe('smoke: frontend SPA loads', () => {
     // splash 構造の必須要素
     expect(html).toContain('<div id="splash">');
     expect(html).toContain('<img id="splashIcon"');
-    expect(html).toContain('<div id="splashSpinner">');
-    // ここから下は mk-go 独自のスプラッシュ。TS baseline は公式の HTML を返す。
+    // ここから下は Elythia 独自のスプラッシュ。TS baseline は公式の HTML を返す。
     if (isTsBackend) return;
-    // スピナーは mk-go 独自 (#2549)。回転する層 (.rig) と半径方向に動く
-    // 点 (.pkt) を分けてある — 1 つの要素で両方やらせると transform が
-    // 衝突して、集まる動きが回転に巻き取られる。
-    expect(html).toContain('class="rig"');
-    expect(html).toContain('class="pkt p1"');
-    expect(html).toContain('class="pkt p6"');
-    // 色はサーバー設定のテーマカラーを渡す。--MI_THEME-accent は利用者が
-    // 選んだテーマの色なので、テーマ適用前に出るスプラッシュには使えない。
-    expect(html).toContain('--splash-color:');
+    // スピナーの代わりに夜空を出す。星は loader の boot.js が #splashSky に描く。
+    expect(html).toContain('<canvas id="splashSky"></canvas>');
+    expect(html).toContain('<div id="splashMark">');
+    expect(html).not.toContain('id="splashSpinner"');
+    // 夜空は固定の配色で、テーマカラーは使わない
+    expect(html).not.toContain('--splash-color:');
     // 旧 mascot (ai.png) や placeholder text は出ないこと
     expect(html).not.toContain('src="/assets/ai.png"');
     expect(html).not.toContain('<p>Loading...</p>');

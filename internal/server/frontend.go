@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"regexp"
 	"strings"
 	"time"
 
@@ -93,46 +92,32 @@ type shellOverrides struct {
 // defaultShellCacheControl mirrors upstream の renderBase (`public, max-age=30`)。
 const defaultShellCacheControl = "public, max-age=30"
 
-// splashSpinnerSVG is the startup spinner shown while the client boots (#2549).
+// defaultThemeColor is the browser UI color used when the server has no
+// theme color configured.
 //
-// 6 つの点が 1 つずつ外から集まってきて、揃ってから 1 回転し、また散る。
-// Misskey から受け継いだ 1/4 円弧はどのサービスにもある形だったので、
-// 起動時に何かを待っている状況に合う形に替えた。
-//
-// **回転する層 (.rig) と半径方向に動く点 (.pkt) を分けてある。** 1 つの要素で
-// 両方やらせると transform が衝突して、集まる動きが回転に巻き取られる。
-// 動きの定義は `packages/frontend/public/loader/style.css` 側にある。
-//
-// **包みの `translate` を使わず、円を viewBox 座標に直接置いている。**
-// CSS の `transform-box` は既定が `view-box` なので、`transform-origin` は
-// viewBox の原点から測られる。包みで平行移動すると要素のローカル座標と
-// ずれ、回転軸が中心から外れて首を振る。
-// 拡大率は upstream の splash と同じ viewBox 152 のままにしてある。
-const splashSpinnerSVG = `<svg viewBox="0 0 152 152" xmlns="http://www.w3.org/2000/svg"><g class="rig">` +
-	`<g transform="rotate(0 76 76)"><circle class="pkt p1" cx="76" cy="76" r="10"/></g>` +
-	`<g transform="rotate(60 76 76)"><circle class="pkt p2" cx="76" cy="76" r="10"/></g>` +
-	`<g transform="rotate(120 76 76)"><circle class="pkt p3" cx="76" cy="76" r="10"/></g>` +
-	`<g transform="rotate(180 76 76)"><circle class="pkt p4" cx="76" cy="76" r="10"/></g>` +
-	`<g transform="rotate(240 76 76)"><circle class="pkt p5" cx="76" cy="76" r="10"/></g>` +
-	`<g transform="rotate(300 76 76)"><circle class="pkt p6" cx="76" cy="76" r="10"/></g>` +
-	`</g></svg>`
+// upstream の既定は #86b300 (Misskey の緑)。起動画面の夜空の上でステータスバーや
+// アドレスバーだけが緑になるので、夜空と同じ色にした。`/api/meta` の
+// themeColor は null のまま返し、nodeinfo の既定も upstream のまま据え置く
+// (どちらも他のクライアントやサーバーが読む値なので、意味を変えない)。
+const defaultThemeColor = "#0a112e"
 
-// splashColorPattern matches the colors we are willing to inline into the
-// splash `<style>` block.
-var splashColorPattern = regexp.MustCompile(`^#[0-9a-fA-F]{3,8}$`)
-
-// splashColor returns the color to paint the startup spinner with, falling back
-// to the default theme color when the configured one is not a plain hex color.
+// splashMarkup is the night-sky startup screen shown while the client boots.
 //
-// **HTML escape は `<style>` の中身を守らない。** style 要素の内容はマークアップ
-// として解釈されないので実体参照はそのまま残り、`}` ひとつで後続の規則に化ける。
-// テーマカラーは管理者が自由に入れられる値なので、素性の分かる形だけを通す。
-func splashColor(themeColor string) string {
-	if splashColorPattern.MatchString(themeColor) {
-		return themeColor
-	}
-	return "#86b300"
-}
+// 背景・星雲・アイコンは `packages/frontend/public/loader/style.css` が描き、
+// 星と流れ星は `loader/boot.js` が #splashSky に描く。スクリプトが動かない
+// 環境でも、夜空とアイコンだけは出る。
+//
+// **スピナーは置かない。** 以前の 6 点のスピナー (#2549) はやめ、画面全体を
+// 夜空にして待ち時間そのものを見せる形にした (2.0.0)。
+//
+// **色はテーマカラーから取らない。** 夜空の配色は既定アイコンから決めた
+// 固定の色で、管理者のテーマカラーを入れると夜空の上で浮く。
+// `%s` にはアイコンの URL (HTML escape 済み) が入る。
+const splashMarkup = `<div id="splash">
+<div class="splashNebula n1"></div><div class="splashNebula n2"></div><div class="splashNebula n3"></div>
+<canvas id="splashSky"></canvas>
+<div id="splashMark"><img id="splashIcon" src="%s" alt="" /></div>
+</div>`
 
 // renderFrontendShell renders the Misskey frontend SPA shell.
 func renderFrontendShell(c echo.Context, cfg *config.Config, metaRepo repository.MetaRepository, proxyAccountResolver meta.ProxyAccountResolver, chunkedUpload meta.ChunkedUploadCapability, clientEntry frontendutil.ClientEntryInfo, ov shellOverrides) error {
@@ -153,13 +138,14 @@ func renderFrontendShell(c echo.Context, cfg *config.Config, metaRepo repository
 	faviconURL := "/favicon.ico"
 	// iOS Safari は明示された apple-touch-icon を manifest の icons より
 	// 優先する。この link が無いと manifest 側にフォールバックし、
-	// purpose:maskable の 192/512 が候補から外れて splash.png (透明背景) が
-	// ホーム画面アイコンに選ばれてしまう (#2527)。
+	// purpose:maskable の 192/512 が候補から外れて splash.png が
+	// ホーム画面アイコンに選ばれてしまう (#2527)。管理者が設定したアイコンを
+	// 使う経路でも同じことが起きる。
 	appleTouchIconURL := "/apple-touch-icon.png"
-	themeColor := "#86b300"
+	themeColor := defaultThemeColor
 	// splash 中央のアイコンは upstream `_splash.tsx` 互換で server
 	// iconUrl を使う (= 管理者が設定したインスタンス画像)。未設定なら
-	// `/static-assets/splash.png` (Misskey ロゴ) にフォールバック。
+	// `/static-assets/splash.png` (既定の Elythia のアイコン) にフォールバック。
 	// mascotImageUrl (Ai キャラ) は別 field で splash には使わない (#993)。
 	splashIconURL := "/static-assets/splash.png"
 	metaJSON := "{}"
@@ -339,25 +325,22 @@ func renderFrontendShell(c echo.Context, cfg *config.Config, metaRepo repository
 %s%s
 %s
 %s
-%s<style>:root{--splash-color:%s}</style>
+%s
 <script>%s</script>
 <script type="application/json" id="misskey_meta" data-generated-at="%d">%s</script>
 %s
 </head><body>
 <noscript><p>Please turn on your JavaScript</p></noscript>
-<div id="splash">
-<img id="splashIcon" src="%s" />
-<div id="splashSpinner">%s</div>
-</div>
+%s
 </body></html>`,
 		instanceNameEsc, ogGroup,
 		descriptionTag, themeColorEsc, themeColorEsc, baseURLEsc,
 		pageTitleEsc, noindexTag, stdhtml.EscapeString(faviconURL), stdhtml.EscapeString(appleTouchIconURL),
 		pageTitleEsc, baseURLEsc,
 		prefetchTags, ov.OG+ov.Head, viteClientTag, cssLinkTags,
-		loaderCSSTag, splashColor(themeColor), bootGlobals,
+		loaderCSSTag, bootGlobals,
 		time.Now().UnixMilli(), metaJSON, loaderJSTag,
-		stdhtml.EscapeString(splashIconURL), splashSpinnerSVG)
+		fmt.Sprintf(splashMarkup, stdhtml.EscapeString(splashIconURL)))
 
 	// **shell を返す経路でだけ CSP を付ける** (#2425)。ここを通るのは catch-all と
 	// AP の non-AP fallback の 2 つで、どちらもこの関数を経由するので path 判定が
@@ -607,7 +590,7 @@ func manifestJSON(cfg *config.Config, metaRepo repository.MetaRepository) echo.H
 		m, _ := metaRepo.Fetch()
 		name := cfg.URL
 		shortName := cfg.URL
-		themeColor := "#86b300"
+		themeColor := defaultThemeColor
 		icon192 := "/static-assets/icons/192.png"
 		icon512 := "/static-assets/icons/512.png"
 		if m != nil {
@@ -631,11 +614,13 @@ func manifestJSON(cfg *config.Config, metaRepo repository.MetaRepository) echo.H
 			}
 		}
 		manifest := map[string]any{
-			"short_name":       shortName,
-			"name":             name,
-			"start_url":        "/",
-			"display":          "standalone",
-			"background_color": "#313a42",
+			"short_name": shortName,
+			"name":       name,
+			"start_url":  "/",
+			"display":    "standalone",
+			// PWA を起動したときに OS が出す画面の背景。upstream は #313a42 だが、
+			// 続けて出る起動画面の夜空と色をつなげるため、夜空の色にした
+			"background_color": "#0a112e",
 			"theme_color":      themeColor,
 			"icons": []map[string]any{
 				{"src": icon192, "sizes": "192x192", "type": "image/png", "purpose": "maskable"},

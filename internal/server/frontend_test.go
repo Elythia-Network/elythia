@@ -25,7 +25,7 @@ import (
 // upstream 互換要素 (#xxx):
 //   - id="splash" wrapper
 //   - id="splashIcon" な img 要素
-//   - id="splashSpinner" (中身は mk-go 独自のスピナー、#2549)
+//   - スピナーの代わりに Elythia 独自の夜空 (星雲・#splashSky の canvas・#splashMark)
 //   - default img src は /static-assets/splash.png (meta.iconUrl 未設定時)
 //   - meta.iconUrl が設定されていればそちらを使う
 //   - ai.png mascot は splash には使わない
@@ -45,14 +45,16 @@ func TestFrontendHTML_SplashStructure(t *testing.T) {
 		assert.Contains(t, body, `<div id="splash">`)
 		assert.Contains(t, body, `<img id="splashIcon"`)
 		assert.Contains(t, body, `src="/static-assets/splash.png"`,
-			"default splash icon should be /static-assets/splash.png (Misskey logo)")
-		assert.Contains(t, body, `<div id="splashSpinner">`)
-		// 起動時のスピナー (#2549)。**回転する層と点を分けてある** — 1 つの
-		// 要素で両方やらせると transform が衝突して、集まる動きが回転に
-		// 巻き取られる。
-		assert.Contains(t, body, `class="rig"`)
-		assert.Contains(t, body, `class="pkt p1"`)
-		assert.Contains(t, body, `class="pkt p6"`, "点は 6 つ")
+			"default splash icon should be /static-assets/splash.png")
+		// 星は boot.js がこの canvas に描く。id が変わると星空が出ない
+		assert.Contains(t, body, `<canvas id="splashSky"></canvas>`)
+		assert.Contains(t, body, `<div id="splashMark"><img id="splashIcon"`)
+		assert.Contains(t, body, `class="splashNebula n1"`)
+		assert.Contains(t, body, `class="splashNebula n3"`, "星雲は 3 つ")
+		// 以前のスピナー (#2549) は置かない
+		assert.NotContains(t, body, `id="splashSpinner"`)
+		// テーマカラーが未設定なら、ブラウザの UI は夜空の色にする
+		assert.Contains(t, body, `<meta name="theme-color" content="#0a112e">`)
 		// ai.png は mascot 用、splash には出ない
 		assert.NotContains(t, body, `src="/assets/ai.png"`,
 			"splash should not use ai.png (mascot)")
@@ -110,8 +112,8 @@ func TestFrontendHTML_SplashStructure(t *testing.T) {
 //
 // 特に `<link rel="apple-touch-icon">` が無いと、iOS Safari は manifest の
 // icons にフォールバックする。192/512 は `purpose: "maskable"` なので候補から
-// 外れ、透明背景の splash.png がホーム画面アイコンに選ばれてしまい、純正
-// Misskey と見た目が変わる (#2527)。
+// 外れ、splash.png がホーム画面アイコンに選ばれてしまう (#2527)。当時の
+// splash.png は透明背景で、iOS では黒く塗られていた。
 func TestFrontendHTML_IconLinks(t *testing.T) {
 	cfg := &config.Config{URL: "https://example.test", Version: "0.0.1-test"}
 
@@ -427,8 +429,10 @@ func TestManifestJSON(t *testing.T) {
 
 		assert.Equal(t, "/", manifest["start_url"])
 		assert.Equal(t, "standalone", manifest["display"])
-		assert.Equal(t, "#313a42", manifest["background_color"])
-		assert.Equal(t, "#86b300", manifest["theme_color"])
+		// background_color だけは upstream (#313a42) と違え、起動画面の夜空の色にしている
+		assert.Equal(t, "#0a112e", manifest["background_color"])
+		// theme_color の既定も upstream (#86b300) と違え、夜空の色にしている
+		assert.Equal(t, "#0a112e", manifest["theme_color"])
 
 		icons := iconsOf(t, manifest)
 		require.Len(t, icons, 3)
@@ -798,66 +802,42 @@ func TestFrontendConsentHTML_IsNotCacheable(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), `content="tx-secret"`)
 }
 
-// スピナーの色はサーバー設定のテーマカラーを使う (#2549)。
+// boot.js は shell が出す canvas を id で引いて星を描く。
+// **片方だけ id を変えると、エラーも出ずに星だけが消える。** Go 側の markup と
+// 実物の boot.js が同じ id を使っていることをここで突き合わせる。
+func TestFrontendHTML_SplashSkyIDMatchesBootLoader(t *testing.T) {
+	js, err := os.ReadFile(filepath.Join("..", "..", "frontend", "packages", "frontend", "public", "loader", "boot.js"))
+	require.NoError(t, err)
+	for _, id := range []string{"splash", "splashSky"} {
+		assert.Contains(t, splashMarkup, `id="`+id+`"`)
+		assert.Contains(t, string(js), `getElementById('`+id+`')`)
+	}
+}
+
+// 夜空の色はテーマカラーから取らない。
 //
-// **`--MI_THEME-accent` は利用者が選んだテーマの色**なので人によって変わる。
-// スプラッシュはテーマが適用される前に出るものなので、サーバーが決めた色を
-// shell から渡す。
-func TestFrontendHTML_SplashColor(t *testing.T) {
+// 以前はスピナーの色として `--splash-color` にテーマカラーを入れていた (#2549)。
+// 夜空は既定アイコンから決めた固定の配色で、テーマカラーを入れる先が無い。
+// **管理者が自由に入れられる値を `<style>` に流さない**ことも、この形で保たれる。
+func TestFrontendHTML_SplashIgnoresThemeColor(t *testing.T) {
 	cfg := &config.Config{URL: "https://example.test", Version: "0.0.1-test"}
+	repo := testutil.NewMockMetaRepository()
+	evil := "red}body{display:none"
+	repo.Meta = &model.Meta{ID: "x", ThemeColor: &evil}
 
-	t.Run("uses the instance theme color", func(t *testing.T) {
-		repo := testutil.NewMockMetaRepository()
-		color := "#00eb91"
-		repo.Meta = &model.Meta{ID: "x", ThemeColor: &color}
+	handler := frontendHTML(cfg, repo, nil, nil)
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	c := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)
+	require.NoError(t, handler(c))
 
-		handler := frontendHTML(cfg, repo, nil, nil)
-		e := echo.New()
-		rec := httptest.NewRecorder()
-		c := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)
-		require.NoError(t, handler(c))
-
-		assert.Contains(t, rec.Body.String(), `<style>:root{--splash-color:#00eb91}</style>`)
-	})
-
-	t.Run("falls back to the default color", func(t *testing.T) {
-		repo := testutil.NewMockMetaRepository()
-		handler := frontendHTML(cfg, repo, nil, nil)
-
-		e := echo.New()
-		rec := httptest.NewRecorder()
-		c := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)
-		require.NoError(t, handler(c))
-
-		// テーマカラーが未設定でも変数は出す。**空で出すと CSS 側の
-		// フォールバックが効かず、色が無いまま描かれる。**
-		assert.Contains(t, rec.Body.String(), `--splash-color:#86b300`)
-	})
-
-	// `<style>` の中身はマークアップとして解釈されないので、HTML escape では
-	// 守れない。**`}` ひとつで後続の規則に化ける**ため、素性の分かる形以外は
-	// 既定色に落とす。
-	t.Run("rejects a color that is not a plain hex value", func(t *testing.T) {
-		repo := testutil.NewMockMetaRepository()
-		evil := "red}body{display:none"
-		repo.Meta = &model.Meta{ID: "x", ThemeColor: &evil}
-
-		handler := frontendHTML(cfg, repo, nil, nil)
-		e := echo.New()
-		rec := httptest.NewRecorder()
-		c := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)
-		require.NoError(t, handler(c))
-
-		// `<meta name="theme-color">` 側には属性 escape された値がそのまま
-		// 出る (そちらは属性値なので正しい)。見るのは style ブロックだけ。
-		// **最初の `<style>` を取らない。** loader の CSS を inline する
-		// テストが先に走ると、そちらを掴んで別物を比較する (#2795)。splash を
-		// 名指しで取れば、fixture が残っていても意味のある比較になる。
-		style := regexp.MustCompile(`<style>:root\{--splash-color:[^<]*</style>`).
-			FindString(rec.Body.String())
-		require.NotEmpty(t, style, "splash color style block not found")
-		assert.Equal(t, `<style>:root{--splash-color:#86b300}</style>`, style)
-	})
+	body := rec.Body.String()
+	assert.NotContains(t, body, "--splash-color")
+	// `<meta name="theme-color">` には属性 escape された値が出る (属性値なので正しい)。
+	// style 要素の中に生のまま入っていないことを見る
+	for _, style := range regexp.MustCompile(`(?s)<style>.*?</style>`).FindAllString(body, -1) {
+		assert.NotContains(t, style, evil)
+	}
 }
 
 // **loader は URL 参照ではなく埋め込む (#2551)。** ファイル名にハッシュが付かない

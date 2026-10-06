@@ -198,6 +198,8 @@ func TestEmbedShell_IconLinks(t *testing.T) {
 
 		assert.Contains(t, body, `<link rel="icon" href="/favicon.ico">`)
 		assert.Contains(t, body, `<link rel="apple-touch-icon" href="/apple-touch-icon.png">`)
+		// theme-color の既定だけは upstream (#86b300) と違え、SPA shell と同じ夜空の色にしている
+		assert.Contains(t, body, `<meta name="theme-color" content="#0a112e">`)
 	})
 
 	t.Run("reflects meta icon urls", func(t *testing.T) {

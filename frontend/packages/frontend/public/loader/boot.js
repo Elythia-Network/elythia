@@ -341,3 +341,244 @@
 		}`);
 	}
 })();
+
+// Elythia: 起動画面の星空。背景・星雲・アイコンは style.css が描き、ここでは
+// #splashSky (canvas) に星と流れ星を描く。
+//
+// **例外を外へ出さない。** 上のブロックが window.onerror で renderError を
+// 呼ぶので、飾りの描画が 1 回失敗しただけで起動失敗の画面に化ける。描画で
+// 失敗したら、星空を諦めて止まるだけにする。
+(() => {
+	// 星白・淡紫・真珠。白を多めにして、色の付いた星が混ざる程度にする
+	const COLORS = ['253,241,235', '253,241,235', '253,241,235', '204,195,247', '253,221,207'];
+
+	function animationDisabled() {
+		try {
+			if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return true;
+			// アプリの「アニメーション」設定。preferences は [scope, value, meta] の
+			// 記録の並びで、どのアカウントの記録かはここでは決められない。どれか
+			// 1 つでも切られていれば止める方に倒す
+			const raw = localStorage.getItem('preferences');
+			if (raw == null) return false;
+			const records = JSON.parse(raw)?.preferences?.animation;
+			return Array.isArray(records) && records.some(r => Array.isArray(r) && r[1] === false);
+		} catch {
+			return false;
+		}
+	}
+
+	function start() {
+		const splash = document.getElementById('splash');
+		const canvas = document.getElementById('splashSky');
+		if (splash == null || canvas == null || typeof canvas.getContext !== 'function') return;
+		const g = canvas.getContext('2d');
+		if (g == null) return;
+
+		const still = animationDisabled();
+		if (still) splash.classList.add('splashStill');
+
+		let w = 1;
+		let h = 1;
+		let stars = [];
+		let meteors = [];
+		let t0 = performance.now();
+		let last = t0;
+		let nextMeteor = 1.5;
+		let stopped = false;
+
+		function stop() {
+			stopped = true;
+			window.removeEventListener('resize', onResize);
+		}
+
+		function fit() {
+			const rect = splash.getBoundingClientRect();
+			w = Math.max(1, rect.width);
+			h = Math.max(1, rect.height);
+			// 高精細の画面でも 2 倍まで、広い画面では 1.5 倍までにする。起動処理と
+			// 同じ時間帯に描くので、画素数をそのまま追うと読み込みそのものを遅くする
+			const dpr = Math.min(window.devicePixelRatio || 1, w * h > 1600000 ? 1.5 : 2);
+			canvas.width = Math.round(w * dpr);
+			canvas.height = Math.round(h * dpr);
+			g.setTransform(dpr, 0, 0, dpr, 0, 0);
+		}
+
+		function build() {
+			fit();
+			const n = Math.min(260, Math.round(w * h / 2600));
+			stars = [];
+			for (let i = 0; i < n; i++) {
+				const big = Math.random() < 0.06;
+				stars.push({
+					x: Math.random() * w,
+					y: Math.random() * h,
+					r: big ? 1.1 + Math.random() * 0.9 : 0.3 + Math.random() * 0.8,
+					a: 0.25 + Math.random() * 0.6,
+					sp: 0.4 + Math.random() * 1.6,
+					ph: Math.random() * Math.PI * 2,
+					c: COLORS[(Math.random() * COLORS.length) | 0],
+					big,
+					// 1 秒あたりの横の移動量 (px)
+					vx: -(2 + Math.random() * 6),
+				});
+			}
+		}
+
+		function sparkle(x, y, s, a, c) {
+			g.strokeStyle = `rgba(${c},${a * 0.7})`;
+			g.lineWidth = 0.6;
+			g.beginPath();
+			g.moveTo(x - s, y);
+			g.lineTo(x + s, y);
+			g.moveTo(x, y - s);
+			g.lineTo(x, y + s);
+			g.stroke();
+		}
+
+		function drawStar(s, a) {
+			g.fillStyle = `rgba(${s.c},${a})`;
+			g.beginPath();
+			g.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+			g.fill();
+			if (s.big) {
+				const glow = g.createRadialGradient(s.x, s.y, 0, s.x, s.y, s.r * 5);
+				glow.addColorStop(0, `rgba(${s.c},${a * 0.35})`);
+				glow.addColorStop(1, `rgba(${s.c},0)`);
+				g.fillStyle = glow;
+				g.beginPath();
+				g.arc(s.x, s.y, s.r * 5, 0, Math.PI * 2);
+				g.fill();
+				sparkle(s.x, s.y, s.r * 3.2, a, s.c);
+			}
+		}
+
+		function drawMeteors(t, dt) {
+			if (t > nextMeteor) {
+				const fromLeft = Math.random() < 0.5;
+				meteors.push({
+					x: fromLeft ? w * (0.05 + Math.random() * 0.35) : w * (0.6 + Math.random() * 0.35),
+					y: h * Math.random() * 0.35,
+					vx: (fromLeft ? 1 : -1) * w * 0.55,
+					vy: h * 0.32,
+					life: 0,
+					dur: 0.9 + Math.random() * 0.4,
+				});
+				nextMeteor = t + 3.5 + Math.random() * 4;
+			}
+			for (let i = meteors.length - 1; i >= 0; i--) {
+				const m = meteors[i];
+				m.life += dt;
+				const p = m.life / m.dur;
+				if (p >= 1) {
+					meteors.splice(i, 1);
+					continue;
+				}
+				const hx = m.x + m.vx * p;
+				const hy = m.y + m.vy * p;
+				const tx = hx - m.vx * 0.18;
+				const ty = hy - m.vy * 0.18;
+				const al = Math.sin(Math.PI * p);
+				const grad = g.createLinearGradient(hx, hy, tx, ty);
+				grad.addColorStop(0, `rgba(253,241,235,${0.95 * al})`);
+				grad.addColorStop(0.3, `rgba(204,195,247,${0.45 * al})`);
+				grad.addColorStop(1, 'rgba(166,155,251,0)');
+				g.strokeStyle = grad;
+				g.lineWidth = 1.4;
+				g.lineCap = 'round';
+				g.beginPath();
+				g.moveTo(hx, hy);
+				g.lineTo(tx, ty);
+				g.stroke();
+				sparkle(hx, hy, 3.5, al, '253,241,235');
+			}
+		}
+
+		function frame(now) {
+			if (stopped) return;
+			// 読み込みが終わると common.ts が #splash を外す。外れたら描くのをやめる
+			if (!splash.isConnected) {
+				stop();
+				return;
+			}
+			try {
+				const t = (now - t0) / 1000;
+				// タブが裏にあった間の経過をまとめて進めない
+				const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
+				last = now;
+				const fadeIn = Math.min(1, t / 1.2);
+				g.clearRect(0, 0, w, h);
+				for (const s of stars) {
+					s.x += s.vx * dt;
+					if (s.x < -2) s.x = w + 2;
+					drawStar(s, s.a * (0.55 + 0.45 * Math.sin(t * s.sp + s.ph)) * fadeIn);
+				}
+				drawMeteors(t, dt);
+			} catch (e) {
+				console.error(e);
+				stop();
+				return;
+			}
+			window.requestAnimationFrame(frame);
+		}
+
+		function drawStill() {
+			g.clearRect(0, 0, w, h);
+			for (const s of stars) drawStar(s, s.a * 0.8);
+		}
+
+		let resizeTimer = null;
+		function onResize() {
+			window.clearTimeout(resizeTimer);
+			resizeTimer = window.setTimeout(() => {
+				if (stopped) return;
+				// 静止画のときは描画の繰り返しが無いので、外れたことにここで気付く
+				if (!splash.isConnected) {
+					stop();
+					return;
+				}
+				try {
+					// 星を作り直さず、新しい大きさへ比率で写す。スマートフォンでは
+					// アドレスバーの出入りのたびに resize が来るので、作り直すと
+					// 星の配置がそのたびに入れ替わって見える
+					const pw = w;
+					const ph = h;
+					fit();
+					if (pw < 2 || ph < 2) {
+						// 大きさが一瞬 0 になった後は比率が意味を持たないので作り直す
+						build();
+					} else {
+						for (const s of stars) {
+							s.x = s.x * w / pw;
+							s.y = s.y * h / ph;
+						}
+					}
+					if (still) drawStill();
+				} catch (e) {
+					console.error(e);
+					stop();
+				}
+			}, 120);
+		}
+
+		try {
+			build();
+			window.addEventListener('resize', onResize);
+			if (still) {
+				drawStill();
+			} else {
+				t0 = performance.now();
+				last = t0;
+				window.requestAnimationFrame(frame);
+			}
+		} catch (e) {
+			console.error(e);
+			stop();
+		}
+	}
+
+	if (document.readyState !== 'loading') {
+		start();
+	} else {
+		window.addEventListener('DOMContentLoaded', start);
+	}
+})();
