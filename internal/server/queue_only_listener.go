@@ -66,14 +66,14 @@ func (s *Server) serveQueueOnly() error {
 		if err != nil {
 			return err
 		}
-		slog.Info("starting Misskey queue worker", "socket", s.config.Socket, "url", s.config.URL)
+		slog.Info("starting Elythia queue worker", "socket", s.config.Socket, "url", s.config.URL)
 	} else {
 		addr := fmt.Sprintf(":%d", s.config.Port)
 		ln, err = net.Listen("tcp", addr)
 		if err != nil {
 			return err
 		}
-		slog.Info("starting Misskey queue worker", "addr", addr, "url", s.config.URL)
+		slog.Info("starting Elythia queue worker", "addr", addr, "url", s.config.URL)
 	}
 
 	if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {

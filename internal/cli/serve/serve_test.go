@@ -157,7 +157,7 @@ func TestServe_StartsAndShutsDownOnSignal(t *testing.T) {
 		"redis-close", "sentry-flush", "pid-cleanup",
 	}, h.steps)
 	assert.True(t, h.srv.shutdown)
-	assert.Contains(t, h.stdout.String(), "Misskey stopped.")
+	assert.Contains(t, h.stdout.String(), "Elythia stopped.")
 	assert.Contains(t, h.log.String(), "shutting down server")
 }
 

@@ -48,6 +48,13 @@ const UserAgentProduct = "Elythia"
 // LegacyUserAgentProduct is the product token used before #3394.
 const LegacyUserAgentProduct = "mk-go"
 
+// DisplayName is the human-facing name of this software, used as the default
+// site name and wherever a user or operator sees the product name.
+//
+// 2.0.0 より前は本家と同じく "Misskey" を出していた。互換のために本家の名前を
+// 名乗る値 (`Bearer realm`、webhook の `X-Misskey-*` など) はここを使わない。
+const DisplayName = "Elythia"
+
 // MkGoRepositoryURL is the canonical source repository of mk-go itself.
 //
 // AGPL-3.0 section 13 で求められる「動いているコードに対応するソース」の案内は

@@ -89,7 +89,7 @@ type openSearchDescription struct {
 // OpenSearchXML serves /opensearch.xml so browsers can register the instance
 // as a search engine.
 func (h *webResourceHandler) OpenSearchXML(c echo.Context) error {
-	name := "Misskey"
+	name := config.DisplayName
 	if m, err := h.metaRepo.Fetch(); err == nil && m != nil && m.Name != nil && *m.Name != "" {
 		name = *m.Name
 	}

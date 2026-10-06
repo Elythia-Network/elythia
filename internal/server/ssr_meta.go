@@ -325,7 +325,7 @@ func (h *ssrMetaHandler) instanceName() string {
 	if err == nil && m != nil && m.Name != nil && *m.Name != "" {
 		return *m.Name
 	}
-	return "Misskey"
+	return config.DisplayName
 }
 
 // pageTitle mirrors upstream の `title={`${x} | ${instanceName}`}`.

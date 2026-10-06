@@ -1034,7 +1034,7 @@ func (s *Server) Start() error {
 			return err
 		}
 		s.echo.Listener = ln
-		slog.Info("starting Misskey server",
+		slog.Info("starting Elythia server",
 			"socket", s.config.Socket, "url", s.config.URL)
 		// Echo.Start は内部で net.Listen してしまうので、ここでは Start では
 		// なく Serve を使って既に張った listener を使う。
@@ -1045,7 +1045,7 @@ func (s *Server) Start() error {
 	}
 
 	addr := fmt.Sprintf(":%d", s.config.Port)
-	slog.Info("starting Misskey server", "addr", addr, "url", s.config.URL)
+	slog.Info("starting Elythia server", "addr", addr, "url", s.config.URL)
 	return s.echo.Start(addr)
 }
 

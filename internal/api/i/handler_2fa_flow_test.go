@@ -29,7 +29,7 @@ func TestTwoFARegister_Success(t *testing.T) {
 	var resp map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	assert.NotEmpty(t, resp["secret"])
-	assert.Equal(t, "Misskey", resp["issuer"])
+	assert.Equal(t, "Elythia", resp["issuer"])
 	// `url` は otpauth:// 形式 (authenticator アプリの「アプリで開く」用)、
 	// `qr` は PNG data URL (frontend が <img src=...> で読む用) — 両者は
 	// 別形式でなければならない (#697)。
