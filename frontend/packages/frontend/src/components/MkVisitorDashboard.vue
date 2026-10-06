@@ -125,6 +125,10 @@ function showMenu(ev: PointerEvent) {
 	background: var(--MI_THEME-panel);
 	border-radius: var(--MI-radius);
 	box-shadow: 0 12px 32px rgb(0 0 0 / 25%);
+	// Elythia: エントランスでは夜空のガラスにする (utility/elythia-entrance.ts)。それ以外では変数が無いので今までどおり
+	border: var(--ELYTHIA-panelBorder, none);
+	-webkit-backdrop-filter: var(--ELYTHIA-panelBackdrop, none);
+	backdrop-filter: var(--ELYTHIA-panelBackdrop, none);
 }
 
 .main {
@@ -132,6 +136,8 @@ function showMenu(ev: PointerEvent) {
 }
 
 .mainIcon {
+	// Elythia: エントランスでは角を丸める (既定のアイコンは四角い夜空の絵なので)
+	border-radius: var(--ELYTHIA-iconRadius, 0);
 	width: 85px;
 	margin-top: -47px;
 	vertical-align: bottom;
