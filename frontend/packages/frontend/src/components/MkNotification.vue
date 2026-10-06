@@ -513,7 +513,7 @@ function mkGoExtra(notification: Misskey.entities.Notification, key: string): st
 
 /*
 	登録申請の受付通知のアイコン (#2987)。notifier がいないのでアバターを
-	出せない。`.icon_renoteGroup` と同じ寸法・字色の枠を使う。
+	出せない。`.icon_renoteGroup` と同じ寸法の枠を使う (字色は背景の accent に合わせる)。
 */
 .icon_signupApplication {
 	display: grid;
@@ -523,7 +523,8 @@ function mkGoExtra(notification: Misskey.entities.Notification, key: string): st
 	height: 80%;
 	font-size: 15px;
 	border-radius: 100%;
-	color: #fff;
+	// Elythia: アクセントが淡いテーマ (Elythia Dark など) でも読めるよう、テーマの色を使う
+	color: var(--MI_THEME-fgOnAccent);
 	background: var(--MI_THEME-accent);
 }
 
