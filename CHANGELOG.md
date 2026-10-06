@@ -14,6 +14,7 @@
 - **フロントエンドを本体の `frontend/` へ取り込んだ。** fork (`shiroha-a/misskey-ts`) と submodule は使わない。本家の新しい版は `make upstream-sync` で当てる
 - **見た目を Elythia のものにした。** 起動画面を夜空にし、既定のアイコン、ログインしていない人の画面、既定のテーマ (Elythia Light / Elythia Dark) を Elythia のものにした。テーマを自分で選んでいない人は、次に開いたときから Elythia のテーマになる
 - **Misskey TS へ戻すこと (復路) の保証をやめた。** TS 版からの移行 (往路) は今までどおり保証する
+- **プラグインどうしの連合 (Peer) は、相手が 1.5.0 以前のあいだ止まる。** nodeinfo の宣言の名前が `mkGoPlugins` から `elythiaPlugins` に変わったため。経路は変わらないので、相手が 2.0.0 に上げれば戻る
 - **運営者の作業が要るもの**: 上げる手順は構成ごとに `docs/upgrade/2.0.0.md` にまとめた。主なものは次のとおり
   - **配布イメージを指定しているなら、新しい置き場所に書き換えること。** `.env` の `MK_IMAGE` などに `ghcr.io/shiroha-a/mk` を書いたままだと、エラーにならないまま古いイメージで動き続ける
   - **バイナリを直接動かしている (systemd など) なら、起動のコマンドを書き換えること。** `misskey` は `elythia serve`、`migrate` は `elythia migrate`、`backfill-<名前>` は `elythia backfill <名前>` になる
