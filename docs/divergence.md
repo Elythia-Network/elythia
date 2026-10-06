@@ -856,6 +856,7 @@ upstream が `jobState` の型を autogen (`AdminQueueJobsRequest['state'][numbe
 | #3388 | `/about-mkgo` のソースコードの案内からフロントエンドの fork (`shiroha-a/misskey-ts`) の行を外す。mk-go 本体のリンクがフロントエンドも案内する。「mk-go本体」の文言を「バックエンドとフロントエンド」にした |
 | #3394 | 改名に合わせて、`/about-mkgo` を `/about-elythia` に移し (ファイルも `pages/about-elythia.vue` に)、画面に出る名前を `Elythia` にする。旧 URL は転送しない (設計 Q5)。i18n のキー名 (`aboutMkGo` など) は識別子なので据え置く |
 | #3406 | 起動画面のスピナー (§4-2 の `2026.7.0-mk.12`) をやめ、画面全体を夜空にする。星と流れ星は `public/loader/boot.js` が canvas に描き、背景・星雲・アイコンは `public/loader/style.css` が描く。**色は利用者のテーマにもサーバーのテーマカラーにも依らない** (テーマ適用前に出るものなので)。既定のアイコン (`frontend/assets/` の favicon / apple-touch-icon / icons/192,512 / splash.png) を Elythia のアイコンにし、manifest の `background_color` とテーマカラー未設定時の `theme-color` / `theme_color` を夜空の色 `#0a112e` にした (upstream は `#313a42` / `#86b300`)。`/api/meta` の `themeColor` (null) と nodeinfo の既定は他が読む値なので upstream のまま据え置く。**純正へは還元しない行** (Elythia の見た目) |
+| #3407 | ログインしていない人のエントランス (`welcome.entrance.classic.vue` / `simple.vue`) から、本家の意匠である左の斜めの帯をやめ、夜空に既定アイコンの絵を薄く重ねる (`welcome.elythia-backdrop.vue`)。「Powered by」を Misskey のロゴから Elythia のアイコンと文字にする。**カードなどの色は利用者のテーマに依らず夜空のガラス** (テーマの変数をエントランスの部分木だけで上書きする、`utility/elythia-entrance.ts`)。背景画像を設定したサーバーではその画像を出す。**純正へは還元しない行** (Elythia の見た目) |
 
 ---
 
