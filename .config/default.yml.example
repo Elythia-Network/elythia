@@ -321,7 +321,7 @@ redis:
 
 # mk-go specific: select the job queue runtime.
 #
-#   - 'mkq' (the only driver): shiroha-a/mkq based runtime. BullMQ
+#   - 'mkq' (the only driver): elythia-network/mkq based runtime. BullMQ
 #                        wire-compatible — the admin queue dashboard
 #                        renders correctly under the upstream Misskey
 #                        TS frontend (which assumes BullMQ). Supports

@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/elythia-network/mkq"
 	"github.com/redis/go-redis/v9"
-	"github.com/shiroha-a/mkq"
 
 	"github.com/elythia-network/elythia/internal/queue/driver"
 )

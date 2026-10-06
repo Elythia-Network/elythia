@@ -1,5 +1,5 @@
 // Package mkqdriver implements queue/driver against mkq
-// (github.com/shiroha-a/mkq), a BullMQ-compatible Go-native job queue.
+// (github.com/elythia-network/mkq), a BullMQ-compatible Go-native job queue.
 //
 // Wire format note: every job mkqdriver enqueues carries a small
 // framing wrapper {type, body} as its mkq payload. The wrapper is

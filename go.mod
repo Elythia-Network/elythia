@@ -10,6 +10,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.99.0
 	github.com/bbrks/go-blurhash v1.2.0
 	github.com/blezek/tga v0.0.0-20150626111426-80720cbc1017
+	github.com/elythia-network/mkq v1.5.0
 	github.com/forPelevin/gomoji v1.4.1
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/gabriel-vasile/mimetype v1.4.15
@@ -36,7 +37,6 @@ require (
 	github.com/prometheus/client_golang v1.24.1
 	github.com/prometheus/client_model v0.6.2
 	github.com/redis/go-redis/v9 v9.22.0
-	github.com/shiroha-a/mkq v1.4.0
 	github.com/shirou/gopsutil/v4 v4.26.3
 	github.com/spakin/netpbm v1.3.2
 	github.com/spf13/viper v1.21.0
