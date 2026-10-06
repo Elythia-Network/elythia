@@ -59,9 +59,17 @@ frontend は #3379 で Misskey TS の fork (`shiroha-a/misskey-ts`) から
 直接直し、Go 側の変更と同じ PR に入れてよい。fork はアーカイブしたので、fork へ
 commit する手順は無い。
 
+### Elythia 独自の API の型 (`frontend/packages/elythia-js`)
+
+本家の misskey-js の型には Elythia 独自のエンドポイントと、`/api/meta` などの独自の項目が無い。これらの型は `frontend/packages/elythia-js` に手で書く (#3417)。misskey-js には手を入れない (本家への追従とぶつからないように)。
+
+- frontend の `misskeyApi` / `misskeyApiGet` と `instance` は `elythia-js` の型を使う。独自のエンドポイントを型を外して (`as never` で) 呼ばず、`elythia-js/src/endpoints.ts` の `ElythiaEndpoints` に型を書く
+- **Go に Elythia 独自のエンドポイントを足したら、`ElythiaEndpoints` に型を書くか `pending-endpoints.txt` に足す。** `TestElythiaJS_EndpointsMatchRouter` が `docs/api-compat.md` の一覧と突き合わせて、どちらにも無ければ落とす (型を書いたら `pending-endpoints.txt` から外す)
+- 新しいパッケージを足したので、手元の `node_modules` が古いと `elythia-js` を解決できない。`frontend/` で `pnpm install` をし直す
+
 ### 手元での確認（CI `frontend` workflow 相当）
 
-CI では `.github/workflows/frontend.yml` の集約 job `frontend` が required check になっている。中身は `frontend-lint` (9 workspace の eslint、typecheck、check-dts、SPDX ヘッダー、locale、misskey-js の API レポート、`emoji-regex-check`) と `frontend-test` (本番設定のビルド、frontend の vitest、misskey-js のテスト) で、詳細は [ci.md](ci.md) にある。
+CI では `.github/workflows/frontend.yml` の集約 job `frontend` が required check になっている。中身は `frontend-lint` (10 workspace の eslint、typecheck、check-dts、SPDX ヘッダー、locale、misskey-js の API レポート、`emoji-regex-check`) と `frontend-test` (本番設定のビルド、frontend の vitest、misskey-js のテスト) で、詳細は [ci.md](ci.md) にある。
 
 手元では `make frontend-check` (target。CI の job ではない) が**型 (`vue-tsc`) + `frontend/` のソースを読むゲート + `emoji-regex-check` + frontend の eslint** までをまとめて回す (#2892 / #2906 / #3324)。vitest は `make frontend-test`。frontend 以外の workspace の eslint や check-dts などは、`frontend.yml` の各 step を `frontend/` で叩く。
 
