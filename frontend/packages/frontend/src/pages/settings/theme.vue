@@ -207,8 +207,9 @@ SPDX-License-Identifier: AGPL-3.0-only
 <script lang="ts" setup>
 import { computed, ref, watch } from 'vue';
 import JSON5 from 'json5';
-import defaultLightTheme from '@@/themes/l-light.json5';
-import defaultDarkTheme from '@@/themes/d-green-lime.json5';
+// Elythia: 既定のテーマは Elythia Light / Elythia Dark (2.0.0)。本家は Mi Light / Mi Green+Lime
+import defaultLightTheme from '@@/themes/l-elythia.json5';
+import defaultDarkTheme from '@@/themes/d-elythia.json5';
 import { isSafeMode } from '@@/js/config.js';
 import type { Theme } from '@@/js/theme.js';
 import * as os from '@/os.js';

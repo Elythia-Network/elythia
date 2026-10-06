@@ -1,0 +1,28 @@
+// Elythia の既定のダークテーマ (2.0.0)。起動画面と同じ深い夜に、真珠色のアクセント。
+// 配色は既定アイコンの夜空と三日月から取った。
+{
+	id: 'f0511ff1-b558-4556-998b-167bdd5db2cf',
+
+	name: 'Elythia Dark',
+	author: 'Elythia',
+	desc: 'Default dark theme of Elythia',
+
+	base: 'dark',
+
+	props: {
+		accent: '#fdddcf',
+		fgOnAccent: '#1a1530',
+		bg: '#060a1f',
+		fg: '#e4e0f2',
+		divider: 'rgba(253, 241, 235, 0.08)',
+		panel: '#0e1433',
+		navBg: '@bg',
+		link: '#b7c3ff',
+		hashtag: '#ccc3f7',
+		renote: '#8fd6c4',
+		infoBg: '#1a2150',
+		infoFg: '@fg',
+		buttonGradateA: '@accent',
+		buttonGradateB: '#ccc3f7',
+	},
+}

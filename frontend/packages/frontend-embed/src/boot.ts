@@ -14,8 +14,9 @@ if (import.meta.env.DEV) {
 
 import '@/style.scss';
 import { createApp, defineAsyncComponent } from 'vue';
-import defaultLightTheme from '@@/themes/l-light.json5';
-import defaultDarkTheme from '@@/themes/d-dark.json5';
+// Elythia: 既定のテーマは Elythia Light / Elythia Dark (2.0.0)。本家は Mi Light / Mi Dark
+import defaultLightTheme from '@@/themes/l-elythia.json5';
+import defaultDarkTheme from '@@/themes/d-elythia.json5';
 import { MediaProxy } from '@@/js/media-proxy.js';
 import { storeBootloaderErrors } from '@@/js/store-boot-errors';
 import { applyTheme, assertIsTheme } from '@/theme.js';

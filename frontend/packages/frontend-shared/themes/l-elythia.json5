@@ -1,0 +1,29 @@
+// Elythia の既定のライトテーマ (2.0.0)。藍のアクセントに淡い藤色のナビ。
+// 配色は既定アイコンの夜空と三日月から取った。
+{
+	id: '827e8f4c-7a62-4552-9f23-a8a20b32da15',
+
+	name: 'Elythia Light',
+	author: 'Elythia',
+	desc: 'Default light theme of Elythia',
+
+	base: 'light',
+
+	props: {
+		accent: '#4f46b8',
+		bg: '#f4f4f8',
+		fg: '#4e5068',
+		fgOnWhite: '@accent',
+		divider: 'rgba(33, 36, 79, 0.1)',
+		panel: '#fff',
+		navBg: '#f3f1fb',
+		header: ':alpha<0.8<@panel',
+		link: '#3f6fd1',
+		hashtag: '#b25a40',
+		renote: '#1f7a6f',
+		infoBg: '#ecebf8',
+		infoFg: '#4e4b85',
+		buttonGradateA: '@accent',
+		buttonGradateB: '#6a5cdc',
+	},
+}
