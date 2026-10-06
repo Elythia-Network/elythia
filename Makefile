@@ -533,7 +533,7 @@ image-logs: ## 上記スタックのログを表示
 	docker compose -f $(IMAGE_COMPOSE) logs -f
 
 image-build: ## bundled image を手元でビルドする (publish 前の確認用)
-	docker build -f Dockerfile.bundled -t ghcr.io/shiroha-a/mk:bundled .
+	docker build -f Dockerfile.bundled -t ghcr.io/elythia-network/elythia:bundled .
 
 
 # Federation tests ― 本家 Misskey と実際に立ち上げて連合動作を検証する。

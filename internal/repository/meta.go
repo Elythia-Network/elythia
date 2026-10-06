@@ -24,7 +24,7 @@ const defaultMetaID = "x"
 // 値は config.MkGoRepositoryURL と同じ。repository 層は config に依存しない方針
 // なので定数を持ち直しており、一致は meta_test.go の
 // TestDefaultRepositoryURLMatchesConfig で固定する。
-const defaultRepositoryURL = "https://github.com/shiroha-a/mk"
+const defaultRepositoryURL = "https://github.com/Elythia-Network/elythia"
 
 // defaultFeedbackURL is the feedback destination advertised to clients when the
 // singleton meta row is created.

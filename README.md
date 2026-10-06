@@ -20,12 +20,12 @@ Misskey互換のGoバックエンド実装。TypeScript/NestJS製の[Misskey](ht
 
 フロントエンドアセットを同梱した `bundled` イメージを使う。ビルドが一切要らない。
 
-動かすだけなら [`docker` ブランチ](https://github.com/shiroha-a/mk/tree/docker)を使う。
+動かすだけなら [`docker` ブランチ](https://github.com/Elythia-Network/elythia/tree/docker)を使う。
 compose と設定のひな形だけが入った orphan ブランチで、Go のソースも frontend の
 ソースも含まないため数十 KB で済む (`develop` は `.git` だけで 672MB ある)。
 
 ```bash
-git clone --depth 1 -b docker https://github.com/shiroha-a/mk.git mk
+git clone --depth 1 -b docker https://github.com/Elythia-Network/elythia.git mk
 cd mk
 
 mkdir -p files && sudo chown -R 991:991 files
@@ -46,8 +46,8 @@ make image-up
 ### ソースからビルドする (Docker Compose)
 
 ```bash
-git clone https://github.com/shiroha-a/mk.git
-cd mk
+git clone https://github.com/Elythia-Network/elythia.git
+cd elythia
 ```
 
 ### 1. フロントエンドをビルドする (初回のみ、3-10分)
@@ -117,8 +117,8 @@ make uds-update      # UDS 構成
 前提: Go 1.27+、PostgreSQL 18推奨 (16以降で動作、CI検証は18)、Redis 7+、Docker (テスト用)
 
 ```bash
-git clone https://github.com/shiroha-a/mk.git
-cd mk
+git clone https://github.com/Elythia-Network/elythia.git
+cd elythia
 
 # 設定ファイルを作成 (→ docs/configuration.md 参照)
 cp .config/default.yml.example .config/default.yml

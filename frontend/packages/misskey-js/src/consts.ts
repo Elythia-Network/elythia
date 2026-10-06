@@ -234,7 +234,7 @@ export const rolePolicies = [
 	'watermarkAvailable',
 ] as const;
 
-// mk-go (https://github.com/shiroha-a/mk) の job queue 構成。
+// mk-go (https://github.com/Elythia-Network/elythia) の job queue 構成。
 //
 // 純正 Misskey は用途ごとに 10 queue へ分けるが、mk-go は 7 queue に集約する
 // (`internal/queue/driver/mkqdriver` の QueueNames)。この配列は管理画面の

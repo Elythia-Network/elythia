@@ -33,8 +33,8 @@ make dev
 **テストを回すには PostgreSQL を自分で用意する。** Redis は testcontainers が立てるが、DB を使うテストの大半は外部の PostgreSQL に直接つなぐ。既定の接続先とロール / DB の作り方は [testing.md](testing.md) を参照。
 
 ```bash
-git clone https://github.com/shiroha-a/mk.git
-cd mk
+git clone https://github.com/Elythia-Network/elythia.git
+cd elythia
 
 # 設定ファイルを作成
 cp .config/default.yml.example .config/default.yml
@@ -77,12 +77,12 @@ make dev
 既存の `docker-compose.yml` / `make docker-*` (ソースからビルド) はそのまま使える。置き換えではなく並立する選択肢。
 
 動かすだけならソースを clone する必要すら無い。compose と設定のひな形だけを置いた
-[`docker` ブランチ](https://github.com/shiroha-a/mk/tree/docker) が GitHub Actions で
+[`docker` ブランチ](https://github.com/Elythia-Network/elythia/tree/docker) が GitHub Actions で
 自動生成されている (`.github/workflows/docker-branch.yml`、生成元は
 `docker-compose.image.yml` / `.config/docker.yml.example` / `deploy/README.md`)。
 
 ```bash
-git clone --depth 1 -b docker https://github.com/shiroha-a/mk.git mk
+git clone --depth 1 -b docker https://github.com/Elythia-Network/elythia.git mk
 cd mk && docker compose up -d
 ```
 

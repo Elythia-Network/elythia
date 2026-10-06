@@ -60,5 +60,5 @@ func TestLoad_NoTarballWarnWhenDisabled(t *testing.T) {
 // nodeinfo の software.repository と meta.repositoryUrl の既定値は同じ値なので
 // config 側の定数に一本化してある (#2700)。
 func TestMkGoRepositoryURL(t *testing.T) {
-	assert.Equal(t, "https://github.com/shiroha-a/mk", MkGoRepositoryURL)
+	assert.Equal(t, "https://github.com/Elythia-Network/elythia", MkGoRepositoryURL)
 }

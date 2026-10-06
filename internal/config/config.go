@@ -54,7 +54,7 @@ const LegacyUserAgentProduct = "mk-go"
 // meta.repositoryUrl (operator が改変版を指せる) が担うが、その既定値と
 // nodeinfo の software.repository はどちらも mk-go 本体を指すため、値をここに
 // 一本化する (#2700)。
-const MkGoRepositoryURL = "https://github.com/shiroha-a/mk"
+const MkGoRepositoryURL = "https://github.com/Elythia-Network/elythia"
 
 // MkGoFeedbackURL is the default destination of `meta.feedbackUrl`.
 //

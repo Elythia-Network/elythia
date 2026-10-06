@@ -38,7 +38,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 					</div>
 				</MkFolder>
 
-				<!-- mk-go 独自: リレー由来の孤児リモートユーザーを定期削除する (shiroha-a/mk#2340)。
+				<!-- mk-go 独自: リレー由来の孤児リモートユーザーを定期削除する (Elythia-Network/elythia#2340)。
 				     転送活動の署名検証は著者の公開鍵を DB に載せる必要があり、その経路だけは
 				     揮発化できないため後追いで回収する。 -->
 				<MkFolder>

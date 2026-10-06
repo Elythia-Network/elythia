@@ -1,6 +1,6 @@
 # Elythia
 
-Misskey互換のGoバックエンド実装 [Elythia](https://github.com/shiroha-a/mk) を、
+Misskey互換のGoバックエンド実装 [Elythia](https://github.com/Elythia-Network/elythia) を、
 **ビルド無しで動かすためだけ**のブランチ。
 
 必要なのはこの3ファイルだけで、Goのソースもフロントエンドのソースも含まない。
@@ -16,7 +16,7 @@ docker-compose.yml           起動用の compose
 必要なもの: Docker と Docker Compose v2。
 
 ```bash
-git clone --depth 1 -b docker https://github.com/shiroha-a/mk.git mk
+git clone --depth 1 -b docker https://github.com/Elythia-Network/elythia.git mk
 cd mk
 
 # ドライブの実体を置くディレクトリ。コンテナは UID/GID 991 で動く
@@ -46,7 +46,7 @@ MK_URL=http://localhost:3000/ docker compose up -d
 |---|---|
 | `MK_URL` | `http://localhost:3000/` |
 | `MK_PORT` | `3000` |
-| `MK_IMAGE` | `ghcr.io/shiroha-a/mk:bundled` |
+| `MK_IMAGE` | `ghcr.io/elythia-network/elythia:bundled` |
 
 本格的に運用するなら設定ファイルを使う。
 
@@ -90,6 +90,11 @@ docker compose pull
 docker compose up -d
 ```
 
+**`.env` などで `MK_IMAGE` に以前の置き場所 (`ghcr.io/shiroha-a/mk:...`) を指定しているなら、
+`ghcr.io/elythia-network/elythia:...` に書き換える。** 2.0.0 からイメージの置き場所が変わり
+(#3394)、以前の置き場所は更新が止まっている。書き換えないと、エラーにならないまま古い版で
+動き続ける。
+
 **`git pull` は使えない。** このブランチは更新のたびに履歴を持たない 1 コミットで
 作り直されるので、`git pull` は「履歴が繋がらない」として止まる。
 
@@ -107,12 +112,13 @@ compose はリリースのタグから取れる (タグ名に `v` は付かな�
 
 ```bash
 curl -fsSL -o docker-compose.yml \
-  https://raw.githubusercontent.com/shiroha-a/mk/1.5.0/docker-compose.image.yml
+  https://raw.githubusercontent.com/Elythia-Network/elythia/1.5.0/docker-compose.image.yml
 MK_IMAGE=ghcr.io/shiroha-a/mk:1.5.0-bundled docker compose up -d
 ```
 
-利用できるタグは [GHCR のページ](https://github.com/shiroha-a/mk/pkgs/container/mk)
-で確認できる。
+利用できるタグは [GHCR のページ](https://github.com/Elythia-Network/elythia/pkgs/container/elythia)
+で確認できる。**2.0.0 より前の版は、以前の置き場所 `ghcr.io/shiroha-a/mk` にある** ([タグの一覧](https://github.com/users/shiroha-a/packages/container/package/mk)。リポジトリを
+`Elythia-Network/elythia` へ移した 2.0.0 から、イメージの置き場所も変わった。#3394)。
 
 ## ログの上限
 
@@ -143,7 +149,7 @@ docker compose down -v   # volume ごと削除 (DB と Redis のデータが消�
 ## このブランチについて
 
 **手で編集しない。** 内容は
-[develop](https://github.com/shiroha-a/mk/tree/develop) 側の生成元から
+[develop](https://github.com/Elythia-Network/elythia/tree/develop) 側の生成元から
 GitHub Actions が自動生成しており、push のたびに履歴ごと作り直される。
 
 | このブランチ | 生成元 (develop) |

@@ -27,7 +27,7 @@
 import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 
-const MKGO_REPOSITORY_URL = 'https://github.com/shiroha-a/mk';
+const MKGO_REPOSITORY_URL = 'https://github.com/Elythia-Network/elythia';
 // #3379 で frontend を本体へ取り込む前に、frontend のソースとして案内していた fork。
 const OLD_FRONTEND_REPOSITORY_URL = 'https://github.com/shiroha-a/misskey-ts';
 

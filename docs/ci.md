@@ -256,7 +256,7 @@ package load エラーで解析が空振りしうる。**ローカルの `go` �
 同じ理由で、これも required には**含めていない**。
 
 結果は Actions のログではなく **Code scanning alerts** に出る
-(`https://github.com/shiroha-a/mk/security/code-scanning`)。まず alert を読み、
+(`https://github.com/Elythia-Network/elythia/security/code-scanning`)。まず alert を読み、
 
 - 本物なら直す
 - 誤検知なら alert 側で dismiss する (理由を選ぶ)。ソースに抑制コメントを撒かない

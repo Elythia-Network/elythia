@@ -131,7 +131,7 @@ import { definePage } from '@/page.js';
 // 位置づけで、**このサーバーが動かしているコード** (instance.repositoryUrl) とは
 // 別物として並べる。backend 側は internal/config.MkGoRepositoryURL に同じ値を持ち、
 // meta.repositoryUrl の既定値と nodeinfo の software.repository がそれを使う (#2700)。
-const MKGO_REPOSITORY_URL = 'https://github.com/shiroha-a/mk';
+const MKGO_REPOSITORY_URL = 'https://github.com/Elythia-Network/elythia';
 
 // Misskey 本体のリポジトリ。**この値が入っているのは「未設定」を意味する。**
 // `meta.repositoryUrl` の列 DEFAULT が upstream 互換でこの URL になっており、

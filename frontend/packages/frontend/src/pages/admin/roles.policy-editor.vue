@@ -744,7 +744,7 @@ const canUseEmojiAsAvatarDecorationMeta = mkGoPolicyMeta('canUseEmojiAsAvatarDec
 // internal/effectivepolicy/validation.go の default と揃えること。
 const canSearchIpHistory = mkGoPolicyValue('canSearchIpHistory', false);
 const canSearchIpHistoryMeta = mkGoPolicyMeta('canSearchIpHistory');
-// Keep these defaults aligned with shiroha-a/mk
+// Keep these defaults aligned with Elythia-Network/elythia
 // internal/effectivepolicy/validation.go (backend PR #3316).
 const canDeleteAccount = mkGoPolicyValue('canDeleteAccount', accountDeletionPolicyDefaults.canDeleteAccount);
 const canDeleteAccountMeta = mkGoPolicyMeta('canDeleteAccount');
