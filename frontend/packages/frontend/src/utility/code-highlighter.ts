@@ -10,8 +10,9 @@ import { bundledThemesInfo } from 'shiki/themes';
 import { bundledLanguagesInfo } from 'shiki/langs';
 import lightTheme from '@@/themes/_light.json5';
 import darkTheme from '@@/themes/_dark.json5';
-import defaultLightTheme from '@@/themes/l-light.json5';
-import defaultDarkTheme from '@@/themes/d-green-lime.json5';
+// Elythia: 既定のテーマは Elythia Light / Elythia Dark (2.0.0)。本家は Mi Light / Mi Green+Lime
+import defaultLightTheme from '@@/themes/l-elythia.json5';
+import defaultDarkTheme from '@@/themes/d-elythia.json5';
 import { unique } from './array.js';
 import { deepClone } from './clone.js';
 import { deepMerge } from './merge.js';

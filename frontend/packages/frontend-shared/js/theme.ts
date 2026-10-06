@@ -35,6 +35,8 @@ export const themeProps = Object.keys(lightTheme.props).filter(key => !key.start
 
 export const getBuiltinThemes = () => Promise.all(
 	[
+		// Elythia: 既定のテーマ (2.0.0) を先頭に置く
+		'l-elythia',
 		'l-light',
 		'l-coffee',
 		'l-apricot',
@@ -45,6 +47,7 @@ export const getBuiltinThemes = () => Promise.all(
 		'l-sushi',
 		'l-u0',
 
+		'd-elythia',
 		'd-dark',
 		'd-persimmon',
 		'd-astro',

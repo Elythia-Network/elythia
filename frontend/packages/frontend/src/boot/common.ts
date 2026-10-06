@@ -5,8 +5,9 @@
 
 import { watch, version as vueVersion } from 'vue';
 import { version, lang, isSafeMode } from '@@/js/config.js';
-import defaultLightTheme from '@@/themes/l-light.json5';
-import defaultDarkTheme from '@@/themes/d-green-lime.json5';
+// Elythia: 既定のテーマは Elythia Light / Elythia Dark (2.0.0)。本家は Mi Light / Mi Green+Lime
+import defaultLightTheme from '@@/themes/l-elythia.json5';
+import defaultDarkTheme from '@@/themes/d-elythia.json5';
 import { storeBootloaderErrors } from '@@/js/store-boot-errors';
 import type { App } from 'vue';
 import widgets from '@/widgets/index.js';
