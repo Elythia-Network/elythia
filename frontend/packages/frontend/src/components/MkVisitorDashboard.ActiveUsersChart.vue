@@ -59,16 +59,24 @@ async function renderChart() {
 
 	await nextTick();
 
-	const vLineColor = store.s.darkMode ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.2)';
+	if (chartEl.value == null) return;
 
-	const accent = tinycolor(themeManager.currentCompiledTheme!.accent).toHexString();
+	// Elythia: エントランスはテーマの変数を部分木で上書きして夜空にしている
+	// (utility/elythia-entrance.ts)。Chart.js は CSS を読まず、既定の色は利用者のテーマから
+	// 取るので、canvas の位置で解決した色を渡す。上書きの無い場所では同じ値になる
+	const style = getComputedStyle(chartEl.value);
+	const onNight = style.getPropertyValue('--ELYTHIA-panelBorder').trim() !== '';
+	const dark = store.s.darkMode || onNight;
+	const fg = style.getPropertyValue('--MI_THEME-fg').trim() || themeManager.currentCompiledTheme!.fg;
+	const gridColor = dark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
+	const vLineColor = dark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.2)';
+
+	const accent = tinycolor(style.getPropertyValue('--MI_THEME-accent').trim() || themeManager.currentCompiledTheme!.accent).toHexString();
 
 	const colorRead = accent;
 	const colorWrite = '#2ecc71';
 
 	const max = Math.max(...raw.read);
-
-	if (chartEl.value == null) return;
 
 	chartInstance = new Chart(chartEl.value, {
 		type: 'bar',
@@ -116,6 +124,7 @@ async function renderChart() {
 						display: true,
 						maxRotation: 0,
 						autoSkipPadding: 8,
+						color: fg,
 					},
 				},
 				y: {
@@ -123,10 +132,12 @@ async function renderChart() {
 					suggestedMax: 10,
 					grid: {
 						display: true,
+						color: gridColor,
 					},
 					ticks: {
 						display: true,
 						//mirror: true,
+						color: fg,
 					},
 				},
 			},

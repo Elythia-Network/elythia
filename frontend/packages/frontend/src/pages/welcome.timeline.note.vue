@@ -86,6 +86,10 @@ onUpdated(() => {
 }
 
 .content {
+	// Elythia: エントランスでは夜空のガラスにする (utility/elythia-entrance.ts)
+	border: var(--ELYTHIA-panelBorder, none);
+	-webkit-backdrop-filter: var(--ELYTHIA-panelBackdrop, none);
+	backdrop-filter: var(--ELYTHIA-panelBackdrop, none);
 	padding: 16px;
 	margin: 0 0 0 auto;
 	max-width: max-content;
