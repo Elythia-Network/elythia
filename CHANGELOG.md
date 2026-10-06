@@ -1,8 +1,59 @@
 # Changelog
 
 記法は Misskey 本家の `CHANGELOG.md` に準拠する (`General` / `Client` / `Server` の区分、`Feat` / `Enhance` / `Fix` の接頭辞)。
-本家の新バージョンを取り込んだ分は「Misskey 202X.Y.Z に追従」の 1 行にまとめ、以降は mk-go 独自の変更のみを記載する。
-`Client` は mk-go が同梱するフロントエンド (`third_party/misskey` fork) の変更を指す。
+本家の新バージョンを取り込んだ分は「Misskey 202X.Y.Z に追従」の 1 行にまとめ、以降は Elythia 独自の変更のみを記載する。
+`Client` は Elythia が同梱するフロントエンド (2.0.0 からは本体の `frontend/`、それより前は `third_party/misskey` fork) の変更を指す。
+1.5.0 までは mk-go という名前で出していた。
+
+## 2.0.0
+
+### Note
+
+- **名前を mk-go から Elythia に変えた。** リポジトリは `Elythia-Network/elythia` へ、配布イメージは `ghcr.io/elythia-network/elythia` へ移った (旧 URL は GitHub が転送するが、旧イメージは更新が止まっている)。nodeinfo の `software.name` は `elythia`、外向きの User-Agent は `Elythia/<版> (<url>)` になる。`/api/meta` の `mkGoVersion` / `mkGoCommit` と環境変数の接頭辞 `MK_` は据え置く
+- **実行バイナリを `elythia` 1 つにまとめた。** `elythia serve` / `elythia migrate` / `elythia backfill <名前>` のようにサブコマンドで呼び分ける
+- **フロントエンドを本体の `frontend/` へ取り込んだ。** fork (`shiroha-a/misskey-ts`) と submodule は使わない。本家の新しい版は `make upstream-sync` で当てる
+- **見た目を Elythia のものにした。** 起動画面を夜空にし、既定のアイコン、ログインしていない人の画面、既定のテーマ (Elythia Light / Elythia Dark) を Elythia のものにした。テーマを自分で選んでいない人は、次に開いたときから Elythia のテーマになる
+- **Misskey TS へ戻すこと (復路) の保証をやめた。** TS 版からの移行 (往路) は今までどおり保証する
+- **運営者の作業が要るもの**: 上げる手順は構成ごとに `docs/upgrade/2.0.0.md` にまとめた。主なものは次のとおり
+  - **配布イメージを指定しているなら、新しい置き場所に書き換えること。** `.env` の `MK_IMAGE` などに `ghcr.io/shiroha-a/mk` を書いたままだと、エラーにならないまま古いイメージで動き続ける
+  - **バイナリを直接動かしている (systemd など) なら、起動のコマンドを書き換えること。** `misskey` は `elythia serve`、`migrate` は `elythia migrate`、`backfill-<名前>` は `elythia backfill <名前>` になる
+  - **UDS 構成は、compose が `frontend/built` を mount するように向け直すこと。** `third_party/misskey` を mount したままだと `make uds-*` が止まる
+  - **ソースからビルドしている構成は、フロントエンドを `frontend/` からビルドし直して Elythia を再起動すること。** バイナリを直接動かしているなら、`MISSKEY_FRONTEND_DIR` などの置き場所の指定も `frontend/` の下へ書き換える。以前の場所を指したままだと、1.5.0 のフロントエンドを黙って配り続ける
+  - **docker ブランチの構成で `docker-compose.override.yml` を使っているなら、2.0.0 の呼び方 (`elythia serve` など) に直すこと**
+  - **プラグインは 2.0.0 に追従した版が要る。** モジュールパスが `github.com/elythia-network/elythia/plugin` に、マニフェストが `elythia-plugin.yml` に変わった (`docs/plugins/compatibility.md`)。同梱プラグインと `Elythia-Network/elythia-plugin-*` の 4 つは追従済み
+  - mkq / mkqd を自分のプログラムに組み込んでいるなら、`github.com/elythia-network/mkq` v1.5.0 / `github.com/elythia-network/mkqd` v0.3.0 へ移すこと (旧パスの mkq の型とは混ぜられない)
+  - マイグレーションが 8 本ある (`000109`〜`000116`)。`000109`〜`000115` は画像プロキシのための index を `CONCURRENTLY` で作る。どれも 1.5.0 のまま先に流してよいが、**先に流したら 1.5.0 を起動し直さないこと** (1.5.0 の `migrate` は知らない版の DB で止まる)
+  - サイト名を設定していないサーバーでは、ページのタイトルやメールなどに出る既定の名前が Misskey から Elythia になる
+
+### General
+
+- Feat: 名前を Elythia に変えた。Go のモジュールパスを `github.com/elythia-network/elythia` に、nodeinfo の `software.name` を `elythia` に、User-Agent を `Elythia/<版> (<url>)` にした
+- Feat: プラグインのマニフェストを `elythia-plugin.yml` に、nodeinfo のプラグインの宣言を `metadata.elythiaPlugins` にした
+- Enhance: mkq を `github.com/elythia-network/mkq` v1.5.0 に移した
+
+### Client
+
+- Feat: 起動画面をスピナーから夜空にした。星のまたたきと流れ星の中にサーバーのアイコンが浮かぶ。アニメーションの設定や「動きを減らす」設定では止める
+- Feat: 既定のアイコン (favicon、ホーム画面のアイコン、起動画面のアイコン) を Elythia のアイコンにした
+- Feat: 既定のテーマを Elythia Light / Elythia Dark にした。本家のテーマも選べる
+- Feat: ログインしていない人のエントランスを夜空にし、「Powered by」を Elythia にした。トップ以外のページの左のパネルと、狭い画面の上の帯も夜空にした
+- Feat: 画面に出る Misskey の名前のうち、このソフトウェアを指すもの (チュートリアル、設定の説明、実績、起動失敗の画面など、32 言語) を Elythia にした。ナビの「Misskey Games」は「Elythia Games」になる
+- Feat: 「Elythiaについて」のページを整理した。フロントエンドの版の行とコントリビューターの一覧を外し、Elythia-Network への案内を置いた。サーバー情報は Elythia の版だけを出す
+- Feat: フロントエンドを本体の `frontend/` へ取り込み、本家の新しい版を当てる `make upstream-sync` を足した
+- Feat: サーバープラグインから、標準の UI の部品 (`MkSelect` / `MkSwitch` / `MkAvatar` など) と、利用者の公開情報を引く `getUsers` を使えるようにした
+- Enhance: 本家への寄付のお願いのダイアログを出さないようにした
+- Fix: アクセントカラーの背景に白い文字を直書きしていた箇所 (通知の申請アイコン、入力補完の選択行など 5 か所) が、アクセントカラーの淡いテーマで読めなかった問題を修正
+- Fix: 依存の既知の脆弱性に対応した (`@xmldom/xmldom` 0.9.12 ほか開発用の依存、`postcss-selector-parser` 7.1.6)
+
+### Server
+
+- Feat: 実行バイナリを `elythia` にまとめ、`serve` / `migrate` / `backfill` などのサブコマンドで呼び分けるようにした
+- Feat: サイト名が未設定のときの既定の名前 (ページのタイトル、`og:site_name`、opensearch、RSS、パスキーの表示名、2 段階認証の発行者名、メール) を Elythia にした。テーマカラーが未設定のときの HTML の `theme-color` と、manifest の `background_color` は夜空の色にした (`/api/meta` の `themeColor` は変えない)
+- Enhance: `meta.repositoryUrl` / `meta.feedbackUrl` が以前の既定値のままなら、移管後の URL に書き換える (`000116`)
+- Enhance: `/api/meta` の Elythia 独自の値 `mkGoFrontendVersion` を廃止した。フロントエンドは独自の版を持たなくなった
+- Fix: 画像プロキシの許可確認が引く URL 列に index が無く、署名の無いリクエストのたびに全件走査になっていた問題を修正 (`000109`〜`000115`)
+- Fix: タイムラインの絵文字の情報を、リクエストのたびに引き直していた問題を修正
+- Fix: 画像プロキシが 500 を返したときに、原因がログに残らなかった問題を修正
 
 ## 1.5.0
 

@@ -2,7 +2,7 @@
 
 Elythia が持つ「純正 Misskey (misskey-dev/misskey) には無い、または挙動が異なる」ものを 1 枚に集約したリファレンス。
 
-- 基準: **Elythia 1.5.0** ⇔ Misskey TS `2026.10.0`
+- 基準: **Elythia 2.0.0** ⇔ Misskey TS `2026.10.0`
 - 最終更新: 2026-09-23
 
 > ベースラインを固定したのは 1.0.0 (= Misskey TS `2026.7.0` 追従完了時点)。1.1.x は

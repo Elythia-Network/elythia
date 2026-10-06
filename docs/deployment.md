@@ -155,7 +155,7 @@ make image-build       # ghcr.io/elythia-network/elythia:bundled をローカル
 `bundled` / `latest` は develop の最新を指す **可変タグ**。本番ではバージョンを固定する。**古い版に固定するときは、その版の compose を使う** (compose は同じ版の image の呼び方に合わせてある。2.0.0 で実行バイナリを `elythia` にまとめた、#3394)。
 
 ```bash
-MK_IMAGE=ghcr.io/shiroha-a/mk:1.5.0-bundled docker compose up -d
+MK_IMAGE=ghcr.io/elythia-network/elythia:2.0.0-bundled docker compose up -d
 ```
 
 **2.0.0 より前の版は、以前の置き場所 `ghcr.io/shiroha-a/mk` にある** ([タグの一覧](https://github.com/users/shiroha-a/packages/container/package/mk)。リポジトリを `Elythia-Network/elythia` へ移した 2.0.0 から、イメージの置き場所も変わった。#3394)。
@@ -395,7 +395,7 @@ worker 数は既定値がキューごとに違い、`stuck 検出` は**キュ�
   ok    redis        接続 ok
   FAIL  webfinger    status 403 (連合が無効)
         インスタンス設定の `federation` が `none` になっている。連合するなら管理画面で有効にする
-  ok    nodeinfo     elythia 1.5.0
+  ok    nodeinfo     elythia 2.0.0
   warn  actor        assertionMethod (Ed25519) が無い
         RSA だけでも連合できる。Ed25519 を公開すると対応実装との署名検証が軽くなる
   ok    tls          証明書の残り 68 日
