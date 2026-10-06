@@ -656,6 +656,8 @@ ElythiaはTS版と同じPostgreSQL/Redisを共有できるため、バイナリ�
 
 ## アップデート
 
+**1.5.0 から 2.0.0 へ上げるときは、[1.5.0 から 2.0.0 へ上げる](upgrade/2.0.0.md) の手順を構成ごとに上から順に流す。** 名前・配布イメージ・実行バイナリ・frontend の置き場所がまとめて変わる版で、下の各節 (#3379 / #3394 / #3400) の手順をまとめてある。
+
 どの構成でも共通する原則は 3 つ。
 
 1. **`frontend/` のソースは本体と一緒に `git pull` で更新される** (#3379 で本体へ取り込んだ)。ただし成果物の `frontend/built` は git の管理の外にあり、pull しても変わらない
@@ -894,7 +896,9 @@ pluginbuild: plugins/foo: go.mod が以前のモジュールパス github.com/sh
 
 ### 切り戻し
 
-`schema_migrations` のバージョンが進んでいるので、バイナリだけ戻すと古い Elythia が新しいスキーマを読むことになる。追加のみのマイグレーション (`ADD COLUMN` / `CREATE TABLE` / `CREATE INDEX`) であれば旧バイナリでも動くが、破壊的な変更を含むリリースでは `make migrate-down` (1 段) を必要な回数繰り返して戻す。リリースノートで破壊的変更の有無を確認すること。
+`schema_migrations` のバージョンが進んでいるので、バイナリだけ戻すと古い Elythia が新しいスキーマを読むことになる。追加のみのマイグレーション (`ADD COLUMN` / `CREATE TABLE` / `CREATE INDEX`) であれば旧バイナリのサーバーは動くが、破壊的な変更を含むリリースでは `make migrate-down` (1 段) を必要な回数繰り返して戻す。リリースノートで破壊的変更の有無を確認すること。
+
+**旧版の `migrate` は、自分の知らない版まで進んだ DB に当たると止まる** (`no migration found for version N`)。compose の `migrate` サービスと UDS の image は起動の前に migration を流すので、追加のみの版でも、**新しい版のまま migration を旧版の最後の版まで戻してから**旧版へ切り替える。2.0.0 から 1.5.0 へ戻す手順は [1.5.0 から 2.0.0 へ上げる](upgrade/2.0.0.md#150-へ戻す)。
 
 > **`elythia migrate -direction down` を本番で叩かないこと。** `-steps` を省くと「全部」の意味になり、全 down マイグレーションが走って 全テーブルが消える。
 >
