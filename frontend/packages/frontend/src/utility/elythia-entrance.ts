@@ -34,7 +34,8 @@ export function entranceThemeVars(blur: boolean): Record<string, string> {
 		'--MI_THEME-buttonBg': 'rgba(204, 195, 247, 0.12)',
 		'--MI_THEME-buttonHoverBg': 'rgba(204, 195, 247, 0.2)',
 		'--MI_THEME-buttonGradateA': '#5a4fd0',
-		'--MI_THEME-buttonGradateB': '#8f83f2',
+		// 白い太字がボタンの中央 (グラデーションの中間) で 4.5:1 を超える濃さにする
+		'--MI_THEME-buttonGradateB': '#7d70e8',
 		'--MI_THEME-infoBg': 'rgba(166, 155, 251, 0.14)',
 		'--MI_THEME-infoFg': '#e4e1f5',
 		'--MI_THEME-infoWarnBg': 'rgba(253, 221, 207, 0.12)',

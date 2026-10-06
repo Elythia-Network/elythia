@@ -9,8 +9,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 	無ければ夜空に既定アイコンの絵を薄く溶かす。左の斜めの帯 (本家の意匠) の代わり。
 -->
 <template>
-<MkFeaturedPhotos v-if="instance.backgroundImageUrl" :class="$style.root"/>
-<div v-else :class="[$style.root, $style.sky, { [$style.still]: !prefer.s.animation }]">
+<MkFeaturedPhotos v-if="instance.backgroundImageUrl" :class="[$style.root, { [$style.contained]: contained }]"/>
+<div v-else :class="[$style.root, $style.sky, { [$style.contained]: contained, [$style.still]: !prefer.s.animation }]">
 	<div :class="$style.art" :style="{ backgroundImage: `url(${art})` }"></div>
 	<svg :class="$style.sparkles" viewBox="0 0 1280 800" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
 		<path :class="$style.sparkle" style="--d: 5s;" d="M640 70 l2 8 8 2 -8 2 -2 8 -2 -8 -8 -2 8 -2z"/>
@@ -25,14 +25,26 @@ import MkFeaturedPhotos from '@/components/MkFeaturedPhotos.vue';
 import art from '/client-assets/elythia-entrance-art.webp';
 import { instance } from '@/instance.js';
 import { prefer } from '@/preferences.js';
+
+defineProps<{
+	/** Fill the nearest positioned ancestor instead of the whole viewport. */
+	contained?: boolean;
+}>();
 </script>
 
 <style lang="scss" module>
 .root {
 	position: fixed;
+	// 絵と星 (z-index: 1) を背景の中に閉じ込め、後に描かれるカードや文字より下にする
+	z-index: 0;
 	inset: 0;
 	// 固定レイヤがホイール操作を奪い、コンテンツ列以外の上でページをスクロールできなくなるのを防ぐ (issue #17680)
 	pointer-events: none;
+}
+
+// ログインしていない人の画面の左パネル (ui/visitor.vue) では、パネルの中だけに敷く
+.contained {
+	position: absolute;
 }
 
 .sky {
@@ -90,6 +102,13 @@ import { prefer } from '@/preferences.js';
 		top: 38%;
 		left: 50%;
 		width: min(800px, 190vw);
+		transform: translate(-50%, -50%);
+	}
+
+	.contained & {
+		top: 32%;
+		left: 50%;
+		width: 900px;
 		transform: translate(-50%, -50%);
 	}
 }

@@ -48,6 +48,20 @@ describe('welcome.elythia-backdrop', () => {
 		assert.exists(container.querySelector('svg'), 'sparkles exist');
 	});
 
+	// ログインしていない人の画面の左パネルでは、画面全体でなくパネルの中に敷く
+	test('fills only its container when contained', async () => {
+		instance.backgroundImageUrl = null;
+		const full = render(XBackdrop, { global: { directives, components } });
+		await nextTick();
+		const fullClass = (full.container.firstElementChild as HTMLElement).className;
+		cleanup();
+		const contained = render(XBackdrop, { props: { contained: true }, global: { directives, components } });
+		await nextTick();
+		const containedClass = (contained.container.firstElementChild as HTMLElement).className;
+		assert.notInclude(fullClass, 'contained');
+		assert.include(containedClass, 'contained');
+	});
+
 	// 管理者が背景画像を設定しているなら、その画像を出して夜空の絵は重ねない
 	test('shows the configured background image instead of the night sky', async () => {
 		instance.backgroundImageUrl = 'https://example.com/bg.jpg';
