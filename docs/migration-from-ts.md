@@ -12,8 +12,8 @@
 ## 1. クローンとビルド
 
 ```bash
-git clone https://github.com/Elythia-Network/elythia.git mk-go
-cd mk-go
+git clone https://github.com/Elythia-Network/elythia.git elythia
+cd elythia
 go build -o built/elythia ./cmd/elythia
 ```
 
