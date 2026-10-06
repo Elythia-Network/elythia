@@ -44,7 +44,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 				</g>
 			</svg>
 			<div :class="$style.title">
-				<div>Welcome to Misskey!</div>
+				<div>Welcome to Elythia!</div>
 				<div :class="$style.version">v{{ version }}</div>
 			</div>
 			<div style="padding: 16px 32px 32px 32px;">

@@ -152,7 +152,7 @@
 		if (!messages) messages = {};
 
 		messages = Object.assign({
-			title: 'Failed to initialize Misskey',
+			title: 'Failed to initialize Elythia',
 			solution: 'The following actions may solve the problem.',
 			solution1: 'Update your os and browser',
 			solution2: 'Disable an adblocker',
@@ -162,7 +162,7 @@
 			otherOption1: 'Clear preferences and cache',
 			otherOption2: 'Start the simple client',
 			otherOption3: 'Start the repair tool',
-			otherOption4: 'Start Misskey in safe mode',
+			otherOption4: 'Start Elythia in safe mode',
 			reload: 'Reload',
 		}, messages);
 

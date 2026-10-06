@@ -12,14 +12,14 @@ export interface Locale extends ILocale {
      */
     "headlineMisskey": string;
     /**
-     * ようこそ！Misskeyは、オープンソースの分散型マイクロブログサービスです。
+     * ようこそ！Elythiaは、オープンソースの分散型マイクロブログサービスです。
      * 「ノート」を作成して、いま起こっていることを共有したり、あなたについて皆に発信しよう📡
      * 「リアクション」機能で、皆のノートに素早く反応を追加することもできます👍
      * 新しい世界を探検しよう🚀
      */
     "introMisskey": string;
     /**
-     * {name}は、オープンソースのプラットフォーム<b>Misskey</b>のサーバーのひとつです。
+     * {name}は、オープンソースのプラットフォーム<b>Elythia</b>のサーバーのひとつです。
      */
     "poweredByMisskeyDescription": ParameterizedString<"name">;
     /**
@@ -55,8 +55,8 @@ export interface Locale extends ILocale {
      */
     "initialPasswordIsIncorrect": string;
     /**
-     * Misskeyを自分でインストールした場合は、設定ファイルに入力したパスワードを使用してください。
-     * Misskeyのホスティングサービスなどを使用している場合は、提供されたパスワードを使用してください。
+     * Elythiaを自分でインストールした場合は、設定ファイルに入力したパスワードを使用してください。
+     * Elythiaのホスティングサービスなどを使用している場合は、提供されたパスワードを使用してください。
      * パスワードを設定していない場合は、空欄にしたまま続行してください。
      */
     "initialPasswordForSetupDescription": string;
@@ -729,7 +729,7 @@ export interface Locale extends ILocale {
      */
     "flagAsBot": string;
     /**
-     * このアカウントがプログラムによって運用される場合は、このフラグをオンにします。オンにすると、反応の連鎖を防ぐためのフラグとして他の開発者に役立ったり、Misskeyのシステム上での扱いがBotに合ったものになります。
+     * このアカウントがプログラムによって運用される場合は、このフラグをオンにします。オンにすると、反応の連鎖を防ぐためのフラグとして他の開発者に役立ったり、Elythiaのシステム上での扱いがBotに合ったものになります。
      */
     "flagAsBotDescription": string;
     /**
@@ -1829,7 +1829,7 @@ export interface Locale extends ILocale {
      */
     "aboutMisskey": string;
     /**
-     * mk-goについて
+     * Elythiaについて
      */
     "aboutMkGo": string;
     /**
@@ -2401,7 +2401,7 @@ export interface Locale extends ILocale {
      */
     "notUseSound": string;
     /**
-     * Misskeyがアクティブな時のみサウンドを出力する
+     * Elythiaがアクティブな時のみサウンドを出力する
      */
     "useSoundOnlyWhenActive": string;
     /**
@@ -2469,7 +2469,7 @@ export interface Locale extends ILocale {
      */
     "scratchpad": string;
     /**
-     * スクラッチパッドは、AiScriptの実験環境を提供します。Misskeyと対話するコードの記述、実行、結果の確認ができます。
+     * スクラッチパッドは、AiScriptの実験環境を提供します。Elythiaと対話するコードの記述、実行、結果の確認ができます。
      */
     "scratchpadDescription": string;
     /**
@@ -3325,7 +3325,7 @@ export interface Locale extends ILocale {
      */
     "sendErrorReports": string;
     /**
-     * オンにすると、問題が発生したときにエラーの詳細情報がMisskeyに共有され、ソフトウェアの品質向上に役立てることができます。エラー情報には、OSのバージョン、ブラウザの種類、行動履歴などが含まれます。
+     * オンにすると、問題が発生したときにエラーの詳細情報がElythiaに共有され、ソフトウェアの品質向上に役立てることができます。エラー情報には、OSのバージョン、ブラウザの種類、行動履歴などが含まれます。
      */
     "sendErrorReportsDescription": string;
     /**
@@ -3709,7 +3709,7 @@ export interface Locale extends ILocale {
      */
     "misskeyUpdated": string;
     /**
-     * mk-goが更新されました！
+     * Elythiaが更新されました！
      */
     "mkGoUpdated": string;
     /**
@@ -4797,7 +4797,7 @@ export interface Locale extends ILocale {
      */
     "later": string;
     /**
-     * Misskeyへ
+     * Elythiaへ
      */
     "goToMisskey": string;
     /**
@@ -5053,7 +5053,7 @@ export interface Locale extends ILocale {
      */
     "repositoryUrl": string;
     /**
-     * ソースコードが公開されているリポジトリがある場合、そのURLを記入します。Misskeyを現状のまま（ソースコードにいかなる変更も加えずに）使用している場合は https://github.com/misskey-dev/misskey と記入します。
+     * ソースコードが公開されているリポジトリがある場合、そのURLを記入します。Elythiaを現状のまま（ソースコードにいかなる変更も加えずに）使用している場合は https://github.com/Elythia-Network/elythia と記入します。
      */
     "repositoryUrlDescription": string;
     /**
@@ -6809,7 +6809,7 @@ export interface Locale extends ILocale {
          */
         "haveFun": ParameterizedString<"name">;
         /**
-         * このまま{name}(Misskey)の使い方についてのチュートリアルに進むこともできますが、ここで中断してすぐに使い始めることもできます。
+         * このまま{name}(Elythia)の使い方についてのチュートリアルに進むこともできますが、ここで中断してすぐに使い始めることもできます。
          */
         "youCanContinueTutorial": ParameterizedString<"name">;
         /**
@@ -6848,7 +6848,7 @@ export interface Locale extends ILocale {
              */
             "title": string;
             /**
-             * ここでは、Misskeyの基本的な使い方や機能を確認できます。
+             * ここでは、Elythiaの基本的な使い方や機能を確認できます。
              */
             "description": string;
         };
@@ -6858,7 +6858,7 @@ export interface Locale extends ILocale {
              */
             "title": string;
             /**
-             * Misskeyでの投稿は「ノート」と呼びます。ノートはタイムラインに時系列で並んでいて、リアルタイムで更新されていきます。
+             * Elythiaでの投稿は「ノート」と呼びます。ノートはタイムラインに時系列で並んでいて、リアルタイムで更新されていきます。
              */
             "description": string;
             /**
@@ -6910,7 +6910,7 @@ export interface Locale extends ILocale {
              */
             "title": string;
             /**
-             * Misskeyには、使い方に応じて複数のタイムラインが用意されています（サーバーによってはいずれかが無効になっていることがあります）。
+             * Elythiaには、使い方に応じて複数のタイムラインが用意されています（サーバーによってはいずれかが無効になっていることがあります）。
              */
             "description1": string;
             /**
@@ -6944,7 +6944,7 @@ export interface Locale extends ILocale {
              */
             "title": string;
             /**
-             * Misskeyにノートを投稿する際には、様々なオプションの設定が可能です。投稿フォームはこのようになっています。
+             * Elythiaにノートを投稿する際には、様々なオプションの設定が可能です。投稿フォームはこのようになっています。
              */
             "description1": string;
             "_visibility": {
@@ -7044,7 +7044,7 @@ export interface Locale extends ILocale {
              */
             "title": string;
             /**
-             * ここで紹介した機能はほんの一部にすぎません。Misskeyの使い方をより詳しく知るには、{link}をご覧ください。
+             * ここで紹介した機能はほんの一部にすぎません。Elythiaの使い方をより詳しく知るには、{link}をご覧ください。
              */
             "description": ParameterizedString<"link">;
         };
@@ -7333,7 +7333,7 @@ export interface Locale extends ILocale {
                  */
                 "description": string;
                 /**
-                 * 良いMisskeyライフを！
+                 * 良いElythiaライフを！
                  */
                 "flavor": string;
             };
@@ -7657,7 +7657,7 @@ export interface Locale extends ILocale {
                  */
                 "description": string;
                 /**
-                 * Misskeyを使ってくれてありがとう！
+                 * Elythiaを使ってくれてありがとう！
                  */
                 "flavor": string;
             };
@@ -8131,7 +8131,7 @@ export interface Locale extends ILocale {
             };
             "_tutorialCompleted": {
                 /**
-                 * Misskey初心者講座 修了証
+                 * Elythia初心者講座 修了証
                  */
                 "title": string;
                 /**
@@ -8368,7 +8368,7 @@ export interface Locale extends ILocale {
              */
             "maxFileSize_caption": string;
             /**
-             * サーバー全体の最大ファイルサイズ設定は {max} です。これより大きいファイルをアップロードできるようにするには、Misskeyの設定ファイルからこの設定を緩和してください。
+             * サーバー全体の最大ファイルサイズ設定は {max} です。これより大きいファイルをアップロードできるようにするには、Elythiaの設定ファイルからこの設定を緩和してください。
              */
             "maxFileSize_caption2": ParameterizedString<"max">;
             /**
@@ -8959,18 +8959,6 @@ export interface Locale extends ILocale {
     };
     "_aboutMkGo": {
         /**
-         * mk-goは、Misskey互換のバックエンド実装です。
-         */
-        "about": string;
-        /**
-         * バックエンド
-         */
-        "backend": string;
-        /**
-         * フロントエンド
-         */
-        "frontend": string;
-        /**
          * このサーバーのソースコード
          */
         "sourceCodeOfThisServer": string;
@@ -8979,13 +8967,9 @@ export interface Locale extends ILocale {
          */
         "sourceCodeOfThisServerDescription": string;
         /**
-         * mk-go本体(バックエンド)
+         * Elythia本体(バックエンドとフロントエンド)
          */
         "sourceCodeOfMkGo": string;
-        /**
-         * フロントエンド(Misskeyのフォーク)
-         */
-        "sourceCodeOfFrontend": string;
         /**
          * ライセンス
          */
@@ -10167,7 +10151,7 @@ export interface Locale extends ILocale {
          */
         "driveFileDurationWarn": string;
         /**
-         * 長い音声を使用するとMisskeyの使用に支障をきたす可能性があります。それでも続行しますか？
+         * 長い音声を使用するとElythiaの使用に支障をきたす可能性があります。それでも続行しますか？
          */
         "driveFileDurationWarnDescription": string;
         /**
@@ -13105,7 +13089,7 @@ export interface Locale extends ILocale {
          */
         "summaryProxy": string;
         /**
-         * Misskey本体ではなく、サマリープロキシを使用してプレビューを生成します。
+         * Elythia本体ではなく、サマリープロキシを使用してプレビューを生成します。
          */
         "summaryProxyDescription": string;
         /**
@@ -13578,7 +13562,7 @@ export interface Locale extends ILocale {
          */
         "otherOption3": string;
         /**
-         * Misskeyをセーフモードで起動
+         * Elythiaをセーフモードで起動
          */
         "otherOption4": string;
     };
@@ -13622,7 +13606,7 @@ export interface Locale extends ILocale {
     };
     "_serverSetupWizard": {
         /**
-         * Misskeyのインストールが完了しました！
+         * Elythiaのインストールが完了しました！
          */
         "installCompleted": string;
         /**
@@ -13646,7 +13630,7 @@ export interface Locale extends ILocale {
          */
         "settingsYouMakeHereCanBeChangedLater": string;
         /**
-         * Misskeyをどのように使いますか？
+         * Elythiaをどのように使いますか？
          */
         "howWillYouUseMisskey": string;
         "_use": {
@@ -15256,7 +15240,7 @@ export interface Locale extends ILocale {
          */
         "databaseOnly": string;
         /**
-         * 使用量を取得できませんでした。純正のMisskeyバックエンドにはこの機能がないため常に取得できません。mk-goで出ない場合はサーバーのログを確認してください。
+         * 使用量を取得できませんでした。純正のMisskeyバックエンドにはこの機能がないため常に取得できません。Elythiaで出ない場合はサーバーのログを確認してください。
          */
         "unavailable": string;
         /**
@@ -15288,7 +15272,7 @@ export interface Locale extends ILocale {
          */
         "nothing": string;
         /**
-         * リモートの{n}件はすべて実体を持たない参照です。mk-goはリモートメディアをローカルにキャッシュしないため、使用量には乗りません。
+         * リモートの{n}件はすべて実体を持たない参照です。Elythiaはリモートメディアをローカルにキャッシュしないため、使用量には乗りません。
          */
         "remoteNoBytes": ParameterizedString<"n">;
         /**
@@ -15320,7 +15304,7 @@ export interface Locale extends ILocale {
     };
     "_mkgoUnsupported": {
         /**
-         * mk-goはリモートメディアをローカルにキャッシュしない設計のため、この設定は動作しません。相手サーバーが削除したメディアの複製を保持しないこと、および他サーバー由来のコンテンツを自サーバーのストレージに保存しないことを優先しています。値はMisskeyへ戻したときのために保存されます。
+         * Elythiaはリモートメディアをローカルにキャッシュしない設計のため、この設定は動作しません。相手サーバーが削除したメディアの複製を保持しないこと、および他サーバー由来のコンテンツを自サーバーのストレージに保存しないことを優先しています。値はMisskeyへ戻したときのために保存されます。
          */
         "remoteMediaCache": string;
     };

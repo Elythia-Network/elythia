@@ -27,7 +27,7 @@ import { i18n } from '@/i18n.js';
 import { definePage } from '@/page.js';
 
 definePage(() => ({
-	title: 'Misskey Games',
+	title: 'Elythia Games',
 	icon: 'ti ti-device-gamepad',
 }));
 </script>
