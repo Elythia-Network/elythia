@@ -157,8 +157,8 @@ host を読ませる経路は開かない。**上の内訳と件数は #2892 よ
 proxy ではなく、allowlist は DB に実在する URL だけを通すので、静的にハードコード
 された URL は 403 になる (実測)。謝辞を残す以上、CSP を足す以外に表示させる道が無い。
 
-Elythia 独自の `/about-elythia` (#3394 より前は `/about-mkgo`) がコントリビューターをテキストリンクにしてあるのは別の
-理由 (新規ファイルなので最初から外部画像を持たせる必要が無い)。
+Elythia 独自の `/about-elythia` (#3394 より前は `/about-mkgo`) は外部画像を持たない
+(Elythia-Network への案内のアイコンは同梱のアセット)。
 
 ### embed も enforce の対象
 

@@ -77,31 +77,20 @@ SPDX-License-Identifier: AGPL-3.0-only
 			</FormSection>
 
 			<!--
-				**アバター画像は出さない。** 新規ページなので最初から外部画像を持たせる
-				必要が無く、名前だけで用は足りる。about-misskey 側の外部画像は #2892 で
-				CSP に 2 origin を足して表示できるようにしたので、**「CSP で落ちるから
-				出せない」わけではない** (出すなら avatars.githubusercontent.com は既に
-				許可済み)。
+				**コントリビューターの一覧は持たない。** 静的な一覧は更新が追いつかず、網羅は
+				GitHub 側が担う。代わりに開発の拠点 (Elythia-Network) を案内する。
 			-->
 			<FormSection>
-				<template #label>{{ i18n.ts._aboutMkGo.contributors }}</template>
-				<div class="_gaps_s">
-					<div :class="$style.contributors">
-						<a
-							v-for="username in contributors"
-							:key="username"
-							:href="`https://github.com/${username}`"
-							target="_blank"
-							rel="noopener"
-							:class="$style.contributor"
-						>@{{ username }}</a>
+				<template #label>Elythia Network</template>
+				<a :href="ELYTHIA_NETWORK_URL" target="_blank" rel="noopener" :class="$style.org" data-testid="about-elythia-network">
+					<img :src="elythiaIcon" alt="" :class="$style.orgIcon"/>
+					<div :class="$style.orgBody">
+						<div :class="$style.orgName">Elythia-Network</div>
+						<div :class="$style.orgDescription">{{ i18n.ts._aboutMkGo.elythiaNetworkDescription }}</div>
 					</div>
-					<FormLink :to="`${MKGO_REPOSITORY_URL}/graphs/contributors`" external>
-						<template #icon><i class="ti ti-users"></i></template>
-						{{ i18n.ts._aboutMkGo.allContributors }}
-						<template #suffix>GitHub</template>
-					</FormLink>
-				</div>
+					<i class="ti ti-brand-github" :class="$style.orgGo"></i>
+					<i class="ti ti-external-link" :class="$style.orgGo"></i>
+				</a>
 			</FormSection>
 		</div>
 	</div>
@@ -110,6 +99,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 <script lang="ts" setup>
 import { computed } from 'vue';
+import elythiaIcon from '/client-assets/elythia-icon.png';
 import FormLink from '@/components/form/link.vue';
 import FormSection from '@/components/form/section.vue';
 import MkKeyValue from '@/components/MkKeyValue.vue';
@@ -122,6 +112,9 @@ import { definePage } from '@/page.js';
 // 別物として並べる。backend 側は internal/config.MkGoRepositoryURL に同じ値を持ち、
 // meta.repositoryUrl の既定値と nodeinfo の software.repository がそれを使う (#2700)。
 const MKGO_REPOSITORY_URL = 'https://github.com/Elythia-Network/elythia';
+
+// Elythia の開発の拠点 (GitHub の組織)。
+const ELYTHIA_NETWORK_URL = 'https://github.com/Elythia-Network';
 
 // Misskey 本体のリポジトリ。**この値が入っているのは「未設定」を意味する。**
 // `meta.repositoryUrl` の列 DEFAULT が upstream 互換でこの URL になっており、
@@ -154,16 +147,6 @@ const serverRepositoryUrl = computed(() => {
 	if (!url || url === UPSTREAM_MISSKEY_REPOSITORY_URL) return null;
 	return url;
 });
-
-// mk-go 本体のコントリビューター。GitHub API を叩くと未認証の rate limit
-// (60 req/h/IP) を全閲覧者で共有することになるので静的に持つ。網羅は
-// 「全てのコントリビューター」リンク側が担う。
-const contributors = [
-	'shiroha-a',
-	'nananek',
-	'Misaki0331',
-	'JO3QMA',
-];
 
 const headerActions = computed(() => []);
 
@@ -198,22 +181,45 @@ definePage(() => ({
 	padding: 0 8px;
 }
 
-.contributors {
-	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-	grid-gap: 12px;
-}
-
-.contributor {
+.org {
 	display: flex;
 	align-items: center;
-	padding: 12px;
-	background: var(--MI_THEME-buttonBg);
-	border-radius: 6px;
+	gap: 14px;
+	padding: 14px;
+	border-radius: var(--MI-radius);
+	background: var(--MI_THEME-panel);
+	border: solid 1px var(--MI_THEME-divider);
+	color: inherit;
 
 	&:hover {
 		text-decoration: none;
-		background: var(--MI_THEME-buttonHoverBg);
+		background: var(--MI_THEME-panelHighlight);
 	}
+}
+
+.orgIcon {
+	flex-shrink: 0;
+	width: 48px;
+	height: 48px;
+	border-radius: 22%;
+}
+
+.orgBody {
+	flex: 1;
+	min-width: 0;
+}
+
+.orgName {
+	font-weight: bold;
+}
+
+.orgDescription {
+	font-size: 0.85em;
+	opacity: 0.75;
+}
+
+.orgGo {
+	flex-shrink: 0;
+	opacity: 0.6;
 }
 </style>

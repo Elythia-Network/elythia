@@ -8975,13 +8975,9 @@ export interface Locale extends ILocale {
          */
         "license": string;
         /**
-         * コントリビューター
+         * Elythiaの開発はここで行っています。不具合の報告や提案も受け付けています。
          */
-        "contributors": string;
-        /**
-         * 全てのコントリビューター
-         */
-        "allContributors": string;
+        "elythiaNetworkDescription": string;
     };
     "_federationHealth": {
         /**

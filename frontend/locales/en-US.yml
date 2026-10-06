@@ -2292,8 +2292,7 @@ _aboutMkGo:
   sourceCodeOfThisServerDescription: "The code actually running on this server. If it has been modified, the modified code is available here."
   sourceCodeOfMkGo: "Elythia itself (backend and frontend)"
   license: "License"
-  contributors: "Contributors"
-  allContributors: "All contributors"
+  elythiaNetworkDescription: "Elythia is developed here. Bug reports and suggestions are welcome."
 
 _federationHealth:
   unavailable: "Could not load delivery health. This backend may not support it, or you may lack permission."

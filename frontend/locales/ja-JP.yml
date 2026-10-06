@@ -2346,8 +2346,7 @@ _aboutMkGo:
   sourceCodeOfThisServerDescription: "このサーバーで実際に動作しているコードです。改変されている場合は、改変後のコードがここから入手できます。"
   sourceCodeOfMkGo: "Elythia本体(バックエンドとフロントエンド)"
   license: "ライセンス"
-  contributors: "コントリビューター"
-  allContributors: "全てのコントリビューター"
+  elythiaNetworkDescription: "Elythiaの開発はここで行っています。不具合の報告や提案も受け付けています。"
 
 _federationHealth:
   unavailable: "配送の健全性を取得できませんでした。この backend が対応していないか、権限がありません。"
