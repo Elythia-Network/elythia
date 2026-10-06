@@ -860,6 +860,7 @@ upstream が `jobState` の型を autogen (`AdminQueueJobsRequest['state'][numbe
 | #3407 | ログインしていない人のエントランス (`welcome.entrance.classic.vue` / `simple.vue`) から、本家の意匠である左の斜めの帯をやめ、夜空に既定アイコンの絵を薄く重ねる (`welcome.elythia-backdrop.vue`)。「Powered by」を Misskey のロゴから Elythia のアイコンと文字にする。**カードなどの色は利用者のテーマに依らず夜空のガラス** (テーマの変数をエントランスの部分木だけで上書きする、`utility/elythia-entrance.ts`)。背景画像を設定したサーバーではその画像を出す。**純正へは還元しない行** (Elythia の見た目) |
 | #3408 | 画面に出る「Misskey」のうち、このソフトウェア自身を指すもの (翻訳 32 言語の 27 キー、「Elythia Games」、初期セットアップ、起動失敗の画面、空のプッシュ通知) を「Elythia」にする。本家への寄付のお願い (`MkDonation`) を出さない。`/about-elythia` からフロントエンドの版の行を外し、`/about` は Elythia の版だけを出す (互換 Misskey 版の行は純正 backend のときだけ)。サイト名の既定値 (`og:site_name`) は backend 側で `Elythia` になったので、`frontend-shared/js/config.ts` は `Elythia` と `Misskey` の両方を未設定として扱う。backend 側の既定の名前 (タイトル、opensearch、RSS、パスキーの表示名、メール) も `config.DisplayName` に変えた。**純正へは還元しない行** (Elythia の名前) |
 | #3409 | ログインしていない人がトップ以外を開いたときの左のパネル (`ui/visitor.vue`、本家はテーマのアクセント色) と狭い画面の上の帯を、エントランスと同じ夜空にする (#3407 の背景の部品とテーマの変数の上書きを使う)。右の本文は利用者のテーマのまま。**純正へは還元しない行** (Elythia の見た目) |
+| #3410 | `/about-elythia` からコントリビューターの一覧をやめ、開発の拠点である GitHub の組織 (Elythia-Network) へのカードにする。AGPL-3.0 第 13 条の案内 (ソースコード、ライセンス) は変えない。**純正へは還元しない行** (Elythia 独自のページ) |
 
 ---
 
