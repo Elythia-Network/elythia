@@ -121,7 +121,7 @@ const splashMarkup = `<div id="splash">
 
 // renderFrontendShell renders the Misskey frontend SPA shell.
 func renderFrontendShell(c echo.Context, cfg *config.Config, metaRepo repository.MetaRepository, proxyAccountResolver meta.ProxyAccountResolver, chunkedUpload meta.ChunkedUploadCapability, clientEntry frontendutil.ClientEntryInfo, ov shellOverrides) error {
-	instanceName := "Misskey"
+	instanceName := config.DisplayName
 	// og:description の既定値は upstream views/_.ts の defaultDescription。
 	// `<meta name="description">` の方は upstream と同じく meta.description が
 	// null のときは**タグごと出さない**ので、有無を別に持つ。

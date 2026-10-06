@@ -10,12 +10,14 @@ import (
 	"fmt"
 	"html"
 	"strings"
+
+	"github.com/elythia-network/elythia/internal/config"
 )
 
 // HTMLWrapInput captures everything WrapHTML needs to build the outer email
 // shell. caller (signup / reset-password 等) は本文 HTML だけ作って渡す。
 type HTMLWrapInput struct {
-	// SiteName は header / footer に表示するインスタンス名。空なら "Misskey"。
+	// SiteName は header / footer に表示するインスタンス名。空なら config.DisplayName。
 	SiteName string
 	// SiteURL は footer の bottom link 先 (instance トップ)。空なら link 省略。
 	SiteURL string
@@ -46,7 +48,7 @@ type HTMLWrapInput struct {
 func WrapHTML(in HTMLWrapInput) string {
 	siteName := in.SiteName
 	if siteName == "" {
-		siteName = "Misskey"
+		siteName = config.DisplayName
 	}
 	subject := html.EscapeString(in.Subject)
 	siteNameEsc := html.EscapeString(siteName)

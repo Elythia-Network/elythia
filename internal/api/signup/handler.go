@@ -13,6 +13,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/core/captcha"
 	coreemail "github.com/elythia-network/elythia/internal/core/email"
 	"github.com/elythia-network/elythia/internal/core/role"
@@ -495,7 +496,7 @@ func (h *Handler) sendSignupConfirmation(meta *model.Meta, to, code, acceptLangu
 	if h.emailSender == nil {
 		return
 	}
-	siteName := "Misskey"
+	siteName := config.DisplayName
 	if meta != nil && meta.Name != nil && *meta.Name != "" {
 		siteName = *meta.Name
 	}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/activitypub/mfm"
+	"github.com/elythia-network/elythia/internal/config"
 	corenote "github.com/elythia-network/elythia/internal/core/note"
 	"github.com/elythia-network/elythia/internal/core/ugcvisibility"
 	"github.com/elythia-network/elythia/internal/model"
@@ -79,7 +80,7 @@ func (f *feedData) rss2() ([]byte, error) {
 		Title:       f.Title,
 		Link:        f.Link,
 		Description: f.Description,
-		Generator:   "Misskey",
+		Generator:   config.DisplayName,
 	}
 	if !f.Updated.IsZero() {
 		ch.LastBuild = f.Updated.UTC().Format(time.RFC1123Z)

@@ -68,6 +68,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/users"
 	apiwebhooks "github.com/elythia-network/elythia/internal/api/webhooks"
 	"github.com/elythia-network/elythia/internal/api/wellknown"
+	"github.com/elythia-network/elythia/internal/config"
 	coreabuse "github.com/elythia-network/elythia/internal/core/abuse"
 	coreachievement "github.com/elythia-network/elythia/internal/core/achievement"
 	coreannouncement "github.com/elythia-network/elythia/internal/core/announcement"
@@ -1789,7 +1790,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// userSecurityKeyRepo + WebAuthnService を構築して signin と /api/i に注入する。
 	// Redis セッションは redis.default を流用する (用途別分離は不要)。
 	userSecurityKeyRepo := repository.NewUserSecurityKeyRepository(s.db)
-	webauthnSvc, webauthnErr := coretwofactor.NewWebAuthnService(s.config.URL, "Misskey", s.redis.Default)
+	webauthnSvc, webauthnErr := coretwofactor.NewWebAuthnService(s.config.URL, config.DisplayName, s.redis.Default)
 	if webauthnErr != nil {
 		slog.Warn("webauthn service unavailable", "err", webauthnErr)
 	} else {

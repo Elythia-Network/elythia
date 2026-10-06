@@ -92,12 +92,12 @@ func ModeratorInactivityWarning(lang string, remainingDays, remainingHours int) 
 			"To moderators,",
 			"",
 			"A moderator has been inactive for a period of time. If there are " + timeEn + " of inactivity left, it will switch to invitation only.",
-			"If you do not want it to switch to invitation only, log in to Misskey to update your last active date.",
+			"If you do not want it to switch to invitation only, log in to Elythia to update your last active date.",
 			"",
 			"モデレーター各位",
 			"",
 			"モデレーターが一定期間活動していないようです。あと" + timeJa + "活動していない状態が続くと招待制に切り替わります。",
-			"招待制に切り替わることを望まない場合は、Misskeyにログインして最終アクティブ日時を更新してください。",
+			"招待制に切り替わることを望まない場合は、Elythiaにログインして最終アクティブ日時を更新してください。",
 		}, "\n")
 		return subject, body
 	case "ja":
@@ -107,7 +107,7 @@ func ModeratorInactivityWarning(lang string, remainingDays, remainingHours int) 
 			"モデレーター各位",
 			"",
 			"モデレーターが一定期間活動していないようです。あと" + timeVariant + "活動していない状態が続くと招待制に切り替わります。",
-			"招待制に切り替わることを望まない場合は、Misskeyにログインして最終アクティブ日時を更新してください。",
+			"招待制に切り替わることを望まない場合は、Elythiaにログインして最終アクティブ日時を更新してください。",
 		}, "\n")
 	default:
 		timeVariant := formatRemaining(lang, remainingDays, remainingHours)
@@ -116,7 +116,7 @@ func ModeratorInactivityWarning(lang string, remainingDays, remainingHours int) 
 			"To moderators,",
 			"",
 			"A moderator has been inactive for a period of time. If there are " + timeVariant + " of inactivity left, it will switch to invitation only.",
-			"If you do not want it to switch to invitation only, log in to Misskey to update your last active date.",
+			"If you do not want it to switch to invitation only, log in to Elythia to update your last active date.",
 		}, "\n")
 	}
 	return subject, body

@@ -611,7 +611,7 @@ func TestFrontendHTML_UpstreamHeadTags(t *testing.T) {
 		assert.Contains(t, body, `<meta name="theme-color-orig" content="`+color+`">`)
 		assert.Contains(t, body, `<meta name="format-detection" content="telephone=no,date=no,address=no,email=no,url=no">`)
 		assert.Contains(t, body,
-			`<link rel="search" type="application/opensearchdescription+xml" title="Misskey" href="https://example.test/opensearch.xml">`)
+			`<link rel="search" type="application/opensearchdescription+xml" title="Elythia" href="https://example.test/opensearch.xml">`)
 	})
 
 	t.Run("opensearch href は URL の末尾スラッシュを重複させない", func(t *testing.T) {

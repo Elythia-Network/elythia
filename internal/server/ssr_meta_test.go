@@ -583,7 +583,7 @@ func TestSSRPages_OpenGraph(t *testing.T) {
 		assert.Contains(t, body, `<meta property="og:image" content="https://example.test/identicon/alice">`)
 		assert.Contains(t, body, `<meta name="twitter:card" content="summary">`)
 		// Layout の title は og:title と違って host を付けない
-		assert.Contains(t, body, `<title>アリス (@alice) | Misskey</title>`)
+		assert.Contains(t, body, `<title>アリス (@alice) | Elythia</title>`)
 		assert.Contains(t, body, `<meta name="description" content="紹介文">`)
 	})
 
@@ -612,7 +612,7 @@ func TestSSRPages_OpenGraph(t *testing.T) {
 		assert.Contains(t, body, `<meta property="og:description" content="クリップの説明">`)
 		assert.Contains(t, body, `<meta property="og:url" content="https://example.test/clips/c1">`)
 		assert.Contains(t, body, `<meta property="og:image" content="https://example.test/identicon/alice">`)
-		assert.Contains(t, body, `<title>まとめ | Misskey</title>`)
+		assert.Contains(t, body, `<title>まとめ | Elythia</title>`)
 	})
 
 	t.Run("flash", func(t *testing.T) {
@@ -627,7 +627,7 @@ func TestSSRPages_OpenGraph(t *testing.T) {
 		assert.Contains(t, body, `<meta property="og:title" content="ゲーム">`)
 		assert.Contains(t, body, `<meta property="og:description" content="遊べます">`)
 		assert.Contains(t, body, `<meta property="og:url" content="https://example.test/play/f1">`)
-		assert.Contains(t, body, `<title>ゲーム | Misskey</title>`)
+		assert.Contains(t, body, `<title>ゲーム | Elythia</title>`)
 	})
 
 	// 非公開の Flash は所有者以外に存在しない扱いなので、SSR でも title /
@@ -674,7 +674,7 @@ func TestSSRGalleryPage_SensitiveFallsBackToAvatar(t *testing.T) {
 		body := newHandler(t, false)
 		assert.Contains(t, body, `<meta property="og:image" content="https://example.test/files/thumb.webp">`)
 		assert.Contains(t, body, `<meta name="twitter:card" content="summary_large_image">`)
-		assert.Contains(t, body, `<title>作品 | Misskey</title>`)
+		assert.Contains(t, body, `<title>作品 | Elythia</title>`)
 	})
 
 	t.Run("sensitive なら avatar と summary", func(t *testing.T) {
@@ -730,7 +730,7 @@ func TestSSRChannelPage(t *testing.T) {
 		assert.Contains(t, body, `<meta property="og:url" content="https://example.test/channels/ch1">`)
 		assert.Contains(t, body, `<meta property="og:image" content="https://example.test/files/b1.png">`)
 		assert.Contains(t, body, `<meta name="twitter:card" content="summary">`)
-		assert.Contains(t, body, `<title>雑談 | Misskey</title>`)
+		assert.Contains(t, body, `<title>雑談 | Elythia</title>`)
 	})
 
 	t.Run("banner も description も無ければ出さない", func(t *testing.T) {
@@ -770,7 +770,7 @@ func TestSSRReversiGamePage(t *testing.T) {
 	assert.Contains(t, body, `<meta property="og:description" content="⚫⚪Misskey Reversi⚪⚫">`)
 	assert.Contains(t, body, `<meta property="og:url" content="https://example.test/reversi/g/g1">`)
 	assert.Contains(t, body, `<meta name="twitter:card" content="summary">`)
-	assert.Contains(t, body, `<title>alice vs bob | Misskey</title>`)
+	assert.Contains(t, body, `<title>alice vs bob | Elythia</title>`)
 }
 
 // upstream views/announcement.tsx の OGP (#2531)。
@@ -797,7 +797,7 @@ func TestSSRAnnouncementPage(t *testing.T) {
 		assert.Contains(t, body, `<meta property="og:url" content="https://example.test/announcements/a1">`)
 		assert.Contains(t, body, `<meta property="og:image" content="`+img+`">`)
 		assert.Contains(t, body, `<meta name="twitter:card" content="summary_large_image">`)
-		assert.Contains(t, body, `<title>メンテナンス | Misskey</title>`)
+		assert.Contains(t, body, `<title>メンテナンス | Elythia</title>`)
 	})
 
 	// 個人宛てのお知らせは permalink で配らない。URL を知っているだけで

@@ -166,7 +166,7 @@ Elythia 側の実装変更で `/healthz` のパスが変わっている可能性
 
 ### nginx が `connect() to unix:/run/mkgo/mkgo.sock failed (13: Permission denied)`
 
-`chmodSocket: "666"` が正しく反映されていません。`deploy/uds/config/default.yml` を確認してください。Elythia の起動ログは `starting Misskey server socket=<path> url=<url>` の形 (`[server] listening on unix:` という行は出ません)。実際のパーミッションは `ls -l` で直接見るのが確実です。
+`chmodSocket: "666"` が正しく反映されていません。`deploy/uds/config/default.yml` を確認してください。Elythia の起動ログは `starting Elythia server socket=<path> url=<url>` の形 (1.x は `starting Misskey server`) (`[server] listening on unix:` という行は出ません)。実際のパーミッションは `ls -l` で直接見るのが確実です。
 
 ### valkey への接続が `resource temporarily unavailable` で失敗する
 

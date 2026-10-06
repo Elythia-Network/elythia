@@ -114,7 +114,7 @@ func serve(e env, args []string) int {
 
 	// 通常起動のログは stdout に出す (以前の misskey バイナリと同じ)。
 	log := e.setupLogging(e.stdout)
-	log.Info("starting Misskey (Go)", "version", config.MisskeyVersion, "mkGoVersion", config.MkGoVersion)
+	log.Info("starting Elythia", "version", config.MisskeyVersion, "mkGoVersion", config.MkGoVersion)
 
 	cfg, err := e.loadConfig(*configPath)
 	if err != nil {
@@ -165,7 +165,7 @@ func serve(e env, args []string) int {
 		log.Error("server shutdown error", "error", err)
 	}
 
-	fmt.Fprintln(e.stdout, "Misskey stopped.")
+	fmt.Fprintln(e.stdout, "Elythia stopped.")
 	return 0
 }
 
@@ -180,7 +180,7 @@ func dumpRoutes(e env, args []string) int {
 
 	// stdout に JSON だけを出したいので、log は stderr に向ける。
 	log := e.setupLogging(e.stderr)
-	log.Info("starting Misskey (Go)", "version", config.MisskeyVersion, "mkGoVersion", config.MkGoVersion)
+	log.Info("starting Elythia", "version", config.MisskeyVersion, "mkGoVersion", config.MkGoVersion)
 
 	cfg, err := e.loadConfig(*configPath)
 	if err != nil {
