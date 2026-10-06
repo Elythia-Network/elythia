@@ -81,7 +81,6 @@ var frontendCSPDirectives = []string{
 	// **style 側の `'unsafe-inline'` は残す** (#2786)。Vue の `:style` バインディングが
 	// 146 箇所あり、DOM の inline `style` 属性になる。属性は `style-src-attr` の
 	// 管轄で hash では救えず (`'unsafe-hashes'` が要る)、外すと UI が広範に壊れる。
-	// splash の `<style>:root{--splash-color:...}</style>` も meta 由来で動的。
 	"style-src 'self' 'unsafe-inline'",
 	// 画像は media proxy 経由で来る。**internal proxy なら同一オリジン**で、
 	// 外部 media proxy 構成ではその origin を extraMediaOrigins で足す (#2501)。

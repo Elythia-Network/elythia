@@ -241,7 +241,7 @@ func readNonCommentSource(t *testing.T, name string) string {
 // よって落ちたり落ちなかったりする。
 //
 // **登録そのものを gate で強制する。** 個々の登録は変異検証が効かない —
-// `TestFrontendHTML_SplashColor` の `<style>` 抽出を splash 名指しに直した時点で、
+// `TestFrontendHTML_SplashColor` (現 `TestFrontendHTML_SplashIgnoresThemeColor`) の `<style>` 抽出を splash 名指しに直した時点で、
 // **登録を全部 (このコミットが足した 7 件 + 元からあった 2 件) 外しても 40 seed で
 // 落ちなくなった** (= 無検証のコードになった)。
 // 「今たまたま誰も踏んでいない」ことと「安全」は別なので、形で縛る。

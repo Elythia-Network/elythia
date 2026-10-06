@@ -29,7 +29,7 @@
  * **mk-go にしか無い機能** (TS baseline では画面も field も存在しない):
  * 承認制サインアップ (`admin_moderation_approval_off_dialog` は丸ごと skip、
  * `admin_moderation_email_required_signup_toggle` は field の確認だけ)、
- * 起動スピナー (`smoke/frontend_load`、#2549)。2026.9.1 の追従で TS baseline を
+ * 起動画面の夜空 (`smoke/frontend_load`。#2549 の起動スピナーを 2.0.0 で置き換えた)。2026.9.1 の追従で TS baseline を
  * 回したときに、これらが TS で落ちることが分かった。
  */
 export const isTsBackend = process.env.MK_BACKEND_TYPE === 'ts';

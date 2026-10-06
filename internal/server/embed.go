@@ -154,7 +154,7 @@ func (h *embedHandlers) render(c echo.Context, ctx *embedContext) error {
 	// upstream base-embed.tsx:46-47 と同じ fallback (SPA shell と共通)。
 	iconURL := "/favicon.ico"
 	appleTouchIconURL := "/apple-touch-icon.png"
-	themeColor := "#86b300"
+	themeColor := defaultThemeColor
 	metaJSON := "{}"
 
 	// CSP の media origin は object storage (meta 依存) から来るので、
