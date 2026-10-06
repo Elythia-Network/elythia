@@ -13,25 +13,16 @@ SPDX-License-Identifier: AGPL-3.0-only
 				<div v-if="mkGoVersion" :class="$style.bannerVersion">v{{ mkGoVersion }}</div>
 			</div>
 
-			<div style="text-align: center;">
-				{{ i18n.ts._aboutMkGo.about }}
-			</div>
-
 			<!--
-				**バックエンドとフロントエンドを対で出す。** Go で書き直したのは
-				バックエンドだけなので、2 行が並ぶだけで構成が伝わる。
+				**フロントエンドの行は持たない。** 以前はバックエンドとフロントエンドの版を
+				対で出していたが、frontend を本体へ取り込んで 1 つのリポジトリ・1 つの版に
+				なった (#3379)。追従している本家の版は「サーバー情報」の Misskey の欄にある。
 			-->
-			<FormSection>
-				<div class="_gaps_s">
-					<MkKeyValue v-if="mkGoVersion" :copy="backendVersion">
-						<template #key>{{ i18n.ts._aboutMkGo.backend }}</template>
-						<template #value>{{ backendVersion }}</template>
-					</MkKeyValue>
-					<MkKeyValue :copy="frontendVersion">
-						<template #key>{{ i18n.ts._aboutMkGo.frontend }}</template>
-						<template #value>{{ frontendVersion }}</template>
-					</MkKeyValue>
-				</div>
+			<FormSection v-if="mkGoVersion">
+				<MkKeyValue :copy="elythiaVersion">
+					<template #key>{{ i18n.ts.version }}</template>
+					<template #value>{{ elythiaVersion }}</template>
+				</MkKeyValue>
 			</FormSection>
 
 			<!--
@@ -119,7 +110,6 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 <script lang="ts" setup>
 import { computed } from 'vue';
-import { version } from '@@/js/config.js';
 import FormLink from '@/components/form/link.vue';
 import FormSection from '@/components/form/section.vue';
 import MkKeyValue from '@/components/MkKeyValue.vue';
@@ -149,23 +139,13 @@ const mkGoMeta = instance as typeof instance & {
 };
 const mkGoVersion = mkGoMeta.mkGoVersion ?? null;
 
-// バックエンドの版。ビルド時に revision を埋めていれば短縮ハッシュを添える
+// Elythia の版。ビルド時に revision を埋めていれば短縮ハッシュを添える
 // (`Elythia 1.3.0 (abc1234)`)。`go run` や build-arg を渡さない image では空に
 // なるので、そのときは版だけ出す。
-const backendVersion = computed(() => {
+const elythiaVersion = computed(() => {
 	const commit = mkGoMeta.mkGoCommit;
 	return commit ? `Elythia ${mkGoVersion} (${commit})` : `Elythia ${mkGoVersion}`;
 });
-
-// フロントエンドの版。build 時定数 (= 追従している本家の package.json の版) を出す。
-// 以前は fork のタグ (`2026.9.0-mk.3`) を mk-go から受け取って出していたが、
-// frontend を本体へ取り込んで独自の版を持たなくなった (#3379)。独自の変更の
-// 有無は上の mk-go の版で分かる。
-//
-// **`instance.version` は使わない。** あれは backend が名乗る互換 Misskey 版で、
-// この行が示したいフロントエンドの出どころとは別物 (`about.overview.vue` の
-// サーバー情報欄は逆に backend の申告値を出す。見ているものが違う)。
-const frontendVersion = computed(() => `Misskey ${version}`);
 
 // このサーバーが動かしているコードの案内先。未設定 (null / 空文字 / upstream の列
 // DEFAULT のまま) なら出さない。

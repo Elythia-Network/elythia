@@ -16,7 +16,7 @@ import { expect, test } from '@playwright/test';
 // `'unsafe-inline'` を外したので、`boot.js` の Reload ボタンを
 // `addEventListener` に移した (fork の custom commit)。
 //
-// **押せないと「Failed to initialize Misskey」画面から復帰できない。** この画面が
+// **押せないと「Failed to initialize Elythia」画面から復帰できない。** この画面が
 // 出るのは CLIENT_ENTRY チャンクの 404 や boot 中の例外で、唯一の復旧手段が
 // このボタン。到達するのは boot 完了前に限られる (`boot/common.ts` が
 // `app.mount()` 後に `window.onerror = null` する) が、それはこの画面が出る条件

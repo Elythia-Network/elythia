@@ -296,7 +296,8 @@ export async function createEmptyNotification(): Promise<void> {
 	await globalThis.registration.showNotification(
 		(new URL(origin)).host,
 		{
-			body: `Misskey v${_VERSION_}`,
+			// _VERSION_ は追従している本家の版 (frontend の package.json) なので、Elythia の版と取り違えないよう付けない
+			body: 'Elythia',
 			silent: true,
 			badge: iconUrl('null'),
 			tag: 'read_notification',

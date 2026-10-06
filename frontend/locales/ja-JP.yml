@@ -1,8 +1,8 @@
 _lang_: "日本語"
 
 headlineMisskey: "ノートでつながるネットワーク"
-introMisskey: "ようこそ！Misskeyは、オープンソースの分散型マイクロブログサービスです。\n「ノート」を作成して、いま起こっていることを共有したり、あなたについて皆に発信しよう📡\n「リアクション」機能で、皆のノートに素早く反応を追加することもできます👍\n新しい世界を探検しよう🚀"
-poweredByMisskeyDescription: "{name}は、オープンソースのプラットフォーム<b>Misskey</b>のサーバーのひとつです。"
+introMisskey: "ようこそ！Elythiaは、オープンソースの分散型マイクロブログサービスです。\n「ノート」を作成して、いま起こっていることを共有したり、あなたについて皆に発信しよう📡\n「リアクション」機能で、皆のノートに素早く反応を追加することもできます👍\n新しい世界を探検しよう🚀"
+poweredByMisskeyDescription: "{name}は、オープンソースのプラットフォーム<b>Elythia</b>のサーバーのひとつです。"
 monthAndDay: "{month}月 {day}日"
 search: "検索"
 reset: "リセット"
@@ -11,7 +11,7 @@ username: "ユーザー名"
 password: "パスワード"
 initialPasswordForSetup: "初期設定開始用パスワード"
 initialPasswordIsIncorrect: "初期設定開始用のパスワードが違います。"
-initialPasswordForSetupDescription: "Misskeyを自分でインストールした場合は、設定ファイルに入力したパスワードを使用してください。\nMisskeyのホスティングサービスなどを使用している場合は、提供されたパスワードを使用してください。\nパスワードを設定していない場合は、空欄にしたまま続行してください。"
+initialPasswordForSetupDescription: "Elythiaを自分でインストールした場合は、設定ファイルに入力したパスワードを使用してください。\nElythiaのホスティングサービスなどを使用している場合は、提供されたパスワードを使用してください。\nパスワードを設定していない場合は、空欄にしたまま続行してください。"
 forgotPassword: "パスワードを忘れた"
 fetchingAsApObject: "連合に照会中"
 ok: "OK"
@@ -179,7 +179,7 @@ youCanCleanRemoteFilesCache: "ファイル管理の🗑️ボタンで全ての�
 cacheRemoteSensitiveFiles: "リモートのセンシティブなファイルをキャッシュする"
 cacheRemoteSensitiveFilesDescription: "この設定を無効にすると、リモートのセンシティブなファイルはキャッシュせず直リンクするようになります。"
 flagAsBot: "Botとして設定"
-flagAsBotDescription: "このアカウントがプログラムによって運用される場合は、このフラグをオンにします。オンにすると、反応の連鎖を防ぐためのフラグとして他の開発者に役立ったり、Misskeyのシステム上での扱いがBotに合ったものになります。"
+flagAsBotDescription: "このアカウントがプログラムによって運用される場合は、このフラグをオンにします。オンにすると、反応の連鎖を防ぐためのフラグとして他の開発者に役立ったり、Elythiaのシステム上での扱いがBotに合ったものになります。"
 flagAsCat: "にゃああああああああああああああ！！！！！！！！！！！！"
 flagAsCatDescription: "にゃにゃにゃ？？"
 flagShowTimelineReplies: "タイムラインにノートへの返信を表示する"
@@ -597,7 +597,7 @@ popout: "ポップアウト"
 volume: "音量"
 masterVolume: "マスター音量"
 notUseSound: "サウンドを出力しない"
-useSoundOnlyWhenActive: "Misskeyがアクティブな時のみサウンドを出力する"
+useSoundOnlyWhenActive: "Elythiaがアクティブな時のみサウンドを出力する"
 details: "詳細"
 renoteDetails: "リノートの詳細"
 chooseEmoji: "絵文字を選択"
@@ -614,7 +614,7 @@ sort: "ソート"
 ascendingOrder: "昇順"
 descendingOrder: "降順"
 scratchpad: "スクラッチパッド"
-scratchpadDescription: "スクラッチパッドは、AiScriptの実験環境を提供します。Misskeyと対話するコードの記述、実行、結果の確認ができます。"
+scratchpadDescription: "スクラッチパッドは、AiScriptの実験環境を提供します。Elythiaと対話するコードの記述、実行、結果の確認ができます。"
 uiInspector: "UIインスペクター"
 uiInspectorDescription: "メモリ上に存在しているUIコンポーネントのインスタンスの一覧を見ることができます。UIコンポーネントはUi:C:系関数により生成されます。"
 output: "出力"
@@ -828,7 +828,7 @@ onlineUsersCount: "{n}人がオンライン"
 nUsers: "{n}ユーザー"
 nNotes: "{n}ノート"
 sendErrorReports: "エラーリポートを送信"
-sendErrorReportsDescription: "オンにすると、問題が発生したときにエラーの詳細情報がMisskeyに共有され、ソフトウェアの品質向上に役立てることができます。エラー情報には、OSのバージョン、ブラウザの種類、行動履歴などが含まれます。"
+sendErrorReportsDescription: "オンにすると、問題が発生したときにエラーの詳細情報がElythiaに共有され、ソフトウェアの品質向上に役立てることができます。エラー情報には、OSのバージョン、ブラウザの種類、行動履歴などが含まれます。"
 myTheme: "マイテーマ"
 backgroundColor: "背景"
 accentColor: "アクセント"
@@ -1196,7 +1196,7 @@ rolesThatCanBeUsedThisEmojiAsReactionPublicRoleWarn: "ロールは公開ロー�
 cancelReactionConfirm: "リアクションを取り消しますか？"
 changeReactionConfirm: "リアクションを変更しますか？"
 later: "あとで"
-goToMisskey: "Misskeyへ"
+goToMisskey: "Elythiaへ"
 additionalEmojiDictionary: "絵文字の追加辞書"
 installed: "インストール済み"
 branding: "ブランディング"
@@ -1260,7 +1260,7 @@ externalServices: "外部サービス"
 sourceCode: "ソースコード"
 sourceCodeIsNotYetProvided: "ソースコードはまだ提供されていません。この問題の修正について管理者に問い合わせてください。"
 repositoryUrl: "リポジトリURL"
-repositoryUrlDescription: "ソースコードが公開されているリポジトリがある場合、そのURLを記入します。Misskeyを現状のまま（ソースコードにいかなる変更も加えずに）使用している場合は https://github.com/misskey-dev/misskey と記入します。"
+repositoryUrlDescription: "ソースコードが公開されているリポジトリがある場合、そのURLを記入します。Elythiaを現状のまま（ソースコードにいかなる変更も加えずに）使用している場合は https://github.com/Elythia-Network/elythia と記入します。"
 repositoryUrlOrTarballRequired: "リポジトリを公開していない場合、代わりにtarballを提供する必要があります。詳細は.config/example.ymlを参照してください。"
 feedback: "フィードバック"
 feedbackUrl: "フィードバックURL"
@@ -1728,7 +1728,7 @@ _initialAccountSetting:
   pushNotificationDescription: "プッシュ通知を有効にすると{name}の通知をお使いのデバイスで受け取ることができます。"
   initialAccountSettingCompleted: "初期設定が完了しました！"
   haveFun: "{name}をお楽しみください！"
-  youCanContinueTutorial: "このまま{name}(Misskey)の使い方についてのチュートリアルに進むこともできますが、ここで中断してすぐに使い始めることもできます。"
+  youCanContinueTutorial: "このまま{name}(Elythia)の使い方についてのチュートリアルに進むこともできますが、ここで中断してすぐに使い始めることもできます。"
   startTutorial: "チュートリアルを開始"
   skipAreYouSure: "初期設定をスキップしますか？"
   laterAreYouSure: "初期設定をあとでやり直しますか？"
@@ -1740,10 +1740,10 @@ _initialTutorial:
   skipAreYouSure: "チュートリアルを終了しますか？"
   _landing:
     title: "チュートリアルへようこそ"
-    description: "ここでは、Misskeyの基本的な使い方や機能を確認できます。"
+    description: "ここでは、Elythiaの基本的な使い方や機能を確認できます。"
   _note:
     title: "ノートって何？"
-    description: "Misskeyでの投稿は「ノート」と呼びます。ノートはタイムラインに時系列で並んでいて、リアルタイムで更新されていきます。"
+    description: "Elythiaでの投稿は「ノート」と呼びます。ノートはタイムラインに時系列で並んでいて、リアルタイムで更新されていきます。"
     reply: "返信することができます。返信に対しての返信も可能で、スレッドのように会話を続けることもできます。"
     renote: "そのノートを自分のタイムラインに流して共有することができます。テキストを追加して引用することも可能です。"
     reaction: "リアクションをつけることができます。詳しくは次のページで解説します。"
@@ -1757,7 +1757,7 @@ _initialTutorial:
     reactDone: "「ー」ボタンを押すとリアクションを取り消すことができます。"
   _timeline:
     title: "タイムラインのしくみ"
-    description1: "Misskeyには、使い方に応じて複数のタイムラインが用意されています（サーバーによってはいずれかが無効になっていることがあります）。"
+    description1: "Elythiaには、使い方に応じて複数のタイムラインが用意されています（サーバーによってはいずれかが無効になっていることがあります）。"
     home: "あなたがフォローしているアカウントの投稿を見られます。"
     local: "このサーバーにいるユーザー全員の投稿を見られます。"
     social: "ホームタイムラインとローカルタイムラインの投稿が両方表示されます。"
@@ -1766,7 +1766,7 @@ _initialTutorial:
     description3: "その他にも、リストタイムラインやチャンネルタイムラインなどがあります。詳しくは{link}をご覧ください。"
   _postNote:
     title: "ノートの投稿設定"
-    description1: "Misskeyにノートを投稿する際には、様々なオプションの設定が可能です。投稿フォームはこのようになっています。"
+    description1: "Elythiaにノートを投稿する際には、様々なオプションの設定が可能です。投稿フォームはこのようになっています。"
     _visibility:
       description: "ノートを表示できる相手を制限できます。"
       public: "すべてのユーザーに公開。"
@@ -1794,7 +1794,7 @@ _initialTutorial:
     doItToContinue: "画像をセンシティブに設定すると先に進めるようになります。"
   _done:
     title: "チュートリアルは終了です🎉"
-    description: "ここで紹介した機能はほんの一部にすぎません。Misskeyの使い方をより詳しく知るには、{link}をご覧ください。"
+    description: "ここで紹介した機能はほんの一部にすぎません。Elythiaの使い方をより詳しく知るには、{link}をご覧ください。"
 
 _timelineDescription:
   home: "ホームタイムラインでは、あなたがフォローしているアカウントの投稿を見られます。"
@@ -1873,7 +1873,7 @@ _achievements:
     _notes1:
       title: "just setting up my msky"
       description: "初めてノートを投稿した"
-      flavor: "良いMisskeyライフを！"
+      flavor: "良いElythiaライフを！"
     _notes10:
       title: "いくつかのノート"
       description: "ノートを10回投稿した"
@@ -1969,7 +1969,7 @@ _achievements:
     _login1000:
       title: "ノートマスターⅢ"
       description: "通算ログイン日数が1,000日"
-      flavor: "Misskeyを使ってくれてありがとう！"
+      flavor: "Elythiaを使ってくれてありがとう！"
     _noteClipped1:
       title: "クリップせずにはいられないな"
       description: "初めてノートをクリップした"
@@ -2110,7 +2110,7 @@ _achievements:
       title: "テスト過剰"
       description: "通知のテストをごく短時間のうちに連続して行った"
     _tutorialCompleted:
-      title: "Misskey初心者講座 修了証"
+      title: "Elythia初心者講座 修了証"
       description: "チュートリアルを完了した"
     _bubbleGameExplodingHead:
       title: "🤯"
@@ -2172,7 +2172,7 @@ _role:
     driveCapacity: "ドライブ容量"
     maxFileSize: "アップロード可能な最大ファイルサイズ"
     maxFileSize_caption: "リバースプロキシやCDNなど、前段で別の設定値が存在する場合があります。"
-    maxFileSize_caption2: "サーバー全体の最大ファイルサイズ設定は {max} です。これより大きいファイルをアップロードできるようにするには、Misskeyの設定ファイルからこの設定を緩和してください。"
+    maxFileSize_caption2: "サーバー全体の最大ファイルサイズ設定は {max} です。これより大きいファイルをアップロードできるようにするには、Elythiaの設定ファイルからこの設定を緩和してください。"
     alwaysMarkNsfw: "ファイルにNSFWを常に付与"
     canUpdateBioMedia: "アイコンとバナーの更新を許可"
     pinMax: "ノートのピン留めの最大数"
@@ -2342,13 +2342,9 @@ _aboutMisskey:
   projectMembers: "プロジェクトメンバー"
 
 _aboutMkGo:
-  about: "Elythiaは、Misskey互換のバックエンド実装です。"
-  backend: "バックエンド"
-  frontend: "フロントエンド"
   sourceCodeOfThisServer: "このサーバーのソースコード"
   sourceCodeOfThisServerDescription: "このサーバーで実際に動作しているコードです。改変されている場合は、改変後のコードがここから入手できます。"
   sourceCodeOfMkGo: "Elythia本体(バックエンドとフロントエンド)"
-  sourceCodeOfFrontend: "フロントエンド(Misskeyのフォーク)"
   license: "ライセンス"
   contributors: "コントリビューター"
   allContributors: "全てのコントリビューター"
@@ -2667,7 +2663,7 @@ _soundSettings:
   driveFileTypeWarn: "このファイルは対応していません"
   driveFileTypeWarnDescription: "音声ファイルを選択してください"
   driveFileDurationWarn: "音声が長すぎます"
-  driveFileDurationWarnDescription: "長い音声を使用するとMisskeyの使用に支障をきたす可能性があります。それでも続行しますか？"
+  driveFileDurationWarnDescription: "長い音声を使用するとElythiaの使用に支障をきたす可能性があります。それでも続行しますか？"
   driveFileError: "音声が読み込めませんでした。設定を変更してください"
 
 _ago:
@@ -3481,7 +3477,7 @@ _urlPreviewSetting:
   userAgent: "User-Agent"
   userAgentDescription: "プレビュー取得時に使用されるUser-Agentを設定します。空欄の場合、デフォルトのUser-Agentが使用されます。"
   summaryProxy: "プレビューを生成するプロキシのエンドポイント"
-  summaryProxyDescription: "Misskey本体ではなく、サマリープロキシを使用してプレビューを生成します。"
+  summaryProxyDescription: "Elythia本体ではなく、サマリープロキシを使用してプレビューを生成します。"
   summaryProxyDescription2: "プロキシには下記パラメータがクエリ文字列として連携されます。プロキシ側がこれらをサポートしない場合、設定値は無視されます。"
 
 _mediaControls:
@@ -3623,7 +3619,7 @@ _bootErrors:
   otherOption1: "クライアント設定とキャッシュを削除"
   otherOption2: "簡易クライアントを起動"
   otherOption3: "修復ツールを起動"
-  otherOption4: "Misskeyをセーフモードで起動"
+  otherOption4: "Elythiaをセーフモードで起動"
 
 _search:
   searchScopeAll: "全て"
@@ -3637,13 +3633,13 @@ _search:
   postTo: "投稿日時to"
 
 _serverSetupWizard:
-  installCompleted: "Misskeyのインストールが完了しました！"
+  installCompleted: "Elythiaのインストールが完了しました！"
   firstCreateAccount: "まずは、管理者アカウントを作成しましょう。"
   accountCreated: "管理者アカウントが作成されました！"
   serverSetting: "サーバーの設定"
   youCanEasilyConfigureOptimalServerSettingsWithThisWizard: "このウィザードで簡単に最適なサーバーの設定が行えます。"
   settingsYouMakeHereCanBeChangedLater: "ここでの設定は、あとからでも変更できます。"
-  howWillYouUseMisskey: "Misskeyをどのように使いますか？"
+  howWillYouUseMisskey: "Elythiaをどのように使いますか？"
   _use:
     single: "お一人様サーバー"
     single_description: "自分専用のサーバーとして、一人で使う"
