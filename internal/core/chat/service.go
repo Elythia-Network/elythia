@@ -31,7 +31,7 @@ import (
 // AP 由来の値を書く chat 列の上限 (migration/000022_chat.up.sql)。溢れると
 // INSERT ごと落ちて、その配送が retry を使い切って dead になる (#2726)。
 //
-// 判断は docs/divergence.md の「リモート由来の文字列を列に入れるときの規則」
+// 判断は docs/divergence/security.md の「リモート由来の文字列を列に入れるときの規則」
 // どおり: 本文 (name / description / text) は切る、身元 (id / uri) は
 // document ごと拒否する。
 const (

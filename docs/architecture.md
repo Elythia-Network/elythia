@@ -346,7 +346,7 @@ upstream に無い、または cherrypick 由来の加算機能（wire 互換を
 
 | 機能 | 系統 | 備考 |
 |---|---|---|
-| password hash の Argon2id 受理 | cherrypick | signin 成功後に bcrypt へ段階移行。divergence.md |
+| password hash の Argon2id 受理 | cherrypick | signin 成功後に bcrypt へ段階移行。[divergence/security.md](divergence/security.md) |
 | federated chat | vanilla chat shape + yojo-art/cherrypick 連合 | 1-on-1 DM を `Create+Note(_misskey_talk:true)` で AP 配送 |
 | federated reversi | vanilla reversi + cherrypick 連合対戦 | crc32 等は packed schema 外（連合 verify 用） |
 | Ed25519 / Multikey (FEP-521a) | 連合拡張 | RSA に加え Ed25519 署名 |

@@ -100,7 +100,7 @@ docker compose exec app /app/elythia migrate -config .config/default.yml -direct
 | `000068` | 冗長な index を DROP | **落とすのは Elythia の migration が作った index だけ**。upstream 由来の index は絶対に触らない (TS 生まれの DB と Elythia 生まれの DB で index の名前を揃え、後の migration (`000083` など) が upstream の名前を前提に書けるようにするため。当初の理由は TS へ戻したときに本家が再作成できないことだったが、そちらは今は保証しない) |
 | `000080` | `note` の自己参照 FK (`renoteId` / `replyId`) を DROP | **upstream 追随。** 本家も 2025.8.0 の `1753868431598-remove_note_constraints.js` でこの 2 本を削除しており、現在の `MiNote` は `createForeignKeyConstraints: false` で FK を作らない |
 | `000081` | 孤児化した `note` 行を DELETE + 痕跡列を NULL 化 | **TS が書いた行が対象になりうる 1 つ目。** 下記参照 |
-| `000082` | owner が持つ `chat_room_membership` / `chat_room_invitation` を DELETE | **`transfer-ownership` だけが作れる行の除去** (#2858)。この endpoint は upstream Misskey に無い (出自は [乖離一覧](divergence.md))。upstream は owner に membership 行を作らず (`ChatService.ts` の `concat({userId: room.ownerId, isMuted: false})`)、owner 宛の招待も `createRoomInvitation` が弾くので TS 生まれの DB には存在しない |
+| `000082` | owner が持つ `chat_room_membership` / `chat_room_invitation` を DELETE | **`transfer-ownership` だけが作れる行の除去** (#2858)。この endpoint は upstream Misskey に無い (出自は [乖離一覧](divergence/api.md))。upstream は owner に membership 行を作らず (`ChatService.ts` の `concat({userId: room.ownerId, isMuted: false})`)、owner 宛の招待も `createRoomInvitation` が弾くので TS 生まれの DB には存在しない |
 | `000083` | `IDX_note_userId` を DROP して `("userId","id" DESC)` の複合 index を作る | **upstream 追随であり、seed の実体が無かった穴を塞ぐもの。** 本家は 2025-04 の `1745378064470-composite-note-index.js` で同じ張り替えをしており、`000067` はその `CompositeNoteIndex1745378064470` を**適用済みとして seed していた**。しかし Elythia 側に index を作る migration が無かったため、TS へ復路で渡すと「適用済み」と誤認したまま index が存在しない状態になっていた。落とすのは Elythia 固有名の `IDX_note_userId` だけで、upstream 由来の index には触らない (`000068` と同じ方針)。作る側は upstream と同名なので TS 生まれの DB では `IF NOT EXISTS` で skip される |
 | `000084` | `meta."repositoryUrl"` の未設定行を Elythia のリポジトリで `UPDATE` | **TS が書いた列の値に当たる 2 つ目。** 対象は NULL と upstream の列 DEFAULT (`https://github.com/misskey-dev/misskey`) のままの行だけで、operator が設定した URL には触らない。下記参照 |
 | `000085` | `meta."feedbackUrl"` の未設定行を Elythia の issues で `UPDATE` | **TS が書いた列の値に当たる 3 つ目。** `000084` とまったく同じ構造で、`000029` が隣り合う 2 行で設定している列 DEFAULT のもう一方。対象は NULL と upstream の列 DEFAULT (`https://github.com/misskey-dev/misskey/issues/new`) のままの行だけ。下記参照 |
@@ -352,7 +352,7 @@ Playwright spec (#744) を **298 ファイル / 40 directory** (directory は sp
   を除く。あちらは対象外)**。** セットアップ
   ウィザードで「1 人用」以外を選んだインスタンスは既定で off になっている。
   Redis の timeline list が空の状態 (= 移行直後) で最も影響が大きい。詳細は
-  [divergence.md §5.6](divergence.md#56-timeline-の-db-fallback-を止めるつまみ)
+  [divergence/operations.md §5.6](divergence/operations.md#56-timeline-の-db-fallback-を止めるつまみ)
 
 ### ファイルアップロードが `CREDENTIAL_REQUIRED` で失敗する
 

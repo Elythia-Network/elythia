@@ -81,7 +81,7 @@ const paginator = markRaw(new Paginator('admin/drive/files', {
 // **削除対象が実在するときだけ押せるようにする** (#3102)。
 //
 // mk-go はリモートメディアをキャッシュしないので、mk-go が作った行に対象は無い
-// (docs/divergence.md 5.5)。**しかし純正 Misskey から引き継いだ DB には、
+// (docs/divergence/operations.md 5.5)。**しかし純正 Misskey から引き継いだ DB には、
 // `cacheRemoteFiles` が有効だった時期の実体つきの行が残る。** 以前は無条件に
 // disabled にしていたので、その運用者は消せるはずのものを UI から消せなかった。
 //

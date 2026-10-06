@@ -77,7 +77,7 @@ var (
 	// **これは未実装ではなく意図的**。mk-go はリモートメディアの実体を持たず
 	// link 行 (`isLink=true` / `size=0`) しか作らないため、退去すべき実体が
 	// 存在せず使用量にも乗らない。gate も LRU 退去も対象が無い
-	// (docs/divergence.md §5.5、#2411)。
+	// (docs/divergence/operations.md §5.5、#2411)。
 	ErrNoFreeSpace = errors.New("no free space")
 	// ErrInvalidFileName is returned when a file rename fails
 	// ValidateFileName. Handler maps this to upstream's INVALID_FILE_NAME
@@ -689,7 +689,7 @@ func (s *Service) Upload(ctx context.Context, in UploadInput) (*model.DriveFile,
 		// 強制し、remote user は expireOldFile で逃げ道を作る。mk-go も remote は
 		// skip するが、理由が違う: リモートメディアの実体を持たない設計なので
 		// gate すべき容量そのものが発生しない (link 行は `size=0`)。expireOldFile
-		// 相当を足さないのも同じ理由で、意図的な差分 (docs/divergence.md §5.5)。
+		// 相当を足さないのも同じ理由で、意図的な差分 (docs/divergence/operations.md §5.5)。
 		if in.User.IsLocal() && policies != nil {
 			if maxBytes, ok := policyMegabytes(policies["maxFileSizeMb"]); ok {
 				if int64(len(info.Body)) > maxBytes {

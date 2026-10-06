@@ -1036,7 +1036,7 @@ type Note struct {
 	// string ならそれ / object なら `href`)。**`id` は見ない**。ただし inbox
 	// 経路では手前の `Normalize` が JSON-LD の展開形を剥がすので、**単一キーの**
 	// `{"@id": ...}` のような形は string になって届く (2 キーあると潰れない。
-	// `docs/divergence.md` の `note.url` の節)。
+	// `docs/divergence/security.md` の `note.url` の節)。
 	//
 	// upstream の `renderNote` は note に `url` を出さないので、outbound には
 	// 影響しない (omitempty で消える)。

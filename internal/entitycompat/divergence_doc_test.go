@@ -7,6 +7,7 @@ import (
 	"go/printer"
 	"go/token"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -15,7 +16,7 @@ import (
 	"testing"
 )
 
-// docs/divergence.md は upstream との差分の一次資料で、diff-e2e の ignore-list を
+// docs/divergence.md (目次) と docs/divergence/ の領域ごとのファイル (#3414) は upstream との差分の一次資料で、diff-e2e の ignore-list を
 // 足すときに「対応する記述があるか」を確認する運用になっている (docs/ci.md の `diff-e2e` の節)。
 // 実態より少ない表を信じると、そこに載っていない差分を差分として認識しないまま
 // 調査が進む。
@@ -86,7 +87,7 @@ func TestDivergenceDoc_EndpointCountMatchesTable(t *testing.T) {
 	}
 
 	if sum != declared {
-		t.Errorf(`docs/divergence.md §1-1 の見出しは %d だが、表の件数列の合計は %d:
+		t.Errorf(`docs/divergence/api.md §1-1 の見出しは %d だが、表の件数列の合計は %d:
   %s
 
 見出しか表のどちらかが古い。endpoint を足したら**サマリだけでなく §1-1 の表にも
@@ -117,7 +118,7 @@ func TestDivergenceDoc_TableCountMatchesSchema(t *testing.T) {
 	lines := readDivergenceDoc(t)
 	start, declared := findDivergenceSection(t, lines, "2-1")
 	if len(own) != declared {
-		t.Errorf(`docs/divergence.md §2-1 の見出しは %d だが、migration が作る upstream 非存在テーブルは %d 件:
+		t.Errorf(`docs/divergence/db.md §2-1 の見出しは %d だが、migration が作る upstream 非存在テーブルは %d 件:
   %s
 
 表に無いテーブルがあるか、逆に消えたテーブルが残っている。`,
@@ -130,7 +131,7 @@ func TestDivergenceDoc_TableCountMatchesSchema(t *testing.T) {
 	// `user_keypair` を挙げる等) ので、行を消して散文で触れるだけで素通りする。
 	for _, table := range own {
 		if !divergenceRowNames(sectionLines(lines, start), table) {
-			t.Errorf("docs/divergence.md §2-1 に %q の行が無い", table)
+			t.Errorf("docs/divergence/db.md §2-1 に %q の行が無い", table)
 		}
 	}
 
@@ -160,7 +161,7 @@ func TestDivergenceDoc_ColumnCountMatchesSchema(t *testing.T) {
 	lines := readDivergenceDoc(t)
 	start, declared := findDivergenceSection(t, lines, "2-2")
 	if len(own) != declared {
-		t.Errorf(`docs/divergence.md §2-2 の見出しは %d だが、upstream 共有テーブルの mk-go 独自カラムは %d 件:
+		t.Errorf(`docs/divergence/db.md §2-2 の見出しは %d だが、upstream 共有テーブルの mk-go 独自カラムは %d 件:
   %s
 
 **見出しの内訳 (実使用 N + 未使用の残存 M) も直すこと。** #2634 では見出しと
@@ -175,7 +176,7 @@ func TestDivergenceDoc_ColumnCountMatchesSchema(t *testing.T) {
 		dot := strings.IndexByte(qualified, '.')
 		table, col := qualified[:dot], qualified[dot+1:]
 		if !divergenceRowMentions(sectionLines(lines, start), table, col) {
-			t.Errorf("docs/divergence.md §2-2 に %q の行が無い", qualified)
+			t.Errorf("docs/divergence/db.md §2-2 に %q の行が無い", qualified)
 		}
 	}
 
@@ -371,13 +372,89 @@ func summaryColumnCounts(lines []string) (mk, residual, cherrypick int, ok bool)
 	return 0, 0, 0, false
 }
 
+// divergenceAreaLinkRe matches the index's links to the per-area files
+// (`[...](divergence/<name>.md)`).
+var divergenceAreaLinkRe = regexp.MustCompile(`\]\(divergence/([a-z0-9-]+\.md)\)`)
+
+// divergenceAreaFiles returns the per-area files the index links to, in the
+// order they appear. #3414 で docs/divergence.md を目次にし、節を
+// docs/divergence/ の領域ごとのファイルへ分けた。
+func divergenceAreaFiles(t *testing.T, index string) []string {
+	t.Helper()
+	seen := map[string]bool{}
+	var files []string
+	for _, m := range divergenceAreaLinkRe.FindAllStringSubmatch(index, -1) {
+		if !seen[m[1]] {
+			seen[m[1]] = true
+			files = append(files, m[1])
+		}
+	}
+	// 目次の書式が変わってリンクを 1 つも拾えないと、どの節も見つからない
+	// まま「見出しが無い」と落ちるより先に、原因をここで示す。
+	if len(files) == 0 {
+		t.Fatal("docs/divergence.md の目次から docs/divergence/ のファイルへのリンクを読めない")
+	}
+	return files
+}
+
+// readDivergenceDoc returns the index (docs/divergence.md) followed by every
+// per-area file it links to, so that the summary in the index and the sections
+// in the area files can be checked against each other.
 func readDivergenceDoc(t *testing.T) []string {
 	t.Helper()
 	blob, err := os.ReadFile(filepath.Join("..", "..", "docs", "divergence.md"))
 	if err != nil {
 		t.Fatalf("read docs/divergence.md: %v", err)
 	}
-	return strings.Split(string(blob), "\n")
+	all := strings.Split(string(blob), "\n")
+	for _, name := range divergenceAreaFiles(t, string(blob)) {
+		area, err := os.ReadFile(filepath.Join("..", "..", "docs", "divergence", name))
+		if err != nil {
+			t.Fatalf("read docs/divergence/%s: %v", name, err)
+		}
+		all = append(all, strings.Split(string(area), "\n")...)
+	}
+	return all
+}
+
+// TestDivergenceDoc_IndexListsEveryAreaFile asserts that the index links to
+// every file under docs/divergence/ and to no file that does not exist.
+//
+// 目次に載らないファイルは、上のゲートからも読まれず、件数のずれを見逃す。
+// 逆に目次だけに残ったリンクは readDivergenceDoc が読めずに落ちる。ファイルは
+// ディスクでなく git ls-files で数える (add し忘れたファイルが手元でだけ通らないように)。
+func TestDivergenceDoc_IndexListsEveryAreaFile(t *testing.T) {
+	blob, err := os.ReadFile(filepath.Join("..", "..", "docs", "divergence.md"))
+	if err != nil {
+		t.Fatalf("read docs/divergence.md: %v", err)
+	}
+	linked := map[string]bool{}
+	for _, name := range divergenceAreaFiles(t, string(blob)) {
+		linked[name] = true
+	}
+	out, err := exec.Command("git", "-C", filepath.Join("..", ".."), "ls-files", "docs/divergence/").Output()
+	if err != nil {
+		t.Fatalf("git ls-files docs/divergence/: %v", err)
+	}
+	tracked := map[string]bool{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if strings.HasSuffix(line, ".md") {
+			tracked[filepath.Base(line)] = true
+		}
+	}
+	if len(tracked) == 0 {
+		t.Fatal("git ls-files が docs/divergence/ のファイルを 1 つも返さない")
+	}
+	for name := range tracked {
+		if !linked[name] {
+			t.Errorf("docs/divergence/%s が docs/divergence.md の目次に無い", name)
+		}
+	}
+	for name := range linked {
+		if !tracked[name] {
+			t.Errorf("docs/divergence.md の目次が、追跡されていない docs/divergence/%s を指している", name)
+		}
+	}
 }
 
 // findDivergenceSection returns the heading's line index and the count declared
@@ -391,7 +468,7 @@ func findDivergenceSection(t *testing.T, lines []string, section string) (int, i
 		}
 		return i, atoi(t, m[2])
 	}
-	t.Fatalf("docs/divergence.md に §%s の見出し (件数付き) が無い", section)
+	t.Fatalf("docs/divergence/ の領域ごとのファイルに §%s の見出し (件数付き) が無い", section)
 	return 0, 0
 }
 
@@ -477,10 +554,10 @@ func TestDivergenceDoc_EndpointCountMatchesAPICompat(t *testing.T) {
 
 	_, declared := findDivergenceSection(t, readDivergenceDoc(t), "1-1")
 	if declared != generated {
-		t.Errorf(`docs/divergence.md §1-1 の見出しは %d だが、docs/api-compat.md は %d と言っている。
+		t.Errorf(`docs/divergence/api.md §1-1 の見出しは %d だが、docs/api-compat.md は %d と言っている。
 
 **どちらが古いかは中身を見ないと決まらない。** api-compat.md 側が古いなら
-`+"`make apicompat`"+` で再生成する (route dump に stack が要る)。divergence.md 側が
+`+"`make apicompat`"+` で再生成する (route dump に stack が要る)。divergence/api.md 側が
 古いなら §1-1 の表・見出し・冒頭サマリの 3 箇所すべてを直す。`, declared, generated)
 	}
 }
@@ -522,7 +599,7 @@ func TestDivergenceDoc_ForkFrontendTagsMatchTable(t *testing.T) {
 		}
 	}
 	if len(tags) == 0 {
-		t.Fatal("docs/divergence.md §4-2 に `| `X.Y.Z-mk.N` |` 形式の行が無い")
+		t.Fatal("docs/divergence/frontend.md §4-2 に `| `X.Y.Z-mk.N` |` 形式の行が無い")
 	}
 
 	if len(tags) != declared {
@@ -551,12 +628,12 @@ tag を足したら**サマリの件数と範囲、§4-2 の表の両方**を直
 		}
 		base := rows[i].base
 		if seen[base] {
-			t.Errorf(`docs/divergence.md §4-2 の base %s の行が飛び飛びに現れている。
+			t.Errorf(`docs/divergence/frontend.md §4-2 の base %s の行が飛び飛びに現れている。
 同じ base の行はまとめて並べること。`, base)
 		}
 		seen[base] = true
 		if prevBase != "" && compareForkBase(prevBase, base) >= 0 {
-			t.Errorf(`docs/divergence.md §4-2 の base が昇順でない (%s の次が %s)。
+			t.Errorf(`docs/divergence/frontend.md §4-2 の base が昇順でない (%s の次が %s)。
 古い順に並べること。`, prevBase, base)
 		}
 		prevBase = base
@@ -598,7 +675,7 @@ func compareForkBase(a, b string) int {
 // **機能追加は N を進め、直前の数字タグの後追い修正はその N に英字を足す**
 // (`-mk.22` の修正が `-mk.22a`、次が `-mk.22b`)。**世代をまたぐ修正は新しい数字を
 // 取る** — 英字は列の順序を保つためのものなので、`-mk.24` の後に `-mk.12a` を打つと
-// `git describe --tags` が後戻りして見える (規則の全文は docs/divergence.md の
+// `git describe --tags` が後戻りして見える (規則の全文は docs/divergence/frontend.md の
 // 「fork frontend の変更」。先例は `-mk.23` / `-mk.25` / `-mk.28`)。
 // **英字を足す形があるので数字は重複しうる。** 単純な連番検査は使えないので、
 // 数字は 1 ずつ、同じ数字の中の英字は a から 1 文字ずつ進むこと
@@ -618,7 +695,7 @@ func assertForkTagSequence(t *testing.T, tags []string) {
 			if letter != "" || prevLetter != "" {
 				want += fmt.Sprintf(" か -mk.%d%s", prevNum, nextForkLetter(prevLetter))
 			}
-			t.Errorf(`docs/divergence.md §4-2 の tag が順に並んでいない (-mk.%d%s の次が -mk.%s、期待は %s)。
+			t.Errorf(`docs/divergence/frontend.md §4-2 の tag が順に並んでいない (-mk.%d%s の次が -mk.%s、期待は %s)。
 抜けているなら「載せない」判断の根拠を書くか、行を足すこと。`, prevNum, prevLetter, tag, want)
 			return
 		}
@@ -659,7 +736,7 @@ func findDivergenceHeading(t *testing.T, lines []string, section string) (int, b
 			return i, true
 		}
 	}
-	t.Fatalf("docs/divergence.md に §%s の見出しが無い", section)
+	t.Fatalf("docs/divergence/ の領域ごとのファイルに §%s の見出しが無い", section)
 	return 0, false
 }
 
@@ -684,7 +761,7 @@ var (
 // docs/api-compat.md still describes the routes router.go registers.
 //
 // **生成物そのものが腐ると、それを錨にしている gate も一緒に無力化する。**
-// TestDivergenceDoc_EndpointCountMatchesAPICompat は divergence.md と
+// TestDivergenceDoc_EndpointCountMatchesAPICompat は divergence/api.md (§1-1) と
 // api-compat.md の一致しか見ないので、endpoint を足して**どちらも更新しない**と
 // 両方が古いまま緑になる。実際 develop では `mk-go version: 1.1.2` /
 // `mk-go only: 49` のまま腐っていた (#2640)。
@@ -978,7 +1055,7 @@ func TestDivergenceDoc_StreamChannelsMatchRegistry(t *testing.T) {
 		}
 	}
 	if len(doc) == 0 {
-		t.Fatal("docs/divergence.md §4-1 からチャンネル名を 1 件も読めない " +
+		t.Fatal("docs/divergence/config.md §4-1 からチャンネル名を 1 件も読めない " +
 			"(表の書式か ```text フェンスが変わった?)")
 	}
 
@@ -987,7 +1064,7 @@ func TestDivergenceDoc_StreamChannelsMatchRegistry(t *testing.T) {
 	if len(missing) == 0 && len(stale) == 0 {
 		return
 	}
-	t.Errorf(`docs/divergence.md §4-1 のチャンネル一覧が internal/server の登録と食い違っている。
+	t.Errorf(`docs/divergence/config.md §4-1 のチャンネル一覧が internal/server の登録と食い違っている。
 
 実装にあって doc に無い (%d 件):
   %s

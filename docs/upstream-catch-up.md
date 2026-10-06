@@ -4,7 +4,7 @@ Elythia の `frontend/` は、本家 Misskey の monorepo から `packages/backe
 
 本書は **本家の版を上げた PR がマージされた後、各開発者 / operator が必要な手順** (1 章) と、**本家の新しい release が出た時の取り込み手順** (2 章) を説明する。
 
-> **#3379 より前の運用。** frontend は submodule が指す fork (アーカイブ済み) から供給していて、追従は fork の上での載せ替えと tag の採番、gitlink の bump だった。fork の tag の採番規則と、その頃の独自変更の一覧は凍結した記録として [divergence.md §4-2](divergence.md#4-2-fork-frontend-の独自変更) に残っている。今の独自変更は §4-2b に PR 番号で書く (2-4)。
+> **#3379 より前の運用。** frontend は submodule が指す fork (アーカイブ済み) から供給していて、追従は fork の上での載せ替えと tag の採番、gitlink の bump だった。fork の tag の採番規則と、その頃の独自変更の一覧は凍結した記録として [divergence/frontend.md §4-2](divergence/frontend.md#4-2-fork-frontend-の独自変更) に残っている。今の独自変更は §4-2b に PR 番号で書く (2-4)。
 
 ---
 
@@ -139,7 +139,7 @@ make upstream-sync TO=<新しい版>
 
 衝突しなかったファイルは index に載る。衝突したテキストのファイルは衝突マーカー付きで作業ツリーに残り、index では unmerged になる (`git diff --name-only --diff-filter=U` で一覧できる)。**バイナリが衝突したときはマーカーが付かず、Elythia 側の内容のまま unmerged になる**ので、本家の版を採るなら `git checkout --theirs -- <パス>` で入れ替える。最後に「次にやること」が表示され、衝突が残っていれば終了コードは 0 にならない。
 
-**3. 衝突を解く。** Elythia 独自の frontend の変更は [divergence.md §4-2b](divergence.md#4-2b-frontend-の独自変更-3379-で取り込んだ後) に PR 番号で記録している。衝突したら、その箇所がどの行の変更かを §4-2b で引いて判断する。
+**3. 衝突を解く。** Elythia 独自の frontend の変更は [divergence/frontend.md §4-2b](divergence/frontend.md#4-2b-frontend-の独自変更-3379-で取り込んだ後) に PR 番号で記録している。衝突したら、その箇所がどの行の変更かを §4-2b で引いて判断する。
 
 - **本家が同じことを直していたら、Elythia の変更を落として本家の形を採り、§4-2b の行を更新する** (消すか、落とした経緯を書く)。§4-2b は「純正へ還元できない差分の一覧」として読むので、本家に入ったものを残さない
 - 本家の変更と Elythia の変更が両立するなら、両方を残す形に解く
@@ -258,7 +258,7 @@ GOWORK=off go test ./internal/activitypub/mfm/ ./tools/emojiregex/
 
 ### 本家の版を上げた後に必須: divergence doc の件数
 
-`golden_upstream_columns.json` を撮り直すと `TestDivergenceDoc_ColumnCountMatchesSchema` が動く。**upstream が列を DROP すると、その列は「Elythia 独自カラム」に転じる**ので `docs/divergence.md` §2-2 の件数が増える (`note_favorite.createdAt` がその経緯で独自列になっている)。
+`golden_upstream_columns.json` を撮り直すと `TestDivergenceDoc_ColumnCountMatchesSchema` が動く。**upstream が列を DROP すると、その列は「Elythia 独自カラム」に転じる**ので `docs/divergence/db.md` §2-2 の件数が増える (`note_favorite.createdAt` がその経緯で独自列になっている)。
 
 落ちたら doc の件数・内訳・冒頭サマリ・表の行をまとめて直す。gate は 4 箇所すべてを見るので、どれか 1 つを直し忘れると通らない (#2634)。
 
@@ -293,7 +293,7 @@ server/api/endpoints/admin/promo/create.ts     ← 表示経路はここに無�
 
 **件数ではなくリストが一致するかを見る** (加減が相殺すると件数だけでは素通りする)。
 違っていたら中身を見て、`docs/api-compatibility.md` の「既知の制限」と
-`docs/divergence.md` §7 の promo 行を更新する。増えていれば表示経路が入った可能性、
+`docs/divergence/security.md` §7 の promo 行を更新する。増えていれば表示経路が入った可能性、
 減っていれば endpoint が削除された可能性。
 
 **0 件や `No such file or directory` が出たら、まず本家の取得を疑う**

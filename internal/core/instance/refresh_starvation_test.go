@@ -207,7 +207,7 @@ func TestFetch_HTMLFaviconOverwritesStoredOne(t *testing.T) {
 // `json.RawMessage` ベースだった頃は `json.Unmarshal("null", &bool)` が
 // error にならず、**既存の `true` を `false` で上書きしていた**。upstream は
 // `updates.openRegistrations = null` で列を NULL にするのでどちらとも違うが、
-// mk-go は「型が違えば既存値を残す」に揃える (docs/divergence.md (a))。
+// mk-go は「型が違えば既存値を残す」に揃える (docs/divergence/security.md の #2730 の行)。
 func TestFetch_NullOpenRegistrationsKeepsStoredValue(t *testing.T) {
 	repo := testutil.NewMockInstanceRepository()
 	open := true

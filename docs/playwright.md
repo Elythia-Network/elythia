@@ -152,7 +152,7 @@ host を読ませる経路は開かない。**上の内訳と件数は #2892 よ
 なぜ CSP 側で解いたか。#2700 が `/about-mkgo` を作ったときに `about-misskey.vue` を
 作り直す案もあったが、**upstream のプロジェクトメンバー・スポンサー・パトロンは
 消さない**方針を採った (upstream が頻繁に更新するファイルなので、書き換えると追従の
-たびにコンフリクトを手で解くことになる。[乖離一覧](divergence.md) の `2026.9.0-mk.3`
+たびにコンフリクトを手で解くことになる。[乖離一覧](divergence/frontend.md) の `2026.9.0-mk.3`
 の行)。**media proxy 経由にも落とせない** — Elythia の proxy は upstream と違い open
 proxy ではなく、allowlist は DB に実在する URL だけを通すので、静的にハードコード
 された URL は 403 になる (実測)。謝辞を残す以上、CSP を足す以外に表示させる道が無い。

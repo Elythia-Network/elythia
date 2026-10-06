@@ -1,0 +1,98 @@
+# 純正 Misskey との差分: DB schema
+
+[差分カタログの目次](../divergence.md) にある分類と基準 (Elythia と追従している本家の版) は、このファイルにも当てはまる。
+
+## 2. DB schema
+
+**逆方向の欠落はゼロ** — upstream の `@Entity` 76 テーブルと全共有カラムを Elythia が superset で保持している。
+
+### 2-1. Elythia 独自テーブル (21)
+
+| テーブル | 由来 | 理由 |
+|---|---|---|
+| `user_keypair_extra` | Elythia 独自 | local user の Ed25519 鍵ペア。既存 `user_keypair` (RSA) を touch せず別テーブルに分離し、**TS へ swap back しても壊れない**設計 |
+| `user_publickey_extra` | Elythia 独自 | remote user の追加公開鍵。actor JSON の `assertionMethod[]` (FEP-521a Multikey) を keyId 単位で保持 |
+| `antenna_note_unread` | Elythia 独自 | per-user per-note の antenna 未読 |
+| `channel_note_unread` | Elythia 独自 | channel follower の未読追跡 |
+| `chunked_upload_session` | Elythia 独自 | 分割アップロード (#2313) の進行中セッション。S3 の `UploadId` はここでだけ保持しクライアントには露出しない。`user` への FK は張らない — CASCADE で行だけ消えると `AbortMultipartUpload` されない未完了マルチパートアップロードが孤児として課金され続けるため、期限切れ GC に回収させる |
+| `emoji_application` | Elythia 独自 | カスタム絵文字の登録申請 (#2934)。**承認までは `emoji` 行を作らない** — 承認待ちを `emoji` に隠し列で持たせると、TS へ切り替えた瞬間に未承認の絵文字が全部有効になる (TS は Elythia 独自の列を知らない)。`signup_application` (#2555) が `user` に対して採ったのと同じ形。`kind` 列は自作画像 (`own`) とリモート絵文字の取り込み (`remote`、#2935) で 1 テーブルを共有するために持つ — 審査する側が見る場所を 2 つに増やさないため。`remote` では `fileId` ではなく `remoteHost` / `remoteName` が素材を指す。`user` / `drive_file` / `emoji` への FK は張らない (`signup_application` と同じ方針)。**純正へは還元できない行** (申請という概念自体が upstream に無い)。 |
+| `emoji_application_quota_reset` | Elythia 独自 | カスタム絵文字の申請枠を手動で戻した記録 (#2962)。**申請の行を消さないための仕組み** — 枠を空けるために履歴を消すと、過去の判断 (#2960 が審査の材料として出している却下理由や「同じ画像か」の判定材料) も同時に消える。代わりにリセットの時刻を積み、期間内の件数を `max(期間の開始, 最後のリセット)` 以降で数える。**1 行 1 操作で積む** — 上書きにすると誰がいつ何回戻したかが残らず、監査の役に立たない。読むときは最新の 1 行。`resetAt` 列は作らない (`createdAt` がその値そのもので、2 つ持つと食い違う)。`user` への FK は張らない (`emoji_application` と同じ方針)。**純正へは還元できない行** (申請という概念自体が upstream に無い)。 |
+| `signup_application` | Elythia 独自 | 承認制の登録 (#2554 / #2555) の申請。**承認待ちを `user` 行として持たないための箱**で、`user` に承認列を足す設計だと TS へ切り替えた瞬間に承認待ち全員が有効なアカウントになる (TS はその列を知らないので素通りする)。申請の回答は `answers` 列に**提出時のラベルを同梱して**持つ (#2570) — 定義を後から変えても既存の申請がどの設問への答えだったか分かる。本人性は**クレームコードの SHA-256** が担保する (#2569) — 平文で持つと DB が漏れた時点で全申請が乗っ取れる。重複申請を DB では抑止しないので、captcha とレート制限が防波堤になる。TS は未知のテーブルを無視するだけ。**ticket を発行するのはメール確認の経路だけ** (#2813) — 即時作成では発行しても誰も参照しない (一回性は `settleApplicationTx` の行ロックが担保する、#2580) ので、`registration_ticket` の行が 1 つ増えるだけだった。即時作成では `ticketId` を**新しく記録しない**ぶん、監査は `processedById` / `usedById` で辿る (メール必須を切る前に始まっていた確認待ちの残骸だけは、ticket を破棄したあとも値として残る = dangling)。メール確認の経路で ticket が担うのは**前回試行の失効**で、置き換えた古い ticket を消すと確認リンクが失効し最新の試行だけが通る。再試行の直列化は ticket ではなく申請行のロック、`/api/signup` の 30 分の再送防止窓はこの経路を通らない。**内部発行する `registration_ticket` は `createdById` を入れない** (#2805) — 審査した管理者を入れると承認のたびにその管理者名義の招待が 1 枚増え、`invite/create` / `invite/limit` の上限 (`CountByCreatorSince`) を食い、利用者の `invite/list` (`ListByCreator`) にも出る (どちらも `WHERE "createdById" = ?` なので NULL は外れる)。監査は失われない — 審査した管理者は `processedById`、登録者は `usedById` で、どちらも**この表に FK が 1 つも無い**ので user を消しても残る。ticket 行のほうは `createdById` / `usedById` の FK がどちらも `ON DELETE CASCADE` なので、審査した管理者か登録者のどちらかを消せば消える (`ticketId` は dangling になる)。`createdById` を入れないとその引き金が 1 つ減る。**upstream が作らない状態を作る** — `createdById` が NULL の行は管理画面の招待一覧に `createdBy: null` (= `system` 表示) で出る (#2813 以降、この行が新しく増えるのはメール確認の経路だけ)。**`invite/delete` のモデレーターは消せる** (#2812 で upstream の bypass を入れた。それ以前は API から消す手段が無く、TS へ切り替えると消せるようになる非対称があった)。ただし endpoint 自体が `canInvite` の後段にあり、この policy を無条件に通るのは administrator / root だけ (既定は false) なので、**`canInvite` を持たない素のモデレーターは handler に届かず 403 になる** — これは upstream も同じ (`ApiCallService` の bypass も root と administrator のみ)。あわせて非モデレーターが使用済みの招待を消せる緩さも塞ぎ、`invite/list` の `used` を `usedAt` 由来に揃えた (upstream / `admin/invite/list` と同じ。`usedById` 由来だと確認メール待ちの ticket が未使用に見え、削除ボタンを押すと 400 になる)。**#2805 より前に作られた行はそのまま残す** — 上限は `inviteLimitCycle` (既定 7 日) の窓から抜けて自然に解消するが、`ListByCreator` は時間窓を持たないので個人の招待一覧には残り続ける。監査行の書き換えになるため移行は書かない |
+| `user_suspension_origin` | Elythia 独自 | 凍結の由来 (`local` / `remote`) を記録する (#2973)。リモート actor の `toot:suspended` を読む (#2951) にあたって、**モデレーターの判断がリモートに巻き戻されない**ようにするために要る。Mastodon は `accounts.suspension_origin` 列で同じことをしている。**`user` に列を足さず別テーブルにしてある** — TS は未知の列も無視するので列追加でも復路は壊れないが、別テーブルなら TS 側から一切見えず、`user` という連合・認証・API のあらゆる経路が触るホットテーブルにも手を入れずに済む (`relay_observed_user` と同じ判断)。TS へ切り替えると由来は失われるが、`user.isSuspended` は残るので**凍結は維持される**。既存の凍結済みユーザーは migration で `local` として登録する (安全側) |
+| `relay_observed_user` | Elythia 独自 | リレー経由で初めて観測した remote user の印 (#2340)。孤児掃除の対象をリレー由来に限定するために使う。印が無いと、リレー購読前から居る行やプロフィール閲覧・スレッド遡りで解決された行まで巻き込む。**`user` に列を足さず別テーブルにしてある**: TS は未知の列も無視するので列追加でも復路は壊れないが、別テーブルなら TS 側から一切見えず `check-migrations` にも差分が出ない。`user` は連合・認証・API のあらゆる経路が触るホットテーブルでもあるため、触らずに済ませる |
+| `instance_secret` | Elythia 独自 | インスタンスごとに生成する秘密値。最初の用途は media proxy の HMAC 鍵。以前は設定に `mediaProxySecret` が無いとインスタンス URL から導出していたが、**URL は公開情報なので誰でも同じ鍵を計算でき署名を偽造できた**。鍵はプロセス間・再起動をまたいで安定している必要があるので (署名した URL を別プロセスが検証する / 発行済み URL が再起動後も有効)、起動時のメモリ生成では足りず DB に置く |
+| `instance_signature_capability` | Elythia 独自 | リモートインスタンスがどの署名方式に対応しているかを host 単位で記録する。判定材料は宣言 (actor の `assertionMethod[]`) / 受信観測 / 送信結果の 3 系統で、それぞれ単独では穴があるので併記する |
+| `instance_gone_suspension` | Elythia 独自 | shared inbox が 410 を返して goneSuspended になった時刻を host 単位で記録する (#3067)。消えたインスタンスとのフォロー関係を片付ける候補を「いつから消えているか」で並べるための起点。`instance` に停止した時刻の列が無く、共有テーブルに列を足すと TS へ戻したときに形が変わるので別テーブルにした。**行があっても今も消えているとは限らない** (管理者が戻した後も残る) ので、読む側は `instance."suspensionState"` で絞る。TS が立てた goneSuspended には行が無い (時刻は不明として表示する) |
+| `federation_rule` | Elythia 独自 | 連合のルール (#3090、§3-5)。ホスト単位の設定 (`meta` の `blockedHosts` など) に**追加の層として**重ねるもので、置き換えない。TS へ戻すとこのテーブルは読まれず**ルールだけが効かなくなる** (ホスト単位の設定は `meta` にあるので残る)。当たった件数と記録は Redis (`apFederationRule:*`) にだけ置く |
+| `note_quote_authorization` | Elythia 独自 | ローカルの投稿の引用を承認した記録 (FEP-044f、#3234、§3-6)。リモートからの QuoteRequest に答えたものと、ローカル同士の引用に自分で発行したものが入る。1 行を承認の実体 (`QuoteAuthorization`) として配る。**消すと相手側の引用が未承認に戻る** — 第三者は引用を表示する前に承認を取得して確かめるので、行が無い (404) と承認が無いのと同じになる。引用される投稿への FK は `ON DELETE CASCADE` で、投稿を消せば承認も消える。作者が相手をブロックしたときも、その相手の引用への承認を消す (§3-6)。TS へ戻すとこのテーブルは読まれず承認が 404 になり、**これまでの引用が相手側で未承認に戻る** (再検証されたとき)。**純正へは還元できない行** (upstream は FEP-044f に対応していない) |
+| `note_quote_request` | Elythia 独自 | ローカルの利用者がリモートの投稿を引用したときに送った QuoteRequest と、その答えの記録 (FEP-044f、#3234、§3-6)。承認されたら承認 URI を引用する投稿の `quoteAuthorization` として配る。引用する投稿への FK は `ON DELETE CASCADE`。**消すと引用する投稿から `quoteAuthorization` が消え**、相手側の引用が再検証のときに未承認に戻る。TS へ戻したときも同じ。**純正へは還元できない行** |
+| `ip_lookup_log` | Elythia 独自 | IP とアカウントの対応を**誰がいつ引いたか**の記録 (#3106)。`admin/ip/*` は upstream に無い口 (#3104 / #3105) なので、その監査も upstream には無い。**`moderation_log` に入れない** — あちらは保持期間を持たず永久に残るのに、この記録に入るのは**照会に使った IP そのもの**で、IP とアカウントの対応と同じだけ機密性がある。`moderation_log` 全体に保持期間を入れると無関係な記録まで消えるので、専用テーブルを分けて 90 日で刈る (`user_ip` と同じ長さだが理由は別で、定数も別)。**結果そのものは記録しない** — 残すのは件数だけで、候補に出たアカウントや一致した IP は書かない (書くとこの表が第 2 の「IP とアカウントの対応」になる)。`user` への FK は張らない — 照会した人を消しても記録は残るのが監査として正しい (`signup_application` と同じ方針)。**純正へは還元できない行** (照会という機能自体が upstream に無い)。 |
+| `bubble_game_versus_record` | Elythia 独自 | バブルゲームの 1:1 対戦の記録 (#3232)。対戦そのもの (#3228) が upstream に無い。1 局 1 行で、両者の得点・理由・エンジンの版・操作の記録・公開の意思を持つ。**報告が届いた時点で書く** — 時間切れは両者の報告がそろうまで終局しないので先に来た側の記録を置く場所が要り、Redis には大きな記録を置かない方針 (#3230) のため DB に置く。**両者が公開にした対局だけ**を参加者以外 (ログイン済み・ブロック関係に無い人) に見せる — 相手の盤面と得点も一緒に出るので、片方の意思だけでは公開しない。`user` への FK は `ON DELETE CASCADE` で、**どちらかが退会したら相手の履歴からも消える**。終局から 30 日で定期処理が消す。TS は未知のテーブルを無視する。**純正へは還元できない行** |
+| `note_unread` | 準・独自 | upstream DB にも legacy 遺物として残るが 2026.7.0 の `models/` に entity は無く参照 0 件。Elythia はこれを実用し `/api/i` の `hasUnreadSpecifiedNotes` / `hasUnreadMentions` を Redis stream を舐めずに解決する。upstream legacy 版にある `noteChannelId` は Elythia の定義に無い (TS 製 DB では `CREATE TABLE IF NOT EXISTS` が no-op なので実害なし) |
+| `migrations` | drop-in 互換 | TypeORM の bookkeeping。Elythia 由来 DB に TS を後から繋いだ時に migration を再実行させないための seed。name は本家と同じ `ClassName+timestamp` 形式で 346 件を保持する (#2244 で短縮形から是正)。漏れは `TestMigrationSeed_CoversUpstream` が CI で検出する |
+| `schema_migrations` | tooling | golang-migrate 用 |
+
+`__chart__*` / `__chart_day__*` 24 テーブルは独自ではない (upstream では `models/` ではなく `core/chart/charts/entities/` で定義されるため、`models/` だけを見ると誤検出する)。
+
+### 2-2. 独自カラム (29 = 実使用 26 + 未使用の残存 3)
+
+うち **Elythia が実際に読み書きするのは 26 件** (cherrypick 由来 3 + Elythia 独自 23)。残り 3 件は fresh な Elythia DB に列だけ残る未使用列で、#2243 で依存を外した。
+
+| テーブル | カラム | 由来 | 理由 |
+|---|---|---|---|
+| `chat_message` | `emojis` / `isDelivering` / `isDeliverFailed` | cherrypick | 連合配送の状態追跡 |
+| `chat_room` | `host` | Elythia 独自 | 取り込んだ chat room の出どころ (#2994)。ローカル room は NULL (`user.host` / `emoji.host` と同じ規約)。値は**正規形の room URI の authority** から入る (実行時) / owner の `user.host` (migration の backfill)。どちらも punycode + 小文字 + 既定ポート除去済みだが、**`www.` の扱いだけは揃わない** — actor の binding 検査は `www.` を畳むのに対し `sameDeliveryHost` は畳まないので、`https://www.e.example/users/x` が document id に `https://e.example/users/x` を名乗る相手では `user.host` が `e.example`、`chat_room.host` が `www.e.example` になる |
+| `chat_room` | `uri` | Elythia 独自 | 取り込んだ chat room の正規 AP URI (#2994)。**room の身元はこれ**で、行の `id` はローカルで採番する。room id は相手が自由に決められる値なので ID 空間はホストをまたいで共有されており、id で keying していた頃は**あるホストが同じ id の room を先に作ると、別のホストの正規の room からの Invite が owner 不一致で恒久的に drop されていた** (retry もされない)。`uri IS NOT NULL` の部分 UNIQUE index で二重取り込みを DB でも止める。**PK は `id` のまま** — upstream の `MiChatRoom` は `@PrimaryColumn() id` なので複合キーにすると TS へ戻せず、`host` を NULL にしたままでは PK にも入れられない (複合 FK も `MATCH SIMPLE` で NULL を素通りするのでローカル room だけ整合性が消える)。`note.uri` / `chat_message.uri` と同じ列の足し方 |
+| `meta` | `approvalRequiredForSignup` | Elythia 独自 | 承認制の登録 (#2554) の有効化。**これ自体がゲート**で、有効時は `/api/signup` を 403 で閉じる (#2557)。**メール必須と併用できる** (#2571) — 承認済みからの登録も `emailRequiredForSignup` が有効なら `user_pending` に積んで確認メールを送るので、設定と実態が食い違わない (#2565 の排他は撤去済み)。クレームコードは常に必須で、本人性の担保はコードが持つ。有効化する更新では**同じ更新でアカウント作成も開放する** — 「先に開放してから承認制を入れる」順を強制すると、その間に素通しで登録される窓ができるため。開放は安全性の条件ではなく (承認制それ自体がゲート)、訪問者に「招待制」と表示しないための整合。`disableRegistration` と組み合わせる運用にすると、訪問者には「招待制」と表示されて実態と食い違う。承認フローは signup service を直接呼ぶのでこの分岐を通らない。**有効な間は、進行中だった確認メールが通らなくなる** (#2804) — `user_pending` は 30 分有効で、申請に紐付かない行は承認の確定処理 (#2576) を通らないので、ゲートが無いと「承認を経ていないローカルアカウント」ができてしまう。`/api/signup-pending` は承認制が有効なら申請 ID を持たない pending を `NOT_APPROVED` で弾く (該当者は申請フォームからやり直す)。**行は消さない**ので、TTL 内に承認制を戻せば同じリンクがまた通る。窓が開くのは切り替え**前**に `emailRequiredForSignup` が ON だった構成だけで、OFF なら `/api/signup` が即座にアカウントを作るので待ち行列が存在しない。meta が読めないときも通さないが、そちらは `NOT_APPROVED` ではなく 500 にする — DB 障害を承認の迂回路にせず、かつドメインの答えにも化けさせない (#2799)。**無効に戻す更新では逆に閉じる** (#2803) — 開放はゲートが立っていることが前提の整合なので、ゲートが消える更新で維持すると、招待制 → 承認制 ON → 承認制 OFF の 3 操作でゲートが 1 つも無い全開状態が残る。倒す先を閉じる側にしてあるのは、元が開放だったサーバーが招待制になっても次に管理画面を開けばトグルに出て気づけるのに対し、逆 (全開のまま残る) は開いていることが正常に見えて気づけないため。`disableRegistration` を明示していれば尊重するので、管理画面は無効化のときに「アカウント作成も閉じるか」を確認して選択結果を明示的に送る (開ける側は #2565 の整合の強制なので明示より優先する、という非対称は意図的)。**この 2 列は bool 以外を 400 で弾き、JSON null だけは無指定として落とす** (#2803) — GORM は map の値をそのまま driver へ渡すため `"false"` のような文字列でも列は更新されるが、正規化は bool しか見ないので、弾かないと「承認制は外れたのに登録は全開のまま」が作れる (upstream も ajv の `type: 'boolean'` で string を 400 にする)。null を弾かないのは upstream の paramDef が `nullable: true` で実装も `typeof === 'boolean'` でしか読まず、misskey-js の生成型も `boolean \| null` のため。落とさないと NOT NULL 制約違反で 500 になる (#2803 以前の挙動)。TS はこの列を認識しないので、TS へ戻すと承認制が単に無効になる — **こちらは Elythia を経由しないので上の補正も効かない** (登録が開くので、切り替え前に `disableRegistration` を検討すること) |
+| `meta` | `registrationClosed` | Elythia 独自 | 新規登録をどの経路からも受け付けない (#3186)。途中まで進んでいる登録 (承認済みの申請 / メール確認待ち) も止めるが、記録は消さないので解除すれば有効期限内のものはそのまま使える (承認済みの申請は承認制で再開した場合だけ)。**有効にする更新では `disableRegistration` も立てる** (`normalizeRegistrationClosed`) — TS へ戻すとこの列は無視されるが、招待制に落ちるので登録が開く方向には倒れない。承認制の値は残す (照会を開けておくのと、解除後に戻れるように)。解除する更新で承認制が残っていれば登録を開け直す (#2565 の整合) |
+| `user` | `isRoot` | Elythia 独自 | upstream は system_account 移行で DROP 済み。`role.Service.isRootUser` の fallback に必要 |
+| `meta` | `proxyAccountId` | Elythia 独自 | 同じく upstream は DROP 済み。`admin/update-proxy-account` が書き込む |
+| `note_favorite` | `createdAt` | Elythia 独自 | upstream は `deleteCreatedAt` で DROP 済み。`/api/i/favorites` の response 要件で復活 |
+| `app` / `auth_session` | `createdAt` | 列のみ残存 | upstream は `deleteCreatedAt` で DROP 済み。Elythia も **読み書きしない** (#2243 で model から除去)。fresh な Elythia DB には列が残るが未使用 |
+| `clip` | `notesCount` | 列のみ残存 | 旧・非正規化カウンタ。#2243 で撤去し、件数は upstream 同様 `clip_note` の実カウントで算出する |
+| `poll` | `notifiedAt` | Elythia 独自 | pollEnded 通知の二重送信防止 |
+| `user_pending` | `invitationTicketId` | Elythia 独自 | 1 招待で複数アカウントを作れる gap を塞ぐ |
+| `user_pending` | `signupApplicationId` | Elythia 独自 | 承認制 (#2571) でメール確認を挟むときの申請 ID。確認完了まではアカウントが無いので申請を `completed` にできず、**紐付けが無いと申請が `approved` のまま残って 1 つの承認から複数アカウントを作れる**。`/api/signup-pending` が `PromotePending` の戻り値からこれを読んで申請を完了させる。**承認制が有効な間は、この列の有無がそのままゲートの判定になる** (#2804) — 空にすると承認を経ていない pending として弾かれる側に倒れるので、移行バッチ等で NULL 化しないこと。TS は未知の列を無視するので drop-in の復路は壊れない |
+| `meta` | `signupApplicationForm` | Elythia 独自 | 承認制の申請フォームの定義 (#2570)。管理者が項目を決める jsonb 配列。上限は 10 項目 / ラベル 100 文字 / 回答 2000 文字で、**上限を置かないと管理者が自分で壊せる** (項目無制限で申請ページが使えなくなる、最大長無制限で 1 件の申請が DB を膨らませる)。壊れた JSON は空フォーム扱いにして申請ページを 500 で潰さない |
+| `meta` | `minimumUsernameLength` | Elythia 独自 | 新規登録で取れる username の最小文字数 (#3015)。既定 1 = 制限なしなので、既存インスタンスの挙動は変わらない。**TS はこの列を認識しない**ため、TS へ戻すと最小長の制限が単に無効になる (既に作られたアカウントはそのまま使える) |
+| `meta` | `enableEphemeralRelayNotes` / `ephemeralRelayNoteTtlMinutes` | Elythia 独自 | リレー経由投稿の揮発化 (#2332)。リレーでしか観測しない投稿は Redis に TTL 付きで置き、ローカルユーザーが触ったときだけ DB へ materialize する。既定 false は既存インスタンスの挙動を変えないため — 有効にするとグローバルタイムラインは FTT の窓より過去に遡れなくなる。**どちらかのフラグ (これか `enableRelayOrphanUserCleanup`) が有効なら、owner 無しのリモート添付を掃除する日次ジョブ (`maintenance:orphanAttachmentCleanup`、05:30) も回る** (#2722)。著者が materialize されていないリモート添付は owner 無しで保存され、ephemeral note が TTL で消えても `drive_file` の行は残るため。消すのは **(a) どの DB 上の note からも参照されておらず、(b) 生きている ephemeral note の印も無く、(c) 猶予より古い** link-only の行だけ。**TTL は寿命の上限ではない** (`Touch` が閲覧のたびに打ち直す) ので、猶予だけでは表示中の添付を守れない。生存判定は Redis の印が担い、猶予は「行を作ってから印を打つまでの窓」を覆うだけ。**Redis を `maxmemory` + `allkeys-lru` で運用する場合は注意**: タイムラインの hydrate は note (`ephNote:*`) だけを読み、印 (`ephFile:*`) には触れないので、印だけが先に evict される側に偏り (`/api/notes/show` の `Touch` は印にも `EXPIRE` を打つため LRU の idle time も更新される。偏るのは hydrate しか通らないノート)、その状態で古い行が再利用されていると表示中の添付が消えうる (`volatile-ttl` なら TTL 順なのでこの偏りは出ない)。**この機能を有効にした直後の 1 TTL ぶん**も、既存の ephemeral note には印が無い (`Touch` は `Expire` なので印を作らない)。cron の時刻は TZ 未指定なので mkq はプロセスの TZ で解釈する |
+| `meta` | `enableRelayOrphanUserCleanup` / `relayOrphanUserGraceDays` | Elythia 独自 | リレー由来の孤児 user の掃除 (#2340)。対象の限定には `relay_observed_user` を使う |
+| `meta` | `chunkedUploadEnabled` / `chunkedUploadChunkSizeMb` / `chunkedUploadSessionTtlMinutes` / `chunkedUploadMaxSessionsPerUser` / `chunkedUploadMaxPendingMbPerUser` | Elythia 独自 | 分割アップロード (#2313) の設定。**コントロールパネル (オブジェクトストレージ) に出ているのは `chunkedUploadEnabled` / `chunkedUploadChunkSizeMb` / `chunkedUploadSessionTtlMinutes` の 3 つだけ**で、ロール policy の上限になる `chunkedUploadMaxSessionsPerUser` / `chunkedUploadMaxPendingMbPerUser` は `admin/update-meta` を直接呼ぶしかない (#2900 で確認)。TS は未知の列を無視するので drop-in の復路は壊れない |
+| `user_ip` | `lastSeenAt` / `observationCount` | Elythia 独自 | IP ごとの最終観測と観測回数 (#3103)。`user_ip` は `UNIQUE (userId, ip)` で 1 ペア 1 行しか持てないので、列を足さずに出す方法が無い。**`createdAt` は初回観測** (upstream の `ApiCallService.logIp` が `INSERT ... orIgnore` なのに合わせた。#3103 より前の Elythia は衝突時に上書きしており最終観測を意味していたので、**純正から引き継いだ DB では同じ列に両方の意味の行が混ざっていた**)。既存の Elythia 行は初回を復元できないため、migration 000094 の backfill では初回 = 最終になる。**その値は「初回観測」ではなく「migration を流した時点での最終観測」**なので、それより前の観測がある行では実際より新しい日時が出る。**TS はこの 2 列を知らない**ので DEFAULT を持たせてあり (`lastSeenAt` は `now()`、`observationCount` は 1)、TS 側が `(createdAt, userId, ip)` だけを INSERT しても落ちない。TS へ戻すと最終観測と観測回数の更新が止まる (行は残る) |
+
+### 2-3. index の差分
+
+| index | 差分の内容 |
+|---|---|
+| `chat_message(fromUserId, toUserId)` 複合 | **upstream に無い** (upstream は各列の単独 `@Index()` のみ)。Elythia 独自の最適化 |
+| `user_ip(ip, lastSeenAt DESC, userId)` | **upstream に無い** (upstream の `user_ip` は `userId` と `UNIQUE (userId, ip)` だけ)。「その IP を使ったアカウントを最終観測の新しい順に」が #3066 の中核クエリで、これが無いと `user_ip` の seq scan になる (#3103 が `(ip, lastSeenAt DESC)` で追加)。**`userId` は #3105 で足した (migration 000095、古いほうは同時に落とす)** — 関連候補の抽出は 1 つの IP から取る件数を上限で打ち切るので、同じ最終観測が並んだときの順序が決まらないと**同じ検索が実行のたびに違う候補を返す**。`userId` を並びに入れて index に無いままにすると `lastSeenAt` を presorted key とする incremental sort に倒れ、**上限が保証されるかが同値の分布に依る** (実測 PG 15 / 1 IP に 10 万アカウント / `LIMIT 201`: 同値が固まっていると 100,000 行 / 33.7 ms、ばらけていれば 202 行 / 0.14 ms。index に `userId` を含めるとどちらでも 201 行)。実態の `lastSeenAt` は観測のたびに更新されるので同値は固まりにくいが、記録が止まっていた期間や移行直後の一括投入では固まりうる |
+| `drive_file(url)` / `drive_file(webpublicUrl)` / `drive_file(thumbnailUrl)` | **upstream に無い**。後 2 者は partial |
+| `clip_favorite(clipId)` | **upstream に無い** (upstream は `UNIQUE(userId, clipId)` と `userId` 単独 index のみで、`clipId` 先頭の index が無い) |
+| `user.tags` の GIN | upstream は btree (`@Index()`) で配列 containment に効かないため GIN に変更 |
+| `drive_file(uri)` | upstream にも index がある。Elythia の差分は **partial (`WHERE uri IS NOT NULL`) にしている点と index 名** |
+| `note.uri` UNIQUE | upstream にも UNIQUE がある。差分は **partial にしている点と index 名** |
+| `note.tags` / `note.mentions` / `note.fileIds` の GIN | **upstream にも同じ GIN がある** (`IDX_NOTE_TAGS` / `IDX_NOTE_MENTIONS` / `IDX_NOTE_FILE_IDS`)。Elythia は名前だけが違う (`IDX_note_tags` / `IDX_note_mentions` / `IDX_note_fileIds` — case に加え `fileIds` は語区切りも異なる) |
+
+#### index 命名の非対称と、その解消 (#2246)
+
+Elythia は index を `IDX_<table>_<col>` で命名するが、upstream は TypeORM 生成の hash 名 (`IDX_e5848eac...`) を使う。`CREATE INDEX IF NOT EXISTS` は **index 名**で存在判定するため、定義が同一でも名前が違えば新規作成され、TS 製 DB では index が全面的に二重化していた。
+
+Misskey TS 2026.7.0 が作った DB に Elythia の全 migration を適用した実測:
+
+| | index 数 |
+|---|---|
+| TS のみ | 442 |
+| Elythia migration 適用後 | 639 (+197) |
+| `000068_drop_redundant_indexes` 適用後 | **474** (165 本を削除、upstream 由来の削除は 0 本) |
+
+`000068` は「Elythia の migration が作る index のうち、同一テーブルに定義が一致する upstream 由来の index が存在するもの」だけを実行時に落とす。**upstream 由来の index には一切触れない** (TS へ戻したとき本家が再作成できず復路が壊れるため)。Elythia 由来 DB では同一定義の別名 index が無いので何も落ちない。
+
+上表の partial 化 3 件 (`note.uri` / `drive_file(uri)` / `user(usernameLower, host)`) も、upstream の full index が同じ役割を果たすと個別に判断して削除対象に含めている。一方 `note_unread` の partial 2 件と `user.tags` の GIN、`user(usernameLower) WHERE host IS NULL` は **意図的に定義が違う**ので残す。
+
+新規に同型の重複を作らないよう、`TestIndexNaming_NoNewUpstreamDuplicates` が CI で検出する。upstream に同内容の index があるなら **upstream の index 名をそのまま使う** (`000058_channel_muting_expires_at.up.sql` が前例)。
+
+#### migration の冪等性
+
+Elythia の migration は TS 製の既存 DB にも流れるため、`CREATE TABLE` / `ADD COLUMN` / `CREATE INDEX` は `IF NOT EXISTS`、`DROP *` は `IF EXISTS` が必須。欠けると upstream が既に作った構造と衝突して migration が dirty 停止し、**drop-in 手順そのものが完走しない**。実際 `000048` が upstream 2026.5.0 の `AddCategoryToAvatarDecorations` と衝突しており、2026.5.0 以降の TS 製 DB からの drop-in が不可能だった (#2246 で修正)。`TestMigrationIdempotency_RequiresIfExists` が CI で強制する。
+
+同じ「`IF NOT EXISTS` が drop-in で意図どおり効かない」クラスとして、`CREATE TABLE` 内でしか定義されていない upstream 非存在カラムも問題になる (TS 製 DB では列が生えない)。`TestSchemaDrift_CreateOnlyColumns` が検出する (#2243)。

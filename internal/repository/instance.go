@@ -322,7 +322,7 @@ func (r *instanceRepository) List(filter model.InstanceListFilter) ([]*model.Ins
 // (adjustFollowingCounts が人数ぶん引き、行は残す) と、移行の後に作られた行
 // (insertFollowingDoc が数えない) だけ。移行したアカウント自身のフォロー、
 // ローカルのアカウントの移行、proxy の行は本家では数えたまま残るので、そこは
-// 本家より小さくなる (docs/divergence.md の 5 節)。全部数えると、本家が引いた
+// 本家より小さくなる (docs/divergence/operations.md の 5 節)。全部数えると、本家が引いた
 // 分まで起動のたびに戻ってしまう。移行済みの利用者はごく少ないので、全 user と
 // JOIN せず、移行済みの id の集合に対する anti join にしている。
 //

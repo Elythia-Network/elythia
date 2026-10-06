@@ -571,7 +571,7 @@ def test_home_timeline_since_id_parity(mkgo, ts):
     # 倒れる (upstream の shouldFallbackToDb が sinceId 非空で常に真、#2720)。
     # つまりこの経路は、**DB fallback が有効な限り** FTT の有無に関わらず SQL の
     # 並び順で決まる。`meta.enableFanoutTimelineDbFallback` を off にすると
-    # 空が返る (#2762、docs/divergence.md §5.6)。既定は on なのでこのテストは
+    # 空が返る (#2762、docs/divergence/operations.md §5.6)。既定は on なのでこのテストは
     # 通るが、off の環境では `got=[]` で落ちる (silent pass にはならない)。
     #
     # **候補 4 件に対して limit 2 で読む。** 候補 <= limit だと `ORDER BY id ASC`

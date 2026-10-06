@@ -177,7 +177,7 @@ const (
 	maxTitleRunes       = 100
 	maxDescriptionRunes = 300
 	// sitename は upstream が clip しないが、同じ経路で任意長を受け取れるので
-	// 揃えて切る (意図的な乖離。`docs/divergence.md` の URL preview の行)。
+	// 揃えて切る (意図的な乖離。`docs/divergence/operations.md` の URL preview の行)。
 	maxSitenameRunes = 100
 	// maxURLBytes bounds the URL-ish fields (`url` / `thumbnail` / `icon` /
 	// `activityPub`)。

@@ -2,10 +2,10 @@
 // a PostgreSQL varchar column.
 //
 // 規則そのもの (本文は切る / URL は値ごと捨てる / 身元は document ごと拒否) は
-// docs/divergence.md の「リモート由来の文字列を列に入れるときの規則」にあり、
+// docs/divergence/security.md の「リモート由来の文字列を列に入れるときの規則」にあり、
 // ここはその**数え方**だけを持つ。以前は federation と instance に同型の
 // ヘルパーが散っていて、rune / byte の数え方と NUL の扱いが分かれる土壌に
-// なっていた (#2726。**内訳は docs/divergence.md に一本化してある** — 数を
+// なっていた (#2726。**内訳は docs/divergence/security.md に一本化してある** — 数を
 // 2 箇所に書くと片方だけ古くなる)。
 //
 // 呼び出し側は「その列固有の判断とログ」を持つ薄い名前付きヘルパーを維持し、
@@ -76,7 +76,7 @@ func Storable(s string) bool {
 // 黙って詰めると「何文字目で切れたか」が入力と対応しなくなる。
 //
 // 値ごと捨てる側の判定は `Storable` / `Fits`。どちらを使うかは
-// docs/divergence.md の「リモート由来の文字列を列に入れるときの規則」にある
+// docs/divergence/security.md の「リモート由来の文字列を列に入れるときの規則」にある
 // (本文は切る / URL は値ごと捨てる)。
 func ToStorable(s string) string {
 	if Storable(s) {

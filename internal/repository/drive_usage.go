@@ -55,7 +55,7 @@ type DriveUsageBucket struct {
 	Size int64
 	// LinkCount is how many of Count are `isLink = true`, i.e. rows that hold no
 	// bytes of their own. mk-go はリモートメディアをキャッシュしないので
-	// (docs/divergence.md 5.5)、リモート側は Count == LinkCount かつ Size == 0 に
+	// (docs/divergence/operations.md 5.5)、リモート側は Count == LinkCount かつ Size == 0 に
 	// なる。TS 由来の DB から引き継いだ実体つきリモート行だけがそこから外れる。
 	LinkCount int64
 }

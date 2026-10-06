@@ -753,7 +753,7 @@ func (s *Service) warnMetaFetchFailed(host string, err error) {
 // `.<pattern>` (i.e. host is a subdomain).
 //
 // mediaSilencedHosts だけは upstream の `isMediaSilencedHost` が完全一致なので、
-// mk-go の後方一致はサブドメインにも効く分だけ広い (docs/divergence.md §3-3)。
+// mk-go の後方一致はサブドメインにも効く分だけ広い (docs/divergence/federation.md §3-3)。
 //
 // Host is also compared with its port and trailing dot removed, so a remote
 // that publishes its actor on a non-default port (`evil.example:8443`) still

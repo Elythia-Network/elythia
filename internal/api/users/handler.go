@@ -1198,7 +1198,7 @@ func (h *Handler) packRelationItems(
 // the remote users of a list with the values their origin server reports
 // (#1146), then re-applies the count visibility gate.
 //
-// mk-go 独自 (docs/divergence.md の RemoteStatsFetcher)。DetailedMany が掛けた
+// mk-go 独自 (docs/divergence/federation.md の RemoteStatsFetcher)。DetailedMany が掛けた
 // カウントのゲートは元の値に対するものなので、差し替えた値に掛け直す。
 func (h *Handler) overrideRemoteStats(ctx context.Context, viewer *model.User, users []*model.User, packed []entity.UserDetailed) {
 	stats := h.batchRemoteStatsOverride(ctx, users)
