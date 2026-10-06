@@ -23,19 +23,27 @@ SPDX-License-Identifier: AGPL-3.0-only
 	<!-- Elythia: この角はエントランス (isRoot) にだけ出る。エントランスはテーマに依らず夜空なので、色も夜空に合わせて固定する -->
 	<MkA v-if="isRoot" to="/about-elythia" class="github-corner" :aria-label="i18n.ts.aboutMkGo"><svg width="80" height="80" viewBox="0 0 250 250" style="fill:#21244f; color:#ccc3f7; position: fixed; z-index: 10; top: 0; border: 0; right: 0;" aria-hidden="true"><path d="M0,0 L115,115 L130,115 L142,142 L250,250 L250,0 Z"></path><path d="M128.3,109.0 C113.8,99.7 119.0,89.6 119.0,89.6 C122.0,82.7 120.5,78.6 120.5,78.6 C119.2,72.0 123.4,76.3 123.4,76.3 C127.3,80.9 125.5,87.3 125.5,87.3 C122.9,97.6 130.6,101.9 134.4,103.2" fill="currentColor" style="transform-origin: 130px 106px;" class="octo-arm"></path><path d="M115.0,115.0 C114.9,115.1 118.7,116.5 119.8,115.4 L133.7,101.6 C136.9,99.2 139.9,98.4 142.2,98.6 C133.8,88.0 127.5,74.4 143.8,58.0 C148.5,53.4 154.0,51.2 159.7,51.0 C160.3,49.4 163.2,43.6 171.4,40.1 C171.4,40.1 176.1,42.5 178.8,56.2 C183.1,58.6 187.2,61.8 190.9,65.4 C194.5,69.0 197.7,73.2 200.1,77.6 C213.8,80.2 216.3,84.9 216.3,84.9 C212.7,93.1 206.9,96.0 205.4,96.6 C205.1,102.4 203.0,107.8 198.3,112.5 C181.9,128.9 168.3,122.5 157.7,114.1 C157.9,116.9 156.7,120.9 152.7,124.9 L141.0,136.5 C139.8,137.7 141.6,141.9 141.8,141.8 Z" fill="currentColor" class="octo-body"></path></svg></MkA>
 
-	<div v-if="!narrow && !isRoot" :class="$style.side">
-		<div :class="$style.sideBanner" :style="{ backgroundImage: instance.backgroundImageUrl ? `url(${ instance.backgroundImageUrl })` : 'none' }"></div>
-		<div :class="$style.sideDashboard">
-			<MkVisitorDashboard/>
+	<!--
+		Elythia: 左のパネルと上の帯は、エントランスと同じく利用者のテーマに依らず夜空にする。
+		右の本文 (RouterView) は利用者のテーマのまま。背景はスクロールする中身と分けて、
+		中身だけが流れるようにする
+	-->
+	<div v-if="!narrow && !isRoot" :class="$style.side" :style="nightVars">
+		<XBackdrop contained/>
+		<div :class="$style.sideScroll">
+			<div :class="$style.sideDashboard">
+				<MkVisitorDashboard/>
+			</div>
 		</div>
 	</div>
 
 	<div :class="$style.main">
-		<div v-if="narrow && !isRoot" :class="$style.header">
+		<div v-if="narrow && !isRoot" :class="$style.header" :style="nightVars">
 			<img :src="instance.iconUrl || '/favicon.ico'" alt="" :class="$style.headerIcon"/>
 			<MkA to="/" :class="$style.headerTitle">{{ instanceName }}</MkA>
 			<!-- mk-go: 受け付けていない間は出さない (#3186)。押すと入口へ戻るだけになる。 -->
-			<MkButton v-if="!registrationClosed" primary rounded :class="$style.headerButton" @click="goHome">{{ i18n.ts.signup }}</MkButton>
+			<!-- Elythia: 夜色の帯の上では primary (白い文字に淡い紫) が読みにくいので、エントランスと同じ gradate にする -->
+			<MkButton v-if="!registrationClosed" gradate rounded :class="$style.headerButton" @click="goHome">{{ i18n.ts.signup }}</MkButton>
 		</div>
 		<div :class="$style.content">
 			<RouterView/>
@@ -59,9 +67,13 @@ import { mainRouter } from '@/router.js';
 import { DI } from '@/di.js';
 import MkButton from '@/components/MkButton.vue';
 import { isRegistrationClosed } from '@/utility/registration-mode.js';
+import XBackdrop from '@/pages/welcome.elythia-backdrop.vue';
+import { prefer } from '@/preferences.js';
+import { entranceThemeVars } from '@/utility/elythia-entrance.js';
 
 const isRoot = computed(() => mainRouter.currentRoute.value.name === 'index');
 const registrationClosed = isRegistrationClosed();
+const nightVars = entranceThemeVars(prefer.s.useBlurEffect);
 
 const DESKTOP_THRESHOLD = 1100;
 
@@ -119,7 +131,10 @@ onMounted(() => {
 	padding: 16px;
 	display: flex;
 	align-items: center;
-	background: var(--MI_THEME-panel);
+	// 部分木で上書きした変数は継承された文字色を変えないので、ここで宣言し直す
+	color: var(--MI_THEME-fg);
+	background: linear-gradient(90deg, #0a112e, #1b1d4a);
+	border-bottom: solid 1px rgba(204, 195, 247, 0.18);
 }
 
 .headerIcon {
@@ -140,20 +155,15 @@ onMounted(() => {
 .side {
 	position: relative;
 	width: 500px;
-	overflow-y: scroll;
-	background: var(--MI_THEME-accent);
+	overflow: hidden;
+	color: var(--MI_THEME-fg);
+	background: #0a112e;
 }
 
-.sideBanner {
-	position: absolute;
-	top: 0;
-	left: 0;
-	width: 100%;
-	aspect-ratio: 1.5;
-	background-position: center;
-	background-size: cover;
-	-webkit-mask-image: linear-gradient(rgba(0, 0, 0, 1.0), transparent);
-	mask-image: linear-gradient(rgba(0, 0, 0, 1.0), transparent);
+.sideScroll {
+	position: relative;
+	height: 100%;
+	overflow-y: scroll;
 }
 
 .sideDashboard {
