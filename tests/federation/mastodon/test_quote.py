@@ -96,7 +96,7 @@ def test_quoting_a_mastodon_post_is_approved(mkgo, mastodon):
     # mk-go は返ってきた承認を quoteAuthorization として配る。**Mastodon の検索で
     # 引用する投稿を取らせるのは、承認が返った後にする** — 取得と QuoteRequest の
     # 処理が同時に走ると、Mastodon は引用先が結び付く前の記録で照合して黙って捨てる
-    # (Mastodon 側の競合。docs/divergence.md §3-6)。
+    # (Mastodon 側の競合。docs/divergence/federation.md §3-6)。
     def authorized():
         note = _mkgo_ap_note(mkgo, quoting["id"])
         auth = note.get("quoteAuthorization")

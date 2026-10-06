@@ -309,7 +309,7 @@ func filterAndSort(ids []string, untilID, sinceID string, limit int) []string {
 	//
 	// 既定では差が出ない (どちらも limit 件を返す) が、
 	// `meta.enableFanoutTimelineDbFallback` を off にすると upstream のほうが
-	// 件数が揃いやすい (#2762。詳細は docs/divergence.md §5.6)。
+	// 件数が揃いやすい (#2762。詳細は docs/divergence/operations.md §5.6)。
 	if limit > 0 && len(out) > limit {
 		out = out[:limit]
 	}

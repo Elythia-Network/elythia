@@ -44,7 +44,7 @@ const (
 // 別テーブル。**NUL も #3022 で同じ述語に揃えた**)。
 //
 // **切るのはリモート由来の値だけ** — `admin/emoji/copy` と AP 経路は相手サーバーが
-// 決めた値を入れるので、弾くと取り込みそのものができなくなる (docs/divergence.md の
+// 決めた値を入れるので、弾くと取り込みそのものができなくなる (docs/divergence/security.md の
 // 「リモート由来の文字列を列に入れるときの規則」、#2726)。
 //
 // NUL も `colfit.Fits` が落とす。PostgreSQL の text 系列は長さに関わらず NUL を
@@ -351,7 +351,7 @@ func (h *Handler) EmojiCopy(c echo.Context) error {
 	// varchar(128) / `license` varchar(1024) / `aliases` varchar(128)[] を
 	// 超えて SQLSTATE 22001 になり、インポートが 500 で落ちる。AP 経路は
 	// `internal/core/federation` が同じ 3 列に対して既に同じ規則を持っており
-	// (#2726、docs/divergence.md の「リモート由来の文字列を列に入れるときの
+	// (#2726、docs/divergence/security.md の「リモート由来の文字列を列に入れるときの
 	// 規則」)、REST 経路だけ素通しにすると非対称になる。
 	//
 	// **本文は切り、要素は落とす。** category / license は本文なので切る

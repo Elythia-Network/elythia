@@ -1394,7 +1394,7 @@ func (h *Handler) packAdminUser(u *model.User, profile *model.UserProfile, showI
 // を通らない**。#3104 が「IP とアカウントの対応は既定でモデレーターに開かない」
 // と決めた以上、同じ種類の情報をモデレーター権限だけで全件返すのは、mk-go が
 // 自分で作った権限境界と食い違う。**upstream からの意図的な逸脱**
-// (docs/divergence.md §7)。
+// (docs/divergence/security.md §7)。
 //
 // **空文字にする。** `Signin` の json-schema は `ip` を
 // `optional: false, nullable: false` と宣言しているので、key を消すことも
@@ -3265,7 +3265,7 @@ func (h *Handler) publishEmojiUpdatedByIDs(ids []string) {
 //
 // `fileId` 経路は**画像を system 所有の drive ファイルへ複製してから**参照する
 // (#2999)。upstream は操作者のファイルをそのまま指すので意図的な乖離
-// (docs/divergence.md §7)。
+// (docs/divergence/security.md §7)。
 //
 // **`url` 経路は取り込まない。** あちらの意味は「この URL を指す」で、drive に行の
 // 無い外部 URL も指せる escape hatch (upstream には無い mk-go 独自の経路)。
@@ -3579,7 +3579,7 @@ func preferWebpublicType(f *model.DriveFile) *string {
 //
 // `fileId` 経路は**画像を system 所有の drive ファイルへ複製してから**参照する
 // (#3014)。upstream は渡された drive ファイルの URL をそのまま入れるので、意図的な
-// 乖離 (docs/divergence.md §7)。`admin/emoji/add` の #2999 と同じ形。
+// 乖離 (docs/divergence/security.md §7)。`admin/emoji/add` の #2999 と同じ形。
 //
 // Aliases は []string なので nil (省略) と [] (空配列) が型で区別できない。
 // Misskey TS 側も optional `?` で undefined と空配列を区別しないため、

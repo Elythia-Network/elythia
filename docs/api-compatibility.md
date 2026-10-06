@@ -284,7 +284,7 @@ Go側のマイグレーション (000001〜) はTS版テーブルに対して原
 
 **Elythia 固有のテーブル (upstream に対応するものが無い) は 18 件:**
 
-> [divergence.md](divergence.md) §2-1 は同じものを **21** と数えている。差は 3 件で、
+> [divergence/db.md](divergence/db.md) §2-1 は同じものを **21** と数えている。差は 3 件で、
 > あちらは `note_unread` (upstream DB には legacy として残るが 2026.7.0 の `models/` に
 > entity が無く参照 0 件。Elythia はこれを実用している) と bookkeeping 2 件
 > (`migrations` / `schema_migrations`) を加える。CI の
@@ -359,7 +359,7 @@ drop-in テスト (#367) で発見した補完カラム:
   カバレッジが崩れ、drop-in 切替でも挙動が変わるため)。表示経路を足すなら
   upstream に無い additive 拡張になる。
   ただし入力側だけは Elythia に意図的乖離がある — `admin/promo/create` は public
-  以外の note を reject する (`docs/divergence.md` §7)
+  以外の note を reject する (`docs/divergence/security.md` §7)
 - **upstream 2026.10.0 まで追従済** — `#947` (2026.3.2 → 2026.5.1) / `#1164` (2026.5.1 → 2026.5.4、LD-Signature 初期実装 + 2026.5.4 hardening 含む) を経て 2026.6.0 → 2026.7.0 → 2026.9.0 → 2026.9.1 → 2026.10.0 まで完了。各 release 差分は [`docs/update/`](update/) を参照 (`<yyyymm><nn>diff.md`。`nn` は**対象 upstream release の patch 番号**で日付ではない。backend に変更が無い release は doc を作らないので番号は飛ぶ。同じディレクトリに `<yyyymmdd>-<issue>-triage.md` 形式の triage note も同居する)
 
 詳細は[TS版からの移行ガイド](migration-from-ts.md)の「既知の制限」セクションも参照。

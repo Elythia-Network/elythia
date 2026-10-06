@@ -177,7 +177,7 @@ git grep -n "<直す前の固有の語>"
 
 「upstream と同じ」「対応済み」と書くときは、その反対が既に登録されていないかを見る。
 
-- `docs/divergence.md` — 意図的な乖離の一次資料
+- `docs/divergence.md` — 意図的な乖離の一次資料 (目次。中身は領域ごとに `docs/divergence/` の下)
 - コードコメントの `#<issue> L<n>` / `N<n>` — documented limitation の印。
   **`docs/divergence.md` には載っていないものがある** (`grep -rn "#2106 L" internal/`
   が辿り方)
@@ -206,7 +206,7 @@ doc が「upstream と同じ順序」と打ち消していた (その後、転�
 ```
 
 母集団が doc 間で違うのは構わない (`docs/api-compatibility.md` の 9 と
-`docs/divergence.md` の 12 は取り方が違うだけ) が、**違うことを両方に書く**。
+`docs/divergence/api.md` の 12 は取り方が違うだけ) が、**違うことを両方に書く**。
 片方だけに注記を置くと、もう片方から来た人には矛盾に見える。
 
 ### 5. 識別子の出どころを取り違えていないか
@@ -248,7 +248,7 @@ rate limit の例:
   誤認させる分だけ有害
 - **gate を doc で説明するときは、その gate が検査していない半分も書く。** 7 周の
   Medium / Low で最も繰り返された型がこれ (射程の過大主張・fail-open・偽陽性)。
-  手本は `docs/divergence.md` §4-1 の「固定できるのは Elythia 側だけで、
+  手本は `docs/divergence/config.md` §4-1 の「固定できるのは Elythia 側だけで、
   『upstream は 18』『名前も upstream に揃えてある』は検証していない
   (`test-shards` は本家のソースを取得しない)」
 

@@ -12,7 +12,7 @@
 - **REST APIは、本家のクライアントがそのまま動く互換性を保つ。** 独自の拡張は、フィールドやエンドポイントの**追加だけ**で行う。既存のものの意味を変えない
 - **frontendはMisskeyのforkで、独自に手を入れてよい**
 - **TS版Misskeyからの移行は保証する。** TS版のDBをそのまま引き継いで起動できるようにする。TS版へ戻せること(復路)は保証しない(#3191)。今どこまで戻れるかは`dropin-e2e`で測っており、戻らなくなったものは[docs/migration-from-ts.md](docs/migration-from-ts.md#戻らなくなったもの)に記録する
-- 本家と意図的に違える挙動は、理由と一緒に[docs/divergence.md](docs/divergence.md)に記録する
+- 本家と意図的に違える挙動は、理由と一緒に[docs/divergence.md](docs/divergence.md)(目次。中身は領域ごとに`docs/divergence/`の下)に記録する
 
 読み方:
 
@@ -301,11 +301,12 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 
 このファイル自体を変えたときだけ、1行で追記します(新しいものを上に)。経緯の本文はリンク先にあります。個別のfixの履歴は`CHANGELOG.md`にあります。
 
+- 2026-10-07: `docs/divergence.md`を目次にし、中身を`docs/divergence/`の領域ごとのファイルへ分けたので、冒頭の方針の案内を更新した (#3414) → [docs/divergence.md](docs/divergence.md)
 - 2026-10-06: nodeinfoの宣言を`elythiaPlugins`にしたので、冒頭の据え置く識別子の例外を更新した (#3400) → [docs/plugin-peer-protocol.md](docs/plugin-peer-protocol.md)
 - 2026-10-06: 本文の名前をElythiaにし、冒頭に旧称と据え置く識別子を書いた (#3394) → [docs/design/project-restructure.md](docs/design/project-restructure.md)
 - 2026-10-06: User-Agentを`Elythia/<version> (<url>)`にしたので、Section 6を更新した (#3394) → [docs/divergence.md](docs/divergence.md)
 - 2026-10-05: 実行バイナリを`elythia`1つにまとめたので、Section 2の構成、Section 3の`make tidy`の行、Section 9の`migrate`の行を更新した (#3394) → [docs/design/project-restructure.md](docs/design/project-restructure.md)
-- 2026-10-05: submodule(`third_party/misskey`)を外したので、Section 2の構成とSection 8の`build`の行を更新した (#3379) → [docs/divergence.md](docs/divergence.md#4-2b-frontend-の独自変更-3379-で取り込んだ後)
+- 2026-10-05: submodule(`third_party/misskey`)を外したので、Section 2の構成とSection 8の`build`の行を更新した (#3379) → [docs/divergence/frontend.md](docs/divergence/frontend.md#4-2b-frontend-の独自変更-3379-で取り込んだ後)
 - 2026-10-05: `frontend`をrequired checkにし、`ci.yml`の`frontend-check` jobをそこへまとめた。Section 3 / 5 / 8に反映し、Section 5にfrontendの節と`.claude/rules/frontend.md`を足した (#3379) → [docs/ci.md](docs/ci.md)
 - 2026-10-05: frontendを`frontend/`から読むようにしたので、Section 2の構成とSection 8の`frontend-check`の行を更新し、`frontend`の行を足した (#3379) → [docs/deployment.md](docs/deployment.md#frontend-を本体へ取り込んだ版へ上げる-3379)
 - 2026-10-05: 比較対象の本家を`.cache/misskey`から読むようにしたので、Section 8の`apicompat`の行を更新した (#3378) → [docs/ci.md](docs/ci.md)

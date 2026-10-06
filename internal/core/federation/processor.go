@@ -2746,7 +2746,7 @@ func (p *Processor) handleFlag(act genericActivity) error {
 	// 付与する (`${content}\n${JSON.stringify(uris, null, 2)}`、#1560)。
 	// **mk-go は pretty print しない** (upstream は 2 space indent)。通報の
 	// 本文だけの差で、既存の通報との一貫性を優先して compact のままにする
-	// (docs/divergence.md 3-3)。
+	// (docs/divergence/federation.md 3-3)。
 	var content struct {
 		Content string `json:"content"`
 	}

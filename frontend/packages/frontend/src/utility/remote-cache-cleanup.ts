@@ -6,7 +6,7 @@
 /**
  * Decides whether "clear cached files" has anything to delete (#3102).
  *
- * **mk-go はリモートメディアをキャッシュしない** (docs/divergence.md 5.5) ので、
+ * **mk-go はリモートメディアをキャッシュしない** (docs/divergence/operations.md 5.5) ので、
  * mk-go が作った行に削除対象は無い (`upsertAttachments` は常に `isLink: true` /
  * `size: 0` の行しか作らない)。**しかし純正 Misskey から引き継いだ DB には、
  * `cacheRemoteFiles` が有効だった時期の実体つきの行が残る。** その運用者にとっては

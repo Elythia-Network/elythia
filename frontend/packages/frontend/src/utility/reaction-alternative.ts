@@ -24,7 +24,7 @@ import { bareEmojiName, hasLocalEmojiWithSameName } from '@/utility/import-remot
  * チップを押すと `:foo@.:` のチップが別に増える (既にローカルの同名チップが
  * あればそちらが増える)。合算は backend 無改造でもできる (`resolveReactionValue`
  * は任意 host を受ける) が、**純正 TS は任意 host を受けず ❤ に落とす**ので
- * drop-in で戻したときに壊れる。詳細は `docs/divergence.md` §4-2。
+ * drop-in で戻したときに壊れる。詳細は `docs/divergence/frontend.md` §4-2。
  */
 export function localAlternativeReaction(reaction: string): string | null {
 	// Unicode 絵文字はそのまま押せる。

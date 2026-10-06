@@ -83,7 +83,7 @@ func validSystemWebhookEvents(on []string) bool {
 
 // errNoSuchSystemWebhook is upstream show.ts noSuchSystemWebhook。mk-go は
 // update / delete でも同じものを返す (本家はそこで findOneByOrFail が投げて 500
-// になる。docs/divergence.md 7、#3262)。
+// になる。docs/divergence/security.md 7、#3262)。
 func errNoSuchSystemWebhook(c echo.Context) error {
 	return c.JSON(http.StatusNotFound, apierr.ErrorWithKind("NO_SUCH_SYSTEM_WEBHOOK", "No such SystemWebhook.", "38dd1ffe-04b4-6ff5-d8ba-4e6a6ae22c9d", apierr.KindServer))
 }

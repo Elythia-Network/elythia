@@ -472,7 +472,7 @@ func sortNulGuardViolations(v []nulGuardViolation) {
 //
 // **既知の範囲**: 単一行の lookup (`Find*` / `Get*` が `(*model.X, error)` を
 // 返すもの) と `*ByID*` だけ。`ListByUser(userID, ...)` のように値を受ける一覧系は
-// 見ていない (docs/divergence.md の「射程外」)。
+// 見ていない (docs/divergence/security.md の「射程外」)。
 func TestRepositoryLookupsRejectUnstorableValues(t *testing.T) {
 	root := filepath.Join(repoRoot(t), "internal", "repository")
 	violations, methods := scanRepoLookupGuards(t, root)

@@ -48,7 +48,7 @@ func TestDefaultQueueConcurrency_CoversAllQueues(t *testing.T) {
 // relationship は #2403 で deliver から分離した。upstream の 16 ではなく 4 を
 // 既定にしているのは、relationship job が DB bound で db.maxOpenConns (既定 25)
 // を HTTP 経路と共有するため。変更する場合は docs/configuration.md と
-// docs/divergence.md §4-3 の記述も合わせること。
+// docs/divergence/config.md §4-3 の記述も合わせること。
 func TestDefaultQueueConcurrency_Relationship(t *testing.T) {
 	assert.Equal(t, 4, defaultQueueConcurrency["relationship"])
 }

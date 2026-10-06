@@ -1055,7 +1055,7 @@ AVIF は、設定し直すと静止画になる** (書き込み経路のアニ�
 ローカル利用者がその値を持っている。このバッチはそれを「原本と違う」と判定して
 公開用 (最大 2048px) へ書き換えるため、48px 表示のアイコンに大きな画像が流れる。
 Elythia 生まれの DB では逆に原本 → 公開用なので改善になる。**構成によって向きが
-反転する**ので、移行済みなら流す前に `docs/divergence.md` の `user.avatarUrl` の行を
+反転する**ので、移行済みなら流す前に `docs/divergence/operations.md` の `user.avatarUrl` の行を
 読むこと。
 
 **アイコンとバナーは 1 本の UPDATE にまとまる。** 条件は AND で積まれるので、片方の
@@ -1216,7 +1216,7 @@ drive にあるファイルはそのまま残る (バッチと同じ判断)。�
 `admin/emoji/update` は #3014 で system 所有へ複製するようになったが、**それ以前に登録・
 差し替えた絵文字は対象外のまま**。**管理画面が使う経路 (`fileId`) からはもう増えない**が、
 `admin/emoji/add` の **`url` 直接指定** (Elythia 独自の escape hatch。「この URL を指す」が
-意味なので取り込まない。`docs/divergence.md` §7) に利用者のファイルの URL を渡せば、
+意味なので取り込まない。`docs/divergence/security.md` §7) に利用者のファイルの URL を渡せば、
 同じ形は今でも作れる。該当するかは以下で分かる (読み取りのみ)。
 
 ```sql
@@ -1477,7 +1477,7 @@ policy さえあればログイン IP が読める。**
   `ip lookup audit: record failed` が Error で出る
 - **`user_ip` 自体が記録していない範囲は引けない。** `meta.enableIpLogging` が
   無効だった期間、凍結済みアカウントの接続、rate limit で 429 になった
-  リクエストは観測が残らない (詳細は [divergence.md](divergence.md) の
+  リクエストは観測が残らない (詳細は [divergence/security.md](divergence/security.md) の
   「IP 履歴の記録契機」)
 - **記録の一覧は最新 10,100 件までしか遡れない** (`offset` の上限 10000 + 1 ページ
   100 件)。保持期間が 90 日なので、**1 日 113 件以上**の照会がある運用では
@@ -1544,6 +1544,6 @@ drift は起動時の `RecomputeFollowCounts` で完全に再計算されるた�
 
 列の意味は本家と同じで、どちらも**その host の側から見た**数 (#3330)。`followingCount` はその host の利用者がローカルの利用者をフォローしている数 (federation/instances の `publishing`)、`followersCount` はローカルの利用者がその host の利用者をフォローしている数 (`subscribing`)。#3330 より前の Elythia は incremental 更新・起動時の再計算ともに**逆向きに数えていた**ので、それまでに Elythia を起動したことのある DB では 2 列の値が入れ替わっている (TS 版が正しく積んだ値も、Elythia の起動時の再計算で入れ替わる)。#3330 を含む版に上げて**一度起動すれば、再計算で正しい向きに戻る**。一方、instance chart (`__chart__instance` の `following` / `followers`) の過去の行は作り直さないので、更新前の期間は 2 系列が入れ替わったまま残る。
 
-`meta.enableStatsForFederatedInstances` を false にすると、本家と同じく Follow / Unfollow はこの 2 列も instance chart の following / followers も動かさない (リモートの投稿・利用者の取り込みで動く `notesCount` / `usersCount` と、instance chart の notes / users も同じく止まる)。ただし**起動時の `RecomputeFollowCounts` はこの設定に関係なく走る** (本家には起動時の再計算そのものが無い。docs/divergence.md の 5 節)。chart と集計列の判定は、どちらも次のイベントから効く (meta はキャッシュ越しに読むので、キャッシュの TTL ぶん遅れうる。#3330 より前は chart 側だけ起動時の値に固定されていて、再起動が要った)。
+`meta.enableStatsForFederatedInstances` を false にすると、本家と同じく Follow / Unfollow はこの 2 列も instance chart の following / followers も動かさない (リモートの投稿・利用者の取り込みで動く `notesCount` / `usersCount` と、instance chart の notes / users も同じく止まる)。ただし**起動時の `RecomputeFollowCounts` はこの設定に関係なく走る** (本家には起動時の再計算そのものが無い。docs/divergence/operations.md の 5 節)。chart と集計列の判定は、どちらも次のイベントから効く (meta はキャッシュ越しに読むので、キャッシュの TTL ぶん遅れうる。#3330 より前は chart 側だけ起動時の値に固定されていて、再起動が要った)。
 
-再計算は**移行済みのアカウントが絡むフォロー行を数えない**。本家の値と一致するのは、移行済みのリモートアカウントをローカルの利用者がフォローしている分の `followersCount` だけで、移行したアカウント側のフォローやローカルのアカウントの移行、proxy アカウントの行は本家では数えたまま残る。そのため移行が絡む instance では、Elythia の値が本家より小さくなりうる (詳細は docs/divergence.md の 5 節、#3330)。
+再計算は**移行済みのアカウントが絡むフォロー行を数えない**。本家の値と一致するのは、移行済みのリモートアカウントをローカルの利用者がフォローしている分の `followersCount` だけで、移行したアカウント側のフォローやローカルのアカウントの移行、proxy アカウントの行は本家では数えたまま残る。そのため移行が絡む instance では、Elythia の値が本家より小さくなりうる (詳細は docs/divergence/operations.md の 5 節、#3330)。

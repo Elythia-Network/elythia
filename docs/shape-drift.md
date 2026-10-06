@@ -35,7 +35,7 @@ Misskey互換クライアント(Miria等)は、misskey-jsの型に従ってレ�
 | `tools/shapediff/` | snapshot再生成 + 全family drift report |
 | `internal/entitycompat/plugin_surface_test.go` | 公開プラグイン API の面 (`TestPluginSurfaceDrift`) |
 | `internal/entitycompat/plugin_doc_test.go` | `docs/plugins/authoring.md` の一覧 ↔ 公開面 golden (`TestPluginDoc_*` 5 本) |
-| `internal/entitycompat/divergence_doc_test.go` | `docs/divergence.md` ↔ 実 schema / 生成物 / router.go (`TestDivergenceDoc_*` 6 本)、`docs/api-compat.md` ↔ router.go (`TestAPICompatDoc_MatchesRouter`) |
+| `internal/entitycompat/divergence_doc_test.go` | `docs/divergence.md` と `docs/divergence/` ↔ 実 schema / 生成物 / router.go / 目次 (`TestDivergenceDoc_*` 7 本)、`docs/api-compat.md` ↔ router.go (`TestAPICompatDoc_MatchesRouter`) |
 | `internal/entitycompat/schema_drift_test.go` | migration の列 ↔ upstream entity (`TestSchemaDrift_CreateOnlyColumns`) |
 | `internal/entitycompat/migration_seed_test.go` | TypeORM `migrations` seed の網羅 (`TestMigrationSeed_CoversUpstream`) |
 
@@ -441,6 +441,10 @@ make shapecheck-gen                                        # golden_upstream_mig
 
 実際に 3 箇所が静かにずれていた (#2634)。#2313 で分割アップロードの endpoint 4 件を足したときに冒頭サマリだけ更新して §1-1 の内訳表を更新せず、#2332 / #2340 / `instance_secret` でも同じことが起きた。§2-2 に至っては見出しの「実使用 14」と直後の散文の「15 件」が**隣接 2 行で矛盾**していた。どれも人が数え直さない限り気付けない。
 
+### `TestDivergenceDoc_IndexListsEveryAreaFile`
+
+`docs/divergence.md` は #3414 から目次で、中身は `docs/divergence/` の領域ごとのファイルにある。下のゲートはどれも、目次と、目次がリンクするファイルを続けて読む。**目次に載らないファイルはどのゲートからも読まれない**ので、目次のリンクと `git ls-files docs/divergence/` を突き合わせる (ディスクでなく git で数えるのは、add し忘れたファイルが手元でだけ通らないようにするため)。領域のファイルを足したら目次の表に行を足す。
+
 ### `TestDivergenceDoc_EndpointCountMatchesTable`
 
 §1-1 の見出しの件数 == 表の件数列の合計 == 冒頭サマリの和の式。
@@ -453,7 +457,7 @@ make shapecheck-gen                                        # golden_upstream_mig
 
 upstream の endpoint 一覧を `tools/apicompat` から直接引くことはできない (**本家のソースは `make upstream-fetch` で取る `.cache/misskey` にしか無く、`test-shards` job は取得しない**。#3378 / #3379)。ただし `make apicompat` の生成物は commit されているので、そちらを経由すれば本家のソース無しで突き合わせられる。
 
-この gate が落ちたとき**どちらが古いかは中身を見ないと決まらない**。api-compat.md 側が古いなら `make apicompat` で再生成する (route dump に stack が要る)。divergence.md 側が古いなら §1-1 の表・見出し・冒頭サマリの 3 箇所すべてを直す。
+この gate が落ちたとき**どちらが古いかは中身を見ないと決まらない**。api-compat.md 側が古いなら `make apicompat` で再生成する (route dump に stack が要る)。divergence/api.md 側が古いなら §1-1 の表・見出し・冒頭サマリの 3 箇所すべてを直す。
 
 ### `TestDivergenceDoc_ForkFrontendTagsMatchTable`
 
@@ -488,7 +492,7 @@ job は本家のソースを取得しないため。doc と実装を同時に間
 `/api/v1/instance/peers` は upstream 側も `get()` 直登録で Elythia も `api.GET` 一本)。
 
 **錨そのものが腐ると、それを見る gate も一緒に無力化する。** 上の
-`EndpointCountMatchesAPICompat` は divergence.md と api-compat.md の一致しか見ないので、
+`EndpointCountMatchesAPICompat` は divergence/api.md (§1-1) と api-compat.md の一致しか見ないので、
 endpoint を足して**どちらも更新しない**と両方が古いまま緑になる (develop では
 `mk-go version: 1.1.2` / `mk-go only: 49` のまま腐っていた)。
 

@@ -225,7 +225,7 @@ P3 (#3378) で上のとおりにした (2026-10-05)。
 5. 衝突はファイル単位で衝突マーカーとして残る。解いてコミットし、`UPSTREAM_MISSKEY_VERSION` を上げる
 6. backend 側の変更は今と同じく triage して Go に移植する (docs/upstream-catch-up.md)
 
-- 今の fork の rebase (`rebase --onto`) と比べて、衝突の解き方が「コミット単位」から「ファイル単位」になる。独自変更の一覧は git の履歴ではなく `docs/divergence.md` §4-2 で保つ
+- 今の fork の rebase (`rebase --onto`) と比べて、衝突の解き方が「コミット単位」から「ファイル単位」になる。独自変更の一覧は git の履歴ではなく `docs/divergence/frontend.md` §4-2 で保つ
 - 取り込まないパスを絞り込みで外すのは、本家が版ごとに `.github/workflows` などを変えるため (2026.9.1 では `.github/workflows` だけで 24 ファイル)。外さないと、無いファイルへの差分として当たらない。
 - **P1 (#3370) の試算:** 過去 3 回の追従を scratch で再現し、今の方式 (独自コミットを 1 件ずつ当て直す) と比べた。どちらも衝突の量は同じで、衝突したファイル以外は実際の `-mk.0` の木 (backend を除く) と完全に一致した。試算では `packages/backend` 以外の差分をまとめて当てた。D1 の「取り込む」パスだけに絞ると、当てるファイルはさらに減る (表の「うち「取り込む」パス」の列)
 
@@ -250,7 +250,7 @@ P4d-3 (#3379) で上のとおりに作った (2026-10-05)。
 
 - **frontend の版 = 本体の版。`mkGoFrontendVersion` は廃止する** (Q7)。読んでいるのは同梱 frontend の `/about-mkgo` の表示だけで (2026-09-30 に確認)、更新ダイアログの判定には使っていない (`check-client-update.ts` のコメントも「fork のタグでは判定できない」として使っていない)。追従している本家の版は `/api/meta` の `version` に既に出ている。ビルド時に埋める `MkGoFrontendVersion` の ldflags (`Makefile` と `Dockerfile` / `deploy/uds/Dockerfile.mkgo`) と、`tests/diff` の除外も合わせて消す
 - `-mk.N` のタグ、`submodulepin-check`、`bundled_assets_pin_test`、`docs/divergence.md` の pin 行は廃止または置き換える
-- `docs/divergence.md` §4-2 (独自変更の一覧) は ~~tag 列を PR 番号に置き換える~~ **#3379 で取り込むまでの記録として凍結し、取り込んだ後の変更は PR 番号を鍵にした新しい節 (§4-2b) に書く** (P4d-2 で変更)。143 行の tag を PR 番号へ置き換えると対応表を作る手間が大きく、アーカイブした fork の tag との対応も失われるため
+- `docs/divergence/frontend.md` §4-2 (独自変更の一覧) は ~~tag 列を PR 番号に置き換える~~ **#3379 で取り込むまでの記録として凍結し、取り込んだ後の変更は PR 番号を鍵にした新しい節 (§4-2b) に書く** (P4d-2 で変更)。143 行の tag を PR 番号へ置き換えると対応表を作る手間が大きく、アーカイブした fork の tag との対応も失われるため
 
 ### D6. テスト関連の配置
 
@@ -372,7 +372,7 @@ P4 (bind mount の元が `third_party/misskey/built` から `frontend/built` に
 ## 未決事項
 
 - ~~Q1. 正式な名前 (P5)~~ → **Elythia** に決定 (2026-09-30)。置き場所は `Elythia-Network`、機械が読む名前は小文字 (R1)
-- ~~Q2. fork の履歴を持ち込むか~~ → **スナップショットとして取り込む** (2026-09-30)。独自変更の経緯は `docs/divergence.md` §4-2 と、アーカイブした fork で追う
+- ~~Q2. fork の履歴を持ち込むか~~ → **スナップショットとして取り込む** (2026-09-30)。独自変更の経緯は `docs/divergence/frontend.md` §4-2 と、アーカイブした fork で追う
 - ~~Q3. 本家の取得方法~~ → **手元は共有の bare mirror + worktree、CI は毎回 shallow** (2026-09-30、D2)
 - ~~Q4. 旧名の配布イメージの猶予期間~~ → **設けない**。改名の版で旧名での publish を止め、移転を案内する (2026-09-30)
 - ~~Q5. 旧 URL (`/about-mkgo` など) の転送を残す期間~~ → **転送しない** (2026-09-30)

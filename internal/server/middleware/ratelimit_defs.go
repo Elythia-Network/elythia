@@ -199,7 +199,7 @@ var DefaultEndpointLimits = map[string]*EndpointLimit{
 	"admin/ip/lookup-log":       {Duration: time.Hour, Max: 120, UserBucketOnly: true},
 	// **upstream の口も同じ扱いにする** (#3106)。返すのは同じ「利用者 ↔ IP の
 	// 対応」なので、ここだけ無制限だと mk-go 側に上限を置いた意味が無い。
-	// upstream にこの制限は無いので意図的な divergence (docs/divergence.md §7)。
+	// upstream にこの制限は無いので意図的な divergence (docs/divergence/security.md §7)。
 	"admin/get-user-ips": {Duration: time.Hour, Max: 120, UserBucketOnly: true},
 	// 連合先との疎通の診断 (#3055)。1 回で相手へ最大 8 本程度のリクエストを飛ばすので、
 	// mk-go を任意の外部ホストへの踏み台にさせない上限を置く。宛先は SSRF-safe

@@ -1156,7 +1156,7 @@ func (r *Resolver) resolveActorOnceWithID(uri string, allowCrossHost bool, preas
 		// を立てて読み取り時に隠すだけ。逆に `applySuspendedAuthorExclusion`
 		// は `isSuspended` しか見ないので、**その人宛のローカル利用者の返信や
 		// リノートまで timeline から消える** (`Delete` 経路では消えない)。
-		// 詳細は docs/divergence.md §3-3a。
+		// 詳細は docs/divergence/federation.md §3-3a。
 		IsSuspended: actor.Suspended.Bool(),
 	}
 	if user.IsSuspended {
@@ -5271,7 +5271,7 @@ func isForeignKeyViolation(err error) bool {
 // `validateFileName` の不合格は `untitled`)。
 //
 // **upstream は実体を download して名前を決める** (Content-Disposition があれば
-// それを優先する)。mk-go は実体を保存しない (docs/divergence.md 5.5) が、先頭を
+// それを優先する)。mk-go は実体を保存しない (docs/divergence/operations.md 5.5) が、先頭を
 // 取得して Content-Disposition を見る (probeAttachment、#3243)。これは
 // Content-Disposition から名前が取れなかったときの fallback — 取得の失敗、
 // ヘッダ無し、名前の不合格 (制御文字・bidi 制御文字を含む)、エラーページと

@@ -25,7 +25,7 @@ type UserLookups struct {
 // とは形が違うので、あちらの packer を流用しない。
 //
 // createdAt は本家に無い。mk-go が前から送っていた項目で、消すと受け取る側が
-// 壊れうるので、追加の項目として残す (docs/divergence.md 1-1b)。
+// 壊れうるので、追加の項目として残す (docs/divergence/api.md 1-1b)。
 //
 // 本家の UserLite はリモートの利用者に instance を付け、emojis を絵文字の URL に
 // 解決する (UserEntityService.pack)。PackUserLite だけではどちらも付かないので、
