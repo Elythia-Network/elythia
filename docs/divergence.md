@@ -861,6 +861,7 @@ upstream が `jobState` の型を autogen (`AdminQueueJobsRequest['state'][numbe
 | #3408 | 画面に出る「Misskey」のうち、このソフトウェア自身を指すもの (翻訳 32 言語の 27 キー、「Elythia Games」、初期セットアップ、起動失敗の画面、空のプッシュ通知) を「Elythia」にする。本家への寄付のお願い (`MkDonation`) を出さない。`/about-elythia` からフロントエンドの版の行を外し、`/about` は Elythia の版だけを出す (互換 Misskey 版の行は純正 backend のときだけ)。サイト名の既定値 (`og:site_name`) は backend 側で `Elythia` になったので、`frontend-shared/js/config.ts` は `Elythia` と `Misskey` の両方を未設定として扱う。backend 側の既定の名前 (タイトル、opensearch、RSS、パスキーの表示名、メール) も `config.DisplayName` に変えた。**純正へは還元しない行** (Elythia の名前) |
 | #3409 | ログインしていない人がトップ以外を開いたときの左のパネル (`ui/visitor.vue`、本家はテーマのアクセント色) と狭い画面の上の帯を、エントランスと同じ夜空にする (#3407 の背景の部品とテーマの変数の上書きを使う)。右の本文は利用者のテーマのまま。**純正へは還元しない行** (Elythia の見た目) |
 | #3410 | `/about-elythia` からコントリビューターの一覧をやめ、開発の拠点である GitHub の組織 (Elythia-Network) へのカードにする。AGPL-3.0 第 13 条の案内 (ソースコード、ライセンス) は変えない。**純正へは還元しない行** (Elythia 独自のページ) |
+| #3411 | 組み込みテーマに Elythia Light / Elythia Dark (`frontend-shared/themes/l-elythia.json5` / `d-elythia.json5`) を足し、既定のテーマにする (本家は Mi Light / Mi Green+Lime、埋め込みは Mi Light / Mi Dark)。管理者がサーバー設定で既定のテーマを指定していればそちらが優先される。あわせて accent の背景に白い文字を直書きしていた 5 か所 (`MkNotification` の申請アイコン、`MkAutocomplete` の選択行、`MkUserSelectDialog`、`MkAuthConfirm`、埋め込みの `EmMediaVideo`) を `fgOnAccent` にした。**`fgOnAccent` を上書きしている本家のテーマ (Future、Green+Lime、Green+Orange、U0) でも、これらの文字が白から暗い色に変わる**。前者は**純正へは還元しない行** (Elythia の見た目)、後者は**純正へ還元しうる行** (本家の Green+Lime でも白い文字が 1.44:1 で読めない) |
 
 ---
 
