@@ -4,7 +4,7 @@
 # backend 向けのもの (test-backend / test-federation / validate-api-json など) と
 # 本家の運用向けのもの (docker / release / labeler など) は持ってこない。
 #
-# - frontend-lint: 9 workspace の eslint、typecheck (frontend / sw / misskey-js)、
+# - frontend-lint: 10 workspace の eslint、typecheck (frontend / sw / misskey-js / elythia-js)、
 #   check-dts、SPDX ヘッダー、locale の検証、misskey-js の API レポート
 # - frontend-test: 本番設定でのビルド、frontend の vitest、misskey-js のテスト
 # - frontend: 上の 2 つを集約する。**required check はこの名前だけ** (`test` と
@@ -136,10 +136,11 @@ jobs:
           --filter frontend --filter frontend-shared --filter frontend-builder
           --filter frontend-embed --filter icons-subsetter --filter sw
           --filter misskey-js --filter misskey-bubble-game --filter misskey-reversi
+          --filter elythia-js
           run eslint
 
       - name: typecheck
-        run: pnpm --no-bail --filter frontend --filter sw --filter misskey-js run typecheck
+        run: pnpm --no-bail --filter frontend --filter sw --filter misskey-js --filter elythia-js run typecheck
 
       - run: pnpm check-dts
 

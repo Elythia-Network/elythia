@@ -169,9 +169,9 @@ import { claimAchievement, claimedAchievements } from '@/utility/achievements.js
 import { $i } from '@/i.js';
 import { prefer } from '@/preferences.js';
 
-// mk-go が additive に返す実装バージョン (#2274)。純正 backend には無いので optional。
-// autogen の MetaDetailed には無い field なのでここで型を広げる (autogen 再生成で消えないように)。
-const mkGoVersion = (instance as typeof instance & { mkGoVersion?: string }).mkGoVersion ?? null;
+// Elythia が additive に返す実装バージョン (#2274)。純正 backend には無いので optional。
+// 型は elythia-js の MetaDetailed が持つ (#3418)。
+const mkGoVersion = instance.mkGoVersion ?? null;
 
 const patronsWithIcon = [{
 	name: 'カイヤン',

@@ -285,7 +285,7 @@ const props = withDefaults(defineProps<{
 	initialTab: 'overview',
 });
 
-const mkGoVersion = (instance as typeof instance & { mkGoVersion?: string }).mkGoVersion ?? null;
+const mkGoVersion = instance.mkGoVersion ?? null;
 const ipLookup = createLazyUserIpLookup(props.userId, userId => misskeyApi('admin/get-user-ips', { userId }));
 
 const result = await _fetch_();

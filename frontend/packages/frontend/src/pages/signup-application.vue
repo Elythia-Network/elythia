@@ -304,10 +304,11 @@ onUnmounted(() => {
 	if (ticker != null) window.clearInterval(ticker);
 });
 
-// mk-go 独自の meta なので misskey-js の型集合には無い (#2570)。
+// Elythia 独自の meta (#2570)。型は elythia-js の MetaDetailed が持つ (#3418)。
+// 端末に残った古い meta では欠けうるので、配列でなければ空にする
 const form = computed<FormField[]>(() => {
-	const raw = (instance as unknown as Record<string, unknown>).signupApplicationForm;
-	return Array.isArray(raw) ? raw as FormField[] : [];
+	const raw = instance.signupApplicationForm;
+	return Array.isArray(raw) ? raw : [];
 });
 
 // **定義と同じ順序の値の配列を送る。** ラベルはサーバーが定義から埋めるので、

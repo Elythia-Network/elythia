@@ -17,6 +17,7 @@
 		"packages/sw",
 		"packages/misskey-js",
 		"packages/misskey-js/generator",
+		"packages/elythia-js",
 		"packages/misskey-reversi",
 		"packages/misskey-bubble-game",
 		"packages-private/*",

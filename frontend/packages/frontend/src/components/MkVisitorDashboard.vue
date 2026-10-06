@@ -75,8 +75,8 @@ import { i18n } from '@/i18n.js';
 import { instance } from '@/instance.js';
 import { isRegistrationClosed } from '@/utility/registration-mode.js';
 
-// mk-go 独自の meta なので misskey-js の型集合には無い (#2557)。
-const approvalRequiredForSignup = (instance as unknown as Record<string, unknown>).approvalRequiredForSignup === true;
+// Elythia 独自の meta (#2557)。型は elythia-js の MetaDetailed が持つ (#3418)。
+const approvalRequiredForSignup = instance.approvalRequiredForSignup === true;
 const registrationClosed = isRegistrationClosed();
 import MkNumber from '@/components/MkNumber.vue';
 import XActiveUsersChart from '@/components/MkVisitorDashboard.ActiveUsersChart.vue';

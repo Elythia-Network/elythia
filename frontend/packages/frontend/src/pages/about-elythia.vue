@@ -124,19 +124,15 @@ const ELYTHIA_NETWORK_URL = 'https://github.com/Elythia-Network';
 // operator が明示設定した場合に備えてここでも弾く。
 const UPSTREAM_MISSKEY_REPOSITORY_URL = 'https://github.com/misskey-dev/misskey';
 
-// mk-go が additive に返す値 (#2274 / #2700)。純正 backend には無いので optional。
-// autogen の MetaDetailed には無い field なのでここで型を広げる (autogen 再生成で消えないように)。
-const mkGoMeta = instance as typeof instance & {
-	mkGoVersion?: string;
-	mkGoCommit?: string;
-};
-const mkGoVersion = mkGoMeta.mkGoVersion ?? null;
+// Elythia が additive に返す値 (#2274 / #2700)。純正 backend には無いので optional。
+// 型は elythia-js の MetaDetailed が持つ (#3418)。
+const mkGoVersion = instance.mkGoVersion ?? null;
 
 // Elythia の版。ビルド時に revision を埋めていれば短縮ハッシュを添える
 // (`Elythia 1.3.0 (abc1234)`)。`go run` や build-arg を渡さない image では空に
 // なるので、そのときは版だけ出す。
 const elythiaVersion = computed(() => {
-	const commit = mkGoMeta.mkGoCommit;
+	const commit = instance.mkGoCommit;
 	return commit ? `Elythia ${mkGoVersion} (${commit})` : `Elythia ${mkGoVersion}`;
 });
 

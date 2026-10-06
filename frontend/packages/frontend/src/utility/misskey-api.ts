@@ -3,18 +3,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import * as Misskey from 'misskey-js';
 import { ref } from 'vue';
 import { apiUrl } from '@@/js/config.js';
+import type * as Elythia from 'elythia-js';
 import { $i } from '@/i.js';
 export const pendingApiRequestsCount = ref(0);
 
 // Implements Misskey.api.ApiClient.request
 export function misskeyApi<
 	ResT = void,
-	E extends keyof Misskey.Endpoints = keyof Misskey.Endpoints,
-	P extends Misskey.Endpoints[E]['req'] = Misskey.Endpoints[E]['req'],
-	_ResT = ResT extends void ? Misskey.api.SwitchCaseResponseType<E, P> : ResT,
+	// Elythia: 本家の Endpoints に Elythia 独自のエンドポイントを重ねたもの (#3417)
+	E extends keyof Elythia.Endpoints = keyof Elythia.Endpoints,
+	P extends Elythia.Endpoints[E]['req'] = Elythia.Endpoints[E]['req'],
+	_ResT = ResT extends void ? Elythia.SwitchCaseResponseType<E, P> : ResT,
 >(
 	endpoint: E,
 	data: P & { i?: string | null; } = {} as any,
@@ -64,9 +65,10 @@ export function misskeyApi<
 // Implements Misskey.api.ApiClient.request
 export function misskeyApiGet<
 	ResT = void,
-	E extends keyof Misskey.Endpoints = keyof Misskey.Endpoints,
-	P extends Misskey.Endpoints[E]['req'] = Misskey.Endpoints[E]['req'],
-	_ResT = ResT extends void ? Misskey.api.SwitchCaseResponseType<E, P> : ResT,
+	// Elythia: 本家の Endpoints に Elythia 独自のエンドポイントを重ねたもの (#3417)
+	E extends keyof Elythia.Endpoints = keyof Elythia.Endpoints,
+	P extends Elythia.Endpoints[E]['req'] = Elythia.Endpoints[E]['req'],
+	_ResT = ResT extends void ? Elythia.SwitchCaseResponseType<E, P> : ResT,
 >(
 	endpoint: E,
 	data: P = {} as any,

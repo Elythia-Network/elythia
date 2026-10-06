@@ -7,6 +7,8 @@ packages:
   - packages/icons-subsetter
   - packages/sw
   - packages/misskey-js
+  # Elythia 独自の API の型 (#3417)
+  - packages/elythia-js
   - packages/misskey-js/generator
   - packages/misskey-reversi
   - packages/misskey-bubble-game

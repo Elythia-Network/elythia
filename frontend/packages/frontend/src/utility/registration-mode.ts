@@ -8,12 +8,12 @@ import { instance } from '@/instance.js';
 /**
  * Whether the server accepts no registrations at all (mk-go, #3186).
  *
- * mk-go 独自の meta なので misskey-js の型集合には無い。**招待制
+ * Elythia 独自の meta (型は elythia-js の MetaDetailed、#3418)。**招待制
  * (`disableRegistration`) と区別する** — 閉じている間は招待コードも使えないので、
  * 「招待制です」と出すと利用者はコードを探しに行く。
  */
 export function isRegistrationClosed(): boolean {
-	return (instance as unknown as Record<string, unknown>).registrationClosed === true;
+	return instance.registrationClosed === true;
 }
 
 /**

@@ -55,6 +55,7 @@
 		"mediabunny": "1.55.4",
 		"mfm-js": "0.26.0",
 		"misskey-bubble-game": "workspace:*",
+		"elythia-js": "workspace:*",
 		"misskey-js": "workspace:*",
 		"misskey-reversi": "workspace:*",
 		"punycode.js": "2.3.1",
