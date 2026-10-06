@@ -41,8 +41,8 @@ import MkInfo from '@/components/MkInfo.vue';
 import { instance } from '@/instance.js';
 import { $i, iAmAdmin } from '@/i.js';
 
-// mk-go 独自の meta なので misskey-js の型集合には無い (#2557)。
-const approvalRequiredForSignup = (instance as unknown as Record<string, unknown>).approvalRequiredForSignup === true;
+// Elythia 独自の meta (#2557)。型は elythia-js の MetaDetailed が持つ (#3418)。
+const approvalRequiredForSignup = instance.approvalRequiredForSignup === true;
 import { lookup } from '@/utility/lookup.js';
 import * as os from '@/os.js';
 import { misskeyApi } from '@/utility/misskey-api.js';

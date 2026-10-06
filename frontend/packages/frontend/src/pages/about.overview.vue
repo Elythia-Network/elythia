@@ -140,9 +140,9 @@ import { host, version } from '@@/js/config.js';
 import { i18n } from '@/i18n.js';
 import { instance } from '@/instance.js';
 
-// mk-go が additive に返す実装バージョン (#2274)。純正 backend には無いので optional。
-// autogen の MetaDetailed には無い field なのでここで型を広げる (autogen 再生成で消えないように)。
-const mkGoVersion = (instance as typeof instance & { mkGoVersion?: string }).mkGoVersion ?? null;
+// Elythia が additive に返す実装バージョン (#2274)。純正 backend には無いので optional。
+// 型は elythia-js の MetaDetailed が持つ (#3418)。
+const mkGoVersion = instance.mkGoVersion ?? null;
 
 // サーバーが申告する互換 Misskey 版。build 時定数の `version` はフロントの
 // bundle 版でしかなく、backend だけ更新した場合にずれるため、サーバー情報の

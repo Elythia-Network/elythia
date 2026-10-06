@@ -20,7 +20,7 @@ PR を出すと十数個の check が走る。**どれが何を見ていて、�
 | `build` | CI | 全パッケージがコンパイルできるか + 同梱プラグインの `go vet` + 同梱サンプルが既定無効か + 同梱サンプル入りの統合バイナリ (`make plugins-all && go build ./cmd/elythia`、#2495) | `go build ./...` / `make plugin-vet` / `make plugins-all && go build -o /dev/null ./cmd/elythia` |
 | `lint` | CI | `go vet` + **actionlint** + `gofmt -s -d` の差分 + 重複 fixture ID + **golangci-lint** | `make lint` / `make actionlint` / `make fmt` / `make golangci-lint` |
 | `test` | CI | 4-way shard の集約。どれか 1 つでも落ちれば赤 | `make test` |
-| `frontend` | frontend | `frontend-lint` (9 workspace の eslint、typecheck、check-dts、SPDX ヘッダー、locale、misskey-js の API レポート、`emoji-regex-check`) と `frontend-test` (本番設定のビルド、frontend の vitest、misskey-js のテスト) の集約。frontend に関係しない差分では両方を skip して成功する | 下の「`frontend` が落ちたとき」 |
+| `frontend` | frontend | `frontend-lint` (10 workspace の eslint、typecheck、check-dts、SPDX ヘッダー、locale、misskey-js の API レポート、`emoji-regex-check`) と `frontend-test` (本番設定のビルド、frontend の vitest、misskey-js のテスト) の集約。frontend に関係しない差分では両方を skip して成功する | 下の「`frontend` が落ちたとき」 |
 
 ### `test` が落ちたとき
 
@@ -273,7 +273,7 @@ package load エラーで解析が空振りしうる。**ローカルの `go` �
 `frontend` は集約 job なので、**落ちた `frontend-lint` / `frontend-test` のログ**を見る。
 `changes` が落ちたときも赤になる (判定できないまま緑にしないため)。
 
-- `frontend-lint`: 9 workspace の eslint、typecheck (frontend は `vue-tsc --noEmit`、ほかに sw / misskey-js)、
+- `frontend-lint`: 10 workspace の eslint、typecheck (frontend は `vue-tsc --noEmit`、ほかに sw / misskey-js / elythia-js)、
   check-dts とその self test、SPDX ヘッダー、locale の検証、misskey-js の API レポート、
   `emoji-regex-check` (#3324) のいずれか
 - `frontend-test`: 本番設定のビルド、frontend の vitest、misskey-js のテストのいずれか
@@ -678,7 +678,7 @@ checkout / setup-go を除くと step は実行順に 3 つ。**required job な
     関係なしにすると、frontend を壊す PR が required を緑のまま通る。パスの一覧は
     `internal/entitycompat` の `frontend_changes_test` が実際の git の差分で確かめている
   - `frontend-lint`: `make plugins-all` → `pnpm i --frozen-lockfile` → `pnpm build` →
-    9 workspace の eslint、typecheck (frontend / sw / misskey-js。frontend は `vue-tsc --noEmit`)、
+    10 workspace の eslint、typecheck (frontend / sw / misskey-js / elythia-js。frontend は `vue-tsc --noEmit`)、
     check-dts とその self test、SPDX ヘッダー、locale の検証、misskey-js の API レポート、
     `make emoji-regex-check` (#3324)。同梱サンプル入りの統合バイナリの build (#2495) は、
     Node が要らないので毎回走る required の `build` job に置いた (Go だけの変更で

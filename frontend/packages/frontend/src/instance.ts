@@ -4,7 +4,8 @@
  */
 
 import { computed, reactive } from 'vue';
-import * as Misskey from 'misskey-js';
+// Elythia: /api/meta の独自の項目 (mkGoVersion など) を型に持つ (#3418)
+import type * as Elythia from 'elythia-js';
 import { misskeyApi } from '@/utility/misskey-api.js';
 import { miLocalStorage } from '@/local-storage.js';
 
@@ -27,9 +28,9 @@ if (providedAt > cachedAt) {
 
 // TODO: instanceをリアクティブにするかは再考の余地あり
 
-export const instance: Misskey.entities.MetaDetailed = reactive(cachedMeta ?? {});
+export const instance: Elythia.MetaDetailed = reactive(cachedMeta ?? {});
 
-export async function fetchInstance(force = false): Promise<Misskey.entities.MetaDetailed> {
+export async function fetchInstance(force = false): Promise<Elythia.MetaDetailed> {
 	if (!force) {
 		const cachedAt = miLocalStorage.getItem('instanceCachedAt') ? parseInt(miLocalStorage.getItem('instanceCachedAt')!) : 0;
 

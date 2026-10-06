@@ -45,6 +45,7 @@ const TARGET_DIRECTORIES = [
 	'packages/frontend/test',
 	'packages/frontend-embed/@types',
 	'packages/frontend-embed/src',
+	'packages/elythia-js/src',
 	'packages/icons-subsetter/src',
 	'packages/misskey-bubble-game/src',
 	'packages/misskey-reversi/src',

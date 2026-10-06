@@ -78,7 +78,7 @@ export async function common(createVue: () => Promise<App<Element>>) {
 	// cache が採られる。その場合ダイアログが 1 回分遅れるだけで誤検知はしない。
 	const lastVersion = miLocalStorage.getItem('lastVersion');
 	const lastMkGoVersion = miLocalStorage.getItem('lastMkGoVersion');
-	const mkGoVersion = (instance as typeof instance & { mkGoVersion?: string }).mkGoVersion ?? null;
+	const mkGoVersion = instance.mkGoVersion ?? null;
 
 	const clientUpdate = resolveClientUpdate({
 		misskeyVersion: version,

@@ -52,7 +52,7 @@ type ChunkedUploadCapability = {
  * 異なり、サーバー側でしか決められないため。
  */
 function getChunkedUploadCapability(): ChunkedUploadCapability | null {
-	const cap = (instance as typeof instance & { chunkedUpload?: { chunkSize?: unknown } }).chunkedUpload;
+	const cap = instance.chunkedUpload;
 	if (cap == null) return null;
 	const chunkSize = cap.chunkSize;
 	if (typeof chunkSize !== 'number' || !Number.isFinite(chunkSize) || chunkSize <= 0) return null;

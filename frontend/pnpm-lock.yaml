@@ -148,6 +148,12 @@ importers:
         specifier: 4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.4.0)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(happy-dom@20.12.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(msw@2.15.0(@types/node@26.4.0)(typescript@6.0.2))(vite@8.2.2(@types/node@26.4.0)(esbuild@0.28.2)(sass-embedded@1.103.1)(sass@1.103.1)(terser@5.48.0)(tsx@4.23.13))
 
+  packages/elythia-js:
+    dependencies:
+      misskey-js:
+        specifier: workspace:*
+        version: link:../misskey-js
+
   packages/frontend:
     dependencies:
       '@analytics/google-analytics':
@@ -219,6 +225,9 @@ importers:
       date-fns:
         specifier: 4.4.0
         version: 4.4.0
+      elythia-js:
+        specifier: workspace:*
+        version: link:../elythia-js
       eventemitter3:
         specifier: 5.0.4
         version: 5.0.4

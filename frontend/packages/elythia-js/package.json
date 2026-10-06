@@ -1,0 +1,22 @@
+{
+	"type": "module",
+	"name": "elythia-js",
+	"version": "0.0.0",
+	"private": true,
+	"description": "Types for the Elythia-specific APIs, layered on top of misskey-js",
+	"license": "AGPL-3.0-only",
+	"types": "./src/index.ts",
+	"exports": {
+		".": {
+			"types": "./src/index.ts"
+		}
+	},
+	"scripts": {
+		"eslint": "eslint './**/*.ts'",
+		"typecheck": "tsc --noEmit",
+		"lint": "pnpm typecheck && pnpm eslint"
+	},
+	"dependencies": {
+		"misskey-js": "workspace:*"
+	}
+}

@@ -242,7 +242,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 | `ci.yml` test | push / PR | ○ | 4 shardで`-race -count=1 -shuffle=3`、パッケージごとのカバレッジ閾値 |
 | `ci.yml` lint | push / PR | ○ | vet / gofmt / actionlint / golangci-lint / テストfixtureのID重複 |
 | `ci.yml` plugin-tests | push / PR | | 同梱プラグインのテスト、`authoring.md`のスニペットのコンパイル |
-| `frontend` | push / PR | ○ | `frontend/`の検査(9 workspaceのeslint、typecheck、SPDX、locale、本番ビルド、vitest)、絵文字の正規表現。frontendに関係しない変更ではlintとtestをskipし、集約jobの`frontend`だけが成功する |
+| `frontend` | push / PR | ○ | `frontend/`の検査(10 workspaceのeslint、typecheck、SPDX、locale、本番ビルド、vitest)、絵文字の正規表現。frontendに関係しない変更ではlintとtestをskipし、集約jobの`frontend`だけが成功する |
 | `ci.yml` vulncheck | push / PR | | govulncheck、`go.mod`とDockerfileのGoの版の一致 |
 | `dependency-review` | PR | | PRが持ち込む依存の既知脆弱性 |
 | `codeql` | PR / push / 週1回 | | Goとworkflowの静的解析 |
@@ -301,6 +301,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 
 このファイル自体を変えたときだけ、1行で追記します(新しいものを上に)。経緯の本文はリンク先にあります。個別のfixの履歴は`CHANGELOG.md`にあります。
 
+- 2026-10-07: frontendに`elythia-js`のworkspaceを足したので、Section 8の`frontend`の行のeslintの対象を10 workspaceにした (#3418) → [docs/contributing.md](docs/contributing.md#elythia-独自の-api-の型-frontendpackageselythia-js)
 - 2026-10-07: `docs/divergence.md`を目次にし、中身を`docs/divergence/`の領域ごとのファイルへ分けたので、冒頭の方針の案内を更新した (#3414) → [docs/divergence.md](docs/divergence.md)
 - 2026-10-06: nodeinfoの宣言を`elythiaPlugins`にしたので、冒頭の据え置く識別子の例外を更新した (#3400) → [docs/plugin-peer-protocol.md](docs/plugin-peer-protocol.md)
 - 2026-10-06: 本文の名前をElythiaにし、冒頭に旧称と据え置く識別子を書いた (#3394) → [docs/design/project-restructure.md](docs/design/project-restructure.md)

@@ -86,8 +86,8 @@ const dialog = useTemplateRef('dialog');
 
 const isAcceptedServerRule = ref(false);
 
-// mk-go 独自の meta なので misskey-js の型集合には無い (#2556)。
-const approvalRequired = (instance as unknown as Record<string, unknown>).approvalRequiredForSignup === true;
+// Elythia 独自の meta (#2556)。型は elythia-js の MetaDetailed が持つ (#3418)。
+const approvalRequired = instance.approvalRequiredForSignup === true;
 const registrationClosed = isRegistrationClosed();
 
 const router = useRouter();
