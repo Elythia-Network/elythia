@@ -12,19 +12,34 @@ import type {
 	BubbleVersusMatch,
 	BubbleVersusRecord,
 	BubbleVersusReportReason,
+	DatabaseHealthReport,
+	DeliveryOutcomeClass,
+	DriveUsage,
 	EmojiApplication,
 	EmojiApplicationPendingLimit,
 	EmojiApplicationQuotaReset,
 	EmojiApplicationQuotaWindow,
 	EmojiApplicationStatus,
 	EmojiApplicationStatusCounts,
+	FederationHealthReport,
 	FederationRule,
 	FederationRuleBody,
 	FederationRuleHit,
+	GoneInstance,
+	GoneInstanceCleanResult,
+	InboxOutcomeClass,
+	IPAccountsResult,
+	IPLookupLogResult,
+	IPRelatedAccountsResult,
 	JoinedChatRoom,
 	LegacySigninResponse,
 	RelatedEmojiApplication,
+	RemoteCheckReport,
+	RemoteEmojiMeta,
 	RoleAssignmentLookup,
+	SelfCheckReport,
+	ServerMetrics,
+	ServerPluginInfo,
 	SignupApplicationView,
 } from './entities.js';
 
@@ -44,6 +59,17 @@ type FederationRuleRequest = Partial<FederationRuleBody> & Pick<FederationRuleBo
  * キーは `'<path>': {` の形で 1 行に書く。
  */
 export type ElythiaEndpoints = {
+	'admin/database-health': {
+		req: Misskey.entities.EmptyRequest;
+		res: DatabaseHealthReport;
+	};
+	'admin/drive/usage': {
+		req: {
+			/** Ignores the cached snapshot and aggregates again. */
+			forceRecalc?: boolean;
+		};
+		res: DriveUsage;
+	};
 	'admin/emoji-application/approve': {
 		req: { applicationId: string };
 		res: AdminEmojiApplication;
@@ -111,6 +137,57 @@ export type ElythiaEndpoints = {
 			lastReset: EmojiApplicationQuotaReset | null;
 		};
 	};
+	'admin/emoji/fetch-remote-meta': {
+		/** Either `emojiId`, or both `name` and `host`. `emojiId` wins when given. */
+		req:
+			| { emojiId: string; name?: string; host?: string }
+			| { emojiId?: string; name: string; host: string };
+		/**
+		 * Failing to fetch from the origin is not an error: it returns
+		 * `fetched: false` with the stored emoji.
+		 */
+		res: RemoteEmojiMeta;
+	};
+	'admin/federation/check-host': {
+		req: {
+			/** A host or a URL. This server itself is rejected (use `admin/self-check`). */
+			host: string;
+			/**
+			 * `user`, `@user`, `user@host` or `@user@host`. A different host than
+			 * `host` is rejected with `INVALID_ACCOUNT`.
+			 */
+			account?: string;
+		};
+		res: RemoteCheckReport;
+	};
+	'admin/federation/clean-gone-instance': {
+		/** A host or a URL of a goneSuspended instance. */
+		req: { host: string };
+		res: GoneInstanceCleanResult;
+	};
+	'admin/federation/close-delivery-breaker': {
+		/** A host or a URL. */
+		req: { host: string };
+		res: undefined;
+	};
+	'admin/federation/delivery-health': {
+		req: {
+			/** Defaults to 3600 (also when 0 or less), capped at 3600. Aggregated in whole minutes. */
+			windowSeconds?: number;
+		};
+		res: FederationHealthReport<DeliveryOutcomeClass>;
+	};
+	'admin/federation/gone-instances': {
+		req: Misskey.entities.EmptyRequest;
+		res: GoneInstance[];
+	};
+	'admin/federation/inbox-health': {
+		req: {
+			/** Defaults to 3600 (also when 0 or less), capped at 3600. Aggregated in whole minutes. */
+			windowSeconds?: number;
+		};
+		res: FederationHealthReport<InboxOutcomeClass>;
+	};
 	'admin/federation/rules/create': {
 		req: FederationRuleRequest;
 		res: FederationRule;
@@ -137,6 +214,72 @@ export type ElythiaEndpoints = {
 		/** Replaces the whole rule; an omitted field is cleared, not kept. */
 		req: FederationRuleRequest & { ruleId: string };
 		res: FederationRule;
+	};
+	'admin/ip/accounts': {
+		req: {
+			/** Normalized before the search; a value that is not an IP is rejected. */
+			ip: string;
+			/** Defaults to the retention period (90). Outside 1-3650 is rejected. */
+			sinceDays?: number;
+			/** Defaults to 30. Outside 1-100 is rejected. */
+			limit?: number;
+			/** Defaults to 0. Outside 0-10000 is rejected. */
+			offset?: number;
+		};
+		res: IPAccountsResult;
+	};
+	'admin/ip/lookup-log': {
+		req: {
+			/** Defaults to 30. Outside 1-100 is rejected. */
+			limit?: number;
+			/** Defaults to 0. Outside 0-10000 is rejected. */
+			offset?: number;
+		};
+		res: IPLookupLogResult;
+	};
+	'admin/ip/related-accounts': {
+		req: {
+			/**
+			 * A local user. Remote users are rejected. `ACCESS_DENIED` is returned for
+			 * the root user and system accounts, for administrators other than the
+			 * caller, and for other moderators unless the caller is an administrator.
+			 * A failure to determine the roles is a 500.
+			 */
+			userId: string;
+			/** Defaults to the retention period (90). Outside 1-3650 is rejected. */
+			sinceDays?: number;
+			/** Defaults to 30. Outside 1-100 is rejected. */
+			limit?: number;
+			/** Defaults to 0. Outside 0-10000 is rejected. */
+			offset?: number;
+		};
+		res: IPRelatedAccountsResult;
+	};
+	'admin/roles/assignment-show': {
+		req: {
+			userId: string;
+			roleId: string;
+		};
+		res: RoleAssignmentLookup;
+	};
+	'admin/self-check': {
+		req: Misskey.entities.EmptyRequest;
+		res: SelfCheckReport;
+	};
+	'admin/server-metrics': {
+		req: Misskey.entities.EmptyRequest;
+		res: ServerMetrics;
+	};
+	'admin/server-plugins': {
+		req: Misskey.entities.EmptyRequest;
+		res: {
+			plugins: ServerPluginInfo[];
+			/**
+			 * Plugin schemas that no compiled-in plugin owns. `null` when they could
+			 * not be checked (not the same as none).
+			 */
+			orphanSchemas: string[] | null;
+		};
 	};
 	'admin/signup-application/approve': {
 		req: { applicationId: string };

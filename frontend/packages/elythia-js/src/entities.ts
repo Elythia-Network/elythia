@@ -403,3 +403,403 @@ export type RoleAssignmentLookup = {
 };
 
 export type MetaDetailed = Misskey.entities.MetaDetailed & ElythiaMetaFields;
+
+/** The outcome of one check of `admin/self-check` or `admin/federation/check-host`. */
+export type SelfCheckStatus = 'ok' | 'warn' | 'fail' | 'skip';
+
+/** One check of `admin/self-check` or `admin/federation/check-host`. */
+export type SelfCheckResult = {
+	/** The check's name. The server may add checks, so this is not a closed set. */
+	name: string;
+	status: SelfCheckStatus;
+	detail: string;
+	/** How to fix it. Always present when `status` is `fail` or `warn`. */
+	hint?: string;
+};
+
+/** The result of `admin/self-check`. */
+export type SelfCheckReport = {
+	results: SelfCheckResult[];
+	/** `false` when any check failed. A warning does not make it `false`. */
+	ok: boolean;
+};
+
+/** The result of `admin/federation/check-host`. */
+export type RemoteCheckReport = SelfCheckReport & {
+	/** The normalized host that was checked. */
+	host: string;
+};
+
+/** A goneSuspended instance and the follow relations left with it. */
+export type GoneInstance = {
+	host: string;
+	/** When it was judged gone. `null` when that was not recorded (for example, suspended by Misskey). */
+	suspendedAt: string | null;
+	followers: number;
+	following: number;
+	followRequests: number;
+};
+
+/** What `admin/federation/clean-gone-instance` removed. */
+export type GoneInstanceCleanResult = {
+	host: string;
+	/** Follows from the gone instance to local users. */
+	removedFollowers: number;
+	/** Follows from local users to the gone instance. */
+	removedFollowing: number;
+	removedFollowRequests: number;
+	/** Follow relations left over the per-run limit. */
+	remaining: number;
+};
+
+/** How an outgoing delivery ended. */
+export type DeliveryOutcomeClass = 'success' | 'gone' | 'rateLimited' | 'clientError' | 'serverError' | 'transport';
+
+/** How an incoming activity was handled. */
+export type InboxOutcomeClass =
+	| 'accepted'
+	| 'unsupported'
+	| 'signatureFailed'
+	| 'blocked'
+	| 'actorUnauthorized'
+	| 'ldSignatureFailed'
+	| 'processingError'
+	| 'duplicate';
+
+/** The outcomes of one host in the window of `admin/federation/delivery-health` or `inbox-health`. */
+export type FederationHostHealth<C extends DeliveryOutcomeClass | InboxOutcomeClass = DeliveryOutcomeClass | InboxOutcomeClass> = {
+	host: string;
+	success: number;
+	failure: number;
+	/** Only the classes that occurred. */
+	byClass: Partial<Record<C, number>>;
+	/** The upper bound of the histogram bucket, or -1 past the largest bucket. */
+	latencyP50Ms: number;
+	/** The upper bound of the histogram bucket, or -1 past the largest bucket. */
+	latencyP95Ms: number;
+	/** The last failure recorded for the host, if any. */
+	lastError?: {
+		at: string;
+		class: C;
+		status: number;
+		message: string;
+	};
+};
+
+/** A host whose deliveries are stopped by the breaker or spaced out after 429. */
+export type DeliveryBreakerState = {
+	host: string;
+	/**
+	 * Whether the breaker is open (deliveries are stopped). When `false`, the
+	 * host is only throttled after 429, or the delayed deliveries are being sent.
+	 */
+	open: boolean;
+	consecutiveFailures: number;
+	openedAt: string | null;
+	nextProbeAt: string | null;
+	probeIntervalSeconds: number;
+	/** Until when deliveries are held after 429. `null` when not throttled. */
+	throttledUntil: string | null;
+	/** The last time a delayed delivery is scheduled for. `null` when none is left. */
+	reservedUntil: string | null;
+};
+
+/** The result of `admin/federation/delivery-health` and `inbox-health`. */
+export type FederationHealthReport<C extends DeliveryOutcomeClass | InboxOutcomeClass> = {
+	/**
+	 * The requested window after the default and the cap, in seconds. The counts
+	 * are aggregated in whole minutes (at least one), so a shorter or uneven
+	 * window covers the minutes it rounds down to.
+	 */
+	windowSeconds: number;
+	/** The most failures first. */
+	hosts: FederationHostHealth<C>[];
+	/** The total number of hosts dropped by the in-memory cap. */
+	evictedHosts: number;
+	/** Always empty for `inbox-health`. */
+	breakers: DeliveryBreakerState[];
+};
+
+/** One local account that used the IP searched with `admin/ip/accounts`. */
+export type IPSearchAccount = {
+	user: Misskey.entities.UserLite;
+	isSuspended: boolean;
+	isDeleted: boolean;
+	/** The account's last activity (not of this IP). `null` when unknown. */
+	lastActiveDate: string | null;
+	/** The first observation of this IP by the account. */
+	firstSeenAt: string;
+	/** The last observation of this IP by the account. */
+	lastSeenAt: string;
+	/** The number of stored observations, not of connections. */
+	observationCount: number;
+};
+
+/**
+ * The result of `admin/ip/accounts`.
+ *
+ * 一致が無いことを「記録が無い」と取り違えないための材料 (loggingEnabled /
+ * hasAnyHistory / droppedCount) も一緒に返る。
+ */
+export type IPAccountsResult = {
+	/** The normalized form actually searched. */
+	ip: string;
+	loggingEnabled: boolean;
+	hasAnyHistory: boolean;
+	sinceDays: number;
+	/** How long IP records are kept, in days. */
+	retentionDays: number;
+	limit: number;
+	offset: number;
+	/**
+	 * Decided before the accounts are resolved. `accounts` can be empty while
+	 * this is `true`; then read on with `offset + limit`.
+	 */
+	hasMore: boolean;
+	/** Rows on this page dropped because the account could not be resolved. */
+	droppedCount: number;
+	accounts: IPSearchAccount[];
+};
+
+/** What an IP lookup recorded in `admin/ip/lookup-log` started from. */
+export type IPLookupKind = 'ip' | 'relatedAccounts' | 'signins' | 'userIps';
+
+/** One recorded IP lookup. */
+export type IPLookupLogEntry = {
+	id: string;
+	/** The moderator who looked up. `null` when the account cannot be resolved. */
+	user: Misskey.entities.UserLite | null;
+	userId: string;
+	kind: IPLookupKind;
+	/** The IP looked up. An empty string unless the lookup started from an IP. */
+	ip: string;
+	/** The user looked up. `null` when there is none or it cannot be resolved. */
+	targetUser: Misskey.entities.UserLite | null;
+	/** An empty string when the lookup did not start from a user. */
+	targetUserId: string;
+	sinceDays: number;
+	/** The number of results returned (the results themselves are not recorded). */
+	resultCount: number;
+	createdAt: string;
+};
+
+/** The result of `admin/ip/lookup-log`. */
+export type IPLookupLogResult = {
+	/** How long lookups are recorded, in days. */
+	retentionDays: number;
+	limit: number;
+	offset: number;
+	hasMore: boolean;
+	/** Newest first. */
+	entries: IPLookupLogEntry[];
+};
+
+/** One IP shared by the target and a candidate of `admin/ip/related-accounts`. */
+export type IPRelatedSharedIP = {
+	ip: string;
+	targetLastSeenAt: string;
+	candidateLastSeenAt: string;
+	/** Accounts that used the IP in the window, including the target. */
+	ipAccountCount: number;
+	/** When `true`, `ipAccountCount` is a lower bound (the count reached the cap). */
+	ipAccountCountIsLowerBound: boolean;
+	/** The elapsed days used for the time decay. */
+	elapsedDays: number;
+};
+
+/** An account that shared at least one IP with the target. */
+export type IPRelatedCandidate = {
+	user: Misskey.entities.UserLite;
+	isSuspended: boolean;
+	isDeleted: boolean;
+	/** The account's last activity. `null` when unknown. */
+	lastActiveDate: string | null;
+	sharedIpCount: number;
+	/** Only for ordering. Not a probability, and can exceed 1. */
+	score: number;
+	/** The heaviest first. */
+	sharedIps: IPRelatedSharedIP[];
+};
+
+/** The result of `admin/ip/related-accounts`. */
+export type IPRelatedAccountsResult = {
+	/** The target user. */
+	user: Misskey.entities.UserLite;
+	loggingEnabled: boolean;
+	hasAnyHistory: boolean;
+	sinceDays: number;
+	retentionDays: number;
+	/** The half-life of the time decay, in days. */
+	halfLifeDays: number;
+	/** The number of the target's IPs used (after the cap). */
+	targetIpCount: number;
+	/** `targetIpsTruncated || candidatesTruncated`. */
+	truncated: boolean;
+	targetIpsTruncated: boolean;
+	candidatesTruncated: boolean;
+	limit: number;
+	offset: number;
+	hasMore: boolean;
+	/** Candidates on this page dropped because the account could not be resolved. */
+	droppedCount: number;
+	candidates: IPRelatedCandidate[];
+};
+
+/** An index that has not been scanned since the statistics were reset. */
+export type DatabaseIndexStat = {
+	table: string;
+	index: string;
+	scans: number;
+	/** An estimate from `pg_class.relpages`. */
+	sizeBytes: number;
+	/** A unique or primary key index (it backs a constraint). */
+	unique: boolean;
+	primary: boolean;
+};
+
+export type DatabaseTableStat = {
+	table: string;
+	liveRows: number;
+	deadRows: number;
+	deadRatio: number;
+	/**
+	 * An estimate from `pg_class.relpages`, including TOAST and indexes. `null`
+	 * when the table has not been measured yet (never vacuumed or analyzed, or
+	 * truncated and not measured since).
+	 */
+	sizeBytes: number | null;
+	/** The newer of the manual and the automatic run. `null` when never. */
+	lastVacuum: string | null;
+	/** The newer of the manual and the automatic run. `null` when never. */
+	lastAnalyze: string | null;
+	modifiedSinceAnalyze: number;
+	/** Known only when the database role can see other roles' VACUUM. */
+	vacuuming: boolean;
+};
+
+/** A table that looks bloated or not vacuumed enough. */
+export type DatabaseHealthProblem = {
+	table: string;
+	kind: 'bloat' | 'vacuum';
+	detail: string;
+};
+
+/** The result of `admin/database-health`. */
+export type DatabaseHealthReport = {
+	generatedAt: string;
+	/** The last recorded statistics reset. `null` when none is recorded. */
+	statsReset: string | null;
+	replicasConfigured: boolean;
+	autovacuumThreshold: number;
+	autovacuumScaleFactor: number;
+	/** Zero or less when the server has no such setting or it is disabled. */
+	autovacuumMaxThreshold: number;
+	unusedIndexes: DatabaseIndexStat[];
+	tables: DatabaseTableStat[];
+	problems: DatabaseHealthProblem[];
+};
+
+/** The result of `admin/server-metrics`: the running server process. */
+export type ServerMetrics = {
+	/** Zero when the start time is unknown. */
+	uptimeMs: number;
+	version: {
+		misskey: string;
+		mkGo: string;
+	};
+	go: {
+		goroutines: number;
+		gomaxprocs: number;
+		heapAllocBytes: number;
+		heapSysBytes: number;
+		heapObjects: number;
+		gcNum: number;
+		/** Zero before the first GC. */
+		lastGcPauseNs: number;
+		gcCpuFraction: number;
+	};
+};
+
+/** A server plugin compiled into the server. */
+export type ServerPluginInfo = {
+	name: string;
+	version: string;
+	apiVersion: number;
+	/** The runtime setting (`plugins.<name>.enabled`). */
+	enabled: boolean;
+	/** What the plugin declares, not what this process wired. */
+	routes: boolean;
+	jobs: boolean;
+	effectivePolicies: boolean;
+	migrations: number;
+	schema: string;
+	/** The setting keys only. The values are never returned. */
+	configKeys: string[];
+};
+
+/** One cell of `admin/drive/usage`. */
+export type DriveUsageBucket = {
+	/** The number of drive file rows. */
+	count: number;
+	/** The sum of the rows' `size`, in bytes, as the database knows it. */
+	size: number;
+	/** How many of `count` are links (rows that hold no bytes of their own). */
+	linkCount: number;
+};
+
+/** What a drive file is used as, in `admin/drive/usage`. */
+export type DriveUsageKind = 'attachment' | 'avatar' | 'banner' | 'emoji' | 'other';
+
+export type DriveUsageOrigin = 'local' | 'remote';
+
+/** The result of `admin/drive/usage`. */
+export type DriveUsage = {
+	/** When the numbers were aggregated (not when they were returned). */
+	calculatedAt: string;
+	elapsedMs: number;
+	/** Whether a recent snapshot was reused. */
+	cached: boolean;
+	cacheTtlSeconds: number;
+	/** The cap of `byHost` and `byUser`. */
+	topLimit: number;
+	/** Where the numbers come from. Not the actual usage of the object storage. */
+	source: 'database';
+	total: DriveUsageBucket;
+	local: DriveUsageBucket;
+	remote: DriveUsageBucket;
+	/** Every kind and origin, zero-filled, in a fixed order. */
+	byKind: (DriveUsageBucket & { kind: DriveUsageKind; origin: DriveUsageOrigin })[];
+	/** Remote hosts, the largest first. */
+	byHost: (DriveUsageBucket & { host: string })[];
+	/** Local users, the largest first. `username` is empty when the user cannot be joined. */
+	byUser: (DriveUsageBucket & { userId: string; username: string })[];
+};
+
+/** The stored remote emoji that `admin/emoji/fetch-remote-meta` looked up. */
+type RemoteEmojiMetaSource = {
+	emojiId: string;
+	name: string;
+	host: string;
+	originalUrl: string;
+};
+
+/**
+ * The result of `admin/emoji/fetch-remote-meta`.
+ *
+ * 取れなかった項目はキーごと出ない (空文字を返すと、既存の値を消す指示に読まれる)。
+ * license は相手から取れなかったとき、保存済みの値があればそれが入る。
+ */
+export type RemoteEmojiMeta =
+	| (RemoteEmojiMetaSource & {
+		fetched: true;
+		category?: string;
+		aliases?: string[];
+		license?: string;
+		isSensitive?: boolean;
+	})
+	| (RemoteEmojiMetaSource & {
+		fetched: false;
+		reason: 'unsupported' | 'notFound' | 'error';
+		license?: string;
+	});
+
