@@ -21,7 +21,10 @@ import type {
 	FederationRule,
 	FederationRuleBody,
 	FederationRuleHit,
+	JoinedChatRoom,
+	LegacySigninResponse,
 	RelatedEmojiApplication,
+	RoleAssignmentLookup,
 	SignupApplicationView,
 } from './entities.js';
 
@@ -230,6 +233,128 @@ export type ElythiaEndpoints = {
 		req: { matchId: string };
 		res: BubbleVersusMatch;
 	};
+	'chat/messages': {
+		/**
+		 * `roomId` wins when both are given; with neither, the result is empty.
+		 * Unlike `chat/messages/user-timeline` and `room-timeline`, it takes no
+		 * cursor.
+		 */
+		req: {
+			/** The caller must be the owner or a member of the room, or a moderator. */
+			roomId?: string;
+			/** The other user of a one-to-one conversation with the caller. */
+			userId?: string;
+			/** Defaults to 20 (also when 0 or less), capped at 100. */
+			limit?: number;
+		};
+		/** Newest first. */
+		res: Misskey.entities.ChatMessage[];
+	};
+	'chat/messages/create': {
+		/**
+		 * Takes the request of `chat/messages/create-to-user` or
+		 * `chat/messages/create-to-room` (the same handler serves all three).
+		 * `toRoomId` wins when both are given.
+		 */
+		req: ({ toUserId: string } | { toRoomId: string }) & {
+			/** Up to 2000 characters. Either `text` (an empty string counts) or `fileId` is required. */
+			text?: string | null;
+			/** A drive file of the caller. */
+			fileId?: string | null;
+		};
+		res: Misskey.entities.ChatMessage;
+	};
+	'chat/messages/reactions/create': {
+		/** The same handler as `chat/messages/react`. */
+		req: Misskey.entities.ChatMessagesReactRequest;
+		res: undefined;
+	};
+	'chat/messages/reactions/delete': {
+		/** The same handler as `chat/messages/unreact`. */
+		req: Misskey.entities.ChatMessagesUnreactRequest;
+		res: undefined;
+	};
+	'chat/messages/read': {
+		/** Marks one message as read. Only a participant of the message may do so. */
+		req: { messageId: string };
+		res: undefined;
+	};
+	'chat/messages/update': {
+		/** Only the sender may edit the message. */
+		req: {
+			messageId: string;
+			/** The new text. Omitting it (or `null`) clears the text to an empty string. */
+			text?: string | null;
+		};
+		res: undefined;
+	};
+	'chat/rooms/invitations/accept': {
+		// Go 側は invitationId も読むが使っていない。招待は (呼び出した人, roomId) で
+		// 引くので、型には載せない
+		req: { roomId: string };
+		res: undefined;
+	};
+	'chat/rooms/invitations/delete': {
+		/** Withdraws an invitation. Only the owner of the room may do so. */
+		req: { invitationId: string };
+		res: undefined;
+	};
+	'chat/rooms/invitations/reject': {
+		req: { roomId: string };
+		res: undefined;
+	};
+	'chat/rooms/joined': {
+		/** The rooms the caller is a member of (not the ones the caller owns). */
+		req: {
+			/** Defaults to 30 (also when 0 or less), capped at 100. */
+			limit?: number;
+			sinceId?: string;
+			untilId?: string;
+			sinceDate?: number;
+			untilDate?: number;
+		};
+		/**
+		 * Newest room (by room id, not by when the caller joined) first, unless only
+		 * `sinceId` / `sinceDate` is given (then oldest first).
+		 */
+		res: JoinedChatRoom[];
+	};
+	'chat/rooms/members/ban': {
+		/** Removes a member from the room. Only the owner of the room may do so. */
+		req: {
+			roomId: string;
+			userId: string;
+		};
+		res: undefined;
+	};
+	'chat/rooms/members/update-membership': {
+		/** Only the owner of the room may do so. */
+		req: {
+			roomId: string;
+			userId: string;
+			/** Left unchanged when omitted. */
+			isMuted?: boolean;
+		};
+		res: undefined;
+	};
+	'chat/rooms/transfer-ownership': {
+		req: {
+			roomId: string;
+			/** A local user who is already a member of the room. */
+			userId: string;
+		};
+		res: undefined;
+	};
+	'chat/rooms/unmute': {
+		/** The same as `chat/rooms/mute` with `mute: false`, except that it returns 204 whenever the membership cannot be found (a non-member, or a lookup failure). */
+		req: { roomId: string };
+		res: undefined;
+	};
+	'chat/unread-count': {
+		req: Misskey.entities.EmptyRequest;
+		/** The number of unread one-to-one messages to the caller (room messages are not counted). */
+		res: { count: number };
+	};
 	'drive/files/create-chunked/abort': {
 		req: { uploadId: string };
 		res: undefined;
@@ -314,6 +439,42 @@ export type ElythiaEndpoints = {
 			untilId?: string | null;
 		};
 		res: EmojiApplication[];
+	};
+	'i/flashs': {
+		/** The same handler as `flash/my`. */
+		req: Misskey.entities.FlashMyRequest;
+		res: Misskey.entities.FlashMyResponse;
+	};
+	'i/flashs/likes': {
+		/** The same handler as `flash/my-likes`. */
+		req: Misskey.entities.FlashMyLikesRequest;
+		res: Misskey.entities.FlashMyLikesResponse;
+	};
+	'roles/assignment-show': {
+		/**
+		 * Whether the caller has an exact assignment of the role. A private role
+		 * the caller is not assigned is answered as `NO_SUCH_ROLE`.
+		 */
+		req: { roleId: string };
+		res: RoleAssignmentLookup;
+	};
+	'signin': {
+		/**
+		 * The legacy sign-in, kept for old clients. Use `signin-flow` instead: this
+		 * one cannot complete two-factor authentication.
+		 */
+		req: {
+			username: string;
+			/** Omit it to ask for the next step. */
+			password?: string;
+			/** Checked only when the user has two-factor authentication disabled. */
+			'hcaptcha-response'?: string | null;
+			'g-recaptcha-response'?: string | null;
+			'turnstile-response'?: string | null;
+			'm-captcha-response'?: string | null;
+			'testcaptcha-response'?: string | null;
+		};
+		res: LegacySigninResponse;
 	};
 	'signup-application/apply': {
 		req: {

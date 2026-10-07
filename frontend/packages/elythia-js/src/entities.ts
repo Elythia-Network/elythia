@@ -346,4 +346,60 @@ export type BubbleVersusRecord = {
 	user2Logs?: number[][] | null;
 };
 
+/**
+ * A chat room as `chat/rooms/joined` returns it.
+ *
+ * 一覧の取得で owner を読み込んでいないので、owner (UserLite) は載らない。
+ * isMuted / invitationExists は常に入れて返す。
+ */
+export type JoinedChatRoom = Omit<Misskey.entities.ChatRoom, 'owner' | 'isMuted' | 'invitationExists'> & {
+	isMuted: boolean;
+	invitationExists: boolean;
+};
+
+/**
+ * The response of the legacy `signin` endpoint.
+ *
+ * signin-flow と違い、captcha の段は無く、passkey の段でも authRequest を返さない。
+ * 2FA を完了する手段が無いので、2FA が有効な利用者は signin-flow でやり直す。
+ */
+export type LegacySigninResponse = {
+	finished: true;
+	id: string;
+	/** The access token. */
+	i: string;
+} | {
+	finished: false;
+	/**
+	 * `password` when no password was sent. `totp` or `passkey` when the
+	 * password was correct but two-factor authentication is enabled.
+	 */
+	next: 'password' | 'totp' | 'passkey';
+};
+
+/**
+ * Whether the caller (or, on the admin side, a user) has an exact assignment
+ * of a role.
+ *
+ * role_assignment の行だけを見るので、conditional な role は条件を満たして
+ * いても、行が無ければ assigned が false になる。判別できるように role.target を返す (#2633)。
+ */
+export type RoleAssignmentLookup = {
+	/**
+	 * Whether an active (unexpired) assignment row exists. The conditions of a
+	 * conditional role are not evaluated, but a conditional role can still be
+	 * `true` when a row exists (assigned manually, or left from before the role
+	 * was switched to conditional).
+	 */
+	assigned: boolean;
+	/** `null` when not assigned, or when the assignment never expires. */
+	expiresAt: string | null;
+	role: {
+		id: string;
+		target: 'manual' | 'conditional';
+		isPublic: boolean;
+		canEditMembersByModerator: boolean;
+	};
+};
+
 export type MetaDetailed = Misskey.entities.MetaDetailed & ElythiaMetaFields;
