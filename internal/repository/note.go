@@ -1274,8 +1274,9 @@ func applyTimelineFilter(q *gorm.DB, f model.TimelineDBFilter) *gorm.DB {
 		// reply の場合は self-thread (= replyUserId = note.userId) のみ残す
 		// (#1047)。
 		//
-		// 自分が他人にした reply (= userId=self / replyUserId=other) はこの
-		// DB fallback では除外される。ただし production の cache hit 経路では
+		// 例外のフラグ (KeepRepliesToViewer / KeepHomeFanoutReplies、#3449) が
+		// 無いときは、自分が他人にした reply (= userId=self / replyUserId=other) は
+		// この DB fallback では除外される。ただし production の cache hit 経路では
 		// fanout (= OnNoteCreated) が自分の HomeTL stream に push しているので
 		// 通常運用は自分の reply も TL に表示される (= Redis 経路は pass-through)。
 		// DB fallback は cache miss / 古い note の case のみ走るので user 体験
@@ -1283,7 +1284,25 @@ func applyTimelineFilter(q *gorm.DB, f model.TimelineDBFilter) *gorm.DB {
 		//
 		// 「他人 → 他人 reply」を per-followee で表示するかは fanout 層で
 		// `following.withReplies` を見て push 制御する (= upstream 互換)。
-		q = q.Where(`("replyId" IS NULL OR "replyUserId" = "note"."userId")`)
+		cond := `"replyId" IS NULL OR "replyUserId" = "note"."userId"`
+		var args []any
+		// 複数の list を混ぜる timeline の DB fallback が list の中身を再現する
+		// ための例外 (#3449。TimelineDBFilter の各 doc を参照)。
+		if f.ViewerID != "" && f.KeepRepliesToViewer {
+			cond += ` OR "replyUserId" = ?`
+			args = append(args, f.ViewerID)
+		}
+		if f.ViewerID != "" && f.KeepHomeFanoutReplies {
+			// チャンネルの投稿は返信も含めてフォロワー全員のホームの list に積まれる
+			// (fanoutToChannelFollowers)。ListHomeTimeline の基本条件がチャンネルの
+			// 投稿をフォロー中 (mute 済みを除く) のものに絞っているので、ここでは
+			// チャンネルの投稿であることだけを見る。
+			cond += ` OR "note"."userId" = ? OR ? = ANY("note"."mentions")` +
+				` OR "note"."userId" IN (SELECT "followeeId" FROM "following" WHERE "followerId" = ? AND "withReplies" = TRUE)` +
+				` OR "note"."channelId" IS NOT NULL`
+			args = append(args, f.ViewerID, f.ViewerID, f.ViewerID)
+		}
+		q = q.Where(`(`+cond+`)`, args...)
 	}
 	if f.IncludeMyRenotes != nil && !*f.IncludeMyRenotes && f.ViewerID != "" {
 		// "userId" は JOIN を持つ呼び出し元 (ListByUserList の user_list_membership)
