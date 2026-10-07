@@ -597,9 +597,10 @@ func (s *Service) confirmMissingOnPrimary(ctx context.Context, candidates []stri
 // **timeline (#2715 / PR #2718) 側も同じ確認を通す** (#2757)。向こうも
 // `resolve()` → `pruneDangling()` で同じ経路を持ち、レプリカ構成では同じ穴が
 // 開いていた。DB fallback があるから安全、とは言えない — fallback は Hybrid
-// 以外では別メソッド (`ListHomeTimeline` 等) で、いずれも `AllowPartial` で
-// クライアントが無効化でき、global を除く 3 経路は
-// `meta.enableFanoutTimelineDbFallback` を off にすれば運用側でも止まり、
+// 以外では別メソッド (`ListHomeTimeline` 等) で、いずれも `AllowPartial` を
+// 渡されると 1 件でも解決できたページでは走らず (0 件のときだけ走る、#3448)、
+// global を除く 3 経路は `meta.enableFanoutTimelineDbFallback` を off にすれば
+// 運用側でも止まり、
 // しかも Redis list から消えた ID は戻らない。
 //
 // **antenna は ephemeral store を読まない。** timeline 側 (#2718) は ephemeral

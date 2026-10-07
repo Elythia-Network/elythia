@@ -3,6 +3,8 @@ package timeline
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,20 +30,32 @@ func (f *fakeDBFallbackToggle) FanoutTimelineDBFallbackEnabled() bool { return f
 type spyNoteRepo struct {
 	repository.NoteRepository
 	homeCalls, localCalls, globalCalls int
+	// limits records the n of every timeline query, in call order.
+	limits []int
+	// hydrates counts FindManyByIDsWithUser calls (one per page resolve).
+	hydrates int
+}
+
+func (s *spyNoteRepo) FindManyByIDsWithUser(ids []string) ([]*model.Note, error) {
+	s.hydrates++
+	return s.NoteRepository.FindManyByIDsWithUser(ids)
 }
 
 func (s *spyNoteRepo) ListHomeTimeline(userID string, limit int, sinceID, untilID string, f model.TimelineDBFilter) ([]*model.Note, error) {
 	s.homeCalls++
+	s.limits = append(s.limits, limit)
 	return s.NoteRepository.ListHomeTimeline(userID, limit, sinceID, untilID, f)
 }
 
 func (s *spyNoteRepo) ListLocalTimeline(limit int, sinceID, untilID string, f model.TimelineDBFilter) ([]*model.Note, error) {
 	s.localCalls++
+	s.limits = append(s.limits, limit)
 	return s.NoteRepository.ListLocalTimeline(limit, sinceID, untilID, f)
 }
 
 func (s *spyNoteRepo) ListGlobalTimeline(limit int, sinceID, untilID string, f model.TimelineDBFilter) ([]*model.Note, error) {
 	s.globalCalls++
+	s.limits = append(s.limits, limit)
 	return s.NoteRepository.ListGlobalTimeline(limit, sinceID, untilID, f)
 }
 
@@ -375,4 +389,377 @@ func TestWireMetaToggles_WiresPushFanoutToggle(t *testing.T) {
 func TestWireMetaToggles_NilArgs(t *testing.T) {
 	repo := &stubMetaRepo{meta: &model.Meta{}}
 	assert.NotPanics(t, func() { WireMetaToggles(nil, nil, repo) })
+}
+
+// --- 6. allowPartial で 1 ページ分が全て消えたとき (#3448) ---
+
+// partialRead reads one descending page of a timeline with the given filter.
+type partialRead func(svc *Service, limit int, filter TimelineFilter) ([]*model.Note, error)
+
+// partialReads covers every fan-out timeline. global も含める — gate の有無は
+// 違うが、0 件で終端を返してはいけないのは同じ。
+var partialReads = map[string]partialRead{
+	"home": func(svc *Service, limit int, f TimelineFilter) ([]*model.Note, error) {
+		return svc.HomeTimeline(context.Background(), dbFallbackViewer, "", "", limit, f)
+	},
+	"local": func(svc *Service, limit int, f TimelineFilter) ([]*model.Note, error) {
+		return svc.LocalTimeline(context.Background(), dbFallbackViewer, "", "", limit, f)
+	},
+	"hybrid": func(svc *Service, limit int, f TimelineFilter) ([]*model.Note, error) {
+		return svc.HybridTimeline(context.Background(), dbFallbackViewer, "", "", limit, f)
+	},
+	"global": func(svc *Service, limit int, f TimelineFilter) ([]*model.Note, error) {
+		return svc.GlobalTimeline(context.Background(), dbFallbackViewer, "", "", limit, f)
+	},
+}
+
+// pushDangling fans out n ids that resolve to nothing (TTL の切れたリレー由来の
+// note を模す)。新しい順に返す。
+func pushDangling(t *testing.T, fanout *FanoutTimelineService, n int) []string {
+	t.Helper()
+	ids := make([]string, n)
+	now := time.Now()
+	for i := n - 1; i >= 0; i-- {
+		ids[i] = idGen.Generate(now.Add(-time.Duration(i) * time.Second))
+		pushAll(t, fanout, ids[i])
+	}
+	return ids
+}
+
+// olderDBNotes builds n notes older than anything pushDangling makes, newest first.
+func olderDBNotes(n int) []*model.Note {
+	notes := make([]*model.Note, n)
+	base := time.Now().Add(-time.Hour)
+	for i := range notes {
+		notes[i] = dbFallbackNote(idGen.Generate(base.Add(-time.Duration(i) * time.Minute)))
+	}
+	return notes
+}
+
+func noteIDs(notes []*model.Note) []string {
+	out := make([]string, 0, len(notes))
+	for _, n := range notes {
+		out = append(out, n.ID)
+	}
+	return out
+}
+
+// 1 ページ分の ID が全て解決できないとき、allowPartial でも空を返さず DB へ
+// 倒れること (#3448)。同梱 frontend は常に allowPartial: true を送り、空のページを
+// 「終端」と判断して以後読まないので、古い note が残っていてもそこで止まっていた。
+//
+// upstream は Redis を読み切って 0 件なら DB へ倒す
+// (FanoutTimelineEndpointService の `ps.allowPartial ? redisTimeline.length !== 0 : ...`)。
+func TestTimelines_AllowPartialEmptyPageFallsBackToDB(t *testing.T) {
+	for name, read := range partialReads {
+		for _, allowPartial := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/allowPartial=%v", name, allowPartial), func(t *testing.T) {
+				older := olderDBNotes(5)
+				svc, fanout, spy := newDBFallbackFixture(t, older...)
+				pushDangling(t, fanout, 20)
+
+				got, err := read(svc, 20, TimelineFilter{AllowPartial: allowPartial})
+				require.NoError(t, err)
+				assert.Equal(t, noteIDs(older), noteIDs(got),
+					"Redis の 1 ページ分が全て消えても、DB にある古い note を返すこと")
+				assert.Positive(t, spy.dbCalls())
+			})
+		}
+	}
+}
+
+// 解決できた note が全て filter で落ちたときも同じ (mute などで 1 ページ分が消える)。
+// 境界は filter 前の resolved から取るので、落ちた note を DB から引き直さない。
+func TestTimelines_AllowPartialFilteredPageFallsBackToDB(t *testing.T) {
+	for name, read := range partialReads {
+		t.Run(name, func(t *testing.T) {
+			older := olderDBNotes(3)
+			muted := make([]*model.Note, 0, 20)
+			now := time.Now()
+			for i := 19; i >= 0; i-- {
+				n := &model.Note{ID: idGen.Generate(now.Add(-time.Duration(i) * time.Second)), UserID: "muted", Visibility: model.NoteVisibilityPublic}
+				muted = append(muted, n)
+			}
+			svc, fanout, _ := newDBFallbackFixture(t, append(append([]*model.Note{}, older...), muted...)...)
+			for _, n := range muted {
+				pushAll(t, fanout, n.ID)
+			}
+			got, err := read(svc, 20, TimelineFilter{AllowPartial: true, MutedUserIDs: []string{"muted"}})
+			require.NoError(t, err)
+			assert.Equal(t, noteIDs(older), noteIDs(got),
+				"mute で 1 ページ分が消えても、その先の note を返すこと")
+		})
+	}
+}
+
+// 1 件でも解決できたら、allowPartial はその部分ページを DB を引かずに返す
+// (従来どおり)。#3448 で変えたのは 0 件のときだけ。
+func TestTimelines_AllowPartialKeepsPartialPage(t *testing.T) {
+	for name, read := range partialReads {
+		t.Run(name, func(t *testing.T) {
+			older := olderDBNotes(5)
+			newest := dbFallbackNote(idGen.Generate(time.Now().Add(time.Second)))
+			svc, fanout, spy := newDBFallbackFixture(t, append([]*model.Note{newest}, older...)...)
+			pushDangling(t, fanout, 19)
+			pushAll(t, fanout, newest.ID)
+
+			got, err := read(svc, 20, TimelineFilter{AllowPartial: true})
+			require.NoError(t, err)
+			assert.Equal(t, []string{newest.ID}, noteIDs(got))
+			assert.Zero(t, spy.dbCalls(), "部分ページなら DB を引かない")
+		})
+	}
+}
+
+// fallback を切っていて Redis も読み切ったなら、upstream と同じく空を返す
+// (`dbFallback` を空配列に差し替えた形)。DB は引かない。
+func TestTimelines_AllowPartialEmptyPageWithoutDBFallback(t *testing.T) {
+	for name, read := range partialReads {
+		if name == "global" {
+			continue // global は gate しない (TestService_GlobalTimeline_NotGatedByDbFallback)
+		}
+		t.Run(name, func(t *testing.T) {
+			svc, fanout, spy := newDBFallbackFixture(t, olderDBNotes(5)...)
+			svc.SetDBFallbackToggle(&fakeDBFallbackToggle{enabled: false})
+			pushDangling(t, fanout, 20)
+
+			got, err := read(svc, 20, TimelineFilter{AllowPartial: true})
+			require.NoError(t, err)
+			assert.Empty(t, got)
+			assert.NotNil(t, got, "空でも non-nil slice であること")
+			assert.Zero(t, spy.dbCalls(), "fallback 無効なら DB を引かない")
+		})
+	}
+}
+
+// fallback を切っていても、Redis にまだ古い ID があるなら読み進める。Redis が
+// 唯一の取得元なので、そこで空を返すと frontend が止まる。upstream も
+// Redis の ID を読み切るまで getAndFilterFromDb を繰り返す。
+func TestTimelines_ScanOlderRedisWithoutDBFallback(t *testing.T) {
+	for name, read := range partialReads {
+		if name == "global" {
+			continue
+		}
+		for _, allowPartial := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/allowPartial=%v", name, allowPartial), func(t *testing.T) {
+				// Redis: 解決できる古い 3 件 + 解決できない新しい 20 件。
+				// 2 回目の読み取り (要求 60 件) で 3 件に届き、読み切る。
+				older := olderDBNotes(3)
+				svc, fanout, spy := newDBFallbackFixture(t, older...)
+				svc.SetDBFallbackToggle(&fakeDBFallbackToggle{enabled: false})
+				for i := len(older) - 1; i >= 0; i-- {
+					pushAll(t, fanout, older[i].ID)
+				}
+				pushDangling(t, fanout, 20)
+
+				got, err := read(svc, 20, TimelineFilter{AllowPartial: allowPartial})
+				require.NoError(t, err)
+				assert.Equal(t, noteIDs(older), noteIDs(got))
+				assert.Zero(t, spy.dbCalls(), "fallback 無効なら DB を引かない (hydrate は走る)")
+			})
+		}
+	}
+
+	// 何回も読み進める形。limit 2 で、解決できない 20 件の奥に 3 件ある。
+	// allowPartial なら 1 件でも見つかった回で止まり、limit で切る。
+	t.Run("several rounds, capped at limit", func(t *testing.T) {
+		older := olderDBNotes(3)
+		svc, fanout, _ := newDBFallbackFixture(t, older...)
+		svc.SetDBFallbackToggle(&fakeDBFallbackToggle{enabled: false})
+		for i := len(older) - 1; i >= 0; i-- {
+			pushAll(t, fanout, older[i].ID)
+		}
+		pushDangling(t, fanout, 20)
+
+		got, err := partialReads["home"](svc, 2, TimelineFilter{AllowPartial: true})
+		require.NoError(t, err)
+		assert.Equal(t, noteIDs(older[:2]), noteIDs(got))
+	})
+}
+
+// scanItem is one entry of a fan-out list fixture for the scan tests.
+type scanItem struct {
+	kind byte // 'm' = muted (resolves, filtered out), 'd' = dangling, 'g' = good
+	note *model.Note
+	id   string
+}
+
+// buildScanList creates the given kinds newest first, stores the resolvable
+// ones and returns them in that order.
+func buildScanList(kinds string) []scanItem {
+	items := make([]scanItem, len(kinds))
+	now := time.Now()
+	for i := range kinds {
+		id := idGen.Generate(now.Add(-time.Duration(i) * time.Second))
+		items[i] = scanItem{kind: kinds[i], id: id}
+		switch kinds[i] {
+		case 'm':
+			items[i].note = &model.Note{ID: id, UserID: "muted", Visibility: model.NoteVisibilityPublic}
+		case 'g':
+			items[i].note = dbFallbackNote(id)
+		}
+	}
+	return items
+}
+
+// fallback を切って Redis を読み進めるとき、**prune されない** ID (mute で落ちる
+// note) をまたいで進むこと。宙吊りの ID だけで組むと、prune が list から消すので
+// 読み進める位置を間違えても次のリクエストでは辻褄が合ってしまう。
+//
+// 重複が無く、降順で、期待した古い note が返ること。読み進めた先の宙吊りの ID も
+// prune されること。
+func TestTimelines_ScanOlderAdvancesThroughFilteredIDs(t *testing.T) {
+	// 新しい順。limit 2 / allowPartial=false で、1 ページ目 (2 件) は全て mute、
+	// 2 回目 (6 件) は mute と宙吊り、3 回目 (6 件) で g が 1 件、4 回目 (3 件) で
+	// 2 件目の g が見つかる。
+	const kinds = "mm" + "mmmmdd" + "gmmmmm" + "gmg" + "g"
+	cases := map[string]struct {
+		read func(*Service) ([]*model.Note, error)
+		// list picks the list an item is pushed to.
+		list func(i int, it scanItem) Name
+	}{
+		"home": {
+			read: func(svc *Service) ([]*model.Note, error) {
+				return svc.HomeTimeline(context.Background(), dbFallbackViewer, "", "", 2, TimelineFilter{MutedUserIDs: []string{"muted"}})
+			},
+			list: func(int, scanItem) Name { return HomeTimelineName(dbFallbackViewer.ID) },
+		},
+		// 複数の list から合流させる形。mute は home、宙吊りは local、g は交互に置く。
+		"hybrid": {
+			read: func(svc *Service) ([]*model.Note, error) {
+				return svc.HybridTimeline(context.Background(), dbFallbackViewer, "", "", 2, TimelineFilter{MutedUserIDs: []string{"muted"}})
+			},
+			list: func(i int, it scanItem) Name {
+				switch {
+				case it.kind == 'm':
+					return HomeTimelineName(dbFallbackViewer.ID)
+				case it.kind == 'd' || i%2 == 0:
+					return LocalTimeline
+				default:
+					return LocalTimelineWithReplyToName(dbFallbackViewer.ID)
+				}
+			},
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			items := buildScanList(kinds)
+			var stored []*model.Note
+			var good, dangling []string
+			for _, it := range items {
+				switch it.kind {
+				case 'g':
+					good = append(good, it.id)
+					stored = append(stored, it.note)
+				case 'm':
+					stored = append(stored, it.note)
+				case 'd':
+					dangling = append(dangling, it.id)
+				}
+			}
+			svc, fanout, spy := newDBFallbackFixture(t, stored...)
+			svc.SetDBFallbackToggle(&fakeDBFallbackToggle{enabled: false})
+			lists := map[Name]struct{}{}
+			for i := len(items) - 1; i >= 0; i-- {
+				l := tc.list(i, items[i])
+				lists[l] = struct{}{}
+				require.NoError(t, fanout.Push(context.Background(), l, items[i].id, MaxTimelineLength))
+			}
+
+			got, err := tc.read(svc)
+			require.NoError(t, err)
+			assert.Equal(t, good[:2], noteIDs(got), "重複せず、降順で、mute をまたいだ先の note を返すこと")
+			assert.Zero(t, spy.dbCalls())
+
+			for l := range lists {
+				left, err := fanout.Get(context.Background(), l, "", "", 0)
+				require.NoError(t, err)
+				for _, d := range dangling {
+					assert.NotContains(t, left, d, "読み進めた先の宙吊りの ID も prune すること")
+				}
+			}
+		})
+	}
+}
+
+// DB で継ぎ足すときは、足りない件数だけを頼む (upstream の
+// `ps.dbFallback(dbUntil, dbSince, remainingToRead)`)。
+func TestTimelines_DBTopUpAsksOnlyForMissing(t *testing.T) {
+	inRedis := idGen.Generate(time.Now())
+	svc, fanout, spy := newDBFallbackFixture(t, dbFallbackNote(inRedis), olderDBNotes(3)[0])
+	pushAll(t, fanout, inRedis)
+
+	_, err := partialReads["home"](svc, 10, TimelineFilter{})
+	require.NoError(t, err)
+	assert.Equal(t, []int{9}, spy.limits)
+}
+
+// limit が 0 以下なら既定の 20 件で読む。0 のまま進むと 1 ページ目が空になり、
+// fallback を切っていれば空を返して frontend が止まる。
+func TestReadFanout_NonPositiveLimitUsesDefault(t *testing.T) {
+	notes := make([]*model.Note, 0, 25)
+	for i := 0; i < 25; i++ {
+		notes = append(notes, dbFallbackNote(idGen.Generate(time.Now().Add(-time.Duration(i)*time.Second))))
+	}
+	svc, _, spy := newDBFallbackFixture(t, notes...)
+	svc.SetDBFallbackToggle(&fakeDBFallbackToggle{enabled: false})
+	r := fanoutRead{
+		keys:  []Name{HomeTimelineName(dbFallbackViewer.ID)},
+		ids:   func() ([]string, error) { return noteIDs(notes), nil },
+		db:    func(string, string, int) ([]*model.Note, error) { return nil, errors.New("unexpected db") },
+		gated: true,
+	}
+	for _, limit := range []int{0, -1} {
+		got, err := svc.readFanout(context.Background(), r, dbFallbackViewer.ID, "", "", limit, TimelineFilter{AllowPartial: true})
+		require.NoError(t, err)
+		assert.Len(t, got, defaultTimelineLimit)
+	}
+	assert.Zero(t, spy.dbCalls())
+}
+
+// PageFilter (handler 側にしか無い判定) も、0 件かどうかを決める前に通すこと。
+// 落ちた後で 0 件なら DB へ倒れ、filter の error はそのまま返る。
+func TestTimelines_PageFilterRunsBeforeEmptyCheck(t *testing.T) {
+	dropAll := func([]*model.Note) ([]*model.Note, error) { return []*model.Note{}, nil }
+	for name, read := range partialReads {
+		t.Run(name, func(t *testing.T) {
+			older := olderDBNotes(3)
+			inRedis := dbFallbackNote(idGen.Generate(time.Now()))
+			svc, fanout, _ := newDBFallbackFixture(t, append([]*model.Note{inRedis}, older...)...)
+			pushAll(t, fanout, inRedis.ID)
+
+			got, err := read(svc, 20, TimelineFilter{AllowPartial: true, PageFilter: dropAll})
+			require.NoError(t, err)
+			assert.Equal(t, noteIDs(older), noteIDs(got))
+
+			boom := errors.New("lookup failed")
+			_, err = read(svc, 20, TimelineFilter{AllowPartial: true, PageFilter: func([]*model.Note) ([]*model.Note, error) { return nil, boom }})
+			assert.ErrorIs(t, err, boom)
+		})
+	}
+}
+
+// 読み進める 1 回の量は limit を下回らない。upstream の式のままだと、残り 1 件で
+// 3 件ずつしか読まず、mute で落ちる ID が長く続くと窓の長さに比例して回数が
+// 増える (1 回ごとに hydrate などの DB 問い合わせが走る)。
+func TestTimelines_ScanOlderReadsAtLeastLimitPerRound(t *testing.T) {
+	// 新しい順に g×9 と、mute で落ちる 150 件。limit 10 / allowPartial=false で、
+	// 1 ページ目は 10 件 (g×9 + m)、残り 149 件の m を読み進めて読み切る。
+	kinds := strings.Repeat("g", 9) + strings.Repeat("m", 150)
+	items := buildScanList(kinds)
+	var stored []*model.Note
+	for _, it := range items {
+		stored = append(stored, it.note)
+	}
+	svc, fanout, spy := newDBFallbackFixture(t, stored...)
+	svc.SetDBFallbackToggle(&fakeDBFallbackToggle{enabled: false})
+	for i := len(items) - 1; i >= 0; i-- {
+		require.NoError(t, fanout.Push(context.Background(), HomeTimelineName(dbFallbackViewer.ID), items[i].id, MaxTimelineLength))
+	}
+
+	got, err := svc.HomeTimeline(context.Background(), dbFallbackViewer, "", "", 10, TimelineFilter{MutedUserIDs: []string{"muted"}})
+	require.NoError(t, err)
+	assert.Len(t, got, 9)
+	// 1 ページ目 + ceil(149 / 10) 回。下限が無いと 1 + ceil(149 / 3) = 51 回。
+	assert.Equal(t, 1+15, spy.hydrates)
 }

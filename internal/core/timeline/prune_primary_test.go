@@ -22,8 +22,8 @@ import (
 // Redis list から消え、戻す経路が無い**。
 //
 // DB fallback があるから安全、とは言えない。fallback は Hybrid 以外では別
-// メソッドで、いずれも `AllowPartial` でクライアントが無効化でき、しかも
-// 一度消えた ID は list に戻らない。
+// メソッドで、いずれも `AllowPartial` を渡されると 1 件でも解決できたページでは
+// 走らず (#3448)、しかも一度消えた ID は list に戻らない。
 func TestPruneDangling_KeepsRowsPresentOnPrimary(t *testing.T) {
 	testutil.SkipIfNoDocker(t)
 	testRedis.FlushAll(context.Background())
