@@ -42,10 +42,6 @@ chat/rooms/members/update-membership
 chat/rooms/transfer-ownership
 chat/rooms/unmute
 chat/unread-count
-drive/files/create-chunked/abort
-drive/files/create-chunked/append
-drive/files/create-chunked/finish
-drive/files/create-chunked/start
 i/flashs
 i/flashs/likes
 roles/assignment-show
