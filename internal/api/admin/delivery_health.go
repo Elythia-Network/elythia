@@ -126,12 +126,15 @@ func (h *Handler) federationHealth(c echo.Context, provider DeliveryHealthProvid
 		return apierr.JSONInvalidParam(c)
 	}
 
+	// 上限との比較は秒のまま行い、範囲内と分かってから time.Duration へ掛ける。
+	// 先に掛けると、windowSeconds が約 9.2e9 を超えたところで int64 が溢れて
+	// 負の値などに化け、上限の比較をすり抜ける (#3440)。
 	window := defaultDeliveryHealthWindow
-	if req.WindowSeconds > 0 {
-		window = time.Duration(req.WindowSeconds) * time.Second
-	}
-	if window > deliveryhealth.MaxWindow {
+	switch {
+	case req.WindowSeconds > int(deliveryhealth.MaxWindow/time.Second):
 		window = deliveryhealth.MaxWindow
+	case req.WindowSeconds > 0:
+		window = time.Duration(req.WindowSeconds) * time.Second
 	}
 
 	hosts, err := provider.Query(c.Request().Context(), window)

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -99,6 +100,55 @@ func TestFederationDeliveryHealth_ClampsWindow(t *testing.T) {
 	rec := doPost(h.FederationDeliveryHealth, `{"windowSeconds":86400}`, adminUser)
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, deliveryhealth.MaxWindow, stub.gotWindow)
+}
+
+// windowSeconds が巨大でも上限 (3600 秒) で頭打ちにする。秒を time.Duration へ
+// 掛けてから比較すると int64 が溢れて負の値などに化け、上限をすり抜けて応答の
+// windowSeconds が負になる (#3440)。送信側と受信側は同じ処理を通るので両方見る。
+func TestFederationHealth_WindowSecondsBoundaries(t *testing.T) {
+	maxSeconds := int(deliveryhealth.MaxWindow / time.Second)
+	cases := []struct {
+		name          string
+		body          string
+		wantWindow    time.Duration
+		wantWindowSec int
+	}{
+		{"omitted uses default", `{}`, time.Hour, 3600},
+		{"zero uses default", `{"windowSeconds":0}`, time.Hour, 3600},
+		{"negative uses default", `{"windowSeconds":-5}`, time.Hour, 3600},
+		{"min int uses default", `{"windowSeconds":-9223372036854775808}`, time.Hour, 3600},
+		{"within range is honoured", `{"windowSeconds":1}`, time.Second, 1},
+		{"exactly max is honoured", `{"windowSeconds":3600}`, deliveryhealth.MaxWindow, maxSeconds},
+		{"max plus one is clamped", `{"windowSeconds":3601}`, deliveryhealth.MaxWindow, maxSeconds},
+		{"just past duration overflow is clamped", `{"windowSeconds":9300000000}`, deliveryhealth.MaxWindow, maxSeconds},
+		{"overflow wrapping to a small positive duration is clamped", `{"windowSeconds":18446744074}`, deliveryhealth.MaxWindow, maxSeconds},
+		{"1<<62 is clamped", `{"windowSeconds":4611686018427387904}`, deliveryhealth.MaxWindow, maxSeconds},
+		{"max int64 is clamped", `{"windowSeconds":9223372036854775807}`, deliveryhealth.MaxWindow, maxSeconds},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, _, _, _ := newTestHandler(t)
+			out := &stubDeliveryHealth{}
+			in := &stubDeliveryHealth{}
+			h.SetDeliveryHealthProvider(out)
+			h.SetInboxHealthProvider(in)
+
+			for _, ep := range []struct {
+				name    string
+				handler echo.HandlerFunc
+				stub    *stubDeliveryHealth
+			}{
+				{"delivery-health", h.FederationDeliveryHealth, out},
+				{"inbox-health", h.FederationInboxHealth, in},
+			} {
+				rec := doPost(ep.handler, tc.body, adminUser)
+				require.Equal(t, http.StatusOK, rec.Code, ep.name)
+				got := decodeHealth(t, rec.Body.Bytes())
+				assert.Equal(t, tc.wantWindowSec, got.WindowSeconds, ep.name)
+				assert.Equal(t, tc.wantWindow, ep.stub.gotWindow, ep.name)
+			}
+		})
+	}
 }
 
 // telemetry 未配線の構成では「データが無い」を返す。エラーにすると管理画面が
