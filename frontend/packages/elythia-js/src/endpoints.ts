@@ -8,6 +8,10 @@ import type * as Misskey from 'misskey-js';
 import type {
 	AdminEmojiApplication,
 	AdminSignupApplication,
+	BubbleGameMode,
+	BubbleVersusMatch,
+	BubbleVersusRecord,
+	BubbleVersusReportReason,
 	EmojiApplication,
 	EmojiApplicationPendingLimit,
 	EmojiApplicationQuotaReset,
@@ -152,6 +156,79 @@ export type ElythiaEndpoints = {
 	'admin/signup-application/reject': {
 		req: { applicationId: string };
 		res: { ok: true };
+	};
+	'bubble-game/versus/accept': {
+		req: { matchId: string };
+		res: BubbleVersusMatch;
+	};
+	'bubble-game/versus/cancel': {
+		/**
+		 * Withdraws an invitation the caller sent, or calls off an accepted match
+		 * before it starts (either player).
+		 */
+		req: { matchId: string };
+		res: undefined;
+	};
+	'bubble-game/versus/decline': {
+		req: { matchId: string };
+		res: undefined;
+	};
+	'bubble-game/versus/history': {
+		req: {
+			/**
+			 * Defaults to the caller. Records of others are shown only when both
+			 * players made them public.
+			 */
+			userId?: string;
+			/** Defaults to 10. Outside 1-100 is rejected. */
+			limit?: number;
+			untilId?: string;
+			untilDate?: number;
+		};
+		/** Newest first. */
+		res: BubbleVersusRecord[];
+	};
+	'bubble-game/versus/invitations': {
+		req: Misskey.entities.EmptyRequest;
+		/** The invitations the caller received and has not answered yet. */
+		res: BubbleVersusMatch[];
+	};
+	'bubble-game/versus/invite': {
+		req: {
+			/** A local user other than the caller. */
+			userId: string;
+			gameMode: BubbleGameMode;
+		};
+		/** An unanswered invitation to the same user in the same mode is returned as is. */
+		res: BubbleVersusMatch;
+	};
+	'bubble-game/versus/record': {
+		req: { matchId: string };
+		/** Includes `seed` and the logs, for the replay. */
+		res: BubbleVersusRecord;
+	};
+	'bubble-game/versus/report': {
+		req: {
+			matchId: string;
+			score: number;
+			frame: number;
+			reason: BubbleVersusReportReason;
+			logs: number[][];
+			/** The engine version the logs were made with. Older clients omit it. */
+			gameVersion?: number;
+		};
+		res: BubbleVersusMatch;
+	};
+	'bubble-game/versus/set-public': {
+		req: {
+			matchId: string;
+			isPublic: boolean;
+		};
+		res: undefined;
+	};
+	'bubble-game/versus/show': {
+		req: { matchId: string };
+		res: BubbleVersusMatch;
 	};
 	'drive/files/create-chunked/abort': {
 		req: { uploadId: string };

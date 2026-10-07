@@ -247,4 +247,103 @@ export type FederationRuleHit = {
 	at: string;
 };
 
+type BubbleGameModeBase = 'normal' | 'yen' | 'square' | 'sweets' | 'space';
+
+/**
+ * A bubble game mode: a shape set, optionally joined with a physics.
+ *
+ * 型としては misskey-bubble-game の GameMode と同じ集合にしてある (相互に代入
+ * できるように)。normal × bouncy は歴史的な名前の `bouncy` で表すので、
+ * `normal-bouncy` は型では通るが、サーバーの ValidGameMode とクライアントの
+ * parseGameMode が実行時に弾く。
+ */
+export type BubbleGameMode =
+	| BubbleGameModeBase
+	| 'bouncy'
+	| `${Exclude<BubbleGameModeBase, 'space'>}-${'bouncy' | 'friction'}`;
+
+export type BubbleVersusStatus = 'invited' | 'accepted' | 'playing' | 'ended';
+
+/** How a versus match ended. */
+export type BubbleVersusReason = 'gameOver' | 'surrender' | 'timeUp' | 'disconnected' | 'invalidReport';
+
+/**
+ * The reason of one player's report. `opponentEnded` is sent after the
+ * opponent's report ended the match, only to keep the board for the replay.
+ * It never decides the outcome.
+ */
+export type BubbleVersusReportReason = 'gameOver' | 'surrender' | 'timeUp' | 'opponentEnded';
+
+/** One player's reported result of a running or ended match. */
+export type BubbleVersusResultSummary = {
+	score: number;
+	frame: number;
+	reason: BubbleVersusReason | 'opponentEnded';
+};
+
+/**
+ * A versus match, as its participants see it.
+ *
+ * 記録 (logs) は大きいので載せない。リプレイは record から引く。
+ */
+export type BubbleVersusMatch = {
+	id: string;
+	gameMode: BubbleGameMode;
+	status: BubbleVersusStatus;
+	/** Decided only when the match is accepted. */
+	seed: string | null;
+	createdAt: string;
+	startAt: string | null;
+	endedAt: string | null;
+	winnerId: string | null;
+	reason: BubbleVersusReason | null;
+	user1Id: string;
+	user2Id: string;
+	/** `null` when the user no longer exists. */
+	user1: Misskey.entities.UserLite | null;
+	/** `null` when the user no longer exists. */
+	user2: Misskey.entities.UserLite | null;
+	user1Ready: boolean;
+	user2Ready: boolean;
+	user1Result: BubbleVersusResultSummary | null;
+	user2Result: BubbleVersusResultSummary | null;
+};
+
+/** One player's side of a stored match record. */
+export type BubbleVersusRecordResult = {
+	score: number;
+	frame: number;
+	reason: BubbleVersusReason | 'opponentEnded';
+	/** The engine version the logs were made with. `null` when the client did not send it. */
+	gameVersion: number | null;
+};
+
+/**
+ * A finished match as returned by `bubble-game/versus/history` and `record`.
+ * `seed` and the logs are only present on `record`.
+ */
+export type BubbleVersusRecord = {
+	id: string;
+	gameMode: BubbleGameMode;
+	startedAt: string;
+	endedAt: string | null;
+	winnerId: string | null;
+	reason: BubbleVersusReason | null;
+	/** Whether both players made the record public. */
+	isPublic: boolean;
+	user1Id: string;
+	user2Id: string;
+	/** `null` when the user no longer exists. */
+	user1: Misskey.entities.UserLite | null;
+	/** `null` when the user no longer exists. */
+	user2: Misskey.entities.UserLite | null;
+	user1Public: boolean;
+	user2Public: boolean;
+	user1Result: BubbleVersusRecordResult | null;
+	user2Result: BubbleVersusRecordResult | null;
+	seed?: string;
+	user1Logs?: number[][] | null;
+	user2Logs?: number[][] | null;
+};
+
 export type MetaDetailed = Misskey.entities.MetaDetailed & ElythiaMetaFields;
