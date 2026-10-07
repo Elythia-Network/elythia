@@ -3,18 +3,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+import type * as Elythia from 'elythia-js';
 import { i18n } from '@/i18n.js';
 
 /**
  * One rolling window as returned by `admin/emoji-application/user-summary` (#2961).
  */
-export type QuotaWindowView = {
-	period: string;
-	used: number;
-	limit: number;
-	unlimited: boolean;
-	retryAt?: string | null;
-};
+export type QuotaWindowView = Elythia.EmojiApplicationQuotaWindow;
 
 /**
  * The awaiting-review cap as returned by `user-summary` (#2961 / #2977).
@@ -23,11 +18,7 @@ export type QuotaWindowView = {
  * 弾かれる。出さないと画面は「1日: 2 / 10 (空きあり)」と描き、**実際には
  * 出せない人を出せると案内する**。
  */
-export type PendingLimitView = {
-	used: number;
-	limit: number;
-	unlimited: boolean;
-};
+export type PendingLimitView = Elythia.EmojiApplicationPendingLimit;
 
 /**
  * Renders the period label (#2961).
@@ -92,11 +83,7 @@ export function canLoadMoreUserApplications(lastPageSize: number, limit: number)
 /**
  * The last manual quota reset as returned by `user-summary` (#2962).
  */
-export type QuotaResetView = {
-	at: string;
-	byId: string;
-	reason: string;
-};
+export type QuotaResetView = Elythia.EmojiApplicationQuotaReset;
 
 /**
  * Reports whether the manual reset is worth offering (#2962).
