@@ -128,12 +128,12 @@ import { i18n } from '@/i18n.js';
 import { useMkSelect } from '@/composables/use-mkselect.js';
 import MkSelect from '@/components/MkSelect.vue';
 import MkSwitch from '@/components/MkSwitch.vue';
-import { misskeyApiGet } from '@/utility/misskey-api.js';
+import { misskeyApi, misskeyApiGet } from '@/utility/misskey-api.js';
 import * as os from '@/os.js';
 import { clearDropAndFusionSave, isDropAndFusionSaveExpired, loadDropAndFusionSave } from '@/utility/drop-and-fusion-save.js';
 import type { DropAndFusionSave } from '@/utility/drop-and-fusion-save.js';
 import { dropAndFusionModeLabel, dropAndFusionScoreUnit } from '@/utility/drop-and-fusion-mode.js';
-import { connectVersusInvitations, versusApi } from '@/utility/bubble-versus.js';
+import { connectVersusInvitations } from '@/utility/bubble-versus.js';
 import type { VersusConnection, VersusMatch } from '@/utility/bubble-versus.js';
 import { useRouter } from '@/router.js';
 
@@ -258,7 +258,8 @@ let versusConnection: VersusConnection | null = null;
 
 async function fetchVersusInvitations() {
 	try {
-		versusInvitations.value = await versusApi<VersusMatch[]>('invitations');
+		const res = await misskeyApi('bubble-game/versus/invitations');
+		versusInvitations.value = res;
 	} catch {
 		// 一覧が取れなくても一人で遊ぶのには関係ないので、黙って空のままにする。
 	}
@@ -276,20 +277,20 @@ function openVersusHistory() {
 async function inviteVersus() {
 	const user = await os.selectUser({ includeSelf: false, localOnly: true });
 	if (user == null) return;
-	const match = await os.apiWithDialog('bubble-game/versus/invite' as never, {
+	const match = await os.apiWithDialog('bubble-game/versus/invite', {
 		userId: user.id,
 		gameMode: gameMode.value,
-	} as never) as VersusMatch;
+	});
 	openVersus(match.id);
 }
 
 async function acceptVersus(inv: VersusMatch) {
-	await os.apiWithDialog('bubble-game/versus/accept' as never, { matchId: inv.id } as never);
+	await os.apiWithDialog('bubble-game/versus/accept', { matchId: inv.id });
 	openVersus(inv.id);
 }
 
 async function declineVersus(inv: VersusMatch) {
-	await os.apiWithDialog('bubble-game/versus/decline' as never, { matchId: inv.id } as never);
+	await os.apiWithDialog('bubble-game/versus/decline', { matchId: inv.id });
 	versusInvitations.value = versusInvitations.value.filter(x => x.id !== inv.id);
 }
 

@@ -74,8 +74,8 @@ import MkNumber from '@/components/MkNumber.vue';
 import MkInfo from '@/components/MkInfo.vue';
 import MkResult from '@/components/global/MkResult.vue';
 import { i18n } from '@/i18n.js';
+import { misskeyApi } from '@/utility/misskey-api.js';
 import { dropAndFusionModeLabel } from '@/utility/drop-and-fusion-mode.js';
-import { versusApi } from '@/utility/bubble-versus.js';
 import type { VersusRecord } from '@/utility/bubble-versus.js';
 import { replayPlayability } from '@/utility/bubble-versus-rules.js';
 
@@ -150,7 +150,8 @@ async function restart() {
 
 onMounted(async () => {
 	try {
-		record.value = await versusApi<VersusRecord>('record', { matchId: props.matchId });
+		const res = await misskeyApi('bubble-game/versus/record', { matchId: props.matchId });
+		record.value = res;
 	} catch (err: any) {
 		loadFailed.value = err?.code === 'NO_SUCH_MATCH' ? 'notFound' : 'error';
 		return;
