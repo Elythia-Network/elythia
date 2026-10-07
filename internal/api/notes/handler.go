@@ -477,12 +477,28 @@ func (h *Handler) Create(c echo.Context) error {
 		// X 後」の 3 択で、相対指定時は expiredAfter のみが入る。
 		// #2106 L6: 両方来た時は upstream create.ts:230 と同じく expiredAfter (相対) を優先する
 		// (旧コメントの『TS PollService』は誤り、endpoint の create.ts が expiry を決定する)。
+		//
+		// 期限が上限 (9999-12-30T23:59:59.999Z) を超える値は 400 INVALID_PARAM で
+		// 弾く。upstream は JS の Date の上限 (+275760 年) まで受け付け、それを
+		// 超えると Invalid Date で保存に失敗する (500)。上限の理由は
+		// note.MaxPollExpiresAtUnixMilli にある (#3443)。
+		var (
+			t      time.Time
+			hasExp bool
+			expErr error
+		)
 		switch {
 		case req.Poll.ExpiredAfter != nil:
-			t := time.Now().Add(time.Duration(*req.Poll.ExpiredAfter) * time.Millisecond)
-			in.Poll.ExpiresAt = &t
+			t, expErr = note.PollExpiresAtAfter(time.Now(), *req.Poll.ExpiredAfter)
+			hasExp = true
 		case req.Poll.ExpiresAt != nil:
-			t := time.UnixMilli(*req.Poll.ExpiresAt)
+			t, expErr = note.PollExpiresAtFromUnixMilli(*req.Poll.ExpiresAt)
+			hasExp = true
+		}
+		if expErr != nil {
+			return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", expErr.Error(), apierr.UUIDInvalidParam))
+		}
+		if hasExp {
 			in.Poll.ExpiresAt = &t
 		}
 	}

@@ -3,6 +3,7 @@ package processors
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -338,6 +339,83 @@ func TestPostScheduledNote_WithPollExpiredAfter(t *testing.T) {
 	require.NotNil(t, pub.calls[0].Poll.ExpiresAt)
 	// publish 時刻 + 1h が ExpiresAt になっている (= 数秒のズレを許容)
 	assert.WithinDuration(t, time.Now().Add(time.Hour), *pub.calls[0].Poll.ExpiresAt, 5*time.Second)
+}
+
+// #3443: time.Duration の範囲 (約 9.22e12 ms) を超える PollExpiredAfter でも
+// 期限が過去へ巻き戻らず、publish 時刻 + expiredAfter になる。
+func TestPostScheduledNote_PollExpiredAfterBeyondDuration(t *testing.T) {
+	scheduledAt := timeFromMs(1234)
+	expiredAfter := int64(9_300_000_000_000) // 約 295 年。Duration に掛けると溢れる
+	drafts := map[string]*model.NoteDraft{
+		"d1": {
+			ID: "d1", UserID: "u1", Visibility: "public",
+			IsActuallyScheduled: true, ScheduledAt: &scheduledAt,
+			HasPoll:          true,
+			PollChoices:      []string{"a", "b"},
+			PollExpiredAfter: &expiredAfter,
+		},
+	}
+	p, _, pub := newProcessor(drafts, map[string]*model.User{"u1": {ID: "u1"}})
+
+	before := time.Now().UnixMilli()
+	require.NoError(t, p.Handle(context.Background(), taskFor("d1")))
+	after := time.Now().UnixMilli()
+	require.Len(t, pub.calls, 1)
+	require.NotNil(t, pub.calls[0].Poll)
+	require.NotNil(t, pub.calls[0].Poll.ExpiresAt)
+	got := pub.calls[0].Poll.ExpiresAt.UnixMilli()
+	assert.GreaterOrEqual(t, got, before+expiredAfter)
+	assert.LessOrEqual(t, got, after+expiredAfter)
+}
+
+// #3443: 期限が上限 (9999-12-30T23:59:59.999Z) を超える PollExpiredAfter は、publish 失敗
+// として scheduledNotePostFailed を通知し、publish しない。
+func TestPostScheduledNote_PollExpiredAfterOutOfRange(t *testing.T) {
+	scheduledAt := timeFromMs(1234)
+	expiredAfter := int64(math.MaxInt64)
+	drafts := map[string]*model.NoteDraft{
+		"d1": {
+			ID: "d1", UserID: "u1", Visibility: "public",
+			IsActuallyScheduled: true, ScheduledAt: &scheduledAt,
+			HasPoll:          true,
+			PollChoices:      []string{"a", "b"},
+			PollExpiredAfter: &expiredAfter,
+		},
+	}
+	p, dr, pub := newProcessor(drafts, map[string]*model.User{"u1": {ID: "u1"}})
+	notif := &stubNotifier{}
+	p.SetNotifier(notif)
+
+	require.NoError(t, p.Handle(context.Background(), taskFor("d1")), "publish 失敗は retry しない")
+	assert.Empty(t, pub.calls, "範囲外の期限で publish しない")
+	require.Len(t, notif.calls, 1)
+	assert.Equal(t, notification.TypeScheduledNotePostFailed, notif.calls[0].Type)
+	assert.Empty(t, dr.deleted, "失敗した draft は消さない")
+}
+
+// #3443: 上限 (9999-12-30T23:59:59.999Z) を超える PollExpiresAt を持つ draft も
+// publish せず、scheduledNotePostFailed を通知する。
+func TestPostScheduledNote_PollExpiresAtOutOfRange(t *testing.T) {
+	scheduledAt := timeFromMs(1234)
+	expiresAt := time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)
+	drafts := map[string]*model.NoteDraft{
+		"d1": {
+			ID: "d1", UserID: "u1", Visibility: "public",
+			IsActuallyScheduled: true, ScheduledAt: &scheduledAt,
+			HasPoll:       true,
+			PollChoices:   []string{"a", "b"},
+			PollExpiresAt: &expiresAt,
+		},
+	}
+	p, dr, pub := newProcessor(drafts, map[string]*model.User{"u1": {ID: "u1"}})
+	notif := &stubNotifier{}
+	p.SetNotifier(notif)
+
+	require.NoError(t, p.Handle(context.Background(), taskFor("d1")))
+	assert.Empty(t, pub.calls, "範囲外の期限で publish しない")
+	require.Len(t, notif.calls, 1)
+	assert.Equal(t, notification.TypeScheduledNotePostFailed, notif.calls[0].Type)
+	assert.Empty(t, dr.deleted, "失敗した draft は消さない")
 }
 
 // PollExpiredAfter なし、PollExpiresAt のみ指定された draft は絶対時刻が

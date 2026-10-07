@@ -220,16 +220,24 @@ func (p *PostScheduledNoteProcessor) Handle(ctx context.Context, task driver.Tas
 	//   - hasPoll=true なら PollChoices / PollMultiple / PollExpiresAt または
 	//     PollExpiredAfter から `*time.Time` 期限を復元
 	//   - PollExpiredAfter (= 経過 ms) 優先、無ければ PollExpiresAt (= 絶対時刻)
+	//
+	// 期限が上限 (note.MaxPollExpiresAtUnixMilli) を超える draft は、publish 失敗
+	// として scheduledNotePostFailed を通知する。upstream も Date で表せない期限は
+	// fetchAndCreate が落ちて同じ通知になる (#3443)。lock を取った後で扱うため、
+	// ここでは控えるだけ。
+	var pollErr error
 	if draft.HasPoll {
 		pollInput := &note.PollInput{
 			Choices:  draft.PollChoices,
 			Multiple: draft.PollMultiple,
 		}
 		if draft.PollExpiredAfter != nil {
-			exp := time.Now().Add(time.Duration(*draft.PollExpiredAfter) * time.Millisecond)
+			var exp time.Time
+			exp, pollErr = note.PollExpiresAtAfter(time.Now(), *draft.PollExpiredAfter)
 			pollInput.ExpiresAt = &exp
 		} else if draft.PollExpiresAt != nil {
 			exp := *draft.PollExpiresAt
+			pollErr = note.ValidatePollExpiresAt(exp)
 			pollInput.ExpiresAt = &exp
 		}
 		in.Poll = pollInput
@@ -255,7 +263,12 @@ func (p *PostScheduledNoteProcessor) Handle(ctx context.Context, task driver.Tas
 			return nil
 		}
 	}
-	publishedNote, err := p.publisher.Create(in)
+	var publishedNote *model.Note
+	if pollErr != nil {
+		err = pollErr
+	} else {
+		publishedNote, err = p.publisher.Create(in)
+	}
 	if err != nil {
 		// #2106 L61: upstream PostScheduledNoteProcessorService は publish 失敗時に
 		// scheduledNotePostFailed 通知のみ行い rethrow せず正常終了する (retry しない)。

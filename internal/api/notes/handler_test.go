@@ -1151,6 +1151,66 @@ func TestCreate_PollExpiredAfterTakesPriority(t *testing.T) {
 	}
 }
 
+// #3443: expiredAfter が time.Duration の範囲 (約 9.22e12 ms) を超えても期限が
+// 過去へ巻き戻らず、upstream と同じ now + expiredAfter になる。上限
+// (9999-12-30T23:59:59.999Z) を超える期限は 400 INVALID_PARAM で弾く。
+func TestCreate_PollExpiryRange(t *testing.T) {
+	tooFarAfter := corenote.MaxPollExpiresAtUnixMilli - time.Now().UnixMilli() + 60_000
+	tests := []struct {
+		name       string
+		poll       string
+		wantStatus int
+		wantMs     int64 // expected deadline relative to now in ms
+		wantAbsMs  int64 // expected absolute deadline in Unix ms (0 = use wantMs)
+	}{
+		{name: "expiredAfter above duration range", poll: `"expiredAfter": 9300000000000`, wantStatus: http.StatusOK, wantMs: 9_300_000_000_000},
+		{name: "expiredAfter at int64 duration overflow boundary", poll: `"expiredAfter": 9223372036855`, wantStatus: http.StatusOK, wantMs: 9_223_372_036_855},
+		{name: "expiredAfter just past the limit", poll: fmt.Sprintf(`"expiredAfter": %d`, tooFarAfter), wantStatus: http.StatusBadRequest},
+		{name: "expiredAfter int64 max", poll: `"expiredAfter": 9223372036854775807`, wantStatus: http.StatusBadRequest},
+		{name: "expiresAt at the limit", poll: `"expiresAt": 253402214399999`, wantStatus: http.StatusOK, wantAbsMs: corenote.MaxPollExpiresAtUnixMilli},
+		{name: "expiresAt one past the limit", poll: `"expiresAt": 253402214400000`, wantStatus: http.StatusBadRequest},
+		{name: "expiresAt in year 10000", poll: `"expiresAt": 253402300800000`, wantStatus: http.StatusBadRequest},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			noteRepo := testutil.NewMockNoteRepository()
+			pollRepo := testutil.NewMockPollRepository()
+			idGen, _ := id.NewGenerator("aidx")
+			createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil)
+			h := NewHandler(noteRepo, createSvc, corenote.NewDeleteService(noteRepo), corenote.NewQueryService(noteRepo, nil), nil, nil, nil, nil, idGen)
+			user := &model.User{ID: "user1", Username: "testuser", AvatarDecorations: datatypes.JSON([]byte("[]"))}
+
+			body := `{"text": "Vote!", "poll": {"choices": ["A", "B"], ` + tt.poll + `}}`
+			req := httptest.NewRequest(http.MethodPost, "/api/notes/create", strings.NewReader(body))
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			rec := httptest.NewRecorder()
+			c := echo.New().NewContext(req, rec)
+			setAuthUser(c, user)
+			before := time.Now()
+			require.NoError(t, h.Create(c))
+			require.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+
+			if tt.wantStatus != http.StatusOK {
+				assert.Contains(t, rec.Body.String(), "INVALID_PARAM")
+				assert.Empty(t, pollRepo.Polls)
+				return
+			}
+			require.Len(t, pollRepo.Polls, 1)
+			for _, poll := range pollRepo.Polls {
+				require.NotNil(t, poll.ExpiresAt)
+				assert.True(t, poll.ExpiresAt.After(time.Now()), "deadline must not be in the past, got %v", poll.ExpiresAt)
+				if tt.wantAbsMs != 0 {
+					assert.Equal(t, tt.wantAbsMs, poll.ExpiresAt.UnixMilli())
+					continue
+				}
+				got := poll.ExpiresAt.UnixMilli()
+				assert.GreaterOrEqual(t, got, before.UnixMilli()+tt.wantMs)
+				assert.LessOrEqual(t, got, time.Now().UnixMilli()+tt.wantMs)
+			}
+		})
+	}
+}
+
 // #2106 L4 / #2215: noteIds 不在の POST /notes は upstream notes.ts の public note 一覧を返す
 // (localOnly note は除外)。
 func TestBulkShow_PublicTimeline(t *testing.T) {
