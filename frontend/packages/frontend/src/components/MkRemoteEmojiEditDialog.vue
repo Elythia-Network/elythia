@@ -93,6 +93,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 <script lang="ts" setup>
 import { computed, ref, useTemplateRef } from 'vue';
+import type * as Elythia from 'elythia-js';
 import MkKeyValue from '@/components/MkKeyValue.vue';
 import MkButton from '@/components/MkButton.vue';
 import MkInfo from '@/components/MkInfo.vue';
@@ -209,11 +210,12 @@ if (props.meta?.fetched) {
 async function done() {
 	// **上書き項目は mk-go が足した additive パラメータ** (#2698) なので、
 	// misskey-js の autogen 型 (`{ emojiId: string }`) には無い。upstream の
-	// paramDef は emojiId のみ必須で、足しても既存の呼び出しは通る。
+	// paramDef は emojiId のみ必須で、足しても既存の呼び出しは通る。型は elythia-js の
+	// ElythiaRequestExtensions で重ねてある (#3439)。
 	// **編集していない経路では上書きを送らない。** 送ると src の値が空で
 	// 潰れる (この props は category / aliases / isSensitive を持たないため、
 	// フォームの初期値が空になる)。
-	const params: Record<string, unknown> = { emojiId: props.emoji.id };
+	const params: Elythia.Endpoints['admin/emoji/copy']['req'] = { emojiId: props.emoji.id };
 	// **名前は直したときだけ送る (#2998)。** そのまま使える名前に上書きを付けると、
 	// 送る値が増えるだけで挙動は変わらない。
 	if (needsRename.value) {
@@ -227,7 +229,7 @@ async function done() {
 	}
 	// 失敗すると apiWithDialog がエラーを出して reject するので、下の emit には届かない
 	// (= 呼び出し側はリアクションしない)。
-	await os.apiWithDialog('admin/emoji/copy' as never, params as never);
+	await os.apiWithDialog('admin/emoji/copy', params);
 
 	emit('done', needsRename.value ? nameInput.value : props.emoji.name);
 	windowEl.value?.close();

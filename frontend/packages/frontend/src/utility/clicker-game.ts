@@ -23,10 +23,11 @@ let prev = '';
 
 export async function load() {
 	try {
+		// レジストリの値の形は書いた側しか知らないので、ここで表明する (#3439)
 		saveData.value = await misskeyApi('i/registry/get', {
 			scope: ['clickerGame'],
 			key: 'saveData',
-		});
+		}) as SaveData;
 	} catch (err: any) {
 		if (err.code === 'NO_SUCH_KEY') {
 			saveData.value = {
