@@ -8,7 +8,15 @@ import type * as Misskey from 'misskey-js';
 import type { ElythiaEndpoints } from './endpoints.js';
 
 export type { ElythiaEndpoints } from './endpoints.js';
-export type { ElythiaMetaFields, MetaDetailed, SignupApplicationFormField } from './entities.js';
+export type {
+	AdminSignupApplication,
+	ElythiaMetaFields,
+	MetaDetailed,
+	SignupApplicationAnswer,
+	SignupApplicationFormField,
+	SignupApplicationStatus,
+	SignupApplicationView,
+} from './entities.js';
 
 /** misskey-js の Endpoints に、Elythia 独自のエンドポイントを重ねたもの。 */
 export type Endpoints = Misskey.Endpoints & ElythiaEndpoints;
