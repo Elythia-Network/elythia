@@ -1,19 +1,3 @@
 # Elythia 独自の POST のエンドポイントのうち、まだ elythia-js に型が無いもの (#3417)。
 # 1 行 1 件、/api/ を除いたパス。型を ElythiaEndpoints に足したら、ここから外す。
 # TestElythiaJS_EndpointsMatchRouter が docs/api-compat.md の一覧と突き合わせる。
-admin/database-health
-admin/drive/usage
-admin/emoji/fetch-remote-meta
-admin/federation/check-host
-admin/federation/clean-gone-instance
-admin/federation/close-delivery-breaker
-admin/federation/delivery-health
-admin/federation/gone-instances
-admin/federation/inbox-health
-admin/ip/accounts
-admin/ip/lookup-log
-admin/ip/related-accounts
-admin/roles/assignment-show
-admin/self-check
-admin/server-metrics
-admin/server-plugins
