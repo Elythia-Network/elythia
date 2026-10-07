@@ -148,7 +148,7 @@ DB では埋めない。足りない分は Redis の窓の奥を読み進めて�
 
 | 状況 | on (既定) | off |
 |---|---|---|
-| Redis に `limit` 以上ある | Redis から返す | 同じ |
+| Redis に `limit` 以上ある | Redis から返す。複数の list を混ぜる timeline では、全ての list が持っている範囲だけ (下の「複数の list を混ぜる timeline」) | Redis から返す (範囲で切らない) |
 | Redis から解決できた分が `limit` 未満 | 足りない分を DB で継ぎ足す。ただし `allowPartial: true` (同梱 frontend は常に送る) なら、1 件も残らなかったときだけ | **Redis の窓の奥を読み進め、読み切ったらその分だけ返す** |
 | Redis が空 | 全ページを DB から返す | **空を返す** |
 | `sinceId` を含むページング | 全ページを DB が処理する | **空を返す** |
@@ -233,6 +233,122 @@ DB fallback の設定で分かれる。
 frontend の paginator は終端と判断し、古い note が残っていてもそれ以上読まない。
 upstream も `ps.allowPartial ? redisTimeline.length !== 0 : ...` を満たすまで読み進め、
 0 件なら DB へ倒す。
+
+### 複数の list を混ぜる timeline (#3449)
+
+social (`hybrid-timeline`) はホーム / ローカル / 返信付きローカル (または自分宛ての
+返信) の 3 本、ログイン中の `local-timeline` はローカル + 返信付きローカル (または
+自分宛ての返信) の 2 本の list を混ぜて返す。list ごとに上限の件数と流量が違うので、
+遡れる深さが違う。以前は浅い list が尽きた先でも深い list の ID だけで 1 ページが
+埋まって DB へ倒れず、浅い list にあったはずの期間 (例: フォロー中の人の、
+ローカルに流れない投稿) が抜けていた。本家にも同じ問題があり、修正
+(misskey-dev/misskey#13495) は未マージ。
+
+Elythia は **DB fallback が on のとき**、各 list の末尾 (最も前に push されて残って
+いる ID) のうち一番新しいもの (`coverageCutoff`) より古い ID を Redis から返さず、
+そこから先を DB に任せる。1 ページ目がそこで足りなくなれば、Redis から返した最古の
+note を境界にして DB で継ぎ足し、cursor がそれより古ければ全ページを DB から返す。
+**抜けなくなるのは DB fallback が on のときだけ。** off のときは範囲で切らず、
+抜ける期間は従来どおり抜ける (下記)。
+
+**DB fallback のクエリも、list の中身を返すように広げた。** 返信を絞る条件
+(「返信ではない or 自己スレッド」) のままだと、list にあった返信が cutoff を
+越えた所から消える (以前は Redis から出ていたものが出なくなる)。
+
+| timeline | list にあって、以前の DB クエリが返さなかったもの | 今の DB クエリ |
+|---|---|---|
+| `local-timeline` (ログイン中、`withReplies: false`) | 自分宛ての返信 (`localTimelineWithReplyTo:<viewer>`) | `replyUserId = viewer` も返す |
+| `hybrid-timeline` の local 側 (`withReplies: false`) | 同上 | 同上 |
+| `hybrid-timeline` の home 側 (`withReplies: false`) | フォロー中の人からの自分宛ての返信、自分の他人宛ての返信、自分への mention を含む返信、`withReplies` 付きでフォローしている人の返信 (ホームの list の振り分け、`fanoutToFollowersAndStream`)、フォロー中のチャンネルの返信 (チャンネルの投稿は返信も含めてフォロワー全員のホームの list に積まれる、`fanoutToChannelFollowers`) | 上記も返す。ただしフォロー一覧が読めなかったときは返さない (下記) |
+
+可視性・mute・block・凍結・チャンネルの条件はそのまま AND で効く。チャンネルの
+返信は、home 側の基本条件がチャンネルの投稿をフォロー中 (mute 済みを除く) の
+チャンネルに絞っているので、それ以外のチャンネルのものは出ない。HTL
+(`notes/timeline`) は list が 1 本で cutoff が掛からないので変えていない
+(upstream の HTL の DB クエリと同じく返信を絞ったまま)。
+
+**home 側の例外は、フォロー一覧が読めたときだけ付ける (fail closed)。** fanout は、
+フォローしていない人の followers 限定の投稿への返信を配らない。SQL 側の同じ判定
+(`HideFollowersOnlyReplyFromNonFollowee`) はフォロー一覧 (`loadFollowingIDs`) が
+読めたときしか掛からないので、読めなかったときに例外だけを広げると、その返信
+(`withReplies` 付きでフォローしている人のものなど) が DB から出てしまう。読め
+なかったときは、自分宛ての返信 (`KeepRepliesToViewer`) 以外の home 側の例外
+(自分の返信、mention を含む返信、`withReplies` の返信、チャンネルの返信) を付けず、
+それらの返信は DB からは出ない。
+
+**FTT を切ったとき (DB 直行) の結果も変わる。** DB 直行の経路も同じクエリを使う
+ので、ログイン中の `local-timeline` / `hybrid-timeline` は、upstream の
+`getFromDb` が返さない返信 (自分宛ての返信と、hybrid の home 側の上の表の返信) も
+返す。これは upstream で FTT が on のときに返る結果と同じで、upstream も FTT を
+切ったときに返らないことを不具合として扱っている (`test/e2e/timelines.ts` の
+Local TL / Social TL にある `FIXME: misskey-dev/misskey#12065` のテストは、
+FTT を切ると飛ばされる)。返る note が増えるだけで、レスポンスの形は変わらない。
+
+**`withFiles: true` の local / hybrid も、自分宛ての返信を含む。** Redis の経路は
+もともと `withFiles` でも同じ list (`localTimeline` + `localTimelineWithReplyTo:<viewer>`
+など) を混ぜてから添付の有無で絞っており、自分宛ての返信の list も混ざっていた。
+upstream は `withFiles` のとき `localTimelineWithFiles` だけを読む。今回 DB の経路も
+自分宛ての返信を返すようになったので、Redis の経路と揃った (upstream との差は
+以前からのもの)。
+
+#13495 も「cutoff + DB クエリの拡張」の組み合わせだが、拡張は hybrid に
+`replyUserId = me` を足すだけで、`withReplies: true` のときにフォロー中の人の返信を
+絞る条件を足している。Elythia との違いは次のとおり。
+
+| 状況 | #13495 | Elythia |
+|---|---|---|
+| list はあるが、窓 (`untilId` より古い範囲) には何も無い | DB へ倒す | 同じ (cutoff が `untilId` 以降になり、Redis から何も返さない) |
+| list が無い (key が存在しない) | DB へ倒す。DB の結果が `limit` 未満の 1 ページ目でだけ、ダミー ID を積んで「空と確認済み」を印す | **cutoff に数えない** |
+| list の深さ | 窓の中の最古 (= 最小値) | **位置としての末尾** (下記) |
+| cutoff で切れて 1 ページに満たない | `allowPartial: true` なら、取れた分だけを返す | **`allowPartial` でも DB で埋める** |
+| DB クエリの拡張 | hybrid に `replyUserId = me` | 上の表 (local と、hybrid の home 側の振り分けも) |
+| DB fallback が off | 切らない | 同じ |
+
+**list が無いのを数えないのは、DB の負荷のため。** 自分宛ての返信の list
+(`localTimelineWithReplyTo:<viewer>`) は、返信を受けたことの無い利用者では常に
+無い。数えると、その利用者のログイン中の social / local は 1 ページ目から全て DB へ
+行く。#13495 のダミー ID は DB の結果が `limit` 未満のとき (= その timeline に
+該当する note がほとんど無い小さなインスタンス) にしか積まれないので、実際には
+ほとんど効かない。Elythia でダミー ID を積まないのは、Redis の key を TS 版と
+共有していること (drop-in) と、解決できない ID を読み取りのたびに除去している
+こと (§5 の宙吊り ID 除去) から。代わりに、key だけが失われたとき (Redis の
+eviction など) は、他の list が持っている期間にあったその list の note が抜ける。
+Redis 全体を消したときは全ての list が同じ時点から積み直されるので普通は抜けないが、
+空の key には古い ID も無条件に積まれる (`Push`) ので、最初に積まれたのが遅れて
+届いた古い note だと、その list は実際より深く見え、間が抜けうる。
+
+**list の深さを最小値で測らないのは、遅れて届いた ID のため。** `Push` は 3 分の
+猶予内の ID を時刻に関係なく先頭へ積むので、遅れて届いた古い ID が list の最小値に
+なりうる。最小値で測ると、それより新しく、先に push されて押し出された note の
+期間まで「持っている」ことになる。list は push の順に並ぶので、末尾 (最も前に
+push されて残っている ID) で測ると、欠けうるのは末尾の note 自身の配送の遅れ
+(最大で猶予の 3 分) の間に作られたものだけになる。猶予の分まで新しい側へずらすと
+安全側に倒せるが、LTL の深さが 3 分を切るインスタンス (上限は 200 件固定) では
+1 ページ目から常に DB へ倒れるので、そこまではしない。
+
+**DB fallback が off のときに範囲で切らないのは、切っても取り戻す先が無いため。**
+切ると、深い list にある note まで見えなくなり、timeline が一番浅い list の深さで
+終わる。上のとおり off は group / open で立てたインスタンスの既定なので、切ると
+影響が広い。
+
+**増える DB の読み取り**は、一番浅い list と一番深い list の間の範囲を遡るページに
+限られる。そこは以前 Redis から返していた (抜けを含んだまま) ページで、1 ページ
+あたり social は 2 本 (`ListHomeTimeline` + `ListLocalTimeline`)、local は 1 本の
+クエリになる。自分宛ての返信の list は上限が 20 件と小さいので、返信を多く受ける
+利用者ではこれが一番浅い list になりやすい。返信を受け始めたばかりの利用者も、
+その list が若いので一番浅くなる。1 ページ目が増えるのは、一番浅い list の末尾が
+1 ページ目の範囲に入るときだけ。list の深さが揃っている範囲や、key の無い list が
+あるだけの場合は、従来どおり DB を引かない。広げた DB クエリは、返信を絞る条件に
+OR を足しただけで、行の取り方 (`id` の index を降順に読む) は変わらない
+(`withReplies` 付きのフォローの副問い合わせは 1 回だけ評価される)。
+
+**cutoff で切れたページを DB で埋めるのは、短いページを返さないため。**
+#13495 と同じく取れた分だけを返すと、若い list が 1 本あるだけで (新しい利用者の
+ホームの list など) social の 1 ページ目が数件になる。次のページは cutoff より
+古いので必ず DB へ行くので、ここで埋めても DB の読み取りの回数は変わらない。
+cutoff で切れていないページは、従来どおり `allowPartial` で部分ページを返す。
+
+`sinceId` を含むページングは、もともと全て DB が処理するので変わらない。
 
 ### 対象になる timeline
 

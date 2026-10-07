@@ -165,56 +165,37 @@ func (s *FanoutTimelineService) Get(ctx context.Context, name Name, untilID, sin
 	return filterAndSort(ids, untilID, sinceID, limit), nil
 }
 
-// GetMerged retrieves IDs from multiple timelines and merges them into one
-// de-duplicated list, ordered by the cursor direction.
-//
-// upstream FanoutTimelineEndpointService は redisTimelines に複数キーを渡し、
-// 取得結果をマージして 1 本の timeline として返す。LTL の返信振り分け
-// (localTimeline / WithReplies / WithReplyTo) がこれに当たる。
-func (s *FanoutTimelineService) GetMerged(ctx context.Context, names []Name, untilID, sinceID string, limit int) ([]string, error) {
-	if len(names) == 0 {
-		return nil, nil
-	}
-	if len(names) == 1 {
-		return s.Get(ctx, names[0], untilID, sinceID, limit)
-	}
-	lists, err := s.GetMulti(ctx, names, untilID, sinceID, limit)
-	if err != nil {
-		return nil, err
-	}
-	seen := make(map[string]struct{})
-	merged := make([]string, 0, limit)
-	for _, ids := range lists {
-		for _, id := range ids {
-			if _, dup := seen[id]; dup {
-				continue
-			}
-			seen[id] = struct{}{}
-			merged = append(merged, id)
-		}
-	}
-	// 向きは cursor に従う (#2720)。Get / GetMulti が per-key で ASC を返しても、
-	// ここで降順に並べ直すと昇順ページングで最新 N 件を切り出してしまう。
-	// LocalTimeline はログイン中だとキーが 2 本になるので、この分岐を落とすと
-	// **ログインの有無で向きが変わる**。
-	if isAscending(sinceID, untilID) {
-		sort.Strings(merged)
-	} else {
-		sort.Sort(sort.Reverse(sort.StringSlice(merged)))
-	}
-	// limit<=0 は Get / GetMulti と同じく全件 (timeline service が窓全体を
-	// 1 回で読むときに使う、#3448)。
-	if limit > 0 && len(merged) > limit {
-		merged = merged[:limit]
-	}
-	return merged, nil
-}
-
 // GetMulti retrieves IDs from multiple timelines in a single pipeline call.
 // 戻り値の順序はnamesと同じ。
 func (s *FanoutTimelineService) GetMulti(ctx context.Context, names []Name, untilID, sinceID string, limit int) ([][]string, error) {
+	lists, _, err := s.GetMultiWithTails(ctx, names, untilID, sinceID, limit)
+	return lists, err
+}
+
+// GetMultiWithTails is GetMulti that also reports, for each list, the id at
+// its tail over the whole list, ignoring the cursor window: the oldest
+// entry that was pushed and is still kept. tails[i] is "" when names[i] holds
+// nothing (the key does not exist).
+//
+// tail は「その list がどこまで遡って持っているか」を表す (#3449)。複数の list を
+// 混ぜる timeline は、一番浅い list の tail より古い分を Redis から返せない
+// (coverageCutoff を参照)。窓の中の最古ではなく list 全体の tail を返すのは、
+// 「窓の中は空だが list はある」(= 窓より新しい分しか持っていない) と
+// 「list が無い」を区別するため。
+//
+// **最小値ではなく、位置としての末尾 (最も前に push された要素) を取る。**
+// Push は 3 分の猶予内の ID を時刻に関係なく先頭へ LPUSH するので、遅れて
+// 届いた古い ID は先頭側に入り、list の最小値になりうる。最小値を tail にすると、
+// その ID より新しく、それより前に push されて LTRIM で押し出された note の
+// 期間まで「持っている」ことになり、そこが抜ける。list は push の順に並ぶので、
+// 末尾より後に push された要素だけが残っている。末尾より新しい時刻の note で
+// 欠けうるのは、末尾の要素より前に push されたもの = 末尾の要素自身の配送の
+// 遅れ (猶予の 3 分以内) の間に作られたものだけになる。猶予の分まで新しい側へ
+// ずらすと、LTL の深さが 3 分を切るインスタンス (上限 200 件) では 1 ページ目から
+// 常に DB へ倒れるので、そこまではしない。
+func (s *FanoutTimelineService) GetMultiWithTails(ctx context.Context, names []Name, untilID, sinceID string, limit int) (lists [][]string, tails []string, err error) {
 	if len(names) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	pipe := s.client.Pipeline()
 	cmds := make([]*redis.StringSliceCmd, 0, len(names))
@@ -222,16 +203,22 @@ func (s *FanoutTimelineService) GetMulti(ctx context.Context, names []Name, unti
 		cmds = append(cmds, pipe.LRange(ctx, s.key(n), 0, -1))
 	}
 	if _, err := pipe.Exec(ctx); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	out := make([][]string, 0, len(cmds))
+	lists = make([][]string, 0, len(cmds))
+	tails = make([]string, 0, len(cmds))
 	for _, cmd := range cmds {
 		// pipe.Exec が成功した時点で個々の cmd.Result() は基本的にエラーを返さない。
 		// 万一エラーを返した場合は空スライスとして扱う。
 		ids, _ := cmd.Result()
-		out = append(out, filterAndSort(ids, untilID, sinceID, limit))
+		lists = append(lists, filterAndSort(ids, untilID, sinceID, limit))
+		tail := ""
+		if len(ids) > 0 {
+			tail = ids[len(ids)-1]
+		}
+		tails = append(tails, tail)
 	}
-	return out, nil
+	return lists, tails, nil
 }
 
 // Purge removes the named timeline list.

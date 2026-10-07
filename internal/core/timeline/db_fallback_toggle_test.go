@@ -705,7 +705,7 @@ func TestReadFanout_NonPositiveLimitUsesDefault(t *testing.T) {
 	svc.SetDBFallbackToggle(&fakeDBFallbackToggle{enabled: false})
 	r := fanoutRead{
 		keys:  []Name{HomeTimelineName(dbFallbackViewer.ID)},
-		ids:   func() ([]string, error) { return noteIDs(notes), nil },
+		ids:   func() ([]string, string, error) { return noteIDs(notes), "", nil },
 		db:    func(string, string, int) ([]*model.Note, error) { return nil, errors.New("unexpected db") },
 		gated: true,
 	}
