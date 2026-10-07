@@ -170,6 +170,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 <script lang="ts" setup>
 import { computed, ref, watch } from 'vue';
+import type * as Elythia from 'elythia-js';
 import MkButton from '@/components/MkButton.vue';
 import MkFolder from '@/components/MkFolder.vue';
 import MkInfo from '@/components/MkInfo.vue';
@@ -181,7 +182,6 @@ import MkLoading from '@/components/global/MkLoading.vue';
 import MkTime from '@/components/global/MkTime.vue';
 import { i18n } from '@/i18n.js';
 import { applicationPreviewMessage, applicationPreviewUrl } from '@/utility/emoji-request-preview.js';
-import type { ApplicationPreview } from '@/utility/emoji-request-preview.js';
 import { definePage } from '@/page.js';
 import { misskeyApi } from '@/utility/misskey-api.js';
 import { selectFile, uploadFile } from '@/utility/drive.js';
@@ -191,21 +191,7 @@ import { pickDroppedEmojiImage, droppedEmojiImageErrorText } from '@/utility/emo
 import { emojiApplicationQuotaText, emojiApplicationPendingLimitText } from '@/utility/emoji-application-quota.js';
 import * as os from '@/os.js';
 
-type Application = {
-	id: string;
-	status: 'pending' | 'approved' | 'rejected' | 'canceled';
-	name: string;
-	rejectReason?: string;
-	createdAt: string;
-	processedAt: string | null;
-	// kind = remote (#2935) のときだけ入る。
-	remoteHost?: string;
-	remoteName?: string;
-	// 画像の解決結果 (#2989)。**URL が空かどうかで状態を推測しない** —
-	// 「削除された」「確認できなかった」「承認後の絵文字が消された」は
-	// 出す文面が違う。
-	preview?: ApplicationPreview;
-};
+type Application = Elythia.EmojiApplication;
 
 // upstream の admin/emoji/add と同じ制約。**申請側で先に弾く** — 承認まで
 // 通してから登録で落ちると、モデレーターが押した後にエラーになる。
@@ -401,7 +387,7 @@ async function onDrop(ev: DragEvent) {
 
 async function submit() {
 	try {
-		await misskeyApi('emoji-application/create' as never, {
+		await misskeyApi('emoji-application/create', {
 			name: name.value,
 			category: category.value,
 			aliases: aliases.value.split(/\s+/).filter(a => a !== ''),
@@ -409,7 +395,7 @@ async function submit() {
 			isSensitive: isSensitive.value,
 			fileId: file.value?.id,
 			comment: comment.value,
-		} as never);
+		});
 	} catch (err) {
 		// **エラーの種別をそのまま出す。** 「失敗しました」だけだと、名前を
 		// 直せばよいのか別の問題なのかが分からない。
@@ -471,7 +457,7 @@ async function loadMine() {
 	brokenPreviews.value = new Set();
 	fetching.value = true;
 	try {
-		mine.value = await misskeyApi('emoji-application/list-mine' as never, { limit: 50 } as never) as unknown as Application[];
+		mine.value = await misskeyApi('emoji-application/list-mine', { limit: 50 });
 	} catch {
 		mine.value = [];
 		await os.alert({ type: 'error', text: i18n.ts.somethingHappened });
@@ -487,7 +473,7 @@ async function cancel(app: Application) {
 	});
 	if (canceled) return;
 	try {
-		await misskeyApi('emoji-application/cancel' as never, { applicationId: app.id } as never);
+		await misskeyApi('emoji-application/cancel', { applicationId: app.id });
 	} catch (err) {
 		// 既に審査されていた場合など。黙って一覧を引き直すと「押しても何も
 		// 起きない」ように見える。
