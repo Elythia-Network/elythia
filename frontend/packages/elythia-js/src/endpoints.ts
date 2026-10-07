@@ -153,6 +153,58 @@ export type ElythiaEndpoints = {
 		req: { applicationId: string };
 		res: { ok: true };
 	};
+	'drive/files/create-chunked/abort': {
+		req: { uploadId: string };
+		res: undefined;
+	};
+	'drive/files/create-chunked/append': {
+		/** Sent as multipart/form-data, like `drive/files/create`. */
+		req: {
+			uploadId: string;
+			/**
+			 * The chunk's position, from 0. Chunks must be sent in order; resending
+			 * an accepted index with the same content succeeds again.
+			 */
+			index: number;
+			/**
+			 * Exactly the session's `chunkSize` bytes, except the last chunk, which
+			 * carries the (non-empty) remainder.
+			 */
+			chunk: Blob;
+		};
+		res: {
+			index: number;
+			/** The index the server expects next. */
+			next: number;
+			receivedBytes: number;
+			totalSize: number;
+			completed: boolean;
+		};
+	};
+	'drive/files/create-chunked/finish': {
+		req: { uploadId: string };
+		/** The same shape as `drive/files/create`. */
+		res: Misskey.entities.DriveFile;
+	};
+	'drive/files/create-chunked/start': {
+		req: {
+			/** Trimmed; an empty name or `blob` is then stored as `untitled`. */
+			name?: string;
+			/** The total size in bytes, checked against the size and capacity limits up front. */
+			size: number;
+			comment?: string | null;
+			folderId?: string | null;
+			isSensitive?: boolean;
+			force?: boolean;
+		};
+		res: {
+			uploadId: string;
+			/** Fixed for the session, even if the server setting changes later. */
+			chunkSize: number;
+			totalChunks: number;
+			expiresAt: string;
+		};
+	};
 	'emoji-application/cancel': {
 		req: { applicationId: string };
 		res: undefined;
