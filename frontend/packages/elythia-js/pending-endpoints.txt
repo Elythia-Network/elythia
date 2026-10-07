@@ -17,16 +17,6 @@ admin/roles/assignment-show
 admin/self-check
 admin/server-metrics
 admin/server-plugins
-bubble-game/versus/accept
-bubble-game/versus/cancel
-bubble-game/versus/decline
-bubble-game/versus/history
-bubble-game/versus/invitations
-bubble-game/versus/invite
-bubble-game/versus/record
-bubble-game/versus/report
-bubble-game/versus/set-public
-bubble-game/versus/show
 chat/messages
 chat/messages/create
 chat/messages/reactions/create
