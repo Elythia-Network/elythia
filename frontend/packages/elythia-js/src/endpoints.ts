@@ -5,7 +5,18 @@
  */
 
 import type * as Misskey from 'misskey-js';
-import type { AdminSignupApplication, SignupApplicationView } from './entities.js';
+import type {
+	AdminEmojiApplication,
+	AdminSignupApplication,
+	EmojiApplication,
+	EmojiApplicationPendingLimit,
+	EmojiApplicationQuotaReset,
+	EmojiApplicationQuotaWindow,
+	EmojiApplicationStatus,
+	EmojiApplicationStatusCounts,
+	RelatedEmojiApplication,
+	SignupApplicationView,
+} from './entities.js';
 
 /**
  * Elythia-specific endpoints that misskey-js does not know about.
@@ -15,6 +26,73 @@ import type { AdminSignupApplication, SignupApplicationView } from './entities.j
  * キーは `'<path>': {` の形で 1 行に書く。
  */
 export type ElythiaEndpoints = {
+	'admin/emoji-application/approve': {
+		req: { applicationId: string };
+		res: AdminEmojiApplication;
+	};
+	'admin/emoji-application/list': {
+		req: {
+			/** Defaults to `pending`. `processed` is approved, rejected and canceled. */
+			filter?: 'all' | 'pending' | 'processed';
+			/** Defaults to 30 (also when out of 1-100). */
+			limit?: number;
+			/** `null` is the same as omitting it. */
+			untilId?: string | null;
+		};
+		res: AdminEmojiApplication[];
+	};
+	'admin/emoji-application/list-by-user': {
+		req: {
+			userId: string;
+			/** Defaults to all. An unknown value is rejected. */
+			status?: 'all' | EmojiApplicationStatus;
+			query?: string;
+			/** Defaults to 30 (also when out of 1-100). */
+			limit?: number;
+			/** `null` is the same as omitting it. */
+			untilId?: string | null;
+		};
+		res: { items: AdminEmojiApplication[] };
+	};
+	'admin/emoji-application/reject': {
+		req: {
+			applicationId: string;
+			reason?: string;
+		};
+		res: AdminEmojiApplication;
+	};
+	'admin/emoji-application/related': {
+		req: {
+			applicationId: string;
+			/** Defaults to 10 (also when out of 1-100). */
+			limit?: number;
+			/** `null` is the same as omitting it. */
+			untilId?: string | null;
+		};
+		res: {
+			/** Counts every related application, not only the returned page. */
+			counts: EmojiApplicationStatusCounts;
+			items: RelatedEmojiApplication[];
+		};
+	};
+	'admin/emoji-application/reset-user-quota': {
+		req: {
+			userId: string;
+			/** Required; kept in the moderation log. */
+			reason: string;
+		};
+		res: { lastReset: EmojiApplicationQuotaReset };
+	};
+	'admin/emoji-application/user-summary': {
+		req: { userId: string };
+		res: {
+			counts: EmojiApplicationStatusCounts;
+			windows: EmojiApplicationQuotaWindow[];
+			pending: EmojiApplicationPendingLimit;
+			/** `null` when the limit has never been reset, or the reset could not be looked up. */
+			lastReset: EmojiApplicationQuotaReset | null;
+		};
+	};
 	'admin/signup-application/approve': {
 		req: { applicationId: string };
 		res: { ok: true };
@@ -36,6 +114,39 @@ export type ElythiaEndpoints = {
 	'admin/signup-application/reject': {
 		req: { applicationId: string };
 		res: { ok: true };
+	};
+	'emoji-application/cancel': {
+		req: { applicationId: string };
+		res: undefined;
+	};
+	'emoji-application/create': {
+		req: {
+			name: string;
+			/** Defaults to `own`. */
+			kind?: 'own' | 'remote';
+			/** Required when `kind` is `own`. */
+			license?: string;
+			comment?: string;
+			/** Required when `kind` is `own`. */
+			fileId?: string;
+			category?: string;
+			aliases?: string[];
+			isSensitive?: boolean;
+			/** Required when `kind` is `remote`. */
+			remoteHost?: string;
+			/** Required when `kind` is `remote`. */
+			remoteName?: string;
+		};
+		res: EmojiApplication;
+	};
+	'emoji-application/list-mine': {
+		req: {
+			/** Defaults to 30 (also when out of 1-100). */
+			limit?: number;
+			/** `null` is the same as omitting it. */
+			untilId?: string | null;
+		};
+		res: EmojiApplication[];
 	};
 	'signup-application/apply': {
 		req: {

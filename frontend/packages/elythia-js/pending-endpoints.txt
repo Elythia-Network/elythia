@@ -3,13 +3,6 @@
 # TestElythiaJS_EndpointsMatchRouter が docs/api-compat.md の一覧と突き合わせる。
 admin/database-health
 admin/drive/usage
-admin/emoji-application/approve
-admin/emoji-application/list
-admin/emoji-application/list-by-user
-admin/emoji-application/reject
-admin/emoji-application/related
-admin/emoji-application/reset-user-quota
-admin/emoji-application/user-summary
 admin/emoji/fetch-remote-meta
 admin/federation/check-host
 admin/federation/clean-gone-instance
@@ -58,9 +51,6 @@ drive/files/create-chunked/abort
 drive/files/create-chunked/append
 drive/files/create-chunked/finish
 drive/files/create-chunked/start
-emoji-application/cancel
-emoji-application/create
-emoji-application/list-mine
 i/flashs
 i/flashs/likes
 roles/assignment-show
