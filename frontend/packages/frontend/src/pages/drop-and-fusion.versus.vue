@@ -144,8 +144,9 @@ import * as os from '@/os.js';
 import { useRouter } from '@/router.js';
 import { useInterval } from '@@/js/use-interval.js';
 import { useStream } from '@/stream.js';
+import { misskeyApi } from '@/utility/misskey-api.js';
 import { dropAndFusionModeLabel } from '@/utility/drop-and-fusion-mode.js';
-import { connectVersusMatch, versusApi } from '@/utility/bubble-versus.js';
+import { connectVersusMatch } from '@/utility/bubble-versus.js';
 import { versusOutcomeLabel, versusReasonLabel } from '@/utility/bubble-versus-labels.js';
 import type { VersusBoardState, VersusConnection, VersusMatch, VersusReport, VersusStarted } from '@/utility/bubble-versus.js';
 import {
@@ -217,7 +218,8 @@ const reasonLabel = computed(() => versusReasonLabel(match.value?.reason));
 
 async function fetchMatch() {
 	try {
-		match.value = await versusApi<VersusMatch>('show', { matchId: props.matchId });
+		const res = await misskeyApi('bubble-game/versus/show', { matchId: props.matchId });
+		match.value = res;
 	} catch (err: any) {
 		// 一時的な失敗で「期限切れ」と出さない。取れていた対局はそのまま見せる。
 		if (err?.code === 'NO_SUCH_MATCH') loadFailed.value = 'notFound';
@@ -341,7 +343,8 @@ async function sendReport() {
 	try {
 		for (let attempt = 0; attempt < REPORT_RETRY_DELAYS_MS.length + 1; attempt++) {
 			try {
-				match.value = await versusApi<VersusMatch>('report', { matchId: props.matchId, ...report });
+				const res = await misskeyApi('bubble-game/versus/report', { matchId: props.matchId, ...report });
+				match.value = res;
 				reported = true;
 				pendingReport.value = null;
 				return;
@@ -364,16 +367,16 @@ async function sendReport() {
 }
 
 async function accept() {
-	match.value = await os.apiWithDialog('bubble-game/versus/accept' as never, { matchId: props.matchId } as never) as VersusMatch;
+	match.value = await os.apiWithDialog('bubble-game/versus/accept', { matchId: props.matchId });
 }
 
 async function decline() {
-	await os.apiWithDialog('bubble-game/versus/decline' as never, { matchId: props.matchId } as never);
+	await os.apiWithDialog('bubble-game/versus/decline', { matchId: props.matchId });
 	leave();
 }
 
 async function cancel() {
-	await os.apiWithDialog('bubble-game/versus/cancel' as never, { matchId: props.matchId } as never);
+	await os.apiWithDialog('bubble-game/versus/cancel', { matchId: props.matchId });
 	leave();
 }
 
@@ -384,7 +387,7 @@ function setReady(ready: boolean) {
 async function surrenderFromLobby() {
 	const { canceled } = await os.confirm({ type: 'warning', text: i18n.ts.areYouSure });
 	if (canceled) return;
-	match.value = await os.apiWithDialog('bubble-game/versus/report' as never, {
+	match.value = await os.apiWithDialog('bubble-game/versus/report', {
 		matchId: props.matchId,
 		score: 0,
 		frame: 0,
@@ -392,7 +395,7 @@ async function surrenderFromLobby() {
 		logs: [],
 		// mk-go (#3232): 記録は空でも版は付ける (付けないと「別の版」と区別できない)。
 		gameVersion: DropAndFusionGame.VERSION,
-	} as never) as VersusMatch;
+	});
 }
 
 function leave() {

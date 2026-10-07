@@ -63,7 +63,6 @@ import * as os from '@/os.js';
 import { useRouter } from '@/router.js';
 import { misskeyApi } from '@/utility/misskey-api.js';
 import { dropAndFusionModeLabel } from '@/utility/drop-and-fusion-mode.js';
-import { versusApi } from '@/utility/bubble-versus.js';
 import type { VersusRecord, VersusRecordResult } from '@/utility/bubble-versus.js';
 import { versusOutcomeLabel, versusReasonLabel } from '@/utility/bubble-versus-labels.js';
 import { outcomeFor } from '@/utility/bubble-versus-rules.js';
@@ -106,11 +105,14 @@ function myPublic(r: VersusRecord): boolean {
 }
 
 async function fetchPage(untilId?: string): Promise<VersusRecord[]> {
-	return versusApi<VersusRecord[]>('history', {
+	// misskeyApi は応答の型を代入先から推論するので、直接代入すると応答の型が
+	// 検査されない。いったん注釈の無い const で受ける
+	const page = await misskeyApi('bubble-game/versus/history', {
 		...(props.userId != null ? { userId: props.userId } : {}),
 		limit: PAGE_SIZE,
 		...(untilId != null ? { untilId } : {}),
 	});
+	return page;
 }
 
 async function load() {
@@ -141,7 +143,7 @@ async function loadMore() {
 
 async function setPublic(r: VersusRecord, isPublic: boolean) {
 	try {
-		await versusApi('set-public', { matchId: r.id, isPublic });
+		await misskeyApi('bubble-game/versus/set-public', { matchId: r.id, isPublic });
 	} catch {
 		os.toast(i18n.ts._mkgoBubbleGame._versus.operationFailed);
 		return;
