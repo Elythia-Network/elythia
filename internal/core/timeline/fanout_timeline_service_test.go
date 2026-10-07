@@ -404,38 +404,40 @@ func TestFanoutTimelineService_PushOldNoteWithTrim(t *testing.T) {
 	require.NoError(t, svc.Push(ctx, LocalTimeline, noteID, 5))
 }
 
-// TestFanoutTimelineService_GetMergedDirection は GetMerged の向きを固定する。
+// TestService_MergedWithCutoffDirection は複数の list を混ぜたときの向きを固定する。
 //
 // **endpoint 経路からは到達しない** — shouldFallbackToDB が sinceId 付きを
 // 全て DB へ倒すため。それでもユニットとして固定するのは、Get / GetMulti が
 // per-key で ASC を返したものをここで降順に並べ直すと、LocalTimeline が
 // ログインの有無でキー数を変える (1 本 or 2 本) ぶん**向きが変わる**ため。
-func TestFanoutTimelineService_GetMergedDirection(t *testing.T) {
+func TestService_MergedWithCutoffDirection(t *testing.T) {
 	testutil.SkipIfNoDocker(t)
 	ctx := context.Background()
 	testRedis.FlushAll(ctx)
 
-	svc := NewFanoutTimelineService(testRedis.Client, idGen, "")
-	svc.randFn = func() float64 { return 1.0 }
+	fanout := NewFanoutTimelineService(testRedis.Client, idGen, "")
+	fanout.randFn = func() float64 { return 1.0 }
+	svc := NewService(fanout, testutil.NewMockNoteRepository(), testutil.NewMockFollowingRepository())
 	now := time.Now()
 	ids := make([]string, 4)
 	for i := range ids {
 		ids[i] = idGen.Generate(now.Add(time.Duration(i) * time.Millisecond))
 	}
-	// 2 キーに分けて積む (1 キーだと Get に委譲されて GetMerged を通らない)。
-	require.NoError(t, svc.Push(ctx, LocalTimeline, ids[1], 100))
-	require.NoError(t, svc.Push(ctx, LocalTimeline, ids[3], 100))
-	require.NoError(t, svc.Push(ctx, GlobalTimeline, ids[2], 100))
+	// 2 キーに分けて積む。
+	require.NoError(t, fanout.Push(ctx, LocalTimeline, ids[1], 100))
+	require.NoError(t, fanout.Push(ctx, LocalTimeline, ids[3], 100))
+	require.NoError(t, fanout.Push(ctx, GlobalTimeline, ids[2], 100))
 
 	keys := []Name{LocalTimeline, GlobalTimeline}
 
-	// sinceId 単独 → ASC で最古 2 件。
-	out, err := svc.GetMerged(ctx, keys, "", ids[0], 2)
+	// sinceId 単独 → ASC。
+	out, cutoff, err := svc.mergedWithCutoff(ctx, keys, "", ids[0])
 	require.NoError(t, err)
-	assert.Equal(t, []string{ids[1], ids[2]}, out, "昇順は最古 N 件")
+	assert.Equal(t, []string{ids[1], ids[2], ids[3]}, out, "昇順は古い順")
+	assert.Equal(t, ids[2], cutoff, "各 list の最古のうち一番新しいもの")
 
 	// untilId 単独 → 従来どおり DESC。
-	out, err = svc.GetMerged(ctx, keys, ids[3], "", 2)
+	out, _, err = svc.mergedWithCutoff(ctx, keys, ids[3], "")
 	require.NoError(t, err)
-	assert.Equal(t, []string{ids[2], ids[1]}, out, "降順は最新 N 件")
+	assert.Equal(t, []string{ids[2], ids[1]}, out, "降順は新しい順")
 }
