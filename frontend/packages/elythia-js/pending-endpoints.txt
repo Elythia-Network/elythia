@@ -10,11 +10,6 @@ admin/federation/close-delivery-breaker
 admin/federation/delivery-health
 admin/federation/gone-instances
 admin/federation/inbox-health
-admin/federation/rules/create
-admin/federation/rules/delete
-admin/federation/rules/hits
-admin/federation/rules/list
-admin/federation/rules/update
 admin/ip/accounts
 admin/ip/lookup-log
 admin/ip/related-accounts

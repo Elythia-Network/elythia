@@ -14,9 +14,20 @@ import type {
 	EmojiApplicationQuotaWindow,
 	EmojiApplicationStatus,
 	EmojiApplicationStatusCounts,
+	FederationRule,
+	FederationRuleBody,
+	FederationRuleHit,
 	RelatedEmojiApplication,
 	SignupApplicationView,
 } from './entities.js';
+
+/**
+ * The body of federation rules create and update.
+ *
+ * 省いた項目はゼロ値 (空文字列・0・空の配列・false・null) として読まれる。mode と target は
+ * ゼロ値だと弾かれるので必須にしてある。
+ */
+type FederationRuleRequest = Partial<FederationRuleBody> & Pick<FederationRuleBody, 'mode' | 'target'>;
 
 /**
  * Elythia-specific endpoints that misskey-js does not know about.
@@ -92,6 +103,33 @@ export type ElythiaEndpoints = {
 			/** `null` when the limit has never been reset, or the reset could not be looked up. */
 			lastReset: EmojiApplicationQuotaReset | null;
 		};
+	};
+	'admin/federation/rules/create': {
+		req: FederationRuleRequest;
+		res: FederationRule;
+	};
+	'admin/federation/rules/delete': {
+		req: { ruleId: string };
+		res: undefined;
+	};
+	'admin/federation/rules/hits': {
+		req: {
+			ruleId: string;
+			/** Defaults to 50, the most kept (also when out of 1-50). */
+			limit?: number;
+		};
+		/** Newest first. */
+		res: FederationRuleHit[];
+	};
+	'admin/federation/rules/list': {
+		req: Misskey.entities.EmptyRequest;
+		/** In evaluation order. */
+		res: FederationRule[];
+	};
+	'admin/federation/rules/update': {
+		/** Replaces the whole rule; an omitted field is cleared, not kept. */
+		req: FederationRuleRequest & { ruleId: string };
+		res: FederationRule;
 	};
 	'admin/signup-application/approve': {
 		req: { applicationId: string };

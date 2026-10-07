@@ -189,4 +189,62 @@ export type EmojiApplicationQuotaReset = {
 	reason: string;
 };
 
+/**
+ * How a federation rule acts: `disabled` is not evaluated, `record` only
+ * records matches, and `enforce` also applies the actions.
+ */
+export type FederationRuleMode = 'disabled' | 'record' | 'enforce';
+
+/** Whether a federation rule looks at incoming notes or at activities. */
+export type FederationRuleTarget = 'note' | 'activity';
+
+/**
+ * The editable part of a federation rule.
+ *
+ * `null` の条件は「問わない」。activity のルールは投稿の中身の条件と書き換えを
+ * 持てない (サーバーが弾く)。
+ */
+export type FederationRuleBody = {
+	name: string;
+	mode: FederationRuleMode;
+	target: FederationRuleTarget;
+	/** The evaluation order, from 0. */
+	position: number;
+	hosts: string[];
+	activityTypes: string[];
+	isBot: boolean | null;
+	newWithinHours: number | null;
+	patterns: string[];
+	hasAttachment: boolean | null;
+	tags: string[];
+	reject: boolean;
+	stripMedia: boolean;
+	sensitive: boolean;
+	unlist: boolean;
+	cw: string | null;
+};
+
+export type FederationRule = FederationRuleBody & {
+	id: string;
+	createdAt: string;
+	updatedAt: string;
+	/** Matches in the last 24 hours. Always 0 in the responses of create and update. */
+	hits: number;
+};
+
+/** One note or activity that matched a federation rule. */
+export type FederationRuleHit = {
+	ruleId: string;
+	host: string;
+	subject: string;
+	/**
+	 * The activity type as received, or `Note` / `Update` for a note (a new note
+	 * or an edit).
+	 */
+	kind: string;
+	/** Whether the actions were applied (the rule was enforced). */
+	applied: boolean;
+	at: string;
+};
+
 export type MetaDetailed = Misskey.entities.MetaDetailed & ElythiaMetaFields;
