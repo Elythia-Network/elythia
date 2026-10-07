@@ -144,7 +144,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 <script lang="ts" setup>
 import { computed, ref } from 'vue';
-import type * as Misskey from 'misskey-js';
+import type * as Elythia from 'elythia-js';
 import MkButton from '@/components/MkButton.vue';
 import MkInfo from '@/components/MkInfo.vue';
 import MkKeyValue from '@/components/MkKeyValue.vue';
@@ -162,51 +162,11 @@ const props = defineProps<{ userId: string }>();
 // full path で key するので、別の利用者へ移ると component ごと作り直される。
 // その前提が変わったら、ここで検索結果を捨てる必要がある。
 
-type SharedIP = {
-	ip: string;
-	targetLastSeenAt: string;
-	candidateLastSeenAt: string;
-	ipAccountCount: number;
-	// **正確な数とは限らない。** 上限まで見えたときは「これ以上」を意味する。
-	ipAccountCountIsLowerBound: boolean;
-	// 減衰に使った経過日数。重みそのものは [0,1] でパーセントと見分けが付かない。
-	elapsedDays: number;
-};
-
-type RelatedCandidate = {
-	user: Misskey.entities.UserLite;
-	isSuspended: boolean;
-	isDeleted: boolean;
-	lastActiveDate: string | null;
-	sharedIpCount: number;
-	score: number;
-	sharedIps: SharedIP[];
-};
-
-type RelatedResponse = {
-	user: Misskey.entities.UserLite;
-	loggingEnabled: boolean;
-	hasAnyHistory: boolean;
-	sinceDays: number;
-	retentionDays: number;
-	halfLifeDays: number;
-	targetIpCount: number;
-	truncated: boolean;
-	// **原因ごとに分かれている。両方立つことがある。** 起点を切ったなら期間を
-	// 絞れば絞り込めるが、候補側の打ち切りはどうにもならない。
-	targetIpsTruncated: boolean;
-	candidatesTruncated: boolean;
-	limit: number;
-	offset: number;
-	hasMore: boolean;
-	droppedCount: number;
-	candidates: RelatedCandidate[];
-};
-
-// mk-go 独自の endpoint なので misskey-js の型集合には無い。
-function api<T>(endpoint: string, params: Record<string, unknown> = {}): Promise<T> {
-	return misskeyApi(endpoint as never, params as never) as unknown as Promise<T>;
-}
+// 共有 IP の ipAccountCount は正確な数とは限らない。上限まで見えたとき
+// (ipAccountCountIsLowerBound) は「これ以上」を意味する。打ち切り
+// (targetIpsTruncated / candidatesTruncated) は原因ごとに分かれ、両方立つことがある。
+type RelatedCandidate = Elythia.IPRelatedCandidate;
+type RelatedResponse = Elythia.IPRelatedAccountsResult;
 
 const loading = ref(false);
 const loadingMore = ref(false);
@@ -322,7 +282,7 @@ async function search(offset: number) {
 		loadingMore.value = true;
 	}
 	try {
-		const res = await api<RelatedResponse>('admin/ip/related-accounts', {
+		const res = await misskeyApi('admin/ip/related-accounts', {
 			userId: props.userId,
 			sinceDays: days,
 			offset,

@@ -151,6 +151,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 <script lang="ts" setup>
 import { computed, ref, watch } from 'vue';
+import type * as Elythia from 'elythia-js';
 import MkInput from '@/components/MkInput.vue';
 import MkSelect from '@/components/MkSelect.vue';
 import MkFolder from '@/components/MkFolder.vue';
@@ -167,10 +168,7 @@ import { useMkSelect } from '@/composables/use-mkselect.js';
 // **送信側と受信側で class は完全に別物。** 重なるものは 1 つも無い。
 // 送信は internal/core/deliveryhealth/outcome.go の 6 種、受信は
 // inbound.go の 8 種で、後者は inbox processor の分岐をそのまま写している。
-type DeliverClass = 'success' | 'gone' | 'rateLimited' | 'clientError' | 'serverError' | 'transport';
-type InboxClass = 'accepted' | 'unsupported' | 'signatureFailed' | 'blocked'
-	| 'actorUnauthorized' | 'ldSignatureFailed' | 'processingError' | 'duplicate';
-type OutcomeClass = DeliverClass | InboxClass;
+type OutcomeClass = Elythia.DeliveryOutcomeClass | Elythia.InboxOutcomeClass;
 
 // **「失敗 = 赤」ではない。** backend が success 側に数えるかどうかと、
 // 運営者が対処すべきかどうかは別。unsupported / duplicate は相手が正しく
@@ -196,44 +194,11 @@ const TONE: Record<OutcomeClass, 'ok' | 'warn' | 'error'> = {
 	processingError: 'error',
 };
 
-type HostHealth = {
-	host: string;
-	success: number;
-	failure: number;
-	byClass: Partial<Record<OutcomeClass, number>>;
-	// ヒストグラムの近似。該当バケットの上限を返し、最上位 (+Inf) は -1。
-	latencyP50Ms: number;
-	latencyP95Ms: number;
-	lastError?: {
-		at: string;
-		class: OutcomeClass;
-		status: number;
-		message: string;
-	};
-};
+// 遅延の p50 / p95 はヒストグラムの近似。該当バケットの上限を返し、最上位 (+Inf) は -1。
+type HostHealth = Elythia.FederationHostHealth;
 
-// mk-go: 配送を止めている相手 (#3048)。internal/core/deliveryhealth/breaker.go の
-// BreakerState。
-type BreakerState = {
-	host: string;
-	// 開いている (配送を止めている) か。false なら 429 で間隔を空けているか、待たせた分を送っているだけ。
-	open: boolean;
-	consecutiveFailures: number;
-	openedAt: string | null;
-	nextProbeAt: string | null;
-	probeIntervalSeconds: number;
-	throttledUntil: string | null;
-	// 429 で待たせた配送の最後の予約時刻 (送り終わる見込み)。
-	reservedUntil: string | null;
-};
-
-type HealthResponse = {
-	windowSeconds: number;
-	hosts: HostHealth[];
-	evictedHosts: number;
-	// 古い backend (#3048 より前) と受信側には無いか空。
-	breakers?: BreakerState[];
-};
+// mk-go: 配送を止めている相手 (#3048)。受信側 (inbox-health) では常に空。
+type BreakerState = Elythia.DeliveryBreakerState;
 
 const props = defineProps<{
 	direction: 'deliver' | 'inbox';
@@ -350,12 +315,10 @@ async function fetchHealth() {
 		? 'admin/federation/delivery-health'
 		: 'admin/federation/inbox-health';
 	try {
-		// endpoint 名の cast は misskey-js の型に存在しないため。mk-go 独自
-		// endpoint を呼ぶ以上避けられない (overview.mkgo.vue と同じ扱い)。
-		const res = await misskeyApi(endpoint as never, { windowSeconds: windowSeconds.value } as never) as unknown as HealthResponse;
-		hosts.value = res.hosts ?? [];
-		evictedHosts.value = res.evictedHosts ?? 0;
-		breakers.value = res.breakers ?? [];
+		const res = await misskeyApi(endpoint, { windowSeconds: windowSeconds.value });
+		hosts.value = res.hosts;
+		evictedHosts.value = res.evictedHosts;
+		breakers.value = res.breakers;
 		unavailable.value = false;
 	} catch {
 		hosts.value = [];
@@ -391,7 +354,7 @@ async function closeBreaker(host: string) {
 	if (canceled) return;
 	closing.value = host;
 	try {
-		await os.apiWithDialog('admin/federation/close-delivery-breaker' as never, { host } as never);
+		await os.apiWithDialog('admin/federation/close-delivery-breaker', { host });
 		await fetchHealth();
 	} finally {
 		closing.value = null;

@@ -61,6 +61,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 <script lang="ts" setup>
 import { ref } from 'vue';
+import type * as Elythia from 'elythia-js';
 import MkFolder from '@/components/MkFolder.vue';
 import MkInfo from '@/components/MkInfo.vue';
 import { misskeyApi } from '@/utility/misskey-api.js';
@@ -68,39 +69,9 @@ import { i18n } from '@/i18n.js';
 import bytes from '@/filters/bytes.js';
 import number from '@/filters/number.js';
 
-// mk-go: admin/database-health の応答。misskey-js の型に無いので手で持つ。
-type Report = {
-	generatedAt: string;
-	statsReset: string | null;
-	replicasConfigured: boolean;
-	unusedIndexes: {
-		table: string;
-		index: string;
-		scans: number;
-		sizeBytes: number;
-		unique: boolean;
-		primary: boolean;
-	}[];
-	tables: {
-		table: string;
-		liveRows: number;
-		deadRows: number;
-		deadRatio: number;
-		// 一度も VACUUM / ANALYZE されていないテーブルは null (0 と出すと空に見える)。
-		sizeBytes: number | null;
-		lastVacuum: string | null;
-		lastAnalyze: string | null;
-		modifiedSinceAnalyze: number;
-		vacuuming: boolean;
-	}[];
-	// 肥大・VACUUM の遅れの判定結果。判定は backend だけが持つ (閾値を画面へ
-	// 書き写すと self-check と食い違う)。
-	problems: {
-		table: string;
-		kind: 'bloat' | 'vacuum';
-		detail: string;
-	}[];
-};
+// mk-go: admin/database-health の応答。肥大・VACUUM の遅れの判定 (problems) は
+// backend だけが持つ (閾値を画面へ書き写すと self-check と食い違う)。
+type Report = Elythia.DatabaseHealthReport;
 
 const report = ref<Report | null>(null);
 // 取得できなかったときのサーバーのエラーの文言。「非対応」とまとめて出すと、
@@ -113,8 +84,8 @@ function problemsOf(table: string): Report['problems'] {
 
 async function fetchReport(): Promise<void> {
 	try {
-		// endpoint 名の cast は misskey-js の型に存在しないため (mk-go 独自)。
-		report.value = await misskeyApi('admin/database-health' as never, {} as never) as unknown as Report;
+		const res = await misskeyApi('admin/database-health', {});
+		report.value = res;
 	} catch (err) {
 		error.value = (err as { message?: string } | null)?.message ?? String(err);
 	}

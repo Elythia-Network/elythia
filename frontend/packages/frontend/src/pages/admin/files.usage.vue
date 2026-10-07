@@ -95,6 +95,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 <script lang="ts" setup>
 import { computed, onMounted, ref } from 'vue';
+import type * as Elythia from 'elythia-js';
 import MkButton from '@/components/MkButton.vue';
 import MkFolder from '@/components/MkFolder.vue';
 import MkInfo from '@/components/MkInfo.vue';
@@ -104,32 +105,9 @@ import { i18n } from '@/i18n.js';
 import { dateString } from '@/filters/date.js';
 import { misskeyApi } from '@/utility/misskey-api.js';
 
-// mk-go 独自の admin/drive/usage (#3053)。純正 backend には無いので
-// misskey-js の型にも載らない。overview.mkgo.vue と同じくローカル型で受ける。
-type UsageBucket = {
-	count: number;
-	size: number;
-	// linkCount は実体を持たない行 (isLink) の数。mk-go はリモートメディアを
-	// キャッシュしないので、リモート側は count と一致し size は 0 になる。
-	linkCount: number;
-};
-
-type DriveUsage = {
-	calculatedAt: string;
-	elapsedMs: number;
-	cached: boolean;
-	cacheTtlSeconds: number;
-	topLimit: number;
-	// source は数字の出所。今は 'database' だけで、DB が把握している量であって
-	// object storage の実使用量ではないことを示す。
-	source: string;
-	total: UsageBucket;
-	local: UsageBucket;
-	remote: UsageBucket;
-	byKind: (UsageBucket & { kind: string; origin: string })[];
-	byHost: (UsageBucket & { host: string })[];
-	byUser: (UsageBucket & { userId: string; username: string })[];
-};
+// mk-go 独自の admin/drive/usage (#3053)。数字は DB が把握している量で、
+// object storage の実使用量ではない (source が 'database')。
+type DriveUsage = Elythia.DriveUsage;
 
 const usage = ref<DriveUsage | null>(null);
 const loading = ref(true);
@@ -167,7 +145,8 @@ function kindLabel(kind: string): string {
 
 async function load(forceRecalc: boolean) {
 	try {
-		usage.value = await misskeyApi('admin/drive/usage' as never, { forceRecalc } as never) as unknown as DriveUsage;
+		const res = await misskeyApi('admin/drive/usage', { forceRecalc });
+		usage.value = res;
 		failed.value = false;
 	} catch {
 		// 純正 backend では endpoint ごと存在しない。集計に失敗したときも 500 が

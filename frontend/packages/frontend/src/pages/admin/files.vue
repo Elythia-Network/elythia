@@ -92,8 +92,8 @@ const remoteUsage = ref<RemoteUsageBucket | null>(null);
 
 onMounted(async () => {
 	try {
-		const usage = await misskeyApi('admin/drive/usage' as never, {} as never) as unknown as { remote?: RemoteUsageBucket };
-		remoteUsage.value = usage.remote ?? null;
+		const usage = await misskeyApi('admin/drive/usage', {});
+		remoteUsage.value = usage.remote;
 	} catch {
 		// 取れなくてもボタンは出す (上記の理由)。使用量タブ側が理由を表示する。
 		remoteUsage.value = null;

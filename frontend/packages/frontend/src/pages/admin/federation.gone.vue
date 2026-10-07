@@ -31,6 +31,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 <script lang="ts" setup>
 import { ref } from 'vue';
+import type * as Elythia from 'elythia-js';
 import MkButton from '@/components/MkButton.vue';
 import MkInfo from '@/components/MkInfo.vue';
 import * as os from '@/os.js';
@@ -38,23 +39,9 @@ import { misskeyApi } from '@/utility/misskey-api.js';
 import { i18n } from '@/i18n.js';
 import number from '@/filters/number.js';
 
-// mk-go: admin/federation/gone-instances の要素。misskey-js の型に無いので手で持つ。
-type GoneInstance = {
-	host: string;
-	// 消えたと判定した時刻。TS が立てた停止など記録が無いものは null。
-	suspendedAt: string | null;
-	followers: number;
-	following: number;
-	followRequests: number;
-};
-
-type CleanResult = {
-	host: string;
-	removedFollowers: number;
-	removedFollowing: number;
-	removedFollowRequests: number;
-	remaining: number;
-};
+// mk-go: admin/federation/gone-instances の要素。suspendedAt は、TS が立てた停止など
+// 記録が無いものでは null。
+type GoneInstance = Elythia.GoneInstance;
 
 const items = ref<GoneInstance[]>([]);
 const loading = ref(true);
@@ -67,8 +54,8 @@ function total(g: GoneInstance): number {
 
 async function fetchList(): Promise<void> {
 	try {
-		// endpoint 名の cast は misskey-js の型に存在しないため (mk-go 独自)。
-		items.value = await misskeyApi('admin/federation/gone-instances' as never, {} as never) as unknown as GoneInstance[];
+		const res = await misskeyApi('admin/federation/gone-instances', {});
+		items.value = res;
 		unavailable.value = false;
 	} catch {
 		unavailable.value = true;
@@ -90,7 +77,7 @@ async function clean(g: GoneInstance): Promise<void> {
 	if (canceled) return;
 	cleaning.value = g.host;
 	try {
-		const res = await misskeyApi('admin/federation/clean-gone-instance' as never, { host: g.host } as never) as unknown as CleanResult;
+		const res = await misskeyApi('admin/federation/clean-gone-instance', { host: g.host });
 		let text = i18n.tsx._goneInstances.cleaned({
 			followers: number(res.removedFollowers),
 			following: number(res.removedFollowing),

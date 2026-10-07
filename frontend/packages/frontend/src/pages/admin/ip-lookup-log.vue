@@ -117,7 +117,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 <script lang="ts" setup>
 import { computed, onMounted, ref } from 'vue';
-import type * as Misskey from 'misskey-js';
+import type * as Elythia from 'elythia-js';
 import MkButton from '@/components/MkButton.vue';
 import MkFolder from '@/components/MkFolder.vue';
 import MkInfo from '@/components/MkInfo.vue';
@@ -129,31 +129,8 @@ import number from '@/filters/number.js';
 import { misskeyApi } from '@/utility/misskey-api.js';
 import { ipSearchErrorKind } from '@/utility/ip-search-result.js';
 
-type IPLookupLogEntry = {
-	id: string;
-	user: Misskey.entities.UserLite | null;
-	userId: string;
-	kind: string;
-	ip: string;
-	targetUser: Misskey.entities.UserLite | null;
-	targetUserId: string;
-	sinceDays: number;
-	resultCount: number;
-	createdAt: string;
-};
-
-type IPLookupLogResponse = {
-	retentionDays: number;
-	limit: number;
-	offset: number;
-	hasMore: boolean;
-	entries: IPLookupLogEntry[];
-};
-
-// mk-go 独自のエンドポイントなので misskey-js の型集合には無い (ip-search.vue と同じ cast)。
-function api<T>(endpoint: string, params: Record<string, unknown> = {}): Promise<T> {
-	return misskeyApi(endpoint as never, params as never) as unknown as Promise<T>;
-}
+type IPLookupLogEntry = Elythia.IPLookupLogEntry;
+type IPLookupLogResponse = Elythia.IPLookupLogResult;
 
 const loading = ref(true);
 const loadingMore = ref(false);
@@ -185,7 +162,7 @@ async function load(offset: number) {
 		loadingMore.value = true;
 	}
 	try {
-		const res = await api<IPLookupLogResponse>('admin/ip/lookup-log', { offset });
+		const res = await misskeyApi('admin/ip/lookup-log', { offset });
 		if (gen !== generation) return;
 		result.value = res;
 		// **追記のときは id で重複を落とす。** offset ページングなので、ページを

@@ -76,6 +76,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 <script lang="ts" setup>
 import { computed } from 'vue';
+import type * as Elythia from 'elythia-js';
 import MkKeyValue from '@/components/MkKeyValue.vue';
 import MkFolder from '@/components/MkFolder.vue';
 import MkInfo from '@/components/MkInfo.vue';
@@ -84,26 +85,12 @@ import { definePage } from '@/page.js';
 import { collectPages } from '@/plugin-api.js';
 import { serverPlugins } from '@/server-plugins.generated.js';
 
-type ServerPluginInfo = {
-	name: string;
-	version: string;
-	apiVersion: number;
-	enabled: boolean;
-	routes: boolean;
-	jobs: boolean;
-	migrations: number;
-	schema: string;
-	configKeys: string[];
-};
+type ServerPluginInfo = Elythia.ServerPluginInfo;
 
-type ServerPluginsResponse = {
-	plugins: ServerPluginInfo[];
-	orphanSchemas: string[] | null;
-};
-
-// mk-go 独自のエンドポイントなので misskey-js の型集合には無い。
-// plugin-api.ts の api() と同じ理由の cast。
-const fetchPlugins = () => misskeyApi('admin/server-plugins' as never, {} as never) as unknown as Promise<ServerPluginsResponse>;
+async function fetchPlugins() {
+	const res = await misskeyApi('admin/server-plugins', {});
+	return res;
+}
 
 function hasFrontend(name: string): boolean {
 	return serverPlugins.some(sp => sp.name === name);
