@@ -91,25 +91,11 @@ SPDX-License-Identifier: AGPL-3.0-only
 </template>
 
 <script lang="ts">
-// mk-go: admin/federation/rules/* の要素。misskey-js の型に無いので手で持つ。
-export type FederationRule = {
+// admin/federation/rules/* の要素 (型は elythia-js)。新しいルールの下書きは
+// 保存するまで id を持たないので、id を null にできる形にする。import にすると
+// setup の側の import と順序の lint がぶつかるので、型の import で書く。
+export type FederationRule = import('elythia-js').FederationRuleBody & {
 	id: string | null;
-	name: string;
-	mode: 'disabled' | 'record' | 'enforce';
-	target: 'note' | 'activity';
-	position: number;
-	hosts: string[];
-	activityTypes: string[];
-	isBot: boolean | null;
-	newWithinHours: number | null;
-	patterns: string[];
-	hasAttachment: boolean | null;
-	tags: string[];
-	reject: boolean;
-	stripMedia: boolean;
-	sensitive: boolean;
-	unlist: boolean;
-	cw: string | null;
 	hits?: number;
 };
 
@@ -246,11 +232,10 @@ async function save(): Promise<void> {
 	}
 	saving.value = true;
 	try {
-		// endpoint 名の cast は misskey-js の型に存在しないため (mk-go 独自)。
 		if (props.rule.id) {
-			await os.apiWithDialog('admin/federation/rules/update' as never, { ruleId: props.rule.id, ...body() } as never);
+			await os.apiWithDialog('admin/federation/rules/update', { ruleId: props.rule.id, ...body() });
 		} else {
-			await os.apiWithDialog('admin/federation/rules/create' as never, body() as never);
+			await os.apiWithDialog('admin/federation/rules/create', body());
 		}
 		emit('saved');
 	} catch {
@@ -269,7 +254,7 @@ async function del(): Promise<void> {
 	if (canceled) return;
 	saving.value = true;
 	try {
-		await misskeyApi('admin/federation/rules/delete' as never, { ruleId: props.rule.id } as never);
+		await misskeyApi('admin/federation/rules/delete', { ruleId: props.rule.id });
 		emit('deleted');
 	} catch (err) {
 		os.alert({ type: 'error', text: (err as { message?: string } | null)?.message ?? String(err) });

@@ -51,6 +51,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 <script lang="ts" setup>
 import { ref } from 'vue';
+import type * as Elythia from 'elythia-js';
 import MkButton from '@/components/MkButton.vue';
 import MkFolder from '@/components/MkFolder.vue';
 import MkInfo from '@/components/MkInfo.vue';
@@ -62,21 +63,11 @@ import { i18n } from '@/i18n.js';
 import { iAmAdmin } from '@/i.js';
 import number from '@/filters/number.js';
 
-// mk-go: admin/federation/rules/hits の要素。
-type Hit = {
-	ruleId: string;
-	host: string;
-	subject: string;
-	kind: string;
-	applied: boolean;
-	at: string;
-};
-
 const items = ref<FederationRule[]>([]);
 const loading = ref(true);
 const unavailable = ref(false);
 const draft = ref<FederationRule | null>(null);
-const hits = ref<Record<string, Hit[]>>({});
+const hits = ref<Record<string, Elythia.FederationRuleHit[]>>({});
 // 保存し直したら編集欄を作り直す (欄は開いたときの値を持つので、読み直した値を
 // 反映させるには key を変える)。
 const version = ref(0);
@@ -93,8 +84,7 @@ function isHttp(s: string): boolean {
 
 async function fetchList(): Promise<void> {
 	try {
-		// endpoint 名の cast は misskey-js の型に存在しないため (mk-go 独自)。
-		items.value = await misskeyApi('admin/federation/rules/list' as never, {} as never) as unknown as FederationRule[];
+		items.value = await misskeyApi('admin/federation/rules/list', {});
 		unavailable.value = false;
 		hits.value = {};
 		version.value++;
@@ -124,7 +114,7 @@ async function loadHits(r: FederationRule): Promise<void> {
 	if (r.id === null) return;
 	const id = r.id;
 	try {
-		const res = await misskeyApi('admin/federation/rules/hits' as never, { ruleId: id } as never) as unknown as Hit[];
+		const res = await misskeyApi('admin/federation/rules/hits', { ruleId: id });
 		hits.value = { ...hits.value, [id]: res };
 	} catch (err) {
 		os.alert({ type: 'error', text: (err as { message?: string } | null)?.message ?? String(err) });
