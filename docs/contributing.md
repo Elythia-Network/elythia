@@ -63,7 +63,7 @@ commit する手順は無い。
 
 本家の misskey-js の型には Elythia 独自のエンドポイントと、`/api/meta` などの独自の項目が無い。これらの型は `frontend/packages/elythia-js` に手で書く (#3417)。misskey-js には手を入れない (本家への追従とぶつからないように)。
 
-- frontend の `misskeyApi` / `misskeyApiGet` と `instance` は `elythia-js` の型を使う。独自のエンドポイントを型を外して (`as never` で) 呼ばず、`elythia-js/src/endpoints.ts` の `ElythiaEndpoints` に型を書く
+- frontend の `misskeyApi` / `misskeyApiGet` / `os.apiWithDialog` と `instance` は `elythia-js` の型を使う。独自のエンドポイントを型を外して (`as never` で) 呼ばず、`elythia-js/src/endpoints.ts` の `ElythiaEndpoints` に型を書く
 - **Go に Elythia 独自のエンドポイントを足したら、`ElythiaEndpoints` に型を書くか `pending-endpoints.txt` に足す。** `TestElythiaJS_EndpointsMatchRouter` が `docs/api-compat.md` の一覧と突き合わせて、どちらにも無ければ落とす (型を書いたら `pending-endpoints.txt` から外す)
 - 新しいパッケージを足したので、手元の `node_modules` が古いと `elythia-js` を解決できない。`frontend/` で `pnpm install` をし直す
 

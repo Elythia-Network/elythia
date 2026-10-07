@@ -62,6 +62,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 <script lang="ts" setup>
 import { computed, ref, watch } from 'vue';
+import type * as Elythia from 'elythia-js';
 import MkButton from '@/components/MkButton.vue';
 import MkFolder from '@/components/MkFolder.vue';
 import MkInfo from '@/components/MkInfo.vue';
@@ -72,29 +73,7 @@ import * as os from '@/os.js';
 import { misskeyApi } from '@/utility/misskey-api.js';
 import { definePage } from '@/page.js';
 
-type Answer = {
-	label: string;
-	value: string;
-};
-
-type SignupApplication = {
-	id: string;
-	status: 'pending' | 'approved' | 'rejected' | 'expired' | 'completed';
-	// 回答は提出時のラベル付き。**定義を変えても既存申請が読める** (#2570)。
-	answers: Answer[];
-	createdAt: string;
-	updatedAt: string;
-	expiresAt: string;
-	processedById: string | null;
-	processedAt: string | null;
-	usedById: string | null;
-};
-
-// mk-go 独自のエンドポイントなので misskey-js の型集合には無い。
-// server-plugins.vue と同じ理由の cast。
-function api<T>(endpoint: string, params: Record<string, unknown> = {}): Promise<T> {
-	return misskeyApi(endpoint as never, params as never) as unknown as Promise<T>;
-}
+type SignupApplication = Elythia.AdminSignupApplication;
 
 const applications = ref<SignupApplication[]>([]);
 const {
@@ -123,7 +102,7 @@ function statusLabel(status: SignupApplication['status']): string {
 }
 
 async function refresh() {
-	const res = await api<{ applications: SignupApplication[]; count: number }>(
+	const res = await misskeyApi(
 		'admin/signup-application/list', { filter: filter.value, limit: 100 });
 	applications.value = res.applications;
 }
@@ -134,7 +113,7 @@ async function approve(app: SignupApplication) {
 		text: 'この申請を承認しますか？',
 	});
 	if (canceled) return;
-	await os.apiWithDialog('admin/signup-application/approve' as never, { applicationId: app.id } as never);
+	await os.apiWithDialog('admin/signup-application/approve', { applicationId: app.id });
 	await refresh();
 }
 
@@ -144,7 +123,7 @@ async function reject(app: SignupApplication) {
 		text: 'この申請を却下しますか？',
 	});
 	if (canceled) return;
-	await os.apiWithDialog('admin/signup-application/reject' as never, { applicationId: app.id } as never);
+	await os.apiWithDialog('admin/signup-application/reject', { applicationId: app.id });
 	await refresh();
 }
 
