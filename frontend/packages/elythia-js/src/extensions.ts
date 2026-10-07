@@ -60,6 +60,10 @@ export type ElythiaRequestExtensions = {
 		enableEphemeralRelayNotes?: boolean;
 		ephemeralRelayNoteTtlMinutes?: number;
 	};
+	'i/regenerate-token': {
+		/** The two-factor authentication code. Required when two-factor authentication is enabled. */
+		token?: string | null;
+	};
 };
 
 /**

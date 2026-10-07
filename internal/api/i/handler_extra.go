@@ -104,9 +104,8 @@ func (h *Handler) ChangePassword(c echo.Context) error {
 			"userId", u.ID, "profile", password.ProfileForLog(*profile.Password))
 	}
 	if !outcome.OK() {
-		// upstream Misskey TS は raw `throw new Error('authentication failed')` を
-		// framework が 401 に変換する (#885)。mk-go も drop-in 互換のため
-		// 400 INCORRECT_PASSWORD に揃える。
+		// upstream は素の `throw new Error('authentication failed')` で、ApiCallService が
+		// 500 INTERNAL_ERROR に包む。Elythia は理由が伝わるよう 400 INCORRECT_PASSWORD を返す。
 		return c.JSON(http.StatusBadRequest, apierr.Error("INCORRECT_PASSWORD", "Incorrect password.", "932c904e-9460-45b7-9ce6-7ed33be7eb2c"))
 	}
 	attempt.Release(context.WithoutCancel(c.Request().Context()))
@@ -192,9 +191,9 @@ func (h *Handler) DeleteAccount(c echo.Context) error {
 		}
 	}()
 
-	// upstream Misskey TS は raw `throw new Error('incorrect password')` を
-	// framework が 401 に変換する (#885)。mk-go も drop-in 互換のため 401
-	// に揃える (旧 mk-go は 403 を返していた)。
+	// upstream は素の `throw new Error('incorrect password')` で、ApiCallService が
+	// 500 INTERNAL_ERROR に包む。Elythia は理由が伝わるよう 400 INCORRECT_PASSWORD を
+	// 返す (comparePassword)。
 	if !h.comparePassword(c, u.ID, *profile.Password, req.Password, "932c904e-9460-45b7-9ce6-7ed33be7eb2c") {
 		return nil
 	}
@@ -416,6 +415,7 @@ func (h *Handler) RegenerateToken(c echo.Context) error {
 	u := middleware.GetUser(c)
 	var req struct {
 		Password string `json:"password"`
+		Token    string `json:"token"`
 	}
 	if err := c.Bind(&req); err != nil || req.Password == "" {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "password is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
@@ -430,9 +430,33 @@ func (h *Handler) RegenerateToken(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, apierr.Error("ACCESS_DENIED", "No password set.", "1fb7cb09-d46a-4fff-b8df-057708cce513"))
 	}
 
-	// upstream Misskey TS は raw `throw new Error('incorrect password')` を
-	// framework が 401 に変換する (#885)。mk-go も drop-in 互換のため 401
-	// に揃える (旧 mk-go は 403 を返していた)。
+	// 2FA gate: frontend の認証ダイアログは 2FA 有効なユーザーに TOTP コードも
+	// 求めて token として送る。password だけで通すと、その入力が検証されない
+	// ままになるので、i/change-password / i/delete-account と同じ形で検証する。
+	// 2FA 無効のユーザーは従来どおり token を見ない。
+	//
+	// **順序は他の 2FA gate と同じ (token → password)。** wrong-password +
+	// wrong-token の error code を INVALID_TOKEN に揃えるため。
+	//
+	// **消費は token を書き換えてから確定させる** (#2852)。password の打ち間違い
+	// や書き込みの失敗でバックアップコードを焼かない。
+	var use twoFAUse
+	if profile.TwoFactorEnabled {
+		var ok bool
+		if use, ok = h.check2FAToken(c.Request().Context(), profile, req.Token); !ok {
+			return c.JSON(http.StatusForbidden, apierr.InvalidToken())
+		}
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			use.Rollback()
+		}
+	}()
+
+	// upstream は素の `throw new Error('incorrect password')` で、ApiCallService が
+	// 500 INTERNAL_ERROR に包む。Elythia は理由が伝わるよう 400 INCORRECT_PASSWORD を
+	// 返す (comparePassword)。
 	if !h.comparePassword(c, u.ID, *profile.Password, req.Password, "932c904e-9460-45b7-9ce6-7ed33be7eb2c") {
 		return nil
 	}
@@ -446,6 +470,10 @@ func (h *Handler) RegenerateToken(c echo.Context) error {
 	if err := h.userService.UpdateUserFields(u.ID, map[string]any{"token": newToken}); err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
+	// **token を書き換えられてから確定する。** 先に確定すると、書き込みに
+	// 失敗したときに何も変わっていないのに 2FA だけ焼ける。
+	_ = use.Commit()
+	committed = true
 	// 旧 token が auth middleware の cache で生き残ると regenerate の主目的
 	// (= 旧 token 失効) が機能しない (#884)。invalidator が wire されている
 	// 場合は old token entry を即時削除する。production では router で必ず

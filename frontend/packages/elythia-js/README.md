@@ -5,7 +5,7 @@ Elythia 独自の API の型を、本家の [misskey-js](../misskey-js) の型�
 - 本家の misskey-js には手を入れない。本家への追従 (`make upstream-sync`) とぶつからないように、独自の分はここに書く
 - `Endpoints` は `misskey-js` の `Endpoints` に、次の 3 つを重ねたもの。frontend の `misskeyApi` / `misskeyApiGet` / `os.apiWithDialog` はこれを使う
   - `ElythiaEndpoints` (`src/endpoints.ts`): Elythia 独自のエンドポイント
-  - `ElythiaRequestExtensions` (`src/extensions.ts`): 本家のエンドポイントに Elythia が足した引数 (`admin/emoji/copy` / `admin/update-meta`)。本家の req に交差で重ねるので、足せるのは省略できる項目だけ。キーは本家にあるエンドポイントに限る (型が弾く)
+  - `ElythiaRequestExtensions` (`src/extensions.ts`): 本家のエンドポイントに Elythia が足した引数 (`admin/emoji/copy` / `admin/update-meta` / `i/regenerate-token`)。本家の req に交差で重ねるので、足せるのは省略できる項目だけ。キーは本家にあるエンドポイントに限る (型が弾く)
   - `ResponseOverrides` (`src/extensions.ts`): misskey-js の型が実際の応答と違うものの差し替え (`i/registry/get`)
 - `misskeyApi` / `misskeyApiGet` / `os.apiWithDialog` は、次の 2 つを型で検査する (#3439)
   - **引数の型に無いキーを渡すと型エラーになる** (`ExcessKeys`)。変数や spread で渡した値も対象になる。引数の型が和集合なら、どれかの要素にあるキーは通す。`EmptyRequest` のエンドポイントはどのキーも通す
