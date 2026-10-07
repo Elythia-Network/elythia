@@ -29,9 +29,6 @@ admin/roles/assignment-show
 admin/self-check
 admin/server-metrics
 admin/server-plugins
-admin/signup-application/approve
-admin/signup-application/list
-admin/signup-application/reject
 bubble-game/versus/accept
 bubble-game/versus/cancel
 bubble-game/versus/decline
@@ -68,7 +65,3 @@ i/flashs
 i/flashs/likes
 roles/assignment-show
 signin
-signup-application/apply
-signup-application/form-token
-signup-application/register
-signup-application/status

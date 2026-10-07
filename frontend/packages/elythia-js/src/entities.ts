@@ -35,4 +35,45 @@ export type ElythiaMetaFields = {
 	};
 };
 
+/**
+ * The state of a signup application (approval-based signup).
+ *
+ * rejected / expired / completed は終端で、再申請は別の申請になる。
+ */
+export type SignupApplicationStatus = 'pending' | 'approved' | 'rejected' | 'expired' | 'completed';
+
+/** What the applicant may see about their own application. */
+export type SignupApplicationView = {
+	status: SignupApplicationStatus;
+	createdAt: string;
+	expiresAt: string;
+};
+
+/**
+ * An answer to the application form, stored with the label it was asked under.
+ *
+ * ラベルを同梱するので、フォームの定義を後から変えても既存の申請が読める (#2570)。
+ */
+export type SignupApplicationAnswer = {
+	label: string;
+	value: string;
+};
+
+/**
+ * A signup application as moderators see it.
+ *
+ * クレームコードは hash しか持たないので、ここにも出てこない。
+ */
+export type AdminSignupApplication = {
+	id: string;
+	status: SignupApplicationStatus;
+	answers: SignupApplicationAnswer[];
+	createdAt: string;
+	updatedAt: string;
+	expiresAt: string;
+	processedById: string | null;
+	processedAt: string | null;
+	usedById: string | null;
+};
+
 export type MetaDetailed = Misskey.entities.MetaDetailed & ElythiaMetaFields;
