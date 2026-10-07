@@ -47,13 +47,25 @@ export function registrationModeOf(state: { closed: boolean; approval: boolean; 
 }
 
 /**
+ * The admin/update-meta fields that one registration mode sends.
+ *
+ * キーを名指しで型にする。admin/update-meta の引数に無いキー (打ち間違い) は
+ * 呼び出し側で型エラーになる (#3439)。
+ */
+export type RegistrationModePatch = {
+	registrationClosed: boolean;
+	approvalRequiredForSignup?: boolean;
+	disableRegistration?: boolean;
+};
+
+/**
  * The admin/update-meta fields to send for each registration mode.
  *
  * **3 つとも明示して送る** — 省略するとサーバー側の整合 (#2565 / #2803 / #3186) が
  * 既定を補い、選んだものと違う受け付け方になりうる。「受け付けない」だけは承認制の値を
  * 送らない (閉じている間も残し、申請者の照会を開けておくため)。
  */
-export const registrationModePatch: Record<RegistrationMode, Record<string, boolean>> = {
+export const registrationModePatch: Record<RegistrationMode, RegistrationModePatch> = {
 	open: { registrationClosed: false, approvalRequiredForSignup: false, disableRegistration: false },
 	invite: { registrationClosed: false, approvalRequiredForSignup: false, disableRegistration: true },
 	approval: { registrationClosed: false, approvalRequiredForSignup: true, disableRegistration: false },

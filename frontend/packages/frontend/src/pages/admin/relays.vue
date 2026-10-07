@@ -101,7 +101,8 @@ import { definePage } from '@/page.js';
 const relays = ref<Misskey.entities.AdminRelaysListResponse>([]);
 
 // mk-go 独自の meta 列 (#2332)。misskey-js の autogen 型は upstream backend の
-// OpenAPI 由来で mk-go では再生成できないため、any 経由で読む。
+// OpenAPI 由来で mk-go では再生成できないため、any 経由で読む。書き込み (admin/update-meta) の
+// 引数の型は elythia-js の ElythiaRequestExtensions で重ねてある (#3439)。
 const enableEphemeralRelayNotes = ref(false);
 const ephemeralRelayNoteTtlMinutes = ref(60);
 const enableRelayOrphanUserCleanup = ref(false);
@@ -119,14 +120,14 @@ function saveEphemeralSettings() {
 	os.apiWithDialog('admin/update-meta', {
 		enableEphemeralRelayNotes: enableEphemeralRelayNotes.value,
 		ephemeralRelayNoteTtlMinutes: ephemeralRelayNoteTtlMinutes.value,
-	} as any);
+	});
 }
 
 function saveOrphanCleanupSettings() {
 	os.apiWithDialog('admin/update-meta', {
 		enableRelayOrphanUserCleanup: enableRelayOrphanUserCleanup.value,
 		relayOrphanUserGraceDays: relayOrphanUserGraceDays.value,
-	} as any);
+	});
 }
 
 async function addRelay() {

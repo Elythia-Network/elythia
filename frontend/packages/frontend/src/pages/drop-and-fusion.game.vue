@@ -1127,10 +1127,11 @@ onMounted(async () => {
 	// 対戦の得点はハイスコアに載せないので読まない。
 	if (props.versus == null) {
 		try {
+			// レジストリの値の形は書いた側しか知らないので、ここで表明する (#3439)
 			highScore.value = await misskeyApi('i/registry/get', {
 				scope: ['dropAndFusionGame'],
 				key: 'highScore:' + props.gameMode,
-			});
+			}) as number;
 		} catch (err) {
 			highScore.value = null;
 		}
@@ -1141,7 +1142,7 @@ onMounted(async () => {
 			yenTotal.value = await misskeyApi('i/registry/get', {
 				scope: ['dropAndFusionGame'],
 				key: 'yenTotal',
-			});
+			}) as number;
 		} catch (err: any) {
 			if (err.code === 'NO_SUCH_KEY') {
 				// nop

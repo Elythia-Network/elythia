@@ -301,7 +301,7 @@ function removeField(i: number) {
 function saveSignupApplicationForm() {
 	os.apiWithDialog('admin/update-meta', {
 		signupApplicationForm: signupApplicationForm.value,
-	} as never).then(() => {
+	}).then(() => {
 		fetchInstance(true);
 	});
 }
@@ -359,7 +359,7 @@ async function onChange_registrationMode(value: RegistrationMode) {
 	const prev = registrationMode.value;
 	registrationMode.value = value;
 	try {
-		await os.apiWithDialog('admin/update-meta', registrationModePatch[value] as never);
+		await os.apiWithDialog('admin/update-meta', registrationModePatch[value]);
 	} catch {
 		registrationMode.value = prev;
 		return;
@@ -388,7 +388,7 @@ function onChange_ugcVisibilityForVisitor(value: typeof ugcVisibilityForVisitor.
 function save_minimumUsernameLength() {
 	os.apiWithDialog('admin/update-meta', {
 		minimumUsernameLength: Number(minimumUsernameLength.value),
-	} as never).then(() => {
+	}).then(() => {
 		fetchInstance(true);
 	});
 }
