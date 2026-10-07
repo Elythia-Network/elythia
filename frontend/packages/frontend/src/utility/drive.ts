@@ -6,6 +6,7 @@
 import { defineAsyncComponent } from 'vue';
 import * as Misskey from 'misskey-js';
 import { apiUrl } from '@@/js/config.js';
+import type * as Elythia from 'elythia-js';
 import type { UploaderFeatures } from '@/composables/use-uploader.js';
 import * as os from '@/os.js';
 import { misskeyApi } from '@/utility/misskey-api.js';
@@ -147,7 +148,7 @@ export function uploadFile(file: File | Blob, options: UploadOptions = {}): Uplo
 	// 閾値もサーバー告知の chunkSize に従う。1 チャンクに収まるなら分割する意味が
 	// 無いので、従来経路のほうがラウンドトリップが少ない。
 	if (chunked != null && file.size > chunked.chunkSize) {
-		return uploadFileChunked(file, options, chunked);
+		return uploadFileChunked(file, options);
 	}
 	return uploadFileSingle(file, options);
 }
@@ -257,10 +258,10 @@ function uploadFileSingle(file: File | Blob, options: UploadOptions = {}): Uploa
  * start / append / finish の 3 段階で送る。
  *
  * リバースプロキシのボディサイズ上限 (Cloudflare は 100MB) を超えるファイルを
- * 送るための経路。1 リクエストあたりの本文はサーバーが告知した chunkSize に
- * 収まるので、上限を上げられない環境でも通る。
+ * 送るための経路。1 リクエストあたりの本文は、start でセッションに固定された
+ * chunkSize に収まるので、上限を上げられない環境でも通る。
  */
-function uploadFileChunked(file: File | Blob, options: UploadOptions, cap: ChunkedUploadCapability): UploadReturnType {
+function uploadFileChunked(file: File | Blob, options: UploadOptions): UploadReturnType {
 	const abortController = new AbortController();
 	const { signal } = abortController;
 	// 進行中の append。abort() から中断できるよう保持する。
@@ -274,7 +275,12 @@ function uploadFileChunked(file: File | Blob, options: UploadOptions, cap: Chunk
 	// 揃える。
 	let reported = false;
 
-	const post = async (endpoint: string, body: Record<string, unknown>): Promise<any> => {
+	// misskeyApi を通さないのは、失敗のステータスと本文を showUploadError に渡す
+	// ため。型は elythia-js から引く。
+	const post = async <E extends 'drive/files/create-chunked/start' | 'drive/files/create-chunked/finish'>(
+		endpoint: E,
+		body: Elythia.Endpoints[E]['req'],
+	): Promise<Elythia.Endpoints[E]['res']> => {
 		const res = await window.fetch(`${apiUrl}/${endpoint}`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
@@ -286,7 +292,11 @@ function uploadFileChunked(file: File | Blob, options: UploadOptions, cap: Chunk
 			reported = true;
 			throw new Error(`${endpoint} failed: ${res.status}`);
 		}
-		return text ? JSON.parse(text) : null;
+		// 成功した start / finish は必ず本文を返す。空なら JSON.parse が投げ、
+		// 呼び出し側の catch が汎用のダイアログを出す。start は null を返していた
+		// ときと同じ結末で、finish は空の本文を成功として扱わなくなる (サーバーが
+		// 本文を返さないことは無いので、実際には起きない)
+		return JSON.parse(text);
 	};
 
 	const filePromise = new Promise<Misskey.entities.DriveFile>((resolve, reject) => {
@@ -320,8 +330,9 @@ function uploadFileChunked(file: File | Blob, options: UploadOptions, cap: Chunk
 				uploadId = session.uploadId;
 
 				// サーバーが返した chunkSize に従う (start と告知の間に admin が
-				// 設定を変えた場合、セッションに固定された値はこちら)。
-				const chunkSize: number = session.chunkSize ?? cap.chunkSize;
+				// 設定を変えた場合、セッションに固定された値はこちら)。start は必ず
+				// chunkSize を返すので、meta の告知には戻らない。
+				const chunkSize: number = session.chunkSize;
 				const totalChunks: number = session.totalChunks;
 
 				for (let index = 0; index < totalChunks; index++) {
@@ -386,11 +397,12 @@ function uploadFileChunked(file: File | Blob, options: UploadOptions, cap: Chunk
 				};
 			}
 
+			const fields: Elythia.Endpoints['drive/files/create-chunked/append']['req'] = { uploadId: id, index, chunk: blob };
 			const formData = new FormData();
 			formData.append('i', $i!.token);
-			formData.append('uploadId', id);
-			formData.append('index', String(index));
-			formData.append('chunk', blob);
+			formData.append('uploadId', fields.uploadId);
+			formData.append('index', String(fields.index));
+			formData.append('chunk', fields.chunk);
 			xhr.send(formData);
 		});
 	}
@@ -402,12 +414,12 @@ function uploadFileChunked(file: File | Blob, options: UploadOptions, cap: Chunk
 		// アップロードが期限切れ GC まで残り、オブジェクトストレージの課金対象に
 		// なる。best-effort なので失敗は握り潰す。
 		if (uploadId != null) {
-			const id = uploadId;
+			const body: Elythia.Endpoints['drive/files/create-chunked/abort']['req'] = { uploadId };
 			uploadId = null;
 			void window.fetch(`${apiUrl}/drive/files/create-chunked/abort`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ i: $i?.token, uploadId: id }),
+				body: JSON.stringify({ i: $i?.token, ...body }),
 				keepalive: true,
 			}).catch(() => {});
 		}
