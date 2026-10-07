@@ -66,6 +66,29 @@ type TimelineDBFilter struct {
 	// フィルタまで巻き込んで fanout が配った返信が消えるため、DB 専用の
 	// フラグとして分けている。
 	ExcludeRepliesToOthers bool
+	// KeepRepliesToViewer keeps replies addressed to ViewerID even when
+	// replies to others are excluded (ExcludeRepliesToOthers or
+	// WithReplies=false). It has no effect without ViewerID.
+	//
+	// 複数の list を混ぜる timeline (ログイン中の local / social) の DB fallback で
+	// list の中身を再現するため (#3449)。fanout は自分宛ての返信を
+	// `localTimelineWithReplyTo:<viewer>` と、フォロー中の人からならホームの list
+	// にも積む。DB 側が返さないと、list の範囲より古い自分宛ての返信が出ない。
+	// 本家の未マージの修正 misskey-dev/misskey#13495 も hybrid の DB クエリに
+	// `replyUserId = me` を足している。
+	KeepRepliesToViewer bool
+	// KeepHomeFanoutReplies additionally keeps, under the same exclusion, the
+	// replies the home fan-out delivers to ViewerID: the viewer's own replies,
+	// replies that mention the viewer, replies by users the viewer follows
+	// with `following.withReplies`, and channel replies. Meant for
+	// ListHomeTimeline only, whose base condition limits channel notes to the
+	// followed (and unmuted) channels; it has no effect without ViewerID.
+	//
+	// social の DB fallback の home 側で、ホームの list の中身を再現するため
+	// (#3449。fanoutToFollowersAndStream の振り分けと揃える)。HTL 単独
+	// (`notes/timeline`) には付けない — list が 1 本なので #3449 の cutoff が
+	// 掛からず、upstream の HTL の DB クエリと同じく返信を絞ったままにしている。
+	KeepHomeFanoutReplies bool
 	// LocalUsersOnly restricts results to notes whose own author is local
 	// (`userHost IS NULL`). Set for anonymous visitors under
 	// meta.ugcVisibilityForVisitor=local (upstream
