@@ -4120,7 +4120,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/chat/rooms/members/ban", chatHandler.MembersBan, middleware.RequireAuth(), middleware.RequireScope("write:chat"), chatWrite())
 	api.POST("/chat/rooms/members/update-membership", chatHandler.MembersUpdateMembership, middleware.RequireAuth(), middleware.RequireScope("write:chat"), chatWrite())
 	api.POST("/chat/messages", chatHandler.Messages, middleware.RequireAuth(), middleware.RequireScope("read:chat"), chatRead())
-	api.POST("/chat/messages/create", chatHandler.MessagesCreate, middleware.RequireAuth(), middleware.RequireScope("write:chat"), chatWrite())
+	// create は create-to-user / create-to-room と同じ処理を呼ぶので、移行済みの
+	// アカウントを拒む RequireNotMoved も揃える。どれか1本でも欠くと、そこから迂回できる (#3437)。
+	api.POST("/chat/messages/create", chatHandler.MessagesCreate, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:chat"), chatWrite())
 	api.POST("/chat/messages/create-to-user", chatHandler.MessagesCreateToUser, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:chat"), chatWrite())
 	api.POST("/chat/messages/create-to-room", chatHandler.MessagesCreateToRoom, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:chat"), chatWrite())
 	api.POST("/chat/messages/show", chatHandler.MessagesShow, middleware.RequireAuth(), middleware.RequireScope("read:chat"), chatRead())
