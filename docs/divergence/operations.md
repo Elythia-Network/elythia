@@ -6,7 +6,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| Redis timeline / antenna の宙吊り ID 除去 | 読み取り時に解決できなかった ID を Redis から取り除く (timeline は #2715 / PR #2718、antenna は #2719)。**upstream は取り除かない** — timeline (`FanoutTimelineEndpointService`) も antenna (`server/api/endpoints/antennas/notes.ts`、こちらは `FanoutTimelineEndpointService` を通らず生の `note.id IN (...)`) も、Redis から取った ID を hydrate して引けなかったぶんを黙って落とすだけ。`FanoutTimelineService.remove` の呼び出し元は `antennas/remove-note` (ユーザー操作) しか無い。**antenna で効く理由は DB fallback が無いこと。** timeline は件数不足時に DB へ fallback するが (`meta.enableFanoutTimelineDbFallback` を off にすると止まる、§5.6)、antenna の読み取りは Redis の ID だけで完結する。押し出し自体は両方にある (antenna は `pushNote` が毎回 `ZRemRangeByRank`、timeline は 10% 確率の `LTrim`) が、**マッチが止まった antenna では新着が積まれないので宙吊り ID が残り続ける**。読み取り窓 (`limit*2`) が全部宙吊りだとページが空で返り、クライアントは次の `untilId` を得られず行き止まりになる。解消は 1 リクエストあたり窓 1 つぶん。**除去は filter を掛ける前の集合で判定する** — visibility / mute / block で落ちた note は生きているため。**消す前に primary で存在を確かめる** (`ExistingNoteIDsOnPrimary`、`dbresolver.Write` で primary 固定) — Elythia はリードレプリカを対応しており (`dbReplications`、既定 `false`)、複製前の行は通常の SELECT で引けない。ID に埋め込まれた時刻での猶予判定は使えない: リモート note の ID は AP の `published` から発番されるため「たった今 INSERT されたが ID の時刻は数時間前」が普通に起きる。**timeline 側も同じ確認を通す** (#2757)。DB fallback があるから安全とは言えない — fallback は Hybrid 以外では別メソッドで、`allowPartial: true` を渡すクライアントには走らず、`enableFanoutTimelineDbFallback` を off にすれば運用側でも止まり (global を除く、§5.6)、Redis list から消えた ID は戻らない |
+| Redis timeline / antenna の宙吊り ID 除去 | 読み取り時に解決できなかった ID を Redis から取り除く (timeline は #2715 / PR #2718、antenna は #2719)。**upstream は取り除かない** — timeline (`FanoutTimelineEndpointService`) も antenna (`server/api/endpoints/antennas/notes.ts`、こちらは `FanoutTimelineEndpointService` を通らず生の `note.id IN (...)`) も、Redis から取った ID を hydrate して引けなかったぶんを黙って落とすだけ。`FanoutTimelineService.remove` の呼び出し元は `antennas/remove-note` (ユーザー操作) しか無い。**antenna で効く理由は DB fallback が無いこと。** timeline は件数不足時に DB へ fallback するが (`meta.enableFanoutTimelineDbFallback` を off にすると止まる、§5.6)、antenna の読み取りは Redis の ID だけで完結する。押し出し自体は両方にある (antenna は `pushNote` が毎回 `ZRemRangeByRank`、timeline は 10% 確率の `LTrim`) が、**マッチが止まった antenna では新着が積まれないので宙吊り ID が残り続ける**。読み取り窓 (`limit*2`) が全部宙吊りだとページが空で返り、クライアントは次の `untilId` を得られず行き止まりになる。解消は 1 リクエストあたり窓 1 つぶん。**除去は filter を掛ける前の集合で判定する** — visibility / mute / block で落ちた note は生きているため。**消す前に primary で存在を確かめる** (`ExistingNoteIDsOnPrimary`、`dbresolver.Write` で primary 固定) — Elythia はリードレプリカを対応しており (`dbReplications`、既定 `false`)、複製前の行は通常の SELECT で引けない。ID に埋め込まれた時刻での猶予判定は使えない: リモート note の ID は AP の `published` から発番されるため「たった今 INSERT されたが ID の時刻は数時間前」が普通に起きる。**timeline 側も同じ確認を通す** (#2757)。DB fallback があるから安全とは言えない — fallback は Hybrid 以外では別メソッドで、`allowPartial: true` を渡すクライアントには 1 件でも解決できたページでは走らず (0 件のときだけ走る、#3448)、`enableFanoutTimelineDbFallback` を off にすれば運用側でも止まり (global を除く、§5.6)、Redis list から消えた ID は戻らない |
 | inbox verify-in-worker 化 | HTTP handler は body + signature header を payload 化して即 202、署名 verify / host block / instance touch は worker 側。HTTP 受信 rps が **TS の 2.6〜2.8 倍** |
 | mkq queue driver | BullMQ wire 互換の Go 実装で、**Elythia 唯一の queue driver** (legacy の asynq は #2985 で削除)。queue-bench の当時の 3-way 比較では送信 rps が mkq 優位、drain time は asynq 優位だった (詳細は [queue-bench.md](../queue-bench.md)) |
 | AIMD auto-scale worker | per-queue の動的 Resize + Prometheus metrics。worker 現在数 / 範囲 / scale 履歴は admin UI にも出す (#2277) |
@@ -143,12 +143,13 @@ DB 直行にする。**両方 off でも DB は引く** — upstream も
 
 upstream の `FanoutTimelineEndpointService` は `useDbFallback` が偽のとき
 `ps.dbFallback` を `() => Promise.resolve([])` に差し替える。Elythia も同じで、
-`limit` に満たなくてもそのまま返す。
+DB では埋めない。足りない分は Redis の窓の奥を読み進めて埋め、読み切っても
+足りなければ `limit` に満たないまま返す (下の「件数の埋め方」)。
 
 | 状況 | on (既定) | off |
 |---|---|---|
 | Redis に `limit` 以上ある | Redis から返す | 同じ |
-| Redis の持ち分が `limit` 未満 | 足りない分を DB で継ぎ足す | **Redis の分だけ返す** |
+| Redis から解決できた分が `limit` 未満 | 足りない分を DB で継ぎ足す。ただし `allowPartial: true` (同梱 frontend は常に送る) なら、1 件も残らなかったときだけ | **Redis の窓の奥を読み進め、読み切ったらその分だけ返す** |
 | Redis が空 | 全ページを DB から返す | **空を返す** |
 | `sinceId` を含むページング | 全ページを DB が処理する | **空を返す** |
 
@@ -175,7 +176,7 @@ frontend の paginator は `fetchNewer` で `sinceId` を投げる
 
 | 経路 | off でも走る DB アクセス |
 |---|---|
-| 継ぎ足し (Redis に持ち分があり `limit` 未満) | Redis の ID を note に引き直す hydrate (`FindManyByIDsWithUser`) と、解決できなかった ID の primary 確認 (`ExistingNoteIDsOnPrimary`、§5 の宙吊り ID 除去) |
+| 継ぎ足し (Redis に持ち分があり `limit` 未満) | Redis の ID を note に引き直す hydrate (`FindManyByIDsWithUser`) と、解決できなかった ID の primary 確認 (`ExistingNoteIDsOnPrimary`、§5 の宙吊り ID 除去)。窓の奥を読み進めるので、どちらも読み進めた回数だけ走る |
 | 全ページ (Redis 空 / `sinceId` 付き) | timeline service は DB を引かない |
 
 ただし**どちらの経路でも handler 側の loader は毎リクエスト走る**。
@@ -186,8 +187,15 @@ following / channel を読み、いずれもキャッシュを挟んでいない
 - home / hybrid: **7 本** (フォロー中チャンネルがあれば `loadFollowedChannelIDs`
   が内部で `loadMutedChannelIDs` を呼び直すので 8 本)
 - local / global: **5 本**
-- service から戻ったあと `applyMuteBlock` → `notesfilter.LoadMuteBlockSets` が
-  muting / blocking / channelMuting / user_profile を**もう一度** 4 本読む
+- `applyMuteBlock` 相当の filter (`newMuteBlockFilter`) が
+  `notesfilter.LoadMuteBlockSets` で muting / blocking / channelMuting /
+  user_profile を**もう一度** 4 本読み、`blockedHosts` のために meta を 1 回読む。
+  Redis のページに通すとき (service の中) か service から戻ったあとの、最初の
+  1 回だけ読んで使い回す (#3448)
+- 同じ filter のリノート先の入れ子検査 (`FindManyByIDsWithUser`) が、新しく通す
+  束ごとに 1 本。Redis の 1 ページ目、窓の奥を読み進めた各回、DB fallback の行が
+  それぞれ 1 束で、通過済みの note は数えない。リノートを含まない束や、mute /
+  block が空の viewer では走らない
 
 いずれもログイン時の数。匿名 viewer では各 loader が nil を返して 0 本になる。
 cursor 付きのページは JSON cache も効かないので、off にしても「timeline が DB を
@@ -201,14 +209,30 @@ upstream は Redis list を `lrange 0 -1` で**丸ごと**取り (`FanoutTimelin
 落ちたぶんは、その先の ID を追加で読んで埋める。**この再読み込みは
 `useDbFallback` では止まらない。**
 
-Elythia にこのループは無い。`filterAndSort` が窓を `limit` 件に切り、hydrate と
-filter を 1 回通すだけ (4 経路とも `Get` / `GetMerged` / `GetMulti` から共通で
-呼ばれる)。足りなければ DB へ継ぎ足す設計になっている。
+Elythia も Redis list を 1 リクエストで 1 回だけ丸ごと読み、1 ページ目
+(`limit` 件) に hydrate と filter を通す (`readFanout`、4 経路で共通)。
+filter には handler 側にしか無い判定 (meta.blockedHosts、凍結、リノート先まで辿る
+mute / block) も含める (`TimelineFilter.PageFilter`、#3448)。足りないときの埋め方は
+DB fallback の設定で分かれる。
 
-on のときは差が見えない (どちらも `limit` 件を返す)。**off にすると upstream の
-ほうが件数が揃いやすい** — 窓に生きた ID が残っていれば upstream は埋めるが、
-Elythia は先頭 `limit` 件から落ちたぶんをそのまま返す。#2762 でこのつまみが
-効くようになったことで観測可能になった差で、つまみ自体が作ったものではない。
+- **off**: upstream と同じく、窓の奥の ID を読み進めて埋める (`scanOlder`)。
+  1 回に hydrate する量は「足りない件数の 3 倍」で、upstream の上限
+  (`Math.min(1.1 / lastSuccessfulRate, 3)`) に合わせている。**ただし `limit`
+  件を下回らない** — upstream の式のままだと残り 1 件で 3 件ずつしか読まず、
+  mute で落ちる ID が続くと、hydrate などの問い合わせの回数が窓の長さに比例して
+  増える。1 ページ目も upstream は `ceil(limit * 1.1)` 件を読むが、Elythia は
+  `limit` 件ちょうど読む。
+- **on**: 窓の奥は読まず、1 ページ目で解決できた最古の note を境界にして DB から
+  継ぎ足す。1 件も解決できなければ、呼び出し側の cursor から DB を引き直す。
+  **upstream は先に窓の奥を読み進め、読み切ってから最後に読んだ ID を境界にして
+  DB へ倒す。** Elythia が読み進めないのは、Redis に無い新しい note が DB にあると
+  読み進めた分だけ飛ばしてしまうため (#2715。`fallbackRange` の doc)。
+
+`allowPartial: true` (同梱 frontend は常に送る) は、1 件でも取れたらそのページを
+返す。**0 件のときは返さず、上のどちらかで埋める** (#3448)。空のページを返すと
+frontend の paginator は終端と判断し、古い note が残っていてもそれ以上読まない。
+upstream も `ps.allowPartial ? redisTimeline.length !== 0 : ...` を満たすまで読み進め、
+0 件なら DB へ倒す。
 
 ### 対象になる timeline
 
