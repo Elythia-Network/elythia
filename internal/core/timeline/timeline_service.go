@@ -108,10 +108,10 @@ func (s *Service) SetDBFallbackToggle(p DBFallbackToggleProvider) {
 // dbFallbackEnabled reports whether the database fallback may run.
 // Provider 未配線なら有効扱い (既定値 true と揃える)。
 //
-// **off にすると件数は揃わない。** Redis が持っている分だけを返し、足りない分は
-// 埋めない。Redis が空 (または sinceId が Redis の窓より古い) なら空を返す。
-// upstream も同じで、`dbFallback` を空配列に差し替えるだけなので呼び出し側から
-// 見ると「取れなかった」ことと区別が付かない。
+// **off にすると件数は揃わない。** DB では埋めず、Redis の窓の奥を読み進めても
+// 足りなければ、その分だけを返す (readFanout)。Redis が空 (または sinceId を含む
+// ページング) なら空を返す。upstream も同じで、`dbFallback` を空配列に
+// 差し替えるだけなので、呼び出し側から見ると「取れなかった」ことと区別が付かない。
 func (s *Service) dbFallbackEnabled() bool {
 	if s.dbFallbackToggle == nil {
 		return true
@@ -212,6 +212,159 @@ func fallbackRange(notes []*model.Note, sinceID, untilID string) (fbSince, fbUnt
 	return sinceID, boundary
 }
 
+// fanoutRead describes how one timeline reads its fan-out lists and its
+// database fallback. readFanout drives it.
+type fanoutRead struct {
+	// keys are the lists the ids come from. Unresolvable ids are pruned from
+	// every one of them.
+	keys []Name
+	// ids returns every id the lists hold inside the caller's cursor window,
+	// de-duplicated and ordered by the cursor direction. readFanout calls it
+	// once per request.
+	ids func() ([]string, error)
+	// db queries the database for up to n notes between since and until.
+	db func(since, until string, n int) ([]*model.Note, error)
+	// gated reports whether meta.enableFanoutTimelineDbFallback applies.
+	// global だけ false (GlobalTimeline の doc を参照)。
+	gated bool
+}
+
+// defaultTimelineLimit is the page size used when the caller passes none.
+const defaultTimelineLimit = 20
+
+// fanoutScanFactor sets how many ids each extra round hydrates, as a multiple
+// of the notes still missing. scanOlder never reads fewer than limit ids.
+//
+// upstream は `Math.ceil(remainingToRead * Math.min(1.1 / lastSuccessfulRate, 3))`
+// で読む量を決める。ここへ来るのは解決できた note が足りない (成功率が低い) ときなので、
+// 上限の 3 倍に固定する。
+//
+// **下限を limit に置くのは意図的な差。** upstream の式は残りが 1 件なら 3 件ずつ
+// しか読まないので、mute で落ちる ID が長く続くと回数が窓の長さに比例して増える。
+// 1 回ごとに hydrate・ephemeral・primary 確認・リノート先の入れ子検査が走るので、
+// 回数は抑える。多めに読んだ分は scanOlder が limit で切る。
+//
+// **1 ページ目は limit 件ちょうど読む。** upstream は初回も同じ式で
+// `ceil(limit * 1.1)` 件を読む。fallback が有効なら、足りない分は DB が同じ範囲から
+// 埋めるので結果は変わらない。
+const fanoutScanFactor = 3
+
+// readFanout serves one page from the fan-out lists, falling back to (or
+// topping up from) the database where upstream FanoutTimelineEndpointService
+// does.
+//
+// **allowPartial でも 0 件のときは返さない (#3448)。** upstream は
+// `ps.allowPartial ? redisTimeline.length !== 0 : redisTimeline.length >= ps.limit`
+// を満たすまで Redis の ID を読み進め、読み切っても 0 件なら DB へ倒す。
+// 空のページを返すと frontend の paginator は「終端」と判断して以後読まないので、
+// 宙吊りの ID (TTL の切れたリレー由来の note) や mute で 1 ページ分が全て消えると、
+// 古い note が残っているのにそこで止まっていた。0 件かどうかは、note を落としうる
+// filter を全て通した後で判定する (TimelineFilter.PageFilter を参照)。
+//
+// **Redis の list は 1 リクエストで 1 回だけ読む。** upstream も getMulti で
+// 窓の中の ID を全て取ってから、メモリ上で切り出して hydrate する。回ごとに
+// LRANGE し直すと、list の長さ L に対して O(L²/limit) の転送になる。
+//
+// 足りないときの埋め方は DB fallback の有無で分ける。
+//   - 使えるとき: 1 ページ目の結果を境界にして DB から埋める (従来どおり)。
+//     解決 0 件なら呼び出し側の cursor から引き直す (#2715、fallbackRange の doc)。
+//     upstream はその前に Redis を読み進めるが、それをすると Redis に無い
+//     新しい note (#2715 で問題になった形) を飛ばすので、DB に任せる。
+//   - 切ってあるとき: Redis が唯一の取得元なので、upstream と同じく Redis を
+//     読み進める (scanOlder)。読み切っても足りなければ、upstream が
+//     `dbFallback` を空配列に差し替えたのと同じく持ち分だけを返す。
+func (s *Service) readFanout(ctx context.Context, r fanoutRead, viewerID, untilID, sinceID string, limit int, filter TimelineFilter) ([]*model.Note, error) {
+	// 公開メソッドが既定値を入れてから呼ぶので通常は到達しないが、0 以下だと
+	// scanOlder の読み取り量が 0 になり進まなくなる。ここでも閉じておく。
+	if limit <= 0 {
+		limit = defaultTimelineLimit
+	}
+	dbEnabled := !r.gated || s.dbFallbackEnabled()
+	all, err := r.ids()
+	if err != nil {
+		return nil, err
+	}
+	page := all
+	if len(page) > limit {
+		page = page[:limit]
+	}
+	if shouldFallbackToDB(page, sinceID, untilID) {
+		if !dbEnabled {
+			return noDBFallback(), nil
+		}
+		return r.db(sinceID, untilID, limit)
+	}
+	resolved, notes, err := s.resolvePage(ctx, r.keys, page, viewerID, filter)
+	if err != nil {
+		return nil, err
+	}
+	if !needsMore(notes, limit, filter.AllowPartial) {
+		return notes, nil
+	}
+	if !dbEnabled {
+		return s.scanOlder(ctx, r.keys, all[len(page):], notes, limit, viewerID, filter)
+	}
+	// **境界は filter 前の resolved から取る。** filter で落ちた note も
+	// 「解決はできている」ので、DB fallback で引き直す必要は無い。
+	fbSince, fbUntil := fallbackRange(resolved, sinceID, untilID)
+	rest, err := r.db(fbSince, fbUntil, limit-len(notes))
+	if err != nil {
+		return nil, err
+	}
+	return append(notes, rest...), nil
+}
+
+// needsMore reports whether a page still has to be filled: with allowPartial
+// any note is enough, otherwise the page must reach limit.
+func needsMore(notes []*model.Note, limit int, allowPartial bool) bool {
+	if allowPartial {
+		return len(notes) == 0
+	}
+	return len(notes) < limit
+}
+
+// resolvePage hydrates ids, prunes the unresolvable ones from keys and applies
+// every filter that can drop a note. resolved is the pre-filter result (the
+// fallback boundary), notes the post-filter one.
+func (s *Service) resolvePage(ctx context.Context, keys []Name, ids []string, viewerID string, filter TimelineFilter) (resolved, notes []*model.Note, err error) {
+	resolved, dangling, err := s.resolve(ctx, ids)
+	if err != nil {
+		return nil, nil, err
+	}
+	s.pruneDangling(ctx, keys, dangling)
+	notes = ApplyFilter(resolved, viewerID, filter)
+	if filter.PageFilter != nil {
+		if notes, err = filter.PageFilter(notes); err != nil {
+			return nil, nil, err
+		}
+	}
+	return resolved, notes, nil
+}
+
+// scanOlder keeps hydrating the ids left over from the first page while the
+// page still needs notes. It is used only while the database fallback is off.
+//
+// rest は readFanout が 1 回だけ読んだ ID の残りで、cursor の向きに並んでいる。
+// ここでは Redis を読み直さず、先頭から切り出していく。
+func (s *Service) scanOlder(ctx context.Context, keys []Name, rest []string, notes []*model.Note, limit int, viewerID string, filter TimelineFilter) ([]*model.Note, error) {
+	for len(rest) > 0 && needsMore(notes, limit, filter.AllowPartial) {
+		// limit > 0 (readFanout が保証) なので n は正になる。
+		n := min(max((limit-len(notes))*fanoutScanFactor, limit), len(rest))
+		_, more, err := s.resolvePage(ctx, keys, rest[:n], viewerID, filter)
+		if err != nil {
+			return nil, err
+		}
+		notes = append(notes, more...)
+		rest = rest[n:]
+	}
+	// notes は ApplyFilter の戻り値から始まるので、空でも非 nil (noDBFallback の契約)。
+	// PageFilter も非 nil を返す前提 (TimelineFilter.PageFilter の doc)。
+	if len(notes) > limit {
+		notes = notes[:limit]
+	}
+	return notes, nil
+}
+
 // HomeTimeline returns the timeline for a logged-in user. The home timeline
 // shows notes by users they follow plus their own notes.
 func (s *Service) HomeTimeline(ctx context.Context, viewer *model.User, untilID, sinceID string, limit int, filter TimelineFilter) ([]*model.Note, error) {
@@ -229,33 +382,17 @@ func (s *Service) HomeTimeline(ctx context.Context, viewer *model.User, untilID,
 	if !s.fanoutEnabled() {
 		return s.noteRepo.ListHomeTimeline(viewer.ID, limit, sinceID, untilID, dbFilter)
 	}
-	ids, err := s.fanout.Get(ctx, HomeTimelineName(viewer.ID), untilID, sinceID, limit)
-	if err != nil {
-		return nil, err
-	}
-	if !shouldFallbackToDB(ids, sinceID, untilID) {
-		resolved, dangling, err := s.resolve(ctx, ids)
-		if err != nil {
-			return nil, err
-		}
-		s.pruneDangling(ctx, []Name{HomeTimelineName(viewer.ID)}, dangling)
-		notes := ApplyFilter(resolved, viewer.ID, filter)
-		if !filter.AllowPartial && len(notes) < limit && s.dbFallbackEnabled() {
-			// **境界は filter 前の resolved から取る。** filter で落ちた note も
-			// 「解決はできている」ので、DB fallback で引き直す必要は無い。
-			fbSince, fbUntil := fallbackRange(resolved, sinceID, untilID)
-			rest, err := s.noteRepo.ListHomeTimeline(viewer.ID, limit-len(notes), fbSince, fbUntil, dbFilter)
-			if err != nil {
-				return nil, err
-			}
-			return append(notes, rest...), nil
-		}
-		return notes, nil
-	}
-	if !s.dbFallbackEnabled() {
-		return noDBFallback(), nil
-	}
-	return s.noteRepo.ListHomeTimeline(viewer.ID, limit, sinceID, untilID, dbFilter)
+	keys := []Name{HomeTimelineName(viewer.ID)}
+	return s.readFanout(ctx, fanoutRead{
+		keys: keys,
+		ids: func() ([]string, error) {
+			return s.fanout.Get(ctx, keys[0], untilID, sinceID, 0)
+		},
+		db: func(since, until string, n int) ([]*model.Note, error) {
+			return s.noteRepo.ListHomeTimeline(viewer.ID, n, since, until, dbFilter)
+		},
+		gated: true,
+	}, viewer.ID, untilID, sinceID, limit, filter)
 }
 
 // LocalTimeline returns notes posted by local users with public/home visibility.
@@ -289,31 +426,16 @@ func (s *Service) LocalTimeline(ctx context.Context, viewer *model.User, untilID
 	case viewerID != "":
 		keys = append(keys, LocalTimelineWithReplyToName(viewerID))
 	}
-	ids, err := s.fanout.GetMerged(ctx, keys, untilID, sinceID, limit)
-	if err != nil {
-		return nil, err
-	}
-	if !shouldFallbackToDB(ids, sinceID, untilID) {
-		resolved, dangling, err := s.resolve(ctx, ids)
-		if err != nil {
-			return nil, err
-		}
-		s.pruneDangling(ctx, keys, dangling)
-		notes := ApplyFilter(resolved, viewerID, filter)
-		if !filter.AllowPartial && len(notes) < limit && s.dbFallbackEnabled() {
-			fbSince, fbUntil := fallbackRange(resolved, sinceID, untilID)
-			rest, err := s.noteRepo.ListLocalTimeline(limit-len(notes), fbSince, fbUntil, dbFilter)
-			if err != nil {
-				return nil, err
-			}
-			return append(notes, rest...), nil
-		}
-		return notes, nil
-	}
-	if !s.dbFallbackEnabled() {
-		return noDBFallback(), nil
-	}
-	return s.noteRepo.ListLocalTimeline(limit, sinceID, untilID, dbFilter)
+	return s.readFanout(ctx, fanoutRead{
+		keys: keys,
+		ids: func() ([]string, error) {
+			return s.fanout.GetMerged(ctx, keys, untilID, sinceID, 0)
+		},
+		db: func(since, until string, n int) ([]*model.Note, error) {
+			return s.noteRepo.ListLocalTimeline(n, since, until, dbFilter)
+		},
+		gated: true,
+	}, viewerID, untilID, sinceID, limit, filter)
 }
 
 // GlobalTimeline returns all public notes including federated remotes.
@@ -340,28 +462,17 @@ func (s *Service) GlobalTimeline(ctx context.Context, viewer *model.User, untilI
 	if !s.fanoutEnabled() {
 		return s.noteRepo.ListGlobalTimeline(limit, sinceID, untilID, toDBFilter(filter, viewerID))
 	}
-	ids, err := s.fanout.Get(ctx, GlobalTimeline, untilID, sinceID, limit)
-	if err != nil {
-		return nil, err
-	}
-	if !shouldFallbackToDB(ids, sinceID, untilID) {
-		resolved, dangling, err := s.resolve(ctx, ids)
-		if err != nil {
-			return nil, err
-		}
-		s.pruneDangling(ctx, []Name{GlobalTimeline}, dangling)
-		notes := ApplyFilter(resolved, viewerID, filter)
-		if !filter.AllowPartial && len(notes) < limit {
-			fbSince, fbUntil := fallbackRange(resolved, sinceID, untilID)
-			rest, err := s.noteRepo.ListGlobalTimeline(limit-len(notes), fbSince, fbUntil, toDBFilter(filter, viewerID))
-			if err != nil {
-				return nil, err
-			}
-			return append(notes, rest...), nil
-		}
-		return notes, nil
-	}
-	return s.noteRepo.ListGlobalTimeline(limit, sinceID, untilID, toDBFilter(filter, viewerID))
+	dbFilter := toDBFilter(filter, viewerID)
+	return s.readFanout(ctx, fanoutRead{
+		keys: []Name{GlobalTimeline},
+		ids: func() ([]string, error) {
+			return s.fanout.Get(ctx, GlobalTimeline, untilID, sinceID, 0)
+		},
+		db: func(since, until string, n int) ([]*model.Note, error) {
+			return s.noteRepo.ListGlobalTimeline(n, since, until, dbFilter)
+		},
+		gated: false,
+	}, viewerID, untilID, sinceID, limit, filter)
 }
 
 // HybridTimeline merges home and local timelines into a single feed.
@@ -384,32 +495,20 @@ func (s *Service) HybridTimeline(ctx context.Context, viewer *model.User, untilI
 	} else {
 		stlKeys = append(stlKeys, LocalTimelineWithReplyToName(viewer.ID))
 	}
-	multi, err := s.fanout.GetMulti(ctx, stlKeys, untilID, sinceID, limit)
-	if err != nil {
-		return nil, err
-	}
-	merged := mergeIDs(multi, limit, isAscending(sinceID, untilID))
-	if !shouldFallbackToDB(merged, sinceID, untilID) {
-		resolved, dangling, err := s.resolve(ctx, merged)
-		if err != nil {
-			return nil, err
-		}
-		s.pruneDangling(ctx, stlKeys, dangling)
-		notes := ApplyFilter(resolved, viewer.ID, filter)
-		if !filter.AllowPartial && len(notes) < limit && s.dbFallbackEnabled() {
-			fbSince, fbUntil := fallbackRange(resolved, sinceID, untilID)
-			rest, err := s.hybridDBFallback(viewer, fbUntil, fbSince, limit-len(notes), filter)
+	return s.readFanout(ctx, fanoutRead{
+		keys: stlKeys,
+		ids: func() ([]string, error) {
+			multi, err := s.fanout.GetMulti(ctx, stlKeys, untilID, sinceID, 0)
 			if err != nil {
 				return nil, err
 			}
-			return append(notes, rest...), nil
-		}
-		return notes, nil
-	}
-	if !s.dbFallbackEnabled() {
-		return noDBFallback(), nil
-	}
-	return s.hybridDBFallback(viewer, untilID, sinceID, limit, filter)
+			return mergeIDs(multi, 0, isAscending(sinceID, untilID)), nil
+		},
+		db: func(since, until string, n int) ([]*model.Note, error) {
+			return s.hybridDBFallback(viewer, until, since, n, filter)
+		},
+		gated: true,
+	}, viewer.ID, untilID, sinceID, limit, filter)
 }
 
 // hybridDBFallback queries the home and local timelines from the database and
@@ -561,9 +660,9 @@ func (s *Service) resolve(ctx context.Context, ids []string) (notes []*model.Not
 	eph, err := s.ephemeral.GetNotes(ctx, missing)
 	if err != nil {
 		// Redis 障害で timeline 全体を落とさない。DB 分だけ返せば、呼び出し側の
-		// 件数不足判定が DB fallback に倒してくれる (ただし
-		// `meta.enableFanoutTimelineDbFallback` が off なら倒れず、件数は
-		// 足りないまま返る、#2762)。**dangling は返さない** —
+		// 件数不足判定が DB fallback に倒してくれる (ただし allowPartial で 1 件でも
+		// 残れば倒れず (#3448)、`meta.enableFanoutTimelineDbFallback` が off なら
+		// 倒れず、件数は足りないまま返る、#2762)。**dangling は返さない** —
 		// 生きている note の ID を消しかねない。
 		slog.WarnContext(ctx, "timeline: ephemeral lookup failed", "err", err)
 		return notes, nil, nil
@@ -659,7 +758,8 @@ func (s *Service) confirmMissingOnPrimary(ctx context.Context, candidates []stri
 // 消え、戻す経路が無い**。
 //
 // DB fallback があるから安全、とは言えない。4 経路とも fallback は
-// `!filter.AllowPartial` でゲートされていてクライアントが無効化でき、
+// `filter.AllowPartial` で 1 件でも解決できたページでは走らず (#3448 で
+// 0 件のときだけは走るようにした)、
 // global を除く 3 経路は `meta.enableFanoutTimelineDbFallback` を off に
 // すれば運用側でも止まり (#2762)、しかも一度 list から消えた ID を戻す経路が無い。
 func (s *Service) pruneDangling(ctx context.Context, names []Name, dangling []string) {

@@ -202,7 +202,9 @@ func (s *FanoutTimelineService) GetMerged(ctx context.Context, names []Name, unt
 	} else {
 		sort.Sort(sort.Reverse(sort.StringSlice(merged)))
 	}
-	if len(merged) > limit {
+	// limit<=0 は Get / GetMulti と同じく全件 (timeline service が窓全体を
+	// 1 回で読むときに使う、#3448)。
+	if limit > 0 && len(merged) > limit {
 		merged = merged[:limit]
 	}
 	return merged, nil
@@ -305,11 +307,9 @@ func filterAndSort(ids []string, untilID, sinceID string, limit int) []string {
 	// **upstream は窓を切らない。** `FanoutTimelineService.getMulti` が
 	// `lrange 0 -1` で list 全体を返し、`FanoutTimelineEndpointService` 側の
 	// while ループが「limit 件が埋まるまで窓の奥へ読み進めながら hydrate する」
-	// 形になっている。mk-go はここで limit 件に切り、足りない分は DB で継ぎ足す。
-	//
-	// 既定では差が出ない (どちらも limit 件を返す) が、
-	// `meta.enableFanoutTimelineDbFallback` を off にすると upstream のほうが
-	// 件数が揃いやすい (#2762。詳細は docs/divergence/operations.md §5.6)。
+	// 形になっている。timeline service もこれに合わせ、limit<=0 で窓全体を
+	// 1 回だけ読み、メモリ上で切り出す (readFanout、#3448)。窓の奥を読み進めるのは
+	// DB fallback を切っているときだけ (docs/divergence/operations.md §5.6)。
 	if limit > 0 && len(out) > limit {
 		out = out[:limit]
 	}

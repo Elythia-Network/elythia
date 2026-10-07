@@ -34,7 +34,7 @@ type TimelineFilter struct {
 	IncludeMyRenotes      *bool    // nil=true。home/hybridのみ
 	IncludeRenotedMyNotes *bool    // nil=true。home/hybridのみ
 	IncludeLocalRenotes   *bool    // nil=true。home/hybridのみ
-	AllowPartial          bool     // trueならRedis結果が不足でもDBフォールバックしない
+	AllowPartial          bool     // trueならRedisから1件でも取れればDBで埋めない。0件ならDBへ倒す (#3448)
 	MutedChannelIDs       []string // 指定があれば channelId が一致するノートを除外
 	// MutedUserIDs は viewer が mute した user の note を除外する filter
 	// 用 (#874)。nil なら filter 無効、空 slice なら filter 有効だが除外
@@ -78,6 +78,16 @@ type TimelineFilter struct {
 	// (upstream FanoutTimelineEndpointService / generateUgcVisibilityQueryForVisitor).
 	// Reply / renote targets attached to a local note are kept, as upstream does.
 	LocalUsersOnly bool
+	// PageFilter is applied to every page hydrated from Redis after
+	// ApplyFilter, before deciding whether the page needs more notes. It must
+	// return a non-nil slice. nil means no extra filter.
+	//
+	// handler 側にしか無い判定 (meta.blockedHosts、凍結、リノート先の返信・
+	// リノートの投稿者まで辿る mute / block) を Redis の読み取りに入れるため
+	// (#3448)。upstream は isBlockedHost や isUserRelated(note.renote) を Redis を
+	// 読み進めるループの filter に入れている。handler が返した後に落とすと、
+	// 1 ページ分が全て消えたときに空を返し、frontend がそこで止まる。
+	PageFilter func([]*model.Note) ([]*model.Note, error)
 }
 
 // boolDefault returns *b if non-nil, else def.
