@@ -3,24 +3,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+import type * as Elythia from 'elythia-js';
 import { i18n } from '@/i18n.js';
 import { getProxiedImageUrl } from '@/utility/media-proxy.js';
 
-export type RelatedCounts = {
-	total: number;
-	pending: number;
-	approved: number;
-	rejected: number;
-	canceled: number;
-};
+export type RelatedCounts = Elythia.EmojiApplicationStatusCounts;
 
-export type RelatedItem = {
-	id: string;
-	url: string | null;
-	remoteHost?: string;
-};
+// 画像の扱いを決めるのに要る項目だけを受ける (ユーザーごとの申請の一覧からも呼ぶ)
+export type RelatedItem = Pick<Elythia.AdminEmojiApplication, 'id' | 'url' | 'remoteHost'>;
 
-export type RelatedStatus = 'pending' | 'approved' | 'rejected' | 'canceled';
+export type RelatedStatus = Elythia.EmojiApplicationStatus;
 
 /**
  * Renders the label for one match reason (#2960).

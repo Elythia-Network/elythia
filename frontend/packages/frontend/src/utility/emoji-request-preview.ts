@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+import type * as Elythia from 'elythia-js';
 import { i18n } from '@/i18n.js';
 import { prefer } from '@/preferences.js';
 import { getProxiedImageUrl, getStaticImageUrl } from '@/utility/media-proxy.js';
@@ -13,11 +14,7 @@ import { getProxiedImageUrl, getStaticImageUrl } from '@/utility/media-proxy.js'
  * **URL が空かどうかで状態を推測しない。** 「申請元が削除された」「承認後の
  * 絵文字が消された」「DB 障害で確認できなかった」は利用者に出す文面が違う。
  */
-export type ApplicationPreview = {
-	url: string;
-	source: 'applicationFile' | 'remoteEmoji' | 'approvedEmoji';
-	state: 'available' | 'sourceGone' | 'approvedEmojiGone' | 'unknown';
-};
+export type ApplicationPreview = Elythia.EmojiApplicationPreview;
 
 /**
  * 表示する画像 URL。出せないときは null。
