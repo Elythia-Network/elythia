@@ -36,6 +36,9 @@ type TimelineRequest struct {
 	// visitorPolicy is meta.ugcVisibilityForVisitor resolved once per request
 	// by serveTimeline (empty for signed-in viewers).
 	visitorPolicy string
+	// pageFilter is applyMuteBlock for this request's viewer, set by
+	// serveTimeline. The endpoints pass it as TimelineFilter.PageFilter.
+	pageFilter func([]*model.Note) ([]*model.Note, error)
 }
 
 // normalize validates limit against upstream の paramDef。ok=false は範囲外で、
@@ -86,6 +89,7 @@ func (h *Handler) Timeline(c echo.Context) error {
 			IncludeRenotedMyNotes: req.IncludeRenotedMyNotes,
 			IncludeLocalRenotes:   req.IncludeLocalRenotes,
 			AllowPartial:          req.AllowPartial,
+			PageFilter:            req.pageFilter,
 			MutedChannelIDs:       h.loadMutedChannelIDs(viewer),
 			MutedUserIDs:          h.loadMutedUserIDs(viewer),
 			RenoteMutedUserIDs:    h.loadRenoteMutedUserIDs(viewer),
@@ -109,6 +113,7 @@ func (h *Handler) LocalTimeline(c echo.Context) error {
 			WithRenotes:        req.WithRenotes,
 			WithReplies:        req.WithReplies,
 			AllowPartial:       req.AllowPartial,
+			PageFilter:         req.pageFilter,
 			MutedChannelIDs:    h.loadMutedChannelIDs(viewer),
 			MutedUserIDs:       h.loadMutedUserIDs(viewer),
 			RenoteMutedUserIDs: h.loadRenoteMutedUserIDs(viewer),
@@ -129,6 +134,7 @@ func (h *Handler) GlobalTimeline(c echo.Context) error {
 			WithFiles:          req.WithFiles,
 			WithRenotes:        req.WithRenotes,
 			AllowPartial:       req.AllowPartial,
+			PageFilter:         req.pageFilter,
 			MutedChannelIDs:    h.loadMutedChannelIDs(viewer),
 			MutedUserIDs:       h.loadMutedUserIDs(viewer),
 			RenoteMutedUserIDs: h.loadRenoteMutedUserIDs(viewer),
@@ -162,6 +168,7 @@ func (h *Handler) HybridTimeline(c echo.Context) error {
 			IncludeRenotedMyNotes: req.IncludeRenotedMyNotes,
 			IncludeLocalRenotes:   req.IncludeLocalRenotes,
 			AllowPartial:          req.AllowPartial,
+			PageFilter:            req.pageFilter,
 			MutedChannelIDs:       h.loadMutedChannelIDs(viewer),
 			MutedUserIDs:          h.loadMutedUserIDs(viewer),
 			RenoteMutedUserIDs:    h.loadRenoteMutedUserIDs(viewer),
@@ -419,6 +426,7 @@ func (h *Handler) serveTimeline(
 		}
 	}
 
+	req.pageFilter = h.newMuteBlockFilter(viewer)
 	notes, err := fn(viewer, req)
 	if err != nil {
 		// requireAuthでviewer nilチェックは事前に行っているので、Service層からの
@@ -431,7 +439,11 @@ func (h *Handler) serveTimeline(
 	// こぼす。upstream FanoutTimelineEndpointService は note と note.renote の
 	// 両方に isUserRelated を適用しており (#2345 の調査で判明)、mk-go でも
 	// 同じ判定を持つ ApplyMuteBlockChannel を timeline 経路に通して揃える。
-	if notes, err = h.applyMuteBlock(viewer, notes); err != nil {
+	//
+	// Redis から読んだページには service が PageFilter として既に通している
+	// (#3448)。ここで判定するのは DB fallback の行だけで、通過済みの Redis の行は
+	// 判定し直さない (newMuteBlockFilter の doc)。読み込みも使い回す。
+	if notes, err = req.pageFilter(notes); err != nil {
 		return apierr.JSONInternalError(c)
 	}
 	packed := h.packMany(c.Request().Context(), notes, viewer)

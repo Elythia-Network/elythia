@@ -830,32 +830,91 @@ func (h *Handler) serveList(c echo.Context, noSuchNoteID string, fn func(*model.
 // blocked-host / suspended は別 follow-up。blockingRepo 未配線 / viewer nil なら
 // no-op。fail-closed: lookup / filter エラーは呼び出し側で 500 にする。
 func (h *Handler) applyMuteBlock(viewer *model.User, notes []*model.Note) ([]*model.Note, error) {
-	// muted-user / blocked-user / muted-channel / muted-instances は viewer 視点
-	// なので anonymous では対象外。
-	if viewer != nil && h.blockingRepo != nil {
-		// channelMutingRepo を渡さないと MutedChannelIDs が空のままになり、
-		// チャンネルミュートが post-fetch 側で一切効かない。
-		sets, err := notesfilter.LoadMuteBlockSets(viewer, h.mutingRepo, h.blockingRepo, h.channelMutingRepo, h.userRepo)
+	return h.newMuteBlockFilter(viewer)(notes)
+}
+
+// newMuteBlockFilter returns applyMuteBlock for one viewer with its lookups
+// (mute / block sets and meta.blockedHosts) loaded at most once, on first use.
+// Notes that already passed an earlier call are not checked again. The
+// returned func is not safe for concurrent use.
+//
+// timeline は Redis を読み進める回ごとにこれを呼び (TimelineFilter.PageFilter、
+// #3448)、service から戻った後にもう一度通す。どちらも 1 リクエストの中で
+// 使い回すので、mute / block / meta の読み込みは 1 回で済む。
+//
+// **通過済みの note は判定し直さない。** 2 回目の呼び出しで実際に落とす対象は
+// DB fallback の行だけで、Redis の行は 1 回目で通過している。全件に掛け直すと、
+// リノート先の入れ子検査 (FindManyByIDsWithUser) がリクエストごとに 1 本余計に
+// 走る。判定は ID で覚える (DB と Redis で同じ note でも別のポインタになりうる)。
+// 同じ ID を判定し直さなくてよいのは、DB fallback の範囲が fallbackRange で
+// Redis から解決した範囲と重ならず、同じ ID が別の内容で来ないため。
+// fallbackRange を変えるときはこの前提も見直すこと。
+func (h *Handler) newMuteBlockFilter(viewer *model.User) func([]*model.Note) ([]*model.Note, error) {
+	var (
+		loaded  bool
+		sets    notesfilter.MuteBlockSets
+		blocked []string
+		passed  = make(map[string]struct{})
+	)
+	return func(notes []*model.Note) ([]*model.Note, error) {
+		if !loaded {
+			// muted-user / blocked-user / muted-channel / muted-instances は viewer 視点
+			// なので anonymous では対象外。
+			if viewer != nil && h.blockingRepo != nil {
+				// channelMutingRepo を渡さないと MutedChannelIDs が空のままになり、
+				// チャンネルミュートが post-fetch 側で一切効かない。
+				s, err := notesfilter.LoadMuteBlockSets(viewer, h.mutingRepo, h.blockingRepo, h.channelMutingRepo, h.userRepo)
+				if err != nil {
+					return nil, err
+				}
+				sets = s
+			}
+			b, err := h.blockedHosts()
+			if err != nil {
+				return nil, err
+			}
+			blocked = b
+			loaded = true
+		}
+		fresh := make([]*model.Note, 0, len(notes))
+		for _, n := range notes {
+			if n == nil {
+				continue
+			}
+			if _, ok := passed[n.ID]; !ok {
+				fresh = append(fresh, n)
+			}
+		}
+		// sets が空 (anonymous / 未配線) か fresh が空なら、ApplyMuteBlockChannel は
+		// 何も引かずに返す。
+		kept, err := notesfilter.ApplyMuteBlockChannel(fresh, sets, h.noteRepo)
 		if err != nil {
 			return nil, err
 		}
-		notes, err = notesfilter.ApplyMuteBlockChannel(notes, sets, h.noteRepo)
-		if err != nil {
-			return nil, err
+		// suspended-user / blocked-host は upstream generateBaseNoteFilteringQuery と
+		// 同じく viewer 不問で常に除外する (#1783。children/replies/renotes/mentions/
+		// search-by-tag/featured の post-fetch 経路で漏れていた)。blockedHosts が
+		// 空 (metaRepo 未配線) なら ApplyBlockedHosts は no-op。
+		for _, n := range notesfilter.ApplyBlockedHosts(notesfilter.ApplySuspended(kept), blocked) {
+			passed[n.ID] = struct{}{}
+		}
+		return keepPassed(notes, passed), nil
+	}
+}
+
+// keepPassed returns the notes whose id is in passed, in input order. 空でも
+// 非 nil を返す (TimelineFilter.PageFilter の契約)。
+func keepPassed(notes []*model.Note, passed map[string]struct{}) []*model.Note {
+	out := make([]*model.Note, 0, len(notes))
+	for _, n := range notes {
+		if n == nil {
+			continue
+		}
+		if _, ok := passed[n.ID]; ok {
+			out = append(out, n)
 		}
 	}
-	// suspended-user / blocked-host は upstream generateBaseNoteFilteringQuery と
-	// 同じく viewer 不問で常に除外する (#1783。children/replies/renotes/mentions/
-	// search-by-tag/featured の post-fetch 経路で漏れていた)。
-	notes = notesfilter.ApplySuspended(notes)
-	if h.metaRepo != nil {
-		blocked, err := h.blockedHosts()
-		if err != nil {
-			return nil, err
-		}
-		notes = notesfilter.ApplyBlockedHosts(notes, blocked)
-	}
-	return notes, nil
+	return out
 }
 
 // SetMetaRepo wires a MetaRepository used for the blocked-host filter on the

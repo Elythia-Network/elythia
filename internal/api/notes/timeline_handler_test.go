@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	coretimeline "github.com/elythia-network/elythia/internal/core/timeline"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
@@ -569,4 +571,232 @@ func TestLoadMutedInstances(t *testing.T) {
 	assert.ElementsMatch(t, []string{"bad.example", "good.tld"}, h.loadMutedInstances(&model.User{ID: "v"}))
 	// 空 mutedInstances は nil。
 	assert.Nil(t, h.loadMutedInstances(&model.User{ID: "empty"}))
+}
+
+// --- #3448: handler 側の filter で 1 ページ分が全て消えるとき ---
+
+// pageFilterNote builds a packable note authored by userID at t.
+func pageFilterNote(t time.Time, userID string, host *string) *model.Note {
+	idGen, _ := id.NewGenerator("aidx")
+	return &model.Note{
+		ID:         idGen.Generate(t),
+		UserID:     userID,
+		UserHost:   host,
+		Visibility: model.NoteVisibilityPublic,
+		Reactions:  datatypes.JSON([]byte("{}")),
+		User: &model.User{
+			ID:                userID,
+			Username:          userID,
+			Host:              host,
+			AvatarDecorations: datatypes.JSON([]byte("[]")),
+		},
+	}
+}
+
+// homeWithDroppedPage seeds the viewer's home list with the given notes (all
+// of which the handler-side filter drops) and the database with three older
+// notes by the viewer that are not in Redis, then reads the home timeline
+// with allowPartial. It returns the ids of the older notes and of the response.
+func homeWithDroppedPage(t *testing.T, noteRepo *testutil.MockNoteRepository, h func(*coretimeline.Service) *Handler, dropped []*model.Note) (older, got []string) {
+	t.Helper()
+	tl, fanout := newRealTimelineService(t, noteRepo)
+	base := time.Now().Add(-time.Hour)
+	for i := 0; i < 3; i++ {
+		n := pageFilterNote(base.Add(-time.Duration(i)*time.Minute), "viewer", nil)
+		noteRepo.Notes[n.ID] = n
+		older = append(older, n.ID)
+	}
+	for _, n := range dropped {
+		noteRepo.Notes[n.ID] = n
+		require.NoError(t, fanout.Push(context.Background(), coretimeline.HomeTimelineName("viewer"), n.ID, 100))
+	}
+
+	c, rec := newJSONRequest(t, "/api/notes/timeline", `{"limit":20,"allowPartial":true}`)
+	setAuthUser(c, &model.User{ID: "viewer"})
+	require.NoError(t, h(tl).Timeline(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp []map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	for _, n := range resp {
+		got = append(got, n["id"].(string))
+	}
+	return older, got
+}
+
+// meta.blockedHosts は timeline.ApplyFilter に無く handler でだけ落とす。
+// Redis のページが全てブロック済みインスタンスの投稿だと、以前は handler が
+// 全て落として [] を返し、frontend がそこで止まっていた。upstream は
+// isBlockedHost を Redis を読み進めるループの filter に入れている。
+func TestTimeline_AllowPartialBlockedHostPageReturnsOlderNotes(t *testing.T) {
+	noteRepo := testutil.NewMockNoteRepository()
+	bad := "bad.example"
+	now := time.Now()
+	dropped := make([]*model.Note, 0, 20)
+	for i := 19; i >= 0; i-- {
+		dropped = append(dropped, pageFilterNote(now.Add(-time.Duration(i)*time.Second), "remote", &bad))
+	}
+	older, got := homeWithDroppedPage(t, noteRepo, func(tl *coretimeline.Service) *Handler {
+		h := newTimelineHandler(t, noteRepo, tl)
+		meta := testutil.NewMockMetaRepository()
+		meta.Meta = &model.Meta{ID: "x", BlockedHosts: []string{bad}}
+		h.SetMetaRepo(meta)
+		return h
+	}, dropped)
+	assert.Equal(t, older, got, "ブロック済みインスタンスの投稿で 1 ページが消えても、古い note を返すこと")
+}
+
+// リノート先が「ミュート相手への返信」だと、timeline.ApplyFilter はリノート
+// 自身の userId / renoteUserId しか見ないので落とせず、handler の入れ子検査で
+// 落ちる。これで 1 ページが全て消えても止まらないこと。
+func TestTimeline_AllowPartialNestedMutePageReturnsOlderNotes(t *testing.T) {
+	noteRepo := testutil.NewMockNoteRepository()
+	now := time.Now()
+	muted := "muted"
+	target := pageFilterNote(now.Add(-2*time.Hour), "x", nil)
+	target.ReplyUserID = &muted
+	noteRepo.Notes[target.ID] = target
+	targetUser := target.UserID
+	dropped := make([]*model.Note, 0, 20)
+	for i := 19; i >= 0; i-- {
+		r := pageFilterNote(now.Add(-time.Duration(i)*time.Second), "other", nil)
+		r.RenoteID = &target.ID
+		r.RenoteUserID = &targetUser
+		dropped = append(dropped, r)
+	}
+	older, got := homeWithDroppedPage(t, noteRepo, func(tl *coretimeline.Service) *Handler {
+		h := newTimelineHandler(t, noteRepo, tl)
+		mutingRepo := testutil.NewMockMutingRepository()
+		mutingRepo.Mutings["m1"] = &model.Muting{ID: "m1", MuterID: "viewer", MuteeID: muted}
+		userRepo := testutil.NewMockUserRepository()
+		userRepo.Users["viewer"] = &model.User{ID: "viewer", Username: "viewer", UsernameLower: "viewer"}
+		h.SetMutingRepo(mutingRepo)
+		h.SetBlockingRepo(testutil.NewMockBlockingRepository())
+		h.SetUserRepo(userRepo)
+		return h
+	}, dropped)
+	// target 自身も DB にあり (公開、viewer 以外の投稿) mock の ListHomeTimeline は
+	// follow を見ないので返りうる。ミュート相手への返信なので handler が落とす。
+	assert.Equal(t, older, got, "リノート先の入れ子ミュートで 1 ページが消えても、古い note を返すこと")
+}
+
+// lookupSpyNoteRepo records every FindManyByIDsWithUser call.
+type lookupSpyNoteRepo struct {
+	repository.NoteRepository
+	calls [][]string
+}
+
+func (s *lookupSpyNoteRepo) FindManyByIDsWithUser(ids []string) ([]*model.Note, error) {
+	s.calls = append(s.calls, append([]string(nil), ids...))
+	return s.NoteRepository.FindManyByIDsWithUser(ids)
+}
+
+// countingMutingRepo counts ListMuteeIDs calls.
+type countingMutingRepo struct {
+	*testutil.MockMutingRepository
+	muteeLists int
+}
+
+func (m *countingMutingRepo) ListMuteeIDs(muterID string) ([]string, error) {
+	m.muteeLists++
+	return m.MockMutingRepository.ListMuteeIDs(muterID)
+}
+
+// countingMetaRepo counts Fetch calls.
+type countingMetaRepo struct {
+	*testutil.MockMetaRepository
+	fetches int
+}
+
+func (m *countingMetaRepo) Fetch() (*model.Meta, error) {
+	m.fetches++
+	return m.MockMetaRepository.Fetch()
+}
+
+type dbFallbackOff struct{}
+
+func (dbFallbackOff) FanoutTimelineDBFallbackEnabled() bool { return false }
+
+// handler 側の filter (PageFilter) は、Redis を読み進める回をまたいでも
+// mute / block / meta を 1 回だけ読み、通過済みの note を判定し直さないこと。
+// リノート先の入れ子検査 (FindManyByIDsWithUser) は、新しく通す束ごとに 1 回だけ
+// 走る。serveTimeline の最後の 1 回で同じ行を掛け直すと、リクエストごとに 1 本
+// 余計な問い合わせになっていた (#3448 review)。
+func TestTimeline_PageFilterLoadsOnceAndSkipsPassedNotes(t *testing.T) {
+	requireRedis(t)
+	mock := testutil.NewMockNoteRepository()
+	spy := &lookupSpyNoteRepo{NoteRepository: mock}
+	now := time.Now()
+	target := pageFilterNote(now.Add(-time.Hour), "x", nil)
+	mock.Notes[target.ID] = target
+	targetUser := target.UserID
+
+	// 新しい順: mute 2 件 | リノート 1 件 + mute 5 件 | リノート 1 件。
+	// limit 2 / allowPartial=false / fallback off で、1 ページ目 (2 件)、
+	// 2 回目 (6 件)、3 回目 (残り 1 件) と読み進める。
+	kinds := "mm" + "rmmmmm" + "r"
+	var renotes []string
+	for i := len(kinds) - 1; i >= 0; i-- {
+		var n *model.Note
+		at := now.Add(-time.Duration(i) * time.Second)
+		if kinds[i] == 'm' {
+			n = pageFilterNote(at, "muted", nil)
+		} else {
+			n = pageFilterNote(at, "other", nil)
+			n.RenoteID = &target.ID
+			n.RenoteUserID = &targetUser
+			renotes = append([]string{n.ID}, renotes...)
+		}
+		mock.Notes[n.ID] = n
+	}
+	testRedis.FlushAll(context.Background())
+	idGen, _ := id.NewGenerator("aidx")
+	fanout := coretimeline.NewFanoutTimelineService(testRedis.Client, idGen, "")
+	tl := coretimeline.NewService(fanout, spy, testutil.NewMockFollowingRepository())
+	tl.SetDBFallbackToggle(dbFallbackOff{})
+	ids := make([]string, 0, len(kinds))
+	for _, n := range mock.Notes {
+		if n.ID != target.ID {
+			ids = append(ids, n.ID)
+		}
+	}
+	sort.Strings(ids)
+	for _, nid := range ids {
+		require.NoError(t, fanout.Push(context.Background(), coretimeline.HomeTimelineName("viewer"), nid, 100))
+	}
+
+	h := NewHandler(spy, corenote.NewCreateService(mock, testutil.NewMockPollRepository(), idGen, nil),
+		corenote.NewDeleteService(mock), corenote.NewQueryService(mock, nil), tl, nil, nil, nil, idGen)
+	muting := &countingMutingRepo{MockMutingRepository: testutil.NewMockMutingRepository()}
+	muting.Mutings["m1"] = &model.Muting{ID: "m1", MuterID: "viewer", MuteeID: "muted"}
+	meta := &countingMetaRepo{MockMetaRepository: testutil.NewMockMetaRepository()}
+	meta.Meta = &model.Meta{ID: "x", BlockedHosts: []string{"bad.example"}}
+	userRepo := testutil.NewMockUserRepository()
+	userRepo.Users["viewer"] = &model.User{ID: "viewer", Username: "viewer", UsernameLower: "viewer"}
+	h.SetMutingRepo(muting)
+	h.SetBlockingRepo(testutil.NewMockBlockingRepository())
+	h.SetUserRepo(userRepo)
+	h.SetMetaRepo(meta)
+
+	c, rec := newJSONRequest(t, "/api/notes/timeline", `{"limit":2}`)
+	setAuthUser(c, &model.User{ID: "viewer"})
+	require.NoError(t, h.Timeline(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp []map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	got := make([]string, 0, len(resp))
+	for _, n := range resp {
+		got = append(got, n["id"].(string))
+	}
+	assert.Equal(t, renotes, got)
+
+	targetLookups := 0
+	for _, call := range spy.calls {
+		if len(call) == 1 && call[0] == target.ID {
+			targetLookups++
+		}
+	}
+	assert.Equal(t, 2, targetLookups, "リノート先の検査は、新しく通す束 (2 回目と 3 回目) ごとに 1 回だけ")
+	// loadMutedUserIDs (TimelineFilter.MutedUserIDs) で 1 本、PageFilter で 1 本。
+	assert.Equal(t, 2, muting.muteeLists, "mute の読み込みは PageFilter 全体で 1 回だけ")
+	assert.Equal(t, 1, meta.fetches, "meta の読み込みは 1 回だけ")
 }
