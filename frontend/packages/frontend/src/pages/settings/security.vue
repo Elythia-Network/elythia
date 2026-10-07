@@ -111,9 +111,10 @@ async function regenerateToken() {
 	const auth = await os.authenticateDialog();
 	if (auth.canceled) return;
 
+	// Elythia: 引数は password だけ。二要素認証のコードは本家もElythiaも読まないので
+	// 送らない (#3439)
 	misskeyApi('i/regenerate-token', {
 		password: auth.result.password,
-		token: auth.result.token,
 	});
 }
 

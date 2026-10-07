@@ -167,9 +167,12 @@ async function del(announcement: (typeof announcements)['value'][number]) {
 	});
 }
 
+// Elythia: 更新の引数に無い項目 (対象の利用者と既読数) は、本家もElythiaも読まないので
+// 送らない (#3439)
 async function archive(announcement: (typeof announcements)['value'][number]) {
 	if (announcement.id == null) return;
-	const { _id, ...data } = announcement; // _idを消す
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars -- 送らないキーを落とすための分割代入
+	const { _id, userId: _userId, reads: _reads, ...data } = announcement; // _idを消す
 	await os.apiWithDialog('admin/announcements/update', {
 		...data,
 		id: announcement.id, // TSを黙らすため
@@ -180,7 +183,8 @@ async function archive(announcement: (typeof announcements)['value'][number]) {
 
 async function unarchive(announcement: (typeof announcements)['value'][number]) {
 	if (announcement.id == null) return;
-	const { _id, ...data } = announcement; // _idを消す
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars -- 送らないキーを落とすための分割代入
+	const { _id, userId: _userId, reads: _reads, ...data } = announcement; // _idを消す
 	await os.apiWithDialog('admin/announcements/update', {
 		...data,
 		id: announcement.id, // TSを黙らすため
@@ -190,11 +194,16 @@ async function unarchive(announcement: (typeof announcements)['value'][number]) 
 }
 
 async function save(announcement: (typeof announcements)['value'][number]) {
-	const { _id, ...data } = announcement; // _idを消す
+	// Elythia: 作成と更新のそれぞれの引数に無い項目は、本家もElythiaも読まないので
+	// 送らない (#3439)
 	if (announcement.id == null) {
+		// eslint-disable-next-line @typescript-eslint/no-unused-vars -- 送らないキーを落とすための分割代入
+		const { _id, id: _newId, isActive: _isActive, reads: _reads, ...data } = announcement; // _idを消す
 		await os.apiWithDialog('admin/announcements/create', data);
 		refresh();
 	} else {
+		// eslint-disable-next-line @typescript-eslint/no-unused-vars -- 送らないキーを落とすための分割代入
+		const { _id, userId: _userId, reads: _reads, ...data } = announcement; // _idを消す
 		os.apiWithDialog('admin/announcements/update', {
 			...data,
 			id: announcement.id, // TSを黙らすため

@@ -64,6 +64,8 @@ commit する手順は無い。
 本家の misskey-js の型には Elythia 独自のエンドポイントと、`/api/meta` などの独自の項目が無い。これらの型は `frontend/packages/elythia-js` に手で書く (#3417)。misskey-js には手を入れない (本家への追従とぶつからないように)。
 
 - frontend の `misskeyApi` / `misskeyApiGet` / `os.apiWithDialog` と `instance` は `elythia-js` の型を使う。独自のエンドポイントを型を外して (`as never` で) 呼ばず、`elythia-js/src/endpoints.ts` の `ElythiaEndpoints` に型を書く
+- **本家のエンドポイントに Elythia が引数を足したら、`elythia-js/src/extensions.ts` の `ElythiaRequestExtensions` に型を書く** (#3439)。こちらはゲートの対象ではない。misskey-js の応答の型が実際と違うものは、同じファイルの `ResponseOverrides` で差し替える
+- `misskeyApi` などは、引数の型に無いキーを型エラーにし、応答の型を代入先から推論しない (#3439)。新しく型エラーが出たら、キーを打ち間違えていないか、サーバーが読まないキーを送っていないかを先に疑う。応答の型を明示する (`misskeyApi<T>(...)`) と引数の型の検査が効かなくなるので、汎用の呼び出し (`paginator.ts`) 以外では使わない。逆に、エンドポイントを型引数のまま受け渡す包み関数は、明示しないとコンパイルできない。引数の検査を残したいなら、`os.apiWithDialog` のように `P & ExcessKeys<E, P>` で受けて `misskeyApi<void, E, P>(...)` と渡す
 - **Go に Elythia 独自のエンドポイントを足したら、`ElythiaEndpoints` に型を書くか `pending-endpoints.txt` に足す。** `TestElythiaJS_EndpointsMatchRouter` が `docs/api-compat.md` の一覧と突き合わせて、どちらにも無ければ落とす (型を書いたら `pending-endpoints.txt` から外す)
 - 新しいパッケージを足したので、手元の `node_modules` が古いと `elythia-js` を解決できない。`frontend/` で `pnpm install` をし直す
 

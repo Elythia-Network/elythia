@@ -194,8 +194,12 @@ function remove(ad: Misskey.entities.Ad) {
 
 function save(ad: Misskey.entities.Ad) {
 	if (ad.id === '') {
+		// Elythia: 作成の引数に id は無い (本家もElythiaも読まない) ので、新規の印の空文字列を
+		// 送らない (#3439)
+		// eslint-disable-next-line @typescript-eslint/no-unused-vars -- 送らないキーを落とすための分割代入
+		const { id: _id, ...fields } = ad;
 		misskeyApi('admin/ad/create', {
-			...ad,
+			...fields,
 			expiresAt: new Date(ad.expiresAt).getTime(),
 			startsAt: new Date(ad.startsAt).getTime(),
 		}).then(() => {

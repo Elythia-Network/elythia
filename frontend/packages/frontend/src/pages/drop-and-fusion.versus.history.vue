@@ -105,8 +105,6 @@ function myPublic(r: VersusRecord): boolean {
 }
 
 async function fetchPage(untilId?: string): Promise<VersusRecord[]> {
-	// misskeyApi は応答の型を代入先から推論するので、直接代入すると応答の型が
-	// 検査されない。いったん注釈の無い const で受ける
 	const page = await misskeyApi('bubble-game/versus/history', {
 		...(props.userId != null ? { userId: props.userId } : {}),
 		limit: PAGE_SIZE,

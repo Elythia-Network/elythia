@@ -72,7 +72,8 @@ const registration = ref<ServiceWorkerRegistration | undefined>();
 const supported = ref(false);
 // If this browser has already subscribed to push notification
 const pushSubscription = ref<PushSubscription | null>(null);
-const pushRegistrationInServer = ref<{ state?: string; key?: string; userId: string; endpoint: string; sendReadMessage: boolean; } | undefined>();
+// Elythia: key はサーバーに VAPID 鍵が無いと null になる (sw/register の応答の型、#3439)
+const pushRegistrationInServer = ref<{ state?: string; key?: string | null; userId: string; endpoint: string; sendReadMessage: boolean; } | undefined>();
 
 async function subscribe() {
 	if (!registration.value || !supported.value || !instance.swPublickey) return;

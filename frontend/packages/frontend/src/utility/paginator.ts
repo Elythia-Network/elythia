@@ -275,7 +275,10 @@ export class Paginator<
 			} : {}),
 		};
 
-		const apiRes = (await misskeyApi(this.endpoint, data).catch(err => {
+		// Elythia: data はエンドポイントの型引数から組む汎用の値で、余計なキーの検査
+		// (ExcessKeys) を型の上で解けないので、fetchOlder / fetchNewer と同じく応答の型を
+		// 明示して呼ぶ (#3439)
+		const apiRes = (await misskeyApi<T[]>(this.endpoint, data).catch(err => {
 			// **初回の取得でも 429 を区別する (レビュー M-2)。** ここを汎用の
 			// error に潰すと `MkError` が「何かがおかしいようです」を描く。
 			// 自動追い読みが止まった直後に利用者が最初にやるのは再読み込み

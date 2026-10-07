@@ -356,8 +356,7 @@ function getActualReactedUsersCount(notification: Misskey.entities.Notification)
  *
  * misskey-js の autogen 型は upstream の通知タイプしか知らないので、
  * `notification.type === 'abuseReport'` と直接書くと型エラーになる。
- * 実行時は素の文字列比較で足りるため、ここで 1 箇所に閉じ込める
- * (mk-go 独自 endpoint を `as never` で呼ぶのと同じ理由)。
+ * 実行時は素の文字列比較で足りるため、ここで 1 箇所に閉じ込める。
  */
 function isMkGoType(notification: Misskey.entities.Notification, type: string): boolean {
 	return (notification as { type: string }).type === type;
