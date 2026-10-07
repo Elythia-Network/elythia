@@ -9,9 +9,20 @@ import type { ElythiaEndpoints } from './endpoints.js';
 
 export type { ElythiaEndpoints } from './endpoints.js';
 export type {
+	AdminEmojiApplication,
 	AdminSignupApplication,
 	ElythiaMetaFields,
+	EmojiApplication,
+	EmojiApplicationKind,
+	EmojiApplicationMatchedBy,
+	EmojiApplicationPendingLimit,
+	EmojiApplicationPreview,
+	EmojiApplicationQuotaReset,
+	EmojiApplicationQuotaWindow,
+	EmojiApplicationStatus,
+	EmojiApplicationStatusCounts,
 	MetaDetailed,
+	RelatedEmojiApplication,
 	SignupApplicationAnswer,
 	SignupApplicationFormField,
 	SignupApplicationStatus,
