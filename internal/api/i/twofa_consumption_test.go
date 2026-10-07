@@ -96,8 +96,9 @@ func TestChangePassword_WrongBothStaysInvalidToken(t *testing.T) {
 
 // 2FA gate を持つ他の endpoint も同じ扱いにする (#2852)。
 //
-// **change-password だけの問題ではなかった。** 2FA gate を持つ 6 endpoint の
-// うち 6 つが 2FA gate を password より前に置いており、どれも同じ消費をしていた。
+// **change-password だけの問題ではなかった。** 2FA gate を持つ endpoint はどれも
+// 2FA gate を password より前に置いており、どれも同じ消費をしていた。
+// regenerate-token は後から 2FA gate を足したので、同じ表に並べて同じ扱いを確かめる。
 func TestTwoFAGatedEndpoints_WrongPasswordKeepsBackupCode(t *testing.T) {
 	for _, tt := range []struct {
 		name     string
@@ -115,6 +116,8 @@ func TestTwoFAGatedEndpoints_WrongPasswordKeepsBackupCode(t *testing.T) {
 			body: `{"password":"WRONG","token":"backup1"}`},
 		{name: "update-email", call: func(h *Handler) func(echo.Context) error { return h.UpdateEmail },
 			body: `{"password":"WRONG","email":"new@example.com","token":"backup1"}`},
+		{name: "regenerate-token", call: func(h *Handler) func(echo.Context) error { return h.RegenerateToken },
+			body: `{"password":"WRONG","token":"backup1"}`},
 		// remove-key は WebAuthn 未設定だと 2FA gate の手前で 503 になるので配線する。
 		{name: "2fa/remove-key", call: func(h *Handler) func(echo.Context) error { return h.TwoFARemoveKey },
 			body: `{"password":"WRONG","token":"backup1","credentialId":"c1"}`, webauthn: true},
@@ -232,7 +235,7 @@ func (g *countingReplayGuard) Release(ctx context.Context, userID, code string) 
 var _ twofactor.ReplayGuard = (*countingReplayGuard)(nil)
 var _ twofactor.ReplayReleaser = (*countingReplayGuard)(nil)
 
-// 成功したときは 6 endpoint すべてでちょうど 1 枚消費する (#2852)。
+// 成功したときは 7 endpoint すべてでちょうど 1 枚消費する (#2852)。
 //
 // **失敗側だけ見ていると `Commit` を消しても緑になる。** それは「単回用の
 // バックアップコードが永久に再利用できる」方向の劣化で、まさに 2FA が緩くなる側。
@@ -252,6 +255,8 @@ func TestTwoFAGatedEndpoints_SuccessConsumesExactlyOne(t *testing.T) {
 			body: `{"password":"oldpass","token":"backup1"}`, want: http.StatusOK},
 		{name: "update-email", call: func(h *Handler) func(echo.Context) error { return h.UpdateEmail },
 			body: `{"password":"oldpass","email":"new@example.com","token":"backup1"}`, want: http.StatusOK},
+		{name: "regenerate-token", call: func(h *Handler) func(echo.Context) error { return h.RegenerateToken },
+			body: `{"password":"oldpass","token":"backup1"}`, want: http.StatusNoContent},
 		{name: "2fa/remove-key", call: func(h *Handler) func(echo.Context) error { return h.TwoFARemoveKey },
 			body: `{"password":"oldpass","token":"backup1","credentialId":"c1"}`, want: http.StatusOK, webauthn: true},
 	} {
@@ -300,10 +305,10 @@ func TestTwoFAUnregister_ClearsBackupCodes(t *testing.T) {
 	assert.Nil(t, p.TwoFactorSecret)
 }
 
-// 6 endpoint すべてで rollback が配線されている (#2852)。
+// 7 endpoint すべてで rollback が配線されている (#2852)。
 //
 // **失敗時に replay 記録が残ると、打ち直しが INVALID_TOKEN になる。**
-// change-password だけ見ていると他 5 つの defer を外しても緑のまま通る。
+// change-password だけ見ていると他 6 つの defer を外しても緑のまま通る。
 func TestTwoFAGatedEndpoints_WrongPasswordReleasesReservation(t *testing.T) {
 	for _, tt := range []struct {
 		name     string
@@ -321,6 +326,8 @@ func TestTwoFAGatedEndpoints_WrongPasswordReleasesReservation(t *testing.T) {
 			body: `{"password":"WRONG","token":"backup1"}`},
 		{name: "update-email", call: func(h *Handler) func(echo.Context) error { return h.UpdateEmail },
 			body: `{"password":"WRONG","email":"new@example.com","token":"backup1"}`},
+		{name: "regenerate-token", call: func(h *Handler) func(echo.Context) error { return h.RegenerateToken },
+			body: `{"password":"WRONG","token":"backup1"}`},
 		{name: "2fa/remove-key", call: func(h *Handler) func(echo.Context) error { return h.TwoFARemoveKey },
 			body: `{"password":"WRONG","token":"backup1","credentialId":"c1"}`, webauthn: true},
 	} {

@@ -2534,9 +2534,9 @@ func (h *Handler) fillPinnedFields(ctx context.Context, u *model.User, profile *
 // signin と /api/i の 2 経路が**同じ guard を共有する**。こちらが未配線だと
 // 一度観測された有効な TOTP コードを window 内で再利用できる (#2682)。
 //
-// 対象は 9 endpoint。check2FAToken を通る 6 つ (i/update-email /
+// 対象は 10 endpoint。check2FAToken を通る 7 つ (i/update-email /
 // i/2fa/register / i/2fa/unregister / i/2fa/remove-key / i/change-password /
-// i/delete-account)、verify2FAToken を通る 2 つ (i/2fa/register-key /
+// i/delete-account / i/regenerate-token)、verify2FAToken を通る 2 つ (i/2fa/register-key /
 // i/2fa/key-done)、guard を直接引く i/2fa/done (handler_2fa.go)。
 // **guard はバックアップコードの予約にも使う** (#2852)。
 func (h *Handler) HasTOTPReplayGuard() bool { return h.totpReplayGuard != nil }

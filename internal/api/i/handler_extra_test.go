@@ -156,8 +156,8 @@ func TestChangePassword_WrongPassword(t *testing.T) {
 	h, repo := newExtraHandler(t)
 	user := setupUserWithPassword(repo, "u1", "correct")
 	rec := postExtra(h.ChangePassword, `{"currentPassword":"wrong","newPassword":"x"}`, user)
-	// upstream Misskey TS は raw `throw new Error` を framework が 401 へ
-	// 変換 (#885)。drop-in 互換のため 401 に揃える (旧 mk-go は 403)。
+	// upstream は素の Error を投げて 500 INTERNAL_ERROR になる。Elythia は
+	// 400 INCORRECT_PASSWORD を返す。
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -421,8 +421,8 @@ func TestRegenerateToken_WrongPassword(t *testing.T) {
 	user := setupUserWithPassword(repo, "u1", "pass")
 	_ = user
 	rec := postExtra(h.RegenerateToken, `{"password":"wrong"}`, repo.Users["u1"])
-	// upstream Misskey TS は raw `throw new Error('incorrect password')` →
-	// framework が 401 (#885)。
+	// upstream は素の Error を投げて 500 INTERNAL_ERROR になる。Elythia は
+	// 400 INCORRECT_PASSWORD を返す。
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -557,6 +557,27 @@ func TestRegenerateToken_UpdateError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
+// token の書き込みに失敗したら、バックアップコードは焼かない。消費の確定 (Commit) を
+// 書き込みより前に置くと、失敗した操作のためにコードを 1 枚失う。
+func TestRegenerateToken_UpdateErrorKeepsBackupCode(t *testing.T) {
+	failRepo := &failingUpdateUserRepo{testutil.NewMockUserRepository()}
+	hash, _ := bcrypt.GenerateFromPassword([]byte("pass"), bcrypt.MinCost)
+	hashStr := string(hash)
+	token := "oldtoken0000000a"
+	failRepo.Users["u1"] = &model.User{ID: "u1", Token: &token}
+	failRepo.Profiles["u1"] = &model.UserProfile{UserID: "u1", Password: &hashStr}
+	enableTwoFactorWithBackupCodes(failRepo.MockUserRepository, "u1")
+	before := backupCodes(failRepo.MockUserRepository, "u1")
+	idGen, _ := id.NewGenerator("aidx")
+	svc := coreuser.NewService(failRepo, testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), idGen)
+	h := NewHandler(svc, idGen)
+
+	rec := postExtra(h.RegenerateToken, `{"password":"pass","token":"backup1"}`, failRepo.Users["u1"])
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Equal(t, before, backupCodes(failRepo.MockUserRepository, "u1"))
+}
+
 type failingFavListRepo struct {
 	*testutil.MockNoteFavoriteRepository
 }
@@ -579,6 +600,83 @@ func TestRegenerateToken_InvalidParam(t *testing.T) {
 	h, _ := newExtraHandler(t)
 	rec := postExtra(h.RegenerateToken, `{}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+// 2FA 有効なユーザーは、password が正しくても token 無しでは token を再生成できない。
+// 応答は i/change-password の 2FA gate と同じ (403 INVALID_TOKEN)。
+func TestRegenerateToken_With2FA_RequiresToken(t *testing.T) {
+	h, repo := newExtraHandler(t)
+	user := setupUserWithPassword(repo, "u1", "pass")
+	before := *user.Token
+	enableTwoFactorWithTOTP(t, repo, "u1")
+
+	rec := postExtra(h.RegenerateToken, `{"password":"pass"}`, user)
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assert.Equal(t, before, *repo.Users["u1"].Token, "token must not rotate without a 2FA code")
+
+	// i/change-password と同じ error (code / id / status) であること。
+	h2, repo2 := newExtraHandler(t)
+	user2 := setupUserWithPassword(repo2, "u1", "pass")
+	enableTwoFactorWithTOTP(t, repo2, "u1")
+	want := postExtra(h2.ChangePassword, `{"currentPassword":"pass","newPassword":"newpass"}`, user2)
+	require.Equal(t, http.StatusForbidden, want.Code)
+	assert.JSONEq(t, want.Body.String(), rec.Body.String())
+}
+
+// null の token (frontend は 2FA 無効時に null を送る) も token 無しとして扱う。
+func TestRegenerateToken_With2FA_NullTokenRejected(t *testing.T) {
+	h, repo := newExtraHandler(t)
+	user := setupUserWithPassword(repo, "u1", "pass")
+	before := *user.Token
+	enableTwoFactorWithTOTP(t, repo, "u1")
+
+	rec := postExtra(h.RegenerateToken, `{"password":"pass","token":null}`, user)
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assert.Contains(t, rec.Body.String(), "INVALID_TOKEN")
+	assert.Equal(t, before, *repo.Users["u1"].Token)
+}
+
+// 誤った 2FA コードでは再生成しない。
+func TestRegenerateToken_With2FA_WrongTokenRejected(t *testing.T) {
+	h, repo := newExtraHandler(t)
+	user := setupUserWithPassword(repo, "u1", "pass")
+	before := *user.Token
+	enableTwoFactorWithBackupCodes(repo, "u1")
+
+	rec := postExtra(h.RegenerateToken, `{"password":"pass","token":"000000"}`, user)
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assert.Contains(t, rec.Body.String(), "INVALID_TOKEN")
+	assert.Equal(t, before, *repo.Users["u1"].Token)
+	assert.Len(t, backupCodes(repo, "u1"), 2)
+}
+
+// 正しい TOTP コードなら再生成でき、token が入れ替わる。
+func TestRegenerateToken_With2FA_ValidTOTPRotatesToken(t *testing.T) {
+	h, repo := newExtraHandler(t)
+	user := setupUserWithPassword(repo, "u1", "pass")
+	before := *user.Token
+	secret := enableTwoFactorWithTOTP(t, repo, "u1")
+
+	rec := postExtra(h.RegenerateToken, `{"password":"pass","token":"`+totpCode(t, secret)+`"}`, user)
+
+	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+	require.NotNil(t, repo.Users["u1"].Token)
+	assert.NotEqual(t, before, *repo.Users["u1"].Token)
+}
+
+// 2FA 無効なユーザーは token を見ない (従来どおり password だけで通る)。
+func TestRegenerateToken_Without2FA_IgnoresToken(t *testing.T) {
+	h, repo := newExtraHandler(t)
+	user := setupUserWithPassword(repo, "u1", "pass")
+	before := *user.Token
+
+	rec := postExtra(h.RegenerateToken, `{"password":"pass","token":"garbage"}`, user)
+
+	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+	assert.NotEqual(t, before, *repo.Users["u1"].Token)
 }
 
 // --- ClaimAchievement ---
