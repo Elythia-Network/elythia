@@ -39,14 +39,18 @@ import { focusParent } from '@/utility/focus.js';
 export const openingWindowsCount = ref(0);
 
 export type ApiWithDialogCustomErrors = Record<string, { title?: string; text: string; }>;
-// Elythia: misskeyApi と同じく、独自のエンドポイントも型付きで呼べるようにする (#3417)
-export const apiWithDialog = (<E extends keyof Elythia.Endpoints>(
+// Elythia: misskeyApi と同じく、独自のエンドポイントも型付きで呼べるようにし、
+// 引数の型に無いキーを弾く (#3417 / #3439)
+export const apiWithDialog = (<
+	E extends keyof Elythia.Endpoints,
+	P extends Elythia.Endpoints[E]['req'] = Elythia.Endpoints[E]['req'],
+>(
 	endpoint: E,
-	data: Elythia.Endpoints[E]['req'],
+	data: P & Elythia.ExcessKeys<E, P>,
 	token?: string | null | undefined,
 	customErrors?: ApiWithDialogCustomErrors,
 ) => {
-	const promise = misskeyApi(endpoint, data, token);
+	const promise = misskeyApi<void, E, P>(endpoint, data, token);
 	promiseDialog(promise, null, async (err) => {
 		let title: string | undefined;
 		let text = err.message + '\n' + err.id;

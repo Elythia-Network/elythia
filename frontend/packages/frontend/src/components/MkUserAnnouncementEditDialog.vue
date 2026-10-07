@@ -101,8 +101,12 @@ async function done() {
 	} satisfies Misskey.entities.AdminAnnouncementsCreateRequest;
 
 	if (props.announcement) {
+		// Elythia: 更新では対象の利用者を変えられない (userId は本家もElythiaも読まない) ので
+		// 送らない (#3439)
+		// eslint-disable-next-line @typescript-eslint/no-unused-vars -- 送らないキーを落とすための分割代入
+		const { userId: _userId, ...fields } = params;
 		await os.apiWithDialog('admin/announcements/update', {
-			...params,
+			...fields,
 			id: props.announcement.id,
 		});
 

@@ -103,10 +103,9 @@ type DecorationLike = {
 const unknownDecoration: DecorationLike = { id: '', url: '', name: '?', roleIdsThatCanBeUsedThisDecoration: [] };
 
 /**
- * mk-go 独自 policy (#2975)。misskey-js の autogen 型には無いのでキャストで読む
- * (独自 endpoint を `as never` で呼ぶのと同じ扱い)。**既定は true** で、backend の
- * effectivepolicy の既定と揃えてある — 揃えないと policy を明示していない
- * サーバーで導線だけ消える。
+ * mk-go 独自 policy (#2975)。misskey-js の autogen 型には無いのでキャストで読む。
+ * **既定は true** で、backend の effectivepolicy の既定と揃えてある — 揃えないと
+ * policy を明示していないサーバーで導線だけ消える。
  */
 const canUseEmojiAsDecoration = computed(() => {
 	const value = ($i.policies as Record<string, unknown>).canUseEmojiAsAvatarDecoration;
