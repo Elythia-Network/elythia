@@ -44,6 +44,33 @@ func TestPollRepository_Create(t *testing.T) {
 	assert.False(t, found.Multiple)
 }
 
+// #3443: core/note が受け付ける期限の上限 (note.MaxPollExpiresAtUnixMilli、
+// 9999-12-30T23:59:59.999Z) が timestamptz に往復できる。セッションの時刻帯で
+// 5 桁の年になると、simple protocol の読み戻しで parse に失敗する。repository
+// から core/note は import できないので値を直に書く。
+// note.MaxPollExpiresAtUnixMilli と同じ値であることは core/note の
+// TestMaxPollExpiresAtUnixMilli_MatchesRepositoryTest が見る。
+func TestPollRepository_StoresLatestAcceptedExpiry(t *testing.T) {
+	repo := NewPollRepository(testDB)
+	user := insertTestUser(t, "u_pmax_1", "pollmaxuser")
+	defer cleanupUser(t, user.ID)
+
+	note := &model.Note{ID: "n_pmax_1", UserID: user.ID, Visibility: model.NoteVisibilityPublic, HasPoll: true, Reactions: datatypes.JSON([]byte("{}"))}
+	require.NoError(t, testDB.Create(note).Error)
+	defer cleanupNote(t, note.ID)
+
+	expires := time.UnixMilli(253_402_214_399_999)
+	require.NoError(t, repo.Create(&model.Poll{
+		NoteID: note.ID, Choices: model.StringArray{"a", "b"}, Votes: model.Int64Array{0, 0},
+		NoteVisibility: model.NoteVisibilityPublic, UserID: user.ID, ExpiresAt: &expires,
+	}))
+
+	var found model.Poll
+	require.NoError(t, testDB.First(&found, "\"noteId\" = ?", note.ID).Error)
+	require.NotNil(t, found.ExpiresAt)
+	assert.True(t, found.ExpiresAt.Equal(expires), "got %v, want %v", found.ExpiresAt, expires)
+}
+
 // TestPollRepository_ListExpiredUnnotified covers the ticker scan path
 // added in #690 (ExpiryWorker)。partial index 経由のクエリ条件
 // (expiresAt < now AND notifiedAt IS NULL) が正しく適用され、limit が効く
