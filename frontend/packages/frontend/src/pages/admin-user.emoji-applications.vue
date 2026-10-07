@@ -181,6 +181,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 <script lang="ts" setup>
 import { computed, onMounted, ref } from 'vue';
+import type * as Elythia from 'elythia-js';
 import MkButton from '@/components/MkButton.vue';
 import MkInfo from '@/components/MkInfo.vue';
 import MkInput from '@/components/MkInput.vue';
@@ -198,26 +199,9 @@ import { relatedImageMissingReason, relatedPreviewUrl, relatedStatusLabel } from
 import { canLoadMoreUserApplications, canResetQuota, isValidResetReason, quotaIsFull, quotaPeriodLabel, quotaUsageLabel, userApplicationNextCursor } from '@/utility/emoji-application-user.js';
 import type { PendingLimitView, QuotaResetView, QuotaWindowView } from '@/utility/emoji-application-user.js';
 
-type Item = {
-	id: string;
-	status: 'pending' | 'approved' | 'rejected' | 'canceled';
-	name: string;
-	createdAt: string;
-	processedAt: string | null;
-	rejectReason?: string;
-	emojiId?: string;
-	url: string | null;
-	remoteHost?: string;
-	remoteName?: string;
-};
+type Item = Elythia.AdminEmojiApplication;
 
-type Counts = {
-	total: number;
-	pending: number;
-	approved: number;
-	rejected: number;
-	canceled: number;
-};
+type Counts = Elythia.EmojiApplicationStatusCounts;
 
 const props = defineProps<{ userId: string }>();
 
@@ -294,9 +278,9 @@ async function fetchSummary() {
 	if (summaryFetching.value) return;
 	summaryFetching.value = true;
 	try {
-		const res = await misskeyApi('admin/emoji-application/user-summary' as never, {
+		const res = await misskeyApi('admin/emoji-application/user-summary', {
 			userId: props.userId,
-		} as never) as unknown as { counts: Counts; windows: QuotaWindowView[]; pending: PendingLimitView; lastReset: QuotaResetView | null };
+		});
 		counts.value = res.counts;
 		windows.value = res.windows;
 		pendingLimit.value = res.pending;
@@ -327,13 +311,13 @@ async function fetchPage(untilId?: string) {
 	// 再試行ボタン (`loadMore`) のほうだった。失敗したら catch が立て直す。
 	historyFailed.value = false;
 	try {
-		const res = await misskeyApi('admin/emoji-application/list-by-user' as never, {
+		const res = await misskeyApi('admin/emoji-application/list-by-user', {
 			userId: props.userId,
 			status: status.value,
 			query: query.value,
 			limit: PAGE,
 			untilId: untilId ?? null,
-		} as never) as unknown as { items: Item[] };
+		});
 		if (gen !== generation) return;
 		items.value = untilId == null ? res.items : [...items.value, ...res.items];
 		lastPageSize.value = res.items.length;
@@ -369,10 +353,10 @@ async function resetQuota() {
 
 	resetting.value = true;
 	try {
-		await misskeyApi('admin/emoji-application/reset-user-quota' as never, {
+		await misskeyApi('admin/emoji-application/reset-user-quota', {
 			userId: props.userId,
 			reason,
-		} as never);
+		});
 		// **取り直す。** 枠が戻ったかどうかは件数の表示でしか確かめられない。
 		// 返り値の lastReset だけ入れて件数を古いままにすると、押したのに
 		// 「5 / 5」のままに見える。

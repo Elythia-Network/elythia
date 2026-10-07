@@ -146,6 +146,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 <script lang="ts" setup>
 import { computed, ref, watch } from 'vue';
+import type * as Elythia from 'elythia-js';
 import MkButton from '@/components/MkButton.vue';
 import MkFolder from '@/components/MkFolder.vue';
 import XRelated from '@/pages/admin/custom-emojis-manager.application-related.vue';
@@ -162,31 +163,7 @@ import { useMkSelect } from '@/composables/use-mkselect.js';
 import { misskeyApi } from '@/utility/misskey-api.js';
 import * as os from '@/os.js';
 
-type Application = {
-	id: string;
-	userId: string;
-	status: 'pending' | 'approved' | 'rejected' | 'canceled';
-	name: string;
-	category: string | null;
-	aliases: string[];
-	license: string;
-	isSensitive: boolean;
-	comment: string | null;
-	rejectReason?: string;
-	createdAt: string;
-	// null = 確認できなかった (DB 障害)。空文字 = 申請者が drive から消した。
-	url: string | null;
-	fileType: string | null;
-	// kind = remote (#2935) のときだけ入る。
-	remoteHost?: string;
-	remoteName?: string;
-	// true = 消えている (承認すると落ちる) / false = ある / null = 確認できなかった。
-	remoteGone?: boolean | null;
-	// true = 同名あり / false = なし / null = 確認できなかった (DB 障害)。
-	// **null を false と同一視しない** — 確認できていないことを隠すと、
-	// 承認を押してから落ちる。
-	nameConflict?: { emojiId: string; createdAt: string | null } | false | null;
-};
+type Application = Elythia.AdminEmojiApplication;
 
 // MkSelect は items API を使う (option 子要素は受け付けない)。
 const { model: filter, def: filterDef } = useMkSelect({
@@ -254,10 +231,10 @@ async function load() {
 	// 「確認できませんでした」が出続ける。
 	brokenPreviews.value = new Set();
 	try {
-		applications.value = await misskeyApi('admin/emoji-application/list' as never, {
+		applications.value = await misskeyApi('admin/emoji-application/list', {
 			filter: filter.value,
 			limit: 50,
-		} as never) as unknown as Application[];
+		});
 	} catch (err) {
 		// 一覧が引けなかったことを黙らせない。空の一覧と区別が付かなくなる。
 		applications.value = [];
@@ -311,7 +288,7 @@ async function approve(app: Application) {
 	}
 	busy.value = app.id;
 	try {
-		await misskeyApi('admin/emoji-application/approve' as never, { applicationId: app.id } as never);
+		await misskeyApi('admin/emoji-application/approve', { applicationId: app.id });
 		await load();
 	} catch (err) {
 		// **握り潰さない。** backend は DUPLICATE_NAME / UNSUPPORTED_FILE_TYPE /
@@ -338,10 +315,10 @@ async function reject(app: Application) {
 	}
 	busy.value = app.id;
 	try {
-		await misskeyApi('admin/emoji-application/reject' as never, {
+		await misskeyApi('admin/emoji-application/reject', {
 			applicationId: app.id,
 			reason,
-		} as never);
+		});
 		delete reasons.value[app.id];
 		await load();
 	} catch (err) {

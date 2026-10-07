@@ -12,11 +12,6 @@ import { emojiApplicationQuotaText, emojiApplicationPendingLimitText } from '@/u
 // `emoji-request.vue` の NAME_RE と揃えてある。
 const NAME_RE = /^[a-zA-Z0-9_]+$/;
 
-// mk-go 独自のエンドポイントなので misskey-js の型集合には無い。
-function api<T>(endpoint: string, params: Record<string, unknown> = {}): Promise<T> {
-	return misskeyApi(endpoint as never, params as never) as unknown as Promise<T>;
-}
-
 /**
  * mk-go: リモート絵文字のインポートを申請する (#2935).
  *
@@ -103,7 +98,7 @@ export async function requestRemoteEmojiImport(name: string, host: string | null
 	}
 
 	try {
-		await api('emoji-application/create', {
+		await misskeyApi('emoji-application/create', {
 			kind: 'remote',
 			// **申請する名前とリモートの名前は別。** 手元で別名にしたい場合が
 			// あるので分けて送る (承認時はこちらの名前で登録される)。

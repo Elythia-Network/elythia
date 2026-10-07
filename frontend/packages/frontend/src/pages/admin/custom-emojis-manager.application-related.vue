@@ -99,6 +99,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 <script lang="ts" setup>
 import { computed, ref } from 'vue';
+import type * as Elythia from 'elythia-js';
 import MkButton from '@/components/MkButton.vue';
 import MkFolder from '@/components/MkFolder.vue';
 import MkInfo from '@/components/MkInfo.vue';
@@ -110,27 +111,9 @@ import { i18n } from '@/i18n.js';
 import { misskeyApi } from '@/utility/misskey-api.js';
 import { canLoadMoreRelated, matchedByLabel, relatedImageMissingLabel, relatedNextCursor, relatedPreviewUrl, relatedStatusLabel, relatedSummaryLabel } from '@/utility/emoji-application-related.js';
 
-type RelatedItem = {
-	id: string;
-	userId: string;
-	status: 'pending' | 'approved' | 'rejected' | 'canceled';
-	name: string;
-	createdAt: string;
-	processedAt: string | null;
-	rejectReason?: string;
-	url: string | null;
-	remoteHost?: string;
-	remoteName?: string;
-	matchedBy: string[];
-};
+type RelatedItem = Elythia.RelatedEmojiApplication;
 
-type Counts = {
-	total: number;
-	pending: number;
-	approved: number;
-	rejected: number;
-	canceled: number;
-};
+type Counts = Elythia.EmojiApplicationStatusCounts;
 
 const props = defineProps<{ applicationId: string }>();
 
@@ -168,11 +151,11 @@ async function fetchPage(untilId?: string) {
 	if (fetching.value) return;
 	fetching.value = true;
 	try {
-		const res = await misskeyApi('admin/emoji-application/related' as never, {
+		const res = await misskeyApi('admin/emoji-application/related', {
 			applicationId: props.applicationId,
 			limit: PAGE,
 			untilId: untilId ?? null,
-		} as never) as unknown as { counts: Counts; items: RelatedItem[] };
+		});
 		counts.value = res.counts;
 		items.value = untilId == null ? res.items : [...items.value, ...res.items];
 		failed.value = false;
