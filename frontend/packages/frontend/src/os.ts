@@ -7,6 +7,7 @@
 
 import { markRaw, ref, defineAsyncComponent, nextTick } from 'vue';
 import * as Misskey from 'misskey-js';
+import type * as Elythia from 'elythia-js';
 import type { Component, MaybeRef } from 'vue';
 import type { ComponentEmit, ComponentProps as CP } from 'vue-component-type-helpers';
 import type { Form, GetFormResultType } from '@/utility/form.js';
@@ -38,9 +39,10 @@ import { focusParent } from '@/utility/focus.js';
 export const openingWindowsCount = ref(0);
 
 export type ApiWithDialogCustomErrors = Record<string, { title?: string; text: string; }>;
-export const apiWithDialog = (<E extends keyof Misskey.Endpoints>(
+// Elythia: misskeyApi と同じく、独自のエンドポイントも型付きで呼べるようにする (#3417)
+export const apiWithDialog = (<E extends keyof Elythia.Endpoints>(
 	endpoint: E,
-	data: Misskey.Endpoints[E]['req'],
+	data: Elythia.Endpoints[E]['req'],
 	token?: string | null | undefined,
 	customErrors?: ApiWithDialogCustomErrors,
 ) => {

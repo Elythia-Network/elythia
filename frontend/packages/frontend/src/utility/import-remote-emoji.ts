@@ -23,8 +23,7 @@ export type RemoteEmojiMeta = {
 	isSensitive?: boolean;
 };
 
-// mk-go 独自のエンドポイントなので misskey-js の型集合には無い。
-// signup-applications.vue と同じ理由の cast。
+// Elythia 独自のエンドポイントで、elythia-js にまだ型が無いための cast (#3417)。
 function api<T>(endpoint: string, params: Record<string, unknown> = {}): Promise<T> {
 	return misskeyApi(endpoint as never, params as never) as unknown as Promise<T>;
 }
