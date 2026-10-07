@@ -143,8 +143,8 @@ type Handler struct {
 	// 未配線なら admin/queue 応答から runtime block を省く。
 	queueRuntime QueueRuntimeProvider
 	queueRedis   QueueRedisInfoProvider
-	// procStats は admin/server-metrics が返すプロセス統計の provider 束 (#2395)。
-	// zero value でも Collect は成功する (取れない section が省かれる)。
+	// procStats は admin/server-metrics の起動時刻と時計 (#2395)。zero value でも
+	// Collect は成功する (uptimeMs が 0 になるだけ)。
 	procStats         procstats.Deps
 	emojiEnqueuer     EmojiImportEnqueuer
 	emojiImageFetcher EmojiImageFetcher
