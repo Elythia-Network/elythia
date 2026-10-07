@@ -31,28 +31,14 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 <script lang="ts" setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue';
+import type * as Elythia from 'elythia-js';
 import MkMiniChart from '@/components/MkMiniChart.vue';
 import number from '@/filters/number.js';
 import bytes from '@/filters/bytes.js';
 import { misskeyApi } from '@/utility/misskey-api.js';
 
-// mk-go 独自の admin/server-metrics (#2395)。純正 backend には無いので
-// misskey-js の型にも載らない。admin/job-queue.vue の QueueRuntime と同じく
-// ローカル型で受ける。
-type ServerMetrics = {
-	uptimeMs: number;
-	version: { misskey: string; mkGo: string };
-	go: {
-		goroutines: number;
-		gomaxprocs: number;
-		heapAllocBytes: number;
-		heapSysBytes: number;
-		heapObjects: number;
-		gcNum: number;
-		lastGcPauseNs: number;
-		gcCpuFraction: number;
-	};
-};
+// mk-go 独自の admin/server-metrics (#2395)。純正 backend には無い。
+type ServerMetrics = Elythia.ServerMetrics;
 
 // 推移はサーバーに残さずクライアント側のリングバッファで持つ。30 点 = 5 分。
 const HISTORY_LEN = 30;
@@ -92,11 +78,7 @@ function push(buf: number[], value: number): number[] {
 async function fetchMetrics() {
 	// 純正 backend では endpoint ごと存在しない。取得できなければ metrics を
 	// null のままにして、セクション全体を出さない。
-	//
-	// endpoint 名の cast は misskey-js の型に存在しないため。mk-go 独自 endpoint を
-	// 呼ぶ以上避けられない (job-queue.vue の admin/queue/* は upstream にもあるので
-	// cast 不要という違いがある)。
-	const res = await misskeyApi('admin/server-metrics' as never) as unknown as ServerMetrics;
+	const res = await misskeyApi('admin/server-metrics');
 	metrics.value = res;
 	goroutineHistory.value = push(goroutineHistory.value, res.go.goroutines);
 	heapHistory.value = push(heapHistory.value, res.go.heapAllocBytes);

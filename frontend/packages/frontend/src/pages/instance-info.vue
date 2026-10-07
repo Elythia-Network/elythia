@@ -183,6 +183,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 <script lang="ts" setup>
 import { ref, computed, watch, markRaw } from 'vue';
 import * as Misskey from 'misskey-js';
+import type * as Elythia from 'elythia-js';
 import type { ChartSrc } from '@/components/MkChart.vue';
 import MkChart from '@/components/MkChart.vue';
 import MkObjectView from '@/components/MkObjectView.vue';
@@ -339,14 +340,8 @@ async function resumeDelivery(): Promise<void> {
 	});
 }
 
-// mk-go: admin/federation/check-host (#3055) の応答。internal/core/remotecheck の
-// Report と同じ形 (misskey-js の型に無いので手で持つ)。
-type CheckStatus = 'ok' | 'warn' | 'fail' | 'skip';
-type CheckReport = {
-	host: string;
-	ok: boolean;
-	results: { name: string; status: CheckStatus; detail: string; hint?: string }[];
-};
+// mk-go: admin/federation/check-host (#3055) の応答。results は self-check と同じ形。
+type CheckReport = Elythia.RemoteCheckReport;
 
 const checkAccount = ref('');
 const checking = ref(false);
@@ -363,8 +358,8 @@ async function runCheck(): Promise<void> {
 	checking.value = true;
 	checkReport.value = null;
 	try {
-		// endpoint 名の cast は misskey-js の型に存在しないため (mk-go 独自)。
-		checkReport.value = await misskeyApi('admin/federation/check-host' as never, { host: props.host, account: checkAccount.value } as never) as unknown as CheckReport;
+		const res = await misskeyApi('admin/federation/check-host', { host: props.host, account: checkAccount.value });
+		checkReport.value = res;
 	} catch (err) {
 		const code = (err as { code?: string } | null)?.code;
 		os.alert({

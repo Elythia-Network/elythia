@@ -147,7 +147,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 <script lang="ts" setup>
 import { computed, reactive, ref } from 'vue';
-import type * as Misskey from 'misskey-js';
+import type * as Elythia from 'elythia-js';
 import MkButton from '@/components/MkButton.vue';
 import MkInfo from '@/components/MkInfo.vue';
 import MkInput from '@/components/MkInput.vue';
@@ -161,33 +161,8 @@ import { definePage } from '@/page.js';
 import { misskeyApi } from '@/utility/misskey-api.js';
 import { ipSearchErrorKind, ipSearchNotice, ipSearchOutcome } from '@/utility/ip-search-result.js';
 
-type IPAccount = {
-	user: Misskey.entities.UserLite;
-	isSuspended: boolean;
-	isDeleted: boolean;
-	lastActiveDate: string | null;
-	firstSeenAt: string;
-	lastSeenAt: string;
-	observationCount: number;
-};
-
-type IPAccountsResponse = {
-	ip: string;
-	loggingEnabled: boolean;
-	hasAnyHistory: boolean;
-	sinceDays: number;
-	retentionDays: number;
-	limit: number;
-	offset: number;
-	hasMore: boolean;
-	droppedCount: number;
-	accounts: IPAccount[];
-};
-
-// Elythia 独自のエンドポイントで、elythia-js にまだ型が無いための cast (#3417)。
-function api<T>(endpoint: string, params: Record<string, unknown> = {}): Promise<T> {
-	return misskeyApi(endpoint as never, params as never) as unknown as Promise<T>;
-}
+type IPAccount = Elythia.IPSearchAccount;
+type IPAccountsResponse = Elythia.IPAccountsResult;
 
 // 保持期間はサーバーが教える。**画面で決め打ちしない** — 決め打ちした値を
 // 事実として出すと、サーバーが変えたときに黙って嘘になる。来るまでは出さない。
@@ -264,7 +239,7 @@ async function search(offset: number) {
 		loadingMore.value = true;
 	}
 	try {
-		const res = await api<IPAccountsResponse>('admin/ip/accounts', {
+		const res = await misskeyApi('admin/ip/accounts', {
 			ip: raw,
 			sinceDays: days,
 			offset,

@@ -16,15 +16,10 @@
  * 続けて間違えた経験から、**確かめていないことを断定しない**枝を表で固定する。
  */
 
-/** Subset of `admin/drive/usage` の remote バケット。 */
-export type RemoteUsageBucket = {
-	/** リモート行の総数。 */
-	count: number;
-	/** `size` 列の合計 (バイト)。実体を持たない行は 0。 */
-	size: number;
-	/** `count` のうち実体を持たない行 (`isLink = true`) の数。 */
-	linkCount: number;
-};
+import type * as Elythia from 'elythia-js';
+
+/** `admin/drive/usage` の remote バケット。 */
+export type RemoteUsageBucket = Elythia.DriveUsageBucket;
 
 export type CleanRemoteFilesState =
 	/** 実体つきの行がある。押せる。 */
