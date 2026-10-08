@@ -113,6 +113,14 @@ type Definition struct {
 	// EffectivePolicies declares effective-policy contributions. The host calls
 	// it after Migrations and before any Routes or Jobs callback.
 	EffectivePolicies func(Context, EffectivePolicyInvalidator) (EffectivePolicyRegistration, error)
+
+	// Secrets declares the secret values the operator enters from the control
+	// panel (#3470). Read them with [Context.Secrets]. May be nil.
+	//
+	// **宣言は入力欄を出すためのもの。** 値の保存と読み出しは宣言の有無に
+	// 関係なく [Context.Secrets] でできるが、管理画面から入れられるのは
+	// ここに書いた名前だけになる。
+	Secrets []SecretSpec
 }
 
 // Validate reports whether the definition is usable.
@@ -137,6 +145,16 @@ func (d Definition) Validate() error {
 	}
 	if d.Peer != nil && !d.Peered {
 		return fmt.Errorf("plugin %q: Peer を指定するなら Peered も立てること", d.Name)
+	}
+	seen := make(map[string]struct{}, len(d.Secrets))
+	for _, sp := range d.Secrets {
+		if !validSecretName(sp.Name) {
+			return fmt.Errorf("plugin %q: Secrets の名前 %q が不正です (英字で始まり、英数字と _ - だけで 64 文字以内)", d.Name, sp.Name)
+		}
+		if _, dup := seen[sp.Name]; dup {
+			return fmt.Errorf("plugin %q: Secrets の名前 %q が重複しています", d.Name, sp.Name)
+		}
+		seen[sp.Name] = struct{}{}
 	}
 	if d.Routes == nil && d.Jobs == nil && d.EffectivePolicies == nil && d.Peer == nil {
 		return fmt.Errorf("plugin %q: Routes も Jobs も EffectivePolicies も Peer も設定されていません", d.Name)
@@ -224,6 +242,11 @@ type Context interface {
 	//
 	// **常に非 nil。** 本体の配線が無い環境では、呼ぶとエラーを返す実装になる。
 	Accounts() Accounts
+	// Secrets returns this plugin's encrypted secret values (#3470).
+	//
+	// **自分の値しか見えない。** 名前はプラグインごとに分かれているので、
+	// 他のプラグインの同名の値とは混ざらない。nil は返さない。
+	Secrets() Secrets
 
 	// Queue enqueues jobs onto this plugin's own queue.
 	//

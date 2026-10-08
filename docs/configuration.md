@@ -47,6 +47,7 @@ cp .config/docker.yml.example .config/docker.yml
 | `enableMetrics` | bool | `false` | Prometheus `/metrics` エンドポイントを公開。job queue 系 metric (`mk_job_workers_active` / `mk_job_workers_quarantined` / `mk_job_handlers_abandoned` / `mk_job_handler_abandonments_total` / `mk_job_queue_pending` / `mk_job_dispatch_wait_seconds` / `mk_job_processing_seconds` / `mk_job_scale_events_total` / `mk_job_scrape_errors_total`) を expose。認証無しで公開されるため、外部公開する場合は nginx / LB ACL で access 制限すること。詳細は `docs/design/auto-scale-job-workers.md` §6.1。`MK_ENABLEMETRICS`で上書き可。 |
 | `jobQueueDriver` | string | `"mkq"` | ジョブキュー実装の選択。**指定できるのは `mkq` だけ** (BullMQ wire-compatible で admin queue 画面が Misskey TS frontend 前提のまま動く + per-queue concurrency / rate-limit が効く)。legacy の `asynq` は #2985 で削除済みで、明示すると**起動エラー**になる (黙って別の driver で起動しないため。行を消せば既定の `mkq`)。**移行は片道** — asynq の未処理ジョブは Redis の `asynq:{<queue>}:*` に居り mkq (`bull:*`) からは見えないので、切り替え前に**旧ビルドで捌ききる**こと (新ビルドは起動を拒むので後から捌けない)。`MK_JOBQUEUEDRIVER`で上書き可。 |
 | `publishTarballInsteadOfProvideRepositoryUrl` | bool | `false` | **Elythia では効かない** (upstream YAML 互換のために読むだけ)。upstream は `built/tarball` を `/tarball/` に静的配信するが Elythia にはそのルートが無く、`/api/meta` の `providesTarball` は常に `false` を返す。有効にすると起動時に warn が出る。**404 で気付ける類ではない** — SPA の catchall が拾うので `misskey-<version>.tar.gz` という名前の HTML が 200 で返る。ソースの案内は `meta.repositoryUrl` (管理画面の 全般 → 情報) で行うこと。新規インスタンスは Elythia のリポジトリが既定で入る (#2700) |
+| `pluginSecretKey` | string | - | サーバープラグインの秘密の値 (API キーなど) を暗号化する鍵 (#3470)。32 バイトを base64 で書いたもの (`openssl rand -base64 32`)。標準 / URL 用の base64 のどちらでもよく、padding の有無も問わない。**長さが違う・base64 として読めない値は起動エラー** (黙って未設定に倒さない)。未設定なら秘密の値を保存できない (管理画面にそう出る)。ロールを分けたときは全プロセスに同じ値を渡す。入れ替えと紛失の手順は[プラグイン — 運営者向け](plugins/operating.md#秘密の値)。`elythia config-dump` では有無だけを出す。`MK_PLUGINSECRETKEY`で上書き可 |
 | `effectivePolicyProviderCacheEntries` | int | `10000` | build-time pluginのeffective-policy providerごとに保持する成功結果LRUの最大件数。正の値だけを受理し、0以下は警告して既定へ戻す。TTLは無く、eviction時はresolverを再実行する。変更にはprocess再起動が必要。`MK_EFFECTIVEPOLICYPROVIDERCACHEENTRIES`で上書き可 |
 
 ### データベース (`db.*`)
@@ -271,6 +272,7 @@ Elythia 側のマイグレーションには含めていない。pgroonga 拡張
 | `MK_ID` | `id` |
 | `MK_MAXFILESIZE` | `maxFileSize` |
 | `MK_MEDIAPROXYSECRET` | `mediaProxySecret` |
+| `MK_PLUGINSECRETKEY` | `pluginSecretKey` |
 | `MK_TESTMODE` | `testMode` |
 | `MK_DISABLEENDPOINTRATELIMITS` | `disableEndpointRateLimits` |
 | `MK_BCRYPTCOST` | `bcryptCost` |
@@ -284,10 +286,10 @@ Elythia 側のマイグレーションには含めていない。pgroonga 拡張
 
 用途別Redisも同様 (例: `MK_REDISFORPUBSUB_HOST`)。
 
-**上表は一部。** `internal/config/config.go` の `bindEnvKeys()` は **90 キー**を
+**上表は一部。** `internal/config/config.go` の `bindEnvKeys()` は **91 キー**を
 登録している。内訳は用途別 Redis 5 系統 (`redis` / `redisForPubsub` /
 `redisForJobQueue` / `redisForTimelines` / `redisForReactions`) が各 9、`db.*` が 9、
-`logging.sql.*` が 2、`sentryForBackend.options.{dsn,environment}` が 2、残り 32 が
+`logging.sql.*` が 2、`sentryForBackend.options.{dsn,environment}` が 2、残り 33 が
 トップレベル。全量はその関数を見ること。
 
 **登録の有無で「作れるか」だけが変わる。** Viper は `AutomaticEnv` を有効にしている

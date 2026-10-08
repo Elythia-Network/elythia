@@ -450,6 +450,81 @@ if err := ctx.Config().Unmarshal(&c); err != nil {
 
 **キーの大文字小文字に注意。** 読み込みに使っている Viper はキーを小文字化する（`apiKey` → `apikey`）。構造体のフィールドは `encoding/json` が大文字小文字を無視して照合するので camelCase のタグで問題ないが、**map で受ける設定はキーの大小が復元されない**。
 
+## 秘密の値
+
+API キーやトークンのように、設定ファイルに書きたくない値を**管理画面から入れてもらい、暗号化して DB に置く**仕組み (#3470)。
+
+```go
+var Plugin = plugin.Definition{
+	Name:       "mybot",
+	APIVersion: plugin.APIVersion,
+	Secrets: []plugin.SecretSpec{
+		{Name: "apiKey", Description: "外部サービスの API キー"},
+	},
+	Jobs: jobs,
+}
+```
+
+`Secrets` で宣言した名前ごとに、コントロールパネルの「サーバープラグイン」に入力欄が出る。値はサーバー側で読む。
+
+```go
+func jobs(pctx plugin.Context, j plugin.Jobs) error {
+	j.Handle("post", func(ctx context.Context, _ json.RawMessage) error {
+		key, err := pctx.Secrets().Get(ctx, "apiKey")
+		switch {
+		case errors.Is(err, plugin.ErrSecretNotSet):
+			// まだ入れられていない。止まらずに案内を出す
+			pctx.Logger().Warn("apiKey が未設定です (コントロールパネル > サーバープラグイン)")
+			return nil
+		case errors.Is(err, plugin.ErrSecretsUnavailable):
+			// 運営者が pluginSecretKey を設定していない
+			return nil
+		case errors.Is(err, plugin.ErrSecretUnreadable):
+			// 鍵が変わった。管理画面から入れ直してもらう
+			return nil
+		case err != nil:
+			return err
+		}
+		return callService(ctx, key)
+	})
+	return nil
+}
+```
+
+**呼ぶたびに DB から読んで復号する。** 管理画面で入れ替えた値は次の `Get` から使われ、再起動は要らない。
+
+**値は書き込み専用。** 保存した値は管理画面にも本体の API の応答にも出ず、出るのは「設定済みか」と、20 文字以上の値の末尾 4 文字だけ。**読んだ値を自分のルートの応答に入れないこと** — この約束をプラグインが自分で破ることになる。ログにも出さない。
+
+| | |
+|---|---|
+| 名前 | 英字で始まり、英数字と `_` `-` だけで 64 文字以内。宣言 (`Validate`) でも保存でも同じ規則で検査する |
+| 値 | 1 バイト以上 8 KiB 以下の UTF-8。**管理画面から入れた値は前後の空白・改行を落として保存する** (貼り付けた API キーに付いた改行で認証が失敗するのを防ぐ)。空白だけなら断る。`ctx.Secrets().Set` はバイト列をそのまま置く |
+| 範囲 | プラグインごとに分かれる。他のプラグインの同名の値は `ctx.Secrets()` からは見えない。**これは API の範囲であってセキュリティ境界ではない** (#2476、[最初に知っておくこと](#最初に知っておくこと)) — プラグインは本体と同じプロセス・同じ DB で動き、設定ファイルの鍵も読める |
+| 管理画面から入れられるもの | **宣言した名前だけ**。宣言していない名前は、プラグインが `Set` で置いたもの (OAuth で受け取ったトークンなど) として一覧に出て、管理画面からは削除だけができる |
+| 書き換えられる人 | 管理者だけ (モデレーターは不可)。ブラウザでログインした token に限り、アプリや API の token では一覧も見られない |
+
+`ctx.Secrets().Set` / `Delete` でプラグイン自身が値を置くこともできる。**鍵が設定されていなければ、どの操作も `ErrSecretsUnavailable` を返す** (平文で置く経路は無い)。鍵が無い環境でも起動を止めず、機能を止めて案内を出す作りにすること。
+
+暗号化の形と、鍵の入れ替え・紛失の手順は[運営者向け](operating.md#秘密の値)。
+
+### 独自の管理画面に入力欄を置く
+
+コントロールパネルの「サーバープラグイン」に入力欄が出るので、何もしなくても使える。自分の管理画面にも置きたいときは `MkPluginSecrets` を使う。
+
+```vue
+<script setup lang="ts">
+import { MkPluginSecrets } from '@/plugin-api.js';
+</script>
+
+<template>
+<MkPluginSecrets plugin="mybot"/>
+</template>
+```
+
+管理者でなければ「管理者だけが扱える」と出る。入力口は本体が張る予約パス (`/api/plugin/<name>/_secrets`、`/_secrets/set`、`/_secrets/delete`) で、プラグインが同じパスを登録することはできない。
+
+**入力口が無いと 200 + `{}` が返る。** `Secrets` を宣言していない・無効になっているプラグインには予約パスを張らないので、`POST /api/plugin/<name>/_secrets*` は本体の API の catchall に落ち、エラーではなく `200 {}` になる (GET 以外の未登録エンドポイントと同じ扱い)。スクリプトから叩くときは、一覧の応答に `secrets` 配列があるか、保存が 204 で返ったかを見ること。`MkPluginSecrets` はこの形を見分けてエラーとして出す。
+
 ## 外へ HTTP を出す
 
 **自分で `&http.Client{}` を作らないこと。** `ctx.HTTP()` が返す client を使う。
@@ -837,6 +912,25 @@ require.NoError(t, jobs.Run(t, "prune", ""))
 
 **DB はフェイクにしない。** SQL の挙動を模した偽物は本物とずれ、通ったのに本番で落ちるテストになる。`plugintest` も migration の適用は Elythia 本体と同じ実装を使っている。
 
+秘密の値は `WithSecrets` で入れておく。置き場所はメモリだが、暗号化と検査 (名前の規則・値の長さ) は本番と同じ実装を通る。
+
+```go
+h := plugintest.New(t).WithName("mybot").WithSecrets(map[string]string{"apiKey": "test-key"})
+res, err := h.Routes(Plugin).Call(t, "POST /connect", plugintest.Request{Administrator: true})
+require.NoError(t, err)
+require.NotNil(t, res)
+
+// プラグインが Set したものを確かめる
+token, ok := h.Secret("oauthToken")
+require.True(t, ok)
+assert.NotEmpty(t, token)
+
+// pluginSecretKey の無いインスタンスでも、止まらずに案内を返せるか
+noKey := plugintest.New(t).WithName("mybot").WithoutSecretKey()
+_, err = noKey.Routes(Plugin).Call(t, "POST /connect", plugintest.Request{Administrator: true})
+require.NoError(t, err)
+```
+
 ## 公開面の一覧
 
 以下が「壊さないと約束する範囲」のすべて。`plugin` パッケージの分は**手で書いているが、`internal/entitycompat/testdata/golden_plugin_surface.txt` の `plugin:` 行と突き合わせる gate が CI で回る** (`TestPluginDoc_*`)。見るのは識別子の有無・宣言の有無・interface の method の署名・トップレベル func / const の行・struct のフィールドの型。**`type X func(...)` の署名だけは対象外** — golden が `type Handler func` としか出さず、照合する相手が無いため。
@@ -897,8 +991,22 @@ type Definition struct
   Routes     func(Context, Router) error
   Jobs       func(Context, Jobs) error
   EffectivePolicies func(Context, EffectivePolicyInvalidator) (EffectivePolicyRegistration, error)
+  Secrets    []SecretSpec
 
 func (Definition) Validate() error
+
+type SecretSpec struct
+  Name        string
+  Description string
+
+type Secrets interface
+  Get(context.Context, string) (string, error)
+  Set(context.Context, string, string) error
+  Delete(context.Context, string) error
+
+var ErrSecretNotSet error
+var ErrSecretsUnavailable error
+var ErrSecretUnreadable error
 
 type ActiveRoleAssignment struct
   RoleID string
@@ -936,6 +1044,7 @@ type Context interface
   Storage() Storage
   Config() Config
   Accounts() Accounts
+  Secrets() Secrets
   Peer() Peer
   Queue() Queue
   HTTP() *http.Client
@@ -1045,6 +1154,7 @@ PluginPage: { path, component, navTitle?, navIcon?, admin? }
 再公開: MkInput / MkButton / MkFolder / MkLoading
         MkSelect / MkSwitch / MkAvatar / MkUserName / MkTime / PageWithHeader
         useMkSelect / definePage
+        MkPluginSecrets (秘密の値の入力欄。props: plugin)
 ```
 
 ## やってはいけないこと
@@ -1057,6 +1167,8 @@ PluginPage: { path, component, navTitle?, navIcon?, admin? }
 | 取得元の `Content-Type` をそのまま `Blob` に流す | 本体が allowlist で矯正するので XSS にはならないが、画像のつもりが `application/octet-stream` になってダウンロードになる |
 | 素の `go` で goroutine を起動する | panic でプロセスごと落ちる。`ctx.Go()` を使う |
 | 管理用の API を `IsModerator()` で守らない | 画面を隠しても API は誰でも叩ける |
+| `ctx.Secrets()` で読んだ値を応答やログに出す | 値は書き込み専用という約束をプラグインが破ることになる |
+| API キーを自分の storage に平文で置く | DB のバックアップと一緒に漏れる。`ctx.Secrets()` を使う |
 
 ## 公開と互換性
 

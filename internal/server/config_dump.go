@@ -110,6 +110,8 @@ func BuildConfigDump(cfg *config.Config, role config.ProcessRole) ConfigDump {
 	add(&d.Settings, "setupPassword", secretValue(cfg.SetupPassword), "")
 	add(&d.Settings, "mediaProxySecret", secretValue(string(cfg.MediaProxySecret)),
 		"未設定なら DB の instance_secret から導出する")
+	add(&d.Settings, "pluginSecretKey", secretValue(string(cfg.PluginSecretKey)),
+		"未設定ならプラグインの秘密の値を保存できない (#3470)")
 	add(&d.Settings, "proxy", redactURLUserinfo(cfg.Proxy), "")
 	add(&d.Settings, "proxySmtp", redactURLUserinfo(cfg.ProxySMTP), "")
 	add(&d.Settings, "frontendContentSecurityPolicy", orUnset(cfg.FrontendContentSecurityPolicy), "")

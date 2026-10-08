@@ -38,6 +38,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/elythia-network/elythia/internal/core/pluginsecret"
 	"github.com/elythia-network/elythia/internal/effectivepolicy"
 	"github.com/elythia-network/elythia/internal/pluginstore"
 	"github.com/elythia-network/elythia/plugin"
@@ -73,6 +74,10 @@ type Harness struct {
 	// (accountStore) を使う。
 	accounts     plugin.Accounts
 	accountStore *fakeAccountStore
+	// 秘密の値 (#3470)。本番と同じ service をメモリ上の置き場所で動かす。
+	secrets            *pluginsecret.Service
+	secretRepo         *memSecretRepo
+	secretsUnavailable bool
 }
 
 // New starts a harness. The plugin name defaults to "test".

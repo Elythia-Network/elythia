@@ -23,6 +23,7 @@ import (
 	corefederation "github.com/elythia-network/elythia/internal/core/federation"
 	corenote "github.com/elythia-network/elythia/internal/core/note"
 	"github.com/elythia-network/elythia/internal/core/pluginaccount"
+	"github.com/elythia-network/elythia/internal/core/pluginsecret"
 	corerole "github.com/elythia-network/elythia/internal/core/role"
 	"github.com/elythia-network/elythia/internal/misc/password"
 	"github.com/elythia-network/elythia/internal/misc/redact"
@@ -87,6 +88,10 @@ type Server struct {
 	// setupRoutes が setupPlugins より前に入れる。nil のときは、各プラグインの
 	// ctx.Accounts() が呼ぶとエラーを返す実装になる。
 	pluginAccounts *pluginaccount.Service
+	// pluginSecrets はプラグインの秘密の値 (#3470) を暗号化して出し入れする。
+	// setupRoutes で setupPlugins より前に入る。nil のときは秘密の値の入力口を
+	// 張らず、プラグインには鍵の無い口 (呼ぶと ErrSecretsUnavailable) を渡す。
+	pluginSecrets *pluginsecret.Service
 	// roleService は HTTP と queue が共有する process-local policy registry。
 	// 有効な plugin provider の登録は起動時だけ行い、enabled の変更には
 	// 再起動を要求する。
