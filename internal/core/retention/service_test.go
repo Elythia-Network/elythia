@@ -57,9 +57,10 @@ func (s *stubUserRepo) SearchUsers(string, string, int, int, string) ([]*model.U
 func (s *stubUserRepo) SearchByUsernameAndHost(string, *string, bool, int) ([]*model.User, error) {
 	return nil, nil
 }
-func (s *stubUserRepo) UpdateUser(string, map[string]any) error    { return nil }
-func (s *stubUserRepo) UpdateProfile(string, map[string]any) error { return nil }
-func (s *stubUserRepo) RemoveBackupCode(_, _ string) error         { return nil }
+func (s *stubUserRepo) UpdateUser(string, map[string]any) error                   { return nil }
+func (s *stubUserRepo) SetAccountCreatedAtIfNull(string, time.Time) (bool, error) { return false, nil }
+func (s *stubUserRepo) UpdateProfile(string, map[string]any) error                { return nil }
+func (s *stubUserRepo) RemoveBackupCode(_, _ string) error                        { return nil }
 
 func (s *stubUserRepo) UpdatePasswordIfCurrent(string, string, string) (bool, error) {
 	return false, nil

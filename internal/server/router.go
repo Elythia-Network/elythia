@@ -795,6 +795,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// ActivityPub
 	apURLs := activitypub.NewURLBuilder(s.config.URL)
 	apRenderer := activitypub.NewRenderer(apURLs)
+	// actor の `published` (アカウントの作成日時) を ID から出す (#3465)。
+	apRenderer.SetIDGenerator(idGen)
 	// Mention tag を AP Note に埋め込むための resolver。
 	apRenderer.SetMentionResolver(corefederation.NewUserMentionResolver(userRepo, apURLs))
 	apRenderer.SetFileResolver(driveFileRepo)
@@ -2003,6 +2005,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// `/api/users/show` から呼ばれるので、放っておくと defederate した相手に
 	// 「誰をいつ見たか」が漏れる。
 	remoteStatsFetcher.SetHostAllowedChecker(instanceService.CanFetchOptionalRemoteData)
+	// フォローしてきたリモートの人のアカウントの作成日時を、Misskey 系の相手
+	// なら `/api/users/show` から埋める (#3465)。統計と同じ fetcher を使うので、
+	// 待ち時間の上限・キャッシュ・SSRF 対策・連合を切った相手の扱いが揃う。
+	federationProcessor.SetAccountCreatedAtFiller(corefederation.NewAccountCreatedAtFiller(remoteStatsFetcher, instanceRepo, userRepo).Fill)
 	usersHandler.SetRemoteStatsFetcher(&remoteStatsFetcherAdapter{
 		fetcher: remoteStatsFetcher,
 	})

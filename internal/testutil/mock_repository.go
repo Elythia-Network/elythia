@@ -563,6 +563,16 @@ func (m *MockUserRepository) UpdateUser(userID string, fields map[string]any) er
 	return nil
 }
 
+// SetAccountCreatedAtIfNull stores createdAt only while the column is nil.
+func (m *MockUserRepository) SetAccountCreatedAtIfNull(userID string, createdAt time.Time) (bool, error) {
+	u, ok := m.Users[userID]
+	if !ok || u.AccountCreatedAt != nil {
+		return false, nil
+	}
+	u.AccountCreatedAt = &createdAt
+	return true, nil
+}
+
 func (m *MockUserRepository) HardDeleteUser(userID string) error {
 	delete(m.Users, userID)
 	delete(m.Profiles, userID)
@@ -969,6 +979,10 @@ func applyUserFields(u *model.User, fields map[string]any) {
 		case "lastFetchedAt":
 			if t, ok := v.(*time.Time); ok {
 				u.LastFetchedAt = t
+			}
+		case "accountCreatedAt":
+			if t, ok := v.(*time.Time); ok {
+				u.AccountCreatedAt = t
 			}
 		case "uri":
 			switch s := v.(type) {

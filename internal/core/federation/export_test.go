@@ -105,3 +105,10 @@ const InboundMentionFetchSlots = inboundMentionFetchSlots
 
 // InboundMentionFailureTTL exposes inboundMentionFailureTTL for external tests.
 const InboundMentionFailureTTL = inboundMentionFailureTTL
+
+// NewRemoteStatsFetcherRedirectingTo returns a RemoteStatsFetcher whose
+// requests to https://<any host>/... go to target (an httptest server URL),
+// for external tests (#3465).
+func NewRemoteStatsFetcherRedirectingTo(target string) *RemoteStatsFetcher {
+	return newRemoteStatsFetcherWithTransport(redirectTransport{target: target})
+}

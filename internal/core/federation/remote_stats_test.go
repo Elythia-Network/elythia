@@ -307,7 +307,9 @@ func (rt redirectTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	if req.URL.RawQuery != "" {
 		target += "?" + req.URL.RawQuery
 	}
-	parsed, err := http.NewRequest(req.Method, target, rewritten.Body)
+	// 元のリクエストの context (呼び出し側の期限と client の Timeout) を
+	// 引き継ぐ。落とすと、応答しない相手のテストで RoundTrip が戻らない。
+	parsed, err := http.NewRequestWithContext(req.Context(), req.Method, target, rewritten.Body)
 	if err != nil {
 		return nil, err
 	}

@@ -123,6 +123,15 @@ type UserDetailed struct {
 	CreatedAt     string  `json:"createdAt"`
 	UpdatedAt     *string `json:"updatedAt"`
 	LastFetchedAt *string `json:"lastFetchedAt"`
+	// AccountCreatedAt はリモートの人がアカウントを作った日時 (#3465、Elythia
+	// 独自の additive field)。createdAt はリモートでは「このサーバーが初めて
+	// 知った日時」なので、本家互換のため値と意味を変えずに別の field で出す。
+	//
+	// **分からないときは null ではなく key ごと出さない (omitempty)。** 本家の
+	// backend e2e (users.ts) は UserDetailed / MeDetailed を「キーが過不足なく
+	// 入っている」かで deepStrictEqual するので、ローカルの人に null の key を
+	// 足すだけで落ちる。ローカルの人には出ない。
+	AccountCreatedAt *string `json:"accountCreatedAt,omitempty"`
 	// MovedTo / AlsoKnownAs はアカウント移行 (Mastodon 互換 Move) のフィールド。
 	// upstream UserEntityService は movedToUri / alsoKnownAs (URI 群) をローカル
 	// ユーザー ID に解決した上で返す (resolvePerson(...).then(u => u.id))。
@@ -584,6 +593,12 @@ func PackUserDetailed(u *model.User, profile *model.UserProfile, idGens ...id.Ge
 	if u.LastFetchedAt != nil {
 		s := u.LastFetchedAt.UTC().Format("2006-01-02T15:04:05.000Z")
 		d.LastFetchedAt = &s
+	}
+
+	// ローカルの人は createdAt が登録日なので出さない (列も書かない)。
+	if !u.IsLocal() && u.AccountCreatedAt != nil {
+		s := u.AccountCreatedAt.UTC().Format("2006-01-02T15:04:05.000Z")
+		d.AccountCreatedAt = &s
 	}
 
 	// updatedAt は upstream UserEntityService.ts:536 と同じく user.updatedAt を

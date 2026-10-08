@@ -1158,6 +1158,10 @@ func (r *Resolver) resolveActorOnceWithID(uri string, allowCrossHost bool, preas
 		// リノートまで timeline から消える** (`Delete` 経路では消えない)。
 		// 詳細は docs/divergence/federation.md §3-3a。
 		IsSuspended: actor.Suspended.Bool(),
+		// アカウントの作成日時 (#3465)。actor の `published` が無い・読めない
+		// ときは NULL のままにする (Misskey 系はフォローを受けたときに
+		// AccountCreatedAtFiller が `/api/users/show` から埋める)。
+		AccountCreatedAt: parseAccountPublished(actor.Published.String(), now),
 	}
 	if user.IsSuspended {
 		// **由来を持てないなら凍結しない。** 記録できないまま凍結すると、
@@ -1805,6 +1809,14 @@ func (r *Resolver) refreshActor(existing *model.User, uri string, skipFeatured b
 	if akaStr := remoteURIList(actor.ID, "user.alsoKnownAs", actor.AlsoKnownAs); akaStr != "" {
 		fields["alsoKnownAs"] = &akaStr
 		existing.AlsoKnownAs = &akaStr
+	}
+	// アカウントの作成日時 (#3465)。送られてくるたびに最新の値で上書きする。
+	// 無い・読めないときは保存済みの値を残す (他のフィールドと同じ規約。
+	// `/api/users/show` から埋めた値を、`published` を送らない相手の refresh で
+	// 消さないため)。
+	if createdAt := parseAccountPublished(actor.Published.String(), now); createdAt != nil {
+		fields["accountCreatedAt"] = createdAt
+		existing.AccountCreatedAt = createdAt
 	}
 	// アバター / バナー画像のURLリモート側で変更された場合に追従する。
 	// 他フィールドと同様、空値や欠落時は既存値を温存する (削除は追わない)。

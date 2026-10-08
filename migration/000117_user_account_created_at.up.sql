@@ -1,0 +1,11 @@
+-- リモートの人がアカウントを作った日時を持つ列 (#3465)。Elythia 独自の列で、
+-- upstream の user には無い。
+--
+-- user.id から出る createdAt は「このサーバーがその人を初めて知った日時」なので、
+-- リモートの人では作成日時にならない。actor の `published` (Mastodon が送る) か、
+-- Misskey 系なら相手の `/api/users/show` の `createdAt` から埋める。
+-- 読めなければ NULL のまま。ローカルの人には書かない (createdAt が作成日時)。
+--
+-- 既存の行は、次にアカウント情報を取り直したときに埋まる。連合先への負荷を
+-- 避けるため、一括の取り直しはしない。
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "accountCreatedAt" timestamp with time zone;
