@@ -48,6 +48,11 @@ SPDX-License-Identifier: AGPL-3.0-only
 						<template #key>{{ i18n.ts.email }}</template>
 						<template #value><span class="_monospace">{{ info.email }}</span></template>
 					</MkKeyValue>
+					<!-- Elythia: プラグインが管理するアカウント (#3468) は、管理しているプラグインの名前を出す。誰もログインできないアカウントであることを、運営者がここで見分けられるようにする -->
+					<MkKeyValue v-if="info && info.managedByPlugin != null" oneline>
+						<template #key>{{ i18n.ts.plugins }}</template>
+						<template #value><span class="_monospace">{{ info.managedByPlugin }}</span></template>
+					</MkKeyValue>
 				</template>
 			</div>
 

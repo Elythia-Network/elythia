@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+import type * as Misskey from 'misskey-js';
 import type { SignupApplicationFormField } from './entities.js';
 
 /**
@@ -75,6 +76,17 @@ export type ElythiaRequestExtensions = {
  * 出なかった (#3439)。
  */
 export type ResponseOverrides = {
+	/**
+	 * Elythia adds the plugin that manages the account (#3468). Missing on
+	 * upstream backends.
+	 */
+	'admin/show-user': Misskey.entities.AdminShowUserResponse & {
+		/**
+		 * The name of the plugin that manages this account, or `null` for an
+		 * ordinary account. Nobody can sign in to a plugin-managed account.
+		 */
+		managedByPlugin?: string | null;
+	};
 	/**
 	 * The stored value, which is any JSON the client wrote. misskey-js has
 	 * `Record<string, never>` (an object with no keys).
