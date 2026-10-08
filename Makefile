@@ -447,7 +447,7 @@ golangci-lint: ## golangci-lint (errcheck / govet / ineffassign / staticcheck)
 	if [ -f "$$gen" ]; then bak=$$(mktemp); cp -p "$$gen" "$$bak"; rm -f "$$gen"; fi; \
 	trap 'if [ -n "$$bak" ]; then cp -p "$$bak" "$$gen"; rm -f "$$bak"; fi' EXIT INT TERM; \
 	gover=$$(awk '/^go [0-9]/ {print $$2; exit}' go.mod); \
-	GOWORK=off GOTOOLCHAIN=go$$gover go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2 run --timeout 10m
+	GOWORK=off GOTOOLCHAIN=go$$gover go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0 run --timeout 10m
 
 .PHONY: actionlint
 actionlint: ## GitHub Actions の workflow を検査
