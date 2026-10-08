@@ -93,7 +93,7 @@ make test                    # CIと同じ条件(-race -count=1 -shuffle=3)
 make test-fast               # -race抜き。反復用で、コミット前の検査ではない
 make gates                   # 静的なparityゲートを一括(サーバー・Docker不要)
 make plugin-test             # 同梱プラグインのテスト(別moduleなので./...に入らない)
-make migrate-up / migrate-down   # downは1段だけ戻す
+make migrate-up / migrate-down   # downは本体の系列を1段だけ戻す(forkの系列はmake migrate-down-local、docs/fork-migrations.md)
 make frontend-check          # frontend/の型チェック + frontendを読むゲート + 絵文字の正規表現 + eslint
 make frontend-lint / frontend-test   # frontend/のeslint / vitest
 ```
@@ -301,6 +301,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 
 このファイル自体を変えたときだけ、1行で追記します(新しいものを上に)。経緯の本文はリンク先にあります。個別のfixの履歴は`CHANGELOG.md`にあります。
 
+- 2026-10-08: forkのmigrationの系列(`migration/local/`)を足したので、Section 3の`migrate-down`の注釈を更新した (#3428) → [docs/fork-migrations.md](docs/fork-migrations.md)
 - 2026-10-07: frontendに`elythia-js`のworkspaceを足したので、Section 8の`frontend`の行のeslintの対象を10 workspaceにした (#3418) → [docs/contributing.md](docs/contributing.md#elythia-独自の-api-の型-frontendpackageselythia-js)
 - 2026-10-07: `docs/divergence.md`を目次にし、中身を`docs/divergence/`の領域ごとのファイルへ分けたので、冒頭の方針の案内を更新した (#3414) → [docs/divergence.md](docs/divergence.md)
 - 2026-10-06: nodeinfoの宣言を`elythiaPlugins`にしたので、冒頭の据え置く識別子の例外を更新した (#3400) → [docs/plugin-peer-protocol.md](docs/plugin-peer-protocol.md)

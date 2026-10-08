@@ -372,12 +372,14 @@ upstream に無い、または cherrypick 由来の加算機能（wire 互換を
 
 ```bash
 make migrate-up      # 最新まで
-make migrate-down    # 1 段ロールバック
+make migrate-down    # 1 段ロールバック (本体の系列)
 make migrate-create  # 新規作成
 
-# 全段ロールバック (破壊的。全テーブルが消える)
-go run ./cmd/elythia migrate -direction down
+# 全段ロールバック (破壊的。全テーブルが消える)。down は -track が必須
+go run ./cmd/elythia migrate -direction down -track core
 ```
+
+fork が独自の migration を足すときは、本体とは別の系列 `migration/local/` (管理表 `schema_migrations_local`) に置く。`elythia migrate -direction up` は本体の後にそれを流す ([fork の独自 migration](fork-migrations.md)、#3428)。
 
 ## 技術スタックとディレクトリ構成 (旧 CLAUDE.md Section 1 / 2)
 

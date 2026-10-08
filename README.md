@@ -166,6 +166,7 @@ go test -race -count=1 -shuffle=3 -timeout 10m \
 | [1.5.0 から 2.0.0 へ上げる](docs/upgrade/2.0.0.md) | 構成ごとの移行手順 (名前・イメージ・バイナリ・frontend の置き場所が変わる版) |
 | [コントリビューション](docs/contributing.md) | Issue/PR運用、レビュー基準 |
 | [TS版からの移行](docs/migration-from-ts.md) | 既存Misskeyからの移行手順 |
+| [fork の独自 migration](docs/fork-migrations.md) | fork が本体の表を変える migration を、本体と衝突せずに足す手順 (`migration/local/`) |
 | [Playwright](docs/playwright.md) | Playwrightによるフロントエンド / API テスト |
 | [Drop-in e2e (pytest)](docs/dropin-e2e.md) | TS-A backend を mk-A に差し替えた state preservation 検証 |
 | [Drop-in frontend e2e (cypress)](docs/dropin-frontend-e2e.md) | 3 TS instance + cypress で frontend 視点の互換 |

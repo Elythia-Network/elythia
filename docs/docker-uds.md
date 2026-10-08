@@ -156,7 +156,7 @@ docker compose -f compose.uds.yaml logs mkgo | tail -50  # mkgo だけ、過去�
 
 対応:
 
-- スキーマが壊れている場合は手動で `psql` で問題を解消する。migration を巻き戻すなら `docker compose -f compose.uds.yaml exec mkgo /app/elythia migrate -direction down -steps 1`。**UDS image は `/app/elythia` を同梱していて entrypoint が `elythia migrate` を叩く** (`deploy/uds/Dockerfile.mkgo`)。コンテナには Go toolchain が無いので `go run ./cmd/elythia migrate` は使えない。手元のツリーから叩く場合は `go run ./cmd/elythia migrate` か、`make build` が作る `./built/elythia migrate`
+- スキーマが壊れている場合は手動で `psql` で問題を解消する。migration を巻き戻すなら `docker compose -f compose.uds.yaml exec mkgo /app/elythia migrate -direction down -track core -steps 1` (`-track` は必須。fork の系列なら `-track local`)。**UDS image は `/app/elythia` を同梱していて entrypoint が `elythia migrate` を叩く** (`deploy/uds/Dockerfile.mkgo`)。コンテナには Go toolchain が無いので `go run ./cmd/elythia migrate` は使えない。手元のツリーから叩く場合は `go run ./cmd/elythia migrate` か、`make build` が作る `./built/elythia migrate`
 - volume 自体がおかしい場合は `make uds-down-v` で named volume を消して綺麗な状態から再構築する (**DB データは全部消える**ので注意)
 - **`-steps` を省略すると全段 down する** (全テーブルが消える)。1 段だけ戻したいときは必ず `-steps 1` を付ける
 
