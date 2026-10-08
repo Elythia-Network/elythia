@@ -464,6 +464,18 @@ func (c *CachedUserRepository) UpdateUser(userID string, fields map[string]any) 
 	return nil
 }
 
+// SetAccountCreatedAtIfNull invalidates the cached row after a write (#3465).
+func (c *CachedUserRepository) SetAccountCreatedAtIfNull(userID string, createdAt time.Time) (bool, error) {
+	set, err := c.UserRepository.SetAccountCreatedAtIfNull(userID, createdAt)
+	if err != nil {
+		return false, err
+	}
+	if set {
+		c.invalidate(userID)
+	}
+	return set, nil
+}
+
 func (c *CachedUserRepository) UpdateProfile(userID string, fields map[string]any) error {
 	if err := c.UserRepository.UpdateProfile(userID, fields); err != nil {
 		return err

@@ -73,6 +73,11 @@ type Processor struct {
 	userRepo         repository.UserRepository
 	noteRepo         repository.NoteRepository
 
+	// accountCreatedAt はフォローしてきたリモートの人のアカウントの作成日時を、
+	// 分からなければ Misskey 系の相手の `/api/users/show` から埋める (#3465)。
+	// 未配線なら埋めない (列は NULL のまま)。
+	accountCreatedAt AccountCreatedAtFillerFunc
+
 	// Block/Flag/Move/Add/Remove federation hooks.
 	// SetBlockingService等で注入。nilの場合は対応activityがErrUnsupportedActivityを返す。
 	blockingService *coreblocking.Service
@@ -844,6 +849,16 @@ type AccountDeleteEnqueuer interface {
 	EnqueueDeleteAccount(payload queue.DeleteAccountPayload) error
 }
 
+// AccountCreatedAtFillerFunc fills a remote user's unknown account creation
+// time. (*AccountCreatedAtFiller).Fill satisfies it.
+type AccountCreatedAtFillerFunc func(ctx context.Context, u *model.User)
+
+// SetAccountCreatedAtFiller wires the best-effort lookup of a remote
+// follower's account creation time on inbound Follow (#3465).
+func (p *Processor) SetAccountCreatedAtFiller(fn AccountCreatedAtFillerFunc) {
+	p.accountCreatedAt = fn
+}
+
 // SetAccountDeleteEnqueuer wires the enqueuer used to cascade-purge a remote
 // user's data when an inbound actor self-delete is received (#1220).
 func (p *Processor) SetAccountDeleteEnqueuer(e AccountDeleteEnqueuer) {
@@ -1060,6 +1075,12 @@ func (p *Processor) handleFollow(act genericActivity) error {
 		slog.Info("federation: skipping inbound Follow targeting a remote followee",
 			"follower", act.Actor, "followee", followeeURI)
 		return nil
+	}
+	// フォローしてきた人のアカウントの作成日時を、分からなければ埋める
+	// (#3465)。フォローの判定 (#3466) より前に置く。best-effort で、失敗しても
+	// フォローは続ける。待つのは accountCreatedAtFillTimeout まで。
+	if p.accountCreatedAt != nil {
+		p.accountCreatedAt(context.Background(), follower)
 	}
 	// inbound AP Follow は AP protocol で withReplies を運ばないので
 	// FollowOptions{} (default false) で作成する (#1056)。remote follower の

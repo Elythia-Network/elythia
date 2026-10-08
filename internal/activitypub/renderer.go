@@ -307,6 +307,9 @@ type Renderer struct {
 	// quoteApproval は引用する投稿の承認 URI (FEP-044f の quoteAuthorization) を
 	// 引く lookup (#3234)。承認が無ければ空文字列。nil なら付けない。
 	quoteApproval func(n *model.Note) (string, error)
+	// idGen はローカルの人の ID から作成日時を出し、actor の `published` に
+	// 載せるために使う (#3465)。nil なら `published` を出さない。
+	idGen id.Generator
 }
 
 // NewRenderer constructs a Renderer.
@@ -332,6 +335,13 @@ func (r *Renderer) SetQuoteApprovalResolver(fn func(n *model.Note) (string, erro
 // QuoteRequest を送るかどうかもこれに揃える。
 func IsQuote(n *model.Note) bool {
 	return n.RenoteID != nil && stringValue(n.Text) != ""
+}
+
+// SetIDGenerator wires the ID generator used to derive a local actor's
+// `published` (account creation time) from the user ID in RenderPerson
+// (#3465). nil disables `published` on actors.
+func (r *Renderer) SetIDGenerator(gen id.Generator) {
+	r.idGen = gen
 }
 
 // SetInstanceImageLookup wires a lookup for meta.iconUrl / meta.bannerUrl used
@@ -464,6 +474,16 @@ func (r *Renderer) RenderPerson(u *model.User, profile *model.UserProfile, publi
 		ManuallyApproves: APTruthyBool(u.IsLocked),
 		Discoverable:     APLenientBool(u.IsExplorable),
 		IsCat:            APLenientBool(u.IsCat),
+	}
+	// アカウントの作成日時を `published` として載せる (#3465)。upstream の
+	// renderPerson は出さないが、Mastodon は出しており、受信側は無ければ
+	// 無視するだけなので連合の互換は崩れない。ローカルの人の ID は登録時に
+	// 作るので、TS から移行した DB でも元の登録日になる。読めない ID のときは
+	// 現在時刻で埋めず、出さない (嘘の作成日時を配るよりよい)。
+	if r.idGen != nil {
+		if t, err := r.idGen.ParseTime(u.ID); err == nil {
+			p.Published = APLenientTimestamp(t.UTC().Format(publishedLayout))
+		}
 	}
 	// Ed25519 鍵を持つ user に対しては assertionMethod に Multikey として
 	// 追加 expose する。Fedibird など FEP-521a 対応サーバーが Ed25519 鍵で

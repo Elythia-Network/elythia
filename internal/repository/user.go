@@ -66,6 +66,10 @@ type UserRepository interface {
 	// や "." の取り扱い (= local 限定への remap) は Service レイヤで行う。
 	SearchByUsernameAndHost(query string, host *string, localOnly bool, limit int) ([]*model.User, error)
 	UpdateUser(userID string, fields map[string]any) error
+	// SetAccountCreatedAtIfNull stores a remote account's creation time only
+	// while "accountCreatedAt" is still NULL (#3465). The bool reports whether
+	// the row was updated.
+	SetAccountCreatedAtIfNull(userID string, createdAt time.Time) (bool, error)
 	UpdateProfile(userID string, fields map[string]any) error
 	// UpdatePasswordIfCurrent replaces a profile password only when the stored
 	// hash still equals currentHash. The bool reports whether one row changed.
@@ -495,6 +499,21 @@ func (r *userRepository) UpdateUser(userID string, fields map[string]any) error 
 		return nil
 	}
 	return r.db.Model(&model.User{}).Where("id = ?", userID).Updates(fields).Error
+}
+
+// SetAccountCreatedAtIfNull implements UserRepository.
+//
+// 列が空のときだけ書く。users/show から埋める経路 (フォローの受信) は、
+// 読んだ時点の行を元に判断するので、その間に refresh が actor の `published`
+// を書いていたら、そちらを残す (published を優先する)。
+func (r *userRepository) SetAccountCreatedAtIfNull(userID string, createdAt time.Time) (bool, error) {
+	res := r.db.Model(&model.User{}).
+		Where(`"id" = ? AND "accountCreatedAt" IS NULL`, userID).
+		Update("accountCreatedAt", createdAt)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
 }
 
 // HardDeleteUser permanently removes the user row, relying on FK ON DELETE
