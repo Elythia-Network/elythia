@@ -22,6 +22,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/chart"
 	corefederation "github.com/elythia-network/elythia/internal/core/federation"
 	corenote "github.com/elythia-network/elythia/internal/core/note"
+	"github.com/elythia-network/elythia/internal/core/pluginaccount"
 	corerole "github.com/elythia-network/elythia/internal/core/role"
 	"github.com/elythia-network/elythia/internal/misc/password"
 	"github.com/elythia-network/elythia/internal/misc/redact"
@@ -82,6 +83,10 @@ type Server struct {
 	// pluginRoles はプラグインのルートで権限を判定するための参照 (#2477)。
 	// setupRoutes で roleService を作った後に入る。
 	pluginRoles middleware.RoleChecker
+	// pluginAccounts はプラグインが管理するアカウント (#3468) の操作。
+	// setupRoutes が setupPlugins より前に入れる。nil のときは、各プラグインの
+	// ctx.Accounts() が呼ぶとエラーを返す実装になる。
+	pluginAccounts *pluginaccount.Service
 	// roleService は HTTP と queue が共有する process-local policy registry。
 	// 有効な plugin provider の登録は起動時だけ行い、enabled の変更には
 	// 再起動を要求する。

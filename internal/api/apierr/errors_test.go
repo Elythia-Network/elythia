@@ -415,3 +415,11 @@ func TestNoSecurityKey(t *testing.T) {
 	assert.Equal(t, "NO_SECURITY_KEY", errObj["code"])
 	assert.Equal(t, UUIDNoSecurityKey, errObj["id"])
 }
+
+// PLUGIN_MANAGED_ACCOUNT は Elythia 独自のエラー (#3468)。
+func TestPluginManagedAccount(t *testing.T) {
+	body := PluginManagedAccount()["error"].(map[string]any)
+	if body["code"] != "PLUGIN_MANAGED_ACCOUNT" || body["id"] != UUIDPluginManagedAccount || body["kind"] != KindClient {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}

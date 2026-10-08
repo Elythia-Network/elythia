@@ -56,6 +56,7 @@ func (m *mockUserRepo) ListUsers(model.UserListFilter) ([]*model.User, error)   
 func (m *mockUserRepo) ListRemoteInboxes() ([]model.RemoteInbox, error)           { return nil, nil }
 func (m *mockUserRepo) CountOnlineUsers() (int64, error)                          { return 0, nil }
 func (m *mockUserRepo) CountLocalUsers() (int64, error)                           { return 0, nil }
+func (m *mockUserRepo) CountLocalUsersForSetup() (int64, error)                   { return 0, nil }
 func (m *mockUserRepo) CountLocalUsersActiveSince(time.Time) (int64, error)       { return 0, nil }
 func (m *mockUserRepo) ListLocalUserIDsRegisteredAfter(string) ([]string, error) {
 	return nil, nil

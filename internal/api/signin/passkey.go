@@ -234,6 +234,11 @@ func (h *Handler) finishPasskeySignin(c echo.Context, user *model.User, cred *we
 		// !authorizedUserId (challenge 未解決) 用で別ステージ (#2081)。
 		return c.JSON(http.StatusForbidden, errBody("652f899f-66d4-490e-993e-6606c8ec04c3"))
 	}
+	// プラグインが管理するアカウント (#3468) は、利用者が居ないのと同じ応答に
+	// する (signin / signin-flow と同じ扱い)。
+	if user.IsPluginManaged() {
+		return c.JSON(http.StatusForbidden, errBody("652f899f-66d4-490e-993e-6606c8ec04c3"))
+	}
 	if user.IsSuspended {
 		return c.JSON(http.StatusForbidden, errBody("e03a5f46-d309-4865-9b69-56282d94e1eb"))
 	}

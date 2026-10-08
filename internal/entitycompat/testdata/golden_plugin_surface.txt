@@ -22,6 +22,13 @@ plugin/plugintest:   field Enqueued.Options plugin.EnqueueOptions
 plugin/plugintest:   field Enqueued.Payload json.RawMessage
 plugin/plugintest:   field JobSet.Handlers map[string]plugin.JobHandler
 plugin/plugintest:   field JobSet.Schedules []Schedule
+plugin/plugintest:   field ManagedAccount.Avatar *plugin.Image
+plugin/plugintest:   field ManagedAccount.Banner *plugin.Image
+plugin/plugintest:   field ManagedAccount.Deleted bool
+plugin/plugintest:   field ManagedAccount.Description *string
+plugin/plugintest:   field ManagedAccount.Name *string
+plugin/plugintest:   field ManagedAccount.Owner string
+plugin/plugintest:   field ManagedAccount.Suspended bool
 plugin/plugintest:   field PeerSend.Host string
 plugin/plugintest:   field PeerSend.ID string
 plugin/plugintest:   field PeerSend.Payload json.RawMessage
@@ -41,10 +48,14 @@ plugin/plugintest: func (*Harness) DeliverPeerReply(string, string, any) error
 plugin/plugintest: func (*Harness) EffectivePolicies(plugin.Definition) plugin.EffectivePolicyRegistration
 plugin/plugintest: func (*Harness) Enqueues() []Enqueued
 plugin/plugintest: func (*Harness) Jobs(plugin.Definition) *JobSet
+plugin/plugintest: func (*Harness) ManagedAccounts() []ManagedAccount
 plugin/plugintest: func (*Harness) Peer(plugin.Definition)
 plugin/plugintest: func (*Harness) PeerSends() []PeerSend
 plugin/plugintest: func (*Harness) Routes(plugin.Definition) Handlers
+plugin/plugintest: func (*Harness) SeedAccount(string, string) plugin.Account
+plugin/plugintest: func (*Harness) SuspendAccount(string)
 plugin/plugintest: func (*Harness) WithAPI(plugin.API) *Harness
+plugin/plugintest: func (*Harness) WithAccounts(plugin.Accounts) *Harness
 plugin/plugintest: func (*Harness) WithConfig(map[string]any) *Harness
 plugin/plugintest: func (*Harness) WithDB(*sql.DB) *Harness
 plugin/plugintest: func (*Harness) WithEffectivePolicyInvalidator(plugin.EffectivePolicyInvalidator) *Harness
@@ -58,12 +69,15 @@ plugin/plugintest: type Enqueued struct
 plugin/plugintest: type Handlers other
 plugin/plugintest: type Harness struct
 plugin/plugintest: type JobSet struct
+plugin/plugintest: type ManagedAccount struct
 plugin/plugintest: type PeerSend struct
 plugin/plugintest: type Request struct
 plugin/plugintest: type Schedule struct
 plugin:   field APIError.Body json.RawMessage
 plugin:   field APIError.Endpoint string
 plugin:   field APIError.Status int
+plugin:   field Account.ID string
+plugin:   field Account.Username string
 plugin:   field ActiveRoleAssignment.AssignmentID string
 plugin:   field ActiveRoleAssignment.RoleID string
 plugin:   field Blob.Body []byte
@@ -93,15 +107,26 @@ plugin:   field EffectivePolicyRequest.UserID string
 plugin:   field EnqueueOptions.DedupTTL time.Duration
 plugin:   field EnqueueOptions.Delay time.Duration
 plugin:   field EnqueueOptions.MaxAttempts int
+plugin:   field Image.Data []byte
+plugin:   field Image.Filename string
 plugin:   field Migration.SQL string
 plugin:   field Migration.Version int
+plugin:   field ProfileUpdate.Avatar *Image
+plugin:   field ProfileUpdate.Banner *Image
+plugin:   field ProfileUpdate.Description *string
+plugin:   field ProfileUpdate.Name *string
 plugin:   field StatusError.Message string
 plugin:   field StatusError.Status int
 plugin:   method API.Anonymous() Caller
 plugin:   method API.AsUser(string) Caller
+plugin:   method Accounts.Create(context.Context, string) (Account, error)
+plugin:   method Accounts.Delete(context.Context, string) error
+plugin:   method Accounts.List(context.Context) ([]Account, error)
+plugin:   method Accounts.UpdateProfile(context.Context, string, ProfileUpdate) error
 plugin:   method Caller.Call(context.Context, string, any) (json.RawMessage, error)
 plugin:   method Config.Unmarshal(any) error
 plugin:   method Context.API() API
+plugin:   method Context.Accounts() Accounts
 plugin:   method Context.Config() Config
 plugin:   method Context.Go(func())
 plugin:   method Context.HTTP() *http.Client
@@ -146,6 +171,8 @@ plugin: func WithDelay(time.Duration) EnqueueOption
 plugin: func WithMaxAttempts(int) EnqueueOption
 plugin: type API interface
 plugin: type APIError struct
+plugin: type Account struct
+plugin: type Accounts interface
 plugin: type ActiveRoleAssignment struct
 plugin: type Blob struct
 plugin: type Caller interface
@@ -160,14 +187,20 @@ plugin: type EffectivePolicyResolver func
 plugin: type EnqueueOption func
 plugin: type EnqueueOptions struct
 plugin: type Handler func
+plugin: type Image struct
 plugin: type JobHandler func
 plugin: type Jobs interface
 plugin: type Migration struct
 plugin: type Peer interface
 plugin: type PeerHandler func
 plugin: type PeerReplyHandler func
+plugin: type ProfileUpdate struct
 plugin: type Queue interface
 plugin: type Request interface
 plugin: type Router interface
 plugin: type StatusError struct
 plugin: type Storage interface
+plugin: var ErrAccountNotFound
+plugin: var ErrAccountSuspended
+plugin: var ErrInvalidUsername
+plugin: var ErrUsernameUnavailable

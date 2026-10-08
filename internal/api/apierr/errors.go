@@ -641,3 +641,18 @@ func NoSuchKey() map[string]any {
 func NoSecurityKey() map[string]any {
 	return Error("NO_SECURITY_KEY", "No security key.", UUIDNoSecurityKey)
 }
+
+// UUIDPluginManagedAccount identifies PLUGIN_MANAGED_ACCOUNT. Elythia 独自の
+// エラーで upstream に対応は無い (#3468)。
+const UUIDPluginManagedAccount = "b78751a0-9931-41da-917d-dcc3cfe22586"
+
+// PluginManagedAccount returns the PLUGIN_MANAGED_ACCOUNT error response.
+// Used when an operation would let someone sign in to, or obtain credentials
+// for, an account that a plugin manages (#3468): admin/reset-password,
+// auth/accept and miauth/gen-token.
+//
+// Elythia 独自のアカウントの種類に対するエラーなので、本家のクライアントが
+// 受け取るのは運営者やプラグインが管理するアカウントを操作したときだけ。
+func PluginManagedAccount() map[string]any {
+	return Error("PLUGIN_MANAGED_ACCOUNT", "This account is managed by a plugin. Nobody can sign in to it or obtain its credentials.", UUIDPluginManagedAccount)
+}

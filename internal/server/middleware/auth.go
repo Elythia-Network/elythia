@@ -136,6 +136,17 @@ func (a *AuthMiddleware) Authenticate() echo.MiddlewareFunc {
 				return next(c)
 			}
 
+			// **プラグインが管理するアカウントの token は、プロセス内の呼び出しで
+			// だけ受け付ける (#3468)。** 誰もログインしないアカウントなので、token が
+			// 漏れても気付いて作り直す人がいない。外から届いた HTTP と streaming の
+			// 接続では、token が正しくても「無効な token」と同じ 401 にする。
+			// 印 (MarkInternalCall) は context の値なので、外からは付けられない。
+			// app token もここで弾く (発行の経路は塞いであるが、DB に残った行を
+			// 外から使わせない)。
+			if user.IsPluginManaged() && !IsInternalCall(c.Request().Context()) {
+				return c.JSON(http.StatusUnauthorized, apierr.AuthenticationFailed())
+			}
+
 			// 論理削除された user は anonymous request 扱いに落とす (#962 P2)。
 			if user.IsDeleted {
 				c.Set(string(deletedContextKey), true)

@@ -764,6 +764,21 @@ func (m *MockUserRepository) CountLocalUsers() (int64, error) {
 	return n, nil
 }
 
+// CountLocalUsersForSetup counts non-deleted local users that no plugin
+// manages. CountLocalUsersErr も同じく効く。
+func (m *MockUserRepository) CountLocalUsersForSetup() (int64, error) {
+	if m.CountLocalUsersErr != nil {
+		return 0, m.CountLocalUsersErr
+	}
+	var n int64
+	for _, u := range m.Users {
+		if u.Host == nil && !u.IsDeleted && !u.IsPluginManaged() {
+			n++
+		}
+	}
+	return n, nil
+}
+
 // CountLocalUsersActiveSince counts local users with lastActiveDate >= since.
 func (m *MockUserRepository) CountLocalUsersActiveSince(since time.Time) (int64, error) {
 	var n int64

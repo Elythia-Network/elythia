@@ -933,7 +933,9 @@ func (h *Handler) AccountsCreate(c echo.Context) error {
 		if h.userRepo == nil {
 			return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 		}
-		n, cerr := h.userRepo.CountLocalUsers()
+		// プラグインが管理するアカウント (#3468) は数えない。起動時に bot を作る
+		// プラグインがあると、最初の管理者を作る前に窓が閉じるため。
+		n, cerr := h.userRepo.CountLocalUsersForSetup()
 		if cerr != nil {
 			return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 		}
@@ -1378,6 +1380,10 @@ func (h *Handler) packAdminUser(u *model.User, profile *model.UserProfile, showI
 	} else {
 		resp["lastActiveDate"] = nil
 	}
+	// **Elythia 独自の項目 (#3468)。** そのアカウントを管理しているプラグインの
+	// 名前。普通のアカウントは null。本家の応答に項目を足すだけなので、本家の
+	// クライアントは読み飛ばす。
+	resp["managedByPlugin"] = u.ManagedByPlugin
 	return resp
 }
 

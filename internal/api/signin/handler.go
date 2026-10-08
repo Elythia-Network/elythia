@@ -195,6 +195,13 @@ func (h *Handler) Signin(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusNotFound, errBody("6cc579cc-885d-43d8-95c2-b8c7fc963280"))
 	}
+	// **プラグインが管理するアカウントには、どの経路からもログインさせない
+	// (#3468)。** 居ない利用者と同じ応答にする。パスワードを持たないので
+	// 下の検証でも落ちるが、パスワードやパスキーが何かの経路で入っても
+	// ログインできないことを、ここで保証する。
+	if user.IsPluginManaged() {
+		return c.JSON(http.StatusNotFound, errBody("6cc579cc-885d-43d8-95c2-b8c7fc963280"))
+	}
 
 	if user.IsSuspended {
 		return c.JSON(http.StatusForbidden, errBody("e03a5f46-d309-4865-9b69-56282d94e1eb"))
@@ -338,6 +345,13 @@ func (h *Handler) SigninFlow(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
 	}
 	if err != nil {
+		return c.JSON(http.StatusNotFound, errBody("6cc579cc-885d-43d8-95c2-b8c7fc963280"))
+	}
+	// **プラグインが管理するアカウントには、どの経路からもログインさせない
+	// (#3468)。** 居ない利用者と同じ応答にする。パスワードを持たないので
+	// 下の検証でも落ちるが、パスワードやパスキーが何かの経路で入っても
+	// ログインできないことを、ここで保証する。
+	if user.IsPluginManaged() {
 		return c.JSON(http.StatusNotFound, errBody("6cc579cc-885d-43d8-95c2-b8c7fc963280"))
 	}
 

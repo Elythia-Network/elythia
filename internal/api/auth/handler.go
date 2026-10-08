@@ -129,6 +129,13 @@ func (h *Handler) Accept(c echo.Context) error {
 	if err := c.Bind(&req); err != nil || req.Token == "" {
 		return apierr.JSONInvalidParam(c)
 	}
+	// **プラグインが管理するアカウントには app token を発行しない (#3468)。**
+	// 外からはそのアカウントの native token が通らないので、ここに来るのは
+	// プラグインの AsUser だけ。通すと、外で使える資格情報をプラグインが
+	// 作れてしまう。
+	if user.IsPluginManaged() {
+		return c.JSON(http.StatusBadRequest, apierr.PluginManagedAccount())
+	}
 
 	session, err := h.repo.FindSessionByToken(req.Token)
 	if err != nil && !repository.IsNotFound(err) {
@@ -255,6 +262,10 @@ func (h *Handler) GenToken(c echo.Context) error {
 	}
 	if err := c.Bind(&req); err != nil || req.Permission == nil {
 		return apierr.JSONInvalidParam(c)
+	}
+	// auth/accept と同じ理由で、管理するアカウントには発行しない (#3468)。
+	if user.IsPluginManaged() {
+		return c.JSON(http.StatusBadRequest, apierr.PluginManagedAccount())
 	}
 
 	tokenStr := misc.SecureRandomHex(32)
