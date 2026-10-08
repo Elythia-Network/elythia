@@ -404,6 +404,24 @@ export type RoleAssignmentLookup = {
 
 export type MetaDetailed = Misskey.entities.MetaDetailed & ElythiaMetaFields;
 
+/**
+ * Elythia-specific fields that the detailed user (`users/show` and others) adds
+ * to the upstream response.
+ *
+ * 古い版のサーバーでは欠けるので省略可能にしてある。
+ */
+export type ElythiaUserDetailedFields = {
+	/**
+	 * When a remote user created the account (ISO 8601), read from the actor's
+	 * `published` or the origin server's `users/show`. Absent for local users
+	 * and when unknown. `createdAt` of a remote user is when this server first
+	 * saw the account.
+	 */
+	accountCreatedAt?: string | null;
+};
+
+export type UserDetailed = Misskey.entities.UserDetailed & ElythiaUserDetailedFields;
+
 /** The outcome of one check of `admin/self-check` or `admin/federation/check-host`. */
 export type SelfCheckStatus = 'ok' | 'warn' | 'fail' | 'skip';
 
