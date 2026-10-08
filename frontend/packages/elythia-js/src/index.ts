@@ -32,6 +32,7 @@ export type {
 	DriveUsageKind,
 	DriveUsageOrigin,
 	ElythiaMetaFields,
+	ElythiaUserDetailedFields,
 	EmojiApplication,
 	EmojiApplicationKind,
 	EmojiApplicationMatchedBy,
@@ -75,6 +76,7 @@ export type {
 	SignupApplicationFormField,
 	SignupApplicationStatus,
 	SignupApplicationView,
+	UserDetailed,
 } from './entities.js';
 
 /**

@@ -114,7 +114,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 							</dl>
 							<dl class="field">
 								<dt class="name"><i class="ti ti-calendar ti-fw"></i> {{ i18n.ts.registeredDate }}</dt>
-								<dd class="value">{{ dateString(user.createdAt) }} (<MkTime :time="user.createdAt"/>)</dd>
+								<dd v-if="accountCreatedAt != null" class="value">{{ accountCreatedDateString(accountCreatedAt) }} (<MkTime :time="accountCreatedAt"/>)</dd>
+								<dd v-else class="value">{{ dateString(user.createdAt) }} (<MkTime :time="user.createdAt"/>)</dd>
 							</dl>
 						</div>
 						<div v-if="user.fields.length > 0" class="fields">
@@ -179,6 +180,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 <script lang="ts" setup>
 import { defineAsyncComponent, computed, onMounted, onUnmounted, onActivated, onDeactivated, nextTick, watch, ref, useTemplateRef } from 'vue';
 import * as Misskey from 'misskey-js';
+import type * as Elythia from 'elythia-js';
 import { getScrollContainer } from '@@/js/scroll.js';
 import type { Content } from '@/components/MkLightbox.item.vue';
 import MkNote from '@/components/MkNote.vue';
@@ -198,6 +200,7 @@ import * as os from '@/os.js';
 import { i18n } from '@/i18n.js';
 import { $i, iAmModerator } from '@/i.js';
 import { dateString } from '@/filters/date.js';
+import { accountCreatedDateString } from '@/utility/account-created-date.js';
 import { confetti } from '@/utility/confetti.js';
 import { misskeyApi } from '@/utility/misskey-api.js';
 import { isFollowingVisibleForMe, isFollowersVisibleForMe } from '@/utility/isFfVisibleForMe.js';
@@ -246,6 +249,10 @@ const emit = defineEmits<{
 const router = useRouter();
 
 const user = ref(props.user);
+// リモートの人の createdAt は「このサーバーが初めて知った日時」なので、
+// アカウントを作った日時が分かればそちらを登録日として出す (#3465)。
+// こちらは日付の単位で送られることが多いので、時刻を出さない。
+const accountCreatedAt = computed(() => (user.value as Elythia.UserDetailed).accountCreatedAt ?? null);
 const narrow = ref<null | boolean>(null);
 const rootEl = useTemplateRef('rootEl');
 const bannerEl = useTemplateRef('bannerEl');
