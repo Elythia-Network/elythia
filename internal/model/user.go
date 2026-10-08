@@ -68,6 +68,13 @@ type User struct {
 	URI                          *string        `gorm:"column:uri;type:varchar(512)" json:"uri"`
 	FollowersURI                 *string        `gorm:"column:followersUri;type:varchar(512)" json:"followersUri"`
 	Token                        *string        `gorm:"column:token;type:char(16)" json:"-"`
+	// ManagedByPlugin is the name of the plugin that manages this account, or
+	// nil for an ordinary account (#3468).
+	//
+	// 埋まっているアカウントには、どの経路からもログインできない。ネイティブ
+	// トークンはプラグインのプロセス内の呼び出し (AsUser) でだけ受け付ける。
+	// Elythia 独自の列 (migration 000118)。
+	ManagedByPlugin *string `gorm:"column:managedByPlugin;type:varchar(32)" json:"managedByPlugin,omitempty"`
 
 	// Relations
 	Avatar *DriveFile `gorm:"foreignKey:AvatarID" json:"avatar,omitempty"`
@@ -75,6 +82,15 @@ type User struct {
 }
 
 func (User) TableName() string { return "user" }
+
+// IsPluginManaged reports whether a plugin manages this account (#3468).
+//
+// 列が NULL でなければ、空文字でも管理するアカウントとして扱う。本体は空文字を
+// 書かないが、手で UPDATE した行でログインの拒否が外れる向きには倒さない。
+// 判定はここ 1 箇所に集める (経路ごとに書くと、1 つだけ条件がずれる)。
+func (u *User) IsPluginManaged() bool {
+	return u != nil && u.ManagedByPlugin != nil
+}
 
 // IsLocal returns true if the user is a local user.
 func (u *User) IsLocal() bool {

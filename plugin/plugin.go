@@ -219,6 +219,12 @@ type Context interface {
 	// Config returns this plugin's settings from the instance configuration.
 	Config() Config
 
+	// Accounts manages the local accounts this plugin owns — accounts that
+	// nobody can sign in to, such as bots (#3468).
+	//
+	// **常に非 nil。** 本体の配線が無い環境では、呼ぶとエラーを返す実装になる。
+	Accounts() Accounts
+
 	// Queue enqueues jobs onto this plugin's own queue.
 	//
 	// [Jobs.Handle] で登録した名前を使う。**Routes からも Jobs からも呼べる**

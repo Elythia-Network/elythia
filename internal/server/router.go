@@ -110,6 +110,7 @@ import (
 	corenotification "github.com/elythia-network/elythia/internal/core/notification"
 	corepage "github.com/elythia-network/elythia/internal/core/page"
 	"github.com/elythia-network/elythia/internal/core/passwordguard"
+	corepluginaccount "github.com/elythia-network/elythia/internal/core/pluginaccount"
 	corepoll "github.com/elythia-network/elythia/internal/core/poll"
 	"github.com/elythia-network/elythia/internal/core/procstats"
 	corereaction "github.com/elythia-network/elythia/internal/core/reaction"
@@ -1553,7 +1554,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// **かつ**ローカル利用者 0」でしか開かないので、フロントの判定も同じに
 	// する。揃えないと、`rootUserId` が NULL で利用者ありの DB で
 	// **セットアップ画面が出続けて作成ボタンが必ず失敗する**。
-	meta.SetLocalUserCounter(func() (int64, error) { return userRepo.CountLocalUsers() })
+	// 初回セットアップの判定は admin/accounts/create と同じ数え方にする。
+	// プラグインが管理するアカウント (#3468) は数えない。
+	meta.SetLocalUserCounter(func() (int64, error) { return userRepo.CountLocalUsersForSetup() })
 	metaHandler.SetAdRepo(repository.NewAdRepository(s.db))
 	proxyAccountResolver := newProxyAccountResolver(repository.NewSystemAccountRepository(s.db), userRepo)
 	metaHandler.SetProxyAccountResolver(proxyAccountResolver)
@@ -4300,6 +4303,15 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		// またげず、デプロイのたびに送信中のものが消える。**
 		enqueuer: s.queueClient,
 	}
+
+	// プラグインが管理するアカウント (#3468)。作成は signup、画像はドライブ、
+	// プロフィールはプロセス内の i/update、削除は admin/delete-account と同じ
+	// 流れを通す。経路ごとに別の実装を持たないため。
+	pluginAccountSvc := corepluginaccount.NewService(userRepo, repository.NewPluginAccountRepository(s.db), signupService)
+	pluginAccountSvc.SetUploader(driveService)
+	pluginAccountSvc.SetProfileUpdater(pluginProfileUpdater(&pluginAPI{echo: s.echo, userRepo: userRepo, host: requestHostFor(s.config.URL)}))
+	pluginAccountSvc.SetDeleter(adminHandler)
+	s.pluginAccounts = pluginAccountSvc
 
 	// プラグインの route は本家に無い経路なので、body の検査を付けない素の group を渡す。
 	if err := s.setupPlugins(api.Group, registeredPlugins, openPluginStorage); err != nil {

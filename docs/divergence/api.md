@@ -80,6 +80,7 @@ upstream の endpoint は `endpoints/` 配下 438 件 + `ApiServerService.ts` �
 | `notifications` / `i/notifications` の `type` | `emojiApplicationProcessed` | 絵文字の登録申請の結果を申請者へ返す (#2934)。**結果と却下理由は通知に積まず、読み出し時に申請から引き直す** — 通知へ複製すると、申請を消しても文面が Redis に残る (`abuseReport` #2868 と同じ形)。申請が消えていたら通知ごと落とす |
 | `/api/meta` | `chunkedUpload` | 分割アップロード (#2313) の能力告知。`{ chunkSize }` を返す。**未対応構成 (オブジェクトストレージ未使用 / `meta.chunkedUploadEnabled=false`) では field ごと出さない**ので、純正 Misskey と同じく `undefined` になりクライアントは単発アップロードにフォールバックする |
 | System Webhook の `abuseReport` / `abuseReportResolved` の本文 | `createdAt` | 通報の作成時刻 (通報の id から出す ISO 8601)。upstream の本文は通報の行をそのまま展開したもので、行に作成時刻の列が無いので含まない。Elythia は以前から送っていたので、受け取る側を壊さないよう追加の項目として残している (#3260)。**それ以外の項目は upstream と同じ** — 通報の 11 列 (`targetUserHost` / `reporterHost` を含む) と、通報者・対象・担当者の 3 人を UserLite で載せる (リモートの利用者には `instance` を付け、`emojis` を解決する)。ローカルの利用者の `emojis` は、upstream と同じく解決せず空にする (`populateEmoji` は host が null だと解決しない。Elythia も i/update で列を書くようになった #3270 で、他の UserLite と合わせて揃えた)。管理画面の `admin/abuse-user-reports` は利用者を UserDetailed で返すので、Webhook の本文とは形が違う |
+| `admin/show-user` | `managedByPlugin` | そのアカウントを管理しているプラグインの名前 (#3468)。普通のアカウントは `null`。**upstream にはプラグインが管理するアカウントという概念自体が無い。** 管理するアカウントには誰もログインできないので、運営者が管理画面でそれを見分けるのに使う |
 
 ### 1-1c. リクエストパラメータの additive
 

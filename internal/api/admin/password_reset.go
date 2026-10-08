@@ -49,6 +49,12 @@ func (h *Handler) ResetPassword(c echo.Context) error {
 			// #2106 L2: upstream reset-password.ts:26 固有の UUID に揃える。
 			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_USER", "No such user.", "ccafc7fe-5074-4edd-9dc0-8ef9ef6a701d"))
 		}
+		// **プラグインが管理するアカウントにはパスワードを作らない (#3468)。**
+		// この endpoint は新しいパスワードを応答に載せて返すので、通すとそのまま
+		// サインインできる相手になる。管理者が相手でも拒否する。
+		if user.IsPluginManaged() {
+			return c.JSON(http.StatusBadRequest, apierr.PluginManagedAccount())
+		}
 		// upstream 2026.7.0 (fork merge): moderator が administrator の password を
 		// リセットできた improper authorization の修正。旧 root-only guard
 		// (CANNOT_RESET_PASSWORD_OF_ROOT_USER) は廃止され、「対象が administrator

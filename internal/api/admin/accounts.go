@@ -1,11 +1,14 @@
 package admin
 
 import (
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
+	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/queue"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/labstack/echo/v4"
@@ -132,6 +135,40 @@ func (h *Handler) DeleteAccount(c echo.Context) error {
 	soft := user != nil && user.Host != nil
 	h.scheduleAccountCascade(req.UserID, soft)
 	return c.NoContent(http.StatusNoContent)
+}
+
+// DeletePluginManagedAccount deletes an account that a plugin manages (#3468),
+// with the same effects as admin/delete-account: the account is flagged
+// deleted, its tokens and streams are dropped, Delete(actor) is delivered, and
+// the cascade deletion is queued.
+//
+// **管理画面からの削除と同じ流れを通す。** プラグインの経路だけ別に書くと、
+// 片方だけ直したときに「この経路で消したアカウントだけ連合に Delete が届かない」
+// 類のずれが生まれる。
+//
+// モデレーションログには残さない。操作したのはモデレーターではなく、
+// プラグイン (=運営者が組み込んだコード) なので、誰の判断として記録するかが
+// 無い。代わりに slog に残す。
+//
+// 管理していないアカウントを渡されたら何もせずエラーを返す。呼び出し側
+// (core/pluginaccount) が所有を確かめてから呼ぶが、root や普通の利用者を
+// この経路で消せないことを、ここでも保証する。
+func (h *Handler) DeletePluginManagedAccount(user *model.User) error {
+	if user == nil || !user.IsPluginManaged() || !user.IsLocal() {
+		return errors.New("admin: not a plugin-managed local account")
+	}
+	if err := h.userRepo.UpdateUser(user.ID, map[string]any{"isSuspended": true, "isDeleted": true}); err != nil {
+		return fmt.Errorf("admin: flag the account deleted: %w", err)
+	}
+	h.recordLocalSuspensionOrigin(user.ID)
+	h.invalidateUserTokenCache(user.ID)
+	h.revokeUserStreams(user.ID)
+	slog.Info("plugin-managed account deleted", "userId", user.ID, "plugin", *user.ManagedByPlugin)
+	if h.userModerationFed != nil {
+		h.userModerationFed.OnUserDeleted(user)
+	}
+	h.scheduleAccountCascade(user.ID, false)
+	return nil
 }
 
 // isProtectedAccount reports whether the given user ID is an account that must

@@ -88,6 +88,11 @@ type UserRepository interface {
 	// CountLocalUsers returns the number of non-deleted local users, used by
 	// nodeinfo `usage.users.total` (#403).
 	CountLocalUsers() (int64, error)
+	// CountLocalUsersForSetup returns the number of non-deleted local users
+	// that are not managed by a plugin. The initial-setup window
+	// (admin/accounts/create and meta's requireSetup) opens only while this
+	// is 0 (#3468).
+	CountLocalUsersForSetup() (int64, error)
 	// CountLocalUsersActiveSince returns the number of local users whose
 	// lastActiveDate falls on or after `since`. Used by nodeinfo
 	// `usage.users.activeMonth / activeHalfyear` (#403).
@@ -880,6 +885,23 @@ func (r *userRepository) CountLocalUsers() (int64, error) {
 	err := r.db.Model(&model.User{}).
 		Where("host IS NULL").
 		Where(`"isDeleted" = false`).
+		Count(&count).Error
+	return count, err
+}
+
+// CountLocalUsersForSetup は初回セットアップの判定にだけ使う (#3468)。
+//
+// **プラグインが管理するアカウントを数えない。** プラグインが起動時に bot を
+// 作ると、新しいインスタンスでは最初の管理者を作る前にローカル利用者が 1 になり、
+// セットアップの窓が閉じて誰も管理者を作れなくなる (復旧する CLI も無い)。
+// 管理するアカウントには誰もログインできないので、窓を閉じる理由にならない。
+// nodeinfo などの利用者数は CountLocalUsers のまま (bot も利用者として数える)。
+func (r *userRepository) CountLocalUsersForSetup() (int64, error) {
+	var count int64
+	err := r.db.Model(&model.User{}).
+		Where("host IS NULL").
+		Where(`"isDeleted" = false`).
+		Where(`"managedByPlugin" IS NULL`).
 		Count(&count).Error
 	return count, err
 }

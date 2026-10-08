@@ -89,6 +89,9 @@ func (s *Server) setupPlugins(api *echo.Group, plugins []plugin.Definition, open
 			),
 			api:    &pluginAPI{echo: s.echo, userRepo: s.userRepo, host: requestHostFor(s.config.URL)},
 			config: pluginConfig(settings),
+			// **名前はここで固定する (#3468)。** 他のプラグインのアカウントを
+			// 操作できないようにする。
+			accounts: newPluginAccounts(def.Name, s.pluginAccounts),
 			// **共通の outbound 設定を通す (#3037)。** プラグインが自分で
 			// `&http.Client{}` を作ると SSRF ガードも運営者の proxy 設定も
 			// 効かず、そのプラグインだけがサーバーの素の IP で外へ出る。
@@ -372,6 +375,7 @@ type pluginContext struct {
 	config     plugin.Config
 	peer       plugin.Peer
 	queue      plugin.Queue
+	accounts   plugin.Accounts
 	httpClient *http.Client
 	goGate     *pluginGoGate
 	goStart    func(func())
@@ -382,6 +386,15 @@ func (c *pluginContext) Logger() *slog.Logger    { return c.logger }
 func (c *pluginContext) API() plugin.API         { return c.api }
 func (c *pluginContext) Storage() plugin.Storage { return c.storage }
 func (c *pluginContext) Config() plugin.Config   { return c.config }
+
+// Accounts は **常に非 nil** (Peer / Queue と同じ理由)。テストなどで
+// pluginContext を直接組んだときも、呼ぶとエラーを返す実装に倒す。
+func (c *pluginContext) Accounts() plugin.Accounts {
+	if c.accounts == nil {
+		return newPluginAccounts(c.name, nil)
+	}
+	return c.accounts
+}
 
 // HTTP returns the outbound client shared with the rest of mk-go.
 //

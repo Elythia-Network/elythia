@@ -233,6 +233,55 @@ return res.Assigned, nil
 
 非公開ロールで `roles/assignment-show` を使うと、**付与されていない利用者には `NO_SUCH_ROLE`** が返る（存在の有無を漏らさないため）。条件つきかつ非公開のロールは、条件を満たす利用者にもこうなる。`admin/roles/assignment-show` にこの秘匿は無く、モデレーター以上なら非公開ロールも読める。
 
+## 管理するアカウント (bot)
+
+プラグインは、自分が管理するローカルのアカウントを作って動かせる (#3468)。bot のように、人が中に入らずプラグインが投稿や返事をするアカウントのための口。
+
+```go
+acc, err := ctx.Accounts().Create(c, "weatherbot")
+if errors.Is(err, plugin.ErrUsernameUnavailable) {
+	// 既に使われている・予約語・削除済みアカウントの名前
+}
+name, desc := "天気bot", "毎朝 7 時に天気を投稿します。"
+err = ctx.Accounts().UpdateProfile(c, acc.ID, plugin.ProfileUpdate{
+	Name:        &name,
+	Description: &desc,
+	Avatar:      &plugin.Image{Data: pngBytes, Filename: "avatar.png"},
+})
+
+// 動かすのは AsUser
+_, err = ctx.API().AsUser(acc.ID).Call(c, "notes/create", map[string]any{"text": "おはようございます"})
+```
+
+`c` は `context.Context` (ルートなら `req.Context()`、ジョブなら受け取ったもの)。
+
+**作ったアカウントには、本体がどの経路からもログインさせない。** パスワードを持たず、パスワード・パスキー・2FA・パスワードの再設定・MiAuth / OAuth のトークン発行・管理者によるパスワードのリセットは、どれも拒否される (居ない利用者と同じ応答か、`PLUGIN_MANAGED_ACCOUNT`)。普通の利用者として作ると、運営者が知らないうちに認証情報が残り、乗っ取りの入口になるため。
+
+**そのアカウントのトークンは、プロセス内の呼び出しでだけ通る。** `AsUser` はそのアカウントのネイティブトークンを載せて本体の API をプロセスの中から呼ぶ。外から届いた HTTP のリクエストと streaming の接続では、トークンが正しくても `401 AUTHENTICATION_FAILED` になる。トークンはどの API の応答にも出ない。誰もログインしないので、漏れても気付いて作り直す人がいないため。streaming を使えないので、通知などは `i/notifications` を読みに行くこと。
+
+ほかに決まっていること:
+
+- **操作できるのは自分が作ったアカウントだけ。** 他のプラグインが管理するアカウントや普通の利用者の ID を `UpdateProfile` / `Delete` に渡すと `plugin.ErrAccountNotFound` になる (存在しないのと区別しない)。`List` も自分のアカウントだけを返す。`AsUser` はこの制限を受けない (どの利用者としても呼べる、今までどおりの口)
+- **必ず bot (`isBot: true`) になる。** `i/update` で `isBot: false` を送ると `400 PLUGIN_MANAGED_ACCOUNT_MUST_BE_BOT` で拒否される (黙って無視はしない)。`isBot: true` を含む更新や、`isBot` を含まない更新は通る
+- **名前の検査は管理者がアカウントを作るときと同じ。** 最小文字数は見ないが、予約語・禁止語・削除済みアカウントの名前は使えない。形式 (`^[a-zA-Z0-9_]{1,20}$`) が違えば `plugin.ErrInvalidUsername`、使えない名前なら `plugin.ErrUsernameUnavailable`
+- **`UpdateProfile` は `i/update` をそのアカウントとして呼ぶのと同じ。** 検査も連合への反映も普通のプロフィール変更と同じに効き、拒否されたら `*plugin.APIError` になる。画像はそのアカウントのドライブにファイルとして置かれ、容量や受け付ける種類の制限もそのアカウントのロールで決まる (画像でなければ `AVATAR_NOT_AN_IMAGE` などで拒否され、置いたファイルはドライブに残る)。文字列の `""` は、表示名なら未設定に、自己紹介なら空に戻す。名前・自己紹介・画像以外の項目は `AsUser(id).Call(c, "i/update", ...)` で変える
+- **`Delete` は管理画面から消すのと同じ流れ。** 投稿・ドライブ・フォローは後からジョブで消え、連合先へ `Delete` が届く。消したアカウントの名前は再利用できない
+- **凍結・サイレンスは普通のアカウントと同じく効く。** 凍結されると `AsUser` の呼び出しも `403 YOUR_ACCOUNT_SUSPENDED` になり、`UpdateProfile` は画像を置く前に `plugin.ErrAccountSuspended` で断る
+- **プラグインを外したり無効にしたりしても、アカウントは消えない。** 過去の投稿やフォロワーを残すため。プラグインが動いていないので、投稿や返事はしなくなる。要らなくなったら外す前に `Delete` すること
+- **プラグインの名前を変えると、それまでのアカウントは新しい名前から操作できない。** アカウントには作ったときの名前が記録されているので、新しい名前のプラグインの `List` には出ず、`UpdateProfile` / `Delete` は `ErrAccountNotFound` になる。アカウント自体は残る。要らなければ、名前を変える前に `Delete` するか、管理画面から削除する
+- 管理画面のユーザーの詳細 (`admin/show-user` の `managedByPlugin`) に、どのプラグインが管理しているかが出る
+- **初回セットアップを妨げない。** 新しいインスタンスでプラグインが起動時にアカウントを作っても、最初の管理者を作る画面 (`admin/accounts/create` の初回セットアップ) はそのまま使える。セットアップの判定は管理するアカウントを数えない。nodeinfo などの利用者数には数える
+
+テストでは `plugintest` のフェイクが既定で入っている。本番と同じ理由 (他のプラグインのアカウント・形式・重複) で拒否するので、`SeedAccount` で他のプラグインのアカウントを置き、触れないことを確かめられる。中身は `ManagedAccounts()` で読める。
+
+```go
+h := plugintest.New(t).WithName("weather")
+theirs := h.SeedAccount("other-plugin", "theirs")
+// ... プラグインのコードを動かす ...
+require.Len(t, h.ManagedAccounts(), 2)
+require.Equal(t, "theirs", theirs.Username) // 他のプラグインのアカウントは残っている
+```
+
 ## ジョブ
 
 ```go
@@ -886,6 +935,7 @@ type Context interface
   API() API
   Storage() Storage
   Config() Config
+  Accounts() Accounts
   Peer() Peer
   Queue() Queue
   HTTP() *http.Client
@@ -937,6 +987,21 @@ type API interface
 
 type Caller interface
   Call(context.Context, string, any) (json.RawMessage, error)
+
+type Accounts interface
+  Create(context.Context, string) (Account, error)
+  List(context.Context) ([]Account, error)
+  UpdateProfile(context.Context, string, ProfileUpdate) error
+  Delete(context.Context, string) error
+
+type Account struct { ID string; Username string }
+type ProfileUpdate struct { Name *string; Description *string; Avatar *Image; Banner *Image }
+type Image struct { Data []byte; Filename string }
+
+var ErrAccountNotFound
+var ErrInvalidUsername
+var ErrUsernameUnavailable
+var ErrAccountSuspended
 
 type Jobs interface
   Handle(string, JobHandler)
@@ -996,5 +1061,7 @@ PluginPage: { path, component, navTitle?, navIcon?, admin? }
 ## 公開と互換性
 
 `plugin/` は semver に従う。破壊的変更では `APIVersion` が上がり、合わないプラグインは**ビルド時にエラーになる**（黙って動かない状態にはならない）。
+
+**interface への method の追加は `APIVersion` を上げない。** `plugin.Context` などは本体が実装してプラグインへ渡すもので、プラグインが呼ぶ側である限り追加で壊れることは無い。ただし**プラグインが自分で実装している場合 (テスト用のフェイクなど) は、method が足りずにコンパイルできなくなる** (例: #3468 で `Context.Accounts()` を足した)。フェイクを自分で書かず、`plugin/plugintest` の `Harness.Context()` を使うこと。こちらは本体と同じ版で追従する。
 
 詳細は[互換性ポリシー](compatibility.md)を参照。

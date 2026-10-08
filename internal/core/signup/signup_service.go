@@ -529,6 +529,76 @@ func (s *Service) SignupWithHost(username, password string, isInitialSetup bool,
 	return &SignupResult{User: user, Token: token, Profile: profile}, nil
 }
 
+// CreatePluginManaged creates a local account that the named plugin manages
+// (#3468). The account has no password, is always a bot, and records
+// pluginName in user.managedByPlugin.
+//
+// username の検査は運営者の経路 (UsernamePolicyOperator) と同じにする。
+// プラグインを組み込むのは運営者なので最小文字数は見ないが、予約語
+// (preservedUsernames)・禁止語・削除済みアカウントの名前は通常の登録と同じく
+// 弾く。
+//
+// **meta を読めないときは作らない。** 通常の登録は可用性を優先して素通しするが、
+// こちらはプラグインが後で作り直せるので、予約語の検査を飛ばした名前を残す
+// 方を避ける。
+//
+// **tx の中で作る** (createUserTx)。プラグインが同じ名前で並行に呼んでも、
+// usernameLower の一意制約で片方だけが残る。
+func (s *Service) CreatePluginManaged(pluginName, username string) (*model.User, error) {
+	if pluginName == "" {
+		return nil, errors.New("signup: plugin name is required")
+	}
+	if s.db == nil {
+		return nil, errors.New("signup: plugin-managed accounts need the database handle (SetDB)")
+	}
+	username, err := normalizeAndValidateUsername(username)
+	if err != nil {
+		return nil, err
+	}
+	lower := strings.ToLower(username)
+	if s.isUsedUsername(lower) {
+		return nil, ErrUsernameUsed
+	}
+	meta, err := s.metaRepo.Fetch()
+	if err != nil {
+		return nil, fmt.Errorf("signup: fetch meta: %w", err)
+	}
+	if isReservedUsername(lower, meta.PreservedUsernames) {
+		return nil, ErrUsernameReserved
+	}
+	if keyword.IsKeyWordIncluded(lower, meta.ProhibitedWordsForNameOfUser) {
+		return nil, ErrUsernameUsed
+	}
+
+	name := pluginName
+	var user *model.User
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		u, _, err := s.createUserTx(tx, createUserInput{
+			userID:          s.idGen.Generate(time.Now()),
+			username:        username,
+			lower:           lower,
+			token:           generateToken(),
+			managedByPlugin: &name,
+		})
+		if err != nil {
+			return err
+		}
+		user = u
+		return nil
+	})
+	if err != nil {
+		// 並行に同じ名前で作られたときは、一意制約の違反が返る。重複として扱う。
+		if errors.Is(err, ErrUsernameAlreadyExists) || repository.IsUniqueViolation(err) {
+			return nil, ErrUsernameAlreadyExists
+		}
+		return nil, err
+	}
+	if s.webhookHook != nil {
+		s.webhookHook.OnUserCreated(user)
+	}
+	return user, nil
+}
+
 // generateToken creates a native session token.
 //
 // 生成の実体と「なぜ 16 文字なのか」は misc.NewNativeToken 側に置いてある。
@@ -1019,6 +1089,9 @@ type createUserInput struct {
 	passwordHash  string
 	email         *string
 	emailVerified bool
+	// managedByPlugin が non-nil なら、プラグインが管理するアカウント (#3468)
+	// として作る。passwordHash は使わず (パスワードを持たせない)、isBot を立てる。
+	managedByPlugin *string
 }
 
 // createUserTx creates the user, profile, used_username entry and keypairs
@@ -1047,18 +1120,30 @@ func (s *Service) createUserTx(tx *gorm.DB, in createUserInput) (*model.User, *m
 		Token:             &in.token,
 		IsExplorable:      true,
 		AvatarDecorations: []byte("[]"),
+		ManagedByPlugin:   in.managedByPlugin,
+		// 管理するアカウントは必ず bot として作る (#3468)。人が中に入らない
+		// アカウントなので、相手に bot であることを示す。
+		IsBot: in.managedByPlugin != nil,
 	}
 	if err := tx.Create(user).Error; err != nil {
 		return nil, nil, err
 	}
 
 	// profile 作成 (failure 時は user 含めて tx rollback で消える)
-	storedHash := in.passwordHash
+	//
+	// **管理するアカウントにはパスワードを持たせない (#3468)。** 空文字の hash を
+	// 入れると「パスワードはあるが一致しない」状態になり、パスワードを要する
+	// endpoint の分岐が経路ごとにずれる。NULL なら全経路が「未設定」で揃う。
+	var storedHash *string
+	if in.managedByPlugin == nil {
+		h := in.passwordHash
+		storedHash = &h
+	}
 	profile := &model.UserProfile{
 		UserID:             in.userID,
 		Email:              in.email,
 		EmailVerified:      in.emailVerified,
-		Password:           &storedHash,
+		Password:           storedHash,
 		AutoAcceptFollowed: true,
 		PreventAiLearning:  true,
 		PublicReactions:    true,

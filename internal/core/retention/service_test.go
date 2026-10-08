@@ -74,6 +74,7 @@ func (s *stubUserRepo) FindProfileByVerifyCode(string) (*model.UserProfile, erro
 func (s *stubUserRepo) FindProfileByEmail(string) (*model.UserProfile, error) { return nil, nil }
 func (s *stubUserRepo) CountOnlineUsers() (int64, error)                      { return 0, nil }
 func (s *stubUserRepo) CountLocalUsers() (int64, error)                       { return 0, nil }
+func (s *stubUserRepo) CountLocalUsersForSetup() (int64, error)               { return 0, nil }
 func (s *stubUserRepo) CountLocalUsersActiveSince(time.Time) (int64, error)   { return 0, nil }
 func (s *stubUserRepo) ListUserRecommendations(string, time.Time, int, int) ([]*model.User, error) {
 	return nil, nil

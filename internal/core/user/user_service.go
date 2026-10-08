@@ -27,6 +27,9 @@ const MaxPinnedNotes = 5
 var (
 	// ErrUserNotFound is returned when the target user does not exist.
 	ErrUserNotFound = errors.New("user not found")
+	// ErrManagedAccountMustBeBot is returned when an update would clear isBot
+	// on an account that a plugin manages (#3468).
+	ErrManagedAccountMustBeBot = errors.New("a plugin-managed account must stay a bot")
 	// ErrFailedToResolveRemoteUser is returned when ShowByUsername is called
 	// with a non-local host and remote resolution fails. Handlers map this
 	// to the dedicated FAILED_TO_RESOLVE_REMOTE_USER API error.
@@ -568,6 +571,13 @@ func (s *Service) UpdateProfile(userID string, in UpdateInput) (*UserWithProfile
 			return nil, err
 		}
 		return nil, ErrUserNotFound
+	}
+	// **プラグインが管理するアカウントの bot の印は外させない (#3468)。**
+	// 黙って無視すると、プラグインは「外した」つもりのまま動く。拒否して
+	// 気付かせる。isBot だけを見て、他の項目を巻き込んで落とすのは外す
+	// 指定があったときだけ (true を送る更新は通す)。
+	if existing.IsPluginManaged() && in.IsBot != nil && !*in.IsBot {
+		return nil, ErrManagedAccountMustBeBot
 	}
 
 	userFields := map[string]any{}

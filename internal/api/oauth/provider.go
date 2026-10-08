@@ -244,6 +244,13 @@ func (h *Handler) Decision(c echo.Context) error {
 	if err != nil || user == nil {
 		return directError(c, "No such user")
 	}
+	// **プラグインが管理するアカウント (#3468) には認可コードを出さない。**
+	// login_token は auth middleware を通らない (form の値なので) ため、
+	// 外からの native token を拒否する gate がここには効かない。居ない利用者と
+	// 同じ応答にする。
+	if user.IsPluginManaged() {
+		return directError(c, "No such user")
+	}
 
 	code := misc.SecureRandomString(tokenLen, misc.AlphanumericChars)
 	g := &grant{

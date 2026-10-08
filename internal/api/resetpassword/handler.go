@@ -65,6 +65,12 @@ func (h *Handler) RequestReset(c echo.Context) error {
 	if err != nil {
 		return c.NoContent(http.StatusNoContent)
 	}
+	// **プラグインが管理するアカウント (#3468) には再設定を受け付けない。**
+	// 居ない利用者と同じ応答にする。パスワードを作れると、そのままログイン
+	// できる相手になる。
+	if user.IsPluginManaged() {
+		return c.NoContent(http.StatusNoContent)
+	}
 
 	// profile取得 → email照合 + emailVerified確認
 	profile, err := h.userRepo.FindProfileByUserID(user.ID)
@@ -149,6 +155,18 @@ func (h *Handler) Reset(c echo.Context) error {
 	if time.Since(issuedAt) > 30*time.Minute {
 		_ = h.resetRepo.Delete(resetReq.ID)
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "Token expired.", "6382759e-0a0d-4e32-893e-0e1e66cec4d5"))
+	}
+
+	// **プラグインが管理するアカウント (#3468) のパスワードは作らない。**
+	// 受付 (RequestReset) で弾いているので普通は来ないが、受付より前に作られた
+	// 要求や手で入れた行で通さない。無効な token と同じ応答にし、要求は消す。
+	target, err := h.userRepo.FindByID(resetReq.UserID)
+	if err != nil && !repository.IsNotFound(err) {
+		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
+	}
+	if err == nil && target.IsPluginManaged() {
+		_ = h.resetRepo.Delete(resetReq.ID)
+		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "Invalid token.", "6382759e-0a0d-4e32-893e-0e1e66cec4d5"))
 	}
 
 	// cost は misc/password に集約してある。**ここだけ 8 を直書きしていたので、

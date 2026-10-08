@@ -42,7 +42,9 @@ func TestInvalidParamIDLint(t *testing.T) {
 		// 本家の reset-password は存在しない・期限切れの token を素の Error
 		// (500 INTERNAL_ERROR) で落とす。mk-go は 400 で返しており、ajv の
 		// 失敗ではないので独自の id のまま残す (docs/divergence.md)。
-		"resetpassword/handler.go": {3, "reset-password の token が無い・期限切れ"},
+		// 4 件目は token の持ち主がプラグインの管理するアカウントのとき (#3468)。
+		// 無い token と同じ応答にする。
+		"resetpassword/handler.go": {4, "reset-password の token が無い・期限切れ・管理するアカウントのもの"},
 	}
 
 	root, err := filepath.Abs("..")

@@ -68,12 +68,17 @@ type Harness struct {
 	// hasJobs は Definition.Jobs を宣言しているか。**本番と同じ理由で
 	// Enqueue を拒否する**ため、Routes / Jobs を呼んだ時点で記録する。
 	hasJobs bool
+
+	// 管理するアカウント (#3468)。accounts が nil ならメモリ上のフェイク
+	// (accountStore) を使う。
+	accounts     plugin.Accounts
+	accountStore *fakeAccountStore
 }
 
 // New starts a harness. The plugin name defaults to "test".
 func New(t *testing.T) *Harness {
 	t.Helper()
-	return &Harness{t: t, name: "test", config: map[string]any{}}
+	return &Harness{t: t, name: "test", config: map[string]any{}, accountStore: &fakeAccountStore{}}
 }
 
 // WithName sets the plugin name reported by Context.Name.

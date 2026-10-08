@@ -1843,6 +1843,10 @@ func (h *Handler) Update(c echo.Context) error {
 		switch {
 		case errors.Is(err, user.ErrUserNotFound):
 			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_USER", "No such user.", "fcd2eef9-a9b2-4c4f-8624-038099e90aa5"))
+		case errors.Is(err, user.ErrManagedAccountMustBeBot):
+			// Elythia 独自 (#3468)。プラグインが管理するアカウントは bot の印を
+			// 外せない。
+			return c.JSON(http.StatusBadRequest, apierr.Error("PLUGIN_MANAGED_ACCOUNT_MUST_BE_BOT", "An account managed by a plugin must stay a bot.", "226cc907-c7b3-4e3d-aef4-f583967e3dd1"))
 		case errors.Is(err, user.ErrAvatarNotFound):
 			// upstream Misskey の NO_SUCH_AVATAR error UUID を流用 (frontend
 			// がコード固有の locale 表示をしているため一致が望ましい)。

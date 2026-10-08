@@ -4216,6 +4216,9 @@ func TestShowUser_ResponseKeysMatchUpstream(t *testing.T) {
 		"lastActiveDate", "moderationNote", "mutedInstances", "mutedWords",
 		"noCrawle", "notificationRecieveConfig", "policies", "preventAiLearning",
 		"receiveAnnouncementEmail", "roleAssigns", "roles", "signins",
+		// Elythia 独自の項目 (#3468)。本家の応答に足すだけで、意味を変える
+		// 項目は無い。
+		"managedByPlugin",
 	}
 
 	h, userRepo, _, _ := newTestHandler(t)
@@ -4233,7 +4236,7 @@ func TestShowUser_ResponseKeysMatchUpstream(t *testing.T) {
 	}
 	sort.Strings(gotKeys)
 	sort.Strings(want)
-	assert.Equal(t, want, gotKeys, "upstream に無い field を返してはいけない")
+	assert.Equal(t, want, gotKeys, "upstream に無い field を返してはいけない (Elythia 独自の追加は名指しで許す)")
 }
 
 // #2313: 分割アップロード設定の範囲検証。chunkSize は S3 の最小パートサイズと
