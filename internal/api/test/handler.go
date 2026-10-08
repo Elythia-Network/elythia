@@ -24,8 +24,13 @@ import (
 // migrator to re-run every migration on the next boot and in the worst case
 // corrupt the migration state. Misskey 本家は TypeORM migrations テーブル
 // (`migrations`) を使っていないのでこの exclusion は mk-go 独自の配慮。
+//
+// schema_migrations_local is the same for a fork's own migration track
+// (migration/local/, #3428). Elythia 本体の DB には無いが、fork の DB で消すと
+// 次の migrate で fork の migration が全部再実行される。
 var preservedTables = map[string]struct{}{
-	"schema_migrations": {},
+	"schema_migrations":       {},
+	"schema_migrations_local": {},
 }
 
 // resetDBMaxRetries mirrors Misskey 本家 (`packages/backend/src/misc/reset-db.ts`)

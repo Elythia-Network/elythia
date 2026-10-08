@@ -74,6 +74,7 @@ func TestDefaultEnv_UsesProcessStreamsAndRealDB(t *testing.T) {
 	assert.NotNil(t, e.closeDB)
 	assert.NotNil(t, e.silenceRedis)
 	assert.Equal(t, "migration", e.migrationsDir)
+	assert.Equal(t, "migration/local", e.localMigrationsDir)
 }
 
 func TestSubcommands_FlagHandling(t *testing.T) {
@@ -203,6 +204,35 @@ func TestCountMigrations(t *testing.T) {
 	assert.Equal(t, 0, countMigrations(filepath.Join(dir, "absent")))
 	// 不正なパターンは Glob がエラーを返す。数えられないときは 0 に倒す。
 	assert.Equal(t, 0, countMigrations("["))
+}
+
+func TestLatestLocalMigration(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"000001_a.up.sql", "000001_a.down.sql", "900003_b.up.sql", "README.md"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), nil, 0o600))
+	}
+	assert.Equal(t, int64(900003), latestLocalMigration(dir))
+	assert.Zero(t, latestLocalMigration(filepath.Join(dir, "absent")))
+	// ディレクトリでないものは読めない。比較を飛ばす 0 に倒す。
+	assert.Zero(t, latestLocalMigration(filepath.Join(dir, "README.md")))
+}
+
+// fork の系列を同梱しているのに当たっていなければ、doctor は FAIL にする (#3428)。
+func TestDoctor_DetectsUnappliedLocalMigrations(t *testing.T) {
+	e, stdout, _ := testEnv()
+	db := testutil.MustOpenTestDB()
+	testutil.ApplyMigrations(db)
+	require.NoError(t, db.Exec(`DROP TABLE IF EXISTS schema_migrations_local`).Error)
+	e.openDB = func(*config.Config) (*gorm.DB, error) { return db, nil }
+	e.closeDB = func(*gorm.DB) {}
+	// core の本数比較は飛ばす (このテストの関心は local だけ)。
+	e.migrationsDir = filepath.Join(t.TempDir(), "absent")
+	e.localMigrationsDir = t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(e.localMigrationsDir, "000001_fork.up.sql"), nil, 0o600))
+
+	path := writeConfig(t, 3000, "")
+	assert.Equal(t, 1, doctor(e, []string{"-config", path}))
+	assert.Contains(t, stdout.String(), "schema_migrations_local を読めない")
 }
 
 func TestStatusMark(t *testing.T) {

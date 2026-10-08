@@ -62,6 +62,57 @@ func TestCheckDatabase_DetectsMissingMigrations(t *testing.T) {
 	assert.Contains(t, got.Hint, "migrate-up")
 }
 
+// fork の系列 (#3428) は、同梱している最大の version と `schema_migrations_local`
+// を突き合わせる。同梱が無い (LocalMigrationLatest == 0) ときは表を見ない。
+func TestCheckDatabase_LocalMigrations(t *testing.T) {
+	db := testutil.MustOpenTestDB()
+	testutil.ApplyMigrations(db)
+	ctx := context.Background()
+	reset := func(t *testing.T, rows string) {
+		t.Helper()
+		require.NoError(t, db.Exec(`DROP TABLE IF EXISTS schema_migrations_local`).Error)
+		if rows == "" {
+			return
+		}
+		require.NoError(t, db.Exec(`CREATE TABLE schema_migrations_local (version bigint NOT NULL PRIMARY KEY, dirty boolean NOT NULL)`).Error)
+		if rows != "none" {
+			require.NoError(t, db.Exec(`INSERT INTO schema_migrations_local (version, dirty) VALUES `+rows).Error)
+		}
+	}
+	t.Cleanup(func() { _ = db.Exec(`DROP TABLE IF EXISTS schema_migrations_local`).Error })
+
+	t.Run("no local track does not read the table", func(t *testing.T) {
+		reset(t, "")
+		got := CheckDatabase(ctx, LocalDeps{DB: db})
+		require.Equal(t, StatusOK, got.Status, got.Detail)
+		assert.NotContains(t, got.Detail, "local")
+	})
+	t.Run("up to date", func(t *testing.T) {
+		reset(t, "(900003, false)")
+		got := CheckDatabase(ctx, LocalDeps{DB: db, LocalMigrationLatest: 900003})
+		require.Equal(t, StatusOK, got.Status, got.Detail)
+		assert.Contains(t, got.Detail, "local migration version 900003")
+	})
+	for _, tt := range []struct {
+		name, rows string
+		latest     int64
+		detail     string
+	}{
+		{"table missing", "", 1, "schema_migrations_local を読めない"},
+		{"dirty", "(2, true)", 2, "fork の migration が dirty (version 2)"},
+		{"behind", "(1, false)", 2, "適用済み version 1 / 同梱の最新 2"},
+		{"all rolled back", "none", 1, "適用済み version 0 / 同梱の最新 1"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			reset(t, tt.rows)
+			got := CheckDatabase(ctx, LocalDeps{DB: db, LocalMigrationLatest: tt.latest})
+			assert.Equal(t, StatusFail, got.Status)
+			assert.Contains(t, got.Detail, tt.detail)
+			assert.NotEmpty(t, got.Hint)
+		})
+	}
+}
+
 // Run は最初の失敗で打ち切らない。打ち切ると運用者が直しては走らせ直すことに
 // なる。
 func TestRun_ContinuesAfterFailure(t *testing.T) {

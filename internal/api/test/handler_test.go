@@ -340,8 +340,10 @@ func TestListUserTables_ContextCanceled(t *testing.T) {
 }
 
 func TestPreservedTablesContainsSchemaMigrations(t *testing.T) {
-	_, ok := preservedTables["schema_migrations"]
-	assert.True(t, ok)
+	for _, table := range []string{"schema_migrations", "schema_migrations_local"} {
+		_, ok := preservedTables[table]
+		assert.True(t, ok, table)
+	}
 }
 
 // Ensure json package is kept by a trivial sanity check on http.StatusNoContent

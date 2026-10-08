@@ -31,19 +31,22 @@ type env struct {
 	closeDB        func(*gorm.DB)
 	silenceRedis   func()
 	migrationsDir  string
+	// localMigrationsDir is the fork's migration track (#3428).
+	localMigrationsDir string
 	// runFsck runs the counter check; fsck.Run outside tests.
 	runFsck func(ctx context.Context, db *gorm.DB, opts fsck.Options) (fsck.Report, error)
 }
 
 func defaultEnv() env {
 	return env{
-		stdout:        os.Stdout,
-		stderr:        os.Stderr,
-		openDB:        openDB,
-		closeDB:       closeDB,
-		silenceRedis:  redislog.UseSilent,
-		migrationsDir: migrationsDir,
-		runFsck:       fsck.Run,
+		stdout:             os.Stdout,
+		stderr:             os.Stderr,
+		openDB:             openDB,
+		closeDB:            closeDB,
+		silenceRedis:       redislog.UseSilent,
+		migrationsDir:      migrationsDir,
+		localMigrationsDir: localMigrationsDir,
+		runFsck:            fsck.Run,
 	}
 }
 

@@ -49,8 +49,18 @@ func migrationUpFiles(t *testing.T) []string {
 
 func trackedMigrationFiles(t *testing.T, pattern string) []string {
 	t.Helper()
-	cmd := exec.Command("git", "ls-files", pattern)
-	cmd.Dir = repoRoot(t)
+	return trackedMigrationFilesIn(t, repoRoot(t), pattern)
+}
+
+// trackedMigrationFilesIn lists the tracked files under root matching pattern.
+//
+// **pathspec は `:(glob)` で渡す。** 素の pathspec では `*` が `/` をまたぐので、
+// `migration/*.up.sql` が fork の系列 `migration/local/*.up.sql` (#3428) まで拾い、
+// 本体の migration の本数に fork の分が混ざる。`:(glob)` の `*` は 1 階層だけ。
+func trackedMigrationFilesIn(t *testing.T, root, pattern string) []string {
+	t.Helper()
+	cmd := exec.Command("git", "ls-files", "--", ":(glob)"+pattern)
+	cmd.Dir = root
 	out, err := cmd.Output()
 	require.NoError(t, err, "git ls-files %s が失敗した", pattern)
 	var files []string
@@ -539,4 +549,25 @@ func TestDestructiveMigrationTableRowsAreUnique(t *testing.T) {
 		require.False(t, seen[r], "破壊的なマイグレーションの表に %s が重複している (件数が水増しになる)", r)
 		seen[r] = true
 	}
+}
+
+// fork の系列 (migration/local/、#3428) を本体の本数に数えない。
+func TestTrackedMigrationFiles_IgnoresLocalTrack(t *testing.T) {
+	root := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "git %v: %s", args, out)
+	}
+	git("init", "-q")
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "migration", "local"), 0o755))
+	for _, name := range []string{"migration/000001_a.up.sql", "migration/000001_a.down.sql", "migration/local/000001_fork.up.sql", "migration/local/000001_fork.down.sql"} {
+		require.NoError(t, os.WriteFile(filepath.Join(root, filepath.FromSlash(name)), nil, 0o600))
+	}
+	git("add", ".")
+
+	require.Equal(t, []string{"migration/000001_a.up.sql"}, trackedMigrationFilesIn(t, root, "migration/*.up.sql"))
+	require.Equal(t, []string{"migration/000001_a.down.sql"}, trackedMigrationFilesIn(t, root, "migration/*.down.sql"))
 }
