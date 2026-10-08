@@ -277,7 +277,8 @@ const migrationLedgerTable = "testutil_applied_migrations"
 // 食わない。**列枠を食う `000033` (ADD) / `000036` (DROP) は成功する側**なので、
 // 成功時のみの記録でも #2756 は解消する。
 func ApplyMigrations(db *gorm.DB) {
-	files, err := findMigrationFiles()
+	dir := filepath.Join(projectRoot(), "migration")
+	files, err := findMigrationFiles(dir)
 	if err != nil {
 		panic("failed to find migration files: " + err.Error())
 	}
@@ -287,7 +288,7 @@ func ApplyMigrations(db *gorm.DB) {
 		if err != nil {
 			panic("failed to read migration file: " + err.Error())
 		}
-		key := filepath.Base(path)
+		key := migrationLedgerKey(dir, path)
 		sum := fmt.Sprintf("%x", sha256.Sum256(sql))
 		if applied[key] == sum {
 			continue
@@ -332,15 +333,33 @@ func recordAppliedMigration(db *gorm.DB, name, sum string) {
 		ON CONFLICT (name) DO UPDATE SET sha = EXCLUDED.sha`, name, sum).Error
 }
 
-func findMigrationFiles() ([]string, error) {
-	_, thisFile, _, _ := runtime.Caller(0)
-	projectRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
-	dir := filepath.Join(projectRoot, "migration")
-	matches, err := filepath.Glob(filepath.Join(dir, "*.up.sql"))
+// findMigrationFiles returns the up migrations under dir (the core track),
+// followed by those under dir/local (a fork's track, #3428).
+//
+// **local も流す。** fork が本体の表に列を足してモデルにも足すと、テストの DB に
+// その列が無ければ fork のテストが全部落ちる。`elythia migrate` と同じく core の
+// 後に流す。Elythia 本体には local が無いので、ここでは何も増えない。
+func findMigrationFiles(dir string) ([]string, error) {
+	core, err := filepath.Glob(filepath.Join(dir, "*.up.sql"))
 	if err != nil {
 		return nil, err
 	}
-	return matches, nil
+	local, err := filepath.Glob(filepath.Join(dir, "local", "*.up.sql"))
+	if err != nil {
+		return nil, err
+	}
+	return append(core, local...), nil
+}
+
+// migrationLedgerKey names a migration file in the ledger: the base name for
+// the core track (the keys existing ledgers already hold) and `local/<name>`
+// for the fork's track, so the two tracks may reuse the same number and name.
+func migrationLedgerKey(dir, path string) string {
+	rel, err := filepath.Rel(dir, path)
+	if err != nil {
+		return filepath.Base(path)
+	}
+	return filepath.ToSlash(rel)
 }
 
 // MustOpenTestDB は OpenTestDB のパニック版。init() で使う。

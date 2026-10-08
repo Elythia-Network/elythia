@@ -9,6 +9,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"github.com/elythia-network/elythia/internal/cli/migrate"
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/core/dbhealth"
 	"github.com/elythia-network/elythia/internal/core/selfcheck"
@@ -18,9 +19,13 @@ import (
 // operator staring at a blank terminal.
 const doctorTimeout = 60 * time.Second
 
-// migrationsDir mirrors what "elythia migrate" passes to golang-migrate
-// (`file://migration`). 同じ場所を数えないと「適用漏れ」の判定がずれる。
-const migrationsDir = "migration"
+// migrationsDir / localMigrationsDir are what "elythia migrate" passes to
+// golang-migrate. 同じ場所を数えないと「適用漏れ」の判定がずれるので、
+// 定数は migrate 側のものを使う。
+const (
+	migrationsDir      = migrate.CoreDir
+	localMigrationsDir = migrate.LocalDir
+)
 
 // Doctor implements "elythia doctor": it runs the configuration / dependency /
 // federation self-checks, prints a report and returns 0 (ok) or 1 (failures).
@@ -48,7 +53,10 @@ func doctor(e env, args []string) int {
 	// 埋もれるので黙らせる (失敗は Result 側で報告する)。
 	e.silenceRedis()
 
-	deps := selfcheck.LocalDeps{MigrationCount: countMigrations(e.migrationsDir)}
+	deps := selfcheck.LocalDeps{
+		MigrationCount:       countMigrations(e.migrationsDir),
+		LocalMigrationLatest: latestLocalMigration(e.localMigrationsDir),
+	}
 	db, dbErr := e.openDB(cfg)
 	if dbErr != nil {
 		deps.DBErr = dbErr
@@ -78,6 +86,17 @@ func countMigrations(dir string) int {
 		return 0
 	}
 	return len(matches)
+}
+
+// latestLocalMigration returns the highest version in the fork's track
+// (#3428), or 0 when there is none. 0 のときは fork の系列を検査しない。
+// 読めないときも 0 に倒す (core の countMigrations と同じく、比較だけを飛ばす)。
+func latestLocalMigration(dir string) int64 {
+	latest, _, err := migrate.LatestVersion(dir)
+	if err != nil {
+		return 0
+	}
+	return int64(latest)
 }
 
 // openDoctorRedis dials Redis. nil を返したら検査は skip になる。

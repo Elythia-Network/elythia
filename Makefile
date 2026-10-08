@@ -1,7 +1,7 @@
 .PHONY: help check gates version plugin-test frontend-check diff-check playwright-check e2e-down-all \
 	update pull pull-plugins docker-update docker-rebuild docker-restart uds-update \
 	image-up image-down image-down-v image-logs image-build \
-	build run dev clean tidy test fmt lint plugin-doc-check migrate-up migrate-down migrate-create \
+	build run dev clean tidy test fmt lint plugin-doc-check migrate-up migrate-down migrate-down-local migrate-create migrate-create-local \
 	plugins plugins-all plugin-dev plugin-vet \
 	federation-misskey-build federation-misskey-up federation-misskey-test \
 	federation-misskey-e2e \
@@ -477,20 +477,36 @@ actionlint: ## GitHub Actions の workflow を検査
 # 接続先は -config (既定 .config/default.yml) から決まる。DATABASE_URL は読まない。
 # 別の DB へ流すなら -config を渡すか MK_DB_* で上書きする。
 ##@ マイグレーション
-migrate-up: ## マイグレーションを最新まで適用
+# 本体の系列 (migration/) を流した後に、fork の系列 (migration/local/) があれば流す (#3428)。
+migrate-up: ## マイグレーションを最新まで適用 (本体 → fork の系列の順)
 	go run ./cmd/elythia migrate -direction up
 
 # **-steps 1 は必須。** `elythia migrate` は steps 未指定 (0) を「全部」と解釈するので、
 # 付け忘れると 1 段のつもりで全 down が走り 全テーブルが消える。
 # 適用済みが 0 件のときは golang-migrate が "file does not exist" で exit 1 する
 # (steps 指定時は ErrNoChange に落ちないため)。冪等に叩くなら呼び出し側で吸収する。
-migrate-down: ## マイグレーションを 1 段階ロールバック
-	go run ./cmd/elythia migrate -direction down -steps 1
+# down は系列の指定が必須 (#3428)。このターゲットは本体の系列だけを戻す。
+migrate-down: ## 本体のマイグレーションを 1 段階ロールバック
+	go run ./cmd/elythia migrate -direction down -track core -steps 1
+
+migrate-down-local: ## fork の系列 (migration/local/) を 1 段階ロールバック
+	go run ./cmd/elythia migrate -direction down -track local -steps 1
 
 migrate-create: ## 新規マイグレーションファイルを作成
 	@read -p "Migration name: " name; \
 	touch migration/$$(printf "%06d" $$(($$(ls migration/*.up.sql 2>/dev/null | wc -l) + 1)))_$${name}.up.sql; \
 	touch migration/$$(printf "%06d" $$(($$(ls migration/*.down.sql 2>/dev/null | wc -l) + 1)))_$${name}.down.sql
+
+# 番号は本数ではなく**最大の番号 + 1** にする。fork の系列は 900001 のように飛んだ
+# 番号から始めてもよいので、本数から決めると既存の番号と重なる。先頭の 0 は
+# 落としてから足す (sh の算術式は 0 始まりを 8 進数として読み、000008 で落ちる)。
+migrate-create-local: ## fork の系列 (migration/local/) に新規マイグレーションファイルを作成
+	@read -p "Migration name: " name; \
+	mkdir -p migration/local; \
+	last=$$(ls migration/local/*.up.sql 2>/dev/null | sed 's|.*/||; s|_.*||' | sort -n | tail -n 1 | sed 's/^0*//'); \
+	next=$$(printf "%06d" $$(( $${last:-0} + 1 ))); \
+	touch migration/local/$${next}_$${name}.up.sql migration/local/$${next}_$${name}.down.sql; \
+	echo "created migration/local/$${next}_$${name}.{up,down}.sql"
 
 # Docker
 ##@ Docker
@@ -1287,7 +1303,7 @@ notiftype-check: ## 通知タイプの一覧が 1 箇所から導出されてい
 
 .PHONY: migrationdoc-check
 migrationdoc-check: ## migration の本数を述べた doc が実態と合っているか検査
-	go test ./internal/entitycompat/... -run 'TestMigrationCountsInDocsMatchReality|TestMigrationCountClaimsDoNotPointIntoHistory|TestClaimPointsIntoHistory|TestNoopDownMigrationListMatchesReality|TestDestructiveMigrationTableRowsAreUnique' -count=1 -v
+	go test ./internal/entitycompat/... -run 'TestMigrationCountsInDocsMatchReality|TestMigrationCountClaimsDoNotPointIntoHistory|TestClaimPointsIntoHistory|TestNoopDownMigrationListMatchesReality|TestDestructiveMigrationTableRowsAreUnique|TestTrackedMigrationFiles_IgnoresLocalTrack' -count=1 -v
 
 .PHONY: mdtable-check
 mdtable-check: ## md の表の各行がヘッダと同じ列数か検査 (溢れたセルは描画時に捨てられる)

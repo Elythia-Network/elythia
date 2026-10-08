@@ -112,7 +112,7 @@ func TestApplyMigrations_SkipsAlreadyApplied(t *testing.T) {
 	ApplyMigrations(db)
 
 	// 台帳が全 migration を記録していること。
-	files, err := findMigrationFiles()
+	files, err := findMigrationFiles(filepath.Join(projectRoot(), "migration"))
 	require.NoError(t, err)
 	require.NotEmpty(t, files)
 	var recorded int64
@@ -189,7 +189,7 @@ func TestApplyMigrations_DoesNotRecordFailures(t *testing.T) {
 
 	// fresh schema では全本が成功するので、まず「成功した本数 == ファイル数」。
 	ApplyMigrations(db)
-	files, err := findMigrationFiles()
+	files, err := findMigrationFiles(filepath.Join(projectRoot(), "migration"))
 	require.NoError(t, err)
 	var recorded int64
 	require.NoError(t, db.Raw(`SELECT count(*) FROM "`+migrationLedgerTable+`"`).Scan(&recorded).Error)
@@ -263,4 +263,31 @@ func TestSchemaName_TruncatesFromTheFront(t *testing.T) {
 	assert.Len(t, got, maxPackageSuffixLen)
 	assert.True(t, strings.HasSuffix(got, "_tail"))
 	assert.Equal(t, "short", schemaName("short"))
+}
+
+// fork の系列 (migration/local/、#3428) も core の後に流す。台帳のキーは
+// `local/<name>` にして、core と同じ番号・名前でも取り違えない。
+func TestFindMigrationFiles_IncludesLocalTrackAfterCore(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "local", "nested"), 0o755))
+	for _, name := range []string{
+		"000002_b.up.sql", "000001_a.up.sql", "000001_a.down.sql",
+		"local/000001_a.up.sql", "local/000001_a.down.sql", "local/nested/000009_x.up.sql",
+	} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, filepath.FromSlash(name)), nil, 0o600))
+	}
+	files, err := findMigrationFiles(dir)
+	require.NoError(t, err)
+	var keys []string
+	for _, f := range files {
+		keys = append(keys, migrationLedgerKey(dir, f))
+	}
+	assert.Equal(t, []string{"000001_a.up.sql", "000002_b.up.sql", "local/000001_a.up.sql"}, keys)
+
+	// local が無いときは core だけ (Elythia 本体の状態)。
+	core := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(core, "000001_a.up.sql"), nil, 0o600))
+	files, err = findMigrationFiles(core)
+	require.NoError(t, err)
+	assert.Len(t, files, 1)
 }
