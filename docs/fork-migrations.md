@@ -93,7 +93,7 @@ make migrate-down          # 本体の系列を 1 段戻す (-track core -steps 
 
 `migration/local/`ができる前(#3428より前)に、独自のmigrationを本体の`migration/`へ足していたforkは、ファイルを`migration/local/`へ動かすだけでは移れません。管理表`schema_migrations`がforkの番号を指したまま残るので、本体のmigrationが流れなかったり、forkのmigrationがもう一度流れようとしたりします(#3453)。
 
-この節の手順は、forkのファイルを`migration/local/`へ移し、2つの管理表を手で書き換えて、本体とforkのmigrationがどちらも1回ずつ当たった状態にします。管理表をSQLで書き換えるのは、`elythia migrate`がgolang-migrateの`force`(migrationを流さずに管理表のversionだけを書き換える操作)を持たないためです。
+この節の手順は、forkのファイルを`migration/local/`へ移し、2つの管理表を手で書き換えて、本体とforkのmigrationがどちらも1回ずつ当たった状態にします。管理表は`elythia migrate -force`ではなくSQLで書き換えます。2つの管理表を1つのtransactionで書き換えるためです。`-force`(migrationを流さずに管理表のversionだけを書き換える操作、#3455)は1回に1つの系列しか書き換えないので、2回に分けると、間で止まったときに片方だけが書き換わります。
 
 ### 混ぜ方による違い
 
@@ -433,7 +433,7 @@ forkのものに接頭辞が無ければ、場合2の名前の付け替え(up.sq
 - **管理表に推測した値を書かない。** 小さすぎると当たったmigrationがもう一度流れてデータが消えることがあり、大きすぎると当たっていないmigrationが黙って飛ばされる(手順2)
 - **サーバーやqueueのworkerを動かしたまま行わない**(手順1)
 
-`force`に当たる操作を`elythia migrate`に足すかは、この節とは別に検討します。
+migrationが途中で止まって管理表がdirtyになったときは、SQLではなく`elythia migrate -force <番号> -track core|local`で戻します。`-force`はdirtyになっている管理表しか書き換えません。手順は[デプロイ](deployment.md#マイグレーションが途中で止まったとき-dirty)にあります。
 
 ## テスト
 

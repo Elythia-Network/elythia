@@ -111,7 +111,7 @@ func TestRun_LocalTrack(t *testing.T) {
 		e, out, opened := trackEnv(t, localDir, map[string]error{"file://" + localDir: errors.New("boom")})
 		assert.Equal(t, 1, run(e, &bytes.Buffer{}, []string{"-config", writeConfig(t)}))
 		require.Len(t, *opened, 2)
-		assert.Contains(t, out.String(), `level=ERROR msg="migration failed" track=local`)
+		assert.Contains(t, out.String(), `level=ERROR msg="migration failed" track=local direction=up`)
 	})
 
 	t.Run("open error on local", func(t *testing.T) {

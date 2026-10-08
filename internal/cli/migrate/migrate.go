@@ -5,12 +5,15 @@ package migrate
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
+	"math"
 	"net/url"
 	"os"
+	"strconv"
 
 	gomigrate "github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
@@ -54,6 +57,8 @@ type migrator interface {
 	Up() error
 	Down() error
 	Steps(n int) error
+	Force(version int) error
+	Version() (version uint, dirty bool, err error)
 	Close() (source error, database error)
 }
 
@@ -104,13 +109,32 @@ func run(e env, flagOut io.Writer, args []string) int {
 	steps := fs.Int("steps", 0, "number of steps (0 = all)")
 	track := fs.String("track", "", "migration track: core (migration/) or local (migration/local/). "+
 		"Required for -direction down and for -steps; up without it applies core, then local")
+	force := fs.String("force", "", "set the tracking table of -track to this version and clear dirty, "+
+		"without running any migration. The version must be a migration of that track")
 	if code, ok := cliflag.Parse(fs, args); !ok {
 		return code
 	}
-	if msg := validateFlags(*direction, *steps, *track); msg != "" {
+	set := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	msg := validateFlags(*direction, *steps, *track)
+	if set["force"] {
+		msg = validateForceFlags(set, *track)
+	}
+	if msg != "" {
 		fmt.Fprintf(flagOut, "elythia migrate: %s\n", msg)
 		fs.Usage()
 		return 2
+	}
+	var forceVersion uint
+	if set["force"] {
+		v, err := strconv.ParseUint(*force, 10, 0)
+		// golang-migrate の Force は int を取るので、int に収まらない番号も弾く。
+		if err != nil || v > math.MaxInt {
+			fmt.Fprintf(flagOut, "elythia migrate: invalid -force %q (want a migration version)\n", *force)
+			fs.Usage()
+			return 2
+		}
+		forceVersion = uint(v)
 	}
 
 	logger := slog.New(slog.NewTextHandler(e.stdout, &slog.HandlerOptions{
@@ -122,6 +146,10 @@ func run(e env, flagOut io.Writer, args []string) int {
 	if err != nil {
 		logger.Error("failed to load config", "error", err)
 		return 1
+	}
+
+	if set["force"] {
+		return e.forceTrack(logger, cfg, *track, forceVersion)
 	}
 
 	tracks := []string{*track}
@@ -166,6 +194,117 @@ func validateFlags(direction string, steps int, track string) string {
 		return "-steps requires -track core or -track local"
 	}
 	return ""
+}
+
+// validateForceFlags returns a message for an invalid flag combination with
+// -force, or "".
+//
+// **-force は管理表を書き換えるだけで、取り消す手段が無い。** 系列を省略させると、
+// 本体の管理表に fork の番号を書く (またはその逆) 取り違えが起きる。-direction /
+// -steps と一緒に書かれたときも、どちらを意図したのか分からないので拒否する。
+func validateForceFlags(set map[string]bool, track string) string {
+	if set["direction"] || set["steps"] {
+		return "-force cannot be combined with -direction or -steps"
+	}
+	if track != trackCore && track != trackLocal {
+		return "-force requires -track core or -track local"
+	}
+	return ""
+}
+
+// forceTrack sets the tracking table of one track to version and clears
+// dirty, without running any migration.
+//
+// golang-migrate の Force は、番号が同梱のファイルに実在するかを見ずに何でも書く。
+// **打ち間違えた番号を書くと、間の migration が黙って飛ばされるか、当たった
+// migration が次の up でもう一度流れる。** 本体の migration は流し直してよいように
+// 書かれていない (000077 は登録申請を全て消す。#3453) ので、その系列の同梱の
+// ファイルに実在する番号だけを受ける。管理表を空にする -1 (NilVersion) も、同じ
+// 理由で受けない。
+func (e env) forceTrack(logger *slog.Logger, cfg *config.Config, track string, version uint) int {
+	log := logger.With("track", track)
+	dir := e.coreDir
+	if track == trackLocal {
+		dir = e.localDir
+	}
+	ok, err := hasUpMigration(dir, version)
+	if err != nil {
+		log.Error("failed to read migrations", "dir", dir, "error", err)
+		return 1
+	}
+	if !ok {
+		log.Error("no such migration in this track; refusing to force", "dir", dir, "version", version)
+		return 1
+	}
+
+	dbURL := e.databaseURL(cfg)
+	if track == trackLocal {
+		dbURL, err = withMigrationsTable(dbURL, LocalTable)
+		if err != nil {
+			// url.Error は URL 全体 (パスワードを含む) を文面に持つ。
+			log.Error("failed to build database URL for the local track")
+			return 1
+		}
+	}
+	m, err := e.open("file://"+dir, dbURL)
+	if err != nil {
+		logDBError(log, cfg, "failed to create migrator", err)
+		return 1
+	}
+	defer m.Close()
+
+	// **dirty でない管理表は書き換えない。** -force は中断した migration の後始末に
+	// 限る。dirty でない表を小さい番号へ戻すと、当たった migration が次の up で
+	// もう一度流れる。開く処理は advisory lock を待つので、流れている最中の migrate
+	// と並べて打つと、その完了を待ってから当たった版を巻き戻してしまう (完了後の
+	// 表は dirty でないので、ここで止まる)。空の表 (ErrNilVersion) も、当たって
+	// いない migration を当たったことにするだけなので受けない。
+	before, dirty, err := m.Version()
+	switch {
+	case errors.Is(err, gomigrate.ErrNilVersion):
+		// 空の表と、最初の migration の down が落ちた表 (-1 で dirty) がここに来る。
+		log.Error("the tracking table is empty, or -1 after a failed down of the first migration; " +
+			"refusing to force (see docs/deployment.md)")
+		return 1
+	case err != nil:
+		logDBError(log, cfg, "failed to read the current version", err)
+		return 1
+	case !dirty:
+		log.Error("the tracking table is not dirty; refusing to force (-force only recovers a dirty table)",
+			"version", before)
+		return 1
+	case before == version:
+		// **記録された番号そのものは、どちらの失敗でも正解にならない。** up で
+		// 落ちたら記録された番号は当たっておらず (1 つ前が正解)、down で落ちたら
+		// 記録は戻す先なので、失敗したファイルは記録の次。そのまま -force すると、
+		// up の失敗では当たっていない migration が黙って飛ばされる。
+		log.Error("refusing to force the recorded version itself; after a failed up force the previous migration, "+
+			"after a failed down the next one (see docs/deployment.md)", "version", before)
+		return 1
+	}
+	// 書き換える前の値を残す。誤って流したときに、元へ戻す手がかりになる。
+	log.Info("tracking table before force", "version", before, "dirty", dirty)
+
+	if err := m.Force(int(version)); err != nil {
+		logDBError(log, cfg, "force failed", err)
+		return 1
+	}
+	log.Info("forced the tracking table", "version", version, "dirty", false)
+	return 0
+}
+
+// hasUpMigration reports whether dir has an up migration numbered version.
+func hasUpMigration(dir string, version uint) (bool, error) {
+	versions, err := upVersions(dir)
+	if err != nil {
+		return false, err
+	}
+	for _, v := range versions {
+		if v == version {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // runTrack migrates one track and returns the exit code.
@@ -223,7 +362,9 @@ func (e env) runTrack(logger *slog.Logger, cfg *config.Config, track, direction 
 		return 0
 	}
 	if err != nil {
-		logDBError(log, cfg, "migration failed", err)
+		// direction を残す。dirty になった管理表を -force で戻すときの番号は、
+		// 失敗したのが up か down かで変わる (docs/deployment.md)。
+		logDBError(log.With("direction", direction), cfg, "migration failed", err)
 		return 1
 	}
 	log.Info("migration completed", "direction", direction)
@@ -254,13 +395,27 @@ func withMigrationsTable(databaseURL, table string) (string, error) {
 // golang-migrate が読まない名前 (番号の無いファイルなど) まで数えて、
 // 「local がある」と判断したのに golang-migrate からは空に見える、というずれが出る。
 func LatestVersion(dir string) (latest uint, count int, err error) {
+	versions, err := upVersions(dir)
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, v := range versions {
+		latest = max(latest, v)
+	}
+	return latest, len(versions), nil
+}
+
+// upVersions returns the versions of the up migrations in dir, using the same
+// file-name rule as golang-migrate. A missing dir has none.
+func upVersions(dir string) ([]uint, error) {
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
-		return 0, 0, nil
+		return nil, nil
 	}
 	if err != nil {
-		return 0, 0, fmt.Errorf("read %s: %w", dir, err)
+		return nil, fmt.Errorf("read %s: %w", dir, err)
 	}
+	var versions []uint
 	for _, ent := range entries {
 		if ent.IsDir() {
 			continue
@@ -269,12 +424,9 @@ func LatestVersion(dir string) (latest uint, count int, err error) {
 		if perr != nil || m.Direction != source.Up {
 			continue
 		}
-		count++
-		if m.Version > latest {
-			latest = m.Version
-		}
+		versions = append(versions, m.Version)
 	}
-	return latest, count, nil
+	return versions, nil
 }
 
 // logDBError logs a DB error, adding the TLS remediation hint when the

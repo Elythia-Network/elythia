@@ -26,7 +26,7 @@
 --        WHERE i.relname = 'IDX_note_uri' AND NOT x.indisvalid;
 --      DROP INDEX CONCURRENTLY IF EXISTS "IDX_note_uri";
 --   2. 残存重複があれば 000056 の DELETE を再実行してから、
---   3. schema_migrations を直前 version (56) へ戻す:
---        UPDATE "schema_migrations" SET version = 56, dirty = false;
---      その後 make migrate-up で再適用 (standalone CLI があれば migrate force 56 でも可)。
+--   3. 管理表を直前 version (56) へ戻す (#3455):
+--        elythia migrate -force 56 -track core
+--      その後 make migrate-up で再適用。
 CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "IDX_note_uri" ON "note" ("uri") WHERE "uri" IS NOT NULL;

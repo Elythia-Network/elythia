@@ -68,7 +68,7 @@ func CheckDatabase(ctx context.Context, deps LocalDeps) Result {
 	}
 	if row.Dirty {
 		return failResult(name, fmt.Sprintf("migration が dirty (version %d)", row.Version),
-			"前回のマイグレーションが中断している。失敗した version を手当てしてから `schema_migrations.dirty` を false に戻す")
+			"前回のマイグレーションが中断している。失敗した version を手当てしてから `elythia migrate -force <当たっている version> -track core` で管理表を戻す (番号の決め方は docs/deployment.md の「マイグレーションが途中で止まったとき」)")
 	}
 	if deps.MigrationCount > 0 && row.Version < int64(deps.MigrationCount) {
 		return failResult(name,
@@ -111,7 +111,7 @@ func checkLocalMigrations(ctx context.Context, deps LocalDeps) (int64, *Result) 
 	if len(rows) == 1 {
 		if rows[0].Dirty {
 			r := failResult(name, fmt.Sprintf("fork の migration が dirty (version %d)", rows[0].Version),
-				"前回の fork の migration が中断している。失敗した version を手当てしてから `schema_migrations_local.dirty` を false に戻す")
+				"前回の fork の migration が中断している。失敗した version を手当てしてから `elythia migrate -force <当たっている version> -track local` で管理表を戻す (番号の決め方は docs/deployment.md の「マイグレーションが途中で止まったとき」)")
 			return 0, &r
 		}
 		version = rows[0].Version

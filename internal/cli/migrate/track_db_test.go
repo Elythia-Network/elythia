@@ -203,3 +203,100 @@ func TestMigrateDB_DownRollsBackOnlyTheNamedTrack(t *testing.T) {
 	assert.Equal(t, []int64{1}, f.versions(t, "schema_migrations"))
 	assert.Empty(t, f.versions(t, "schema_migrations_local"))
 }
+
+// dirtyOf returns the dirty flag of a golang-migrate tracking table.
+func (f *dbFixture) dirtyOf(t *testing.T, table string) bool {
+	t.Helper()
+	var dirty []bool
+	require.NoError(t, f.db.Raw(`SELECT dirty FROM "`+table+`"`).Scan(&dirty).Error)
+	require.Len(t, dirty, 1)
+	return dirty[0]
+}
+
+// **#3455 の本題。** migration が途中で落ちて dirty になった管理表を、原因を
+// 直した後に -force で戻すと、次の up が続きから流れる。-force は指定した系列の
+// 管理表だけを書き換え、migration は流さない。
+func TestMigrateDB_ForceRecoversDirtyTrack(t *testing.T) {
+	f := newDBFixture(t, "force_dirty")
+	writeMigration(t, f.coreDir, "000001_core_a",
+		`CREATE TABLE core_a (id text PRIMARY KEY);`, `DROP TABLE core_a;`)
+	writeMigration(t, f.coreDir, "000002_core_b",
+		`CREATE TABLE core_b (id text PRIMARY KEY); SELECT * FROM no_such_table;`, `DROP TABLE core_b;`)
+	writeMigration(t, f.localDir, "000001_fork_col",
+		`ALTER TABLE core_a ADD COLUMN fork_x text;`, `ALTER TABLE core_a DROP COLUMN fork_x;`)
+
+	code, out := f.migrate(t)
+	require.Equal(t, 1, code, out)
+	require.Equal(t, []int64{2}, f.versions(t, "schema_migrations"))
+	require.True(t, f.dirtyOf(t, "schema_migrations"))
+	// 記録された番号 (当たっていない 000002) をそのまま当たったことにはしない。
+	code, out = f.migrate(t, "-force", "2", "-track", "core")
+	require.Equal(t, 1, code, out)
+	require.True(t, f.dirtyOf(t, "schema_migrations"))
+	// dirty のままでは up が先へ進まない。
+	code, out = f.migrate(t)
+	require.Equal(t, 1, code, out)
+	assert.Contains(t, out, "Dirty database version 2")
+
+	// 原因を直す。000002 は 1 文目も含めて取り消されている (1 つの transaction)
+	// ので、当たっているのは 000001 まで。
+	require.False(t, f.tableExists(t, "core_b"))
+	writeMigration(t, f.coreDir, "000002_core_b",
+		`CREATE TABLE core_b (id text PRIMARY KEY);`, `DROP TABLE core_b;`)
+
+	code, out = f.migrate(t, "-force", "1", "-track", "core")
+	require.Equal(t, 0, code, out)
+	assert.Equal(t, []int64{1}, f.versions(t, "schema_migrations"))
+	assert.False(t, f.dirtyOf(t, "schema_migrations"))
+	assert.False(t, f.tableExists(t, "core_b"), "-force must not run migrations")
+	assert.False(t, f.tableExists(t, "schema_migrations_local"), "-force on core must not touch local")
+
+	code, out = f.migrate(t)
+	require.Equal(t, 0, code, out)
+	assert.True(t, f.tableExists(t, "core_b"))
+	// dirty でない表はもう書き換えない (当たった 000002 を未適用にしない)。
+	code, out = f.migrate(t, "-force", "1", "-track", "core")
+	require.Equal(t, 1, code, out)
+	assert.Contains(t, out, "the tracking table is not dirty")
+	assert.Equal(t, []int64{2}, f.versions(t, "schema_migrations"))
+	assert.True(t, f.columnExists(t, "core_a", "fork_x"))
+	assert.Equal(t, []int64{2}, f.versions(t, "schema_migrations"))
+	assert.Equal(t, []int64{1}, f.versions(t, "schema_migrations_local"))
+
+	// local の -force は local の管理表だけを書き換える。
+	// (fork の 000002 の up が落ちた状態を作る)
+	require.NoError(t, f.db.Exec(`UPDATE schema_migrations_local SET version = 2, dirty = true`).Error)
+	code, out = f.migrate(t, "-force", "1", "-track", "local")
+	require.Equal(t, 0, code, out)
+	assert.Equal(t, []int64{1}, f.versions(t, "schema_migrations_local"))
+	assert.False(t, f.dirtyOf(t, "schema_migrations_local"))
+	assert.Equal(t, []int64{2}, f.versions(t, "schema_migrations"))
+	assert.False(t, f.dirtyOf(t, "schema_migrations"))
+}
+
+// down が途中で落ちると、golang-migrate は失敗したファイルではなく、戻す先
+// (1 つ前) の番号を dirty で記録する。失敗した down は取り消されているので、
+// 当たっているのは記録の次の番号。docs/deployment.md の手順はこれを前提にする。
+func TestMigrateDB_ForceAfterFailedDown(t *testing.T) {
+	f := newDBFixture(t, "force_down")
+	writeMigration(t, f.coreDir, "000001_core_a",
+		`CREATE TABLE core_a (id text PRIMARY KEY);`, `DROP TABLE core_a;`)
+	writeMigration(t, f.coreDir, "000002_core_b",
+		`CREATE TABLE core_b (id text PRIMARY KEY);`, `DROP TABLE core_b; SELECT * FROM no_such_table;`)
+	code, out := f.migrate(t)
+	require.Equal(t, 0, code, out)
+
+	code, out = f.migrate(t, "-direction", "down", "-track", "core", "-steps", "1")
+	require.Equal(t, 1, code, out)
+	require.Equal(t, []int64{1}, f.versions(t, "schema_migrations"))
+	require.True(t, f.dirtyOf(t, "schema_migrations"))
+	require.True(t, f.tableExists(t, "core_b"), "the failed down must have been rolled back")
+
+	code, out = f.migrate(t, "-force", "2", "-track", "core")
+	require.Equal(t, 0, code, out)
+	assert.Equal(t, []int64{2}, f.versions(t, "schema_migrations"))
+	assert.False(t, f.dirtyOf(t, "schema_migrations"))
+	code, out = f.migrate(t)
+	require.Equal(t, 0, code, out)
+	assert.Contains(t, out, "no migration changes to apply")
+}
