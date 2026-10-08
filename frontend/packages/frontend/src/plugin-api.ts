@@ -24,6 +24,7 @@
  * 組み込むこと。
  */
 
+import { defineAsyncComponent } from 'vue';
 import type { Component } from 'vue';
 import type { entities } from 'misskey-js';
 import { misskeyApi } from '@/utility/misskey-api.js';
@@ -49,6 +50,17 @@ export { default as MkAvatar } from '@/components/global/MkAvatar.vue';
 export { default as MkUserName } from '@/components/global/MkUserName.vue';
 export { default as MkTime } from '@/components/global/MkTime.vue';
 export { default as PageWithHeader } from '@/components/global/PageWithHeader.vue';
+/**
+ * サーバープラグインの秘密の値 (API キーなど) の入力欄 (Elythia #3470)。
+ * `plugin` にプラグイン名を渡すと、`Definition.Secrets` で宣言した値の入力欄を出す。
+ * 値は書き込み専用で、保存後は「設定済み」と末尾 4 文字しか出ない。保存・削除は
+ * 管理者だけができる。コントロールパネルのサーバープラグイン一覧にも同じものが出る
+ * ので、独自の管理画面に置くのは任意。
+ *
+ * 遅延読み込みにする。この部品はダイアログ (`@/os.js`) を使うので、そのまま
+ * import すると plugin-api を読むだけでルーターまで巻き込む。
+ */
+export const MkPluginSecrets = defineAsyncComponent(() => import('@/components/MkPluginSecrets.vue'));
 export { useMkSelect } from '@/composables/use-mkselect.js';
 export { definePage } from '@/page.js';
 

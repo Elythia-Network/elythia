@@ -52,6 +52,17 @@ SPDX-License-Identifier: AGPL-3.0-only
 							<template #key>設定キー</template>
 							<template #value>{{ p.configKeys.join(', ') }}（値は表示されません）</template>
 						</MkKeyValue>
+						<!--
+							秘密の値 (#3470)。状態も管理者にしか返らないので、管理者にだけ出す。
+							入力口は有効なプラグインにしか張られない。
+						-->
+						<MkFolder v-if="p.secrets.length > 0 && $i?.isAdmin">
+							<template #icon><i class="ti ti-key"></i></template>
+							<template #label>秘密の値</template>
+							<template #suffix>{{ p.secrets.length }}件</template>
+							<MkPluginSecrets v-if="p.enabled" :plugin="p.name"/>
+							<MkInfo v-else>無効なプラグインの秘密の値は設定できません。有効にして再起動してください。</MkInfo>
+						</MkFolder>
 						<MkKeyValue v-if="pagesOf(p.name).length > 0">
 							<template #key>ページ</template>
 							<template #value>
@@ -80,6 +91,8 @@ import type * as Elythia from 'elythia-js';
 import MkKeyValue from '@/components/MkKeyValue.vue';
 import MkFolder from '@/components/MkFolder.vue';
 import MkInfo from '@/components/MkInfo.vue';
+import MkPluginSecrets from '@/components/MkPluginSecrets.vue';
+import { $i } from '@/i.js';
 import { misskeyApi } from '@/utility/misskey-api.js';
 import { definePage } from '@/page.js';
 import { collectPages } from '@/plugin-api.js';

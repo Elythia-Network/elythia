@@ -63,6 +63,8 @@ export type {
 	JoinedChatRoom,
 	LegacySigninResponse,
 	MetaDetailed,
+	PluginSecretInfo,
+	PluginSecretList,
 	RelatedEmojiApplication,
 	RemoteCheckReport,
 	RemoteEmojiMeta,

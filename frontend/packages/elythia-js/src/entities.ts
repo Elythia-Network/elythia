@@ -753,6 +753,32 @@ export type ServerPluginInfo = {
 	schema: string;
 	/** The setting keys only. The values are never returned. */
 	configKeys: string[];
+	/**
+	 * The secret names the plugin declares. Neither the values nor whether they
+	 * are set; administrators read that from `plugin/<name>/_secrets`.
+	 */
+	secrets: string[];
+};
+
+/** One secret of a server plugin, as `plugin/<name>/_secrets` returns it. The value is never returned. */
+export type PluginSecretInfo = {
+	name: string;
+	description: string;
+	/** Whether the plugin declares it. Only declared secrets can be entered from the control panel. */
+	declared: boolean;
+	configured: boolean;
+	/** False when the stored value does not decrypt with the current `pluginSecretKey`. */
+	readable: boolean;
+	/** The last 4 characters of a value at least 20 characters long. */
+	hint: string | null;
+	updatedAt: string | null;
+};
+
+/** The result of `plugin/<name>/_secrets` (administrators only). */
+export type PluginSecretList = {
+	/** False when `pluginSecretKey` is not configured; nothing can be stored or deleted then. */
+	available: boolean;
+	secrets: PluginSecretInfo[];
 };
 
 /** One cell of `admin/drive/usage`. */
