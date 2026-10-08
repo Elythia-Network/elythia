@@ -24,6 +24,12 @@ type fakeMigrator struct {
 	steps  int
 	err    error
 	closed bool
+	// forced is the version passed to Force. version / dirty / versionErr are
+	// what Version returns.
+	forced     int
+	version    uint
+	dirty      bool
+	versionErr error
 }
 
 func (f *fakeMigrator) Up() error   { f.calls = append(f.calls, "up"); return f.err }
@@ -33,7 +39,13 @@ func (f *fakeMigrator) Steps(n int) error {
 	f.steps = n
 	return f.err
 }
-func (f *fakeMigrator) Close() (error, error) { f.closed = true; return nil, nil }
+func (f *fakeMigrator) Force(v int) error {
+	f.calls = append(f.calls, "force")
+	f.forced = v
+	return f.err
+}
+func (f *fakeMigrator) Version() (uint, bool, error) { return f.version, f.dirty, f.versionErr }
+func (f *fakeMigrator) Close() (error, error)        { f.closed = true; return nil, nil }
 
 func writeConfig(t *testing.T) string {
 	t.Helper()

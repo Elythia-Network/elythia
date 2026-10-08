@@ -726,6 +726,52 @@ make migrate-up
 sudo systemctl restart misskey    # systemd の場合
 ```
 
+### マイグレーションが途中で止まったとき (dirty)
+
+migration が途中で失敗すると、golang-migrate は管理表に番号を `dirty = true` で記録して止まる。この状態では `elythia migrate` が `Dirty database version <記録された番号>. Fix and force version.` で止まり、`elythia doctor` も FAIL を返す。**原因を直してから、管理表を `elythia migrate -force` で、当たっている番号へ戻す** (#3455)。
+
+```sql
+-- fork の系列 (migration/local/) なら schema_migrations_local を見る
+SELECT version, dirty FROM schema_migrations;
+```
+
+**記録される番号は、失敗したのが up か down かで違う。** up で失敗すると、失敗したファイルの番号が記録される。down で失敗すると、戻す先 (失敗したファイルの 1 つ前) の番号が記録される。どちらだったかは、止まったときのログの `msg="migration failed"` の行の `direction=` で確かめる。compose の `migrate` サービスと UDS の entrypoint は up しか流さない。
+
+1. サーバーと、migrate を流すもの (compose の `migrate` サービス、UDS の entrypoint) を止める。`-force` は流れている migrate の完了を待ってから動くので、並べて打つと、当たった番号を巻き戻すおそれがある (`-force` は dirty でない管理表を書き換えずに止まるので、たいていはそこで気付ける)
+2. 失敗した理由をログで確かめて、原因を取り除く (例: 重複した行、足りない権限、`statement_timeout`)
+3. 失敗したファイルが、DB にどこまで当たっているかを確かめる。1 つのファイルの文は 1 つの transaction で流れるので、普通は何も当たっていない (失敗した up は当たっておらず、失敗した down は戻っていない)。例外は `CREATE INDEX CONCURRENTLY` で、使えない (INVALID の) index が残ることがある。残っていたら `DROP INDEX CONCURRENTLY` で消す (手順は該当する migration のファイルの冒頭に書いてある)
+
+   ```sql
+   SELECT i.relname FROM pg_index x JOIN pg_class i ON i.oid = x.indexrelid
+     JOIN pg_namespace n ON n.oid = i.relnamespace
+    WHERE n.nspname = current_schema() AND NOT x.indisvalid;
+   ```
+
+   **`migration failed` の行が無いときは、migrate のプロセスが途中で殺された** (停止の猶予が切れた、接続が切れたなど)。このときは、PostgreSQL がファイルを最後まで流して commit していることがある。失敗したファイルの効果 (表・列・index、書き換えたデータ) が全て当たっている (down なら全て戻っている) なら、記録された番号が正しい。`-force` は記録された番号を受けないので、SQL で dirty だけを外す: `UPDATE schema_migrations SET dirty = false;` (fork の系列なら `schema_migrations_local`)。何も当たっていないなら、下の 4 に進む
+
+4. 管理表を、当たっている番号へ戻す
+   - **up で失敗したとき**: 記録された番号のファイルは当たっていない。その系列で、それより 1 つ前のファイルの番号へ戻す。次の `elythia migrate` が、失敗したファイルから流し直す
+   - **down で失敗したとき**: 失敗したファイルは戻っておらず、当たったまま。その系列で、記録された番号の次のファイルの番号へ戻す
+
+   ```bash
+   # バイナリ直接実行
+   elythia migrate -force <番号> -track core
+   # Docker Compose (TCP)。配布 image で動かしているなら -f docker-compose.image.yml を足す
+   docker compose run --rm --no-deps migrate migrate -config .config/default.yml -force <番号> -track core
+   # Docker Compose (UDS)
+   docker compose -f compose.uds.yaml run --rm --no-deps mkgo migrate -force <番号> -track core
+   ```
+
+5. `elythia migrate` を流し、`elythia doctor` が通ることを確かめてから、サーバーを起動する
+
+`-force` は migration を流さずに、`-track` で指定した系列の管理表だけを書き換え、書き換える前の値をログに出す。**dirty になっている管理表しか書き換えず、番号はその系列のファイルに実在するものしか受けない。** 違う番号を書くと、間の migration が黙って飛ばされるか、当たった migration が次の up でもう一度流れる。本体の migration は流し直してよいようには書かれておらず、例えば `000077` は未処理の登録申請を全て消す ([fork-migrations.md](fork-migrations.md#本体のmigrationに混ぜてしまった場合))。**推測で番号を決めない。** 失敗したファイルの効果が一部だけ残っていて、取り除くか最後まで当てるかを決められないときは、バックアップから戻す。
+
+**`-force` は、記録された番号そのものと、空の管理表を受けない。** 記録された番号への `-force` は、up の失敗では当たっていない migration を飛ばし、down の失敗では当たっている migration を流し直させる。失敗した up のファイルを手で最後まで当てた場合も、手で当てた分を取り除いてから 1 つ前へ戻し、`elythia migrate` に流させる。例外は、3 のプロセスが殺された場合だけ。
+
+その系列の最初のファイル (本体なら `000001`。fork の系列は `900001` などから始まることがある) で止まったときは、`-force` では戻せない。管理表 (`schema_migrations`、fork の系列なら `schema_migrations_local`) を SQL で直す。
+- up で失敗したとき: 管理表は最初のファイルの番号で dirty になっているが、そのファイルは当たっていない。原因を取り除いた後に、管理表を `DROP TABLE` する。次の `elythia migrate` が管理表を作り直し、最初のファイルから流す
+- down で失敗したとき: 管理表は `-1` で dirty になっているが、最初のファイルは当たったまま。`UPDATE schema_migrations SET version = 1, dirty = false;` (fork の系列なら `schema_migrations_local` と、その系列の最初の番号) で戻す
+
 ### frontend を本体へ取り込んだ版へ上げる (#3379)
 
 この版から、同梱の frontend は submodule (`third_party/misskey`) ではなく、本体の `frontend/` からビルドして配る。UDS 構成 (`compose.uds.yaml`) で運用している場合は、compose の bind mount の元と、frontend のビルドの出力先が変わる。**手順どおりに進めないと、frontend の配信物が空になり 404 を返す。**
