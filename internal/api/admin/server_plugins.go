@@ -32,6 +32,10 @@ type ServerPluginInfo struct {
 	// 秘密かを mk-go は判別できないので、`elythia config-dump` と同じく既定で全部
 	// マスクする方針に合わせる。
 	ConfigKeys []string `json:"configKeys"`
+	// Secrets lists the secret names the plugin declares (#3470). **値も
+	// 設定済みかどうかも返さない** — この一覧はモデレーターにも見えるので、
+	// 状態は管理者だけが叩ける `plugin/<name>/_secrets` で返す。
+	Secrets []string `json:"secrets"`
 }
 
 // PluginOrphanSchemaLister returns plugin schemas that no compiled-in plugin

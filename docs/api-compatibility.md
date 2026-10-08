@@ -282,9 +282,9 @@ TS版の`.config/default.yml`をそのまま使用可能。以下の設定もGo�
 
 Go側のマイグレーション (000001〜) はTS版テーブルに対して原則追加のみだが、例外が 18 件ある ([migration-from-ts.md](migration-from-ts.md#破壊的なマイグレーション))。TS版のマイグレーションで作成される全テーブルは維持される。
 
-**Elythia 固有のテーブル (upstream に対応するものが無い) は 18 件:**
+**Elythia 固有のテーブル (upstream に対応するものが無い) は 19 件:**
 
-> [divergence/db.md](divergence/db.md) §2-1 は同じものを **21** と数えている。差は 3 件で、
+> [divergence/db.md](divergence/db.md) §2-1 は同じものを **22** と数えている。差は 3 件で、
 > あちらは `note_unread` (upstream DB には legacy として残るが 2026.7.0 の `models/` に
 > entity が無く参照 0 件。Elythia はこれを実用している) と bookkeeping 2 件
 > (`migrations` / `schema_migrations`) を加える。CI の
@@ -309,8 +309,9 @@ Go側のマイグレーション (000001〜) はTS版テーブルに対して原
 | `note_quote_authorization` | 引用の承認 (FEP-044f、#3234) | `000101` |
 | `note_quote_request` | 引用の承認を求めた記録 (FEP-044f、#3234) | `000102` |
 | `bubble_game_versus_record` | バブルゲームの対戦の記録 (#3232) | `000105` |
+| `plugin_secret` | サーバープラグインの秘密の値。暗号文だけを置く (#3470) | `000119` |
 
-Elythia の migration が作るテーブルは 121。上記 18 件と golang-migrate 台帳の
+Elythia の migration が作るテーブルは 122。上記 19 件と golang-migrate 台帳の
 `schema_migrations` を除く **102 はすべて upstream にも存在する** (TypeORM 台帳の
 `migrations` を含む)。
 

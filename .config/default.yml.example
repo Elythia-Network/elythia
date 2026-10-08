@@ -614,3 +614,16 @@ proxyBypassHosts:
 #    peerMaxBody: 524288
 #    apiKey: "..."
 #    endpoint: https://api.example-game.com
+
+# Key that encrypts server plugins' secret values (API keys and the like)
+# entered from the control panel (#3470). 32 random bytes in base64:
+#
+#   openssl rand -base64 32
+#
+# Without it, plugin secrets cannot be stored (the control panel says so).
+# A malformed or wrong-length value stops startup. Give every process the
+# same key when you split roles. Losing or replacing the key makes the
+# stored values unreadable; enter them again from the control panel (see
+# docs/plugins/operating.md). Keep it out of your database backups.
+# Can also be set with MK_PLUGINSECRETKEY.
+#pluginSecretKey: "<output of openssl rand -base64 32>"

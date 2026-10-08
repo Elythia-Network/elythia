@@ -111,6 +111,8 @@ import (
 	corepage "github.com/elythia-network/elythia/internal/core/page"
 	"github.com/elythia-network/elythia/internal/core/passwordguard"
 	corepluginaccount "github.com/elythia-network/elythia/internal/core/pluginaccount"
+	"github.com/elythia-network/elythia/internal/core/pluginsecret"
+	"github.com/elythia-network/elythia/internal/core/pluginsecret/pgrepo"
 	corepoll "github.com/elythia-network/elythia/internal/core/poll"
 	"github.com/elythia-network/elythia/internal/core/procstats"
 	corereaction "github.com/elythia-network/elythia/internal/core/reaction"
@@ -4312,6 +4314,14 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	pluginAccountSvc.SetProfileUpdater(pluginProfileUpdater(&pluginAPI{echo: s.echo, userRepo: userRepo, host: requestHostFor(s.config.URL)}))
 	pluginAccountSvc.SetDeleter(adminHandler)
 	s.pluginAccounts = pluginAccountSvc
+	// プラグインの秘密の値 (#3470)。鍵の長さは config で検査済みなので、ここで
+	// 失敗するのは本体の不具合。起動を止める (プラグイン登録の失敗と同じ扱い)。
+	pluginSecretSvc, err := pluginsecret.New(pgrepo.New(repository.NewPluginSecretRepository(s.db)), s.config.PluginSecretKey)
+	if err != nil {
+		s.pluginSetupErr = err
+		return
+	}
+	s.pluginSecrets = pluginSecretSvc
 
 	// プラグインの route は本家に無い経路なので、body の検査を付けない素の group を渡す。
 	if err := s.setupPlugins(api.Group, registeredPlugins, openPluginStorage); err != nil {

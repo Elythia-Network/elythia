@@ -28,6 +28,7 @@ func secretBearingConfig() *config.Config {
 		RedisForReactions: config.RedisOptions{Host: "r", Port: 6379},
 		SetupPassword:     "LEAK-setup-password",
 		MediaProxySecret:  []byte("LEAK-media-proxy-secret"),
+		PluginSecretKey:   []byte("LEAK-plugin-secret-key-32-bytes!"),
 		Proxy:             "http://user:LEAK-proxy-pass@proxy.internal:3128",
 		ProxySMTP:         "http://user:LEAK-smtp-pass@smtp-proxy.internal:3128",
 	}
@@ -43,6 +44,7 @@ func TestBuildConfigDump_NeverLeaksSecrets(t *testing.T) {
 	for _, secret := range []string{
 		"LEAK-db-pass", "LEAK-redis-pass", "LEAK-setup-password",
 		"LEAK-media-proxy-secret", "LEAK-proxy-pass", "LEAK-smtp-pass",
+		"LEAK-plugin-secret-key",
 	} {
 		assert.NotContainsf(t, rendered, secret, "%s が出力に漏れている", secret)
 	}
@@ -56,6 +58,21 @@ func TestBuildConfigDump_ShowsWhetherSecretsAreSet(t *testing.T) {
 	bare := &config.Config{URL: "https://example.com", Port: 3000}
 	unset := RenderConfigDump(BuildConfigDump(bare, config.RoleBoth))
 	assert.Contains(t, unset, unsetPlaceholder)
+}
+
+// pluginSecretKey (#3470) は有無だけを出す。
+func TestBuildConfigDump_PluginSecretKeyShowsOnlyPresence(t *testing.T) {
+	find := func(cfg *config.Config) string {
+		for _, e := range BuildConfigDump(cfg, config.RoleBoth).Settings {
+			if e.Key == "pluginSecretKey" {
+				return e.Value
+			}
+		}
+		t.Fatal("pluginSecretKey が dump に無い")
+		return ""
+	}
+	assert.Equal(t, redactedPlaceholder, find(secretBearingConfig()))
+	assert.Equal(t, unsetPlaceholder, find(&config.Config{URL: "https://example.com"}))
 }
 
 // proxy の host は診断に要るので残し、認証情報だけ落とす。

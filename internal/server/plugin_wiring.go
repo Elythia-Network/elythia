@@ -96,6 +96,9 @@ func (s *Server) setupPlugins(api *echo.Group, plugins []plugin.Definition, open
 			// `&http.Client{}` を作ると SSRF ガードも運営者の proxy 設定も
 			// 効かず、そのプラグインだけがサーバーの素の IP で外へ出る。
 			httpClient: s.outboundClient(pluginHTTPTimeout),
+			// **プラグイン名で絞った口だけを渡す (#3470)。** 名前を受け取る
+			// 口を渡すと、他のプラグインの値を名指しで読めてしまう。
+			secrets: s.pluginSecretService().ForPlugin(def.Name),
 		}
 
 		// ストレージはロールに関係なく渡す。Routes からも Jobs からも使うため。
@@ -165,6 +168,12 @@ func (s *Server) setupPlugins(api *echo.Group, plugins []plugin.Definition, open
 		prepared = append(prepared, preparedPlugin{def: def, ctx: pctx, peer: peer})
 	}
 
+	secretPlugins := make([]plugin.Definition, 0, len(prepared))
+	for _, p := range prepared {
+		secretPlugins = append(secretPlugins, p.def)
+	}
+	warnPluginSecretsWithoutKey(secretPlugins, s.pluginSecretService().Available())
+
 	for _, p := range prepared {
 		def := p.def
 		pctx := p.ctx
@@ -179,7 +188,9 @@ func (s *Server) setupPlugins(api *echo.Group, plugins []plugin.Definition, open
 		// 登録は生成物との照合から見えないため)。
 		needsRoutes := def.Routes != nil
 		needsPeer := def.Peered && s.peerDeps != nil
-		if s.role.RunsServer() && (needsRoutes || needsPeer) {
+		// 秘密の値の入力口 (#3470) は、宣言したプラグインにだけ張る。
+		needsSecrets := len(def.Secrets) > 0 && s.pluginSecrets != nil
+		if s.role.RunsServer() && (needsRoutes || needsPeer || needsSecrets) {
 			// **第三者アプリのトークンを入れない (#3037)。** プラグインの
 			// ルートには upstream の `kind` にあたる宣言が無く、本体は
 			// `RequireScope` を配線できない。gate を置かないと
@@ -203,6 +214,9 @@ func (s *Server) setupPlugins(api *echo.Group, plugins []plugin.Definition, open
 			// プラグインが同じパスを登録できてしまい、受け口を奪える。
 			if needsPeer {
 				group.POST(peerPath, peer.echoHandler())
+			}
+			if needsSecrets {
+				s.registerPluginSecretRoutes(group, def)
 			}
 		}
 		// peer の送信を処理するのは queue ロール (#2819)。**Peered だけで
@@ -251,6 +265,7 @@ func (s *Server) setupPlugins(api *echo.Group, plugins []plugin.Definition, open
 			"name", def.Name, "version", def.Version,
 			"routes", def.Routes != nil && s.role.RunsServer(),
 			"peer", needsPeer,
+			"secrets", len(def.Secrets),
 			"jobs", def.Jobs != nil && s.role.RunsQueue(),
 			"migrations", len(def.Migrations),
 			"schema", schema)
@@ -305,6 +320,7 @@ func serverPluginInfos(plugins []plugin.Definition, settings map[string]map[stri
 			Migrations:        len(def.Migrations),
 			Schema:            schema,
 			ConfigKeys:        keys,
+			Secrets:           secretNames(def.Secrets),
 		})
 	}
 	return infos
@@ -373,6 +389,7 @@ type pluginContext struct {
 	api        plugin.API
 	storage    plugin.Storage
 	config     plugin.Config
+	secrets    plugin.Secrets
 	peer       plugin.Peer
 	queue      plugin.Queue
 	accounts   plugin.Accounts
@@ -394,6 +411,15 @@ func (c *pluginContext) Accounts() plugin.Accounts {
 		return newPluginAccounts(c.name, nil)
 	}
 	return c.accounts
+}
+
+// Secrets は **常に非 nil** を返す (Peer / Queue と同じ理由)。未配線なら
+// 鍵の無い service の口を渡すので、呼ぶと ErrSecretsUnavailable になる。
+func (c *pluginContext) Secrets() plugin.Secrets {
+	if c.secrets == nil {
+		return unconfiguredPluginSecrets().ForPlugin(c.name)
+	}
+	return c.secrets
 }
 
 // HTTP returns the outbound client shared with the rest of mk-go.

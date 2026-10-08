@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -404,6 +405,11 @@ type Source struct {
 	// distribution rather than pointing at the source repository URL. Exposed
 	// via /api/meta.providesTarball.
 	PublishTarballInsteadOfProvideRepositoryURL bool `mapstructure:"publishTarballInsteadOfProvideRepositoryUrl"`
+
+	// PluginSecretKey encrypts server plugins' secret values (#3470): 32
+	// random bytes in base64 (`openssl rand -base64 32`). 未設定なら秘密の値の
+	// 機能は使えない (保存を断る)。
+	PluginSecretKey string `mapstructure:"pluginSecretKey"`
 }
 
 // Config represents the resolved application configuration.
@@ -564,6 +570,10 @@ type Config struct {
 	// PublishTarballInsteadOfProvideRepositoryURL is exposed to clients via
 	// /api/meta.providesTarball. See the Source struct for details.
 	PublishTarballInsteadOfProvideRepositoryURL bool
+
+	// PluginSecretKey is the decoded pluginSecretKey (#3470), or nil when it is
+	// not configured. 長さは resolve で PluginSecretKeySize に揃えてある。
+	PluginSecretKey []byte
 }
 
 // ProvidesTarball reports whether this server serves a source tarball at
@@ -638,6 +648,7 @@ func bindEnvKeys(v *viper.Viper) {
 		"redisForReactions.poolSize",
 		"id", "maxFileSize",
 		"mediaProxySecret",
+		"pluginSecretKey",
 		"testMode",
 		"dev",
 		"effectivePolicyProviderCacheEntries",
@@ -787,6 +798,11 @@ func resolve(src *Source) (*Config, error) {
 
 	mediaProxySecret := deriveMediaProxySecret(src)
 
+	pluginSecretKey, err := decodePluginSecretKey(src.PluginSecretKey)
+	if err != nil {
+		return nil, err
+	}
+
 	jobQueueDriver, err := resolveJobQueueDriver(src.JobQueueDriver)
 	if err != nil {
 		return nil, err
@@ -878,6 +894,7 @@ func resolve(src *Source) (*Config, error) {
 		MediaProxy:                   mediaProxy,
 		ExternalMediaProxyEnabled:    externalMediaProxyEnabled,
 		MediaProxySecret:             mediaProxySecret,
+		PluginSecretKey:              pluginSecretKey,
 		VideoThumbnailGenerator:      strings.TrimRight(src.VideoThumbnailGenerator, "/"),
 		VideoThumbnailGeneratorMode:  normalizeVideoThumbMode(src.VideoThumbnailGeneratorMode),
 		NSFWDetectorURL:              strings.TrimRight(src.NSFWDetectorURL, "/"),
@@ -982,6 +999,39 @@ func (r RedisOptions) KeyPrefix() string {
 		return ""
 	}
 	return r.Prefix + ":"
+}
+
+// PluginSecretKeySize is the length of pluginSecretKey after decoding.
+const PluginSecretKeySize = 32
+
+// decodePluginSecretKey decodes pluginSecretKey (#3470).
+//
+// **書き間違いは起動を止める。** 黙って「未設定」に倒すと、運営者は鍵を置いた
+// つもりなのに秘密の値を保存できず、原因が設定にあると気付きにくい。短い鍵を
+// 通さないのも同じ理由で、弱い鍵で暗号化された値が溜まってから気付いても
+// 入れ直すしかない。
+//
+// 標準の base64 と URL 用の base64 のどちらも、padding の有無を問わず受ける
+// (どのツールで作ったかで形が変わるため)。
+func decodePluginSecretKey(raw string) ([]byte, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	for _, enc := range []*base64.Encoding{
+		base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding,
+	} {
+		key, err := enc.DecodeString(raw)
+		if err != nil {
+			continue
+		}
+		if len(key) != PluginSecretKeySize {
+			return nil, fmt.Errorf("pluginSecretKey は %d バイトを base64 で書いたものにしてください (%d バイトでした。`openssl rand -base64 32` で作れます)",
+				PluginSecretKeySize, len(key))
+		}
+		return key, nil
+	}
+	return nil, fmt.Errorf("pluginSecretKey を base64 として読めません (`openssl rand -base64 32` で作れます)")
 }
 
 // deriveMediaProxySecret returns the configured secret for HMAC-signed media

@@ -52,6 +52,8 @@ plugin/plugintest: func (*Harness) ManagedAccounts() []ManagedAccount
 plugin/plugintest: func (*Harness) Peer(plugin.Definition)
 plugin/plugintest: func (*Harness) PeerSends() []PeerSend
 plugin/plugintest: func (*Harness) Routes(plugin.Definition) Handlers
+plugin/plugintest: func (*Harness) Secret(string) (string, bool)
+plugin/plugintest: func (*Harness) SecretNames() []string
 plugin/plugintest: func (*Harness) SeedAccount(string, string) plugin.Account
 plugin/plugintest: func (*Harness) SuspendAccount(string)
 plugin/plugintest: func (*Harness) WithAPI(plugin.API) *Harness
@@ -62,6 +64,8 @@ plugin/plugintest: func (*Harness) WithEffectivePolicyInvalidator(plugin.Effecti
 plugin/plugintest: func (*Harness) WithHTTPClient(*http.Client) *Harness
 plugin/plugintest: func (*Harness) WithName(string) *Harness
 plugin/plugintest: func (*Harness) WithPeers(...string) *Harness
+plugin/plugintest: func (*Harness) WithSecrets(map[string]string) *Harness
+plugin/plugintest: func (*Harness) WithoutSecretKey() *Harness
 plugin/plugintest: func (*JobSet) Run(*testing.T, string, string) error
 plugin/plugintest: func (Handlers) Call(*testing.T, string, Request) (any, error)
 plugin/plugintest: func New(*testing.T) *Harness
@@ -92,6 +96,7 @@ plugin:   field Definition.Peer func(Context, Peer) error
 plugin:   field Definition.PeerMaxBody int64
 plugin:   field Definition.Peered bool
 plugin:   field Definition.Routes func(Context, Router) error
+plugin:   field Definition.Secrets []SecretSpec
 plugin:   field Definition.Version string
 plugin:   field EffectivePolicyContribution.Key string
 plugin:   field EffectivePolicyContribution.Order int
@@ -115,6 +120,8 @@ plugin:   field ProfileUpdate.Avatar *Image
 plugin:   field ProfileUpdate.Banner *Image
 plugin:   field ProfileUpdate.Description *string
 plugin:   field ProfileUpdate.Name *string
+plugin:   field SecretSpec.Description string
+plugin:   field SecretSpec.Name string
 plugin:   field StatusError.Message string
 plugin:   field StatusError.Status int
 plugin:   method API.Anonymous() Caller
@@ -134,6 +141,7 @@ plugin:   method Context.Logger() *slog.Logger
 plugin:   method Context.Name() string
 plugin:   method Context.Peer() Peer
 plugin:   method Context.Queue() Queue
+plugin:   method Context.Secrets() Secrets
 plugin:   method Context.Storage() Storage
 plugin:   method EffectivePolicyInvalidator.InvalidateRole(context.Context, string) error
 plugin:   method EffectivePolicyInvalidator.InvalidateUser(context.Context, string) error
@@ -153,6 +161,9 @@ plugin:   method Request.Query(string) string
 plugin:   method Request.UserID() string
 plugin:   method Router.GET(string, Handler)
 plugin:   method Router.POST(string, Handler)
+plugin:   method Secrets.Delete(context.Context, string) error
+plugin:   method Secrets.Get(context.Context, string) (string, error)
+plugin:   method Secrets.Set(context.Context, string, string) error
 plugin:   method Storage.DB() *sql.DB
 plugin:   method Storage.Migrate(context.Context, []Migration) error
 plugin: const APIVersion
@@ -198,9 +209,14 @@ plugin: type ProfileUpdate struct
 plugin: type Queue interface
 plugin: type Request interface
 plugin: type Router interface
+plugin: type SecretSpec struct
+plugin: type Secrets interface
 plugin: type StatusError struct
 plugin: type Storage interface
 plugin: var ErrAccountNotFound
 plugin: var ErrAccountSuspended
 plugin: var ErrInvalidUsername
+plugin: var ErrSecretNotSet
+plugin: var ErrSecretUnreadable
+plugin: var ErrSecretsUnavailable
 plugin: var ErrUsernameUnavailable
