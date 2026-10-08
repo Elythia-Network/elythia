@@ -17,7 +17,7 @@
 # ので、tag だけだと「どの builder で作ったか」を再現できない。digest があると
 # BuildKit は digest で pull する。tag は読む人向けと CI の版照合用に残す。
 # 更新は dependabot (`.github/dependabot.yml` の `docker`) が digest ごと上げる。
-FROM golang:1.27.1-alpine@sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414 AS builder
+FROM golang:1.27.2-alpine@sha256:85dc1069ac644ea3c527b177303a406eb3358192816cd7f9e5848eb658851673 AS builder
 
 # Step 2 (#618) で chai2010/webp → gen2brain/webp (libwebp on wazero/WASM) に
 # 切替えたので cgo 依存はゼロ。build-base (gcc + musl libc) は不要になった。
