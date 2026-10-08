@@ -149,10 +149,14 @@ cd mk && docker compose up -d
 
 | ターゲット | 内容 |
 |---|---|
-| `make migrate-up` | 最新まで適用 |
-| `make migrate-down` | 1段階ロールバック (`-steps 1`) |
-| `go run ./cmd/elythia migrate -direction down` | **全段ロールバック**。`-steps` 未指定は「全部」の意味で、全テーブルが消える |
+| `make migrate-up` | 最新まで適用。本体 (`migration/`) の後に、fork の系列 (`migration/local/`) があれば流す |
+| `make migrate-down` | 本体の系列を1段階ロールバック (`-track core -steps 1`) |
+| `make migrate-down-local` | fork の系列を1段階ロールバック (`-track local -steps 1`) |
+| `go run ./cmd/elythia migrate -direction down -track core` | **全段ロールバック**。`-steps` 未指定は「全部」の意味で、全テーブルが消える。down は `-track core` / `-track local` が必須 (#3428) |
 | `make migrate-create` | 新規マイグレーションファイル作成 |
+| `make migrate-create-local` | fork の系列 (`migration/local/`) に新規マイグレーションファイル作成 |
+
+fork が本体の表を変える独自の migration を足す手順と決まりは [fork の独自 migration](fork-migrations.md) にある。
 
 #### 大規模テーブルへの index 追加
 
@@ -410,9 +414,11 @@ make uds-restart            # mkgo を再起動して配信 entry を検証だ�
 
 # マイグレーション（接続先は -config、既定 .config/default.yml から決まる）
 make migrate-up             # 最新まで適用
-make migrate-down           # 1段階ロールバック (-steps 1)
-go run ./cmd/elythia migrate -direction down   # 全段ロールバック (破壊的。全テーブルが消える)
+make migrate-down           # 本体の系列を1段階ロールバック (-track core -steps 1)
+make migrate-down-local     # fork の系列 (migration/local/) を1段階ロールバック
+go run ./cmd/elythia migrate -direction down -track core   # 全段ロールバック (破壊的。全テーブルが消える)
 make migrate-create         # 新規マイグレーションファイル作成（プロンプト対話）
+make migrate-create-local   # fork の系列に新規マイグレーションファイル作成 (docs/fork-migrations.md)
 
 # Docker
 make docker-build

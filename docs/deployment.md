@@ -409,7 +409,7 @@ warn は「見ておくべき」であって「壊れている」ではないた
 | 検査 | 内容 |
 |---|---|
 | `config.url` | 絶対 URL か、https か |
-| `database` | 接続と、`schema_migrations` が同梱マイグレーションに追いついているか |
+| `database` | 接続と、`schema_migrations` が同梱マイグレーションに追いついているか。fork の系列 (`migration/local/`) を同梱しているときは `schema_migrations_local` も見る ([fork の独自 migration](fork-migrations.md#doctor)) |
 | `root user` | `meta.rootUserId` が設定されているか。**未設定だと root 判定が効かず**、`admin/accounts/create` の初回セットアップ判定がローカル利用者数のガードだけに依存する状態になる。指名し直すには DB を直接更新する (`update-meta` は `rootUserId` を受け付けない) |
 | `redis` | 接続 |
 | `webfinger` | **公開 URL 経由**で `acct:instance.actor@<host>` が引けるか |
@@ -680,7 +680,7 @@ AP の acct 解決が 404 になる)。メンションは WebFinger で既存の
 
 **#3379 より前の版から UDS 構成を上げるときは、先に[frontend を本体へ取り込んだ版へ上げる](#frontend-を本体へ取り込んだ版へ上げる-3379)の手順を踏む。** compose の bind mount の元と、frontend のビルドの出力先が変わるため。
 
-マイグレーションは構成によって適用方法が違う (下記参照)。golang-migrate が `schema_migrations` で適用済みバージョンを管理するため、何度流しても冪等。
+マイグレーションは構成によって適用方法が違う (下記参照)。golang-migrate が `schema_migrations` で適用済みバージョンを管理するため、何度流しても冪等。fork の系列 (`migration/local/`) は別の管理表 `schema_migrations_local` で管理する ([fork-migrations.md](fork-migrations.md))。
 
 ### Docker Compose (TCP / UDS 共通)
 
@@ -900,7 +900,7 @@ pluginbuild: plugins/foo: go.mod が以前のモジュールパス github.com/sh
 
 **旧版の `migrate` は、自分の知らない版まで進んだ DB に当たると止まる** (`no migration found for version N`)。compose の `migrate` サービスと UDS の image は起動の前に migration を流すので、追加のみの版でも、**新しい版のまま migration を旧版の最後の版まで戻してから**旧版へ切り替える。2.0.0 から 1.5.0 へ戻す手順は [1.5.0 から 2.0.0 へ上げる](upgrade/2.0.0.md#150-へ戻す)。
 
-> **`elythia migrate -direction down` を本番で叩かないこと。** `-steps` を省くと「全部」の意味になり、全 down マイグレーションが走って 全テーブルが消える。
+> **`elythia migrate -direction down -track core` を `-steps` 無しで本番で叩かないこと。** `-steps` を省くと「全部」の意味になり、全 down マイグレーションが走って 全テーブルが消える。down には `-track core` (本体) か `-track local` (fork の系列、[fork の独自 migration](fork-migrations.md)) の指定が必須で、省くと何もせずに終了コード 2 で止まる。
 >
 > **down が用意されていても戻せない migration がある。** `000081` は孤児行を、`000082` は chat room の owner が持つ membership / 招待行を DELETE するが、どちらも削除した行の内容を保存していないので down は no-op。詳細は [TS版からの移行](migration-from-ts.md#破壊的なマイグレーション)。
 
