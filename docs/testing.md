@@ -16,6 +16,7 @@
 | Drop-in e2e (pytest) | TS-A backend を mk-A に差し替えて state preservation 検証 | TS 2 instance + mk overlay | `make dropin-swap-test` (#365 / #367 / #372 / #374、詳細は[dropin-e2e.md](dropin-e2e.md)) |
 | Drop-in frontend e2e (cypress) | 3 TS instance + mk overlay swap で frontend 視点の互換 | cypress + 3 TS + mk-A | `make dropin-frontend-swap-test` (#380 / #381 / #387 / #394、詳細は[dropin-frontend-e2e.md](dropin-frontend-e2e.md)) |
 | Playwright e2e | Elythia と Misskey TS の両 backend で API/frontend 統合互換を検証 | Docker Compose 全部 | `tests/playwright/` 配下 (#744、298 spec ファイル。PR ごとに Elythia、upstream 追従時に TS backend) |
+| fuzz (画像デコーダ) | `internal/misc/imagedecode` のデコーダと判定関数 | 不要 | `make fuzz-imagedecode` (詳細は[画像デコーダの fuzz](#画像デコーダの-fuzz-3480)) |
 | 本家 backend e2e | Misskey 本家の `test/e2e/**` をテスト本体無改変で Elythia に向けて実行 | PostgreSQL / Redis + Elythia バイナリ | `make upstream-e2e` (#2347、25 ファイル 1256 テスト。詳細は[upstream-backend-e2e.md](upstream-backend-e2e.md)) |
 
 ## 手元の準備
@@ -404,6 +405,35 @@ make dropin-frontend-swap-test     # TS-A → mk-A 切替まで含む end-to-end
 ```
 
 nightly 19:00 UTC で `dropin-frontend-e2e` を実行 (`.github/workflows/dropin-frontend-e2e.yml`)。
+
+## 画像デコーダの fuzz (#3480)
+
+`internal/misc/imagedecode` には fuzz 関数が 4 つある。`fuzz_test.go` の 3 つ (drive が使う入口 `DecodeWithPixelCap` / `DecodeTGAWithPixelCap` と、デコードの前に走る判定関数と metadata の検査 `FuzzProbes`) と、`webp_test.go` の `FuzzDecodeWebP` (WebP の container の解析だけ。外部の種は読まない)。Go の fuzz は panic や `t.Fatal` は拾うが 1 入力あたりの時間の上限は持たないので、`fuzz_test.go` の 2 つのデコードは `-fuzz` で回しているとき (と `IMAGEDECODE_FUZZ_TIMECHECK=1` のとき) に限って 5 秒を超えたら失敗にしている (種だけを走らせる `make test` では見ない。`-race` 付きだと AVIF / JPEG XL の WASM デコーダの初回が 2〜4 秒かかり、誤検知になるため)。
+
+- **普通の `go test` では種だけが走る。** 種は `testdata/fuzz-seeds/` にコミットした 4x4 の画像 (PNG / GIF / JPEG は stdlib、BMP / TIFF は `x/image`、WebP / AVIF / JPEG XL は `gen2brain/*`、TGA は `blezek/tga` のエンコーダで作ったもの) と、`testdata/` の PNG。テストのたびに作らないのは、WASM のエンコーダが `-race` 付きだと 3 つで 16 秒かかるため。作り直すときは `IMAGEDECODE_WRITE_FUZZ_SEEDS=1 go test ./internal/misc/imagedecode -run '^TestWriteFuzzSeeds$'` (無いときはこのテストが、種が揃っているかだけ検査する)。HEIC と netpbm は Go のエンコーダが無いか使っていないので、外部の種を渡したときだけ通る
+- **変異させて回すのは `make fuzz-imagedecode`。** `FUZZTIME` (既定 2m) で時間、`FUZZ` で対象 (正規表現。既定は 4 つ全部 = 8 分)、`FUZZPARALLEL` (既定 2) で worker 数を変える。種は module cache にある各ライブラリの testdata を `IMAGEDECODE_FUZZ_SEEDS` (ディレクトリを `:` 区切り) で渡す。target が組み立てて `seeds:` に出すので、手で渡すのは別の種を足すときだけ。渡したディレクトリが無ければテストが落ちる
+- **デコーダの依存 (`gen2brain/*`、`golang.org/x/image`、`kovidgoyal/imaging`、`blezek/tga`) を上げたら回す。** 落ちた入力は `testdata/fuzz/<Fuzz 関数名>/` に書かれる。panic したものは以後の普通のテストで毎回落ちる。5 秒を超えたものは、Go が表示する `go test -run=<Fuzz 関数名>/<名前>` では時間を見ないので通ってしまう。再現するときは `-fuzz` を付けるか、`IMAGEDECODE_FUZZ_TIMECHECK=1` を付けて実行する
+
+- **画素数の上限は既定で `MaxPixels` (8192²)。** drive がアップロードに使う上限は `UpstreamMaxPixels` (0x3FFF²) で、その間の寸法を宣言するヘッダは既定では `DecodeConfig` の段で弾かれて先に進まない。本番と同じ上限で回すときは `IMAGEDECODE_FUZZ_PIXELCAP=upstream` を付ける。raster 1 枚は 16 bit でもバイト予算 (`imagedecode.go` の `px*bpp > maxPixels*4`) で 1GiB に収まるが、色の変換や向きの補正で 2 枚目を持つので、worker 1 つに 2GiB 以上を見込む
+
+```sh
+make fuzz-imagedecode                                   # 4 つの対象を 2 分ずつ
+make fuzz-imagedecode FUZZ=FuzzDecodeWithPixelCap FUZZTIME=10m
+IMAGEDECODE_FUZZ_PIXELCAP=upstream make fuzz-imagedecode FUZZ=FuzzDecodeWithPixelCap FUZZPARALLEL=1
+```
+
+**メモリに上限を付けて回す。** デコーダは宣言した寸法ぶんの raster を先に確保し (`MaxPixels` × 4 bytes = 256MB)、色の変換や向きの補正、アニメーションの canvas で 2 枚目を持つ経路があるので、worker 1 つに 512MB 以上を見込む (WASM のデコーダは linear memory を別に持つ)。本番と同居するホストでは、コンテナで上限を付けて回す。`make` が入っている bookworm 系の image を使い (`go.mod` の版以上の Go のもの)、module cache は読み取り専用で mount する (ダウンロードが無ければ `go` は書かない)。fuzz が見つけた入力の蓄積 (corpus) は `$GOCACHE/fuzz` に書くので、`GOCACHE` はホスト側の gitignore 済みのディレクトリ (`.cache/` の下) に向けて次の実行に引き継ぐ。`--user` を付けるのは、落ちた入力が `testdata/fuzz/` に root 所有で書かれないようにするため。`IMAGEDECODE_FUZZ_PIXELCAP` と `IMAGEDECODE_FUZZ_TIMECHECK` は `docker run` に継承されないので、使うときは `-e` で渡す (target が `pixel cap` に実効の値を出す)。手元に古い同名の image が残っていると `go.mod` の版より古い Go で止まるので、先に `docker pull` する。
+
+```sh
+mkdir -p .cache/fuzz-gocache
+docker run --rm --memory=4g --memory-swap=4g --cpus=3 --user "$(id -u):$(id -g)" \
+  -v "$(go env GOMODCACHE):/go/pkg/mod:ro" -v "$PWD:/src" -w /src \
+  -e HOME=/tmp -e GOCACHE=/src/.cache/fuzz-gocache -e CGO_ENABLED=0 \
+  golang:1.27-bookworm make fuzz-imagedecode FUZZTIME=5m FUZZPARALLEL=3
+# drive と同じ上限で回すときは -e IMAGEDECODE_FUZZ_PIXELCAP=upstream を足し、FUZZPARALLEL=1 にする
+```
+
+2026-10-09 の監査では、この条件 (`--memory=4g --cpus=3`、worker 3、種は module cache の testdata で 96KiB 以下のもの) で `FuzzDecodeWithPixelCap` を 8 分回し、`go test` が最後に表示した `execs` は 820,709、panic / 5 秒超 / OOM は無かった。
 
 ## 変更の経緯 (旧 CLAUDE.md の更新記録)
 
