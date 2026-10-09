@@ -78,6 +78,48 @@ curl -i -X POST http://localhost/api/meta -H 'Content-Type: application/json' -d
 
 ブラウザで `http://localhost/` を開き、Misskey のログイン画面が出ることを確認してください。DevTools の Network タブで `/streaming` が `ws://localhost/streaming` で確立していれば WebSocket の upgrade も成功しています。
 
+## mkgo のイメージは専用のビルダーでビルドする
+
+`make uds-build` (と、それを呼ぶ `uds-up` / `uds-rebuild` / `uds-update`) は、`mkgo` のイメージを dockerd の外のビルダー (BuildKit を動かすコンテナ、既定の名前は `elythia-builder`) でビルドし、終わったらビルダーを止めます (#3477)。`postgres` など他のサービスは、従来どおり dockerd の中のビルダーでビルドします。こちらは `docker buildx use` などで選んでいるビルダーに関係なく、名前で指定します。
+
+**dockerd にメモリを残さないため。** 既定のビルダーは BuildKit を dockerd の中で動かすので、ビルドで使ったメモリの大半が dockerd に残り、時間をおいても戻りません。戻すには dockerd を再起動するしかなく、`live-restore` が無効なら本番のコンテナも止まります。実測は次のとおりです。
+
+| ビルド | dockerd の匿名メモリ | ビルダーのコンテナ |
+|---|---|---|
+| `Dockerfile.bundled` を既定のビルダーで (参考) | 242MB → 587MB、3 分後も 507MB | (無い) |
+| `Dockerfile.bundled` を専用のビルダーで (参考) | +35MB (イメージの取り込み分) | 最大 4.7GiB |
+| `deploy/uds/Dockerfile.mkgo` (`make uds-build` が `mkgo` に使うもの) を専用のビルダーで、キャッシュが空の状態から | +17MB | 最大 2.37GiB、終わった後も 405MiB |
+
+**`mkgo` だけを専用のビルダーにする理由。** 専用のビルダーは dockerd の image store を見ず、`FROM` をレジストリから引き直します。`deploy/postgres-bigm/Dockerfile` の `FROM postgres:18-alpine` は digest で固定していないので、専用のビルダーでビルドすると最初の 1 回で新しい base を取りに行き、イメージが変わります。すると次の `docker compose up -d` で本番の PostgreSQL のコンテナが作り直されます。既定のビルダーは手元の base とキャッシュを使うので、イメージは変わりません。
+
+- **ビルダーは消さずに止めます。** 止めればメモリは全部戻り、キャッシュはビルダーの volume に残ります。`docker buildx rm` は volume ごと消すので、キャッシュも消えます。止めたビルダーは buildx では使われていないもの (inactive) に数えられるので、`docker buildx rm --all-inactive` でも消えます
+- 最初の 1 回だけビルダーを作ります。そのビルドはキャッシュが空なので時間がかかり、`mkgo` のイメージも作り直されます
+- Ctrl-C で中断しても、ビルダーは止まります。切り離して実行した `make uds-build` を止めるときは、プロセスグループごと止めます (`kill -- -<PGID>`)。make の PID だけに `kill` を送っても、ビルドは最後まで進んでイメージができます (以前のレシピでも同じです。終了コードは失敗になります)
+- 同じビルダーで別のビルドが走っているときに `make uds-build` が終わると、ビルダーを止めるので、そちらのビルドも止まります。別の worktree から `make uds-build` を流すときも同じビルダーを使います
+- 既定のビルダーでビルドするときは `make uds-build UDS_BUILDER=` のように変数を空にします。別の名前を使うときは `UDS_BUILDER=<名前>` を渡します
+- ビルダーのコンテナのイメージは `UDS_BUILDER_IMAGE` で digest まで固定しています
+- 専用のビルダーは、dockerd の `registry-mirrors` やプロキシの設定を使いません。それらが無いとレジストリに届かないホストでは、`UDS_BUILDER=` で従来のビルダーを使います
+
+困ったときは次のようにします。
+
+```sh
+# ビルダーが動いたまま残っている (docker ps に buildx_buildkit_elythia-builder0 がある)
+docker buildx stop elythia-builder
+
+# ビルダーが壊れていて毎回失敗する。--keep-state でキャッシュの volume を残して消し、
+# 次の make uds-build で作り直す (UDS_BUILDER_IMAGE を変えたときも同じ)
+docker buildx rm --keep-state elythia-builder
+
+# キャッシュの大きさを見る・減らす。止まっているビルダーには du も prune も
+# "driver not running" で失敗するので、先に起動し、最後に止める
+docker buildx inspect --bootstrap elythia-builder >/dev/null
+docker buildx du --builder elythia-builder
+docker buildx prune --builder elythia-builder --max-used-space 20GB
+docker buildx stop elythia-builder
+```
+
+専用のビルダーに切り替えた後も、それまで dockerd に積み上がったメモリは、dockerd を再起動するまで戻りません。また、既定のビルダーに溜まったビルドキャッシュ (`docker buildx du --builder default`) のうち `mkgo` の分は使われなくなります。dockerd の再起動は `live-restore` が無効だと本番を含む全コンテナを止め、キャッシュの削除は元に戻せません。どちらも影響を確かめてから行ってください。
+
 ## UDS で繋がっていることの確認
 
 どのサービスにも `ports:` を切っていないので、ホスト側で 80 番以外の TCP は一切 listen していないはずです。

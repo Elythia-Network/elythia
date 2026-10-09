@@ -50,6 +50,8 @@ make build          # または docker build / make uds-build
 
 加えて、**本番ホストで `docker build` するとメモリが戻らない**。Docker 23 以降の BuildKit は dockerd に組み込まれているため、ビルドで伸びたヒープが dockerd に残る。実測ではビルドキャッシュを 60.88GB 削除しても RSS は 4,465 → 4,485MB でほぼ変化しなかった（原因はキャッシュではなくビルドの実行そのもので、解放には dockerd の再起動が要る）。
 
+ホストでビルドするなら、`make uds-build` / `make uds-up` は `mkgo` のイメージを dockerd の外の専用ビルダーでビルドし、終わったら止めるので、`mkgo` のビルドについては dockerd にイメージの取り込み分しか残らない（`postgres` は従来どおり dockerd の中でビルドするが、キャッシュが当たるので軽い。[UDS デプロイ](../docker-uds.md#mkgo-のイメージは専用のビルダーでビルドする)、#3477）。ただし、ビルド中の重さはビルダーのコンテナに乗るだけで減らない（`deploy/uds/Dockerfile.mkgo` で最大 2.37GiB）ので、2GB の VPS に載らないことは変わらない。
+
 ビルドを GitHub Actions に任せれば、どちらも起きない。自分のリポジトリに次の workflow を1つ置くだけでよい。
 
 ```yaml

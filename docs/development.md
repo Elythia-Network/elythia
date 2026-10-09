@@ -251,6 +251,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_xxx" ON "yyy" ("zzz");
 | ターゲット | 内容 |
 |---|---|
 | `make uds-init` `uds-build` `uds-up` `uds-down` `uds-down-v` `uds-logs` `uds-ps` | UNIX ドメインソケット構成の本番スタック操作 ([UDSデプロイ](docker-uds.md)) |
+| (変数) `UDS_BUILDER` `UDS_BUILDER_IMAGE` | `uds-build` / `uds-up` が `mkgo` のイメージをビルドする専用ビルダーの名前 (既定 `elythia-builder`) と、そのコンテナのイメージ。ビルド後に止める。`UDS_BUILDER=` で既定のビルダーを使う ([UDSデプロイ](docker-uds.md#mkgo-のイメージは専用のビルダーでビルドする)) |
 | `make uds-frontend-build` | 本番向けフロントエンドビルド |
 | `make uds-rebuild` | フロントエンド + イメージをまとめてビルド |
 | `make uds-restart` | `mkgo` を再起動して配信エントリを検証 |
