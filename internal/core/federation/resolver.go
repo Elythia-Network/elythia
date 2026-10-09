@@ -1128,6 +1128,22 @@ func (r *Resolver) resolveActorOnceWithID(uri string, allowCrossHost bool, preas
 			"actor", truncateRunes(actor.ID, userURIMaxRunes), "host", host)
 		return nil, ErrInvalidActor
 	}
+	// **取りに行った URI と文書の id が違えば、id で引き直す。** 冒頭の lookup は
+	// 要求した URI で引いているので、`/@alice` のような別名や、id が既知の別の
+	// actor を指す文書では「まだ無い」と判定される。そのまま作ると `uri` が同じ
+	// 行が 2 つになり (`user.uri` は一意でない)、uri で引く経路と username / host
+	// で引く経路が別の行を指すようになる。本家も createPerson の前に
+	// `findOneBy({ uri: person.id })` で既存を返す。既存の行は別名の文書の中身
+	// (鍵を含む) で書き換えない。
+	if actor.ID != uri {
+		known, kerr := r.userRepo.FindByURI(actor.ID)
+		switch {
+		case kerr == nil && known != nil:
+			return known, nil
+		case kerr != nil && !repository.IsNotFound(kerr):
+			return nil, fmt.Errorf("%w: actor %q: %v", ErrLookupUnavailable, truncateRunes(actor.ID, userURIMaxRunes), kerr)
+		}
+	}
 
 	now := r.clock()
 	user := &model.User{
