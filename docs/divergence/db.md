@@ -6,7 +6,7 @@
 
 **逆方向の欠落はゼロ** — upstream の `@Entity` 76 テーブルと全共有カラムを Elythia が superset で保持している。
 
-### 2-1. Elythia 独自テーブル (22)
+### 2-1. Elythia 独自テーブル (23)
 
 | テーブル | 由来 | 理由 |
 |---|---|---|
@@ -29,15 +29,16 @@
 | `ip_lookup_log` | Elythia 独自 | IP とアカウントの対応を**誰がいつ引いたか**の記録 (#3106)。`admin/ip/*` は upstream に無い口 (#3104 / #3105) なので、その監査も upstream には無い。**`moderation_log` に入れない** — あちらは保持期間を持たず永久に残るのに、この記録に入るのは**照会に使った IP そのもの**で、IP とアカウントの対応と同じだけ機密性がある。`moderation_log` 全体に保持期間を入れると無関係な記録まで消えるので、専用テーブルを分けて 90 日で刈る (`user_ip` と同じ長さだが理由は別で、定数も別)。**結果そのものは記録しない** — 残すのは件数だけで、候補に出たアカウントや一致した IP は書かない (書くとこの表が第 2 の「IP とアカウントの対応」になる)。`user` への FK は張らない — 照会した人を消しても記録は残るのが監査として正しい (`signup_application` と同じ方針)。**純正へは還元できない行** (照会という機能自体が upstream に無い)。 |
 | `bubble_game_versus_record` | Elythia 独自 | バブルゲームの 1:1 対戦の記録 (#3232)。対戦そのもの (#3228) が upstream に無い。1 局 1 行で、両者の得点・理由・エンジンの版・操作の記録・公開の意思を持つ。**報告が届いた時点で書く** — 時間切れは両者の報告がそろうまで終局しないので先に来た側の記録を置く場所が要り、Redis には大きな記録を置かない方針 (#3230) のため DB に置く。**両者が公開にした対局だけ**を参加者以外 (ログイン済み・ブロック関係に無い人) に見せる — 相手の盤面と得点も一緒に出るので、片方の意思だけでは公開しない。`user` への FK は `ON DELETE CASCADE` で、**どちらかが退会したら相手の履歴からも消える**。終局から 30 日で定期処理が消す。TS は未知のテーブルを無視する。**純正へは還元できない行** |
 | `plugin_secret` | Elythia 独自 | サーバープラグインの秘密の値 (API キーなど、#3470)。設定ファイルの `pluginSecretKey` で暗号化 (AES-256-GCM、鍵は HKDF-SHA256 で導出) した暗号文だけを置き、平文の列は持たない — DB のバックアップと一緒に値が漏れないようにするため。暗号文はプラグイン名と値の名前に結び付けてある (AAD) ので、行の名前を書き換えても別の値としては読めない。**プラグインの schema (`plugin_<name>`) ではなく `public` に置く** — プラグインの schema はプラグイン自身が自由に読み書きする場所なので。鍵を失うと読めなくなり、管理画面から入れ直す ([plugins/operating.md](../plugins/operating.md#秘密の値))。TS は未知のテーブルを無視する。**純正へは還元できない行** |
+| `silent_follow` | Elythia 独自 | フォローの止め方を「静かに成立させる」(`user_profile.followApprovalAction` = `silentFollow`、#3466) にした人へ、通知を出さずに成立させたフォローの記録。受け手が `following/silent/list` で後から確かめる。`(followeeId, followerId)` で 1 組 1 行にまとめ、同じ人がまた来たら `id` (= 日時) を書き換える。**フォローが解除されても消さない** — 確かめたいのは「誰が来たか」なので。`user` への FK は両方 `ON DELETE CASCADE`。TS は未知のテーブルを無視する。**純正へは還元できない行** (止め方そのものが upstream に無い) |
 | `note_unread` | 準・独自 | upstream DB にも legacy 遺物として残るが 2026.7.0 の `models/` に entity は無く参照 0 件。Elythia はこれを実用し `/api/i` の `hasUnreadSpecifiedNotes` / `hasUnreadMentions` を Redis stream を舐めずに解決する。upstream legacy 版にある `noteChannelId` は Elythia の定義に無い (TS 製 DB では `CREATE TABLE IF NOT EXISTS` が no-op なので実害なし) |
 | `migrations` | drop-in 互換 | TypeORM の bookkeeping。Elythia 由来 DB に TS を後から繋いだ時に migration を再実行させないための seed。name は本家と同じ `ClassName+timestamp` 形式で 346 件を保持する (#2244 で短縮形から是正)。漏れは `TestMigrationSeed_CoversUpstream` が CI で検出する |
 | `schema_migrations` | tooling | golang-migrate 用 |
 
 `__chart__*` / `__chart_day__*` 24 テーブルは独自ではない (upstream では `models/` ではなく `core/chart/charts/entities/` で定義されるため、`models/` だけを見ると誤検出する)。
 
-### 2-2. 独自カラム (31 = 実使用 28 + 未使用の残存 3)
+### 2-2. 独自カラム (34 = 実使用 31 + 未使用の残存 3)
 
-うち **Elythia が実際に読み書きするのは 28 件** (cherrypick 由来 3 + Elythia 独自 25)。残り 3 件は fresh な Elythia DB に列だけ残る未使用列で、#2243 で依存を外した。
+うち **Elythia が実際に読み書きするのは 31 件** (cherrypick 由来 3 + Elythia 独自 28)。Elythia 独自のうち `user_profile` の `followApprovalLocalSeconds` / `followApprovalRemoteSeconds` の 2 件は、本家が次の版で足す列 (PR 17998、2026.10.0 には無い) を先に取り込んだもので、本家の版を上げると独自ではなくなる。残り 3 件は fresh な Elythia DB に列だけ残る未使用列で、#2243 で依存を外した。
 
 | テーブル | カラム | 由来 | 理由 |
 |---|---|---|---|
@@ -48,6 +49,8 @@
 | `meta` | `registrationClosed` | Elythia 独自 | 新規登録をどの経路からも受け付けない (#3186)。途中まで進んでいる登録 (承認済みの申請 / メール確認待ち) も止めるが、記録は消さないので解除すれば有効期限内のものはそのまま使える (承認済みの申請は承認制で再開した場合だけ)。**有効にする更新では `disableRegistration` も立てる** (`normalizeRegistrationClosed`) — TS へ戻すとこの列は無視されるが、招待制に落ちるので登録が開く方向には倒れない。承認制の値は残す (照会を開けておくのと、解除後に戻れるように)。解除する更新で承認制が残っていれば登録を開け直す (#2565 の整合) |
 | `user` | `accountCreatedAt` | Elythia 独自 | リモートの人がアカウントを作った日時 (#3465)。`createdAt` は id から出るので、リモートの人では「このサーバーが初めて知った日時」にしかならない。actor の `published` か、Misskey 系なら相手の `/api/users/show` の `createdAt` から埋める ([連合の差分](federation.md#3-7-リモートのアカウントの作成日時-elythia-独自))。ローカルの人と、どちらからも取れなかった人は NULL。**TS はこの列を認識しない**ので、TS へ戻すと読まれないだけで害は無い |
 | `user` | `managedByPlugin` | Elythia 独自 | プラグインが管理するアカウント (#3468) のプラグイン名。NULL は普通のアカウント。埋まっているアカウントには本体がどの経路からもログインさせず、ネイティブトークンをプロセス内の呼び出しでだけ受け付ける ([security.md](security.md) §6)。**TS はこの列を認識しない**ため、TS へ戻すと普通のアカウントとして扱われ、トークンも外から使えるようになる (パスワードは持たないので、パスワードではログインできないまま) |
+| `user_profile` | `followApprovalLocalSeconds` / `followApprovalRemoteSeconds` | 本家の次の版 (PR 17998) | 作られてからこの秒数に満たないアカウントからのフォローを止める設定 (#3466)。列名・型 (`integer`、NULL 可) は本家の migration `FollowApprovalByAccountAge1791109435844` と同じにしてあり、本家に追従するときに同じ列を足す migration を重ねて作らない。**本家の 2026.10.0 には無い**ので、TS へ戻してから PR 17998 を含む本家の版へ上げると、本家の migration が `already exists` で落ちる (復路は保証しない、#3191)。経過時間の数え方の違いは [api.md](api.md#作られてから日の浅いアカウントからのフォロー-3466) |
+| `user_profile` | `followApprovalAction` | Elythia 独自 | 上の期間に当たったフォローの止め方 (#3466)。`request` (既定、本家と同じ) / `silentRequest` / `silentFollow`。`NOT NULL DEFAULT 'request'` なので、TS から移ってきた行も本家と同じ動きになる。TS はこの列を読まない |
 | `user` | `isRoot` | Elythia 独自 | upstream は system_account 移行で DROP 済み。`role.Service.isRootUser` の fallback に必要 |
 | `meta` | `proxyAccountId` | Elythia 独自 | 同じく upstream は DROP 済み。`admin/update-proxy-account` が書き込む |
 | `note_favorite` | `createdAt` | Elythia 独自 | upstream は `deleteCreatedAt` で DROP 済み。`/api/i/favorites` の response 要件で復活 |

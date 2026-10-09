@@ -485,6 +485,14 @@ type UpdateInput struct {
 	CarefulBot               *bool
 	InjectFeaturedNote       *bool
 	ReceiveAnnouncementEmail *bool
+	// FollowApprovalLocalSeconds / FollowApprovalRemoteSeconds は作られてから
+	// 日の浅いアカウントからのフォローを止める期間 (秒、#3466)。**int で
+	// 3 状態 (nil=不変 / *nil=NULL / **v=値) を表す。範囲の検証は呼び出し側。
+	FollowApprovalLocalSeconds  **int
+	FollowApprovalRemoteSeconds **int
+	// FollowApprovalAction は止め方 (#3466、Elythia 独自)。nil なら不変。
+	// 値の検証は呼び出し側。
+	FollowApprovalAction *string
 	// ChatScope は誰からのチャットを許可するか (1-on-1 DM 用)。
 	// 受け付けるのは "everyone" / "followers" / "following" / "mutual" / "none"
 	// (CherryPick / Misskey TS と同じ enum)。検証は呼び出し側 (#692)。
@@ -553,6 +561,15 @@ type UpdateInput struct {
 	// PinnedPageID と同じ 3 状態を **int で表す (nil=不変 / *nil=NULL / **v=値)。
 	MakeNotesFollowersOnlyBefore **int
 	MakeNotesHiddenBefore        **int
+}
+
+// nullableInt returns v's value, or an untyped nil for SQL NULL (the same
+// shape as makeNotesFollowersOnlyBefore above).
+func nullableInt(v *int) any {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
 // FieldItem represents one row of user_profile.fields. upstream Misskey の
@@ -666,6 +683,15 @@ func (s *Service) UpdateProfile(userID string, in UpdateInput) (*UserWithProfile
 	}
 	if in.ReceiveAnnouncementEmail != nil {
 		profileFields["receiveAnnouncementEmail"] = *in.ReceiveAnnouncementEmail
+	}
+	if in.FollowApprovalLocalSeconds != nil {
+		profileFields["followApprovalLocalSeconds"] = nullableInt(*in.FollowApprovalLocalSeconds)
+	}
+	if in.FollowApprovalRemoteSeconds != nil {
+		profileFields["followApprovalRemoteSeconds"] = nullableInt(*in.FollowApprovalRemoteSeconds)
+	}
+	if in.FollowApprovalAction != nil {
+		profileFields["followApprovalAction"] = *in.FollowApprovalAction
 	}
 	if in.ChatScope != nil {
 		userFields["chatScope"] = *in.ChatScope

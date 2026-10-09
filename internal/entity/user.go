@@ -207,19 +207,32 @@ type MeDetailed struct {
 	FollowedMessage *string `json:"followedMessage"`
 	// avatarId / bannerId は self view 専用 (#1251)。misskey_dart の dispatch が
 	// `avatarId` key の存在で MeDetailed を判別するため、MeDetailed のみが出す。
-	AvatarID                 *string `json:"avatarId"`
-	BannerID                 *string `json:"bannerId"`
-	IsExplorable             bool    `json:"isExplorable"`
-	IsDeleted                bool    `json:"isDeleted"`
-	HideOnlineStatus         bool    `json:"hideOnlineStatus"`
-	NoCrawle                 bool    `json:"noCrawle"`
-	PreventAiLearning        bool    `json:"preventAiLearning"`
-	AutoSensitive            bool    `json:"autoSensitive"`
-	CarefulBot               bool    `json:"carefulBot"`
-	AutoAcceptFollowed       bool    `json:"autoAcceptFollowed"`
-	AlwaysMarkNsfw           bool    `json:"alwaysMarkNsfw"`
-	ReceiveAnnouncementEmail bool    `json:"receiveAnnouncementEmail"`
-	InjectFeaturedNote       bool    `json:"injectFeaturedNote"`
+	AvatarID           *string `json:"avatarId"`
+	BannerID           *string `json:"bannerId"`
+	IsExplorable       bool    `json:"isExplorable"`
+	IsDeleted          bool    `json:"isDeleted"`
+	HideOnlineStatus   bool    `json:"hideOnlineStatus"`
+	NoCrawle           bool    `json:"noCrawle"`
+	PreventAiLearning  bool    `json:"preventAiLearning"`
+	AutoSensitive      bool    `json:"autoSensitive"`
+	CarefulBot         bool    `json:"carefulBot"`
+	AutoAcceptFollowed bool    `json:"autoAcceptFollowed"`
+	// FollowApprovalLocalSeconds / FollowApprovalRemoteSeconds は本家 PR 17998
+	// の MeDetailed の項目 (#3466)。**未設定 (NULL) のときは key ごと出さない。**
+	// 本家の schema では nullable・optional ではないが、それは 2026.10.0 より後の
+	// 版で、追従している版 (2026.10.0) の本家 e2e (users.ts) は MeDetailed の
+	// key の過不足を完全一致で見るため、常に出すと i と i/update の応答を比べる
+	// テストが落ちる。逆に PR 17998 の e2e (follow-approval.ts) の最初のテストは
+	// `i` に null の key があることを見るので、こちらは今は落ちる。本家の版を
+	// PR 17998 を含むものへ上げるときに omitempty を外す (両方とも通る形に戻る)。
+	FollowApprovalLocalSeconds  *int `json:"followApprovalLocalSeconds,omitempty"`
+	FollowApprovalRemoteSeconds *int `json:"followApprovalRemoteSeconds,omitempty"`
+	// FollowApprovalAction は止め方 (#3466、Elythia 独自の追加)。同じ理由で、
+	// 既定 (request) のときは出さない。
+	FollowApprovalAction     string `json:"followApprovalAction,omitempty"`
+	AlwaysMarkNsfw           bool   `json:"alwaysMarkNsfw"`
+	ReceiveAnnouncementEmail bool   `json:"receiveAnnouncementEmail"`
+	InjectFeaturedNote       bool   `json:"injectFeaturedNote"`
 	// 以下は misskey_dart の MeDetailed.fromJson が非null bool として cast する
 	// ため、self-view (users/show me) でも必ず値を出す必要がある (#1237)。
 	// /api/i は handler 層でこれらを正確な値に上書きするが、users/show の
@@ -376,6 +389,11 @@ func AsMeDetailed(d UserDetailed, u *model.User, profile *model.UserProfile) MeD
 		out.AutoSensitive = profile.AutoSensitive
 		out.CarefulBot = profile.CarefulBot
 		out.AutoAcceptFollowed = profile.AutoAcceptFollowed
+		out.FollowApprovalLocalSeconds = profile.FollowApprovalLocalSeconds
+		out.FollowApprovalRemoteSeconds = profile.FollowApprovalRemoteSeconds
+		if a := model.NormalizeFollowApprovalAction(profile.FollowApprovalAction); a != model.FollowApprovalActionRequest {
+			out.FollowApprovalAction = a
+		}
 		out.AlwaysMarkNsfw = profile.AlwaysMarkNsfw
 		out.ReceiveAnnouncementEmail = profile.ReceiveAnnouncementEmail
 		out.InjectFeaturedNote = profile.InjectFeaturedNote

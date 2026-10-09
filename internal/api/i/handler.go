@@ -19,6 +19,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/notehide"
 	"github.com/elythia-network/elythia/internal/core/avatardecoration"
+	"github.com/elythia-network/elythia/internal/core/following"
 	"github.com/elythia-network/elythia/internal/core/notification"
 	"github.com/elythia-network/elythia/internal/core/passwordguard"
 	"github.com/elythia-network/elythia/internal/core/role"
@@ -100,6 +101,8 @@ type Handler struct {
 	moveInValidator       MoveInValidator
 	achievementNotifier   AchievementNotifier
 	followRequestRepo     repository.FollowRequestRepository
+	// followRequestAccepter は鍵を外したときに溜まったリクエストを承認する (#3466)。
+	followRequestAccepter FollowRequestBulkAccepter
 	announcementRepo      AnnouncementUnreadSource
 	chatRepo              ChatUnreadSource
 	antennaUnreadRepo     AntennaUnreadSource
@@ -667,6 +670,24 @@ func (h *Handler) SetFollowRequestRepo(r repository.FollowRequestRepository) {
 	h.followRequestRepo = r
 }
 
+// FollowRequestBulkAccepter accepts the pending follow requests toward a
+// user. *following.Service satisfies it.
+type FollowRequestBulkAccepter interface {
+	AcceptAllRequests(followeeID string) error
+}
+
+// SetFollowRequestBulkAccepter wires the bulk acceptance of pending follow
+// requests run when i/update unlocks the account (upstream
+// acceptAllFollowRequests, #3466).
+func (h *Handler) SetFollowRequestBulkAccepter(a FollowRequestBulkAccepter) {
+	h.followRequestAccepter = a
+}
+
+// HasFollowRequestBulkAccepter reports whether the bulk acceptance was wired.
+//
+// 未配線だと、鍵を外しても溜まっていたリクエストが承認されずに残る。起動時検査に使う。
+func (h *Handler) HasFollowRequestBulkAccepter() bool { return h.followRequestAccepter != nil }
+
 // SetAnnouncementRepo wires the announcement repository used to compute
 // hasUnreadAnnouncement / unreadAnnouncements on /api/i.
 func (h *Handler) SetAnnouncementRepo(r AnnouncementUnreadSource) {
@@ -1165,6 +1186,14 @@ type UpdateRequest struct {
 	// 値で設定、省略で不変。json.RawMessage で 3 状態を区別する。
 	MakeNotesFollowersOnlyBefore json.RawMessage `json:"makeNotesFollowersOnlyBefore"`
 	MakeNotesHiddenBefore        json.RawMessage `json:"makeNotesHiddenBefore"`
+	// FollowApprovalLocalSeconds / FollowApprovalRemoteSeconds は、作られてから
+	// 日の浅いアカウントからのフォローを止める期間 (本家 PR 17998 の paramDef:
+	// integer、nullable、0〜2592000、#3466)。null と省略を区別する。
+	FollowApprovalLocalSeconds  json.RawMessage `json:"followApprovalLocalSeconds"`
+	FollowApprovalRemoteSeconds json.RawMessage `json:"followApprovalRemoteSeconds"`
+	// FollowApprovalAction は止め方 (Elythia 独自の追加、#3466)。
+	// request / silentRequest / silentFollow。null は省略と同じ。
+	FollowApprovalAction *string `json:"followApprovalAction"`
 }
 
 // FieldInput is the {name, value} shape accepted by i/update for profile
@@ -1422,6 +1451,38 @@ func parseNullableInt(raw json.RawMessage) (**int, bool, error) {
 	if err := json.Unmarshal(raw, &n); err != nil {
 		return nil, false, err
 	}
+	p := &n
+	return &p, true, nil
+}
+
+// errInvalidSeconds is returned by parseNullableSeconds for a value outside
+// the accepted range or with a fractional part.
+var errInvalidSeconds = errors.New("invalid seconds")
+
+// parseNullableSeconds decodes an integer-nullable number of seconds in
+// 0..maxSeconds into the **int 3-state convention of parseNullableInt.
+// Unlike parseNullableInt it accepts integral numbers written with a
+// fraction or an exponent (2.0, 1e3), as upstream's ajv `type: integer` does,
+// and rejects 1.5.
+//
+// parseNullableInt は他の項目 (makeNotes*Before) と共有しているので、挙動を
+// 変えずに期間 (#3466) 専用のものを分けた。
+func parseNullableSeconds(raw json.RawMessage, maxSeconds int) (**int, bool, error) {
+	if len(raw) == 0 {
+		return nil, false, nil
+	}
+	if string(bytes.TrimSpace(raw)) == "null" {
+		var clear *int
+		return &clear, true, nil
+	}
+	var f float64
+	if err := json.Unmarshal(raw, &f); err != nil {
+		return nil, false, err
+	}
+	if f != math.Trunc(f) || f < 0 || f > float64(maxSeconds) {
+		return nil, false, errInvalidSeconds
+	}
+	n := int(f)
 	p := &n
 	return &p, true, nil
 }
@@ -1808,6 +1869,45 @@ func (h *Handler) Update(c echo.Context) error {
 	} else if ok {
 		in.MakeNotesHiddenBefore = v
 	}
+	// 期間は本家の paramDef と同じく整数で 0〜2592000 (30 日)。範囲外・小数・
+	// 文字列は INVALID_PARAM (#3466)。
+	for _, f := range []struct {
+		raw json.RawMessage
+		dst ***int
+	}{
+		{req.FollowApprovalLocalSeconds, &in.FollowApprovalLocalSeconds},
+		{req.FollowApprovalRemoteSeconds, &in.FollowApprovalRemoteSeconds},
+	} {
+		v, ok, err := parseNullableSeconds(f.raw, following.FollowApprovalMaxSeconds)
+		if err != nil {
+			return apierr.JSONInvalidParam(c)
+		}
+		if !ok {
+			continue
+		}
+		*f.dst = v
+	}
+	if req.FollowApprovalAction != nil {
+		if !model.IsFollowApprovalAction(*req.FollowApprovalAction) {
+			return apierr.JSONInvalidParam(c)
+		}
+		in.FollowApprovalAction = req.FollowApprovalAction
+	}
+	// 鍵を外すときだけ、溜まったリクエストを承認する (本家 i/update の
+	// `user.isLocked && ps.isLocked === false`)。更新前の値は DB から読む —
+	// middleware の me は認証キャッシュ (30 秒) の写しで、直前に鍵を掛けた
+	// ばかりだと古い値 (未施錠) のままになる。
+	unlocking := false
+	if req.IsLocked != nil && !*req.IsLocked && h.followRequestAccepter != nil {
+		wasLocked := me.IsLocked
+		if h.userRepo != nil {
+			if cur, err := h.userRepo.FindByID(me.ID); err == nil {
+				wasLocked = cur.IsLocked
+			}
+		}
+		unlocking = wasLocked
+	}
+
 	// pinnedPageId は upstream と同じ 3 分岐: null → CLEAR、truthy id →
 	// 所有権検証して SET、それ以外 (省略 / "") → 不変 (upstream の
 	// `if (ps.pinnedPageId)` は "" が falsy で no-op)。
@@ -1859,6 +1959,16 @@ func (h *Handler) Update(c echo.Context) error {
 			return c.JSON(http.StatusBadRequest, apierr.Error("BANNER_NOT_AN_IMAGE", "The file specified as a banner is not an image.", "75aedb19-2afd-4e6d-87fc-67941256fa60"))
 		}
 		return apierr.JSONInternalError(c)
+	}
+
+	// 本家は鍵の解除で溜まったリクエストを承認し終えてから応答する。期間の
+	// 条件に当たる人は残す (#3466)。失敗しても設定は保存済みなので応答は
+	// 成功のまま返し、記録だけ残す (本家はここで 500 になる。残ったリクエストは
+	// following/requests/list から手で承認できる)。
+	if unlocking {
+		if err := h.followRequestAccepter.AcceptAllRequests(me.ID); err != nil {
+			slog.Error("i/update: failed to accept pending follow requests on unlock", "user", me.ID, "error", err)
+		}
 	}
 
 	// upstream i/update.ts:532-593: verifiedLinks を一旦 [] にリセットし、profile

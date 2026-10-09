@@ -31,6 +31,7 @@ export type {
 	DriveUsageBucket,
 	DriveUsageKind,
 	DriveUsageOrigin,
+	ElythiaMeDetailedFields,
 	ElythiaMetaFields,
 	ElythiaUserDetailedFields,
 	EmojiApplication,
@@ -49,6 +50,7 @@ export type {
 	FederationRuleHit,
 	FederationRuleMode,
 	FederationRuleTarget,
+	FollowApprovalAction,
 	GoneInstance,
 	GoneInstanceCleanResult,
 	InboxOutcomeClass,
@@ -62,6 +64,7 @@ export type {
 	IPSearchAccount,
 	JoinedChatRoom,
 	LegacySigninResponse,
+	MeDetailed,
 	MetaDetailed,
 	PluginSecretInfo,
 	PluginSecretList,
@@ -78,6 +81,7 @@ export type {
 	SignupApplicationFormField,
 	SignupApplicationStatus,
 	SignupApplicationView,
+	SilentFollow,
 	UserDetailed,
 } from './entities.js';
 

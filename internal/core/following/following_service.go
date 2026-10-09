@@ -142,6 +142,8 @@ type Service struct {
 	// instanceStatsEnabled は meta.enableStatsForFederatedInstances を読む。
 	// 未配線なら本家の既定値 (true) と同じく常に集計する。
 	instanceStatsEnabled func() bool
+	// silentFollowRepo は「静かに成立させる」(#3466) で通したフォローを記録する。
+	silentFollowRepo repository.SilentFollowRepository
 }
 
 // SilencedHostChecker reports whether a remote host is silenced.
@@ -542,6 +544,24 @@ func (s *Service) Follow(followerID, followeeID string, opts FollowOptions) (*Fo
 		s.silencedChecker.IsSilenced(*follower.Host) {
 		needsApproval = true
 	}
+	// **作られてから日の浅いアカウントからのフォローを止める (#3466)。** 本家
+	// PR 17998 の requiresAgeBasedApproval。他の条件で既に承認待ちになるなら
+	// 見ない (鍵アカウントなどは本家どおり通知付きのリクエストにする)。止め方
+	// (followApprovalAction) は Elythia 独自で、既定は本家と同じ request。
+	var approval followApproval
+	if !needsApproval {
+		approval, err = s.checkFollowApproval(follower, followee)
+		if err != nil {
+			return nil, err
+		}
+		needsApproval = approval.request
+	}
+	// 「静かに成立させる」でも、下の autoAccept に当たる相手 (自分がフォロー
+	// していて autoAcceptFollowed が有効) は、本家ならリクエストにならず通知付きで
+	// 成立する相手なので、通知を止めない。
+	if approval.silentFollow && s.shouldAutoAcceptFollow(followee, followerID) {
+		approval.silentFollow = false
+	}
 	// #2106 N21: followee が local + profile.autoAcceptFollowed=true + 相互フォロー
 	// (followee→follower) のときは follow request を作らず即 Following を成立させる
 	// (下の通常 Following 作成経路に fall through)。remote follower の場合は handleFollow が
@@ -564,7 +584,9 @@ func (s *Service) Follow(followerID, followeeID string, opts FollowOptions) (*Fo
 		if err := s.followRequestRepo.Create(req); err != nil {
 			return nil, err
 		}
-		if s.notificationHook != nil {
+		// 「静かにリクエストにする」(#3466) は通知だけを作らない。リクエストの
+		// 一覧、main stream の receiveFollowRequest と meUpdated は通常どおり。
+		if s.notificationHook != nil && !approval.silentRequest {
 			s.notificationHook.OnFollowRequested(followerID, followeeID)
 		}
 		// リモートの承認制followeeにはAP Follow activityを送る必要がある
@@ -593,6 +615,20 @@ func (s *Service) Follow(followerID, followeeID string, opts FollowOptions) (*Fo
 	if err := s.followingRepo.Create(f); err != nil {
 		return nil, err
 	}
+	// **同じ組の申請が残っていれば消す (本家 insertFollowingDoc と同じ)。**
+	// 期間の設定 (#3466) を外した後や期間を過ぎた後にフォローし直すと、前に
+	// 作った申請が残ったまま即フォローが成立する。残すと「フォロー済みかつ
+	// 申請中」になり、承認しようとすると following の一意制約で落ちる。
+	if req, err := s.followRequestRepo.FindByPair(followerID, followeeID); err == nil {
+		// 消せなかったときはエラーを返す (本家も await して投げる)。フォローは
+		// 既に成立しているので、申請が残っても承認の側で成功として片付く。
+		if err := s.followRequestRepo.Delete(req); err != nil {
+			return nil, err
+		}
+		s.publishMeUpdated(followee)
+	} else if !repository.IsNotFound(err) {
+		return nil, err
+	}
 
 	// どちらかが移行済みなら、カウント・instance の集計列・chart を動かさない。
 	// 本家 insertFollowingDoc の `if (!followeeUser.movedToUri &&
@@ -614,8 +650,15 @@ func (s *Service) Follow(followerID, followeeID string, opts FollowOptions) (*Fo
 		s.adjustInstanceCountsForFollowing(f, 1)
 	}
 
-	if s.notificationHook != nil {
+	// 「静かに成立させる」(#3466) は follow の通知を作らず、受け手が後から
+	// 確かめられるように silent_follow に記録する。Webhook (followed) と
+	// main stream のイベントは止めない — 利用者が自分で設定した連携と、画面の
+	// 状態の更新なので。
+	if s.notificationHook != nil && !approval.silentFollow {
 		s.notificationHook.OnFollowed(followerID, followeeID)
+	}
+	if approval.silentFollow {
+		s.recordSilentFollow(followerID, followeeID)
 	}
 	if s.federationHook != nil {
 		// アウトバウンド: local→remote follow の場合は Follow activity を送る。
@@ -780,6 +823,23 @@ func (s *Service) AcceptRequest(followeeID, followerID string) error {
 	if err := s.followRequestRepo.Delete(req); err != nil {
 		return err
 	}
+	// **既にフォローが成立しているなら、申請を消すだけで成功とする (#3466)。**
+	// 期間の設定を変えた後のフォローし直しなどで、フォローと申請が両方残った
+	// 行が過去に作られうる。ここで following を作ろうとすると一意制約
+	// (23505) で落ち、利用者には 500 が、鍵を外したときの一括承認では残りの
+	// 申請が承認されないまま止まる。本家 insertFollowingDoc も重複を
+	// (リモートからのフォローでは) 握って申請を消す。
+	alreadyFollowing := func() error {
+		if followee, err := s.userRepo.FindByID(req.FolloweeID); err == nil {
+			s.publishMeUpdated(followee)
+		}
+		return nil
+	}
+	if already, err := s.followingRepo.Exists(req.FollowerID, req.FolloweeID); err != nil {
+		return err
+	} else if already {
+		return alreadyFollowing()
+	}
 	f := &model.Following{
 		ID:           s.idGen.Generate(time.Now()),
 		FollowerID:   req.FollowerID,
@@ -789,6 +849,12 @@ func (s *Service) AcceptRequest(followeeID, followerID string) error {
 		WithReplies:  req.WithReplies,
 	}
 	if err := s.followingRepo.Create(f); err != nil {
+		// 同じ申請を同時に承認した (二度押し、鍵の解除の同時実行) ときは、上の
+		// Exists をすり抜けた片方がここで一意制約に当たる。もう片方が成立させて
+		// いるので、既にフォロー済みのときと同じく成功として扱う。
+		if repository.IsUniqueViolation(err) {
+			return alreadyFollowing()
+		}
 		return err
 	}
 	// 承認でも本家は insertFollowingDoc を通るので、Follow と同じ移行済みの
