@@ -591,6 +591,11 @@ export const ROUTE_DEF = [{
 	path: '/my/follow-requests',
 	component: page(() => import('@/pages/follow-requests.vue')),
 	loginRequired: true,
+	// プライバシーの設定から「通知せずに受け入れたフォロー」のタブへ直接開く
+	// (#3466)。宣言しないと props に入らない (上の custom-emojis-manager と同じ)。
+	query: {
+		tab: 'tab',
+	},
 }, {
 	path: '/my/lists/:listId',
 	component: page(() => import('@/pages/my-lists/list.vue')),

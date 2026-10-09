@@ -6424,6 +6424,100 @@ export interface Locale extends ILocale {
          */
         "forceBackup": string;
     };
+    "_followApproval": {
+        /**
+         * フォロー承認
+         */
+        "groupTitle": string;
+        /**
+         * すべてのフォローが承認制になるため、期間による設定は適用されません。フォローの承認制を解除すると、以下の設定が再び適用されます。
+         */
+        "inactiveDescription": string;
+        /**
+         * 新しいアカウントからのフォローを制限する
+         */
+        "title": string;
+        /**
+         * フォローを承認制にしている場合や、新しいアカウントからのフォローを制限する場合にも、あなたがフォローしている相手は自動承認します。
+         */
+        "autoAcceptDescription": string;
+        /**
+         * 指定した期間が経過していない相手からのフォローを、下で選んだ方法で扱います。既存のフォロワーには影響しません。フォローしている相手の自動承認が有効な場合、その相手は通常どおりフォローできます。
+         */
+        "description": string;
+        /**
+         * ローカルユーザーからのフォロー
+         */
+        "local": string;
+        /**
+         * このサーバーでのアカウント作成からの期間で判定します。
+         */
+        "localDescription": string;
+        /**
+         * リモートユーザーからのフォロー
+         */
+        "remote": string;
+        /**
+         * 相手のサーバーが公開しているアカウントの作成日時からの期間で判定します。作成日時を公開していない相手は、このサーバーが初めてそのアカウントを認識してからの期間で判定します。
+         */
+        "remoteDescription": string;
+        /**
+         * 既定値を使う（現在は無効）
+         */
+        "useDefault": string;
+        /**
+         * 期間を指定する
+         */
+        "custom": string;
+        /**
+         * 承認が必要な期間
+         */
+        "period": string;
+        /**
+         * 単位
+         */
+        "unit": string;
+        /**
+         * 期間が正しくありません。1秒以上の期間を、指定できる範囲内で入力してください。
+         */
+        "invalidPeriod": string;
+        /**
+         * 期間に満たない相手からのフォローの扱い
+         */
+        "action": string;
+        /**
+         * 通知しない方法を選ぶと、短い間に大量のフォローが来ても通知が埋まりません。
+         */
+        "actionDescription": string;
+        /**
+         * フォローリクエストにする
+         */
+        "actionRequest": string;
+        /**
+         * 通知せずにフォローリクエストにする
+         */
+        "actionSilentRequest": string;
+        /**
+         * 通知せずにフォローを受け入れる
+         */
+        "actionSilentFollow": string;
+        /**
+         * 通知せずに受け入れたフォロー
+         */
+        "silentFollows": string;
+        /**
+         * 期間に満たない相手から、通知せずに受け入れたフォローの一覧です。同じ相手から何度フォローされても1件にまとめ、最後にフォローされた日時を表示します。
+         */
+        "silentFollowsDescription": string;
+        /**
+         * 通知せずに受け入れたフォローはありません
+         */
+        "noSilentFollows": string;
+        /**
+         * フォロワーではありません
+         */
+        "notFollower": string;
+    };
     "_accountSettings": {
         /**
          * コンテンツの表示にログインを必須にする
