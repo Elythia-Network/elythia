@@ -3,6 +3,7 @@ package plugin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 )
 
 /*
@@ -76,7 +77,23 @@ type Peer interface {
 // PeerHandler processes one payload from another instance and returns the
 // reply. Returning an error makes mk-go respond with an error status; the
 // sender's [Peer.OnReply] is not called.
+//
+// Wrap [ErrBadPeerPayload] when the payload itself is wrong: mk-go then
+// answers 400, which the sender does not retry, and logs it at DEBUG. Any
+// other error, including a JSON decoding error returned as is, is treated as
+// a fault on this side: 500 (retried by the sender) and an ERROR log. A
+// [*StatusError] from [Errorf] is treated like any other error (500, retried);
+// wrap the sentinel instead. For a payload that does not decode:
+//
+//	if err := json.Unmarshal(payload, &req); err != nil {
+//		return nil, fmt.Errorf("%w: %w", plugin.ErrBadPeerPayload, err)
+//	}
 type PeerHandler func(ctx context.Context, from string, payload json.RawMessage) (any, error)
+
+// ErrBadPeerPayload marks a [PeerHandler] error as the sender's fault (a
+// payload that fails validation). Wrap it: fmt.Errorf("%w: user is empty",
+// plugin.ErrBadPeerPayload).
+var ErrBadPeerPayload = errors.New("plugin: bad peer payload")
 
 // PeerReplyHandler processes the reply to a [Peer.Send]. id is what Send
 // returned.

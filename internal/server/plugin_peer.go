@@ -572,6 +572,20 @@ func (p *pluginPeer) echoHandler() echo.HandlerFunc {
 		if err != nil {
 			// **プラグインのエラー文面は返さない。** 内部事情 (DB のエラー等)
 			// が相手のサーバーに漏れる。ログにだけ残す。
+			//
+			// **相手の入力の誤りは 400 + Debug にする。** 署名はホスト単位の
+			// 信頼なので、相手のホストの誰でも正しく署名した不正な payload を
+			// 送れる。それを 500 + ERROR にすると、こちらの障害と見分けが
+			// つかないうえ、送信側が 5xx として再送してくる。段階は相手起因の
+			// 署名検証の失敗と同じ Debug に揃える。
+			//
+			// 判定はプラグインが ErrBadPeerPayload を包んだときだけ。JSON の
+			// 解読エラーを型で拾うと、プラグインが自分の DB や本体 API の応答を
+			// 読み損ねた障害まで 400 (再送なし、ERROR なし) に化ける。
+			if errors.Is(err, plugin.ErrBadPeerPayload) {
+				p.logger.Debug("peer ハンドラが payload を拒否しました", "from", from, "err", err)
+				return peerError(c, http.StatusBadRequest, "payload を処理できません")
+			}
 			p.logger.Error("peer ハンドラがエラーを返しました", "from", from, "err", err)
 			return peerError(c, http.StatusInternalServerError, "処理できません")
 		}

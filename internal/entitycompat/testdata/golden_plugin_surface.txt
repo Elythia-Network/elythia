@@ -240,6 +240,7 @@ plugin: type StatusError struct
 plugin: type Storage interface
 plugin: var ErrAccountNotFound
 plugin: var ErrAccountSuspended
+plugin: var ErrBadPeerPayload
 plugin: var ErrInvalidUsername
 plugin: var ErrNoRetry
 plugin: var ErrSecretNotSet

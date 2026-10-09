@@ -3,11 +3,14 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/labstack/echo/v4"
@@ -289,6 +292,75 @@ func TestPluginPeer_ServeHidesHandlerError(t *testing.T) {
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	assert.NotContains(t, rec.Body.String(), "内部の詳細")
+}
+
+// recordingHandler keeps the levels of the records it receives.
+type recordingHandler struct {
+	mu     sync.Mutex
+	levels []slog.Level
+}
+
+func (h *recordingHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h *recordingHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.levels = append(h.levels, r.Level)
+	return nil
+}
+func (h *recordingHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *recordingHandler) WithGroup(string) slog.Handler      { return h }
+
+func (h *recordingHandler) max() slog.Level {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	m := slog.LevelDebug - 1
+	for _, l := range h.levels {
+		if l > m {
+			m = l
+		}
+	}
+	return m
+}
+
+// 相手の payload の誤りは、プラグインが plugin.ErrBadPeerPayload を包んだときだけ
+// 400 + Debug にする。送信側は 4xx を再送しない。包まないエラーは、JSON の解読
+// エラーでも 500 + ERROR のまま (プラグインが自分のデータを読み損ねた障害を 400 に
+// 化けさせない)。
+func TestPluginPeer_ServeBadPayloadIs400(t *testing.T) {
+	var syntaxErr error
+	{
+		var v map[string]any
+		syntaxErr = json.Unmarshal([]byte(`{`), &v)
+	}
+	cases := []struct {
+		name      string
+		err       error
+		want      int
+		wantLevel slog.Level
+	}{
+		{"wrapped ErrBadPeerPayload", fmt.Errorf("%w: user が空です", plugin.ErrBadPeerPayload), http.StatusBadRequest, slog.LevelDebug},
+		{"payload decode error wrapped with the sentinel", fmt.Errorf("%w: %w", plugin.ErrBadPeerPayload, syntaxErr), http.StatusBadRequest, slog.LevelDebug},
+		{"json error returned as is (control)", syntaxErr, http.StatusInternalServerError, slog.LevelError},
+		{"other error (control)", errors.New("db down"), http.StatusInternalServerError, slog.LevelError},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			key, pem := testPeerKeypair(t)
+			p := testPeer(t, &pluginPeerDeps{
+				keyCache: activitypub.NewPublicKeyCache(4),
+				resolver: &fakePeerResolver{host: "sender.example", pem: pem},
+			})
+			rec := &recordingHandler{}
+			p.logger = slog.New(rec)
+			p.Handle(func(context.Context, string, json.RawMessage) (any, error) { return nil, tc.err })
+			body, _ := json.Marshal(peerEnvelope{ID: "x", Payload: json.RawMessage(`{"a":1}`)})
+			c, res := peerRequest(t, body, func(r *http.Request) { signPeerRequest(t, r, key, body) })
+			require.NoError(t, p.echoHandler()(c))
+			assert.Equal(t, tc.want, res.Code)
+			assert.Equal(t, tc.wantLevel, rec.max(), "log level")
+			assert.NotContains(t, res.Body.String(), "user が空です", "the plugin's message leaked")
+		})
+	}
 }
 
 // 署名が通れば、送信元は **鍵の持ち主** として渡る。
