@@ -16,7 +16,7 @@
 	uds-init uds-layout-check uds-frontend-build uds-build uds-rebuild uds-restart uds-up uds-down uds-down-v uds-logs uds-ps \
 	bench-up bench-run bench-down bench-logs \
 	apicompat apicompat-routes apicompat-render \
-	test-fast shapecheck shapecheck-gen shapecheck-report errorid-check limitspec-check perm-check wiring-check catalog-check notfound-check nulparam-check compose-check testflags-check gaterun-check secretfield-check ipshape-check iprecord-check \
+	test-fast fuzz-imagedecode shapecheck shapecheck-gen shapecheck-report errorid-check limitspec-check perm-check wiring-check catalog-check notfound-check nulparam-check compose-check testflags-check gaterun-check secretfield-check ipshape-check iprecord-check \
 	diff-up diff-test diff-down diff-logs \
 	upstream-e2e upstream-e2e-deps upstream-e2e-up upstream-e2e-down upstream-e2e-migrate upstream-e2e-test
 
@@ -389,6 +389,30 @@ plugin-vet: ## 同梱プラグインの既定無効を検査 + go vet (CI の bu
 		dir=$$(dirname "$$mod"); \
 		echo "==> $$dir"; \
 		(cd "$$dir" && GOWORK=off go vet ./...); \
+	done
+
+FUZZTIME ?= 2m
+FUZZPARALLEL ?= 2
+FUZZ ?= Fuzz
+
+fuzz-imagedecode: ## 画像デコーダの fuzz を回す (FUZZTIME= 時間、FUZZ= 対象の正規表現、FUZZPARALLEL= worker 数)
+	# 種は module cache にある各ライブラリの testdata を IMAGEDECODE_FUZZ_SEEDS で
+	# 渡す (#3480)。無いライブラリは飛ばす。
+	# worker は既定 2。デコーダは宣言した寸法ぶんの raster を先に確保し (MaxPixels x
+	# 4 bytes = 256MB)、色の変換や向きの補正で 2 枚目を持つ経路があるので、worker 1 つ
+	# に 512MB 以上を見込む。本番と同居するホストではメモリに上限を付けたコンテナで
+	# 回す (docs/testing.md)。
+	@seeds=""; \
+	for m in golang.org/x/image github.com/kovidgoyal/imaging github.com/gen2brain/avif github.com/gen2brain/webp github.com/gen2brain/heic github.com/gen2brain/jpegxl github.com/blezek/tga; do \
+		d=$$(go list -m -f '{{.Dir}}' $$m 2>/dev/null) || continue; \
+		[ -d "$$d/testdata" ] && seeds="$$seeds:$$d/testdata"; \
+	done; \
+	targets=$$(go test ./internal/misc/imagedecode -run '^$$' -list '^$(FUZZ)' | grep '^Fuzz' || true); \
+	[ -n "$$targets" ] || { echo "no fuzz target matches FUZZ=$(FUZZ)"; exit 1; }; \
+	echo "seeds: $${seeds#:}"; \
+	for fz in $$targets; do \
+		echo "==> $$fz ($(FUZZTIME), parallel $(FUZZPARALLEL), pixel cap $${IMAGEDECODE_FUZZ_PIXELCAP:-default})"; \
+		IMAGEDECODE_FUZZ_SEEDS="$${seeds#:}" go test ./internal/misc/imagedecode -run '^$$' -fuzz="^$$fz$$" -fuzztime=$(FUZZTIME) -parallel=$(FUZZPARALLEL) || exit 1; \
 	done
 
 plugin-test: ## 同梱プラグインのテストを実行 (PostgreSQL が要る)

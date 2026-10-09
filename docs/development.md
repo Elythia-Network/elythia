@@ -136,6 +136,7 @@ cd mk && docker compose up -d
 | `make actionlint` | GitHub Actions の workflow を検査 (式の typo・存在しない `needs` 参照・`runs-on` の誤り・`run:` の中のシェルを shellcheck 経由で)。**CodeQL の `actions` とは別物** — あちらは script injection などのセキュリティを見るが、式が壊れているかは見ない。`lint` job から `make` 経由で呼ぶので、版の定義は Makefile に 1 つだけ置く |
 | `make test` | `go test ./... -v -race -count=1 -shuffle=3` (CI と同じテスト実行条件。PostgreSQL が要る → [testing.md](testing.md)) |
 | `make test-fast` | `-race` 抜き (反復用)。**コミット前の検査ではない** — CI で落ちるものが手元で緑になる |
+| `make fuzz-imagedecode` | 画像デコーダの fuzz (`FUZZTIME` / `FUZZ` / `FUZZPARALLEL`)。デコーダの依存を上げたら回す ([testing.md](testing.md#画像デコーダの-fuzz-3480)) |
 | `make frontend-test` | fork frontend の vitest (#2844) |
 | `make plugin-vet` | 同梱プラグインを`go vet` + 既定無効を検査（CIの`build` jobの2 step相当） |
 | `make plugin-test` | 同梱プラグインのテスト (別 module なので `./...` に含まれない) |
