@@ -48,7 +48,7 @@ policy集約時のhost `int`精度、小数値、通常範囲の単位と結果�
 
 ### Driveと分割upload
 
-`policyMegabytes`で`maxFileSizeMb`、`driveCapacityMb`、`chunkedUploadMaxPendingMb`をbyteへ変換する。policyが有効な正数なら、範囲外の大値は`MaxInt64`へ飽和する。0以下の無制限判定は既存どおり維持する。
+`maxFileSizeMb`と`driveCapacityMb`は`policyLimitBytes`で、`chunkedUploadMaxPendingMb`は`policyMegabytes`でbyteへ変換する。policyが有効な正数なら、範囲外の大値は`MaxInt64`へ飽和する。0以下の扱いは2つで違う。`maxFileSizeMb`と`driveCapacityMb`は本家と同じく、0は空でない本体を、負の値は0バイトの本体も拒む (`policyLimitBytes`は0なら0、負なら-1を返す)。上限なしになるのはpolicyが無いときだけ。Elythia独自の`chunkedUploadMaxPendingMb`は0以下を上限なしと読み、インスタンスの上限があればその値に丸める。
 
 容量判定では`usage + pending + request size`を直接加算せず、`SumExceedsInt64`で上限超過を判定する。overflowはupload許可ではなく既存の容量超過errorへ合流させる。
 

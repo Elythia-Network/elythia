@@ -529,20 +529,69 @@ func TestUpload_DriveLimitsPassUnderThreshold(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// maxFileSizeMb / driveCapacityMb が 0 (= unset) なら gate skip。upstream
-// `if (policies.maxFileSizeMb)` で 0 falsy = 無制限。
-func TestUpload_DriveLimitsZeroSkipsGate(t *testing.T) {
+// maxFileSizeMb / driveCapacityMb の 0 以下は「保存できない」。本家
+// DriveService は `1024 * 1024 * policies.maxFileSizeMb < info.size` を
+// そのまま比べ、0 を飛ばす経路は無い。上限なしにするのはキーが無いときだけ。
+func TestUpload_DriveLimitsZeroOrNegativeRejects(t *testing.T) {
+	cases := []struct {
+		name     string
+		policies map[string]any
+		want     error
+	}{
+		{"maxFileSizeMb 0", map[string]any{"maxFileSizeMb": 0}, drive.ErrMaxFileSizeExceeded},
+		{"maxFileSizeMb negative", map[string]any{"maxFileSizeMb": -1.0}, drive.ErrMaxFileSizeExceeded},
+		{"driveCapacityMb 0", map[string]any{"driveCapacityMb": 0}, drive.ErrNoFreeSpace},
+		{"driveCapacityMb negative", map[string]any{"driveCapacityMb": -5}, drive.ErrNoFreeSpace},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _, _ := newSvc(t)
+			svc.SetRoleChecker(&fakeMod{policies: map[string]map[string]any{"u1": tc.policies}})
+			_, err := svc.Upload(context.Background(), drive.UploadInput{
+				User: &model.User{ID: "u1"}, Body: []byte("x"), Name: "x.bin",
+			})
+			require.ErrorIs(t, err, tc.want)
+		})
+	}
+}
+
+// 負の値は 0 バイトの本体も拒む (本家 `1024 * 1024 * -1 < 0` が真)。0 は
+// 空の本体を通す (本家 `0 < 0` が偽)。
+func TestUpload_DriveLimitsNegativeRejectsEmptyBody(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		policies map[string]any
+		want     error
+	}{
+		{"maxFileSizeMb negative", map[string]any{"maxFileSizeMb": -1}, drive.ErrMaxFileSizeExceeded},
+		{"driveCapacityMb negative", map[string]any{"driveCapacityMb": -1}, drive.ErrNoFreeSpace},
+		{"maxFileSizeMb 0", map[string]any{"maxFileSizeMb": 0}, nil},
+		{"driveCapacityMb 0", map[string]any{"driveCapacityMb": 0}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _, _ := newSvc(t)
+			svc.SetRoleChecker(&fakeMod{policies: map[string]map[string]any{"u1": tc.policies}})
+			_, err := svc.Upload(context.Background(), drive.UploadInput{
+				User: &model.User{ID: "u1"}, Body: []byte{}, Name: "empty.txt",
+			})
+			if tc.want == nil {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, tc.want)
+		})
+	}
+}
+
+// キーが無いときは上限なし (本家にはこの状態が無い。policy の provider が
+// 宣言しないなど Elythia 側の都合)。
+func TestUpload_DriveLimitsAbsentSkipsGate(t *testing.T) {
 	svc, _, _ := newSvc(t)
-	svc.SetRoleChecker(&fakeMod{
-		policies: map[string]map[string]any{
-			"u1": {"maxFileSizeMb": 0, "driveCapacityMb": 0},
-		},
-	})
-	user := &model.User{ID: "u1"}
+	svc.SetRoleChecker(&fakeMod{policies: map[string]map[string]any{"u1": {}}})
 	_, err := svc.Upload(context.Background(), drive.UploadInput{
-		User: user, Body: make([]byte, 2*1024*1024), Name: "x.bin",
+		User: &model.User{ID: "u1"}, Body: make([]byte, 2*1024*1024), Name: "x.bin",
 	})
-	require.NoError(t, err, "policy 0 は upstream falsy 相当で gate skip")
+	require.NoError(t, err)
 }
 
 // usageErrRepo は UsageByUser だけ error を返す stub。driveCapacityMb gate
@@ -1841,6 +1890,11 @@ func TestMaxUploadBytes(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, int64(1.5*1024*1024), got)
 
+	// 0 は「保存できない」上限で、上限なしではない (Upload の gate と同じ)。
+	got, ok = svc.MaxUploadBytes(&model.User{ID: "u3"})
+	require.True(t, ok, "policy 0 を上限なしとして扱っている")
+	assert.Equal(t, int64(0), got)
+
 	// 上限を作らない側。**`Upload` の gate と対象を揃える** — あちらも
 	// system file と remote user は見ない。
 	for _, tt := range []struct {
@@ -1849,7 +1903,6 @@ func TestMaxUploadBytes(t *testing.T) {
 	}{
 		{"system file (user なし)", nil},
 		{"remote user", remote},
-		{"policy が 0", &model.User{ID: "u3"}},
 		{"policy の無い user", &model.User{ID: "u9"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

@@ -241,10 +241,11 @@ var readMultipartFile = func(c echo.Context, maxBytes int64) ([]byte, string, er
 // 上限を強制するのは実際に読むこちら側で、`Size` は「読む前に落とせる
 // ときは落とす」ための早い枝。
 //
-// maxBytes <= 0 は上限なし (policy 未設定 / system file / remote user)。
+// maxBytes <= 0 は上限なし (policy 未設定 / system file / remote user)。0 や負の
+// policy は呼び出し側 (FilesCreate) が 1 に丸めてから渡す。
 func readAtMost(r io.Reader, maxBytes int64) ([]byte, error) {
 	// **`maxBytes+1` のオーバーフローを避ける (#3037 レビュー)。**
-	// `policyMegabytes` は `safemath.MulFloat64` で `MaxInt64` に飽和するので、
+	// `policyLimitBytes` は `safemath.MulFloat64` で `MaxInt64` に飽和するので、
 	// `maxFileSizeMb` に `math.MaxFloat64` (= このリポジトリが「無制限」の
 	// 意味で使うイディオム) を入れると `maxBytes+1` が `MinInt64` になり、
 	// `io.LimitReader` が即 EOF を返して **0 バイトの本体が error 無しで
@@ -354,7 +355,13 @@ func (h *Handler) FilesCreate(c echo.Context) error {
 	}
 
 	// 読み切る前に上限を引く (`readMultipartFile` の doc 参照)。
-	maxBytes, _ := h.svc.MaxUploadBytes(user)
+	maxBytes, limited := h.svc.MaxUploadBytes(user)
+	if limited && maxBytes < 1 {
+		// readMultipartFile は 0 以下を「上限なし」と読むので、0 バイト (と負)
+		// の上限は 1 バイトで読むのを止める。残りの判定 (1 バイトや 0 バイトの
+		// 本体) は Upload の gate に任せる。
+		maxBytes = 1
+	}
 	body, filename, err := readMultipartFile(c, maxBytes)
 	if err != nil {
 		// upstream `drive/files/create` と同じ 413。**`Upload` が返すのと

@@ -1618,7 +1618,10 @@ func TestEffectivePolicy_NegativeUnlimitedCannotBypassPositiveInstanceCaps(t *te
 
 	policies, err := svc.GetUserPoliciesChecked("u1")
 	require.NoError(t, err)
-	assert.Equal(t, 100, policies["maxFileSizeMb"])
+	// maxFileSizeMb の 0 以下は「保存できない」で、server の上限に持ち上げない
+	// (本家 `Math.min(serverMaxFileSizeMb, Math.max(...vs))`)。分割アップロードの
+	// 独自 policy は 0 以下を上限なしと読むので、インスタンスの上限に丸める。
+	assert.Equal(t, -1, policies["maxFileSizeMb"])
 	assert.Equal(t, 2, policies[role.PolicyChunkedUploadMaxConcurrentSessions])
 	assert.Equal(t, 64, policies[role.PolicyChunkedUploadMaxPendingMb])
 }
@@ -1642,7 +1645,10 @@ func TestEffectivePolicy_ZeroUnlimitedCannotBypassPositiveInstanceCaps(t *testin
 
 	policies, err := svc.GetUserPoliciesChecked("u1")
 	require.NoError(t, err)
-	assert.Equal(t, 100, policies["maxFileSizeMb"])
+	// maxFileSizeMb の 0 以下は「保存できない」で、server の上限に持ち上げない
+	// (本家 `Math.min(serverMaxFileSizeMb, Math.max(...vs))`)。分割アップロードの
+	// 独自 policy は 0 以下を上限なしと読むので、インスタンスの上限に丸める。
+	assert.Equal(t, 0, policies["maxFileSizeMb"])
 	assert.Equal(t, 2, policies[role.PolicyChunkedUploadMaxConcurrentSessions])
 	assert.Equal(t, 64, policies[role.PolicyChunkedUploadMaxPendingMb])
 }

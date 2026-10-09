@@ -1572,6 +1572,40 @@ func TestReadAtMost_SaturatedLimitIsTreatedAsUnlimited(t *testing.T) {
 	assert.Equal(t, "hello world", string(body), "飽和した上限で本体が切り詰められている")
 }
 
+// maxFileSizeMb が 0 の利用者は、空でない本体を保存できない (本家と同じ)。
+// 読み切る前の上限 (readMultipartFile) も 0 を上限なしと読まず、413 にする。
+func TestFilesCreate_ZeroPolicyRejects(t *testing.T) {
+	for _, v := range []any{0, -1.0} {
+		h, fileRepo, _ := newHandler(t)
+		h.svc.SetRoleChecker(roleStub{maxFileSizeMb: v})
+		c, rec := newMultipartReq(t, "hello.txt", "hello world", nil)
+		setUser(c, "u1")
+		require.NoError(t, h.FilesCreate(c))
+		assert.Equal(t, http.StatusRequestEntityTooLarge, rec.Code, "maxFileSizeMb=%v で保存できている", v)
+		assert.Empty(t, fileRepo.Files)
+	}
+}
+
+// 0 の上限でも、読み切る前の上限は「上限なし」(0 以下) にしない。0 を渡すと
+// readMultipartFile は本体を全部読んでから Upload の gate で落とすので、保存は
+// されないがヒープは server の上限まで確保される。
+func TestFilesCreate_ZeroPolicyBoundsTheRead(t *testing.T) {
+	orig := readMultipartFile
+	t.Cleanup(func() { readMultipartFile = orig })
+	var got int64 = -1
+	readMultipartFile = func(c echo.Context, maxBytes int64) ([]byte, string, error) {
+		got = maxBytes
+		return orig(c, maxBytes)
+	}
+	h, _, _ := newHandler(t)
+	h.svc.SetRoleChecker(roleStub{maxFileSizeMb: 0})
+	c, _ := newMultipartReq(t, "hello.txt", "hello world", nil)
+	setUser(c, "u1")
+	require.NoError(t, h.FilesCreate(c))
+	assert.Positive(t, got, "0 の上限を readMultipartFile に上限なしとして渡している")
+	assert.LessOrEqual(t, got, int64(1))
+}
+
 func TestFilesCreate_SaturatedPolicyStillUploads(t *testing.T) {
 	h, fileRepo, _ := newHandler(t)
 	h.svc.SetRoleChecker(roleStub{maxFileSizeMb: math.MaxFloat64})
