@@ -1130,7 +1130,10 @@ func (s *Service) capServerMaxFileSize(policies map[string]any) map[string]any {
 		return policies
 	}
 	if v, ok := policies["maxFileSizeMb"]; ok {
-		if policyUnlimitedOrAboveCap(v, s.serverMaxFileSizeMb) {
+		// 本家は `Math.min(serverMaxFileSizeMb, Math.max(...vs))` なので、上限を
+		// 超える値だけを下げ、0 以下はそのまま残す (drive 側で「保存できない」に
+		// なる)。
+		if policyAboveCap(v, s.serverMaxFileSizeMb) {
 			policies["maxFileSizeMb"] = s.serverMaxFileSizeMb
 		}
 	}
@@ -1179,6 +1182,21 @@ func capIntPolicy(policies map[string]any, key string, limit int) {
 // GetUserPolicies の全 return 直前で呼ぶ。
 func (s *Service) applyServerCaps(policies map[string]any) map[string]any {
 	return s.capChunkedUpload(s.capServerMaxFileSize(policies))
+}
+
+// policyAboveCap reports whether a numeric policy exceeds a positive instance
+// cap. Unlike policyUnlimitedOrAboveCap it leaves 0 and negative values alone,
+// for policies where those mean "nothing allowed" rather than "unlimited".
+func policyAboveCap(v any, limit int) bool {
+	switch x := v.(type) {
+	case int:
+		return x > limit
+	case int64:
+		return x > int64(limit)
+	case float64:
+		return x > float64(limit)
+	}
+	return false
 }
 
 // policyUnlimitedOrAboveCap reports whether a numeric policy would disable a

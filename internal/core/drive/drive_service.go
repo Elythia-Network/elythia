@@ -94,13 +94,36 @@ var (
 func policyNumber(v any) (float64, bool) { return role.PolicyNumber(v) }
 
 // policyMegabytesは数値policyを飽和byte数へ変換する。boolは値の存在ではなく、
-// gateに使える正の上限であることを表す。
+// gateに使える正の上限であることを表す。0以下を「上限なし」と読むのは、
+// Elythia独自の分割アップロードの保留容量 (chunkedUploadMaxPendingMb) だけに使う。
 func policyMegabytes(v any) (int64, bool) {
 	mb, ok := policyNumber(v)
 	if !ok {
 		return 0, false
 	}
 	return safemath.MulFloat64(mb, 1024*1024), mb > 0
+}
+
+// policyLimitBytes converts the upstream size policies (maxFileSizeMb,
+// driveCapacityMb) to a byte limit. ok is false only when the policy is
+// absent or not a number. 0 is a limit of 0 bytes and a negative value
+// returns -1, which every size (including 0) exceeds.
+//
+// 本家 DriveService は `1024 * 1024 * policies.X` をそのまま比べるので、0 は
+// 空でない本体を、負の値は 0 バイトの本体も拒む。上限なしになるのは policy が
+// 無いときだけ。
+func policyLimitBytes(v any) (int64, bool) {
+	mb, ok := policyNumber(v)
+	if !ok {
+		return 0, false
+	}
+	if mb < 0 {
+		return -1, true
+	}
+	if mb == 0 {
+		return 0, true
+	}
+	return safemath.MulFloat64(mb, 1024*1024), true
 }
 
 // MaxUploadBytes reports the `maxFileSizeMb` role policy for a user, in bytes.
@@ -111,9 +134,9 @@ func policyMegabytes(v any) (int64, bool) {
 // 「30MB しか保存できない利用者が 250MB を送り付けてメモリを確保させる」
 // ことができた。handler が先にこれを引いて、超える分は読まずに落とす。
 //
-// ok=false は「上限なし」(policy 未設定 / 0 以下 / system file / role が
-// 未配線)。判定できないときに勝手な上限を作らないための形で、`Upload` 側の
-// `policyMegabytes` の ok と同じ意味。
+// ok=false は「上限なし」(policy 未設定 / system file / role が未配線)。
+// 判定できないときに勝手な上限を作らないための形で、`Upload` 側の
+// `policyLimitBytes` の ok と同じ意味。0 は ok=true で 0、負の値は -1 を返す。
 func (s *Service) MaxUploadBytes(user *model.User) (int64, bool) {
 	// system file (user == nil) と remote user は `Upload` 側でも gate の
 	// 対象外なので、ここでも上限を作らない。
@@ -124,7 +147,7 @@ func (s *Service) MaxUploadBytes(user *model.User) (int64, bool) {
 	if policies == nil {
 		return 0, false
 	}
-	return policyMegabytes(policies["maxFileSizeMb"])
+	return policyLimitBytes(policies["maxFileSizeMb"])
 }
 
 // ValidateFileName mirrors upstream DriveFileEntityService.validateFileName:
@@ -691,12 +714,12 @@ func (s *Service) Upload(ctx context.Context, in UploadInput) (*model.DriveFile,
 		// gate すべき容量そのものが発生しない (link 行は `size=0`)。expireOldFile
 		// 相当を足さないのも同じ理由で、意図的な差分 (docs/divergence/operations.md §5.5)。
 		if in.User.IsLocal() && policies != nil {
-			if maxBytes, ok := policyMegabytes(policies["maxFileSizeMb"]); ok {
+			if maxBytes, ok := policyLimitBytes(policies["maxFileSizeMb"]); ok {
 				if int64(len(info.Body)) > maxBytes {
 					return nil, ErrMaxFileSizeExceeded
 				}
 			}
-			if capacityBytes, ok := policyMegabytes(policies["driveCapacityMb"]); ok {
+			if capacityBytes, ok := policyLimitBytes(policies["driveCapacityMb"]); ok {
 				// UsageByUser の DB error を握り潰すと usage=0 として gate を
 				// pass してしまい driveCapacityMb 制限が事実上効かなくなる。
 				// production の transient DB error 時に黙って upload を許可する

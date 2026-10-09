@@ -203,7 +203,7 @@ func TestStartChunkedUpload_RejectsNonPositiveSize(t *testing.T) {
 // パート数が backend の上限を超える宣言は、受け取り始める前に弾く。
 func TestStartChunkedUpload_RejectsTooManyParts(t *testing.T) {
 	f := newChunkedFixture(t)
-	f.roles.policies["u1"]["maxFileSizeMb"] = 0 // サイズ gate を外して parts 上限だけを見る
+	delete(f.roles.policies["u1"], "maxFileSizeMb") // サイズ gate を外して parts 上限だけを見る
 	_, err := f.svc.StartChunkedUpload(context.Background(), drive.StartChunkedUploadInput{
 		User: f.user, Size: int64(drive.MaxMultipartParts)*testChunkSize + 1,
 	})
@@ -212,8 +212,8 @@ func TestStartChunkedUpload_RejectsTooManyParts(t *testing.T) {
 
 func TestStartChunkedUpload_MaxInt64SizeCannotOverflowPartCount(t *testing.T) {
 	f := newChunkedFixture(t)
-	f.roles.policies["u1"]["maxFileSizeMb"] = 0
-	f.roles.policies["u1"]["driveCapacityMb"] = 0
+	delete(f.roles.policies["u1"], "maxFileSizeMb")
+	delete(f.roles.policies["u1"], "driveCapacityMb")
 	f.roles.policies["u1"][role.PolicyChunkedUploadMaxPendingMb] = 0
 	_, err := f.svc.StartChunkedUpload(context.Background(), drive.StartChunkedUploadInput{
 		User: f.user, Size: math.MaxInt64,
@@ -237,7 +237,8 @@ func TestStartChunkedUpload_DriveCapacitySumCannotOverflow(t *testing.T) {
 	f := newChunkedFixture(t)
 	uid := "u1"
 	require.NoError(t, f.files.Create(&model.DriveFile{ID: "f1", UserID: &uid, Size: math.MaxInt}))
-	f.roles.policies["u1"]["maxFileSizeMb"] = 0
+	// サイズの gate を外すにはキーを消す (0 は「保存できない」)。
+	delete(f.roles.policies["u1"], "maxFileSizeMb")
 	f.roles.policies["u1"]["driveCapacityMb"] = 1
 	_, err := f.svc.StartChunkedUpload(context.Background(), drive.StartChunkedUploadInput{
 		User: f.user, Size: 1,
@@ -245,10 +246,33 @@ func TestStartChunkedUpload_DriveCapacitySumCannotOverflow(t *testing.T) {
 	assert.ErrorIs(t, err, drive.ErrNoFreeSpace)
 }
 
+// 分割アップロードの開始も Upload と同じく、maxFileSizeMb / driveCapacityMb の
+// 0 を「保存できない」と読む。上限なしにはしない。
+func TestStartChunkedUpload_ZeroDriveLimitsReject(t *testing.T) {
+	for _, tc := range []struct {
+		key  string
+		want error
+	}{
+		{"maxFileSizeMb", drive.ErrMaxFileSizeExceeded},
+		{"driveCapacityMb", drive.ErrNoFreeSpace},
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			f := newChunkedFixture(t)
+			f.roles.policies["u1"][tc.key] = 0
+			_, err := f.svc.StartChunkedUpload(context.Background(), drive.StartChunkedUploadInput{
+				User: f.user, Size: 1,
+			})
+			assert.ErrorIs(t, err, tc.want)
+		})
+	}
+}
+
 func TestStartChunkedUpload_PendingSumCannotOverflow(t *testing.T) {
 	f := newChunkedFixture(t)
-	f.roles.policies["u1"]["maxFileSizeMb"] = 0
-	f.roles.policies["u1"]["driveCapacityMb"] = 0
+	// 保留容量の gate だけを見るため、サイズと容量の gate はキーを消して外す
+	// (0 は「保存できない」)。
+	delete(f.roles.policies["u1"], "maxFileSizeMb")
+	delete(f.roles.policies["u1"], "driveCapacityMb")
 	f.roles.policies["u1"][role.PolicyChunkedUploadMaxPendingMb] = 1
 	f.settings.MaxPendingBytesPerUser = 0
 	require.NoError(t, f.sessions.Create(&model.ChunkedUploadSession{

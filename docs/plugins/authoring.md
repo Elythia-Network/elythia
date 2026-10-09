@@ -513,7 +513,7 @@ func effectivePolicies(ctx plugin.Context, inv plugin.EffectivePolicyInvalidator
 
 **置換が複数providerから重なったときはmalformedではない。** 上に挙げた失敗条件は「provider自身の出力が壊れている」場合で、置換の競合はそうではない。同じ`Key`と`ReplaceRoleID`を複数providerが置換した場合は**競合**になる。hostはそのpairを置換として受け入れず、ネイティブcontributionへ戻す — どちらの値も採らないので、管理者が設定したロールの値が残る。provider全体は失敗扱いにしないので、**ネイティブへ戻るのはそのpairだけで、他のkeyの追加contributionも他のロールの置換も通常どおり効く**。checked解決はこの結果を競合を表す固定errorと伴って返し、unchecked解決は同じ結果を返して競合errorだけを捨てる。provider失敗と併発した場合は両方のerrorが`errors.Is`で辿れる。provider失敗は宣言keyをネイティブへ戻すので、他のproviderの置換も同じkeyなら巻き戻る。
 
-instance/server capはplugin集約の後に適用する。`maxFileSizeMb`、`chunkedUploadMaxConcurrentSessions`、`chunkedUploadMaxPendingMb`へ`0`以下の無制限値を返しても、positiveなcapが設定されていればcap値になる。
+instance/server capはplugin集約の後に適用する。`chunkedUploadMaxConcurrentSessions`と`chunkedUploadMaxPendingMb`へ`0`以下の無制限値を返しても、positiveなcapが設定されていればcap値になる。`maxFileSizeMb`はserver capを超える値だけがcap値に下がり、`0`以下はそのまま残る (本家と同じく、`0`以下は「保存できない」の意味になる。`driveCapacityMb`も同じ)。
 
 `Resolve`は、明示的なinvalidationの間は`UserID`、sorted active `RoleIDs`、`ActiveAssignments`だけで結果が決まる純粋関数として実装する。時刻、request固有情報、未通知の外部状態へ依存してはならない。**同じ`RoleIDs`でも`ActiveAssignments`が違えば結果が違ってもよい**ので、hostはproviderごとの成功結果cache keyにassignment IDを含める（付け外し / 再割り当ての直後に前の結果を返さないため）。cacheはoperator設定`effectivePolicyProviderCacheEntries`（既定10000件、providerごと）のLRUであり、eviction時は同じ入力を再解決する。
 

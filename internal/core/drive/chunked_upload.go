@@ -244,12 +244,13 @@ func (s *Service) StartChunkedUpload(_ context.Context, in StartChunkedUploadInp
 	// こちらは remote / local を問わず適用する: 分割アップロードは申告値を
 	// 信用して受け入れ枠を確保する経路なので、gate が外れる分岐を作らない。
 	//
-	// **値の読み取りはpolicyMegabytesに通す。** このhelperはpolicyNumberを介して
-	// int/float64を正規化してからbyte数へ飽和変換する。素の `.(int)` だと
-	// float64で型アサーションに失敗し、上限違反で弾くのではなく**上限そのものが
-	// 消える**。Upload側も同じhelperを通すため、同じpolicyが経路によって効いたり
-	// 効かなかったりしない (#2611)。
-	if maxBytes, ok := policyMegabytes(policies["maxFileSizeMb"]); ok {
+	// **値の読み取りはhelperに通す。** maxFileSizeMb / driveCapacityMb は
+	// policyLimitBytes、Elythia独自の保留容量はpolicyMegabytes。どちらも
+	// policyNumberを介してint/float64を正規化してからbyte数へ飽和変換する。素の
+	// `.(int)` だとfloat64で型アサーションに失敗し、上限違反で弾くのではなく
+	// **上限そのものが消える**。Upload側も同じhelperを通すため、同じpolicyが
+	// 経路によって効いたり効かなかったりしない (#2611)。
+	if maxBytes, ok := policyLimitBytes(policies["maxFileSizeMb"]); ok {
 		if in.Size > maxBytes {
 			return nil, ErrMaxFileSizeExceeded
 		}
@@ -259,7 +260,7 @@ func (s *Service) StartChunkedUpload(_ context.Context, in StartChunkedUploadInp
 	if err != nil {
 		return nil, fmt.Errorf("count pending chunked uploads: %w", err)
 	}
-	if capacityBytes, ok := policyMegabytes(policies["driveCapacityMb"]); ok {
+	if capacityBytes, ok := policyLimitBytes(policies["driveCapacityMb"]); ok {
 		usage, err := s.fileRepo.UsageByUser(in.User.ID)
 		if err != nil {
 			// Upload と同じ理由で握り潰さない。usage=0 として素通しにすると

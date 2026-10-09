@@ -2073,7 +2073,10 @@ func TestGetUserPolicies_NativeNegativeUnlimitedCannotBypassInstanceCaps(t *test
 	assignRepo.Assignments["user1:r1"] = &model.RoleAssignment{ID: "a1", UserID: "user1", RoleID: "r1"}
 
 	policies := svc.GetUserPolicies("user1")
-	assert.Equal(t, 100, policies["maxFileSizeMb"])
+	// maxFileSizeMb の 0 以下は「保存できない」で、server の上限に持ち上げない
+	// (本家 `Math.min(serverMaxFileSizeMb, Math.max(...vs))`)。分割アップロードの
+	// 独自 policy は 0 以下を上限なしと読むので、インスタンスの上限に丸める。
+	assert.Equal(t, -1, policies["maxFileSizeMb"])
 	assert.Equal(t, 2, policies[role.PolicyChunkedUploadMaxConcurrentSessions])
 	assert.Equal(t, 64, policies[role.PolicyChunkedUploadMaxPendingMb])
 }
@@ -2090,6 +2093,20 @@ func TestGetUserPolicies_PositiveFractionalMaxFileSizeBelowCapRemainsUnchanged(t
 	assignRepo.Assignments["user1:r1"] = &model.RoleAssignment{ID: "a1", UserID: "user1", RoleID: "r1"}
 
 	assert.Equal(t, 0.5, svc.GetUserPolicies("user1")["maxFileSizeMb"])
+}
+
+// server の上限を超える小数は上限の値に下がる (policyAboveCap の float64 の枝)。
+func TestGetUserPolicies_FractionalMaxFileSizeAboveCapIsLowered(t *testing.T) {
+	svc, roleRepo, assignRepo, _ := newTestService(t)
+	svc.SetServerMaxFileSizeMb(100)
+	roleRepo.Roles["r1"] = &model.Role{
+		ID: "r1", Name: "Big",
+		Policies: datatypes.JSON([]byte(`{
+			"maxFileSizeMb": {"useDefault": false, "priority": 2, "value": 150.5}
+		}`)),
+	}
+	assignRepo.Assignments["user1:r1"] = &model.RoleAssignment{ID: "a1", UserID: "user1", RoleID: "r1"}
+	assert.Equal(t, 100, svc.GetUserPolicies("user1")["maxFileSizeMb"])
 }
 
 // cap が既定値より大きい場合は既定値のまま。cap は上限であって強制値ではない。
