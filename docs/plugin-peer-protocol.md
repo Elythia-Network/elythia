@@ -75,15 +75,16 @@ Elythia 同士でだけ通じる、署名付きの HTTP チャネルの仕様 (#
 |---|---|---|
 | `400` | 本文が空 / JSON として壊れている / proto poisoning | `{"statusCode":400,"code":"FST_ERR_CTP_..."}` |
 | `400` | 署名は通ったが、本文をエンベロープとして読めない | `{"error":{"message":"..."}}` |
+| `400` | プラグインのハンドラが payload を拒んだ (`plugin.ErrBadPeerPayload` を包んだエラー) | `{"error":{"message":"..."}}` |
 | `401` | 署名を検証できない | `{"error":{"message":"..."}}` |
 | `403` | 送信元をブロックしている / 連合の許可設定の対象外 | `{"error":{"message":"..."}}` |
 | `404` | 受け口が無い (相手がそのプラグインを持たない / 無効 / `Peered` 未宣言) | `{"error":{"code":"UNKNOWN_API_ENDPOINT",...}}` または `{"message":"Not Found"}` |
 | `413` | 本文が上限を超えている | `{"message":"Request Entity Too Large"}` |
 | `429` | レート制限に掛かった (`Retry-After` 付き) | `{"error":{"message":"..."}}` |
-| `500` | プラグインのハンドラがエラーを返した | `{"error":{"message":"..."}}` |
+| `500` | プラグインのハンドラがそれ以外のエラーを返した | `{"error":{"message":"..."}}` |
 | `501` | 受け口はあるが `Handle` を呼んでいない | `{"error":{"message":"..."}}` |
 
-**プラグインの受け口に届く前に返るものは、本文の形が違う。** 最初の `400`
+**プラグインの受け口に届く前に返るものは、本文の形が違う。** `FST_ERR_CTP_*` の `400`
 (`/api` の JSON パーサ) は Fastify 互換、`413` (body limit) と、そのプラグインが
 HTTP ルートを持つ場合の `404` は echo 既定 (`{"message":"..."}`)、ルートを持たない
 場合の `404` (catchall) は Misskey のエラー封筒。**受信側の実装が Elythia でないなら

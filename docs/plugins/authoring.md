@@ -845,7 +845,13 @@ Elythia が面倒を見るもの:
 
 プラグインが面倒を見るもの:
 
-- **payload の中身と値域**。相手は同じプラグインを持っているだけで、善良とは限らない
+- **payload の中身と値域**。相手は同じプラグインを持っているだけで、善良とは限らない。
+  不正な payload は `fmt.Errorf("%w: user が空です", plugin.ErrBadPeerPayload)` のように
+  `plugin.ErrBadPeerPayload` を包んで返す。payload が JSON として読めないときも
+  `fmt.Errorf("%w: %w", plugin.ErrBadPeerPayload, err)` と包む。Elythia は `400` を返して
+  Debug で記録し、送信側は再送しない。包まないエラー (解読エラーをそのまま返したものも
+  含む) はこちらの障害として `500` + ERROR で記録し、送信側が再送する。HTTP ルートの
+  `plugin.Errorf` (StatusError) を返しても同じく `500` になる
 - **payload の版**。Elythia は中身を解釈しないので、形を変えたときの互換は自分で保つ
 - **`OnReply` の冪等性**。キューに載るので、worker が途中で落ちれば同じ交換が
   積み直される。**複数回呼ばれうる**ので、加算や追記はそのままでは二重になる
@@ -1156,6 +1162,7 @@ type Peer interface
 
 type PeerHandler func(context.Context, string, json.RawMessage) (any, error)
 type PeerReplyHandler func(context.Context, string, string, json.RawMessage) error
+var ErrBadPeerPayload error
 
 type Queue interface
   Enqueue(context.Context, string, any, ...EnqueueOption) error
