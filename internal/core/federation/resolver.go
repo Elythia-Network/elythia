@@ -3172,27 +3172,36 @@ func (r *Resolver) ingestNoteWithCreated(body []byte, deliveringActorURI string,
 	}
 	// TS本家ApNoteService.tsと同じ3段フォールバックでtext抽出:
 	// 1. source.content (MFM) → 2. _misskey_content → 3. content (HTML→MFM変換)
+	var fullText *string
 	if apNote.Source != nil &&
 		apNote.Source.MediaType == "text/x.misskeymarkdown" &&
 		apNote.Source.Content != "" {
-		// `note.text` は無制限の text 列なので長さは切らないが、**NUL は落とす**。
+		// 長さは本家と同じく 8192 (UTF-16 の単位) で切る (clipRemoteNoteText)。
+		// **NUL も落とす**。
 		// `content` 経路は mfm.FromHTML が落とすが、source / _misskey_content は
 		// FromHTML を通らない (#2723)。
 		// **空になったら nil のままにする** (NUL だけの content が来ると空になる)。
 		// `content` 経路が `if text != ""` で nil を保つので、揃えないと REST の
 		// `text` が同じ入力で `null` と `""` に分かれる。
 		if text := remoteText(apNote.Source.Content, 0); text != "" {
-			note.Text = &text
+			fullText = &text
 		}
 	} else if apNote.MisskeyContent != "" {
 		if text := remoteText(apNote.MisskeyContent.String(), 0); text != "" {
-			note.Text = &text
+			fullText = &text
 		}
 	} else if apNote.Content != "" {
 		text := mfm.FromHTML(apNote.Content)
 		if text != "" {
-			note.Text = &text
+			fullText = &text
 		}
+	}
+	// 保存するのは切った本文、禁止語・連合のルール・本文からの hashtag の判定は
+	// 切る前の全文で行う (本家 ApNoteService は checkProhibitedWordsContain を
+	// 全文で見てから NoteCreateService.create で切る)。
+	if fullText != nil {
+		clipped := clipRemoteNoteText(*fullText)
+		note.Text = &clipped
 	}
 	if apNote.Summary != "" {
 		// **列の上限で切り、NUL を落とす。** CW は**相手が自由に決められる値**で、
@@ -3225,7 +3234,7 @@ func (r *Resolver) ingestNoteWithCreated(body []byte, deliveringActorURI string,
 	// 戻すので、error にすると同じ note が 8 回配送し直されて dead letter に積まれる。
 	// note を作らずに抜ける形は AP vote 経路が既に使っており、呼び出し側は
 	// nil note を扱える (ResolveNoteWithCreated だけは ErrInvalidNote に倒す)。
-	if r.containsProhibitedWords(note.Text, note.CW, apPollChoices(&apNote)) {
+	if r.containsProhibitedWords(fullText, note.CW, apPollChoices(&apNote)) {
 		slog.Info("federation: dropping inbound note containing prohibited words",
 			"uri", truncateRunes(apNote.ID, noteURIMaxRunes), "actor", actor.ID)
 		return nil, false, nil
@@ -3237,7 +3246,7 @@ func (r *Resolver) ingestNoteWithCreated(body []byte, deliveringActorURI string,
 	var ruleDecision fedrule.Decision
 	if r.rules != nil && r.rules.HasNoteRules() {
 		hasAttachment := len(extractAttachments(apNote.Attachment, apNote.Sensitive.Bool())) > 0
-		in := noteRuleFacts(actor, note.Text, note.CW, &apNote, hasAttachment)
+		in := noteRuleFacts(actor, fullText, note.CW, &apNote, hasAttachment)
 		in.Actor = r.rules.ActorFacts(actor)
 		ruleDecision = r.rules.EvaluateNote(in)
 		if ruleDecision.Reject {
@@ -3421,8 +3430,8 @@ func (r *Resolver) ingestNoteWithCreated(body []byte, deliveringActorURI string,
 	// 一括処理する (#679)。長すぎる tag は truncate ではなく **drop** する。`tag` 配列が空 / Hashtag を含まない実装 (古い Mastodon
 	// 等) でも本文 fallback で trends 集計に乗るようにする。
 	hashtagSources := extractHashtagTagNames(apNote.Tag)
-	if note.Text != nil {
-		hashtagSources = append(hashtagSources, *note.Text)
+	if fullText != nil {
+		hashtagSources = append(hashtagSources, *fullText)
 	}
 	if note.CW != nil {
 		hashtagSources = append(hashtagSources, *note.CW)
@@ -3816,6 +3825,8 @@ func (r *Resolver) UpdateRemoteNote(body []byte, actorURI string) (*model.Note, 
 	} else if apNote.Content != "" {
 		newText = mfm.FromHTML(apNote.Content)
 	}
+	// 保存するのは切った本文、判定と hashtag は全文 (create 経路と同じ)。
+	storedText := clipRemoteNoteText(newText)
 	// CW は**下の fields 反映より前に**決める。禁止語の判定を「更新後の値」で
 	// 行うために先に要るが、判定は `existing` を書き換える前に済ませたい
 	// (弾く場合は in-memory の note も無傷で返す)。
@@ -3910,8 +3921,8 @@ func (r *Resolver) UpdateRemoteNote(body []byte, actorURI string) (*model.Note, 
 		}
 	}
 	if newText != "" {
-		fields["text"] = &newText
-		existing.Text = &newText
+		fields["text"] = &storedText
+		existing.Text = &storedText
 	}
 	if !slices.Equal([]string(existing.Mentions), []string(mentions)) {
 		fields["mentions"] = mentions
@@ -3939,14 +3950,16 @@ func (r *Resolver) UpdateRemoteNote(body []byte, actorURI string) (*model.Note, 
 	// hashtag は AP `tag` Hashtag entry + 編集後の本文 / CW から再抽出して
 	// 差分があれば更新 (#679)。IngestNote と同じ規則。
 	//
-	// 順序依存に注意: 上の text 更新 (`if newText != "" { existing.Text = &newText }`)
-	// と CW 更新が既に適用済みの状態で `existing.Text` / `existing.CW` を
-	// 読むので、再抽出は更新後の値で行う。`if newText != ""` を skip した
-	// 場合は元の値を保つので、この場合も「現在の本文 + 新 tag」で再計算
-	// される。将来 text 更新ロジックを別関数に切り出す等の refactor が
+	// 本文がある Update は全文 (`newText`、保存するのは切った `storedText`) から、
+	// 本文の無い Update は保存済みの `existing.Text` (切った後) から拾う。後者は
+	// 8192 単位を超えていた投稿では末尾のタグを拾わない (本文の無い Update は
+	// まれなので、保存済みの値で足りるとした。禁止語と連合のルールの判定も同じ)。
+	// CW は更新後の `existing.CW` を読むので、CW の更新より後ろに置く。将来 text 更新ロジックを別関数に切り出す等の refactor が
 	// 入ったら、この順序依存も追従させること。
 	hashtagSources := extractHashtagTagNames(apNote.Tag)
-	if existing.Text != nil {
+	if newText != "" {
+		hashtagSources = append(hashtagSources, newText)
+	} else if existing.Text != nil {
 		hashtagSources = append(hashtagSources, *existing.Text)
 	}
 	if existing.CW != nil {
@@ -5263,13 +5276,43 @@ func inboxPtr(inbox string) *string {
 }
 
 // remoteText prepares a remote-supplied **body** string for a column: NUL を落とし、
-// max rune で切る。max <= 0 なら切らない (`note.text` のような無制限の列用)。
+// max rune で切る。max <= 0 なら切らない (`note.text` のような無制限の列用。リモートの
+// note の本文の長さは呼び出し側で clipRemoteNoteText が切る)。
 //
 // **URL / ID には使わない。** 途中で切った URL は別物で、取りに行っても無駄なうえ
 // 壊れた参照を保存することになる。そちらは `remoteMediaURL` と同じく**値ごと捨てる**
 // (#2723)。
 func remoteText(raw string, max int) string {
 	return colfit.Text(raw, max)
+}
+
+// remoteNoteTextMaxUTF16 is upstream DB_MAX_NOTE_TEXT_LENGTH (const.ts): the
+// length a remote note's text is cut to before it is stored. The checks that
+// read the text (prohibited words, federation rules, hashtags) see the full
+// text, as upstream does.
+const remoteNoteTextMaxUTF16 = 8192
+
+// clipRemoteNoteText cuts s to at most remoteNoteTextMaxUTF16 UTF-16 code
+// units, never splitting a surrogate pair.
+//
+// 本家 NoteCreateService は `data.text.length > DB_MAX_NOTE_TEXT_LENGTH` なら
+// `data.text.slice(0, DB_MAX_NOTE_TEXT_LENGTH)` で切る。JavaScript の length は
+// UTF-16 の単位なので、rune で数えると BMP 外の文字 (絵文字など) が多い本文で
+// 本家の 2 倍まで入る。本家と違ってサロゲートペアの途中では切らない (切ると
+// 対になっていない surrogate が残り、保存時に置換文字になる)。
+func clipRemoteNoteText(s string) string {
+	units := 0
+	for i, r := range s {
+		w := 1
+		if r > 0xFFFF {
+			w = 2
+		}
+		if units+w > remoteNoteTextMaxUTF16 {
+			return s[:i]
+		}
+		units += w
+	}
+	return s
 }
 
 // truncateRunes clips s to at most max runes. byte 単位で切ると壊れた UTF-8 を

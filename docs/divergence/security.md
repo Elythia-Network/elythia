@@ -311,7 +311,7 @@ bind されない値」も見る (例: `notes/search` は `userId` があると 
 
 | 種類 | 扱い | 理由 |
 |---|---|---|
-| **本文系** (`note.cw` / `user_profile.description` / `user.name` / `user_profile.location` / `instance.description` 等) | rune 単位で **truncate**。**列に長さ制約が無ければ切らない** (`note.text` は text 型なので NUL の除去だけ) | 切っても意味が残る。列はコードポイントで数えるので byte で切らない |
+| **本文系** (`note.cw` / `user_profile.description` / `user.name` / `user_profile.location` / `instance.description` 等) | rune 単位で **truncate**。**列に長さ制約が無ければ切らない**。例外はリモートの `note.text` で、列は text 型だが本家 `DB_MAX_NOTE_TEXT_LENGTH` に合わせて 8192 (UTF-16 の単位) で切る。本家と違ってサロゲートペアの途中では切らない (本家は 8191 単位 + 置換文字、Elythia は 8191 単位)。禁止語・連合のルール・本文からの hashtag の判定は、本家と同じく切る前の全文で行う (本文の無い Update では保存済みの、切った後の本文で判定する) | 切っても意味が残る。列はコードポイントで数えるので byte で切らない |
 | **URL / ID 系** (`user.inbox` / `sharedInbox` / `featured` / `movedToUri` / `avatarUrl` / `drive_file.thumbnailUrl` 等) | 収まらなければ**値ごと捨てて親の行は作る**。**切ることはしない** (`user.alsoKnownAs` のように列に長さ制約が無ければ長い値も残し、NUL を含む要素だけ落とす) | 切った URL は別物で、取りに行っても無駄なうえ壊れた参照が残る |
 | **身元そのもの** (`user.uri` / `user.host` / `preferredUsername` / `note.uri` / `drive_file.url`) | 収まらなければ **document ごと拒否** (添付は 1 件ずつなのでその添付だけ) | 切ると別のものを指し、捨てると lookup / dedup の鍵が無くなる |
 | **NUL** | 種類を問わず**除去**。ただし URL / ID 系は上の規則どおり値ごと捨てる | PostgreSQL は varchar / text に NUL を入れると 22021 で落ちる |
