@@ -753,6 +753,65 @@ e2e-frontend-build: plugins ## フロントエンドをビルド (本番の bind
 UDS_COMPOSE=compose.uds.yaml
 UDS_CONFIG=deploy/uds/config/default.yml
 
+# UDS の mkgo のイメージは、dockerd の外のビルダー (BuildKit を動かすコンテナ) で
+# ビルドし、終わったらビルダーを止める (#3477)。
+#
+# **既定のビルダーは BuildKit を dockerd の中で動かす。** ビルドで使ったメモリの大半が
+# dockerd に残り、時間をおいても戻らない (実測: Dockerfile.bundled を 1 回ビルドすると
+# dockerd の匿名メモリが 242MB → 587MB、3 分後も 507MB)。本番を動かすホストでは、
+# ビルドのたびに積み上がって数 GB になり swap にも出ていた。戻すには dockerd の
+# 再起動が要り、本番のコンテナも止まる。
+#
+# 専用のビルダーなら重さはそのコンテナに乗り、dockerd の増加はイメージの取り込み分
+# だけになる (同じ Dockerfile.bundled で +35MB、ビルダーは最大 4.7GiB。mkgo の
+# deploy/uds/Dockerfile.mkgo では +17MB、ビルダーは最大 2.37GiB)。**消さずに
+# 止める。** 止めればメモリは全部戻り、キャッシュは volume に残る (`docker buildx rm`
+# は volume ごと消す)。止めずに置くと、使っていない間もメモリを抱えたままになる
+# (Dockerfile.bundled の後で 1.4GiB、Dockerfile.mkgo の後で 405MiB)。
+#
+# **専用のビルダーでビルドするのは mkgo だけ。** postgres (deploy/postgres-bigm) など
+# 他のサービスは既定のビルダーのまま。専用のビルダーは dockerd の image store を
+# 見ずに FROM をレジストリから引き直すので、base を digest で固定していない
+# postgres:18-alpine だと最初のビルドで新しい base を取りに行き、image が変わる。
+# 次の `up -d` で本番の PostgreSQL のコンテナが作り直される。既定のビルダーは
+# 手元の base とキャッシュを使うので、従来どおり image は変わらない。
+#
+# - 初回だけ作る。最初のビルドはキャッシュが空なので時間がかかる
+# - 同じビルダーで別のビルドが走っているときに止めると、そちらも止まる
+# - 空にすると既定のビルダーで従来どおりビルドする (`make uds-build UDS_BUILDER=`)
+#
+# 変数名に DOCKER_ を付けない。docker CLI が読む環境変数と衝突しうる。
+UDS_BUILDER ?= elythia-builder
+# ビルダーのコンテナの image。特権で動くので tag を付け替えられない digest で固定する。
+# 変えたときは、既にあるビルダーは古い image のままなので、`docker buildx rm
+# --keep-state $(UDS_BUILDER)` で消してから作り直す (キャッシュは残る)。
+UDS_BUILDER_IMAGE ?= moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+
+# $(call uds_with_builder,<コマンド>) は <コマンド> を BUILDX_BUILDER=$(UDS_BUILDER) で
+# 実行し、成否にかかわらず最後にビルダーを止める。<コマンド> の終了コードを返す。
+# docker compose は BUILDX_BUILDER を読み、そのビルダーでビルドして dockerd へ取り込む。
+#
+# - **シグナルでも止める。** dash は EXIT の trap を、シグナルで終わったときには
+#   走らせない。Ctrl-C やプロセスグループへの kill で中断するとビルダーがビルド途中の
+#   メモリを抱えたまま残るので、INT / TERM / HUP で exit させて EXIT の trap を通す。
+#   make の PID だけに TERM を送っても compose は止まらず、ビルドは最後まで進む
+#   (以前の uds-build でも同じ。こちらは終了コード 143 で失敗を返す)
+# - 作成が別の make と競合して失敗したときは、相手が作ったものを使う
+define uds_with_builder
+if [ -z "$(UDS_BUILDER)" ]; then \
+	ctx=$$(docker context show) && [ -n "$$ctx" ] || exit 1; \
+	BUILDX_BUILDER=$$ctx $(1); exit $$?; \
+fi; \
+echo "==> ビルダー $(UDS_BUILDER) でビルドし、終わったら止める (UDS_BUILDER= で既定のビルダー)"; \
+docker buildx inspect $(UDS_BUILDER) >/dev/null 2>&1 || \
+	docker buildx create --name $(UDS_BUILDER) --driver docker-container \
+		--driver-opt image=$(UDS_BUILDER_IMAGE) >/dev/null || \
+	docker buildx inspect $(UDS_BUILDER) >/dev/null 2>&1 || exit 1; \
+trap 'docker buildx stop $(UDS_BUILDER) >/dev/null 2>&1' EXIT; \
+trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP; \
+BUILDX_BUILDER=$(UDS_BUILDER) $(1)
+endef
+
 # compose / config の実ファイルはデプロイ先ごとに書き換えるため gitignore 済み。
 # 初回起動時のみ .example からコピーする (order-only prerequisite なので、
 # 一度作成したあとは .example を更新してもユーザのローカル編集を上書きしない)。
@@ -788,12 +847,33 @@ uds-layout-check:
 
 # revision は build-arg で渡す。**Dockerfile の中では git を呼べない** —
 # `.dockerignore` が `.git` を落とすので、コンテキストにリポジトリが入らない。
-uds-build: uds-layout-check | $(UDS_COMPOSE) $(UDS_CONFIG) ## UDS スタックのイメージをビルド
-	MKGO_COMMIT=$$(git rev-parse --short HEAD 2>/dev/null) \
-	docker compose -f $(UDS_COMPOSE) build
+#
+# mkgo 以外 (postgres など) を dockerd の中のビルダーで先にビルドし、mkgo を専用の
+# ビルダーでビルドする。理由は UDS_BUILDER の説明。ビルドするものが無いサービス
+# (nginx など) は compose が飛ばす。
+#
+# - **dockerd のビルダーは名前で指定する。** 指定しないと「今選ばれているビルダー」に
+#   なり、`docker buildx use` や BUILDX_BUILDER の export で専用のビルダーが選ばれて
+#   いると postgres もそちらでビルドされ、本番の PostgreSQL が作り直される。docker
+#   ドライバのビルダーの名前は context の名前と同じ (`docker context show`)。取れなければ
+#   止める (空のまま渡すと「今選ばれているビルダー」に戻る)
+# - サービス名が mkgo であることを前提にする (uds-restart も同じ)。mkgo の image を
+#   使う別のサービスを足すと、そちらが先にビルドされて古い mkgo を見る。そういう構成に
+#   するときは、この順序を見直す
+uds-build: uds-layout-check | $(UDS_COMPOSE) $(UDS_CONFIG) ## UDS スタックのイメージをビルド (mkgo は専用ビルダーで。UDS_BUILDER= で既定のビルダー)
+	@services=$$(docker compose -f $(UDS_COMPOSE) config --services) || exit 1; \
+	others=$$(printf '%s\n' "$$services" | grep -vx mkgo); \
+	if [ -n "$$others" ]; then \
+		ctx=$$(docker context show) && [ -n "$$ctx" ] || exit 1; \
+		BUILDX_BUILDER=$$ctx docker compose -f $(UDS_COMPOSE) build $$others || exit 1; \
+	fi
+	@$(call uds_with_builder,MKGO_COMMIT=$$(git rev-parse --short HEAD 2>/dev/null) docker compose -f $(UDS_COMPOSE) build mkgo)
 
-uds-up: uds-layout-check | $(UDS_COMPOSE) $(UDS_CONFIG) ## UDS スタックを起動
-	docker compose -f $(UDS_COMPOSE) up -d --build
+# ビルドは uds-build に任せる (`up -d --build` にすると、全サービスが同じビルダーで
+# ビルドされる)。以前の `up -d --build` は MKGO_COMMIT を渡しておらず、
+# /api/meta の mkGoCommit が空の image ができていた。
+uds-up: uds-build | $(UDS_COMPOSE) $(UDS_CONFIG) ## UDS スタックをビルドして起動
+	docker compose -f $(UDS_COMPOSE) up -d
 
 uds-rebuild: ## frontend と image をまとめてビルド (本番の配信物を差し替える)
 	$(MAKE) uds-frontend-build
