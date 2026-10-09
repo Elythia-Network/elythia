@@ -236,6 +236,13 @@ func (s *Server) setupPlugins(api *echo.Group, plugins []plugin.Definition, open
 				return fmt.Errorf("plugin %q: ジョブ登録に失敗しました: %w", def.Name, err)
 			}
 		}
+		// 通知の handler (#3469) もジョブと同じく queue ロールでだけ登録する。
+		// 積むのはどのロールでも行う (router の pluginnotify.Dispatcher)。
+		if def.Notifications != nil && s.role.RunsQueue() {
+			if err := s.registerPluginNotifications(def, pctx); err != nil {
+				return fmt.Errorf("plugin %q: 通知の handler の登録に失敗しました: %w", def.Name, err)
+			}
+		}
 
 		// schema も出す。プラグインのデータがどこにあるかを、運営者が
 		// ログだけで辿れるようにする (消したあとの残存データの説明に要る)。
@@ -267,6 +274,7 @@ func (s *Server) setupPlugins(api *echo.Group, plugins []plugin.Definition, open
 			"peer", needsPeer,
 			"secrets", len(def.Secrets),
 			"jobs", def.Jobs != nil && s.role.RunsQueue(),
+			"notifications", def.Notifications != nil && s.role.RunsQueue(),
 			"migrations", len(def.Migrations),
 			"schema", schema)
 	}
@@ -1008,6 +1016,18 @@ func validateEndpoint(endpoint string) error {
 
 // --- Jobs ---
 
+// pluginJobError maps plugin.ErrNoRetry onto the driver's skip-retry sentinel.
+//
+// プラグインは driver を import できない (internal) ので、公開面の sentinel を
+// ここで写す。写さないと、4xx のように何度やっても直らない失敗を、残りの回数
+// だけ繰り返す。
+func pluginJobError(err error) error {
+	if err == nil || !errors.Is(err, plugin.ErrNoRetry) || errors.Is(err, driver.ErrSkipRetry) {
+		return err
+	}
+	return fmt.Errorf("%w: %w", driver.ErrSkipRetry, err)
+}
+
 type pluginJobs struct {
 	name      string
 	server    *queue.Server
@@ -1038,7 +1058,7 @@ func (j *pluginJobs) Handle(name string, h plugin.JobHandler) {
 		return
 	}
 	j.server.Handle(j.taskType(name), func(ctx context.Context, t driver.Task) error {
-		return h(ctx, t.Payload())
+		return pluginJobError(h(ctx, t.Payload()))
 	})
 }
 

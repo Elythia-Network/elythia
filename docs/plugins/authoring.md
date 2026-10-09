@@ -257,7 +257,7 @@ _, err = ctx.API().AsUser(acc.ID).Call(c, "notes/create", map[string]any{"text":
 
 **作ったアカウントには、本体がどの経路からもログインさせない。** パスワードを持たず、パスワード・パスキー・2FA・パスワードの再設定・MiAuth / OAuth のトークン発行・管理者によるパスワードのリセットは、どれも拒否される (居ない利用者と同じ応答か、`PLUGIN_MANAGED_ACCOUNT`)。普通の利用者として作ると、運営者が知らないうちに認証情報が残り、乗っ取りの入口になるため。
 
-**そのアカウントのトークンは、プロセス内の呼び出しでだけ通る。** `AsUser` はそのアカウントのネイティブトークンを載せて本体の API をプロセスの中から呼ぶ。外から届いた HTTP のリクエストと streaming の接続では、トークンが正しくても `401 AUTHENTICATION_FAILED` になる。トークンはどの API の応答にも出ない。誰もログインしないので、漏れても気付いて作り直す人がいないため。streaming を使えないので、通知などは `i/notifications` を読みに行くこと。
+**そのアカウントのトークンは、プロセス内の呼び出しでだけ通る。** `AsUser` はそのアカウントのネイティブトークンを載せて本体の API をプロセスの中から呼ぶ。外から届いた HTTP のリクエストと streaming の接続では、トークンが正しくても `401 AUTHENTICATION_FAILED` になる。トークンはどの API の応答にも出ない。誰もログインしないので、漏れても気付いて作り直す人がいないため。streaming は使えないが、メンションやフォローなどは[通知の handler](#管理するアカウントへの通知) で受け取れる。
 
 ほかに決まっていること:
 
@@ -281,6 +281,92 @@ theirs := h.SeedAccount("other-plugin", "theirs")
 require.Len(t, h.ManagedAccounts(), 2)
 require.Equal(t, "theirs", theirs.Username) // 他のプラグインのアカウントは残っている
 ```
+
+## 管理するアカウントへの通知
+
+管理するアカウント宛ての通知を、プラグインの handler で受け取れる (#3469)。bot がメンションに返事をするのに、`i/notifications` を定期的に読みに行かなくて済む。
+
+```go
+func notifications(ctx plugin.Context, n plugin.Notifications) error {
+	n.Handle(func(c context.Context, ev plugin.Notification) error {
+		switch ev.Type {
+		case plugin.NotificationMention, plugin.NotificationReply:
+			// ダイレクト (specified) に公開の返事をすると、宛先の外へ漏れる
+			if ev.NoteVisibility == "specified" {
+				return nil
+			}
+			// 同じ通知がもう一度届いても、返事を二重に投稿しない
+			if alreadyReplied(c, ev.ID) {
+				return nil
+			}
+			_, err := ctx.API().AsUser(ev.AccountID).Call(c, "notes/create", map[string]any{
+				"text":       "呼びましたか?",
+				"replyId":    ev.NoteID,
+				"visibility": ev.NoteVisibility, // 元の投稿の公開範囲に合わせる
+			})
+			if err != nil {
+				return retryUnlessClientError(err)
+			}
+			return markReplied(c, ev.ID)
+		case plugin.NotificationFollow:
+			// フォローし返す。同じ通知がもう一度届くと「既にフォローしている」の
+			// 4xx になるので、それも再試行しない
+			_, err := ctx.API().AsUser(ev.AccountID).Call(c, "following/create", map[string]any{"userId": ev.UserID})
+			return retryUnlessClientError(err)
+		}
+		return nil // 知らない種類は無視する
+	})
+	return nil
+}
+
+// retryUnlessClientError は 4xx (429 を除く) を再試行しない失敗にする。投稿が
+// 消えた・既にフォローしている、などは繰り返しても直らない。5xx と 429 は
+// そのまま返すので、後で再試行される。
+func retryUnlessClientError(err error) error {
+	var apiErr *plugin.APIError
+	if errors.As(err, &apiErr) && apiErr.Status >= 400 && apiErr.Status < 500 && apiErr.Status != 429 {
+		return plugin.NoRetry(err)
+	}
+	return err
+}
+```
+
+`Definition.Notifications` に渡す (`Notifications: notifications`)。`Jobs` と同じく、queue を担うプロセスでだけ呼ばれる。宣言したのに `Handle` を呼ばないと、起動に失敗する。
+
+届くもの:
+
+| `ev.Type` | いつ | `NoteID` |
+|---|---|---|
+| `NotificationMention` | メンションされた | メンションした投稿 |
+| `NotificationReply` | 投稿に返信された | 返信の投稿 |
+| `NotificationQuote` | 投稿を引用された | 引用した投稿 |
+| `NotificationFollow` | フォローされた | (空) |
+| `NotificationFollowRequest` | フォローリクエストが来た (承認制のとき) | (空) |
+| `NotificationReaction` | 投稿にリアクションされた (`Reaction` に絵文字) | リアクションされた投稿 |
+| `NotificationChatMessage` | 1:1 のチャットでメッセージが来た (`ChatMessageID`) | (空) |
+
+`UserID` は相手 (メンションした人・フォローした人・送った人。リモートの利用者のこともある)。`NoteVisibility` は mention / reply / quote のときだけ、通知を作った時点の投稿の公開範囲 (`public` / `home` / `followers` / `specified`) が入る (リアクションでは空)。**`specified` (ダイレクト) の投稿に公開の返事をしないこと** — 宛先の外へ本文が漏れる。本文などの中身は渡さないので、要るなら `AsUser(ev.AccountID)` で `notes/show` などを呼んで取る。その時点の可視性で判定されるので、消された投稿は取れない。
+
+決まっていること:
+
+- **届くのは自分が管理するアカウント宛てだけ。** 他のプラグインのアカウントや普通の利用者への通知は届かない。`Notifications` を宣言していないプラグインのアカウントへの通知は、キューに積まれない
+- **通知が作られなかったら届かない。** そのアカウントが相手をミュートしている、通知の受信設定 (`notificationRecieveConfig`) やロールで切っている、スレッドをミュートしている、などで通知が作られない場合は handler も呼ばれない。届くのは実際に作られた通知と同じ数で、1 つの投稿がメンションと返信の両方にあたるときは返信の 1 件だけ、引用しながらメンションした投稿は引用とメンションの 2 件になる (`ev.NoteID` は同じ)
+- **利用者に見えない相手からは届かない。** 次の相手からの通知とチャットは、プラグインには届けない。bot が、利用者からは見えないものに返事をしないようにするため
+  - ブロックしている相手。本体はブロックした相手からのメンションでも通知を作る (本家と同じで、ブロックでは通知は止まらない)
+  - ミュートしている相手。チャットは通知を作らないので、ここで落とす
+  - 凍結中の相手と、ミュートしたインスタンス (`mutedInstances`) の相手。本体は通知を作るが、`i/notifications` が読むときに落とす
+  - 相手が見つからないとき (連合の相手が手元に無いなど) と、確かめられなかったとき (DB の障害など) も届けない
+- **削除済み・凍結中のアカウント宛ては届かない。** 凍結中は `AsUser` の呼び出しが `403` になるので、届けても失敗するだけのため
+- **ここに無い種類 (リノート、フォローしている人の投稿、アンケートの終了など) は届かない。** 今後足すことがあるので、知らない `ev.Type` は無視すること
+- **ルームのチャットは届かない。** 1:1 のメッセージだけ
+- **handler は通知を作る処理から切り離して呼ぶ。** 本体は通知を作った後にプラグインの専用キュー `plugin:<name>` へ積むだけで、handler はキューの worker が呼ぶ。handler が遅くても失敗しても、投稿や通知の処理は待たないし失敗もしない。ただし**積む処理そのものは同期**で、リアクション・フォロー・チャットの API (と通知を作る処理) の中で行う。Redis が応答しないと、積むのに最大 5 秒待ってから諦める。諦めた通知は届かない (ログに残る)
+- **handler はプラグインのジョブと同じキューで動く。** キュー `plugin:<name>` は `Jobs` のジョブと共有で、同時に動くのはプロセスあたり 2 つまで (`unknownQueueConcurrency`)。時間のかかるジョブが 2 つ走っていると、その間は返事が遅れる。重い処理はジョブを短く分けるか、handler の中では受け付けだけをして後回しにする
+- **at-least-once で届く。** handler がエラーを返すと再試行する (初回を含めて 5 回まで、10 秒起点の指数バックオフ。最後まで失敗したら捨てる)。**繰り返しても直らない失敗は `plugin.NoRetry(err)` で包んで返す** と、そこで打ち切る (`errors.Is(err, plugin.ErrNoRetry)` で判定するので、`%w` で包んでもよい)。`Jobs` のジョブでも同じに効く。成功した後でも、worker の再起動などで同じ通知がもう一度届くことがある。**`ev.ID` を見て冪等に書くこと** (再試行しても `ev.ID` は変わらない)。返事を投稿するなら、投稿した `ev.ID` を自分の storage に記録しておく
+- **順序は保証しない。** 再試行や並行した worker で前後する
+- 1 回の実行の上限はジョブと同じ (既定 1 時間、[ジョブ](#ジョブ)を参照)。`c` を尊重すること
+- **bot 同士で返事をし合うと止まらない。** 相手も bot なら返事をしない (`users/show` の `isBot` を見る) など、プラグインの側で止めること
+
+テストは `plugintest` の `Notifications` と `Notify` で、handler へ直接届けられる ([テスト](#テスト))。
 
 ## ジョブ
 
@@ -333,7 +419,7 @@ func routes(ctx plugin.Context, r plugin.Router) error {
 |---|---|
 | 名前 | `Jobs.Handle` に登録したものと同じもの。登録が無い名前で積むと処理者なしとして失敗する (再試行はしない) |
 | `Definition.Jobs` | **宣言していないと積めない** (エラーになる)。専用キューを作らないので、積めても誰も処理しないため |
-| 再試行 | **既定は無し。** 冪等かどうかはプラグインしか知らないので、`WithMaxAttempts` で明示する。頼むと指数バックオフ (10 秒起点) が自動で付く — 付けないと落ちている取得先を遅延 0 で連打する |
+| 再試行 | **既定は無し。** 冪等かどうかはプラグインしか知らないので、`WithMaxAttempts` で明示する。頼むと指数バックオフ (10 秒起点) が自動で付く — 付けないと落ちている取得先を遅延 0 で連打する。handler が `plugin.NoRetry(err)` を返すと、残りの回数があっても打ち切る |
 | 重複排除 | `WithDedup` で抑制されたときも `Enqueue` は `nil` を返す。**積めたかどうかは区別できない** |
 | ロール | 積むのはどのプロセスからでもできる。処理するのは queue ロールのプロセスだけ |
 
@@ -931,6 +1017,17 @@ _, err = noKey.Routes(Plugin).Call(t, "POST /connect", plugintest.Request{Admini
 require.NoError(t, err)
 ```
 
+通知の handler (#3469) は `Notifications` で登録させ、`Notify` で届ける。宛先は本番と同じく確かめる — このプラグインが管理するアカウント (`ctx.Accounts().Create` で作ったか、`SeedAccount("<プラグイン名>", ...)` で置いたもの) でないとテストが落ちる。`ID` を省くと連番が入る。同じ `ID` で 2 回呼ぶと、再試行で同じ通知がもう一度届いた場合を試せる。
+
+```go
+h := plugintest.New(t).WithName("mybot").WithAPI(&stubAPI{})
+h.Notifications(Plugin)
+acc := h.SeedAccount("mybot", "mybot")
+n := plugin.Notification{ID: "n1", Type: plugin.NotificationMention, AccountID: acc.ID, UserID: "u1", NoteID: "note1", NoteVisibility: "public"}
+require.NoError(t, h.Notify(n))
+require.NoError(t, h.Notify(n)) // 2 回目は返事を二重にしないこと
+```
+
 ## 公開面の一覧
 
 以下が「壊さないと約束する範囲」のすべて。`plugin` パッケージの分は**手で書いているが、`internal/entitycompat/testdata/golden_plugin_surface.txt` の `plugin:` 行と突き合わせる gate が CI で回る** (`TestPluginDoc_*`)。見るのは識別子の有無・宣言の有無・interface の method の署名・トップレベル func / const の行・struct のフィールドの型。**`type X func(...)` の署名だけは対象外** — golden が `type Handler func` としか出さず、照合する相手が無いため。
@@ -990,6 +1087,7 @@ type Definition struct
   Migrations []Migration
   Routes     func(Context, Router) error
   Jobs       func(Context, Jobs) error
+  Notifications func(Context, Notifications) error
   EffectivePolicies func(Context, EffectivePolicyInvalidator) (EffectivePolicyRegistration, error)
   Secrets    []SecretSpec
 
@@ -1116,8 +1214,37 @@ type Jobs interface
   Handle(string, JobHandler)
   Schedule(string, string, any)
 
+var ErrNoRetry error
+func NoRetry(error) error
+
 type Config interface
   Unmarshal(any) error
+
+type Notifications interface
+  Handle(NotificationHandler)
+
+type NotificationHandler func(context.Context, Notification) error
+
+type NotificationType string
+
+const NotificationMention
+const NotificationReply
+const NotificationQuote
+const NotificationFollow
+const NotificationFollowRequest
+const NotificationReaction
+const NotificationChatMessage
+
+type Notification struct
+  ID            string
+  Type          NotificationType
+  AccountID     string
+  UserID        string
+  NoteID        string
+  Reaction      string
+  NoteVisibility string
+  ChatMessageID string
+  CreatedAt     time.Time
 
 type Handler func(Request) (any, error)
 type JobHandler func(context.Context, json.RawMessage) error
@@ -1174,6 +1301,6 @@ PluginPage: { path, component, navTitle?, navIcon?, admin? }
 
 `plugin/` は semver に従う。破壊的変更では `APIVersion` が上がり、合わないプラグインは**ビルド時にエラーになる**（黙って動かない状態にはならない）。
 
-**interface への method の追加は `APIVersion` を上げない。** `plugin.Context` などは本体が実装してプラグインへ渡すもので、プラグインが呼ぶ側である限り追加で壊れることは無い。ただし**プラグインが自分で実装している場合 (テスト用のフェイクなど) は、method が足りずにコンパイルできなくなる** (例: #3468 で `Context.Accounts()` を足した)。フェイクを自分で書かず、`plugin/plugintest` の `Harness.Context()` を使うこと。こちらは本体と同じ版で追従する。
+**interface への method の追加は `APIVersion` を上げない。** `plugin.Context` などは本体が実装してプラグインへ渡すもので、プラグインが呼ぶ側である限り追加で壊れることは無い。ただし**プラグインが自分で実装している場合 (テスト用のフェイクなど) は、method が足りずにコンパイルできなくなる** (例: #3468 で `Context.Accounts()` を足した)。**`Definition` への項目の追加 (例: #3469 の `Notifications`) も上げない** — 宣言しないプラグインには何も変わらない。フェイクを自分で書かず、`plugin/plugintest` の `Harness.Context()` を使うこと。こちらは本体と同じ版で追従する。
 
 詳細は[互換性ポリシー](compatibility.md)を参照。

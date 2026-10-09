@@ -1,6 +1,7 @@
 // Package plugintest provides fakes for testing mk-go plugins.
 //
-// プラグインのルートやジョブを、mk-go を起動せずに直接呼べるようにする。
+// プラグインのルートやジョブ、通知の handler を、mk-go を起動せずに直接
+// 呼べるようにする。
 //
 //	func TestMyRoute(t *testing.T) {
 //	    h := plugintest.New(t).
@@ -78,6 +79,10 @@ type Harness struct {
 	secrets            *pluginsecret.Service
 	secretRepo         *memSecretRepo
 	secretsUnavailable bool
+
+	// 通知の handler (#3469)。Notifications が記録し、Notify から叩く。
+	notificationHandler plugin.NotificationHandler
+	notifySeq           int
 }
 
 // New starts a harness. The plugin name defaults to "test".

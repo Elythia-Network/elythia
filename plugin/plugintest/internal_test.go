@@ -62,3 +62,52 @@ func TestMemSecretRepo_ListByPlugin(t *testing.T) {
 	require.Len(t, sts, 1)
 	assert.True(t, sts[0].Readable)
 }
+
+// Notify の前処理。本番が届けない宛先・未登録・型の無い通知はテストを落とす
+// (#3469)。Fatal を通る経路は外からテストできないので、判定だけを分けて見る。
+func TestHarness_PrepareNotify(t *testing.T) {
+	h := New(t).WithName("bot")
+	mine := h.SeedAccount("bot", "mine")
+	theirs := h.SeedAccount("other", "theirs")
+	frozen := h.SeedAccount("bot", "frozen")
+	h.SuspendAccount(frozen.ID)
+	gone := h.SeedAccount("bot", "gone")
+	require.NoError(t, h.Context().Accounts().Delete(context.Background(), gone.ID))
+
+	_, _, err := h.prepareNotify(plugin.Notification{Type: plugin.NotificationMention, AccountID: mine.ID})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Handle が登録されていません")
+
+	h.Notifications(plugin.Definition{
+		Name: "bot", APIVersion: plugin.APIVersion,
+		Notifications: func(_ plugin.Context, n plugin.Notifications) error {
+			n.Handle(func(context.Context, plugin.Notification) error { return nil })
+			return nil
+		},
+	})
+
+	for name, n := range map[string]plugin.Notification{
+		"他のプラグインのアカウント": {Type: plugin.NotificationMention, AccountID: theirs.ID},
+		"存在しないアカウント":    {Type: plugin.NotificationMention, AccountID: "ghost"},
+		"凍結中":           {Type: plugin.NotificationMention, AccountID: frozen.ID},
+		"削除済み":          {Type: plugin.NotificationMention, AccountID: gone.ID},
+		"型が空":           {AccountID: mine.ID},
+	} {
+		_, _, err := h.prepareNotify(n)
+		assert.Error(t, err, name)
+	}
+
+	fn, got, err := h.prepareNotify(plugin.Notification{Type: plugin.NotificationFollow, AccountID: mine.ID})
+	require.NoError(t, err)
+	assert.NotNil(t, fn)
+	assert.NotEmpty(t, got.ID, "ID を省いたら連番を入れる")
+	assert.False(t, got.CreatedAt.IsZero(), "CreatedAt を省いたら現在時刻を入れる")
+	_, again, err := h.prepareNotify(plugin.Notification{Type: plugin.NotificationFollow, AccountID: mine.ID})
+	require.NoError(t, err)
+	assert.NotEqual(t, got.ID, again.ID, "連番は呼ぶたびに変わる")
+
+	// WithAccounts で差し替えているときは宛先を確かめない。
+	h.WithAccounts(h.Context().Accounts())
+	_, _, err = h.prepareNotify(plugin.Notification{Type: plugin.NotificationMention, AccountID: "anything"})
+	assert.NoError(t, err)
+}

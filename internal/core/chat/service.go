@@ -177,6 +177,36 @@ type Service struct {
 	// 自分へ送ってきている (otherApprovedMe) なら chatScope チェックを skip し、
 	// 送信後に自分→相手の approval を挿入する。nil なら従来どおり scope のみで判定。
 	approvalRepo repository.ChatApprovalRepository
+	// messageObserver は 1:1 のメッセージを保存した後に呼ぶ (#3469)。
+	// プラグインが管理するアカウント宛のメッセージを、そのプラグインへ届ける
+	// のに使う。未配線なら呼ばない。
+	messageObserver MessageObserver
+}
+
+// MessageObserver is told about each direct (1:1) chat message after it has
+// been stored (#3469).
+//
+// **保存できたものだけ。** chatScope・ブロックで拒否したメッセージと、AP の
+// 再送で既存のものを返したときは呼ばない。メッセージの作成を止めないよう、
+// 実装は重い処理をせず (queue に積むなど) すぐ戻ること。
+//
+// recipient は送信の検査のために既に引いてあれば渡す (無ければ nil)。observer が
+// 宛先を引き直さずに済むようにするため。
+type MessageObserver interface {
+	DirectMessageCreated(ctx context.Context, msg *model.ChatMessage, recipient *model.User)
+}
+
+// SetMessageObserver attaches the observer told about new direct messages.
+// nil disables it.
+func (s *Service) SetMessageObserver(o MessageObserver) {
+	s.messageObserver = o
+}
+
+// notifyMessageObserver hands a stored direct message to the observer.
+func (s *Service) notifyMessageObserver(ctx context.Context, msg *model.ChatMessage, recipient *model.User) {
+	if s.messageObserver != nil {
+		s.messageObserver.DirectMessageCreated(ctx, msg, recipient)
+	}
 }
 
 // ChatInvitationNotifier records a 'chatRoomInvitationReceived' notification on
@@ -491,9 +521,11 @@ func (s *Service) CreateMessageToUser(ctx context.Context, fromUserID, toUserID,
 			otherApprovedMe = ok
 		}
 	}
+	// recipient は observer (#3469) にも渡す。引けていなければ nil。
+	var recipient *model.User
 	if !otherApprovedMe && s.userRepo != nil {
-		recipient, err := s.userRepo.FindByID(toUserID)
-		if err == nil {
+		if r, err := s.userRepo.FindByID(toUserID); err == nil {
+			recipient = r
 			sender, err := s.userRepo.FindByID(fromUserID)
 			if err == nil {
 				if err := s.canChat(sender, recipient); err != nil {
@@ -552,6 +584,7 @@ func (s *Service) CreateMessageToUser(ctx context.Context, fromUserID, toUserID,
 	}
 	// リモートユーザー宛ならAP配送 (best-effort)
 	s.tryDeliverToRemoteUser(msg, fromUserID, toUserID)
+	s.notifyMessageObserver(ctx, msg, recipient)
 	return msg, nil
 }
 
@@ -1110,10 +1143,14 @@ func (s *Service) CreateMessageViaAP(ctx context.Context, uri string, fromUser *
 			otherApprovedMe = ok
 		}
 	}
+	var recipient *model.User
 	if !otherApprovedMe && s.userRepo != nil {
-		if recipient, err := s.userRepo.FindByID(toUserID); err == nil && recipient.IsLocal() {
-			if err := s.canChat(fromUser, recipient); err != nil {
-				return nil, err
+		if r, err := s.userRepo.FindByID(toUserID); err == nil {
+			recipient = r
+			if r.IsLocal() {
+				if err := s.canChat(fromUser, r); err != nil {
+					return nil, err
+				}
 			}
 		}
 	}
@@ -1160,6 +1197,7 @@ func (s *Service) CreateMessageViaAP(ctx context.Context, uri string, fromUser *
 		// 居ないこともあるので、引き直すと sender 未解決で push を落とす。
 		s.pushNewChatMessage(toUserID, packed, fromUser, nil)
 	}
+	s.notifyMessageObserver(ctx, msg, recipient)
 	return msg, nil
 }
 

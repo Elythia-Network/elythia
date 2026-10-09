@@ -111,6 +111,7 @@ import (
 	corepage "github.com/elythia-network/elythia/internal/core/page"
 	"github.com/elythia-network/elythia/internal/core/passwordguard"
 	corepluginaccount "github.com/elythia-network/elythia/internal/core/pluginaccount"
+	corepluginnotify "github.com/elythia-network/elythia/internal/core/pluginnotify"
 	"github.com/elythia-network/elythia/internal/core/pluginsecret"
 	"github.com/elythia-network/elythia/internal/core/pluginsecret/pgrepo"
 	corepoll "github.com/elythia-network/elythia/internal/core/poll"
@@ -4327,6 +4328,16 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	if err := s.setupPlugins(api.Group, registeredPlugins, openPluginStorage); err != nil {
 		s.pluginSetupErr = err
 		return
+	}
+	// 管理するアカウントへの通知をプラグインへ届ける (#3469)。**ロールを問わず
+	// 配線する** — 通知とチャットはどのプロセスでも作られる。受け取るプラグインが
+	// 居なければ nil なので、通知を作るたびの宛先の確認も走らない。
+	// queueClient が nil のまま interface に入れると nil にならないので、ここで分ける。
+	if d := newPluginNotificationDispatcher(registeredPlugins, s.config.Plugins, s.queueClient, corepluginnotify.Deps{
+		Users: userRepo, Mutes: mutingService, Blocks: blockingRepo,
+	}); d != nil {
+		notificationHook.SetCreatedObserver(d)
+		chatService.SetMessageObserver(d)
 	}
 	// 消したプラグインのデータが残っていないかを知らせる (#2479)。
 	// 自動では消さないので、残っていること自体を見えるようにする。

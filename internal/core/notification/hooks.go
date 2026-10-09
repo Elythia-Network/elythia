@@ -60,6 +60,25 @@ type Hook struct {
 	// threadMuteRepo は reply/mention 通知のスレッドミュート gate に使う
 	// optional 依存 (#1954)。未配線なら gate は素通り。
 	threadMuteRepo repository.NoteThreadMutingRepository
+	// createdObserver は実際に作った通知を受け取る (#3469)。プラグインが管理する
+	// アカウントへの通知を、そのプラグインへ届けるのに使う。未配線なら呼ばない。
+	createdObserver CreatedObserver
+}
+
+// CreatedObserver is told about each notification the Hook actually persisted
+// for a local recipient (#3469).
+//
+// **抑制の判定より後で呼ぶ。** ミュート・notificationRecieveConfig・ロールの
+// opt-out・スレッドミュートで作られなかった通知では呼ばない。通知を作る処理を
+// 止めないよう、実装は重い処理をせず (queue に積むなど) すぐ戻ること。
+type CreatedObserver interface {
+	NotificationCreated(ctx context.Context, recipient *model.User, n *Notification)
+}
+
+// SetCreatedObserver attaches the observer told about created notifications.
+// nil disables it.
+func (h *Hook) SetCreatedObserver(o CreatedObserver) {
+	h.createdObserver = o
 }
 
 // NewHook constructs a Hook bound to a NotificationService and userRepo.
@@ -559,6 +578,7 @@ func (h *Hook) recordNoteUnreads(n *model.Note, author *model.User, mentionedIDs
 // user (host == nil). リモートユーザーへの通知はAP連合経由で送られるので
 // ローカルストリームには入れない。Muteしているnotifierからの通知も抑制する。
 func (h *Hook) notifyLocalUser(ctx context.Context, notifieeID string, in CreateInput) {
+	var recipient *model.User
 	if h.userRepo != nil {
 		u, err := h.userRepo.FindByID(notifieeID)
 		if err != nil {
@@ -567,6 +587,7 @@ func (h *Hook) notifyLocalUser(ctx context.Context, notifieeID string, in Create
 		if u.Host != nil {
 			return
 		}
+		recipient = u
 	}
 	// notifiee がnotifierをmuteしている場合は通知をスキップする
 	if h.muteChecker != nil && in.NotifierID != "" {
@@ -593,9 +614,16 @@ func (h *Hook) notifyLocalUser(ctx context.Context, notifieeID string, in Create
 			}
 		}
 	}
-	if _, err := h.svc.CreateWithPush(ctx, in, pushFn); err != nil {
+	n, err := h.svc.CreateWithPush(ctx, in, pushFn)
+	if err != nil {
 		slog.Warn("notification create failed", "type", in.Type, "notifiee", notifieeID, "err", err)
 		return
+	}
+	// n が nil なのはロールの opt-out で抑制されたとき。作っていない通知は
+	// 知らせない。recipient が無い (userRepo 未配線) ときも、誰の通知か
+	// 確かめられないので知らせない。
+	if n != nil && recipient != nil && h.createdObserver != nil {
+		h.createdObserver.NotificationCreated(ctx, recipient, n)
 	}
 }
 

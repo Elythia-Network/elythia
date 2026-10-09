@@ -64,6 +64,10 @@ func TestDefinition_Validate_Accepts(t *testing.T) {
 	// Jobs だけでもよい (queue 専用のプラグイン)。
 	jobsOnly := Definition{Name: "x", APIVersion: APIVersion, Jobs: func(Context, Jobs) error { return nil }}
 	require.NoError(t, jobsOnly.Validate())
+
+	// 通知の handler だけでもよい (#3469。bot の返事だけをするプラグイン)。
+	notifOnly := Definition{Name: "x", APIVersion: APIVersion, Notifications: func(Context, Notifications) error { return nil }}
+	require.NoError(t, notifOnly.Validate())
 }
 
 func TestDefinition_Validate_Rejects(t *testing.T) {
@@ -298,4 +302,12 @@ func TestDefinition_Validate_PeerRequiresPeered(t *testing.T) {
 
 	// Routes / Jobs / EffectivePolicies / Peer のいずれも無ければエラー。
 	assert.Error(t, base.Validate())
+}
+
+func TestNoRetry(t *testing.T) {
+	assert.NoError(t, NoRetry(nil))
+	base := errors.New("gone")
+	err := NoRetry(base)
+	assert.ErrorIs(t, err, ErrNoRetry)
+	assert.ErrorIs(t, err, base, "元のエラーも残す")
 }

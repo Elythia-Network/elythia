@@ -206,6 +206,14 @@ func TestClient_EnqueuePlugin_RetentionAppliedViaPrefix(t *testing.T) {
 	require.NoError(t, c.EnqueuePluginPeer(context.Background(), "genshin", []byte(`{}`)))
 	assert.True(t, rec.lastOpts.KeepCompletedSet)
 	assert.Equal(t, 30, rec.lastOpts.KeepCompleted)
+
+	// 通知の受け渡し (#3469) も同じ。
+	rec.lastOpts = driver.EnqueueOptions{}
+	require.NoError(t, c.EnqueuePluginNotification(context.Background(), "genshin", []byte(`{}`)))
+	assert.True(t, rec.lastOpts.KeepCompletedSet, "通知の受け渡しに retention が付いていない")
+	assert.Equal(t, 30, rec.lastOpts.KeepCompleted)
+	assert.True(t, rec.lastOpts.KeepFailedSet)
+	assert.Equal(t, 100, rec.lastOpts.KeepFailed)
 }
 
 // **名前ごとの登録があればそちらが優先されること** (接頭辞が上書きしない)。

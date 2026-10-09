@@ -49,6 +49,8 @@ plugin/plugintest: func (*Harness) EffectivePolicies(plugin.Definition) plugin.E
 plugin/plugintest: func (*Harness) Enqueues() []Enqueued
 plugin/plugintest: func (*Harness) Jobs(plugin.Definition) *JobSet
 plugin/plugintest: func (*Harness) ManagedAccounts() []ManagedAccount
+plugin/plugintest: func (*Harness) Notifications(plugin.Definition)
+plugin/plugintest: func (*Harness) Notify(plugin.Notification) error
 plugin/plugintest: func (*Harness) Peer(plugin.Definition)
 plugin/plugintest: func (*Harness) PeerSends() []PeerSend
 plugin/plugintest: func (*Harness) Routes(plugin.Definition) Handlers
@@ -92,6 +94,7 @@ plugin:   field Definition.EffectivePolicies func(Context, EffectivePolicyInvali
 plugin:   field Definition.Jobs func(Context, Jobs) error
 plugin:   field Definition.Migrations []Migration
 plugin:   field Definition.Name string
+plugin:   field Definition.Notifications func(Context, Notifications) error
 plugin:   field Definition.Peer func(Context, Peer) error
 plugin:   field Definition.PeerMaxBody int64
 plugin:   field Definition.Peered bool
@@ -116,6 +119,15 @@ plugin:   field Image.Data []byte
 plugin:   field Image.Filename string
 plugin:   field Migration.SQL string
 plugin:   field Migration.Version int
+plugin:   field Notification.AccountID string
+plugin:   field Notification.ChatMessageID string
+plugin:   field Notification.CreatedAt time.Time
+plugin:   field Notification.ID string
+plugin:   field Notification.NoteID string
+plugin:   field Notification.NoteVisibility string
+plugin:   field Notification.Reaction string
+plugin:   field Notification.Type NotificationType
+plugin:   field Notification.UserID string
 plugin:   field ProfileUpdate.Avatar *Image
 plugin:   field ProfileUpdate.Banner *Image
 plugin:   field ProfileUpdate.Description *string
@@ -147,6 +159,7 @@ plugin:   method EffectivePolicyInvalidator.InvalidateRole(context.Context, stri
 plugin:   method EffectivePolicyInvalidator.InvalidateUser(context.Context, string) error
 plugin:   method Jobs.Handle(string, JobHandler)
 plugin:   method Jobs.Schedule(string, string, any)
+plugin:   method Notifications.Handle(NotificationHandler)
 plugin:   method Peer.Handle(PeerHandler)
 plugin:   method Peer.Has(context.Context, string) (bool, error)
 plugin:   method Peer.OnReply(PeerReplyHandler)
@@ -167,6 +180,13 @@ plugin:   method Secrets.Set(context.Context, string, string) error
 plugin:   method Storage.DB() *sql.DB
 plugin:   method Storage.Migrate(context.Context, []Migration) error
 plugin: const APIVersion
+plugin: const NotificationChatMessage
+plugin: const NotificationFollow
+plugin: const NotificationFollowRequest
+plugin: const NotificationMention
+plugin: const NotificationQuote
+plugin: const NotificationReaction
+plugin: const NotificationReply
 plugin: func (*APIError) Error() string
 plugin: func (*StatusError) Error() string
 plugin: func (Definition) Validate() error
@@ -175,6 +195,7 @@ plugin: func ErrNotFound(string, ...any) *StatusError
 plugin: func Errorf(int, string, ...any) *StatusError
 plugin: func ExtractStatusError(error) (*StatusError, string)
 plugin: func NewCodedStatusError(int, string, string) error
+plugin: func NoRetry(error) error
 plugin: func Register(Definition)
 plugin: func Registered() []Definition
 plugin: func WithDedup(time.Duration) EnqueueOption
@@ -202,6 +223,10 @@ plugin: type Image struct
 plugin: type JobHandler func
 plugin: type Jobs interface
 plugin: type Migration struct
+plugin: type Notification struct
+plugin: type NotificationHandler func
+plugin: type NotificationType other
+plugin: type Notifications interface
 plugin: type Peer interface
 plugin: type PeerHandler func
 plugin: type PeerReplyHandler func
@@ -216,6 +241,7 @@ plugin: type Storage interface
 plugin: var ErrAccountNotFound
 plugin: var ErrAccountSuspended
 plugin: var ErrInvalidUsername
+plugin: var ErrNoRetry
 plugin: var ErrSecretNotSet
 plugin: var ErrSecretUnreadable
 plugin: var ErrSecretsUnavailable

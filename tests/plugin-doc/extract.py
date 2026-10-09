@@ -13,6 +13,7 @@ import sys
 HEADER = '''import (
 \t"context"
 \t"encoding/json"
+\t"errors"
 \t"net/http"
 \t"testing"
 
@@ -32,7 +33,7 @@ var (
 \traw                             json.RawMessage
 )
 
-var _, _, _, _, _, _, _ = context.Background, json.Marshal, http.StatusOK, plugintest.New, require.NoError, assert.Equal, peercache.DefaultTTL
+var _, _, _, _, _, _, _, _ = context.Background, json.Marshal, errors.As, http.StatusOK, plugintest.New, require.NoError, assert.Equal, peercache.DefaultTTL
 '''
 
 # **断片ごとに置かれる文脈が違う** — top-level 宣言、`(any, error)` を返すハンドラの
