@@ -625,8 +625,10 @@ func (r *Resolver) resolveSuspensionChange(existing *model.User, actorSuspended 
 	// **削除済みの行には触らない** (#2973)。`admin/accounts/delete` は
 	// `isSuspended` と `isDeleted` を同時に立てるので、発信元由来の凍結が
 	// 残っている tombstone を発信元が解除できてしまう。inbound の gate は
-	// `isSuspended` しか見ない (`processor.go` の dispatch 前チェック) ので、
-	// 解除されると削除済みアカウントからの activity が再び通る。
+	// `isSuspended` と `isDeleted` の両方を見る (`processor.go` の dispatch 前
+	// チェック) が、ここで凍結を外させてはいけない。読み取り側 (packer や
+	// timeline) は `isSuspended` を見て隠すので、外れると削除したアカウントが
+	// 見えるようになる。
 	if existing.IsDeleted {
 		return false, false
 	}
