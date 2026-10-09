@@ -70,6 +70,15 @@ type Definition struct {
 	// job queue. May be nil.
 	Jobs func(Context, Jobs) error
 
+	// Notifications registers the handler for notifications addressed to the
+	// accounts this plugin manages (#3469). Called only in processes that run
+	// the job queue, like Jobs. May be nil.
+	//
+	// **宣言したプラグインにだけ届ける。** 宣言が無ければ、管理するアカウントに
+	// 通知が来てもキューに積まない (積んでも処理する handler が居ないため)。
+	// handler はプラグインの専用キューの worker から呼ばれる。
+	Notifications func(Context, Notifications) error
+
 	// Peered opts this plugin into [Peer] — the private channel to the same
 	// plugin on other mk-go instances.
 	//
@@ -156,8 +165,8 @@ func (d Definition) Validate() error {
 		}
 		seen[sp.Name] = struct{}{}
 	}
-	if d.Routes == nil && d.Jobs == nil && d.EffectivePolicies == nil && d.Peer == nil {
-		return fmt.Errorf("plugin %q: Routes も Jobs も EffectivePolicies も Peer も設定されていません", d.Name)
+	if d.Routes == nil && d.Jobs == nil && d.EffectivePolicies == nil && d.Peer == nil && d.Notifications == nil {
+		return fmt.Errorf("plugin %q: Routes も Jobs も EffectivePolicies も Peer も Notifications も設定されていません", d.Name)
 	}
 	return nil
 }

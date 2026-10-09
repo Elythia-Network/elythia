@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"time"
 
 	"github.com/elythia-network/elythia/internal/queue/driver"
 )
@@ -142,4 +143,52 @@ func (c *Client) EnqueuePlugin(ctx context.Context, plugin, job string, body []b
 	base = append(base, c.retentionOpts(PluginQueueName(plugin))...)
 	all := append(base, opts...)
 	return c.inner.Enqueue(ctx, PluginTaskType(plugin, job), body, all...)
+}
+
+// PluginNotificationJobName is the reserved job name the host uses to hand a
+// notification to a plugin's handler (#3469).
+//
+// `_peer` と同じく `_` 始まりなので、プラグイン自身のジョブ名
+// (pluginJobNamePattern) とは衝突せず、プラグインが [Client.EnqueuePlugin] から
+// 偽の通知を積むこともできない。
+const PluginNotificationJobName = "_notification"
+
+// PluginNotificationTaskType is the task type for one notification delivery.
+func PluginNotificationTaskType(plugin string) string {
+	return PluginTaskType(plugin, PluginNotificationJobName)
+}
+
+// PluginNotificationMaxAttempts is the total number of tries for one
+// notification delivery, including the first.
+//
+// **再試行を必ず付ける。** mkq の既定は 0 回 (= 再試行無し) で、handler が
+// 一時的に失敗しただけで bot が返事をしなくなる。通知の handler は
+// at-least-once を前提に冪等に書く約束なので (docs/plugins/authoring.md)、
+// 本体の判断で再試行してよい。
+const PluginNotificationMaxAttempts = 5
+
+// PluginNotificationBackoffBase is the exponential backoff base between tries.
+// プラグインのジョブの再試行 (server.pluginRetryBackoffBase) と同じ 10 秒起点。
+// 5 回なら 10 / 20 / 40 / 80 秒の間隔で、2 分半ほどで諦める。
+const PluginNotificationBackoffBase = 10 * time.Second
+
+// EnqueuePluginNotification schedules one notification delivery onto the
+// plugin's own queue.
+//
+// プラグイン専用のキューに積むので、handler が遅くても詰まっても、本体の
+// キューと他のプラグインは巻き添えにならない。
+func (c *Client) EnqueuePluginNotification(ctx context.Context, plugin string, body []byte) error {
+	if !pluginNamePattern.MatchString(plugin) {
+		return fmt.Errorf("queue: プラグイン名 %q が不正です", plugin)
+	}
+	opts := []driver.EnqueueOption{
+		driver.WithQueue(PluginQueueName(plugin)),
+		driver.WithMaxRetry(PluginNotificationMaxAttempts - 1),
+		// **backoff も付ける。** 未設定の mkq は遅延 0 で再投入するので、
+		// handler が落ちている外部 API を連打する。
+		driver.WithBackoff(driver.BackoffExponential, PluginNotificationBackoffBase),
+	}
+	// retention は他のプラグインの経路と同じく付ける (#1193 の再発防止)。
+	opts = append(opts, c.retentionOpts(PluginQueueName(plugin))...)
+	return c.inner.Enqueue(ctx, PluginNotificationTaskType(plugin), body, opts...)
 }

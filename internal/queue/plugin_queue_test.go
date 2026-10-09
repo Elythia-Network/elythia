@@ -137,3 +137,35 @@ func TestPluginJobName_CannotClaimPeerSlot(t *testing.T) {
 	assert.Error(t, c.EnqueuePlugin(context.Background(), "demo", queue.PluginPeerJobName, nil))
 	assert.Equal(t, queue.PluginTaskType("demo", queue.PluginPeerJobName), queue.PluginPeerTaskType("demo"))
 }
+
+// 通知の受け渡し (#3469) は **専用キュー**へ、**再試行と backoff を付けて**
+// 積む。mkq の既定は再試行 0 回なので、明示しないと一時的な失敗で bot が
+// 返事をしなくなる。
+func TestClient_EnqueuePluginNotification(t *testing.T) {
+	d := newFakeDriver()
+	c := queue.NewClient(d)
+
+	require.NoError(t, c.EnqueuePluginNotification(context.Background(), "demo", []byte(`{"id":"n1"}`)))
+
+	require.Len(t, d.client.calls, 1)
+	got := d.client.calls[0]
+	assert.Equal(t, "plugin:demo:_notification", got.taskType)
+	assert.Equal(t, queue.PluginNotificationTaskType("demo"), got.taskType)
+	assert.JSONEq(t, `{"id":"n1"}`, string(got.payload))
+	o := driver.ApplyEnqueueOptions(got.opts)
+	assert.Equal(t, "plugin:demo", o.Queue)
+	assert.True(t, o.MaxRetrySet)
+	assert.Equal(t, queue.PluginNotificationMaxAttempts-1, o.MaxRetry)
+	assert.Greater(t, o.MaxRetry, 0, "再試行する")
+	assert.Equal(t, driver.BackoffExponential, o.BackoffType)
+	assert.Equal(t, queue.PluginNotificationBackoffBase, o.BackoffDelay)
+
+	assert.Error(t, c.EnqueuePluginNotification(context.Background(), "Bad Name", nil))
+}
+
+// **プラグインは `_notification` を名乗れない。** 名乗れると、偽の通知を
+// 自分の handler へ積めてしまう。
+func TestPluginJobName_CannotClaimNotificationSlot(t *testing.T) {
+	c := queue.NewClient(newFakeDriver())
+	assert.Error(t, c.EnqueuePlugin(context.Background(), "demo", queue.PluginNotificationJobName, nil))
+}
