@@ -914,6 +914,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 未施錠アカウントが承認なしでフォローされ、followers 限定ノートが
 	// 配送される (upstream UserFollowingService の 4 つ目の OR 条件)。
 	followingService.SetSilencedHostChecker(instanceService)
+	// 「静かに成立させる」(#3466) で通したフォローを記録する。following/silent/list
+	// が読む。
+	followingService.SetSilentFollowRepo(repository.NewSilentFollowRepository(s.db))
 	// ホワイトリスト連合 (federation: specified) / blockedHosts に対する gate を
 	// resolver の入口 (fetchActor / resolveNoteOnce / IngestNoteWithCreated) に
 	// 適用する。deliver_service / inboxProcessor と同じ instanceService を共有。
@@ -2165,6 +2168,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	iHandler.SetNotificationService(notificationService)
 	iHandler.SetAchievementNotifier(notificationService)
 	iHandler.SetFollowRequestRepo(followRequestRepo)
+	iHandler.SetFollowRequestBulkAccepter(followingService) // #3466: 鍵を外したときの一括承認
 	iHandler.SetChatRepo(chatRepo)
 	// Phase 7-2 follow-up (#271)
 	iHandler.SetAntennaUnreadRepo(antennaNoteUnreadRepo)
@@ -3446,6 +3450,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/following/update", followingHandler.UpdateFollow, middleware.RequireAuth(), middleware.RequireScope("write:following"))
 	api.POST("/following/update-all", followingHandler.UpdateFollowAll, middleware.RequireAuth(), middleware.RequireScope("write:following"))
 	api.POST("/following/requests/sent", followingHandler.RequestsSent, middleware.RequireAuth(), middleware.RequireScope("read:following"))
+	// Elythia 独自 (#3466): 通知を出さずに成立させたフォローの一覧。
+	api.POST("/following/silent/list", followingHandler.ListSilent, middleware.RequireAuth(), middleware.RequireScope("read:following"))
 	// channels 残り
 	api.POST("/channels/favorite", channelsHandler.Favorite, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:channels"))
 	api.POST("/channels/unfavorite", channelsHandler.Unfavorite, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:channels"))
@@ -4658,6 +4664,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"受信した Block / Undo(Block) が無視され、reversi の Invite からブロック判定が飛ぶ"},
 		{"following.silencedHostChecker", followingService.HasSilencedHostChecker(),
 			"サイレンスしたホストからのフォローが承認なしで通り、followers 限定ノートが配送される"},
+		{"following.silentFollowRepo", followingService.HasSilentFollowRepo(),
+			"通知を出さずに成立させたフォロー (#3466) が記録されず、following/silent/list に出ない"},
+		{"i.followRequestBulkAccepter", iHandler.HasFollowRequestBulkAccepter(),
+			"鍵を外しても溜まっていたフォローリクエストが承認されずに残る"},
 		{"resolver.silencedHostChecker", federationResolver.HasSilencedHostChecker(),
 			"silenced instance の remote public note が home へ降格されず public timeline に出る"},
 		{"resolver.rolePolicyProvider", federationResolver.HasRolePolicyProvider(),

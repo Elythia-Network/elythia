@@ -41,6 +41,7 @@ import type {
 	ServerMetrics,
 	ServerPluginInfo,
 	SignupApplicationView,
+	SilentFollow,
 } from './entities.js';
 
 /**
@@ -582,6 +583,21 @@ export type ElythiaEndpoints = {
 			untilId?: string | null;
 		};
 		res: EmojiApplication[];
+	};
+	'following/silent/list': {
+		/**
+		 * The follows toward the caller that succeeded without a notification
+		 * because of `followApprovalAction: 'silentFollow'` (#3466), newest first.
+		 */
+		req: {
+			/** From 1 to 100. Defaults to 10. */
+			limit?: number;
+			sinceId?: string;
+			untilId?: string;
+			sinceDate?: number;
+			untilDate?: number;
+		};
+		res: SilentFollow[];
 	};
 	'i/flashs': {
 		/** The same handler as `flash/my`. */

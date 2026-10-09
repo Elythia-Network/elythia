@@ -1169,6 +1169,20 @@ func applyProfileFields(p *model.UserProfile, fields map[string]any) error {
 			if b, ok := v.(bool); ok {
 				p.CarefulBot = b
 			}
+		case "followApprovalLocalSeconds", "followApprovalRemoteSeconds":
+			var n *int
+			if i, ok := v.(int); ok {
+				n = &i
+			}
+			if k == "followApprovalLocalSeconds" {
+				p.FollowApprovalLocalSeconds = n
+			} else {
+				p.FollowApprovalRemoteSeconds = n
+			}
+		case "followApprovalAction":
+			if s, ok := v.(string); ok {
+				p.FollowApprovalAction = s
+			}
 		case "injectFeaturedNote":
 			if b, ok := v.(bool); ok {
 				p.InjectFeaturedNote = b

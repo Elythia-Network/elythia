@@ -422,6 +422,52 @@ export type ElythiaUserDetailedFields = {
 
 export type UserDetailed = Misskey.entities.UserDetailed & ElythiaUserDetailedFields;
 
+/**
+ * How a follow from an account younger than `followApprovalLocalSeconds` /
+ * `followApprovalRemoteSeconds` is handled (#3466).
+ *
+ * - `request`: becomes a follow request with a notification (upstream behaviour, the default)
+ * - `silentRequest`: becomes a follow request without a notification
+ * - `silentFollow`: succeeds without a notification and is listed in `following/silent/list`
+ */
+export type FollowApprovalAction = 'request' | 'silentRequest' | 'silentFollow';
+
+/**
+ * Fields that the signed-in user (`i`, `i/update`, `meUpdated`) has on
+ * Elythia but not in this version of misskey-js. Absent when unset (`null`,
+ * or `request` for the action).
+ *
+ * 本家 2026.10.0 の e2e が MeDetailed の key の過不足を見るので、未設定なら出さない。
+ * 古い版のサーバーでも欠ける。どちらも未設定として読む。
+ */
+export type ElythiaMeDetailedFields = {
+	/**
+	 * Follows from local accounts younger than this many seconds are held back
+	 * (`null` or 0: off). An upstream field (misskey-dev/misskey#17998) that
+	 * this version of misskey-js does not have yet.
+	 */
+	followApprovalLocalSeconds?: number | null;
+	/**
+	 * The same for remote accounts. Elythia counts from the account creation
+	 * time the remote server published when known, and from when this server
+	 * first saw the account otherwise. Upstream always uses the latter.
+	 */
+	followApprovalRemoteSeconds?: number | null;
+	/** How a held-back follow is handled. Elythia-only. */
+	followApprovalAction?: FollowApprovalAction;
+};
+
+export type MeDetailed = Misskey.entities.MeDetailed & ElythiaMeDetailedFields;
+
+/** One element of `following/silent/list` (#3466). */
+export type SilentFollow = {
+	/** The cursor. Changes each time the same user follows again. */
+	id: string;
+	/** When the latest silent follow from this user happened. */
+	createdAt: string;
+	follower: Misskey.entities.UserLite;
+};
+
 /** The outcome of one check of `admin/self-check` or `admin/federation/check-host`. */
 export type SelfCheckStatus = 'ok' | 'warn' | 'fail' | 'skip';
 

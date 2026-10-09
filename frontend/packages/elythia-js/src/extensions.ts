@@ -5,7 +5,7 @@
  */
 
 import type * as Misskey from 'misskey-js';
-import type { SignupApplicationFormField } from './entities.js';
+import type { FollowApprovalAction, SignupApplicationFormField } from './entities.js';
 
 /**
  * Request fields that Elythia adds to upstream endpoints, keyed by the endpoint.
@@ -60,6 +60,19 @@ export type ElythiaRequestExtensions = {
 		/** Keeps notes seen only through relays in Redis instead of the database. */
 		enableEphemeralRelayNotes?: boolean;
 		ephemeralRelayNoteTtlMinutes?: number;
+	};
+	'i/update': {
+		/**
+		 * Holds back follows from local accounts younger than this many seconds
+		 * (0 to 2592000, `null` or 0: off). An upstream parameter
+		 * (misskey-dev/misskey#17998) that this version of misskey-js does not
+		 * have yet.
+		 */
+		followApprovalLocalSeconds?: number | null;
+		/** The same for remote accounts. */
+		followApprovalRemoteSeconds?: number | null;
+		/** How a held-back follow is handled. Elythia-only. */
+		followApprovalAction?: FollowApprovalAction;
 	};
 	'i/regenerate-token': {
 		/** The two-factor authentication code. Required when two-factor authentication is enabled. */
