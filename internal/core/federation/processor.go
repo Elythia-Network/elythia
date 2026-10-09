@@ -528,11 +528,20 @@ func (p *Processor) process(body []byte, signer *model.User) error {
 	// suspended remote actor を DB lookup で判定して drop する (新規 actor は
 	// まだ DB に無く suspended にもなり得ないので素通し)。fetch はせず DB read
 	// のみなので追加コストは小さい。
+	//
+	// 削除済み (isDeleted) の actor も同じく捨てる。本家は署名の持ち主を引く
+	// `getAuthUserFromKeyId` / `getAuthUserFromApId` が削除済みなら null を返し、
+	// InboxProcessorService が `skip: failed to resolve user` で捨てる。ここに
+	// 届く act.Actor は、HTTP 署名の持ち主か、転送なら LD-Signature で認証された
+	// actor なので、どちらの経路もこの判定を通る。
 	if p.userRepo != nil {
 		actor, err := p.userRepo.FindByURI(act.Actor)
 		switch {
 		case err == nil && actor != nil && actor.IsSuspended:
 			slog.Info("federation: dropping activity from suspended actor", "actor", act.Actor, "type", act.Type)
+			return nil
+		case err == nil && actor != nil && actor.IsDeleted:
+			slog.Info("federation: dropping activity from deleted actor", "actor", act.Actor, "type", act.Type)
 			return nil
 		case err != nil && !repository.IsNotFound(err):
 			// **判定できないまま素通しにしない** (#3116)。以前は `err == nil` を
@@ -540,7 +549,7 @@ func (p *Processor) process(body []byte, signer *model.User) error {
 			// そのまま処理されていた** (moderation の fail-open)。not-found は
 			// 「まだ取り込んでいない actor」= 凍結されているはずがないので素通しが
 			// 正しいが、障害は retry させる。
-			return fmt.Errorf("suspended actor check: %w", err)
+			return fmt.Errorf("actor moderation check: %w", err)
 		}
 	}
 

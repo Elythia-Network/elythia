@@ -36,9 +36,9 @@ func (h *Handler) AccountsDelete(c echo.Context) error {
 	if err := h.userRepo.UpdateUser(req.UserID, map[string]any{"isSuspended": true, "isDeleted": true}); err == nil {
 		// **モデレーターの判断として刻む** (#2973)。刻まないと、発信元由来の
 		// 凍結が `remote` のまま残っている行では、発信元が `toot:suspended` を
-		// 下ろした時点で tombstone の凍結が解除される。inbound の gate は
-		// `isSuspended` しか見ないので、削除済みアカウントからの activity が
-		// 再び通ることになる。
+		// 下ろした時点で tombstone の凍結が解除される。削除済みの行は inbound の
+		// gate (`isDeleted`) で捨てられるが、読み取り側は `isSuspended` を見て
+		// 隠すので、凍結が外れると削除したアカウントが見えるようになる。
 		h.recordLocalSuspensionOrigin(req.UserID)
 		// 論理削除直後の auth bypass 防止 (#965)。target の全 token cache
 		// entry を即時 invalidate して 30s stale window を消す。DB 更新が
@@ -112,9 +112,9 @@ func (h *Handler) DeleteAccount(c echo.Context) error {
 	if err := h.userRepo.UpdateUser(req.UserID, map[string]any{"isSuspended": true, "isDeleted": true}); err == nil {
 		// **モデレーターの判断として刻む** (#2973)。刻まないと、発信元由来の
 		// 凍結が `remote` のまま残っている行では、発信元が `toot:suspended` を
-		// 下ろした時点で tombstone の凍結が解除される。inbound の gate は
-		// `isSuspended` しか見ないので、削除済みアカウントからの activity が
-		// 再び通ることになる。
+		// 下ろした時点で tombstone の凍結が解除される。削除済みの行は inbound の
+		// gate (`isDeleted`) で捨てられるが、読み取り側は `isSuspended` を見て
+		// 隠すので、凍結が外れると削除したアカウントが見えるようになる。
 		h.recordLocalSuspensionOrigin(req.UserID)
 		// AccountsDelete と同じ。target の全 token cache entry を即時
 		// invalidate (#965)。

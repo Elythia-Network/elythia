@@ -383,5 +383,5 @@ func TestResolveActor_DeletedTombstone_IsNotUnsuspended(t *testing.T) {
 	user, err := r.ResolveActor(uri)
 	require.NoError(t, err)
 	assert.Truef(t, user.IsSuspended,
-		"削除済み tombstone の凍結が発信元に解除された。inbound gate は isSuspended しか見ないので activity が再び通る")
+		"削除済み tombstone の凍結が発信元に解除された。読み取り側は isSuspended で隠すので、削除したアカウントが見えるようになる")
 }

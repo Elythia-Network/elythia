@@ -113,6 +113,30 @@ func TestProcess_SuspendedActorDropped(t *testing.T) {
 	assert.Empty(t, noteRepo.Notes, "suspended actor activity must be dropped")
 }
 
+// 削除済み (isDeleted) の actor からの activity も捨てる。本家は署名の持ち主が
+// 削除済みなら `skip: failed to resolve user`。凍結 (isSuspended) とは別に
+// 立つ (相手の Delete(actor) は isDeleted だけを立てる)。
+func TestProcess_DeletedActorDropped(t *testing.T) {
+	p, repo, noteRepo, _ := newProcForInbound1560(t, aliceActor)
+	uri := "https://remote.example/users/alice"
+	host := "remote.example"
+	repo.Users["alice1"] = &model.User{ID: "alice1", Username: "alice", URI: &uri, Host: &host, IsDeleted: true}
+	repo.Users["bob"] = &model.User{ID: "bob", Username: "bob"}
+
+	body := []byte(`{
+		"type": "Create",
+		"actor": "https://remote.example/users/alice",
+		"object": {"id":"https://remote.example/notes/x","type":"Note","attributedTo":"https://remote.example/users/alice","content":"hi","to":["https://www.w3.org/ns/activitystreams#Public"]}
+	}`)
+	require.NoError(t, p.Process(body), "a dropped activity is acked, not retried")
+	assert.Empty(t, noteRepo.Notes, "deleted actor activity must be dropped")
+
+	// 対照: 同じ actor が削除済みでなければ作られる。
+	repo.Users["alice1"].IsDeleted = false
+	require.NoError(t, p.Process(body))
+	assert.Len(t, noteRepo.Notes, 1, "control: the same Create from a live actor is stored")
+}
+
 // #1560 [LOW] bearcaps (bear:) object URI は Create/Announce で skip。
 func TestProcess_BearcapsObjectSkipped(t *testing.T) {
 	p, repo, noteRepo, _ := newProcForInbound1560(t, aliceActor)

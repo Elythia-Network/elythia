@@ -4703,8 +4703,8 @@ func TestUnsuspendUser_OriginWriteFailureIs500(t *testing.T) {
 
 // **アカウント削除も local として刻む。** `isSuspended` と `isDeleted` を同時に
 // 立てるので、remote 由来の記録が残っていると発信元が tombstone の凍結を外せる。
-// inbound の gate は `isSuspended` しか見ないため、削除済みアカウントからの
-// activity が再び通ることになる。
+// 読み取り側は `isSuspended` を見て隠すので、凍結が外れると削除したアカウントが
+// 見えるようになる。
 func TestAccountsDelete_RecordsLocalOrigin(t *testing.T) {
 	h, userRepo, _, _ := newTestHandler(t)
 	host := "remote.example"
