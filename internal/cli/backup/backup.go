@@ -62,6 +62,30 @@ func setup(e env, cfg *config.Config) (backup.Storage, error) {
 	return e.openStorage(cfg.Backup.Storage)
 }
 
+// takeOptions builds the options of backup.Take from cfg. "backup take" and
+// "backup daemon" share it so that both take the same backup.
+func takeOptions(e env, cfg *config.Config, st backup.Storage, logger *slog.Logger) (backup.TakeOptions, error) {
+	opts := backup.TakeOptions{
+		Storage:     st,
+		DatabaseURL: cfg.DatabaseURL("postgres"),
+		Runner:      e.runner,
+		PgDump:      cfg.Backup.Tools.PgDump,
+		Logger:      logger,
+	}
+	var err error
+	if e.dumpConn != nil {
+		if opts.Dump, err = e.dumpConn(cfg); err != nil {
+			return opts, fmt.Errorf("failed to build the pg_dump connection: %w", err)
+		}
+	}
+	if cfg.Backup.Encryption.Enabled {
+		if opts.Recipients, err = backup.ParseRecipients(cfg.Backup.Encryption.Recipients); err != nil {
+			return opts, fmt.Errorf("invalid encryption settings: %w", err)
+		}
+	}
+	return opts, nil
+}
+
 func take(ctx context.Context, e env, args []string) int {
 	fs := cliflag.New("backup take", e.stderr)
 	configPath := fs.String("config", defaultConfigPath, "path to configuration file")
@@ -82,22 +106,9 @@ func take(ctx context.Context, e env, args []string) int {
 	if err != nil {
 		return fail("failed to open storage", err)
 	}
-	opts := backup.TakeOptions{
-		Storage:     st,
-		DatabaseURL: cfg.DatabaseURL("postgres"),
-		Runner:      e.runner,
-		PgDump:      cfg.Backup.Tools.PgDump,
-		Logger:      logger,
-	}
-	if e.dumpConn != nil {
-		if opts.Dump, err = e.dumpConn(cfg); err != nil {
-			return fail("failed to build the pg_dump connection", err)
-		}
-	}
-	if cfg.Backup.Encryption.Enabled {
-		if opts.Recipients, err = backup.ParseRecipients(cfg.Backup.Encryption.Recipients); err != nil {
-			return fail("invalid encryption settings", err)
-		}
+	opts, err := takeOptions(e, cfg, st, logger)
+	if err != nil {
+		return fail("invalid options", err)
 	}
 	meta, err := backup.Take(ctx, opts)
 	if err != nil {

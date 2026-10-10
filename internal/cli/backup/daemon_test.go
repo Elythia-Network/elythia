@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -70,7 +72,7 @@ func daemonTestEnv(t *testing.T, cfg *config.Config) (daemonEnv, *syncBuffer, co
 			}
 			return cfg, nil
 		},
-		openDeps: func(*config.Config) (Deps, error) {
+		openDeps: func(*config.Config, *slog.Logger) (Deps, error) {
 			return Deps{Storage: emptyStorage{}, Taker: nopTaker{}}, nil
 		},
 		signalContext: func() (context.Context, context.CancelFunc) { return ctx, cancel },
@@ -111,15 +113,97 @@ func TestDaemonFlagsAndConfigErrors(t *testing.T) {
 	}
 }
 
-func TestDaemonNotWiredByDefault(t *testing.T) {
-	e, stderr, _ := daemonTestEnv(t, cfgWith(&config.BackupOptions{Schedule: config.BackupScheduleOptions{Interval: "24h"}}))
-	e.openDeps = defaultDaemonEnv().openDeps
-	assert.Equal(t, 1, runDaemon(e, nil))
-	assert.Contains(t, stderr.String(), "not wired in yet")
+func TestWireDepsErrors(t *testing.T) {
+	core := filepath.Join(t.TempDir(), "migration")
+	writeMigrations(t, core, "000001")
+	dir := markedDir(t)
+	dirStorage := config.BackupStorageOptions{Type: backupkit.StorageTypeDir, Dir: config.BackupDirectoryOptions{Path: dir}}
+	for _, tc := range []struct {
+		name  string
+		b     config.BackupOptions
+		setup func(*env, *verifyEnv)
+		want  string
+	}{
+		{"storage", config.BackupOptions{}, nil, "cannot open the storage: backup: storage.type is empty"},
+		{"unmarked directory", config.BackupOptions{Storage: config.BackupStorageOptions{Type: backupkit.StorageTypeDir, Dir: config.BackupDirectoryOptions{Path: t.TempDir()}}}, nil, backupkit.DirMarkerFile},
+		{"recipients", config.BackupOptions{Storage: dirStorage, Encryption: config.BackupEncryptionOptions{Enabled: true}}, nil, "invalid encryption settings"},
+		{"pg_dump connection", config.BackupOptions{Storage: dirStorage}, func(te *env, _ *verifyEnv) {
+			te.dumpConn = func(*config.Config) (backupkit.DumpConn, error) { return backupkit.DumpConn{}, errors.New("broken") }
+		}, "pg_dump connection: broken"},
+		{"bundled migrations", config.BackupOptions{Storage: dirStorage}, func(_ *env, ve *verifyEnv) {
+			ve.coreDir = filepath.Join(t.TempDir(), "none")
+		}, "bundled migrations"},
+		{"identity file", config.BackupOptions{Storage: dirStorage, Encryption: config.BackupEncryptionOptions{IdentityFile: filepath.Join(t.TempDir(), "none")}}, nil, "identityFile"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			te := defaultEnv()
+			ve := defaultVerifyEnv()
+			ve.coreDir, ve.localDir = core, filepath.Join(core, "local")
+			if tc.setup != nil {
+				tc.setup(&te, &ve)
+			}
+			b := tc.b
+			_, err := wireDeps(te, ve)(cfgWith(&b), discardLogger())
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
+}
+
+// recordingRunner fails every program and records what was run.
+type recordingRunner struct{ names *[]string }
+
+func (r recordingRunner) Command(ctx context.Context, _ []string, name string, args ...string) *exec.Cmd {
+	*r.names = append(*r.names, name)
+	return exec.CommandContext(ctx, "false")
+}
+
+func TestWireDepsBuildsTakerAndVerifier(t *testing.T) {
+	core := filepath.Join(t.TempDir(), "migration")
+	writeMigrations(t, core, "000001", "000009")
+	dir := markedDir(t)
+	var ran []string
+	te := defaultEnv()
+	te.runner = recordingRunner{names: &ran}
+	te.dumpConn = func(*config.Config) (backupkit.DumpConn, error) {
+		return backupkit.DumpConn{URI: "postgresql://test@localhost:5432/elythia"}, nil
+	}
+	ve := defaultVerifyEnv()
+	ve.coreDir, ve.localDir = core, filepath.Join(core, "local")
+	var gotID string
+	var gotOpts backupkit.VerifyOptions
+	var gotStorage backupkit.Storage
+	ve.verify = func(_ context.Context, st backupkit.Storage, id string, o backupkit.VerifyOptions) (backupkit.VerifyResult, error) {
+		gotStorage, gotID, gotOpts = st, id, o
+		return backupkit.VerifyResult{ID: id, OK: true}, errors.New("cleanup failed")
+	}
+	b := &config.BackupOptions{
+		Storage: config.BackupStorageOptions{Type: backupkit.StorageTypeDir, Dir: config.BackupDirectoryOptions{Path: dir}},
+		Tools:   config.BackupToolsOptions{PgDump: "/opt/pg/pg_dump", Initdb: "/opt/pg/initdb"},
+	}
+	deps, err := wireDeps(te, ve)(cfgWith(b), discardLogger())
+	require.NoError(t, err)
+	require.IsType(t, &backupkit.DirStorage{}, deps.Storage)
+
+	// 取る処理は backup.Take を、設定の pg_dump で呼ぶ。
+	_, err = deps.Taker.Take(context.Background())
+	require.Error(t, err)
+	require.NotEmpty(t, ran)
+	assert.Equal(t, "/opt/pg/pg_dump", ran[0])
+
+	// 確かめる処理は backup.Verify に、同じ保存先と verify と同じ options を渡し、
+	// 結果と誤りをそのまま返す。
+	res, err := deps.Verifier.Verify(context.Background(), "20261010T040000Z")
+	require.EqualError(t, err, "cleanup failed")
+	assert.True(t, res.OK)
+	assert.Equal(t, "20261010T040000Z", gotID)
+	assert.Same(t, deps.Storage, gotStorage)
+	assert.Equal(t, backupkit.BundledMigrations{Core: 9}, gotOpts.Bundled)
+	assert.Equal(t, backupkit.LocalSandbox{Tools: b.Tools}, gotOpts.Sandbox)
 }
 
 func TestDefaultDaemonEnv(t *testing.T) {
 	e := defaultDaemonEnv()
+	require.NotNil(t, e.openDeps)
 	assert.Equal(t, time.Local, e.location)
 	ctx, cancel := e.signalContext()
 	cancel()
@@ -207,7 +291,7 @@ func TestBuildPassesOptions(t *testing.T) {
 		Schedule: config.BackupScheduleOptions{Interval: "24h", Listen: ":0"},
 		Server:   config.BackupServerOptions{ServiceToken: "tok"},
 	})
-	e.openDeps = func(*config.Config) (Deps, error) { return Deps{}, errors.New("deps failed") }
+	e.openDeps = func(*config.Config, *slog.Logger) (Deps, error) { return Deps{}, errors.New("deps failed") }
 	_, _, err := build(e, cfg, discardLogger())
 	require.EqualError(t, err, "deps failed")
 

@@ -43,10 +43,15 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-type dockerExecRunner struct{ container string }
+// dockerExecRunner runs programs inside a container with docker exec, as user
+// when it is set (initdb refuses to run as root).
+type dockerExecRunner struct{ container, user string }
 
 func (r dockerExecRunner) Command(ctx context.Context, env []string, name string, args ...string) *exec.Cmd {
 	a := []string{"exec", "-i"}
+	if r.user != "" {
+		a = append(a, "-u", r.user)
+	}
 	for _, e := range env {
 		a = append(a, "-e", e)
 	}
