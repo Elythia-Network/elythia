@@ -92,7 +92,7 @@ touch /mnt/nas/elythia-backup/.elythia-backup
 
 **管理画面(#3462)からも使うときは、本体とグループを共有する。** バックアップ用のサービスはUID 70(postgres)で、本体は別のUIDで動く(compose(TCP)の`docker-compose.yml`ではUID・GIDとも991、UDSの`compose.uds.yaml.example`では65532)。本体が一覧・ダウンロード・削除をするには、本体のGIDのグループとして読めて、ディレクトリに書ける(消せる)必要がある。
 
-- `elythia backup`は、ディレクトリを`0770`、ファイルを`0640`で作る(umaskに左右されない)。グループには、ファイルを読むことと消すことを許し、書き換えは許さない。他人(other)には一切渡さない
+- `elythia backup`は、ディレクトリを`0770`、ファイルを`0640`で作る(umaskに左右されない)。グループは、ファイルの中身を変えることはできないが、読むことと、ディレクトリの中にファイルを作る・置き換える・消すことはできる(ディレクトリに書けるため)。他人(other)には一切渡さない
 - グループは、根に付けたsetgidで引き継がせる。根の所有者とグループを`70:<本体のGID>`、modeを`2770`にする
 - composeの`backup`サービスは、本体のGIDを補助グループに持つ(`group_add`。同梱のcomposeに書いてある)。持たないと、作ったディレクトリからsetgidが落ち、その下のファイルが本体から読めなくなる
 - 本体のコンテナにも、同じホストのパスを`backup.storage.dir.path`(または`backup.server.storage.dir.path`)と同じ場所にmountする
@@ -107,11 +107,15 @@ find /mnt/nas/elythia-backup/generations -type d -exec chmod 2770 {} +
 find /mnt/nas/elythia-backup/generations -type f -exec chmod 0640 {} +
 ```
 
+**GIDがホストやNASの別のグループと重ならないか確かめる。** ファイルにはGIDの数字だけが記録されるので、ホストやNASで同じ数字のグループに入っている者は、バックアップを読めて、消せる。991はホストの別のグループ(例えば`polkitd`)に割り当てられていることがある。`getent group 991`(UDSでは65532)をホストとNASの両方で見て、使われていれば、そのグループに人やサービスが入っていないことを確かめる。
+
+unix extensionsの無いCIFSなど、chmodを受け付けないファイルシステムでは、`elythia backup`はchmodの失敗(`EPERM` / `ENOTSUP` / `EINVAL`)を警告に留めて書き続ける。権限はmountの設定(`file_mode` / `dir_mode` / `gid`)で決まるので、そちらで本体のGIDから読めるようにし、otherに渡さない値にする。
+
 **暗号化しないdumpは、本体のグループに読める。** 本体はDBの接続情報(と、DBの中の秘密鍵・token)を元から持っているので、読めて新たに漏れるものは無い、という判断。本体のGIDに他のプロセスを入れないこと。NASがUID・GIDを書き換える設定(`all_squash`など)だと、この分け方は効かない。
 
 本体とバックアップ用のサービスを同じユーザーで動かす構成(バイナリ直接実行など)では、この手順は要らない。
 
-保存先の中の通常のファイルだけを世代のファイルとして扱う。symlinkは、根の中を指すものも辿らない(一覧に出さず、読み出しも`not found`にする)。
+保存先の中の通常のファイルだけを世代のファイルとして扱う。根の下のsymlinkは、根の中を指すものも辿らない。一覧に出さず、読み出しは`not found`にし、途中にsymlinkがある場所へは書かず、消さない。`backup.storage.dir.path`そのものがsymlinkなのは構わない(起動時に実体へ解決する)。
 
 ## 暗号化
 
@@ -335,4 +339,9 @@ ID                STATUS    SIZE  ENCRYPTED  VERIFIED  ELYTHIA  MIGRATION
 ### 上げるときにすること
 
 - **ディレクトリの保存先を管理画面から使うときは、[ディレクトリ](#ディレクトリ)の手順でグループを揃える。** 以前の版の`elythia backup`は`0700` / `0600`で作っていたので、そのままでは本体から読めない(一覧が500になる)
+- **composeのファイルを手で直す。** `compose.uds.yaml`(UDS)は`compose.uds.yaml.example`から複製したもので、gitignoreしてあるので`git pull`では変わらない。`docker-compose.yml`も、手元で変えていれば同じ。exampleに入った次の2つを写す
+  - `backup`サービスに`group_add`(本体のGID。UDSは`"65532"`、compose(TCP)は`"991"`)
+  - 本体(UDSは`mkgo`、compose(TCP)は`app`)の`volumes`に、`backup`サービスと同じ保存先のmount(例: `- /mnt/nas/elythia-backup:/backup`)
+
+  写した後は、本体を作り直す(`docker compose -f compose.uds.yaml up -d mkgo`)。`backup`サービスは`run`のたびに作られるので、作り直しは要らない
 - **nginxの設定に`/backup-download`の節を足す。** UDSの`deploy/uds/nginx/mkgo.conf`は取り込めば入るが、設定はnginxの起動時に読むので、nginxのコンテナを再起動する(`docker compose -f compose.uds.yaml restart nginx`)。自分で書いた設定には、[逆プロキシ](deployment.md#逆プロキシ-nginx)の例を写す
