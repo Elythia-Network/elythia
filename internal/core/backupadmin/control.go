@@ -111,9 +111,19 @@ const controlBodyLimit = 1 << 20
 // (プライベートアドレス) なので、連合用の SSRF 対策付きの client は使わない。
 func NewHTTPControl(baseURL, token string, doer Doer) *HTTPControl {
 	if doer == nil {
-		doer = &http.Client{Timeout: controlTimeout}
+		doer = &http.Client{Timeout: controlTimeout, Transport: directTransport()}
 	}
 	return &HTTPControl{base: strings.TrimRight(baseURL, "/"), token: token, doer: doer}
+}
+
+// directTransport is http.DefaultTransport without a proxy.
+//
+// 制御 API は同じ compose の中の宛先なので、HTTP_PROXY / HTTPS_PROXY を通す理由が
+// 無い。通すと、Authorization: Bearer の token が proxy に渡る。
+func directTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.Proxy = nil
+	return t
 }
 
 // clientIPHeader carries the administrator's address to the service.
@@ -194,9 +204,12 @@ func (c *HTTPControl) do(ctx context.Context, method, path string, payload any, 
 		return nil, fmt.Errorf("%w: %v", ErrServiceFailed, err)
 	}
 	defer func() { _ = res.Body.Close() }()
-	data, err := io.ReadAll(io.LimitReader(res.Body, controlBodyLimit))
+	data, err := io.ReadAll(io.LimitReader(res.Body, controlBodyLimit+1))
 	if err != nil {
 		return nil, fmt.Errorf("%w: read response: %v", ErrServiceFailed, err)
+	}
+	if len(data) > controlBodyLimit {
+		return nil, fmt.Errorf("%w: %s %s: response is larger than %d bytes", ErrServiceFailed, method, path, controlBodyLimit)
 	}
 	if res.StatusCode >= 200 && res.StatusCode <= 299 {
 		return data, nil

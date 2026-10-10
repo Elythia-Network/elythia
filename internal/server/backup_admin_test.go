@@ -53,6 +53,20 @@ func TestNewBackupAdminService_OpensTheConfiguredStorage(t *testing.T) {
 		_, err := svc.List(ctx)
 		assert.ErrorIs(t, err, backupadmin.ErrNotConfigured)
 	})
+	t.Run("service without token is not used", func(t *testing.T) {
+		b := &config.BackupOptions{Storage: dirOpts(mainDir)}
+		b.Server.ServiceURL = "http://backup:3010"
+		ov, err := newBackupAdminService(&config.Config{Backup: b}, nil).List(ctx)
+		require.NoError(t, err)
+		assert.False(t, ov.Service.Configured)
+		_, err = newBackupAdminService(&config.Config{Backup: b}, nil).Take(ctx, "")
+		assert.ErrorIs(t, err, backupadmin.ErrServiceNotConfigured)
+
+		b.Server.ServiceToken = "secret"
+		ov, err = newBackupAdminService(&config.Config{Backup: b}, nil).List(ctx)
+		require.NoError(t, err)
+		assert.True(t, ov.Service.Configured)
+	})
 	t.Run("no backup section", func(t *testing.T) {
 		_, err := newBackupAdminService(&config.Config{}, nil).List(ctx)
 		assert.ErrorIs(t, err, backupadmin.ErrNotConfigured)
