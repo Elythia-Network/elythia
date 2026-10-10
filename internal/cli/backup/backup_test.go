@@ -351,6 +351,10 @@ func TestConfigExampleKeysDecode(t *testing.T) {
 	require.NoError(t, err)
 	_, block, ok := strings.Cut(string(raw), "#backup:\n")
 	require.True(t, ok, "the example has a backup: block")
+	// 例に値を書くと、コメントを外しただけで公開の値をtokenにして動いてしまう。
+	// 例は空のまま保ち、キーが読めることは差し替えた値で確かめる。
+	require.Contains(t, block, "#    serviceToken: \"\"\n", "the example leaves serviceToken empty")
+	block = strings.Replace(block, "#    serviceToken: \"\"\n", "#    serviceToken: \"example-token\"\n", 1)
 	var lines []string
 	lines = append(lines, "backup:")
 	for _, l := range strings.Split(block, "\n") {
@@ -378,7 +382,7 @@ func TestConfigExampleKeysDecode(t *testing.T) {
 		Interval: "24h", At: "04:00", Keep: 7, Verify: true, DelayAfter: "36h", Listen: "127.0.0.1:3010",
 	}, b.Schedule)
 	assert.Equal(t, config.BackupNotifyOptions{WebhookURL: "https://hooks.example.com/...", Format: "generic"}, b.Notify)
-	assert.Equal(t, "...", b.Server.ServiceToken)
+	assert.Equal(t, "example-token", b.Server.ServiceToken)
 }
 
 // markedDir returns a new directory that a DirStorage accepts.

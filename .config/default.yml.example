@@ -722,5 +722,8 @@ proxyBypassHosts:
 #    # Control API of `elythia backup daemon` (schedule.listen) for taking
 #    # and verifying from the admin page. Ignored while serviceToken is empty.
 #    serviceUrl: ""
-#    # Shared by the daemon's control API and the main server.
-#    serviceToken: "..."
+#    # Shared by the daemon's control API and the main server. Generate a
+#    # value (e.g. `openssl rand -hex 32`) and write the same one to both.
+#    # While empty, the daemon does not start with listen set, and the
+#    # server sends nothing.
+#    serviceToken: ""
