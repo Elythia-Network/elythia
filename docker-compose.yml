@@ -142,6 +142,12 @@ services:
       # 秘密鍵はリポジトリの外 (.config にも置かない) に置き、取る側のホストには
       # 置かないのが望ましい。
       # - /etc/elythia/backup-identity.txt:/run/secrets/backup-identity.txt:ro
+      # verify は復号した dump と戻した DB を TMPDIR (既定は書き込み層の /tmp) に置く。
+      # 本番の DB の volume と同じディスクを埋めないよう、別のディスクを mount して
+      # 下の environment の TMPDIR をそこへ向ける (UID 70 が書けるようにする。docs/backup.md)。
+      # - /mnt/scratch/elythia-verify:/scratch
+    # environment:
+    #   TMPDIR: /scratch
     restart: "no"
 
   # Video thumbnail generator (#637 M2). mk-go の media proxy が video/* を

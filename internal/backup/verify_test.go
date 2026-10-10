@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
+	"syscall"
 	"testing"
 	"time"
 
@@ -101,6 +103,7 @@ func TestVerifyHealthyBackupPassesAllStages(t *testing.T) {
 	assert.True(t, res.OK)
 	assert.Empty(t, res.Mismatches)
 	assert.Equal(t, "9.9.9", res.ElythiaVersion)
+	assert.Equal(t, meta.DumpSHA256, res.DumpSHA256)
 	assert.Equal(t, time.Date(2026, 10, 10, 5, 0, 0, 0, time.UTC), res.VerifiedAt)
 	assert.Equal(t, res, readVerifyJSON(t, s, testGenID))
 
@@ -142,15 +145,16 @@ func TestVerifyEncryptedBackup(t *testing.T) {
 		e.sandbox.assertNoLeftovers(t)
 	})
 	t.Run("wrong identity", func(t *testing.T) {
+		// 鍵の取り違えは設定の誤りで、世代の欠陥ではない。前回の結果を上書きしない。
 		other, err := age.GenerateX25519Identity()
 		require.NoError(t, err)
 		s := newMemStorage()
 		putGeneration(t, s, meta, enc.Bytes())
 		opts := e.opts()
 		opts.Identities = []age.Identity{other}
-		res, err := Verify(context.Background(), s, testGenID, opts)
-		require.NoError(t, err)
-		requireFailedAt(t, res, StageReadable, "cannot decrypt")
+		_, err = Verify(context.Background(), s, testGenID, opts)
+		require.ErrorContains(t, err, "identityFile does not match")
+		assert.NotContains(t, s.objects, Key(testGenID, VerifyFile))
 	})
 	t.Run("plain hash mismatch", func(t *testing.T) {
 		bad := meta
@@ -309,14 +313,24 @@ type failingSandbox struct {
 	program   string
 	mkdirErr  error
 	removeErr error
-	removed   []string
+	// failStop really stops the server and then reports a failure.
+	failStop bool
+	removed  []string
+	initdb   []string
 }
 
 func (f *failingSandbox) Run(ctx context.Context, cmd SandboxCmd) error {
 	if cmd.Program == f.program {
 		return errors.New("injected failure")
 	}
-	return f.Sandbox.Run(ctx, cmd)
+	if cmd.Program == "initdb" {
+		f.initdb = cmd.Args
+	}
+	err := f.Sandbox.Run(ctx, cmd)
+	if err == nil && f.failStop && cmd.Program == "pg_ctl" && len(cmd.Args) > 0 && cmd.Args[0] == "stop" {
+		return errors.New("injected stop failure")
+	}
+	return err
 }
 
 func (f *failingSandbox) MkdirTemp(ctx context.Context) (string, error) {
@@ -348,6 +362,7 @@ func TestVerifySandboxFailuresAreErrorsAndCleanUp(t *testing.T) {
 		{"start fails", &failingSandbox{program: "pg_ctl"}, "start the throwaway server"},
 		{"mkdir fails", &failingSandbox{mkdirErr: errors.New("disk full")}, "disk full"},
 		{"remove fails", &failingSandbox{removeErr: errors.New("busy")}, "remove the sandbox directory"},
+		{"stop fails after the verdict", &failingSandbox{failStop: true}, "stop the throwaway server"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.sandbox.Sandbox = e.sandbox
@@ -355,9 +370,15 @@ func TestVerifySandboxFailuresAreErrorsAndCleanUp(t *testing.T) {
 			putGeneration(t, s, meta, dump)
 			opts := e.opts()
 			opts.Sandbox = tc.sandbox
-			_, err := Verify(context.Background(), s, testGenID, opts)
+			res, err := Verify(context.Background(), s, testGenID, opts)
 			require.ErrorContains(t, err, tc.want)
-			assert.NotContains(t, s.objects, Key(testGenID, VerifyFile))
+			if tc.sandbox.removeErr != nil || tc.sandbox.failStop {
+				// 判定が出た後の後始末の失敗では、判定を verify.json に残す。
+				assert.True(t, res.OK, "%+v", res.Stages)
+				assert.Equal(t, res, readVerifyJSON(t, s, testGenID))
+			} else {
+				assert.NotContains(t, s.objects, Key(testGenID, VerifyFile))
+			}
 			if tc.sandbox.mkdirErr == nil {
 				assert.Len(t, tc.sandbox.removed, 1)
 			}
@@ -526,8 +547,15 @@ func TestResolveGenerationID(t *testing.T) {
 	_, err := ResolveGenerationID(ctx, s, "latest")
 	require.ErrorContains(t, err, "no complete generation")
 
-	s.objects[Key("20261008T000000Z", MetaFile)] = []byte("{}")
-	s.objects[Key("20261009T000000Z", MetaFile)] = []byte("{}")
+	putMeta := func(id string) {
+		m := plainMeta([]byte("x"))
+		m.ID = id
+		body, err := json.Marshal(m)
+		require.NoError(t, err)
+		s.objects[Key(id, MetaFile)] = body
+	}
+	putMeta("20261008T000000Z")
+	putMeta("20261009T000000Z")
 	// meta.json の無い新しい世代 (取っている途中) は選ばない。
 	s.objects[Key("20261010T000000Z", DumpFile)] = []byte("x")
 	s.objects["generations/junk/meta.json"] = []byte("{}")
@@ -535,6 +563,11 @@ func TestResolveGenerationID(t *testing.T) {
 	got, err := ResolveGenerationID(ctx, s, "latest")
 	require.NoError(t, err)
 	assert.Equal(t, "20261009T000000Z", got)
+
+	// 最新の meta.json が読めないときは、古い世代へ黙って下がらずに止める。
+	s.objects[Key("20261011T000000Z", MetaFile)] = []byte("{")
+	_, err = ResolveGenerationID(ctx, s, "latest")
+	require.ErrorContains(t, err, "the newest generation 20261011T000000Z has an unreadable meta.json")
 
 	got, err = ResolveGenerationID(ctx, s, "20261001T000000Z")
 	require.NoError(t, err)
@@ -558,10 +591,33 @@ func TestLocalSandbox(t *testing.T) {
 
 	err := sb.Run(ctx, SandboxCmd{Program: "pg_ctl"})
 	require.ErrorContains(t, err, "pg_ctl")
+	var pe *ProgramError
+	require.ErrorAs(t, err, &pe, "false ran and exited 1")
+	assert.Equal(t, 1, pe.ExitCode)
 
 	// 上書きしていないプログラムは PATH から名前で探す。
 	err = sb.Run(ctx, SandboxCmd{Program: "sh", Args: []string{"-c", "echo oops >&2; exit 3"}})
 	require.ErrorContains(t, err, "oops")
+	require.ErrorAs(t, err, &pe)
+	assert.Equal(t, ProgramError{Program: "sh", ExitCode: 3, Stderr: "oops"}, *pe)
+
+	// 動かせなかったもの (見つからない、126 / 127、シグナル) は ProgramError にしない。
+	for _, c := range []SandboxCmd{
+		{Program: "elythia-no-such-program"},
+		{Program: "sh", Args: []string{"-c", "exit 127"}},
+		{Program: "sh", Args: []string{"-c", "exit 126"}},
+		{Program: "sh", Args: []string{"-c", "kill -9 $$"}},
+	} {
+		err := sb.Run(ctx, c)
+		require.Error(t, err, "%v", c.Args)
+		assert.False(t, errors.As(err, &pe), "%v: %v", c.Args, err)
+	}
+
+	free, err := sb.FreeBytes(ctx, sb.TempDir)
+	require.NoError(t, err)
+	assert.Positive(t, free)
+	_, err = sb.FreeBytes(ctx, filepath.Join(sb.TempDir, "missing"))
+	require.Error(t, err)
 
 	dir, err := sb.MkdirTemp(ctx)
 	require.NoError(t, err)
@@ -629,6 +685,13 @@ func TestVerifyTrackingTableShapes(t *testing.T) {
 			name:  "empty local table",
 			setup: []string{`CREATE TABLE schema_migrations_local (version bigint NOT NULL PRIMARY KEY, dirty boolean NOT NULL)`},
 			undo:  []string{`DROP TABLE schema_migrations_local`},
+		},
+		{
+			// fsck の問い合わせが通らない DB (本体の表が欠けている) は使えない。
+			name:  "fsck cannot run",
+			setup: []string{`ALTER TABLE note RENAME TO note_moved`},
+			undo:  []string{`ALTER TABLE note_moved RENAME TO note`},
+			want:  "fsck cannot run on the restored database",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -718,7 +781,11 @@ func TestVerifyGenerationsTakenByTake(t *testing.T) {
 			if tc.encrypt {
 				opts.Identities = []age.Identity{identity}
 			}
+			rec := &failingSandbox{Sandbox: e.sandbox}
+			opts.Sandbox = rec
 			res, err := Verify(ctx, st, meta.ID, opts)
+			// 使い捨てのサーバーは、元の DB と同じ locale で作る。
+			assert.Contains(t, rec.initdb, "--lc-collate="+meta.DatabaseLocale.Collate)
 			require.NoError(t, err)
 			require.Len(t, res.Stages, 3)
 			for _, s := range res.Stages {
@@ -784,4 +851,193 @@ func TestInitdbLocaleArgs(t *testing.T) {
 			assert.Equal(t, tc.want, initdbLocaleArgs(tc.in))
 		})
 	}
+}
+
+// TestVerifyEnvironmentFailuresKeepTheEarlierResult: failures of the
+// environment (not of the generation) return an error and leave verify.json
+// as it was.
+func TestVerifyEnvironmentFailuresKeepTheEarlierResult(t *testing.T) {
+	dump := []byte("dump bytes of some length")
+	earlier := []byte(`{"ok":true}`)
+	id, err := age.GenerateX25519Identity()
+	require.NoError(t, err)
+	var enc bytes.Buffer
+	w, err := age.Encrypt(&enc, id.Recipient())
+	require.NoError(t, err)
+	_, err = w.Write(dump)
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+	encMeta := plainMeta(enc.Bytes())
+	encMeta.Encrypted, encMeta.Encryption, encMeta.DumpFile = true, EncryptionAge, DumpFileAge
+	encMeta.PlainSHA256 = sha256Hex(dump)
+
+	for _, tc := range []struct {
+		name  string
+		meta  Meta
+		data  []byte
+		setup func(*memStorage, *VerifyOptions)
+		want  string
+	}{
+		{"pg_restore cannot be run", plainMeta(dump), dump, func(_ *memStorage, o *VerifyOptions) {
+			o.Sandbox = LocalSandbox{TempDir: t.TempDir(), Tools: config.BackupToolsOptions{PgRestore: "/nonexistent/pg_restore"}}
+		}, "run pg_restore --list"},
+		{"download cut", plainMeta(dump), dump, func(s *memStorage, _ *VerifyOptions) {
+			s.failAfter = map[string]int{DumpFile: 5}
+		}, "connection reset by peer"},
+		{"download cut in the age header", encMeta, enc.Bytes(), func(s *memStorage, _ *VerifyOptions) {
+			s.failAfter = map[string]int{DumpFileAge: 10}
+		}, "connection reset by peer"},
+		{"download cut in the age payload", encMeta, enc.Bytes(), func(s *memStorage, _ *VerifyOptions) {
+			s.failAfter = map[string]int{DumpFileAge: len(enc.Bytes()) - 5}
+		}, "connection reset by peer"},
+		{"temporary directory too small", func() Meta { m := plainMeta(dump); m.DumpSize = 1 << 62; return m }(), dump, nil,
+			"less than the 4611686018427387904 bytes"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newMemStorage()
+			putGeneration(t, s, tc.meta, tc.data)
+			s.objects[Key(testGenID, VerifyFile)] = earlier
+			o := VerifyOptions{Sandbox: noRunSandbox{t}, Bundled: BundledMigrations{Core: 1}, Identities: []age.Identity{id}}
+			if tc.setup != nil {
+				tc.setup(s, &o)
+			}
+			_, err := Verify(context.Background(), s, testGenID, o)
+			require.ErrorContains(t, err, tc.want)
+			assert.Equal(t, earlier, s.objects[Key(testGenID, VerifyFile)])
+		})
+	}
+}
+
+// failingWriter fails every write, like a full disk.
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, syscall.ENOSPC }
+func (failingWriter) Close() error              { return nil }
+
+// closeFailingWriter accepts writes but fails on Close (delayed write error).
+type closeFailingWriter struct{}
+
+func (closeFailingWriter) Write(p []byte) (int, error) { return len(p), nil }
+func (closeFailingWriter) Close() error                { return syscall.ENOSPC }
+
+func TestVerifyStagingWriteErrorsAreEnvironmentErrors(t *testing.T) {
+	dump := []byte("dump")
+	for name, w := range map[string]io.WriteCloser{"write": failingWriter{}, "close": closeFailingWriter{}} {
+		t.Run(name, func(t *testing.T) {
+			s := newMemStorage()
+			putGeneration(t, s, plainMeta(dump), dump)
+			v := &verifier{storage: s, id: testGenID, meta: plainMeta(dump), opts: VerifyOptions{Sandbox: noRunSandbox{t}},
+				dumpPath: filepath.Join(t.TempDir(), "dump.pgc"),
+				create:   func(string) (io.WriteCloser, error) { return w, nil }}
+			err := v.readable(context.Background())
+			require.ErrorIs(t, err, syscall.ENOSPC)
+			var se *stageError
+			assert.False(t, errors.As(err, &se))
+		})
+	}
+}
+
+func TestProgramVerdict(t *testing.T) {
+	ctx := context.Background()
+	var se *stageError
+
+	err := programVerdict(ctx, "pg_restore", &ProgramError{Program: "pg_restore", ExitCode: 1, Stderr: `invalid input syntax for type integer`})
+	require.ErrorAs(t, err, &se, "a dump that pg_restore rejects is a defect of the generation")
+	assert.Contains(t, se.msg, "pg_restore failed")
+
+	for _, stderr := range envMarkers {
+		err := programVerdict(ctx, "pg_restore", &ProgramError{Program: "pg_restore", ExitCode: 1, Stderr: "ERROR: " + stderr})
+		assert.False(t, errors.As(err, &se), stderr)
+		assert.ErrorContains(t, err, "because of the environment")
+	}
+
+	err = programVerdict(ctx, "pg_restore", errors.New("exec: not found"))
+	assert.False(t, errors.As(err, &se))
+
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	err = programVerdict(canceled, "pg_restore", &ProgramError{Program: "pg_restore", ExitCode: 1})
+	assert.False(t, errors.As(err, &se), "interrupted, not judged")
+}
+
+func TestRequireFree(t *testing.T) {
+	free := func(n int64, err error) func(string) (int64, error) {
+		return func(string) (int64, error) { return n, err }
+	}
+	require.NoError(t, requireFree("x", "/", 10, free(10, nil)))
+	require.ErrorContains(t, requireFree("x", "/", 11, free(10, nil)), "TMPDIR")
+	require.ErrorContains(t, requireFree("x", "/", 1, free(0, errors.New("statfs failed"))), "statfs failed")
+}
+
+// spaceSandbox reports a fixed amount of free space for the sandbox directory.
+type spaceSandbox struct {
+	Sandbox
+	free int64
+}
+
+func (s spaceSandbox) FreeBytes(context.Context, string) (int64, error) { return s.free, nil }
+
+// TestVerifySandboxSpaceCheck: the sandbox directory needs at least the dump's
+// size free, checked before initdb.
+func TestVerifySandboxSpaceCheck(t *testing.T) {
+	e := getVerifyEnv(t)
+	dump := e.dump(t)
+	meta := e.buildMeta(t, testGenID, dump, e.bundled.Core, false)
+	s := newMemStorage()
+	putGeneration(t, s, meta, dump)
+	opts := e.opts()
+	opts.Sandbox = spaceSandbox{Sandbox: e.sandbox, free: meta.DumpSize - 1}
+	_, err := Verify(context.Background(), s, testGenID, opts)
+	require.ErrorContains(t, err, "the sandbox directory")
+	assert.NotContains(t, s.objects, Key(testGenID, VerifyFile))
+	e.sandbox.assertNoLeftovers(t)
+
+	opts.Sandbox = spaceSandbox{Sandbox: e.sandbox, free: meta.DumpSize}
+	res, err := Verify(context.Background(), s, testGenID, opts)
+	require.NoError(t, err)
+	assert.True(t, res.OK)
+}
+
+// TestVerifyDetectsDumpThatDoesNotRestore: the TOC is intact (pg_restore
+// --list passes) but the table data is damaged, so only the restore fails.
+// That is a defect of the generation and is recorded in verify.json.
+func TestVerifyDetectsDumpThatDoesNotRestore(t *testing.T) {
+	e := getVerifyEnv(t)
+	// 表のデータが dump の大半を占めるようにし、真ん中を壊せばデータの塊に当たるようにする。
+	p := newDatabase(t)
+	p.exec(t,
+		`CREATE TABLE big (id int PRIMARY KEY, body text)`,
+		`INSERT INTO big SELECT g, md5(g::text) || md5((g * 7)::text) FROM generate_series(1, 100000) g`,
+	)
+	var out bytes.Buffer
+	require.NoError(t, e.sandbox.Run(context.Background(), SandboxCmd{
+		Program: "pg_dump", Args: []string{"-Fc", "-U", pgUser, "-d", p.db}, Stdout: &out,
+	}))
+	damaged := out.Bytes()
+	for i := len(damaged) * 45 / 100; i < len(damaged)*55/100; i++ {
+		damaged[i] ^= 0x5a
+	}
+	meta := plainMeta(damaged)
+	meta.RowCounts = map[string]int64{"public.big": 100000}
+	s := newMemStorage()
+	putGeneration(t, s, meta, damaged)
+
+	res, err := Verify(context.Background(), s, testGenID, e.opts())
+	require.NoError(t, err)
+	requireFailedAt(t, res, StageRestorable, "pg_restore failed")
+	assert.Equal(t, res, readVerifyJSON(t, s, testGenID))
+	e.sandbox.assertNoLeftovers(t)
+}
+
+func TestCreateStagingIsPrivate(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "dump.pgc")
+	w, err := createStaging(p)
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+	info, err := os.Stat(p)
+	require.NoError(t, err)
+	// 復号した dump には秘密鍵や token が入る。
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	_, err = createStaging(p)
+	require.Error(t, err, "an existing file is not reused")
 }

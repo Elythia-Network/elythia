@@ -102,6 +102,8 @@ age-keygen -o /etc/elythia/backup-identity.txt
 # 表示された公開鍵(age1...)をbackup.encryption.recipientsに書く
 ```
 
+`age-keygen -o`は鍵のファイルを0600(作った人だけが読める)で作る。バックアップ用のimageはUID 70(`postgres`)で動くので、rootで作った鍵をそのままmountすると読めない。mountする前に持ち主をUID 70にする(`sudo chown 70:70 /etc/elythia/backup-identity.txt`。modeは0600のままにする)。
+
 **秘密鍵はリポジトリの中(`.config`を含む)に置かない。** リポジトリの下に置くと、imageを作るときのbuild contextに入りうる(`.dockerignore`は`.config/*.txt`を外しているが、それ以外の場所は外さない)。composeで渡すときは、リポジトリの外のファイルをread-onlyでmountする(`docker-compose.yml`の`backup`サービスのコメントを参照)。
 
 秘密鍵を失うと、暗号化した世代はどれも戻せない。ホストの外に控えておく。
@@ -174,7 +176,7 @@ elythia backup list -config .config/default.yml -json   # JSONで出す
 
 `elythia backup verify`で、取った世代を使い捨てのPostgreSQLへ実際に戻し、戻せることを確かめる(#3459)。ファイルが読めるだけでは、戻そうとしたときに初めて戻らないと分かることがあるため。**本番のDBには繋がない。** DBを作る権限も要らない。
 
-引数は世代のID(`20261010T040000Z`の形)か`latest`。`latest`は`meta.json`のある世代のうち最も新しいものを選ぶ(`meta.json`の無い、取っている途中か取るのに失敗した世代は選ばない)。全ての段が通れば終了コード0、1つでも通らなければ1を返す。フラグ(`-config`)は世代の指定より前に書く。
+引数は世代のID(`20261010T040000Z`の形)か`latest`。`latest`は`meta.json`のある世代のうち最も新しいものを選ぶ(`meta.json`の無い、取っている途中か取るのに失敗した世代は選ばない)。最も新しい世代の`meta.json`が読めない(壊れている、知らない`formatVersion`など)ときは、古い世代へ下がらずにエラーで止まる。下がると「最新を確かめた」と誤解するため。古い世代を確かめるときはIDで指定する。全ての段が通れば終了コード0、1つでも通らなければ1を返す。フラグ(`-config`)は世代の指定より前に書く。
 
 **`initdb` / `pg_ctl` / `pg_restore`が要る。** 本体のimageはdistrolessで、これらが無い。バックアップ用のimageで動かす。`initdb`はrootでは動かないので、root以外のユーザーで実行する(バックアップ用のimageは`postgres`で動く)。同梱のmigrationの番号と比べるので、作業ディレクトリに`migration/`が要る(imageでは`/app`)。
 
@@ -185,7 +187,9 @@ docker compose run --rm --no-deps backup verify latest
 docker compose run --rm --no-deps backup verify 20261010T040000Z
 ```
 
-暗号化した世代を確かめるときは、`backup`サービスの`volumes`のコメントを外して秘密鍵をmountし、`backup.encryption.identityFile`にmount先(`/run/secrets/backup-identity.txt`)を書く。
+暗号化した世代を確かめるときは、`backup`サービスの`volumes`のコメントを外して秘密鍵をmountし、`backup.encryption.identityFile`にmount先(`/run/secrets/backup-identity.txt`)を書く。鍵の持ち主は上の「暗号化」のとおりUID 70にしておく。
+
+**一時ディレクトリは、本番のDBのvolumeと別のディスクに向ける。** 何もしないと、復号したdumpと戻したDBはコンテナの書き込み層(`/tmp`)に置かれる。これはDBのvolumeと同じディスクであることが多く、埋まると本番のPostgreSQLがWALを書けなくなる。`backup`サービスの`volumes`と`environment`のコメントを外し、別のディスクをmountして`TMPDIR`をそこへ向ける(下の「一時ディレクトリの空き」)。
 
 ### UDS
 
@@ -193,7 +197,7 @@ docker compose run --rm --no-deps backup verify 20261010T040000Z
 docker compose -f compose.uds.yaml run --rm --no-deps backup verify latest
 ```
 
-秘密鍵の渡し方はcompose(TCP)と同じ(`compose.uds.yaml.example`の`backup`サービスのコメント)。
+秘密鍵の渡し方と、一時ディレクトリを別のディスクへ向ける方法は、compose(TCP)と同じ(`compose.uds.yaml.example`の`backup`サービスのコメント)。
 
 ### バイナリ直接実行
 
@@ -217,9 +221,17 @@ DBに拡張(pg_bigmなど)を入れているときは、このホストのPostgr
 
 - 使い捨てのPostgreSQLは、`meta.json`の`databaseLocale`と同じencodingとlocaleで`initdb`する。一時ディレクトリのunix socketだけで待ち受け、TCPを開かない
 - 使い捨てのPostgreSQLとそのデータは、通っても通らなくても止めて消す。復号したdumpを置く一時ファイルも消す
-- 一時ディレクトリには、復号したdumpと戻したDBが同時に置かれる。dumpと戻したDBを合わせた大きさの空きが要る。場所は`TMPDIR`(未設定なら`/tmp`)で、composeではコンテナの中
+- 一時ディレクトリの空きは下の「一時ディレクトリの空き」
 - `rowCounts`が空の`meta.json`は、突き合わせが何も検査せずに通ってしまうので、`restorable`を失敗にする
 - `fsck`が見つけたカウンタのずれと孤児行は、段を失敗にせず`warnings`に残す。snapshotの時点で元のDBにあったずれで、バックアップの欠陥ではないため。`fsck`のクエリ自体が通らない(表や列が無い)ときは失敗にする
+
+### 一時ディレクトリの空き
+
+一時ディレクトリには、復号したdumpと戻したDBが同時に置かれる。場所は`TMPDIR`(未設定なら`/tmp`)。
+
+- 要る空きは、およそ「dumpの大きさ + 戻したDBの大きさ」。戻したDBは、dumpより何倍か大きくなる(dumpは表のデータを圧縮して持ち、索引を持たないため)。元のDBの大きさ(`SELECT pg_size_pretty(pg_database_size(current_database()))`)を目安にする
+- 始める前に、dumpを置く場所の空きがdumpの大きさ以上あるかを、dumpを置いた後に、使い捨てのPostgreSQLを置く場所の空きがdumpの大きさ以上あるかを見て、足りなければ止める(環境の誤りとして扱う)。dumpの大きさは必ず要る量の下限なので、この検査で通るはずの検証を止めることはない。逆に、この検査に通っても足りないことはある
+- `TMPDIR`は短いパスにする。使い捨てのPostgreSQLのunix socketをこの下に作り、socketのパスには約100バイトの上限があるため
 
 ### 結果(`verify.json`)
 
@@ -238,12 +250,22 @@ DBに拡張(pg_bigmなど)を入れているときは、このホストのPostgr
   "mismatches": [
     {"table": "public.note", "expected": 120345, "actual": 120344}
   ],
-  "elythiaVersion": "2.0.0"
+  "elythiaVersion": "2.0.0",
+  "dumpSha256": "9f86d08..."
 }
 ```
 
+- `dumpSha256`は、確かめたdumpのsha256(`meta.json`の`dumpSha256`と同じ値)。後でdumpが差し替えられたときに、確かめた結果がどのdumpのものかが分かる
 - `mismatches`の`actual`が`-1`のときは、戻したDBにその表が無い。`expected`が`-1`のときは、戻したDBにあるが`meta.json`に無い
-- **確かめること自体ができなかったときは、`verify.json`を書かない。** 世代に`meta.json`が無い、保存先に繋がらない、暗号化した世代なのに`identityFile`が無い、`meta.json`の`extensions`の拡張が使い捨てのPostgreSQLに無い、`initdb`や`pg_ctl start`が失敗した、など。バックアップの良し悪しではなく環境の問題なので、終了コード1で理由を表示するだけにする。使い捨てのPostgreSQLを消せなかったときも、結果を表示したうえで`verify.json`を書かずに1を返す
+- **確かめること自体ができなかったときは、`verify.json`を書かない(前の結果はそのまま残る)。** バックアップの良し悪しではなく環境の問題なので、終了コード1で理由を表示し、「判定していない」と出す。次の場合が当たる
+  - 世代に`meta.json`が無い。保存先に繋がらない、読み出しが途中で切れた
+  - 暗号化した世代なのに`identityFile`が無い、または`identityFile`の鍵がその世代を暗号化した鍵と合わない
+  - 一時ディレクトリの空きが足りない、書き込みに失敗した(`ENOSPC`など)
+  - `pg_restore` / `initdb` / `pg_ctl`を動かせない(パスが無い、実行できない)。`initdb`や`pg_ctl start`が失敗した
+  - `meta.json`の`extensions`の拡張が使い捨てのPostgreSQLに無い
+  - 途中で止められた(`Ctrl-C`や`SIGTERM`)
+- **世代の欠陥として`verify.json`に書くのは、世代の中身が原因のときだけ。** 大きさやsha256の食い違い、復号の途中の失敗(暗号文の欠けや改ざん)、`pg_restore`がdumpを拒んだとき、行数や管理表の食い違い。`pg_restore`の失敗は終了コードでは見分けられないので、stderrに環境の誤りの文言(`No space left on device`、`out of memory`、サーバーとの接続が切れた、など)があれば環境の誤りに、それ以外は世代の欠陥に倒す。後者の`error`にはstderrがそのまま入るので、環境の誤りを取り違えていれば読めば分かる
+- 3つの段の判定が出た後に、使い捨てのPostgreSQLを止める・消すのに失敗したときは、`verify.json`を書いたうえで、その失敗を表示して1を返す
 - **終了コード0のときは、`verify.json`が置かれている。** 1のときは、置かれていることも置かれていないこともある
 
 ### 確かめていないこと

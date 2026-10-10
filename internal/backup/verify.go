@@ -74,12 +74,18 @@ func failf(format string, args ...any) error {
 // verify.json next to meta.json. The stored dump and meta.json are only read.
 //
 // A failing generation is reported through VerifyResult.OK with a nil error.
-// The error is non-nil when verification itself could not be carried out
-// (the generation has no meta.json, the storage or the sandbox failed, the
-// throwaway server lacks an extension the dump needs, the options are
-// incomplete), when the throwaway server could not be cleaned up, or when
-// verify.json could not be stored. A nil error therefore means verify.json
-// has been stored with the returned result.
+// The error is non-nil when verification itself could not be carried out:
+// the generation has no meta.json, the storage could not be read, the
+// identity does not match, a program could not be run, the temporary
+// directory is short of space, the throwaway server lacks an extension the
+// dump needs, or the options are incomplete. verify.json is not written in
+// those cases, so an earlier result stays as it was.
+//
+// Once every stage has a verdict, verify.json is written even when the
+// throwaway server cannot be cleaned up afterwards; that failure (and a
+// failure to write verify.json) is then returned as the error together with
+// the result. A nil error therefore means verify.json has been stored with
+// the returned result.
 func Verify(ctx context.Context, s Storage, id string, opts VerifyOptions) (VerifyResult, error) {
 	if !ValidID(id) {
 		return VerifyResult{}, fmt.Errorf("backup verify: invalid generation id %q", id)
@@ -100,8 +106,8 @@ func Verify(ctx context.Context, s Storage, id string, opts VerifyOptions) (Veri
 		return VerifyResult{}, fmt.Errorf("backup verify: %w", err)
 	}
 
-	v := &verifier{storage: s, id: id, meta: *meta, opts: opts}
-	stages, verr := v.run(ctx)
+	v := &verifier{storage: s, id: id, meta: *meta, opts: opts, create: createStaging}
+	stages, verr, cleanupErr := v.run(ctx)
 
 	version := opts.ElythiaVersion
 	if version == "" {
@@ -118,14 +124,19 @@ func Verify(ctx context.Context, s Storage, id string, opts VerifyOptions) (Veri
 		Stages:         stages,
 		Mismatches:     v.mismatches,
 		ElythiaVersion: version,
+		DumpSHA256:     meta.DumpSHA256,
 	}
 	if verr != nil {
-		return res, verr
+		// 環境の誤りでは世代の良し悪しが決まっていないので、verify.json を書かない
+		// (前回の結果を上書きしない)。
+		return res, errors.Join(verr, cleanupErr)
 	}
-	if err := writeVerifyResult(ctx, s, res); err != nil {
-		return res, err
+	// 判定が出ていれば、後始末の失敗とは別に結果を残す。残さないと、壊れていると
+	// 分かった世代でも前回の ok: true が残る。
+	if err := writeVerifyResult(context.WithoutCancel(ctx), s, res); err != nil {
+		return res, errors.Join(err, cleanupErr)
 	}
-	return res, nil
+	return res, cleanupErr
 }
 
 func writeVerifyResult(ctx context.Context, s Storage, res VerifyResult) error {
@@ -141,7 +152,11 @@ func writeVerifyResult(ctx context.Context, s Storage, res VerifyResult) error {
 
 // ResolveGenerationID turns a command-line argument into a generation ID.
 // "latest" is the newest generation that has meta.json; anything else must be
-// a valid ID.
+// a valid ID. When the meta.json of that newest generation cannot be read,
+// it fails instead of falling back to an older generation.
+//
+// 読めない世代を飛ばして古い世代を確かめると、「最新は確かめた」と誤解される。
+// 名指しで ID を渡せば、古い世代は確かめられる。
 func ResolveGenerationID(ctx context.Context, s Storage, arg string) (string, error) {
 	if arg != "latest" {
 		if !ValidID(arg) {
@@ -149,21 +164,20 @@ func ResolveGenerationID(ctx context.Context, s Storage, arg string) (string, er
 		}
 		return arg, nil
 	}
-	objs, err := s.List(ctx, GenerationPrefix())
+	gens, err := ListGenerations(ctx, s)
 	if err != nil {
 		return "", fmt.Errorf("backup: list generations: %w", err)
 	}
-	latest := ""
-	for _, o := range objs {
-		id := GenerationIDFromKey(o.Key)
-		if id != "" && o.Key == Key(id, MetaFile) && id > latest {
-			latest = id
+	for i := len(gens) - 1; i >= 0; i-- {
+		g := gens[i]
+		switch {
+		case g.MetaError != nil:
+			return "", fmt.Errorf("backup: the newest generation %s has an unreadable %s (%v); give an older generation's ID to verify it", g.ID, MetaFile, g.MetaError)
+		case g.Meta != nil:
+			return g.ID, nil
 		}
 	}
-	if latest == "" {
-		return "", errors.New("backup: no complete generation")
-	}
-	return latest, nil
+	return "", errors.New("backup: no complete generation")
 }
 
 type verifier struct {
@@ -173,11 +187,19 @@ type verifier struct {
 	opts       VerifyOptions
 	mismatches []RowMismatch
 	dumpPath   string
+	// create opens the staging file for the decrypted dump.
+	create func(path string) (io.WriteCloser, error)
+}
+
+func createStaging(path string) (io.WriteCloser, error) {
+	return os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 }
 
 // run executes the stages in order. After a failed stage the rest are
-// recorded as skipped. A non-nil error is an environment error.
-func (v *verifier) run(ctx context.Context) (stages []StageResult, err error) {
+// recorded as skipped. err is an environment error; cleanupErr is a failure
+// to stop or remove the throwaway server, reported separately so that a
+// verdict is still stored.
+func (v *verifier) run(ctx context.Context) (stages []StageResult, err, cleanupErr error) {
 	record := func(stage VerifyStage, serr error, warnings []string) (bool, error) {
 		var se *stageError
 		switch {
@@ -200,34 +222,37 @@ func (v *verifier) run(ctx context.Context) (stages []StageResult, err error) {
 
 	stageDir, err := os.MkdirTemp(v.opts.TempDir, "elythia-verify-dump-")
 	if err != nil {
-		return nil, fmt.Errorf("backup verify: %w", err)
+		return nil, fmt.Errorf("backup verify: %w", err), nil
 	}
 	// 復号した dump には秘密鍵や token が入るので、成否に関わらず消す。
 	defer func() { _ = os.RemoveAll(stageDir) }()
 	v.dumpPath = filepath.Join(stageDir, "dump.pgc")
+
+	// 復号した dump を置く前に、少なくとも dump の大きさの空きがあるかを見る。
+	if err := requireFree("the temporary directory "+stageDir, stageDir, v.meta.DumpSize, freeBytes); err != nil {
+		return nil, err, nil
+	}
 
 	ok, err := record(StageReadable, v.readable(ctx), nil)
 	if err != nil || !ok {
 		if err == nil {
 			skipRest(1)
 		}
-		return stages, err
+		return stages, err, nil
 	}
 
 	srv, cleanup, err := v.startServer(ctx)
 	if err != nil {
-		return stages, err
+		return stages, err, nil
 	}
 	defer func() {
 		// 使い捨てのサーバーは失敗しても必ず止めて消す。ctx が切れていても止めたい。
-		if cerr := cleanup(context.WithoutCancel(ctx)); cerr != nil {
-			err = errors.Join(err, cerr)
-		}
+		cleanupErr = cleanup(context.WithoutCancel(ctx))
 	}()
 
 	conn, db, err := connectSandbox(ctx, srv)
 	if err != nil {
-		return stages, err
+		return stages, err, nil
 	}
 	defer func() {
 		_ = conn.Close(context.WithoutCancel(ctx))
@@ -238,7 +263,7 @@ func (v *verifier) run(ctx context.Context) (stages []StageResult, err error) {
 	// pg_restore の CREATE EXTENSION の失敗として restorable を落とすと、世代が
 	// 壊れているように見えるので、戻す前に環境の誤りとして止める。
 	if err := checkExtensions(ctx, conn, v.meta.Extensions); err != nil {
-		return stages, err
+		return stages, err, nil
 	}
 
 	ok, err = record(StageRestorable, v.restorable(ctx, srv, conn), nil)
@@ -246,11 +271,60 @@ func (v *verifier) run(ctx context.Context) (stages []StageResult, err error) {
 		if err == nil {
 			skipRest(2)
 		}
-		return stages, err
+		return stages, err, nil
 	}
 	warnings, uerr := v.usable(ctx, conn, db)
 	_, err = record(StageUsable, uerr, warnings)
-	return stages, err
+	return stages, err, nil
+}
+
+// requireFree fails when dir has less than need bytes free. free reports the
+// free space; an error from it is an environment error too.
+func requireFree(what, dir string, need int64, free func(string) (int64, error)) error {
+	got, err := free(dir)
+	if err != nil {
+		return fmt.Errorf("backup verify: check the free space of %s: %w", what, err)
+	}
+	if got < need {
+		return fmt.Errorf("backup verify: %s has %d bytes free, less than the %d bytes this generation needs at least; "+
+			"point TMPDIR at a larger disk that is not the database's", what, got, need)
+	}
+	return nil
+}
+
+// envMarkers are pg_restore / server messages that come from the
+// environment, not from the dump.
+var envMarkers = []string{
+	"No space left on device",
+	"Disk quota exceeded",
+	"out of memory",
+	"could not connect to server",
+	"connection to server",
+	"server closed the connection unexpectedly",
+	"terminating connection",
+}
+
+// programVerdict turns the error of a sandboxed program that read the dump
+// into a stage failure when the program ran and rejected the dump, or into
+// an environment error otherwise.
+//
+// pg_restore の失敗は終了コードでは区別できない (どれも 1)。プログラムを動かせな
+// かった場合 (ProgramError でない)、ctx が切れた場合、stderr に環境の誤りの文言が
+// ある場合を環境の誤りにし、残りは世代の欠陥に倒す。--exit-on-error の pg_restore が
+// 落ちるのは、ほとんどが dump の中の SQL やデータを戻せないときだから。環境の文言の
+// 一覧に無い環境の誤り (例: 未知の権限の問題) は世代の欠陥に見えるが、その場合でも
+// stderr の全文が verify.json の error に残る。
+func programVerdict(ctx context.Context, what string, err error) error {
+	var pe *ProgramError
+	if ctx.Err() != nil || !errors.As(err, &pe) {
+		return fmt.Errorf("backup verify: run %s: %w", what, err)
+	}
+	for _, m := range envMarkers {
+		if strings.Contains(pe.Stderr, m) {
+			return fmt.Errorf("backup verify: %s failed because of the environment: %w", what, err)
+		}
+	}
+	return failf("%s failed: %v", what, err)
 }
 
 // readable checks the stored bytes against meta.json, decrypts them into
@@ -281,32 +355,51 @@ func (v *verifier) readable(ctx context.Context) error {
 	}
 	defer func() { _ = rc.Close() }()
 
-	f, err := os.OpenFile(v.dumpPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	f, err := v.create(v.dumpPath)
 	if err != nil {
 		return fmt.Errorf("backup verify: %w", err)
 	}
+	// 読み出し (保存先) と書き込み (一時ファイル) の失敗は環境の誤り。どちらで
+	// 起きたかを覚えておき、復号の失敗 (世代の欠陥) と区別する。
+	src := &errReader{r: rc}
+	dst := &errWriter{w: f}
 	stored := &countingHash{h: sha256.New()}
-	raw := io.TeeReader(rc, stored)
+	raw := io.TeeReader(src, stored)
 	plain := io.Reader(raw)
 	if m.Encrypted {
 		dec, err := Decrypt(raw, v.opts.Identities...)
 		if err != nil {
 			_ = f.Close()
+			var noMatch *age.NoIdentityMatchError
+			switch {
+			case src.err != nil:
+				return fmt.Errorf("backup verify: read dump: %w", src.err)
+			case errors.As(err, &noMatch):
+				return fmt.Errorf("backup verify: backup.encryption.identityFile does not match the key the generation was encrypted to: %w", err)
+			}
 			return failf("cannot decrypt the dump: %v", err)
 		}
 		plain = dec
 	}
 	plainHash := sha256.New()
-	_, copyErr := io.Copy(io.MultiWriter(f, plainHash), plain)
+	_, copyErr := io.Copy(io.MultiWriter(dst, plainHash), plain)
 	if copyErr == nil {
 		// age は末尾の余分なバイトを読まずに終わることがあるので、保存された
 		// バイト列の hash を取り切る。
 		_, copyErr = io.Copy(io.Discard, raw)
 	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("backup verify: %w", err)
-	}
-	if copyErr != nil {
+	closeErr := f.Close()
+	switch {
+	case src.err != nil:
+		return fmt.Errorf("backup verify: read dump: %w", src.err)
+	case dst.err != nil:
+		return fmt.Errorf("backup verify: write the decrypted dump to the temporary directory: %w", dst.err)
+	case closeErr != nil:
+		return fmt.Errorf("backup verify: write the decrypted dump to the temporary directory: %w", closeErr)
+	case ctx.Err() != nil:
+		return fmt.Errorf("backup verify: %w", ctx.Err())
+	case copyErr != nil:
+		// 残るのは復号の途中の失敗 (暗号文の改ざんや欠け)。
 		return failf("cannot read the dump: %v", copyErr)
 	}
 
@@ -324,7 +417,7 @@ func (v *verifier) readable(ctx context.Context) error {
 
 	return v.withDump(func(r io.Reader) error {
 		if err := v.opts.Sandbox.Run(ctx, SandboxCmd{Program: "pg_restore", Args: []string{"--list"}, Stdin: r, Stdout: io.Discard}); err != nil {
-			return failf("pg_restore --list failed: %v", err)
+			return programVerdict(ctx, "pg_restore --list", err)
 		}
 		return nil
 	})
@@ -368,6 +461,17 @@ func (v *verifier) startServer(ctx context.Context) (SandboxServer, func(context
 	}
 	fail := func(err error) (SandboxServer, func(context.Context) error, error) {
 		return SandboxServer{}, nil, errors.Join(err, cleanup(context.WithoutCancel(ctx)))
+	}
+
+	// 戻した DB は圧縮した dump より小さくならない (dump は表のデータを圧縮して持ち、
+	// 索引を持たない)。dump の大きさは必ず要る量の下限なので、これを下回る空きで
+	// 止めても、通るはずの検証を止めることはない。一時ファイルの dump を置いた後に
+	// 測るので、同じディスクならその分も引かれている。
+	if rep, ok := sb.(SpaceReporter); ok {
+		free := func(d string) (int64, error) { return rep.FreeBytes(ctx, d) }
+		if err := requireFree("the sandbox directory "+dir, dir, v.meta.DumpSize, free); err != nil {
+			return fail(err)
+		}
 	}
 
 	// 中身は検証が終われば捨てるので、fsync を省いて速くする。
@@ -480,7 +584,7 @@ func (v *verifier) restorable(ctx context.Context, srv SandboxServer, conn *pgx.
 			"--no-owner", "--no-privileges", "--exit-on-error",
 		}
 		if err := v.opts.Sandbox.Run(ctx, SandboxCmd{Program: "pg_restore", Args: args, Stdin: r}); err != nil {
-			return failf("pg_restore failed: %v", err)
+			return programVerdict(ctx, "pg_restore", err)
 		}
 		return nil
 	})
@@ -580,6 +684,34 @@ func (v *verifier) usable(ctx context.Context, conn *pgx.Conn, db *gorm.DB) ([]s
 		warnings = append(warnings, fmt.Sprintf("fsck: %d orphan row(s) in %s: %s", o.Count, o.Table, o.Reason))
 	}
 	return warnings, nil
+}
+
+// errReader remembers the first error of the reader it wraps.
+type errReader struct {
+	r   io.Reader
+	err error
+}
+
+func (e *errReader) Read(p []byte) (int, error) {
+	n, err := e.r.Read(p)
+	if err != nil && err != io.EOF && e.err == nil {
+		e.err = err
+	}
+	return n, err
+}
+
+// errWriter remembers the first error of the writer it wraps.
+type errWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (e *errWriter) Write(p []byte) (int, error) {
+	n, err := e.w.Write(p)
+	if err != nil && e.err == nil {
+		e.err = err
+	}
+	return n, err
 }
 
 // countingHash hashes and counts what is written to it.
