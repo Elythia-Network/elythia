@@ -288,7 +288,9 @@ func hasObject(bg backup.Generation, name string) bool {
 // 保存先の中身は書き込める誰かが作れるので信用しきらない。dumpFile から作った
 // key でダウンロードの URL を出すので、世代の外を指す値はここで落とす。
 func checkDumpFile(m *backup.Meta) error {
-	if m.DumpFile == "" || strings.Contains(m.DumpFile, "/") || strings.Contains(m.DumpFile, "..") {
+	// 区切り (/ と \) を含まない1つの名前で、. と .. でないものだけを受ける。
+	// "a..b" のような名前は世代の外を指さないので拒否しない。
+	if m.DumpFile == "" || m.DumpFile == "." || m.DumpFile == ".." || strings.ContainsAny(m.DumpFile, `/\`) {
 		return fmt.Errorf("%s has invalid dumpFile %q", backup.MetaFile, m.DumpFile)
 	}
 	return nil

@@ -334,6 +334,15 @@ func TestList_BrokenMeta(t *testing.T) {
 		"traversal": func(t *testing.T, st *memStorage) {
 			putJSON(t, st, backup.Key(gen1, backup.MetaFile), backup.Meta{FormatVersion: 1, ID: gen1, DumpFile: "../x"})
 		},
+		"dot dot": func(t *testing.T, st *memStorage) {
+			putJSON(t, st, backup.Key(gen1, backup.MetaFile), backup.Meta{FormatVersion: 1, ID: gen1, DumpFile: ".."})
+		},
+		"dot": func(t *testing.T, st *memStorage) {
+			putJSON(t, st, backup.Key(gen1, backup.MetaFile), backup.Meta{FormatVersion: 1, ID: gen1, DumpFile: "."})
+		},
+		"backslash": func(t *testing.T, st *memStorage) {
+			putJSON(t, st, backup.Key(gen1, backup.MetaFile), backup.Meta{FormatVersion: 1, ID: gen1, DumpFile: `..\x`})
+		},
 		"empty dump file": func(t *testing.T, st *memStorage) {
 			putJSON(t, st, backup.Key(gen1, backup.MetaFile), backup.Meta{FormatVersion: 1, ID: gen1})
 		},
@@ -350,6 +359,11 @@ func TestList_BrokenMeta(t *testing.T) {
 			require.Len(t, ov.Generations, 1)
 			assert.False(t, ov.Generations[0].Complete)
 			assert.NotEmpty(t, ov.Generations[0].MetaError)
+			// dumpFile の形の誤りは、dump が見つからないこととは別に、理由として出す。
+			switch name {
+			case "traversal", "dot dot", "dot", "backslash", "empty dump file":
+				assert.Contains(t, ov.Generations[0].MetaError, "invalid dumpFile")
+			}
 		})
 	}
 }
@@ -573,4 +587,16 @@ func TestDownloadAndVerify_InvalidDumpFile(t *testing.T) {
 	assert.ErrorContains(t, err, "invalid dumpFile")
 	_, err = svc.Verify(context.Background(), gen1, "")
 	assert.ErrorIs(t, err, ErrIncomplete)
+}
+
+// TestList_DotsInsideANameAreFine: only "." and ".." themselves leave the
+// generation.
+func TestList_DotsInsideANameAreFine(t *testing.T) {
+	st := newMemStorage()
+	putJSON(t, st, backup.Key(gen1, backup.MetaFile), backup.Meta{FormatVersion: backup.MetaFormatVersion, ID: gen1, DumpFile: "dump..pgc"})
+	require.NoError(t, st.Put(context.Background(), backup.Key(gen1, "dump..pgc"), strings.NewReader("d")))
+	ov, err := NewService(Options{Storage: st}).List(context.Background())
+	require.NoError(t, err)
+	require.Len(t, ov.Generations, 1)
+	assert.True(t, ov.Generations[0].Complete, ov.Generations[0].MetaError)
 }
