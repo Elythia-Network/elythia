@@ -5,7 +5,7 @@
  */
 
 import type * as Misskey from 'misskey-js';
-import type { FollowApprovalAction, SignupApplicationFormField } from './entities.js';
+import type { FollowApprovalAction, Page, PageVisibility, SignupApplicationFormField } from './entities.js';
 
 /**
  * Request fields that Elythia adds to upstream endpoints, keyed by the endpoint.
@@ -78,6 +78,14 @@ export type ElythiaRequestExtensions = {
 		/** The two-factor authentication code. Required when two-factor authentication is enabled. */
 		token?: string | null;
 	};
+	'pages/create': {
+		/** Who can see the Page (#3479). Defaults to `public`. */
+		visibility?: PageVisibility;
+	};
+	'pages/update': {
+		/** Who can see the Page (#3479). Omitting it keeps the current value. */
+		visibility?: PageVisibility;
+	};
 };
 
 /**
@@ -107,4 +115,6 @@ export type ResponseOverrides = {
 	 * 値の形は書いた側のクライアントしか知らないので、読む側で型を表明する。
 	 */
 	'i/registry/get': unknown;
+	/** Elythia adds `visibility` (#3479). */
+	'pages/show': Page;
 };

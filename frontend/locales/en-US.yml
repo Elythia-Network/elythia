@@ -2876,6 +2876,7 @@ _pages:
   editPage: "Edit this Page"
   readPage: "Viewing this Page's source"
   pageSetting: "Page settings"
+  visibilityDescription: "When it is private, nobody but you can see it, even with the URL."
   nameAlreadyExists: "The specified Page URL already exists"
   invalidNameTitle: "The specified Page URL is invalid"
   invalidNameText: "Make sure the Page title is not empty"

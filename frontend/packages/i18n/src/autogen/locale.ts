@@ -11729,6 +11729,10 @@ export interface Locale extends ILocale {
          */
         "pageSetting": string;
         /**
+         * 非公開にすると、自分以外の人は、URLを知っていても見られません。
+         */
+        "visibilityDescription": string;
+        /**
          * 指定されたページURLは既に存在しています
          */
         "nameAlreadyExists": string;
