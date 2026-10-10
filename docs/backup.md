@@ -92,7 +92,7 @@ touch /mnt/nas/elythia-backup/.elythia-backup
 
 **管理画面(#3462)からも使うときは、本体とグループを共有する。** バックアップ用のサービスはUID 70(postgres)で、本体は別のUIDで動く(compose(TCP)の`docker-compose.yml`ではUID・GIDとも991、UDSの`compose.uds.yaml.example`では65532)。本体が一覧・ダウンロード・削除をするには、本体のGIDのグループとして読めて、ディレクトリに書ける(消せる)必要がある。
 
-- `elythia backup`は、ディレクトリを`0770`、ファイルを`0640`で作る(umaskに左右されない)。グループは、ファイルの中身を変えることはできないが、読むことと、ディレクトリの中にファイルを作る・置き換える・消すことはできる(ディレクトリに書けるため)。他人(other)には一切渡さない
+- `elythia backup`は、ディレクトリを`0770`、ファイルを`0640`で作る(作った後でchmodし直すので、umaskに左右されない。ただし下のとおりchmodを受け流したときは、作ったときのmode(ファイルは`0600`、ディレクトリは`0770`からumaskを引いたもの)のまま残る)。グループは、ファイルの中身を変えることはできないが、読むことと、ディレクトリの中にファイルを作る・置き換える・消すことはできる(ディレクトリに書けるため)。他人(other)には一切渡さない
 - グループは、根に付けたsetgidで引き継がせる。根の所有者とグループを`70:<本体のGID>`、modeを`2770`にする
 - composeの`backup`サービスは、本体のGIDを補助グループに持つ(`group_add`。同梱のcomposeに書いてある)。持たないと、作ったディレクトリからsetgidが落ち、その下のファイルが本体から読めなくなる
 - 本体のコンテナにも、同じホストのパスを`backup.storage.dir.path`(または`backup.server.storage.dir.path`)と同じ場所にmountする
@@ -109,7 +109,7 @@ find /mnt/nas/elythia-backup/generations -type f -exec chmod 0640 {} +
 
 **GIDがホストやNASの別のグループと重ならないか確かめる。** ファイルにはGIDの数字だけが記録されるので、ホストやNASで同じ数字のグループに入っている者は、バックアップを読めて、消せる。991はホストの別のグループ(例えば`polkitd`)に割り当てられていることがある。`getent group 991`(UDSでは65532)をホストとNASの両方で見て、使われていれば、そのグループに人やサービスが入っていないことを確かめる。
 
-unix extensionsの無いCIFSなど、chmodを受け付けないファイルシステムでは、`elythia backup`はchmodの失敗(`EPERM` / `ENOTSUP` / `EINVAL`)を警告に留めて書き続ける。権限はmountの設定(`file_mode` / `dir_mode` / `gid`)で決まるので、そちらで本体のGIDから読めるようにし、otherに渡さない値にする。
+unix extensionsの無いCIFSなど、chmodを受け付けないファイルシステムでは、`elythia backup`はchmodの失敗のうち`EPERM` / `EINVAL`と、対応していないことを示すもの(`ENOTSUP`(`EOPNOTSUPP`) / `ENOSYS`)を警告に留めて書き続ける。警告は、本体では起動ごと、コマンドでは実行ごとに初回だけ出す(`backup: the storage does not accept chmod`)。それ以外の失敗(`EIO`など)では止める。権限はmountの設定(`file_mode` / `dir_mode` / `gid`)で決まるので、そちらで本体のGIDから読めるようにし、otherに渡さない値にする。
 
 **暗号化しないdumpは、本体のグループに読める。** 本体はDBの接続情報(と、DBの中の秘密鍵・token)を元から持っているので、読めて新たに漏れるものは無い、という判断。本体のGIDに他のプロセスを入れないこと。NASがUID・GIDを書き換える設定(`all_squash`など)だと、この分け方は効かない。
 
