@@ -1,0 +1,341 @@
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# mk-go configuration (Docker)
+#
+# このファイルは `.config/docker.yml.example` です。
+# Dockerfile が build 時に `.config/docker.yml.example` を image 内の
+# `/app/.config/default.yml` として焼き込みます。docker-compose の
+# 既定値 (POSTGRES_USER=misskey / POSTGRES_PASSWORD=misskey) と
+# 整合する内容を初期値にしてあるので、`docker compose up` で out-of-
+# the-box に動作します。
+#
+# 設定をカスタマイズする場合:
+#   1. cp .config/docker.yml.example .config/docker.yml
+#   2. .config/docker.yml を編集
+#   3. docker-compose.yml の `volumes:` で
+#        - ./.config/docker.yml:/app/.config/default.yml:ro
+#      を有効化して mount 上書き
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#   ┌─────┐
+#───┘ URL └─────────────────────────────────────────────────────
+
+# Final accessible URL seen by a user.
+url: http://localhost:3000
+
+# ONCE YOU HAVE STARTED THE INSTANCE, DO NOT CHANGE THE
+# URL SETTINGS AFTER THAT!
+
+#   ┌───────────────────────┐
+#───┘ Port and TLS settings └───────────────────────────────────
+
+port: 3000
+
+#   ┌──────────────────────────┐
+#───┘ PostgreSQL configuration └────────────────────────────────
+
+db:
+  host: db
+  port: 5432
+
+  # Database name
+  db: misskey
+
+  # Auth — docker-compose.yml の POSTGRES_USER / POSTGRES_PASSWORD と
+  # 同じ値にしておく (out-of-the-box で接続できるように)。
+  # 本番運用では強いパスワードに変更すること。
+  user: misskey
+  pass: misskey
+
+  # Whether disable Caching queries
+  #disableCache: true
+
+  # Extra Connection options
+  # `ssl: true` enables TLS and verifies the server certificate and hostname
+  # against the system CAs (same as upstream node-postgres). NOTE: earlier
+  # mk-go versions did not verify. For a self-signed / private CA, point
+  # `sslrootcert` at the CA file; to explicitly skip verification (exposes
+  # the connection to interception) use `ssl: { rejectUnauthorized: false }`
+  # (or `ssl: no-verify`).
+  # `sslmode` (libpq value) may be set instead of `ssl`. See docs/configuration.md.
+  #extra:
+  #  ssl: true
+  #  sslrootcert: /etc/ssl/certs/pg-ca.pem
+
+dbReplications: false
+
+# You can configure any number of read replicas here
+#dbSlaves:
+#  -
+#    host:
+#    port:
+#    db:
+#    user:
+#    pass:
+
+#   ┌─────────────────────┐
+#───┘ Redis configuration └─────────────────────────────────────
+
+redis:
+  host: redis
+  port: 6379
+  #family: 0  # 0=Both, 4=IPv4, 6=IPv6
+  #pass: example-pass
+  #prefix: example-prefix
+  #db: 1
+
+#redisForPubsub:
+#  host: redis
+#  port: 6379
+
+#redisForJobQueue:
+#  host: redis
+#  port: 6379
+
+#redisForTimelines:
+#  host: redis
+#  port: 6379
+
+#redisForReactions:
+#  host: redis
+#  port: 6379
+
+#   ┌───────────────────┐
+#───┘ Job queue driver └────────────────────────────────────────
+
+# mk-go specific: select the job queue runtime.
+#
+#   - 'mkq' (the only driver): elythia-network/mkq based, BullMQ wire-
+#                         compatible (makes the admin queue dashboard
+#                         render correctly under the upstream Misskey
+#                         TS frontend) + supports per-queue concurrency
+#                         and rate-limit knobs.
+#
+# The legacy 'asynq' driver was removed in mk-go (#2985). A config that
+# still pins it fails to start: set 'mkq' or delete the line.
+#
+# Migrating is ONE-WAY: asynq's queued jobs (`asynq:{<queue>}:*` in Redis)
+# are invisible to mkq (`bull:*`). Drain them with the PREVIOUS mk-go
+# build before upgrading — the new build refuses to start, so there is no
+# way to drain them afterwards.
+#
+#jobQueueDriver: mkq
+
+#   ┌───────────────────────────────┐
+#───┘ Fulltext search configuration └─────────────────────────────
+
+fulltextSearch:
+  # - sqlLike (default), sqlPgroonga, meilisearch
+  provider: sqlLike
+
+#meilisearch:
+#  host: meilisearch
+#  port: 7700
+#  apiKey: ''
+#  ssl: true
+#  index: ''
+#  scope: local
+
+#   ┌───────────────┐
+#───┘ ID generation └───────────────────────────────────────────
+
+# Available methods: aid, aidx, meid, ulid, objectid
+# ONCE YOU HAVE STARTED THE INSTANCE, DO NOT CHANGE.
+
+id: 'aidx'
+
+#   ┌────────────────┐
+#───┘ Error tracking └──────────────────────────────────────────
+
+#sentryForBackend:
+#  options:
+#    dsn: 'https://examplePublicKey@o0.ingest.sentry.io/0'
+
+#   ┌─────────────────────┐
+#───┘ Job queue settings └──────────────────────────────────────
+
+#deliverJobConcurrency: 128
+#inboxJobConcurrency: 16
+
+#deliverJobPerSec: 128
+#inboxJobPerSec: 32
+
+# Job attempts (total tries incl. the first). Defaults match Misskey:
+# deliver=12, inbox=8. Set to 1 to disable retries to a failing remote.
+#deliverJobMaxAttempts: 12
+#inboxJobMaxAttempts: 8
+
+# Auto-scale: when jobQueueAutoScale=true, an AIMD controller dynamically
+# resizes worker pools for queues without an explicit *JobConcurrency knob,
+# within [minWorkers, maxWorkers]. Full spec:
+# docs/design/auto-scale-job-workers.md.
+#jobQueueAutoScale: false
+#maxWorkers: 128                # per-queue upper bound (default: runtime.NumCPU() * 16)
+#minWorkers: 4                  # per-queue lower bound (kept warm even at idle)
+#maxWorkersGlobal: 256          # cluster-wide cap across queues for multi-pod use (default: unset = no cap)
+#autoScaleCooldownSeconds: 1    # minimum interval between scale events (5-10 recommended in production to avoid oscillation)
+
+#   ┌─────────────────────┐
+#───┘ Other configuration └─────────────────────────────────────
+
+#disableHsts: true
+
+#outgoingAddressFamily: ipv4
+
+# When set, **every third-party outbound HTTP/HTTPS request** mk-go makes is
+# routed through this proxy: ActivityPub delivery, WebFinger, media proxy,
+# summary (URL preview) target fetch, webhook delivery, Web Push, and SaaS
+# APIs (hCaptcha / reCAPTCHA / Turnstile / mCaptcha / DeepL / Truemail /
+# Verifymail, etc.). Use this to centralize egress or to keep the origin IP
+# hidden. Hosts that must bypass the proxy (exact hostname match) go in
+# proxyBypassHosts below.
+# Note: operator-trusted endpoints configured via `urlPreviewSummaryProxyUrl`
+# (the summaly proxy itself) are called directly so that internal/localhost
+# summaly deployments keep working.
+# Destination check: for every request that goes through the proxy, mk-go
+# resolves the destination host itself and refuses to hand it to the proxy
+# when any address is private / reserved (allowedPrivateNetworks still
+# applies). The proxy re-resolves the name on its own, so a DNS rebinding
+# window remains: configure the proxy to deny private, loopback and
+# link-local destinations (e.g. 169.254.169.254) as well. Destinations that
+# cannot be resolved locally are not forwarded either.
+# Numeric hosts that are not a plain dotted quad (0x7f.1, 2130706433, 127.1)
+# are refused, since the proxy may read them as 127.0.0.1.
+#proxy: http://127.0.0.1:3128
+
+# Hosts that bypass `proxy` (exact hostname match).
+proxyBypassHosts:
+  - api.deepl.com
+  - api-free.deepl.com
+  - www.recaptcha.net
+  - hcaptcha.com
+  - challenges.cloudflare.com
+
+#proxySmtp: http://127.0.0.1:3128
+
+#mediaProxy: https://example.com/proxy
+
+# Video thumbnail generator. docker-compose.yml に `video-thumb` service
+# (nekonoverse/video-thumb) を同梱しているが default では disabled。
+# 動画サムネを生成したい operator は docker-compose.yml の `video-thumb`
+# block と以下の行を両方コメントアウト解除する。
+# 設定が無ければ mk-go は video request に dummy PNG を返すだけで外部
+# generator を呼ばない。default wire mode "post" は multipart bytes 転送、
+# Misskey TS 互換の "get" 経路は default.yml.example を参照。
+#videoThumbnailGenerator: http://video-thumb:8005
+#videoThumbnailGeneratorMode: post
+
+# NSFW sensitive media detection (#406). Disabled by default. The operator
+# runs any compatible service and points this at its URL. The wire spec
+# and reference compatible images are documented in default.yml.example.
+#nsfwDetectorUrl: http://nsfw-detector:8080/score
+
+#allowedPrivateNetworks:
+#  - '127.0.0.1/32'
+
+#maxFileSize: 262144000
+
+#logging:
+#  sql:
+#    enableQueryParamLogging: false
+#    disableQueryTruncation: false
+
+# Expose the Prometheus /metrics endpoint with job-queue metrics.
+# Unauthenticated; restrict access via nginx / LB ACL if exposed outside
+# the cluster. See docs/design/auto-scale-job-workers.md §6.1.
+#enableMetrics: false
+
+# Maximum successful effective-policy entries retained per provider.
+# Non-positive values use the default 10000. Changes require a restart.
+#effectivePolicyProviderCacheEntries: 10000
+
+#   ┌────────────────────────┐
+#───┘ Database backup (#3457) └────────────────────────────────
+
+# Used by `elythia backup` (the "backup" and "backup-daemon" compose
+# services) and by the admin page of the server (backup.server). See
+# docs/backup.md.
+#
+# **A disk of the same host does not count as a backup**: it is lost together
+# with the database. Use S3-compatible storage or a directory on another
+# device mounted here (NAS and so on). The storage credentials live in this
+# file, not in the database, so that the backups can be read when the
+# database is gone.
+#backup:
+#  storage:
+#    # "s3" or "dir"
+#    type: s3
+#    s3:
+#      # Empty means AWS S3. For R2: https://<account>.r2.cloudflarestorage.com
+#      # Use https:// unless the storage is on a private network: with
+#      # http:// the dump (unless encrypted) and the signed requests travel
+#      # in plaintext.
+#      endpoint: https://s3.example.com
+#      region: us-east-1
+#      bucket: elythia-backup
+#      prefix: example-instance
+#      accessKey: "..."
+#      secretKey: "..."
+#      # true for MinIO and other services without virtual-hosted buckets
+#      forcePathStyle: false
+#    dir:
+#      # Must already exist and contain the marker file .elythia-backup,
+#      # created on the mounted device (touch /mnt/nas/.../.elythia-backup).
+#      # Neither is created, so an unmounted NAS fails instead of filling the
+#      # local disk.
+#      path: /backup
+#  # The dump contains users' private keys, tokens and password hashes.
+#  # With encryption enabled, the dump is encrypted with age
+#  # (https://age-encryption.org). Taking a backup needs only the public
+#  # keys; keep the private key (age-keygen output) off this host and give it
+#  # only to verify / restore.
+#  encryption:
+#    enabled: false
+#    recipients:
+#      - age1...
+#    # Keep the private key outside the repository and .config.
+#    identityFile: /run/secrets/backup-identity.txt
+#  # Paths of the PostgreSQL client programs. Empty means PATH. Their major
+#  # version must not be older than the server's.
+#  tools:
+#    pgDump: ""
+#    # pg_restore must not be newer than the server it restores into
+#    # (`elythia backup restore`). `elythia backup verify` restores into a
+#    # throwaway server with pgRestore, initdb and pgCtl.
+#    pgRestore: ""
+#    initdb: ""
+#    pgCtl: ""
+#  # The "backup-daemon" compose service (docs/backup.md): take, verify and
+#  # prune on a schedule, and report problems.
+#  schedule:
+#    interval: 24h
+#    # HH:MM in the process time zone (UTC unless TZ is set on the service).
+#    at: "04:00"
+#    keep: 7
+#    verify: true
+#    # Control API for the admin page (plain HTTP). backup-daemon publishes
+#    # no port, so only containers on the compose network reach it (as
+#    # http://backup-daemon:3010); never add ports.
+#    listen: ":3010"
+#  notify:
+#    webhookUrl: "https://hooks.example.com/..."
+#    # generic, discord or slack
+#    format: generic
+#  # What the server (the admin page, #3462) uses. The daemon reads
+#  # serviceToken too.
+#  server:
+#    # Empty type means backup.storage. Set it to give the server a key that
+#    # can only list, read and delete. With a "dir" storage, the server must
+#    # see the same directory and share its group (docs/backup.md).
+#    storage:
+#      type: ""
+#    # Price per GB-month (2^30 bytes) for the monthly estimate. 0 hides it.
+#    pricePerGbMonth: 0
+#    # Control API of `elythia backup daemon` (schedule.listen) for taking
+#    # and verifying from the admin page, e.g. http://backup-daemon:3010.
+#    # Ignored while serviceToken is empty.
+#    serviceUrl: ""
+#    # Shared by the daemon's control API and the main server. Generate a
+#    # value (e.g. `openssl rand -hex 32`) and write the same one to both.
+#    # While empty, the daemon does not start with listen set, and the
+#    # server sends nothing.
+#    serviceToken: ""

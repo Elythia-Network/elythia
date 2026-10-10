@@ -1,0 +1,120 @@
+# pull して起動する構成。フロントエンドのビルドも image のビルドも不要。
+#
+# 既存の docker-compose.yml との違い:
+#   - `build:` を持たない (publish 済みの bundled image を pull する)
+#   - `frontend/built` の bind-mount が無い (アセットは image 同梱)
+#   - したがって事前の `make e2e-frontend-build` が要らない
+#
+# ソースからビルドしたい場合は従来どおり docker-compose.yml を使う。こちらは
+# それを置き換えるものではなく、並立する選択肢。
+#
+# 使い方:
+#   make image-up      # 起動
+#   make image-logs    # ログ
+#   make image-down    # 停止
+#
+# 手元の変更を反映したい場合は先に bundled image を自前ビルドする:
+#   docker build -f Dockerfile.bundled -t ghcr.io/elythia-network/elythia:bundled .
+
+# 本番 UDS スタックと同じ project 名 (= ディレクトリ名の mk) に合流しないよう
+# 明示する。docker-compose.yml は name: を持たないため project 名がディレクトリ
+# 名になり、同名で動く本番を recreate しうる。
+name: mk-image
+
+# ログの上限 (#2828)。
+#
+# **既定の json-file はローテーションしない。** 指定しないとコンテナが動いている
+# あいだログが増え続け、ディスクを埋める。
+#
+# **`max-size` は decimal。** json-file は units.FromHumanSize で読むので、`50m` は
+# 50,000,000 バイト (= 47.7 MiB)。`50mib` と書いても同じ扱いで、MiB は表現できない。
+# 3 世代で 1 サービスあたり最大 150 MB (= 143 MiB)。実測 (mk-go の本番) では
+# 1 日あたり約 13 MB なので、封筒の分を含めて 1 週間前後は遡れる。
+#
+# **既存のコンテナには効かない。** この設定は生成時に固定されるので、
+# `docker compose up -d` で作り直すまで反映されない。
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
+services:
+  app:
+    logging: *default-logging
+    # MK_IMAGE で上書きできる。手元でビルドした image を試すときに使う。
+    image: ${MK_IMAGE:-ghcr.io/elythia-network/elythia:bundled}
+    ports:
+      - "${MK_PORT:-3000}:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      MK_DB_HOST: db
+      MK_REDIS_HOST: redis
+      # 実運用では .config/docker.yml を用意して下の volumes を有効にする。
+      # url は必須項目で、既定値は https://example.tld/ のまま。
+      MK_URL: ${MK_URL:-http://localhost:3000/}
+      TZ: Asia/Tokyo
+    volumes:
+      # ドライブの実体。コンテナは UID/GID 991 で動くので
+      # `sudo chown -R 991:991 ./files` が必要 (#621)。
+      - ./files:/app/drive-files
+      # 設定を差し替える場合はコメントを外す。**migrate 側にも同じ mount を
+      # 入れること** — 片方だけだとマイグレーションと本体が別 DB を見る。
+      # - ./.config/docker.yml:/app/.config/default.yml:ro
+    restart: unless-stopped
+
+  # マイグレーションを適用する one-shot サービス。app は完走を待って起動する。
+  # golang-migrate が適用済みバージョンを管理するので何度流しても冪等。
+  migrate:
+    logging: *default-logging
+    image: ${MK_IMAGE:-ghcr.io/elythia-network/elythia:bundled}
+    entrypoint: ["/app/elythia"]
+    command: ["migrate", "-config", ".config/default.yml", "-direction", "up"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      MK_DB_HOST: db
+      MK_REDIS_HOST: redis
+      MK_URL: ${MK_URL:-http://localhost:3000/}
+    # volumes:
+    #   - ./.config/docker.yml:/app/.config/default.yml:ro
+    restart: "no"
+
+  db:
+    logging: *default-logging
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: misskey
+      POSTGRES_USER: misskey
+      POSTGRES_PASSWORD: misskey
+    volumes:
+      - db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U misskey"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  redis:
+    logging: *default-logging
+    image: redis:7-alpine
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+volumes:
+  db-data:
+  redis-data:
