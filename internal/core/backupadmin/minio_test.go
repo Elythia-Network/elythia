@@ -177,7 +177,7 @@ func TestMinio_ListUsageDeleteAndPresign(t *testing.T) {
 
 	// 署名付き URL: 期限内は取れて、期限を過ぎると拒否される。
 	short := NewService(Options{Storage: st, DownloadTTL: 2 * time.Second})
-	d, err := short.Download(ctx, gen2)
+	d, err := short.Download(ctx, gen2, "admin1")
 	require.NoError(t, err)
 	assert.Equal(t, "storage", d.Via)
 	res, err := http.Get(d.URL)

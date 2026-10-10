@@ -427,7 +427,7 @@ func TestDownload_Presigned(t *testing.T) {
 	putGeneration(t, st, gen1, []byte("encrypted-dump"), true)
 	now := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)
 	svc := NewService(Options{Storage: st, Now: func() time.Time { return now }})
-	d, err := svc.Download(context.Background(), gen1)
+	d, err := svc.Download(context.Background(), gen1, "admin1")
 	require.NoError(t, err)
 	assert.Equal(t, "storage", d.Via)
 	assert.Equal(t, "https://s3.example/"+backup.Key(gen1, backup.DumpFileAge)+"?sig=x", d.URL)
@@ -438,7 +438,7 @@ func TestDownload_Presigned(t *testing.T) {
 	assert.Equal(t, "elythia-backup-"+gen1+"-dump.pgc.age", d.FileName)
 
 	st.err = errors.New("no creds")
-	_, err = svc.Download(context.Background(), gen1)
+	_, err = svc.Download(context.Background(), gen1, "admin1")
 	assert.ErrorContains(t, err, "no creds")
 }
 
@@ -446,13 +446,14 @@ func TestDownload_Server(t *testing.T) {
 	st := newMemStorage()
 	putGeneration(t, st, gen1, []byte("plain-dump"), false)
 	tokens := &fakeTokens{}
-	svc := NewService(Options{Storage: st, Tokens: tokens, DownloadURLBase: "https://example.com/backup-download/", DownloadTTL: time.Minute})
-	d, err := svc.Download(context.Background(), gen1)
+	svc := NewService(Options{Storage: st, Tokens: tokens, DownloadURLBase: "https://example.com/backup-download?token=", DownloadTTL: time.Minute})
+	d, err := svc.Download(context.Background(), gen1, "admin1")
 	require.NoError(t, err)
 	assert.Equal(t, "server", d.Via)
-	assert.Equal(t, "https://example.com/backup-download/tok", d.URL)
+	assert.Equal(t, "https://example.com/backup-download?token=tok", d.URL)
 	assert.Equal(t, time.Minute, tokens.ttl)
 	assert.Equal(t, backup.Key(gen1, backup.DumpFile), tokens.grants["tok"].Key)
+	assert.Equal(t, "admin1", tokens.grants["tok"].UserID)
 
 	g, rc, info, err := svc.Open(context.Background(), "tok")
 	require.NoError(t, err)
@@ -466,10 +467,10 @@ func TestDownload_Server(t *testing.T) {
 	assert.ErrorIs(t, err, ErrTokenInvalid)
 
 	tokens.err = errors.New("redis down")
-	_, err = svc.Download(context.Background(), gen1)
+	_, err = svc.Download(context.Background(), gen1, "admin1")
 	assert.ErrorContains(t, err, "redis down")
 
-	_, err = NewService(Options{Storage: st}).Download(context.Background(), gen1)
+	_, err = NewService(Options{Storage: st}).Download(context.Background(), gen1, "admin1")
 	assert.ErrorContains(t, err, "not wired")
 }
 
@@ -477,18 +478,18 @@ func TestDownload_Errors(t *testing.T) {
 	st := newMemStorage()
 	require.NoError(t, st.Put(context.Background(), backup.Key(gen1, backup.DumpFile), strings.NewReader("x")))
 	svc := NewService(Options{Storage: st, Tokens: &fakeTokens{}, DownloadURLBase: "u/"})
-	_, err := svc.Download(context.Background(), gen1)
+	_, err := svc.Download(context.Background(), gen1, "admin1")
 	assert.ErrorIs(t, err, ErrIncomplete, "no meta.json")
-	_, err = svc.Download(context.Background(), gen2)
+	_, err = svc.Download(context.Background(), gen2, "admin1")
 	assert.ErrorIs(t, err, ErrNotFound)
 
 	putGeneration(t, st, gen2, []byte("x"), false)
 	delete(st.objs, backup.Key(gen2, backup.DumpFile))
-	_, err = svc.Download(context.Background(), gen2)
+	_, err = svc.Download(context.Background(), gen2, "admin1")
 	assert.ErrorIs(t, err, ErrIncomplete, "dump missing")
 
 	st.statErr = errors.New("io")
-	_, err = svc.Download(context.Background(), gen2)
+	_, err = svc.Download(context.Background(), gen2, "admin1")
 	assert.ErrorContains(t, err, "io")
 }
 

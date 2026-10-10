@@ -232,7 +232,7 @@ func newFixture(t *testing.T, guardOnly bool) *fixture {
 	tokens := backupadmin.NewRedisTokens(rdb)
 	svc := backupadmin.NewService(backupadmin.Options{
 		StorageType: "dir", Storage: st, Control: ctl, Tokens: tokens,
-		DownloadURLBase: "https://example.com/backup-download/",
+		DownloadURLBase: "https://example.com/backup-download?token=",
 	})
 	lg := &modlog{}
 	hd := NewHandler(svc, v, lg)
@@ -260,7 +260,7 @@ func newFixture(t *testing.T, guardOnly bool) *fixture {
 	e.POST("/api/admin/backup/delete", hd.Delete, chain...)
 	e.POST("/api/admin/backup/download", hd.Download, chain...)
 	e.POST("/api/admin/backup/reauth-challenge", hd.ReauthChallenge, pre...)
-	e.GET("/backup-download/:token", hd.ServeDownload)
+	e.GET("/backup-download", hd.ServeDownload)
 	return &fixture{e: e, storage: st, control: ctl, log: lg, secret: secret, keys: k, tokens: tokens}
 }
 
@@ -437,11 +437,11 @@ func TestOperationResponses(t *testing.T) {
 	var d backupadmin.Download
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &d))
 	assert.Equal(t, "server", d.Via)
-	require.True(t, strings.HasPrefix(d.URL, "https://example.com/backup-download/"))
-	token := strings.TrimPrefix(d.URL, "https://example.com/backup-download/")
+	require.True(t, strings.HasPrefix(d.URL, "https://example.com/backup-download?token="))
+	token := strings.TrimPrefix(d.URL, "https://example.com/backup-download?token=")
 
 	// 本体を通して渡す。Range で途中から取れる。
-	req := httptest.NewRequest(http.MethodGet, "/backup-download/"+token, nil)
+	req := httptest.NewRequest(http.MethodGet, "/backup-download?token="+token, nil)
 	req.Header.Set("Range", "bytes=4-7")
 	res := httptest.NewRecorder()
 	f.e.ServeHTTP(res, req)
@@ -490,26 +490,26 @@ func TestServeDownload(t *testing.T) {
 		f.e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		return rec
 	}
-	assert.Equal(t, http.StatusNotFound, get("/backup-download/nope").Code)
+	assert.Equal(t, http.StatusNotFound, get("/backup-download?token=nope").Code)
 
 	tok, err := f.tokens.Issue(context.Background(), backupadmin.DownloadGrant{Key: backup.Key(gen1, backup.DumpFile), FileName: "x.pgc"}, time.Minute)
 	require.NoError(t, err)
-	rec := get("/backup-download/" + tok)
+	rec := get("/backup-download?token=" + tok)
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, string(dumpBytes()), rec.Body.String())
 	assert.Equal(t, "application/octet-stream", rec.Header().Get("Content-Type"))
 
 	f.storage.noSeek = true
-	rec = get("/backup-download/" + tok)
+	rec = get("/backup-download?token=" + tok)
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, string(dumpBytes()), rec.Body.String())
 
 	f.storage.getErr = errors.New("io")
-	assert.Equal(t, http.StatusInternalServerError, get("/backup-download/"+tok).Code)
+	assert.Equal(t, http.StatusInternalServerError, get("/backup-download?token="+tok).Code)
 
 	f.storage.getErr = nil
 	delete(f.storage.objs, backup.Key(gen1, backup.DumpFile))
-	assert.Equal(t, http.StatusNotFound, get("/backup-download/"+tok).Code)
+	assert.Equal(t, http.StatusNotFound, get("/backup-download?token="+tok).Code)
 }
 
 func TestReauthChallenge(t *testing.T) {

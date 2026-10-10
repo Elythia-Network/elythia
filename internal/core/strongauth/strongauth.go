@@ -26,10 +26,13 @@
 //     fail-open にしているが、ここはコマンド (elythia backup) という代わりの
 //     手段があるので、照合できないときは拒否する
 //   - **どの要素で失敗したかを返さない。** password と 2つ目の要素のどちらが
-//     違ったかを分けると、片方ずつ当てられる
+//     違ったかを分けると、片方ずつ当てられる。例外は、password が合っていて
+//     TOTP のコードを使い回しただけのとき (ReasonCodeReused)。操作のたびに
+//     再認証するので普通に起き、数えると本人が締め出される
 package strongauth
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -74,6 +77,9 @@ const (
 	// ReasonPasswordNotSet: the account has no password to re-authenticate
 	// with.
 	ReasonPasswordNotSet
+	// ReasonCodeReused: the password was right but the TOTP or backup code
+	// was already used within the replay window. Not counted as a failure.
+	ReasonCodeReused
 )
 
 // Error is returned when a request is refused.
@@ -269,12 +275,22 @@ func (v *Verifier) Verify(ctx context.Context, s Subject, r Reauth) error {
 	if err != nil {
 		return err
 	}
-	usePasskey := len(r.Credential) > 0
+	// `"credential": null` は付けていないのと同じに扱う。null をパスキーの
+	// 経路に回すと、token を付けていても失敗として数えられる。
+	usePasskey := len(r.Credential) > 0 && !bytes.Equal(bytes.TrimSpace(r.Credential), []byte("null"))
 	if r.Password == "" || (!usePasskey && r.Token == "") {
 		return refuse(ReasonReauthRequired)
 	}
 	if usePasskey && r.Request == nil {
 		return refuse(ReasonReauthRequired)
+	}
+	// パスキーを照合できない構成かどうかは、予約より前に確かめる。照合して
+	// いないものを失敗として数えない。
+	var keys []*model.UserSecurityKey
+	if usePasskey {
+		if keys, err = v.passkeys(s.User.ID); err != nil {
+			return err
+		}
 	}
 
 	// 予約は取り消しに引きずられない ctx で行う (i/* の beginPasswordCheck と同じ)。
@@ -290,16 +306,32 @@ func (v *Verifier) Verify(ctx context.Context, s Subject, r Reauth) error {
 	}
 
 	var second secondFactor
+	var secondErr error
 	if usePasskey {
-		second, err = v.checkPasskey(ctx, s.User, r)
+		second, secondErr = v.checkPasskey(ctx, s.User, keys, r)
 	} else {
-		second, err = v.checkCode(bg, profile, r.Token)
+		second, secondErr = v.checkCode(bg, profile, r.Token)
 	}
-	if err != nil {
+	if ReasonOf(secondErr) == ReasonUnavailable {
+		// 照合できなかっただけなので、失敗として数えない。
+		attempt.Release(bg)
+		return secondErr
+	}
+	// **2つ目の要素の成否にかかわらず password を照合する。** 2つ目の要素が
+	// 通ったときだけ bcrypt を走らせると、応答の速さでコードの正否が分かる。
+	pwOK := bcrypt.CompareHashAndPassword([]byte(*profile.Password), []byte(r.Password)) == nil
+	switch {
+	case ReasonOf(secondErr) == ReasonCodeReused && pwOK:
+		// 同じ TOTP のコードを続けて使っただけ (操作のたびに再認証するので、
+		// 2分以内に2つ操作すると普通に起きる)。password が合っていれば
+		// 総当たりではないので数えず、次のコードを待つよう伝える。
+		attempt.Release(bg)
+		return secondErr
+	case secondErr != nil:
 		// 失敗は予約を残したまま (= 失敗 1 回) にする。
-		return err
-	}
-	if bcrypt.CompareHashAndPassword([]byte(*profile.Password), []byte(r.Password)) != nil {
+		second.rollback()
+		return refuse(ReasonFailed)
+	case !pwOK:
 		second.rollback()
 		return refuse(ReasonFailed)
 	}
@@ -372,18 +404,15 @@ func (v *Verifier) reserve(ctx context.Context, userID, key string) error {
 		return unavailable(fmt.Errorf("replay guard: %w", err))
 	}
 	if !ok {
-		// 同じコードを窓の中で2回使った。打ち間違いと同じ扱いにする。
-		return refuse(ReasonFailed)
+		// 同じコードを窓の中で2回使った。password が合っていれば Verify が
+		// 数えずに返す。
+		return refuse(ReasonCodeReused)
 	}
 	return nil
 }
 
 // checkPasskey verifies a passkey assertion for the challenge of BeginPasskey.
-func (v *Verifier) checkPasskey(ctx context.Context, u *model.User, r Reauth) (secondFactor, error) {
-	keys, err := v.passkeys(u.ID)
-	if err != nil {
-		return secondFactor{}, err
-	}
+func (v *Verifier) checkPasskey(ctx context.Context, u *model.User, keys []*model.UserSecurityKey, r Reauth) (secondFactor, error) {
 	cred, err := v.d.Passkeys.FinishLogin(ctx, u, keys, twofactor.CredentialRequest(r.Request, r.Credential))
 	if err != nil {
 		slog.Warn("strongauth: passkey verification failed", "userId", u.ID, "err", err)

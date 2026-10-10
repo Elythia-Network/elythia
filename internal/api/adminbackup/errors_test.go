@@ -53,6 +53,7 @@ func TestRefusalMapping(t *testing.T) {
 		code   string
 	}{
 		{&strongauth.Error{Reason: strongauth.ReasonPasswordNotSet}, http.StatusForbidden, "PASSWORD_NOT_SET"},
+		{&strongauth.Error{Reason: strongauth.ReasonCodeReused}, http.StatusForbidden, "TWO_FACTOR_CODE_ALREADY_USED"},
 		{&strongauth.Error{Reason: strongauth.ReasonPasskeyUnavailable}, http.StatusBadRequest, "PASSKEY_UNAVAILABLE"},
 		{&strongauth.Error{Reason: strongauth.ReasonUnavailable, Err: errors.New("redis")}, http.StatusServiceUnavailable, "AUTHENTICATION_UNAVAILABLE"},
 		{fmt.Errorf("wrapped: %w", &strongauth.Error{Reason: strongauth.ReasonFailed}), http.StatusForbidden, "REAUTHENTICATION_FAILED"},
@@ -73,12 +74,20 @@ func TestRefusalMapping(t *testing.T) {
 
 func TestGuardRejectsMalformedBodies(t *testing.T) {
 	f := newFixture(t, true)
-	for name, body := range map[string]string{
-		"not json":  "{",
-		"too large": `{"password":"` + strings.Repeat("x", reauthBodyLimit) + `"}`,
-	} {
+	cases := map[string]struct{ body, contentType string }{
+		"not json":  {"{", echo.MIMEApplicationJSON},
+		"too large": {`{"password":"` + strings.Repeat("x", reauthBodyLimit) + `"}`, echo.MIMEApplicationJSON},
+		// handler の Bind と読み方が食い違わないよう、JSON 以外は受けない。
+		"text/plain": {`{"password":"correct horse","token":"123456"}`, echo.MIMETextPlain},
+		"form":       {"password=correct+horse&token=123456", echo.MIMEApplicationForm},
+		"no type":    {`{"password":"correct horse","token":"123456"}`, ""},
+	}
+	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/api/admin/backup/list", strings.NewReader(body))
+			req := httptest.NewRequest(http.MethodPost, "/api/admin/backup/list", strings.NewReader(tc.body))
+			if tc.contentType != "" {
+				req.Header.Set(echo.HeaderContentType, tc.contentType)
+			}
 			req.Header.Set("X-Test-User", adminID)
 			req.Header.Set("X-Test-Token", userToken+adminID)
 			rec := httptest.NewRecorder()

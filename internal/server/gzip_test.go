@@ -86,6 +86,22 @@ func TestGzipMiddleware_SkipsStreamingRoute(t *testing.T) {
 		"/streaming must bypass gzip to keep WebSocket frames intact")
 }
 
+// /backup-download は数 GB の dump をそのまま渡すので gzip しない (#3462)。
+// gzip すると Content-Length が消え、Range の応答まで包まれる。
+func TestGzipMiddleware_SkipsBackupDownload(t *testing.T) {
+	e := echo.New()
+	e.Use(echomw.GzipWithConfig(gzipConfig()))
+	e.GET("/backup-download", func(c echo.Context) error {
+		return c.String(http.StatusOK, strings.Repeat("x", 2000))
+	})
+	req := httptest.NewRequest(http.MethodGet, "/backup-download?token=x", nil)
+	req.Header.Set(echo.HeaderAcceptEncoding, "gzip")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Empty(t, rec.Header().Get(echo.HeaderContentEncoding))
+}
+
 // AcceptEncoding に gzip が含まれない client には raw body を返す
 // (Echo middleware の負荷ハンドリング)。
 func TestGzipMiddleware_DoesNotCompressWithoutAcceptEncoding(t *testing.T) {

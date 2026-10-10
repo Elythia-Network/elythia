@@ -315,7 +315,62 @@ func TestVerify_TOTPReplayIsRejected(t *testing.T) {
 	code := f.code(t)
 	require.NoError(t, f.v.Verify(context.Background(), adminSubject(), Reauth{Password: password, Token: code}))
 	err := f.v.Verify(context.Background(), adminSubject(), Reauth{Password: password, Token: code})
-	assert.Equal(t, ReasonFailed, ReasonOf(err))
+	assert.Equal(t, ReasonCodeReused, ReasonOf(err))
+	err = f.v.Verify(context.Background(), adminSubject(), Reauth{Password: "wrong", Token: code})
+	assert.Equal(t, ReasonFailed, ReasonOf(err), "a reused code with a wrong password is an ordinary failure")
+}
+
+// 操作のたびに再認証するので、同じコードの使い回しは本人の普通の操作で起きる。
+// password が合っていれば数えず、何度繰り返しても締め出さない。
+func TestVerify_ReusedCodeWithRightPasswordIsNotCounted(t *testing.T) {
+	f := newFixture(t)
+	code := f.code(t)
+	require.NoError(t, f.v.Verify(context.Background(), adminSubject(), Reauth{Password: password, Token: code}))
+	for i := 0; i <= passwordguard.DefaultMaxFailures; i++ {
+		err := f.v.Verify(context.Background(), adminSubject(), Reauth{Password: password, Token: code})
+		require.Equal(t, ReasonCodeReused, ReasonOf(err), "attempt %d", i+1)
+	}
+	twofactor.ReleaseReservation(context.Background(), f.deps.Replay, adminID, code)
+	require.NoError(t, f.v.Verify(context.Background(), adminSubject(), Reauth{Password: password, Token: code}))
+}
+
+func TestVerify_ReusedCodeWithWrongPasswordIsCounted(t *testing.T) {
+	f := newFixture(t)
+	code := f.code(t)
+	require.NoError(t, f.v.Verify(context.Background(), adminSubject(), Reauth{Password: password, Token: code}))
+	for i := 0; i < passwordguard.DefaultMaxFailures; i++ {
+		require.Equal(t, ReasonFailed, ReasonOf(f.v.Verify(context.Background(), adminSubject(), Reauth{Password: "wrong", Token: code})))
+	}
+	assert.Equal(t, ReasonRateLimited, ReasonOf(f.v.Verify(context.Background(), adminSubject(), Reauth{Password: password, Token: code})))
+}
+
+func TestVerify_NullCredentialUsesToken(t *testing.T) {
+	f := newFixture(t)
+	require.NoError(t, f.v.Verify(context.Background(), adminSubject(), Reauth{Password: password, Token: f.code(t), Credential: json.RawMessage(" null ")}))
+	assert.Zero(t, f.passkeys.finished)
+}
+
+// 照合できなかったもの (パスキーが無い、Redis の障害) は失敗として数えない。
+func TestVerify_UncheckedFailuresAreNotCounted(t *testing.T) {
+	t.Run("no passkey", func(t *testing.T) {
+		f := newFixture(t)
+		f.keys.keys = nil
+		for i := 0; i <= passwordguard.DefaultMaxFailures; i++ {
+			require.Equal(t, ReasonPasskeyUnavailable, ReasonOf(f.v.Verify(context.Background(), adminSubject(), passkeyReauth(password))))
+		}
+		require.NoError(t, f.v.Verify(context.Background(), adminSubject(), Reauth{Password: password, Token: f.code(t)}))
+	})
+	t.Run("replay guard down", func(t *testing.T) {
+		f := newFixture(t)
+		d := f.deps
+		d.Replay = erringReplay{}
+		v, err := New(d)
+		require.NoError(t, err)
+		for i := 0; i <= passwordguard.DefaultMaxFailures; i++ {
+			require.Equal(t, ReasonUnavailable, ReasonOf(v.Verify(context.Background(), adminSubject(), Reauth{Password: password, Token: f.code(t)})))
+		}
+		require.NoError(t, f.v.Verify(context.Background(), adminSubject(), Reauth{Password: password, Token: f.code(t)}))
+	})
 }
 
 func TestVerify_TOTPNotEnabled(t *testing.T) {

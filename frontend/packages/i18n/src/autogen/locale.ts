@@ -9405,6 +9405,14 @@ export interface Locale extends ILocale {
          */
         "reauthFailed": string;
         /**
+         * パスワードと、二段階認証のコードかパスキーを入力してください。
+         */
+        "reauthRequired": string;
+        /**
+         * この二段階認証のコードは使用済みです。次のコードに切り替わるまで待つか、パスキーを使ってください。
+         */
+        "codeAlreadyUsed": string;
+        /**
          * パスキーが登録されていないか、このサーバーではパスキーを使えません。
          */
         "passkeyUnavailable": string;

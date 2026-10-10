@@ -532,7 +532,9 @@ func gzipConfig() echomw.GzipConfig {
 		Skipper: func(c echo.Context) bool {
 			// WebSocket upgrade 経路 (/streaming) は frame 単位の bidirectional
 			// 通信で gzip すると壊れる。
-			return c.Path() == "/streaming"
+			// /backup-download は数 GB の dump をそのまま渡す。gzip し直すと CPU を
+			// 使い、Content-Length が消えて進捗が出ず、Range の応答まで包まれる。
+			return c.Path() == "/streaming" || c.Path() == "/backup-download"
 		},
 		Level:     gzip.DefaultCompression,
 		MinLength: 1024,

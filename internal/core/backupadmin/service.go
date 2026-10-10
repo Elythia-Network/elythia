@@ -144,7 +144,7 @@ type Options struct {
 	// presign. Required with a directory storage.
 	Tokens DownloadTokens
 	// DownloadURLBase is the absolute URL that server-side download tokens
-	// are appended to (e.g. https://example.com/backup-download/).
+	// are appended to (e.g. https://example.com/backup-download?token=).
 	DownloadURLBase string
 	// PricePerGBMonth enables the monthly estimate when positive.
 	PricePerGBMonth float64
@@ -372,8 +372,9 @@ func (s *Service) Delete(ctx context.Context, id string) (int64, error) {
 }
 
 // Download returns a short-lived URL for the dump of generation id. An
-// encrypted dump is handed out encrypted.
-func (s *Service) Download(ctx context.Context, id string) (*Download, error) {
+// encrypted dump is handed out encrypted. userID is the administrator who
+// asked; it is recorded when the server-side URL is used.
+func (s *Service) Download(ctx context.Context, id, userID string) (*Download, error) {
 	if _, err := s.generationObjects(ctx, id); err != nil {
 		return nil, err
 	}
@@ -406,7 +407,7 @@ func (s *Service) Download(ctx context.Context, id string) (*Download, error) {
 	if s.o.Tokens == nil || s.o.DownloadURLBase == "" {
 		return nil, errors.New("backupadmin: server-side download is not wired")
 	}
-	token, err := s.o.Tokens.Issue(ctx, DownloadGrant{Key: key, FileName: d.FileName}, s.o.DownloadTTL)
+	token, err := s.o.Tokens.Issue(ctx, DownloadGrant{Key: key, FileName: d.FileName, UserID: userID}, s.o.DownloadTTL)
 	if err != nil {
 		return nil, fmt.Errorf("issue download token: %w", err)
 	}

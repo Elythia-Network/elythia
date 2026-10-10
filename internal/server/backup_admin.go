@@ -42,7 +42,7 @@ func backupServerStorageOptions(b *config.BackupOptions) config.BackupStorageOpt
 func newBackupAdminService(cfg *config.Config, rdb redis.Cmdable) *backupadmin.Service {
 	o := backupadmin.Options{
 		Tokens:          backupadmin.NewRedisTokens(rdb),
-		DownloadURLBase: strings.TrimRight(cfg.URL, "/") + "/backup-download/",
+		DownloadURLBase: strings.TrimRight(cfg.URL, "/") + "/backup-download?token=",
 	}
 	b := cfg.Backup
 	if b == nil {

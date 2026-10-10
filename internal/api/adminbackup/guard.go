@@ -28,6 +28,7 @@ const (
 	idReauthFailed       = "82808eb2-6622-4363-83ba-af99cc470bb3"
 	idPasskeyUnavailable = "dd2aa4c6-6ea1-4564-92ae-44d68e617d43"
 	idAuthUnavailable    = "a2e8e922-25bf-4ca2-999d-5e060ca6ea54"
+	idCodeReused         = "d632df49-9d46-4c95-a1d7-73e7a98d2d97"
 	// idNotAdministrator is the ID RequireAdmin returns (upstream requireAdmin).
 	idNotAdministrator = "c3d38592-54c0-429d-be96-5636b0431a61"
 )
@@ -75,6 +76,12 @@ func Guard(v *strongauth.Verifier) echo.MiddlewareFunc {
 			}
 			var f reauthFields
 			if len(bytes.TrimSpace(body)) > 0 {
+				// handler の Bind は Content-Type に従って読むので、JSON 以外で
+				// 送られると再認証だけ通って (TOTP を消費して) から落ちる。読み方を
+				// 揃えるため、JSON だけを受ける。
+				if !middleware.IsJSONContentType(req.Header.Get(echo.HeaderContentType)) {
+					return apierr.JSONInvalidParam(c)
+				}
 				if err := json.Unmarshal(body, &f); err != nil {
 					return apierr.JSONInvalidParam(c)
 				}
@@ -126,6 +133,9 @@ func refusal(c echo.Context, err error) error {
 		// サインアウトの扱いをするので使わない。
 		return c.JSON(http.StatusForbidden, apierr.ErrorWithKind("REAUTHENTICATION_FAILED",
 			"The password or the two-factor authentication is incorrect.", idReauthFailed, apierr.KindPermission))
+	case strongauth.ReasonCodeReused:
+		return c.JSON(http.StatusForbidden, apierr.ErrorWithKind("TWO_FACTOR_CODE_ALREADY_USED",
+			"This two-factor code was already used. Wait for the next code or use a passkey.", idCodeReused, apierr.KindPermission))
 	case strongauth.ReasonRateLimited:
 		retry := int64((se.RetryAfter + time.Second - 1) / time.Second)
 		c.Response().Header().Set("Retry-After", strconv.FormatInt(retry, 10))
