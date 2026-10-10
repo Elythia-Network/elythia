@@ -583,6 +583,30 @@ func TestUpload_DriveLimitsNegativeRejectsEmptyBody(t *testing.T) {
 	}
 }
 
+// drive は小数の policy をその大きさで扱う (本家と同じ)。0.5MB なら 512KiB まで
+// 保存でき、それを超えると拒否する。role の解決は通らない (基本ポリシーの小数を
+// 残すことは role のテストで見る、#3489)。
+func TestUpload_FractionalSizePolicy(t *testing.T) {
+	for _, tc := range []struct {
+		size int
+		want error
+	}{
+		{512 * 1024, nil},
+		{512*1024 + 1, drive.ErrMaxFileSizeExceeded},
+	} {
+		svc, _, _ := newSvc(t)
+		svc.SetRoleChecker(&fakeMod{policies: map[string]map[string]any{"u1": {"maxFileSizeMb": 0.5}}})
+		_, err := svc.Upload(context.Background(), drive.UploadInput{
+			User: &model.User{ID: "u1"}, Body: make([]byte, tc.size), Name: "x.bin",
+		})
+		if tc.want == nil {
+			require.NoError(t, err, "size %d", tc.size)
+		} else {
+			require.ErrorIs(t, err, tc.want, "size %d", tc.size)
+		}
+	}
+}
+
 // キーが無いときは上限なし (本家にはこの状態が無い。policy の provider が
 // 宣言しないなど Elythia 側の都合)。
 func TestUpload_DriveLimitsAbsentSkipsGate(t *testing.T) {
