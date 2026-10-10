@@ -438,10 +438,9 @@ func TestDefaultsReachUnreachableServices(t *testing.T) {
 	assert.Error(t, err)
 
 	e := defaultRestoreEnv()
-	// ロールバックの入れ替えは SwitchDatabase を通す。失敗の後に pg_database を
-	// 引き直すので、繋がらなければ「入れ替わったか分からない」になる。
+	// ロールバックの入れ替えは SwitchDatabase を通す (入れ替える前に名前を確かめる)。
 	err = e.replace(ctx, &bkp.Restorer{Conn: connFor(cfg)}, "postgres", "elythia", "elythia_rolled_back_1", "elythia_before_restore_1")
-	assert.ErrorIs(t, err, bkp.ErrRestoreSwitchUnknown)
+	assert.ErrorContains(t, err, "check the database names before switching")
 	// 保存先は (1) #3458 の実装で開く。
 	assert.Equal(t, reflect.ValueOf(bkp.OpenStorage).Pointer(), reflect.ValueOf(e.openStorage).Pointer())
 	assert.NotNil(t, e.restore)

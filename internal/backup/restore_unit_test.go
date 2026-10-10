@@ -529,6 +529,7 @@ func TestRestoreStepsReportConnectionFailures(t *testing.T) {
 		"CheckTarget swap":   r.CheckTarget(ctx, swap),
 		"CheckTarget empty":  r.CheckTarget(ctx, empty),
 		"CheckNoConnections": r.CheckNoConnections(ctx, "", "db"),
+		"SwitchDatabase":     r.SwitchDatabase(ctx, "", "db", "a", "b"),
 		"CheckCompatibility": r.CheckCompatibility(ctx, &RestorePlan{Meta: meta}, swap),
 		"RestoreInto swap":   r.RestoreInto(ctx, &RestorePlan{Meta: meta}, swap, "db_restore"),
 		"VerifyRestored":     r.VerifyRestored(ctx, "db", meta),
@@ -536,7 +537,7 @@ func TestRestoreStepsReportConnectionFailures(t *testing.T) {
 		"DropDatabase":       r.DropDatabase(ctx, "", "db"),
 	}
 	// 繋がらなければ、入れ替わったかどうかは分からない。
-	assert.Equal(t, swapUnknown, r.swapOutcome("", "db_restore", "db_before"))
+	assert.Equal(t, swapUnknown, r.swapOutcome("", "db", "db_restore", "db_before"))
 	_, errs["ApplyDatabaseSettings"] = r.ApplyDatabaseSettings(ctx, "db", meta)
 	_, errs["Migrate"] = r.Migrate("db")
 	for name, err := range errs {

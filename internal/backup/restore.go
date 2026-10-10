@@ -247,10 +247,28 @@ const (
 	swapNotDone
 )
 
+// checkSwitchNames stops a switch before it starts when replacement does
+// not exist or keepAs is already taken.
+func (r *Restorer) checkSwitchNames(ctx context.Context, maintenance, keepAs, replacement string) error {
+	admin, err := r.connect(ctx, maintenanceDB(maintenance))
+	if err != nil {
+		return fmt.Errorf("backup: check the database names before switching: %w", err)
+	}
+	defer admin.Close(context.Background())
+	if _, err := databaseInfo(ctx, admin, replacement); err != nil {
+		return fmt.Errorf("backup: check the database names before switching: %w", err)
+	}
+	if _, err := databaseInfo(ctx, admin, keepAs); err == nil {
+		return fmt.Errorf("backup: check the database names before switching: database %q already exists", keepAs)
+	}
+	return nil
+}
+
 // swapOutcome tells from pg_database whether a failed name swap happened:
 // restored (the replacement) is gone and before (the kept name) exists
-// (done), or restored exists and before does not (not done).
-func (r *Restorer) swapOutcome(maintenance, restored, before string) swapState {
+// (done), or before does not exist while restored or database does (not
+// done: the transaction rolled back).
+func (r *Restorer) swapOutcome(maintenance, database, restored, before string) swapState {
 	// 呼ばれるのは失敗の後で、元の ctx は取り消されていることがある。
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -259,7 +277,7 @@ func (r *Restorer) swapOutcome(maintenance, restored, before string) swapState {
 		return swapUnknown
 	}
 	defer admin.Close(context.Background())
-	rows, err := admin.Query(ctx, `SELECT datname FROM pg_database WHERE datname = ANY($1)`, []string{restored, before})
+	rows, err := admin.Query(ctx, `SELECT datname FROM pg_database WHERE datname = ANY($1)`, []string{database, restored, before})
 	if err != nil {
 		return swapUnknown
 	}
@@ -274,7 +292,7 @@ func (r *Restorer) swapOutcome(maintenance, restored, before string) swapState {
 	switch {
 	case has[before] && !has[restored]:
 		return swapDone
-	case has[restored] && !has[before]:
+	case !has[before] && (has[restored] || has[database]):
 		return swapNotDone
 	}
 	return swapUnknown
@@ -311,6 +329,12 @@ func (r *Restorer) finish(ctx context.Context, plan *RestorePlan, opts RestoreOp
 // エラーとして返ることがある。そのまま「変わっていない」と扱うと、実際には
 // 入れ替わっているのに Redis の後始末を飛ばしてしまう。
 func (r *Restorer) SwitchDatabase(ctx context.Context, maintenance, database, keepAs, replacement string) error {
+	// 打ち間違えた名前や、同じ秒の退避名とぶつかるときは、入れ替える前に分かる形で
+	// 止める。入れ替えの失敗として扱うと、何も起きていないのに「入れ替わったか
+	// 分からない」と出してしまう。
+	if err := r.checkSwitchNames(ctx, maintenance, keepAs, replacement); err != nil {
+		return err
+	}
 	err := r.ReplaceDatabase(ctx, maintenance, database, keepAs, replacement)
 	if r.afterReplace != nil {
 		err = errors.Join(err, r.afterReplace())
@@ -318,7 +342,7 @@ func (r *Restorer) SwitchDatabase(ctx context.Context, maintenance, database, ke
 	if err == nil {
 		return nil
 	}
-	switch r.swapOutcome(maintenance, replacement, keepAs) {
+	switch r.swapOutcome(maintenance, database, replacement, keepAs) {
 	case swapDone:
 		r.logf("warning: %v; but %s was already replaced (the previous database is %s)", err, database, keepAs)
 		return nil

@@ -13,6 +13,8 @@ compose群とCIはPostgreSQL 18に統一した(#2513)。**既存の16のdata vol
 - バックアップ用のimageの`pg_dump`は18で、16のサーバーから取れる(pg_dumpは自分より古いサーバーから取れる)。16のサーバーから18の`pg_dump`で取り、18の空のDBへ戻して`elythia doctor`の検査が通ることは、`internal/backup`のテスト(`TestRestoreEmptyFromPostgres16`)で確かめている
 - **逆に、18の`pg_restore`では16のサーバーへ戻せない。** 16が知らない設定(`transaction_timeout`)を流して落ちるので、`backup restore`は何も作る前に止まる。16のまま`-mode swap`で前の状態へ戻すことはできないので、先に18へ上げる
 
+**この手順は、`backup restore`(#3461)を持つ版のElythiaで動いていることが前提。** `backup`サービスや`backup restore`が無い古い版で16のまま動いているなら、まずDBを16のまま、[アップデート](#アップデート)の手順でElythiaをこの版以上へ上げ、起動して動くことを確かめてから、この手順を流す。このとき、`docker-compose.yml`の`db`の`image`と`volumes`は16のもの(`postgres:16-alpine`と`db_data:/var/lib/postgresql/data`)のまま残す。取ってきた版の`docker-compose.yml`の`db`は18を指しているので、そのまま`up`すると、16のvolumeを18で開こうとして起動しない(上の段落)。`db`を18に書き換えるのは手順4。
+
 止まる時間は、最後のバックアップを取り始めてから、戻し終わるまで。サービス名は`docker-compose.yml`(TCP構成)のもの(`app` / `db` / `backup`)。UDS構成の読み替えは、手順の後に書く。`backup`サービスの設定(保存先と、暗号化するなら鍵)は、先に[DBのバックアップ](backup.md)に従って済ませておく。
 
 ```bash
@@ -20,8 +22,9 @@ compose群とCIはPostgreSQL 18に統一した(#2513)。**既存の16のdata vol
 #    動かしておく (db の image と volume は手順 4 で書き換える。backup は run --no-deps
 #    で呼ぶので、db を作り直さない)
 #    restore は同梱の migration を当てるので、app より新しい版の image で戻すと、
-#    app の起動時の migrate が知らない番号で止まる。Elythia の版を上げるのは、
-#    この手順を終えてからにする
+#    app の起動時の migrate が知らない番号で止まる。今の版より新しい版へ上げるのは、
+#    この手順を終えてからにする (backup restore の無い版からは、上の段落のとおり
+#    先にこの版へ上げておく)
 MKGO_COMMIT=$(git rev-parse --short HEAD) docker compose build backup
 
 # 1. 書き込みを止める (db と redis は動かしたまま)
