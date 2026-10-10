@@ -144,6 +144,18 @@ const (
 	LogCreateFederationRule LogType = "createFederationRule"
 	LogUpdateFederationRule LogType = "updateFederationRule"
 	LogDeleteFederationRule LogType = "deleteFederationRule"
+	// DB のバックアップの管理画面 (#3462)。閲覧も含めて全ての操作を残す。
+	// バックアップには利用者の秘密鍵・token・パスワードの hash が入るので、
+	// 誰がいつ一覧を見て、どの世代を落としたか・消したかを追えるようにする。
+	// info は listBackups が {generationCount, totalBytes}、takeBackup が {}、
+	// verifyBackup が {generationId}、deleteBackup が {generationId, freedBytes}
+	// (途中で失敗したら partial: true)、downloadBackup が
+	// {generationId, via, size, encrypted}。
+	LogListBackups    LogType = "listBackups"
+	LogTakeBackup     LogType = "takeBackup"
+	LogVerifyBackup   LogType = "verifyBackup"
+	LogDeleteBackup   LogType = "deleteBackup"
+	LogDownloadBackup LogType = "downloadBackup"
 )
 
 // UserInfo builds the standard {userId, userUsername, userHost} info

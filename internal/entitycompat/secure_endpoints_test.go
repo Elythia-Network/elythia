@@ -66,7 +66,7 @@ func TestSecureDrift(t *testing.T) {
 	// 検出できない。
 	//
 	// mk-go が意図的に upstream より厳しくする場合は、理由を添えて
-	// secureStricterThanUpstream に登録すること (現在は空 = 全件 upstream 一致)。
+	// secureStricterThanUpstream に登録すること。
 	var extra []string
 	for ep, reg := range regs {
 		if secure[ep] || excludedEndpoint(ep) || secureStricterThanUpstream[ep] != "" {
@@ -90,9 +90,21 @@ func TestSecureDrift(t *testing.T) {
 
 // secureStricterThanUpstream lists endpoints where mk-go deliberately requires a
 // native session token even though Misskey does not mark them `secure: true`.
-// The value is the reason; an empty map means every RequireSecure matches
-// upstream. Keep it empty unless there is a documented reason (docs/divergence.md).
-var secureStricterThanUpstream = map[string]string{}
+// The value is the reason. Add an entry only with a documented reason
+// (docs/divergence.md).
+var secureStricterThanUpstream = map[string]string{
+	// DB のバックアップの管理画面 (#3462、Elythia 独自で本家に無い)。バックアップには
+	// 利用者の秘密鍵・token・パスワードの hash が入るので、アプリの token では
+	// 使えないようにする (docs/divergence/api.md)。
+	"admin/backup/delete":           backupSecureReason,
+	"admin/backup/download":         backupSecureReason,
+	"admin/backup/list":             backupSecureReason,
+	"admin/backup/reauth-challenge": backupSecureReason,
+	"admin/backup/take":             backupSecureReason,
+	"admin/backup/verify":           backupSecureReason,
+}
+
+const backupSecureReason = "Elythia-only backup admin (#3462): backups hold private keys, tokens and password hashes, so app tokens must not reach them"
 
 // parseRouteRegistrations returns endpoint path -> the full router registration
 // text (balanced parens), so middleware on a multi-line inline handler's closing

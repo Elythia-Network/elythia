@@ -15,6 +15,7 @@ import (
 	"github.com/elythia-network/elythia/internal/activitypub"
 	"github.com/elythia-network/elythia/internal/activitypub/ld"
 	apiadmin "github.com/elythia-network/elythia/internal/api/admin"
+	"github.com/elythia-network/elythia/internal/api/adminbackup"
 	apiannouncements "github.com/elythia-network/elythia/internal/api/announcements"
 	"github.com/elythia-network/elythia/internal/api/antennas"
 	"github.com/elythia-network/elythia/internal/api/ap"
@@ -126,6 +127,7 @@ import (
 	coresignup "github.com/elythia-network/elythia/internal/core/signup"
 	"github.com/elythia-network/elythia/internal/core/signupapplication"
 	"github.com/elythia-network/elythia/internal/core/signupform"
+	"github.com/elythia-network/elythia/internal/core/strongauth"
 	coresystemaccount "github.com/elythia-network/elythia/internal/core/systemaccount"
 	coretimeline "github.com/elythia-network/elythia/internal/core/timeline"
 	coretransfer "github.com/elythia-network/elythia/internal/core/transfer"
@@ -3850,6 +3852,38 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/admin/get-table-stats", adminHandler.GetTableStats, middleware.RequireAdmin(roleService), middleware.RequireScope("read:admin:table-stats"))
 	// DB の健全性 (#3095、mk-go 独自)。get-table-stats と同じ権限。
 	api.POST("/admin/database-health", adminHandler.DatabaseHealth, middleware.RequireAdmin(roleService), middleware.RequireScope("read:admin:table-stats"))
+	// DB のバックアップの管理画面 (#3462、Elythia 独自)。閲覧を含む全ての操作に、
+	// 管理者・ブラウザでログインした token・2FA かパスキーの登録・操作ごとの
+	// 再認証を課す (strongauth)。RequireAdmin / RequireSecure は gate が読む
+	// 目印でもあり、backupGuard が同じ条件をもう一度見る (付け忘れても閉じる)。
+	// reauth-challenge はパスキーの challenge を出すだけの前段なので、再認証は
+	// 課さず、それ以外の条件を handler の中で見る。
+	backupVerifierDeps := strongauth.Deps{
+		Roles:    roleService,
+		Profiles: userService,
+		Keys:     userSecurityKeyRepo,
+		Guard:    passwordFailureGuard,
+		Replay:   totpReplayGuard,
+	}
+	if webauthnSvc != nil {
+		backupVerifierDeps.Passkeys = webauthnSvc
+	}
+	backupVerifier, err := strongauth.New(backupVerifierDeps)
+	if err != nil {
+		panic("admin/backup: " + err.Error())
+	}
+	backupHandler := adminbackup.NewHandler(newBackupAdminService(s.config, s.redis.Default), backupVerifier, modLogService)
+	backupGuard := backupHandler.Guard()
+	api.POST("/admin/backup/list", backupHandler.List, middleware.RequireAdmin(roleService), middleware.RequireSecure(), backupGuard)
+	api.POST("/admin/backup/take", backupHandler.Take, middleware.RequireAdmin(roleService), middleware.RequireSecure(), backupGuard)
+	api.POST("/admin/backup/verify", backupHandler.Verify, middleware.RequireAdmin(roleService), middleware.RequireSecure(), backupGuard)
+	api.POST("/admin/backup/delete", backupHandler.Delete, middleware.RequireAdmin(roleService), middleware.RequireSecure(), backupGuard)
+	api.POST("/admin/backup/download", backupHandler.Download, middleware.RequireAdmin(roleService), middleware.RequireSecure(), backupGuard)
+	api.POST("/admin/backup/reauth-challenge", backupHandler.ReauthChallenge, middleware.RequireAdmin(roleService), middleware.RequireSecure())
+	// ディレクトリの保存先のダウンロード。ブラウザのダウンロードは Authorization を
+	// 付けられないので、admin/backup/download が出した短い期限の token で渡す
+	// (S3 の署名付き URL と同じ扱い)。
+	s.echo.GET("/backup-download/:token", backupHandler.ServeDownload)
 	api.POST("/admin/server-info", adminHandler.ServerInfo, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:server-info"))
 	// mk-go 独自 (#2395)。upstream に対応する endpoint は無いので scope も
 	// server-info のものを流用する (admin UI 以外の consumer を想定しない)。

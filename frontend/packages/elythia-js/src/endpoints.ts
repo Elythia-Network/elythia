@@ -8,6 +8,10 @@ import type * as Misskey from 'misskey-js';
 import type {
 	AdminEmojiApplication,
 	AdminSignupApplication,
+	BackupDownload,
+	BackupJob,
+	BackupOverview,
+	BackupReauth,
 	BubbleGameMode,
 	BubbleVersusMatch,
 	BubbleVersusRecord,
@@ -60,6 +64,33 @@ type FederationRuleRequest = Partial<FederationRuleBody> & Pick<FederationRuleBo
  * キーは `'<path>': {` の形で 1 行に書く。
  */
 export type ElythiaEndpoints = {
+	'admin/backup/delete': {
+		req: BackupReauth & { id: string };
+		res: { freedBytes: number };
+	};
+	'admin/backup/download': {
+		req: BackupReauth & { id: string };
+		res: BackupDownload;
+	};
+	'admin/backup/list': {
+		req: BackupReauth;
+		res: BackupOverview;
+	};
+	'admin/backup/reauth-challenge': {
+		req: Misskey.entities.EmptyRequest;
+		/** PublicKeyCredentialRequestOptionsJSON for the passkey re-authentication. */
+		res: Record<string, unknown>;
+	};
+	'admin/backup/take': {
+		/** The backup service takes it in the background. */
+		req: BackupReauth;
+		res: { accepted: true; job: BackupJob | null };
+	};
+	'admin/backup/verify': {
+		/** The backup service verifies it in the background. */
+		req: BackupReauth & { id: string };
+		res: { accepted: true; job: BackupJob | null };
+	};
 	'admin/database-health': {
 		req: Misskey.entities.EmptyRequest;
 		res: DatabaseHealthReport;
