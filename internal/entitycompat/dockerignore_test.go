@@ -26,14 +26,15 @@ import (
 // **サイズだけの理由でここへ足さないこと。** コンテキストが太っても転送が遅く
 // なるだけで、ビルドは通るし気付ける。ここは「中身が読まれると困るもの」に限る。
 var excludedFromBuildContext = map[string]string{
-	".git/config":                         "履歴と remote の認証情報が入る",
-	"plugins/example/.git/config":         "入れ子の .git も落とす (plugins/*/ は独立リポジトリ)",
-	".env":                                "運用の設定ファイル (作られていれば認証情報を含む)",
-	".env.test":                           "同上。`.env.test.example` から作る手順が docs/testing.md にある",
-	"drive-files/abcdef.png":              "利用者がアップロードしたファイル。既定の drive の置き場所 (internal/server/router.go)",
-	".config/default.yml":                 "operator-local な設定。DB / Redis のパスワードを持つ",
-	".cache/misskey/mirror.git/HEAD":      "比較対象の本家 (make upstream-fetch、#3378)。node_modules 入りの木と 400MB 近い bare repository で、image には要らない",
-	"frontend/node_modules/.modules.yaml": "取り込んだ frontend/ の依存 (#3379)。手元で pnpm を回すと 1GB 近くになる",
+	".git/config":                                   "履歴と remote の認証情報が入る",
+	"plugins/example/.git/config":                   "入れ子の .git も落とす (plugins/*/ は独立リポジトリ)",
+	".env":                                          "運用の設定ファイル (作られていれば認証情報を含む)",
+	".env.test":                                     "同上。`.env.test.example` から作る手順が docs/testing.md にある",
+	"drive-files/abcdef.png":                        "利用者がアップロードしたファイル。既定の drive の置き場所 (internal/server/router.go)",
+	".config/default.yml":                           "operator-local な設定。DB / Redis のパスワードを持つ",
+	".config/backup-identity.txt":                   "バックアップを復号する age の秘密鍵 (#3458)。置かないよう docs/backup.md で勧めているが、置かれても入れない",
+	".cache/misskey/mirror.git/HEAD":                "比較対象の本家 (make upstream-fetch、#3378)。node_modules 入りの木と 400MB 近い bare repository で、image には要らない",
+	"frontend/node_modules/.modules.yaml":           "取り込んだ frontend/ の依存 (#3379)。手元で pnpm を回すと 1GB 近くになる",
 	"frontend/packages/frontend/node_modules/vue/x": "同じく workspace ごとの node_modules",
 	"deploy/uds/config/default.yml":                 "同上 (本番 UDS)",
 	"compose.uds.yaml":                              "本番 UDS の compose。environment にパスワード類を持つ",

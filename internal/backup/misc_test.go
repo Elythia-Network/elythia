@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -82,8 +83,51 @@ func TestDumpConnFromURL(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, dc.Password)
 
-	_, err = DumpConnFromURL("postgres://a b@%zz")
-	require.Error(t, err)
+	// db.host の書き間違いなどで読めない URL でも、エラーにパスワードを出さない。
+	for _, bad := range []string{"postgres://mk:SECRETPW@db%20x:5432/mk", "postgres://mk:SECRETPW@db x:5432/mk", "postgres://mk:SECRETPW@%zz"} {
+		_, err = DumpConnFromURL(bad)
+		require.Error(t, err, bad)
+		assert.NotContains(t, err.Error(), "SECRETPW", bad)
+		assert.Contains(t, err.Error(), "db.host")
+	}
+
+	// libpq は sslrootcert の無い verify-full で ~/.postgresql/root.crt を探すので、
+	// 本体 (pgx) と同じくシステムの CA を使うよう system を補う。
+	dc, err = DumpConnFromURL("postgres://mk:pw@db:5432/mk?sslmode=verify-full")
+	require.NoError(t, err)
+	assert.Equal(t, "postgres://mk@db:5432/mk?sslmode=verify-full&sslrootcert=system", dc.URI)
+	dc, err = DumpConnFromURL("postgres://mk:pw@db:5432/mk?sslmode=verify-full&sslrootcert=%2Fca.crt")
+	require.NoError(t, err)
+	assert.Equal(t, "postgres://mk@db:5432/mk?sslmode=verify-full&sslrootcert=%2Fca.crt", dc.URI)
+	dc, err = DumpConnFromURL("postgres://mk:pw@db:5432/mk?sslmode=require")
+	require.NoError(t, err)
+	assert.NotContains(t, dc.URI, "sslrootcert")
+	_, err = DumpConnFromURL("postgres://mk:pw@db:5432/mk?sslmode=verify-ca")
+	require.ErrorContains(t, err, "sslrootcert")
+	dc, err = DumpConnFromURL("postgres://mk:pw@db:5432/mk?sslmode=verify-ca&sslrootcert=%2Fca.crt")
+	require.NoError(t, err)
+	assert.Contains(t, dc.URI, "sslmode=verify-ca")
+}
+
+func TestTake_BadDatabaseURLDoesNotLeakPassword(t *testing.T) {
+	st, err := NewDirStorage(markedDir(t))
+	require.NoError(t, err)
+	// pg_dump 側の接続を与えても、pgx の側のエラーにもパスワードは出ない。
+	for _, opts := range []TakeOptions{
+		{Storage: st, DatabaseURL: "postgres://mk:SECRETPW@db x:5432/mk"},
+		{Storage: st, DatabaseURL: "postgres://mk:SECRETPW@db x:5432/mk", Dump: DumpConn{URI: "postgresql:///x"}, Runner: fakeVersionRunner{}},
+	} {
+		_, err := Take(context.Background(), opts)
+		require.Error(t, err)
+		assert.NotContains(t, err.Error(), "SECRETPW")
+	}
+}
+
+// fakeVersionRunner answers every command like `pg_dump --version`.
+type fakeVersionRunner struct{}
+
+func (fakeVersionRunner) Command(ctx context.Context, _ []string, _ string, _ ...string) *exec.Cmd {
+	return exec.CommandContext(ctx, "echo", "pg_dump (PostgreSQL) 18.0")
 }
 
 func TestTailBuffer(t *testing.T) {
@@ -97,7 +141,7 @@ func TestTake_RequiresStorageAndChecksBeforeConnecting(t *testing.T) {
 	_, err := Take(context.Background(), TakeOptions{})
 	require.ErrorContains(t, err, "no storage")
 
-	st, err := NewDirStorage(t.TempDir())
+	st, err := NewDirStorage(markedDir(t))
 	require.NoError(t, err)
 	_, err = Take(context.Background(), TakeOptions{Storage: st, DatabaseURL: "postgres://a b@%zz"})
 	require.Error(t, err)
@@ -115,6 +159,9 @@ type brokenStorage struct {
 	Storage
 	failList  bool
 	failPutOn string
+	// lieOnPut stores keys ending with it and then reports a failure, like a
+	// response lost after the object was written.
+	lieOnPut string
 	// corruptGet flips the first byte of what Get returns for keys ending
 	// with it.
 	corruptGet string
@@ -129,6 +176,12 @@ func (b *brokenStorage) List(ctx context.Context, prefix string) ([]ObjectInfo, 
 }
 
 func (b *brokenStorage) Put(ctx context.Context, key string, r io.Reader) error {
+	if b.lieOnPut != "" && strings.HasSuffix(key, b.lieOnPut) {
+		if err := b.Storage.Put(ctx, key, r); err != nil {
+			return err
+		}
+		return errors.New("put reported failure after storing")
+	}
 	if b.failPutOn != "" && strings.HasSuffix(key, b.failPutOn) {
 		_, _ = io.Copy(io.Discard, r)
 		return errors.New("put failed")
@@ -160,7 +213,7 @@ func TestTake_StorageFailures(t *testing.T) {
 	p.seedSimple(t)
 	ctx := context.Background()
 	newDir := func() Storage {
-		st, err := NewDirStorage(t.TempDir())
+		st, err := NewDirStorage(markedDir(t))
 		require.NoError(t, err)
 		return st
 	}
@@ -195,12 +248,20 @@ func TestTake_StorageFailures(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, objs)
 	})
+	t.Run("meta upload reports failure after storing", func(t *testing.T) {
+		inner := newDir()
+		_, err := Take(ctx, p.takeOptions(&brokenStorage{Storage: inner, lieOnPut: MetaFile}))
+		require.ErrorContains(t, err, "after storing")
+		objs, err := inner.List(ctx, "")
+		require.NoError(t, err)
+		assert.Empty(t, objs, "neither the dump nor a meta.json that names it is left")
+	})
 	t.Run("pg_dump missing", func(t *testing.T) {
 		opts := p.takeOptions(newDir())
 		opts.Runner = LocalRunner{}
 		opts.PgDump = filepath.Join(t.TempDir(), "no-pg_dump")
 		_, err := Take(ctx, opts)
-		require.ErrorContains(t, err, "start")
+		require.ErrorContains(t, err, "--version")
 	})
 	t.Run("cancelled", func(t *testing.T) {
 		cctx, cancel := context.WithCancel(ctx)
@@ -211,28 +272,33 @@ func TestTake_StorageFailures(t *testing.T) {
 }
 
 func TestListGenerations(t *testing.T) {
-	st, err := NewDirStorage(t.TempDir())
+	st, err := NewDirStorage(markedDir(t))
 	require.NoError(t, err)
 	ctx := context.Background()
 	put := func(key, body string) { require.NoError(t, st.Put(ctx, key, strings.NewReader(body))) }
 
-	complete, incomplete, unknown, verified := "20261001T000000Z", "20261002T000000Z", "20261003T000000Z", "20261004T000000Z"
+	complete, incomplete, unknown, verified, noDump := "20261001T000000Z", "20261002T000000Z", "20261003T000000Z", "20261004T000000Z", "20261005T000000Z"
+	completeMeta := `{"formatVersion":1,"id":"` + complete + `","encrypted":false,"dumpFile":"dump.pgc"}`
 	put(Key(complete, DumpFile), "dump")
-	put(Key(complete, MetaFile), `{"formatVersion":1,"id":"`+complete+`","encrypted":false}`)
+	put(Key(complete, MetaFile), completeMeta)
 	put(Key(incomplete, DumpFile), "partial")
 	put(Key(unknown, MetaFile), `{"formatVersion":2,"id":"`+unknown+`"}`)
-	put(Key(verified, MetaFile), `{"formatVersion":1,"id":"`+verified+`"}`)
+	put(Key(verified, DumpFileAge), "enc")
+	put(Key(verified, MetaFile), `{"formatVersion":1,"id":"`+verified+`","dumpFile":"dump.pgc.age"}`)
 	put(Key(verified, VerifyFile), `{"id":"`+verified+`","ok":true}`)
+	// meta.json はあるが、名指しする dump が無い (別の名前の dump しか無い)。
+	put(Key(noDump, DumpFile), "dump")
+	put(Key(noDump, MetaFile), `{"formatVersion":1,"id":"`+noDump+`","dumpFile":"dump.pgc.age"}`)
 	put("generations/latest/meta.json", "{}")
 	put("unrelated", "x")
 
 	gens, err := ListGenerations(ctx, st)
 	require.NoError(t, err)
-	require.Len(t, gens, 4)
-	assert.Equal(t, []string{complete, incomplete, unknown, verified}, []string{gens[0].ID, gens[1].ID, gens[2].ID, gens[3].ID})
+	require.Len(t, gens, 5)
+	assert.Equal(t, []string{complete, incomplete, unknown, verified, noDump}, []string{gens[0].ID, gens[1].ID, gens[2].ID, gens[3].ID, gens[4].ID})
 
 	assert.True(t, gens[0].Complete())
-	assert.Equal(t, int64(len("dump")+len(`{"formatVersion":1,"id":"`+complete+`","encrypted":false}`)), gens[0].Size)
+	assert.Equal(t, int64(len("dump")+len(completeMeta)), gens[0].Size)
 	assert.Len(t, gens[0].Objects, 2)
 	assert.Nil(t, gens[0].Verify)
 
@@ -245,6 +311,10 @@ func TestListGenerations(t *testing.T) {
 
 	require.NotNil(t, gens[3].Verify)
 	assert.True(t, gens[3].Verify.OK)
+	assert.True(t, gens[3].Complete())
+
+	require.NotNil(t, gens[4].Meta)
+	assert.False(t, gens[4].Complete(), "meta.json without the dump it names")
 
 	_, err = (&brokenStorage{Storage: st, failList: true}).List(ctx, "")
 	require.Error(t, err)
@@ -253,7 +323,7 @@ func TestListGenerations(t *testing.T) {
 }
 
 func TestReadMeta_Rejects(t *testing.T) {
-	st, err := NewDirStorage(t.TempDir())
+	st, err := NewDirStorage(markedDir(t))
 	require.NoError(t, err)
 	ctx := context.Background()
 	id := "20261001T000000Z"

@@ -29,6 +29,9 @@ node_modules
 # `.claude` は permission の allowlist などの operator-local (gitignored)。`rules/` だけは
 # 共有して git で追跡するが (#3248)、Claude Code 向けの文書なので image には要らない。
 .config/*.y*ml
+# age の秘密鍵 (age-keygen の出力、#3458)。docs/backup.md は .config の外に置くよう
+# 勧めているが、置かれても build context に入れない。
+.config/*.txt
 deploy/uds/config/*.y*ml
 compose.uds.yaml
 .claude

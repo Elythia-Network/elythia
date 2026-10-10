@@ -29,8 +29,23 @@ type Generation struct {
 	Objects []ObjectInfo
 }
 
-// Complete reports whether the generation has a readable meta.json.
-func (g Generation) Complete() bool { return g.Meta != nil }
+// Complete reports whether the generation has a readable meta.json and the
+// dump it names.
+//
+// meta.json は最後に置くが、dump だけが消えた世代 (meta.json の Put が失敗扱いで実は
+// 置けていた、手で消した、など) を戻せるものとして数えない。
+func (g Generation) Complete() bool {
+	if g.Meta == nil {
+		return false
+	}
+	dump := Key(g.ID, g.Meta.DumpFile)
+	for _, o := range g.Objects {
+		if o.Key == dump {
+			return true
+		}
+	}
+	return false
+}
 
 // ListGenerations returns the generations in the storage, oldest first.
 func ListGenerations(ctx context.Context, st Storage) ([]Generation, error) {

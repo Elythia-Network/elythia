@@ -146,6 +146,10 @@ func list(ctx context.Context, e env, args []string) int {
 			status = "unreadable"
 		case g.Meta == nil:
 			status = "incomplete"
+		case !g.Complete():
+			// meta.json が名指しする dump が無い。戻せないので complete と出さない。
+			status = "no-dump"
+			fallthrough
 		default:
 			encrypted = fmt.Sprint(g.Meta.Encrypted)
 			version = g.Meta.ElythiaVersion

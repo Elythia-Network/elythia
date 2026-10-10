@@ -209,7 +209,7 @@ func TestTake_Encrypted(t *testing.T) {
 func TestTake_Directory(t *testing.T) {
 	p := newDatabase(t)
 	p.seedSimple(t)
-	st, err := NewDirStorage(t.TempDir())
+	st, err := NewDirStorage(markedDir(t))
 	require.NoError(t, err)
 	meta, err := Take(context.Background(), p.takeOptions(st))
 	require.NoError(t, err)
@@ -226,6 +226,17 @@ func TestTake_Directory(t *testing.T) {
 		{Table: "schema_migrations_local", Missing: true},
 	}, meta.Migrations)
 	assert.Equal(t, []string{"statement_timeout=5min", "work_mem=8MB"}, meta.DatabaseSettings)
+	assert.Regexp(t, `^pg_dump \(PostgreSQL\) 18\.`, meta.PgDumpVersion)
+	assert.Equal(t, "UTF8", meta.DatabaseLocale.Encoding)
+	assert.Equal(t, "libc", meta.DatabaseLocale.Provider)
+	assert.NotEmpty(t, meta.DatabaseLocale.Collate)
+	assert.NotEmpty(t, meta.DatabaseLocale.Ctype)
+	require.Len(t, meta.Extensions, 2)
+	assert.Equal(t, "pg_trgm", meta.Extensions[0].Name)
+	assert.Equal(t, "public", meta.Extensions[0].Schema)
+	assert.NotEmpty(t, meta.Extensions[0].Version)
+	assert.Equal(t, "plpgsql", meta.Extensions[1].Name)
+	assert.Equal(t, "pg_catalog", meta.Extensions[1].Schema)
 
 	gens, err := ListGenerations(context.Background(), st)
 	require.NoError(t, err)
@@ -250,7 +261,7 @@ func TestTake_Directory(t *testing.T) {
 func TestTake_PgDumpFailureLeavesNothing(t *testing.T) {
 	p := newDatabase(t)
 	p.seedSimple(t)
-	dir, err := NewDirStorage(t.TempDir())
+	dir, err := NewDirStorage(markedDir(t))
 	require.NoError(t, err)
 	for name, st := range map[string]Storage{"dir": dir, "s3": newS3Storage(t)} {
 		t.Run(name, func(t *testing.T) {
@@ -272,7 +283,7 @@ func TestTake_PgDumpFailureLeavesNothing(t *testing.T) {
 func TestTake_PgDumpTruncatedOutputLeavesNothing(t *testing.T) {
 	p := newDatabase(t)
 	p.seedSimple(t)
-	dir, err := NewDirStorage(t.TempDir())
+	dir, err := NewDirStorage(markedDir(t))
 	require.NoError(t, err)
 	for name, st := range map[string]Storage{"dir": dir, "s3": newS3Storage(t)} {
 		t.Run(name, func(t *testing.T) {
@@ -295,6 +306,9 @@ func TestTake_PgDumpTruncatedOutputLeavesNothing(t *testing.T) {
 type truncatingRunner struct{ inner dockerExecRunner }
 
 func (r truncatingRunner) Command(ctx context.Context, env []string, name string, args ...string) *exec.Cmd {
+	if len(args) == 1 && args[0] == "--version" {
+		return r.inner.Command(ctx, env, name, args...)
+	}
 	return r.inner.Command(ctx, env, "sh", append([]string{"-c", `"$0" "$@" | head -c 2000; exit 3`, name}, args...)...)
 }
 
@@ -302,3 +316,92 @@ func (r truncatingRunner) Command(ctx context.Context, env []string, name string
 type noDeleteStorage struct{ Storage }
 
 func (noDeleteStorage) Delete(context.Context, string) error { return nil }
+
+// TestTake_SameSecondDoesNotMix starts two backups with the same generation ID
+// at once. Exactly one may succeed, and its generation must be consistent:
+// the other must neither overwrite nor delete its files.
+func TestTake_SameSecondDoesNotMix(t *testing.T) {
+	p := newDatabase(t)
+	p.seedSimple(t)
+	dir, err := NewDirStorage(markedDir(t))
+	require.NoError(t, err)
+	for name, st := range map[string]Storage{"dir": dir, "s3": newS3Storage(t)} {
+		t.Run(name, func(t *testing.T) {
+			at := time.Now()
+			// List で同じ ID が無いことを確かめる段を、2 つとも通り抜けさせる。
+			gate := &listGate{Storage: st, ready: make(chan struct{}), n: 2}
+			var wg sync.WaitGroup
+			errs := make([]error, 2)
+			for i := range 2 {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					opts := p.takeOptions(gate)
+					opts.Now = func() time.Time { return at }
+					_, errs[i] = Take(context.Background(), opts)
+				}()
+			}
+			wg.Wait()
+			ok := 0
+			for _, err := range errs {
+				if err == nil {
+					ok++
+				} else {
+					assert.ErrorIs(t, err, ErrExists)
+				}
+			}
+			require.Equal(t, 1, ok, "%v", errs)
+			gens, err := ListGenerations(context.Background(), st)
+			require.NoError(t, err)
+			require.Len(t, gens, 1)
+			require.True(t, gens[0].Complete())
+			size, sum, err := HashObject(context.Background(), st, Key(gens[0].ID, DumpFile))
+			require.NoError(t, err)
+			assert.Equal(t, gens[0].Meta.DumpSize, size)
+			assert.Equal(t, gens[0].Meta.DumpSHA256, sum)
+		})
+	}
+}
+
+// listGate holds List until n callers have reached it, so concurrent Takes
+// all pass the "does the generation exist" check.
+type listGate struct {
+	Storage
+	mu    sync.Mutex
+	n     int
+	ready chan struct{}
+}
+
+func (g *listGate) List(ctx context.Context, prefix string) ([]ObjectInfo, error) {
+	g.mu.Lock()
+	if g.n > 0 {
+		g.n--
+		if g.n == 0 {
+			close(g.ready)
+		}
+	}
+	g.mu.Unlock()
+	<-g.ready
+	return g.Storage.List(ctx, prefix)
+}
+
+func (g *listGate) PutNew(ctx context.Context, key string, r io.Reader) error {
+	return g.Storage.(NewPutter).PutNew(ctx, key, r)
+}
+
+// TestTake_IgnoresDatabaseTimeouts: a statement_timeout set on the database
+// must not cut the row counts.
+func TestTake_IgnoresDatabaseTimeouts(t *testing.T) {
+	p := newDatabase(t)
+	p.exec(t,
+		`CREATE TABLE big (id int)`,
+		`INSERT INTO big SELECT generate_series(1, 2000000)`,
+		`ALTER DATABASE `+p.db+` SET statement_timeout = '10ms'`,
+		`ALTER DATABASE `+p.db+` SET idle_in_transaction_session_timeout = '10ms'`,
+	)
+	st, err := NewDirStorage(markedDir(t))
+	require.NoError(t, err)
+	meta, err := Take(context.Background(), p.takeOptions(st))
+	require.NoError(t, err)
+	assert.Equal(t, int64(2000000), meta.RowCounts["public.big"])
+}

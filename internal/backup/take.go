@@ -30,16 +30,37 @@ type DumpConn struct {
 	Password string
 }
 
-// DumpConnFromURL splits a postgres:// URL into a DumpConn.
+// DumpConnFromURL splits a postgres:// URL (config.Config.DatabaseURL) into a
+// DumpConn for libpq.
+//
+// エラーに URL を入れない。この URL はパスワードを含み、db.host の書き間違いなどで
+// 読めないときにそのままログへ出ると漏れる。
+//
+// pgx と libpq では、sslrootcert が無い verify-ca / verify-full の意味が違う。pgx は
+// システムの CA で検証するが、libpq は ~/.postgresql/root.crt を探して無ければ失敗する。
+// 本体と同じく「システムの CA で検証する」にするため、libpq には sslrootcert=system
+// (PostgreSQL 16 以降の libpq) を渡す。libpq は system を verify-full でしか受け付けない
+// ので、verify-ca でシステムの CA を使う形は pg_dump では取れない。
 func DumpConnFromURL(dbURL string) (DumpConn, error) {
 	u, err := url.Parse(dbURL)
 	if err != nil {
-		return DumpConn{}, fmt.Errorf("backup: parse database url: %w", err)
+		return DumpConn{}, errors.New("backup: the database URL built from db: is not a valid URL (check db.host and db.port)")
 	}
 	var pass string
 	if u.User != nil {
 		pass, _ = u.User.Password()
 		u.User = url.User(u.User.Username())
+	}
+	q := u.Query()
+	if q.Get("sslrootcert") == "" {
+		switch q.Get("sslmode") {
+		case "verify-full":
+			q.Set("sslrootcert", "system")
+			u.RawQuery = q.Encode()
+		case "verify-ca":
+			return DumpConn{}, errors.New("backup: db.extra.sslmode verify-ca needs db.extra.sslrootcert for pg_dump " +
+				"(libpq verifies against the system CAs only with verify-full)")
+		}
 	}
 	return DumpConn{URI: u.String(), Password: pass}, nil
 }
@@ -112,6 +133,11 @@ func Take(ctx context.Context, o TakeOptions) (meta *Meta, err error) {
 		return nil, fmt.Errorf("backup: generation %s already exists", id)
 	}
 
+	pgDumpVersion, err := readPgDumpVersion(ctx, runner, pgDump)
+	if err != nil {
+		return nil, err
+	}
+
 	conn, err := pgx.Connect(ctx, o.DatabaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("backup: connect: %w", err)
@@ -125,6 +151,12 @@ func Take(ctx context.Context, o TakeOptions) (meta *Meta, err error) {
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
 
+	// DB やロールに statement_timeout などが設定されていると、大きな表の count(*) や、
+	// pg_dump が終わるのを待つ間の idle な transaction が切られる。pg_dump 自身も
+	// 自分の接続でこれらを 0 にする。
+	if _, err := tx.Exec(ctx, "SET LOCAL statement_timeout = 0; SET LOCAL lock_timeout = 0; SET LOCAL idle_in_transaction_session_timeout = 0"); err != nil {
+		return nil, fmt.Errorf("backup: set timeouts: %w", err)
+	}
 	var snapshot string
 	if err := tx.QueryRow(ctx, "SELECT pg_export_snapshot()").Scan(&snapshot); err != nil {
 		return nil, fmt.Errorf("backup: export snapshot: %w", err)
@@ -135,6 +167,7 @@ func Take(ctx context.Context, o TakeOptions) (meta *Meta, err error) {
 		CreatedAt:      createdAt,
 		ElythiaVersion: config.MkGoVersion,
 		ElythiaCommit:  config.MkGoCommit,
+		PgDumpVersion:  pgDumpVersion,
 	}
 	si, err := ReadServerInfo(ctx, tx)
 	if err != nil {
@@ -145,6 +178,12 @@ func Take(ctx context.Context, o TakeOptions) (meta *Meta, err error) {
 		return nil, err
 	}
 	if meta.DatabaseSettings, err = ReadDatabaseSettings(ctx, tx); err != nil {
+		return nil, err
+	}
+	if meta.DatabaseLocale, err = ReadDatabaseLocale(ctx, tx, si.VersionNum); err != nil {
+		return nil, err
+	}
+	if meta.Extensions, err = ReadExtensions(ctx, tx); err != nil {
 		return nil, err
 	}
 	if meta.RowCounts, err = CountRows(ctx, tx); err != nil {
@@ -163,13 +202,12 @@ func Take(ctx context.Context, o TakeOptions) (meta *Meta, err error) {
 	stored, err := streamDump(ctx, o.Storage, dumpKey, runner, pgDump, dump, snapshot, o.Recipients)
 	// dump を Put した後で失敗したら、途中の世代を残さない。meta.json が無いので
 	// 読む側は無視するが、容量の料金はかかる。
+	// ErrExists は、同じ秒に始めた別のバックアップが先に置いたということ。その dump は
+	// 自分のものではないので消さない。
+	cleanupDump := !errors.Is(err, ErrExists)
 	defer func() {
-		if err != nil {
-			delCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
-			defer cancel()
-			if derr := o.Storage.Delete(delCtx, dumpKey); derr != nil {
-				logger.Warn("backup: failed to delete the incomplete dump", "key", dumpKey, "error", derr)
-			}
+		if err != nil && cleanupDump {
+			deleteQuietly(ctx, o.Storage, logger, dumpKey)
 		}
 	}()
 	if err != nil {
@@ -188,11 +226,37 @@ func Take(ctx context.Context, o TakeOptions) (meta *Meta, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("backup: encode meta: %w", err)
 	}
-	if err = o.Storage.Put(ctx, Key(id, MetaFile), bytes.NewReader(body)); err != nil {
+	if err = putNew(ctx, o.Storage, Key(id, MetaFile), bytes.NewReader(body)); err != nil {
+		// 失敗と返ってきても、実は置けていることがある (応答が途中で切れた場合など)。
+		// dump だけ消して meta.json が残ると、中身の無い世代が complete に見えるので、
+		// meta.json も消す。ErrExists なら置いたのは自分ではないので消さない。
+		if !errors.Is(err, ErrExists) {
+			deleteQuietly(ctx, o.Storage, logger, Key(id, MetaFile))
+		}
 		return nil, err
 	}
 	logger.Info("backup: done", "id", id)
 	return meta, nil
+}
+
+// deleteQuietly removes key after a failure, even when ctx is already done,
+// and only logs when it cannot.
+func deleteQuietly(ctx context.Context, st Storage, logger *slog.Logger, key string) {
+	delCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+	defer cancel()
+	if err := st.Delete(delCtx, key); err != nil {
+		logger.Warn("backup: failed to delete an incomplete object", "key", key, "error", err)
+	}
+}
+
+// readPgDumpVersion runs `pg_dump --version` and returns its first line.
+func readPgDumpVersion(ctx context.Context, runner Runner, pgDump string) (string, error) {
+	out, err := runner.Command(ctx, nil, pgDump, "--version").Output()
+	if err != nil {
+		return "", fmt.Errorf("backup: %s --version: %w", pgDump, err)
+	}
+	line, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
+	return line, nil
 }
 
 type storedDump struct {
@@ -212,7 +276,7 @@ func streamDump(ctx context.Context, st Storage, key string, runner Runner, pgDu
 	// いないと pipe への書き込みで止まる。
 	putErr := make(chan error, 1)
 	go func() {
-		err := st.Put(ctx, key, pr)
+		err := putNew(ctx, st, key, pr)
 		if err != nil {
 			// 保存先が読むのをやめたら pg_dump も止める。止めないと pipe が詰まって
 			// pg_dump が書き込みで止まり、Wait が返らない。

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
+	"path"
 	"strings"
 	"time"
 
@@ -50,6 +52,8 @@ var (
 	_ Storage   = (*S3Storage)(nil)
 	_ Presigner = (*S3Storage)(nil)
 	_ Storage   = (*DirStorage)(nil)
+	_ NewPutter = (*S3Storage)(nil)
+	_ NewPutter = (*DirStorage)(nil)
 )
 
 // NewS3Storage builds an S3Storage from the config.
@@ -75,6 +79,9 @@ func NewS3Storage(o config.BackupS3Options) (*S3Storage, error) {
 		ResponseChecksumValidation: aws.ResponseChecksumValidationWhenRequired,
 	}
 	if o.Endpoint != "" {
+		if err := checkEndpoint(o.Endpoint); err != nil {
+			return nil, err
+		}
 		opts.BaseEndpoint = aws.String(o.Endpoint)
 	}
 	client := s3.New(opts)
@@ -85,6 +92,24 @@ func NewS3Storage(o config.BackupS3Options) (*S3Storage, error) {
 		prefix:   normalizePrefix(o.Prefix),
 		PartSize: DefaultS3PartSize,
 	}, nil
+}
+
+// checkEndpoint rejects an endpoint that is not an http(s) URL with a host.
+//
+// 値そのものはエラーに入れない。URL として読めない値や userinfo 付きの値には、
+// 書き間違えた認証情報が含まれていることがあり、ログに残すと漏れる。
+func checkEndpoint(endpoint string) error {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return errors.New("backup: storage.s3.endpoint is not a valid URL")
+	}
+	if u.User != nil {
+		return errors.New("backup: storage.s3.endpoint must not contain credentials; use accessKey / secretKey")
+	}
+	if (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+		return errors.New("backup: storage.s3.endpoint must be an http:// or https:// URL with a host")
+	}
+	return nil
 }
 
 // normalizePrefix trims slashes and adds one trailing slash to a non-empty
@@ -108,6 +133,20 @@ func (s *S3Storage) objectKey(key string) (string, error) {
 // ones use a multipart upload, which is aborted when anything fails. Neither
 // makes an object visible under key until the upload completes.
 func (s *S3Storage) Put(ctx context.Context, key string, r io.Reader) error {
+	return s.put(ctx, key, r, false)
+}
+
+// PutNew is Put with If-None-Match: * on the request that makes the object
+// visible, so it fails with ErrExists instead of replacing an existing key.
+//
+// 条件付きの書き込みを知らない S3 互換の実装は、条件を無視するか 501 を返す。501 の
+// ときは条件を外して送り直す (中身はまだ手元か、送り終えた parts にある)。その場合は
+// 上書きを防げないが、バックアップを取れないよりはよい。
+func (s *S3Storage) PutNew(ctx context.Context, key string, r io.Reader) error {
+	return s.put(ctx, key, r, true)
+}
+
+func (s *S3Storage) put(ctx context.Context, key string, r io.Reader, exclusive bool) error {
 	k, err := s.objectKey(key)
 	if err != nil {
 		return err
@@ -120,23 +159,57 @@ func (s *S3Storage) Put(ctx context.Context, key string, r io.Reader) error {
 	n, err := io.ReadFull(r, buf)
 	switch {
 	case errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF):
-		_, err = s.client.PutObject(ctx, &s3.PutObjectInput{
-			Bucket:        aws.String(s.bucket),
-			Key:           aws.String(k),
-			Body:          bytes.NewReader(buf[:n]),
-			ContentLength: aws.Int64(int64(n)),
+		err = withCondition(exclusive, func(cond *string) error {
+			_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
+				Bucket:        aws.String(s.bucket),
+				Key:           aws.String(k),
+				Body:          bytes.NewReader(buf[:n]),
+				ContentLength: aws.Int64(int64(n)),
+				IfNoneMatch:   cond,
+			})
+			return err
 		})
 		if err != nil {
-			return fmt.Errorf("backup: put %s: %w", key, err)
+			return putError("put", key, err)
 		}
 		return nil
 	case err != nil:
 		return fmt.Errorf("backup: read %s: %w", key, err)
 	}
-	return s.putMultipart(ctx, key, k, buf, r)
+	return s.putMultipart(ctx, key, k, buf, r, exclusive)
 }
 
-func (s *S3Storage) putMultipart(ctx context.Context, key, k string, first []byte, r io.Reader) (err error) {
+// withCondition calls send with If-None-Match: * when exclusive, and again
+// without it when the service does not implement conditional writes.
+func withCondition(exclusive bool, send func(cond *string) error) error {
+	if !exclusive {
+		return send(nil)
+	}
+	err := send(aws.String("*"))
+	if s3ErrorCode(err) == "NotImplemented" {
+		return send(nil)
+	}
+	return err
+}
+
+// putError maps a failed conditional write to ErrExists.
+func putError(op, key string, err error) error {
+	switch s3ErrorCode(err) {
+	case "PreconditionFailed", "ConditionalRequestConflict":
+		return fmt.Errorf("backup: %s %s: %w", op, key, ErrExists)
+	}
+	return fmt.Errorf("backup: %s %s: %w", op, key, err)
+}
+
+func s3ErrorCode(err error) string {
+	var api smithy.APIError
+	if errors.As(err, &api) {
+		return api.ErrorCode()
+	}
+	return ""
+}
+
+func (s *S3Storage) putMultipart(ctx context.Context, key, k string, first []byte, r io.Reader, exclusive bool) (err error) {
 	created, err := s.client.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(k),
@@ -188,14 +261,18 @@ func (s *S3Storage) putMultipart(ctx context.Context, key, k string, first []byt
 			return fmt.Errorf("backup: read %s: %w", key, err)
 		}
 	}
-	_, err = s.client.CompleteMultipartUpload(ctx, &s3.CompleteMultipartUploadInput{
-		Bucket:          aws.String(s.bucket),
-		Key:             aws.String(k),
-		UploadId:        uploadID,
-		MultipartUpload: &types.CompletedMultipartUpload{Parts: parts},
+	err = withCondition(exclusive, func(cond *string) error {
+		_, err := s.client.CompleteMultipartUpload(ctx, &s3.CompleteMultipartUploadInput{
+			Bucket:          aws.String(s.bucket),
+			Key:             aws.String(k),
+			UploadId:        uploadID,
+			MultipartUpload: &types.CompletedMultipartUpload{Parts: parts},
+			IfNoneMatch:     cond,
+		})
+		return err
 	})
 	if err != nil {
-		return fmt.Errorf("backup: complete multipart upload %s: %w", key, err)
+		return putError("complete multipart upload", key, err)
 	}
 	return nil
 }
@@ -268,17 +345,44 @@ func (s *S3Storage) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
-// PresignGet returns a GET URL for key that expires after ttl.
+// PresignGet returns a GET URL for key that expires after ttl. The response
+// carries Content-Disposition: attachment, so a browser saves the file.
+//
+// 管理画面 (#3462) のダウンロードは別 origin の署名付き URL なので、<a download> が
+// 効かない。付けないとブラウザは保存せずに開こうとする。
 func (s *S3Storage) PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error) {
 	k, err := s.objectKey(key)
 	if err != nil {
 		return "", err
 	}
-	req, err := s.presign.PresignGetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(k)}, s3.WithPresignExpires(ttl))
+	in := &s3.GetObjectInput{
+		Bucket:                     aws.String(s.bucket),
+		Key:                        aws.String(k),
+		ResponseContentDisposition: aws.String(`attachment; filename="` + downloadName(key) + `"`),
+	}
+	req, err := s.presign.PresignGetObject(ctx, in, s3.WithPresignExpires(ttl))
 	if err != nil {
 		return "", fmt.Errorf("backup: presign %s: %w", key, err)
 	}
 	return req.URL, nil
+}
+
+// downloadName is the file name offered for key: "<generation ID>-<name>"
+// for a file of a generation, the last segment otherwise.
+//
+// ヘッダーの引用符の中に入れるので、英数字と . _ - 以外は _ に置き換える。
+func downloadName(key string) string {
+	name := path.Base(key)
+	if id := GenerationIDFromKey(key); id != "" {
+		name = id + "-" + name
+	}
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
+			return r
+		}
+		return '_'
+	}, name)
 }
 
 func isS3NotFound(err error) bool {
