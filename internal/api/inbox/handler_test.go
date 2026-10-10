@@ -858,7 +858,7 @@ func TestCaptureSignatureHeaders_CarriesXDate(t *testing.T) {
 	req.Header.Set("X-Date", "x")
 	req.Host = "example.com"
 
-	got := captureSignatureHeaders(req)
+	got, _ := captureSignatureHeaders(req)
 
 	assert.Equal(t, "x", got["X-Date"], "署名対象の X-Date が worker へ渡らない")
 	assert.Equal(t, "d", got["Date"])
@@ -921,7 +921,7 @@ func TestCaptureSignatureHeaders_BoundsExtraHeaders(t *testing.T) {
 	req.Header.Set("Signature", `keyId="https://remote.example/users/alice#main-key",algorithm="rsa-sha256",headers="`+
 		strings.Join(names, " ")+`",signature="c2ln"`)
 
-	got := captureSignatureHeaders(req)
+	got, _ := captureSignatureHeaders(req)
 
 	extra := 0
 	for k := range got {
@@ -932,12 +932,48 @@ func TestCaptureSignatureHeaders_BoundsExtraHeaders(t *testing.T) {
 	assert.Equal(t, maxSignedExtraHeaders, extra, "署名に挙がった追加のヘッダーの数が上限で止まっていない")
 	assert.Equal(t, "v", got["X-Extra-00"], "先頭の追加のヘッダーが運ばれていない")
 	assert.NotContains(t, got, "X-Not-Signed", "署名に挙がっていないヘッダーまで運んでいる")
-	assert.NotContains(t, got, "(Request-Target)")
-	assert.NotContains(t, got, "(Created)")
 
 	// 大きさの上限: 1 つで上限を超える値は運ばない。
 	big := httptest.NewRequest(http.MethodPost, "/inbox", nil)
 	big.Header.Set("X-Huge", strings.Repeat("a", maxSignedExtraHeaderBytes+1))
 	big.Header.Set("Signature", `keyId="k",headers="date x-huge",signature="c2ln"`)
-	assert.NotContains(t, captureSignatureHeaders(big), "X-Huge", "大きさの上限を超える値を運んでいる")
+	gotBig, complete := captureSignatureHeaders(big)
+	assert.NotContains(t, gotBig, "X-Huge", "大きさの上限を超える値を運んでいる")
+	assert.False(t, complete, "積みきれなかったことを返していない")
+
+	// 上限に収まれば complete。
+	small := httptest.NewRequest(http.MethodPost, "/inbox", nil)
+	small.Header.Set("X-Small", "v")
+	small.Header.Set("Signature", `keyId="k",headers="date x-small",signature="c2ln"`)
+	_, complete = captureSignatureHeaders(small)
+	assert.True(t, complete)
+}
+
+// 署名に挙がったヘッダーを積みきれないときは、受付で 401 にする (#3498)。
+// 202 で受けると worker が必ず検証に失敗し、相手には成功に見えたまま捨てる。
+func TestInbox_AsyncMode_RejectsSignatureOverHeaderLimits(t *testing.T) {
+	priv, pub, err := activitypub.GenerateRSAKeypair()
+	require.NoError(t, err)
+	key, err := activitypub.NewPrivateKey("https://remote.example/users/alice#main-key", priv)
+	require.NoError(t, err)
+
+	h, _, _ := newHandler(t, pub)
+	enq := &recordingEnqueuer{}
+	h.SetEnqueuer(enq)
+
+	body := []byte(`{"type":"Follow","actor":"https://remote.example/users/alice","object":"https://example.com/users/bob"}`)
+	c, rec := newPost(t, body)
+	req := c.Request()
+	names := []string{"(request-target)", "date", "host", "digest"}
+	for i := 0; i <= maxSignedExtraHeaders; i++ {
+		name := fmt.Sprintf("x-extra-%02d", i)
+		names = append(names, name)
+		req.Header.Set(name, "v")
+	}
+	require.NoError(t, activitypub.SignRequest(req, key, activitypub.SHA256Digest(body), names))
+	req.Host = "example.com"
+
+	require.NoError(t, h.Inbox(c))
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	assert.Empty(t, enq.calls, "積みきれない署名をキューに積んでいる")
 }

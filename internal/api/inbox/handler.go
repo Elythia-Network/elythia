@@ -176,10 +176,12 @@ const (
 // 配送に `Collection-Synchronization` を付けて署名するので、フォロワー限定だけが
 // 届かなかった (#3037 の `X-Date` も同じ形だった)。
 //
-// 上限を超えた分は運ばない。その場合 worker の検証は落ちる (fail closed) が、
-// 正規の送り手がそこまで多くのヘッダーを署名することは無い。上限はキューの
-// payload を相手の申告で膨らませないためのもの。
-func captureSignatureHeaders(req *http.Request) map[string]string {
+// 上限はキューの payload を相手の申告で膨らませないためのもの。正規の送り手が
+// そこまで多くのヘッダーを署名することは無い。署名に挙がったヘッダーを上限で
+// 積みきれなかったときは complete が false になる。呼び出し側はそれを受付で
+// 401 にする (積まずに 202 を返すと、worker で黙って捨てることになり、相手には
+// 成功に見える)。
+func captureSignatureHeaders(req *http.Request) (headers map[string]string, complete bool) {
 	out := make(map[string]string, len(signatureRelevantHeaders))
 	for _, h := range signatureRelevantHeaders {
 		if v := req.Header.Get(h); v != "" {
@@ -191,7 +193,8 @@ func captureSignatureHeaders(req *http.Request) map[string]string {
 	}
 	parsed, err := activitypub.ParseSignatureHeader(out["Signature"])
 	if err != nil {
-		return out
+		// 受付の admitInbox が先に 401 で弾くので、ここには来ない。
+		return out, true
 	}
 	extra, size := 0, 0
 	for _, name := range parsed.Headers {
@@ -208,13 +211,13 @@ func captureSignatureHeaders(req *http.Request) map[string]string {
 			continue
 		}
 		if extra >= maxSignedExtraHeaders || size+len(v) > maxSignedExtraHeaderBytes {
-			break
+			return out, false
 		}
 		out[key] = v
 		extra++
 		size += len(v)
 	}
-	return out
+	return out, true
 }
 
 // Inbox handles POST /inbox and POST /users/:id/inbox.
@@ -297,11 +300,18 @@ func (h *Handler) Inbox(c echo.Context) error {
 		// path + query で署名するので (本家 7c9c38c04a / 同期経路の
 		// VerifyRequestCached も同じ)、URL.Path だと `/inbox?x=1` 宛ての署名が
 		// worker 側でだけ合わなくなる。
+		headers, complete := captureSignatureHeaders(c.Request())
+		if !complete {
+			// 署名に挙がったヘッダーを積みきれないと worker が必ず検証に失敗する。
+			// 202 で受けて黙って捨てるより、ここで 401 にして相手に失敗を見せる (#3498)。
+			slog.Info("inbox: rejecting a signature over too many or too large headers")
+			return c.NoContent(http.StatusUnauthorized)
+		}
 		payload := queue.InboxPayload{
 			Body:    body,
 			Method:  c.Request().Method,
 			Path:    c.Request().URL.RequestURI(),
-			Headers: captureSignatureHeaders(c.Request()),
+			Headers: headers,
 		}
 		if err := h.enqueuer.EnqueueInbox(c.Request().Context(), payload); err != nil {
 			// queue 障害時は 500 を返して上流に retry させる (best-effort
