@@ -22,6 +22,7 @@
 # (PostgreSQL 18 を公式サポートした release) を指す。
 FROM postgres:18-alpine
 
+# 上げるときは、ルートの Dockerfile の backup stage (バックアップを戻す側) も同じ値にする。
 ARG PG_BIGM_COMMIT=735dceba0ecdd8ac1aaaaa207226a7102b6bbd71
 
 RUN apk add --no-cache --virtual .build-deps build-base curl icu-dev \

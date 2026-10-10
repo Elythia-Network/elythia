@@ -109,6 +109,18 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # digest で固定する (理由は builder と同じ)。DB のサーバーの版を上げたら、ここも
 # 同じメジャーバージョンへ上げる。
 FROM postgres:18-alpine@sha256:4da1a4828be12604092fa55311276f08f9224a74a62dcb4708bd7439e2a03911 AS backup
+# pg_bigm を入れておく。UDS の構成の DB (deploy/postgres-bigm) は pg_bigm 入りで、
+# CREATE EXTENSION した DB の dump を戻すには、戻す側にも拡張が要る。verify (#3459) は
+# この image の中で使い捨ての PostgreSQL に戻すので、無いと CREATE EXTENSION pg_bigm で
+# 落ちる。入れるだけなら、使わない DB の dump にも戻す処理にも影響しない。
+# **版は deploy/postgres-bigm/Dockerfile と揃える** (同じ commit SHA)。
+ARG PG_BIGM_COMMIT=735dceba0ecdd8ac1aaaaa207226a7102b6bbd71
+RUN apk add --no-cache --virtual .build-deps build-base curl icu-dev \
+ && curl -fsSL "https://github.com/pgbigm/pg_bigm/archive/${PG_BIGM_COMMIT}.tar.gz" -o /tmp/pg_bigm.tar.gz \
+ && tar xzf /tmp/pg_bigm.tar.gz -C /tmp \
+ && make -C "/tmp/pg_bigm-${PG_BIGM_COMMIT}" USE_PGXS=1 with_llvm=no install \
+ && rm -rf /tmp/pg_bigm* \
+ && apk del .build-deps
 COPY --from=backup-builder /out/bin/elythia /usr/local/bin/elythia
 # verify (#3459) と restore (#3461) が、バイナリの同梱の migration の番号と比べる。
 COPY --from=backup-builder /app/migration /app/migration

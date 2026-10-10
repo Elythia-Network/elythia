@@ -191,6 +191,7 @@ services:
       - pg_sock:/var/run/postgresql
       # 保存先をディレクトリにするときは、別の機器を mount したホストのパスを渡し、
       # backup.storage.dir.path に /backup を書く。コンテナは UID 70 (postgres) で動く。
+      # mount 先の根に目印 .elythia-backup が要る (docs/backup.md)。
       # - /mnt/nas/elythia-backup:/backup
     networks:
       - mkgo-uds

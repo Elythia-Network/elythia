@@ -120,6 +120,10 @@ services:
     build:
       context: .
       target: backup
+      # meta.json の elythiaCommit に入る revision。Dockerfile の中では git を呼べない
+      # ので build-arg で渡す (docs/backup.md)。
+      args:
+        MKGO_COMMIT: ${MKGO_COMMIT:-}
     profiles: ["backup"]
     # depends_on を書かない。書くと `run` が DB のコンテナの設定の差分を見て作り直す
     # ことがある。DB は動いている前提で、`run --no-deps` で呼ぶ。
@@ -129,8 +133,14 @@ services:
       # backup.storage.dir.path に /backup を書く。コンテナは UID 70 (postgres) で
       # 動くので、そのユーザーが書けるようにしておく。
       # - /mnt/nas/elythia-backup:/backup
+      # 保存先をディレクトリにするときは、mount 先の根に目印 .elythia-backup が要る
+      # (mount が外れたときにホストのディスクへ書かないため。docs/backup.md)。
+      # db.extra.sslrootcert で CA ファイルを指すときは、同じパスに mount する。
+      # - /etc/elythia/db-ca.crt:/etc/elythia/db-ca.crt:ro
       # 暗号化した世代を確かめる・戻すときだけ、age の秘密鍵を渡す (取るだけなら不要)。
-      # - ./.config/backup-identity.txt:/app/.config/backup-identity.txt:ro
+      # 秘密鍵はリポジトリの外 (.config にも置かない) に置き、取る側のホストには
+      # 置かないのが望ましい。
+      # - /etc/elythia/backup-identity.txt:/run/secrets/backup-identity.txt:ro
     restart: "no"
 
   # Video thumbnail generator (#637 M2). mk-go の media proxy が video/* を

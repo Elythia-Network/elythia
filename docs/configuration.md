@@ -257,16 +257,16 @@ Elythia 側のマイグレーションには含めていない。pgroonga 拡張
 | キー | 型 | 説明 |
 |---|---|---|
 | `backup.storage.type` | string | `s3`(S3互換)か`dir`(ディレクトリ)。必須 |
-| `backup.storage.s3.endpoint` | string | 接続先のURL。空ならAWS S3 |
+| `backup.storage.s3.endpoint` | string | 接続先のURL(`https://`。`http://`は経路を信頼できるときだけ)。空ならAWS S3 |
 | `backup.storage.s3.region` | string | region。空なら`us-east-1` |
 | `backup.storage.s3.bucket` | string | bucket。必須 |
 | `backup.storage.s3.prefix` | string | 世代を置くkeyの接頭辞。前後の`/`は無視する |
 | `backup.storage.s3.accessKey` / `secretKey` | string | 認証情報。どちらも必須 |
 | `backup.storage.s3.forcePathStyle` | bool | path形式でbucketを指す(MinIOなど) |
-| `backup.storage.dir.path` | string | 別の機器をmountしたディレクトリ。**既に存在している必要がある**(mountが外れているときに、同じホストのディスクへ黙って書き始めないよう、作らない) |
+| `backup.storage.dir.path` | string | 別の機器をmountしたディレクトリ。**既に存在し、根に目印のファイル`.elythia-backup`がある必要がある**(mountが外れているときに、同じホストのディスクへ黙って書き始めないよう、どちらも作らない。作り方は[DBのバックアップ](backup.md#ディレクトリ)) |
 | `backup.encryption.enabled` | bool | dumpをageで暗号化する |
 | `backup.encryption.recipients` | string[] | ageの公開鍵(`age1...`)。`enabled`のとき1つ以上必須。取るのに要るのはこれだけ |
-| `backup.encryption.identityFile` | string | ageの秘密鍵のファイル。確かめる・戻すときに使う |
+| `backup.encryption.identityFile` | string | ageの秘密鍵のファイル。確かめる・戻すときに使う。リポジトリの外に置く |
 | `backup.tools.pgDump` | string | `pg_dump`のパス。空ならPATHから探す |
 
 `backup:`の節は`MK_*`の環境変数では作れない(`bindEnvKeys()`に無い)。
