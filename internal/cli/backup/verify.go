@@ -82,29 +82,10 @@ func runVerify(ctx context.Context, e verifyEnv, args []string) int {
 		return 1
 	}
 
-	core, _, err := migrate.LatestVersion(e.coreDir)
-	if err != nil || core == 0 {
-		// 同梱の番号が分からないと「進みすぎていないか」を確かめられない。
-		fmt.Fprintf(e.stderr, "elythia backup verify: cannot read the bundled migrations in %s (run it in /app of the backup image): %v\n", e.coreDir, err)
-		return 1
-	}
-	local, _, err := migrate.LatestVersion(e.localDir)
+	opts, err := verifyOptions(e, cfg.Backup)
 	if err != nil {
-		fmt.Fprintf(e.stderr, "elythia backup verify: cannot read the fork migrations in %s: %v\n", e.localDir, err)
+		fmt.Fprintf(e.stderr, "elythia backup verify: %v\n", err)
 		return 1
-	}
-
-	opts := backup.VerifyOptions{
-		Sandbox: e.newSandbox(cfg.Backup),
-		Bundled: backup.BundledMigrations{Core: int64(core), Local: int64(local)},
-	}
-	if f := cfg.Backup.Encryption.IdentityFile; f != "" {
-		ids, err := backup.LoadIdentities(f)
-		if err != nil {
-			fmt.Fprintf(e.stderr, "elythia backup verify: cannot read backup.encryption.identityFile: %v\n", err)
-			return 1
-		}
-		opts.Identities = ids
 	}
 
 	storage, err := e.openStorage(cfg.Backup.Storage)
@@ -130,6 +111,32 @@ func runVerify(ctx context.Context, e verifyEnv, args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// verifyOptions builds the options of backup.Verify from b. "backup verify"
+// and "backup daemon" share it so that both verify the same way.
+func verifyOptions(e verifyEnv, b *config.BackupOptions) (backup.VerifyOptions, error) {
+	core, _, err := migrate.LatestVersion(e.coreDir)
+	if err != nil || core == 0 {
+		// 同梱の番号が分からないと「進みすぎていないか」を確かめられない。
+		return backup.VerifyOptions{}, fmt.Errorf("cannot read the bundled migrations in %s (run it in /app of the backup image): %v", e.coreDir, err)
+	}
+	local, _, err := migrate.LatestVersion(e.localDir)
+	if err != nil {
+		return backup.VerifyOptions{}, fmt.Errorf("cannot read the fork migrations in %s: %w", e.localDir, err)
+	}
+	opts := backup.VerifyOptions{
+		Sandbox: e.newSandbox(b),
+		Bundled: backup.BundledMigrations{Core: int64(core), Local: int64(local)},
+	}
+	if f := b.Encryption.IdentityFile; f != "" {
+		ids, err := backup.LoadIdentities(f)
+		if err != nil {
+			return backup.VerifyOptions{}, fmt.Errorf("cannot read backup.encryption.identityFile: %w", err)
+		}
+		opts.Identities = ids
+	}
+	return opts, nil
 }
 
 // printResult writes the human-facing summary.

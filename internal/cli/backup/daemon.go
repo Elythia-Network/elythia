@@ -27,20 +27,12 @@ type Deps struct {
 	Verifier daemon.Verifier
 }
 
-// errNotWired is returned by the default openDeps until the take (#3458) and
-// verify (#3459) implementations are wired in.
-var errNotWired = errors.New("the storage, take (#3458) and verify (#3459) implementations are not wired in yet")
-
 // daemonEnv carries the process-level dependencies so tests can replace them.
 type daemonEnv struct {
 	stderr     io.Writer
 	loadConfig func(string) (*config.Config, error)
 	// openDeps builds the storage, taker and verifier from the config.
-	//
-	// 配線する場所: 保存先 (#3458 の S3 / ディレクトリの実装)、取る処理 (#3458)、
-	// 確かめる処理 (#3459) を cfg.Backup から作って返す。実物が入るまでは
-	// errNotWired を返し、daemon は起動しない。
-	openDeps func(*config.Config) (Deps, error)
+	openDeps func(*config.Config, *slog.Logger) (Deps, error)
 	// signalContext is canceled by SIGINT / SIGTERM.
 	signalContext func() (context.Context, context.CancelFunc)
 	listen        func(addr string) (net.Listener, error)
@@ -51,7 +43,7 @@ func defaultDaemonEnv() daemonEnv {
 	return daemonEnv{
 		stderr:     os.Stderr,
 		loadConfig: config.Load,
-		openDeps:   func(*config.Config) (Deps, error) { return Deps{}, errNotWired },
+		openDeps:   wireDeps(defaultEnv(), defaultVerifyEnv()),
 		signalContext: func() (context.Context, context.CancelFunc) {
 			return signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		},
@@ -148,7 +140,7 @@ func build(e daemonEnv, cfg *config.Config, logger *slog.Logger) (*daemon.Daemon
 	} else {
 		logger.Warn("backup: backup.notify.webhookUrl is empty; failures are only logged")
 	}
-	deps, err := e.openDeps(cfg)
+	deps, err := e.openDeps(cfg, logger)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -164,4 +156,53 @@ func build(e daemonEnv, cfg *config.Config, logger *slog.Logger) (*daemon.Daemon
 		return nil, nil, err
 	}
 	return d, h, nil
+}
+
+// wireDeps returns the openDeps that builds the storage with
+// backup.OpenStorage, the taker with backup.Take and the verifier with
+// backup.Verify, from the same options "backup take" and "backup verify" use.
+func wireDeps(te env, ve verifyEnv) func(*config.Config, *slog.Logger) (Deps, error) {
+	return func(cfg *config.Config, logger *slog.Logger) (Deps, error) {
+		st, err := te.openStorage(cfg.Backup.Storage)
+		if err != nil {
+			return Deps{}, fmt.Errorf("cannot open the storage: %w", err)
+		}
+		topts, err := takeOptions(te, cfg, st, logger)
+		if err != nil {
+			return Deps{}, err
+		}
+		// 定期実行で確かめない設定でも、制御 API から確かめることを頼めるので、
+		// 確かめる準備 (同梱の migration の番号、秘密鍵) は起動時に済ませて誤りを出す。
+		vopts, err := verifyOptions(ve, cfg.Backup)
+		if err != nil {
+			return Deps{}, err
+		}
+		return Deps{
+			Storage:  st,
+			Taker:    taker{opts: topts},
+			Verifier: verifier{st: st, opts: vopts, verify: ve.verify},
+		}, nil
+	}
+}
+
+// taker adapts backup.Take to daemon.Taker.
+type taker struct{ opts backupkit.TakeOptions }
+
+func (t taker) Take(ctx context.Context) (backupkit.Meta, error) {
+	m, err := backupkit.Take(ctx, t.opts)
+	if err != nil {
+		return backupkit.Meta{}, err
+	}
+	return *m, nil
+}
+
+// verifier adapts backup.Verify to daemon.Verifier.
+type verifier struct {
+	st     backupkit.Storage
+	opts   backupkit.VerifyOptions
+	verify func(context.Context, backupkit.Storage, string, backupkit.VerifyOptions) (backupkit.VerifyResult, error)
+}
+
+func (v verifier) Verify(ctx context.Context, id string) (backupkit.VerifyResult, error) {
+	return v.verify(ctx, v.st, id, v.opts)
 }
