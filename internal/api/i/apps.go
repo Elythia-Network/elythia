@@ -247,6 +247,14 @@ func (h *Handler) RevokeToken(c echo.Context) error {
 	if h.authInvalidator != nil && tok.Token != "" {
 		h.authInvalidator.InvalidateToken(tok.Token)
 	}
+	// **hash の形で認証された分も消す (#3490)。** 本家の app 認証のクライアントは
+	// i = sha256(accessToken + appSecret) (= 保存した hash) を送るので、cache の
+	// 鍵がそちらになる。本番では下の stream revoke が利用者単位で cache を消す
+	// (`OnStreamRevoke` → `InvalidateTokensForUser`) ので大文字の形も含めて消えるが、
+	// revoker を配線しない構成でも小文字の形は即時に消えるよう、ここでも消す。
+	if h.authInvalidator != nil && tok.Hash != "" {
+		h.authInvalidator.InvalidateToken(tok.Hash)
+	}
 	// その token で張られた WebSocket も閉じる (mk-go 独自)。アプリ連携の解除も
 	// この endpoint を通る。
 	if h.streamRevoker != nil {

@@ -478,6 +478,34 @@ func TestAuthenticate_AccessToken(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// 本家の app 認証のクライアントは i = sha256(accessToken + appSecret) を送る
+// (本家 AuthenticateService は `hash: token.toLowerCase()` で引く)。その形でも
+// 認証され、raw の accessToken も引き続き通る (#3490)。
+func TestAuthenticate_UpstreamAppTokenForm(t *testing.T) {
+	user := &model.User{ID: "user_app_2", Username: "appuser2"}
+	rawToken := "raw_app_token_upstream"
+	hashWithSecret := sha256Hash(rawToken + "app_secret_value")
+	for _, presented := range []string{hashWithSecret, strings.ToUpper(hashWithSecret), rawToken} {
+		tokenRepo := testutil.NewMockAccessTokenRepository()
+		tokenRepo.Tokens[hashWithSecret] = &model.AccessToken{
+			ID: "at_app_2", Token: rawToken, Hash: hashWithSecret, UserID: user.ID, User: user,
+		}
+		auth := NewAuthMiddleware(testutil.NewMockUserRepository(), tokenRepo)
+		e := echo.New()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Bearer "+presented)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		var got *model.User
+		require.NoError(t, auth.Authenticate()(func(c echo.Context) error {
+			got = GetUser(c)
+			return c.NoContent(http.StatusOK)
+		})(c))
+		require.NotNil(t, got, "presented %q was not authenticated", presented)
+		assert.Equal(t, "user_app_2", got.ID)
+	}
+}
+
 // TestAuthenticate_AppIssuedAccessToken は #910 drift fix の regression guard:
 // auth/accept は hash = sha256(token + app.secret) で保存するため、
 // middleware が hash 列だけで lookup すると 401 になる。token (raw) 列での

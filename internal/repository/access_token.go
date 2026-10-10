@@ -3,6 +3,7 @@ package repository
 import (
 	"github.com/elythia-network/elythia/internal/model"
 	"gorm.io/gorm"
+	"strings"
 )
 
 // AccessTokenRepository provides data access for access tokens.
@@ -15,8 +16,11 @@ type AccessTokenRepository interface {
 	//
 	//  - miauth/gen-token は hash = sha256(token) で保存 → hash 列で hit
 	//  - auth/accept は hash = sha256(token + app.secret) で保存 → token 列で hit
+	//  - 本家の app 認証のクライアントは i = sha256(accessToken + appSecret) を
+	//    送る → 提示された値 (小文字) が hash 列で hit (#3490、本家
+	//    AuthenticateService の `hash: token.toLowerCase()`)
 	//
-	// 2 経路を 1 query にすることで middleware ホットパスでの追加 round trip を
+	// 3 経路を 1 query にすることで middleware ホットパスでの追加 round trip を
 	// 避けつつ、app-issued token も miauth token も一律で resolve できる (#910)。
 	FindByHashOrToken(hash, rawToken string) (*model.AccessToken, error)
 	FindByID(id string) (*model.AccessToken, error)
@@ -71,7 +75,7 @@ func (r *accessTokenRepository) FindByHashOrToken(hash, rawToken string) (*model
 	}
 	var token model.AccessToken
 	if err := r.db.
-		Where(`"hash" = ? OR "token" = ?`, hash, rawToken).
+		Where(`"hash" = ? OR "token" = ? OR "hash" = ?`, hash, rawToken, strings.ToLower(rawToken)).
 		Preload("User").
 		First(&token).Error; err != nil {
 		return nil, err

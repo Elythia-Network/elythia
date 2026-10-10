@@ -3570,7 +3570,8 @@ func (m *MockAccessTokenRepository) FindByHash(hash string) (*model.AccessToken,
 	return t, nil
 }
 
-// FindByHashOrToken は実 repo の WHERE hash = ? OR token = ? を再現する。
+// FindByHashOrToken は実 repo の WHERE hash = ? OR token = ? OR hash = lower(token)
+// を再現する。
 // 実 repo は hash 列と token 列の OR 検索を 1 query で行うため、mock も
 // 両条件を順に評価する。Tokens map は hash key で持っているので、token 列
 // 検索は線形探索になるが test scope では問題ない。
@@ -3582,6 +3583,10 @@ func (m *MockAccessTokenRepository) FindByHashOrToken(hash, rawToken string) (*m
 		if t.Token == rawToken {
 			return t, nil
 		}
+	}
+	// 本家の app 認証の形: 提示された値 (小文字) が hash 列と一致する (#3490)。
+	if t, ok := m.Tokens[strings.ToLower(rawToken)]; ok {
+		return t, nil
 	}
 	return nil, ErrNotFound
 }
