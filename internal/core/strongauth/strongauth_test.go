@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -85,14 +86,14 @@ type fakePasskeys struct {
 	finished  int
 }
 
-func (p *fakePasskeys) BeginLogin(context.Context, *model.User, []*model.UserSecurityKey) (*protocol.CredentialAssertion, error) {
+func (p *fakePasskeys) BeginReauth(context.Context, *model.User, []*model.UserSecurityKey) (*protocol.CredentialAssertion, error) {
 	if p.beginErr != nil {
 		return nil, p.beginErr
 	}
 	return &protocol.CredentialAssertion{Response: protocol.PublicKeyCredentialRequestOptions{Challenge: []byte("chal")}}, nil
 }
 
-func (p *fakePasskeys) FinishLogin(_ context.Context, _ *model.User, _ []*model.UserSecurityKey, req *http.Request) (*webauthn.Credential, error) {
+func (p *fakePasskeys) FinishReauth(_ context.Context, _ *model.User, _ []*model.UserSecurityKey, req *http.Request) (*webauthn.Credential, error) {
 	p.finished++
 	if p.finishErr != nil {
 		return nil, p.finishErr
@@ -464,6 +465,22 @@ func TestVerify_PasskeyFailures(t *testing.T) {
 		f.passkeys.finishErr = errors.New("bad signature")
 		assert.Equal(t, ReasonFailed, ReasonOf(f.v.Verify(context.Background(), adminSubject(), passkeyReauth(password))))
 	})
+	for name, cause := range map[string]error{
+		"challenge store down":    fmt.Errorf("%w: %w", twofactor.ErrWebAuthnSessionStore, errors.New("connection refused")),
+		"webauthn not configured": twofactor.ErrWebAuthnNotConfigured,
+	} {
+		t.Run(name, func(t *testing.T) {
+			// 照合できなかっただけなので、失敗に数えない。枠 (10 回) を超えて
+			// 繰り返しても、その後の正しい再認証が通る。
+			f := newFixture(t)
+			f.passkeys.finishErr = cause
+			for range 12 {
+				assert.Equal(t, ReasonUnavailable, ReasonOf(f.v.Verify(context.Background(), adminSubject(), passkeyReauth(password))))
+			}
+			f.passkeys.finishErr = nil
+			require.NoError(t, f.v.Verify(context.Background(), adminSubject(), passkeyReauth(password)))
+		})
+	}
 	t.Run("wrong password", func(t *testing.T) {
 		f := newFixture(t)
 		assert.Equal(t, ReasonFailed, ReasonOf(f.v.Verify(context.Background(), adminSubject(), passkeyReauth("wrong"))))
