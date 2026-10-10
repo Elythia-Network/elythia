@@ -36,6 +36,12 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 				<MkSwitch v-model="hideTitleWhenPinned">{{ i18n.ts._pages.hideTitleWhenPinned }}</MkSwitch>
 
+				<!-- Elythia: 公開範囲 (#3479)。private は作者だけが見られる -->
+				<MkSelect v-model="visibility" :items="visibilityDef">
+					<template #label>{{ i18n.ts.visibility }}</template>
+					<template #caption>{{ i18n.ts._pages.visibilityDescription }}</template>
+				</MkSelect>
+
 				<div class="eyeCatch">
 					<MkButton v-if="eyeCatchingImageId == null && !readonly" @click="setEyeCatchingImage"><i class="ti ti-plus"></i> {{ i18n.ts._pages.eyeCatchingImageSet }}</MkButton>
 					<div v-else-if="eyeCatchingImage">
@@ -62,6 +68,7 @@ import { computed, provide, watch, ref } from 'vue';
 import * as Misskey from 'misskey-js';
 import { url } from '@@/js/config.js';
 import XBlocks from './page-editor.blocks.vue';
+import type * as Elythia from 'elythia-js';
 import { genId } from '@/utility/id.js';
 import MkButton from '@/components/MkButton.vue';
 import MkSelect from '@/components/MkSelect.vue';
@@ -86,7 +93,7 @@ const props = defineProps<{
 const tab = ref('settings');
 const author = ref<Misskey.entities.User | null>($i);
 const readonly = ref(false);
-const page = ref<Misskey.entities.Page | null>(null);
+const page = ref<Elythia.Page | null>(null);
 const pageId = ref<string | null>(null);
 const currentName = ref<string | null>(null);
 const title = ref('');
@@ -104,6 +111,16 @@ const {
 	],
 	initialValue: 'sans-serif',
 });
+const {
+	model: visibility,
+	def: visibilityDef,
+} = useMkSelect({
+	items: [
+		{ label: i18n.ts.public, value: 'public' },
+		{ label: i18n.ts.private, value: 'private' },
+	],
+	initialValue: 'public',
+});
 const content = ref<Misskey.entities.Page['content']>([]);
 const alignCenter = ref(false);
 const hideTitleWhenPinned = ref(false);
@@ -120,7 +137,7 @@ watch(eyeCatchingImageId, async () => {
 	}
 });
 
-function getSaveOptions(): Misskey.entities.PagesCreateRequest {
+function getSaveOptions(): Elythia.Endpoints['pages/create']['req'] {
 	return {
 		title: title.value.trim(),
 		name: name.value.trim(),
@@ -132,6 +149,7 @@ function getSaveOptions(): Misskey.entities.PagesCreateRequest {
 		content: content.value,
 		variables: [],
 		eyeCatchingImageId: eyeCatchingImageId.value,
+		visibility: visibility.value,
 	};
 }
 
@@ -139,7 +157,7 @@ async function save() {
 	const options = getSaveOptions();
 
 	if (pageId.value) {
-		const updateOptions: Misskey.entities.PagesUpdateRequest = {
+		const updateOptions: Elythia.Endpoints['pages/update']['req'] = {
 			pageId: pageId.value,
 			...options,
 		};
@@ -283,6 +301,8 @@ async function init() {
 		font.value = page.value.font;
 		hideTitleWhenPinned.value = page.value.hideTitleWhenPinned;
 		alignCenter.value = page.value.alignCenter;
+		// 本家のサーバーや古い版は visibility を返さないので、公開として扱う
+		visibility.value = page.value.visibility ?? 'public';
 		content.value = page.value.content;
 		eyeCatchingImageId.value = page.value.eyeCatchingImageId;
 	} else {

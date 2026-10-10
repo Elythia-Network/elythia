@@ -3095,6 +3095,7 @@ _pages:
   editPage: "ページの編集"
   readPage: "ソースを表示中"
   pageSetting: "ページ設定"
+  visibilityDescription: "非公開にすると、自分以外の人は、URLを知っていても見られません。"
   nameAlreadyExists: "指定されたページURLは既に存在しています"
   invalidNameTitle: "不正なページURLです"
   invalidNameText: "空白でないか確認してください"

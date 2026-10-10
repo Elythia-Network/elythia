@@ -423,6 +423,25 @@ export type ElythiaUserDetailedFields = {
 export type UserDetailed = Misskey.entities.UserDetailed & ElythiaUserDetailedFields;
 
 /**
+ * Who can see a Page (#3479). `private` Pages are visible only to the author.
+ *
+ * 本家の列は public / followers / specified だが、Elythia は派生版の一つに揃えて
+ * 2 値に作り替えた。本家は公開範囲を選ぶ API も画面も持たない。
+ */
+export type PageVisibility = 'public' | 'private';
+
+/**
+ * Elythia-specific fields that a Page adds to the upstream response.
+ *
+ * 古い版のサーバーと本家のサーバーでは欠けるので省略可能にしてある。
+ */
+export type ElythiaPageFields = {
+	visibility?: PageVisibility;
+};
+
+export type Page = Misskey.entities.Page & ElythiaPageFields;
+
+/**
  * How a follow from an account younger than `followApprovalLocalSeconds` /
  * `followApprovalRemoteSeconds` is handled (#3466).
  *
