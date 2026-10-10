@@ -53,6 +53,9 @@ var (
 	ErrRestoreVersion         = errors.New("backup: pg_restore is newer than the target server")
 	ErrRestoreLocale          = errors.New("backup: the restore target has a different encoding or locale from the backup")
 	ErrRestoreExtension       = errors.New("backup: the target server lacks extensions the backup uses")
+	// ErrRestoreSwitchUnknown is returned when renaming the databases failed
+	// and pg_database does not tell whether the rename happened.
+	ErrRestoreSwitchUnknown = errors.New("backup: could not tell whether the database names were switched")
 )
 
 // maxIdentifierLen is NAMEDATALEN-1 of a default PostgreSQL build.
@@ -106,8 +109,9 @@ type Restorer struct {
 	// Now is time.Now unless replaced by tests.
 	Now func() time.Time
 
-	// replaceErr is added to the result of the name swap (tests only).
-	replaceErr error
+	// afterReplace runs after the name swap and its error is added to the
+	// result (tests only).
+	afterReplace func() error
 }
 
 // RestoreOptions are the inputs of one restore.
@@ -126,6 +130,10 @@ type RestoreOptions struct {
 	// target. Only for callers that restore into the new database while the
 	// server is still running and check again before ReplaceDatabase.
 	SkipConnectionCheck bool
+	// At is the time the swap mode names its databases after (RestoreNames).
+	// Zero means now; Restore fixes it once so that CheckTarget checks the
+	// same names it then creates.
+	At time.Time
 }
 
 // RestoreResult describes a finished restore.
@@ -188,6 +196,11 @@ func (r *Restorer) Restore(ctx context.Context, opts RestoreOptions) (*RestoreRe
 	if err != nil {
 		return nil, err
 	}
+	// 名前の元になる時刻は 1 回だけ取る。CheckTarget が「まだ無い」と確かめた名前と、
+	// 実際に作る名前を揃えるため (秒の境目をまたぐと別の名前になる)。
+	if opts.At.IsZero() {
+		opts.At = r.now()
+	}
 	if err := r.CheckTarget(ctx, opts); err != nil {
 		return nil, err
 	}
@@ -198,7 +211,7 @@ func (r *Restorer) Restore(ctx context.Context, opts RestoreOptions) (*RestoreRe
 	target := opts.Database
 	var before string
 	if opts.Mode == RestoreSwap {
-		target, before, err = RestoreNames(opts.Database, r.now())
+		target, before, err = RestoreNames(opts.Database, opts.At)
 		if err != nil {
 			return nil, err
 		}
@@ -208,25 +221,16 @@ func (r *Restorer) Restore(ctx context.Context, opts RestoreOptions) (*RestoreRe
 	}
 	err = r.finish(ctx, plan, opts, target, before, res)
 	if err != nil && opts.Mode == RestoreSwap {
-		// 名前の入れ替えは、サーバーの側で COMMIT が通った後に、取り消しや接続断で
-		// エラーとして返ることがある。そのまま「今の DB は変わっていない」と扱うと、
-		// 実際には入れ替わっているのに Redis の後始末を飛ばしてしまうので、
-		// pg_database を引き直して、どちらの状態かを確かめてから決める。
-		switch r.swapOutcome(opts.MaintenanceDB, target, before) {
-		case swapDone:
-			r.logf("warning: %v; but %s was already replaced (the previous database is %s)", err, opts.Database, before)
-			res.BeforeRestore = before
-			return res, nil
-		case swapNotDone:
-			// 作った DB だけを消す。今の DB には触っていない。
-			if derr := r.DropDatabase(context.Background(), opts.MaintenanceDB, target); derr != nil {
-				r.logf("warning: could not drop %s: %v", target, derr)
-			} else {
-				r.logf("dropped %s; the current database %s was not changed", target, opts.Database)
-			}
-		default:
-			return nil, fmt.Errorf("%w (could not tell whether %s was replaced: check pg_database for %s and %s before starting the server)",
-				err, opts.Database, target, before)
+		if errors.Is(err, ErrRestoreSwitchUnknown) {
+			// 入れ替わったかどうか分からないので、作った DB は消さない。消すと、
+			// 入れ替わっていた場合に戻したばかりの DB を消してしまう。
+			return nil, err
+		}
+		// 作った DB だけを消す。今の DB には触っていない。
+		if derr := r.DropDatabase(context.Background(), opts.MaintenanceDB, target); derr != nil {
+			r.logf("warning: could not drop %s: %v", target, derr)
+		} else {
+			r.logf("dropped %s; the current database %s was not changed", target, opts.Database)
 		}
 	}
 	if err != nil {
@@ -243,9 +247,9 @@ const (
 	swapNotDone
 )
 
-// swapOutcome tells from pg_database whether the name swap of a failed
-// swap-mode restore happened: restored is gone and before exists (done), or
-// restored exists and before does not (not done).
+// swapOutcome tells from pg_database whether a failed name swap happened:
+// restored (the replacement) is gone and before (the kept name) exists
+// (done), or restored exists and before does not (not done).
 func (r *Restorer) swapOutcome(maintenance, restored, before string) swapState {
 	// 呼ばれるのは失敗の後で、元の ctx は取り消されていることがある。
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -291,20 +295,38 @@ func (r *Restorer) finish(ctx context.Context, plan *RestorePlan, opts RestoreOp
 	if opts.Mode != RestoreSwap {
 		return nil
 	}
-	if err := r.replace(ctx, opts.MaintenanceDB, opts.Database, before, target); err != nil {
+	if err := r.SwitchDatabase(ctx, opts.MaintenanceDB, opts.Database, before, target); err != nil {
 		return err
 	}
 	res.BeforeRestore = before
 	return nil
 }
 
-func (r *Restorer) replace(ctx context.Context, maintenance, database, keepAs, replacement string) error {
+// SwitchDatabase is ReplaceDatabase for the swap mode and for a rollback:
+// when the rename returns an error, it reads pg_database again. If the
+// rename happened anyway, it logs a warning and returns nil; if it cannot
+// tell, it returns ErrRestoreSwitchUnknown.
+//
+// 名前の入れ替えは、サーバーの側で COMMIT が通った後に、取り消しや接続断で
+// エラーとして返ることがある。そのまま「変わっていない」と扱うと、実際には
+// 入れ替わっているのに Redis の後始末を飛ばしてしまう。
+func (r *Restorer) SwitchDatabase(ctx context.Context, maintenance, database, keepAs, replacement string) error {
 	err := r.ReplaceDatabase(ctx, maintenance, database, keepAs, replacement)
-	if r.replaceErr != nil {
-		// テストで、COMMIT が通った後にエラーが返る場合を作る。
-		err = errors.Join(err, r.replaceErr)
+	if r.afterReplace != nil {
+		err = errors.Join(err, r.afterReplace())
 	}
-	return err
+	if err == nil {
+		return nil
+	}
+	switch r.swapOutcome(maintenance, replacement, keepAs) {
+	case swapDone:
+		r.logf("warning: %v; but %s was already replaced (the previous database is %s)", err, database, keepAs)
+		return nil
+	case swapNotDone:
+		return err
+	}
+	return fmt.Errorf("%w: %v; check pg_database for %s and %s before starting the server",
+		ErrRestoreSwitchUnknown, err, replacement, keepAs)
 }
 
 func checkConfirm(opts RestoreOptions) error {
@@ -399,7 +421,11 @@ func (r *Restorer) CheckTarget(ctx context.Context, opts RestoreOptions) error {
 			return err
 		}
 	}
-	restored, before, err := RestoreNames(opts.Database, r.now())
+	at := opts.At
+	if at.IsZero() {
+		at = r.now()
+	}
+	restored, before, err := RestoreNames(opts.Database, at)
 	if err != nil {
 		return err
 	}
@@ -744,6 +770,31 @@ func (r *Restorer) DropDatabase(ctx context.Context, maintenance, name string) e
 
 func dropDatabaseSQL(name string) string {
 	return "DROP DATABASE IF EXISTS " + ident(name) + " WITH (FORCE)"
+}
+
+// ResolveID returns the generation id (a generation ID or LatestGeneration)
+// selects and whether it was verified, the way Load does.
+func (r *Restorer) ResolveID(ctx context.Context, id string) (string, bool, error) {
+	return r.resolveID(ctx, id)
+}
+
+// NewestGeneration returns the newest generation in the storage that has a
+// meta.json, whether or not it can be read ("" when there is none).
+// Generations without meta.json (interrupted takes) are ignored.
+//
+// 読めない meta.json の世代も数える。読めないだけで中身が新しいかもしれず、
+// 「戻す世代が最新」と言い切れないため。
+func NewestGeneration(ctx context.Context, st Storage) (string, error) {
+	gens, err := ListGenerations(ctx, st)
+	if err != nil {
+		return "", fmt.Errorf("backup: list generations: %w", err)
+	}
+	for i := len(gens) - 1; i >= 0; i-- {
+		if g := gens[i]; g.Complete() || g.MetaError != nil {
+			return g.ID, nil
+		}
+	}
+	return "", nil
 }
 
 // resolveID returns the generation to restore and whether it was verified.

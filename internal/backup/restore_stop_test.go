@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -276,7 +277,7 @@ func TestRestoreStopConditions(t *testing.T) {
 		var out bytes.Buffer
 		r := pg.restorer(storage, rsSuperUser, rsSuperPass)
 		r.Out = &out
-		r.replaceErr = errors.New("conn closed after commit")
+		r.afterReplace = func() error { return errors.New("conn closed after commit") }
 		res, err := r.Restore(ctx, swap)
 		require.NoError(t, err, out.String())
 		assert.Equal(t, rsAppDB+"_before_restore_20261010120000", res.BeforeRestore)
@@ -288,6 +289,50 @@ func TestRestoreStopConditions(t *testing.T) {
 		noLeftovers(t)
 	})
 
+	t.Run("swap whose outcome cannot be told", func(t *testing.T) {
+		// 入れ替えの後、作った名前の DB がまた現れる (両方の名前がある) と、どちらとも
+		// 言えない。そのときは作った名前の DB を消さずに止まる。
+		restoreName, beforeName, err := RestoreNames(rsAppDB, super.now())
+		require.NoError(t, err)
+		r := pg.restorer(storage, rsSuperUser, rsSuperPass)
+		r.afterReplace = func() error {
+			pg.exec(t, "postgres", "CREATE DATABASE "+restoreName)
+			return errors.New("conn closed")
+		}
+		_, err = r.Restore(ctx, swap)
+		require.ErrorIs(t, err, ErrRestoreSwitchUnknown)
+		assert.Contains(t, err.Error(), "check pg_database for "+restoreName+" and "+beforeName)
+		assert.Equal(t, int64(1), rsDatabasesLike(t, pg, restoreName))
+		assert.Equal(t, int64(1), rsDatabasesLike(t, pg, beforeName))
+		// 後の subtest のために元へ戻す。
+		require.NoError(t, r.DropDatabase(ctx, "", restoreName))
+		require.NoError(t, super.ReplaceDatabase(ctx, "", rsAppDB, rsAppDB+"_oc_y", beforeName))
+		require.NoError(t, super.DropDatabase(ctx, "", rsAppDB+"_oc_y"))
+		noLeftovers(t)
+	})
+
+	t.Run("rollback switch reported as failed after the names changed", func(t *testing.T) {
+		pg.exec(t, "postgres", "CREATE DATABASE rb_cur", "CREATE DATABASE rb_kept")
+		t.Cleanup(func() { pg.exec(t, "postgres", "DROP DATABASE IF EXISTS rb_cur", "DROP DATABASE IF EXISTS rb_aside") })
+		var out bytes.Buffer
+		r := pg.restorer(storage, rsSuperUser, rsSuperPass)
+		r.Out = &out
+		r.afterReplace = func() error { return errors.New("conn closed after commit") }
+		require.NoError(t, r.SwitchDatabase(ctx, "", "rb_cur", "rb_aside", "rb_kept"))
+		assert.Contains(t, out.String(), "was already replaced")
+		assert.Equal(t, int64(1), rsDatabasesLike(t, pg, "rb_aside"))
+		assert.Equal(t, int64(0), rsDatabasesLike(t, pg, "rb_kept"))
+		// 入れ替わっていなければ (元の名前のまま)、元のエラーを返す。
+		pg.exec(t, "postgres", "CREATE DATABASE rb_kept2")
+		t.Cleanup(func() { pg.exec(t, "postgres", "DROP DATABASE IF EXISTS rb_kept2") })
+		r.afterReplace = nil
+		held := pg.connect(t, rsSuperUser, rsSuperPass, "rb_cur")
+		err := r.SwitchDatabase(ctx, "", "rb_cur", "rb_aside2", "rb_kept2")
+		require.ErrorIs(t, err, ErrRestoreConnections)
+		assert.NotErrorIs(t, err, ErrRestoreSwitchUnknown)
+		_ = held.Close(ctx)
+	})
+
 	t.Run("existing restore names", func(t *testing.T) {
 		restored, _, err := RestoreNames(rsAppDB, super.now())
 		require.NoError(t, err)
@@ -296,6 +341,41 @@ func TestRestoreStopConditions(t *testing.T) {
 		err = super.CheckTarget(ctx, swap)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "already exists")
+
+		// Restore は時刻を 1 回だけ取り、CheckTarget が確かめる名前と作る名前を揃える。
+		// 時計が進んでも、確かめる段で止まる (作る段の CREATE DATABASE で落ちるのではない)。
+		r := pg.restorer(storage, rsSuperUser, rsSuperPass)
+		at := super.now()
+		calls := 0
+		r.Now = func() time.Time {
+			calls++
+			return at.Add(time.Duration(calls-1) * time.Second)
+		}
+		_, err = r.Restore(ctx, swap)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `backup: database "`+restored+`" already exists`)
+		assert.Equal(t, 1, calls)
+		o := swap
+		o.At = at.Add(time.Hour)
+		require.NoError(t, super.CheckTarget(ctx, o))
+
+		// 通るときも、退避した名前は最初に取った時刻から作る。
+		base := at.Add(2 * time.Hour)
+		calls = 0
+		r.Now = func() time.Time {
+			calls++
+			return base.Add(time.Duration(calls-1) * time.Second)
+		}
+		res, err := r.Restore(ctx, swap)
+		require.NoError(t, err)
+		_, wantBefore, err := RestoreNames(rsAppDB, base)
+		require.NoError(t, err)
+		assert.Equal(t, wantBefore, res.BeforeRestore)
+		assert.Equal(t, 1, calls)
+		require.NoError(t, super.ReplaceDatabase(ctx, "", rsAppDB, rsAppDB+"_oc_z", res.BeforeRestore))
+		require.NoError(t, super.DropDatabase(ctx, "", rsAppDB+"_oc_z"))
+		// 最初に作った restored はこの subtest の Cleanup で消す。それ以外は残っていない。
+		assert.Equal(t, int64(1), rsDatabasesLike(t, pg, rsAppDB+"\\_%restore\\_%"))
 	})
 
 	t.Run("steps on a scratch database", func(t *testing.T) {
