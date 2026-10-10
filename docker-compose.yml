@@ -115,6 +115,7 @@ services:
   #   docker compose run --rm --no-deps backup take    # 取って保存先へ送る
   #   docker compose run --rm --no-deps backup list    # 保存先の世代を一覧する
   #   docker compose run --rm --no-deps backup verify latest  # 使い捨ての PostgreSQL へ戻して確かめる
+  #   docker compose run --rm --no-deps backup restore ...  # 戻す (docs/deployment.md)
   # 本体の image は pg_dump を持たないので、postgres:18-alpine に elythia を足した
   # image (Dockerfile の target backup) で動かす。設定は本体と同じファイルを読む
   # (db: と backup: の節)。保存先と暗号化の設定は docs/backup.md を参照。
