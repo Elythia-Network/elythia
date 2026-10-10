@@ -951,7 +951,7 @@ export type BackupGeneration = {
 	/** The UTC time it was taken, as `YYYYMMDDTHHMMSSZ`. */
 	id: string;
 	createdAt: string;
-	/** `false` for an interrupted upload (no readable meta.json). It still uses storage. */
+	/** `false` for an interrupted upload (no readable meta.json, or its dump is missing). It still uses storage. */
 	complete: boolean;
 	metaError?: string;
 	/** The total bytes of every object of the generation. */

@@ -338,7 +338,7 @@ func TestList_BrokenMeta(t *testing.T) {
 			putJSON(t, st, backup.Key(gen1, backup.MetaFile), backup.Meta{FormatVersion: 1, ID: gen1})
 		},
 		"too large": func(t *testing.T, st *memStorage) {
-			st.objs[backup.Key(gen1, backup.MetaFile)] = bytes.Repeat([]byte(" "), metaReadLimit+1)
+			st.objs[backup.Key(gen1, backup.MetaFile)] = bytes.Repeat([]byte(" "), 16<<20+1)
 		},
 	}
 	for name, setup := range cases {
@@ -435,7 +435,7 @@ func TestDownload_Presigned(t *testing.T) {
 	assert.Equal(t, now.Add(DefaultDownloadTTL), d.ExpiresAt)
 	assert.True(t, d.Encrypted)
 	assert.Equal(t, int64(len("encrypted-dump")), d.Size)
-	assert.Equal(t, "elythia-backup-"+gen1+"-dump.pgc.age", d.FileName)
+	assert.Equal(t, gen1+"-dump.pgc.age", d.FileName)
 
 	st.err = errors.New("no creds")
 	_, err = svc.Download(context.Background(), gen1, "admin1")
@@ -547,4 +547,30 @@ func TestTakeAndVerify(t *testing.T) {
 	assert.ErrorIs(t, err, ErrServiceNotConfigured)
 	_, err = none.Verify(context.Background(), gen1, "")
 	assert.ErrorIs(t, err, ErrServiceNotConfigured)
+}
+
+// TestList_DumpMissing: meta.json alone is not a usable generation
+// (backup.Generation.Complete).
+func TestList_DumpMissing(t *testing.T) {
+	st := newMemStorage()
+	putGeneration(t, st, gen1, []byte("d"), false)
+	delete(st.objs, backup.Key(gen1, backup.DumpFile))
+	ov, err := NewService(Options{Storage: st}).List(context.Background())
+	require.NoError(t, err)
+	require.Len(t, ov.Generations, 1)
+	g := ov.Generations[0]
+	assert.False(t, g.Complete)
+	assert.Equal(t, backup.DumpFile+" is missing", g.MetaError)
+	assert.Equal(t, "2.1.0", g.ElythiaVersion, "what meta.json says is still shown")
+}
+
+func TestDownloadAndVerify_InvalidDumpFile(t *testing.T) {
+	st := newMemStorage()
+	putJSON(t, st, backup.Key(gen1, backup.MetaFile), backup.Meta{FormatVersion: backup.MetaFormatVersion, ID: gen1, DumpFile: "../x"})
+	svc := NewService(Options{Storage: st, Control: &fakeControl{}, Tokens: &fakeTokens{}, DownloadURLBase: "u/"})
+	_, err := svc.Download(context.Background(), gen1, "admin1")
+	assert.ErrorIs(t, err, ErrIncomplete)
+	assert.ErrorContains(t, err, "invalid dumpFile")
+	_, err = svc.Verify(context.Background(), gen1, "")
+	assert.ErrorIs(t, err, ErrIncomplete)
 }

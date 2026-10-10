@@ -252,7 +252,7 @@ Elythia 側のマイグレーションには含めていない。pgroonga 拡張
 
 ### バックアップ (`backup.*`)
 
-`elythia backup`(バックアップ用のimageの`backup`サービス)が読む。取る・確かめる手順と保存先に置かれるものは[DBのバックアップ](backup.md)にある。**保存先の認証情報はDBではなくここに置く。** DBが失われたときにも、バックアップを取り出せる必要があるため(ドライブのオブジェクトストレージの設定はDBの`meta`にあるので流用しない)。
+`elythia backup`(バックアップ用のimageの`backup`サービス)と、本体(管理画面。`backup.server.*`)が読む。取る・確かめる手順と保存先に置かれるもの、管理画面は[DBのバックアップ](backup.md)にある。**保存先の認証情報はDBではなくここに置く。** DBが失われたときにも、バックアップを取り出せる必要があるため(ドライブのオブジェクトストレージの設定はDBの`meta`にあるので流用しない)。
 
 | キー | 型 | 説明 |
 |---|---|---|
@@ -269,6 +269,10 @@ Elythia 側のマイグレーションには含めていない。pgroonga 拡張
 | `backup.encryption.identityFile` | string | ageの秘密鍵のファイル。確かめる・戻すときに使う。リポジトリの外に置く |
 | `backup.tools.pgDump` | string | `pg_dump`のパス。空ならPATHから探す |
 | `backup.tools.pgRestore` / `initdb` / `pgCtl` | string | `elythia backup verify`が使い捨てのPostgreSQLを立てて戻すときの、`pg_restore` / `initdb` / `pg_ctl`のパス。空ならPATHから探す |
+| `backup.server.storage.*` | object | 本体(管理画面)が読む保存先。`backup.storage`と同じ形。**`type`が空なら`backup.storage`を使う**。本体には一覧・読み取り・削除の権限があればよく、書き込みは要らない。バックアップ用のサービスとは別の鍵を本体に渡したいときに、ここに書く |
+| `backup.server.pricePerGbMonth` | number | 1GBあたりの月額。0より大きいと、管理画面に月額の目安を出す(1GBは2^30バイト。S3・R2の課金の単位に合わせた) |
+| `backup.server.serviceUrl` | string | `elythia backup daemon`(#3460で足す)の制御APIのURL(例: `http://backup:3010`)。空なら、管理画面から取る・確かめるができない(一覧・削除・ダウンロードはできる) |
+| `backup.server.serviceToken` | string | 制御APIの認証。本体は`Authorization: Bearer <値>`で送り、daemonは同じ値で照合する |
 
 `backup:`の節は`MK_*`の環境変数では作れない(`bindEnvKeys()`に無い)。
 
