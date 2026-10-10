@@ -71,6 +71,10 @@ type BackupScheduleOptions struct {
 	Keep int `mapstructure:"keep"`
 	// Verify runs `backup verify` after every backup.
 	Verify bool `mapstructure:"verify"`
+	// DelayAfter is how long after the newest usable generation the daemon
+	// reports a delay, as a Go duration. Empty means 1.5 times Interval. It
+	// must not be shorter than Interval.
+	DelayAfter string `mapstructure:"delayAfter"`
 	// Listen is the address the daemon's control API listens on (e.g.
 	// ":3010"). Empty disables the control API.
 	Listen string `mapstructure:"listen"`
