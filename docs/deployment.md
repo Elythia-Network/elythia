@@ -389,7 +389,7 @@ worker 数は既定値がキューごとに違い、`stuck 検出` は**キュ�
 
 ```
   ok    config.url   https://example.com
-  ok    database     接続 ok / migration version 120
+  ok    database     接続 ok / migration version 121
   ok    database-health dead tuple と VACUUM に問題なし (122 テーブル)
   ok    root user    meta.rootUserId 設定済み
   ok    redis        接続 ok
@@ -652,7 +652,7 @@ upstream以外の設定はTCP構成と同じ。
 
 既存のMisskey (TypeScript版)からの移行手順は[TS版からの移行ガイド](migration-from-ts.md)を参照。
 
-ElythiaはTS版と同じPostgreSQL/Redisを共有できるため、バイナリの差し替えだけで移行可能。マイグレーションはTS版テーブルに対して原則追加のみだが、例外が 18 件ある ([TS版からの移行](migration-from-ts.md#破壊的なマイグレーション))。
+ElythiaはTS版と同じPostgreSQL/Redisを共有できるため、バイナリの差し替えだけで移行可能。マイグレーションはTS版テーブルに対して原則追加のみだが、例外が 19 件ある ([TS版からの移行](migration-from-ts.md#破壊的なマイグレーション))。
 
 ## アップデート
 

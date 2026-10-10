@@ -17,10 +17,11 @@ func TestValidPageVisibility(t *testing.T) {
 
 	// 受け入れる値はリテラルで書く (定数を参照すると、集合を広げる変異と
 	// 一緒に期待値まで動く)。
-	for _, v := range []model.PageVisibility{"", "public", "followers", "specified"} {
+	for _, v := range []model.PageVisibility{"", "public", "private"} {
 		require.True(t, validPageVisibility(v), "%q は受け入れること", v)
 	}
-	for _, v := range []model.PageVisibility{"private", "home", "bogus", "PUBLIC", "public "} {
+	// followers / specified は本家の enum の値だが、#3479 で 2 値にしたので拒否する。
+	for _, v := range []model.PageVisibility{"followers", "specified", "home", "bogus", "PUBLIC", "public "} {
 		require.False(t, validPageVisibility(v), "%q は拒否すること", v)
 	}
 }
@@ -31,8 +32,7 @@ func TestValidPageVisibilityCoversModelConstants(t *testing.T) {
 
 	for _, v := range []model.PageVisibility{
 		model.PageVisibilityPublic,
-		model.PageVisibilityFollowers,
-		model.PageVisibilitySpecified,
+		model.PageVisibilityPrivate,
 	} {
 		require.True(t, validPageVisibility(v),
 			"model の定数 %q を拒否している (列が受け付ける値を弾いてはいけない)", v)
@@ -45,7 +45,7 @@ func TestValidPageVisibilityCoversModelConstants(t *testing.T) {
 // 述語が呼ばれているかを見ない。
 func TestCreate_RejectsUnknownVisibility(t *testing.T) {
 	h, _, _ := newHandler(t)
-	c, rec := newReq(t, `{"title":"t","name":"alpha","content":[],"variables":[],"visibility":"private"}`)
+	c, rec := newReq(t, `{"title":"t","name":"alpha","content":[],"variables":[],"visibility":"followers"}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Create(c))
 	require.Equal(t, http.StatusBadRequest, rec.Code,
@@ -53,7 +53,7 @@ func TestCreate_RejectsUnknownVisibility(t *testing.T) {
 }
 
 func TestCreate_AcceptsKnownVisibility(t *testing.T) {
-	for _, v := range []string{"public", "followers", "specified"} {
+	for _, v := range []string{"public", "private"} {
 		t.Run(v, func(t *testing.T) {
 			h, _, _ := newHandler(t)
 			c, rec := newReq(t, `{"title":"t","name":"alpha","content":[],"variables":[],"visibility":"`+v+`"}`)
@@ -70,7 +70,7 @@ func TestUpdate_RejectsUnknownVisibility(t *testing.T) {
 	// visibility の検証を外しても 400 のままでテストが空振りする
 	// (初版で実際にそうなった)。
 	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "alice", Name: "alpha", Title: "t"}
-	c, rec := newReq(t, `{"pageId":"p1","visibility":"private"}`)
+	c, rec := newReq(t, `{"pageId":"p1","visibility":"specified"}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Update(c))
 	require.Equal(t, http.StatusBadRequest, rec.Code,
@@ -79,7 +79,7 @@ func TestUpdate_RejectsUnknownVisibility(t *testing.T) {
 	// 対照: 正しい値なら通ること (400 が別の理由で出ていないことの確認)。
 	h2, repo2, _ := newHandler(t)
 	repo2.Pages["p1"] = &model.Page{ID: "p1", UserID: "alice", Name: "alpha", Title: "t"}
-	c2, rec2 := newReq(t, `{"pageId":"p1","visibility":"followers"}`)
+	c2, rec2 := newReq(t, `{"pageId":"p1","visibility":"private"}`)
 	setUser(c2, "alice")
 	require.NoError(t, h2.Update(c2))
 	require.Equal(t, http.StatusOK, rec2.Code, "正しい値は通ること")

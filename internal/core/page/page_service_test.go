@@ -54,7 +54,7 @@ func TestCreate_PassesThroughOptionalFields(t *testing.T) {
 		Content:             []byte(`[{"id":"a"}]`),
 		Variables:           []byte(`[{"v":1}]`),
 		Script:              "x",
-		Visibility:          model.PageVisibilityFollowers,
+		Visibility:          model.PageVisibilityPrivate,
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "summary", *p.Summary)
@@ -63,7 +63,7 @@ func TestCreate_PassesThroughOptionalFields(t *testing.T) {
 	assert.Equal(t, "serif", p.Font)
 	assert.Equal(t, "img1", *p.EyeCatchingImageID)
 	assert.Equal(t, "x", p.Script)
-	assert.Equal(t, model.PageVisibilityFollowers, p.Visibility)
+	assert.Equal(t, model.PageVisibilityPrivate, p.Visibility)
 }
 
 func TestCreate_OwnerRequired(t *testing.T) {
@@ -141,14 +141,14 @@ func TestShow_NotFound(t *testing.T) {
 
 func TestShow_PrivateAccessDenied(t *testing.T) {
 	svc, repo, _ := newSvc(t)
-	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "u1", Visibility: model.PageVisibilityFollowers}
+	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "u1", Visibility: model.PageVisibilityPrivate}
 	_, err := svc.Show("u2", "p1")
 	assert.ErrorIs(t, err, page.ErrAccessDenied)
 }
 
 func TestShow_PrivateOwnerOK(t *testing.T) {
 	svc, repo, _ := newSvc(t)
-	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "u1", Visibility: model.PageVisibilityFollowers}
+	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "u1", Visibility: model.PageVisibilityPrivate}
 	got, err := svc.Show("u1", "p1")
 	require.NoError(t, err)
 	assert.Equal(t, "p1", got.ID)
@@ -167,7 +167,7 @@ func TestFindByID_HappyPath_Public(t *testing.T) {
 func TestFindByID_Returns_Private_Regardless_Of_Visibility(t *testing.T) {
 	svc, repo, _ := newSvc(t)
 	// followers visibilityでも visibility checkはせず返すことを確認
-	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "u1", Visibility: model.PageVisibilityFollowers}
+	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "u1", Visibility: model.PageVisibilityPrivate}
 	got, err := svc.FindByID("p1")
 	require.NoError(t, err)
 	assert.Equal(t, "p1", got.ID)
@@ -197,7 +197,7 @@ func TestShowByName_NotFound(t *testing.T) {
 
 func TestShowByName_PrivateAccessDenied(t *testing.T) {
 	svc, repo, _ := newSvc(t)
-	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "u1", Name: "alpha", Visibility: model.PageVisibilityFollowers}
+	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "u1", Name: "alpha", Visibility: model.PageVisibilityPrivate}
 	_, err := svc.ShowByName("u2", "u1", "alpha")
 	assert.ErrorIs(t, err, page.ErrAccessDenied)
 }
@@ -217,7 +217,7 @@ func TestUpdate_HappyPath(t *testing.T) {
 	align := true
 	hide := true
 	script := "x"
-	vis := model.PageVisibilityFollowers
+	vis := model.PageVisibilityPrivate
 	got, err := svc.Update("u1", "p1", page.UpdateInput{
 		Title:               &newTitle,
 		Name:                &newName,
@@ -242,7 +242,7 @@ func TestUpdate_HappyPath(t *testing.T) {
 	require.NotNil(t, got.EyeCatchingImageID)
 	assert.Equal(t, "img1", *got.EyeCatchingImageID)
 	assert.Equal(t, "x", got.Script)
-	assert.Equal(t, model.PageVisibilityFollowers, got.Visibility)
+	assert.Equal(t, model.PageVisibilityPrivate, got.Visibility)
 }
 
 func TestUpdate_NotFound(t *testing.T) {
@@ -253,7 +253,7 @@ func TestUpdate_NotFound(t *testing.T) {
 
 func TestUpdate_AccessDenied(t *testing.T) {
 	svc, repo, _ := newSvc(t)
-	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "owner"}
+	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "owner", Visibility: model.PageVisibilityPublic}
 	_, err := svc.Update("u1", "p1", page.UpdateInput{})
 	assert.ErrorIs(t, err, page.ErrAccessDenied)
 }
@@ -317,7 +317,7 @@ func TestDelete_NotFound(t *testing.T) {
 
 func TestDelete_AccessDenied(t *testing.T) {
 	svc, repo, _ := newSvc(t)
-	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "owner"}
+	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "owner", Visibility: model.PageVisibilityPublic}
 	err := svc.Delete("u1", "p1")
 	assert.ErrorIs(t, err, page.ErrAccessDenied)
 }
@@ -337,7 +337,7 @@ func TestFeatured(t *testing.T) {
 	svc, repo, _ := newSvc(t)
 	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "u1", Visibility: model.PageVisibilityPublic, LikedCount: 5}
 	repo.Pages["p2"] = &model.Page{ID: "p2", UserID: "u1", Visibility: model.PageVisibilityPublic, LikedCount: 10}
-	repo.Pages["p3"] = &model.Page{ID: "p3", UserID: "u1", Visibility: model.PageVisibilityFollowers, LikedCount: 100}
+	repo.Pages["p3"] = &model.Page{ID: "p3", UserID: "u1", Visibility: model.PageVisibilityPrivate, LikedCount: 100}
 	rows, err := svc.Featured("", "", 10, 0)
 	require.NoError(t, err)
 	require.Len(t, rows, 2)
@@ -399,7 +399,7 @@ func TestLike_NotFound(t *testing.T) {
 
 func TestLike_PrivateAccessDenied(t *testing.T) {
 	svc, repo, _ := newSvc(t)
-	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "u1", Visibility: model.PageVisibilityFollowers}
+	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "u1", Visibility: model.PageVisibilityPrivate}
 	err := svc.Like("u2", "p1")
 	assert.ErrorIs(t, err, page.ErrAccessDenied)
 }
@@ -409,7 +409,7 @@ func TestLike_PrivateAccessDenied(t *testing.T) {
 // ErrYourPage が返る (ErrAccessDenied ではない)。
 func TestLike_OwnPrivate_YourPage(t *testing.T) {
 	svc, repo, _ := newSvc(t)
-	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "u1", Visibility: model.PageVisibilityFollowers}
+	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "u1", Visibility: model.PageVisibilityPrivate}
 	err := svc.Like("u1", "p1")
 	assert.ErrorIs(t, err, page.ErrYourPage)
 }
@@ -515,6 +515,34 @@ func TestUnlike_NotLiked(t *testing.T) {
 	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "u1", Visibility: model.PageVisibilityPublic}
 	err := svc.Unlike("u2", "p1")
 	assert.ErrorIs(t, err, page.ErrNotLiked)
+}
+
+// TestUnlike_PrivatePageHidesFromStrangers checks that a stranger who has not
+// liked a private page cannot tell it exists (#3479).
+func TestUnlike_PrivatePageHidesFromStrangers(t *testing.T) {
+	svc, repo, _ := newSvc(t)
+	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "u1", Visibility: model.PageVisibilityPrivate}
+	assert.ErrorIs(t, svc.Unlike("u2", "p1"), page.ErrPageNotFound)
+	assert.ErrorIs(t, svc.Unlike("u1", "p1"), page.ErrNotLiked)
+}
+
+// TestUpdateDelete_PrivatePageHidesFromStrangers checks that a non-owner
+// cannot tell a private page exists through update or delete (#3479).
+func TestUpdateDelete_PrivatePageHidesFromStrangers(t *testing.T) {
+	svc, repo, _ := newSvc(t)
+	repo.Pages["priv"] = &model.Page{ID: "priv", UserID: "u1", Visibility: model.PageVisibilityPrivate}
+	repo.Pages["pub"] = &model.Page{ID: "pub", UserID: "u1", Visibility: model.PageVisibilityPublic}
+	title := "x"
+
+	_, err := svc.Update("u2", "priv", page.UpdateInput{Title: &title})
+	assert.ErrorIs(t, err, page.ErrPageNotFound)
+	assert.ErrorIs(t, svc.Delete("u2", "priv"), page.ErrPageNotFound)
+	require.Contains(t, repo.Pages, "priv")
+
+	// 公開の Page は本家と同じ ACCESS_DENIED のまま。
+	_, err = svc.Update("u2", "pub", page.UpdateInput{Title: &title})
+	assert.ErrorIs(t, err, page.ErrAccessDenied)
+	assert.ErrorIs(t, svc.Delete("u2", "pub"), page.ErrAccessDenied)
 }
 
 // failingDeleteLikeRepo causes Delete to fail.

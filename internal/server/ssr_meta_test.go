@@ -1035,25 +1035,36 @@ func TestSSRPages_HTTPHeaders(t *testing.T) {
 		assert.Equal(t, "public, max-age=3600", ann.Header().Get("Cache-Control"))
 	})
 
-	// 公開ページ以外は共有キャッシュに載せない (upstream の分岐)。
-	t.Run("page は visibility で出し分ける", func(t *testing.T) {
-		newHandler := func(t *testing.T, visibility model.PageVisibility) *httptest.ResponseRecorder {
+	// private の Page は、作者以外に題名・要約・ID を出さない (#3479)。HTML は
+	// 閲覧者を区別しないので、Page が無いときと同じ応答にする。Cache-Control が
+	// 違うだけでも存在が分かるので、ヘッダーと本文の両方を比べる。
+	t.Run("private の page は無い page と同じ応答", func(t *testing.T) {
+		get := func(t *testing.T, name string, visibility model.PageVisibility) *httptest.ResponseRecorder {
 			t.Helper()
 			h, userRepo, _ := newSSRTestHandler(t)
 			userRepo.Users["u1"] = ssrTestUser("u1", "alice")
 			pageRepo := testutil.NewMockPageRepository()
+			summary := "SECRET-SUMMARY"
 			pageRepo.Pages["p1"] = &model.Page{
-				ID: "p1", UserID: "u1", Name: "about", Title: "About", Visibility: visibility,
+				ID: "secretpageid", UserID: "u1", Name: "about", Title: "SECRET-TITLE",
+				Summary: &summary, Visibility: visibility,
 			}
 			h.pageRepo = pageRepo
-			return ssrGet(t, h.UserPagePage, "/@alice/pages/about",
-				map[string]string{"acct": "alice", "page": "about"})
+			return ssrGet(t, h.UserPagePage, "/@alice/pages/"+name,
+				map[string]string{"acct": "alice", "page": name})
 		}
 
-		assert.Equal(t, "public, max-age=15",
-			newHandler(t, model.PageVisibilityPublic).Header().Get("Cache-Control"))
-		assert.Equal(t, "private, max-age=0, must-revalidate",
-			newHandler(t, model.PageVisibilitySpecified).Header().Get("Cache-Control"))
+		public := get(t, "about", model.PageVisibilityPublic)
+		assert.Equal(t, "public, max-age=15", public.Header().Get("Cache-Control"))
+		assert.Contains(t, public.Body.String(), "SECRET-TITLE")
+
+		private := get(t, "about", model.PageVisibilityPrivate)
+		missing := get(t, "nothing", model.PageVisibilityPrivate)
+		assert.Equal(t, missing.Code, private.Code)
+		assert.Equal(t, missing.Header().Get("Cache-Control"), private.Header().Get("Cache-Control"))
+		for _, secret := range []string{"SECRET-TITLE", "SECRET-SUMMARY", "secretpageid"} {
+			assert.NotContains(t, private.Body.String(), secret)
+		}
 	})
 
 	// 対象が見つからないページは shell の既定値。

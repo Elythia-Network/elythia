@@ -28,12 +28,13 @@ services:
       context: ../..
       # 既存の federation 用 Dockerfile を再利用する。migrate と server を
       # 両方ビルドし、entrypoint で migrate up → server start する構成。
-      # mk-go のマイグレーションは TS schema に対して原則追加のみ。例外は 18 件
+      # mk-go のマイグレーションは TS schema に対して原則追加のみ。例外は 19 件
       # あり、うち 14 件は mk-go が自分で作ったものの除去・初期化か upstream 追随。
-      # 残る 4 件のうち TS が書いた行を消すのは 000081 と 000094。000081 が
+      # 残る 5 件のうち TS が書いた行を消すのは 000081 と 000094。000081 が
       # 消すのは renoteId を失って表示されなくなった空殻だけ、000094 は
       # user_ip の表記揺れを畳んで 1 行に統合する (観測そのものは失われない)。
-      # 000084 / 000085 は meta の未設定行を埋めるだけ
+      # 000084 / 000085 は meta の未設定行を埋めるだけ。000121 は page の
+      # visibility の型を作り替えるが、TS が書く public の値は変わらない
       # (docs/migration-from-ts.md#破壊的なマイグレーション)。
       dockerfile: tests/federation/common/Dockerfile.mkgo
     environment:

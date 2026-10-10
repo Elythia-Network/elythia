@@ -6,13 +6,16 @@ import (
 	"gorm.io/datatypes"
 )
 
-// PageVisibility represents the visibility level of a Page (Misskey 互換)。
+// PageVisibility represents the visibility level of a Page.
+//
+// 本家の enum は public / followers / specified だが、本家は常に public を書き、
+// 公開範囲を選ぶ手段を持たない。Elythia は派生版の一つに揃えて public / private
+// の 2 値にした (#3479、migration 000121)。private は作者だけが見られる。
 type PageVisibility string
 
 const (
-	PageVisibilityPublic    PageVisibility = "public"
-	PageVisibilityFollowers PageVisibility = "followers"
-	PageVisibilitySpecified PageVisibility = "specified"
+	PageVisibilityPublic  PageVisibility = "public"
+	PageVisibilityPrivate PageVisibility = "private"
 )
 
 // Page represents the `page` table. Misskey 互換のローカル限定機能で、

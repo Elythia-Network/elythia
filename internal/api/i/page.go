@@ -85,6 +85,12 @@ func (h *Handler) PageLikes(c echo.Context) error {
 			// transient な timing race 用 fail-soft)。
 			continue
 		}
+		// 公開中に like した Page が後から private になっても、作者以外には中身を
+		// 返さない (#3479)。like の行は残すので、unlike で外せる。drop するので
+		// 1 ページの件数は limit より少なくなりうる (上の dangling like と同じ)。
+		if p.Visibility != model.PageVisibilityPublic && p.UserID != u.ID {
+			continue
+		}
 		owner, ok := ownersByID[p.UserID]
 		if !ok {
 			// owner 解決失敗時は drop。pack して null user を出すと frontend

@@ -163,8 +163,7 @@ func (s *Service) FindByID(pageID string) (*model.Page, error) {
 }
 
 // Show returns a page by id. requesterID は閲覧者で、空文字なら anonymous
-// 扱い。followers / specified visibility のページは所有者だけがアクセスできる
-// (簡易実装。フォロー判定や visibleUserIds の評価はフェーズ後半で拡張)。
+// 扱い。private のページは所有者だけがアクセスできる (#3479)。
 func (s *Service) Show(requesterID, pageID string) (*model.Page, error) {
 	p, err := s.repo.FindByID(pageID)
 	if err != nil {
@@ -229,7 +228,7 @@ func (s *Service) Update(ownerID, pageID string, in UpdateInput) (*model.Page, e
 		return nil, ErrPageNotFound
 	}
 	if p.UserID != ownerID {
-		return nil, ErrAccessDenied
+		return nil, notOwnerError(p)
 	}
 	fields := map[string]any{}
 	if in.Title != nil {
@@ -312,7 +311,7 @@ func (s *Service) Delete(ownerID, pageID string) error {
 		return ErrPageNotFound
 	}
 	if p.UserID != ownerID {
-		return ErrAccessDenied
+		return notOwnerError(p)
 	}
 	return s.repo.Delete(p)
 }
@@ -329,9 +328,19 @@ func (s *Service) Featured(sinceID, untilID string, limit, offset int) ([]*model
 	return s.repo.ListFeatured(sinceID, untilID, limit, offset)
 }
 
+// notOwnerError is the error for a non-owner trying to update or delete p.
+//
+// 公開の Page は本家と同じ ACCESS_DENIED。private の Page は「無い」と答える
+// (#3479)。ACCESS_DENIED を返すと、ID を持つ他人に Page の存在が分かる。
+func notOwnerError(p *model.Page) error {
+	if p.Visibility != model.PageVisibilityPublic {
+		return ErrPageNotFound
+	}
+	return ErrAccessDenied
+}
+
 // Like attaches a Like row from userID to pageID. Public pages can be liked
-// by anyone; followers/specified pages by the owner only (mirrors Show
-// access rules).
+// by anyone; private pages by the owner only (mirrors Show access rules).
 func (s *Service) Like(userID, pageID string) error {
 	if userID == "" {
 		return errors.New("userId is required")
@@ -379,7 +388,8 @@ func (s *Service) Unlike(userID, pageID string) error {
 	if userID == "" {
 		return errors.New("userId is required")
 	}
-	if _, err := s.repo.FindByID(pageID); err != nil {
+	p, err := s.repo.FindByID(pageID)
+	if err != nil {
 		// **DB 障害を not-found に丸めない** (#2792)。呼び出し側は
 		// ErrPageNotFound を 4xx にするので、ここで潰すと接続断が
 		// 「そんなページは無い」として返る。
@@ -393,6 +403,12 @@ func (s *Service) Unlike(userID, pageID string) error {
 		// **DB 障害を「like していない」にしない** (#2792)。
 		if !repository.IsNotFound(err) {
 			return err
+		}
+		// private の Page は、作者以外には「無い」と答える (#3479)。NOT_LIKED を
+		// 返すと、ID を持つ他人に Page の存在が分かる。like 済みの人は公開中に
+		// like した人なので、下の削除まで通して外せるようにしておく。
+		if p.Visibility != model.PageVisibilityPublic && p.UserID != userID {
+			return ErrPageNotFound
 		}
 		return ErrNotLiked
 	}

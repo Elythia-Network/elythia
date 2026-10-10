@@ -264,7 +264,7 @@ func TestShow_HidesPrivatePinnedPage(t *testing.T) {
 	pageRepo := testutil.NewMockPageRepository()
 	require.NoError(t, pageRepo.Create(&model.Page{
 		ID: "pg1", UserID: "pp1", Name: "secret", Title: "t",
-		Visibility: model.PageVisibilityFollowers,
+		Visibility: model.PageVisibilityPrivate,
 		Content:    datatypes.JSON([]byte(`[{"text":"PINNED-PAGE-canary"}]`)),
 	}))
 	h.SetPageRepo(pageRepo)

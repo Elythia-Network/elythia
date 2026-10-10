@@ -32,6 +32,29 @@
 - 「静かにリクエストにする」でも、受け取った申請があることはナビゲーションのフォローリクエストの印 (MeDetailed の `hasPendingReceivedFollowRequest`) に出る。止めるのは通知 (`receiveFollowRequest`) だけ。フォローリクエストの画面は、受け取った申請があれば鍵アカウントでなくても「受け取った」タブを先に開く
 - 相手が作成日時を偽ることは、この機能では防がない (#3465 の決定)
 
+## Page の公開範囲 (#3479)
+
+Page に作者だけが見られる `private` を足し、公開範囲を `public` / `private` の 2 値にした。派生版の一つが同じ形で入れている。本家の Page には列 (`public` / `followers` / `specified`) だけがあり、作成時は必ず `public` を書く。公開範囲を選ぶ API も画面も無い。
+
+| 項目 | 本家 | Elythia |
+|---|---|---|
+| `pages/create` / `pages/update` の `visibility` | 受け付けない | `public` / `private` を受け付ける。それ以外は `INVALID_PARAM`。create で省くと `public`、update で省くと今の値のまま |
+| Page の応答の `visibility` | 出さない | 出す (作者以外に返るのは `public` の Page だけ) |
+| `pages/show` | 公開範囲を見ない | `private` の Page は作者以外に `NO_SUCH_PAGE` (ID と名前のどちらで引いても) |
+| `pages/like` | 公開範囲を見ない | `private` の Page は作者以外に `NO_SUCH_PAGE` |
+| `pages/unlike` | 公開範囲を見ない | `private` の Page を like していない他人には `NO_SUCH_PAGE` (`NOT_LIKED` では存在が分かるため)。公開中に like した人は外せる |
+| `page-push` | 公開範囲を見ない | `private` の Page は作者以外に `NO_SUCH_PAGE` (作者のストリームにイベントを送らない) |
+| `users/show` などの `pinnedPage` / `pinnedPageId` | 公開範囲を見ない | `private` の Page は、作者以外にはどちらも `null` (ID が出ると、private の Page を持っていることが分かる)。Page を読み出せなかったときも、作者以外には `pinnedPageId` を出さない。Page が削除済みなら `pinnedPageId` だけを出す (本家は列の FK の `ON DELETE SET NULL` で ID が消えるが、Elythia の DB にはこの FK が無い。#3479 より前からの差) |
+| `users/pages`・`pages/featured` | `public` だけを出す | 同じ (`private` は作者本人が見ても出さない。作者は `i/pages` とエディタで見る) |
+| `/@<user>/pages/<name>` の HTML の metadata | 公開範囲を見ずに題名・要約・アイキャッチ・Page の ID を出す。公開範囲で変えるのは `Cache-Control` だけ | `private` の Page は、Page が無いときと同じ応答にする (`Cache-Control` も同じ)。HTML は閲覧者を区別しないので、作者にも既定の表示になる |
+| `i/page-likes` | 公開範囲を見ない | 他人の `private` の Page は一覧から外す (like の行は残すので、`pages/unlike` で外せる) |
+| `pages/update` / `pages/delete` を作者以外が呼んだとき | `ACCESS_DENIED`。ただし `pages/delete` はモデレーターなら他人の Page も消せる | 公開の Page は `ACCESS_DENIED`、`private` の Page は `NO_SUCH_PAGE`。**`pages/delete` はモデレーターでも作者以外は通さない** (#3479 より前からの差) |
+| 画面 | 無い | エディタの「公開範囲」で選ぶ |
+
+- **#3479 より前は、`followers` / `specified` も受け付けていた。** 初期の実装から入っていた独自の引数で、ここにも `elythia-js` の型にも載っていなかった。判定はどちらも「作者以外には見せない」だった。`000121` がこの 2 値の行を `private` にする (見える範囲は変わらない)。これらを渡すクライアントは `INVALID_PARAM` になる
+- 3 値のまま画面を作らなかったのは、`specified` には相手を選ぶ画面が、`followers` には Page の全経路でのフォロー判定が要るため
+- 連合には影響しない (Page は ActivityPub で配らない)
+
 ## 1. API endpoint
 
 upstream の endpoint は `endpoints/` 配下 438 件 + `ApiServerService.ts` の fastify 直登録 6 件 (POST 5 / GET 1) = **444 件**。うち **444 件すべてを実装済み (coverage 100.0%)**。
@@ -116,6 +139,7 @@ upstream 由来のクライアントはそのまま通る (省略時は upstream
 | `i/update` | `avatarDecorations[].scale` | デコレーションの大きさ (#2975)。**0.1 以上 1 以下**で、外れると `INVALID_PARAM`。**拡大を許さないのが要点** — `.decoration` は既にアバターの 2 倍の枠に描かれるので、1 が upstream と同じ最大サイズにあたる。**1 (既定) は保存しない** — 既存の行は `scale` を持たず、読み出し側はどのみち「無ければ 1」を実装するので、既定を書き込むと意味が変わらないのに全員の jsonb が書き換わる。同梱 frontend は**新規に絵文字を装着するときだけ 0.5 を初期値**にする (カタログ由来は従来どおり 1 から始まる) |
 | `i/update` | `avatarDecorations[].emojiName` | ローカルのカスタム絵文字をアバターデコレーションとして装着する (#2975)。**指定があると同じ要素の `id` は読まない** — クライアントは `avatarDecorations` を配列ごと送り直す作りなので、絵文字の要素を編集するたびに前回保存された `emoji` 行の id が一緒に返ってくる。両方を見る形にすると「name は A、id は B」という入力の扱いを決めねばならず、どちらに倒しても利用者の意図と食い違いうる。**逆に `emojiName` が無く `id` が `emoji` 行を指す場合は絵文字として扱う** — 未知 field を落とす型付きクライアントのための fallback で、検証は同じものを通す。検証は `canUseEmojiAsAvatarDecoration` (無ければ `RESTRICTED_BY_ROLE`)、ローカルに存在するか (無ければ `NO_SUCH_EMOJI`)、センシティブでないか (だめなら Elythia 固有の `SENSITIVE_EMOJI_NOT_ALLOWED`)、絵文字側のロール制限 (`roleIdsThatCanBeUsedThisEmojiAsReaction`、無ければ `RESTRICTED_BY_ROLE`) の順。**センシティブを「存在しない」に丸めない** — 丸めると利用者は名前を打ち間違えたと思って探し続ける。**検証はキャッシュではなく DB を引く** (`CachedEmojiRepository.FindByNameAndHost` / `FindByID` はどちらも無キャッシュで inner へ委譲する) — 作ったばかりの絵文字が TTL のあいだ使えない、センシティブにした直後の絵文字が TTL のあいだ設定できる、という窓を作らないため。個数は `avatarDecorationLimit` に合算する。**リモート絵文字は対象外** — 連合先が消すと壊れるため、ローカル (`host IS NULL`) だけに絞ってある |
 | `i/update` | `followApprovalAction` | フォローの止め方 (#3466)。`request` / `silentRequest` / `silentFollow` 以外は `INVALID_PARAM`。`null` は省略と同じ。期間の `followApprovalLocalSeconds` / `followApprovalRemoteSeconds` (整数、0〜2592000、`null` 可) は本家の次の版 (PR 17998) の引数で、範囲も本家と同じ。本家の ajv (`type: integer`) と同じく、整数の値なら `2.0` や `1e3` の書き方も受け、`1.5` は拒否する |
+| `pages/create` / `pages/update` | `visibility` | Page の公開範囲 (#3479)。`public` / `private`。詳細は上の「[Page の公開範囲](#page-の公開範囲-3479)」 |
 | `/avatar/@acct` | `static` | 静止画設定 (`disableShowingAnimatedImages` / `dataSaver.avatar`) のとき frontend が付ける (#2908)。**upstream には無い** — あちらは media proxy が open proxy なので `getStaticImageUrl` が組む `<mediaProxy>/static.webp?url=<instance>/avatar/@u@h&static=1` がそのまま通る。Elythia の proxy は allowlist が DB に実在する URL だけを通すため、その URL は **403 + `max-age=86400`** になり静止画になるどころか 1 日壊れていた。`/avatar/` 側で受けて署名付きプロキシ URL へ 302 する (`/emoji/:path` の `static` と同じ形、#2905)。**除外は identicon fallback だけ** — `/identicon/<id>` は相対 URL なので proxy の `Fetch` が `fetchRemote` に落ちて取りに行けない URL として弾かれ、400 + `max-age=86400` になる (#3034 より前は 404 + 同じキャッシュ。PNG を生成して返すのでアニメーションもしない)。**同一オリジンは除外しない** — ローカルの drive アバターも GIF / APNG / animated WebP になりうる。allowlist は判断材料にならない (署名付き URL を組むので `Authorize` は allowlist より先に HMAC で通る) |
 
 ### 1-2. 未実装 (0)

@@ -6,6 +6,8 @@
 
 **逆方向の欠落はゼロ** — upstream の `@Entity` 76 テーブルと全共有カラムを Elythia が superset で保持している。
 
+**列の型を変えた共有カラムが 1 つある。** `page."visibility"` の enum `page_visibility_enum` は、本家の (`public`, `followers`, `specified`) を `000121` で (`public`, `private`) に作り替えた (#3479)。`private` は作者だけが見られる Page で、派生版の一つと同じ 2 値に揃えた。本家は作成時に必ず `public` を書き、他の 2 値を使う API も画面も持たないので、TS 版から移した行は変わらない。TS へ戻したときの影響は [TS版からの移行](../migration-from-ts.md#misskey-tsへのロールバック) にある。API 側の差分は [divergence/api.md](api.md#page-の公開範囲-3479)。
+
 ### 2-1. Elythia 独自テーブル (23)
 
 | テーブル | 由来 | 理由 |

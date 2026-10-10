@@ -276,7 +276,7 @@ func TestShow_NotFound(t *testing.T) {
 // のみ返すため shape が一致し、private page の存在を 403 で露呈しない。
 func TestShow_AccessDenied(t *testing.T) {
 	h, repo, _ := newHandler(t)
-	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "owner", Visibility: model.PageVisibilityFollowers}
+	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "owner", Visibility: model.PageVisibilityPrivate}
 	c, rec := newReq(t, `{"pageId":"p1"}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Show(c))
@@ -291,7 +291,7 @@ func TestShow_AccessDenied(t *testing.T) {
 // (ShowByName) でも非public・非所有者には 404 NO_SUCH_PAGE を返す。
 func TestShow_AccessDenied_ByName(t *testing.T) {
 	h, repo, _ := newHandler(t)
-	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "owner", Name: "alpha", Visibility: model.PageVisibilityFollowers}
+	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "owner", Name: "alpha", Visibility: model.PageVisibilityPrivate}
 	c, rec := newReq(t, `{"userId":"owner","name":"alpha"}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Show(c))
@@ -302,7 +302,7 @@ func TestShow_AccessDenied_ByName(t *testing.T) {
 // {username, name} 経路 (#955) でも非public・非所有者には 404 NO_SUCH_PAGE。
 func TestShow_AccessDenied_ByUsername(t *testing.T) {
 	h, repo, _ := newHandler(t)
-	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "alice", Name: "alpha", Visibility: model.PageVisibilityFollowers}
+	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "alice", Name: "alpha", Visibility: model.PageVisibilityPrivate}
 	h.SetUserSource(&stubUserSource{
 		byUsernameBundle: &coreuser.UserWithProfile{User: &model.User{ID: "alice", Username: "alice"}},
 	})
@@ -320,7 +320,7 @@ func TestShow_AccessDenied_ByUsername(t *testing.T) {
 // 経路なので明示的に固定する。
 func TestShow_AccessDenied_Guest(t *testing.T) {
 	h, repo, _ := newHandler(t)
-	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "owner", Visibility: model.PageVisibilityFollowers}
+	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "owner", Visibility: model.PageVisibilityPrivate}
 	c, rec := newReq(t, `{"pageId":"p1"}`)
 	// setUser is intentionally NOT called — middleware.GetUser returns nil.
 	require.NoError(t, h.Show(c))
@@ -703,7 +703,7 @@ func TestLike_NotFound(t *testing.T) {
 // noSuchPage に集約して 403 で存在露呈しない。
 func TestLike_AccessDenied(t *testing.T) {
 	h, repo, _ := newHandler(t)
-	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "alice", Visibility: model.PageVisibilityFollowers}
+	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "alice", Visibility: model.PageVisibilityPrivate}
 	c, rec := newReq(t, `{"pageId":"p1"}`)
 	setUser(c, "bob")
 	require.NoError(t, h.Like(c))
