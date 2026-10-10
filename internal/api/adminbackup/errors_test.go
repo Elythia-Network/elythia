@@ -98,6 +98,27 @@ func TestGuardRejectsMalformedBodies(t *testing.T) {
 	}
 }
 
+// TestGuardRejectsAValidBodyOverTheLimit: the body would still decode when
+// cut at the limit (trailing spaces), so only the size check refuses it.
+func TestGuardRejectsAValidBodyOverTheLimit(t *testing.T) {
+	f := newFixture(t, false)
+	body := `{"password":"` + password + `","token":"` + f.code(t) + `"}`
+	send := func(body string) int {
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/backup/list", strings.NewReader(body))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		req.Header.Set("X-Test-User", adminID)
+		req.Header.Set("X-Test-Token", userToken+adminID)
+		rec := httptest.NewRecorder()
+		f.e.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	assert.Equal(t, http.StatusBadRequest, send(body+strings.Repeat(" ", reauthBodyLimit)))
+	assert.Zero(t, f.storage.accesses)
+	assert.Empty(t, f.log.entries)
+	// 上限の内側なら通る (同じコードはまだ使われていない)。
+	assert.Equal(t, http.StatusOK, send(body+strings.Repeat(" ", reauthBodyLimit-len(body))))
+}
+
 func TestOperationsRequireID(t *testing.T) {
 	for _, path := range []string{"/api/admin/backup/verify", "/api/admin/backup/delete", "/api/admin/backup/download"} {
 		t.Run(path, func(t *testing.T) {
