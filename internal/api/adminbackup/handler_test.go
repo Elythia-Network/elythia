@@ -449,7 +449,7 @@ func TestOperationResponses(t *testing.T) {
 	assert.Equal(t, "4567", res.Body.String())
 	assert.Equal(t, "no-store", res.Header().Get("Cache-Control"))
 	assert.Contains(t, res.Header().Get("Content-Disposition"), "attachment")
-	assert.Contains(t, res.Header().Get("Content-Disposition"), "elythia-backup-"+gen1)
+	assert.Equal(t, `attachment; filename=`+gen1+`-dump.pgc`, res.Header().Get("Content-Disposition"))
 
 	rec = f.post(t, "/api/admin/backup/verify", native(adminID), auth(map[string]any{"id": gen1}))
 	require.Equal(t, http.StatusOK, rec.Code)

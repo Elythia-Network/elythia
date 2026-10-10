@@ -10,7 +10,6 @@ package backupadmin
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -48,8 +47,9 @@ const bytesPerGB = 1 << 30
 type Generation struct {
 	ID        string    `json:"id"`
 	CreatedAt time.Time `json:"createdAt"`
-	// Complete is false when meta.json is missing or unreadable. Such a
-	// generation is an interrupted upload; it still uses storage.
+	// Complete is false when meta.json is missing or unreadable, or when the
+	// dump it names is missing (backup.Generation.Complete). Such a
+	// generation cannot be restored; it still uses storage.
 	Complete bool `json:"complete"`
 	// MetaError says why meta.json could not be read.
 	MetaError string `json:"metaError,omitempty"`
@@ -170,10 +170,6 @@ func NewService(o Options) *Service {
 	return &Service{o: o}
 }
 
-// metaReadLimit caps meta.json and verify.json. 行数の表を含めても数百 KB に
-// 収まる。保存先の中身を信用しきらず、壊れた巨大なファイルでメモリを使い切らない。
-const metaReadLimit = 16 << 20
-
 // List returns the generations, the storage usage and the state of the backup
 // service.
 func (s *Service) List(ctx context.Context) (*Overview, error) {
@@ -181,33 +177,23 @@ func (s *Service) List(ctx context.Context) (*Overview, error) {
 	if st == nil {
 		return nil, ErrNotConfigured
 	}
+	// 使用量は保存先の根の下の全て (世代の外のものも) を数えるので、世代の一覧
+	// (generations/ の下だけ) とは別に数える。
 	objects, err := st.List(ctx, "")
 	if err != nil {
 		return nil, fmt.Errorf("list storage: %w", err)
 	}
 	ov := &Overview{StorageType: s.o.StorageType, Generations: []Generation{}}
-	byID := map[string]*Generation{}
 	for _, o := range objects {
 		ov.Usage.TotalBytes += o.Size
 		ov.Usage.ObjectCount++
-		id := backup.GenerationIDFromKey(o.Key)
-		if id == "" {
-			continue
-		}
-		g := byID[id]
-		if g == nil {
-			g = &Generation{ID: id, Migrations: []backup.MigrationState{}}
-			if t, err := backup.IDTime(id); err == nil {
-				g.CreatedAt = t
-			}
-			byID[id] = g
-		}
-		g.Size += o.Size
-		g.ObjectCount++
 	}
-	for _, g := range byID {
-		s.fill(ctx, g)
-		ov.Generations = append(ov.Generations, *g)
+	gens, err := backup.ListGenerations(ctx, st)
+	if err != nil {
+		return nil, fmt.Errorf("list generations: %w", err)
+	}
+	for _, bg := range gens {
+		ov.Generations = append(ov.Generations, s.generation(ctx, bg))
 	}
 	// 新しい世代を先に出す。ID は UTC の時刻で、文字列の順が時刻の順になる。
 	sort.Slice(ov.Generations, func(i, j int) bool { return ov.Generations[i].ID > ov.Generations[j].ID })
@@ -221,83 +207,106 @@ func (s *Service) List(ctx context.Context) (*Overview, error) {
 	return ov, nil
 }
 
-// fill reads meta.json and verify.json of g.
-func (s *Service) fill(ctx context.Context, g *Generation) {
-	m, err := s.readMeta(ctx, g.ID)
-	if err != nil {
-		g.MetaError = err.Error()
-		return
+// generation converts a generation read by backup.ListGenerations.
+func (s *Service) generation(ctx context.Context, bg backup.Generation) Generation {
+	g := Generation{ID: bg.ID, Size: bg.Size, ObjectCount: len(bg.Objects), Migrations: []backup.MigrationState{}}
+	if t, err := backup.IDTime(bg.ID); err == nil {
+		g.CreatedAt = t
 	}
-	g.Complete = true
-	if !m.CreatedAt.IsZero() {
-		g.CreatedAt = m.CreatedAt
-	}
-	g.DumpSize = m.DumpSize
-	g.Encrypted = m.Encrypted
-	g.ElythiaVersion = m.ElythiaVersion
-	g.ElythiaCommit = m.ElythiaCommit
-	g.PostgresVersion = m.PostgresVersion
-	g.Database = m.Database
-	if m.Migrations != nil {
-		g.Migrations = m.Migrations
-	}
-	var vr backup.VerifyResult
-	switch err := s.readJSON(ctx, backup.Key(g.ID, backup.VerifyFile), &vr); {
-	case errors.Is(err, backup.ErrNotFound):
-	case err != nil:
-		g.Verify = &VerifySummary{Error: err.Error(), Stages: []backup.StageResult{}, Mismatches: []backup.RowMismatch{}}
+	switch m := bg.Meta; {
+	case bg.MetaError != nil:
+		g.MetaError = bg.MetaError.Error()
+	case m == nil:
+		g.MetaError = backup.MetaFile + " is missing"
 	default:
-		vs := &VerifySummary{OK: vr.OK, VerifiedAt: vr.VerifiedAt, Stages: vr.Stages, Mismatches: vr.Mismatches}
-		if vs.Stages == nil {
-			vs.Stages = []backup.StageResult{}
+		if err := checkDumpFile(m); err != nil {
+			g.MetaError = err.Error()
+			break
 		}
-		if vs.Mismatches == nil {
-			vs.Mismatches = []backup.RowMismatch{}
+		// meta.json が読めても dump が無ければ戻せないので、完成とは数えない
+		// (backup.Generation.Complete の契約)。
+		if bg.Complete() {
+			g.Complete = true
+		} else {
+			g.MetaError = m.DumpFile + " is missing"
 		}
-		g.Verify = vs
+		if !m.CreatedAt.IsZero() {
+			g.CreatedAt = m.CreatedAt
+		}
+		g.DumpSize = m.DumpSize
+		g.Encrypted = m.Encrypted
+		g.ElythiaVersion = m.ElythiaVersion
+		g.ElythiaCommit = m.ElythiaCommit
+		g.PostgresVersion = m.PostgresVersion
+		g.Database = m.Database
+		if m.Migrations != nil {
+			g.Migrations = m.Migrations
+		}
 	}
+	g.Verify = s.verifySummary(ctx, bg)
+	return g
+}
+
+// verifySummary summarizes verify.json of bg, or returns nil when the
+// generation has not been verified.
+func (s *Service) verifySummary(ctx context.Context, bg backup.Generation) *VerifySummary {
+	vr := bg.Verify
+	if vr == nil {
+		if !hasObject(bg, backup.VerifyFile) {
+			return nil
+		}
+		// ListGenerations は読めない verify.json を黙って捨てるので、管理画面に
+		// 理由を出すためにもう一度読む。
+		var err error
+		if vr, err = backup.ReadVerify(ctx, s.o.Storage, bg.ID); err != nil {
+			return &VerifySummary{Error: err.Error(), Stages: []backup.StageResult{}, Mismatches: []backup.RowMismatch{}}
+		}
+	}
+	vs := &VerifySummary{OK: vr.OK, VerifiedAt: vr.VerifiedAt, Stages: vr.Stages, Mismatches: vr.Mismatches}
+	if vs.Stages == nil {
+		vs.Stages = []backup.StageResult{}
+	}
+	if vs.Mismatches == nil {
+		vs.Mismatches = []backup.RowMismatch{}
+	}
+	return vs
+}
+
+func hasObject(bg backup.Generation, name string) bool {
+	key := backup.Key(bg.ID, name)
+	for _, o := range bg.Objects {
+		if o.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
+// checkDumpFile rejects a dumpFile that would name an object outside the
+// generation.
+//
+// 保存先の中身は書き込める誰かが作れるので信用しきらない。dumpFile から作った
+// key でダウンロードの URL を出すので、世代の外を指す値はここで落とす。
+func checkDumpFile(m *backup.Meta) error {
+	if m.DumpFile == "" || strings.Contains(m.DumpFile, "/") || strings.Contains(m.DumpFile, "..") {
+		return fmt.Errorf("%s has invalid dumpFile %q", backup.MetaFile, m.DumpFile)
+	}
+	return nil
 }
 
 // readMeta reads and checks meta.json of generation id.
 func (s *Service) readMeta(ctx context.Context, id string) (*backup.Meta, error) {
-	var m backup.Meta
-	if err := s.readJSON(ctx, backup.Key(id, backup.MetaFile), &m); err != nil {
+	m, err := backup.ReadMeta(ctx, s.o.Storage, id)
+	if err != nil {
 		if errors.Is(err, backup.ErrNotFound) {
 			return nil, fmt.Errorf("%s is missing", backup.MetaFile)
 		}
 		return nil, err
 	}
-	// 知らない版のメタ情報は、欄の意味が変わっている可能性があるので読まない
-	// (MetaFormatVersion の契約)。
-	if m.FormatVersion != backup.MetaFormatVersion {
-		return nil, fmt.Errorf("%s has unknown formatVersion %d", backup.MetaFile, m.FormatVersion)
+	if err := checkDumpFile(m); err != nil {
+		return nil, err
 	}
-	if m.ID != id {
-		return nil, fmt.Errorf("%s has id %q", backup.MetaFile, m.ID)
-	}
-	if m.DumpFile == "" || strings.Contains(m.DumpFile, "/") || strings.Contains(m.DumpFile, "..") {
-		return nil, fmt.Errorf("%s has invalid dumpFile %q", backup.MetaFile, m.DumpFile)
-	}
-	return &m, nil
-}
-
-func (s *Service) readJSON(ctx context.Context, key string, v any) error {
-	rc, err := s.o.Storage.Get(ctx, key)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = rc.Close() }()
-	data, err := io.ReadAll(io.LimitReader(rc, metaReadLimit+1))
-	if err != nil {
-		return fmt.Errorf("read %s: %w", key, err)
-	}
-	if len(data) > metaReadLimit {
-		return fmt.Errorf("%s is larger than %d bytes", key, metaReadLimit)
-	}
-	if err := json.Unmarshal(data, v); err != nil {
-		return fmt.Errorf("decode %s: %w", key, err)
-	}
-	return nil
+	return m, nil
 }
 
 func (s *Service) serviceState(ctx context.Context) ServiceState {
@@ -339,36 +348,20 @@ func (s *Service) generationObjects(ctx context.Context, id string) ([]backup.Ob
 	return objects, nil
 }
 
-// Delete removes every object of generation id. It returns the number of
-// bytes freed.
+// Delete removes every object of generation id, meta.json first (see
+// backup.DeleteGeneration). It returns the number of bytes freed.
 func (s *Service) Delete(ctx context.Context, id string) (int64, error) {
-	objects, err := s.generationObjects(ctx, id)
-	if err != nil {
-		return 0, err
+	if s.o.Storage == nil {
+		return 0, ErrNotConfigured
 	}
-	// **meta.json を最初に消す。** meta.json の無い世代は未完成として扱われる
-	// (Meta の契約) ので、途中で失敗しても、一部だけ残った世代が「戻せる世代」に
-	// 見えることがない。
-	metaKey := backup.Key(id, backup.MetaFile)
-	if err := s.o.Storage.Delete(ctx, metaKey); err != nil {
-		return 0, fmt.Errorf("delete %s: %w", metaKey, err)
+	if !backup.ValidID(id) {
+		return 0, ErrInvalidID
 	}
-	var freed int64
-	for _, o := range objects {
-		if o.Key == metaKey {
-			freed += o.Size
-		}
+	freed, err := backup.DeleteGeneration(ctx, s.o.Storage, id)
+	if errors.Is(err, backup.ErrNotFound) {
+		return 0, ErrNotFound
 	}
-	for _, o := range objects {
-		if o.Key == metaKey {
-			continue
-		}
-		if err := s.o.Storage.Delete(ctx, o.Key); err != nil {
-			return freed, fmt.Errorf("delete %s: %w", o.Key, err)
-		}
-		freed += o.Size
-	}
-	return freed, nil
+	return freed, err
 }
 
 // Download returns a short-lived URL for the dump of generation id. An
@@ -392,7 +385,9 @@ func (s *Service) Download(ctx context.Context, id, userID string) (*Download, e
 	}
 	d := &Download{
 		ExpiresAt: s.o.Now().Add(s.o.DownloadTTL),
-		FileName:  "elythia-backup-" + id + "-" + m.DumpFile,
+		// 署名付き URL の Content-Disposition (backup.S3Storage.PresignGet) と同じ
+		// 名前にし、どちらの保存先でも同じ名前で保存されるようにする。
+		FileName:  id + "-" + m.DumpFile,
 		Size:      info.Size,
 		Encrypted: m.Encrypted,
 	}
