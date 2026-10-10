@@ -441,22 +441,9 @@ func closeGorm(db *gorm.DB) {
 // extension that meta.json records, so that pg_restore would stop at its
 // CREATE EXTENSION.
 func checkExtensions(ctx context.Context, q Queryer, exts []ExtensionInfo) error {
-	if len(exts) == 0 {
-		return nil
-	}
-	rows, err := q.Query(ctx, "SELECT name FROM pg_available_extensions")
+	missing, err := missingExtensions(ctx, q, exts)
 	if err != nil {
-		return fmt.Errorf("backup verify: list the available extensions: %w", err)
-	}
-	names, err := pgx.CollectRows(rows, pgx.RowTo[string])
-	if err != nil {
-		return fmt.Errorf("backup verify: list the available extensions: %w", err)
-	}
-	var missing []string
-	for _, e := range exts {
-		if !slices.Contains(names, e.Name) {
-			missing = append(missing, e.Name)
-		}
+		return fmt.Errorf("backup verify: %w", err)
 	}
 	if len(missing) == 0 {
 		return nil
@@ -464,6 +451,30 @@ func checkExtensions(ctx context.Context, q Queryer, exts []ExtensionInfo) error
 	return fmt.Errorf("backup verify: the backup uses extension(s) %s that the throwaway PostgreSQL server cannot install; "+
 		"run verify where they are installed (the backup image has pg_bigm; other extensions need an image that adds them)",
 		strings.Join(missing, ", "))
+}
+
+// missingExtensions returns the names in exts that the server q is
+// connected to cannot install (pg_available_extensions). verify checks the
+// throwaway server with it and restore the target server (#3461).
+func missingExtensions(ctx context.Context, q Queryer, exts []ExtensionInfo) ([]string, error) {
+	if len(exts) == 0 {
+		return nil, nil
+	}
+	rows, err := q.Query(ctx, "SELECT name FROM pg_available_extensions")
+	if err != nil {
+		return nil, fmt.Errorf("list the available extensions: %w", err)
+	}
+	names, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("list the available extensions: %w", err)
+	}
+	var missing []string
+	for _, e := range exts {
+		if !slices.Contains(names, e.Name) {
+			missing = append(missing, e.Name)
+		}
+	}
+	return missing, nil
 }
 
 // restorable restores the dump into the throwaway server and compares the
