@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -861,4 +863,81 @@ func TestCaptureSignatureHeaders_CarriesXDate(t *testing.T) {
 	assert.Equal(t, "x", got["X-Date"], "署名対象の X-Date が worker へ渡らない")
 	assert.Equal(t, "d", got["Date"])
 	assert.Equal(t, "example.com", got["Host"])
+}
+
+// **署名の headers= に挙がったヘッダーは worker まで運ぶ (#3498)。**
+//
+// Mastodon はフォロワー限定の投稿の配送に `Collection-Synchronization` を付けて
+// 署名する。決め打ちの一覧だけを運ぶと、worker が署名を組み立て直せず
+// `missing required header "collection-synchronization"` で捨てていた。
+// 受付は通るので、worker と同じ形で組み直して検証するところまで見る。
+func TestInbox_AsyncMode_CarriesEverySignedHeader(t *testing.T) {
+	priv, pub, err := activitypub.GenerateRSAKeypair()
+	require.NoError(t, err)
+	key, err := activitypub.NewPrivateKey("https://remote.example/users/alice#main-key", priv)
+	require.NoError(t, err)
+
+	h, _, _ := newHandler(t, pub)
+	enq := &recordingEnqueuer{}
+	h.SetEnqueuer(enq)
+
+	body := []byte(`{"type":"Create","actor":"https://remote.example/users/alice","object":{"type":"Note","id":"https://remote.example/notes/1","attributedTo":"https://remote.example/users/alice","to":["https://remote.example/users/alice/followers"],"content":"x"}}`)
+	c, rec := newPost(t, body)
+	req := c.Request()
+	req.Header.Set("Content-Type", "application/activity+json")
+	req.Header.Set("Collection-Synchronization",
+		`collectionId="https://remote.example/users/alice/followers", url="https://remote.example/users/alice/followers_synchronization", digest="abc"`)
+	require.NoError(t, activitypub.SignRequest(req, key, activitypub.SHA256Digest(body),
+		[]string{"(request-target)", "host", "date", "digest", "content-type", "collection-synchronization"}))
+	req.Host = "example.com"
+
+	require.NoError(t, h.Inbox(c))
+	require.Equal(t, http.StatusAccepted, rec.Code)
+	require.Len(t, enq.calls, 1)
+	got := enq.calls[0]
+	assert.NotEmpty(t, got.Headers["Collection-Synchronization"], "署名対象の Collection-Synchronization が worker へ渡らない")
+
+	rebuilt, err := http.NewRequest(got.Method, "http://placeholder"+got.Path, bytes.NewReader(got.Body))
+	require.NoError(t, err)
+	for k, v := range got.Headers {
+		rebuilt.Header.Set(k, v)
+	}
+	require.NoError(t, activitypub.VerifyRequest(rebuilt, pub), "worker と同じ形で組み直した要求の署名が通らない")
+}
+
+// 署名の headers= は相手の申告なので、運ぶ数と大きさに上限を付ける (#3498)。
+// 疑似ヘッダー ((request-target) など) と、署名に挙がっていないヘッダーは運ばない。
+func TestCaptureSignatureHeaders_BoundsExtraHeaders(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/inbox", nil)
+	req.Host = "example.com"
+	names := []string{"(request-target)", "(created)", "date"}
+	for i := 0; i < 40; i++ {
+		name := fmt.Sprintf("x-extra-%02d", i)
+		names = append(names, name)
+		req.Header.Set(name, "v")
+	}
+	req.Header.Set("X-Not-Signed", "v")
+	req.Header.Set("Date", "d")
+	req.Header.Set("Signature", `keyId="https://remote.example/users/alice#main-key",algorithm="rsa-sha256",headers="`+
+		strings.Join(names, " ")+`",signature="c2ln"`)
+
+	got := captureSignatureHeaders(req)
+
+	extra := 0
+	for k := range got {
+		if strings.HasPrefix(k, "X-Extra-") {
+			extra++
+		}
+	}
+	assert.Equal(t, maxSignedExtraHeaders, extra, "署名に挙がった追加のヘッダーの数が上限で止まっていない")
+	assert.Equal(t, "v", got["X-Extra-00"], "先頭の追加のヘッダーが運ばれていない")
+	assert.NotContains(t, got, "X-Not-Signed", "署名に挙がっていないヘッダーまで運んでいる")
+	assert.NotContains(t, got, "(Request-Target)")
+	assert.NotContains(t, got, "(Created)")
+
+	// 大きさの上限: 1 つで上限を超える値は運ばない。
+	big := httptest.NewRequest(http.MethodPost, "/inbox", nil)
+	big.Header.Set("X-Huge", strings.Repeat("a", maxSignedExtraHeaderBytes+1))
+	big.Header.Set("Signature", `keyId="k",headers="date x-huge",signature="c2ln"`)
+	assert.NotContains(t, captureSignatureHeaders(big), "X-Huge", "大きさの上限を超える値を運んでいる")
 }
