@@ -101,32 +101,6 @@ func (d *DirStorage) Put(ctx context.Context, key string, r io.Reader) error {
 	})
 }
 
-// PutNew is Put, except that it fails with ErrExists instead of replacing an
-// existing key.
-//
-// 一時ファイルを hard link で置く。link は置き先が既にあれば失敗するので、同じ key へ
-// 同時に書いても片方だけが通る。link を持たないファイルシステム (一部の SMB など) では、
-// 有無を確かめてから rename する形に落ちる。その間に割り込まれる隙は残る。
-func (d *DirStorage) PutNew(ctx context.Context, key string, r io.Reader) error {
-	return d.put(ctx, key, r, func(tmp, p string) error {
-		err := os.Link(tmp, p)
-		switch {
-		case err == nil:
-			_ = os.Remove(tmp)
-			return nil
-		case errors.Is(err, fs.ErrExist):
-			return ErrExists
-		}
-		if _, serr := os.Lstat(p); serr == nil {
-			return ErrExists
-		}
-		if err := os.Rename(tmp, p); err != nil {
-			return fmt.Errorf("backup: rename %s: %w", key, err)
-		}
-		return nil
-	})
-}
-
 // put writes r to a temporary file next to key and hands it to place.
 func (d *DirStorage) put(ctx context.Context, key string, r io.Reader, place func(tmp, p string) error) (err error) {
 	p, err := d.path(key)

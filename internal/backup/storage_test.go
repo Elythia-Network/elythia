@@ -15,7 +15,6 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/aws/smithy-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -170,45 +169,6 @@ func TestNewDirStorage_RequiresExistingDirectory(t *testing.T) {
 	t.Chdir(wd)
 
 	require.Error(t, CreateDirMarker(filepath.Join(t.TempDir(), "missing")))
-}
-
-// putNewContract checks PutNew: it stores new keys like Put, and refuses to
-// replace an existing key with ErrExists.
-func putNewContract(t *testing.T, st Storage) {
-	ctx := context.Background()
-	np, ok := st.(NewPutter)
-	require.True(t, ok)
-	require.NoError(t, np.PutNew(ctx, "generations/a/meta.json", strings.NewReader("first")))
-	err := np.PutNew(ctx, "generations/a/meta.json", strings.NewReader("second"))
-	require.ErrorIs(t, err, ErrExists)
-	assert.Equal(t, []byte("first"), readAll(t, st, "generations/a/meta.json"))
-	objs, err := st.List(ctx, "")
-	require.NoError(t, err)
-	assert.Len(t, objs, 1, "the refused write leaves nothing behind")
-	// 途中で失敗した PutNew も、何も残さない。
-	require.Error(t, np.PutNew(ctx, "generations/b/x", &failingReader{data: []byte("x"), err: io.ErrClosedPipe}))
-	_, err = st.Stat(ctx, "generations/b/x")
-	assert.ErrorIs(t, err, ErrNotFound)
-}
-
-func TestDirStorage_PutNew(t *testing.T) {
-	st, err := NewDirStorage(markedDir(t))
-	require.NoError(t, err)
-	putNewContract(t, st)
-	assert.Error(t, st.PutNew(context.Background(), "../x", strings.NewReader("x")))
-}
-
-func TestS3Storage_PutNew(t *testing.T) {
-	st := newS3Storage(t)
-	putNewContract(t, st)
-	// multipart の側も、完了の時点で既存の key を置き換えない。
-	st.PartSize = 5 << 20
-	ctx := context.Background()
-	data := randomBytes(t, st.PartSize+10)
-	require.NoError(t, st.PutNew(ctx, "big", bytes.NewReader(data)))
-	err := st.PutNew(ctx, "big", bytes.NewReader(randomBytes(t, st.PartSize+10)))
-	require.ErrorIs(t, err, ErrExists)
-	assert.Equal(t, sha256Hex(data), sha256Hex(rawS3Get(t, st, "big")))
 }
 
 func TestDirStorage_RejectsKeysOutsideRoot(t *testing.T) {
@@ -454,53 +414,6 @@ func TestOpenStorage(t *testing.T) {
 	require.ErrorContains(t, err, "storage.type is empty")
 	_, err = OpenStorage(config.BackupStorageOptions{Type: "local"})
 	require.ErrorContains(t, err, `unknown storage.type "local"`)
-}
-
-// noConditionClient is an S3 service that does not implement conditional
-// writes: it answers If-None-Match with 501.
-type noConditionClient struct {
-	s3Client
-	unconditional int
-}
-
-func (c *noConditionClient) PutObject(_ context.Context, in *s3.PutObjectInput, _ ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
-	if in.IfNoneMatch != nil {
-		return nil, &smithy.GenericAPIError{Code: "NotImplemented"}
-	}
-	c.unconditional++
-	return &s3.PutObjectOutput{}, nil
-}
-
-func (c *noConditionClient) CreateMultipartUpload(context.Context, *s3.CreateMultipartUploadInput, ...func(*s3.Options)) (*s3.CreateMultipartUploadOutput, error) {
-	return &s3.CreateMultipartUploadOutput{UploadId: aws.String("u")}, nil
-}
-
-func (c *noConditionClient) UploadPart(context.Context, *s3.UploadPartInput, ...func(*s3.Options)) (*s3.UploadPartOutput, error) {
-	return &s3.UploadPartOutput{ETag: aws.String("e")}, nil
-}
-
-func (c *noConditionClient) CompleteMultipartUpload(_ context.Context, in *s3.CompleteMultipartUploadInput, _ ...func(*s3.Options)) (*s3.CompleteMultipartUploadOutput, error) {
-	if in.IfNoneMatch != nil {
-		return nil, &smithy.GenericAPIError{Code: "NotImplemented"}
-	}
-	c.unconditional++
-	return &s3.CompleteMultipartUploadOutput{}, nil
-}
-
-func TestS3Storage_PutNewFallsBackWithoutConditionalWrites(t *testing.T) {
-	c := &noConditionClient{}
-	st := &S3Storage{client: c, bucket: "b", PartSize: 4}
-	ctx := context.Background()
-	require.NoError(t, st.PutNew(ctx, "small", strings.NewReader("ab")))
-	require.NoError(t, st.PutNew(ctx, "big", strings.NewReader("abcdefghij")))
-	assert.Equal(t, 2, c.unconditional, "each write is retried once without the condition")
-
-	// 条件と関係ない失敗は送り直さない。
-	assert.Equal(t, "", s3ErrorCode(errors.New("x")))
-	err := putError("put", "k", &smithy.GenericAPIError{Code: "PreconditionFailed"})
-	require.ErrorIs(t, err, ErrExists)
-	err = putError("put", "k", &smithy.GenericAPIError{Code: "AccessDenied"})
-	require.NotErrorIs(t, err, ErrExists)
 }
 
 func TestNewS3Storage_EndpointErrorsDoNotEchoTheValue(t *testing.T) {

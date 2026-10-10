@@ -202,11 +202,8 @@ func Take(ctx context.Context, o TakeOptions) (meta *Meta, err error) {
 	stored, err := streamDump(ctx, o.Storage, dumpKey, runner, pgDump, dump, snapshot, o.Recipients)
 	// dump を Put した後で失敗したら、途中の世代を残さない。meta.json が無いので
 	// 読む側は無視するが、容量の料金はかかる。
-	// ErrExists は、同じ秒に始めた別のバックアップが先に置いたということ。その dump は
-	// 自分のものではないので消さない。
-	cleanupDump := !errors.Is(err, ErrExists)
 	defer func() {
-		if err != nil && cleanupDump {
+		if err != nil {
 			deleteQuietly(ctx, o.Storage, logger, dumpKey)
 		}
 	}()
@@ -226,13 +223,11 @@ func Take(ctx context.Context, o TakeOptions) (meta *Meta, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("backup: encode meta: %w", err)
 	}
-	if err = putNew(ctx, o.Storage, Key(id, MetaFile), bytes.NewReader(body)); err != nil {
+	if err = o.Storage.Put(ctx, Key(id, MetaFile), bytes.NewReader(body)); err != nil {
 		// 失敗と返ってきても、実は置けていることがある (応答が途中で切れた場合など)。
 		// dump だけ消して meta.json が残ると、中身の無い世代が complete に見えるので、
-		// meta.json も消す。ErrExists なら置いたのは自分ではないので消さない。
-		if !errors.Is(err, ErrExists) {
-			deleteQuietly(ctx, o.Storage, logger, Key(id, MetaFile))
-		}
+		// meta.json も消す。
+		deleteQuietly(ctx, o.Storage, logger, Key(id, MetaFile))
 		return nil, err
 	}
 	logger.Info("backup: done", "id", id)
@@ -276,7 +271,7 @@ func streamDump(ctx context.Context, st Storage, key string, runner Runner, pgDu
 	// いないと pipe への書き込みで止まる。
 	putErr := make(chan error, 1)
 	go func() {
-		err := putNew(ctx, st, key, pr)
+		err := st.Put(ctx, key, pr)
 		if err != nil {
 			// 保存先が読むのをやめたら pg_dump も止める。止めないと pipe が詰まって
 			// pg_dump が書き込みで止まり、Wait が返らない。
