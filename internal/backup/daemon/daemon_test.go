@@ -490,6 +490,32 @@ func TestDaemonDoesNotRepeatDelayOnEachFailure(t *testing.T) {
 	})
 }
 
+// 未来の時刻の世代があっても、定期実行と遅れの通知は止まらない (どちらも今から数える)。
+func TestDaemonFutureGenerationDoesNotStopScheduleOrDelay(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := mustSchedule(t, config.BackupScheduleOptions{Interval: "24h", DelayAfter: "36h"}, time.UTC)
+		r := newRig(t, s, func(r *rig) {
+			r.st.addGeneration(at(30, 0), true, "")
+			r.taker.err = errBoom
+		})
+		var buf bytes.Buffer
+		r.d.log = slog.New(slog.NewTextHandler(&buf, nil))
+		r.start(t)
+		time.Sleep(2*24*time.Hour - time.Second)
+		synctest.Wait()
+		assert.Equal(t, []time.Time{at(1, 0)}, r.taker.callTimes())
+		var delays []time.Time
+		for _, e := range r.notify.all() {
+			if e.Kind == EventDelay {
+				delays = append(delays, e.OccurredAt)
+			}
+		}
+		assert.Equal(t, []time.Time{at(1, 12)}, delays, "counted from the start, not reset by each failed take")
+		assert.Contains(t, buf.String(), "dated in the future")
+		r.stop()
+	})
+}
+
 func TestDaemonReportsDelay(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s := mustSchedule(t, config.BackupScheduleOptions{Interval: "24h", At: "04:00", Keep: 1, Verify: true}, time.UTC)

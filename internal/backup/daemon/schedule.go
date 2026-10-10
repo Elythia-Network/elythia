@@ -99,8 +99,14 @@ func (s *Schedule) AtString() string {
 //
 // latest is the creation time of the newest complete generation, or nil when
 // there is none. When it is older than Interval (or missing) the first run is
-// now, so a daemon that was down does not wait for the next slot.
+// now, so a daemon that was down does not wait for the next slot. A latest
+// after now is treated as now.
 func (s *Schedule) Start(now time.Time, latest *time.Time) time.Time {
+	if latest != nil && latest.After(now) {
+		// 時計の狂ったホストで取った世代などで未来の時刻があると、起点が未来になり、
+		// その時刻まで枠が来ない。今を超えないように丸める。
+		latest = &now
+	}
 	catchUp := latest == nil || now.Sub(*latest) >= s.Interval
 	if s.HasAt {
 		if catchUp {

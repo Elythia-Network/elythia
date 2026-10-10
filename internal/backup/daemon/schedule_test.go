@@ -117,6 +117,18 @@ func TestScheduleMultiDay(t *testing.T) {
 	assert.Equal(t, time.Date(2026, 10, 10, 4, 0, 0, 0, jst), s.Next(time.Date(2026, 10, 7, 5, 0, 0, 0, jst)))
 }
 
+// 未来の時刻の世代は今として数え、枠を未来へ飛ばさない。
+func TestScheduleCapsFutureLatest(t *testing.T) {
+	now := time.Date(2026, 10, 10, 10, 0, 0, 0, jst)
+	future := now.Add(30 * 24 * time.Hour)
+	s := mustSchedule(t, config.BackupScheduleOptions{Interval: "6h"}, jst)
+	assert.Equal(t, now.Add(6*time.Hour), s.Start(now, &future))
+	assert.Equal(t, now.Add(12*time.Hour), s.Next(now.Add(6*time.Hour)))
+
+	s = mustSchedule(t, config.BackupScheduleOptions{Interval: "24h", At: "04:00"}, jst)
+	assert.Equal(t, time.Date(2026, 10, 11, 4, 0, 0, 0, jst), s.Start(now, &future))
+}
+
 // 再起動しても、枠は最新の世代を取った日から数える (再起動した日へずれない)。
 func TestScheduleMultiDayKeepsSlotsAcrossRestart(t *testing.T) {
 	s := mustSchedule(t, config.BackupScheduleOptions{Interval: "168h", At: "04:00"}, jst)
