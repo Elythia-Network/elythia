@@ -520,9 +520,10 @@ func (a *AuthMiddleware) resolveUser(token string) (user *model.User, scopes []s
 		return user, nil, "", false, nil
 	}
 
-	// hash 列 (miauth: sha256(token)) と token 列 (raw, app/auth) を 1 query
-	// で OR 検索する。upstream Misskey TS の AuthenticateService と同 pattern
-	// (#910)。両 index がある前提で BitmapOr scan に乗る。
+	// hash 列 (miauth: sha256(token) / 本家の app 認証の形: 提示された値の小文字)
+	// と token 列 (raw, app/auth) を 1 query で OR 検索する。upstream Misskey TS の
+	// AuthenticateService と同 pattern (#910、#3490)。両 index がある前提で
+	// BitmapOr scan に乗る。
 	hash := sha256Hash(token)
 	accessToken, err := a.accessTokenRepo.FindByHashOrToken(hash, token)
 	if err != nil {

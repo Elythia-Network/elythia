@@ -83,4 +83,12 @@ func TestAccessTokenRepository_FindByHashOrToken(t *testing.T) {
 		_, err := repo.FindByHashOrToken("nonexistent_hash", "nonexistent_token")
 		assert.Error(t, err)
 	})
+
+	// 本家の app 認証のクライアントは i = sha256(accessToken + appSecret) を送る。
+	// 提示された値 (小文字にして) が hash 列と一致すれば引ける (#3490)。
+	t.Run("hits when the presented value is the stored hash (upstream app form)", func(t *testing.T) {
+		found, err := repo.FindByHashOrToken("sha256_of_presented_value", "HASH_APP_WITH_SECRET")
+		require.NoError(t, err)
+		assert.Equal(t, appToken.ID, found.ID)
+	})
 }

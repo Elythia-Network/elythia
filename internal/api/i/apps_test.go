@@ -281,7 +281,8 @@ func TestRevokeToken_ByRawTokenForAppIssuedToken(t *testing.T) {
 	assert.Error(t, err, "token should be deleted after revoke")
 	// auth middleware の cache に残ると revoke の効果が遅延する。
 	// invalidator が raw token で呼ばれていることを確認 (= drop-in 互換)。
-	require.Equal(t, []string{rawToken}, inv.calls)
+	// hash の形で認証された鍵も消す (#3490)。
+	require.Equal(t, []string{rawToken, hashWithSecret}, inv.calls)
 }
 
 // TestRevokeToken_InvalidatorByTokenIDPath は tokenId 経由の revoke でも
@@ -303,7 +304,8 @@ func TestRevokeToken_InvalidatorByTokenIDPath(t *testing.T) {
 
 	rec := postExtra(h.RevokeToken, `{"tokenId":"at_byid_1"}`, stubUser)
 	assert.Equal(t, http.StatusNoContent, rec.Code)
-	require.Equal(t, []string{rawToken}, inv.calls)
+	// 本家の app 認証の形 (i = hash) で認証された cache の鍵も消す (#3490)。
+	require.Equal(t, []string{rawToken, "h_byid"}, inv.calls)
 }
 
 func TestRevokeToken_NoParams(t *testing.T) {
