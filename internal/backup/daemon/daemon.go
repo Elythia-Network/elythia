@@ -151,6 +151,9 @@ type Daemon struct {
 	// usableBase is when the delay clock started: the newest usable
 	// generation, or the daemon start when there is none.
 	usableBase time.Time
+	// usableBaseGenTime is the time of the generation usableBase was taken
+	// from, before it was capped at the time it was recorded.
+	usableBaseGenTime time.Time
 	// usableBaseIsStart reports whether usableBase is the daemon start
 	// rather than the time of a generation.
 	usableBaseIsStart bool
@@ -194,6 +197,10 @@ func (d *Daemon) Run(ctx context.Context) {
 		var latest *time.Time
 		if g := Latest(gens, func(g Generation) bool { return g.Complete }); g != nil {
 			latest = &g.Time
+			if g.Time.After(now) {
+				d.log.Warn("backup: the newest generation is dated in the future; the schedule counts it as now",
+					"generation", g.ID, "at", g.Time.Format(time.RFC3339))
+			}
 		}
 		d.nextRun = sched.Start(now, latest)
 		d.log.Info("backup: schedule started",
@@ -330,8 +337,16 @@ func (d *Daemon) setLatestLocked(gens []Generation, initial bool) {
 	}
 	// 最新の使える世代が手で確かめ直されて使えなくなったときは、起点を 1 つ前の
 	// 使える世代へ戻す (戻した結果がもう遅れなら、すぐに知らせる)。
-	if g != nil && (initial || !g.Time.Equal(d.usableBase)) {
+	if g != nil && (initial || !g.Time.Equal(d.usableBaseGenTime)) {
+		d.usableBaseGenTime = g.Time
 		d.usableBase = g.Time
+		if now := d.clock.Now(); g.Time.After(now) {
+			// 未来の時刻の世代を起点にすると、その時刻まで遅れを知らせなくなる。今を
+			// 超えないように丸める。比べるのは丸める前の時刻なので、毎回丸め直さない。
+			d.log.Warn("backup: the newest usable generation is dated in the future; the delay is counted from now",
+				"generation", g.ID, "at", g.Time.Format(time.RFC3339))
+			d.usableBase = now
+		}
 		d.usableBaseIsStart = false
 		moved = true
 	}
