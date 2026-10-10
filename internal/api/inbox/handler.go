@@ -304,7 +304,9 @@ func (h *Handler) Inbox(c echo.Context) error {
 		if !complete {
 			// 署名に挙がったヘッダーを積みきれないと worker が必ず検証に失敗する。
 			// 202 で受けて黙って捨てるより、ここで 401 にして相手に失敗を見せる (#3498)。
-			slog.Info("inbox: rejecting a signature over too many or too large headers")
+			// 捨てる経路なので相手を出す (#2725)。
+			slog.Warn("inbox: rejecting a signature over too many or too large headers",
+				"host", signerHostOf(parsed), "keyId", signerKeyIDOf(parsed))
 			return c.NoContent(http.StatusUnauthorized)
 		}
 		payload := queue.InboxPayload{
