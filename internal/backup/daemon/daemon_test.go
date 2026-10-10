@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -220,6 +221,90 @@ func TestDaemonReportsFailures(t *testing.T) {
 		assert.Equal(t, "prune", r.d.Status().LastTake.Stage)
 		r.stop()
 	})
+}
+
+// 判定の後 (使い捨てのサーバーの後始末など) で失敗しても、判定は判定として知らせ、
+// verify.json を残し、整理はその verify.json で行う (#3459 のレビューの M1)。
+func TestDaemonKeepsVerdictWhenCleanupFails(t *testing.T) {
+	cleanupErr := errors.New("pg_ctl stop: server did not shut down")
+	synctest.Test(t, func(t *testing.T) {
+		s := mustSchedule(t, config.BackupScheduleOptions{Interval: "24h", Keep: 1, Verify: true, DelayAfter: "240h"}, time.UTC)
+		var old string
+		r := newRig(t, s, func(r *rig) {
+			old = r.st.addGeneration(at(-1, 0), true, "ok")
+			r.ver.fail = true
+			r.ver.afterErr = cleanupErr
+		})
+		r.start(t)
+		broken := backup.NewID(at(0, 0))
+		ev := r.notify.all()
+		require.Len(t, ev, 2)
+		assert.Equal(t, EventMismatch, ev[0].Kind, "a broken generation is reported as a mismatch, not only as a cleanup failure")
+		assert.Equal(t, broken, ev[0].GenerationID)
+		assert.Equal(t, []backup.RowMismatch{{Table: "public.note", Expected: 10, Actual: 9}}, ev[0].Mismatches)
+		assert.Equal(t, []backup.StageResult{{Stage: backup.StageRestorable, Error: "row counts differ"}}, ev[0].FailedStages)
+		assert.Equal(t, EventFailure, ev[1].Kind)
+		assert.Equal(t, "verify", ev[1].Stage)
+		assert.Contains(t, ev[1].Message, "server did not shut down")
+		v, err := backup.ReadVerify(context.Background(), r.st, broken)
+		require.NoError(t, err, "the verdict is stored as verify.json")
+		assert.False(t, v.OK)
+		st := r.d.Status()
+		assert.False(t, st.LastTake.OK)
+		assert.Equal(t, "verify", st.LastTake.Stage)
+		assert.Contains(t, st.LastTake.Error, "verification failed")
+		assert.Contains(t, st.LastTake.Error, "server did not shut down")
+		assert.Equal(t, []string{old, broken}, r.st.ids(), "a failed verdict prunes nothing")
+
+		// 通った判定なら、verify.json を残して整理まで進めるが、作業は OK にしない。
+		r.ver.mu.Lock()
+		r.ver.fail = false
+		r.ver.mu.Unlock()
+		time.Sleep(24 * time.Hour)
+		synctest.Wait()
+		good := backup.NewID(at(1, 0))
+		ev = r.notify.all()
+		require.Len(t, ev, 3)
+		assert.Equal(t, EventFailure, ev[2].Kind)
+		assert.Equal(t, good, ev[2].GenerationID)
+		v, err = backup.ReadVerify(context.Background(), r.st, good)
+		require.NoError(t, err)
+		assert.True(t, v.OK)
+		assert.Equal(t, []string{good}, r.st.ids(), "the stored verdict lets pruning count the new generation")
+		st = r.d.Status()
+		assert.False(t, st.LastTake.OK)
+		assert.Equal(t, "verify", st.LastTake.Stage)
+		assert.Equal(t, []string{old, broken}, st.LastTake.Deleted)
+		assert.Equal(t, good, st.LatestUsable.ID)
+		r.stop()
+	})
+}
+
+func TestDaemonReportsVerdictStoreFailure(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := mustSchedule(t, config.BackupScheduleOptions{Interval: "24h", Keep: 1, Verify: true, DelayAfter: "240h"}, time.UTC)
+		r := newRig(t, s, func(r *rig) {
+			r.st.addGeneration(at(-1, 0), true, "ok")
+			r.ver.afterErr = errBoom
+		})
+		r.st.putErr = errors.New("bucket is read-only")
+		r.start(t)
+		ev := r.notify.all()
+		require.Len(t, ev, 1)
+		assert.Equal(t, EventFailure, ev[0].Kind)
+		assert.Contains(t, ev[0].Message, "boom")
+		assert.Contains(t, ev[0].Message, "bucket is read-only")
+		assert.Len(t, r.st.ids(), 2, "an unstored verdict does not count, so nothing is pruned")
+		r.stop()
+	})
+}
+
+func TestJudged(t *testing.T) {
+	three := []backup.StageResult{{Stage: backup.StageReadable}, {Stage: backup.StageRestorable}, {Stage: backup.StageUsable}}
+	assert.True(t, judged(backup.VerifyResult{Stages: three}))
+	assert.False(t, judged(backup.VerifyResult{Stages: three[:2]}))
+	assert.False(t, judged(backup.VerifyResult{}))
+	assert.False(t, judged(backup.VerifyResult{Stages: []backup.StageResult{three[0], three[2], three[1]}}))
 }
 
 func TestDaemonReportsDelay(t *testing.T) {

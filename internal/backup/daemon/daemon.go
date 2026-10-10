@@ -9,7 +9,9 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -31,6 +33,12 @@ type Taker interface {
 // pruning reads verify.json from the storage. A nil error with OK false means
 // the verification ran and found the backup broken; an error means it could
 // not run to the end.
+//
+// An error together with a result that records all three stages (readable,
+// restorable, usable) means the verdict was reached but something after it
+// failed, such as stopping the throwaway server or storing verify.json. The
+// daemon then treats the result as the verdict, stores verify.json itself
+// and reports the error separately.
 type Verifier interface {
 	Verify(ctx context.Context, id string) (backup.VerifyResult, error)
 }
@@ -339,7 +347,8 @@ func (d *Daemon) runJob(ctx context.Context, job Job) JobResult {
 			return res
 		}
 	}
-	res.OK = true
+	// 検証に通ったが後始末に失敗した世代は、整理まで進めたうえで OK にしない。
+	res.OK = res.Error == ""
 	res.FinishedAt = d.clock.Now()
 	d.log.Info("backup: job finished", "kind", job.Kind, "generation", res.GenerationID, "deleted", res.Deleted)
 	return res
@@ -353,35 +362,93 @@ func (d *Daemon) setRunningID(id string) {
 	}
 }
 
-// verify runs the verifier on res.GenerationID and reports whether it passed.
+// verify runs the verifier on res.GenerationID and reports whether the
+// generation passed.
 func (d *Daemon) verify(ctx context.Context, res *JobResult) bool {
 	vr, err := d.opts.Verifier.Verify(ctx, res.GenerationID)
-	if err != nil {
+	if err != nil && !judged(vr) {
 		d.fail(ctx, res, "verify", err)
 		return false
 	}
 	res.Verify = &vr
-	if vr.OK {
-		return true
-	}
-	res.Stage = "verify"
-	res.Error = "verification failed"
-	res.FinishedAt = d.clock.Now()
-	e := Event{Kind: EventMismatch, OccurredAt: res.FinishedAt, GenerationID: res.GenerationID,
-		Message: "the backup did not pass verification", Mismatches: vr.Mismatches}
-	for _, s := range vr.Stages {
-		if !s.OK && !s.Skipped {
-			e.FailedStages = append(e.FailedStages, s)
+	if err != nil {
+		// 判定は出たが、その後 (使い捨てのサーバーの後始末や verify.json の保存) で
+		// 失敗した (#3459 の Verify は、このとき verify.json を書かずに返す)。判定を
+		// 捨てて「失敗」とだけ知らせると、世代が壊れていても運営者には後始末の失敗に
+		// しか見えない。判定は判定として扱い、整理が読めるよう verify.json もここで残す。
+		d.log.Error("backup: verification reached a verdict but did not finish cleanly",
+			"generation", res.GenerationID, "ok", vr.OK, "error", err)
+		if werr := storeVerifyResult(ctx, d.opts.Storage, vr); werr != nil {
+			err = errors.Join(err, werr)
 		}
 	}
-	d.log.Error("backup: verification failed", "generation", res.GenerationID, "stages", e.FailedStages, "mismatches", vr.Mismatches)
-	d.send(ctx, e)
-	return false
+	if !vr.OK {
+		res.Stage = "verify"
+		res.Error = "verification failed"
+		if err != nil {
+			res.Error += "; " + err.Error()
+		}
+		res.FinishedAt = d.clock.Now()
+		e := Event{Kind: EventMismatch, OccurredAt: res.FinishedAt, GenerationID: res.GenerationID,
+			Message: "the backup did not pass verification", Mismatches: vr.Mismatches}
+		for _, s := range vr.Stages {
+			if !s.OK && !s.Skipped {
+				e.FailedStages = append(e.FailedStages, s)
+			}
+		}
+		d.log.Error("backup: verification failed", "generation", res.GenerationID, "stages", e.FailedStages, "mismatches", vr.Mismatches)
+		d.send(ctx, e)
+	}
+	if err != nil {
+		// 判定とは別に、後始末の失敗を知らせる。通った世代でも、使い捨てのサーバーが
+		// 残っているとディスクやメモリを使い続けるため。
+		d.notifyFailure(ctx, res, "verify", fmt.Errorf("after the verdict: %w", err))
+		if vr.OK {
+			res.Stage = "verify"
+			res.Error = "after the verdict: " + err.Error()
+		}
+	}
+	return vr.OK
+}
+
+// judged reports whether vr records a verdict for all three stages, in the
+// order backup.Verify runs them. A stage that was not reached is recorded as
+// skipped, so a verdict always has the three.
+func judged(vr backup.VerifyResult) bool {
+	want := []backup.VerifyStage{backup.StageReadable, backup.StageRestorable, backup.StageUsable}
+	if len(vr.Stages) != len(want) {
+		return false
+	}
+	for i, s := range vr.Stages {
+		if s.Stage != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// storeVerifyResult writes vr as verify.json of its generation.
+func storeVerifyResult(ctx context.Context, st backup.Storage, vr backup.VerifyResult) error {
+	body, err := json.MarshalIndent(vr, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode %s: %w", backup.VerifyFile, err)
+	}
+	// ctx が切れていても、判定は残したい。
+	if err := st.Put(context.WithoutCancel(ctx), backup.Key(vr.ID, backup.VerifyFile), bytes.NewReader(body)); err != nil {
+		return fmt.Errorf("write %s: %w", backup.Key(vr.ID, backup.VerifyFile), err)
+	}
+	return nil
 }
 
 func (d *Daemon) fail(ctx context.Context, res *JobResult, stage string, err error) {
 	res.Stage = stage
 	res.Error = err.Error()
+	d.notifyFailure(ctx, res, stage, err)
+}
+
+// notifyFailure logs err and sends a failure event without changing res
+// beyond its finish time.
+func (d *Daemon) notifyFailure(ctx context.Context, res *JobResult, stage string, err error) {
 	res.FinishedAt = d.clock.Now()
 	d.log.Error("backup: job failed", "kind", res.Kind, "stage", stage, "generation", res.GenerationID, "error", err)
 	d.send(ctx, Event{Kind: EventFailure, OccurredAt: res.FinishedAt, GenerationID: res.GenerationID,

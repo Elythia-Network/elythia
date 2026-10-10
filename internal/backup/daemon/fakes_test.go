@@ -22,8 +22,9 @@ type memStorage struct {
 	mu      sync.Mutex
 	objects map[string][]byte
 	deleted []string
-	// listErr / getErr / deleteErr / statErr make the next calls fail.
-	listErr, getErr, deleteErr, statErr error
+	// listErr / getErr / deleteErr / statErr / putErr make the next calls
+	// fail.
+	listErr, getErr, deleteErr, statErr, putErr error
 }
 
 func newMemStorage() *memStorage { return &memStorage{objects: map[string][]byte{}} }
@@ -35,6 +36,9 @@ func (m *memStorage) Put(_ context.Context, key string, r io.Reader) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.putErr != nil {
+		return m.putErr
+	}
 	m.objects[key] = b
 	return nil
 }
@@ -122,7 +126,7 @@ func (m *memStorage) addGeneration(t time.Time, complete bool, verify string) st
 	id := backup.NewID(t)
 	m.set(backup.Key(id, backup.DumpFile), []byte("dump-"+id))
 	if complete {
-		meta, _ := json.Marshal(backup.Meta{FormatVersion: backup.MetaFormatVersion, ID: id, CreatedAt: t})
+		meta, _ := json.Marshal(backup.Meta{FormatVersion: backup.MetaFormatVersion, ID: id, CreatedAt: t, DumpFile: backup.DumpFile})
 		m.set(backup.Key(id, backup.MetaFile), meta)
 	}
 	switch verify {
@@ -174,18 +178,22 @@ func (f *fakeTaker) callTimes() []time.Time {
 
 // fakeVerifier writes verify.json with the configured outcome.
 type fakeVerifier struct {
-	st    *memStorage
-	mu    sync.Mutex
-	ids   []string
-	fail  bool // OK false with a mismatch
-	err   error
-	block chan struct{}
+	st   *memStorage
+	mu   sync.Mutex
+	ids  []string
+	fail bool // OK false with a mismatch
+	err  error
+	// afterErr returns a verdict for all three stages together with this
+	// error and stores no verify.json, as backup.Verify does when cleaning
+	// up after the verdict fails.
+	afterErr error
+	block    chan struct{}
 }
 
 func (f *fakeVerifier) Verify(ctx context.Context, id string) (backup.VerifyResult, error) {
 	f.mu.Lock()
 	f.ids = append(f.ids, id)
-	fail, err, block := f.fail, f.err, f.block
+	fail, err, afterErr, block := f.fail, f.err, f.afterErr, f.block
 	f.mu.Unlock()
 	if block != nil {
 		select {
@@ -203,6 +211,13 @@ func (f *fakeVerifier) Verify(ctx context.Context, id string) (backup.VerifyResu
 			backup.StageResult{Stage: backup.StageRestorable, OK: false, Error: "row counts differ"},
 			backup.StageResult{Stage: backup.StageUsable, Skipped: true})
 		res.Mismatches = []backup.RowMismatch{{Table: "public.note", Expected: 10, Actual: 9}}
+	} else if afterErr != nil {
+		res.Stages = append(res.Stages,
+			backup.StageResult{Stage: backup.StageRestorable, OK: true},
+			backup.StageResult{Stage: backup.StageUsable, OK: true})
+	}
+	if afterErr != nil {
+		return res, afterErr
 	}
 	b, _ := json.Marshal(res)
 	f.st.set(backup.Key(id, backup.VerifyFile), b)

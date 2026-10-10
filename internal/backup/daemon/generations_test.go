@@ -61,18 +61,27 @@ func TestScanErrors(t *testing.T) {
 	st.listErr = errBoom
 	_, err := Scan(context.Background(), st)
 	require.ErrorIs(t, err, errBoom)
-
-	st.listErr = nil
-	st.getErr = errBoom
-	_, err = Scan(context.Background(), st)
-	require.ErrorIs(t, err, errBoom, "an unreadable verify.json is a storage error, not an unverified generation")
 }
 
-func TestReadVerifyStateMissing(t *testing.T) {
+// 読めない meta.json / verify.json は、理由に関わらず使えない世代に倒す。
+func TestScanTreatsUnreadableFilesAsUnusable(t *testing.T) {
 	st := newMemStorage()
-	state, err := readVerifyState(context.Background(), st, backup.NewID(t0))
+	id := st.addGeneration(dayN(0), true, "ok")
+	st.getErr = errBoom
+	gens, err := Scan(context.Background(), st)
 	require.NoError(t, err)
-	assert.Equal(t, VerifyNone, state, "verify.json deleted between List and Get")
+	require.Len(t, gens, 1)
+	assert.False(t, gens[0].Complete, "meta.json that cannot be read")
+	assert.Equal(t, VerifyUnreadable, gens[0].Verify)
+	assert.False(t, gens[0].Usable(false))
+
+	// meta.json はあるが、名指しする dump が無い世代は揃っていない。
+	st.getErr = nil
+	require.NoError(t, st.Delete(context.Background(), backup.Key(id, backup.DumpFile)))
+	gens, err = Scan(context.Background(), st)
+	require.NoError(t, err)
+	assert.False(t, gens[0].Complete, "meta.json without its dump")
+	assert.Equal(t, VerifyOK, gens[0].Verify)
 }
 
 func TestUsable(t *testing.T) {
