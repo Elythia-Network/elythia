@@ -3,6 +3,7 @@ package backup
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -148,6 +149,7 @@ func TestRestoreRunsTheSteps(t *testing.T) {
 	// (版上げ・引っ越しでは、戻す DB は止めた時点の DB そのもの)。検査は流す。
 	calls = rsCalls{}
 	e, out, _ = rsEnv(&calls)
+	e.openStorage = rsGens(t, rsGen{id: "20261010T030000Z", verified: true})
 	require.Equal(t, 0, restore(e, []string{"-config", cfg, "-id", "latest", "-mode", "empty", "-confirm", "elythia"}))
 	assert.False(t, calls.cleaned)
 	assert.NotNil(t, calls.checked)
@@ -228,6 +230,7 @@ func TestRestoreRedisFlag(t *testing.T) {
 	for _, c := range cases {
 		var calls rsCalls
 		e, _, errOut := rsEnv(&calls)
+		e.openStorage = rsGens(t, rsGen{id: "20261010T030000Z", verified: true})
 		args := append([]string{"-config", cfg, "-id", "latest", "-confirm", "elythia"}, c.args...)
 		require.Equal(t, 0, restore(e, args), "%v: %s", c.args, errOut.String())
 		assert.Equal(t, c.clean, calls.cleaned, "%v", c.args)
@@ -242,6 +245,95 @@ func TestRestoreRedisFlag(t *testing.T) {
 	e, _, _ = rsEnv(&calls)
 	require.Equal(t, 0, restore(e, []string{"-config", cfg, "-rollback", "elythia_before_restore_1", "-confirm", "elythia", "-redis", "keep"}))
 	assert.False(t, calls.cleaned)
+}
+
+// rsGen is one generation rsGens stores.
+type rsGen struct {
+	id       string
+	verified bool
+	// noMeta leaves out meta.json (an interrupted take); badMeta writes a
+	// meta.json of an unknown format.
+	noMeta, badMeta bool
+}
+
+// rsGens returns an openStorage that opens a marked directory holding gens.
+func rsGens(t *testing.T, gens ...rsGen) func(config.BackupStorageOptions) (bkp.Storage, error) {
+	t.Helper()
+	dir := t.TempDir()
+	require.NoError(t, bkp.CreateDirMarker(dir))
+	st, err := bkp.NewDirStorage(dir)
+	require.NoError(t, err)
+	ctx := context.Background()
+	put := func(key string, v any) {
+		b, err := json.Marshal(v)
+		require.NoError(t, err)
+		require.NoError(t, st.Put(ctx, key, bytes.NewReader(b)))
+	}
+	for _, g := range gens {
+		require.NoError(t, st.Put(ctx, bkp.Key(g.id, bkp.DumpFile), strings.NewReader("dump")))
+		switch {
+		case g.noMeta:
+		case g.badMeta:
+			put(bkp.Key(g.id, bkp.MetaFile), bkp.Meta{FormatVersion: bkp.MetaFormatVersion + 1, ID: g.id})
+		default:
+			put(bkp.Key(g.id, bkp.MetaFile), bkp.Meta{FormatVersion: bkp.MetaFormatVersion, ID: g.id, DumpFile: bkp.DumpFile})
+		}
+		if g.verified {
+			put(bkp.Key(g.id, bkp.VerifyFile), bkp.VerifyResult{ID: g.id, OK: true})
+		}
+	}
+	return func(config.BackupStorageOptions) (bkp.Storage, error) { return st, nil }
+}
+
+// TestRestoreRedisAutoNeedsNewest checks that -redis auto keeps Redis in
+// the empty mode only when the generation is the newest in the storage.
+func TestRestoreRedisAutoNeedsNewest(t *testing.T) {
+	cfg := rsConfig(t, "elythia", rsBackupSection)
+	const older, newer = "20261010T030000Z", "20261010T040000Z"
+	run := func(open func(config.BackupStorageOptions) (bkp.Storage, error), extra ...string) (int, rsCalls, string) {
+		var calls rsCalls
+		e, _, errOut := rsEnv(&calls)
+		e.openStorage = open
+		args := append([]string{"-config", cfg, "-mode", "empty", "-confirm", "elythia"}, extra...)
+		return restore(e, args), calls, errOut.String()
+	}
+	// 新しい世代が未検証なので、latest は古い世代になる。Redis の方が新しいので止める。
+	newerUnverified := rsGens(t, rsGen{id: older, verified: true}, rsGen{id: newer})
+	for _, id := range []string{"latest", older} {
+		code, calls, errOut := run(newerUnverified, "-id", id)
+		assert.Equal(t, 1, code, id)
+		assert.Contains(t, errOut, "generation "+older+" is not the newest generation in the storage ("+newer+")", id)
+		assert.Contains(t, errOut, "-redis clean", id)
+		assert.Nil(t, calls.restore, id)
+	}
+	// 明示すれば、どちらでも進む。
+	code, calls, errOut := run(newerUnverified, "-id", older, "-redis", "keep")
+	require.Equal(t, 0, code, errOut)
+	assert.False(t, calls.cleaned)
+	code, calls, errOut = run(newerUnverified, "-id", older, "-redis", "clean")
+	require.Equal(t, 0, code, errOut)
+	assert.True(t, calls.cleaned)
+	// 最新の世代を戻すなら、auto で残す。
+	code, calls, errOut = run(newerUnverified, "-id", newer)
+	require.Equal(t, 0, code, errOut)
+	assert.False(t, calls.cleaned)
+	assert.NotNil(t, calls.restore)
+	// 途中で止まった世代 (meta.json が無い) は数えない。読めない meta.json の世代は数える。
+	code, _, errOut = run(rsGens(t, rsGen{id: older, verified: true}, rsGen{id: newer, noMeta: true}), "-id", "latest")
+	require.Equal(t, 0, code, errOut)
+	code, _, errOut = run(rsGens(t, rsGen{id: older, verified: true}, rsGen{id: newer, badMeta: true}), "-id", older)
+	assert.Equal(t, 1, code)
+	assert.Contains(t, errOut, "not the newest")
+	// 戻す世代が決まらなければ、その理由で止まる。
+	code, _, errOut = run(rsGens(t, rsGen{id: older}), "-id", "latest")
+	assert.Equal(t, 1, code)
+	assert.Contains(t, errOut, "no verified generation")
+	// swap は auto で常に消すので、最新かどうかを見ない。
+	var c rsCalls
+	e, _, errOut2 := rsEnv(&c)
+	e.openStorage = newerUnverified
+	require.Equal(t, 0, restore(e, []string{"-config", cfg, "-mode", "swap", "-confirm", "elythia", "-id", older}), errOut2.String())
+	assert.True(t, c.cleaned)
 }
 
 func TestRestoreRollback(t *testing.T) {
@@ -346,6 +438,10 @@ func TestDefaultsReachUnreachableServices(t *testing.T) {
 	assert.Error(t, err)
 
 	e := defaultRestoreEnv()
+	// ロールバックの入れ替えは SwitchDatabase を通す。失敗の後に pg_database を
+	// 引き直すので、繋がらなければ「入れ替わったか分からない」になる。
+	err = e.replace(ctx, &bkp.Restorer{Conn: connFor(cfg)}, "postgres", "elythia", "elythia_rolled_back_1", "elythia_before_restore_1")
+	assert.ErrorIs(t, err, bkp.ErrRestoreSwitchUnknown)
 	// 保存先は (1) #3458 の実装で開く。
 	assert.Equal(t, reflect.ValueOf(bkp.OpenStorage).Pointer(), reflect.ValueOf(e.openStorage).Pointer())
 	assert.NotNil(t, e.restore)

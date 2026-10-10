@@ -48,7 +48,7 @@ func defaultRestoreEnv() restoreEnv {
 			return r.Restore(ctx, o)
 		},
 		replace: func(ctx context.Context, r *bkp.Restorer, m, db, keepAs, repl string) error {
-			return r.ReplaceDatabase(ctx, m, db, keepAs, repl)
+			return r.SwitchDatabase(ctx, m, db, keepAs, repl)
 		},
 		cleanRedis: cleanRedis,
 		check:      checkRestored,
@@ -71,7 +71,7 @@ func restore(e restoreEnv, args []string) int {
 	migrations := fs.String("migrations", migrate.CoreDir, "directory of the bundled migrations (its local/ subdirectory is the fork track)")
 	tmpDir := fs.String("tmp-dir", "", "directory for the downloaded dump (default: the system temporary directory)")
 	redisMode := fs.String("redis", redisAuto, "after switching databases: clean (delete timelines, caches and pending deliveries), keep, "+
-		"or auto (clean for -mode swap and -rollback, keep for -mode empty)")
+		"or auto (clean for -mode swap and -rollback; keep for -mode empty when restoring the newest generation, otherwise ask)")
 	if code, ok := cliflag.Parse(fs, args); !ok {
 		return code
 	}
@@ -127,6 +127,11 @@ func restore(e restoreEnv, args []string) int {
 		}
 	}
 
+	if *redisMode == redisAuto && bkp.RestoreMode(*mode) == bkp.RestoreEmpty {
+		if code := e.checkNewest(ctx, r, *id); code != 0 {
+			return code
+		}
+	}
 	res, err := e.restore(ctx, r, bkp.RestoreOptions{
 		ID: *id, Mode: bkp.RestoreMode(*mode), Database: cfg.DB.DB, Confirm: *confirm, MaintenanceDB: *maint,
 	})
@@ -189,6 +194,32 @@ func (e restoreEnv) rollback(ctx context.Context, r *bkp.Restorer, cfg *config.C
 	return e.afterSwitch(ctx, cfg, r.CoreMigrationsDir, clean)
 }
 
+// checkNewest lets -redis auto keep Redis in the empty mode only when the
+// generation to restore is the newest one in the storage.
+//
+// Redis を残してよいのは、戻す DB が Redis と同じ時点のとき (止めてから取った最後の
+// 世代) だけ。古い世代を戻すと、Redis の方が新しいまま残り、戻した DB に無い投稿の
+// 配送や、古い数に足されるリアクション数の差分が出る。どちらか分からなければ、
+// 打った人に -redis を選ばせる。
+func (e restoreEnv) checkNewest(ctx context.Context, r *bkp.Restorer, id string) int {
+	target, _, err := r.ResolveID(ctx, id)
+	if err != nil {
+		fmt.Fprintf(e.stderr, "elythia backup restore: %v\n", err)
+		return 1
+	}
+	newest, err := bkp.NewestGeneration(ctx, r.Storage)
+	if err != nil {
+		fmt.Fprintf(e.stderr, "elythia backup restore: %v\n", err)
+		return 1
+	}
+	if target != newest {
+		fmt.Fprintf(e.stderr, "elythia backup restore: generation %s is not the newest generation in the storage (%s), so redis may hold newer data than the backup; "+
+			"pass -redis clean to delete the timelines, caches and pending deliveries, or -redis keep if redis is as old as the backup\n", target, newest)
+		return 1
+	}
+	return 0
+}
+
 // Values of -redis.
 const (
 	redisAuto  = "auto"
@@ -201,7 +232,7 @@ const (
 //
 // **空の DB へ戻す形では、既定で Redis を消さない。** この形は版を上げるときと
 // 引っ越すときに使い、本体を止めてから取った最後の世代を戻すので、戻した DB は
-// 止めた時点の DB そのもの。Redis に残る配送待ちの job (届いていない Delete など)、
+// 止めた時点の DB そのもの (最新の世代であることは checkNewest が確かめる)。Redis に残る配送待ちの job (届いていない Delete など)、
 // DB へ未反映のリアクション数 (reaction-buffer) は、戻した DB と食い違わず、消すと
 // 失うだけになる。DB を失って古い世代から作り直すときは -redis clean を渡す。
 func cleanRedisFor(v string, mode bkp.RestoreMode) bool {

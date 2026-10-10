@@ -133,6 +133,39 @@ func (rsListErrStorage) List(context.Context, string) ([]ObjectInfo, error) {
 	return nil, errors.New("list failed")
 }
 
+func TestNewestGeneration(t *testing.T) {
+	ctx := context.Background()
+	s := newRSStorage()
+	got, err := NewestGeneration(ctx, s)
+	require.NoError(t, err)
+	assert.Empty(t, got)
+	put := func(id string) {
+		s.putJSON(t, Key(id, MetaFile), Meta{FormatVersion: MetaFormatVersion, ID: id, DumpFile: DumpFile})
+		s.objs[Key(id, DumpFile)] = []byte("dump")
+	}
+	put("20261001T000000Z")
+	put("20261002T000000Z")
+	// meta.json の無い世代 (途中で止まった) は数えない。
+	s.objs[Key("20261003T000000Z", DumpFile)] = []byte("dump")
+	got, err = NewestGeneration(ctx, s)
+	require.NoError(t, err)
+	assert.Equal(t, "20261002T000000Z", got)
+	// dump が無い世代は数えず、読めない meta.json の世代は数える。
+	s.putJSON(t, Key("20261004T000000Z", MetaFile), Meta{FormatVersion: MetaFormatVersion, ID: "20261004T000000Z", DumpFile: DumpFile})
+	got, _ = NewestGeneration(ctx, s)
+	assert.Equal(t, "20261002T000000Z", got)
+	s.putJSON(t, Key("20261005T000000Z", MetaFile), Meta{FormatVersion: MetaFormatVersion + 1, ID: "20261005T000000Z"})
+	got, _ = NewestGeneration(ctx, s)
+	assert.Equal(t, "20261005T000000Z", got)
+
+	_, err = NewestGeneration(ctx, rsListErrStorage{newRSStorage()})
+	assert.ErrorContains(t, err, "list failed")
+	id, verified, err := (&Restorer{Storage: s}).ResolveID(ctx, "20261001T000000Z")
+	require.NoError(t, err)
+	assert.Equal(t, "20261001T000000Z", id)
+	assert.False(t, verified)
+}
+
 func TestResolveLatestListError(t *testing.T) {
 	_, _, err := (&Restorer{Storage: rsListErrStorage{newRSStorage()}}).resolveID(context.Background(), LatestGeneration)
 	assert.ErrorContains(t, err, "list failed")
