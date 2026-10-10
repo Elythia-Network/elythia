@@ -160,7 +160,7 @@ func TestPageRepository_ListPublicByUser(t *testing.T) {
 		`INSERT INTO "page" (id, "updatedAt", title, name, "userId", content, variables, visibility, "hideTitleWhenPinned")
 		 VALUES (?, NOW(), ?, ?, ?, '[]'::jsonb, '[]'::jsonb, ?, false), (?, NOW(), ?, ?, ?, '[]'::jsonb, '[]'::jsonb, ?, false)`,
 		"pg_pub_1", "pub", "p1", u.ID, "public",
-		"pg_priv_1", "priv", "p2", u.ID, "specified",
+		"pg_priv_1", "priv", "p2", u.ID, "private",
 	).Error)
 	defer testDB.Exec(`DELETE FROM "page" WHERE id IN (?, ?)`, "pg_pub_1", "pg_priv_1")
 

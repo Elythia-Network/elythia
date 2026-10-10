@@ -73,7 +73,7 @@ id: aidx             # Misskey-TS側のID生成方式と一致させること
 
 Elythiaの追加テーブルを作り、共有テーブルを upstream の形に揃える。**Misskey-TSが書いたデータは原則として保持される** (例外は `000081` / `000084` / `000085` / `000094`、後述)。`000082` も行を DELETE するが、対象は upstream Misskey に無い `transfer-ownership` が作った行だけで TS 由来のものは含まない。
 
-共有テーブルにも触るものが 18 件あるので、内容と、TS へ戻したときの影響 (保証はしない) を[破壊的なマイグレーション](#破壊的なマイグレーション)にまとめてある。**先に読むこと。**
+共有テーブルにも触るものが 19 件あるので、内容と、TS へ戻したときの影響 (保証はしない) を[破壊的なマイグレーション](#破壊的なマイグレーション)にまとめてある。**先に読むこと。**
 
 ```bash
 # ローカルビルドの場合
@@ -87,7 +87,7 @@ docker compose exec app /app/elythia migrate -config .config/default.yml -direct
 
 ### 破壊的なマイグレーション
 
-「追加のみ」ではない。共有テーブルに触るものが 18 件ある。**うち 14 件は Elythia 側だけが作るもの (列 / FK / index / seed / 重複行 / 譲渡が残した membership) の除去、その初期化、または upstream 追随で、Misskey-TS が書いた列の値には影響しない。残る 4 件 (`000081` / `000084` / `000085` / `000094`) は TS が書いた値にも当たる。**
+「追加のみ」ではない。共有テーブルに触るものが 19 件ある。**うち 14 件は Elythia 側だけが作るもの (列 / FK / index / seed / 重複行 / 譲渡が残した membership) の除去、その初期化、または upstream 追随で、Misskey-TS が書いた列の値には影響しない。残る 5 件 (`000081` / `000084` / `000085` / `000094` / `000121`) は TS が書いた値にも当たる。ただし `000121` が変えるのは値ではなく TS の列の型で、全行を書き直すが、TS が書く値 (`public`) はそのまま残る。**
 
 | migration | 内容 | 位置づけ |
 |---|---|---|
@@ -109,6 +109,7 @@ docker compose exec app /app/elythia migrate -config .config/default.yml -direct
 | `000106` | `abuse_report_notification_recipient` の FK を張り替え (`SET NULL` の Elythia 名 2 本を DROP し、本家と同じ名前の `CASCADE` 3 本を足す) | **upstream 追随** (#3264)。本家 `1713656541000-abuse-report-notification.js` と同じ 3 本 (`userId` -> `user` / `user_profile`、`systemWebhookId` -> `system_webhook`) にする。**TS 製 DB には元から本家の 3 本があるので何もしない** (名前で有無を見て足す)。行は消さない — 直す前に `SET NULL` で宛先が NULL になった通知先は残る。**外部キーを張る前に、本家では作れない形の値を NULL にする** — `user_profile` の無い利用者を指す `userId` (残すと検証で失敗して migration が止まる) と、method に合わない側の参照 (webhook 方式の行の `userId`、email 方式の行の `systemWebhookId`。残すと CASCADE で無関係な削除に巻き込まれて通知先ごと消える)。どれも TS が書く値には当たらず、down でも戻らない |
 | `000107` | `note."pageCount"` をページの content から数え直して backfill (`UPDATE`) | **upstream 追随** (#3293)。Elythia はページの作成・更新・削除で `pageCount` を増減していなかったので、それより前に作ったページが参照するノートを本家と同じ数え方 (`PageService.collectReferencedNotes`) で埋める。**増やす向きにしか直さない** (参照されているノートだけを触る)。TS が維持していれば同じ値になっているので **TS 製 DB では何も変わらない**。down は戻さない (0 に戻すと掃除の保護が外れる) |
 | `000116` | `meta."repositoryUrl"` / `meta."feedbackUrl"` のうち、`000084` / `000085` か起動時の `EnsureInitial` が入れた以前の既定値 (`https://github.com/shiroha-a/mk`、`.../issues/new`) と同じ行を新しい URL で `UPDATE` | **Elythia が自分で入れた値の更新。** リポジトリを `Elythia-Network/elythia` へ移した (#3394) ため。TS が書いた値 (`misskey-dev` の既定値や operator の値) には触らない。down は新しい URL の行を以前の既定値に戻す (旧 URL は GitHub が転送するので開ける) |
+| `000121` | `page."visibility"` の型 `page_visibility_enum` を (`public`, `followers`, `specified`) から (`public`, `private`) に作り替え、`followers` / `specified` の行を `private` に `UPDATE` | **Elythia の機能 (#3479)。** Page に作者だけが見られる `private` を足し、派生版の一つと同じ 2 値にする。本家は作成時に必ず `public` を書き、公開範囲を選ぶ API も画面も持たないので、**TS が書いた行は `public` のまま変わらない**。`followers` / `specified` の行を作れたのは、#3479 より前の Elythia の API だけ。enum が既に 2 値なら何もしない。down は 3 値に戻し、`private` の行を `specified` にする (`followers` だった行と `specified` だった行の区別は戻らない)。TS へ戻したときの影響は「[戻らなくなったもの](#戻らなくなったもの)」の上の段落にある |
 
 #### `000081` について
 
@@ -187,7 +188,7 @@ admin 画面 (全般 → 情報) で上書きする。
 
 **個別の migration を見て「これは安全」と判断しないこと。** 判断材料になりそうなものが 2 つあるが、どちらも当てにならない。
 
-- **`-- data loss:` の宣言。** あるのは 27 本だけで、**宣言が無いまま `DROP TABLE` / `DROP COLUMN` / `DELETE` する down が 51 本ある**。運用も一貫していない — `000076` は `meta` の設定列 1 本を落とすだけで宣言しているが、同じく `meta` の設定列を落とす `000070` は「data loss も無い」と書いている
+- **`-- data loss:` の宣言。** あるのは 28 本だけで、**宣言が無いまま `DROP TABLE` / `DROP COLUMN` / `DELETE` する down が 51 本ある**。運用も一貫していない — `000076` は `meta` の設定列 1 本を落とすだけで宣言しているが、同じく `meta` の設定列を落とす `000070` は「data loss も無い」と書いている
 - **up が冪等かどうか。** `000029` の up は大半が `IF NOT EXISTS` 付きだが、**down は無条件に DROP する**。落ちるのは `user_security_key` / `user_ip` / `user_memo` / `promo_note` / `promo_read` といった **upstream 所有のテーブル**と、`meta` / `user_profile` の 63 列、そして **TypeORM の `migrations` テーブル**。`000067` がわざわざ守っているものを、より悪い形で壊す。宣言は無い。同じ形 (up は冪等、down は無条件 DROP、対象は upstream) は `000030` / `000031` / `000032` / `000038` にもある
 
 方向が違うので別に挙げておくもの:
@@ -273,11 +274,13 @@ Elythia のコンテナは Misskey-TS と同じ **UID/GID 991** で起動する�
 
 今の版でどこまで戻れるかは、`make dropin-mkgo-born-test` (Elythia 生まれの DB を TS に引き渡す) と `make dropin-swap-test` の復路の段階 (TS → Elythia → TS) で**測っている**。どちらも守る対象ではなく、意図的な変更で通らなくなったら期待値を更新し、何が戻らなくなったかを下の「[戻らなくなったもの](#戻らなくなったもの)」に記録する (手順は [dropin-e2e.md](dropin-e2e.md#復路は測る対象-3191))。Elythia が追加したテーブルは Misskey-TS からは無視される。
 
-[破壊的なマイグレーション](#破壊的なマイグレーション) の 18 件は戻らない。うち 14 件は Elythia が自分で作ったものの除去・初期化か upstream 追随なので**戻す必要が無い**。`000056` / `000081` / `000082` が消した行と `000053` / `000067` / `000084` / `000085` が上書きした値は、down が `SELECT 1;` の no-op なので復元できない。**`000094` は down を持つが、それでも戻らない** — 消すのは自分で足した列と index だけで、正規化した `ip` の値と統合で消えた行は復元できない (統合前の行数も個別の観測時刻も残っていない)。**`000084` / `000085` が書き換えるのは `meta."repositoryUrl"` と `meta."feedbackUrl"` なので、TS へ戻すときは admin 画面で設定し直すこと** (Elythia のリポジトリと issues を案内したままになる)。この経路を CI で測っているのは `make dropin-swap-test` (TS → Elythia → TS) で、`make dropin-mkgo-born-test` は逆に Elythia 生まれの DB を TS に引き渡せるかを見ている。
+[破壊的なマイグレーション](#破壊的なマイグレーション) の 19 件は戻らない。うち 14 件は Elythia が自分で作ったものの除去・初期化か upstream 追随なので**戻す必要が無い**。`000056` / `000081` / `000082` が消した行と `000053` / `000067` / `000084` / `000085` が上書きした値は、down が `SELECT 1;` の no-op なので復元できない。**`000094` は down を持つが、それでも戻らない** — 消すのは自分で足した列と index だけで、正規化した `ip` の値と統合で消えた行は復元できない (統合前の行数も個別の観測時刻も残っていない)。**`000084` / `000085` が書き換えるのは `meta."repositoryUrl"` と `meta."feedbackUrl"` なので、TS へ戻すときは admin 画面で設定し直すこと** (Elythia のリポジトリと issues を案内したままになる)。この経路を CI で測っているのは `make dropin-swap-test` (TS → Elythia → TS) で、`make dropin-mkgo-born-test` は逆に Elythia 生まれの DB を TS に引き渡せるかを見ている。
 
 migration の注記やコードのコメントには、TS へ戻せることを設計の理由にした記述が残っている。**それらは当時の判断の記録で、今は保証ではない。** 往路にも要る制約 (upstream 由来の index を触らない、TS が書いた RSA 鍵のテーブルをそのまま読む、など) は、往路の理由で引き続き守る。
 
 **プラグインが管理するアカウント (#3468) は、TS へ戻すと普通のアカウントになる。** TS は `user."managedByPlugin"` を読まないので、Elythia がしていたログインの拒否が外れ、そのアカウントのネイティブトークンが外からのリクエストでも通るようになる (パスワードは持たないので、パスワードではログインできないまま)。戻す前に該当するアカウントを凍結するか削除すること。詳細は [divergence/db.md](divergence/db.md) の `managedByPlugin` の行と [divergence/security.md](divergence/security.md) §6。復路の検証は落ちない (列が無視されるだけ) ので、下の表には載せていない。
+
+**非公開の Page (#3479) は、TS へ戻すと URL を知っている人に見える。** 本家の `users/pages` と注目の Page は `public` だけを出すので、一覧には現れない。しかし `pages/show` は公開範囲を見ないので、ID か名前で引けば作者以外にも中身が返り、画面でも開ける。`/@<user>/pages/<name>` の HTML の metadata にも題名と要約が出る。過去に like した人の `i/page-likes` にも出る。戻す前に、非公開の Page を削除するか公開してよい内容にすること。`000121` の down を流すと `private` は `specified` になるが、本家の `pages/show` はこれも見ないので結果は同じ。復路の検証は落ちない (TS が書く `public` は新しい型にもある) ので、下の表には載せていない。
 
 ### 戻らなくなったもの
 

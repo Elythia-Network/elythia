@@ -251,23 +251,41 @@ func (h *Handler) fillPinnedPages(viewer *model.User, targets []userpack.DetailT
 		return
 	}
 	pages := map[string]*model.Page{}
+	// 読み出しに失敗したときは、private かどうかが分からない。ID を残すと
+	// private の Page の ID が出うるので、そのときは他人には ID も出さない (#3479)。
+	lookupFailed := false
 	if len(pageIDs) == 1 {
-		if p, err := h.pageRepo.FindByID(pageIDs[0]); err == nil && p != nil {
+		p, err := h.pageRepo.FindByID(pageIDs[0])
+		switch {
+		case err == nil && p != nil:
 			pages[p.ID] = p
+		case err != nil && !repository.IsNotFound(err):
+			lookupFailed = true
 		}
 	} else if rows, err := h.pageRepo.FindManyByIDs(pageIDs); err == nil {
 		for _, p := range rows {
 			pages[p.ID] = p
 		}
+	} else {
+		lookupFailed = true
 	}
 	for _, t := range targets {
 		if t.Detailed.PinnedPageID == nil {
 			continue
 		}
-		if p := pages[*t.Detailed.PinnedPageID]; pinnedPageVisibleTo(p, viewer) {
+		p := pages[*t.Detailed.PinnedPageID]
+		if pinnedPageVisibleTo(p, viewer) {
 			// golden Page は user 必須。pinnedPage は profile user 自身の page
 			// なので owner=u を渡して user (UserLite) を埋める (#1266 follow-up)。
 			t.Detailed.PinnedPage = entity.PackPageWithContext(p, entity.PackPageContext{IDGen: h.idGen, Owner: t.User})
+		} else if p != nil || (lookupFailed && (viewer == nil || t.User == nil || viewer.ID != t.User.ID)) {
+			// private の Page は ID も出さない (#3479)。ID が出ると、作者以外に
+			// private の Page を持っていることと、その ID が分かる。
+			//
+			// Page が無いときは ID を残す。本家は pinnedPageId に FK
+			// (ON DELETE SET NULL) があり削除済みの ID は残らないが、Elythia で作った
+			// DB には FK が無く ID が残る (#3479 より前からの差)。
+			t.Detailed.PinnedPageID = nil
 		}
 	}
 }

@@ -338,8 +338,8 @@ func TestPageRepository_UpdateFields_EmptyVisibilityIsRejectedByColumn(t *testin
 	assert.Contains(t, err.Error(), "page_visibility_enum")
 
 	// 対照: 正しい値は通ること。
-	require.NoError(t, repo.UpdateFields(p.ID, map[string]any{"visibility": "followers"}))
+	require.NoError(t, repo.UpdateFields(p.ID, map[string]any{"visibility": "private"}))
 	got, err := repo.FindByID(p.ID)
 	require.NoError(t, err)
-	assert.Equal(t, model.PageVisibilityFollowers, got.Visibility)
+	assert.Equal(t, model.PageVisibilityPrivate, got.Visibility)
 }

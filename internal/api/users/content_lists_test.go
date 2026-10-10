@@ -220,7 +220,7 @@ func TestPages_HidesNonPublic(t *testing.T) {
 	userRepo.Users["owner"] = &model.User{ID: "owner", Username: "owner", UsernameLower: "owner"}
 	repo := testutil.NewMockPageRepository()
 	require.NoError(t, repo.Create(&model.Page{ID: "p1", UserID: "owner", Visibility: model.PageVisibilityPublic}))
-	require.NoError(t, repo.Create(&model.Page{ID: "p2", UserID: "owner", Visibility: model.PageVisibilityFollowers}))
+	require.NoError(t, repo.Create(&model.Page{ID: "p2", UserID: "owner", Visibility: model.PageVisibilityPrivate}))
 	h.SetPageRepo(repo)
 	rec := postStub(h.Pages, `{"userId":"owner"}`, nil)
 	var rows []map[string]any

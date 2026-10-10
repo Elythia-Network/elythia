@@ -1343,7 +1343,7 @@ func (h *Handler) HasUGCVisibility() bool { return h.ugcVisibilityNow() != "" }
 // 同じ関数の 14 行上ではピン留めノートに可視性ゲートを掛けているのに、Page 側の
 // 枝には viewer への参照が 1 つも無く、`content` (ブロックツリー全体) / `script` /
 // `title` / `summary` / `variables` がそのまま出ていた。Page は
-// `pages/create` が `visibility` を無検証で受け、`i/update` の `pinnedPageId` も
+// `pages/create` が `visibility` を受け、`i/update` の `pinnedPageId` も
 // 所有者しか見ないので、前提を作るのは容易。
 //
 // upstream も `pages/show` にゲートが無いので `両方` に当たるが、mk-go は

@@ -3,6 +3,7 @@ package users
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -2324,6 +2325,136 @@ func TestShow_PinnedPage_Populated(t *testing.T) {
 	assert.Equal(t, "user1", pageUser["id"])
 }
 
+// TestShow_PinnedPage_PrivateHidesID checks that a private pinned page exposes
+// neither its body nor its ID to anyone but the author (#3479).
+func TestShow_PinnedPage_PrivateHidesID(t *testing.T) {
+	cases := []struct {
+		name   string
+		viewer *model.User
+		wantID bool
+	}{
+		{name: "anonymous gets neither", viewer: nil},
+		{name: "stranger gets neither", viewer: &model.User{ID: "viewer1"}},
+		{name: "author gets both", viewer: &model.User{ID: "user1"}, wantID: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, userRepo := newTestHandler(t)
+			addTestUser(userRepo)
+			pageID := "pg_secret"
+			userRepo.Profiles["user1"] = &model.UserProfile{
+				UserID:       "user1",
+				Fields:       datatypes.JSON([]byte("[]")),
+				PinnedPageID: &pageID,
+			}
+			h.SetPageRepo(&stubPageRepoForPin{page: &model.Page{
+				ID: pageID, Title: "SECRET-TITLE", UserID: "user1", Visibility: model.PageVisibilityPrivate,
+			}})
+
+			e := echo.New()
+			req := httptest.NewRequest(http.MethodPost, "/api/users/show", strings.NewReader(`{"userId": "user1"}`))
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+			if tc.viewer != nil {
+				c.Set("misskeyUser", tc.viewer)
+			}
+			require.NoError(t, h.Show(c))
+
+			var resp map[string]any
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+			if tc.wantID {
+				assert.Equal(t, pageID, resp["pinnedPageId"])
+				assert.NotNil(t, resp["pinnedPage"])
+				return
+			}
+			assert.Nil(t, resp["pinnedPageId"])
+			assert.Nil(t, resp["pinnedPage"])
+			assert.NotContains(t, rec.Body.String(), pageID)
+			assert.NotContains(t, rec.Body.String(), "SECRET-TITLE")
+		})
+	}
+}
+
+// TestShow_PinnedPage_MissingKeepsID: Page が無い (削除済み) ときは pinnedPageId を
+// 残し、pinnedPage だけを null にする。本家は FK の ON DELETE SET NULL で ID が
+// 消えるが、Elythia の DB には FK が無い (#3479 より前からの差)。#3479 で private の
+// ID を隠すようにしたが、その条件を広げすぎていないかを見る。
+func TestShow_PinnedPage_MissingKeepsID(t *testing.T) {
+	h, userRepo := newTestHandler(t)
+	addTestUser(userRepo)
+	pageID := "pg_gone"
+	userRepo.Profiles["user1"] = &model.UserProfile{
+		UserID:       "user1",
+		Fields:       datatypes.JSON([]byte("[]")),
+		PinnedPageID: &pageID,
+	}
+	h.SetPageRepo(&stubPageRepoForPin{page: nil})
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/users/show", strings.NewReader(`{"userId": "user1"}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	require.NoError(t, h.Show(c))
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, pageID, resp["pinnedPageId"])
+	assert.Nil(t, resp["pinnedPage"])
+}
+
+// failingPageRepoForPin fails every page lookup.
+type failingPageRepoForPin struct{ stubPageRepoForPin }
+
+func (s *failingPageRepoForPin) FindByID(string) (*model.Page, error) {
+	return nil, errors.New("db down")
+}
+
+// TestShow_PinnedPage_LookupFailureHidesIDFromOthers: Page の読み出しに失敗すると
+// private かどうか分からないので、他人には ID を出さない (#3479)。本人には残す。
+func TestShow_PinnedPage_LookupFailureHidesIDFromOthers(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		viewer *model.User
+		wantID bool
+	}{
+		{name: "anonymous", viewer: nil},
+		{name: "author", viewer: &model.User{ID: "user1"}, wantID: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, userRepo := newTestHandler(t)
+			addTestUser(userRepo)
+			pageID := "pg_unknown"
+			userRepo.Profiles["user1"] = &model.UserProfile{
+				UserID:       "user1",
+				Fields:       datatypes.JSON([]byte("[]")),
+				PinnedPageID: &pageID,
+			}
+			h.SetPageRepo(&failingPageRepoForPin{})
+
+			e := echo.New()
+			req := httptest.NewRequest(http.MethodPost, "/api/users/show", strings.NewReader(`{"userId": "user1"}`))
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+			if tc.viewer != nil {
+				c.Set("misskeyUser", tc.viewer)
+			}
+			require.NoError(t, h.Show(c))
+
+			var resp map[string]any
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+			if tc.wantID {
+				assert.Equal(t, pageID, resp["pinnedPageId"])
+			} else {
+				assert.Nil(t, resp["pinnedPageId"])
+			}
+			assert.Nil(t, resp["pinnedPage"])
+		})
+	}
+}
+
 func TestShow_PinnedFields_Defaults(t *testing.T) {
 	h, userRepo := newTestHandler(t)
 	addTestUser(userRepo)
@@ -2466,7 +2597,7 @@ func TestPinnedPageVisibleTo(t *testing.T) {
 	pub := &model.Page{ID: "p1", UserID: "owner", Visibility: model.PageVisibilityPublic}
 	require.True(t, pinnedPageVisibleTo(pub, nil), "public は未認証にも見せる")
 
-	hidden := &model.Page{ID: "p2", UserID: "owner", Visibility: model.PageVisibilityFollowers}
+	hidden := &model.Page{ID: "p2", UserID: "owner", Visibility: model.PageVisibilityPrivate}
 	require.False(t, pinnedPageVisibleTo(hidden, nil), "非公開は未認証に見せない")
 	require.False(t, pinnedPageVisibleTo(hidden, stranger), "非公開は他人に見せない")
 	require.True(t, pinnedPageVisibleTo(hidden, owner), "本人には見せる")

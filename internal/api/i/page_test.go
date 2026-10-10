@@ -118,6 +118,37 @@ func TestPageLikes_DropsLikeWithoutOwner(t *testing.T) {
 	assert.Empty(t, got, "like with unresolved owner must be dropped, not emitted with missing user")
 }
 
+// TestPageLikes_DropsPrivatePageOfOthers: 公開中に like した Page が後から
+// private になったら、like した人の一覧からは外す (#3479)。公開の Page は残る。
+func TestPageLikes_DropsPrivatePageOfOthers(t *testing.T) {
+	h, userRepo := newExtraHandler(t)
+	userRepo.Users["author"] = &model.User{ID: "author", Username: "author", UsernameLower: "author"}
+	idGen, _ := id.NewGenerator("aidx")
+	publicID := idGen.Generate(time.Now())
+	privateID := idGen.Generate(time.Now())
+	pageRepo := testutil.NewMockPageRepository()
+	require.NoError(t, pageRepo.Create(&model.Page{
+		ID: publicID, UserID: "author", Title: "PUBLIC", Name: "a",
+		Visibility: model.PageVisibilityPublic,
+	}))
+	require.NoError(t, pageRepo.Create(&model.Page{
+		ID: privateID, UserID: "author", Title: "SECRET-TITLE", Name: "b",
+		Visibility: model.PageVisibilityPrivate,
+	}))
+	h.SetPageRepo(pageRepo)
+	pageLike := testutil.NewMockPageLikeRepository()
+	require.NoError(t, pageLike.Create(&model.PageLike{ID: "pl1", UserID: stubUser.ID, PageID: publicID}))
+	require.NoError(t, pageLike.Create(&model.PageLike{ID: "pl2", UserID: stubUser.ID, PageID: privateID}))
+	h.SetPageLikeRepo(pageLike)
+	rec := postExtra(h.PageLikes, `{}`, stubUser)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.NotContains(t, rec.Body.String(), "SECRET-TITLE")
+	var got []map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.Len(t, got, 1)
+	assert.Equal(t, "pl1", got[0]["id"])
+}
+
 // TestPageLikes_CursorPagination: untilID 指定で id < untilID の row のみ
 // 返ることを確認 (#1136 follow-up、frontend Paginator の fetchOlder が
 // untilId を投げてくるが、cursor 未対応だと同 page を無限ループする)。

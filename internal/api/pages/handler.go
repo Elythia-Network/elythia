@@ -322,6 +322,7 @@ func (h *Handler) Update(c echo.Context) error {
 			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_PAGE", "No such page.", "21149b9e-3616-4778-9592-c4ce89f5a864"))
 		// upstream TS pages/update は accessDenied (UUID 3c15cd52) を持つため、
 		// show (存在隠蔽 404) とは異なり 403 を維持する (#1432)。
+		// private の Page は core が ErrPageNotFound にする (#3479)。
 		case errors.Is(err, corepage.ErrAccessDenied):
 			return c.JSON(http.StatusBadRequest, apierr.Error("ACCESS_DENIED", "Access denied.", "3c15cd52-3b4b-4274-967d-6456fc4f792b"))
 		case errors.Is(err, corepage.ErrPageNameRequired),
@@ -354,6 +355,7 @@ func (h *Handler) Delete(c echo.Context) error {
 			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_PAGE", "No such page.", "eb0c6e1d-d519-4764-9486-52a7e1c6392a"))
 		// upstream TS pages/delete は accessDenied (UUID 8b741b3e) を持つため、
 		// show (存在隠蔽 404) とは異なり 403 を維持する (#1432)。
+		// private の Page は core が ErrPageNotFound にする (#3479)。
 		case errors.Is(err, corepage.ErrAccessDenied):
 			return c.JSON(http.StatusBadRequest, apierr.Error("ACCESS_DENIED", "Access denied.", "8b741b3e-2c22-44b3-a15f-29949aa1601e"))
 		}
@@ -506,7 +508,7 @@ func (h *Handler) PagePush(c echo.Context) error {
 	}
 	// TS本家はfindOneByのみで可視性チェックをしないのでFindByIDを
 	// 使って合わせる。見つからなければ404に丸め、存在するIDだけに
-	// emitする。
+	// emitする。private だけは下で作者に限る。
 	p, err := h.svc.FindByID(req.PageID)
 	// **service の sentinel を見る。** page.Service は not-found を
 	// ErrPageNotFound に置き換えるので、repository.IsNotFound では判定できない。
@@ -514,7 +516,9 @@ func (h *Handler) PagePush(c echo.Context) error {
 		// **DB 障害を not-found に丸めない** (#2792)。
 		return apierr.JSONInternalError(c)
 	}
-	if err != nil {
+	// private の Page を見られるのは作者だけなので、作者以外からのイベントは
+	// 「無い」として扱う (#3479)。本家には private が無い。
+	if err != nil || (p.Visibility != model.PageVisibilityPublic && p.UserID != caller.ID) {
 		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_PAGE", "No such page.", "4a13ad31-6729-46b4-b9af-e86b265c2e74"))
 	}
 	if h.mainStreamPublisher == nil || h.userSource == nil {
@@ -661,7 +665,7 @@ func (h *Handler) HasDriveFileRepo() bool { return h.driveFileRepo != nil }
 // (`public`) が入る。Go の string では省略と空文字を区別できない。
 func validPageVisibility(v model.PageVisibility) bool {
 	switch v {
-	case "", model.PageVisibilityPublic, model.PageVisibilityFollowers, model.PageVisibilitySpecified:
+	case "", model.PageVisibilityPublic, model.PageVisibilityPrivate:
 		return true
 	}
 	return false

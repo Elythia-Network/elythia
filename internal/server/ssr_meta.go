@@ -161,7 +161,6 @@ func linkTag(rel, typ, href string) string {
 const (
 	ssrPermalinkCacheControl = "public, max-age=15"
 	ssrArchiveCacheControl   = "public, max-age=3600"
-	ssrPrivateCacheControl   = "private, max-age=0, must-revalidate"
 )
 
 // remoteHost reports whether host identifies another instance.
@@ -637,7 +636,11 @@ func (h *ssrMetaHandler) UserPagePage(c echo.Context) error {
 	}
 	p := h.profileOf(u.ID)
 	page, err := h.pageRepo.FindByUserAndName(u.ID, c.Param("page"))
-	if err != nil || page == nil {
+	// private の Page は作者にしか見せない (#3479)。HTML は閲覧者を区別せずに
+	// 返すので、作者以外に題名・要約・ID を出さないよう「無い」ときと同じ応答に
+	// する (Cache-Control も同じにしないと、ヘッダーで存在が分かる)。作者は
+	// SPA が pages/show で本文を引くので困らない。本家は private を持たない。
+	if err != nil || page == nil || page.Visibility != model.PageVisibilityPublic {
 		return h.render(c, shellOverrides{Head: userHead(u, p, false)})
 	}
 	og := propertyTag("og:type", "article") +
@@ -652,18 +655,12 @@ func (h *ssrMetaHandler) UserPagePage(c echo.Context) error {
 	} else {
 		og += authorImageOG(h.avatarURL(u))
 	}
-	// upstream は公開ページだけ共有キャッシュに載せ、それ以外は revalidate を
-	// 強制する (limited / specified なページが CDN に残らないようにする)。
-	cache := ssrPermalinkCacheControl
-	if page.Visibility != model.PageVisibilityPublic {
-		cache = ssrPrivateCacheControl
-	}
 	return h.render(c, shellOverrides{
 		Head:         userHead(u, p, false) + metaTag("misskey:page-id", page.ID),
 		OG:           og,
 		Title:        h.pageTitle(page.Title),
 		Description:  strOrEmpty(page.Summary),
-		CacheControl: cache,
+		CacheControl: ssrPermalinkCacheControl,
 		RobotsTag:    robotsTagsFor(p),
 	})
 }
