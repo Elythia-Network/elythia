@@ -23,12 +23,21 @@ type DirStorage struct {
 	root string
 }
 
-// NewDirStorage returns a DirStorage rooted at root, which must already exist
-// and be a directory.
+// DirMarkerFile is the file that must exist at the root of a directory
+// storage. DirStorage refuses a root without it.
 //
-// 根のディレクトリを作らないのが要点。NAS の mount が外れていると mount 先の
-// ディレクトリ自体が無いことが多く、ここで作ると同じホストのディスクへ黙って
-// 書き始める (同じホストのディスクはバックアップに数えない、#3457)。
+// 根のディレクトリがあるだけでは、別の機器が mount されているとは言えない。compose の
+// bind mount では、NAS の mount が外れてもホストの空のディレクトリがそのまま見え、
+// そこへ書くと同じホストのディスクにバックアップを置くことになる (同じホストの
+// ディスクはバックアップに数えない、#3457)。運営者が mount した先に作った目印が
+// 見えることを、書く前の条件にする。
+const DirMarkerFile = ".elythia-backup"
+
+// NewDirStorage returns a DirStorage rooted at root, which must already exist,
+// be a directory and contain DirMarkerFile.
+//
+// 根のディレクトリも目印も作らない。作ると、mount が外れたときに同じホストの
+// ディスクへ黙って書き始める。
 func NewDirStorage(root string) (*DirStorage, error) {
 	if root == "" {
 		return nil, errors.New("backup: storage.dir.path is empty")
@@ -44,7 +53,21 @@ func NewDirStorage(root string) (*DirStorage, error) {
 	if !fi.IsDir() {
 		return nil, fmt.Errorf("backup: storage directory %s is not a directory", abs)
 	}
+	if _, err := os.Stat(filepath.Join(abs, DirMarkerFile)); err != nil {
+		return nil, fmt.Errorf("backup: %s has no %s. Is the backup device mounted there? "+
+			"Create the file on the mounted device (see docs/backup.md): %w", abs, DirMarkerFile, err)
+	}
 	return &DirStorage{root: abs}, nil
+}
+
+// CreateDirMarker writes DirMarkerFile into root, which must already exist.
+// Run it once on the mounted device; tests use it to prepare a storage.
+func CreateDirMarker(root string) error {
+	f, err := os.OpenFile(filepath.Join(root, DirMarkerFile), os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("backup: create %s: %w", DirMarkerFile, err)
+	}
+	return f.Close()
 }
 
 // Root returns the absolute path of the storage directory.
@@ -54,6 +77,9 @@ func (d *DirStorage) Root() string { return d.root }
 // slash-separated paths (no "..", no empty or temp-file segments).
 func (d *DirStorage) path(key string) (string, error) {
 	if key == "" || strings.HasPrefix(key, "/") || strings.Contains(key, `\`) || path.Clean(key) != key {
+		return "", fmt.Errorf("backup: invalid key %q", key)
+	}
+	if key == DirMarkerFile {
 		return "", fmt.Errorf("backup: invalid key %q", key)
 	}
 	for _, seg := range strings.Split(key, "/") {
@@ -66,7 +92,43 @@ func (d *DirStorage) path(key string) (string, error) {
 
 // Put writes r to a temporary file next to key and renames it into place, so
 // a failed Put never leaves a partial file under key.
-func (d *DirStorage) Put(ctx context.Context, key string, r io.Reader) (err error) {
+func (d *DirStorage) Put(ctx context.Context, key string, r io.Reader) error {
+	return d.put(ctx, key, r, func(tmp, p string) error {
+		if err := os.Rename(tmp, p); err != nil {
+			return fmt.Errorf("backup: rename %s: %w", key, err)
+		}
+		return nil
+	})
+}
+
+// PutNew is Put, except that it fails with ErrExists instead of replacing an
+// existing key.
+//
+// 一時ファイルを hard link で置く。link は置き先が既にあれば失敗するので、同じ key へ
+// 同時に書いても片方だけが通る。link を持たないファイルシステム (一部の SMB など) では、
+// 有無を確かめてから rename する形に落ちる。その間に割り込まれる隙は残る。
+func (d *DirStorage) PutNew(ctx context.Context, key string, r io.Reader) error {
+	return d.put(ctx, key, r, func(tmp, p string) error {
+		err := os.Link(tmp, p)
+		switch {
+		case err == nil:
+			_ = os.Remove(tmp)
+			return nil
+		case errors.Is(err, fs.ErrExist):
+			return ErrExists
+		}
+		if _, serr := os.Lstat(p); serr == nil {
+			return ErrExists
+		}
+		if err := os.Rename(tmp, p); err != nil {
+			return fmt.Errorf("backup: rename %s: %w", key, err)
+		}
+		return nil
+	})
+}
+
+// put writes r to a temporary file next to key and hands it to place.
+func (d *DirStorage) put(ctx context.Context, key string, r io.Reader, place func(tmp, p string) error) (err error) {
 	p, err := d.path(key)
 	if err != nil {
 		return err
@@ -82,25 +144,29 @@ func (d *DirStorage) Put(ctx context.Context, key string, r io.Reader) (err erro
 		return fmt.Errorf("backup: create temp file: %w", err)
 	}
 	tmp := f.Name()
+	closed := false
 	defer func() {
 		if err != nil {
-			_ = f.Close()
+			if !closed {
+				_ = f.Close()
+			}
 			_ = os.Remove(tmp)
 		}
 	}()
 	if _, err = io.Copy(f, ctxReader{ctx: ctx, r: r}); err != nil {
 		return fmt.Errorf("backup: write %s: %w", key, err)
 	}
-	// rename の前に中身をディスクへ落とす。落とさずに rename すると、電源断の後に
+	// 置く前に中身をディスクへ落とす。落とさずに rename すると、電源断の後に
 	// 名前だけあって中身が空のファイルが残りうる。
 	if err = f.Sync(); err != nil {
 		return fmt.Errorf("backup: sync %s: %w", key, err)
 	}
+	closed = true
 	if err = f.Close(); err != nil {
 		return fmt.Errorf("backup: close %s: %w", key, err)
 	}
-	if err = os.Rename(tmp, p); err != nil {
-		return fmt.Errorf("backup: rename %s: %w", key, err)
+	if err = place(tmp, p); err != nil {
+		return err
 	}
 	syncDir(dir)
 	return nil
@@ -171,7 +237,7 @@ func (d *DirStorage) List(_ context.Context, prefix string) ([]ObjectInfo, error
 			return err
 		}
 		key := filepath.ToSlash(rel)
-		if !strings.HasPrefix(key, prefix) {
+		if key == DirMarkerFile || !strings.HasPrefix(key, prefix) {
 			return nil
 		}
 		fi, err := e.Info()

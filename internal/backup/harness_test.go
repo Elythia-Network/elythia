@@ -144,6 +144,7 @@ func (p *pgEnv) exec(t *testing.T, sqls ...string) {
 func (p *pgEnv) seedSimple(t *testing.T) {
 	t.Helper()
 	p.exec(t,
+		`CREATE EXTENSION pg_trgm`,
 		`CREATE TABLE note (id bigserial PRIMARY KEY, body text NOT NULL)`,
 		`INSERT INTO note (body) SELECT 'note ' || g FROM generate_series(1, 1000) g`,
 		`CREATE SCHEMA other`,
@@ -292,4 +293,12 @@ func randomHex(t *testing.T, n int) string {
 	_, err := rand.Read(b)
 	require.NoError(t, err)
 	return hex.EncodeToString(b)
+}
+
+// markedDir returns a new directory that a DirStorage accepts.
+func markedDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	require.NoError(t, CreateDirMarker(dir))
+	return dir
 }

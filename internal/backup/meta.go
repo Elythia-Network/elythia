@@ -31,6 +31,17 @@ type Meta struct {
 	// DatabaseSettings are the per-database settings (ALTER DATABASE ... SET)
 	// that pg_dump does not include, as "name=value" (#3461).
 	DatabaseSettings []string `json:"databaseSettings"`
+	// DatabaseLocale is the encoding and locale the database was created
+	// with. A restore target must be created with the same values (#3459,
+	// #3461).
+	DatabaseLocale DatabaseLocale `json:"databaseLocale"`
+	// Extensions are the installed extensions (pg_extension). A restore
+	// target needs each of them available, or pg_restore fails at
+	// CREATE EXTENSION.
+	Extensions []ExtensionInfo `json:"extensions"`
+	// PgDumpVersion is the first line of `pg_dump --version` of the program
+	// that took the dump.
+	PgDumpVersion string `json:"pgDumpVersion"`
 
 	// DumpFile is the key of the dump relative to the generation directory.
 	DumpFile string `json:"dumpFile"`
@@ -42,6 +53,27 @@ type Meta struct {
 	Encrypted   bool   `json:"encrypted"`
 	// Encryption names the scheme ("age") when Encrypted.
 	Encryption string `json:"encryption,omitempty"`
+}
+
+// DatabaseLocale is from pg_database for the dumped database.
+type DatabaseLocale struct {
+	// Encoding is the server encoding name, such as "UTF8".
+	Encoding string `json:"encoding"`
+	Collate  string `json:"collate"`
+	Ctype    string `json:"ctype"`
+	// Provider is "libc", "icu" or "builtin" (datlocprovider). Empty on
+	// servers older than PostgreSQL 15.
+	Provider string `json:"provider,omitempty"`
+	// Locale is the ICU or builtin locale (datlocale, daticulocale before
+	// PostgreSQL 17). Empty for libc.
+	Locale string `json:"locale,omitempty"`
+}
+
+// ExtensionInfo is one row of pg_extension.
+type ExtensionInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+	Schema  string `json:"schema"`
 }
 
 // MigrationState is one row of a migration bookkeeping table.

@@ -142,7 +142,7 @@ func TestDefaultEnv(t *testing.T) {
 
 func TestTakeAndList(t *testing.T) {
 	c := startDB(t)
-	dir := t.TempDir()
+	dir := markedDir(t)
 	cfg := writeConfig(t, c, dirBackupYAML(dir, ""))
 	ctx := context.Background()
 
@@ -187,7 +187,7 @@ func TestTakeAndList(t *testing.T) {
 
 func TestTake_Encrypted(t *testing.T) {
 	c := startDB(t)
-	dir := t.TempDir()
+	dir := markedDir(t)
 	id, err := age.GenerateX25519Identity()
 	require.NoError(t, err)
 	cfg := writeConfig(t, c, dirBackupYAML(dir, fmt.Sprintf("  encryption:\n    enabled: true\n    recipients:\n      - %s\n", id.Recipient())))
@@ -207,7 +207,7 @@ func TestTake_Encrypted(t *testing.T) {
 func TestTake_Failures(t *testing.T) {
 	c := startDB(t)
 	ctx := context.Background()
-	dir := t.TempDir()
+	dir := markedDir(t)
 	for _, tc := range []struct {
 		name, backupYAML, want string
 		dumpConnErr            bool
@@ -215,6 +215,7 @@ func TestTake_Failures(t *testing.T) {
 		{name: "no backup section", backupYAML: "", want: "no backup: section"},
 		{name: "unknown storage", backupYAML: "backup:\n  storage:\n    type: local\n", want: "unknown storage.type"},
 		{name: "missing directory", backupYAML: dirBackupYAML(filepath.Join(dir, "unmounted"), ""), want: "storage directory"},
+		{name: "directory without the marker", backupYAML: dirBackupYAML(t.TempDir(), ""), want: backup.DirMarkerFile},
 		{name: "encryption without recipients", backupYAML: dirBackupYAML(dir, "  encryption:\n    enabled: true\n"), want: "recipients is empty"},
 		{name: "pg_dump connection", backupYAML: dirBackupYAML(dir, ""), want: "pg_dump connection", dumpConnErr: true},
 		{name: "pg_dump missing", backupYAML: dirBackupYAML(dir, "  tools:\n    pgDump: /nonexistent/pg_dump\n"), want: "/nonexistent/pg_dump"},
@@ -233,9 +234,18 @@ func TestTake_Failures(t *testing.T) {
 	}
 	entries, err := os.ReadDir(dir)
 	require.NoError(t, err)
-	assert.Empty(t, entries, "failed takes leave nothing in the storage")
+	require.Len(t, entries, 1, "failed takes leave nothing in the storage")
+	assert.Equal(t, backup.DirMarkerFile, entries[0].Name())
 
-	e, _, stderr := testEnv(nil)
+	// db.host が URL として読めなくても、ログに DB のパスワードを出さない。
+	leak := filepath.Join(t.TempDir(), "default.yml")
+	require.NoError(t, os.WriteFile(leak, []byte("url: http://127.0.0.1:3000/\nport: 3000\ndb:\n  host: db x\n  port: 5432\n  db: x\n  user: mk\n  pass: SECRETPW\n"+dirBackupYAML(dir, "")), 0o600))
+	e, stdout, stderr := testEnv(nil)
+	assert.Equal(t, 1, take(ctx, e, []string{"-config", leak}))
+	assert.Contains(t, stderr.String(), "db.host")
+	assert.NotContains(t, stderr.String()+stdout.String(), "SECRETPW")
+
+	e, _, stderr = testEnv(nil)
 	assert.Equal(t, 1, take(ctx, e, []string{"-config", filepath.Join(t.TempDir(), "absent.yml")}))
 	assert.Contains(t, stderr.String(), "failed to load config")
 }
@@ -268,7 +278,7 @@ func TestList_Failures(t *testing.T) {
 	assert.Equal(t, 1, list(ctx, e, []string{"-config", cfgPath("")}))
 	assert.Contains(t, stderr.String(), "no backup: section")
 
-	dir := t.TempDir()
+	dir := markedDir(t)
 	e, _, stderr = testEnv(nil)
 	e.openStorage = func(config.BackupStorageOptions) (backup.Storage, error) { return failingList{}, nil }
 	assert.Equal(t, 1, list(ctx, e, []string{"-config", cfgPath(dirBackupYAML(dir, ""))}))
@@ -277,31 +287,36 @@ func TestList_Failures(t *testing.T) {
 
 func TestList_UnreadableAndVerified(t *testing.T) {
 	ctx := context.Background()
-	dir := t.TempDir()
+	dir := markedDir(t)
 	st, err := backup.NewDirStorage(dir)
 	require.NoError(t, err)
 	put := func(key, body string) { require.NoError(t, st.Put(ctx, key, strings.NewReader(body))) }
 	put(backup.Key("20261001T000000Z", backup.MetaFile), `{"formatVersion":99,"id":"20261001T000000Z"}`)
-	put(backup.Key("20261002T000000Z", backup.MetaFile), `{"formatVersion":1,"id":"20261002T000000Z","elythiaVersion":"2.0.0","encrypted":true,"migrations":[{"table":"schema_migrations","version":5,"dirty":true}]}`)
+	put(backup.Key("20261002T000000Z", backup.DumpFileAge), "enc")
+	put(backup.Key("20261002T000000Z", backup.MetaFile), `{"formatVersion":1,"id":"20261002T000000Z","elythiaVersion":"2.0.0","encrypted":true,"dumpFile":"dump.pgc.age","migrations":[{"table":"schema_migrations","version":5,"dirty":true}]}`)
 	put(backup.Key("20261002T000000Z", backup.VerifyFile), `{"id":"20261002T000000Z","ok":false}`)
 	put(backup.Key("20261003T000000Z", backup.MetaFile), `{"formatVersion":1,"id":"20261003T000000Z","migrations":[{"table":"schema_migrations","version":-1}]}`)
 	put(backup.Key("20261003T000000Z", backup.VerifyFile), `{"id":"20261003T000000Z","ok":true}`)
+	// meta.json だけあって dump が無い世代。
+	put(backup.Key("20261004T000000Z", backup.MetaFile), `{"formatVersion":1,"id":"20261004T000000Z","dumpFile":"dump.pgc"}`)
 	cfg := filepath.Join(t.TempDir(), "default.yml")
 	require.NoError(t, os.WriteFile(cfg, []byte("url: http://127.0.0.1:3000/\nport: 3000\ndb:\n  host: 127.0.0.1\n  port: 5432\n  db: x\n  user: x\n  pass: x\n"+dirBackupYAML(dir, "")), 0o600))
 
 	e, stdout, stderr := testEnv(nil)
 	require.Equal(t, 0, list(ctx, e, []string{"-config", cfg}), stderr.String())
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
-	require.Len(t, lines, 4)
+	require.Len(t, lines, 5)
+	assert.Regexp(t, `^20261004T000000Z\s+no-dump\s`, lines[4])
 	assert.Regexp(t, `^20261001T000000Z\s+unreadable\s`, lines[1])
 	assert.Regexp(t, `^20261002T000000Z\s+complete\s+\d+\s+true\s+failed\s+2\.0\.0\s+5 \(dirty\)$`, lines[2])
-	assert.Regexp(t, `^20261003T000000Z\s+complete\s+\d+\s+false\s+ok\s+\S*\s*empty$`, lines[3])
+	assert.Regexp(t, `^20261003T000000Z\s+no-dump\s+\d+\s+false\s+ok\s+\S*\s*empty$`, lines[3])
 
 	e, stdout, stderr = testEnv(nil)
 	require.Equal(t, 0, list(ctx, e, []string{"-config", cfg, "-json"}), stderr.String())
 	var listed []listedGeneration
 	require.NoError(t, json.Unmarshal(stdout.Bytes(), &listed))
-	require.Len(t, listed, 3)
+	require.Len(t, listed, 4)
+	assert.False(t, listed[3].Complete, "no dump")
 	assert.Contains(t, listed[0].MetaError, "formatVersion 99")
 	require.NotNil(t, listed[1].Verify)
 	assert.False(t, listed[1].Verify.OK)
@@ -350,5 +365,13 @@ func TestConfigExampleKeysDecode(t *testing.T) {
 	}, b.Storage.S3)
 	assert.Equal(t, "/backup", b.Storage.Dir.Path)
 	assert.Equal(t, []string{"age1..."}, b.Encryption.Recipients)
-	assert.Equal(t, "/app/.config/backup-identity.txt", b.Encryption.IdentityFile)
+	assert.Equal(t, "/run/secrets/backup-identity.txt", b.Encryption.IdentityFile)
+}
+
+// markedDir returns a new directory that a DirStorage accepts.
+func markedDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	require.NoError(t, backup.CreateDirMarker(dir))
+	return dir
 }

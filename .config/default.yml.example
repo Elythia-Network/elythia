@@ -645,6 +645,9 @@ proxyBypassHosts:
 #    type: s3
 #    s3:
 #      # Empty means AWS S3. For R2: https://<account>.r2.cloudflarestorage.com
+#      # Use https:// unless the storage is on a private network: with
+#      # http:// the dump (unless encrypted) and the signed requests travel
+#      # in plaintext.
 #      endpoint: https://s3.example.com
 #      region: us-east-1
 #      bucket: elythia-backup
@@ -654,8 +657,10 @@ proxyBypassHosts:
 #      # true for MinIO and other services without virtual-hosted buckets
 #      forcePathStyle: false
 #    dir:
-#      # Must already exist (it is not created, so an unmounted NAS fails
-#      # instead of filling the local disk).
+#      # Must already exist and contain the marker file .elythia-backup,
+#      # created on the mounted device (touch /mnt/nas/.../.elythia-backup).
+#      # Neither is created, so an unmounted NAS fails instead of filling the
+#      # local disk.
 #      path: /backup
 #  # The dump contains users' private keys, tokens and password hashes.
 #  # With encryption enabled, the dump is encrypted with age
@@ -666,7 +671,8 @@ proxyBypassHosts:
 #    enabled: false
 #    recipients:
 #      - age1...
-#    identityFile: /app/.config/backup-identity.txt
+#    # Keep the private key outside the repository and .config.
+#    identityFile: /run/secrets/backup-identity.txt
 #  # Paths of the PostgreSQL client programs. Empty means PATH. Their major
 #  # version must not be older than the server's.
 #  tools:

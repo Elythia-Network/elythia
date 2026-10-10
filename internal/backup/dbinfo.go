@@ -149,3 +149,53 @@ func ReadServerInfo(ctx context.Context, q Queryer) (ServerInfo, error) {
 	}
 	return si, nil
 }
+
+// ReadExtensions returns the installed extensions, sorted by name.
+func ReadExtensions(ctx context.Context, q Queryer) ([]ExtensionInfo, error) {
+	rows, err := q.Query(ctx, `SELECT e.extname, e.extversion, n.nspname
+FROM pg_extension e
+JOIN pg_namespace n ON n.oid = e.extnamespace
+ORDER BY e.extname`)
+	if err != nil {
+		return nil, fmt.Errorf("backup: read extensions: %w", err)
+	}
+	exts, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (ExtensionInfo, error) {
+		var e ExtensionInfo
+		err := r.Scan(&e.Name, &e.Version, &e.Schema)
+		return e, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("backup: read extensions: %w", err)
+	}
+	if exts == nil {
+		exts = []ExtensionInfo{}
+	}
+	return exts, nil
+}
+
+// localeProviders maps pg_database.datlocprovider to its name.
+var localeProviders = map[string]string{"b": "builtin", "c": "libc", "i": "icu"}
+
+// ReadDatabaseLocale reads the encoding and locale of the current database.
+// versionNum is server_version_num: the columns differ between versions.
+//
+// 版を上げるときは古いサーバーから新しい pg_dump で取るので、古い版の列名でも読む。
+// datlocprovider は 15 から、datlocale は 17 から (16 までは daticulocale)。
+func ReadDatabaseLocale(ctx context.Context, q Queryer, versionNum int) (DatabaseLocale, error) {
+	cols := "pg_encoding_to_char(encoding), datcollate, datctype, '', ''"
+	switch {
+	case versionNum >= 170000:
+		cols = "pg_encoding_to_char(encoding), datcollate, datctype, datlocprovider::text, coalesce(datlocale, '')"
+	case versionNum >= 150000:
+		cols = "pg_encoding_to_char(encoding), datcollate, datctype, datlocprovider::text, coalesce(daticulocale, '')"
+	}
+	var l DatabaseLocale
+	var provider string
+	err := q.QueryRow(ctx, "SELECT "+cols+" FROM pg_database WHERE datname = current_database()").
+		Scan(&l.Encoding, &l.Collate, &l.Ctype, &provider, &l.Locale)
+	if err != nil {
+		return DatabaseLocale{}, fmt.Errorf("backup: read database locale: %w", err)
+	}
+	l.Provider = localeProviders[provider]
+	return l, nil
+}
