@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/elythia-network/elythia/internal/activitypub"
 	"github.com/elythia-network/elythia/internal/core/federation"
@@ -151,13 +152,33 @@ var signatureRelevantHeaders = []string{
 	"Accept",
 }
 
+// Limits on the signed headers captured beyond signatureRelevantHeaders.
+const (
+	// maxSignedExtraHeaders is how many extra headers named in the
+	// Signature's headers= list are carried to the worker.
+	maxSignedExtraHeaders = 16
+	// maxSignedExtraHeaderBytes caps the total size of their values.
+	maxSignedExtraHeaderBytes = 8 << 10
+)
+
 // captureSignatureHeaders extracts the headers needed to re-verify the
-// HTTP signature in the inbox worker. Only the small allowlist above is
-// included so the queue payload stays compact.
+// HTTP signature in the inbox worker: the allowlist above, plus every header
+// the Signature's headers= list names (within the limits above), so that the
+// worker rebuilds the same signing string the sender signed.
 //
 // Host は net/http で req.Host に格納される (Header map には入らない) た
 // め、明示的に補完してから capture する。これが無いと worker 側 verify が
 // `host: ""` で署名再構築して RSA verify が失敗する。
+//
+// **署名の headers= に挙がったヘッダーも運ぶ (#3498)。** 決め打ちの一覧だけを
+// 運ぶと、一覧に無いヘッダーを署名に含める相手の配送が、署名が正しいのに worker で
+// `missing required header` になって捨てられる。Mastodon はフォロワー限定の投稿の
+// 配送に `Collection-Synchronization` を付けて署名するので、フォロワー限定だけが
+// 届かなかった (#3037 の `X-Date` も同じ形だった)。
+//
+// 上限を超えた分は運ばない。その場合 worker の検証は落ちる (fail closed) が、
+// 正規の送り手がそこまで多くのヘッダーを署名することは無い。上限はキューの
+// payload を相手の申告で膨らませないためのもの。
 func captureSignatureHeaders(req *http.Request) map[string]string {
 	out := make(map[string]string, len(signatureRelevantHeaders))
 	for _, h := range signatureRelevantHeaders {
@@ -167,6 +188,31 @@ func captureSignatureHeaders(req *http.Request) map[string]string {
 	}
 	if out["Host"] == "" && req.Host != "" {
 		out["Host"] = req.Host
+	}
+	parsed, err := activitypub.ParseSignatureHeader(out["Signature"])
+	if err != nil {
+		return out
+	}
+	extra, size := 0, 0
+	for _, name := range parsed.Headers {
+		if strings.HasPrefix(name, "(") {
+			// (request-target) などの疑似ヘッダーは、method と path から作る。
+			continue
+		}
+		key := http.CanonicalHeaderKey(name)
+		if _, ok := out[key]; ok {
+			continue
+		}
+		v := req.Header.Get(key)
+		if v == "" {
+			continue
+		}
+		if extra >= maxSignedExtraHeaders || size+len(v) > maxSignedExtraHeaderBytes {
+			break
+		}
+		out[key] = v
+		extra++
+		size += len(v)
 	}
 	return out
 }
