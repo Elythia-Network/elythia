@@ -15,10 +15,16 @@ type Queryer interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-// MigrationTables are the migration bookkeeping tables recorded in Meta, in
-// the order they are recorded: the core track and the fork's local track
+// Migration bookkeeping tables: the core track and the fork's local track
 // (#3428).
-var MigrationTables = []string{"schema_migrations", "schema_migrations_local"}
+const (
+	CoreMigrationsTable  = "schema_migrations"
+	LocalMigrationsTable = "schema_migrations_local"
+)
+
+// MigrationTables are the migration bookkeeping tables recorded in Meta, in
+// the order they are recorded.
+var MigrationTables = []string{CoreMigrationsTable, LocalMigrationsTable}
 
 // NilMigrationVersion is MigrationState.Version for a bookkeeping table that
 // exists but has no row (golang-migrate's NilVersion).
