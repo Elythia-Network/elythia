@@ -150,9 +150,12 @@ type Daemon struct {
 	latestUsable *Generation
 	// usableBase is when the delay clock started: the newest usable
 	// generation, or the daemon start when there is none.
-	usableBase      time.Time
-	nextDelayAlert  time.Time
-	lastNotifyError string
+	usableBase time.Time
+	// usableBaseIsStart reports whether usableBase is the daemon start
+	// rather than the time of a generation.
+	usableBaseIsStart bool
+	nextDelayAlert    time.Time
+	lastNotifyError   string
 }
 
 // New returns a Daemon.
@@ -196,6 +199,19 @@ func (d *Daemon) Run(ctx context.Context) {
 		d.log.Info("backup: schedule started",
 			"interval", sched.Interval.String(), "at", sched.AtString(), "timezone", sched.Location.String(),
 			"keep", sched.Keep, "verify", sched.Verify, "next", d.nextRun.Format(time.RFC3339))
+		if sched.AtDriftsAcrossRestarts() {
+			d.log.Warn("backup: schedule.at with an interval that neither divides 24h nor is a multiple of it; the slots can move when the daemon restarts",
+				"interval", sched.Interval.String(), "at", sched.AtString())
+		}
+		if id := d.unverifiedLatest(gens); id != "" && d.nextRun.After(now) {
+			// 止める途中で検証が切れると verify.json は確かめる前 (無い) に戻るので、
+			// 揃った最新の世代が検証されないまま残る。取り戻しは揃っているかで決めるので
+			// 次の枠まで取り直さず、その間は使える世代に数えられずに遅れを知らせてしまう。
+			// 取り直すより安いので、起動して最初にその世代を確かめる。すぐ取る場合は、
+			// 新しい世代を確かめることになるので回さない。
+			d.log.Info("backup: verifying the newest generation, which has no verify.json", "generation", id)
+			d.startLocked(JobVerify, TriggerSchedule, id, now)
+		}
 	}
 	d.mu.Unlock()
 
@@ -232,6 +248,19 @@ func (d *Daemon) Run(ctx context.Context) {
 	}
 }
 
+// unverifiedLatest returns the ID of the newest complete generation when the
+// schedule verifies every take and that generation has no verify.json, or "".
+func (d *Daemon) unverifiedLatest(gens []Generation) string {
+	if !d.opts.RequireVerified || d.opts.Verifier == nil {
+		return ""
+	}
+	g := Latest(gens, func(g Generation) bool { return g.Complete })
+	if g == nil || g.Verify != VerifyNone {
+		return ""
+	}
+	return g.ID
+}
+
 // onTimer starts a due scheduled take and sends a due delay alert.
 func (d *Daemon) onTimer(ctx context.Context) {
 	now := d.clock.Now()
@@ -255,6 +284,12 @@ func (d *Daemon) onTimer(ctx context.Context) {
 		}
 		e := Event{Kind: EventDelay, OccurredAt: now,
 			Message: fmt.Sprintf("no usable backup since the daemon started at %s", d.usableBase.UTC().Format(time.RFC3339))}
+		if !d.usableBaseIsStart {
+			// 使える世代が手で確かめ直されて 1 つも無くなった。起点は起動時刻ではなく、
+			// 最後に使える世代として数えていた世代の時刻のまま。
+			e.Message = fmt.Sprintf("no usable backup is left; the delay is counted from %s, when the last generation that counted was made",
+				d.usableBase.UTC().Format(time.RFC3339))
+		}
 		if d.latestUsable != nil {
 			t := d.latestUsable.Time
 			e.LastUsableAt = &t
@@ -290,10 +325,14 @@ func (d *Daemon) setLatestLocked(gens []Generation, initial bool) {
 		d.latestUsable = &cp
 	}
 	moved := initial
+	if initial {
+		d.usableBaseIsStart = true
+	}
 	// 最新の使える世代が手で確かめ直されて使えなくなったときは、起点を 1 つ前の
 	// 使える世代へ戻す (戻した結果がもう遅れなら、すぐに知らせる)。
 	if g != nil && (initial || !g.Time.Equal(d.usableBase)) {
 		d.usableBase = g.Time
+		d.usableBaseIsStart = false
 		moved = true
 	}
 	if moved && d.opts.Schedule != nil {

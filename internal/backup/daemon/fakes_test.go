@@ -200,12 +200,15 @@ type fakeVerifier struct {
 	// ok:false and return no error, as backup.Verify does when pg_restore is
 	// killed by the cancelled context.
 	cancelWrites bool
+	// afterStore, when set, is called after verify.json is stored, before
+	// Verify returns.
+	afterStore func()
 }
 
 func (f *fakeVerifier) Verify(ctx context.Context, id string) (backup.VerifyResult, error) {
 	f.mu.Lock()
 	f.ids = append(f.ids, id)
-	fail, err, afterErr, block, cancelWrites := f.fail, f.err, f.afterErr, f.block, f.cancelWrites
+	fail, err, afterErr, block, cancelWrites, afterStore := f.fail, f.err, f.afterErr, f.block, f.cancelWrites, f.afterStore
 	f.mu.Unlock()
 	if block != nil {
 		select {
@@ -244,6 +247,9 @@ func (f *fakeVerifier) Verify(ctx context.Context, id string) (backup.VerifyResu
 	}
 	b, _ := json.Marshal(res)
 	f.st.set(backup.Key(id, backup.VerifyFile), b)
+	if afterStore != nil {
+		afterStore()
+	}
 	return res, nil
 }
 
