@@ -251,8 +251,8 @@ proxyBypassHosts:
 #   ┌────────────────────────┐
 #───┘ Database backup (#3457) └────────────────────────────────
 
-# Used by `elythia backup` (the "backup" compose service). The server itself
-# does not read it yet. See docs/backup.md.
+# Used by `elythia backup` (the "backup" compose service) and by the admin
+# page of the server (backup.server). See docs/backup.md.
 #
 # **A disk of the same host does not count as a backup**: it is lost together
 # with the database. Use S3-compatible storage or a directory on another
@@ -301,3 +301,16 @@ proxyBypassHosts:
 #    pgRestore: ""
 #    initdb: ""
 #    pgCtl: ""
+#  # What the server (the admin page, #3462) uses.
+#  server:
+#    # Empty type means backup.storage. Set it to give the server a key that
+#    # can only list, read and delete. With a "dir" storage, the server must
+#    # see the same directory and share its group (docs/backup.md).
+#    storage:
+#      type: ""
+#    # Price per GB-month (2^30 bytes) for the monthly estimate. 0 hides it.
+#    pricePerGbMonth: 0
+#    # Control API of `elythia backup daemon` for taking and verifying from
+#    # the admin page. Ignored while serviceToken is empty.
+#    serviceUrl: ""
+#    serviceToken: ""
