@@ -228,6 +228,7 @@ type Source struct {
 	RedisForReactions         *RedisOptions          `mapstructure:"redisForReactions"`
 	FulltextSearch            *FulltextSearchOptions `mapstructure:"fulltextSearch"`
 	Meilisearch               *MeilisearchOptions    `mapstructure:"meilisearch"`
+	Backup                    *BackupOptions         `mapstructure:"backup"`
 	SetupPassword             string                 `mapstructure:"setupPassword"`
 	Proxy                     string                 `mapstructure:"proxy"`
 	ProxySMTP                 string                 `mapstructure:"proxySmtp"`
@@ -468,6 +469,8 @@ type Config struct {
 
 	FulltextSearch *FulltextSearchOptions
 	Meilisearch    *MeilisearchOptions
+	// Backup is nil when the config file has no `backup:` section (#3457).
+	Backup *BackupOptions
 
 	ID string
 
@@ -857,6 +860,7 @@ func resolve(src *Source) (*Config, error) {
 
 		FulltextSearch: src.FulltextSearch,
 		Meilisearch:    src.Meilisearch,
+		Backup:         src.Backup,
 
 		ID: src.ID,
 
