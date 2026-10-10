@@ -53,7 +53,9 @@ docker compose up -d
 docker compose exec app /app/elythia doctor
 ```
 
-**この手順では、Redisを消さない。** `-mode empty`は、`-redis`を渡さなければRedisの後始末をしない。手順1で本体を止めてから手順2で取るので、戻すDBは止めた時点のDBそのもので、Redisの中身と食い違わない。消すと、届いていない配送(`Delete`の再試行を含む。消すと、こちらで消した投稿が相手に残る)や、DBへ未反映のリアクション数(`reaction-buffer:*`。本体を止めるときには反映しない)を失うだけになる。DBを失って古い世代から作り直すときなど、Redisの方が新しいときは`-redis clean`を渡す。
+**この手順では、Redisを消さない。** `-mode empty`は、`-redis`を渡さず(`auto`)、戻す世代が保存先の最新の世代(`meta.json`のある世代のうち最も新しいもの)のときは、Redisの後始末をしない。手順1で本体を止めてから手順2で取るので、戻すDBは止めた時点のDBそのもので、Redisの中身と食い違わない。消すと、届いていない配送(`Delete`の再試行を含む。消すと、こちらで消した投稿が相手に残る)や、DBへ未反映のリアクション数(`reaction-buffer:*`。本体を止めるときには反映しない)を失うだけになる。
+
+戻す世代が最新でないとき(`-id latest`が、検証していない新しい世代を飛ばして古い世代を選んだときや、古い世代を名指ししたとき)は、`-redis`を明示するよう表示して、何もせずに止まる。Redisの方がDBより新しいかもしれないため。DBを失って古い世代から作り直すときなど、Redisの方が新しいときは`-redis clean`を、Redisもその世代と同じ時点だと分かっているときは`-redis keep`を渡す。
 
 UDS構成(`compose.uds.yaml`)では、次のように読み替える。
 
@@ -63,6 +65,14 @@ UDS構成(`compose.uds.yaml`)では、次のように読み替える。
 - 元に戻すときは、16で動いていたimage(ビルドしたものが手元に残っていればそのtag)と`pg_data`に戻す。`deploy/postgres-bigm/Dockerfile`は新しい版を指しているので、作り直すと16にはならない
 
 元に戻すには、`docker compose stop app db`の後、`docker-compose.yml`の`db`を16のimage(`postgres:16-alpine`)と元のマウント(`db_data:/var/lib/postgresql/data`)に戻して`docker compose up -d`する。戻した後は、上げようとしていた間に18の側で作られた投稿などは無い。
+
+**手順7で本体を18で動かした後に16へ戻すときは、本体を起動する前にRedisを片付ける。** Redisには18で動いていた間のタイムライン・配送待ちのjob・リアクション数の差分が残り、16のDBより新しくなっているため。戻すコマンドを通さないので、[Redisの後始末](#redisの後始末)の「消すもの」の表のkeyを手で消す(`bull:deliver:meta`と`bull:deliver:repeat`は残す)。例えばタイムラインは次の形で消す。`<prefix>`は表の説明のとおり。
+
+```bash
+docker compose exec -T redis sh -c "redis-cli --scan --pattern '<prefix>list:*' | xargs -r redis-cli del"
+```
+
+18で本体を起動していなければ(手順5か6で止めたなら)、Redisは16のDBと同じ時点のままなので、片付けは要らない。
 
 ### DBが大きいとき(`pg_upgrade`)
 
@@ -111,8 +121,10 @@ dumpから戻す方法は、DBの大きさに比例して止まる時間が延�
 4. `pg_dump`に入らないDB単位の設定(`ALTER DATABASE ... SET`)を、メタ情報の`databaseSettings`から入れ直す。取るときに`pg_db_role_setting`のうちDB単位のもの(ロール単位でないもの)を`名前=値`の形で記録しているので、`search_path`のような一覧の設定は要素ごとに分けて入れる。superuserにしか入れられない設定(`log_min_duration_statement`など)が付いていたら、superuserでないDBのユーザーではここで止まる
 5. `elythia migrate`と同じく、同梱のmigrationを当てる(本体の系列、forkの系列の順)。バイナリより古い版で取ったバックアップは、ここで追いつく
 6. `-mode swap`では、名前を1つのトランザクションで入れ替える。2〜6のどこかで落ちたら、作ったDBを消して止まる。今のDBには触らない。`-mode empty`で3〜5のどこかで落ちたら、戻した中身がDBに残るので、DBを作り直してから流し直す
-7. Redisの後始末(下の表)をし、`elythia doctor`のうち本体が動いていなくても回せる検査(DBの管理表、rootの利用者、Redis)を流す。後始末は、`-mode swap`と`-rollback`では既定で行い、`-mode empty`では既定で行わない(`-redis clean|keep`で変えられる。理由は[版を上げる手順](#postgresql-16--18-への移行-既存環境)の後の説明)
-8. 名前の入れ替えがサーバーの側で済んだ後に、接続が切れるなどしてエラーが返ったときは、`pg_database`を引き直して、入れ替わっていれば戻し終えたものとして7へ進む。どちらか分からなければ、作ったDBを消さずに、確かめるべきDBの名前を表示して止まる
+7. Redisの後始末(下の表)をし、`elythia doctor`のうち本体が動いていなくても回せる検査(DBの管理表、rootの利用者、Redis)を流す。後始末は、`-mode swap`と`-rollback`では既定で行う。`-mode empty`では、戻す世代が保存先の最新の世代なら既定で行わず、最新でなければ`-redis`の明示を求めて止まる(`-redis clean|keep`で変えられる。理由は[版を上げる手順](#postgresql-16--18-への移行-既存環境)の後の説明)
+8. 名前の入れ替えがサーバーの側で済んだ後に、接続が切れるなどしてエラーが返ったときは、`pg_database`を引き直して、入れ替わっていれば戻し終えたものとして7へ進む(`-rollback`の入れ替えも同じ)。どちらか分からなければ(繋がらない、両方の名前がある、など)、作ったDBを消さずに、確かめるべき2つのDBの名前を表示して終了コード1で止まる。そのときは、本体を起動する前に`pg_database`(`SELECT datname FROM pg_database`)を見て、次のどちらかを手で行う
+   - `<DB名>_before_restore_<日時>`があり、`<DB名>_restore_<日時>`が無い(入れ替わっている): [Redisの後始末](#redisの後始末)のkeyを消し、`vacuumdb --analyze-in-stages`を流してから起動する
+   - `<DB名>_restore_<日時>`があり、`<DB名>_before_restore_<日時>`が無い(入れ替わっていない): `DROP DATABASE <DB名>_restore_<日時>`で作ったDBを消す。今のDBはそのまま使える
 
 **[pg_bigm](#pg_bigm-日本語の部分一致検索を高速化)などの拡張を入れたDBは、戻す先のサーバーにも同じ拡張が要る。** dumpは`CREATE EXTENSION`を含むので、拡張の無いサーバー(素の`postgres:18-alpine`)へは戻らない。戻す前に止まる。バックアップ用のimageにpg_bigmが入っているのは`backup verify`のためで、戻す先はDBのサーバー(UDS構成なら`deploy/postgres-bigm`のimage)になる。拡張を作るにはsuperuserが要ることがある。
 
