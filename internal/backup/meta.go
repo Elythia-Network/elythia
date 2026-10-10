@@ -103,9 +103,6 @@ type VerifyResult struct {
 	Stages         []StageResult `json:"stages"`
 	Mismatches     []RowMismatch `json:"mismatches,omitempty"`
 	ElythiaVersion string        `json:"elythiaVersion"`
-	// DumpSHA256 is Meta.DumpSHA256 of the dump that was verified, so that a
-	// dump replaced after verification can be told apart.
-	DumpSHA256 string `json:"dumpSha256"`
 }
 
 // StageResult is the outcome of one verify stage. Skipped stages (because an

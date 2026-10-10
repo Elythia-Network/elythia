@@ -3,14 +3,11 @@ package backup
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/elythia-network/elythia/internal/config"
 )
@@ -51,9 +48,8 @@ type SandboxServer struct {
 // 割り当てた port で繋ぐので、それらを Runner とは別にここへ閉じる。プログラムの
 // 実行そのものは LocalSandbox.Runner (Runner) に任せる。
 type Sandbox interface {
-	// Run runs one program. When the program ran and exited with a failure
-	// status, the error is (or wraps) a *ProgramError. Any other error means
-	// the program could not be run at all (missing, not executable, killed).
+	// Run runs one program and returns an error that includes its standard
+	// error output when it exits non-zero.
 	Run(ctx context.Context, cmd SandboxCmd) error
 	// MkdirTemp creates an empty private directory for one verification.
 	MkdirTemp(ctx context.Context) (string, error)
@@ -61,36 +57,6 @@ type Sandbox interface {
 	RemoveAll(ctx context.Context, dir string) error
 	// Server describes the throwaway server whose files live under dir.
 	Server(dir string) SandboxServer
-}
-
-// ProgramError is a program that ran and exited with a failure status.
-//
-// verify は「プログラムが dump を拒んだ」(世代の欠陥) と「プログラムを動かせなかった」
-// (環境の誤り) を分ける。前者だけをこの型で返す。
-type ProgramError struct {
-	Program  string
-	ExitCode int
-	// Stderr is the tail of the program's standard error output.
-	Stderr string
-}
-
-func (e *ProgramError) Error() string {
-	return fmt.Sprintf("%s exited with status %d: %s", e.Program, e.ExitCode, e.Stderr)
-}
-
-// SpaceReporter is implemented by sandboxes that can tell how much space is
-// free under a directory returned by MkdirTemp.
-type SpaceReporter interface {
-	FreeBytes(ctx context.Context, dir string) (int64, error)
-}
-
-// freeBytes returns the space available to an unprivileged user under dir.
-func freeBytes(dir string) (int64, error) {
-	var st syscall.Statfs_t
-	if err := syscall.Statfs(dir, &st); err != nil {
-		return 0, fmt.Errorf("statfs %s: %w", dir, err)
-	}
-	return int64(st.Bavail) * int64(st.Bsize), nil //nolint:gosec // ブロック数と大きさは int64 に収まる
 }
 
 // LocalSandbox runs the PostgreSQL programs as child processes of this
@@ -136,23 +102,9 @@ func (s LocalSandbox) Run(ctx context.Context, cmd SandboxCmd) error {
 	var stderr bytes.Buffer
 	c.Stderr = &stderr
 	if err := c.Run(); err != nil {
-		msg := strings.TrimSpace(stderr.String())
-		// 126 / 127 は sh や docker exec が「実行できない / 見つからない」に使う番号で、
-		// プログラム自身の失敗ではない。シグナルで止まったもの (-1) も同じ扱い。
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			if code := exitErr.ExitCode(); code > 0 && code != 126 && code != 127 {
-				return &ProgramError{Program: cmd.Program, ExitCode: code, Stderr: msg}
-			}
-		}
-		return fmt.Errorf("%s: %w: %s", cmd.Program, err, msg)
+		return fmt.Errorf("%s: %w: %s", cmd.Program, err, strings.TrimSpace(stderr.String()))
 	}
 	return nil
-}
-
-// FreeBytes implements SpaceReporter.
-func (s LocalSandbox) FreeBytes(_ context.Context, dir string) (int64, error) {
-	return freeBytes(dir)
 }
 
 // MkdirTemp implements Sandbox.
