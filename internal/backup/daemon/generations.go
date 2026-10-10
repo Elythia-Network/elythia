@@ -34,7 +34,6 @@ type Generation struct {
 	// being written, was abandoned or is broken.
 	Complete bool
 	Verify   VerifyState
-	Keys     []string
 	Size     int64
 }
 
@@ -72,7 +71,6 @@ func Scan(ctx context.Context, st backup.Storage) ([]Generation, error) {
 		g := Generation{ID: l.ID, Time: t, Complete: l.Complete(), Verify: VerifyNone, Size: l.Size}
 		verifyKey := backup.Key(l.ID, backup.VerifyFile)
 		for _, o := range l.Objects {
-			g.Keys = append(g.Keys, o.Key)
 			if o.Key == verifyKey {
 				g.Verify = VerifyUnreadable
 			}
@@ -130,27 +128,4 @@ func PlanPrune(gens []Generation, keep int, requireVerified bool) []Generation {
 		return nil
 	}
 	return append([]Generation(nil), gens[:cut]...)
-}
-
-// DeleteGeneration removes every object of g. meta.json goes first so that a
-// generation interrupted half-way is seen as incomplete, never as a complete
-// generation whose dump is missing.
-func DeleteGeneration(ctx context.Context, st backup.Storage, g Generation) error {
-	meta := backup.Key(g.ID, backup.MetaFile)
-	keys := make([]string, 0, len(g.Keys))
-	for _, k := range g.Keys {
-		if k == meta {
-			if err := st.Delete(ctx, k); err != nil {
-				return fmt.Errorf("delete %s: %w", k, err)
-			}
-			continue
-		}
-		keys = append(keys, k)
-	}
-	for _, k := range keys {
-		if err := st.Delete(ctx, k); err != nil {
-			return fmt.Errorf("delete %s: %w", k, err)
-		}
-	}
-	return nil
 }

@@ -609,7 +609,15 @@ func (d *Daemon) prune(ctx context.Context) ([]string, error) {
 	}
 	var deleted []string
 	for _, g := range PlanPrune(gens, keep, d.opts.RequireVerified) {
-		if err := DeleteGeneration(ctx, d.opts.Storage, g); err != nil {
+		// 管理画面の削除 (#3462) と同じ順序 (meta.json を最初に消す) で消すため、
+		// backup.DeleteGeneration に任せる。一覧を取った後に管理画面から消された世代は
+		// ErrNotFound になるが、消えていることに変わりはないので失敗にしない。
+		_, err := backup.DeleteGeneration(ctx, d.opts.Storage, g.ID)
+		if errors.Is(err, backup.ErrNotFound) {
+			d.log.Info("backup: an old generation was already gone", "generation", g.ID)
+			continue
+		}
+		if err != nil {
 			return deleted, err
 		}
 		deleted = append(deleted, g.ID)
