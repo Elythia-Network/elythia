@@ -133,11 +133,12 @@ type SecurityKeyStore interface {
 	UpdateCounter(id string, counter int64) error
 }
 
-// Passkeys issues and verifies passkey assertions. *twofactor.WebAuthnService
-// implements it.
+// Passkeys issues and verifies passkey assertions for a re-authentication.
+// *twofactor.WebAuthnService implements it; its challenge is kept apart from
+// the sign-in challenge.
 type Passkeys interface {
-	BeginLogin(ctx context.Context, user *model.User, existing []*model.UserSecurityKey) (*protocol.CredentialAssertion, error)
-	FinishLogin(ctx context.Context, user *model.User, existing []*model.UserSecurityKey, req *http.Request) (*webauthn.Credential, error)
+	BeginReauth(ctx context.Context, user *model.User, existing []*model.UserSecurityKey) (*protocol.CredentialAssertion, error)
+	FinishReauth(ctx context.Context, user *model.User, existing []*model.UserSecurityKey, req *http.Request) (*webauthn.Credential, error)
 }
 
 // Deps are the stores the Verifier reads. Roles, Profiles and Guard are
@@ -247,7 +248,7 @@ func (v *Verifier) BeginPasskey(ctx context.Context, s Subject) (*protocol.Crede
 	if err != nil {
 		return nil, err
 	}
-	assertion, err := v.d.Passkeys.BeginLogin(ctx, s.User, keys)
+	assertion, err := v.d.Passkeys.BeginReauth(ctx, s.User, keys)
 	if err != nil {
 		return nil, unavailable(fmt.Errorf("begin passkey: %w", err))
 	}
@@ -413,8 +414,13 @@ func (v *Verifier) reserve(ctx context.Context, userID, key string) error {
 
 // checkPasskey verifies a passkey assertion for the challenge of BeginPasskey.
 func (v *Verifier) checkPasskey(ctx context.Context, u *model.User, keys []*model.UserSecurityKey, r Reauth) (secondFactor, error) {
-	cred, err := v.d.Passkeys.FinishLogin(ctx, u, keys, twofactor.CredentialRequest(r.Request, r.Credential))
+	cred, err := v.d.Passkeys.FinishReauth(ctx, u, keys, twofactor.CredentialRequest(r.Request, r.Credential))
 	if err != nil {
+		// challenge を置いた Redis に届かなかったのは照合できなかっただけで、
+		// assertion が違ったのではない。TOTP の経路と同じく失敗に数えない。
+		if errors.Is(err, twofactor.ErrWebAuthnSessionStore) || errors.Is(err, twofactor.ErrWebAuthnNotConfigured) {
+			return secondFactor{}, unavailable(fmt.Errorf("passkey: %w", err))
+		}
 		slog.Warn("strongauth: passkey verification failed", "userId", u.ID, "err", err)
 		return secondFactor{}, refuse(ReasonFailed)
 	}

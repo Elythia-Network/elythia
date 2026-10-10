@@ -46,6 +46,10 @@ var (
 	// the assertion is well formed but its signature does not verify
 	// (upstream's verifySignInWithPasskeyAuthentication returns null).
 	ErrWebAuthnAssertionNotVerified = errors.New("twofactor: webauthn assertion not verified")
+	// ErrWebAuthnSessionStore is wrapped around a failure of the challenge
+	// store (Redis) while loading a login or re-authentication challenge, so
+	// that callers can tell "could not check" from "the assertion is wrong".
+	ErrWebAuthnSessionStore = errors.New("twofactor: webauthn session store failed")
 )
 
 // webAuthnSessionTTL bounds how long a registration / authentication challenge
@@ -168,6 +172,16 @@ func loginSessionKey(userID string) string {
 	return "twofa:webauthn:" + userID + ":login"
 }
 
+// reauthSessionKey is the Redis key for the challenge of a re-authentication
+// with a passkey (strongauth, #3462).
+//
+// サインインの challenge (loginSessionKey) と分ける。共有すると、片方の開始が
+// もう片方の challenge を上書きし、サインイン用に出した challenge への assertion が
+// 管理画面の再認証にも通る。
+func reauthSessionKey(userID string) string {
+	return "twofa:webauthn:" + userID + ":reauth"
+}
+
 // registrationSessionKey is the Redis key for the upstream-compatible
 // single-in-flight-per-user mode used by /api/i/2fa/{register-key,key-done}.
 // Misskey TS の WebAuthnService と同じく client は session id を round-trip
@@ -288,6 +302,16 @@ func (s *WebAuthnService) takeRegistrationSession(ctx context.Context, userID st
 // The browser is asked for userVerification=preferred like upstream;
 // FinishLogin requires it regardless.
 func (s *WebAuthnService) BeginLogin(ctx context.Context, user *model.User, existing []*model.UserSecurityKey) (*protocol.CredentialAssertion, error) {
+	return s.beginAssertion(ctx, user, existing, loginSessionKey(user.ID))
+}
+
+// BeginReauth is BeginLogin for a re-authentication of a signed-in user
+// (strongauth). Its challenge is kept apart from the sign-in challenge.
+func (s *WebAuthnService) BeginReauth(ctx context.Context, user *model.User, existing []*model.UserSecurityKey) (*protocol.CredentialAssertion, error) {
+	return s.beginAssertion(ctx, user, existing, reauthSessionKey(user.ID))
+}
+
+func (s *WebAuthnService) beginAssertion(ctx context.Context, user *model.User, existing []*model.UserSecurityKey, key string) (*protocol.CredentialAssertion, error) {
 	if s == nil || s.wa == nil {
 		return nil, ErrWebAuthnNotConfigured
 	}
@@ -296,7 +320,7 @@ func (s *WebAuthnService) BeginLogin(ctx context.Context, user *model.User, exis
 	if err != nil {
 		return nil, err
 	}
-	if err := s.putLoginSession(ctx, user.ID, sd); err != nil {
+	if err := s.putSession(ctx, key, sd); err != nil {
 		return nil, err
 	}
 	return assertion, nil
@@ -312,10 +336,19 @@ func (s *WebAuthnService) BeginLogin(ctx context.Context, user *model.User, exis
 // second factor or the only one. Returns ErrWebAuthnCounterRollback when the
 // signature counter signals a cloned authenticator.
 func (s *WebAuthnService) FinishLogin(ctx context.Context, user *model.User, existing []*model.UserSecurityKey, req *http.Request) (*webauthn.Credential, error) {
+	return s.finishAssertion(ctx, user, existing, req, loginSessionKey(user.ID))
+}
+
+// FinishReauth verifies an assertion for the challenge of BeginReauth.
+func (s *WebAuthnService) FinishReauth(ctx context.Context, user *model.User, existing []*model.UserSecurityKey, req *http.Request) (*webauthn.Credential, error) {
+	return s.finishAssertion(ctx, user, existing, req, reauthSessionKey(user.ID))
+}
+
+func (s *WebAuthnService) finishAssertion(ctx context.Context, user *model.User, existing []*model.UserSecurityKey, req *http.Request, key string) (*webauthn.Credential, error) {
 	if s == nil || s.wa == nil {
 		return nil, ErrWebAuthnNotConfigured
 	}
-	sd, err := s.takeLoginSession(ctx, user.ID)
+	sd, err := s.takeSession(ctx, key)
 	if err != nil {
 		return nil, err
 	}
@@ -351,6 +384,16 @@ func checkCounter(cred *webauthn.Credential) error {
 
 // putLoginSession overwrites any in-flight login challenge for the user.
 func (s *WebAuthnService) putLoginSession(ctx context.Context, userID string, sd *webauthn.SessionData) error {
+	return s.putSession(ctx, loginSessionKey(userID), sd)
+}
+
+// takeLoginSession loads-and-deletes the login session blob (single-use).
+func (s *WebAuthnService) takeLoginSession(ctx context.Context, userID string) (*webauthn.SessionData, error) {
+	return s.takeSession(ctx, loginSessionKey(userID))
+}
+
+// putSession overwrites the challenge stored under key.
+func (s *WebAuthnService) putSession(ctx context.Context, key string, sd *webauthn.SessionData) error {
 	if s == nil || s.redis == nil {
 		return ErrWebAuthnNotConfigured
 	}
@@ -358,20 +401,21 @@ func (s *WebAuthnService) putLoginSession(ctx context.Context, userID string, sd
 	if err != nil {
 		return err
 	}
-	return s.redis.Set(ctx, loginSessionKey(userID), raw, webAuthnSessionTTL).Err()
+	return s.redis.Set(ctx, key, raw, webAuthnSessionTTL).Err()
 }
 
-// takeLoginSession loads-and-deletes the login session blob (single-use).
-func (s *WebAuthnService) takeLoginSession(ctx context.Context, userID string) (*webauthn.SessionData, error) {
+// takeSession loads-and-deletes the challenge stored under key (single-use).
+// A store failure is wrapped in ErrWebAuthnSessionStore.
+func (s *WebAuthnService) takeSession(ctx context.Context, key string) (*webauthn.SessionData, error) {
 	if s == nil || s.redis == nil {
 		return nil, ErrWebAuthnNotConfigured
 	}
-	raw, err := s.redis.GetDel(ctx, loginSessionKey(userID)).Bytes()
+	raw, err := s.redis.GetDel(ctx, key).Bytes()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
 			return nil, ErrWebAuthnSessionNotFound
 		}
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrWebAuthnSessionStore, err)
 	}
 	var sd webauthn.SessionData
 	if err := json.Unmarshal(raw, &sd); err != nil {

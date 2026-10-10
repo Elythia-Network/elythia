@@ -63,11 +63,11 @@ func (k *keys) UpdateCounter(string, int64) error                   { return nil
 
 type passkeys struct{}
 
-func (passkeys) BeginLogin(context.Context, *model.User, []*model.UserSecurityKey) (*protocol.CredentialAssertion, error) {
+func (passkeys) BeginReauth(context.Context, *model.User, []*model.UserSecurityKey) (*protocol.CredentialAssertion, error) {
 	return &protocol.CredentialAssertion{Response: protocol.PublicKeyCredentialRequestOptions{Challenge: []byte("chal"), RelyingPartyID: "example.com"}}, nil
 }
 
-func (passkeys) FinishLogin(_ context.Context, _ *model.User, _ []*model.UserSecurityKey, req *http.Request) (*webauthn.Credential, error) {
+func (passkeys) FinishReauth(_ context.Context, _ *model.User, _ []*model.UserSecurityKey, req *http.Request) (*webauthn.Credential, error) {
 	b, _ := io.ReadAll(req.Body)
 	if !bytes.Contains(b, []byte("good-assertion")) {
 		return nil, errors.New("bad assertion")
