@@ -3088,6 +3088,8 @@ _backups:
   serviceBusy: "The backup service is busy. Please try again later."
   serviceRunning: "The backup service is working."
   reauthFailed: "The password or the two-factor code is incorrect."
+  reauthRequired: "Enter your password and a two-factor code, or use a passkey."
+  codeAlreadyUsed: "This two-factor code has already been used. Wait for the next code or use a passkey."
   passkeyUnavailable: "No passkey is registered, or passkeys are not available on this server."
   rateLimited: "Too many failed authentications. Please wait for a while."
   storage: "Storage"

@@ -150,7 +150,9 @@ const $i = ensureSignin();
 // 登録できないので、実質は TOTP の有無)。未登録なら操作のボタンを出さずに案内する。
 const hasPasskey = computed(() => ($i.securityKeysList?.length ?? 0) > 0);
 const hasSecondFactor = computed(() => $i.twoFactorEnabled || hasPasskey.value);
-const usePasskey = ref(false);
+// TOTP を外してパスキーだけが残っているアカウント (TS 版から引き継いだもの) は、
+// コードを入れる欄の無いダイアログでは再認証できないので、パスキーを既定にする。
+const usePasskey = ref(!$i.twoFactorEnabled && hasPasskey.value);
 
 const overview = ref<Elythia.BackupOverview | null>(null);
 const busy = ref(false);
@@ -181,6 +183,8 @@ function errorText(err: unknown): string {
 	switch (apiErr?.code) {
 		case 'TWO_FACTOR_REQUIRED': return i18n.ts._backups.twoFactorRequired;
 		case 'REAUTHENTICATION_FAILED': return i18n.ts._backups.reauthFailed;
+		case 'REAUTHENTICATION_REQUIRED': return i18n.ts._backups.reauthRequired;
+		case 'TWO_FACTOR_CODE_ALREADY_USED': return i18n.ts._backups.codeAlreadyUsed;
 		case 'PASSKEY_UNAVAILABLE': return i18n.ts._backups.passkeyUnavailable;
 		case 'RATE_LIMIT_EXCEEDED': return i18n.ts._backups.rateLimited;
 		case 'BACKUP_NOT_CONFIGURED': return i18n.ts._backups.notConfigured;

@@ -166,7 +166,7 @@ func (h *Handler) Download(c echo.Context) error {
 	if !ok {
 		return apierr.JSONInvalidParam(c)
 	}
-	d, err := h.svc.Download(c.Request().Context(), id)
+	d, err := h.svc.Download(c.Request().Context(), id, middleware.GetUser(c).ID)
 	if err != nil {
 		return serviceError(c, "download", err)
 	}
@@ -193,14 +193,14 @@ func (h *Handler) ReauthChallenge(c echo.Context) error {
 	return c.JSON(http.StatusOK, assertion.Response)
 }
 
-// ServeDownload handles GET /backup-download/:token, the server-side download
-// of a directory storage. The token comes from Download.
+// ServeDownload handles GET /backup-download?token=..., the server-side
+// download of a directory storage. The token comes from Download.
 func (h *Handler) ServeDownload(c echo.Context) error {
 	res := c.Response()
 	res.Header().Set("Cache-Control", "no-store")
 	res.Header().Set("X-Content-Type-Options", "nosniff")
 	res.Header().Set("Referrer-Policy", "no-referrer")
-	g, rc, info, err := h.svc.Open(c.Request().Context(), c.Param("token"))
+	g, rc, info, err := h.svc.Open(c.Request().Context(), c.QueryParam("token"))
 	if err != nil {
 		if errors.Is(err, backupadmin.ErrTokenInvalid) || errors.Is(err, backupadmin.ErrNotFound) || errors.Is(err, backupadmin.ErrNotConfigured) {
 			return c.String(http.StatusNotFound, "Not Found")
@@ -209,6 +209,9 @@ func (h *Handler) ServeDownload(c echo.Context) error {
 		return c.String(http.StatusInternalServerError, "Internal Server Error")
 	}
 	defer func() { _ = rc.Close() }()
+	// token は期限内なら何度でも使えるので、実際に取られたことを残す。発行は
+	// moderation log の downloadBackup に残っている。
+	slog.Info("admin/backup: backup downloaded", "userId", g.UserID, "key", g.Key, "ip", c.RealIP(), "range", c.Request().Header.Get("Range"))
 	res.Header().Set("Content-Type", "application/octet-stream")
 	res.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": g.FileName}))
 	// ディレクトリの保存先はファイルを返すので、Range (途切れたダウンロードの

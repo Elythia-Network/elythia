@@ -20,6 +20,8 @@ type DownloadGrant struct {
 	// Key is the storage key of the object.
 	Key      string `json:"key"`
 	FileName string `json:"fileName"`
+	// UserID is the administrator the token was issued to.
+	UserID string `json:"userId"`
 }
 
 // DownloadTokens issues and resolves short-lived download tokens for storages
