@@ -348,7 +348,13 @@ const menuDef = computed<SuperMenuDef[]>(() => [{
 		text: i18n.ts.database,
 		to: '/admin/database',
 		active: currentPage.value?.route.name === 'database',
-	}],
+	}, ...(iAmAdmin ? [{
+		// mk-go: DB のバックアップ (#3462)。管理者だけが使える (モデレーターには出さない)。
+		icon: 'ti ti-database-export',
+		text: i18n.ts._backups.title,
+		to: '/admin/backups',
+		active: currentPage.value?.route.name === 'backups',
+	}] : [])],
 }, {
 	// サーバープラグインの節 (mk-go #2477 / #2497)。
 	//
