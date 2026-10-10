@@ -270,7 +270,7 @@ Elythia 側のマイグレーションには含めていない。pgroonga 拡張
 | `backup.tools.pgDump` | string | `pg_dump`のパス。空ならPATHから探す |
 | `backup.tools.pgRestore` / `initdb` / `pgCtl` | string | `pg_restore` / `initdb` / `pg_ctl`のパス。空ならPATHから探す。`pg_restore`は、`elythia backup restore`がDBへ戻すときと、`elythia backup verify`が使い捨てのPostgreSQLへ戻すときに使う。`initdb` / `pg_ctl`は`verify`だけが使う |
 | `backup.schedule.interval` | string | `elythia backup daemon`が取る間隔(Goのduration。例: `24h`)。1分以上。空なら定期実行しない |
-| `backup.schedule.at` | string | 取る時刻(`HH:MM`)。プロセスのタイムゾーン(`TZ`)で読む。省略可 |
+| `backup.schedule.at` | string | 取る時刻(`HH:MM`)。プロセスのタイムゾーン(`TZ`)で読む。省略可。付けるなら`interval`は24時間を割り切る値か24時間の倍数にする(それ以外は再起動で枠の位相が変わり、起動時に警告する) |
 | `backup.schedule.keep` | int | 残す使える世代の数。古い世代は、使える新しい世代がこの数そろってから消す。`0`なら消さない |
 | `backup.schedule.verify` | bool | 取った後に毎回確かめる。`true`を推奨する。暗号化しているなら`backup.encryption.identityFile`も要る(空なら起動しない) |
 | `backup.schedule.delayAfter` | string | 最後の使える世代からこの時間を過ぎたら遅れを知らせる。空なら`interval`の1.5倍。`interval`より短くできない |
