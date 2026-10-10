@@ -435,8 +435,26 @@ func regularFile(root *os.Root, rel string) (fs.FileInfo, error) {
 // List returns the regular files whose key starts with prefix, in key order.
 func (d *DirStorage) List(_ context.Context, prefix string) ([]ObjectInfo, error) {
 	var out []ObjectInfo
-	err := filepath.WalkDir(d.root, func(p string, e fs.DirEntry, err error) error {
+	err := filepath.WalkDir(d.root, d.listWalkFunc(prefix, &out))
+	if err != nil {
+		return nil, fmt.Errorf("backup: list %s: %w", d.root, err)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
+	return out, nil
+}
+
+// listWalkFunc returns the filepath.WalkDir callback of List, which appends
+// the matching regular files to out. Entries that disappear during the walk
+// are skipped; the root itself must exist.
+func (d *DirStorage) listWalkFunc(prefix string, out *[]ObjectInfo) fs.WalkDirFunc {
+	return func(p string, e fs.DirEntry, err error) error {
 		if err != nil {
+			// 一覧の途中で世代が消される (整理や管理画面からの削除) と、読もうとした
+			// ディレクトリやファイルが無くなっている。消えたものは一覧に要らないので
+			// 飛ばす。根そのものが無いのは保存先の異常なので、これまでどおり失敗にする。
+			if p != d.root && errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
 			return err
 		}
 		if !e.Type().IsRegular() || strings.HasPrefix(e.Name(), dirTempPrefix) {
@@ -451,17 +469,15 @@ func (d *DirStorage) List(_ context.Context, prefix string) ([]ObjectInfo, error
 			return nil
 		}
 		fi, err := e.Info()
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
-		out = append(out, ObjectInfo{Key: key, Size: fi.Size(), ModTime: fi.ModTime()})
+		*out = append(*out, ObjectInfo{Key: key, Size: fi.Size(), ModTime: fi.ModTime()})
 		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("backup: list %s: %w", d.root, err)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
-	return out, nil
 }
 
 // Delete removes key and then any directories it leaves empty, up to (not

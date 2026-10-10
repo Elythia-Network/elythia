@@ -253,6 +253,41 @@ func TestDirStorage_ListAndPutErrors(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestDirStorage_ListSkipsEntriesRemovedDuringWalk: a generation deleted
+// while List walks the directory is left out instead of failing the whole
+// listing. A missing root still fails.
+func TestDirStorage_ListSkipsEntriesRemovedDuringWalk(t *testing.T) {
+	root := markedDir(t)
+	st, err := NewDirStorage(root)
+	require.NoError(t, err)
+	var out []ObjectInfo
+	fn := st.listWalkFunc("", &out)
+	gone := &fs.PathError{Op: "open", Path: filepath.Join(root, "gen"), Err: syscall.ENOENT}
+
+	// 読もうとした世代のディレクトリが、もう消えていた。
+	require.NoError(t, fn(filepath.Join(root, "gen"), nil, gone))
+	// 根が無いのは、これまでどおり失敗。
+	require.ErrorIs(t, fn(root, nil, gone), fs.ErrNotExist)
+	// 消えた以外の失敗は、これまでどおり返す。
+	require.ErrorIs(t, fn(filepath.Join(root, "gen"), nil, &fs.PathError{Op: "open", Err: syscall.EACCES}), syscall.EACCES)
+
+	// ディレクトリを読んだ後で、ファイルが消された。
+	ctx := context.Background()
+	require.NoError(t, st.Put(ctx, "gen/a", strings.NewReader("x")))
+	entries, err := os.ReadDir(filepath.Join(root, "gen"))
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.NoError(t, os.Remove(filepath.Join(root, "gen", "a")))
+	require.NoError(t, fn(filepath.Join(root, "gen", "a"), entries[0], nil))
+	assert.Empty(t, out)
+
+	require.NoError(t, st.Put(ctx, "gen/b", strings.NewReader("x")))
+	listed, err := st.List(ctx, "")
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	assert.Equal(t, "gen/b", listed[0].Key)
+}
+
 // TestS3Storage_Multipart sends an object larger than the part size, so it
 // goes through CreateMultipartUpload / UploadPart / Complete.
 func TestS3Storage_Multipart(t *testing.T) {
