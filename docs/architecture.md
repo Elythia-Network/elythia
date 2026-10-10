@@ -432,8 +432,9 @@ CLAUDE.md の Section 1 / 2 にあった表とツリーを、#3248 でここへ�
 /
 ├── cmd/
 │   └── elythia/            # 実行バイナリ。internal/cli を呼ぶだけ
-├── internal/               # 全28ディレクトリ (`git ls-tree -d HEAD internal/ | wc -l`)
-│   ├── cli/                # elythia のサブコマンド (serve / migrate / backfill <名前> / doctor / fsck / config-dump / healthcheck / dump-routes)
+├── internal/               # 全29ディレクトリ (`git ls-tree -d HEAD internal/ | wc -l`)
+│   ├── cli/                # elythia のサブコマンド (serve / migrate / backfill <名前> / backup <名前> / doctor / fsck / config-dump / healthcheck / dump-routes)
+│   ├── backup/             # DB のバックアップ (`elythia backup`、#3457)。保存先 (S3 互換 / ディレクトリ)、世代の置き方、pg_dump での取得
 │   ├── config/             # 設定ローダー（Misskey YAML互換）
 │   ├── db/                 # GORM の PostgreSQL 接続配線
 │   ├── server/             # HTTPサーバーのセットアップ、ルーティング、ミドルウェア

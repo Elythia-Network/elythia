@@ -106,6 +106,33 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # DB のバックアップ (#3458)。**普段は動かさない** (profiles に入れてあるので
+  # `docker compose up` では起動しない)。使うときだけ呼ぶ:
+  #   docker compose run --rm --no-deps backup take    # 取って保存先へ送る
+  #   docker compose run --rm --no-deps backup list    # 保存先の世代を一覧する
+  # 本体の image は pg_dump を持たないので、postgres:18-alpine に elythia を足した
+  # image (Dockerfile の target backup) で動かす。設定は本体と同じファイルを読む
+  # (db: と backup: の節)。保存先と暗号化の設定は docs/backup.md を参照。
+  # **同じホストのディスクはバックアップに数えない。** 保存先は S3 互換か、別の
+  # 機器を mount したディレクトリにする。docker.sock は渡さない。
+  backup:
+    logging: *default-logging
+    build:
+      context: .
+      target: backup
+    profiles: ["backup"]
+    # depends_on を書かない。書くと `run` が DB のコンテナの設定の差分を見て作り直す
+    # ことがある。DB は動いている前提で、`run --no-deps` で呼ぶ。
+    volumes:
+      - ./.config/docker.yml:/app/.config/default.yml:ro
+      # 保存先をディレクトリにするときは、別の機器を mount したホストのパスを渡し、
+      # backup.storage.dir.path に /backup を書く。コンテナは UID 70 (postgres) で
+      # 動くので、そのユーザーが書けるようにしておく。
+      # - /mnt/nas/elythia-backup:/backup
+      # 暗号化した世代を確かめる・戻すときだけ、age の秘密鍵を渡す (取るだけなら不要)。
+      # - ./.config/backup-identity.txt:/app/.config/backup-identity.txt:ro
+    restart: "no"
+
   # Video thumbnail generator (#637 M2). mk-go の media proxy が video/* を
   # 受けたとき、設定 `videoThumbnailGenerator` で指定した URL に対して
   # multipart POST (default mode) で video bytes を送り、静止画 thumbnail

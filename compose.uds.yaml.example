@@ -168,6 +168,34 @@ services:
       - mkgo-uds
     restart: unless-stopped
 
+  # DB のバックアップ (#3458)。**普段は動かさない** (profiles に入れてあるので
+  # `up -d` では起動しない)。使うときだけ呼ぶ:
+  #   docker compose -f compose.uds.yaml run --rm --no-deps backup take
+  #   docker compose -f compose.uds.yaml run --rm --no-deps backup list
+  # postgres:18-alpine に elythia を足した image (Dockerfile の target backup) で動き、
+  # mkgo と同じ設定ファイルを読んで pg_sock 経由で DB に繋ぐ。保存先と暗号化の設定は
+  # docs/backup.md を参照。**同じホストのディスクはバックアップに数えない。**
+  # docker.sock は渡さない。
+  backup:
+    logging: *default-logging
+    build:
+      context: .
+      target: backup
+      args:
+        MKGO_COMMIT: ${MKGO_COMMIT:-}
+    profiles: ["backup"]
+    # depends_on を書かない。書くと `run` が DB のコンテナの設定の差分を見て作り直す
+    # ことがある。DB は動いている前提で、`run --no-deps` で呼ぶ。
+    volumes:
+      - ./deploy/uds/config/default.yml:/app/.config/default.yml:ro
+      - pg_sock:/var/run/postgresql
+      # 保存先をディレクトリにするときは、別の機器を mount したホストのパスを渡し、
+      # backup.storage.dir.path に /backup を書く。コンテナは UID 70 (postgres) で動く。
+      # - /mnt/nas/elythia-backup:/backup
+    networks:
+      - mkgo-uds
+    restart: "no"
+
   nginx:
     logging: *default-logging
     image: nginx:1.27-alpine

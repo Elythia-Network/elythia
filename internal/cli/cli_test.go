@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/elythia-network/elythia/internal/cli/backfill"
+	clibackup "github.com/elythia-network/elythia/internal/cli/backup"
 	"github.com/elythia-network/elythia/internal/cli/diag"
 	"github.com/elythia-network/elythia/internal/cli/migrate"
 	"github.com/elythia-network/elythia/internal/cli/serve"
@@ -158,6 +159,8 @@ func TestCommands_WiresEveryNameToItsRunner(t *testing.T) {
 		"backfill instance-counts":   backfill.InstanceCounts,
 		"backfill note-tags":         backfill.NoteTags,
 		"backfill remote-host":       backfill.RemoteHost,
+		"backup take":                clibackup.Take,
+		"backup list":                clibackup.List,
 	}
 	got := map[string]uintptr{}
 	for _, c := range Commands() {

@@ -250,6 +250,27 @@ Elythia 側のマイグレーションには含めていない。pgroonga 拡張
 | `logging.sql.disableQueryTruncation` | bool | SQLログのクエリ切り詰めを無効化 |
 | `logging.sql.enableQueryParamLogging` | bool | SQLログにパラメータ値を含める |
 
+### バックアップ (`backup.*`)
+
+`elythia backup`(バックアップ用のimageの`backup`サービス)が読む。取る手順と保存先に置かれるものは[DBのバックアップ](backup.md)にある。**保存先の認証情報はDBではなくここに置く。** DBが失われたときにも、バックアップを取り出せる必要があるため(ドライブのオブジェクトストレージの設定はDBの`meta`にあるので流用しない)。
+
+| キー | 型 | 説明 |
+|---|---|---|
+| `backup.storage.type` | string | `s3`(S3互換)か`dir`(ディレクトリ)。必須 |
+| `backup.storage.s3.endpoint` | string | 接続先のURL。空ならAWS S3 |
+| `backup.storage.s3.region` | string | region。空なら`us-east-1` |
+| `backup.storage.s3.bucket` | string | bucket。必須 |
+| `backup.storage.s3.prefix` | string | 世代を置くkeyの接頭辞。前後の`/`は無視する |
+| `backup.storage.s3.accessKey` / `secretKey` | string | 認証情報。どちらも必須 |
+| `backup.storage.s3.forcePathStyle` | bool | path形式でbucketを指す(MinIOなど) |
+| `backup.storage.dir.path` | string | 別の機器をmountしたディレクトリ。**既に存在している必要がある**(mountが外れているときに、同じホストのディスクへ黙って書き始めないよう、作らない) |
+| `backup.encryption.enabled` | bool | dumpをageで暗号化する |
+| `backup.encryption.recipients` | string[] | ageの公開鍵(`age1...`)。`enabled`のとき1つ以上必須。取るのに要るのはこれだけ |
+| `backup.encryption.identityFile` | string | ageの秘密鍵のファイル。確かめる・戻すときに使う |
+| `backup.tools.pgDump` | string | `pg_dump`のパス。空ならPATHから探す |
+
+`backup:`の節は`MK_*`の環境変数では作れない(`bindEnvKeys()`に無い)。
+
 ## 環境変数オーバーライド
 
 `MK_`プレフィックス付きの環境変数で設定値を上書きできる。ネストキーは`_`区切り。
