@@ -1,6 +1,6 @@
 # DBのバックアップ
 
-`elythia backup`で、DBのバックアップを取り、ホストの外の保存先へ送る(#3457)。この文書は、取る手順、取ったものが戻せるかを確かめる手順、保存先に置かれるものを扱う。戻す手順と、PostgreSQLのメジャーバージョンを上げる手順は[デプロイ](deployment.md#バックアップから戻す-restore)にある([戻す](#戻す))。設定のキーの一覧は[設定リファレンス](configuration.md#バックアップ-backup)にある。
+`elythia backup`で、DBのバックアップを取り、ホストの外の保存先へ送る(#3457)。この文書は、取る手順、取ったものが戻せるかを確かめる手順、それらを定期的に回す手順、保存先に置かれるものを扱う。戻す手順と、PostgreSQLのメジャーバージョンを上げる手順は[デプロイ](deployment.md#バックアップから戻す-restore)にある([戻す](#戻す))。設定のキーの一覧は[設定リファレンス](configuration.md#バックアップ-backup)にある。
 
 **同じホストのディスクに置いたものは、バックアップとして数えない。** ディスクやホストが壊れたときに、DBと一緒に失われるため。保存先は、S3互換のストレージ(AWS S3、Cloudflare R2、MinIOなど)か、別の機器をmountしたディレクトリ(NASなど)にする。
 
@@ -55,7 +55,7 @@ S3互換の保存先では、`backup.storage.s3.prefix`の下に`generations/`�
 
 ### 同じ秒に2つ取ったとき
 
-世代のIDは秒の単位なので、同じ秒に2つ取ると同じ場所に書こうとする。取り始めに同じIDの世代が既にあれば失敗するが、**保存先の側では排他しない**ので、2つがほぼ同時に始まるとファイルが混ざりうる。定期実行(#3460)は同時に1つしか走らせない。**手で`take`を同時に打たないこと。**
+世代のIDは秒の単位なので、同じ秒に2つ取ると同じ場所に書こうとする。取り始めに同じIDの世代が既にあれば失敗するが、**保存先の側では排他しない**ので、2つがほぼ同時に始まるとファイルが混ざりうる。[定期実行](#定期実行)は同時に1つしか走らせない。**手で`take`を同時に打たないこと。**
 
 保存先で「まだ無ければ置く」形(S3の`If-None-Match: *`など)にしないのは、SDKが500や切断で同じ要求を自動で送り直すため。1回目が保存済みだと送り直しが失敗し、自分が置いたものを他が置いたと取り違える。
 
@@ -272,13 +272,223 @@ DBに拡張(pg_bigmなど)を入れているときは、このホストのPostgr
 ```
 
 - `mismatches`の`actual`が`-1`のときは、戻したDBにその表が無い。`expected`が`-1`のときは、戻したDBにあるが`meta.json`に無い
-- **確かめること自体ができなかったときは、`verify.json`を書かない。** 世代に`meta.json`が無い、保存先に繋がらない、暗号化した世代なのに`identityFile`が無い、`meta.json`の`extensions`の拡張が使い捨てのPostgreSQLに無い、`initdb`や`pg_ctl start`が失敗した、など。バックアップの良し悪しではなく環境の問題なので、終了コード1で理由を表示するだけにする。使い捨てのPostgreSQLを消せなかったときも、結果を表示したうえで`verify.json`を書かずに1を返す
+- **確かめること自体ができなかったときは、`verify.json`を書かない。** 世代に`meta.json`が無い、保存先に繋がらない、暗号化した世代なのに`identityFile`が無い、`meta.json`の`extensions`の拡張が使い捨てのPostgreSQLに無い、`initdb`や`pg_ctl start`が失敗した、など。バックアップの良し悪しではなく環境の問題なので、終了コード1で理由を表示するだけにする。使い捨てのPostgreSQLを消せなかったときも、結果を表示したうえで`verify.json`を書かずに1を返す(定期実行のdaemonは、この場合も判定を`verify.json`に残す。下の「1回の流れ」)
 - **終了コード0のときは、`verify.json`が置かれている。** 1のときは、置かれていることも置かれていないこともある
 
 ### 確かめていないこと
 
 - 戻した後に、Elythiaのサーバーとして起動できるか(Redisやメディアの保存先は扱わない)。戻す手順は#3461で扱う
 - `pg_dump`に入らないDB単位の設定(`meta.json`の`databaseSettings`)。戻すときに入れ直す(#3461)
+
+## 定期実行
+
+`elythia backup daemon`は、設定した間隔でバックアップを[取り](#取る)、[確かめ](#確かめる)、古い世代を消す常駐のプロセス(#3460)。失敗したとき、検証で食い違ったとき、間隔を過ぎても新しい世代ができないときに、Webhookで運営者へ知らせる。本体の管理画面(#3462)が「今すぐ取る」「今すぐ確かめる」「状態」を頼むための制御APIも、このプロセスが持つ。
+
+取る処理と確かめる処理は、`backup take` / `backup verify`と同じもの(同じ設定、同じ`pg_dump` / `initdb` / `pg_ctl` / `pg_restore`)を使う。そのためバックアップ用のimageの中か、それらがあるホストで動かす。起動するときに、保存先が開けること、同梱のmigrationの番号が読めること(作業ディレクトリに`migration/`が要る)、`backup.encryption.identityFile`を書いたならそれが読めることを確かめ、どれかが駄目なら起動しない。
+
+### 設定
+
+設定ファイルの`backup:`の節に書く。保存先(`backup.storage`)と暗号化(`backup.encryption`)は、取る・確かめるときと同じものを使う。キーの一覧は[設定リファレンス](configuration.md#バックアップ-backup)にある。
+
+```yaml
+backup:
+  schedule:
+    interval: 24h        # 間隔 (Go の duration)。空なら定期実行しない
+    at: "04:00"          # 取る時刻 (HH:MM、プロセスのタイムゾーン)。省略可
+    keep: 7              # 残す世代の数。0 なら消さない
+    verify: true         # 取った後に毎回確かめる
+    delayAfter: 36h      # 遅れを知らせるまでの時間。省略時は interval の 1.5 倍
+    listen: ":3010"      # 制御 API の待ち受け。空なら制御 API を持たない
+  notify:
+    webhookUrl: "https://discord.com/api/webhooks/..."
+    format: discord      # generic / discord / slack。省略時は generic
+  server:
+    serviceToken: "<長いランダムな文字列>"   # 制御 API の認証。本体も同じ値を読む
+```
+
+| キー | 意味 |
+|---|---|
+| `schedule.interval` | 間隔。1分より短い値は受け付けない(単位の書き忘れで取り続けないため) |
+| `schedule.at` | 取る時刻。`interval`が24時間の倍数なら、暦の日数で進むので夏時間の切り替えでも同じ時刻に取る。24時間より短い間隔なら、`at`を起点に`interval`ごとに取る |
+| `schedule.keep` | 残す「使える世代」の数(下の「世代の整理」) |
+| `schedule.verify` | `true`なら、取った後に毎回`backup verify`と同じ検証を流す。**`true`を推奨する。** `false`のときは、検証していない世代も「使える世代」に数える |
+| `schedule.delayAfter` | 最後の使える世代から、この時間を過ぎても新しい世代ができなければ遅れを知らせる。`interval`より短い値は受け付けない |
+| `schedule.listen` | 制御APIの待ち受けのアドレス。設定するなら`server.serviceToken`も必須(空なら起動しない) |
+| `notify.webhookUrl` | 通知先。空なら通知せず、ログにだけ残す |
+| `notify.format` | 送る形。下の「通知」 |
+| `server.serviceToken` | 制御APIのtoken。本体(#3462)とdaemonで同じ値を使う |
+
+`interval`も`listen`も空なら、何もすることが無いので起動しない。`interval`を空にして`listen`だけを設定すると、定期実行はせず、管理画面から頼まれたときだけ取る・確かめる形になる。
+
+#### 時刻とタイムゾーン
+
+`at`は、プロセスのタイムゾーン(環境変数`TZ`)で解釈する。`postgres:18-alpine`は`TZ`が空だとUTCになる。composeの`backup-daemon`サービスは`TZ: Asia/Tokyo`を渡している(このimageには`/usr/share/zoneinfo`が入っている)。起動時のログ`backup: schedule started`に、解釈したタイムゾーン(`timezone=`)と次に取る時刻(`next=`)が出るので、確かめる。
+
+#### 起動したときに取るか
+
+起動したとき、最新の揃った世代(`meta.json`と、それが名指しするdumpがある世代)が`interval`より古いか、世代が1つも無ければ、すぐに1回取る。daemonが止まっていた間の分を、次の枠まで待たずに取り戻すため。最新の世代が`interval`より新しければ、次の枠まで待つ。そのため、再起動のたびに取り直すことはない。
+
+取っている途中に次の枠が来たときは、重ねて取らず、終わるのを待って1回だけ取る。
+
+### 1回の流れ
+
+1. 取る。失敗したら通知して終わる
+2. `verify: true`なら確かめる。検証が最後まで走れなかったら「失敗」、走って食い違ったら「食い違い」として通知し、**世代の整理はしない**
+3. 世代を整理する
+
+1つのプロセスの中では、取る・確かめる・消すを同時に1つしか走らせない。確かめている世代を消したり、書いている途中の世代を消したりしないため。**同じ保存先に対して、daemonを2つ動かさない。** daemonを動かしている間に手で`take`を打つと、daemonの作業とは排他されない(同じ秒に重なると、上の「同じ秒に2つ取ったとき」のとおり混ざりうる)。手で取るときは、制御APIの`POST /take`で頼む。
+
+確かめる処理は、判定が出た後に使い捨てのPostgreSQLの後始末(`pg_ctl stop`や一時ディレクトリの削除)か`verify.json`の保存に失敗すると、判定と誤りの両方を返す(上の「結果」)。daemonは、3つの段の判定が揃っていればそれを判定として扱う。通らなかったなら「食い違い」を知らせ、通ったなら整理まで進める。どちらでも`verify.json`を自分で書き直してから、後始末の失敗を「失敗」として別に知らせる。整理は保存先の`verify.json`を読んで行うため。
+
+### 世代の整理
+
+**古い世代は、使える新しい世代が`keep`個そろってから消す。** 壊れたバックアップしか残らない状態を作らないため。
+
+- 「使える世代」は、`verify: true`なら、揃った世代で`verify.json`が`ok: true`のもの。`verify: false`なら、揃った世代で、検証に落ちていないもの(`verify.json`が無いか`ok: true`)
+- `meta.json`か`verify.json`が読めない世代は、理由(壊れている、保存先の一時的な誤り)に関わらず使えない世代として扱う。使えない世代が増えても、消す世代は増えない
+- 新しい方から数えて`keep`個目の使える世代より古い世代は、使えるかどうかに関わらず全て消す
+- それより新しい世代は、検証に落ちた世代も、揃っていない世代も残す。落ちた理由を調べられるようにするためと、揃っていない世代は書いている途中かもしれないため。`keep`個の窓の外に出たら消える
+- 使える世代が`keep`個に満たない間は、何も消さない。検証に落ち続けると世代が増え続けるので、通知を見たら原因を直す
+- `keep: 0`なら何も消さない
+- 1つの世代を消すときは、`meta.json`を最初に消す。途中で失敗しても、その世代は揃っていない世代に見え、dumpの欠けた揃った世代には見えない
+
+### 通知
+
+| 種類 | いつ | `event` |
+|---|---|---|
+| 失敗 | 取る・確かめる・消すのどれかが誤りを返した。確かめる処理の後始末の失敗も含む | `failure` |
+| 食い違い | 検証が走り、戻せない・行数が違う・Elythiaとして読めない | `mismatch` |
+| 遅れ | 最後の使える世代(無ければdaemonの起動時刻)から`delayAfter`を過ぎた | `delay` |
+
+遅れは、取る処理が戻ってこない(固まった)ときにも知らせる。遅れが続く間は、`delayAfter`ごとに繰り返し知らせる。起動した時点で既に遅れていれば、起動してすぐに知らせる。**daemonそのものが止まっていると、遅れも知らせられない。** daemonの死活は、コンテナの再起動の設定(`restart: unless-stopped`など)と、制御APIの`GET /status`で見る。
+
+#### 送る形
+
+`format: generic`は、次のJSONを送る(`text`は人が読む1行の文面)。
+
+```json
+{
+  "event": "mismatch",
+  "instance": "https://example.tld",
+  "occurredAt": "2026-10-10T04:12:00Z",
+  "generationId": "20261009T190000Z",
+  "message": "the backup did not pass verification",
+  "failedStages": [{"stage": "restorable", "ok": false, "error": "..."}],
+  "mismatches": [{"table": "public.note", "expected": 10, "actual": 9}],
+  "text": "[Elythia backup] https://example.tld: verification found a broken backup ..."
+}
+```
+
+`stage`(失敗した段: `take` / `verify` / `prune`)と`lastUsableAt`(遅れのときの最後の使える世代)は、値があるときだけ入る。
+
+`format: discord`は`{"content": "<text>"}`を、`format: slack`は`{"text": "<text>"}`を送る(DiscordのWebhook、SlackのIncoming Webhook)。Discordでは、誤りの文面に含まれる`@everyone`などで一斉通知が起きないよう、mentionを全て無効にして送る。長い文面は、各サービスの上限(Discordは2000文字、Slackは3000文字で切る)に収まるよう切る。
+
+送信に失敗したら2回まで送り直す。リダイレクトはたどらない。送れなかったことはログと`GET /status`の`lastNotifyError`に残る。
+
+#### 通知先への通信
+
+通知は、本体の外向きの通信と同じ`internal/safehttp`の経路で送る。`proxy` / `proxyBypassHosts` / `outgoingAddress` / `outgoingAddressFamily`が効き、**プライベートなアドレスへは送らない**。同じLANの通知先(自前のntfyなど)へ送るときは、本体と同じく`allowedPrivateNetworks`にそのアドレスを書いて許す。
+
+### 制御API
+
+本体の管理画面(#3462)が使う口。`schedule.listen`で待ち受ける。**TLSを持たないので、composeの内部のネットワークだけで待ち受け、portをホストへ公開しない。** 同梱のcomposeの`backup-daemon`サービスは`ports`を持たない。本体の`backup.server.serviceUrl`には`http://backup-daemon:3010`(`listen`のport)を書く。
+
+全てのリクエストに`Authorization: Bearer <server.serviceToken>`が要る。tokenは定数時間で比べる。一致しなければ、パスに関わらず`401 {"error":"unauthorized"}`を返す。
+
+| メソッドとパス | 本文 | 応答 |
+|---|---|---|
+| `POST /take` | 無し | `202 {"job": Job}`。走っている作業があれば`409 {"error":"busy","running": Job}` |
+| `POST /verify` | `{"id": "<世代のID>"}` | `202 {"job": Job}`。IDの形が違えば`400 {"error":"invalid_id"}`、その世代の`meta.json`が無ければ`404 {"error":"no_such_generation"}`、保存先に届かなければ`502 {"error":"storage_error"}`、走っている作業があれば`409` |
+| `GET /status` | 無し | `200 Status` |
+
+daemonが止まりかけているときは、`POST`に`503 {"error":"not_running"}`を返す。`POST /take`は、定期実行と同じ流れ(取る → 設定なら確かめる → 整理する)を1回走らせる。作業は非同期で、結果は`GET /status`の`lastTake` / `lastVerify`で見る。
+
+`Job`と`Status`の形は次のとおり。時刻はRFC 3339(UTC)。
+
+```json
+{
+  "now": "2026-10-10T04:00:00Z",
+  "schedule": {"interval": "24h0m0s", "at": "04:00", "timezone": "Asia/Tokyo", "keep": 7, "verify": true, "delayAfter": "36h0m0s"},
+  "running": {"kind": "take", "trigger": "schedule", "generationId": "20261009T190000Z", "startedAt": "..."},
+  "pending": false,
+  "nextRunAt": "2026-10-11T19:00:00Z",
+  "lastTake": {
+    "kind": "take", "trigger": "api", "generationId": "20261009T190000Z",
+    "startedAt": "...", "finishedAt": "...",
+    "ok": false, "stage": "verify", "error": "verification failed",
+    "verify": {"id": "...", "ok": false, "stages": [], "mismatches": []},
+    "deleted": ["20261001T190000Z"]
+  },
+  "lastVerify": null,
+  "latestUsable": {"id": "20261008T190000Z", "at": "2026-10-08T19:00:00Z"},
+  "overdue": false
+}
+```
+
+- `schedule`は、定期実行をしないときは`null`。`nextRunAt`も`null`
+- `running`は、走っている作業(無ければ`null`)。取る作業の`generationId`は、取り終えた時点で入る
+- `pending`は、定期実行の枠が来たが、別の作業が走っているので待っているとき`true`
+- `lastTake` / `lastVerify`は、最後に終わった作業の結果。`ok`は全ての段が通り、検証(走らせたなら)にも通ったとき`true`。検証に通っても後始末に失敗したときは`false`で、`stage`が`verify`、`error`に後始末の誤りが入る。`stage`は失敗した段(`take` / `verify` / `prune`)、`verify`は検証の結果(`verify.json`と同じ形)、`deleted`は整理で消した世代
+- `latestUsable`は、最新の使える世代
+- `overdue`は、遅れの状態にあるとき`true`
+- `lastNotifyError`は、最後の通知が送れなかったときだけ入る(送れたら消える)
+- この状態はプロセスのメモリにだけあり、再起動すると`lastTake` / `lastVerify`は`null`に戻る。世代の一覧は保存先から読む
+
+#### 接続元IPのヘッダー
+
+本体は、管理画面を操作した人の接続元IPを`X-Elythia-Client-IP`で渡す。daemonは、**tokenが一致したリクエストのときだけ**このヘッダーを読み、ログ(`backup: control API request`の`client_ip=`)に残す。IPとして読めない値は捨てる。tokenが一致しないリクエストは、ヘッダーを読む前に401で返す。
+
+### 動かし方
+
+#### compose(TCP)
+
+`docker-compose.yml`の`backup-daemon`サービスを使う。`backup`サービスと同じimage・設定ファイル・`volumes`(YAMLのanchorで共有している)で、`elythia backup daemon`を常駐させる。`profiles: ["backup-daemon"]`に入れてあるので、profileを有効にしたときだけ起動する。
+
+```bash
+# imageを作る(初回と、Elythiaを更新したとき)
+MKGO_COMMIT=$(git rev-parse --short HEAD) docker compose --profile backup-daemon build backup-daemon
+# 起動する
+docker compose --profile backup-daemon up -d backup-daemon
+# ログ(次に取る時刻など)を見る
+docker compose --profile backup-daemon logs backup-daemon
+```
+
+- **`backup`サービスを`up`で常駐させず、別のサービスにしている。** `backup`は`run --rm`で呼ぶ1回きりのもので`restart: "no"`だが、常駐には`restart: unless-stopped`が要るため。名前が固定なので、本体の`backup.server.serviceUrl`に`http://backup-daemon:3010`と書ける
+- 普段の`docker compose up -d`にも含めたいときは、`.env`に`COMPOSE_PROFILES=backup-daemon`を書く。書かないと、Elythiaを更新したときの`up -d`で`backup-daemon`が作り直されず、古いimageのまま動き続ける
+- `backup-daemon`は、DBのhealthcheckが通ってから起動する(`depends_on`)。起動してすぐに取ることがあるため(上の「起動したときに取るか」)
+- 保存先をディレクトリにするときと、暗号化した世代を確かめるとき(`verify: true`)は、`backup`サービスの`volumes`のコメントを外す。`backup-daemon`にも同じものが入る
+- `TZ`は`Asia/Tokyo`にしてある。変えるときは`backup-daemon`の`environment`を書き換える
+
+#### UDS
+
+`compose.uds.yaml.example`の`backup-daemon`サービスを使う(`compose.uds.yaml`に複製しているなら、同じ節を足す)。`mkgo`と同じ設定ファイルを読み、`pg_sock`のvolumeを通してDBへ繋ぐ。制御APIは`mkgo-uds`のネットワークで待ち受けるので、`mkgo`から`http://backup-daemon:3010`で届く。
+
+```bash
+MKGO_COMMIT=$(git rev-parse --short HEAD) docker compose -f compose.uds.yaml --profile backup-daemon build backup-daemon
+docker compose -f compose.uds.yaml --profile backup-daemon up -d backup-daemon
+```
+
+#### バイナリ直接実行
+
+[取る](#バイナリ直接実行)・[確かめる](#バイナリ直接実行-1)ときと同じく、DBのサーバーと同じ版の`pg_dump` / `initdb` / `pg_ctl` / `pg_restore`がPATHにあるホストで、リポジトリ(または`migration/`のある場所)を作業ディレクトリにして呼ぶ。
+
+```bash
+TZ=Asia/Tokyo elythia backup daemon -config .config/default.yml
+```
+
+systemdで常駐させるときは、`Restart=on-failure`を付ける。`SIGINT` / `SIGTERM`で止まり、走っている作業には中断を頼む(中断した世代は揃っていない世代として残り、後の整理で消える)。
+
+### 動いているかを確かめる
+
+- 起動のログの`next=`で、次に取る時刻を見る
+- 制御APIを有効にしていれば、`GET /status`で状態を見る。portを公開していないのでホストからは届かない。コンテナの中から叩く(バックアップ用のimageには`curl`が無く、busyboxの`wget`がある)
+
+```bash
+docker compose --profile backup-daemon exec backup-daemon \
+  wget -qO- --header "Authorization: Bearer <serviceToken>" http://127.0.0.1:3010/status
+```
+
+- 通知が届くかは、`notify.webhookUrl`を設定した上で、一時的に保存先を読めない値にして`POST /take`を頼むと、`failure`が届く
 
 ## 一覧の見方
 
@@ -296,7 +506,7 @@ ID                STATUS    SIZE  ENCRYPTED  VERIFIED  ELYTHIA  MIGRATION
 
 ## 管理画面(#3462)
 
-管理画面の「情報 → バックアップ」で、世代の一覧と保存先の使用量を見て、取る・確かめる・消す・ダウンロードができる。本体は設定ファイルの`backup:`を読んで保存先を見る(`backup.server.storage.type`が空なら`backup.storage`)。取る・確かめるは、本体のimageに`pg_dump`が無いので、`backup.server.serviceUrl`の`elythia backup daemon`(#3460で足す)に頼む。
+管理画面の「情報 → バックアップ」で、世代の一覧と保存先の使用量を見て、取る・確かめる・消す・ダウンロードができる。本体は設定ファイルの`backup:`を読んで保存先を見る(`backup.server.storage.type`が空なら`backup.storage`)。取る・確かめるは、本体のimageに`pg_dump`が無いので、`backup.server.serviceUrl`の`elythia backup daemon`([定期実行](#定期実行)の[制御API](#制御api))に頼む。
 
 本体が保存先を開けないとき(設定が無い、ディレクトリに目印が無いなど)も、本体は起動する。管理画面は「保存先が設定されていない」と出し、理由は本体のログ(`backup: storage for the admin page is unavailable`)に残る。**ディレクトリの保存先では、本体のコンテナにも同じパスでmountし、グループを共有する**([ディレクトリ](#ディレクトリ))。目印`.elythia-backup`が見えないと開けない。
 

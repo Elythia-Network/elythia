@@ -683,7 +683,31 @@ proxyBypassHosts:
 #    pgRestore: ""
 #    initdb: ""
 #    pgCtl: ""
-#  # What the server (the admin page, #3462) uses.
+#  # `elythia backup daemon` (docs/backup.md): take, verify and prune on a
+#  # schedule, and report problems. Empty interval and listen: nothing to do.
+#  schedule:
+#    # Go duration. At least 1m.
+#    interval: 24h
+#    # HH:MM in the process time zone (TZ). Optional.
+#    at: "04:00"
+#    # Usable generations to keep. Older ones are deleted only after this
+#    # many newer ones exist. 0 keeps everything.
+#    keep: 7
+#    # Verify every new backup (recommended).
+#    verify: true
+#    # Report a delay when no usable generation is newer than this. Empty
+#    # means 1.5 times interval.
+#    delayAfter: 36h
+#    # Control API for the admin page. Listen only on an internal network and
+#    # never publish the port. Requires server.serviceToken.
+#    listen: ":3010"
+#  notify:
+#    # Empty: failures are only logged.
+#    webhookUrl: "https://hooks.example.com/..."
+#    # generic, discord or slack
+#    format: generic
+#  # What the server (the admin page, #3462) uses. The daemon reads
+#  # serviceToken too.
 #  server:
 #    # Empty type means backup.storage. Set it to give the server a key that
 #    # can only list, read and delete. With a "dir" storage, the server must
@@ -692,7 +716,8 @@ proxyBypassHosts:
 #      type: ""
 #    # Price per GB-month (2^30 bytes) for the monthly estimate. 0 hides it.
 #    pricePerGbMonth: 0
-#    # Control API of `elythia backup daemon` for taking and verifying from
-#    # the admin page. Ignored while serviceToken is empty.
+#    # Control API of `elythia backup daemon` (schedule.listen) for taking
+#    # and verifying from the admin page. Ignored while serviceToken is empty.
 #    serviceUrl: ""
-#    serviceToken: ""
+#    # Shared by the daemon's control API and the main server.
+#    serviceToken: "..."

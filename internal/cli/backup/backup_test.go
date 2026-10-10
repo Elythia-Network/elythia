@@ -371,6 +371,11 @@ func TestConfigExampleKeysDecode(t *testing.T) {
 	assert.Equal(t, "/backup", b.Storage.Dir.Path)
 	assert.Equal(t, []string{"age1..."}, b.Encryption.Recipients)
 	assert.Equal(t, "/run/secrets/backup-identity.txt", b.Encryption.IdentityFile)
+	assert.Equal(t, config.BackupScheduleOptions{
+		Interval: "24h", At: "04:00", Keep: 7, Verify: true, DelayAfter: "36h", Listen: ":3010",
+	}, b.Schedule)
+	assert.Equal(t, config.BackupNotifyOptions{WebhookURL: "https://hooks.example.com/...", Format: "generic"}, b.Notify)
+	assert.Equal(t, "...", b.Server.ServiceToken)
 }
 
 // markedDir returns a new directory that a DirStorage accepts.
