@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -501,21 +502,154 @@ func TestDirStorage_DoesNotFollowSymlinks(t *testing.T) {
 	assert.Equal(t, "in storage", string(b))
 }
 
-// TestDirStorage_GetRefusesASwapAfterTheCheck replaces the checked file with
-// a symlink before it is opened.
+// TestDirStorage_GetRefusesASwapAfterTheCheck replaces the checked file
+// before it is opened: with a symlink out of the root, and with another file
+// inside the root (which os.Root alone would open).
 func TestDirStorage_GetRefusesASwapAfterTheCheck(t *testing.T) {
+	ctx := context.Background()
+	t.Cleanup(func() { beforeDirOpen = nil })
+	t.Run("symlink out of the root", func(t *testing.T) {
+		root := markedDir(t)
+		st, err := NewDirStorage(root)
+		require.NoError(t, err)
+		require.NoError(t, st.Put(ctx, "generations/a/dump.pgc", strings.NewReader("in storage")))
+		outside := filepath.Join(t.TempDir(), "secret")
+		require.NoError(t, os.WriteFile(outside, []byte("host secret"), 0o600))
+		beforeDirOpen = func(p string) {
+			require.NoError(t, os.Remove(p))
+			require.NoError(t, os.Symlink(outside, p))
+		}
+		_, err = st.Get(ctx, "generations/a/dump.pgc")
+		assert.ErrorIs(t, err, ErrNotFound)
+	})
+	t.Run("another file", func(t *testing.T) {
+		root := markedDir(t)
+		st, err := NewDirStorage(root)
+		require.NoError(t, err)
+		require.NoError(t, st.Put(ctx, "generations/a/dump.pgc", strings.NewReader("checked")))
+		require.NoError(t, st.Put(ctx, "generations/b/dump.pgc", strings.NewReader("other")))
+		beforeDirOpen = func(p string) {
+			require.NoError(t, os.Rename(filepath.Join(root, "generations", "b", "dump.pgc"), p))
+		}
+		_, err = st.Get(ctx, "generations/a/dump.pgc")
+		assert.ErrorIs(t, err, ErrNotFound)
+	})
+}
+
+// TestDirStorage_ChmodRefusedByTheFileSystem: a file system without Unix
+// permissions (CIFS without unix extensions) refuses chmod even for the
+// owner. Taking a backup must still work there; other errors still stop it.
+func TestDirStorage_ChmodRefusedByTheFileSystem(t *testing.T) {
+	origFile, origDir := chmodFile, chmodDir
+	t.Cleanup(func() { chmodFile, chmodDir = origFile, origDir })
+	ctx := context.Background()
+	for _, errno := range []syscall.Errno{syscall.EPERM, syscall.ENOTSUP, syscall.EINVAL} {
+		t.Run(errno.Error(), func(t *testing.T) {
+			var fileCalls, dirCalls int
+			chmodFile = func(f *os.File, _ fs.FileMode) error {
+				fileCalls++
+				return &fs.PathError{Op: "chmod", Path: f.Name(), Err: errno}
+			}
+			chmodDir = func(_ *os.Root, name string, _ fs.FileMode) error {
+				dirCalls++
+				return &fs.PathError{Op: "chmod", Path: name, Err: errno}
+			}
+			st, err := NewDirStorage(markedDir(t))
+			require.NoError(t, err)
+			require.NoError(t, st.Put(ctx, "generations/a/dump.pgc", strings.NewReader("x")))
+			assert.Equal(t, "x", string(readAll(t, st, "generations/a/dump.pgc")))
+			assert.Equal(t, 1, fileCalls)
+			assert.Equal(t, 2, dirCalls, "generations and generations/a")
+		})
+	}
+	t.Run("other errors stop the put", func(t *testing.T) {
+		chmodDir = origDir
+		chmodFile = func(f *os.File, _ fs.FileMode) error {
+			return &fs.PathError{Op: "chmod", Path: f.Name(), Err: syscall.EIO}
+		}
+		root := markedDir(t)
+		st, err := NewDirStorage(root)
+		require.NoError(t, err)
+		require.ErrorIs(t, st.Put(ctx, "generations/a/dump.pgc", strings.NewReader("x")), syscall.EIO)
+		entries, err := os.ReadDir(filepath.Join(root, "generations", "a"))
+		require.NoError(t, err)
+		assert.Empty(t, entries, "no temp file is left")
+
+		chmodFile = origFile
+		chmodDir = func(_ *os.Root, name string, _ fs.FileMode) error {
+			return &fs.PathError{Op: "chmod", Path: name, Err: syscall.EIO}
+		}
+		require.ErrorIs(t, st.Put(ctx, "generations/b/dump.pgc", strings.NewReader("x")), syscall.EIO)
+	})
+}
+
+// TestNewDirStorage_ResolvesASymlinkedRoot: with the root given through a
+// symbolic link, List must see what Put wrote.
+func TestNewDirStorage_ResolvesASymlinkedRoot(t *testing.T) {
+	real := markedDir(t)
+	link := filepath.Join(t.TempDir(), "backup")
+	require.NoError(t, os.Symlink(real, link))
+	st, err := NewDirStorage(link)
+	require.NoError(t, err)
+	want, err := filepath.EvalSymlinks(real)
+	require.NoError(t, err)
+	assert.Equal(t, want, st.Root())
+	ctx := context.Background()
+	require.NoError(t, st.Put(ctx, "generations/a/dump.pgc", strings.NewReader("x")))
+	objs, err := st.List(ctx, "")
+	require.NoError(t, err)
+	require.Len(t, objs, 1)
+	assert.Equal(t, "generations/a/dump.pgc", objs[0].Key)
+
+	// 目印は実体の側で探す。symlink の先に目印が無ければ拒む。
+	bare := filepath.Join(t.TempDir(), "bare")
+	require.NoError(t, os.Symlink(t.TempDir(), bare))
+	_, err = NewDirStorage(bare)
+	require.ErrorContains(t, err, DirMarkerFile)
+	_, err = NewDirStorage(filepath.Join(t.TempDir(), "dangling"))
+	require.Error(t, err)
+}
+
+// TestDirStorage_PutAndDeleteDoNotFollowSymlinks: someone in the storage's
+// group can replace a generation directory with a symbolic link; neither
+// writing nor deleting may reach through it.
+func TestDirStorage_PutAndDeleteDoNotFollowSymlinks(t *testing.T) {
 	root := markedDir(t)
 	st, err := NewDirStorage(root)
 	require.NoError(t, err)
 	ctx := context.Background()
-	require.NoError(t, st.Put(ctx, "generations/a/dump.pgc", strings.NewReader("in storage")))
-	outside := filepath.Join(t.TempDir(), "secret")
-	require.NoError(t, os.WriteFile(outside, []byte("host secret"), 0o600))
-	beforeDirOpen = func(p string) {
-		require.NoError(t, os.Remove(p))
-		require.NoError(t, os.Symlink(outside, p))
+	outside := t.TempDir()
+	victim := filepath.Join(outside, "dump.pgc")
+	require.NoError(t, os.WriteFile(victim, []byte("host file"), 0o600))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "generations"), 0o700))
+	require.NoError(t, os.Symlink(outside, filepath.Join(root, "generations", "b")))
+	// 根の中を指すものも受けない。
+	require.NoError(t, st.Put(ctx, "generations/a/x", strings.NewReader("x")))
+	require.NoError(t, os.Symlink(filepath.Join(root, "generations", "a"), filepath.Join(root, "generations", "c")))
+
+	for _, key := range []string{"generations/b/dump.pgc", "generations/b/new", "generations/c/x", "generations/c/new"} {
+		assert.ErrorIs(t, st.Put(ctx, key, strings.NewReader("overwritten")), errSymlink, key)
+		assert.ErrorIs(t, st.Delete(ctx, key), errSymlink, key)
 	}
-	t.Cleanup(func() { beforeDirOpen = nil })
-	_, err = st.Get(ctx, "generations/a/dump.pgc")
-	assert.ErrorIs(t, err, ErrNotFound)
+	b, err := os.ReadFile(victim)
+	require.NoError(t, err)
+	assert.Equal(t, "host file", string(b))
+	entries, err := os.ReadDir(outside)
+	require.NoError(t, err)
+	assert.Len(t, entries, 1, "nothing written outside")
+	assert.Equal(t, "x", string(readAll(t, st, "generations/a/x")))
+
+	// 置き先そのものが symlink なら、辿らずに symlink を置き換える / 消す。
+	link := filepath.Join(root, "generations", "a", "dump.pgc")
+	require.NoError(t, os.Symlink(victim, link))
+	require.NoError(t, st.Put(ctx, "generations/a/dump.pgc", strings.NewReader("new dump")))
+	fi, err := os.Lstat(link)
+	require.NoError(t, err)
+	assert.True(t, fi.Mode().IsRegular())
+	require.NoError(t, os.Remove(link))
+	require.NoError(t, os.Symlink(victim, link))
+	require.NoError(t, st.Delete(ctx, "generations/a/dump.pgc"))
+	b, err = os.ReadFile(victim)
+	require.NoError(t, err)
+	assert.Equal(t, "host file", string(b))
 }
