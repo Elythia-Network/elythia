@@ -172,6 +172,7 @@ services:
   # `up -d` では起動しない)。使うときだけ呼ぶ:
   #   docker compose -f compose.uds.yaml run --rm --no-deps backup take
   #   docker compose -f compose.uds.yaml run --rm --no-deps backup list
+  #   docker compose -f compose.uds.yaml run --rm --no-deps backup verify latest
   # postgres:18-alpine に elythia を足した image (Dockerfile の target backup) で動き、
   # mkgo と同じ設定ファイルを読んで pg_sock 経由で DB に繋ぐ。保存先と暗号化の設定は
   # docs/backup.md を参照。**同じホストのディスクはバックアップに数えない。**
@@ -193,6 +194,9 @@ services:
       # backup.storage.dir.path に /backup を書く。コンテナは UID 70 (postgres) で動く。
       # mount 先の根に目印 .elythia-backup が要る (docs/backup.md)。
       # - /mnt/nas/elythia-backup:/backup
+      # 暗号化した世代を確かめる・戻すときだけ、age の秘密鍵を渡す (取るだけなら不要)。
+      # 秘密鍵はリポジトリの外 (deploy/uds/config にも置かない) に置く。
+      # - /etc/elythia/backup-identity.txt:/run/secrets/backup-identity.txt:ro
     networks:
       - mkgo-uds
     restart: "no"
