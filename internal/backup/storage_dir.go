@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"syscall"
 )
 
@@ -39,6 +40,9 @@ const (
 // device (NAS and so on). Keys map to paths below the root.
 type DirStorage struct {
 	root string
+	// chmodWarned is set once a chmod refused by the file system has been
+	// logged. CIFS などでは毎回起きるので、警告は DirStorage ごとに初回だけ出す。
+	chmodWarned atomic.Bool
 }
 
 // DirMarkerFile is the file that must exist at the root of a directory
@@ -171,7 +175,7 @@ func (d *DirStorage) Put(ctx context.Context, key string, r io.Reader) (err erro
 	}
 	defer func() { _ = root.Close() }()
 	dir := filepath.Dir(rel)
-	if err := mkdirs(root, dir); err != nil {
+	if err := d.mkdirs(root, dir); err != nil {
 		return err
 	}
 	// 書き終える前に他から読まれないよう 0600 で作って書き、置く前に filePerm に
@@ -197,7 +201,7 @@ func (d *DirStorage) Put(ctx context.Context, key string, r io.Reader) (err erro
 	if err = f.Sync(); err != nil {
 		return fmt.Errorf("backup: sync %s: %w", key, err)
 	}
-	if err = chmodTolerant(key, func() error { return chmodFile(f, filePerm) }); err != nil {
+	if err = d.chmodTolerant(key, func() error { return fchmod(f, filePerm) }); err != nil {
 		return err
 	}
 	closed = true
@@ -238,7 +242,7 @@ func createTemp(root *os.Root, dir string) (string, *os.File, error) {
 //
 // 既にあるディレクトリの mode は変えない。運営者が手で付けた setgid や、別の
 // UID が作ったものを、こちらの都合で書き換えない。
-func mkdirs(root *os.Root, dir string) error {
+func (d *DirStorage) mkdirs(root *os.Root, dir string) error {
 	if dir == "." {
 		return nil
 	}
@@ -267,19 +271,52 @@ func mkdirs(root *os.Root, dir string) error {
 		// 残す。落とすと、その下に作るファイルのグループが自分の主グループになり、
 		// 本体から読めなくなる。
 		mode := dirPerm | fi.Mode()&fs.ModeSetgid
-		if err := chmodTolerant(cur, func() error { return chmodDir(root, cur, mode) }); err != nil {
+		if err := d.chmodTolerant(cur, func() error { return chmodDir(root, cur, fi, mode) }); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// chmodFile and chmodDir are replaced in tests to simulate file systems that
-// refuse chmod.
-var (
-	chmodFile = func(f *os.File, mode fs.FileMode) error { return f.Chmod(mode) }
-	chmodDir  = func(root *os.Root, name string, mode fs.FileMode) error { return root.Chmod(name, mode) }
-)
+// beforeChmodDir runs before chmodDir opens the directory. Tests use it to
+// swap the directory for a symbolic link in that window.
+var beforeChmodDir func(name string)
+
+// fchmod changes the mode of an open file or directory. Tests replace it to
+// simulate file systems that refuse chmod.
+var fchmod = func(f *os.File, mode fs.FileMode) error { return f.Chmod(mode) }
+
+// chmodDir changes the mode of the directory name, which the caller found
+// with Lstat as fi, through an open descriptor (fchmod). It refuses when what
+// it opened is not that directory.
+//
+// root.Chmod は Go 1.27 では fchmodat2 (syscall 452) を使う。fchmodat2 を許可しない
+// seccomp (古い Docker / containerd / podman の既定) では EPERM になり、CIFS の
+// 「chmod を受け付けない」と見分けられずに受け流してしまう (作ったディレクトリが
+// 0770&^umask のまま残り、本体が消せなくなる)。開いて fchmod すれば、どの
+// seccomp の既定でも通る。
+//
+// os.Root の OpenFile は、根の中を指す symlink を O_NOFOLLOW を付けても辿る
+// (実測)。確かめた後に symlink へ差し替えられたときに別のディレクトリの mode を
+// 変えないよう、開いたものが確かめたものと同じかを見る。
+func chmodDir(root *os.Root, name string, fi fs.FileInfo, mode fs.FileMode) error {
+	if beforeChmodDir != nil {
+		beforeChmodDir(name)
+	}
+	f, err := root.OpenFile(name, os.O_RDONLY|syscall.O_DIRECTORY, 0)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	ofi, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if !os.SameFile(fi, ofi) {
+		return fmt.Errorf("%s: %w", name, errSymlink)
+	}
+	return fchmod(f, mode)
+}
 
 // chmodTolerant runs chmod and ignores the errors of a file system that has
 // no Unix permissions, logging a warning instead.
@@ -290,14 +327,16 @@ var (
 // 構成でバックアップそのものが取れなくなる。作ったばかりのファイルの持ち主は
 // 自分なので、普通のファイルシステムでこれらが返ることは無い。それ以外の誤り
 // (EIO / EROFS など) は止める。
-func chmodTolerant(name string, chmod func() error) error {
+func (d *DirStorage) chmodTolerant(name string, chmod func() error) error {
 	err := chmod()
 	if err == nil {
 		return nil
 	}
 	// ENOTSUP (= EOPNOTSUPP) と ENOSYS は errors.ErrUnsupported に当たる。
 	if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EINVAL) || errors.Is(err, errors.ErrUnsupported) {
-		slog.Warn("backup: the storage does not accept chmod; the permissions are left to the mount options", "path", name, "err", err)
+		if !d.chmodWarned.Swap(true) {
+			slog.Warn("backup: the storage does not accept chmod; the permissions are left to the mount options (logged once)", "path", name, "err", err)
+		}
 		return nil
 	}
 	return fmt.Errorf("backup: chmod %s: %w", name, err)
@@ -341,7 +380,13 @@ func (d *DirStorage) Get(_ context.Context, key string) (io.ReadCloser, error) {
 	}
 	f, err := root.Open(rel)
 	if err != nil {
-		return nil, ErrNotFound
+		// 確かめた後に消された・差し替えられた (根の外を指す symlink なら os.Root が
+		// 拒む) ときだけ「無い」にする。EACCES / EMFILE / ESTALE / EIO を「無い」に
+		// すると、検証が世代の欠陥 (dump が無い) として記録し、原因が見えなくなる。
+		if now, lerr := lstatPath(root, rel); lerr != nil || !os.SameFile(fi, now) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("backup: open %s: %w", key, err)
 	}
 	// 確かめてから開くまでの間に symlink や別のファイルへ差し替えられていないか。
 	// 開いたものが確かめたものと同じ inode でなければ渡さない。

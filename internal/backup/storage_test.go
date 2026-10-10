@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -538,33 +539,43 @@ func TestDirStorage_GetRefusesASwapAfterTheCheck(t *testing.T) {
 
 // TestDirStorage_ChmodRefusedByTheFileSystem: a file system without Unix
 // permissions (CIFS without unix extensions) refuses chmod even for the
-// owner. Taking a backup must still work there; other errors still stop it.
+// owner. Taking a backup must still work there, with one warning per
+// storage; other errors still stop it.
 func TestDirStorage_ChmodRefusedByTheFileSystem(t *testing.T) {
-	origFile, origDir := chmodFile, chmodDir
-	t.Cleanup(func() { chmodFile, chmodDir = origFile, origDir })
+	orig := fchmod
+	t.Cleanup(func() { fchmod = orig })
+	var logs bytes.Buffer
+	origLog := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(origLog) })
 	ctx := context.Background()
-	for _, errno := range []syscall.Errno{syscall.EPERM, syscall.ENOTSUP, syscall.EINVAL} {
+	for _, errno := range []syscall.Errno{syscall.EPERM, syscall.ENOTSUP, syscall.ENOSYS, syscall.EINVAL} {
 		t.Run(errno.Error(), func(t *testing.T) {
+			logs.Reset()
 			var fileCalls, dirCalls int
-			chmodFile = func(f *os.File, _ fs.FileMode) error {
-				fileCalls++
+			fchmod = func(f *os.File, _ fs.FileMode) error {
+				if fi, err := f.Stat(); err == nil && fi.IsDir() {
+					dirCalls++
+				} else {
+					fileCalls++
+				}
 				return &fs.PathError{Op: "chmod", Path: f.Name(), Err: errno}
-			}
-			chmodDir = func(_ *os.Root, name string, _ fs.FileMode) error {
-				dirCalls++
-				return &fs.PathError{Op: "chmod", Path: name, Err: errno}
 			}
 			st, err := NewDirStorage(markedDir(t))
 			require.NoError(t, err)
 			require.NoError(t, st.Put(ctx, "generations/a/dump.pgc", strings.NewReader("x")))
+			require.NoError(t, st.Put(ctx, "generations/b/dump.pgc", strings.NewReader("y")))
 			assert.Equal(t, "x", string(readAll(t, st, "generations/a/dump.pgc")))
-			assert.Equal(t, 1, fileCalls)
-			assert.Equal(t, 2, dirCalls, "generations and generations/a")
+			assert.Equal(t, 2, fileCalls)
+			assert.Equal(t, 3, dirCalls, "generations, generations/a and generations/b")
+			assert.Equal(t, 1, strings.Count(logs.String(), "does not accept chmod"), "warned once per storage")
 		})
 	}
 	t.Run("other errors stop the put", func(t *testing.T) {
-		chmodDir = origDir
-		chmodFile = func(f *os.File, _ fs.FileMode) error {
+		fchmod = func(f *os.File, _ fs.FileMode) error {
+			if fi, err := f.Stat(); err == nil && fi.IsDir() {
+				return orig(f, dirPerm)
+			}
 			return &fs.PathError{Op: "chmod", Path: f.Name(), Err: syscall.EIO}
 		}
 		root := markedDir(t)
@@ -575,12 +586,82 @@ func TestDirStorage_ChmodRefusedByTheFileSystem(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, entries, "no temp file is left")
 
-		chmodFile = origFile
-		chmodDir = func(_ *os.Root, name string, _ fs.FileMode) error {
-			return &fs.PathError{Op: "chmod", Path: name, Err: syscall.EIO}
+		fchmod = func(f *os.File, m fs.FileMode) error {
+			if fi, err := f.Stat(); err == nil && fi.IsDir() {
+				return &fs.PathError{Op: "chmod", Path: f.Name(), Err: syscall.EIO}
+			}
+			return orig(f, m)
 		}
 		require.ErrorIs(t, st.Put(ctx, "generations/b/dump.pgc", strings.NewReader("x")), syscall.EIO)
 	})
+}
+
+// TestDirStorage_DirectoryChmodGoesThroughTheDescriptor: directories are
+// chmod-ed through an open descriptor (fchmod), not by path. root.Chmod uses
+// fchmodat2, which older seccomp profiles refuse with EPERM.
+func TestDirStorage_DirectoryChmodGoesThroughTheDescriptor(t *testing.T) {
+	orig := fchmod
+	t.Cleanup(func() { fchmod = orig })
+	root := markedDir(t)
+	var dirs []string
+	fchmod = func(f *os.File, m fs.FileMode) error {
+		if fi, err := f.Stat(); err == nil && fi.IsDir() {
+			rel, err := filepath.Rel(root, f.Name())
+			require.NoError(t, err)
+			dirs = append(dirs, filepath.ToSlash(rel))
+		}
+		return orig(f, m)
+	}
+	st, err := NewDirStorage(root)
+	require.NoError(t, err)
+	require.NoError(t, st.Put(context.Background(), "generations/a/dump.pgc", strings.NewReader("x")))
+	assert.Equal(t, []string{"generations", "generations/a"}, dirs)
+}
+
+// TestDirStorage_DirectoryChmodDoesNotFollowASwappedSymlink replaces the
+// new directory with a symlink to another directory before its chmod.
+func TestDirStorage_DirectoryChmodDoesNotFollowASwappedSymlink(t *testing.T) {
+	root := markedDir(t)
+	other := filepath.Join(root, "other")
+	require.NoError(t, os.Mkdir(other, 0o700))
+	require.NoError(t, os.Chmod(other, 0o700))
+	beforeChmodDir = func(name string) {
+		p := filepath.Join(root, name)
+		require.NoError(t, os.Remove(p))
+		// 相対の symlink にする。os.Root は絶対パスの symlink を根の外への脱出として
+		// 拒むが、根の中を指す相対の symlink は辿る。
+		target, err := filepath.Rel(filepath.Dir(p), other)
+		require.NoError(t, err)
+		require.NoError(t, os.Symlink(target, p))
+	}
+	t.Cleanup(func() { beforeChmodDir = nil })
+	st, err := NewDirStorage(root)
+	require.NoError(t, err)
+	require.Error(t, st.Put(context.Background(), "generations/a/dump.pgc", strings.NewReader("x")))
+	fi, err := os.Stat(other)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o700), fi.Mode().Perm(), "the directory behind the symlink keeps its mode")
+}
+
+// TestDirStorage_GetKeepsErrorsOtherThanMissing: a file that exists but
+// cannot be opened is not "missing"; verify would record it as a broken
+// generation.
+func TestDirStorage_GetKeepsErrorsOtherThanMissing(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores the file mode")
+	}
+	root := markedDir(t)
+	st, err := NewDirStorage(root)
+	require.NoError(t, err)
+	ctx := context.Background()
+	require.NoError(t, st.Put(ctx, "generations/a/dump.pgc", strings.NewReader("x")))
+	p := filepath.Join(root, "generations", "a", "dump.pgc")
+	require.NoError(t, os.Chmod(p, 0))
+	t.Cleanup(func() { _ = os.Chmod(p, 0o600) })
+	_, err = st.Get(ctx, "generations/a/dump.pgc")
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrNotFound)
+	assert.ErrorIs(t, err, fs.ErrPermission)
 }
 
 // TestNewDirStorage_ResolvesASymlinkedRoot: with the root given through a
