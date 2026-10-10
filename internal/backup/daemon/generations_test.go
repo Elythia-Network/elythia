@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/elythia-network/elythia/internal/backup"
+	"github.com/elythia-network/elythia/internal/config"
 )
 
 var t0 = time.Date(2026, 10, 1, 4, 0, 0, 0, time.UTC)
@@ -42,7 +43,6 @@ func TestScanClassifiesGenerations(t *testing.T) {
 		assert.Equal(t, w.verify, gens[i].Verify, w.id)
 		assert.True(t, gens[i].Time.Equal(dayN(i)), w.id)
 	}
-	assert.Len(t, gens[0].Keys, 3)
 	assert.Equal(t, int64(len("dump-"+ok))+int64(len(mustGet(t, st, backup.Key(ok, backup.MetaFile))))+int64(len(mustGet(t, st, backup.Key(ok, backup.VerifyFile)))), gens[0].Size)
 }
 
@@ -145,28 +145,59 @@ func TestLatest(t *testing.T) {
 	assert.Nil(t, Latest(gens, func(Generation) bool { return false }))
 }
 
-func TestDeleteGenerationRemovesMetaFirst(t *testing.T) {
-	st := newMemStorage()
-	id := st.addGeneration(dayN(0), true, "ok")
-	other := st.addGeneration(dayN(1), true, "ok")
-	gens, err := Scan(context.Background(), st)
-	require.NoError(t, err)
-	require.NoError(t, DeleteGeneration(context.Background(), st, gens[0]))
-	require.NotEmpty(t, st.deleted)
-	assert.Equal(t, backup.Key(id, backup.MetaFile), st.deleted[0], "meta.json goes first")
-	assert.Len(t, st.deleted, 3)
-	assert.Equal(t, []string{other}, st.ids())
+// pruneDaemon is a daemon that keeps keep generations, for calling prune
+// directly.
+func pruneDaemon(t *testing.T, st backup.Storage, keep int) *Daemon {
+	s := mustSchedule(t, config.BackupScheduleOptions{Interval: "24h", Keep: keep}, time.UTC)
+	return New(Options{Schedule: s, Storage: st, Logger: discardLogger(), Clock: utcClock{}})
 }
 
-func TestDeleteGenerationErrors(t *testing.T) {
+func TestPruneDeletesMetaFirst(t *testing.T) {
+	st := newMemStorage()
+	old := st.addGeneration(dayN(0), true, "ok")
+	newer := st.addGeneration(dayN(1), true, "ok")
+	deleted, err := pruneDaemon(t, st, 1).prune(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, []string{old}, deleted)
+	require.NotEmpty(t, st.deleted)
+	assert.Equal(t, backup.Key(old, backup.MetaFile), st.deleted[0], "meta.json goes first")
+	assert.Len(t, st.deleted, 3)
+	assert.Equal(t, []string{newer}, st.ids())
+}
+
+func TestPruneReturnsDeleteErrors(t *testing.T) {
 	st := newMemStorage()
 	st.addGeneration(dayN(0), true, "ok")
-	gens, err := Scan(context.Background(), st)
-	require.NoError(t, err)
+	st.addGeneration(dayN(1), true, "ok")
 	st.deleteErr = errBoom
-	require.ErrorIs(t, DeleteGeneration(context.Background(), st, gens[0]), errBoom)
+	deleted, err := pruneDaemon(t, st, 1).prune(context.Background())
+	require.ErrorIs(t, err, errBoom)
+	assert.Empty(t, deleted)
+}
 
-	// meta.json の無い世代でも、残りの削除の失敗を返す。
-	partial := Generation{ID: gens[0].ID, Keys: []string{backup.Key(gens[0].ID, backup.DumpFile)}}
-	require.ErrorIs(t, DeleteGeneration(context.Background(), st, partial), errBoom)
+// goneStorage hides the objects of one generation from a listing of that
+// generation alone, as if the admin page deleted it after the daemon listed
+// every generation.
+type goneStorage struct {
+	*memStorage
+	gone string
+}
+
+func (g goneStorage) List(ctx context.Context, prefix string) ([]backup.ObjectInfo, error) {
+	if prefix == backup.Key(g.gone, "") {
+		return nil, nil
+	}
+	return g.memStorage.List(ctx, prefix)
+}
+
+// 一覧を取った後に管理画面から消された世代は、消す段の失敗にしない。
+func TestPruneSkipsGenerationAlreadyGone(t *testing.T) {
+	st := newMemStorage()
+	gone := st.addGeneration(dayN(0), true, "ok")
+	old := st.addGeneration(dayN(1), true, "ok")
+	newer := st.addGeneration(dayN(2), true, "ok")
+	deleted, err := pruneDaemon(t, goneStorage{memStorage: st, gone: gone}, 1).prune(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, []string{old}, deleted, "the generation already gone is not reported as deleted")
+	assert.Equal(t, []string{gone, newer}, st.ids())
 }
