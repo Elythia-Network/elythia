@@ -297,3 +297,7 @@ proxyBypassHosts:
 #  # version must not be older than the server's.
 #  tools:
 #    pgDump: ""
+#    # `elythia backup verify` restores into a throwaway server with these.
+#    pgRestore: ""
+#    initdb: ""
+#    pgCtl: ""

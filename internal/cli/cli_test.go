@@ -161,6 +161,7 @@ func TestCommands_WiresEveryNameToItsRunner(t *testing.T) {
 		"backfill remote-host":       backfill.RemoteHost,
 		"backup take":                clibackup.Take,
 		"backup list":                clibackup.List,
+		"backup verify":              clibackup.Verify,
 	}
 	got := map[string]uintptr{}
 	for _, c := range Commands() {

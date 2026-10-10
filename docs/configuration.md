@@ -252,7 +252,7 @@ Elythia 側のマイグレーションには含めていない。pgroonga 拡張
 
 ### バックアップ (`backup.*`)
 
-`elythia backup`(バックアップ用のimageの`backup`サービス)が読む。取る手順と保存先に置かれるものは[DBのバックアップ](backup.md)にある。**保存先の認証情報はDBではなくここに置く。** DBが失われたときにも、バックアップを取り出せる必要があるため(ドライブのオブジェクトストレージの設定はDBの`meta`にあるので流用しない)。
+`elythia backup`(バックアップ用のimageの`backup`サービス)が読む。取る・確かめる手順と保存先に置かれるものは[DBのバックアップ](backup.md)にある。**保存先の認証情報はDBではなくここに置く。** DBが失われたときにも、バックアップを取り出せる必要があるため(ドライブのオブジェクトストレージの設定はDBの`meta`にあるので流用しない)。
 
 | キー | 型 | 説明 |
 |---|---|---|
@@ -268,6 +268,7 @@ Elythia 側のマイグレーションには含めていない。pgroonga 拡張
 | `backup.encryption.recipients` | string[] | ageの公開鍵(`age1...`)。`enabled`のとき1つ以上必須。取るのに要るのはこれだけ |
 | `backup.encryption.identityFile` | string | ageの秘密鍵のファイル。確かめる・戻すときに使う。リポジトリの外に置く |
 | `backup.tools.pgDump` | string | `pg_dump`のパス。空ならPATHから探す |
+| `backup.tools.pgRestore` / `initdb` / `pgCtl` | string | `elythia backup verify`が使い捨てのPostgreSQLを立てて戻すときの、`pg_restore` / `initdb` / `pg_ctl`のパス。空ならPATHから探す |
 
 `backup:`の節は`MK_*`の環境変数では作れない(`bindEnvKeys()`に無い)。
 

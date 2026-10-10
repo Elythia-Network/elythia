@@ -1,5 +1,6 @@
 // Package backup implements "elythia backup", which takes database backups
-// into storage outside the host and lists them (#3457).
+// into storage outside the host, lists them and verifies that they can be
+// restored (#3457).
 //
 // サブコマンドは internal/cli の Commands で "backup" の Sub に並べる。後の段階
 // (verify / daemon / restore) も同じ親に足す。
