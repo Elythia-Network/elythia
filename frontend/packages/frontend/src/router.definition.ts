@@ -479,6 +479,11 @@ export const ROUTE_DEF = [{
 		name: 'database',
 		component: page(() => import('@/pages/admin/database.vue')),
 	}, {
+		// mk-go: DB のバックアップ (#3462)。閲覧を含む全ての操作に再認証を求める
+		path: '/backups',
+		name: 'backups',
+		component: page(() => import('@/pages/admin/backups.vue')),
+	}, {
 		// mk-go: 承認制の登録の審査 (#2555)
 		path: '/signup-applications',
 		name: 'signup-applications',
