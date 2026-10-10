@@ -4,7 +4,6 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -20,6 +19,7 @@ import (
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/core/cache"
 	"github.com/elythia-network/elythia/internal/core/chart"
+	"github.com/elythia-network/elythia/internal/core/event"
 	corefederation "github.com/elythia-network/elythia/internal/core/federation"
 	corenote "github.com/elythia-network/elythia/internal/core/note"
 	"github.com/elythia-network/elythia/internal/core/pluginaccount"
@@ -34,6 +34,7 @@ import (
 	"github.com/elythia-network/elythia/internal/repository"
 	mksentry "github.com/elythia-network/elythia/internal/sentry"
 	"github.com/elythia-network/elythia/internal/server/middleware"
+	"github.com/elythia-network/elythia/internal/stream"
 	"github.com/elythia-network/elythia/plugin"
 	"github.com/labstack/echo/v4"
 	echomw "github.com/labstack/echo/v4/middleware"
@@ -77,9 +78,12 @@ type Server struct {
 	// 既定 (RoleBoth) は env 未設定時の従来どおりの挙動。setupRoutes は
 	// role を見て背景処理を出し分けるので、New より前に決まっている必要がある。
 	role config.ProcessRole
-	// queueOnlyServer は RoleQueue のときだけ立てる /healthz 用の最小 server。
-	// Shutdown で閉じるために保持する。
-	queueOnlyServer *http.Server
+	// streamManager / streamPubSub / internalPubSub は世代ごとに作り直すもの
+	// (#3463)。setupRoutes が入れ、StopBackground が閉じる。以前は setupRoutes の
+	// ローカル変数で、止める口が無かった。
+	streamManager  *stream.Manager
+	streamPubSub   *event.PubSubService
+	internalPubSub *event.PubSubService
 
 	// pluginRoles はプラグインのルートで権限を判定するための参照 (#2477)。
 	// setupRoutes で roleService を作った後に入る。
@@ -1003,13 +1007,14 @@ func (s *Server) SetSyncDeliverHookForTest(fn func(payload queue.DeliverPayload)
 	}
 }
 
-// Start begins listening on the configured port (or UNIX domain socket) and
-// launches the queue worker.
+// StartBackground launches the background work of this server generation:
+// the queue worker, auto-scale and scheduler (when the process role runs the
+// queue) and the chart save loop. It does not listen; the Supervisor owns the
+// listener and routes requests to Handler / ServeHandler.
 //
-// If s.config.Socket is non-empty the HTTP server binds to that path instead
-// of a TCP port. This matches Misskey 本家 YAML の `socket` / `chmodSocket`
-// 設定と同じ運用感覚で使える。
-func (s *Server) Start() error {
+// listener を Server から外したのは、メンテナンスで Server を作り直しても
+// listener を張ったままにするため (#3463)。
+func (s *Server) StartBackground() error {
 	// queue 側 (worker / autoscale / scheduler) は RoleServer では起動しない。
 	// Web ノードもジョブを **enqueue** はするので queueClient は生かしたまま、
 	// 消費側だけ止める (#2459)。
@@ -1035,35 +1040,32 @@ func (s *Server) Start() error {
 			slog.Warn("chart management service start failed", "err", err)
 		}
 	}
-
-	if !s.role.RunsServer() {
-		return s.serveQueueOnly()
-	}
-
-	if s.config.Socket != "" {
-		ln, err := config.ListenUnixSocket(s.config.Socket, s.config.ChmodSocket)
-		if err != nil {
-			return err
-		}
-		s.echo.Listener = ln
-		slog.Info("starting Elythia server",
-			"socket", s.config.Socket, "url", s.config.URL)
-		// Echo.Start は内部で net.Listen してしまうので、ここでは Start では
-		// なく Serve を使って既に張った listener を使う。
-		if err := s.echo.Server.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return err
-		}
-		return nil
-	}
-
-	addr := fmt.Sprintf(":%d", s.config.Port)
-	slog.Info("starting Elythia server", "addr", addr, "url", s.config.URL)
-	return s.echo.Start(addr)
+	return nil
 }
 
-// Shutdown gracefully shuts down the server, the queue worker and
-// any background services such as the chart management loop.
+// ServeHandler returns the handler the listener should serve for this
+// process role: the full router for a node that runs the server, or the
+// minimal /healthz (+ /metrics) mux for a queue-only node.
+func (s *Server) ServeHandler() http.Handler {
+	if !s.role.RunsServer() {
+		return s.queueOnlyMux()
+	}
+	return s.echo
+}
+
+// Shutdown stops this server generation: streaming connections, the queue
+// worker and every background service such as the chart management loop.
+// It is the same as StopBackground and safe to call more than once.
 func (s *Server) Shutdown(ctx context.Context) error {
+	return s.StopBackground(ctx)
+}
+
+// StopBackground stops everything StartBackground and the constructor
+// started, closes the streaming connections with a 1012 close frame and
+// closes this generation's Redis subscriptions. It does not close the DB
+// pool or the Redis clients, which the caller owns. Only the first call does
+// the work; later calls return its result.
+func (s *Server) StopBackground(ctx context.Context) error {
 	s.shutdownOnce.Do(func() {
 		s.shutdownErr = s.shutdown(ctx)
 	})
@@ -1071,6 +1073,14 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 func (s *Server) shutdown(ctx context.Context) error {
+	// streaming を最初に閉じる。接続の close handler は DB を触る
+	// (lastActiveDate など) ので、DB を閉じる前に終わらせる。close frame を
+	// 送るので、クライアントは 1006 ではなく 1012 を受けて繋ぎ直す (#3463)。
+	if s.streamManager != nil {
+		if left := s.streamManager.CloseAll(ctx, stream.ServiceRestartCloseCode, "server restarting"); left > 0 {
+			slog.Warn("streaming connections did not close before the deadline", "left", left)
+		}
+	}
 	// 登録順に shutdown hook を走らせる。publisher goroutine の clean 停止と、
 	// graceful drain が必要な service (hashtag #727 等) の Shutdown(ctx) を
 	// 兼ねる。hook が ctx を取るので timeout 共有が可能 (#764)。
@@ -1102,21 +1112,20 @@ func (s *Server) shutdown(ctx context.Context) error {
 			slog.Warn("queue driver close failed", "err", err)
 		}
 	}
-	// RoleQueue では echo を listen していないので、代わりに最小 server を閉じる。
-	// echo.Shutdown 自体は listener 無しでも無害だが、閉じる対象を取り違えると
-	// in-flight な /healthz が切られないまま抜ける。
-	var err error
-	if s.queueOnlyServer != nil {
-		err = s.queueOnlyServer.Shutdown(ctx)
-	} else {
-		err = s.echo.Shutdown(ctx)
+	// この世代の Redis 購読を閉じる。internal: の購読は解除の関数を捨てて
+	// いるので、個別ではなく pubsub ごと閉じる (#3463)。Publish はクライアントを
+	// 直接使うので、閉じた後も (古い世代の残りの処理が) 送ることはできる。
+	for _, ps := range []*event.PubSubService{s.internalPubSub, s.streamPubSub} {
+		if ps != nil {
+			_ = ps.Close()
+		}
 	}
-	// UDS listen していた場合、Shutdown で net.Listener.Close() は呼ばれる
-	// が、ソケットファイル自体は残るので明示的に unlink しておく。
-	if rmErr := config.RemoveUnixSocket(s.config.Socket); rmErr != nil {
-		slog.Warn("failed to remove socket file", "socket", s.config.Socket, "err", rmErr)
+	// listener は Supervisor が持つ。echo は listen していないので、Shutdown は
+	// echo が自分で張った server を持っていた場合 (テストなど) にだけ効く。
+	if s.echo != nil {
+		return s.echo.Shutdown(ctx)
 	}
-	return err
+	return nil
 }
 
 // setChartManagement registers the chart management service so its

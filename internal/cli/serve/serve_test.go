@@ -65,6 +65,8 @@ type harness struct {
 	srv            *fakeServer
 	files          map[string]*bytes.Buffer
 	cancel         context.CancelFunc
+	// appName は newSupervisor に渡った cfg の DBApplicationName。
+	appName string
 }
 
 type nopCloser struct{ *bytes.Buffer }
@@ -107,6 +109,11 @@ func newHarness() *harness {
 		},
 		newServer: func(*config.Config, *gorm.DB, *cache.RedisClients) (httpServer, error) {
 			h.steps = append(h.steps, "server")
+			return h.srv, nil
+		},
+		newSupervisor: func(cfg *config.Config, _ *cache.RedisClients) (supervisor, error) {
+			h.steps = append(h.steps, "supervisor")
+			h.appName = cfg.DBApplicationName
 			return h.srv, nil
 		},
 		signalContext: func() (context.Context, context.CancelFunc) {
@@ -153,9 +160,11 @@ func TestServe_StartsAndShutsDownOnSignal(t *testing.T) {
 	code := h.runServe(t, []string{"-config", "x.yml"})
 	assert.Equal(t, 0, code)
 	assert.Equal(t, []string{
-		"log:stdout", "config:x.yml", "pid:/run/x.pid", "sentry", "db", "redis", "server",
+		"log:stdout", "config:x.yml", "pid:/run/x.pid", "sentry", "redis", "supervisor",
 		"redis-close", "sentry-flush", "pid-cleanup",
 	}, h.steps)
+	// DB の接続には、このプロセスを表す名前が付く (#3463)。
+	assert.Regexp(t, `^elythia/both/.+/[0-9]+$`, h.appName)
 	assert.True(t, h.srv.shutdown)
 	assert.Contains(t, h.stdout.String(), "Elythia stopped.")
 	assert.Contains(t, h.log.String(), "shutting down server")
@@ -206,28 +215,23 @@ func TestServe_StartupFailures(t *testing.T) {
 			wantSteps: []string{"log:stdout", "config:.config/default.yml", "pid:/run/x.pid", "pid-cleanup"},
 		},
 		{
-			name:    "database",
-			break_:  func(h *harness) { h.e.openDB = func(*config.Config) (*gorm.DB, error) { return nil, boom } },
-			wantLog: "failed to connect to database",
-			wantSteps: []string{"log:stdout", "config:.config/default.yml", "pid:/run/x.pid", "sentry",
-				"sentry-flush", "pid-cleanup"},
-		},
-		{
 			name: "redis",
 			break_: func(h *harness) {
 				h.e.openRedis = func(*config.Config) (*cache.RedisClients, func(), error) { return nil, nil, boom }
 			},
 			wantLog: "failed to connect to Redis",
-			wantSteps: []string{"log:stdout", "config:.config/default.yml", "pid:/run/x.pid", "sentry", "db",
+			wantSteps: []string{"log:stdout", "config:.config/default.yml", "pid:/run/x.pid", "sentry",
 				"sentry-flush", "pid-cleanup"},
 		},
 		{
-			name: "server",
+			// DB に繋がらない場合も、Server を作れない場合も、Supervisor の構築の
+			// 失敗として返る。
+			name: "supervisor",
 			break_: func(h *harness) {
-				h.e.newServer = func(*config.Config, *gorm.DB, *cache.RedisClients) (httpServer, error) { return nil, boom }
+				h.e.newSupervisor = func(*config.Config, *cache.RedisClients) (supervisor, error) { return nil, boom }
 			},
 			wantLog: "failed to construct server",
-			wantSteps: []string{"log:stdout", "config:.config/default.yml", "pid:/run/x.pid", "sentry", "db", "redis",
+			wantSteps: []string{"log:stdout", "config:.config/default.yml", "pid:/run/x.pid", "sentry", "redis",
 				"redis-close", "sentry-flush", "pid-cleanup"},
 		},
 	}
@@ -319,6 +323,7 @@ func TestDefaultEnv(t *testing.T) {
 	assert.NotNil(t, e.initSentry)
 	assert.NotNil(t, e.openDB)
 	assert.NotNil(t, e.newServer)
+	assert.NotNil(t, e.newSupervisor)
 
 	ctx, cancel := e.signalContext()
 	cancel()
@@ -347,6 +352,22 @@ func TestDefaultEnv(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, clients)
 	assert.Nil(t, closeFn)
+
+	// 既定の Supervisor は DB を開くところから始める。誰も listen していない
+	// 宛先なら、DB の接続の失敗として返る。
+	cfg.DB = config.DBOptions{Host: "127.0.0.1", Port: port, DB: "x", User: "x", Pass: "x"}
+	sup, err := e.newSupervisor(cfg, &cache.RedisClients{})
+	assert.ErrorContains(t, err, "connect to database")
+	assert.Nil(t, sup)
+}
+
+func TestDBApplicationName(t *testing.T) {
+	t.Setenv(config.EnvOnlyServer, "1")
+	t.Setenv(config.EnvOnlyQueue, "")
+	assert.Regexp(t, fmt.Sprintf(`^elythia/server/.+/%d$`, os.Getpid()), dbApplicationName())
+	// 矛盾した役割の指定は Server の構築で落ちるが、名前の段では止めない。
+	t.Setenv(config.EnvOnlyQueue, "1")
+	assert.Regexp(t, `^elythia/invalid/`, dbApplicationName())
 }
 
 func TestExportedEntryPoints_StopOnFlagErrors(t *testing.T) {

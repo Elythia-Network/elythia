@@ -2906,6 +2906,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// Streaming (Phase 4.1 Step K)
 	// 1. Redis pubsub bus (核となる publish/subscribe チャンネル)
 	streamPubSub := event.NewPubSubService(s.redis.Pubsub, "stream:")
+	s.streamPubSub = streamPubSub
 	streamBus := stream.NewEventPubSubBus(streamPubSub)
 
 	// #1740: meta 更新の cross-worker cache invalidation。更新した worker は
@@ -2922,6 +2923,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// CachedMetaRepository.Update が invalidate してから notifyUpdate する
 	// 実装がその順序を保証しており、subscriber 側はここの並び順で保証する。
 	internalPubSub := event.NewPubSubService(s.redis.Pubsub, "internal:")
+	s.internalPubSub = internalPubSub
 	// captcha の provider 集合は起動時の meta スナップショットから組まれるので、
 	// **ここで繋がないと管理画面で有効にしても再起動まで一切検証されない**。
 	// `/api/meta` は DB を読むのでフロントは captcha を描画し、運営者からは
@@ -3114,6 +3116,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// 3. Connection manager + 各 publisher の生成
 	streamManager := stream.NewManager(streamRegistry, streamBus)
+	s.streamManager = streamManager
 	// readNotificationメッセージをnotificationServiceに橋渡しする
 	streamManager.SetNotificationReader(&notifReaderAdapter{svc: notificationService})
 	// hardMutedWords (#787) 用の rules lookup を wire。connection 確立時に

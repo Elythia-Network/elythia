@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -63,7 +64,16 @@ type Manager struct {
 	// 巻き込むため。
 	busCancelMu sync.Mutex
 	busCancels  map[string]func()
+
+	// closing は CloseAll が呼ばれた印。以後に Accept した接続はすぐ閉じる。
+	// メンテナンスに入るとき (#3463)、ハンドラーを差し替える前に upgrade を
+	// 終えていた接続が、CloseAll の後に登録されて残るのを防ぐ。
+	closing atomic.Bool
 }
+
+// ServiceRestartCloseCode is the WebSocket close code (1012, Service Restart)
+// CloseAll sends when the server stops a generation.
+const ServiceRestartCloseCode = 1012
 
 // LastActiveRecorder bumps a user's `lastActiveDate`. upstream の
 // StreamingApiServerService は WebSocket 接続時と 5 分ごとにこれを呼ぶ。
@@ -238,6 +248,11 @@ func (m *Manager) Accept(ws *websocket.Conn, user *model.User, scopes []string, 
 		m.unregister(id)
 	})
 	m.register(c)
+	if m.closing.Load() {
+		// CloseAll の後に登録された。register の後で見るので、CloseAll の
+		// 一覧の取得と入れ違っても、どちらかで必ず閉じられる。
+		c.CloseWithCode(ServiceRestartCloseCode, "server restarting")
+	}
 	// Start ブロックするので呼び出し元 goroutine 上で読み続ける。
 	c.Start()
 }
@@ -301,6 +316,56 @@ func (m *Manager) Shutdown() {
 	m.mu.Unlock()
 	for _, c := range conns {
 		c.Close()
+	}
+}
+
+// CloseAll stops every process-wide bus subscription the Manager holds, sends
+// a close frame with code / reason to every live connection and waits until
+// they have all unregistered or ctx is done. Connections accepted afterwards
+// are closed the same way. It returns the number of connections still
+// registered when it gave up (0 on success).
+//
+// Shutdown と違い、close frame を送る (Shutdown の Close は送らないので、相手には
+// 1006 に見える)。購読も、Shutdown が外していない relation reload を含めて全部外す。
+// 本家の Stream は閉じられると再接続するので、メンテナンスを抜けた後に
+// クライアントが自分で繋ぎ直す (#3463)。
+func (m *Manager) CloseAll(ctx context.Context, code int, reason string) int {
+	m.closing.Store(true)
+	m.busCancelMu.Lock()
+	cancels := make([]func(), 0, len(m.busCancels))
+	for topic, cancel := range m.busCancels {
+		if cancel != nil {
+			cancels = append(cancels, cancel)
+		}
+		delete(m.busCancels, topic)
+	}
+	m.busCancelMu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
+
+	m.mu.RLock()
+	conns := make([]*Connection, 0, len(m.conns))
+	for _, c := range m.conns {
+		conns = append(conns, c)
+	}
+	m.mu.RUnlock()
+	for _, c := range conns {
+		c.CloseWithCode(code, reason)
+	}
+
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		n := m.Count()
+		if n == 0 {
+			return 0
+		}
+		select {
+		case <-ctx.Done():
+			return n
+		case <-ticker.C:
+		}
 	}
 }
 
