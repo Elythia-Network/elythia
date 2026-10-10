@@ -1905,6 +1905,14 @@ func TestMergeMetaPolicies(t *testing.T) {
 		assert.Equal(t, true, merged["ltlAvailable"])
 	})
 
+	// `/api/meta` や frontend に埋め込む meta の policies も、size の 2 つの key の
+	// 小数を残す (#3489)。frontend はこの値でアップロードを手前で止める。
+	t.Run("fractional size policies are kept", func(t *testing.T) {
+		merged := role.MergeMetaPolicies([]byte(`{"maxFileSizeMb":0.5,"driveCapacityMb":1.5,"pinLimit":2.7}`))
+		assert.Equal(t, 0.5, merged["maxFileSizeMb"])
+		assert.Equal(t, 1.5, merged["driveCapacityMb"])
+		assert.Equal(t, 2, merged["pinLimit"], "other int keys are still rounded")
+	})
 	t.Run("invalid JSON falls back to defaults", func(t *testing.T) {
 		merged := role.MergeMetaPolicies([]byte(`{not json`))
 		assert.Equal(t, role.DefaultPolicies()["ltlAvailable"], merged["ltlAvailable"])
@@ -2093,6 +2101,40 @@ func TestGetUserPolicies_PositiveFractionalMaxFileSizeBelowCapRemainsUnchanged(t
 	assignRepo.Assignments["user1:r1"] = &model.RoleAssignment{ID: "a1", UserID: "user1", RoleID: "r1"}
 
 	assert.Equal(t, 0.5, svc.GetUserPolicies("user1")["maxFileSizeMb"])
+}
+
+// 基本ポリシー (meta) の小数は、size の 2 つの key だけ切り捨てずに残す
+// (#3489)。切り捨てると 0.5 が 0 になり、drive で「保存できない」に変わる
+// (本家は 0.5MB まで通す)。他の int の key は従来どおり整数に丸める。
+func TestGetUserPolicies_FractionalBaseSizePoliciesAreKept(t *testing.T) {
+	svc, _, _, metaRepo := newTestService(t)
+	svc.SetServerMaxFileSizeMb(100)
+	metaRepo.Meta = &model.Meta{ID: "x", Policies: datatypes.JSON([]byte(`{"maxFileSizeMb": 0.5, "driveCapacityMb": 1.5, "pinLimit": 2.7}`))}
+	p := svc.GetUserPolicies("user1")
+	assert.Equal(t, 0.5, p["maxFileSizeMb"])
+	assert.Equal(t, 1.5, p["driveCapacityMb"])
+	assert.Equal(t, 2, p["pinLimit"], "other int keys are still rounded")
+}
+
+// 基本が小数でも、ロールで付けた値が集約で勝つ (#3489)。base が float64 のとき
+// int の分岐に入らず、ロールの値を捨てていた形 (#3484 の作業中に出た回帰)。
+func TestGetUserPolicies_FractionalBaseDoesNotHideRoleValue(t *testing.T) {
+	svc, roleRepo, assignRepo, metaRepo := newTestService(t)
+	svc.SetServerMaxFileSizeMb(250)
+	metaRepo.Meta = &model.Meta{ID: "x", Policies: datatypes.JSON([]byte(`{"maxFileSizeMb": 0.5, "driveCapacityMb": 1.5}`))}
+	roleRepo.Roles["r1"] = &model.Role{
+		ID: "r1", Name: "Big",
+		Policies: datatypes.JSON([]byte(`{
+			"maxFileSizeMb": {"useDefault": false, "priority": 2, "value": 200},
+			"driveCapacityMb": {"useDefault": false, "priority": 2, "value": 5000}
+		}`)),
+	}
+	assignRepo.Assignments["user1:r1"] = &model.RoleAssignment{ID: "a1", UserID: "user1", RoleID: "r1"}
+	p := svc.GetUserPolicies("user1")
+	assert.Equal(t, 200, p["maxFileSizeMb"])
+	assert.Equal(t, 5000, p["driveCapacityMb"])
+	// ロールの無い利用者は基本の小数のまま。
+	assert.Equal(t, 0.5, svc.GetUserPolicies("nobody")["maxFileSizeMb"])
 }
 
 // server の上限を超える小数は上限の値に下がる (policyAboveCap の float64 の枝)。
