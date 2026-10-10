@@ -261,7 +261,20 @@ func buildKeywordDSN(host string, port int, user, pass, dbname string, t DBTLS) 
 // (socket 名 .s.PGSQL.<port> の末尾数字) を渡す。UDS では TLS を張れないので
 // sslmode は強制的に disable になる。TLS の設定は ResolveDBTLS を参照。
 func (c *Config) DSN() string {
-	return buildKeywordDSN(c.DB.Host, c.DB.Port, c.DB.User, c.DB.Pass, c.DB.DB, c.dbTLS())
+	return c.withApplicationName(buildKeywordDSN(c.DB.Host, c.DB.Port, c.DB.User, c.DB.Pass, c.DB.DB, c.dbTLS()))
+}
+
+// withApplicationName appends application_name to a keyword/value DSN when
+// DBApplicationName is set.
+//
+// pgx は未知の keyword を runtime parameter として送るので、DSN に足すだけで
+// サーバー側の pg_stat_activity.application_name に載る。メンテナンスに入った
+// ときに「Elythia の接続が 0 になったか」を名前で数えるため (#3463)。
+func (c *Config) withApplicationName(dsn string) string {
+	if c.DBApplicationName == "" {
+		return dsn
+	}
+	return dsn + " application_name=" + dsnQuote(c.DBApplicationName)
 }
 
 // SlaveDSN returns the PostgreSQL connection string for the idx-th read
@@ -275,7 +288,7 @@ func (c *Config) SlaveDSN(idx int) string {
 		return ""
 	}
 	s := c.DBSlaves[idx]
-	return buildKeywordDSN(s.Host, s.Port, s.User, s.Pass, s.DB, c.dbTLS())
+	return c.withApplicationName(buildKeywordDSN(s.Host, s.Port, s.User, s.Pass, s.DB, c.dbTLS()))
 }
 
 // DatabaseURL returns the primary connection as a postgres URL with the given
@@ -299,6 +312,9 @@ func (c *Config) DatabaseURL(scheme string) string {
 	q.Set("sslmode", t.SSLMode)
 	if t.SSLRootCert != "" {
 		q.Set("sslrootcert", t.SSLRootCert)
+	}
+	if c.DBApplicationName != "" {
+		q.Set("application_name", c.DBApplicationName)
 	}
 	u.RawQuery = q.Encode()
 	return u.String()

@@ -460,6 +460,10 @@ type Config struct {
 	DB             DBOptions
 	DBReplications bool
 	DBSlaves       []DBSlaveOptions
+	// DBApplicationName is sent as application_name on every PostgreSQL
+	// connection built from DSN / SlaveDSN / DatabaseURL. It is not read
+	// from the config file: the process sets it at startup (#3463).
+	DBApplicationName string
 
 	Redis             RedisOptions
 	RedisForPubsub    RedisOptions

@@ -18,6 +18,7 @@ import (
 	"github.com/elythia-network/elythia/internal/cli/cliflag"
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/core/cache"
+	mkdb "github.com/elythia-network/elythia/internal/db"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/redislog"
 	mksentry "github.com/elythia-network/elythia/internal/sentry"
@@ -27,11 +28,15 @@ import (
 // shutdownTimeout bounds the graceful shutdown after a signal.
 const shutdownTimeout = 10 * time.Second
 
-// httpServer is the part of *server.Server these subcommands drive.
+// httpServer is the part of *server.Server dump-routes drives.
 type httpServer interface {
+	DumpRoutes(w io.Writer) error
+}
+
+// supervisor is the part of *server.Supervisor serve drives.
+type supervisor interface {
 	Start() error
 	Shutdown(ctx context.Context) error
-	DumpRoutes(w io.Writer) error
 }
 
 // env carries the process-level dependencies so tests can replace them.
@@ -51,6 +56,9 @@ type env struct {
 	// openRedis returns the clients and the function that closes them.
 	openRedis func(cfg *config.Config) (*cache.RedisClients, func(), error)
 	newServer func(cfg *config.Config, db *gorm.DB, redis *cache.RedisClients) (httpServer, error)
+	// newSupervisor opens the DB and builds the first server generation under
+	// a Supervisor, which owns the listener (#3463).
+	newSupervisor func(cfg *config.Config, redis *cache.RedisClients) (supervisor, error)
 	// signalContext is canceled when the process is asked to stop.
 	signalContext func() (context.Context, context.CancelFunc)
 	createFile    func(path string) (io.WriteCloser, error)
@@ -74,6 +82,13 @@ func defaultEnv() env {
 		},
 		newServer: func(cfg *config.Config, db *gorm.DB, redis *cache.RedisClients) (httpServer, error) {
 			return server.New(cfg, db, redis)
+		},
+		newSupervisor: func(cfg *config.Config, redis *cache.RedisClients) (supervisor, error) {
+			return server.NewSupervisor(cfg, redis, server.SupervisorDeps{
+				OpenDB:    model.NewDatabase,
+				NewServer: server.New,
+				CloseDB:   mkdb.Close,
+			})
 		},
 		signalContext: func() (context.Context, context.CancelFunc) {
 			return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -140,11 +155,22 @@ func serve(e env, args []string) int {
 	}
 	defer flushSentry()
 
-	srv, closeRedis, code := build(e, log, cfg)
-	if code != 0 {
-		return code
+	// 本体の接続に名前を付ける。メンテナンスに入ったとき、pg_stat_activity で
+	// Elythia の接続が残っていないかを名前で数えるため (#3463)。
+	cfg.DBApplicationName = dbApplicationName()
+
+	// Redis を先に開く。DB と Server は Supervisor が開いて作る (#3463)。
+	redisClients, closeRedis, err := e.openRedis(cfg)
+	if err != nil {
+		log.Error("failed to connect to Redis", "error", err)
+		return 1
 	}
 	defer closeRedis()
+	srv, err := e.newSupervisor(cfg, redisClients)
+	if err != nil {
+		log.Error("failed to construct server", "error", err)
+		return 1
+	}
 
 	ctx, stop := e.signalContext()
 	defer stop()
@@ -167,6 +193,23 @@ func serve(e env, args []string) int {
 
 	fmt.Fprintln(e.stdout, "Elythia stopped.")
 	return 0
+}
+
+// dbApplicationName returns the application_name of this process's DB
+// connections: "elythia/<role>/<host>/<pid>".
+//
+// コンテナの中では PID がほぼ 1 なので、host (コンテナ ID) も入れて区別する。
+// PostgreSQL は 63 バイトで切り詰めるが、先頭の "elythia/" が残れば数えられる。
+func dbApplicationName() string {
+	role := "invalid"
+	if r, err := config.ResolveProcessRole(); err == nil {
+		role = string(r)
+	}
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		host = "unknown"
+	}
+	return fmt.Sprintf("elythia/%s/%s/%d", role, host, os.Getpid())
 }
 
 func dumpRoutes(e env, args []string) int {

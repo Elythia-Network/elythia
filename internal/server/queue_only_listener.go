@@ -2,10 +2,7 @@ package server
 
 import (
 	"encoding/json"
-	"errors"
-	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/config"
@@ -48,36 +45,4 @@ func (s *Server) queueOnlyMux() *http.ServeMux {
 		}
 	}
 	return mux
-}
-
-// serveQueueOnly listens with the minimal mux and blocks until shutdown.
-//
-// listener の張り方 (unix socket / TCP) は server ノードと揃える。同じ
-// `elythia healthcheck` が両方の role に効くようにするため。
-func (s *Server) serveQueueOnly() error {
-	srv := &http.Server{Handler: s.queueOnlyMux()}
-	applyServerTimeouts(srv)
-	s.queueOnlyServer = srv
-
-	var ln net.Listener
-	var err error
-	if s.config.Socket != "" {
-		ln, err = config.ListenUnixSocket(s.config.Socket, s.config.ChmodSocket)
-		if err != nil {
-			return err
-		}
-		slog.Info("starting Elythia queue worker", "socket", s.config.Socket, "url", s.config.URL)
-	} else {
-		addr := fmt.Sprintf(":%d", s.config.Port)
-		ln, err = net.Listen("tcp", addr)
-		if err != nil {
-			return err
-		}
-		slog.Info("starting Elythia queue worker", "addr", addr, "url", s.config.URL)
-	}
-
-	if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return err
-	}
-	return nil
 }
