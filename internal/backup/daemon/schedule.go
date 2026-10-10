@@ -103,17 +103,16 @@ func (s *Schedule) AtString() string {
 func (s *Schedule) Start(now time.Time, latest *time.Time) time.Time {
 	catchUp := latest == nil || now.Sub(*latest) >= s.Interval
 	if s.HasAt {
-		// 枠の起点は、最新の世代を取った日の At にする。再起動した日を起点にすると、
-		// 2 日以上の間隔では再起動のたびに枠がずれ、間隔が開いて遅れの通知も出る。
-		base := now
-		if !catchUp {
-			base = *latest
-		}
-		local := base.In(s.Location)
-		s.anchor = time.Date(local.Year(), local.Month(), local.Day(), s.Hour, s.Minute, 0, 0, s.Location)
 		if catchUp {
+			local := now.In(s.Location)
+			s.anchor = time.Date(local.Year(), local.Month(), local.Day(), s.Hour, s.Minute, 0, 0, s.Location)
 			return now
 		}
+		// 枠の起点は、最新の世代以前で最後の At にする。再起動した日を起点にすると、
+		// 2 日以上の間隔では再起動のたびに枠がずれ、間隔が開いて遅れの通知も出る。
+		// 世代を取った日の At にすると、枠が保留されて日付をまたいでから取った世代
+		// (23:30 の枠を 00:30 に取ったなど) で起点が 1 日後ろへずれる。
+		s.anchor = s.lastAtNotAfter(*latest)
 		return s.Next(now)
 	}
 	if catchUp {
@@ -122,6 +121,24 @@ func (s *Schedule) Start(now time.Time, latest *time.Time) time.Time {
 	}
 	s.anchor = latest.Add(s.Interval)
 	return s.anchor
+}
+
+// lastAtNotAfter returns the last At (in Location) that is not after t.
+func (s *Schedule) lastAtNotAfter(t time.Time) time.Time {
+	local := t.In(s.Location)
+	a := time.Date(local.Year(), local.Month(), local.Day(), s.Hour, s.Minute, 0, 0, s.Location)
+	if a.After(t) {
+		a = time.Date(local.Year(), local.Month(), local.Day()-1, s.Hour, s.Minute, 0, 0, s.Location)
+	}
+	return a
+}
+
+// AtDriftsAcrossRestarts reports whether At is combined with an Interval
+// that neither divides 24h nor is a multiple of it. Such slots do not repeat
+// at the same times every day, so the phase depends on the anchor and can
+// move when the daemon restarts.
+func (s *Schedule) AtDriftsAcrossRestarts() bool {
+	return s.HasAt && s.Interval%day != 0 && day%s.Interval != 0
 }
 
 // Next returns the first slot strictly after after. Start must have been

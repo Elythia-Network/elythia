@@ -1,9 +1,12 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -28,7 +31,11 @@ type rig struct {
 }
 
 func newRig(t *testing.T, sched *Schedule, prepare func(*rig)) *rig {
-	st := newMemStorage()
+	return newRigOn(t, newMemStorage(), sched, prepare)
+}
+
+// newRigOn is newRig on an existing storage, for a restarted daemon.
+func newRigOn(_ *testing.T, st *memStorage, sched *Schedule, prepare func(*rig)) *rig {
 	r := &rig{st: st, taker: &fakeTaker{st: st, now: func() time.Time { return time.Now().UTC() }}, ver: &fakeVerifier{st: st}, notify: &recNotifier{}}
 	if prepare != nil {
 		prepare(r)
@@ -574,6 +581,160 @@ func TestDaemonDefersScheduledTakeBehindManualVerify(t *testing.T) {
 		assert.Equal(t, []string{id}, r.ver.verified(), "schedule.verify is off, so the new take is not verified")
 		r.stop()
 	})
+}
+
+// 止める途中で切れた検証は verify.json が戻されるので、再起動したら最初にその世代を
+// 確かめる (取り直さない)。
+func TestDaemonVerifiesInterruptedGenerationAfterRestart(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := mustSchedule(t, config.BackupScheduleOptions{Interval: "24h", Keep: 1, Verify: true}, time.UTC)
+		r := newRig(t, s, func(r *rig) {
+			r.ver.block = make(chan struct{})
+			r.ver.cancelWrites = true
+		})
+		r.start(t)
+		require.Len(t, r.taker.callTimes(), 1)
+		id := backup.NewID(epoch)
+		r.stop()
+		_, err := readObject(context.Background(), r.st, backup.Key(id, backup.VerifyFile))
+		require.NoError(t, err)
+		require.Equal(t, []string{id}, r.st.ids())
+
+		time.Sleep(time.Hour)
+		r2 := newRigOn(t, r.st, s, nil)
+		r2.start(t)
+		assert.Equal(t, []string{id}, r2.ver.verified(), "the interrupted generation is verified first")
+		assert.Empty(t, r2.taker.callTimes(), "it is not taken again")
+		st := r2.d.Status()
+		require.NotNil(t, st.LatestUsable)
+		assert.Equal(t, id, st.LatestUsable.ID)
+		require.NotNil(t, st.LastVerify)
+		assert.True(t, st.LastVerify.OK)
+		assert.Equal(t, TriggerSchedule, st.LastVerify.Trigger)
+		assert.Equal(t, at(1, 0), *st.NextRunAt)
+
+		// 枠まで遅れを知らせない。
+		time.Sleep(23*time.Hour - time.Second)
+		synctest.Wait()
+		assert.Empty(t, r2.notify.all())
+		r2.stop()
+	})
+}
+
+// 検証が判定を書き終えた直後に止めても、verify.json は戻されるが、再起動で確かめ直す。
+func TestDaemonVerifiesAfterStopRightAfterVerdict(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := mustSchedule(t, config.BackupScheduleOptions{Interval: "24h", Keep: 1, Verify: true}, time.UTC)
+		var r *rig
+		r = newRig(t, s, func(r0 *rig) { r0.ver.afterStore = func() { r.cancel() } })
+		r.start(t)
+		<-r.done
+		id := backup.NewID(epoch)
+		b, err := readObject(context.Background(), r.st, backup.Key(id, backup.VerifyFile))
+		require.NoError(t, err)
+		require.Nil(t, b, "the verdict written while stopping is rolled back")
+
+		r2 := newRigOn(t, r.st, s, nil)
+		r2.start(t)
+		assert.Equal(t, []string{id}, r2.ver.verified())
+		assert.Empty(t, r2.taker.callTimes())
+		require.NotNil(t, r2.d.Status().LatestUsable)
+		assert.Equal(t, id, r2.d.Status().LatestUsable.ID)
+		r2.stop()
+	})
+}
+
+// 揃った最新の世代が使える、または確かめた結果が残っているなら、起動で確かめない。
+// 取り戻しですぐ取るときも、古い世代は確かめない。
+func TestDaemonDoesNotVerifyAtStartWhenNotNeeded(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		verify bool
+		age    time.Duration
+		state  string
+		takes  int
+	}{
+		{"verified", true, time.Hour, "ok", 0},
+		{"failed", true, time.Hour, "failed", 0},
+		{"verify off", false, time.Hour, "", 0},
+		{"catching up", true, 25 * time.Hour, "", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				s := mustSchedule(t, config.BackupScheduleOptions{Interval: "24h", Verify: tc.verify}, time.UTC)
+				r := newRig(t, s, func(r *rig) { r.st.addGeneration(epoch.Add(-tc.age), true, tc.state) })
+				r.start(t)
+				assert.Len(t, r.taker.callTimes(), tc.takes)
+				var want []string
+				if tc.takes > 0 {
+					want = []string{backup.NewID(epoch)}
+				}
+				assert.Equal(t, want, r.ver.verified())
+				r.stop()
+			})
+		})
+	}
+}
+
+// 使える世代が手で確かめ直されて 1 つも無くなったとき、遅れの起点を起動時刻と書かない。
+func TestDaemonDelayMessageAfterLastUsableInvalidated(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := mustSchedule(t, config.BackupScheduleOptions{Interval: "24h", DelayAfter: "48h", Verify: true}, time.UTC)
+		var id string
+		r := newRig(t, s, func(r *rig) {
+			id = r.st.addGeneration(epoch.Add(-time.Hour), true, "ok")
+			r.taker.err = errBoom
+		})
+		r.start(t)
+		r.ver.mu.Lock()
+		r.ver.fail = true
+		r.ver.mu.Unlock()
+		_, err := r.d.Start(JobVerify, id)
+		require.NoError(t, err)
+		synctest.Wait()
+		require.Nil(t, r.d.Status().LatestUsable)
+		time.Sleep(47 * time.Hour)
+		synctest.Wait()
+		var delays []Event
+		for _, e := range r.notify.all() {
+			if e.Kind == EventDelay {
+				delays = append(delays, e)
+			}
+		}
+		require.Len(t, delays, 1)
+		assert.Equal(t, epoch.Add(47*time.Hour), delays[0].OccurredAt)
+		assert.NotContains(t, delays[0].Message, "daemon started")
+		assert.Contains(t, delays[0].Message, "1999-12-31T23:00:00Z")
+		assert.Nil(t, delays[0].LastUsableAt)
+		r.stop()
+	})
+}
+
+// 24 時間を割り切らない間隔に at を付けると、起動時に警告する (止めない)。
+func TestDaemonWarnsAboutDriftingAt(t *testing.T) {
+	for _, tc := range []struct {
+		interval, at string
+		warn         bool
+	}{
+		{"7h", "04:00", true},
+		{"36h", "04:00", true},
+		{"6h", "04:00", false},
+		{"48h", "04:00", false},
+		{"7h", "", false},
+	} {
+		t.Run(tc.interval+"@"+tc.at, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				s := mustSchedule(t, config.BackupScheduleOptions{Interval: tc.interval, At: tc.at}, time.UTC)
+				r := newRig(t, s, nil)
+				var buf bytes.Buffer
+				r.d.log = slog.New(slog.NewTextHandler(&buf, nil))
+				r.start(t)
+				r.stop()
+				assert.Equal(t, tc.warn, strings.Contains(buf.String(), "level=WARN"), buf.String())
+				assert.Len(t, r.taker.callTimes(), 1, "the daemon still runs")
+			})
+		})
+	}
 }
 
 func TestDaemonWithoutSchedule(t *testing.T) {

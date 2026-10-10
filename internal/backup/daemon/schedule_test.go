@@ -127,6 +127,40 @@ func TestScheduleMultiDayKeepsSlotsAcrossRestart(t *testing.T) {
 	assert.Equal(t, time.Date(2026, 10, 18, 4, 0, 0, 0, jst), s.Next(first))
 }
 
+// 保留された枠を日付をまたいでから取った世代でも、起点はその枠の at にする
+// (取った日の at にすると 1 日後ろへずれる)。
+func TestScheduleMultiDayAnchorsToSlotBeforeLatest(t *testing.T) {
+	s := mustSchedule(t, config.BackupScheduleOptions{Interval: "48h", At: "23:30"}, time.UTC)
+	latest := time.Date(2026, 10, 10, 0, 30, 0, 0, time.UTC)
+	now := time.Date(2026, 10, 11, 10, 0, 0, 0, time.UTC)
+	first := s.Start(now, &latest)
+	assert.Equal(t, time.Date(2026, 10, 11, 23, 30, 0, 0, time.UTC), first, "one interval after the 10/09 23:30 slot")
+	assert.Equal(t, time.Date(2026, 10, 13, 23, 30, 0, 0, time.UTC), s.Next(first))
+
+	// at ちょうどに取り始めた世代は、その日の at が起点。
+	s = mustSchedule(t, config.BackupScheduleOptions{Interval: "48h", At: "23:30"}, time.UTC)
+	latest = time.Date(2026, 10, 9, 23, 30, 0, 0, time.UTC)
+	assert.Equal(t, time.Date(2026, 10, 11, 23, 30, 0, 0, time.UTC), s.Start(now, &latest))
+}
+
+func TestScheduleAtDriftsAcrossRestarts(t *testing.T) {
+	for _, tc := range []struct {
+		interval, at string
+		want         bool
+	}{
+		{"7h", "04:00", true},
+		{"36h", "04:00", true},
+		{"5m", "04:00", false},
+		{"8h", "04:00", false},
+		{"24h", "04:00", false},
+		{"72h", "04:00", false},
+		{"7h", "", false},
+	} {
+		s := mustSchedule(t, config.BackupScheduleOptions{Interval: tc.interval, At: tc.at}, time.UTC)
+		assert.Equal(t, tc.want, s.AtDriftsAcrossRestarts(), "%s at %q", tc.interval, tc.at)
+	}
+}
+
 func TestScheduleKeepsWallClockAcrossDST(t *testing.T) {
 	ny, err := time.LoadLocation("America/New_York")
 	require.NoError(t, err)
