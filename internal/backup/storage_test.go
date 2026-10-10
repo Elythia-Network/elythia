@@ -1,0 +1,380 @@
+package backup
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"errors"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/elythia-network/elythia/internal/config"
+)
+
+// failingReader returns n bytes of data and then an error, like a pg_dump
+// that dies partway.
+type failingReader struct {
+	data []byte
+	err  error
+}
+
+func (f *failingReader) Read(p []byte) (int, error) {
+	if len(f.data) == 0 {
+		return 0, f.err
+	}
+	n := copy(p, f.data)
+	f.data = f.data[n:]
+	return n, nil
+}
+
+func randomBytes(t *testing.T, n int) []byte {
+	t.Helper()
+	b := make([]byte, n)
+	_, err := rand.Read(b)
+	require.NoError(t, err)
+	return b
+}
+
+func readAll(t *testing.T, st Storage, key string) []byte {
+	t.Helper()
+	r, err := st.Get(context.Background(), key)
+	require.NoError(t, err)
+	defer r.Close()
+	b, err := io.ReadAll(r)
+	require.NoError(t, err)
+	return b
+}
+
+// storageContract checks the behaviour every Storage must have.
+func storageContract(t *testing.T, st Storage) {
+	ctx := context.Background()
+
+	_, err := st.Get(ctx, "generations/x/meta.json")
+	assert.ErrorIs(t, err, ErrNotFound)
+	_, err = st.Stat(ctx, "generations/x/meta.json")
+	assert.ErrorIs(t, err, ErrNotFound)
+	require.NoError(t, st.Delete(ctx, "generations/x/meta.json"), "deleting a missing key is not an error")
+
+	require.NoError(t, st.Put(ctx, "generations/b/two", strings.NewReader("22")))
+	require.NoError(t, st.Put(ctx, "generations/a/one", strings.NewReader("1")))
+	require.NoError(t, st.Put(ctx, "other", strings.NewReader("333")))
+	assert.Equal(t, []byte("1"), readAll(t, st, "generations/a/one"))
+
+	info, err := st.Stat(ctx, "generations/b/two")
+	require.NoError(t, err)
+	assert.Equal(t, "generations/b/two", info.Key)
+	assert.Equal(t, int64(2), info.Size)
+	assert.WithinDuration(t, time.Now(), info.ModTime, time.Hour)
+
+	objs, err := st.List(ctx, "generations/")
+	require.NoError(t, err)
+	require.Len(t, objs, 2)
+	assert.Equal(t, "generations/a/one", objs[0].Key)
+	assert.Equal(t, "generations/b/two", objs[1].Key)
+	assert.Equal(t, int64(2), objs[1].Size)
+	all, err := st.List(ctx, "")
+	require.NoError(t, err)
+	assert.Len(t, all, 3)
+
+	// 上書きは中身を入れ替える。
+	require.NoError(t, st.Put(ctx, "generations/a/one", strings.NewReader("one")))
+	assert.Equal(t, []byte("one"), readAll(t, st, "generations/a/one"))
+
+	// 途中で失敗した Put は、新しい key に何も残さず、既存の key を壊さない。
+	boom := errors.New("boom")
+	err = st.Put(ctx, "generations/c/partial", &failingReader{data: []byte("half"), err: boom})
+	require.ErrorIs(t, err, boom)
+	_, err = st.Stat(ctx, "generations/c/partial")
+	assert.ErrorIs(t, err, ErrNotFound)
+	err = st.Put(ctx, "generations/a/one", &failingReader{data: []byte("xx"), err: boom})
+	require.ErrorIs(t, err, boom)
+	assert.Equal(t, []byte("one"), readAll(t, st, "generations/a/one"))
+	objs, err = st.List(ctx, "generations/")
+	require.NoError(t, err)
+	assert.Len(t, objs, 2)
+
+	require.NoError(t, st.Delete(ctx, "generations/a/one"))
+	_, err = st.Stat(ctx, "generations/a/one")
+	assert.ErrorIs(t, err, ErrNotFound)
+
+	for _, key := range []string{"", "/abs"} {
+		assert.Error(t, st.Put(ctx, key, strings.NewReader("x")), key)
+		_, err := st.Get(ctx, key)
+		assert.Error(t, err, key)
+		_, err = st.Stat(ctx, key)
+		assert.Error(t, err, key)
+		assert.Error(t, st.Delete(ctx, key), key)
+	}
+}
+
+func TestDirStorage_Contract(t *testing.T) {
+	st, err := NewDirStorage(t.TempDir())
+	require.NoError(t, err)
+	storageContract(t, st)
+}
+
+func TestS3Storage_Contract(t *testing.T) {
+	storageContract(t, newS3Storage(t))
+}
+
+func TestNewDirStorage_RequiresExistingDirectory(t *testing.T) {
+	_, err := NewDirStorage("")
+	require.Error(t, err)
+
+	missing := filepath.Join(t.TempDir(), "nas")
+	_, err = NewDirStorage(missing)
+	require.Error(t, err)
+	_, statErr := os.Stat(missing)
+	assert.True(t, os.IsNotExist(statErr), "an unmounted path must not be created")
+
+	file := filepath.Join(t.TempDir(), "file")
+	require.NoError(t, os.WriteFile(file, nil, 0o600))
+	_, err = NewDirStorage(file)
+	require.ErrorContains(t, err, "not a directory")
+
+	st, err := NewDirStorage(".")
+	require.NoError(t, err)
+	assert.True(t, filepath.IsAbs(st.Root()))
+}
+
+func TestDirStorage_RejectsKeysOutsideRoot(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "root")
+	require.NoError(t, os.Mkdir(root, 0o700))
+	st, err := NewDirStorage(root)
+	require.NoError(t, err)
+	ctx := context.Background()
+	for _, key := range []string{"../escape", "a/../../escape", "a//b", "a/./b", `a\b`, "a/", ".tmp-x", "a/.tmp-x", ".."} {
+		assert.Error(t, st.Put(ctx, key, strings.NewReader("x")), key)
+	}
+	entries, err := os.ReadDir(parent)
+	require.NoError(t, err)
+	assert.Len(t, entries, 1, "nothing written next to the root")
+}
+
+func TestDirStorage_PutIsPrivateAndLeavesNoTempFile(t *testing.T) {
+	root := t.TempDir()
+	st, err := NewDirStorage(root)
+	require.NoError(t, err)
+	ctx := context.Background()
+	require.NoError(t, st.Put(ctx, "generations/a/dump.pgc", strings.NewReader("secret")))
+	fi, err := os.Stat(filepath.Join(root, "generations", "a", "dump.pgc"))
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), fi.Mode().Perm())
+
+	require.Error(t, st.Put(ctx, "generations/a/broken", &failingReader{data: []byte("x"), err: io.ErrClosedPipe}))
+	entries, err := os.ReadDir(filepath.Join(root, "generations", "a"))
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "dump.pgc", entries[0].Name())
+
+	// List は書きかけの一時ファイルを返さない (別のプロセスが書いている途中)。
+	require.NoError(t, os.WriteFile(filepath.Join(root, "generations", "a", dirTempPrefix+"123"), []byte("x"), 0o600))
+	objs, err := st.List(ctx, "")
+	require.NoError(t, err)
+	require.Len(t, objs, 1)
+
+	// ディレクトリは object ではない。
+	_, err = st.Stat(ctx, "generations/a")
+	assert.ErrorIs(t, err, ErrNotFound)
+	_, err = st.Get(ctx, "generations/a")
+	assert.ErrorIs(t, err, ErrNotFound)
+
+	// キャンセルした ctx では書かない。
+	cctx, cancel := context.WithCancel(ctx)
+	cancel()
+	require.ErrorIs(t, st.Put(cctx, "generations/b/x", strings.NewReader("x")), context.Canceled)
+}
+
+func TestDirStorage_DeleteRemovesEmptyDirectories(t *testing.T) {
+	root := t.TempDir()
+	st, err := NewDirStorage(root)
+	require.NoError(t, err)
+	ctx := context.Background()
+	require.NoError(t, st.Put(ctx, "generations/a/one", strings.NewReader("1")))
+	require.NoError(t, st.Put(ctx, "generations/a/two", strings.NewReader("2")))
+	require.NoError(t, st.Delete(ctx, "generations/a/one"))
+	_, err = os.Stat(filepath.Join(root, "generations", "a"))
+	require.NoError(t, err, "a directory that still has files stays")
+	require.NoError(t, st.Delete(ctx, "generations/a/two"))
+	_, err = os.Stat(filepath.Join(root, "generations"))
+	assert.True(t, os.IsNotExist(err), "empty generation directories are removed")
+	_, err = os.Stat(root)
+	require.NoError(t, err, "the root itself stays")
+}
+
+func TestDirStorage_ListAndPutErrors(t *testing.T) {
+	root := t.TempDir()
+	st, err := NewDirStorage(root)
+	require.NoError(t, err)
+	ctx := context.Background()
+	// 親が通常のファイルだと、ディレクトリを作れない。
+	require.NoError(t, st.Put(ctx, "file", strings.NewReader("x")))
+	require.Error(t, st.Put(ctx, "file/child", strings.NewReader("x")))
+
+	// 根が消えると List は失敗する。
+	require.NoError(t, os.RemoveAll(root))
+	_, err = st.List(ctx, "")
+	require.Error(t, err)
+}
+
+// TestS3Storage_Multipart sends an object larger than the part size, so it
+// goes through CreateMultipartUpload / UploadPart / Complete.
+func TestS3Storage_Multipart(t *testing.T) {
+	st := newS3Storage(t)
+	st.PartSize = 5 << 20 // S3 の part の最小 (最後以外)
+	ctx := context.Background()
+	for _, size := range []int{2 * st.PartSize, 2*st.PartSize + 12345} {
+		data := randomBytes(t, size)
+		require.NoError(t, st.Put(ctx, "big", bytes.NewReader(data)))
+		assert.Equal(t, sha256Hex(data), sha256Hex(rawS3Get(t, st, "big")), size)
+	}
+}
+
+// TestS3Storage_MultipartFailureLeavesNothing: a reader that fails after the
+// first part must leave neither an object nor an unfinished multipart upload
+// (whose parts would keep costing storage).
+func TestS3Storage_MultipartFailureLeavesNothing(t *testing.T) {
+	st := newS3Storage(t)
+	st.PartSize = 5 << 20
+	ctx := context.Background()
+	boom := errors.New("pg_dump died")
+	err := st.Put(ctx, "big", &failingReader{data: randomBytes(t, 2*st.PartSize+100), err: boom})
+	require.ErrorIs(t, err, boom)
+	_, err = st.Stat(ctx, "big")
+	assert.ErrorIs(t, err, ErrNotFound)
+	ups, err := st.client.(*s3.Client).ListMultipartUploads(ctx, &s3.ListMultipartUploadsInput{
+		Bucket: aws.String(minioBucket),
+		// MinIO は object の key そのものを prefix に渡さないと未完了の upload を返さない。
+		Prefix: aws.String(st.prefix + "big"),
+	})
+	require.NoError(t, err)
+	assert.Empty(t, ups.Uploads)
+}
+
+func TestS3Storage_PresignGet(t *testing.T) {
+	st := newS3Storage(t)
+	ctx := context.Background()
+	require.NoError(t, st.Put(ctx, "generations/a/dump.pgc", strings.NewReader("dump-bytes")))
+	u, err := st.PresignGet(ctx, "generations/a/dump.pgc", time.Minute)
+	require.NoError(t, err)
+	resp, err := http.Get(u) //nolint:gosec,noctx // テストで MinIO の署名付き URL を叩く
+	require.NoError(t, err)
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "dump-bytes", string(body))
+
+	short, err := st.PresignGet(ctx, "generations/a/dump.pgc", time.Second)
+	require.NoError(t, err)
+	time.Sleep(2 * time.Second)
+	resp, err = http.Get(short) //nolint:gosec,noctx // テストで MinIO の署名付き URL を叩く
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode, "expired URL")
+
+	_, err = st.PresignGet(ctx, "", time.Minute)
+	require.Error(t, err)
+}
+
+func TestS3Storage_Prefix(t *testing.T) {
+	startMinIO(t)
+	ctx := context.Background()
+	base := "prefix-" + randomHex(t, 4)
+	for _, p := range []string{base, "/" + base + "/", base + "/"} {
+		st, err := NewS3Storage(minioOptions(p))
+		require.NoError(t, err)
+		assert.Equal(t, base+"/", st.prefix, p)
+	}
+	st, err := NewS3Storage(minioOptions(base))
+	require.NoError(t, err)
+	require.NoError(t, st.Put(ctx, "k", strings.NewReader("v")))
+	root, err := NewS3Storage(minioOptions(""))
+	require.NoError(t, err)
+	assert.Equal(t, "", root.prefix)
+	assert.Equal(t, []byte("v"), readAll(t, root, base+"/k"))
+	objs, err := st.List(ctx, "")
+	require.NoError(t, err)
+	require.Len(t, objs, 1)
+	assert.Equal(t, "k", objs[0].Key, "keys are relative to the prefix")
+}
+
+func TestS3Storage_ListPaginates(t *testing.T) {
+	st := newS3Storage(t)
+	ctx := context.Background()
+	// MinIO の 1 ページは最大 1000 件。
+	const n = 1005
+	for i := range n {
+		require.NoError(t, st.Put(ctx, "k/"+string(rune('a'+i%26))+randomHex(t, 4), strings.NewReader("x")))
+	}
+	objs, err := st.List(ctx, "k/")
+	require.NoError(t, err)
+	assert.Len(t, objs, n)
+}
+
+func TestS3Storage_Errors(t *testing.T) {
+	startMinIO(t)
+	ctx := context.Background()
+	o := minioOptions("x")
+	o.Bucket = "no-such-bucket-" + randomHex(t, 4)
+	st, err := NewS3Storage(o)
+	require.NoError(t, err)
+	st.PartSize = 5 << 20
+	assert.Error(t, st.Put(ctx, "k", strings.NewReader("v")))
+	assert.Error(t, st.Put(ctx, "k", bytes.NewReader(randomBytes(t, st.PartSize+1))))
+	_, err = st.Get(ctx, "k")
+	assert.Error(t, err)
+	assert.NotErrorIs(t, err, ErrNotFound)
+	_, err = st.List(ctx, "")
+	assert.Error(t, err)
+	assert.Error(t, st.Delete(ctx, "k"))
+
+	ok := newS3Storage(t)
+	ok.PartSize = 0 // 0 は既定の大きさ
+	require.NoError(t, ok.Put(ctx, "k", strings.NewReader("v")))
+	failing := &failingReader{data: nil, err: errors.New("read failed")}
+	require.ErrorContains(t, ok.Put(ctx, "k2", failing), "read failed")
+}
+
+func TestNewS3Storage_Validation(t *testing.T) {
+	_, err := NewS3Storage(config.BackupS3Options{AccessKey: "a", SecretKey: "b"})
+	require.ErrorContains(t, err, "bucket")
+	_, err = NewS3Storage(config.BackupS3Options{Bucket: "b", AccessKey: "a"})
+	require.ErrorContains(t, err, "secretKey")
+	st, err := NewS3Storage(config.BackupS3Options{Bucket: "b", AccessKey: "a", SecretKey: "s"})
+	require.NoError(t, err)
+	assert.Equal(t, DefaultS3PartSize, st.PartSize)
+}
+
+func TestIsS3NotFound(t *testing.T) {
+	assert.False(t, isS3NotFound(errors.New("other")))
+}
+
+func TestOpenStorage(t *testing.T) {
+	dir := t.TempDir()
+	st, err := OpenStorage(config.BackupStorageOptions{Type: StorageTypeDir, Dir: config.BackupDirectoryOptions{Path: dir}})
+	require.NoError(t, err)
+	assert.IsType(t, &DirStorage{}, st)
+	_, ok := st.(Presigner)
+	assert.False(t, ok, "a directory cannot hand out URLs")
+
+	st, err = OpenStorage(config.BackupStorageOptions{Type: StorageTypeS3, S3: config.BackupS3Options{Bucket: "b", AccessKey: "a", SecretKey: "s"}})
+	require.NoError(t, err)
+	_, ok = st.(Presigner)
+	assert.True(t, ok)
+
+	_, err = OpenStorage(config.BackupStorageOptions{})
+	require.ErrorContains(t, err, "storage.type is empty")
+	_, err = OpenStorage(config.BackupStorageOptions{Type: "local"})
+	require.ErrorContains(t, err, `unknown storage.type "local"`)
+}
