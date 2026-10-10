@@ -27,14 +27,15 @@ compose群とCIはPostgreSQL 18に統一した(#2513)。**既存の16のdata vol
 #    先にこの版へ上げておく)
 MKGO_COMMIT=$(git rev-parse --short HEAD) docker compose build backup
 
-# 1. 書き込みを止める (db と redis は動かしたまま)
-docker compose stop app
+# 1. 書き込みを止める (db と redis は動かしたまま)。backup-daemon (定期実行) も止める
+docker compose stop app backup-daemon
 
 # 2. 最後の世代を取る。出力の世代 ID (例: 20261010T030000Z) を控える
 docker compose run --rm --no-deps backup take
 
 # 3. 新しい版 (18) で戻せることを確かめる。通らなければ、ここで止めて
-#    docker compose start app で再開する
+#    docker compose start app で再開する (backup-daemon を使っているなら、
+#    docker compose start backup-daemon も)
 docker compose run --rm --no-deps backup verify <世代ID>
 
 # 4. db を 18 の新しい volume で立てる。docker-compose.yml の db を
@@ -54,7 +55,12 @@ docker compose exec db vacuumdb -U <DBのユーザー> -d <DB名> --analyze-in-s
 # 7. 起動して確かめる
 docker compose up -d
 docker compose exec app /app/elythia doctor
+# backup-daemon を使っているなら再開する (.env の COMPOSE_PROFILES に backup-daemon を
+# 書いていれば、上の up -d で起動している)
+docker compose start backup-daemon
 ```
+
+**`backup-daemon`は手順1で止め、手順7まで動かさない。** 動かしたままだと、手順4で立てた空のDBの世代を定期実行で取り、`keep`を超えた古い世代を整理で消しうるため。
 
 **この手順では、Redisを消さない。** `-mode empty`は、`-redis`を渡さず(`auto`)、戻す世代が保存先の最新の世代(`meta.json`のある世代のうち最も新しいもの)のときは、Redisの後始末をしない。手順1で本体を止めてから手順2で取るので、戻すDBは止めた時点のDBそのもので、Redisの中身と食い違わない。消すと、届いていない配送(`Delete`の再試行を含む。消すと、こちらで消した投稿が相手に残る)や、DBへ未反映のリアクション数(`reaction-buffer:*`。本体を止めるときには反映しない)を失うだけになる。
 
@@ -62,7 +68,7 @@ docker compose exec app /app/elythia doctor
 
 UDS構成(`compose.uds.yaml`)では、次のように読み替える。
 
-- `docker compose`に`-f compose.uds.yaml`を付け、`app`を`mkgo`に、`db`を`postgres`にする
+- `docker compose`に`-f compose.uds.yaml`を付け、`app`を`mkgo`に、`db`を`postgres`にする。`backup-daemon`は同じ名前のまま止めて、手順7の後で再開する
 - `postgres`は`build: deploy/postgres-bigm`(pg_bigm入り)で、`PGDATA`を`/var/lib/postgresql/data/pgdata`に明示し、volumeを`pg_data:/var/lib/postgresql/data`にmountしている。手順4では、`deploy/postgres-bigm/Dockerfile`の`FROM`が新しい版であることを確かめて`docker compose -f compose.uds.yaml build postgres`し、volumeを`pg_data_pg18:/var/lib/postgresql/data`に変えて、末尾の`volumes:`に`pg_data_pg18:`を足す。`PGDATA`はそのままでよい
 - 手順6は`docker compose -f compose.uds.yaml exec postgres vacuumdb -h /var/run/postgresql -U <DBのユーザー> -d <DB名> --analyze-in-stages`
 - 元に戻すときは、16で動いていたimage(ビルドしたものが手元に残っていればそのtag)と`pg_data`に戻す。`deploy/postgres-bigm/Dockerfile`は新しい版を指しているので、作り直すと16にはならない
@@ -180,8 +186,8 @@ Redisに繋がらずに後始末が失敗したときは、DBはもう切り替�
 compose(TCP)。`backup`はバックアップ用のサービスで、設定ファイルと保存先は取るときと同じものを使う([DBのバックアップ](backup.md))。暗号化した世代を戻すときは、`backup`サービスの`volumes`のコメントを外して秘密鍵を渡し、`backup.encryption.identityFile`にそのパスを書く。
 
 ```bash
-# 1. 本体と worker を止める (db と redis は動かしたまま)
-docker compose stop app
+# 1. 本体と worker、backup-daemon (定期実行) を止める (db と redis は動かしたまま)
+docker compose stop app backup-daemon
 
 # 2. 戻す (今の DB は <DB名>_before_restore_<日時> として残る)
 docker compose run --rm --no-deps backup restore -id latest -mode swap -confirm <DB名>
@@ -189,14 +195,17 @@ docker compose run --rm --no-deps backup restore -id latest -mode swap -confirm 
 # 3. 統計を取り直す (pg_restore は表の統計を持ってこない)
 docker compose exec db vacuumdb -U <DBのユーザー> -d <DB名> --analyze-in-stages
 
-# 4. 起動して確かめる
+# 4. 起動して確かめる。backup-daemon を使っているなら再開する
 docker compose up -d app
 docker compose exec app /app/elythia doctor
+docker compose start backup-daemon
 ```
 
-UDS構成は、`app`を`mkgo`に読み替え、`docker compose`に`-f compose.uds.yaml`を付ける(`docker compose -f compose.uds.yaml run --rm --no-deps backup restore ...`)。`compose.uds.yaml.example`の`backup`サービスは、DBのソケット(`pg_sock`)と、Redisの後始末のためにvalkeyのソケット(`valkey_sock`)をmountしている。`compose.uds.yaml`に複製しているなら、`valkey_sock`の行も足す。`mkgo`は起動のたびに`elythia migrate`を流す(`deploy/uds/mkgo-entrypoint.sh`)が、戻すときに当て終えているので、何も起きない。
+**`backup-daemon`は、戻し終わって確かめるまで動かさない。** 動かしたままだと、戻している途中や戻したばかりのDBの世代を定期実行で取り、`keep`を超えた古い世代を整理で消しうるため。
 
-バイナリ直接実行では、サーバーを止めてから、`pg_restore`があるホストで、本体と同じ設定ファイルを渡して流す。`pg_restore`の版は、バックアップを取った`pg_dump`以上で、DBのサーバー以下にする(バックアップを取った`pg_dump`も戻す先のサーバーも18なら、18の`pg_restore`)。`pg_restore`の場所は`backup.tools.pgRestore`で変えられる。
+UDS構成は、`app`を`mkgo`に読み替え(`backup-daemon`はそのまま)、`docker compose`に`-f compose.uds.yaml`を付ける(`docker compose -f compose.uds.yaml run --rm --no-deps backup restore ...`)。`compose.uds.yaml.example`の`backup`サービスは、DBのソケット(`pg_sock`)と、Redisの後始末のためにvalkeyのソケット(`valkey_sock`)をmountしている。`compose.uds.yaml`に複製しているなら、`valkey_sock`の行も足す。`mkgo`は起動のたびに`elythia migrate`を流す(`deploy/uds/mkgo-entrypoint.sh`)が、戻すときに当て終えているので、何も起きない。
+
+バイナリ直接実行では、サーバーと、常駐させているなら`elythia backup daemon`を止めてから(daemonは確かめ終わってから再開する)、`pg_restore`があるホストで、本体と同じ設定ファイルを渡して流す。`pg_restore`の版は、バックアップを取った`pg_dump`以上で、DBのサーバー以下にする(バックアップを取った`pg_dump`も戻す先のサーバーも18なら、18の`pg_restore`)。`pg_restore`の場所は`backup.tools.pgRestore`で変えられる。
 
 ```bash
 sudo systemctl stop elythia
@@ -213,9 +222,10 @@ sudo systemctl start elythia
 `-mode swap`で戻した後に元の状態へ戻すには、本体を止めてから、退避したDBの名前を渡す。
 
 ```bash
-docker compose stop app
+docker compose stop app backup-daemon
 docker compose run --rm --no-deps backup restore -rollback <DB名>_before_restore_<日時> -confirm <DB名>
 docker compose up -d app
+docker compose start backup-daemon   # backup-daemon を使っているなら
 ```
 
 戻したDBは`<DB名>_rolled_back_<日時>`として残り、退避していたDBが`<DB名>`に戻る。Redisの後始末と検査は、戻すときと同じく流す。ロールバックを取り消すには、`-rollback <DB名>_rolled_back_<日時>`を渡す。
