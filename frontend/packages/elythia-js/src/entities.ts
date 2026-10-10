@@ -912,3 +912,122 @@ export type RemoteEmojiMeta =
 		license?: string;
 	});
 
+/**
+ * The re-authentication every `admin/backup/*` request carries (#3462).
+ *
+ * password に加えて、TOTP のコード (またはバックアップコード) を token に入れるか、
+ * `admin/backup/reauth-challenge` の challenge に対するパスキーの assertion
+ * (`PublicKeyCredential.toJSON()`) を credential に入れる。credential があれば token は見ない。
+ */
+export type BackupReauth = {
+	password: string;
+	token?: string;
+	credential?: Record<string, unknown>;
+};
+
+/** One migration bookkeeping table in a backup. */
+export type BackupMigrationState = {
+	table: string;
+	version: number;
+	dirty: boolean;
+	missing?: boolean;
+};
+
+/** The verify stages of `elythia backup verify`, in order. */
+export type BackupVerifyStage = 'readable' | 'restorable' | 'usable';
+
+/** The last verification of a generation. */
+export type BackupVerifySummary = {
+	ok: boolean;
+	verifiedAt: string;
+	stages: { stage: BackupVerifyStage; ok: boolean; skipped?: boolean; error?: string }[];
+	mismatches: { table: string; expected: number; actual: number }[];
+	/** Set when verify.json could not be read. */
+	error?: string;
+};
+
+/** One backup generation. */
+export type BackupGeneration = {
+	/** The UTC time it was taken, as `YYYYMMDDTHHMMSSZ`. */
+	id: string;
+	createdAt: string;
+	/** `false` for an interrupted upload (no readable meta.json). It still uses storage. */
+	complete: boolean;
+	metaError?: string;
+	/** The total bytes of every object of the generation. */
+	size: number;
+	objectCount: number;
+	dumpSize?: number;
+	encrypted: boolean;
+	elythiaVersion?: string;
+	elythiaCommit?: string;
+	postgresVersion?: string;
+	database?: string;
+	migrations: BackupMigrationState[];
+	/** `null` until the generation is verified. */
+	verify: BackupVerifySummary | null;
+};
+
+/** The result of `admin/backup/list`. */
+export type BackupOverview = {
+	/** `s3` or `dir`. */
+	storageType: string;
+	/** Newest first. */
+	generations: BackupGeneration[];
+	usage: {
+		/** Every object under the storage root, including ones outside the generations. */
+		totalBytes: number;
+		objectCount: number;
+		generationCount: number;
+		/** `null` unless `backup.server.pricePerGbMonth` is set. 1 GB is 2^30 bytes. */
+		pricePerGbMonth: number | null;
+		monthlyCost: number | null;
+	};
+	/** The state of the backup service. Lost when the service restarts. */
+	service: {
+		/** `false` when `backup.server.serviceUrl` is empty: taking and verifying are unavailable. */
+		configured: boolean;
+		reachable: boolean;
+		error?: string;
+		running: BackupJob | null;
+		nextRunAt: string | null;
+		lastTake: BackupJobResult | null;
+		lastVerify: BackupJobResult | null;
+		latestUsable: { id: string; at: string } | null;
+		/** No usable generation was made within `backup.schedule.delayAfter`. */
+		overdue: boolean;
+		lastNotifyError?: string;
+	};
+};
+
+/** A take or verify of the backup service. */
+export type BackupJob = {
+	kind: 'take' | 'verify';
+	trigger: 'schedule' | 'api';
+	generationId?: string;
+	startedAt: string;
+};
+
+/** A finished BackupJob. */
+export type BackupJobResult = BackupJob & {
+	finishedAt: string;
+	ok: boolean;
+	/** Where it failed. */
+	stage?: 'take' | 'verify' | 'prune';
+	error?: string;
+	/** The generations pruned after this job. */
+	deleted?: string[];
+};
+
+/** The result of `admin/backup/download`. */
+export type BackupDownload = {
+	/** Valid until `expiresAt`. */
+	url: string;
+	expiresAt: string;
+	/** `storage` for a presigned S3 URL, `server` for a URL served by this server. */
+	via: 'storage' | 'server';
+	fileName: string;
+	size: number;
+	/** An encrypted generation is handed out encrypted. */
+	encrypted: boolean;
+};

@@ -9351,6 +9351,216 @@ export interface Locale extends ILocale {
          */
         "inProgress": string;
     };
+    "_backups": {
+        /**
+         * バックアップ
+         */
+        "title": string;
+        /**
+         * データベースのバックアップの世代と、保存先の使用量を表示し、取得・検証・削除・ダウンロードを行います。バックアップには利用者の秘密鍵・トークン・パスワードのハッシュが含まれるため、表示を含む全ての操作で、その都度パスワードと二段階認証（またはパスキー）による認証を求めます。
+         */
+        "description": string;
+        /**
+         * この機能を使うには、二段階認証（TOTP）かパスキーを登録してください。
+         */
+        "twoFactorRequired": string;
+        /**
+         * セキュリティの設定を開く
+         */
+        "openSecuritySettings": string;
+        /**
+         * 認証して表示
+         */
+        "show": string;
+        /**
+         * 認証して再読み込み
+         */
+        "reload": string;
+        /**
+         * パスキーで認証する
+         */
+        "usePasskey": string;
+        /**
+         * バックアップの保存先が設定されていません。設定ファイルの「backup:」を確認してください。
+         */
+        "notConfigured": string;
+        /**
+         * バックアップ用のサービスが設定されていないため、ここからは取得・検証できません（backup.server.serviceUrl）。
+         */
+        "serviceNotConfigured": string;
+        /**
+         * バックアップ用のサービスに接続できません。
+         */
+        "serviceUnreachable": string;
+        /**
+         * バックアップ用のサービスが別の処理を実行中です。しばらくしてから再度お試しください。
+         */
+        "serviceBusy": string;
+        /**
+         * バックアップ用のサービスが処理を実行中です。
+         */
+        "serviceRunning": string;
+        /**
+         * パスワードまたは二段階認証のコードが正しくありません。
+         */
+        "reauthFailed": string;
+        /**
+         * パスキーが登録されていないか、このサーバーではパスキーを使えません。
+         */
+        "passkeyUnavailable": string;
+        /**
+         * 認証の失敗が続いたため、しばらく操作できません。
+         */
+        "rateLimited": string;
+        /**
+         * 保存先
+         */
+        "storage": string;
+        /**
+         * 合計の容量
+         */
+        "totalSize": string;
+        /**
+         * 世代の数
+         */
+        "generationCount": string;
+        /**
+         * ファイルの数
+         */
+        "objectCount": string;
+        /**
+         * 月額の目安
+         */
+        "monthlyCost": string;
+        /**
+         * 1GBあたり{price}で計算
+         */
+        "monthlyCostDescription": ParameterizedString<"price">;
+        /**
+         * 次の定期実行
+         */
+        "nextRun": string;
+        /**
+         * 前回の取得
+         */
+        "lastTake": string;
+        /**
+         * 前回の検証
+         */
+        "lastVerify": string;
+        /**
+         * 使える最新の世代
+         */
+        "latestUsable": string;
+        /**
+         * 決められた間隔を過ぎても、使える新しい世代ができていません。
+         */
+        "overdue": string;
+        /**
+         * 通知を送れませんでした
+         */
+        "lastNotifyError": string;
+        /**
+         * なし
+         */
+        "none": string;
+        /**
+         * 今すぐ取得
+         */
+        "takeNow": string;
+        /**
+         * 今すぐバックアップを取得しますか？
+         */
+        "takeConfirm": string;
+        /**
+         * バックアップの取得を依頼しました。完了すると一覧に表示されます。
+         */
+        "takeAccepted": string;
+        /**
+         * 検証
+         */
+        "verifyNow": string;
+        /**
+         * 検証を依頼しました。完了すると結果が表示されます。
+         */
+        "verifyAccepted": string;
+        /**
+         * ダウンロード
+         */
+        "download": string;
+        /**
+         * ダウンロード用のURLは{minutes}分間だけ有効です。
+         */
+        "downloadDescription": ParameterizedString<"minutes">;
+        /**
+         * この世代は暗号化されています。復号にはageの秘密鍵が必要です。
+         */
+        "encryptedDownload": string;
+        /**
+         * {id} を削除しますか？この操作は取り消せません。
+         */
+        "deleteConfirm": ParameterizedString<"id">;
+        /**
+         * 削除しました（{size}）。
+         */
+        "deleted": ParameterizedString<"size">;
+        /**
+         * バックアップの世代はありません。
+         */
+        "empty": string;
+        /**
+         * 未完成
+         */
+        "incomplete": string;
+        /**
+         * 送信が途中で止まった世代です。容量を使っているので、不要なら削除してください。
+         */
+        "incompleteDescription": string;
+        /**
+         * 暗号化
+         */
+        "encrypted": string;
+        /**
+         * 暗号化なし
+         */
+        "notEncrypted": string;
+        /**
+         * 検証済み
+         */
+        "verified": string;
+        /**
+         * 検証に失敗
+         */
+        "verifyFailed": string;
+        /**
+         * 未検証
+         */
+        "notVerified": string;
+        /**
+         * 取得した日時
+         */
+        "createdAt": string;
+        /**
+         * 大きさ
+         */
+        "size": string;
+        /**
+         * Elythiaの版
+         */
+        "elythiaVersion": string;
+        /**
+         * PostgreSQLの版
+         */
+        "postgresVersion": string;
+        /**
+         * 管理表の番号
+         */
+        "migrations": string;
+        /**
+         * 検証した日時
+         */
+        "verifiedAt": string;
+    };
     "_databaseHealth": {
         /**
          * テーブル
@@ -12484,6 +12694,26 @@ export interface Locale extends ILocale {
         };
     };
     "_moderationLogTypes": {
+        /**
+         * バックアップの一覧を表示
+         */
+        "listBackups": string;
+        /**
+         * バックアップを取得
+         */
+        "takeBackup": string;
+        /**
+         * バックアップを検証
+         */
+        "verifyBackup": string;
+        /**
+         * バックアップを削除
+         */
+        "deleteBackup": string;
+        /**
+         * バックアップをダウンロード
+         */
+        "downloadBackup": string;
         /**
          * 絵文字申請枠をリセット
          */

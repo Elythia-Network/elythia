@@ -62,6 +62,11 @@ func TestLogTypeValues(t *testing.T) {
 		{LogCreateFederationRule, "createFederationRule"},
 		{LogUpdateFederationRule, "updateFederationRule"},
 		{LogDeleteFederationRule, "deleteFederationRule"},
+		{LogListBackups, "listBackups"},
+		{LogTakeBackup, "takeBackup"},
+		{LogVerifyBackup, "verifyBackup"},
+		{LogDeleteBackup, "deleteBackup"},
+		{LogDownloadBackup, "downloadBackup"},
 	}
 	for _, tc := range cases {
 		if string(tc.got) != tc.want {
