@@ -163,6 +163,7 @@ go test -race -count=1 -shuffle=3 -timeout 10m \
 | [CI で回る項目](docs/ci.md) | どの check が何を見ていて、落ちたとき何を疑うか |
 | [ActivityPub連合](docs/federation.md) | AP実装、HTTP Signatures、配信パイプライン |
 | [デプロイ](docs/deployment.md) | Docker/Compose/systemd、逆プロキシ |
+| [DBのバックアップ](docs/backup.md) | `elythia backup`で取ってホストの外へ送る手順、保存先に置かれるもの |
 | [1.5.0 から 2.0.0 へ上げる](docs/upgrade/2.0.0.md) | 構成ごとの移行手順 (名前・イメージ・バイナリ・frontend の置き場所が変わる版) |
 | [コントリビューション](docs/contributing.md) | Issue/PR運用、レビュー基準 |
 | [TS版からの移行](docs/migration-from-ts.md) | 既存Misskeyからの移行手順 |

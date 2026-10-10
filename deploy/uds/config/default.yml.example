@@ -309,3 +309,47 @@ proxyBypassHosts:
 # Unauthenticated; restrict access via nginx / LB ACL if exposed outside
 # the cluster. See docs/design/auto-scale-job-workers.md §6.1.
 #enableMetrics: false
+
+#   ┌────────────────────────┐
+#───┘ Database backup (#3457) └────────────────────────────────
+
+# Used by `elythia backup` (the "backup" compose service). The server itself
+# does not read it yet. See docs/backup.md.
+#
+# **A disk of the same host does not count as a backup**: it is lost together
+# with the database. Use S3-compatible storage or a directory on another
+# device mounted here (NAS and so on). The storage credentials live in this
+# file, not in the database, so that the backups can be read when the
+# database is gone.
+#backup:
+#  storage:
+#    # "s3" or "dir"
+#    type: s3
+#    s3:
+#      # Empty means AWS S3. For R2: https://<account>.r2.cloudflarestorage.com
+#      endpoint: https://s3.example.com
+#      region: us-east-1
+#      bucket: elythia-backup
+#      prefix: example-instance
+#      accessKey: "..."
+#      secretKey: "..."
+#      # true for MinIO and other services without virtual-hosted buckets
+#      forcePathStyle: false
+#    dir:
+#      # Must already exist (it is not created, so an unmounted NAS fails
+#      # instead of filling the local disk).
+#      path: /backup
+#  # The dump contains users' private keys, tokens and password hashes.
+#  # With encryption enabled, the dump is encrypted with age
+#  # (https://age-encryption.org). Taking a backup needs only the public
+#  # keys; keep the private key (age-keygen output) off this host and give it
+#  # only to verify / restore.
+#  encryption:
+#    enabled: false
+#    recipients:
+#      - age1...
+#    identityFile: /app/.config/backup-identity.txt
+#  # Paths of the PostgreSQL client programs. Empty means PATH. Their major
+#  # version must not be older than the server's.
+#  tools:
+#    pgDump: ""

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 
 	"github.com/elythia-network/elythia/internal/cli/backfill"
+	clibackup "github.com/elythia-network/elythia/internal/cli/backup"
 	"github.com/elythia-network/elythia/internal/cli/diag"
 	"github.com/elythia-network/elythia/internal/cli/migrate"
 	"github.com/elythia-network/elythia/internal/cli/serve"
@@ -40,6 +41,11 @@ func Commands() []Command {
 			{Name: "instance-counts", Summary: "recompute instance notesCount / usersCount", Run: backfill.InstanceCounts},
 			{Name: "note-tags", Summary: "normalize note.tags to NFKC + lowercase", Run: backfill.NoteTags},
 			{Name: "remote-host", Summary: "normalize stored remote hosts (UTS#46 + punycode)", Run: backfill.RemoteHost},
+		}},
+		// 後の段階 (verify / daemon / restore) はこの Sub に足す (#3457)。
+		{Name: "backup", Summary: "take database backups into storage outside the host, and list them", Sub: []Command{
+			{Name: "take", Summary: "dump the database (pg_dump -Fc) and store it as a new generation", Run: clibackup.Take},
+			{Name: "list", Summary: "list the generations in the storage", Run: clibackup.List},
 		}},
 		{Name: "doctor", Summary: "check configuration, dependencies and federation, then exit", Run: diag.Doctor},
 		{Name: "fsck", Summary: "check denormalized counters (read-only unless -fix)", Run: diag.Fsck},

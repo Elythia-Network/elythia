@@ -80,6 +80,46 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 go build -tags nodynamic -trimpath -ldflags="-s -w $REVISION_LDFLAGS" -o /out/bin/elythia ./cmd/elythia && \
     ln -s elythia /out/bin/migrate
 
+# Stage: backup (#3458)
+#
+# DB のバックアップを取る image。`docker build --target backup` で作る。本体の image
+# (下の runtime) は distroless で pg_dump を持たないので、postgres の公式 image に
+# elythia を足す。**pg_dump の版を DB のサーバーと揃えるため**で、DB と同じ
+# postgres:18-alpine を使う (古い pg_dump は新しいサーバーから取れない)。
+#
+# builder とは別の stage でビルドする。builder は frontend/ の node_modules が無いと
+# 落ちるが、バックアップの image に frontend は要らない。命令は builder と同じ並びに
+# してあるので、BuildKit は go mod download までの layer を共有する。
+FROM golang:1.27.2-alpine@sha256:85dc1069ac644ea3c527b177303a406eb3358192816cd7f9e5848eb658851673 AS backup-builder
+RUN apk add --no-cache git
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
+COPY . .
+ARG MKGO_COMMIT=
+ENV REVISION_LDFLAGS="-X github.com/elythia-network/elythia/internal/config.MkGoCommit=${MKGO_COMMIT}"
+# プラグインも本体と同じく組み込む。設定ファイルの plugins: の節を本体と同じ
+# 意味で読むため (pluginembed-check も全ての builder に求めている)。
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    GOWORK=off go run ./tools/pluginbuild && \
+    CGO_ENABLED=0 go build -tags nodynamic -trimpath -ldflags="-s -w $REVISION_LDFLAGS" -o /out/bin/elythia ./cmd/elythia
+
+# digest で固定する (理由は builder と同じ)。DB のサーバーの版を上げたら、ここも
+# 同じメジャーバージョンへ上げる。
+FROM postgres:18-alpine@sha256:4da1a4828be12604092fa55311276f08f9224a74a62dcb4708bd7439e2a03911 AS backup
+COPY --from=backup-builder /out/bin/elythia /usr/local/bin/elythia
+# verify (#3459) と restore (#3461) が、バイナリの同梱の migration の番号と比べる。
+COPY --from=backup-builder /app/migration /app/migration
+WORKDIR /app
+# postgres の公式 image の entrypoint (initdb を走らせる docker-entrypoint.sh) は
+# 使わない。サーバーを立てる image ではないため。root では動かさず、image に
+# 元からある postgres (UID 70) で動かす。
+USER postgres
+ENTRYPOINT ["/usr/local/bin/elythia", "backup"]
+CMD ["list", "-config", ".config/default.yml"]
+
 # Stage 2: Runtime
 #
 # distroless/static-debian13 (#621) を採用。Step 3 で binary が完全 static に
