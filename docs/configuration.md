@@ -272,9 +272,9 @@ Elythia 側のマイグレーションには含めていない。pgroonga 拡張
 | `backup.schedule.interval` | string | `elythia backup daemon`が取る間隔(Goのduration。例: `24h`)。1分以上。空なら定期実行しない |
 | `backup.schedule.at` | string | 取る時刻(`HH:MM`)。プロセスのタイムゾーン(`TZ`)で読む。省略可 |
 | `backup.schedule.keep` | int | 残す使える世代の数。古い世代は、使える新しい世代がこの数そろってから消す。`0`なら消さない |
-| `backup.schedule.verify` | bool | 取った後に毎回確かめる。`true`を推奨する |
+| `backup.schedule.verify` | bool | 取った後に毎回確かめる。`true`を推奨する。暗号化しているなら`backup.encryption.identityFile`も要る(空なら起動しない) |
 | `backup.schedule.delayAfter` | string | 最後の使える世代からこの時間を過ぎたら遅れを知らせる。空なら`interval`の1.5倍。`interval`より短くできない |
-| `backup.schedule.listen` | string | daemonの制御APIの待ち受け(例: `:3010`)。空なら持たない。composeの内部のネットワークだけで待ち受け、portを公開しない |
+| `backup.schedule.listen` | string | daemonの制御API(平文のHTTP)の待ち受け。空なら持たない。composeでは`:3010`(`backup-daemon`はportを公開しない)、バイナリを直接実行するなら`127.0.0.1:3010`のように絞る |
 | `backup.notify.webhookUrl` | string | 失敗・食い違い・遅れの通知先。空ならログにだけ残す |
 | `backup.notify.format` | string | `generic` / `discord` / `slack`。空なら`generic` |
 | `backup.server.storage.*` | object | 本体(管理画面)が読む保存先。`backup.storage`と同じ形。**`type`が空なら`backup.storage`を使う**。本体には一覧・読み取り・削除の権限があればよく、書き込みは要らない。バックアップ用のサービスとは別の鍵を本体に渡したいときに、ここに書く |

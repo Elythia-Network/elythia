@@ -284,7 +284,7 @@ DBに拡張(pg_bigmなど)を入れているときは、このホストのPostgr
 
 `elythia backup daemon`は、設定した間隔でバックアップを[取り](#取る)、[確かめ](#確かめる)、古い世代を消す常駐のプロセス(#3460)。失敗したとき、検証で食い違ったとき、間隔を過ぎても新しい世代ができないときに、Webhookで運営者へ知らせる。本体の管理画面(#3462)が「今すぐ取る」「今すぐ確かめる」「状態」を頼むための制御APIも、このプロセスが持つ。
 
-取る処理と確かめる処理は、`backup take` / `backup verify`と同じもの(同じ設定、同じ`pg_dump` / `initdb` / `pg_ctl` / `pg_restore`)を使う。そのためバックアップ用のimageの中か、それらがあるホストで動かす。起動するときに、保存先が開けること、同梱のmigrationの番号が読めること(作業ディレクトリに`migration/`が要る)、`backup.encryption.identityFile`を書いたならそれが読めることを確かめ、どれかが駄目なら起動しない。
+取る処理と確かめる処理は、`backup take` / `backup verify`と同じもの(同じ設定、同じ`pg_dump` / `initdb` / `pg_ctl` / `pg_restore`)を使う。そのためバックアップ用のimageの中か、それらがあるホストで動かす。起動するときに、保存先が開けること、同梱のmigrationの番号が読めること(作業ディレクトリに`migration/`が要る)、`backup.encryption.identityFile`を書いたならそれが読めることを確かめ、どれかが駄目なら起動しない。暗号化していて`schedule.verify: true`なのに`identityFile`が空のときも起動しない(毎回の検証が復号できずに落ち、使える世代が1つもできないため)。
 
 ### 設定
 
@@ -298,7 +298,7 @@ backup:
     keep: 7              # 残す世代の数。0 なら消さない
     verify: true         # 取った後に毎回確かめる
     delayAfter: 36h      # 遅れを知らせるまでの時間。省略時は interval の 1.5 倍
-    listen: ":3010"      # 制御 API の待ち受け。空なら制御 API を持たない
+    listen: ":3010"      # 制御 API の待ち受け。空なら制御 API を持たない (下の「制御API」)
   notify:
     webhookUrl: "https://discord.com/api/webhooks/..."
     format: discord      # generic / discord / slack。省略時は generic
@@ -322,23 +322,27 @@ backup:
 
 #### 時刻とタイムゾーン
 
-`at`は、プロセスのタイムゾーン(環境変数`TZ`)で解釈する。`postgres:18-alpine`は`TZ`が空だとUTCになる。composeの`backup-daemon`サービスは`TZ: Asia/Tokyo`を渡している(このimageには`/usr/share/zoneinfo`が入っている)。起動時のログ`backup: schedule started`に、解釈したタイムゾーン(`timezone=`)と次に取る時刻(`next=`)が出るので、確かめる。
+`at`は、プロセスのタイムゾーン(環境変数`TZ`)で解釈する。`postgres:18-alpine`は`TZ`が空だとUTCになり、同梱のcomposeの`backup-daemon`サービスも`TZ`を渡さないので、既定では`at`はUTCの時刻になる。日本時間で決めたいときは、`backup-daemon`の`environment`のコメントを外して`TZ: Asia/Tokyo`を渡す(このimageには`/usr/share/zoneinfo`が入っている)。起動時のログ`backup: schedule started`に、解釈したタイムゾーン(`timezone=`)と次に取る時刻(`next=`)が出るので、確かめる。
 
 #### 起動したときに取るか
 
 起動したとき、最新の揃った世代(`meta.json`と、それが名指しするdumpがある世代)が`interval`より古いか、世代が1つも無ければ、すぐに1回取る。daemonが止まっていた間の分を、次の枠まで待たずに取り戻すため。最新の世代が`interval`より新しければ、次の枠まで待つ。そのため、再起動のたびに取り直すことはない。
 
+`at`があるとき、枠は最新の世代を取った日の`at`から`interval`ごとに数える。再起動した日から数え直さないので、2日以上の間隔でも再起動で枠がずれない(例: `interval: 168h`、`at: "04:00"`で、最新の世代が6日前の04:00なら、次は翌日の04:00)。
+
 取っている途中に次の枠が来たときは、重ねて取らず、終わるのを待って1回だけ取る。
 
 ### 1回の流れ
 
-1. 取る。失敗したら通知して終わる
+1. 取る。取る前に、DBが接続を受け付けるまで最大5分待つ(DBと同時に起動したときや、DBの再起動中のため)。待ちきれなければそのまま取りにいき、失敗したら通知して終わる
 2. `verify: true`なら確かめる。検証が最後まで走れなかったら「失敗」、走って食い違ったら「食い違い」として通知し、**世代の整理はしない**
 3. 世代を整理する
 
 1つのプロセスの中では、取る・確かめる・消すを同時に1つしか走らせない。確かめている世代を消したり、書いている途中の世代を消したりしないため。**同じ保存先に対して、daemonを2つ動かさない。** daemonを動かしている間に手で`take`を打つと、daemonの作業とは排他されない(同じ秒に重なると、上の「同じ秒に2つ取ったとき」のとおり混ざりうる)。手で取るときは、制御APIの`POST /take`で頼む。
 
-確かめる処理は、判定が出た後に使い捨てのPostgreSQLの後始末(`pg_ctl stop`や一時ディレクトリの削除)か`verify.json`の保存に失敗すると、判定と誤りの両方を返す(上の「結果」)。daemonは、3つの段の判定が揃っていればそれを判定として扱う。通らなかったなら「食い違い」を知らせ、通ったなら整理まで進める。どちらでも`verify.json`を自分で書き直してから、後始末の失敗を「失敗」として別に知らせる。整理は保存先の`verify.json`を読んで行うため。
+確かめる処理は、判定が出た後に使い捨てのPostgreSQLの後始末(`pg_ctl stop`や一時ディレクトリの削除)か`verify.json`の保存に失敗すると、3つの段が全て通っていても`ok: false`にし、`verify.json`を書かずに誤りと一緒に返す(上の「結果」)。daemonは、3つの段の判定が揃っていれば、**判定を段の結果から求め直す**(全ての段が通っていれば通った世代)。通らなかったなら「食い違い」を知らせ、通ったなら整理まで進める。どちらでも`verify.json`を自分で書いてから、後始末の失敗を「失敗」として別に知らせる。整理は保存先の`verify.json`を読んで行うため。
+
+確かめている途中でdaemonを止めた(`SIGTERM`など)ときは、中断として扱う。中断で`pg_restore`が切れたことを世代の欠陥と取り違えないよう、`verify.json`は確かめる前の状態(無ければ無い)に戻し、通知もしない。`GET /status`の`lastVerify` / `lastTake`の`error`に`interrupted`と残る。
 
 ### 世代の整理
 
@@ -373,13 +377,15 @@ backup:
   "occurredAt": "2026-10-10T04:12:00Z",
   "generationId": "20261009T190000Z",
   "message": "the backup did not pass verification",
-  "failedStages": [{"stage": "restorable", "ok": false, "error": "..."}],
+  "failedStages": [{"stage": "restorable", "ok": false, "error": "the dump cannot be restored or its row counts differ; see verify.json"}],
   "mismatches": [{"table": "public.note", "expected": 10, "actual": 9}],
   "text": "[Elythia backup] https://example.tld: verification found a broken backup ..."
 }
 ```
 
 `stage`(失敗した段: `take` / `verify` / `prune`)と`lastUsableAt`(遅れのときの最後の使える世代)は、値があるときだけ入る。
+
+**`failedStages`の`error`は、段ごとに決まった短い要約で、`pg_restore`などの誤りの文面は載せない。** `pg_restore`の誤りには戻そうとした行の値(利用者の秘密鍵やtokenの一部)が含まれうるので、外の通知先へは送らない。詳しい誤りは保存先の`verify.json`とdaemonのログで見る。`mismatches`(表の名前と行数)は載せる。
 
 `format: discord`は`{"content": "<text>"}`を、`format: slack`は`{"text": "<text>"}`を送る(DiscordのWebhook、SlackのIncoming Webhook)。Discordでは、誤りの文面に含まれる`@everyone`などで一斉通知が起きないよう、mentionを全て無効にして送る。長い文面は、各サービスの上限(Discordは2000文字、Slackは3000文字で切る)に収まるよう切る。
 
@@ -391,7 +397,7 @@ backup:
 
 ### 制御API
 
-本体の管理画面(#3462)が使う口。`schedule.listen`で待ち受ける。**TLSを持たないので、composeの内部のネットワークだけで待ち受け、portをホストへ公開しない。** 同梱のcomposeの`backup-daemon`サービスは`ports`を持たない。本体の`backup.server.serviceUrl`には`http://backup-daemon:3010`(`listen`のport)を書く。
+本体の管理画面(#3462)が使う口。`schedule.listen`で待ち受ける。**TLSを持たないので、本体からだけ届く場所で待ち受ける。** composeでは、同梱の`backup-daemon`サービスが`ports`を持たないので、`listen: ":3010"`でもcomposeの内部のネットワークからしか届かない(`ports`を足さない)。バイナリを直接実行するときは、`:3010`と書くと全てのインターフェースで平文の口が開くので、`127.0.0.1:3010`のように絞る(下の「バイナリ直接実行」)。本体の`backup.server.serviceUrl`には`http://backup-daemon:3010`(`listen`のport)を書く。
 
 全てのリクエストに`Authorization: Bearer <server.serviceToken>`が要る。tokenは定数時間で比べる。一致しなければ、パスに関わらず`401 {"error":"unauthorized"}`を返す。
 
@@ -447,17 +453,17 @@ daemonが止まりかけているときは、`POST`に`503 {"error":"not_running
 ```bash
 # imageを作る(初回と、Elythiaを更新したとき)
 MKGO_COMMIT=$(git rev-parse --short HEAD) docker compose --profile backup-daemon build backup-daemon
-# 起動する
-docker compose --profile backup-daemon up -d backup-daemon
+# 起動する(--no-deps を付ける)
+docker compose --profile backup-daemon up -d --no-deps backup-daemon
 # ログ(次に取る時刻など)を見る
 docker compose --profile backup-daemon logs backup-daemon
 ```
 
 - **`backup`サービスを`up`で常駐させず、別のサービスにしている。** `backup`は`run --rm`で呼ぶ1回きりのもので`restart: "no"`だが、常駐には`restart: unless-stopped`が要るため。名前が固定なので、本体の`backup.server.serviceUrl`に`http://backup-daemon:3010`と書ける
+- **`--no-deps`を付ける。** `backup-daemon`は`backup`と同じく`depends_on`を持たない。`depends_on`があると、`up`がDBのコンテナの定義の差分を見て、動いているDBを作り直しうるため。DBの起動は、daemonが取る前に待つ(上の「1回の流れ」)
 - 普段の`docker compose up -d`にも含めたいときは、`.env`に`COMPOSE_PROFILES=backup-daemon`を書く。書かないと、Elythiaを更新したときの`up -d`で`backup-daemon`が作り直されず、古いimageのまま動き続ける
-- `backup-daemon`は、DBのhealthcheckが通ってから起動する(`depends_on`)。起動してすぐに取ることがあるため(上の「起動したときに取るか」)
 - 保存先をディレクトリにするときと、暗号化した世代を確かめるとき(`verify: true`)は、`backup`サービスの`volumes`のコメントを外す。`backup-daemon`にも同じものが入る
-- `TZ`は`Asia/Tokyo`にしてある。変えるときは`backup-daemon`の`environment`を書き換える
+- `TZ`は渡していない(`at`はUTC)。変えるときは`backup-daemon`の`environment`のコメントを外す(上の「時刻とタイムゾーン」)
 
 #### UDS
 
@@ -465,7 +471,7 @@ docker compose --profile backup-daemon logs backup-daemon
 
 ```bash
 MKGO_COMMIT=$(git rev-parse --short HEAD) docker compose -f compose.uds.yaml --profile backup-daemon build backup-daemon
-docker compose -f compose.uds.yaml --profile backup-daemon up -d backup-daemon
+docker compose -f compose.uds.yaml --profile backup-daemon up -d --no-deps backup-daemon
 ```
 
 #### バイナリ直接実行
@@ -475,6 +481,8 @@ docker compose -f compose.uds.yaml --profile backup-daemon up -d backup-daemon
 ```bash
 TZ=Asia/Tokyo elythia backup daemon -config .config/default.yml
 ```
+
+**`schedule.listen`はループバック(`127.0.0.1:3010`)に絞る。** 制御APIは平文で、`:3010`のように書くと全てのインターフェースで待ち受ける。tokenが要るとはいえ、tokenが平文で流れる。本体が別のホストにあって絞れないときは、TLSを終端するリバースプロキシかVPNの内側に置く。`.config/default.yml.example`の例は`127.0.0.1:3010`にしてある。
 
 systemdで常駐させるときは、`Restart=on-failure`を付ける。`SIGINT` / `SIGTERM`で止まり、走っている作業には中断を頼む(中断した世代は揃っていない世代として残り、後の整理で消える)。
 

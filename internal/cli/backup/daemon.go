@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	backupkit "github.com/elythia-network/elythia/internal/backup"
 	"github.com/elythia-network/elythia/internal/backup/daemon"
 	"github.com/elythia-network/elythia/internal/cli/cliflag"
@@ -171,24 +173,96 @@ func wireDeps(te env, ve verifyEnv) func(*config.Config, *slog.Logger) (Deps, er
 		if err != nil {
 			return Deps{}, err
 		}
+		b := cfg.Backup
+		if b.Encryption.Enabled && b.Schedule.Verify && b.Encryption.IdentityFile == "" {
+			// 毎回の検証が復号できずに失敗し続け、使える世代が 1 つもできない。
+			return Deps{}, errors.New("backup.schedule.verify needs backup.encryption.identityFile when encryption is enabled")
+		}
 		// 定期実行で確かめない設定でも、制御 API から確かめることを頼めるので、
 		// 確かめる準備 (同梱の migration の番号、秘密鍵) は起動時に済ませて誤りを出す。
-		vopts, err := verifyOptions(ve, cfg.Backup)
+		vopts, err := verifyOptions(ve, b)
 		if err != nil {
 			return Deps{}, err
 		}
 		return Deps{
 			Storage:  st,
-			Taker:    taker{opts: topts},
+			Taker:    newTaker(topts),
 			Verifier: verifier{st: st, opts: vopts, verify: ve.verify},
 		}, nil
 	}
 }
 
-// taker adapts backup.Take to daemon.Taker.
-type taker struct{ opts backupkit.TakeOptions }
+// Defaults of how long a take waits for the database to accept connections.
+const (
+	defaultDBWait      = 5 * time.Minute
+	defaultDBRetry     = 5 * time.Second
+	defaultPingTimeout = 10 * time.Second
+)
+
+// taker adapts backup.Take to daemon.Taker. Before each take it waits up to
+// dbWait for the database to accept connections.
+//
+// compose の backup-daemon は DB の起動を depends_on で待たない (待つ形にすると、
+// `up` が DB のコンテナを作り直しうる)。DB と同時に起動したときや DB の再起動中に、
+// 1 回目の取る作業が繋がらずに失敗して次の枠 (既定で 1 日後) まで取らない、という
+// ことが無いよう、取る前に繋がるまで待つ。待ちきれなければそのまま取りにいき、
+// 失敗として知らせる。
+type taker struct {
+	opts          backupkit.TakeOptions
+	ping          func(context.Context) error
+	dbWait, retry time.Duration
+	now           func() time.Time
+}
+
+func newTaker(opts backupkit.TakeOptions) taker {
+	return taker{
+		opts: opts,
+		ping: func(ctx context.Context) error {
+			ctx, cancel := context.WithTimeout(ctx, defaultPingTimeout)
+			defer cancel()
+			conn, err := pgx.Connect(ctx, opts.DatabaseURL)
+			if err != nil {
+				return err
+			}
+			return conn.Close(ctx)
+		},
+		dbWait: defaultDBWait,
+		retry:  defaultDBRetry,
+		now:    time.Now,
+	}
+}
+
+// waitForDB returns once ping succeeds, dbWait has passed or ctx is done.
+func (t taker) waitForDB(ctx context.Context) {
+	logger := t.opts.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	deadline := t.now().Add(t.dbWait)
+	for {
+		err := t.ping(ctx)
+		if err == nil || ctx.Err() != nil {
+			return
+		}
+		if !t.now().Before(deadline) {
+			logger.Error("backup: the database still does not accept connections; taking the backup anyway", "waited", t.dbWait.String(), "error", err)
+			return
+		}
+		logger.Warn("backup: waiting for the database to accept connections", "error", err)
+		timer := time.NewTimer(t.retry)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+	}
+}
 
 func (t taker) Take(ctx context.Context) (backupkit.Meta, error) {
+	if t.ping != nil {
+		t.waitForDB(ctx)
+	}
 	m, err := backupkit.Take(ctx, t.opts)
 	if err != nil {
 		return backupkit.Meta{}, err
