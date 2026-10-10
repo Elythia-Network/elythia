@@ -252,7 +252,7 @@ Elythia 側のマイグレーションには含めていない。pgroonga 拡張
 
 ### バックアップ (`backup.*`)
 
-`elythia backup`(バックアップ用のimageの`backup`サービス)と、本体(管理画面。`backup.server.*`)が読む。取る・確かめる手順と保存先に置かれるもの、管理画面は[DBのバックアップ](backup.md)に、戻す手順は[デプロイ](deployment.md#バックアップから戻す-restore)にある。**保存先の認証情報はDBではなくここに置く。** DBが失われたときにも、バックアップを取り出せる必要があるため(ドライブのオブジェクトストレージの設定はDBの`meta`にあるので流用しない)。
+`elythia backup`(バックアップ用のimageの`backup`サービスと、定期実行の`backup-daemon`サービス)と、本体(管理画面。`backup.server.*`)が読む。取る・確かめる・定期実行の手順と保存先に置かれるもの、管理画面は[DBのバックアップ](backup.md)に、戻す手順は[デプロイ](deployment.md#バックアップから戻す-restore)にある。**保存先の認証情報はDBではなくここに置く。** DBが失われたときにも、バックアップを取り出せる必要があるため(ドライブのオブジェクトストレージの設定はDBの`meta`にあるので流用しない)。
 
 | キー | 型 | 説明 |
 |---|---|---|
@@ -269,10 +269,18 @@ Elythia 側のマイグレーションには含めていない。pgroonga 拡張
 | `backup.encryption.identityFile` | string | ageの秘密鍵のファイル。確かめる・戻すときに使う。リポジトリの外に置く |
 | `backup.tools.pgDump` | string | `pg_dump`のパス。空ならPATHから探す |
 | `backup.tools.pgRestore` / `initdb` / `pgCtl` | string | `pg_restore` / `initdb` / `pg_ctl`のパス。空ならPATHから探す。`pg_restore`は、`elythia backup restore`がDBへ戻すときと、`elythia backup verify`が使い捨てのPostgreSQLへ戻すときに使う。`initdb` / `pg_ctl`は`verify`だけが使う |
+| `backup.schedule.interval` | string | `elythia backup daemon`が取る間隔(Goのduration。例: `24h`)。1分以上。空なら定期実行しない |
+| `backup.schedule.at` | string | 取る時刻(`HH:MM`)。プロセスのタイムゾーン(`TZ`)で読む。省略可 |
+| `backup.schedule.keep` | int | 残す使える世代の数。古い世代は、使える新しい世代がこの数そろってから消す。`0`なら消さない |
+| `backup.schedule.verify` | bool | 取った後に毎回確かめる。`true`を推奨する |
+| `backup.schedule.delayAfter` | string | 最後の使える世代からこの時間を過ぎたら遅れを知らせる。空なら`interval`の1.5倍。`interval`より短くできない |
+| `backup.schedule.listen` | string | daemonの制御APIの待ち受け(例: `:3010`)。空なら持たない。composeの内部のネットワークだけで待ち受け、portを公開しない |
+| `backup.notify.webhookUrl` | string | 失敗・食い違い・遅れの通知先。空ならログにだけ残す |
+| `backup.notify.format` | string | `generic` / `discord` / `slack`。空なら`generic` |
 | `backup.server.storage.*` | object | 本体(管理画面)が読む保存先。`backup.storage`と同じ形。**`type`が空なら`backup.storage`を使う**。本体には一覧・読み取り・削除の権限があればよく、書き込みは要らない。バックアップ用のサービスとは別の鍵を本体に渡したいときに、ここに書く |
 | `backup.server.pricePerGbMonth` | number | 1GBあたりの月額。0より大きいと、管理画面に月額の目安を出す(1GBは2^30バイト。S3・R2の課金の単位に合わせた) |
-| `backup.server.serviceUrl` | string | `elythia backup daemon`(#3460で足す)の制御APIのURL(例: `http://backup:3010`)。空なら、管理画面から取る・確かめるができない(一覧・削除・ダウンロードはできる) |
-| `backup.server.serviceToken` | string | 制御APIの認証。本体は`Authorization: Bearer <値>`で送り、daemonは同じ値で照合する。空なら、`serviceUrl`があっても本体は依頼を送らない(起動時に警告する) |
+| `backup.server.serviceUrl` | string | `elythia backup daemon`の制御API(`backup.schedule.listen`)のURL(例: `http://backup-daemon:3010`)。空なら、管理画面から取る・確かめるができない(一覧・削除・ダウンロードはできる) |
+| `backup.server.serviceToken` | string | 制御APIの認証。本体は`Authorization: Bearer <値>`で送り、daemonは同じ値で照合する。空なら、`serviceUrl`があっても本体は依頼を送らない(起動時に警告する)。daemonは、`schedule.listen`を書いたのにこれが空なら起動しない |
 
 `backup:`の節は`MK_*`の環境変数では作れない(`bindEnvKeys()`に無い)。
 

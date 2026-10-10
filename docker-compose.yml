@@ -121,7 +121,7 @@ services:
   # (db: と backup: の節)。保存先と暗号化の設定は docs/backup.md を参照。
   # **同じホストのディスクはバックアップに数えない。** 保存先は S3 互換か、別の
   # 機器を mount したディレクトリにする。docker.sock は渡さない。
-  backup:
+  backup: &backup-service
     logging: *default-logging
     build:
       context: .
@@ -153,6 +153,28 @@ services:
       # 置かないのが望ましい。
       # - /etc/elythia/backup-identity.txt:/run/secrets/backup-identity.txt:ro
     restart: "no"
+
+  # バックアップを常駐させる形 (#3460)。上の backup と同じ image・volumes で、
+  # `elythia backup daemon` を動かす。設定の backup.schedule の間隔で取って・確かめて・
+  # 古い世代を消し、失敗・食い違い・遅れを backup.notify へ知らせる。手順は
+  # docs/backup.md の「定期実行」。使うときだけ profile を有効にする:
+  #   docker compose --profile backup-daemon up -d backup-daemon
+  # backup と別のサービスにしているのは、backup が `run --rm` で呼ぶ 1 回きりの
+  # もの (restart: "no") で、常駐には restart: unless-stopped が要るため。名前が
+  # 固定なので、本体の backup.server.serviceUrl に http://backup-daemon:3010 と書ける。
+  # 制御 API (backup.schedule.listen) は compose の内部ネットワークだけで待ち受け、
+  # **ports を書かない** (TLS を持たない)。
+  backup-daemon:
+    <<: *backup-service
+    profiles: ["backup-daemon"]
+    command: ["daemon"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # backup.schedule.at はこのタイムゾーンで読む。
+      TZ: Asia/Tokyo
+    restart: unless-stopped
 
   # Video thumbnail generator (#637 M2). mk-go の media proxy が video/* を
   # 受けたとき、設定 `videoThumbnailGenerator` で指定した URL に対して
