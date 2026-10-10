@@ -42,11 +42,12 @@ func Commands() []Command {
 			{Name: "note-tags", Summary: "normalize note.tags to NFKC + lowercase", Run: backfill.NoteTags},
 			{Name: "remote-host", Summary: "normalize stored remote hosts (UTS#46 + punycode)", Run: backfill.RemoteHost},
 		}},
-		// 後の段階 (verify / daemon / restore) はこの Sub に足す (#3457)。
-		{Name: "backup", Summary: "take database backups into storage outside the host, list and verify them", Sub: []Command{
+		// 後の段階 (daemon) はこの Sub に足す (#3457)。
+		{Name: "backup", Summary: "take database backups into storage outside the host, list, verify and restore them", Sub: []Command{
 			{Name: "take", Summary: "dump the database (pg_dump -Fc) and store it as a new generation", Run: clibackup.Take},
 			{Name: "list", Summary: "list the generations in the storage", Run: clibackup.List},
 			{Name: "verify", Summary: "check that a backup can be restored (writes verify.json)", Run: clibackup.Verify},
+			{Name: "restore", Summary: "restore a backup into this server's database (-mode swap or empty)", Run: clibackup.Restore},
 		}},
 		{Name: "doctor", Summary: "check configuration, dependencies and federation, then exit", Run: diag.Doctor},
 		{Name: "fsck", Summary: "check denormalized counters (read-only unless -fix)", Run: diag.Fsck},

@@ -162,6 +162,7 @@ func TestCommands_WiresEveryNameToItsRunner(t *testing.T) {
 		"backup take":                clibackup.Take,
 		"backup list":                clibackup.List,
 		"backup verify":              clibackup.Verify,
+		"backup restore":             clibackup.Restore,
 	}
 	got := map[string]uintptr{}
 	for _, c := range Commands() {
