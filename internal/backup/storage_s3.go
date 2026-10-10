@@ -52,8 +52,6 @@ var (
 	_ Storage   = (*S3Storage)(nil)
 	_ Presigner = (*S3Storage)(nil)
 	_ Storage   = (*DirStorage)(nil)
-	_ NewPutter = (*S3Storage)(nil)
-	_ NewPutter = (*DirStorage)(nil)
 )
 
 // NewS3Storage builds an S3Storage from the config.
@@ -132,21 +130,11 @@ func (s *S3Storage) objectKey(key string) (string, error) {
 // Put uploads r. Objects smaller than PartSize go in one PutObject; larger
 // ones use a multipart upload, which is aborted when anything fails. Neither
 // makes an object visible under key until the upload completes.
-func (s *S3Storage) Put(ctx context.Context, key string, r io.Reader) error {
-	return s.put(ctx, key, r, false)
-}
-
-// PutNew is Put with If-None-Match: * on the request that makes the object
-// visible, so it fails with ErrExists instead of replacing an existing key.
 //
-// 条件付きの書き込みを知らない S3 互換の実装は、条件を無視するか 501 を返す。501 の
-// ときは条件を外して送り直す (中身はまだ手元か、送り終えた parts にある)。その場合は
-// 上書きを防げないが、バックアップを取れないよりはよい。
-func (s *S3Storage) PutNew(ctx context.Context, key string, r io.Reader) error {
-	return s.put(ctx, key, r, true)
-}
-
-func (s *S3Storage) put(ctx context.Context, key string, r io.Reader, exclusive bool) error {
+// 上書きを防ぐ条件 (If-None-Match) は付けない。SDK は 500 や切断で同じ要求を自動で
+// 送り直すので、1 回目が保存済みだと送り直しが 412 になり、自分で置いたものを
+// 「他が置いた」と取り違える。条件の無い PUT は送り直しても同じ結果になる。
+func (s *S3Storage) Put(ctx context.Context, key string, r io.Reader) error {
 	k, err := s.objectKey(key)
 	if err != nil {
 		return err
@@ -159,57 +147,23 @@ func (s *S3Storage) put(ctx context.Context, key string, r io.Reader, exclusive 
 	n, err := io.ReadFull(r, buf)
 	switch {
 	case errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF):
-		err = withCondition(exclusive, func(cond *string) error {
-			_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
-				Bucket:        aws.String(s.bucket),
-				Key:           aws.String(k),
-				Body:          bytes.NewReader(buf[:n]),
-				ContentLength: aws.Int64(int64(n)),
-				IfNoneMatch:   cond,
-			})
-			return err
+		_, err = s.client.PutObject(ctx, &s3.PutObjectInput{
+			Bucket:        aws.String(s.bucket),
+			Key:           aws.String(k),
+			Body:          bytes.NewReader(buf[:n]),
+			ContentLength: aws.Int64(int64(n)),
 		})
 		if err != nil {
-			return putError("put", key, err)
+			return fmt.Errorf("backup: put %s: %w", key, err)
 		}
 		return nil
 	case err != nil:
 		return fmt.Errorf("backup: read %s: %w", key, err)
 	}
-	return s.putMultipart(ctx, key, k, buf, r, exclusive)
+	return s.putMultipart(ctx, key, k, buf, r)
 }
 
-// withCondition calls send with If-None-Match: * when exclusive, and again
-// without it when the service does not implement conditional writes.
-func withCondition(exclusive bool, send func(cond *string) error) error {
-	if !exclusive {
-		return send(nil)
-	}
-	err := send(aws.String("*"))
-	if s3ErrorCode(err) == "NotImplemented" {
-		return send(nil)
-	}
-	return err
-}
-
-// putError maps a failed conditional write to ErrExists.
-func putError(op, key string, err error) error {
-	switch s3ErrorCode(err) {
-	case "PreconditionFailed", "ConditionalRequestConflict":
-		return fmt.Errorf("backup: %s %s: %w", op, key, ErrExists)
-	}
-	return fmt.Errorf("backup: %s %s: %w", op, key, err)
-}
-
-func s3ErrorCode(err error) string {
-	var api smithy.APIError
-	if errors.As(err, &api) {
-		return api.ErrorCode()
-	}
-	return ""
-}
-
-func (s *S3Storage) putMultipart(ctx context.Context, key, k string, first []byte, r io.Reader, exclusive bool) (err error) {
+func (s *S3Storage) putMultipart(ctx context.Context, key, k string, first []byte, r io.Reader) (err error) {
 	created, err := s.client.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(k),
@@ -261,18 +215,14 @@ func (s *S3Storage) putMultipart(ctx context.Context, key, k string, first []byt
 			return fmt.Errorf("backup: read %s: %w", key, err)
 		}
 	}
-	err = withCondition(exclusive, func(cond *string) error {
-		_, err := s.client.CompleteMultipartUpload(ctx, &s3.CompleteMultipartUploadInput{
-			Bucket:          aws.String(s.bucket),
-			Key:             aws.String(k),
-			UploadId:        uploadID,
-			MultipartUpload: &types.CompletedMultipartUpload{Parts: parts},
-			IfNoneMatch:     cond,
-		})
-		return err
+	_, err = s.client.CompleteMultipartUpload(ctx, &s3.CompleteMultipartUploadInput{
+		Bucket:          aws.String(s.bucket),
+		Key:             aws.String(k),
+		UploadId:        uploadID,
+		MultipartUpload: &types.CompletedMultipartUpload{Parts: parts},
 	})
 	if err != nil {
-		return putError("complete multipart upload", key, err)
+		return fmt.Errorf("backup: complete multipart upload %s: %w", key, err)
 	}
 	return nil
 }
