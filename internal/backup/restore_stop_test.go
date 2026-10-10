@@ -212,6 +212,34 @@ func TestRestoreStopConditions(t *testing.T) {
 		noLeftovers(t)
 	})
 
+	t.Run("backup older than the binary is migrated after the row check", func(t *testing.T) {
+		// バイナリが、バックアップより新しい migration (ここでは fork の系列で表を作る
+		// もの) を持つ。行数の突き合わせは migrate の前に済ませる。順序が逆だと、
+		// migrate が作った表がバックアップに無い表として食い違いになる。
+		id := "20261010T045800Z"
+		rsTakeBackup(t, pg, storage, rsAppDB, id, rsBackupOptions{})
+		local := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(local, "900001_fork.up.sql"), []byte("CREATE TABLE fork_t (id int); INSERT INTO fork_t VALUES (1);"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(local, "900001_fork.down.sql"), []byte("DROP TABLE fork_t;"), 0o600))
+		var out bytes.Buffer
+		r := pg.restorer(storage, rsSuperUser, rsSuperPass)
+		r.LocalMigrationsDir = local
+		r.Out = &out
+		o := swap
+		o.ID = id
+		res, err := r.Restore(ctx, o)
+		require.NoError(t, err, out.String())
+		require.Len(t, res.Migrations, 2)
+		assert.Equal(t, MigrationState{Table: LocalMigrationsTable, Version: 900001}, res.Migrations[1])
+		app := pg.connect(t, rsSuperUser, rsSuperPass, rsAppDB)
+		assert.Equal(t, int64(1), rsCount(t, app, `SELECT count(*) FROM fork_t`))
+		_ = app.Close(ctx)
+		// 後の subtest のために元へ戻す。
+		require.NoError(t, super.ReplaceDatabase(ctx, "", rsAppDB, rsAppDB+"_oc_m", res.BeforeRestore))
+		require.NoError(t, super.DropDatabase(ctx, "", rsAppDB+"_oc_m"))
+		noLeftovers(t)
+	})
+
 	t.Run("row counts differ", func(t *testing.T) {
 		id := "20261010T050000Z"
 		rsTakeBackup(t, pg, storage, rsAppDB, id, rsBackupOptions{mutateMeta: func(m *Meta) { m.RowCounts["public.note"]++ }})
@@ -267,10 +295,12 @@ func TestRestoreStopConditions(t *testing.T) {
 		// 名前の入れ替えの後でエラーが返ったときは、pg_database で状態を確かめる。
 		pg.exec(t, "postgres", "CREATE DATABASE oc_before", "CREATE DATABASE oc_restore_only")
 		t.Cleanup(func() { pg.exec(t, "postgres", "DROP DATABASE oc_before", "DROP DATABASE oc_restore_only") })
-		assert.Equal(t, swapDone, super.swapOutcome("", "oc_restore", "oc_before"))
-		assert.Equal(t, swapNotDone, super.swapOutcome("", "oc_restore_only", "oc_before_x"))
-		assert.Equal(t, swapUnknown, super.swapOutcome("", "oc_restore_only", "oc_before"))
-		assert.Equal(t, swapUnknown, super.swapOutcome("", "oc_none", "oc_none_before"))
+		assert.Equal(t, swapDone, super.swapOutcome("", "oc_db", "oc_restore", "oc_before"))
+		assert.Equal(t, swapNotDone, super.swapOutcome("", "oc_db", "oc_restore_only", "oc_before_x"))
+		assert.Equal(t, swapUnknown, super.swapOutcome("", "oc_db", "oc_restore_only", "oc_before"))
+		assert.Equal(t, swapUnknown, super.swapOutcome("", "oc_db", "oc_none", "oc_none_before"))
+		// 戻す元の DB があり、退避した名前が無ければ、巻き戻っている。
+		assert.Equal(t, swapNotDone, super.swapOutcome("", "oc_restore_only", "oc_none", "oc_none_before"))
 	})
 
 	t.Run("swap reported as failed after the names changed", func(t *testing.T) {
@@ -309,6 +339,36 @@ func TestRestoreStopConditions(t *testing.T) {
 		require.NoError(t, super.ReplaceDatabase(ctx, "", rsAppDB, rsAppDB+"_oc_y", beforeName))
 		require.NoError(t, super.DropDatabase(ctx, "", rsAppDB+"_oc_y"))
 		noLeftovers(t)
+	})
+
+	t.Run("switch with a wrong or taken name", func(t *testing.T) {
+		// 名前の打ち間違いや、退避名が既にあるときは、入れ替える前に止まり、
+		// 「入れ替わったか分からない」とは言わない。
+		pg.exec(t, "postgres", "CREATE DATABASE sw_cur", "CREATE DATABASE sw_kept", "CREATE DATABASE sw_taken")
+		t.Cleanup(func() {
+			pg.exec(t, "postgres", "DROP DATABASE sw_cur", "DROP DATABASE sw_kept", "DROP DATABASE sw_taken")
+		})
+		err := super.SwitchDatabase(ctx, "", "sw_cur", "sw_aside", "sw_typo")
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, ErrRestoreSwitchUnknown)
+		assert.Contains(t, err.Error(), `database "sw_typo" does not exist`)
+		err = super.SwitchDatabase(ctx, "", "sw_cur", "sw_taken", "sw_kept")
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, ErrRestoreSwitchUnknown)
+		assert.Contains(t, err.Error(), `database "sw_taken" already exists`)
+		for _, n := range []string{"sw_cur", "sw_kept", "sw_taken"} {
+			assert.Equal(t, int64(1), rsDatabasesLike(t, pg, n), n)
+		}
+		// 入れ替えが失敗して巻き戻ったとき (戻す元があり、退避名が無い) も、元のエラーを返す。
+		r := pg.restorer(storage, rsSuperUser, rsSuperPass)
+		r.afterReplace = func() error {
+			pg.exec(t, "postgres", "ALTER DATABASE sw_cur RENAME TO sw_kept_back", "ALTER DATABASE sw_aside RENAME TO sw_cur", "ALTER DATABASE sw_kept_back RENAME TO sw_kept")
+			return errors.New("rolled back")
+		}
+		err = r.SwitchDatabase(ctx, "", "sw_cur", "sw_aside", "sw_kept")
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, ErrRestoreSwitchUnknown)
+		assert.Contains(t, err.Error(), "rolled back")
 	})
 
 	t.Run("rollback switch reported as failed after the names changed", func(t *testing.T) {
