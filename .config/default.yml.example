@@ -631,8 +631,9 @@ proxyBypassHosts:
 #   ┌────────────────────────┐
 #───┘ Database backup (#3457) └────────────────────────────────
 
-# Used by `elythia backup` (the "backup" compose service) and by the admin
-# page of the server (backup.server). See docs/backup.md.
+# Used by `elythia backup` (the "backup" and "backup-daemon" compose
+# services) and by the admin page of the server (backup.server). See
+# docs/backup.md.
 #
 # **A disk of the same host does not count as a backup**: it is lost together
 # with the database. Use S3-compatible storage or a directory on another
@@ -698,9 +699,11 @@ proxyBypassHosts:
 #    # Report a delay when no usable generation is newer than this. Empty
 #    # means 1.5 times interval.
 #    delayAfter: 36h
-#    # Control API for the admin page. Listen only on an internal network and
-#    # never publish the port. Requires server.serviceToken.
-#    listen: ":3010"
+#    # Control API for the admin page (plain HTTP, no TLS). Requires
+#    # server.serviceToken. Running the binary directly, keep it on loopback
+#    # as below. In compose, ":3010" is fine because the backup-daemon
+#    # service publishes no port; never add one.
+#    listen: "127.0.0.1:3010"
 #  notify:
 #    # Empty: failures are only logged.
 #    webhookUrl: "https://hooks.example.com/..."

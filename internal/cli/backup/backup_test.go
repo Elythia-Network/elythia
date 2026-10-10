@@ -40,6 +40,9 @@ func TestMain(m *testing.M) {
 	if pgC != nil {
 		_ = pgC.Terminate(context.Background())
 	}
+	if daemonPgC != nil {
+		_ = daemonPgC.Terminate(context.Background())
+	}
 	os.Exit(code)
 }
 
@@ -372,7 +375,7 @@ func TestConfigExampleKeysDecode(t *testing.T) {
 	assert.Equal(t, []string{"age1..."}, b.Encryption.Recipients)
 	assert.Equal(t, "/run/secrets/backup-identity.txt", b.Encryption.IdentityFile)
 	assert.Equal(t, config.BackupScheduleOptions{
-		Interval: "24h", At: "04:00", Keep: 7, Verify: true, DelayAfter: "36h", Listen: ":3010",
+		Interval: "24h", At: "04:00", Keep: 7, Verify: true, DelayAfter: "36h", Listen: "127.0.0.1:3010",
 	}, b.Schedule)
 	assert.Equal(t, config.BackupNotifyOptions{WebhookURL: "https://hooks.example.com/...", Format: "generic"}, b.Notify)
 	assert.Equal(t, "...", b.Server.ServiceToken)

@@ -251,8 +251,9 @@ proxyBypassHosts:
 #   ┌────────────────────────┐
 #───┘ Database backup (#3457) └────────────────────────────────
 
-# Used by `elythia backup` (the "backup" compose service) and by the admin
-# page of the server (backup.server). See docs/backup.md.
+# Used by `elythia backup` (the "backup" and "backup-daemon" compose
+# services) and by the admin page of the server (backup.server). See
+# docs/backup.md.
 #
 # **A disk of the same host does not count as a backup**: it is lost together
 # with the database. Use S3-compatible storage or a directory on another
@@ -303,7 +304,24 @@ proxyBypassHosts:
 #    pgRestore: ""
 #    initdb: ""
 #    pgCtl: ""
-#  # What the server (the admin page, #3462) uses.
+#  # The "backup-daemon" compose service (docs/backup.md): take, verify and
+#  # prune on a schedule, and report problems.
+#  schedule:
+#    interval: 24h
+#    # HH:MM in the process time zone (UTC unless TZ is set on the service).
+#    at: "04:00"
+#    keep: 7
+#    verify: true
+#    # Control API for the admin page (plain HTTP). backup-daemon publishes
+#    # no port, so only containers on the compose network reach it (as
+#    # http://backup-daemon:3010); never add ports.
+#    listen: ":3010"
+#  notify:
+#    webhookUrl: "https://hooks.example.com/..."
+#    # generic, discord or slack
+#    format: generic
+#  # What the server (the admin page, #3462) uses. The daemon reads
+#  # serviceToken too.
 #  server:
 #    # Empty type means backup.storage. Set it to give the server a key that
 #    # can only list, read and delete. With a "dir" storage, the server must
@@ -312,7 +330,9 @@ proxyBypassHosts:
 #      type: ""
 #    # Price per GB-month (2^30 bytes) for the monthly estimate. 0 hides it.
 #    pricePerGbMonth: 0
-#    # Control API of `elythia backup daemon` for taking and verifying from
-#    # the admin page. Ignored while serviceToken is empty.
+#    # Control API of `elythia backup daemon` (schedule.listen) for taking
+#    # and verifying from the admin page, e.g. http://backup-daemon:3010.
+#    # Ignored while serviceToken is empty.
 #    serviceUrl: ""
-#    serviceToken: ""
+#    # Shared by the daemon's control API and the main server.
+#    serviceToken: "..."

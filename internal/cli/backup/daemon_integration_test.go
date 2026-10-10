@@ -3,12 +3,16 @@ package backup
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,6 +26,7 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 
 	"github.com/elythia-network/elythia/internal/backup"
+	"github.com/elythia-network/elythia/internal/backup/daemon"
 	"github.com/elythia-network/elythia/internal/cli/migrate"
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/testutil"
@@ -41,6 +46,9 @@ type containerSandbox struct {
 	run        backup.LocalSandbox
 	host       string
 	mappedPort int
+	// removeErr makes RemoveAll fail after removing the directory, to imitate
+	// a cleanup that fails once the verdict is in.
+	removeErr error
 }
 
 func (s containerSandbox) Run(ctx context.Context, cmd backup.SandboxCmd) error {
@@ -61,8 +69,10 @@ func (s containerSandbox) MkdirTemp(ctx context.Context) (string, error) {
 }
 
 func (s containerSandbox) RemoveAll(ctx context.Context, dir string) error {
-	_, err := s.sh(ctx, `rm -rf "$1"`, dir)
-	return err
+	if _, err := s.sh(ctx, `rm -rf "$1"`, dir); err != nil {
+		return err
+	}
+	return s.removeErr
 }
 
 func (s containerSandbox) Server(dir string) backup.SandboxServer {
@@ -73,11 +83,23 @@ func (s containerSandbox) Server(dir string) backup.SandboxServer {
 	return backup.SandboxServer{Options: opts, ToolHost: local.ToolHost, ToolPort: p, Host: s.host, Port: s.mappedPort}
 }
 
-// startDaemonDB starts a PostgreSQL 18 container whose database "elythia"
-// has Elythia's schema, as verify's usable stage requires.
-func startDaemonDB(t *testing.T) (*tcpostgres.PostgresContainer, int64) {
+var (
+	daemonPgOnce sync.Once
+	daemonPgC    *tcpostgres.PostgresContainer
+	daemonPgErr  error
+)
+
+// startDaemonDB starts, once per test binary, a PostgreSQL 18 container whose
+// database "elythia" has Elythia's schema, as verify's usable stage requires.
+func startDaemonDB(t *testing.T) *tcpostgres.PostgresContainer {
 	t.Helper()
 	testutil.SkipIfNoDocker(t)
+	daemonPgOnce.Do(func() { daemonPgC, daemonPgErr = runDaemonDB() })
+	require.NoError(t, daemonPgErr)
+	return daemonPgC
+}
+
+func runDaemonDB() (*tcpostgres.PostgresContainer, error) {
 	ctx := context.Background()
 	c, err := tcpostgres.Run(ctx, "postgres:18-alpine",
 		tcpostgres.WithDatabase("elythia"),
@@ -90,21 +112,26 @@ func startDaemonDB(t *testing.T) (*tcpostgres.PostgresContainer, int64) {
 				WithStartupTimeout(60*time.Second),
 		),
 	)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = c.Terminate(context.Background()) })
-
+	if err != nil {
+		return c, err
+	}
 	core, _, err := migrate.LatestVersion(filepath.Join("..", "..", "..", migrate.CoreDir))
-	require.NoError(t, err)
-	require.NotZero(t, core)
+	if err != nil || core == 0 {
+		return c, fmt.Errorf("bundled migrations: %d, %v", core, err)
+	}
 	url, err := c.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
+	if err != nil {
+		return c, err
+	}
 	db, err := gorm.Open(postgres.Open(url), &gorm.Config{Logger: gormlogger.Default.LogMode(gormlogger.Silent)})
-	require.NoError(t, err)
-	t.Cleanup(func() {
+	if err != nil {
+		return c, err
+	}
+	defer func() {
 		if sqlDB, err := db.DB(); err == nil {
 			_ = sqlDB.Close()
 		}
-	})
+	}()
 	testutil.ApplyMigrations(db)
 	for _, q := range []string{
 		// golang-migrate が当てた後と同じ 1 行にする。
@@ -114,68 +141,106 @@ func startDaemonDB(t *testing.T) (*tcpostgres.PostgresContainer, int64) {
 		`CREATE TABLE daemon_fixture (id int PRIMARY KEY)`,
 		`INSERT INTO daemon_fixture SELECT generate_series(1, 5)`,
 	} {
-		require.NoError(t, db.Exec(q).Error, q)
+		if err := db.Exec(q).Error; err != nil {
+			return c, fmt.Errorf("%s: %w", q, err)
+		}
 	}
-	return c, int64(core)
+	return c, nil
 }
 
-// The daemon takes a backup with backup.Take into a directory storage,
-// verifies it with backup.Verify in a throwaway server, and prunes the old
-// generation, all through the wiring "backup daemon" uses.
-func TestDaemonTakesVerifiesAndPrunesWithRealImplementations(t *testing.T) {
-	c, _ := startDaemonDB(t)
-	ctx := context.Background()
-	dir := markedDir(t)
-	cfgPath := writeConfig(t, c, dirBackupYAML(dir, "  schedule:\n    interval: 24h\n    keep: 1\n    verify: true\n"))
+// daemonRig is the real storage, taker and verifier wiring of "backup daemon"
+// against the daemon test database.
+type daemonRig struct {
+	c       *tcpostgres.PostgresContainer
+	cfgPath string
+	cfg     *config.Config
+	dir     string
+	st      backup.Storage
+	te      env
+	ve      verifyEnv
+}
 
-	te, _, _ := testEnv(c)
-	ve := defaultVerifyEnv()
-	ve.coreDir = filepath.Join("..", "..", "..", migrate.CoreDir)
-	ve.localDir = filepath.Join("..", "..", "..", migrate.LocalDir)
+func newDaemonRig(t *testing.T, removeErr error) *daemonRig {
+	t.Helper()
+	c := startDaemonDB(t)
+	ctx := context.Background()
+	r := &daemonRig{c: c, dir: markedDir(t)}
+	r.cfgPath = writeConfig(t, c, dirBackupYAML(r.dir, "  schedule:\n    interval: 24h\n    keep: 1\n    verify: true\n"))
+	var err error
+	r.te, _, _ = testEnv(c)
+	r.ve = defaultVerifyEnv()
+	r.ve.coreDir = filepath.Join("..", "..", "..", migrate.CoreDir)
+	r.ve.localDir = filepath.Join("..", "..", "..", migrate.LocalDir)
 	host, err := c.Host(ctx)
 	require.NoError(t, err)
 	mapped, err := c.MappedPort(ctx, daemonSandboxPort+"/tcp")
 	require.NoError(t, err)
-	ve.newSandbox = func(b *config.BackupOptions) backup.Sandbox {
+	r.ve.newSandbox = func(b *config.BackupOptions) backup.Sandbox {
 		return containerSandbox{
 			run:        backup.LocalSandbox{Tools: b.Tools, Runner: dockerExecRunner{container: c.GetContainerID(), user: "postgres"}},
 			host:       host,
 			mappedPort: int(mapped.Num()),
+			removeErr:  removeErr,
 		}
 	}
+	r.cfg, err = config.Load(r.cfgPath)
+	require.NoError(t, err)
+	r.st, err = backup.OpenStorage(r.cfg.Backup.Storage)
+	require.NoError(t, err)
+	return r
+}
 
-	// 2 日前の世代を 1 つ置く。起動したとき、最新の世代が間隔より古いので、すぐに取る。
-	cfg, err := config.Load(cfgPath)
+// take stores a generation made age ago.
+func (r *daemonRig) take(t *testing.T, age time.Duration) *backup.Meta {
+	t.Helper()
+	opts, err := takeOptions(r.te, r.cfg, r.st, discardLogger())
 	require.NoError(t, err)
-	st, err := backup.OpenStorage(cfg.Backup.Storage)
+	opts.Now = func() time.Time { return time.Now().Add(-age) }
+	m, err := backup.Take(context.Background(), opts)
 	require.NoError(t, err)
-	oldOpts, err := takeOptions(te, cfg, st, discardLogger())
-	require.NoError(t, err)
-	oldOpts.Now = func() time.Time { return time.Now().Add(-48 * time.Hour) }
-	old, err := backup.Take(ctx, oldOpts)
-	require.NoError(t, err)
+	return m
+}
 
+// runUntil runs the daemon until done reports true, then stops it and
+// returns its log.
+func (r *daemonRig) runUntil(t *testing.T, done func([]backup.Generation) bool) ([]backup.Generation, string) {
+	t.Helper()
+	ctx := context.Background()
 	var stderr syncBuffer
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	e := daemonEnv{
 		stderr:        &stderr,
 		loadConfig:    config.Load,
-		openDeps:      wireDeps(te, ve),
+		openDeps:      wireDeps(r.te, r.ve),
 		signalContext: func() (context.Context, context.CancelFunc) { return runCtx, cancel },
 		listen:        func(addr string) (net.Listener, error) { return net.Listen("tcp", addr) },
 		location:      time.UTC,
 	}
 	code := make(chan int, 1)
-	go func() { code <- runDaemon(e, []string{"-config", cfgPath}) }()
-
+	go func() { code <- runDaemon(e, []string{"-config", r.cfgPath}) }()
 	var gens []backup.Generation
 	require.Eventually(t, func() bool {
-		gens, err = backup.ListGenerations(ctx, st)
-		return err == nil && len(gens) == 1 && gens[0].ID != old.ID && gens[0].Verify != nil
-	}, 3*time.Minute, 200*time.Millisecond, "a new verified generation replaces the old one; log:\n%s", &stderr)
+		var err error
+		gens, err = backup.ListGenerations(ctx, r.st)
+		return err == nil && done(gens)
+	}, 3*time.Minute, 200*time.Millisecond, "log:\n%s", &stderr)
 	cancel()
 	require.Equal(t, 0, <-code, stderr.String())
+	return gens, stderr.String()
+}
+
+// The daemon takes a backup with backup.Take into a directory storage,
+// verifies it with backup.Verify in a throwaway server, and prunes the old
+// generation, all through the wiring "backup daemon" uses.
+func TestDaemonTakesVerifiesAndPrunesWithRealImplementations(t *testing.T) {
+	r := newDaemonRig(t, nil)
+	ctx := context.Background()
+	// 2 日前の世代を 1 つ置く。起動したとき、最新の世代が間隔より古いので、すぐに取る。
+	old := r.take(t, 48*time.Hour)
+	gens, log := r.runUntil(t, func(gens []backup.Generation) bool {
+		return len(gens) == 1 && gens[0].ID != old.ID && gens[0].Verify != nil
+	})
 
 	g := gens[0]
 	assert.True(t, g.Complete())
@@ -183,15 +248,99 @@ func TestDaemonTakesVerifiesAndPrunesWithRealImplementations(t *testing.T) {
 	assert.True(t, g.Verify.OK, "%+v", g.Verify)
 	assert.Equal(t, int64(5), g.Meta.RowCounts["public.daemon_fixture"])
 	assert.Empty(t, g.Verify.Mismatches)
-	log := stderr.String()
 	assert.Contains(t, log, "backup: deleted an old generation")
 	assert.Contains(t, log, "generation="+old.ID)
 	assert.NotContains(t, log, "level=ERROR")
 	// 使い捨てのサーバーは残らない。
-	sb := ve.newSandbox(cfg.Backup).(containerSandbox)
+	sb := r.ve.newSandbox(r.cfg.Backup).(containerSandbox)
 	out, err := sb.sh(ctx, `ls -d /tmp/verify-* 2>/dev/null || true`)
 	require.NoError(t, err)
 	assert.Empty(t, strings.TrimSpace(out))
-	_, err = os.Stat(filepath.Join(dir, backup.DirMarkerFile))
+	_, err = os.Stat(filepath.Join(r.dir, backup.DirMarkerFile))
 	require.NoError(t, err, "pruning never touches the marker")
+}
+
+// 実物の backup.Verify は、判定の後に後始末が失敗すると、3 段が全て通っていても
+// OK を false にし、verify.json を書かずに誤りと一緒に返す。daemon のテストの偽物
+// (internal/backup/daemon の fakeVerifier.afterErr) はこの形を真似ているので、
+// 実物がこの形であることをここで確かめる。
+func TestRealVerifyCleanupFailureShape(t *testing.T) {
+	r := newDaemonRig(t, errors.New("rm: device busy"))
+	m := r.take(t, time.Hour)
+	vopts, err := verifyOptions(r.ve, r.cfg.Backup)
+	require.NoError(t, err)
+	res, err := backup.Verify(context.Background(), r.st, m.ID, vopts)
+	require.ErrorContains(t, err, "device busy")
+	require.Len(t, res.Stages, 3)
+	for _, s := range res.Stages {
+		assert.True(t, s.OK, "%+v", s)
+		assert.False(t, s.Skipped)
+	}
+	assert.False(t, res.OK, "the real Verify reports OK false when cleaning up fails")
+	_, err = backup.ReadVerify(context.Background(), r.st, m.ID)
+	require.ErrorIs(t, err, backup.ErrNotFound, "and stores no verify.json")
+}
+
+// 後始末に失敗しても、通った世代は ok:true として残り、整理まで進む (H-1)。
+func TestDaemonKeepsPassingVerdictWhenRealCleanupFails(t *testing.T) {
+	r := newDaemonRig(t, errors.New("rm: device busy"))
+	old := r.take(t, 48*time.Hour)
+	gens, log := r.runUntil(t, func(gens []backup.Generation) bool {
+		return len(gens) == 1 && gens[0].ID != old.ID && gens[0].Verify != nil
+	})
+	require.NotNil(t, gens[0].Verify)
+	assert.True(t, gens[0].Verify.OK, "%+v", gens[0].Verify)
+	assert.Contains(t, log, "verification reached a verdict but did not finish cleanly")
+	assert.Contains(t, log, "device busy")
+}
+
+// cancelBeforeRestore cancels the daemon's context just before pg_restore
+// loads the dump, as a SIGTERM during verification would.
+type cancelBeforeRestore struct {
+	containerSandbox
+	cancel context.CancelFunc
+}
+
+func (s cancelBeforeRestore) Run(ctx context.Context, cmd backup.SandboxCmd) error {
+	if cmd.Program == "pg_restore" && !slices.Contains(cmd.Args, "--list") {
+		s.cancel()
+	}
+	return s.containerSandbox.Run(ctx, cmd)
+}
+
+// 止める途中で切れた検証は、判定として verify.json に残さない (M-1)。
+func TestDaemonInterruptedRealVerificationLeavesNoVerdict(t *testing.T) {
+	r := newDaemonRig(t, nil)
+	m := r.take(t, time.Hour)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sb := r.ve.newSandbox(r.cfg.Backup).(containerSandbox)
+	vopts, err := verifyOptions(r.ve, r.cfg.Backup)
+	require.NoError(t, err)
+	vopts.Sandbox = cancelBeforeRestore{containerSandbox: sb, cancel: cancel}
+	var logs syncBuffer
+	d := daemon.New(daemon.Options{Storage: r.st, Verifier: verifier{st: r.st, opts: vopts, verify: backup.Verify},
+		Logger: slog.New(slog.NewTextHandler(&logs, nil))})
+	done := make(chan struct{})
+	go func() {
+		d.Run(ctx)
+		close(done)
+	}()
+	require.Eventually(t, func() bool {
+		_, err := d.Start(daemon.JobVerify, m.ID)
+		return err == nil
+	}, 10*time.Second, 10*time.Millisecond)
+	select {
+	case <-done:
+	case <-time.After(3 * time.Minute):
+		t.Fatalf("the verification was never interrupted; log:\n%s", &logs)
+	}
+	_, err = backup.ReadVerify(context.Background(), r.st, m.ID)
+	require.ErrorIs(t, err, backup.ErrNotFound, "an interrupted verification leaves no verdict; log:\n%s", &logs)
+	st := d.Status()
+	require.NotNil(t, st.LastVerify)
+	assert.Contains(t, st.LastVerify.Error, "interrupted")
+	out, err := sb.sh(context.Background(), `ls -d /tmp/verify-* 2>/dev/null || true`)
+	require.NoError(t, err)
+	assert.Empty(t, strings.TrimSpace(out), "the throwaway server is still removed")
 }

@@ -219,7 +219,7 @@ services:
   # `elythia backup daemon` を動かす。設定の backup.schedule の間隔で取って・確かめて・
   # 古い世代を消し、失敗・食い違い・遅れを backup.notify へ知らせる。手順は
   # docs/backup.md の「定期実行」。使うときだけ profile を有効にする:
-  #   docker compose -f compose.uds.yaml --profile backup-daemon up -d backup-daemon
+  #   docker compose -f compose.uds.yaml --profile backup-daemon up -d --no-deps backup-daemon
   # backup と別のサービスにしているのは、backup が `run --rm` で呼ぶ 1 回きりの
   # もの (restart: "no") で、常駐には restart: unless-stopped が要るため。名前が
   # 固定なので、本体の backup.server.serviceUrl に http://backup-daemon:3010 と書ける。
@@ -229,12 +229,12 @@ services:
     <<: *backup-service
     profiles: ["backup-daemon"]
     command: ["daemon"]
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      # backup.schedule.at はこのタイムゾーンで読む。
-      TZ: Asia/Tokyo
+    # depends_on を書かない (backup と同じ理由で、`up` が DB のコンテナを作り直しうる)。
+    # DB の起動は daemon が取る前に待つ (最大 5 分)。`up -d --no-deps` で起動する。
+    # backup.schedule.at はプロセスのタイムゾーンで読む。既定は UTC。変えるときは
+    # 次のコメントを外す。
+    # environment:
+    #   TZ: Asia/Tokyo
     restart: unless-stopped
 
   nginx:

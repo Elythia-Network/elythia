@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"filippo.io/age"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -134,6 +135,9 @@ func TestWireDepsErrors(t *testing.T) {
 			ve.coreDir = filepath.Join(t.TempDir(), "none")
 		}, "bundled migrations"},
 		{"identity file", config.BackupOptions{Storage: dirStorage, Encryption: config.BackupEncryptionOptions{IdentityFile: filepath.Join(t.TempDir(), "none")}}, nil, "identityFile"},
+		{"verify without identity file", config.BackupOptions{Storage: dirStorage,
+			Encryption: config.BackupEncryptionOptions{Enabled: true, Recipients: []string{testRecipient(t)}},
+			Schedule:   config.BackupScheduleOptions{Verify: true}}, nil, "needs backup.encryption.identityFile"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			te := defaultEnv()
@@ -184,8 +188,13 @@ func TestWireDepsBuildsTakerAndVerifier(t *testing.T) {
 	require.NoError(t, err)
 	require.IsType(t, &backupkit.DirStorage{}, deps.Storage)
 
-	// 取る処理は backup.Take を、設定の pg_dump で呼ぶ。
-	_, err = deps.Taker.Take(context.Background())
+	// 取る処理は backup.Take を、設定の pg_dump で呼ぶ。DB を待つのは別のテストで見る。
+	tk, ok := deps.Taker.(taker)
+	require.True(t, ok)
+	require.NotNil(t, tk.ping)
+	assert.Equal(t, defaultDBWait, tk.dbWait)
+	tk.dbWait = 0
+	_, err = tk.Take(context.Background())
 	require.Error(t, err)
 	require.NotEmpty(t, ran)
 	assert.Equal(t, "/opt/pg/pg_dump", ran[0])
@@ -199,6 +208,85 @@ func TestWireDepsBuildsTakerAndVerifier(t *testing.T) {
 	assert.Same(t, deps.Storage, gotStorage)
 	assert.Equal(t, backupkit.BundledMigrations{Core: 9}, gotOpts.Bundled)
 	assert.Equal(t, backupkit.LocalSandbox{Tools: b.Tools}, gotOpts.Sandbox)
+}
+
+func testRecipient(t *testing.T) string {
+	t.Helper()
+	id, err := age.GenerateX25519Identity()
+	require.NoError(t, err)
+	return id.Recipient().String()
+}
+
+// pingSeq returns errors from errs in order, then nil.
+type pingSeq struct {
+	mu    sync.Mutex
+	errs  []error
+	calls int
+}
+
+func (p *pingSeq) ping(context.Context) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.calls++
+	if len(p.errs) == 0 {
+		return nil
+	}
+	err := p.errs[0]
+	p.errs = p.errs[1:]
+	return err
+}
+
+func TestTakerWaitsForDatabase(t *testing.T) {
+	var ran []string
+	run := recordingRunner{names: &ran}
+	opts := backupkit.TakeOptions{Storage: emptyStorage{}, Dump: backupkit.DumpConn{URI: "postgresql://x@localhost/x"}, Runner: run}
+	var logs syncBuffer
+	opts.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+
+	// 2 回繋がらず、3 回目で繋がってから取りにいく。
+	p := &pingSeq{errs: []error{errors.New("refused"), errors.New("refused")}}
+	tk := taker{opts: opts, ping: p.ping, dbWait: time.Hour, retry: time.Millisecond, now: time.Now}
+	_, err := tk.Take(context.Background())
+	require.Error(t, err, "the fake pg_dump fails")
+	assert.Equal(t, 3, p.calls)
+	assert.Len(t, ran, 1, "the take runs once the database answers")
+	assert.Contains(t, logs.String(), "waiting for the database")
+
+	// 待ちきれなければ、そのまま取りにいく (失敗として知らせるため)。
+	ran = nil
+	p = &pingSeq{errs: []error{errors.New("refused"), errors.New("refused"), errors.New("refused")}}
+	clock := time.Now()
+	tk = taker{opts: opts, ping: p.ping, dbWait: 2 * time.Second, retry: time.Millisecond, now: func() time.Time {
+		clock = clock.Add(time.Second)
+		return clock
+	}}
+	_, err = tk.Take(context.Background())
+	require.Error(t, err)
+	assert.Len(t, ran, 1)
+	assert.Contains(t, logs.String(), "still does not accept connections")
+
+	// ctx が切れたら待たない。
+	ran = nil
+	p = &pingSeq{errs: []error{errors.New("refused")}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	tk = taker{opts: opts, ping: p.ping, dbWait: time.Hour, retry: time.Hour, now: time.Now}
+	_, err = tk.Take(ctx)
+	require.Error(t, err)
+	assert.Equal(t, 1, p.calls)
+
+	// Logger が無くても落ちない。
+	tk = taker{opts: backupkit.TakeOptions{Storage: emptyStorage{}}, ping: (&pingSeq{errs: []error{errBoomCLI}}).ping, dbWait: 0, now: time.Now}
+	_, err = tk.Take(context.Background())
+	require.Error(t, err)
+}
+
+var errBoomCLI = errors.New("boom")
+
+func TestNewTakerPingsTheDatabase(t *testing.T) {
+	tk := newTaker(backupkit.TakeOptions{DatabaseURL: "postgres://x:y@127.0.0.1:1/x?sslmode=disable&connect_timeout=1"})
+	require.Error(t, tk.ping(context.Background()))
+	assert.Equal(t, defaultDBRetry, tk.retry)
 }
 
 func TestDefaultDaemonEnv(t *testing.T) {
