@@ -22,6 +22,8 @@ type memStorage struct {
 	mu      sync.Mutex
 	objects map[string][]byte
 	deleted []string
+	// puts records the keys written through Put.
+	puts []string
 	// listErr / getErr / deleteErr / statErr / putErr make the next calls
 	// fail.
 	listErr, getErr, deleteErr, statErr, putErr error
@@ -39,6 +41,7 @@ func (m *memStorage) Put(_ context.Context, key string, r io.Reader) error {
 	if m.putErr != nil {
 		return m.putErr
 	}
+	m.puts = append(m.puts, key)
 	m.objects[key] = b
 	return nil
 }
@@ -176,6 +179,10 @@ func (f *fakeTaker) callTimes() []time.Time {
 	return append([]time.Time(nil), f.calls...)
 }
 
+// restorableError is what a failed restorable stage carries: pg_restore's
+// stderr, which can quote row values.
+const restorableError = `pg_restore: error: COPY failed for table "user_keypair": CONTEXT: COPY user_keypair, line 1: "SECRET-KEY-MATERIAL"`
+
 // fakeVerifier writes verify.json with the configured outcome.
 type fakeVerifier struct {
 	st   *memStorage
@@ -184,22 +191,37 @@ type fakeVerifier struct {
 	fail bool // OK false with a mismatch
 	err  error
 	// afterErr returns a verdict for all three stages together with this
-	// error and stores no verify.json, as backup.Verify does when cleaning
-	// up after the verdict fails.
+	// error, OK false and no verify.json, as backup.Verify does when cleaning
+	// up after the verdict fails (TestRealVerifyCleanupFailureShape in
+	// internal/cli/backup checks the real one has this shape).
 	afterErr error
 	block    chan struct{}
+	// cancelWrites makes a cancelled verification store verify.json with
+	// ok:false and return no error, as backup.Verify does when pg_restore is
+	// killed by the cancelled context.
+	cancelWrites bool
 }
 
 func (f *fakeVerifier) Verify(ctx context.Context, id string) (backup.VerifyResult, error) {
 	f.mu.Lock()
 	f.ids = append(f.ids, id)
-	fail, err, afterErr, block := f.fail, f.err, f.afterErr, f.block
+	fail, err, afterErr, block, cancelWrites := f.fail, f.err, f.afterErr, f.block, f.cancelWrites
 	f.mu.Unlock()
 	if block != nil {
 		select {
 		case <-block:
 		case <-ctx.Done():
-			return backup.VerifyResult{}, ctx.Err()
+			if !cancelWrites {
+				return backup.VerifyResult{}, ctx.Err()
+			}
+			res := backup.VerifyResult{ID: id, Stages: []backup.StageResult{
+				{Stage: backup.StageReadable, OK: true},
+				{Stage: backup.StageRestorable, Error: "pg_restore: context canceled"},
+				{Stage: backup.StageUsable, Skipped: true},
+			}}
+			b, _ := json.Marshal(res)
+			f.st.set(backup.Key(id, backup.VerifyFile), b)
+			return res, nil
 		}
 	}
 	if err != nil {
@@ -208,7 +230,7 @@ func (f *fakeVerifier) Verify(ctx context.Context, id string) (backup.VerifyResu
 	res := backup.VerifyResult{ID: id, OK: !fail, Stages: []backup.StageResult{{Stage: backup.StageReadable, OK: true}}}
 	if fail {
 		res.Stages = append(res.Stages,
-			backup.StageResult{Stage: backup.StageRestorable, OK: false, Error: "row counts differ"},
+			backup.StageResult{Stage: backup.StageRestorable, OK: false, Error: restorableError},
 			backup.StageResult{Stage: backup.StageUsable, Skipped: true})
 		res.Mismatches = []backup.RowMismatch{{Table: "public.note", Expected: 10, Actual: 9}}
 	} else if afterErr != nil {
@@ -217,6 +239,7 @@ func (f *fakeVerifier) Verify(ctx context.Context, id string) (backup.VerifyResu
 			backup.StageResult{Stage: backup.StageUsable, OK: true})
 	}
 	if afterErr != nil {
+		res.OK = false
 		return res, afterErr
 	}
 	b, _ := json.Marshal(res)
@@ -235,13 +258,24 @@ type recNotifier struct {
 	mu     sync.Mutex
 	events []Event
 	err    error
+	// block, when set, is waited on after recording an event of kind
+	// blockKind.
+	block     chan struct{}
+	blockKind EventKind
 }
 
-func (r *recNotifier) Notify(_ context.Context, e Event) error {
+func (r *recNotifier) Notify(ctx context.Context, e Event) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.events = append(r.events, e)
-	return r.err
+	err, block := r.err, r.block
+	r.mu.Unlock()
+	if block != nil && e.Kind == r.blockKind {
+		select {
+		case <-block:
+		case <-ctx.Done():
+		}
+	}
+	return err
 }
 
 func (r *recNotifier) kinds() []EventKind {

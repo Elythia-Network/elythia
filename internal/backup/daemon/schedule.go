@@ -103,7 +103,13 @@ func (s *Schedule) AtString() string {
 func (s *Schedule) Start(now time.Time, latest *time.Time) time.Time {
 	catchUp := latest == nil || now.Sub(*latest) >= s.Interval
 	if s.HasAt {
-		local := now.In(s.Location)
+		// 枠の起点は、最新の世代を取った日の At にする。再起動した日を起点にすると、
+		// 2 日以上の間隔では再起動のたびに枠がずれ、間隔が開いて遅れの通知も出る。
+		base := now
+		if !catchUp {
+			base = *latest
+		}
+		local := base.In(s.Location)
 		s.anchor = time.Date(local.Year(), local.Month(), local.Day(), s.Hour, s.Minute, 0, 0, s.Location)
 		if catchUp {
 			return now

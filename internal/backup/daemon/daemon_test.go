@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"testing/synctest"
@@ -144,7 +145,7 @@ func TestDaemonKeepsOldGenerationsUntilNewOnesVerify(t *testing.T) {
 		assert.Equal(t, failedC, ev[0].GenerationID)
 		assert.Equal(t, "https://example.tld", ev[0].Instance)
 		assert.Equal(t, []backup.RowMismatch{{Table: "public.note", Expected: 10, Actual: 9}}, ev[0].Mismatches)
-		assert.Equal(t, []backup.StageResult{{Stage: backup.StageRestorable, Error: "row counts differ"}}, ev[0].FailedStages, "skipped stages are not reported as failures")
+		assert.Equal(t, []backup.StageResult{{Stage: backup.StageRestorable, Error: stageSummary(backup.StageRestorable)}}, ev[0].FailedStages, "skipped stages are not reported as failures")
 		st := r.d.Status()
 		assert.False(t, st.LastTake.OK)
 		assert.Equal(t, "verify", st.LastTake.Stage)
@@ -242,7 +243,7 @@ func TestDaemonKeepsVerdictWhenCleanupFails(t *testing.T) {
 		assert.Equal(t, EventMismatch, ev[0].Kind, "a broken generation is reported as a mismatch, not only as a cleanup failure")
 		assert.Equal(t, broken, ev[0].GenerationID)
 		assert.Equal(t, []backup.RowMismatch{{Table: "public.note", Expected: 10, Actual: 9}}, ev[0].Mismatches)
-		assert.Equal(t, []backup.StageResult{{Stage: backup.StageRestorable, Error: "row counts differ"}}, ev[0].FailedStages)
+		assert.Equal(t, []backup.StageResult{{Stage: backup.StageRestorable, Error: stageSummary(backup.StageRestorable)}}, ev[0].FailedStages)
 		assert.Equal(t, EventFailure, ev[1].Kind)
 		assert.Equal(t, "verify", ev[1].Stage)
 		assert.Contains(t, ev[1].Message, "server did not shut down")
@@ -305,6 +306,181 @@ func TestJudged(t *testing.T) {
 	assert.False(t, judged(backup.VerifyResult{Stages: three[:2]}))
 	assert.False(t, judged(backup.VerifyResult{}))
 	assert.False(t, judged(backup.VerifyResult{Stages: []backup.StageResult{three[0], three[2], three[1]}}))
+}
+
+// 検証に落ちた回は整理しない。keep: 1 で使える世代が 2 つあると、整理すれば古い方が
+// 消えるので、消えていないことで整理が走らなかったと分かる。
+func TestDaemonDoesNotPruneAfterFailedVerification(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := mustSchedule(t, config.BackupScheduleOptions{Interval: "24h", Keep: 1, Verify: true, DelayAfter: "240h"}, time.UTC)
+		var a, b string
+		r := newRig(t, s, func(r *rig) {
+			a = r.st.addGeneration(at(-3, 0), true, "ok")
+			b = r.st.addGeneration(at(-2, 0), true, "ok")
+			r.ver.fail = true
+		})
+		r.start(t)
+		require.Len(t, r.taker.callTimes(), 1)
+		assert.Equal(t, []string{a, b, backup.NewID(epoch)}, r.st.ids())
+		assert.Empty(t, r.d.Status().LastTake.Deleted)
+		r.stop()
+	})
+}
+
+// 外へ送る通知に、段の誤り (pg_restore の stderr) を載せない。
+func TestDaemonMismatchNotificationOmitsStageErrors(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := mustSchedule(t, config.BackupScheduleOptions{Interval: "24h", Keep: 1, Verify: true, DelayAfter: "240h"}, time.UTC)
+		r := newRig(t, s, func(r *rig) { r.ver.fail = true })
+		r.start(t)
+		ev := r.notify.all()
+		require.Len(t, ev, 1)
+		require.Equal(t, EventMismatch, ev[0].Kind)
+		body, err := json.Marshal(ev[0])
+		require.NoError(t, err)
+		assert.NotContains(t, string(body), "SECRET-KEY-MATERIAL")
+		assert.NotContains(t, ev[0].Text(), "SECRET-KEY-MATERIAL")
+		// verify.json には詳細が残る。
+		v, err := backup.ReadVerify(context.Background(), r.st, backup.NewID(epoch))
+		require.NoError(t, err)
+		assert.Equal(t, restorableError, v.Stages[1].Error)
+		r.stop()
+	})
+}
+
+// 止める途中で切れた検証は判定として残さず、前の verify.json に戻す。
+func TestDaemonInterruptedVerificationKeepsPreviousResult(t *testing.T) {
+	for _, prev := range []string{"ok", ""} {
+		t.Run("previous="+prev, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				var id string
+				r := newRig(t, nil, func(r *rig) {
+					id = r.st.addGeneration(at(-1, 0), true, prev)
+					r.ver.block = make(chan struct{})
+					r.ver.cancelWrites = true
+				})
+				before, err := readObject(context.Background(), r.st, backup.Key(id, backup.VerifyFile))
+				require.NoError(t, err)
+				r.start(t)
+				_, err = r.d.Start(JobVerify, id)
+				require.NoError(t, err)
+				synctest.Wait()
+				r.stop()
+				after, err := readObject(context.Background(), r.st, backup.Key(id, backup.VerifyFile))
+				require.NoError(t, err)
+				assert.Equal(t, before, after, "verify.json is as it was before the interrupted verification")
+				assert.Empty(t, r.notify.all(), "an interruption is neither a mismatch nor a failure")
+				st := r.d.Status()
+				require.NotNil(t, st.LastVerify)
+				assert.False(t, st.LastVerify.OK)
+				assert.Contains(t, st.LastVerify.Error, "interrupted")
+				assert.Nil(t, st.LastVerify.Verify)
+			})
+		})
+	}
+}
+
+// 前の verify.json が読めなければ、戻さずにそのままにする。
+func TestDaemonInterruptedVerificationWithUnreadablePrevious(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var id string
+		r := newRig(t, nil, func(r *rig) {
+			id = r.st.addGeneration(at(-1, 0), true, "ok")
+			r.ver.block = make(chan struct{})
+			r.ver.cancelWrites = true
+		})
+		r.start(t)
+		r.st.mu.Lock()
+		r.st.getErr = errBoom
+		r.st.mu.Unlock()
+		_, err := r.d.Start(JobVerify, id)
+		require.NoError(t, err)
+		synctest.Wait()
+		r.stop()
+		r.st.mu.Lock()
+		defer r.st.mu.Unlock()
+		assert.Empty(t, r.st.puts, "nothing is written back")
+		assert.Empty(t, r.st.deleted, "nothing is deleted")
+	})
+}
+
+// 最新の使える世代が手で確かめ直されて使えなくなったら、遅れの起点を 1 つ前の
+// 使える世代へ戻し、それがもう遅れならすぐに知らせる。
+func TestDaemonDelayBaseFollowsInvalidatedGeneration(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := mustSchedule(t, config.BackupScheduleOptions{Interval: "24h", DelayAfter: "48h"}, time.UTC)
+		var old, newest string
+		r := newRig(t, s, func(r *rig) {
+			old = r.st.addGeneration(at(-3, 0), true, "ok")
+			newest = r.st.addGeneration(at(0, 0).Add(-time.Hour), true, "ok")
+		})
+		r.start(t)
+		require.Empty(t, r.notify.all())
+		require.Equal(t, newest, r.d.Status().LatestUsable.ID)
+		r.ver.mu.Lock()
+		r.ver.fail = true
+		r.ver.mu.Unlock()
+		_, err := r.d.Start(JobVerify, newest)
+		require.NoError(t, err)
+		synctest.Wait()
+		st := r.d.Status()
+		assert.Equal(t, old, st.LatestUsable.ID)
+		assert.True(t, st.Overdue)
+		time.Sleep(time.Second)
+		synctest.Wait()
+		var delays []Event
+		for _, e := range r.notify.all() {
+			if e.Kind == EventDelay {
+				delays = append(delays, e)
+			}
+		}
+		require.Len(t, delays, 1, "the older usable generation is already overdue")
+		assert.Equal(t, old, delays[0].GenerationID)
+		r.stop()
+	})
+}
+
+// 遅れの通知が送り終わらなくても、次の枠は止まらない。
+func TestDaemonDelayNotificationDoesNotBlockSchedule(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := mustSchedule(t, config.BackupScheduleOptions{Interval: "24h", DelayAfter: "24h"}, time.UTC)
+		r := newRig(t, s, func(r *rig) {
+			r.st.addGeneration(at(-2, 0), true, "")
+			r.taker.err = errBoom
+			r.notify.block = make(chan struct{})
+			r.notify.blockKind = EventDelay
+		})
+		r.start(t)
+		require.Contains(t, r.notify.kinds(), EventDelay)
+		time.Sleep(24*time.Hour + time.Second)
+		synctest.Wait()
+		assert.Len(t, r.taker.callTimes(), 2, "the next slot runs while the delay notification hangs")
+		close(r.notify.block)
+		r.stop()
+	})
+}
+
+// 使える世代があって取るのに失敗し続けるときも、遅れは delayAfter ごとにだけ知らせ、
+// 失敗のたびに数え直さない。
+func TestDaemonDoesNotRepeatDelayOnEachFailure(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := mustSchedule(t, config.BackupScheduleOptions{Interval: "24h", DelayAfter: "36h"}, time.UTC)
+		r := newRig(t, s, func(r *rig) {
+			r.st.addGeneration(at(-2, 0), true, "")
+			r.taker.err = errBoom
+		})
+		r.start(t)
+		time.Sleep(3*24*time.Hour - time.Second)
+		synctest.Wait()
+		var delays []time.Time
+		for _, e := range r.notify.all() {
+			if e.Kind == EventDelay {
+				delays = append(delays, e.OccurredAt)
+			}
+		}
+		assert.Equal(t, []time.Time{at(0, 0), at(1, 0), at(2, 12)}, delays)
+		r.stop()
+	})
 }
 
 func TestDaemonReportsDelay(t *testing.T) {
