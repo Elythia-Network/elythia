@@ -1474,14 +1474,20 @@ func (p *Processor) handleAccept(act genericActivity) error {
 		}
 	}
 	var inner genericActivity
-	// 型エラーを握らないと、直後の normalizeActor (#999) が救うはずの
-	// `inner.actor` が embedded object のケースに**到達できない** (#2662)。
-	if err := unmarshalIgnoringTypeErrors(act.Object, &inner); err != nil {
-		// objectが文字列（Follow IDのURI）の場合もあるが、現状はnilで許容
+	if f, ok := p.localFollowFromID(act.Object, act.Actor); ok {
+		// object が Follow の id だけの文字列 (#3491)。本家 ApInboxService.accept は
+		// resolver で id を解決し、自インスタンスの `/follows/` は follow request から
+		// Follow を組み直す。ここで組み直さないと、id だけの Accept を返す相手への
+		// フォローがずっと申請中のまま残る。
+		inner = f
+	} else if err := unmarshalIgnoringTypeErrors(act.Object, &inner); err != nil {
+		// 型エラーを握らないと、直後の normalizeActor (#999) が救うはずの
+		// `inner.actor` が embedded object のケースに**到達できない** (#2662)。
 		return nil
+	} else {
+		// inner.actor が embedded object のケースも救済する (#999 / upstream #17340)。
+		inner.normalizeActor(act.Object)
 	}
-	// inner.actor が embedded object のケースも救済する (#999 / upstream #17340)。
-	inner.normalizeActor(act.Object)
 	// chat room invitation の Accept (remote が我々の room 招待を承認) は
 	// membership 化する (#1203)。
 	if strings.EqualFold(inner.Type, "invite") {
@@ -2595,13 +2601,17 @@ func (p *Processor) handleReject(act genericActivity) error {
 		}
 	}
 	var inner genericActivity
-	// 型エラーを握らないと、直後の normalizeActor (#999) が救うはずの
-	// `inner.actor` が embedded object のケースに**到達できない** (#2662)。
-	if err := unmarshalIgnoringTypeErrors(act.Object, &inner); err != nil {
+	if f, ok := p.localFollowFromID(act.Object, act.Actor); ok {
+		// object が Follow の id だけの文字列 (#3491、handleAccept と同じ)。
+		inner = f
+	} else if err := unmarshalIgnoringTypeErrors(act.Object, &inner); err != nil {
+		// 型エラーを握らないと、直後の normalizeActor (#999) が救うはずの
+		// `inner.actor` が embedded object のケースに**到達できない** (#2662)。
 		return fmt.Errorf("invalid reject object: %w", err)
+	} else {
+		// inner.actor が embedded object のケースも救済する (#999 / upstream #17340)。
+		inner.normalizeActor(act.Object)
 	}
-	// inner.actor が embedded object のケースも救済する (#999 / upstream #17340)。
-	inner.normalizeActor(act.Object)
 	// chat room invitation の Reject (remote が我々の room 招待を辞退) は
 	// pending invitation を削除する (#1203)。
 	if strings.EqualFold(inner.Type, "invite") {
@@ -3132,6 +3142,45 @@ func readApHref(raw json.RawMessage) string {
 		return obj.Href
 	}
 	return ""
+}
+
+// localFollowFromID rebuilds the Follow an Accept / Reject refers to when its
+// object is only the id of a Follow this instance sent: a relay follow
+// (`/activities/follow-relay/<id>`) or a user follow (`/follows/<followerID>/
+// <hash of the followee URI>`, URLBuilder.FollowURI). For a user follow the id
+// must be the one this instance would have sent to actorURI, so a remote actor
+// can only answer follows addressed to itself.
+//
+// 本家 ApResolverService.resolveLocal の `follows` と同じく、id から Follow を
+// 組み直す。follower は id のパスから取り、その利用者がローカルに居るかは
+// 呼び出し側の userFromAPID が確かめる。本家の形の id (`/follows/<申請の id>`、
+// TS 版から移行した時点で申請中だったもの) は引けないので扱わない
+// (docs/divergence/federation.md)。relay の id だけの Accept / Reject は本家では
+// 解決に失敗するが、こちらは relayStatusChangeAllowed を通したうえで受ける。
+func (p *Processor) localFollowFromID(object json.RawMessage, actorURI string) (genericActivity, bool) {
+	if p.localBaseURL == "" {
+		return genericActivity{}, false
+	}
+	var id string
+	if json.Unmarshal(object, &id) != nil || id == "" {
+		return genericActivity{}, false
+	}
+	if matchFollowRelayID(id, p.localBaseURL) != "" {
+		return genericActivity{Type: "Follow", ID: id}, true
+	}
+	rest, ok := strings.CutPrefix(id, p.localBaseURL+"/follows/")
+	if !ok {
+		return genericActivity{}, false
+	}
+	followerID, _, ok := strings.Cut(rest, "/")
+	if !ok || followerID == "" {
+		return genericActivity{}, false
+	}
+	urls := activitypub.NewURLBuilder(p.localBaseURL)
+	if urls.FollowURI(followerID, actorURI) != id {
+		return genericActivity{}, false
+	}
+	return genericActivity{Type: "Follow", ID: id, Actor: urls.UserURI(followerID)}, true
 }
 
 // readActorString reads an activity's actor field, supporting both string and

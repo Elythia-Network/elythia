@@ -268,6 +268,63 @@ func (h *stubFederationHook) OnLocalFollowAccepted(follower, followee *model.Use
 	h.accepted = append(h.accepted, follower.ID+"->"+followee.ID)
 }
 
+// ローカルからリモート (鍵でない) へのフォローは、相手の Accept が届くまで申請に
+// なる (#3491、本家 UserFollowingService.follow の 3 つ目の OR 条件)。Follow は
+// 送り、Accept (AcceptRequest) で成立する。
+func TestFollow_LocalToRemote_WaitsForAccept(t *testing.T) {
+	svc, userRepo, fRepo, frRepo := newSvc(t)
+	addUser(t, userRepo, "alice", false)
+	remote := addUser(t, userRepo, "remote_bob", false)
+	host := "remote.example"
+	remote.Host = &host
+	fed := &stubFederationHook{}
+	svc.SetFederationHook(fed)
+
+	res, err := svc.Follow("alice", "remote_bob", following.FollowOptions{})
+	require.NoError(t, err)
+	require.NotNil(t, res.Request, "a follow to a remote user did not become a request")
+	exists, err := fRepo.Exists("alice", "remote_bob")
+	require.NoError(t, err)
+	assert.False(t, exists, "following was created before the remote Accept")
+	assert.Equal(t, []string{"alice->remote_bob"}, fed.followed, "the Follow activity is still delivered")
+
+	require.NoError(t, svc.AcceptRequest("remote_bob", "alice"))
+	exists, err = fRepo.Exists("alice", "remote_bob")
+	require.NoError(t, err)
+	assert.True(t, exists, "the Accept did not establish the follow")
+	pending, err := frRepo.Exists("alice", "remote_bob")
+	require.NoError(t, err)
+	assert.False(t, pending, "the request was left behind after the Accept")
+}
+
+// 本家の backend e2e と同じ切り替え (FORCE_FOLLOW_REMOTE_USER_FOR_TESTING=true) の
+// ときは即座に成立する。ローカル同士は今までどおり即座に成立する。
+func TestFollow_LocalToRemote_ForceSwitchAndLocalControl(t *testing.T) {
+	t.Run("force switch", func(t *testing.T) {
+		t.Setenv("FORCE_FOLLOW_REMOTE_USER_FOR_TESTING", "true")
+		svc, userRepo, fRepo, _ := newSvc(t)
+		addUser(t, userRepo, "alice", false)
+		remote := addUser(t, userRepo, "remote_bob", false)
+		host := "remote.example"
+		remote.Host = &host
+		res, err := svc.Follow("alice", "remote_bob", following.FollowOptions{})
+		require.NoError(t, err)
+		assert.Nil(t, res.Request)
+		exists, _ := fRepo.Exists("alice", "remote_bob")
+		assert.True(t, exists)
+	})
+	t.Run("local to local (control)", func(t *testing.T) {
+		svc, userRepo, fRepo, _ := newSvc(t)
+		addUser(t, userRepo, "alice", false)
+		addUser(t, userRepo, "bob", false)
+		res, err := svc.Follow("alice", "bob", following.FollowOptions{})
+		require.NoError(t, err)
+		assert.Nil(t, res.Request)
+		exists, _ := fRepo.Exists("alice", "bob")
+		assert.True(t, exists)
+	})
+}
+
 func TestFollow_LockedUser_InvokesFederationHook(t *testing.T) {
 	// 承認制の相手に対する follow でも AP Follow activity が飛ぶ必要がある
 	// (相手側の承認を待つフロー)。federationHook.OnLocalFollowed が呼ばれ、
@@ -1390,6 +1447,9 @@ func TestFollow_RemoteFollower_BumpsInstanceFollowing(t *testing.T) {
 // local follower → remote followee: instance(remote).followersCount += 1
 // (本家 insertFollowingDoc の isRemoteUser(followee) 分岐、#3330)。
 func TestFollow_LocalFollowsRemote_BumpsInstanceFollowers(t *testing.T) {
+	// ローカルからリモートへのフォローは Accept まで申請になる (#3491)。このテストは
+	// 成立した後を見るので、本家の backend e2e と同じ切り替えで即座に成立させる。
+	t.Setenv("FORCE_FOLLOW_REMOTE_USER_FOR_TESTING", "true")
 	svc, userRepo, _, _ := newSvc(t)
 	instanceRepo := testutil.NewMockInstanceRepository()
 	host := "remote.example"
@@ -1409,6 +1469,9 @@ func TestFollow_LocalFollowsRemote_BumpsInstanceFollowers(t *testing.T) {
 
 // Unfollow で counter -1
 func TestUnfollow_DecrementsInstanceCounters(t *testing.T) {
+	// ローカルからリモートへのフォローは Accept まで申請になる (#3491)。このテストは
+	// 成立した後を見るので、本家の backend e2e と同じ切り替えで即座に成立させる。
+	t.Setenv("FORCE_FOLLOW_REMOTE_USER_FOR_TESTING", "true")
 	svc, userRepo, _, _ := newSvc(t)
 	instanceRepo := testutil.NewMockInstanceRepository()
 	host := "remote.example"
@@ -1474,6 +1537,9 @@ func TestAcceptRequest_BumpsInstanceCounters(t *testing.T) {
 // meta.enableStatsForFederatedInstances gate: when it is false, follow and
 // unfollow in either direction do not touch the instance counters.
 func TestFollow_InstanceStatsGateOff_LeavesCounters(t *testing.T) {
+	// ローカルからリモートへのフォローは Accept まで申請になる (#3491)。このテストは
+	// 成立した後を見るので、本家の backend e2e と同じ切り替えで即座に成立させる。
+	t.Setenv("FORCE_FOLLOW_REMOTE_USER_FOR_TESTING", "true")
 	svc, userRepo, _, _ := newSvc(t)
 	instanceRepo := testutil.NewMockInstanceRepository()
 	host := "remote.example"

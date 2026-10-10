@@ -128,6 +128,21 @@ export function followRemote(viewer: Principal, target: Principal): Cypress.Chai
         },
         { retries: 30, interval: 3_000 },
       ),
+    )
+    .then(() =>
+      // viewer 側でもフォローが成立する (相手の Accept が届く) のを待つ。
+      // リモートへのフォローは Accept まで申請中になるので (本家と同じ、#3491)、
+      // 相手の followers に載っただけではこちらの home timeline にまだ積まれない。
+      retryUntil(
+        () =>
+          api(viewerInst, 'users/show', {
+            i: viewer.token,
+            username: target.username,
+            host: targetInst.domain,
+          }),
+        (resp) => resp.status === 200 && resp.body?.isFollowing === true,
+        { retries: 30, interval: 3_000 },
+      ),
     );
 }
 

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
@@ -525,6 +526,16 @@ func (s *Service) Follow(followerID, followeeID string, opts FollowOptions) (*Fo
 	// #2106 N22: locked に加え、bot follower かつ local followee の profile.carefulBot=true でも
 	// follow request 化する (「Bot からのフォローに慎重」設定)。
 	needsApproval := followee.IsLocked
+	// **ローカルからリモートへのフォローは、相手の Accept が届くまで申請にする
+	// (#3491)。** 本家 UserFollowingService.follow の 3 つ目の OR 条件
+	// (`isLocalUser(follower) && isRemoteUser(followee)`)。成立は Accept の受信
+	// (鍵アカウント宛てと同じ流れ) で行う。本家と同じく、環境変数
+	// FORCE_FOLLOW_REMOTE_USER_FOR_TESTING=true のときだけ即座に成立させる
+	// (本家の backend e2e がリモートの相手を Accept を返さない形で作るため)。
+	if !needsApproval && follower.Host == nil && followee.Host != nil &&
+		os.Getenv("FORCE_FOLLOW_REMOTE_USER_FOR_TESTING") != "true" {
+		needsApproval = true
+	}
 	if !needsApproval && follower.IsBot && followee.Host == nil {
 		if profile, perr := s.userRepo.FindProfileByUserID(followeeID); perr == nil && profile != nil && profile.CarefulBot {
 			needsApproval = true
