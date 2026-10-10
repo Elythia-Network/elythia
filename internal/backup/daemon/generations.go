@@ -2,11 +2,7 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"sort"
 	"time"
 
 	"github.com/elythia-network/elythia/internal/backup"
@@ -23,19 +19,19 @@ const (
 	VerifyOK VerifyState = "ok"
 	// VerifyFailed means verify.json reports a failure.
 	VerifyFailed VerifyState = "failed"
-	// VerifyUnreadable means verify.json exists but could not be parsed.
+	// VerifyUnreadable means verify.json exists but could not be read or
+	// parsed.
 	VerifyUnreadable VerifyState = "unreadable"
 )
 
-// maxVerifyFileSize bounds how much of verify.json is read.
-const maxVerifyFileSize = 1 << 20
-
-// Generation is one generation directory found in the storage.
+// Generation is one generation found in the storage, classified for
+// retention and delay checks.
 type Generation struct {
 	ID   string
 	Time time.Time
-	// Complete reports whether meta.json exists. A generation without it is
-	// still being written or was abandoned.
+	// Complete reports whether meta.json is readable and the dump it names
+	// exists (backup.Generation.Complete). A generation without it is still
+	// being written, was abandoned or is broken.
 	Complete bool
 	Verify   VerifyState
 	Keys     []string
@@ -57,67 +53,39 @@ func (g Generation) Usable(requireVerified bool) bool {
 	return g.Verify == VerifyOK || g.Verify == VerifyNone
 }
 
-// Scan lists the generations in st, oldest first.
+// Scan lists the generations in st, oldest first. It reads them with
+// backup.ListGenerations (#3458), the same listing `backup list` and the
+// admin page use.
+//
+// meta.json や verify.json が読めなかった世代は、理由 (壊れている、保存先の一時的な
+// 誤り) に関わらず「使えない世代」に倒す。使えない世代が増えても、PlanPrune の窓は
+// 古い方へ広がるだけで、消す世代は増えない。読めないことを理由に新しい世代を消す
+// ことは起きない。
 func Scan(ctx context.Context, st backup.Storage) ([]Generation, error) {
-	objs, err := st.List(ctx, backup.GenerationPrefix())
+	listed, err := backup.ListGenerations(ctx, st)
 	if err != nil {
 		return nil, fmt.Errorf("list generations: %w", err)
 	}
-	byID := map[string]*Generation{}
-	for _, o := range objs {
-		id := backup.GenerationIDFromKey(o.Key)
-		if id == "" {
-			continue
-		}
-		g, ok := byID[id]
-		if !ok {
-			t, _ := backup.IDTime(id)
-			g = &Generation{ID: id, Time: t, Verify: VerifyNone}
-			byID[id] = g
-		}
-		g.Keys = append(g.Keys, o.Key)
-		g.Size += o.Size
-		switch o.Key {
-		case backup.Key(id, backup.MetaFile):
-			g.Complete = true
-		case backup.Key(id, backup.VerifyFile):
-			g.Verify = VerifyUnreadable
-		}
-	}
-	gens := make([]Generation, 0, len(byID))
-	for _, g := range byID {
-		if g.Verify == VerifyUnreadable {
-			state, err := readVerifyState(ctx, st, g.ID)
-			if err != nil {
-				return nil, err
+	gens := make([]Generation, 0, len(listed))
+	for _, l := range listed {
+		t, _ := backup.IDTime(l.ID)
+		g := Generation{ID: l.ID, Time: t, Complete: l.Complete(), Verify: VerifyNone, Size: l.Size}
+		verifyKey := backup.Key(l.ID, backup.VerifyFile)
+		for _, o := range l.Objects {
+			g.Keys = append(g.Keys, o.Key)
+			if o.Key == verifyKey {
+				g.Verify = VerifyUnreadable
 			}
-			g.Verify = state
 		}
-		gens = append(gens, *g)
+		if l.Verify != nil {
+			g.Verify = VerifyFailed
+			if l.Verify.OK {
+				g.Verify = VerifyOK
+			}
+		}
+		gens = append(gens, g)
 	}
-	// ID は UTC の時刻を固定幅で書いたものなので、文字列の順が時刻の順になる。
-	sort.Slice(gens, func(i, j int) bool { return gens[i].ID < gens[j].ID })
 	return gens, nil
-}
-
-func readVerifyState(ctx context.Context, st backup.Storage, id string) (VerifyState, error) {
-	rc, err := st.Get(ctx, backup.Key(id, backup.VerifyFile))
-	if errors.Is(err, backup.ErrNotFound) {
-		// List の後に消された。
-		return VerifyNone, nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("read %s: %w", backup.Key(id, backup.VerifyFile), err)
-	}
-	defer rc.Close()
-	var res backup.VerifyResult
-	if err := json.NewDecoder(io.LimitReader(rc, maxVerifyFileSize)).Decode(&res); err != nil {
-		return VerifyUnreadable, nil
-	}
-	if res.OK {
-		return VerifyOK, nil
-	}
-	return VerifyFailed, nil
 }
 
 // Latest returns the newest generation in gens (oldest first) that satisfies
