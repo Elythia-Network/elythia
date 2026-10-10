@@ -83,6 +83,9 @@ func startPostgres(t *testing.T) *tcpostgres.PostgresContainer {
 			tcpostgres.WithDatabase("elythia"),
 			tcpostgres.WithUsername(pgUser),
 			tcpostgres.WithPassword(pgPassword),
+			// verify の使い捨てのサーバーを同じ container の中に立て、このプロセスから
+			// 繋ぐための port (verify_env_test.go の sandboxPort)。
+			testcontainers.WithExposedPorts(sandboxPort+"/tcp"),
 			testcontainers.WithWaitStrategy(
 				wait.ForLog("database system is ready to accept connections").
 					WithOccurrence(2).
@@ -198,11 +201,15 @@ func (p *pgEnv) takeOptions(st Storage) TakeOptions {
 	return TakeOptions{Storage: st, DatabaseURL: p.url, Dump: p.dump, Runner: p.runner}
 }
 
-// dockerExecRunner runs programs inside a container with docker exec.
-type dockerExecRunner struct{ container string }
+// dockerExecRunner runs programs inside a container with docker exec, as user
+// when it is set (initdb refuses to run as root).
+type dockerExecRunner struct{ container, user string }
 
 func (r dockerExecRunner) Command(ctx context.Context, env []string, name string, args ...string) *exec.Cmd {
 	a := []string{"exec", "-i"}
+	if r.user != "" {
+		a = append(a, "-u", r.user)
+	}
 	for _, e := range env {
 		a = append(a, "-e", e)
 	}

@@ -112,9 +112,15 @@ type StageResult struct {
 	OK      bool        `json:"ok"`
 	Skipped bool        `json:"skipped,omitempty"`
 	Error   string      `json:"error,omitempty"`
+	// Warnings are findings that do not fail the stage, such as counter
+	// drift that fsck finds in the restored database (it was already in the
+	// source database at the snapshot).
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // RowMismatch is a table whose restored row count differs from Meta.
+// Expected is -1 when meta.json does not list the table, and Actual is -1
+// when the restored database does not have it.
 type RowMismatch struct {
 	Table    string `json:"table"`
 	Expected int64  `json:"expected"`
