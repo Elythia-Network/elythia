@@ -1,6 +1,6 @@
 # DBのバックアップ
 
-`elythia backup`で、DBのバックアップを取り、ホストの外の保存先へ送る(#3457)。この文書は、取る手順、取ったものが戻せるかを確かめる手順、保存先に置かれるものを扱う。設定のキーの一覧は[設定リファレンス](configuration.md#バックアップ-backup)にある。
+`elythia backup`で、DBのバックアップを取り、ホストの外の保存先へ送る(#3457)。この文書は、取る手順、取ったものが戻せるかを確かめる手順、保存先に置かれるものを扱う。戻す手順と、PostgreSQLのメジャーバージョンを上げる手順は[デプロイ](deployment.md#バックアップから戻す-restore)にある([戻す](#戻す))。設定のキーの一覧は[設定リファレンス](configuration.md#バックアップ-backup)にある。
 
 **同じホストのディスクに置いたものは、バックアップとして数えない。** ディスクやホストが壊れたときに、DBと一緒に失われるため。保存先は、S3互換のストレージ(AWS S3、Cloudflare R2、MinIOなど)か、別の機器をmountしたディレクトリ(NASなど)にする。
 
@@ -29,6 +29,8 @@ DBを全件数えるので、表が大きいと数える時間がかかる。そ
 dumpには`CREATE EXTENSION`が入るので、戻す側のPostgreSQLにも同じ拡張が要る。メタ情報の`extensions`に、取った時点の拡張を記録する。
 
 バックアップ用のimageには、UDSの構成のDB(`deploy/postgres-bigm`)と同じ版の**pg_bigmを入れてある**。[確かめる](#確かめる)ときは、このimageの中で使い捨てのPostgreSQLに戻すため。PGroongaなど、それ以外の拡張を入れたDBは、そのままではimageの中で戻せない。確かめるときは、戻す前に`extensions`の拡張が使い捨てのPostgreSQLにあるかを調べ、無ければその名前を出して止める。
+
+[戻す](#戻す)とき(`backup restore`、#3461)は、記録した拡張が戻す先のDBのサーバーに無ければ、何もせずに止まる。戻す先はバックアップ用のimageではなくDBのサーバーなので、pg_bigmを使うDBなら、DBのサーバーにもpg_bigmが要る(UDSの構成なら`deploy/postgres-bigm`)。
 
 ## 保存先に置かれるもの
 
@@ -345,3 +347,27 @@ ID                STATUS    SIZE  ENCRYPTED  VERIFIED  ELYTHIA  MIGRATION
 
   写した後は、本体を作り直す(`docker compose -f compose.uds.yaml up -d mkgo`)。`backup`サービスは`run`のたびに作られるので、作り直しは要らない
 - **nginxの設定に`/backup-download`の節を足す。** UDSの`deploy/uds/nginx/mkgo.conf`は取り込めば入るが、設定はnginxの起動時に読むので、nginxのコンテナを再起動する(`docker compose -f compose.uds.yaml restart nginx`)。自分で書いた設定には、[逆プロキシ](deployment.md#逆プロキシ-nginx)の例を写す
+
+## 戻す
+
+`elythia backup restore`で、世代からDBを戻す(#3461)。手順は[デプロイ](deployment.md)の次の節にある。
+
+- [バックアップから戻す](deployment.md#バックアップから戻す-restore): 同じサーバーで今のDBと入れ替える形(`-mode swap`)と、空のDBへ戻す形(`-mode empty`)。戻す前に止まる条件、Redisの後始末(`-mode empty`では既定で行わない)、連合への影響、ドライブのファイルが戻らないこと、元に戻す手順(`-rollback`)
+- [PostgreSQL 16 → 18 への移行](deployment.md#postgresql-16--18-への移行-既存環境): 最後の世代を取り、新しい版で確かめ、新しいvolumeのサーバーの空のDBへ戻す
+
+`backup`サービスでは、取るときと同じく`run`で呼ぶ。
+
+```bash
+docker compose run --rm --no-deps backup restore -id latest -mode swap -confirm <DB名>
+```
+
+戻すときは、メタ情報のうち次のものを使う。
+
+| メタ情報 | 使い方 |
+|---|---|
+| `dumpSize` / `dumpSha256` / `plainSha256` | 落としたdumpと突き合わせる。食い違えば何も書かずに止まる |
+| `migrations` | 同梱のmigrationより新しい番号か、dirtyなら止まる |
+| `rowCounts` | 戻した後の行数と突き合わせる |
+| `databaseSettings` | 戻した後に`ALTER DATABASE ... SET`で入れ直す |
+| `databaseLocale` | `-mode swap`では、この値でDBを作る。`-mode empty`では、戻す先のDBと違えば止まる |
+| `extensions` | 戻す先のサーバーに無ければ止まる |

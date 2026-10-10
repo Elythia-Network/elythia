@@ -2,40 +2,208 @@
 
 ## PostgreSQL 16 → 18 への移行 (既存環境)
 
-compose 群と CI は PostgreSQL 18 に統一した (#2513)。**既存の 16 の data volume はイメージを上げるだけでは開けない** — メジャーアップグレードには dump→restore (または pg_upgrade) が必要で、そのまま起動すると `database files are incompatible` で crash loop になる。
+compose群とCIはPostgreSQL 18に統一した(#2513)。**既存の16のdata volumeは、imageを上げるだけでは開けない。** メジャーバージョンを上げるには、古いサーバーから取ったdumpを新しいサーバーへ戻す(または`pg_upgrade`する)必要があり、そのまま起動すると`database files are incompatible`でcrash loopになる。
 
-さらに `postgres:18` イメージは **data layout が変わった** (default PGDATA が `/var/lib/postgresql/18/docker`、`VOLUME` 宣言が `/var/lib/postgresql` 親ディレクトリへ)。compose 群のマウント先はこれに合わせて `/var/lib/postgresql` に変更済み。旧パス (`/var/lib/postgresql/data`) のままイメージだけ上げると、**新規デプロイでは匿名 volume 側に initdb され、`down` で全データが静かに消える**。自前 compose を使っている場合はマウント先を確認すること。
+さらに`postgres:18`のimageは**data layoutが変わった**(既定のPGDATAが`/var/lib/postgresql/18/docker`、`VOLUME`の宣言が親の`/var/lib/postgresql`)。compose群のマウント先はこれに合わせて`/var/lib/postgresql`に変えてある。旧パス(`/var/lib/postgresql/data`)のままimageだけ上げると、**新規デプロイでは匿名volumeの側にinitdbされ、`down`で全データが静かに消える**。自前のcomposeを使っているなら、マウント先を確かめること。
 
-既存環境の移行手順 (ダウンタイム = dump + restore の時間)。サービス名は
-`docker-compose.yml` (TCP 構成) のもの (`app` / `db`)。UDS 構成は `mkgo` /
-`postgres` に読み替える (UDS は明示 `PGDATA` なのでマウント先は旧パスのまま
-変えなくてよい):
+この手順は、`elythia backup take`で取ったバックアップ([DBのバックアップ](backup.md))と`elythia backup restore`([バックアップから戻す](#バックアップから戻す-restore))を使う。18より後の版へ上げるときも、版の数字を読み替えれば同じ手順になる。
+
+- **上げる前に、新しい版で戻せることを確かめる。** バックアップ用のimageは`postgres:18-alpine`を元にしているので、`backup verify`([確かめる](backup.md#確かめる)、#3459)は18の`initdb`で立てた使い捨てのサーバーへ戻して確かめる
+- **古いvolumeは消さない。** 新しい版のサーバーは新しいvolumeで立てるので、composeを古い版に戻せば元に戻る
+- バックアップ用のimageの`pg_dump`は18で、16のサーバーから取れる(pg_dumpは自分より古いサーバーから取れる)。16のサーバーから18の`pg_dump`で取り、18の空のDBへ戻して`elythia doctor`の検査が通ることは、`internal/backup`のテスト(`TestRestoreEmptyFromPostgres16`)で確かめている
+- **逆に、18の`pg_restore`では16のサーバーへ戻せない。** 16が知らない設定(`transaction_timeout`)を流して落ちるので、`backup restore`は何も作る前に止まる。16のまま`-mode swap`で前の状態へ戻すことはできないので、先に18へ上げる
+
+止まる時間は、最後のバックアップを取り始めてから、戻し終わるまで。サービス名は`docker-compose.yml`(TCP構成)のもの(`app` / `db` / `backup`)。UDS構成の読み替えは、手順の後に書く。`backup`サービスの設定(保存先と、暗号化するなら鍵)は、先に[DBのバックアップ](backup.md)に従って済ませておく。
 
 ```bash
-# 0. 先に compose を 18 版 (イメージ + マウント先) へ更新しておく
-#    (git pull。ここを忘れて古い compose のまま進めると 16 で init し直すだけになる)
+# 0. バックアップ用の image を、動いている app と同じ版から作る。db はまだ 16 のまま
+#    動かしておく (db の image と volume は手順 4 で書き換える。backup は run --no-deps
+#    で呼ぶので、db を作り直さない)
+#    restore は同梱の migration を当てるので、app より新しい版の image で戻すと、
+#    app の起動時の migrate が知らない番号で止まる。Elythia の版を上げるのは、
+#    この手順を終えてからにする
+MKGO_COMMIT=$(git rev-parse --short HEAD) docker compose build backup
 
-# 1. アプリを止めて書き込みを停止 (postgres は起動したまま)
+# 1. 書き込みを止める (db と redis は動かしたまま)
 docker compose stop app
 
-# 2. dump を取る
-docker compose exec -T db pg_dumpall -U <user> > pg16-dump.sql
+# 2. 最後の世代を取る。出力の世代 ID (例: 20261010T030000Z) を控える
+docker compose run --rm --no-deps backup take
 
-# 3. 全体を止め、volume 自体もバックアップしてから作り直す
-#    (tar は postgres 停止後に取る。稼働中に取ると crash-consistent ですらない)
-docker compose down
-docker run --rm -v <pg-volume>:/from -v "$PWD":/to alpine tar czf /to/pg16-data.tar.gz -C /from .
-docker volume rm <pg-volume>
-docker compose up -d db          # ここで postgres:18 が新規 initdb する
+# 3. 新しい版 (18) で戻せることを確かめる。通らなければ、ここで止めて
+#    docker compose start app で再開する
+docker compose run --rm --no-deps backup verify <世代ID>
 
-# 4. restore (init が作った空 DB を落としてから dump を流す)
-docker compose exec -T db psql -U <user> -d postgres -c 'DROP DATABASE <db>;'
-docker compose exec -T db psql -U <user> -d postgres < pg16-dump.sql
-docker compose exec -T db vacuumdb -U <user> --all --analyze-in-stages
+# 4. db を 18 の新しい volume で立てる。docker-compose.yml の db を
+#      image: postgres:18-alpine   (pg_bigm を使っているなら、その入った image)
+#      volumes: [db_data_pg18:/var/lib/postgresql]
+#    にし、末尾の volumes: に db_data_pg18: を足す。古い db_data は消さない
+docker compose stop db
+docker compose up -d db          # postgres:18 が新しい volume に initdb し、空の DB を作る
 
-# 5. アプリ再開・確認
+# 5. 空の DB へ戻す。-mode empty は既定で Redis を消さない (下の説明)
+docker compose run --rm --no-deps backup restore -id <世代ID> -mode empty -confirm <DB名>
+
+# 6. 統計を取り直す。pg_restore は表の統計を持ってこないので、取り直すまで
+#    planner が見当違いの plan を選ぶことがある
+docker compose exec db vacuumdb -U <DBのユーザー> -d <DB名> --analyze-in-stages
+
+# 7. 起動して確かめる
 docker compose up -d
+docker compose exec app /app/elythia doctor
 ```
+
+**この手順では、Redisを消さない。** `-mode empty`は、`-redis`を渡さなければRedisの後始末をしない。手順1で本体を止めてから手順2で取るので、戻すDBは止めた時点のDBそのもので、Redisの中身と食い違わない。消すと、届いていない配送(`Delete`の再試行を含む。消すと、こちらで消した投稿が相手に残る)や、DBへ未反映のリアクション数(`reaction-buffer:*`。本体を止めるときには反映しない)を失うだけになる。DBを失って古い世代から作り直すときなど、Redisの方が新しいときは`-redis clean`を渡す。
+
+UDS構成(`compose.uds.yaml`)では、次のように読み替える。
+
+- `docker compose`に`-f compose.uds.yaml`を付け、`app`を`mkgo`に、`db`を`postgres`にする
+- `postgres`は`build: deploy/postgres-bigm`(pg_bigm入り)で、`PGDATA`を`/var/lib/postgresql/data/pgdata`に明示し、volumeを`pg_data:/var/lib/postgresql/data`にmountしている。手順4では、`deploy/postgres-bigm/Dockerfile`の`FROM`が新しい版であることを確かめて`docker compose -f compose.uds.yaml build postgres`し、volumeを`pg_data_pg18:/var/lib/postgresql/data`に変えて、末尾の`volumes:`に`pg_data_pg18:`を足す。`PGDATA`はそのままでよい
+- 手順6は`docker compose -f compose.uds.yaml exec postgres vacuumdb -h /var/run/postgresql -U <DBのユーザー> -d <DB名> --analyze-in-stages`
+- 元に戻すときは、16で動いていたimage(ビルドしたものが手元に残っていればそのtag)と`pg_data`に戻す。`deploy/postgres-bigm/Dockerfile`は新しい版を指しているので、作り直すと16にはならない
+
+元に戻すには、`docker compose stop app db`の後、`docker-compose.yml`の`db`を16のimage(`postgres:16-alpine`)と元のマウント(`db_data:/var/lib/postgresql/data`)に戻して`docker compose up -d`する。戻した後は、上げようとしていた間に18の側で作られた投稿などは無い。
+
+### DBが大きいとき(`pg_upgrade`)
+
+dumpから戻す方法は、DBの大きさに比例して止まる時間が延びる。止まる時間が長くなりすぎるサーバーでは、`pg_upgrade`で上げる方法がある。data volumeを新しい版の形式へその場で変換するので、表の中身を書き直さず、`--link`を付ければコピーもしない。ただし、両方の版のサーバーのプログラムが同じ場所に要り、`--link`で上げた後は古い版では開けなくなる。手順はPostgreSQLの文書(`pg_upgrade`)に従い、**上げる前に上の手順2・3でバックアップを取って確かめておく**。
+
+## バックアップから戻す (restore)
+
+`elythia backup restore`は、保存先の世代からDBを戻す(#3461)。バックアップ用のimage(`pg_restore`を持つ)の中で動かす。戻す先によって2つの形がある。
+
+| 形 | 使う場面 | 何をするか |
+|---|---|---|
+| `-mode swap` | 同じサーバーで、今のDBを前の状態へ戻す | `<DB名>_restore_<日時>`へ戻し、確かめてから、今のDBを`<DB名>_before_restore_<日時>`へ、戻したDBを`<DB名>`へ名前を変える。今のDBは消さない |
+| `-mode empty` | PostgreSQLのメジャーバージョンを上げる、別のホストへ引っ越す | 表が1つも無い`<DB名>`へ戻す。DBは、設定ファイルのDBのユーザーを持ち主にして先に作っておく(`CREATE DATABASE <DB名> OWNER <DBのユーザー>`。postgresのimageなら、`POSTGRES_DB`が`POSTGRES_USER`の持ち物として作る) |
+
+`<DB名>`は設定ファイルの`db.db`。`<日時>`はUTCの`YYYYMMDDhhmmss`。戻す世代は`-id <世代ID>`で選ぶ。世代IDは`backup list`で見る。`-id latest`は、`meta.json`とdumpが揃っていて(`backup list`の`STATUS`が`complete`)、検証(`backup verify`、[確かめる](backup.md#確かめる))に通った世代(`verify.json`の`ok`が`true`)のうち、最も新しいものを選ぶ。それより新しい世代の`meta.json`か`verify.json`が読めないときは、古い世代へ進まずに止まる(一時的に読めなかっただけで、意図より古い時点へ戻さないため)。そのときは`-id`で名指しする。検証していない世代を`-id`で名指ししたときは、警告を出して戻す。
+
+### 戻す前に止める条件
+
+次のどれかに当たると、DBに何もせずに止まる。
+
+- **`-confirm <DB名>`が無いか、`db.db`と違う。** 設定ファイルを取り違えたまま、別のインスタンスのDBを入れ替えないため
+- **戻す先のDBに、ほかの接続が残っている**(`pg_stat_activity`で見る)。本体・workerのプロセスを全て止めてから流す。配送を別ノードに分けている構成では、そちらも止める
+- **バックアップの管理表の番号が、バイナリの同梱の番号より新しい。** 管理表が進みすぎていると、戻した後に`elythia migrate`も本体の起動も通らない。バックアップを取った版以上のバイナリで戻す。管理表がdirtyのバックアップも戻さない
+- **`-mode swap`で、DBのユーザーにDBを作る権限が無い。** DBを作るには`CREATEDB`が、今のDBの名前を変えるにはそのDBの持ち主であることが要る(superuserはどちらも要らない)。足りなければ、管理者のユーザーで権限を足すか、`-mode empty`で管理者が作った空のDBへ戻す
+
+  ```bash
+  docker compose exec db psql -U <管理者のユーザー> -d postgres -c 'ALTER ROLE <DBのユーザー> CREATEDB;'
+  ```
+
+  composeの既定(`POSTGRES_USER`で作ったユーザー)はsuperuserなので、足さなくてよい
+
+- **`pg_restore`の版が、戻す先のサーバーより新しい。** 新しい`pg_restore`は、古いサーバーが知らない設定を流して落ちる(18の`pg_restore`から16のサーバーへ戻すと`transaction_timeout`で落ちる)
+- **バックアップのDBに入っていた拡張(メタ情報の`extensions`)が、戻す先のサーバーに無い**(`pg_available_extensions`で見る)。dumpは`CREATE EXTENSION`を含むので、無いと`pg_restore`が落ちる
+
+`-mode empty`では、ほかに次の3つを確かめる。
+
+- **戻す先のDBに表が1つも無いこと**
+- **DBのユーザーが`public` schemaに表を作れること。** PostgreSQL 15からは`public`の持ち主がDBの持ち主になったので、管理者の持ち物として作ったDBへは、アプリのユーザーでは戻せない
+- **戻す先のDBのencodingとlocale(`LC_COLLATE` / `LC_CTYPE` / locale provider / ICUかbuiltinのlocale)が、バックアップを取ったDB(メタ情報の`databaseLocale`)と同じこと。** 照合順序が違うと、戻した後の並び順や、一意制約の判定が変わる。違えば、作り直すための`CREATE DATABASE`の文を表示して止まる。16より前のサーバーで取ったバックアップは、locale providerを`libc`として比べる。postgresの公式imageの16と18(alpine)は既定の値が同じで、そのまま通る
+
+### 戻すときに行うこと
+
+1. 保存先からdumpを一時ファイルへ落とし、大きさとsha256をメタ情報と突き合わせる。暗号化した世代は、`backup.encryption.identityFile`の鍵で復号する。**書き込む前に全部を確かめる**
+2. `pg_restore --exit-on-error --single-transaction --no-owner --no-privileges`で戻す。1つのトランザクションなので、途中で落ちたら何も残らない。`-mode swap`では、`<DB名>_restore_<日時>`を、バックアップに記録したencodingとlocale(メタ情報の`databaseLocale`)、今のDBの持ち主で作ってから戻す。記録が今のDBと違うとき(取った後にDBを作り直した、など)は、そのことを表示して、記録の値で作る
+3. 表ごとの行数を、メタ情報の行数(dumpと同じsnapshotで数えたもの)と突き合わせる
+4. `pg_dump`に入らないDB単位の設定(`ALTER DATABASE ... SET`)を、メタ情報の`databaseSettings`から入れ直す。取るときに`pg_db_role_setting`のうちDB単位のもの(ロール単位でないもの)を`名前=値`の形で記録しているので、`search_path`のような一覧の設定は要素ごとに分けて入れる。superuserにしか入れられない設定(`log_min_duration_statement`など)が付いていたら、superuserでないDBのユーザーではここで止まる
+5. `elythia migrate`と同じく、同梱のmigrationを当てる(本体の系列、forkの系列の順)。バイナリより古い版で取ったバックアップは、ここで追いつく
+6. `-mode swap`では、名前を1つのトランザクションで入れ替える。2〜6のどこかで落ちたら、作ったDBを消して止まる。今のDBには触らない。`-mode empty`で3〜5のどこかで落ちたら、戻した中身がDBに残るので、DBを作り直してから流し直す
+7. Redisの後始末(下の表)をし、`elythia doctor`のうち本体が動いていなくても回せる検査(DBの管理表、rootの利用者、Redis)を流す。後始末は、`-mode swap`と`-rollback`では既定で行い、`-mode empty`では既定で行わない(`-redis clean|keep`で変えられる。理由は[版を上げる手順](#postgresql-16--18-への移行-既存環境)の後の説明)
+8. 名前の入れ替えがサーバーの側で済んだ後に、接続が切れるなどしてエラーが返ったときは、`pg_database`を引き直して、入れ替わっていれば戻し終えたものとして7へ進む。どちらか分からなければ、作ったDBを消さずに、確かめるべきDBの名前を表示して止まる
+
+**[pg_bigm](#pg_bigm-日本語の部分一致検索を高速化)などの拡張を入れたDBは、戻す先のサーバーにも同じ拡張が要る。** dumpは`CREATE EXTENSION`を含むので、拡張の無いサーバー(素の`postgres:18-alpine`)へは戻らない。戻す前に止まる。バックアップ用のimageにpg_bigmが入っているのは`backup verify`のためで、戻す先はDBのサーバー(UDS構成なら`deploy/postgres-bigm`のimage)になる。拡張を作るにはsuperuserが要ることがある。
+
+dumpは、戻す前に一時ファイルへ落とす(暗号化した世代は復号したもの。持ち主だけが読める0600で作る)。`backup`サービスではコンテナの`/tmp`に置くので、dumpの大きさの空きが要る。別の場所に置くときは`-tmp-dir <ディレクトリ>`を渡す。一時ファイルは終わったときと中断(`SIGINT` / `SIGTERM`)のときに消すが、`SIGKILL`やOOMで落ちたときは残る。**バイナリを直接実行すると、ホストの`/tmp`に平文のdumpが残りうる。** 利用者のtokenや秘密鍵が入るので、暗号化したディスクの上のディレクトリを`-tmp-dir`で渡すか、落ちたときに`elythia-restore-*.pgc`を消す。
+
+**戻すのはDBだけで、ドライブのファイル(ローカルの`drive-files`とオブジェクトストレージ)は戻らない。** [DBのバックアップ](backup.md)はファイルを含まないため。バックアップより後に消したファイルは、戻したDBに行があるのに中身が無く、画像が切れる。バックアップより後に上げたファイルは、DBに行が無いまま保存先に残り、どこからも指されない。ファイルも同じ時点へ揃えたいときは、保存先の側(オブジェクトストレージのversioningやスナップショットなど)で戻す。
+
+`-mode swap`は、一時的にDBの約2倍のディスクを使う。退避した`<DB名>_before_restore_<日時>`は自動では消さない。戻した結果に問題が無いと確かめてから、`DROP DATABASE`で消す。
+
+### Redisの後始末
+
+DBを戻しても、Redisにはバックアップより後のDBの行を指すものが残る。`FLUSHDB`は使わない。既定の構成では5つの用途(`redis` / `redisForPubsub` / `redisForJobQueue` / `redisForTimelines` / `redisForReactions`)が同じRedisの同じDBを共有しているので、キューと、総当たりや再送を止める記録まで消えるため。消すkeyは名前で決めて、`SCAN`で探して消す。`<prefix>`は、そのクライアントの`prefix`(既定は`url`のホスト名)に`:`を付けたもの。
+
+| 消すもの | 理由 |
+|---|---|
+| `<prefix>list:*`(timelines) | タイムライン。戻したDBに無い投稿のIDが残る |
+| `<prefix>ephNote:*` / `ephNoteURI:*` / `ephUser:*` / `ephUserURI:*` / `ephFile:*`(timelines) | リレーだけの投稿。`ephFile:`はdrive_fileの行を掃除から守る印で、その行が戻したDBに無いか、別のものになっている |
+| `<prefix>cleanRemoteNotes:cursor` | リモートの投稿の掃除が次に読むnoteのID。戻したDBより先を指す |
+| `antennaTimeline:*` / `featuredGlobalNotesRanking:*` / `featuredInChannelNotesRanking:*` / `featuredPerUserNotesRanking:*` / `featuredGalleryPostsRanking:*` | noteのIDの集合 |
+| `reaction-buffer:*` | DBへ未反映のリアクション数の差分。反映すると、戻したnoteの数に後の差分が足される |
+| `userSwSubscriptions:*` | `sw_subscription`の行のキャッシュ |
+| `reversi:fed:*` / `reversi:game:*` / `reversi:matchAny` / `bubbleVersus:*` | 対局と利用者のIDを持つ途中の状態 |
+| `apFederationRule:*` | 連合のルールのIDごとの集計 |
+| `oauth:*` | 認可の途中の状態。発行したtokenのID(DBの行)を持つ |
+| `bull:deliver:*`(jobQueue。`bull:deliver:meta`と`bull:deliver:repeat`を除く) | 配送を待つjob。下の「連合への影響」 |
+
+| 消さないもの | 理由 |
+|---|---|
+| `<prefix>notificationTimeline:*` / `<prefix>latestReadNotification:*` | 通知はRedisにしか無い(本家と同じ)。消すと、バックアップより前の通知も失われる。noteや送り主がDBに無い通知は、読むときに落とすので、戻したDBに無い投稿は出ない |
+| `passwordguard:*` / `mk:2fa:totp:used:*` / `mk:ap:inbox:seen:*` / `mk:signupform:nonce:*` / `limit:*` | 総当たり・再利用・再送・連投を止める記録。消すと、その窓が開き直る |
+| `<prefix>elythia:maintenance*` | メンテナンスの状態(#3463) |
+| `apDelivery*` / `apInboxHealth:*` / `ed25519:*` / `reversi:federation:version:*` / `<prefix>url-preview:*` | 相手のサーバーや外部のURLについての記録で、DBから作ったものではない |
+| `bull:`の`deliver`以外のqueue、`bull:deliver:meta` / `bull:deliver:repeat` | バックアップより後に届いた連合のactivity(inbox)は、戻した後も当てる価値がある。`meta`には管理画面のキューの一時停止が入る。消えた行を指すjobは失敗して捨てられるが、**戻したDBにも行がある操作は成功する。** 例えば、待っていた相手からのフォロー解除(`Undo`)や、こちらの利用者がバックアップより後に行ったフォローの操作(relationship)が、戻したDBに当たる |
+
+ユーザーやmetaなどのメモリ上のキャッシュはRedisに無いので、本体を止めてから戻せば、起動し直したときに作り直される。
+
+Redisに繋がらずに後始末が失敗したときは、DBはもう切り替わった後なので、終了コード1で止まり、その旨を表示する。上の表のkeyを消すまで、本体を起動しない。
+
+### 連合への影響
+
+戻すのはこのサーバーのDBだけで、連合の相手が受け取ったものは戻らない。
+
+- バックアップより後の投稿・リアクション・フォローなどは、相手のサーバーに残る。こちらのDBには無いので、取り消しの`Delete`や`Undo`も出せない
+- 配送を待っていたjob(`bull:deliver:*`)は捨てる。ほとんどがバックアップより後の行のactivityで、配ると相手にだけ存在する投稿を増やすため。バックアップより前のactivityの再試行も一緒に消えるので、一部の相手には届かないままになる
+- 相手からのフォロー・フォロー解除・ブロックのうち、バックアップより後に届いて処理を終えたものは、こちらに無い。相手は、こちらが受け取ったと思っている。まだ処理を待っていたもの(inboxのjob)は、戻したDBに当たる
+- `-mode empty`で版を上げる・引っ越すときは、本体を止めてから取った世代を戻すので、上のことは起きない。配送を待つjobも既定で残すので、止める前に出した`Delete`なども、起動した後に届く
+
+### 手順
+
+compose(TCP)。`backup`はバックアップ用のサービスで、設定ファイルと保存先は取るときと同じものを使う([DBのバックアップ](backup.md))。暗号化した世代を戻すときは、`backup`サービスの`volumes`のコメントを外して秘密鍵を渡し、`backup.encryption.identityFile`にそのパスを書く。
+
+```bash
+# 1. 本体と worker を止める (db と redis は動かしたまま)
+docker compose stop app
+
+# 2. 戻す (今の DB は <DB名>_before_restore_<日時> として残る)
+docker compose run --rm --no-deps backup restore -id latest -mode swap -confirm <DB名>
+
+# 3. 統計を取り直す (pg_restore は表の統計を持ってこない)
+docker compose exec db vacuumdb -U <DBのユーザー> -d <DB名> --analyze-in-stages
+
+# 4. 起動して確かめる
+docker compose up -d app
+docker compose exec app /app/elythia doctor
+```
+
+UDS構成は、`app`を`mkgo`に読み替え、`docker compose`に`-f compose.uds.yaml`を付ける(`docker compose -f compose.uds.yaml run --rm --no-deps backup restore ...`)。`compose.uds.yaml.example`の`backup`サービスは、DBのソケット(`pg_sock`)と、Redisの後始末のためにvalkeyのソケット(`valkey_sock`)をmountしている。`compose.uds.yaml`に複製しているなら、`valkey_sock`の行も足す。`mkgo`は起動のたびに`elythia migrate`を流す(`deploy/uds/mkgo-entrypoint.sh`)が、戻すときに当て終えているので、何も起きない。
+
+バイナリ直接実行では、サーバーを止めてから、`pg_restore`があるホストで、本体と同じ設定ファイルを渡して流す。`pg_restore`の版は、バックアップを取った`pg_dump`以上で、DBのサーバー以下にする(バックアップを取った`pg_dump`も戻す先のサーバーも18なら、18の`pg_restore`)。`pg_restore`の場所は`backup.tools.pgRestore`で変えられる。
+
+```bash
+sudo systemctl stop elythia
+./elythia backup restore -config .config/default.yml -id latest -mode swap -confirm <DB名> -tmp-dir /var/lib/elythia/restore-tmp
+vacuumdb -h <DBのホスト> -U <DBのユーザー> -d <DB名> --analyze-in-stages
+sudo systemctl start elythia
+./elythia doctor
+```
+
+`migration/`があるディレクトリで流す(同梱の番号との比較とmigrationに使う)。別の場所にあるなら`-migrations <ディレクトリ>`で渡す。
+
+### 元に戻す(ロールバック)
+
+`-mode swap`で戻した後に元の状態へ戻すには、本体を止めてから、退避したDBの名前を渡す。
+
+```bash
+docker compose stop app
+docker compose run --rm --no-deps backup restore -rollback <DB名>_before_restore_<日時> -confirm <DB名>
+docker compose up -d app
+```
+
+戻したDBは`<DB名>_rolled_back_<日時>`として残り、退避していたDBが`<DB名>`に戻る。Redisの後始末と検査は、戻すときと同じく流す。ロールバックを取り消すには、`-rollback <DB名>_rolled_back_<日時>`を渡す。
 
 ## pg_bigm (日本語の部分一致検索を高速化)
 
