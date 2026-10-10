@@ -43,7 +43,13 @@ func newBackupAdminService(cfg *config.Config, rdb redis.Cmdable) *backupadmin.S
 			o.Storage = st
 		}
 	}
-	if b.Server.ServiceURL != "" {
+	switch {
+	case b.Server.ServiceURL == "":
+	case b.Server.ServiceToken == "":
+		// token 無しで依頼を送らない。daemon の側も token 無しでは受けないはずだが、
+		// 本体の側でも、認証の無い経路を作らない。
+		slog.Warn("backup: backup.server.serviceUrl is set but backup.server.serviceToken is empty; taking and verifying from the admin page are disabled")
+	default:
 		o.Control = backupadmin.NewHTTPControl(b.Server.ServiceURL, b.Server.ServiceToken, nil)
 	}
 	return backupadmin.NewService(o)

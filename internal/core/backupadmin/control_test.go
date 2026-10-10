@@ -207,3 +207,24 @@ func TestRedisTokens(t *testing.T) {
 	_, err = tk.Issue(ctx, DownloadGrant{Key: "k"}, time.Minute)
 	assert.ErrorContains(t, err, "down")
 }
+
+// TestHTTPControl_ResponseTooLarge: a response over the limit is refused
+// instead of being cut and decoded.
+func TestHTTPControl_ResponseTooLarge(t *testing.T) {
+	srv, _ := controlServer(t, http.StatusOK, `{"overdue":true}`+strings.Repeat(" ", controlBodyLimit))
+	_, err := NewHTTPControl(srv.URL, "secret", nil).Status(context.Background())
+	assert.ErrorIs(t, err, ErrServiceFailed)
+	assert.ErrorContains(t, err, "larger than")
+}
+
+// TestHTTPControl_DoesNotUseAProxy: the bearer token must not go through
+// HTTP_PROXY.
+func TestHTTPControl_DoesNotUseAProxy(t *testing.T) {
+	c := NewHTTPControl("http://backup:3010", "secret", nil)
+	client, ok := c.doer.(*http.Client)
+	require.True(t, ok)
+	tr, ok := client.Transport.(*http.Transport)
+	require.True(t, ok)
+	assert.Nil(t, tr.Proxy)
+	assert.Equal(t, controlTimeout, client.Timeout)
+}
