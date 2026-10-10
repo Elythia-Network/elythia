@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"sync"
 	"time"
@@ -262,18 +263,24 @@ func (d *Daemon) onTimer(ctx context.Context) {
 		}
 		delay = &e
 	}
-	d.mu.Unlock()
 	if delay != nil {
-		d.send(ctx, *delay)
+		// 通知の送り直しは最大で数十秒かかる。Run のループの中で待つと、その間は
+		// 次の枠も制御 API の後の再計算も止まるので、別の goroutine で送る。
+		d.wg.Add(1)
+		go func(e Event) {
+			defer d.wg.Done()
+			d.send(ctx, e)
+		}(*delay)
 	}
+	d.mu.Unlock()
 }
 
 // setLatestLocked records the newest usable generation and, when it is newer
 // than the delay clock (or initial), restarts the delay clock from it. d.mu
 // must be held.
 //
-// 遅れの起点は、新しい世代ができたときだけ動かす。取るのに失敗するたびに起点から
-// 数え直すと、知らせた直後の遅れをもう一度知らせてしまう。
+// 遅れの起点は、最新の使える世代が変わったときだけ動かす。取るのに失敗するたびに
+// 起点から数え直すと、知らせた直後の遅れをもう一度知らせてしまう。
 func (d *Daemon) setLatestLocked(gens []Generation, initial bool) {
 	g := Latest(gens, func(g Generation) bool { return g.Usable(d.opts.RequireVerified) })
 	if g == nil {
@@ -283,7 +290,9 @@ func (d *Daemon) setLatestLocked(gens []Generation, initial bool) {
 		d.latestUsable = &cp
 	}
 	moved := initial
-	if g != nil && (initial || g.Time.After(d.usableBase)) {
+	// 最新の使える世代が手で確かめ直されて使えなくなったときは、起点を 1 つ前の
+	// 使える世代へ戻す (戻した結果がもう遅れなら、すぐに知らせる)。
+	if g != nil && (initial || !g.Time.Equal(d.usableBase)) {
 		d.usableBase = g.Time
 		moved = true
 	}
@@ -365,23 +374,40 @@ func (d *Daemon) setRunningID(id string) {
 // verify runs the verifier on res.GenerationID and reports whether the
 // generation passed.
 func (d *Daemon) verify(ctx context.Context, res *JobResult) bool {
+	key := backup.Key(res.GenerationID, backup.VerifyFile)
+	prev, prevErr := readObject(ctx, d.opts.Storage, key)
 	vr, err := d.opts.Verifier.Verify(ctx, res.GenerationID)
+	if ctx.Err() != nil {
+		// 止める途中 (SIGTERM など) で切れた検証は、世代の良し悪しではない。#3459 の
+		// Verify は切れた pg_restore を段の欠陥として verify.json に ok:false で書くことが
+		// あるので、確かめる前の verify.json に戻し、判定としても通知としても扱わない。
+		d.restoreVerifyFile(ctx, key, prev, prevErr)
+		res.Stage = "verify"
+		res.Error = "interrupted: " + ctx.Err().Error()
+		res.FinishedAt = d.clock.Now()
+		d.log.Warn("backup: verification interrupted; the previous verify.json is kept",
+			"generation", res.GenerationID, "error", err)
+		return false
+	}
 	if err != nil && !judged(vr) {
 		d.fail(ctx, res, "verify", err)
 		return false
 	}
-	res.Verify = &vr
 	if err != nil {
 		// 判定は出たが、その後 (使い捨てのサーバーの後始末や verify.json の保存) で
-		// 失敗した (#3459 の Verify は、このとき verify.json を書かずに返す)。判定を
-		// 捨てて「失敗」とだけ知らせると、世代が壊れていても運営者には後始末の失敗に
-		// しか見えない。判定は判定として扱い、整理が読めるよう verify.json もここで残す。
+		// 失敗した。#3459 の Verify は、このとき 3 段が全て通っていても OK を false にし、
+		// verify.json を書かずに返す。判定を捨てて「失敗」とだけ知らせると、壊れた世代も
+		// 後始末の失敗にしか見えず、通った世代は ok:false と記録されてしまう。判定は
+		// 段の結果から求め直し (vr.OK は後始末の失敗も含むので使わない)、整理が読めるよう
+		// verify.json もここで残す。
+		vr.OK = stagesPassed(vr)
 		d.log.Error("backup: verification reached a verdict but did not finish cleanly",
 			"generation", res.GenerationID, "ok", vr.OK, "error", err)
 		if werr := storeVerifyResult(ctx, d.opts.Storage, vr); werr != nil {
 			err = errors.Join(err, werr)
 		}
 	}
+	res.Verify = &vr
 	if !vr.OK {
 		res.Stage = "verify"
 		res.Error = "verification failed"
@@ -391,12 +417,17 @@ func (d *Daemon) verify(ctx context.Context, res *JobResult) bool {
 		res.FinishedAt = d.clock.Now()
 		e := Event{Kind: EventMismatch, OccurredAt: res.FinishedAt, GenerationID: res.GenerationID,
 			Message: "the backup did not pass verification", Mismatches: vr.Mismatches}
+		var failed []backup.StageResult
 		for _, s := range vr.Stages {
 			if !s.OK && !s.Skipped {
-				e.FailedStages = append(e.FailedStages, s)
+				failed = append(failed, s)
+				// 段の誤りには pg_restore の stderr が入り、COPY の誤りでは行の値 (秘密鍵や
+				// token の一部) まで含みうる。外へ送る通知には段の名前と決まった要約だけを
+				// 載せ、詳細は verify.json と daemon のログで見る。
+				e.FailedStages = append(e.FailedStages, backup.StageResult{Stage: s.Stage, Error: stageSummary(s.Stage)})
 			}
 		}
-		d.log.Error("backup: verification failed", "generation", res.GenerationID, "stages", e.FailedStages, "mismatches", vr.Mismatches)
+		d.log.Error("backup: verification failed", "generation", res.GenerationID, "stages", failed, "mismatches", vr.Mismatches)
 		d.send(ctx, e)
 	}
 	if err != nil {
@@ -409,6 +440,78 @@ func (d *Daemon) verify(ctx context.Context, res *JobResult) bool {
 		}
 	}
 	return vr.OK
+}
+
+// stagesPassed reports whether every stage of vr passed. vr must be judged
+// (a skipped stage is recorded with OK false).
+func stagesPassed(vr backup.VerifyResult) bool {
+	for _, s := range vr.Stages {
+		if !s.OK {
+			return false
+		}
+	}
+	return true
+}
+
+// stageSummary is the fixed text put into a notification for a failed stage.
+func stageSummary(stage backup.VerifyStage) string {
+	switch stage {
+	case backup.StageReadable:
+		return "the stored dump cannot be read (size, sha256, decryption or pg_restore --list); see verify.json"
+	case backup.StageRestorable:
+		return "the dump cannot be restored or its row counts differ; see verify.json"
+	case backup.StageUsable:
+		return "the restored database cannot be served by this Elythia (tracking tables or fsck); see verify.json"
+	default:
+		return "failed; see verify.json"
+	}
+}
+
+// maxVerifyFileSize bounds how much of verify.json is kept for restoring.
+const maxVerifyFileSize = 16 << 20
+
+// readObject reads key, returning nil without an error when it does not
+// exist.
+func readObject(ctx context.Context, st backup.Storage, key string) ([]byte, error) {
+	rc, err := st.Get(ctx, key)
+	if errors.Is(err, backup.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rc.Close()
+	b, err := io.ReadAll(io.LimitReader(rc, maxVerifyFileSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(b) > maxVerifyFileSize {
+		return nil, fmt.Errorf("%s is too large", key)
+	}
+	return b, nil
+}
+
+// restoreVerifyFile puts back verify.json as it was before an interrupted
+// verification (prev nil: it did not exist).
+func (d *Daemon) restoreVerifyFile(ctx context.Context, key string, prev []byte, prevErr error) {
+	ctx = context.WithoutCancel(ctx)
+	var err error
+	switch {
+	case prevErr != nil:
+		// 前の中身が分からないので触らない。ok:false が残っても、使えない世代が増える
+		// だけで、整理で消す世代は増えない。
+		d.log.Warn("backup: cannot restore verify.json after an interrupted verification", "key", key, "error", prevErr)
+		return
+	case prev == nil:
+		if err = d.opts.Storage.Delete(ctx, key); errors.Is(err, backup.ErrNotFound) {
+			err = nil
+		}
+	default:
+		err = d.opts.Storage.Put(ctx, key, bytes.NewReader(prev))
+	}
+	if err != nil {
+		d.log.Error("backup: cannot restore verify.json after an interrupted verification", "key", key, "error", err)
+	}
 }
 
 // judged reports whether vr records a verdict for all three stages, in the

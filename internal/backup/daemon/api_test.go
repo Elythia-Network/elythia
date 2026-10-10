@@ -119,6 +119,31 @@ func TestHandlerTakeAndStatus(t *testing.T) {
 	})
 }
 
+// 本文は 4KiB までしか読まない。正しい ID でも、上限を超える JSON は 400 にする。
+func TestHandlerVerifyBodyLimit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var id string
+		r := newRig(t, nil, func(r *rig) { id = r.st.addGeneration(epoch.Add(-time.Hour), true, "") })
+		r.start(t)
+		h, err := Handler(r.d, testToken)
+		require.NoError(t, err)
+		padded := func(size int) string {
+			head, tail := `{"pad":"`, `","id":"`+id+`"}`
+			return head + strings.Repeat("x", size-len(head)-len(tail)) + tail
+		}
+		const limit = 4 << 10
+		code, out, _ := call(t, h, "POST", "/verify", testToken, padded(limit+1))
+		assert.Equal(t, http.StatusBadRequest, code)
+		assert.Equal(t, "invalid_id", out["error"])
+		assert.Empty(t, r.ver.verified())
+		// 上限ちょうどまでは読む。
+		code, _, _ = call(t, h, "POST", "/verify", testToken, padded(limit))
+		assert.Equal(t, http.StatusAccepted, code)
+		synctest.Wait()
+		r.stop()
+	})
+}
+
 func TestHandlerVerify(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var id string

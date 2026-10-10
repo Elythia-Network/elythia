@@ -117,6 +117,16 @@ func TestScheduleMultiDay(t *testing.T) {
 	assert.Equal(t, time.Date(2026, 10, 10, 4, 0, 0, 0, jst), s.Next(time.Date(2026, 10, 7, 5, 0, 0, 0, jst)))
 }
 
+// 再起動しても、枠は最新の世代を取った日から数える (再起動した日へずれない)。
+func TestScheduleMultiDayKeepsSlotsAcrossRestart(t *testing.T) {
+	s := mustSchedule(t, config.BackupScheduleOptions{Interval: "168h", At: "04:00"}, jst)
+	latest := time.Date(2026, 10, 4, 4, 0, 30, 0, jst)
+	now := time.Date(2026, 10, 10, 10, 0, 0, 0, jst)
+	first := s.Start(now, &latest)
+	assert.Equal(t, time.Date(2026, 10, 11, 4, 0, 0, 0, jst), first, "one interval after the newest generation's slot")
+	assert.Equal(t, time.Date(2026, 10, 18, 4, 0, 0, 0, jst), s.Next(first))
+}
+
 func TestScheduleKeepsWallClockAcrossDST(t *testing.T) {
 	ny, err := time.LoadLocation("America/New_York")
 	require.NoError(t, err)
