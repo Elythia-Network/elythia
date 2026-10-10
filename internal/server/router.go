@@ -3883,8 +3883,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// ディレクトリの保存先のダウンロード。ブラウザのダウンロードは Authorization を
 	// 付けられないので、admin/backup/download が出した短い期限の token で渡す
 	// (S3 の署名付き URL と同じ扱い)。token は path でなく query の `token` に
-	// 置く。アクセスログは query の `token` を伏せ (internal/misc/redact)、nginx の
-	// 参照設定は query を含まない $uri を記録するので、どちらにも残らない。
+	// 置く。本体のアクセスログは query の `token` を伏せ (internal/misc/redact)、
+	// nginx の参照設定のアクセスログは query を含まない $uri を記録する。ただし
+	// nginx の error_log はエラー行にリクエスト行をそのまま付けるので、そこには
+	// 残りうる (伏せる手段が無い。有効なのは 5 分)。
 	s.echo.GET("/backup-download", backupHandler.ServeDownload)
 	api.POST("/admin/server-info", adminHandler.ServerInfo, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:server-info"))
 	// mk-go 独自 (#2395)。upstream に対応する endpoint は無いので scope も

@@ -554,6 +554,19 @@ server {
         return 404;
     }
 
+    # 管理画面からのバックアップのダウンロード (ディレクトリの保存先)。数GBの
+    # dumpを返すので、bufferingを切る (下記の注意点を参照)。
+    location = /backup-download {
+        proxy_pass http://mkgo;
+        proxy_http_version 1.1;
+        proxy_buffering off;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_redirect off;
+    }
+
     location / {
         proxy_pass http://mkgo;
         proxy_http_version 1.1;
@@ -583,6 +596,7 @@ server {
   `/streaming?i=<トークン>` はそちらから出る。レベルを上げても消えない
   (実測では `[crit]`)。収集側でフィルタするか、診断性を捨てて
   `error_log /dev/null;` にすること
+- `/backup-download`(管理画面からバックアップをダウンロードする経路、[DBのバックアップ](backup.md#ダウンロード))は`proxy_buffering off`にする。既定のままだと、nginxが数GBのdumpを一時ファイルに書き出す。URLのquery`token`も`/streaming`の`i`と同じく、エラーになったときに`error_log`へ残る(有効なのは5分)
 - `location /debug`の404は**`location /`が全部を委譲する構成だから**要る。Elythiaは
   `enablePprof: true`のときだけ`/debug/pprof/*`を生やすが、有効化は運用者が診断のために
   行う判断であって公開してよいという意味ではない。ここで落としておかないと、

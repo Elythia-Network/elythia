@@ -144,7 +144,8 @@ const (
 	LogCreateFederationRule LogType = "createFederationRule"
 	LogUpdateFederationRule LogType = "updateFederationRule"
 	LogDeleteFederationRule LogType = "deleteFederationRule"
-	// DB のバックアップの管理画面 (#3462)。閲覧も含めて全ての操作を残す。
+	// DB のバックアップの管理画面 (#3462)。閲覧も含めて、成立した操作を残す
+	// (Log は非同期で、書き込みの失敗は警告のログだけになる)。
 	// バックアップには利用者の秘密鍵・token・パスワードの hash が入るので、
 	// 誰がいつ一覧を見て、どの世代を落としたか・消したかを追えるようにする。
 	// info は listBackups が {generationCount, totalBytes}、takeBackup が {}、

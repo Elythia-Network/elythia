@@ -90,6 +90,29 @@ touch /mnt/nas/elythia-backup/.elythia-backup
 
 ディレクトリと目印は自動では作らない。作ると、mountが外れたときに同じホストのディスクへ書き始める。
 
+**管理画面(#3462)からも使うときは、本体とグループを共有する。** バックアップ用のサービスはUID 70(postgres)で、本体は別のUIDで動く(compose(TCP)の`docker-compose.yml`ではUID・GIDとも991、UDSの`compose.uds.yaml.example`では65532)。本体が一覧・ダウンロード・削除をするには、本体のGIDのグループとして読めて、ディレクトリに書ける(消せる)必要がある。
+
+- `elythia backup`は、ディレクトリを`0770`、ファイルを`0640`で作る(umaskに左右されない)。グループには、ファイルを読むことと消すことを許し、書き換えは許さない。他人(other)には一切渡さない
+- グループは、根に付けたsetgidで引き継がせる。根の所有者とグループを`70:<本体のGID>`、modeを`2770`にする
+- composeの`backup`サービスは、本体のGIDを補助グループに持つ(`group_add`。同梱のcomposeに書いてある)。持たないと、作ったディレクトリからsetgidが落ち、その下のファイルが本体から読めなくなる
+- 本体のコンテナにも、同じホストのパスを`backup.storage.dir.path`(または`backup.server.storage.dir.path`)と同じ場所にmountする
+
+```bash
+# compose(TCP)。UDSでは991を65532に読み替える
+chown 70:991 /mnt/nas/elythia-backup
+chmod 2770 /mnt/nas/elythia-backup
+# 既に世代がある場合(以前の版は0700 / 0600で作っていた)
+chgrp -R 991 /mnt/nas/elythia-backup/generations
+find /mnt/nas/elythia-backup/generations -type d -exec chmod 2770 {} +
+find /mnt/nas/elythia-backup/generations -type f -exec chmod 0640 {} +
+```
+
+**暗号化しないdumpは、本体のグループに読める。** 本体はDBの接続情報(と、DBの中の秘密鍵・token)を元から持っているので、読めて新たに漏れるものは無い、という判断。本体のGIDに他のプロセスを入れないこと。NASがUID・GIDを書き換える設定(`all_squash`など)だと、この分け方は効かない。
+
+本体とバックアップ用のサービスを同じユーザーで動かす構成(バイナリ直接実行など)では、この手順は要らない。
+
+保存先の中の通常のファイルだけを世代のファイルとして扱う。symlinkは、根の中を指すものも辿らない(一覧に出さず、読み出しも`not found`にする)。
+
 ## 暗号化
 
 dumpには、利用者の秘密鍵(`user_keypair`)、token、パスワードのhashが入る。`backup.encryption.enabled: true`にすると、dumpを[age](https://age-encryption.org)で暗号化してから送る。
@@ -269,7 +292,9 @@ ID                STATUS    SIZE  ENCRYPTED  VERIFIED  ELYTHIA  MIGRATION
 
 管理画面の「情報 → バックアップ」で、世代の一覧と保存先の使用量を見て、取る・確かめる・消す・ダウンロードができる。本体は設定ファイルの`backup:`を読んで保存先を見る(`backup.server.storage.type`が空なら`backup.storage`)。取る・確かめるは、本体のimageに`pg_dump`が無いので、`backup.server.serviceUrl`の`elythia backup daemon`(#3460で足す)に頼む。
 
-本体が保存先を開けないとき(設定が無い、ディレクトリに目印が無いなど)も、本体は起動する。管理画面は「保存先が設定されていない」と出し、理由は本体のログ(`backup: storage for the admin page is unavailable`)に残る。**ディレクトリの保存先では、本体のコンテナにも同じパスでmountする。** 目印`.elythia-backup`が見えないと開けない。
+本体が保存先を開けないとき(設定が無い、ディレクトリに目印が無いなど)も、本体は起動する。管理画面は「保存先が設定されていない」と出し、理由は本体のログ(`backup: storage for the admin page is unavailable`)に残る。**ディレクトリの保存先では、本体のコンテナにも同じパスでmountし、グループを共有する**([ディレクトリ](#ディレクトリ))。目印`.elythia-backup`が見えないと開けない。
+
+`backup.server.serviceUrl`を書いても`backup.server.serviceToken`が空なら、本体は依頼を送らず、取る・確かめるを使えないものとして扱う(起動時に警告をログに出す)。制御APIへの依頼は、`HTTP_PROXY`などの環境変数があってもproxyを通さない。
 
 本体に渡す鍵は、`backup.server.storage`でバックアップ用のサービスとは別にできる。本体が保存先に対して行うのは、一覧・読み取り(`meta.json` / `verify.json`と、署名付きURL)・削除だけで、書き込みはしない。
 
@@ -282,9 +307,13 @@ ID                STATUS    SIZE  ENCRYPTED  VERIFIED  ELYTHIA  MIGRATION
 - 二段階認証(TOTP)かパスキーを登録していること。未登録なら画面が登録を案内する
 - 操作のたびに、パスワードと、TOTPのコード(またはバックアップコード)かパスキーで再認証すること
 
-再認証の失敗は、パスワードと2つ目の要素のどちらの失敗も`passwordguard`で数える(アカウントと接続元の範囲の組ごとに1時間10回、アカウント全体で1時間100回。サインインや`i/*`の再認証と同じ枠)。Redisに繋がらないときは照合できないので拒否する(503)。TOTPのコードは一度使うと記録が残っている間(既定で120秒)使えないので、続けて操作するときは次のコードを待つか、パスキーを使う。パスワードが合っていてコードを使い回しただけのときは、失敗として数えない。
+再認証の失敗は、パスワードと2つ目の要素のどちらの失敗も`passwordguard`で数える(アカウントと接続元の範囲の組ごとに1時間10回、アカウント全体で1時間100回。`i/*`でパスワードを確かめる操作と同じ枠で、合わせて数える。サインインはこの枠を使わない)。Redisに繋がらないときは照合できないので拒否する(503)。TOTPのコードは一度使うと記録が残っている間(既定で120秒)使えないので、続けて操作するときは次のコードを待つか、パスキーを使う。パスワードが合っていてコードを使い回しただけのときは、失敗として数えない。
 
-操作はすべてモデレーションログに残る(`listBackups` / `takeBackup` / `verifyBackup` / `deleteBackup` / `downloadBackup`)。
+この例外のため、直前に使われたTOTPのコードを知っている者は、応答(`TWO_FACTOR_CODE_ALREADY_USED`か`REAUTHENTICATION_FAILED`か)でパスワードの当否を知れる。ただし、パスワードが違えば失敗として数えるので、上の枠を超えて試すことはできない。
+
+パスキーのchallengeは、サインインのものとは別に置く。サインインのために出したchallengeへの応答は、ここでは通らない。challengeを置いたRedisに繋がらないときは、照合できなかったものとして拒否し(503)、失敗には数えない。
+
+成立した操作は、モデレーションログに残す(`listBackups` / `takeBackup` / `verifyBackup` / `deleteBackup` / `downloadBackup`)。ログは操作の応答と別に書くので、書き込みに失敗しても操作は取り消されず、本体のログに警告(`moderation log: write failed`など)だけが残る。
 
 ### 一覧と使用量
 
@@ -299,6 +328,11 @@ ID                STATUS    SIZE  ENCRYPTED  VERIFIED  ELYTHIA  MIGRATION
 ### ダウンロード
 
 - S3互換の保存先: 5分だけ有効な署名付きURLを出す。ブラウザは保存先から直接ダウンロードする
-- ディレクトリの保存先: 本体の`/backup-download?token=<token>`から渡す。tokenは5分だけ有効で、期限内なら途切れたダウンロードを再開できる(Range)。tokenはアクセスログでは伏せられ、実際に取られたことは本体のログ(`admin/backup: backup downloaded`)に残る
+- ディレクトリの保存先: 本体の`/backup-download?token=<token>`から渡す。tokenは5分だけ有効で、期限内なら途切れたダウンロードを再開できる(Range)。tokenは本体のアクセスログでは伏せられ、実際に取られたことは本体のログ(`admin/backup: backup downloaded`)に残る。前に置いたnginxでは、同梱の設定はアクセスログにqueryを出さないが、**エラーになったときの`error_log`の行にはtokenが残る**(nginxに伏せる手段が無い。[逆プロキシ](deployment.md#逆プロキシ-nginx))。数GBのdumpを返すので、nginxでは`/backup-download`の`proxy_buffering`を切る(同梱の`deploy/uds/nginx/mkgo.conf`と、[逆プロキシ](deployment.md#逆プロキシ-nginx)の例に入れてある)
 
 どちらも`<世代ID>-<ファイル名>`(例: `20261010T040000Z-dump.pgc`)の名前で保存される。暗号化した世代は、暗号化したまま渡す。戻すにはageの秘密鍵が要る。
+
+### 上げるときにすること
+
+- **ディレクトリの保存先を管理画面から使うときは、[ディレクトリ](#ディレクトリ)の手順でグループを揃える。** 以前の版の`elythia backup`は`0700` / `0600`で作っていたので、そのままでは本体から読めない(一覧が500になる)
+- **nginxの設定に`/backup-download`の節を足す。** UDSの`deploy/uds/nginx/mkgo.conf`は取り込めば入るが、設定はnginxの起動時に読むので、nginxのコンテナを再起動する(`docker compose -f compose.uds.yaml restart nginx`)。自分で書いた設定には、[逆プロキシ](deployment.md#逆プロキシ-nginx)の例を写す

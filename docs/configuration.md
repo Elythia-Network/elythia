@@ -272,7 +272,7 @@ Elythia 側のマイグレーションには含めていない。pgroonga 拡張
 | `backup.server.storage.*` | object | 本体(管理画面)が読む保存先。`backup.storage`と同じ形。**`type`が空なら`backup.storage`を使う**。本体には一覧・読み取り・削除の権限があればよく、書き込みは要らない。バックアップ用のサービスとは別の鍵を本体に渡したいときに、ここに書く |
 | `backup.server.pricePerGbMonth` | number | 1GBあたりの月額。0より大きいと、管理画面に月額の目安を出す(1GBは2^30バイト。S3・R2の課金の単位に合わせた) |
 | `backup.server.serviceUrl` | string | `elythia backup daemon`(#3460で足す)の制御APIのURL(例: `http://backup:3010`)。空なら、管理画面から取る・確かめるができない(一覧・削除・ダウンロードはできる) |
-| `backup.server.serviceToken` | string | 制御APIの認証。本体は`Authorization: Bearer <値>`で送り、daemonは同じ値で照合する |
+| `backup.server.serviceToken` | string | 制御APIの認証。本体は`Authorization: Bearer <値>`で送り、daemonは同じ値で照合する。空なら、`serviceUrl`があっても本体は依頼を送らない(起動時に警告する) |
 
 `backup:`の節は`MK_*`の環境変数では作れない(`bindEnvKeys()`に無い)。
 
