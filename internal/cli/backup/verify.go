@@ -159,14 +159,9 @@ func printResult(w io.Writer, res backup.VerifyResult) {
 		}
 		fmt.Fprintf(w, "  %s: meta.json %d rows / restored %s\n", m.Table, m.Expected, actual)
 	}
-	// 段が 3 つ揃っていないのは、環境の誤りや中断で判定に至らなかったとき。
-	// そのときに「戻せない」と出すと、世代が壊れていると誤解される。
-	switch {
-	case len(res.Stages) < 3:
-		fmt.Fprintln(w, "This backup was not judged: verification stopped because of the error below (the backup itself may be fine).")
-	case res.OK:
+	if res.OK {
 		fmt.Fprintln(w, "This backup can be restored.")
-	default:
+	} else {
 		fmt.Fprintln(w, "This backup cannot be restored.")
 	}
 }

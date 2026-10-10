@@ -197,12 +197,6 @@ services:
       # 暗号化した世代を確かめる・戻すときだけ、age の秘密鍵を渡す (取るだけなら不要)。
       # 秘密鍵はリポジトリの外 (deploy/uds/config にも置かない) に置く。
       # - /etc/elythia/backup-identity.txt:/run/secrets/backup-identity.txt:ro
-      # verify は復号した dump と戻した DB を TMPDIR (既定は書き込み層の /tmp) に置く。
-      # 本番の DB の volume と同じディスクを埋めないよう、別のディスクを mount して
-      # 下の environment の TMPDIR をそこへ向ける (UID 70 が書けるようにする。docs/backup.md)。
-      # - /mnt/scratch/elythia-verify:/scratch
-    # environment:
-    #   TMPDIR: /scratch
     networks:
       - mkgo-uds
     restart: "no"

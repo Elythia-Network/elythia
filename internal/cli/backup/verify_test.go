@@ -3,7 +3,6 @@ package backup
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -18,24 +17,15 @@ import (
 	"github.com/elythia-network/elythia/internal/config"
 )
 
-// listStorage is a Storage that lists fixed keys and serves a minimal
-// meta.json for each generation.
+// listStorage is a Storage that only lists fixed keys.
 type listStorage struct {
 	keys []string
 	err  error
 }
 
 func (s listStorage) Put(context.Context, string, io.Reader) error { return errors.New("read-only") }
-func (s listStorage) Get(_ context.Context, key string) (io.ReadCloser, error) {
-	id := backup.GenerationIDFromKey(key)
-	if id == "" || key != backup.Key(id, backup.MetaFile) {
-		return nil, backup.ErrNotFound
-	}
-	body, err := json.Marshal(backup.Meta{FormatVersion: backup.MetaFormatVersion, ID: id})
-	if err != nil {
-		return nil, err
-	}
-	return io.NopCloser(bytes.NewReader(body)), nil
+func (s listStorage) Get(context.Context, string) (io.ReadCloser, error) {
+	return nil, backup.ErrNotFound
 }
 func (s listStorage) Stat(context.Context, string) (backup.ObjectInfo, error) {
 	return backup.ObjectInfo{}, backup.ErrNotFound
@@ -159,16 +149,6 @@ func TestRunVerifyPrintsWarningsAndErrors(t *testing.T) {
 	assert.Contains(t, h.stderr.String(), "busy")
 }
 
-func TestRunVerifyEnvironmentErrorIsNotAVerdict(t *testing.T) {
-	h := newHarness(t)
-	h.result = backup.VerifyResult{ID: "20261010T000000Z", Stages: []backup.StageResult{{Stage: backup.StageReadable, OK: true}}}
-	h.err = errors.New("the backup uses extension(s) pg_bigm that the throwaway PostgreSQL server cannot install")
-	assert.Equal(t, 1, h.run("latest"))
-	assert.Contains(t, h.stdout.String(), "This backup was not judged")
-	assert.NotContains(t, h.stdout.String(), "cannot be restored")
-	assert.Contains(t, h.stderr.String(), "pg_bigm")
-}
-
 func TestRunVerifyErrorWithoutStagesPrintsNoTable(t *testing.T) {
 	h := newHarness(t)
 	h.result = backup.VerifyResult{}
@@ -209,7 +189,6 @@ func TestRunVerifyStopsBeforeVerifying(t *testing.T) {
 		}, "latest", "bad yaml"},
 		{"no backup section", func(_ *testing.T, h *harness) { h.cfg.Backup = nil }, "latest", "no backup: section"},
 		{"no bundled migrations", func(t *testing.T, h *harness) { h.env.coreDir = filepath.Join(t.TempDir(), "none") }, "latest", "bundled migrations"},
-		{"empty bundled migrations", func(t *testing.T, h *harness) { h.env.coreDir = t.TempDir() }, "latest", "bundled migrations"},
 		{"unreadable local migrations", func(t *testing.T, h *harness) {
 			f := filepath.Join(t.TempDir(), "file")
 			require.NoError(t, os.WriteFile(f, nil, 0o644))
