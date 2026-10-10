@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -187,15 +188,12 @@ func TestDirStorage_RejectsKeysOutsideRoot(t *testing.T) {
 	assert.Len(t, entries, 1, "nothing written next to the root")
 }
 
-func TestDirStorage_PutIsPrivateAndLeavesNoTempFile(t *testing.T) {
+func TestDirStorage_PutLeavesNoTempFile(t *testing.T) {
 	root := markedDir(t)
 	st, err := NewDirStorage(root)
 	require.NoError(t, err)
 	ctx := context.Background()
 	require.NoError(t, st.Put(ctx, "generations/a/dump.pgc", strings.NewReader("secret")))
-	fi, err := os.Stat(filepath.Join(root, "generations", "a", "dump.pgc"))
-	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0o600), fi.Mode().Perm())
 
 	require.Error(t, st.Put(ctx, "generations/a/broken", &failingReader{data: []byte("x"), err: io.ErrClosedPipe}))
 	entries, err := os.ReadDir(filepath.Join(root, "generations", "a"))
@@ -432,4 +430,92 @@ func TestDownloadName(t *testing.T) {
 	assert.Equal(t, "dump.pgc", downloadName("generations/latest/dump.pgc"))
 	// 引用符・改行・非 ASCII はヘッダーを壊すので置き換える。
 	assert.Equal(t, "a_b__c___.txt", downloadName("x/a\"b\r\nc日本語.txt"))
+}
+
+// TestDirStorage_PutPermissions: the group may read the files and delete
+// them (the main server runs as another UID, #3462); others get nothing,
+// whatever the umask is.
+func TestDirStorage_PutPermissions(t *testing.T) {
+	old := syscall.Umask(0o077)
+	t.Cleanup(func() { syscall.Umask(old) })
+	root := markedDir(t)
+	// 運営者の手順と同じく、根に setgid を付けてグループを共有する。
+	require.NoError(t, os.Chmod(root, 0o770|os.ModeSetgid))
+	st, err := NewDirStorage(root)
+	require.NoError(t, err)
+	ctx := context.Background()
+	require.NoError(t, st.Put(ctx, "generations/a/dump.pgc", strings.NewReader("secret")))
+
+	fi, err := os.Stat(filepath.Join(root, "generations", "a", "dump.pgc"))
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o640), fi.Mode().Perm(), "the group reads, others do not")
+	rfi, err := os.Stat(root)
+	require.NoError(t, err)
+	rootGID := rfi.Sys().(*syscall.Stat_t).Gid
+	assert.Equal(t, rootGID, fi.Sys().(*syscall.Stat_t).Gid, "the file takes the group of the root")
+	for _, dir := range []string{"generations", filepath.Join("generations", "a")} {
+		fi, err := os.Stat(filepath.Join(root, dir))
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0o770), fi.Mode().Perm(), dir)
+		assert.NotZero(t, fi.Mode()&os.ModeSetgid, "%s keeps the inherited setgid", dir)
+		assert.Equal(t, rootGID, fi.Sys().(*syscall.Stat_t).Gid, dir)
+	}
+
+	// 既にあるディレクトリの mode は変えない。
+	require.NoError(t, os.Mkdir(filepath.Join(root, "generations", "b"), 0o700))
+	require.NoError(t, os.Chmod(filepath.Join(root, "generations", "b"), 0o700))
+	require.NoError(t, st.Put(ctx, "generations/b/x", strings.NewReader("x")))
+	fi, err = os.Stat(filepath.Join(root, "generations", "b"))
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o700), fi.Mode().Perm())
+}
+
+// TestDirStorage_DoesNotFollowSymlinks: someone who can write to the
+// storage must not be able to hand out files outside it through a symlink.
+func TestDirStorage_DoesNotFollowSymlinks(t *testing.T) {
+	root := markedDir(t)
+	st, err := NewDirStorage(root)
+	require.NoError(t, err)
+	ctx := context.Background()
+	outside := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(outside, "dump.pgc"), []byte("host secret"), 0o600))
+	require.NoError(t, st.Put(ctx, "generations/a/real", strings.NewReader("in storage")))
+
+	// 世代の中の symlink (根の外を指すものと、根の中を指すもの)。
+	require.NoError(t, os.Symlink(filepath.Join(outside, "dump.pgc"), filepath.Join(root, "generations", "a", "dump.pgc")))
+	require.NoError(t, os.Symlink(filepath.Join(root, "generations", "a", "real"), filepath.Join(root, "generations", "a", "inner")))
+	// 途中のディレクトリが symlink。
+	require.NoError(t, os.Symlink(outside, filepath.Join(root, "generations", "b")))
+
+	for _, key := range []string{"generations/a/dump.pgc", "generations/a/inner", "generations/b/dump.pgc"} {
+		_, err := st.Stat(ctx, key)
+		assert.ErrorIs(t, err, ErrNotFound, key)
+		_, err = st.Get(ctx, key)
+		assert.ErrorIs(t, err, ErrNotFound, key)
+	}
+	objs, err := st.List(ctx, "")
+	require.NoError(t, err)
+	require.Len(t, objs, 1)
+	assert.Equal(t, "generations/a/real", objs[0].Key)
+	b := readAll(t, st, "generations/a/real")
+	assert.Equal(t, "in storage", string(b))
+}
+
+// TestDirStorage_GetRefusesASwapAfterTheCheck replaces the checked file with
+// a symlink before it is opened.
+func TestDirStorage_GetRefusesASwapAfterTheCheck(t *testing.T) {
+	root := markedDir(t)
+	st, err := NewDirStorage(root)
+	require.NoError(t, err)
+	ctx := context.Background()
+	require.NoError(t, st.Put(ctx, "generations/a/dump.pgc", strings.NewReader("in storage")))
+	outside := filepath.Join(t.TempDir(), "secret")
+	require.NoError(t, os.WriteFile(outside, []byte("host secret"), 0o600))
+	beforeDirOpen = func(p string) {
+		require.NoError(t, os.Remove(p))
+		require.NoError(t, os.Symlink(outside, p))
+	}
+	t.Cleanup(func() { beforeDirOpen = nil })
+	_, err = st.Get(ctx, "generations/a/dump.pgc")
+	assert.ErrorIs(t, err, ErrNotFound)
 }

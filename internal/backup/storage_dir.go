@@ -17,6 +17,20 @@ import (
 // renaming them into place. List never returns them.
 const dirTempPrefix = ".tmp-"
 
+// Permissions of what DirStorage creates: the owner and the group may read,
+// nobody else may. The group may also delete (write on directories), but not
+// change the files.
+//
+// 本体 (管理画面、#3462) はバックアップ用のサービスと別の UID で動く (991 と 70)。
+// 本体が一覧・ダウンロード・削除をするには、同じグループで読めて、ディレクトリに
+// 書ける (消せる) 必要がある。dump には秘密鍵や token が入るので、他人 (other) には
+// 一切渡さない。グループは、根に setgid を付けたディレクトリから引き継ぐ
+// (docs/backup.md)。umask に左右されないよう、作った後で付け直す。
+const (
+	dirPerm  fs.FileMode = 0o770
+	filePerm fs.FileMode = 0o640
+)
+
 // DirStorage keeps generations in a directory, meant to be a mount of another
 // device (NAS and so on). Keys map to paths below the root.
 type DirStorage struct {
@@ -108,11 +122,11 @@ func (d *DirStorage) put(ctx context.Context, key string, r io.Reader, place fun
 		return err
 	}
 	dir := filepath.Dir(p)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("backup: mkdir %s: %w", dir, err)
+	if err := d.mkdirs(dir); err != nil {
+		return err
 	}
-	// CreateTemp は 0600 で作る。バックアップには秘密鍵や token が入るので、
-	// 他の利用者から読めないままにする。
+	// CreateTemp は 0600 で作る。書き終える前に他から読まれないよう、そのまま書き、
+	// 置く前に filePerm に広げる。
 	f, err := os.CreateTemp(dir, dirTempPrefix+"*")
 	if err != nil {
 		return fmt.Errorf("backup: create temp file: %w", err)
@@ -135,6 +149,9 @@ func (d *DirStorage) put(ctx context.Context, key string, r io.Reader, place fun
 	if err = f.Sync(); err != nil {
 		return fmt.Errorf("backup: sync %s: %w", key, err)
 	}
+	if err = f.Chmod(filePerm); err != nil {
+		return fmt.Errorf("backup: chmod %s: %w", key, err)
+	}
 	closed = true
 	if err = f.Close(); err != nil {
 		return fmt.Errorf("backup: close %s: %w", key, err)
@@ -143,6 +160,40 @@ func (d *DirStorage) put(ctx context.Context, key string, r io.Reader, place fun
 		return err
 	}
 	syncDir(dir)
+	return nil
+}
+
+// mkdirs creates the directories from the root down to dir with dirPerm.
+// Directories that already exist are left as they are.
+//
+// 既にあるディレクトリの mode は変えない。運営者が手で付けた setgid や、別の
+// UID が作ったものを、こちらの都合で書き換えない。
+func (d *DirStorage) mkdirs(dir string) error {
+	rel, err := filepath.Rel(d.root, dir)
+	if err != nil || rel == "." {
+		return err
+	}
+	cur := d.root
+	for _, seg := range strings.Split(rel, string(filepath.Separator)) {
+		cur = filepath.Join(cur, seg)
+		err := os.Mkdir(cur, dirPerm)
+		if errors.Is(err, fs.ErrExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("backup: mkdir %s: %w", cur, err)
+		}
+		fi, err := os.Stat(cur)
+		if err != nil {
+			return fmt.Errorf("backup: mkdir %s: %w", cur, err)
+		}
+		// 親の setgid を引き継いだ (グループを共有する) ディレクトリでは、それを
+		// 残す。落とすと、その下に作るファイルのグループが自分の主グループになり、
+		// 本体から読めなくなる。
+		if err := os.Chmod(cur, dirPerm|fi.Mode()&fs.ModeSetgid); err != nil {
+			return fmt.Errorf("backup: chmod %s: %w", cur, err)
+		}
+	}
 	return nil
 }
 
@@ -155,23 +206,42 @@ func syncDir(dir string) {
 	}
 }
 
-// Get opens key for reading.
+// beforeDirOpen runs between the check and the open in DirStorage.Get. Tests
+// use it to swap the file in that window.
+var beforeDirOpen func(p string)
+
+// Get opens key for reading. Only a regular file is an object: a symbolic
+// link, even one that stays inside the root, is not followed.
+//
+// 保存先に書ける者が dump の名前で symlink を置くと、辿った先 (本体のコンテナの
+// 中の任意のファイル) を管理画面のダウンロードで渡してしまう。List は symlink を
+// 返さないが、API は名前を直接指定できるので、ここで止める。
 func (d *DirStorage) Get(_ context.Context, key string) (io.ReadCloser, error) {
 	p, err := d.path(key)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := d.statFile(p); err != nil {
+	fi, err := d.statFile(p)
+	if err != nil {
 		return nil, err
+	}
+	if beforeDirOpen != nil {
+		beforeDirOpen(p)
 	}
 	f, err := os.Open(p)
 	if err != nil {
 		return nil, notFoundOr(err)
 	}
+	// 確かめてから開くまでの間に symlink や別のファイルへ差し替えられていないか。
+	// 開いたものが確かめたものと同じ inode でなければ渡さない。
+	if ofi, err := f.Stat(); err != nil || !os.SameFile(fi, ofi) {
+		_ = f.Close()
+		return nil, ErrNotFound
+	}
 	return f, nil
 }
 
-// Stat describes key.
+// Stat describes key. Like Get, it does not follow symbolic links.
 func (d *DirStorage) Stat(_ context.Context, key string) (ObjectInfo, error) {
 	p, err := d.path(key)
 	if err != nil {
@@ -184,10 +254,24 @@ func (d *DirStorage) Stat(_ context.Context, key string) (ObjectInfo, error) {
 	return ObjectInfo{Key: key, Size: fi.Size(), ModTime: fi.ModTime()}, nil
 }
 
+// statFile returns the FileInfo of p when p and every directory between the
+// root and p are not symbolic links and p is a regular file.
 func (d *DirStorage) statFile(p string) (fs.FileInfo, error) {
-	fi, err := os.Stat(p)
+	rel, err := filepath.Rel(d.root, p)
 	if err != nil {
-		return nil, notFoundOr(err)
+		return nil, err
+	}
+	cur := d.root
+	var fi fs.FileInfo
+	for _, seg := range strings.Split(rel, string(filepath.Separator)) {
+		cur = filepath.Join(cur, seg)
+		if fi, err = os.Lstat(cur); err != nil {
+			return nil, notFoundOr(err)
+		}
+		// 途中のディレクトリが symlink でも、根の外を指しうる。
+		if fi.Mode()&fs.ModeSymlink != 0 {
+			return nil, ErrNotFound
+		}
 	}
 	// ディレクトリは object ではない (S3 にディレクトリが無いのと揃える)。
 	if !fi.Mode().IsRegular() {
