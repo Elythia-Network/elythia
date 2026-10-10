@@ -80,6 +80,15 @@ class TestFederationFollow:
 
         assert poll_until(_followed, timeout=60, desc="bob sees alice as follower")
 
+        # alice 側でもフォローが成立する (bob の Accept が届く) のを待つ。リモートへの
+        # フォローは Accept まで申請中になるので (本家と同じ、#3491)、bob の followers
+        # に載っただけでは alice の home timeline にまだ積まれない。
+        assert poll_until(
+            lambda: (instance_a.users_show("bob", host=B_DOMAIN) or {}).get("isFollowing") is True,
+            timeout=60,
+            desc="alice's follow of bob is accepted",
+        )
+
 
 class TestFederationNoteDelivery:
     """

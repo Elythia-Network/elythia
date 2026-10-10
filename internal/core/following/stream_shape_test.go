@@ -99,6 +99,9 @@ func callsOf(pub *stubMainStreamPublisher, event string) []mainEventCall {
 // follow の相手は、Webhook と同じく閲覧者=フォローした側の UserDetailedNotMe (#3330)。
 // 本家 UserFollowingService は profile を読み、関係とフォロワー限定のカウントを載せる。
 func TestStream_FollowCarriesDetailedNotMe(t *testing.T) {
+	// ローカルからリモートへのフォローは Accept まで申請になる (#3491)。このテストは
+	// 成立した後を見るので、本家の backend e2e と同じ切り替えで即座に成立させる。
+	t.Setenv("FORCE_FOLLOW_REMOTE_USER_FOR_TESTING", "true")
 	svc, userRepo, pub := newStreamSvc(t)
 	addStreamUser(userRepo, "alice", false, nil)
 	host := streamRemoteHost

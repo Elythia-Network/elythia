@@ -1350,6 +1350,10 @@ func TestFollowers_AppliesRemoteStatsOverride(t *testing.T) {
 // /api/users/following — same helper is used so symmetry is expected, but
 // explicit regression guard against prefix routing or pack-side regressions.
 func TestFollowing_AppliesRemoteStatsOverride(t *testing.T) {
+	// ローカルからリモートへのフォローは Accept まで申請になる (#3491)。このテストは
+	// フォローが成立した後の表示を見るので、本家の backend e2e と同じ切り替えで即座に
+	// 成立させる。
+	t.Setenv("FORCE_FOLLOW_REMOTE_USER_FOR_TESTING", "true")
 	h, repo := newTestHandler(t)
 	addTestUser(repo) // user1 = local target profile
 	remoteHost := "remote.example"

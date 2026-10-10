@@ -1876,6 +1876,31 @@ func TestProcess_RejectFollowRelay_MarksRejected(t *testing.T) {
 	assert.Empty(t, marker.accepted)
 }
 
+// relay の Accept の object が Follow の id だけでも、relay 本人からなら accepted
+// にする (#3491)。他の actor からは状態を変えない (relayStatusChangeAllowed)。
+func TestProcess_AcceptFollowRelay_IDOnlyObject(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		actor string
+		want  []string
+	}{
+		{"from the relay", "https://relay.example/actor", []string{"relID"}},
+		{"from another host", "https://evil.example/actor", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, repo, _, _ := newProcessor(t, aliceActor)
+			p.SetLocalBaseURL("https://example.com")
+			marker := newFakeRelayMarker("relID", "https://relay.example/inbox")
+			p.SetRelayMarker(marker)
+			seedRelayActor(repo, "https://relay.example/actor", "https://relay.example/inbox", "")
+			seedRelayActor(repo, "https://evil.example/actor", "https://evil.example/inbox", "")
+			body := []byte(`{"type":"Accept","actor":"` + tc.actor + `","object":"https://example.com/activities/follow-relay/relID"}`)
+			require.NoError(t, p.Process(body))
+			assert.Equal(t, tc.want, marker.accepted)
+		})
+	}
+}
+
 // TestProcess_FollowRelay_HostNormalizedMatch は host 比較が punycode / 大小文字を
 // 揃えてから行われることを固定する (素の文字列比較へ退行すると落ちる)。
 func TestProcess_FollowRelay_HostNormalizedMatch(t *testing.T) {

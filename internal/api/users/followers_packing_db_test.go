@@ -366,6 +366,10 @@ func TestFollowers_RemoteStatsOverrideRegatesCounts(t *testing.T) {
 // A remote user whose lists are followers-only shows the origin's counts to
 // a viewer who follows them and 0 to one who does not, after the override.
 func TestFollowers_RemoteStatsOverrideRegatesFollowersOnly(t *testing.T) {
+	// ローカルからリモートへのフォローは Accept まで申請になる (#3491)。このテストは
+	// フォローが成立した後の表示を見るので、本家の backend e2e と同じ切り替えで即座に
+	// 成立させる。
+	t.Setenv("FORCE_FOLLOW_REMOTE_USER_FOR_TESTING", "true")
 	h, repo := newTestHandler(t)
 	addTestUser(repo)
 	h.SetBlockingRepo(testutil.NewMockBlockingRepository())
