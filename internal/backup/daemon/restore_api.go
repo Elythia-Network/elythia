@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/netip"
 	"strings"
@@ -68,7 +69,7 @@ func (rs *Restore) parts(w http.ResponseWriter) (*restoreop.Manager, ReauthVerif
 // lock takes busy, or answers BACKUP_SERVICE_BUSY.
 func (rs *Restore) lock(w http.ResponseWriter) (func(), bool) {
 	if !rs.busy.TryLock() {
-		restoreError(w, restoreop.ErrBusy)
+		restoreError(w, nil, restoreop.ErrBusy)
 		return nil, false
 	}
 	return rs.busy.Unlock, true
@@ -120,7 +121,7 @@ type restoreRequest struct {
 //
 // 本体は利用者のリクエストをそのまま転送し、応答をそのまま返す。そのため、
 // 応答の形は本体の admin/* と同じ Misskey の形のエラーにする。
-func mountRestore(mux *http.ServeMux, rs *Restore) {
+func mountRestore(mux *http.ServeMux, rs *Restore, log *slog.Logger) {
 	mux.HandleFunc("POST /restore/prepare", func(w http.ResponseWriter, r *http.Request) {
 		m, v, ok := rs.parts(w)
 		if !ok {
@@ -138,7 +139,7 @@ func mountRestore(mux *http.ServeMux, rs *Restore) {
 		// 始められないもの (終わっていない操作、メンテナンス中、レプリカ) は、
 		// 再認証の前に断る。再認証は DB へ接続を張るため。
 		if err := m.CanStart(r.Context()); err != nil {
-			restoreError(w, err)
+			restoreError(w, log, err)
 			return
 		}
 		u, ok := reauth(w, r, v, req)
@@ -147,12 +148,12 @@ func mountRestore(mux *http.ServeMux, rs *Restore) {
 		}
 		rec, ticket, err := m.Prepare(r.Context(), restoreop.PrepareRequest{GenerationID: req.GenerationID, UserID: u.ID, Token: req.I})
 		if err != nil {
-			restoreError(w, err)
+			restoreError(w, log, err)
 			return
 		}
 		st, err := m.Status(r.Context(), rec)
 		if err != nil {
-			restoreError(w, err)
+			restoreError(w, log, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"opId": rec.OpID, "ticket": ticket, "status": st})
@@ -171,25 +172,25 @@ func mountRestore(mux *http.ServeMux, rs *Restore) {
 			return
 		}
 		defer unlock()
-		rec, ok := ticketRecord(w, r, m, req)
+		rec, ok := ticketRecord(w, r, log, m, req)
 		if !ok {
 			return
 		}
 		// 準備ができていないもの、メンテナンス中は、再認証の前に断る。名前を入れ替え
 		// ている最中に照合の接続を DB へ張らないため。
 		if rec.Step != restoreop.StepReady {
-			restoreError(w, restoreop.ErrStep)
+			restoreError(w, log, restoreop.ErrStep)
 			return
 		}
 		if err := m.NoMaintenance(r.Context()); err != nil {
-			restoreError(w, err)
+			restoreError(w, log, err)
 			return
 		}
 		if _, ok := reauth(w, r, v, req); !ok {
 			return
 		}
 		if err := m.Confirm(r.Context(), rec.OpID); err != nil {
-			restoreError(w, err)
+			restoreError(w, log, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -208,23 +209,23 @@ func mountRestore(mux *http.ServeMux, rs *Restore) {
 			return
 		}
 		defer unlock()
-		rec, ok := ticketRecord(w, r, m, req)
+		rec, ok := ticketRecord(w, r, log, m, req)
 		if !ok {
 			return
 		}
 		if rec.Step != restoreop.StepPreparing && rec.Step != restoreop.StepReady {
-			restoreError(w, restoreop.ErrStep)
+			restoreError(w, log, restoreop.ErrStep)
 			return
 		}
 		if err := m.NoMaintenance(r.Context()); err != nil {
-			restoreError(w, err)
+			restoreError(w, log, err)
 			return
 		}
 		if _, ok := reauth(w, r, v, req); !ok {
 			return
 		}
 		if err := m.Abort(r.Context(), rec.OpID); err != nil {
-			restoreError(w, err)
+			restoreError(w, log, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -243,13 +244,13 @@ func mountRestore(mux *http.ServeMux, rs *Restore) {
 		if req.Session != "" {
 			req.I = req.Session
 		}
-		rec, ok := ticketRecord(w, r, m, req)
+		rec, ok := ticketRecord(w, r, log, m, req)
 		if !ok {
 			return
 		}
 		st, err := m.Status(r.Context(), rec)
 		if err != nil {
-			restoreError(w, err)
+			restoreError(w, log, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, st)
@@ -300,17 +301,17 @@ func reauth(w http.ResponseWriter, r *http.Request, v ReauthVerifier, req restor
 }
 
 // ticketRecord checks the ticket and the session of a request.
-func ticketRecord(w http.ResponseWriter, r *http.Request, m *restoreop.Manager, req restoreRequest) (*restoreop.Record, bool) {
+func ticketRecord(w http.ResponseWriter, r *http.Request, log *slog.Logger, m *restoreop.Manager, req restoreRequest) (*restoreop.Record, bool) {
 	rec, err := m.CheckTicket(r.Context(), req.OpID, req.Ticket, req.I)
 	if err != nil {
-		restoreError(w, err)
+		restoreError(w, log, err)
 		return nil, false
 	}
 	return rec, true
 }
 
 // restoreError writes the response for an error of the restore.
-func restoreError(w http.ResponseWriter, err error) {
+func restoreError(w http.ResponseWriter, log *slog.Logger, err error) {
 	switch {
 	case errors.Is(err, restoreop.ErrInvalidID):
 		writeJSON(w, http.StatusBadRequest, apierr.InvalidParam())
@@ -343,7 +344,12 @@ func restoreError(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusServiceUnavailable, apierr.ErrorWithKind("RESTORE_UNAVAILABLE",
 			"The backup service is stopping.", idRestoreUnavailable, apierr.KindServer))
 	default:
-		// 戻す前の検査 (権限、拡張、版など) の失敗。運営者が読めるよう、理由を載せる。
-		writeJSON(w, http.StatusBadRequest, apierr.Error("RESTORE_PREPARE_FAILED", err.Error(), idRestorePrepareFail))
+		// 戻す前の検査 (権限、拡張、版など) の失敗。理由には DB やファイルの名前が入る
+		// ので、応答には載せず daemon のログにだけ残す。
+		if log != nil {
+			log.Warn("backup: a restore from the admin page could not be prepared", "err", err)
+		}
+		writeJSON(w, http.StatusBadRequest, apierr.Error("RESTORE_PREPARE_FAILED",
+			"The restore could not be prepared. See the log of the backup service for the reason.", idRestorePrepareFail))
 	}
 }

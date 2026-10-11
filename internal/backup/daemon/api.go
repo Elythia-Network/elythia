@@ -76,7 +76,7 @@ func Handler(d *Daemon, token string, restore *Restore) (http.Handler, error) {
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, d.Status())
 	})
-	mountRestore(mux, restore)
+	mountRestore(mux, restore, d.log)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 		// 長さの違いも漏らさないよう、hash にそろえてから定数時間で比べる。
