@@ -229,6 +229,8 @@ type env struct {
 	notes   []string
 	slot    *slot
 	mu      sync.Mutex
+	// stepHook, when set, is the failStep of the managers start makes.
+	stepHook func(to string) error
 }
 
 // slot is the job slot of the backup service.
@@ -314,6 +316,7 @@ func (e *env) start() {
 	e.opts.Acquire = e.slot.acquire
 	e.ctx, e.cancel = context.WithCancel(context.Background())
 	e.m = New(e.opts)
+	e.m.failStep = e.stepHook
 	e.m.Start(e.ctx)
 	e.t.Cleanup(func() {
 		e.cancel()

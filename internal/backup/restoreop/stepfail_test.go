@@ -181,6 +181,27 @@ func TestStepNotWritten_RecordGone(t *testing.T) {
 	assert.Contains(t, e.notes[0], "its record is gone")
 }
 
+// TestStepNotWritten_AtStart checks that the recovery at start also goes on
+// from the written step when it cannot write one (settle after recoverRecord).
+func TestStepNotWritten_AtStart(t *testing.T) {
+	e := newEnv(t)
+	e.stop()
+	e.process("p1")
+	ctx := context.Background()
+	require.NoError(t, e.store.create(ctx, &Record{OpID: "restore-0123456789abcdef", Step: StepSwitched, Database: testDB, Target: tgt, Before: before}))
+	e.db.mu.Lock()
+	e.db.dbs = map[string]string{testDB: "restored", before: "current"}
+	e.db.mu.Unlock()
+	require.NoError(t, e.maint.Enter(ctx, maintmode.State{OpID: "restore-0123456789abcdef", Kind: maintmode.KindRestore, Phase: maintmode.PhaseHeld}))
+	f := newFailOnce(StepReverting)
+	e.stepHook = f.hook
+	e.start()
+	f.wait(t)
+	e.waitStep("restore-0123456789abcdef", StepReverted)
+	assert.Equal(t, "current", e.db.content(testDB))
+	require.Eventually(t, func() bool { return e.maintenance() == nil }, 5*time.Second, 5*time.Millisecond)
+}
+
 // TestRecover_ResumingWithNamesNotSwapped checks that a resuming record whose
 // database names are not as after the switch is left to an operator: the
 // record may lag behind a revert that already put the previous one back.
