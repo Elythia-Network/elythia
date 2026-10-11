@@ -438,3 +438,27 @@ func TestAbuseReportRepository_HasOlderUnresolvedFromHost(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, got, "resolved reports must not suppress new notifications")
 }
+
+// 秘密の欄を伏せる前に記録された平文の行に、検索が一致しないこと。
+func TestModerationLogRepository_List_SearchSkipsMetaSecrets(t *testing.T) {
+	repo := NewModerationLogRepository(testDB)
+	createTestUser(t, "ml_sec")
+	row := &model.ModerationLog{ID: "ml_sec1", UserID: "ml_sec", Type: "updateServerSettings",
+		Info: []byte(`{"before":{"name":"ml-sec-visible-name","smtpPass":"ml-sec-hidden-before"},"after":{"objectStorageSecretKey":"ml-sec-hidden-after"}}`)}
+	require.NoError(t, repo.Create(row))
+	defer cleanupModLog(t, row.ID)
+
+	ids := func(search string) []string {
+		t.Helper()
+		logs, err := repo.List(model.ModerationLogFilter{Limit: 100, Search: search})
+		require.NoError(t, err)
+		var out []string
+		for _, l := range logs {
+			out = append(out, l.ID)
+		}
+		return out
+	}
+	assert.Contains(t, ids("ml-sec-visible-name"), row.ID, "non-secret fields stay searchable")
+	assert.NotContains(t, ids("ml-sec-hidden-before"), row.ID)
+	assert.NotContains(t, ids("ml-sec-hidden-after"), row.ID)
+}
