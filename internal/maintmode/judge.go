@@ -50,8 +50,10 @@ type Counter interface {
 	// Sessions lists the sessions on the database on every server, except
 	// the counter's own and the autovacuum workers.
 	Sessions(ctx context.Context) ([]Blocker, error)
-	// Terminate ends one session listed by Sessions.
-	Terminate(ctx context.Context, b Blocker) error
+	// Terminate ends one session listed by Sessions, if it is still an
+	// Elythia session of the counter's role on the database. It reports
+	// whether it ended one.
+	Terminate(ctx context.Context, b Blocker) (bool, error)
 }
 
 // Judge decides, for the maintenance in Store, when every process has let go
@@ -185,9 +187,14 @@ func (j *Judge) terminateElythia(ctx context.Context, sessions []Blocker) []Bloc
 			remain = append(remain, b)
 			continue
 		}
-		if err := j.Counter.Terminate(ctx, b); err != nil {
+		ended, err := j.Counter.Terminate(ctx, b)
+		if err != nil {
 			slog.Warn("maintenance: failed to terminate an Elythia session", "session", b.String(), "err", err)
 			remain = append(remain, b)
+			continue
+		}
+		if !ended {
+			// 数えた後に自分で閉じたか、pid が別の接続に替わった。次の判定で数え直す。
 			continue
 		}
 		slog.Warn("maintenance: terminated an Elythia session that outlived the drain timeout", "session", b.String())
@@ -332,7 +339,7 @@ func (c *PGCounter) list(ctx context.Context, t PGTarget) ([]pgactivity.Session,
 }
 
 // Terminate implements Counter.
-func (c *PGCounter) Terminate(ctx context.Context, b Blocker) error {
+func (c *PGCounter) Terminate(ctx context.Context, b Blocker) (bool, error) {
 	for _, t := range c.Targets {
 		if t.Name != b.Server {
 			continue
@@ -341,13 +348,12 @@ func (c *PGCounter) Terminate(ctx context.Context, b Blocker) error {
 		defer cancel()
 		conn, err := c.connect(ctx, t)
 		if err != nil {
-			return err
+			return false, err
 		}
 		defer func() { _ = conn.Close(context.Background()) }()
-		_, err = pgactivity.Terminate(ctx, conn, b.PID)
-		return err
+		return pgactivity.Terminate(ctx, conn, b.PID, t.Database, ElythiaApplicationPrefix)
 	}
-	return fmt.Errorf("maintmode: unknown server %q", b.Server)
+	return false, fmt.Errorf("maintmode: unknown server %q", b.Server)
 }
 
 // TargetsFromConfig returns the servers to count on: the primary, and every

@@ -87,12 +87,28 @@ func TestListAndTerminate(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, self, 1)
 
-	// 同じ role は切れる。別の role は権限で失敗する。
-	ok, err := Terminate(ctx, counter, minePID)
+	// 別の DB・別の接頭辞・別の role の接続は、pid が合っても切らない。
+	for name, args := range map[string][2]string{
+		"another database": {"postgres", "elythia/"},
+		"another prefix":   {"appdb", "elythia-judge/"},
+		"wildcard prefix":  {"appdb", "elythia_server%"},
+	} {
+		ok, err := Terminate(ctx, counter, minePID, args[0], args[1])
+		require.NoError(t, err, name)
+		assert.False(t, ok, name)
+	}
+	ok, err := Terminate(ctx, counter, otherPID, "appdb", "")
+	require.NoError(t, err)
+	assert.False(t, ok, "別の role の接続を切ろうとした")
+	// 条件に合えば切る。
+	ok, err = Terminate(ctx, counter, minePID, "appdb", "elythia/")
 	require.NoError(t, err)
 	assert.True(t, ok)
-	_, err = Terminate(ctx, counter, otherPID)
-	assert.Error(t, err)
+	// もういない。
+	require.Eventually(t, func() bool {
+		ok, err := Terminate(ctx, counter, minePID, "appdb", "elythia/")
+		return err == nil && !ok
+	}, 5*time.Second, 50*time.Millisecond)
 	require.Eventually(t, func() bool {
 		s, err := List(ctx, counter, "appdb")
 		return err == nil && len(s) == 1 && s[0].PID == otherPID
@@ -101,6 +117,6 @@ func TestListAndTerminate(t *testing.T) {
 	require.NoError(t, counter.Close(ctx))
 	_, err = List(ctx, counter, "appdb")
 	assert.Error(t, err)
-	_, err = Terminate(ctx, counter, 1)
+	_, err = Terminate(ctx, counter, 1, "appdb", "elythia/")
 	assert.Error(t, err)
 }

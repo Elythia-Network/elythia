@@ -41,7 +41,7 @@ func (f *fakeCounter) Sessions(context.Context) ([]maintmode.Blocker, error) {
 	return append([]maintmode.Blocker(nil), f.sessions...), f.err
 }
 
-func (f *fakeCounter) Terminate(context.Context, maintmode.Blocker) error { return nil }
+func (f *fakeCounter) Terminate(context.Context, maintmode.Blocker) (bool, error) { return true, nil }
 
 func psqlSession(pid int) maintmode.Blocker {
 	return maintmode.Blocker{Server: "primary", Session: pgactivity.Session{PID: pid, User: "app", Application: "psql", SameRole: true}}

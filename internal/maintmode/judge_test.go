@@ -35,21 +35,27 @@ func (f *fakeCounter) Sessions(context.Context) ([]Blocker, error) {
 	return append([]Blocker(nil), f.sessions...), f.err
 }
 
-func (f *fakeCounter) Terminate(_ context.Context, b Blocker) error {
+func (f *fakeCounter) Terminate(_ context.Context, b Blocker) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.termErr != nil {
-		return f.termErr
+		return false, f.termErr
 	}
-	f.terminated = append(f.terminated, b.PID)
 	var rest []Blocker
+	found := false
 	for _, s := range f.sessions {
-		if s.PID != b.PID {
-			rest = append(rest, s)
+		if s.PID == b.PID {
+			found = true
+			continue
 		}
+		rest = append(rest, s)
 	}
 	f.sessions = rest
-	return nil
+	if !found {
+		return false, nil
+	}
+	f.terminated = append(f.terminated, b.PID)
+	return true, nil
 }
 
 func elythiaSession(pid int) Blocker {
@@ -394,11 +400,13 @@ func TestTargetsFromConfig(t *testing.T) {
 func TestPGCounter_Errors(t *testing.T) {
 	_, err := (&PGCounter{}).Sessions(context.Background())
 	assert.Error(t, err)
-	assert.Error(t, (&PGCounter{}).Terminate(context.Background(), Blocker{Server: "primary"}))
+	_, err = (&PGCounter{}).Terminate(context.Background(), Blocker{Server: "primary"})
+	assert.Error(t, err)
 	bad := &PGCounter{Targets: []PGTarget{{Name: "primary", DSN: "host=/nonexistent port=1 dbname=x connect_timeout=1"}}}
 	_, err = bad.Sessions(context.Background())
 	assert.Error(t, err)
-	assert.Error(t, bad.Terminate(context.Background(), Blocker{Server: "primary"}))
+	_, err = bad.Terminate(context.Background(), Blocker{Server: "primary"})
+	assert.Error(t, err)
 }
 
 func TestBlockerString(t *testing.T) {
@@ -425,4 +433,31 @@ func TestJudge_DoesNotJudgeAStateWithoutOpID(t *testing.T) {
 	}
 	assert.Empty(t, f.terminated, "opId の無い状態で接続を切った")
 	assert.Equal(t, PhaseEntering, phase(t, s))
+}
+
+// vanishingCounter lists a session that is gone by the time it is
+// terminated (it closed by itself, or its pid now belongs to another
+// connection).
+type vanishingCounter struct{ fakeCounter }
+
+func (v *vanishingCounter) Terminate(context.Context, Blocker) (bool, error) { return false, nil }
+
+// TestJudge_SessionGoneBeforeTerminateIsNotRecorded checks #3463 review L-4:
+// a session that pg_terminate_backend did not end is not recorded as
+// terminated.
+func TestJudge_SessionGoneBeforeTerminateIsNotRecorded(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+	c := newClock()
+	v := &vanishingCounter{}
+	v.set(elythiaSession(30))
+	require.NoError(t, s.Report(ctx, ProcReport{ID: "p1", State: ProcDrained}))
+	j := c.judge(s, v, "j")
+	require.NoError(t, s.Enter(ctx, State{OpID: "op"}))
+	_, _ = j.Step(ctx)
+	c.add(time.Minute)
+	_, err := j.Step(ctx)
+	require.NoError(t, err)
+	st, _ := s.Get(ctx)
+	assert.Empty(t, st.Terminated, "切れなかった接続を切ったと記録した")
 }
