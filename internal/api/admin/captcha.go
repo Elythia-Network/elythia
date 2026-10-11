@@ -105,20 +105,18 @@ func (h *Handler) CaptchaSave(c echo.Context) error {
 	// 伏せ字のまま送り返された secret は「変えない」。検証には保存済みの値を使い、
 	// 保存では書き換えない (captcha/current は秘密の値を返さない)。
 	if req.Secret != nil && model.IsMetaSecretPlaceholder(*req.Secret) {
-		stored, err := h.storedCaptchaSecret(req.Provider)
+		// secret と instanceUrl は同じ 1 回の読み取りから取る (別々に読むと、間に
+		// 入った更新で組み合わせが崩れる)。
+		stored, storedURL, err := h.storedCaptchaSecret(req.Provider)
 		if err != nil {
 			return c.JSON(http.StatusInternalServerError, apierr.InternalError())
 		}
 		// 保存済みの secret は、保存済みの送り先へだけ送る。mcaptcha は検証を
 		// instanceUrl へ送るので、送り先を変えるなら secret も入力し直させる。
-		if req.Provider == "mcaptcha" && stored != "" {
-			storedURL, err := h.storedMcaptchaInstanceURL()
-			if err != nil {
-				return c.JSON(http.StatusInternalServerError, apierr.InternalError())
-			}
-			if normalizeDestination(strDeref(req.InstanceURL)) != normalizeDestination(storedURL) {
-				return secretReentryRequired(c, "secret")
-			}
+		// 保存するときも、update-meta と同じ判定を transaction の中でもう一度行う。
+		if req.Provider == "mcaptcha" && stored != "" &&
+			normalizeDestination(strDeref(req.InstanceURL)) != normalizeDestination(storedURL) {
+			return secretReentryRequired(c, "secret")
 		}
 		req.Secret = nil
 		if stored != "" {
@@ -192,8 +190,8 @@ func (h *Handler) CaptchaSave(c echo.Context) error {
 		setIfProvided(fields, "turnstileSiteKey", req.Sitekey)
 		setIfProvided(fields, "turnstileSecretKey", req.Secret)
 	}
-	if err := h.metaRepo.Update(fields); err != nil {
-		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
+	if err := h.updateMetaChecked(fields); err != nil {
+		return h.writeCheckedUpdateError(c, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -246,14 +244,15 @@ func setIfProvided(fields map[string]any, col string, p *string) {
 	}
 }
 
-// storedCaptchaSecret returns the saved secret of provider ("" when unset).
-func (h *Handler) storedCaptchaSecret(provider string) (string, error) {
+// storedCaptchaSecret returns the saved secret of provider and the saved
+// mCaptcha instance URL ("" when unset), from one read.
+func (h *Handler) storedCaptchaSecret(provider string) (string, string, error) {
 	if h.metaRepo == nil {
-		return "", nil
+		return "", "", nil
 	}
 	m, err := h.metaRepo.Fetch()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	var v *string
 	switch provider {
@@ -266,17 +265,5 @@ func (h *Handler) storedCaptchaSecret(provider string) (string, error) {
 	case "turnstile":
 		v = m.TurnstileSecretKey
 	}
-	return strDeref(v), nil
-}
-
-// storedMcaptchaInstanceURL returns the saved mCaptcha instance URL ("" when unset).
-func (h *Handler) storedMcaptchaInstanceURL() (string, error) {
-	if h.metaRepo == nil {
-		return "", nil
-	}
-	m, err := h.metaRepo.Fetch()
-	if err != nil {
-		return "", err
-	}
-	return strDeref(m.McaptchaInstanceURL), nil
+	return strDeref(v), strDeref(m.McaptchaInstanceURL), nil
 }

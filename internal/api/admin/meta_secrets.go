@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -11,6 +12,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/labstack/echo/v4"
 )
 
@@ -221,26 +223,45 @@ func normalizeDestination(v any) string {
 	}
 }
 
-// refuseKeptSecretForNewDestination writes the refusal (and returns with the
-// response committed) when fields change a destination of a stored secret
-// without re-entering it.
-func (h *Handler) refuseKeptSecretForNewDestination(c echo.Context, fields map[string]any) error {
+// secretReentryError reports the secret that must be entered again.
+type secretReentryError struct{ field string }
+
+func (e *secretReentryError) Error() string { return e.field + " must be entered again" }
+
+// updateMetaChecked writes fields. When they touch a destination of a secret,
+// the check runs against the row read inside the update's transaction
+// (repository.CheckedMetaUpdater), not against the cache.
+//
+// 判定 (今の値の読み取り) と書き込みの間に別の更新が入ると、判定した前提が崩れ、
+// 「別の送り先 + 保存済みの秘密」が残りうる。同じ transaction の中で行を
+// ロックして読む。判定付きの更新ができない構成では書かない。
+func (h *Handler) updateMetaChecked(fields map[string]any) error {
 	if !touchesSecretDestination(fields) {
+		return h.metaRepo.Update(fields)
+	}
+	cu, ok := h.metaRepo.(repository.CheckedMetaUpdater)
+	if !ok {
+		return repository.ErrCheckedUpdateUnsupported
+	}
+	return cu.UpdateChecked(fields, func(cur *model.Meta) error {
+		current, err := metaAsMap(cur)
+		if err != nil {
+			return err
+		}
+		if f := keptSecretForNewDestination(fields, current); f != "" {
+			return &secretReentryError{field: f}
+		}
 		return nil
+	})
+}
+
+// writeCheckedUpdateError writes the response for an updateMetaChecked error.
+func (h *Handler) writeCheckedUpdateError(c echo.Context, err error) error {
+	var re *secretReentryError
+	if errors.As(err, &re) {
+		return secretReentryRequired(c, re.field)
 	}
-	cur, err := h.metaRepo.Fetch()
-	if err != nil {
-		// 今の値が分からないと、送り先が変わるかを判定できない。通さない。
-		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
-	}
-	current, err := metaAsMap(cur)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
-	}
-	if f := keptSecretForNewDestination(fields, current); f != "" {
-		return secretReentryRequired(c, f)
-	}
-	return nil
+	return c.JSON(http.StatusInternalServerError, apierr.InternalError())
 }
 
 func touchesSecretDestination(fields map[string]any) bool {

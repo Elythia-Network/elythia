@@ -2,7 +2,6 @@ package admin_test
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -15,6 +14,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/signup"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -310,32 +310,55 @@ func TestUpdateMeta_DestinationChangeWithoutStoredSecret(t *testing.T) {
 	}
 }
 
-// failFirstFetch fails only the first Fetch, so that the destination check
-// is the one that sees the failure.
-type failFirstFetch struct {
-	*testutil.MockMetaRepository
-	failed bool
-}
+// uncheckedMetaRepo hides UpdateChecked: a repository that cannot update
+// with a check.
+type uncheckedMetaRepo struct{ repository.MetaRepository }
 
-func (f *failFirstFetch) Fetch() (*model.Meta, error) {
-	if !f.failed {
-		f.failed = true
-		return nil, errors.New("db down")
-	}
-	return f.MockMetaRepository.Fetch()
-}
-
-// 今の値が読めないと送り先が変わるかを判定できないので、通さない。
-func TestUpdateMeta_DestinationCheckFailsClosedWithoutMeta(t *testing.T) {
+// 判定付きの更新ができない構成では、送り先に触れる更新を書かない。
+func TestUpdateMeta_DestinationChangeFailsClosedWithoutCheckedUpdate(t *testing.T) {
 	_, userRepo, metaRepo, _ := newTestHandler(t)
-	stored, host := "plain-smtp", "smtp.example.com"
-	metaRepo.Meta.SMTPPass, metaRepo.Meta.SMTPHost = &stored, &host
-	repo := &failFirstFetch{MockMetaRepository: metaRepo}
+	repo := uncheckedMetaRepo{metaRepo}
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
 	h := apiadmin.NewHandler(signup.NewService(userRepo, repo, idGen), nil, repo, userRepo, idGen)
-	rec := doPost(h.UpdateMeta, `{"smtpHost":"smtp.attacker.example"}`, adminUser)
+
+	rec := doPost(h.UpdateMeta, `{"smtpHost":"smtp.example.com"}`, adminUser)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Nil(t, metaRepo.LastUpdateFields, "nothing is written")
+
+	// 送り先に触れない更新は今までどおり書く。
+	rec = doPost(h.UpdateMeta, `{"name":"renamed"}`, adminUser)
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+}
+
+// 判定は、キャッシュ (Fetch) ではなく、書き込みと同じ transaction の中で読んだ行
+// で行う。キャッシュが古い (秘密が未設定に見える) 間に、別の更新で秘密が保存
+// されていても断る。
+func TestUpdateMeta_DestinationCheckUsesTheLockedRow(t *testing.T) {
+	h, _, metaRepo, _ := newTestHandler(t)
+	host, pass := "smtp.example.com", "plain-current-pass"
+	metaRepo.CheckedMeta = &model.Meta{ID: "x", SMTPHost: &host, SMTPPass: &pass}
+
+	rec := doPost(h.UpdateMeta, `{"smtpHost":"smtp.attacker.example"}`, adminUser)
+	assert.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	assert.Equal(t, 1, metaRepo.UpdateCheckedCalls)
+	assert.Nil(t, metaRepo.LastUpdateFields, "nothing is written")
+}
+
+// captcha/save も、保存するときに同じ判定を transaction の中で行う。
+func TestCaptchaSave_McaptchaCheckUsesTheLockedRow(t *testing.T) {
+	h, _, metaRepo, _ := newTestHandler(t)
+	stored, storedURL, newURL := "plain-stored-mcaptcha", "https://mcaptcha.example", "https://mcaptcha.example.attacker.example"
+	// キャッシュ (Fetch) では送り先が新しい値で、検証は通る。
+	metaRepo.Meta.McaptchaSecretKey = &stored
+	metaRepo.Meta.McaptchaInstanceURL = &newURL
+	// transaction の中で読んだ行では、送り先は元の値。
+	metaRepo.CheckedMeta = &model.Meta{ID: "x", McaptchaSecretKey: &stored, McaptchaInstanceURL: &storedURL}
+	h.SetCaptchaVerifierFactory(func(string, string, string, string) captcha.Verifier { return stubCaptchaVerifier{} })
+	body := updateMetaBody(t, map[string]any{"provider": "mcaptcha", "sitekey": "site", "instanceUrl": newURL,
+		"secret": model.MetaSecretPlaceholder, "captchaResult": "ok"})
+	rec := doPost(h.CaptchaSave, body, adminUser)
+	assert.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 	assert.Nil(t, metaRepo.LastUpdateFields, "nothing is written")
 }
 
