@@ -367,3 +367,33 @@ func TestCaptchaSave_McaptchaPlaceholderRequiresStoredInstanceURL(t *testing.T) 
 		})
 	}
 }
+
+// captcha/current は、どの provider の secret も伏せる。
+func TestCaptchaCurrent_MasksEveryProvider(t *testing.T) {
+	h, _, metaRepo, _ := newTestHandler(t)
+	setAllMetaSecrets(t, metaRepo.Meta)
+	rec := doPost(h.CaptchaCurrent, `{}`, adminUser)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	for _, p := range []string{"hcaptcha", "mcaptcha", "recaptcha", "turnstile"} {
+		obj, ok := got[p].(map[string]any)
+		require.True(t, ok, p)
+		assert.Equal(t, model.MetaSecretPlaceholder, obj["secretKey"], p)
+		assert.Equal(t, true, obj["hasSecretKey"], p)
+		assert.NotContains(t, rec.Body.String(), secretValue(p+"SecretKey"), p)
+	}
+}
+
+func TestCaptchaCurrent_UnsetSecretsStayNull(t *testing.T) {
+	h, _, _, _ := newTestHandler(t)
+	rec := doPost(h.CaptchaCurrent, `{}`, adminUser)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	for _, p := range []string{"hcaptcha", "mcaptcha", "recaptcha", "turnstile"} {
+		obj := got[p].(map[string]any)
+		assert.Nil(t, obj["secretKey"], p)
+		assert.Equal(t, false, obj["hasSecretKey"], p)
+	}
+}
