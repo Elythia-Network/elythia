@@ -6,6 +6,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/core/captcha"
+	"github.com/elythia-network/elythia/internal/metasecret"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/labstack/echo/v4"
 )
@@ -57,24 +58,24 @@ func captchaCurrentShape(provider string, meta *model.Meta) map[string]any {
 		"provider": provider,
 		"hcaptcha": map[string]any{
 			"siteKey":      meta.HcaptchaSiteKey,
-			"secretKey":    model.MaskMetaSecret(meta.HcaptchaSecretKey),
-			"hasSecretKey": model.MetaSecretIsSet(meta.HcaptchaSecretKey),
+			"secretKey":    metasecret.Mask(meta.HcaptchaSecretKey),
+			"hasSecretKey": metasecret.IsSet(meta.HcaptchaSecretKey),
 		},
 		"mcaptcha": map[string]any{
 			"siteKey":      meta.McaptchaSiteKey,
-			"secretKey":    model.MaskMetaSecret(meta.McaptchaSecretKey),
-			"hasSecretKey": model.MetaSecretIsSet(meta.McaptchaSecretKey),
+			"secretKey":    metasecret.Mask(meta.McaptchaSecretKey),
+			"hasSecretKey": metasecret.IsSet(meta.McaptchaSecretKey),
 			"instanceUrl":  meta.McaptchaInstanceURL,
 		},
 		"recaptcha": map[string]any{
 			"siteKey":      meta.RecaptchaSiteKey,
-			"secretKey":    model.MaskMetaSecret(meta.RecaptchaSecretKey),
-			"hasSecretKey": model.MetaSecretIsSet(meta.RecaptchaSecretKey),
+			"secretKey":    metasecret.Mask(meta.RecaptchaSecretKey),
+			"hasSecretKey": metasecret.IsSet(meta.RecaptchaSecretKey),
 		},
 		"turnstile": map[string]any{
 			"siteKey":      meta.TurnstileSiteKey,
-			"secretKey":    model.MaskMetaSecret(meta.TurnstileSecretKey),
-			"hasSecretKey": model.MetaSecretIsSet(meta.TurnstileSecretKey),
+			"secretKey":    metasecret.Mask(meta.TurnstileSecretKey),
+			"hasSecretKey": metasecret.IsSet(meta.TurnstileSecretKey),
 		},
 	}
 }
@@ -104,7 +105,7 @@ func (h *Handler) CaptchaSave(c echo.Context) error {
 
 	// 伏せ字のまま送り返された secret は「変えない」。検証には保存済みの値を使い、
 	// 保存では書き換えない (captcha/current は秘密の値を返さない)。
-	if req.Secret != nil && model.IsMetaSecretPlaceholder(*req.Secret) {
+	if req.Secret != nil && metasecret.IsPlaceholder(*req.Secret) {
 		// secret と instanceUrl は同じ 1 回の読み取りから取る (別々に読むと、間に
 		// 入った更新で組み合わせが崩れる)。
 		stored, storedURL, err := h.storedCaptchaSecret(req.Provider)

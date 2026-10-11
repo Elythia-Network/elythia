@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/elythia-network/elythia/internal/metasecret"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -23,7 +24,7 @@ func TestMetaForModerationLog(t *testing.T) {
 	assert.Nil(t, metaForModerationLog(nil))
 	got, ok := metaForModerationLog(&model.Meta{SMTPPass: strp("pw"), Name: strp("site")}).(map[string]any)
 	require.True(t, ok)
-	assert.Equal(t, model.MetaSecretPlaceholder, got["smtpPass"])
+	assert.Equal(t, metasecret.Placeholder, got["smtpPass"])
 	assert.Nil(t, got["deeplAuthKey"])
 	assert.Equal(t, "site", got["name"])
 	b, err := json.Marshal(got)

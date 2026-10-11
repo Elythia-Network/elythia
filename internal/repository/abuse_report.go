@@ -3,6 +3,7 @@ package repository
 import (
 	"strings"
 
+	"github.com/elythia-network/elythia/internal/metasecret"
 	"github.com/elythia-network/elythia/internal/model"
 	"gorm.io/gorm"
 )
@@ -269,8 +270,8 @@ var moderationLogSearchExpr = buildModerationLogSearchExpr()
 
 func buildModerationLogSearchExpr() string {
 	// 欄名は model の定数で、利用者の入力ではない。
-	names := make([]string, 0, len(model.MetaSecretFields))
-	for _, f := range model.MetaSecretFields {
+	names := make([]string, 0, len(metasecret.Fields))
+	for _, f := range metasecret.Fields {
 		names = append(names, "'"+f+"'")
 	}
 	drop := "ARRAY[" + strings.Join(names, ", ") + "]"

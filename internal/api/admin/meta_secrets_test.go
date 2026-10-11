@@ -12,6 +12,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/captcha"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
 	"github.com/elythia-network/elythia/internal/core/signup"
+	"github.com/elythia-network/elythia/internal/metasecret"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
@@ -27,7 +28,7 @@ func secretValue(field string) string { return "plain-" + field + "-value" }
 func setAllMetaSecrets(t *testing.T, meta *model.Meta) {
 	t.Helper()
 	vals := map[string]string{}
-	for _, f := range model.MetaSecretFields {
+	for _, f := range metasecret.Fields {
 		vals[f] = secretValue(f)
 	}
 	b, err := json.Marshal(vals)
@@ -48,9 +49,9 @@ func TestAdminMeta_DoesNotReturnSecrets(t *testing.T) {
 	body := rec.Body.String()
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
-	for _, f := range model.MetaSecretFields {
+	for _, f := range metasecret.Fields {
 		assert.NotContains(t, body, secretValue(f), "%s leaks", f)
-		assert.Equal(t, model.MetaSecretPlaceholder, got[f], f)
+		assert.Equal(t, metasecret.Placeholder, got[f], f)
 		assert.Equal(t, true, got[hasName(f)], hasName(f))
 	}
 }
@@ -61,7 +62,7 @@ func TestAdminMeta_UnsetSecretsStayNull(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
-	for _, f := range model.MetaSecretFields {
+	for _, f := range metasecret.Fields {
 		v, present := got[f]
 		assert.True(t, present, "%s is still in the response", f)
 		assert.Nil(t, v, f)
@@ -79,7 +80,7 @@ func TestUpdateMeta_SendingBackAdminMetaKeepsSecrets(t *testing.T) {
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 	body := map[string]any{"name": "renamed"}
-	for _, f := range model.MetaSecretFields {
+	for _, f := range metasecret.Fields {
 		body[f] = got[f]
 	}
 	b, err := json.Marshal(body)
@@ -88,7 +89,7 @@ func TestUpdateMeta_SendingBackAdminMetaKeepsSecrets(t *testing.T) {
 	rec = doPost(h.UpdateMeta, string(b), adminUser)
 	require.Equal(t, http.StatusNoContent, rec.Code)
 	assert.Contains(t, metaRepo.LastUpdateFields, "name")
-	for _, f := range model.MetaSecretFields {
+	for _, f := range metasecret.Fields {
 		assert.NotContains(t, metaRepo.LastUpdateFields, f, "%s would be overwritten", f)
 	}
 }
@@ -116,7 +117,7 @@ func TestUpdateMeta_ModerationLogHasNoSecrets(t *testing.T) {
 	entry := logs.Snapshot()[0]
 	assert.Equal(t, "updateServerSettings", entry.Type)
 	info := string(entry.Info)
-	for _, f := range model.MetaSecretFields {
+	for _, f := range metasecret.Fields {
 		assert.NotContains(t, info, secretValue(f), "%s is logged in plain text", f)
 	}
 	assert.NotContains(t, info, "plain-new-deepl")
@@ -124,7 +125,7 @@ func TestUpdateMeta_ModerationLogHasNoSecrets(t *testing.T) {
 	require.NoError(t, json.Unmarshal(entry.Info, &parsed))
 	before, ok := parsed["before"].(map[string]any)
 	require.True(t, ok)
-	assert.Equal(t, model.MetaSecretPlaceholder, before["smtpPass"])
+	assert.Equal(t, metasecret.Placeholder, before["smtpPass"])
 	_, ok = parsed["changedSecrets"]
 	assert.True(t, ok, "changedSecrets is recorded")
 }
@@ -155,7 +156,7 @@ func TestShowModerationLogs_MasksSecretsOfOldRows(t *testing.T) {
 		byID[l["id"].(string)] = l
 	}
 	info := byID["l1"]["info"].(map[string]any)
-	assert.Equal(t, model.MetaSecretPlaceholder, info["before"].(map[string]any)["smtpPass"])
+	assert.Equal(t, metasecret.Placeholder, info["before"].(map[string]any)["smtpPass"])
 	assert.Equal(t, "a", info["before"].(map[string]any)["name"], "other fields are kept")
 	assert.Nil(t, info["after"].(map[string]any)["deeplAuthKey"], "unset stays null")
 	assert.Equal(t, "u1", byID["l2"]["info"].(map[string]any)["userId"], "other log types are untouched")
@@ -172,7 +173,7 @@ func TestCaptchaSave_PlaceholderUsesStoredSecret(t *testing.T) {
 		verifiedWith = secret
 		return stubCaptchaVerifier{}
 	})
-	body := `{"provider":"turnstile","sitekey":"site","secret":"` + model.MetaSecretPlaceholder + `","captchaResult":"ok"}`
+	body := `{"provider":"turnstile","sitekey":"site","secret":"` + metasecret.Placeholder + `","captchaResult":"ok"}`
 	rec := doPost(h.CaptchaSave, body, adminUser)
 	require.Equal(t, http.StatusNoContent, rec.Code)
 	assert.Equal(t, stored, verifiedWith)
@@ -184,7 +185,7 @@ func TestCaptchaSave_PlaceholderUsesStoredSecret(t *testing.T) {
 func TestCaptchaSave_PlaceholderWithoutStoredSecretIsRejected(t *testing.T) {
 	h, _, _, _ := newTestHandler(t)
 	h.SetCaptchaVerifierFactory(func(string, string, string, string) captcha.Verifier { return stubCaptchaVerifier{} })
-	body := `{"provider":"hcaptcha","sitekey":"site","secret":"` + model.MetaSecretPlaceholder + `","captchaResult":"ok"}`
+	body := `{"provider":"hcaptcha","sitekey":"site","secret":"` + metasecret.Placeholder + `","captchaResult":"ok"}`
 	rec := doPost(h.CaptchaSave, body, adminUser)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
@@ -194,14 +195,14 @@ func TestCaptchaSave_PlaceholderWithoutStoredSecretIsRejected(t *testing.T) {
 func TestUpdateMeta_PaddedPlaceholderKeepsSecrets(t *testing.T) {
 	h, _, metaRepo, _ := newTestHandler(t)
 	body := map[string]any{"name": "renamed"}
-	for _, f := range model.MetaSecretFields {
-		body[f] = " " + model.MetaSecretPlaceholder + "\n"
+	for _, f := range metasecret.Fields {
+		body[f] = " " + metasecret.Placeholder + "\n"
 	}
 	b, err := json.Marshal(body)
 	require.NoError(t, err)
 	rec := doPost(h.UpdateMeta, string(b), adminUser)
 	require.Equal(t, http.StatusNoContent, rec.Code)
-	for _, f := range model.MetaSecretFields {
+	for _, f := range metasecret.Fields {
 		assert.NotContains(t, metaRepo.LastUpdateFields, f, "%s would be overwritten", f)
 	}
 }
@@ -215,7 +216,7 @@ func TestCaptchaSave_PaddedPlaceholderUsesStoredSecret(t *testing.T) {
 		verifiedWith = secret
 		return stubCaptchaVerifier{}
 	})
-	body := `{"provider":"hcaptcha","sitekey":"site","secret":" ` + model.MetaSecretPlaceholder + ` ","captchaResult":"ok"}`
+	body := `{"provider":"hcaptcha","sitekey":"site","secret":" ` + metasecret.Placeholder + ` ","captchaResult":"ok"}`
 	rec := doPost(h.CaptchaSave, body, adminUser)
 	require.Equal(t, http.StatusNoContent, rec.Code)
 	assert.Equal(t, stored, verifiedWith)
@@ -257,7 +258,7 @@ func updateMetaBody(t *testing.T, kv map[string]any) string {
 func TestUpdateMeta_DestinationChangeRequiresSecret(t *testing.T) {
 	for _, tc := range secretDestinationCases {
 		for name, body := range map[string]map[string]any{
-			"placeholder": {tc.dest: tc.changed, tc.secret: model.MetaSecretPlaceholder},
+			"placeholder": {tc.dest: tc.changed, tc.secret: metasecret.Placeholder},
 			"omitted":     {tc.dest: tc.changed},
 		} {
 			t.Run(tc.dest+"/"+name, func(t *testing.T) {
@@ -291,7 +292,7 @@ func TestUpdateMeta_UnchangedDestinationKeepsSecret(t *testing.T) {
 		for i, same := range append([]any{tc.stored}, tc.same...) {
 			t.Run(fmt.Sprintf("%s/%d", tc.dest, i), func(t *testing.T) {
 				h, metaRepo := newDestinationHandler(t, tc.secret, tc.dest, tc.stored)
-				rec := doPost(h.UpdateMeta, updateMetaBody(t, map[string]any{tc.dest: same, tc.secret: model.MetaSecretPlaceholder}), adminUser)
+				rec := doPost(h.UpdateMeta, updateMetaBody(t, map[string]any{tc.dest: same, tc.secret: metasecret.Placeholder}), adminUser)
 				require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
 				assert.NotContains(t, metaRepo.LastUpdateFields, tc.secret)
 			})
@@ -356,7 +357,7 @@ func TestCaptchaSave_McaptchaCheckUsesTheLockedRow(t *testing.T) {
 	metaRepo.CheckedMeta = &model.Meta{ID: "x", McaptchaSecretKey: &stored, McaptchaInstanceURL: &storedURL}
 	h.SetCaptchaVerifierFactory(func(string, string, string, string) captcha.Verifier { return stubCaptchaVerifier{} })
 	body := updateMetaBody(t, map[string]any{"provider": "mcaptcha", "sitekey": "site", "instanceUrl": newURL,
-		"secret": model.MetaSecretPlaceholder, "captchaResult": "ok"})
+		"secret": metasecret.Placeholder, "captchaResult": "ok"})
 	rec := doPost(h.CaptchaSave, body, adminUser)
 	assert.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 	assert.Nil(t, metaRepo.LastUpdateFields, "nothing is written")
@@ -383,7 +384,7 @@ func TestCaptchaSave_McaptchaPlaceholderRequiresStoredInstanceURL(t *testing.T) 
 				return stubCaptchaVerifier{}
 			})
 			body := updateMetaBody(t, map[string]any{"provider": "mcaptcha", "sitekey": "site", "instanceUrl": tc.url,
-				"secret": model.MetaSecretPlaceholder, "captchaResult": "ok"})
+				"secret": metasecret.Placeholder, "captchaResult": "ok"})
 			rec := doPost(h.CaptchaSave, body, adminUser)
 			assert.Equal(t, tc.code, rec.Code, rec.Body.String())
 			assert.Equal(t, tc.code == http.StatusNoContent, called, "the stored secret is sent only to the stored instance")
@@ -402,7 +403,7 @@ func TestCaptchaCurrent_MasksEveryProvider(t *testing.T) {
 	for _, p := range []string{"hcaptcha", "mcaptcha", "recaptcha", "turnstile"} {
 		obj, ok := got[p].(map[string]any)
 		require.True(t, ok, p)
-		assert.Equal(t, model.MetaSecretPlaceholder, obj["secretKey"], p)
+		assert.Equal(t, metasecret.Placeholder, obj["secretKey"], p)
 		assert.Equal(t, true, obj["hasSecretKey"], p)
 		assert.NotContains(t, rec.Body.String(), secretValue(p+"SecretKey"), p)
 	}

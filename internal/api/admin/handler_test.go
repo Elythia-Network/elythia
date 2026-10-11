@@ -17,6 +17,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
 	"github.com/elythia-network/elythia/internal/core/role"
 	"github.com/elythia-network/elythia/internal/core/signup"
+	"github.com/elythia-network/elythia/internal/metasecret"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
@@ -3839,7 +3840,7 @@ func TestAdminMeta_ReadsModelFields(t *testing.T) {
 	assert.Equal(t, "https://meta.example/ai.png", resp["mascotImageUrl"])
 	assert.Equal(t, "https://meta.example/inquiry", resp["inquiryUrl"])
 	// 秘密の値は返さない (設定済みなら伏せ字)。
-	assert.Equal(t, model.MetaSecretPlaceholder, resp["deeplAuthKey"])
+	assert.Equal(t, metasecret.Placeholder, resp["deeplAuthKey"])
 	assert.Equal(t, true, resp["hasDeeplAuthKey"])
 	assert.Equal(t, true, resp["deeplIsPro"])
 	assert.Equal(t, true, resp["translatorAvailable"], "deeplAuthKey != null で true")
