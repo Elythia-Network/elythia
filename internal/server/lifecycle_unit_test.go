@@ -34,6 +34,8 @@ type fakeGenerations struct {
 	openErr  error
 	buildErr error
 	closeDB  func(*gorm.DB) error
+	// hook, when set, is registered as a shutdown hook of every generation.
+	hook func(context.Context)
 }
 
 func newFakeGenerations(t *testing.T) *fakeGenerations {
@@ -61,7 +63,11 @@ func (f *fakeGenerations) deps(drain time.Duration) SupervisorDeps {
 				<-f.release
 				return c.String(http.StatusOK, "slow")
 			})
-			return &Server{echo: e, config: cfg, role: config.RoleServer}, nil
+			srv := &Server{echo: e, config: cfg, role: config.RoleServer}
+			if f.hook != nil {
+				srv.registerShutdownHook(f.hook)
+			}
+			return srv, nil
 		},
 		CloseDB: func(db *gorm.DB) error {
 			f.closed.Add(1)

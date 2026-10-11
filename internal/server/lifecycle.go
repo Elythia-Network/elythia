@@ -337,26 +337,141 @@ func (s *Supervisor) listen() (net.Listener, error) {
 	return ln, nil
 }
 
-// Shutdown stops the current generation, closes its DB pool, then stops the
-// listener and removes the UNIX socket file. Safe to call more than once.
+// shutdownBudgetDefault is the budget of a Shutdown whose ctx has no
+// deadline.
+const shutdownBudgetDefault = 30 * time.Second
+
+// shutdownBudget splits the time Shutdown has. The drain share is what the
+// lock wait and the in-flight requests may use; the rest is kept for
+// stopping the background work (shutdown hooks, chart, queue), which always
+// runs, and for closing the DB and the listener.
+type shutdownBudget struct {
+	start, drainUntil, deadline time.Time
+}
+
+// shutdownStopMin is the least time the ctx passed to the background stop
+// has, even when the ctx of Shutdown is already done. hook に期限切れの ctx を
+// 渡さないためのもので、Shutdown がその間待つことは保証しない。
+const shutdownStopMin = time.Second
+
+func newShutdownBudget(ctx context.Context, now time.Time) shutdownBudget {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		deadline = now.Add(shutdownBudgetDefault)
+	}
+	if ctx.Err() != nil && deadline.After(now) {
+		// 期限の無い ctx が取り消された。もう待たない。
+		deadline = now
+	}
+	total := deadline.Sub(now)
+	if total < 0 {
+		total = 0
+	}
+	if total < shutdownStopMin {
+		return shutdownBudget{start: now, drainUntil: now, deadline: now.Add(shutdownStopMin)}
+	}
+	// 待ちの段は全体の 1/3 まで。残りの 2/3 から streaming を閉じる待ち
+	// (streamCloseContext、その 1/3 まで) を引いても、shutdown hook には全体の
+	// 4/9 以上が残る。
+	return shutdownBudget{start: now, drainUntil: now.Add(total / 3), deadline: deadline}
+}
+
+// Shutdown stops the current generation and closes its DB pool, then stops
+// the listener and removes the UNIX socket file. Safe to call more than once.
+//
+// 順序と時間の配分:
+//
+//  1. 新しいリクエストを unavailable へ回す
+//  2. 処理中の HTTP リクエストを待つ (WebSocket は数えない)。世代の切り替えが
+//     走っていればその終わりも待つ。どちらも全体の 1/3 まで
+//  3. 世代の背景処理を止める (StopBackground: streaming を 1012 で閉じ、shutdown
+//     hook・chart の保存・queue の停止)。処理中のリクエストの待ちが上限に達しても
+//     呼ぶ。渡す ctx の期限は全体の期限 (切れていればそこから shutdownStopMin)
+//  4. 最後に DB を閉じる。処理中のリクエストが残っていたら、その数をログに出す
+//
+// 例外: 切り替えのロックが 2 の上限までに取れなければ、世代は切り替えの側に任せ、
+// 3 と 4 を行わない。
+//
+// 呼び出し元の ctx が切れても、3 を始める (または 3 を行わないと決める) 前には
+// 返らない。その後は ctx が切れた時点で返り、残りは裏で続く。返った後に呼び出し元が
+// プロセスを終えれば、hook は途中で切られうる。
 func (s *Supervisor) Shutdown(ctx context.Context) error {
 	s.shutdownOnce.Do(func() {
-		var errs []error
-		s.genMu.Lock()
-		if gen := s.gen; gen != nil {
-			errs = append(errs, gen.srv.StopBackground(ctx))
-			_, err := s.closeDB(ctx, gen.db)
-			errs = append(errs, err)
-			s.gen = nil
+		budget := newShutdownBudget(ctx, time.Now())
+		stopCalled := make(chan struct{})
+		done := make(chan error, 1)
+		go func() { done <- s.shutdownNow(budget, stopCalled) }()
+		select {
+		case err := <-done:
+			s.shutdownErr = err
+			return
+		case <-ctx.Done():
 		}
-		s.genMu.Unlock()
-		errs = append(errs, s.httpSrv.Shutdown(ctx))
-		// UDS listen していた場合、Shutdown で net.Listener.Close() は呼ばれる
-		// が、ソケットファイル自体は残るので明示的に unlink しておく。
-		if rmErr := config.RemoveUnixSocket(s.cfg.Socket); rmErr != nil {
-			slog.Warn("failed to remove socket file", "socket", s.cfg.Socket, "err", rmErr)
+		// 期限は切れたが、背景処理の停止を呼ぶまでは返らない。待ちの段は
+		// drainUntil で打ち切られるので、ここで長くは止まらない。
+		select {
+		case err := <-done:
+			s.shutdownErr = err
+		case <-stopCalled:
+			slog.Warn("shutdown did not finish before the deadline; the rest continues in the background")
+			s.shutdownErr = ctx.Err()
 		}
-		s.shutdownErr = errors.Join(errs...)
 	})
 	return s.shutdownErr
+}
+
+func (s *Supervisor) shutdownNow(b shutdownBudget, stopCalled chan<- struct{}) error {
+	var errs []error
+	drainCtx, cancelDrain := context.WithDeadline(context.Background(), b.drainUntil)
+	defer cancelDrain()
+	old := s.setHandler(http.HandlerFunc(unavailable))
+
+	// 世代の切り替えの途中なら、終わるのを待つ。待ちの段の上限を過ぎたら、世代は
+	// 切り替えの側に任せて止めずに進む。
+	if !lockBefore(&s.genMu, b.drainUntil) {
+		slog.Warn("a generation switch is still running; leaving its generation to it")
+		close(stopCalled)
+	} else {
+		if gen := s.gen; gen != nil {
+			inFlight := retire(drainCtx, old)
+			// 期限が切れていても、背景処理の停止は必ず呼ぶ。渡す ctx は全体の期限。
+			stopCtx, cancelStop := context.WithDeadline(context.Background(), b.deadline)
+			close(stopCalled)
+			errs = append(errs, gen.srv.StopBackground(stopCtx))
+			cancelStop()
+			if inFlight = max(inFlight, old.active.Load()); inFlight > 0 {
+				slog.Warn("closing the database with requests still in flight", "inFlight", inFlight)
+			}
+			closeCtx, cancelClose := context.WithDeadline(context.Background(), b.deadline)
+			_, err := s.closeDB(closeCtx, gen.db)
+			cancelClose()
+			errs = append(errs, err)
+			s.gen = nil
+		} else {
+			close(stopCalled)
+		}
+		s.genMu.Unlock()
+	}
+	httpCtx, cancelHTTP := context.WithDeadline(context.Background(), b.deadline)
+	errs = append(errs, s.httpSrv.Shutdown(httpCtx))
+	cancelHTTP()
+	// UDS listen していた場合、Shutdown で net.Listener.Close() は呼ばれる
+	// が、ソケットファイル自体は残るので明示的に unlink しておく。
+	if rmErr := config.RemoveUnixSocket(s.cfg.Socket); rmErr != nil {
+		slog.Warn("failed to remove socket file", "socket", s.cfg.Socket, "err", rmErr)
+	}
+	return errors.Join(errs...)
+}
+
+// lockBefore takes mu, giving up at deadline. It reports whether it holds mu.
+func lockBefore(mu *sync.Mutex, deadline time.Time) bool {
+	for {
+		if mu.TryLock() {
+			return true
+		}
+		if !time.Now().Before(deadline) {
+			return false
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
