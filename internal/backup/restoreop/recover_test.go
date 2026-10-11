@@ -435,3 +435,58 @@ func TestRecover_ReadsTheMaintenanceAgain(t *testing.T) {
 		})
 	}
 }
+
+// TestRecover_KeepsReadingTheRecord checks that the recovery reads the
+// unfinished record again until Redis answers, giving back the reserved
+// slot meanwhile so that backups go on (#3463 (6c) L-4).
+func TestRecover_KeepsReadingTheRecord(t *testing.T) {
+	e := newEnv(t)
+	e.stop()
+	ctx := context.Background()
+	require.NoError(t, e.store.create(ctx, &Record{OpID: "restore-left", Step: StepAborting, Database: testDB, Target: tgt, Before: before}))
+	e.db.mu.Lock()
+	e.db.dbs[tgt] = "restored"
+	e.db.mu.Unlock()
+	reserved := &slot{}
+	release, err := reserved.acquire()
+	require.NoError(t, err)
+	e.mr.SetError("LOADING Redis is loading the dataset in memory")
+	e.slot = &slot{}
+	e.opts.Acquire = e.slot.acquire
+	e.ctx, e.cancel = context.WithCancel(context.Background())
+	e.m = New(e.opts)
+	e.m.StartHolding(e.ctx, release)
+	t.Cleanup(func() { e.cancel(); e.m.Wait() })
+	require.Eventually(t, func() bool { return !reserved.isHeld() }, 5*time.Second, 5*time.Millisecond,
+		"the reserved slot is given back while the record cannot be read")
+	e.mr.SetError("")
+	e.waitStep("restore-left", StepAborted)
+	assert.NotContains(t, e.db.names(), tgt)
+}
+
+// TestRecover_RereadsRightAfterTheSlot finishes the operation between the
+// recovery's read and its taking the slot: it must read again after the
+// slot, not act on the copy it read before.
+func TestRecover_RereadsRightAfterTheSlot(t *testing.T) {
+	e := newEnv(t)
+	e.stop()
+	ctx := context.Background()
+	require.NoError(t, e.store.create(ctx, &Record{OpID: "restore-live", Step: StepReady, Database: testDB, Target: tgt, Before: before}))
+	e.db.mu.Lock()
+	e.db.dbs[tgt] = "restored"
+	e.db.mu.Unlock()
+	s := &slot{}
+	e.slot = s
+	e.opts.Acquire = func() (func(), error) {
+		// 枠を取る直前に、この実行の操作として終わった。
+		require.NoError(t, e.store.setStep(ctx, "restore-live", StepReady, StepDone, time.Now()))
+		return s.acquire()
+	}
+	e.ctx, e.cancel = context.WithCancel(context.Background())
+	e.m = New(e.opts)
+	e.m.Start(e.ctx)
+	e.m.Wait()
+	e.cancel()
+	assert.Empty(t, e.db.drops, "a finished operation is not recovered")
+	assert.False(t, s.isHeld())
+}

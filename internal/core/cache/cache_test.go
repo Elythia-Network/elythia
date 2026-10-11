@@ -59,8 +59,22 @@ func TestNewRedisClients_ConnectionFail(t *testing.T) {
 		RedisForReactions: config.RedisOptions{Host: "invalid-host", Port: 1},
 	}
 
+	var made []*redis.Client
+	orig := newRedisClient
+	newRedisClient = func(opts config.RedisOptions) *redis.Client {
+		c := orig(opts)
+		made = append(made, c)
+		return c
+	}
+	t.Cleanup(func() { newRedisClient = orig })
+
 	_, err := NewRedisClients(cfg)
 	assert.Error(t, err)
+	// 失敗したときは、作った client を全て閉じる (繋がるまで試し直す呼び出し元でリークしない)。
+	require.Len(t, made, 5)
+	for _, c := range made {
+		assert.ErrorIs(t, c.Ping(context.Background()).Err(), redis.ErrClosed)
+	}
 }
 
 func TestBuildRedisOptions_TCP(t *testing.T) {

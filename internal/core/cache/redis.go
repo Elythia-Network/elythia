@@ -21,15 +21,18 @@ type RedisClients struct {
 // NewRedisClients creates Redis clients from configuration.
 func NewRedisClients(cfg *config.Config) (*RedisClients, error) {
 	clients := &RedisClients{
-		Default:   newClient(cfg.Redis),
-		Pubsub:    newClient(cfg.RedisForPubsub),
-		JobQueue:  newClient(cfg.RedisForJobQueue),
-		Timelines: newClient(cfg.RedisForTimelines),
-		Reactions: newClient(cfg.RedisForReactions),
+		Default:   newRedisClient(cfg.Redis),
+		Pubsub:    newRedisClient(cfg.RedisForPubsub),
+		JobQueue:  newRedisClient(cfg.RedisForJobQueue),
+		Timelines: newRedisClient(cfg.RedisForTimelines),
+		Reactions: newRedisClient(cfg.RedisForReactions),
 	}
 
 	ctx := context.Background()
 	if err := clients.Default.Ping(ctx).Err(); err != nil {
+		// 作った client を閉じる。閉じないと、繋がるまで試し直す呼び出し元
+		// (バックアップ用のサービス) で、試すたびに接続の pool が残る。
+		_ = clients.Close()
 		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
 	}
 
@@ -44,6 +47,9 @@ func NewRedisClients(cfg *config.Config) (*RedisClients, error) {
 
 	return clients, nil
 }
+
+// newRedisClient creates one client. Tests replace it to see the clients.
+var newRedisClient = newClient
 
 func newClient(opts config.RedisOptions) *redis.Client {
 	return redis.NewClient(buildRedisOptions(opts))
