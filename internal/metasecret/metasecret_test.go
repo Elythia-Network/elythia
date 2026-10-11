@@ -1,4 +1,4 @@
-package model
+package metasecret
 
 import (
 	"reflect"
@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/elythia-network/elythia/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -28,7 +29,7 @@ var notSecretColumns = map[string]string{
 func metaJSONNames(t *testing.T) []string {
 	t.Helper()
 	var names []string
-	typ := reflect.TypeOf(Meta{})
+	typ := reflect.TypeOf(model.Meta{})
 	for i := 0; i < typ.NumField(); i++ {
 		tag := typ.Field(i).Tag.Get("json")
 		name, _, _ := strings.Cut(tag, ",")
@@ -40,7 +41,7 @@ func metaJSONNames(t *testing.T) []string {
 	return names
 }
 
-func TestMetaSecretFieldsCoverSecretColumns(t *testing.T) {
+func TestFieldsCoverSecretColumns(t *testing.T) {
 	names := metaJSONNames(t)
 	matched := 0
 	for _, name := range names {
@@ -49,13 +50,13 @@ func TestMetaSecretFieldsCoverSecretColumns(t *testing.T) {
 		}
 		matched++
 		if _, ok := notSecretColumns[name]; ok {
-			assert.False(t, IsMetaSecretField(name), "%q is both a secret and an exception", name)
+			assert.False(t, IsField(name), "%q is both a secret and an exception", name)
 			continue
 		}
-		assert.True(t, IsMetaSecretField(name), "meta column %q looks like a secret but is not in MetaSecretFields", name)
+		assert.True(t, IsField(name), "meta column %q looks like a secret but is not in Fields", name)
 	}
 	// 何も当たらないなら、名前の取り出しか正規表現が壊れている。
-	require.GreaterOrEqual(t, matched, len(MetaSecretFields)+len(notSecretColumns))
+	require.GreaterOrEqual(t, matched, len(Fields)+len(notSecretColumns))
 }
 
 // 使われていない例外を残さない。列が消えたり名前が変わったりした例外は落とす。
@@ -70,38 +71,38 @@ func TestNotSecretColumnsAreUsed(t *testing.T) {
 	}
 }
 
-func TestMetaSecretFieldsAreMetaColumns(t *testing.T) {
+func TestFieldsAreMetaColumns(t *testing.T) {
 	names := map[string]bool{}
 	for _, n := range metaJSONNames(t) {
 		names[n] = true
 	}
-	for _, f := range MetaSecretFields {
-		assert.True(t, names[f], "MetaSecretFields has %q, which is not a meta column", f)
+	for _, f := range Fields {
+		assert.True(t, names[f], "Fields has %q, which is not a meta column", f)
 	}
 }
 
-func TestMaskMetaSecret(t *testing.T) {
+func TestMask(t *testing.T) {
 	set, empty := "s3cr3t", ""
-	assert.Equal(t, MetaSecretPlaceholder, MaskMetaSecret(&set))
-	assert.Equal(t, MetaSecretPlaceholder, MaskMetaSecret(set))
-	assert.Equal(t, &empty, MaskMetaSecret(&empty))
-	assert.Equal(t, "", MaskMetaSecret(""))
-	assert.Nil(t, MaskMetaSecret(nil))
+	assert.Equal(t, Placeholder, Mask(&set))
+	assert.Equal(t, Placeholder, Mask(set))
+	assert.Equal(t, &empty, Mask(&empty))
+	assert.Equal(t, "", Mask(""))
+	assert.Nil(t, Mask(nil))
 	var nilPtr *string
-	assert.Equal(t, nilPtr, MaskMetaSecret(nilPtr))
+	assert.Equal(t, nilPtr, Mask(nilPtr))
 
 	m := map[string]any{"smtpPass": "pw", "deeplAuthKey": nil, "name": "kept"}
-	MaskMetaSecretsInMap(m)
-	assert.Equal(t, MetaSecretPlaceholder, m["smtpPass"])
+	MaskInMap(m)
+	assert.Equal(t, Placeholder, m["smtpPass"])
 	assert.Nil(t, m["deeplAuthKey"])
 	assert.Equal(t, "kept", m["name"])
 	_, added := m["objectStorageSecretKey"]
 	assert.False(t, added, "absent fields are not added")
 }
 
-func TestIsMetaSecretPlaceholder(t *testing.T) {
-	assert.True(t, IsMetaSecretPlaceholder(MetaSecretPlaceholder))
-	assert.True(t, IsMetaSecretPlaceholder(" \t"+MetaSecretPlaceholder+"\n"))
-	assert.False(t, IsMetaSecretPlaceholder(MetaSecretPlaceholder+"x"))
-	assert.False(t, IsMetaSecretPlaceholder(""))
+func TestIsPlaceholder(t *testing.T) {
+	assert.True(t, IsPlaceholder(Placeholder))
+	assert.True(t, IsPlaceholder(" \t"+Placeholder+"\n"))
+	assert.False(t, IsPlaceholder(Placeholder+"x"))
+	assert.False(t, IsPlaceholder(""))
 }

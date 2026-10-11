@@ -11,24 +11,25 @@ import (
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
+	"github.com/elythia-network/elythia/internal/metasecret"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/labstack/echo/v4"
 )
 
 // redactAdminMetaSecrets replaces the secret fields of an admin/meta response
-// with model.MetaSecretPlaceholder and adds has<Field> flags.
+// with metasecret.Placeholder and adds has<Field> flags.
 //
 // 秘密の値は返さない。欄は残し、設定済みなら固定の文字列、未設定なら今までどおり
 // null / 空文字を返す。has<Field> は追加の欄で、設定済みかを bool で示す。
 func redactAdminMetaSecrets(resp map[string]any) {
-	for _, f := range model.MetaSecretFields {
+	for _, f := range metasecret.Fields {
 		v, ok := resp[f]
 		if !ok {
 			continue
 		}
-		resp[hasSecretFieldName(f)] = model.MetaSecretIsSet(v)
-		resp[f] = model.MaskMetaSecret(v)
+		resp[hasSecretFieldName(f)] = metasecret.IsSet(v)
+		resp[f] = metasecret.Mask(v)
 	}
 }
 
@@ -46,8 +47,8 @@ func hasSecretFieldName(field string) string {
 // 管理画面 (本家のものを含む) は admin/meta で受け取った値をそのまま送り返す。
 // 伏せ字を受けたら「変えない」と読む。空文字と null は今までどおり消す。
 func dropUnchangedSecretFields(fields map[string]any) {
-	for _, f := range model.MetaSecretFields {
-		if s, ok := fields[f].(string); ok && model.IsMetaSecretPlaceholder(s) {
+	for _, f := range metasecret.Fields {
+		if s, ok := fields[f].(string); ok && metasecret.IsPlaceholder(s) {
 			delete(fields, f)
 		}
 	}
@@ -69,7 +70,7 @@ func metaForModerationLog(m *model.Meta) any {
 	if err := json.Unmarshal(b, &out); err != nil {
 		return nil
 	}
-	model.MaskMetaSecretsInMap(out)
+	metasecret.MaskInMap(out)
 	return out
 }
 
@@ -81,7 +82,7 @@ func changedMetaSecrets(before, after *model.Meta) []string {
 	}
 	bm, am := metaSecretValues(before), metaSecretValues(after)
 	out := []string{}
-	for _, f := range model.MetaSecretFields {
+	for _, f := range metasecret.Fields {
 		if bm[f] != am[f] {
 			out = append(out, f)
 		}
@@ -98,8 +99,8 @@ func metaSecretValues(m *model.Meta) map[string]string {
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return nil
 	}
-	out := make(map[string]string, len(model.MetaSecretFields))
-	for _, f := range model.MetaSecretFields {
+	out := make(map[string]string, len(metasecret.Fields))
+	for _, f := range metasecret.Fields {
 		if s, ok := raw[f].(string); ok {
 			out[f] = s
 		}
@@ -126,7 +127,7 @@ func redactModerationLogInfo(logType string, info []byte) any {
 	}
 	for _, k := range []string{"before", "after"} {
 		if inner, ok := m[k].(map[string]any); ok {
-			model.MaskMetaSecretsInMap(inner)
+			metasecret.MaskInMap(inner)
 		}
 	}
 	return m
@@ -158,7 +159,7 @@ func keptSecretForNewDestination(fields map[string]any, current map[string]any) 
 		if _, sent := fields[sd.secret]; sent {
 			continue
 		}
-		if !model.MetaSecretIsSet(current[sd.secret]) {
+		if !metasecret.IsSet(current[sd.secret]) {
 			continue
 		}
 		for _, d := range sd.dests {
