@@ -909,3 +909,35 @@ func TestDirStorage_ListRefusesSymlinkedPrefix(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, objs)
 }
+
+// TestDirStorage_ListToleratesNonUTF8Names: os.Root's FS refuses names that
+// are not valid UTF-8 (fs.ValidPath). One such directory or file, at the root
+// or below generations/, must not make the whole listing fail.
+func TestDirStorage_ListToleratesNonUTF8Names(t *testing.T) {
+	root := markedDir(t)
+	st, err := NewDirStorage(root)
+	require.NoError(t, err)
+	ctx := context.Background()
+	require.NoError(t, st.Put(ctx, Key("20261010T040000Z", MetaFile), strings.NewReader("{}")))
+	bad := "bad-\xff\xfe"
+	for _, dir := range []string{root, filepath.Join(root, "generations"), filepath.Join(root, "generations", "20261010T040000Z")} {
+		require.NoError(t, os.Mkdir(filepath.Join(dir, bad), 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, bad, "x"), []byte("x"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, bad+".file"), []byte("x"), 0o600))
+	}
+	for _, prefix := range []string{"", GenerationPrefix(), Key("20261010T040000Z", "")} {
+		objs, err := st.List(ctx, prefix)
+		require.NoError(t, err, prefix)
+		assert.Contains(t, objs, mustStat(t, st, Key("20261010T040000Z", MetaFile)), prefix)
+	}
+	gens, err := ListGenerations(ctx, st)
+	require.NoError(t, err)
+	require.Len(t, gens, 1)
+}
+
+func mustStat(t *testing.T, st Storage, key string) ObjectInfo {
+	t.Helper()
+	fi, err := st.Stat(context.Background(), key)
+	require.NoError(t, err)
+	return fi
+}
