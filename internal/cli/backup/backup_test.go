@@ -307,6 +307,9 @@ func TestList_UnreadableAndVerified(t *testing.T) {
 	put(backup.Key("20261003T000000Z", backup.VerifyFile), `{"id":"20261003T000000Z","ok":true}`)
 	// meta.json だけあって dump が無い世代。
 	put(backup.Key("20261004T000000Z", backup.MetaFile), `{"formatVersion":1,"id":"20261004T000000Z","dumpFile":"dump.pgc"}`)
+	// ok:true でも、同じ ID で取り直す前の dump を確かめた結果 (dumpSha256 が食い違う) は
+	// 通ったと出さない。
+	put(backup.Key("20261004T000000Z", backup.VerifyFile), `{"id":"20261004T000000Z","ok":true,"dumpSha256":"0000"}`)
 	cfg := filepath.Join(t.TempDir(), "default.yml")
 	require.NoError(t, os.WriteFile(cfg, []byte("url: http://127.0.0.1:3000/\nport: 3000\ndb:\n  host: 127.0.0.1\n  port: 5432\n  db: x\n  user: x\n  pass: x\n"+dirBackupYAML(dir, "")), 0o600))
 
@@ -314,7 +317,7 @@ func TestList_UnreadableAndVerified(t *testing.T) {
 	require.Equal(t, 0, list(ctx, e, []string{"-config", cfg}), stderr.String())
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
 	require.Len(t, lines, 5)
-	assert.Regexp(t, `^20261004T000000Z\s+no-dump\s`, lines[4])
+	assert.Regexp(t, `^20261004T000000Z\s+no-dump\s+\d+\s+false\s+failed\s`, lines[4])
 	assert.Regexp(t, `^20261001T000000Z\s+unreadable\s`, lines[1])
 	assert.Regexp(t, `^20261002T000000Z\s+complete\s+\d+\s+true\s+failed\s+2\.0\.0\s+5 \(dirty\)$`, lines[2])
 	assert.Regexp(t, `^20261003T000000Z\s+no-dump\s+\d+\s+false\s+ok\s+\S*\s*empty$`, lines[3])

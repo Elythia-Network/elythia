@@ -377,7 +377,7 @@ backup:
 
 **古い世代は、使える新しい世代が`keep`個そろってから消す。** 壊れたバックアップしか残らない状態を作らないため。
 
-- 「使える世代」は、`verify: true`なら、揃った世代で`verify.json`が`ok: true`のもの。`verify: false`なら、揃った世代で、検証に落ちていないもの(`verify.json`が無いか`ok: true`)
+- 「使える世代」は、`verify: true`なら、揃った世代で`verify.json`が通っているもの。`verify: false`なら、揃った世代で、検証に落ちていないもの(`verify.json`が無いか通っている)。「通っている」は、`ok: true`で、かつその世代の今の`meta.json`の結果であること(IDと`dumpSha256`が合う。戻す処理の`-id latest`と管理画面と同じ基準)
 - `meta.json`か`verify.json`が読めない世代は、理由(壊れている、保存先の一時的な誤り)に関わらず使えない世代として扱う。使えない世代が増えても、消す世代は増えない
 - 新しい方から数えて`keep`個目の使える世代より古い世代は、使えるかどうかに関わらず全て消す
 - それより新しい世代は、検証に落ちた世代も、揃っていない世代も残す。落ちた理由を調べられるようにするためと、揃っていない世代は書いている途中かもしれないため。`keep`個の窓の外に出たら消える
@@ -538,7 +538,7 @@ ID                STATUS    SIZE  ENCRYPTED  VERIFIED  ELYTHIA  MIGRATION
 |---|---|
 | `STATUS` | `complete`(`meta.json`と、それが名指しするdumpがある)、`incomplete`(`meta.json`が無い。途中で止まったもの)、`no-dump`(`meta.json`はあるがdumpが無い。戻せない)、`unreadable`(`meta.json`が読めない。知らない`formatVersion`など) |
 | `SIZE` | 世代のファイルの合計(bytes) |
-| `VERIFIED` | 確かめた結果(`verify.json`の`ok`)。通れば`ok`、通らなければ`failed`、まだ確かめていなければ`-` |
+| `VERIFIED` | 確かめた結果。通れば`ok`、通らなければ`failed`、まだ確かめていなければ`-`。`verify.json`の`ok`が`true`でも、別の世代の結果か、`dumpSha256`が今の`meta.json`と違う(同じIDで取り直された)ときは`failed`にする。戻す処理(`-id latest`)と管理画面と同じ基準 |
 | `MIGRATION` | `schema_migrations`の番号。表が無ければ`missing`、行が無ければ`empty`、dirtyなら`(dirty)`が付く |
 
 ## 管理画面(#3462)

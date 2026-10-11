@@ -171,7 +171,8 @@ func list(ctx context.Context, e env, args []string) int {
 		}
 		verified := "-"
 		if g.Verify != nil {
-			verified = map[bool]string{true: "ok", false: "failed"}[g.Verify.OK]
+			// restore と管理画面と同じ基準で出す (backup.VerifyPassed)。
+			verified = map[bool]string{true: "ok", false: "failed"}[backup.VerifyPassed(g.ID, g.Verify, g.Meta)]
 		}
 		fmt.Fprintf(tw, "%s\t%s\t%d\t%s\t%s\t%s\t%s\n", g.ID, status, g.Size, encrypted, verified, version, migration)
 	}

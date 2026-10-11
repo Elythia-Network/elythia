@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -53,6 +54,26 @@ func mustGet(t *testing.T, st *memStorage, key string) []byte {
 	b, ok := st.objects[key]
 	require.True(t, ok, key)
 	return b
+}
+
+// verify.json の ok が true でも、restore と同じ基準 (backup.VerifyPassed) で通って
+// いなければ使える世代に数えない。数えると、restore が選ばない世代を残して古い世代を
+// 消しうる。
+func TestScanUsesVerifyPassed(t *testing.T) {
+	st := newMemStorage()
+	stale := st.addGeneration(dayN(0), true, "")
+	b, err := json.Marshal(backup.VerifyResult{ID: stale, OK: true, DumpSHA256: "0000"})
+	require.NoError(t, err)
+	st.set(backup.Key(stale, backup.VerifyFile), b)
+	other := st.addGeneration(dayN(1), true, "")
+	b, err = json.Marshal(backup.VerifyResult{ID: stale, OK: true})
+	require.NoError(t, err)
+	st.set(backup.Key(other, backup.VerifyFile), b)
+	gens, err := Scan(context.Background(), st)
+	require.NoError(t, err)
+	require.Len(t, gens, 2)
+	assert.Equal(t, VerifyFailed, gens[0].Verify, "dumpSha256 differs from meta.json")
+	assert.Equal(t, VerifyFailed, gens[1].Verify, "verify.json of another generation")
 }
 
 func TestScanErrors(t *testing.T) {
