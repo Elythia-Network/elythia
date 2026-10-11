@@ -96,7 +96,7 @@ dumpから戻す方法は、DBの大きさに比例して止まる時間が延�
 | `-mode swap` | 同じサーバーで、今のDBを前の状態へ戻す | `<DB名>_restore_<日時>`へ戻し、確かめてから、今のDBを`<DB名>_before_restore_<日時>`へ、戻したDBを`<DB名>`へ名前を変える。今のDBは消さない |
 | `-mode empty` | PostgreSQLのメジャーバージョンを上げる、別のホストへ引っ越す | 表が1つも無い`<DB名>`へ戻す。DBは、設定ファイルのDBのユーザーを持ち主にして先に作っておく(`CREATE DATABASE <DB名> OWNER <DBのユーザー>`。postgresのimageなら、`POSTGRES_DB`が`POSTGRES_USER`の持ち物として作る) |
 
-`<DB名>`は設定ファイルの`db.db`。`<日時>`はUTCの`YYYYMMDDhhmmss`。戻す世代は`-id <世代ID>`で選ぶ。世代IDは`backup list`で見る。`-id latest`は、`meta.json`とdumpが揃っていて(`backup list`の`STATUS`が`complete`)、検証(`backup verify`、[確かめる](backup.md#確かめる))に通った世代(`verify.json`の`ok`が`true`)のうち、最も新しいものを選ぶ。それより新しい世代の`meta.json`か`verify.json`が読めないときは、古い世代へ進まずに止まる(一時的に読めなかっただけで、意図より古い時点へ戻さないため)。そのときは`-id`で名指しする。検証していない世代を`-id`で名指ししたときは、警告を出して戻す。
+`<DB名>`は設定ファイルの`db.db`。`<日時>`はUTCの`YYYYMMDDhhmmss`。戻す世代は`-id <世代ID>`で選ぶ。世代IDは`backup list`で見る。`-id latest`は、`meta.json`とdumpが揃っていて(`backup list`の`STATUS`が`complete`)、検証(`backup verify`、[確かめる](backup.md#確かめる))に通った世代(`verify.json`の`ok`が`true`で、その`id`と`dumpSha256`が今の`meta.json`と合うもの。`dumpSha256`を持たない古い`verify.json`は`id`だけで見る)のうち、最も新しいものを選ぶ。それより新しい世代の`meta.json`か`verify.json`が読めないときは、古い世代へ進まずに止まる(一時的に読めなかっただけで、意図より古い時点へ戻さないため)。そのときは`-id`で名指しする。検証していない世代を`-id`で名指ししたときは、警告を出して戻す。
 
 ### 戻す前に止める条件
 
