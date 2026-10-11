@@ -19,6 +19,21 @@ import (
 // にまとめる。どの段の失敗も、このどれかを通る。
 func stopping(ctx context.Context) bool { return ctx.Err() != nil }
 
+// advance writes the step before an action outside (the maintenance, the
+// database names) depends on it.
+//
+// 書けなければ、外への作用の前で止まって返す (false)。記録が遅れたまま作用を
+// 進めると、起動し直した回復が古い段から逆の方向を選ぶ (例: switched のまま
+// 戻した DB で再開させると、回復が元の DB へ戻して書き込みを失う)。記録は最後に
+// 書けた段のまま残り、回復がそこから続きを決める。
+func (m *Manager) advance(ctx context.Context, opID, from, to string, extra ...any) bool {
+	if err := m.setStep(ctx, opID, from, to, extra...); err != nil {
+		m.log.Error("backup: cannot record the step of a restore; leaving it to the recovery", "opId", opID, "from", from, "to", to, "err", err)
+		return false
+	}
+	return true
+}
+
 // runJudge runs the judge until the returned function is called.
 func (m *Manager) runJudge(ctx context.Context) func() {
 	if m.o.RunJudge == nil {
@@ -140,7 +155,9 @@ func (m *Manager) switchOver(ctx context.Context, rec *Record) {
 		m.abortBeforeSwitch(ctx, rec, err, true)
 		return
 	}
-	m.record(ctx, rec.OpID, StepEntering, StepSwitched)
+	if !m.advance(ctx, rec.OpID, StepEntering, StepSwitched) {
+		return
+	}
 	m.journal(ctx, rec.OpID, StepSwitched, "%s is now the restored database; the previous one is %s", rec.Database, rec.Before)
 
 	// C6 / C7: Redis の後始末と検査。
@@ -152,7 +169,9 @@ func (m *Manager) switchOver(ctx context.Context, rec *Record) {
 	m.modlog(ctx, rec.Database, rec, "switch")
 
 	// C9 / C10
-	m.record(ctx, rec.OpID, StepSwitched, StepResuming)
+	if !m.advance(ctx, rec.OpID, StepSwitched, StepResuming) {
+		return
+	}
 	if err := m.o.Maint.SetPhase(ctx, rec.OpID, maintmode.PhaseResuming); err != nil {
 		m.revert(ctx, rec, StepResuming, fmt.Errorf("resume: %w", err))
 		return
@@ -196,7 +215,9 @@ func (m *Manager) abortBeforeSwitch(ctx context.Context, rec *Record, cause erro
 		return
 	}
 	m.journal(ctx, rec.OpID, StepEntering, "not switching: %v", cause)
-	m.record(ctx, rec.OpID, "", StepAborting, "error", cause.Error())
+	if !m.advance(ctx, rec.OpID, "", StepAborting, "error", cause.Error()) {
+		return
+	}
 	if inMaintenance {
 		m.resumeCurrent(ctx, rec)
 		if stopping(ctx) {
@@ -234,7 +255,9 @@ func (m *Manager) revert(ctx context.Context, rec *Record, from string, cause er
 	if aside == "" {
 		aside = rec.Database + "_rolled_back_" + m.now().UTC().Format("20060102150405")
 	}
-	m.record(ctx, rec.OpID, "", StepReverting, "aside", aside, "error", cause.Error())
+	if !m.advance(ctx, rec.OpID, "", StepReverting, "aside", aside, "error", cause.Error()) {
+		return
+	}
 	rec.Aside = aside
 	m.revertSwitch(ctx, rec)
 }
