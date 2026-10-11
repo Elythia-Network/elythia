@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+	"time"
 
 	"github.com/go-webauthn/webauthn/protocol"
 	"gorm.io/gorm"
@@ -36,6 +38,40 @@ type DBVerifier struct {
 	// Guard and Replay are shared with the main server through Redis.
 	Guard  passwordguard.Guard
 	Replay twofactor.ReplayGuard
+	// MaxChecks caps the checks running at once (default 2). A check over
+	// the cap is refused as rate limited without opening the database.
+	MaxChecks int
+
+	semOnce sync.Once
+	sem     chan struct{}
+}
+
+// nativeTokenLen is the length of a native session token (users.token is
+// char(16)).
+const nativeTokenLen = 16
+
+// busyRetryAfter is the Retry-After of a check refused over MaxChecks.
+const busyRetryAfter = 2 * time.Second
+
+// acquire takes one of the MaxChecks slots without waiting.
+//
+// 照合は 1 回ごとに DB へ接続を張る。数を絞らないと、管理者の token を持たない
+// 要求でも接続を積み上げて、入れ替えの直前の「接続が無いこと」の確認を邪魔できる。
+// 待たずに断るのは、待たせると要求を溜めて同じことになるため。
+func (v *DBVerifier) acquire() (func(), error) {
+	v.semOnce.Do(func() {
+		n := v.MaxChecks
+		if n <= 0 {
+			n = 2
+		}
+		v.sem = make(chan struct{}, n)
+	})
+	select {
+	case v.sem <- struct{}{}:
+		return func() { <-v.sem }, nil
+	default:
+		return nil, &Error{Reason: ReasonRateLimited, RetryAfter: busyRetryAfter}
+	}
 }
 
 // session is one check's view of the database.
@@ -49,9 +85,25 @@ func (v *DBVerifier) open(ctx context.Context, token, clientIP string) (*session
 	if v.Open == nil || v.Guard == nil {
 		return nil, Subject{}, unavailable(errors.New("strongauth: DBVerifier needs Open and Guard"))
 	}
-	db, closeDB, err := v.Open(ctx)
+	if token == "" {
+		return nil, Subject{}, refuse(ReasonNoCredential)
+	}
+	// 形の合わない token (app や MiAuth の token を含む) は、DB を開く前に断る。
+	if len(token) != nativeTokenLen {
+		return nil, Subject{}, refuse(ReasonNotNativeToken)
+	}
+	release, err := v.acquire()
 	if err != nil {
+		return nil, Subject{}, err
+	}
+	db, closeRaw, err := v.Open(ctx)
+	if err != nil {
+		release()
 		return nil, Subject{}, unavailable(fmt.Errorf("open database: %w", err))
+	}
+	closeDB := func() {
+		closeRaw()
+		release()
 	}
 	users := repository.NewUserRepository(db)
 	// users.token (char(16)) だけを引く。app や MiAuth の token は access_token の行で
@@ -93,9 +145,6 @@ func (v *DBVerifier) open(ctx context.Context, token, clientIP string) (*session
 // Verify checks every condition for the user whose native session token is
 // token, and returns that user. The database is closed before it returns.
 func (v *DBVerifier) Verify(ctx context.Context, token, clientIP string, r Reauth) (*model.User, error) {
-	if token == "" {
-		return nil, refuse(ReasonNoCredential)
-	}
 	sess, subject, err := v.open(ctx, token, clientIP)
 	if err != nil {
 		return nil, err
@@ -109,9 +158,6 @@ func (v *DBVerifier) Verify(ctx context.Context, token, clientIP string, r Reaut
 
 // BeginPasskey starts a passkey challenge for the user of token.
 func (v *DBVerifier) BeginPasskey(ctx context.Context, token, clientIP string) (*protocol.CredentialAssertion, error) {
-	if token == "" {
-		return nil, refuse(ReasonNoCredential)
-	}
 	sess, subject, err := v.open(ctx, token, clientIP)
 	if err != nil {
 		return nil, err
