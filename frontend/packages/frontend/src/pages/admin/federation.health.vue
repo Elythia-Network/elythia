@@ -41,26 +41,32 @@ SPDX-License-Identifier: AGPL-3.0-only
 			mk-go: 配送を止めている相手 (#3048)。**「開いたまま戻らない」が最悪の
 			失敗形**なので、見えて手で再開できるようにする。受信側には無い。
 		-->
-		<div v-if="direction === 'deliver' && breakers.length > 0" class="_gaps_s">
-			<div :class="$style.breakersHead">{{ i18n.ts._federationHealth.breakersTitle }}</div>
-			<div v-for="b in breakers" :key="b.host" :class="[$style.breaker, b.open ? $style.error : $style.warn]">
-				<div :class="$style.breakerHead">
-					<span class="_monospace">{{ b.host }}</span>
-					<span :class="$style.breakerState">{{ stateLabel(b) }}</span>
+		<MkFolder v-if="direction === 'deliver' && breakers.length > 0" :defaultOpen="true">
+			<template #label>{{ i18n.ts._federationHealth.breakersTitle }}</template>
+			<template #suffix>{{ number(breakers.length) }}</template>
+			<div class="_gaps_s">
+				<div v-for="b in visibleBreakers" :key="b.host" :class="[$style.breaker, b.open ? $style.error : $style.warn]">
+					<div :class="$style.breakerHead">
+						<span class="_monospace">{{ b.host }}</span>
+						<span :class="$style.breakerState">{{ stateLabel(b) }}</span>
+					</div>
+					<div :class="$style.breakerBody">
+						<template v-if="b.open">
+							<div v-if="b.openedAt">{{ i18n.ts._federationHealth.breakerOpenedAt }}: <MkTime :time="b.openedAt"/></div>
+							<div v-if="b.nextProbeAt">{{ i18n.ts._federationHealth.breakerNextProbe }}: <MkTime :time="b.nextProbeAt" mode="absolute"/></div>
+							<div>{{ i18n.tsx._federationHealth.breakerDetail({ failures: number(b.consecutiveFailures), interval: intervalLabel(b.probeIntervalSeconds) }) }}</div>
+						</template>
+						<div v-if="b.throttledUntil">{{ i18n.ts._federationHealth.breakerThrottledUntil }}: <MkTime :time="b.throttledUntil" mode="absolute"/></div>
+						<div v-if="b.reservedUntil">{{ i18n.ts._federationHealth.breakerReservedUntil }}: <MkTime :time="b.reservedUntil" mode="absolute"/></div>
+					</div>
+					<MkButton small :disabled="closing === b.host" @click="closeBreaker(b.host)"><i class="ti ti-player-play"></i> {{ i18n.ts._federationHealth.breakerClose }}</MkButton>
 				</div>
-				<div :class="$style.breakerBody">
-					<template v-if="b.open">
-						<div v-if="b.openedAt">{{ i18n.ts._federationHealth.breakerOpenedAt }}: <MkTime :time="b.openedAt"/></div>
-						<div v-if="b.nextProbeAt">{{ i18n.ts._federationHealth.breakerNextProbe }}: <MkTime :time="b.nextProbeAt" mode="absolute"/></div>
-						<div>{{ i18n.tsx._federationHealth.breakerDetail({ failures: number(b.consecutiveFailures), interval: intervalLabel(b.probeIntervalSeconds) }) }}</div>
-					</template>
-					<div v-if="b.throttledUntil">{{ i18n.ts._federationHealth.breakerThrottledUntil }}: <MkTime :time="b.throttledUntil" mode="absolute"/></div>
-					<div v-if="b.reservedUntil">{{ i18n.ts._federationHealth.breakerReservedUntil }}: <MkTime :time="b.reservedUntil" mode="absolute"/></div>
-				</div>
-				<MkButton small :disabled="closing === b.host" @click="closeBreaker(b.host)"><i class="ti ti-player-play"></i> {{ i18n.ts._federationHealth.breakerClose }}</MkButton>
+				<MkButton v-if="visibleBreakers.length < breakers.length" :class="$style.loadMore" @click="showMoreBreakers">
+					{{ i18n.ts.loadMore }}
+				</MkButton>
+				<div :class="$style.hint">{{ i18n.ts._federationHealth.breakersNote }}</div>
 			</div>
-			<div :class="$style.hint">{{ i18n.ts._federationHealth.breakersNote }}</div>
-		</div>
+		</MkFolder>
 
 		<div>
 			<MkInput v-model="hostQuery" :debounce="true">
@@ -90,7 +96,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 				効かないので、key が host だけだと窓や並び替えを変えたときに同じ要素が
 				再利用され、error に転落しても開かない。
 			-->
-			<MkFolder v-for="h in visibleHosts" :key="`${h.host}:${severityOf(h)}`" :defaultOpen="severityOf(h) === 'error'">
+			<MkFolder v-for="h in pagedHosts" :key="`${h.host}:${severityOf(h)}`" :defaultOpen="severityOf(h) === 'error'">
 				<template #label>
 					<span :class="[$style.dot, $style[severityOf(h)]]" :title="rateLabel(h)"></span>
 					<span class="_monospace">{{ h.host }}</span>
@@ -142,6 +148,9 @@ SPDX-License-Identifier: AGPL-3.0-only
 					</div>
 				</div>
 			</MkFolder>
+			<MkButton v-if="pagedHosts.length < visibleHosts.length" :class="$style.loadMore" @click="showMoreHosts">
+				{{ i18n.ts.loadMore }}
+			</MkButton>
 		</div>
 
 		<MkInfo>{{ direction === 'deliver' ? i18n.ts._federationHealth.deliverNote : i18n.ts._federationHealth.inboxNote }}</MkInfo>
@@ -200,6 +209,9 @@ type HostHealth = Elythia.FederationHostHealth;
 // mk-go: 配送を止めている相手 (#3048)。受信側 (inbox-health) では常に空。
 type BreakerState = Elythia.DeliveryBreakerState;
 
+const HOST_PAGE_SIZE = 50;
+const BREAKER_PAGE_SIZE = 10;
+
 const props = defineProps<{
 	direction: 'deliver' | 'inbox';
 }>();
@@ -214,6 +226,8 @@ const breakers = ref<BreakerState[]>([]);
 const closing = ref<string | null>(null);
 const fetching = ref(true);
 const unavailable = ref(false);
+const visibleHostLimit = ref(HOST_PAGE_SIZE);
+const visibleBreakerLimit = ref(BREAKER_PAGE_SIZE);
 
 const { model: windowSeconds, def: windowDef } = useMkSelect({
 	// **1 時間より長い窓は出さない。** deliveryhealth.MaxWindow が 1 時間で、
@@ -306,8 +320,21 @@ const visibleHosts = computed(() => {
 	});
 });
 
+const pagedHosts = computed(() => visibleHosts.value.slice(0, visibleHostLimit.value));
+const visibleBreakers = computed(() => breakers.value.slice(0, visibleBreakerLimit.value));
+
+function showMoreHosts() {
+	visibleHostLimit.value += HOST_PAGE_SIZE;
+}
+
+function showMoreBreakers() {
+	visibleBreakerLimit.value += BREAKER_PAGE_SIZE;
+}
+
 async function fetchHealth() {
 	fetching.value = true;
+	visibleHostLimit.value = HOST_PAGE_SIZE;
+	visibleBreakerLimit.value = BREAKER_PAGE_SIZE;
 	// **毎回戻す。** 立てたままだと v-else 側 (窓・状態・並び替えの全セレクタ) が
 	// 消えるので、一度でも失敗するとその場から再試行できなくなる。
 	unavailable.value = false;
@@ -362,13 +389,12 @@ async function closeBreaker(host: string) {
 }
 
 watch([windowSeconds, () => props.direction], fetchHealth, { immediate: true });
+watch([hostQuery, state, sort], () => {
+	visibleHostLimit.value = HOST_PAGE_SIZE;
+});
 </script>
 
 <style lang="scss" module>
-.breakersHead {
-	font-weight: bold;
-}
-
 .breaker {
 	display: flex;
 	flex-direction: column;
@@ -513,5 +539,9 @@ watch([windowSeconds, () => props.direction], fetchHealth, { immediate: true });
 	text-align: center;
 	padding: 32px 16px;
 	opacity: 0.7;
+}
+
+.loadMore {
+	margin: 0 auto;
 }
 </style>
