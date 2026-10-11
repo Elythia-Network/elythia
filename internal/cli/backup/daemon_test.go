@@ -496,8 +496,8 @@ func TestDaemonRetriesTheRestore(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
 	store := restoreop.NewStore(rdb, "p:")
-	require.NoError(t, rdb.Set(context.Background(), store.CurrentKey(), "restore-left", 0).Err())
-	require.NoError(t, rdb.HSet(context.Background(), "p:elythia:maintenance:restore:restore-left", "opId", "restore-left", "step", "aborting").Err())
+	require.NoError(t, rdb.Set(context.Background(), store.CurrentKey(), "restore-0123456789abcdef", 0).Err())
+	require.NoError(t, rdb.HSet(context.Background(), "p:elythia:maintenance:restore:restore-0123456789abcdef", "opId", "restore-0123456789abcdef", "step", "aborting").Err())
 	var attempts atomic.Int32
 	closed := make(chan struct{})
 	e.openRestore = func(_ *config.Config, d *daemon.Daemon, _ backupkit.Storage, _ *slog.Logger) (*RestoreParts, error) {
@@ -515,7 +515,7 @@ func TestDaemonRetriesTheRestore(t *testing.T) {
 	go func() { done <- runDaemon(e, nil) }()
 	base := "http://" + <-addr
 	status := func() int {
-		req, err := http.NewRequest(http.MethodPost, base+"/restore/status", strings.NewReader(`{"opId":"restore-left","ticket":"x","i":"y"}`))
+		req, err := http.NewRequest(http.MethodPost, base+"/restore/status", strings.NewReader(`{"opId":"restore-0123456789abcdef","ticket":"x","i":"y"}`))
 		require.NoError(t, err)
 		req.Header.Set("Authorization", "Bearer tok")
 		res, err := http.DefaultClient.Do(req)
@@ -526,7 +526,7 @@ func TestDaemonRetriesTheRestore(t *testing.T) {
 		return res.StatusCode
 	}
 	require.Eventually(t, func() bool {
-		step, _ := rdb.HGet(context.Background(), "p:elythia:maintenance:restore:restore-left", "step").Result()
+		step, _ := rdb.HGet(context.Background(), "p:elythia:maintenance:restore:restore-0123456789abcdef", "step").Result()
 		return step == restoreop.StepAborted
 	}, 5*time.Second, 10*time.Millisecond, "the manager built later recovers the operation")
 	assert.Equal(t, http.StatusForbidden, status(), "the control API serves the restore (the ticket is wrong)")

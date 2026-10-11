@@ -454,6 +454,9 @@ func (m *Manager) finishLive(opID string) {
 // CheckTicket returns the record of opID when ticket and token are the ones
 // it was prepared with.
 func (m *Manager) CheckTicket(ctx context.Context, opID, ticket, token string) (*Record, error) {
+	if !ValidOpID(opID) {
+		return nil, ErrNotFound
+	}
 	rec, err := m.o.Store.Get(ctx, opID)
 	if err != nil {
 		return nil, err
