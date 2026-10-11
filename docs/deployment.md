@@ -768,6 +768,14 @@ held の間も数え続け、後から繋いだ接続があれば `status` に�
 DB のユーザーには、メンテナンス用の DB への `CONNECT` の権限が要る (`postgres` は既定で誰でも
 繋げる)。同じユーザーの接続を切るのに superuser は要らない。
 
+- **`maintenance.maintenanceDb` に `template1` を使わない。** `CREATE DATABASE` は既定で `template1`
+  を写すので、判定役が 2 秒ごとに繋いでいると、その瞬間に流れた `createdb` (や、`TEMPLATE` を
+  指定しない `CREATE DATABASE`) が「source database "template1" is being accessed by other users」で
+  失敗する。`postgres` か、そのために作った空の DB にする
+- **`dbReplications` を有効にしているなら、各 replica にも判定役が繋げる必要がある。** 1 台でも
+  繋がらないと判定は失敗し (`status` の `judge error` に出る)、メンテナンスは `entering` から進まない
+  (安全側)。replica を外す作業の前にメンテナンスに入るなら、先に設定から外しておく
+
 ### メンテナンス中の応答
 
 | 経路 | 応答 |

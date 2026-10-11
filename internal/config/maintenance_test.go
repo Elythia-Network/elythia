@@ -18,10 +18,10 @@ func TestLoad_MaintenanceDefaults(t *testing.T) {
 }
 
 func TestLoad_MaintenanceFromFileAndEnv(t *testing.T) {
-	path := writeTestConfig(t, testYAML+"maintenance:\n  maintenanceDb: template1\n  drainTimeout: 45s\n")
+	path := writeTestConfig(t, testYAML+"maintenance:\n  maintenanceDb: elythia_admin\n  drainTimeout: 45s\n")
 	cfg, err := Load(path)
 	require.NoError(t, err)
-	assert.Equal(t, MaintenanceOptions{MaintenanceDB: "template1", DrainTimeout: 45 * time.Second}, cfg.Maintenance)
+	assert.Equal(t, MaintenanceOptions{MaintenanceDB: "elythia_admin", DrainTimeout: 45 * time.Second}, cfg.Maintenance)
 
 	// 節が無くても、環境変数だけで変えられる (bindEnvKeys にある)。
 	t.Setenv("MK_MAINTENANCE_DRAINTIMEOUT", "2m")
