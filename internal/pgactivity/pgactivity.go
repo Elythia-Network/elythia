@@ -79,24 +79,25 @@ func List(ctx context.Context, q Querier, database string) ([]Session, error) {
 }
 
 // terminateSQL ends $1 only while it is still a backend on $2 of the current
-// role whose application_name starts with $3.
+// role whose application_name is $3.
 //
 // pid だけで切ると、数えてから切るまでの間に pid が別の接続に使い回されたとき、
-// 関係の無い接続を切る。確かめるのと切るのを 1 文にする。LIKE を使わないのは、
-// 接頭辞の _ や % を wildcard として読ませないため。
+// 関係の無い接続を切る。確かめるのと切るのを 1 文にする。名前は数えたときの
+// 完全な名前で比べ、同じ接頭辞を持つ別のプロセスの接続を切らない
+// (#3463 のレビュー2周目 4)。
 const terminateSQL = `
 	SELECT coalesce(bool_or(pg_terminate_backend(pid)), false)
 	FROM pg_stat_activity
 	WHERE pid = $1 AND datname = $2 AND usename = current_user
-		AND left(application_name, length($3)) = $3`
+		AND application_name = $3`
 
 // Terminate ends the backend pid with pg_terminate_backend, but only while it
-// is still connected to database as the current role with an
-// application_name starting with appPrefix. It reports whether it ended one
-// (false when that backend is gone or no longer matches).
-func Terminate(ctx context.Context, q Querier, pid int, database, appPrefix string) (bool, error) {
+// is still connected to database as the current role with application_name
+// application (as List returned it). It reports whether it ended one (false
+// when that backend is gone or no longer matches).
+func Terminate(ctx context.Context, q Querier, pid int, database, application string) (bool, error) {
 	var ok bool
-	if err := q.QueryRow(ctx, terminateSQL, pid, database, appPrefix).Scan(&ok); err != nil {
+	if err := q.QueryRow(ctx, terminateSQL, pid, database, application).Scan(&ok); err != nil {
 		return false, fmt.Errorf("pgactivity: terminate %d: %w", pid, err)
 	}
 	return ok, nil
