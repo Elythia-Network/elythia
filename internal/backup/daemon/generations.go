@@ -15,9 +15,11 @@ type VerifyState string
 const (
 	// VerifyNone means verify.json does not exist.
 	VerifyNone VerifyState = "none"
-	// VerifyOK means verify.json exists and reports OK.
+	// VerifyOK means verify.json passes backup.VerifyPassed: it reports OK
+	// and belongs to the generation's current dump.
 	VerifyOK VerifyState = "ok"
-	// VerifyFailed means verify.json reports a failure.
+	// VerifyFailed means verify.json reports a failure, or reports OK for
+	// another generation or dump (backup.VerifyPassed is false).
 	VerifyFailed VerifyState = "failed"
 	// VerifyUnreadable means verify.json exists but could not be read or
 	// parsed.
@@ -77,7 +79,10 @@ func Scan(ctx context.Context, st backup.Storage) ([]Generation, error) {
 		}
 		if l.Verify != nil {
 			g.Verify = VerifyFailed
-			if l.Verify.OK {
+			// restore の -id latest と管理画面と同じ基準で「通った」と言う。同じ ID で
+			// 取り直されて dumpSha256 が食い違う verify.json を通ったと数えると、
+			// restore が選ばない世代を「使える世代」に数え、古い世代を消しうる。
+			if backup.VerifyPassed(l.ID, l.Verify, l.Meta) {
 				g.Verify = VerifyOK
 			}
 		}
