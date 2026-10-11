@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"testing"
@@ -67,4 +68,25 @@ func TestDefaultEndpointLimits_RestoreStatusIsLimitedPerClient(t *testing.T) {
 	if assert.Len(t, store.calls, 1) {
 		assert.Contains(t, store.calls[0].Key, ipBucketPrefix, "an anonymous request is counted per client")
 	}
+}
+
+// TestAllowIP_SharesTheBucketWithMiddleware checks that AllowIP counts on the
+// same key as Middleware does for an anonymous request.
+func TestAllowIP_SharesTheBucketWithMiddleware(t *testing.T) {
+	const ep = "admin/backup/restore/status"
+	store := &mockLimitStore{}
+	rl := NewRateLimiter(store, true, DefaultEndpointLimits)
+	e, h := setupEcho(rl)
+	doRequest(e, rl.Middleware(), h, "/api/"+ep, nil)
+	ok, _ := rl.AllowIP(context.Background(), ep, "192.168.1.100")
+	assert.True(t, ok)
+	if assert.Len(t, store.calls, 2) {
+		assert.Equal(t, store.calls[0].Key, store.calls[1].Key)
+	}
+	store.results, store.idx = []mockResult{{Info: LimitInfo{Remaining: 0, ResetMs: time.Now().Add(30 * time.Second).UnixMilli()}}}, 0
+	ok, retry := rl.AllowIP(context.Background(), ep, "192.168.1.100")
+	assert.False(t, ok)
+	assert.Positive(t, retry)
+	ok, _ = rl.AllowIP(context.Background(), "admin/backup/restore/confirm", "192.168.1.100")
+	assert.True(t, ok, "an endpoint without a limit")
 }

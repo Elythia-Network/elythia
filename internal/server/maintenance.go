@@ -2,9 +2,11 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -13,9 +15,11 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/elythia-network/elythia/internal/api/adminbackup"
+	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/frontendutil"
 	"github.com/elythia-network/elythia/internal/maintmode"
+	"github.com/elythia-network/elythia/internal/server/middleware"
 )
 
 // Retry backoff for a generation that failed to come back after a
@@ -86,7 +90,7 @@ func (m *maintTracker) init(s *Supervisor) {
 	}
 	if s.cfg != nil {
 		// 配送だけのノード (QueueOnly) は handler が API を出さないので、転送の口を付けても届かない。
-		opts.Forward, opts.ForwardPaths = maintenanceRestoreForward(s.cfg)
+		opts.Forward, opts.ForwardPaths = maintenanceRestoreForward(s.cfg, maintenanceRateLimiter(s))
 	}
 	m.handler = maintmode.NewHandler(opts)
 }
@@ -95,7 +99,7 @@ func (m *maintTracker) init(s *Supervisor) {
 // is in maintenance, resolving the client address the way echo does
 // (trustProxy), so that the per-client failure budget of the
 // re-authentication is the same as when the server runs.
-func maintenanceRestoreForward(cfg *config.Config) (http.HandlerFunc, []string) {
+func maintenanceRestoreForward(cfg *config.Config, limiter *middleware.RateLimiter) (http.HandlerFunc, []string) {
 	trusted, err := config.ParseTrustProxy(cfg.TrustProxy)
 	if err != nil {
 		// 起動時に同じ値で echo を組み立てて通っているので、ここには来ない。
@@ -105,8 +109,33 @@ func maintenanceRestoreForward(cfg *config.Config) (http.HandlerFunc, []string) 
 	fwd := newRestoreForwarder(cfg)
 	return func(w http.ResponseWriter, r *http.Request) {
 		op := strings.TrimPrefix(r.URL.Path, adminbackup.RestorePathPrefix)
-		fwd.Serve(w, r, op, extract(r))
+		ip := extract(r)
+		// status は本体で認証しないので、動いている間と同じ接続元の上限 (echo の
+		// rate limit と同じ bucket) を、メンテナンス中も通す。
+		if limiter != nil {
+			if ok, retry := limiter.AllowIP(r.Context(), strings.TrimPrefix(r.URL.Path, "/api/"), ip); !ok {
+				w.Header().Set("Retry-After", strconv.FormatInt(retry, 10))
+				w.Header().Set("Content-Type", "application/json; charset=utf-8")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_ = json.NewEncoder(w).Encode(apierr.RateLimitExceeded())
+				return
+			}
+		}
+		fwd.Serve(w, r, op, ip)
 	}, maintenanceRestorePaths
+}
+
+// maintenanceRateLimiter is the rate limiter the forward during a
+// maintenance shares with the server (the same Redis buckets and limits).
+func maintenanceRateLimiter(s *Supervisor) *middleware.RateLimiter {
+	if s.redis == nil || s.redis.Default == nil || s.cfg.DisableEndpointRateLimits {
+		return nil
+	}
+	rl := middleware.NewRedisRateLimiter(s.redis.Default, s.cfg.EnableIPRateLimit, middleware.DefaultEndpointLimits)
+	if s.cfg.TestMode {
+		rl.Disable()
+	}
+	return rl
 }
 
 // maintenanceRestorePaths are the restore endpoints forwarded during a
