@@ -67,7 +67,8 @@ func restore(e restoreEnv, args []string) int {
 		"empty: restore into the existing empty database (a new server)")
 	confirm := fs.String("confirm", "", "the database name (db.db) again, to confirm the target")
 	rollback := fs.String("rollback", "", "instead of restoring, put back a database kept by an earlier swap (<db>_before_restore_<time>)")
-	maint := fs.String("maintenance-db", "postgres", "database to connect to while creating and renaming databases")
+	maint := fs.String("maintenance-db", "", "database to connect to while creating and renaming databases "+
+		"(default: maintenance.maintenanceDb of the config, postgres when unset)")
 	migrations := fs.String("migrations", migrate.CoreDir, "directory of the bundled migrations (its local/ subdirectory is the fork track)")
 	tmpDir := fs.String("tmp-dir", "", "directory for the downloaded dump (default: the system temporary directory)")
 	redisMode := fs.String("redis", redisAuto, "after switching databases: clean (delete timelines, caches and pending deliveries), keep, "+
@@ -91,6 +92,11 @@ func restore(e restoreEnv, args []string) int {
 	if err != nil {
 		fmt.Fprintf(e.stderr, "elythia backup restore: load config: %v\n", err)
 		return 1
+	}
+	if *maint == "" {
+		// メンテナンスモードの判定役と同じ DB を既定にする (設計第2版 §4)。
+		// 運営者が設定で替えたなら、戻すときもそちらへ繋ぐ。
+		*maint = cfg.Maintenance.MaintenanceDB
 	}
 	// 中断されたら ctx を取り消して、後始末 (作った DB の削除、復号した一時ファイルの
 	// 削除) を走らせる。既定のシグナルの扱いのままだと、defer が走らずに終わる。

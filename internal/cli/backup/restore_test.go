@@ -130,10 +130,10 @@ func TestRestoreRunsTheSteps(t *testing.T) {
 	var calls rsCalls
 	e, out, errOut := rsEnv(&calls)
 	code := restore(e, []string{"-config", cfg, "-id", "latest", "-mode", "swap", "-confirm", "elythia",
-		"-maintenance-db", "template1", "-migrations", "mig", "-tmp-dir", "/var/tmp"})
+		"-maintenance-db", "elythia_admin", "-migrations", "mig", "-tmp-dir", "/var/tmp"})
 	require.Equal(t, 0, code, errOut.String())
 	require.NotNil(t, calls.restore)
-	assert.Equal(t, bkp.RestoreOptions{ID: "latest", Mode: bkp.RestoreSwap, Database: "elythia", Confirm: "elythia", MaintenanceDB: "template1"}, *calls.restore)
+	assert.Equal(t, bkp.RestoreOptions{ID: "latest", Mode: bkp.RestoreSwap, Database: "elythia", Confirm: "elythia", MaintenanceDB: "elythia_admin"}, *calls.restore)
 	r := calls.restorer
 	assert.Equal(t, "mig", r.CoreMigrationsDir)
 	assert.Equal(t, filepath.Join("mig", "local"), r.LocalMigrationsDir)
@@ -446,4 +446,22 @@ func TestDefaultsReachUnreachableServices(t *testing.T) {
 	assert.NotNil(t, e.restore)
 	assert.NotNil(t, e.replace)
 	assert.NotNil(t, e.now)
+}
+
+// TestRestoreMaintenanceDBDefaultsToTheConfig checks #3463 review L-2: without
+// -maintenance-db, restore connects to maintenance.maintenanceDb, the
+// database the maintenance judge uses, and to postgres when it is unset.
+func TestRestoreMaintenanceDBDefaultsToTheConfig(t *testing.T) {
+	for section, want := range map[string]string{
+		"": "postgres",
+		"maintenance:\n  maintenanceDb: elythia_admin\n": "elythia_admin",
+	} {
+		cfg := rsConfig(t, "elythia", rsBackupSection+section)
+		var calls rsCalls
+		e, _, errOut := rsEnv(&calls)
+		code := restore(e, []string{"-config", cfg, "-id", "latest", "-mode", "swap", "-confirm", "elythia"})
+		require.Equal(t, 0, code, errOut.String())
+		require.NotNil(t, calls.restore)
+		assert.Equal(t, want, calls.restore.MaintenanceDB, section)
+	}
 }
