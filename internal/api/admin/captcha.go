@@ -49,25 +49,32 @@ func (h *Handler) CaptchaCurrent(c echo.Context) error {
 
 // captchaCurrentShape builds the nested captcha/current response (upstream
 // CaptchaService.get). nil *string fields serialize to JSON null (nullable:true).
+//
+// secretKey は admin/meta と同じく値を返さず、設定済みなら伏せ字を返す。
+// hasSecretKey は追加の欄。
 func captchaCurrentShape(provider string, meta *model.Meta) map[string]any {
 	return map[string]any{
 		"provider": provider,
 		"hcaptcha": map[string]any{
-			"siteKey":   meta.HcaptchaSiteKey,
-			"secretKey": meta.HcaptchaSecretKey,
+			"siteKey":      meta.HcaptchaSiteKey,
+			"secretKey":    model.MaskMetaSecret(meta.HcaptchaSecretKey),
+			"hasSecretKey": model.MetaSecretIsSet(meta.HcaptchaSecretKey),
 		},
 		"mcaptcha": map[string]any{
-			"siteKey":     meta.McaptchaSiteKey,
-			"secretKey":   meta.McaptchaSecretKey,
-			"instanceUrl": meta.McaptchaInstanceURL,
+			"siteKey":      meta.McaptchaSiteKey,
+			"secretKey":    model.MaskMetaSecret(meta.McaptchaSecretKey),
+			"hasSecretKey": model.MetaSecretIsSet(meta.McaptchaSecretKey),
+			"instanceUrl":  meta.McaptchaInstanceURL,
 		},
 		"recaptcha": map[string]any{
-			"siteKey":   meta.RecaptchaSiteKey,
-			"secretKey": meta.RecaptchaSecretKey,
+			"siteKey":      meta.RecaptchaSiteKey,
+			"secretKey":    model.MaskMetaSecret(meta.RecaptchaSecretKey),
+			"hasSecretKey": model.MetaSecretIsSet(meta.RecaptchaSecretKey),
 		},
 		"turnstile": map[string]any{
-			"siteKey":   meta.TurnstileSiteKey,
-			"secretKey": meta.TurnstileSecretKey,
+			"siteKey":      meta.TurnstileSiteKey,
+			"secretKey":    model.MaskMetaSecret(meta.TurnstileSecretKey),
+			"hasSecretKey": model.MetaSecretIsSet(meta.TurnstileSecretKey),
 		},
 	}
 }
@@ -93,8 +100,23 @@ func (h *Handler) CaptchaSave(c echo.Context) error {
 	if _, ok := supportedCaptchaProviders[req.Provider]; !ok {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PROVIDER", "Invalid provider.", "14bf7ae1-80cc-4363-acb2-4fd61d086af0"))
 	}
+	var verifySecret *string
 
-	secret := strDeref(req.Secret)
+	// 伏せ字のまま送り返された secret は「変えない」。検証には保存済みの値を使い、
+	// 保存では書き換えない (captcha/current は秘密の値を返さない)。
+	if req.Secret != nil && *req.Secret == model.MetaSecretPlaceholder {
+		stored, err := h.storedCaptchaSecret(req.Provider)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, apierr.InternalError())
+		}
+		req.Secret = nil
+		if stored != "" {
+			verifySecret = &stored
+		}
+	} else {
+		verifySecret = req.Secret
+	}
+	secret := strDeref(verifySecret)
 	sitekey := strDeref(req.Sitekey)
 	instanceURL := strDeref(req.InstanceURL)
 	captchaResult := strDeref(req.CaptchaResult)
@@ -211,4 +233,27 @@ func setIfProvided(fields map[string]any, col string, p *string) {
 	if p != nil {
 		fields[col] = *p
 	}
+}
+
+// storedCaptchaSecret returns the saved secret of provider ("" when unset).
+func (h *Handler) storedCaptchaSecret(provider string) (string, error) {
+	if h.metaRepo == nil {
+		return "", nil
+	}
+	m, err := h.metaRepo.Fetch()
+	if err != nil {
+		return "", err
+	}
+	var v *string
+	switch provider {
+	case "hcaptcha":
+		v = m.HcaptchaSecretKey
+	case "mcaptcha":
+		v = m.McaptchaSecretKey
+	case "recaptcha":
+		v = m.RecaptchaSecretKey
+	case "turnstile":
+		v = m.TurnstileSecretKey
+	}
+	return strDeref(v), nil
 }

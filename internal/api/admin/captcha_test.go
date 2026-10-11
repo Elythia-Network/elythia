@@ -50,7 +50,10 @@ func TestCaptchaCurrent_WithHcaptchaEnabled(t *testing.T) {
 	// nested provider object shape (upstream current.ts res)。
 	hcap := got["hcaptcha"].(map[string]any)
 	assert.Equal(t, "sk-hcap", hcap["siteKey"])
-	assert.Equal(t, "ss-hcap", hcap["secretKey"])
+	// 秘密の値は返さず、伏せ字と hasSecretKey を返す。
+	assert.Equal(t, model.MetaSecretPlaceholder, hcap["secretKey"])
+	assert.Equal(t, true, hcap["hasSecretKey"])
+	assert.NotContains(t, rec.Body.String(), "ss-hcap")
 	// 全 provider object が key として存在する。
 	for _, p := range []string{"hcaptcha", "mcaptcha", "recaptcha", "turnstile"} {
 		_, ok := got[p].(map[string]any)
