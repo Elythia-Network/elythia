@@ -104,7 +104,14 @@ func (m *Manager) switchOver(ctx context.Context, rec *Record) {
 		OpID: rec.OpID, Kind: maintmode.KindRestore, RequestedBy: rec.UserID, StartedAt: m.now(),
 	})
 	if err != nil {
-		m.abortBeforeSwitch(ctx, rec, fmt.Errorf("enter the maintenance: %w", err), false)
+		// 書き込みは済んだのに応答を読めなかっただけのことがある。読み直して、この操作の
+		// 状態が残っていれば戻してから中止する (残したまま aborted にすると、誰も外さない)。
+		st, gerr := m.o.Maint.Get(ctx)
+		if gerr != nil {
+			m.giveUp(ctx, rec, StepEntering, fmt.Errorf("enter the maintenance: %w; then read it: %v", err, gerr))
+			return
+		}
+		m.abortBeforeSwitch(ctx, rec, fmt.Errorf("enter the maintenance: %w", err), st != nil && st.OpID == rec.OpID)
 		return
 	}
 	m.journal(ctx, rec.OpID, StepEntering, "waiting for every process to let go of %s", rec.Database)
