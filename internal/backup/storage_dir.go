@@ -614,6 +614,15 @@ func listWalkFunc(prefix string, out *[]ObjectInfo) fs.WalkDirFunc {
 			if p != "." && errors.Is(err, fs.ErrNotExist) {
 				return nil
 			}
+			// os.Root の FS は、fs.ValidPath に通らない名前 (UTF-8 でない名前など) を
+			// ErrInvalid で断る。世代の ID と key は ASCII なので、そういう名前は key に
+			// ならない。断られた 1 つのせいで一覧全体を失敗にしない。
+			if p != "." && errors.Is(err, fs.ErrInvalid) {
+				if e != nil && e.IsDir() {
+					return fs.SkipDir
+				}
+				return nil
+			}
 			// 世代の外の読めないディレクトリ (lost+found など) は、バックアップの物を
 			// 持たないので飛ばす。世代の下で読めないのは保存先の異常なので失敗にする。
 			if p != "." && errors.Is(err, fs.ErrPermission) && !underGenerations(p) {
