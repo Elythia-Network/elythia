@@ -193,25 +193,29 @@ func TestSupervisor_WebSocketRequestsAreNotCounted(t *testing.T) {
 	assert.Zero(t, sup.stopGeneration(http.HandlerFunc(unavailable)).InFlight)
 }
 
-// TestSupervisor_RequestOnRetiredHandlerGoesToTheCurrentOne covers the race
+// TestSupervisor_RequestOnRetiredHandlerIsNotServedByIt covers the race
 // between loading the handler and the stop: a request that grabbed a
-// handler which got retired must not be served by it.
-func TestSupervisor_RequestOnRetiredHandlerGoesToTheCurrentOne(t *testing.T) {
+// handler which got retired must not be served by it. 差し替え済みなら今の
+// ハンドラーへ、差し替えられないまま残っていれば 503 にする (読み直し続けない)。
+func TestSupervisor_RequestOnRetiredHandlerIsNotServedByIt(t *testing.T) {
 	sup := &Supervisor{}
-	var oldCalls, newCalls atomic.Int32
+	var oldCalls atomic.Int32
 	old := &routedHandler{next: http.HandlerFunc(func(http.ResponseWriter, *http.Request) { oldCalls.Add(1) })}
 	old.retired.Store(true)
 	sup.current.Store(old)
-	done := make(chan struct{})
+	done := make(chan int, 1)
 	go func() {
-		sup.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
-		close(done)
+		rec := httptest.NewRecorder()
+		sup.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+		done <- rec.Code
 	}()
-	time.Sleep(20 * time.Millisecond)
-	sup.current.Store(&routedHandler{next: http.HandlerFunc(func(http.ResponseWriter, *http.Request) { newCalls.Add(1) })})
-	<-done
+	select {
+	case code := <-done:
+		assert.Equal(t, http.StatusServiceUnavailable, code)
+	case <-time.After(5 * time.Second):
+		t.Fatal("止めたハンドラーの前で読み直し続けている")
+	}
 	assert.Zero(t, oldCalls.Load())
-	assert.EqualValues(t, 1, newCalls.Load())
 	assert.Zero(t, old.active.Load())
 }
 

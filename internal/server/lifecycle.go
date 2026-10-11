@@ -200,6 +200,12 @@ func (s *Supervisor) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		rh.active.Add(1)
 		if rh.retired.Load() {
 			rh.active.Add(-1)
+			if s.current.Load() == rh {
+				// 止めたハンドラーが差し替えられないまま残っている。読み直し続けると
+				// 抜けられないので、503 で返す (#3463 のレビュー2周目 1)。
+				unavailable(w, r)
+				return
+			}
 			continue
 		}
 		func() {
