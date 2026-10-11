@@ -938,11 +938,12 @@ export type BackupVerifyStage = 'readable' | 'restorable' | 'usable';
 
 /** The last verification of a generation. */
 export type BackupVerifySummary = {
+	/** True when verify.json passed and belongs to the generation's current dump (the same check restore uses). */
 	ok: boolean;
 	verifiedAt: string;
 	stages: { stage: BackupVerifyStage; ok: boolean; skipped?: boolean; error?: string }[];
 	mismatches: { table: string; expected: number; actual: number }[];
-	/** Set when verify.json could not be read. */
+	/** Set when verify.json could not be read, or when it passed but belongs to another generation or an earlier dump. */
 	error?: string;
 };
 
