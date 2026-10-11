@@ -99,8 +99,8 @@ export type ElythiaEndpoints = {
 		res: BackupRestoreTicket & { status: BackupRestoreStatus };
 	};
 	'admin/backup/restore/status': {
-		/** Answered also during the maintenance. */
-		req: BackupRestoreTicket;
+		/** Answered also during the maintenance. Not authenticated by the server: send the session token as `session`, not as `i` (the restored database may not have the session). */
+		req: BackupRestoreTicket & { session: string };
 		res: BackupRestoreStatus;
 	};
 	'admin/backup/take': {

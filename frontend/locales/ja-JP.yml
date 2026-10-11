@@ -2514,6 +2514,8 @@ _backups:
   restoreUnknownHelp: "データベースを切り替えたかどうか分からなくなったため、メンテナンスのまま止めています。サーバーの管理者がpg_databaseを確かめ、elythia backup restore -rollbackとelythia maintenance exitで戻してください。"
   restoreWaiting: "データベースへの接続が残っています"
   restoreStatusUnavailable: "進み具合を読めません。しばらくしてから自動で読み直します。"
+  restoreSessionMayBeGone: "戻したデータベースにこのセッションが無いときは、ほかの画面を開くとサインインし直すよう求められます。"
+  restoreSessionGone: "このセッションでは進み具合を読めなくなりました。戻したデータベースにこのセッションが無い可能性があります。サインインし直してください。サインインし直した後は、この戻す操作の進み具合をここでは読めないので、サーバーのログで確かめてください。"
   restoreNotVerified: "検証に通っていない世代は、ここからは戻せません。先に検証してください。"
   maintenanceActive: "すでにメンテナンス中です。"
   versionMismatch: "バックアップ用のサービスと、サーバーのプロセスの版が違います。版を揃えてから戻してください。"

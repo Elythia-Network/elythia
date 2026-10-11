@@ -40,6 +40,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 					</MkInfo>
 					<MkInfo v-if="restore.status.record.step === 'unknown'" warn>{{ i18n.ts._backups.restoreUnknownHelp }}</MkInfo>
 					<MkInfo v-else-if="restore.status.maintenance">{{ i18n.ts._backups.restoreKeepOpen }}</MkInfo>
+					<MkInfo v-else-if="restore.status.record.step === 'done'">{{ i18n.ts._backups.restoreSessionMayBeGone }}</MkInfo>
 					<div v-if="restore.status.maintenance?.blockers?.length" :class="$style.verifyError">
 						{{ i18n.ts._backups.restoreWaiting }}:
 						<div v-for="b in restore.status.maintenance.blockers" :key="b.server + b.pid" class="_monospace">{{ b.server }} pid={{ b.pid }} {{ b.application }}</div>
@@ -329,7 +330,9 @@ async function pollRestore(): Promise<void> {
 	const r = restore.value;
 	if (r == null) return;
 	try {
-		r.status = await misskeyApi('admin/backup/restore/status', r.ticket);
+		// セッションは i ではなく session で送る。本体は status を認証しないので、戻した DB に
+		// このセッションが無くても読める (i で送ると、本体の認証が 401 で断る)。
+		r.status = await misskeyApi('admin/backup/restore/status', { ...r.ticket, session: $i.token }, null);
 		r.error = null;
 		if (r.status.final) stopPolling();
 	} catch (err) {
@@ -338,6 +341,13 @@ async function pollRestore(): Promise<void> {
 		if (code === 'RESTORE_TICKET_INVALID' || code === 'NO_SUCH_RESTORE') {
 			stopPolling();
 			r.error = errorText(err);
+			return;
+		}
+		if (code === 'AUTHENTICATION_FAILED' || code === 'CREDENTIAL_REQUIRED') {
+			// 読み直しても変わらない。サインアウトや保存した値の消去はしない (戻した DB に
+			// セッションが無いだけのことがあり、サインインし直せば使える)。
+			stopPolling();
+			r.error = i18n.ts._backups.restoreSessionGone;
 			return;
 		}
 		r.error = i18n.ts._backups.restoreStatusUnavailable;

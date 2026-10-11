@@ -3894,7 +3894,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/admin/backup/restore/prepare", backupHandler.RestorePrepare, middleware.RequireAdmin(roleService), middleware.RequireSecure())
 	api.POST("/admin/backup/restore/confirm", backupHandler.RestoreConfirm, middleware.RequireAdmin(roleService), middleware.RequireSecure())
 	api.POST("/admin/backup/restore/abort", backupHandler.RestoreAbort, middleware.RequireAdmin(roleService), middleware.RequireSecure())
-	api.POST("/admin/backup/restore/status", backupHandler.RestoreStatus, middleware.RequireAdmin(roleService), middleware.RequireSecure())
+	// status は本体の認証を通さない。名前を入れ替えた後、戻した DB にこのセッションが
+	// 無いと、本体の認証が 401 で断り、画面は進み具合を読めなくなる (frontend はセッション
+	// を i ではなく session で送る)。daemon が準備のときの ticket とセッションの hash で
+	// 照合し、DB を引かない。
+	api.POST("/admin/backup/restore/status", backupHandler.RestoreStatus)
 	api.POST("/admin/backup/list", backupHandler.List, middleware.RequireAdmin(roleService), middleware.RequireSecure(), backupGuard)
 	api.POST("/admin/backup/take", backupHandler.Take, middleware.RequireAdmin(roleService), middleware.RequireSecure(), backupGuard)
 	api.POST("/admin/backup/verify", backupHandler.Verify, middleware.RequireAdmin(roleService), middleware.RequireSecure(), backupGuard)

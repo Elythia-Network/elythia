@@ -9625,6 +9625,14 @@ export interface Locale extends ILocale {
          */
         "restoreStatusUnavailable": string;
         /**
+         * 戻したデータベースにこのセッションが無いときは、ほかの画面を開くとサインインし直すよう求められます。
+         */
+        "restoreSessionMayBeGone": string;
+        /**
+         * このセッションでは進み具合を読めなくなりました。戻したデータベースにこのセッションが無い可能性があります。サインインし直してください。サインインし直した後は、この戻す操作の進み具合をここでは読めないので、サーバーのログで確かめてください。
+         */
+        "restoreSessionGone": string;
+        /**
          * 検証に通っていない世代は、ここからは戻せません。先に検証してください。
          */
         "restoreNotVerified": string;
