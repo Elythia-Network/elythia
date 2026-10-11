@@ -622,9 +622,12 @@ func listWalkFunc(prefix string, out *[]ObjectInfo) fs.WalkDirFunc {
 			if p != "." && errors.Is(err, fs.ErrNotExist) {
 				return nil
 			}
-			// os.Root の FS は、fs.ValidPath に通らない名前 (UTF-8 でない名前など) を
-			// ErrInvalid で断る。世代の ID と key は ASCII なので、そういう名前は key に
-			// ならない。断られた 1 つのせいで一覧全体を失敗にしない。
+			// os.Root の FS は、fs.ValidPath に通らない名前 (UTF-8 でない名前など) の
+			// ディレクトリを読むときに ErrInvalid で断る。断られた 1 つのせいで一覧全体を
+			// 失敗にせず、そのディレクトリを飛ばす。飛ばしたディレクトリの中身は、一覧にも
+			// 世代の削除にも使用量にも入らない (同じ名前のファイルは読まずに済むので、
+			// key として一覧に出る)。本体が書く key は ASCII なので、手で置いたときだけ
+			// 起きる。
 			if p != "." && errors.Is(err, fs.ErrInvalid) {
 				if e != nil && e.IsDir() {
 					return fs.SkipDir
