@@ -68,7 +68,16 @@ func TestClaimKey(t *testing.T) {
 	t.Run("the read back fails", func(t *testing.T) {
 		st := &newPutMem{memStorage: newMemStorage(), resent: true}
 		st.getErr = map[string]error{"take.lock": io.ErrUnexpectedEOF}
-		require.ErrorIs(t, claimKey(ctx, st, key, []byte("mine")), ErrExists, "unknown ownership is not success")
+		err := claimKey(ctx, st, key, []byte("mine"))
+		require.ErrorIs(t, err, ErrClaimUnverified, "unknown ownership is not success")
+		require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+		require.NotErrorIs(t, err, ErrExists, "it is not known to be someone else's either")
+	})
+	t.Run("exists but cannot be found (a write still in flight)", func(t *testing.T) {
+		st := &newPutMem{memStorage: newMemStorage(), err: ErrExists}
+		err := claimKey(ctx, st, key, []byte("mine"))
+		require.ErrorIs(t, err, ErrClaimUnverified)
+		require.ErrorIs(t, err, ErrNotFound)
 	})
 	t.Run("other errors pass through", func(t *testing.T) {
 		st := &newPutMem{memStorage: newMemStorage(), err: io.ErrClosedPipe}
@@ -82,6 +91,27 @@ func TestClaimKey(t *testing.T) {
 		require.NoError(t, claimKey(ctx, st, key, []byte("mine")))
 		assert.Equal(t, []byte("mine"), st.objects[key])
 	})
+}
+
+// deadlineStorage records whether Get was given a deadline.
+type deadlineStorage struct {
+	*memStorage
+	sawDeadline bool
+}
+
+func (d *deadlineStorage) Get(ctx context.Context, key string) (io.ReadCloser, error) {
+	_, d.sawDeadline = ctx.Deadline()
+	return d.memStorage.Get(ctx, key)
+}
+
+// TestReleaseKey_BoundsTheReadBack: releaseKey runs after a failure with a
+// context that may never be cancelled; reading back must not hang forever.
+func TestReleaseKey_BoundsTheReadBack(t *testing.T) {
+	st := &deadlineStorage{memStorage: newMemStorage()}
+	st.objects["k"] = []byte("a")
+	releaseKey(context.Background(), st, slog.New(slog.DiscardHandler), "k", []byte("a"))
+	assert.True(t, st.sawDeadline)
+	assert.NotContains(t, st.objects, "k")
 }
 
 func TestReleaseKey(t *testing.T) {

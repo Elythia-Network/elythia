@@ -146,11 +146,15 @@ func Take(ctx context.Context, o TakeOptions) (meta *Meta, err error) {
 		return nil, err
 	}
 	if err = claimKey(ctx, o.Storage, lockKey, lock); err != nil {
-		if errors.Is(err, ErrExists) {
-			return nil, fmt.Errorf("backup: generation %s is being taken by another backup started in the same second: %w", id, err)
-		}
-		// 置けたのに失敗と返ってきたかもしれない。自分のものなら消す。
+		// 置けたのに失敗と返ってきたかもしれない。ErrExists でも、読み直しの後で
+		// 自分の 1 回目が着くことがある。自分の印のときだけ消すので、相手の印は消さない。
 		releaseKey(ctx, o.Storage, logger, lockKey, lock)
+		switch {
+		case errors.Is(err, ErrExists):
+			return nil, fmt.Errorf("backup: generation %s is being taken by another backup started in the same second: %w", id, err)
+		case errors.Is(err, ErrClaimUnverified):
+			return nil, fmt.Errorf("backup: could not tell whether generation %s is being taken by another backup; try again: %w", id, err)
+		}
 		return nil, err
 	}
 	defer func() {
