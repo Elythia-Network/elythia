@@ -48,15 +48,16 @@ describe('mfm-js work limit', () => {
 		expect(nodes.at(-1)).toEqual({ type: 'text', props: { text: expect.stringContaining('**a**') } });
 	});
 
-	test('keeps long ordinary posts under the default limit', () => {
-		const post = [
-			'**太字**と<i>斜体</i>と~~打ち消し~~、`code`、\\(x^2\\)、$[x2 大きく] ',
-			'リンク [ここ](https://example.com/a_(b)) と <https://example.com/x> ',
-			'@user@remote.example #タグ #(かっこ) :neko: https://example.com/path?q=[1] ',
-			'JSON: {"a": [1, 2, {"b": [3]}], "c": "[x]"} ',
-			'> 引用\n> **太字**\n',
-			'気温<20度、i < n ',
-		].join('').repeat(60).slice(0, 8192);
+	test('keeps posts with overlapping unclosed syntax under the default limit', () => {
+		// 閉じ忘れの <center> の後に、[ で始まる行が続く日本語のログ。閉じない構文の
+		// 読み直しが重なる、上限に近い形の正当な投稿。
+		const post = ('<center>お知らせ\n' + '[12:34:56] [情報] [db] [pool] 接続 (3) :neko:\n'.repeat(400)).slice(0, 8192);
 		expect(parse(post, {})).toEqual(parse(post, { workLimit: Number.POSITIVE_INFINITY }));
+	});
+
+	test('applies the work limit to parseSimple too', () => {
+		type ParseSimpleWithLimit = (input: string) => mfmjs.MfmSimpleNode[];
+		const parseSimple = mfmjs.parseSimple as unknown as ParseSimpleWithLimit;
+		expect(parseSimple(':a: '.repeat(2000))[0].type).toBe('emojiCode');
 	});
 });

@@ -1,5 +1,5 @@
 diff --git a/built/index.cjs b/built/index.cjs
-index ed6d2be..0b8684c 100644
+index ed6d2be..9fd708d 100644
 --- a/built/index.cjs
 +++ b/built/index.cjs
 @@ -42,6 +42,12 @@ var Parser = class Parser {
@@ -108,7 +108,7 @@ index ed6d2be..0b8684c 100644
  			const result = parsers[i].handler(input, index, state);
  			if (result.success) return result;
  		}
-@@ -155,11 +212,54 @@ function lazy(fn) {
+@@ -155,11 +212,55 @@ function lazy(fn) {
  	});
  	return parser;
  }
@@ -121,9 +121,10 @@ index ed6d2be..0b8684c 100644
 +// 分だけ大きくなりうる。見落とした経路があっても 1 回の解析が際限なく走らないよう、
 +// 安全網として上限を置く (Elythia のサーバーの MFM の解析器と同じ考え方)。上限を超えたら、
 +// それより後に読む full / inline / simple は構文を試さず 1 文字の text として読む。
-+// 普通の投稿は上限に届かないので、結果はパッチの前と変わらない。
++// 上限に届かない解析の結果はパッチの前と変わらない。普通の投稿はたいてい届かないが、
++// 閉じない構文の読み直しが重なる投稿 (閉じ忘れと括弧の多い長文など) では届きうる。
 +const WORK_LIMIT_BASE = 100000;
-+const WORK_LIMIT_PER_CHAR = 100;
++const WORK_LIMIT_PER_CHAR = 200;
 +const MEMO_LIMIT = 250000;
 +// 注: memo は入力の文字列の値で引くので、同じ内容の引用が 2 つあると、子の node が同じ
 +// object になる (mfm-js の利用側は node を書き換えないので、結果は変わらない)。
@@ -164,7 +165,7 @@ index ed6d2be..0b8684c 100644
  		parser.name = key;
  		return parser;
  	});
-@@ -409,13 +509,25 @@ function seqOrText(...parsers) {
+@@ -409,13 +510,25 @@ function seqOrText(...parsers) {
  	return new Parser((input, index, state) => {
  		const accum = [];
  		let latestIndex = index;
@@ -190,7 +191,7 @@ index ed6d2be..0b8684c 100644
  		return success(latestIndex, accum);
  	});
  }
-@@ -805,7 +917,11 @@ function fullParser(input, opts) {
+@@ -805,7 +918,11 @@ function fullParser(input, opts) {
  		nestLimit: opts.nestLimit != null ? opts.nestLimit : 20,
  		depth: 0,
  		linkLabel: false,
@@ -203,7 +204,7 @@ index ed6d2be..0b8684c 100644
  	});
  	if (!result.success) throw new Error("Unexpected parse error");
  	return mergeText(result.value);
-@@ -813,7 +929,11 @@ function fullParser(input, opts) {
+@@ -813,7 +930,11 @@ function fullParser(input, opts) {
  function simpleParser(input) {
  	const result = language.simpleParser.handler(input, 0, {
  		depth: 0,
@@ -216,7 +217,7 @@ index ed6d2be..0b8684c 100644
  	});
  	if (!result.success) throw new Error("Unexpected parse error");
  	return mergeText(result.value);
-@@ -824,7 +944,11 @@ function simpleParser(input) {
+@@ -824,7 +945,11 @@ function simpleParser(input) {
  * Generates a MfmNode tree from the MFM string.
  */
  function parse(input, opts = {}) {
@@ -230,7 +231,7 @@ index ed6d2be..0b8684c 100644
  /**
  * Generates a MfmSimpleNode tree from the MFM string.
 diff --git a/built/index.mjs b/built/index.mjs
-index 8c47479..59562d6 100644
+index 8c47479..5de778e 100644
 --- a/built/index.mjs
 +++ b/built/index.mjs
 @@ -41,6 +41,12 @@ var Parser = class Parser {
@@ -339,7 +340,7 @@ index 8c47479..59562d6 100644
  			const result = parsers[i].handler(input, index, state);
  			if (result.success) return result;
  		}
-@@ -154,11 +211,54 @@ function lazy(fn) {
+@@ -154,11 +211,55 @@ function lazy(fn) {
  	});
  	return parser;
  }
@@ -352,9 +353,10 @@ index 8c47479..59562d6 100644
 +// 分だけ大きくなりうる。見落とした経路があっても 1 回の解析が際限なく走らないよう、
 +// 安全網として上限を置く (Elythia のサーバーの MFM の解析器と同じ考え方)。上限を超えたら、
 +// それより後に読む full / inline / simple は構文を試さず 1 文字の text として読む。
-+// 普通の投稿は上限に届かないので、結果はパッチの前と変わらない。
++// 上限に届かない解析の結果はパッチの前と変わらない。普通の投稿はたいてい届かないが、
++// 閉じない構文の読み直しが重なる投稿 (閉じ忘れと括弧の多い長文など) では届きうる。
 +const WORK_LIMIT_BASE = 100000;
-+const WORK_LIMIT_PER_CHAR = 100;
++const WORK_LIMIT_PER_CHAR = 200;
 +const MEMO_LIMIT = 250000;
 +// 注: memo は入力の文字列の値で引くので、同じ内容の引用が 2 つあると、子の node が同じ
 +// object になる (mfm-js の利用側は node を書き換えないので、結果は変わらない)。
@@ -395,7 +397,7 @@ index 8c47479..59562d6 100644
  		parser.name = key;
  		return parser;
  	});
-@@ -408,13 +508,25 @@ function seqOrText(...parsers) {
+@@ -408,13 +509,25 @@ function seqOrText(...parsers) {
  	return new Parser((input, index, state) => {
  		const accum = [];
  		let latestIndex = index;
@@ -421,7 +423,7 @@ index 8c47479..59562d6 100644
  		return success(latestIndex, accum);
  	});
  }
-@@ -804,7 +916,11 @@ function fullParser(input, opts) {
+@@ -804,7 +917,11 @@ function fullParser(input, opts) {
  		nestLimit: opts.nestLimit != null ? opts.nestLimit : 20,
  		depth: 0,
  		linkLabel: false,
@@ -434,7 +436,7 @@ index 8c47479..59562d6 100644
  	});
  	if (!result.success) throw new Error("Unexpected parse error");
  	return mergeText(result.value);
-@@ -812,7 +928,11 @@ function fullParser(input, opts) {
+@@ -812,7 +929,11 @@ function fullParser(input, opts) {
  function simpleParser(input) {
  	const result = language.simpleParser.handler(input, 0, {
  		depth: 0,
@@ -447,7 +449,7 @@ index 8c47479..59562d6 100644
  	});
  	if (!result.success) throw new Error("Unexpected parse error");
  	return mergeText(result.value);
-@@ -823,7 +943,11 @@ function simpleParser(input) {
+@@ -823,7 +944,11 @@ function simpleParser(input) {
  * Generates a MfmNode tree from the MFM string.
  */
  function parse(input, opts = {}) {
