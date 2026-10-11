@@ -526,6 +526,14 @@ func TestOwnerOf(t *testing.T) {
 	assert.Equal(t, lr[0].ID, ownerOf(truncated, lr).ID)
 	two := append(lr, ProcReport{ID: strings.Repeat("x", 60) + "-98"})
 	assert.Nil(t, ownerOf(truncated, two), "切り詰めた名前が 2 つに合うのに持ち主を決めた")
+	// 切り詰められた名前が、別のプロセスの ID とたまたま完全一致しても、接頭辞が
+	// 合う報告がほかにもあれば決めない (同じ host の pid 12 と pid 1234 など)。
+	host := strings.Repeat("h", pgNameMax-len("elythia/server/")-len("-12"))
+	short := ProcReport{ID: host + "-12", State: ProcDrained}
+	longer := ProcReport{ID: host + "-1234", State: ProcRunning}
+	name := ("elythia/server/" + longer.ID)[:pgNameMax]
+	require.Equal(t, "elythia/server/"+short.ID, name, "前提: 切り詰めた名前が pid 12 の ID と一致する")
+	assert.Nil(t, ownerOf(name, []ProcReport{short, longer}), "running の pid 1234 の接続を pid 12 のものと取り違えた")
 	// 63 バイトより短い名前は、前方一致では決めない (合う報告が 1 つでも)。
 	assert.Nil(t, ownerOf("elythia/server/host-a", reports))
 	assert.Nil(t, ownerOf("elythia/server/host-b-12345678", reports))
