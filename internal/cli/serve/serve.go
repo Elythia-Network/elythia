@@ -5,12 +5,15 @@ package serve
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -220,21 +223,39 @@ func serve(e env, args []string) int {
 	return 0
 }
 
-// processID names this process in the maintenance reports: "<host>-<pid>".
+// processID names this process in the maintenance reports, as the judge
+// and in application_name: "<host>-<pid>-<random>". It is fixed for the
+// life of the process.
 //
-// コンテナの中では PID がほぼ 1 なので、host (コンテナ ID) も入れて区別する。
-func processID() string {
+// コンテナの中では PID がほぼ 1 で、hostname: を指定した scale や host network
+// では host も重なる。重なると報告が上書きされ、判定役のロックの ID も同じに
+// なる (#3463 のレビュー2周目 5) ので、起動ごとの乱数を付ける。
+var processID = sync.OnceValue(func() string {
 	host, err := os.Hostname()
 	if err != nil || host == "" {
 		host = "unknown"
 	}
-	return fmt.Sprintf("%s-%d", host, os.Getpid())
+	var b [4]byte
+	_, _ = rand.Read(b[:])
+	return buildProcessID(host, os.Getpid(), hex.EncodeToString(b[:]))
+})
+
+// processIDHostMax bounds the host part of processID so that
+// "elythia/<longest role>/<processID>" fits in the 63 bytes PostgreSQL keeps
+// of application_name: 63 - len("elythia/invalid/") - len("-<7 digits>-<8 hex>").
+const processIDHostMax = 63 - len("elythia/invalid/") - len("-1234567-01234567")
+
+// buildProcessID joins host, pid and random, shortening host so that the pid
+// and the random part always survive PostgreSQL's truncation.
+func buildProcessID(host string, pid int, random string) string {
+	if len(host) > processIDHostMax {
+		host = host[:processIDHostMax]
+	}
+	return fmt.Sprintf("%s-%d-%s", host, pid, random)
 }
 
 // dbApplicationName returns the application_name of this process's DB
 // connections: "elythia/<role>/<processID>".
-//
-// PostgreSQL は 63 バイトで切り詰めるが、先頭の "elythia/" が残れば数えられる。
 func dbApplicationName() string {
 	role := "invalid"
 	if r, err := config.ResolveProcessRole(); err == nil {

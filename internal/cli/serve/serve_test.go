@@ -167,7 +167,7 @@ func TestServe_StartsAndShutsDownOnSignal(t *testing.T) {
 		"redis-close", "sentry-flush", "pid-cleanup",
 	}, h.steps)
 	// DB の接続には、このプロセスを表す名前が付く (#3463)。
-	assert.Regexp(t, `^elythia/both/.+-[0-9]+$`, h.appName)
+	assert.Regexp(t, `^elythia/both/.+-[0-9]+-[0-9a-f]{8}$`, h.appName)
 	assert.True(t, h.srv.shutdown)
 	assert.Contains(t, h.stdout.String(), "Elythia stopped.")
 	assert.Contains(t, h.log.String(), "shutting down server")
@@ -421,7 +421,8 @@ func TestDefaultEnv(t *testing.T) {
 func TestDBApplicationName(t *testing.T) {
 	t.Setenv(config.EnvOnlyServer, "1")
 	t.Setenv(config.EnvOnlyQueue, "")
-	assert.Regexp(t, fmt.Sprintf(`^elythia/server/.+-%d$`, os.Getpid()), dbApplicationName())
+	assert.Regexp(t, fmt.Sprintf(`^elythia/server/.+-%d-[0-9a-f]{8}$`, os.Getpid()), dbApplicationName())
+	assert.Equal(t, processID(), processID(), "同じプロセスで ID が変わった")
 	// 矛盾した役割の指定は Server の構築で落ちるが、名前の段では止めない。
 	t.Setenv(config.EnvOnlyQueue, "1")
 	assert.Regexp(t, `^elythia/invalid/`, dbApplicationName())
@@ -444,4 +445,19 @@ func TestSetupLogging_InstallsDefault(t *testing.T) {
 	assert.Same(t, logger, slog.Default())
 	slog.Info("hello")
 	assert.True(t, strings.Contains(buf.String(), "msg=hello"), fmt.Sprintf("got %q", buf.String()))
+}
+
+// TestBuildProcessID checks #3463 review round 2 item 5: the process ID
+// carries a random part, and a long host is shortened so that the pid and
+// the random part survive PostgreSQL's 63-byte truncation of
+// application_name.
+func TestBuildProcessID(t *testing.T) {
+	assert.Equal(t, "web-1-0a1b2c3d", buildProcessID("web", 1, "0a1b2c3d"))
+	long := strings.Repeat("h", 255)
+	id := buildProcessID(long, 1234567, "0a1b2c3d")
+	assert.True(t, strings.HasSuffix(id, "-1234567-0a1b2c3d"), id)
+	for _, role := range []string{"server", "queue", "both", "invalid"} {
+		app := "elythia/" + role + "/" + id
+		assert.LessOrEqual(t, len(app), 63, "乱数の部分が PostgreSQL に切り詰められる: %s", app)
+	}
 }
