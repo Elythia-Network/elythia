@@ -411,6 +411,8 @@ func TestDaemonVerdictBeforeInterruptionIsKept(t *testing.T) {
 		require.NotNil(t, st.LastVerify.Verify)
 		assert.False(t, st.LastVerify.Verify.OK)
 		assert.NotContains(t, st.LastVerify.Error, "interrupted")
+		// daemon の ctx は切れているが、食い違いの通知は届ける (次の起動では確かめ直さない)。
+		assert.Equal(t, []EventKind{EventMismatch}, r.notify.kinds())
 	})
 }
 
