@@ -237,8 +237,11 @@ func lettingGo(r *ProcReport) bool {
 // ownerOf returns the report of the process that opened a connection named
 // app ("elythia/<role>/<process ID>"), or nil when there is none.
 //
-// PostgreSQL は application_name を 63 バイトで切り詰める。切り詰められた名前は、
-// 接頭辞が 1 つの報告にだけ合うときに限ってその持ち主とみなす。
+// PostgreSQL は application_name を 63 バイトで切り詰める。切り詰められたかも
+// しれない名前 (63 バイト) は、完全一致でも決めず、接頭辞が合う報告が 1 つだけの
+// ときに限ってその持ち主とみなす。切り詰めた結果が別のプロセスの ID とたまたま
+// 一致すると、その (running の) プロセスを持ち主と取り違えるため
+// (#3463 のレビュー2周目 2)。
 func ownerOf(app string, reports []ProcReport) *ProcReport {
 	rest, ok := strings.CutPrefix(app, ElythiaApplicationPrefix)
 	if !ok {
@@ -248,13 +251,14 @@ func ownerOf(app string, reports []ProcReport) *ProcReport {
 	if !ok || id == "" {
 		return nil
 	}
+	truncated := len(app) >= pgNameMax
 	var found *ProcReport
 	for i := range reports {
 		r := &reports[i]
 		switch {
-		case r.ID == id:
+		case !truncated && r.ID == id:
 			return r
-		case len(app) >= pgNameMax && strings.HasPrefix(r.ID, id):
+		case truncated && strings.HasPrefix(r.ID, id):
 			if found != nil {
 				return nil
 			}
