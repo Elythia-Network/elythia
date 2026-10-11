@@ -85,6 +85,9 @@ WORKDIR /work/frontend
 # 作る (依存の postinstall もここで走る)。ソースより先に行って、ソースの変更で
 # 取り直さないようにする。
 COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
+# 依存にあてるパッチ (pnpm-workspace.yaml の patchedDependencies)。fetch の時点で無いと
+# ERR_PNPM_PATCH_NOT_FOUND で落ちる。
+COPY frontend/patches/ ./patches/
 RUN node -e "console.log(JSON.parse(require('node:fs').readFileSync('./package.json')).packageManager)" | xargs npm install -g
 RUN --mount=type=cache,target=/pnpm-store pnpm fetch --frozen-lockfile
 

@@ -24,6 +24,9 @@ overrides:
   js-cookie@<3.0.7: 3.0.8
   js-yaml@>=4.0.0 <4.3.2: 4.3.2
 
+patchedDependencies:
+  mfm-js@0.26.0: 8e0468c76e80338728c32dfa21e9a020b7a675733d163f346c9091fc941a98e8
+
 importers:
 
   .:
@@ -266,7 +269,7 @@ importers:
         version: 1.55.4
       mfm-js:
         specifier: 0.26.0
-        version: 0.26.0
+        version: 0.26.0(patch_hash=8e0468c76e80338728c32dfa21e9a020b7a675733d163f346c9091fc941a98e8)
       misskey-bubble-game:
         specifier: workspace:*
         version: link:../misskey-bubble-game
@@ -583,7 +586,7 @@ importers:
         version: 2.2.3
       mfm-js:
         specifier: 0.26.0
-        version: 0.26.0
+        version: 0.26.0(patch_hash=8e0468c76e80338728c32dfa21e9a020b7a675733d163f346c9091fc941a98e8)
       misskey-js:
         specifier: workspace:*
         version: link:../misskey-js
@@ -11078,7 +11081,7 @@ snapshots:
 
   merge2@1.4.1: {}
 
-  mfm-js@0.26.0:
+  mfm-js@0.26.0(patch_hash=8e0468c76e80338728c32dfa21e9a020b7a675733d163f346c9091fc941a98e8):
     dependencies:
       '@misskey-dev/emoji-data': 17.0.0
 
