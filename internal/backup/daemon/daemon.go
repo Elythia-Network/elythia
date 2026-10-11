@@ -147,11 +147,14 @@ type Daemon struct {
 	// stopping is set once Run's ctx is done; Start refuses new jobs.
 	stopping bool
 	// pending is a scheduled take that came due while another job ran.
-	pending      bool
-	nextRun      time.Time
-	lastTake     *JobResult
-	lastVerify   *JobResult
-	latestUsable *Generation
+	pending bool
+	// pendingVerify is the newest generation Run wanted to verify at start
+	// while the slot was reserved; it is verified when the slot comes back.
+	pendingVerify string
+	nextRun       time.Time
+	lastTake      *JobResult
+	lastVerify    *JobResult
+	latestUsable  *Generation
 	// usableBase is when the delay clock started: the newest usable
 	// generation, or the daemon start when there is none.
 	usableBase time.Time
@@ -215,7 +218,9 @@ func (d *Daemon) Run(ctx context.Context) {
 				"interval", sched.Interval.String(), "at", sched.AtString())
 		}
 		if id := d.unverifiedLatest(gens); id != "" && d.nextRun.After(now) && d.running != nil {
-			d.log.Info("backup: not verifying the newest generation at start; the restore from the admin page holds the job slot", "generation", id, "running", d.running.Kind)
+			// 枠を返したときに確かめる (Acquire の解放)。
+			d.log.Info("backup: verifying the newest generation once the restore from the admin page gives the job slot back", "generation", id, "running", d.running.Kind)
+			d.pendingVerify = id
 		} else if id != "" && d.nextRun.After(now) {
 			// 止める途中で検証が切れると verify.json は確かめる前 (無い) に戻るので、
 			// 揃った最新の世代が検証されないまま残る。取り戻しは揃っているかで決めるので
@@ -421,9 +426,19 @@ func (d *Daemon) acquire(kind JobKind, beforeRun bool) (func(), error) {
 			if d.running == job {
 				d.running = nil
 			}
-			if d.pending && d.running == nil && !d.stopping && d.ctx.Err() == nil {
-				d.pending = false
-				d.startLocked(JobTake, TriggerSchedule, "", d.clock.Now())
+			if d.running == nil && !d.stopping && d.ctx != nil && d.ctx.Err() == nil {
+				switch {
+				case d.pending:
+					// 取る方を先にする。取った世代を確かめるので、起動時の検証は要らなくなる
+					// (Run が「すぐ取る場合は回さない」のと同じ)。
+					d.pending = false
+					d.pendingVerify = ""
+					d.startLocked(JobTake, TriggerSchedule, "", d.clock.Now())
+				case d.pendingVerify != "":
+					id := d.pendingVerify
+					d.pendingVerify = ""
+					d.startLocked(JobVerify, TriggerSchedule, id, d.clock.Now())
+				}
 			}
 			d.mu.Unlock()
 			select {
