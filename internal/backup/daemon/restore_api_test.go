@@ -329,16 +329,21 @@ func TestRestoreAPI_PrepareErrors(t *testing.T) {
 
 func TestRestoreAPI_Unavailable(t *testing.T) {
 	d := New(Options{Storage: newMemStorage(), Logger: discardLogger()})
+	// 組み立てていない、まだ Set されていない、照合の口が無い、のどれも 503。
+	for _, rs := range []*Restore{nil, {}, {Manager: restoreop.New(restoreop.Options{Logger: discardLogger()})}} {
+		h, err := Handler(d, testToken, rs)
+		require.NoError(t, err)
+		for _, path := range []string{"/restore/prepare", "/restore/confirm", "/restore/abort", "/restore/status"} {
+			req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte("{}")))
+			req.Header.Set("Authorization", "Bearer "+testToken)
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusServiceUnavailable, w.Code, path)
+			assert.Contains(t, w.Body.String(), "RESTORE_UNAVAILABLE")
+		}
+	}
 	h, err := Handler(d, testToken, nil)
 	require.NoError(t, err)
-	for _, path := range []string{"/restore/prepare", "/restore/confirm", "/restore/abort", "/restore/status"} {
-		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte("{}")))
-		req.Header.Set("Authorization", "Bearer "+testToken)
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusServiceUnavailable, w.Code, path)
-		assert.Contains(t, w.Body.String(), "RESTORE_UNAVAILABLE")
-	}
 	// token の無いリクエストは、リストアの口にも届かない。
 	req := httptest.NewRequest(http.MethodPost, "/restore/status", bytes.NewReader([]byte("{}")))
 	w := httptest.NewRecorder()

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -42,7 +43,14 @@ type daemonEnv struct {
 	// openRestore builds the restore from the admin page (#3463 (6c)). Nil
 	// leaves it out.
 	openRestore func(*config.Config, *daemon.Daemon, backupkit.Storage, *slog.Logger) (*RestoreParts, error)
+	// restoreRetry is how often openRestore is tried again after it failed
+	// at start. Zero means defaultRestoreRetry.
+	restoreRetry time.Duration
 }
+
+// defaultRestoreRetry is how often the daemon tries again to build the
+// restore from the admin page when Redis did not answer at start.
+const defaultRestoreRetry = 30 * time.Second
 
 func defaultDaemonEnv() daemonEnv {
 	return daemonEnv{
@@ -83,7 +91,7 @@ func runDaemon(e daemonEnv, args []string) int {
 		return 1
 	}
 	if restore != nil {
-		defer restore.Close()
+		defer restore.close()
 	}
 
 	ctx, cancel := e.signalContext()
@@ -111,18 +119,11 @@ func runDaemon(e daemonEnv, args []string) int {
 		}()
 	}
 	if restore != nil {
-		// 前の実行が途中で残したリストアを片付ける。メンテナンスのまま残っている
-		// ことがあるので、Run が最初の job (最新の世代の検証) を始める前に枠を預ける。
-		// 片付けるものが無ければ、回復がすぐに返す。
-		release, err := d.Reserve(daemon.JobRestore)
-		if err != nil {
-			release = nil
-		}
-		restore.Manager.StartHolding(ctx, release)
+		restore.start(ctx, d, e.restoreRetry, logger)
 	}
 	d.Run(ctx)
 	if restore != nil {
-		restore.Manager.Wait()
+		restore.wait()
 	}
 	if ln != nil {
 		if err := <-apiErr; err != nil {
@@ -136,7 +137,7 @@ func runDaemon(e daemonEnv, args []string) int {
 // build validates the config and assembles the daemon, its control API
 // handler (nil when backup.schedule.listen is empty) and the restore from
 // the admin page (nil when it is not available).
-func build(e daemonEnv, cfg *config.Config, logger *slog.Logger) (*daemon.Daemon, http.Handler, *RestoreParts, error) {
+func build(e daemonEnv, cfg *config.Config, logger *slog.Logger) (*daemon.Daemon, http.Handler, *restoreSetup, error) {
 	d, err := buildDaemon(e, cfg, logger)
 	if err != nil {
 		return nil, nil, nil, err
@@ -149,26 +150,104 @@ func build(e daemonEnv, cfg *config.Config, logger *slog.Logger) (*daemon.Daemon
 		return nil, nil, nil, daemon.ErrNoServiceToken
 	}
 	// 画面からのリストアは制御 API の上で動く。Redis に繋がらないときは、リストアだけを
-	// 外して起動する (取る・確かめるは止めない)。
-	var parts *RestoreParts
+	// 外して起動し (取る・確かめるは止めない)、繋がるまで裏で試し続ける。
+	var setup *restoreSetup
 	var rs *daemon.Restore
 	if e.openRestore != nil {
-		parts, err = e.openRestore(cfg, d, d.Storage(), logger)
+		rs = &daemon.Restore{}
+		setup = &restoreSetup{rs: rs, open: func() (*RestoreParts, error) { return e.openRestore(cfg, d, d.Storage(), logger) }}
+		parts, err := setup.open()
 		if err != nil {
-			logger.Warn("backup: the restore from the admin page is not available", "err", err)
-			parts = nil
+			logger.Warn("backup: the restore from the admin page is not available yet; retrying in the background", "err", err)
 		} else {
-			rs = &daemon.Restore{Manager: parts.Manager, Verifier: parts.Verifier}
+			setup.parts = parts
+			rs.Set(parts.Manager, parts.Verifier)
 		}
 	}
 	h, err := daemon.Handler(d, b.Server.ServiceToken, rs)
 	if err != nil {
-		if parts != nil {
-			parts.Close()
+		if setup != nil {
+			setup.close()
 		}
 		return nil, nil, nil, err
 	}
-	return d, h, parts, nil
+	return d, h, setup, nil
+}
+
+// restoreSetup is the restore from the admin page of one daemon run.
+type restoreSetup struct {
+	rs   *daemon.Restore
+	open func() (*RestoreParts, error)
+
+	mu    sync.Mutex
+	parts *RestoreParts // nil until open succeeded
+	retry sync.WaitGroup
+}
+
+// start recovers an operation an earlier run left unfinished, or keeps
+// trying to build the restore when it was not available at start.
+//
+// 組み立てられていれば、Run が最初の job (最新の世代の検証) を始める前に枠を
+// 預ける。メンテナンスのまま残った操作を、検証の後まで待たせないため。片付ける
+// ものが無ければ、回復がすぐに返す。後から組み立てた場合は Run が動いているので、
+// 回復は枠が空くのを待つ。
+func (s *restoreSetup) start(ctx context.Context, d *daemon.Daemon, every time.Duration, logger *slog.Logger) {
+	if s.parts != nil {
+		release, err := d.Reserve(daemon.JobRestore)
+		if err != nil {
+			release = nil
+		}
+		s.parts.Manager.StartHolding(ctx, release)
+		return
+	}
+	if every <= 0 {
+		every = defaultRestoreRetry
+	}
+	s.retry.Add(1)
+	go func() {
+		defer s.retry.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(every):
+			}
+			parts, err := s.open()
+			if err != nil {
+				logger.Debug("backup: the restore from the admin page is still not available", "err", err)
+				continue
+			}
+			s.mu.Lock()
+			s.parts = parts
+			s.mu.Unlock()
+			s.rs.Set(parts.Manager, parts.Verifier)
+			parts.Manager.Start(ctx)
+			logger.Info("backup: the restore from the admin page is available")
+			return
+		}
+	}()
+}
+
+// wait waits for the retries and the operations to return (after the
+// context of start is done).
+func (s *restoreSetup) wait() {
+	s.retry.Wait()
+	s.mu.Lock()
+	parts := s.parts
+	s.mu.Unlock()
+	if parts != nil {
+		parts.Manager.Wait()
+	}
+}
+
+// close releases what the restore holds.
+func (s *restoreSetup) close() {
+	s.retry.Wait()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.parts != nil && s.parts.Close != nil {
+		s.parts.Close()
+	}
 }
 
 // buildDaemon validates the config and assembles the daemon.

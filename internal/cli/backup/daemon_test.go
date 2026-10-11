@@ -26,6 +26,7 @@ import (
 	"github.com/elythia-network/elythia/internal/backup/daemon"
 	"github.com/elythia-network/elythia/internal/backup/restoreop"
 	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/core/strongauth"
 	"github.com/elythia-network/elythia/internal/maintmode"
 )
 
@@ -456,19 +457,92 @@ func TestBuildRestoreParts(t *testing.T) {
 		built++
 		return nil, errors.New("redis down")
 	}
-	d, h, parts, err := build(e, cfg, discardLogger())
+	d, h, setup, err := build(e, cfg, discardLogger())
 	require.NoError(t, err, "the daemon starts without the restore")
 	assert.NotNil(t, d)
 	assert.NotNil(t, h)
-	assert.Nil(t, parts)
+	require.NotNil(t, setup)
+	assert.Nil(t, setup.parts, "retried later")
 	assert.Equal(t, 1, built)
 
 	noAPI := cfgWith(&config.BackupOptions{Schedule: config.BackupScheduleOptions{Interval: "24h"}})
-	_, h, parts, err = build(e, noAPI, discardLogger())
+	_, h, setup, err = build(e, noAPI, discardLogger())
 	require.NoError(t, err)
 	assert.Nil(t, h)
-	assert.Nil(t, parts)
+	assert.Nil(t, setup)
 	assert.Equal(t, 1, built, "not built without the control API")
+}
+
+// TestDaemonRetriesTheRestore checks that a restore which could not be built
+// at start (Redis did not answer) is built later in the background: the
+// control API then serves it and the manager recovers what an earlier run
+// left, without stopping the daemon in between.
+func TestDaemonRetriesTheRestore(t *testing.T) {
+	cfg := cfgWith(&config.BackupOptions{
+		Schedule: config.BackupScheduleOptions{Listen: "127.0.0.1:0"},
+		Server:   config.BackupServerOptions{ServiceToken: "tok"},
+	})
+	e, _, cancel := daemonTestEnv(t, cfg)
+	addr := make(chan string, 1)
+	e.listen = func(string) (net.Listener, error) {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err == nil {
+			addr <- ln.Addr().String()
+		}
+		return ln, err
+	}
+	e.restoreRetry = 10 * time.Millisecond
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	store := restoreop.NewStore(rdb, "p:")
+	require.NoError(t, rdb.Set(context.Background(), store.CurrentKey(), "restore-left", 0).Err())
+	require.NoError(t, rdb.HSet(context.Background(), "p:elythia:maintenance:restore:restore-left", "opId", "restore-left", "step", "aborting").Err())
+	var attempts atomic.Int32
+	closed := make(chan struct{})
+	e.openRestore = func(_ *config.Config, d *daemon.Daemon, _ backupkit.Storage, _ *slog.Logger) (*RestoreParts, error) {
+		if attempts.Add(1) < 3 {
+			return nil, errors.New("redis down")
+		}
+		m := restoreop.New(restoreop.Options{
+			Store: store, Maint: maintmode.NewStore(rdb, rdb, "p:"), DB: stubRestoreDB{},
+			Acquire: func() (func(), error) { return d.Acquire(daemon.JobRestore) },
+			Poll:    5 * time.Millisecond, Logger: discardLogger(),
+		})
+		return &RestoreParts{Manager: m, Verifier: &strongauth.DBVerifier{}, Close: func() { close(closed) }}, nil
+	}
+	done := make(chan int, 1)
+	go func() { done <- runDaemon(e, nil) }()
+	base := "http://" + <-addr
+	status := func() int {
+		req, err := http.NewRequest(http.MethodPost, base+"/restore/status", strings.NewReader(`{"opId":"restore-left","ticket":"x","i":"y"}`))
+		require.NoError(t, err)
+		req.Header.Set("Authorization", "Bearer tok")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return 0
+		}
+		_ = res.Body.Close()
+		return res.StatusCode
+	}
+	require.Eventually(t, func() bool {
+		step, _ := rdb.HGet(context.Background(), "p:elythia:maintenance:restore:restore-left", "step").Result()
+		return step == restoreop.StepAborted
+	}, 5*time.Second, 10*time.Millisecond, "the manager built later recovers the operation")
+	assert.Equal(t, http.StatusForbidden, status(), "the control API serves the restore (the ticket is wrong)")
+	assert.EqualValues(t, 3, attempts.Load(), "it stops trying once built")
+	cancel()
+	select {
+	case code := <-done:
+		assert.Equal(t, 0, code)
+	case <-time.After(10 * time.Second):
+		t.Fatal("runDaemon did not return")
+	}
+	select {
+	case <-closed:
+	default:
+		t.Fatal("the restore parts were not closed")
+	}
 }
 
 // TestDaemonStartsAndClosesTheRestore checks that runDaemon starts the
