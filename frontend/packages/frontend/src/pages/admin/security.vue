@@ -122,7 +122,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 							</SearchMarker>
 
 							<SearchMarker>
-								<MkInput v-model="emailValidationForm.state.verifymailAuthKey">
+								<MkInput v-model="emailValidationForm.state.verifymailAuthKey" type="password" autocomplete="new-password">
 									<template #prefix><i class="ti ti-key"></i></template>
 									<template #label><SearchLabel>Verifymail.io API Auth Key</SearchLabel></template>
 								</MkInput>
@@ -142,7 +142,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 							</SearchMarker>
 
 							<SearchMarker>
-								<MkInput v-model="emailValidationForm.state.truemailAuthKey">
+								<MkInput v-model="emailValidationForm.state.truemailAuthKey" type="password" autocomplete="new-password">
 									<template #prefix><i class="ti ti-key"></i></template>
 									<template #label><SearchLabel>TrueMail API Auth Key</SearchLabel></template>
 								</MkInput>
