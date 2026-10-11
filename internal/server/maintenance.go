@@ -86,7 +86,7 @@ func (m *maintTracker) init(s *Supervisor) {
 	}
 	if s.cfg != nil {
 		// 配送だけのノード (QueueOnly) は handler が API を出さないので、転送の口を付けても届かない。
-		opts.Forward, opts.ForwardPrefix = maintenanceRestoreForward(s.cfg)
+		opts.Forward, opts.ForwardPaths = maintenanceRestoreForward(s.cfg)
 	}
 	m.handler = maintmode.NewHandler(opts)
 }
@@ -95,18 +95,30 @@ func (m *maintTracker) init(s *Supervisor) {
 // is in maintenance, resolving the client address the way echo does
 // (trustProxy), so that the per-client failure budget of the
 // re-authentication is the same as when the server runs.
-func maintenanceRestoreForward(cfg *config.Config) (http.HandlerFunc, string) {
+func maintenanceRestoreForward(cfg *config.Config) (http.HandlerFunc, []string) {
 	trusted, err := config.ParseTrustProxy(cfg.TrustProxy)
 	if err != nil {
 		// 起動時に同じ値で echo を組み立てて通っているので、ここには来ない。
-		return nil, ""
+		return nil, nil
 	}
 	extract := buildIPExtractor(trusted)
 	fwd := newRestoreForwarder(cfg)
 	return func(w http.ResponseWriter, r *http.Request) {
 		op := strings.TrimPrefix(r.URL.Path, adminbackup.RestorePathPrefix)
 		fwd.Serve(w, r, op, extract(r))
-	}, adminbackup.RestorePathPrefix
+	}, maintenanceRestorePaths
+}
+
+// maintenanceRestorePaths are the restore endpoints forwarded during a
+// maintenance.
+//
+// prepare は転送しない。メンテナンス中に始められる操作は無く (daemon も断る)、
+// 転送すると再認証のために DB へ接続を張る要求を、メンテナンス中に誰でも送れる
+// ことになるため。進み具合・確定・中止は、メンテナンスの中で続く操作に要る。
+var maintenanceRestorePaths = []string{
+	adminbackup.RestorePathPrefix + "status",
+	adminbackup.RestorePathPrefix + "confirm",
+	adminbackup.RestorePathPrefix + "abort",
 }
 
 // holdingAtStartup reads the state once before the first generation is

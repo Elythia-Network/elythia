@@ -232,13 +232,15 @@ func TestHandler_ForwardsTheRestorePaths(t *testing.T) {
 			forwarded = append(forwarded, r.URL.Path)
 			w.WriteHeader(http.StatusTeapot)
 		},
-		ForwardPrefix: "/api/admin/backup/restore/",
+		ForwardPaths: []string{"/api/admin/backup/restore/status"},
 	})
 	rec := serve(h, http.MethodPost, "/api/admin/backup/restore/status", nil)
 	assert.Equal(t, http.StatusTeapot, rec.Code)
 	assert.Equal(t, []string{"/api/admin/backup/restore/status"}, forwarded)
 	rec = serve(h, http.MethodPost, "/api/admin/backup/list", nil)
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "other admin/backup paths are not forwarded")
+	rec = serve(h, http.MethodPost, "/api/admin/backup/restore/prepare", nil)
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "only the listed paths are forwarded")
 	assert.Len(t, forwarded, 1)
 
 	// 転送先が無ければ、ほかの API と同じく 503。
