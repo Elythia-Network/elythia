@@ -274,22 +274,9 @@ func (r *Restorer) swapOutcome(maintenance, database, restored, before string) s
 	// 呼ばれるのは失敗の後で、元の ctx は取り消されていることがある。
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	admin, err := r.connect(ctx, maintenanceDB(maintenance))
+	has, err := r.ExistingDatabases(ctx, maintenance, []string{database, restored, before})
 	if err != nil {
 		return swapUnknown
-	}
-	defer admin.Close(context.Background())
-	rows, err := admin.Query(ctx, `SELECT datname FROM pg_database WHERE datname = ANY($1)`, []string{database, restored, before})
-	if err != nil {
-		return swapUnknown
-	}
-	names, err := pgx.CollectRows(rows, pgx.RowTo[string])
-	if err != nil {
-		return swapUnknown
-	}
-	has := map[string]bool{}
-	for _, n := range names {
-		has[n] = true
 	}
 	switch {
 	case has[before] && !has[restored]:
@@ -298,6 +285,32 @@ func (r *Restorer) swapOutcome(maintenance, database, restored, before string) s
 		return swapNotDone
 	}
 	return swapUnknown
+}
+
+// ExistingDatabases reports which of names exist in pg_database. It
+// connects to maintenance (empty means "postgres").
+//
+// 画面からのリストア (#3463 (6c)) が、途中で落ちた後にどこまで進んだかを名前の
+// 組から判断するのに使う。
+func (r *Restorer) ExistingDatabases(ctx context.Context, maintenance string, names []string) (map[string]bool, error) {
+	admin, err := r.connect(ctx, maintenanceDB(maintenance))
+	if err != nil {
+		return nil, err
+	}
+	defer admin.Close(context.Background())
+	rows, err := admin.Query(ctx, `SELECT datname FROM pg_database WHERE datname = ANY($1)`, names)
+	if err != nil {
+		return nil, fmt.Errorf("backup: read pg_database: %w", err)
+	}
+	found, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("backup: read pg_database: %w", err)
+	}
+	has := make(map[string]bool, len(found))
+	for _, n := range found {
+		has[n] = true
+	}
+	return has, nil
 }
 
 func (r *Restorer) finish(ctx context.Context, plan *RestorePlan, opts RestoreOptions, target, before string, res *RestoreResult) error {

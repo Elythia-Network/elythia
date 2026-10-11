@@ -102,14 +102,7 @@ func restore(e restoreEnv, args []string) int {
 	// 削除) を走らせる。既定のシグナルの扱いのままだと、defer が走らずに終わる。
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	r := &bkp.Restorer{
-		Conn:               connFor(cfg),
-		CoreMigrationsDir:  *migrations,
-		LocalMigrationsDir: filepath.Join(*migrations, filepath.Base(migrate.LocalDir)),
-		TempDir:            *tmpDir,
-		Out:                e.stdout,
-		Now:                e.now,
-	}
+	r := newRestorer(cfg, *migrations, *tmpDir, e.stdout, e.now)
 
 	if *rollback != "" {
 		return e.rollback(ctx, r, cfg, *rollback, *confirm, *maint, cleanRedisFor(*redisMode, bkp.RestoreSwap))
@@ -124,13 +117,9 @@ func restore(e restoreEnv, args []string) int {
 		fmt.Fprintf(e.stderr, "elythia backup restore: open storage: %v\n", err)
 		return 1
 	}
-	r.Storage = storage
-	r.PgRestore = cfg.Backup.Tools.PgRestore
-	if f := cfg.Backup.Encryption.IdentityFile; f != "" {
-		if r.Identities, err = bkp.LoadIdentities(f); err != nil {
-			fmt.Fprintf(e.stderr, "elythia backup restore: backup.encryption.identityFile: %v\n", err)
-			return 1
-		}
+	if err := withBackupTools(r, cfg.Backup, storage); err != nil {
+		fmt.Fprintf(e.stderr, "elythia backup restore: %v\n", err)
+		return 1
 	}
 
 	if *redisMode == redisAuto && bkp.RestoreMode(*mode) == bkp.RestoreEmpty {
@@ -294,6 +283,34 @@ func (e restoreEnv) clearRedis(ctx context.Context, cfg *config.Config) int {
 	return 0
 }
 
+// newRestorer returns a Restorer for the configured server without a
+// storage. The CLI and the daemon (#3463 (6c)) build it the same way.
+func newRestorer(cfg *config.Config, migrations, tmpDir string, out io.Writer, now func() time.Time) *bkp.Restorer {
+	return &bkp.Restorer{
+		Conn:               connFor(cfg),
+		CoreMigrationsDir:  migrations,
+		LocalMigrationsDir: filepath.Join(migrations, filepath.Base(migrate.LocalDir)),
+		TempDir:            tmpDir,
+		Out:                out,
+		Now:                now,
+	}
+}
+
+// withBackupTools sets the storage, pg_restore and the decryption keys of
+// the backup: section on r.
+func withBackupTools(r *bkp.Restorer, b *config.BackupOptions, storage bkp.Storage) error {
+	r.Storage = storage
+	r.PgRestore = b.Tools.PgRestore
+	if f := b.Encryption.IdentityFile; f != "" {
+		ids, err := bkp.LoadIdentities(f)
+		if err != nil {
+			return fmt.Errorf("backup.encryption.identityFile: %w", err)
+		}
+		r.Identities = ids
+	}
+	return nil
+}
+
 // connFor builds the connection strings for another database name on the
 // configured server.
 func connFor(cfg *config.Config) bkp.RestoreConn {
@@ -331,11 +348,16 @@ func cleanRedis(ctx context.Context, cfg *config.Config) (bkp.RedisCleanupResult
 		return bkp.RedisCleanupResult{}, err
 	}
 	defer func() { _ = clients.Close() }()
-	return bkp.CleanRedisAfterRestore(ctx, bkp.RedisCleanupTargets{
+	return bkp.CleanRedisAfterRestore(ctx, redisCleanupTargets(cfg, clients))
+}
+
+// redisCleanupTargets names the clients the cleanup after a restore uses.
+func redisCleanupTargets(cfg *config.Config, clients *cache.RedisClients) bkp.RedisCleanupTargets {
+	return bkp.RedisCleanupTargets{
 		Default:   bkp.RedisCleanupTarget{Client: clients.Default, Prefix: cfg.Redis.KeyPrefix()},
 		Timelines: bkp.RedisCleanupTarget{Client: clients.Timelines, Prefix: cfg.RedisForTimelines.KeyPrefix()},
 		JobQueue:  bkp.RedisCleanupTarget{Client: clients.JobQueue},
-	})
+	}
 }
 
 func checkRestored(ctx context.Context, cfg *config.Config, coreDir, localDir string) (selfcheck.Report, error) {
