@@ -127,6 +127,41 @@ func TestResolveLatestPicksNewestVerified(t *testing.T) {
 	assert.ErrorContains(t, err, "cannot read generation 20261008T000000Z")
 }
 
+// TestResolveRejectsVerificationOfAnotherDump: a verify.json whose dumpSha256
+// differs from meta.json verified a dump that has since been replaced
+// (#3499). One without dumpSha256 (written before #3499) is still accepted.
+func TestResolveRejectsVerificationOfAnotherDump(t *testing.T) {
+	ctx := context.Background()
+	s := newRSStorage()
+	r := &Restorer{Storage: s}
+	put := func(id, dumpSHA, verifiedSHA string) {
+		s.putJSON(t, Key(id, MetaFile), Meta{FormatVersion: MetaFormatVersion, ID: id, DumpFile: DumpFile, DumpSHA256: dumpSHA})
+		s.objs[Key(id, DumpFile)] = []byte("dump")
+		s.putJSON(t, Key(id, VerifyFile), VerifyResult{ID: id, OK: true, DumpSHA256: verifiedSHA})
+	}
+	put("20261001T000000Z", "aaaa", "")
+	put("20261002T000000Z", "bbbb", "BBBB")
+	put("20261003T000000Z", "cccc", "dddd")
+
+	id, verified, err := r.resolveID(ctx, LatestGeneration)
+	require.NoError(t, err)
+	assert.Equal(t, "20261002T000000Z", id, "the newest one verified a replaced dump")
+	assert.True(t, verified)
+
+	_, verified, err = r.resolveID(ctx, "20261003T000000Z")
+	require.NoError(t, err)
+	assert.False(t, verified)
+	_, verified, err = r.resolveID(ctx, "20261001T000000Z")
+	require.NoError(t, err)
+	assert.True(t, verified, "verify.json from before #3499 has no dumpSha256")
+
+	// meta.json が読めない世代は、検証済みとして扱わない (この後の readMeta が止める)。
+	s.objs[Key("20261002T000000Z", MetaFile)] = []byte("{")
+	_, verified, err = r.resolveID(ctx, "20261002T000000Z")
+	require.NoError(t, err)
+	assert.False(t, verified)
+}
+
 type rsListErrStorage struct{ *rsStorage }
 
 func (rsListErrStorage) List(context.Context, string) ([]ObjectInfo, error) {

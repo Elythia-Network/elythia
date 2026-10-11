@@ -101,6 +101,7 @@ func TestVerifyHealthyBackupPassesAllStages(t *testing.T) {
 	assert.True(t, res.OK)
 	assert.Empty(t, res.Mismatches)
 	assert.Equal(t, "9.9.9", res.ElythiaVersion)
+	assert.Equal(t, meta.DumpSHA256, res.DumpSHA256)
 	assert.Equal(t, time.Date(2026, 10, 10, 5, 0, 0, 0, time.UTC), res.VerifiedAt)
 	assert.Equal(t, res, readVerifyJSON(t, s, testGenID))
 
