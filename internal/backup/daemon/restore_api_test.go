@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -366,7 +367,7 @@ func TestRestoreErrorMapping(t *testing.T) {
 		{ErrNotRunning, http.StatusServiceUnavailable, "RESTORE_UNAVAILABLE"},
 	} {
 		w := httptest.NewRecorder()
-		restoreError(w, c.err)
+		restoreError(w, discardLogger(), c.err)
 		assert.Equal(t, c.status, w.Code, c.code)
 		assert.Contains(t, w.Body.String(), `"code":"`+c.code+`"`)
 	}
@@ -453,4 +454,21 @@ func TestRestoreAPI_StatusBySession(t *testing.T) {
 	rec, out = r.post(t, "/restore/abort", map[string]any{"session": "session-token-01", "opId": opID, "ticket": ticket, "password": "pw", "token": "123456"})
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 	assert.Equal(t, "RESTORE_TICKET_INVALID", errCode(out))
+}
+
+// TestRestoreErrorKeepsTheReasonInTheLog checks that a failed check before a
+// restore answers a generic message and leaves the reason (which names
+// databases and files) to the log of the service.
+func TestRestoreErrorKeepsTheReasonInTheLog(t *testing.T) {
+	var buf bytes.Buffer
+	w := httptest.NewRecorder()
+	restoreError(w, slog.New(slog.NewTextHandler(&buf, nil)), errors.New(`permission denied for database "app_secret"`))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "RESTORE_PREPARE_FAILED")
+	assert.NotContains(t, w.Body.String(), "app_secret")
+	assert.Contains(t, buf.String(), "app_secret")
+	// ロガーが無くても応答は返す。
+	w = httptest.NewRecorder()
+	restoreError(w, nil, errors.New("x"))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
