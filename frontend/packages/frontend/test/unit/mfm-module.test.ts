@@ -28,18 +28,18 @@ describe('parse', () => {
 
 describe('mfm-js imports', () => {
 	// 画面のコードが mfm-js を直接読むと、このモジュールを通らなくなる。import 文だけで
-	// なく import() や require、mfm-js/... の形も拾う。eslint でも止めているが、ここでも
-	// 確かめる。
+	// なく import() (テンプレートリテラルを含む) や require、mfm-js/... の形も拾う。
+	// eslint は import 文しか見ないので、ここでも確かめる。
 	const roots = [join(__dirname, '../../src'), join(__dirname, '../../../frontend-embed/src')];
 	const files = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
 		const path = join(dir, entry.name);
 		if (entry.isDirectory()) return files(path);
-		return /\.(ts|vue)$/.test(entry.name) ? [path] : [];
+		return /\.(ts|tsx|js|vue)$/.test(entry.name) ? [path] : [];
 	});
 
 	test('only the mfm module imports mfm-js', () => {
 		const importers = roots.flatMap(files)
-			.filter(path => /['"]mfm-js(\/[^'"]*)?['"]/.test(readFileSync(path, 'utf8')))
+			.filter(path => /['"`]mfm-js(\/[^'"`]*)?['"`]/.test(readFileSync(path, 'utf8')))
 			.map(path => path.replace(/\\/g, '/').replace(/^.*\/packages\//, ''));
 		expect(importers.sort()).toEqual([
 			'frontend-embed/src/utility/mfm.ts',
