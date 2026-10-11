@@ -401,3 +401,18 @@ proxyBypassHosts:
 #    # While empty, the daemon does not start with listen set, and the
 #    # server sends nothing.
 #    serviceToken: ""
+
+#   ┌──────────────────────────┐
+#───┘ Maintenance mode (#3463) └──────────────────────────────
+
+# Used by `elythia maintenance` and by every process while a maintenance
+# lets go of the database. See docs/deployment.md. Every key has a default;
+# the section may stay commented out.
+#maintenance:
+#  # The database the judge connects to while it counts the sessions on the
+#  # application database in pg_stat_activity. Must not be db.db.
+#  maintenanceDb: postgres
+#  # After this, the judge terminates the Elythia sessions that remain
+#  # (application_name elythia/..., same role). Other sessions are never
+#  # terminated; the maintenance waits until they close.
+#  drainTimeout: 30s

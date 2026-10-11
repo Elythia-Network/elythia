@@ -20,6 +20,8 @@ import (
 	"github.com/golang-migrate/migrate/v4/source"
 	_ "github.com/golang-migrate/migrate/v4/source/file" // file:// source
 	"github.com/jackc/pgx/v5"
+
+	"github.com/elythia-network/elythia/internal/pgactivity"
 )
 
 // RestoreMode selects where `backup restore` writes (#3461).
@@ -1205,31 +1207,13 @@ func checkSwapPrivilege(ctx context.Context, conn *pgx.Conn, name string, db res
 // 入れ替える形では名前の変更が接続のある DB を拒否するが、それは pg_restore と
 // 突き合わせを終えた後になる。空の DB へ戻す形では、何も止めない。
 func checkNoConnections(ctx context.Context, conn *pgx.Conn, name string) error {
-	rows, err := conn.Query(ctx, `
-		SELECT pid, coalesce(usename, ''), coalesce(application_name, ''), coalesce(host(client_addr), 'local')
-		FROM pg_stat_activity
-		WHERE datname = $1 AND pid <> pg_backend_pid() AND backend_type = 'client backend'
-		ORDER BY pid`, name)
+	sessions, err := pgactivity.List(ctx, conn, name)
 	if err != nil {
-		return fmt.Errorf("backup: read pg_stat_activity: %w", err)
-	}
-	var sessions []string
-	for rows.Next() {
-		var pid int
-		var user, app, addr string
-		if err := rows.Scan(&pid, &user, &app, &addr); err != nil {
-			rows.Close()
-			return fmt.Errorf("backup: read pg_stat_activity: %w", err)
-		}
-		sessions = append(sessions, fmt.Sprintf("pid=%d user=%s application=%q from=%s", pid, user, app, addr))
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("backup: read pg_stat_activity: %w", err)
+		return fmt.Errorf("backup: %w", err)
 	}
 	if len(sessions) > 0 {
 		return fmt.Errorf("%w: stop the server and workers first (%d sessions on %q: %s)",
-			ErrRestoreConnections, len(sessions), name, strings.Join(sessions, "; "))
+			ErrRestoreConnections, len(sessions), name, pgactivity.Join(sessions))
 	}
 	return nil
 }

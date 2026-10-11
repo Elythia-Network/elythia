@@ -284,6 +284,15 @@ Elythia 側のマイグレーションには含めていない。pgroonga 拡張
 
 `backup:`の節は`MK_*`の環境変数では作れない(`bindEnvKeys()`に無い)。
 
+### メンテナンスモード (`maintenance.*`)
+
+`elythia maintenance`と、本体の各プロセスが読む。メンテナンスの使い方は[デプロイ](deployment.md#メンテナンスモード)にある。節ごと省略でき、どのキーにも既定がある。どちらも`bindEnvKeys()`にあるので、節が無くても`MK_MAINTENANCE_MAINTENANCEDB` / `MK_MAINTENANCE_DRAINTIMEOUT`で設定できる。
+
+| キー | 型 | 説明 |
+|---|---|---|
+| `maintenance.maintenanceDb` | string | 判定役が`pg_stat_activity`を数えるときに繋ぐDB。既定は`postgres`。`db.db`と同じ名前にはできない(判定役の接続が数に入り、0にならない)。DBのユーザーに`CONNECT`の権限が要る(`postgres`はPUBLICに許されている) |
+| `maintenance.drainTimeout` | string | メンテナンスに入ってからこの時間を過ぎても接続が残っていたら、判定役がElythia自身の接続(`application_name`が`elythia/`で始まり、判定役と同じroleのもの)を`pg_terminate_backend`で切る(Goのduration)。既定は`30s`。0より大きい値にする。それ以外の接続は切らない |
+
 ## 環境変数オーバーライド
 
 `MK_`プレフィックス付きの環境変数で設定値を上書きできる。ネストキーは`_`区切り。
@@ -320,11 +329,11 @@ Elythia 側のマイグレーションには含めていない。pgroonga 拡張
 
 用途別Redisも同様 (例: `MK_REDISFORPUBSUB_HOST`)。
 
-**上表は一部。** `internal/config/config.go` の `bindEnvKeys()` は **91 キー**を
+**上表は一部。** `internal/config/config.go` の `bindEnvKeys()` は **93 キー**を
 登録している。内訳は用途別 Redis 5 系統 (`redis` / `redisForPubsub` /
 `redisForJobQueue` / `redisForTimelines` / `redisForReactions`) が各 9、`db.*` が 9、
-`logging.sql.*` が 2、`sentryForBackend.options.{dsn,environment}` が 2、残り 33 が
-トップレベル。全量はその関数を見ること。
+`logging.sql.*` が 2、`sentryForBackend.options.{dsn,environment}` が 2、
+`maintenance.*` が 2、残り 33 がトップレベル。全量はその関数を見ること。
 
 **登録の有無で「作れるか」だけが変わる。** Viper は `AutomaticEnv` を有効にしている
 ので、**設定ファイルにそのキーが書かれていれば `MK_` で上書きできる**。`bindEnvKeys()`
