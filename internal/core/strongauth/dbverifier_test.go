@@ -3,6 +3,7 @@ package strongauth
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -137,10 +138,69 @@ func TestDBVerifier_OpenFailure(t *testing.T) {
 		Open:  func(context.Context) (*gorm.DB, func(), error) { return nil, nil, errors.New("down") },
 		Guard: erringGuard{},
 	}
-	_, err := v.Verify(context.Background(), "tok", "", Reauth{Password: password, Token: "1"})
+	_, err := v.Verify(context.Background(), "tokadmin00000001", "", Reauth{Password: password, Token: "1"})
 	assert.Equal(t, ReasonUnavailable, ReasonOf(err))
-	_, err = (&DBVerifier{}).Verify(context.Background(), "tok", "", Reauth{})
+	_, err = (&DBVerifier{}).Verify(context.Background(), "tokadmin00000001", "", Reauth{})
 	assert.Equal(t, ReasonUnavailable, ReasonOf(err))
+}
+
+// TestDBVerifier_RefusesMisshapenTokensWithoutOpening checks that a token
+// that cannot be a native session token never opens the database.
+func TestDBVerifier_RefusesMisshapenTokensWithoutOpening(t *testing.T) {
+	opened := 0
+	v := &DBVerifier{
+		Open: func(context.Context) (*gorm.DB, func(), error) {
+			opened++
+			return nil, nil, errors.New("down")
+		},
+		Guard: erringGuard{},
+	}
+	for _, tok := range []string{"short", "tokadmin000000012", "an-app-token-that-is-much-longer-than-sixteen"} {
+		_, err := v.Verify(context.Background(), tok, "", Reauth{Password: password, Token: "1"})
+		assert.Equal(t, ReasonNotNativeToken, ReasonOf(err), tok)
+		_, err = v.BeginPasskey(context.Background(), tok, "")
+		assert.Equal(t, ReasonNotNativeToken, ReasonOf(err), tok)
+	}
+	_, err := v.BeginPasskey(context.Background(), "", "")
+	assert.Equal(t, ReasonNoCredential, ReasonOf(err))
+	assert.Zero(t, opened)
+}
+
+// TestDBVerifier_CapsConcurrentChecks checks that a check over MaxChecks is
+// refused at once without opening the database, and that a slot comes back
+// when a check ends, even a failed one.
+func TestDBVerifier_CapsConcurrentChecks(t *testing.T) {
+	entered := make(chan struct{})
+	unblock := make(chan struct{})
+	var opened atomic.Int32
+	v := &DBVerifier{
+		Open: func(context.Context) (*gorm.DB, func(), error) {
+			if opened.Add(1) == 1 {
+				close(entered)
+				<-unblock
+			}
+			return nil, nil, errors.New("down")
+		},
+		Guard:     erringGuard{},
+		MaxChecks: 1,
+	}
+	done := make(chan error)
+	go func() {
+		_, err := v.Verify(context.Background(), "tokadmin00000001", "", Reauth{})
+		done <- err
+	}()
+	<-entered
+	_, err := v.Verify(context.Background(), "tokadmin00000001", "", Reauth{})
+	var se *Error
+	require.ErrorAs(t, err, &se)
+	assert.Equal(t, ReasonRateLimited, se.Reason)
+	assert.Equal(t, 2*time.Second, se.RetryAfter)
+	assert.EqualValues(t, 1, opened.Load(), "the refused check does not open the database")
+	close(unblock)
+	assert.Equal(t, ReasonUnavailable, ReasonOf(<-done))
+	_, err = v.Verify(context.Background(), "tokadmin00000001", "", Reauth{})
+	assert.Equal(t, ReasonUnavailable, ReasonOf(err), "the slot is back")
+	assert.EqualValues(t, 2, opened.Load())
 }
 
 func TestDBVerifier_BeginPasskey(t *testing.T) {
