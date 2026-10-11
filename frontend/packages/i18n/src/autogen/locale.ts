@@ -4341,6 +4341,14 @@ export interface Locale extends ILocale {
      */
     "invalidParamErrorDescription": string;
     /**
+     * 秘密の値を入力し直してください
+     */
+    "secretReentryRequired": string;
+    /**
+     * 送り先(ホストやURLなど)を変えるときは、それと組になっているパスワードやキーも入力し直してください。保存済みの値は、新しい送り先には使いません。
+     */
+    "secretReentryRequiredDescription": string;
+    /**
      * 操作が拒否されました
      */
     "permissionDeniedError": string;

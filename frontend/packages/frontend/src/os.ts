@@ -84,6 +84,11 @@ export const apiWithDialog = (<
 		} else if (err.code === 'ROLE_PERMISSION_DENIED') {
 			title = i18n.ts.permissionDeniedError;
 			text = i18n.ts.permissionDeniedErrorDescription;
+		} else if (err.code === 'SECRET_REENTRY_REQUIRED') {
+			// Elythia: 管理画面で送り先 (SMTP のホストなど) を変えたのに、対になる秘密を
+			// 伏せ字のまま保存しようとした (admin/update-meta・admin/captcha/save)。
+			title = i18n.ts.secretReentryRequired;
+			text = i18n.ts.secretReentryRequiredDescription;
 		} else if (err.code.startsWith('TOO_MANY')) { // TODO: バックエンドに kind: client/contentsLimitExceeded みたいな感じで送るように統一してもらってそれで判定する
 			title = i18n.ts.youCannotCreateAnymore;
 			text = `${i18n.ts.error}: ${err.id}`;
