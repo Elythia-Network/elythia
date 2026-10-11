@@ -65,9 +65,13 @@ func TestForwarder_Relays(t *testing.T) {
 	assert.Equal(t, "usertoken0000001", s.body["i"], "the user's token moves into the body")
 	assert.Equal(t, "123456", s.body["token"])
 
-	// 本文に i があれば、それを使う。
-	forward(f, "status", `{"i":"bodytoken0000001","opId":"op1"}`, map[string]string{"Authorization": "Bearer other"})
-	assert.Equal(t, "bodytoken0000001", (*seen)[1].body["i"])
+	// 本体の認証と同じく、ヘッダーの token を本文の i より先に使う。本文の i を使うと、
+	// 本体が確かめた管理者と別の人で daemon が照合する。
+	forward(f, "confirm", `{"i":"bodytoken0000001","opId":"op1"}`, map[string]string{"Authorization": "Bearer headertoken00001"})
+	assert.Equal(t, "headertoken00001", (*seen)[1].body["i"])
+	// ヘッダーが無ければ本文の i のまま。
+	forward(f, "confirm", `{"i":"bodytoken0000001","opId":"op1"}`, nil)
+	assert.Equal(t, "bodytoken0000001", (*seen)[2].body["i"])
 }
 
 func TestForwarder_RelaysEmptyAndErrorResponses(t *testing.T) {
