@@ -31,7 +31,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 						<div class="_gaps_m">
 							<SearchMarker>
-								<MkInput v-model="deeplAuthKey">
+								<MkInput v-model="deeplAuthKey" type="password" autocomplete="new-password">
 									<template #prefix><i class="ti ti-key"></i></template>
 									<template #label><SearchLabel>Auth Key</SearchLabel></template>
 								</MkInput>

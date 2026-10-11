@@ -37,7 +37,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 					<template #prefix><i class="ti ti-key"></i></template>
 					<template #label>{{ i18n.ts.hcaptchaSiteKey }}</template>
 				</MkInput>
-				<MkInput v-model="botProtectionForm.state.hcaptchaSecretKey" debounce>
+				<MkInput v-model="botProtectionForm.state.hcaptchaSecretKey" type="password" autocomplete="new-password" debounce>
 					<template #prefix><i class="ti ti-key"></i></template>
 					<template #label>{{ i18n.ts.hcaptchaSecretKey }}</template>
 				</MkInput>
@@ -65,7 +65,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 					<template #prefix><i class="ti ti-key"></i></template>
 					<template #label>{{ i18n.ts.mcaptchaSiteKey }}</template>
 				</MkInput>
-				<MkInput v-model="botProtectionForm.state.mcaptchaSecretKey" debounce>
+				<MkInput v-model="botProtectionForm.state.mcaptchaSecretKey" type="password" autocomplete="new-password" debounce>
 					<template #prefix><i class="ti ti-key"></i></template>
 					<template #label>{{ i18n.ts.mcaptchaSecretKey }}</template>
 				</MkInput>
@@ -90,7 +90,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 					<template #prefix><i class="ti ti-key"></i></template>
 					<template #label>{{ i18n.ts.recaptchaSiteKey }}</template>
 				</MkInput>
-				<MkInput v-model="botProtectionForm.state.recaptchaSecretKey" debounce>
+				<MkInput v-model="botProtectionForm.state.recaptchaSecretKey" type="password" autocomplete="new-password" debounce>
 					<template #prefix><i class="ti ti-key"></i></template>
 					<template #label>{{ i18n.ts.recaptchaSecretKey }}</template>
 				</MkInput>
@@ -122,7 +122,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 					<template #prefix><i class="ti ti-key"></i></template>
 					<template #label>{{ i18n.ts.turnstileSiteKey }}</template>
 				</MkInput>
-				<MkInput v-model="botProtectionForm.state.turnstileSecretKey" debounce>
+				<MkInput v-model="botProtectionForm.state.turnstileSecretKey" type="password" autocomplete="new-password" debounce>
 					<template #prefix><i class="ti ti-key"></i></template>
 					<template #label>{{ i18n.ts.turnstileSecretKey }}</template>
 				</MkInput>

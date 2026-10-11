@@ -156,7 +156,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 								</SearchMarker>
 
 								<SearchMarker>
-									<MkInput v-model="serviceWorkerForm.state.swPrivateKey">
+									<MkInput v-model="serviceWorkerForm.state.swPrivateKey" type="password" autocomplete="new-password">
 										<template #label><SearchLabel>Private key</SearchLabel><span v-if="serviceWorkerForm.modifiedStates.swPrivateKey" class="_modified">{{ i18n.ts.modified }}</span></template>
 										<template #prefix><i class="ti ti-key"></i></template>
 									</MkInput>
