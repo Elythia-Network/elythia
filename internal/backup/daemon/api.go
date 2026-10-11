@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/api/adminbackup"
 	"github.com/elythia-network/elythia/internal/backup"
 )
 
@@ -81,7 +82,7 @@ func Handler(d *Daemon, token string, restore *Restore) (http.Handler, error) {
 		// 長さの違いも漏らさないよう、hash にそろえてから定数時間で比べる。
 		sum := sha256.Sum256([]byte(got))
 		if !ok || subtle.ConstantTimeCompare(sum[:], want[:]) != 1 {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="elythia-backup"`)
+			w.Header().Set("WWW-Authenticate", adminbackup.ServiceAuthChallenge)
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			return
 		}

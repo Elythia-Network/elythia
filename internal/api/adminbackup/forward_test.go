@@ -82,10 +82,15 @@ func TestForwarder_RelaysEmptyAndErrorResponses(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "REAUTHENTICATION_FAILED")
 
 	// daemon が serviceToken を断ったのは設定の食い違い。401 のままだと画面がサインアウトする。
-	srv, _ = fakeService(t, http.StatusUnauthorized, `{"error":"unauthorized"}`, nil)
+	srv, _ = fakeService(t, http.StatusUnauthorized, `{"error":"unauthorized"}`, map[string]string{"WWW-Authenticate": ServiceAuthChallenge})
 	rec = forward(NewForwarder(srv.URL, "wrong", nil), "status", `{}`, nil)
 	assert.Equal(t, http.StatusBadGateway, rec.Code)
 	assert.Contains(t, rec.Body.String(), "BACKUP_SERVICE_UNREACHABLE")
+	// 利用者の token が無いという daemon の 401 は、設定の食い違いではないのでそのまま返す。
+	srv, _ = fakeService(t, http.StatusUnauthorized, `{"error":{"code":"CREDENTIAL_REQUIRED"}}`, nil)
+	rec = forward(NewForwarder(srv.URL, "svc", nil), "prepare", `{}`, nil)
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	assert.Contains(t, rec.Body.String(), "CREDENTIAL_REQUIRED")
 
 	srv, _ = fakeService(t, http.StatusOK, strings.Repeat("x", forwardResponseLimit+1), nil)
 	rec = forward(NewForwarder(srv.URL, "svc", nil), "status", `{}`, nil)
