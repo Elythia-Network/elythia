@@ -368,6 +368,13 @@ func TestSupervisor_ShutdownWaitsForAHandlerInstalledWhileItWaitedForTheLock(t *
 	assert.Zero(t, f.closed.Load(), "処理中のリクエストがあるのに DB を閉じた")
 	code, _ := getBody(t, sup, "/healthz")
 	assert.Equal(t, http.StatusServiceUnavailable, code, "Shutdown がロックを取った後も新しい世代へ回している")
+	// WebSocket の upgrade は止めた印を見ずに今のハンドラーへ渡るので、差し替え
+	// 直していなければ新しい世代に届く。
+	upgrade := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	upgrade.Header.Set("Upgrade", "websocket")
+	rec := httptest.NewRecorder()
+	sup.ServeHTTP(rec, upgrade)
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "ロックを取った後に unavailable へ差し替え直していない")
 	close(f.release)
 	assert.Equal(t, http.StatusOK, recvWithin(t, slowDone, "遅いリクエストが終わらない"))
 	require.NoError(t, recvWithin(t, shutdownDone, "Shutdown が終わらない"))
