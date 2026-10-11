@@ -265,8 +265,8 @@ func (s *Service) verifySummary(ctx context.Context, bg backup.Generation) *Veri
 			return &VerifySummary{Error: err.Error(), Stages: []backup.StageResult{}, Mismatches: []backup.RowMismatch{}}
 		}
 	}
-	// restore と同じ基準で「通った」と言う。別の世代や、差し替わる前の dump を
-	// 確かめた verify.json を、画面だけ通ったと見せない。
+	// restore と同じ基準で「通った」と言う。別の世代や、同じ ID で取り直す前の
+	// dump を確かめた verify.json を、画面だけ通ったと見せない。
 	vs := &VerifySummary{OK: backup.VerifyPassed(bg.ID, vr, bg.Meta), VerifiedAt: vr.VerifiedAt, Stages: vr.Stages, Mismatches: vr.Mismatches}
 	if vr.OK && !vs.OK {
 		vs.Error = "verify.json does not belong to this generation's current dump (meta.json is missing or unreadable, or the generation ID or dumpSha256 differs); verify it again"
