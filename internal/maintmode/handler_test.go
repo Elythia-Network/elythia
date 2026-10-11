@@ -220,3 +220,29 @@ func TestHandler_StaticFiles(t *testing.T) {
 	rec = serve(h, http.MethodPost, "/assets/a.js", nil)
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 }
+
+// TestHandler_ForwardsTheRestorePaths checks that the restore endpoints are
+// forwarded while in maintenance (#3463 (6c)) and every other API path still
+// gets the 503.
+func TestHandler_ForwardsTheRestorePaths(t *testing.T) {
+	var forwarded []string
+	h := NewHandler(HandlerOptions{
+		State: func() *State { return &State{Phase: PhaseHeld, OpID: "op"} },
+		Forward: func(w http.ResponseWriter, r *http.Request) {
+			forwarded = append(forwarded, r.URL.Path)
+			w.WriteHeader(http.StatusTeapot)
+		},
+		ForwardPrefix: "/api/admin/backup/restore/",
+	})
+	rec := serve(h, http.MethodPost, "/api/admin/backup/restore/status", nil)
+	assert.Equal(t, http.StatusTeapot, rec.Code)
+	assert.Equal(t, []string{"/api/admin/backup/restore/status"}, forwarded)
+	rec = serve(h, http.MethodPost, "/api/admin/backup/list", nil)
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "other admin/backup paths are not forwarded")
+	assert.Len(t, forwarded, 1)
+
+	// 転送先が無ければ、ほかの API と同じく 503。
+	h = NewHandler(HandlerOptions{State: func() *State { return &State{Phase: PhaseHeld, OpID: "op"} }})
+	rec = serve(h, http.MethodPost, "/api/admin/backup/restore/status", nil)
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+}
