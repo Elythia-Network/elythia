@@ -340,6 +340,9 @@ type PGTarget struct {
 	DSN string
 	// Database is the database whose sessions are counted.
 	Database string
+	// MaintenanceDB is the database DSN connects to. It must differ from
+	// Database.
+	MaintenanceDB string
 }
 
 // PGCounter counts the sessions with a short connection to the maintenance
@@ -385,6 +388,12 @@ func (c *PGCounter) Sessions(ctx context.Context) ([]Blocker, error) {
 }
 
 func (c *PGCounter) list(ctx context.Context, t PGTarget) ([]pgactivity.Session, error) {
+	if t.MaintenanceDB == t.Database {
+		// 対象の DB に繋いで数えると、判定役自身の接続のせいで 0 にならず、
+		// 判定のたびに対象の DB へ繋ぐことにもなる。設定の検査は maintenance: の
+		// 節があるときしか効かない (db.db が postgres で節が無い構成) ので、ここでも拒む。
+		return nil, fmt.Errorf("maintmode: %s: maintenance.maintenanceDb (%q) is the application database; set another database", t.Name, t.MaintenanceDB)
+	}
 	ctx, cancel := context.WithTimeout(ctx, connectTimeout)
 	defer cancel()
 	conn, err := c.connect(ctx, t)
@@ -425,7 +434,7 @@ func TargetsFromConfig(cfg *config.Config, applicationName string) []PGTarget {
 	c := *cfg
 	c.DB.DB = maint
 	c.DBApplicationName = applicationName
-	targets := []PGTarget{{Name: "primary", DSN: c.DSN(), Database: cfg.DB.DB}}
+	targets := []PGTarget{{Name: "primary", DSN: c.DSN(), Database: cfg.DB.DB, MaintenanceDB: maint}}
 	if !cfg.DBReplications {
 		return targets
 	}
@@ -435,7 +444,7 @@ func TargetsFromConfig(cfg *config.Config, applicationName string) []PGTarget {
 	for i, s := range cfg.DBSlaves {
 		c.DBSlaves[i].DB = maint
 		targets = append(targets, PGTarget{
-			Name: fmt.Sprintf("replica%d", i), DSN: c.SlaveDSN(i), Database: s.DB,
+			Name: fmt.Sprintf("replica%d", i), DSN: c.SlaveDSN(i), Database: s.DB, MaintenanceDB: maint,
 		})
 	}
 	return targets

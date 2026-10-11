@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -567,4 +568,36 @@ func TestJudge_TerminatedIsDeduplicatedAndBounded(t *testing.T) {
 		_, _ = j2.entering(ctx, st)
 	}
 	assert.Len(t, j2.terminated, 1, "同じ接続を何度も記録した")
+}
+
+// TestPGCounter_RefusesTheApplicationDatabase fixes #3463 review L-1: with
+// no maintenance: section the config does not check the names, so a
+// database named postgres would be counted from inside itself.
+func TestPGCounter_RefusesTheApplicationDatabase(t *testing.T) {
+	cfg := &config.Config{
+		DB:          config.DBOptions{Host: "db", Port: 5432, DB: "postgres", User: "u", Pass: "p"},
+		Maintenance: config.MaintenanceOptions{MaintenanceDB: "postgres"},
+	}
+	connected := false
+	c := &PGCounter{
+		Targets: TargetsFromConfig(cfg, "elythia-judge/x"),
+		Connect: func(context.Context, string) (*pgx.Conn, error) {
+			connected = true
+			return nil, errors.New("must not connect")
+		},
+	}
+	_, err := c.Sessions(context.Background())
+	assert.ErrorContains(t, err, "is the application database")
+	assert.False(t, connected, "対象の DB に繋ごうとした")
+
+	// 判定役は判定を拒み、judgeError に出して entering のまま待つ。
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+	require.NoError(t, s.Enter(ctx, State{OpID: "op"}))
+	j := &Judge{Store: s, Counter: c, ID: "j", DrainTimeout: time.Second}
+	_, err = j.Step(ctx)
+	require.Error(t, err)
+	st, _ := s.Get(ctx)
+	assert.Equal(t, PhaseEntering, st.Phase)
+	assert.Contains(t, st.JudgeError, "is the application database")
 }
