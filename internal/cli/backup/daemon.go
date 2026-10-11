@@ -132,31 +132,52 @@ func runDaemon(e daemonEnv, args []string) int {
 // handler (nil when backup.schedule.listen is empty) and the restore from
 // the admin page (nil when it is not available).
 func build(e daemonEnv, cfg *config.Config, logger *slog.Logger) (*daemon.Daemon, http.Handler, *RestoreParts, error) {
-	d, h, err := buildDaemon(e, cfg, logger)
-	if err != nil || h == nil || e.openRestore == nil {
-		return d, h, nil, err
+	d, err := buildDaemon(e, cfg, logger)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	b := cfg.Backup
+	if b.Schedule.Listen == "" {
+		return d, nil, nil, nil
+	}
+	if b.Server.ServiceToken == "" {
+		return nil, nil, nil, daemon.ErrNoServiceToken
 	}
 	// 画面からのリストアは制御 API の上で動く。Redis に繋がらないときは、リストアだけを
 	// 外して起動する (取る・確かめるは止めない)。
-	restore, err := e.openRestore(cfg, d, d.Storage(), logger)
-	if err != nil {
-		logger.Warn("backup: the restore from the admin page is not available", "err", err)
-		return d, h, nil, nil
+	var parts *RestoreParts
+	var rs *daemon.Restore
+	if e.openRestore != nil {
+		parts, err = e.openRestore(cfg, d, d.Storage(), logger)
+		if err != nil {
+			logger.Warn("backup: the restore from the admin page is not available", "err", err)
+			parts = nil
+		} else {
+			rs = &daemon.Restore{Manager: parts.Manager, Verifier: parts.Verifier}
+		}
 	}
-	return d, h, restore, nil
+	h, err := daemon.Handler(d, b.Server.ServiceToken, rs)
+	if err != nil {
+		if parts != nil {
+			parts.Close()
+		}
+		return nil, nil, nil, err
+	}
+	return d, h, parts, nil
 }
 
-func buildDaemon(e daemonEnv, cfg *config.Config, logger *slog.Logger) (*daemon.Daemon, http.Handler, error) {
+// buildDaemon validates the config and assembles the daemon.
+func buildDaemon(e daemonEnv, cfg *config.Config, logger *slog.Logger) (*daemon.Daemon, error) {
 	if cfg.Backup == nil {
-		return nil, nil, errors.New("the config has no backup: section")
+		return nil, errors.New("the config has no backup: section")
 	}
 	b := cfg.Backup
 	sched, err := daemon.ParseSchedule(b.Schedule, e.location)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if sched == nil && b.Schedule.Listen == "" {
-		return nil, nil, errors.New("nothing to do: set backup.schedule.interval or backup.schedule.listen")
+		return nil, errors.New("nothing to do: set backup.schedule.interval or backup.schedule.listen")
 	}
 	var notifier daemon.Notifier
 	if b.Notify.WebhookURL != "" {
@@ -167,7 +188,7 @@ func buildDaemon(e daemonEnv, cfg *config.Config, logger *slog.Logger) (*daemon.
 		)
 		wh, err := daemon.NewWebhook(b.Notify.WebhookURL, b.Notify.Format, daemon.NewWebhookClient(transport))
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		notifier = wh
 	} else {
@@ -175,20 +196,12 @@ func buildDaemon(e daemonEnv, cfg *config.Config, logger *slog.Logger) (*daemon.
 	}
 	deps, err := e.openDeps(cfg, logger)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	d := daemon.New(daemon.Options{
+	return daemon.New(daemon.Options{
 		Schedule: sched, Storage: deps.Storage, Taker: deps.Taker, Verifier: deps.Verifier,
 		Notifier: notifier, Instance: cfg.URL, Logger: logger,
-	})
-	if b.Schedule.Listen == "" {
-		return d, nil, nil
-	}
-	h, err := daemon.Handler(d, b.Server.ServiceToken)
-	if err != nil {
-		return nil, nil, err
-	}
-	return d, h, nil
+	}), nil
 }
 
 // wireDeps returns the openDeps that builds the storage with

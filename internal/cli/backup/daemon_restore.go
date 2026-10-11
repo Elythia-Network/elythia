@@ -60,14 +60,30 @@ func daemonID() string {
 	return fmt.Sprintf("%s-%d-%s", host, os.Getpid(), hex.EncodeToString(b[:]))
 }
 
-// openRestore builds the restore manager. d gives it the job slot; storage
-// and the backup: section are the ones the daemon already uses.
+// heldGrace is added to maintenance.drainTimeout for how long a restore
+// waits for the maintenance to be held (設計 §8-3)。
+const heldGrace = 2 * time.Minute
+
+// openRestore builds the restore with the bundled migrations of the image.
+func openRestore(cfg *config.Config, d *daemon.Daemon, storage backupkit.Storage, logger *slog.Logger) (*RestoreParts, error) {
+	return restoreWiring{coreDir: migrate.CoreDir, localDir: migrate.LocalDir, heldGrace: heldGrace}.open(cfg, d, storage, logger)
+}
+
+// restoreWiring are the parts of the restore that tests replace.
+type restoreWiring struct {
+	coreDir, localDir string
+	heldGrace         time.Duration
+}
+
+// open builds the restore manager. d gives it the job slot; storage and the
+// backup: section are the ones the daemon already uses.
 //
 // daemon の接続は、メンテナンス用の DB と、戻す先の新しい DB だけに張る。本体の
 // DB 名へは、再認証とモデレーションログの短い接続だけ (どちらも名前を入れ替える
 // 前後には張らない)。application_name は elythia/ で始めない。判定役が切る対象に
 // しないため (切られると照合が途中で落ちる)。
-func openRestore(cfg *config.Config, d *daemon.Daemon, storage backupkit.Storage, logger *slog.Logger) (*RestoreParts, error) {
+func (w restoreWiring) open(cfg *config.Config, d *daemon.Daemon, storage backupkit.Storage, logger *slog.Logger) (*RestoreParts, error) {
+	coreDir, localDir := w.coreDir, w.localDir
 	redislog.UseSilent()
 	clients, err := cache.NewRedisClients(cfg)
 	if err != nil {
@@ -86,15 +102,16 @@ func openRestore(cfg *config.Config, d *daemon.Daemon, storage backupkit.Storage
 		ID:           "backup-daemon/" + selfID,
 		DrainTimeout: drain,
 	}
-	r := newRestorer(withAppName(cfg, "elythia-backup/restore/"+selfID), migrate.CoreDir, "", logWriter{logger}, time.Now)
+	r := newRestorer(withAppName(cfg, "elythia-backup/restore/"+selfID), coreDir, "", logWriter{logger}, time.Now)
+	r.LocalMigrationsDir = localDir
 	if err := withBackupTools(r, cfg.Backup, storage); err != nil {
 		_ = clients.Close()
 		return nil, err
 	}
+	// 本体と同じく、設定の id が読めなければ既定の aidx で作る (router.go と同じ)。
 	idGen, err := id.NewGenerator(cfg.ID)
 	if err != nil {
-		_ = clients.Close()
-		return nil, err
+		idGen, _ = id.NewGenerator("aidx")
 	}
 	manager := restoreop.New(restoreop.Options{
 		Store: restoreop.NewStore(clients.Default, prefix),
@@ -108,7 +125,7 @@ func openRestore(cfg *config.Config, d *daemon.Daemon, storage backupkit.Storage
 			return err
 		},
 		Check: func(ctx context.Context) error {
-			report, err := checkRestored(ctx, withAppName(cfg, "elythia-backup/check/"+selfID), migrate.CoreDir, migrate.LocalDir)
+			report, err := checkRestored(ctx, withAppName(cfg, "elythia-backup/check/"+selfID), coreDir, localDir)
 			if err != nil {
 				return err
 			}
@@ -124,7 +141,7 @@ func openRestore(cfg *config.Config, d *daemon.Daemon, storage backupkit.Storage
 		Replicas:      cfg.DBReplications,
 		Version:       config.MkGoVersion,
 		Commit:        config.MkGoCommit,
-		HeldTimeout:   drain + 2*time.Minute,
+		HeldTimeout:   drain + w.heldGrace,
 		Logger:        logger,
 	})
 	verifier := &strongauth.DBVerifier{

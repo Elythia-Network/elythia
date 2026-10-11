@@ -33,13 +33,15 @@ const maxRequestBody = 4 << 10
 //	POST /take    start a take job (take, verify when configured, prune)
 //	POST /verify  start a verify job; body {"id": "<generation id>"}
 //	GET  /status  the Status snapshot
+//	POST /restore/*  the restore from the admin page (restore_api.go; 503
+//	                 when restore is nil)
 //
 // Every request must carry "Authorization: Bearer <token>". token must not
 // be empty.
 //
 // 本体の管理画面が「今すぐ取る」「今すぐ確かめる」「状態」を頼む口。バックアップには
 // 利用者の秘密鍵や token が入るので、token を知らない相手には状態も見せない。
-func Handler(d *Daemon, token string) (http.Handler, error) {
+func Handler(d *Daemon, token string, restore *Restore) (http.Handler, error) {
 	if token == "" {
 		return nil, ErrNoServiceToken
 	}
@@ -73,6 +75,7 @@ func Handler(d *Daemon, token string) (http.Handler, error) {
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, d.Status())
 	})
+	mountRestore(mux, restore)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 		// 長さの違いも漏らさないよう、hash にそろえてから定数時間で比べる。
