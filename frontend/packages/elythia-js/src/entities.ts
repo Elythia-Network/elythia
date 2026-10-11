@@ -943,7 +943,7 @@ export type BackupVerifySummary = {
 	verifiedAt: string;
 	stages: { stage: BackupVerifyStage; ok: boolean; skipped?: boolean; error?: string }[];
 	mismatches: { table: string; expected: number; actual: number }[];
-	/** Set when verify.json could not be read, or when it passed but belongs to another generation or an earlier dump. */
+	/** Set when verify.json could not be read, or when it passed but does not count: meta.json is missing or unreadable, or it belongs to another generation or an earlier dump. */
 	error?: string;
 };
 
