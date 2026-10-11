@@ -80,6 +80,10 @@ type Judge struct {
 	opID       string
 	firstSeen  time.Time
 	terminated []Blocker
+	// lettingGo holds the IDs of the processes seen draining or drained
+	// during this opId. Their sessions may be terminated even after their
+	// report is gone (the process died while letting go).
+	lettingGo map[string]bool
 }
 
 // Outcome is what one Step did.
@@ -141,6 +145,39 @@ func (j *Judge) reset(opID string) {
 	j.opID = opID
 	j.firstSeen = j.now()
 	j.terminated = nil
+	j.lettingGo = map[string]bool{}
+}
+
+// remember records which processes said they let go, and forgets those that
+// serve again.
+func (j *Judge) remember(reports []ProcReport) {
+	if j.lettingGo == nil {
+		j.lettingGo = map[string]bool{}
+	}
+	for _, r := range reports {
+		switch r.State {
+		case ProcDraining, ProcDrained:
+			j.lettingGo[r.ID] = true
+		case ProcStarting, ProcRunning, ProcResuming:
+			delete(j.lettingGo, r.ID)
+		}
+	}
+}
+
+// withRemembered returns reports plus a drained entry for every process
+// remembered as letting go whose report is gone.
+func (j *Judge) withRemembered(reports []ProcReport) []ProcReport {
+	live := make(map[string]bool, len(reports))
+	for _, r := range reports {
+		live[r.ID] = true
+	}
+	out := append([]ProcReport(nil), reports...)
+	for id := range j.lettingGo {
+		if !live[id] {
+			out = append(out, ProcReport{ID: id, State: ProcDrained})
+		}
+	}
+	return out
 }
 
 // waitingFor lists the live reports that are not drained.
@@ -164,6 +201,7 @@ func (j *Judge) entering(ctx context.Context, st *State) (Outcome, error) {
 		return Waiting, err
 	}
 	waiting := waitingFor(reports)
+	j.remember(reports)
 	sessions, err := j.Counter.Sessions(ctx)
 	if err != nil {
 		_ = j.Store.progress(ctx, st.OpID, now, waiting, st.Blockers, j.terminated, err.Error())
@@ -177,7 +215,10 @@ func (j *Judge) entering(ctx context.Context, st *State) (Outcome, error) {
 		return MovedToHeld, nil
 	}
 	if len(sessions) > 0 && now.Sub(j.firstSeen) >= j.DrainTimeout {
-		sessions = j.terminateElythia(ctx, sessions, reports)
+		// 手放す途中で落ちたプロセスは報告が消える。一度 draining / drained と
+		// 見たプロセスの接続は、報告が消えた後も切ってよいとする。覚えずにいると、
+		// その接続を二度と自動で切らず、held に届かない (#3463 のレビュー2周目 3)。
+		sessions = j.terminateElythia(ctx, sessions, j.withRemembered(reports))
 	}
 	return Waiting, j.Store.progress(ctx, st.OpID, now, waiting, sessions, j.terminated, "")
 }

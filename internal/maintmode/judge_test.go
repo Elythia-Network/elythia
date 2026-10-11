@@ -609,3 +609,61 @@ func TestPGCounter_RefusesTheApplicationDatabase(t *testing.T) {
 	assert.Equal(t, PhaseEntering, st.Phase)
 	assert.Contains(t, st.JudgeError, "is the application database")
 }
+
+// TestJudge_TerminatesForAProcessThatDiedWhileLettingGo checks #3463 review
+// round 2 item 3: a process seen draining that dies loses its report; its
+// sessions are still terminated after the timeout. A process remembered so
+// but serving again (same ID running) is forgotten.
+func TestJudge_TerminatesForAProcessThatDiedWhileLettingGo(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+	c := newClock()
+	f := &fakeCounter{}
+	f.set(sessionOf(50, "elythia/server/died-1"), sessionOf(51, "elythia/server/back-1"))
+	require.NoError(t, s.Report(ctx, ProcReport{ID: "died-1", State: ProcDraining}))
+	require.NoError(t, s.Report(ctx, ProcReport{ID: "back-1", State: ProcDrained}))
+	j := c.judge(s, f, "j")
+	require.NoError(t, s.Enter(ctx, State{OpID: "op"}))
+	_, err := j.Step(ctx)
+	require.NoError(t, err)
+	// died-1 は落ちて報告が消え、back-1 は (同じ ID で) また running と報告した。
+	require.NoError(t, s.RemoveReport(ctx, "died-1"))
+	require.NoError(t, s.Report(ctx, ProcReport{ID: "back-1", State: ProcRunning}))
+	_, err = j.Step(ctx)
+	require.NoError(t, err)
+	require.NoError(t, s.RemoveReport(ctx, "back-1"))
+	c.add(time.Minute)
+	_, err = j.Step(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, []int{50}, f.terminated, "落ちたプロセスの接続だけを切る")
+
+	// opId が変わったら、覚えた分は捨てる。
+	require.NoError(t, s.Clear(ctx, ""))
+	require.NoError(t, s.Enter(ctx, State{OpID: "op2"}))
+	f.set(sessionOf(52, "elythia/server/died-1"))
+	_, _ = j.Step(ctx)
+	c.add(time.Minute)
+	_, err = j.Step(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, []int{50}, f.terminated, "前の opId で覚えたプロセスの接続を切った")
+}
+
+// TestJudge_RememberedLiveProcessIsNotCountedTwice checks that a process
+// both remembered and still reporting counts once: counted twice, a
+// truncated application_name would match two entries and find no owner.
+func TestJudge_RememberedLiveProcessIsNotCountedTwice(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+	c := newClock()
+	id := strings.Repeat("h", 60) + "-1-0a1b2c3d"
+	f := &fakeCounter{}
+	f.set(sessionOf(60, ("elythia/server/" + id)[:pgNameMax]))
+	require.NoError(t, s.Report(ctx, ProcReport{ID: id, State: ProcDrained}))
+	j := c.judge(s, f, "j")
+	require.NoError(t, s.Enter(ctx, State{OpID: "op"}))
+	_, _ = j.Step(ctx)
+	c.add(time.Minute)
+	_, err := j.Step(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, []int{60}, f.terminated)
+}

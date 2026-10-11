@@ -751,11 +751,22 @@ WHERE datname = '<db.db>' AND pid <> pg_backend_pid() AND usesysid IS NOT NULL;
 - **`maintenance.drainTimeout` (既定 30 秒) を過ぎても接続が残っていたら、手放すと報告している
   プロセスの接続だけを切る。** 切るのは、`application_name` の `<host>-<pid>-<乱数>` (起動ごとに乱数を付けたプロセスの ID) が報告と一致し、その
   報告が `drained` (または上限を過ぎても `draining`) で、判定役と同じ DB のユーザーの接続。見捨てた
-  ジョブや、止める途中で上限に達したプロセスが掴んでいる接続にあたる。切った接続は `status` に出る
+  ジョブや、止める途中で上限に達したプロセスが掴んでいる接続にあたる。切った接続は `status` に出る。
+  手放す途中で落ちて報告が消えたプロセスも、判定役がそのメンテナンスの間に一度 `draining` /
+  `drained` と見ていれば、同じように切る (判定役が入れ替わると、この記憶は引き継がれない)
 - **それ以外の接続は切らない。** 運営者の `psql` のほか、報告の無いプロセスや `running` のプロセスの
   Elythia の接続も切らない (Redis に繋がらずメンテナンスに気付いていないプロセスは、切ってもすぐに
   繋ぎ直す)。held にせず、残っている接続を `status` に出して待ち続ける。その接続を閉じるかプロセスを
   止めれば、次の判定で held になる
+- 判定役が切らない接続を手で切るときは、`status` に出た `application_name` をそのまま使う。
+  落ちたノードの接続が残っている場合などにあたる。動いているプロセスの接続を切ると、すぐに
+  繋ぎ直されるので、先にそのプロセスを止める
+
+  ```sql
+  -- メンテナンス用の DB から。'<db.db>' と application_name は status の出力から写す
+  SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+  WHERE datname = '<db.db>' AND application_name = 'elythia/server/<host>-<pid>-<乱数>';
+  ```
 - `enter -wait` の上限を過ぎたら、状態は `entering` のまま 1 で終わる。判定は本体の各プロセスが
   続けるので、後で `status` を見るか、`wait` で待ち直す
 - 判定役が 1 つもいない (本体が動いておらず、CLI も待っていない) と、`entering` のまま進まない。
