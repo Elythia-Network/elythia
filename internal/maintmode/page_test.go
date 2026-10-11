@@ -18,16 +18,22 @@ import (
 const pageScriptHarness = `
 var out = [];
 global.document = { getElementById: function () { return { hidden: false, textContent: '' }; } };
-global.location = { reload: function () { out.push('reload'); } };
+global.location = { href: '/x', reload: function () { out.push('reload'); } };
 global.setTimeout = function () {};
-global.fetch = function () {
+global.fetch = function (url, opts) {
+	if (opts && opts.method === 'HEAD') {
+		if (HEADSTATUS < 0) return Promise.reject(new Error('offline'));
+		return Promise.resolve({ ok: HEADSTATUS >= 200 && HEADSTATUS < 300, status: HEADSTATUS });
+	}
 	return Promise.resolve({
 		ok: STATUS >= 200 && STATUS < 300,
 		json: function () { return Promise.resolve().then(function () { return JSON.parse(BODY); }); }
 	});
 };
 SCRIPT
-setImmediate(function () { setImmediate(function () { console.log(out.join(',') || 'none'); }); });
+setTimeout(function () {}, 0);
+var waits = 0;
+(function wait() { if (++waits < 20) { setImmediate(wait); return; } console.log(out.join(',') || 'none'); })();
 `
 
 // TestPage_PollReloadsOnlyWhenTheServerSaysItIsOver fixes #3463 review L-6:
@@ -43,16 +49,20 @@ func TestPage_PollReloadsOnlyWhenTheServerSaysItIsOver(t *testing.T) {
 	for name, c := range map[string]struct {
 		status int
 		body   string
+		head   int // status of the HEAD to the page; -1 = network error
 		want   string
 	}{
-		"over":             {200, `{"maintenance":false}`, "reload"},
-		"still on":         {200, `{"maintenance":true,"phase":"held"}`, "none"},
-		"not json":         {200, `<html>proxy</html>`, "none"},
-		"json but not obj": {200, `"ok"`, "none"},
-		"error status":     {502, `{"maintenance":false}`, "none"},
+		"over":                       {200, `{"maintenance":false}`, 0, "reload"},
+		"still on":                   {200, `{"maintenance":true,"phase":"held"}`, 0, "none"},
+		"not json, page still 503":   {200, `<html>proxy</html>`, 503, "none"},
+		"not json, page served":      {200, `<html>spa</html>`, 200, "reload"},
+		"not json, page unreachable": {200, `<html>proxy</html>`, -1, "none"},
+		"json but not obj":           {200, `"ok"`, 0, "none"},
+		"error status":               {502, `{"maintenance":false}`, 0, "none"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			src := strings.NewReplacer(
+				"HEADSTATUS", strconv.Itoa(c.head),
 				"STATUS", strconv.Itoa(c.status),
 				"BODY", jsString(c.body),
 				"SCRIPT", m[1],

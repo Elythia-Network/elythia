@@ -69,9 +69,16 @@ dd{margin:0 0 8px;overflow-wrap:anywhere;white-space:pre-wrap}
 		fetch('/maintenance/status', { cache: 'no-store', credentials: 'same-origin' })
 			.then(function (res) {
 				if (!res.ok) return null;
-				// 本文が JSON でない (前段の proxy のページなど) ときは、終わったとは
-				// 読まずに次の周を待つ。終わったと読むと、再読み込みを 5 秒ごとに繰り返す。
-				return res.json().catch(function () { return null; });
+				// 本文が JSON でないときは、このページ自体へ HEAD を送って確かめる。
+				// 503 ならまだメンテナンス中 (前段の proxy のページなど) なので次の周を
+				// 待つ。それ以外なら、この機能の無い版に戻した (SPA が返った) とみて
+				// 再読み込みする。どちらかに決め打ちすると、再読み込みを 5 秒ごとに
+				// 繰り返すか、二度と再読み込みしないかになる。
+				return res.json().catch(function () {
+					return fetch(location.href, { method: 'HEAD', cache: 'no-store', credentials: 'same-origin' })
+						.then(function (head) { return head.status === 503 ? null : { maintenance: false }; })
+						.catch(function () { return null; });
+				});
 			})
 			.then(function (s) {
 				if (!s) return;
