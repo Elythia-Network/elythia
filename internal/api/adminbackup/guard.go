@@ -102,51 +102,70 @@ func Guard(v *strongauth.Verifier) echo.MiddlewareFunc {
 
 // refusal writes the response for a strongauth refusal.
 func refusal(c echo.Context, err error) error {
+	res := Refusal(err, middleware.IsSuspendedRequest(c))
+	if res.RetryAfter != "" {
+		c.Response().Header().Set("Retry-After", res.RetryAfter)
+	}
+	return c.JSON(res.Status, res.Body)
+}
+
+// RefusalResponse is the HTTP response for a strongauth refusal.
+type RefusalResponse struct {
+	Status int
+	Body   any
+	// RetryAfter is the Retry-After header value, or "".
+	RetryAfter string
+}
+
+// Refusal returns the response for err from strongauth. suspended tells a
+// suspended account from a missing credential.
+//
+// バックアップ用のサービス (#3463 (6c)) も同じ形で返す。本体は daemon の応答を
+// そのまま利用者へ渡すので、管理画面から見て本体と daemon の区別が付かない。
+func Refusal(err error, suspended bool) RefusalResponse {
 	var se *strongauth.Error
 	if !errors.As(err, &se) {
 		slog.Error("admin/backup: unexpected auth error", "err", err)
-		return apierr.JSONInternalError(c)
+		return RefusalResponse{Status: http.StatusInternalServerError, Body: apierr.InternalError()}
 	}
 	switch se.Reason {
 	case strongauth.ReasonNoCredential:
-		if middleware.IsSuspendedRequest(c) {
-			return c.JSON(http.StatusForbidden, apierr.YourAccountSuspended())
+		if suspended {
+			return RefusalResponse{Status: http.StatusForbidden, Body: apierr.YourAccountSuspended()}
 		}
-		return c.JSON(http.StatusUnauthorized, apierr.CredentialRequired())
+		return RefusalResponse{Status: http.StatusUnauthorized, Body: apierr.CredentialRequired()}
 	case strongauth.ReasonNotAdmin:
-		return c.JSON(http.StatusForbidden, apierr.ErrorWithKind("ROLE_PERMISSION_DENIED",
-			"You are not an administrator.", idNotAdministrator, apierr.KindPermission))
+		return RefusalResponse{Status: http.StatusForbidden, Body: apierr.ErrorWithKind("ROLE_PERMISSION_DENIED",
+			"You are not an administrator.", idNotAdministrator, apierr.KindPermission)}
 	case strongauth.ReasonNotNativeToken:
-		return c.JSON(http.StatusForbidden, apierr.ErrorWithKind("ACCESS_DENIED",
-			"Access denied.", apierr.UUIDAccessDeniedSecure, apierr.KindClient))
+		return RefusalResponse{Status: http.StatusForbidden, Body: apierr.ErrorWithKind("ACCESS_DENIED",
+			"Access denied.", apierr.UUIDAccessDeniedSecure, apierr.KindClient)}
 	case strongauth.ReasonTwoFactorRequired:
-		return c.JSON(http.StatusForbidden, apierr.ErrorWithKind("TWO_FACTOR_REQUIRED",
-			"Register two-factor authentication or a passkey to use this.", idTwoFactorRequired, apierr.KindPermission))
+		return RefusalResponse{Status: http.StatusForbidden, Body: apierr.ErrorWithKind("TWO_FACTOR_REQUIRED",
+			"Register two-factor authentication or a passkey to use this.", idTwoFactorRequired, apierr.KindPermission)}
 	case strongauth.ReasonPasswordNotSet:
-		return c.JSON(http.StatusForbidden, apierr.ErrorWithKind("PASSWORD_NOT_SET",
-			"Set a password to use this.", idPasswordNotSet, apierr.KindPermission))
+		return RefusalResponse{Status: http.StatusForbidden, Body: apierr.ErrorWithKind("PASSWORD_NOT_SET",
+			"Set a password to use this.", idPasswordNotSet, apierr.KindPermission)}
 	case strongauth.ReasonReauthRequired:
-		return c.JSON(http.StatusForbidden, apierr.ErrorWithKind("REAUTHENTICATION_REQUIRED",
-			"Enter your password and a two-factor code or use a passkey.", idReauthRequired, apierr.KindPermission))
+		return RefusalResponse{Status: http.StatusForbidden, Body: apierr.ErrorWithKind("REAUTHENTICATION_REQUIRED",
+			"Enter your password and a two-factor code or use a passkey.", idReauthRequired, apierr.KindPermission)}
 	case strongauth.ReasonFailed:
 		// AUTHENTICATION_FAILED (401) は token が無効という意味で、frontend が
 		// サインアウトの扱いをするので使わない。
-		return c.JSON(http.StatusForbidden, apierr.ErrorWithKind("REAUTHENTICATION_FAILED",
-			"The password or the two-factor authentication is incorrect.", idReauthFailed, apierr.KindPermission))
+		return RefusalResponse{Status: http.StatusForbidden, Body: apierr.ErrorWithKind("REAUTHENTICATION_FAILED",
+			"The password or the two-factor authentication is incorrect.", idReauthFailed, apierr.KindPermission)}
 	case strongauth.ReasonCodeReused:
-		return c.JSON(http.StatusForbidden, apierr.ErrorWithKind("TWO_FACTOR_CODE_ALREADY_USED",
-			"This two-factor code was already used. Wait for the next code or use a passkey.", idCodeReused, apierr.KindPermission))
+		return RefusalResponse{Status: http.StatusForbidden, Body: apierr.ErrorWithKind("TWO_FACTOR_CODE_ALREADY_USED",
+			"This two-factor code was already used. Wait for the next code or use a passkey.", idCodeReused, apierr.KindPermission)}
 	case strongauth.ReasonRateLimited:
 		retry := int64((se.RetryAfter + time.Second - 1) / time.Second)
-		c.Response().Header().Set("Retry-After", strconv.FormatInt(retry, 10))
-		return c.JSON(http.StatusTooManyRequests, apierr.RateLimitExceeded())
+		return RefusalResponse{Status: http.StatusTooManyRequests, Body: apierr.RateLimitExceeded(), RetryAfter: strconv.FormatInt(retry, 10)}
 	case strongauth.ReasonPasskeyUnavailable:
-		return c.JSON(http.StatusBadRequest, apierr.Error("PASSKEY_UNAVAILABLE",
-			"No passkey is registered, or passkeys are not available on this server.", idPasskeyUnavailable))
+		return RefusalResponse{Status: http.StatusBadRequest, Body: apierr.Error("PASSKEY_UNAVAILABLE",
+			"No passkey is registered, or passkeys are not available on this server.", idPasskeyUnavailable)}
 	default:
 		slog.Error("admin/backup: authentication unavailable", "err", err)
-		c.Response().Header().Set("Retry-After", "10")
-		return c.JSON(http.StatusServiceUnavailable, apierr.ErrorWithKind("AUTHENTICATION_UNAVAILABLE",
-			"Authentication is temporarily unavailable. Please try again later.", idAuthUnavailable, apierr.KindServer))
+		return RefusalResponse{Status: http.StatusServiceUnavailable, Body: apierr.ErrorWithKind("AUTHENTICATION_UNAVAILABLE",
+			"Authentication is temporarily unavailable. Please try again later.", idAuthUnavailable, apierr.KindServer), RetryAfter: "10"}
 	}
 }
