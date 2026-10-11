@@ -399,6 +399,15 @@ func (d *Daemon) runJob(ctx context.Context, job Job) JobResult {
 				return res
 			}
 		}
+		if ctx.Err() != nil {
+			// 判定の後に止められた。切れた ctx で整理に進むと、保存先の一覧や削除が
+			// 失敗して「整理の失敗」と知らせてしまう。整理は次の回に任せる。
+			res.Stage = "prune"
+			res.Error = "interrupted: " + ctx.Err().Error()
+			res.FinishedAt = d.clock.Now()
+			d.log.Warn("backup: stopped before pruning; the next run prunes", "generation", res.GenerationID)
+			return res
+		}
 		deleted, err := d.prune(ctx)
 		res.Deleted = deleted
 		if err != nil {
