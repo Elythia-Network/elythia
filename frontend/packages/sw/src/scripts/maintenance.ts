@@ -82,9 +82,14 @@ export async function cachedMaintenancePage(store: MaintenanceStore): Promise<Re
 export async function maintenanceAwareNavigation(
 	fetched: Response | undefined,
 	store: MaintenanceStore,
+	method = 'GET',
 ): Promise<Response | undefined> {
 	if (fetched && isMaintenanceResponse(fetched)) {
-		await rememberMaintenance(fetched, store).catch(() => undefined);
+		// 覚えるのは GET の画面だけ。メンテナンスの画面は終わったかを HEAD で
+		// 確かめることがあり、その本文の無い応答で画面のキャッシュを上書きしない。
+		if (method === 'GET') {
+			await rememberMaintenance(fetched, store).catch(() => undefined);
+		}
 		return fetched;
 	}
 	if (fetched && ((fetched.status && fetched.status < 500) || fetched.type === 'opaqueredirect')) {

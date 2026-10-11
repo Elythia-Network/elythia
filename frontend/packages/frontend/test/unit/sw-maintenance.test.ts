@@ -48,6 +48,18 @@ describe('maintenanceAwareNavigation', () => {
 		expect(cache.size).toBe(1);
 	});
 
+	it('does not overwrite the cached page with the answer to a HEAD', async () => {
+		const { store, cache, state } = memoryStore();
+		await maintenanceAwareNavigation(maintenancePage(), store);
+		const markedAt = state.mark;
+		state.now += 60_000;
+		const head = new Response(null, { status: 503, headers: { [MAINTENANCE_HEADER]: '1' } });
+		const answer = await maintenanceAwareNavigation(head, store, 'HEAD');
+		expect(answer).toBe(head);
+		expect(state.mark).toBe(markedAt);
+		expect(await cache.get('/__elythia_maintenance__')?.clone().text()).toBe('<p>maintenance</p>');
+	});
+
 	it('shows the cached maintenance page when the server cannot be reached', async () => {
 		const { store, state } = memoryStore();
 		await maintenanceAwareNavigation(maintenancePage(), store);

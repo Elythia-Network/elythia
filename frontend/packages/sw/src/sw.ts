@@ -45,7 +45,7 @@ async function respondToNavigation(request: Request): Promise<Response> {
 
 	// Elythia: 目印の付いた 503 (メンテナンス中) はオフラインの画面に差し替えない。
 	// 繋がらないときも、直前にメンテナンスを見ていればその画面を出す (#3463)。
-	const answer = await maintenanceAwareNavigation(response, maintenanceStore);
+	const answer = await maintenanceAwareNavigation(response, maintenanceStore, request.method);
 	if (answer) return answer;
 
 	// Only show offline page when network request actually fails
