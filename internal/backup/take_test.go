@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"io/fs"
 	"os"
@@ -408,10 +409,15 @@ func TestTake_SameSecondDoesNotMix(t *testing.T) {
 			wg.Wait()
 			ok := 0
 			for _, err := range errs {
-				if err == nil {
+				switch {
+				case err == nil:
 					ok++
-				} else {
-					assert.ErrorIs(t, err, ErrExists)
+				case errors.Is(err, ErrExists):
+				default:
+					// 門を通った後も 2 つの List は同時とは限らない。片方の List が、相手の
+					// take.lock を置いた後に走ると、取り始めの確かめで止まる。どちらで止まっても
+					// 相手のファイルには触れない。
+					assert.ErrorContains(t, err, "generation "+NewID(at)+" already exists")
 				}
 			}
 			require.Equal(t, 1, ok, "%v", errs)
