@@ -249,8 +249,8 @@ var linkFile = func(root *os.Root, oldname, newname string) error { return root.
 //
 // link は置き先が既にあれば失敗するので、同じ key へ同時に書いても片方だけが通る。
 // NFS のクライアントが link を送り直すと、1 回目で置けていても EEXIST が返る。
-// それを自分のものと見分けるのは呼ぶ側 (claimKey) の読み直し。hard link を作れない
-// ファイルシステム (一部の SMB など) では、O_EXCL で直接作る形に落ちる。
+// それを自分のものと見分けるのは呼ぶ側 (claimKey) の読み直し。link が EEXIST 以外で
+// 失敗したとき (hard link を作れない一部の SMB など) は、O_EXCL で直接作る形に落ちる。
 func (d *DirStorage) PutNew(ctx context.Context, key string, body []byte) (err error) {
 	rel, err := d.rel(key)
 	if err != nil {
@@ -284,10 +284,11 @@ func (d *DirStorage) PutNew(ctx context.Context, key string, body []byte) (err e
 		return nil
 	case errors.Is(err, fs.ErrExist):
 		return fmt.Errorf("backup: put %s: %w", key, ErrExists)
-	case errors.Is(err, syscall.EPERM) || errors.Is(err, errors.ErrUnsupported):
-		return d.createExclusive(root, key, rel, body)
 	}
-	return fmt.Errorf("backup: link %s: %w", key, err)
+	// hard link を作れない理由 (EPERM / ENOTSUP / EXDEV / EACCES など) は
+	// ファイルシステムごとに違う。O_EXCL も「無ければ作る」なので、どの失敗でも
+	// そちらで置く。自分の再送で「既にある」になる場合は、claimKey の読み直しが救う。
+	return d.createExclusive(root, key, rel, body)
 }
 
 // createExclusive creates rel with O_EXCL and writes body into it. It is the

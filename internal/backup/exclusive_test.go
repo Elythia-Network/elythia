@@ -208,21 +208,51 @@ func TestDirStorage_PutNewWithoutHardLinks(t *testing.T) {
 			assertNoTempFiles(t, st.Root())
 		})
 	}
-	t.Run("other link errors fail", func(t *testing.T) {
-		orig := linkFile
-		t.Cleanup(func() { linkFile = orig })
-		linkFile = func(_ *os.Root, oldname, newname string) error {
-			return &os.LinkError{Op: "link", Old: oldname, New: newname, Err: syscall.EIO}
+	t.Run("every other link error falls back", func(t *testing.T) {
+		for _, errno := range []error{syscall.EIO, syscall.EXDEV, syscall.EACCES} {
+			orig := linkFile
+			linkFile = func(_ *os.Root, oldname, newname string) error {
+				return &os.LinkError{Op: "link", Old: oldname, New: newname, Err: errno}
+			}
+			st, err := NewDirStorage(markedDir(t))
+			require.NoError(t, err)
+			putNewContract(t, st)
+			assertNoTempFiles(t, st.Root())
+			linkFile = orig
 		}
-		st, err := NewDirStorage(markedDir(t))
-		require.NoError(t, err)
-		err = st.PutNew(context.Background(), Key("20261010T040000Z", LockFile), []byte("x"))
-		require.ErrorIs(t, err, syscall.EIO)
-		require.NotErrorIs(t, err, ErrExists)
-		_, serr := st.Stat(context.Background(), Key("20261010T040000Z", LockFile))
-		require.ErrorIs(t, serr, ErrNotFound, "an EIO does not fall back to creating the file")
-		assertNoTempFiles(t, st.Root())
 	})
+}
+
+// TestDirStorage_PutNewFallbackWriteFailureLeavesNothing: when the O_EXCL
+// fallback created the key but could not write it, the half-made key is
+// removed instead of being left as somebody's claim.
+func TestDirStorage_PutNewFallbackWriteFailureLeavesNothing(t *testing.T) {
+	origLink, origChmod := linkFile, fchmod
+	t.Cleanup(func() { linkFile, fchmod = origLink, origChmod })
+	linkFile = func(_ *os.Root, oldname, newname string) error {
+		return &os.LinkError{Op: "link", Old: oldname, New: newname, Err: syscall.EPERM}
+	}
+	files := 0
+	fchmod = func(f *os.File, mode fs.FileMode) error {
+		// ディレクトリの chmod は数えない。ファイルの 1 回目は一時ファイル、2 回目が
+		// O_EXCL で作ったファイル。
+		if mode == filePerm {
+			files++
+			if files == 2 {
+				return syscall.EIO
+			}
+		}
+		return origChmod(f, mode)
+	}
+	st, err := NewDirStorage(markedDir(t))
+	require.NoError(t, err)
+	key := Key("20261010T040000Z", LockFile)
+	err = st.PutNew(context.Background(), key, []byte("x"))
+	require.ErrorIs(t, err, syscall.EIO)
+	require.Equal(t, 2, files, "the failure came from writing the O_EXCL file")
+	_, err = st.Stat(context.Background(), key)
+	require.ErrorIs(t, err, ErrNotFound)
+	assertNoTempFiles(t, st.Root())
 }
 
 func assertNoTempFiles(t *testing.T, root string) {
