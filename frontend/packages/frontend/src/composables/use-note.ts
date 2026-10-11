@@ -5,7 +5,7 @@
 
 import { ref } from 'vue';
 import type { Ref } from 'vue';
-import * as mfm from 'mfm-js';
+import * as mfm from '@/utility/mfm.js';
 import * as Misskey from 'misskey-js';
 import { isLink } from '@@/js/is-link.js';
 import { shouldCollapsed } from '@@/js/collapsed.js';

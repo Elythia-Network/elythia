@@ -52,7 +52,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 <script lang="ts" setup>
 import { computed, defineAsyncComponent, provide } from 'vue';
-import * as mfm from 'mfm-js';
+import * as mfm from '@/utility/mfm.js';
 import * as Misskey from 'misskey-js';
 import { url } from '@@/js/config.js';
 import { isLink } from '@@/js/is-link.js';
