@@ -851,3 +851,34 @@ func TestDirStorage_ListStart(t *testing.T) {
 		assert.Equal(t, want, st.listStart(prefix), prefix)
 	}
 }
+
+// TestDirStorage_RechecksTheMarker: when the device is unmounted after the
+// storage was opened, the marker disappears with it. Writing and listing must
+// stop instead of filling the host's empty directory.
+func TestDirStorage_RechecksTheMarker(t *testing.T) {
+	root := markedDir(t)
+	st, err := NewDirStorage(root)
+	require.NoError(t, err)
+	ctx := context.Background()
+	require.NoError(t, st.Put(ctx, "generations/a/x", strings.NewReader("x")))
+
+	require.NoError(t, os.Remove(filepath.Join(root, DirMarkerFile)))
+	err = st.Put(ctx, "generations/b/meta.json", strings.NewReader("x"))
+	require.ErrorIs(t, err, ErrNoDirMarker)
+	_, err = os.Stat(filepath.Join(root, "generations", "b"))
+	assert.True(t, os.IsNotExist(err), "no directory is created before the check")
+	_, err = st.List(ctx, "")
+	require.ErrorIs(t, err, ErrNoDirMarker)
+
+	// 目印の名前のディレクトリは目印ではない。
+	require.NoError(t, os.Mkdir(filepath.Join(root, DirMarkerFile), 0o700))
+	require.ErrorIs(t, st.Put(ctx, "generations/b/meta.json", strings.NewReader("x")), ErrNoDirMarker)
+
+	// 目印が戻れば、また書ける。
+	require.NoError(t, os.Remove(filepath.Join(root, DirMarkerFile)))
+	require.NoError(t, CreateDirMarker(root))
+	require.NoError(t, st.Put(ctx, "generations/b/meta.json", strings.NewReader("x")))
+	objs, err := st.List(ctx, "")
+	require.NoError(t, err)
+	assert.Len(t, objs, 2)
+}
