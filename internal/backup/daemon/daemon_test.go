@@ -765,6 +765,36 @@ func TestDaemonVerifyWaitsForTheRecovery(t *testing.T) {
 	})
 }
 
+// TestDaemonTakeWaitsForTheRecovery checks that a scheduled take does not
+// start while the recovery goes on, even with the slot given back, and
+// starts when it ends.
+func TestDaemonTakeWaitsForTheRecovery(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := mustSchedule(t, config.BackupScheduleOptions{Interval: "1h", Keep: 5}, time.UTC)
+		r := newRig(t, s, func(r *rig) {
+			r.st.addGeneration(epoch.Add(-30*time.Minute), true, "")
+		})
+		release, err := r.d.Reserve(JobRestore)
+		require.NoError(t, err)
+		r.d.SetRecovering(true)
+		r.start(t)
+		// 枠を持つ間に取得の時刻が来て溜まり、回復の途中で枠を返す。
+		time.Sleep(31 * time.Minute)
+		synctest.Wait()
+		release()
+		synctest.Wait()
+		assert.Empty(t, r.taker.callTimes(), "the take that came due waits for the recovery")
+		// 枠を返した後に時刻が来る取得も待つ。
+		time.Sleep(time.Hour)
+		synctest.Wait()
+		assert.Empty(t, r.taker.callTimes())
+		r.d.SetRecovering(false)
+		synctest.Wait()
+		assert.Len(t, r.taker.callTimes(), 1, "it runs once the recovery ends")
+		r.stop()
+	})
+}
+
 // TestDaemonReserveThenScheduledTake checks that a scheduled take that came
 // due while the slot was reserved runs first when it comes back, instead of
 // the verification Run wanted at start (the take verifies its own).
