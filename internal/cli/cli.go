@@ -14,6 +14,7 @@ import (
 	"github.com/elythia-network/elythia/internal/cli/backfill"
 	clibackup "github.com/elythia-network/elythia/internal/cli/backup"
 	"github.com/elythia-network/elythia/internal/cli/diag"
+	"github.com/elythia-network/elythia/internal/cli/maintenance"
 	"github.com/elythia-network/elythia/internal/cli/migrate"
 	"github.com/elythia-network/elythia/internal/cli/serve"
 )
@@ -49,6 +50,12 @@ func Commands() []Command {
 			{Name: "verify", Summary: "check that a backup can be restored (writes verify.json)", Run: clibackup.Verify},
 			{Name: "restore", Summary: "restore a backup into this server's database (-mode swap or empty)", Run: clibackup.Restore},
 			{Name: "daemon", Summary: "take, verify and prune backups on a schedule and serve the control API", Run: clibackup.Daemon},
+		}},
+		{Name: "maintenance", Summary: "enter or leave maintenance mode (every process lets go of the database)", Sub: []Command{
+			{Name: "enter", Summary: "start a maintenance and wait until every process has let go of the database", Run: maintenance.Enter},
+			{Name: "exit", Summary: "end the maintenance and wait until every process serves again", Run: maintenance.Exit},
+			{Name: "status", Summary: "print the maintenance state, the sessions on the database and the process reports", Run: maintenance.Status},
+			{Name: "wait", Summary: "judge the active maintenance until it is held (or over, when resuming)", Run: maintenance.Wait},
 		}},
 		{Name: "doctor", Summary: "check configuration, dependencies and federation, then exit", Run: diag.Doctor},
 		{Name: "fsck", Summary: "check denormalized counters (read-only unless -fix)", Run: diag.Fsck},

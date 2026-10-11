@@ -4,6 +4,7 @@
 package migrate
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"time"
 
 	gomigrate "github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
@@ -22,6 +24,8 @@ import (
 
 	"github.com/elythia-network/elythia/internal/cli/cliflag"
 	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/core/cache"
+	"github.com/elythia-network/elythia/internal/maintmode"
 )
 
 const (
@@ -45,6 +49,15 @@ const (
 	// 当たって `no migration found for version 900001` で止まる。
 	LocalTable = "schema_migrations_local"
 )
+
+// ExitMaintenance is the exit code of a run refused because a maintenance is
+// active (#3463). It differs from 1 so that a start script can skip the
+// migration and still start the server, which then waits in maintenance.
+//
+// UDS の entrypoint は migrate が 0 以外で終わると止まる (set -e)。メンテナンス中に
+// コンテナを作り直すと、1 で終わる形では再起動を繰り返し、メンテナンスの画面も
+// 出せない。
+const ExitMaintenance = 3
 
 // Track names accepted by -track.
 const (
@@ -74,6 +87,9 @@ type env struct {
 	databaseURL func(*config.Config) string
 	// coreDir / localDir are the migration directories of the two tracks.
 	coreDir, localDir string
+	// maintenance reads the maintenance state from Redis (#3463). nil State
+	// means none is active.
+	maintenance func(*config.Config) (*maintmode.State, error)
 }
 
 func defaultEnv() env {
@@ -96,7 +112,21 @@ func defaultEnv() env {
 		databaseURL: func(cfg *config.Config) string { return cfg.DatabaseURL("pgx5") },
 		coreDir:     CoreDir,
 		localDir:    LocalDir,
+		maintenance: readMaintenance,
 	}
+}
+
+// readMaintenance opens the default Redis of cfg and reads the maintenance
+// state.
+func readMaintenance(cfg *config.Config) (*maintmode.State, error) {
+	clients, err := cache.NewRedisClients(cfg)
+	if err != nil {
+		return nil, err
+	}
+	defer clients.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return maintmode.NewStore(clients.Default, clients.Pubsub, cfg.Redis.KeyPrefix()).Get(ctx)
 }
 
 // Run implements "elythia migrate" and returns the process exit code.
@@ -111,6 +141,8 @@ func run(e env, flagOut io.Writer, args []string) int {
 		"Required for -direction down and for -steps; up without it applies core, then local")
 	force := fs.String("force", "", "set the tracking table of -track to this version and clear dirty, "+
 		"without running any migration. The version must be a migration of that track")
+	maintenanceOp := fs.String("maintenance-op", "", "run even though a maintenance is active, "+
+		"if this is its opId (elythia maintenance status shows it)")
 	if code, ok := cliflag.Parse(fs, args); !ok {
 		return code
 	}
@@ -148,6 +180,10 @@ func run(e env, flagOut io.Writer, args []string) int {
 		return 1
 	}
 
+	if code := e.checkMaintenance(logger, cfg, *maintenanceOp); code != 0 {
+		return code
+	}
+
 	if set["force"] {
 		return e.forceTrack(logger, cfg, *track, forceVersion)
 	}
@@ -166,6 +202,38 @@ func run(e env, flagOut io.Writer, args []string) int {
 		}
 	}
 	return 0
+}
+
+// checkMaintenance refuses to run while a maintenance is active, unless
+// opID names it. It returns 0 to go on, or ExitMaintenance.
+//
+// メンテナンスの間は本体が DB を手放しており、リストアでは DB の名前を入れ
+// 替えている最中のことがある。UDS の entrypoint は起動のたびに migrate を流す
+// ので、ここで止めないと、メンテナンス中に再起動した本体の側から DB に触れる
+// (設計 §3.4)。
+//
+// **Redis が読めないときは止めない (警告だけ出す)。** compose の migrate は
+// Redis の起動を待たない構成があり、ここで失敗にすると既存の起動が壊れる。
+func (e env) checkMaintenance(logger *slog.Logger, cfg *config.Config, opID string) int {
+	if e.maintenance == nil {
+		return 0
+	}
+	st, err := e.maintenance(cfg)
+	if err != nil {
+		logger.Warn("could not read the maintenance state from Redis; running anyway", "error", err)
+		return 0
+	}
+	if !st.Holding() {
+		return 0
+	}
+	if opID != "" && opID == st.OpID {
+		logger.Info("a maintenance is active; running because -maintenance-op names it", "opId", st.OpID)
+		return 0
+	}
+	logger.Error("a maintenance is active; refusing to migrate. "+
+		"Run it again after `elythia maintenance exit`, or pass -maintenance-op <opId> to run it during the maintenance",
+		"opId", st.OpID, "phase", st.Phase)
+	return ExitMaintenance
 }
 
 // validateFlags returns a message for an invalid flag combination, or "".

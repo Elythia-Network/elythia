@@ -141,6 +141,7 @@ import (
 	corewebpush "github.com/elythia-network/elythia/internal/core/webpush"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/frontendutil"
+	"github.com/elythia-network/elythia/internal/maintmode"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/misc/idnhost"
 	miscsmtp "github.com/elythia-network/elythia/internal/misc/smtp"
@@ -1435,18 +1436,26 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// cron の担当と揃えて **queue role でだけ**発火する (#2459)。idempotent
 	// なので複数ノードで走っても壊れないが、Web ノードを増やすたびに起動時の
 	// DB 書き込みが増えるのは無駄。
+	//
+	// **startConstructionWorker で走らせる** (#3463)。素の goroutine だと、
+	// メンテナンスで世代を止めて DB のプールを閉じた後も走り続け、閉じたプールへ
+	// 書きに行く (実測で "sql: database is closed" が出た)。shutdown hook が
+	// 終わるのを待つので、DB を閉じる前に終わる。
 	if s.role.RunsQueue() {
-		go func() {
-			if err := retentionSvc.Aggregate(context.Background()); err != nil {
+		s.startConstructionWorker(func(ctx context.Context) {
+			if err := retentionSvc.Aggregate(ctx); err != nil {
 				slog.Warn("retention aggregate at startup failed", "err", err)
 			}
-		}()
+		})
 	}
 
 	// Health check
 	s.echo.GET("/healthz", func(c echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 	})
+	// メンテナンスの画面が「終わった」を知るための口 (#3463)。メンテナンス中は
+	// Supervisor のメンテナンスのハンドラーが同じパスに maintenance: true を返す。
+	s.echo.GET(maintmode.StatusPath, maintenanceStatusOff)
 
 	// Prometheus metrics: enableMetrics=true のときだけ公開する。
 	// 認証は付かない (Prometheus 慣例) ので、operator は nginx / LB ACL で

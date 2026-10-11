@@ -192,6 +192,7 @@ func TestDefaultEnv(t *testing.T) {
 	assert.Equal(t, os.Stdout, e.stdout)
 	assert.Equal(t, "migration", e.coreDir)
 	assert.Equal(t, "migration/local", e.localDir)
+	assert.NotNil(t, e.maintenance)
 	cfg, err := config.Load(writeConfig(t))
 	require.NoError(t, err)
 	assert.True(t, strings.HasPrefix(e.databaseURL(cfg), "pgx5://"), "database URL must use the pgx5 driver")

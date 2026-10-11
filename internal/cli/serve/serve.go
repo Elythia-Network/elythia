@@ -19,6 +19,7 @@ import (
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/core/cache"
 	mkdb "github.com/elythia-network/elythia/internal/db"
+	"github.com/elythia-network/elythia/internal/maintmode"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/redislog"
 	mksentry "github.com/elythia-network/elythia/internal/sentry"
@@ -26,7 +27,12 @@ import (
 )
 
 // shutdownTimeout bounds the graceful shutdown after a signal.
-const shutdownTimeout = 10 * time.Second
+//
+// docker の既定の停止猶予 (10 秒) より短くする。終了の後に Sentry の flush
+// (最大 2 秒、internal/sentry の flushTimeout) が続くので、それを足しても 10 秒に
+// 届かない値にする。届くと SIGKILL と重なり、最後の DB を閉じる処理やログが
+// 途中で切られる (#3463)。
+const shutdownTimeout = 7 * time.Second
 
 // httpServer is the part of *server.Server dump-routes drives.
 type httpServer interface {
@@ -85,9 +91,16 @@ func defaultEnv() env {
 		},
 		newSupervisor: func(cfg *config.Config, redis *cache.RedisClients) (supervisor, error) {
 			return server.NewSupervisor(cfg, redis, server.SupervisorDeps{
-				OpenDB:    model.NewDatabase,
-				NewServer: server.New,
-				CloseDB:   mkdb.Close,
+				OpenDB:      model.NewDatabase,
+				NewServer:   server.New,
+				CloseDB:     mkdb.Close,
+				Maintenance: maintmode.NewStore(redis.Default, redis.Pubsub, cfg.Redis.KeyPrefix()),
+				// どのプロセスも判定役の候補になる。管理画面から入れたときに受けた
+				// プロセスが落ちても、ほかのプロセスが判定を引き継ぐ (設計第2版 §2.1)。
+				MaintenanceCounter: &maintmode.PGCounter{
+					Targets: maintmode.TargetsFromConfig(cfg, "elythia-judge/"+processID()),
+				},
+				ProcessID: processID(),
 			})
 		},
 		signalContext: func() (context.Context, context.CancelFunc) {
@@ -195,21 +208,27 @@ func serve(e env, args []string) int {
 	return 0
 }
 
-// dbApplicationName returns the application_name of this process's DB
-// connections: "elythia/<role>/<host>/<pid>".
+// processID names this process in the maintenance reports: "<host>-<pid>".
 //
 // コンテナの中では PID がほぼ 1 なので、host (コンテナ ID) も入れて区別する。
+func processID() string {
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		host = "unknown"
+	}
+	return fmt.Sprintf("%s-%d", host, os.Getpid())
+}
+
+// dbApplicationName returns the application_name of this process's DB
+// connections: "elythia/<role>/<processID>".
+//
 // PostgreSQL は 63 バイトで切り詰めるが、先頭の "elythia/" が残れば数えられる。
 func dbApplicationName() string {
 	role := "invalid"
 	if r, err := config.ResolveProcessRole(); err == nil {
 		role = string(r)
 	}
-	host, err := os.Hostname()
-	if err != nil || host == "" {
-		host = "unknown"
-	}
-	return fmt.Sprintf("elythia/%s/%s/%d", role, host, os.Getpid())
+	return "elythia/" + role + "/" + processID()
 }
 
 func dumpRoutes(e env, args []string) int {

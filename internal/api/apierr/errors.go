@@ -57,6 +57,9 @@ const (
 	// (UUIDInvalidParam) とは別の id で、ajv より先に出る。
 	UUIDInvalidParamCast = "0b5f1631-7c1a-41a6-b399-cce335f34d85"
 	UUIDInternalError    = "5d37dbcb-891e-41ca-a3d6-e690c97775ac"
+	// UUIDMaintenance は Elythia 独自の MAINTENANCE の UUID (#3463)。本家に
+	// メンテナンスの概念は無いので、対応する上流の id は無い。
+	UUIDMaintenance = "218ec84b-6e9c-492d-ac08-37bcc33af056"
 	// UUIDNotFound は Misskey TS 上流に対応する汎用 NOT_FOUND code が存在
 	// しない (上流は endpoint 固有 NO_SUCH_* を使う) ため mk-go 固有の
 	// 安定 UUID を発番する。frontend 側の i18n には未対応だが、code+id 組
@@ -286,6 +289,13 @@ func InternalError(msg ...string) map[string]any {
 		m = msg[0]
 	}
 	return ErrorWithKind("INTERNAL_ERROR", m, UUIDInternalError, KindServer)
+}
+
+// Maintenance returns the MAINTENANCE error body the API answers with a 503
+// while the server is in maintenance (#3463). The code is an Elythia
+// extension; kind is server because the client did nothing wrong.
+func Maintenance() map[string]any {
+	return ErrorWithKind("MAINTENANCE", "The server is under maintenance.", UUIDMaintenance, KindServer)
 }
 
 // NotFound returns a 404 NOT_FOUND error response. mk-go 固有の汎用 404

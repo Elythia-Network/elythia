@@ -97,6 +97,14 @@ func TestInternalError(t *testing.T) {
 	assert.Equal(t, "server", errObj["kind"])
 }
 
+func TestMaintenance(t *testing.T) {
+	errObj := Maintenance()["error"].(map[string]any)
+	assert.Equal(t, "MAINTENANCE", errObj["code"])
+	assert.Equal(t, UUIDMaintenance, errObj["id"])
+	assert.Equal(t, "server", errObj["kind"])
+	assert.Equal(t, "The server is under maintenance.", errObj["message"])
+}
+
 // #1559 framework auth errors の code / id を upstream ApiCallService.ts と固定。
 func TestAuthFrameworkErrors(t *testing.T) {
 	for _, tc := range []struct {
