@@ -358,7 +358,7 @@ func TestSupervisor_ShutdownWaitsForAHandlerInstalledWhileItWaitedForTheLock(t *
 		code, _ := getBody(t, sup, "/slow")
 		slowDone <- code
 	}()
-	<-f.entered
+	recvWithin(t, f.entered, "遅いリクエストが世代に届かない")
 	sup.genMu.Unlock()
 	select {
 	case <-shutdownDone:
@@ -369,7 +369,21 @@ func TestSupervisor_ShutdownWaitsForAHandlerInstalledWhileItWaitedForTheLock(t *
 	code, _ := getBody(t, sup, "/healthz")
 	assert.Equal(t, http.StatusServiceUnavailable, code, "Shutdown がロックを取った後も新しい世代へ回している")
 	close(f.release)
-	assert.Equal(t, http.StatusOK, <-slowDone)
-	require.NoError(t, <-shutdownDone)
+	assert.Equal(t, http.StatusOK, recvWithin(t, slowDone, "遅いリクエストが終わらない"))
+	require.NoError(t, recvWithin(t, shutdownDone, "Shutdown が終わらない"))
 	assert.EqualValues(t, 1, f.closed.Load())
+}
+
+// recvWithin receives from ch, failing the test (instead of hanging) after
+// 10 seconds.
+func recvWithin[T any](t *testing.T, ch <-chan T, msg string) T {
+	t.Helper()
+	select {
+	case v := <-ch:
+		return v
+	case <-time.After(10 * time.Second):
+		t.Fatal(msg)
+	}
+	var zero T
+	return zero
 }
