@@ -260,6 +260,7 @@ DBに拡張(pg_bigmなど)を入れているときは、このホストのPostgr
 
 - 要る空きは、およそ「dumpの大きさ + 戻したDBの大きさ」。戻したDBは、dumpより何倍か大きくなる(dumpは表のデータを圧縮して持ち、索引を持たないため)。元のDBの大きさ(`SELECT pg_size_pretty(pg_database_size(current_database()))`)を目安にする
 - 始める前に、dumpを置く場所の空きがdumpの大きさ以上あるかを、dumpを置いた後に、使い捨てのPostgreSQLを置く場所の空きがdumpの大きさ以上あるかを見て、足りなければ止める(環境の誤りとして扱う)。空きを見る前に、保存先にあるdumpの大きさを`meta.json`の`dumpSize`と照合する。食い違えば世代の欠陥にする(`dumpSize`が化けて大きな値になっていると、空きが足りないという環境の誤りに見えてしまうため)。dumpの大きさは必ず要る量の下限なので、この検査で通るはずの検証を止めることはない。逆に、この検査に通っても足りないことはある
+- `TMPDIR`を設定していないと、`backup verify`は確かめる前に、daemonは`schedule.verify: true`なら起動したときに、本番のDBと同じディスクを埋めうるという警告を出す。空きの検査は戻したDBの大きさを測れないため
 - `TMPDIR`は短いパスにする。使い捨てのPostgreSQLのunix socketをこの下に作り、socketのパスには約100バイトの上限があるため
 
 ### 結果(`verify.json`)

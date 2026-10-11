@@ -184,6 +184,9 @@ func wireDeps(te env, ve verifyEnv) func(*config.Config, *slog.Logger) (Deps, er
 		if err != nil {
 			return Deps{}, err
 		}
+		if w := backupkit.TempDirWarning(vopts.TempDir, ve.env); w != "" && b.Schedule.Verify {
+			logger.Warn("backup: " + w)
+		}
 		return Deps{
 			Storage:  st,
 			Taker:    newTaker(topts),
