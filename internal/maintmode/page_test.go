@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -40,10 +41,7 @@ var waits = 0;
 // a 200 with a body that is not JSON (a proxy's page) was read as "over" and
 // the page reloaded every 5 seconds.
 func TestPage_PollReloadsOnlyWhenTheServerSaysItIsOver(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node is not installed")
-	}
+	node := requireNode(t)
 	m := regexp.MustCompile(`(?s)<script nonce="\{\{nonce\}\}">(.*?)</script>`).FindStringSubmatch(pageHTML)
 	require.Len(t, m, 2, "the page has its script")
 	for name, c := range map[string]struct {
@@ -78,4 +76,50 @@ func TestPage_PollReloadsOnlyWhenTheServerSaysItIsOver(t *testing.T) {
 
 func jsString(s string) string {
 	return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(s) + "'"
+}
+
+// requireNode returns the path of node. Without it the test is skipped on a
+// developer machine but fails on CI (CI is set), where skipping would pass
+// the check without running it (CLAUDE.md Section 8). GitHub の ubuntu の
+// runner には node が入っている。
+func requireNode(t *testing.T) string {
+	t.Helper()
+	return lookNode(t, exec.LookPath, os.Getenv("CI") != "")
+}
+
+func lookNode(t testing.TB, look func(string) (string, error), onCI bool) string {
+	t.Helper()
+	node, err := look("node")
+	if err == nil {
+		return node
+	}
+	if onCI {
+		t.Fatalf("node is required on CI to test the maintenance page script: %v", err)
+	}
+	t.Skip("node is not installed")
+	return ""
+}
+
+// fakeTB records whether Fatalf or Skip was called.
+type fakeTB struct {
+	testing.TB
+	fatal, skipped bool
+}
+
+func (f *fakeTB) Helper()               {}
+func (f *fakeTB) Fatalf(string, ...any) { f.fatal = true; runtime.Goexit() }
+func (f *fakeTB) Skip(...any)           { f.skipped = true; runtime.Goexit() }
+
+func TestLookNode_FailsOnCIWhenMissing(t *testing.T) {
+	missing := func(string) (string, error) { return "", exec.ErrNotFound }
+	run := func(onCI bool) *fakeTB {
+		f := &fakeTB{TB: t}
+		done := make(chan struct{})
+		go func() { defer close(done); lookNode(f, missing, onCI) }()
+		<-done
+		return f
+	}
+	assert.True(t, run(true).fatal, "CI で node が無いのに落とさなかった")
+	assert.True(t, run(false).skipped)
+	assert.Equal(t, "/bin/node", lookNode(t, func(string) (string, error) { return "/bin/node", nil }, true))
 }
