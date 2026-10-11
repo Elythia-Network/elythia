@@ -47,6 +47,20 @@ type MetaRepository interface {
 	EnsureInitial(id string) error
 }
 
+// ErrCheckedUpdateUnsupported is returned when a wrapped repository cannot
+// update with a check.
+var ErrCheckedUpdateUnsupported = errors.New("meta repository does not support checked updates")
+
+// CheckedMetaUpdater updates meta after check approves the current row.
+//
+// 判定と書き込みを 1 つの transaction の中で行い、今の行は `SELECT ... FOR
+// UPDATE` で読む (キャッシュを通さない)。判定から書き込みまでの間に別の更新が
+// 入ると、判定した前提 (今の値) が崩れるため。check が誤りを返したら何も書かず、
+// その誤りをそのまま返す。
+type CheckedMetaUpdater interface {
+	UpdateChecked(fields map[string]any, check func(current *model.Meta) error) error
+}
+
 type metaRepository struct {
 	db *gorm.DB
 }
@@ -80,6 +94,28 @@ func (r *metaRepository) Fetch() (*model.Meta, error) {
 
 func (r *metaRepository) Update(fields map[string]any) error {
 	return r.db.Model(&model.Meta{}).Where("TRUE").Updates(fields).Error
+}
+
+// UpdateChecked implements CheckedMetaUpdater.
+func (r *metaRepository) UpdateChecked(fields map[string]any, check func(current *model.Meta) error) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		// 書き込みは全部の行に当たる (Update と同じ Where TRUE) ので、ロックも全部の
+		// 行に取る。meta は 1 行の前提で、そのときは素の Update と待ち合わない。
+		// 行が複数あると、ここ (主キーの順) と素の UPDATE (ヒープの順) でロックの
+		// 順序が揃わず、デッドロックで片方が中断されうる。
+		// 判定に使う行は Fetch (First) と同じく主キーの順で最初のもの。
+		var rows []model.Meta
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Order("id").Find(&rows).Error; err != nil {
+			return err
+		}
+		if len(rows) == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		if err := check(&rows[0]); err != nil {
+			return err
+		}
+		return tx.Model(&model.Meta{}).Where("TRUE").Updates(fields).Error
+	})
 }
 
 // EnsureInitial creates the singleton meta row if it does not exist yet.
