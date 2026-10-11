@@ -1,12 +1,15 @@
 package backup
 
 import (
+	"bytes"
 	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -15,8 +18,11 @@ import (
 	"testing"
 	"time"
 
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/smithy-go"
+	smithyhttp "github.com/aws/smithy-go/transport/http"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/elythia-network/elythia/internal/config"
@@ -35,6 +41,9 @@ type flakyS3 struct {
 	failed  map[string]bool
 	// puts counts the PUT requests per key, resent ones included.
 	puts map[string]int
+	// refuseCondition answers conditional PUTs with 400 InvalidArgument, like
+	// an S3-compatible service without conditional writes.
+	refuseCondition bool
 }
 
 func newFlakyS3(t *testing.T) (*flakyS3, *S3Storage) {
@@ -65,6 +74,10 @@ func (f *flakyS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		f.puts[key]++
+		if f.refuseCondition && r.Header.Get("If-None-Match") != "" {
+			writeS3Error(w, http.StatusBadRequest, "InvalidArgument")
+			return
+		}
 		if r.Header.Get("If-None-Match") == "*" {
 			if _, exists := f.objects[key]; exists {
 				writeS3Error(w, http.StatusPreconditionFailed, "PreconditionFailed")
@@ -157,24 +170,94 @@ func TestS3Storage_PutNewSurvivesSDKRetry(t *testing.T) {
 	require.Equal(t, []byte("mine"), f.objects["p/"+key])
 }
 
-// noConditionClient is an S3 service that does not implement conditional
-// writes: it answers If-None-Match with 501.
+// noConditionClient is an S3 service that refuses conditional writes with
+// refusal. unconditionalErr is what the write without the condition returns.
 type noConditionClient struct {
 	s3Client
-	unconditional int
+	refusal          error
+	unconditionalErr error
+	conditional      int
+	unconditional    int
 }
 
 func (c *noConditionClient) PutObject(_ context.Context, in *s3.PutObjectInput, _ ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
 	if in.IfNoneMatch != nil {
-		return nil, &smithy.GenericAPIError{Code: "NotImplemented"}
+		c.conditional++
+		return nil, c.refusal
 	}
 	c.unconditional++
-	return &s3.PutObjectOutput{}, nil
+	return &s3.PutObjectOutput{}, c.unconditionalErr
 }
 
-func TestS3Storage_PutNewFallsBackWithoutConditionalWrites(t *testing.T) {
-	c := &noConditionClient{}
-	st := &S3Storage{client: c, bucket: "b"}
-	require.NoError(t, st.PutNew(t.Context(), "k", []byte("ab")))
-	require.Equal(t, 1, c.unconditional, "the write is resent once without the condition")
+// httpError is what the SDK returns for a non-2xx answer without an S3 error
+// code it knows.
+func httpError(status int, msg string) error {
+	return &awshttp.ResponseError{ResponseError: &smithyhttp.ResponseError{
+		Response: &smithyhttp.Response{Response: &http.Response{StatusCode: status}},
+		Err:      errors.New(msg),
+	}}
+}
+
+// captureWarnings sends slog's default output to a buffer until the test ends.
+func captureWarnings(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	orig := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(orig) })
+	return &buf
+}
+
+// TestS3Storage_PutNewFallsBackWhenTheConditionIsRefused: S3-compatible
+// services that do not implement conditional writes refuse them in several
+// ways. Taking a backup must still work there, with a warning (once) that
+// the same-second exclusion does not hold.
+func TestS3Storage_PutNewFallsBackWhenTheConditionIsRefused(t *testing.T) {
+	for name, refusal := range map[string]error{
+		"NotImplemented code":  &smithy.GenericAPIError{Code: "NotImplemented"},
+		"InvalidArgument":      &smithy.GenericAPIError{Code: "InvalidArgument"},
+		"InvalidRequest":       &smithy.GenericAPIError{Code: "InvalidRequest"},
+		"501 without a code":   httpError(http.StatusNotImplemented, "not implemented"),
+		"400 about the header": httpError(http.StatusBadRequest, "unsupported header If-None-Match"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			logs := captureWarnings(t)
+			c := &noConditionClient{refusal: refusal}
+			st := &S3Storage{client: c, bucket: "b"}
+			require.NoError(t, st.PutNew(t.Context(), "k", []byte("ab")))
+			require.NoError(t, st.PutNew(t.Context(), "k2", []byte("ab")))
+			assert.Equal(t, 2, c.unconditional, "each write is resent without the condition")
+			assert.Equal(t, 1, strings.Count(logs.String(), "refused a conditional write"), "warned once per storage")
+		})
+	}
+}
+
+// TestS3Storage_PutNewDoesNotRetryOtherErrors: refusals that are not about
+// the condition (a 403 may be wrong credentials) fail as they are.
+func TestS3Storage_PutNewDoesNotRetryOtherErrors(t *testing.T) {
+	for name, refusal := range map[string]error{
+		"AccessDenied":        &smithy.GenericAPIError{Code: "AccessDenied"},
+		"403 without a code":  httpError(http.StatusForbidden, "forbidden"),
+		"400 about something": httpError(http.StatusBadRequest, "bad digest"),
+		"500":                 httpError(http.StatusInternalServerError, "boom"),
+		"not an HTTP error":   errors.New("connection reset"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := &noConditionClient{refusal: refusal}
+			st := &S3Storage{client: c, bucket: "b"}
+			err := st.PutNew(t.Context(), "k", []byte("ab"))
+			require.ErrorIs(t, err, refusal)
+			require.NotErrorIs(t, err, ErrExists)
+			assert.Zero(t, c.unconditional)
+		})
+	}
+	t.Run("the unconditional resend fails", func(t *testing.T) {
+		c := &noConditionClient{refusal: &smithy.GenericAPIError{Code: "NotImplemented"}, unconditionalErr: io.ErrClosedPipe}
+		st := &S3Storage{client: c, bucket: "b"}
+		require.ErrorIs(t, st.PutNew(t.Context(), "k", []byte("ab")), io.ErrClosedPipe)
+	})
+	t.Run("an invalid key", func(t *testing.T) {
+		st := &S3Storage{client: &noConditionClient{}, bucket: "b"}
+		require.Error(t, st.PutNew(t.Context(), "/k", []byte("ab")))
+	})
 }

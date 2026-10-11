@@ -477,6 +477,23 @@ func TestTake_SurvivesResentRequests(t *testing.T) {
 	assert.Equal(t, meta.DumpSHA256, sum)
 }
 
+// TestTake_WorksWhereConditionalWritesAreRefused: an S3-compatible service
+// that answers If-None-Match with 400 must still get backups (without the
+// same-second exclusion).
+func TestTake_WorksWhereConditionalWritesAreRefused(t *testing.T) {
+	p := newDatabase(t)
+	p.seedSimple(t)
+	f, st := newFlakyS3(t)
+	f.refuseCondition = true
+	meta, err := Take(context.Background(), p.takeOptions(st))
+	require.NoError(t, err)
+	gens, err := ListGenerations(context.Background(), st)
+	require.NoError(t, err)
+	require.Len(t, gens, 1)
+	assert.Equal(t, meta.ID, gens[0].ID)
+	assert.True(t, gens[0].Complete())
+}
+
 // unverifiableClaim stores the lock but says it already existed, and fails
 // the first read back of it, like a storage that answered 409 and then had
 // a transient read error.
