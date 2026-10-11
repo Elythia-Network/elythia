@@ -111,9 +111,14 @@ func runDaemon(e daemonEnv, args []string) int {
 		}()
 	}
 	if restore != nil {
-		// 前の実行が途中で残したリストアを片付ける。job の枠は Run が始まってから
-		// 取れるので、Start は Run と並べて呼び、枠が空くまで待たせる。
-		restore.Manager.Start(ctx)
+		// 前の実行が途中で残したリストアを片付ける。メンテナンスのまま残っている
+		// ことがあるので、Run が最初の job (最新の世代の検証) を始める前に枠を預ける。
+		// 片付けるものが無ければ、回復がすぐに返す。
+		release, err := d.Reserve(daemon.JobRestore)
+		if err != nil {
+			release = nil
+		}
+		restore.Manager.StartHolding(ctx, release)
 	}
 	d.Run(ctx)
 	if restore != nil {

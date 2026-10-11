@@ -15,7 +15,13 @@ import (
 // 段の記録と pg_database の名前の組から、どこまで進んだかを決める。入れ替えの後で
 // 落ちたなら元の DB へ戻す (v1 §7-8 の決定)。決められないときは何もせず、
 // メンテナンスのまま運営者に渡す。
-func (m *Manager) recoverOnStart(ctx context.Context) {
+func (m *Manager) recoverOnStart(ctx context.Context, held func()) {
+	release := held
+	defer func() {
+		if release != nil {
+			release()
+		}
+	}()
 	rec, err := m.o.Store.Current(ctx)
 	if err != nil {
 		m.log.Error("backup: cannot read the unfinished restore", "err", err)
@@ -24,12 +30,12 @@ func (m *Manager) recoverOnStart(ctx context.Context) {
 	if rec == nil {
 		return
 	}
-	// 起動した直後は、検証されていない最新の世代を確かめる job が先に枠を取って
-	// いることがある。取れるまで待つ (諦めると、メンテナンスのまま残る)。
-	var release func()
-	for {
-		release, err = m.o.Acquire()
+	// 枠を先に預かっていなければ (Redis に後から繋がった場合など)、取れるまで待つ。
+	// 先に動いている job があり得るので、諦めない (諦めると、メンテナンスのまま残る)。
+	for release == nil {
+		r, err := m.o.Acquire()
 		if err == nil {
+			release = r
 			break
 		}
 		select {
@@ -38,7 +44,6 @@ func (m *Manager) recoverOnStart(ctx context.Context) {
 		case <-time.After(m.o.Poll):
 		}
 	}
-	defer release()
 	// 待つ間に、この実行で受けた準備がその記録を作って終えていることがある (起動
 	// した直後に Current を読む前に Prepare が来た場合)。枠を取った後で読み直し、
 	// 終わっていれば何もしない。この実行の操作は終わるまで枠を持つので、枠を取れた
