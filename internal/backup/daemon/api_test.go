@@ -38,7 +38,7 @@ func call(t *testing.T, h http.Handler, method, path, token, body string) (int, 
 }
 
 func TestHandlerRequiresToken(t *testing.T) {
-	_, err := Handler(New(Options{}), "")
+	_, err := Handler(New(Options{}), "", nil)
 	require.ErrorIs(t, err, ErrNoServiceToken)
 }
 
@@ -46,7 +46,7 @@ func TestHandlerRejectsWrongToken(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r := newRig(t, nil, nil)
 		r.start(t)
-		h, err := Handler(r.d, testToken)
+		h, err := Handler(r.d, testToken, nil)
 		require.NoError(t, err)
 		for _, tc := range []struct{ method, path, token string }{
 			{"GET", "/status", ""},
@@ -77,7 +77,7 @@ func TestHandlerTakeAndStatus(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r := newRig(t, nil, func(r *rig) { r.taker.block = make(chan struct{}) })
 		r.start(t)
-		h, err := Handler(r.d, testToken)
+		h, err := Handler(r.d, testToken, nil)
 		require.NoError(t, err)
 
 		code, body, hdr := call(t, h, "POST", "/take", testToken, "")
@@ -125,7 +125,7 @@ func TestHandlerVerifyBodyLimit(t *testing.T) {
 		var id string
 		r := newRig(t, nil, func(r *rig) { id = r.st.addGeneration(epoch.Add(-time.Hour), true, "") })
 		r.start(t)
-		h, err := Handler(r.d, testToken)
+		h, err := Handler(r.d, testToken, nil)
 		require.NoError(t, err)
 		padded := func(size int) string {
 			head, tail := `{"pad":"`, `","id":"`+id+`"}`
@@ -149,7 +149,7 @@ func TestHandlerVerify(t *testing.T) {
 		var id string
 		r := newRig(t, nil, func(r *rig) { id = r.st.addGeneration(epoch.Add(-time.Hour), true, "") })
 		r.start(t)
-		h, err := Handler(r.d, testToken)
+		h, err := Handler(r.d, testToken, nil)
 		require.NoError(t, err)
 
 		for _, body := range []string{"", "{", `{"id":""}`, `{"id":"../x"}`, `{"id":"latest"}`, `{"id":"` + strings.Repeat("1", 5000) + `"}`} {
@@ -201,7 +201,7 @@ func (s *syncBuffer) String() string {
 func TestHandlerClientIPHeaderTrustedOnlyWithToken(t *testing.T) {
 	var logs syncBuffer
 	d := New(Options{Logger: slog.New(slog.NewTextHandler(&logs, nil)), Storage: newMemStorage()})
-	h, err := Handler(d, testToken)
+	h, err := Handler(d, testToken, nil)
 	require.NoError(t, err)
 	send := func(token, ip string) {
 		req := httptest.NewRequest("GET", "/status", nil)
