@@ -1142,10 +1142,19 @@ func TestProgramVerdict(t *testing.T) {
 	require.ErrorAs(t, err, &se, "a dump that pg_restore rejects is a defect of the generation")
 	assert.Contains(t, se.msg, "pg_restore failed")
 
-	for _, stderr := range envMarkers {
-		err := programVerdict(ctx, "pg_restore", &ProgramError{Program: "pg_restore", ExitCode: 1, Stderr: "ERROR: " + stderr})
+	// 一覧を回すと、語を消してもテストが通ってしまうので、実際の文言を名指しで固定する。
+	for _, stderr := range []string{
+		"pg_restore: error: could not execute query: ERROR:  could not extend file: No space left on device",
+		"pg_restore: error: could not execute query: ERROR:  could not write to file: Disk quota exceeded",
+		"pg_restore: error: could not execute query: ERROR:  out of memory",
+		"pg_restore: error: could not connect to server: Connection refused",
+		"pg_restore: error: connection to server on socket \"/tmp/sock/.s.PGSQL.5432\" failed: No such file or directory",
+		"pg_restore: error: could not execute query: server closed the connection unexpectedly",
+		"FATAL:  terminating connection due to administrator command",
+	} {
+		err := programVerdict(ctx, "pg_restore", &ProgramError{Program: "pg_restore", ExitCode: 1, Stderr: stderr})
 		assert.False(t, errors.As(err, &se), stderr)
-		assert.ErrorContains(t, err, "because of the environment")
+		assert.ErrorContains(t, err, "because of the environment", stderr)
 	}
 
 	// DETAIL / CONTEXT / Command was: と引用符の中は、利用者が決められる値なので見ない。
