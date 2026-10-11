@@ -288,7 +288,11 @@ func (d *DirStorage) PutNew(ctx context.Context, key string, body []byte) (err e
 	// hard link を作れない理由 (EPERM / ENOTSUP / EXDEV / EACCES など) は
 	// ファイルシステムごとに違う。O_EXCL も「無ければ作る」なので、どの失敗でも
 	// そちらで置く。自分の再送で「既にある」になる場合は、claimKey の読み直しが救う。
-	return d.createExclusive(root, key, rel, body)
+	// そちらも失敗したら、原因を追えるよう link の誤りも一緒に返す。
+	if cerr := d.createExclusive(root, key, rel, body); cerr != nil {
+		return errors.Join(cerr, fmt.Errorf("backup: link %s: %w", key, err))
+	}
+	return nil
 }
 
 // createExclusive creates rel with O_EXCL and writes body into it. It is the
