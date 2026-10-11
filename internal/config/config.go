@@ -229,6 +229,7 @@ type Source struct {
 	FulltextSearch            *FulltextSearchOptions `mapstructure:"fulltextSearch"`
 	Meilisearch               *MeilisearchOptions    `mapstructure:"meilisearch"`
 	Backup                    *BackupOptions         `mapstructure:"backup"`
+	Maintenance               *MaintenanceSource     `mapstructure:"maintenance"`
 	SetupPassword             string                 `mapstructure:"setupPassword"`
 	Proxy                     string                 `mapstructure:"proxy"`
 	ProxySMTP                 string                 `mapstructure:"proxySmtp"`
@@ -475,6 +476,9 @@ type Config struct {
 	Meilisearch    *MeilisearchOptions
 	// Backup is nil when the config file has no `backup:` section (#3457).
 	Backup *BackupOptions
+	// Maintenance holds the maintenance mode settings, with the defaults
+	// filled when the section is absent (#3463).
+	Maintenance MaintenanceOptions
 
 	ID string
 
@@ -686,6 +690,8 @@ func bindEnvKeys(v *viper.Viper) {
 		"minWorkers",
 		"maxWorkersGlobal",
 		"autoScaleCooldownSeconds",
+		"maintenance.maintenanceDb",
+		"maintenance.drainTimeout",
 	}
 	for _, k := range keys {
 		_ = v.BindEnv(k)
@@ -826,6 +832,11 @@ func resolve(src *Source) (*Config, error) {
 		return nil, err
 	}
 
+	maintenance, err := resolveMaintenance(src.Maintenance, src.DB.DB)
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := &Config{
 		Version:     MisskeyVersion,
 		URL:         parsedURL.Scheme + "://" + parsedURL.Host,
@@ -865,6 +876,7 @@ func resolve(src *Source) (*Config, error) {
 		FulltextSearch: src.FulltextSearch,
 		Meilisearch:    src.Meilisearch,
 		Backup:         src.Backup,
+		Maintenance:    maintenance,
 
 		ID: src.ID,
 

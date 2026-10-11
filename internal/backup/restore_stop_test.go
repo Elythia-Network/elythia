@@ -81,6 +81,19 @@ func TestRestoreStopConditions(t *testing.T) {
 		noLeftovers(t)
 	})
 
+	// 別の role の接続は、non-superuser から見ると backend_type が null になる。
+	// 'client backend' で絞ると見落とした (#3463 の設計 §7)。
+	t.Run("a session of another role is seen by a non-superuser", func(t *testing.T) {
+		held := pg.connect(t, rsSuperUser, rsSuperPass, rsAppDB)
+		app := pg.restorer(storage, rsAppUser, rsAppPass)
+		err := app.CheckNoConnections(ctx, "", rsAppDB)
+		require.ErrorIs(t, err, ErrRestoreConnections)
+		assert.Contains(t, err.Error(), "user="+rsSuperUser)
+		_ = held.Close(ctx)
+		require.Eventually(t, func() bool { return app.CheckNoConnections(ctx, "", rsAppDB) == nil },
+			5*time.Second, 50*time.Millisecond)
+	})
+
 	t.Run("backup has migrations newer than the binary", func(t *testing.T) {
 		bundled, _, err := latestMigration(rsCoreMigrations)
 		require.NoError(t, err)
