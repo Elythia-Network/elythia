@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -44,24 +45,24 @@ func (f *failOnce) wait(t *testing.T) {
 }
 
 // TestStepNotWritten checks that a step that cannot be written stops the
-// operation before anything outside depends on it, and that the recovery
-// then finishes it from the step that was written (#3463 (6c) M-2).
+// operation before anything outside depends on it, and that the same run
+// then recovers from the step that was written, without a restart (#3463
+// (6c) M-2, and H-1 of the third review).
 func TestStepNotWritten(t *testing.T) {
 	cases := []struct {
 		name      string
 		to        string
 		failCheck bool
 		holdConn  bool
-		left      string // the step left for the recovery
 		final     string
-		content   string
-		// cleaned is how often Redis was cleaned before the stop.
+		// cleaned is how often Redis was cleaned in all: a step that was not
+		// written must not be followed by the cleanup it guards.
 		cleaned int
 	}{
-		{"switched", StepSwitched, false, false, StepEntering, StepReverted, "current", 0},
-		{"resuming", StepResuming, false, false, StepSwitched, StepReverted, "current", 1},
-		{"reverting", StepReverting, true, false, StepSwitched, StepReverted, "current", 1},
-		{"aborting", StepAborting, false, true, StepEntering, StepAborted, "current", 0},
+		{"switched", StepSwitched, false, false, StepReverted, 1},
+		{"resuming", StepResuming, false, false, StepReverted, 2},
+		{"reverting", StepReverting, true, false, StepReverted, 2},
+		{"aborting", StepAborting, false, true, StepAborted, 0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -80,28 +81,58 @@ func TestStepNotWritten(t *testing.T) {
 			e.m.failStep = f.hook
 			require.NoError(t, e.m.Confirm(context.Background(), rec.OpID))
 			f.wait(t)
-			// 外への作用の前で止まっているので、待っている goroutine は無い。
-			require.Eventually(t, func() bool { return !e.slot.isHeld() }, 5*time.Second, 5*time.Millisecond)
-			got, err := e.store.Get(context.Background(), rec.OpID)
-			require.NoError(t, err)
-			assert.Equal(t, c.left, got.Step)
-			st := e.maintenance()
-			require.NotNil(t, st, "the maintenance stays for the recovery")
-			assert.NotEqual(t, maintmode.PhaseResuming, st.Phase, "the processes are not let back")
-			e.mu.Lock()
-			assert.Equal(t, c.cleaned, e.cleaned, "nothing else is done after the step could not be written")
-			e.mu.Unlock()
-			e.stop()
 			e.db.mu.Lock()
 			e.db.conns[testDB] = 0
-			delete(e.db.fail, "check")
 			e.db.mu.Unlock()
-			e.start()
 			e.waitStep(rec.OpID, c.final)
-			assert.Equal(t, c.content, e.db.content(testDB))
+			assert.Equal(t, "current", e.db.content(testDB))
 			require.Eventually(t, func() bool { return e.maintenance() == nil }, 5*time.Second, 5*time.Millisecond)
+			require.Eventually(t, func() bool { return !e.slot.isHeld() }, 5*time.Second, 5*time.Millisecond)
+			e.mu.Lock()
+			defer e.mu.Unlock()
+			assert.Equal(t, c.cleaned, e.cleaned)
+			assert.Empty(t, e.notes)
 		})
 	}
+}
+
+// TestStepNotWritten_RedisGone checks that an operation whose record cannot
+// be read either keeps the judge and the slot, notifies once, and finishes
+// when Redis is back.
+func TestStepNotWritten_RedisGone(t *testing.T) {
+	var clock atomic.Int64
+	start := time.Now()
+	e := newEnv(t, func(o *Options) {
+		o.Now = func() time.Time { return start.Add(time.Duration(clock.Load())) }
+	})
+	e.process("p1")
+	rec, _ := e.prepare()
+	var failed atomic.Bool
+	e.m.failStep = func(to string) error {
+		if to == StepSwitched && failed.CompareAndSwap(false, true) {
+			e.mr.SetError("LOADING Redis is loading the dataset in memory")
+			return errors.New("redis: write failed")
+		}
+		return nil
+	}
+	require.NoError(t, e.m.Confirm(context.Background(), rec.OpID))
+	require.Eventually(t, func() bool {
+		// 書けなかった後だけ時計を進める (それまでは held の待ちの期限に効く)。
+		if failed.Load() {
+			clock.Add(int64(stalledNotifyAfter))
+		}
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		return len(e.notes) == 1
+	}, 5*time.Second, 5*time.Millisecond)
+	assert.True(t, e.slot.isHeld(), "the slot is kept while it waits")
+	e.mr.SetError("")
+	e.waitStep(rec.OpID, StepReverted)
+	require.Eventually(t, func() bool { return e.maintenance() == nil }, 5*time.Second, 5*time.Millisecond)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	assert.Len(t, e.notes, 1, "notified once")
+	assert.Contains(t, e.notes[0], "Redis does not answer")
 }
 
 // TestRecover_ResumingWithNamesNotSwapped checks that a resuming record whose

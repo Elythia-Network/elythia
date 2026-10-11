@@ -25,13 +25,60 @@ func stopping(ctx context.Context) bool { return ctx.Err() != nil }
 // 書けなければ、外への作用の前で止まって返す (false)。記録が遅れたまま作用を
 // 進めると、起動し直した回復が古い段から逆の方向を選ぶ (例: switched のまま
 // 戻した DB で再開させると、回復が元の DB へ戻して書き込みを失う)。記録は最後に
-// 書けた段のまま残り、回復がそこから続きを決める。
+// 書けた段のまま残り、settle が同じ goroutine で回復に入って続きを決める。
 func (m *Manager) advance(ctx context.Context, opID, from, to string, extra ...any) bool {
 	if err := m.setStep(ctx, opID, from, to, extra...); err != nil {
-		m.log.Error("backup: cannot record the step of a restore; leaving it to the recovery", "opId", opID, "from", from, "to", to, "err", err)
+		m.log.Error("backup: cannot record the step of a restore; recovering from the written step", "opId", opID, "from", from, "to", to, "err", err)
+		m.stalled.Store(true)
 		return false
 	}
 	return true
+}
+
+// stalledNotifyAfter is how long settle waits for the record before it
+// notifies an operator once.
+const stalledNotifyAfter = time.Minute
+
+// settle finishes an operation that stopped because a step could not be
+// written: it reads the record again (Poll apart, as long as it takes) and
+// recovers from the step that was written, holding the judge and the job
+// slot of the caller. It returns at once when nothing stopped, and without
+// moving the record when the service is stopping.
+//
+// 止まったまま返すと、名前を入れ替えた後でもメンテナンスのまま、起動し直すまで
+// 誰も続きを決めない。回復の中で記録が書けなかったときも、ここで繰り返す
+// (呼び出しを重ねない)。
+func (m *Manager) settle(ctx context.Context, opID string) {
+	notified := false
+	since := m.now()
+	for m.stalled.Swap(false) {
+		var rec *Record
+		for rec == nil {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(m.o.Poll):
+			}
+			r, err := m.o.Store.Get(ctx, opID)
+			if err == nil {
+				rec = r
+				continue
+			}
+			if !notified && m.now().Sub(since) >= stalledNotifyAfter {
+				notified = true
+				msg := fmt.Sprintf("restore %s stopped: Redis does not answer, so it cannot decide how to go on (%v). It keeps trying; the maintenance stays as it is until then", opID, err)
+				m.log.Error("backup: " + msg)
+				if m.o.Notify != nil {
+					m.o.Notify(context.WithoutCancel(ctx), msg)
+				}
+			}
+		}
+		if Final(rec.Step) {
+			return
+		}
+		m.journal(ctx, opID, rec.Step, "a step could not be written; recovering from step %s", rec.Step)
+		m.recoverRecord(ctx, rec)
+	}
 }
 
 // runJudge runs the judge until the returned function is called.
@@ -113,6 +160,11 @@ func (m *Manager) waitCleared(ctx context.Context, opID string, timeout time.Dur
 func (m *Manager) switchOver(ctx context.Context, rec *Record) {
 	stopJudge := m.runJudge(ctx)
 	defer stopJudge()
+	m.switchSteps(ctx, rec)
+	m.settle(ctx, rec.OpID)
+}
+
+func (m *Manager) switchSteps(ctx context.Context, rec *Record) {
 
 	// C3: メンテナンスに入れる。
 	err := m.o.Maint.Enter(ctx, maintmode.State{

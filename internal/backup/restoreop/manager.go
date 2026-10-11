@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/elythia-network/elythia/internal/backup"
@@ -102,6 +103,10 @@ type Manager struct {
 	wg   sync.WaitGroup
 	// ops holds the operations this process started and has not finished.
 	ops map[string]*liveOp
+
+	// stalled is set when a step could not be written; settle recovers.
+	// 枠のおかげで操作は同時に 1 つなので、Manager に 1 つでよい。
+	stalled atomic.Bool
 
 	// failStep, when set by a test, fails writing the step to.
 	failStep func(to string) error

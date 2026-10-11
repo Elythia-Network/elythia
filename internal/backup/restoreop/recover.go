@@ -66,6 +66,7 @@ func (m *Manager) recoverOnStart(ctx context.Context, held func()) {
 	defer stopJudge()
 	m.journal(ctx, rec.OpID, rec.Step, "the backup service restarted at step %s; recovering", rec.Step)
 	m.recoverRecord(ctx, rec)
+	m.settle(ctx, rec.OpID)
 }
 
 func (m *Manager) recoverRecord(ctx context.Context, rec *Record) {
