@@ -238,7 +238,9 @@ func TestTake_StorageFailures(t *testing.T) {
 		objs, err := inner.List(ctx, "")
 		require.NoError(t, err)
 		assert.Empty(t, objs, "the dump that failed the check is deleted and no meta.json is written")
-		require.Len(t, bs.deleted, 1)
+		require.Len(t, bs.deleted, 2)
+		assert.True(t, strings.HasSuffix(bs.deleted[0], "/"+DumpFile), "the dump goes first: %v", bs.deleted)
+		assert.True(t, strings.HasSuffix(bs.deleted[1], "/"+LockFile), "then the lock: %v", bs.deleted)
 	})
 	t.Run("meta upload fails", func(t *testing.T) {
 		inner := newDir()
@@ -255,6 +257,14 @@ func TestTake_StorageFailures(t *testing.T) {
 		objs, err := inner.List(ctx, "")
 		require.NoError(t, err)
 		assert.Empty(t, objs, "neither the dump nor a meta.json that names it is left")
+	})
+	t.Run("lock upload reports failure after storing", func(t *testing.T) {
+		inner := newDir()
+		_, err := Take(ctx, p.takeOptions(&brokenStorage{Storage: inner, lieOnPut: LockFile}))
+		require.ErrorContains(t, err, "after storing")
+		objs, err := inner.List(ctx, "")
+		require.NoError(t, err)
+		assert.Empty(t, objs, "a lock that was stored after all is removed")
 	})
 	t.Run("pg_dump missing", func(t *testing.T) {
 		opts := p.takeOptions(newDir())

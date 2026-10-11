@@ -240,6 +240,97 @@ func (d *DirStorage) Put(ctx context.Context, key string, r io.Reader) (err erro
 	return nil
 }
 
+// linkFile makes newname a hard link to oldname inside root. Tests replace it
+// to simulate file systems without hard links and NFS retransmissions.
+var linkFile = func(root *os.Root, oldname, newname string) error { return root.Link(oldname, newname) }
+
+// PutNew writes body to a temporary file next to key and hard-links it into
+// place, so it fails with ErrExists instead of replacing an existing key.
+//
+// link は置き先が既にあれば失敗するので、同じ key へ同時に書いても片方だけが通る。
+// NFS のクライアントが link を送り直すと、1 回目で置けていても EEXIST が返る。
+// それを自分のものと見分けるのは呼ぶ側 (claimKey) の読み直し。hard link を作れない
+// ファイルシステム (一部の SMB など) では、O_EXCL で直接作る形に落ちる。
+func (d *DirStorage) PutNew(ctx context.Context, key string, body []byte) (err error) {
+	rel, err := d.rel(key)
+	if err != nil {
+		return err
+	}
+	root, err := d.openRoot()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	if err := d.checkMarker(root); err != nil {
+		return err
+	}
+	dir := filepath.Dir(rel)
+	if err := d.mkdirs(root, dir); err != nil {
+		return err
+	}
+	tmp, f, err := createTemp(root, dir)
+	if err != nil {
+		return err
+	}
+	// 置けても置けなくても、一時ファイルは残さない (link なら置き先が残る)。
+	defer func() { _ = root.Remove(tmp) }()
+	if err := d.writeSmall(key, f, body); err != nil {
+		return err
+	}
+	err = linkFile(root, tmp, rel)
+	switch {
+	case err == nil:
+		syncDir(filepath.Join(d.root, dir))
+		return nil
+	case errors.Is(err, fs.ErrExist):
+		return fmt.Errorf("backup: put %s: %w", key, ErrExists)
+	case errors.Is(err, syscall.EPERM) || errors.Is(err, errors.ErrUnsupported):
+		return d.createExclusive(root, key, rel, body)
+	}
+	return fmt.Errorf("backup: link %s: %w", key, err)
+}
+
+// createExclusive creates rel with O_EXCL and writes body into it. It is the
+// fallback of PutNew on file systems without hard links.
+//
+// 作ってから書き終えるまでの間は、中身の無いファイルが key に見える。その間に
+// 落ちると空のファイルが残るが、読み直しが一致しないので、誰もその世代を自分の
+// ものとは扱わない。
+func (d *DirStorage) createExclusive(root *os.Root, key, rel string, body []byte) error {
+	f, err := root.OpenFile(rel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, fs.ErrExist) {
+		return fmt.Errorf("backup: put %s: %w", key, ErrExists)
+	}
+	if err != nil {
+		return fmt.Errorf("backup: create %s: %w", key, err)
+	}
+	if err := d.writeSmall(key, f, body); err != nil {
+		_ = root.Remove(rel)
+		return err
+	}
+	syncDir(filepath.Join(d.root, filepath.Dir(rel)))
+	return nil
+}
+
+// writeSmall writes body to f, makes it durable, gives it filePerm and closes
+// it. f is closed even when it fails.
+func (d *DirStorage) writeSmall(key string, f *os.File, body []byte) error {
+	_, err := f.Write(body)
+	if err == nil {
+		err = f.Sync()
+	}
+	if err == nil {
+		err = d.chmodTolerant(key, func() error { return fchmod(f, filePerm) })
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return fmt.Errorf("backup: write %s: %w", key, err)
+	}
+	return nil
+}
+
 // createTemp creates a new file named dirTempPrefix+random in dir.
 func createTemp(root *os.Root, dir string) (string, *os.File, error) {
 	for range 10 {
