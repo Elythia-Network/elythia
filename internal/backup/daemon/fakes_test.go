@@ -201,8 +201,9 @@ type fakeVerifier struct {
 	// the daemon still rolls back.
 	cancelWrites bool
 	// cancelJudged makes a cancelled verification store a verdict (all three
-	// stages, restorable failed) and return no error, as backup.Verify does
-	// when it is stopped after the verdict, during the cleanup.
+	// stages; restorable failed when fail is set, all passed otherwise) and
+	// return no error, as backup.Verify does when it is stopped after the
+	// verdict, during the cleanup.
 	cancelJudged bool
 	// afterStore, when set, is called after verify.json is stored, before
 	// Verify returns.
@@ -225,9 +226,15 @@ func (f *fakeVerifier) Verify(ctx context.Context, id string) (backup.VerifyResu
 				{Stage: backup.StageReadable, OK: true},
 				{Stage: backup.StageRestorable, Error: restorableError},
 			}}
-			if cancelJudged {
+			switch {
+			case cancelJudged && fail:
 				res.Stages = append(res.Stages, backup.StageResult{Stage: backup.StageUsable, Skipped: true})
 				res.Mismatches = []backup.RowMismatch{{Table: "public.note", Expected: 10, Actual: 9}}
+			case cancelJudged:
+				res.OK = true
+				res.Stages = []backup.StageResult{
+					{Stage: backup.StageReadable, OK: true}, {Stage: backup.StageRestorable, OK: true}, {Stage: backup.StageUsable, OK: true},
+				}
 			}
 			b, _ := json.Marshal(res)
 			f.st.set(backup.Key(id, backup.VerifyFile), b)

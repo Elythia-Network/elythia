@@ -396,6 +396,7 @@ func TestDaemonVerdictBeforeInterruptionIsKept(t *testing.T) {
 			id = r.st.addGeneration(at(-1, 0), true, "ok")
 			r.ver.block = make(chan struct{})
 			r.ver.cancelJudged = true
+			r.ver.fail = true
 		})
 		r.start(t)
 		_, err := r.d.Start(JobVerify, id)
@@ -413,6 +414,29 @@ func TestDaemonVerdictBeforeInterruptionIsKept(t *testing.T) {
 		assert.NotContains(t, st.LastVerify.Error, "interrupted")
 		// daemon の ctx は切れているが、食い違いの通知は届ける (次の起動では確かめ直さない)。
 		assert.Equal(t, []EventKind{EventMismatch}, r.notify.kinds())
+	})
+}
+
+// 取った後の検証が判定を出した後に止められたら、切れた ctx で整理へ進まない。進むと
+// 保存先の操作が失敗して「整理の失敗」と知らせる (実物の保存先は ctx を見る)。
+func TestDaemonSkipsPruneWhenStoppedAfterVerdict(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := mustSchedule(t, config.BackupScheduleOptions{Interval: "24h", Keep: 1, Verify: true, DelayAfter: "240h"}, time.UTC)
+		var old string
+		r := newRig(t, s, func(r *rig) {
+			old = r.st.addGeneration(at(-2, 0), true, "ok")
+			r.ver.block = make(chan struct{})
+			r.ver.cancelJudged = true
+		})
+		r.start(t)
+		require.Len(t, r.taker.callTimes(), 1)
+		r.stop()
+		assert.Contains(t, r.st.ids(), old, "nothing is pruned after the stop")
+		st := r.d.Status()
+		require.NotNil(t, st.LastTake)
+		assert.Equal(t, "prune", st.LastTake.Stage)
+		assert.Contains(t, st.LastTake.Error, "interrupted")
+		assert.NotContains(t, r.notify.kinds(), EventFailure, "an interruption is not a failure")
 	})
 }
 
