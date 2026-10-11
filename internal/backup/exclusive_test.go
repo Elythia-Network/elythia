@@ -249,6 +249,7 @@ func TestDirStorage_PutNewFallbackWriteFailureLeavesNothing(t *testing.T) {
 	key := Key("20261010T040000Z", LockFile)
 	err = st.PutNew(context.Background(), key, []byte("x"))
 	require.ErrorIs(t, err, syscall.EIO)
+	require.ErrorIs(t, err, syscall.EPERM, "the link error that led to the fallback is kept")
 	require.Equal(t, 2, files, "the failure came from writing the O_EXCL file")
 	_, err = st.Stat(context.Background(), key)
 	require.ErrorIs(t, err, ErrNotFound)
