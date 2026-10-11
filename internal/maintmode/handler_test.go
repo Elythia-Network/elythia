@@ -192,10 +192,14 @@ func TestHandler_StaticFiles(t *testing.T) {
 	fav := filepath.Join(root, "favicon.ico")
 	require.NoError(t, os.WriteFile(fav, []byte("ico"), 0o644))
 
+	// dir の中から外を指す symlink は、たどらない。
+	require.NoError(t, os.Symlink(filepath.Join(root, "secret.txt"), filepath.Join(dist, "escape.txt")))
+
 	h := NewHandler(HandlerOptions{Static: []StaticRoute{
 		{Prefix: "/assets/", Dirs: []string{dist, repo}},
 		{Prefix: "/favicon.ico", Dirs: []string{fav}},
 		{Prefix: "/empty/"},
+		{Prefix: "/gone/", Dirs: []string{filepath.Join(root, "missing")}},
 	}})
 
 	rec := serve(h, http.MethodGet, "/assets/a.js", nil)
@@ -207,7 +211,7 @@ func TestHandler_StaticFiles(t *testing.T) {
 	rec = serve(h, http.MethodGet, "/favicon.ico", nil)
 	assert.Equal(t, http.StatusOK, rec.Code)
 
-	for _, p := range []string{"/assets/sub", "/assets/", "/assets/missing.js", "/assets/../secret.txt", "/assets/%2e%2e/secret.txt", "/empty/x"} {
+	for _, p := range []string{"/assets/sub", "/assets/", "/assets/missing.js", "/assets/../secret.txt", "/assets/%2e%2e/secret.txt", "/assets/escape.txt", "/empty/x", "/gone/x"} {
 		rec = serve(h, http.MethodGet, p, nil)
 		assert.Equal(t, http.StatusServiceUnavailable, rec.Code, p)
 		assert.NotContains(t, rec.Body.String(), "secret", p)
