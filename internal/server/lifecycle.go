@@ -486,14 +486,18 @@ func (s *Supervisor) shutdownNow(b shutdownBudget, stopCalled chan<- struct{}) e
 		slog.Warn("a generation switch is still running; leaving its generation to it")
 		close(stopCalled)
 	} else {
+		// ロックを待つ間に、走っていた切り替え (メンテナンスを抜ける作り直し) が
+		// 新しい世代のハンドラーを差し込んでいることがある。もう一度 unavailable に
+		// 差し替え、差し込まれたハンドラーの処理中も待つ (#3463 のレビュー1周目 L-3)。
+		again := s.setHandler(http.HandlerFunc(unavailable))
 		if gen := s.gen; gen != nil {
-			inFlight := retire(drainCtx, old)
+			inFlight := max(retire(drainCtx, old), retire(drainCtx, again))
 			// 期限が切れていても、背景処理の停止は必ず呼ぶ。渡す ctx は全体の期限。
 			stopCtx, cancelStop := context.WithDeadline(context.Background(), b.deadline)
 			close(stopCalled)
 			errs = append(errs, gen.srv.StopBackground(stopCtx))
 			cancelStop()
-			if inFlight = max(inFlight, old.active.Load()); inFlight > 0 {
+			if inFlight = max(inFlight, old.active.Load(), again.active.Load()); inFlight > 0 {
 				slog.Warn("closing the database with requests still in flight", "inFlight", inFlight)
 			}
 			closeCtx, cancelClose := context.WithDeadline(context.Background(), b.deadline)

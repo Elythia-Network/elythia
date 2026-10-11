@@ -334,3 +334,42 @@ func TestSupervisor_ShutdownReturnsAtItsDeadlineOnceHooksAreCalled(t *testing.T)
 	assert.Less(t, time.Since(start), 2500*time.Millisecond, "遅い hook の終わりまで Shutdown が返らない")
 	<-hookDone
 }
+
+// TestSupervisor_ShutdownWaitsForAHandlerInstalledWhileItWaitedForTheLock
+// fixes #3463 review L-3: a switch that held the lock could install the
+// handler of a new generation after Shutdown routed requests to
+// unavailable; Shutdown then closed the DB without waiting for the requests
+// on that handler.
+func TestSupervisor_ShutdownWaitsForAHandlerInstalledWhileItWaitedForTheLock(t *testing.T) {
+	f := newFakeGenerations(t)
+	sup, err := NewSupervisor(&config.Config{}, nil, f.deps(5*time.Second))
+	require.NoError(t, err)
+	sup.genMu.Lock() // メンテナンスを抜ける作り直しの途中
+	shutdownDone := make(chan error, 1)
+	go func() { shutdownDone <- sup.Shutdown(context.Background()) }()
+	require.Eventually(t, func() bool {
+		code, _ := getBody(t, sup, "/healthz")
+		return code == http.StatusServiceUnavailable
+	}, 5*time.Second, 5*time.Millisecond)
+	// 作り直しが新しい世代のハンドラーを差し込み、そこへリクエストが届く。
+	sup.setHandler(sup.gen.srv.ServeHandler())
+	slowDone := make(chan int, 1)
+	go func() {
+		code, _ := getBody(t, sup, "/slow")
+		slowDone <- code
+	}()
+	<-f.entered
+	sup.genMu.Unlock()
+	select {
+	case <-shutdownDone:
+		t.Fatal("差し込まれたハンドラーの処理中を待たずに Shutdown が終わった")
+	case <-time.After(200 * time.Millisecond):
+	}
+	assert.Zero(t, f.closed.Load(), "処理中のリクエストがあるのに DB を閉じた")
+	code, _ := getBody(t, sup, "/healthz")
+	assert.Equal(t, http.StatusServiceUnavailable, code, "Shutdown がロックを取った後も新しい世代へ回している")
+	close(f.release)
+	assert.Equal(t, http.StatusOK, <-slowDone)
+	require.NoError(t, <-shutdownDone)
+	assert.EqualValues(t, 1, f.closed.Load())
+}
