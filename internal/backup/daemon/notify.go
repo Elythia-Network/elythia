@@ -26,6 +26,9 @@ const (
 	EventMismatch EventKind = "mismatch"
 	// EventDelay: no usable generation was made within DelayAfter.
 	EventDelay EventKind = "delay"
+	// EventRestoreStopped: a restore from the admin page stopped with the
+	// maintenance on, and an operator has to decide (#3463 (6c)).
+	EventRestoreStopped EventKind = "restore_stopped"
 )
 
 // Event is one notification.
@@ -57,6 +60,8 @@ func (e Event) Text() string {
 		b.WriteString("verification found a broken backup")
 	case EventDelay:
 		b.WriteString("no new backup")
+	case EventRestoreStopped:
+		b.WriteString("a restore stopped and left the maintenance on")
 	}
 	if e.GenerationID != "" {
 		fmt.Fprintf(&b, " (generation %s)", e.GenerationID)

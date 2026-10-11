@@ -157,6 +157,11 @@ const (
 	LogVerifyBackup   LogType = "verifyBackup"
 	LogDeleteBackup   LogType = "deleteBackup"
 	LogDownloadBackup LogType = "downloadBackup"
+	// 画面からのリストア (#3463 (6c))。バックアップ用のサービスが書く。準備を始めた
+	// ときは今の DB に、名前を入れ替えた後は戻した DB に書く (どちらの DB を見ても、
+	// 誰がいつ戻したかが分かるように)。info は {generationId, opId, phase}
+	// (phase は "prepare" か "switch")。
+	LogRestoreBackup LogType = "restoreBackup"
 )
 
 // UserInfo builds the standard {userId, userUsername, userHost} info

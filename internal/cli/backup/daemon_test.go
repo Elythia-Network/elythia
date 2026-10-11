@@ -12,16 +12,21 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"filippo.io/age"
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	backupkit "github.com/elythia-network/elythia/internal/backup"
 	"github.com/elythia-network/elythia/internal/backup/daemon"
+	"github.com/elythia-network/elythia/internal/backup/restoreop"
 	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/maintmode"
 )
 
 type syncBuffer struct {
@@ -423,11 +428,11 @@ func TestBuildPassesOptions(t *testing.T) {
 		Server:   config.BackupServerOptions{ServiceToken: "tok"},
 	})
 	e.openDeps = func(*config.Config, *slog.Logger) (Deps, error) { return Deps{}, errors.New("deps failed") }
-	_, _, err := build(e, cfg, discardLogger())
+	_, _, _, err := build(e, cfg, discardLogger())
 	require.EqualError(t, err, "deps failed")
 
 	e, _, _ = daemonTestEnv(t, nil)
-	d, h, err := build(e, cfg, discardLogger())
+	d, h, _, err := build(e, cfg, discardLogger())
 	require.NoError(t, err)
 	require.NotNil(t, h)
 	st := d.Status()
@@ -436,3 +441,105 @@ func TestBuildPassesOptions(t *testing.T) {
 }
 
 func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
+
+// TestBuildRestoreParts checks that the restore from the admin page is
+// built only with the control API, and that a failure to build it leaves
+// taking and verifying running.
+func TestBuildRestoreParts(t *testing.T) {
+	cfg := cfgWith(&config.BackupOptions{
+		Schedule: config.BackupScheduleOptions{Interval: "24h", Listen: ":0"},
+		Server:   config.BackupServerOptions{ServiceToken: "tok"},
+	})
+	var built int
+	e, _, _ := daemonTestEnv(t, nil)
+	e.openRestore = func(*config.Config, *daemon.Daemon, backupkit.Storage, *slog.Logger) (*RestoreParts, error) {
+		built++
+		return nil, errors.New("redis down")
+	}
+	d, h, parts, err := build(e, cfg, discardLogger())
+	require.NoError(t, err, "the daemon starts without the restore")
+	assert.NotNil(t, d)
+	assert.NotNil(t, h)
+	assert.Nil(t, parts)
+	assert.Equal(t, 1, built)
+
+	noAPI := cfgWith(&config.BackupOptions{Schedule: config.BackupScheduleOptions{Interval: "24h"}})
+	_, h, parts, err = build(e, noAPI, discardLogger())
+	require.NoError(t, err)
+	assert.Nil(t, h)
+	assert.Nil(t, parts)
+	assert.Equal(t, 1, built, "not built without the control API")
+}
+
+// TestDaemonStartsAndClosesTheRestore checks that runDaemon starts the
+// restore manager (which recovers an unfinished restore) and closes it.
+func TestDaemonStartsAndClosesTheRestore(t *testing.T) {
+	cfg := cfgWith(&config.BackupOptions{
+		Schedule: config.BackupScheduleOptions{Listen: ":0"},
+		Server:   config.BackupServerOptions{ServiceToken: "tok"},
+	})
+	e, _, cancel := daemonTestEnv(t, cfg)
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	store := restoreop.NewStore(rdb, "p:")
+	closed := make(chan struct{})
+	var acquired atomic.Int32
+	e.openRestore = func(_ *config.Config, d *daemon.Daemon, _ backupkit.Storage, _ *slog.Logger) (*RestoreParts, error) {
+		m := restoreop.New(restoreop.Options{
+			Store: store, Maint: maintmode.NewStore(rdb, rdb, "p:"), DB: stubRestoreDB{},
+			Acquire: func() (func(), error) {
+				release, err := d.Acquire(daemon.JobRestore)
+				if err == nil {
+					acquired.Add(1)
+				}
+				return release, err
+			},
+			Logger: discardLogger(),
+		})
+		return &RestoreParts{Manager: m, Close: func() { close(closed) }}, nil
+	}
+	// 前の実行が残した、片付けるべき記録 (中止の途中) を置く。
+	require.NoError(t, rdb.Set(context.Background(), store.CurrentKey(), "restore-left", 0).Err())
+	require.NoError(t, rdb.HSet(context.Background(), "p:elythia:maintenance:restore:restore-left", "opId", "restore-left", "step", "aborting").Err())
+	done := make(chan int, 1)
+	go func() { done <- runDaemon(e, nil) }()
+	require.Eventually(t, func() bool { return acquired.Load() == 1 }, 5*time.Second, 10*time.Millisecond,
+		"the manager takes the job slot to recover")
+	cancel()
+	select {
+	case code := <-done:
+		assert.Equal(t, 0, code)
+	case <-time.After(10 * time.Second):
+		t.Fatal("runDaemon did not return")
+	}
+	select {
+	case <-closed:
+	default:
+		t.Fatal("the restore parts were not closed")
+	}
+}
+
+// stubRestoreDB does nothing.
+type stubRestoreDB struct{}
+
+func (stubRestoreDB) Load(context.Context, string) (*backupkit.RestorePlan, error) { return nil, nil }
+func (stubRestoreDB) CheckTarget(context.Context, backupkit.RestoreOptions) error  { return nil }
+func (stubRestoreDB) CheckCompatibility(context.Context, *backupkit.RestorePlan, backupkit.RestoreOptions) error {
+	return nil
+}
+func (stubRestoreDB) RestoreInto(context.Context, *backupkit.RestorePlan, backupkit.RestoreOptions, string) error {
+	return nil
+}
+func (stubRestoreDB) VerifyRestored(context.Context, string, backupkit.Meta) error { return nil }
+func (stubRestoreDB) ApplyDatabaseSettings(context.Context, string, backupkit.Meta) ([]string, error) {
+	return nil, nil
+}
+func (stubRestoreDB) Migrate(string) ([]backupkit.MigrationState, error) { return nil, nil }
+func (stubRestoreDB) SwitchDatabase(context.Context, string, string, string, string) error {
+	return nil
+}
+func (stubRestoreDB) DropDatabase(context.Context, string, string) error { return nil }
+func (stubRestoreDB) ExistingDatabases(context.Context, string, []string) (map[string]bool, error) {
+	return nil, nil
+}
