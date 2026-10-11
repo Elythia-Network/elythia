@@ -319,3 +319,72 @@ func TestGiveUpAdvice(t *testing.T) {
 		assert.Contains(t, n, "elythia maintenance status")
 	})
 }
+
+// TestRecover_GivesUpWhenItCannotTell covers the recoveries that cannot
+// decide and must leave the operation to an operator untouched.
+func TestRecover_GivesUpWhenItCannotTell(t *testing.T) {
+	swapped := map[string]string{testDB: "restored", before: "current"}
+	cases := []struct {
+		name  string
+		step  string
+		names map[string]string
+		phase string
+		aside string
+		hook  func(h *hookMaint)
+	}{
+		{"resuming with the maintenance unreadable", StepResuming, swapped, maintmode.PhaseResuming, "",
+			func(h *hookMaint) { h.failGet = errors.New("redis down") }},
+		{"resuming that cannot resume", StepResuming, swapped, maintmode.PhaseHeld, "",
+			func(h *hookMaint) {
+				h.failSet = func(string) error { return errors.New("cannot write") }
+			}},
+		{"reverting with names of neither side", StepReverting, map[string]string{testDB: "x"}, maintmode.PhaseHeld, testDB + "_rolled_back_1", nil},
+		{"reverting with the maintenance unreadable", StepReverting, map[string]string{testDB: "current", testDB + "_rolled_back_1": "restored"}, maintmode.PhaseHeld, testDB + "_rolled_back_1",
+			func(h *hookMaint) { h.failGet = errors.New("redis down") }},
+		{"an unknown step", "bogus", swapped, maintmode.PhaseHeld, "", nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var h *hookMaint
+			e := newEnv(t, withHook(&h))
+			e.stop()
+			ctx := context.Background()
+			require.NoError(t, e.store.create(ctx, &Record{OpID: "restore-x", Step: c.step, Database: testDB, Target: tgt, Before: before, Aside: c.aside}))
+			e.db.mu.Lock()
+			e.db.dbs = map[string]string{}
+			for k, v := range c.names {
+				e.db.dbs[k] = v
+			}
+			e.db.mu.Unlock()
+			require.NoError(t, e.maint.Enter(ctx, maintmode.State{OpID: "restore-x", Kind: maintmode.KindRestore, Phase: c.phase}))
+			if c.hook != nil {
+				c.hook(h)
+			}
+			e.start()
+			e.waitStep("restore-x", StepUnknown)
+			assert.Equal(t, c.names, e.db.names(), "nothing is renamed")
+			assert.Empty(t, e.db.drops)
+		})
+	}
+}
+
+// TestCanStart checks the reasons an operation cannot start, which the
+// control API asks before it spends a re-authentication.
+func TestCanStart(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	require.NoError(t, e.m.CanStart(ctx))
+	require.NoError(t, e.store.create(ctx, &Record{OpID: "restore-left", Step: StepReady, Database: testDB, Target: tgt, Before: before}))
+	assert.ErrorIs(t, e.m.CanStart(ctx), ErrBusy)
+
+	r := newEnv(t, func(o *Options) { o.Replicas = true })
+	assert.ErrorIs(t, r.m.CanStart(ctx), ErrReplicas)
+	require.NoError(t, r.maint.Enter(ctx, maintmode.State{OpID: "m1", Kind: maintmode.KindManual}))
+	assert.ErrorIs(t, r.m.CanStart(ctx), ErrMaintenanceActive)
+	assert.ErrorIs(t, r.m.NoMaintenance(ctx), ErrMaintenanceActive)
+
+	var h *hookMaint
+	f := newEnv(t, withHook(&h))
+	h.failGet = errors.New("redis down")
+	assert.ErrorContains(t, f.m.CanStart(ctx), "redis down")
+}
