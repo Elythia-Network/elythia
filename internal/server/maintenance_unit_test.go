@@ -301,7 +301,7 @@ func (c *dbCounter) Sessions(context.Context) ([]maintmode.Blocker, error) {
 	return out, nil
 }
 
-func (c *dbCounter) Terminate(context.Context, maintmode.Blocker) error { return nil }
+func (c *dbCounter) Terminate(context.Context, maintmode.Blocker) (bool, error) { return false, nil }
 
 func stateOf(t *testing.T, store *maintmode.Store) *maintmode.State {
 	t.Helper()
