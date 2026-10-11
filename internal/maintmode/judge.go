@@ -421,7 +421,7 @@ func (c *PGCounter) Terminate(ctx context.Context, b Blocker) (bool, error) {
 			return false, err
 		}
 		defer func() { _ = conn.Close(context.Background()) }()
-		return pgactivity.Terminate(ctx, conn, b.PID, t.Database, ElythiaApplicationPrefix)
+		return pgactivity.Terminate(ctx, conn, b.PID, t.Database, b.Application)
 	}
 	return false, fmt.Errorf("maintmode: unknown server %q", b.Server)
 }
