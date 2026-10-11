@@ -169,6 +169,7 @@ import MkKeyValue from '@/components/MkKeyValue.vue';
 import MkSwitch from '@/components/MkSwitch.vue';
 import * as os from '@/os.js';
 import { misskeyApi } from '@/utility/misskey-api.js';
+import { createSequentialPoller } from '@/utility/sequential-poller.js';
 import { i18n } from '@/i18n.js';
 import { definePage } from '@/page.js';
 import { ensureSignin } from '@/i.js';
@@ -304,7 +305,6 @@ const RESTORE_STORAGE_KEY = 'elythia:backupRestore';
 const RESTORE_POLL_MS = 2000;
 
 const restore = ref<{ ticket: Elythia.BackupRestoreTicket; status: Elythia.BackupRestoreStatus | null; error: string | null } | null>(null);
-let restoreTimer: number | null = null;
 
 function saveRestoreTicket(t: Elythia.BackupRestoreTicket | null): void {
 	try {
@@ -326,45 +326,45 @@ function loadRestoreTicket(): Elythia.BackupRestoreTicket | null {
 	}
 }
 
-async function pollRestore(): Promise<void> {
+async function pollRestore(isCurrent: () => boolean): Promise<boolean> {
 	const r = restore.value;
-	if (r == null) return;
+	if (r == null) return false;
 	try {
 		// セッションは i ではなく session で送る。本体は status を認証しないので、戻した DB に
 		// このセッションが無くても読める (i で送ると、本体の認証が 401 で断る)。
-		r.status = await misskeyApi('admin/backup/restore/status', { ...r.ticket, session: $i.token }, null);
+		const status = await misskeyApi('admin/backup/restore/status', { ...r.ticket, session: $i.token }, null);
+		if (!isCurrent()) return false;
+		r.status = status;
 		r.error = null;
-		if (r.status.final) stopPolling();
+		return !status.final;
 	} catch (err) {
+		if (!isCurrent()) return false;
 		// メンテナンスへの出入りや本体の再起動の間は読めないことがある。読み直し続ける。
 		const code = (err as { code?: string } | null)?.code;
 		if (code === 'RESTORE_TICKET_INVALID' || code === 'NO_SUCH_RESTORE') {
-			stopPolling();
 			r.error = errorText(err);
-			return;
+			return false;
 		}
 		if (code === 'AUTHENTICATION_FAILED' || code === 'CREDENTIAL_REQUIRED') {
 			// 読み直しても変わらない。サインアウトや保存した値の消去はしない (戻した DB に
 			// セッションが無いだけのことがあり、サインインし直せば使える)。
-			stopPolling();
 			r.error = i18n.ts._backups.restoreSessionGone;
-			return;
+			return false;
 		}
 		r.error = i18n.ts._backups.restoreStatusUnavailable;
+		return true;
 	}
 }
 
+// 前の要求が終わってから次を予約する (間隔で回すと、応答の遅い間に要求が重なる)。
+const restorePoller = createSequentialPoller(pollRestore, RESTORE_POLL_MS);
+
 function startPolling(): void {
-	stopPolling();
-	restoreTimer = window.setInterval(pollRestore, RESTORE_POLL_MS);
-	void pollRestore();
+	restorePoller.start();
 }
 
 function stopPolling(): void {
-	if (restoreTimer != null) {
-		window.clearInterval(restoreTimer);
-		restoreTimer = null;
-	}
+	restorePoller.stop();
 }
 
 async function startRestore(g: Elythia.BackupGeneration): Promise<void> {
