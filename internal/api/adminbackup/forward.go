@@ -104,11 +104,11 @@ func (f *Forwarder) Serve(w http.ResponseWriter, r *http.Request, op, clientIP s
 			return
 		}
 	}
-	if _, ok := fields["i"]; !ok {
-		if tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok && tok != "" {
-			b, _ := json.Marshal(tok)
-			fields["i"] = b
-		}
+	// 本体の認証 (middleware の extractToken) と同じく、ヘッダーの token を本文の i より
+	// 先に使う。逆だと、本体が管理者と確かめた token と別の token で daemon が照合する。
+	if tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok && tok != "" {
+		b, _ := json.Marshal(tok)
+		fields["i"] = b
 	}
 	out, err := json.Marshal(fields)
 	if err != nil {
