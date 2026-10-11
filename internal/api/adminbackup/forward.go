@@ -24,6 +24,11 @@ const RestorePathPrefix = "/api/admin/backup/restore/"
 // RestoreOps are the forwarded operations.
 var RestoreOps = []string{"prepare", "confirm", "abort", "status"}
 
+// ServiceAuthChallenge is the WWW-Authenticate the backup service sends when
+// it refuses the service token. The forwarder tells it from a 401 about the
+// administrator's own credentials by it.
+const ServiceAuthChallenge = `Bearer realm="elythia-backup"`
+
 // idServiceUnreachable is returned when the backup service cannot be reached.
 const idServiceUnreachable = "1d3f5b9a-27c4-4e60-9f0e-6a8b2c4d7e19"
 
@@ -137,9 +142,11 @@ func (f *Forwarder) Serve(w http.ResponseWriter, r *http.Request, op, clientIP s
 		f.unreachable(w, err)
 		return
 	}
-	if res.StatusCode == http.StatusUnauthorized {
+	if res.StatusCode == http.StatusUnauthorized && res.Header.Get("WWW-Authenticate") == ServiceAuthChallenge {
 		// daemon が serviceToken を断った。本体と daemon の設定の食い違いで、利用者の
 		// 認証の誤りではない (401 のまま返すと、画面がサインアウトの扱いをする)。
+		// 利用者の token が無いときの daemon の 401 (CREDENTIAL_REQUIRED) は、この
+		// ヘッダーを付けないので、そのまま返す。
 		slog.Error("admin/backup: the backup service refused the service token; check backup.server.serviceToken")
 		f.unreachable(w, nil)
 		return

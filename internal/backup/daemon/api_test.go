@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/elythia-network/elythia/internal/api/adminbackup"
 	"github.com/elythia-network/elythia/internal/backup"
 )
 
@@ -59,7 +60,7 @@ func TestHandlerRejectsWrongToken(t *testing.T) {
 			code, body, hdr := call(t, h, tc.method, tc.path, tc.token, `{"id":"20000101T000000Z"}`)
 			assert.Equal(t, http.StatusUnauthorized, code, "%+v", tc)
 			assert.Equal(t, "unauthorized", body["error"])
-			assert.Contains(t, hdr.Get("WWW-Authenticate"), "Bearer")
+			assert.Equal(t, adminbackup.ServiceAuthChallenge, hdr.Get("WWW-Authenticate"), "the main server tells this 401 from the administrator's by it")
 		}
 		// "Bearer " の付かない生の token も通さない。
 		req := httptest.NewRequest("POST", "/take", nil)
