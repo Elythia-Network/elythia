@@ -538,7 +538,7 @@ ID                STATUS    SIZE  ENCRYPTED  VERIFIED  ELYTHIA  MIGRATION
 |---|---|
 | `STATUS` | `complete`(`meta.json`と、それが名指しするdumpがある)、`incomplete`(`meta.json`が無い。途中で止まったもの)、`no-dump`(`meta.json`はあるがdumpが無い。戻せない)、`unreadable`(`meta.json`が読めない。知らない`formatVersion`など) |
 | `SIZE` | 世代のファイルの合計(bytes) |
-| `VERIFIED` | 確かめた結果。通れば`ok`、通らなければ`failed`、まだ確かめていなければ`-`。`verify.json`の`ok`が`true`でも、別の世代の結果か、`dumpSha256`が今の`meta.json`と違う(同じIDで取り直された)ときは`failed`にする。戻す処理(`-id latest`)と管理画面と同じ基準 |
+| `VERIFIED` | 確かめた結果。通れば`ok`、通らなければ`failed`、まだ確かめていなければ`-`。`verify.json`の`ok`が`true`でも、別の世代の結果か、`dumpSha256`が今の`meta.json`と違う(同じIDで取り直された)か、`meta.json`が無い・読めないときは`failed`にする。戻す処理(`-id latest`)と管理画面と同じ基準 |
 | `MIGRATION` | `schema_migrations`の番号。表が無ければ`missing`、行が無ければ`empty`、dirtyなら`(dirty)`が付く |
 
 ## 管理画面(#3462)
