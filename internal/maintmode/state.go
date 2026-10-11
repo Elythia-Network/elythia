@@ -116,6 +116,9 @@ type State struct {
 	// JudgeError is the last error of the judge (e.g. it could not reach
 	// PostgreSQL), empty when the last look succeeded.
 	JudgeError string `json:"judgeError"`
+
+	// phaseMissing is set when the hash has no phase (read as entering).
+	phaseMissing bool
 }
 
 // Holding reports whether the processes should keep away from the database.
@@ -189,8 +192,9 @@ func (s *Store) Get(ctx context.Context) (*State, error) {
 	_ = json.Unmarshal([]byte(m["terminated"]), &st.Terminated)
 	if st.Phase == "" {
 		// phase の無い hash は、書きかけか壊れたもの。安全側に倒して
-		// メンテナンス中として扱う。
+		// メンテナンス中として扱う。判定役はこれを判定しない。
 		st.Phase = PhaseEntering
+		st.phaseMissing = true
 	}
 	return st, nil
 }

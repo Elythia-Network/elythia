@@ -432,7 +432,7 @@ func TestJudge_DoesNotJudgeAStateWithoutOpID(t *testing.T) {
 	mr.HSet(s.StateKey(), "phase", PhaseEntering)
 	for range 3 {
 		_, err := j.Step(ctx)
-		assert.ErrorContains(t, err, "no opId")
+		assert.ErrorContains(t, err, "no opId or no phase")
 		c.add(time.Hour)
 	}
 	assert.Empty(t, f.terminated, "opId の無い状態で接続を切った")
@@ -666,4 +666,26 @@ func TestJudge_RememberedLiveProcessIsNotCountedTwice(t *testing.T) {
 	_, err := j.Step(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, []int{60}, f.terminated)
+}
+
+// TestJudge_DoesNotJudgeAStateWithoutPhase checks #3463 review round 2 item
+// 8: a hash with an opId but no phase reads as entering, but the judge's
+// writes need the phase, so judging it would only terminate sessions.
+func TestJudge_DoesNotJudgeAStateWithoutPhase(t *testing.T) {
+	s, mr := newTestStore(t)
+	ctx := context.Background()
+	c := newClock()
+	f := &fakeCounter{}
+	f.set(elythiaSession(18))
+	require.NoError(t, s.Report(ctx, ProcReport{ID: "p1", State: ProcDrained}))
+	mr.HSet(s.StateKey(), "opId", "op")
+	j := c.judge(s, f, "j")
+	for range 3 {
+		_, err := j.Step(ctx)
+		assert.ErrorContains(t, err, "no phase")
+		c.add(time.Hour)
+	}
+	assert.Empty(t, f.terminated, "phase の無い状態で接続を切った")
+	st, _ := s.Get(ctx)
+	assert.True(t, st.Holding(), "phase の無い状態は、各プロセスにはメンテナンス中と読ませる")
 }
