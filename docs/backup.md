@@ -580,7 +580,7 @@ ID                STATUS    SIZE  ENCRYPTED  VERIFIED  ELYTHIA  MIGRATION
 
 パスキーのchallengeは、サインインのものとは別に置く。サインインのために出したchallengeへの応答は、ここでは通らない。challengeを置いたRedisに繋がらないときは、照合できなかったものとして拒否し(503)、失敗には数えない。
 
-成立した操作は、モデレーションログに残す(`listBackups` / `takeBackup` / `verifyBackup` / `deleteBackup` / `downloadBackup`)。ログは操作の応答と別に書くので、書き込みに失敗しても操作は取り消されず、本体のログに警告(`moderation log: write failed`など)だけが残る。
+成立した操作は、モデレーションログに残す(`listBackups` / `takeBackup` / `verifyBackup` / `deleteBackup` / `downloadBackup`、[画面から戻す](#画面から戻す-3463)の`restoreBackup`)。ログは操作の応答と別に書くので、書き込みに失敗しても操作は取り消されず、本体のログに警告(`moderation log: write failed`など)だけが残る。
 
 ### 一覧と使用量
 
@@ -598,6 +598,34 @@ ID                STATUS    SIZE  ENCRYPTED  VERIFIED  ELYTHIA  MIGRATION
 - ディレクトリの保存先: 本体の`/backup-download?token=<token>`から渡す。tokenは5分だけ有効で、期限内なら途切れたダウンロードを再開できる(Range)。tokenは本体のアクセスログでは伏せられ、実際に取られたことは本体のログ(`admin/backup: backup downloaded`)に残る。前に置いたnginxでは、同梱の設定はアクセスログにqueryを出さないが、**エラーになったときの`error_log`の行にはtokenが残る**(nginxに伏せる手段が無い。[逆プロキシ](deployment.md#逆プロキシ-nginx))。数GBのdumpを返すので、nginxでは`/backup-download`の`proxy_buffering`を切る(同梱の`deploy/uds/nginx/mkgo.conf`と、[逆プロキシ](deployment.md#逆プロキシ-nginx)の例に入れてある)
 
 どちらも`<世代ID>-<ファイル名>`(例: `20261010T040000Z-dump.pgc`)の名前で保存される。暗号化した世代は、暗号化したまま渡す。戻すにはageの秘密鍵が要る。
+
+### 画面から戻す (#3463)
+
+検証に通った世代(一覧の「検証済み」)は、管理画面の「この世代へ戻す」で戻せる。戻す処理は`elythia backup daemon`が最初から最後まで行い、本体は管理画面のリクエストをdaemonへ転送するだけになる。そのため、`backup.server.serviceUrl`と`serviceToken`、daemonの`backup.schedule.listen`が要る。daemonはRedis(本体と同じ設定)に繋ぎ、`backup.encryption.identityFile`(暗号化した世代を戻すとき)と`pg_restore`を持つ。
+
+1. **準備**: 再認証の後、daemonが世代を`<DB名>_restore_<日時>`へ戻し、行数を突き合わせ、DB単位の設定を入れ直し、同梱のmigrationを当てる。**この間も本体は動いたまま**で、今のDBには触れない。準備に失敗したら、作ったDBを消して終わる
+2. **確定**: 準備ができたら、画面が「切り替える」と「中止」を出す。切り替えるには、もう一度再認証する。30分のうちに切り替えなければ、作ったDBを消して中止する
+3. **切り替え**: daemonが本体の全プロセスを[メンテナンスモード](deployment.md#メンテナンスモード)に入れ、DBへの接続が0になる(`held`)のを待つ。待つのは`maintenance.drainTimeout`に2分を足した時間までで、過ぎたら元のDBのままメンテナンスを抜けて中止する。`held`になったら、**名前を入れ替える直前にもう一度`pg_stat_activity`で接続が無いことを確かめて**、今のDBを`<DB名>_before_restore_<日時>`へ、戻したDBを`<DB名>`へ、1つのトランザクションで名前を変える(接続のあるDBの名前の変更はPostgreSQL自身も拒む)
+4. **後始末と検査**: Redisの後始末([戻す](deployment.md#redisの後始末)と同じkey)と、`elythia doctor`のうち本体が動いていなくても回せる検査を流す。どちらかが失敗したら、元のDBを`<DB名>`へ戻し(戻したDBは`<DB名>_rolled_back_<日時>`として残す)、もう一度Redisを片付けてから抜ける
+5. **再開**: メンテナンスを抜け、本体の全プロセスがDBと`Server`を作り直す。5分のうちに全プロセスが戻らなければ、もう一度メンテナンスに入れて元のDBへ戻す
+
+進み具合は画面に出る。切り替えの間はほかの管理画面のAPIが503になるので、画面を開いたままにする。再読み込みするとメンテナンスの画面になり、終わると戻る。進み具合を読む`opId`とticketはそのタブにだけ置き、準備をしたのと同じセッションでしか読めない。
+
+**再認証は、確定・中止も含めて常にdaemonが行う。** 本体で照合すると、同じTOTPのコードを本体とdaemonで二重に消費して落ちるため。daemonは照合のたびに本体のDBへ短い接続を張って閉じ(`application_name`は`elythia-backup/auth/...`)、名前を入れ替えている間は照合しない。条件は[認証](#認証)と同じで、失敗の数え方(`passwordguard`)とTOTPの使い回しの記録も本体と同じRedisに置く。本体が動いている間は、本体も前段で管理者とブラウザのtokenかどうかを見る。
+
+**途中でdaemonが止まったら**、起動し直したときに、Redisに残した記録(`<prefix>elythia:maintenance:restore:<opId>`)と`pg_database`の名前の組から、どこまで進んだかを決める。名前を入れ替える前なら作ったDBを消して元のDBで抜け、入れ替えた後なら元のDBへ戻す。どちらとも決められないとき(名前の組がどちらにも合わない、`pg_database`を読めない)と、入れ替えたかどうか分からないときは、**何もせずメンテナンスのまま止まり**、`restore_stopped`を[通知](#通知)する。そのときは、`pg_database`を確かめ、`elythia backup restore -rollback`([元に戻す](deployment.md#元に戻すロールバック))で正しいDBを`<DB名>`へ置いてから、`elythia maintenance exit`で抜ける。
+
+モデレーションログの`restoreBackup`は、準備を始めたときは今のDBに、名前を入れ替えた後は戻したDBに書く(どちらのDBを見ても、誰がいつ戻したかが分かる)。
+
+画面からは次のことができない。どれも[戻す](#戻す)のコマンドで行う。
+
+- 検証に通っていない世代を戻す
+- 読み取りレプリカ(`dbReplications`)を使う構成で戻す
+- 本体のプロセスとdaemonの版が違うときに戻す(daemonは自分の同梱のmigrationを当てるので、版が違うと本体が戻したDBで起動できないことがある)
+- 空のDBへ戻す(`-mode empty`)、`-rollback`で戻した後をさらに戻す
+- 本体が起動しない状態から戻す
+
+戻すのはDBだけで、ドライブのファイルが戻らないこと、連合の相手が受け取ったものは戻らないことは、コマンドで戻すときと同じ([戻すときに行うこと](deployment.md#戻すときに行うこと)、[連合への影響](deployment.md#連合への影響))。退避した`<DB名>_before_restore_<日時>`は自動では消さない。
 
 ### 上げるときにすること
 
