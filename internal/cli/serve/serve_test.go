@@ -10,11 +10,14 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
+	redis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -164,7 +167,7 @@ func TestServe_StartsAndShutsDownOnSignal(t *testing.T) {
 		"redis-close", "sentry-flush", "pid-cleanup",
 	}, h.steps)
 	// DB の接続には、このプロセスを表す名前が付く (#3463)。
-	assert.Regexp(t, `^elythia/both/.+/[0-9]+$`, h.appName)
+	assert.Regexp(t, `^elythia/both/.+-[0-9]+$`, h.appName)
 	assert.True(t, h.srv.shutdown)
 	assert.Contains(t, h.stdout.String(), "Elythia stopped.")
 	assert.Contains(t, h.log.String(), "shutting down server")
@@ -292,6 +295,20 @@ func TestDumpRoutes_Failures(t *testing.T) {
 		h := newHarness()
 		h.e.openDB = func(*config.Config) (*gorm.DB, error) { return nil, boom }
 		assert.Equal(t, 1, dumpRoutes(h.e, nil))
+		assert.Contains(t, h.log.String(), "failed to connect to database")
+	})
+	t.Run("build redis", func(t *testing.T) {
+		h := newHarness()
+		h.e.openRedis = func(*config.Config) (*cache.RedisClients, func(), error) { return nil, nil, boom }
+		assert.Equal(t, 1, dumpRoutes(h.e, nil))
+		assert.Contains(t, h.log.String(), "failed to connect to Redis")
+	})
+	t.Run("build server", func(t *testing.T) {
+		h := newHarness()
+		h.e.newServer = func(*config.Config, *gorm.DB, *cache.RedisClients) (httpServer, error) { return nil, boom }
+		assert.Equal(t, 1, dumpRoutes(h.e, nil))
+		assert.Contains(t, h.log.String(), "failed to construct server")
+		assert.Contains(t, h.steps, "redis-close", "構築に失敗したのに Redis を閉じていない")
 	})
 	t.Run("output file", func(t *testing.T) {
 		h := newHarness()
@@ -353,18 +370,40 @@ func TestDefaultEnv(t *testing.T) {
 	assert.Nil(t, clients)
 	assert.Nil(t, closeFn)
 
+	// 繋がる宛先なら、クライアントと閉じる関数を返す。
+	live := miniredis.RunT(t)
+	livePort, err := strconv.Atoi(live.Port())
+	require.NoError(t, err)
+	liveCfg := &config.Config{}
+	liveCfg.Redis = config.RedisOptions{Host: live.Host(), Port: livePort}
+	liveCfg.RedisForPubsub, liveCfg.RedisForJobQueue = liveCfg.Redis, liveCfg.Redis
+	liveCfg.RedisForTimelines, liveCfg.RedisForReactions = liveCfg.Redis, liveCfg.Redis
+	clients, closeFn, err = e.openRedis(liveCfg)
+	require.NoError(t, err)
+	require.NotNil(t, clients)
+	closeFn()
+
 	// 既定の Supervisor は DB を開くところから始める。誰も listen していない
 	// 宛先なら、DB の接続の失敗として返る。
+	// その前にメンテナンスの状態を Redis から読む (#3463)。
+	mr := miniredis.RunT(t)
+	rc := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rc.Close() })
 	cfg.DB = config.DBOptions{Host: "127.0.0.1", Port: port, DB: "x", User: "x", Pass: "x"}
-	sup, err := e.newSupervisor(cfg, &cache.RedisClients{})
+	sup, err := e.newSupervisor(cfg, &cache.RedisClients{Default: rc, Pubsub: rc})
 	assert.ErrorContains(t, err, "connect to database")
 	assert.Nil(t, sup)
+	// Redis が読めなければ、DB を開く前に失敗する。
+	mr.Close()
+	_, err = e.newSupervisor(cfg, &cache.RedisClients{Default: rc, Pubsub: rc})
+	// 最初に Redis へ書くのは「起動中」の報告 (#3463 のレビュー M1')。
+	assert.ErrorContains(t, err, "write the starting report")
 }
 
 func TestDBApplicationName(t *testing.T) {
 	t.Setenv(config.EnvOnlyServer, "1")
 	t.Setenv(config.EnvOnlyQueue, "")
-	assert.Regexp(t, fmt.Sprintf(`^elythia/server/.+/%d$`, os.Getpid()), dbApplicationName())
+	assert.Regexp(t, fmt.Sprintf(`^elythia/server/.+-%d$`, os.Getpid()), dbApplicationName())
 	// 矛盾した役割の指定は Server の構築で落ちるが、名前の段では止めない。
 	t.Setenv(config.EnvOnlyQueue, "1")
 	assert.Regexp(t, `^elythia/invalid/`, dbApplicationName())

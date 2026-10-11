@@ -76,6 +76,8 @@ func (f *dbFixture) migrate(t *testing.T, args ...string) (int, string) {
 	e.setLogger = func(*slog.Logger) {}
 	e.coreDir, e.localDir = f.coreDir, f.localDir
 	e.databaseURL = func(*config.Config) string { return f.migrateURL() }
+	// 手元の Redis を読みに行かない。
+	e.maintenance = nil
 	code := run(e, &bytes.Buffer{}, append([]string{"-config", writeConfig(t)}, args...))
 	return code, out.String()
 }

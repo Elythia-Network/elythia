@@ -15,7 +15,16 @@ if [ "$#" -gt 0 ]; then
 fi
 
 echo "[mkgo-entrypoint] running migrations..."
-/app/elythia migrate -config /app/.config/default.yml -direction up
+# メンテナンス中 (#3463) は migrate が 3 で終わる。そのときは migration を飛ばして
+# serve を起動する。serve は DB を開かずにメンテナンスの画面を出して待つ。
+# 3 以外の失敗は今までどおり止める。
+status=0
+/app/elythia migrate -config /app/.config/default.yml -direction up || status=$?
+if [ "$status" -eq 3 ]; then
+	echo "[mkgo-entrypoint] a maintenance is active; skipping migrations"
+elif [ "$status" -ne 0 ]; then
+	exit "$status"
+fi
 
 echo "[mkgo-entrypoint] starting misskey server..."
 exec /app/elythia serve -config /app/.config/default.yml

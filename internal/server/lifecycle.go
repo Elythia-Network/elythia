@@ -16,6 +16,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/core/cache"
+	"github.com/elythia-network/elythia/internal/maintmode"
 )
 
 // defaultDrainTimeout bounds how long stopping a generation waits for the
@@ -34,6 +35,19 @@ type SupervisorDeps struct {
 	// DrainTimeout bounds the wait for in-flight requests and for the DB pool
 	// to close when a generation stops. Zero means defaultDrainTimeout.
 	DrainTimeout time.Duration
+	// Maintenance, when set, makes the Supervisor follow the maintenance
+	// state in Redis: it stops the generation when a maintenance starts and
+	// builds a new one when it ends (#3463).
+	Maintenance *maintmode.Store
+	// MaintenanceCounter, when set together with Maintenance, makes the
+	// Supervisor a candidate judge: it takes the judge lock when nobody
+	// holds it and decides from pg_stat_activity when the database has been
+	// let go.
+	MaintenanceCounter maintmode.Counter
+	// ProcessID names this process in its maintenance report and as a judge.
+	ProcessID string
+	// MaintenancePoll overrides maintmode.PollInterval (tests).
+	MaintenancePoll time.Duration
 }
 
 // generation is one Server together with the DB pool it was built on.
@@ -83,10 +97,16 @@ type Supervisor struct {
 
 	shutdownOnce sync.Once
 	shutdownErr  error
+
+	// maint はメンテナンスの状態を追う部分 (maintenance.go)。deps.Maintenance が
+	// nil なら使わない。
+	maint maintTracker
 }
 
 // NewSupervisor builds the first server generation (opening the DB pool) and
-// returns a Supervisor ready to Start.
+// returns a Supervisor ready to Start. When deps.Maintenance reports an
+// active maintenance, it opens nothing and starts with the maintenance
+// handler instead; the generation is built once the maintenance is over.
 func NewSupervisor(cfg *config.Config, redis *cache.RedisClients, deps SupervisorDeps) (*Supervisor, error) {
 	if deps.OpenDB == nil || deps.NewServer == nil || deps.CloseDB == nil {
 		return nil, errors.New("server: supervisor deps are incomplete")
@@ -103,13 +123,39 @@ func NewSupervisor(cfg *config.Config, redis *cache.RedisClients, deps Superviso
 	s.httpSrv = &http.Server{Handler: s}
 	applyServerTimeouts(s.httpSrv)
 	s.setHandler(http.HandlerFunc(unavailable))
+	s.maint.init(s)
+
+	// 状態を読む前に「起動中」を報告する。判定役は starting の報告がある間は
+	// held にしないので、読んだ直後に入ったメンテナンスはこのプロセスを待つ。
+	// 順序が逆だと、DB を開く前のこのプロセスは pg_stat_activity にも報告にも
+	// 出ず、判定役が held にした後で DB を開きうる (設計第2版 §2.3)。
+	if err := s.maint.announceStarting(); err != nil {
+		return nil, fmt.Errorf("maintenance: write the starting report: %w", err)
+	}
+	// メンテナンス中に起動したら DB を開かない。抜けるのを待ってから、
+	// 監視の流れの中で世代を作る (設計 §3.4)。
+	holding, err := s.maint.holdingAtStartup()
+	if err != nil {
+		s.maint.stop(context.Background())
+		return nil, err
+	}
+	if holding {
+		slog.Info("maintenance is active; starting without opening the database")
+		s.setHandler(s.maint.handler)
+		s.maint.setProc(maintmode.ProcDrained, StopReport{})
+		s.maint.report(context.Background())
+		return s, nil
+	}
 
 	gen, err := s.buildGeneration()
 	if err != nil {
+		s.maint.stop(context.Background())
 		return nil, err
 	}
 	s.gen = gen
 	s.setHandler(gen.srv.ServeHandler())
+	s.maint.setProc(maintmode.ProcRunning, StopReport{})
+	s.maint.report(context.Background())
 	return s, nil
 }
 
@@ -304,6 +350,7 @@ func (s *Supervisor) Start() error {
 	if err != nil {
 		return err
 	}
+	s.maint.start()
 	addr := ln.Addr().String()
 	s.listenerAddr.Store(&addr)
 	close(s.listening)
@@ -381,16 +428,21 @@ func newShutdownBudget(ctx context.Context, now time.Time) shutdownBudget {
 //
 // 順序と時間の配分:
 //
-//  1. 新しいリクエストを unavailable へ回す
+//  1. メンテナンスの監視と判定役を止め、新しいリクエストを unavailable へ回す
 //  2. 処理中の HTTP リクエストを待つ (WebSocket は数えない)。世代の切り替えが
 //     走っていればその終わりも待つ。どちらも全体の 1/3 まで
 //  3. 世代の背景処理を止める (StopBackground: streaming を 1012 で閉じ、shutdown
 //     hook・chart の保存・queue の停止)。処理中のリクエストの待ちが上限に達しても
 //     呼ぶ。渡す ctx の期限は全体の期限 (切れていればそこから shutdownStopMin)
-//  4. 最後に DB を閉じる。処理中のリクエストが残っていたら、その数をログに出す
+//  4. 最後に DB を閉じ、メンテナンスの報告を消す。処理中のリクエストが残って
+//     いたら、その数をログに出す
 //
 // 例外: 切り替えのロックが 2 の上限までに取れなければ、世代は切り替えの側に任せ、
-// 3 と 4 を行わない。
+// 3 と 4 を行わない。報告は消さず、プロセスが終わるまで書き続ける (切り替えの
+// 途中の世代が DB を開きうるので、判定役に待たせる)。
+//
+// どの順序でも、メンテナンスの判定は誤らない。判定役は pg_stat_activity を
+// 根拠にし、報告が消えたことを「手放した」とは数えない (#3463 の設計第2版)。
 //
 // 呼び出し元の ctx が切れても、3 を始める (または 3 を行わないと決める) 前には
 // 返らない。その後は ctx が切れた時点で返り、残りは裏で続く。返った後に呼び出し元が
@@ -424,6 +476,8 @@ func (s *Supervisor) shutdownNow(b shutdownBudget, stopCalled chan<- struct{}) e
 	var errs []error
 	drainCtx, cancelDrain := context.WithDeadline(context.Background(), b.drainUntil)
 	defer cancelDrain()
+	// 監視を先に止める。止めないと、世代を止めた直後に作り直しかねない。
+	s.maint.stopWatch(drainCtx)
 	old := s.setHandler(http.HandlerFunc(unavailable))
 
 	// 世代の切り替えの途中なら、終わるのを待つ。待ちの段の上限を過ぎたら、世代は
@@ -451,6 +505,7 @@ func (s *Supervisor) shutdownNow(b shutdownBudget, stopCalled chan<- struct{}) e
 			close(stopCalled)
 		}
 		s.genMu.Unlock()
+		s.maint.leave()
 	}
 	httpCtx, cancelHTTP := context.WithDeadline(context.Background(), b.deadline)
 	errs = append(errs, s.httpSrv.Shutdown(httpCtx))
