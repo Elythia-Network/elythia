@@ -16,6 +16,10 @@ import (
 // 落ちたなら元の DB へ戻す (v1 §7-8 の決定)。決められないときは何もせず、
 // メンテナンスのまま運営者に渡す。
 func (m *Manager) recoverOnStart(ctx context.Context, held func()) {
+	if m.o.Recovering != nil {
+		m.o.Recovering(true)
+		defer m.o.Recovering(false)
+	}
 	release := held
 	defer func() {
 		if release != nil {

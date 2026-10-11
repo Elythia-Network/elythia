@@ -3,6 +3,7 @@ package restoreop
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -496,4 +497,22 @@ func TestRecover_RereadsRightAfterTheSlot(t *testing.T) {
 	e.cancel()
 	assert.Empty(t, e.db.drops, "a finished operation is not recovered")
 	assert.False(t, s.isHeld())
+}
+
+// TestRecover_TellsWhenItRecovers checks that the recovery tells the service
+// when it begins and ends, so that the service holds back its own work.
+func TestRecover_TellsWhenItRecovers(t *testing.T) {
+	var mu sync.Mutex
+	var told []bool
+	e := newEnv(t, func(o *Options) {
+		o.Recovering = func(v bool) {
+			mu.Lock()
+			defer mu.Unlock()
+			told = append(told, v)
+		}
+	})
+	e.m.Wait()
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, []bool{true, false}, told)
 }

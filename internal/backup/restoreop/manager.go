@@ -68,6 +68,10 @@ type Options struct {
 	// asks it so that a request is refused before its re-authentication
 	// (which would spend the TOTP code). Nil means never busy.
 	SlotBusy func() bool
+	// Recovering is told when the recovery at start begins (true) and ends
+	// (false), so that the service holds back its own start-up work until
+	// then. Nil is fine.
+	Recovering func(bool)
 	// Notify reports a state an operator has to resolve.
 	Notify func(ctx context.Context, message string)
 

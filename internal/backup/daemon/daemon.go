@@ -151,10 +151,13 @@ type Daemon struct {
 	// pendingVerify is the newest generation Run wanted to verify at start
 	// while the slot was reserved; it is verified when the slot comes back.
 	pendingVerify string
-	nextRun       time.Time
-	lastTake      *JobResult
-	lastVerify    *JobResult
-	latestUsable  *Generation
+	// recovering is set while the restore from the admin page recovers an
+	// unfinished operation; pendingVerify waits for it to end.
+	recovering   bool
+	nextRun      time.Time
+	lastTake     *JobResult
+	lastVerify   *JobResult
+	latestUsable *Generation
 	// usableBase is when the delay clock started: the newest usable
 	// generation, or the daemon start when there is none.
 	usableBase time.Time
@@ -380,6 +383,26 @@ func (d *Daemon) Start(kind JobKind, id string) (Job, error) {
 	return d.startLocked(kind, TriggerAPI, id, d.clock.Now()), nil
 }
 
+// SetRecovering marks that the restore from the admin page is recovering an
+// unfinished operation (true) or has finished (false).
+//
+// 回復が Redis を読めない間に枠を返しても、後回しにした検証は始めない。始めると、
+// 検証が終わるまで回復が枠を取れず、メンテナンスが外れない。回復が終わったら始める。
+func (d *Daemon) SetRecovering(v bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.recovering = v
+	if !v && d.pendingVerify != "" && d.running == nil && !d.stopping && d.ctx != nil && d.ctx.Err() == nil {
+		d.startPendingVerifyLocked()
+	}
+}
+
+func (d *Daemon) startPendingVerifyLocked() {
+	id := d.pendingVerify
+	d.pendingVerify = ""
+	d.startLocked(JobVerify, TriggerSchedule, id, d.clock.Now())
+}
+
 // SlotBusy reports whether a job (or a restore) holds the job slot now.
 func (d *Daemon) SlotBusy() bool {
 	d.mu.Lock()
@@ -434,10 +457,8 @@ func (d *Daemon) acquire(kind JobKind, beforeRun bool) (func(), error) {
 					d.pending = false
 					d.pendingVerify = ""
 					d.startLocked(JobTake, TriggerSchedule, "", d.clock.Now())
-				case d.pendingVerify != "":
-					id := d.pendingVerify
-					d.pendingVerify = ""
-					d.startLocked(JobVerify, TriggerSchedule, id, d.clock.Now())
+				case d.pendingVerify != "" && !d.recovering:
+					d.startPendingVerifyLocked()
 				}
 			}
 			d.mu.Unlock()

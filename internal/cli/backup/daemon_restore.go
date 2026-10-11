@@ -136,6 +136,7 @@ func (w restoreWiring) open(cfg *config.Config, d *daemon.Daemon, storage backup
 		},
 		Acquire:       func() (func(), error) { return d.Acquire(daemon.JobRestore) },
 		SlotBusy:      d.SlotBusy,
+		Recovering:    d.SetRecovering,
 		Notify:        d.NotifyRestoreStopped,
 		Database:      cfg.DB.DB,
 		MaintenanceDB: cfg.Maintenance.MaintenanceDB,
