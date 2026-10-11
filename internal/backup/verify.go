@@ -118,6 +118,7 @@ func Verify(ctx context.Context, s Storage, id string, opts VerifyOptions) (Veri
 		Stages:         stages,
 		Mismatches:     v.mismatches,
 		ElythiaVersion: version,
+		DumpSHA256:     meta.DumpSHA256,
 	}
 	if verr != nil {
 		return res, verr
