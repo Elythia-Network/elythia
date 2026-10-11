@@ -3201,6 +3201,32 @@ type MockMetaRepository struct {
 	// FetchErr forces Fetch to fail. 「DB が読めない窓」を再現するために使う
 	// (判定できないときに fail-open していないかを見るテスト)。
 	FetchErr error
+	// CheckedMeta, when set, is the row UpdateChecked hands to check instead of
+	// Meta. 実 repo の「transaction の中で読んだ行」がキャッシュ (Fetch) と
+	// 食い違う場面を再現する。
+	CheckedMeta *model.Meta
+	// UpdateCheckedCalls counts UpdateChecked calls.
+	UpdateCheckedCalls int
+}
+
+// UpdateChecked mimics repository.CheckedMetaUpdater: check sees the current
+// row (CheckedMeta, else Meta) and nothing is written when it fails.
+func (m *MockMetaRepository) UpdateChecked(fields map[string]any, check func(current *model.Meta) error) error {
+	m.mu.Lock()
+	m.UpdateCheckedCalls++
+	cur := m.Meta
+	if m.CheckedMeta != nil {
+		cur = m.CheckedMeta
+	}
+	if cur == nil {
+		cur = &model.Meta{}
+	}
+	m.mu.Unlock()
+	// ロックを持ったまま check を呼ばない (check が Fetch を呼ぶと止まる)。
+	if err := check(cur); err != nil {
+		return err
+	}
+	return m.Update(fields)
 }
 
 func NewMockMetaRepository() *MockMetaRepository {
