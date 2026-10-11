@@ -138,6 +138,27 @@ func (d *DirStorage) openRoot() (*os.Root, error) {
 	return r, nil
 }
 
+// ErrNoDirMarker is returned when DirMarkerFile is missing from the storage
+// root, as when the backup device is no longer mounted there.
+var ErrNoDirMarker = errors.New("backup: the storage directory has no " + DirMarkerFile)
+
+// checkMarker confirms that DirMarkerFile is still at the root.
+//
+// NewDirStorage で確かめるだけでは足りない。daemon は保存先を 1 回だけ作って使い
+// 回すので、その後に mount が外れると、ホストの空のディレクトリへ書き始める。書く
+// (と一覧する) たびに、その操作で使う根の fd で確かめ直す。同じ fd なので、確かめた
+// 後に mount し直されても、確かめた方の機器へ書く。
+func (d *DirStorage) checkMarker(root *os.Root) error {
+	fi, err := root.Stat(DirMarkerFile)
+	if err == nil && fi.Mode().IsRegular() {
+		return nil
+	}
+	if err == nil {
+		err = errors.New("not a regular file")
+	}
+	return fmt.Errorf("%w: %s (%v). Is the backup device still mounted there?", ErrNoDirMarker, d.root, err)
+}
+
 // lstatPath checks every directory between the root and rel with Lstat and
 // returns the FileInfo of rel itself. A symbolic link anywhere, rel
 // included, yields errSymlink.
@@ -174,6 +195,9 @@ func (d *DirStorage) Put(ctx context.Context, key string, r io.Reader) (err erro
 		return err
 	}
 	defer func() { _ = root.Close() }()
+	if err := d.checkMarker(root); err != nil {
+		return err
+	}
 	dir := filepath.Dir(rel)
 	if err := d.mkdirs(root, dir); err != nil {
 		return err
@@ -437,9 +461,21 @@ func regularFile(root *os.Root, rel string) (fs.FileInfo, error) {
 // 走査は prefix のディレクトリから始める。根から全体を走査すると、ext4 などを根に
 // mount したときの lost+found (root の 0700) のように、バックアップと関係の無い
 // 読めないディレクトリで一覧ごと失敗する。prefix のディレクトリが無ければ空を返す。
+//
+// 目印が無ければ失敗にする。mount が外れた後の空のディレクトリを「世代が無い」と
+// 読むと、daemon が世代の整理や遅れの検知を誤る。
 func (d *DirStorage) List(_ context.Context, prefix string) ([]ObjectInfo, error) {
+	root, err := d.openRoot()
+	if err != nil {
+		return nil, err
+	}
+	err = d.checkMarker(root)
+	_ = root.Close()
+	if err != nil {
+		return nil, err
+	}
 	var out []ObjectInfo
-	err := filepath.WalkDir(d.listStart(prefix), d.listWalkFunc(prefix, &out))
+	err = filepath.WalkDir(d.listStart(prefix), d.listWalkFunc(prefix, &out))
 	if err != nil {
 		return nil, fmt.Errorf("backup: list %s: %w", d.root, err)
 	}

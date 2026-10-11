@@ -7,8 +7,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"io/fs"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -274,6 +277,42 @@ func TestTake_DirectoryWithUnreadableLostAndFound(t *testing.T) {
 	require.Len(t, gens, 1)
 	assert.Equal(t, meta.ID, gens[0].ID)
 	assert.True(t, gens[0].Complete())
+}
+
+// unmountAfterDump removes the directory marker right after the dump is
+// stored, like a device that goes away while a backup is being taken.
+type unmountAfterDump struct {
+	*DirStorage
+}
+
+func (u unmountAfterDump) Put(ctx context.Context, key string, r io.Reader) error {
+	if err := u.DirStorage.Put(ctx, key, r); err != nil {
+		return err
+	}
+	if strings.HasSuffix(key, "/"+DumpFile) {
+		return os.Remove(filepath.Join(u.Root(), DirMarkerFile))
+	}
+	return nil
+}
+
+// TestTake_StopsWhenTheMarkerDisappears: once the marker is gone, Take must
+// not write meta.json (it would land on the host's disk after an unmount).
+func TestTake_StopsWhenTheMarkerDisappears(t *testing.T) {
+	p := newDatabase(t)
+	p.seedSimple(t)
+	root := markedDir(t)
+	st, err := NewDirStorage(root)
+	require.NoError(t, err)
+	_, err = Take(context.Background(), p.takeOptions(unmountAfterDump{st}))
+	require.ErrorIs(t, err, ErrNoDirMarker)
+	var metas []string
+	require.NoError(t, filepath.WalkDir(root, func(p string, e fs.DirEntry, err error) error {
+		if err == nil && e.Name() == MetaFile {
+			metas = append(metas, p)
+		}
+		return err
+	}))
+	assert.Empty(t, metas, "meta.json is not written once the marker is gone")
 }
 
 // TestTake_PgDumpFailureLeavesNothing: when pg_dump fails partway, neither
