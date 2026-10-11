@@ -462,3 +462,41 @@ func TestModerationLogRepository_List_SearchSkipsMetaSecrets(t *testing.T) {
 	assert.NotContains(t, ids("ml-sec-hidden-before"), row.ID)
 	assert.NotContains(t, ids("ml-sec-hidden-after"), row.ID)
 }
+
+// info や before / after が object でない行があっても、検索が失敗しないこと。
+func TestModerationLogRepository_List_SearchToleratesNonObjectInfo(t *testing.T) {
+	repo := NewModerationLogRepository(testDB)
+	createTestUser(t, "ml_shape")
+	rows := []*model.ModerationLog{
+		{ID: "ml_shape1", UserID: "ml_shape", Type: "updateServerSettings", Info: []byte(`"ml-shape-scalar"`)},
+		{ID: "ml_shape2", UserID: "ml_shape", Type: "updateServerSettings", Info: []byte(`["ml-shape-array"]`)},
+		{ID: "ml_shape3", UserID: "ml_shape", Type: "updateServerSettings", Info: []byte(`{"before":"ml-shape-before","after":["ml-shape-after"]}`)},
+		{ID: "ml_shape4", UserID: "ml_shape", Type: "updateServerSettings", Info: []byte(`{"before":null,"after":{"smtpPass":"ml-shape-hidden","name":"ml-shape-name"}}`)},
+		{ID: "ml_shape5", UserID: "ml_shape", Type: "updateServerSettings", Info: []byte(`{"before":{"name":"ml-shape-obj"},"after":"ml-shape-after-scalar"}`)},
+	}
+	for _, r := range rows {
+		require.NoError(t, repo.Create(r))
+		defer cleanupModLog(t, r.ID)
+	}
+	for search, want := range map[string]string{
+		"ml-shape-scalar":       "ml_shape1",
+		"ml-shape-array":        "ml_shape2",
+		"ml-shape-before":       "ml_shape3",
+		"ml-shape-after":        "ml_shape3",
+		"ml-shape-name":         "ml_shape4",
+		"ml-shape-after-scalar": "ml_shape5",
+	} {
+		logs, err := repo.List(model.ModerationLogFilter{Limit: 100, Search: search})
+		require.NoError(t, err, search)
+		var ids []string
+		for _, l := range logs {
+			ids = append(ids, l.ID)
+		}
+		assert.Contains(t, ids, want, search)
+	}
+	logs, err := repo.List(model.ModerationLogFilter{Limit: 100, Search: "ml-shape-hidden"})
+	require.NoError(t, err)
+	for _, l := range logs {
+		assert.NotEqual(t, "ml_shape4", l.ID)
+	}
+}

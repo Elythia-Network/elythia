@@ -268,14 +268,19 @@ func (r *moderationLogRepository) List(filter model.ModerationLogFilter) ([]*mod
 var moderationLogSearchExpr = buildModerationLogSearchExpr()
 
 func buildModerationLogSearchExpr() string {
-	var b strings.Builder
-	b.WriteString("(info")
+	// 欄名は model の定数で、利用者の入力ではない。
+	names := make([]string, 0, len(model.MetaSecretFields))
 	for _, f := range model.MetaSecretFields {
-		// 欄名は model の定数で、利用者の入力ではない。
-		for _, side := range []string{"before", "after"} {
-			b.WriteString(" #- '{" + side + "," + f + "}'")
-		}
+		names = append(names, "'"+f+"'")
 	}
-	b.WriteString(")::text")
-	return b.String()
+	drop := "ARRAY[" + strings.Join(names, ", ") + "]"
+	// `#-` や `-` は文字列などの jsonb に使うと失敗する (クエリごと 500 になる)。
+	// before / after が object のときだけ、その中の秘密の欄を消す。info が object で
+	// ないときは `info->'before'` が NULL になるので、何もしない。
+	before := "(CASE WHEN jsonb_typeof(info->'before') = 'object' " +
+		"THEN jsonb_set(info, '{before}', (info->'before') - " + drop + ") ELSE info END)"
+	both := "(CASE WHEN jsonb_typeof(info->'after') = 'object' " +
+		"THEN jsonb_set(" + before + ", '{after}', (info->'after') - " + drop + ") ELSE " + before + " END)"
+	return "(CASE WHEN type = 'updateServerSettings' " +
+		"THEN " + both + " ELSE info END)::text"
 }
