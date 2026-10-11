@@ -20,6 +20,13 @@ import (
 // backupGuard を付けない (handler の中で、再認証以外の条件を見る)。
 var backupRoutesWithoutReauth = map[string]string{
 	"admin/backup/reauth-challenge": "パスキーの challenge を出すだけで、何も見せず何も変えない。再認証以外の条件は handler の BeginPasskey が見る",
+	// 画面からのリストア (#3463 (6c)) は daemon へ転送し、再認証を含む全条件を daemon が
+	// 照合する。本体で backupGuard を付けると、同じ TOTP のコードを本体と daemon で
+	// 二重に消費して必ず落ちる。
+	"admin/backup/restore/prepare": "daemon (internal/backup/daemon の restore_api.go) が DBVerifier で再認証する",
+	"admin/backup/restore/confirm": "daemon が ticket と DBVerifier の再認証を見る",
+	"admin/backup/restore/abort":   "daemon が ticket と DBVerifier の再認証を見る",
+	"admin/backup/restore/status":  "daemon が ticket と同じセッションかだけを見る (DB を引かない)",
 }
 
 func TestBackupAdminRoutesAreGuarded(t *testing.T) {

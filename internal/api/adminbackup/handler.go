@@ -33,9 +33,10 @@ type ModLogger interface {
 
 // Handler serves admin/backup/*.
 type Handler struct {
-	svc      *backupadmin.Service
-	verifier *strongauth.Verifier
-	modlog   ModLogger
+	svc       *backupadmin.Service
+	verifier  *strongauth.Verifier
+	modlog    ModLogger
+	forwarder *Forwarder
 }
 
 // NewHandler returns a Handler. modlog may be nil only in tests.

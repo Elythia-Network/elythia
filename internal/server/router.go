@@ -3886,6 +3886,15 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	}
 	backupHandler := adminbackup.NewHandler(newBackupAdminService(s.config, s.redis.Default), backupVerifier, modLogService)
 	backupGuard := backupHandler.Guard()
+	// 画面からのリストア (#3463 (6c)) は daemon へ転送する。再認証 (backupGuard) は
+	// 付けない。付けると TOTP のコードを本体と daemon で二重に消費して落ちる。再認証を
+	// 含む全条件は daemon が DB を見て照合する。管理者と native token の確認は、本体が
+	// 動いている間の前段として残す (メンテナンス中は maintmode が転送するので通らない)。
+	backupHandler.SetForwarder(newRestoreForwarder(s.config))
+	api.POST("/admin/backup/restore/prepare", backupHandler.RestorePrepare, middleware.RequireAdmin(roleService), middleware.RequireSecure())
+	api.POST("/admin/backup/restore/confirm", backupHandler.RestoreConfirm, middleware.RequireAdmin(roleService), middleware.RequireSecure())
+	api.POST("/admin/backup/restore/abort", backupHandler.RestoreAbort, middleware.RequireAdmin(roleService), middleware.RequireSecure())
+	api.POST("/admin/backup/restore/status", backupHandler.RestoreStatus, middleware.RequireAdmin(roleService), middleware.RequireSecure())
 	api.POST("/admin/backup/list", backupHandler.List, middleware.RequireAdmin(roleService), middleware.RequireSecure(), backupGuard)
 	api.POST("/admin/backup/take", backupHandler.Take, middleware.RequireAdmin(roleService), middleware.RequireSecure(), backupGuard)
 	api.POST("/admin/backup/verify", backupHandler.Verify, middleware.RequireAdmin(roleService), middleware.RequireSecure(), backupGuard)

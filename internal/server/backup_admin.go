@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/elythia-network/elythia/internal/api/adminbackup"
 	"github.com/elythia-network/elythia/internal/backup"
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/core/backupadmin"
@@ -53,4 +54,14 @@ func newBackupAdminService(cfg *config.Config, rdb redis.Cmdable) *backupadmin.S
 		o.Control = backupadmin.NewHTTPControl(b.Server.ServiceURL, b.Server.ServiceToken, nil)
 	}
 	return backupadmin.NewService(o)
+}
+
+// newRestoreForwarder returns the forwarder of the restore endpoints
+// (#3463 (6c)). Without backup.server.serviceUrl and serviceToken it answers
+// BACKUP_SERVICE_NOT_CONFIGURED.
+func newRestoreForwarder(cfg *config.Config) *adminbackup.Forwarder {
+	if cfg.Backup == nil {
+		return adminbackup.NewForwarder("", "", nil)
+	}
+	return adminbackup.NewForwarder(cfg.Backup.Server.ServiceURL, cfg.Backup.Server.ServiceToken, nil)
 }

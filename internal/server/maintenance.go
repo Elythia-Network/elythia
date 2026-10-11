@@ -5,12 +5,14 @@ import (
 	"log/slog"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/elythia-network/elythia/internal/api/adminbackup"
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/frontendutil"
 	"github.com/elythia-network/elythia/internal/maintmode"
@@ -76,12 +78,35 @@ func (m *maintTracker) init(s *Supervisor) {
 	if m.role == string(config.RoleQueue) {
 		healthRole = m.role
 	}
-	m.handler = maintmode.NewHandler(maintmode.HandlerOptions{
+	opts := maintmode.HandlerOptions{
 		State:     m.state.Load,
 		Static:    maintenanceStaticRoutes(),
 		Role:      healthRole,
 		QueueOnly: healthRole != "",
-	})
+	}
+	if s.cfg != nil {
+		// 配送だけのノード (QueueOnly) は handler が API を出さないので、転送の口を付けても届かない。
+		opts.Forward, opts.ForwardPrefix = maintenanceRestoreForward(s.cfg)
+	}
+	m.handler = maintmode.NewHandler(opts)
+}
+
+// maintenanceRestoreForward forwards the restore endpoints while the process
+// is in maintenance, resolving the client address the way echo does
+// (trustProxy), so that the per-client failure budget of the
+// re-authentication is the same as when the server runs.
+func maintenanceRestoreForward(cfg *config.Config) (http.HandlerFunc, string) {
+	trusted, err := config.ParseTrustProxy(cfg.TrustProxy)
+	if err != nil {
+		// 起動時に同じ値で echo を組み立てて通っているので、ここには来ない。
+		return nil, ""
+	}
+	extract := buildIPExtractor(trusted)
+	fwd := newRestoreForwarder(cfg)
+	return func(w http.ResponseWriter, r *http.Request) {
+		op := strings.TrimPrefix(r.URL.Path, adminbackup.RestorePathPrefix)
+		fwd.Serve(w, r, op, extract(r))
+	}, adminbackup.RestorePathPrefix
 }
 
 // holdingAtStartup reads the state once before the first generation is
