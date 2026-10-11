@@ -211,6 +211,12 @@ services:
       # 暗号化した世代を確かめる・戻すときだけ、age の秘密鍵を渡す (取るだけなら不要)。
       # 秘密鍵はリポジトリの外 (deploy/uds/config にも置かない) に置き、backup.encryption.identityFile にこのパスを書く。
       # - /etc/elythia/backup-identity.txt:/run/secrets/backup-identity.txt:ro
+      # verify は復号した dump と戻した DB を TMPDIR (既定は書き込み層の /tmp) に置く。
+      # 本番の DB の volume と同じディスクを埋めないよう、別のディスクを mount して
+      # 下の environment の TMPDIR をそこへ向ける (UID 70 が書けるようにする。docs/backup.md)。
+      # - /mnt/scratch/elythia-verify:/scratch
+    # environment:
+    #   TMPDIR: /scratch
     networks:
       - mkgo-uds
     restart: "no"
@@ -232,9 +238,12 @@ services:
     # depends_on を書かない (backup と同じ理由で、`up` が DB のコンテナを作り直しうる)。
     # DB の起動は daemon が取る前に待つ (最大 5 分)。`up -d --no-deps` で起動する。
     # backup.schedule.at はプロセスのタイムゾーンで読む。既定は UTC。変えるときは
-    # 次のコメントを外す。
+    # 次のコメントを外す。environment を書くと上の backup の environment を丸ごと
+    # 置き換えるので、backup で TMPDIR を設定したときは、ここにも同じ行を書く
+    # (定期実行の検証も TMPDIR を使う)。
     # environment:
     #   TZ: Asia/Tokyo
+    #   TMPDIR: /scratch
     restart: unless-stopped
 
   nginx:
