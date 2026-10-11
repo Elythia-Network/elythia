@@ -203,17 +203,12 @@ func createStaging(path string) (io.WriteCloser, error) {
 // verdict is still stored.
 func (v *verifier) run(ctx context.Context) (stages []StageResult, err, cleanupErr error) {
 	record := func(stage VerifyStage, serr error, warnings []string) (bool, error) {
-		var se *stageError
-		switch {
-		case serr == nil:
-			stages = append(stages, StageResult{Stage: stage, OK: true, Warnings: warnings})
-			return true, nil
-		case errors.As(serr, &se):
-			stages = append(stages, StageResult{Stage: stage, Error: se.msg})
-			return false, nil
-		default:
-			return false, serr
+		r, ok, err := stageOutcome(ctx, stage, serr, warnings)
+		if err != nil {
+			return false, err
 		}
+		stages = append(stages, r)
+		return ok, nil
 	}
 	skipRest := func(from int) {
 		order := []VerifyStage{StageReadable, StageRestorable, StageUsable}
@@ -273,6 +268,26 @@ func (v *verifier) run(ctx context.Context) (stages []StageResult, err, cleanupE
 	warnings, uerr := v.usable(ctx, conn, db)
 	_, err = record(StageUsable, uerr, warnings)
 	return stages, err, nil
+}
+
+// stageOutcome turns the result of one stage into its StageResult, or into
+// an environment error.
+//
+// 段の途中で ctx が切れた (Ctrl-C、SIGTERM) ときの失敗は、世代の良し悪しではない。
+// 切れた接続で fsck や行数の数え上げが落ちたものを世代の欠陥として残すと、前回の
+// ok: true を ok: false で上書きしてしまう (daemon の restoreVerifyFile と同じ考え方)。
+func stageOutcome(ctx context.Context, stage VerifyStage, serr error, warnings []string) (StageResult, bool, error) {
+	var se *stageError
+	switch {
+	case serr == nil:
+		return StageResult{Stage: stage, OK: true, Warnings: warnings}, true, nil
+	case errors.As(serr, &se) && ctx.Err() == nil:
+		return StageResult{Stage: stage, Error: se.msg}, false, nil
+	case errors.As(serr, &se):
+		return StageResult{}, false, fmt.Errorf("backup verify: interrupted during %s (%s): %w", stage, se.msg, ctx.Err())
+	default:
+		return StageResult{}, false, serr
+	}
 }
 
 // requireFree fails when dir has less than need bytes free. free reports the

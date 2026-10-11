@@ -44,7 +44,9 @@ type memStorage struct {
 	failAfter map[string]int
 	// statErr, when set, is returned by Stat for keys with that suffix.
 	statErr map[string]error
-	puts    []string
+	// onGet, when set, is called with the key at the start of every Get.
+	onGet func(key string)
+	puts  []string
 }
 
 func newMemStorage() *memStorage { return &memStorage{objects: map[string][]byte{}} }
@@ -67,6 +69,9 @@ func (m *memStorage) Put(_ context.Context, key string, r io.Reader) error {
 }
 
 func (m *memStorage) Get(_ context.Context, key string) (io.ReadCloser, error) {
+	if m.onGet != nil {
+		m.onGet(key)
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for suffix, err := range m.getErr {
