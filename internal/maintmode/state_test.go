@@ -2,6 +2,7 @@ package maintmode
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -328,4 +329,58 @@ func TestMustJSON(t *testing.T) {
 	assert.Equal(t, "[]", mustJSON([]string(nil)))
 	assert.Equal(t, `["a"]`, mustJSON([]string{"a"}))
 	assert.Equal(t, "[]", mustJSON(func() {}))
+}
+
+// cmdLog records the names of the commands a client sends.
+type cmdLog struct {
+	mu   sync.Mutex
+	cmds []string
+}
+
+func (l *cmdLog) DialHook(next redis.DialHook) redis.DialHook { return next }
+func (l *cmdLog) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
+	return func(ctx context.Context, cmd redis.Cmder) error {
+		l.mu.Lock()
+		l.cmds = append(l.cmds, cmd.Name())
+		l.mu.Unlock()
+		return next(ctx, cmd)
+	}
+}
+func (l *cmdLog) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return next
+}
+
+// TestStore_EnterWritesTheStateInOneCommand fixes #3463 review M-2: a state
+// written in two round trips (phase first) could be read by the judge without
+// an opId in between.
+func TestStore_EnterWritesTheStateInOneCommand(t *testing.T) {
+	mr := miniredis.RunT(t)
+	c := redis.NewClient(&redis.Options{Addr: mr.Addr(), MaxRetries: -1})
+	t.Cleanup(func() { _ = c.Close() })
+	s := NewStore(c, nil, "pfx:")
+	// スクリプトを先に読み込ませ、EVALSHA の失敗からの EVAL を数えないようにする。
+	require.NoError(t, s.Enter(context.Background(), State{OpID: "warm"}))
+	require.NoError(t, s.Clear(context.Background(), ""))
+	log := &cmdLog{}
+	c.AddHook(log)
+	require.NoError(t, s.Enter(context.Background(), State{OpID: "op", Reason: "r"}))
+	var writes []string
+	for _, name := range log.cmds {
+		if name != "publish" {
+			writes = append(writes, name)
+		}
+	}
+	assert.Equal(t, []string{"evalsha"}, writes, "状態を 1 往復で書いていない")
+	st, err := s.Get(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "op", st.OpID)
+	assert.Equal(t, "r", st.Reason)
+}
+
+func TestStore_EnterFillsAnOpID(t *testing.T) {
+	s, _ := newTestStore(t)
+	require.NoError(t, s.Enter(context.Background(), State{}))
+	st, err := s.Get(context.Background())
+	require.NoError(t, err)
+	assert.Regexp(t, `^op-[0-9a-f]{16}$`, st.OpID)
 }

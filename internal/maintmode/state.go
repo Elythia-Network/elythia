@@ -9,6 +9,8 @@ package maintmode
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -193,8 +195,20 @@ func (s *Store) Get(ctx context.Context) (*State, error) {
 	return st, nil
 }
 
+// enterScript writes the whole state hash when none exists. 1: written,
+// 0: a maintenance is already active.
+//
+// 1 往復で書く。phase だけを先に置いて残りを後から書く形だと、その間に読んだ
+// 判定役が opId の無い状態を見て、待ちの時計を持たないまま接続を切りうる
+// (#3463 のレビュー1周目 M-2)。
+var enterScript = redis.NewScript(`
+if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end
+redis.call('HSET', KEYS[1], unpack(ARGV))
+return 1`)
+
 // Enter starts a maintenance. It fails with ErrActive when one is already
-// active, so two operators cannot overwrite each other.
+// active, so two operators cannot overwrite each other. An empty OpID is
+// filled with a random one: the judge does not judge a state without one.
 func (s *Store) Enter(ctx context.Context, st State) error {
 	if st.Phase == "" {
 		st.Phase = PhaseEntering
@@ -202,29 +216,35 @@ func (s *Store) Enter(ctx context.Context, st State) error {
 	if st.StartedAt.IsZero() {
 		st.StartedAt = time.Now()
 	}
-	// phase だけを HSETNX で先に置き、取れた側だけが残りを書く。
-	ok, err := s.rdb.HSetNX(ctx, s.StateKey(), "phase", st.Phase).Result()
+	if st.OpID == "" {
+		st.OpID = "op-" + randomHex()
+	}
+	args := []any{
+		"phase", st.Phase,
+		"opId", st.OpID,
+		"kind", st.Kind,
+		"reason", st.Reason,
+		"requestedBy", st.RequestedBy,
+		"startedAt", formatTime(st.StartedAt),
+	}
+	if !st.LeaseUntil.IsZero() {
+		args = append(args, "leaseUntil", formatTime(st.LeaseUntil))
+	}
+	n, err := enterScript.Run(ctx, s.rdb, []string{s.StateKey()}, args...).Int()
 	if err != nil {
 		return fmt.Errorf("maintmode: write state: %w", err)
 	}
-	if !ok {
+	if n == 0 {
 		return ErrActive
-	}
-	fields := map[string]any{
-		"opId":        st.OpID,
-		"kind":        st.Kind,
-		"reason":      st.Reason,
-		"requestedBy": st.RequestedBy,
-		"startedAt":   formatTime(st.StartedAt),
-	}
-	if !st.LeaseUntil.IsZero() {
-		fields["leaseUntil"] = formatTime(st.LeaseUntil)
-	}
-	if err := s.rdb.HSet(ctx, s.StateKey(), fields).Err(); err != nil {
-		return fmt.Errorf("maintmode: write state: %w", err)
 	}
 	s.notify(ctx)
 	return nil
+}
+
+func randomHex() string {
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 // setPhaseScript moves the state to ARGV[2] when it exists and, unless
