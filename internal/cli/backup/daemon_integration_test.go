@@ -260,9 +260,9 @@ func TestDaemonTakesVerifiesAndPrunesWithRealImplementations(t *testing.T) {
 	require.NoError(t, err, "pruning never touches the marker")
 }
 
-// 実物の backup.Verify は、判定の後に後始末が失敗すると、3 段が全て通っていても
-// OK を false にし、verify.json を書かずに誤りと一緒に返す。daemon のテストの偽物
-// (internal/backup/daemon の fakeVerifier.afterErr) はこの形を真似ているので、
+// 実物の backup.Verify は、判定の後に後始末が失敗すると、判定 (3 段が全て通れば
+// OK true) を verify.json に書いたうえで、誤りと一緒に返す (#3499)。daemon のテストの
+// 偽物 (internal/backup/daemon の fakeVerifier.afterErr) はこの形を真似ているので、
 // 実物がこの形であることをここで確かめる。
 func TestRealVerifyCleanupFailureShape(t *testing.T) {
 	r := newDaemonRig(t, errors.New("rm: device busy"))
@@ -276,9 +276,10 @@ func TestRealVerifyCleanupFailureShape(t *testing.T) {
 		assert.True(t, s.OK, "%+v", s)
 		assert.False(t, s.Skipped)
 	}
-	assert.False(t, res.OK, "the real Verify reports OK false when cleaning up fails")
-	_, err = backup.ReadVerify(context.Background(), r.st, m.ID)
-	require.ErrorIs(t, err, backup.ErrNotFound, "and stores no verify.json")
+	assert.True(t, res.OK, "the verdict does not depend on the cleanup")
+	stored, err := backup.ReadVerify(context.Background(), r.st, m.ID)
+	require.NoError(t, err, "and the verdict is stored")
+	assert.Equal(t, res, *stored)
 }
 
 // 後始末に失敗しても、通った世代は ok:true として残り、整理まで進む (H-1)。
