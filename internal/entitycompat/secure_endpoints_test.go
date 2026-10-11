@@ -106,7 +106,6 @@ var secureStricterThanUpstream = map[string]string{
 	"admin/backup/restore/abort":   backupSecureReason,
 	"admin/backup/restore/confirm": backupSecureReason,
 	"admin/backup/restore/prepare": backupSecureReason,
-	"admin/backup/restore/status":  backupSecureReason,
 }
 
 const backupSecureReason = "Elythia-only backup admin (#3462): backups hold private keys, tokens and password hashes, so app tokens must not reach them"

@@ -435,3 +435,22 @@ func TestRestoreAPI_OneChangeAtATime(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, <-done)
 	assert.Equal(t, 2, r.verify.count(), "only the first abort was checked")
 }
+
+// TestRestoreAPI_StatusBySession checks that status takes the session from
+// the session field, which the admin page uses because the main server does
+// not authenticate status (#3463 (6c) M-4).
+func TestRestoreAPI_StatusBySession(t *testing.T) {
+	r := newAPIRig(t)
+	opID, ticket := r.prepare(t)
+	rec, _ := r.post(t, "/restore/status", map[string]any{"session": "session-token-01", "opId": opID, "ticket": ticket})
+	assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	rec, _ = r.post(t, "/restore/status", map[string]any{"session": "session-token-01", "i": nil, "opId": opID, "ticket": ticket})
+	assert.Equal(t, http.StatusOK, rec.Code, "i is null when the page sends no credential")
+	rec, out := r.post(t, "/restore/status", map[string]any{"session": "session-token-02", "opId": opID, "ticket": ticket})
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assert.Equal(t, "RESTORE_TICKET_INVALID", errCode(out))
+	// confirm と abort は session を見ない (再認証の token は i)。
+	rec, out = r.post(t, "/restore/abort", map[string]any{"session": "session-token-01", "opId": opID, "ticket": ticket, "password": "pw", "token": "123456"})
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assert.Equal(t, "RESTORE_TICKET_INVALID", errCode(out))
+}

@@ -104,11 +104,22 @@ func TestSetupRoutes_RestoreIsForwardedWithoutTheGuard(t *testing.T) {
 		assert.Equal(t, http.StatusOK, rec.Code, op+": "+rec.Body.String())
 		assert.JSONEq(t, `{"record":{"step":"ready"}}`, rec.Body.String())
 	}
-	// 本体が動いている間は、管理者でなければ転送しない。
-	assert.Equal(t, http.StatusUnauthorized, post("status", "").Code)
+	// 本体が動いている間は、管理者でなければ転送しない (status を除く)。
+	for _, op := range []string{"prepare", "confirm", "abort"} {
+		assert.Equal(t, http.StatusUnauthorized, post(op, "").Code, op)
+	}
+	// status は本体の認証を通さない。戻した DB にセッションが無くても (本体が知らない
+	// token でも)、session で送れば daemon まで届く。
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/backup/restore/status",
+		bytes.NewReader([]byte(`{"opId":"x","ticket":"t","session":"unknowntoken0001","i":null}`)))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	svc.mu.Lock()
 	defer svc.mu.Unlock()
-	assert.Equal(t, []string{"/restore/prepare", "/restore/confirm", "/restore/abort", "/restore/status"}, svc.paths)
+	assert.Equal(t, []string{"/restore/prepare", "/restore/confirm", "/restore/abort", "/restore/status", "/restore/status"}, svc.paths)
+	assert.Equal(t, "unknowntoken0001", svc.bodies[4]["session"])
 	assert.Equal(t, "123456", svc.bodies[0]["token"], "the second factor reaches the service unconsumed")
 	assert.Equal(t, rootToken, svc.bodies[0]["i"], "the session token moves into the body")
 }

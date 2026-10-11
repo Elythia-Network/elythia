@@ -611,7 +611,9 @@ ID                STATUS    SIZE  ENCRYPTED  VERIFIED  ELYTHIA  MIGRATION
 
 進み具合は画面に出る。切り替えの間はほかの管理画面のAPIが503になるので、画面を開いたままにする。再読み込みするとメンテナンスの画面になり、終わると戻る。進み具合を読む`opId`とticketはそのタブにだけ置き、準備をしたのと同じセッションでしか読めない。
 
-**再認証は、確定・中止も含めて常にdaemonが行う。** 本体で照合すると、同じTOTPのコードを本体とdaemonで二重に消費して落ちるため。daemonは照合のたびに本体のDBへ短い接続を張って閉じ(`application_name`は`elythia-backup/auth/...`)、名前を入れ替えている間は照合しない。条件は[認証](#認証)と同じで、失敗の数え方(`passwordguard`)とTOTPの使い回しの記録も本体と同じRedisに置く。本体が動いている間は、本体も前段で管理者とブラウザのtokenかどうかを見る。
+**進み具合(`status`)は、本体では認証しない。** 戻したDBに準備をしたセッションが無いと(準備をした後にサインインした場合など)、本体の認証が401で断り、画面が進み具合を読めなくなるため。画面はセッションのtokenを`i`ではなく`session`で送り、daemonが準備のときのticketとtokenのhashで照合する。戻した後は、ほかの画面を開くとサインインし直すよう求められることがある。サインインし直すと別のセッションになるので、その戻す操作の進み具合は画面では読めない。daemonのログ(`backup: restore`の行)で確かめる。
+
+**再認証は、確定・中止も含めて常にdaemonが行う。** 本体で照合すると、同じTOTPのコードを本体とdaemonで二重に消費して落ちるため。daemonは照合のたびに本体のDBへ短い接続を張って閉じ(`application_name`は`elythia-backup/auth/...`)、名前を入れ替えている間は照合しない。条件は[認証](#認証)と同じで、失敗の数え方(`passwordguard`)とTOTPの使い回しの記録も本体と同じRedisに置く。本体が動いている間は、本体も前段で管理者とブラウザのtokenかどうかを見る(`status`を除く)。
 
 **途中でdaemonが止まったら**、起動し直したときに、Redisに残した記録(`<prefix>elythia:maintenance:restore:<opId>`)と`pg_database`の名前の組から、どこまで進んだかを決める。名前を入れ替える前なら作ったDBを消して元のDBで抜け、入れ替えた後なら元のDBへ戻す。どちらとも決められないとき(名前の組がどちらにも合わない、`pg_database`を読めない)と、入れ替えたかどうか分からないときは、**何もせずメンテナンスのまま止まり**、`restore_stopped`を[通知](#通知)する。そのときは、`pg_database`を確かめ、`elythia backup restore -rollback`([元に戻す](deployment.md#元に戻すロールバック))で正しいDBを`<DB名>`へ置いてから、`elythia maintenance exit`で抜ける。
 

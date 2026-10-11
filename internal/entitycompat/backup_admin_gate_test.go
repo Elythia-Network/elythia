@@ -29,6 +29,13 @@ var backupRoutesWithoutReauth = map[string]string{
 	"admin/backup/restore/status":  "daemon が ticket と同じセッションかだけを見る (DB を引かない)",
 }
 
+// backupRoutesWithoutAdmin are the admin/backup/* routes that do not go
+// through the server's authentication, with where they are checked instead.
+var backupRoutesWithoutAdmin = map[string]string{
+	// 名前を入れ替えた後、戻した DB にセッションが無いと本体の認証が 401 で断る。
+	"admin/backup/restore/status": "daemon が準備のときの ticket とセッションの hash で照合する (restore_api.go の ticketRecord)",
+}
+
 func TestBackupAdminRoutesAreGuarded(t *testing.T) {
 	routes := parseRouteRegistrations(t, filepath.Join("..", "server", "router.go"))
 	var found []string
@@ -38,6 +45,10 @@ func TestBackupAdminRoutesAreGuarded(t *testing.T) {
 		}
 		found = append(found, ep)
 		reg := stripGoComments(raw)
+		if _, ok := backupRoutesWithoutAdmin[ep]; ok {
+			assert.NotContains(t, reg, "backupGuard", "%s", ep)
+			continue
+		}
 		assert.Contains(t, reg, "middleware.RequireAdmin(", "%s: 管理者だけにする", ep)
 		assert.Contains(t, reg, "middleware.RequireSecure()", "%s: native token だけにする", ep)
 		if _, ok := backupRoutesWithoutReauth[ep]; ok {
@@ -53,6 +64,10 @@ func TestBackupAdminRoutesAreGuarded(t *testing.T) {
 	}
 	for ep := range backupRoutesWithoutReauth {
 		assert.Contains(t, found, ep, "backupRoutesWithoutReauth の %s は実在しない", ep)
+	}
+	for ep := range backupRoutesWithoutAdmin {
+		assert.Contains(t, found, ep, "backupRoutesWithoutAdmin の %s は実在しない", ep)
+		assert.Contains(t, backupRoutesWithoutReauth, ep, "%s は再認証も daemon に任せる", ep)
 	}
 	assertWired(t, routerGo, "backupGuard := backupHandler.Guard()",
 		"admin/backup/* の再認証が無い guard になる")

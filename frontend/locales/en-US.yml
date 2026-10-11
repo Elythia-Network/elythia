@@ -3143,6 +3143,8 @@ _backups:
   restoreUnknownHelp: "It could not tell whether the databases were switched, so it stopped and left the maintenance on. An administrator of the server has to check pg_database and put things back with elythia backup restore -rollback and elythia maintenance exit."
   restoreWaiting: "Connections to the database remain"
   restoreStatusUnavailable: "The progress cannot be read. It will retry."
+  restoreSessionMayBeGone: "If the restored database does not have this session, other pages will ask you to sign in again."
+  restoreSessionGone: "The progress can no longer be read with this session. The restored database may not have it. Sign in again. After signing in again, the progress of this restore cannot be read here; check the server logs."
   restoreNotVerified: "A generation that has not passed verification cannot be restored here. Verify it first."
   maintenanceActive: "A maintenance is already active."
   versionMismatch: "The backup service and the server processes run different versions. Align them before restoring."

@@ -105,6 +105,10 @@ type restoreRequest struct {
 	Password     string          `json:"password"`
 	Token        string          `json:"token"`
 	Credential   json.RawMessage `json:"credential"`
+	// Session is the session token status is answered for. status is not
+	// authenticated by the main server (the restored database may not have
+	// the session), so the admin page sends it here instead of in i.
+	Session string `json:"session"`
 }
 
 // mountRestore adds the restore endpoints to mux.
@@ -112,7 +116,7 @@ type restoreRequest struct {
 //	POST /restore/prepare  {i, id, password, token|credential}  → {opId, ticket, status}
 //	POST /restore/confirm  {i, opId, ticket, password, token|credential}
 //	POST /restore/abort    {i, opId, ticket, password, token|credential}
-//	POST /restore/status   {i, opId, ticket}  → status
+//	POST /restore/status   {session (or i), opId, ticket}  → status
 //
 // 本体は利用者のリクエストをそのまま転送し、応答をそのまま返す。そのため、
 // 応答の形は本体の admin/* と同じ Misskey の形のエラーにする。
@@ -234,8 +238,11 @@ func mountRestore(mux *http.ServeMux, rs *Restore) {
 		if !ok {
 			return
 		}
-		// 進み具合は ticket とセッションだけで返す (DB を引かない)。メンテナンス中にも
-		// 読めるようにするため。
+		// 進み具合は ticket とセッションだけで返す (DB を引かない)。メンテナンス中や、
+		// 戻した DB にセッションが無いときにも読めるようにするため。
+		if req.Session != "" {
+			req.I = req.Session
+		}
 		rec, ok := ticketRecord(w, r, m, req)
 		if !ok {
 			return
