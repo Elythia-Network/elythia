@@ -373,3 +373,22 @@ Redis list の窓 (global は `MaxTimelineLength` 固定の 200 件で、meta �
 ない) を超えて遡れなくなる — `untilId` で窓の外を要求した
 時点で Redis が空になり、fallback も止まるため。upstream の同設定のインスタンスは
 GTL が無傷なので、この食い違いは Elythia 側の退行として出る。
+
+## 5.7. メンテナンスモード (Elythia 独自、#3463)
+
+本家にメンテナンスの概念は無い (`maintenance` / `SERVICE_UNAVAILABLE` で backend・frontend・misskey-js・sw を探しても当たらない)。Elythia は、全プロセスが DB への接続を手放し、listener だけを残して待つモードを持つ。入り方と運用は [deployment.md](../deployment.md#メンテナンスモード) にある。ここには、本家と違って見える応答だけを書く。
+
+| 経路 | メンテナンス中の応答 | 本家 |
+|---|---|---|
+| `/api/*` | 503、`Retry-After`、本文は `{"error":{"message":"The server is under maintenance.","code":"MAINTENANCE","id":"218ec84b-6e9c-492d-ac08-37bcc33af056","kind":"server"}}` | この `code` は無い (Elythia の追加)。本家の `misskeyApi` と misskey-js は 204 以外で `res.json()` を先に呼ぶので、本文を JSON にして `body.error` で reject させる |
+| `POST /inbox`、`POST /users/:id/inbox` | 本文の無い 503 と `Retry-After` | 本家の配送側は 5xx を再送する (`Retry-After` は読まない) |
+| `GET /streaming` | 503 (upgrade しない) | WebSocket でない GET への 503 と同じ status |
+| `/healthz` | 200 のまま、本文に `"maintenance": true` を足す | — |
+| 画面の遷移 (HTML を求める GET) | 503、`X-Elythia-Maintenance: 1`、自前のメンテナンスの画面。SPA の shell は返さない | — |
+| `GET /maintenance/status` | 200、`{"maintenance":true,"phase":...,"startedAt":...,"reason":...}`。通常時は `{"maintenance":false}` | 無い (Elythia の追加) |
+| 静的なファイル (`/vite/*`、`/static-assets/*` など) | 通常どおり返す | — |
+| それ以外 (`/manifest.json`、`/.well-known/*`、AP の GET など) | 503 | — |
+
+- WebSocket の接続は、入るときに close code 1012 (Service Restart) で閉じる。本家の misskey-js の `Stream` (reconnecting-websocket) は、閉じられると code に関係なく繋ぎ直す。メンテナンスの間は 503 で失敗し続け、抜けた後に繋がる
+- Service Worker は、`X-Elythia-Maintenance: 1` の付いた 503 をオフラインの画面に差し替えない ([frontend.md](frontend.md) の §4-2b と同じ扱いの独自変更)。直前にメンテナンスの画面を見ていれば、通信に失敗したときや前段の proxy が 5xx を返したときに、キャッシュしたその画面を出す (6 時間まで)
+- `/manifest.json` も 503 にした。最小の静的な JSON を返すと、ブラウザが PWA の名前やアイコンをそれで上書きしうるため

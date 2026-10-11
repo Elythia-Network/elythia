@@ -441,6 +441,8 @@ handler 自体は止まらない** (Go では goroutine を殺せない) ので�
 
 起動中に呼んだ`ctx.Go()`は、全pluginのstorage、migration、`EffectivePolicies`、`Routes`、`Jobs`とhost側のroute配線が成功するまで開始されない。起動に失敗した場合は保留した処理を破棄する。起動成功後の呼び出しは直ちに開始する。cancelやdrainは提供しないため、正常終了時の停止が必要な処理はplugin側で終了条件を持つこと。
 
+**`Migrations`・`Peer`・`EffectivePolicies`・`Routes`・`Jobs`は、1つのプロセスの中で何度呼ばれてもよいように書く。** メンテナンスモード (#3463、[deployment.md](../deployment.md#メンテナンスモード)) を抜けるたびに、Elythiaはサーバーを作り直し、これらをもう一度呼ぶ。storageのpoolは古いものが閉じられ、新しいものが渡される。パッケージ変数に前回の`Context`やstorageを持ち続けると、閉じたpoolを使ってエラーになる。`ctx.Go()`で起動した長く走るgoroutineは止められないので、作り直しの後も古いものが残る (`Context`から終了を知る手段は今は無い)。
+
 > **プラグインが素の `go` を書くとプロセスごと落ちる。** Go は他 goroutine の panic を回収できず、Elythia 側の recover では止められない。
 
 ## 効果ポリシー

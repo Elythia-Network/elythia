@@ -432,8 +432,8 @@ CLAUDE.md の Section 1 / 2 にあった表とツリーを、#3248 でここへ�
 /
 ├── cmd/
 │   └── elythia/            # 実行バイナリ。internal/cli を呼ぶだけ
-├── internal/               # 全29ディレクトリ (`git ls-tree -d HEAD internal/ | wc -l`)
-│   ├── cli/                # elythia のサブコマンド (serve / migrate / backfill <名前> / backup <名前> / doctor / fsck / config-dump / healthcheck / dump-routes)
+├── internal/               # 全31ディレクトリ (`git ls-tree -d HEAD internal/ | wc -l`)
+│   ├── cli/                # elythia のサブコマンド (serve / migrate / backfill <名前> / backup <名前> / maintenance <enter|exit|wait|status> / doctor / fsck / config-dump / healthcheck / dump-routes)
 │   ├── backup/             # DB のバックアップ (`elythia backup`、#3457)。保存先 (S3 互換 / ディレクトリ)、世代の置き方、pg_dump での取得
 │   ├── config/             # 設定ローダー（Misskey YAML互換）
 │   ├── db/                 # GORM の PostgreSQL 接続配線
@@ -464,8 +464,10 @@ CLAUDE.md の Section 1 / 2 にあった表とツリーを、#3248 でここへ�
 │   ├── l10n/               # サーバーが送るメール文面のロケール解決
 │   ├── safemath/           # 固定幅へ寄せるときに飽和させる算術ヘルパー
 │   ├── maintenance/        # SQL migration として書けない後始末バッチ（`elythia backfill <名前>` で手動で回す）
+│   ├── maintmode/          # メンテナンスモード (全プロセスが DB を手放す)。Redis の状態・各プロセスの報告・pg_stat_activity で held を決める判定役・メンテナンス中の HTTP 応答 (#3463)
 │   ├── frontendutil/       # 同梱フロントエンドの資産配信ヘルパー
 │   ├── pgarray/            # database/sql 用の PostgreSQL 配列型
+│   ├── pgactivity/         # pg_stat_activity で DB に繋いでいる接続を数えて切る。バックアップの戻しとメンテナンスモードが使う (#3463)
 │   ├── sentry/             # sentry-go の配線
 │   ├── redislog/           # go-redis の内部ロガーを slog へ流す配線
 │   ├── misc/               # ユーティリティ（ID生成 等。既定は`aidx`、Section 6 参照）
