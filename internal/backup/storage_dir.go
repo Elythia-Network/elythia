@@ -433,14 +433,35 @@ func regularFile(root *os.Root, rel string) (fs.FileInfo, error) {
 }
 
 // List returns the regular files whose key starts with prefix, in key order.
+//
+// 走査は prefix のディレクトリから始める。根から全体を走査すると、ext4 などを根に
+// mount したときの lost+found (root の 0700) のように、バックアップと関係の無い
+// 読めないディレクトリで一覧ごと失敗する。prefix のディレクトリが無ければ空を返す。
 func (d *DirStorage) List(_ context.Context, prefix string) ([]ObjectInfo, error) {
 	var out []ObjectInfo
-	err := filepath.WalkDir(d.root, d.listWalkFunc(prefix, &out))
+	err := filepath.WalkDir(d.listStart(prefix), d.listWalkFunc(prefix, &out))
 	if err != nil {
 		return nil, fmt.Errorf("backup: list %s: %w", d.root, err)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
 	return out, nil
+}
+
+// listStart returns the directory List walks for prefix: the deepest
+// directory every matching key is under, or the root.
+func (d *DirStorage) listStart(prefix string) string {
+	dir := path.Dir(prefix)
+	if strings.HasSuffix(prefix, "/") {
+		dir = strings.TrimSuffix(prefix, "/")
+	}
+	// key として使えない形 ("..") なら、根から走査して prefix で絞る。
+	if dir == "." || dir == "" {
+		return d.root
+	}
+	if _, err := d.rel(dir); err != nil {
+		return d.root
+	}
+	return filepath.Join(d.root, filepath.FromSlash(dir))
 }
 
 // listWalkFunc returns the filepath.WalkDir callback of List, which appends
@@ -453,6 +474,14 @@ func (d *DirStorage) listWalkFunc(prefix string, out *[]ObjectInfo) fs.WalkDirFu
 			// ディレクトリやファイルが無くなっている。消えたものは一覧に要らないので
 			// 飛ばす。根そのものが無いのは保存先の異常なので、これまでどおり失敗にする。
 			if p != d.root && errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
+			// 世代の外の読めないディレクトリ (lost+found など) は、バックアップの物を
+			// 持たないので飛ばす。世代の下で読めないのは保存先の異常なので失敗にする。
+			if p != d.root && errors.Is(err, fs.ErrPermission) && !d.underGenerations(p) {
+				if e != nil && e.IsDir() {
+					return filepath.SkipDir
+				}
 				return nil
 			}
 			return err
@@ -478,6 +507,17 @@ func (d *DirStorage) listWalkFunc(prefix string, out *[]ObjectInfo) fs.WalkDirFu
 		*out = append(*out, ObjectInfo{Key: key, Size: fi.Size(), ModTime: fi.ModTime()})
 		return nil
 	}
+}
+
+// underGenerations reports whether p is the generation root or below it.
+func (d *DirStorage) underGenerations(p string) bool {
+	rel, err := filepath.Rel(d.root, p)
+	if err != nil {
+		return false
+	}
+	gen := strings.TrimSuffix(generationRoot, "/")
+	rel = filepath.ToSlash(rel)
+	return rel == gen || strings.HasPrefix(rel, gen+"/")
 }
 
 // Delete removes key and then any directories it leaves empty, up to (not

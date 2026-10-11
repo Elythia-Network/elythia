@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"io"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -254,6 +255,25 @@ func TestTake_Directory(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, r.Close())
 	assert.Equal(t, meta.RowCounts, p.restore(t, dump).countRows(t))
+}
+
+// TestTake_DirectoryWithUnreadableLostAndFound: a disk mounted at the
+// storage root has lost+found, which the backup user cannot read. Taking and
+// listing must still work.
+func TestTake_DirectoryWithUnreadableLostAndFound(t *testing.T) {
+	p := newDatabase(t)
+	p.seedSimple(t)
+	root := markedDir(t)
+	unreadableDir(t, filepath.Join(root, "lost+found"))
+	st, err := NewDirStorage(root)
+	require.NoError(t, err)
+	meta, err := Take(context.Background(), p.takeOptions(st))
+	require.NoError(t, err)
+	gens, err := ListGenerations(context.Background(), st)
+	require.NoError(t, err)
+	require.Len(t, gens, 1)
+	assert.Equal(t, meta.ID, gens[0].ID)
+	assert.True(t, gens[0].Complete())
 }
 
 // TestTake_PgDumpFailureLeavesNothing: when pg_dump fails partway, neither
