@@ -71,11 +71,14 @@ type Generation struct {
 
 // VerifySummary is the part of verify.json the admin page shows.
 type VerifySummary struct {
+	// OK is backup.VerifyPassed: verify.json passed and belongs to the
+	// generation's current dump.
 	OK         bool                 `json:"ok"`
 	VerifiedAt time.Time            `json:"verifiedAt"`
 	Stages     []backup.StageResult `json:"stages"`
 	Mismatches []backup.RowMismatch `json:"mismatches"`
-	// Error says why verify.json could not be read.
+	// Error says why verify.json could not be read, or why a passing
+	// verify.json does not count for the generation's current dump.
 	Error string `json:"error,omitempty"`
 }
 
@@ -262,7 +265,12 @@ func (s *Service) verifySummary(ctx context.Context, bg backup.Generation) *Veri
 			return &VerifySummary{Error: err.Error(), Stages: []backup.StageResult{}, Mismatches: []backup.RowMismatch{}}
 		}
 	}
-	vs := &VerifySummary{OK: vr.OK, VerifiedAt: vr.VerifiedAt, Stages: vr.Stages, Mismatches: vr.Mismatches}
+	// restore と同じ基準で「通った」と言う。別の世代や、差し替わる前の dump を
+	// 確かめた verify.json を、画面だけ通ったと見せない。
+	vs := &VerifySummary{OK: backup.VerifyPassed(bg.ID, vr, bg.Meta), VerifiedAt: vr.VerifiedAt, Stages: vr.Stages, Mismatches: vr.Mismatches}
+	if vr.OK && !vs.OK {
+		vs.Error = "verify.json does not belong to this generation's current dump (meta.json is missing or unreadable, or the generation ID or dumpSha256 differs); verify it again"
+	}
 	if vs.Stages == nil {
 		vs.Stages = []backup.StageResult{}
 	}

@@ -379,6 +379,38 @@ func TestList_BrokenVerify(t *testing.T) {
 	assert.Contains(t, ov.Generations[0].Verify.Error, "decode")
 }
 
+// TestList_VerifyOfAnotherDump: the admin page calls a generation verified
+// with the same check as restore (backup.VerifyPassed), not verify.json's ok
+// alone (#3499).
+func TestList_VerifyOfAnotherDump(t *testing.T) {
+	st := newMemStorage()
+	m := putGeneration(t, st, gen1, []byte("d"), false)
+	putGeneration(t, st, gen2, []byte("e"), false)
+	putJSON(t, st, backup.Key(gen1, backup.VerifyFile), backup.VerifyResult{ID: gen1, OK: true, DumpSHA256: "0000"})
+	putJSON(t, st, backup.Key(gen2, backup.VerifyFile), backup.VerifyResult{ID: gen1, OK: true})
+	ov, err := NewService(Options{Storage: st}).List(context.Background())
+	require.NoError(t, err)
+	byID := map[string]*VerifySummary{}
+	for _, g := range ov.Generations {
+		byID[g.ID] = g.Verify
+	}
+	for _, id := range []string{gen1, gen2} {
+		require.NotNil(t, byID[id], id)
+		assert.False(t, byID[id].OK, id)
+		assert.Contains(t, byID[id].Error, "verify it again", id)
+	}
+
+	putJSON(t, st, backup.Key(gen1, backup.VerifyFile), backup.VerifyResult{ID: gen1, OK: true, DumpSHA256: m.DumpSHA256})
+	ov, err = NewService(Options{Storage: st}).List(context.Background())
+	require.NoError(t, err)
+	for _, g := range ov.Generations {
+		if g.ID == gen1 {
+			assert.True(t, g.Verify.OK)
+			assert.Empty(t, g.Verify.Error)
+		}
+	}
+}
+
 func TestDelete(t *testing.T) {
 	st := newMemStorage()
 	putGeneration(t, st, gen1, []byte("dump-one"), false)
