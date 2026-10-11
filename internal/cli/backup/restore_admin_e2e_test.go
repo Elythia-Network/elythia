@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -38,6 +39,7 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 
 	bkp "github.com/elythia-network/elythia/internal/backup"
+	"github.com/elythia-network/elythia/internal/backup/daemon"
 	"github.com/elythia-network/elythia/internal/backup/restoreop"
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/maintmode"
@@ -73,6 +75,8 @@ type restoreE2E struct {
 	prefix  string
 	stopped chan int
 	cancel  context.CancelFunc
+	// daemon is the backup service runDaemon built.
+	daemon atomic.Pointer[daemon.Daemon]
 }
 
 func (r *restoreE2E) exec(db string, sqls ...string) {
@@ -254,6 +258,16 @@ func TestRestoreFromAdminEndToEnd(t *testing.T) {
 	}
 	r := setupRestoreE2E(t)
 	server := r.startServer("fake-1")
+
+	t.Run("a job holds the slot", func(t *testing.T) {
+		// 取る・確かめるが走っている間は、再認証 (TOTP の消費) の前に断る。
+		release, err := r.daemon.Load().Acquire(daemon.JobVerify)
+		require.NoError(t, err)
+		defer release()
+		code, out := r.call("/restore/prepare", map[string]any{"i": adminToken, "id": r.genID, "password": adminPassword, "token": r.codes[0]}, "")
+		assert.Equal(t, http.StatusConflict, code)
+		assert.Equal(t, "BACKUP_SERVICE_BUSY", e2eCode(out))
+	})
 
 	t.Run("re-authentication", func(t *testing.T) {
 		body := func(token string, extra map[string]any) map[string]any {
@@ -516,7 +530,10 @@ backup:
 		signalContext: func() (context.Context, context.CancelFunc) { return runCtx, runCancel },
 		listen:        func(string) (net.Listener, error) { return ln, nil },
 		location:      time.UTC,
-		openRestore:   restoreWiring{coreDir: rsCoreMigrations, localDir: filepath.Join(rsCoreMigrations, "local"), heldGrace: 5 * time.Second}.open,
+		openRestore: func(cfg *config.Config, d *daemon.Daemon, s bkp.Storage, l *slog.Logger) (*RestoreParts, error) {
+			r.daemon.Store(d)
+			return restoreWiring{coreDir: rsCoreMigrations, localDir: filepath.Join(rsCoreMigrations, "local"), heldGrace: 5 * time.Second}.open(cfg, d, s, l)
+		},
 	}
 	r.stopped = make(chan int, 1)
 	go func() { r.stopped <- runDaemon(e, []string{"-config", cfgPath}) }()

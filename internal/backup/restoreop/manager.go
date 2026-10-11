@@ -63,6 +63,10 @@ type Options struct {
 	// Acquire takes the service's job slot so that no scheduled take runs
 	// during the operation. The returned function gives it back.
 	Acquire func() (release func(), err error)
+	// SlotBusy reports whether another job holds the slot now. CanStart
+	// asks it so that a request is refused before its re-authentication
+	// (which would spend the TOTP code). Nil means never busy.
+	SlotBusy func() bool
 	// Notify reports a state an operator has to resolve.
 	Notify func(ctx context.Context, message string)
 
@@ -244,10 +248,19 @@ func (m *Manager) Prepare(ctx context.Context, req PrepareRequest) (*Record, str
 	return rec, ticket, nil
 }
 
-// CanStart reports why an operation cannot start now (an unfinished one, an
-// active maintenance, replicas). It reads Redis only, so the control API
+// CanStart reports why an operation cannot start now (a job holding the
+// slot, an unfinished one, an active maintenance, replicas). It reads Redis only, so the control API
 // calls it before it spends a re-authentication, which opens the database.
 func (m *Manager) CanStart(ctx context.Context) error {
+	// 枠は Prepare が取るので、ここでは今空いているかだけを見る (Prepare の中の確かめ
+	// では見ない。自分が取った枠で断ってしまう)。
+	if m.o.SlotBusy != nil && m.o.SlotBusy() {
+		return ErrBusy
+	}
+	return m.canStart(ctx)
+}
+
+func (m *Manager) canStart(ctx context.Context) error {
 	if cur, err := m.o.Store.Current(ctx); err != nil {
 		return err
 	} else if cur != nil {
@@ -279,7 +292,7 @@ func (m *Manager) NoMaintenance(ctx context.Context) error {
 
 func (m *Manager) prepareChecks(ctx context.Context, req PrepareRequest) (*Record, string, *backup.RestorePlan, backup.RestoreOptions, error) {
 	var opts backup.RestoreOptions
-	if err := m.CanStart(ctx); err != nil {
+	if err := m.canStart(ctx); err != nil {
 		return nil, "", nil, opts, err
 	}
 	if err := m.checkVersions(ctx); err != nil {

@@ -135,6 +135,7 @@ func (w restoreWiring) open(cfg *config.Config, d *daemon.Daemon, storage backup
 			return writeModLog(ctx, cfg, selfID, idGen, database, userID, info)
 		},
 		Acquire:       func() (func(), error) { return d.Acquire(daemon.JobRestore) },
+		SlotBusy:      d.SlotBusy,
 		Notify:        d.NotifyRestoreStopped,
 		Database:      cfg.DB.DB,
 		MaintenanceDB: cfg.Maintenance.MaintenanceDB,

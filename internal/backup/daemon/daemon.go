@@ -375,6 +375,13 @@ func (d *Daemon) Start(kind JobKind, id string) (Job, error) {
 	return d.startLocked(kind, TriggerAPI, id, d.clock.Now()), nil
 }
 
+// SlotBusy reports whether a job (or a restore) holds the job slot now.
+func (d *Daemon) SlotBusy() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.running != nil
+}
+
 // Storage returns the storage the daemon was built with.
 func (d *Daemon) Storage() backup.Storage { return d.opts.Storage }
 
