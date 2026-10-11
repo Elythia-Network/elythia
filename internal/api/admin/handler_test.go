@@ -3838,7 +3838,9 @@ func TestAdminMeta_ReadsModelFields(t *testing.T) {
 	assert.Equal(t, "https://meta.example/192.png", resp["app192IconUrl"])
 	assert.Equal(t, "https://meta.example/ai.png", resp["mascotImageUrl"])
 	assert.Equal(t, "https://meta.example/inquiry", resp["inquiryUrl"])
-	assert.Equal(t, "dk", resp["deeplAuthKey"])
+	// 秘密の値は返さない (設定済みなら伏せ字)。
+	assert.Equal(t, model.MetaSecretPlaceholder, resp["deeplAuthKey"])
+	assert.Equal(t, true, resp["hasDeeplAuthKey"])
 	assert.Equal(t, true, resp["deeplIsPro"])
 	assert.Equal(t, true, resp["translatorAvailable"], "deeplAuthKey != null で true")
 	assert.Equal(t, float64(5), resp["notesPerOneAd"])
