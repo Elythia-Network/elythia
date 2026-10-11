@@ -6,12 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"net/http"
 	"net/url"
 	"path"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
@@ -46,6 +50,9 @@ type S3Storage struct {
 	// PartSize is the multipart part size. Objects smaller than it are sent
 	// with a single PutObject.
 	PartSize int
+	// conditionWarned is set once the warning about a refused conditional
+	// write has been logged.
+	conditionWarned atomic.Bool
 }
 
 var (
@@ -170,9 +177,12 @@ func (s *S3Storage) Put(ctx context.Context, key string, r io.Reader) error {
 // through it; the dump and meta.json keep the unconditional Put.
 //
 // SDK は 500 や切断の後に同じ要求を送り直すので、1 回目が保存済みだと 412 が
-// 返る。それを自分のものと見分けるのは呼ぶ側 (claimKey) の読み直し。条件付きの
-// 書き込みを知らない S3 互換の実装は、条件を無視するか 501 を返す。501 のときは
-// 条件を外して送る。その実装では同じ秒の take を排他できないが、取れないよりはよい。
+// 返る。それを自分のものと見分けるのは呼ぶ側 (claimKey) の読み直し。
+//
+// 条件付きの書き込みを知らない S3 互換の実装は、条件を無視するか、501 や 400
+// (InvalidArgument / InvalidRequest など) で断る。断られたら条件を外して送り
+// 直し、排他が効かない保存先だと警告を 1 回だけ出す。取れなくなるよりはよい。
+// 403 は認証の誤りでありうるので、送り直さずに失敗にする。
 func (s *S3Storage) PutNew(ctx context.Context, key string, body []byte) error {
 	k, err := s.objectKey(key)
 	if err != nil {
@@ -189,20 +199,41 @@ func (s *S3Storage) PutNew(ctx context.Context, key string, body []byte) error {
 		return err
 	}
 	err = send(aws.String("*"))
-	switch s3ErrorCode(err) {
-	case "":
-		if err == nil {
-			return nil
-		}
-	case "PreconditionFailed", "ConditionalRequestConflict":
+	switch {
+	case err == nil:
+		return nil
+	case s3ErrorCode(err) == "PreconditionFailed" || s3ErrorCode(err) == "ConditionalRequestConflict":
 		return fmt.Errorf("backup: put %s: %w", key, ErrExists)
-	case "NotImplemented":
-		err = send(nil)
-		if err == nil {
+	case conditionRefused(err):
+		if !s.conditionWarned.Swap(true) {
+			slog.Warn("backup: the S3 storage refused a conditional write (If-None-Match); "+
+				"two backups started in the same second are not kept apart on this storage (logged once)", "err", err)
+		}
+		if err = send(nil); err == nil {
 			return nil
 		}
 	}
 	return fmt.Errorf("backup: put %s: %w", key, err)
+}
+
+// conditionRefused reports whether err is an S3-compatible service refusing
+// the If-None-Match condition itself, rather than the write.
+func conditionRefused(err error) bool {
+	switch s3ErrorCode(err) {
+	case "NotImplemented", "InvalidArgument", "InvalidRequest":
+		return true
+	}
+	var re *awshttp.ResponseError
+	if !errors.As(err, &re) {
+		return false
+	}
+	switch re.HTTPStatusCode() {
+	case http.StatusNotImplemented:
+		return true
+	case http.StatusBadRequest:
+		return strings.Contains(strings.ToLower(err.Error()), "if-none-match")
+	}
+	return false
 }
 
 // s3ErrorCode returns the S3 error code of err, or "" when it has none.
