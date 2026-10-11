@@ -104,7 +104,7 @@ func (h *Handler) CaptchaSave(c echo.Context) error {
 
 	// 伏せ字のまま送り返された secret は「変えない」。検証には保存済みの値を使い、
 	// 保存では書き換えない (captcha/current は秘密の値を返さない)。
-	if req.Secret != nil && *req.Secret == model.MetaSecretPlaceholder {
+	if req.Secret != nil && model.IsMetaSecretPlaceholder(*req.Secret) {
 		stored, err := h.storedCaptchaSecret(req.Provider)
 		if err != nil {
 			return c.JSON(http.StatusInternalServerError, apierr.InternalError())

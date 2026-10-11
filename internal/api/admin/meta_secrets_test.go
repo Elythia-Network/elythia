@@ -184,3 +184,36 @@ func TestCaptchaSave_PlaceholderWithoutStoredSecretIsRejected(t *testing.T) {
 	rec := doPost(h.CaptchaSave, body, adminUser)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
+
+// 前後に空白の付いた伏せ字も「変えない」と読む。update-meta は一部の欄を trim して
+// から保存するので、そのまま通すと trim された伏せ字が秘密として残る。
+func TestUpdateMeta_PaddedPlaceholderKeepsSecrets(t *testing.T) {
+	h, _, metaRepo, _ := newTestHandler(t)
+	body := map[string]any{"name": "renamed"}
+	for _, f := range model.MetaSecretFields {
+		body[f] = " " + model.MetaSecretPlaceholder + "\n"
+	}
+	b, err := json.Marshal(body)
+	require.NoError(t, err)
+	rec := doPost(h.UpdateMeta, string(b), adminUser)
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	for _, f := range model.MetaSecretFields {
+		assert.NotContains(t, metaRepo.LastUpdateFields, f, "%s would be overwritten", f)
+	}
+}
+
+func TestCaptchaSave_PaddedPlaceholderUsesStoredSecret(t *testing.T) {
+	h, _, metaRepo, _ := newTestHandler(t)
+	stored := "plain-stored-hcaptcha"
+	metaRepo.Meta.HcaptchaSecretKey = &stored
+	var verifiedWith string
+	h.SetCaptchaVerifierFactory(func(_, secret, _, _ string) captcha.Verifier {
+		verifiedWith = secret
+		return stubCaptchaVerifier{}
+	})
+	body := `{"provider":"hcaptcha","sitekey":"site","secret":" ` + model.MetaSecretPlaceholder + ` ","captchaResult":"ok"}`
+	rec := doPost(h.CaptchaSave, body, adminUser)
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Equal(t, stored, verifiedWith)
+	assert.NotContains(t, metaRepo.LastUpdateFields, "hcaptchaSecretKey")
+}

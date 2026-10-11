@@ -1,5 +1,7 @@
 package model
 
+import "strings"
+
 // MetaSecretFields lists the meta columns that hold credentials of external
 // services. The admin API and the moderation log never return their values;
 // see MetaSecretPlaceholder.
@@ -27,6 +29,15 @@ var MetaSecretFields = []string{
 // 受け取った値をそのまま update-meta へ送り返すので、null を返すと保存のたびに
 // 秘密が消える。update-meta はこの文字列を「変えない」として受ける。
 const MetaSecretPlaceholder = "********************************"
+
+// IsMetaSecretPlaceholder reports whether s is MetaSecretPlaceholder, ignoring
+// surrounding whitespace.
+//
+// 前後の空白を許すのは、update-meta が一部の欄を trim してから保存するため。
+// 空白付きの伏せ字を「新しい値」と読むと、trim された伏せ字が秘密として残る。
+func IsMetaSecretPlaceholder(s string) bool {
+	return strings.TrimSpace(s) == MetaSecretPlaceholder
+}
 
 // IsMetaSecretField reports whether name is one of MetaSecretFields.
 func IsMetaSecretField(name string) bool {

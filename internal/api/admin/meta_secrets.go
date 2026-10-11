@@ -39,7 +39,7 @@ func hasSecretFieldName(field string) string {
 // 伏せ字を受けたら「変えない」と読む。空文字と null は今までどおり消す。
 func dropUnchangedSecretFields(fields map[string]any) {
 	for _, f := range model.MetaSecretFields {
-		if s, ok := fields[f].(string); ok && s == model.MetaSecretPlaceholder {
+		if s, ok := fields[f].(string); ok && model.IsMetaSecretPlaceholder(s) {
 			delete(fields, f)
 		}
 	}
