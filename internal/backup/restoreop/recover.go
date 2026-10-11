@@ -39,6 +39,18 @@ func (m *Manager) recoverOnStart(ctx context.Context) {
 		}
 	}
 	defer release()
+	// 待つ間に、この実行で受けた準備がその記録を作って終えていることがある (起動
+	// した直後に Current を読む前に Prepare が来た場合)。枠を取った後で読み直し、
+	// 終わっていれば何もしない。この実行の操作は終わるまで枠を持つので、枠を取れた
+	// 時点で残っている記録は、前の実行のものだけになる。
+	rec, err = m.o.Store.Current(ctx)
+	if err != nil {
+		m.log.Error("backup: cannot read the unfinished restore", "err", err)
+		return
+	}
+	if rec == nil {
+		return
+	}
 	stopJudge := m.runJudge(ctx)
 	defer stopJudge()
 	m.journal(ctx, rec.OpID, rec.Step, "the backup service restarted at step %s; recovering", rec.Step)
