@@ -96,43 +96,89 @@ func TestStepNotWritten(t *testing.T) {
 	}
 }
 
-// TestStepNotWritten_RedisGone checks that an operation whose record cannot
-// be read either keeps the judge and the slot, notifies once, and finishes
-// when Redis is back.
-func TestStepNotWritten_RedisGone(t *testing.T) {
-	var clock atomic.Int64
-	start := time.Now()
-	e := newEnv(t, func(o *Options) {
-		o.Now = func() time.Time { return start.Add(time.Duration(clock.Load())) }
-	})
+// TestStepNotWritten_Notifies checks that an operation that cannot go on
+// keeps the judge and the slot and notifies once, whether Redis cannot be
+// read or can be read but not written, and finishes when Redis is back.
+func TestStepNotWritten_Notifies(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		readable bool
+	}{{"unreadable", false}, {"readable but not writable", true}} {
+		t.Run(c.name, func(t *testing.T) {
+			var clock atomic.Int64
+			start := time.Now()
+			e := newEnv(t, func(o *Options) {
+				o.Now = func() time.Time { return start.Add(time.Duration(clock.Load())) }
+			})
+			e.process("p1")
+			rec, _ := e.prepare()
+			var failed, broken atomic.Bool
+			var writes atomic.Int32
+			e.m.failStep = func(to string) error {
+				if to == StepSwitched && failed.CompareAndSwap(false, true) {
+					broken.Store(true)
+					if !c.readable {
+						// go-redis が再試行しない種類の誤り。
+						e.mr.SetError("ERR the record is not available")
+					}
+				}
+				if broken.Load() {
+					writes.Add(1)
+					return errors.New("OOM command not allowed when used memory > 'maxmemory'")
+				}
+				return nil
+			}
+			require.NoError(t, e.m.Confirm(context.Background(), rec.OpID))
+			require.Eventually(t, func() bool {
+				// 書けなかった後だけ時計を進める (それまでは held の待ちの期限に効く)。
+				if failed.Load() {
+					clock.Add(int64(stalledNotifyAfter))
+				}
+				e.mu.Lock()
+				defer e.mu.Unlock()
+				return len(e.notes) >= 1
+			}, 5*time.Second, 5*time.Millisecond)
+			if c.readable {
+				// 回復を何周も回しても、知らせるのは 1 回。
+				w := writes.Load()
+				require.Eventually(t, func() bool { return writes.Load() >= w+3 }, 5*time.Second, 5*time.Millisecond)
+			}
+			assert.True(t, e.slot.isHeld(), "the slot is kept while it waits")
+			broken.Store(false)
+			e.mr.SetError("")
+			e.waitStep(rec.OpID, StepReverted)
+			require.Eventually(t, func() bool { return e.maintenance() == nil }, 5*time.Second, 5*time.Millisecond)
+			e.mu.Lock()
+			defer e.mu.Unlock()
+			assert.Len(t, e.notes, 1, "notified once")
+			assert.Contains(t, e.notes[0], "cannot write or read its record")
+		})
+	}
+}
+
+// TestStepNotWritten_RecordGone checks that an operation whose record is gone
+// stops, notifies and gives the slot back instead of reading forever.
+func TestStepNotWritten_RecordGone(t *testing.T) {
+	e := newEnv(t)
 	e.process("p1")
 	rec, _ := e.prepare()
-	var failed atomic.Bool
+	var once sync.Once
 	e.m.failStep = func(to string) error {
-		if to == StepSwitched && failed.CompareAndSwap(false, true) {
-			e.mr.SetError("LOADING Redis is loading the dataset in memory")
-			return errors.New("redis: write failed")
+		var err error
+		if to == StepSwitched {
+			once.Do(func() {
+				require.NoError(t, e.rdb.Del(context.Background(), "p:elythia:maintenance:restore:"+rec.OpID).Err())
+				err = errors.New("redis: write failed")
+			})
 		}
-		return nil
+		return err
 	}
 	require.NoError(t, e.m.Confirm(context.Background(), rec.OpID))
-	require.Eventually(t, func() bool {
-		// 書けなかった後だけ時計を進める (それまでは held の待ちの期限に効く)。
-		if failed.Load() {
-			clock.Add(int64(stalledNotifyAfter))
-		}
-		e.mu.Lock()
-		defer e.mu.Unlock()
-		return len(e.notes) == 1
-	}, 5*time.Second, 5*time.Millisecond)
-	assert.True(t, e.slot.isHeld(), "the slot is kept while it waits")
-	e.mr.SetError("")
-	e.waitStep(rec.OpID, StepReverted)
-	require.Eventually(t, func() bool { return e.maintenance() == nil }, 5*time.Second, 5*time.Millisecond)
+	require.Eventually(t, func() bool { return !e.slot.isHeld() }, 5*time.Second, 5*time.Millisecond)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	assert.Len(t, e.notes, 1, "notified once")
-	assert.Contains(t, e.notes[0], "Redis does not answer")
+	require.Len(t, e.notes, 1)
+	assert.Contains(t, e.notes[0], "its record is gone")
 }
 
 // TestRecover_ResumingWithNamesNotSwapped checks that a resuming record whose
