@@ -289,12 +289,16 @@ func (d *Daemon) onTimer(ctx context.Context) {
 	d.mu.Lock()
 	if !now.Before(d.nextRun) {
 		d.nextRun = sched.Next(now)
-		if d.running == nil {
+		if d.running == nil && !d.recovering {
 			d.startLocked(JobTake, TriggerSchedule, "", now)
 		} else {
-			// 手で頼まれた検証などが走っている。終わったらすぐ取る。
+			// 手で頼まれた検証などが走っているか、リストアの回復の途中。終わったらすぐ取る。
 			d.pending = true
-			d.log.Info("backup: scheduled backup deferred until the running job ends", "running", d.running.Kind)
+			if d.running != nil {
+				d.log.Info("backup: scheduled backup deferred until the running job ends", "running", d.running.Kind)
+			} else {
+				d.log.Info("backup: scheduled backup deferred until the restore recovery ends")
+			}
 		}
 	}
 	var delay *Event
@@ -392,7 +396,16 @@ func (d *Daemon) SetRecovering(v bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.recovering = v
-	if !v && d.pendingVerify != "" && d.running == nil && !d.stopping && d.ctx != nil && d.ctx.Err() == nil {
+	if v || d.running != nil || d.stopping || d.ctx == nil || d.ctx.Err() != nil {
+		return
+	}
+	// 回復の間に溜まった取得を先に始める (取った世代を確かめるので、後回しの検証は捨てる)。
+	switch {
+	case d.pending:
+		d.pending = false
+		d.pendingVerify = ""
+		d.startLocked(JobTake, TriggerSchedule, "", d.clock.Now())
+	case d.pendingVerify != "":
 		d.startPendingVerifyLocked()
 	}
 }
@@ -451,7 +464,7 @@ func (d *Daemon) acquire(kind JobKind, beforeRun bool) (func(), error) {
 			}
 			if d.running == nil && !d.stopping && d.ctx != nil && d.ctx.Err() == nil {
 				switch {
-				case d.pending:
+				case d.pending && !d.recovering:
 					// 取る方を先にする。取った世代を確かめるので、起動時の検証は要らなくなる
 					// (Run が「すぐ取る場合は回さない」のと同じ)。
 					d.pending = false
@@ -773,7 +786,7 @@ func (d *Daemon) finish(ctx context.Context, res JobResult) {
 	if err == nil {
 		d.setLatestLocked(gens, false)
 	}
-	if d.pending && ctx.Err() == nil {
+	if d.pending && !d.recovering && ctx.Err() == nil {
 		d.pending = false
 		d.startLocked(JobTake, TriggerSchedule, "", d.clock.Now())
 	}
