@@ -282,10 +282,16 @@ func TestGiveUpAdvice(t *testing.T) {
 	swapped := map[string]string{testDB: "restored", before: "current"}
 	note := func(t *testing.T, e *env) string {
 		t.Helper()
-		e.mu.Lock()
-		defer e.mu.Unlock()
-		require.Len(t, e.notes, 1)
-		return e.notes[0]
+		// 通知は unknown を書いた後に送るので、届くのを待つ。
+		var n []string
+		require.Eventually(t, func() bool {
+			e.mu.Lock()
+			defer e.mu.Unlock()
+			n = append([]string(nil), e.notes...)
+			return len(n) > 0
+		}, 5*time.Second, 5*time.Millisecond)
+		require.Len(t, n, 1)
+		return n[0]
 	}
 	t.Run("maintenance on", func(t *testing.T) {
 		e, rec := crashed(t, StepSwitched, notSwapped, maintmode.PhaseHeld, "")
