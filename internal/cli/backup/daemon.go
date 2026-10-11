@@ -184,7 +184,9 @@ func wireDeps(te env, ve verifyEnv) func(*config.Config, *slog.Logger) (Deps, er
 		if err != nil {
 			return Deps{}, err
 		}
-		if w := backupkit.TempDirWarning(vopts.TempDir, ve.env); w != "" && b.Schedule.Verify {
+		// 定期実行で確かめなくても、制御 API があれば管理画面の「今すぐ確かめる」で
+		// 確かめるので、そのときも出す。
+		if w := backupkit.TempDirWarning(vopts.TempDir, ve.env); w != "" && (b.Schedule.Verify || b.Schedule.Listen != "") {
 			logger.Warn("backup: " + w)
 		}
 		return Deps{

@@ -171,12 +171,15 @@ func TestWireDepsWarnsWithoutTMPDIR(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		verify bool
+		listen string
 		tmpdir string
 		warn   bool
 	}{
-		{"scheduled verification without TMPDIR", true, "", true},
-		{"scheduled verification with TMPDIR", true, "/scratch", false},
-		{"no scheduled verification", false, "", false},
+		{"scheduled verification without TMPDIR", true, "", "", true},
+		{"scheduled verification with TMPDIR", true, "", "/scratch", false},
+		{"control API without TMPDIR", false, "0.0.0.0:3010", "", true},
+		{"control API with TMPDIR", false, "0.0.0.0:3010", "/scratch", false},
+		{"neither", false, "", "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ve.getenv = func(k string) string {
@@ -187,7 +190,7 @@ func TestWireDepsWarnsWithoutTMPDIR(t *testing.T) {
 			}
 			b := &config.BackupOptions{
 				Storage:  config.BackupStorageOptions{Type: backupkit.StorageTypeDir, Dir: config.BackupDirectoryOptions{Path: markedDir(t)}},
-				Schedule: config.BackupScheduleOptions{Verify: tc.verify},
+				Schedule: config.BackupScheduleOptions{Verify: tc.verify, Listen: tc.listen},
 			}
 			var log bytes.Buffer
 			_, err := wireDeps(defaultEnv(), ve)(cfgWith(b), slog.New(slog.NewTextHandler(&log, nil)))
