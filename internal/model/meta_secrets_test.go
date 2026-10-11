@@ -70,3 +70,10 @@ func TestMaskMetaSecret(t *testing.T) {
 	_, added := m["objectStorageSecretKey"]
 	assert.False(t, added, "absent fields are not added")
 }
+
+func TestIsMetaSecretPlaceholder(t *testing.T) {
+	assert.True(t, IsMetaSecretPlaceholder(MetaSecretPlaceholder))
+	assert.True(t, IsMetaSecretPlaceholder(" \t"+MetaSecretPlaceholder+"\n"))
+	assert.False(t, IsMetaSecretPlaceholder(MetaSecretPlaceholder+"x"))
+	assert.False(t, IsMetaSecretPlaceholder(""))
+}
