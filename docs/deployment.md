@@ -682,6 +682,167 @@ MK_ONLY_QUEUE=1 ./built/elythia serve -config .config/default.yml
   ノードが古い) は問題ない — 新しい配送ノードは payload に鍵があればそちらを
   使う。**単一プロセス構成では producer と worker が同じなので影響しない**
 
+## メンテナンスモード
+
+重い migration や DB の作業の間、**全プロセスに DB への接続を手放させる**モード (#3463)。
+プロセスは止めず、listener だけを残してメンテナンスの応答を返す。抜けると、各プロセスが
+DB に繋ぎ直し、サーバーの中身 (キャッシュ・購読・ジョブの worker など) を作り直す。
+
+状態は Redis (`redis` の接続先) のキー `elythia:maintenance` に置く (`redis.prefix` を設定していれば、その後ろに `:` を挟んで付く)。
+**Redis の `maxmemory-policy` は `noeviction` か `volatile-*` にする。** `allkeys-*` だとメモリが
+足りなくなったときに状態のキーが追い出され、メンテナンスが勝手に終わる。`allkeys-*` のときは
+`serve` の起動時と `maintenance enter` が警告を出す (CONFIG を受けない Redis では確かめない)。全プロセスが
+これを見る (pub/sub の通知と 2 秒ごとの読み直し) ので、Web と配送を分けた構成
+([前節](#web-と配送を別ノードに分ける)) でも、複数の Web ノードでも、まとめて入って抜ける。
+
+```bash
+# 入る。DB への接続が 0 になって held になるまで待つ (既定 2 分)
+./built/elythia maintenance enter -config .config/default.yml -reason "DB の作業"
+
+# 状態、DB に残っている接続、各プロセスの報告を見る
+./built/elythia maintenance status -config .config/default.yml
+
+# held になるまで (resuming なら抜け終わるまで) もう一度待つ
+./built/elythia maintenance wait -config .config/default.yml
+
+# 抜ける。全プロセスが元どおり動くのを確かめてから状態を消す (既定 2 分)
+./built/elythia maintenance exit -config .config/default.yml
+```
+
+判定に使う設定 (`maintenance.maintenanceDb` / `maintenance.drainTimeout`) は [configuration.md](configuration.md#メンテナンスモード-maintenance) にある。
+
+### 入るときに起きること
+
+1. 新しいリクエストへの応答を、メンテナンスの応答に切り替える
+2. 処理中の HTTP リクエストが終わるのを待つ (上限 30 秒)
+3. streaming の接続を close code 1012 で閉じる。本家のクライアントは自分で繋ぎ直す
+4. ジョブの worker・cron・chart の保存の処理を止める (chart のメモリ上の集計は DB へ書いてから止まる)
+5. DB の接続を閉じる (read replica とプラグインのストレージの接続も含む)
+
+2・4・5 の待ちはそれぞれ最大 30 秒なので、1 つのプロセスが手放すまでに最大 90 秒ほど掛かる。
+`enter -wait` の既定 (2 分) はそれより長くしてある。
+
+### held になる条件
+
+**held にしてよいかは、PostgreSQL に問い合わせて決める。** 各プロセスの報告は「まだ待つ理由」を
+足すだけで、報告が消えても held の根拠にはしない。決めるのは「判定役」で、Redis のロック
+(`elythia:maintenance:judge`) を取った 1 つがなる。本体の各プロセスと、待っている間の
+`elythia maintenance enter|exit|wait` が候補になるので、受けたプロセスが落ちても、ほかのプロセスが
+引き継ぐ。
+
+判定役は、次の 2 つが同じ 1 回の判定の中で成り立ったときだけ、状態を `held` にする。
+
+1. 生きている報告に、`drained` でないもの (`starting`・`running`・`draining`・`resuming`・
+   `resume_failed`) が無い。起動の途中のプロセスは、状態を読む前に `starting` を報告するので、
+   DB を開く前でもここで待つ
+2. メンテナンス用の DB (`maintenance.maintenanceDb`、既定 `postgres`) から `pg_stat_activity` を
+   見て、対象の DB (`db.db`) に判定役以外の接続が 1 つも無い。autovacuum は数えない。
+   `dbReplications` を有効にしていれば、各 replica でも同じように数える
+
+```sql
+-- 判定役が数えているもの (メンテナンス用の DB から)
+SELECT pid, usename, application_name FROM pg_stat_activity
+WHERE datname = '<db.db>' AND pid <> pg_backend_pid() AND usesysid IS NOT NULL;
+```
+
+本体の接続には `application_name` (`elythia/<role>/<host>-<pid>`) が付いている。
+
+- **`maintenance.drainTimeout` (既定 30 秒) を過ぎても接続が残っていたら、Elythia 自身の接続だけを
+  切る** (`application_name` が `elythia/` で始まり、判定役と同じ DB のユーザーのもの)。見捨てた
+  ジョブや、止める途中で上限に達したプロセスが掴んでいる接続にあたる。切った接続は `status` に出る
+- **それ以外の接続 (運営者の `psql` など) は切らない。** held にせず、残っている接続を `status` に
+  出して待ち続ける。その接続を閉じれば、次の判定で held になる
+- `enter -wait` の上限を過ぎたら、状態は `entering` のまま 1 で終わる。判定は本体の各プロセスが
+  続けるので、後で `status` を見るか、`wait` で待ち直す
+- 判定役が 1 つもいない (本体が動いておらず、CLI も待っていない) と、`entering` のまま進まない。
+  `status` は `judge: none` と出す。`wait` を流せば CLI が判定する
+
+**held は「判定した時点で接続が 0 だった」という事実で、その後も 0 であることは保証しない。** 判定役は
+held の間も数え続け、後から繋いだ接続があれば `status` に警告を出す。Redis に繋がらないまま動いている
+プロセスは、メンテナンスに入ったことを知る手段が無いので、held の後に繋ぎ直しうる。**DB を触る作業の
+直前には `status` を見る。**
+
+DB のユーザーには、メンテナンス用の DB への `CONNECT` の権限が要る (`postgres` は既定で誰でも
+繋げる)。同じユーザーの接続を切るのに superuser は要らない。
+
+### メンテナンス中の応答
+
+| 経路 | 応答 |
+|---|---|
+| API (`/api/*`) | 503 と `Retry-After`、本文は JSON のエラー (`code: MAINTENANCE`) |
+| 連合の受信 (`/inbox`、`/users/:id/inbox`) | 本文の無い 503 と `Retry-After`。送り手は間隔を空けて再送する |
+| `/streaming` | 503 |
+| `/healthz` | **200** (`"maintenance": true` 付き)。compose の healthcheck と監視が止めない |
+| 画面 | 503 とメンテナンスの画面。終わると自動で再読み込みする |
+| 静的なファイル | 通常どおり |
+
+配送だけのノード (`MK_ONLY_QUEUE`) は、通常時と同じく `/healthz` だけを返し、それ以外は 503 にする。
+
+詳しい形は [divergence/operations.md §5.7](divergence/operations.md#57-メンテナンスモード-elythia-独自3463)。
+
+### メンテナンス中に起動したプロセス
+
+`elythia serve` は DB を開く前に Redis の状態を読む。メンテナンス中なら DB を開かずに
+メンテナンスの応答で起動し、抜けるのを待ってから DB を開く。
+
+`elythia migrate` は、メンテナンス中は何もせずに **3** で終わる (DB に触れない)。UDS の
+entrypoint (`deploy/uds/mkgo-entrypoint.sh`) は 3 を受けたら migration を飛ばして `serve` を
+起動する。メンテナンス中に migration を流したいときは、`elythia maintenance status` が出す
+opId を `-maintenance-op <opId>` で渡す。**メンテナンス中に版を上げたら、抜ける前にこれで
+migration を流す。** 飛ばしたまま抜けると、古い schema のまま新しい版が動く。
+
+- Redis に繋がらないときの `migrate` は、警告を出して普段どおり流す (Redis の起動を待たない
+  構成を壊さないため)
+- compose (TCP) の `migrate` サービスは 0 以外で終わると app を起動しない
+  (`service_completed_successfully`)。メンテナンス中に `docker compose up` し直すと app が
+  上がらないので、抜けてから行う
+
+### 抜けられないとき
+
+- `elythia maintenance exit` は状態を `resuming` にし、生きている報告が全部 `running` になったら
+  判定役が状態を消す。報告が消えたプロセス (落ちた場合など) は待たない。起動し直せば、そのまま
+  普段どおりに起動する。DB に繋ぎ直せないプロセスは `resume_failed` を報告し、メンテナンスの応答の
+  まま間隔を延ばしながら (最大 30 秒) 繋ぎ直しを繰り返す。`exit -wait` の上限を過ぎたら、状態は
+  `resuming` のまま 1 で終わる。DB が戻れば、各プロセスは自分で戻り、判定役が状態を消す
+- `resuming` の状態が残っている間は、次の `enter` は「既に入っている」で失敗する。判定役が
+  いなければ `wait` で消し終えるか、`-force` で消す
+- `-force` は待たずに状態を消す
+- **Redis が読めない間、プロセスは今の状態のまま動かない。** メンテナンス中に Redis が落ちても
+  勝手には抜けない
+
+### プロセスの停止 (SIGTERM) の時間の配分
+
+`elythia serve` は SIGTERM を受けてから 7 秒を予算にして止まる。その後に Sentry の送信待ち
+(最大 2 秒) が続いても、docker の既定の停止猶予 (10 秒) に届かず、SIGKILL の前に終われる。7 秒を
+次のように分ける。
+
+1. メンテナンスの監視と判定役を止め、新しいリクエストを 503 にする。処理中の HTTP リクエストと、
+   走っているメンテナンスの切り替えの終わりを待つ。**全体の 1/3 まで**
+2. streaming を 1012 で閉じる。残りの 1/3 (最大 3 秒) まで
+3. shutdown hook (chart の保存・バッファの flush)・queue の停止。1 で処理中のリクエストの待ちが
+   上限に達しても呼び、全体の期限までの時間を渡す
+4. DB を閉じ、メンテナンスの報告を消す。処理中のリクエストが残っていたら、その数をログに出す
+
+この順序は「行儀よく止める」ためのもので、メンテナンスの判定はこれに依らない。判定役は
+`pg_stat_activity` を見るので、止める途中のプロセスの接続はそこに出て、閉じ終えるまで held に
+ならない。
+
+例外が 2 つある。
+
+- **メンテナンスの切り替えが 1 の上限を過ぎても終わらないとき**は、その世代を切り替えの側に任せ、
+  3 と 4 を行わない。切り替えが世代を止めている途中なら、hook はその停止の中で呼ばれる。作っている
+  途中なら、その世代の hook は呼ばれない。報告は消さず、プロセスが終わるまで書き続ける
+- `Shutdown` は 3 を始めた所で、予算が切れていれば返る。hook には全体の期限 (切れていれば
+  そこから 1 秒) までの ctx を渡すが、返った後に呼び出し元がプロセスを終えれば、hook は途中で
+  切られうる
+
+### 今できないこと
+
+- 管理画面からの入る・抜ける (#3462 の管理画面と再認証が入ってから足す)。今は CLI だけ
+- 外部のプラグインが `ctx.Go` で長く走る goroutine を持つ場合、抜けるたびにプラグインの
+  初期化 (`Routes` / `Jobs` など) がもう一度呼ばれ、古い goroutine は止まらない。プラグインは
+  何度呼ばれてもよいように書く ([plugins/authoring.md](plugins/authoring.md) に書いた)
+
 ## systemdユニット例
 
 ```ini
