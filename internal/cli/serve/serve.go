@@ -5,6 +5,7 @@ package serve
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -178,7 +179,17 @@ func serve(e env, args []string) int {
 		log.Error("failed to connect to Redis", "error", err)
 		return 1
 	}
-	defer closeRedis()
+	// Shutdown が期限で返ったときは、shutdown hook (chart の保存・バッファの
+	// flush) が裏でまだ走っていて Redis を使いうる。閉じずにプロセスの終了に任せる
+	// (#3463 のレビュー1周目 L-7)。
+	keepRedis := false
+	defer func() {
+		if keepRedis {
+			log.Warn("leaving Redis open: shutdown hooks may still be running")
+			return
+		}
+		closeRedis()
+	}()
 	srv, err := e.newSupervisor(cfg, redisClients)
 	if err != nil {
 		log.Error("failed to construct server", "error", err)
@@ -202,6 +213,7 @@ func serve(e env, args []string) int {
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Error("server shutdown error", "error", err)
+		keepRedis = errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
 	}
 
 	fmt.Fprintln(e.stdout, "Elythia stopped.")

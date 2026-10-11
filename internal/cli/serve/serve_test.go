@@ -187,6 +187,24 @@ func TestServe_LogsStartAndShutdownErrors(t *testing.T) {
 	assert.Contains(t, h.log.String(), "server shutdown error")
 }
 
+// TestServe_KeepsRedisOpenWhileHooksMayRun checks #3463 review L-7: when
+// Shutdown returned at its deadline, the shutdown hooks may still be running
+// in the background, so Redis is left open for the process exit to close.
+func TestServe_KeepsRedisOpenWhileHooksMayRun(t *testing.T) {
+	for _, err := range []error{context.DeadlineExceeded, fmt.Errorf("wrapped: %w", context.Canceled)} {
+		h := newHarness()
+		h.srv.shutdownErr = err
+		assert.Equal(t, 0, h.runServe(t, nil))
+		assert.NotContains(t, h.steps, "redis-close", "hook が走っているかもしれないのに Redis を閉じた")
+		assert.Contains(t, h.log.String(), "leaving Redis open")
+	}
+	// それ以外の失敗では、今までどおり閉じる。
+	h := newHarness()
+	h.srv.shutdownErr = errors.New("still busy")
+	assert.Equal(t, 0, h.runServe(t, nil))
+	assert.Contains(t, h.steps, "redis-close")
+}
+
 func TestServe_StartupFailures(t *testing.T) {
 	boom := errors.New("boom")
 	tests := []struct {
