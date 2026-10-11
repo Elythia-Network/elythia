@@ -126,6 +126,7 @@ type apiRig struct {
 	db     *apiDB
 	maint  *maintmode.Store
 	m      *restoreop.Manager
+	d      *Daemon
 }
 
 func newAPIRig(t *testing.T) *apiRig {
@@ -156,6 +157,7 @@ func newAPIRig(t *testing.T) *apiRig {
 			(&maintmode.Judge{Store: maint, Counter: noSessions{}, ID: "j", DrainTimeout: time.Hour}).Run(ctx, 5*time.Millisecond)
 		},
 		Acquire:  func() (func(), error) { return d.Acquire(JobRestore) },
+		SlotBusy: d.SlotBusy,
 		Database: "app", MaintenanceDB: "postgres",
 		Poll: 5 * time.Millisecond, HeldTimeout: time.Second, ResumeTimeout: time.Second, Logger: discardLogger(),
 	})
@@ -168,7 +170,7 @@ func newAPIRig(t *testing.T) *apiRig {
 	v := &fakeReauth{}
 	h, err := Handler(d, testToken, &Restore{Manager: m, Verifier: v})
 	require.NoError(t, err)
-	return &apiRig{h: h, verify: v, db: db, maint: maint, m: m}
+	return &apiRig{h: h, verify: v, db: db, maint: maint, m: m, d: d}
 }
 
 type noSessions struct{}
@@ -471,4 +473,20 @@ func TestRestoreErrorKeepsTheReasonInTheLog(t *testing.T) {
 	w = httptest.NewRecorder()
 	restoreError(w, nil, errors.New("x"))
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// TestRestoreAPI_RefusesWhileAJobRuns checks that prepare is refused before
+// the re-authentication while a scheduled take or a verification holds the
+// job slot, so that the TOTP code is not spent on a request that cannot
+// start (#3463 (6c) L-3).
+func TestRestoreAPI_RefusesWhileAJobRuns(t *testing.T) {
+	r := newAPIRig(t)
+	release, err := r.d.Acquire(JobVerify)
+	require.NoError(t, err)
+	rec, out := r.post(t, "/restore/prepare", auth(map[string]any{"id": "20261010T120000Z"}))
+	assert.Equal(t, http.StatusConflict, rec.Code)
+	assert.Equal(t, "BACKUP_SERVICE_BUSY", errCode(out))
+	assert.Zero(t, r.verify.count(), "refused before the re-authentication")
+	release()
+	r.prepare(t)
 }

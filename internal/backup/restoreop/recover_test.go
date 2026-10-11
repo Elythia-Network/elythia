@@ -393,6 +393,13 @@ func TestCanStart(t *testing.T) {
 	f := newEnv(t, withHook(&h))
 	h.failGet = errors.New("redis down")
 	assert.ErrorContains(t, f.m.CanStart(ctx), "redis down")
+
+	// 予定の取得や検証が枠を持っている間は、再認証の前に断る。
+	busy := false
+	b := newEnv(t, func(o *Options) { o.SlotBusy = func() bool { return busy } })
+	require.NoError(t, b.m.CanStart(ctx))
+	busy = true
+	assert.ErrorIs(t, b.m.CanStart(ctx), ErrBusy)
 }
 
 // TestRecover_ReadsTheMaintenanceAgain checks that the recovery reads the
