@@ -33,6 +33,7 @@ type Maintenance interface {
 	Get(ctx context.Context) (*maintmode.State, error)
 	Enter(ctx context.Context, st maintmode.State) error
 	SetPhase(ctx context.Context, opID, phase string) error
+	Clear(ctx context.Context, opID string) error
 	Reports(ctx context.Context) ([]maintmode.ProcReport, error)
 }
 

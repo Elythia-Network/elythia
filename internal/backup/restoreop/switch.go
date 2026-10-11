@@ -171,14 +171,15 @@ func (m *Manager) switchSteps(ctx context.Context, rec *Record) {
 		OpID: rec.OpID, Kind: maintmode.KindRestore, RequestedBy: rec.UserID, StartedAt: m.now(),
 	})
 	if err != nil {
-		// 書き込みは済んだのに応答を読めなかっただけのことがある。読み直して、この操作の
-		// 状態が残っていれば戻してから中止する (残したまま aborted にすると、誰も外さない)。
-		st, gerr := m.o.Maint.Get(ctx)
-		if gerr != nil {
-			m.giveUp(ctx, rec, StepEntering, fmt.Errorf("enter the maintenance: %w; then read it: %v", err, gerr))
+		// 書き込みは済んだのに応答を読めなかっただけのことがあり、書き込みが後から届く
+		// こともある。読み直しでは決められないので、この操作の状態だけを消し (opId の
+		// CAS)、間を置いてもう一度消してから中止する (残したまま aborted にすると、誰も
+		// 外さない)。消せなければ運営者に渡す。
+		if cerr := m.clearOwnTwice(ctx, rec.OpID); cerr != nil {
+			m.giveUp(ctx, rec, StepEntering, fmt.Errorf("enter the maintenance: %w; then clear it: %v", err, cerr))
 			return
 		}
-		m.abortBeforeSwitch(ctx, rec, fmt.Errorf("enter the maintenance: %w", err), st != nil && st.OpID == rec.OpID)
+		m.abortBeforeSwitch(ctx, rec, fmt.Errorf("enter the maintenance: %w", err), false)
 		return
 	}
 	m.journal(ctx, rec.OpID, StepEntering, "waiting for every process to let go of %s", rec.Database)
@@ -229,6 +230,24 @@ func (m *Manager) switchSteps(ctx context.Context, rec *Record) {
 		return
 	}
 	m.awaitResume(ctx, rec)
+}
+
+// clearOwnTwice clears the maintenance of opID (only if it is that one's),
+// waits Poll and clears it again for a write that arrives late.
+func (m *Manager) clearOwnTwice(ctx context.Context, opID string) error {
+	for i := 0; i < 2; i++ {
+		if i > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(m.o.Poll):
+			}
+		}
+		if err := m.o.Maint.Clear(ctx, opID); err != nil && !errors.Is(err, maintmode.ErrOpMismatch) {
+			return err
+		}
+	}
+	return nil
 }
 
 // awaitResume waits for the processes to serve on the restored database and
