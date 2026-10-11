@@ -144,13 +144,19 @@ func New(o Options) *Manager {
 // and recovers an operation an earlier run of the service left unfinished.
 // It returns once the recovery has been started; Wait waits for it.
 func (m *Manager) Start(ctx context.Context) {
+	m.StartHolding(ctx, nil)
+}
+
+// StartHolding is Start with the job slot already taken (reserved before the
+// service started its own jobs). The recovery uses it and gives it back.
+func (m *Manager) StartHolding(ctx context.Context, release func()) {
 	m.mu.Lock()
 	m.base = ctx
 	m.mu.Unlock()
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
-		m.recoverOnStart(ctx)
+		m.recoverOnStart(ctx, release)
 	}()
 }
 

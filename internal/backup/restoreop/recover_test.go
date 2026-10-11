@@ -244,3 +244,31 @@ func TestRecover_RereadsAfterTheSlot(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, StepDone, got.Step)
 }
+
+// TestRecover_GivesBackTheReservedSlot checks that StartHolding gives the
+// slot back whether or not there is something to recover, and that the
+// recovery then does not take the slot again.
+func TestRecover_GivesBackTheReservedSlot(t *testing.T) {
+	for _, unfinished := range []bool{false, true} {
+		e := newEnv(t)
+		e.stop()
+		if unfinished {
+			require.NoError(t, e.store.create(context.Background(), &Record{OpID: "restore-held", Step: StepReady, Database: testDB, Target: tgt, Before: before}))
+		}
+		busy := &slot{}
+		release, err := busy.acquire()
+		require.NoError(t, err)
+		e.opts.Acquire = func() (func(), error) {
+			t.Error("the recovery takes the slot again")
+			return nil, errors.New("busy")
+		}
+		e.ctx, e.cancel = context.WithCancel(context.Background())
+		e.m = New(e.opts)
+		e.m.StartHolding(e.ctx, release)
+		t.Cleanup(func() { e.cancel(); e.m.Wait() })
+		require.Eventually(t, func() bool { return !busy.isHeld() }, 5*time.Second, 5*time.Millisecond, "unfinished=%v", unfinished)
+		if unfinished {
+			e.waitStep("restore-held", StepAborted)
+		}
+	}
+}

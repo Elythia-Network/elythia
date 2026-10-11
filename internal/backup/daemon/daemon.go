@@ -214,7 +214,9 @@ func (d *Daemon) Run(ctx context.Context) {
 			d.log.Warn("backup: schedule.at with an interval that neither divides 24h nor is a multiple of it; the slots can move when the daemon restarts",
 				"interval", sched.Interval.String(), "at", sched.AtString())
 		}
-		if id := d.unverifiedLatest(gens); id != "" && d.nextRun.After(now) {
+		if id := d.unverifiedLatest(gens); id != "" && d.nextRun.After(now) && d.running != nil {
+			d.log.Info("backup: not verifying the newest generation at start; the restore from the admin page holds the job slot", "generation", id, "running", d.running.Kind)
+		} else if id != "" && d.nextRun.After(now) {
 			// 止める途中で検証が切れると verify.json は確かめる前 (無い) に戻るので、
 			// 揃った最新の世代が検証されないまま残る。取り戻しは揃っているかで決めるので
 			// 次の枠まで取り直さず、その間は使える世代に数えられずに遅れを知らせてしまう。
@@ -381,9 +383,23 @@ func (d *Daemon) Storage() backup.Storage { return d.opts.Storage }
 // Calling the returned function gives the slot back; a scheduled take that
 // came due meanwhile starts then.
 func (d *Daemon) Acquire(kind JobKind) (func(), error) {
+	return d.acquire(kind, false)
+}
+
+// Reserve takes the job slot before Run starts, so that the first job of Run
+// (verifying the newest generation) waits for it. The restore from the admin
+// page reserves it to recover an operation an earlier run left unfinished.
+//
+// 回復はメンテナンスのまま残った操作を片付けるので、起動して最初の検証より先に
+// 枠を持つ。Run の後で取ると、検証が終わるまでメンテナンスが外れない。
+func (d *Daemon) Reserve(kind JobKind) (func(), error) {
+	return d.acquire(kind, true)
+}
+
+func (d *Daemon) acquire(kind JobKind, beforeRun bool) (func(), error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.ctx == nil || d.stopping {
+	if (d.ctx == nil && !beforeRun) || d.stopping {
 		return nil, ErrNotRunning
 	}
 	if d.running != nil {

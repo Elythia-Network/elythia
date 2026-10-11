@@ -700,6 +700,40 @@ func TestDaemonVerifiesInterruptedGenerationAfterRestart(t *testing.T) {
 	})
 }
 
+// TestDaemonReserveHoldsTheSlotBeforeRun checks that a slot reserved before
+// Run (the restore from the admin page recovering an unfinished operation)
+// keeps Run from starting its first job, the verification of the newest
+// generation (#3463 (6c)).
+func TestDaemonReserveHoldsTheSlotBeforeRun(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := mustSchedule(t, config.BackupScheduleOptions{Interval: "24h", Keep: 1, Verify: true}, time.UTC)
+		r := newRig(t, s, func(r *rig) {
+			r.ver.block = make(chan struct{})
+			r.ver.cancelWrites = true
+		})
+		r.start(t)
+		r.stop()
+
+		r2 := newRigOn(t, r.st, s, nil)
+		early, err := r2.d.Reserve(JobRestore)
+		require.NoError(t, err)
+		early()
+		release, err := r2.d.Reserve(JobRestore)
+		require.NoError(t, err, "released before Run, the slot can be reserved again")
+		_, err = r2.d.Reserve(JobRestore)
+		require.ErrorIs(t, err, ErrBusy)
+		r2.start(t)
+		assert.Empty(t, r2.ver.verified(), "the first job waits for the reserved slot")
+		st := r2.d.Status()
+		require.NotNil(t, st.Running)
+		assert.Equal(t, JobRestore, st.Running.Kind)
+		release()
+		synctest.Wait()
+		assert.Nil(t, r2.d.Status().Running)
+		r2.stop()
+	})
+}
+
 // 検証が判定を書き終えた直後に止めても、verify.json は戻されるが、再起動で確かめ直す。
 func TestDaemonVerifiesAfterStopRightAfterVerdict(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {

@@ -472,7 +472,8 @@ func TestBuildRestoreParts(t *testing.T) {
 }
 
 // TestDaemonStartsAndClosesTheRestore checks that runDaemon starts the
-// restore manager (which recovers an unfinished restore) and closes it.
+// restore manager (which recovers an unfinished restore with the job slot
+// reserved before Run) and closes it.
 func TestDaemonStartsAndClosesTheRestore(t *testing.T) {
 	cfg := cfgWith(&config.BackupOptions{
 		Schedule: config.BackupScheduleOptions{Listen: ":0"},
@@ -504,8 +505,12 @@ func TestDaemonStartsAndClosesTheRestore(t *testing.T) {
 	require.NoError(t, rdb.HSet(context.Background(), "p:elythia:maintenance:restore:restore-left", "opId", "restore-left", "step", "aborting").Err())
 	done := make(chan int, 1)
 	go func() { done <- runDaemon(e, nil) }()
-	require.Eventually(t, func() bool { return acquired.Load() == 1 }, 5*time.Second, 10*time.Millisecond,
-		"the manager takes the job slot to recover")
+	require.Eventually(t, func() bool {
+		step, _ := rdb.HGet(context.Background(), "p:elythia:maintenance:restore:restore-left", "step").Result()
+		return step == restoreop.StepAborted
+	}, 5*time.Second, 10*time.Millisecond, "the manager recovers the operation")
+	// 枠は Run の前に預けたもので足り、後から取りに行かない (Run の最初の job より先に片付ける)。
+	assert.Zero(t, acquired.Load())
 	cancel()
 	select {
 	case code := <-done:
