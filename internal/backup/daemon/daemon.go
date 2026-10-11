@@ -676,7 +676,12 @@ func (d *Daemon) finish(ctx context.Context, res JobResult) {
 
 func (d *Daemon) send(ctx context.Context, e Event) {
 	e.Instance = d.opts.Instance
-	err := d.notify.Notify(ctx, e)
+	// 止める途中 (ctx が切れた後) に出た判定や失敗も届ける。判定の後に止められた検証の
+	// 食い違いは、次の起動では確かめ直さないので、ここで送れないと誰にも知らされない。
+	// 止まるのを長く待たせないよう、上限を付ける。
+	nctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), notifyTimeout)
+	defer cancel()
+	err := d.notify.Notify(nctx, e)
 	d.mu.Lock()
 	if err != nil {
 		d.lastNotifyError = err.Error()
@@ -688,6 +693,10 @@ func (d *Daemon) send(ctx context.Context, e Event) {
 		d.log.Error("backup: cannot send a notification", "event", e.Kind, "error", err)
 	}
 }
+
+// notifyTimeout bounds one notification sent after the daemon's context was
+// cancelled.
+const notifyTimeout = 10 * time.Second
 
 // ScheduleInfo is the schedule part of Status.
 type ScheduleInfo struct {

@@ -281,6 +281,10 @@ type recNotifier struct {
 }
 
 func (r *recNotifier) Notify(ctx context.Context, e Event) error {
+	// 実物の Webhook と同じく、切れた ctx では送れない。
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	r.events = append(r.events, e)
 	err, block := r.err, r.block
