@@ -745,10 +745,11 @@ SELECT pid, usename, application_name FROM pg_stat_activity
 WHERE datname = '<db.db>' AND pid <> pg_backend_pid() AND usesysid IS NOT NULL;
 ```
 
-本体の接続には `application_name` (`elythia/<role>/<host>-<pid>`) が付いている。
+本体の接続には `application_name` (`elythia/<role>/<host>-<pid>-<乱数>`) が付いている。乱数は起動ごとに
+変わり、`host` は PostgreSQL が残す 63 バイトに pid と乱数が収まるよう切り詰める。
 
 - **`maintenance.drainTimeout` (既定 30 秒) を過ぎても接続が残っていたら、手放すと報告している
-  プロセスの接続だけを切る。** 切るのは、`application_name` の `<host>-<pid>` が報告と一致し、その
+  プロセスの接続だけを切る。** 切るのは、`application_name` の `<host>-<pid>-<乱数>` (起動ごとに乱数を付けたプロセスの ID) が報告と一致し、その
   報告が `drained` (または上限を過ぎても `draining`) で、判定役と同じ DB のユーザーの接続。見捨てた
   ジョブや、止める途中で上限に達したプロセスが掴んでいる接続にあたる。切った接続は `status` に出る
 - **それ以外の接続は切らない。** 運営者の `psql` のほか、報告の無いプロセスや `running` のプロセスの
