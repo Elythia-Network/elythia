@@ -5,9 +5,13 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/elythia-network/elythia/internal/core/captcha"
+	"github.com/elythia-network/elythia/internal/core/moderationlog"
+	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -92,6 +96,66 @@ func TestUpdateMeta_EmptyAndNewSecretsAreWritten(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, rec.Code)
 	assert.Contains(t, metaRepo.LastUpdateFields, "smtpPass")
 	assert.Equal(t, "new-key", metaRepo.LastUpdateFields["objectStorageSecretKey"])
+}
+
+func TestUpdateMeta_ModerationLogHasNoSecrets(t *testing.T) {
+	h, _, metaRepo, _ := newTestHandler(t)
+	setAllMetaSecrets(t, metaRepo.Meta)
+	logs := testutil.NewMockModerationLogRepository()
+	gen, err := id.NewGenerator("aidx")
+	require.NoError(t, err)
+	h.SetModLogService(moderationlog.New(logs, gen))
+
+	rec := doPost(h.UpdateMeta, `{"name":"renamed","deeplAuthKey":"plain-new-deepl"}`, adminUser)
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	require.Eventually(t, func() bool { return len(logs.Snapshot()) == 1 }, time.Second, 5*time.Millisecond)
+	entry := logs.Snapshot()[0]
+	assert.Equal(t, "updateServerSettings", entry.Type)
+	info := string(entry.Info)
+	for _, f := range model.MetaSecretFields {
+		assert.NotContains(t, info, secretValue(f), "%s is logged in plain text", f)
+	}
+	assert.NotContains(t, info, "plain-new-deepl")
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(entry.Info, &parsed))
+	before, ok := parsed["before"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, model.MetaSecretPlaceholder, before["smtpPass"])
+	_, ok = parsed["changedSecrets"]
+	assert.True(t, ok, "changedSecrets is recorded")
+}
+
+// 伏せる前に記録された平文の行も、返すときには伏せる。
+func TestShowModerationLogs_MasksSecretsOfOldRows(t *testing.T) {
+	h, _, _, _ := newTestHandler(t)
+	logs := testutil.NewMockModerationLogRepository()
+	require.NoError(t, logs.Create(&model.ModerationLog{
+		ID: "l1", Type: "updateServerSettings",
+		Info: []byte(`{"before":{"name":"a","smtpPass":"plain-old-pass"},"after":{"name":"b","objectStorageSecretKey":"plain-old-key","deeplAuthKey":null}}`),
+	}))
+	require.NoError(t, logs.Create(&model.ModerationLog{ID: "l2", Type: "suspend", Info: []byte(`{"userId":"u1"}`)}))
+	require.NoError(t, logs.Create(&model.ModerationLog{ID: "l3", Type: "suspend"}))
+	gen, err := id.NewGenerator("aidx")
+	require.NoError(t, err)
+	h.SetModLogService(moderationlog.New(logs, gen))
+
+	rec := doPost(h.ShowModerationLogs, `{}`, adminUser)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+	assert.NotContains(t, body, "plain-old-pass")
+	assert.NotContains(t, body, "plain-old-key")
+	var got []map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	byID := map[string]map[string]any{}
+	for _, l := range got {
+		byID[l["id"].(string)] = l
+	}
+	info := byID["l1"]["info"].(map[string]any)
+	assert.Equal(t, model.MetaSecretPlaceholder, info["before"].(map[string]any)["smtpPass"])
+	assert.Equal(t, "a", info["before"].(map[string]any)["name"], "other fields are kept")
+	assert.Nil(t, info["after"].(map[string]any)["deeplAuthKey"], "unset stays null")
+	assert.Equal(t, "u1", byID["l2"]["info"].(map[string]any)["userId"], "other log types are untouched")
+	assert.Nil(t, byID["l3"]["info"], "an empty info stays null")
 }
 
 // captcha/save は伏せ字の secret を「変えない」として、保存済みの値で検証する。
