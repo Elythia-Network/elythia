@@ -626,7 +626,19 @@ func New(cfg *config.Config, db *gorm.DB, redis *cache.RedisClients) (*Server, e
 	return newServer(cfg, db, redis, plugin.Registered(), nil)
 }
 
+// constructionMu serializes server construction. newServer replaces
+// process-wide state (the setters TestProcessGlobalsAreRestored lists, e.g.
+// entity.Set* / notehide.Set*) while it wires the routes.
+//
+// 本番では 1 プロセスに Supervisor は 1 つで、世代の作り直しは genMu で直列に
+// なる。それでも、同じプロセスで 2 つの構築が重なると (2 つの Supervisor を立てる
+// テストで実際に起きた) グローバルへの書き込みが競合するので、構築ごと直列にする。
+// 構築は起動時とメンテナンスを抜けるときにしか走らないので、待ちは問題にならない。
+var constructionMu sync.Mutex
+
 func newServer(cfg *config.Config, db *gorm.DB, redis *cache.RedisClients, plugins []plugin.Definition, openStorage pluginStorageOpener, beforeSetup ...func(*Server)) (*Server, error) {
+	constructionMu.Lock()
+	defer constructionMu.Unlock()
 	// 役割は環境変数で決まる (#2459)。矛盾した指定はここで落として、
 	// 「起動はしたがジョブが処理されない」形の失敗にしない。
 	role, err := config.ResolveProcessRole()
@@ -872,6 +884,18 @@ func (s *Server) cleanupConstruction() {
 			}
 			s.queueDriver = nil
 		}
+		// setupRoutes が作った購読も閉じる。メンテナンスの後の作り直しは失敗すると
+		// 繰り返すので、閉じないと試すたびに Redis の接続と goroutine が漏れる (#3463)。
+		if s.streamManager != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			s.streamManager.CloseAll(ctx, stream.ServiceRestartCloseCode, "server restarting")
+			cancel()
+		}
+		for _, ps := range []*event.PubSubService{s.internalPubSub, s.streamPubSub} {
+			if ps != nil {
+				_ = ps.Close()
+			}
+		}
 	})
 }
 
@@ -1072,12 +1096,33 @@ func (s *Server) StopBackground(ctx context.Context) error {
 	return s.shutdownErr
 }
 
+// streamCloseMax bounds how long stopping a generation waits for the
+// streaming connections to close.
+const streamCloseMax = 3 * time.Second
+
+// streamCloseContext derives the deadline of the streaming close wait: at
+// most streamCloseMax and at most a third of what is left of ctx, so the
+// shutdown hooks keep most of the time.
+func streamCloseContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	limit := streamCloseMax
+	if deadline, ok := ctx.Deadline(); ok {
+		limit = min(limit, time.Until(deadline)/3)
+	}
+	return context.WithTimeout(ctx, limit)
+}
+
 func (s *Server) shutdown(ctx context.Context) error {
 	// streaming を最初に閉じる。接続の close handler は DB を触る
 	// (lastActiveDate など) ので、DB を閉じる前に終わらせる。close frame を
 	// 送るので、クライアントは 1006 ではなく 1012 を受けて繋ぎ直す (#3463)。
+	//
+	// **待ちには別の上限を付ける。** 待ちが ctx を使い切ると、後に続く shutdown
+	// hook (chart の SaveAll や buffer の flush) の時間が 0 になる。
 	if s.streamManager != nil {
-		if left := s.streamManager.CloseAll(ctx, stream.ServiceRestartCloseCode, "server restarting"); left > 0 {
+		closeCtx, cancel := streamCloseContext(ctx)
+		left := s.streamManager.CloseAll(closeCtx, stream.ServiceRestartCloseCode, "server restarting")
+		cancel()
+		if left > 0 {
 			slog.Warn("streaming connections did not close before the deadline", "left", left)
 		}
 	}
