@@ -178,6 +178,9 @@ func TestJudgeIntegration(t *testing.T) {
 			got, _ := pg.counter().Sessions(ctx)
 			return len(got) == 1
 		}, 10*time.Second, 50*time.Millisecond)
+		// 持ち主のプロセスは手放し終えた (drained) と言っているが、見捨てたクエリが
+		// 接続を掴んでいる。
+		require.NoError(t, s.Report(ctx, ProcReport{ID: "p1", State: ProcDrained}))
 		require.NoError(t, s.Enter(ctx, State{OpID: "op1"}))
 		_, err := j.Step(ctx)
 		require.NoError(t, err)
@@ -197,12 +200,14 @@ func TestJudgeIntegration(t *testing.T) {
 			return err == nil && out == MovedToHeld
 		}, 10*time.Second, 50*time.Millisecond)
 
-		// 抜けて、すぐ入り直せる。
+		// 抜けて (プロセスは戻って running)、すぐ入り直せる (プロセスはすぐ手放す)。
+		require.NoError(t, s.Report(ctx, ProcReport{ID: "p1", State: ProcRunning}))
 		require.NoError(t, s.SetPhase(ctx, "op1", PhaseResuming))
 		out, err := j.Step(ctx)
 		require.NoError(t, err)
 		require.Equal(t, Cleared, out)
 		require.NoError(t, s.Enter(ctx, State{OpID: "op2"}))
+		require.NoError(t, s.Report(ctx, ProcReport{ID: "p1", State: ProcDrained}))
 		out, err = j.Step(ctx)
 		require.NoError(t, err)
 		assert.Equal(t, MovedToHeld, out, "抜けた直後の enter が詰まった")

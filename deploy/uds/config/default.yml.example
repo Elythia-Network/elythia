@@ -413,6 +413,7 @@ proxyBypassHosts:
 #  # application database in pg_stat_activity. Must not be db.db.
 #  maintenanceDb: postgres
 #  # After this, the judge terminates the Elythia sessions that remain
-#  # (application_name elythia/..., same role). Other sessions are never
-#  # terminated; the maintenance waits until they close.
+#  # for processes reporting they let go (drained, or still draining), as
+#  # the same database user. Other sessions (psql, processes that do not
+#  # report or still run) are never terminated; the maintenance waits.
 #  drainTimeout: 30s
