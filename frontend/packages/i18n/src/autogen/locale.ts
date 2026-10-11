@@ -9576,6 +9576,136 @@ export interface Locale extends ILocale {
          * 検証した日時
          */
         "verifiedAt": string;
+        /**
+         * この世代へ戻す
+         */
+        "restore": string;
+        /**
+         * バックアップから戻す
+         */
+        "restoreTitle": string;
+        /**
+         * 世代 {id} を別の名前のデータベースへ戻して、切り替える準備をします。準備の間もサーバーは動いたままです。準備ができたら、切り替えるかどうかをもう一度確かめます。
+         */
+        "restoreConfirm": ParameterizedString<"id">;
+        /**
+         * 切り替える
+         */
+        "restoreSwitch": string;
+        /**
+         * メンテナンスに入り、データベースを切り替えます。切り替えが終わるまで、利用者はサーバーを使えません。今のデータベースは {before} という名前で残ります。続けますか？
+         */
+        "restoreSwitchConfirm": ParameterizedString<"before">;
+        /**
+         * 中止
+         */
+        "restoreAbort": string;
+        /**
+         * 準備したデータベースを削除して、中止しますか？
+         */
+        "restoreAbortConfirm": string;
+        /**
+         * 閉じる
+         */
+        "restoreClose": string;
+        /**
+         * 切り替えの間は、この画面を開いたままにしてください。再読み込みするとメンテナンスの画面になり、終わると戻ります。
+         */
+        "restoreKeepOpen": string;
+        /**
+         * データベースを切り替えたかどうか分からなくなったため、メンテナンスのまま止めています。サーバーの管理者がpg_databaseを確かめ、elythia backup restore -rollbackとelythia maintenance exitで戻してください。
+         */
+        "restoreUnknownHelp": string;
+        /**
+         * データベースへの接続が残っています
+         */
+        "restoreWaiting": string;
+        /**
+         * 進み具合を読めません。しばらくしてから自動で読み直します。
+         */
+        "restoreStatusUnavailable": string;
+        /**
+         * 検証に通っていない世代は、ここからは戻せません。先に検証してください。
+         */
+        "restoreNotVerified": string;
+        /**
+         * すでにメンテナンス中です。
+         */
+        "maintenanceActive": string;
+        /**
+         * バックアップ用のサービスと、サーバーのプロセスの版が違います。版を揃えてから戻してください。
+         */
+        "versionMismatch": string;
+        /**
+         * 読み取りレプリカを使う構成では、ここからは戻せません。elythia backup restoreを使ってください。
+         */
+        "restoreNotSupported": string;
+        /**
+         * 今の段階では、この操作はできません。
+         */
+        "restoreStepMismatch": string;
+        /**
+         * この戻す操作は、別のセッションから始められたものです。
+         */
+        "restoreTicketInvalid": string;
+        /**
+         * バックアップ用のサービスでは、ここからの戻す操作を使えません。
+         */
+        "restoreUnavailable": string;
+        "_restoreSteps": {
+            /**
+             * 準備中
+             */
+            "preparing": string;
+            /**
+             * 切り替えの準備ができました
+             */
+            "ready": string;
+            /**
+             * メンテナンスに入っています
+             */
+            "entering": string;
+            /**
+             * 切り替えました
+             */
+            "switched": string;
+            /**
+             * サーバーが戻るのを待っています
+             */
+            "resuming": string;
+            /**
+             * 元のデータベースへ戻しています
+             */
+            "reverting": string;
+            /**
+             * 中止しています
+             */
+            "aborting": string;
+            /**
+             * 戻しました
+             */
+            "done": string;
+            /**
+             * 準備に失敗しました
+             */
+            "failed": string;
+            /**
+             * 期限までに切り替えなかったため、中止しました
+             */
+            "expired": string;
+            /**
+             * 中止しました（今のデータベースは変わっていません）
+             */
+            "aborted": string;
+            /**
+             * 元のデータベースへ戻しました
+             */
+            "reverted": string;
+            /**
+             * 止まりました（確認が必要です）
+             */
+            "unknown": string;
+        };
     };
     "_databaseHealth": {
         /**

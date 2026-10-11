@@ -1,7 +1,3 @@
 # Elythia 独自の POST のエンドポイントのうち、まだ elythia-js に型が無いもの (#3417)。
 # 1 行 1 件、/api/ を除いたパス。型を ElythiaEndpoints に足したら、ここから外す。
 # TestElythiaJS_EndpointsMatchRouter が docs/api-compat.md の一覧と突き合わせる。
-admin/backup/restore/abort
-admin/backup/restore/confirm
-admin/backup/restore/prepare
-admin/backup/restore/status
