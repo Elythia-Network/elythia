@@ -25,9 +25,44 @@ type hookMaint struct {
 	failGets int
 	// afterEnter runs after a successful Enter; its error is returned.
 	afterEnter func() error
+	// failEnter fails Enter without writing.
+	failEnter error
+	// failClear fails Clear.
+	failClear error
+	// late is a state written right after the next Get or Clear returns,
+	// like an Enter whose write arrives late.
+	late *maintmode.State
+}
+
+// writeLate applies the late write once.
+func (h *hookMaint) writeLate(ctx context.Context) {
+	h.mu.Lock()
+	st := h.late
+	h.late = nil
+	h.mu.Unlock()
+	if st != nil {
+		_ = h.Store.Enter(ctx, *st)
+	}
+}
+
+func (h *hookMaint) Clear(ctx context.Context, opID string) error {
+	h.mu.Lock()
+	err := h.failClear
+	h.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	defer h.writeLate(ctx)
+	return h.Store.Clear(ctx, opID)
 }
 
 func (h *hookMaint) Enter(ctx context.Context, st maintmode.State) error {
+	h.mu.Lock()
+	ferr := h.failEnter
+	h.mu.Unlock()
+	if ferr != nil {
+		return ferr
+	}
 	if err := h.Store.Enter(ctx, st); err != nil {
 		return err
 	}
@@ -51,6 +86,7 @@ func (h *hookMaint) Get(ctx context.Context) (*maintmode.State, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer h.writeLate(ctx)
 	return h.Store.Get(ctx)
 }
 
