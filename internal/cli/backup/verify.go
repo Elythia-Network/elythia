@@ -43,6 +43,10 @@ func defaultVerifyEnv() verifyEnv {
 	}
 }
 
+// notJudged is printed when verification stopped before every stage had a
+// verdict.
+const notJudged = "This backup was not judged: verification stopped because of the error below (the backup itself may be fine)."
+
 // Verify implements "elythia backup verify <id|latest>": it reads the
 // generation, restores it into a throwaway PostgreSQL server, checks that this
 // binary can serve it and stores verify.json next to meta.json. It returns 0
@@ -100,8 +104,13 @@ func runVerify(ctx context.Context, e verifyEnv, args []string) int {
 	}
 
 	res, err := e.verify(ctx, storage, id, opts)
-	if len(res.Stages) > 0 {
+	switch {
+	case len(res.Stages) > 0:
 		printResult(e.stdout, res)
+	case err != nil:
+		// 読めるかの段の途中の環境の誤り (鍵の不一致、読み出しの失敗、空きなど) では
+		// 段が 1 つも残らない。そのときも、世代が壊れているとは言っていないことを示す。
+		fmt.Fprintln(e.stdout, notJudged)
 	}
 	if err != nil {
 		fmt.Fprintf(e.stderr, "elythia backup verify: %v\n", err)
@@ -170,7 +179,7 @@ func printResult(w io.Writer, res backup.VerifyResult) {
 	// そのときに「戻せない」と出すと、世代が壊れていると誤解される。
 	switch {
 	case len(res.Stages) < 3:
-		fmt.Fprintln(w, "This backup was not judged: verification stopped because of the error below (the backup itself may be fine).")
+		fmt.Fprintln(w, notJudged)
 	case res.OK:
 		fmt.Fprintln(w, "This backup can be restored.")
 	default:

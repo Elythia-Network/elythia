@@ -172,10 +172,12 @@ func TestRunVerifyEnvironmentErrorIsNotAVerdict(t *testing.T) {
 func TestRunVerifyErrorWithoutStagesPrintsNoTable(t *testing.T) {
 	h := newHarness(t)
 	h.result = backup.VerifyResult{}
-	h.err = errors.New("generation has no meta.json")
+	h.err = errors.New("backup.encryption.identityFile does not match the key the generation was encrypted to")
 	assert.Equal(t, 1, h.run("latest"))
-	assert.Empty(t, h.stdout.String())
-	assert.Contains(t, h.stderr.String(), "no meta.json")
+	// 段の表は出さないが、判定していないことは出す。
+	assert.Equal(t, "This backup was not judged: verification stopped because of the error below (the backup itself may be fine).\n", h.stdout.String())
+	assert.NotContains(t, h.stdout.String(), "cannot be restored")
+	assert.Contains(t, h.stderr.String(), "identityFile does not match")
 }
 
 func TestRunVerifyArguments(t *testing.T) {
