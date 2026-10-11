@@ -142,7 +142,11 @@ func writeVerifyResult(ctx context.Context, s Storage, res VerifyResult) error {
 
 // ResolveGenerationID turns a command-line argument into a generation ID.
 // "latest" is the newest generation that has meta.json; anything else must be
-// a valid ID.
+// a valid ID. When the meta.json of that newest generation cannot be read,
+// it fails instead of falling back to an older generation.
+//
+// 読めない世代を飛ばして古い世代を確かめると、「最新は確かめた」と誤解される。
+// 名指しで ID を渡せば、古い世代は確かめられる。
 func ResolveGenerationID(ctx context.Context, s Storage, arg string) (string, error) {
 	if arg != "latest" {
 		if !ValidID(arg) {
@@ -150,21 +154,20 @@ func ResolveGenerationID(ctx context.Context, s Storage, arg string) (string, er
 		}
 		return arg, nil
 	}
-	objs, err := s.List(ctx, GenerationPrefix())
+	gens, err := ListGenerations(ctx, s)
 	if err != nil {
 		return "", fmt.Errorf("backup: list generations: %w", err)
 	}
-	latest := ""
-	for _, o := range objs {
-		id := GenerationIDFromKey(o.Key)
-		if id != "" && o.Key == Key(id, MetaFile) && id > latest {
-			latest = id
+	for i := len(gens) - 1; i >= 0; i-- {
+		g := gens[i]
+		switch {
+		case g.MetaError != nil:
+			return "", fmt.Errorf("backup: the newest generation %s has an unreadable %s (%v); give an older generation's ID to verify it", g.ID, MetaFile, g.MetaError)
+		case g.Meta != nil:
+			return g.ID, nil
 		}
 	}
-	if latest == "" {
-		return "", errors.New("backup: no complete generation")
-	}
-	return latest, nil
+	return "", errors.New("backup: no complete generation")
 }
 
 type verifier struct {

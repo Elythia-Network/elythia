@@ -527,8 +527,15 @@ func TestResolveGenerationID(t *testing.T) {
 	_, err := ResolveGenerationID(ctx, s, "latest")
 	require.ErrorContains(t, err, "no complete generation")
 
-	s.objects[Key("20261008T000000Z", MetaFile)] = []byte("{}")
-	s.objects[Key("20261009T000000Z", MetaFile)] = []byte("{}")
+	putMeta := func(id string) {
+		m := plainMeta([]byte("x"))
+		m.ID = id
+		body, err := json.Marshal(m)
+		require.NoError(t, err)
+		s.objects[Key(id, MetaFile)] = body
+	}
+	putMeta("20261008T000000Z")
+	putMeta("20261009T000000Z")
 	// meta.json の無い新しい世代 (取っている途中) は選ばない。
 	s.objects[Key("20261010T000000Z", DumpFile)] = []byte("x")
 	s.objects["generations/junk/meta.json"] = []byte("{}")
@@ -536,6 +543,11 @@ func TestResolveGenerationID(t *testing.T) {
 	got, err := ResolveGenerationID(ctx, s, "latest")
 	require.NoError(t, err)
 	assert.Equal(t, "20261009T000000Z", got)
+
+	// 最新の meta.json が読めないときは、古い世代へ黙って下がらずに止める。
+	s.objects[Key("20261011T000000Z", MetaFile)] = []byte("{")
+	_, err = ResolveGenerationID(ctx, s, "latest")
+	require.ErrorContains(t, err, "the newest generation 20261011T000000Z has an unreadable meta.json")
 
 	got, err = ResolveGenerationID(ctx, s, "20261001T000000Z")
 	require.NoError(t, err)
