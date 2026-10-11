@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/labstack/echo/v4"
@@ -21,6 +22,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/cache"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
+	"github.com/elythia-network/elythia/internal/server/middleware"
 )
 
 // fakeBackupService records what reaches the control API.
@@ -135,7 +137,7 @@ func TestMaintenanceRestoreForwardResolvesTheClientLikeEcho(t *testing.T) {
 		TrustProxy: []string{"10.0.0.0/8"},
 		Backup:     &config.BackupOptions{Server: config.BackupServerOptions{ServiceURL: daemon.URL, ServiceToken: "svc"}},
 	}
-	fwd, paths := maintenanceRestoreForward(cfg)
+	fwd, paths := maintenanceRestoreForward(cfg, nil)
 	require.NotNil(t, fwd)
 	assert.ElementsMatch(t, []string{"/api/admin/backup/restore/status", "/api/admin/backup/restore/confirm", "/api/admin/backup/restore/abort"}, paths,
 		"prepare is not forwarded during a maintenance")
@@ -156,7 +158,7 @@ func TestMaintenanceRestoreForwardResolvesTheClientLikeEcho(t *testing.T) {
 	defer svc.mu.Unlock()
 	assert.Equal(t, []string{"203.0.113.9", "198.51.100.4"}, svc.ips)
 
-	_, paths = maintenanceRestoreForward(&config.Config{TrustProxy: []string{"not a cidr"}})
+	_, paths = maintenanceRestoreForward(&config.Config{TrustProxy: []string{"not a cidr"}}, nil)
 	assert.Empty(t, paths)
 }
 
@@ -189,4 +191,68 @@ func TestMaintenanceHandlerForwardsTheRestore(t *testing.T) {
 	svc.mu.Lock()
 	defer svc.mu.Unlock()
 	assert.Len(t, svc.paths, 1)
+}
+
+// TestMaintenanceRestoreForwardIsRateLimited checks that the status forwarded
+// during a maintenance counts against the client's bucket, like the server
+// does while it runs (#3463 (6c)).
+func TestMaintenanceRestoreForwardIsRateLimited(t *testing.T) {
+	svc := &fakeBackupService{}
+	daemon := svc.server(t)
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	rl := middleware.NewRedisRateLimiter(rdb, true, map[string]*middleware.EndpointLimit{
+		"admin/backup/restore/status": {Duration: time.Minute, Max: 1},
+	})
+	cfg := &config.Config{Backup: &config.BackupOptions{Server: config.BackupServerOptions{ServiceURL: daemon.URL, ServiceToken: "svc"}}}
+	fwd, _ := maintenanceRestoreForward(cfg, rl)
+	post := func(path, addr string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(`{"opId":"x"}`)))
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = addr
+		rec := httptest.NewRecorder()
+		fwd(rec, req)
+		return rec
+	}
+	assert.Equal(t, http.StatusOK, post("/api/admin/backup/restore/status", "203.0.113.5:1").Code)
+	rec := post("/api/admin/backup/restore/status", "203.0.113.5:2")
+	assert.Equal(t, http.StatusTooManyRequests, rec.Code)
+	assert.NotEmpty(t, rec.Header().Get("Retry-After"))
+	assert.Equal(t, http.StatusOK, post("/api/admin/backup/restore/status", "198.51.100.9:1").Code, "another client has its own bucket")
+	assert.Equal(t, http.StatusOK, post("/api/admin/backup/restore/confirm", "203.0.113.5:3").Code, "confirm has no such limit")
+	svc.mu.Lock()
+	defer svc.mu.Unlock()
+	assert.Len(t, svc.paths, 3)
+}
+
+// TestMaintenanceHandlerLimitsTheStatus checks that the handler a process
+// serves during a maintenance is wired to the server's rate limit.
+func TestMaintenanceHandlerLimitsTheStatus(t *testing.T) {
+	t.Setenv(config.EnvOnlyServer, "")
+	t.Setenv(config.EnvOnlyQueue, "")
+	svc := &fakeBackupService{}
+	daemon := svc.server(t)
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	cfg := &config.Config{
+		EnableIPRateLimit: true,
+		Backup:            &config.BackupOptions{Server: config.BackupServerOptions{ServiceURL: daemon.URL, ServiceToken: "svc"}},
+	}
+	var m maintTracker
+	m.init(&Supervisor{cfg: cfg, redis: &cache.RedisClients{Default: rdb}})
+	limit := middleware.DefaultEndpointLimits["admin/backup/restore/status"]
+	codes := map[int]int{}
+	for i := 0; i <= limit.Max; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/backup/restore/status", bytes.NewReader([]byte(`{"opId":"x"}`)))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		m.handler.ServeHTTP(rec, req)
+		codes[rec.Code]++
+	}
+	assert.Equal(t, map[int]int{http.StatusOK: limit.Max, http.StatusTooManyRequests: 1}, codes)
+
+	assert.Nil(t, maintenanceRateLimiter(&Supervisor{cfg: cfg}), "no Redis")
+	assert.Nil(t, maintenanceRateLimiter(&Supervisor{cfg: &config.Config{DisableEndpointRateLimits: true}, redis: &cache.RedisClients{Default: rdb}}))
 }

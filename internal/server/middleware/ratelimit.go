@@ -250,6 +250,26 @@ func (rl *RateLimiter) Middleware() echo.MiddlewareFunc {
 	}
 }
 
+// AllowIP checks the IP bucket of endpoint for a request that does not go
+// through Middleware (the restore status forwarded during a maintenance). It
+// uses the same key as Middleware, so both count against one bucket. It
+// reports the seconds to wait when the bucket is exhausted.
+func (rl *RateLimiter) AllowIP(ctx context.Context, endpoint, ip string) (bool, int64) {
+	limit, ok := rl.limits[endpoint]
+	if rl.disabled || !ok || !rl.enableIPRateLimit || limit.Duration <= 0 || limit.Max <= 0 {
+		return true, 0
+	}
+	info, err := rl.store.Check(ctx, ipHash(ip)+":"+endpoint, limit.Duration, limit.Max)
+	if err != nil {
+		slog.Warn("rate limit store error", "endpoint", endpoint, "err", err)
+		return true, 0
+	}
+	if info.Remaining > 0 {
+		return true, 0
+	}
+	return false, max((info.ResetMs-time.Now().UnixMilli()+999)/1000, 0)
+}
+
 // rateLimitActor は単一 bucket を識別する key + factor のペア。
 // 認証済 user では userID 由来 actor (factor=user policy) と IP 由来 actor
 // (factor=1.0) が並ぶ。未認証では IP 由来 actor のみ。
