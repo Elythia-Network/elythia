@@ -9,10 +9,14 @@ import (
 
 // Object names inside a generation directory.
 const (
-	MetaFile       = "meta.json"
-	VerifyFile     = "verify.json"
-	DumpFile       = "dump.pgc"
-	DumpFileAge    = "dump.pgc.age"
+	MetaFile    = "meta.json"
+	VerifyFile  = "verify.json"
+	DumpFile    = "dump.pgc"
+	DumpFileAge = "dump.pgc.age"
+	// LockFile is the first object Take writes into a generation. Whoever
+	// manages to create it owns the generation ID; a second Take started in
+	// the same second stops there (#3496).
+	LockFile       = "take.lock"
 	generationRoot = "generations/"
 )
 

@@ -3,6 +3,7 @@ package backup
 import (
 	"bytes"
 	"context"
+	cryptorand "crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -89,13 +91,15 @@ type TakeOptions struct {
 // storage and returns its Meta once meta.json is stored.
 //
 // 手順:
+//  0. 世代に LockFile を「まだ無ければ置く」形で置き、その世代の ID を自分のものにする。
+//     同じ秒に始めた別の Take はここで止まる
 //  1. REPEATABLE READ の transaction で pg_export_snapshot() を取り、その snapshot で
 //     表ごとの行数と管理表を読む
 //  2. 同じ snapshot を pg_dump --snapshot に渡し、出力を (暗号化して) 保存先へ流す
 //  3. 保存先から読み直して sha256 と大きさを確かめる
 //  4. 最後に meta.json を置く。meta.json の無い世代は途中で止まったものとして扱う
 //
-// 途中で失敗したときは、置いた dump を消してから返す。
+// 途中で失敗したときは、置いた dump と LockFile を消してから返す。
 func Take(ctx context.Context, o TakeOptions) (meta *Meta, err error) {
 	if o.Storage == nil {
 		return nil, errors.New("backup: no storage")
@@ -132,6 +136,28 @@ func Take(ctx context.Context, o TakeOptions) (meta *Meta, err error) {
 	if len(existing) > 0 {
 		return nil, fmt.Errorf("backup: generation %s already exists", id)
 	}
+	// 上の確かめから置くまでの間に、同じ秒に始めた別の Take が割り込みうる。dump と
+	// meta.json は送り直しても同じ結果になる無条件の Put のまま置き、排他は LockFile
+	// だけで取る。LockFile は世代に残す。消すと、後から同じ秒に始めた Take が取り
+	// 直して、置き終えた世代を上書きできてしまう。
+	lockKey := Key(id, LockFile)
+	lock, err := newTakeLock(id, createdAt)
+	if err != nil {
+		return nil, err
+	}
+	if err = claimKey(ctx, o.Storage, lockKey, lock); err != nil {
+		if errors.Is(err, ErrExists) {
+			return nil, fmt.Errorf("backup: generation %s is being taken by another backup started in the same second: %w", id, err)
+		}
+		// 置けたのに失敗と返ってきたかもしれない。自分のものなら消す。
+		releaseKey(ctx, o.Storage, logger, lockKey, lock)
+		return nil, err
+	}
+	defer func() {
+		if err != nil {
+			releaseKey(ctx, o.Storage, logger, lockKey, lock)
+		}
+	}()
 
 	pgDumpVersion, err := readPgDumpVersion(ctx, runner, pgDump)
 	if err != nil {
@@ -232,6 +258,30 @@ func Take(ctx context.Context, o TakeOptions) (meta *Meta, err error) {
 	}
 	logger.Info("backup: done", "id", id)
 	return meta, nil
+}
+
+// takeLock is the content of LockFile. Nonce makes it unique, so claimKey
+// can tell its own lock from another Take's; the rest helps an operator who
+// finds the file.
+type takeLock struct {
+	ID        string    `json:"id"`
+	Nonce     string    `json:"nonce"`
+	Host      string    `json:"host"`
+	PID       int       `json:"pid"`
+	StartedAt time.Time `json:"startedAt"`
+}
+
+func newTakeLock(id string, startedAt time.Time) ([]byte, error) {
+	var nonce [16]byte
+	if _, err := cryptorand.Read(nonce[:]); err != nil {
+		return nil, fmt.Errorf("backup: lock nonce: %w", err)
+	}
+	host, _ := os.Hostname()
+	body, err := json.Marshal(takeLock{ID: id, Nonce: hex.EncodeToString(nonce[:]), Host: host, PID: os.Getpid(), StartedAt: startedAt})
+	if err != nil {
+		return nil, fmt.Errorf("backup: encode lock: %w", err)
+	}
+	return body, nil
 }
 
 // deleteQuietly removes key after a failure, even when ctx is already done,

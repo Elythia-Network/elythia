@@ -80,12 +80,13 @@ func TestTake_MinIO(t *testing.T) {
 	assert.Empty(t, meta.Encryption)
 	assert.Equal(t, DumpFile, meta.DumpFile)
 
-	// 保存先には dump と meta.json の 2 つだけが置かれる。
+	// 保存先には dump と meta.json と、世代を取った印の 3 つだけが置かれる。
 	objs, err := st.List(context.Background(), GenerationPrefix())
 	require.NoError(t, err)
-	require.Len(t, objs, 2)
+	require.Len(t, objs, 3)
 	assert.Equal(t, Key(id, DumpFile), objs[0].Key)
 	assert.Equal(t, Key(id, MetaFile), objs[1].Key)
+	assert.Equal(t, Key(id, LockFile), objs[2].Key)
 
 	// sha256 と大きさは、バケットから直接読んだ bytes と一致する。
 	dump := rawS3Get(t, st, Key(id, DumpFile))
@@ -354,7 +355,10 @@ func TestTake_PgDumpTruncatedOutputLeavesNothing(t *testing.T) {
 			require.Error(t, err)
 			objs, err := st.List(context.Background(), "")
 			require.NoError(t, err)
-			assert.Empty(t, objs)
+			// Delete を止めているので、世代を取った印だけは残る。dump は残らない。
+			for _, o := range objs {
+				assert.True(t, strings.HasSuffix(o.Key, "/"+LockFile), o.Key)
+			}
 		})
 	}
 }
@@ -375,6 +379,103 @@ func (r truncatingRunner) Command(ctx context.Context, env []string, name string
 type noDeleteStorage struct{ Storage }
 
 func (noDeleteStorage) Delete(context.Context, string) error { return nil }
+
+// TestTake_SameSecondDoesNotMix starts two backups with the same generation ID
+// at once. Exactly one may succeed, and its generation must be consistent:
+// the other must neither overwrite nor delete its files.
+func TestTake_SameSecondDoesNotMix(t *testing.T) {
+	p := newDatabase(t)
+	p.seedSimple(t)
+	dir, err := NewDirStorage(markedDir(t))
+	require.NoError(t, err)
+	_, flaky := newFlakyS3(t)
+	for name, st := range map[string]Storage{"dir": dir, "s3": newS3Storage(t), "s3 with resent requests": flaky} {
+		t.Run(name, func(t *testing.T) {
+			at := time.Now()
+			// List で同じ ID が無いことを確かめる段を、2 つとも通り抜けさせる。
+			gate := &listGate{Storage: st, ready: make(chan struct{}), n: 2}
+			var wg sync.WaitGroup
+			errs := make([]error, 2)
+			for i := range 2 {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					opts := p.takeOptions(gate)
+					opts.Now = func() time.Time { return at }
+					_, errs[i] = Take(context.Background(), opts)
+				}()
+			}
+			wg.Wait()
+			ok := 0
+			for _, err := range errs {
+				if err == nil {
+					ok++
+				} else {
+					assert.ErrorIs(t, err, ErrExists)
+				}
+			}
+			require.Equal(t, 1, ok, "%v", errs)
+			gens, err := ListGenerations(context.Background(), st)
+			require.NoError(t, err)
+			require.Len(t, gens, 1)
+			require.True(t, gens[0].Complete())
+			size, sum, err := HashObject(context.Background(), st, Key(gens[0].ID, DumpFile))
+			require.NoError(t, err)
+			assert.Equal(t, gens[0].Meta.DumpSize, size)
+			assert.Equal(t, gens[0].Meta.DumpSHA256, sum)
+			_, err = st.Stat(context.Background(), Key(gens[0].ID, LockFile))
+			require.NoError(t, err, "the lock stays with the generation")
+		})
+	}
+}
+
+// listGate holds List until n callers have reached it, so concurrent Takes
+// all pass the "does the generation exist" check.
+type listGate struct {
+	Storage
+	mu    sync.Mutex
+	n     int
+	ready chan struct{}
+}
+
+func (g *listGate) List(ctx context.Context, prefix string) ([]ObjectInfo, error) {
+	g.mu.Lock()
+	if g.n > 0 {
+		g.n--
+		if g.n == 0 {
+			close(g.ready)
+		}
+	}
+	g.mu.Unlock()
+	<-g.ready
+	return g.Storage.List(ctx, prefix)
+}
+
+func (g *listGate) PutNew(ctx context.Context, key string, body []byte) error {
+	return g.Storage.(NewPutter).PutNew(ctx, key, body)
+}
+
+// TestTake_SurvivesResentRequests takes a backup into an S3 whose every first
+// PUT is stored and answered with 500, so the SDK resends each request (and
+// the conditional one gets 412). The backup must succeed and be consistent.
+func TestTake_SurvivesResentRequests(t *testing.T) {
+	p := newDatabase(t)
+	p.seedSimple(t)
+	f, st := newFlakyS3(t)
+	meta, err := Take(context.Background(), p.takeOptions(st))
+	require.NoError(t, err)
+	for _, name := range []string{LockFile, DumpFile, MetaFile} {
+		assert.Equal(t, 2, f.puts["p/"+Key(meta.ID, name)], "%s was resent", name)
+	}
+	gens, err := ListGenerations(context.Background(), st)
+	require.NoError(t, err)
+	require.Len(t, gens, 1)
+	require.True(t, gens[0].Complete())
+	size, sum, err := HashObject(context.Background(), st, Key(meta.ID, DumpFile))
+	require.NoError(t, err)
+	assert.Equal(t, meta.DumpSize, size)
+	assert.Equal(t, meta.DumpSHA256, sum)
+}
 
 // TestTake_IgnoresDatabaseTimeouts: a statement_timeout set on the database
 // must not cut the row counts.
