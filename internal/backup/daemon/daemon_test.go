@@ -736,6 +736,35 @@ func TestDaemonReserveHoldsTheSlotBeforeRun(t *testing.T) {
 	})
 }
 
+// TestDaemonVerifyWaitsForTheRecovery checks that the slot given back while
+// the recovery cannot read Redis does not start the postponed verification;
+// it starts when the recovery ends (#3463 (6c)).
+func TestDaemonVerifyWaitsForTheRecovery(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := mustSchedule(t, config.BackupScheduleOptions{Interval: "24h", Keep: 1, Verify: true}, time.UTC)
+		r := newRig(t, s, func(r *rig) {
+			r.ver.block = make(chan struct{})
+			r.ver.cancelWrites = true
+		})
+		r.start(t)
+		r.stop()
+
+		r2 := newRigOn(t, r.st, s, nil)
+		release, err := r2.d.Reserve(JobRestore)
+		require.NoError(t, err)
+		r2.d.SetRecovering(true)
+		r2.start(t)
+		release()
+		synctest.Wait()
+		assert.Empty(t, r2.ver.verified(), "not while the recovery goes on")
+		assert.False(t, r2.d.SlotBusy(), "the recovery can take the slot again")
+		r2.d.SetRecovering(false)
+		synctest.Wait()
+		assert.Equal(t, []string{backup.NewID(epoch)}, r2.ver.verified())
+		r2.stop()
+	})
+}
+
 // TestDaemonReserveThenScheduledTake checks that a scheduled take that came
 // due while the slot was reserved runs first when it comes back, instead of
 // the verification Run wanted at start (the take verifies its own).
