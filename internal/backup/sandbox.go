@@ -70,7 +70,8 @@ type Sandbox interface {
 type ProgramError struct {
 	Program  string
 	ExitCode int
-	// Stderr is the tail of the program's standard error output.
+	// Stderr is the program's whole standard error output, trimmed of
+	// surrounding white space.
 	Stderr string
 }
 

@@ -103,8 +103,10 @@ type VerifyResult struct {
 	Stages         []StageResult `json:"stages"`
 	Mismatches     []RowMismatch `json:"mismatches,omitempty"`
 	ElythiaVersion string        `json:"elythiaVersion"`
-	// DumpSHA256 is Meta.DumpSHA256 of the dump that was verified, so that a
-	// dump replaced after verification can be told apart.
+	// DumpSHA256 is Meta.DumpSHA256 of the dump that was verified. It tells
+	// a verify.json apart from the generation when meta.json and the dump
+	// were both replaced afterwards (taken again under the same ID); a dump
+	// replaced alone is caught when restore checks it against meta.json.
 	// Empty in a verify.json written before #3499.
 	DumpSHA256 string `json:"dumpSha256,omitempty"`
 }

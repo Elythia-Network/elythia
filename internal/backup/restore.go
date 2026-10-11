@@ -851,9 +851,10 @@ func (r *Restorer) resolveID(ctx context.Context, id string) (string, bool, erro
 // to call a generation verified.
 //
 // 別の世代の結果を置き間違えたものを、検証済みとして扱わない。検証した dump の
-// sha256 (#3499) が今の meta.json と違えば、検証の後に dump が差し替わっている。
-// dumpSha256 を持たない verify.json (#3499 より前の版が書いたもの) は、ID だけで
-// 判断する。
+// sha256 (#3499) が今の meta.json と違えば、検証の後に同じ ID で取り直され、
+// meta.json と dump が両方入れ替わっている。dump だけの差し替えはここでは分から
+// ないが、戻すときに meta.json との sha256 の照合で止まる。dumpSha256 を持たない
+// verify.json (#3499 より前の版が書いたもの) は、ID だけで判断する。
 func VerifyPassed(id string, vr *VerifyResult, meta *Meta) bool {
 	if vr == nil || !vr.OK || vr.ID != id || meta == nil {
 		return false
