@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/netip"
 	"strings"
+	"sync"
 
 	"github.com/elythia-network/elythia/internal/api/adminbackup"
 	"github.com/elythia-network/elythia/internal/api/apierr"
@@ -28,6 +29,21 @@ type ReauthVerifier interface {
 type Restore struct {
 	Manager  *restoreop.Manager
 	Verifier ReauthVerifier
+
+	// busy is held by the request that prepares, confirms or aborts.
+	//
+	// 段の確かめから操作までの間に、別の要求の再認証 (DB への接続) が割り込まない
+	// よう、操作を変える要求は 1 つずつにする。待たずに断る。
+	busy sync.Mutex
+}
+
+// lock takes busy, or answers BACKUP_SERVICE_BUSY.
+func (rs *Restore) lock(w http.ResponseWriter) (func(), bool) {
+	if !rs.busy.TryLock() {
+		restoreError(w, restoreop.ErrBusy)
+		return nil, false
+	}
+	return rs.busy.Unlock, true
 }
 
 // restoreBodyLimit caps a forwarded request body. パスキーの assertion を
@@ -78,6 +94,17 @@ func mountRestore(mux *http.ServeMux, rs *Restore) {
 		if !ok {
 			return
 		}
+		unlock, ok := rs.lock(w)
+		if !ok {
+			return
+		}
+		defer unlock()
+		// 始められないもの (終わっていない操作、メンテナンス中、レプリカ) は、
+		// 再認証の前に断る。再認証は DB へ接続を張るため。
+		if err := rs.Manager.CanStart(r.Context()); err != nil {
+			restoreError(w, err)
+			return
+		}
 		u, ok := reauth(w, r, rs, req)
 		if !ok {
 			return
@@ -99,14 +126,23 @@ func mountRestore(mux *http.ServeMux, rs *Restore) {
 		if !ok {
 			return
 		}
+		unlock, ok := rs.lock(w)
+		if !ok {
+			return
+		}
+		defer unlock()
 		rec, ok := ticketRecord(w, r, rs, req)
 		if !ok {
 			return
 		}
-		// 準備ができていないものは、再認証の前に断る。名前を入れ替えている最中に
-		// 照合の接続を DB へ張らないため。
+		// 準備ができていないもの、メンテナンス中は、再認証の前に断る。名前を入れ替え
+		// ている最中に照合の接続を DB へ張らないため。
 		if rec.Step != restoreop.StepReady {
 			restoreError(w, restoreop.ErrStep)
+			return
+		}
+		if err := rs.Manager.NoMaintenance(r.Context()); err != nil {
+			restoreError(w, err)
 			return
 		}
 		if _, ok := reauth(w, r, rs, req); !ok {
@@ -123,12 +159,21 @@ func mountRestore(mux *http.ServeMux, rs *Restore) {
 		if !ok {
 			return
 		}
+		unlock, ok := rs.lock(w)
+		if !ok {
+			return
+		}
+		defer unlock()
 		rec, ok := ticketRecord(w, r, rs, req)
 		if !ok {
 			return
 		}
 		if rec.Step != restoreop.StepPreparing && rec.Step != restoreop.StepReady {
 			restoreError(w, restoreop.ErrStep)
+			return
+		}
+		if err := rs.Manager.NoMaintenance(r.Context()); err != nil {
+			restoreError(w, err)
 			return
 		}
 		if _, ok := reauth(w, r, rs, req); !ok {

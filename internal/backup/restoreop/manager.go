@@ -230,20 +230,43 @@ func (m *Manager) Prepare(ctx context.Context, req PrepareRequest) (*Record, str
 	return rec, ticket, nil
 }
 
-func (m *Manager) prepareChecks(ctx context.Context, req PrepareRequest) (*Record, string, *backup.RestorePlan, backup.RestoreOptions, error) {
-	var opts backup.RestoreOptions
+// CanStart reports why an operation cannot start now (an unfinished one, an
+// active maintenance, replicas). It reads Redis only, so the control API
+// calls it before it spends a re-authentication, which opens the database.
+func (m *Manager) CanStart(ctx context.Context) error {
 	if cur, err := m.o.Store.Current(ctx); err != nil {
-		return nil, "", nil, opts, err
+		return err
 	} else if cur != nil {
-		return nil, "", nil, opts, ErrBusy
+		return ErrBusy
 	}
-	if st, err := m.o.Maint.Get(ctx); err != nil {
-		return nil, "", nil, opts, err
-	} else if st != nil {
-		return nil, "", nil, opts, ErrMaintenanceActive
+	if err := m.NoMaintenance(ctx); err != nil {
+		return err
 	}
 	if m.o.Replicas {
-		return nil, "", nil, opts, ErrReplicas
+		return ErrReplicas
+	}
+	return nil
+}
+
+// NoMaintenance returns ErrMaintenanceActive while any maintenance is on.
+//
+// メンテナンス中は、再認証で DB へ接続を張らない。張ると、そのメンテナンスの
+// 「接続が無いこと」の確認を邪魔する。
+func (m *Manager) NoMaintenance(ctx context.Context) error {
+	st, err := m.o.Maint.Get(ctx)
+	if err != nil {
+		return err
+	}
+	if st != nil {
+		return ErrMaintenanceActive
+	}
+	return nil
+}
+
+func (m *Manager) prepareChecks(ctx context.Context, req PrepareRequest) (*Record, string, *backup.RestorePlan, backup.RestoreOptions, error) {
+	var opts backup.RestoreOptions
+	if err := m.CanStart(ctx); err != nil {
+		return nil, "", nil, opts, err
 	}
 	if err := m.checkVersions(ctx); err != nil {
 		return nil, "", nil, opts, err

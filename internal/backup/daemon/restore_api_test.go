@@ -83,9 +83,20 @@ type fakeReauth struct {
 	calls int
 	ips   []string
 	err   error
+	// entered and block, when set, hold a check until block is closed.
+	entered chan struct{}
+	block   chan struct{}
 }
 
 func (f *fakeReauth) Verify(_ context.Context, token, ip string, r strongauth.Reauth) (*model.User, error) {
+	f.mu.Lock()
+	entered, block := f.entered, f.block
+	f.entered = nil
+	f.mu.Unlock()
+	if block != nil {
+		close(entered)
+		<-block
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
@@ -354,4 +365,68 @@ func TestRestoreErrorMapping(t *testing.T) {
 		assert.Equal(t, c.status, w.Code, c.code)
 		assert.Contains(t, w.Body.String(), `"code":"`+c.code+`"`)
 	}
+}
+
+// TestRestoreAPI_RefusesBeforeTheReauthentication checks that a request that
+// cannot go on is refused before the re-authentication, which opens the
+// database: during any maintenance, and while another operation is unfinished.
+func TestRestoreAPI_RefusesBeforeTheReauthentication(t *testing.T) {
+	idle := newAPIRig(t)
+	require.NoError(t, idle.maint.Enter(context.Background(), maintmode.State{OpID: "m1", Kind: maintmode.KindManual}))
+	rec, out := idle.post(t, "/restore/prepare", auth(map[string]any{"id": "20261010T120000Z"}))
+	assert.Equal(t, http.StatusConflict, rec.Code)
+	assert.Equal(t, "MAINTENANCE_ACTIVE", errCode(out))
+	assert.Zero(t, idle.verify.count(), "prepare during a maintenance does not reach the database")
+
+	r := newAPIRig(t)
+	opID, ticket := r.prepare(t)
+	before := r.verify.count()
+	rec, out = r.post(t, "/restore/prepare", auth(map[string]any{"id": "20261010T120000Z"}))
+	assert.Equal(t, http.StatusConflict, rec.Code)
+	assert.Equal(t, "BACKUP_SERVICE_BUSY", errCode(out), "another operation is unfinished")
+
+	require.NoError(t, r.maint.Enter(context.Background(), maintmode.State{OpID: "m1", Kind: maintmode.KindManual}))
+	for _, path := range []string{"/restore/confirm", "/restore/abort"} {
+		rec, out := r.post(t, path, auth(map[string]any{"opId": opID, "ticket": ticket}))
+		assert.Equal(t, http.StatusConflict, rec.Code, path)
+		assert.Equal(t, "MAINTENANCE_ACTIVE", errCode(out), path)
+	}
+	assert.Equal(t, before, r.verify.count(), "no check reaches the database")
+	rec, _ = r.post(t, "/restore/status", map[string]any{"i": "session-token-01", "opId": opID, "ticket": ticket})
+	assert.Equal(t, http.StatusOK, rec.Code, "the progress stays readable")
+}
+
+// TestRestoreAPI_OneChangeAtATime checks that while one request prepares,
+// confirms or aborts, another is refused at once instead of starting a
+// second check, and that the progress stays readable.
+func TestRestoreAPI_OneChangeAtATime(t *testing.T) {
+	r := newAPIRig(t)
+	opID, ticket := r.prepare(t)
+	entered, block := make(chan struct{}), make(chan struct{})
+	r.verify.mu.Lock()
+	r.verify.entered, r.verify.block = entered, block
+	r.verify.mu.Unlock()
+	done := make(chan int)
+	go func() {
+		rec, _ := r.post(t, "/restore/abort", auth(map[string]any{"opId": opID, "ticket": ticket}))
+		done <- rec.Code
+	}()
+	<-entered
+	for _, c := range []struct {
+		path string
+		body map[string]any
+	}{
+		{"/restore/prepare", auth(map[string]any{"id": "20261010T120000Z"})},
+		{"/restore/confirm", auth(map[string]any{"opId": opID, "ticket": ticket})},
+		{"/restore/abort", auth(map[string]any{"opId": opID, "ticket": ticket})},
+	} {
+		rec, out := r.post(t, c.path, c.body)
+		assert.Equal(t, http.StatusConflict, rec.Code, c.path)
+		assert.Equal(t, "BACKUP_SERVICE_BUSY", errCode(out), c.path)
+	}
+	rec, _ := r.post(t, "/restore/status", map[string]any{"i": "session-token-01", "opId": opID, "ticket": ticket})
+	assert.Equal(t, http.StatusOK, rec.Code)
+	close(block)
+	assert.Equal(t, http.StatusNoContent, <-done)
+	assert.Equal(t, 2, r.verify.count(), "only the first abort was checked")
 }
