@@ -271,7 +271,7 @@ afterEach(() => {
 });
 
 describe('federation health large lists', () => {
-	test.each(['deliver', 'inbox'] as const)('renders %s hosts in closed, incremental pages', async (direction) => {
+	test.each(['deliver', 'inbox'] as const)('renders %s hosts in severity-aware, incremental pages', async (direction) => {
 		misskeyApi.mockResolvedValue(healthResponse(120, direction === 'deliver' ? 25 : 0));
 
 		const view = render(XFederationHealth, {
@@ -280,24 +280,21 @@ describe('federation health large lists', () => {
 		});
 
 		await waitFor(() => assert.lengthOf(hostFolders(view), 50));
-		assert.ok(hostFolders(view).every((item) => item.dataset.defaultOpen === 'false'));
+		assert.ok(hostFolders(view).every((item) => item.dataset.defaultOpen === 'true'));
 
-		await fireEvent.click(view.getByRole('button', { name: /load more/i }));
+		await fireEvent.click(view.getAllByRole('button', { name: /load more/i }).at(-1)!);
 		await waitFor(() => assert.lengthOf(hostFolders(view), 100));
 
-		await fireEvent.click(view.getByRole('button', { name: /load more/i }));
+		await fireEvent.click(view.getAllByRole('button', { name: /load more/i }).at(-1)!);
 		await waitFor(() => assert.lengthOf(hostFolders(view), 120));
 	});
 
-	test('keeps delivery breakers folded and reveals ten at a time', async () => {
+	test('starts delivery breakers open and reveals ten at a time', async () => {
 		const view = await renderLargeDeliver();
 		const breakerFolder = view.getAllByTestId('health-folder')[0];
 
-		assert.strictEqual(breakerFolder.dataset.defaultOpen, 'false');
-		assert.lengthOf(view.container.querySelectorAll('.ti-player-play'), 0);
-
-		await fireEvent.click(view.getAllByTestId('folder-toggle')[0]);
-		await waitFor(() => assert.lengthOf(view.container.querySelectorAll('.ti-player-play'), 10));
+		assert.strictEqual(breakerFolder.dataset.defaultOpen, 'true');
+		assert.lengthOf(view.container.querySelectorAll('.ti-player-play'), 10);
 
 		await fireEvent.click(view.getAllByRole('button', { name: /load more/i })[0]);
 		await waitFor(() => assert.lengthOf(view.container.querySelectorAll('.ti-player-play'), 20));
@@ -319,10 +316,35 @@ describe('federation health large lists', () => {
 		await fireEvent.click(view.getAllByRole('button', { name: /load more/i }).at(-1)!);
 		await waitFor(() => assert.lengthOf(hostFolders(view), 100));
 		assert.include(hostFolders(view)[0].textContent, 'host-2047.example.test');
+		assert.strictEqual(hostFolders(view)[0].dataset.defaultOpen, 'true');
 
 		await fireEvent.update(sortSelect(view), 'host');
 		await waitFor(() => assert.lengthOf(hostFolders(view), 50));
 		assert.include(hostFolders(view)[0].textContent, 'host-0000.example.test');
+		assert.strictEqual(hostFolders(view)[0].dataset.defaultOpen, 'false');
+	});
+
+	test('remounts a host folder when its severity becomes error', async () => {
+		misskeyApi.mockImplementation(async (endpoint: string) => ({
+			...healthResponse(0, 0),
+			hosts: [{
+				...host(0),
+				...(endpoint.endsWith('inbox-health') ? { success: 0, failure: 10 } : {}),
+			}],
+		}));
+		const view = render(XFederationHealth, {
+			props: { direction: 'deliver' },
+			global,
+		});
+
+		await waitFor(() => assert.lengthOf(hostFolders(view), 1));
+		assert.strictEqual(hostFolders(view)[0].dataset.defaultOpen, 'false');
+		assert.notInclude(hostFolders(view)[0].textContent, 'Succeeded');
+
+		await view.rerender({ direction: 'inbox' });
+		await waitFor(() => expect(misskeyApi).toHaveBeenLastCalledWith('admin/federation/inbox-health', { windowSeconds: 3600 }));
+		await waitFor(() => assert.include(hostFolders(view)[0].textContent, 'Succeeded'));
+		assert.strictEqual(hostFolders(view)[0].dataset.defaultOpen, 'true');
 	});
 
 	test('resets the host page after changing the state filter', async () => {
@@ -358,7 +380,6 @@ describe('federation health large lists', () => {
 		apiWithDialog.mockResolvedValue(undefined);
 		const view = await renderLargeDeliver();
 
-		await fireEvent.click(view.getAllByTestId('folder-toggle')[0]);
 		await fireEvent.click(view.getAllByRole('button', { name: /load more/i })[0]);
 		await waitFor(() => assert.lengthOf(view.container.querySelectorAll('.ti-player-play'), 20));
 		await fireEvent.click(view.getAllByRole('button', { name: /load more/i }).at(-1)!);

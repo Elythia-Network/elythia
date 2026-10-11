@@ -41,7 +41,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 			mk-go: 配送を止めている相手 (#3048)。**「開いたまま戻らない」が最悪の
 			失敗形**なので、見えて手で再開できるようにする。受信側には無い。
 		-->
-		<MkFolder v-if="direction === 'deliver' && breakers.length > 0">
+		<MkFolder v-if="direction === 'deliver' && breakers.length > 0" :defaultOpen="true">
 			<template #label>{{ i18n.ts._federationHealth.breakersTitle }}</template>
 			<template #suffix>{{ number(breakers.length) }}</template>
 			<div class="_gaps_s">
@@ -91,7 +91,12 @@ SPDX-License-Identifier: AGPL-3.0-only
 		<MkLoading v-if="fetching"/>
 		<div v-else-if="visibleHosts.length === 0" :class="$style.empty">{{ i18n.ts._federationHealth.noHosts }}</div>
 		<div v-else class="_gaps_s">
-			<MkFolder v-for="h in pagedHosts" :key="h.host">
+			<!--
+				**key に severity を混ぜる。** defaultOpen は MkFolder のマウント時しか
+				効かないので、key が host だけだと窓や並び替えを変えたときに同じ要素が
+				再利用され、error に転落しても開かない。
+			-->
+			<MkFolder v-for="h in pagedHosts" :key="`${h.host}:${severityOf(h)}`" :defaultOpen="severityOf(h) === 'error'">
 				<template #label>
 					<span :class="[$style.dot, $style[severityOf(h)]]" :title="rateLabel(h)"></span>
 					<span class="_monospace">{{ h.host }}</span>
