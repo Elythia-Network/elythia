@@ -1926,8 +1926,9 @@ func (h *Handler) UpdateMeta(c echo.Context) error {
 	}
 
 	// before snapshot for moderation log。Misskey TS の updateServerSettings
-	// info は full meta の before/after で SMTP secret 等もそのまま記録する
-	// 仕様 (上流 update-meta.ts でも mask 無し)。互換性最優先で同じ挙動。
+	// info は full meta の before/after。本家は秘密の欄もそのまま記録するが、
+	// Elythia は記録する時点で伏せる (metaForModerationLog)。どの秘密を変えたかは
+	// changedSecrets に残す。
 	//
 	// 順序メモ: maybeAutoGenerateVAPID は fields map に鍵を inject するが
 	// metaRepo の DB 状態は触らないので、ここで Fetch() しても VAPID 生成
@@ -1951,8 +1952,9 @@ func (h *Handler) UpdateMeta(c echo.Context) error {
 	}
 	if afterMeta, err := h.metaRepo.Fetch(); err == nil {
 		h.logModeration(c, moderationlog.LogUpdateServerSettings, map[string]any{
-			"before": beforeMeta,
-			"after":  afterMeta,
+			"before":         metaForModerationLog(beforeMeta),
+			"after":          metaForModerationLog(afterMeta),
+			"changedSecrets": changedMetaSecrets(beforeMeta, afterMeta),
 		})
 	}
 	return c.NoContent(http.StatusNoContent)
@@ -4673,7 +4675,7 @@ func (h *Handler) ShowModerationLogs(c echo.Context) error {
 			"id":     l.ID,
 			"userId": l.UserID,
 			"type":   l.Type,
-			"info":   l.Info,
+			"info":   redactModerationLogInfo(l.Type, l.Info),
 		}
 		if s, err := aidxCreatedAtString(h.idGen, l.ID); err == nil {
 			m["createdAt"] = s
