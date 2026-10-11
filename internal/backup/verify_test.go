@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -962,6 +963,57 @@ func TestVerifyWrongIdentityInterrupted(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 	var se *stageError
 	assert.False(t, errors.As(err, &se))
+}
+
+func TestStageOutcome(t *testing.T) {
+	live := context.Background()
+	canceled, cancel := context.WithCancel(live)
+	cancel()
+	for _, stage := range []VerifyStage{StageReadable, StageRestorable, StageUsable} {
+		t.Run(string(stage), func(t *testing.T) {
+			r, ok, err := stageOutcome(live, stage, nil, []string{"w"})
+			require.NoError(t, err)
+			assert.True(t, ok)
+			assert.Equal(t, StageResult{Stage: stage, OK: true, Warnings: []string{"w"}}, r)
+
+			r, ok, err = stageOutcome(live, stage, failf("fsck cannot run"), nil)
+			require.NoError(t, err)
+			assert.False(t, ok)
+			assert.Equal(t, StageResult{Stage: stage, Error: "fsck cannot run"}, r)
+
+			// 途中で止められた段の失敗は判定にしない。
+			_, ok, err = stageOutcome(canceled, stage, failf("fsck cannot run: context canceled"), nil)
+			require.ErrorIs(t, err, context.Canceled)
+			assert.ErrorContains(t, err, "interrupted during "+string(stage))
+			assert.False(t, ok)
+
+			envErr := errors.New("storage down")
+			_, _, err = stageOutcome(live, stage, envErr, nil)
+			assert.Equal(t, envErr, err)
+		})
+	}
+}
+
+// TestVerifyInterruptedStageKeepsTheEarlierResult: a stage that fails after
+// the verification was interrupted does not overwrite verify.json.
+func TestVerifyInterruptedStageKeepsTheEarlierResult(t *testing.T) {
+	dump := []byte("dump bytes")
+	meta := plainMeta(dump)
+	meta.DumpSHA256 = "0000" // 止められなければ、食い違いで世代の欠陥になる値
+	s := newMemStorage()
+	putGeneration(t, s, meta, dump)
+	earlier := []byte(`{"ok":true}`)
+	s.objects[Key(testGenID, VerifyFile)] = earlier
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.onGet = func(key string) {
+		if strings.HasSuffix(key, DumpFile) {
+			cancel()
+		}
+	}
+	_, err := Verify(ctx, s, testGenID, VerifyOptions{Sandbox: noRunSandbox{t}, Bundled: BundledMigrations{Core: 1}})
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, earlier, s.objects[Key(testGenID, VerifyFile)])
 }
 
 // TestVerifyCorruptDumpSizeIsADefect: a dumpSize in meta.json that does not
