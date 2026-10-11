@@ -381,7 +381,7 @@ GTL が無傷なので、この食い違いは Elythia 側の退行として出�
 | 経路 | メンテナンス中の応答 | 本家 |
 |---|---|---|
 | `/api/*` | 503、`Retry-After`、本文は `{"error":{"message":"The server is under maintenance.","code":"MAINTENANCE","id":"218ec84b-6e9c-492d-ac08-37bcc33af056","kind":"server"}}` | この `code` は無い (Elythia の追加)。本家の `misskeyApi` と misskey-js は 204 以外で `res.json()` を先に呼ぶので、本文を JSON にして `body.error` で reject させる |
-| `/api/admin/backup/restore/*` | バックアップ用のサービスへ転送する (画面から戻す #3463 (6c) の進み具合と確定)。本体は DB に触れず、照合はサービスが行う | 本家に無い経路。戻す操作が自分で入れたメンテナンスの間も、管理画面が進み具合を読めるようにする |
+| `/api/admin/backup/restore/status` / `confirm` / `abort` | バックアップ用のサービスへ転送する (画面から戻す #3463 (6c) の進み具合・確定・中止)。本体は DB に触れず、照合はサービスが行う。`prepare` は転送せず、ほかの API と同じ 503 | 本家に無い経路。戻す操作が自分で入れたメンテナンスの間も、管理画面が進み具合を読めるようにする |
 | `POST /inbox`、`POST /users/:id/inbox` | 本文の無い 503 と `Retry-After` | 本家の配送側は 5xx を再送する (`Retry-After` は読まない) |
 | `GET /streaming` | 503 (upgrade しない) | WebSocket でない GET への 503 と同じ status |
 | `/healthz` | 200 のまま、本文に `"maintenance": true` を足す | — |
