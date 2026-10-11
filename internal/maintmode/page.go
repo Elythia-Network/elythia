@@ -69,7 +69,9 @@ dd{margin:0 0 8px;overflow-wrap:anywhere;white-space:pre-wrap}
 		fetch('/maintenance/status', { cache: 'no-store', credentials: 'same-origin' })
 			.then(function (res) {
 				if (!res.ok) return null;
-				return res.json().catch(function () { return { maintenance: false }; });
+				// 本文が JSON でない (前段の proxy のページなど) ときは、終わったとは
+				// 読まずに次の周を待つ。終わったと読むと、再読み込みを 5 秒ごとに繰り返す。
+				return res.json().catch(function () { return null; });
 			})
 			.then(function (s) {
 				if (!s) return;
