@@ -387,6 +387,33 @@ func TestDaemonInterruptedVerificationKeepsPreviousResult(t *testing.T) {
 	}
 }
 
+// 判定が出た後 (後始末の間) に止められた検証は、本当の判定なので前の verify.json に
+// 戻さない。戻すと、壊れていると分かった世代が前の ok:true のまま残る。
+func TestDaemonVerdictBeforeInterruptionIsKept(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var id string
+		r := newRig(t, nil, func(r *rig) {
+			id = r.st.addGeneration(at(-1, 0), true, "ok")
+			r.ver.block = make(chan struct{})
+			r.ver.cancelJudged = true
+		})
+		r.start(t)
+		_, err := r.d.Start(JobVerify, id)
+		require.NoError(t, err)
+		synctest.Wait()
+		r.stop()
+		vr, err := backup.ReadVerify(context.Background(), r.st, id)
+		require.NoError(t, err)
+		assert.False(t, vr.OK, "the failing verdict is kept, not rolled back to the previous ok:true")
+		require.Len(t, vr.Stages, 3)
+		st := r.d.Status()
+		require.NotNil(t, st.LastVerify)
+		require.NotNil(t, st.LastVerify.Verify)
+		assert.False(t, st.LastVerify.Verify.OK)
+		assert.NotContains(t, st.LastVerify.Error, "interrupted")
+	})
+}
+
 // 前の verify.json が読めなければ、戻さずにそのままにする。
 func TestDaemonInterruptedVerificationWithUnreadablePrevious(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {

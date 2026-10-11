@@ -196,10 +196,14 @@ type fakeVerifier struct {
 	// internal/cli/backup checks the real one has this shape).
 	afterErr error
 	block    chan struct{}
-	// cancelWrites makes a cancelled verification store verify.json with
-	// ok:false and return no error, as backup.Verify does when pg_restore is
-	// killed by the cancelled context.
+	// cancelWrites makes a cancelled verification store a verify.json that
+	// has no verdict (not all three stages) and return no error, the shape
+	// the daemon still rolls back.
 	cancelWrites bool
+	// cancelJudged makes a cancelled verification store a verdict (all three
+	// stages, restorable failed) and return no error, as backup.Verify does
+	// when it is stopped after the verdict, during the cleanup.
+	cancelJudged bool
 	// afterStore, when set, is called after verify.json is stored, before
 	// Verify returns.
 	afterStore func()
@@ -208,20 +212,23 @@ type fakeVerifier struct {
 func (f *fakeVerifier) Verify(ctx context.Context, id string) (backup.VerifyResult, error) {
 	f.mu.Lock()
 	f.ids = append(f.ids, id)
-	fail, err, afterErr, block, cancelWrites, afterStore := f.fail, f.err, f.afterErr, f.block, f.cancelWrites, f.afterStore
+	fail, err, afterErr, block, cancelWrites, cancelJudged, afterStore := f.fail, f.err, f.afterErr, f.block, f.cancelWrites, f.cancelJudged, f.afterStore
 	f.mu.Unlock()
 	if block != nil {
 		select {
 		case <-block:
 		case <-ctx.Done():
-			if !cancelWrites {
+			if !cancelWrites && !cancelJudged {
 				return backup.VerifyResult{}, ctx.Err()
 			}
 			res := backup.VerifyResult{ID: id, Stages: []backup.StageResult{
 				{Stage: backup.StageReadable, OK: true},
-				{Stage: backup.StageRestorable, Error: "pg_restore: context canceled"},
-				{Stage: backup.StageUsable, Skipped: true},
+				{Stage: backup.StageRestorable, Error: restorableError},
 			}}
+			if cancelJudged {
+				res.Stages = append(res.Stages, backup.StageResult{Stage: backup.StageUsable, Skipped: true})
+				res.Mismatches = []backup.RowMismatch{{Table: "public.note", Expected: 10, Actual: 9}}
+			}
 			b, _ := json.Marshal(res)
 			f.st.set(backup.Key(id, backup.VerifyFile), b)
 			return res, nil
