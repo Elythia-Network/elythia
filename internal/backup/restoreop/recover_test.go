@@ -210,3 +210,37 @@ func TestRecover_RevertedWhileResumingKeepsRedis(t *testing.T) {
 	defer e.mu.Unlock()
 	assert.Zero(t, e.cleaned)
 }
+
+// TestRecover_RereadsAfterTheSlot checks that the recovery reads the record
+// again once it has the job slot: an operation this run prepared right after
+// the start may have finished while the recovery waited, and must not be
+// recovered (its database dropped) from the stale copy.
+func TestRecover_RereadsAfterTheSlot(t *testing.T) {
+	e := newEnv(t)
+	e.stop()
+	ctx := context.Background()
+	require.NoError(t, e.store.create(ctx, &Record{OpID: "restore-live", Step: StepReady, Database: testDB, Target: tgt, Before: before}))
+	e.db.mu.Lock()
+	e.db.dbs[tgt] = "restored"
+	e.db.mu.Unlock()
+	busy := &slot{}
+	release, err := busy.acquire()
+	require.NoError(t, err)
+	e.slot = busy
+	e.opts.Acquire = busy.acquire
+	e.ctx, e.cancel = context.WithCancel(context.Background())
+	e.m = New(e.opts)
+	e.m.Start(e.ctx)
+	t.Cleanup(func() { e.cancel(); e.m.Wait() })
+	time.Sleep(30 * time.Millisecond)
+	// 待っている間に、その操作が終わった (この実行の確定で done になった)。
+	require.NoError(t, e.store.setStep(ctx, "restore-live", StepReady, StepDone, time.Now()))
+	release()
+	require.Eventually(t, func() bool { return !busy.isHeld() }, time.Second, 5*time.Millisecond)
+	time.Sleep(30 * time.Millisecond)
+	e.stop()
+	assert.Empty(t, e.db.drops, "a finished operation is not recovered")
+	got, err := e.store.Get(ctx, "restore-live")
+	require.NoError(t, err)
+	assert.Equal(t, StepDone, got.Step)
+}
