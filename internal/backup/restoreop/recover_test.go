@@ -272,3 +272,50 @@ func TestRecover_GivesBackTheReservedSlot(t *testing.T) {
 		}
 	}
 }
+
+// TestGiveUpAdvice checks that the notification an operator gets when an
+// operation stops names the steps that fit whether the maintenance is still
+// on: with it gone, the processes serve the database, so it must not just
+// say to rename it.
+func TestGiveUpAdvice(t *testing.T) {
+	notSwapped := map[string]string{testDB: "current", tgt: "restored"}
+	swapped := map[string]string{testDB: "restored", before: "current"}
+	note := func(t *testing.T, e *env) string {
+		t.Helper()
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		require.Len(t, e.notes, 1)
+		return e.notes[0]
+	}
+	t.Run("maintenance on", func(t *testing.T) {
+		e, rec := crashed(t, StepSwitched, notSwapped, maintmode.PhaseHeld, "")
+		e.waitStep(rec.OpID, StepUnknown)
+		n := note(t, e)
+		assert.Contains(t, n, "left the maintenance on")
+		assert.Contains(t, n, "elythia backup restore -rollback")
+		assert.NotContains(t, n, "elythia maintenance enter")
+	})
+	t.Run("maintenance gone", func(t *testing.T) {
+		e, rec := crashed(t, StepSwitched, swapped, "", "")
+		e.waitStep(rec.OpID, StepUnknown)
+		n := note(t, e)
+		assert.Contains(t, n, "The maintenance is not on")
+		assert.Contains(t, n, "enter the maintenance first (elythia maintenance enter)")
+		assert.NotContains(t, n, "left the maintenance on")
+	})
+	t.Run("maintenance unreadable", func(t *testing.T) {
+		var h *hookMaint
+		e := newEnv(t, withHook(&h))
+		e.stop()
+		require.NoError(t, e.store.create(context.Background(), &Record{OpID: "restore-unread", Step: StepSwitched, Database: testDB, Target: tgt, Before: before}))
+		e.db.mu.Lock()
+		e.db.dbs = map[string]string{testDB: "restored", before: "current"}
+		e.db.mu.Unlock()
+		h.failGet = errors.New("redis down")
+		e.start()
+		e.waitStep("restore-unread", StepUnknown)
+		n := note(t, e)
+		assert.Contains(t, n, "could not read the maintenance state")
+		assert.Contains(t, n, "elythia maintenance status")
+	})
+}

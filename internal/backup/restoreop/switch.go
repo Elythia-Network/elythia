@@ -313,16 +313,33 @@ func (m *Manager) finishRevert(ctx context.Context, rec *Record) {
 	m.journal(ctx, rec.OpID, StepReverted, "reverted to the previous database")
 }
 
-// giveUp stops with the maintenance on and leaves the decision to an
-// operator (it cannot tell the state of the names, or cannot get the
-// processes off the database).
+// giveUp stops and leaves the decision to an operator (it cannot tell the
+// state of the names, or cannot get the processes off the database).
+//
+// 勧める手順は、メンテナンスが残っているかで変える。残っていないときに
+// -rollback だけを勧めると、プロセスが動いている DB の名前を変えさせることになる
+// (接続があれば PostgreSQL が拒むが、運営者が接続を切ってから試しかねない)。
 func (m *Manager) giveUp(ctx context.Context, rec *Record, from string, cause error) {
 	if stopping(ctx) {
 		return
 	}
-	msg := fmt.Sprintf("restore %s stopped and left the maintenance on: %v. Check pg_database for %s, %s, %s and %s, "+
-		"put the right database under %s (elythia backup restore -rollback), then end the maintenance (elythia maintenance exit)",
-		rec.OpID, cause, rec.Database, rec.Target, rec.Before, rec.Aside, rec.Database)
+	names := fmt.Sprintf("Check pg_database for %s, %s, %s and %s", rec.Database, rec.Target, rec.Before, rec.Aside)
+	var msg string
+	st, err := m.o.Maint.Get(ctx)
+	switch {
+	case err != nil:
+		msg = fmt.Sprintf("restore %s stopped: %v. It could not read the maintenance state (%v); check it with elythia maintenance status. %s. "+
+			"With the maintenance on, put the right database under %s (elythia backup restore -rollback), then end the maintenance (elythia maintenance exit)",
+			rec.OpID, cause, err, names, rec.Database)
+	case st != nil && st.OpID == rec.OpID:
+		msg = fmt.Sprintf("restore %s stopped and left the maintenance on: %v. %s, "+
+			"put the right database under %s (elythia backup restore -rollback), then end the maintenance (elythia maintenance exit)",
+			rec.OpID, cause, names, rec.Database)
+	default:
+		msg = fmt.Sprintf("restore %s stopped: %v. The maintenance is not on, so the processes serve the database named %s now. %s. "+
+			"To put another database under %s, enter the maintenance first (elythia maintenance enter), then elythia backup restore -rollback, then elythia maintenance exit",
+			rec.OpID, cause, rec.Database, names, rec.Database)
+	}
 	m.record(ctx, rec.OpID, "", StepUnknown, "error", cause.Error())
 	m.journal(ctx, rec.OpID, from, "%s", msg)
 	m.log.Error("backup: " + msg)
