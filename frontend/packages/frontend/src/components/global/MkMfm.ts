@@ -4,7 +4,7 @@
  */
 
 import { h } from 'vue';
-import * as mfm from 'mfm-js';
+import * as mfm from '@/utility/mfm.js';
 import * as Misskey from 'misskey-js';
 import { host } from '@@/js/config.js';
 import type { VNode, SetupContext } from 'vue';

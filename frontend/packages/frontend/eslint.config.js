@@ -45,6 +45,17 @@ export default [
 			'@typescript-eslint/no-empty-interface': ['error', {
 				allowSingleExtends: true,
 			}],
+			// MFM は src/utility/mfm.ts を通して扱う (後で解析器を差し替える口をそこに
+			// 置いている)。shared の punycode の制限もここで指定し直す。
+			'no-restricted-imports': ['error', {
+				paths: [
+					{ name: 'punycode' },
+					{ name: 'mfm-js', message: 'Use `@/utility/mfm.js` instead of importing mfm-js directly.' },
+				],
+				patterns: [
+					{ group: ['mfm-js/*'], message: 'Use `@/utility/mfm.js` instead of importing mfm-js directly.' },
+				],
+			}],
 			// defineExposeが誤検知されてしまう
 			'@typescript-eslint/no-unused-expressions': 'off',
 			'import/consistent-type-specifier-style': ['error', 'prefer-top-level'],
@@ -163,6 +174,15 @@ export default [
 			'vue/attribute-hyphenation': ['error', 'never'],
 			'vue/no-mutating-props': ['error', {
 				shallowOnly: true,
+			}],
+		},
+	},
+	{
+		// mfm-js を直接 import してよいのは、このモジュールだけ
+		files: ['src/utility/mfm.ts'],
+		rules: {
+			'no-restricted-imports': ['error', {
+				paths: [{ name: 'punycode' }],
 			}],
 		},
 	},
