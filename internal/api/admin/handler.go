@@ -1802,6 +1802,10 @@ func (h *Handler) UpdateMeta(c echo.Context) error {
 	delete(fields, "i")
 	// 伏せ字のまま送り返された秘密の欄は「変えない」(admin/meta は秘密の値を返さない)。
 	dropUnchangedSecretFields(fields)
+	// 秘密を残したまま送り先だけを変えることはさせない (keptSecretForNewDestination)。
+	if err := h.refuseKeptSecretForNewDestination(c, fields); err != nil || c.Response().Committed {
+		return err
+	}
 	// #2106 S1: identity / 専用 endpoint 管轄の column を generic map 経路から除外する。
 	// update-meta は admin が任意 meta column を書ける generic passthrough 設計 (model
 	// コメント参照) だが、rootUserId を書けると root 権限を別 user に付け替えられ

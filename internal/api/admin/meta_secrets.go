@@ -2,10 +2,16 @@ package admin
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 
+	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/labstack/echo/v4"
 )
 
 // redactAdminMetaSecrets replaces the secret fields of an admin/meta response
@@ -122,4 +128,128 @@ func redactModerationLogInfo(logType string, info []byte) any {
 		}
 	}
 	return m
+}
+
+// secretDestinations lists the meta fields that decide where each secret is
+// sent. 秘密を相手に渡す (認証の値として送る) 欄だけを並べる。送り先が固定の
+// もの (DeepL、verifymail、hCaptcha / reCAPTCHA / Turnstile) と、秘密そのものを
+// 送らないもの (オブジェクトストレージは署名だけを送る、Web Push の秘密鍵は署名に
+// 使うだけ) は含めない。
+var secretDestinations = []struct {
+	secret string
+	dests  []string
+}{
+	{"smtpPass", []string{"smtpHost", "smtpPort"}},
+	{"truemailAuthKey", []string{"truemailInstance"}},
+	{"sensitiveMediaDetectionApiKey", []string{"sensitiveMediaDetectionApiUrl"}},
+	{"mcaptchaSecretKey", []string{"mcaptchaInstanceUrl"}},
+}
+
+// keptSecretForNewDestination returns the secret field that update-meta would
+// keep while one of its destinations changes, or "".
+//
+// 伏せ字 (または欄を送らない) は「今の秘密を残す」意味になる。送り先だけを
+// 変えると、入力し直していない秘密が新しい送り先へ渡るので、送り先を変える
+// ときは秘密も入力し直させる。今の秘密が未設定なら渡るものが無いので通す。
+func keptSecretForNewDestination(fields map[string]any, current map[string]any) string {
+	for _, sd := range secretDestinations {
+		if _, sent := fields[sd.secret]; sent {
+			continue
+		}
+		if !model.MetaSecretIsSet(current[sd.secret]) {
+			continue
+		}
+		for _, d := range sd.dests {
+			v, ok := fields[d]
+			if !ok {
+				continue
+			}
+			if normalizeDestination(v) != normalizeDestination(current[d]) {
+				return sd.secret
+			}
+		}
+	}
+	return ""
+}
+
+// errIDSecretReentryRequired is the error id of SECRET_REENTRY_REQUIRED.
+// Elythia 独自のエラー。
+const errIDSecretReentryRequired = "32e50b4f-2201-49fe-8846-71d252213ac1"
+
+// secretReentryRequired writes the refusal for a destination change that
+// keeps the stored secret.
+func secretReentryRequired(c echo.Context, field string) error {
+	return c.JSON(http.StatusBadRequest, apierr.Error("SECRET_REENTRY_REQUIRED",
+		"Enter "+field+" again when changing where it is sent.", errIDSecretReentryRequired))
+}
+
+// metaAsMap renders m with the JSON names, as update-meta's fields use them.
+func metaAsMap(m *model.Meta) (map[string]any, error) {
+	b, err := json.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]any
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// normalizeDestination returns a comparable form of a destination field.
+//
+// 比べるときだけ正規化する。空白・末尾のスラッシュ・scheme と host の大文字で
+// 「変わった」と読まないため。null と空文字は同じ (どちらも未設定)。
+func normalizeDestination(v any) string {
+	switch s := v.(type) {
+	case nil:
+		return ""
+	case string:
+		t := strings.TrimSpace(s)
+		if u, err := url.Parse(t); err == nil && u.Scheme != "" && u.Host != "" {
+			u.Scheme = strings.ToLower(u.Scheme)
+			u.Host = strings.ToLower(u.Host)
+			u.Path = strings.TrimRight(u.Path, "/")
+			u.RawPath = ""
+			return u.String()
+		}
+		return strings.TrimSuffix(strings.ToLower(t), ".")
+	case float64:
+		return strconv.FormatFloat(s, 'f', -1, 64)
+	default:
+		return fmt.Sprint(s)
+	}
+}
+
+// refuseKeptSecretForNewDestination writes the refusal (and returns with the
+// response committed) when fields change a destination of a stored secret
+// without re-entering it.
+func (h *Handler) refuseKeptSecretForNewDestination(c echo.Context, fields map[string]any) error {
+	if !touchesSecretDestination(fields) {
+		return nil
+	}
+	cur, err := h.metaRepo.Fetch()
+	if err != nil {
+		// 今の値が分からないと、送り先が変わるかを判定できない。通さない。
+		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
+	}
+	current, err := metaAsMap(cur)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
+	}
+	if f := keptSecretForNewDestination(fields, current); f != "" {
+		return secretReentryRequired(c, f)
+	}
+	return nil
+}
+
+func touchesSecretDestination(fields map[string]any) bool {
+	for _, sd := range secretDestinations {
+		for _, d := range sd.dests {
+			if _, ok := fields[d]; ok {
+				return true
+			}
+		}
+	}
+	return false
 }
