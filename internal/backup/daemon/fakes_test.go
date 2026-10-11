@@ -191,7 +191,7 @@ type fakeVerifier struct {
 	fail bool // OK false with a mismatch
 	err  error
 	// afterErr returns a verdict for all three stages together with this
-	// error, OK false and no verify.json, as backup.Verify does when cleaning
+	// error, after storing verify.json, as backup.Verify does when cleaning
 	// up after the verdict fails (TestRealVerifyCleanupFailureShape in
 	// internal/cli/backup checks the real one has this shape).
 	afterErr error
@@ -241,11 +241,14 @@ func (f *fakeVerifier) Verify(ctx context.Context, id string) (backup.VerifyResu
 			backup.StageResult{Stage: backup.StageRestorable, OK: true},
 			backup.StageResult{Stage: backup.StageUsable, OK: true})
 	}
+	b, _ := json.Marshal(res)
 	if afterErr != nil {
-		res.OK = false
+		// 実物と同じく、判定は保存先へ書く。書けなければ、その誤りも一緒に返す。
+		if perr := f.st.Put(ctx, backup.Key(id, backup.VerifyFile), bytes.NewReader(b)); perr != nil {
+			return res, errors.Join(perr, afterErr)
+		}
 		return res, afterErr
 	}
-	b, _ := json.Marshal(res)
 	f.st.set(backup.Key(id, backup.VerifyFile), b)
 	if afterStore != nil {
 		afterStore()

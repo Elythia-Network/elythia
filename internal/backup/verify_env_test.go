@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -37,7 +39,12 @@ type memStorage struct {
 	// getErr / putErr, when set, are returned for keys with that suffix.
 	getErr map[string]error
 	putErr map[string]error
-	puts   []string
+	// failAfter makes Get of keys with that suffix fail after that many bytes,
+	// like a connection lost in the middle of a download.
+	failAfter map[string]int
+	// statErr, when set, is returned by Stat for keys with that suffix.
+	statErr map[string]error
+	puts    []string
 }
 
 func newMemStorage() *memStorage { return &memStorage{objects: map[string][]byte{}} }
@@ -71,12 +78,22 @@ func (m *memStorage) Get(_ context.Context, key string) (io.ReadCloser, error) {
 	if !ok {
 		return nil, ErrNotFound
 	}
+	for suffix, n := range m.failAfter {
+		if strings.HasSuffix(key, suffix) {
+			return io.NopCloser(io.MultiReader(bytes.NewReader(b[:n]), iotest.ErrReader(errors.New("connection reset by peer")))), nil
+		}
+	}
 	return io.NopCloser(bytes.NewReader(b)), nil
 }
 
 func (m *memStorage) Stat(_ context.Context, key string) (ObjectInfo, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	for suffix, err := range m.statErr {
+		if strings.HasSuffix(key, suffix) {
+			return ObjectInfo{}, err
+		}
+	}
 	b, ok := m.objects[key]
 	if !ok {
 		return ObjectInfo{}, ErrNotFound

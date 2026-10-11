@@ -449,11 +449,10 @@ func (d *Daemon) verify(ctx context.Context, res *JobResult) bool {
 	}
 	if err != nil {
 		// 判定は出たが、その後 (使い捨てのサーバーの後始末や verify.json の保存) で
-		// 失敗した。#3459 の Verify は、このとき 3 段が全て通っていても OK を false にし、
-		// verify.json を書かずに返す。判定を捨てて「失敗」とだけ知らせると、壊れた世代も
-		// 後始末の失敗にしか見えず、通った世代は ok:false と記録されてしまう。判定は
-		// 段の結果から求め直し (vr.OK は後始末の失敗も含むので使わない)、整理が読めるよう
-		// verify.json もここで残す。
+		// 失敗した。判定を捨てて「失敗」とだけ知らせると、壊れた世代も後始末の失敗に
+		// しか見えない。Verify は後始末に失敗しても判定を verify.json に書く (#3499) が、
+		// verify.json の保存そのものが失敗したときに備え、判定は段の結果から求め直し、
+		// 整理が読めるよう verify.json もここで残す。
 		vr.OK = stagesPassed(vr)
 		d.log.Error("backup: verification reached a verdict but did not finish cleanly",
 			"generation", res.GenerationID, "ok", vr.OK, "error", err)
