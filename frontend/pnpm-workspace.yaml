@@ -85,6 +85,10 @@ overrides:
   joi@<18.2.6: 18.2.9
   js-cookie@<3.0.7: 3.0.8
   js-yaml@>=4.0.0 <4.3.2: 4.3.2
+# 依存にあてるパッチ (Elythia)。mfm-js は解析の途中の結果を覚える形にしてある。
+# mfm-js を外したら (#3515) 消す。
+patchedDependencies:
+  mfm-js@0.26.0: patches/mfm-js@0.26.0.patch
 engineStrict: true
 saveExact: true
 shellEmulator: true
