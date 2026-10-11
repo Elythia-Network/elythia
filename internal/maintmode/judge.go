@@ -108,6 +108,11 @@ func (j *Judge) Step(ctx context.Context) (Outcome, error) {
 	if err != nil || !ok {
 		return NotJudging, err
 	}
+	if st.OpID == "" {
+		// opId の無い状態 (手で書いた、壊れた) は判定しない。書き込みは全部
+		// opId で縛っているので、判定しても held にできず、待ちの時計も持てない。
+		return Waiting, errors.New("maintmode: the maintenance state has no opId; clear it with `elythia maintenance exit -force`")
+	}
 	if st.OpID != j.opID {
 		j.reset(st.OpID)
 	}

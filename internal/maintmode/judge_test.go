@@ -405,3 +405,24 @@ func TestBlockerString(t *testing.T) {
 	b := operatorSession(1)
 	assert.Contains(t, b.String(), "primary pid=1")
 }
+
+// TestJudge_DoesNotJudgeAStateWithoutOpID fixes #3463 review M-2: a judge
+// that read a state without an opId (half written, or written by hand) had
+// no wait clock and terminated sessions at once.
+func TestJudge_DoesNotJudgeAStateWithoutOpID(t *testing.T) {
+	s, mr := newTestStore(t)
+	ctx := context.Background()
+	c := newClock()
+	f := &fakeCounter{}
+	f.set(elythiaSession(17))
+	require.NoError(t, s.Report(ctx, ProcReport{ID: "p1", State: ProcDrained}))
+	j := c.judge(s, f, "j")
+	mr.HSet(s.StateKey(), "phase", PhaseEntering)
+	for range 3 {
+		_, err := j.Step(ctx)
+		assert.ErrorContains(t, err, "no opId")
+		c.add(time.Hour)
+	}
+	assert.Empty(t, f.terminated, "opId の無い状態で接続を切った")
+	assert.Equal(t, PhaseEntering, phase(t, s))
+}
