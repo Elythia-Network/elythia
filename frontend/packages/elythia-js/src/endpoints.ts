@@ -12,6 +12,8 @@ import type {
 	BackupJob,
 	BackupOverview,
 	BackupReauth,
+	BackupRestoreStatus,
+	BackupRestoreTicket,
 	BubbleGameMode,
 	BubbleVersusMatch,
 	BubbleVersusRecord,
@@ -80,6 +82,26 @@ export type ElythiaEndpoints = {
 		req: Misskey.entities.EmptyRequest;
 		/** PublicKeyCredentialRequestOptionsJSON for the passkey re-authentication. */
 		res: Record<string, unknown>;
+	};
+	'admin/backup/restore/abort': {
+		/** Only before the switch was confirmed. */
+		req: BackupReauth & BackupRestoreTicket;
+		res: null;
+	};
+	'admin/backup/restore/confirm': {
+		/** Puts the server into maintenance and switches the databases. */
+		req: BackupReauth & BackupRestoreTicket;
+		res: null;
+	};
+	'admin/backup/restore/prepare': {
+		/** Restores the generation into a new database while the server keeps running. Only a generation that passed verification. */
+		req: BackupReauth & { id: string };
+		res: BackupRestoreTicket & { status: BackupRestoreStatus };
+	};
+	'admin/backup/restore/status': {
+		/** Answered also during the maintenance. */
+		req: BackupRestoreTicket;
+		res: BackupRestoreStatus;
 	};
 	'admin/backup/take': {
 		/** The backup service takes it in the background. */

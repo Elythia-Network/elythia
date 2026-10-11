@@ -27,6 +27,35 @@ SPDX-License-Identifier: AGPL-3.0-only
 				</div>
 			</template>
 
+			<!--
+				mk-go: 画面からのリストア (#3463 (6c))。進み具合はバックアップ用のサービスが
+				持ち、メンテナンス中も ticket で読める。
+			-->
+			<div v-if="restore" class="_panel _gaps_s" :class="$style.restore">
+				<div :class="$style.restoreHead"><i class="ti ti-database-import"></i> {{ i18n.ts._backups.restoreTitle }}<span v-if="restore.status" class="_monospace">: {{ restore.status.record.generationId }}</span></div>
+				<template v-if="restore.status">
+					<MkInfo :warn="restore.status.record.step === 'unknown' || restore.status.record.step === 'failed'">
+						{{ stepText(restore.status.record.step) }}
+						<div v-if="restore.status.record.error" class="_monospace" :class="$style.verifyError">{{ restore.status.record.error }}</div>
+					</MkInfo>
+					<MkInfo v-if="restore.status.record.step === 'unknown'" warn>{{ i18n.ts._backups.restoreUnknownHelp }}</MkInfo>
+					<MkInfo v-else-if="restore.status.maintenance">{{ i18n.ts._backups.restoreKeepOpen }}</MkInfo>
+					<div v-if="restore.status.maintenance?.blockers?.length" :class="$style.verifyError">
+						{{ i18n.ts._backups.restoreWaiting }}:
+						<div v-for="b in restore.status.maintenance.blockers" :key="b.server + b.pid" class="_monospace">{{ b.server }} pid={{ b.pid }} {{ b.application }}</div>
+					</div>
+					<div :class="$style.journal" class="_monospace">
+						<div v-for="(j, i) in restore.status.journal.slice(-12)" :key="i"><MkTime :time="j.at" mode="absolute"/> {{ j.message }}</div>
+					</div>
+				</template>
+				<MkInfo v-if="restore.error" warn>{{ restore.error }}</MkInfo>
+				<div class="_buttons">
+					<MkButton v-if="restore.status?.record.step === 'ready'" primary :disabled="busy" @click="confirmRestore"><i class="ti ti-switch-horizontal"></i> {{ i18n.ts._backups.restoreSwitch }}</MkButton>
+					<MkButton v-if="restore.status?.record.step === 'ready' || restore.status?.record.step === 'preparing'" danger :disabled="busy" @click="abortRestore"><i class="ti ti-x"></i> {{ i18n.ts._backups.restoreAbort }}</MkButton>
+					<MkButton v-if="restore.status == null || restore.status.final" :disabled="busy" @click="closeRestore">{{ i18n.ts._backups.restoreClose }}</MkButton>
+				</div>
+			</div>
+
 			<template v-if="overview">
 				<MkInfo v-if="!overview.service.configured">{{ i18n.ts._backups.serviceNotConfigured }}</MkInfo>
 				<MkInfo v-else-if="!overview.service.reachable" warn>{{ i18n.ts._backups.serviceUnreachable }}</MkInfo>
@@ -116,6 +145,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 						<div class="_buttons">
 							<MkButton v-if="g.complete && overview.service.configured" small :disabled="busy" @click="verify(g)"><i class="ti ti-checkup-list"></i> {{ i18n.ts._backups.verifyNow }}</MkButton>
 							<MkButton v-if="g.complete" small :disabled="busy" @click="download(g)"><i class="ti ti-download"></i> {{ i18n.ts._backups.download }}</MkButton>
+							<MkButton v-if="g.complete && g.verify?.ok && overview.service.configured && restore == null" small :disabled="busy" @click="startRestore(g)"><i class="ti ti-database-import"></i> {{ i18n.ts._backups.restore }}</MkButton>
 							<MkButton small danger :disabled="busy" @click="remove(g)"><i class="ti ti-trash"></i> {{ i18n.ts.delete }}</MkButton>
 						</div>
 					</div>
@@ -127,7 +157,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 </template>
 
 <script lang="ts" setup>
-import { computed, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { startAuthentication } from '@simplewebauthn/browser';
 import type * as Elythia from 'elythia-js';
 import type { PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/browser';
@@ -190,6 +220,14 @@ function errorText(err: unknown): string {
 		case 'BACKUP_NOT_CONFIGURED': return i18n.ts._backups.notConfigured;
 		case 'BACKUP_SERVICE_NOT_CONFIGURED': return i18n.ts._backups.serviceNotConfigured;
 		case 'BACKUP_SERVICE_BUSY': return i18n.ts._backups.serviceBusy;
+		case 'BACKUP_SERVICE_UNREACHABLE': return i18n.ts._backups.serviceUnreachable;
+		case 'GENERATION_NOT_VERIFIED': return i18n.ts._backups.restoreNotVerified;
+		case 'MAINTENANCE_ACTIVE': return i18n.ts._backups.maintenanceActive;
+		case 'VERSION_MISMATCH': return i18n.ts._backups.versionMismatch;
+		case 'RESTORE_NOT_SUPPORTED': return i18n.ts._backups.restoreNotSupported;
+		case 'RESTORE_STEP': return i18n.ts._backups.restoreStepMismatch;
+		case 'RESTORE_TICKET_INVALID': return i18n.ts._backups.restoreTicketInvalid;
+		case 'RESTORE_UNAVAILABLE': return i18n.ts._backups.restoreUnavailable;
 		default: return apiErr?.message ?? String(err);
 	}
 }
@@ -258,6 +296,116 @@ async function remove(g: Elythia.BackupGeneration): Promise<void> {
 	os.alert({ type: 'success', text: i18n.tsx._backups.deleted({ size: bytes(res.freedBytes, 1) }) });
 }
 
+// 進み具合を読み続けるための opId と ticket。再読み込みしても続きから読めるよう、
+// このタブの sessionStorage にだけ置く (ticket だけでは何もできず、同じセッションの
+// token が要る)。
+const RESTORE_STORAGE_KEY = 'elythia:backupRestore';
+const RESTORE_POLL_MS = 2000;
+
+const restore = ref<{ ticket: Elythia.BackupRestoreTicket; status: Elythia.BackupRestoreStatus | null; error: string | null } | null>(null);
+let restoreTimer: number | null = null;
+
+function saveRestoreTicket(t: Elythia.BackupRestoreTicket | null): void {
+	try {
+		if (t) window.sessionStorage.setItem(RESTORE_STORAGE_KEY, JSON.stringify(t));
+		else window.sessionStorage.removeItem(RESTORE_STORAGE_KEY);
+	} catch {
+		// 保存できなくても、この画面を開いている間は読める。
+	}
+}
+
+function loadRestoreTicket(): Elythia.BackupRestoreTicket | null {
+	try {
+		const raw = window.sessionStorage.getItem(RESTORE_STORAGE_KEY);
+		if (raw == null) return null;
+		const t = JSON.parse(raw) as Partial<Elythia.BackupRestoreTicket>;
+		return typeof t.opId === 'string' && typeof t.ticket === 'string' ? { opId: t.opId, ticket: t.ticket } : null;
+	} catch {
+		return null;
+	}
+}
+
+async function pollRestore(): Promise<void> {
+	const r = restore.value;
+	if (r == null) return;
+	try {
+		r.status = await misskeyApi('admin/backup/restore/status', r.ticket);
+		r.error = null;
+		if (r.status.final) stopPolling();
+	} catch (err) {
+		// メンテナンスへの出入りや本体の再起動の間は読めないことがある。読み直し続ける。
+		const code = (err as { code?: string } | null)?.code;
+		if (code === 'RESTORE_TICKET_INVALID' || code === 'NO_SUCH_RESTORE') {
+			stopPolling();
+			r.error = errorText(err);
+			return;
+		}
+		r.error = i18n.ts._backups.restoreStatusUnavailable;
+	}
+}
+
+function startPolling(): void {
+	stopPolling();
+	restoreTimer = window.setInterval(pollRestore, RESTORE_POLL_MS);
+	void pollRestore();
+}
+
+function stopPolling(): void {
+	if (restoreTimer != null) {
+		window.clearInterval(restoreTimer);
+		restoreTimer = null;
+	}
+}
+
+async function startRestore(g: Elythia.BackupGeneration): Promise<void> {
+	const { canceled } = await os.confirm({ type: 'warning', text: i18n.tsx._backups.restoreConfirm({ id: g.id }) });
+	if (canceled) return;
+	const res = await run(auth => misskeyApi('admin/backup/restore/prepare', { ...auth, id: g.id }));
+	if (res == null) return;
+	const ticket = { opId: res.opId, ticket: res.ticket };
+	saveRestoreTicket(ticket);
+	restore.value = { ticket, status: res.status, error: null };
+	startPolling();
+}
+
+async function confirmRestore(): Promise<void> {
+	const r = restore.value;
+	if (r?.status == null) return;
+	const { canceled } = await os.confirm({ type: 'warning', text: i18n.tsx._backups.restoreSwitchConfirm({ before: r.status.record.before }) });
+	if (canceled) return;
+	await run(auth => misskeyApi('admin/backup/restore/confirm', { ...auth, ...r.ticket }));
+	startPolling();
+}
+
+async function abortRestore(): Promise<void> {
+	const r = restore.value;
+	if (r == null) return;
+	const { canceled } = await os.confirm({ type: 'warning', text: i18n.ts._backups.restoreAbortConfirm });
+	if (canceled) return;
+	await run(auth => misskeyApi('admin/backup/restore/abort', { ...auth, ...r.ticket }));
+	startPolling();
+}
+
+function stepText(step: Elythia.BackupRestoreStep): string {
+	return i18n.ts._backups._restoreSteps[step];
+}
+
+function closeRestore(): void {
+	stopPolling();
+	saveRestoreTicket(null);
+	restore.value = null;
+}
+
+onMounted(() => {
+	const t = loadRestoreTicket();
+	if (t != null) {
+		restore.value = { ticket: t, status: null, error: null };
+		startPolling();
+	}
+});
+
+onUnmounted(stopPolling);
+
 function statusIcon(g: Elythia.BackupGeneration): string {
 	if (!g.complete) return 'ti ti-alert-triangle';
 	if (g.verify == null) return 'ti ti-help-circle';
@@ -280,6 +428,23 @@ definePage(() => ({
 .caption {
 	font-size: 0.9em;
 	opacity: 0.8;
+}
+
+.restore {
+	padding: 16px;
+}
+
+.restoreHead {
+	font-weight: bold;
+}
+
+.journal {
+	font-size: 0.85em;
+	opacity: 0.8;
+	max-height: 240px;
+	overflow: auto;
+	white-space: pre-wrap;
+	word-break: break-all;
 }
 
 .verifyError {

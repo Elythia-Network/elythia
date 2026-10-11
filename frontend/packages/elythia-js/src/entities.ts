@@ -1001,9 +1001,9 @@ export type BackupOverview = {
 	};
 };
 
-/** A take or verify of the backup service. */
+/** A take or verify of the backup service, or a restore from the admin page holding its job slot. */
 export type BackupJob = {
-	kind: 'take' | 'verify';
+	kind: 'take' | 'verify' | 'restore';
 	trigger: 'schedule' | 'api';
 	generationId?: string;
 	startedAt: string;
@@ -1031,4 +1031,54 @@ export type BackupDownload = {
 	size: number;
 	/** An encrypted generation is handed out encrypted. */
 	encrypted: boolean;
+};
+
+/** The steps of a restore from the admin page (#3463). */
+export type BackupRestoreStep =
+	| 'preparing' | 'ready' | 'entering' | 'switched' | 'resuming' | 'reverting' | 'aborting'
+	| 'done' | 'failed' | 'expired' | 'aborted' | 'reverted' | 'unknown';
+
+/** The record of a restore from the admin page. */
+export type BackupRestoreRecord = {
+	opId: string;
+	step: BackupRestoreStep;
+	generationId: string;
+	/** The database name of the server (`db.db`). */
+	database: string;
+	/** Where the generation is restored before the switch. */
+	target: string;
+	/** The name the current database keeps after the switch. */
+	before: string;
+	/** The name the restored database keeps when it is put back aside. */
+	aside?: string;
+	userId: string;
+	error?: string;
+	createdAt: string;
+	updatedAt: string;
+	readyAt?: string;
+};
+
+/** The progress of a restore from the admin page. */
+export type BackupRestoreStatus = {
+	record: BackupRestoreRecord;
+	journal: { at: string; step: string; message: string }[];
+	/** The maintenance this restore drives, while it is on. */
+	maintenance: {
+		phase: 'entering' | 'held' | 'resuming';
+		startedAt: string;
+		heldAt?: string;
+		waitingFor?: string[] | null;
+		blockers?: { server: string; pid: number; user: string; application: string; addr: string }[] | null;
+	} | null;
+	/** The restore ended (done, failed, expired, aborted, reverted or unknown). */
+	final: boolean;
+};
+
+/**
+ * Identifies one restore and the session that prepared it. Kept by the admin
+ * page only; it is not a credential on its own (the session token must match).
+ */
+export type BackupRestoreTicket = {
+	opId: string;
+	ticket: string;
 };
