@@ -27,14 +27,42 @@ type ReauthVerifier interface {
 // Restore is the restore from the admin page served by the control API
 // (#3463 (6c)).
 type Restore struct {
+	// Manager and Verifier are nil until the restore is available; Set
+	// fills them later (the backup service started before Redis answered).
 	Manager  *restoreop.Manager
 	Verifier ReauthVerifier
 
+	mu sync.RWMutex
 	// busy is held by the request that prepares, confirms or aborts.
 	//
 	// 段の確かめから操作までの間に、別の要求の再認証 (DB への接続) が割り込まない
 	// よう、操作を変える要求は 1 つずつにする。待たずに断る。
 	busy sync.Mutex
+}
+
+// Set makes the restore available.
+func (rs *Restore) Set(m *restoreop.Manager, v ReauthVerifier) {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	rs.Manager, rs.Verifier = m, v
+}
+
+// parts returns the manager and the verifier, or answers RESTORE_UNAVAILABLE
+// while they are not set.
+func (rs *Restore) parts(w http.ResponseWriter) (*restoreop.Manager, ReauthVerifier, bool) {
+	var m *restoreop.Manager
+	var v ReauthVerifier
+	if rs != nil {
+		rs.mu.RLock()
+		m, v = rs.Manager, rs.Verifier
+		rs.mu.RUnlock()
+	}
+	if m == nil || v == nil {
+		writeJSON(w, http.StatusServiceUnavailable, apierr.ErrorWithKind("RESTORE_UNAVAILABLE",
+			"Restoring from the admin page is not available on the backup service.", idRestoreUnavailable, apierr.KindServer))
+		return nil, nil, false
+	}
+	return m, v, true
 }
 
 // lock takes busy, or answers BACKUP_SERVICE_BUSY.
@@ -90,7 +118,11 @@ type restoreRequest struct {
 // 応答の形は本体の admin/* と同じ Misskey の形のエラーにする。
 func mountRestore(mux *http.ServeMux, rs *Restore) {
 	mux.HandleFunc("POST /restore/prepare", func(w http.ResponseWriter, r *http.Request) {
-		req, ok := readRestore(w, r, rs)
+		m, v, ok := rs.parts(w)
+		if !ok {
+			return
+		}
+		req, ok := readRestore(w, r)
 		if !ok {
 			return
 		}
@@ -101,20 +133,20 @@ func mountRestore(mux *http.ServeMux, rs *Restore) {
 		defer unlock()
 		// 始められないもの (終わっていない操作、メンテナンス中、レプリカ) は、
 		// 再認証の前に断る。再認証は DB へ接続を張るため。
-		if err := rs.Manager.CanStart(r.Context()); err != nil {
+		if err := m.CanStart(r.Context()); err != nil {
 			restoreError(w, err)
 			return
 		}
-		u, ok := reauth(w, r, rs, req)
+		u, ok := reauth(w, r, v, req)
 		if !ok {
 			return
 		}
-		rec, ticket, err := rs.Manager.Prepare(r.Context(), restoreop.PrepareRequest{GenerationID: req.GenerationID, UserID: u.ID, Token: req.I})
+		rec, ticket, err := m.Prepare(r.Context(), restoreop.PrepareRequest{GenerationID: req.GenerationID, UserID: u.ID, Token: req.I})
 		if err != nil {
 			restoreError(w, err)
 			return
 		}
-		st, err := rs.Manager.Status(r.Context(), rec)
+		st, err := m.Status(r.Context(), rec)
 		if err != nil {
 			restoreError(w, err)
 			return
@@ -122,7 +154,11 @@ func mountRestore(mux *http.ServeMux, rs *Restore) {
 		writeJSON(w, http.StatusOK, map[string]any{"opId": rec.OpID, "ticket": ticket, "status": st})
 	})
 	mux.HandleFunc("POST /restore/confirm", func(w http.ResponseWriter, r *http.Request) {
-		req, ok := readRestore(w, r, rs)
+		m, v, ok := rs.parts(w)
+		if !ok {
+			return
+		}
+		req, ok := readRestore(w, r)
 		if !ok {
 			return
 		}
@@ -131,7 +167,7 @@ func mountRestore(mux *http.ServeMux, rs *Restore) {
 			return
 		}
 		defer unlock()
-		rec, ok := ticketRecord(w, r, rs, req)
+		rec, ok := ticketRecord(w, r, m, req)
 		if !ok {
 			return
 		}
@@ -141,21 +177,25 @@ func mountRestore(mux *http.ServeMux, rs *Restore) {
 			restoreError(w, restoreop.ErrStep)
 			return
 		}
-		if err := rs.Manager.NoMaintenance(r.Context()); err != nil {
+		if err := m.NoMaintenance(r.Context()); err != nil {
 			restoreError(w, err)
 			return
 		}
-		if _, ok := reauth(w, r, rs, req); !ok {
+		if _, ok := reauth(w, r, v, req); !ok {
 			return
 		}
-		if err := rs.Manager.Confirm(r.Context(), rec.OpID); err != nil {
+		if err := m.Confirm(r.Context(), rec.OpID); err != nil {
 			restoreError(w, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("POST /restore/abort", func(w http.ResponseWriter, r *http.Request) {
-		req, ok := readRestore(w, r, rs)
+		m, v, ok := rs.parts(w)
+		if !ok {
+			return
+		}
+		req, ok := readRestore(w, r)
 		if !ok {
 			return
 		}
@@ -164,7 +204,7 @@ func mountRestore(mux *http.ServeMux, rs *Restore) {
 			return
 		}
 		defer unlock()
-		rec, ok := ticketRecord(w, r, rs, req)
+		rec, ok := ticketRecord(w, r, m, req)
 		if !ok {
 			return
 		}
@@ -172,31 +212,35 @@ func mountRestore(mux *http.ServeMux, rs *Restore) {
 			restoreError(w, restoreop.ErrStep)
 			return
 		}
-		if err := rs.Manager.NoMaintenance(r.Context()); err != nil {
+		if err := m.NoMaintenance(r.Context()); err != nil {
 			restoreError(w, err)
 			return
 		}
-		if _, ok := reauth(w, r, rs, req); !ok {
+		if _, ok := reauth(w, r, v, req); !ok {
 			return
 		}
-		if err := rs.Manager.Abort(r.Context(), rec.OpID); err != nil {
+		if err := m.Abort(r.Context(), rec.OpID); err != nil {
 			restoreError(w, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("POST /restore/status", func(w http.ResponseWriter, r *http.Request) {
-		req, ok := readRestore(w, r, rs)
+		m, _, ok := rs.parts(w)
+		if !ok {
+			return
+		}
+		req, ok := readRestore(w, r)
 		if !ok {
 			return
 		}
 		// 進み具合は ticket とセッションだけで返す (DB を引かない)。メンテナンス中にも
 		// 読めるようにするため。
-		rec, ok := ticketRecord(w, r, rs, req)
+		rec, ok := ticketRecord(w, r, m, req)
 		if !ok {
 			return
 		}
-		st, err := rs.Manager.Status(r.Context(), rec)
+		st, err := m.Status(r.Context(), rec)
 		if err != nil {
 			restoreError(w, err)
 			return
@@ -206,13 +250,8 @@ func mountRestore(mux *http.ServeMux, rs *Restore) {
 }
 
 // readRestore reads a forwarded request body.
-func readRestore(w http.ResponseWriter, r *http.Request, rs *Restore) (restoreRequest, bool) {
+func readRestore(w http.ResponseWriter, r *http.Request) (restoreRequest, bool) {
 	var req restoreRequest
-	if rs == nil || rs.Manager == nil || rs.Verifier == nil {
-		writeJSON(w, http.StatusServiceUnavailable, apierr.ErrorWithKind("RESTORE_UNAVAILABLE",
-			"Restoring from the admin page is not available on the backup service.", idRestoreUnavailable, apierr.KindServer))
-		return req, false
-	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, restoreBodyLimit+1))
 	if err != nil || len(body) > restoreBodyLimit {
 		writeJSON(w, http.StatusBadRequest, apierr.InvalidParam())
@@ -236,10 +275,10 @@ func clientIP(r *http.Request) string {
 }
 
 // reauth checks every strongauth condition for the request.
-func reauth(w http.ResponseWriter, r *http.Request, rs *Restore, req restoreRequest) (*model.User, bool) {
+func reauth(w http.ResponseWriter, r *http.Request, v ReauthVerifier, req restoreRequest) (*model.User, bool) {
 	// パスキーの照合は Request の Origin と、Credential の assertion を読む
 	// (strongauth が Credential を本文にした要求を作り直す)。
-	u, err := rs.Verifier.Verify(r.Context(), req.I, clientIP(r), strongauth.Reauth{
+	u, err := v.Verify(r.Context(), req.I, clientIP(r), strongauth.Reauth{
 		Password: req.Password, Token: req.Token, Credential: req.Credential, Request: r,
 	})
 	if err != nil {
@@ -254,8 +293,8 @@ func reauth(w http.ResponseWriter, r *http.Request, rs *Restore, req restoreRequ
 }
 
 // ticketRecord checks the ticket and the session of a request.
-func ticketRecord(w http.ResponseWriter, r *http.Request, rs *Restore, req restoreRequest) (*restoreop.Record, bool) {
-	rec, err := rs.Manager.CheckTicket(r.Context(), req.OpID, req.Ticket, req.I)
+func ticketRecord(w http.ResponseWriter, r *http.Request, m *restoreop.Manager, req restoreRequest) (*restoreop.Record, bool) {
+	rec, err := m.CheckTicket(r.Context(), req.OpID, req.Ticket, req.I)
 	if err != nil {
 		restoreError(w, err)
 		return nil, false
