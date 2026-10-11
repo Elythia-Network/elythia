@@ -431,10 +431,15 @@ func (d *Daemon) verify(ctx context.Context, res *JobResult) bool {
 	key := backup.Key(res.GenerationID, backup.VerifyFile)
 	prev, prevErr := readObject(ctx, d.opts.Storage, key)
 	vr, err := d.opts.Verifier.Verify(ctx, res.GenerationID)
-	if ctx.Err() != nil {
-		// 止める途中 (SIGTERM など) で切れた検証は、世代の良し悪しではない。#3459 の
-		// Verify は切れた pg_restore を段の欠陥として verify.json に ok:false で書くことが
-		// あるので、確かめる前の verify.json に戻し、判定としても通知としても扱わない。
+	if ctx.Err() != nil && !judged(vr) {
+		// 止める途中 (SIGTERM など) で切れた検証は、世代の良し悪しではない。Verify は
+		// 止められた段を判定として書かない (#3499) が、判定に至らないまま書かれた
+		// verify.json が残っていれば、確かめる前の中身に戻し、判定としても通知としても
+		// 扱わない。
+		//
+		// 3 つの段の判定が出ていれば、止められたのはその後 (使い捨てのサーバーの後始末の
+		// 間など) で、判定は本物。前の中身へ戻すと、本当の ok:false を前の ok:true で
+		// 上書きしてしまうので、下の判定の扱いへ進む。
 		d.restoreVerifyFile(ctx, key, prev, prevErr)
 		res.Stage = "verify"
 		res.Error = "interrupted: " + ctx.Err().Error()
