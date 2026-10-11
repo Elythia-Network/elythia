@@ -51,6 +51,16 @@ const stalledNotifyAfter = time.Minute
 func (m *Manager) settle(ctx context.Context, opID string) {
 	notified := false
 	since := m.now()
+	// 読めない間だけでなく、読めるが書けない間 (maxmemory の OOM など) も、回復を
+	// 繰り返すだけでメンテナンスが外れないので、どちらも同じ期限で 1 回知らせる。
+	notify := func(cause error) {
+		if notified || m.now().Sub(since) < stalledNotifyAfter {
+			return
+		}
+		notified = true
+		m.notifyStalled(ctx, fmt.Sprintf("restore %s stopped: it cannot write or read its record in Redis, so it cannot go on (%v). "+
+			"It keeps trying; the maintenance stays as it is until then", opID, cause))
+	}
 	for m.stalled.Swap(false) {
 		var rec *Record
 		for rec == nil {
@@ -60,24 +70,33 @@ func (m *Manager) settle(ctx context.Context, opID string) {
 			case <-time.After(m.o.Poll):
 			}
 			r, err := m.o.Store.Get(ctx, opID)
-			if err == nil {
+			switch {
+			case err == nil:
 				rec = r
-				continue
-			}
-			if !notified && m.now().Sub(since) >= stalledNotifyAfter {
-				notified = true
-				msg := fmt.Sprintf("restore %s stopped: Redis does not answer, so it cannot decide how to go on (%v). It keeps trying; the maintenance stays as it is until then", opID, err)
-				m.log.Error("backup: " + msg)
-				if m.o.Notify != nil {
-					m.o.Notify(context.WithoutCancel(ctx), msg)
-				}
+			case errors.Is(err, ErrNotFound):
+				// 記録が消えている (期限切れや手で消された)。続きを決められないので、
+				// 読み直し続けずに運営者に渡し、枠を返す。
+				m.notifyStalled(ctx, fmt.Sprintf("restore %s stopped: its record is gone, so it cannot decide how to go on. "+
+					"Check pg_database and the maintenance (elythia maintenance status) and put things right by hand", opID))
+				return
+			default:
+				notify(err)
 			}
 		}
 		if Final(rec.Step) {
 			return
 		}
+		notify(errors.New("a step could not be written"))
 		m.journal(ctx, opID, rec.Step, "a step could not be written; recovering from step %s", rec.Step)
 		m.recoverRecord(ctx, rec)
+	}
+}
+
+// notifyStalled logs msg and notifies an operator.
+func (m *Manager) notifyStalled(ctx context.Context, msg string) {
+	m.log.Error("backup: " + msg)
+	if m.o.Notify != nil {
+		m.o.Notify(context.WithoutCancel(ctx), msg)
 	}
 }
 
