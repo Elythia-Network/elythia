@@ -291,7 +291,7 @@ Elythia 側のマイグレーションには含めていない。pgroonga 拡張
 | キー | 型 | 説明 |
 |---|---|---|
 | `maintenance.maintenanceDb` | string | 判定役が`pg_stat_activity`を数えるときに繋ぐDB。既定は`postgres`。`db.db`と同じ名前にはできない(判定役の接続が数に入り、0にならない)。DBのユーザーに`CONNECT`の権限が要る(`postgres`はPUBLICに許されている) |
-| `maintenance.drainTimeout` | string | メンテナンスに入ってからこの時間を過ぎても接続が残っていたら、判定役がElythia自身の接続(`application_name`が`elythia/`で始まり、判定役と同じroleのもの)を`pg_terminate_backend`で切る(Goのduration)。既定は`30s`。0より大きい値にする。それ以外の接続は切らない |
+| `maintenance.drainTimeout` | string | メンテナンスに入ってからこの時間を過ぎても接続が残っていたら、判定役が、手放すと報告しているプロセス(報告が`drained`か、上限を過ぎても`draining`)のElythiaの接続(`application_name`の`<host>-<pid>`が報告と一致し、判定役と同じroleのもの)を`pg_terminate_backend`で切る(Goのduration)。既定は`30s`。0より大きい値にする。それ以外の接続(運営者の`psql`、報告の無いプロセスや`running`のプロセスの接続)は切らない |
 
 ## 環境変数オーバーライド
 

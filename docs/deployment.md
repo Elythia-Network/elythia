@@ -747,11 +747,14 @@ WHERE datname = '<db.db>' AND pid <> pg_backend_pid() AND usesysid IS NOT NULL;
 
 本体の接続には `application_name` (`elythia/<role>/<host>-<pid>`) が付いている。
 
-- **`maintenance.drainTimeout` (既定 30 秒) を過ぎても接続が残っていたら、Elythia 自身の接続だけを
-  切る** (`application_name` が `elythia/` で始まり、判定役と同じ DB のユーザーのもの)。見捨てた
+- **`maintenance.drainTimeout` (既定 30 秒) を過ぎても接続が残っていたら、手放すと報告している
+  プロセスの接続だけを切る。** 切るのは、`application_name` の `<host>-<pid>` が報告と一致し、その
+  報告が `drained` (または上限を過ぎても `draining`) で、判定役と同じ DB のユーザーの接続。見捨てた
   ジョブや、止める途中で上限に達したプロセスが掴んでいる接続にあたる。切った接続は `status` に出る
-- **それ以外の接続 (運営者の `psql` など) は切らない。** held にせず、残っている接続を `status` に
-  出して待ち続ける。その接続を閉じれば、次の判定で held になる
+- **それ以外の接続は切らない。** 運営者の `psql` のほか、報告の無いプロセスや `running` のプロセスの
+  Elythia の接続も切らない (Redis に繋がらずメンテナンスに気付いていないプロセスは、切ってもすぐに
+  繋ぎ直す)。held にせず、残っている接続を `status` に出して待ち続ける。その接続を閉じるかプロセスを
+  止めれば、次の判定で held になる
 - `enter -wait` の上限を過ぎたら、状態は `entering` のまま 1 で終わる。判定は本体の各プロセスが
   続けるので、後で `status` を見るか、`wait` で待ち直す
 - 判定役が 1 つもいない (本体が動いておらず、CLI も待っていない) と、`entering` のまま進まない。

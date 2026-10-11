@@ -31,9 +31,17 @@ import (
 const JudgeLockTTL = 10 * time.Second
 
 // ElythiaApplicationPrefix starts the application_name of every connection
-// the Elythia processes open (config.Config.DBApplicationName). Only those
-// are terminated after the drain timeout.
+// the Elythia processes open (config.Config.DBApplicationName,
+// "elythia/<role>/<process ID>"). Only those are terminated after the drain
+// timeout, and only for a process that reports it is letting go.
 const ElythiaApplicationPrefix = "elythia/"
+
+// maxTerminatedRecorded bounds State.Terminated.
+const maxTerminatedRecorded = 100
+
+// pgNameMax is the length PostgreSQL truncates application_name to
+// (NAMEDATALEN - 1).
+const pgNameMax = 63
 
 // Blocker is a session on the database the maintenance waits for.
 type Blocker struct {
@@ -169,21 +177,25 @@ func (j *Judge) entering(ctx context.Context, st *State) (Outcome, error) {
 		return MovedToHeld, nil
 	}
 	if len(sessions) > 0 && now.Sub(j.firstSeen) >= j.DrainTimeout {
-		sessions = j.terminateElythia(ctx, sessions)
+		sessions = j.terminateElythia(ctx, sessions, reports)
 	}
 	return Waiting, j.Store.progress(ctx, st.OpID, now, waiting, sessions, j.terminated, "")
 }
 
-// terminateElythia ends the sessions an Elythia process of the same role
-// left behind (an abandoned queue handler, a stop that ran out of time) and
+// terminateElythia ends the sessions that an Elythia process which reports
+// it is letting go (drained, or still draining past the drain timeout) left
+// behind: an abandoned queue handler, a stop that ran out of time. It
 // returns the sessions that remain.
 //
-// それ以外 (運営者の psql など) は切らない。誰かが作業中かもしれないので、
-// 残っている接続を見せて待つ。別の role の接続は権限で切れないので、先に絞る。
-func (j *Judge) terminateElythia(ctx context.Context, sessions []Blocker) []Blocker {
+// 切るのは、持ち主のプロセスが手放すと言っている接続だけにする。報告の無い
+// プロセス (Redis に繋がらないまま running で、メンテナンスに気付いていない
+// かもしれない) や running のプロセスの接続を切ると、そのプロセスはすぐに
+// 繋ぎ直し、held の後に接続が現れる。2 秒ごとに切り続けることにもなる
+// (#3463 のレビュー1周目 M-1)。運営者の psql など、Elythia 以外の接続も切らない。
+func (j *Judge) terminateElythia(ctx context.Context, sessions []Blocker, reports []ProcReport) []Blocker {
 	var remain []Blocker
 	for _, b := range sessions {
-		if !b.SameRole || !strings.HasPrefix(b.Application, ElythiaApplicationPrefix) {
+		if !b.SameRole || !lettingGo(ownerOf(b.Application, reports)) {
 			remain = append(remain, b)
 			continue
 		}
@@ -198,9 +210,58 @@ func (j *Judge) terminateElythia(ctx context.Context, sessions []Blocker) []Bloc
 			continue
 		}
 		slog.Warn("maintenance: terminated an Elythia session that outlived the drain timeout", "session", b.String())
-		j.terminated = append(j.terminated, b)
+		j.recordTerminated(b)
 	}
 	return remain
+}
+
+// recordTerminated adds b to the terminated list once, up to
+// maxTerminatedRecorded entries.
+func (j *Judge) recordTerminated(b Blocker) {
+	for _, t := range j.terminated {
+		if t.Server == b.Server && t.PID == b.PID {
+			return
+		}
+	}
+	if len(j.terminated) < maxTerminatedRecorded {
+		j.terminated = append(j.terminated, b)
+	}
+}
+
+// lettingGo reports whether r says its process is letting go of the
+// database.
+func lettingGo(r *ProcReport) bool {
+	return r != nil && (r.State == ProcDrained || r.State == ProcDraining)
+}
+
+// ownerOf returns the report of the process that opened a connection named
+// app ("elythia/<role>/<process ID>"), or nil when there is none.
+//
+// PostgreSQL は application_name を 63 バイトで切り詰める。切り詰められた名前は、
+// 接頭辞が 1 つの報告にだけ合うときに限ってその持ち主とみなす。
+func ownerOf(app string, reports []ProcReport) *ProcReport {
+	rest, ok := strings.CutPrefix(app, ElythiaApplicationPrefix)
+	if !ok {
+		return nil
+	}
+	_, id, ok := strings.Cut(rest, "/")
+	if !ok || id == "" {
+		return nil
+	}
+	var found *ProcReport
+	for i := range reports {
+		r := &reports[i]
+		switch {
+		case r.ID == id:
+			return r
+		case len(app) >= pgNameMax && strings.HasPrefix(r.ID, id):
+			if found != nil {
+				return nil
+			}
+			found = r
+		}
+	}
+	return found
 }
 
 // held keeps listing the sessions: held is a fact of the moment it was

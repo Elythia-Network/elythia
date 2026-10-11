@@ -3,6 +3,7 @@ package maintmode
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -166,6 +167,7 @@ func TestJudge_TerminatesElythiaSessionsAfterTheDrainTimeout(t *testing.T) {
 	c := newClock()
 	f := &fakeCounter{}
 	f.set(elythiaSession(12))
+	require.NoError(t, s.Report(ctx, ProcReport{ID: "p1", State: ProcDrained}))
 	j := c.judge(s, f, "j")
 	require.NoError(t, s.Enter(ctx, State{OpID: "op"}))
 
@@ -262,6 +264,7 @@ func TestJudge_NewOpIDRestartsTheJudgement(t *testing.T) {
 	c := newClock()
 	f := &fakeCounter{}
 	f.set(elythiaSession(17))
+	require.NoError(t, s.Report(ctx, ProcReport{ID: "p1", State: ProcDrained}))
 	j := c.judge(s, f, "j")
 	require.NoError(t, s.Enter(ctx, State{OpID: "op1"}))
 	_, _ = j.Step(ctx)
@@ -460,4 +463,108 @@ func TestJudge_SessionGoneBeforeTerminateIsNotRecorded(t *testing.T) {
 	require.NoError(t, err)
 	st, _ := s.Get(ctx)
 	assert.Empty(t, st.Terminated, "切れなかった接続を切ったと記録した")
+}
+
+func sessionOf(pid int, app string) Blocker {
+	return Blocker{Server: "primary", Session: pgactivity.Session{PID: pid, User: "app", Application: app, SameRole: true}}
+}
+
+// TestJudge_TerminatesOnlyForProcessesLettingGo fixes #3463 review M-1: an
+// Elythia session is terminated only when its process reports drained (or
+// draining past the timeout). A process without a report (Redis lost while
+// running) or a running one would reconnect at once, after held.
+func TestJudge_TerminatesOnlyForProcessesLettingGo(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+	c := newClock()
+	f := &fakeCounter{}
+	f.set(
+		sessionOf(40, "elythia/server/drained-1"),
+		sessionOf(41, "elythia/server/draining-1"),
+		sessionOf(42, "elythia/server/running-1"),
+		sessionOf(43, "elythia/server/unreported-1"),
+		sessionOf(44, "elythia/server/starting-1"),
+	)
+	for id, state := range map[string]string{
+		"drained-1": ProcDrained, "draining-1": ProcDraining, "running-1": ProcRunning, "starting-1": ProcStarting,
+	} {
+		require.NoError(t, s.Report(ctx, ProcReport{ID: id, State: state}))
+	}
+	j := c.judge(s, f, "j")
+	require.NoError(t, s.Enter(ctx, State{OpID: "op"}))
+	_, _ = j.Step(ctx)
+	c.add(time.Minute)
+	_, err := j.Step(ctx)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []int{40, 41}, f.terminated)
+	st, _ := s.Get(ctx)
+	var left []int
+	for _, b := range st.Blockers {
+		left = append(left, b.PID)
+	}
+	assert.ElementsMatch(t, []int{42, 43, 44}, left, "切らなかった接続を blockers に出していない")
+	assert.Equal(t, PhaseEntering, st.Phase)
+}
+
+func TestOwnerOf(t *testing.T) {
+	reports := []ProcReport{
+		{ID: "host-a-1", State: ProcDrained},
+		{ID: "host-b-123456789", State: ProcDrained},
+		{ID: "host-b-123456780", State: ProcDrained},
+	}
+	assert.Equal(t, "host-a-1", ownerOf("elythia/server/host-a-1", reports).ID)
+	assert.Nil(t, ownerOf("elythia/server/host-a-10", reports), "名前が前方一致するだけの別のプロセス")
+	assert.Nil(t, ownerOf("psql", reports))
+	assert.Nil(t, ownerOf("elythia/server", reports))
+	assert.Nil(t, ownerOf("elythia/server/", reports))
+	// 63 バイトで切り詰められた名前は、1 つの報告にだけ合えば持ち主とみなす。
+	long := "elythia/server/" + strings.Repeat("x", 60)
+	lr := []ProcReport{{ID: strings.Repeat("x", 60) + "-99", State: ProcDrained}}
+	truncated := long[:pgNameMax]
+	require.Len(t, truncated, pgNameMax)
+	assert.Equal(t, lr[0].ID, ownerOf(truncated, lr).ID)
+	two := append(lr, ProcReport{ID: strings.Repeat("x", 60) + "-98"})
+	assert.Nil(t, ownerOf(truncated, two), "切り詰めた名前が 2 つに合うのに持ち主を決めた")
+	// 63 バイトより短い名前は、前方一致では決めない (合う報告が 1 つでも)。
+	assert.Nil(t, ownerOf("elythia/server/host-a", reports))
+	assert.Nil(t, ownerOf("elythia/server/host-b-12345678", reports))
+}
+
+// stickyCounter keeps listing a session after terminating it.
+type stickyCounter struct{ fakeCounter }
+
+func (s *stickyCounter) Terminate(context.Context, Blocker) (bool, error) { return true, nil }
+
+// TestJudge_TerminatedIsDeduplicatedAndBounded checks that the terminated
+// list does not grow on every step (#3463 review M-1).
+func TestJudge_TerminatedIsDeduplicatedAndBounded(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+	c := newClock()
+	f := &stickyCounter{}
+	var many []Blocker
+	for i := range maxTerminatedRecorded + 20 {
+		many = append(many, sessionOf(1000+i, "elythia/server/p1"))
+	}
+	f.set(many...)
+	require.NoError(t, s.Report(ctx, ProcReport{ID: "p1", State: ProcDrained}))
+	j := c.judge(s, f, "j")
+	require.NoError(t, s.Enter(ctx, State{OpID: "op"}))
+	_, _ = j.Step(ctx)
+	c.add(time.Minute)
+	for range 3 {
+		_, err := j.Step(ctx)
+		require.NoError(t, err)
+	}
+	st, _ := s.Get(ctx)
+	assert.Len(t, st.Terminated, maxTerminatedRecorded)
+
+	f.set(sessionOf(7, "elythia/server/p1"))
+	j2 := c.judge(s, f, "j")
+	j2.reset("op")
+	j2.firstSeen = c.now().Add(-time.Hour)
+	for range 3 {
+		_, _ = j2.entering(ctx, st)
+	}
+	assert.Len(t, j2.terminated, 1, "同じ接続を何度も記録した")
 }
