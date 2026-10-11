@@ -843,17 +843,18 @@ func (r *Restorer) resolveID(ctx context.Context, id string) (string, bool, erro
 		// meta.json が読めない世代は、この後の readMeta が理由を付けて止める。
 		return id, false, nil
 	}
-	return id, verifyPassed(id, vr, meta), nil
+	return id, VerifyPassed(id, vr, meta), nil
 }
 
-// verifyPassed reports whether vr is a passing verification of the
-// generation id whose meta.json is meta.
+// VerifyPassed reports whether vr is a passing verification of the
+// generation id whose meta.json is meta. restore and the admin page use it
+// to call a generation verified.
 //
 // 別の世代の結果を置き間違えたものを、検証済みとして扱わない。検証した dump の
 // sha256 (#3499) が今の meta.json と違えば、検証の後に dump が差し替わっている。
 // dumpSha256 を持たない verify.json (#3499 より前の版が書いたもの) は、ID だけで
 // 判断する。
-func verifyPassed(id string, vr *VerifyResult, meta *Meta) bool {
+func VerifyPassed(id string, vr *VerifyResult, meta *Meta) bool {
 	if vr == nil || !vr.OK || vr.ID != id || meta == nil {
 		return false
 	}
@@ -883,7 +884,7 @@ func (r *Restorer) latestVerified(ctx context.Context) (string, bool, error) {
 		if g.Verify == nil && hasObject(g, Key(g.ID, VerifyFile)) {
 			return "", false, fmt.Errorf("backup: cannot read %s; pass a generation id explicitly", Key(g.ID, VerifyFile))
 		}
-		if verifyPassed(g.ID, g.Verify, g.Meta) {
+		if VerifyPassed(g.ID, g.Verify, g.Meta) {
 			return g.ID, true, nil
 		}
 	}
