@@ -98,6 +98,9 @@ type Manager struct {
 	wg   sync.WaitGroup
 	// ops holds the operations this process started and has not finished.
 	ops map[string]*liveOp
+
+	// failStep, when set by a test, fails writing the step to.
+	failStep func(to string) error
 }
 
 type liveOp struct {
@@ -177,6 +180,11 @@ func (m *Manager) journal(ctx context.Context, opID, step, format string, args .
 
 // setStep writes the step. 状態は「書いてから進める」。書けなければ進めない。
 func (m *Manager) setStep(ctx context.Context, opID, from, to string, extra ...any) error {
+	if m.failStep != nil {
+		if err := m.failStep(to); err != nil {
+			return err
+		}
+	}
 	return m.o.Store.setStep(context.WithoutCancel(ctx), opID, from, to, m.now(), extra...)
 }
 

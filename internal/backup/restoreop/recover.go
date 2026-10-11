@@ -87,6 +87,17 @@ func (m *Manager) recoverRecord(ctx context.Context, rec *Record) {
 		m.journal(ctx, rec.OpID, final, "dropped %s; the current database %s was not changed", rec.Target, rec.Database)
 		return
 	case StepResuming:
+		// 名前の組が入れ替えた後のものか確かめる。記録だけを信じると、戻す処理の記録が
+		// 書けずに resuming のまま残った場合に、元の DB で再開させて done と書く。
+		has, err := m.o.DB.ExistingDatabases(ctx, m.o.MaintenanceDB, []string{rec.Database, rec.Target, rec.Before})
+		if err != nil {
+			m.giveUp(ctx, rec, rec.Step, fmt.Errorf("read pg_database: %w", err))
+			return
+		}
+		if !swappedNames(rec, has) {
+			m.giveUp(ctx, rec, rec.Step, errors.New("the database names do not match the recorded switch"))
+			return
+		}
 		st, err := m.o.Maint.Get(ctx)
 		if err != nil {
 			m.giveUp(ctx, rec, rec.Step, fmt.Errorf("read the maintenance: %w", err))
@@ -114,7 +125,7 @@ func (m *Manager) recoverRecord(ctx context.Context, rec *Record) {
 		m.giveUp(ctx, rec, rec.Step, fmt.Errorf("read pg_database: %w", err))
 		return
 	}
-	swapped := has[rec.Before] && !has[rec.Target] && has[rec.Database]
+	swapped := swappedNames(rec, has)
 	notSwapped := !has[rec.Before] && has[rec.Target] && has[rec.Database]
 	switch rec.Step {
 	case StepEntering:
@@ -151,4 +162,11 @@ func (m *Manager) recoverRecord(ctx context.Context, rec *Record) {
 	default:
 		m.giveUp(ctx, rec, rec.Step, fmt.Errorf("unexpected step %q", rec.Step))
 	}
+}
+
+// swappedNames reports whether pg_database has the names as they are after
+// the switch: the restored database under Database and the previous one
+// kept as Before.
+func swappedNames(rec *Record, has map[string]bool) bool {
+	return has[rec.Before] && !has[rec.Target] && has[rec.Database]
 }
