@@ -10,6 +10,15 @@ import (
 	"github.com/elythia-network/elythia/internal/maintmode"
 )
 
+// stopping reports whether the service is stopping.
+//
+// 止められた段は、失敗として扱わずに記録を進めないまま返る。失敗として扱うと、
+// サービスを止めただけで中止・戻す・諦める (unknown) へ進んでしまう。記録は最後に
+// 書いた段のまま残り、起動し直したときに Recover が名前と状態から続きを決める。
+// 確かめるのは、失敗を受けて記録を進める入口 (abortBeforeSwitch・revert・giveUp)
+// にまとめる。どの段の失敗も、このどれかを通る。
+func stopping(ctx context.Context) bool { return ctx.Err() != nil }
+
 // runJudge runs the judge until the returned function is called.
 func (m *Manager) runJudge(ctx context.Context) func() {
 	if m.o.RunJudge == nil {
@@ -176,10 +185,17 @@ func (m *Manager) cleanAndCheck(ctx context.Context) error {
 // abortBeforeSwitch ends an operation whose names were not swapped (A1): the
 // processes resume on the current database and the new one is dropped.
 func (m *Manager) abortBeforeSwitch(ctx context.Context, rec *Record, cause error, inMaintenance bool) {
+	if stopping(ctx) {
+		return
+	}
 	m.journal(ctx, rec.OpID, StepEntering, "not switching: %v", cause)
 	m.record(ctx, rec.OpID, "", StepAborting, "error", cause.Error())
 	if inMaintenance {
 		m.resumeCurrent(ctx, rec)
+		if stopping(ctx) {
+			// aborting のまま残す。Recover がもう一度戻してから消す。
+			return
+		}
 	}
 	m.dropTarget(ctx, rec)
 	m.record(ctx, rec.OpID, StepAborting, StepAborted)
@@ -190,7 +206,7 @@ func (m *Manager) abortBeforeSwitch(ctx context.Context, rec *Record, cause erro
 // effort: they keep retrying on their own).
 func (m *Manager) resumeCurrent(ctx context.Context, rec *Record) {
 	if err := m.o.Maint.SetPhase(ctx, rec.OpID, maintmode.PhaseResuming); err != nil {
-		if !errors.Is(err, maintmode.ErrNotActive) {
+		if !errors.Is(err, maintmode.ErrNotActive) && !stopping(ctx) {
 			m.journal(ctx, rec.OpID, "", "could not end the maintenance: %v", err)
 		}
 		return
@@ -203,6 +219,9 @@ func (m *Manager) resumeCurrent(ctx context.Context, rec *Record) {
 // revert puts the previous database back after the names were swapped (A2,
 // and A3 when the processes already came back).
 func (m *Manager) revert(ctx context.Context, rec *Record, from string, cause error) {
+	if stopping(ctx) {
+		return
+	}
 	m.journal(ctx, rec.OpID, from, "putting the previous database back: %v", cause)
 	aside := rec.Aside
 	if aside == "" {
@@ -261,17 +280,36 @@ func (m *Manager) holdAgain(ctx context.Context, rec *Record) bool {
 
 // finishRevert cleans Redis again and lets the processes resume on the
 // previous database.
+//
+// 再開 (resuming) を先に出してから reverted を書く。逆だと、その間で止められた
+// ときに最終の段だけが残り、メンテナンスが外れなくなる。
 func (m *Manager) finishRevert(ctx context.Context, rec *Record) {
+	st, err := m.o.Maint.Get(ctx)
+	if err != nil {
+		m.giveUp(ctx, rec, StepReverting, fmt.Errorf("read the maintenance: %w", err))
+		return
+	}
+	held := st != nil && st.OpID == rec.OpID && st.Phase != maintmode.PhaseResuming
 	m.journal(ctx, rec.OpID, StepReverting, "%s is the previous database again; the restored one is kept as %s", rec.Database, rec.Aside)
-	if m.o.CleanRedis != nil {
-		// 戻した DB で動いた間に Redis に積まれたものを消す。失敗しても元の DB へは
-		// 戻っているので、止めずに記録だけ残す。
+	if held && m.o.CleanRedis != nil {
+		// 戻した DB で動いた間に Redis に積まれたものを消す。プロセスが元の DB で
+		// 動き始めた後 (resuming や状態が消えた後) に消すと、元の DB の分まで消す
+		// ので、止まっている間だけにする。失敗しても元の DB へは戻っているので、
+		// 止めずに記録だけ残す。
 		if err := m.o.CleanRedis(ctx); err != nil {
 			m.journal(ctx, rec.OpID, StepReverting, "could not clean redis: %v", err)
 		}
 	}
+	if held {
+		if err := m.o.Maint.SetPhase(ctx, rec.OpID, maintmode.PhaseResuming); err != nil && !errors.Is(err, maintmode.ErrNotActive) {
+			m.giveUp(ctx, rec, StepReverting, fmt.Errorf("resume: %w", err))
+			return
+		}
+	}
 	m.record(ctx, rec.OpID, StepReverting, StepReverted)
-	m.resumeCurrent(ctx, rec)
+	if m.waitCleared(ctx, rec.OpID, m.o.ResumeTimeout) == waitTimeout {
+		m.journal(ctx, rec.OpID, "", "the processes have not served again within %s; the maintenance stays at resuming and they keep retrying", m.o.ResumeTimeout)
+	}
 	m.journal(ctx, rec.OpID, StepReverted, "reverted to the previous database")
 }
 
@@ -279,6 +317,9 @@ func (m *Manager) finishRevert(ctx context.Context, rec *Record) {
 // operator (it cannot tell the state of the names, or cannot get the
 // processes off the database).
 func (m *Manager) giveUp(ctx context.Context, rec *Record, from string, cause error) {
+	if stopping(ctx) {
+		return
+	}
 	msg := fmt.Sprintf("restore %s stopped and left the maintenance on: %v. Check pg_database for %s, %s, %s and %s, "+
 		"put the right database under %s (elythia backup restore -rollback), then end the maintenance (elythia maintenance exit)",
 		rec.OpID, cause, rec.Database, rec.Target, rec.Before, rec.Aside, rec.Database)

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/elythia-network/elythia/internal/maintmode"
 )
 
 // recoverOnStart finishes an operation an earlier run of the service left
@@ -48,8 +50,16 @@ func (m *Manager) recoverRecord(ctx context.Context, rec *Record) {
 	case StepPreparing, StepReady, StepAborting:
 		// まだ名前を入れ替えていない。メンテナンスに入れたまま落ちていれば (中止の
 		// 途中など) 元の DB で戻し、作った DB を消す。
-		if st, err := m.o.Maint.Get(ctx); err == nil && st != nil && st.OpID == rec.OpID {
+		st, err := m.o.Maint.Get(ctx)
+		if err != nil {
+			m.giveUp(ctx, rec, rec.Step, fmt.Errorf("read the maintenance: %w", err))
+			return
+		}
+		if st != nil && st.OpID == rec.OpID {
 			m.resumeCurrent(ctx, rec)
+			if stopping(ctx) {
+				return
+			}
 		}
 		m.dropTarget(ctx, rec)
 		final := StepAborted
@@ -71,6 +81,13 @@ func (m *Manager) recoverRecord(ctx context.Context, rec *Record) {
 			m.journal(ctx, rec.OpID, StepDone, "the processes already serve the restored database")
 			return
 		}
+		if st.Phase != maintmode.PhaseResuming {
+			// resuming を書いた後、状態を resuming にする前に止められた。
+			if err := m.o.Maint.SetPhase(ctx, rec.OpID, maintmode.PhaseResuming); err != nil {
+				m.giveUp(ctx, rec, rec.Step, fmt.Errorf("resume: %w", err))
+				return
+			}
+		}
 		m.awaitResume(ctx, rec)
 		return
 	}
@@ -87,7 +104,11 @@ func (m *Manager) recoverRecord(ctx context.Context, rec *Record) {
 		switch {
 		case notSwapped:
 			st, err := m.o.Maint.Get(ctx)
-			inMaintenance := err == nil && st != nil && st.OpID == rec.OpID
+			if err != nil {
+				m.giveUp(ctx, rec, rec.Step, fmt.Errorf("read the maintenance: %w", err))
+				return
+			}
+			inMaintenance := st != nil && st.OpID == rec.OpID
 			m.abortBeforeSwitch(ctx, rec, errors.New("the backup service restarted before the switch"), inMaintenance)
 		case swapped:
 			m.revert(ctx, rec, StepEntering, errors.New("the backup service restarted after the switch"))

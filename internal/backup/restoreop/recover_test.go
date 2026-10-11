@@ -175,3 +175,38 @@ func TestRecover_WaitsForTheJobSlot(t *testing.T) {
 	e.waitStep("restore-slot", StepAborted)
 	assert.NotContains(t, e.db.names(), tgt)
 }
+
+// TestRecover_MaintenanceUnreadable checks that the recovery gives up instead
+// of dropping the new database when it cannot tell whether its maintenance
+// is still on (dropping and finishing would leave that maintenance with no
+// operation to end it).
+func TestRecover_MaintenanceUnreadable(t *testing.T) {
+	for _, step := range []string{StepAborting, StepEntering} {
+		t.Run(step, func(t *testing.T) {
+			var h *hookMaint
+			e := newEnv(t, withHook(&h))
+			e.stop()
+			ctx := context.Background()
+			require.NoError(t, e.store.create(ctx, &Record{OpID: "restore-unread", Step: step, Database: testDB, Target: tgt, Before: before}))
+			e.db.mu.Lock()
+			e.db.dbs[tgt] = "restored"
+			e.db.mu.Unlock()
+			h.failGet = errors.New("redis down")
+			e.start()
+			e.waitStep("restore-unread", StepUnknown)
+			assert.Contains(t, e.db.names(), tgt)
+		})
+	}
+}
+
+// TestRecover_RevertedWhileResumingKeepsRedis checks that a recovery which
+// finds the previous database back and the processes already resuming does
+// not clean Redis again: they write to it on the previous database.
+func TestRecover_RevertedWhileResumingKeepsRedis(t *testing.T) {
+	names := map[string]string{testDB: "current", testDB + "_rolled_back_1": "restored"}
+	e, rec := crashed(t, StepReverting, names, maintmode.PhaseResuming, testDB+"_rolled_back_1")
+	e.waitStep(rec.OpID, StepReverted)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	assert.Zero(t, e.cleaned)
+}
