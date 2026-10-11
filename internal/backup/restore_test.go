@@ -207,6 +207,14 @@ func TestRestoreSwap(t *testing.T) {
 	err = r.RestoreInto(ctx, plan, RestoreOptions{ID: rsGenID, Mode: RestoreSwap, Database: rsAppDB, Confirm: rsAppDB}, "elythia_taken")
 	require.ErrorIs(t, err, ErrRestoreNotCreated)
 	assert.Contains(t, err.Error(), "already exists")
+
+	// ほかの理由で作れなかったとき (ここでは権限) は、作れたかどうかを決めつけない。
+	pg.exec(t, "postgres", "CREATE ROLE elythia_nocreate LOGIN PASSWORD 'nocreate'")
+	weak := pg.restorer(storage, "elythia_nocreate", "nocreate")
+	weak.Identities = []age.Identity{id}
+	err = weak.RestoreInto(ctx, plan, RestoreOptions{ID: rsGenID, Mode: RestoreSwap, Database: rsAppDB, Confirm: rsAppDB}, "elythia_denied")
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrRestoreNotCreated)
 }
 
 // TestRestoreEmptyFromPostgres16 takes a backup from a PostgreSQL 16 server

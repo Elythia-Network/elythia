@@ -20,6 +20,7 @@ import (
 	"github.com/golang-migrate/migrate/v4/source"
 	_ "github.com/golang-migrate/migrate/v4/source/file" // file:// source
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/elythia-network/elythia/internal/pgactivity"
 )
@@ -63,6 +64,12 @@ var (
 	// database of that name, which may be another one's.
 	ErrRestoreNotCreated = errors.New("backup: the database was not created")
 )
+
+// isDuplicateDatabase reports whether err is PostgreSQL's duplicate_database.
+func isDuplicateDatabase(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "42P04"
+}
 
 // notCreatedError marks an error of RestoreInto before the database was
 // created, keeping its message.
@@ -720,9 +727,14 @@ func (r *Restorer) RestoreInto(ctx context.Context, plan *RestorePlan, opts Rest
 	loc := r.swapLocale(plan.Meta, opts.Database, db)
 	r.logf("creating database %s", dbname)
 	if _, err := admin.Exec(ctx, createDatabaseSQL(dbname, loc, db.owner)); err != nil {
-		// 確かめた後で同じ名前の DB を別の作業が作った場合も、ここで落ちる。呼び出し元が
-		// その DB を消さないよう、作っていないことを示す。
-		return notCreatedError{fmt.Errorf("backup: create database %q: %w", dbname, err)}
+		err = fmt.Errorf("backup: create database %q: %w", dbname, err)
+		// 確かめた後で同じ名前の DB を別の作業が作った (duplicate_database) ときだけ、
+		// 作っていないと示す (呼び出し元がその DB を消さないように)。ほかの失敗 (接続の
+		// 切断など) は、作れたかどうか分からないので、消す側に倒す。
+		if isDuplicateDatabase(err) {
+			return notCreatedError{err}
+		}
+		return err
 	}
 	if err := r.pgRestore(ctx, dbname, dump); err != nil {
 		if _, derr := admin.Exec(context.Background(), dropDatabaseSQL(dbname)); derr != nil {
