@@ -109,6 +109,17 @@ func (h *Handler) CaptchaSave(c echo.Context) error {
 		if err != nil {
 			return c.JSON(http.StatusInternalServerError, apierr.InternalError())
 		}
+		// 保存済みの secret は、保存済みの送り先へだけ送る。mcaptcha は検証を
+		// instanceUrl へ送るので、送り先を変えるなら secret も入力し直させる。
+		if req.Provider == "mcaptcha" && stored != "" {
+			storedURL, err := h.storedMcaptchaInstanceURL()
+			if err != nil {
+				return c.JSON(http.StatusInternalServerError, apierr.InternalError())
+			}
+			if normalizeDestination(strDeref(req.InstanceURL)) != normalizeDestination(storedURL) {
+				return secretReentryRequired(c, "secret")
+			}
+		}
 		req.Secret = nil
 		if stored != "" {
 			verifySecret = &stored
@@ -256,4 +267,16 @@ func (h *Handler) storedCaptchaSecret(provider string) (string, error) {
 		v = m.TurnstileSecretKey
 	}
 	return strDeref(v), nil
+}
+
+// storedMcaptchaInstanceURL returns the saved mCaptcha instance URL ("" when unset).
+func (h *Handler) storedMcaptchaInstanceURL() (string, error) {
+	if h.metaRepo == nil {
+		return "", nil
+	}
+	m, err := h.metaRepo.Fetch()
+	if err != nil {
+		return "", err
+	}
+	return strDeref(m.McaptchaInstanceURL), nil
 }

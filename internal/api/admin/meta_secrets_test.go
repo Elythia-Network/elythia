@@ -2,13 +2,17 @@ package admin_test
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
+	apiadmin "github.com/elythia-network/elythia/internal/api/admin"
 	"github.com/elythia-network/elythia/internal/core/captcha"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
+	"github.com/elythia-network/elythia/internal/core/signup"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/testutil"
@@ -216,4 +220,150 @@ func TestCaptchaSave_PaddedPlaceholderUsesStoredSecret(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, rec.Code)
 	assert.Equal(t, stored, verifiedWith)
 	assert.NotContains(t, metaRepo.LastUpdateFields, "hcaptchaSecretKey")
+}
+
+// secretDestinationCases pairs each secret with one of its destinations and the
+// stored / changed destination values.
+var secretDestinationCases = []struct {
+	secret, dest string
+	stored       any
+	changed      any
+	same         []any // 正規化すると今の値と同じになる値
+}{
+	{"smtpPass", "smtpHost", "smtp.example.com", "smtp.example.com.attacker.example", []any{" SMTP.example.com ", "smtp.example.com."}},
+	{"smtpPass", "smtpPort", float64(587), float64(2525), []any{float64(587)}},
+	{"truemailAuthKey", "truemailInstance", "https://truemail.example", "https://truemail.example.attacker.example", []any{"https://TRUEMAIL.example/", " https://truemail.example "}},
+	{"sensitiveMediaDetectionApiKey", "sensitiveMediaDetectionApiUrl", "https://detect.example/api", "https://detect.example/api2", []any{"https://detect.example/api/", "HTTPS://detect.example/api"}},
+	{"mcaptchaSecretKey", "mcaptchaInstanceUrl", "https://mcaptcha.example", "http://mcaptcha.example", []any{"https://mcaptcha.example/"}},
+}
+
+func newDestinationHandler(t *testing.T, secret, dest string, stored any) (*apiadmin.Handler, *testutil.MockMetaRepository) {
+	t.Helper()
+	h, _, metaRepo, _ := newTestHandler(t)
+	b, err := json.Marshal(map[string]any{secret: secretValue(secret), dest: stored})
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(b, metaRepo.Meta))
+	return h, metaRepo
+}
+
+func updateMetaBody(t *testing.T, kv map[string]any) string {
+	t.Helper()
+	b, err := json.Marshal(kv)
+	require.NoError(t, err)
+	return string(b)
+}
+
+// 送り先を変えるのに秘密を入力し直さない (伏せ字・欄なし) なら断る。
+func TestUpdateMeta_DestinationChangeRequiresSecret(t *testing.T) {
+	for _, tc := range secretDestinationCases {
+		for name, body := range map[string]map[string]any{
+			"placeholder": {tc.dest: tc.changed, tc.secret: model.MetaSecretPlaceholder},
+			"omitted":     {tc.dest: tc.changed},
+		} {
+			t.Run(tc.dest+"/"+name, func(t *testing.T) {
+				h, metaRepo := newDestinationHandler(t, tc.secret, tc.dest, tc.stored)
+				rec := doPost(h.UpdateMeta, updateMetaBody(t, body), adminUser)
+				require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+				assert.Contains(t, rec.Body.String(), "SECRET_REENTRY_REQUIRED")
+				assert.Nil(t, metaRepo.LastUpdateFields, "nothing is written")
+			})
+		}
+	}
+}
+
+// 秘密を入力し直す (新しい値・空・null) なら、送り先を変えられる。
+func TestUpdateMeta_DestinationChangeWithNewSecret(t *testing.T) {
+	for _, tc := range secretDestinationCases {
+		for name, secret := range map[string]any{"new": "plain-new-secret", "empty": "", "null": nil} {
+			t.Run(tc.dest+"/"+name, func(t *testing.T) {
+				h, _ := newDestinationHandler(t, tc.secret, tc.dest, tc.stored)
+				rec := doPost(h.UpdateMeta, updateMetaBody(t, map[string]any{tc.dest: tc.changed, tc.secret: secret}), adminUser)
+				assert.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+			})
+		}
+	}
+}
+
+// 送り先が (正規化すると) 変わらないなら、伏せ字のままでよい。本家の画面は
+// 全部の欄を送り返す。
+func TestUpdateMeta_UnchangedDestinationKeepsSecret(t *testing.T) {
+	for _, tc := range secretDestinationCases {
+		for i, same := range append([]any{tc.stored}, tc.same...) {
+			t.Run(fmt.Sprintf("%s/%d", tc.dest, i), func(t *testing.T) {
+				h, metaRepo := newDestinationHandler(t, tc.secret, tc.dest, tc.stored)
+				rec := doPost(h.UpdateMeta, updateMetaBody(t, map[string]any{tc.dest: same, tc.secret: model.MetaSecretPlaceholder}), adminUser)
+				require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+				assert.NotContains(t, metaRepo.LastUpdateFields, tc.secret)
+			})
+		}
+	}
+}
+
+// 今の秘密が未設定なら、渡るものが無いので送り先だけを変えられる。
+func TestUpdateMeta_DestinationChangeWithoutStoredSecret(t *testing.T) {
+	for _, tc := range secretDestinationCases {
+		t.Run(tc.dest, func(t *testing.T) {
+			h, _, _, _ := newTestHandler(t)
+			rec := doPost(h.UpdateMeta, updateMetaBody(t, map[string]any{tc.dest: tc.changed}), adminUser)
+			assert.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+		})
+	}
+}
+
+// failFirstFetch fails only the first Fetch, so that the destination check
+// is the one that sees the failure.
+type failFirstFetch struct {
+	*testutil.MockMetaRepository
+	failed bool
+}
+
+func (f *failFirstFetch) Fetch() (*model.Meta, error) {
+	if !f.failed {
+		f.failed = true
+		return nil, errors.New("db down")
+	}
+	return f.MockMetaRepository.Fetch()
+}
+
+// 今の値が読めないと送り先が変わるかを判定できないので、通さない。
+func TestUpdateMeta_DestinationCheckFailsClosedWithoutMeta(t *testing.T) {
+	_, userRepo, metaRepo, _ := newTestHandler(t)
+	stored, host := "plain-smtp", "smtp.example.com"
+	metaRepo.Meta.SMTPPass, metaRepo.Meta.SMTPHost = &stored, &host
+	repo := &failFirstFetch{MockMetaRepository: metaRepo}
+	idGen, err := id.NewGenerator("aidx")
+	require.NoError(t, err)
+	h := apiadmin.NewHandler(signup.NewService(userRepo, repo, idGen), nil, repo, userRepo, idGen)
+	rec := doPost(h.UpdateMeta, `{"smtpHost":"smtp.attacker.example"}`, adminUser)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Nil(t, metaRepo.LastUpdateFields, "nothing is written")
+}
+
+// captcha/save: 伏せ字の secret は、保存済みの instanceUrl へだけ送る。
+func TestCaptchaSave_McaptchaPlaceholderRequiresStoredInstanceURL(t *testing.T) {
+	stored, storedURL := "plain-stored-mcaptcha", "https://mcaptcha.example"
+	for name, tc := range map[string]struct {
+		url  string
+		code int
+	}{
+		"changed":    {"https://mcaptcha.example.attacker.example", http.StatusBadRequest},
+		"same":       {"https://mcaptcha.example", http.StatusNoContent},
+		"normalized": {" https://MCAPTCHA.example/ ", http.StatusNoContent},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, _, metaRepo, _ := newTestHandler(t)
+			metaRepo.Meta.McaptchaSecretKey = &stored
+			metaRepo.Meta.McaptchaInstanceURL = &storedURL
+			called := false
+			h.SetCaptchaVerifierFactory(func(string, string, string, string) captcha.Verifier {
+				called = true
+				return stubCaptchaVerifier{}
+			})
+			body := updateMetaBody(t, map[string]any{"provider": "mcaptcha", "sitekey": "site", "instanceUrl": tc.url,
+				"secret": model.MetaSecretPlaceholder, "captchaResult": "ok"})
+			rec := doPost(h.CaptchaSave, body, adminUser)
+			assert.Equal(t, tc.code, rec.Code, rec.Body.String())
+			assert.Equal(t, tc.code == http.StatusNoContent, called, "the stored secret is sent only to the stored instance")
+		})
+	}
 }
