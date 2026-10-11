@@ -65,6 +65,10 @@ const (
 	JobTake JobKind = "take"
 	// JobVerify verifies one existing generation.
 	JobVerify JobKind = "verify"
+	// JobRestore holds the job slot while a restore from the admin page runs
+	// (#3463 (6c)), so that no scheduled take runs against a database that is
+	// being swapped.
+	JobRestore JobKind = "restore"
 )
 
 // Trigger is what started a job.
@@ -367,6 +371,44 @@ func (d *Daemon) Start(kind JobKind, id string) (Job, error) {
 		return *d.running, ErrBusy
 	}
 	return d.startLocked(kind, TriggerAPI, id, d.clock.Now()), nil
+}
+
+// Storage returns the storage the daemon was built with.
+func (d *Daemon) Storage() backup.Storage { return d.opts.Storage }
+
+// Acquire takes the job slot for work the daemon does not run itself (a
+// restore from the admin page). It returns ErrBusy when a job is running.
+// Calling the returned function gives the slot back; a scheduled take that
+// came due meanwhile starts then.
+func (d *Daemon) Acquire(kind JobKind) (func(), error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.ctx == nil || d.stopping {
+		return nil, ErrNotRunning
+	}
+	if d.running != nil {
+		return nil, ErrBusy
+	}
+	job := &Job{Kind: kind, Trigger: TriggerAPI, StartedAt: d.clock.Now()}
+	d.running = job
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			d.mu.Lock()
+			if d.running == job {
+				d.running = nil
+			}
+			if d.pending && d.running == nil && !d.stopping && d.ctx.Err() == nil {
+				d.pending = false
+				d.startLocked(JobTake, TriggerSchedule, "", d.clock.Now())
+			}
+			d.mu.Unlock()
+			select {
+			case d.kick <- struct{}{}:
+			default:
+			}
+		})
+	}, nil
 }
 
 func (d *Daemon) startLocked(kind JobKind, trigger Trigger, id string, now time.Time) Job {
@@ -681,6 +723,12 @@ func (d *Daemon) finish(ctx context.Context, res JobResult) {
 	case d.kick <- struct{}{}:
 	default:
 	}
+}
+
+// NotifyRestoreStopped reports a restore from the admin page that stopped
+// with the maintenance on.
+func (d *Daemon) NotifyRestoreStopped(ctx context.Context, message string) {
+	d.send(ctx, Event{Kind: EventRestoreStopped, OccurredAt: d.clock.Now(), Message: message})
 }
 
 func (d *Daemon) send(ctx context.Context, e Event) {

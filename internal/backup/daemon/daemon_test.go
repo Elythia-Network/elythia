@@ -905,3 +905,40 @@ func TestNewDefaults(t *testing.T) {
 	tm := d.clock.NewTimer(time.Hour)
 	assert.True(t, tm.Stop())
 }
+
+// TestDaemonAcquireHoldsTheJobSlot checks the slot a restore from the admin
+// page takes (#3463 (6c)): no job starts while it is held, a scheduled take
+// that came due waits for it, and releasing twice is harmless.
+func TestDaemonAcquireHoldsTheJobSlot(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := mustSchedule(t, config.BackupScheduleOptions{Interval: "1h", Keep: 5}, time.UTC)
+		r := newRig(t, s, func(r *rig) {
+			r.st.addGeneration(epoch.Add(-30*time.Minute), true, "")
+		})
+		_, err := r.d.Acquire(JobRestore)
+		require.ErrorIs(t, err, ErrNotRunning, "before Run")
+		r.start(t)
+		release, err := r.d.Acquire(JobRestore)
+		require.NoError(t, err)
+		_, err = r.d.Acquire(JobRestore)
+		require.ErrorIs(t, err, ErrBusy)
+		_, err = r.d.Start(JobTake, "")
+		require.ErrorIs(t, err, ErrBusy)
+		st := r.d.Status()
+		require.NotNil(t, st.Running)
+		assert.Equal(t, JobRestore, st.Running.Kind)
+
+		time.Sleep(31 * time.Minute)
+		synctest.Wait()
+		assert.Empty(t, r.taker.callTimes(), "the scheduled take waits for the restore")
+		release()
+		synctest.Wait()
+		assert.Equal(t, []time.Time{epoch.Add(31 * time.Minute)}, r.taker.callTimes(), "it runs once the slot is free")
+		release()
+		synctest.Wait()
+		assert.Len(t, r.taker.callTimes(), 1, "releasing again does nothing")
+		r.stop()
+		_, err = r.d.Acquire(JobRestore)
+		require.ErrorIs(t, err, ErrNotRunning, "after stopping")
+	})
+}

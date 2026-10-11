@@ -39,6 +39,9 @@ type daemonEnv struct {
 	signalContext func() (context.Context, context.CancelFunc)
 	listen        func(addr string) (net.Listener, error)
 	location      *time.Location
+	// openRestore builds the restore from the admin page (#3463 (6c)). Nil
+	// leaves it out.
+	openRestore func(*config.Config, *daemon.Daemon, backupkit.Storage, *slog.Logger) (*RestoreParts, error)
 }
 
 func defaultDaemonEnv() daemonEnv {
@@ -49,8 +52,9 @@ func defaultDaemonEnv() daemonEnv {
 		signalContext: func() (context.Context, context.CancelFunc) {
 			return signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		},
-		listen:   func(addr string) (net.Listener, error) { return net.Listen("tcp", addr) },
-		location: time.Local,
+		listen:      func(addr string) (net.Listener, error) { return net.Listen("tcp", addr) },
+		location:    time.Local,
+		openRestore: openRestore,
 	}
 }
 
@@ -73,10 +77,13 @@ func runDaemon(e daemonEnv, args []string) int {
 		fmt.Fprintf(e.stderr, "backup daemon: cannot read the config: %v\n", err)
 		return 1
 	}
-	d, handler, err := build(e, cfg, logger)
+	d, handler, restore, err := build(e, cfg, logger)
 	if err != nil {
 		fmt.Fprintf(e.stderr, "backup daemon: %v\n", err)
 		return 1
+	}
+	if restore != nil {
+		defer restore.Close()
 	}
 
 	ctx, cancel := e.signalContext()
@@ -103,7 +110,15 @@ func runDaemon(e daemonEnv, args []string) int {
 			apiErr <- err
 		}()
 	}
+	if restore != nil {
+		// 前の実行が途中で残したリストアを片付ける。job の枠は Run が始まってから
+		// 取れるので、Start は Run と並べて呼び、枠が空くまで待たせる。
+		restore.Manager.Start(ctx)
+	}
 	d.Run(ctx)
+	if restore != nil {
+		restore.Manager.Wait()
+	}
 	if ln != nil {
 		if err := <-apiErr; err != nil {
 			fmt.Fprintf(e.stderr, "backup daemon: control API: %v\n", err)
@@ -113,9 +128,25 @@ func runDaemon(e daemonEnv, args []string) int {
 	return 0
 }
 
-// build validates the config and assembles the daemon and its control API
-// handler (nil when backup.schedule.listen is empty).
-func build(e daemonEnv, cfg *config.Config, logger *slog.Logger) (*daemon.Daemon, http.Handler, error) {
+// build validates the config and assembles the daemon, its control API
+// handler (nil when backup.schedule.listen is empty) and the restore from
+// the admin page (nil when it is not available).
+func build(e daemonEnv, cfg *config.Config, logger *slog.Logger) (*daemon.Daemon, http.Handler, *RestoreParts, error) {
+	d, h, err := buildDaemon(e, cfg, logger)
+	if err != nil || h == nil || e.openRestore == nil {
+		return d, h, nil, err
+	}
+	// 画面からのリストアは制御 API の上で動く。Redis に繋がらないときは、リストアだけを
+	// 外して起動する (取る・確かめるは止めない)。
+	restore, err := e.openRestore(cfg, d, d.Storage(), logger)
+	if err != nil {
+		logger.Warn("backup: the restore from the admin page is not available", "err", err)
+		return d, h, nil, nil
+	}
+	return d, h, restore, nil
+}
+
+func buildDaemon(e daemonEnv, cfg *config.Config, logger *slog.Logger) (*daemon.Daemon, http.Handler, error) {
 	if cfg.Backup == nil {
 		return nil, nil, errors.New("the config has no backup: section")
 	}
