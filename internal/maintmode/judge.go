@@ -122,10 +122,11 @@ func (j *Judge) Step(ctx context.Context) (Outcome, error) {
 	if err != nil || !ok {
 		return NotJudging, err
 	}
-	if st.OpID == "" {
-		// opId の無い状態 (手で書いた、壊れた) は判定しない。書き込みは全部
-		// opId で縛っているので、判定しても held にできず、待ちの時計も持てない。
-		return Waiting, errors.New("maintmode: the maintenance state has no opId; clear it with `elythia maintenance exit -force`")
+	if st.OpID == "" || st.phaseMissing {
+		// opId か phase の無い状態 (手で書いた、壊れた) は判定しない。書き込みは
+		// opId と phase で縛っているので、判定しても held にできず、上限の後に
+		// 接続を切り続けるだけになる (#3463 のレビュー2周目 8)。
+		return Waiting, errors.New("maintmode: the maintenance state has no opId or no phase; clear it with `elythia maintenance exit -force`")
 	}
 	if st.OpID != j.opID {
 		j.reset(st.OpID)
