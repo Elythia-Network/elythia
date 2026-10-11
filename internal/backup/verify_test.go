@@ -994,8 +994,10 @@ func TestStageOutcome(t *testing.T) {
 	}
 }
 
-// TestVerifyInterruptedStageKeepsTheEarlierResult: a stage that fails after
-// the verification was interrupted does not overwrite verify.json.
+// TestVerifyInterruptedStageKeepsTheEarlierResult: a download cancelled in
+// the middle does not overwrite verify.json. readable checks ctx itself
+// right after the copy; TestVerifyStageFailureAfterCancelIsNotAVerdict
+// covers the stage failures that reach stageOutcome.
 func TestVerifyInterruptedStageKeepsTheEarlierResult(t *testing.T) {
 	dump := []byte("dump bytes")
 	meta := plainMeta(dump)
@@ -1028,6 +1030,26 @@ func TestTempDirWarning(t *testing.T) {
 	assert.Contains(t, TempDirWarning("", env("")), "point TMPDIR at another disk")
 	assert.Empty(t, TempDirWarning("", env("/scratch")))
 	assert.Empty(t, TempDirWarning("/scratch", env("")))
+}
+
+// TestVerifyStageFailureAfterCancelIsNotAVerdict: Verify passes the stage
+// failures through stageOutcome with its own ctx. A size mismatch found
+// after the verification was cancelled (the Stat check has no ctx check of
+// its own) is an interruption, and verify.json stays as it was.
+func TestVerifyStageFailureAfterCancelIsNotAVerdict(t *testing.T) {
+	dump := []byte("dump bytes")
+	meta := plainMeta(dump)
+	meta.DumpSize = int64(len(dump)) + 1
+	s := newMemStorage()
+	putGeneration(t, s, meta, dump)
+	earlier := []byte(`{"ok":true}`)
+	s.objects[Key(testGenID, VerifyFile)] = earlier
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := Verify(ctx, s, testGenID, VerifyOptions{Sandbox: noRunSandbox{t}, Bundled: BundledMigrations{Core: 1}})
+	require.ErrorIs(t, err, context.Canceled)
+	assert.ErrorContains(t, err, "dump size 10 does not match meta.json (11)")
+	assert.Equal(t, earlier, s.objects[Key(testGenID, VerifyFile)])
 }
 
 // TestVerifyCorruptDumpSizeIsADefect: a dumpSize in meta.json that does not
