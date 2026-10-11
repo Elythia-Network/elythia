@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -217,6 +218,35 @@ func TestSupervisor_RequestOnRetiredHandlerIsNotServedByIt(t *testing.T) {
 	}
 	assert.Zero(t, oldCalls.Load())
 	assert.Zero(t, old.active.Load())
+}
+
+// TestSupervisor_RequestOnRetiredHandlerGoesToTheReplacement covers the
+// other side of the race: a request that grabbed a handler which was then
+// retired and replaced is served by the replacement.
+func TestSupervisor_RequestOnRetiredHandlerGoesToTheReplacement(t *testing.T) {
+	sup := &Supervisor{}
+	var oldCalls, newCalls atomic.Int32
+	old := &routedHandler{next: http.HandlerFunc(func(http.ResponseWriter, *http.Request) { oldCalls.Add(1) })}
+	replacement := &routedHandler{next: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		newCalls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	})}
+	sup.current.Store(old)
+	var once sync.Once
+	// リクエストが old を掴んだ直後に、止めて差し替える (世代の切り替えと同じ順序)。
+	sup.afterLoad = func() {
+		once.Do(func() {
+			sup.current.Store(replacement)
+			old.retired.Store(true)
+		})
+	}
+	rec := httptest.NewRecorder()
+	sup.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	assert.Equal(t, http.StatusOK, rec.Code, "差し替え済みなのに 503 を返した")
+	assert.Zero(t, oldCalls.Load())
+	assert.EqualValues(t, 1, newCalls.Load())
+	assert.Zero(t, old.active.Load())
+	assert.Zero(t, replacement.active.Load())
 }
 
 // TestSupervisor_FailedRebuildKeepsStandbyAndCanRetry checks that a
