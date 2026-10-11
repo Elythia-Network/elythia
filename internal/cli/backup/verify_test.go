@@ -3,6 +3,7 @@ package backup
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -17,15 +18,24 @@ import (
 	"github.com/elythia-network/elythia/internal/config"
 )
 
-// listStorage is a Storage that only lists fixed keys.
+// listStorage is a Storage that lists fixed keys and serves a minimal
+// meta.json for each generation.
 type listStorage struct {
 	keys []string
 	err  error
 }
 
 func (s listStorage) Put(context.Context, string, io.Reader) error { return errors.New("read-only") }
-func (s listStorage) Get(context.Context, string) (io.ReadCloser, error) {
-	return nil, backup.ErrNotFound
+func (s listStorage) Get(_ context.Context, key string) (io.ReadCloser, error) {
+	id := backup.GenerationIDFromKey(key)
+	if id == "" || key != backup.Key(id, backup.MetaFile) {
+		return nil, backup.ErrNotFound
+	}
+	body, err := json.Marshal(backup.Meta{FormatVersion: backup.MetaFormatVersion, ID: id})
+	if err != nil {
+		return nil, err
+	}
+	return io.NopCloser(bytes.NewReader(body)), nil
 }
 func (s listStorage) Stat(context.Context, string) (backup.ObjectInfo, error) {
 	return backup.ObjectInfo{}, backup.ErrNotFound
