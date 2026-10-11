@@ -124,9 +124,10 @@ func TestMaintenanceRestoreForwardResolvesTheClientLikeEcho(t *testing.T) {
 		TrustProxy: []string{"10.0.0.0/8"},
 		Backup:     &config.BackupOptions{Server: config.BackupServerOptions{ServiceURL: daemon.URL, ServiceToken: "svc"}},
 	}
-	fwd, prefix := maintenanceRestoreForward(cfg)
+	fwd, paths := maintenanceRestoreForward(cfg)
 	require.NotNil(t, fwd)
-	assert.Equal(t, "/api/admin/backup/restore/", prefix)
+	assert.ElementsMatch(t, []string{"/api/admin/backup/restore/status", "/api/admin/backup/restore/confirm", "/api/admin/backup/restore/abort"}, paths,
+		"prepare is not forwarded during a maintenance")
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/backup/restore/status", bytes.NewReader([]byte(`{"opId":"x"}`)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Forwarded-For", "203.0.113.9")
@@ -144,8 +145,8 @@ func TestMaintenanceRestoreForwardResolvesTheClientLikeEcho(t *testing.T) {
 	defer svc.mu.Unlock()
 	assert.Equal(t, []string{"203.0.113.9", "198.51.100.4"}, svc.ips)
 
-	_, prefix = maintenanceRestoreForward(&config.Config{TrustProxy: []string{"not a cidr"}})
-	assert.Empty(t, prefix)
+	_, paths = maintenanceRestoreForward(&config.Config{TrustProxy: []string{"not a cidr"}})
+	assert.Empty(t, paths)
 }
 
 // TestMaintenanceHandlerForwardsTheRestore checks that the handler a
@@ -164,6 +165,9 @@ func TestMaintenanceHandlerForwardsTheRestore(t *testing.T) {
 	rec := httptest.NewRecorder()
 	m.handler.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	rec = httptest.NewRecorder()
+	m.handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/admin/backup/restore/prepare", bytes.NewReader([]byte(`{"id":"x"}`))))
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "prepare is not forwarded during a maintenance")
 
 	t.Setenv(config.EnvOnlyQueue, "1")
 	var q maintTracker

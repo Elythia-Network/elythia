@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -52,11 +53,11 @@ type HandlerOptions struct {
 	// /healthz answers, everything else is a plain 503 (no page, no static
 	// files, no API error body).
 	QueueOnly bool
-	// Forward, when set, serves the paths under ForwardPrefix instead of the
+	// Forward, when set, serves the paths in ForwardPaths instead of the
 	// 503: the restore from the admin page is forwarded to the backup service
 	// also during the maintenance it drives (#3463 (6c)).
-	Forward       http.HandlerFunc
-	ForwardPrefix string
+	Forward      http.HandlerFunc
+	ForwardPaths []string
 }
 
 // Status is the body of StatusPath.
@@ -110,7 +111,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case p == StatusPath:
 		h.status(w)
 		return
-	case h.opts.Forward != nil && h.opts.ForwardPrefix != "" && strings.HasPrefix(p, h.opts.ForwardPrefix):
+	case h.opts.Forward != nil && slices.Contains(h.opts.ForwardPaths, p):
 		// DB に触れない (daemon が照合する)。
 		h.opts.Forward(w, r)
 		return
