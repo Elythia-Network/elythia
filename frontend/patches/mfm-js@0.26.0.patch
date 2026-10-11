@@ -1,5 +1,5 @@
 diff --git a/built/index.cjs b/built/index.cjs
-index ed6d2be..60308bd 100644
+index ed6d2be..0b8684c 100644
 --- a/built/index.cjs
 +++ b/built/index.cjs
 @@ -42,6 +42,12 @@ var Parser = class Parser {
@@ -15,7 +15,7 @@ index ed6d2be..60308bd 100644
  			const result = this.handler(input, index, state);
  			if (!result.success) return result;
  			const text = input.slice(index, result.index);
-@@ -49,19 +55,52 @@ var Parser = class Parser {
+@@ -49,19 +55,57 @@ var Parser = class Parser {
  		});
  	}
  	many(min) {
@@ -36,6 +36,7 @@ index ed6d2be..60308bd 100644
 +					if (rest != null) break;
 +					visited.push(latestIndex);
 +				}
++				if (state.work !== undefined) state.work++;
  				result = this.handler(input, latestIndex, state);
  				if (!result.success) break;
  				latestIndex = result.index;
@@ -48,6 +49,10 @@ index ed6d2be..60308bd 100644
 +				values = accum.length === 0 && rest.start === 0 ? rest.values : accum.concat(rest.values.slice(rest.start));
 +				latestIndex = rest.end;
 +			}
++			// 覚える件数は 1 回の解析で MEMO_LIMIT までにする (超えた分は覚えないだけで、
++			// 結果は変わらない)。
++			if (table != null && state.memoCount + visited.length <= MEMO_LIMIT) state.memoCount += visited.length;
++			else visited.length = 0;
 +			if (table != null) for (let i = 0; i < visited.length; i++) table.set(memoKey(visited[i], state, input), {
 +				values,
 +				start: i,
@@ -71,7 +76,7 @@ index ed6d2be..60308bd 100644
  	}
  	sep(separator, min) {
  		if (min < 1) throw new Error("\"min\" must be a value greater than or equal to 1.");
-@@ -95,12 +134,24 @@ function seq(...parsers) {
+@@ -95,18 +139,31 @@ function seq(...parsers) {
  		let result;
  		let latestIndex = index;
  		const accum = [];
@@ -96,7 +101,14 @@ index ed6d2be..60308bd 100644
  		return success(latestIndex, accum);
  	});
  }
-@@ -155,6 +206,30 @@ function lazy(fn) {
+ function alt(parsers) {
+ 	return new Parser((input, index, state) => {
+ 		for (let i = 0; i < parsers.length; i++) {
++			if (state.work !== undefined) state.work++;
+ 			const result = parsers[i].handler(input, index, state);
+ 			if (result.success) return result;
+ 		}
+@@ -155,11 +212,54 @@ function lazy(fn) {
  	});
  	return parser;
  }
@@ -104,6 +116,17 @@ index ed6d2be..60308bd 100644
 +// 効く状態 (入れ子の深さ、リンクの見出しの中か) が同じまま読み直したときは、前の結果を
 +// 使う。覚えるのは 1 回の parse / parseSimple の間だけで、呼び出しをまたいで持たない。
 +let nextMemoId = 0;
++// 1 回の parse の仕事量 (alt で候補を試した数と、many で繰り返した数) の上限と、memo の
++// 件数の上限。上の memo で仕事量は入力の長さに比例するが、比例の係数は入れ子の深さの
++// 分だけ大きくなりうる。見落とした経路があっても 1 回の解析が際限なく走らないよう、
++// 安全網として上限を置く (Elythia のサーバーの MFM の解析器と同じ考え方)。上限を超えたら、
++// それより後に読む full / inline / simple は構文を試さず 1 文字の text として読む。
++// 普通の投稿は上限に届かないので、結果はパッチの前と変わらない。
++const WORK_LIMIT_BASE = 100000;
++const WORK_LIMIT_PER_CHAR = 100;
++const MEMO_LIMIT = 250000;
++// 注: memo は入力の文字列の値で引くので、同じ内容の引用が 2 つあると、子の node が同じ
++// object になる (mfm-js の利用側は node を書き換えないので、結果は変わらない)。
 +// 繰り返しごとの表を返す。鍵は位置と状態から作る数で、入れ子の上限は 1 回の
 +// 解析の間は変わらないので鍵に入れない。
 +function memoTable(state, input, id) {
@@ -127,7 +150,21 @@ index ed6d2be..60308bd 100644
  function createLanguage(syntaxes) {
  	const rules = {};
  	for (const key of Object.keys(syntaxes)) rules[key] = lazy(() => {
-@@ -409,13 +484,25 @@ function seqOrText(...parsers) {
+-		const parser = syntaxes[key](rules);
++		let parser = syntaxes[key](rules);
+ 		if (parser == null) throw new Error("syntax must return a parser.");
++		if (key === "full" || key === "inline" || key === "simple") {
++			// 仕事量の上限を超えたら、構文を試さず 1 文字の text として読む。
++			const inner = parser;
++			parser = new Parser((input, index, state) => {
++				if (state.work !== undefined && state.work > state.workLimit) return char.handler(input, index, state);
++				return inner.handler(input, index, state);
++			});
++		}
+ 		parser.name = key;
+ 		return parser;
+ 	});
+@@ -409,13 +509,25 @@ function seqOrText(...parsers) {
  	return new Parser((input, index, state) => {
  		const accum = [];
  		let latestIndex = index;
@@ -153,28 +190,47 @@ index ed6d2be..60308bd 100644
  		return success(latestIndex, accum);
  	});
  }
-@@ -805,7 +892,8 @@ function fullParser(input, opts) {
+@@ -805,7 +917,11 @@ function fullParser(input, opts) {
  		nestLimit: opts.nestLimit != null ? opts.nestLimit : 20,
  		depth: 0,
  		linkLabel: false,
 -		trace: false
 +		trace: false,
-+		memo: new Map()
++		memo: new Map(),
++		memoCount: 0,
++		work: 0,
++		workLimit: opts.workLimit != null ? opts.workLimit : WORK_LIMIT_BASE + WORK_LIMIT_PER_CHAR * input.length
  	});
  	if (!result.success) throw new Error("Unexpected parse error");
  	return mergeText(result.value);
-@@ -813,7 +901,8 @@ function fullParser(input, opts) {
+@@ -813,7 +929,11 @@ function fullParser(input, opts) {
  function simpleParser(input) {
  	const result = language.simpleParser.handler(input, 0, {
  		depth: 0,
 -		nestLimit: Infinity
 +		nestLimit: Infinity,
-+		memo: new Map()
++		memo: new Map(),
++		memoCount: 0,
++		work: 0,
++		workLimit: WORK_LIMIT_BASE + WORK_LIMIT_PER_CHAR * input.length
  	});
  	if (!result.success) throw new Error("Unexpected parse error");
  	return mergeText(result.value);
+@@ -824,7 +944,11 @@ function simpleParser(input) {
+ * Generates a MfmNode tree from the MFM string.
+ */
+ function parse(input, opts = {}) {
+-	return fullParser(input, { nestLimit: opts.nestLimit });
++	// workLimit は Elythia のテストのための口 (仕事量の上限を差し替える)。
++	return fullParser(input, {
++		nestLimit: opts.nestLimit,
++		workLimit: opts.workLimit
++	});
+ }
+ /**
+ * Generates a MfmSimpleNode tree from the MFM string.
 diff --git a/built/index.mjs b/built/index.mjs
-index 8c47479..93b3e41 100644
+index 8c47479..59562d6 100644
 --- a/built/index.mjs
 +++ b/built/index.mjs
 @@ -41,6 +41,12 @@ var Parser = class Parser {
@@ -190,7 +246,7 @@ index 8c47479..93b3e41 100644
  			const result = this.handler(input, index, state);
  			if (!result.success) return result;
  			const text = input.slice(index, result.index);
-@@ -48,19 +54,52 @@ var Parser = class Parser {
+@@ -48,19 +54,57 @@ var Parser = class Parser {
  		});
  	}
  	many(min) {
@@ -211,6 +267,7 @@ index 8c47479..93b3e41 100644
 +					if (rest != null) break;
 +					visited.push(latestIndex);
 +				}
++				if (state.work !== undefined) state.work++;
  				result = this.handler(input, latestIndex, state);
  				if (!result.success) break;
  				latestIndex = result.index;
@@ -223,6 +280,10 @@ index 8c47479..93b3e41 100644
 +				values = accum.length === 0 && rest.start === 0 ? rest.values : accum.concat(rest.values.slice(rest.start));
 +				latestIndex = rest.end;
 +			}
++			// 覚える件数は 1 回の解析で MEMO_LIMIT までにする (超えた分は覚えないだけで、
++			// 結果は変わらない)。
++			if (table != null && state.memoCount + visited.length <= MEMO_LIMIT) state.memoCount += visited.length;
++			else visited.length = 0;
 +			if (table != null) for (let i = 0; i < visited.length; i++) table.set(memoKey(visited[i], state, input), {
 +				values,
 +				start: i,
@@ -246,7 +307,7 @@ index 8c47479..93b3e41 100644
  	}
  	sep(separator, min) {
  		if (min < 1) throw new Error("\"min\" must be a value greater than or equal to 1.");
-@@ -94,12 +133,24 @@ function seq(...parsers) {
+@@ -94,18 +138,31 @@ function seq(...parsers) {
  		let result;
  		let latestIndex = index;
  		const accum = [];
@@ -271,7 +332,14 @@ index 8c47479..93b3e41 100644
  		return success(latestIndex, accum);
  	});
  }
-@@ -154,6 +205,30 @@ function lazy(fn) {
+ function alt(parsers) {
+ 	return new Parser((input, index, state) => {
+ 		for (let i = 0; i < parsers.length; i++) {
++			if (state.work !== undefined) state.work++;
+ 			const result = parsers[i].handler(input, index, state);
+ 			if (result.success) return result;
+ 		}
+@@ -154,11 +211,54 @@ function lazy(fn) {
  	});
  	return parser;
  }
@@ -279,6 +347,17 @@ index 8c47479..93b3e41 100644
 +// 効く状態 (入れ子の深さ、リンクの見出しの中か) が同じまま読み直したときは、前の結果を
 +// 使う。覚えるのは 1 回の parse / parseSimple の間だけで、呼び出しをまたいで持たない。
 +let nextMemoId = 0;
++// 1 回の parse の仕事量 (alt で候補を試した数と、many で繰り返した数) の上限と、memo の
++// 件数の上限。上の memo で仕事量は入力の長さに比例するが、比例の係数は入れ子の深さの
++// 分だけ大きくなりうる。見落とした経路があっても 1 回の解析が際限なく走らないよう、
++// 安全網として上限を置く (Elythia のサーバーの MFM の解析器と同じ考え方)。上限を超えたら、
++// それより後に読む full / inline / simple は構文を試さず 1 文字の text として読む。
++// 普通の投稿は上限に届かないので、結果はパッチの前と変わらない。
++const WORK_LIMIT_BASE = 100000;
++const WORK_LIMIT_PER_CHAR = 100;
++const MEMO_LIMIT = 250000;
++// 注: memo は入力の文字列の値で引くので、同じ内容の引用が 2 つあると、子の node が同じ
++// object になる (mfm-js の利用側は node を書き換えないので、結果は変わらない)。
 +// 繰り返しごとの表を返す。鍵は位置と状態から作る数で、入れ子の上限は 1 回の
 +// 解析の間は変わらないので鍵に入れない。
 +function memoTable(state, input, id) {
@@ -302,7 +381,21 @@ index 8c47479..93b3e41 100644
  function createLanguage(syntaxes) {
  	const rules = {};
  	for (const key of Object.keys(syntaxes)) rules[key] = lazy(() => {
-@@ -408,13 +483,25 @@ function seqOrText(...parsers) {
+-		const parser = syntaxes[key](rules);
++		let parser = syntaxes[key](rules);
+ 		if (parser == null) throw new Error("syntax must return a parser.");
++		if (key === "full" || key === "inline" || key === "simple") {
++			// 仕事量の上限を超えたら、構文を試さず 1 文字の text として読む。
++			const inner = parser;
++			parser = new Parser((input, index, state) => {
++				if (state.work !== undefined && state.work > state.workLimit) return char.handler(input, index, state);
++				return inner.handler(input, index, state);
++			});
++		}
+ 		parser.name = key;
+ 		return parser;
+ 	});
+@@ -408,13 +508,25 @@ function seqOrText(...parsers) {
  	return new Parser((input, index, state) => {
  		const accum = [];
  		let latestIndex = index;
@@ -328,23 +421,42 @@ index 8c47479..93b3e41 100644
  		return success(latestIndex, accum);
  	});
  }
-@@ -804,7 +891,8 @@ function fullParser(input, opts) {
+@@ -804,7 +916,11 @@ function fullParser(input, opts) {
  		nestLimit: opts.nestLimit != null ? opts.nestLimit : 20,
  		depth: 0,
  		linkLabel: false,
 -		trace: false
 +		trace: false,
-+		memo: new Map()
++		memo: new Map(),
++		memoCount: 0,
++		work: 0,
++		workLimit: opts.workLimit != null ? opts.workLimit : WORK_LIMIT_BASE + WORK_LIMIT_PER_CHAR * input.length
  	});
  	if (!result.success) throw new Error("Unexpected parse error");
  	return mergeText(result.value);
-@@ -812,7 +900,8 @@ function fullParser(input, opts) {
+@@ -812,7 +928,11 @@ function fullParser(input, opts) {
  function simpleParser(input) {
  	const result = language.simpleParser.handler(input, 0, {
  		depth: 0,
 -		nestLimit: Infinity
 +		nestLimit: Infinity,
-+		memo: new Map()
++		memo: new Map(),
++		memoCount: 0,
++		work: 0,
++		workLimit: WORK_LIMIT_BASE + WORK_LIMIT_PER_CHAR * input.length
  	});
  	if (!result.success) throw new Error("Unexpected parse error");
  	return mergeText(result.value);
+@@ -823,7 +943,11 @@ function simpleParser(input) {
+ * Generates a MfmNode tree from the MFM string.
+ */
+ function parse(input, opts = {}) {
+-	return fullParser(input, { nestLimit: opts.nestLimit });
++	// workLimit は Elythia のテストのための口 (仕事量の上限を差し替える)。
++	return fullParser(input, {
++		nestLimit: opts.nestLimit,
++		workLimit: opts.workLimit
++	});
+ }
+ /**
+ * Generates a MfmSimpleNode tree from the MFM string.
