@@ -359,8 +359,12 @@ func (m *Manager) prepare(ctx context.Context, rec *Record, plan *backup.Restore
 			return
 		}
 	}
-	// 作った DB だけを消す。今の DB には触れていない。
-	m.dropTarget(ctx, rec)
+	// 作った DB だけを消す。今の DB には触れていない。作る前に落ちたとき (同じ名前の DB
+	// を確かめた後で別の作業が作った場合を含む) は、その名前の DB は自分のものではない
+	// ので消さない。
+	if !errors.Is(err, backup.ErrRestoreNotCreated) {
+		m.dropTarget(ctx, rec)
+	}
 	final := StepFailed
 	serr := m.setStep(ctx, rec.OpID, StepPreparing, StepFailed, "error", err.Error())
 	if errors.Is(serr, ErrStep) {

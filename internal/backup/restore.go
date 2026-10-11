@@ -58,7 +58,18 @@ var (
 	// ErrRestoreSwitchUnknown is returned when renaming the databases failed
 	// and pg_database does not tell whether the rename happened.
 	ErrRestoreSwitchUnknown = errors.New("backup: could not tell whether the database names were switched")
+	// ErrRestoreNotCreated is matched (errors.Is) by a RestoreInto error
+	// returned before it created the database: the caller must not drop a
+	// database of that name, which may be another one's.
+	ErrRestoreNotCreated = errors.New("backup: the database was not created")
 )
+
+// notCreatedError marks an error of RestoreInto before the database was
+// created, keeping its message.
+type notCreatedError struct{ err error }
+
+func (e notCreatedError) Error() string   { return e.err.Error() }
+func (e notCreatedError) Unwrap() []error { return []error{ErrRestoreNotCreated, e.err} }
 
 // maxIdentifierLen is NAMEDATALEN-1 of a default PostgreSQL build.
 const maxIdentifierLen = 63
@@ -691,7 +702,7 @@ func (r *Restorer) RestoreInto(ctx context.Context, plan *RestorePlan, opts Rest
 	// 作る前に dump を確かめる。食い違っていたら、DB を作らずに止まる。
 	dump, cleanup, err := r.fetchDump(ctx, plan.Meta)
 	if err != nil {
-		return err
+		return notCreatedError{err}
 	}
 	defer cleanup()
 	if opts.Mode == RestoreEmpty {
@@ -699,17 +710,19 @@ func (r *Restorer) RestoreInto(ctx context.Context, plan *RestorePlan, opts Rest
 	}
 	admin, err := r.connect(ctx, maintenanceDB(opts.MaintenanceDB))
 	if err != nil {
-		return err
+		return notCreatedError{err}
 	}
 	defer admin.Close(context.Background())
 	db, err := databaseInfo(ctx, admin, opts.Database)
 	if err != nil {
-		return err
+		return notCreatedError{err}
 	}
 	loc := r.swapLocale(plan.Meta, opts.Database, db)
 	r.logf("creating database %s", dbname)
 	if _, err := admin.Exec(ctx, createDatabaseSQL(dbname, loc, db.owner)); err != nil {
-		return fmt.Errorf("backup: create database %q: %w", dbname, err)
+		// 確かめた後で同じ名前の DB を別の作業が作った場合も、ここで落ちる。呼び出し元が
+		// その DB を消さないよう、作っていないことを示す。
+		return notCreatedError{fmt.Errorf("backup: create database %q: %w", dbname, err)}
 	}
 	if err := r.pgRestore(ctx, dbname, dump); err != nil {
 		if _, derr := admin.Exec(context.Background(), dropDatabaseSQL(dbname)); derr != nil {

@@ -198,6 +198,15 @@ func TestRestoreSwap(t *testing.T) {
 		"ALTER DATABASE "+res.BeforeRestore+" RENAME TO "+rsAppDB)
 	back := pg.connect(t, rsAppUser, rsAppPass, rsAppDB)
 	assert.Equal(t, int64(2), rsCount(t, back, `SELECT count(*) FROM note`))
+
+	// 戻す先の名前を、確かめた後で別の作業が作っていた。作れなかったことを示し、その DB
+	// には触れない (呼び出し元が消さないように)。
+	pg.exec(t, "postgres", "CREATE DATABASE elythia_taken")
+	plan, err := r.Load(ctx, rsGenID)
+	require.NoError(t, err)
+	err = r.RestoreInto(ctx, plan, RestoreOptions{ID: rsGenID, Mode: RestoreSwap, Database: rsAppDB, Confirm: rsAppDB}, "elythia_taken")
+	require.ErrorIs(t, err, ErrRestoreNotCreated)
+	assert.Contains(t, err.Error(), "already exists")
 }
 
 // TestRestoreEmptyFromPostgres16 takes a backup from a PostgreSQL 16 server
