@@ -293,7 +293,9 @@ func TestRestore_AbortAndExpiry(t *testing.T) {
 		got := e.waitStep(rec.OpID, StepAborted)
 		assert.Equal(t, "aborted by the administrator", got.Error)
 		assert.Equal(t, []string{rec.Target}, e.db.drops)
-		assert.False(t, e.slot.isHeld())
+		// 起動時の回復が、準備の作った記録を見て枠を待っていると、中止の後に一度だけ枠を
+		// 取って読み直す (何もせずに返す)。
+		require.Eventually(t, func() bool { return !e.slot.isHeld() }, time.Second, 5*time.Millisecond)
 		assert.ErrorIs(t, e.m.Confirm(ctx, rec.OpID), ErrStep, "an aborted operation cannot be confirmed")
 		assert.ErrorIs(t, e.m.Abort(ctx, rec.OpID), ErrStep)
 	})

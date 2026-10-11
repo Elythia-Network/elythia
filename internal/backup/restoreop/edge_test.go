@@ -200,7 +200,9 @@ func TestRestore_RevertCannotHoldAgain(t *testing.T) {
 	p.setFailBack(true)
 	rec, _ := e.prepare()
 	require.NoError(t, e.m.Confirm(context.Background(), rec.OpID))
-	e.waitStep(rec.OpID, StepReverting)
+	// 接続は戻す処理に入る前 (再開を待つ間) に残す。reverting を見てからでは、判定役が
+	// 先に held にして入れ替えに進むことがある。
+	e.waitStep(rec.OpID, StepResuming)
 	e.db.mu.Lock()
 	e.db.conns[testDB] = 1
 	e.db.mu.Unlock()
