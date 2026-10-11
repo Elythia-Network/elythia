@@ -26,6 +26,15 @@ type verifyEnv struct {
 	// coreDir / localDir are the bundled migration directories, the same
 	// ones `elythia migrate` and `elythia doctor` read.
 	coreDir, localDir string
+	// getenv reads the environment; nil means os.Getenv.
+	getenv func(string) string
+}
+
+func (e verifyEnv) env(key string) string {
+	if e.getenv == nil {
+		return os.Getenv(key)
+	}
+	return e.getenv(key)
 }
 
 func defaultVerifyEnv() verifyEnv {
@@ -103,6 +112,9 @@ func runVerify(ctx context.Context, e verifyEnv, args []string) int {
 		return 1
 	}
 
+	if w := backup.TempDirWarning(opts.TempDir, e.env); w != "" {
+		fmt.Fprintf(e.stderr, "elythia backup verify: warning: %s\n", w)
+	}
 	res, err := e.verify(ctx, storage, id, opts)
 	switch {
 	case len(res.Stages) > 0:

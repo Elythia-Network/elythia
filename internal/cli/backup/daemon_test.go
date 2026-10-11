@@ -161,6 +161,46 @@ func (r recordingRunner) Command(ctx context.Context, _ []string, name string, a
 	return exec.CommandContext(ctx, "false")
 }
 
+// The daemon warns at start when scheduled verification would use the
+// default temporary directory.
+func TestWireDepsWarnsWithoutTMPDIR(t *testing.T) {
+	core := filepath.Join(t.TempDir(), "migration")
+	writeMigrations(t, core, "000001")
+	ve := defaultVerifyEnv()
+	ve.coreDir, ve.localDir = core, filepath.Join(core, "local")
+	for _, tc := range []struct {
+		name   string
+		verify bool
+		tmpdir string
+		warn   bool
+	}{
+		{"scheduled verification without TMPDIR", true, "", true},
+		{"scheduled verification with TMPDIR", true, "/scratch", false},
+		{"no scheduled verification", false, "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ve.getenv = func(k string) string {
+				if k == "TMPDIR" {
+					return tc.tmpdir
+				}
+				return ""
+			}
+			b := &config.BackupOptions{
+				Storage:  config.BackupStorageOptions{Type: backupkit.StorageTypeDir, Dir: config.BackupDirectoryOptions{Path: markedDir(t)}},
+				Schedule: config.BackupScheduleOptions{Verify: tc.verify},
+			}
+			var log bytes.Buffer
+			_, err := wireDeps(defaultEnv(), ve)(cfgWith(b), slog.New(slog.NewTextHandler(&log, nil)))
+			require.NoError(t, err)
+			if tc.warn {
+				assert.Contains(t, log.String(), "TMPDIR is not set")
+			} else {
+				assert.NotContains(t, log.String(), "TMPDIR")
+			}
+		})
+	}
+}
+
 func TestWireDepsBuildsTakerAndVerifier(t *testing.T) {
 	core := filepath.Join(t.TempDir(), "migration")
 	writeMigrations(t, core, "000001", "000009")

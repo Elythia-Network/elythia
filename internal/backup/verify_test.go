@@ -1016,6 +1016,20 @@ func TestVerifyInterruptedStageKeepsTheEarlierResult(t *testing.T) {
 	assert.Equal(t, earlier, s.objects[Key(testGenID, VerifyFile)])
 }
 
+func TestTempDirWarning(t *testing.T) {
+	env := func(v string) func(string) string {
+		return func(k string) string {
+			if k == "TMPDIR" {
+				return v
+			}
+			return ""
+		}
+	}
+	assert.Contains(t, TempDirWarning("", env("")), "point TMPDIR at another disk")
+	assert.Empty(t, TempDirWarning("", env("/scratch")))
+	assert.Empty(t, TempDirWarning("/scratch", env("")))
+}
+
 // TestVerifyCorruptDumpSizeIsADefect: a dumpSize in meta.json that does not
 // match the stored object is a defect of the generation, found before the
 // free-space check could mistake it for a full disk.

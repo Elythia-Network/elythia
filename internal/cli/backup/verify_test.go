@@ -169,6 +169,23 @@ func TestRunVerifyEnvironmentErrorIsNotAVerdict(t *testing.T) {
 	assert.Contains(t, h.stderr.String(), "pg_bigm")
 }
 
+func TestRunVerifyWarnsWithoutTMPDIR(t *testing.T) {
+	h := newHarness(t)
+	h.env.getenv = func(string) string { return "" }
+	assert.Equal(t, 0, h.run("latest"))
+	assert.Contains(t, h.stderr.String(), "warning: TMPDIR is not set")
+
+	h = newHarness(t)
+	h.env.getenv = func(k string) string {
+		if k == "TMPDIR" {
+			return "/scratch"
+		}
+		return ""
+	}
+	assert.Equal(t, 0, h.run("latest"))
+	assert.NotContains(t, h.stderr.String(), "TMPDIR")
+}
+
 func TestRunVerifyErrorWithoutStagesPrintsNoTable(t *testing.T) {
 	h := newHarness(t)
 	h.result = backup.VerifyResult{}

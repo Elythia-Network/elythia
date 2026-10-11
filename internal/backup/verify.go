@@ -290,6 +290,23 @@ func stageOutcome(ctx context.Context, stage VerifyStage, serr error, warnings [
 	}
 }
 
+// TempDirWarning returns a warning when verification would stage the
+// decrypted dump and the throwaway server under the default temporary
+// directory: tempDir (VerifyOptions.TempDir) is empty and getenv("TMPDIR")
+// is unset. It returns "" otherwise.
+//
+// 空きの検査は dump の大きさを下限にしているだけで、戻した DB の大きさは測れない。
+// 既定の /tmp は、compose ではコンテナの書き込み層で、本番の DB の volume と同じ
+// ディスクであることが多い。埋まると本番の PostgreSQL が WAL を書けなくなるので、
+// 別のディスクへ向ける手順へ誘導する。
+func TempDirWarning(tempDir string, getenv func(string) string) string {
+	if tempDir != "" || getenv("TMPDIR") != "" {
+		return ""
+	}
+	return "TMPDIR is not set, so verification stages the decrypted dump and the restored database under " + os.TempDir() +
+		", which may be on the same disk as the production database; point TMPDIR at another disk (docs/backup.md)"
+}
+
 // requireFree fails when dir has less than need bytes free. free reports the
 // free space; an error from it is an environment error too.
 func requireFree(what, dir string, need int64, free func(string) (int64, error)) error {
