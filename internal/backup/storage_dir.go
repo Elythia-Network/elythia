@@ -554,60 +554,70 @@ func regularFile(root *os.Root, rel string) (fs.FileInfo, error) {
 // 読めないディレクトリで一覧ごと失敗する。prefix のディレクトリが無ければ空を返す。
 //
 // 目印が無ければ失敗にする。mount が外れた後の空のディレクトリを「世代が無い」と
-// 読むと、daemon が世代の整理や遅れの検知を誤る。
+// 読むと、daemon が世代の整理や遅れの検知を誤る。目印を確かめた根の fd のまま
+// (os.Root の FS で) 走査するので、確かめた後に mount し直されても、確かめた方を
+// 読む。起点までの途中の symlink は拒む (根の外の世代を一覧に混ぜない)。
 func (d *DirStorage) List(_ context.Context, prefix string) ([]ObjectInfo, error) {
 	root, err := d.openRoot()
 	if err != nil {
 		return nil, err
 	}
-	err = d.checkMarker(root)
-	_ = root.Close()
-	if err != nil {
+	defer func() { _ = root.Close() }()
+	if err := d.checkMarker(root); err != nil {
 		return nil, err
 	}
+	start := listStart(prefix)
+	if start != "." {
+		if _, err := lstatPath(root, filepath.FromSlash(start)); err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("backup: list %s: %s: %w", d.root, start, err)
+		}
+	}
 	var out []ObjectInfo
-	err = filepath.WalkDir(d.listStart(prefix), d.listWalkFunc(prefix, &out))
-	if err != nil {
+	if err := fs.WalkDir(root.FS(), start, listWalkFunc(prefix, &out)); err != nil {
 		return nil, fmt.Errorf("backup: list %s: %w", d.root, err)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
 	return out, nil
 }
 
-// listStart returns the directory List walks for prefix: the deepest
-// directory every matching key is under, or the root.
-func (d *DirStorage) listStart(prefix string) string {
+// listStart returns the root-relative, slash-separated directory List walks
+// for prefix: the deepest directory every matching key is under, or ".".
+func listStart(prefix string) string {
 	dir := path.Dir(prefix)
 	if strings.HasSuffix(prefix, "/") {
 		dir = strings.TrimSuffix(prefix, "/")
 	}
 	// key として使えない形 ("..") なら、根から走査して prefix で絞る。
 	if dir == "." || dir == "" {
-		return d.root
+		return "."
 	}
-	if _, err := d.rel(dir); err != nil {
-		return d.root
+	if _, err := (&DirStorage{}).rel(dir); err != nil {
+		return "."
 	}
-	return filepath.Join(d.root, filepath.FromSlash(dir))
+	return dir
 }
 
-// listWalkFunc returns the filepath.WalkDir callback of List, which appends
-// the matching regular files to out. Entries that disappear during the walk
-// are skipped; the root itself must exist.
-func (d *DirStorage) listWalkFunc(prefix string, out *[]ObjectInfo) fs.WalkDirFunc {
+// listWalkFunc returns the fs.WalkDir callback of List, which appends the
+// matching regular files to out. Paths are root-relative ("." is the root).
+// Entries that disappear during the walk are skipped; the root itself must
+// exist.
+func listWalkFunc(prefix string, out *[]ObjectInfo) fs.WalkDirFunc {
 	return func(p string, e fs.DirEntry, err error) error {
 		if err != nil {
 			// 一覧の途中で世代が消される (整理や管理画面からの削除) と、読もうとした
 			// ディレクトリやファイルが無くなっている。消えたものは一覧に要らないので
 			// 飛ばす。根そのものが無いのは保存先の異常なので、これまでどおり失敗にする。
-			if p != d.root && errors.Is(err, fs.ErrNotExist) {
+			if p != "." && errors.Is(err, fs.ErrNotExist) {
 				return nil
 			}
 			// 世代の外の読めないディレクトリ (lost+found など) は、バックアップの物を
 			// 持たないので飛ばす。世代の下で読めないのは保存先の異常なので失敗にする。
-			if p != d.root && errors.Is(err, fs.ErrPermission) && !d.underGenerations(p) {
+			if p != "." && errors.Is(err, fs.ErrPermission) && !underGenerations(p) {
 				if e != nil && e.IsDir() {
-					return filepath.SkipDir
+					return fs.SkipDir
 				}
 				return nil
 			}
@@ -616,11 +626,7 @@ func (d *DirStorage) listWalkFunc(prefix string, out *[]ObjectInfo) fs.WalkDirFu
 		if !e.Type().IsRegular() || strings.HasPrefix(e.Name(), dirTempPrefix) {
 			return nil
 		}
-		rel, err := filepath.Rel(d.root, p)
-		if err != nil {
-			return err
-		}
-		key := filepath.ToSlash(rel)
+		key := p
 		if key == DirMarkerFile || !strings.HasPrefix(key, prefix) {
 			return nil
 		}
@@ -636,15 +642,11 @@ func (d *DirStorage) listWalkFunc(prefix string, out *[]ObjectInfo) fs.WalkDirFu
 	}
 }
 
-// underGenerations reports whether p is the generation root or below it.
-func (d *DirStorage) underGenerations(p string) bool {
-	rel, err := filepath.Rel(d.root, p)
-	if err != nil {
-		return false
-	}
+// underGenerations reports whether the root-relative path p is the
+// generation root or below it.
+func underGenerations(p string) bool {
 	gen := strings.TrimSuffix(generationRoot, "/")
-	rel = filepath.ToSlash(rel)
-	return rel == gen || strings.HasPrefix(rel, gen+"/")
+	return p == gen || strings.HasPrefix(p, gen+"/")
 }
 
 // Delete removes key and then any directories it leaves empty, up to (not

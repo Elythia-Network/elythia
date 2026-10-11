@@ -261,20 +261,25 @@ func TestDirStorage_ListSkipsEntriesRemovedDuringWalk(t *testing.T) {
 	st, err := NewDirStorage(root)
 	require.NoError(t, err)
 	var out []ObjectInfo
-	fn := st.listWalkFunc("", &out)
-	gone := &fs.PathError{Op: "open", Path: filepath.Join(root, "gen"), Err: syscall.ENOENT}
+	// 走査は根からの相対パスで行う ("." が根)。
+	fn := listWalkFunc("", &out)
+	gone := &fs.PathError{Op: "open", Path: "gen", Err: syscall.ENOENT}
 
 	// 読もうとした世代のディレクトリが、もう消えていた。
-	require.NoError(t, fn(filepath.Join(root, "gen"), nil, gone))
+	require.NoError(t, fn("gen", nil, gone))
 	// 根が無いのは、これまでどおり失敗。
-	require.ErrorIs(t, fn(root, nil, gone), fs.ErrNotExist)
+	require.ErrorIs(t, fn(".", nil, gone), fs.ErrNotExist)
 	// 世代の下で、消えた以外の失敗は、これまでどおり返す。
-	require.ErrorIs(t, fn(filepath.Join(root, "generations", "gen"), nil, &fs.PathError{Op: "open", Err: syscall.EACCES}), syscall.EACCES)
-	require.ErrorIs(t, fn(filepath.Join(root, "generations"), nil, &fs.PathError{Op: "open", Err: syscall.EACCES}), syscall.EACCES)
+	require.ErrorIs(t, fn("generations/gen", nil, &fs.PathError{Op: "open", Err: syscall.EACCES}), syscall.EACCES)
+	require.ErrorIs(t, fn("generations", nil, &fs.PathError{Op: "open", Err: syscall.EACCES}), syscall.EACCES)
+	// 根そのものが読めないのも失敗。
+	require.ErrorIs(t, fn(".", nil, &fs.PathError{Op: "open", Err: syscall.EACCES}), syscall.EACCES)
 	// 世代の外の読めないもの (lost+found など) は飛ばす。
-	require.NoError(t, fn(filepath.Join(root, "gen"), nil, &fs.PathError{Op: "open", Err: syscall.EACCES}))
+	require.NoError(t, fn("gen", nil, &fs.PathError{Op: "open", Err: syscall.EACCES}))
+	// "generations" で始まるだけの別の名前は、世代の外。
+	require.NoError(t, fn("generationsX", nil, &fs.PathError{Op: "open", Err: syscall.EACCES}))
 	// 世代の外でも、権限以外の失敗は返す。
-	require.ErrorIs(t, fn(filepath.Join(root, "gen"), nil, &fs.PathError{Op: "open", Err: syscall.EIO}), syscall.EIO)
+	require.ErrorIs(t, fn("gen", nil, &fs.PathError{Op: "open", Err: syscall.EIO}), syscall.EIO)
 
 	// ディレクトリを読んだ後で、ファイルが消された。
 	ctx := context.Background()
@@ -283,7 +288,7 @@ func TestDirStorage_ListSkipsEntriesRemovedDuringWalk(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, entries, 1)
 	require.NoError(t, os.Remove(filepath.Join(root, "gen", "a")))
-	require.NoError(t, fn(filepath.Join(root, "gen", "a"), entries[0], nil))
+	require.NoError(t, fn("gen/a", entries[0], nil))
 	assert.Empty(t, out)
 
 	require.NoError(t, st.Put(ctx, "gen/b", strings.NewReader("x")))
@@ -836,19 +841,18 @@ func TestDirStorage_ListStartsAtThePrefix(t *testing.T) {
 }
 
 func TestDirStorage_ListStart(t *testing.T) {
-	st := &DirStorage{root: "/r"}
 	for prefix, want := range map[string]string{
-		"":                     "/r",
-		"gen":                  "/r",
-		"generations/":         "/r/generations",
-		"generations/a/":       "/r/generations/a",
-		"generations/a/meta":   "/r/generations/a",
-		"generations/../x/":    "/r",
-		"../outside/":          "/r",
-		"generations/.tmp-x/":  "/r",
-		"generations//double/": "/r",
+		"":                     ".",
+		"gen":                  ".",
+		"generations/":         "generations",
+		"generations/a/":       "generations/a",
+		"generations/a/meta":   "generations/a",
+		"generations/../x/":    ".",
+		"../outside/":          ".",
+		"generations/.tmp-x/":  ".",
+		"generations//double/": ".",
 	} {
-		assert.Equal(t, want, st.listStart(prefix), prefix)
+		assert.Equal(t, want, listStart(prefix), prefix)
 	}
 }
 
@@ -881,4 +885,27 @@ func TestDirStorage_RechecksTheMarker(t *testing.T) {
 	objs, err := st.List(ctx, "")
 	require.NoError(t, err)
 	assert.Len(t, objs, 2)
+}
+
+// TestDirStorage_ListRefusesSymlinkedPrefix: a generation directory replaced
+// by a symbolic link (to a place outside the root) must not be listed as if it
+// were in the storage.
+func TestDirStorage_ListRefusesSymlinkedPrefix(t *testing.T) {
+	outside := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(outside, "20261010T040000Z"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(outside, "20261010T040000Z", MetaFile), []byte("{}"), 0o600))
+	root := markedDir(t)
+	require.NoError(t, os.Symlink(outside, filepath.Join(root, "generations")))
+	st, err := NewDirStorage(root)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	for _, prefix := range []string{Key("20261010T040000Z", ""), GenerationPrefix()} {
+		_, err := st.List(ctx, prefix)
+		require.ErrorIs(t, err, errSymlink, prefix)
+	}
+	// 根から走査するときは、symlink を辿らない (中身を数えない)。
+	objs, err := st.List(ctx, "")
+	require.NoError(t, err)
+	assert.Empty(t, objs)
 }
