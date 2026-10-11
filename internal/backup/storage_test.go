@@ -268,8 +268,13 @@ func TestDirStorage_ListSkipsEntriesRemovedDuringWalk(t *testing.T) {
 	require.NoError(t, fn(filepath.Join(root, "gen"), nil, gone))
 	// 根が無いのは、これまでどおり失敗。
 	require.ErrorIs(t, fn(root, nil, gone), fs.ErrNotExist)
-	// 消えた以外の失敗は、これまでどおり返す。
-	require.ErrorIs(t, fn(filepath.Join(root, "gen"), nil, &fs.PathError{Op: "open", Err: syscall.EACCES}), syscall.EACCES)
+	// 世代の下で、消えた以外の失敗は、これまでどおり返す。
+	require.ErrorIs(t, fn(filepath.Join(root, "generations", "gen"), nil, &fs.PathError{Op: "open", Err: syscall.EACCES}), syscall.EACCES)
+	require.ErrorIs(t, fn(filepath.Join(root, "generations"), nil, &fs.PathError{Op: "open", Err: syscall.EACCES}), syscall.EACCES)
+	// 世代の外の読めないもの (lost+found など) は飛ばす。
+	require.NoError(t, fn(filepath.Join(root, "gen"), nil, &fs.PathError{Op: "open", Err: syscall.EACCES}))
+	// 世代の外でも、権限以外の失敗は返す。
+	require.ErrorIs(t, fn(filepath.Join(root, "gen"), nil, &fs.PathError{Op: "open", Err: syscall.EIO}), syscall.EIO)
 
 	// ディレクトリを読んだ後で、ファイルが消された。
 	ctx := context.Background()
@@ -768,4 +773,81 @@ func TestDirStorage_PutAndDeleteDoNotFollowSymlinks(t *testing.T) {
 	b, err = os.ReadFile(victim)
 	require.NoError(t, err)
 	assert.Equal(t, "host file", string(b))
+}
+
+// unreadableDir creates dir with no permissions and restores them on cleanup,
+// so t.TempDir can remove it.
+func unreadableDir(t *testing.T, dir string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	require.NoError(t, os.Chmod(dir, 0))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	if _, err := os.ReadDir(dir); err == nil {
+		t.Skip("running with permissions that read a mode 000 directory (root?)")
+	}
+}
+
+// TestDirStorage_ListIgnoresUnreadableDirectoriesOutsideGenerations: a disk
+// mounted at the root brings lost+found (root, 0700), which the backup user
+// cannot read. Listing and taking must not fail because of it.
+func TestDirStorage_ListIgnoresUnreadableDirectoriesOutsideGenerations(t *testing.T) {
+	root := markedDir(t)
+	unreadableDir(t, filepath.Join(root, "lost+found"))
+	st, err := NewDirStorage(root)
+	require.NoError(t, err)
+	ctx := context.Background()
+	require.NoError(t, st.Put(ctx, Key("20261010T040000Z", MetaFile), strings.NewReader("{}")))
+	require.NoError(t, st.Put(ctx, "other/file", strings.NewReader("x")))
+
+	for _, prefix := range []string{"", GenerationPrefix(), Key("20261010T040000Z", "")} {
+		objs, err := st.List(ctx, prefix)
+		require.NoError(t, err, prefix)
+		assert.NotEmpty(t, objs, prefix)
+	}
+	all, err := st.List(ctx, "")
+	require.NoError(t, err)
+	assert.Len(t, all, 2, "everything readable is still counted")
+
+	// prefix の下が無ければ空。
+	objs, err := st.List(ctx, Key("20261010T050000Z", ""))
+	require.NoError(t, err)
+	assert.Empty(t, objs)
+}
+
+// TestDirStorage_ListStartsAtThePrefix: listing one generation does not read
+// the others, so a broken generation does not hide a healthy one. Below
+// generations/, an unreadable directory is still an error.
+func TestDirStorage_ListStartsAtThePrefix(t *testing.T) {
+	root := markedDir(t)
+	st, err := NewDirStorage(root)
+	require.NoError(t, err)
+	ctx := context.Background()
+	require.NoError(t, st.Put(ctx, Key("20261010T040000Z", MetaFile), strings.NewReader("{}")))
+	unreadableDir(t, filepath.Join(root, "generations", "20261010T030000Z"))
+
+	objs, err := st.List(ctx, Key("20261010T040000Z", ""))
+	require.NoError(t, err)
+	require.Len(t, objs, 1)
+
+	_, err = st.List(ctx, GenerationPrefix())
+	require.ErrorIs(t, err, fs.ErrPermission, "an unreadable generation is not skipped silently")
+	_, err = ListGenerations(ctx, st)
+	require.ErrorIs(t, err, fs.ErrPermission)
+}
+
+func TestDirStorage_ListStart(t *testing.T) {
+	st := &DirStorage{root: "/r"}
+	for prefix, want := range map[string]string{
+		"":                     "/r",
+		"gen":                  "/r",
+		"generations/":         "/r/generations",
+		"generations/a/":       "/r/generations/a",
+		"generations/a/meta":   "/r/generations/a",
+		"generations/../x/":    "/r",
+		"../outside/":          "/r",
+		"generations/.tmp-x/":  "/r",
+		"generations//double/": "/r",
+	} {
+		assert.Equal(t, want, st.listStart(prefix), prefix)
+	}
 }
