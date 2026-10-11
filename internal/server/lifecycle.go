@@ -98,6 +98,10 @@ type Supervisor struct {
 	shutdownOnce sync.Once
 	shutdownErr  error
 
+	// afterLoad, when set, runs in ServeHTTP right after a request loaded the
+	// current handler (tests: to swap the handler at that exact point).
+	afterLoad func()
+
 	// maint はメンテナンスの状態を追う部分 (maintenance.go)。deps.Maintenance が
 	// nil なら使わない。
 	maint maintTracker
@@ -191,6 +195,9 @@ func (s *Supervisor) setHandler(h http.Handler) *routedHandler {
 func (s *Supervisor) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for {
 		rh := s.current.Load()
+		if s.afterLoad != nil {
+			s.afterLoad()
+		}
 		// WebSocket は hijack されて長く残るので数えない。止めるときは
 		// Server.StopBackground が close frame を送って閉じる。
 		if isWebSocketUpgrade(r) {
