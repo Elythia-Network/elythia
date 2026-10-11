@@ -344,3 +344,30 @@ func TestRestore_EnterRefusedByAnotherMaintenance(t *testing.T) {
 	assert.Equal(t, "manual-1", st.OpID, "the other maintenance is left alone")
 	assert.Equal(t, "current", e.db.content(testDB))
 }
+
+// TestPrepare_KeepsADatabaseItDidNotCreate checks that a failed prepare does
+// not drop a database of the target's name that another one created after
+// the checks (#3463 (6c) L-6).
+func TestPrepare_KeepsADatabaseItDidNotCreate(t *testing.T) {
+	e := newEnv(t, func(o *Options) {
+		db := o.DB.(*fakeDB)
+		// 確かめた後、作る前に、同じ名前の DB を別の作業が作る。
+		o.DB = createsFirst{db}
+	})
+	rec, _, err := e.m.Prepare(context.Background(), PrepareRequest{GenerationID: "20261010T120000Z", UserID: "u1", Token: "t"})
+	require.NoError(t, err)
+	got := e.waitStep(rec.OpID, StepFailed)
+	assert.Contains(t, got.Error, "already exists")
+	assert.Equal(t, "someone else's", e.db.content(rec.Target))
+	assert.Empty(t, e.db.drops)
+}
+
+// createsFirst creates the target as another one's right before restoring.
+type createsFirst struct{ *fakeDB }
+
+func (c createsFirst) RestoreInto(ctx context.Context, plan *backup.RestorePlan, opts backup.RestoreOptions, dbname string) error {
+	c.mu.Lock()
+	c.dbs[dbname] = "someone else's"
+	c.mu.Unlock()
+	return c.fakeDB.RestoreInto(ctx, plan, opts, dbname)
+}

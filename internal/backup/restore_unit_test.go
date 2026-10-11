@@ -580,6 +580,8 @@ func TestRestoreStepsReportConnectionFailures(t *testing.T) {
 		assert.NotContains(t, err.Error(), secret, name)
 	}
 	assert.Contains(t, errs["CheckTarget empty"].Error(), "create the empty database first")
+	// 繋がらずに DB を作っていないことを、呼び出し元が見分けられる (作っていない DB を消さない)。
+	assert.ErrorIs(t, errs["RestoreInto swap"], ErrRestoreNotCreated)
 }
 
 func TestRedactURL(t *testing.T) {

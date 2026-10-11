@@ -62,6 +62,10 @@ func (f *fakeDB) CheckCompatibility(context.Context, *backup.RestorePlan, backup
 
 func (f *fakeDB) RestoreInto(ctx context.Context, plan *backup.RestorePlan, _ backup.RestoreOptions, dbname string) error {
 	f.mu.Lock()
+	if _, taken := f.dbs[dbname]; taken {
+		f.mu.Unlock()
+		return fmt.Errorf("%w: database %q already exists", backup.ErrRestoreNotCreated, dbname)
+	}
 	f.dbs[dbname] = "restored:" + plan.ID
 	block := f.block
 	f.mu.Unlock()
