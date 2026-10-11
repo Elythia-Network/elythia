@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -266,6 +267,13 @@ func newTicket() (ticket, hash string) {
 	ticket = base64.RawURLEncoding.EncodeToString(b)
 	return ticket, hashString(ticket)
 }
+
+// opIDPattern is the shape newOpID makes.
+var opIDPattern = regexp.MustCompile(`^restore-[0-9a-f]{16}$`)
+
+// ValidOpID reports whether opID has the shape of an operation ID, so that a
+// request with another one is refused without reading Redis.
+func ValidOpID(opID string) bool { return opIDPattern.MatchString(opID) }
 
 func newOpID() string {
 	b := make([]byte, 8)

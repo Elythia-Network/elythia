@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -127,6 +128,26 @@ type apiRig struct {
 	maint  *maintmode.Store
 	m      *restoreop.Manager
 	d      *Daemon
+	mr     *miniredis.Miniredis
+	log    *syncLog
+}
+
+// syncLog collects log output across goroutines.
+type syncLog struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (l *syncLog) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.Write(p)
+}
+
+func (l *syncLog) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.String()
 }
 
 func newAPIRig(t *testing.T) *apiRig {
@@ -137,7 +158,8 @@ func newAPIRig(t *testing.T) *apiRig {
 	db := &apiDB{dbs: map[string]bool{"app": true}}
 	maint := maintmode.NewStore(rdb, rdb, "p:")
 	ctx, cancel := context.WithCancel(context.Background())
-	d := New(Options{Storage: newMemStorage(), Logger: discardLogger()})
+	logs := &syncLog{}
+	d := New(Options{Storage: newMemStorage(), Logger: slog.New(slog.NewTextHandler(logs, nil))})
 	done := make(chan struct{})
 	go func() {
 		d.Run(ctx)
@@ -170,7 +192,7 @@ func newAPIRig(t *testing.T) *apiRig {
 	v := &fakeReauth{}
 	h, err := Handler(d, testToken, &Restore{Manager: m, Verifier: v})
 	require.NoError(t, err)
-	return &apiRig{h: h, verify: v, db: db, maint: maint, m: m, d: d}
+	return &apiRig{h: h, verify: v, db: db, maint: maint, m: m, d: d, mr: mr, log: logs}
 }
 
 type noSessions struct{}
@@ -489,4 +511,43 @@ func TestRestoreAPI_RefusesWhileAJobRuns(t *testing.T) {
 	assert.Zero(t, r.verify.count(), "refused before the re-authentication")
 	release()
 	r.prepare(t)
+}
+
+// TestRestoreAPI_StatusFromAnyone covers status, which the server does not
+// authenticate: a malformed operation ID is refused without reading Redis,
+// an unknown or mismatched one is not logged, and a failure to read Redis is
+// answered 503 and logged at most once a minute (#3463 (6c) L-2).
+func TestRestoreAPI_StatusFromAnyone(t *testing.T) {
+	r := newAPIRig(t)
+	opID, ticket := r.prepare(t)
+	before := r.mr.CommandCount()
+	for _, bad := range []string{"", "restore-", "restore-XYZ", "restore-0123456789abcdef0", "x" + opID, "../" + opID} {
+		rec, out := r.post(t, "/restore/status", map[string]any{"session": "session-token-01", "opId": bad, "ticket": ticket})
+		assert.Equal(t, http.StatusNotFound, rec.Code, bad)
+		assert.Equal(t, "NO_SUCH_RESTORE", errCode(out), bad)
+	}
+	assert.Equal(t, before, r.mr.CommandCount(), "a malformed ID does not reach Redis")
+
+	rec, _ := r.post(t, "/restore/status", map[string]any{"session": "session-token-01", "opId": "restore-0123456789abcdef", "ticket": ticket})
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	rec, _ = r.post(t, "/restore/status", map[string]any{"session": "other-session-01", "opId": opID, "ticket": ticket})
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assert.NotContains(t, r.log.String(), "cannot read a restore record")
+
+	r.mr.SetError("LOADING Redis is loading the dataset in memory")
+	for range 3 {
+		rec, out := r.post(t, "/restore/status", map[string]any{"session": "session-token-01", "opId": opID, "ticket": ticket})
+		assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+		assert.Equal(t, "RESTORE_UNAVAILABLE", errCode(out))
+	}
+	r.mr.SetError("")
+	assert.Equal(t, 1, strings.Count(r.log.String(), "cannot read a restore record"), "logged once a minute")
+}
+
+func TestLogThrottle(t *testing.T) {
+	var lt logThrottle
+	now := time.Unix(1000, 0)
+	assert.True(t, lt.allow(now))
+	assert.False(t, lt.allow(now.Add(storeErrLogInterval-time.Second)))
+	assert.True(t, lt.allow(now.Add(storeErrLogInterval)))
 }

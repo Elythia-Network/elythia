@@ -371,3 +371,10 @@ func (c createsFirst) RestoreInto(ctx context.Context, plan *backup.RestorePlan,
 	c.mu.Unlock()
 	return c.fakeDB.RestoreInto(ctx, plan, opts, dbname)
 }
+
+func TestValidOpID(t *testing.T) {
+	assert.True(t, ValidOpID(newOpID()))
+	for _, bad := range []string{"", "restore-", "restore-0123456789ABCDEF", "restore-0123456789abcde", "restore-0123456789abcdef0", " restore-0123456789abcdef", "restore-0123456789abcdef\n"} {
+		assert.False(t, ValidOpID(bad), bad)
+	}
+}

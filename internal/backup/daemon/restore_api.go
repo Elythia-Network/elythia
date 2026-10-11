@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/elythia-network/elythia/internal/api/adminbackup"
 	"github.com/elythia-network/elythia/internal/api/apierr"
@@ -34,6 +35,8 @@ type Restore struct {
 	Verifier ReauthVerifier
 
 	mu sync.RWMutex
+	// storeErrLog throttles the log of records that cannot be read.
+	storeErrLog logThrottle
 	// busy is held by the request that prepares, confirms or aborts.
 	//
 	// 段の確かめから操作までの間に、別の要求の再認証 (DB への接続) が割り込まない
@@ -172,7 +175,7 @@ func mountRestore(mux *http.ServeMux, rs *Restore, log *slog.Logger) {
 			return
 		}
 		defer unlock()
-		rec, ok := ticketRecord(w, r, log, m, req)
+		rec, ok := rs.ticketRecord(w, r, log, m, req)
 		if !ok {
 			return
 		}
@@ -209,7 +212,7 @@ func mountRestore(mux *http.ServeMux, rs *Restore, log *slog.Logger) {
 			return
 		}
 		defer unlock()
-		rec, ok := ticketRecord(w, r, log, m, req)
+		rec, ok := rs.ticketRecord(w, r, log, m, req)
 		if !ok {
 			return
 		}
@@ -244,7 +247,7 @@ func mountRestore(mux *http.ServeMux, rs *Restore, log *slog.Logger) {
 		if req.Session != "" {
 			req.I = req.Session
 		}
-		rec, ok := ticketRecord(w, r, log, m, req)
+		rec, ok := rs.ticketRecord(w, r, log, m, req)
 		if !ok {
 			return
 		}
@@ -301,13 +304,44 @@ func reauth(w http.ResponseWriter, r *http.Request, v ReauthVerifier, req restor
 }
 
 // ticketRecord checks the ticket and the session of a request.
-func ticketRecord(w http.ResponseWriter, r *http.Request, log *slog.Logger, m *restoreop.Manager, req restoreRequest) (*restoreop.Record, bool) {
+//
+// status は本体で認証しないので、誰の要求でもここまで届く。知らない操作や合わない
+// ticket はログに書かず、Redis を読めないときだけ、間隔を空けて書く (匿名の要求で
+// ログを溢れさせないため)。
+func (rs *Restore) ticketRecord(w http.ResponseWriter, r *http.Request, log *slog.Logger, m *restoreop.Manager, req restoreRequest) (*restoreop.Record, bool) {
 	rec, err := m.CheckTicket(r.Context(), req.OpID, req.Ticket, req.I)
-	if err != nil {
-		restoreError(w, log, err)
-		return nil, false
+	switch {
+	case err == nil:
+		return rec, true
+	case errors.Is(err, restoreop.ErrNotFound), errors.Is(err, restoreop.ErrTicket):
+		restoreError(w, nil, err)
+	default:
+		if log != nil && rs.storeErrLog.allow(time.Now()) {
+			log.Warn("backup: cannot read a restore record", "err", err)
+		}
+		writeJSON(w, http.StatusServiceUnavailable, apierr.ErrorWithKind("RESTORE_UNAVAILABLE",
+			"The backup service cannot read the restore now. Please try again later.", idRestoreUnavailable, apierr.KindServer))
 	}
-	return rec, true
+	return nil, false
+}
+
+// logThrottle lets one log line through per interval.
+type logThrottle struct {
+	mu   sync.Mutex
+	last time.Time
+}
+
+// storeErrLogInterval is how often a failure to read a record is logged.
+const storeErrLogInterval = time.Minute
+
+func (t *logThrottle) allow(now time.Time) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.last.IsZero() && now.Sub(t.last) < storeErrLogInterval {
+		return false
+	}
+	t.last = now
+	return true
 }
 
 // restoreError writes the response for an error of the restore.

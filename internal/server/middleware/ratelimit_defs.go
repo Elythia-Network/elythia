@@ -22,6 +22,12 @@ var DefaultEndpointLimits = map[string]*EndpointLimit{
 	"blocking/create": {Duration: time.Hour, Max: 20},
 	"blocking/delete": {Duration: time.Hour, Max: 100},
 
+	// ── Backup (Elythia 独自) ──────────────────────────
+	// 画面からのリストアの進み具合 (#3463 (6c))。本体では認証しない (戻した DB に
+	// セッションが無くても読めるように) ので、誰でもバックアップ用のサービスまで
+	// 届く。画面は 2 秒に 1 回読むので、タブ 2 つぶんを上限にする。
+	"admin/backup/restore/status": {Duration: time.Minute, Max: 60},
+
 	// ── Bubble Game ────────────────────────────────────
 	"bubble-game/register": {Duration: time.Hour, Max: 120, MinInterval: 30 * time.Second},
 	// 対戦 (mk-go 独自、#3230)。招待は相手に通知が飛ぶので絞る。

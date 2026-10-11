@@ -46,3 +46,25 @@ func TestDefaultEndpointLimits_TokenHolderCannotExhaustRecoveryEndpoints(t *test
 		})
 	}
 }
+
+// TestDefaultEndpointLimits_RestoreStatusIsLimitedPerClient checks the limit
+// on the restore status, which the server does not authenticate (#3463 (6c)):
+// an anonymous request is counted on the client's IP bucket.
+func TestDefaultEndpointLimits_RestoreStatusIsLimitedPerClient(t *testing.T) {
+	const path = "/api/admin/backup/restore/status"
+	limit, ok := DefaultEndpointLimits[strings.TrimPrefix(path, "/api/")]
+	if assert.True(t, ok) {
+		// 画面の読み直し (2 秒に 1 回) は止めない。
+		assert.GreaterOrEqual(t, float64(limit.Max)/limit.Duration.Seconds(), 0.5)
+	}
+	store := &mockLimitStore{results: []mockResult{
+		{Info: LimitInfo{Remaining: 0, ResetMs: time.Now().Add(time.Minute).UnixMilli()}},
+	}}
+	rl := NewRateLimiter(store, true, DefaultEndpointLimits)
+	e, h := setupEcho(rl)
+	rec := doRequest(e, rl.Middleware(), h, path, nil)
+	assert.Equal(t, http.StatusTooManyRequests, rec.Code)
+	if assert.Len(t, store.calls, 1) {
+		assert.Contains(t, store.calls[0].Key, ipBucketPrefix, "an anonymous request is counted per client")
+	}
+}
