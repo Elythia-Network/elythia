@@ -208,9 +208,10 @@ func TestDirStorage_PutNewWithoutHardLinks(t *testing.T) {
 			assertNoTempFiles(t, st.Root())
 		})
 	}
-	t.Run("every other link error falls back", func(t *testing.T) {
-		for _, errno := range []error{syscall.EIO, syscall.EXDEV, syscall.EACCES} {
+	for _, errno := range []error{syscall.EIO, syscall.EXDEV, syscall.EACCES} {
+		t.Run("other link error "+errno.Error()+" falls back", func(t *testing.T) {
 			orig := linkFile
+			t.Cleanup(func() { linkFile = orig })
 			linkFile = func(_ *os.Root, oldname, newname string) error {
 				return &os.LinkError{Op: "link", Old: oldname, New: newname, Err: errno}
 			}
@@ -218,9 +219,8 @@ func TestDirStorage_PutNewWithoutHardLinks(t *testing.T) {
 			require.NoError(t, err)
 			putNewContract(t, st)
 			assertNoTempFiles(t, st.Root())
-			linkFile = orig
-		}
-	})
+		})
+	}
 }
 
 // TestDirStorage_PutNewFallbackWriteFailureLeavesNothing: when the O_EXCL
