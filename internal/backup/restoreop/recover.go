@@ -22,36 +22,42 @@ func (m *Manager) recoverOnStart(ctx context.Context, held func()) {
 			release()
 		}
 	}()
-	rec, err := m.o.Store.Current(ctx)
-	if err != nil {
-		m.log.Error("backup: cannot read the unfinished restore", "err", err)
-		return
-	}
-	if rec == nil {
-		return
-	}
-	// 枠を先に預かっていなければ (Redis に後から繋がった場合など)、取れるまで待つ。
-	// 先に動いている job があり得るので、諦めない (諦めると、メンテナンスのまま残る)。
-	for release == nil {
-		r, err := m.o.Acquire()
+	var rec *Record
+	logged := false
+	for {
+		r, err := m.o.Store.Current(ctx)
 		if err == nil {
-			release = r
-			break
+			if r == nil || release != nil {
+				rec = r
+				break
+			}
+			// 枠を先に預かっていなければ (Redis に後から繋がった場合など)、取れるまで
+			// 待つ。先に動いている job があり得るので、諦めない (諦めると、メンテナンスの
+			// まま残る)。取れたら記録を読み直す: 待つ間に、この実行で受けた準備がその
+			// 記録を作って終えていることがある (起動した直後に Current を読む前に
+			// Prepare が来た場合)。この実行の操作は終わるまで枠を持つので、枠を取れた
+			// 時点で残っている記録は、前の実行のものだけになる。
+			if acquired, aerr := m.o.Acquire(); aerr == nil {
+				release = acquired
+				continue
+			}
+		} else {
+			// 読めない間は読み直し続ける (1 回で諦めると、メンテナンスのまま残った操作を
+			// 起動し直すまで誰も片付けない)。預かった枠は返し、取る・確かめるを止めない。
+			if !logged {
+				m.log.Error("backup: cannot read the unfinished restore; retrying", "err", err)
+				logged = true
+			}
+			if release != nil {
+				release()
+				release = nil
+			}
 		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-time.After(m.o.Poll):
 		}
-	}
-	// 待つ間に、この実行で受けた準備がその記録を作って終えていることがある (起動
-	// した直後に Current を読む前に Prepare が来た場合)。枠を取った後で読み直し、
-	// 終わっていれば何もしない。この実行の操作は終わるまで枠を持つので、枠を取れた
-	// 時点で残っている記録は、前の実行のものだけになる。
-	rec, err = m.o.Store.Current(ctx)
-	if err != nil {
-		m.log.Error("backup: cannot read the unfinished restore", "err", err)
-		return
 	}
 	if rec == nil {
 		return
