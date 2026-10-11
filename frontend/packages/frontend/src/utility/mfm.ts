@@ -41,7 +41,8 @@ export type {
  * Parses MFM like mfm-js's `parse`.
  */
 export function parse(input: string, opts?: Partial<{ nestLimit: number }>): mfmjs.MfmNode[] {
-	return mfmjs.parse(input, opts);
+	// mfm-js の公開の引数だけを渡す (パッチのテスト用の口は通さない)。
+	return mfmjs.parse(input, { nestLimit: opts?.nestLimit });
 }
 
 /**

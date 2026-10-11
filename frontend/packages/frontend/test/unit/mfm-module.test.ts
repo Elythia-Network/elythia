@@ -9,6 +9,11 @@ import { describe, expect, test } from 'vitest';
 import * as mfm from '@/utility/mfm.js';
 
 describe('parse', () => {
+	test('does not pass options other than nestLimit to mfm-js', () => {
+		// パッチのテスト用の口 (workLimit) を画面のコードから通さない。
+		expect(mfm.parse('**a**', { workLimit: 0 } as never)[0].type).toBe('bold');
+	});
+
 	test('parses ordinary input as mfm-js does', () => {
 		expect(mfm.parse('**a** :b: @c')).toEqual([
 			{ type: 'bold', children: [{ type: 'text', props: { text: 'a' } }] },
