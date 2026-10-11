@@ -21,6 +21,21 @@ type hookMaint struct {
 	failGet error
 	failRep error
 	failSet func(phase string) error
+	// afterEnter runs after a successful Enter; its error is returned.
+	afterEnter func() error
+}
+
+func (h *hookMaint) Enter(ctx context.Context, st maintmode.State) error {
+	if err := h.Store.Enter(ctx, st); err != nil {
+		return err
+	}
+	h.mu.Lock()
+	f := h.afterEnter
+	h.mu.Unlock()
+	if f != nil {
+		return f()
+	}
+	return nil
 }
 
 func (h *hookMaint) Get(ctx context.Context) (*maintmode.State, error) {
