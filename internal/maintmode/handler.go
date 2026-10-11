@@ -244,7 +244,7 @@ func (h *handler) serveStatic(w http.ResponseWriter, r *http.Request) bool {
 			continue
 		}
 		for _, dir := range route.Dirs {
-			if serveFile(w, r, filepath.Join(dir, filepath.FromSlash(clean))) {
+			if serveFileIn(w, r, dir, filepath.FromSlash(clean)) {
 				return true
 			}
 		}
@@ -252,13 +252,36 @@ func (h *handler) serveStatic(w http.ResponseWriter, r *http.Request) bool {
 	return false
 }
 
-// serveFile serves a regular file and reports whether it existed.
-// ディレクトリの一覧は出さない (http.FileServer と違い、ディレクトリは無視する)。
+// serveFileIn serves name inside dir and reports whether it existed.
+//
+// os.Root で開くので、dir の中から外を指す symlink もたどらない。".." を
+// 落とすだけでは、symlink を経由して dir の外のファイルを返しうる。
+func serveFileIn(w http.ResponseWriter, r *http.Request, dir, name string) bool {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return false
+	}
+	defer root.Close()
+	f, err := root.Open(name)
+	if err != nil {
+		return false
+	}
+	return serveOpened(w, r, f)
+}
+
+// serveFile serves a regular file named by the configuration (not by the
+// request) and reports whether it existed.
 func serveFile(w http.ResponseWriter, r *http.Request, name string) bool {
 	f, err := os.Open(name)
 	if err != nil {
 		return false
 	}
+	return serveOpened(w, r, f)
+}
+
+// serveOpened serves f when it is a regular file, and closes it.
+// ディレクトリの一覧は出さない (http.FileServer と違い、ディレクトリは無視する)。
+func serveOpened(w http.ResponseWriter, r *http.Request, f *os.File) bool {
 	defer f.Close()
 	fi, err := f.Stat()
 	if err != nil || !fi.Mode().IsRegular() {
