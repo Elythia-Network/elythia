@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"filippo.io/age"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -621,4 +623,10 @@ func TestParseToolMajor(t *testing.T) {
 	}
 	_, err := parseToolMajor("")
 	assert.Error(t, err)
+}
+
+func TestIsDuplicateDatabase(t *testing.T) {
+	assert.True(t, isDuplicateDatabase(fmt.Errorf("create: %w", &pgconn.PgError{Code: "42P04"})))
+	assert.False(t, isDuplicateDatabase(&pgconn.PgError{Code: "42501"}), "insufficient_privilege")
+	assert.False(t, isDuplicateDatabase(errors.New("conn closed")))
 }
