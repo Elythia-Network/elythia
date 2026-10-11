@@ -394,3 +394,44 @@ func TestCanStart(t *testing.T) {
 	h.failGet = errors.New("redis down")
 	assert.ErrorContains(t, f.m.CanStart(ctx), "redis down")
 }
+
+// TestRecover_ReadsTheMaintenanceAgain checks that the recovery reads the
+// maintenance state again a few times instead of handing a short Redis
+// outage to an operator, and still gives up when it stays unreadable.
+func TestRecover_ReadsTheMaintenanceAgain(t *testing.T) {
+	notSwapped := map[string]string{testDB: "current", tgt: "restored"}
+	swapped := map[string]string{testDB: "restored", before: "current"}
+	for _, c := range []struct {
+		name  string
+		step  string
+		names map[string]string
+		fails int
+		final string
+	}{
+		{"aborting, a short outage", StepAborting, notSwapped, maintenanceReadAttempts - 1, StepAborted},
+		{"entering, a short outage", StepEntering, notSwapped, maintenanceReadAttempts - 1, StepAborted},
+		{"resuming, a short outage", StepResuming, swapped, maintenanceReadAttempts - 1, StepDone},
+		{"aborting, unreadable", StepAborting, notSwapped, maintenanceReadAttempts, StepUnknown},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var h *hookMaint
+			e := newEnv(t, withHook(&h))
+			e.stop()
+			e.process("p1")
+			ctx := context.Background()
+			require.NoError(t, e.store.create(ctx, &Record{OpID: "restore-x", Step: c.step, Database: testDB, Target: tgt, Before: before}))
+			e.db.mu.Lock()
+			e.db.dbs = map[string]string{}
+			for k, v := range c.names {
+				e.db.dbs[k] = v
+			}
+			e.db.mu.Unlock()
+			require.NoError(t, e.maint.Enter(ctx, maintmode.State{OpID: "restore-x", Kind: maintmode.KindRestore, Phase: maintmode.PhaseHeld}))
+			h.mu.Lock()
+			h.failGets = c.fails
+			h.mu.Unlock()
+			e.start()
+			e.waitStep("restore-x", c.final)
+		})
+	}
+}

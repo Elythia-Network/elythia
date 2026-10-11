@@ -67,7 +67,7 @@ func (m *Manager) recoverRecord(ctx context.Context, rec *Record) {
 	case StepPreparing, StepReady, StepAborting:
 		// まだ名前を入れ替えていない。メンテナンスに入れたまま落ちていれば (中止の
 		// 途中など) 元の DB で戻し、作った DB を消す。
-		st, err := m.o.Maint.Get(ctx)
+		st, err := m.readMaintenance(ctx)
 		if err != nil {
 			m.giveUp(ctx, rec, rec.Step, fmt.Errorf("read the maintenance: %w", err))
 			return
@@ -98,7 +98,7 @@ func (m *Manager) recoverRecord(ctx context.Context, rec *Record) {
 			m.giveUp(ctx, rec, rec.Step, errors.New("the database names do not match the recorded switch"))
 			return
 		}
-		st, err := m.o.Maint.Get(ctx)
+		st, err := m.readMaintenance(ctx)
 		if err != nil {
 			m.giveUp(ctx, rec, rec.Step, fmt.Errorf("read the maintenance: %w", err))
 			return
@@ -131,7 +131,7 @@ func (m *Manager) recoverRecord(ctx context.Context, rec *Record) {
 	case StepEntering:
 		switch {
 		case notSwapped:
-			st, err := m.o.Maint.Get(ctx)
+			st, err := m.readMaintenance(ctx)
 			if err != nil {
 				m.giveUp(ctx, rec, rec.Step, fmt.Errorf("read the maintenance: %w", err))
 				return
@@ -169,4 +169,31 @@ func (m *Manager) recoverRecord(ctx context.Context, rec *Record) {
 // kept as Before.
 func swappedNames(rec *Record, has map[string]bool) bool {
 	return has[rec.Before] && !has[rec.Target] && has[rec.Database]
+}
+
+// maintenanceReadAttempts is how often the recovery reads the maintenance
+// state before it gives up on it.
+const maintenanceReadAttempts = 5
+
+// readMaintenance reads the maintenance state, trying again a few times
+// (Poll apart).
+//
+// 一度読めなかっただけで運営者に渡すと、Redis の瞬断でもメンテナンスのまま止まる。
+// 上限を付けるのは、読めないまま進めて作った DB を消すことはしないため。
+func (m *Manager) readMaintenance(ctx context.Context) (*maintmode.State, error) {
+	var err error
+	for i := 0; i < maintenanceReadAttempts; i++ {
+		if i > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(m.o.Poll):
+			}
+		}
+		var st *maintmode.State
+		if st, err = m.o.Maint.Get(ctx); err == nil {
+			return st, nil
+		}
+	}
+	return nil, err
 }

@@ -21,6 +21,8 @@ type hookMaint struct {
 	failGet error
 	failRep error
 	failSet func(phase string) error
+	// failGets fails that many Gets before they succeed again.
+	failGets int
 	// afterEnter runs after a successful Enter; its error is returned.
 	afterEnter func() error
 }
@@ -41,6 +43,10 @@ func (h *hookMaint) Enter(ctx context.Context, st maintmode.State) error {
 func (h *hookMaint) Get(ctx context.Context) (*maintmode.State, error) {
 	h.mu.Lock()
 	err := h.failGet
+	if err == nil && h.failGets > 0 {
+		h.failGets--
+		err = errors.New("redis: i/o timeout")
+	}
 	h.mu.Unlock()
 	if err != nil {
 		return nil, err
