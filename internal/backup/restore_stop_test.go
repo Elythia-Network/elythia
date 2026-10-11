@@ -314,6 +314,12 @@ func TestRestoreStopConditions(t *testing.T) {
 		assert.Equal(t, swapUnknown, super.swapOutcome("", "oc_db", "oc_none", "oc_none_before"))
 		// 戻す元の DB があり、退避した名前が無ければ、巻き戻っている。
 		assert.Equal(t, swapNotDone, super.swapOutcome("", "oc_restore_only", "oc_none", "oc_none_before"))
+
+		has, err := super.ExistingDatabases(ctx, "", []string{"oc_before", "oc_restore_only", "oc_none"})
+		require.NoError(t, err)
+		assert.Equal(t, map[string]bool{"oc_before": true, "oc_restore_only": true}, has)
+		_, err = super.ExistingDatabases(ctx, "no_such_maintenance_db", []string{"oc_before"})
+		require.Error(t, err)
 	})
 
 	t.Run("swap reported as failed after the names changed", func(t *testing.T) {
