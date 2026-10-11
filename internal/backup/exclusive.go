@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"time"
 )
 
 // ErrExists is returned by NewPutter.PutNew when the key already exists.
@@ -25,15 +27,25 @@ type NewPutter interface {
 	PutNew(ctx context.Context, key string, body []byte) error
 }
 
+// ErrClaimUnverified is returned by claimKey when the storage said the key
+// already exists but reading it back failed, so it is unknown whose it is.
+var ErrClaimUnverified = errors.New("backup: could not read back an object that the storage says already exists")
+
+// claimTimeout bounds reading a claimed key back and deleting it after a
+// failure, like deleteQuietly.
+const claimTimeout = time.Minute
+
 // claimKey stores body under key unless someone else already did. It returns
-// nil when key holds body afterwards, and an error wrapping ErrExists when it
-// holds something else. Storages without NewPutter get a plain Put, which
-// does not exclude anyone.
+// nil when key holds body afterwards, an error wrapping ErrExists when it
+// holds something else, and one wrapping ErrClaimUnverified when it could
+// not be read back. Storages without NewPutter get a plain Put, which does
+// not exclude anyone.
 //
 // 「既にある」と返っても、自分の前の試行が置いたものかもしれない (#3458 で、SDK の
 // 自動の送り直しが 412 になり、正常に取れたバックアップを自分で壊した)。読み直して、
 // 中身が自分の送ったものと同じなら成功として扱う。body に乱数を含めておけば、他の
-// 誰かが同じ中身を置くことは無い。
+// 誰かが同じ中身を置くことは無い。読み直せなかったときは、相手のものとも自分のもの
+// とも言えないので、ErrExists とは分けて返す。
 func claimKey(ctx context.Context, st Storage, key string, body []byte) error {
 	np, ok := st.(NewPutter)
 	if !ok {
@@ -43,27 +55,38 @@ func claimKey(ctx context.Context, st Storage, key string, body []byte) error {
 	if err == nil || !errors.Is(err, ErrExists) {
 		return err
 	}
-	if holds(ctx, st, key, body) {
+	same, rerr := holds(ctx, st, key, body)
+	switch {
+	case rerr != nil:
+		return fmt.Errorf("%w: %s: %w", ErrClaimUnverified, key, rerr)
+	case same:
 		return nil
 	}
 	return err
 }
 
-// holds reports whether key can be read and holds exactly body.
-func holds(ctx context.Context, st Storage, key string, body []byte) bool {
+// holds reports whether key holds exactly body. A key that does not exist
+// is an error (ErrNotFound): after "already exists" it means the object is
+// still being written by someone, or was removed.
+func holds(ctx context.Context, st Storage, key string, body []byte) (bool, error) {
 	r, err := st.Get(ctx, key)
 	if err != nil {
-		return false
+		return false, err
 	}
 	defer func() { _ = r.Close() }()
 	got, err := io.ReadAll(io.LimitReader(r, int64(len(body))+1))
-	return err == nil && bytes.Equal(got, body)
+	if err != nil {
+		return false, err
+	}
+	return bytes.Equal(got, body), nil
 }
 
 // releaseKey deletes key after a failure, but only while it still holds body,
 // so a key claimed by someone else is never deleted.
 func releaseKey(ctx context.Context, st Storage, logger *slog.Logger, key string, body []byte) {
-	if holds(context.WithoutCancel(ctx), st, key, body) {
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), claimTimeout)
+	defer cancel()
+	if same, _ := holds(rctx, st, key, body); same {
 		deleteQuietly(ctx, st, logger, key)
 	}
 }

@@ -477,6 +477,46 @@ func TestTake_SurvivesResentRequests(t *testing.T) {
 	assert.Equal(t, meta.DumpSHA256, sum)
 }
 
+// unverifiableClaim stores the lock but says it already existed, and fails
+// the first read back of it, like a storage that answered 409 and then had
+// a transient read error.
+type unverifiableClaim struct {
+	*DirStorage
+	failedGet bool
+}
+
+func (u *unverifiableClaim) PutNew(ctx context.Context, key string, body []byte) error {
+	if err := u.DirStorage.PutNew(ctx, key, body); err != nil {
+		return err
+	}
+	return ErrExists
+}
+
+func (u *unverifiableClaim) Get(ctx context.Context, key string) (io.ReadCloser, error) {
+	if strings.HasSuffix(key, "/"+LockFile) && !u.failedGet {
+		u.failedGet = true
+		return nil, io.ErrUnexpectedEOF
+	}
+	return u.DirStorage.Get(ctx, key)
+}
+
+// TestTake_UnverifiedClaimIsNotReportedAsAnotherBackup: when the lock cannot
+// be read back, Take must not claim another backup holds the generation, and
+// must remove its own lock instead of leaving it behind.
+func TestTake_UnverifiedClaimIsNotReportedAsAnotherBackup(t *testing.T) {
+	p := newDatabase(t)
+	p.seedSimple(t)
+	st, err := NewDirStorage(markedDir(t))
+	require.NoError(t, err)
+	_, err = Take(context.Background(), p.takeOptions(&unverifiableClaim{DirStorage: st}))
+	require.ErrorIs(t, err, ErrClaimUnverified)
+	require.NotErrorIs(t, err, ErrExists)
+	assert.ErrorContains(t, err, "could not tell")
+	objs, err := st.List(context.Background(), "")
+	require.NoError(t, err)
+	assert.Empty(t, objs, "its own lock is removed")
+}
+
 // TestTake_IgnoresDatabaseTimeouts: a statement_timeout set on the database
 // must not cut the row counts.
 func TestTake_IgnoresDatabaseTimeouts(t *testing.T) {
