@@ -223,6 +223,26 @@ func TestDirStorage_PutNewWithoutHardLinks(t *testing.T) {
 	}
 }
 
+// TestDirStorage_PutNewFallbackLostRaceIsOnlyErrExists: when the O_EXCL
+// fallback finds the key taken, the error says so and nothing else; the link
+// error is not the cause and must not show up in "being taken by another
+// backup".
+func TestDirStorage_PutNewFallbackLostRaceIsOnlyErrExists(t *testing.T) {
+	orig := linkFile
+	t.Cleanup(func() { linkFile = orig })
+	linkFile = func(_ *os.Root, oldname, newname string) error {
+		return &os.LinkError{Op: "link", Old: oldname, New: newname, Err: syscall.EPERM}
+	}
+	st, err := NewDirStorage(markedDir(t))
+	require.NoError(t, err)
+	key := Key("20261010T040000Z", LockFile)
+	require.NoError(t, st.PutNew(context.Background(), key, []byte("theirs")))
+	err = st.PutNew(context.Background(), key, []byte("mine"))
+	require.ErrorIs(t, err, ErrExists)
+	require.NotErrorIs(t, err, syscall.EPERM)
+	assert.NotContains(t, err.Error(), "link")
+}
+
 // TestDirStorage_PutNewFallbackWriteFailureLeavesNothing: when the O_EXCL
 // fallback created the key but could not write it, the half-made key is
 // removed instead of being left as somebody's claim.
