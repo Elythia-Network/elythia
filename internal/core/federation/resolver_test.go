@@ -203,7 +203,7 @@ func TestResolveActor_NewUserDropsMalformedIconBanner(t *testing.T) {
 		"preferredUsername": "alice",
 		"inbox": "https://remote.example/users/alice/inbox",
 		"icon": {"type": "Image", "url": "/avatar.png"},
-		"image": {"type": "Image", "url": "https://remote.example/banner).png"},
+		"image": {"type": "Image", "url": "https:///remote.example/banner.png"},
 		"publicKey": {"publicKeyPem": "FAKE"}
 	}`
 	r, _ := newResolver(t, body, nil)
@@ -211,6 +211,45 @@ func TestResolveActor_NewUserDropsMalformedIconBanner(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, user.AvatarURL)
 	assert.Nil(t, user.BannerURL)
+}
+
+// 符号化で列の上限 (bannerUrl は 512) を超えたら、長すぎる値と同じく捨てる。
+func TestResolveActor_NewUserDropsBannerTooLongAfterEncoding(t *testing.T) {
+	prefix := "https://remote.example/"
+	raw := prefix + strings.Repeat("a", 512-len(prefix)-2) + "  "
+	require.Len(t, []rune(raw), 512, "符号化する前は上限ちょうど")
+	body := `{ "@context": "https://www.w3.org/ns/activitystreams",
+		"id": "https://remote.example/users/alice",
+		"type": "Person",
+		"preferredUsername": "alice",
+		"inbox": "https://remote.example/users/alice/inbox",
+		"image": {"type": "Image", "url": ` + strconv.Quote(raw) + `},
+		"publicKey": {"publicKeyPem": "FAKE"}
+	}`
+	r, _ := newResolver(t, body, nil)
+	user, err := r.ResolveActor("https://remote.example/users/alice")
+	require.NoError(t, err)
+	assert.Nil(t, user.BannerURL)
+}
+
+// 括弧や空白を含む正規の URL は、捨てずに符号化して取り込む。
+func TestResolveActor_NewUserEncodesIconBanner(t *testing.T) {
+	body := `{ "@context": "https://www.w3.org/ns/activitystreams",
+		"id": "https://remote.example/users/alice",
+		"type": "Person",
+		"preferredUsername": "alice",
+		"inbox": "https://remote.example/users/alice/inbox",
+		"icon": {"type": "Image", "url": "https://remote.example/media/photo (1).jpg"},
+		"image": {"type": "Image", "url": "https://remote.example/media/it's.png"},
+		"publicKey": {"publicKeyPem": "FAKE"}
+	}`
+	r, _ := newResolver(t, body, nil)
+	user, err := r.ResolveActor("https://remote.example/users/alice")
+	require.NoError(t, err)
+	require.NotNil(t, user.AvatarURL)
+	assert.Equal(t, "https://remote.example/media/photo%20%281%29.jpg", *user.AvatarURL)
+	require.NotNil(t, user.BannerURL)
+	assert.Equal(t, "https://remote.example/media/it%27s.png", *user.BannerURL)
 }
 
 func TestResolveActor_NewUserIngestsManuallyApproves(t *testing.T) {

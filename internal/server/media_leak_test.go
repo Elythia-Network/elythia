@@ -78,6 +78,20 @@ func TestAvatarHandler_MalformedRemoteAvatarFallsBackToIdenticon(t *testing.T) {
 	assert.NotContains(t, loc, "remote.example/files")
 }
 
+// ローカルの人の相対パスの avatarUrl は、形の判定に掛けずにそのまま使う。
+func TestAvatarHandler_LocalRelativeAvatarIsNotChecked(t *testing.T) {
+	withMediaProxy(t)
+	repo := leakUserRepo{user: &model.User{ID: "u1", Username: "bob", AvatarURL: strPtrLeak("/files/avatar.png")}}
+
+	e := echo.New()
+	e.GET("/avatar/@:acct", avatarHandler(repo, "local.example"))
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/avatar/@bob", nil))
+
+	require.Equal(t, http.StatusFound, rec.Code)
+	assert.NotContains(t, rec.Header().Get(echo.HeaderLocation), "/identicon/", "ローカルの avatar を identicon にしない")
+}
+
 // ローカル user の avatar は書き換えない。同一オリジンなので包む意味が無く、
 // 包むと無駄な往復が 1 段増える。
 func TestAvatarHandler_LocalAvatarUnchanged(t *testing.T) {

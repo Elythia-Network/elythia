@@ -281,11 +281,22 @@ func TestAvatarBannerProxying(t *testing.T) {
 	// リモートの人の avatarUrl は、プロキシで包める形のときだけ使う。崩れた形の値
 	// (取り込みで捨てる前に保存された行) は identicon にする。
 	t.Run("malformed remote avatar falls back to identicon", func(t *testing.T) {
-		for _, raw := range []string{"/a.png", "https:\\\\" + remoteHost + "/a.png", "https://" + remoteHost + "/a).png"} {
+		for _, raw := range []string{"/a.png", "https:\\\\" + remoteHost + "/a.png", "https:///" + remoteHost + "/a.png"} {
 			u0 := &model.User{Username: "carol", Host: sp(remoteHost), AvatarURL: sp(raw)}
 			if got := IdenticonURL(u0); got != "/identicon/carol@"+remoteHost {
 				t.Errorf("%q: got %s", raw, got)
 			}
+		}
+	})
+	// 括弧などは捨てずに符号化してからプロキシに渡す。
+	t.Run("remote avatar with parentheses is encoded and proxied", func(t *testing.T) {
+		u0 := &model.User{Username: "carol", Host: sp(remoteHost), AvatarURL: sp("https://" + remoteHost + "/a (1).png")}
+		got := IdenticonURL(u0)
+		if !strings.HasPrefix(got, testInternalProxy+"/avatar.webp?") {
+			t.Fatalf("remote avatar not proxied: %s", got)
+		}
+		if want := "https://" + remoteHost + "/a%20%281%29.png"; u(t, got).Query().Get("url") != want {
+			t.Errorf("url param = %q, want %q", u(t, got).Query().Get("url"), want)
 		}
 	})
 	t.Run("relative local avatar unchanged", func(t *testing.T) {

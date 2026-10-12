@@ -65,12 +65,14 @@ func TestEffectsInLine_NullCell(t *testing.T) {
 func TestUserLiteMap_MalformedRemoteAvatar(t *testing.T) {
 	avatar := func(u *model.User) string { return *userLiteMap(u)["avatarUrl"].(*string) }
 	host := "remote.example"
-	for _, raw := range []string{"/a.png", "https://remote.example/a).png"} {
+	for _, raw := range []string{"/a.png", "https:///remote.example/a.png"} {
 		u := &model.User{ID: "u1", Username: "bob", Host: &host, AvatarURL: &raw}
 		assert.Equal(t, "/identicon/bob@remote.example", avatar(u), raw)
 	}
 	ok := "https://remote.example/a.png"
 	assert.Equal(t, ok, avatar(&model.User{ID: "u1", Username: "bob", Host: &host, AvatarURL: &ok}))
+	paren := "https://remote.example/a (1).png"
+	assert.Equal(t, "https://remote.example/a%20%281%29.png", avatar(&model.User{ID: "u1", Username: "bob", Host: &host, AvatarURL: &paren}), "括弧と空白は符号化する")
 	local := "/files/a.png"
 	assert.Equal(t, local, avatar(&model.User{ID: "u2", Username: "alice", AvatarURL: &local}), "ローカルの人は変えない")
 }
