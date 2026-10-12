@@ -58,6 +58,26 @@ func TestAvatarHandler_RemoteAvatarGoesThroughProxy(t *testing.T) {
 		"生のリモート URL を Location に入れない")
 }
 
+// リモートの人の、プロキシで包めない形の avatarUrl は使わず identicon へ飛ばす。
+func TestAvatarHandler_MalformedRemoteAvatarFallsBackToIdenticon(t *testing.T) {
+	withMediaProxy(t)
+	host := "remote.example"
+	repo := leakUserRepo{user: &model.User{
+		ID: "u1", Username: "bob", Host: &host,
+		AvatarURL: strPtrLeak("https:\\\\remote.example/files/avatar.png"),
+	}}
+
+	e := echo.New()
+	e.GET("/avatar/@:acct", avatarHandler(repo, "local.example"))
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/avatar/@bob@remote.example", nil))
+
+	require.Equal(t, http.StatusFound, rec.Code)
+	loc := rec.Header().Get(echo.HeaderLocation)
+	assert.Contains(t, loc, "/identicon/u1", "崩れた形の avatarUrl は使わない (got %q)", loc)
+	assert.NotContains(t, loc, "remote.example/files")
+}
+
 // ローカル user の avatar は書き換えない。同一オリジンなので包む意味が無く、
 // 包むと無駄な往復が 1 段増える。
 func TestAvatarHandler_LocalAvatarUnchanged(t *testing.T) {

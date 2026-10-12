@@ -278,6 +278,22 @@ func TestAvatarBannerProxying(t *testing.T) {
 			t.Errorf("local avatar changed: %s", got)
 		}
 	})
+	// リモートの人の avatarUrl は、プロキシで包める形のときだけ使う。崩れた形の値
+	// (取り込みで捨てる前に保存された行) は identicon にする。
+	t.Run("malformed remote avatar falls back to identicon", func(t *testing.T) {
+		for _, raw := range []string{"/a.png", "https:\\\\" + remoteHost + "/a.png", "https://" + remoteHost + "/a).png"} {
+			u0 := &model.User{Username: "carol", Host: sp(remoteHost), AvatarURL: sp(raw)}
+			if got := IdenticonURL(u0); got != "/identicon/carol@"+remoteHost {
+				t.Errorf("%q: got %s", raw, got)
+			}
+		}
+	})
+	t.Run("relative local avatar unchanged", func(t *testing.T) {
+		u0 := &model.User{Username: "bob", AvatarURL: sp("/files/a.png")}
+		if got := IdenticonURL(u0); got != "/files/a.png" {
+			t.Errorf("local avatar changed: %s", got)
+		}
+	})
 	t.Run("identicon fallback unchanged", func(t *testing.T) {
 		u0 := &model.User{Username: "carol", Host: sp(remoteHost)}
 		if got := IdenticonURL(u0); got != "/identicon/carol@"+remoteHost {

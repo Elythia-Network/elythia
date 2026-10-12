@@ -30,6 +30,7 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/misc/idnhost"
 	"github.com/elythia-network/elythia/internal/misc/keyword"
+	"github.com/elythia-network/elythia/internal/misc/remoteurl"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"gorm.io/datatypes"
@@ -1395,6 +1396,12 @@ func remoteMediaURL(actorURI, column, raw string, max int) string {
 		slog.Warn("federation: dropping oversized media url",
 			"actor", truncateRunes(actorURI, userURIMaxRunes), "column", column,
 			"len", len([]rune(raw)), "max", max)
+		return ""
+	}
+	// 画面に出すときにプロキシで包めない形の URL は、取り込まない。
+	if !remoteurl.WellFormedMedia(raw) {
+		slog.Warn("federation: dropping malformed media url",
+			"actor", truncateRunes(actorURI, userURIMaxRunes), "column", column)
 		return ""
 	}
 	return raw

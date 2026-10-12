@@ -9,6 +9,7 @@ import (
 
 	apiusers "github.com/elythia-network/elythia/internal/api/users"
 	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/misc/remoteurl"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 )
@@ -68,6 +69,10 @@ func avatarHandler(userRepo avatarUserLookup, localHost string) echo.HandlerFunc
 		}
 
 		target := user.AvatarURL
+		// リモートの人の、プロキシで包めない形の avatarUrl は使わない (entity.IdenticonURL と同じ)。
+		if target != nil && user.Host != nil && *user.Host != "" && !remoteurl.WellFormedMedia(*target) {
+			target = nil
+		}
 		if target == nil || *target == "" {
 			// identicon fallback。`user.id` をシード化文字列として使う。
 			target = strPtr("/identicon/" + user.ID)
