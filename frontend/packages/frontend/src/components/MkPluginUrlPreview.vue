@@ -123,12 +123,12 @@ watch(
 		const nextKey = loadKey();
 		if (selected == null || !mayLoad.value) {
 			abortLoad();
-			// IntersectionObserver is a presentation gate for the first load, not
-			// the lifetime owner of an already loaded note preview. Keeping the
-			// component mounted here preserves provider-owned resources while
-			// the parent note still owns it.
+			// Visibility and activation only gate new work. A ready result belongs
+			// to this note until an ownership key changes, the CW closes, or the
+			// coordinator unmounts. Keep it mounted so returning to the tab or a
+			// KeepAlive view does not trigger another provider request.
 			if (selected != null && loadState.value === 'ready' && loadedKey === nextKey &&
-				!inViewport.value && props.revealed && active.value && props.source != null) return;
+				props.revealed && props.source != null) return;
 			resetLoad();
 			return;
 		}
@@ -188,8 +188,10 @@ onUnmounted(() => {
 });
 
 onErrorCaptured((err) => {
-	if (registration.value == null || loadState.value !== 'ready') return;
+	if (registration.value == null || (loadState.value !== 'loading' && loadState.value !== 'ready')) return;
 	console.error(`[preview:${registration.value.id}] render failed`, err);
+	abortLoad();
+	loadState.value = 'error';
 	renderFailed.value = true;
 	return false;
 });

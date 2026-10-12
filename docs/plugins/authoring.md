@@ -778,9 +778,44 @@ import { MkSelect, MkSwitch, MkAvatar, MkUserName, MkTime, PageWithHeader, useMk
 
 ```ts
 const res = await host.api<T>('plugin/myplugin/me', { ... });
+
+const controller = new AbortController();
+const abortable = host.api<T>('plugin/myplugin/preview', { url }, {
+	signal: controller.signal,
+});
 ```
 
-**POST 固定。** 利用者のセッションがそのまま使われる。
+**POST 固定。** 利用者のセッションがそのまま使われる。第3引数の`signal`へ
+`AbortSignal`を渡すと、画面の破棄などに合わせてリクエストを中止できる。
+
+### プレビュー provider
+
+ノート内のURLカードをプラグイン独自の表示へ差し替える場合は、`setup`で
+`host.preview.register`を呼ぶ。
+
+```ts
+host.preview.register({
+	id: 'post-card',
+	priority: 100,
+	requiresDetail: true,
+	match: input => input.kind === 'url' && new URL(input.href).hostname === 'example.com',
+	load: async (input, context, signal) => {
+		if (input.kind !== 'url') throw new Error('URL only');
+		return host.api('plugin/myplugin/preview', { url: input.href }, { signal });
+	},
+	component: MyCard,
+});
+```
+
+- `match`は同期かつI/Oなしで判定する。複数が一致した場合は`priority`の降順、同値なら名前空間付きIDの昇順で1つに決まる。
+- `id`はプラグイン内の名前で、hostが`<plugin名>:<id>`へ名前空間化する。同じ名前空間付きIDを二重登録すると例外になる。
+- `requiresDetail: true`に一致したURLは、タイムラインでは既存カードを取得せず元URLのリンクとして表示する。詳細画面かつCW展開済み・active・表示領域内になってから`load`を呼ぶ。
+- `load`には中止用の`AbortSignal`を渡す。取得中に非active・画面外・unmountになった場合は中止される。取得済みの表示は同じノートが所有する間、非activeや画面外になっても保持される。
+- `load`、読み込み表示、または本表示の描画に失敗した場合は元URLのリンクへ閉じ、別providerや既存URLカードへは戻らない。
+
+現在providerを接続しているのは`MkNote` / `MkNoteDetailed`のURLだけで、チャット、
+URLプレビューポップアップ、ページ本文などは対象外。`PreviewInput`の`file`は将来の
+接続用に型だけを定義しており、現時点でfile入力を渡す画面は無い。
 
 ## 他のインスタンスとやりとりする
 
@@ -1280,12 +1315,14 @@ definePlugin(def)
 host.name / host.me
 definePlugin({ name, pages?, setup })
 host.slot(name, renderer)
-host.api<T>(endpoint, params)
+host.preview.register(provider)
+host.api<T>(endpoint, params, { signal? })
 
 PluginPage: { path, component, navTitle?, navIcon?, admin? }
 
 型: SlotName / SlotUser / SlotContext / SlotMount / SlotComponent / SlotRenderer
-    PluginPage / PageRegistration / PluginUser
+    PluginPage / PageRegistration / PluginUser / PreviewInput / PreviewContext
+    PreviewProvider / PreviewRegistration
 関数: getUsers(ids)
 再公開: MkInput / MkButton / MkFolder / MkLoading
         MkSelect / MkSwitch / MkAvatar / MkUserName / MkTime / PageWithHeader
