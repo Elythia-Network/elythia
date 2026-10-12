@@ -14,6 +14,7 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/colfit"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/misc/reactionlegacy"
+	"github.com/elythia-network/elythia/internal/misc/remoteurl"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/forPelevin/gomoji"
@@ -784,9 +785,10 @@ func (s *Service) resolveStreamEmoji(reaction string) *NoteStreamEmoji {
 	if err != nil || emoji == nil {
 		return nil
 	}
-	url := emoji.PublicURL
-	if url == "" {
-		url = emoji.OriginalURL
+	// リモートの絵文字の、形の崩れた URL は使わず、絵文字が無いときと同じにする。
+	url, ok := remoteurl.EmojiURL(emoji.PublicURL, emoji.OriginalURL, host != "")
+	if !ok {
+		return nil
 	}
 	suffix := host
 	if suffix == "" {

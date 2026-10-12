@@ -171,6 +171,10 @@ func TestEmojiUsableAsDecoration(t *testing.T) {
 func TestEmojiDecorationURL(t *testing.T) {
 	assert.Equal(t, "", EmojiDecorationURL(nil))
 	assert.Equal(t, "pub", EmojiDecorationURL(&model.Emoji{PublicURL: "pub", OriginalURL: "orig"}))
+	// リモートの行は形を確かめる。崩れていれば空にする。
+	host := "remote.example"
+	assert.Equal(t, "", EmojiDecorationURL(&model.Emoji{Host: &host, PublicURL: "pub"}))
+	assert.Equal(t, "https://remote.example/a%20b.png", EmojiDecorationURL(&model.Emoji{Host: &host, PublicURL: "https://remote.example/a b.png"}))
 	assert.Equal(t, "orig", EmojiDecorationURL(&model.Emoji{OriginalURL: "orig"}))
 }
 

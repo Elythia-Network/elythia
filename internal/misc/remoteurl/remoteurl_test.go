@@ -45,3 +45,26 @@ func TestMedia(t *testing.T) {
 		assert.Empty(t, got, "%q", raw)
 	}
 }
+
+func TestEmojiURL(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		public, original string
+		remote           bool
+		want             string
+		ok               bool
+	}{
+		{"local public", "/files/a.png", "/files/b.png", false, "/files/a.png", true},
+		{"local falls back to original", "", "/files/b.png", false, "/files/b.png", true},
+		{"local empty", "", "", false, "", true},
+		{"remote public", "https://remote.example/a.png", "https://remote.example/b.png", true, "https://remote.example/a.png", true},
+		{"remote falls back to original", "", "https://remote.example/b (1).png", true, "https://remote.example/b%20%281%29.png", true},
+		{"remote malformed", "https:///remote.example/a.png", "https://remote.example/b.png", true, "", false},
+		{"remote relative", "/a.png", "", true, "", false},
+		{"remote empty", "", "", true, "", false},
+	} {
+		got, ok := EmojiURL(tc.public, tc.original, tc.remote)
+		assert.Equal(t, tc.ok, ok, tc.name)
+		assert.Equal(t, tc.want, got, tc.name)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/elythia-network/elythia/internal/misc/remoteurl"
 	"github.com/elythia-network/elythia/internal/model"
 )
 
@@ -156,7 +157,9 @@ func NewEmojiResolver(lookup EmojiLookup, notes []*model.Note) *EmojiResolver {
 			emojis, _ := kl.FindManyByKeys(keys)
 			for _, e := range emojis {
 				k := model.EmojiKeyOf(e)
-				r.cache[k.Name+"@"+k.Host] = emojiDisplayURL(e)
+				if url, ok := emojiDisplayURL(e, k.Host); ok {
+					r.cache[k.Name+"@"+k.Host] = url
+				}
 			}
 		}
 		return r
@@ -176,19 +179,19 @@ func NewEmojiResolver(lookup EmojiLookup, notes []*model.Note) *EmojiResolver {
 			continue
 		}
 		for _, e := range emojis {
-			r.cache[e.Name+"@"+host] = emojiDisplayURL(e)
+			if url, ok := emojiDisplayURL(e, host); ok {
+				r.cache[e.Name+"@"+host] = url
+			}
 		}
 	}
 	return r
 }
 
 // emojiDisplayURL is the URL an emoji is shown with: PublicURL, falling back
-// to OriginalURL.
-func emojiDisplayURL(e *model.Emoji) string {
-	if e.PublicURL != "" {
-		return e.PublicURL
-	}
-	return e.OriginalURL
+// to OriginalURL. host is the emoji's host ("" for local). ok is false for a
+// remote emoji whose URL is malformed; the emoji is then left unresolved.
+func emojiDisplayURL(e *model.Emoji, host string) (string, bool) {
+	return remoteurl.EmojiURL(e.PublicURL, e.OriginalURL, host != "")
 }
 
 // PopulateNoteEmojis resolves emoji names stored in note.Emojis to URLs and

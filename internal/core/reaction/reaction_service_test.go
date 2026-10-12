@@ -978,3 +978,30 @@ func TestService_NotificationHook_SelfReactionIsNotTouched(t *testing.T) {
 	require.NoError(t, svc.Delete(author, "n1"))
 	assert.Empty(t, hook.events)
 }
+
+// リモートの絵文字の、形の崩れた URL は stream に載せず、絵文字が無いときと
+// 同じく emoji=nil にする。括弧などは符号化した値を載せる。
+func TestService_NoteStreamHook_OnCreate_RemoteEmojiURLForm(t *testing.T) {
+	for raw, want := range map[string]string{
+		"https:///remote.example/emoji/smile.webp":    "",
+		"/emoji/smile.webp":                           "",
+		"https://remote.example/emoji/smile (1).webp": "https://remote.example/emoji/smile%20%281%29.webp",
+	} {
+		svc, repo, _, emojiRepo, _ := newService(t)
+		seedNote(repo, "n1", "author", model.NoteVisibilityPublic)
+		host := "remote.example"
+		emojiRepo.Emojis["smile@remote.example"] = &model.Emoji{Name: "smile", Host: &host, PublicURL: raw}
+		hook := &recordingNoteStreamHook{}
+		svc.SetNoteStreamHook(hook)
+
+		_, err := svc.Create(&model.User{ID: "viewer"}, "n1", ":smile@remote.example:")
+		require.NoError(t, err)
+		require.Len(t, hook.reacted, 1)
+		if want == "" {
+			assert.Nil(t, hook.reacted[0].emoji, raw)
+			continue
+		}
+		require.NotNil(t, hook.reacted[0].emoji, raw)
+		assert.Equal(t, want, hook.reacted[0].emoji.URL)
+	}
+}
