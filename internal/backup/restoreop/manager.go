@@ -459,7 +459,7 @@ func (m *Manager) waitConfirmation(ctx context.Context, rec *Record, live *liveO
 	}
 	m.dropTarget(ctx, rec)
 	m.record(ctx, rec.OpID, StepAborting, StepExpired)
-	m.journal(ctx, rec.OpID, StepExpired, "dropped %s: nobody confirmed within %s", rec.Target, m.o.ReadyTimeout)
+	m.journal(ctx, rec.OpID, StepExpired, "%s: nobody confirmed within %s", targetFate(rec), m.o.ReadyTimeout)
 	m.finishLive(rec.OpID)
 }
 
@@ -485,6 +485,16 @@ func (m *Manager) dropTarget(ctx context.Context, rec *Record) {
 	if err := m.o.DB.DropDatabase(dctx, m.o.MaintenanceDB, rec.Target); err != nil {
 		m.journal(ctx, rec.OpID, "", "could not drop %s: %v", rec.Target, err)
 	}
+}
+
+// targetFate tells in the journal what became of rec's Target when the
+// operation ended before the switch: a restore dropped the database it
+// created, a rollback keeps the kept database (dropTarget).
+func targetFate(rec *Record) string {
+	if rec.Kind == KindRollback {
+		return "kept " + rec.Target + " as it is"
+	}
+	return "dropped " + rec.Target
 }
 
 // keptName reports whether name is database itself, a database kept by a
@@ -614,7 +624,7 @@ func (m *Manager) Abort(ctx context.Context, opID string) error {
 		if err := m.setStep(ctx, opID, StepAborting, StepAborted); err != nil {
 			return err
 		}
-		m.journal(ctx, opID, StepAborted, "aborted; dropped %s", rec.Target)
+		m.journal(ctx, opID, StepAborted, "aborted; %s", targetFate(rec))
 		m.finishLive(opID)
 		return nil
 	}

@@ -95,7 +95,7 @@ func (m *Manager) recoverRecord(ctx context.Context, rec *Record) {
 			final = StepFailed
 		}
 		m.record(ctx, rec.OpID, rec.Step, final, "error", "the backup service restarted before the switch")
-		m.journal(ctx, rec.OpID, final, "dropped %s; the current database %s was not changed", rec.Target, rec.Database)
+		m.journal(ctx, rec.OpID, final, "%s; the current database %s was not changed", targetFate(rec), rec.Database)
 		return
 	case StepResuming:
 		// 名前の組が入れ替えた後のものか確かめる。記録だけを信じると、戻す処理の記録が
