@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -76,6 +77,26 @@ func TestAvatarHandler_MalformedRemoteAvatarFallsBackToIdenticon(t *testing.T) {
 	loc := rec.Header().Get(echo.HeaderLocation)
 	assert.Contains(t, loc, "/identicon/u1", "崩れた形の avatarUrl は使わない (got %q)", loc)
 	assert.NotContains(t, loc, "remote.example/files")
+}
+
+// 括弧や空白を含むリモートの avatarUrl は、符号化した値をプロキシに渡す。
+func TestAvatarHandler_RemoteAvatarIsEncoded(t *testing.T) {
+	withMediaProxy(t)
+	host := "remote.example"
+	repo := leakUserRepo{user: &model.User{
+		ID: "u1", Username: "bob", Host: &host,
+		AvatarURL: strPtrLeak("https://remote.example/files/a (1).png"),
+	}}
+
+	e := echo.New()
+	e.GET("/avatar/@:acct", avatarHandler(repo, "local.example"))
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/avatar/@bob@remote.example", nil))
+
+	require.Equal(t, http.StatusFound, rec.Code)
+	loc, err := url.Parse(rec.Header().Get(echo.HeaderLocation))
+	require.NoError(t, err)
+	assert.Equal(t, "https://remote.example/files/a%20%281%29.png", loc.Query().Get("url"))
 }
 
 // ローカルの人の相対パスの avatarUrl は、形の判定に掛けずにそのまま使う。
