@@ -3,13 +3,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { createApp, defineAsyncComponent, markRaw } from 'vue';
+import { createApp, defineAsyncComponent, markRaw, watch } from 'vue';
 import { ui } from '@@/js/config.js';
 import * as Misskey from 'misskey-js';
 import { compareVersions } from 'compare-versions';
 import { common } from './common.js';
 import type { Component } from 'vue';
 import type { Keymap } from '@/utility/hotkey.js';
+import type { NightMeteorController } from '@/utility/night-meteor-effect.js';
 import { i18n } from '@/i18n.js';
 import { alert, confirm, popup, post } from '@/os.js';
 import { useStream } from '@/stream.js';
@@ -31,6 +32,7 @@ import { misskeyApi } from '@/utility/misskey-api.js';
 import { unisonReload } from '@/utility/unison-reload.js';
 import { isBirthday } from '@/utility/is-birthday.js';
 import { seasonalScreenEffectOf } from '@/utility/seasonal-screen-effect.js';
+import { themeManager } from '@/theme.js';
 
 export async function mainBoot() {
 	const { isClientUpdated, clientUpdate, lastVersion } = await common(async () => {
@@ -77,6 +79,8 @@ export async function mainBoot() {
 		});
 	}
 
+	// 季節の演出は起動時にだけ判定し、出したら止めない。流れ星はこれを見て重ねないようにする (#3530)。
+	let seasonalEffectShowing = false;
 	try {
 		if (prefer.s.enableSeasonalScreenEffect) {
 			const effect = seasonalScreenEffectOf(new Date().getMonth() + 1, prefer.s.hemisphere);
@@ -85,12 +89,43 @@ export async function mainBoot() {
 				new SnowfallEffect({
 					sakura: effect === 'sakura',
 				}).render();
+				seasonalEffectShowing = true;
 			}
 		}
 	} catch (error) {
 		// console.error(error);
 		console.error('Failed to initialise the seasonal screen effect canvas context:', error);
 	}
+
+	//#region Elythia: 夜空の流れ星 (#3530)
+	{
+		let nightMeteor: NightMeteorController | null = null;
+		// 読み込みの途中で設定を切り替えられたときに、古い読み込みの結果を捨てるための番号。
+		let generation = 0;
+		watch(prefer.r.enableNightMeteorEffect, async (enabled) => {
+			const current = ++generation;
+			nightMeteor?.stop();
+			nightMeteor = null;
+			if (!enabled) return;
+			try {
+				const { startNightMeteorEffect } = await import('@/utility/night-meteor-effect.js');
+				if (current !== generation) return;
+				nightMeteor = startNightMeteorEffect(() => ({
+					// store.s.darkMode はどちらの枠のテーマを使うかで、色そのものではない。テーマの
+					// プレビュー中などは食い違うので、themeManager が付ける data-color-scheme を見る。
+					darkMode: window.document.documentElement.dataset.colorScheme === 'dark',
+					seasonalEffectShowing,
+				}));
+			} catch (error) {
+				console.error('Failed to start the night meteor effect:', error);
+			}
+		}, { immediate: true });
+		// テーマの切り替えは、色が当たった後の themeChanged で見直す。
+		themeManager.on('themeChanged', () => {
+			nightMeteor?.update();
+		});
+	}
+	//#endregion
 
 	if ($i) {
 		store.loaded.then(async () => {
