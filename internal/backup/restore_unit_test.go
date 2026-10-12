@@ -234,6 +234,7 @@ func TestCheckMigrations(t *testing.T) {
 	assert.NotErrorIs(t, err, ErrRestoreMigrationTooNew)
 	err = r.checkMigrations(Meta{Migrations: []MigrationState{{Table: CoreMigrationsTable, Version: 3, Dirty: true}}})
 	assert.ErrorContains(t, err, "dirty")
+	assert.ErrorIs(t, err, ErrRestoreMigrationDirty)
 	err = r.checkMigrations(Meta{Migrations: []MigrationState{{Table: "other", Version: 1}}})
 	assert.ErrorContains(t, err, "unknown migration table")
 
@@ -244,6 +245,33 @@ func TestCheckMigrations(t *testing.T) {
 	assert.Error(t, err)
 	assert.Error(t, (&Restorer{CoreMigrationsDir: file}).checkMigrations(Meta{}))
 	assert.Error(t, (&Restorer{CoreMigrationsDir: rsCoreMigrations, LocalMigrationsDir: file}).checkMigrations(Meta{}))
+}
+
+// TestBundledCompareBehind checks when a database is behind the bundled
+// migrations (CheckDatabaseMigrations then migrates it before a rollback).
+func TestBundledCompareBehind(t *testing.T) {
+	b := bundled{core: 10, local: 900002, localCount: 2}
+	noErr := func(MigrationState) error { return errors.New("dirty") }
+	noNew := func(MigrationState, uint) error { return errors.New("too new") }
+	cases := []struct {
+		name   string
+		b      bundled
+		states []MigrationState
+		behind bool
+	}{
+		{"both at the bundled versions", b, []MigrationState{{Table: CoreMigrationsTable, Version: 10}, {Table: LocalMigrationsTable, Version: 900002}}, false},
+		{"core behind", b, []MigrationState{{Table: CoreMigrationsTable, Version: 9}, {Table: LocalMigrationsTable, Version: 900002}}, true},
+		{"local behind", b, []MigrationState{{Table: CoreMigrationsTable, Version: 10}, {Table: LocalMigrationsTable, Version: 900001}}, true},
+		{"local table missing with bundled local migrations", b, []MigrationState{{Table: CoreMigrationsTable, Version: 10}, {Table: LocalMigrationsTable, Missing: true}}, true},
+		{"local table missing without local migrations", bundled{core: 10}, []MigrationState{{Table: CoreMigrationsTable, Version: 10}, {Table: LocalMigrationsTable, Missing: true}}, false},
+		{"empty core table", b, []MigrationState{{Table: CoreMigrationsTable, Version: NilMigrationVersion}, {Table: LocalMigrationsTable, Version: 900002}}, true},
+		{"empty local table without local migrations", bundled{core: 10}, []MigrationState{{Table: CoreMigrationsTable, Version: 10}, {Table: LocalMigrationsTable, Version: NilMigrationVersion}}, false},
+	}
+	for _, c := range cases {
+		behind, err := c.b.compare(c.states, "test", noErr, noNew)
+		require.NoError(t, err, c.name)
+		assert.Equal(t, c.behind, behind, c.name)
+	}
 }
 
 func TestRestoreNames(t *testing.T) {
