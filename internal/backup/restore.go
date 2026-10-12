@@ -1123,8 +1123,8 @@ func (r *Restorer) CheckDatabaseMigrations(ctx context.Context, dbname string) (
 	}
 	out.NeedsMigration, err = b.compare(states, fmt.Sprintf("database %q", dbname),
 		func(s MigrationState) error {
-			return fmt.Errorf("%w: %s of %q is dirty (version %d); a migration stopped in the middle, so fix it with elythia migrate first",
-				ErrRestoreMigrationDirty, s.Table, dbname, s.Version)
+			return fmt.Errorf("%w: %s of %q is dirty (version %d); a migration stopped in the middle, so repair it first (MK_DB_DB=%s elythia migrate -force <version> -track core|local)",
+				ErrRestoreMigrationDirty, s.Table, dbname, s.Version, dbname)
 		},
 		func(s MigrationState, latest uint) error {
 			return fmt.Errorf("%w: %s of %q is at %d but this binary ships up to %d; use a binary at least as new as that database",

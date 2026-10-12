@@ -195,6 +195,8 @@ func TestRestoreStopConditions(t *testing.T) {
 		kept(t, "kept_dirty", count, `UPDATE schema_migrations SET dirty = true`)
 		_, err = r.CheckDatabaseMigrations(ctx, "kept_dirty")
 		require.ErrorIs(t, err, ErrRestoreMigrationDirty)
+		// 直す先は今の DB ではなく退避した DB。
+		assert.Contains(t, err.Error(), "MK_DB_DB=kept_dirty elythia migrate -force")
 
 		// fork の系列も見る。同梱に fork の migration が無いのに管理表が進んでいる。
 		kept(t, "kept_local_newer", count,

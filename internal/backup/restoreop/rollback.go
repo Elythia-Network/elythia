@@ -126,7 +126,10 @@ func (m *Manager) rollbackChecks(ctx context.Context, req RollbackRequest) (*Rec
 // behind them.
 //
 // 再開するプロセスは migrate を流さないので、入れ替える前に当てる (リストアの準備と
-// 同じ)。当てた後で中止しても、戻す先は新しい版のまま残る (中身は失わない)。
+// 同じ)。当てた後で中止しても、戻す先は新しい版のまま残る。当てている途中で失敗
+// したり、サービスが殺されたりすると、戻す先の管理表は dirty のまま残る (次の準備は
+// KEPT_DATABASE_DIRTY で断る)。直し方は docs/backup.md の「退避したDBへ戻す」。
+// Migrate は ctx を取らないので、準備の中止は当て終わるのを待ってから効く。
 func (m *Manager) migrateKept(ctx context.Context, rec *Record, migrations *backup.DatabaseMigrations) error {
 	if migrations == nil || !migrations.NeedsMigration {
 		m.journal(ctx, rec.OpID, StepPreparing, "%s is at the bundled migrations", rec.Target)

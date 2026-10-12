@@ -468,7 +468,7 @@ func restoreError(w http.ResponseWriter, log *slog.Logger, err error) {
 			"The database to roll back to has migrations this version of Elythia does not know. Use a version at least as new as that database.", idKeptTooNew))
 	case errors.Is(err, restoreop.ErrKept) && errors.Is(err, backup.ErrRestoreMigrationDirty):
 		writeJSON(w, http.StatusBadRequest, apierr.Error("KEPT_DATABASE_DIRTY",
-			"A migration of the database to roll back to stopped in the middle. Fix it with elythia migrate first.", idKeptDirty))
+			"A migration of the database to roll back to stopped in the middle. Repair its migration table first (elythia migrate -force with MK_DB_DB set to that database).", idKeptDirty))
 	case errors.Is(err, restoreop.ErrKept) && errors.Is(err, backup.ErrRestoreNotElythia):
 		writeJSON(w, http.StatusBadRequest, apierr.Error("KEPT_DATABASE_NOT_ELYTHIA",
 			"The database to roll back to is not an Elythia database.", idKeptNotElythia))

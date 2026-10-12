@@ -9710,7 +9710,7 @@ export interface Locale extends ILocale {
              */
             "migrationTooNew": string;
             /**
-             * 管理表の更新が途中で止まっているので、戻せません。elythia migrateで直してください。
+             * 管理表の更新が途中で止まっている（dirty）ので、戻せません。サーバーの管理者が、このデータベースの管理表を直してから戻してください（手順はドキュメントの「退避したDBへ戻す」）。
              */
             "migrationDirty": string;
             /**

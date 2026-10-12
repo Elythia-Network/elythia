@@ -192,6 +192,10 @@ func TestRollbackErrorMapping(t *testing.T) {
 		assert.Equal(t, c.status, w.Code, c.code)
 		assert.Contains(t, w.Body.String(), `"code":"`+c.code+`"`)
 	}
+	// dirty の直し方は、今の DB ではなく戻す先を名指しする。
+	w := httptest.NewRecorder()
+	restoreError(w, discardLogger(), fmt.Errorf("%w: %w", restoreop.ErrKept, backup.ErrRestoreMigrationDirty))
+	assert.Contains(t, w.Body.String(), "MK_DB_DB")
 }
 
 // TestRestoreAPI_MigrationRefusalsStayRestoreErrors checks that a restore of
