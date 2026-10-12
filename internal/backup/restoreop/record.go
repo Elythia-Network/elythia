@@ -172,9 +172,17 @@ func (s *Store) create(ctx context.Context, r *Record) error {
 }
 
 func (s *Store) fields(r *Record) []any {
+	target, kept := r.Target, ""
+	if r.Kind == KindRollback {
+		// ロールバックの戻す先は、欄を足す前 (#3463 (6c)) の版が読まない keptTarget に
+		// 置き、target は空にする。古い版へ戻した daemon が途中の記録を回復すると、
+		// target を「作った DB」として消すため (古い版は kind も名前の守りも持たない)。
+		// 空の名前の DROP DATABASE は PostgreSQL が構文の誤りで断るので、何も消えない。
+		target, kept = "", r.Target
+	}
 	return []any{
 		"opId", r.OpID, "kind", r.Kind, "step", r.Step, "generationId", r.GenerationID, "database", r.Database,
-		"target", r.Target, "before", r.Before, "aside", r.Aside, "userId", r.UserID, "error", r.Error,
+		"target", target, "keptTarget", kept, "before", r.Before, "aside", r.Aside, "userId", r.UserID, "error", r.Error,
 		"ticketHash", r.ticketHash, "tokenHash", r.tokenHash,
 		"createdAt", formatTime(r.CreatedAt), "updatedAt", formatTime(r.UpdatedAt), "readyAt", formatTime(r.ReadyAt),
 	}
@@ -194,9 +202,13 @@ func (s *Store) Get(ctx context.Context, opID string) (*Record, error) {
 		// 欄を足す前 (#3463 (6c)) の記録はリストア。
 		kind = KindRestore
 	}
+	target := m["target"]
+	if kind == KindRollback {
+		target = m["keptTarget"]
+	}
 	return &Record{
 		OpID: m["opId"], Kind: kind, Step: m["step"], GenerationID: m["generationId"], Database: m["database"],
-		Target: m["target"], Before: m["before"], Aside: m["aside"], UserID: m["userId"], Error: m["error"],
+		Target: target, Before: m["before"], Aside: m["aside"], UserID: m["userId"], Error: m["error"],
 		CreatedAt: parseTime(m["createdAt"]), UpdatedAt: parseTime(m["updatedAt"]), ReadyAt: parseTime(m["readyAt"]),
 		ticketHash: m["ticketHash"], tokenHash: m["tokenHash"],
 	}, nil

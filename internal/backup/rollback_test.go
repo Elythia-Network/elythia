@@ -139,6 +139,15 @@ func TestRollbackChecks(t *testing.T) {
 	assert.Equal(t, KeptProblemUnreadable, byName[locked].Problem)
 	assert.Equal(t, time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC), byName[current].At)
 
+	// 前の版の daemon がロールバックの記録を読むと、戻す先の名前は空になる
+	// (restoreop の keptTarget)。空の名前では何も消えず、何も無いことになる。
+	before := rsDatabasesLike(t, pg, "%")
+	require.Error(t, app.DropDatabase(ctx, "", ""))
+	assert.Equal(t, before, rsDatabasesLike(t, pg, "%"), "nothing is dropped")
+	has, err := app.ExistingDatabases(ctx, "", []string{rsAppDB, ""})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]bool{rsAppDB: true}, has)
+
 	none, err := app.KeptDatabases(ctx, "", "nothing_kept")
 	require.NoError(t, err)
 	assert.NotNil(t, none)

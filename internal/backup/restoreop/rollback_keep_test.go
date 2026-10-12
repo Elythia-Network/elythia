@@ -145,3 +145,34 @@ func TestRecordKind(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, KindRestore, rec.Kind)
 }
+
+// TestRecord_OldReaderSeesNoTarget checks what a backup service of the
+// previous version (#3463 (6c), which reads target and knows neither kind
+// nor keptTarget) sees in a rollback record: no target, so its recovery and
+// abort have nothing to drop.
+func TestRecord_OldReaderSeesNoTarget(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	require.NoError(t, e.store.create(ctx, &Record{OpID: "restore-old", Kind: KindRollback, Step: StepReady, Database: testDB, Target: keptDB, Before: asideDB}))
+	raw, err := e.rdb.HGetAll(ctx, e.store.key("restore-old")).Result()
+	require.NoError(t, err)
+	assert.Equal(t, "", raw["target"], "the previous version reads target as the database it created")
+	assert.Equal(t, keptDB, raw["keptTarget"])
+	rec, err := e.store.Get(ctx, "restore-old")
+	require.NoError(t, err)
+	assert.Equal(t, keptDB, rec.Target, "this version reads the kept database back")
+
+	// 古い版が段を進めても (setStep は target を書かない)、空のまま。
+	require.NoError(t, e.store.setStep(ctx, "restore-old", StepReady, StepAborting, time.Now(), "error", "x"))
+	raw, err = e.rdb.HGetAll(ctx, e.store.key("restore-old")).Result()
+	require.NoError(t, err)
+	assert.Equal(t, "", raw["target"])
+
+	// リストアの記録は今までどおり target に置く。
+	require.NoError(t, e.rdb.Del(ctx, e.store.CurrentKey()).Err())
+	require.NoError(t, e.store.create(ctx, &Record{OpID: "restore-new", Kind: KindRestore, Step: StepReady, Database: testDB, Target: tgt}))
+	raw, err = e.rdb.HGetAll(ctx, e.store.key("restore-new")).Result()
+	require.NoError(t, err)
+	assert.Equal(t, tgt, raw["target"])
+	assert.Equal(t, "", raw["keptTarget"])
+}
