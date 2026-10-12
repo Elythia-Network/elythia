@@ -350,3 +350,55 @@ func TestKindHelpers(t *testing.T) {
 	assert.Equal(t, "kept", swappedIn(rb))
 	assert.Equal(t, "restored", swappedIn(rs))
 }
+
+// journalText joins the journal of opID.
+func (e *env) journalText(opID string) string {
+	e.t.Helper()
+	j, err := e.store.Journal(context.Background(), opID)
+	require.NoError(e.t, err)
+	var b strings.Builder
+	for _, x := range j {
+		b.WriteString(x.Message + "\n")
+	}
+	return b.String()
+}
+
+// TestRollback_JournalSaysKept checks that the journal of a rollback that
+// ended before the switch says the kept database stays, not that it was
+// dropped (the restore's wording).
+func TestRollback_JournalSaysKept(t *testing.T) {
+	ctx := context.Background()
+	check := func(t *testing.T, text string) {
+		t.Helper()
+		assert.NotContains(t, text, "dropped")
+		assert.Contains(t, text, "kept "+keptDB+" as it is")
+	}
+	t.Run("abort while ready", func(t *testing.T) {
+		e := newEnv(t)
+		e.withKept()
+		rec, _ := e.rollback()
+		require.NoError(t, e.m.Abort(ctx, rec.OpID))
+		e.waitStep(rec.OpID, StepAborted)
+		check(t, e.journalText(rec.OpID))
+	})
+	t.Run("expiry", func(t *testing.T) {
+		e := newEnv(t, func(o *Options) { o.ReadyTimeout = 30 * time.Millisecond })
+		e.withKept()
+		rec, _, err := e.m.PrepareRollback(ctx, RollbackRequest{Database: keptDB, UserID: "u1", Token: "t"})
+		require.NoError(t, err)
+		e.waitStep(rec.OpID, StepExpired)
+		check(t, e.journalText(rec.OpID))
+	})
+	t.Run("recovery", func(t *testing.T) {
+		e, rec := crashedRollback(t, StepReady, map[string]string{testDB: "current", keptDB: "kept"}, "")
+		e.waitStep(rec.OpID, StepAborted)
+		check(t, e.journalText(rec.OpID))
+	})
+	t.Run("a restore still says dropped", func(t *testing.T) {
+		e := newEnv(t)
+		rec, _ := e.prepare()
+		require.NoError(t, e.m.Abort(ctx, rec.OpID))
+		e.waitStep(rec.OpID, StepAborted)
+		assert.Contains(t, e.journalText(rec.OpID), "dropped "+rec.Target)
+	})
+}
