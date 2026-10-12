@@ -106,6 +106,7 @@ describe('preview provider registry', () => {
 	});
 
 	test('selects priority descending, then namespaced ID ascending', async () => {
+		vi.spyOn(String.prototype, 'localeCompare').mockReturnValue(1);
 		await launchServerPlugins([
 			plugin('zeta', provider('card', 10)),
 			plugin('alpha', provider('later', 10)),
@@ -340,6 +341,34 @@ describe('preview provider coordinator', () => {
 		expect(unmounted).not.toHaveBeenCalled();
 	});
 
+	test('keeps a ready provider mounted across document inactivity without reloading', async () => {
+		const mounted = vi.fn();
+		const unmounted = vi.fn();
+		const load = vi.fn(async () => 'loaded');
+		const Component = defineComponent({
+			props: ['data', 'context'],
+			setup() {
+				onMounted(mounted);
+				onBeforeUnmount(unmounted);
+			},
+			template: '<div>document: {{ data }}:{{ context.active }}</div>',
+		});
+		await launchServerPlugins([plugin('example', lazyProvider({ load, component: Component }))]);
+		const result = renderPreview();
+
+		await waitFor(() => expect(result.getByText('document: loaded:true')).toBeTruthy());
+		Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+		document.dispatchEvent(new Event('visibilitychange'));
+		await waitFor(() => expect(result.getByText('document: loaded:false')).toBeTruthy());
+
+		Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+		document.dispatchEvent(new Event('visibilitychange'));
+		await waitFor(() => expect(result.getByText('document: loaded:true')).toBeTruthy());
+		expect(load).toHaveBeenCalledTimes(1);
+		expect(mounted).toHaveBeenCalledTimes(1);
+		expect(unmounted).not.toHaveBeenCalled();
+	});
+
 	test('renders a provider loading card only while one bounded load is in flight', async () => {
 		let finish!: (value: string) => void;
 		const Loading = defineComponent({ template: '<div aria-label="loading preview">loading card</div>' });
@@ -401,6 +430,39 @@ describe('preview provider coordinator', () => {
 		expect(signal?.aborted).toBe(true);
 	});
 
+	test('keeps a ready provider across kept-alive deactivation without reloading', async () => {
+		const mounted = vi.fn();
+		const unmounted = vi.fn();
+		const load = vi.fn(async () => 'loaded');
+		const Component = defineComponent({
+			props: ['data'],
+			setup() {
+				onMounted(mounted);
+				onBeforeUnmount(unmounted);
+			},
+			template: '<div>kept alive: {{ data }}</div>',
+		});
+		await launchServerPlugins([plugin('example', lazyProvider({ load, component: Component }))]);
+		const shown = ref(true);
+		const Wrapper = defineComponent({
+			components: { MkPluginUrlPreview },
+			setup: () => ({ shown, source }),
+			template: '<KeepAlive><MkPluginUrlPreview v-if="shown" :url="url" :detail="true" :revealed="true" :source="source" /></KeepAlive>',
+			data: () => ({ url: urlInput.href }),
+		});
+
+		const result = render(Wrapper, { global: { directives, components } });
+		await waitFor(() => expect(result.getByText('kept alive: loaded')).toBeTruthy());
+		shown.value = false;
+		await nextTick();
+		shown.value = true;
+		await waitFor(() => expect(result.getByText('kept alive: loaded')).toBeTruthy());
+
+		expect(load).toHaveBeenCalledTimes(1);
+		expect(mounted).toHaveBeenCalledTimes(1);
+		expect(unmounted).not.toHaveBeenCalled();
+	});
+
 	test('closes a load failure to a source link without trying another provider', async () => {
 		const secondLoad = vi.fn(async () => 'second');
 		await launchServerPlugins([
@@ -432,6 +494,28 @@ describe('preview provider coordinator', () => {
 
 		const result = renderPreview();
 		await waitFor(() => expect(result.getByRole('link').getAttribute('href')).toBe(urlInput.href));
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	test('captures a loading component render error, aborts the load, and closes to a source link', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		let signal: AbortSignal | undefined;
+		await launchServerPlugins([plugin('broken', lazyProvider({
+			loadingComponent: defineComponent({
+				setup() {
+					throw new Error('loading render failed');
+				},
+				template: '<div/>',
+			}),
+			load(_input, _context, value) {
+				signal = value;
+				return new Promise(() => undefined);
+			},
+		}))]);
+
+		const result = renderPreview();
+		await waitFor(() => expect(result.getByRole('link').getAttribute('href')).toBe(urlInput.href));
+		expect(signal?.aborted).toBe(true);
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 });

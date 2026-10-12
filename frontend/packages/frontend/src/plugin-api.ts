@@ -326,7 +326,7 @@ export function resolvePreviewProvider(input: PreviewInput): PreviewRegistration
 
 	matches.sort((a, b) => {
 		const priority = (b.provider.priority ?? 0) - (a.provider.priority ?? 0);
-		return priority !== 0 ? priority : a.id.localeCompare(b.id);
+		return priority !== 0 ? priority : a.id < b.id ? -1 : 1;
 	});
 
 	if (matches.length > 1) {
