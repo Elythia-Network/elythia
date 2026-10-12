@@ -1,6 +1,9 @@
 package entity
 
-import "github.com/elythia-network/elythia/internal/model"
+import (
+	"github.com/elythia-network/elythia/internal/misc/remoteurl"
+	"github.com/elythia-network/elythia/internal/model"
+)
 
 // EmojiDetailed is the emoji representation returned by admin emoji endpoints.
 // Matches the TypeScript EmojiDetailed schema (packDetailed).
@@ -20,10 +23,8 @@ type EmojiDetailed struct {
 // PackEmojiDetailed converts a model.Emoji to an EmojiDetailed DTO.
 // URL is computed as publicUrl || originalUrl for backward compatibility.
 func PackEmojiDetailed(e *model.Emoji) EmojiDetailed {
-	url := e.PublicURL
-	if url == "" {
-		url = e.OriginalURL
-	}
+	// リモートの絵文字の、形の崩れた URL は空にする (一覧から行は消さない)。
+	url, _ := remoteurl.EmojiURL(e.PublicURL, e.OriginalURL, e.Host != nil && *e.Host != "")
 	aliases := make([]string, len(e.Aliases))
 	copy(aliases, e.Aliases)
 	roleIDs := make([]string, len(e.RoleIDsThatCanBeUsedThisEmojiAsReaction))

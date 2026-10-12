@@ -32,3 +32,21 @@ func Media(raw string) (string, bool) {
 	}
 	return clean, true
 }
+
+// EmojiURL returns the URL a custom emoji is shown with: publicURL, falling
+// back to originalURL. For a remote emoji the value goes through Media, and ok
+// is false when it is malformed; callers then treat the emoji as unknown. A
+// local emoji is returned as is with ok true.
+//
+// 取り込みで形を確かめる前に保存されたリモートの絵文字の行があるので、返す
+// ときにもう一度確かめる。読み出しの経路が複数あるので、判定をここに集める。
+func EmojiURL(publicURL, originalURL string, remote bool) (string, bool) {
+	u := publicURL
+	if u == "" {
+		u = originalURL
+	}
+	if !remote {
+		return u, true
+	}
+	return Media(u)
+}

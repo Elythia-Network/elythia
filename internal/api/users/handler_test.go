@@ -13,6 +13,7 @@ import (
 
 	corefollowing "github.com/elythia-network/elythia/internal/core/following"
 	coreuser "github.com/elythia-network/elythia/internal/core/user"
+	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/entitycompat/shapetest"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
@@ -2532,6 +2533,21 @@ func TestSetters_WireOptionalDeps(t *testing.T) {
 	assert.Equal(t, "https://remote.example/smile.png", remote["smile"])
 	// ローカルの利用者は本家と同じく解決しない (#3270)。
 	assert.Empty(t, show("u1"))
+}
+
+// リモートの利用者の emojis には、形の崩れた URL の絵文字を載せない。括弧などは
+// 符号化した値を載せる。
+func TestPopulateUserEmojis_RemoteURLForm(t *testing.T) {
+	h, _ := newTestHandler(t)
+	host := "remote.example"
+	emojiRepo := testutil.NewMockEmojiRepository()
+	require.NoError(t, emojiRepo.Create(&model.Emoji{ID: "e1", Name: "bad", Host: &host, PublicURL: "https:///remote.example/bad.png"}))
+	require.NoError(t, emojiRepo.Create(&model.Emoji{ID: "e2", Name: "ok", Host: &host, PublicURL: "https://remote.example/ok (1).png"}))
+	h.SetEmojiRepo(emojiRepo)
+
+	lite := &entity.UserLite{}
+	h.populateUserEmojis(&model.User{ID: "u2", Host: &host, Emojis: []string{"bad", "ok"}}, lite)
+	assert.Equal(t, map[string]string{"ok": "https://remote.example/ok%20%281%29.png"}, lite.Emojis)
 }
 
 // stubBufferedReactions implements entity.BufferedReactionsReader as a no-op

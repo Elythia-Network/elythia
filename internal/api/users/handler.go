@@ -23,6 +23,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/userpack"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/misc/remoteurl"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
@@ -418,9 +419,10 @@ func (h *Handler) populateUserEmojis(u *model.User, lite *entity.UserLite) {
 	}
 	m := make(map[string]string, len(emojis))
 	for _, e := range emojis {
-		url := e.PublicURL
-		if url == "" {
-			url = e.OriginalURL
+		// 形の崩れた URL の絵文字は、解決できなかったものとして載せない。
+		url, ok := remoteurl.EmojiURL(e.PublicURL, e.OriginalURL, true)
+		if !ok {
+			continue
 		}
 		m[e.Name] = url
 	}

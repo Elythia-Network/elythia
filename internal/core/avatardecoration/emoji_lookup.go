@@ -4,6 +4,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/misc/remoteurl"
 	"github.com/elythia-network/elythia/internal/model"
 )
 
@@ -140,8 +141,8 @@ func EmojiDecorationURL(e *model.Emoji) string {
 	if e == nil {
 		return ""
 	}
-	if e.PublicURL != "" {
-		return e.PublicURL
-	}
-	return e.OriginalURL
+	// デコレーションに使えるのはローカルの絵文字だけだが、リモートの行が
+	// 渡されたときに形の崩れた URL を返さないよう、共通の判定を通す。
+	url, _ := remoteurl.EmojiURL(e.PublicURL, e.OriginalURL, e.Host != nil && *e.Host != "")
+	return url
 }
