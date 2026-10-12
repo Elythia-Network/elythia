@@ -311,6 +311,23 @@ func (h *Handler) MiAuthCheck(c echo.Context) error {
 		// session 不在 / 既に取得済 (one-time) は ok:false。
 		return c.JSON(http.StatusOK, map[string]any{"ok": false})
 	}
+	// **持ち主は、取得済みにする前に確かめる。** プラグインが管理するアカウント
+	// (#3468) の token は、gen-token / accept が作らないので本来ここには無い。
+	// それでも行があれば (それより前のデータや手で入れた行) 払い出さない。外では
+	// 使えない token だが、資格情報を外へ出す口を残さない。持ち主を読めない障害の
+	// ときも払い出さず、取得済みにもしない (クライアントは polling で取り直せる)。
+	var owner *model.User
+	if h.userRepo != nil {
+		u, uerr := h.userRepo.FindByID(tok.UserID)
+		switch {
+		case uerr != nil && !repository.IsNotFound(uerr):
+			return c.JSON(http.StatusOK, map[string]any{"ok": false})
+		case uerr == nil && u != nil && u.IsPluginManaged():
+			return c.JSON(http.StatusOK, map[string]any{"ok": false})
+		case uerr == nil:
+			owner = u
+		}
+	}
 	// one-time 取得: fetched=false→true の遷移をアトミックに行い、勝った
 	// リクエストだけが token を払い出す。並行 polling で同じ token が二重に
 	// 渡ることを防ぐ (上の Fetched チェックは fast path で、ここが真の関門)。
@@ -320,13 +337,11 @@ func (h *Handler) MiAuthCheck(c echo.Context) error {
 	}
 
 	resp := map[string]any{"ok": true, "token": tok.Token}
-	if h.userRepo != nil {
-		if u, uerr := h.userRepo.FindByID(tok.UserID); uerr == nil && u != nil {
-			profile, _ := h.userRepo.FindProfileByUserID(u.ID)
-			// 本家 ApiServerService の miauth check も pack(token.userId, null,
-			// {schema: 'UserDetailedNotMe'}) (#3330)。
-			resp["user"] = h.packDetailedNotMe(u, profile)
-		}
+	if owner != nil {
+		profile, _ := h.userRepo.FindProfileByUserID(owner.ID)
+		// 本家 ApiServerService の miauth check も pack(token.userId, null,
+		// {schema: 'UserDetailedNotMe'}) (#3330)。
+		resp["user"] = h.packDetailedNotMe(owner, profile)
 	}
 	return c.JSON(http.StatusOK, resp)
 }
