@@ -210,6 +210,21 @@ describe('preview provider coordinator', () => {
 		};
 	}
 
+	function controlIntersection(): (isIntersecting: boolean) => void {
+		let callback: IntersectionObserverCallback | undefined;
+		vi.stubGlobal('IntersectionObserver', class {
+			readonly root = null;
+			readonly rootMargin = '0px';
+			readonly thresholds = [0];
+			constructor(value: IntersectionObserverCallback) { callback = value; }
+			disconnect() {}
+			observe() {}
+			takeRecords(): IntersectionObserverEntry[] { return []; }
+			unobserve() {}
+		});
+		return isIntersecting => callback?.([{ isIntersecting } as IntersectionObserverEntry], {} as IntersectionObserver);
+	}
+
 	test.each([
 		['timeline', { detail: false }],
 		['hidden CW', { revealed: false }],
@@ -481,6 +496,51 @@ describe('preview provider coordinator', () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
+	test('keeps a load failure settled across viewport exit and re-entry', async () => {
+		const setIntersecting = controlIntersection();
+		const load = vi.fn(async () => {
+			throw new Error('load failed');
+		});
+		await launchServerPlugins([plugin('broken', lazyProvider({ requiresDetail: false, load }))]);
+		const result = renderPreview({ detail: false });
+
+		setIntersecting(true);
+		await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+		await waitFor(() => expect(result.getByRole('link').getAttribute('href')).toBe(urlInput.href));
+		setIntersecting(false);
+		await nextTick();
+		setIntersecting(true);
+		await nextTick();
+
+		expect(load).toHaveBeenCalledTimes(1);
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	test('retries a settled load failure when the ownership key changes', async () => {
+		const load = vi.fn(async () => {
+			throw new Error('load failed');
+		});
+		await launchServerPlugins([plugin('broken', lazyProvider({ load }))]);
+		const result = renderPreview();
+
+		await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+		await result.rerender({ url: 'https://example.com/post/2' });
+		await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+	});
+
+	test('retries a settled load failure after its CW closes and reopens', async () => {
+		const load = vi.fn(async () => {
+			throw new Error('load failed');
+		});
+		await launchServerPlugins([plugin('broken', lazyProvider({ load }))]);
+		const result = renderPreview();
+
+		await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+		await result.rerender({ revealed: false });
+		await result.rerender({ revealed: true });
+		await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+	});
+
 	test('captures a provider render error and closes to a source link', async () => {
 		vi.spyOn(console, 'error').mockImplementation(() => undefined);
 		await launchServerPlugins([plugin('broken', lazyProvider({
@@ -494,6 +554,37 @@ describe('preview provider coordinator', () => {
 
 		const result = renderPreview();
 		await waitFor(() => expect(result.getByRole('link').getAttribute('href')).toBe(urlInput.href));
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	test('keeps a provider render failure settled across viewport exit and re-entry', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		const setIntersecting = controlIntersection();
+		const load = vi.fn(async () => 'loaded');
+		const renderAttempts = vi.fn();
+		await launchServerPlugins([plugin('broken', lazyProvider({
+			requiresDetail: false,
+			load,
+			component: defineComponent({
+				setup() {
+					renderAttempts();
+					throw new Error('render failed');
+				},
+				template: '<div/>',
+			}),
+		}))]);
+		const result = renderPreview({ detail: false });
+
+		setIntersecting(true);
+		await waitFor(() => expect(renderAttempts).toHaveBeenCalledTimes(1));
+		await waitFor(() => expect(result.getByRole('link').getAttribute('href')).toBe(urlInput.href));
+		setIntersecting(false);
+		await nextTick();
+		setIntersecting(true);
+		await nextTick();
+
+		expect(load).toHaveBeenCalledTimes(1);
+		expect(renderAttempts).toHaveBeenCalledTimes(1);
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
@@ -516,6 +607,37 @@ describe('preview provider coordinator', () => {
 		const result = renderPreview();
 		await waitFor(() => expect(result.getByRole('link').getAttribute('href')).toBe(urlInput.href));
 		expect(signal?.aborted).toBe(true);
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	test('keeps a loading component failure settled across viewport exit and re-entry', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		const setIntersecting = controlIntersection();
+		const load = vi.fn(() => new Promise(() => undefined));
+		const renderAttempts = vi.fn();
+		await launchServerPlugins([plugin('broken', lazyProvider({
+			requiresDetail: false,
+			loadingComponent: defineComponent({
+				setup() {
+					renderAttempts();
+					throw new Error('loading render failed');
+				},
+				template: '<div/>',
+			}),
+			load,
+		}))]);
+		const result = renderPreview({ detail: false });
+
+		setIntersecting(true);
+		await waitFor(() => expect(renderAttempts).toHaveBeenCalledTimes(1));
+		await waitFor(() => expect(result.getByRole('link').getAttribute('href')).toBe(urlInput.href));
+		setIntersecting(false);
+		await nextTick();
+		setIntersecting(true);
+		await nextTick();
+
+		expect(load).toHaveBeenCalledTimes(1);
+		expect(renderAttempts).toHaveBeenCalledTimes(1);
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 });
