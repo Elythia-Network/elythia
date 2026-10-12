@@ -32,6 +32,8 @@ export const NIGHT_METEOR_STYLE = {
 	brightness: 0.9,
 	/** The warm white of the stars on the splash screen. */
 	color: '#fff6d8',
+	/** The same color, fully transparent, for the end of the tail. */
+	tailEndColor: '#fff6d800',
 } as const;
 
 type Meteor = {
@@ -53,9 +55,11 @@ export function nextBurstDelay(random: () => number = Math.random): number {
 
 /**
  * Draws the meteors on a canvas over the whole screen.
- * It runs requestAnimationFrame only while a meteor is in flight.
+ * The canvas is in the document and requestAnimationFrame runs only while a
+ * meteor is in flight. Between the bursts only a timer is left.
  */
 export class NightMeteorRenderer {
+	private active = false;
 	private canvas: HTMLCanvasElement | null = null;
 	private ctx: CanvasRenderingContext2D | null = null;
 	private meteors: Meteor[] = [];
@@ -68,27 +72,52 @@ export class NightMeteorRenderer {
 
 	constructor() {
 		this.frame = this.frame.bind(this);
-		this.resize = this.resize.bind(this);
+		this.onResize = this.onResize.bind(this);
 	}
 
+	/** Whether the bursts are scheduled (between `start()` and `stop()`). */
 	public get running(): boolean {
-		return this.canvas != null;
+		return this.active;
 	}
 
 	public start(): void {
-		if (this.canvas != null) return;
+		if (this.active) return;
+		this.active = true;
+		// 始めてすぐに流すと、タブを行き来するたびに流れて目障りなので、最初も間を空ける。
+		this.scheduleBurst();
+	}
+
+	public stop(): void {
+		if (!this.active) return;
+		this.active = false;
+		if (this.burstTimer != null) window.clearTimeout(this.burstTimer);
+		this.burstTimer = null;
+		this.detach();
+	}
+
+	/**
+	 * Puts the canvas in the document. Returns false when the 2D canvas is unavailable.
+	 *
+	 * 画面全体の canvas を置いたままにすると、何も描いていない間も合成のレイヤーと
+	 * 描画先のメモリ(1920x1080、倍率2で約33MB)を持ち続ける。流れている間だけ置く。
+	 */
+	private attach(): boolean {
+		if (this.canvas != null) return true;
 
 		const canvas = window.document.createElement('canvas');
 		const ctx = canvas.getContext('2d');
 		// 2D の canvas が使えない環境では、何も出さないだけにする。
-		if (ctx == null) return;
+		if (ctx == null) return false;
 
 		Object.assign(canvas.style, {
 			position: 'fixed',
+			// 100vh はスマートフォンでアドレスバーの分だけ見えている範囲とずれるので、四辺を 0 にして画面に合わせる。
 			top: '0',
+			right: '0',
+			bottom: '0',
 			left: '0',
-			width: '100vw',
-			height: '100vh',
+			width: '100%',
+			height: '100%',
 			background: 'transparent',
 			pointerEvents: 'none',
 			// 季節の演出の canvas と同じく、全ての要素の上に重ねる(押す操作は pointer-events で素通しする)。
@@ -99,37 +128,37 @@ export class NightMeteorRenderer {
 
 		this.canvas = canvas;
 		this.ctx = ctx;
-		this.meteors = [];
-		// 新しい canvas は既定の大きさなので、前回の大きさと同じでも必ず合わせ直す。
-		this.width = 0;
-		this.height = 0;
-		this.resize();
-		window.addEventListener('resize', this.resize);
-		// 始めてすぐに流すと、タブを行き来するたびに流れて目障りなので、最初も間を空ける。
-		this.scheduleBurst();
+		this.resize(true);
+		window.addEventListener('resize', this.onResize);
+		return true;
 	}
 
-	public stop(): void {
-		if (this.canvas == null) return;
-
+	private detach(): void {
 		if (this.raf !== 0) window.cancelAnimationFrame(this.raf);
 		this.raf = 0;
 		this.lastFrame = 0;
-		if (this.burstTimer != null) window.clearTimeout(this.burstTimer);
-		this.burstTimer = null;
-		window.removeEventListener('resize', this.resize);
+		this.meteors = [];
+		if (this.canvas == null) return;
+		window.removeEventListener('resize', this.onResize);
+		// 外しただけでは描画先のメモリが GC まで残り、iOS Safari では canvas の総量の上限に数えられる。大きさを 0 にしてその場で手放す。
+		this.canvas.width = 0;
+		this.canvas.height = 0;
 		this.canvas.remove();
 		this.canvas = null;
 		this.ctx = null;
-		this.meteors = [];
 	}
 
-	private resize(): void {
+	private onResize(): void {
+		this.resize(false);
+	}
+
+	private resize(force: boolean): void {
 		if (this.canvas == null || this.ctx == null) return;
 		const dpr = Math.min(window.devicePixelRatio || 1, 2);
-		const width = window.innerWidth;
-		const height = window.innerHeight;
-		if (width === this.width && height === this.height && dpr === this.dpr) return;
+		// 描画先の縦横比を、実際に表示されている canvas の大きさに合わせる。
+		const width = this.canvas.clientWidth || window.innerWidth;
+		const height = this.canvas.clientHeight || window.innerHeight;
+		if (!force && width === this.width && height === this.height && dpr === this.dpr) return;
 		this.width = width;
 		this.height = height;
 		this.dpr = dpr;
@@ -148,9 +177,7 @@ export class NightMeteorRenderer {
 	}
 
 	private launch(): void {
-		if (this.canvas == null) return;
-		// 画面の倍率を変えたときには resize が来ないことがあるので、流す前に確かめ直す。
-		if (this.meteors.length === 0) this.resize();
+		if (!this.attach()) return;
 
 		const s = NIGHT_METEOR_STYLE;
 		const [xLo, xHi] = s.xRange;
@@ -195,7 +222,8 @@ export class NightMeteorRenderer {
 			const ty = m.y - (m.vy / speed) * s.tail;
 			const gradient = ctx.createLinearGradient(m.x, m.y, tx, ty);
 			gradient.addColorStop(0, s.color);
-			gradient.addColorStop(1, 'transparent');
+			// 'transparent' は透明な黒なので、途中が灰色がかる。同じ色のまま透明にする。
+			gradient.addColorStop(1, s.tailEndColor);
 			ctx.globalAlpha = alpha;
 			ctx.strokeStyle = gradient;
 			ctx.lineWidth = s.width;
@@ -212,10 +240,9 @@ export class NightMeteorRenderer {
 		ctx.globalAlpha = 1;
 		this.meteors = this.meteors.filter(m => m.life < m.max);
 
-		// 流れ星が残っていないときは次の群れまで描かない(requestAnimationFrame を回し続けない)。
+		// 流れ星が残っていないときは次の群れまで描かない。requestAnimationFrame を回し続けず、canvas も外す。
 		if (this.meteors.length === 0) {
-			ctx.clearRect(0, 0, this.width, this.height);
-			this.lastFrame = 0;
+			this.detach();
 			return;
 		}
 		this.raf = window.requestAnimationFrame(this.frame);
@@ -236,6 +263,8 @@ export type NightMeteorController = {
 	update(): void;
 	/** Stops the meteors and removes every listener and timer. */
 	stop(): void;
+	/** Whether the conditions hold and the bursts are scheduled. */
+	readonly showing: boolean;
 };
 
 const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
@@ -280,6 +309,9 @@ export function startNightMeteorEffect(getEnvironment: () => NightMeteorEnvironm
 
 	return {
 		update,
+		get showing() {
+			return renderer.running;
+		},
 		stop() {
 			stopped = true;
 			if (checkTimer != null) window.clearTimeout(checkTimer);
