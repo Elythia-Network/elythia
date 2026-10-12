@@ -371,7 +371,8 @@ func TestRollback_JournalSaysKept(t *testing.T) {
 	check := func(t *testing.T, text string) {
 		t.Helper()
 		assert.NotContains(t, text, "dropped")
-		assert.Contains(t, text, "kept "+keptDB+" as it is")
+		// 戻す先の扱いは、最後の行に1回だけ書く (2行並べない)。
+		assert.Equal(t, 1, strings.Count(text, "kept "+keptDB+" as it is"), text)
 	}
 	t.Run("abort while ready", func(t *testing.T) {
 		e := newEnv(t)
@@ -391,6 +392,26 @@ func TestRollback_JournalSaysKept(t *testing.T) {
 	})
 	t.Run("recovery", func(t *testing.T) {
 		e, rec := crashedRollback(t, StepReady, map[string]string{testDB: "current", keptDB: "kept"}, "")
+		e.waitStep(rec.OpID, StepAborted)
+		check(t, e.journalText(rec.OpID))
+	})
+	t.Run("migration fails", func(t *testing.T) {
+		e := newEnv(t)
+		e.withKept()
+		e.db.needsMigration = true
+		e.db.fail["migrate"] = errors.New("migrate failed")
+		rec, _, err := e.m.PrepareRollback(ctx, RollbackRequest{Database: keptDB, UserID: "u1", Token: "t"})
+		require.NoError(t, err)
+		e.waitStep(rec.OpID, StepFailed)
+		check(t, e.journalText(rec.OpID))
+	})
+	t.Run("switch refused (A1)", func(t *testing.T) {
+		e := newEnv(t)
+		e.withKept()
+		e.process("p1")
+		e.db.switchErr = func(int) error { return errors.New("database is being accessed by other users") }
+		rec, _ := e.rollback()
+		require.NoError(t, e.m.Confirm(ctx, rec.OpID))
 		e.waitStep(rec.OpID, StepAborted)
 		check(t, e.journalText(rec.OpID))
 	})

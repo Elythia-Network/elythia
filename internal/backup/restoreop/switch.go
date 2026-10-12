@@ -321,6 +321,10 @@ func (m *Manager) abortBeforeSwitch(ctx context.Context, rec *Record, cause erro
 	}
 	m.dropTarget(ctx, rec)
 	m.record(ctx, rec.OpID, StepAborting, StepAborted)
+	if rec.Kind == KindRollback {
+		m.journal(ctx, rec.OpID, StepAborted, "the current database %s was not changed; %s", rec.Database, targetFate(rec))
+		return
+	}
 	m.journal(ctx, rec.OpID, StepAborted, "the current database %s was not changed", rec.Database)
 }
 
