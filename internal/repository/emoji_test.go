@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/elythia-network/elythia/internal/model"
@@ -550,6 +551,60 @@ func TestEmojiRepository_ListV2_Basic(t *testing.T) {
 	rows, err := repo.ListV2(model.EmojiV2Filter{Limit: 10})
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, len(rows), 2)
+}
+
+// ValidEmojiUpdatedAtFilter が通す値は、実際の PostgreSQL でも落ちないこと (#3518)。
+//
+// **mock では Go と PostgreSQL の判定の差を検出できない。** 判定が広すぎると、
+// 検査を通った値が CAST(... AS DATE) との比較で落ちて 500 に戻る。0 年と ±15:59 を
+// 超える時差は、Go の time.Parse が通し PostgreSQL が拒否する実例。
+func TestValidEmojiUpdatedAtFilter_AgreesWithPostgres(t *testing.T) {
+	repo := NewEmojiRepository(testDB)
+
+	for _, tc := range []struct {
+		v         string
+		want      bool
+		pgRejects bool
+	}{
+		{"", true, false},
+		{"2026-10-12", true, false},
+		{"0001-01-01", true, false},
+		{"9999-12-31", true, false},
+		{"2026-10-12T00:00:00Z", true, false},
+		{"2026-10-12T23:59:59.5+09:00", true, false},
+		{"2026-10-12T00:00:00+15:59", true, false},
+		{"2026-10-12T00:00:00-15:59", true, false},
+		// 以下は拒否する。pgRejects は PostgreSQL も読めない値 (拒否する理由の裏付け)。
+		{"0000-01-01", false, true},
+		{"0000-06-15T00:00:00Z", false, true},
+		{"2026-10-12T00:00:00+16:00", false, true},
+		{"2026-10-12T00:00:00-23:00", false, true},
+		{"2026-02-30", false, true},
+		{"bogus", false, true},
+		{"2026-10-12T00:00:00,5Z", false, true},
+		{"2026-10-12T00:00:00+14:60", false, true},
+		{"2026-10-12T00:00:00+00:99", false, true},
+		{"2026-10-12T00:00:00." + strings.Repeat("0", 105) + "Z", false, true},
+		// PostgreSQL は読めるが、管理画面も RFC 3339 も使わない形なので拒否のままにする
+		// (yesterday は PostgreSQL の特殊値)。
+		{"2026-10-12 00:00:00", false, false},
+		{"yesterday", false, false},
+		// 時が 1 桁は RFC 3339 ではない (time.Parse は通すが形で落とす)。
+		{"2026-10-12T1:00:00Z", false, false},
+	} {
+		t.Run(tc.v, func(t *testing.T) {
+			require.Equal(t, tc.want, ValidEmojiUpdatedAtFilter(tc.v))
+			for _, q := range []*model.EmojiV2Query{{UpdatedAtFrom: tc.v}, {UpdatedAtTo: tc.v}} {
+				_, err := repo.ListV2(model.EmojiV2Filter{Query: q, Limit: 1})
+				switch {
+				case tc.want:
+					require.NoError(t, err, "検査を通った値で PostgreSQL が落ちた")
+				case tc.pgRejects:
+					require.Error(t, err, "PostgreSQL が読めない値として拒否しているが、実際には読めた")
+				}
+			}
+		})
+	}
 }
 
 func TestEmojiRepository_ListV2_HostType(t *testing.T) {

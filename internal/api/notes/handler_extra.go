@@ -324,6 +324,12 @@ func (h *Handler) Mentions(c echo.Context) error {
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
+	// **enum 列へそのまま比較値として渡る。** `note_visibility_enum` に無い値は
+	// PostgreSQL の型変換で落ちて 500 になる (本家も paramDef が string だけで同じ)。
+	// 呼び出し側の誤りなので引く前に 400 で返す (#3518)。
+	if !validMentionsVisibility(req.Visibility) {
+		return apierr.JSONInvalidParam(c)
+	}
 	// visibility kind の絞り込みは ListMentions の SQL push-down に委譲する
 	// (#1451)。upstream TS notes/mentions と同じく、visibility 指定時のみ
 	// note.visibility = <値> で exact-match し、未指定は全種別を返す。旧実装は
@@ -833,4 +839,17 @@ func (h *Handler) materializeIfMissing(noteID string, lookupErr error) bool {
 	}
 	_, err := h.materializer.EnsureNote(context.Background(), noteID)
 	return err == nil
+}
+
+// validMentionsVisibility reports whether v is a value notes/mentions can
+// compare against the `note_visibility_enum` column.
+//
+// **空文字は許す。** 未指定は全種別を返す意味で、Go の string では省略と空文字を
+// 区別できない。
+func validMentionsVisibility(v string) bool {
+	switch model.NoteVisibility(v) {
+	case "", model.NoteVisibilityPublic, model.NoteVisibilityHome, model.NoteVisibilityFollowers, model.NoteVisibilitySpecified:
+		return true
+	}
+	return false
 }

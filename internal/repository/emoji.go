@@ -10,6 +10,45 @@ import (
 	"gorm.io/gorm"
 )
 
+// ValidEmojiUpdatedAtFilter reports whether v can be used as
+// EmojiV2Query.UpdatedAtFrom / UpdatedAtTo, i.e. compared with
+// `CAST("updatedAt" AS DATE)` without PostgreSQL rejecting it.
+//
+// The empty string means "not specified" and is accepted.
+//
+// 値は SQL にバインドされ、PostgreSQL が date として読めないとクエリごと落ちて 500
+// になる (#3518)。管理画面の日付欄が送る `YYYY-MM-DD` に加えて RFC 3339 の日時も
+// 通す (本家は PostgreSQL が読める形をすべて受け付けるので、狭めすぎない)。
+// time.Parse は RFC 3339 を厳密には検査せず、小数秒のカンマ・分が 60 以上の時差・
+// 105 桁以上の小数秒を通して PostgreSQL に拒否されるので、形は正規表現で先に決める
+// (小数秒は 9 桁まで)。0 年と ±15:59 を超える時差も PostgreSQL が拒否するので
+// ここで落とす。逆に、5 桁以上の年・小文字の t / z・うるう秒・10 桁以上の小数秒は
+// PostgreSQL が読めても拒否になる (管理画面も misskey-js も送らない形)。
+func ValidEmojiUpdatedAtFilter(v string) bool {
+	if v == "" {
+		return true
+	}
+	if emojiDateOnlyPattern.MatchString(v) {
+		t, err := time.Parse(time.DateOnly, v)
+		return err == nil && t.Year() >= 1
+	}
+	if !emojiRFC3339Pattern.MatchString(v) {
+		return false
+	}
+	t, err := time.Parse(time.RFC3339, v)
+	if err != nil || t.Year() < 1 {
+		return false
+	}
+	_, offset := t.Zone()
+	const maxOffset = 15*60*60 + 59*60
+	return offset >= -maxOffset && offset <= maxOffset
+}
+
+var (
+	emojiDateOnlyPattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+	emojiRFC3339Pattern  = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?(Z|[+-]\d{2}:[0-5]\d)$`)
+)
+
 // bumpEmojiUpdatedAt injects updatedAt=now into an emoji write field map when the
 // caller did not set it. upstream CustomEmojiService は update / 各 bulk op で
 // 必ず updatedAt = new Date() を書くため、map-based GORM Updates でも同等に bump

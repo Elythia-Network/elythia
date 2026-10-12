@@ -843,6 +843,44 @@ func TestEmojiListV2_Basic(t *testing.T) {
 	}
 }
 
+// updatedAtFrom / updatedAtTo は日付として読める値だけを通す (#3518)。
+//
+// **通すと 500 になる。** 値は `CAST("updatedAt" AS DATE)` との比較にそのまま
+// バインドされ、PostgreSQL の型変換で落ちる。mock の repository は落ちないので、
+// 検査を外すとここが 200 になる。
+func TestEmojiListV2_RejectsUnparsableUpdatedAt(t *testing.T) {
+	for _, tc := range []struct{ name, body string }{
+		{"from_garbage", `{"query":{"updatedAtFrom":"bogus"}}`},
+		{"to_garbage", `{"query":{"updatedAtTo":"2026-13-01"}}`},
+		{"from_out_of_range_day", `{"query":{"updatedAtFrom":"2026-02-30"}}`},
+		{"from_year_zero", `{"query":{"updatedAtFrom":"0000-01-01"}}`},
+		{"to_offset_beyond_postgres", `{"query":{"updatedAtTo":"2026-10-12T00:00:00+16:00"}}`},
+		{"to_only_bad_with_good_from", `{"query":{"updatedAtFrom":"2026-10-01","updatedAtTo":"x"}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, _ := setupEmojiHandler(t, &model.Emoji{ID: "e1", Name: "smile"})
+			rec := doPost(h.EmojiListV2, tc.body, adminUser)
+			assert.Equal(t, http.StatusBadRequest, rec.Code)
+		})
+	}
+}
+
+// 管理画面が送る YYYY-MM-DD と RFC 3339 の日時、空文字 (未指定) は通す (#3518)。
+// 本家は PostgreSQL が date として読める形を受け付けるので、狭めすぎない。
+func TestEmojiListV2_AcceptsUpdatedAtDates(t *testing.T) {
+	for _, tc := range []struct{ name, body string }{
+		{"date_only", `{"query":{"updatedAtFrom":"2026-10-01","updatedAtTo":"2026-10-12"}}`},
+		{"rfc3339", `{"query":{"updatedAtFrom":"2026-10-01T00:00:00Z","updatedAtTo":"2026-10-12T23:59:59.5+09:00"}}`},
+		{"empty", `{"query":{"updatedAtFrom":"","updatedAtTo":""}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, _ := setupEmojiHandler(t, &model.Emoji{ID: "e1", Name: "smile"})
+			rec := doPost(h.EmojiListV2, tc.body, adminUser)
+			assert.Equal(t, http.StatusOK, rec.Code)
+		})
+	}
+}
+
 // TestEmojiListV2_RoleObjectsAndShape は v2/admin/emoji/list の
 // roleIdsThatCanBeUsedThisEmojiAsReaction が golden EmojiDetailedAdmin と同じ
 // {id, name} object 配列で返ること、未知 role が省かれることを検証する。
