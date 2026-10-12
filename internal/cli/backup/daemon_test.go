@@ -622,3 +622,10 @@ func (stubRestoreDB) DropDatabase(context.Context, string, string) error { retur
 func (stubRestoreDB) ExistingDatabases(context.Context, string, []string) (map[string]bool, error) {
 	return nil, nil
 }
+func (stubRestoreDB) CheckDatabaseMigrations(context.Context, string) (*backupkit.DatabaseMigrations, error) {
+	return nil, nil
+}
+func (stubRestoreDB) CheckRollback(context.Context, string, string, string, string) error { return nil }
+func (stubRestoreDB) KeptDatabases(context.Context, string, string) ([]backupkit.KeptDatabase, error) {
+	return nil, nil
+}

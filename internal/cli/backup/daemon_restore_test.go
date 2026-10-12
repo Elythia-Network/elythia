@@ -10,7 +10,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/elythia-network/elythia/internal/backup/restoreop"
 	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/core/moderationlog"
 	"github.com/elythia-network/elythia/internal/core/selfcheck"
 )
 
@@ -22,6 +24,12 @@ func TestReportError(t *testing.T) {
 	}})
 	require.Error(t, err)
 	assert.Equal(t, "the restored database failed the checks: root: no root user", err.Error())
+}
+
+func TestModLogType(t *testing.T) {
+	assert.Equal(t, moderationlog.LogRollbackBackup, modLogType(restoreop.KindRollback))
+	assert.Equal(t, moderationlog.LogRestoreBackup, modLogType(restoreop.KindRestore))
+	assert.Equal(t, moderationlog.LogRestoreBackup, modLogType(""))
 }
 
 // closedPort returns a local port nothing listens on.

@@ -34,6 +34,12 @@ type fakeDB struct {
 	drops     []string
 	switches  int
 	switchErr func(n int) error
+	// migrated lists the databases Migrate ran on; needsMigration is what
+	// CheckDatabaseMigrations reports.
+	migrated       []string
+	needsMigration bool
+	// migrateBlock, when set, holds Migrate until it is closed.
+	migrateBlock chan struct{}
 }
 
 func newFakeDB() *fakeDB {
@@ -85,7 +91,64 @@ func (f *fakeDB) VerifyRestored(context.Context, string, backup.Meta) error {
 func (f *fakeDB) ApplyDatabaseSettings(context.Context, string, backup.Meta) ([]string, error) {
 	return nil, f.failing("settings")
 }
-func (f *fakeDB) Migrate(string) ([]backup.MigrationState, error) { return nil, f.failing("migrate") }
+func (f *fakeDB) Migrate(name string) ([]backup.MigrationState, error) {
+	f.mu.Lock()
+	block := f.migrateBlock
+	f.mu.Unlock()
+	if block != nil {
+		<-block
+	}
+	if err := f.failing("migrate"); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.migrated = append(f.migrated, name)
+	return nil, nil
+}
+
+func (f *fakeDB) migratedNames() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.migrated...)
+}
+
+func (f *fakeDB) CheckDatabaseMigrations(context.Context, string) (*backup.DatabaseMigrations, error) {
+	f.mu.Lock()
+	needs := f.needsMigration
+	f.mu.Unlock()
+	return &backup.DatabaseMigrations{NeedsMigration: needs}, f.failing("migrations")
+}
+
+func (f *fakeDB) CheckRollback(_ context.Context, _, _, kept, keepAs string) error {
+	if err := f.failing("checkRollback"); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.conns[kept] > 0 {
+		return fmt.Errorf("%w: someone is on %q", backup.ErrRestoreConnections, kept)
+	}
+	if _, ok := f.dbs[keepAs]; ok {
+		return fmt.Errorf("database %q already exists", keepAs)
+	}
+	return nil
+}
+
+func (f *fakeDB) KeptDatabases(_ context.Context, _, database string) ([]backup.KeptDatabase, error) {
+	if err := f.failing("kept"); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []backup.KeptDatabase
+	for n := range f.dbs {
+		if kind, at, ok := backup.ParseKeptName(database, n); ok {
+			out = append(out, backup.KeptDatabase{Name: n, Kind: kind, At: at})
+		}
+	}
+	return out, nil
+}
 
 func (f *fakeDB) SwitchDatabase(_ context.Context, _, database, keepAs, replacement string) error {
 	f.mu.Lock()
@@ -285,9 +348,13 @@ func newEnv(t *testing.T, mutate ...func(*Options)) *env {
 			e.checked++
 			return e.db.failing("check")
 		},
-		ModLog: func(_ context.Context, database, _ string, info map[string]any) error {
+		ModLog: func(_ context.Context, database, _, kind string, info map[string]any) error {
 			e.mu.Lock()
 			defer e.mu.Unlock()
+			if kind == KindRollback {
+				e.modlogs = append(e.modlogs, fmt.Sprintf("rollback:%s:%s:%s:%s:%s", database, e.db.content(database), info["phase"], info["from"], info["keptAs"]))
+				return nil
+			}
 			e.modlogs = append(e.modlogs, fmt.Sprintf("%s:%s:%s", database, e.db.content(database), info["phase"]))
 			return nil
 		},
