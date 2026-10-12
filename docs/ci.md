@@ -302,14 +302,14 @@ make frontend-test
 
 eslint (frontend だけ) を回すなら `make frontend-lint` (実測 55 秒)。
 
-**`emoji-regex-check` が落ちたとき (#3324):** MFM の Unicode 絵文字の正規表現 (`internal/activitypub/mfm/emoji_regex_gen.go`) が、`frontend/` に pnpm install した mfm-js / emoji-data と食い違っている。`… is stale` なら mfm-js か emoji-data の版が上がったので、作り直して差分ごとコミットする。生成ツールが `no longer contains` や構文のエラーで落ちたら、mfm-js の `unicodeEmoji` の書き方か正規表現の構文が変わっているので、生成ツール (`tools/emojiregex/`) を直す。
+**`emoji-regex-check` が落ちたとき (#3324):** MFM の Unicode 絵文字の正規表現 (`internal/activitypub/mfm/emoji_regex_gen.go`) が、`frontend/` に pnpm install した frontend の MFM の解析器 (`@elythia-network/mfm`、#3515) が持つ正規表現と食い違っている。解析器は、emoji-data の正規表現と、その元の emoji-data の版・使い方を写した mfm-js の版を `built/emoji-regex.gen.js` に書き出しており、生成ツールはそれを読む。`… is stale` なら解析器を上げたときに正規表現か版が変わったので、作り直して差分ごとコミットする。生成ツールが `declarations` や `flags`、構文のエラーで落ちたら、解析器の書き出す形か正規表現の構文が変わっているので、生成ツール (`tools/emojiregex/`) を直す。
 
 ```bash
 make emoji-regex
-node internal/activitypub/mfm/testdata/emoji_mfmjs.mjs frontend \
-  > internal/activitypub/mfm/testdata/emoji_mfmjs.json
 GOWORK=off go test ./internal/activitypub/mfm/ ./tools/emojiregex/
 ```
+
+emoji-data か mfm-js の版が変わったときは、`internal/activitypub/mfm/testdata/emoji_mfmjs.json` (mfm-js の期待値) も `emoji_mfmjs.mjs` で作り直す。frontend からは mfm-js を外した (#3515) ので、mfm-js を `packages/frontend/node_modules/mfm-js` に入れたディレクトリを引数に渡す。この手順は、`internal/activitypub/mfm` を同じ解析器へ置き換える #3514 で見直す。
 
 **`make uds-frontend-build` / `e2e-frontend-build` は検証に使わないこと。** 本番が
 bind-mount している (または切り替え後に bind-mount する) `frontend/built` を書き換えてしまう。

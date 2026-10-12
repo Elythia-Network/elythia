@@ -77,7 +77,7 @@ jobs:
           fi
           # frontend のビルドが import する生成物は plugins/ から pluginbuild が作り、
           # job は make plugins-all (Makefile / go.mod) を通す。絵文字の正規表現は
-          # tools/emojiregex が生成し、frontend/ の mfm-js と突き合わせる。
+          # tools/emojiregex が生成し、frontend/ の MFM の解析器と突き合わせる。
           #
           # **パイプで grep -q に渡さない。** grep -q は最初の一致で抜けるので、
           # 一覧がパイプのバッファ (約 64KiB) を超えると書き手が SIGPIPE で落ち、
@@ -156,10 +156,10 @@ jobs:
       - name: misskey-js API report
         run: pnpm --filter misskey-js api-prod
 
-      # MFM の Unicode 絵文字の正規表現が、frontend/ に pnpm install した mfm-js /
-      # emoji-data と一致しているか (#3324)。node_modules が要るので make gates には
-      # 入れず、ここで回す。(以前は ci.yml の frontend-check job にあった、#3379)
-      - name: Emoji regex matches mfm-js
+      # MFM の Unicode 絵文字の正規表現が、frontend/ に pnpm install した MFM の解析器
+      # (@elythia-network/mfm、#3515) と一致しているか (#3324)。node_modules が要るので
+      # make gates には入れず、ここで回す。(以前は ci.yml の frontend-check job にあった、#3379)
+      - name: Emoji regex matches the frontend MFM parser
         working-directory: .
         run: make emoji-regex-check
 
