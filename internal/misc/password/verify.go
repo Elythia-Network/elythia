@@ -159,8 +159,45 @@ func ProfileForLog(stored string) string {
 	// parts[2] / parts[3] には salt や digest が来る。argon2 のリファレンス実装は
 	// version 0x10 で `$v=` を省くので、これは「移行元が想定と違う実装」という
 	// **まさに診断したい場面で踏む**形 (#2849)。
-	if len(parts) != 6 || !strings.HasPrefix(parts[2], "v=") {
+	// field の数が合っていても、中身が version / パラメータの形でなければ返さない。
+	// 区切りが1つずれた形では、parts[3] に salt が来る。
+	if len(parts) != 6 || !isPHCVersion(parts[2]) || !isPHCParams(parts[3]) {
 		return fmt.Sprintf("argon2id (unexpected field layout, parts=%d)", len(parts))
 	}
 	return "argon2id " + parts[2] + " " + parts[3]
+}
+
+// isPHCVersion reports whether s is a PHC version field such as "v=19".
+func isPHCVersion(s string) bool {
+	v, ok := strings.CutPrefix(s, "v=")
+	return ok && isDecimal(v)
+}
+
+// isPHCParams reports whether s is a PHC parameter list such as
+// "m=65536,t=3,p=4": comma-separated lowercase keys with decimal values.
+func isPHCParams(s string) bool {
+	for kv := range strings.SplitSeq(s, ",") {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok || k == "" || !isDecimal(v) {
+			return false
+		}
+		for _, r := range k {
+			if r < 'a' || r > 'z' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func isDecimal(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
