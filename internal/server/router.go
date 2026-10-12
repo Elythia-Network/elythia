@@ -3899,6 +3899,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// を i ではなく session で送る)。daemon が準備のときの ticket とセッションの hash で
 	// 照合し、DB を引かない。
 	api.POST("/admin/backup/restore/status", backupHandler.RestoreStatus)
+	// 退避した DB の一覧 (#3463 (6d))。一覧 (admin/backup/list) と同じく、本体が
+	// backupGuard で再認証してから daemon へ転送する (daemon は照合しない)。閲覧だけで
+	// DB を変えないので、操作のように daemon に照合させる理由が無い。メンテナンス中は
+	// 転送しない (maintenance.go の ForwardPaths に無い)。
+	api.POST("/admin/backup/restore/candidates", backupHandler.RestoreCandidates, middleware.RequireAdmin(roleService), middleware.RequireSecure(), backupGuard)
 	api.POST("/admin/backup/list", backupHandler.List, middleware.RequireAdmin(roleService), middleware.RequireSecure(), backupGuard)
 	api.POST("/admin/backup/take", backupHandler.Take, middleware.RequireAdmin(roleService), middleware.RequireSecure(), backupGuard)
 	api.POST("/admin/backup/verify", backupHandler.Verify, middleware.RequireAdmin(roleService), middleware.RequireSecure(), backupGuard)

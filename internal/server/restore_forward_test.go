@@ -107,9 +107,13 @@ func TestSetupRoutes_RestoreIsForwardedWithoutTheGuard(t *testing.T) {
 		assert.JSONEq(t, `{"record":{"step":"ready"}}`, rec.Body.String())
 	}
 	// 本体が動いている間は、管理者でなければ転送しない (status を除く)。
-	for _, op := range []string{"prepare", "confirm", "abort"} {
+	for _, op := range []string{"prepare", "confirm", "abort", "candidates"} {
 		assert.Equal(t, http.StatusUnauthorized, post(op, "").Code, op)
 	}
+	// 退避した DB の一覧は、本体の再認証 (backupGuard) を通ってからでないと転送しない。
+	// root はプロフィールも 2FA も持たないので、照合で断られる (下の paths に出ない)。
+	crec := post("candidates", rootToken)
+	assert.NotEqual(t, http.StatusOK, crec.Code, crec.Body.String())
 	// status は本体の認証を通さない。戻した DB にセッションが無くても (本体が知らない
 	// token でも)、session で送れば daemon まで届く。
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/backup/restore/status",

@@ -21,8 +21,14 @@ import (
 // maintenance (#3463 (6c)).
 const RestorePathPrefix = "/api/admin/backup/restore/"
 
-// RestoreOps are the forwarded operations.
-var RestoreOps = []string{"prepare", "confirm", "abort", "status"}
+// RestoreOps are the forwarded operations. prepare also starts a rollback
+// (kind "rollback", #3463 (6d)); candidates lists the databases a rollback
+// can swap back in.
+var RestoreOps = []string{"prepare", "confirm", "abort", "status", "candidates"}
+
+// opCandidates lists the kept databases. The server re-authenticates it
+// (backupGuard) like admin/backup/list, so only the session token is sent.
+const opCandidates = "candidates"
 
 // ServiceAuthChallenge is the WWW-Authenticate the backup service sends when
 // it refuses the service token. The forwarder tells it from a 401 about the
@@ -104,6 +110,14 @@ func (f *Forwarder) Serve(w http.ResponseWriter, r *http.Request, op, clientIP s
 			return
 		}
 	}
+	if op == opCandidates {
+		// 一覧は本体の backupGuard で照合済み。パスワードとコードを daemon へ渡さない
+		// (daemon は使わない)。
+		fields = map[string]json.RawMessage{"i": fields["i"]}
+		if fields["i"] == nil {
+			delete(fields, "i")
+		}
+	}
 	// 本体の認証 (middleware の extractToken) と同じく、ヘッダーの token を本文の i より
 	// 先に使う。逆だと、本体が管理者と確かめた token と別の token で daemon が照合する。
 	if tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok && tok != "" {
@@ -183,6 +197,9 @@ func (h *Handler) RestoreConfirm(c echo.Context) error { return h.restore(c, "co
 
 // RestoreAbort handles POST /api/admin/backup/restore/abort.
 func (h *Handler) RestoreAbort(c echo.Context) error { return h.restore(c, "abort") }
+
+// RestoreCandidates handles POST /api/admin/backup/restore/candidates.
+func (h *Handler) RestoreCandidates(c echo.Context) error { return h.restore(c, opCandidates) }
 
 // RestoreStatus handles POST /api/admin/backup/restore/status.
 func (h *Handler) RestoreStatus(c echo.Context) error { return h.restore(c, "status") }

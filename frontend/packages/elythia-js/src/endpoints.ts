@@ -10,6 +10,7 @@ import type {
 	AdminSignupApplication,
 	BackupDownload,
 	BackupJob,
+	BackupKeptDatabases,
 	BackupOverview,
 	BackupReauth,
 	BackupRestoreStatus,
@@ -93,9 +94,18 @@ export type ElythiaEndpoints = {
 		req: BackupReauth & BackupRestoreTicket;
 		res: null;
 	};
+	'admin/backup/restore/candidates': {
+		/** The databases kept by restores and rollbacks, which a rollback can swap back in. Re-authenticated like `admin/backup/list`. */
+		req: BackupReauth;
+		res: BackupKeptDatabases;
+	};
 	'admin/backup/restore/prepare': {
-		/** Restores the generation into a new database while the server keeps running. Only a generation that passed verification. */
-		req: BackupReauth & { id: string };
+		/**
+		 * Restores the generation into a new database while the server keeps running (only a generation that passed verification),
+		 * or, with `kind: 'rollback'`, prepares swapping a kept database back in.
+		 * The re-authentication of a rollback is checked against the current database.
+		 */
+		req: BackupReauth & ({ kind?: 'restore'; id: string } | { kind: 'rollback'; database: string });
 		res: BackupRestoreTicket & { status: BackupRestoreStatus };
 	};
 	'admin/backup/restore/status': {

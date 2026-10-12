@@ -1038,18 +1038,21 @@ export type BackupRestoreStep =
 	| 'preparing' | 'ready' | 'entering' | 'switched' | 'resuming' | 'reverting' | 'aborting'
 	| 'done' | 'failed' | 'expired' | 'aborted' | 'reverted' | 'unknown';
 
-/** The record of a restore from the admin page. */
+/** The record of a restore or a rollback from the admin page. */
 export type BackupRestoreRecord = {
 	opId: string;
+	/** `rollback` swaps a kept database back in (#3463 (6d)). */
+	kind: 'restore' | 'rollback';
 	step: BackupRestoreStep;
+	/** Empty for a rollback. */
 	generationId: string;
 	/** The database name of the server (`db.db`). */
 	database: string;
-	/** Where the generation is restored before the switch. */
+	/** Where the generation is restored before the switch; for a rollback, the kept database it swaps back in. */
 	target: string;
 	/** The name the current database keeps after the switch. */
 	before: string;
-	/** The name the restored database keeps when it is put back aside. */
+	/** The name the swapped-in database keeps when it is put back aside (for a rollback, `target`). */
 	aside?: string;
 	userId: string;
 	error?: string;
@@ -1072,6 +1075,31 @@ export type BackupRestoreStatus = {
 	} | null;
 	/** The restore ended (done, failed, expired, aborted, reverted or unknown). */
 	final: boolean;
+};
+
+/** A database kept by a restore or a rollback, which a rollback can swap back in. */
+export type BackupKeptDatabase = {
+	name: string;
+	/** `before_restore`: swapped out by a restore. `rolled_back`: swapped out by a rollback (or the revert of a failed restore). */
+	kind: 'before_restore' | 'rolled_back';
+	/** When it was swapped out (the time in its name). */
+	at: string;
+	/** Bytes, or null when the database user cannot read it. */
+	size: number | null;
+	/** Null when the migration tables could not be read. */
+	migrations: BackupMigrationState[] | null;
+	/** Behind the bundled migrations: a rollback migrates it before the switch. */
+	needsMigration: boolean;
+	/** Why a rollback refuses it. Absent when it can be rolled back to. */
+	problem?: 'migrationTooNew' | 'migrationDirty' | 'notElythia' | 'unreadable';
+};
+
+/** The result of `admin/backup/restore/candidates`. */
+export type BackupKeptDatabases = {
+	/** The database name of the server (`db.db`). */
+	database: string;
+	/** Newest first. */
+	databases: BackupKeptDatabase[];
 };
 
 /**
