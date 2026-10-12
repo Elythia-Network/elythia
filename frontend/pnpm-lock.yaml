@@ -165,6 +165,9 @@ importers:
       '@analytics/google-analytics':
         specifier: 1.1.0
         version: 1.1.0
+      '@elythia-network/mfm':
+        specifier: 0.1.0
+        version: 0.1.0
       '@mcaptcha/core-glue':
         specifier: 0.1.0-alpha-5
         version: 0.1.0-alpha-5
@@ -572,6 +575,9 @@ importers:
 
   packages/frontend-embed:
     dependencies:
+      '@elythia-network/mfm':
+        specifier: 0.1.0
+        version: 0.1.0
       buraha:
         specifier: 0.0.1
         version: 0.0.1
@@ -1061,6 +1067,10 @@ packages:
 
   '@cropper/utils@2.2.0':
     resolution: {integrity: sha512-wTrpZl+F4Kr2hzovqjztSexWUU+EVK1CxPymbYgFYoAS/NZXwCDsrvikJQn+HYZVxjqyo/ClnFxA0fG+tFy6Hw==}
+
+  '@elythia-network/mfm@0.1.0':
+    resolution: {integrity: sha512-Qg+6ucAtzCKt3Fxq8ZPFxpOG0icJGl9zkVHKnmjSWepP9UayIPdleH210LmLFq186tUU+1wRiiyx99Of6EeTmg==}
+    engines: {node: '>=20'}
 
   '@emnapi/core@1.11.0':
     resolution: {integrity: sha512-l9Oo58x0HOP5znGzVhYW9U3e5wVuA4LAZU2AGezTmkhO1CgQRFDhDg4nneHsu/t3WniXg9QrG2nIXL/ZS8ln8Q==}
@@ -6789,6 +6799,8 @@ snapshots:
       '@cropper/element-viewer': 2.2.0
 
   '@cropper/utils@2.2.0': {}
+
+  '@elythia-network/mfm@0.1.0': {}
 
   '@emnapi/core@1.11.0':
     dependencies:
