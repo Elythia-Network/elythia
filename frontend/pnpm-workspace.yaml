@@ -71,8 +71,9 @@ overrides:
   '@tabler/icons-webfont>sharp': '-'
   # 以下は、lock が指す版に high の advisory があるため修正版へ上げる (mk-go #3379)。
   # どれも開発・ビルド・テストの道具の推移的な依存で、配る bundle には入らない。
-  # 本家が追従したら外す。braces (<=3.0.3) は修正版が無く、http-cache-semantics は
-  # 修正版 4.3.0 が minimumReleaseAge に満たないので、この 2 つは残る。
+  # 本家が追従したら外す。braces (<=3.0.3) と sprintf-js (<=1.1.3) は修正版が無いので残る。
+  # http-cache-semantics は advisory の範囲が <=4.2.0 で修正版の指定が無く、作者は挙動を
+  # 仕様どおりとして直していない。4.3.0 は該当の処理を変えていないが、範囲から外れるので上げる。
   '@xmldom/xmldom@0.9.10': 0.9.12
   axios@<1.20.0: 1.20.0
   brace-expansion@<1.1.20: 1.1.21
@@ -81,10 +82,16 @@ overrides:
   fast-uri@<3.1.7: 3.1.8
   fastify@<5.12.2: 5.12.5
   find-my-way@<9.7.0: 9.9.0
+  http-cache-semantics@<4.3.0: 4.3.0
   immutable@<5.1.8: 5.1.9
   joi@<18.2.6: 18.2.9
   js-cookie@<3.0.7: 3.0.8
   js-yaml@>=4.0.0 <4.3.2: 4.3.2
+  source-map-js@<1.2.2: 1.2.2
+  # uuid は moderate の advisory で、配る bundle に入る (@syuilo/aiscript 1.2.1 が 11.1.0、
+  # 0.19.0 が 9.0.1 を使う)。どちらも v4 を buf なしで呼ぶだけで該当しないが、lock から
+  # advisory の版を外しておく。9.x には修正版が無いので 11.1.1 へ上げる (v4 の named export は同じ)。
+  uuid@<11.1.1: 11.1.1
 # 依存にあてるパッチ (Elythia)。mfm-js は解析の途中の結果を覚える形にしてある。
 # mfm-js を外したら (#3515) 消す。
 patchedDependencies:
