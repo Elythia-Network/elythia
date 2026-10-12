@@ -206,6 +206,12 @@ func (h *Handler) SessionUserkey(c echo.Context) error {
 	if session.UserID == nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("PENDING_SESSION", "This session is not yet approved.", "8c8a4145-02cc-4cca-8e66-29ba60445a8e"))
 	}
+	// プラグインが管理するアカウント (#3468) の token は払い出さない。accept が
+	// 承認させないので本来ここには来ないが、それより前のデータなどで承認済みの
+	// session があっても資格情報を外へ出さない。居ない session と同じ応答にする。
+	if session.User != nil && session.User.IsPluginManaged() {
+		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_SESSION", "No such session.", "5b5a1503-8bc8-4bd0-8054-dc189e8cdcb3"))
+	}
 
 	accessToken, err := h.repo.FindAccessTokenByAppAndUser(app.ID, *session.UserID)
 	if err != nil {
