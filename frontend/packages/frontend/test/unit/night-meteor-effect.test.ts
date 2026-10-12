@@ -222,11 +222,12 @@ describe('NightMeteorRenderer', () => {
 });
 
 describe('startNightMeteorEffect', () => {
-	const env: NightMeteorEnvironment = { darkMode: true, seasonalEffectShowing: false };
+	const env: NightMeteorEnvironment = { darkMode: true, animation: true, seasonalEffectShowing: false };
 	const getEnv = () => env;
 
 	afterEach(() => {
 		env.darkMode = true;
+		env.animation = true;
 		env.seasonalEffectShowing = false;
 	});
 
@@ -269,6 +270,21 @@ describe('startNightMeteorEffect', () => {
 		expect(controller.showing).toBe(false);
 
 		env.darkMode = true;
+		controller.update();
+		expect(controller.showing).toBe(true);
+
+		controller.stop();
+	});
+
+	test('follows the in-app animation preference on update()', () => {
+		const controller = startNightMeteorEffect(getEnv);
+		expect(controller.showing).toBe(true);
+
+		env.animation = false;
+		controller.update();
+		expect(controller.showing).toBe(false);
+
+		env.animation = true;
 		controller.update();
 		expect(controller.showing).toBe(true);
 

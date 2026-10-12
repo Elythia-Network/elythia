@@ -114,6 +114,7 @@ export async function mainBoot() {
 					// store.s.darkMode はどちらの枠のテーマを使うかで、色そのものではない。テーマの
 					// プレビュー中などは食い違うので、themeManager が付ける data-color-scheme を見る。
 					darkMode: window.document.documentElement.dataset.colorScheme === 'dark',
+					animation: prefer.s.animation,
 					seasonalEffectShowing,
 				}));
 			} catch (error) {
@@ -122,6 +123,9 @@ export async function mainBoot() {
 		}, { immediate: true });
 		// テーマの切り替えは、色が当たった後の themeChanged で見直す。
 		themeManager.on('themeChanged', () => {
+			nightMeteor?.update();
+		});
+		watch(prefer.r.animation, () => {
 			nightMeteor?.update();
 		});
 	}

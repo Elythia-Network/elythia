@@ -26,6 +26,7 @@ function conditions(overrides: Partial<NightMeteorConditions> = {}): NightMeteor
 	return {
 		enabled: true,
 		darkMode: true,
+		animation: true,
 		reducedMotion: false,
 		visible: true,
 		seasonalEffectShowing: false,
@@ -66,6 +67,10 @@ describe('shouldShowNightMeteor', () => {
 
 	test('does not show when the preference is off', () => {
 		expect(shouldShowNightMeteor(conditions({ enabled: false }))).toBe(false);
+	});
+
+	test('does not show when the in-app animation is off', () => {
+		expect(shouldShowNightMeteor(conditions({ animation: false }))).toBe(false);
 	});
 
 	test('does not show when the device asks for less motion', () => {
