@@ -531,13 +531,31 @@ func blurhashIfPresent(mediaID, blurhash *string) *string {
 	return blurhash
 }
 
-// bannerURLIfPresent returns the proxied banner URL only when bannerId is set,
-// mirroring upstream's `bannerId == null ? null : bannerUrl` (#1558)。
-func bannerURLIfPresent(bannerID, bannerURL *string) *string {
-	if bannerID == nil {
+// bannerURLIfPresent returns the proxied banner URL. For a local user it
+// mirrors upstream's `bannerId == null ? null : bannerUrl` (#1558); for a
+// remote user it returns bannerUrl when it is a well-formed absolute http(s)
+// URL.
+//
+// 本家はリモートの人のバナーもドライブのファイルとして取り込み bannerId を持つが、
+// Elythia はファイルを作らず bannerUrl だけを保存する (federation の resolver)。
+// bannerId で判定すると、リモートの人は常にバナー無しになる (#3526)。
+func bannerURLIfPresent(host, bannerID, bannerURL *string) *string {
+	if host == nil || *host == "" {
+		if bannerID == nil {
+			return nil
+		}
+		return currentMediaURLContext().ProxyBannerURL(bannerURL)
+	}
+	// リモートの人の bannerUrl は相手が決めた文字列。取り込みで確かめる前に保存された
+	// 行もあるので、返すときにも形を確かめる (アイコンの IdenticonURL と同じ)。
+	if bannerURL == nil {
 		return nil
 	}
-	return currentMediaURLContext().ProxyBannerURL(bannerURL)
+	clean, ok := remoteurl.Media(*bannerURL)
+	if !ok {
+		return nil
+	}
+	return currentMediaURLContext().ProxyBannerURL(&clean)
 }
 
 func PackUserLite(u *model.User) UserLite {
@@ -583,10 +601,11 @@ func PackUserDetailed(u *model.User, profile *model.UserProfile, idGens ...id.Ge
 		// (admin が role に設定する権限)。lookup が wire されていない
 		// path (= 既存 unit test 等) は default true で fallback する。
 		CanChat: resolveCanChat(u.ID),
-		// bannerId が null のとき bannerUrl / bannerBlurhash も null にする
-		// (upstream `user.bannerId == null ? null : ...`、#1558)。remote user の
-		// bannerUrl は remote origin を指すため proxy 経由に書き換える (#1529)。
-		BannerURL:           bannerURLIfPresent(u.BannerID, u.BannerURL),
+		// ローカルの利用者は bannerId が null のとき bannerUrl / bannerBlurhash も
+		// null にする (upstream `user.bannerId == null ? null : ...`、#1558)。
+		// リモートの人は bannerId を持たないので bannerUrl の有無で決める (#3526)。
+		// remote user の bannerUrl は remote origin を指すため proxy 経由に書き換える (#1529)。
+		BannerURL:           bannerURLIfPresent(u.Host, u.BannerID, u.BannerURL),
 		BannerBlurhash:      blurhashIfPresent(u.BannerID, u.BannerBlurhash),
 		IsLocked:            u.IsLocked,
 		IsSuspended:         u.IsSuspended,

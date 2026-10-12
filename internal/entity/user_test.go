@@ -415,6 +415,24 @@ func TestPackUser_BlurhashGatedByMediaID(t *testing.T) {
 		assert.Nil(t, d.BannerBlurhash, "bannerId が無ければ bannerBlurhash も出さない")
 	})
 
+	// リモートの人は bannerId を持たない (Elythia はバナーをドライブのファイルに
+	// しない) ので、bannerUrl の有無で決める (#3526)。blurhash は計算しないので出さない。
+	t.Run("remote user without bannerId → bannerUrl kept", func(t *testing.T) {
+		host := "remote.example"
+		u := &model.User{ID: "u", Username: "u", Host: &host, BannerURL: &bannerURL, BannerBlurhash: &blur}
+		d := PackUserDetailed(u, nil)
+		require.NotNil(t, d.BannerURL, "リモートの人のバナーは bannerId が無くても出す")
+		assert.Equal(t, bannerURL, *d.BannerURL)
+		assert.Nil(t, d.BannerBlurhash)
+	})
+
+	t.Run("remote user without banner → bannerUrl nil", func(t *testing.T) {
+		host := "remote.example"
+		u := &model.User{ID: "u", Username: "u", Host: &host}
+		d := PackUserDetailed(u, nil)
+		assert.Nil(t, d.BannerURL)
+	})
+
 	t.Run("bannerId set → banner kept", func(t *testing.T) {
 		bid := "b1"
 		u := &model.User{ID: "u", Username: "u", BannerID: &bid, BannerURL: &bannerURL, BannerBlurhash: &blur}
