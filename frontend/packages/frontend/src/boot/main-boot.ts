@@ -30,6 +30,7 @@ import { updateCurrentAccountPartial } from '@/accounts.js';
 import { misskeyApi } from '@/utility/misskey-api.js';
 import { unisonReload } from '@/utility/unison-reload.js';
 import { isBirthday } from '@/utility/is-birthday.js';
+import { seasonalScreenEffectOf } from '@/utility/seasonal-screen-effect.js';
 
 export async function mainBoot() {
 	const { isClientUpdated, clientUpdate, lastVersion } = await common(async () => {
@@ -78,24 +79,12 @@ export async function mainBoot() {
 
 	try {
 		if (prefer.s.enableSeasonalScreenEffect) {
-			const month = new Date().getMonth() + 1;
-			if (prefer.s.hemisphere === 'S') {
-				// ▼南半球
-				if (month === 7 || month === 8) {
-					const SnowfallEffect = (await import('@/utility/snowfall-effect.js')).SnowfallEffect;
-					new SnowfallEffect({}).render();
-				}
-			} else {
-				// ▼北半球
-				if (month === 12 || month === 1) {
-					const SnowfallEffect = (await import('@/utility/snowfall-effect.js')).SnowfallEffect;
-					new SnowfallEffect({}).render();
-				} else if (month === 3 || month === 4) {
-					const SakuraEffect = (await import('@/utility/snowfall-effect.js')).SnowfallEffect;
-					new SakuraEffect({
-						sakura: true,
-					}).render();
-				}
+			const effect = seasonalScreenEffectOf(new Date().getMonth() + 1, prefer.s.hemisphere);
+			if (effect != null) {
+				const SnowfallEffect = (await import('@/utility/snowfall-effect.js')).SnowfallEffect;
+				new SnowfallEffect({
+					sakura: effect === 'sakura',
+				}).render();
 			}
 		}
 	} catch (error) {
