@@ -94,11 +94,13 @@ func PackDriveFileSelf(f *model.DriveFile, idGen id.Generator) DriveFileEntity {
 // webpublic は EXIF を落とした再エンコード版なので、他人向けに原本を指すと
 // **撮影位置 (GPS) が公開側に出る**。逆に所有者へ webpublic を返すと、
 // ダウンロードが劣化コピーになる。
+//
+// f is expected to have been passed through wellFormedRemoteFile.
 func driveFileURL(ctx *MediaURLContext, f *model.DriveFile, self bool) string {
 	if self {
-		return ctx.GetSelfURL(f, modeDefault)
+		return ctx.checkedSelfURL(f, modeDefault)
 	}
-	return ctx.GetPublicURL(f, modeDefault)
+	return ctx.checkedPublicURL(f, modeDefault)
 }
 
 func packDriveFile(f *model.DriveFile, idGen id.Generator, self bool) DriveFileEntity {
@@ -123,6 +125,9 @@ func packDriveFile(f *model.DriveFile, idGen id.Generator, self bool) DriveFileE
 	// upstream の self:true raw-url 契約からの意図的 deviation (moderator IP 保護、
 	// #1529 / #1948-14 で文書化済)。
 	ctx := currentMediaURLContext()
+	// リモートのファイルの URL の形は、ここで 1 回だけ確かめる。各 URL の組み立ては
+	// 確かめた後の値を受ける checked* を使い、コピーと解析を繰り返さない。
+	checked := wellFormedRemoteFile(f)
 	return DriveFileEntity{
 		ID:           f.ID,
 		CreatedAt:    createdAt,
@@ -134,9 +139,9 @@ func packDriveFile(f *model.DriveFile, idGen id.Generator, self bool) DriveFileE
 		Blurhash:     f.Blurhash,
 		Properties:   props,
 		Comment:      f.Comment,
-		URL:          driveFileURL(ctx, f, self),
-		ThumbnailURL: ctx.GetThumbnailURL(f),
-		WebpublicURL: ctx.GetWebpublicURL(f),
+		URL:          driveFileURL(ctx, checked, self),
+		ThumbnailURL: ctx.checkedThumbnailURL(checked),
+		WebpublicURL: ctx.checkedWebpublicURL(checked),
 		FolderID:     f.FolderID,
 		UserID:       f.UserID,
 	}
