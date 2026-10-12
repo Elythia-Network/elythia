@@ -3174,6 +3174,7 @@ _moderationLogTypes:
   downloadBackup: "Backup downloaded"
   restoreBackup: "Restored from a backup"
   rollbackBackup: "Rolled back to a kept database"
+  listKeptDatabases: "Kept databases listed"
   resetEmojiApplicationQuota: "Emoji request quota reset"
   cleanGoneInstance: "Cleaned up follows with a gone server"
   createFederationRule: "Federation rule created"

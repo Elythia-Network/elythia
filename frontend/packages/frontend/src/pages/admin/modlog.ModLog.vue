@@ -111,6 +111,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 		<i v-else-if="(log.type as string) === 'updateFederationRule'" class="ti ti-pencil"></i>
 		<i v-else-if="(log.type as string) === 'deleteFederationRule'" class="ti ti-trash"></i>
 		<i v-else-if="(log.type as string) === 'listBackups'" class="ti ti-list"></i>
+		<i v-else-if="(log.type as string) === 'listKeptDatabases'" class="ti ti-list"></i>
 		<i v-else-if="(log.type as string) === 'takeBackup'" class="ti ti-database-export"></i>
 		<i v-else-if="(log.type as string) === 'verifyBackup'" class="ti ti-checkup-list"></i>
 		<i v-else-if="(log.type as string) === 'deleteBackup'" class="ti ti-trash"></i>

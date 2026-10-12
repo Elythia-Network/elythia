@@ -3429,6 +3429,7 @@ _moderationLogTypes:
   downloadBackup: "バックアップをダウンロード"
   restoreBackup: "バックアップから戻す"
   rollbackBackup: "退避したデータベースへ戻す"
+  listKeptDatabases: "退避したデータベースの一覧を表示"
   resetEmojiApplicationQuota: "絵文字申請枠をリセット"
   cleanGoneInstance: "消えたサーバーとのフォロー関係を片付け"
   createFederationRule: "連合のルールを作成"

@@ -12964,6 +12964,10 @@ export interface Locale extends ILocale {
          */
         "rollbackBackup": string;
         /**
+         * 退避したデータベースの一覧を表示
+         */
+        "listKeptDatabases": string;
+        /**
          * 絵文字申請枠をリセット
          */
         "resetEmojiApplicationQuota": string;
