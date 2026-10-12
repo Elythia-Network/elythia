@@ -108,7 +108,7 @@ Elythia 独自機能の spec を書くときは `mkgo/` に置く。そちらは
 
 ```
 /*
- * SPDX-FileCopyrightText: mk-go project
+ * SPDX-FileCopyrightText: Elythia-Network
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 ```
