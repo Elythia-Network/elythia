@@ -124,7 +124,16 @@ SPDX-License-Identifier: AGPL-3.0-only
 						:class="$style.poll"
 					/>
 					<div v-if="isEnabledUrlPreview">
-						<MkUrlPreview v-for="url in urls" :key="url" :url="url" :compact="true" :detail="true" style="margin-top: 6px;"/>
+						<MkPluginUrlPreview
+							v-for="url in urls"
+							:key="url"
+							:url="url"
+							:compact="true"
+							:detail="true"
+							:revealed="appearNote.cw == null || showContent"
+							:source="{ kind: 'note', noteId: appearNote.id }"
+							style="margin-top: 6px;"
+						/>
 					</div>
 					<div v-if="appearNote.renoteId" :class="$style.quote"><MkNoteSimple :note="appearNote?.renote ?? null" :class="$style.quoteNote"/></div>
 				</div>
@@ -260,7 +269,7 @@ import MkReactionsViewer from '@/components/MkReactionsViewer.vue';
 import MkMediaList from '@/components/MkMediaList.vue';
 import MkCwButton from '@/components/MkCwButton.vue';
 import MkPoll from '@/components/MkPoll.vue';
-import MkUrlPreview from '@/components/MkUrlPreview.vue';
+import MkPluginUrlPreview from '@/components/MkPluginUrlPreview.vue';
 import MkInstanceTicker from '@/components/MkInstanceTicker.vue';
 import MkUserCardMini from '@/components/MkUserCardMini.vue';
 import MkPagination from '@/components/MkPagination.vue';
