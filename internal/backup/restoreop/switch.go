@@ -187,7 +187,7 @@ func (m *Manager) switchSteps(ctx context.Context, rec *Record) {
 
 	// C3: メンテナンスに入れる。
 	err := m.o.Maint.Enter(ctx, maintmode.State{
-		OpID: rec.OpID, Kind: maintmode.KindRestore, RequestedBy: rec.UserID, StartedAt: m.now(),
+		OpID: rec.OpID, Kind: maintKind(rec), RequestedBy: rec.UserID, StartedAt: m.now(),
 	})
 	if err != nil {
 		// 書き込みは済んだのに応答を読めなかっただけのことがあり、書き込みが後から届く
@@ -230,7 +230,7 @@ func (m *Manager) switchSteps(ctx context.Context, rec *Record) {
 	if !m.advance(ctx, rec.OpID, StepEntering, StepSwitched) {
 		return
 	}
-	m.journal(ctx, rec.OpID, StepSwitched, "%s is now the restored database; the previous one is %s", rec.Database, rec.Before)
+	m.journal(ctx, rec.OpID, StepSwitched, "%s is now the %s database; the previous one is %s", rec.Database, swappedIn(rec), rec.Before)
 
 	// C6 / C7: Redis の後始末と検査。
 	if err := m.cleanAndCheck(ctx); err != nil {
@@ -281,6 +281,10 @@ func (m *Manager) awaitResume(ctx context.Context, rec *Record) {
 		return
 	}
 	m.record(ctx, rec.OpID, StepResuming, StepDone)
+	if rec.Kind == KindRollback {
+		m.journal(ctx, rec.OpID, StepDone, "rolled back to %s; the previous database is kept as %s", rec.Target, rec.Before)
+		return
+	}
 	m.journal(ctx, rec.OpID, StepDone, "restored generation %s; the previous database is kept as %s", rec.GenerationID, rec.Before)
 }
 
@@ -455,17 +459,17 @@ func (m *Manager) giveUp(ctx context.Context, rec *Record, from string, cause er
 	st, err := m.o.Maint.Get(ctx)
 	switch {
 	case err != nil:
-		msg = fmt.Sprintf("restore %s stopped: %v. It could not read the maintenance state (%v); check it with elythia maintenance status. %s. "+
+		msg = fmt.Sprintf("%s %s stopped: %v. It could not read the maintenance state (%v); check it with elythia maintenance status. %s. "+
 			"With the maintenance on, put the right database under %s (elythia backup restore -rollback), then end the maintenance (elythia maintenance exit)",
-			rec.OpID, cause, err, names, rec.Database)
+			kindWord(rec), rec.OpID, cause, err, names, rec.Database)
 	case st != nil && st.OpID == rec.OpID:
-		msg = fmt.Sprintf("restore %s stopped and left the maintenance on: %v. %s, "+
+		msg = fmt.Sprintf("%s %s stopped and left the maintenance on: %v. %s, "+
 			"put the right database under %s (elythia backup restore -rollback), then end the maintenance (elythia maintenance exit)",
-			rec.OpID, cause, names, rec.Database)
+			kindWord(rec), rec.OpID, cause, names, rec.Database)
 	default:
-		msg = fmt.Sprintf("restore %s stopped: %v. The maintenance is not on, so the processes serve the database named %s now. %s. "+
+		msg = fmt.Sprintf("%s %s stopped: %v. The maintenance is not on, so the processes serve the database named %s now. %s. "+
 			"To put another database under %s, enter the maintenance first (elythia maintenance enter), then elythia backup restore -rollback, then elythia maintenance exit",
-			rec.OpID, cause, rec.Database, names, rec.Database)
+			kindWord(rec), rec.OpID, cause, rec.Database, names, rec.Database)
 	}
 	m.record(ctx, rec.OpID, "", StepUnknown, "error", cause.Error())
 	m.journal(ctx, rec.OpID, from, "%s", msg)
@@ -473,4 +477,31 @@ func (m *Manager) giveUp(ctx context.Context, rec *Record, from string, cause er
 	if m.o.Notify != nil {
 		m.o.Notify(context.WithoutCancel(ctx), msg)
 	}
+}
+
+// kindWord names the kind of rec in messages to an operator.
+func kindWord(rec *Record) string {
+	if rec.Kind == KindRollback {
+		return "rollback"
+	}
+	return "restore"
+}
+
+// maintKind is the maintenance kind of rec.
+//
+// 公開の進み具合の画面には種類を出さない (v1 §7-5) が、運営者の
+// elythia maintenance status と判定役のログでは見分けられるようにする。
+func maintKind(rec *Record) string {
+	if rec.Kind == KindRollback {
+		return maintmode.KindRollback
+	}
+	return maintmode.KindRestore
+}
+
+// swappedIn describes the database rec swaps in, for the journal.
+func swappedIn(rec *Record) string {
+	if rec.Kind == KindRollback {
+		return "kept"
+	}
+	return "restored"
 }

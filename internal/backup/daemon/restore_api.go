@@ -96,10 +96,27 @@ const (
 	idTicket             = "9acc0efb-0525-480d-a140-3c8c43a03a14"
 	idStep               = "ee0a73b0-bde4-4473-82e7-9fff7d4084ab"
 	idRestorePrepareFail = "7b035de7-20e9-4a89-a2ea-70f71a89f0a3"
+	// The rollback (#3463 (6d)).
+	idNoSuchKept     = "8a3797f6-9ec1-4d07-acf0-c2cf26b756ff"
+	idKeptInUse      = "244566b9-100b-4e69-a81f-9621afeff435"
+	idKeptTooNew     = "89ae0244-69fd-4aae-abaa-d5dab882cdda"
+	idKeptDirty      = "34815d4b-8ed6-41a4-9033-80813e5387bf"
+	idKeptNotElythia = "1038631b-9339-4d70-89fc-fdef999a95e4"
+	idKeptUnreadable = "a6d32479-3b5b-4937-953f-585af90128a4"
 )
 
-// restoreRequest is the body of the four endpoints.
+// Values of restoreRequest.Kind.
+const (
+	kindRestore  = "restore"
+	kindRollback = "rollback"
+)
+
+// restoreRequest is the body of the endpoints.
 type restoreRequest struct {
+	// Kind is "restore" (or empty) to restore generation GenerationID, or
+	// "rollback" to swap the kept database Database back in (prepare only).
+	Kind     string `json:"kind"`
+	Database string `json:"database"`
 	// I is the administrator's session token (the main server moves it
 	// from the Authorization header into the body).
 	I            string          `json:"i"`
@@ -118,9 +135,16 @@ type restoreRequest struct {
 // mountRestore adds the restore endpoints to mux.
 //
 //	POST /restore/prepare  {i, id, password, token|credential}  → {opId, ticket, status}
+//	                       {i, kind: "rollback", database, password, token|credential}
 //	POST /restore/confirm  {i, opId, ticket, password, token|credential}
 //	POST /restore/abort    {i, opId, ticket, password, token|credential}
 //	POST /restore/status   {session (or i), opId, ticket}  → status
+//	POST /restore/candidates {}  → {database, databases: [...]}
+//
+// ロールバック (#3463 (6d)) は、準備だけ種類を受け、確定・中止・進み具合は
+// リストアと同じ枠を使う。照合は今の DB で行う (v1 §7-6)。戻した後の DB に
+// 資格情報が無ければ断られるので、画面は CLI (elythia backup restore -rollback)
+// を案内する。
 //
 // 本体は利用者のリクエストをそのまま転送し、応答をそのまま返す。そのため、
 // 応答の形は本体の admin/* と同じ Misskey の形のエラーにする。
@@ -132,6 +156,18 @@ func mountRestore(mux *http.ServeMux, rs *Restore, log *slog.Logger) {
 		}
 		req, ok := readRestore(w, r)
 		if !ok {
+			return
+		}
+		// 種類と名前の形は、再認証 (TOTP の消費) の前に断る。
+		switch req.Kind {
+		case "", kindRestore:
+		case kindRollback:
+			if err := m.ValidKept(req.Database); err != nil {
+				restoreError(w, log, err)
+				return
+			}
+		default:
+			writeJSON(w, http.StatusBadRequest, apierr.InvalidParam())
 			return
 		}
 		unlock, ok := rs.lock(w)
@@ -149,7 +185,14 @@ func mountRestore(mux *http.ServeMux, rs *Restore, log *slog.Logger) {
 		if !ok {
 			return
 		}
-		rec, ticket, err := m.Prepare(r.Context(), restoreop.PrepareRequest{GenerationID: req.GenerationID, UserID: u.ID, Token: req.I})
+		var rec *restoreop.Record
+		var ticket string
+		var err error
+		if req.Kind == kindRollback {
+			rec, ticket, err = m.PrepareRollback(r.Context(), restoreop.RollbackRequest{Database: req.Database, UserID: u.ID, Token: req.I})
+		} else {
+			rec, ticket, err = m.Prepare(r.Context(), restoreop.PrepareRequest{GenerationID: req.GenerationID, UserID: u.ID, Token: req.I})
+		}
 		if err != nil {
 			restoreError(w, log, err)
 			return
@@ -257,6 +300,46 @@ func mountRestore(mux *http.ServeMux, rs *Restore, log *slog.Logger) {
 			return
 		}
 		writeJSON(w, http.StatusOK, st)
+	})
+}
+
+// mountCandidates adds POST /restore/candidates: the databases kept by
+// restores and rollbacks, which a rollback can swap back in.
+//
+// 本体の admin/backup/restore/candidates は、一覧 (admin/backup/list) と同じく
+// 本体の再認証 (backupGuard) を通ってから転送する。ここでは照合しない (同じ TOTP の
+// コードを本体と daemon で二重に消費しないため)。制御 API の serviceToken は
+// 通っている。操作を変える要求と同じく 1 つずつにする (一覧は退避した DB へ短く
+// 繋ぐので、準備の接続の確認と重ねない)。
+func mountCandidates(mux *http.ServeMux, rs *Restore, log *slog.Logger) {
+	mux.HandleFunc("POST /restore/candidates", func(w http.ResponseWriter, r *http.Request) {
+		m, _, ok := rs.parts(w)
+		if !ok {
+			return
+		}
+		if _, ok := readRestore(w, r); !ok {
+			return
+		}
+		unlock, ok := rs.lock(w)
+		if !ok {
+			return
+		}
+		defer unlock()
+		list, err := m.Candidates(r.Context())
+		switch {
+		case errors.Is(err, restoreop.ErrBusy), errors.Is(err, restoreop.ErrMaintenanceActive):
+			restoreError(w, log, err)
+			return
+		case err != nil:
+			// 理由には DB の名前や接続先が入るので、応答には載せずログにだけ残す。
+			if log != nil {
+				log.Warn("backup: cannot list the kept databases", "err", err)
+			}
+			writeJSON(w, http.StatusInternalServerError, apierr.ErrorWithKind("KEPT_DATABASES_UNREADABLE",
+				"The backup service cannot list the kept databases. See the log of the backup service for the reason.", idKeptUnreadable, apierr.KindServer))
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"database": m.Database(), "databases": list})
 	})
 }
 
@@ -374,6 +457,21 @@ func restoreError(w http.ResponseWriter, log *slog.Logger, err error) {
 	case errors.Is(err, restoreop.ErrStep):
 		writeJSON(w, http.StatusConflict, apierr.Error("RESTORE_STEP",
 			"The restore is not at a step that allows this.", idStep))
+	case errors.Is(err, restoreop.ErrInvalidKept), errors.Is(err, restoreop.ErrNoSuchKept):
+		writeJSON(w, http.StatusBadRequest, apierr.Error("NO_SUCH_KEPT_DATABASE",
+			"No such database kept by a restore or a rollback.", idNoSuchKept))
+	case errors.Is(err, backup.ErrRestoreConnections):
+		writeJSON(w, http.StatusConflict, apierr.Error("KEPT_DATABASE_IN_USE",
+			"Someone is connected to the database to roll back to. Disconnect them first.", idKeptInUse))
+	case errors.Is(err, backup.ErrRestoreMigrationTooNew):
+		writeJSON(w, http.StatusBadRequest, apierr.Error("KEPT_DATABASE_TOO_NEW",
+			"The database to roll back to has migrations this version of Elythia does not know. Use a version at least as new as that database.", idKeptTooNew))
+	case errors.Is(err, backup.ErrRestoreMigrationDirty):
+		writeJSON(w, http.StatusBadRequest, apierr.Error("KEPT_DATABASE_DIRTY",
+			"A migration of the database to roll back to stopped in the middle. Fix it with elythia migrate first.", idKeptDirty))
+	case errors.Is(err, backup.ErrRestoreNotElythia):
+		writeJSON(w, http.StatusBadRequest, apierr.Error("KEPT_DATABASE_NOT_ELYTHIA",
+			"The database to roll back to is not an Elythia database.", idKeptNotElythia))
 	case errors.Is(err, restoreop.ErrNotRunning), errors.Is(err, ErrNotRunning):
 		writeJSON(w, http.StatusServiceUnavailable, apierr.ErrorWithKind("RESTORE_UNAVAILABLE",
 			"The backup service is stopping.", idRestoreUnavailable, apierr.KindServer))

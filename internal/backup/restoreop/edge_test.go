@@ -322,7 +322,7 @@ func containsAll(s string, parts ...string) bool {
 
 func TestRestore_DropFailureIsJournaled(t *testing.T) {
 	e := newEnv(t)
-	e.opts.ModLog = func(context.Context, string, string, map[string]any) error { return errors.New("db down") }
+	e.opts.ModLog = func(context.Context, string, string, string, map[string]any) error { return errors.New("db down") }
 	e.stop()
 	e.start()
 	e.db.fail["restoreInto"] = errors.New("pg_restore failed")

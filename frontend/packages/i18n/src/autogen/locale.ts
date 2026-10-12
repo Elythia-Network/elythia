@@ -12873,6 +12873,10 @@ export interface Locale extends ILocale {
          */
         "restoreBackup": string;
         /**
+         * 退避したデータベースへ戻す
+         */
+        "rollbackBackup": string;
+        /**
          * 絵文字申請枠をリセット
          */
         "resetEmojiApplicationQuota": string;

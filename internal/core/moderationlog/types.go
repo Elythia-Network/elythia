@@ -162,6 +162,10 @@ const (
 	// 誰がいつ戻したかが分かるように)。info は {generationId, opId, phase}
 	// (phase は "prepare" か "switch")。
 	LogRestoreBackup LogType = "restoreBackup"
+	// 画面からのロールバック (#3463 (6d))。書く DB はリストアと同じ (準備は今の DB、
+	// 入れ替えた後は戻した DB)。info は {database, from, keptAs, opId, phase}。
+	// from は戻した先の退避した DB の名前、keptAs は今の DB を脇へ置いた名前。
+	LogRollbackBackup LogType = "rollbackBackup"
 )
 
 // UserInfo builds the standard {userId, userUsername, userHost} info

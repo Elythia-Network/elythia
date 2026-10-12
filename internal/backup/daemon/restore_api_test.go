@@ -32,6 +32,11 @@ type apiDB struct {
 	dbs map[string]bool
 	// loadErr is returned by Load.
 	loadErr error
+	// migrationsErr, rollbackErr, kept and keptErr are what the rollback
+	// checks and the listing return.
+	migrationsErr, rollbackErr error
+	kept                       []backup.KeptDatabase
+	keptErr                    error
 }
 
 func (a *apiDB) Load(_ context.Context, id string) (*backup.RestorePlan, error) {
@@ -76,6 +81,17 @@ func (a *apiDB) ExistingDatabases(_ context.Context, _ string, names []string) (
 		out[n] = a.dbs[n]
 	}
 	return out, nil
+}
+func (a *apiDB) CheckDatabaseMigrations(context.Context, string) (*backup.DatabaseMigrations, error) {
+	return &backup.DatabaseMigrations{}, a.migrationsErr
+}
+func (a *apiDB) CheckRollback(context.Context, string, string, string, string) error {
+	return a.rollbackErr
+}
+func (a *apiDB) KeptDatabases(context.Context, string, string) ([]backup.KeptDatabase, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.kept, a.keptErr
 }
 
 // fakeReauth accepts password "pw" with code "123456" for the session token

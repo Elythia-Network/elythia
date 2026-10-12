@@ -27,6 +27,10 @@ type DB interface {
 	SwitchDatabase(ctx context.Context, maintenance, database, keepAs, replacement string) error
 	DropDatabase(ctx context.Context, maintenance, name string) error
 	ExistingDatabases(ctx context.Context, maintenance string, names []string) (map[string]bool, error)
+	// The rollback (#3463 (6d)).
+	CheckDatabaseMigrations(ctx context.Context, dbname string) (*backup.DatabaseMigrations, error)
+	CheckRollback(ctx context.Context, maintenance, database, kept, keepAs string) error
+	KeptDatabases(ctx context.Context, maintenance, database string) ([]backup.KeptDatabase, error)
 }
 
 // Maintenance is the maintenance state. *maintmode.Store implements it.
@@ -47,6 +51,13 @@ var (
 	ErrReplicas          = errors.New("restoreop: restoring from the admin page is not supported with dbReplications")
 	ErrVersionMismatch   = errors.New("restoreop: a process runs another version of Elythia")
 	ErrTicket            = errors.New("restoreop: the ticket does not match")
+	// ErrInvalidKept is returned for a rollback to a name that is not one of
+	// a database kept by a restore or a rollback (<db>_before_restore_<t>,
+	// <db>_rolled_back_<t>).
+	ErrInvalidKept = errors.New("restoreop: not a database kept by a restore or a rollback")
+	// ErrNoSuchKept is returned for a rollback to a kept database that does
+	// not exist.
+	ErrNoSuchKept = errors.New("restoreop: no such kept database")
 )
 
 // Options configure a Manager.
@@ -61,8 +72,9 @@ type Options struct {
 	CleanRedis func(ctx context.Context) error
 	// Check runs the checks of the database that now has the server's name.
 	Check func(ctx context.Context) error
-	// ModLog records a moderation log in database. Failures are logged only.
-	ModLog func(ctx context.Context, database, userID string, info map[string]any) error
+	// ModLog records a moderation log of an operation of kind (KindRestore
+	// or KindRollback) in database. Failures are logged only.
+	ModLog func(ctx context.Context, database, userID, kind string, info map[string]any) error
 	// Acquire takes the service's job slot so that no scheduled take runs
 	// during the operation. The returned function gives it back.
 	Acquire func() (release func(), err error)
@@ -254,10 +266,13 @@ func (m *Manager) Prepare(ctx context.Context, req PrepareRequest) (*Record, str
 	go func() {
 		defer m.wg.Done()
 		defer cancel()
-		m.prepare(pctx, rec, plan, opts, live)
+		m.prepare(pctx, rec, func(ctx context.Context) error { return m.restoreInto(ctx, rec, plan, opts) }, live)
 	}()
 	return rec, ticket, nil
 }
+
+// Database is the name of the server's database (db.db).
+func (m *Manager) Database() string { return m.o.Database }
 
 // CanStart reports why an operation cannot start now (a job holding the
 // slot, an unfinished one, an active maintenance, replicas). It reads Redis only, so the control API
@@ -367,14 +382,18 @@ func (m *Manager) modlog(ctx context.Context, database string, rec *Record, phas
 		return
 	}
 	info := map[string]any{"generationId": rec.GenerationID, "opId": rec.OpID, "phase": phase}
-	if err := m.o.ModLog(context.WithoutCancel(ctx), database, rec.UserID, info); err != nil {
+	if rec.Kind == KindRollback {
+		info = map[string]any{"database": rec.Database, "from": rec.Target, "keptAs": rec.Before, "opId": rec.OpID, "phase": phase}
+	}
+	if err := m.o.ModLog(context.WithoutCancel(ctx), database, rec.UserID, rec.Kind, info); err != nil {
 		m.log.Warn("backup: cannot write the moderation log of a restore", "opId", rec.OpID, "database", database, "err", err)
 	}
 }
 
-// prepare restores into the new database and moves the operation to ready.
-func (m *Manager) prepare(ctx context.Context, rec *Record, plan *backup.RestorePlan, opts backup.RestoreOptions, live *liveOp) {
-	err := m.restoreInto(ctx, rec, plan, opts)
+// prepare runs work (restoring into the new database, or migrating the kept
+// database of a rollback) and moves the operation to ready.
+func (m *Manager) prepare(ctx context.Context, rec *Record, work func(context.Context) error, live *liveOp) {
+	err := work(ctx)
 	if err == nil {
 		err = m.setStep(ctx, rec.OpID, StepPreparing, StepReady, "readyAt", formatTime(m.now()))
 		if err == nil {
@@ -385,7 +404,7 @@ func (m *Manager) prepare(ctx context.Context, rec *Record, plan *backup.Restore
 	}
 	// 作った DB だけを消す。今の DB には触れていない。作る前に落ちたとき (同じ名前の DB
 	// を確かめた後で別の作業が作った場合を含む) は、その名前の DB は自分のものではない
-	// ので消さない。
+	// ので消さない。ロールバックの戻す先は、dropTarget が消さない。
 	if !errors.Is(err, backup.ErrRestoreNotCreated) {
 		m.dropTarget(ctx, rec)
 	}

@@ -131,8 +131,8 @@ func (w restoreWiring) open(cfg *config.Config, d *daemon.Daemon, storage backup
 			}
 			return reportError(report)
 		},
-		ModLog: func(ctx context.Context, database, userID string, info map[string]any) error {
-			return writeModLog(ctx, cfg, selfID, idGen, database, userID, info)
+		ModLog: func(ctx context.Context, database, userID, kind string, info map[string]any) error {
+			return writeModLog(ctx, cfg, selfID, idGen, database, userID, modLogType(kind), info)
 		},
 		Acquire:       func() (func(), error) { return d.Acquire(daemon.JobRestore) },
 		SlotBusy:      d.SlotBusy,
@@ -189,10 +189,18 @@ func openOnce(ctx context.Context, cfg *config.Config) (*gorm.DB, func(), error)
 	return db.WithContext(ctx), func() { _ = sqlDB.Close() }, nil
 }
 
-// writeModLog records a restore in the moderation log of database. It
+// modLogType is the moderation log type of an operation of kind.
+func modLogType(kind string) moderationlog.LogType {
+	if kind == restoreop.KindRollback {
+		return moderationlog.LogRollbackBackup
+	}
+	return moderationlog.LogRestoreBackup
+}
+
+// writeModLog records a restore or a rollback in the moderation log of database. It
 // writes synchronously (moderationlog.Service.Log is asynchronous) so that
 // the connection is closed before the daemon goes on.
-func writeModLog(ctx context.Context, cfg *config.Config, selfID string, idGen id.Generator, database, userID string, info map[string]any) error {
+func writeModLog(ctx context.Context, cfg *config.Config, selfID string, idGen id.Generator, database, userID string, typ moderationlog.LogType, info map[string]any) error {
 	c := withAppName(cfg, "elythia-backup/modlog/"+selfID)
 	c.DB.DB = database
 	db, closeDB, err := openOnce(ctx, c)
@@ -205,7 +213,7 @@ func writeModLog(ctx context.Context, cfg *config.Config, selfID string, idGen i
 		return err
 	}
 	return repository.NewModerationLogRepository(db).Create(&model.ModerationLog{
-		ID: idGen.Generate(time.Now()), UserID: userID, Type: string(moderationlog.LogRestoreBackup), Info: datatypes.JSON(b),
+		ID: idGen.Generate(time.Now()), UserID: userID, Type: string(typ), Info: datatypes.JSON(b),
 	})
 }
 

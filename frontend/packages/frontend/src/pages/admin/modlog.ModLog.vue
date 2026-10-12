@@ -62,6 +62,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 		<span v-else-if="(log.type as string) === 'createFederationRule' || (log.type as string) === 'updateFederationRule' || (log.type as string) === 'deleteFederationRule'">: {{ (log.info as { ruleName?: string }).ruleName || (log.info as { ruleId?: string }).ruleId }}</span>
 		<!-- mk-go: DB のバックアップの管理画面 (#3462)。世代を対象にする操作は世代の ID を出す。 -->
 		<span v-else-if="(log.type as string) === 'verifyBackup' || (log.type as string) === 'deleteBackup' || (log.type as string) === 'downloadBackup' || (log.type as string) === 'restoreBackup'">: <span class="_monospace">{{ (log.info as { generationId?: string }).generationId }}</span></span>
+		<span v-else-if="(log.type as string) === 'rollbackBackup'">: <span class="_monospace">{{ (log.info as { from?: string }).from }}</span></span>
 		<span v-else-if="log.type === 'assignRole'">: @{{ log.info.userUsername }}{{ log.info.userHost ? '@' + log.info.userHost : '' }} <i class="ti ti-arrow-right"></i> {{ log.info.roleName }}</span>
 		<span v-else-if="log.type === 'unassignRole'">: @{{ log.info.userUsername }}{{ log.info.userHost ? '@' + log.info.userHost : '' }} <i class="ti ti-equal-not"></i> {{ log.info.roleName }}</span>
 		<span v-else-if="log.type === 'createRole'">: {{ log.info.role.name }}</span>
@@ -115,6 +116,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 		<i v-else-if="(log.type as string) === 'deleteBackup'" class="ti ti-trash"></i>
 		<i v-else-if="(log.type as string) === 'downloadBackup'" class="ti ti-download"></i>
 		<i v-else-if="(log.type as string) === 'restoreBackup'" class="ti ti-database-import"></i>
+		<i v-else-if="(log.type as string) === 'rollbackBackup'" class="ti ti-arrow-back-up"></i>
 		<i v-else-if="log.type === 'assignRole'" class="ti ti-user-plus"></i>
 		<i v-else-if="log.type === 'unassignRole'" class="ti ti-user-minus"></i>
 		<i v-else-if="log.type === 'createRole'" class="ti ti-plus"></i>
