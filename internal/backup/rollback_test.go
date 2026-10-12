@@ -169,7 +169,14 @@ func TestRollbackChecks(t *testing.T) {
 		assert.Contains(t, err.Error(), current)
 		_ = held.Close(ctx)
 		require.Eventually(t, func() bool { return app.CheckRollback(ctx, "", rsAppDB, current, keepAs) == nil },
-			5*time.Second, 50*time.Millisecond)
+			10*time.Second, 50*time.Millisecond)
+		// 一覧が読んだ直後のように、閉じかけの接続は抜けるのを待つ。
+		late := pg.connect(t, rsAppUser, rsAppPass, current)
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			_ = late.Close(context.Background())
+		}()
+		require.NoError(t, app.CheckRollback(ctx, "", rsAppDB, current, keepAs))
 		// 戻す先の持ち主でなければ、名前を変えられない。
 		pg.exec(t, "postgres", "CREATE DATABASE "+rsAppDB+"_before_restore_20261007000000")
 		err = app.CheckRollback(ctx, "", rsAppDB, rsAppDB+"_before_restore_20261007000000", keepAs)
