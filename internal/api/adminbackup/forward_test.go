@@ -9,8 +9,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/elythia-network/elythia/internal/core/moderationlog"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/server/middleware"
 )
 
 type seenRequest struct {
@@ -96,6 +101,45 @@ func TestForwarder_CandidatesSendsOnlyTheSession(t *testing.T) {
 	assert.Equal(t, "rollback", (*seen)[2].body["kind"])
 	assert.Equal(t, "app_before_restore_20261001000000", (*seen)[2].body["database"])
 	assert.Equal(t, "pw", (*seen)[2].body["password"])
+}
+
+// TestRestoreCandidates_LogsTheListing checks that a listing of the kept
+// databases the backup service answered is recorded like listBackups, and
+// that the response passes through as it is.
+func TestRestoreCandidates_LogsTheListing(t *testing.T) {
+	call := func(t *testing.T, status int, body string) (*httptest.ResponseRecorder, *modlog) {
+		t.Helper()
+		srv, _ := fakeService(t, status, body, map[string]string{"Content-Type": "application/json; charset=utf-8", "Retry-After": "3"})
+		lg := &modlog{}
+		h := NewHandler(nil, nil, lg)
+		h.SetForwarder(NewForwarder(srv.URL, "svc", nil))
+		e := echo.New()
+		req := httptest.NewRequest(http.MethodPost, RestorePathPrefix+"candidates", strings.NewReader(`{"password":"pw"}`))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		tok := "usertoken0000001"
+		c.Set(string(middleware.UserContextKey), &model.User{ID: "admin1", Token: &tok})
+		require.NoError(t, h.RestoreCandidates(c))
+		return rec, lg
+	}
+	body := `{"database":"app","databases":[{"name":"app_before_restore_20261001000000"},{"name":"app_rolled_back_20261002000000"}]}`
+	rec, lg := call(t, http.StatusOK, body)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.JSONEq(t, body, rec.Body.String())
+	assert.Equal(t, "3", rec.Header().Get("Retry-After"))
+	assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
+	assert.Equal(t, []moderationlog.LogType{moderationlog.LogListKeptDatabases}, lg.entries)
+	assert.Equal(t, map[string]any{"databaseCount": 2}, lg.infos[0])
+
+	// 断られた一覧は記録しない。応答はそのまま返す。
+	rec, lg = call(t, http.StatusConflict, `{"error":{"code":"BACKUP_SERVICE_BUSY"}}`)
+	assert.Equal(t, http.StatusConflict, rec.Code)
+	assert.Contains(t, rec.Body.String(), "BACKUP_SERVICE_BUSY")
+	assert.Empty(t, lg.entries)
+	// 本文が読めない 200 も記録しない。
+	_, lg = call(t, http.StatusOK, `not json`)
+	assert.Empty(t, lg.entries)
 }
 
 func TestForwarder_RelaysEmptyAndErrorResponses(t *testing.T) {

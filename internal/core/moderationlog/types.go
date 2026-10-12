@@ -166,6 +166,9 @@ const (
 	// 入れ替えた後は戻した DB)。info は {database, from, keptAs, opId, phase}。
 	// from は戻した先の退避した DB の名前、keptAs は今の DB を脇へ置いた名前。
 	LogRollbackBackup LogType = "rollbackBackup"
+	// 退避した DB の一覧 (#3463 (6d)、admin/backup/restore/candidates)。listBackups と
+	// 同じく閲覧も残す。本体が書く。info は {databaseCount}。
+	LogListKeptDatabases LogType = "listKeptDatabases"
 )
 
 // UserInfo builds the standard {userId, userUsername, userHost} info

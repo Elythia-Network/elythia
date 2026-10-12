@@ -581,7 +581,7 @@ ID                STATUS    SIZE  ENCRYPTED  VERIFIED  ELYTHIA  MIGRATION
 
 パスキーのchallengeは、サインインのものとは別に置く。サインインのために出したchallengeへの応答は、ここでは通らない。challengeを置いたRedisに繋がらないときは、照合できなかったものとして拒否し(503)、失敗には数えない。
 
-成立した操作は、モデレーションログに残す(`listBackups` / `takeBackup` / `verifyBackup` / `deleteBackup` / `downloadBackup`、[画面から戻す](#画面から戻す-3463)の`restoreBackup`と`rollbackBackup`)。ログは操作の応答と別に書くので、書き込みに失敗しても操作は取り消されず、本体のログに警告(`moderation log: write failed`など)だけが残る。
+成立した操作は、モデレーションログに残す(`listBackups` / `takeBackup` / `verifyBackup` / `deleteBackup` / `downloadBackup`、[画面から戻す](#画面から戻す-3463)の`restoreBackup`と`rollbackBackup`、退避したDBの一覧の`listKeptDatabases`)。ログは操作の応答と別に書くので、書き込みに失敗しても操作は取り消されず、本体のログに警告(`moderation log: write failed`など)だけが残る。
 
 ### 一覧と使用量
 

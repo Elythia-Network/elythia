@@ -13,6 +13,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/core/moderationlog"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 )
 
@@ -199,7 +200,41 @@ func (h *Handler) RestoreConfirm(c echo.Context) error { return h.restore(c, "co
 func (h *Handler) RestoreAbort(c echo.Context) error { return h.restore(c, "abort") }
 
 // RestoreCandidates handles POST /api/admin/backup/restore/candidates.
-func (h *Handler) RestoreCandidates(c echo.Context) error { return h.restore(c, opCandidates) }
+//
+// 一覧 (admin/backup/list の listBackups) と同じく、閲覧も記録する。退避した DB には
+// 利用者の秘密鍵などがそのまま入っており、その名前と大きさを誰がいつ見たかを追える
+// ようにする。成立した (daemon が 200 を返した) ときだけ書く。
+func (h *Handler) RestoreCandidates(c echo.Context) error {
+	cw := &capturedResponse{header: http.Header{}, status: http.StatusOK}
+	h.forwarder.Serve(cw, c.Request(), opCandidates, c.RealIP())
+	if cw.status == http.StatusOK {
+		var body struct {
+			Databases []json.RawMessage `json:"databases"`
+		}
+		if json.Unmarshal(cw.body.Bytes(), &body) == nil {
+			h.log(c, moderationlog.LogListKeptDatabases, map[string]any{"databaseCount": len(body.Databases)})
+		}
+	}
+	w := c.Response()
+	for k, v := range cw.header {
+		w.Header()[k] = v
+	}
+	w.WriteHeader(cw.status)
+	_, _ = w.Write(cw.body.Bytes())
+	return nil
+}
+
+// capturedResponse keeps a response in memory so that the handler can look
+// at it before passing it on.
+type capturedResponse struct {
+	header http.Header
+	status int
+	body   bytes.Buffer
+}
+
+func (r *capturedResponse) Header() http.Header         { return r.header }
+func (r *capturedResponse) Write(p []byte) (int, error) { return r.body.Write(p) }
+func (r *capturedResponse) WriteHeader(status int)      { r.status = status }
 
 // RestoreStatus handles POST /api/admin/backup/restore/status.
 func (h *Handler) RestoreStatus(c echo.Context) error { return h.restore(c, "status") }
