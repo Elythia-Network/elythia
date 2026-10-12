@@ -173,7 +173,8 @@ func (r *Restorer) KeptDatabases(ctx context.Context, maintenance, database stri
 
 // CheckRollback runs the stop conditions of a rollback that swaps kept back
 // in as database and keeps database as keepAs: kept exists and nobody is
-// connected to it, keepAs is free, and the database user may rename both
+// connected to it (waiting a few seconds for sessions that are closing),
+// keepAs is free, and the database user may rename both
 // (ErrRestoreNoPrivilege). It connects to maintenance (empty means
 // "postgres"). The connections on database are checked again by
 // ReplaceDatabase, in the maintenance.
@@ -195,5 +196,7 @@ func (r *Restorer) CheckRollback(ctx context.Context, maintenance, database, kep
 	if _, err := databaseInfo(ctx, admin, keepAs); err == nil {
 		return fmt.Errorf("backup: database %q already exists", keepAs)
 	}
-	return checkNoConnections(ctx, admin, kept)
+	// 一覧 (KeptDatabases) は退避した DB へ短く繋いで版を読むので、一覧の直後の準備では
+	// その閉じた接続が少しの間残る。名前の入れ替えと同じだけ待つ。
+	return waitNoConnections(ctx, admin, kept, replacementSettle)
 }

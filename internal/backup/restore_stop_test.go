@@ -101,6 +101,13 @@ func TestRestoreStopConditions(t *testing.T) {
 		has, err := super.ExistingDatabases(ctx, "", []string{rsAppDB, replacement, rsAppDB + "_kept_conn"})
 		require.NoError(t, err)
 		assert.Equal(t, map[string]bool{rsAppDB: true, replacement: true}, has)
+		// 待つことがある入れ替える側を先に確かめ、今の DB はその後に確かめる (今の DB の
+		// 確認から名前の変更までの間を短くするため)。両方に接続があれば、入れ替える側で断る。
+		onCurrent := pg.connect(t, rsSuperUser, rsSuperPass, rsAppDB)
+		err = super.ReplaceDatabase(ctx, "", rsAppDB, rsAppDB+"_kept_conn", replacement)
+		require.ErrorIs(t, err, ErrRestoreConnections)
+		assert.Contains(t, err.Error(), `sessions on "`+replacement+`"`)
+		_ = onCurrent.Close(ctx)
 		_ = held.Close(ctx)
 
 		// 入れ替える直前まで繋いでいた接続 (戻す処理の migrate など) は、抜けるのを待つ。

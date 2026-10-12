@@ -805,13 +805,14 @@ func (r *Restorer) ReplaceDatabase(ctx context.Context, maintenance, database, k
 		return err
 	}
 	defer admin.Close(context.Background())
-	if err := checkNoConnections(ctx, admin, database); err != nil {
-		return err
-	}
 	// 入れ替える側 (戻した DB、ロールバックでは退避した DB) も確かめる。接続のある
 	// DB の名前の変更は PostgreSQL も拒むが、その拒否は「入れ替えに失敗した」としか
 	// 読めない。人が手で繋いでいる理由を、入れ替える前に分かる形で返す (#3463 (6d))。
+	// 待つことがあるこちらを先に行い、今の DB の確認から名前の変更までの間を短くする。
 	if err := waitNoConnections(ctx, admin, replacement, replacementSettle); err != nil {
+		return err
+	}
+	if err := checkNoConnections(ctx, admin, database); err != nil {
 		return err
 	}
 	// 名前の入れ替えは 1 つのトランザクションで行う。どちらかが落ちたら (今の DB に
