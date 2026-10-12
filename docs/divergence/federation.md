@@ -115,6 +115,16 @@ target 側には**新規に取り込んだときだけ**という gate がある
 note では `createNote` を通らない)。無条件だと再ブーストのたびに古い note が
 antenna に湧く。あわせてローカル note は対象外にする (作成時に既に通っている)。
 
+**target が `public` / `home` のときだけ載せる。** 作者本人の followers note の
+ブースト (#3520 で取り込むようにした) でも、target は antenna に渡さない。
+Elythia の antenna の可視性判定は、followers note でも mention されていれば通す
+ので (#2106 N27)、crafted Announce が配送されていない followers note を antenna に
+載せる入口になるため。upstream は `checkHitAntenna` が、作者をフォローしている
+antenna の持ち主と作者本人の antenna に載せる。相手が Misskey なら followers note
+を取得させないので、この形で target が新規に取り込まれることはほぼ無い。相手が
+Mastodon なら、署名付きの取得に followers-only の投稿を返すことがあるので、
+upstream では載り Elythia では載らない取りこぼしになる。
+
 **この gate は「他の経路で先に DB へ入った note」を全部落とす。** upstream では
 それらの経路も `resolveNote` → `createNote` → `NoteCreateService.create` を通り、
 `addNoteToAntennas` は `silent` の外にあるので**その時点で antenna に載っている**。
