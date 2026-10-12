@@ -4553,10 +4553,13 @@ func (r *Resolver) upsertEmojis(tags []activitypub.EmojiTag, host string) model.
 	names := make(model.StringArray, 0, len(order))
 	for _, name := range order {
 		tag := tagByName[name]
-		iconURL := tag.Icon.URL.String()
+		// 画面に出すときにプロキシで包めない形の URL は使わない。括弧などは
+		// 符号化した値を保存する。収まらない URL と同じ扱いにする。
+		iconURL, iconOK := remoteurl.Media(tag.Icon.URL.String())
 		// icon URL は `originalUrl` / `publicUrl` (varchar(512) NOT NULL)。
-		// 切った URL は別物なので**値ごと捨てる** (#2726)。
-		iconFits := fitsColumn(iconURL, emojiURLMaxRunes)
+		// 切った URL は別物なので**値ごと捨てる** (#2726)。符号化で長くなる
+		// ことがあるので、符号化した後の値で測る。
+		iconFits := iconOK && fitsColumn(iconURL, emojiURLMaxRunes)
 		if existing, ok := existingByName[name]; ok {
 			// 既存絵文字: URL/URIが変わっていればまとめてupdate
 			updates := map[string]any{}
@@ -4567,7 +4570,7 @@ func (r *Resolver) upsertEmojis(tags []activitypub.EmojiTag, host string) model.
 				updates["publicUrl"] = iconURL
 			}
 			if !iconFits {
-				slog.Warn("upsertEmojis: keeping stored url; new url does not fit its column",
+				slog.Warn("upsertEmojis: keeping stored url; new url is malformed or does not fit its column",
 					"name", name, "host", host)
 			}
 			// uri は URL なので切らない。収まらなければ**値だけ捨てて**行は残す
@@ -4604,7 +4607,7 @@ func (r *Resolver) upsertEmojis(tags []activitypub.EmojiTag, host string) model.
 		// `note.emojis` に載るほうが悪い (クライアントは未解決の絵文字を
 		// `:name:` のまま出すので、そちらのほうが読める、#2726)。
 		if !iconFits {
-			slog.Warn("upsertEmojis: emoji url does not fit its column",
+			slog.Warn("upsertEmojis: emoji url is malformed or does not fit its column",
 				"name", name, "host", host)
 			continue
 		}

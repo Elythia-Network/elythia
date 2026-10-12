@@ -8,6 +8,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/misc/remoteurl"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 )
@@ -106,7 +107,17 @@ func emojiRedirectHandler(repo emojiLookup) echo.HandlerFunc {
 		if target == "" {
 			target = emoji.OriginalURL
 		}
+		// リモートの絵文字の URL は相手が決めた文字列。プロキシで包めない形の
+		// もの (取り込みで確かめる前に保存された行) へは飛ばさず、絵文字が
+		// 無いときと同じに扱う。包まれずに閲覧者のブラウザが相手へ直接取りに行く。
+		// hostPtr を引いたときは、host が一致する行だけが返る。
+		if target != "" && hostPtr != nil {
+			target, _ = remoteurl.Media(target)
+		}
 		if target == "" {
+			if _, hasFallback := c.QueryParams()["fallback"]; hasFallback {
+				return c.Redirect(http.StatusFound, emojiRedirectFallback)
+			}
 			return c.NoContent(http.StatusNotFound)
 		}
 		// **`?badge=1` は badge モードへ回す (#2909)。** Service Worker の

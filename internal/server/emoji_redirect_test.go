@@ -408,3 +408,51 @@ func TestEmojiRedirectHandler_BadgeProxiesLocalEmoji(t *testing.T) {
 	assert.Equal(t, "https://local.example/files/abc.png", loc.Query().Get("url"))
 	assert.NotEmpty(t, loc.Query().Get("sig"))
 }
+
+// リモートの絵文字の、プロキシで包めない形の URL へは飛ばさない。絵文字が
+// 無いときと同じく、fallback があればその画像へ、無ければ 404 にする。
+func TestEmojiRedirectHandler_MalformedRemoteURL(t *testing.T) {
+	withMediaProxy(t)
+	host := "remote.example"
+	for _, raw := range []string{"/meow.png", "https:///remote.example/meow.png", "https:\\\\remote.example/meow.png"} {
+		repo := &stubEmojiLookup{emojis: map[string]*model.Emoji{
+			"meow|remote.example": {Name: "meow", Host: &host, PublicURL: raw, OriginalURL: raw},
+		}}
+		h := emojiRedirectHandler(repo)
+		for _, q := range []string{"", "static=1", "badge=1"} {
+			c, rec := newEmojiTestContext(t, "meow@remote.example.webp", q)
+			require.NoError(t, h(c))
+			assert.Equal(t, http.StatusNotFound, rec.Code, "%q %q: location=%q", raw, q, rec.Header().Get(echo.HeaderLocation))
+		}
+		c, rec := newEmojiTestContext(t, "meow@remote.example.webp", "fallback=1")
+		require.NoError(t, h(c))
+		assert.Equal(t, http.StatusFound, rec.Code)
+		assert.Equal(t, emojiRedirectFallback, rec.Header().Get(echo.HeaderLocation), raw)
+	}
+}
+
+// 括弧などを含むリモートの絵文字の URL は、符号化してからプロキシに渡す。
+func TestEmojiRedirectHandler_RemoteURLIsEncoded(t *testing.T) {
+	withMediaProxy(t)
+	repo := &stubEmojiLookup{emojis: map[string]*model.Emoji{
+		"meow|remote.example": {Name: "meow", PublicURL: "https://remote.example/meow (1).png"},
+	}}
+	c, rec := newEmojiTestContext(t, "meow@remote.example.webp", "")
+	require.NoError(t, emojiRedirectHandler(repo)(c))
+	require.Equal(t, http.StatusFound, rec.Code)
+	loc, err := neturl.Parse(rec.Header().Get(echo.HeaderLocation))
+	require.NoError(t, err)
+	assert.Equal(t, "local.example", loc.Host)
+	assert.Equal(t, "https://remote.example/meow%20%281%29.png", loc.Query().Get("url"))
+}
+
+// ローカルの絵文字の URL は形の判定に掛けない (相対パスでもそのまま飛ばす)。
+func TestEmojiRedirectHandler_LocalURLIsNotChecked(t *testing.T) {
+	repo := &stubEmojiLookup{emojis: map[string]*model.Emoji{
+		"smile|": {Name: "smile", PublicURL: "/files/smile.png"},
+	}}
+	c, rec := newEmojiTestContext(t, "smile.webp", "")
+	require.NoError(t, emojiRedirectHandler(repo)(c))
+	assert.Equal(t, http.StatusFound, rec.Code)
+	assert.Equal(t, "/files/smile.png", rec.Header().Get(echo.HeaderLocation))
+}
