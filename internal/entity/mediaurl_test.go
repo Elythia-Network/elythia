@@ -344,6 +344,58 @@ func TestAvatarBannerProxying(t *testing.T) {
 			t.Errorf("remote banner not proxied: %v", d.BannerURL)
 		}
 	})
+	// 実際に取り込まれたリモートの人は bannerId を持たない (#3526)。
+	t.Run("remote banner without bannerId is proxied", func(t *testing.T) {
+		u0 := &model.User{Username: "dave", Host: sp(remoteHost), BannerURL: sp("https://" + remoteHost + "/b.png")}
+		d := PackUserDetailed(u0, nil)
+		if d.BannerURL == nil || !strings.HasPrefix(*d.BannerURL, testInternalProxy+"/image.webp?") {
+			t.Errorf("remote banner not proxied: %v", d.BannerURL)
+		}
+	})
+	// 相手が決めた URL は、host を持つ http(s) の絶対 URL だけを返す。形の崩れた
+	// 値はプロキシに包まれないので、そのまま返さず null にする (#3526)。
+	t.Run("malformed remote banner is dropped", func(t *testing.T) {
+		for _, raw := range []string{
+			"/b.png",
+			"//" + remoteHost + "/b.png",
+			"https:\\\\" + remoteHost + "/b.png",
+			"https:" + remoteHost + "/b.png",
+			"x),url(https://" + remoteHost + "/b.png",
+			"https://" + remoteHost + "/b\nc.png",
+			"javascript://" + remoteHost + "/b.png",
+			"data:image/png;base64,AAAA",
+		} {
+			u0 := &model.User{Username: "dave", Host: sp(remoteHost), BannerURL: sp(raw)}
+			if d := PackUserDetailed(u0, nil); d.BannerURL != nil {
+				t.Errorf("%q must be dropped, got %v", raw, *d.BannerURL)
+			}
+		}
+	})
+	// 括弧や空白は捨てずに符号化してからプロキシに渡す (アイコンと同じ)。
+	t.Run("remote banner with parentheses is encoded and proxied", func(t *testing.T) {
+		u0 := &model.User{Username: "dave", Host: sp(remoteHost), BannerURL: sp("https://" + remoteHost + "/b (1).png")}
+		d := PackUserDetailed(u0, nil)
+		if d.BannerURL == nil || !strings.HasPrefix(*d.BannerURL, testInternalProxy+"/image.webp?") {
+			t.Fatalf("remote banner not proxied: %v", d.BannerURL)
+		}
+		if want := "https://" + remoteHost + "/b%20%281%29.png"; u(t, *d.BannerURL).Query().Get("url") != want {
+			t.Errorf("url param = %q, want %q", u(t, *d.BannerURL).Query().Get("url"), want)
+		}
+	})
+	t.Run("well-formed remote banner over http is proxied", func(t *testing.T) {
+		u0 := &model.User{Username: "dave", Host: sp(remoteHost), BannerURL: sp("http://" + remoteHost + "/b.png")}
+		d := PackUserDetailed(u0, nil)
+		if d.BannerURL == nil || !strings.HasPrefix(*d.BannerURL, testInternalProxy+"/image.webp?") {
+			t.Errorf("remote banner not proxied: %v", d.BannerURL)
+		}
+	})
+	// host が空文字の行はローカルとして扱う (IdenticonURL と同じ)。
+	t.Run("empty host is local", func(t *testing.T) {
+		u0 := &model.User{Username: "erin", Host: sp(""), BannerURL: sp("https://" + remoteHost + "/b.png")}
+		if d := PackUserDetailed(u0, nil); d.BannerURL != nil {
+			t.Errorf("local user without bannerId must not have a banner, got %v", *d.BannerURL)
+		}
+	})
 	t.Run("nil banner stays nil", func(t *testing.T) {
 		u0 := &model.User{Username: "erin"}
 		if d := PackUserDetailed(u0, nil); d.BannerURL != nil {

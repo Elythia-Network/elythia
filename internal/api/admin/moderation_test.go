@@ -260,3 +260,38 @@ func TestUpdateUserNote_WritesModerationLog(t *testing.T) {
 	assert.Equal(t, "old note", info["before"])
 	assert.Equal(t, "new note", info["after"])
 }
+
+// リモートの人は bannerId を持たず bannerUrl だけを持つ (#3526)。それでも外せること。
+// モデレーションログの fileId は本家と同じく bannerId (無ければ null)。
+func TestUnsetUserBanner_RemoteUserWithoutBannerID(t *testing.T) {
+	h, userRepo, _, _ := newTestHandler(t)
+	host := "remote.example"
+	bannerURL := "https://remote.example/b.webp"
+	userRepo.Users["u1"] = &model.User{ID: "u1", Username: "alice", Host: &host, BannerURL: &bannerURL}
+	repo := attachModLog(t, h)
+
+	rec := doPost(h.UnsetUserBanner, `{"userId":"u1"}`, adminUser)
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Nil(t, userRepo.Users["u1"].BannerURL, "bannerUrl を外す")
+
+	require.Eventually(t, func() bool { return len(repo.Snapshot()) == 1 }, 500*time.Millisecond, 5*time.Millisecond)
+	var info map[string]any
+	require.NoError(t, json.Unmarshal(repo.Snapshot()[0].Info, &info))
+	v, ok := info["fileId"]
+	assert.True(t, ok, "fileId の鍵は残す")
+	assert.Nil(t, v)
+}
+
+// バナーが無ければ何もせず、モデレーションログも書かない。
+func TestUnsetUserBanner_AlreadyUnsetNoLog(t *testing.T) {
+	h, userRepo, _, _ := newTestHandler(t)
+	empty := ""
+	userRepo.Users["u1"] = &model.User{ID: "u1", Username: "alice"}
+	userRepo.Users["u2"] = &model.User{ID: "u2", Username: "bob", BannerURL: &empty}
+	repo := attachModLog(t, h)
+
+	require.Equal(t, http.StatusNoContent, doPost(h.UnsetUserBanner, `{"userId":"u1"}`, adminUser).Code)
+	require.Equal(t, http.StatusNoContent, doPost(h.UnsetUserBanner, `{"userId":"u2"}`, adminUser).Code)
+	time.Sleep(50 * time.Millisecond)
+	assert.Empty(t, repo.Snapshot())
+}

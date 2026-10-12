@@ -51,10 +51,16 @@ func (h *Handler) UnsetUserBanner(c echo.Context) error {
 		return apierr.JSONInvalidParam(c)
 	}
 	user, err := h.userRepo.FindByID(req.UserID)
-	if err != nil || user == nil || user.BannerID == nil {
+	// リモートの人は bannerId を持たず bannerUrl だけを持つ (#3526)。bannerId だけを
+	// 見ると、表示されているリモートの人のバナーを外せない。
+	if err != nil || user == nil || (user.BannerID == nil && (user.BannerURL == nil || *user.BannerURL == "")) {
 		return c.NoContent(http.StatusNoContent)
 	}
-	fileID := *user.BannerID
+	// 本家の info.fileId は user.bannerId (リモートの人では null)。外す前の値を取っておく。
+	var fileID any
+	if user.BannerID != nil {
+		fileID = *user.BannerID
+	}
 	if err := h.userRepo.UpdateUser(req.UserID, map[string]any{"bannerId": nil, "bannerUrl": nil, "bannerBlurhash": nil}); err == nil {
 		info := moderationlog.UserInfo(user)
 		info["fileId"] = fileID
