@@ -18,11 +18,12 @@ export type RollbackContext = {
 
 // 再認証は今のデータベースで行う。バックアップから戻した直後は、その後に設定した
 // パスワードや二段階認証、管理者の役割、セッションが今のデータベースに無いことがあり、
-// 画面からは戻せない。そのときに出るコード。
+// 画面からは戻せない。そのときに出るコード。REAUTHENTICATION_FAILED は入れない。
+// パスワードの打ち間違いと見分けられず、打ち間違えただけの人に本体を止めるよう勧める
+// ことになるため。
 const CREDENTIAL_CODES: readonly string[] = [
 	'TWO_FACTOR_REQUIRED',
 	'PASSWORD_NOT_SET',
-	'REAUTHENTICATION_FAILED',
 	'ROLE_PERMISSION_DENIED',
 	'ACCESS_DENIED',
 	'PASSKEY_UNAVAILABLE',

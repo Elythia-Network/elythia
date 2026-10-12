@@ -16,7 +16,6 @@ describe('rollbackCliCommand', () => {
 	test.each([
 		'TWO_FACTOR_REQUIRED',
 		'PASSWORD_NOT_SET',
-		'REAUTHENTICATION_FAILED',
 		'ROLE_PERMISSION_DENIED',
 		'ACCESS_DENIED',
 		'PASSKEY_UNAVAILABLE',
@@ -25,6 +24,8 @@ describe('rollbackCliCommand', () => {
 	});
 
 	test.each([
+		// パスワードの打ち間違いでも出るので、本体を止める手順は勧めない。
+		'REAUTHENTICATION_FAILED',
 		'TWO_FACTOR_CODE_ALREADY_USED',
 		'RATE_LIMIT_EXCEEDED',
 		'KEPT_DATABASE_TOO_NEW',
