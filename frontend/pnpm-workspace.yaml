@@ -44,7 +44,6 @@ minimumReleaseAgeExclude:
   - '@elythia-network/mfm@0.1.0'
   - '@syuilo/aiscript'
   - buraha
-  - mfm-js
   - slacc
   - slacc-android-arm-eabi
   - slacc-android-arm64
@@ -95,10 +94,6 @@ overrides:
   # 0.19.0 が 9.0.1 を使う)。どちらも v4 を buf なしで呼ぶだけで該当しないが、lock から
   # advisory の版を外しておく。9.x には修正版が無いので 11.1.1 へ上げる (v4 の named export は同じ)。
   uuid@<11.1.1: 11.1.1
-# 依存にあてるパッチ (Elythia)。mfm-js は解析の途中の結果を覚える形にしてある。
-# mfm-js を外したら (#3515) 消す。
-patchedDependencies:
-  mfm-js@0.26.0: patches/mfm-js@0.26.0.patch
 engineStrict: true
 saveExact: true
 shellEmulator: true
