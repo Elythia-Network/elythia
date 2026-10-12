@@ -811,7 +811,7 @@ host.preview.register({
 - `id`はプラグイン内の名前で、hostが`<plugin名>:<id>`へ名前空間化する。同じ名前空間付きIDを二重登録すると例外になる。
 - `requiresDetail: true`に一致したURLは、タイムラインでは既存カードを取得せず元URLのリンクとして表示する。詳細画面かつCW展開済み・active・表示領域内になってから`load`を呼ぶ。
 - `load`には中止用の`AbortSignal`を渡す。取得中に非active・画面外・unmountになった場合は中止される。取得済みの表示は同じノートが所有する間、非activeや画面外になっても保持される。
-- `load`、読み込み表示、または本表示の描画に失敗した場合は元URLのリンクへ閉じ、別providerや既存URLカードへは戻らない。
+- `load`、読み込み表示、または本表示の描画に失敗した場合は元URLのリンクへ閉じ、別providerや既存URLカードへは戻らない。同じ所有キー（provider・URL・note source・detail）のままノートを表示している間は、viewport・タブ・KeepAliveへの復帰だけでは再試行しない。所有キーが変わる、CWを閉じて再展開する、または再mountされる（ノートを開き直す・ページを再読み込みする）場合は再試行する。
 
 現在providerを接続しているのは`MkNote` / `MkNoteDetailed`のURLだけで、チャット、
 URLプレビューポップアップ、ページ本文などは対象外。`PreviewInput`の`file`は将来の
