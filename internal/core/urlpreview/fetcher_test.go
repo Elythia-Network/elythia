@@ -324,3 +324,58 @@ func TestValidateResultSchemes_DropsNonHTTPThumbnailAndIcon(t *testing.T) {
 	assert.Equal(t, &ok, r2.Thumbnail, "http(s) の thumbnail は保持")
 	assert.Equal(t, &ok, r2.Icon)
 }
+
+// scheme が http(s) でも、host を持たない thumbnail / icon は落とす。メディア
+// プロキシは host を持つ絶対 URL しか包まないので、包まれずに画面へ出てしまう。
+// 括弧や空白は符号化した値にする。
+func TestValidateResultSchemes_DropsHostlessThumbnailAndIcon(t *testing.T) {
+	for _, raw := range []string{"https:///remote.example/i.png", "http:remote.example/i.png", "https:\\\\remote.example/i.png", "/i.png"} {
+		thumb, icon := raw, raw
+		r := &Result{URL: "https://example.com", Thumbnail: &thumb, Icon: &icon}
+		require.NoError(t, validateResultSchemes(r))
+		assert.Nil(t, r.Thumbnail, raw)
+		assert.Nil(t, r.Icon, raw)
+	}
+	thumb, icon := "https://example.com/a (1).png", "HTTPS://example.com/i.png"
+	r := &Result{URL: "https://example.com", Thumbnail: &thumb, Icon: &icon}
+	require.NoError(t, validateResultSchemes(r))
+	require.NotNil(t, r.Thumbnail)
+	assert.Equal(t, "https://example.com/a%20%281%29.png", *r.Thumbnail)
+	require.NotNil(t, r.Icon, "scheme の大文字小文字は問わない")
+}
+
+// host を持たない player の URL は、preview は残して player だけ捨てる。
+func TestValidateResultSchemes_DropsHostlessPlayer(t *testing.T) {
+	bad := "https:///remote.example/embed"
+	w := 640
+	r := &Result{URL: "https://example.com", Player: PlayerResult{URL: &bad, Width: &w, Allow: []string{"autoplay"}}}
+	require.NoError(t, validateResultSchemes(r))
+	assert.Nil(t, r.Player.URL)
+	assert.Nil(t, r.Player.Width)
+	assert.Equal(t, []string{}, r.Player.Allow)
+
+	good := "https://remote.example/embed"
+	r2 := &Result{URL: "https://example.com", Player: PlayerResult{URL: &good, Width: &w}}
+	require.NoError(t, validateResultSchemes(r2))
+	require.NotNil(t, r2.Player.URL)
+	assert.Equal(t, good, *r2.Player.URL)
+	assert.Equal(t, &w, r2.Player.Width)
+}
+
+// 相対参照で書かれた og:image も、解決した結果に host が無ければ返さない。
+func TestFetcher_DropsHostlessResolvedThumbnail(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(`<html><head><meta property="og:title" content="x">` +
+			`<meta property="og:image" content="https:///remote.example/i.png">` +
+			`<link rel="icon" href="/favicon.ico"></head></html>`))
+	}))
+	defer srv.Close()
+
+	f := newTestFetcher(Config{Enabled: true, AllowRedirect: true, TimeoutMs: 5000, MaxContentLength: 1 << 20})
+	result, err := f.Fetch(context.Background(), srv.URL)
+	require.NoError(t, err)
+	assert.Nil(t, result.Thumbnail, "host の無い thumbnail を返している")
+	require.NotNil(t, result.Icon, "解決して host を持つ icon は残す")
+	assert.Equal(t, srv.URL+"/favicon.ico", *result.Icon)
+}

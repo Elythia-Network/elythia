@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/misc/keyword"
+	"github.com/elythia-network/elythia/internal/misc/remoteurl"
 	"github.com/elythia-network/elythia/internal/safehttp"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/net/html/charset"
@@ -200,18 +201,40 @@ func validateResultSchemes(result *Result) error {
 	if result.Player.URL != nil && *result.Player.URL != "" && !isHTTPScheme(*result.Player.URL) {
 		return fmt.Errorf("%w: unsupported schema in player url", ErrFetchFailed)
 	}
+	// scheme が http(s) でも host を持たない player の URL (`https:///…` など) は、
+	// preview 全体は落とさずに player だけを捨てる。
+	if result.Player.URL != nil && *result.Player.URL != "" && !hasHTTPHost(*result.Player.URL) {
+		result.Player = PlayerResult{Allow: []string{}}
+	}
 	// thumbnail / icon は preview 全体を落とすほどではないので、値だけ捨てる
 	// (upstream も画像が壊れているだけで preview 自体は返す)。
-	dropNonHTTP(&result.Thumbnail)
-	dropNonHTTP(&result.Icon)
+	dropMalformedMedia(&result.Thumbnail)
+	dropMalformedMedia(&result.Icon)
 	return nil
 }
 
-// dropNonHTTP clears an optional URL field when it is not http(s).
-func dropNonHTTP(field **string) {
-	if *field != nil && **field != "" && !isHTTPScheme(**field) {
-		*field = nil
+// dropMalformedMedia replaces an optional image URL with its remoteurl.Media
+// form, or clears it when the value is not an absolute http(s) URL with a host.
+//
+// 画面ではメディアプロキシで包んでから img の src に入れるが、プロキシは host を
+// 持つ絶対 URL しか包まない。scheme の接頭辞だけを見ると `https:///…` が通り、
+// 相対参照を解決しても host が空のまま包まれずに出てしまう。
+func dropMalformedMedia(field **string) {
+	if *field == nil || **field == "" {
+		return
 	}
+	clean, ok := remoteurl.Media(**field)
+	if !ok {
+		*field = nil
+		return
+	}
+	*field = &clean
+}
+
+// hasHTTPHost reports whether raw parses as an http(s) URL with a host.
+func hasHTTPHost(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && u.Host != "" && (u.Scheme == "http" || u.Scheme == "https")
 }
 
 // isHTTPScheme reports whether the URL uses http(s)。
