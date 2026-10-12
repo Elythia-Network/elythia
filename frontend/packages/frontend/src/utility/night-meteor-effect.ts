@@ -253,6 +253,8 @@ export class NightMeteorRenderer {
 export type NightMeteorEnvironment = {
 	/** Whether the applied theme is a dark one (`data-color-scheme` on `<html>`). */
 	darkMode: boolean;
+	/** The in-app animation preference (`prefer.s.animation`). */
+	animation: boolean;
 	/** Whether the seasonal screen effect was started at boot. */
 	seasonalEffectShowing: boolean;
 };
@@ -271,8 +273,8 @@ const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
 
 /**
  * Starts watching the conditions and shows the meteors while they hold.
- * The caller calls `update()` when the environment changes (the theme) and
- * `stop()` when the preference is turned off.
+ * The caller calls `update()` when the environment changes (the theme or the
+ * animation preference) and `stop()` when the preference is turned off.
  */
 export function startNightMeteorEffect(getEnvironment: () => NightMeteorEnvironment): NightMeteorController {
 	const renderer = new NightMeteorRenderer();
@@ -287,6 +289,7 @@ export function startNightMeteorEffect(getEnvironment: () => NightMeteorEnvironm
 		const show = shouldShowNightMeteor({
 			enabled: true,
 			darkMode: env.darkMode,
+			animation: env.animation,
 			reducedMotion: reducedMotion.matches,
 			visible: window.document.visibilityState === 'visible',
 			seasonalEffectShowing: env.seasonalEffectShowing,

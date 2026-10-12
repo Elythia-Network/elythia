@@ -55,6 +55,8 @@ export type NightMeteorConditions = {
 	enabled: boolean;
 	/** Whether the applied theme is a dark one (`data-color-scheme` on `<html>`). */
 	darkMode: boolean;
+	/** The in-app animation preference (`prefer.s.animation`). */
+	animation: boolean;
 	/** Whether the device asks for less motion (`prefers-reduced-motion: reduce`). */
 	reducedMotion: boolean;
 	/** Whether the page is visible (`document.visibilityState`). */
@@ -69,6 +71,8 @@ export type NightMeteorConditions = {
 export function shouldShowNightMeteor(c: NightMeteorConditions): boolean {
 	if (!c.enabled) return false;
 	if (!c.darkMode) return false;
+	// アプリの「アニメーション」をオフにしている人にも、動くものを出さない。
+	if (!c.animation) return false;
 	if (c.reducedMotion) return false;
 	if (!c.visible) return false;
 	// 雪や桜と重ねると画面が騒がしくなるので、季節の演出を優先する。
