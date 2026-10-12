@@ -1399,12 +1399,20 @@ func remoteMediaURL(actorURI, column, raw string, max int) string {
 		return ""
 	}
 	// 画面に出すときにプロキシで包めない形の URL は、取り込まない。
-	if !remoteurl.WellFormedMedia(raw) {
+	clean, ok := remoteurl.Media(raw)
+	if !ok {
 		slog.Warn("federation: dropping malformed media url",
 			"actor", truncateRunes(actorURI, userURIMaxRunes), "column", column)
 		return ""
 	}
-	return raw
+	// 符号化で長くなることがある。列に入らなければ、長すぎる値と同じく捨てる。
+	if len([]rune(clean)) > max {
+		slog.Warn("federation: dropping oversized media url",
+			"actor", truncateRunes(actorURI, userURIMaxRunes), "column", column,
+			"len", len([]rune(clean)), "max", max)
+		return ""
+	}
+	return clean
 }
 
 // remoteSharedInbox picks the actor's shared inbox, preferring the top-level

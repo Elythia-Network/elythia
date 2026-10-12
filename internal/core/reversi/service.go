@@ -1045,9 +1045,13 @@ func packGame(game *model.ReversiGame) map[string]any {
 // フィールドは省略)。avatar が空なら identicon URL を返すのは本家互換。
 func userLiteMap(u *model.User) map[string]any {
 	avatarURL := u.AvatarURL
-	// リモートの人の、プロキシで包めない形の avatarUrl は使わない (entity.IdenticonURL と同じ)。
-	if avatarURL != nil && u.Host != nil && *u.Host != "" && !remoteurl.WellFormedMedia(*avatarURL) {
-		avatarURL = nil
+	// リモートの人の、形の崩れた avatarUrl は使わず identicon にする。
+	if avatarURL != nil && u.Host != nil && *u.Host != "" {
+		if clean, ok := remoteurl.Media(*avatarURL); ok {
+			avatarURL = &clean
+		} else {
+			avatarURL = nil
+		}
 	}
 	if avatarURL == nil || *avatarURL == "" {
 		host := ""

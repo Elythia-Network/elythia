@@ -478,14 +478,20 @@ type InstanceLite struct {
 // (e.g. internal/api/chat の packUser / internal/core/chat の packUserStream)
 // も同じ規則を使える (#692 / #708 review)。
 func IdenticonURL(u *model.User) string {
-	remote := u.Host != nil && *u.Host != ""
+	avatar := ""
+	if u.AvatarURL != nil {
+		avatar = *u.AvatarURL
+	}
 	// リモートの人の avatarUrl は相手が決めた文字列。プロキシで包めない形のもの
-	// (取り込みで捨てる前に保存された行) は使わず identicon にする。
-	if u.AvatarURL != nil && *u.AvatarURL != "" && (!remote || remoteurl.WellFormedMedia(*u.AvatarURL)) {
+	// (取り込みで確かめる前に保存された行) は使わず identicon にする。
+	if avatar != "" && u.Host != nil && *u.Host != "" {
+		avatar, _ = remoteurl.Media(avatar)
+	}
+	if avatar != "" {
 		// remote user の avatarUrl は remote origin を指すため proxy 経由に
 		// 書き換えて閲覧者の IP 漏洩を防ぐ (#1529)。local / identicon は素通し
 		// (ProxyAvatarURL は同一オリジン・相対 URL を wrap しない)。
-		return currentMediaURLContext().ProxyAvatarURL(*u.AvatarURL)
+		return currentMediaURLContext().ProxyAvatarURL(avatar)
 	}
 	// upstream getIdenticonUrl (UserEntityService.ts:386-391): local かつ
 	// username に '.' を含むユーザー (= system account relay.actor /
