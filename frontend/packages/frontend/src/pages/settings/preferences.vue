@@ -779,6 +779,15 @@ SPDX-License-Identifier: AGPL-3.0-only
 								</MkPreferenceContainer>
 							</SearchMarker>
 
+							<SearchMarker :keywords="['effect', 'show', 'night', 'meteor', 'star', 'dark']">
+								<MkPreferenceContainer k="enableNightMeteorEffect">
+									<MkSwitch v-model="enableNightMeteorEffect">
+										<template #label><SearchLabel>{{ i18n.ts.nightMeteorEffect }}</SearchLabel></template>
+										<template #caption>{{ i18n.ts.nightMeteorEffectDescription }}</template>
+									</MkSwitch>
+								</MkPreferenceContainer>
+							</SearchMarker>
+
 							<SearchMarker :keywords="['image', 'photo', 'picture', 'media', 'thumbnail', 'new', 'tab']">
 								<MkPreferenceContainer k="imageNewTab">
 									<MkSwitch v-model="imageNewTab">
@@ -947,6 +956,7 @@ const reactionsDisplaySize = prefer.model('reactionsDisplaySize');
 const limitWidthOfReaction = prefer.model('limitWidthOfReaction');
 const squareAvatars = prefer.model('squareAvatars');
 const enableSeasonalScreenEffect = prefer.model('enableSeasonalScreenEffect');
+const enableNightMeteorEffect = prefer.model('enableNightMeteorEffect');
 const showAvatarDecorations = prefer.model('showAvatarDecorations');
 const nsfw = prefer.model('nsfw');
 const emojiStyle = prefer.model('emojiStyle');

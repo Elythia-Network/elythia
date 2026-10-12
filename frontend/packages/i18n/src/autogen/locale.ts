@@ -5177,6 +5177,14 @@ export interface Locale extends ILocale {
      */
     "seasonalScreenEffect": string;
     /**
+     * 夜空の流れ星
+     */
+    "nightMeteorEffect": string;
+    /**
+     * 夜（20時〜翌4時）にダークテーマを使っているとき、ときどき画面に流れ星が流れます。季節に応じた画面の演出が出ている間は流れません。
+     */
+    "nightMeteorEffectDescription": string;
+    /**
      * デコる
      */
     "decorate": string;
