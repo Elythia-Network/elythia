@@ -18,6 +18,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 			<MkInfo v-if="!hasSecondFactor" warn>
 				{{ i18n.ts._backups.twoFactorRequired }}
 				<MkA to="/settings/security" class="_link">{{ i18n.ts._backups.openSecuritySettings }}</MkA>
+				<!-- mk-go: 戻した DB に 2FA が無いと、画面からは退避した DB へ戻せない (#3463 (6d))。 -->
+				<div>{{ i18n.ts._backups.rollbackCliHint }}</div>
 			</MkInfo>
 			<template v-else>
 				<MkSwitch v-if="hasPasskey" v-model="usePasskey">{{ i18n.ts._backups.usePasskey }}</MkSwitch>
@@ -32,7 +34,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 				持ち、メンテナンス中も ticket で読める。
 			-->
 			<div v-if="restore" class="_panel _gaps_s" :class="$style.restore">
-				<div :class="$style.restoreHead"><i class="ti ti-database-import"></i> {{ i18n.ts._backups.restoreTitle }}<span v-if="restore.status" class="_monospace">: {{ restore.status.record.generationId }}</span></div>
+				<div v-if="restore.status?.record.kind === 'rollback'" :class="$style.restoreHead"><i class="ti ti-arrow-back-up"></i> {{ i18n.ts._backups.rollbackTitle }}<span class="_monospace">: {{ restore.status.record.target }}</span></div>
+				<div v-else :class="$style.restoreHead"><i class="ti ti-database-import"></i> {{ i18n.ts._backups.restoreTitle }}<span v-if="restore.status" class="_monospace">: {{ restore.status.record.generationId }}</span></div>
 				<template v-if="restore.status">
 					<MkInfo :warn="restore.status.record.step === 'unknown' || restore.status.record.step === 'failed'">
 						{{ stepText(restore.status.record.step) }}
@@ -152,6 +155,42 @@ SPDX-License-Identifier: AGPL-3.0-only
 					</div>
 				</MkFolder>
 			</template>
+
+			<!--
+				mk-go: 退避したデータベースとロールバック (#3463 (6d))。一覧も世代の一覧と同じく
+				その都度の再認証を求める。戻す処理と進み具合はリストアと同じ枠を使う。
+			-->
+			<div v-if="hasSecondFactor" class="_gaps_s">
+				<div :class="$style.sectionHead"><i class="ti ti-arrow-back-up"></i> {{ i18n.ts._backups.keptTitle }}</div>
+				<div :class="$style.caption">{{ i18n.ts._backups.keptDescription }}</div>
+				<div class="_buttons">
+					<MkButton :disabled="busy" @click="loadKept"><i class="ti ti-lock-open"></i> {{ kept ? i18n.ts._backups.reload : i18n.ts._backups.keptShow }}</MkButton>
+				</div>
+				<template v-if="kept">
+					<div v-if="kept.databases.length === 0" :class="$style.caption">{{ i18n.ts._backups.keptEmpty }}</div>
+					<MkFolder v-for="k in kept.databases" :key="k.name">
+						<template #icon><i :class="k.problem ? 'ti ti-alert-triangle' : 'ti ti-database'"></i></template>
+						<template #label><span class="_monospace">{{ k.name }}</span></template>
+						<template #caption>{{ k.kind === 'rolled_back' ? i18n.ts._backups.keptRolledBack : i18n.ts._backups.keptBeforeRestore }}</template>
+						<template v-if="k.size != null" #suffix>{{ bytes(k.size, 1) }}</template>
+						<div class="_gaps_s">
+							<MkInfo v-if="k.problem" warn>{{ i18n.ts._backups._keptProblems[k.problem] }}</MkInfo>
+							<MkInfo v-else-if="k.needsMigration">{{ i18n.ts._backups.keptNeedsMigration }}</MkInfo>
+							<MkKeyValue oneline>
+								<template #key>{{ i18n.ts._backups.keptAt }}</template>
+								<template #value><MkTime :time="k.at" mode="detail"/></template>
+							</MkKeyValue>
+							<MkKeyValue v-if="k.migrations != null && k.migrations.length > 0" oneline>
+								<template #key>{{ i18n.ts._backups.migrations }}</template>
+								<template #value><span class="_monospace">{{ k.migrations.map(m => `${m.table}=${m.missing ? '-' : m.version}${m.dirty ? ' (dirty)' : ''}`).join(', ') }}</span></template>
+							</MkKeyValue>
+							<div class="_buttons">
+								<MkButton v-if="k.problem == null && restore == null" small :disabled="busy" @click="startRollback(k)"><i class="ti ti-arrow-back-up"></i> {{ i18n.ts._backups.rollback }}</MkButton>
+							</div>
+						</div>
+					</MkFolder>
+				</template>
+			</div>
 		</div>
 	</div>
 </PageWithHeader>
@@ -170,6 +209,8 @@ import MkSwitch from '@/components/MkSwitch.vue';
 import * as os from '@/os.js';
 import { misskeyApi } from '@/utility/misskey-api.js';
 import { createSequentialPoller } from '@/utility/sequential-poller.js';
+import { rollbackCliCommand } from '@/utility/backup-rollback.js';
+import type { RollbackContext } from '@/utility/backup-rollback.js';
 import { i18n } from '@/i18n.js';
 import { definePage } from '@/page.js';
 import { ensureSignin } from '@/i.js';
@@ -210,8 +251,14 @@ async function reauth(): Promise<Elythia.BackupReauth | null> {
 	return { password: auth.result.password, token: auth.result.token ?? undefined };
 }
 
-function errorText(err: unknown): string {
+function errorText(err: unknown, rollback?: RollbackContext | null): string {
 	const apiErr = err as { code?: string; message?: string } | null;
+	// ロールバックの照合は今のデータベースで行う (#3463 (6d))。資格情報が無くて断られた
+	// ときは、コマンドでの戻し方を添える。
+	const command = rollbackCliCommand(apiErr?.code, rollback);
+	if (command != null) {
+		return errorText(err) + '\n\n' + i18n.tsx._backups.rollbackCli({ command });
+	}
 	switch (apiErr?.code) {
 		case 'TWO_FACTOR_REQUIRED': return i18n.ts._backups.twoFactorRequired;
 		case 'REAUTHENTICATION_FAILED': return i18n.ts._backups.reauthFailed;
@@ -230,12 +277,18 @@ function errorText(err: unknown): string {
 		case 'RESTORE_STEP': return i18n.ts._backups.restoreStepMismatch;
 		case 'RESTORE_TICKET_INVALID': return i18n.ts._backups.restoreTicketInvalid;
 		case 'RESTORE_UNAVAILABLE': return i18n.ts._backups.restoreUnavailable;
+		case 'NO_SUCH_KEPT_DATABASE': return i18n.ts._backups.noSuchKept;
+		case 'KEPT_DATABASE_IN_USE': return i18n.ts._backups.keptInUse;
+		case 'KEPT_DATABASE_TOO_NEW': return i18n.ts._backups._keptProblems.migrationTooNew;
+		case 'KEPT_DATABASE_DIRTY': return i18n.ts._backups._keptProblems.migrationDirty;
+		case 'KEPT_DATABASE_NOT_ELYTHIA': return i18n.ts._backups._keptProblems.notElythia;
+		case 'KEPT_DATABASES_UNREADABLE': return i18n.ts._backups.keptUnreadable;
 		default: return apiErr?.message ?? String(err);
 	}
 }
 
 /** Runs one operation with a fresh re-authentication. */
-async function run<T>(op: (auth: Elythia.BackupReauth) => Promise<T>): Promise<T | null> {
+async function run<T>(op: (auth: Elythia.BackupReauth) => Promise<T>, rollback?: RollbackContext | null): Promise<T | null> {
 	if (busy.value) return null;
 	busy.value = true;
 	try {
@@ -245,7 +298,7 @@ async function run<T>(op: (auth: Elythia.BackupReauth) => Promise<T>): Promise<T
 	} catch (err) {
 		// パスキーの取り消し (startAuthentication の reject) は黙って戻す。
 		if (err instanceof Error && err.name === 'NotAllowedError') return null;
-		os.alert({ type: 'error', text: errorText(err) });
+		os.alert({ type: 'error', text: errorText(err, rollback) });
 		return null;
 	} finally {
 		busy.value = false;
@@ -367,6 +420,32 @@ function stopPolling(): void {
 	restorePoller.stop();
 }
 
+const kept = ref<Elythia.BackupKeptDatabases | null>(null);
+
+async function loadKept(): Promise<void> {
+	const res = await run(auth => misskeyApi('admin/backup/restore/candidates', auth));
+	if (res != null) kept.value = res;
+}
+
+async function startRollback(k: Elythia.BackupKeptDatabase): Promise<void> {
+	if (kept.value == null) return;
+	const context = { name: k.name, database: kept.value.database };
+	const { canceled } = await os.confirm({ type: 'warning', text: i18n.tsx._backups.rollbackConfirm(context) });
+	if (canceled) return;
+	const res = await run(auth => misskeyApi('admin/backup/restore/prepare', { ...auth, kind: 'rollback', database: k.name }), context);
+	if (res == null) return;
+	const ticket = { opId: res.opId, ticket: res.ticket };
+	saveRestoreTicket(ticket);
+	restore.value = { ticket, status: res.status, error: null };
+	startPolling();
+}
+
+/** The guidance context of the rollback shown in the progress panel, if it is one. */
+function rollbackContext(): RollbackContext | null {
+	const rec = restore.value?.status?.record;
+	return rec?.kind === 'rollback' ? { name: rec.target, database: rec.database } : null;
+}
+
 async function startRestore(g: Elythia.BackupGeneration): Promise<void> {
 	const { canceled } = await os.confirm({ type: 'warning', text: i18n.tsx._backups.restoreConfirm({ id: g.id }) });
 	if (canceled) return;
@@ -383,16 +462,18 @@ async function confirmRestore(): Promise<void> {
 	if (r?.status == null) return;
 	const { canceled } = await os.confirm({ type: 'warning', text: i18n.tsx._backups.restoreSwitchConfirm({ before: r.status.record.before }) });
 	if (canceled) return;
-	await run(auth => misskeyApi('admin/backup/restore/confirm', { ...auth, ...r.ticket }));
+	await run(auth => misskeyApi('admin/backup/restore/confirm', { ...auth, ...r.ticket }), rollbackContext());
 	startPolling();
 }
 
 async function abortRestore(): Promise<void> {
 	const r = restore.value;
 	if (r == null) return;
-	const { canceled } = await os.confirm({ type: 'warning', text: i18n.ts._backups.restoreAbortConfirm });
+	// ロールバックの戻す先は、中止しても消さない。
+	const text = r.status?.record.kind === 'rollback' ? i18n.ts._backups.rollbackAbortConfirm : i18n.ts._backups.restoreAbortConfirm;
+	const { canceled } = await os.confirm({ type: 'warning', text });
 	if (canceled) return;
-	await run(auth => misskeyApi('admin/backup/restore/abort', { ...auth, ...r.ticket }));
+	await run(auth => misskeyApi('admin/backup/restore/abort', { ...auth, ...r.ticket }), rollbackContext());
 	startPolling();
 }
 
@@ -445,6 +526,10 @@ definePage(() => ({
 }
 
 .restoreHead {
+	font-weight: bold;
+}
+
+.sectionHead {
 	font-weight: bold;
 }
 
