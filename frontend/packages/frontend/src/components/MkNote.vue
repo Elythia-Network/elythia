@@ -100,7 +100,16 @@ SPDX-License-Identifier: AGPL-3.0-only
 						:class="$style.poll"
 					/>
 					<div v-if="isEnabledUrlPreview">
-						<MkUrlPreview v-for="url in urls" :key="url" :url="url" :compact="true" :detail="false" :class="$style.urlPreview"/>
+						<MkPluginUrlPreview
+							v-for="url in urls"
+							:key="url"
+							:url="url"
+							:compact="true"
+							:detail="false"
+							:revealed="appearNote.cw == null || showContent"
+							:source="{ kind: 'note', noteId: appearNote.id }"
+							:class="$style.urlPreview"
+						/>
 					</div>
 					<div v-if="appearNote.renoteId" :class="$style.quote"><MkNoteSimple :note="appearNote?.renote ?? null" :class="$style.quoteNote"/></div>
 					<button v-if="isLong && collapsed" :class="$style.collapsed" class="_button" @click="collapsed = false">
@@ -218,7 +227,7 @@ import MkReactionsViewer from '@/components/MkReactionsViewer.vue';
 import MkMediaList from '@/components/MkMediaList.vue';
 import MkCwButton from '@/components/MkCwButton.vue';
 import MkPoll from '@/components/MkPoll.vue';
-import MkUrlPreview from '@/components/MkUrlPreview.vue';
+import MkPluginUrlPreview from '@/components/MkPluginUrlPreview.vue';
 import MkInstanceTicker from '@/components/MkInstanceTicker.vue';
 
 const props = withDefaults(defineProps<{

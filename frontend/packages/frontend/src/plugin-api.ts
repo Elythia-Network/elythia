@@ -73,6 +73,48 @@ export { definePage } from '@/page.js';
  */
 export type PluginUser = entities.UserLite;
 
+/** Content that can be offered to a plugin preview provider. */
+export type PreviewInput =
+	| { kind: 'url'; href: string }
+	| {
+		kind: 'file';
+		file: {
+			id: string;
+			name: string;
+			size: number;
+			url: string;
+			declaredMimeType: string | null;
+			detectedMimeType: string | null;
+		};
+	};
+
+/** Runtime state available to a preview provider after it has matched. */
+export type PreviewContext = {
+	detail: boolean;
+	revealed: boolean;
+	active: boolean;
+	inViewport: boolean;
+	source: { kind: 'note'; noteId: string } | null;
+};
+
+/** A lazy preview implementation registered by a bundled server plugin. */
+export type PreviewProvider<T = unknown> = {
+	id: string;
+	priority?: number;
+	requiresDetail?: boolean;
+	loadingComponent?: Component;
+	match(input: PreviewInput): boolean;
+	load(input: PreviewInput, context: PreviewContext, signal: AbortSignal): Promise<T>;
+	component: Component;
+};
+
+/** A provider after its plugin namespace has been applied. */
+export type PreviewRegistration = {
+	id: string;
+	plugin: string;
+	provider: PreviewProvider;
+};
+
 /**
  * 重複を除き、users/show の上限（100人）ごとに公開ユーザー情報を取得する。
  *
@@ -209,13 +251,18 @@ export type PluginHost = {
 	 */
 	slot(name: SlotName, renderer: SlotRenderer): void;
 
+	/** Registers a lazy content preview under this plugin's namespace. */
+	readonly preview: {
+		register<T = unknown>(provider: PreviewProvider<T>): void;
+	};
+
 	/**
 	 * Calls an mk-go API endpoint.
 	 *
 	 * 自分のバックエンド側は `plugin/<name>/<path>` で呼べる。
 	 * 認証は利用者のセッションがそのまま使われる。
 	 */
-	api<T = unknown>(endpoint: string, params?: Record<string, unknown>): Promise<T>;
+	api<T = unknown>(endpoint: string, params?: Record<string, unknown>, options?: { signal?: AbortSignal }): Promise<T>;
 };
 
 export type PluginDefinition = {
@@ -247,6 +294,47 @@ export type Registration = { plugin: string; renderer: SlotRenderer };
 export type PageRegistration = PluginPage & { plugin: string; fullPath: string };
 
 const registry = new Map<SlotName, Registration[]>();
+const previewRegistry = new Map<string, PreviewRegistration>();
+
+function registerPreviewProvider<T>(plugin: string, provider: PreviewProvider<T>): void {
+	if (provider.id.length === 0 || provider.id.includes(':')) {
+		throw new Error(`Invalid preview provider ID: ${provider.id}`);
+	}
+
+	const id = `${plugin}:${provider.id}`;
+	if (previewRegistry.has(id)) {
+		throw new Error(`Preview provider is already registered: ${id}`);
+	}
+
+	previewRegistry.set(id, {
+		id,
+		plugin,
+		provider: provider as PreviewProvider,
+	});
+}
+
+/** Resolves one deterministic winner without performing provider I/O. */
+export function resolvePreviewProvider(input: PreviewInput): PreviewRegistration | null {
+	const matches: PreviewRegistration[] = [];
+	for (const registration of previewRegistry.values()) {
+		try {
+			if (registration.provider.match(input)) matches.push(registration);
+		} catch (err) {
+			if (_DEV_) console.warn(`[preview:${registration.id}] matcher failed`, err);
+		}
+	}
+
+	matches.sort((a, b) => {
+		const priority = (b.provider.priority ?? 0) - (a.provider.priority ?? 0);
+		return priority !== 0 ? priority : a.id.localeCompare(b.id);
+	});
+
+	if (matches.length > 1) {
+		if (_DEV_) console.warn(`[preview] multiple providers matched; selected ${matches[0].id}; candidates: ${matches.map(match => match.id).join(', ')}`);
+	}
+
+	return matches[0] ?? null;
+}
 
 /**
  * Collects the pages declared by the given plugins.
@@ -285,6 +373,11 @@ function buildHost(name: string): PluginHost {
 	return {
 		name,
 		me: toSlotUser($i),
+		preview: {
+			register(provider) {
+				registerPreviewProvider(name, provider);
+			},
+		},
 		slot(slotName, renderer) {
 			const list = registry.get(slotName) ?? [];
 			list.push({ plugin: name, renderer });
@@ -293,10 +386,10 @@ function buildHost(name: string): PluginHost {
 			list.sort((a, b) => a.plugin.localeCompare(b.plugin));
 			registry.set(slotName, list);
 		},
-		api(endpoint, params) {
+		api(endpoint, params, options) {
 			// misskeyApi の型は既知のエンドポイント集合に閉じているが、
 			// プラグインのエンドポイントはそこに無い。ここで境界を吸収する。
-			return misskeyApi(endpoint as never, (params ?? {}) as never) as never;
+			return misskeyApi(endpoint as never, (params ?? {}) as never, undefined, options?.signal) as never;
 		},
 	};
 }
@@ -320,4 +413,9 @@ export async function launchServerPlugins(plugins: PluginDefinition[]): Promise<
 /** Test hook: clears registered slots. */
 export function _resetSlotsForTest(): void {
 	registry.clear();
+}
+
+/** Test hook: clears registered preview providers. */
+export function _resetPreviewsForTest(): void {
+	previewRegistry.clear();
 }
