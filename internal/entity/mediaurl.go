@@ -311,7 +311,12 @@ func (c *MediaURLContext) ownMediaHost() string {
 // (GPS) が公開側に出る**。mk-go はここが `f.URL` 固定だった。
 // 所有者自身に見せる URL は `GetSelfURL`。
 func (c *MediaURLContext) GetPublicURL(f *model.DriveFile, mode proxyMode) string {
-	f = wellFormedRemoteFile(f)
+	return c.checkedPublicURL(wellFormedRemoteFile(f), mode)
+}
+
+// checkedPublicURL is GetPublicURL for a file already passed through
+// wellFormedRemoteFile.
+func (c *MediaURLContext) checkedPublicURL(f *model.DriveFile, mode proxyMode) string {
 	return c.publicURL(f, mode, WebpublicOrOriginalURL(f))
 }
 
@@ -325,7 +330,12 @@ func (c *MediaURLContext) GetPublicURL(f *model.DriveFile, mode proxyMode) strin
 // remote origin を proxy 経由にする点だけは upstream と違う (moderator の IP
 // 保護、#1529 / #1948-14 で文書化済み)。
 func (c *MediaURLContext) GetSelfURL(f *model.DriveFile, mode proxyMode) string {
-	f = wellFormedRemoteFile(f)
+	return c.checkedSelfURL(wellFormedRemoteFile(f), mode)
+}
+
+// checkedSelfURL is GetSelfURL for a file already passed through
+// wellFormedRemoteFile.
+func (c *MediaURLContext) checkedSelfURL(f *model.DriveFile, mode proxyMode) string {
 	return c.publicURL(f, mode, f.URL)
 }
 
@@ -411,7 +421,12 @@ func (c *MediaURLContext) publicURL(f *model.DriveFile, mode proxyMode, base str
 // origin. For mk-go link-format remote files webpublicUrl is nil, so this is a
 // no-op there; it only matters if a remote webpublic ever gets stored.
 func (c *MediaURLContext) GetWebpublicURL(f *model.DriveFile) *string {
-	f = wellFormedRemoteFile(f)
+	return c.checkedWebpublicURL(wellFormedRemoteFile(f))
+}
+
+// checkedWebpublicURL is GetWebpublicURL for a file already passed through
+// wellFormedRemoteFile.
+func (c *MediaURLContext) checkedWebpublicURL(f *model.DriveFile) *string {
 	if c == nil || f.WebpublicURL == nil || *f.WebpublicURL == "" {
 		return f.WebpublicURL
 	}
@@ -432,7 +447,12 @@ func (c *MediaURLContext) GetWebpublicURL(f *model.DriveFile) *string {
 // wraps the result through the proxy when it is a remote origin. A nil receiver
 // returns the raw fallback (pre-#1529 behavior).
 func (c *MediaURLContext) GetThumbnailURL(f *model.DriveFile) *string {
-	f = wellFormedRemoteFile(f)
+	return c.checkedThumbnailURL(wellFormedRemoteFile(f))
+}
+
+// checkedThumbnailURL is GetThumbnailURL for a file already passed through
+// wellFormedRemoteFile.
+func (c *MediaURLContext) checkedThumbnailURL(f *model.DriveFile) *string {
 	if c == nil {
 		return resolveThumbnailURL(f)
 	}
