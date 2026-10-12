@@ -418,7 +418,11 @@ func (m *Manager) prepare(ctx context.Context, rec *Record, work func(context.Co
 	if serr != nil {
 		m.log.Error("backup: cannot record the end of a restore", "opId", rec.OpID, "err", serr)
 	}
-	m.journal(ctx, rec.OpID, final, "%v", err)
+	if rec.Kind == KindRollback {
+		m.journal(ctx, rec.OpID, final, "%v; %s", err, targetFate(rec))
+	} else {
+		m.journal(ctx, rec.OpID, final, "%v", err)
+	}
 	m.finishLive(rec.OpID)
 }
 
@@ -472,7 +476,8 @@ func (m *Manager) waitConfirmation(ctx context.Context, rec *Record, live *liveO
 // 消さない)。
 func (m *Manager) dropTarget(ctx context.Context, rec *Record) {
 	if rec.Kind == KindRollback {
-		m.journal(ctx, rec.OpID, "", "kept %s as it is", rec.Target)
+		// 戻す先をどうしたかは、呼び出し元が最後の行に targetFate で書く (ここでも
+		// 書くと、同じ行が2つ並ぶ)。
 		return
 	}
 	if keptName(rec.Target, rec.Database) || keptName(rec.Target, m.o.Database) {
