@@ -2,9 +2,18 @@ package restoreop
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/elythia-network/elythia/internal/backup"
 )
+
+// ErrKept wraps the refusals of a rollback that are about the kept
+// database itself (its connections, privileges and migrations).
+//
+// 同じ印 (backup.ErrRestoreMigrationTooNew など) はリストアの世代の確認も返すので、
+// 応答の形をロールバックの理由に変えるのは、この印が付いたときだけにする。
+var ErrKept = errors.New("restoreop: the kept database cannot be rolled back to")
 
 // RollbackRequest asks to swap a kept database back in (#3463 (6d)).
 type RollbackRequest struct {
@@ -94,11 +103,11 @@ func (m *Manager) rollbackChecks(ctx context.Context, req RollbackRequest) (*Rec
 		return nil, "", nil, ErrNoSuchKept
 	}
 	if err := m.o.DB.CheckRollback(ctx, m.o.MaintenanceDB, m.o.Database, req.Database, before); err != nil {
-		return nil, "", nil, err
+		return nil, "", nil, fmt.Errorf("%w: %w", ErrKept, err)
 	}
 	migrations, err := m.o.DB.CheckDatabaseMigrations(ctx, req.Database)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, "", nil, fmt.Errorf("%w: %w", ErrKept, err)
 	}
 	ticket, ticketHash := newTicket()
 	now := m.now()

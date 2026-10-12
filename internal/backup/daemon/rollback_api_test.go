@@ -182,14 +182,28 @@ func TestRollbackErrorMapping(t *testing.T) {
 	}{
 		{restoreop.ErrInvalidKept, http.StatusBadRequest, "NO_SUCH_KEPT_DATABASE"},
 		{restoreop.ErrNoSuchKept, http.StatusBadRequest, "NO_SUCH_KEPT_DATABASE"},
-		{backup.ErrRestoreConnections, http.StatusConflict, "KEPT_DATABASE_IN_USE"},
-		{backup.ErrRestoreMigrationTooNew, http.StatusBadRequest, "KEPT_DATABASE_TOO_NEW"},
-		{backup.ErrRestoreMigrationDirty, http.StatusBadRequest, "KEPT_DATABASE_DIRTY"},
-		{backup.ErrRestoreNotElythia, http.StatusBadRequest, "KEPT_DATABASE_NOT_ELYTHIA"},
+		{fmt.Errorf("%w: %w", restoreop.ErrKept, backup.ErrRestoreConnections), http.StatusConflict, "KEPT_DATABASE_IN_USE"},
+		{fmt.Errorf("%w: %w", restoreop.ErrKept, backup.ErrRestoreMigrationTooNew), http.StatusBadRequest, "KEPT_DATABASE_TOO_NEW"},
+		{fmt.Errorf("%w: %w", restoreop.ErrKept, backup.ErrRestoreMigrationDirty), http.StatusBadRequest, "KEPT_DATABASE_DIRTY"},
+		{fmt.Errorf("%w: %w", restoreop.ErrKept, backup.ErrRestoreNotElythia), http.StatusBadRequest, "KEPT_DATABASE_NOT_ELYTHIA"},
 	} {
 		w := httptest.NewRecorder()
 		restoreError(w, discardLogger(), c.err)
 		assert.Equal(t, c.status, w.Code, c.code)
 		assert.Contains(t, w.Body.String(), `"code":"`+c.code+`"`)
+	}
+}
+
+// TestRestoreAPI_MigrationRefusalsStayRestoreErrors checks that a restore of
+// a generation whose migrations are too new or dirty still answers
+// RESTORE_PREPARE_FAILED: the same sentinels mean the kept database only for
+// a rollback.
+func TestRestoreAPI_MigrationRefusalsStayRestoreErrors(t *testing.T) {
+	r := newAPIRig(t)
+	for _, sentinel := range []error{backup.ErrRestoreMigrationTooNew, backup.ErrRestoreMigrationDirty, backup.ErrRestoreNotElythia, backup.ErrRestoreConnections} {
+		r.db.loadErr = fmt.Errorf("backup: %w: schema_migrations", sentinel)
+		rec, out := r.post(t, "/restore/prepare", auth(map[string]any{"id": "20261010T120000Z"}))
+		assert.Equal(t, http.StatusBadRequest, rec.Code, sentinel)
+		assert.Equal(t, "RESTORE_PREPARE_FAILED", errCode(out), sentinel)
 	}
 }
