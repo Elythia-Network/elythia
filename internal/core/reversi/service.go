@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/misc/remoteurl"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/redis/go-redis/v9"
@@ -1044,6 +1045,10 @@ func packGame(game *model.ReversiGame) map[string]any {
 // フィールドは省略)。avatar が空なら identicon URL を返すのは本家互換。
 func userLiteMap(u *model.User) map[string]any {
 	avatarURL := u.AvatarURL
+	// リモートの人の、プロキシで包めない形の avatarUrl は使わない (entity.IdenticonURL と同じ)。
+	if avatarURL != nil && u.Host != nil && *u.Host != "" && !remoteurl.WellFormedMedia(*avatarURL) {
+		avatarURL = nil
+	}
 	if avatarURL == nil || *avatarURL == "" {
 		host := ""
 		if u.Host != nil {

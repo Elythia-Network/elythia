@@ -195,6 +195,24 @@ func TestResolveActor_NewUserIngestsIconBanner(t *testing.T) {
 	assert.Equal(t, "https://remote.example/banner.png", *user.BannerURL)
 }
 
+// プロキシで包めない形の icon / image の URL は取り込まない。
+func TestResolveActor_NewUserDropsMalformedIconBanner(t *testing.T) {
+	body := `{ "@context": "https://www.w3.org/ns/activitystreams",
+		"id": "https://remote.example/users/alice",
+		"type": "Person",
+		"preferredUsername": "alice",
+		"inbox": "https://remote.example/users/alice/inbox",
+		"icon": {"type": "Image", "url": "/avatar.png"},
+		"image": {"type": "Image", "url": "https://remote.example/banner).png"},
+		"publicKey": {"publicKeyPem": "FAKE"}
+	}`
+	r, _ := newResolver(t, body, nil)
+	user, err := r.ResolveActor("https://remote.example/users/alice")
+	require.NoError(t, err)
+	assert.Nil(t, user.AvatarURL)
+	assert.Nil(t, user.BannerURL)
+}
+
 func TestResolveActor_NewUserIngestsManuallyApproves(t *testing.T) {
 	// actor.manuallyApprovesFollowers が true のリモートアカウントは
 	// IsLocked=true で保存する (follow 時に FollowRequest 経路に入るように
