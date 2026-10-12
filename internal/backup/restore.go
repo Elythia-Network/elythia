@@ -63,6 +63,12 @@ var (
 	// returned before it created the database: the caller must not drop a
 	// database of that name, which may be another one's.
 	ErrRestoreNotCreated = errors.New("backup: the database was not created")
+	// ErrRestoreMigrationDirty is returned for a migration table left dirty
+	// (a migration stopped in the middle).
+	ErrRestoreMigrationDirty = errors.New("backup: a migration table is dirty")
+	// ErrRestoreNotElythia is returned for a database without the core
+	// migration table.
+	ErrRestoreNotElythia = errors.New("backup: the database has no Elythia migration table")
 )
 
 // isDuplicateDatabase reports whether err is PostgreSQL's duplicate_database.
@@ -996,47 +1002,135 @@ func (r *Restorer) readMeta(ctx context.Context, id string) (Meta, error) {
 // (golang-migrate は知らない番号で止まる)。戻す前に、取った版以上のバイナリへ
 // 上げてもらう。dirty の管理表も、migration の途中で取ったものなので戻さない。
 func (r *Restorer) checkMigrations(m Meta) error {
+	b, err := r.bundledMigrations()
+	if err != nil {
+		return err
+	}
+	_, err = b.compare(m.Migrations, "meta.json",
+		func(s MigrationState) error {
+			return fmt.Errorf("%w: %s was dirty (version %d) when the backup was taken", ErrRestoreMigrationDirty, s.Table, s.Version)
+		},
+		func(s MigrationState, latest uint) error {
+			return fmt.Errorf("%w: %s is at %d in the backup (taken by Elythia %s) but this binary ships up to %d; use a binary at least as new as the backup",
+				ErrRestoreMigrationTooNew, s.Table, s.Version, m.ElythiaVersion, latest)
+		})
+	return err
+}
+
+// bundled is the newest bundled migration of each track.
+type bundled struct {
+	core, local uint
+	localCount  int
+}
+
+// bundledMigrations reads the bundled migrations of both tracks.
+func (r *Restorer) bundledMigrations() (bundled, error) {
 	core, _, err := latestMigration(r.CoreMigrationsDir)
 	if err != nil {
-		return err
+		return bundled{}, err
 	}
 	if core == 0 {
-		return fmt.Errorf("backup: no migrations found in %q (run from the directory that has migration/)", r.CoreMigrationsDir)
+		return bundled{}, fmt.Errorf("backup: no migrations found in %q (run from the directory that has migration/)", r.CoreMigrationsDir)
 	}
-	local, _, err := latestMigration(r.LocalMigrationsDir)
+	local, n, err := latestMigration(r.LocalMigrationsDir)
 	if err != nil {
-		return err
+		return bundled{}, err
 	}
-	for _, s := range m.Migrations {
-		if s.Missing {
-			continue
-		}
-		var bundled uint
+	return bundled{core: core, local: local, localCount: n}, nil
+}
+
+// compare checks states (read from source) against the bundled migrations:
+// a dirty table or one ahead of the bundled migrations stops, through dirty
+// and tooNew, which word the error for where the states come from. It
+// reports whether a table is behind, so that Migrate has something to
+// apply. A missing table is skipped, and counts as behind when its track
+// has bundled migrations.
+func (b bundled) compare(states []MigrationState, source string, dirty func(MigrationState) error, tooNew func(MigrationState, uint) error) (behind bool, err error) {
+	for _, s := range states {
+		var latest uint
+		var count int
 		switch s.Table {
 		case CoreMigrationsTable:
-			bundled = core
+			latest, count = b.core, 1
 		case LocalMigrationsTable:
-			bundled = local
+			latest, count = b.local, b.localCount
 		default:
-			return fmt.Errorf("backup: meta.json has an unknown migration table %q", s.Table)
+			return false, fmt.Errorf("backup: %s has an unknown migration table %q", source, s.Table)
+		}
+		if s.Missing {
+			behind = behind || count > 0
+			continue
 		}
 		if s.Dirty {
-			return fmt.Errorf("backup: %s was dirty (version %d) when the backup was taken", s.Table, s.Version)
+			return false, dirty(s)
 		}
 		// 管理表はあるが行が無い (NilMigrationVersion) のは、migration を 1 つも当てて
-		// いない DB。戻した後の Migrate で全部を当てるので、止めない。
+		// いない DB。Migrate で全部を当てるので、止めない。
 		if s.Version == NilMigrationVersion {
+			behind = behind || count > 0
 			continue
 		}
 		if s.Version < 0 {
-			return fmt.Errorf("backup: meta.json has an invalid version %d for %s", s.Version, s.Table)
+			return false, fmt.Errorf("backup: %s has an invalid version %d for %s", source, s.Version, s.Table)
 		}
-		if uint(s.Version) > bundled {
-			return fmt.Errorf("%w: %s is at %d in the backup (taken by Elythia %s) but this binary ships up to %d; use a binary at least as new as the backup",
-				ErrRestoreMigrationTooNew, s.Table, s.Version, m.ElythiaVersion, bundled)
+		if uint(s.Version) > latest {
+			return false, tooNew(s, latest)
+		}
+		behind = behind || uint(s.Version) < latest
+	}
+	return behind, nil
+}
+
+// DatabaseMigrations is the state of the migration tables of a database,
+// compared with the bundled migrations (CheckDatabaseMigrations).
+type DatabaseMigrations struct {
+	States []MigrationState `json:"states"`
+	// NeedsMigration is true when a table is behind the bundled migrations:
+	// Migrate has something to apply.
+	NeedsMigration bool `json:"needsMigration"`
+}
+
+// CheckDatabaseMigrations reads both migration tables of dbname (the core
+// schema_migrations and the fork's schema_migrations_local) and checks them
+// against the bundled migrations: a dirty table stops with
+// ErrRestoreMigrationDirty, a table ahead of the bundled migrations with
+// ErrRestoreMigrationTooNew, and a database without the core table with
+// ErrRestoreNotElythia. The returned state is set whenever the tables could
+// be read, also with those errors.
+//
+// 退避した DB へ戻すロールバック (#3463 (6d)) が、戻す前に使う。戻した後に
+// 再開するプロセスは migrate を流さないので、古い DB には入れ替える前に Migrate を
+// 当て、新しい DB と dirty の DB は戻さない。
+func (r *Restorer) CheckDatabaseMigrations(ctx context.Context, dbname string) (*DatabaseMigrations, error) {
+	b, err := r.bundledMigrations()
+	if err != nil {
+		return nil, err
+	}
+	conn, err := r.connect(ctx, dbname)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close(context.Background())
+	states, err := ReadMigrations(ctx, conn)
+	if err != nil {
+		return nil, err
+	}
+	out := &DatabaseMigrations{States: states}
+	for _, s := range states {
+		if s.Table == CoreMigrationsTable && s.Missing {
+			return out, fmt.Errorf("%w: %q has no %s", ErrRestoreNotElythia, dbname, CoreMigrationsTable)
 		}
 	}
-	return nil
+	out.NeedsMigration, err = b.compare(states, fmt.Sprintf("database %q", dbname),
+		func(s MigrationState) error {
+			return fmt.Errorf("%w: %s of %q is dirty (version %d); a migration stopped in the middle, so fix it with elythia migrate first",
+				ErrRestoreMigrationDirty, s.Table, dbname, s.Version)
+		},
+		func(s MigrationState, latest uint) error {
+			return fmt.Errorf("%w: %s of %q is at %d but this binary ships up to %d; use a binary at least as new as that database",
+				ErrRestoreMigrationTooNew, s.Table, dbname, s.Version, latest)
+		})
+	return out, err
 }
 
 // latestMigration returns the highest up migration version in dir and the

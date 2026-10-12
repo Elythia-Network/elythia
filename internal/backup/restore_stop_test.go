@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	gomigrate "github.com/golang-migrate/migrate/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -149,6 +151,68 @@ func TestRestoreStopConditions(t *testing.T) {
 		_, err = super.Load(ctx, atBundled)
 		require.NoError(t, err)
 		noLeftovers(t)
+	})
+
+	// 退避した DB へ戻す前の版の確認 (#3463 (6d))。2 つの系列を DB から読む。
+	t.Run("migrations of a kept database", func(t *testing.T) {
+		bundled, count, err := latestMigration(rsCoreMigrations)
+		require.NoError(t, err)
+		kept := func(t *testing.T, name string, steps int, sqls ...string) {
+			t.Helper()
+			pg.exec(t, "postgres", "CREATE DATABASE "+name+" OWNER "+rsAppUser)
+			t.Cleanup(func() { pg.exec(t, "postgres", "DROP DATABASE IF EXISTS "+name+" WITH (FORCE)") })
+			if steps > 0 {
+				m, err := gomigrate.New("file://"+rsCoreMigrations, pg.url("pgx5", rsAppUser, rsAppPass, name))
+				require.NoError(t, err)
+				require.NoError(t, m.Steps(steps))
+				_, _ = m.Close()
+			}
+			if len(sqls) > 0 {
+				pg.exec(t, name, sqls...)
+			}
+		}
+		r := pg.restorer(storage, rsAppUser, rsAppPass)
+
+		dm, err := r.CheckDatabaseMigrations(ctx, rsAppDB)
+		require.NoError(t, err)
+		assert.False(t, dm.NeedsMigration, "the current database is at the bundled version")
+		require.Len(t, dm.States, 2)
+		assert.Equal(t, MigrationState{Table: CoreMigrationsTable, Version: int64(bundled)}, dm.States[0])
+		assert.Equal(t, MigrationState{Table: LocalMigrationsTable, Missing: true}, dm.States[1])
+
+		kept(t, "kept_older", count-1)
+		dm, err = r.CheckDatabaseMigrations(ctx, "kept_older")
+		require.NoError(t, err)
+		assert.True(t, dm.NeedsMigration)
+
+		kept(t, "kept_newer", count, fmt.Sprintf(`UPDATE schema_migrations SET version = %d`, bundled+1))
+		dm, err = r.CheckDatabaseMigrations(ctx, "kept_newer")
+		require.ErrorIs(t, err, ErrRestoreMigrationTooNew)
+		assert.Contains(t, err.Error(), `"kept_newer"`)
+		require.NotNil(t, dm, "the state is returned with the refusal")
+		assert.Equal(t, int64(bundled)+1, dm.States[0].Version)
+
+		kept(t, "kept_dirty", count, `UPDATE schema_migrations SET dirty = true`)
+		_, err = r.CheckDatabaseMigrations(ctx, "kept_dirty")
+		require.ErrorIs(t, err, ErrRestoreMigrationDirty)
+
+		// fork の系列も見る。同梱に fork の migration が無いのに管理表が進んでいる。
+		kept(t, "kept_local_newer", count,
+			`CREATE TABLE schema_migrations_local (version bigint NOT NULL PRIMARY KEY, dirty boolean NOT NULL)`,
+			`INSERT INTO schema_migrations_local VALUES (900001, false)`,
+			`ALTER TABLE schema_migrations_local OWNER TO `+rsAppUser)
+		_, err = r.CheckDatabaseMigrations(ctx, "kept_local_newer")
+		require.ErrorIs(t, err, ErrRestoreMigrationTooNew)
+		assert.Contains(t, err.Error(), LocalMigrationsTable)
+
+		kept(t, "kept_not_elythia", 0)
+		_, err = r.CheckDatabaseMigrations(ctx, "kept_not_elythia")
+		require.ErrorIs(t, err, ErrRestoreNotElythia)
+
+		_, err = r.CheckDatabaseMigrations(ctx, "kept_missing")
+		require.Error(t, err)
+		_, err = (&Restorer{Conn: r.Conn}).CheckDatabaseMigrations(ctx, rsAppDB)
+		assert.ErrorContains(t, err, "no migrations found")
 	})
 
 	t.Run("no privilege to create databases", func(t *testing.T) {
