@@ -74,6 +74,30 @@ func TestForwarder_Relays(t *testing.T) {
 	assert.Equal(t, "bodytoken0000001", (*seen)[2].body["i"])
 }
 
+// TestForwarder_CandidatesSendsOnlyTheSession checks that the listing of
+// the kept databases, re-authenticated by the server, does not carry the
+// password and the code to the backup service.
+func TestForwarder_CandidatesSendsOnlyTheSession(t *testing.T) {
+	srv, seen := fakeService(t, http.StatusOK, `{"database":"app","databases":[]}`, nil)
+	f := NewForwarder(srv.URL, "svc", nil)
+	rec := forward(f, "candidates", `{"password":"pw","token":"123456","credential":{"id":"x"}}`,
+		map[string]string{"Authorization": "Bearer usertoken0000001"})
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.JSONEq(t, `{"database":"app","databases":[]}`, rec.Body.String())
+	require.Len(t, *seen, 1)
+	assert.Equal(t, "/restore/candidates", (*seen)[0].path)
+	assert.Equal(t, map[string]any{"i": "usertoken0000001"}, (*seen)[0].body)
+
+	forward(f, "candidates", `{"password":"pw"}`, nil)
+	assert.Equal(t, map[string]any{}, (*seen)[1].body, "no session, nothing else either")
+
+	// 準備は種類と名前をそのまま渡す。
+	forward(f, "prepare", `{"kind":"rollback","database":"app_before_restore_20261001000000","password":"pw","token":"123456"}`, nil)
+	assert.Equal(t, "rollback", (*seen)[2].body["kind"])
+	assert.Equal(t, "app_before_restore_20261001000000", (*seen)[2].body["database"])
+	assert.Equal(t, "pw", (*seen)[2].body["password"])
+}
+
 func TestForwarder_RelaysEmptyAndErrorResponses(t *testing.T) {
 	srv, _ := fakeService(t, http.StatusNoContent, "", nil)
 	rec := forward(NewForwarder(srv.URL, "svc", nil), "confirm", `{}`, nil)

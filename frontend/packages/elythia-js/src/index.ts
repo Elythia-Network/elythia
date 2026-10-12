@@ -17,6 +17,8 @@ export type {
 	BackupGeneration,
 	BackupJob,
 	BackupJobResult,
+	BackupKeptDatabase,
+	BackupKeptDatabases,
 	BackupMigrationState,
 	BackupOverview,
 	BackupReauth,
