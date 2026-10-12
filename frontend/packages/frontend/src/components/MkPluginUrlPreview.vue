@@ -96,7 +96,7 @@ const loadedData = ref<unknown>(null);
 const renderFailed = ref(false);
 let controller: AbortController | null = null;
 let loadGeneration = 0;
-let loadedKey = '';
+let settledKey = '';
 
 function loadKey(): string {
 	return [registration.value?.id ?? '', props.url, props.source?.noteId ?? '', props.detail ? 'detail' : 'timeline'].join('\u0000');
@@ -112,8 +112,13 @@ function resetLoad(): void {
 	abortLoad();
 	loadState.value = 'idle';
 	loadedData.value = null;
-	loadedKey = '';
+	settledKey = '';
 	renderFailed.value = false;
+}
+
+function ownsSettledState(key: string): boolean {
+	return (loadState.value === 'ready' || loadState.value === 'error') &&
+		settledKey === key && props.revealed && props.source != null;
 }
 
 watch(
@@ -127,12 +132,11 @@ watch(
 			// to this note until an ownership key changes, the CW closes, or the
 			// coordinator unmounts. Keep it mounted so returning to the tab or a
 			// KeepAlive view does not trigger another provider request.
-			if (selected != null && loadState.value === 'ready' && loadedKey === nextKey &&
-				props.revealed && props.source != null) return;
+			if (selected != null && ownsSettledState(nextKey)) return;
 			resetLoad();
 			return;
 		}
-		if (loadState.value === 'ready' && loadedKey === nextKey) return;
+		if (ownsSettledState(nextKey)) return;
 		resetLoad();
 
 		const currentGeneration = loadGeneration;
@@ -144,11 +148,12 @@ watch(
 			if (currentController.signal.aborted || currentGeneration !== loadGeneration) return;
 			controller = null;
 			loadedData.value = data;
-			loadedKey = nextKey;
+			settledKey = nextKey;
 			loadState.value = 'ready';
 		}, err => {
 			if (currentController.signal.aborted || currentGeneration !== loadGeneration) return;
 			controller = null;
+			settledKey = nextKey;
 			loadState.value = 'error';
 			console.warn(`[preview:${selected.id}] load failed`, err);
 		});
@@ -191,6 +196,7 @@ onErrorCaptured((err) => {
 	if (registration.value == null || (loadState.value !== 'loading' && loadState.value !== 'ready')) return;
 	console.error(`[preview:${registration.value.id}] render failed`, err);
 	abortLoad();
+	settledKey = loadKey();
 	loadState.value = 'error';
 	renderFailed.value = true;
 	return false;
