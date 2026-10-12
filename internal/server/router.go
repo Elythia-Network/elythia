@@ -3331,6 +3331,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// 5. Reversi WebSocket channel (Phase 9.6) を登録する
 	reversiService := corereversi.NewService(reversiRepo, reversiPublisher, s.redis.Default)
+	// stream で配る対局の UserLite も、API と同じくリモートのアイコンをメディア
+	// プロキシに通す。配線しないとリモートの人は identicon になる。
+	reversiService.SetAvatarURLFunc(entity.IdenticonURL)
 	streamRegistry.Register("reversiGame", channels.NewReversiGameFactory(reversiService).New)
 	streamRegistry.RegisterCredentialed("reversi", channels.NewReversi)
 

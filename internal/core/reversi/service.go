@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/elythia-network/elythia/internal/misc/remoteurl"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/redis/go-redis/v9"
@@ -187,6 +186,9 @@ type Service struct {
 	deliverer FederationDeliverer
 	userRepo  UserLookup
 	baseURL   string
+	// stream で配る UserLite の avatarUrl を決める関数。core は entity を import
+	// できないので、メディアプロキシを通す entity.IdenticonURL を server から渡す。
+	avatarURL func(*model.User) string
 }
 
 // NewService constructs a Service with the required dependencies.
@@ -215,6 +217,30 @@ func (s *Service) SetFederationDeliverer(d FederationDeliverer) {
 // actor / opponent Host / URI。
 func (s *Service) SetUserRepo(r UserLookup) {
 	s.userRepo = r
+}
+
+// SetAvatarURLFunc sets the function that resolves the avatarUrl of the
+// UserLite maps embedded in stream events. Without it, remote users get their
+// identicon URL and local users keep their stored avatarUrl.
+func (s *Service) SetAvatarURLFunc(f func(*model.User) string) {
+	s.avatarURL = f
+}
+
+// fallbackAvatarURL is the avatarUrl used when SetAvatarURLFunc was not called.
+//
+// リモートの人の avatarUrl は相手のサーバーを指す。プロキシを通さずに返すと、
+// 対局を見ている人のブラウザが相手のサーバーへ直接取りに行くので、配線されて
+// いないときは identicon にする。avatar が空なら identicon URL を返すのは本家互換。
+func fallbackAvatarURL(u *model.User) string {
+	remote := u.Host != nil && *u.Host != ""
+	if !remote && u.AvatarURL != nil && *u.AvatarURL != "" {
+		return *u.AvatarURL
+	}
+	host := ""
+	if remote {
+		host = "@" + *u.Host
+	}
+	return "/identicon/" + u.Username + host
 }
 
 // SetBaseURL records the local instance base URL (https://<host>) used to
@@ -532,7 +558,7 @@ func (s *Service) StartGame(ctx context.Context, game *model.ReversiGame) error 
 	}
 	// 初期ターンタイマー: logsCount=0 (まだ一手も置かれていない)
 	s.setTurnTimer(ctx, game.ID, 0, game.TimeLimitForEachTurn)
-	s.publish(game.ID, "started", map[string]any{"game": packGame(game)})
+	s.publish(game.ID, "started", map[string]any{"game": s.packGame(game)})
 	return nil
 }
 
@@ -647,7 +673,7 @@ func (s *Service) PutStone(ctx context.Context, gameID, userID string, pos int, 
 	if engine.Turn == nil {
 		s.publish(gameID, "ended", map[string]any{
 			"winnerId": game.WinnerID,
-			"game":     packGame(game),
+			"game":     s.packGame(game),
 		})
 	}
 	// 連合対戦の場合は putstone Update を相手に配信 (#417 P1)。ゲーム終了
@@ -711,7 +737,7 @@ func (s *Service) Surrender(ctx context.Context, gameID, userID string) error {
 	s.publish(gameID, "ended", map[string]any{
 		"winnerId": winnerID,
 		"reason":   "surrender",
-		"game":     packGame(game),
+		"game":     s.packGame(game),
 	})
 	// 連合対戦の場合は Leave を相手に配信 (#417 P1)。配信後に fedCache を
 	// 片付ける (session mapping 参照が Leave 配信側に必要)。
@@ -766,7 +792,7 @@ func (s *Service) CheckTimeout(ctx context.Context, gameID string) error {
 	s.publish(gameID, "ended", map[string]any{
 		"winnerId": winnerID,
 		"reason":   "timeout",
-		"game":     packGame(game),
+		"game":     s.packGame(game),
 	})
 	s.cleanupFedCache(ctx, gameID)
 	return nil
@@ -991,7 +1017,7 @@ func EngineFromGame(game *model.ReversiGame) (*Game, error) {
 // packGame is a minimal JSON projection used by event bodies. 詳細ペイロード
 // は api ハンドラ側の packGame を使うため、ここでは stream 配信に必要な最小の
 // フィールドのみ含める。
-func packGame(game *model.ReversiGame) map[string]any {
+func (s *Service) packGame(game *model.ReversiGame) map[string]any {
 	out := map[string]any{
 		"id":                   game.ID,
 		"user1Id":              game.User1ID,
@@ -1020,10 +1046,10 @@ func packGame(game *model.ReversiGame) map[string]any {
 	// キー省略。entity パッケージに依存せず最小限のフィールドだけ手で組み
 	// 立てる (#417 のレビューでこの形にした)。
 	if game.User1 != nil {
-		out["user1"] = userLiteMap(game.User1)
+		out["user1"] = s.userLiteMap(game.User1)
 	}
 	if game.User2 != nil {
-		out["user2"] = userLiteMap(game.User2)
+		out["user2"] = s.userLiteMap(game.User2)
 	}
 	// winner は upstream Misskey TS の ReversiGameEntityService.packDetail と
 	// 同じく winnerId から派生させて UserLite として埋める。frontend
@@ -1031,9 +1057,9 @@ func packGame(game *model.ReversiGame) map[string]any {
 	// winnerId だけでは draw に倒れて #649 の症状になる。
 	if game.WinnerID != nil {
 		if game.User1 != nil && game.User1.ID == *game.WinnerID {
-			out["winner"] = userLiteMap(game.User1)
+			out["winner"] = s.userLiteMap(game.User1)
 		} else if game.User2 != nil && game.User2.ID == *game.WinnerID {
-			out["winner"] = userLiteMap(game.User2)
+			out["winner"] = s.userLiteMap(game.User2)
 		}
 	}
 	return out
@@ -1042,31 +1068,20 @@ func packGame(game *model.ReversiGame) map[string]any {
 // userLiteMap builds a UserLite-compatible map without importing the
 // entity package (core layer must not depend on presentation layer).
 // フィールドは entity.PackUserLite の必須部分のみ (optional な TS 互換
-// フィールドは省略)。avatar が空なら identicon URL を返すのは本家互換。
-func userLiteMap(u *model.User) map[string]any {
-	avatarURL := u.AvatarURL
-	// リモートの人の、形の崩れた avatarUrl は使わず identicon にする。
-	if avatarURL != nil && u.Host != nil && *u.Host != "" {
-		if clean, ok := remoteurl.Media(*avatarURL); ok {
-			avatarURL = &clean
-		} else {
-			avatarURL = nil
-		}
-	}
-	if avatarURL == nil || *avatarURL == "" {
-		host := ""
-		if u.Host != nil {
-			host = "@" + *u.Host
-		}
-		identicon := "/identicon/" + u.Username + host
-		avatarURL = &identicon
+// フィールドは省略)。avatarUrl は SetAvatarURLFunc で渡された関数で決める。
+func (s *Service) userLiteMap(u *model.User) map[string]any {
+	var avatarURL string
+	if s != nil && s.avatarURL != nil {
+		avatarURL = s.avatarURL(u)
+	} else {
+		avatarURL = fallbackAvatarURL(u)
 	}
 	return map[string]any{
 		"id":                u.ID,
 		"name":              u.Name,
 		"username":          u.Username,
 		"host":              u.Host,
-		"avatarUrl":         avatarURL,
+		"avatarUrl":         &avatarURL,
 		"avatarBlurhash":    u.AvatarBlurhash,
 		"avatarDecorations": u.AvatarDecorations,
 		"isBot":             u.IsBot,

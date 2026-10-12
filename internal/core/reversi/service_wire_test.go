@@ -587,7 +587,7 @@ func TestPackGame_EmbedsUserLiteMaps(t *testing.T) {
 		User1: &model.User{ID: "alice", Username: "alice", Name: &name, Host: &remoteHost},
 		User2: &model.User{ID: "bob", Username: "bob"},
 	}
-	out := packGame(g)
+	out := (&Service{}).packGame(g)
 	u1, ok := out["user1"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "alice", u1["id"])
@@ -616,7 +616,7 @@ func TestPackGame_WinnerField(t *testing.T) {
 			User1: user1, User2: user2,
 			WinnerID: &winnerID,
 		}
-		out := packGame(g)
+		out := (&Service{}).packGame(g)
 		w, ok := out["winner"].(map[string]any)
 		require.True(t, ok, "winner must be present")
 		assert.Equal(t, "alice", w["id"])
@@ -629,7 +629,7 @@ func TestPackGame_WinnerField(t *testing.T) {
 			User1: user1, User2: user2,
 			WinnerID: &bobID,
 		}
-		out := packGame(g)
+		out := (&Service{}).packGame(g)
 		w, ok := out["winner"].(map[string]any)
 		require.True(t, ok)
 		assert.Equal(t, "bob", w["id"])
@@ -640,7 +640,7 @@ func TestPackGame_WinnerField(t *testing.T) {
 			ID: "g1", User1ID: "alice", User2ID: "bob",
 			User1: user1, User2: user2,
 		}
-		out := packGame(g)
+		out := (&Service{}).packGame(g)
 		_, has := out["winner"]
 		assert.False(t, has, "winner must be omitted when WinnerID is nil")
 	})
@@ -652,7 +652,7 @@ func TestPackGame_WinnerField(t *testing.T) {
 			ID: "g1", User1ID: "alice", User2ID: "bob",
 			WinnerID: &winnerID,
 		}
-		out := packGame(g)
+		out := (&Service{}).packGame(g)
 		_, has := out["winner"]
 		assert.False(t, has)
 		assert.Equal(t, &winnerID, out["winnerId"])

@@ -61,18 +61,36 @@ func TestEffectsInLine_NullCell(t *testing.T) {
 	assert.Empty(t, effects) // null cellで打ち切り
 }
 
-// リモートの人の、プロキシで包めない形の avatarUrl は使わず identicon にする。
-func TestUserLiteMap_MalformedRemoteAvatar(t *testing.T) {
-	avatar := func(u *model.User) string { return *userLiteMap(u)["avatarUrl"].(*string) }
+// 配線されていないとき、リモートの人の avatarUrl は形にかかわらず使わず
+// identicon にする。プロキシを通さずに相手のサーバーの URL を配らないため。
+func TestUserLiteMap_UnwiredRemoteAvatarIsIdenticon(t *testing.T) {
+	avatar := func(u *model.User) string { return *(&Service{}).userLiteMap(u)["avatarUrl"].(*string) }
 	host := "remote.example"
-	for _, raw := range []string{"/a.png", "https:///remote.example/a.png"} {
+	for _, raw := range []string{"https://remote.example/a.png", "/a.png", "https:///remote.example/a.png", ""} {
 		u := &model.User{ID: "u1", Username: "bob", Host: &host, AvatarURL: &raw}
 		assert.Equal(t, "/identicon/bob@remote.example", avatar(u), raw)
 	}
-	ok := "https://remote.example/a.png"
-	assert.Equal(t, ok, avatar(&model.User{ID: "u1", Username: "bob", Host: &host, AvatarURL: &ok}))
-	paren := "https://remote.example/a (1).png"
-	assert.Equal(t, "https://remote.example/a%20%281%29.png", avatar(&model.User{ID: "u1", Username: "bob", Host: &host, AvatarURL: &paren}), "括弧と空白は符号化する")
+	assert.Equal(t, "/identicon/bob@remote.example", avatar(&model.User{ID: "u1", Username: "bob", Host: &host}))
 	local := "/files/a.png"
 	assert.Equal(t, local, avatar(&model.User{ID: "u2", Username: "alice", AvatarURL: &local}), "ローカルの人は変えない")
+	assert.Equal(t, "/identicon/alice", avatar(&model.User{ID: "u2", Username: "alice"}))
+}
+
+// 配線されていれば、stream で配る対局の UserLite の avatarUrl はその関数が決める。
+func TestPackGame_UsesWiredAvatarURLFunc(t *testing.T) {
+	host := "remote.example"
+	raw := "https://remote.example/a.png"
+	s := &Service{}
+	s.SetAvatarURLFunc(func(u *model.User) string { return "/proxy/avatar.webp?u=" + u.ID })
+	winner := "u1"
+	g := &model.ReversiGame{
+		ID: "g1", User1ID: "u1", User2ID: "u2", WinnerID: &winner,
+		User1: &model.User{ID: "u1", Username: "bob", Host: &host, AvatarURL: &raw},
+		User2: &model.User{ID: "u2", Username: "alice"},
+	}
+	out := s.packGame(g)
+	for _, key := range []string{"user1", "winner"} {
+		assert.Equal(t, "/proxy/avatar.webp?u=u1", *out[key].(map[string]any)["avatarUrl"].(*string), key)
+	}
+	assert.Equal(t, "/proxy/avatar.webp?u=u2", *out["user2"].(map[string]any)["avatarUrl"].(*string))
 }
