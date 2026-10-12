@@ -56,6 +56,9 @@ const (
 	modToken      = "tokmoder00000001"
 	no2faToken    = "tokno2fa00000001"
 	guardToken    = "tokguard00000001"
+	// late2faToken is an administrator who registers 2FA after the backup
+	// was taken (#3463 (6d)).
+	late2faToken = "toklate2fa000001"
 )
 
 // restoreE2E is the restore from the admin page wired to real servers: a
@@ -258,6 +261,8 @@ func TestRestoreFromAdminEndToEnd(t *testing.T) {
 	}
 	r := setupRestoreE2E(t)
 	server := r.startServer("fake-1")
+	// keptBefore is the database the restore kept, which the rollback swaps back in.
+	var keptBefore string
 
 	t.Run("a job holds the slot", func(t *testing.T) {
 		// 取る・確かめるが走っている間は、再認証 (TOTP の消費) の前に断る。
@@ -362,6 +367,127 @@ func TestRestoreFromAdminEndToEnd(t *testing.T) {
 		// モデレーションログ: 準備は前の DB に、名前の入れ替えは戻した DB に残る。
 		assert.Equal(t, 1, modlogCount(t, r, "elythia", "switch"))
 		assert.GreaterOrEqual(t, modlogCount(t, r, before, "prepare"), 1)
+		keptBefore = before
+	})
+
+	// 画面からのロールバック (#3463 (6d))。照合は今の DB (戻した DB) で行う。
+	t.Run("rollback refused without the credentials in the current database", func(t *testing.T) {
+		require.NotEmpty(t, keptBefore)
+		code, err := totp.GenerateCode(r.secret, time.Now())
+		require.NoError(t, err)
+		st, out := r.call("/restore/prepare", map[string]any{"i": late2faToken, "kind": "rollback", "database": keptBefore, "password": adminPassword, "token": code}, "")
+		assert.Equal(t, http.StatusForbidden, st, out)
+		assert.Equal(t, "TWO_FACTOR_REQUIRED", e2eCode(out), "u5 registered 2FA after the backup, so the restored database has none")
+		cur, err := restoreop.NewStore(r.rdb, r.prefix).Current(r.ctx)
+		require.NoError(t, err)
+		assert.Nil(t, cur, "nothing is prepared")
+	})
+
+	t.Run("rollback", func(t *testing.T) {
+		require.NotEmpty(t, keptBefore)
+		st, out := r.call("/restore/candidates", map[string]any{}, "")
+		require.Equal(t, http.StatusOK, st, out)
+		assert.Equal(t, "elythia", out["database"])
+		dbs, _ := out["databases"].([]any)
+		require.Len(t, dbs, 1, out)
+		first, _ := dbs[0].(map[string]any)
+		assert.Equal(t, keptBefore, first["name"])
+		assert.Equal(t, bkp.KeptBeforeRestore, first["kind"])
+		assert.Nil(t, first["problem"])
+		assert.Equal(t, false, first["needsMigration"])
+
+		st, out = r.call("/restore/prepare", map[string]any{"i": adminToken, "kind": "rollback", "database": keptBefore, "password": adminPassword, "token": r.backupCode()}, "")
+		require.Equal(t, http.StatusOK, st, out)
+		opID, _ := out["opId"].(string)
+		ticket, _ := out["ticket"].(string)
+		r.waitStep(opID, ticket, restoreop.StepReady)
+		// 戻した DB で動いていた間のタイムライン。ロールバックの後は消える。
+		require.NoError(t, r.rdb.RPush(r.ctx, r.prefix+"list:localTimeline", "n_before").Err())
+		st, out = r.call("/restore/confirm", map[string]any{"i": adminToken, "opId": opID, "ticket": ticket, "password": adminPassword, "token": r.backupCode()}, "")
+		require.Equal(t, http.StatusNoContent, st, out)
+		rec := r.waitStep(opID, ticket, restoreop.StepDone, restoreop.StepAborted, restoreop.StepReverted, restoreop.StepUnknown)
+		require.Equal(t, restoreop.StepDone, rec["step"], rec)
+		assert.Equal(t, restoreop.KindRollback, rec["kind"])
+
+		assert.Equal(t, []string{"n_after", "n_before"}, r.notes("elythia"), "the database before the restore is back")
+		keptAs, _ := rec["before"].(string)
+		assert.Equal(t, []string{"n_before"}, r.notes(keptAs), "the restored database is kept")
+		assert.Equal(t, []string{keptAs}, dbNamesWithPrefix(t, r, "elythia_rolled_back_"))
+		assert.Empty(t, dbNamesWithPrefix(t, r, "elythia_before_restore_"), "the kept database now has the server's name")
+		n, err := r.rdb.Exists(r.ctx, r.prefix+"list:localTimeline").Result()
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), n, "redis is cleaned")
+		require.Eventually(t, func() bool {
+			return strings.Join(server.notesSeen(), ",") == "n_after,n_before"
+		}, 30*time.Second, 100*time.Millisecond, "the process serves the database it rolled back to")
+		// モデレーションログ: 準備は戻した DB (今は脇へ置いた方) に、入れ替えは戻った DB に残る。
+		assert.Equal(t, 1, modlogCountOf(t, r, "elythia", "rollbackBackup", "switch"))
+		assert.Equal(t, 1, modlogCountOf(t, r, keptAs, "rollbackBackup", "prepare"))
+		info := modlogInfo(t, r, "elythia", "rollbackBackup", "switch")
+		assert.Equal(t, keptBefore, info["from"])
+		assert.Equal(t, keptAs, info["keptAs"])
+		assert.Equal(t, "elythia", info["database"])
+	})
+
+	// 戻す先の版 (#3463 (6d))。新しい・dirty は断り、古ければ入れ替える前に
+	// migrate を当てる。中止しても戻す先は消さない。
+	t.Run("rollback by the version of the kept database", func(t *testing.T) {
+		_, count, err := latestCoreMigration()
+		require.NoError(t, err)
+		kept := func(name string, steps int, sqls ...string) {
+			t.Helper()
+			admin, err := pgx.Connect(r.ctx, r.url("test", "test", "postgres"))
+			require.NoError(t, err)
+			_, err = admin.Exec(r.ctx, "CREATE DATABASE "+name+" OWNER app")
+			require.NoError(t, err)
+			require.NoError(t, admin.Close(r.ctx))
+			m, err := gomigrate.New("file://"+rsCoreMigrations, strings.Replace(r.url("app", "app-pass", name), "postgres://", "pgx5://", 1))
+			require.NoError(t, err)
+			require.NoError(t, m.Steps(steps))
+			_, _ = m.Close()
+			if len(sqls) > 0 {
+				r.exec(name, sqls...)
+			}
+		}
+		const (
+			newer = "elythia_before_restore_20260101000001"
+			dirty = "elythia_before_restore_20260101000002"
+			older = "elythia_before_restore_20260101000003"
+		)
+		kept(newer, count, `UPDATE schema_migrations SET version = version + 1`)
+		kept(dirty, count, `UPDATE schema_migrations SET dirty = true`)
+		kept(older, count-1)
+
+		st, out := r.call("/restore/candidates", map[string]any{}, "")
+		require.Equal(t, http.StatusOK, st, out)
+		problems := map[string]any{}
+		dbs, _ := out["databases"].([]any)
+		for _, d := range dbs {
+			m, _ := d.(map[string]any)
+			problems[m["name"].(string)] = m["problem"]
+		}
+		assert.Equal(t, "migrationTooNew", problems[newer])
+		assert.Equal(t, "migrationDirty", problems[dirty])
+		assert.Nil(t, problems[older])
+
+		for name, want := range map[string]string{newer: "KEPT_DATABASE_TOO_NEW", dirty: "KEPT_DATABASE_DIRTY"} {
+			st, out := r.call("/restore/prepare", map[string]any{"i": adminToken, "kind": "rollback", "database": name, "password": adminPassword, "token": r.backupCode()}, "")
+			assert.Equal(t, http.StatusBadRequest, st, out)
+			assert.Equal(t, want, e2eCode(out), name)
+		}
+
+		st, out = r.call("/restore/prepare", map[string]any{"i": adminToken, "kind": "rollback", "database": older, "password": adminPassword, "token": r.backupCode()}, "")
+		require.Equal(t, http.StatusOK, st, out)
+		opID, _ := out["opId"].(string)
+		ticket, _ := out["ticket"].(string)
+		r.waitStep(opID, ticket, restoreop.StepReady)
+		assert.Equal(t, migrationVersion(t, r, "elythia"), migrationVersion(t, r, older), "migrated to the bundled version before the switch")
+		st, out = r.call("/restore/abort", map[string]any{"i": adminToken, "opId": opID, "ticket": ticket, "password": adminPassword, "token": r.backupCode()}, "")
+		require.Equal(t, http.StatusNoContent, st, out)
+		r.waitStep(opID, ticket, restoreop.StepAborted)
+		assert.Equal(t, []string{"elythia_before_restore_20260101000001", "elythia_before_restore_20260101000002", older},
+			dbNamesWithPrefix(t, r, "elythia_before_restore_"), "aborting a rollback keeps the kept database")
+		assert.Equal(t, []string{"n_after", "n_before"}, r.notes("elythia"))
 	})
 
 	r.cancel()
@@ -385,12 +511,71 @@ func dbCountLike(t *testing.T, r *restoreE2E, pattern string) int64 {
 
 func modlogCount(t *testing.T, r *restoreE2E, db, phase string) int {
 	t.Helper()
+	return modlogCountOf(t, r, db, "restoreBackup", phase)
+}
+
+func modlogCountOf(t *testing.T, r *restoreE2E, db, typ, phase string) int {
+	t.Helper()
 	conn, err := pgx.Connect(r.ctx, r.url("app", "app-pass", db))
 	require.NoError(t, err)
 	defer conn.Close(r.ctx)
 	var n int
-	require.NoError(t, conn.QueryRow(r.ctx, `SELECT count(*) FROM moderation_log WHERE type = 'restoreBackup' AND info->>'phase' = $1`, phase).Scan(&n))
+	require.NoError(t, conn.QueryRow(r.ctx, `SELECT count(*) FROM moderation_log WHERE type = $1 AND info->>'phase' = $2`, typ, phase).Scan(&n))
 	return n
+}
+
+func modlogInfo(t *testing.T, r *restoreE2E, db, typ, phase string) map[string]any {
+	t.Helper()
+	conn, err := pgx.Connect(r.ctx, r.url("app", "app-pass", db))
+	require.NoError(t, err)
+	defer conn.Close(r.ctx)
+	var info map[string]any
+	require.NoError(t, conn.QueryRow(r.ctx, `SELECT info FROM moderation_log WHERE type = $1 AND info->>'phase' = $2`, typ, phase).Scan(&info))
+	return info
+}
+
+// dbNamesWithPrefix lists the databases whose name starts with prefix
+// (compared as text: LIKE would take _ for any character).
+func dbNamesWithPrefix(t *testing.T, r *restoreE2E, prefix string) []string {
+	t.Helper()
+	conn, err := pgx.Connect(r.ctx, r.url("app", "app-pass", "postgres"))
+	require.NoError(t, err)
+	defer conn.Close(r.ctx)
+	rows, err := conn.Query(r.ctx, `SELECT datname FROM pg_database WHERE left(datname, length($1)) = $1 ORDER BY datname`, prefix)
+	require.NoError(t, err)
+	names, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	require.NoError(t, err)
+	return names
+}
+
+func migrationVersion(t *testing.T, r *restoreE2E, db string) int64 {
+	t.Helper()
+	conn, err := pgx.Connect(r.ctx, r.url("app", "app-pass", db))
+	require.NoError(t, err)
+	defer conn.Close(r.ctx)
+	var v int64
+	require.NoError(t, conn.QueryRow(r.ctx, `SELECT version FROM schema_migrations`).Scan(&v))
+	return v
+}
+
+// latestCoreMigration returns the newest bundled core migration and the
+// number of them.
+func latestCoreMigration() (uint, int, error) {
+	entries, err := os.ReadDir(rsCoreMigrations)
+	if err != nil {
+		return 0, 0, err
+	}
+	var latest uint
+	n := 0
+	for _, e := range entries {
+		var v uint
+		if _, err := fmt.Sscanf(e.Name(), "%d_", &v); err != nil || !strings.HasSuffix(e.Name(), ".up.sql") {
+			continue
+		}
+		latest = max(latest, v)
+		n++
+	}
+	return latest, n, nil
 }
 
 func setupRestoreE2E(t *testing.T) *restoreE2E {
@@ -511,8 +696,10 @@ backup:
 	require.NoError(t, err)
 	require.NoError(t, st.Put(ctx, bkp.Key(r.genID, bkp.VerifyFile), bytes.NewReader(vr)))
 
-	// バックアップより後の投稿と、それを指すタイムライン。
-	r.exec("elythia", `INSERT INTO note ("id", "userId", "visibility") VALUES ('n_after', 'u1', 'public')`)
+	// バックアップより後の投稿と、それを指すタイムライン。u5 はバックアップより後に
+	// 2FA を登録した (戻した DB では 2FA が無い)。
+	r.exec("elythia", `INSERT INTO note ("id", "userId", "visibility") VALUES ('n_after', 'u1', 'public')`,
+		fmt.Sprintf(`UPDATE user_profile SET "twoFactorEnabled" = true, "twoFactorSecret" = '%s' WHERE "userId" = 'u5'`, r.secret))
 	require.NoError(t, r.rdb.RPush(ctx, r.prefix+"list:localTimeline", "n_after").Err())
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -569,11 +756,14 @@ func seedAdminUsers(t *testing.T, r *restoreE2E) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(adminPassword), bcrypt.MinCost)
 	require.NoError(t, err)
 	h := string(hash)
-	r.codes = []string{"BACKUPCODE000001", "BACKUPCODE000002", "BACKUPCODE000003", "BACKUPCODE000004", "BACKUPCODE000005", "BACKUPCODE000006"}
+	r.codes = nil
+	for i := 1; i <= 12; i++ {
+		r.codes = append(r.codes, fmt.Sprintf("BACKUPCODE%06d", i))
+	}
 	for _, u := range []struct {
 		id, token string
 		twoFA     bool
-	}{{"u1", adminToken, true}, {"u2", modToken, true}, {"u3", no2faToken, false}, {"u4", guardToken, true}} {
+	}{{"u1", adminToken, true}, {"u2", modToken, true}, {"u3", no2faToken, false}, {"u4", guardToken, true}, {"u5", late2faToken, false}} {
 		tok := u.token
 		require.NoError(t, db.Create(&model.User{ID: u.id, Username: u.id, UsernameLower: u.id, Token: &tok, AvatarDecorations: datatypes.JSON([]byte("[]"))}).Error)
 		p := &model.UserProfile{UserID: u.id, Password: &h, TwoFactorEnabled: u.twoFA}
@@ -587,7 +777,7 @@ func seedAdminUsers(t *testing.T, r *restoreE2E) {
 	}
 	require.NoError(t, db.Create(&model.Role{ID: "r_admin", Name: "admin", IsAdministrator: true}).Error)
 	require.NoError(t, db.Create(&model.Role{ID: "r_mod", Name: "mod", IsModerator: true}).Error)
-	for _, a := range [][3]string{{"a1", "u2", "r_mod"}, {"a2", "u3", "r_admin"}, {"a3", "u4", "r_admin"}} {
+	for _, a := range [][3]string{{"a1", "u2", "r_mod"}, {"a2", "u3", "r_admin"}, {"a3", "u4", "r_admin"}, {"a4", "u5", "r_admin"}} {
 		require.NoError(t, db.Create(&model.RoleAssignment{ID: a[0], UserID: a[1], RoleID: a[2]}).Error)
 	}
 	require.NoError(t, db.Exec(`INSERT INTO meta ("id", "rootUserId") SELECT 'x', 'u1' WHERE NOT EXISTS (SELECT 1 FROM meta)`).Error)
