@@ -342,7 +342,14 @@ func (m *Manager) revert(ctx context.Context, rec *Record, from string, cause er
 	}
 	m.journal(ctx, rec.OpID, from, "putting the previous database back: %v", cause)
 	aside := rec.Aside
-	if aside == "" {
+	switch {
+	case aside != "":
+	case rec.Kind == KindRollback:
+		// ロールバックを戻すときは、戻した DB を元の名前 (退避したときの名前) へ戻す。
+		// 新しい _rolled_back_ の名前で残すと、いつ退避した DB だったかが名前から
+		// 分からなくなる。
+		aside = rec.Target
+	default:
 		aside = rec.Database + "_rolled_back_" + m.now().UTC().Format("20060102150405")
 	}
 	if !m.advance(ctx, rec.OpID, "", StepReverting, "aside", aside, "error", cause.Error()) {
