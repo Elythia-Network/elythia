@@ -5080,6 +5080,12 @@ func extractAttachments(rawAttachments []any, noteSensitive bool) []activitypub.
 		if urlStr == "" {
 			continue
 		}
+		// 画面に出すときにプロキシで包めない形の URL の添付は取り込まない。
+		// `url` は dedup の鍵 (`drive_file.uri`) にも使うので、ここでは符号化した
+		// 値に置き換えず、保存する表示用の値は upsertAttachments で作る。
+		if _, ok := remoteurl.Media(urlStr); !ok {
+			continue
+		}
 		mediaType, _ := m["mediaType"].(string)
 		name, _ := m["name"].(string)
 		// upstream が実際に NSFW 判定に使うのは添付単位の `sensitive`
@@ -5105,8 +5111,10 @@ func extractAttachments(rawAttachments []any, noteSensitive bool) []activitypub.
 		if iconMap, ok := m["icon"].(map[string]any); ok {
 			iconURL, _ := iconMap["url"].(string)
 			iconType := apTypeOf(iconMap)
-			if iconURL != "" {
-				icon = &activitypub.Image{Type: activitypub.APType(iconType), URL: activitypub.APLenientHref(iconURL)}
+			// サムネイルは表示の補助でしかないので、崩れた形なら添付は残して
+			// サムネイルだけ捨てる。
+			if clean, ok := remoteurl.Media(iconURL); ok {
+				icon = &activitypub.Image{Type: activitypub.APType(iconType), URL: activitypub.APLenientHref(clean)}
 			}
 		}
 		out = append(out, activitypub.Document{
@@ -5438,6 +5446,15 @@ func (r *Resolver) upsertAttachments(docs []activitypub.Document, userID, host *
 				"url", truncateRunes(doc.URL, driveFileURLMaxRunes))
 			continue
 		}
+		// 表示に使う `url` は、形を確かめて符号化した値にする。extractAttachments
+		// を通らずに来た Document もあるので、ここでも確かめる。符号化で長く
+		// なって列に入らなければ、長すぎる値と同じく添付ごと諦める。
+		mediaURL, ok := remoteurl.Media(doc.URL)
+		if !ok || !fitsColumn(mediaURL, driveFileURLMaxRunes) {
+			slog.Warn("federation: skipping attachment whose url is malformed",
+				"url", truncateRunes(doc.URL, driveFileURLMaxRunes))
+			continue
+		}
 		// URI ベースで dedup。既存ならその ID を再利用する。
 		if existing, err := r.driveFileRepo.FindByURI(doc.URL); err == nil && existing != nil {
 			ids = append(ids, existing.ID)
@@ -5489,7 +5506,7 @@ func (r *Resolver) upsertAttachments(docs []activitypub.Document, userID, host *
 			Type:           mediaType,
 			Size:           0, // 未 fetch のため未知
 			Comment:        comment,
-			URL:            doc.URL,
+			URL:            mediaURL,
 			URI:            &uri,
 			IsLink:         true,
 			IsSensitive:    doc.Sensitive,
@@ -5503,7 +5520,7 @@ func (r *Resolver) upsertAttachments(docs []activitypub.Document, userID, host *
 		// thumbnail / blurhash は**表示の補助でしかない**ので、列
 		// (varchar(512) / varchar(128)) に入らなければ値ごと捨てて添付は残す。
 		if doc.Icon != nil && doc.Icon.URL != "" {
-			if thumb := doc.Icon.URL.String(); fitsColumn(thumb, driveFileThumbMaxRunes) {
+			if thumb, ok := remoteurl.Media(doc.Icon.URL.String()); ok && fitsColumn(thumb, driveFileThumbMaxRunes) {
 				f.ThumbnailURL = &thumb
 			}
 		}
