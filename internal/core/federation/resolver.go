@@ -1852,14 +1852,27 @@ func (r *Resolver) refreshActor(existing *model.User, uri string, skipFeatured b
 		existing.AccountCreatedAt = createdAt
 	}
 	// アバター / バナー画像のURLリモート側で変更された場合に追従する。
-	// 他フィールドと同様、空値や欠落時は既存値を温存する (削除は追わない)。
+	// アイコンは、他フィールドと同様、空値や欠落時は既存値を温存する (削除は追わない。
+	// 本家は消すが、#3526 より前からの扱いのまま)。バナーは下のとおり消える。
 	if avatarURL := remoteMediaURL(actor.ID, "user.avatarUrl", actor.Icon.URLOrEmpty(), maxRemoteAvatarURLLen); avatarURL != "" {
 		fields["avatarUrl"] = &avatarURL
 		existing.AvatarURL = &avatarURL
 	}
+	// バナーは、actor から image が消えたらこちらも消す (本家 resolveAvatarAndBanner は
+	// image が無ければ bannerId / bannerUrl / bannerBlurhash を null にする)。リモートの
+	// 人のバナーは表示されるので (#3526)、消えたものを出し続けない。image はあるが値を
+	// 使えないとき (長すぎる・NUL を含む・形が崩れている・url が空や文字列の形) は、
+	// 本家が取得に失敗して今の値を残すのと同じく、今の値を残す。
 	if bannerURL := remoteMediaURL(actor.ID, "user.bannerUrl", actor.Image.URLOrEmpty(), maxRemoteBannerURLLen); bannerURL != "" {
 		fields["bannerUrl"] = &bannerURL
 		existing.BannerURL = &bannerURL
+	} else if actor.Image == nil && (existing.BannerURL != nil || existing.BannerID != nil || existing.BannerBlurhash != nil) {
+		fields["bannerId"] = nil
+		fields["bannerUrl"] = nil
+		fields["bannerBlurhash"] = nil
+		existing.BannerID = nil
+		existing.BannerURL = nil
+		existing.BannerBlurhash = nil
 	}
 	// `_misskey_canChat` の更新を chatScope に反映 (#692)。flag 欠落時は
 	// 既存値を保持する (連合先がフィールドを export していない場合に上書き

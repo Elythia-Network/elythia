@@ -2750,6 +2750,89 @@ func TestResolveActor_TTLRefreshUpdatesIconBanner(t *testing.T) {
 	assert.Equal(t, "https://remote.example/new-banner.png", *user.BannerURL)
 }
 
+// recordingUserRepo records the field maps handed to UpdateUser.
+//
+// mock の UpdateUser は FindByURI が返したのと同じ行を書き換えるので、呼び出し側が
+// メモリ上の値だけを変えても repo の値まで変わって見える。保存したかどうかは、
+// UpdateUser に渡った値で確かめる。
+type recordingUserRepo struct {
+	*testutil.MockUserRepository
+	updates []map[string]any
+}
+
+func (r *recordingUserRepo) UpdateUser(userID string, fields map[string]any) error {
+	r.updates = append(r.updates, fields)
+	return r.MockUserRepository.UpdateUser(userID, fields)
+}
+
+func (r *recordingUserRepo) updatedTo(key string) (any, bool) {
+	for i := len(r.updates) - 1; i >= 0; i-- {
+		if v, ok := r.updates[i][key]; ok {
+			return v, true
+		}
+	}
+	return nil, false
+}
+
+func refreshBannerActor(t *testing.T, image string) (*recordingUserRepo, *model.User) {
+	t.Helper()
+	repo := &recordingUserRepo{MockUserRepository: testutil.NewMockUserRepository()}
+	noteRepo := testutil.NewMockNoteRepository()
+	urls := activitypub.NewURLBuilder("https://example.com")
+	idGen, _ := id.NewGenerator("aidx")
+	uri := "https://remote.example/users/alice"
+	old := time.Now().Add(-48 * time.Hour)
+	oldAvatar := "https://remote.example/keep-avatar.png"
+	oldBanner := "https://remote.example/old-banner.png"
+	bannerID, blur := "b1", "blur"
+	repo.Users["existing"] = &model.User{
+		ID: "existing", Username: "alice", URI: &uri,
+		AvatarURL: &oldAvatar, BannerURL: &oldBanner, BannerID: &bannerID, BannerBlurhash: &blur, LastFetchedAt: &old,
+	}
+	updated := `{ "@context": "https://www.w3.org/ns/activitystreams",
+		"id": "https://remote.example/users/alice",
+		"type": "Person",
+		"preferredUsername": "alice",
+		"inbox": "https://remote.example/users/alice/inbox",` + image + `
+		"publicKey": {"publicKeyPem": "REFRESHED"}
+	}`
+	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(updated)}, idGen)
+	user, err := r.ResolveActor(uri)
+	require.NoError(t, err)
+	return repo, user
+}
+
+// actor から image が消えたら、バナーも消す (本家 resolveAvatarAndBanner と同じく
+// bannerId / bannerUrl / bannerBlurhash の3つ、#3526)。アイコンは今までどおり温存する。
+func TestResolveActor_TTLRefreshClearsBannerWhenOmitted(t *testing.T) {
+	repo, user := refreshBannerActor(t, "")
+	assert.Nil(t, user.BannerURL, "消えたバナーは消す")
+	for _, key := range []string{"bannerId", "bannerUrl", "bannerBlurhash"} {
+		v, ok := repo.updatedTo(key)
+		require.True(t, ok, "%s を保存した行からも消す", key)
+		assert.Nil(t, v, key)
+	}
+	require.NotNil(t, user.AvatarURL)
+	assert.Equal(t, "https://remote.example/keep-avatar.png", *user.AvatarURL)
+}
+
+// image はあるが値を使えないときは、本家が取得に失敗するのと同じく今の値を残す。
+func TestResolveActor_TTLRefreshKeepsBannerWhenImageUnusable(t *testing.T) {
+	for name, image := range map[string]string{
+		"empty url":   `"image": {"type": "Image", "url": ""},`,
+		"string form": `"image": "https://remote.example/new-banner.png",`,
+		"malformed":   `"image": {"type": "Image", "url": "https:///remote.example/b.png"},`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo, user := refreshBannerActor(t, image)
+			require.NotNil(t, user.BannerURL)
+			assert.Equal(t, "https://remote.example/old-banner.png", *user.BannerURL)
+			_, touched := repo.updatedTo("bannerUrl")
+			assert.False(t, touched, "bannerUrl を書き換えない")
+		})
+	}
+}
+
 func TestResolveActor_TTLRefreshPreservesIconWhenOmitted(t *testing.T) {
 	// refresh 先の actor から icon が欠落していたら既存値を保持する (削除は追わない)。
 	repo := testutil.NewMockUserRepository()
