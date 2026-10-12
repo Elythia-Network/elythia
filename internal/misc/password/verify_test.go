@@ -217,6 +217,18 @@ func TestProfileForLog_UnexpectedLayoutOmitsValues(t *testing.T) {
 		"$argon2id$m=65536,t=3,p=4$c2FsdHNhbHRzYWx0c2Ex$ZGlnZXN0ZGlnZXN0",
 		"$argon2id$c2FsdA$ZGlnZXN0",
 		"$argon2id$v=19$SALTSALTSALTSALT$DIGESTDIGESTDIGEST",
+		// field の数は6でも、区切りが1つずれて parts[3] に salt が来る形
+		"$argon2id$v=19$c2FsdHNhbHRzYWx0c2Ex$ZGlnZXN0ZGlnZXN0$extra",
+		// version の欄に値以外が入る形
+		"$argon2id$v=c2FsdHNhbHRzYWx0$m=65536,t=3,p=4$c2FsdA$ZGlnZXN0",
+		// パラメータの欄の値に数字以外が入る形
+		"$argon2id$v=19$m=c2FsdHNhbHRzYWx0$c2FsdA$ZGlnZXN0",
+		// パラメータの鍵が英小文字でない形、鍵や値が空の形、version の値が空の形
+		"$argon2id$v=19$M=65536$c2FsdA$ZGlnZXN0",
+		"$argon2id$v=19$=1$c2FsdA$ZGlnZXN0",
+		"$argon2id$v=19$m=$c2FsdA$ZGlnZXN0",
+		"$argon2id$v=$m=1$c2FsdA$ZGlnZXN0",
+		"$argon2id$v=19$$c2FsdA$ZGlnZXN0",
 	} {
 		got := ProfileForLog(in)
 		if !strings.Contains(got, "unexpected field layout") {
