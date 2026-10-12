@@ -1,6 +1,9 @@
 // Command emojiregex generates the Unicode emoji pattern of the MFM parser
 // (internal/activitypub/mfm/emoji_regex_gen.go) from the emoji regex of
 // @misskey-dev/emoji-data, the one mfm-js uses for its unicodeEmoji parser.
+// The regex is read from the frontend's MFM parser, @elythia-network/mfm,
+// which ships the same regex, so that the server and the frontend read the
+// same emoji.
 //
 // The JavaScript regex works on UTF-16 code units; the generated pattern is the
 // same regex over code points for Go's regexp package. Both pick the first
@@ -27,7 +30,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"regexp/syntax"
+	"strconv"
 	"strings"
+	"unicode/utf16"
 )
 
 const (
@@ -105,7 +110,7 @@ const (
 	snapshotHeader      = "@misskey-dev/emoji-data "
 )
 
-// mfm-js の版も snapshot に残す。正規表現が同じでも、mfm-js を上げたら
+// mfm-js の版も snapshot に残す。正規表現が同じでも、写す mfm-js の版が変わったら
 // unicodeEmoji の使い方と期待値 (testdata/emoji_mfmjs.json) を確かめ直す必要が
 // あるので、版が変わったら -check を落とす。
 func (s regexSource) snapshot() []byte {
@@ -124,70 +129,120 @@ func parseSnapshot(b []byte) (regexSource, error) {
 	}, nil
 }
 
-// mfm-js の unicodeEmoji の実装。正規表現の使い方 (フラグを落として今の位置から
-// 読む) と、U+FE0F だけのときに文字として返すことを、この形で前提にしている。
-// mfm-js を上げてこの形が変わったら、生成した判定が mfm-js と揃っているかを
-// 確かめ直す必要があるので、見つからなければ落とす。
-const mfmjsUnicodeEmoji = `regexp(RegExp(emojiRegex.source)).map((content) => {
-			return content === "` + "\ufe0f" + `" ? content : UNI_EMOJI(content);`
-
-var (
-	emojiRegexDecl = regexp.MustCompile(`(?m)^const emojiRegex = /(.+)/([a-z]*);$`)
-	// mfm-js の regexp() コンビネータは ^(?:...) で包んで今の位置に固定する。
-	mfmjsRegexpCombinator = "RegExp(`^(?:${pattern.source})`, pattern.flags)"
+// frontend の MFM の解析器 (@elythia-network/mfm、#3515) が持つ絵文字の正規表現。
+// 解析器は emoji-data の正規表現を生成して同梱しており、生成元の emoji-data と、
+// その使い方を写した mfm-js の版も書き出している。ここから読めば、サーバーと
+// frontend が同じ正規表現で絵文字を読んでいることを確かめられる。
+const (
+	frontendMfmPackage = "@elythia-network/mfm"
+	frontendMfmRegexJS = "built/emoji-regex.gen.js"
 )
 
-// loadSource reads the emoji regex that the frontend's mfm-js depends on.
-//
-// 版は書き写さず、frontend が使う mfm-js から辿る。pnpm は依存を
-// `.pnpm/<pkg>@<ver>/node_modules/` に兄弟として並べるので、mfm-js の実体の隣に
-// mfm-js 自身が依存する版の emoji-data がある。
-func loadSource(misskeyDir string) (regexSource, error) {
-	link := filepath.Join(misskeyDir, "packages", "frontend", "node_modules", "mfm-js")
-	mfmjsDir, err := filepath.EvalSymlinks(link)
-	if err != nil {
-		return regexSource{}, fmt.Errorf("mfm-js is not installed (run pnpm install in %s): %w", misskeyDir, err)
-	}
-	var mfmjs struct {
-		Version      string            `json:"version"`
-		Dependencies map[string]string `json:"dependencies"`
-	}
-	if err := readJSON(filepath.Join(mfmjsDir, "package.json"), &mfmjs); err != nil {
-		return regexSource{}, err
-	}
-	want := mfmjs.Dependencies["@misskey-dev/emoji-data"]
-	if want == "" {
-		return regexSource{}, fmt.Errorf("mfm-js %s does not depend on @misskey-dev/emoji-data", mfmjs.Version)
-	}
-	bundle, err := os.ReadFile(filepath.Join(mfmjsDir, "built", "index.mjs"))
-	if err != nil {
-		return regexSource{}, err
-	}
-	for _, needle := range []string{mfmjsUnicodeEmoji, mfmjsRegexpCombinator} {
-		if !bytes.Contains(bundle, []byte(needle)) {
-			return regexSource{}, fmt.Errorf("mfm-js %s no longer contains %q; check that its unicodeEmoji still works the way this generator assumes", mfmjs.Version, needle)
-		}
-	}
+var (
+	emojiDataVersionDecl  = regexp.MustCompile(`(?m)^export const emojiDataVersion = '([^'\\]+)';$`)
+	emojiMfmJsVersionDecl = regexp.MustCompile(`(?m)^export const emojiMfmJsVersion = '([^'\\]+)';$`)
+	// 文字列リテラルの中の逃がし文字は \\ と \uXXXX だけを受け付ける (他の書き方が
+	// 出てきたら読み違えないよう落とす)。
+	emojiRegexDecl = regexp.MustCompile(`(?m)^export const emojiRegex = new RegExp\('((?:[^'\\]|\\\\|\\u[0-9a-fA-F]{4})*)', '([a-z]*)'\);$`)
+)
 
-	dataDir := filepath.Join(filepath.Dir(mfmjsDir), "@misskey-dev", "emoji-data")
-	var data struct {
+// emojiRegexFlags are the flags the parser must build the regex with: sticky
+// (match at the current position only) and, like mfm-js, without `u`, so that
+// it works on UTF-16 code units as the converter assumes.
+const emojiRegexFlags = "y"
+
+// loadSource reads the emoji regex that the frontend's MFM parser uses.
+//
+// 版は書き写さず、frontend が依存する @elythia-network/mfm から辿る。
+func loadSource(misskeyDir string) (regexSource, error) {
+	link := filepath.Join(misskeyDir, "packages", "frontend", "node_modules", filepath.FromSlash(frontendMfmPackage))
+	dir, err := filepath.EvalSymlinks(link)
+	if err != nil {
+		return regexSource{}, fmt.Errorf("%s is not installed (run pnpm install in %s): %w", frontendMfmPackage, misskeyDir, err)
+	}
+	var pkg struct {
+		Name    string `json:"name"`
 		Version string `json:"version"`
 	}
-	if err := readJSON(filepath.Join(dataDir, "package.json"), &data); err != nil {
+	if err := readJSON(filepath.Join(dir, "package.json"), &pkg); err != nil {
 		return regexSource{}, err
 	}
-	if data.Version != want {
-		return regexSource{}, fmt.Errorf("mfm-js wants emoji-data %s but %s is installed", want, data.Version)
+	if pkg.Name != frontendMfmPackage {
+		return regexSource{}, fmt.Errorf("%s is %q, want %s", link, pkg.Name, frontendMfmPackage)
 	}
-	js, err := os.ReadFile(filepath.Join(dataDir, "built", "regex.mjs"))
+	js, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(frontendMfmRegexJS)))
 	if err != nil {
 		return regexSource{}, err
 	}
-	src, err := extractRegex(js)
+	src, err := extractSource(js)
+	if err != nil {
+		return regexSource{}, fmt.Errorf("%s %s: %w", frontendMfmPackage, pkg.Version, err)
+	}
+	return src, nil
+}
+
+// extractSource reads the versions and the regex from the parser's
+// emoji-regex.gen.js. Each declaration must appear exactly once.
+func extractSource(js []byte) (regexSource, error) {
+	one := func(re *regexp.Regexp, name string) ([][]byte, error) {
+		m := re.FindAllSubmatch(js, -1)
+		if len(m) != 1 {
+			return nil, fmt.Errorf("found %d %s declarations, want 1", len(m), name)
+		}
+		return m[0], nil
+	}
+	data, err := one(emojiDataVersionDecl, "emojiDataVersion")
 	if err != nil {
 		return regexSource{}, err
 	}
-	return regexSource{mfmjs: mfmjs.Version, version: data.Version, source: src}, nil
+	mfmjs, err := one(emojiMfmJsVersionDecl, "emojiMfmJsVersion")
+	if err != nil {
+		return regexSource{}, err
+	}
+	re, err := one(emojiRegexDecl, "emojiRegex")
+	if err != nil {
+		return regexSource{}, err
+	}
+	if flags := string(re[2]); flags != emojiRegexFlags {
+		return regexSource{}, fmt.Errorf("emojiRegex has flags %q, want %q", flags, emojiRegexFlags)
+	}
+	source, err := unquoteJS(string(re[1]))
+	if err != nil {
+		return regexSource{}, err
+	}
+	return regexSource{mfmjs: string(mfmjs[1]), version: string(data[1]), source: source}, nil
+}
+
+// unquoteJS decodes the content of a JavaScript string literal that escapes
+// only with \\ and \uXXXX (outside the surrogate range).
+//
+// 正規表現の元の文字列には © ® がそのまま入っており、生成した側は \u00a9 の形で書く。
+func unquoteJS(lit string) (string, error) {
+	var b strings.Builder
+	for i := 0; i < len(lit); i++ {
+		if lit[i] != '\\' {
+			b.WriteByte(lit[i])
+			continue
+		}
+		switch {
+		case strings.HasPrefix(lit[i:], `\\`):
+			b.WriteByte('\\')
+			i++
+		case strings.HasPrefix(lit[i:], `\u`) && len(lit) >= i+6:
+			v, err := strconv.ParseUint(lit[i+2:i+6], 16, 16)
+			if err != nil {
+				return "", fmt.Errorf("bad escape %q in emojiRegex", lit[i:i+6])
+			}
+			if utf16.IsSurrogate(rune(v)) {
+				return "", fmt.Errorf("surrogate escape %q in emojiRegex", lit[i:i+6])
+			}
+			b.WriteRune(rune(v))
+			i += 5
+		default:
+			return "", fmt.Errorf("unsupported escape at %d in emojiRegex", i)
+		}
+	}
+	return b.String(), nil
 }
 
 func readJSON(path string, v any) error {
@@ -199,15 +254,6 @@ func readJSON(path string, v any) error {
 		return fmt.Errorf("%s: %w", path, err)
 	}
 	return nil
-}
-
-// extractRegex returns the source of the single `const emojiRegex = /.../;`.
-func extractRegex(js []byte) (string, error) {
-	m := emojiRegexDecl.FindAllSubmatch(js, -1)
-	if len(m) != 1 {
-		return "", fmt.Errorf("found %d emojiRegex declarations, want 1", len(m))
-	}
-	return string(m[0][1]), nil
 }
 
 // generate converts the regex and renders the Go file.

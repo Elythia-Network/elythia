@@ -164,7 +164,7 @@ make frontend-lint
 make frontend-test    # 先に cd frontend && pnpm install && pnpm build
 ```
 
-mfm-js か emoji-data の版が変わっていたら、下の「MFM の絵文字の正規表現」の手順も要る。
+`@elythia-network/mfm` を上げて、それが持つ絵文字の正規表現か版が変わっていたら、下の「MFM の絵文字の正規表現」の手順も要る。
 
 `tools/upstreamsync` が本体に置いた `refs/upstream/<版>` は branch でも tag でもないので push されない。要らなくなったら `git update-ref -d refs/upstream/<版>` で消してよい (次の追従でも、今の版の ref は取り直す)。
 
@@ -245,16 +245,16 @@ TypeORM の decorator から正規形を再現できないため **実 DB から
 
 ### 本家の版を上げた後に必須: MFM の絵文字の正規表現
 
-Elythia の MFM パーサは、mfm-js が依存する `@misskey-dev/emoji-data` の `emojiRegex` を Go の正規表現へ移したもの (`internal/activitypub/mfm/emoji_regex_gen.go`) で Unicode 絵文字を読む (#3324)。frontend の mfm-js の版か、それが依存する emoji-data の版が変わると、`emoji-regex-check` (CI では `frontend` workflow の `frontend-lint`、手元では `make frontend-check` から呼ばれる) が落ちる (正規表現が同じでも、snapshot に記録した版と食い違うため)。mfm-js の `unicodeEmoji` の書き方が変わったときも、生成ツールが前提の形を見つけられずに落ちる (下記)。
+Elythia の MFM パーサは、mfm-js が依存する `@misskey-dev/emoji-data` の `emojiRegex` を Go の正規表現へ移したもの (`internal/activitypub/mfm/emoji_regex_gen.go`) で Unicode 絵文字を読む (#3324)。正規表現は、frontend の MFM の解析器 `@elythia-network/mfm` (#3515) が同梱しているもの (`built/emoji-regex.gen.js`) から読む。frontend は mfm-js を使わないので、本家が mfm-js を上げてもここは変わらない。`@elythia-network/mfm` を上げて、正規表現か、記録された emoji-data / mfm-js の版が変わると、`emoji-regex-check` (CI では `frontend` workflow の `frontend-lint`、手元では `make frontend-check` から呼ばれる) が落ちる (正規表現が同じでも、snapshot に記録した版と食い違うため)。
 
 ```bash
 make emoji-regex     # 生成物と tools/emojiregex/testdata/source.txt を作り直す
-node internal/activitypub/mfm/testdata/emoji_mfmjs.mjs frontend \
-  > internal/activitypub/mfm/testdata/emoji_mfmjs.json   # mfm-js の期待値を作り直す
 GOWORK=off go test ./internal/activitypub/mfm/ ./tools/emojiregex/
 ```
 
-生成ツールは、mfm-js の `unicodeEmoji` の書き方 (`regexp(RegExp(emojiRegex.source))` と、U+FE0F だけのときに文字を返す `map`) と、正規表現が使う構文 (`?` だけの量指定・サロゲートペア・決まった位置の否定の先読み) を前提にしている。前提が崩れると生成の時点で落ちるので、その場合は生成ツールを直す。
+emoji-data か mfm-js の版が変わったときは、`internal/activitypub/mfm/testdata/emoji_mfmjs.json` (mfm-js の期待値) も `emoji_mfmjs.mjs` で作り直す。frontend からは mfm-js を外した (#3515) ので、mfm-js を `packages/frontend/node_modules/mfm-js` に入れたディレクトリを引数に渡す。この手順は、`internal/activitypub/mfm` を同じ解析器へ置き換える #3514 で見直す。
+
+生成ツールは、解析器の書き出す形 (`emojiDataVersion` / `emojiMfmJsVersion` / `emojiRegex` の宣言が 1 つずつ、`emojiRegex` は `u` を付けない sticky (`y`) の `RegExp`) と、正規表現が使う構文 (`?` だけの量指定・サロゲートペア・決まった位置の否定の先読み) を前提にしている。前提が崩れると生成の時点で落ちるので、その場合は生成ツールを直す。
 
 ### 本家の版を上げた後に必須: divergence doc の件数
 
