@@ -10,6 +10,7 @@
 		"lint": "pnpm typecheck && pnpm eslint"
 	},
 	"dependencies": {
+		"@elythia-network/mfm": "0.1.0",
 		"buraha": "0.0.1",
 		"frontend-shared": "workspace:*",
 		"i18n": "workspace:*",

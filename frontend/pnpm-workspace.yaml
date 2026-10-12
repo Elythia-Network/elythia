@@ -39,6 +39,9 @@ allowBuilds:
 minimumReleaseAge: 10080 # delay 7days to mitigate supply-chain attack
 minimumReleaseAgeExclude:
   - '@misskey-dev/*'
+  # Elythia の自前のパッケージ。自前の CI から provenance 付きで公開している (#3515)。
+  # 次の版も 7 日待つよう、外すのは版を限る。版を上げるときはここも書き換える。
+  - '@elythia-network/mfm@0.1.0'
   - '@syuilo/aiscript'
   - buraha
   - mfm-js

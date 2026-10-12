@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-// MFM を扱う唯一の入口。画面のコードは mfm-js を直接 import せず、ここを使う
-// (eslint の no-restricted-imports で強制している)。関数の名前・引数・戻り値は
-// mfm-js と同じにしてあり、後で Elythia の解析器へ中身を差し替えられるようにしている。
+// MFM を扱う唯一の入口。画面のコードは解析器を直接 import せず、ここを使う
+// (eslint の no-restricted-imports で強制している)。中身は Elythia の解析器
+// @elythia-network/mfm (#3515)。関数の名前・引数・戻り値・構文木は mfm-js 0.26.0 と同じ。
 
-import * as mfmjs from 'mfm-js';
+import * as mfmParser from '@elythia-network/mfm';
 
 export type {
 	MfmBlock,
@@ -35,29 +35,28 @@ export type {
 	MfmUnicodeEmoji,
 	MfmUrl,
 	NodeType,
-} from 'mfm-js';
+} from '@elythia-network/mfm';
 
 /**
  * Parses MFM like mfm-js's `parse`.
  */
-export function parse(input: string, opts?: Partial<{ nestLimit: number }>): mfmjs.MfmNode[] {
-	// mfm-js の公開の引数だけを渡す (パッチのテスト用の口は通さない)。
-	return mfmjs.parse(input, { nestLimit: opts?.nestLimit });
+export function parse(input: string, opts?: Partial<{ nestLimit: number }>): mfmParser.MfmNode[] {
+	// 引数は mfm-js と同じ nestLimit だけを渡す。500 より大きい値は 500 として扱われる
+	// (入れ子を再帰で読むため)。画面のコードは既定の 20 しか使わない。
+	return mfmParser.parse(input, { nestLimit: opts?.nestLimit });
 }
 
 /**
  * Parses the simple MFM syntax like mfm-js's `parseSimple`.
  */
-// parseSimple は絵文字と平文しか読まないので、長い入力でも重くならない (3000 文字の
-// どの形でも 10ms 前後だった)。そのまま渡す。
-export function parseSimple(input: string): mfmjs.MfmSimpleNode[] {
-	return mfmjs.parseSimple(input);
+export function parseSimple(input: string): mfmParser.MfmSimpleNode[] {
+	return mfmParser.parseSimple(input);
 }
 
 /**
  * Collects the nodes for which `predicate` returns true, like mfm-js's
  * `extract`.
  */
-export function extract(nodes: mfmjs.MfmNode[], predicate: (node: mfmjs.MfmNode) => boolean): mfmjs.MfmNode[] {
-	return mfmjs.extract(nodes, predicate);
+export function extract(nodes: mfmParser.MfmNode[], predicate: (node: mfmParser.MfmNode) => boolean): mfmParser.MfmNode[] {
+	return mfmParser.extract(nodes, predicate);
 }
