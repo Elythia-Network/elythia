@@ -788,8 +788,8 @@ func (r *Restorer) ApplyDatabaseSettings(ctx context.Context, dbname string, met
 }
 
 // ReplaceDatabase renames database to keepAs and replacement to database,
-// in one transaction, after checking that nobody is connected to database.
-// It connects to maintenance (empty means "postgres").
+// in one transaction, after checking that nobody is connected to database
+// or to replacement. It connects to maintenance (empty means "postgres").
 //
 // Swapping in a restored database is ReplaceDatabase(db, before, restored);
 // undoing it is ReplaceDatabase(db, <some new name>, before).
@@ -800,6 +800,12 @@ func (r *Restorer) ReplaceDatabase(ctx context.Context, maintenance, database, k
 	}
 	defer admin.Close(context.Background())
 	if err := checkNoConnections(ctx, admin, database); err != nil {
+		return err
+	}
+	// 入れ替える側 (戻した DB、ロールバックでは退避した DB) も確かめる。接続のある
+	// DB の名前の変更は PostgreSQL も拒むが、その拒否は「入れ替えに失敗した」としか
+	// 読めない。人が手で繋いでいる理由を、入れ替える前に分かる形で返す (#3463 (6d))。
+	if err := waitNoConnections(ctx, admin, replacement, replacementSettle); err != nil {
 		return err
 	}
 	// 名前の入れ替えは 1 つのトランザクションで行う。どちらかが落ちたら (今の DB に
@@ -816,6 +822,32 @@ func (r *Restorer) ReplaceDatabase(ctx context.Context, maintenance, database, k
 		return fmt.Errorf("backup: swap database names: %w", err)
 	}
 	return nil
+}
+
+// replacementSettle is how long ReplaceDatabase waits for the sessions on
+// the replacement to go away.
+//
+// 戻す処理は、入れ替える直前まで入れ替える側へ繋いでいる (コマンドの戻す処理は
+// migrate の直後に入れ替える)。閉じた接続も pg_stat_activity に少しの間残るので、
+// 1 回で断ると自分の接続で止まる。PostgreSQL も名前の変更で他の接続が抜けるのを
+// 5 秒まで待つ (CountOtherDBBackends) ので、同じだけ待つ。
+const replacementSettle = 5 * time.Second
+
+// waitNoConnections is checkNoConnections that tries again until wait has
+// passed while sessions remain.
+func waitNoConnections(ctx context.Context, conn *pgx.Conn, name string, wait time.Duration) error {
+	deadline := time.Now().Add(wait)
+	for {
+		err := checkNoConnections(ctx, conn, name)
+		if err == nil || !errors.Is(err, ErrRestoreConnections) || !time.Now().Before(deadline) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 }
 
 // DropDatabase drops name, disconnecting its sessions. It connects to

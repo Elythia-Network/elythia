@@ -81,6 +81,38 @@ func TestRestoreStopConditions(t *testing.T) {
 		noLeftovers(t)
 	})
 
+	// 入れ替える側 (ロールバックでは退避した DB) に人が繋いでいるときも、名前を
+	// 変える前に接続の理由で止める (#3463 (6d))。今の DB には接続が無い。
+	t.Run("connections remain on the replacement", func(t *testing.T) {
+		const replacement = "x_replacement_conn"
+		pg.exec(t, "postgres", "CREATE DATABASE "+replacement)
+		t.Cleanup(func() { pg.exec(t, "postgres", "DROP DATABASE IF EXISTS "+replacement+" WITH (FORCE)") })
+		held := pg.connect(t, rsSuperUser, rsSuperPass, replacement)
+		var pid int
+		require.NoError(t, held.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid))
+		require.NoError(t, super.CheckNoConnections(ctx, "", rsAppDB))
+		err := super.ReplaceDatabase(ctx, "", rsAppDB, rsAppDB+"_kept_conn", replacement)
+		require.ErrorIs(t, err, ErrRestoreConnections)
+		assert.Contains(t, err.Error(), replacement)
+		assert.Contains(t, err.Error(), "pid="+strconv.Itoa(pid))
+		// 名前はどちらも変わっていない。
+		has, err := super.ExistingDatabases(ctx, "", []string{rsAppDB, replacement, rsAppDB + "_kept_conn"})
+		require.NoError(t, err)
+		assert.Equal(t, map[string]bool{rsAppDB: true, replacement: true}, has)
+		_ = held.Close(ctx)
+
+		// 入れ替える直前まで繋いでいた接続 (戻す処理の migrate など) は、抜けるのを待つ。
+		late := pg.connect(t, rsSuperUser, rsSuperPass, replacement)
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			_ = late.Close(context.Background())
+		}()
+		require.NoError(t, super.ReplaceDatabase(ctx, "", rsAppDB, rsAppDB+"_kept_conn", replacement))
+		// 元の名前へ戻す。
+		require.NoError(t, super.ReplaceDatabase(ctx, "", rsAppDB, replacement, rsAppDB+"_kept_conn"))
+		noLeftovers(t)
+	})
+
 	// 別の role の接続は、non-superuser から見ると backend_type が null になる。
 	// 'client backend' で絞ると見落とした (#3463 の設計 §7)。
 	t.Run("a session of another role is seen by a non-superuser", func(t *testing.T) {
