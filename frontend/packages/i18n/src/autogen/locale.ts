@@ -9660,6 +9660,93 @@ export interface Locale extends ILocale {
          * バックアップ用のサービスでは、ここからの戻す操作を使えません。
          */
         "restoreUnavailable": string;
+        /**
+         * 退避したデータベース
+         */
+        "keptTitle": string;
+        /**
+         * バックアップから戻したときやロールバックしたときに、それまでのデータベースを消さずに残したものです。選んだものへ戻せます（ロールバック）。そのときも、今のデータベースは消さずに別の名前で残します。
+         */
+        "keptDescription": string;
+        /**
+         * 認証して表示
+         */
+        "keptShow": string;
+        /**
+         * 退避したデータベースはありません。
+         */
+        "keptEmpty": string;
+        /**
+         * バックアップから戻す前のデータベース
+         */
+        "keptBeforeRestore": string;
+        /**
+         * ロールバックで退避したデータベース
+         */
+        "keptRolledBack": string;
+        /**
+         * 退避した日時
+         */
+        "keptAt": string;
+        /**
+         * 今の版より古いデータベースです。戻す前に、管理表の番号を今の版まで進めます（migrate）。
+         */
+        "keptNeedsMigration": string;
+        /**
+         * 戻す先のデータベースに接続が残っています。接続を切ってから、もう一度お試しください。
+         */
+        "keptInUse": string;
+        /**
+         * 退避したデータベースの一覧を読めませんでした。バックアップ用のサービスのログを確かめてください。
+         */
+        "keptUnreadable": string;
+        /**
+         * その退避したデータベースはありません。
+         */
+        "noSuchKept": string;
+        "_keptProblems": {
+            /**
+             * 今のElythiaより新しい版のデータベースなので、戻せません。Elythiaをその版以上に上げてください。
+             */
+            "migrationTooNew": string;
+            /**
+             * 管理表の更新が途中で止まっているので、戻せません。elythia migrateで直してください。
+             */
+            "migrationDirty": string;
+            /**
+             * Elythiaのデータベースではないので、戻せません。
+             */
+            "notElythia": string;
+            /**
+             * このデータベースを読めませんでした。
+             */
+            "unreadable": string;
+        };
+        /**
+         * このデータベースへ戻す
+         */
+        "rollback": string;
+        /**
+         * 退避したデータベースへ戻す
+         */
+        "rollbackTitle": string;
+        /**
+         * {name}へ戻す準備をします。準備の間もサーバーは動いたままです。準備ができたら、切り替えるかどうかをもう一度確かめます。認証は今のデータベース（{database}）に登録されているパスワードと二段階認証で行います。
+         */
+        "rollbackConfirm": ParameterizedString<"name" | "database">;
+        /**
+         * ロールバックを中止しますか？戻す先のデータベースは、そのまま残ります。
+         */
+        "rollbackAbortConfirm": string;
+        /**
+         * 今のデータベースに、あなたのパスワードや二段階認証、管理者の役割が無い可能性があります（戻したバックアップより後に設定した場合など）。そのときは、この画面からは戻せません。サーバーの管理者が本体を止めてから、次のコマンドで戻してください。
+         * {command}
+         */
+        "rollbackCli": ParameterizedString<"command">;
+        /**
+         * バックアップから戻した直後で、今のデータベースに二段階認証が登録されていないときは、退避したデータベースへ戻す操作をelythia backup restore -rollbackで行ってください。
+         */
+        "rollbackCliHint": string;
         "_restoreSteps": {
             /**
              * 準備中
