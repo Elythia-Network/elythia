@@ -58,3 +58,30 @@ func TestLocalFileURLIsNotChecked(t *testing.T) {
 	require.NotNil(t, c.GetWebpublicURL(f))
 	assert.Equal(t, "/files/w.png", *c.GetWebpublicURL(f))
 }
+
+// external proxy の設定では、リモートの画像は url ではなく uri を external proxy に
+// 渡す。保存された url が崩れていても、出るのは external proxy の URL か空で、
+// 崩れた値がそのまま出ることは無い。
+func TestRemoteFileURLForm_ExternalProxy(t *testing.T) {
+	c := externalCtx()
+	for _, raw := range []string{"/files/a.png", "https:///" + remoteHost + "/a.png"} {
+		withURI := &model.DriveFile{Type: "image/png", URL: raw, URI: sp("https://" + remoteHost + "/a.png"),
+			UserHost: sp(remoteHost), IsLink: true, ThumbnailURL: sp(raw)}
+		got := c.GetPublicURL(withURI, modeDefault)
+		assert.True(t, strings.HasPrefix(got, testExternalProxy+"/"), "%q: %s", raw, got)
+		assert.Equal(t, "https://"+remoteHost+"/a.png", u(t, got).Query().Get("url"))
+		thumb := c.GetThumbnailURL(withURI)
+		require.NotNil(t, thumb, raw)
+		assert.True(t, strings.HasPrefix(*thumb, testExternalProxy+"/"), "%q: %s", raw, *thumb)
+
+		// uri も無ければ、包む元が無いので空にする。
+		noURI := &model.DriveFile{Type: "image/png", URL: raw, UserHost: sp(remoteHost), IsLink: true, ThumbnailURL: sp(raw)}
+		assert.Empty(t, c.GetPublicURL(noURI, modeDefault), raw)
+		assert.Nil(t, c.GetThumbnailURL(noURI), raw)
+
+		// 画像以外は external proxy に回らないので、崩れた url は空にする。
+		pdf := &model.DriveFile{Type: "application/pdf", URL: raw, URI: sp("https://" + remoteHost + "/a.pdf"),
+			UserHost: sp(remoteHost), IsLink: true}
+		assert.Empty(t, c.GetPublicURL(pdf, modeDefault), raw)
+	}
+}
