@@ -37,13 +37,11 @@ export function msUntilNextNightBoundary(now: Date): number {
 	const m = now.getMonth();
 	const d = now.getDate();
 	// Date のコンストラクタに地方時で組ませると、夏時間の切り替わる日も正しく扱える。
-	const candidates = [
-		new Date(y, m, d, NIGHT_END_HOUR),
-		new Date(y, m, d, NIGHT_START_HOUR),
-		new Date(y, m, d + 1, NIGHT_END_HOUR),
-	];
-	const next = candidates.find(c => c.getTime() > now.getTime())!;
-	return next.getTime() - now.getTime();
+	const todayEnd = new Date(y, m, d, NIGHT_END_HOUR);
+	if (todayEnd.getTime() > now.getTime()) return todayEnd.getTime() - now.getTime();
+	const todayStart = new Date(y, m, d, NIGHT_START_HOUR);
+	if (todayStart.getTime() > now.getTime()) return todayStart.getTime() - now.getTime();
+	return new Date(y, m, d + 1, NIGHT_END_HOUR).getTime() - now.getTime();
 }
 
 /** Returns how long to wait before checking the conditions again. */
