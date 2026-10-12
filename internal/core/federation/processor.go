@@ -2084,13 +2084,22 @@ func (p *Processor) handleAnnounce(act genericActivity, signer *model.User) erro
 		return p.publishRelayDeliveredNote(target, targetURI, act.Actor)
 	}
 	// upstream announceNote の 2 つの skip guard (#1560、ApInboxService.ts:350-361):
-	//   1. !isVisibleForMe(renote, actor): boost は public/home の note にしか
-	//      行えない。followers / specified の note を announce してくる activity は
-	//      不正なので drop する (mk-go は remote-remote の follow graph を持たない
-	//      ため、isVisibleForMe を「対象が public/home か」で近似する)。
+	//   1. !isVisibleForMe(renote, actor): 見えない note の boost は drop する。
+	//      本家は isVisibleForMe を通った後も NoteCreateService が他人の followers
+	//      note と specified note の renote を拒否するので、取り込めるのは public /
+	//      home と作者本人の followers note だけになる。ここではその結果を直接
+	//      判定する (remote-remote の follow graph は要らない)。本家は拒否を throw
+	//      で job のエラーにするが、ここでは ack して捨てる。
 	//   2. activity.published < 対象 note の createdAt: announce が対象 note より
 	//      前に published されたと主張する malformed timestamp は drop する。
-	if target.Visibility != model.NoteVisibilityPublic && target.Visibility != model.NoteVisibilityHome {
+	//
+	// **作者本人の followers note は通す** (#3520)。本家の isVisibleForMe は作者
+	// 本人なら true で、NoteCreateService も自分の followers note の renote を許す
+	// (公開範囲は下で followers に絞る)。近似がこの形まで捨てていたので、鍵
+	// アカウントが自分の followers note をリノートしてもフォロワーに出なかった。
+	targetPublicOrHome := target.Visibility == model.NoteVisibilityPublic || target.Visibility == model.NoteVisibilityHome
+	selfFollowersRenote := target.Visibility == model.NoteVisibilityFollowers && target.UserID == announcer.ID
+	if !targetPublicOrHome && !selfFollowersRenote {
 		slog.Info("federation: skipping Announce of non-public note", "object", targetURI, "actor", act.Actor, "visibility", target.Visibility)
 		return nil
 	}
@@ -2106,7 +2115,8 @@ func (p *Processor) handleAnnounce(act genericActivity, signer *model.User) erro
 	// mention されている / reply 先が viewer」なら通す (#2106 N27 の意図的緩和)。
 	// resolveNote の位置に置くと、crafted Announce を投げるだけで**配送されて
 	// いない followers-only note を対象ユーザーの antenna に載せられる**入口が
-	// できる。public/home に絞った後なら、その入口は開かない。
+	// できる。public/home に絞った後なら、その入口は開かない。作者本人の
+	// followers note の renote (#3520) も、同じ理由でここには載せない。
 	//
 	// **新規に取り込んだときだけ発火させる。** 無条件だと再ブーストのたびに古い
 	// note が antenna に湧く。upstream も既知の note では createNote を通らない
@@ -2123,7 +2133,7 @@ func (p *Processor) handleAnnounce(act genericActivity, signer *model.User) erro
 	// docs/divergence.md に記載。`!viaRelay` はここに到達する時点で常に真
 	// (上の early return を通る) で、renote 側の hook と同じく将来 early return
 	// を消したときの保険。実際に止めているのは signer 側の判定。
-	if p.antennaHook != nil && targetCreated && !viaRelay && !p.isRelayDelivery(signer) &&
+	if p.antennaHook != nil && targetCreated && targetPublicOrHome && !viaRelay && !p.isRelayDelivery(signer) &&
 		target.UserHost != nil && *target.UserHost != "" {
 		hydratedTarget, author := p.hydrateWithAuthor(target)
 		if author == nil {
@@ -2198,12 +2208,19 @@ func (p *Processor) handleAnnounce(act genericActivity, signer *model.User) erro
 	// visibleUsers / 通知の扱いは #1864 で別途対応する。
 	renoteVisibility := deriveVisibility(announcer, decodeAudience(act.To), decodeAudience(act.CC))
 	// upstream NoteCreateService は renote の visibility を対象 note 以下に clamp する
-	// (home note は public で renote できず home に落ちる)。target は上の gate で
-	// public/home に限定済みなので、home target に対する public boost を home に
-	// 落とす。これが無いと crafted Announce(to=[Public], object=home note) で home
-	// note を global timeline に leak させられる。
+	// (home note は public で renote できず home に落ちる)。home target に対する
+	// public boost を home に落とす。これが無いと crafted Announce(to=[Public],
+	// object=home note) で home note を global timeline に leak させられる。
+	// followers target (作者本人のもの) は下で followers に絞る。
 	if target.Visibility == model.NoteVisibilityHome && renoteVisibility == model.NoteVisibilityPublic {
 		renoteVisibility = model.NoteVisibilityHome
+	}
+	// followers target (作者本人のものだけが上の gate を通る) は followers 以下に
+	// 絞る。本家 NoteCreateService の `case 'followers'` と同じく、public / home を
+	// followers に落とし、それより狭い公開範囲 (specified) は維持する。
+	if target.Visibility == model.NoteVisibilityFollowers &&
+		(renoteVisibility == model.NoteVisibilityPublic || renoteVisibility == model.NoteVisibilityHome) {
+		renoteVisibility = model.NoteVisibilityFollowers
 	}
 	renote := &model.Note{
 		ID:         p.resolver.idGen.Generate(now),
