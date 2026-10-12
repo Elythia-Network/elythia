@@ -88,3 +88,22 @@ func TestMiAuthCheck_OwnerLookup(t *testing.T) {
 		assert.True(t, repo.accessTokens["k"].Fetched)
 	})
 }
+
+// auth/session/userkey も、プラグインが管理するアカウントの token を払い出さない。
+// 居ない session と同じ応答にし、session は消さない。
+func TestSessionUserkey_PluginManagedOwnerRefused(t *testing.T) {
+	h, repo := newTestHandler()
+	repo.apps["s1"] = &model.App{ID: "a1", Secret: "s1"}
+	managed := "bot-plugin"
+	userID := "bot1"
+	user := &model.User{ID: "bot1", Username: "bot", ManagedByPlugin: &managed}
+	repo.sessions["tok1"] = &model.AuthSession{ID: "sess1", Token: "tok1", AppID: "a1", UserID: &userID, User: user}
+	appID := "a1"
+	repo.accessTokens["a1:bot1"] = &model.AccessToken{ID: "at1", Token: "bot-token", AppID: &appID, UserID: "bot1"}
+
+	rec := post(h.SessionUserkey, `{"appSecret":"s1","token":"tok1"}`, nil)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "NO_SUCH_SESSION")
+	assert.NotContains(t, rec.Body.String(), "bot-token")
+	assert.NotEmpty(t, repo.sessions, "session を消さない")
+}
