@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -334,7 +335,7 @@ func (m *Manager) prepareChecks(ctx context.Context, req PrepareRequest) (*Recor
 	ticket, ticketHash := newTicket()
 	now := m.now()
 	rec := &Record{
-		OpID: newOpID(), Step: StepPreparing, GenerationID: plan.ID, Database: m.o.Database,
+		OpID: newOpID(), Kind: KindRestore, Step: StepPreparing, GenerationID: plan.ID, Database: m.o.Database,
 		Target: target, Before: before, UserID: req.UserID, CreatedAt: now, UpdatedAt: now,
 		ticketHash: ticketHash, tokenHash: hashString(req.Token),
 	}
@@ -443,12 +444,35 @@ func (m *Manager) waitConfirmation(ctx context.Context, rec *Record, live *liveO
 	m.finishLive(rec.OpID)
 }
 
+// dropTarget drops the new database of a restore. It never drops the
+// database of a rollback (the kept one it was going to swap back in), nor
+// one that has the server's name or the name of a kept database.
+//
+// ロールバックの Target は退避した DB そのもので、消すと戻す先を失う。種類で
+// 分けたうえで、名前でも守る (種類を取り違えた記録や、手で書き換えた記録でも
+// 消さない)。
 func (m *Manager) dropTarget(ctx context.Context, rec *Record) {
+	if rec.Kind == KindRollback {
+		m.journal(ctx, rec.OpID, "", "kept %s as it is", rec.Target)
+		return
+	}
+	if keptName(rec.Target, rec.Database) || keptName(rec.Target, m.o.Database) {
+		m.log.Error("backup: refusing to drop a database this restore did not create", "opId", rec.OpID, "database", rec.Target)
+		m.journal(ctx, rec.OpID, "", "did not drop %s: it is not a database this restore created", rec.Target)
+		return
+	}
 	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
 	defer cancel()
 	if err := m.o.DB.DropDatabase(dctx, m.o.MaintenanceDB, rec.Target); err != nil {
 		m.journal(ctx, rec.OpID, "", "could not drop %s: %v", rec.Target, err)
 	}
+}
+
+// keptName reports whether name is database itself, a database kept by a
+// restore or a rollback of it, or empty.
+func keptName(name, database string) bool {
+	return name == "" || name == database ||
+		strings.HasPrefix(name, database+"_before_restore_") || strings.HasPrefix(name, database+"_rolled_back_")
 }
 
 func (m *Manager) finishLive(opID string) {

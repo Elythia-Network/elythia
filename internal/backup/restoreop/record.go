@@ -74,12 +74,29 @@ func Final(step string) bool {
 	return false
 }
 
+// Kinds of an operation.
+const (
+	// KindRestore restores a generation into a new database and swaps it in.
+	KindRestore = "restore"
+	// KindRollback swaps a database kept by an earlier restore or rollback
+	// (<db>_before_restore_<t> or <db>_rolled_back_<t>) back in (#3463 (6d)).
+	KindRollback = "rollback"
+)
+
 // recordTTL is how long a finished record (and its journal) stays in Redis.
 const recordTTL = 7 * 24 * time.Hour
 
 // Record is the state of one operation.
+//
+// ロールバックでは、欄を次のように読み替える。Target は戻す先の退避した DB、
+// Before は今の DB を脇へ置く新しい名前 (<db>_rolled_back_<t>)、戻すときの
+// Aside は Target (元の名前へ完全に戻す)。確定の後の段と回復の表は、そのまま
+// 使える。違うのは、Target を決して消さないことだけ (dropTarget)。
 type Record struct {
-	OpID         string    `json:"opId"`
+	OpID string `json:"opId"`
+	// Kind is KindRestore or KindRollback. A record written before the
+	// field existed is a restore.
+	Kind         string    `json:"kind"`
 	Step         string    `json:"step"`
 	GenerationID string    `json:"generationId"`
 	Database     string    `json:"database"`
@@ -156,7 +173,7 @@ func (s *Store) create(ctx context.Context, r *Record) error {
 
 func (s *Store) fields(r *Record) []any {
 	return []any{
-		"opId", r.OpID, "step", r.Step, "generationId", r.GenerationID, "database", r.Database,
+		"opId", r.OpID, "kind", r.Kind, "step", r.Step, "generationId", r.GenerationID, "database", r.Database,
 		"target", r.Target, "before", r.Before, "aside", r.Aside, "userId", r.UserID, "error", r.Error,
 		"ticketHash", r.ticketHash, "tokenHash", r.tokenHash,
 		"createdAt", formatTime(r.CreatedAt), "updatedAt", formatTime(r.UpdatedAt), "readyAt", formatTime(r.ReadyAt),
@@ -172,8 +189,13 @@ func (s *Store) Get(ctx context.Context, opID string) (*Record, error) {
 	if len(m) == 0 {
 		return nil, ErrNotFound
 	}
+	kind := m["kind"]
+	if kind == "" {
+		// 欄を足す前 (#3463 (6c)) の記録はリストア。
+		kind = KindRestore
+	}
 	return &Record{
-		OpID: m["opId"], Step: m["step"], GenerationID: m["generationId"], Database: m["database"],
+		OpID: m["opId"], Kind: kind, Step: m["step"], GenerationID: m["generationId"], Database: m["database"],
 		Target: m["target"], Before: m["before"], Aside: m["aside"], UserID: m["userId"], Error: m["error"],
 		CreatedAt: parseTime(m["createdAt"]), UpdatedAt: parseTime(m["updatedAt"]), ReadyAt: parseTime(m["readyAt"]),
 		ticketHash: m["ticketHash"], tokenHash: m["tokenHash"],
