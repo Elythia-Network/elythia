@@ -222,11 +222,26 @@ func TestFederationUpdateInstance_NoOpWithoutInstanceRepo(t *testing.T) {
 	assertNoLogWritten(t, repo)
 }
 
-// instance 行が存在しない host への update は upstream 同様 500 (instance not found)。
-// 旧実装は silent 204 だったが本家 (throw new Error('instance not found')) に揃える。
+// instance 行が存在しない host への update は 404 (#3518)。本家は
+// throw new Error('instance not found') で 500 だが、呼び出し側の誤りを障害に
+// 見せない。旧実装の silent 204 にも戻さない。
 func TestFederationUpdateInstance_HostNotFound(t *testing.T) {
 	h, repo := setupFederationUpdateInstance(t, nil)
 	rec := doPost(h.FederationUpdateInstance, `{"host":"ghost.example","isSuspended":true}`, adminUser)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assertNoLogWritten(t, repo)
+}
+
+// 「見つからない」以外の lookup 失敗 (DB 障害) は 404 に潰さず 500 のまま (#3518)。
+// 404 にすると、障害中の操作が「その host は無い」と誤って伝わる。
+func TestFederationUpdateInstance_LookupErrorIs500(t *testing.T) {
+	h, _, _, _ := newTestHandler(t)
+	instRepo := testutil.NewMockInstanceRepository()
+	require.NoError(t, instRepo.Create(&model.Instance{ID: "i1", Host: "remote.example"}))
+	instRepo.FindByHostErr = errors.New("connection refused")
+	h.SetInstanceRepo(instRepo)
+	repo := attachModLog(t, h)
+	rec := doPost(h.FederationUpdateInstance, `{"host":"remote.example","isSuspended":true}`, adminUser)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	assertNoLogWritten(t, repo)
 }

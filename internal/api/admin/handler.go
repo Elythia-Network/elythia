@@ -4083,6 +4083,12 @@ func (h *Handler) EmojiListV2(c echo.Context) error {
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
+	// **`CAST("updatedAt" AS DATE)` との比較にそのまま渡る。** 日付として読めない
+	// 値は PostgreSQL の型変換で落ちて 500 になる (本家も paramDef が string だけで
+	// 同じ)。呼び出し側の誤りなので引く前に 400 で返す (#3518)。
+	if req.Query != nil && (!repository.ValidEmojiUpdatedAtFilter(req.Query.UpdatedAtFrom) || !repository.ValidEmojiUpdatedAtFilter(req.Query.UpdatedAtTo)) {
+		return apierr.JSONInvalidParam(c)
+	}
 	filter := model.EmojiV2Filter{
 		SinceID:  sinceID,
 		UntilID:  untilID,

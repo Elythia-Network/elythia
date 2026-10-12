@@ -478,6 +478,33 @@ func TestMentions_InvalidJSON(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
+// visibility は note_visibility_enum が受け付ける値と空文字 (未指定) だけを通す (#3518)。
+//
+// **通すと 500 になる。** 値は `note.visibility = ?` にそのまま渡り、enum への
+// 型変換で PostgreSQL がクエリごと落とす。mock の repository は落ちないので、
+// 検査を外すとここが 200 になる。
+func TestMentions_RejectsUnknownVisibility(t *testing.T) {
+	for _, v := range []string{"private", "bogus", "PUBLIC", "public "} {
+		t.Run(v, func(t *testing.T) {
+			h, _, _ := newExtraHandler(t)
+			rec := postExtra(h.Mentions, `{"visibility":"`+v+`"}`, &model.User{ID: "u1"})
+			assert.Equal(t, http.StatusBadRequest, rec.Code)
+		})
+	}
+}
+
+// 受け入れる値はリテラルで書く (定数を参照すると、集合を変える変異と一緒に
+// 期待値まで動く)。
+func TestMentions_AcceptsKnownVisibility(t *testing.T) {
+	for _, v := range []string{"", "public", "home", "followers", "specified"} {
+		t.Run("v="+v, func(t *testing.T) {
+			h, _, _ := newExtraHandler(t)
+			rec := postExtra(h.Mentions, `{"visibility":"`+v+`"}`, &model.User{ID: "u1"})
+			assert.Equal(t, http.StatusOK, rec.Code)
+		})
+	}
+}
+
 // #1554 mentions は viewer が mute した author の note を除外する。
 func TestMentions_FiltersMutedAuthor(t *testing.T) {
 	h, noteRepo, _ := newExtraHandler(t)
