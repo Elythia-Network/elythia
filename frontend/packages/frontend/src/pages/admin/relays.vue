@@ -10,64 +10,68 @@ SPDX-License-Identifier: AGPL-3.0-only
 			<div class="_gaps">
 				<!-- mk-go 独自: リレー経由投稿を DB に保存せず Redis で揮発させる (#2332)。
 				     設定対象がリレー経由の投稿なので、購読の管理と同じ画面に置く。 -->
-				<MkFolder>
-					<template #icon><i class="ti ti-flame"></i></template>
-					<template #label><SearchLabel>{{ i18n.ts.ephemeralRelayNotes }}</SearchLabel></template>
+				<SearchMarker v-slot="slotProps" :keywords="['relay', 'ephemeral', 'note']">
+					<MkFolder :defaultOpen="slotProps.isParentOfTarget">
+						<template #icon><i class="ti ti-flame"></i></template>
+						<template #label><SearchLabel>{{ i18n.ts.ephemeralRelayNotes }}</SearchLabel></template>
 
-					<div class="_gaps_m">
-						<MkInfo warn>{{ i18n.ts.ephemeralRelayNotesWarning }}</MkInfo>
+						<div class="_gaps_m">
+							<MkInfo warn>{{ i18n.ts.ephemeralRelayNotesWarning }}</MkInfo>
 
-						<SearchMarker>
-							<MkSwitch v-model="enableEphemeralRelayNotes">
-								<SearchLabel>{{ i18n.ts.enableEphemeralRelayNotes }}</SearchLabel>
-								<template #caption><SearchText>{{ i18n.ts.enableEphemeralRelayNotesDescription }}</SearchText></template>
-							</MkSwitch>
-						</SearchMarker>
-
-						<template v-if="enableEphemeralRelayNotes">
 							<SearchMarker>
-								<MkInput v-model="ephemeralRelayNoteTtlMinutes" type="number" :min="1">
-									<template #label><SearchLabel>{{ i18n.ts.ephemeralRelayNoteTtl }}</SearchLabel></template>
-									<template #suffix>{{ i18n.ts._time.minute }}</template>
-									<template #caption><SearchText>{{ i18n.ts.ephemeralRelayNoteTtlDescription }}</SearchText></template>
-								</MkInput>
+								<MkSwitch v-model="enableEphemeralRelayNotes">
+									<SearchLabel>{{ i18n.ts.enableEphemeralRelayNotes }}</SearchLabel>
+									<template #caption><SearchText>{{ i18n.ts.enableEphemeralRelayNotesDescription }}</SearchText></template>
+								</MkSwitch>
 							</SearchMarker>
-						</template>
 
-						<MkButton primary @click="saveEphemeralSettings"><i class="ti ti-check"></i> {{ i18n.ts.save }}</MkButton>
-					</div>
-				</MkFolder>
+							<template v-if="enableEphemeralRelayNotes">
+								<SearchMarker>
+									<MkInput v-model="ephemeralRelayNoteTtlMinutes" type="number" :min="1">
+										<template #label><SearchLabel>{{ i18n.ts.ephemeralRelayNoteTtl }}</SearchLabel></template>
+										<template #suffix>{{ i18n.ts._time.minute }}</template>
+										<template #caption><SearchText>{{ i18n.ts.ephemeralRelayNoteTtlDescription }}</SearchText></template>
+									</MkInput>
+								</SearchMarker>
+							</template>
+
+							<MkButton primary @click="saveEphemeralSettings"><i class="ti ti-check"></i> {{ i18n.ts.save }}</MkButton>
+						</div>
+					</MkFolder>
+				</SearchMarker>
 
 				<!-- mk-go 独自: リレー由来の孤児リモートユーザーを定期削除する (Elythia-Network/elythia#2340)。
 				     転送活動の署名検証は著者の公開鍵を DB に載せる必要があり、その経路だけは
 				     揮発化できないため後追いで回収する。 -->
-				<MkFolder>
-					<template #icon><i class="ti ti-user-off"></i></template>
-					<template #label><SearchLabel>{{ i18n.ts.relayOrphanUserCleanup }}</SearchLabel></template>
+				<SearchMarker v-slot="slotProps" :keywords="['relay', 'orphan', 'user', 'cleanup']">
+					<MkFolder :defaultOpen="slotProps.isParentOfTarget">
+						<template #icon><i class="ti ti-user-off"></i></template>
+						<template #label><SearchLabel>{{ i18n.ts.relayOrphanUserCleanup }}</SearchLabel></template>
 
-					<div class="_gaps_m">
-						<MkInfo>{{ i18n.ts.relayOrphanUserCleanupInfo }}</MkInfo>
+						<div class="_gaps_m">
+							<MkInfo>{{ i18n.ts.relayOrphanUserCleanupInfo }}</MkInfo>
 
-						<SearchMarker>
-							<MkSwitch v-model="enableRelayOrphanUserCleanup">
-								<SearchLabel>{{ i18n.ts.enableRelayOrphanUserCleanup }}</SearchLabel>
-								<template #caption><SearchText>{{ i18n.ts.enableRelayOrphanUserCleanupDescription }}</SearchText></template>
-							</MkSwitch>
-						</SearchMarker>
-
-						<template v-if="enableRelayOrphanUserCleanup">
 							<SearchMarker>
-								<MkInput v-model="relayOrphanUserGraceDays" type="number" :min="7">
-									<template #label><SearchLabel>{{ i18n.ts.relayOrphanUserGraceDays }}</SearchLabel></template>
-									<template #suffix>{{ i18n.ts._time.day }}</template>
-									<template #caption><SearchText>{{ i18n.ts.relayOrphanUserGraceDaysDescription }}</SearchText></template>
-								</MkInput>
+								<MkSwitch v-model="enableRelayOrphanUserCleanup">
+									<SearchLabel>{{ i18n.ts.enableRelayOrphanUserCleanup }}</SearchLabel>
+									<template #caption><SearchText>{{ i18n.ts.enableRelayOrphanUserCleanupDescription }}</SearchText></template>
+								</MkSwitch>
 							</SearchMarker>
-						</template>
 
-						<MkButton primary @click="saveOrphanCleanupSettings"><i class="ti ti-check"></i> {{ i18n.ts.save }}</MkButton>
-					</div>
-				</MkFolder>
+							<template v-if="enableRelayOrphanUserCleanup">
+								<SearchMarker>
+									<MkInput v-model="relayOrphanUserGraceDays" type="number" :min="7">
+										<template #label><SearchLabel>{{ i18n.ts.relayOrphanUserGraceDays }}</SearchLabel></template>
+										<template #suffix>{{ i18n.ts._time.day }}</template>
+										<template #caption><SearchText>{{ i18n.ts.relayOrphanUserGraceDaysDescription }}</SearchText></template>
+									</MkInput>
+								</SearchMarker>
+							</template>
+
+							<MkButton primary @click="saveOrphanCleanupSettings"><i class="ti ti-check"></i> {{ i18n.ts.save }}</MkButton>
+						</div>
+					</MkFolder>
+				</SearchMarker>
 
 				<div v-for="relay in relays" :key="relay.inbox" class="relaycxt _panel" style="padding: 16px;">
 					<div>{{ relay.inbox }}</div>
