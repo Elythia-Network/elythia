@@ -349,6 +349,10 @@ func (i *Inspector) ListRetryTasks(qname string, page, pageSize int) ([]*driver.
 // listDelayedFiltered fetches the delayed bucket in full, filters by
 // `atm` (= attemptsMade) according to retry, and applies page/pageSize
 // in Go. Pagination is post-filter so callers see consistent counts.
+//
+// **全ページをたどる用途に使わない。** 呼ぶたびに delayed の全件を読むので、
+// ページを進めると O(N²/pageSize) になる (#3169)。全件をたどるときは
+// ListDelayedTasks を使い、振り分けは呼び出し側で行う。
 func (i *Inspector) listDelayedFiltered(qname string, retry bool, page, pageSize int) ([]*driver.TaskSummary, error) {
 	q := i.driver.queueFor(qname)
 	if q == nil {
@@ -453,10 +457,10 @@ func (i *Inspector) list(qname string, bucket mkq.JobBucket, page, pageSize int)
 	// **新しい順で取る (#3167)。** upstream の admin/queue/jobs は
 	// `queue.getJobs(types, 0, 100)` で asc=false (新しい順)。古い順だと、
 	// 完了済みが数万件溜まったキューで何か月も前の job しか見えない。
-	// 予約投稿の取り消し (`ClearScheduledNote`) は全ページを走査するので並びに
-	// 依存しない。**admin の clear / promote は先頭ページ (100 件) しか見ない**ので
-	// 依存する — clear は先頭ページが保護対象 (予約投稿) で埋まると打ち切り、
-	// promote はどの 100 件を促進するかがこの並びで決まる。
+	// 予約投稿の取り消し (`ClearScheduledNote`) と admin の clear / promote は
+	// 全ページをたどってから消す・促進するので、並びに依存しない (#3169)。
+	// **ページの添字の範囲だけを読む。** たどり切っても読み出しは件数分で済む
+	// (振り分けた一覧の listDelayedFiltered は、呼ぶたびに delayed の全件を読む)。
 	jobs, err := q.ListJobs(inspectorCtx(), bucket, start, end, false)
 	if err != nil {
 		return nil, fmt.Errorf("mkqdriver: list %s/%s: %w", qname, bucket, err)

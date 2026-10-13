@@ -3,6 +3,7 @@ package admin_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -81,6 +82,13 @@ type stubQueueInspector struct {
 	queuesErr     error
 	runErr        error
 	deleteErr     error
+	// filteredCalls / delayedCalls count ListScheduled+RetryTasks and
+	// ListDelayedTasks calls.
+	filteredCalls int
+	delayedCalls  int
+	// deleteFailIDs makes DeleteTask fail for these ids only (cron repeat
+	// jobs that RemoveJob refuses).
+	deleteFailIDs map[string]bool
 }
 
 func (s *stubQueueInspector) PauseQueue(q string) error {
@@ -109,6 +117,9 @@ func (s *stubQueueInspector) GetQueueInfo(q string) (*apiadmin.QueueInfoResult, 
 func (s *stubQueueInspector) DeleteTask(q, id string) error {
 	if s.deleteErr != nil {
 		return s.deleteErr
+	}
+	if s.deleteFailIDs[id] {
+		return errors.New("cannot remove repeat job")
 	}
 	s.deleted = append(s.deleted, id)
 	// 実 inspector 同様、削除した task を各 state list から除く (clearQueueState
@@ -147,28 +158,50 @@ func (s *stubQueueInspector) RunTask(_, id string) error {
 	s.runCalls = append(s.runCalls, id)
 	return nil
 }
-func (s *stubQueueInspector) ListPendingTasks(q string, _, _ int) ([]*apiadmin.QueueTaskSummary, error) {
-	return s.pending[q], nil
+
+// stubPage slices rows like the real inspector does: 1-indexed page, newest
+// first as stored. 実 inspector と同じくページで切らないと、先頭ページより
+// 後ろを扱う経路 (#3169) を試せない。
+func stubPage(rows []*apiadmin.QueueTaskSummary, page, pageSize int) []*apiadmin.QueueTaskSummary {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 30
+	}
+	start := (page - 1) * pageSize
+	if start >= len(rows) {
+		return nil
+	}
+	return rows[start:min(start+pageSize, len(rows))]
 }
-func (s *stubQueueInspector) ListActiveTasks(q string, _, _ int) ([]*apiadmin.QueueTaskSummary, error) {
-	return s.active[q], nil
+
+func (s *stubQueueInspector) ListPendingTasks(q string, page, pageSize int) ([]*apiadmin.QueueTaskSummary, error) {
+	return stubPage(s.pending[q], page, pageSize), nil
 }
-func (s *stubQueueInspector) ListScheduledTasks(q string, _, _ int) ([]*apiadmin.QueueTaskSummary, error) {
-	return s.scheduled[q], nil
+func (s *stubQueueInspector) ListActiveTasks(q string, page, pageSize int) ([]*apiadmin.QueueTaskSummary, error) {
+	return stubPage(s.active[q], page, pageSize), nil
 }
-func (s *stubQueueInspector) ListRetryTasks(q string, _, _ int) ([]*apiadmin.QueueTaskSummary, error) {
-	return s.retry[q], nil
+func (s *stubQueueInspector) ListScheduledTasks(q string, page, pageSize int) ([]*apiadmin.QueueTaskSummary, error) {
+	s.filteredCalls++
+	return stubPage(s.scheduled[q], page, pageSize), nil
+}
+func (s *stubQueueInspector) ListRetryTasks(q string, page, pageSize int) ([]*apiadmin.QueueTaskSummary, error) {
+	s.filteredCalls++
+	return stubPage(s.retry[q], page, pageSize), nil
 }
 
 // ListDelayedTasks は delayed バケット全体 = scheduled + retry を返す。
-func (s *stubQueueInspector) ListDelayedTasks(q string, _, _ int) ([]*apiadmin.QueueTaskSummary, error) {
-	return append(append([]*apiadmin.QueueTaskSummary{}, s.scheduled[q]...), s.retry[q]...), nil
+func (s *stubQueueInspector) ListDelayedTasks(q string, page, pageSize int) ([]*apiadmin.QueueTaskSummary, error) {
+	s.delayedCalls++
+	all := append(append([]*apiadmin.QueueTaskSummary{}, s.scheduled[q]...), s.retry[q]...)
+	return stubPage(all, page, pageSize), nil
 }
-func (s *stubQueueInspector) ListCompletedTasks(q string, _, _ int) ([]*apiadmin.QueueTaskSummary, error) {
-	return s.completed[q], nil
+func (s *stubQueueInspector) ListCompletedTasks(q string, page, pageSize int) ([]*apiadmin.QueueTaskSummary, error) {
+	return stubPage(s.completed[q], page, pageSize), nil
 }
-func (s *stubQueueInspector) ListFailedTasks(q string, _, _ int) ([]*apiadmin.QueueTaskSummary, error) {
-	return s.failed[q], nil
+func (s *stubQueueInspector) ListFailedTasks(q string, page, pageSize int) ([]*apiadmin.QueueTaskSummary, error) {
+	return stubPage(s.failed[q], page, pageSize), nil
 }
 func (s *stubQueueInspector) GetTaskInfo(_, id string) (*apiadmin.QueueTaskSummary, error) {
 	if t, ok := s.task[id]; ok {
@@ -614,25 +647,21 @@ func TestQueueInboxDelayed_AggregatesByHostFromSignature(t *testing.T) {
 //
 // 他の QueueInspector method は embedded stubQueueInspector の zero-value に
 // fall through する (空 map / 空 slice 返却)。cap test では fetchAllDelayedTasks
-// 経由の Scheduled/Retry list call しか走らないので問題なし。
+// 経由の delayed list call しか走らないので問題なし。
 type pagedInspector struct {
 	stubQueueInspector
 	payload []byte
 	calls   int
 }
 
-func (p *pagedInspector) ListScheduledTasks(_ string, _, pageSize int) ([]*apiadmin.QueueTaskSummary, error) {
+func (p *pagedInspector) ListDelayedTasks(_ string, page, pageSize int) ([]*apiadmin.QueueTaskSummary, error) {
 	p.calls++
 	rows := make([]*apiadmin.QueueTaskSummary, 0, pageSize)
 	for i := 0; i < pageSize; i++ {
-		rows = append(rows, &apiadmin.QueueTaskSummary{Payload: p.payload})
+		// ID は重複除去に掛からないよう、ページごとに変える。
+		rows = append(rows, &apiadmin.QueueTaskSummary{ID: fmt.Sprintf("%d-%d", page, i), Payload: p.payload})
 	}
 	return rows, nil
-}
-
-func (p *pagedInspector) ListRetryTasks(_ string, _, _ int) ([]*apiadmin.QueueTaskSummary, error) {
-	// retry list は常に空 = scheduled の cap だけを test 対象にする。
-	return nil, nil
 }
 
 // TestQueueDeliverDelayed_PageCapBoundsRunaway: inspector が常に full page を
@@ -660,7 +689,7 @@ func TestQueueDeliverDelayed_PageCapBoundsRunaway(t *testing.T) {
 	// 打ち切られる。
 	require.Len(t, got, 1)
 	assertHostCount(t, got, 0, "always.example", pageCap*apiadmin.DelayedTasksFetchPageSize)
-	// inspector への ListScheduledTasks 呼び出しは cap 回数で打ち切られる。
+	// inspector への ListDelayedTasks 呼び出しは cap 回数で打ち切られる。
 	assert.Equal(t, pageCap, insp.calls,
 		"page iteration must stop at delayedTasksMaxPages")
 }
@@ -1769,4 +1798,190 @@ func TestQueueClear_ProtectionOnlyAppliesToPendingBuckets(t *testing.T) {
 			}
 		})
 	}
+}
+
+// stubTasks returns n tasks of typ with ids prefix-0 .. prefix-(n-1).
+func stubTasks(prefix, typ string, n int) []*apiadmin.QueueTaskSummary {
+	out := make([]*apiadmin.QueueTaskSummary, n)
+	for i := range out {
+		out[i] = &apiadmin.QueueTaskSummary{ID: fmt.Sprintf("%s-%d", prefix, i), Type: typ}
+	}
+	return out
+}
+
+func idsOf(tasks []*apiadmin.QueueTaskSummary) []string {
+	out := make([]string, len(tasks))
+	for i, t := range tasks {
+		out[i] = t.ID
+	}
+	return out
+}
+
+// **先頭ページが保護対象で埋まっていても、その後ろを消すこと (#3169)。**
+//
+// 以前は先頭ページ (100 件) を引いては消し、全部が保護対象なら打ち切ったので、
+// 予約投稿が 100 件を超えて先頭にあると、後ろの配送を 1 件も消さなかった。
+func TestQueueClear_ReachesPastProtectedFirstPage(t *testing.T) {
+	for _, tc := range []struct {
+		state string
+		fill  func(*stubQueueInspector, []*apiadmin.QueueTaskSummary)
+	}{
+		{"delayed", func(s *stubQueueInspector, rows []*apiadmin.QueueTaskSummary) {
+			s.scheduled = map[string][]*apiadmin.QueueTaskSummary{"deliver": rows}
+		}},
+		{"wait", func(s *stubQueueInspector, rows []*apiadmin.QueueTaskSummary) {
+			s.pending = map[string][]*apiadmin.QueueTaskSummary{"deliver": rows}
+		}},
+		{"*", func(s *stubQueueInspector, rows []*apiadmin.QueueTaskSummary) {
+			s.retry = map[string][]*apiadmin.QueueTaskSummary{"deliver": rows}
+		}},
+	} {
+		t.Run(tc.state, func(t *testing.T) {
+			h, _, _, _ := newTestHandler(t)
+			protected := stubTasks("note", queue.TaskTypePostScheduledNote, 150)
+			deliver := stubTasks("deliver", queue.TaskTypeDeliver, 30)
+			insp := &stubQueueInspector{}
+			tc.fill(insp, append(append([]*apiadmin.QueueTaskSummary{}, protected...), deliver...))
+			h.SetQueueInspector(insp)
+
+			rec := doPost(h.QueueClear, `{"queue":"deliver","state":"`+tc.state+`"}`, adminUser)
+			require.Equal(t, http.StatusNoContent, rec.Code)
+			assert.ElementsMatch(t, idsOf(deliver), insp.deleted,
+				"保護対象の後ろにある配送を消し、保護対象は消さないこと")
+		})
+	}
+}
+
+// **消せない task があっても、その後ろを消し続けること (#3169)。** cron 由来の
+// repeat job は RemoveJob が拒否する。先頭がそれで埋まっていても止めない。
+func TestQueueClear_ContinuesPastUndeletableTasks(t *testing.T) {
+	h, _, _, _ := newTestHandler(t)
+	stuck := stubTasks("repeat", queue.TaskTypeDeliver, 150)
+	deliver := stubTasks("deliver", queue.TaskTypeDeliver, 30)
+	insp := &stubQueueInspector{
+		scheduled:     map[string][]*apiadmin.QueueTaskSummary{"deliver": append(append([]*apiadmin.QueueTaskSummary{}, stuck...), deliver...)},
+		deleteFailIDs: map[string]bool{},
+	}
+	for _, t := range stuck {
+		insp.deleteFailIDs[t.ID] = true
+	}
+	h.SetQueueInspector(insp)
+
+	rec := doPost(h.QueueClear, `{"queue":"deliver","state":"delayed"}`, adminUser)
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	assert.ElementsMatch(t, idsOf(deliver), insp.deleted)
+}
+
+// **promote は先頭の 100 件だけでなく全件を対象にすること (#3169)。** upstream の
+// `queue.promoteJobs()` は全件が対象。
+func TestQueuePromoteJobs_PromotesBeyondFirstPage(t *testing.T) {
+	h, _, _, _ := newTestHandler(t)
+	protected := stubTasks("note", queue.TaskTypePostScheduledNote, 150)
+	retry := stubTasks("retry", queue.TaskTypeDeliver, 120)
+	insp := &stubQueueInspector{
+		scheduled: map[string][]*apiadmin.QueueTaskSummary{"deliver": protected},
+		retry:     map[string][]*apiadmin.QueueTaskSummary{"deliver": retry},
+	}
+	h.SetQueueInspector(insp)
+
+	rec := doPost(h.QueuePromoteJobs, `{"queue":"deliver"}`, adminUser)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.EqualValues(t, 120, got["promoted"])
+	assert.ElementsMatch(t, idsOf(retry), insp.runCalls)
+}
+
+// **delayed は振り分けた一覧ではなく、delayed 全体の一覧でたどること (#3169)。**
+//
+// mkq の scheduled / retry の一覧は、atm で振り分けてからページを切るので、
+// 1 ページ読むたびに delayed の全件を Redis から読み直す。それでページを
+// 進めると、retry が 5 万件あるときに約 2,500 万回の読み出しになる。delayed
+// 全体の一覧は添字の範囲だけを読むので、たどり切っても N 回で済む
+// (mkqdriver の TestInspector_ListDelayedTasks_WalkReadsEachJobOnce)。
+func TestQueueBulkOps_WalkDelayedOnce(t *testing.T) {
+	const n = 5000
+	for _, tc := range []struct {
+		name string
+		call func(h *apiadmin.Handler) int
+	}{
+		{"clear delayed", func(h *apiadmin.Handler) int {
+			return doPost(h.QueueClear, `{"queue":"deliver","state":"delayed"}`, adminUser).Code
+		}},
+		{"clear all", func(h *apiadmin.Handler) int {
+			return doPost(h.QueueClear, `{"queue":"deliver","state":"*"}`, adminUser).Code
+		}},
+		{"promote", func(h *apiadmin.Handler) int {
+			return doPost(h.QueuePromoteJobs, `{"queue":"deliver"}`, adminUser).Code
+		}},
+		{"deliver-delayed", func(h *apiadmin.Handler) int {
+			return doPost(h.QueueDeliverDelayed, `{}`, adminUser).Code
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, _, _, _ := newTestHandler(t)
+			insp := &stubQueueInspector{
+				retry: map[string][]*apiadmin.QueueTaskSummary{"deliver": stubTasks("retry", queue.TaskTypeDeliver, n)},
+			}
+			h.SetQueueInspector(insp)
+
+			code := tc.call(h)
+			require.Less(t, code, 300)
+			assert.Zero(t, insp.filteredCalls, "振り分けた一覧を使わないこと")
+			// 5000 件 = 満杯の 50 ページ + 空の 1 ページ。
+			assert.Equal(t, n/apiadmin.DelayedTasksFetchPageSize+1, insp.delayedCalls)
+		})
+	}
+}
+
+// churnInspector wraps stubQueueInspector and simulates a delayed bucket that
+// changes while it is walked: each ListDelayedTasks call first pushes a new
+// job to the head (newest first), and the first page loses one entry whose
+// HASH vanished (mkq skips it).
+type churnInspector struct {
+	stubQueueInspector
+	pushed int
+}
+
+func (c *churnInspector) ListDelayedTasks(q string, page, pageSize int) ([]*apiadmin.QueueTaskSummary, error) {
+	c.pushed++
+	head := &apiadmin.QueueTaskSummary{ID: fmt.Sprintf("new-%d", c.pushed), Type: queue.TaskTypeDeliver}
+	c.retry[q] = append([]*apiadmin.QueueTaskSummary{head}, c.retry[q]...)
+	rows, err := c.stubQueueInspector.ListDelayedTasks(q, page, pageSize)
+	if page == 1 && len(rows) > 0 {
+		rows = rows[1:]
+	}
+	return rows, err
+}
+
+// **走査中に一覧が動いても、読み飛ばさず、同じ job を二度扱わないこと (#3169)。**
+//
+// 新しい job が先頭に入ると、既に読んだ job が後ろへずれて次のページにもう一度
+// 出る。重複を除かないと promote が同じ job を二度促進し、件数も水増しされる。
+// また mkq は HASH が既に無い job を飛ばすので、途中のページが 100 件に満たない
+// ことがある。そこで止まると後ろを取りこぼす。
+func TestQueuePromoteJobs_WalkSurvivesChurn(t *testing.T) {
+	h, _, _, _ := newTestHandler(t)
+	insp := &churnInspector{}
+	insp.retry = map[string][]*apiadmin.QueueTaskSummary{"deliver": stubTasks("retry", queue.TaskTypeDeliver, 250)}
+	h.SetQueueInspector(insp)
+
+	rec := doPost(h.QueuePromoteJobs, `{"queue":"deliver"}`, adminUser)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	counts := map[string]int{}
+	for _, id := range insp.runCalls {
+		counts[id]++
+	}
+	for id, n := range counts {
+		assert.Equal(t, 1, n, "%s を二度促進しないこと", id)
+	}
+	// 1 ページ目で欠けた 1 件 (走査の最初に先頭へ入った new-1) 以外は、
+	// 元からある 250 件すべてに届くこと。
+	for i := 0; i < 250; i++ {
+		assert.Contains(t, counts, fmt.Sprintf("retry-%d", i))
+	}
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.EqualValues(t, len(insp.runCalls), got["promoted"])
 }

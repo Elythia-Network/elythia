@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -2014,4 +2016,65 @@ func TestServer_RateLimit_IsPerQueueNotPerWorker(t *testing.T) {
 			workers, d, floor)
 	}
 	t.Logf("worker=1: %s / worker=16: %s (per-queue なら同程度)", elapsed[1], elapsed[16])
+}
+
+// TestInspector_ListDelayedTasks_WalkReadsEachJobOnce: delayed を最後のページまで
+// たどったときの Redis の読み出しが O(N) に収まることを固定する (#3169)。
+// admin の clear / promote と予約投稿の取り消しは、この一覧でたどる。
+// scheduled / retry に振り分けた一覧はページごとに delayed の全件を読み直すので、
+// 同じことをすると O(N²/pageSize) になる。
+func TestInspector_ListDelayedTasks_WalkReadsEachJobOnce(t *testing.T) {
+	d := newDriver(t)
+	ctx := context.Background()
+
+	const n = 1050
+	for i := 0; i < n; i++ {
+		require.NoError(t, d.Client().Enqueue(ctx,
+			"ins:walk", nil,
+			driver.WithQueue("deliver"),
+			driver.WithProcessIn(time.Hour+time.Duration(i)*time.Second),
+		))
+	}
+	// 半分を retry-backoff 待ち (atm > 0) にする。振り分けに依存しないことを見る。
+	for i := 1; i <= n; i += 2 {
+		require.NoError(t, testRedis.Client.HSet(ctx, fmt.Sprintf("bull:deliver:%d", i), "atm", 1).Err())
+	}
+
+	require.NoError(t, testRedis.Client.ConfigResetStat(ctx).Err())
+	ins := d.Inspector()
+	seen := make(map[string]struct{})
+	const pageSize = 100
+	for page := 1; ; page++ {
+		rows, err := ins.ListDelayedTasks("deliver", page, pageSize)
+		require.NoError(t, err)
+		// 本番 (admin の walkQueueTasks) と同じく、空のページまで進む。
+		if len(rows) == 0 {
+			break
+		}
+		for _, r := range rows {
+			seen[r.ID] = struct{}{}
+		}
+	}
+	assert.Len(t, seen, n)
+	assert.Equal(t, int64(n), hgetallCalls(t), "each job must be read once")
+}
+
+// hgetallCalls returns the number of HGETALL calls since CONFIG RESETSTAT.
+func hgetallCalls(t *testing.T) int64 {
+	t.Helper()
+	info, err := testRedis.Client.Info(context.Background(), "commandstats").Result()
+	require.NoError(t, err)
+	for _, line := range strings.Split(info, "\n") {
+		if !strings.HasPrefix(line, "cmdstat_hgetall:") {
+			continue
+		}
+		for _, kv := range strings.Split(strings.TrimPrefix(strings.TrimSpace(line), "cmdstat_hgetall:"), ",") {
+			if v, ok := strings.CutPrefix(kv, "calls="); ok {
+				calls, err := strconv.ParseInt(v, 10, 64)
+				require.NoError(t, err)
+				return calls
+			}
+		}
+	}
+	return 0
 }
