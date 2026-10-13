@@ -274,7 +274,7 @@ package load エラーで解析が空振りしうる。**ローカルの `go` �
 `changes` が落ちたときも赤になる (判定できないまま緑にしないため)。
 
 - `frontend-lint`: 10 workspace の eslint、typecheck (frontend は `vue-tsc --noEmit`、ほかに sw / misskey-js / elythia-js)、
-  check-dts とその self test、SPDX ヘッダー、locale の検証、misskey-js の API レポート、
+  check-dts とその self test、SPDX ヘッダーとその検査ツールの self test、locale の検証、misskey-js の API レポート、
   `emoji-regex-check` (#3324) のいずれか
 - `frontend-test`: 本番設定のビルド、frontend の vitest、misskey-js のテストのいずれか
 
@@ -679,7 +679,7 @@ checkout / setup-go を除くと step は実行順に 3 つ。**required job な
     `internal/entitycompat` の `frontend_changes_test` が実際の git の差分で確かめている
   - `frontend-lint`: `make plugins-all` → `pnpm i --frozen-lockfile` → `pnpm build` →
     10 workspace の eslint、typecheck (frontend / sw / misskey-js / elythia-js。frontend は `vue-tsc --noEmit`)、
-    check-dts とその self test、SPDX ヘッダー、locale の検証、misskey-js の API レポート、
+    check-dts とその self test、SPDX ヘッダーとその検査ツールの self test、locale の検証、misskey-js の API レポート、
     `make emoji-regex-check` (#3324)。同梱サンプル入りの統合バイナリの build (#2495) は、
     Node が要らないので毎回走る required の `build` job に置いた (Go だけの変更で
     `cmd/elythia` 側の配線が崩れても拾えるように)

@@ -158,7 +158,7 @@ make frontend-lint / frontend-test   # frontend/のeslint / vitest
 `frontend/`は本家Misskeyのfrontendを取り込んだpnpm workspaceで、本体のコミットとして直接直す(#3379)。詳細は[docs/contributing.md](docs/contributing.md#fork-frontend-frontend-を触るとき)にある。
 
 - **`frontend/`を触ったら、`make frontend-check` / `make frontend-lint` / `make frontend-test`も通す。** `make check`はGoしか見ない。CIではrequiredの`frontend`が見る
-- **新しいファイルにも本家と同じSPDXヘッダーを付ける。** `frontend/scripts/check-spdx.mjs`が落とす。Go側の「SPDXを付けない」方針とは逆
+- **新しく書くファイルには、`SPDX-FileCopyrightText: Elythia-Network`と`SPDX-License-Identifier: AGPL-3.0-only`のヘッダーを付ける。** 無いと`frontend/scripts/check-spdx.mjs`が落とす(`--fix`はこの名義で足す)。上流から移したコードを含むなら、上流の行も残す。Go側の「SPDXを付けない」方針とは逆
 - **本番のチェックアウトで`pnpm build` / `pnpm -r build` / `make e2e-frontend-build`を検証目的に流さない。** `frontend/built`を消してから作り直すので、そこをbind mountしている本番が404になる。検証は別のworktreeで行う
 - 生成物の`server-plugins.generated.ts`は追跡していない。無ければ`make plugins`で作る
 
@@ -301,6 +301,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 
 このファイル自体を変えたときだけ、1行で追記します(新しいものを上に)。経緯の本文はリンク先にあります。個別のfixの履歴は`CHANGELOG.md`にあります。
 
+- 2026-10-13: frontendで新しく書くファイルのSPDXヘッダーをElythia-Networkの名義にしたので、Section 5のfrontendの節を更新した (#3533) → [docs/contributing.md](docs/contributing.md#go-のソースに-spdx-ヘッダーは付けない)
 - 2026-10-08: forkのmigrationの系列(`migration/local/`)を足したので、Section 3の`migrate-down`の注釈を更新した (#3428) → [docs/fork-migrations.md](docs/fork-migrations.md)
 - 2026-10-07: frontendに`elythia-js`のworkspaceを足したので、Section 8の`frontend`の行のeslintの対象を10 workspaceにした (#3418) → [docs/contributing.md](docs/contributing.md#elythia-独自の-api-の型-frontendpackageselythia-js)
 - 2026-10-07: `docs/divergence.md`を目次にし、中身を`docs/divergence/`の領域ごとのファイルへ分けたので、冒頭の方針の案内を更新した (#3414) → [docs/divergence.md](docs/divergence.md)
