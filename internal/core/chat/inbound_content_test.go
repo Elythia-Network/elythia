@@ -9,8 +9,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/elythia-network/elythia/internal/activitypub/mfm"
+	apmfm "github.com/elythia-network/elythia/internal/activitypub/mfm"
 	"github.com/elythia-network/elythia/internal/model"
+
+	"github.com/elythia-network/mfm"
 )
 
 // chatMessageTextMaxRunes (internal/core/chat) と同じ値。core 側は unexported
@@ -19,10 +21,10 @@ import (
 const testChatMessageTextMaxRunes = 4096
 
 // renderChatContent renders text the way the outbound renderer does
-// (`mfm.Parse` -> `mfm.ToHTML`) so the round-trip tests stay honest even if the
+// (`mfm.Parse` -> `apmfm.ToHTML`) so the round-trip tests stay honest even if the
 // sender side changes shape.
 func renderChatContent(text string) string {
-	return mfm.ToHTML(mfm.Parse(text), "remote.example")
+	return apmfm.ToHTML(mfm.Parse(text), "remote.example")
 }
 
 // 連合で届く 1-on-1 chat の `content` は HTML。MFM に戻してから保存しないと

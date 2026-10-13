@@ -89,7 +89,7 @@ jobs:
           # 切るのは、日本語などのパスが "frontend/\346..." と引用されて ^frontend/ に
           # 一致しなくなるため。
           files=$(git -c core.quotePath=false diff --no-renames --name-only "$base" HEAD)
-          if grep -qE '^(frontend/|plugins/|plugin/|tools/pluginbuild/|tools/emojiregex/|internal/activitypub/mfm/emoji_regex_gen\.go$|\.github/workflows/frontend\.yml$|Makefile$|go\.(mod|sum)$)' <<< "$files"; then
+          if grep -qE '^(frontend/|plugins/|plugin/|tools/pluginbuild/|tools/emojiregex/|\.github/workflows/frontend\.yml$|Makefile$|go\.(mod|sum)$)' <<< "$files"; then
             echo "frontend=true" >> "$GITHUB_OUTPUT"
           else
             echo "frontend=false" >> "$GITHUB_OUTPUT"

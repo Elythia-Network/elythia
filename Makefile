@@ -355,19 +355,19 @@ test-fast: ## 全テストを -race 抜きで実行 (反復用。コミット前
 	go test ./... -count=1 -shuffle=3
 
 .PHONY: emoji-regex emoji-regex-check
-emoji-regex: ## MFM の Unicode 絵文字の正規表現を frontend の解析器が持つ emoji-data の正規表現から生成 (#3324)
-	# 生成物 (internal/activitypub/mfm/emoji_regex_gen.go) を手で直さない。
+emoji-regex: ## frontend の MFM の解析器が持つ絵文字の正規表現を snapshot に書き写す (#3324)
 	# frontend/ に pnpm install 済みであること。正規表現は @elythia-network/mfm の
-	# built/emoji-regex.gen.js から読む (#3515)。記録された mfm-js か emoji-data の版が
-	# 変わったら、mfm-js の期待値 (internal/activitypub/mfm/testdata/emoji_mfmjs.json) も
-	# testdata/emoji_mfmjs.mjs で作り直す (どちらかの版がずれるとテストが落ちる)。
+	# built/emoji-regex.gen.js から読む (#3515)。サーバーの解析器 (Go のモジュール
+	# github.com/elythia-network/mfm、#3514) の emoji_regex_gen.go と一致しなければ、
+	# snapshot を書かずに落ちる。生成物はモジュールの側にあり、ここでは作らない。
 	GOWORK=off go run ./tools/emojiregex
 
-emoji-regex-check: ## 生成した絵文字の正規表現が frontend/ の MFM の解析器と一致するか検査
+emoji-regex-check: ## サーバーの MFM の解析器 (Go のモジュール) の絵文字の正規表現が frontend/ の解析器と一致するか検査
 	# **`make gates` には入れない** — node_modules が要る。frontend-check から呼ぶ。
-	# 生成物と snapshot の突き合わせは node_modules 無しで `go test ./tools/emojiregex/`
-	# が見る。こちらは snapshot (正規表現と、mfm-js / emoji-data の版) が frontend/ に
-	# pnpm install した @elythia-network/mfm と一致しているかを見る。
+	# Go のモジュールの生成物と snapshot の突き合わせは、node_modules 無しで
+	# `go test ./tools/emojiregex/` が見る。こちらは加えて、snapshot (正規表現と、
+	# mfm-js / emoji-data の版) が frontend/ に pnpm install した @elythia-network/mfm と
+	# 一致しているかを見る。
 	GOWORK=off go run ./tools/emojiregex -check
 
 plugin-doc-check: ## authoring.md の Go スニペットがコンパイルできるか検査

@@ -302,14 +302,14 @@ make frontend-test
 
 eslint (frontend だけ) を回すなら `make frontend-lint` (実測 55 秒)。
 
-**`emoji-regex-check` が落ちたとき (#3324):** MFM の Unicode 絵文字の正規表現 (`internal/activitypub/mfm/emoji_regex_gen.go`) が、`frontend/` に pnpm install した frontend の MFM の解析器 (`@elythia-network/mfm`、#3515) が持つ正規表現と食い違っている。解析器は、emoji-data の正規表現と、その元の emoji-data の版・使い方を写した mfm-js の版を `built/emoji-regex.gen.js` に書き出しており、生成ツールはそれを読む。`… is stale` なら解析器を上げたときに正規表現か版が変わったので、作り直して差分ごとコミットする。生成ツールが `declarations` や `flags`、構文のエラーで落ちたら、解析器の書き出す形か正規表現の構文が変わっているので、生成ツール (`tools/emojiregex/`) を直す。
+**`emoji-regex-check` が落ちたとき (#3324):** サーバーの MFM の解析器 (Go のモジュール `github.com/elythia-network/mfm`、#3514) が持つ Unicode 絵文字の正規表現 (モジュールの `emoji_regex_gen.go`) と、`frontend/` に pnpm install した frontend の MFM の解析器 (`@elythia-network/mfm`、#3515) が持つ正規表現が食い違っている。frontend の解析器は、emoji-data の正規表現と、その元の emoji-data の版・使い方を写した mfm-js の版を `built/emoji-regex.gen.js` に書き出しており、検査ツールはそれを Go の正規表現へ変換してモジュールのファイルと突き合わせる。どちらも Elythia-Network/mfm から出ているので、`… is stale` で Go のモジュールの側が名指しされたら、片方だけを上げているので、`go.mod` (`go get`) と `frontend/` の `@elythia-network/mfm` を同じリリースへ揃える。snapshot (`tools/emojiregex/testdata/source.txt`) が名指しされたら、`make emoji-regex` で書き写して差分ごとコミットする。検査ツールが `declarations` や `flags`、構文のエラーで落ちたら、解析器の書き出す形か正規表現の構文が変わっているので、検査ツール (`tools/emojiregex/`) を直す。
 
 ```bash
 make emoji-regex
-GOWORK=off go test ./internal/activitypub/mfm/ ./tools/emojiregex/
+GOWORK=off go test ./tools/emojiregex/
 ```
 
-emoji-data か mfm-js の版が変わったときは、`internal/activitypub/mfm/testdata/emoji_mfmjs.json` (mfm-js の期待値) も `emoji_mfmjs.mjs` で作り直す。frontend からは mfm-js を外した (#3515) ので、mfm-js を `packages/frontend/node_modules/mfm-js` に入れたディレクトリを引数に渡す。この手順は、`internal/activitypub/mfm` を同じ解析器へ置き換える #3514 で見直す。
+emoji-data か mfm-js の版が変わったときの mfm-js の期待値の作り直しは、Elythia-Network/mfm の側で行う (解析器のテストはそちらにある)。
 
 **`make uds-frontend-build` / `e2e-frontend-build` は検証に使わないこと。** 本番が
 bind-mount している (または切り替え後に bind-mount する) `frontend/built` を書き換えてしまう。
@@ -671,7 +671,7 @@ checkout / setup-go を除くと step は実行順に 3 つ。**required job な
 - job は 4 つ。
   - `changes`: 毎回動き、`git diff --name-only <base> HEAD` で frontend に関係する変更が
     あるかを判定する。対象は `frontend/`・`plugins/`・`plugin/`・`tools/pluginbuild/`・
-    `tools/emojiregex/`・`internal/activitypub/mfm/emoji_regex_gen.go`・workflow 自身・
+    `tools/emojiregex/`・workflow 自身・
     `Makefile`・`go.mod` / `go.sum`。リネームは移動元と移動先の両方を見る
     (`--no-renames`)。手動実行と、比べる先が無い push (ブランチの作成など) は
     関係ありとして扱う。**迷ったら関係ありに倒す** — 誤って

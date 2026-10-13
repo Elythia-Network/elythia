@@ -3,6 +3,7 @@ package mfm
 import (
 	"testing"
 
+	mfmparser "github.com/elythia-network/mfm"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -46,7 +47,7 @@ func TestEncodeURIComponent(t *testing.T) {
 }
 
 // TestSearch_MatchesUpstream checks the search node props against mfm-js 0.26.0
-// parse() and the HTML against upstream MfmService.toHtml (search branch:
+// mfmparser.Parse() and the HTML against upstream MfmService.toHtml (search branch:
 // href = escapeHtml("https://www.google.com/search?q=" + encodeURIComponent(query)),
 // text = escapeHtml(content)).
 func TestSearch_MatchesUpstream(t *testing.T) {
@@ -83,8 +84,8 @@ func TestSearch_MatchesUpstream(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.in, func(t *testing.T) {
-			nodes := Parse(c.in)
-			if assert.Len(t, nodes, 1) && assert.Equal(t, NodeSearch, nodes[0].Type) {
+			nodes := mfmparser.Parse(c.in)
+			if assert.Len(t, nodes, 1) && assert.Equal(t, mfmparser.NodeSearch, nodes[0].Type) {
 				assert.Equal(t, c.query, nodes[0].Props["query"])
 				assert.Equal(t, c.content, nodes[0].Props["content"])
 			}

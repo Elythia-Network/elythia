@@ -8,13 +8,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/elythia-network/elythia/internal/activitypub/mfm"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/hashtag"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/misc/idnhost"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
+	"github.com/elythia-network/mfm"
 
 	"github.com/elythia-network/elythia/internal/core/role"
 )

@@ -245,16 +245,16 @@ TypeORM の decorator から正規形を再現できないため **実 DB から
 
 ### 本家の版を上げた後に必須: MFM の絵文字の正規表現
 
-Elythia の MFM パーサは、mfm-js が依存する `@misskey-dev/emoji-data` の `emojiRegex` を Go の正規表現へ移したもの (`internal/activitypub/mfm/emoji_regex_gen.go`) で Unicode 絵文字を読む (#3324)。正規表現は、frontend の MFM の解析器 `@elythia-network/mfm` (#3515) が同梱しているもの (`built/emoji-regex.gen.js`) から読む。frontend は mfm-js を使わないので、本家が mfm-js を上げてもここは変わらない。`@elythia-network/mfm` を上げて、正規表現か、記録された emoji-data / mfm-js の版が変わると、`emoji-regex-check` (CI では `frontend` workflow の `frontend-lint`、手元では `make frontend-check` から呼ばれる) が落ちる (正規表現が同じでも、snapshot に記録した版と食い違うため)。
+Elythia の MFM の解析器は、サーバーが Go のモジュール `github.com/elythia-network/mfm` (#3514)、frontend が `@elythia-network/mfm` (#3515) で、どちらも Elythia-Network/mfm から出ている。Unicode 絵文字は、mfm-js が依存する `@misskey-dev/emoji-data` の `emojiRegex` で読む (#3324。Go のモジュールは Go の正規表現へ移したもの (`emoji_regex_gen.go`) を、frontend は `built/emoji-regex.gen.js` を同梱している)。どちらも mfm-js を使わないので、本家が mfm-js を上げてもここは変わらない。片方だけを上げて、正規表現か、記録された emoji-data / mfm-js の版が食い違うと、`emoji-regex-check` (CI では `frontend` workflow の `frontend-lint`、手元では `make frontend-check` から呼ばれる) が落ちる (正規表現が同じでも、snapshot に記録した版と食い違うため)。解析器を上げるときは、`go get` と `frontend/` の依存を同じリリースへ揃える。
 
 ```bash
-make emoji-regex     # 生成物と tools/emojiregex/testdata/source.txt を作り直す
-GOWORK=off go test ./internal/activitypub/mfm/ ./tools/emojiregex/
+make emoji-regex     # tools/emojiregex/testdata/source.txt を書き写す (Go のモジュールと食い違えば落ちる)
+GOWORK=off go test ./tools/emojiregex/
 ```
 
-emoji-data か mfm-js の版が変わったときは、`internal/activitypub/mfm/testdata/emoji_mfmjs.json` (mfm-js の期待値) も `emoji_mfmjs.mjs` で作り直す。frontend からは mfm-js を外した (#3515) ので、mfm-js を `packages/frontend/node_modules/mfm-js` に入れたディレクトリを引数に渡す。この手順は、`internal/activitypub/mfm` を同じ解析器へ置き換える #3514 で見直す。
+emoji-data か mfm-js の版が変わったときの mfm-js の期待値の作り直しは、Elythia-Network/mfm の側で行う。
 
-生成ツールは、解析器の書き出す形 (`emojiDataVersion` / `emojiMfmJsVersion` / `emojiRegex` の宣言が 1 つずつ、`emojiRegex` は `u` を付けない sticky (`y`) の `RegExp`) と、正規表現が使う構文 (`?` だけの量指定・サロゲートペア・決まった位置の否定の先読み) を前提にしている。前提が崩れると生成の時点で落ちるので、その場合は生成ツールを直す。
+検査ツールは、解析器の書き出す形 (`emojiDataVersion` / `emojiMfmJsVersion` / `emojiRegex` の宣言が 1 つずつ、`emojiRegex` は `u` を付けない sticky (`y`) の `RegExp`) と、正規表現が使う構文 (`?` だけの量指定・サロゲートペア・決まった位置の否定の先読み) を前提にしている。前提が崩れると変換の時点で落ちるので、その場合は検査ツールを直す。
 
 ### 本家の版を上げた後に必須: divergence doc の件数
 

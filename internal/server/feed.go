@@ -8,13 +8,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/elythia-network/elythia/internal/activitypub/mfm"
+	apmfm "github.com/elythia-network/elythia/internal/activitypub/mfm"
 	"github.com/elythia-network/elythia/internal/config"
 	corenote "github.com/elythia-network/elythia/internal/core/note"
 	"github.com/elythia-network/elythia/internal/core/ugcvisibility"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/labstack/echo/v4"
+
+	"github.com/elythia-network/mfm"
 )
 
 // feedNoteLimit mirrors upstream FeedService (take: 20).
@@ -455,6 +457,6 @@ func (r feedUserResolver) FindLocalByUsername(username string) (*model.User, err
 // JSON.parse(note.mentionedRemoteUsers) to MfmService.toHtml.
 func feedNoteHTML(host string) func(text, mentionedRemoteUsers string) string {
 	return func(text, mentionedRemoteUsers string) string {
-		return mfm.ToHTMLWithMentions(mfm.Parse(text), host, mfm.ParseMentionedRemoteUsers(mentionedRemoteUsers))
+		return apmfm.ToHTMLWithMentions(mfm.Parse(text), host, apmfm.ParseMentionedRemoteUsers(mentionedRemoteUsers))
 	}
 }

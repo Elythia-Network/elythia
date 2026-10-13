@@ -124,7 +124,7 @@ cd mk && docker compose up -d
 | `make tidy` | `go mod tidy`。**このリポジトリでは private plugin の解決に失敗するので使えない**。依存追加は `go get`、`go.sum` の充足検証は **`GOWORK=off go build`**。**`-mod=readonly` では効かない** — Go 1.16 以降それは既定値で、素の `go build` と同じ。効いていないのは `go.work` のほうで、workspace があると `go.sum` ではなく `go.work.sum` が使われ、`go.sum` から行を消しても**どちらの書き方でも exit 0 になる** (実測)。CI は `go.work` を持たない (生成物で gitignore 済み) ので、既存の `go build ./...` が既に検証している (→ [プラグインの書き方](plugins/authoring.md)) |
 | `make plugins` | `plugins/` を走査して組み込み用ファイルを生成 (#2480)。`make build` が内部で呼ぶ |
 | `make plugins-all` | `disabled` のプラグインも含めて生成 (CI 検証用) |
-| `make emoji-regex` | MFM の Unicode 絵文字の正規表現 (`internal/activitypub/mfm/emoji_regex_gen.go`) を、mfm-js が依存する `@misskey-dev/emoji-data` の `emojiRegex` から生成 (#3324)。正規表現は、frontend の MFM の解析器 `@elythia-network/mfm` が同梱しているものを読む (#3515)。`frontend/` に `pnpm install` 済みであること。生成物は手で直さない |
+| `make emoji-regex` | frontend の MFM の解析器 `@elythia-network/mfm` (#3515) が同梱する Unicode 絵文字の正規表現 (`@misskey-dev/emoji-data` の `emojiRegex`) を、snapshot (`tools/emojiregex/testdata/source.txt`) に書き写す (#3324)。サーバーの解析器 (Go のモジュール `github.com/elythia-network/mfm`、#3514) の `emoji_regex_gen.go` と一致しなければ落ちる。`frontend/` に `pnpm install` 済みであること |
 
 ### コード品質
 
@@ -330,7 +330,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_xxx" ON "yyy" ("zzz");
 - **golangci-lint** (`make golangci-lint`) — errcheck / govet / ineffassign / staticcheck
 
 #### frontendジョブ (`.github/workflows/frontend.yml`)
-- `ci.yml`ではなく別のworkflowにあり、pathsで絞らずに毎回起動する。`changes`ジョブが差分からfrontendに関係する変更か (`frontend/`・`plugins/`・`plugin/`・`tools/pluginbuild/`・`tools/emojiregex/`・`internal/activitypub/mfm/emoji_regex_gen.go`・workflow自身・`Makefile`・`go.mod` / `go.sum`。リネームは移動元と移動先の両方を見る) を判定し、関係なければ`frontend-lint` / `frontend-test`をskipする
+- `ci.yml`ではなく別のworkflowにあり、pathsで絞らずに毎回起動する。`changes`ジョブが差分からfrontendに関係する変更か (`frontend/`・`plugins/`・`plugin/`・`tools/pluginbuild/`・`tools/emojiregex/`・workflow自身・`Makefile`・`go.mod` / `go.sum`。リネームは移動元と移動先の両方を見る) を判定し、関係なければ`frontend-lint` / `frontend-test`をskipする
 - `frontend`ジョブは`if: always()`で両者を束ねる集約ジョブ。関係しない差分では成功し、関係する差分では両方の成功を要求する。`changes`が落ちたら失敗する
 - 中身と手元での再現は[ci.md](ci.md)にある。手元用の`make frontend-check`は残っているが、CIの同名ジョブは#3379で無くなった
 
