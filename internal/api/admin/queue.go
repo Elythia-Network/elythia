@@ -71,8 +71,8 @@ func (h *Handler) QueueClear(c echo.Context) error {
 
 // clearQueueState removes jobs of the given Bull state from queue, mirroring
 // upstream queue.clean(0,0,state). state '*' clears all clearable states.
-// mkq には state 単位の bulk-delete API が無いため、pending は DrainPending、
-// それ以外は state 別の list → DeleteTask で消す (best-effort)。
+// mkq には state 単位の bulk-delete API が無いため、state 別の一覧を最後まで
+// たどってから DeleteTask で消す (best-effort)。
 //
 // 注意点 (mkq 制約 / upstream との差):
 //
@@ -89,64 +89,97 @@ func (h *Handler) QueueClear(c echo.Context) error {
 // bulk-clear 経路が無いため no-op。
 //
 // (3) cron (repeat) 由来の delayed job は RemoveJob が拒否するため
-// clear('delayed') で消えない。
+// clear('delayed') で消えない。消せない job は飛ばして、後ろを消し続ける。
 //
-// (4) **1 リクエストで消し切らないことがある** (再実行で継続)。上限 1000 反復 ×
-// 100 件で約 100k。(1) の変更で wait もこの制限に入った (`DrainPending` は
-// 1 回で全部消していた)。
+// (4) **1 リクエストで消し切らないことがある** (再実行で継続)。1 バケットで
+// たどるのは delayedTasksMaxPages × delayedTasksFetchPageSize (約 100k) 件まで。
 func (h *Handler) clearQueueState(queue, state string) {
-	// deleteAll はリストが空になるまで先頭ページを引いて消す。削除で件数が
-	// 減るため page=1 を繰り返す。delete が 1 件も進まなければ無限ループを
-	// 避けて打ち切る。上限 1000 反復 (= 約 100k tasks) の安全弁付き。
 	// **保護を掛けるのは「これから動く」バケットだけ。** completed / failed は
 	// 既に終わった記録なので、消せなくすると**終了済みの予約投稿 /
 	// アカウント削除が永久に残る** (掃除の目的そのものが果たせない)。
-	deleteAll := func(lister func(string, int, int) ([]*QueueTaskSummary, error), protect bool) {
-		for i := 0; i < 1000; i++ {
-			rows, err := lister(queue, 1, 100)
-			if err != nil || len(rows) == 0 {
+	//
+	// **先頭ページだけを見て止めない (#3169)。** 以前は先頭ページを消しては
+	// 引き直し、ページが保護対象で埋まると打ち切っていたので、100 件を超える
+	// 予約投稿が先頭にあると、その後ろを 1 件も消さなかった。
+	clear := func(state string, list queueTaskLister, protect bool) {
+		var ids []string
+		walkQueueTasks(queue, state, list, func(t *QueueTaskSummary) {
+			if protect && isOperatorProtectedTask(t) {
 				return
 			}
-			progressed := false
-			skipped := 0
-			for _, t := range rows {
-				if protect && isOperatorProtectedTask(t) {
-					skipped++
-					continue
-				}
-				if h.queueInspector.DeleteTask(queue, t.ID) == nil {
-					progressed = true
-				}
-			}
-			// **保護対象しか残っていなければ打ち切る。** 進捗ゼロで回り続けない。
-			if !progressed || skipped == len(rows) {
-				return
-			}
+			ids = append(ids, t.ID)
+		})
+		for _, id := range ids {
+			_ = h.queueInspector.DeleteTask(queue, id)
 		}
 	}
 	// **pending も一括削除ではなく個別に消す。** `DeleteAllPendingTasks` は
 	// job type を見ないので、wait へ昇格した予約投稿やアカウント削除まで
 	// 巻き込む。保護対象を除いて消すために列挙経路を通す。
+	//
+	// delayed は scheduled と retry を分けずに `ListDelayedTasks` でたどる。
+	// 分けた一覧は atm で振り分けた後にページを切るので、1 ページ読むたびに
+	// delayed の全件を読み直す (#3169)。
 	switch state {
 	case "*":
-		deleteAll(h.queueInspector.ListPendingTasks, true)
-		deleteAll(h.queueInspector.ListScheduledTasks, true)
-		deleteAll(h.queueInspector.ListRetryTasks, true)
-		deleteAll(h.queueInspector.ListFailedTasks, false)
-		deleteAll(h.queueInspector.ListCompletedTasks, false)
+		clear("pending", h.queueInspector.ListPendingTasks, true)
+		clear("delayed", h.queueInspector.ListDelayedTasks, true)
+		clear("failed", h.queueInspector.ListFailedTasks, false)
+		clear("completed", h.queueInspector.ListCompletedTasks, false)
 	case "wait", "waiting", "pending":
-		deleteAll(h.queueInspector.ListPendingTasks, true)
+		clear("pending", h.queueInspector.ListPendingTasks, true)
 	case "delayed":
-		deleteAll(h.queueInspector.ListScheduledTasks, true)
-		deleteAll(h.queueInspector.ListRetryTasks, true)
+		clear("delayed", h.queueInspector.ListDelayedTasks, true)
 	case "failed":
-		deleteAll(h.queueInspector.ListFailedTasks, false)
+		clear("failed", h.queueInspector.ListFailedTasks, false)
 	case "completed":
-		deleteAll(h.queueInspector.ListCompletedTasks, false)
+		clear("completed", h.queueInspector.ListCompletedTasks, false)
 	default:
 		// active / paused / prioritized は単独 state での bulk-clear 経路が
 		// 無いため no-op。pause 中のジョブは wait にあるので "wait" で掃ける
 		// (上の注意点 (1))。
+	}
+}
+
+// queueTaskLister is one of the paged QueueInspector.List*Tasks methods.
+type queueTaskLister func(qname string, page, pageSize int) ([]*QueueTaskSummary, error)
+
+// walkQueueTasks calls fn for every task list returns, page by page, until an
+// empty page or delayedTasksMaxPages.
+//
+// **たどる間は消さない。** 一覧は添字の範囲で切るので、たどりながら消すと
+// 後ろの task が前へ詰まり、次のページで読み飛ばす。消すのは呼び出し側が
+// たどり終えてから行う。走査中に新しい job が先頭に入ると、既に読んだ task が
+// 後ろへずれて次のページにもう一度出るので、ID で重複を除く。
+func walkQueueTasks(queue, state string, list queueTaskLister, fn func(*QueueTaskSummary)) {
+	seen := make(map[string]struct{})
+	for page := 1; page <= delayedTasksMaxPages; page++ {
+		rows, err := list(queue, page, delayedTasksFetchPageSize)
+		if err != nil || len(rows) == 0 {
+			return
+		}
+		for _, t := range rows {
+			if t == nil {
+				continue
+			}
+			if _, dup := seen[t.ID]; dup {
+				continue
+			}
+			seen[t.ID] = struct{}{}
+			fn(t)
+		}
+		// **短いページでは止めず、空のページまで進む。** mkq は範囲で取った
+		// ID のうち、HASH が既に無いもの (読む間に消された job など) を飛ばす
+		// ので、途中のページが 100 件に満たないことがある。full page が続いた
+		// まま cap に到達した時だけ warn する (= データがまだ残っている可能性が
+		// 高い異常状態)。
+		if page == delayedTasksMaxPages && len(rows) == delayedTasksFetchPageSize {
+			slog.Warn("admin/queue: page cap reached, truncating",
+				"queue", queue, "state", state,
+				"maxPages", delayedTasksMaxPages,
+				"pageSize", delayedTasksFetchPageSize,
+				"collected", len(seen))
+		}
 	}
 }
 
@@ -175,30 +208,30 @@ func (h *Handler) QueueInboxDelayed(c echo.Context) error {
 	return c.JSON(http.StatusOK, aggregateByHost(tasks, inboxHostFromPayload))
 }
 
-// delayedTasksFetchPageSize は scheduled / retry を page 走査する際の 1 page
-// 当たり件数。100 は driver 側の page size 上限 (mkq は 100 超を 30 に丸める)
+// delayedTasksFetchPageSize は queue の一覧を page 走査する際 (walkQueueTasks) の
+// 1 page 当たり件数。100 は driver 側の page size 上限 (mkq は 100 超を 30 に丸める)
 // に収まる大きさ。
 const delayedTasksFetchPageSize = 100
 
-// delayedTasksMaxPages は scheduled / retry それぞれの page 走査の上限。
-// = 100K tasks per state, 200K total。これは defense-in-depth の二重目的:
+// delayedTasksMaxPages は 1 つの一覧 (バケット) を page 走査する際の上限。
+// = 100K tasks per bucket。これは defense-in-depth の二重目的:
 //
 //   - inspector が常に full page を返すような misbehavior 時の無限ループ防御
 //   - 連合先長期 down 等の pathological case で、admin panel が backend
 //     memory を食い潰さない soft cap
 //
 // 通常の運用では数千件で頭打ちになるはずなので、この上限を踏むのは異常状態。
-// 到達時は slog.Warn で diag を残し、収集できた分だけで集計を進める
-// (= panel に top hosts は出るので、admin はその情報を元に対処できる)。
+// 到達時は slog.Warn で diag を残し、収集できた分だけで集計・clear・promote を
+// 進める (= panel に top hosts は出るので、admin はその情報を元に対処できる)。
 //
 // var にしているのは test seam: cap 防御の挙動を確認する test が小さい
 // cap を一時設定するため。production code から書き換えてはならない。
 var delayedTasksMaxPages = 1000
 
-// fetchAllDelayedTasks fetches every scheduled+retry task for the queue by
-// iterating pages of size delayedTasksFetchPageSize until each list is
+// fetchAllDelayedTasks fetches every delayed (scheduled+retry) task for the
+// queue by iterating pages of size delayedTasksFetchPageSize until the list is
 // exhausted or delayedTasksMaxPages の上限に達するまで。結果は downstream の
-// host aggregation の union として返す。
+// host aggregation に渡す。
 //
 // Misskey TS の BullMQ getJobs(['delayed']) は全件取得が前提なので、通常
 // page が空になるまで走査するが、defense-in-depth として上限を設けている
@@ -207,35 +240,12 @@ func (h *Handler) fetchAllDelayedTasks(queueName string) []*QueueTaskSummary {
 	if h.queueInspector == nil {
 		return nil
 	}
+	// scheduled と retry を分けずにたどる。分けた一覧は 1 ページ読むたびに
+	// delayed の全件を読み直す (#3169)。
 	var all []*QueueTaskSummary
-	for _, spec := range []struct {
-		state string
-		fetch func(string, int, int) ([]*QueueTaskSummary, error)
-	}{
-		{"scheduled", h.queueInspector.ListScheduledTasks},
-		{"retry", h.queueInspector.ListRetryTasks},
-	} {
-		for page := 1; page <= delayedTasksMaxPages; page++ {
-			rows, err := spec.fetch(queueName, page, delayedTasksFetchPageSize)
-			if err != nil || len(rows) == 0 {
-				break
-			}
-			all = append(all, rows...)
-			// partial page を取った時点で正常にデータ尽きと判断、warn せず
-			// 抜ける。full page が続いたまま cap に到達した時だけ warn する
-			// (= データがまだ残っている可能性が高い異常状態)。
-			if len(rows) < delayedTasksFetchPageSize {
-				break
-			}
-			if page == delayedTasksMaxPages {
-				slog.Warn("admin/queue/delayed: page cap reached, truncating aggregation",
-					"queue", queueName, "state", spec.state,
-					"maxPages", delayedTasksMaxPages,
-					"pageSize", delayedTasksFetchPageSize,
-					"collected", len(all))
-			}
-		}
-	}
+	walkQueueTasks(queueName, "delayed", h.queueInspector.ListDelayedTasks, func(t *QueueTaskSummary) {
+		all = append(all, t)
+	})
 	return all
 }
 
@@ -543,9 +553,9 @@ func (h *Handler) listTasksForState(queue, state string, page, limit int) ([]*Qu
 
 // QueuePromoteJobs handles POST /api/admin/queue/promote-jobs.
 func (h *Handler) QueuePromoteJobs(c echo.Context) error {
-	// driver に bulk promote API が無いため、対象 queue の scheduled/retry を
-	// 1 ページずつ拾って RunTask で逐次 promote する。大量投入時は後続の
-	// ページを クライアント側で再呼び出しする運用。
+	// driver に bulk promote API が無いため、対象 queue の delayed を最後まで
+	// たどってから RunTask で逐次 promote する。upstream の `queue.promoteJobs()`
+	// と同じく全件が対象 (#3169。以前は先頭の 100 件だけだった)。
 	// upstream Misskey TS は paramDef で queue を required にしている (#929)。
 	var req struct {
 		Queue string `json:"queue"`
@@ -556,23 +566,19 @@ func (h *Handler) QueuePromoteJobs(c echo.Context) error {
 	if h.queueInspector == nil {
 		return c.NoContent(http.StatusNoContent)
 	}
-	promoted := 0
-	for _, state := range []string{"scheduled", "retry"} {
-		var rows []*QueueTaskSummary
-		if state == "scheduled" {
-			rows, _ = h.queueInspector.ListScheduledTasks(req.Queue, 1, 100)
-		} else {
-			rows, _ = h.queueInspector.ListRetryTasks(req.Queue, 1, 100)
+	var ids []string
+	walkQueueTasks(req.Queue, "delayed", h.queueInspector.ListDelayedTasks, func(t *QueueTaskSummary) {
+		// **利用者の予定は促進しない。** 促進は「詰まった配送を流す」操作で、
+		// 予約投稿を前倒しで公開する操作ではない。
+		if isOperatorProtectedTask(t) {
+			return
 		}
-		for _, t := range rows {
-			// **利用者の予定は促進しない。** 促進は「詰まった配送を流す」操作で、
-			// 予約投稿を前倒しで公開する操作ではない。
-			if isOperatorProtectedTask(t) {
-				continue
-			}
-			if err := h.queueInspector.RunTask(req.Queue, t.ID); err == nil {
-				promoted++
-			}
+		ids = append(ids, t.ID)
+	})
+	promoted := 0
+	for _, id := range ids {
+		if err := h.queueInspector.RunTask(req.Queue, id); err == nil {
+			promoted++
 		}
 	}
 	h.logModeration(c, moderationlog.LogPromoteQueue, map[string]any{

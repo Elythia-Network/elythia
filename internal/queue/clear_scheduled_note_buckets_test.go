@@ -2,6 +2,8 @@ package queue_test
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/elythia-network/elythia/internal/queue"
@@ -38,29 +40,34 @@ func (i *bucketInspector) ListActiveTasks(_ string, page, _ int) ([]*driver.Task
 	return i.active, nil
 }
 
-func (i *bucketInspector) ListScheduledTasks(_ string, page, _ int) ([]*driver.TaskSummary, error) {
-	if page > 1 {
+// ListDelayedTasks は delayed 全体 (scheduled + retry) を、実物と同じく添字の
+// 範囲で切って返す。ListScheduledTasks / ListRetryTasks は実装しない。あちらは
+// ページごとに delayed の全件を読み直すので、走査に使ったら panic で気付く
+// (#3169)。
+func (i *bucketInspector) ListDelayedTasks(_ string, page, pageSize int) ([]*driver.TaskSummary, error) {
+	all := append(append([]*driver.TaskSummary{}, i.scheduled...), i.retry...)
+	start := (page - 1) * pageSize
+	if start >= len(all) {
 		return nil, nil
 	}
-	return i.scheduled, nil
+	return all[start:min(start+pageSize, len(all))], nil
 }
 
-func (i *bucketInspector) ListRetryTasks(_ string, page, _ int) ([]*driver.TaskSummary, error) {
-	if page > 1 {
-		return nil, nil
-	}
-	return i.retry, nil
-}
-
-func (i *bucketInspector) ListDelayedTasks(_ string, page, _ int) ([]*driver.TaskSummary, error) {
-	if page > 1 {
-		return nil, nil
-	}
-	return append(append([]*driver.TaskSummary{}, i.scheduled...), i.retry...), nil
-}
-
+// DeleteTask は実物と同じく一覧から取り除く。たどりながら消すと、後ろの
+// task が前へ詰まって次のページで読み飛ばされる。
 func (i *bucketInspector) DeleteTask(_ string, taskID string) error {
 	i.deleted = append(i.deleted, taskID)
+	drop := func(rows []*driver.TaskSummary) []*driver.TaskSummary {
+		out := rows[:0:0]
+		for _, t := range rows {
+			if t.ID != taskID {
+				out = append(out, t)
+			}
+		}
+		return out
+	}
+	i.scheduled = drop(i.scheduled)
+	i.retry = drop(i.retry)
 	return nil
 }
 
@@ -125,4 +132,121 @@ func TestClearScheduledNote_ScansPendingAndActiveBuckets(t *testing.T) {
 				"%s バケットの job も消すこと", bucket)
 		})
 	}
+}
+
+// **たどり終えてから消すこと (#3169)。** 一覧は添字の範囲で切るので、1 ページ
+// 目で消すと 2 ページ目の先頭が 1 ページ目へ詰まり、読み飛ばされる。同じ
+// 下書きの job が 2 つ (古い予定と backoff 待ちなど) あり、ページをまたいで
+// いると、片方が残って予定と違う時刻に公開される。
+func TestClearScheduledNote_DeletesAfterWalking(t *testing.T) {
+	scheduled := []*driver.TaskSummary{scheduledNoteSummary(t, "target-1", "target")}
+	for i := 0; i < 99; i++ {
+		scheduled = append(scheduled, scheduledNoteSummary(t, fmt.Sprintf("other-%d", i), "other"))
+	}
+	insp := &bucketInspector{
+		scheduled: scheduled,
+		retry:     []*driver.TaskSummary{scheduledNoteSummary(t, "target-2", "target")},
+	}
+	c := queue.NewClient(&bucketDriver{insp: insp})
+
+	require.NoError(t, c.ClearScheduledNote("target"))
+	assert.Equal(t, []string{"target-1", "target-2"}, insp.deleted)
+}
+
+// **途中のページが短くても止まらないこと (#3169)。** mkq は HASH が既に無い
+// job を飛ばすので、途中のページが 100 件に満たないことがある。
+func TestClearScheduledNote_ContinuesPastShortPage(t *testing.T) {
+	var scheduled []*driver.TaskSummary
+	for i := 0; i < 150; i++ {
+		scheduled = append(scheduled, scheduledNoteSummary(t, fmt.Sprintf("other-%d", i), "other"))
+	}
+	scheduled = append(scheduled, scheduledNoteSummary(t, "target-1", "target"))
+	insp := &shortPageInspector{bucketInspector: bucketInspector{scheduled: scheduled}}
+	c := queue.NewClient(&bucketDriver{insp: insp})
+
+	require.NoError(t, c.ClearScheduledNote("target"))
+	assert.Equal(t, []string{"target-1"}, insp.deleted)
+}
+
+// shortPageInspector drops one entry from the first delayed page, like mkq
+// does when a job's HASH vanished between the range read and HGETALL.
+type shortPageInspector struct {
+	bucketInspector
+}
+
+func (i *shortPageInspector) ListDelayedTasks(q string, page, pageSize int) ([]*driver.TaskSummary, error) {
+	rows, err := i.bucketInspector.ListDelayedTasks(q, page, pageSize)
+	if page == 1 && len(rows) > 0 {
+		rows = rows[1:]
+	}
+	return rows, err
+}
+
+// **一覧の取得に途中で失敗しても、それまでに見つけた job は消すこと (#3169)。**
+// 残すと、時刻を変えた予約投稿が古い時刻で公開される。
+func TestClearScheduledNote_DeletesFoundTasksOnListError(t *testing.T) {
+	scheduled := []*driver.TaskSummary{scheduledNoteSummary(t, "target-1", "target")}
+	for i := 0; i < 99; i++ {
+		scheduled = append(scheduled, scheduledNoteSummary(t, fmt.Sprintf("other-%d", i), "other"))
+	}
+	insp := &failingPageInspector{bucketInspector: bucketInspector{scheduled: scheduled}}
+	c := queue.NewClient(&bucketDriver{insp: insp})
+
+	require.Error(t, c.ClearScheduledNote("target"))
+	assert.Equal(t, []string{"target-1"}, insp.deleted)
+}
+
+// failingPageInspector fails the second delayed page.
+type failingPageInspector struct {
+	bucketInspector
+}
+
+func (i *failingPageInspector) ListDelayedTasks(q string, page, pageSize int) ([]*driver.TaskSummary, error) {
+	if page >= 2 {
+		return nil, errors.New("redis down")
+	}
+	return i.bucketInspector.ListDelayedTasks(q, page, pageSize)
+}
+
+// **同じ job を二度消さないこと (#3169)。** 走査中に新しい job が先頭に入ると、
+// 読んだ job が後ろへずれて次のページにもう一度出る。二度目の削除は、既に
+// 無い job として失敗を返すので、消せたのに失敗と報告することになる。
+func TestClearScheduledNote_DeletesDuplicateOnce(t *testing.T) {
+	// 1 ページ目を読む直前に 1 件、2 ページ目の直前にもう 1 件が先頭に入る。
+	// target-1 は 1 ページ目の末尾 (添字 99) で読まれ、2 ページ目の先頭
+	// (添字 100) にもう一度出る。
+	insp := &headPushInspector{}
+	for i := 0; i < 98; i++ {
+		insp.scheduled = append(insp.scheduled, scheduledNoteSummary(t, fmt.Sprintf("other-%d", i), "other"))
+	}
+	insp.scheduled = append(insp.scheduled,
+		scheduledNoteSummary(t, "target-1", "target"),
+		scheduledNoteSummary(t, "other-last", "other"))
+	c := queue.NewClient(&bucketDriver{insp: insp})
+
+	require.NoError(t, c.ClearScheduledNote("target"))
+	assert.Equal(t, []string{"target-1"}, insp.deleted)
+}
+
+// headPushInspector pushes a new unrelated job to the head before each
+// delayed page, and fails DeleteTask for jobs that are already gone.
+type headPushInspector struct {
+	bucketInspector
+	pushed int
+}
+
+func (i *headPushInspector) ListDelayedTasks(q string, page, pageSize int) ([]*driver.TaskSummary, error) {
+	i.pushed++
+	head := &driver.TaskSummary{ID: fmt.Sprintf("new-%d", i.pushed), Type: queue.TaskTypeDeliver}
+	i.scheduled = append([]*driver.TaskSummary{head}, i.scheduled...)
+	return i.bucketInspector.ListDelayedTasks(q, page, pageSize)
+}
+
+func (i *headPushInspector) DeleteTask(q, taskID string) error {
+	for _, t := range i.scheduled {
+		if t.ID == taskID {
+			return i.bucketInspector.DeleteTask(q, taskID)
+		}
+	}
+	return errors.New("job not found")
 }
