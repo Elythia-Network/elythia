@@ -44,7 +44,7 @@ upstream と食い違っていても気付けない**。
 `workflow_dispatch` で発火する。nightly から PR トリガーへ移行済み (#2291)。
 
 **4 シャード並列** (`--shard=i/4`、`fail-fast: false`)。check 名は
-`spec (mk-go 1/4)` 〜 `4/4`。
+`spec (Elythia 1/4)` 〜 `4/4`。
 
 **1 スタックあたりは直列でしか回せない。** 298 spec のうち 179 が共有の root (alice) で
 **ブラウザからサインイン**し (数え方は `grep -rlE 'uiSigninAsRoot|signin-username' tests/playwright/specs --include='*.spec.ts' | wc -l`。
@@ -195,7 +195,7 @@ vite の hash class を selector に使わない (`[class*="_button_"]` 等)。p
 必須 `details` と任意 `evidence` の 2 textarea）。`data-testid` を付けるか、
 ラベル文字列から親要素を辿って `textarea` を取る。
 
-Playwright は **required check ではない**（`spec (mk-go …)` は PR で走り、落ちれば
+Playwright は **required check ではない**（`spec (Elythia …)` は PR で走り、落ちれば
 check に fail が出るが、マージはブロックされない）。paths フィルタ外の変更だけだと
 workflow が発火しないので、fixture を触った PR では check を見る。手元では
 `make playwright-check` でも再現できる。spec 追加時は上の規約を守る。

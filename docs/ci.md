@@ -107,11 +107,11 @@ PR を出すと十数個の check が走る。**どれが何を見ていて、�
 | `e2e (1/4)` 〜 `4/4` | Upstream backend e2e | **本家の backend e2e 1256 テスト**が Elythia に対して通るか | 3-7 min | `make upstream-e2e` |
 | `diff` | Diff e2e | Elythia と TS の**レスポンスの値**が一致するか (endpoint 比較 35 件) | 4 min | `make diff-check` |
 | `swap-test` | Drop-in e2e | TS→mk 切替で state が保たれるか | 5 min | `make dropin-swap-test` |
-| `mkgo-born` | Drop-in e2e | **Elythia 生まれの DB を TS に引き渡せるか** (測る対象。保証はしない、#3191) | 5 min | `make dropin-mkgo-born-test` |
+| `elythia-born` | Drop-in e2e | **Elythia 生まれの DB を TS に引き渡せるか** (測る対象。保証はしない、#3191) | 5 min | `make dropin-elythia-born-test` |
 | `ed25519-verify` | Drop-in e2e | Fedibird-like mock との Ed25519 双方向 verify | 5 min | `make dropin-fedibird-test` |
 | `federation` | Drop-in e2e | 本物の Misskey TS との実連合 (follow/note/reaction/renote/reply/mention/delete) | 4 min | `make federation-misskey-e2e` |
 | `federation-mastodon` | Drop-in e2e | 本物の Mastodon との引用の承認 (FEP-044f): 双方向の引用が承認済みになるか、取り消しが双方向で効くか | 未計測 | `make federation-mastodon-e2e` |
-| `spec (mk-go 1/4)` 〜 `4/4` | Playwright | ブラウザからの統合互換 (298 spec ファイル) | 4-9 min | `make playwright-check` |
+| `spec (Elythia 1/4)` 〜 `4/4` | Playwright | ブラウザからの統合互換 (298 spec ファイル) | 4-9 min | `make playwright-check` |
 | `build-and-push` / `-bundled` | Docker | image がビルドできるか (PR では push しない)。`-bundled` は image の中で frontend もビルドする (#3379) | 4 min (`-bundled` はキャッシュが冷えていると frontend の分だけ延びる。手元の冷えたビルドで frontend stage だけ約 3 分) | `docker build -f Dockerfile .` / `docker build -f Dockerfile.bundled .` |
 | `build / build` | Build with plugins (selftest) | 運営者向けの reusable workflow が通るか。外部プラグインを実際に clone し、frontend を持つので `Dockerfile.bundled` の中でプラグインの .vue を含めた SPA のビルドまで走る。**`docker build --check` では見えない範囲** (pluginbuild / go build / frontend のビルドが通るか、生成物とプラグインの frontend が frontend stage に届くか) を確認できるのはこの check だけ | 6 min | paths に該当する PR で自動発火する。手動なら `gh workflow run build-with-plugins-selftest.yml --ref <branch>` (default branch にある場合のみ) |
 
@@ -125,7 +125,7 @@ PR を出すと十数個の check が走る。**どれが何を見ていて、�
 | `diff` | **同じ入力に対する値そのもの** |
 | shape drift (`test` に含まれる) | フィールドの有無・型 |
 | `swap-test` | DB を引き継いだときに壊れないか |
-| `mkgo-born` | **Elythia が作った DB を TS が受け取れるか** |
+| `elythia-born` | **Elythia が作った DB を TS が受け取れるか** |
 | `federation` / `ed25519-verify` | 他実装と実際に喋れるか |
 | `vulncheck` | **自分のコードではなく依存**に既知の穴が無いか (develop に入った後、到達可能なものだけ) |
 | `review` | **入る前**に、その PR が持ち込む依存に既知の穴が無いか (到達可能性は見ない) |
@@ -144,12 +144,12 @@ CodeQL はその逆で、**依存ではなく自分のコード**をパターン
 `actions` の解析も入れてあり、`pull_request` のコンテキストを式に埋める形 (script injection)
 のように**レビューで見落としやすく、落ちても気付きにくい**ものを拾う。
 
-`swap-test` と `mkgo-born` は似て見えるが、**DB を作った側が違う**。
+`swap-test` と `elythia-born` は似て見えるが、**DB を作った側が違う**。
 
 |  | DB を作ったのは | 経路 |
 |---|---|---|
 | `swap-test` | TypeORM | TS → Elythia → TS |
-| `mkgo-born` | **Elythia の migration** | Elythia → TS |
+| `elythia-born` | **Elythia の migration** | Elythia → TS |
 
 後者の方が厳しい。TS が一度も触っていない schema を受け取るので、カラム型・制約・
 enum・index 名・default のどれかが TypeORM の期待とずれていれば起動しない。
@@ -195,7 +195,7 @@ artifact には 2 種類のログが入る。`compose.log` / `ps.log` は orches
 workflow が後から集めたもの。前者がある場合はそちらが本命で、後者は stack が
 既に撤去されていて空のことがある。
 
-`mkgo-born` だけは落ち方が他と違い、原因が段階からほぼ特定できる。
+`elythia-born` だけは落ち方が他と違い、原因が段階からほぼ特定できる。
 
 | 落ちた段階 | 意味 |
 |---|---|
@@ -551,12 +551,12 @@ checkout / setup-go を除くと step は実行順に 3 つ。**required job な
   | check 名 | 実行内容 |
   |---|---|
   | `swap-test` | `make dropin-swap-test` — TS→mk 切替の state preservation (#374) |
-  | `mkgo-born` | `make dropin-mkgo-born-test` — Elythia 生まれの DB を TS に引き渡せるか (#2379 / #2383) |
+  | `elythia-born` | `make dropin-elythia-born-test` — Elythia 生まれの DB を TS に引き渡せるか (#2379 / #2383) |
   | `ed25519-verify` | `make dropin-fedibird-test` — Fedibird-like AP mock との Ed25519 双方向 verify (#1083 / #2360) |
   | `federation` | `make federation-misskey-e2e` — 本物の Misskey TS を相手にした実連合 (#2362) |
   | `federation-mastodon` | `make federation-mastodon-e2e` — 本物の Mastodon を相手にした引用の承認 (FEP-044f、#3234) |
 
-- `mkgo-born` は `swap-test` と似て見えるが **DB を作った側が違う** (前者は Elythia の
+- `elythia-born` は `swap-test` と似て見えるが **DB を作った側が違う** (前者は Elythia の
   migration、後者は TypeORM)。TS が一度も触っていない schema を受け取るのは前者だけで、
   どこまで移れるかを測る唯一の経路にあたる (保証はしない、#3191)。`TestMigrationSeed_CoversUpstream` は
   seed 一覧と upstream migration file の静的な突き合わせに過ぎず、実際に TS を起動して
@@ -571,7 +571,7 @@ checkout / setup-go を除くと step は実行順に 3 つ。**required job な
   する (ed25519 側は導入時から 2 箇所壊れていたのに、swap が緑だったため 3 か月
   気付けなかった、#2360)。
 - 失敗時は docker compose logs を `dropin-logs-<scenario>` artifact として 14 日保持。
-  `swap-test` / `mkgo-born` の orchestrator は `down -v` の**前**に自分で
+  `swap-test` / `elythia-born` の orchestrator は `down -v` の**前**に自分で
   `compose.log` / `ps.log` を残すので、workflow 側の収集は `-post` 付きの別名で書く。
   同名にすると撤去済み stack の空ログで上書きしてしまう (#2383)。
 

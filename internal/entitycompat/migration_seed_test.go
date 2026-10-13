@@ -14,7 +14,7 @@ import (
 // (mk-go → Misskey TS).
 //
 // 復路は保証しない (#3191) が、この gate は required のまま残す。seed は、どこまで
-// 戻れるかを測る `mkgo-born` (docs/dropin-e2e.md) の前提で、足す手間も小さいため。
+// 戻れるかを測る `elythia-born` (docs/dropin-e2e.md) の前提で、足す手間も小さいため。
 //
 // TypeORM は起動時に bookkeeping テーブル `migrations` を読み、
 //
