@@ -37,6 +37,34 @@ const MaxNoteTags = 32
 // 膨らんだ値が列制約を超えて INSERT ごと落ちる (#2662)。
 const MaxTagLength = 128
 
+// MaxParseBytes is the longest prefix of each text fragment that is parsed
+// for hashtags. Hashtags after it are not extracted.
+//
+// MFM の解析器 (github.com/elythia-network/mfm) はメモ表の上限を「16MiB と入力長の
+// 64 倍の大きい方」にしている。リモートのノートは切る前の全文 (取得は最大 1MiB) が
+// ここに来るので、そのままだと病的な入力 1 件で数百 MB を確保する。256KiB に切れば
+// 上限は 16MiB に収まり、#3514 で置き換える前の解析器と同じになる。切った位置に
+// あるタグは切れた形で拾われ、またいだコードブロックの中の # も拾われる (本家も
+// 本文を 8192 文字で切ってからタグを抜くので、同じ種類の挙動)。
+const MaxParseBytes = 256 << 10
+
+// cutForParse returns parts with each fragment cut to at most MaxParseBytes,
+// at a UTF-8 boundary.
+func cutForParse(parts []string) []string {
+	out := make([]string, len(parts))
+	for i, p := range parts {
+		if len(p) > MaxParseBytes {
+			n := MaxParseBytes
+			for n > 0 && !utf8.RuneStart(p[n]) {
+				n--
+			}
+			p = p[:n]
+		}
+		out[i] = p
+	}
+	return out
+}
+
 // Extract pulls hashtag names out of text fragments (typically the note's
 // body and CW). Extraction goes through the full MFM parser, so hashtags
 // inside code blocks, URLs, links and mentions are correctly excluded (the
@@ -47,7 +75,7 @@ const MaxTagLength = 128
 // 挙動)。Empty / whitespace-only inputs return nil. Tags longer than
 // MaxTagLength are dropped.
 func Extract(parts ...string) []string {
-	tags := mfm.CollectHashtags(parts...)
+	tags := mfm.CollectHashtags(cutForParse(parts)...)
 	if len(tags) == 0 {
 		return nil
 	}
@@ -81,7 +109,7 @@ func Extract(parts ...string) []string {
 // then `tags.map(normalizeForSearch)` on store, #1948-18). search-by-tag は同じ
 // normalizeForSearch を query に適用するため、stored 値と一致する。
 func ExtractNoteTags(parts ...string) []string {
-	return NormalizeNoteTags(mfm.CollectHashtags(parts...))
+	return NormalizeNoteTags(mfm.CollectHashtags(cutForParse(parts)...))
 }
 
 // NormalizeNoteTags applies the note.tags store normalization to a pre-extracted
