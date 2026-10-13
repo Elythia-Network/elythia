@@ -2078,3 +2078,31 @@ func hgetallCalls(t *testing.T) int64 {
 	}
 	return 0
 }
+
+// **ハンドラが driver.JobLog で書いた行を、admin の Load logs で読めること (#3551)。**
+func TestServer_HandlerWritesJobLog(t *testing.T) {
+	d := newDriver(t)
+	srv := d.Server()
+	var wg sync.WaitGroup
+	wg.Add(1)
+	srv.Handle("test:log", func(ctx context.Context, _ driver.Task) error {
+		defer wg.Done()
+		driver.JobLog(ctx, "first line")
+		driver.JobLog(ctx, "second line")
+		return nil
+	})
+	require.NoError(t, srv.Start())
+	t.Cleanup(srv.Shutdown)
+
+	ctx := context.Background()
+	require.NoError(t, d.Client().Enqueue(ctx, "test:log", nil, driver.WithQueue("deliver")))
+	if !waitGroupTimeout(&wg, 5*time.Second) {
+		t.Fatal("handler not invoked within timeout")
+	}
+	id, err := testRedis.Client.Get(ctx, "bull:deliver:id").Result()
+	require.NoError(t, err)
+	logs, count, err := d.Inspector().GetTaskLogs("deliver", id, 0, -1)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"first line", "second line"}, logs)
+	assert.Equal(t, int64(2), count)
+}

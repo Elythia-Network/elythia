@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/elythia-network/elythia/internal/repository"
 
@@ -190,4 +191,101 @@ func TestCleanRemoteNotes_CursorSurvivesAcrossRuns(t *testing.T) {
 	repo.afters = nil
 	require.NoError(t, p.Handle(context.Background(), driver.RawTask{}))
 	assert.Equal(t, "", repo.afters[0])
+}
+
+// captureJobLog returns a context whose job log lines are appended to *lines.
+func captureJobLog(lines *[]string) context.Context {
+	return driver.WithJobLogger(context.Background(), func(_ context.Context, line string) error {
+		*lines = append(*lines, line)
+		return nil
+	})
+}
+
+// **実行の記録をジョブのログに書くこと (#3551)。** upstream は同じ場面で
+// job.log に書き、管理画面の Load logs で読める。
+func TestCleanRemoteNotes_WritesJobLog(t *testing.T) {
+	roots := make([]string, 0, 150)
+	for i := range 150 {
+		roots = append(roots, fmt.Sprintf("r%03d", i))
+	}
+	p := NewCleanRemoteNotesProcessor(&pagingNoteRepo{roots: roots}, func() CleanRemoteNotesConfig {
+		return CleanRemoteNotesConfig{Enabled: true, ExpiryDays: 90, MaxProcessingMinutes: 60}
+	})
+	// 期限より古いカーソル (aidx の ID は時刻順で、"0" は最も古い)。
+	p.SetCursorStore(&memCursorStore{value: "0000000000"})
+
+	var lines []string
+	require.NoError(t, p.Handle(captureJobLog(&lines), driver.RawTask{}))
+	require.Len(t, lines, 4)
+	assert.Equal(t, "Resuming from the cursor left by a previous run: 0000000000", lines[0])
+	assert.Regexp(t, `^Deleted 0 notes; \d+ms$`, lines[1])
+	assert.Regexp(t, `^Deleted 0 notes; \d+ms$`, lines[2])
+	assert.Equal(t, "No more notes to clean. The next run will start from the beginning.", lines[3])
+}
+
+// **時間切れで止めたときは、そのことと止めた位置を書くこと (#3551)。**
+func TestCleanRemoteNotes_WritesJobLogOnTimeout(t *testing.T) {
+	repo := &countingNoteRepo{batch: 7}
+	p := NewCleanRemoteNotesProcessor(repo, func() CleanRemoteNotesConfig {
+		return CleanRemoteNotesConfig{Enabled: true, ExpiryDays: 90, MaxProcessingMinutes: 1}
+	})
+	base := time.Now()
+	clock := base
+	p.now = func() time.Time { return clock }
+	// 1 バッチ目の直後に時間を進め、上限を超えさせる。
+	repo.onDelete = func(int) { clock = base.Add(2 * time.Minute) }
+
+	var lines []string
+	require.NoError(t, p.Handle(captureJobLog(&lines), driver.RawTask{}))
+	assert.Equal(t, 1, repo.calls)
+	require.Len(t, lines, 2)
+	assert.Regexp(t, `^Deleted 7 notes; \d+ms$`, lines[0])
+	assert.Equal(t, "Reached maximum duration of 60000ms, stopping... (last cursor: cursor)", lines[1])
+}
+
+// **期限より新しいカーソルでは「再開した」と書かないこと (#3551)。** repository は
+// そのカーソルを捨てて先頭から読み直すので、書くと記録が嘘になる。
+func TestCleanRemoteNotes_JobLogSkipsResumeForDiscardedCursor(t *testing.T) {
+	p := NewCleanRemoteNotesProcessor(&pagingNoteRepo{}, func() CleanRemoteNotesConfig {
+		return CleanRemoteNotesConfig{Enabled: true, ExpiryDays: 90, MaxProcessingMinutes: 60}
+	})
+	p.SetCursorStore(&memCursorStore{value: "zzzzzzzzzz"})
+
+	var lines []string
+	require.NoError(t, p.Handle(captureJobLog(&lines), driver.RawTask{}))
+	// 消せるノートが無いので、空のバッチの「Deleted 0 notes」も書かない。
+	assert.Equal(t, []string{"No more notes to clean. The next run will start from the beginning."}, lines)
+}
+
+// **無効化や取り消しで止めたときは「時間切れ」と書かないこと (#3551)。**
+// 時計がたまたま期限を過ぎていても、止めた理由は時間切れではない。
+func TestCleanRemoteNotes_JobLogTimeoutOnlyWhenTimedOut(t *testing.T) {
+	for _, tc := range []string{"disabled", "canceled"} {
+		t.Run(tc, func(t *testing.T) {
+			repo := &countingNoteRepo{batch: 7}
+			enabled := true
+			p := NewCleanRemoteNotesProcessor(repo, func() CleanRemoteNotesConfig {
+				return CleanRemoteNotesConfig{Enabled: enabled, ExpiryDays: 90, MaxProcessingMinutes: 1}
+			})
+			base := time.Now()
+			clock := base
+			p.now = func() time.Time { return clock }
+			var lines []string
+			ctx, cancel := context.WithCancel(captureJobLog(&lines))
+			defer cancel()
+			repo.onDelete = func(int) {
+				if tc == "disabled" {
+					enabled = false
+				} else {
+					cancel()
+				}
+				// 止めた後に時計が期限を過ぎる。
+				clock = base.Add(2 * time.Minute)
+			}
+
+			require.NoError(t, p.Handle(ctx, driver.RawTask{}))
+			require.Len(t, lines, 1)
+			assert.Regexp(t, `^Deleted 7 notes; \d+ms$`, lines[0])
+		})
+	}
 }

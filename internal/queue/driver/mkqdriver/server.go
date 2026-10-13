@@ -1308,6 +1308,10 @@ func newDispatchHandler(handlers map[string]driver.HandlerFunc, qname string, ob
 			return nil, fmt.Errorf("mkqdriver: no handler for %q: %w", taskType, mkq.ErrUnrecoverable)
 		}
 		run := func(c context.Context) error {
+			// ジョブのログ (Load logs) に書けるようにする (#3551)。
+			c = driver.WithJobLogger(c, func(lc context.Context, line string) error {
+				return job.Log(lc, line)
+			})
 			d := handlerDeadlineFor(taskType, deadline)
 			return runBounded(c, h, mkqTask{taskType: taskType, payload: job.Data.Body},
 				d, graceFor(d),

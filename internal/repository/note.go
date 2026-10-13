@@ -1627,6 +1627,24 @@ func (r *noteRepository) DeleteExpiredRemoteNotes(expiryDays, batchSize int) (in
 	return deleted, err
 }
 
+// ExpiredRemoteNotesCursorInRange reports whether DeleteExpiredRemoteNotesAfter
+// resumes from cursor instead of starting over.
+//
+// 期限より新しいカーソル (運営者が期限を延ばした後など) は、その先に消せる
+// ノートが無いので捨てて先頭から読み直す。掃除のジョブが「再開した」と
+// 記録するかどうかも、これで決める (#3551)。
+func ExpiredRemoteNotesCursorInRange(expiryDays int, cursor string) bool {
+	if cursor == "" {
+		return false
+	}
+	return cursor < expiredRemoteNotesCutoffID(expiryDays)
+}
+
+// expiredRemoteNotesCutoffID is the smallest note id that is not yet expired.
+func expiredRemoteNotesCutoffID(expiryDays int) string {
+	return aidxCutoffID(time.Now().Add(-time.Duration(expiryDays) * 24 * time.Hour))
+}
+
 // DeleteExpiredRemoteNotesAfter is the cursor-based form of
 // DeleteExpiredRemoteNotes.
 //
@@ -1641,7 +1659,7 @@ func (r *noteRepository) DeleteExpiredRemoteNotesAfter(expiryDays, batchSize int
 	if batchSize <= 0 {
 		batchSize = 100
 	}
-	cutoffID := aidxCutoffID(time.Now().Add(-time.Duration(expiryDays) * 24 * time.Hour))
+	cutoffID := expiredRemoteNotesCutoffID(expiryDays)
 	if after >= cutoffID {
 		after = ""
 	}

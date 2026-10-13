@@ -3,6 +3,7 @@ package processors
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -65,6 +66,8 @@ type CleanRemoteNotesProcessor struct {
 	// 停止手段が効かない。姉妹ジョブ (`orphan_user_cleanup.go`) は同じ理由で
 	// 既にこの形になっている。upstream もループの各反復で再評価する。
 	cfg func() CleanRemoteNotesConfig
+	// now is the clock. テストで時間切れを起こすために差し替える。
+	now func() time.Time
 	// cursor はジョブをまたいで走査位置を持つ (#17957)。nil なら 1 回の実行の
 	// 中だけで前に進む。
 	cursor CursorStore
@@ -106,7 +109,11 @@ func (p *CleanRemoteNotesProcessor) Handle(ctx context.Context, _ driver.Task) e
 		maxDuration = 60 * time.Minute
 	}
 
-	deadline := time.Now().Add(maxDuration)
+	now := p.now
+	if now == nil {
+		now = time.Now
+	}
+	deadline := now().Add(maxDuration)
 	const batchSize = 100
 	var totalDeleted int64
 
@@ -120,8 +127,22 @@ func (p *CleanRemoteNotesProcessor) Handle(ctx context.Context, _ driver.Task) e
 			cursor = c
 		}
 	}
+	// ジョブのログ (Load logs) に書く文と場面は upstream の
+	// CleanRemoteNotesProcessorService に揃える (#3551)。Elythia に無い処理の行
+	// (進捗の見込みの警告、statement timeout での件数の調整と飛ばした ID、
+	// 一時的な削除の失敗の集計) と、時間切れの行の末尾の進捗 (%) は書かない。
+	// 期限より新しいカーソルは、repository が捨てて先頭から読み直すので、
+	// そのときは「再開した」と書かない (upstream も同じ条件で書く)。
+	if repository.ExpiredRemoteNotesCursorInRange(expiryDays, cursor) {
+		driver.JobLog(ctx, fmt.Sprintf("Resuming from the cursor left by a previous run: %s", cursor))
+	}
+	// 止まった理由を持つ。ループを抜けた後に時計を読み直して判定すると、
+	// 無効化や取り消しで止まったときにも「時間切れ」と書きうる。
+	timedOut := false
 
-	for time.Now().Before(deadline) {
+	for {
+		// 取り消しと無効化を先に見る。どれかで止めたときに時計が期限を
+		// 過ぎていても、止めた理由は時間切れではない。
 		if ctx.Err() != nil {
 			break
 		}
@@ -131,18 +152,30 @@ func (p *CleanRemoteNotesProcessor) Handle(ctx context.Context, _ driver.Task) e
 			slog.Info("clean-remote-notes: disabled during run, stopping")
 			break
 		}
+		if !now().Before(deadline) {
+			timedOut = true
+			break
+		}
+		batchBeginAt := now()
 		deleted, scanned, lastRootID, err := p.noteRepo.DeleteExpiredRemoteNotesAfter(expiryDays, batchSize, cursor)
 		if err != nil {
 			slog.Error("clean-remote-notes: batch delete failed", "error", err)
 			return err
 		}
 		totalDeleted += deleted
+		// 件数は実際に消した行 (子を含む)。upstream は同じ文で、削除の候補に
+		// した行の数 (消せなかった行を含む) を書く。何も見なかったバッチでは
+		// 書かない (upstream も空のバッチでは「No more notes」だけを書く)。
+		if scanned > 0 {
+			driver.JobLog(ctx, fmt.Sprintf("Deleted %d notes; %dms", deleted, now().Sub(batchBeginAt).Milliseconds()))
+		}
 		// **判定は見た根の数で行う。** 消した行数 (子を含む) と比べると単位が
 		// 合わず、消せないツリーが並んだところで打ち切ってしまう。
 		if scanned < batchSize {
 			// 末尾まで来たので、次回は先頭から。クリップやお気に入りを外されて
 			// 後から消せるようになったノートを拾い直すため (upstream と同じ)。
 			p.storeCursor(ctx, "")
+			driver.JobLog(ctx, "No more notes to clean. The next run will start from the beginning.")
 			break
 		}
 		cursor = lastRootID
@@ -153,6 +186,9 @@ func (p *CleanRemoteNotesProcessor) Handle(ctx context.Context, _ driver.Task) e
 		time.Sleep(500 * time.Millisecond)
 	}
 
+	if timedOut {
+		driver.JobLog(ctx, fmt.Sprintf("Reached maximum duration of %dms, stopping... (last cursor: %s)", maxDuration.Milliseconds(), cursor))
+	}
 	if totalDeleted > 0 {
 		slog.Info("clean-remote-notes: completed", "deleted", totalDeleted)
 	}
