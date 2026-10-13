@@ -3,8 +3,9 @@ name: Drop-in e2e
 # drop-in 互換の regression を検知する e2e を 5 シナリオ並列で実行する。
 #
 # - swap-test      (`make dropin-swap-test`)       TS→mk 切替の state preservation (#374)
-# - mkgo-born      (`make dropin-mkgo-born-test`)  mk-go 生まれの DB を TS に
-#                                                  引き渡せるか (#2379)
+# - elythia-born   (`make dropin-elythia-born-test`)
+#                                                  Elythia 生まれの DB を TS に
+#                                                  引き渡せるか (#2379。旧名 mkgo-born、#3556)
 # - ed25519-verify (`make dropin-fedibird-test`)   Fedibird-like AP mock との
 #                                                  Ed25519 双方向 verify (#1083)
 # - federation     (`make federation-misskey-e2e`) 本物の Misskey TS を相手にした
@@ -17,7 +18,7 @@ name: Drop-in e2e
 # 他実装と本当に相互運用できるかは実際に喋らせないと分からない。ユニットテスト
 # (48 件) は「自分で署名して自分で検証する」ことしか保証しない。
 #
-# mk-go 生まれの DB を TS が受け取れるか (保証はしないが、どこまで移れるかを測る。
+# Elythia 生まれの DB を TS が受け取れるか (保証はしないが、どこまで移れるかを測る。
 # #3191) は、swap-test とは別に載せる。swap-test の DB を作ったのは TypeORM なので、
 # 「TS が一度も触っていない schema」は swap-test では一切踏まない。実際この経路の
 # 初回実行で、RSA 秘密鍵が PKCS#1 のため TS 側の送信連合が全滅する不具合を
@@ -94,8 +95,8 @@ jobs:
             make: dropin-swap-test
             image: misskey/misskey:2026.10.0
             compose: -f tests/dropin/compose.yml -f tests/dropin/compose.mk.yml -f tests/dropin/compose.fedibird.yml
-          - name: mkgo-born
-            make: dropin-mkgo-born-test
+          - name: elythia-born
+            make: dropin-elythia-born-test
             image: misskey/misskey:2026.10.0
             compose: -f tests/dropin/compose.yml -f tests/dropin/compose.mk.yml
           - name: ed25519-verify
@@ -214,7 +215,7 @@ jobs:
           # drop-in 系は fedibird overlay も一緒に渡す。swap では使われないが、
           # 余分な -f は定義が増えるだけで害が無く、取りこぼさない方を優先する。
           #
-          # ファイル名を `-post` で分けるのは、swap / mkgo-born の orchestrator が
+          # ファイル名を `-post` で分けるのは、swap / elythia-born の orchestrator が
           # trap 内で **同じ /tmp/dropin-logs へ ps.log / compose.log を書いてから
           # `down -v` する**ため。同名で書くとこの step が空ファイルで上書きして
           # しまい (stack はもう存在しない)、artifact から実ログが消える。

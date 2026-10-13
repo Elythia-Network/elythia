@@ -82,8 +82,11 @@ jobs:
         # backend 固有の make target / compose 引数 / prepull / timeout を
         # ここで一元定義する (= matrix.include の単一の情報源)。
         run: |
+          # label は check の一覧に出る名前。backend は step の条件と artifact の
+          # 名前に使う内部の値なので、改名 (#3180) の後も据え置く (#3556)。
           mkgo='{
             "backend": "mk-go",
+            "label": "Elythia",
             "up_target": "playwright-up",
             "test_target": "playwright-test",
             "down_target": "playwright-down",
@@ -104,6 +107,7 @@ jobs:
           # 失敗内容は artifact (trace / screenshot) から読む。
           ts='{
             "backend": "ts",
+            "label": "ts",
             "up_target": "playwright-ts-up",
             "test_target": "playwright-ts-test",
             "down_target": "playwright-ts-down",
@@ -132,7 +136,7 @@ jobs:
           echo "$matrix" | jq .
 
   spec:
-    name: spec (${{ matrix.backend }} ${{ matrix.shard }}/${{ matrix.shard_total }})
+    name: spec (${{ matrix.label }} ${{ matrix.shard }}/${{ matrix.shard_total }})
     needs: plan
     runs-on: ubuntu-latest
     # backend ごとに枠を変える。mk-go は hang を早く検出したいので短め。

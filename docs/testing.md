@@ -382,12 +382,12 @@ PR ごとに `.github/workflows/dropin-e2e.yml` が **5 シナリオ**を並列�
 | check 名 | make target | 見ているもの |
 |---|---|---|
 | `swap-test` | `dropin-swap-test` | TS→mk 切替で state が保たれるか (#374)。TS へ戻す stage 6b-9 は測る対象 (#3191) |
-| `mkgo-born` | `dropin-mkgo-born-test` | **Elythia 生まれの DB を TS に引き渡せるか** (#2383。測る対象で、保証はしない、#3191) |
+| `elythia-born` | `dropin-elythia-born-test` | **Elythia 生まれの DB を TS に引き渡せるか** (#2383。測る対象で、保証はしない、#3191) |
 | `ed25519-verify` | `dropin-fedibird-test` | Fedibird-like mock との Ed25519 双方向 verify (#1083) |
 | `federation` | `federation-misskey-e2e` | 本物の Misskey TS を相手にした実連合 (#2362) |
 | `federation-mastodon` | `federation-mastodon-e2e` | 本物の Mastodon を相手にした引用の承認 (FEP-044f、#3234) |
 
-`swap-test` と `mkgo-born` は似て見えるが **DB を作った側が違う** (前者は TypeORM、
+`swap-test` と `elythia-born` は似て見えるが **DB を作った側が違う** (前者は TypeORM、
 後者は Elythia の migration)。TS が一度も触っていない schema を受け取るのは後者だけ。
 
 `make dropin-fedibird-test` は Fedibird-like な AP mock を立てて **Ed25519 署名の

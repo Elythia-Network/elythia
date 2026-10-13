@@ -9,7 +9,7 @@
 	federation-mastodon-e2e federation-mastodon-down \
 	dropin-up dropin-down dropin-test dropin-logs \
 	dropin-mk-up dropin-mk-test dropin-mk-down dropin-mk-logs dropin-swap-test dropin-fedibird-test \
-	dropin-mkgo-born-test \
+	dropin-elythia-born-test \
 	dropin-frontend-up dropin-frontend-down dropin-frontend-baseline dropin-frontend-logs \
 	dropin-frontend-mk-up dropin-frontend-mk-down dropin-frontend-swap-test \
 	e2e-frontend-build \
@@ -661,10 +661,10 @@ dropin-swap-test: ## TS → Elythia 切替の state preservation を通しで検
 # Fedibird-like ActivityPub mock を立てて、mk-A との Ed25519 双方向 verify を
 # walks through する。ed25519 P2-P5 が実 federation 経路で動くことを担保する
 # nightly 用 e2e。
-# mk-go 生まれの DB を TS に引き渡す経路 (#2379)。swap test (TS→mk-go→TS) とは
-# 別物で、TS が一度も触っていない schema を受け取る。mk-go で始めた人が Misskey に
-# どこまで移れるかを測る (保証はしない、#3191)。
-dropin-mkgo-born-test: ## Elythia 生まれの DB を TS に引き渡せるか検証
+# Elythia 生まれの DB を TS に引き渡す経路 (#2379)。swap test (TS→Elythia→TS) とは
+# 別物で、TS が一度も触っていない schema を受け取る。Elythia で始めた人が Misskey に
+# どこまで移れるかを測る (保証はしない、#3191)。旧名 dropin-mkgo-born-test (#3556)。
+dropin-elythia-born-test: ## Elythia 生まれの DB を TS に引き渡せるか検証
 	./tests/dropin/run-mkgo-born-test.sh
 
 dropin-fedibird-test: ## Fedibird-like AP mock との Ed25519 双方向 verify

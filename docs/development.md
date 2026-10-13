@@ -225,7 +225,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_xxx" ON "yyy" ("zzz");
 | `make dropin-up` `dropin-test` `dropin-down` `dropin-logs` | TS 2 インスタンスの federation smoke | [Drop-in e2e](dropin-e2e.md) |
 | `make dropin-mk-up` `dropin-mk-test` `dropin-mk-down` `dropin-mk-logs` | 上記の backend を Elythia に差し替えた overlay | 同上 |
 | `make dropin-swap-test` | TS → Elythia 切替の state preservation を通しで検証 | 同上 |
-| `make dropin-mkgo-born-test` | **Elythia 生まれの DB を TS に引き渡せるか** (測る対象。保証はしない、#3191) | 同上 |
+| `make dropin-elythia-born-test` | **Elythia 生まれの DB を TS に引き渡せるか** (測る対象。保証はしない、#3191) | 同上 |
 | `make dropin-fedibird-test` | Fedibird-like AP mock との Ed25519 双方向 verify | 同上 |
 | `make dropin-frontend-baseline` `dropin-frontend-up` `dropin-frontend-down` `dropin-frontend-logs` | 3 TS インスタンス + cypress | [Drop-in frontend e2e](dropin-frontend-e2e.md) |
 | `make dropin-frontend-mk-up` `dropin-frontend-mk-down` `dropin-frontend-swap-test` | 上記の Elythia overlay と切替シナリオ | 同上 |
@@ -343,10 +343,10 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_xxx" ON "yyy" ("zzz");
 | `vulncheck` | CI | 依存・Go stdlib の**到達可能な**既知脆弱性 + Go version の pin 整合 |
 | `plugin-tests` | CI | 同梱プラグインのテスト (別 module なので `go list ./...` に入らない) |
 | `build-and-push` / `-bundled` | Docker | image がビルドできるか (PR では push しない) |
-| `spec (mk-go 1/4)` 〜 `4/4` | Playwright | ブラウザからの統合互換。TS backend での実行は `workflow_dispatch` のみ |
+| `spec (Elythia 1/4)` 〜 `4/4` | Playwright | ブラウザからの統合互換。TS backend での実行は `workflow_dispatch` のみ |
 | `e2e (1/4)` 〜 `4/4` | Upstream backend e2e | 本家の backend e2e が Elythia に対して通るか |
 | `diff` | Diff e2e | Elythia と TS の**レスポンスの値**が一致するか |
-| `swap-test` / `mkgo-born` / `ed25519-verify` / `federation` / `federation-mastodon` | Drop-in e2e | 切替・TS へ戻す経路の測定・Ed25519・実連合 (Misskey TS / Mastodon) の 5 シナリオ |
+| `swap-test` / `elythia-born` / `ed25519-verify` / `federation` / `federation-mastodon` | Drop-in e2e | 切替・TS へ戻す経路の測定・Ed25519・実連合 (Misskey TS / Mastodon) の 5 シナリオ |
 
 どれが何を守っているかの対比は [ci.md](ci.md) にまとめてある。
 
@@ -463,7 +463,7 @@ make dropin-frontend-mk-up       # mk overlay だけ立ち上げ (clean DB の m
 make dropin-frontend-mk-down     # mk overlay cleanup
 
 # その他の e2e / 検証
-make dropin-mkgo-born-test   # Elythia 生まれの DB を TS に引き渡せるか (#2383)
+make dropin-elythia-born-test # Elythia 生まれの DB を TS に引き渡せるか (#2383)
 make federation-misskey-e2e  # 本物の Misskey TS との実連合を起動から撤去まで通しで (#2362)
 make federation-mastodon-e2e # 本物の Mastodon と引用の承認 (FEP-044f) を通しで (#3234)
 make diff-check              # Elythia と TS のレスポンスを値レベルで diff (#2078)

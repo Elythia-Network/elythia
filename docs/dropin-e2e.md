@@ -174,7 +174,7 @@ compose 内で pull を再試行するか `docker pull misskey/misskey:2026.10.0
 | check 名 | make target | 見ているもの |
 |---|---|---|
 | `swap-test` | `dropin-swap-test` | TS→Elythia 切替で state が保たれるか (往路)。TS へ戻す stage 6b-9 は測る対象 |
-| `mkgo-born` | `dropin-mkgo-born-test` | Elythia 生まれの DB を TS に引き渡せるか (測る対象) |
+| `elythia-born` | `dropin-elythia-born-test` | Elythia 生まれの DB を TS に引き渡せるか (測る対象) |
 | `ed25519-verify` | `dropin-fedibird-test` | Fedibird-like mock との Ed25519 双方向 verify |
 | `federation` | `federation-misskey-e2e` | 本物の Misskey TS との実連合 |
 | `federation-mastodon` | `federation-mastodon-e2e` | 本物の Mastodon との引用の承認 (FEP-044f) |
@@ -200,18 +200,18 @@ PR の required check には**入れない**。理由:
   非ブロッキングにする
 
 失敗時は docker compose のログを `dropin-logs-<scenario>` artifact として 14 日保持する。
-`swap-test` / `mkgo-born` は orchestrator 自身が `down -v` の前に `compose.log` /
+`swap-test` / `elythia-born` は orchestrator 自身が `down -v` の前に `compose.log` /
 `ps.log` を残しており、workflow が後から集めたものは `-post` 付きの別名で入る。
 前者があればそちらが本命。
 
-### `swap-test` と `mkgo-born` の違い
+### `swap-test` と `elythia-born` の違い
 
 似て見えるが **DB を作った側が違う**。
 
 |  | DB を作ったのは | 経路 |
 |---|---|---|
 | `swap-test` | TypeORM | TS → Elythia → TS |
-| `mkgo-born` | **Elythia の migration** | Elythia → TS |
+| `elythia-born` | **Elythia の migration** | Elythia → TS |
 
 後者の方が厳しい。TS は一度も触っていない schema を受け取るので、カラム型・制約・
 enum・index 名・default のどれかが TypeORM の期待とずれていれば起動しない。
@@ -224,7 +224,7 @@ PKCS#1 のため TS 側の送信連合が全滅する不具合が見つかって
 `ParseRSAPrivateKey` は PKCS#1 / PKCS#8 の両方を読めるため、**コードを読む限りでは
 何も問題が無いように見える**類のバグだった。
 
-`mkgo-born` が落ちた場合、段階から原因がほぼ特定できる。
+`elythia-born` が落ちた場合、段階から原因がほぼ特定できる。
 
 | 落ちた段階 | 意味 |
 |---|---|
@@ -234,7 +234,7 @@ PKCS#1 のため TS 側の送信連合が全滅する不具合が見つかって
 
 ## 復路は測る対象 (#3191)
 
-TS へ戻せること (復路) は保証しない。`mkgo-born` と `swap-test` の stage 6b-9 は、今の版で
+TS へ戻せること (復路) は保証しない。`elythia-born` と `swap-test` の stage 6b-9 は、今の版で
 どこまで戻れるかを**測る**ために残している。往路 (`swap-test` の stage 1-6。6b は復路の準備なので除く) は引き続き守る。
 
 復路の検証が落ちたときの手順:
@@ -242,16 +242,16 @@ TS へ戻せること (復路) は保証しない。`mkgo-born` と `swap-test` 
 1. **往路も落ちていないかを見る。** 次の段階が落ちているなら、それは Elythia 側の回帰なので
    直す。復路の段階だけが落ちているときに次へ進む
    - `swap-test` の stage 1-6 (6b を除く): TS の DB を引き継ぐ往路
-   - `mkgo-born` の stage 0-2: 空の DB から Elythia を起動してデータを作る段階で、TS は関わらない
+   - `elythia-born` の stage 0-2: 空の DB から Elythia を起動してデータを作る段階で、TS は関わらない
    - `swap-test` の stage 6b のうち、Elythia の API が 5xx を返した、または Ed25519 署名の Follow を
      受理しなかったもの: 復路の準備の段階だが、見ているのは Elythia 自身の振る舞い
 2. **原因が意図的な変更かを確かめる。** 意図していない変更 (seed の漏れ、型の取り違えなど)
    で落ちているなら、従来どおり直す。直す手間が小さいなら、戻れる範囲を広げておくのは
    構わない
 3. **意図的な変更なら、設計を戻さずに期待値を更新する。**
-   - pytest の段階 (`mkgo-born` の stage 5、`swap-test` の stage 6b / 9) は、該当テストに
+   - pytest の段階 (`elythia-born` の stage 5、`swap-test` の stage 6b / 9) は、該当テストに
      `@pytest.mark.xfail(strict=True, reason="#<PR>: <TS へ戻したときに起きること>")` を付ける
-   - orchestrator の段階 (`mkgo-born` の stage 4b / 4d、`swap-test` の stage 8b / 8d) で止まる
+   - orchestrator の段階 (`elythia-born` の stage 4b / 4d、`swap-test` の stage 8b / 8d) で止まる
      場合は、後の pytest が走らないので xfail では表せない。その段階で「戻らなくなった」ことを
      表示して以降の復路の段階を飛ばし、成功として終える変更を同じ PR に入れる。往路の段階は
      飛ばさない
@@ -259,6 +259,6 @@ TS へ戻せること (復路) は保証しない。`mkgo-born` と `swap-test` 
    に 1 行足す (版 / 落ちた段階 / TS へ戻したときに失われるもの、または起きること / PR)
 5. **PR の本文に書く。** 運営者向けの CHANGELOG の Note に載せるかは、リリースのときに決める
 
-`mkgo-born` が作るデータは `test_swap_setup.py` の分 (user・follow・公開範囲違いの note・リスト など) だけで、Elythia 独自の機能 (承認制の
+`elythia-born` が作るデータは `test_swap_setup.py` の分 (user・follow・公開範囲違いの note・リスト など) だけで、Elythia 独自の機能 (承認制の
 申請、絵文字の申請など) の行は作っていない。測る範囲を広げる場合は、`swap-test` の
 `test_swap_seed_mkgo_only.py` と同じ形で seed を足す。
