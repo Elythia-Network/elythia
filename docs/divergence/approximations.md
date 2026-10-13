@@ -23,6 +23,14 @@ upstream の `NoteDraftService.update` は「**未予約 → 予約** に切り�
 **`errorid-check` では捕まらない** — あれは emission 側の id / code / status の一致しか
 見ないので、「emission が無いこと」は検査対象外。
 
+### 予約投稿で、本文や CW が notes/create の上限を超える下書きは失敗として通知する
+
+本家の予約投稿 (`PostScheduledNoteProcessorService`) は、下書きの本文を `NoteCreateService` が
+`DB_MAX_NOTE_TEXT_LENGTH` (8192) で切り詰めて投稿する。Elythia は、本文が 3000 文字、または CW が
+100 文字 (notes/create と notes/drafts/create の上限) を超える下書きを投稿せず、
+`scheduledNotePostFailed` を通知する (下書きは残る)。本家の下書きは保存の時点でこの上限に
+収まるので、違いが出るのは、Elythia が保存の時点で長さを検査するより前に作られた下書きだけ。
+
 ## 9. 実装が近似になっているもの (意図も結末も同じ・数値や内部の形がわずかに違う)
 
 upstream の挙動を再現しているが、依存ライブラリや判定の実装が違うため、**画素値や内部の形までは一致しない**もの。乖離として残す判断ではなく「ここまで揃っていて、残差はこれだけ」という記録。
