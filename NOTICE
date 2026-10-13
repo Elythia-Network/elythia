@@ -1,4 +1,4 @@
-mk-go (to be renamed Elythia)
+Elythia
 
 This program is free software: you can redistribute it and/or modify it under
 the terms of the GNU Affero General Public License, version 3, as published by
@@ -16,7 +16,8 @@ files are left unchanged.
 
 - The upstream Misskey version this tree follows is written in
   UPSTREAM_MISSKEY_VERSION.
-- frontend/ was imported from the mk-go fork of Misskey
+- frontend/ was imported from the fork of Misskey kept for this project
+  under its former name, mk-go
   (https://github.com/shiroha-a/misskey-ts) at tag 2026.10.0-mk.5. The history
   of the modifications made before the import can be followed in that
   repository up to that tag.
