@@ -1018,6 +1018,16 @@ err = h.DeliverPeerReply("other.example", sends[0].ID, map[string]any{"score": 1
 `WithPeers` に無いホストへの `Send` は本番と同じくエラーになる。宣言を忘れたテストが、
 本番では通らない経路を試していることに気付ける。
 
+## MFM を読む
+
+ノートの本文などの MFM を構文木にしたいときは、本体と同じ解析器 `github.com/elythia-network/mfm` (MIT、#3514) をプラグインの `go.mod` へ `go get` で足して、直接 import する。本体の `internal/` は import できないが、この解析器は独立したモジュールなので使える。`mfm.Parse` / `mfm.ParseSimple` が mfm-js と同じ形の構文木を返し、`mfm.CollectHashtags` / `mfm.CollectEmojiCodes` / `mfm.ExtractCustomEmojis` で、ハッシュタグ・カスタム絵文字を取り出せる。
+
+- **信頼できない入力は、長さを切ってから渡す。** 解析器のメモ表の上限は 16MiB と入力長の 64 倍の大きい方なので、長い入力ほど多く確保する。本体はリモートの本文からハッシュタグを拾うとき、断片ごとに先頭 256KiB だけを解析している (そのため、それより長い本文では本体の抽出結果と一致しない)
+
+- **このモジュールは「公開面の一覧」に入らない。** 版は Elythia-Network/mfm のリリースで決まり、`plugin` パッケージの互換の約束の外にある
+- ビルドで使われる版は、本体の `go.mod` と同じか新しい版になる (Go の版の選び方による)。本体と同じ木を得たいなら、本体の `go.mod` と同じ版を書く
+- 連合向けの HTML への変換 (`ToHTML`) と、HTML から MFM への変換 (`FromHTML`) は本体の `internal/activitypub/mfm` にあり、プラグインからは使えない
+
 ## テスト
 
 `plugin/plugintest` でルートとジョブを直接叩ける。
