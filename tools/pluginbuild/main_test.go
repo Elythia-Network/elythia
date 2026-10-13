@@ -361,6 +361,9 @@ func TestRenderFrontendList_Empty(t *testing.T) {
 	assert.Contains(t, out, "export const serverPlugins: PluginDefinition[] = [];")
 	assert.NotContains(t, out, "@mkplugin/")
 	assert.Contains(t, out, "DO NOT EDIT")
+	// 生成物は Elythia が書くファイルなので、上流ではなく Elythia-Network の名義にする (#3533)
+	assert.True(t, strings.HasPrefix(out, "/*\n * SPDX-FileCopyrightText: Elythia-Network\n * SPDX-License-Identifier: AGPL-3.0-only\n */\n"), "header: %q", out)
+	assert.NotContains(t, out, "misskey-project")
 }
 
 func TestRenderFrontendList_WithPlugins(t *testing.T) {
