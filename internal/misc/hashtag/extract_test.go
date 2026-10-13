@@ -292,3 +292,37 @@ func TestTags_DropNUL(t *testing.T) {
 	require.NotEmpty(t, NormalizeNoteTags([]string{"ok"}), "対照")
 	assert.Empty(t, NormalizeNoteTags([]string{withNUL}), "note.tags")
 }
+
+// TestExtract_ParsesOnlyTheFirstMaxParseBytes checks that each fragment is
+// cut to MaxParseBytes before parsing, at a UTF-8 boundary (#3514).
+func TestExtract_ParsesOnlyTheFirstMaxParseBytes(t *testing.T) {
+	head := "#head "
+	pad := strings.Repeat("a", MaxParseBytes-len(head)-len(" #edge")-1)
+	// #edge は上限の内側で終わる。その直後の 3 バイトの文字が境界をまたぐ
+	text := head + pad + " #edge" + "あ" + " #tail"
+	require.Greater(t, len(text), MaxParseBytes)
+	assert.Equal(t, []string{"head", "edge"}, Extract(text))
+	assert.Equal(t, []string{"head", "edge"}, ExtractNoteTags(text))
+	// 断片ごとに切るので、2 つ目の断片は 1 つ目の長さに影響されない
+	assert.Equal(t, []string{"head", "edge", "cw"}, Extract(text, "#cw"))
+
+	cut := cutForParse([]string{text, "short"})
+	assert.True(t, utf8.ValidString(cut[0]))
+	assert.LessOrEqual(t, len(cut[0]), MaxParseBytes)
+	assert.True(t, strings.HasSuffix(cut[0], " #edge"), "cut at the start of the multibyte rune")
+	assert.Equal(t, "short", cut[1])
+
+	// ちょうど上限の長さの断片は切らない (p[MaxParseBytes] を読まない)
+	exact := strings.Repeat("a", MaxParseBytes-len(" #last")) + " #last"
+	require.Len(t, exact, MaxParseBytes)
+	assert.Equal(t, []string{exact}, cutForParse([]string{exact}))
+	assert.Equal(t, []string{"last"}, Extract(exact))
+	// 1 バイト超える断片は、ちょうど上限の位置で切る
+	over := exact[:MaxParseBytes-len("last")] + "ab" + "cd" + "e"
+	require.Len(t, over, MaxParseBytes+1)
+	assert.Equal(t, []string{"abcd"}, Extract(over))
+
+	// 上限は解析器のメモ表の上限 (16MiB と 64 × 入力長の大きい方) を 16MiB に留める長さにする
+	assert.LessOrEqual(t, 64*MaxParseBytes, 16<<20)
+	assert.Greater(t, 64*(MaxParseBytes+1), 16<<20)
+}
