@@ -10,57 +10,61 @@ SPDX-License-Identifier: AGPL-3.0-only
 			<SearchText>{{ i18n.ts._settings.privacyBanner }}</SearchText>
 		</MkFeatureBanner>
 
-		<FormSection first>
-			<template #label><SearchLabel>{{ i18n.ts._followApproval.groupTitle }}</SearchLabel></template>
-			<div class="_gaps_m">
-				<SearchMarker :keywords="['follow', 'lock']">
-					<MkSwitch v-model="isLocked" @update:modelValue="save()">
-						<template #label><SearchLabel>{{ i18n.ts.makeFollowManuallyApprove }}</SearchLabel></template>
-						<template #caption><SearchText>{{ i18n.ts.lockedAccountInfo }}</SearchText></template>
-					</MkSwitch>
-				</SearchMarker>
+		<SearchMarker :keywords="['follow', 'approval']">
+			<FormSection first>
+				<template #label><SearchLabel>{{ i18n.ts._followApproval.groupTitle }}</SearchLabel></template>
+				<div class="_gaps_m">
+					<SearchMarker :keywords="['follow', 'lock']">
+						<MkSwitch v-model="isLocked" @update:modelValue="save()">
+							<template #label><SearchLabel>{{ i18n.ts.makeFollowManuallyApprove }}</SearchLabel></template>
+							<template #caption><SearchText>{{ i18n.ts.lockedAccountInfo }}</SearchText></template>
+						</MkSwitch>
+					</SearchMarker>
 
-				<SearchMarker :keywords="['follow', 'request', 'approval', 'age']">
-					<FormSlot>
-						<template #label><SearchLabel>{{ i18n.ts._followApproval.title }}</SearchLabel></template>
-						<div class="_gaps_m">
-							<div><SearchText>{{ i18n.ts._followApproval.description }}</SearchText></div>
-							<MkInfo v-if="isLocked"><SearchText>{{ i18n.ts._followApproval.inactiveDescription }}</SearchText></MkInfo>
-							<MkDisableSection :disabled="isLocked">
-								<div class="_gaps_m">
-									<div v-for="setting in followApprovalSettings" :key="setting.key" class="_gaps_s">
-										<MkSelect v-model="setting.mode" :items="followApprovalModes" @update:modelValue="saveFollowApproval(setting)">
-											<template #label><SearchLabel>{{ setting.label }}</SearchLabel></template>
-											<template #caption><SearchText>{{ setting.caption }}</SearchText></template>
-										</MkSelect>
-										<MkInput v-if="setting.mode === 'custom'" v-model="setting.amount" type="number" :min="1 / FOLLOW_APPROVAL_UNIT_SECONDS[setting.unit]" :max="FOLLOW_APPROVAL_MAX_SECONDS / FOLLOW_APPROVAL_UNIT_SECONDS[setting.unit]" step="any" @update:modelValue="scheduleFollowApprovalSave(setting)">
-											<template #label>{{ i18n.ts._followApproval.period }}</template>
-											<template #suffix>{{ setting.unit === 'day' ? i18n.ts._time.day : i18n.ts._time.hour }}</template>
-											<template v-if="followApprovalPeriodToSeconds(setting.amount, setting.unit) == null" #caption>{{ i18n.ts._followApproval.invalidPeriod }}</template>
-										</MkInput>
-										<MkSelect v-if="setting.mode === 'custom'" v-model="setting.unit" :items="followApprovalUnits" @update:modelValue="saveFollowApproval(setting)">
-											<template #label>{{ i18n.ts._followApproval.unit }}</template>
-										</MkSelect>
+					<SearchMarker :keywords="['follow', 'request', 'approval', 'age', 'local', 'remote']">
+						<FormSlot>
+							<template #label><SearchLabel>{{ i18n.ts._followApproval.title }}</SearchLabel></template>
+							<div class="_gaps_m">
+								<div><SearchText>{{ i18n.ts._followApproval.description }}</SearchText></div>
+								<MkInfo v-if="isLocked"><SearchText>{{ i18n.ts._followApproval.inactiveDescription }}</SearchText></MkInfo>
+								<MkDisableSection :disabled="isLocked">
+									<div class="_gaps_m">
+										<div v-for="setting in followApprovalSettings" :key="setting.key" class="_gaps_s">
+											<MkSelect v-model="setting.mode" :items="followApprovalModes" @update:modelValue="saveFollowApproval(setting)">
+												<template #label>{{ setting.label }}</template>
+												<template #caption>{{ setting.caption }}</template>
+											</MkSelect>
+											<MkInput v-if="setting.mode === 'custom'" v-model="setting.amount" type="number" :min="1 / FOLLOW_APPROVAL_UNIT_SECONDS[setting.unit]" :max="FOLLOW_APPROVAL_MAX_SECONDS / FOLLOW_APPROVAL_UNIT_SECONDS[setting.unit]" step="any" @update:modelValue="scheduleFollowApprovalSave(setting)">
+												<template #label>{{ i18n.ts._followApproval.period }}</template>
+												<template #suffix>{{ setting.unit === 'day' ? i18n.ts._time.day : i18n.ts._time.hour }}</template>
+												<template v-if="followApprovalPeriodToSeconds(setting.amount, setting.unit) == null" #caption>{{ i18n.ts._followApproval.invalidPeriod }}</template>
+											</MkInput>
+											<MkSelect v-if="setting.mode === 'custom'" v-model="setting.unit" :items="followApprovalUnits" @update:modelValue="saveFollowApproval(setting)">
+												<template #label>{{ i18n.ts._followApproval.unit }}</template>
+											</MkSelect>
+										</div>
+										<SearchMarker :keywords="['follow', 'approval', 'silent']">
+											<MkSelect v-model="followApprovalAction" :items="followApprovalActionDef" @update:modelValue="saveFollowApprovalAction()">
+												<template #label><SearchLabel>{{ i18n.ts._followApproval.action }}</SearchLabel></template>
+												<template #caption><SearchText>{{ i18n.ts._followApproval.actionDescription }}</SearchText></template>
+											</MkSelect>
+										</SearchMarker>
+										<MkButton v-if="followApprovalAction === 'silentFollow'" type="routerLink" to="/my/follow-requests?tab=silent" rounded><i class="ti ti-bell-off"></i> {{ i18n.ts._followApproval.silentFollows }}</MkButton>
 									</div>
-									<MkSelect v-model="followApprovalAction" :items="followApprovalActionDef" @update:modelValue="saveFollowApprovalAction()">
-										<template #label><SearchLabel>{{ i18n.ts._followApproval.action }}</SearchLabel></template>
-										<template #caption><SearchText>{{ i18n.ts._followApproval.actionDescription }}</SearchText></template>
-									</MkSelect>
-									<MkButton v-if="followApprovalAction === 'silentFollow'" type="routerLink" to="/my/follow-requests?tab=silent" rounded><i class="ti ti-bell-off"></i> {{ i18n.ts._followApproval.silentFollows }}</MkButton>
-								</div>
-							</MkDisableSection>
-						</div>
-					</FormSlot>
-				</SearchMarker>
+								</MkDisableSection>
+							</div>
+						</FormSlot>
+					</SearchMarker>
 
-				<SearchMarker :keywords="['follow', 'auto', 'accept']">
-					<MkSwitch v-model="autoAcceptFollowed" @update:modelValue="save()">
-						<template #label><SearchLabel>{{ i18n.ts.autoAcceptFollowed }}</SearchLabel></template>
-						<template #caption><SearchText>{{ i18n.ts._followApproval.autoAcceptDescription }}</SearchText></template>
-					</MkSwitch>
-				</SearchMarker>
-			</div>
-		</FormSection>
+					<SearchMarker :keywords="['follow', 'auto', 'accept']">
+						<MkSwitch v-model="autoAcceptFollowed" @update:modelValue="save()">
+							<template #label><SearchLabel>{{ i18n.ts.autoAcceptFollowed }}</SearchLabel></template>
+							<template #caption><SearchText>{{ i18n.ts._followApproval.autoAcceptDescription }}</SearchText></template>
+						</MkSwitch>
+					</SearchMarker>
+				</div>
+			</FormSection>
+		</SearchMarker>
 
 		<SearchMarker :keywords="['reaction', 'public']">
 			<MkSwitch v-model="publicReactions" @update:modelValue="save()">
