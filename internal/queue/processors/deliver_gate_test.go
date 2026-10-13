@@ -47,3 +47,29 @@ func TestDeliverProcessor_DeliveryGate_AllowsActiveHost(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, payload.Inbox, signer.gotURL)
 }
+
+// stubSoftwareSuspension reports hosts in suspended as software-suspended.
+type stubSoftwareSuspension struct {
+	suspended map[string]bool
+}
+
+func (s stubSoftwareSuspension) IsSuspended(host string) bool { return s.suspended[host] }
+
+// **配送停止中のソフトウェアの相手には、実際に送らないこと (#3558)。** 判定
+// (core/federation.SuspendedChecker) が当たったら、signer を呼ばずに成功として
+// 終える。当たらない相手には従来どおり送る。
+func TestDeliverProcessor_SuspendedSoftware_SkipsDelivery(t *testing.T) {
+	payload := makePayload(t)
+
+	signer := &stubSigner{resp: okResponse(http.StatusOK)}
+	p := processors.NewDeliverProcessor(signer)
+	p.SetSuspendedChecker(stubSoftwareSuspension{suspended: map[string]bool{"remote.example": true}})
+	require.NoError(t, p.Handle(context.Background(), makeTask(t, payload)))
+	assert.Empty(t, signer.gotURL, "配送停止中のソフトウェアの相手へは POST しない")
+
+	signer = &stubSigner{resp: okResponse(http.StatusOK)}
+	p = processors.NewDeliverProcessor(signer)
+	p.SetSuspendedChecker(stubSoftwareSuspension{suspended: map[string]bool{}})
+	require.NoError(t, p.Handle(context.Background(), makeTask(t, payload)))
+	assert.Equal(t, payload.Inbox, signer.gotURL)
+}
