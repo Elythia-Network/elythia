@@ -464,6 +464,9 @@ type FederationHostSets struct {
 	// SuspendedSoftware は meta.deliverSuspendedSoftware をパースしたもの。
 	// federation/instances 等の softwareSuspended 表示判定に使う (#1732)。
 	SuspendedSoftware []model.SuspendedSoftwareEntry
+	// InboxSuspendedSoftware は meta.inboxSuspendedSoftware をパースしたもの。
+	// 受信を拒否しているかの表示に使う (Elythia 独自、#3362)。
+	InboxSuspendedSoftware []model.SuspendedSoftwareEntry
 	// Federation / FederationHosts は連合モード (`all` / `none` / `specified`) と
 	// `specified` のときの許可リスト。疎通の診断 (#3055) が IsAllowed と同じ判定に使う。
 	Federation      string
@@ -487,13 +490,15 @@ func (s *Service) FederationHostLists() (FederationHostSets, error) {
 	// deliverSuspendedSoftware (jsonb) を softwareSuspended 判定用に parse する
 	// (#1732)。配送の判定と同じ読み方にする (#3558。読めない要素だけ飛ばす)。
 	suspended := model.ParseSuspendedSoftware(meta.DeliverSuspendedSoftware)
+	inboxSuspended := model.ParseSuspendedSoftware(meta.InboxSuspendedSoftware)
 	return FederationHostSets{
-		Blocked:           meta.BlockedHosts,
-		Silenced:          meta.SilencedHosts,
-		MediaSilenced:     meta.MediaSilencedHosts,
-		SuspendedSoftware: suspended,
-		Federation:        meta.Federation,
-		FederationHosts:   meta.FederationHosts,
+		Blocked:                meta.BlockedHosts,
+		Silenced:               meta.SilencedHosts,
+		MediaSilenced:          meta.MediaSilencedHosts,
+		SuspendedSoftware:      suspended,
+		InboxSuspendedSoftware: inboxSuspended,
+		Federation:             meta.Federation,
+		FederationHosts:        meta.FederationHosts,
 	}, nil
 }
 

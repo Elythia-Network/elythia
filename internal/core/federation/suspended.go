@@ -1,7 +1,9 @@
 package federation
 
 import (
+	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/elythia-network/elythia/internal/misc/semverrange"
 	"github.com/elythia-network/elythia/internal/model"
@@ -47,6 +49,18 @@ func MatchSuspendedSoftware(softwareName, softwareVersion *string, entries []Sus
 		if rng == "*" {
 			return true
 		}
+		// `/.../` (末尾に i を付けると大文字と小文字を区別しない) は、バージョンの
+		// 文字列そのものに正規表現を当てる Elythia 独自の書き方 (#3362)。fork が
+		// 付けるサフィックス (`2024.11.1-cherrypick-4.14.0` の `-cherrypick-4.14.0`)
+		// は semver ではプレリリースとして読まれ、fork 側の版で範囲を書けない。
+		// 本家の semver は `/.../` を範囲として読めずどれにも当てないので、意味を
+		// 足しても本家の設定とぶつからない。
+		if re, ok := versionRegexp(rng); ok {
+			if softwareVersion != nil && re != nil && re.MatchString(*softwareVersion) {
+				return true
+			}
+			continue
+		}
 		// 空の範囲は、本家の semver と同じく全バージョン (semver として読めるもの)
 		// に当たる。TS 版で「名前だけ入れて範囲を空にした」設定を移行しても、
 		// 配送停止が外れないようにする (#3558。以前の Elythia は当てていなかった)。
@@ -70,15 +84,28 @@ func MatchSuspendedSoftware(softwareName, softwareVersion *string, entries []Sus
 type SuspendedChecker struct {
 	metaRepo     repository.MetaRepository
 	instanceRepo repository.InstanceRepository
+	// entriesOf picks the setting (deliverSuspendedSoftware or
+	// inboxSuspendedSoftware) from meta.
+	entriesOf func(*model.Meta) []byte
 }
 
 // NewSuspendedChecker creates a checker that reads meta.deliverSuspendedSoftware
 // on every call.
 func NewSuspendedChecker(metaRepo repository.MetaRepository, instanceRepo repository.InstanceRepository) *SuspendedChecker {
-	return &SuspendedChecker{metaRepo: metaRepo, instanceRepo: instanceRepo}
+	return &SuspendedChecker{metaRepo: metaRepo, instanceRepo: instanceRepo,
+		entriesOf: func(m *model.Meta) []byte { return m.DeliverSuspendedSoftware }}
 }
 
-// IsSuspended reports whether delivery to the given host should be skipped.
+// NewInboxSuspendedChecker creates a checker that reads
+// meta.inboxSuspendedSoftware on every call. 受信を拒否するソフトウェアの判定
+// (Elythia 独自、#3362)。判定の規則は配送停止と同じ。
+func NewInboxSuspendedChecker(metaRepo repository.MetaRepository, instanceRepo repository.InstanceRepository) *SuspendedChecker {
+	return &SuspendedChecker{metaRepo: metaRepo, instanceRepo: instanceRepo,
+		entriesOf: func(m *model.Meta) []byte { return m.InboxSuspendedSoftware }}
+}
+
+// IsSuspended reports whether delivery to (or, for the inbox checker,
+// activities from) the given host should be refused.
 // ホストの instance レコードから softwareName/softwareVersion を取得し、
 // deliverSuspendedSoftware リストとマッチする。meta や instance が読めない
 // ときは配送を止めない (以前と同じ)。
@@ -90,7 +117,7 @@ func (c *SuspendedChecker) IsSuspended(host string) bool {
 	if err != nil || m == nil {
 		return false
 	}
-	entries := ParseSuspendedSoftware(m.DeliverSuspendedSoftware)
+	entries := ParseSuspendedSoftware(c.entriesOf(m))
 	if len(entries) == 0 {
 		return false
 	}
@@ -105,4 +132,76 @@ func (c *SuspendedChecker) IsSuspended(host string) bool {
 // 同じ読み方にするため model.ParseSuspendedSoftware に委ねる (#3558)。
 func ParseSuspendedSoftware(raw []byte) []SuspendedSoftwareEntry {
 	return model.ParseSuspendedSoftware(raw)
+}
+
+// InvalidVersionRegexp reports whether rng is written as `/pattern/` (or
+// `/pattern/i`) but the pattern does not compile. admin/update-meta が保存の
+// 時点で弾くのに使う (#3362)。判定では、コンパイルできないパターンは何にも
+// 当てないだけで、管理者は気付けない。
+//
+// `/x/I` や `/x/g` のように、閉じる `/` の後に i 以外が続くものも不正とする。
+// これらは正規表現として読まれず semver の範囲としても不正なので、判定では
+// 黙って何にも当たらない。
+func InvalidVersionRegexp(rng string) bool {
+	rng = semverrange.TrimSpace(rng)
+	if re, ok := versionRegexp(rng); ok {
+		return re == nil
+	}
+	if strings.HasPrefix(rng, "/") {
+		if last := strings.LastIndex(rng, "/"); last > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// versionRegexpCacheMax bounds the compiled patterns kept by versionRegexp.
+const versionRegexpCacheMax = 256
+
+type compiledVersionRegexp struct {
+	re *regexp.Regexp
+}
+
+// versionRegexps keeps compiled `/.../` patterns. 判定は配送と受信のたびに走り、
+// パターンは管理者の設定なので、毎回コンパイルし直さない。上限を超えたら丸ごと
+// 捨てる。コンパイルできないパターンも nil として覚える。
+var versionRegexps = struct {
+	sync.Mutex
+	m map[string]compiledVersionRegexp
+}{m: make(map[string]compiledVersionRegexp)}
+
+// versionRegexp reports whether rng is written as `/pattern/` or
+// `/pattern/i`, and returns the compiled pattern (nil when it does not
+// compile). Go の正規表現 (RE2) は入力の長さに比例する時間で動くので、管理者の
+// 書いたパターンで判定が遅くなることは無い。
+func versionRegexp(rng string) (*regexp.Regexp, bool) {
+	if len(rng) < 2 || rng[0] != '/' {
+		return nil, false
+	}
+	body, flags := rng[1:], ""
+	switch {
+	case strings.HasSuffix(body, "/i"):
+		body, flags = body[:len(body)-2], "(?i)"
+	case strings.HasSuffix(body, "/"):
+		body = body[:len(body)-1]
+	default:
+		return nil, false
+	}
+	versionRegexps.Lock()
+	if c, hit := versionRegexps.m[rng]; hit {
+		versionRegexps.Unlock()
+		return c.re, true
+	}
+	versionRegexps.Unlock()
+	re, err := regexp.Compile(flags + body)
+	if err != nil {
+		re = nil
+	}
+	versionRegexps.Lock()
+	if len(versionRegexps.m) >= versionRegexpCacheMax {
+		versionRegexps.m = make(map[string]compiledVersionRegexp)
+	}
+	versionRegexps.m[rng] = compiledVersionRegexp{re: re}
+	versionRegexps.Unlock()
+	return re, true
 }

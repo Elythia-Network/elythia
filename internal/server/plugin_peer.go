@@ -308,7 +308,9 @@ func (p *pluginPeer) Send(ctx context.Context, host string, payload any) (string
 }
 
 // blocked reports whether an **inbound** peer request from host must be
-// refused. AP の inbox と同じ判定。
+// refused. AP の inbox のドメインブロックと連合モードの判定と同じ。受信を拒否する
+// ソフトウェア (meta.inboxSuspendedSoftware、#3362) はここでは見ない — あれは
+// ActivityPub の受信に掛ける設定で、プラグイン同士の通信は対象にしていない。
 func (p *pluginPeer) blocked(host string) bool {
 	if p.deps.blocker == nil {
 		// **配線が落ちていたら通さない (fail-closed)。** ここは「相手が

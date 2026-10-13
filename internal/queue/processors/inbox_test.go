@@ -1306,3 +1306,120 @@ func TestInboxProcessor_ForwardedActorFromBlockedHostDropped(t *testing.T) {
 	require.Empty(t, stub.calls,
 		"ブロックしたホストの actor は、転送経由でも処理しないこと")
 }
+
+// stubSoftwareBlocker refuses hosts in suspended (inboxSuspendedSoftware).
+type stubSoftwareBlocker struct{ suspended map[string]bool }
+
+func (s stubSoftwareBlocker) IsSuspended(host string) bool { return s.suspended[host] }
+
+// **受信を拒否するソフトウェアの相手からの activity は処理しない (#3362)。**
+// ドメインブロックと同じ場所で見るので、Delete も含めて拒否する。当たらない
+// 相手は従来どおり処理する。
+func TestInboxProcessor_SoftwareSuspendedHostDropped(t *testing.T) {
+	priv, pub, err := activitypub.GenerateRSAKeypair()
+	require.NoError(t, err)
+	key, err := activitypub.NewPrivateKey("https://remote.example/users/alice#main-key", priv)
+	require.NoError(t, err)
+	host := "remote.example"
+	aliceURI := "https://remote.example/users/alice"
+
+	for _, tc := range []struct {
+		name      string
+		suspended bool
+		body      string
+	}{
+		{"suspended follow", true, `{"id":"https://remote.example/follows/1","type":"Follow","actor":"https://remote.example/users/alice"}`},
+		{"suspended delete", true, `{"id":"https://remote.example/deletes/1","type":"Delete","actor":"https://remote.example/users/alice","object":"https://remote.example/notes/1"}`},
+		{"not suspended", false, `{"id":"https://remote.example/follows/2","type":"Follow","actor":"https://remote.example/users/alice"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &stubFedProcessor{}
+			p := processors.NewInboxProcessor(stub)
+			p.SetSignatureVerifier(&stubVerifier{actor: &model.User{ID: "alice", Host: &host, URI: &aliceURI}, pubKey: pub})
+			p.SetHostBlockChecker(&stubBlocker{blocked: func(string) bool { return false }})
+			p.SetSoftwareSuspensionChecker(stubSoftwareBlocker{suspended: map[string]bool{host: tc.suspended}})
+
+			payload := signedInboxPayload(t, key, []byte(tc.body))
+			require.NoError(t, p.Handle(context.Background(), driver.RawTask{
+				TypeName: queue.TaskTypeInbox,
+				Body:     mustEncode(t, payload),
+			}), "拒否は sender へ retry を要求しない")
+			if tc.suspended {
+				assert.Empty(t, stub.calls, "受信を拒否するソフトウェアの相手の activity は処理しないこと")
+			} else {
+				assert.NotEmpty(t, stub.calls, "当たらない相手の activity は処理すること")
+			}
+		})
+	}
+}
+
+// **転送された actor のソフトウェアも見ること (#3362)。** 署名者 (リレー) は
+// 当たらなくても、LD 署名の actor のホストが当たれば処理しない。
+func TestInboxProcessor_ForwardedActorFromSoftwareSuspendedHostDropped(t *testing.T) {
+	priv, pub, err := activitypub.GenerateRSAKeypair()
+	require.NoError(t, err)
+	key, err := activitypub.NewPrivateKey("https://relay.example/actor#main-key", priv)
+	require.NoError(t, err)
+
+	relayHost := "relay.example"
+	suspendedHost := "suspended.example"
+	verifier := &multiActorVerifier{
+		pubKey: pub,
+		byURI: map[string]*model.User{
+			"https://relay.example/actor":           {ID: "relay", Host: &relayHost, URI: uptr("https://relay.example/actor")},
+			"https://suspended.example/users/alice": {ID: "alice", Host: &suspendedHost, URI: uptr("https://suspended.example/users/alice")},
+		},
+	}
+	stub := &stubFedProcessor{}
+	p := processors.NewInboxProcessor(stub)
+	p.SetSignatureVerifier(verifier)
+	p.SetLDSignatureVerifier(&stubLDVerifier{present: true, creator: "https://suspended.example/users/alice#main-key"})
+	p.SetHostBlockChecker(&stubBlocker{blocked: func(string) bool { return false }})
+	p.SetSoftwareSuspensionChecker(stubSoftwareBlocker{suspended: map[string]bool{suspendedHost: true}})
+
+	body := []byte(`{"id":"https://suspended.example/creates/1","type":"Create","actor":"https://suspended.example/users/alice","signature":{"type":"RsaSignature2017","creator":"https://suspended.example/users/alice#main-key"}}`)
+	payload := signedInboxPayload(t, key, body)
+	require.NoError(t, p.Handle(context.Background(), driver.RawTask{
+		TypeName: queue.TaskTypeInbox,
+		Body:     mustEncode(t, payload),
+	}))
+	require.Empty(t, stub.calls, "受信を拒否するソフトウェアの actor は、転送経由でも処理しないこと")
+}
+
+// countingVerifier counts ResolveActor calls.
+type countingVerifier struct {
+	*stubVerifier
+	resolved int
+}
+
+func (c *countingVerifier) ResolveActor(uri string) (*model.User, error) {
+	c.resolved++
+	return c.stubVerifier.ResolveActor(uri)
+}
+
+// **署名を検証する前に、keyId のホストで止めること (#3362)。** 検証は署名者の
+// actor を解決して保存するので、拒否する相手の分まで行と通信が増える。
+func TestInboxProcessor_SoftwareSuspendedHostStoppedBeforeVerification(t *testing.T) {
+	priv, pub, err := activitypub.GenerateRSAKeypair()
+	require.NoError(t, err)
+	// keyId のホストは大文字混じりでも、小文字にして判定する。
+	key, err := activitypub.NewPrivateKey("https://Remote.example/users/alice#main-key", priv)
+	require.NoError(t, err)
+	host := "remote.example"
+	aliceURI := "https://remote.example/users/alice"
+	verifier := &countingVerifier{stubVerifier: &stubVerifier{actor: &model.User{ID: "alice", Host: &host, URI: &aliceURI}, pubKey: pub}}
+
+	stub := &stubFedProcessor{}
+	p := processors.NewInboxProcessor(stub)
+	p.SetSignatureVerifier(verifier)
+	p.SetHostBlockChecker(&stubBlocker{})
+	p.SetSoftwareSuspensionChecker(stubSoftwareBlocker{suspended: map[string]bool{host: true}})
+
+	payload := signedInboxPayload(t, key, []byte(`{"id":"https://remote.example/follows/1","type":"Follow","actor":"https://remote.example/users/alice"}`))
+	require.NoError(t, p.Handle(context.Background(), driver.RawTask{
+		TypeName: queue.TaskTypeInbox,
+		Body:     mustEncode(t, payload),
+	}))
+	assert.Zero(t, verifier.resolved, "拒否する相手の actor を解決しないこと")
+	assert.Empty(t, stub.calls)
+}

@@ -494,3 +494,29 @@ func TestInstances_GETBindsQueryParams(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	assert.Len(t, resp, 1, "GET ?limit=1 must bind the query param (else default 30 returns all 3)")
 }
+
+// **受信を拒否するソフトウェアに当たるかを isInboxSuspended で返す (Elythia 独自、
+// #3362)。** isSuspended / suspensionState は配送の停止だけを表す本家の意味のまま。
+func TestShowInstance_InboxSuspended(t *testing.T) {
+	h, repo, metaRepo := newHandlerWithMeta(t)
+	metaRepo.Meta = &model.Meta{
+		InboxSuspendedSoftware: datatypes.JSON([]byte(`[{"software":"mastodon","versionRange":"<=4.2.0"}]`)),
+	}
+	name := "mastodon"
+	old, newer := "4.1.0", "4.3.0"
+	inst := seedInstance(t, repo, "old.example")
+	inst.SoftwareName, inst.SoftwareVersion = &name, &old
+	inst2 := seedInstance(t, repo, "new.example")
+	inst2.SoftwareName, inst2.SoftwareVersion = &name, &newer
+
+	for host, want := range map[string]bool{"old.example": true, "new.example": false} {
+		c, rec := newReq(t, `{"host":"`+host+`"}`)
+		require.NoError(t, h.ShowInstance(c))
+		require.Equal(t, http.StatusOK, rec.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		assert.Equal(t, want, resp["isInboxSuspended"], host)
+		assert.Equal(t, false, resp["isSuspended"], "配送の停止とは別に表す")
+		assert.Equal(t, "none", resp["suspensionState"])
+	}
+}

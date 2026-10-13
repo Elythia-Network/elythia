@@ -43,7 +43,7 @@
 | `chat_room_inbox.go` / `reversi_inbox.go` | cherrypick 由来 activity の受信 |
 | `featured.go` | **リモート** actor の featured を取り込んで `user_note_pining` に反映 (upstream `ApPersonService.updateFeatured` 相当)。ローカルの featured を返すのは `internal/api/ap/handler.go` |
 | `permanent_error.go` | リトライしない失敗の判定 |
-| `suspended.go` | 配送先インスタンスの software 名 / 版で**送信をスキップ**するかの判定 (`meta.deliverSuspendedSoftware`) |
+| `suspended.go` | インスタンスの software 名 / 版で、**送信をスキップ**するか (`meta.deliverSuspendedSoftware`) と、**受信を拒否**するか (`meta.inboxSuspendedSoftware`、#3362) の判定。範囲は本家と同じ semver (`internal/misc/semverrange`) と、Elythia 独自の `/.../` (正規表現) |
 | `remote_user_resolver.go` | `acct:` からのリモートユーザー解決 |
 | `attachment_probe.go` | リモート添付の先頭取得 (形式・名前・画像の寸法) |
 

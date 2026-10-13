@@ -24,6 +24,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/captcha"
 	coredrive "github.com/elythia-network/elythia/internal/core/drive"
 	"github.com/elythia-network/elythia/internal/core/emojiapplication"
+	corefederation "github.com/elythia-network/elythia/internal/core/federation"
 	"github.com/elythia-network/elythia/internal/core/iplookuplog"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
 	"github.com/elythia-network/elythia/internal/core/procstats"
@@ -1760,7 +1761,9 @@ func (h *Handler) AdminMeta(c echo.Context) error {
 		"minimumUsernameLength":        m.MinimumUsernameLength,
 		"prohibitedWordsForNameOfUser": m.ProhibitedWordsForNameOfUser,
 		"deliverSuspendedSoftware":     metaJSONValue(m.DeliverSuspendedSoftware, []any{}),
-		"verifymailAuthKey":            m.VerifymailAuthKey, "truemailAuthKey": m.TruemailAuthKey, "truemailInstance": m.TruemailInstance,
+		// 受信を拒否するソフトウェア (Elythia 独自、#3362)。
+		"inboxSuspendedSoftware": metaJSONValue(m.InboxSuspendedSoftware, []any{}),
+		"verifymailAuthKey":      m.VerifymailAuthKey, "truemailAuthKey": m.TruemailAuthKey, "truemailInstance": m.TruemailInstance,
 		// proxyAccountId は frontend admin/settings 画面が読み込み時に
 		// users/show でこの ID を引くため、必ず非空でなければ画面が
 		// 真っ白になる (#348)。本家 SystemAccountService.fetch('proxy')
@@ -1878,6 +1881,19 @@ func (h *Handler) UpdateMeta(c echo.Context) error {
 		if key := invalidDefaultPolicyKey(policies); key != "" {
 			return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM",
 				"policy "+key+" has a value of the wrong type.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
+		}
+	}
+
+	// **ソフトウェアの一覧の形を見る (#3362)。** upstream の paramDef は
+	// deliverSuspendedSoftware の各要素の software / versionRange を string 必須に
+	// していて、形が違えば 400 で弾く。Elythia は検査せずに保存していたので、
+	// 読めない要素が入りえた。受信の一覧 (Elythia 独自) も同じ形にする。
+	for _, key := range []string{"deliverSuspendedSoftware", "inboxSuspendedSoftware"} {
+		if raw, ok := fields[key]; ok && raw != nil {
+			if !isSoftwareSuspensionList(raw) {
+				return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM",
+					key+" must be an array of {software: string, versionRange: string}, and a versionRange written as /pattern/ must compile.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
+			}
 		}
 	}
 
@@ -2305,6 +2321,7 @@ func coerceMetaArrayFields(fields map[string]any) {
 // TestMetaJSONBColumns_CoversAllJSONColumns (reflection guard) が検出する。
 var metaJSONBColumns = map[string]struct{}{
 	"deliverSuspendedSoftware": {},
+	"inboxSuspendedSoftware":   {},
 	"policies":                 {},
 	"clientOptions":            {},
 	"signupApplicationForm":    {},
@@ -4871,4 +4888,34 @@ func (h *Handler) now() time.Time {
 		return h.clock()
 	}
 	return time.Now()
+}
+
+// isSoftwareSuspensionList reports whether v is a decoded JSON array of
+// {software: string, versionRange: string}, the shape upstream's update-meta
+// paramDef requires for deliverSuspendedSoftware (#3362)。ほかのキーは見ない
+// (upstream の schema も additionalProperties を禁じていない)。
+func isSoftwareSuspensionList(v any) bool {
+	items, ok := v.([]any)
+	if !ok {
+		return false
+	}
+	for _, item := range items {
+		m, ok := item.(map[string]any)
+		if !ok {
+			return false
+		}
+		if _, ok := m["software"].(string); !ok {
+			return false
+		}
+		rng, ok := m["versionRange"].(string)
+		if !ok {
+			return false
+		}
+		// `/.../` (Elythia 独自の正規表現の書き方) なのにコンパイルできないものは
+		// 弾く。判定では何にも当たらないだけで、管理者が気付けないため (#3362)。
+		if corefederation.InvalidVersionRegexp(rng) {
+			return false
+		}
+	}
+	return true
 }

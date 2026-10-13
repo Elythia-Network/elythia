@@ -3458,6 +3458,14 @@ func (m *MockMetaRepository) Update(fields map[string]any) error {
 			case []byte:
 				m.Meta.DeliverSuspendedSoftware = datatypes.JSON(b)
 			}
+		case "inboxSuspendedSoftware":
+			// jsonb 列 (#3362)。deliverSuspendedSoftware と同じく正規化済みを反映する。
+			switch b := v.(type) {
+			case datatypes.JSON:
+				m.Meta.InboxSuspendedSoftware = b
+			case []byte:
+				m.Meta.InboxSuspendedSoftware = datatypes.JSON(b)
+			}
 		case "clientOptions":
 			// object 形 jsonb 列 (#1846)。coerceMetaJSONBFields 正規化済みを反映。
 			switch b := v.(type) {

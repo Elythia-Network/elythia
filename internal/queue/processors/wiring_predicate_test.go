@@ -121,3 +121,12 @@ func TestDeliverProcessor_HasSuspendedChecker(t *testing.T) {
 type stubSuspendedChecker struct{}
 
 func (stubSuspendedChecker) IsSuspended(string) bool { return false }
+
+// #3362: 受信を拒否するソフトウェアの判定。設定が空でも常に配線する。
+func TestInboxProcessor_HasSoftwareSuspensionChecker(t *testing.T) {
+	assert.False(t, (&InboxProcessor{}).HasSoftwareSuspensionChecker(), "未配線なら false")
+
+	p := &InboxProcessor{}
+	p.SetSoftwareSuspensionChecker(stubSuspendedChecker{})
+	assert.True(t, p.HasSoftwareSuspensionChecker(), "配線したら true")
+}

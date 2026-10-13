@@ -242,6 +242,9 @@ type Meta struct {
 	UgcVisibilityForVisitor      string         `gorm:"column:ugcVisibilityForVisitor;type:varchar(128);default:'local'" json:"ugcVisibilityForVisitor"`
 	ClientOptions                datatypes.JSON `gorm:"column:clientOptions;type:jsonb;default:'{}'" json:"clientOptions"`
 	DeliverSuspendedSoftware     datatypes.JSON `gorm:"column:deliverSuspendedSoftware;type:jsonb;default:'[]'" json:"deliverSuspendedSoftware"`
+	// InboxSuspendedSoftware is the list of software whose activities the inbox
+	// refuses (Elythia 独自、#3362)。形は DeliverSuspendedSoftware と同じ。
+	InboxSuspendedSoftware datatypes.JSON `gorm:"column:inboxSuspendedSoftware;type:jsonb;default:'[]'" json:"inboxSuspendedSoftware"`
 
 	// Relations
 	RootUser *User `gorm:"foreignKey:RootUserID" json:"rootUser,omitempty"`

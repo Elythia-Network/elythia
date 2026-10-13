@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/elythia-network/elythia/internal/activitypub"
@@ -81,6 +82,14 @@ type HostBlockChecker interface {
 	IsAllowed(host string) bool
 }
 
+// SoftwareSuspensionChecker reports whether activities from a host must be
+// refused because the instance runs software listed in
+// meta.inboxSuspendedSoftware (Elythia 独自、#3362)。実装は
+// core/federation.NewInboxSuspendedChecker。
+type SoftwareSuspensionChecker interface {
+	IsSuspended(host string) bool
+}
+
 // InstanceTracker is invoked after a successfully verified inbound
 // activity so that the instance row's latestRequestReceivedAt can be
 // updated. nil なら no-op。
@@ -142,6 +151,7 @@ type InboxProcessor struct {
 	// 付けるかどうかの判定に使う (#2340)。
 	relayChecker    RelayActorChecker
 	hostBlocker     HostBlockChecker
+	softwareBlocker SoftwareSuspensionChecker
 	instanceTracker InstanceTracker
 	chartHook       InboxChartHook
 	capabilities    SignatureCapabilityRecorder
@@ -200,6 +210,11 @@ func (p *InboxProcessor) SetSignatureVerifier(v SignatureVerifier) {
 // federation-blocked hosts after signature verification.
 func (p *InboxProcessor) SetHostBlockChecker(c HostBlockChecker) {
 	p.hostBlocker = c
+}
+
+// SetSoftwareSuspensionChecker wires the checker for meta.inboxSuspendedSoftware.
+func (p *InboxProcessor) SetSoftwareSuspensionChecker(c SoftwareSuspensionChecker) {
+	p.softwareBlocker = c
 }
 
 // SetInstanceTracker wires the InstanceTracker used to update
@@ -310,6 +325,18 @@ func (p *InboxProcessor) Handle(_ context.Context, t driver.Task) error {
 	// body は dispatch する本文。転送経路では authorizeActor が署名済みの内容へ
 	// 差し替える。
 	body := payload.Body
+	// **署名を検証する前に、keyId のホストで受信の拒否を見る (#3362)。** 検証は
+	// 署名者の actor を解決して保存し、プロフィールや nodeinfo も取りに行くので、
+	// 拒否する相手の分まで行と通信が増える。ドメインブロックが resolver の手前で
+	// 止まるのと同じく、先に止める。keyId は検証前で信用できない値だが、拒否の
+	// 向きにしか使わないので、偽れば送った本人の要求が落ちるだけ。当たらなければ
+	// 検証の後に DB で正規化したホストでもう一度見る (isBlocked)。
+	if keyHost := strings.ToLower(host); len(payload.Headers) > 0 && p.softwareBlocker != nil && keyHost != "" && p.softwareBlocker.IsSuspended(keyHost) {
+		// 記録も小文字にしたホストで残す (大文字混じりの keyId で別のホストとして
+		// 数えないため)。
+		p.recordInboxTelemetry(keyHost, deliveryhealth.ClassBlocked, started, "")
+		return nil
+	}
 	if len(payload.Headers) > 0 && p.verifier != nil {
 		actor, keyType, err := p.verifyPayload(payload)
 		if errors.Is(err, federation.ErrLookupUnavailable) {
@@ -731,7 +758,14 @@ func (p *InboxProcessor) isBlocked(actor *model.User) bool {
 	if p.hostBlocker.IsBlocked(host) {
 		return true
 	}
-	return !p.hostBlocker.IsAllowed(host)
+	if !p.hostBlocker.IsAllowed(host) {
+		return true
+	}
+	// **受信を拒否するソフトウェア (#3362)。** ドメインブロックと同じ場所で見る
+	// ので、HTTP 署名の署名者と、LD 署名で転送された actor の両方に効き、
+	// Delete / Undo も含めて拒否する。ソフトウェアが分からない相手は拒否しない
+	// (配送停止と同じ)。
+	return p.softwareBlocker != nil && p.softwareBlocker.IsSuspended(host)
 }
 
 func (p *InboxProcessor) touchInstance(actor *model.User) {
@@ -820,6 +854,11 @@ func (p *InboxProcessor) HasSignatureVerifier() bool { return p.verifier != nil 
 // inbox の replay guard だけ外すのは筋が通らないので載せる
 // (#2682 review M-4)。
 func (p *InboxProcessor) HasInboxReplayGuard() bool { return p.replayGuard != nil }
+
+// HasSoftwareSuspensionChecker reports whether the inboxSuspendedSoftware
+// checker was wired. 設定は判定のたびに読むので常に配線する。起動時検査に使う
+// (#3362)。
+func (p *InboxProcessor) HasSoftwareSuspensionChecker() bool { return p.softwareBlocker != nil }
 
 // HasHostBlockChecker reports whether the host block checker was wired.
 //

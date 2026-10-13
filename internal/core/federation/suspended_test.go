@@ -1,6 +1,7 @@
 package federation
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/elythia-network/elythia/internal/model"
@@ -134,4 +135,122 @@ func TestSuspendedChecker_ReadsCurrentSetting(t *testing.T) {
 
 	meta.Meta = &model.Meta{DeliverSuspendedSoftware: []byte(`[]`)}
 	assert.False(t, c.IsSuspended("old.example"), "外した設定も次の判定から効くこと")
+}
+
+// **`/.../` で書くと、バージョンの文字列に正規表現を当てる (Elythia 独自、#3362)。**
+// fork が付けるサフィックスは semver ではプレリリースとして読まれ、fork 側の版で
+// 範囲を書けないので、文字列そのものに当てる書き方を足した。
+func TestMatchSuspendedSoftware_Regexp(t *testing.T) {
+	entry := func(r string) []SuspendedSoftwareEntry {
+		return []SuspendedSoftwareEntry{{Software: "misskey", VersionRange: r}}
+	}
+	tests := []struct {
+		name string
+		ver  *string
+		rng  string
+		want bool
+	}{
+		{"fork suffix match", strp("2024.11.1-cherrypick-4.12.0"), `/-cherrypick-4\.1[0-3]\./`, true},
+		{"fork suffix miss", strp("2024.11.1-cherrypick-4.20.0"), `/-cherrypick-4\.1[0-3]\./`, false},
+		// 末尾の i で大文字と小文字を区別しない。
+		{"case-insensitive", strp("4.3.2+GLITCH"), "/glitch$/i", true},
+		{"case-sensitive", strp("4.3.2+GLITCH"), "/glitch$/", false},
+		// semver として読めないバージョンにも当てられる。
+		{"unparsable version", strp("2024.08-dev"), "/^2024\\.08/", true},
+		// バージョンが無い相手には当てない。
+		{"nil version", nil, "/.*/", false},
+		// コンパイルできないパターンは何にも当てない。
+		{"invalid pattern", strp("1.2.3"), "/(/", false},
+		// 閉じていないものは正規表現として読まず、semver の範囲として読む
+		// (範囲としても不正なので当たらない)。
+		{"not closed", strp("1.2.3"), "/1.2.3", false},
+		{"slash only", strp("1.2.3"), "/", false},
+		// 前後の空白は除く。
+		{"padded", strp("2024.11.1-cherrypick-4.12.0"), "  /cherrypick/  ", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, MatchSuspendedSoftware(strp("misskey"), tt.ver, entry(tt.rng)))
+		})
+	}
+}
+
+// コンパイルしたパターンは覚えておき、上限を超えたら捨てる。
+func TestVersionRegexpCache(t *testing.T) {
+	versionRegexps.Lock()
+	saved := versionRegexps.m
+	versionRegexps.m = make(map[string]compiledVersionRegexp)
+	versionRegexps.Unlock()
+	t.Cleanup(func() {
+		versionRegexps.Lock()
+		versionRegexps.m = saved
+		versionRegexps.Unlock()
+	})
+
+	// 同じ範囲は 2 回目に覚えたものを返す (コンパイルし直さない)。
+	first, ok := versionRegexp("/^1\\./")
+	require.True(t, ok)
+	second, _ := versionRegexp("/^1\\./")
+	assert.Same(t, first, second, "覚えたパターンを使うこと")
+
+	for i := 0; i < versionRegexpCacheMax+10; i++ {
+		_, ok := versionRegexp(fmt.Sprintf("/^%d\\./", i))
+		require.True(t, ok)
+	}
+	versionRegexps.Lock()
+	n := len(versionRegexps.m)
+	versionRegexps.Unlock()
+	assert.LessOrEqual(t, n, versionRegexpCacheMax)
+	// 上限で丸ごと捨てるので、捨てた後に覚えた分 (上限より十分少ない) だけが残る。
+	assert.Positive(t, n)
+	assert.Less(t, n, versionRegexpCacheMax/2, "上限に達したら捨てること")
+	// 捨てた後でも同じ結果になる。
+	assert.True(t, MatchSuspendedSoftware(strp("misskey"), strp("0.1.0"),
+		[]SuspendedSoftwareEntry{{Software: "misskey", VersionRange: "/^0\\./"}}))
+}
+
+// **受信の checker は inboxSuspendedSoftware を読み、配送の一覧は読まない (#3362)。**
+func TestInboxSuspendedChecker_ReadsInboxSetting(t *testing.T) {
+	repo := testutil.NewMockInstanceRepository()
+	name := "misskey"
+	ver := "2024.10.0"
+	require.NoError(t, repo.Create(&model.Instance{ID: "i1", Host: "old.example", SoftwareName: &name, SoftwareVersion: &ver}))
+	meta := testutil.NewMockMetaRepository()
+	meta.Meta = &model.Meta{
+		DeliverSuspendedSoftware: []byte(`[]`),
+		InboxSuspendedSoftware:   []byte(`[{"software":"misskey","versionRange":"<=2024.11.0"}]`),
+	}
+	assert.True(t, NewInboxSuspendedChecker(meta, repo).IsSuspended("old.example"))
+	assert.False(t, NewSuspendedChecker(meta, repo).IsSuspended("old.example"), "配送の判定は受信の一覧を読まない")
+
+	meta.Meta = &model.Meta{
+		DeliverSuspendedSoftware: []byte(`[{"software":"misskey","versionRange":"*"}]`),
+		InboxSuspendedSoftware:   []byte(`[]`),
+	}
+	assert.False(t, NewInboxSuspendedChecker(meta, repo).IsSuspended("old.example"), "受信の判定は配送の一覧を読まない")
+	assert.True(t, NewSuspendedChecker(meta, repo).IsSuspended("old.example"))
+}
+
+// /.../ の形なのに正規表現として読めないもの (コンパイルできない、閉じる / の後に
+// i 以外が続く) を不正とする。admin/update-meta が保存の時点で弾く (#3362)。
+func TestInvalidVersionRegexp(t *testing.T) {
+	for rng, want := range map[string]bool{
+		"/(/":         true,
+		"/x/I":        true,
+		"/x/g":        true,
+		"/x/ i":       true,
+		"/a/b/x":      true,
+		"/-fork-/":    false,
+		"/-fork-/i":   false,
+		"  /fork/i  ": false,
+		"/a/b/":       false,
+		// 閉じていないものは semver の範囲として読むので、ここでは弾かない。
+		"/1.2.3":  false,
+		"/":       false,
+		"*":       false,
+		"<=1.2.3": false,
+		"":        false,
+	} {
+		assert.Equal(t, want, InvalidVersionRegexp(rng), "%q", rng)
+	}
 }
