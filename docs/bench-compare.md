@@ -16,7 +16,7 @@ gh workflow run bench-compare.yml --repo Elythia-Network/elythia \
   -f base=develop -f head=<ブランチか SHA> -f rounds=3 -f scenario=prod-like
 ```
 
-- `rounds`は 2 か 3 です。job の上限 (45 分) に 3 ラウンドが収まるかは、下の「所要時間」の実測で見直します
+- `rounds`は 2 か 3 です。4 ラウンドは job の上限 (45 分) に収まりません (下の「所要時間」)
 - `base` / `head`には、英数字と`._/-`だけの ref か SHA を渡します。ブランチから届かない commit (fork の PR の commit など) は、40 桁の SHA か`pull/<番号>/head`で渡します。どちらかを解決できなければ、比較を始める前に止まります
 - **測る仕組み (`tests/bench/ab`、k6 のシナリオ、`tools/benchcompare`) は、workflow を起動したブランチ (通常は develop) のものを使います。** base / head の側のものではありません。app の image は`./cmd/elythia`をビルドするので、バイナリを`elythia`にまとめた #3394 より前の commit は比べられません
 - `head`に fork の PR を渡すときは`pull/<番号>/head`と書きます。workflow は secrets を使わず、token は読み取りだけなので、fork のコードを流しても書き込みはできません
@@ -107,4 +107,17 @@ make bench-compare-down   # 途中で止めたときの片付け
 
 ## 所要時間
 
-(実測を取ったら書く)
+GitHub-hosted runner (ubuntu-24.04、AMD EPYC 7763 の 4 vCPU) で、同じ commit 同士を`prod-like`の 3 ラウンドで流した実測です (2026-10-13、#3555 の PR の A/A)。
+
+| 段階 | 時間 |
+|---|---|
+| image のビルド (1 回) | 1 分 48 秒 |
+| 計測しない起動 (burn-in) | 9 秒 |
+| 1 回 (base か head の片方) | 約 5 分 21 秒 |
+| 3 ラウンド (6 回) | 約 32 分 |
+| `run.sh`の合計 | 34 分 04 秒 |
+| job 全体 (checkout と setup-go を含む) | 34 分 29 秒 |
+
+- base と head が違う commit なら、image のビルドがもう 1 回 (約 2 分) 増えて、36〜37 分の見込みです
+- 4 ラウンドは計測だけで約 43 分になり、ビルドを足すと job の上限 (45 分) を超えるので、`rounds`は 3 までにしています
+- この実行では、7 つのエンドポイントと app / postgres / redis のリソースが、すべて「差なし」でした。app は CPU の上限 (1.25) に、計測の区切り (100ms) のうち約 14% で当たっていました (`throttle.csv`)

@@ -113,7 +113,7 @@ PR を出すと十数個の check が走る。**どれが何を見ていて、�
 | `federation-mastodon` | Drop-in e2e | 本物の Mastodon との引用の承認 (FEP-044f): 双方向の引用が承認済みになるか、取り消しが双方向で効くか | 未計測 | `make federation-mastodon-e2e` |
 | `spec (Elythia 1/4)` 〜 `4/4` | Playwright | ブラウザからの統合互換 (298 spec ファイル) | 4-9 min | `make playwright-check` |
 | `build-and-push` / `-bundled` | Docker | image がビルドできるか (PR では push しない)。`-bundled` は image の中で frontend もビルドする (#3379) | 4 min (`-bundled` はキャッシュが冷えていると frontend の分だけ延びる。手元の冷えたビルドで frontend stage だけ約 3 分) | `docker build -f Dockerfile .` / `docker build -f Dockerfile.bundled .` |
-| `compare` | Bench compare | **ベンチの仕組みを変えた PR でだけ**、PR の head 同士 (A/A) を同じスタックで流し、最後まで完了するか。「差なし」かどうかは check では見ず、Summary を人が見る。base と head を選んで比べるときは手動で起動する (`gh workflow run bench-compare.yml -f base=develop -f head=<ref>`、[bench-compare.md](bench-compare.md)) | 未計測 | `make bench-compare BASE=HEAD HEAD=HEAD SMOKE=1` (本番のホストでは smoke だけ) |
+| `compare` | Bench compare | **ベンチの仕組みを変えた PR でだけ**、PR の head 同士 (A/A) を同じスタックで流し、最後まで完了するか。「差なし」かどうかは check では見ず、Summary を人が見る。base と head を選んで比べるときは手動で起動する (`gh workflow run bench-compare.yml -f base=develop -f head=<ref>`、[bench-compare.md](bench-compare.md)) | 35 min | `make bench-compare BASE=HEAD HEAD=HEAD SMOKE=1` (本番のホストでは smoke だけ) |
 | `build / build` | Build with plugins (selftest) | 運営者向けの reusable workflow が通るか。外部プラグインを実際に clone し、frontend を持つので `Dockerfile.bundled` の中でプラグインの .vue を含めた SPA のビルドまで走る。**`docker build --check` では見えない範囲** (pluginbuild / go build / frontend のビルドが通るか、生成物とプラグインの frontend が frontend stage に届くか) を確認できるのはこの check だけ | 6 min | paths に該当する PR で自動発火する。手動なら `gh workflow run build-with-plugins-selftest.yml --ref <branch>` (default branch にある場合のみ) |
 
 ### e2e 系が「何を守っているか」の違い

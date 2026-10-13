@@ -11,7 +11,7 @@ name: Bench compare
 #   確かめる経路が要る (CLAUDE.md Section 8)。**check が見るのは最後まで流れたか
 #   だけ**で、「差なし」かどうかは Summary を人が見る (A/A でも runner の揺れで
 #   「差あり」が出うるので、落とすと flaky になる)。
-# - required check には**入れない**。1 回に 30 分以上かかり、runner の揺れも受ける。
+# - required check には**入れない**。3 ラウンドで約 35 分かかり、runner の揺れも受ける。
 
 on:
   workflow_dispatch:
@@ -114,8 +114,8 @@ jobs:
             head=$(resolve "$HEAD_INPUT")
             rounds=$ROUNDS_INPUT
           fi
-          # 3 ラウンドで timeout-minutes に収まるかは、docs/bench-compare.md の実測を
-          # 見る。収まる根拠が無いうちは 3 を上限にする。
+          # 3 ラウンドで約 34 分、4 ラウンドは計測だけで約 43 分になり、ビルドを足すと
+          # timeout-minutes を超える (docs/bench-compare.md の実測)。
           case $rounds in
             2 | 3) ;;
             *) echo "rounds must be 2 or 3: $rounds" >&2; exit 1 ;;
