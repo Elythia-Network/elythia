@@ -1,6 +1,7 @@
 package admin_test
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1984,4 +1985,135 @@ func TestQueuePromoteJobs_WalkSurvivesChurn(t *testing.T) {
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 	assert.EqualValues(t, len(insp.runCalls), got["promoted"])
+}
+
+// **配送と受信の本文を、base64 の 1 行ではなくオブジェクトで返すこと (#3550)。**
+//
+// payload は本文を []byte で持つので、そのままだと Data タブに base64 の長い
+// 1 行が出て、ハイライトで画面が数秒固まる。
+func TestQueueShowJob_DataExpandsActivityBody(t *testing.T) {
+	activity := map[string]any{"type": "Create", "id": "https://local.example/notes/1/activity"}
+	rawActivity, err := json.Marshal(activity)
+	require.NoError(t, err)
+	deliver, err := json.Marshal(queue.DeliverPayload{Inbox: "https://remote.example/inbox", Body: rawActivity, KeyPEM: "secret"})
+	require.NoError(t, err)
+	inbox, err := json.Marshal(queue.InboxPayload{Body: rawActivity, Path: "/inbox"})
+	require.NoError(t, err)
+	notJSON, err := json.Marshal(queue.InboxPayload{Body: []byte("not json"), Path: "/inbox"})
+	require.NoError(t, err)
+	scalarJSON, err := json.Marshal(queue.InboxPayload{Body: []byte(`"abc"`), Path: "/inbox"})
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name    string
+		task    *apiadmin.QueueTaskSummary
+		want    any
+		checkFn func(t *testing.T, body map[string]any)
+	}{
+		{name: "deliver", task: &apiadmin.QueueTaskSummary{ID: "d", Type: queue.TaskTypeDeliver, Payload: deliver}, want: activity,
+			checkFn: func(t *testing.T, body map[string]any) {
+				assert.NotEqual(t, "secret", body["keyPem"], "鍵は伏せたままにすること")
+			}},
+		{name: "inbox", task: &apiadmin.QueueTaskSummary{ID: "d", Type: queue.TaskTypeInbox, Payload: inbox}, want: activity},
+		// JSON として読めない本文は、今までどおり base64 のまま返す。
+		{name: "not json", task: &apiadmin.QueueTaskSummary{ID: "d", Type: queue.TaskTypeInbox, Payload: notJSON},
+			want: base64.StdEncoding.EncodeToString([]byte("not json"))},
+		// JSON の文字列 (オブジェクトでも配列でもない) は、展開したか分からない
+		// 形になるので、base64 のまま返す。
+		{name: "json scalar", task: &apiadmin.QueueTaskSummary{ID: "d", Type: queue.TaskTypeInbox, Payload: scalarJSON},
+			want: base64.StdEncoding.EncodeToString([]byte(`"abc"`))},
+		// 配送と受信以外の job は触らない。
+		{name: "other type", task: &apiadmin.QueueTaskSummary{ID: "d", Type: "ap:other", Payload: inbox},
+			want: base64.StdEncoding.EncodeToString(rawActivity)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, _, _, _ := newTestHandler(t)
+			h.SetQueueInspector(&stubQueueInspector{task: map[string]*apiadmin.QueueTaskSummary{"d": tc.task}})
+			rec := doPost(h.QueueShowJob, `{"queue":"deliver","id":"d"}`, adminUser)
+			require.Equal(t, http.StatusOK, rec.Code)
+			var got map[string]any
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+			data, ok := got["data"].(map[string]any)
+			require.True(t, ok)
+			body, ok := data["body"].(map[string]any)
+			require.True(t, ok)
+			assert.Equal(t, tc.want, body["body"])
+			if tc.checkFn != nil {
+				tc.checkFn(t, body)
+			}
+		})
+	}
+}
+
+// **入れ子の深い本文を埋め込まないこと (#3550)。** encoding/json は埋め込んだ
+// 本文を書き出すときに、外側の入れ子と合わせて深さを数える。深い受信の本文が
+// 1 件あるだけで、一覧の書き出しが失敗し、ほかの job も含めて空のレスポンスに
+// なった。受信の本文は署名を検証する前に積まれるので、外から送り込める。
+func TestQueueJobs_DeepActivityBodyDoesNotBreakList(t *testing.T) {
+	deep := `{"actor":"https://remote.example/u","a":` + strings.Repeat("[", 9997) + strings.Repeat("]", 9997) + `}`
+	inbox, err := json.Marshal(queue.InboxPayload{Body: []byte(deep), Path: "/inbox"})
+	require.NoError(t, err)
+	// 文字列の中の括弧 (エスケープした引用符の後ろ) は深さに数えない。
+	inString := `\"` + strings.Repeat("[", 100)
+	shallow, err := json.Marshal(queue.InboxPayload{Body: []byte(`{"a":[[{"b":"` + inString + `"}]]}`), Path: "/inbox"})
+	require.NoError(t, err)
+
+	h, _, _, _ := newTestHandler(t)
+	h.SetQueueInspector(&stubQueueInspector{
+		failed: map[string][]*apiadmin.QueueTaskSummary{"inbox": {
+			{ID: "deep", Type: queue.TaskTypeInbox, Payload: inbox},
+			{ID: "shallow", Type: queue.TaskTypeInbox, Payload: shallow},
+		}},
+	})
+	rec := doPost(h.QueueJobs, `{"queue":"inbox","state":["failed"]}`, adminUser)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got []map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got), "一覧が壊れないこと")
+	require.Len(t, got, 2)
+	bodies := map[string]any{}
+	for _, job := range got {
+		bodies[job["id"].(string)] = job["data"].(map[string]any)["body"].(map[string]any)["body"]
+	}
+	assert.Equal(t, base64.StdEncoding.EncodeToString([]byte(deep)), bodies["deep"], "深い本文は base64 のまま返す")
+	assert.Equal(t, map[string]any{"a": []any{[]any{map[string]any{"b": `"` + strings.Repeat("[", 100)}}}}, bodies["shallow"])
+}
+
+// 深さの上限は 64 段で、数えるのは入れ子の深さであって括弧の総数ではない。
+// JSON として読めない本文と不正な UTF-8 の本文は、埋め込むと一覧の書き出しを
+// 壊すので base64 のまま返す (#3550)。
+func TestQueueShowJob_ActivityBodyEmbeddingLimits(t *testing.T) {
+	nested := func(n int) string { return strings.Repeat("[", n) + strings.Repeat("]", n) }
+	manyTags := `{"tag":[` + strings.TrimSuffix(strings.Repeat(`{"type":"Emoji"},`, 70), ",") + `]}`
+	for _, tc := range []struct {
+		name     string
+		body     string
+		embedded bool
+	}{
+		{"depth 64", nested(64), true},
+		{"depth 65", nested(65), false},
+		// 浅いが括弧が多い (絵文字の多いノート)。
+		{"many brackets", manyTags, true},
+		{"truncated object", `{"a":`, false},
+		{"invalid utf-8", "{\"a\":\"\xff\"}", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload, err := json.Marshal(queue.InboxPayload{Body: []byte(tc.body), Path: "/inbox"})
+			require.NoError(t, err)
+			h, _, _, _ := newTestHandler(t)
+			h.SetQueueInspector(&stubQueueInspector{task: map[string]*apiadmin.QueueTaskSummary{
+				"d": {ID: "d", Type: queue.TaskTypeInbox, Payload: payload},
+			}})
+			rec := doPost(h.QueueShowJob, `{"queue":"inbox","id":"d"}`, adminUser)
+			require.Equal(t, http.StatusOK, rec.Code)
+			var got map[string]any
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+			body := got["data"].(map[string]any)["body"].(map[string]any)["body"]
+			if tc.embedded {
+				_, isString := body.(string)
+				assert.False(t, isString, "base64 の文字列ではなく JSON として埋め込むこと")
+			} else {
+				assert.Equal(t, base64.StdEncoding.EncodeToString([]byte(tc.body)), body, "base64 のまま返すこと")
+			}
+		})
+	}
 }

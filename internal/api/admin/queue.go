@@ -1,6 +1,8 @@
 package admin
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -8,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/elythia-network/elythia/internal/activitypub"
 	"github.com/elythia-network/elythia/internal/api/apierr"
@@ -1080,9 +1083,93 @@ func packJobData(t *QueueTaskSummary) map[string]any {
 		body = map[string]any{}
 	}
 	body = redactJobSecrets(body)
+	body = expandActivityBody(t.Type, body)
 	// Type が空になることは無い。mkq driver は framing が無ければ BullMQ の
 	// job.name に落とし、その既定は queue 名。
 	return map[string]any{"type": t.Type, "body": body}
+}
+
+// expandActivityBody embeds the activity carried by deliver / inbox payloads
+// as JSON, so the Data tab shows it as an object.
+//
+// **配送と受信の payload は、本文を []byte で持つ** (`DeliverPayload.Body` /
+// `InboxPayload.Body`)。JSON では base64 の長い 1 行の文字列になり、Data タブの
+// ハイライトがそこで数秒固まる (#3550。同じノートの配送で、base64 のままだと
+// 3,886ms、展開すると 760ms)。upstream は受信の job data に activity を
+// オブジェクトで持つ (配送は JSON 文字列)。
+//
+// **木に展開せず、元のバイト列をそのまま埋め込む** (`json.RawMessage`)。受信の
+// 本文は外から 64KB まで積めるので、`map[string]any` に展開すると一覧 (最大
+// 505 件) の 1 回でメモリが約 15 倍になった。元のバイト列なら、キーの順序や
+// 大きな整数も変わらない。オブジェクトか配列として読めるときだけ置き換え、
+// それ以外 (壊れた本文や JSON の文字列) は base64 のまま返す。**不正な UTF-8 も
+// 埋め込まない。** RawMessage は書き直さずに出すので、UTF-8 を厳密に読む
+// クライアントで一覧全体が読めなくなる (受信の本文は受付で UTF-8 を検査しない)。
+func expandActivityBody(taskType string, body any) any {
+	if taskType != queue.TaskTypeDeliver && taskType != queue.TaskTypeInbox {
+		return body
+	}
+	m, ok := body.(map[string]any)
+	if !ok {
+		return body
+	}
+	encoded, ok := m["body"].(string)
+	if !ok {
+		return body
+	}
+	raw, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return body
+	}
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || (trimmed[0] != '{' && trimmed[0] != '[') ||
+		!jsonNestingWithin(trimmed, maxEmbeddedActivityDepth) || !json.Valid(trimmed) || !utf8.Valid(trimmed) {
+		return body
+	}
+	m["body"] = json.RawMessage(trimmed)
+	return m
+}
+
+// maxEmbeddedActivityDepth bounds the nesting of an activity embedded by
+// expandActivityBody.
+//
+// **深い本文は埋め込まない。** encoding/json は RawMessage を書き出すときに
+// 外側の入れ子と合わせて深さ (上限 10000) を数え直す。`json.Valid` は本文だけを
+// 見るので、9997 段の本文が通り、一覧 (`[{data:{body:{body: …}}}]`) の書き出しが
+// 失敗して、200 のまま本文の空なレスポンスになった (#3550 のレビュー)。受信の
+// 本文は署名を検証する前に積まれるので、外から 1 件で一覧全体を潰せる。
+// ActivityPub の activity は普通 10 段にも届かないので、64 段で十分。
+const maxEmbeddedActivityDepth = 64
+
+// jsonNestingWithin reports whether the arrays and objects in raw nest at most
+// max levels deep. raw must be JSON (strings are skipped by their quotes).
+func jsonNestingWithin(raw []byte, max int) bool {
+	depth := 0
+	inString := false
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+		if inString {
+			switch c {
+			case '\\':
+				i++
+			case '"':
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '{', '[':
+			depth++
+			if depth > max {
+				return false
+			}
+		case '}', ']':
+			depth--
+		}
+	}
+	return true
 }
 
 // attemptsAtOrEmpty normalises the attempt-start list for JSON.
