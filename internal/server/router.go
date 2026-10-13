@@ -1071,12 +1071,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// Ed25519 署名の配送が 2xx を返した (= 同期的には拒否されなかった) ことを
 	// 記録する (#2393)。
 	deliverProcessor.SetSignatureCapabilityRecorder(sigCapBuffer)
-	// deliverSuspendedSoftware: 対象インスタンスへの配送をスキップする
-	if suspMeta, err := metaRepo.Fetch(); err == nil && len(suspMeta.DeliverSuspendedSoftware) > 0 {
-		deliverProcessor.SetSuspendedChecker(
-			corefederation.NewSuspendedChecker(suspMeta.DeliverSuspendedSoftware, instanceRepo),
-		)
-	}
+	// deliverSuspendedSoftware: 対象インスタンスへの配送をスキップする。設定は
+	// 判定のたびに meta から読むので、常に配線する (#3558。以前は起動時に設定が
+	// 空なら配線せず、後から設定しても再起動するまで効かなかった)。
+	deliverProcessor.SetSuspendedChecker(corefederation.NewSuspendedChecker(metaRepo, instanceRepo))
 	s.queueServer.Handle(queue.TaskTypeDeliver, deliverProcessor.Handle)
 
 	// Inbox (#534 / #565): HTTP handler は body+signature 関連 header を
@@ -4715,6 +4713,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"モデレーターの suspend / unsuspend が由来を刻まないので、解除が次の actor refresh で無言で戻る (#2973)"},
 		{"resolver.suspensionOriginRepo", federationResolver.HasSuspensionOriginRepo(),
 			"リモート actor の凍結を読まなくなる (#2951 が効かない)。読んだとしても由来を刻めないので、モデレーターが解除しても次の refresh で無言で戻る"},
+		{"deliverProcessor.suspendedChecker", deliverProcessor.HasSuspendedChecker(),
+			"管理画面の配送停止中のソフトウェアが配送に効かない (画面には配送停止と出る、#3558)"},
 		{"deliverProcessor.signingKeySource", deliverProcessor.HasSigningKeySource(),
 			"署名鍵は payload に載せず配送時に引くので、未配線だと全ての AP 配送が POST されないまま失敗する (連合が止まる)"},
 		{"notes.metaRepo", notesHandler.HasMetaRepo(),

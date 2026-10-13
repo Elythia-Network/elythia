@@ -758,9 +758,14 @@ func (p *DeliverProcessor) sendOnce(payload queue.DeliverPayload, useEd25519 boo
 // `deliver.hostBlockChecker` では代替できない。ブロック前に積まれたジョブや
 // retry-backoff 中のジョブが該当する (#1404)。起動時検査に使う (#2708)。
 //
-// `SetSuspendedChecker` は operator が `deliverSuspendedSoftware` を設定した
-// ときだけ配線されるので対象外。
+// `SetSuspendedChecker` (deliverSuspendedSoftware) は別の関門なので
+// HasSuspendedChecker で見る。
 func (p *DeliverProcessor) HasDeliveryGate() bool { return p.deliveryGate != nil }
+
+// HasSuspendedChecker reports whether the deliverSuspendedSoftware checker
+// was wired. 設定は判定のたびに読むので、設定が空でも常に配線する (#3558)。
+// 起動時検査に使う。
+func (p *DeliverProcessor) HasSuspendedChecker() bool { return p.suspendedChecker != nil }
 
 // parseRetryAfter reads an HTTP Retry-After value (delay-seconds or an
 // HTTP-date). It returns 0 when the header is absent or unusable; the

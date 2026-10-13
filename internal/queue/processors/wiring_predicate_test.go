@@ -107,3 +107,17 @@ func TestDeliverProcessor_HasSigningKeySource(t *testing.T) {
 	p.SetSigningKeySource(&stubKeySource{})
 	assert.True(t, p.HasSigningKeySource())
 }
+
+// #3558: 配送停止中のソフトウェアの判定。以前は起動時に設定が空だと配線されず、
+// 後から設定しても再起動するまで効かなかった。
+func TestDeliverProcessor_HasSuspendedChecker(t *testing.T) {
+	assert.False(t, (&DeliverProcessor{}).HasSuspendedChecker(), "未配線なら false")
+
+	p := &DeliverProcessor{}
+	p.SetSuspendedChecker(stubSuspendedChecker{})
+	assert.True(t, p.HasSuspendedChecker(), "配線したら true")
+}
+
+type stubSuspendedChecker struct{}
+
+func (stubSuspendedChecker) IsSuspended(string) bool { return false }

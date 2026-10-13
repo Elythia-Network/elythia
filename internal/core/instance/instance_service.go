@@ -3,7 +3,6 @@
 package instance
 
 import (
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"sync"
@@ -486,11 +485,8 @@ func (s *Service) FederationHostLists() (FederationHostSets, error) {
 		return FederationHostSets{}, err
 	}
 	// deliverSuspendedSoftware (jsonb) を softwareSuspended 判定用に parse する
-	// (#1732)。不正な JSON は空扱い (best-effort)。
-	var suspended []model.SuspendedSoftwareEntry
-	if len(meta.DeliverSuspendedSoftware) > 0 {
-		_ = json.Unmarshal(meta.DeliverSuspendedSoftware, &suspended)
-	}
+	// (#1732)。配送の判定と同じ読み方にする (#3558。読めない要素だけ飛ばす)。
+	suspended := model.ParseSuspendedSoftware(meta.DeliverSuspendedSoftware)
 	return FederationHostSets{
 		Blocked:           meta.BlockedHosts,
 		Silenced:          meta.SilencedHosts,
