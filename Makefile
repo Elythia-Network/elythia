@@ -967,8 +967,8 @@ HEAD ?= HEAD
 ROUNDS ?= 2
 SCENARIO ?= prod-like
 
-bench-compare: ## base と head の commit の性能を比べる (BASE= HEAD= ROUNDS= SCENARIO= SMOKE=1)
-	tests/bench/ab/run.sh --base '$(BASE)' --head '$(HEAD)' --rounds '$(ROUNDS)' --scenario '$(SCENARIO)' $(if $(filter 1,$(SMOKE)),--smoke)
+bench-compare: ## base と head の commit の性能を比べる (BASE= HEAD= ROUNDS= SCENARIO= BENCH_OUT= SMOKE=1)
+	tests/bench/ab/run.sh --base '$(BASE)' --head '$(HEAD)' --rounds '$(ROUNDS)' --scenario '$(SCENARIO)' $(if $(BENCH_OUT),--out '$(BENCH_OUT)') $(if $(filter 1,$(SMOKE)),--smoke)
 
 bench-compare-down: ## bench-compare のスタックを撤去
 	docker compose -f $(BENCH_AB_COMPOSE) --profile tools down -v --remove-orphans

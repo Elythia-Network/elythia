@@ -323,8 +323,9 @@ Elythia と Misskey TS を並べて比較するハーネスは、**比較対象�
 | `tests/bench/http/` / `tests/bench/queue/` の compose | 性能比較の対象 |
 
 **古い tag でも image は問題なくビルドできる**ので、腐っても CI は落ちない —
-落ちるのは配った先だけ。`tests/bench/http/` はどの workflow からも参照されていない
-(`tests/bench/queue/` は nightly の `queue-bench-smoke.yml` が引く)。
+落ちるのは配った先だけ。`tests/bench/http/` の compose (本家と並べるスタック) はどの workflow からも
+参照されていない (`tests/bench/queue/` は nightly の `queue-bench-smoke.yml` が引く。
+`bench-compare.yml` が使うのは seed と k6 の共通部品だけで、本家の image は使わない)。
 
 以前は `Dockerfile.bundled` の `MISSKEY_ASSETS_IMAGE` (fork が publish する assets image)
 もこの表に入っていて、表に載せた後も実際に置き去りになった (#2877 / #3011)。#3379 で

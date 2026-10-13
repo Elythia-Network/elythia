@@ -1,0 +1,175 @@
+name: Bench compare
+
+# base と head の 2 つの commit を、同じスタックで交互に流して性能を比べる
+# (#3542 / #3545)。使い方と結果の読み方は docs/bench-compare.md。
+#
+# - workflow_dispatch: base / head に ref か SHA を渡す。fork の PR は
+#   `pull/<番号>/head` で渡せる。**secrets は使わず、token は読み取りだけ**なので、
+#   fork のコードを流しても書き込みはできない。`pull_request_target` は使わない。
+# - pull_request: ベンチの仕組みを変えた PR でだけ、PR の head 同士 (A/A) を流す。
+#   新しい workflow は default branch に入るまで dispatch できないので、PR の上で
+#   確かめる経路が要る (CLAUDE.md Section 8)。**check が見るのは最後まで流れたか
+#   だけ**で、「差なし」かどうかは Summary を人が見る (A/A でも runner の揺れで
+#   「差あり」が出うるので、落とすと flaky になる)。
+# - required check には**入れない**。1 回に 30 分以上かかり、runner の揺れも受ける。
+
+on:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: "比べる元の ref か SHA"
+        required: true
+        default: develop
+      head:
+        description: "比べる先の ref か SHA (fork の PR は pull/<番号>/head)"
+        required: true
+      rounds:
+        description: "ラウンド数 2 か 3 (1 ラウンド = base と head を 1 回ずつ)"
+        required: true
+        default: "3"
+      scenario:
+        description: "prod-like (利用者ごとの制限あり) か unlimited (制限なし)"
+        required: true
+        type: choice
+        default: prod-like
+        options:
+          - prod-like
+          - unlimited
+  pull_request:
+    branches: [develop]
+    paths:
+      - .github/workflows/bench-compare.yml
+      - tests/bench/ab/**
+      # compose.yml が seed と k6 の共通部品をここから読む
+      - tests/bench/http/common/**
+      - tests/bench/http/k6/lib/**
+      - tools/benchcompare/**
+
+permissions:
+  contents: read
+
+# PR では、同じ PR に push し直したら古い実行を止める。dispatch は 1 回ごとに別の
+# group にする。group を共有すると、待っている実行は 1 つしか持てず、3 本目を起動した
+# ときに 2 本目が黙って取り消される。
+concurrency:
+  group: bench-compare-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      # base と head の両方を worktree に出すので、履歴をすべて取る。
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # run.sh が tools/benchcompare をホストでビルドする。
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Resolve base and head
+        id: refs
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_INPUT: ${{ inputs.base }}
+          HEAD_INPUT: ${{ inputs.head }}
+          ROUNDS_INPUT: ${{ inputs.rounds }}
+        run: |
+          set -euo pipefail
+          # $(...) の中でも set -e を効かせる。無いと resolve の中の fetch が失敗しても
+          # 止まらず、前の fetch が残した FETCH_HEAD を黙って使う。
+          shopt -s inherit_errexit
+          # 入力は env で受け、式を run に直接書かない (書くとシェルに注入できる)。
+          resolve() {
+            local ref=$1 sha
+            # ref として使える文字だけを受ける。先頭の - は git の option になり、
+            # 空白や記号は Summary の Markdown を壊す。
+            if ! [[ $ref =~ ^[A-Za-z0-9._/][A-Za-z0-9._/-]*$ ]]; then
+              echo "not a ref: '$ref'" >&2
+              return 1
+            fi
+            if sha=$(git rev-parse --verify --quiet "$ref^{commit}"); then echo "$sha"; return; fi
+            if sha=$(git rev-parse --verify --quiet "origin/$ref^{commit}"); then echo "$sha"; return; fi
+            # fork の PR (pull/<番号>/head) や、ブランチに無い SHA は取りに行く。古い
+            # FETCH_HEAD を読まないよう、先に消す。
+            rm -f "$(git rev-parse --git-dir)/FETCH_HEAD"
+            git fetch --quiet --no-tags origin "$ref" >&2 || return 1
+            git rev-parse --verify "FETCH_HEAD^{commit}"
+          }
+          if [ "$EVENT" = pull_request ]; then
+            base_name="PR head"
+            head_name="PR head"
+            base=$PR_HEAD_SHA
+            head=$PR_HEAD_SHA
+            rounds=3
+          else
+            base_name=$BASE_INPUT
+            head_name=$HEAD_INPUT
+            base=$(resolve "$BASE_INPUT")
+            head=$(resolve "$HEAD_INPUT")
+            rounds=$ROUNDS_INPUT
+          fi
+          # 3 ラウンドで timeout-minutes に収まるかは、docs/bench-compare.md の実測を
+          # 見る。収まる根拠が無いうちは 3 を上限にする。
+          case $rounds in
+            2 | 3) ;;
+            *) echo "rounds must be 2 or 3: $rounds" >&2; exit 1 ;;
+          esac
+          {
+            echo "base=$base"
+            echo "head=$head"
+            echo "rounds=$rounds"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "## Bench compare"
+            echo
+            echo "- base: \`$base_name\` ($base)"
+            echo "- head: \`$head_name\` ($head)"
+            echo "- rounds: $rounds"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # make を通さず run.sh を呼ぶ。make はレシピに値を埋め込むので、入力を
+      # 渡すと make とシェルの両方に注入でき、終了コードも 2 にまとめてしまう。
+      - name: Compare
+        env:
+          BASE: ${{ steps.refs.outputs.base }}
+          HEAD_SHA: ${{ steps.refs.outputs.head }}
+          ROUNDS: ${{ steps.refs.outputs.rounds }}
+          SCENARIO: ${{ inputs.scenario || 'prod-like' }}
+          OUT: ${{ runner.temp }}/bench-compare
+        run: |
+          mkdir -p "$OUT"
+          started=$(date +%s)
+          status=0
+          tests/bench/ab/run.sh --base "$BASE" --head "$HEAD_SHA" --rounds "$ROUNDS" --scenario "$SCENARIO" --out "$OUT" || status=$?
+          echo "elapsed: $(( $(date +%s) - started ))s (exit $status)" | tee "$OUT/elapsed.txt"
+          exit "$status"
+
+      - name: Summary
+        if: always()
+        env:
+          OUT: ${{ runner.temp }}/bench-compare
+        run: |
+          if [ -f "$OUT/report.md" ]; then
+            cat "$OUT/report.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "report.md がありません (準備の失敗、時間切れ、取り消し、集計の入力エラーのいずれか)。artifact のログを見てください。" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -f "$OUT/elapsed.txt" ]; then
+            printf '\n%s\n' "$(cat "$OUT/elapsed.txt")" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bench-compare-${{ github.run_id }}
+          path: ${{ runner.temp }}/bench-compare
+          retention-days: 14
+          if-no-files-found: warn
