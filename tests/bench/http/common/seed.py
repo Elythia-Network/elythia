@@ -38,6 +38,18 @@ FILES_PER_USER = int(os.environ.get("SEED_FILES_PER_USER", "0"))
 # set is non-empty so authed timelines (home-timeline scenario) exercise the
 # mute filter / loadMutedUserIDs path.
 MUTES_PER_USER = int(os.environ.get("SEED_MUTES_PER_USER", "0"))
+# Fraction of seed notes that reply to an earlier public / home note (opt-in,
+# default 0). Replies make timeline packing resolve the reply target, which a
+# reply-free seed never does (#3544).
+REPLY_RATIO = float(os.environ.get("SEED_REPLY_RATIO", "0"))
+# Visibility weights of seed notes, as "public:80,home:15,followers:5"
+# (default: every note public). Followers-only notes make timelines filter by
+# the follow graph (#3544).
+VISIBILITY = os.environ.get("SEED_VISIBILITY", "public")
+# Exit non-zero when a user, follow edge or note could not be created (opt-in,
+# default off). A comparison that seeds less data on one side than the other
+# would otherwise look like a performance difference (#3544).
+STRICT = os.environ.get("SEED_STRICT", "") == "1"
 
 # A minimal valid 1x1 PNG, used for drive uploads when FILES_PER_USER > 0.
 # Embedding the bytes keeps the seeder self-contained (no asset file mount).
@@ -176,6 +188,19 @@ def seed_mutes(http: httpx.Client, tokens: list[str], user_ids: list[str]) -> in
     return edges
 
 
+def parse_visibility(spec: str) -> list[tuple[str, int]]:
+    """Parse SEED_VISIBILITY ("public:80,home:15" or just "public")."""
+    weights: list[tuple[str, int]] = []
+    for part in spec.split(","):
+        name, _, weight = part.strip().partition(":")
+        if name not in ("public", "home", "followers"):
+            raise ValueError(f"SEED_VISIBILITY: unknown visibility {name!r}")
+        weights.append((name, int(weight) if weight else 1))
+    if not weights or sum(w for _, w in weights) <= 0:
+        raise ValueError(f"SEED_VISIBILITY: no positive weight in {spec!r}")
+    return weights
+
+
 def main() -> None:
     wait_for_health(TARGET_URL)
 
@@ -262,14 +287,33 @@ def main() -> None:
 
     # ノート投入。FILES_PER_USER > 0 のとき一部の note に自分の file を添付して
     # timeline packing の drive-file 解決経路を踏ませる (決定的: 3 note に 1 回)。
+    #
+    # 返信と公開範囲は、既定 (返信 0・全部 public) のときに乱数を引かない。既定の
+    # seed で作るデータを #3544 の前と変えないため。乱数は follow / mute と別の
+    # 固定 seed の Random を使い、base と head で同じデータにする
+    visibilities = parse_visibility(VISIBILITY)
+    rng = random.Random(3544)
+    # 返信先は、誰からでも見える public / home のノートから選ぶ
+    reply_targets: list[str] = []
+    replies = 0
     note_ids: list[str] = []
     for idx, token in enumerate(tokens):
         files = user_files[idx]
         for j in range(NUM_NOTES_PER_USER):
+            visibility = visibilities[0][0]
+            if len(visibilities) > 1:
+                visibility = rng.choices([v for v, _ in visibilities], weights=[w for _, w in visibilities])[0]
             body: dict = {
                 "text": f"Benchmark seed note {idx}-{j} on {TARGET_NAME}",
-                "visibility": "public",
+                "visibility": visibility,
             }
+            # 乱数は返信先の有無に関係なく、1 つのノートにつき同じ回数だけ引く。
+            # rng.choice は候補の数で引く回数が変わるので使わない。ノートの作成が
+            # 失敗して返信先の数が変わっても、以降の系列がずれないようにする
+            if REPLY_RATIO > 0:
+                is_reply, pick = rng.random() < REPLY_RATIO, rng.random()
+                if is_reply and reply_targets:
+                    body["replyId"] = reply_targets[int(pick * len(reply_targets))]
             if files and j % 3 == 0:
                 # 1-2 個添付 (file 数に応じて)。決定的に選ぶ。
                 pick = files[: 2] if len(files) >= 2 else files[:1]
@@ -279,10 +323,16 @@ def main() -> None:
                 nid = result.get("createdNote", {}).get("id")
                 if nid:
                     note_ids.append(nid)
+                    if visibility in ("public", "home"):
+                        reply_targets.append(nid)
+                    if "replyId" in body:
+                        replies += 1
             except Exception as exc:
                 print(f"WARN: note create failed: {exc}", file=sys.stderr)
 
     print(f"Created {len(note_ids)} notes on {TARGET_NAME}")
+    if REPLY_RATIO > 0:
+        print(f"Of which {replies} are replies (SEED_REPLY_RATIO={REPLY_RATIO})")
 
     # 結果出力
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -301,6 +351,19 @@ def main() -> None:
     with open(path, "w") as f:
         json.dump(output, f, indent=2)
     print(f"Wrote seed data to {path}")
+
+    if STRICT:
+        # 期待値は要求した人数から出す。作れた人数から出すと、欠けた分だけ期待値も下がる
+        expected = {
+            "users": (len(tokens), NUM_USERS),
+            "user ids": (sum(1 for u in user_ids if u), NUM_USERS),
+            "follow edges": (edges, NUM_USERS * min(FOLLOWERS_PER_USER, NUM_USERS - 1)),
+            "notes": (len(note_ids), NUM_USERS * NUM_NOTES_PER_USER),
+        }
+        short = [f"{name} {got}/{want}" for name, (got, want) in expected.items() if got < want]
+        if short:
+            print(f"ERROR: SEED_STRICT: seeded less than requested: {', '.join(short)}", file=sys.stderr)
+            sys.exit(1)
 
 
 if __name__ == "__main__":

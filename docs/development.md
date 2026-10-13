@@ -473,7 +473,7 @@ make frontend-lint           # eslint だけ (CI と同じ範囲、実測 55 秒
 make e2e-down-all            # 検証用スタックを一括撤去 (**本番 project `mk` は対象外**)
 ```
 
-**上記は全体ではない。** `make help` が全 143 target を出す (`^名前:.*##` の行を数えた)。一覧と説明は
+**上記は全体ではない。** `make help` が全 150 target を出す (`^名前:.*##` の行を数えた)。一覧と説明は
 このファイルの上の節、CI 上の対応は [docs/ci.md](ci.md)。
 
 エントリポイント：
