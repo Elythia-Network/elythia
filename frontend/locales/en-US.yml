@@ -3848,3 +3848,10 @@ _mkgoRolePolicy:
   emojiApplicationMaxPending_caption: "How many requests may await review at the same time. Unlike the rolling limits, a slot is freed when a request is approved, rejected or withdrawn. This caps how long the moderation list gets, which the rolling limits do not. 0 means no limit here, but a user in several roles gets the largest value, so setting 0 on one role does not lift a limit set on the base role (raise that role's priority to do that)."
   emojiApplicationQuotaUnlimited: "No limit"
   emojiApplicationQuota_caption: "Every request made in the preceding period counts, including rejected and cancelled ones. 0 means no limit for this period, but a user in several roles gets the largest value, so setting 0 on one role does not lift a limit set on the base role (raise that role's priority to do that). Whether the user may request at all is controlled by the \"Can request custom emoji\" policy."
+_mkgoSuspendedSoftware:
+  versionRegexHint: "A version enclosed in slashes, such as /-cherrypick-4\\.1[0-3]\\./, is matched against the version string as a regular expression. Add i after the closing slash to ignore case. Software names are compared without regard to case."
+  inboxSuspendedSoftware: "Software refused at the inbox"
+  inboxSuspendedSoftwareDescription: "Activities from servers running the specified software are refused when they arrive, including deletions and undos (the server still answers that it received them and does not tell the sender). Posts boosted by other servers and posts this server fetches are not stopped. Names and version ranges are written the same way as for Suspended Software. A version enclosed in slashes, such as /-cherrypick-4\\.1[0-3]\\./, is matched against the version string as a regular expression (add i after the closing slash to ignore case). Servers whose software is unknown are not refused."
+  inboxStatus: "Inbox refusal by software"
+  inboxSuspended: "Refusing"
+  inboxNotSuspended: "Not applicable"

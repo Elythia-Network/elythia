@@ -47,6 +47,15 @@ SPDX-License-Identifier: AGPL-3.0-only
 							{{ i18n.ts._delivery._type[suspensionState] }}
 						</template>
 					</MkKeyValue>
+					<!-- isInboxSuspended は Elythia 独自 (#3362)。本家のサーバーでは欠けるので、行ごと出さない。 -->
+					<MkKeyValue v-if="instance.isInboxSuspended != null">
+						<template #key>
+							{{ i18n.ts._mkgoSuspendedSoftware.inboxStatus }}
+						</template>
+						<template #value>
+							{{ instance.isInboxSuspended ? i18n.ts._mkgoSuspendedSoftware.inboxSuspended : i18n.ts._mkgoSuspendedSoftware.inboxNotSuspended }}
+						</template>
+					</MkKeyValue>
 					<MkButton v-if="suspensionState === 'none'" :disabled="!instance" danger @click="stopDelivery">{{ i18n.ts._delivery.stop }}</MkButton>
 					<MkButton v-if="suspensionState !== 'none'" :disabled="!instance || suspensionState == 'softwareSuspended'" @click="resumeDelivery">{{ i18n.ts._delivery.resume }}</MkButton>
 					<MkSwitch v-model="isBlocked" :disabled="!meta || !instance" @update:modelValue="toggleBlock">{{ i18n.ts.blockThisInstance }}</MkSwitch>
@@ -238,7 +247,7 @@ const {
 	initialValue: 'instance-requests',
 });
 const meta = ref<Misskey.entities.AdminMetaResponse | null>(null);
-const instance = ref<Misskey.entities.FederationInstance | null>(null);
+const instance = ref<Elythia.FederationInstance | null>(null);
 const suspensionState = ref<'none' | 'manuallySuspended' | 'goneSuspended' | 'autoSuspendedForNotResponding' | 'softwareSuspended'>('none');
 const isBlocked = ref(false);
 const isSilenced = ref(false);

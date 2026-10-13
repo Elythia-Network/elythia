@@ -16457,4 +16457,30 @@ export interface Locale extends ILocale {
          */
         "inconsistent": string;
     };
+    "_mkgoSuspendedSoftware": {
+        /**
+         * バージョンを/で囲むと、バージョンの文字列に正規表現を当てます（例：/-cherrypick-4\.1[0-3]\./）。閉じる/の後にiを付けると、大文字と小文字を区別しません。ソフトウェアの名前は、大文字と小文字を区別せずに比べます。
+         */
+        "versionRegexHint": string;
+        /**
+         * 受信を拒否するソフトウェア
+         */
+        "inboxSuspendedSoftware": string;
+        /**
+         * 指定したソフトウェアで動いているサーバーから届くアクティビティを、受信の時点で拒否します（相手には受け取ったと返したうえで捨て、拒否したことは伝えません）。削除や取り消しも受け付けません。ほかのサーバーがリノートした投稿や、こちらから取りに行った投稿は止めません。ソフトウェアの名前とバージョンの範囲の書き方は、配信停止中のソフトウェアと同じです。バージョンを/で囲むと、バージョンの文字列に正規表現を当てます（例：/-cherrypick-4\.1[0-3]\./、閉じる/の後にiを付けると大文字と小文字を区別しません）。ソフトウェアが分からないサーバーからの受信は拒否しません。
+         */
+        "inboxSuspendedSoftwareDescription": string;
+        /**
+         * ソフトウェアによる受信の拒否
+         */
+        "inboxStatus": string;
+        /**
+         * 拒否中
+         */
+        "inboxSuspended": string;
+        /**
+         * 対象外
+         */
+        "inboxNotSuspended": string;
+    };
 }

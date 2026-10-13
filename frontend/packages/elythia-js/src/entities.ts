@@ -442,6 +442,38 @@ export type ElythiaPageFields = {
 export type Page = Misskey.entities.Page & ElythiaPageFields;
 
 /**
+ * A rule that picks remote servers by the software that nodeinfo reports.
+ *
+ * `software` is compared without regard to case. `versionRange` is a semver
+ * range (empty or `*`: every version), or `/pattern/` (`/pattern/i` to ignore
+ * case) to match the version string with a regular expression.
+ *
+ * 形は本家の `deliverSuspendedSoftware` の要素と同じ。正規表現の書き方は Elythia 独自で、
+ * 配送停止の一覧と受信を拒否する一覧 (#3362) の両方で使える。
+ */
+export type SuspendedSoftware = {
+	software: string;
+	versionRange: string;
+};
+
+/**
+ * Elythia-specific fields that a federation instance adds to the upstream
+ * response (`federation/show-instance`, `federation/instances`).
+ *
+ * 古い版のサーバーと本家のサーバーでは欠けるので省略可能にしてある。
+ */
+export type ElythiaFederationInstanceFields = {
+	/**
+	 * Whether the instance runs software that `inboxSuspendedSoftware` lists,
+	 * so that activities from it are refused (#3362). `isSuspended` and
+	 * `suspensionState` keep their upstream meaning (delivery only).
+	 */
+	isInboxSuspended?: boolean;
+};
+
+export type FederationInstance = Misskey.entities.FederationInstance & ElythiaFederationInstanceFields;
+
+/**
  * How a follow from an account younger than `followApprovalLocalSeconds` /
  * `followApprovalRemoteSeconds` is handled (#3466).
  *

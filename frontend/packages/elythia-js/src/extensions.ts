@@ -5,7 +5,7 @@
  */
 
 import type * as Misskey from 'misskey-js';
-import type { FollowApprovalAction, Page, PageVisibility, SignupApplicationFormField } from './entities.js';
+import type { FederationInstance, FollowApprovalAction, Page, PageVisibility, SignupApplicationFormField, SuspendedSoftware } from './entities.js';
 
 /**
  * Request fields that Elythia adds to upstream endpoints, keyed by the endpoint.
@@ -60,6 +60,11 @@ export type ElythiaRequestExtensions = {
 		/** Keeps notes seen only through relays in Redis instead of the database. */
 		enableEphemeralRelayNotes?: boolean;
 		ephemeralRelayNoteTtlMinutes?: number;
+		/**
+		 * Software whose activities the inbox refuses (#3362). Matched by the same
+		 * rules as `deliverSuspendedSoftware`.
+		 */
+		inboxSuspendedSoftware?: SuspendedSoftware[];
 	};
 	'i/update': {
 		/**
@@ -97,6 +102,14 @@ export type ElythiaRequestExtensions = {
  * 出なかった (#3439)。
  */
 export type ResponseOverrides = {
+	/** Elythia adds the software whose activities the inbox refuses (#3362). */
+	'admin/meta': Misskey.entities.AdminMetaResponse & {
+		/**
+		 * Software whose activities the inbox refuses. Missing on upstream
+		 * backends and on older Elythia.
+		 */
+		inboxSuspendedSoftware?: SuspendedSoftware[];
+	};
 	/**
 	 * Elythia adds the plugin that manages the account (#3468). Missing on
 	 * upstream backends.
@@ -108,6 +121,13 @@ export type ResponseOverrides = {
 		 */
 		managedByPlugin?: string | null;
 	};
+	/** Elythia adds `isInboxSuspended` to each instance (#3362). */
+	'federation/instances': FederationInstance[];
+	/**
+	 * Elythia adds `isInboxSuspended` (#3362). `null` when the host is unknown,
+	 * as upstream.
+	 */
+	'federation/show-instance': FederationInstance | null;
 	/**
 	 * The stored value, which is any JSON the client wrote. misskey-js has
 	 * `Record<string, never>` (an object with no keys).
