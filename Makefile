@@ -14,7 +14,7 @@
 	dropin-frontend-mk-up dropin-frontend-mk-down dropin-frontend-swap-test \
 	e2e-frontend-build \
 	uds-init uds-layout-check uds-frontend-build uds-build uds-rebuild uds-restart uds-up uds-down uds-down-v uds-logs uds-ps \
-	bench-up bench-run bench-down bench-logs \
+	bench-up bench-run bench-down bench-logs bench-compare bench-compare-down \
 	apicompat apicompat-routes apicompat-render \
 	test-fast fuzz-imagedecode shapecheck shapecheck-gen shapecheck-report errorid-check limitspec-check perm-check wiring-check catalog-check notfound-check nulparam-check compose-check testflags-check gaterun-check secretfield-check ipshape-check iprecord-check \
 	diff-up diff-test diff-down diff-logs \
@@ -131,12 +131,13 @@ E2E_COMPOSE_FILES = \
 	tests/federation/compose.misskey.yml \
 	tests/federation/compose.mastodon.yml \
 	tests/bench/http/compose.yml \
+	tests/bench/ab/compose.yml \
 	tests/bench/queue/compose.yml
 
 # 使われている profile を全部渡す。**`down` は有効な profile の container しか
 # 消さない**ので、付けないと seed / runner 系が残る。存在しない profile 名を
 # 渡してもエラーにはならないので、ファイルごとに出し分けず全部並べる。
-E2E_PROFILES = --profile test --profile bench --profile outbound --profile inbound --profile report
+E2E_PROFILES = --profile test --profile bench --profile outbound --profile inbound --profile report --profile tools
 
 e2e-down-all: ## 検証用スタックを一括撤去 (本番 project mk は対象外)
 	@for f in $(E2E_COMPOSE_FILES); do \
@@ -955,6 +956,22 @@ bench-down: ## k6 ベンチのスタックを撤去
 
 bench-logs: ## k6 ベンチのログを表示
 	docker compose -f $(BENCH_COMPOSE) logs -f
+
+# base と head の 2 つの commit を、同じスタックで交互に流して比べる (#3544)。
+# 結果は tests/bench/ab/results/<日時>-<シナリオ>/report.md に出力される。
+# 負荷をかけるので、本番が動いているホストでは SMOKE=1 の動作確認だけにする。
+# BASE / HEAD は commit に解決できる ref。worktree の未コミットの変更は測らない。
+BENCH_AB_COMPOSE=tests/bench/ab/compose.yml
+BASE ?= develop
+HEAD ?= HEAD
+ROUNDS ?= 2
+SCENARIO ?= prod-like
+
+bench-compare: ## base と head の commit の性能を比べる (BASE= HEAD= ROUNDS= SCENARIO= SMOKE=1)
+	tests/bench/ab/run.sh --base '$(BASE)' --head '$(HEAD)' --rounds '$(ROUNDS)' --scenario '$(SCENARIO)' $(if $(filter 1,$(SMOKE)),--smoke)
+
+bench-compare-down: ## bench-compare のスタックを撤去
+	docker compose -f $(BENCH_AB_COMPOSE) --profile tools down -v --remove-orphans
 
 # Queue bench (#563): deliver/inbox throughput comparison between
 # Misskey TS (BullMQ) and mk-go (mkq). asynq driver は #2985 で削除。

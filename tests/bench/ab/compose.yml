@@ -1,0 +1,149 @@
+# base / head の 2 つの commit を、同じスタックで交互に流す (#3544)。
+# run.sh から使う。app の image は APP_IMAGE で差し替える。
+#
+# **CPU の上限の合計は 3.75 にしてある。** GitHub-hosted runner は 4 vCPU で、
+# 残りを OS・dockerd・sampler に残す。上限が足りずに奪い合うと、どちらの commit が
+# 速いかではなく、その回にどれだけ奪われたかを測ることになる。配分は app 1.25 /
+# postgres 0.75 / redis 0.5 / web 0.5 / k6 0.75。最初の版は web と redis を 0.25 に
+# していて、5 VU の smoke でも短い山で上限に当たり (1 回 100ms の区切りのうち 75ms
+# 止まる)、app の差と関係なく p99 が伸びていた。上限に当たった回数と時間は、回ごとに
+# throttle.csv に残す。GitHub-hosted runner での配分は、段階 (3) の実測で見直す。
+#
+# image は digest で固定する。日を変えて流した比較どうしで、app 以外の条件を揃える。
+#
+# project 名は本番 (mk) と衝突させない (CLAUDE.md Section 0)。
+name: mk-bench-ab
+
+services:
+  postgres:
+    image: postgres:18-alpine@sha256:4da1a4828be12604092fa55311276f08f9224a74a62dcb4708bd7439e2a03911
+    environment:
+      POSTGRES_DB: misskey
+      POSTGRES_USER: misskey
+      POSTGRES_PASSWORD: testpass
+    healthcheck:
+      test: pg_isready -U misskey
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 1024M
+    networks: [bench]
+
+  redis:
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    healthcheck:
+      test: redis-cli ping
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+    networks: [bench]
+
+  app:
+    # run.sh が回ごとに mk-bench-ab-app:base / :head を渡す。既定値は down など
+    # image を使わない操作のためのもの
+    image: ${APP_IMAGE:-mk-bench-ab-app:base}
+    environment:
+      TZ: Asia/Tokyo
+      # 負荷は k6 の 1 つの IP から来るので、IP の制限だけ外す
+      MK_ENABLEIPRATELIMIT: "false"
+      # prod-like は false (利用者ごとの制限を残す)、unlimited は true。seed の間だけは
+      # run.sh が true にする (admin/accounts/create は 1 時間に 30 なので 50 人を作れない)
+      MK_DISABLEENDPOINTRATELIMITS: "${BENCH_DISABLE_ENDPOINT_RATE_LIMITS:-false}"
+      MK_ENABLETIMELINECACHE: "false"
+      # sampler が Go のヒープを /debug/pprof/heap から読む
+      MK_ENABLEPPROF: "true"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    volumes:
+      - ./elythia.yml:/app/.config/default.yml:ro
+    # sampler がヒープを読むためだけに、localhost の空いている port へ出す
+    ports:
+      - "127.0.0.1::3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/healthz"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+    deploy:
+      resources:
+        limits:
+          cpus: "1.25"
+          memory: 1024M
+    networks: [bench]
+
+  web:
+    image: nginx:alpine@sha256:df221db836e1754089190208cee7eeda94f233197056426eda74a43ab1abeac2
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      app: { condition: service_healthy }
+    healthcheck:
+      # localhost は ::1 に解決されるが、nginx.conf は IPv4 でしか listen しない
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+    networks: [bench]
+
+  seed:
+    profiles: [tools]
+    build:
+      context: ../http/common
+      dockerfile: Dockerfile.seed
+    environment:
+      TARGET_URL: http://web
+      TARGET_NAME: bench-ab
+      # run.sh --smoke が小さくする
+      SEED_USERS: "${BENCH_SEED_USERS:-50}"
+      SEED_NOTES: "${BENCH_SEED_NOTES:-50}"
+      SEED_REPLY_RATIO: "0.35"
+      SEED_VISIBILITY: "public:80,home:15,followers:5"
+      # 作れなかった利用者・ノート・フォローがあれば非 0 で終わる
+      SEED_STRICT: "1"
+      OUTPUT_DIR: /seed
+    volumes:
+      - seed:/seed
+      - ../http/common/seed.py:/app/seed.py:ro
+    networks: [bench]
+
+  k6:
+    profiles: [tools]
+    image: grafana/k6:0.55.0@sha256:b24f418fc99a26dd57904c952c03bfaf79462be18508acc45aafa07ff68e7df2
+    # 結果を書く results/ の持ち主に合わせる (run.sh が渡す)
+    user: "${BENCH_UID:-0}:${BENCH_GID:-0}"
+    environment:
+      TARGET_URL: http://web
+    volumes:
+      # /lib は image の musl loader と重なるので避ける
+      - ./k6:/scripts/ab:ro
+      - ../http/k6/lib:/scripts/lib:ro
+      - seed:/seed:ro
+      - ${BENCH_RUN_DIR:-./results}:/out
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 512M
+    networks: [bench]
+
+volumes:
+  seed:
+
+networks:
+  bench:
+    driver: bridge

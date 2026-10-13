@@ -21,6 +21,7 @@ import (
 // **選ばせる**形にしてある。
 var pluginbuildExemptDockerfiles = map[string]string{
 	"tests/federation/common/Dockerfile.mkgo": "連合 e2e 用。plugins/ を持たない素の mk-go 同士を突き合わせるので組み込む対象が無い",
+	"tests/bench/ab/Dockerfile.app":           "base / head の性能比較用 (#3544)。比べる commit の worktree には plugins/ が無いので組み込む対象が無い",
 }
 
 // mkgoBuildVerbs and mkgoBuildTargets identify a command that compiles mk-go.
