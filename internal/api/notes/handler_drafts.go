@@ -2,9 +2,11 @@ package notes
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
+	"unicode/utf8"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/pagination"
@@ -106,6 +108,9 @@ func (h *Handler) DraftsCreate(c echo.Context) error {
 	// draft 経由でも upstream drafts/create.ts:161,168 の enum 制約に揃え、不正値が
 	// scheduled-note 処理経由で投稿されるのを防ぐ。
 	if err := validateNoteEnums(req.Visibility, req.ReactionAcceptance); err != nil {
+		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", err.Error(), apierr.UUIDInvalidParam))
+	}
+	if err := validateDraftLengths(req.Text, req.CW, req.Hashtag, req.FileIDs, req.Poll); err != nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", err.Error(), apierr.UUIDInvalidParam))
 	}
 	if req.Visibility == "" {
@@ -251,6 +256,9 @@ func (h *Handler) DraftsUpdate(c echo.Context) error {
 	if err := validateNoteEnums(req.Visibility, req.ReactionAcceptance); err != nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", err.Error(), apierr.UUIDInvalidParam))
 	}
+	if err := validateDraftLengths(req.Text, req.CW, req.Hashtag, req.FileIDs, req.Poll); err != nil {
+		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", err.Error(), apierr.UUIDInvalidParam))
+	}
 	draft, err := h.draftRepo.FindByIDAndUser(req.DraftID, user.ID)
 	if err != nil && !repository.IsNotFound(err) {
 		// **DB 障害を not-found に丸めない** (#2792)。
@@ -367,6 +375,41 @@ func (h *Handler) DraftsUpdate(c echo.Context) error {
 	draft.User = user
 	// upstream res は { updatedDraft: NoteDraft } で包む。
 	return c.JSON(http.StatusOK, map[string]any{"updatedDraft": h.packDraft(c.Request().Context(), user, draft, nil)})
+}
+
+// validateDraftLengths enforces the length limits of upstream
+// notes/drafts/create.ts and update.ts paramDef: text up to
+// MAX_NOTE_TEXT_LENGTH, cw 1 to 100, hashtag up to 200, at most 16 fileIds,
+// and at most 10 poll choices of 1 to 50 characters each.
+//
+// 下書きは予約投稿で notes/create の検査を通らずにノートになるので、ここで
+// notes/create と同じ上限を掛けないと、長い本文がそのまま解析・配送される。
+func validateDraftLengths(text, cw, hashtag *string, fileIDs []string, poll *draftPoll) error {
+	if text != nil && utf8.RuneCountInString(*text) > maxNoteTextLength {
+		return errors.New("text is too long")
+	}
+	if cw != nil {
+		if n := utf8.RuneCountInString(*cw); n < 1 || n > 100 {
+			return errors.New("cw must be between 1 and 100 characters")
+		}
+	}
+	if hashtag != nil && utf8.RuneCountInString(*hashtag) > 200 {
+		return errors.New("hashtag is too long")
+	}
+	if len(fileIDs) > 16 {
+		return errors.New("too many files (max 16)")
+	}
+	if poll != nil {
+		if len(poll.Choices) > 10 {
+			return errors.New("poll must have at most 10 choices")
+		}
+		for _, choice := range poll.Choices {
+			if n := utf8.RuneCountInString(choice); n < 1 || n > 50 {
+				return errors.New("each poll choice must be between 1 and 50 characters")
+			}
+		}
+	}
+	return nil
 }
 
 // draftPoll mirrors the upstream notes/drafts poll param object.
