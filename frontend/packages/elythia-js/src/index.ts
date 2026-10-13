@@ -46,6 +46,7 @@ export type {
 	DriveUsageBucket,
 	DriveUsageKind,
 	DriveUsageOrigin,
+	ElythiaFederationInstanceFields,
 	ElythiaMeDetailedFields,
 	ElythiaMetaFields,
 	ElythiaPageFields,
@@ -61,6 +62,7 @@ export type {
 	EmojiApplicationStatusCounts,
 	FederationHealthReport,
 	FederationHostHealth,
+	FederationInstance,
 	FederationRule,
 	FederationRuleBody,
 	FederationRuleHit,
@@ -100,6 +102,7 @@ export type {
 	SignupApplicationStatus,
 	SignupApplicationView,
 	SilentFollow,
+	SuspendedSoftware,
 	UserDetailed,
 } from './entities.js';
 

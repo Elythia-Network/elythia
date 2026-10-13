@@ -316,8 +316,36 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 									<div :class="$style.metadataRoot" class="_gaps_s">
 										<MkInfo>{{ i18n.ts._serverSettings.deliverSuspendedSoftwareDescription }}</MkInfo>
+										<MkInfo>{{ i18n.ts._mkgoSuspendedSoftware.versionRegexHint }}</MkInfo>
 										<div v-for="(element, index) in federationForm.state.deliverSuspendedSoftware" :key="index" v-panel :class="$style.fieldDragItem">
 											<button class="_button" :class="$style.dragItemRemove" @click="federationForm.state.deliverSuspendedSoftware.splice(index, 1)"><i class="ti ti-x"></i></button>
+											<div :class="$style.dragItemForm">
+												<FormSplit :minWidth="200">
+													<MkInput v-model="element.software" small :placeholder="i18n.ts.softwareName">
+													</MkInput>
+													<MkInput v-model="element.versionRange" small :placeholder="i18n.ts.version">
+													</MkInput>
+												</FormSplit>
+											</div>
+										</div>
+									</div>
+								</MkFolder>
+							</SearchMarker>
+
+							<SearchMarker :keywords="['suspended', 'software', 'inbox']">
+								<MkFolder>
+									<template #icon><i class="ti ti-list"></i></template>
+									<template #label><SearchLabel>{{ i18n.ts._mkgoSuspendedSoftware.inboxSuspendedSoftware }}</SearchLabel></template>
+									<template #footer>
+										<div class="_buttons">
+											<MkButton @click="federationForm.state.inboxSuspendedSoftware.push({software: '', versionRange: ''})"><i class="ti ti-plus"></i> {{ i18n.ts.add }}</MkButton>
+										</div>
+									</template>
+
+									<div :class="$style.metadataRoot" class="_gaps_s">
+										<MkInfo>{{ i18n.ts._mkgoSuspendedSoftware.inboxSuspendedSoftwareDescription }}</MkInfo>
+										<div v-for="(element, index) in federationForm.state.inboxSuspendedSoftware" :key="index" v-panel :class="$style.fieldDragItem">
+											<button class="_button" :class="$style.dragItemRemove" @click="federationForm.state.inboxSuspendedSoftware.splice(index, 1)"><i class="ti ti-x"></i></button>
 											<div :class="$style.dragItemForm">
 												<FormSplit :minWidth="200">
 													<MkInput v-model="element.software" small :placeholder="i18n.ts.softwareName">
@@ -538,6 +566,8 @@ const federationForm = useForm({
 	federation: meta.federation,
 	federationHosts: meta.federationHosts.join('\n'),
 	deliverSuspendedSoftware: meta.deliverSuspendedSoftware,
+	// Elythia 独自 (#3362)。本家や古い版のサーバーは返さないので、空の一覧として扱う。
+	inboxSuspendedSoftware: meta.inboxSuspendedSoftware ?? [],
 	signToActivityPubGet: meta.signToActivityPubGet,
 	proxyRemoteFiles: meta.proxyRemoteFiles,
 	allowExternalApRedirect: meta.allowExternalApRedirect,
@@ -548,6 +578,7 @@ const federationForm = useForm({
 		federation: state.federation,
 		federationHosts: state.federationHosts.split('\n'),
 		deliverSuspendedSoftware: state.deliverSuspendedSoftware,
+		inboxSuspendedSoftware: state.inboxSuspendedSoftware,
 		signToActivityPubGet: state.signToActivityPubGet,
 		proxyRemoteFiles: state.proxyRemoteFiles,
 		allowExternalApRedirect: state.allowExternalApRedirect,
