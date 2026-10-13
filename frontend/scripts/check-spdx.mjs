@@ -18,7 +18,7 @@
  *   1 = SPDX 欠落またはローカル検査でのコメント形式違反
  *   2 = 引数、Git ref、ファイル列挙・読取などの理由で検査不能
  *
- * CI 互換判定は、現行 CI と同じく copyright 行または AGPL license 行のどちらか
+ * CI 互換判定は、現行 CI と同じく上流の copyright 行または AGPL license 行のどちらか
  * 一方が全文のどこかにあれば pass する。この判定はライセンス表記の完全性や正当性を
  * 保証しない。ローカル検査は、加えて .vue / .html のコメント形式を検査する。
  *
@@ -57,11 +57,18 @@ const TARGET_EXTENSIONS = new Set(['.cjs', '.html', '.js', '.mjs', '.scss', '.ts
 const EXCLUDED_CONFIG_EXTENSIONS = new Set(['.cjs', '.js', '.mjs', '.ts']);
 const HTML_COMMENT_EXTENSIONS = new Set(['.vue', '.html']);
 
+/** 判定に使う上流の著作権の行。上流から取り込んだファイルはこの行を持つ。 */
 const COPYRIGHT_LINE = 'SPDX-FileCopyrightText: syuilo and misskey-project';
 const LICENSE_LINE = 'SPDX-License-Identifier: AGPL-3.0-only';
 
-const HTML_HEADER = `<!--\n${COPYRIGHT_LINE}\n${LICENSE_LINE}\n-->\n\n`;
-const BLOCK_HEADER = `/*\n * ${COPYRIGHT_LINE}\n * ${LICENSE_LINE}\n */\n\n`;
+// --fix が足すのは Elythia が新しく書くファイルなので、著作権の行は Elythia-Network
+// にする。上流の行を付けると帰属が逆になる (#3533)。判定は上の 2 行のどちらかが
+// あれば通るままで変えない。
+/** --fix が新しいファイルに足す著作権の行。 */
+const FIX_COPYRIGHT_LINE = 'SPDX-FileCopyrightText: Elythia-Network';
+
+const HTML_HEADER = `<!--\n${FIX_COPYRIGHT_LINE}\n${LICENSE_LINE}\n-->\n\n`;
+const BLOCK_HEADER = `/*\n * ${FIX_COPYRIGHT_LINE}\n * ${LICENSE_LINE}\n */\n\n`;
 
 /** @typedef {'check' | 'fix' | 'ci'} Mode */
 /** @typedef {'missing' | 'wrong-form' | 'ok'} Verdict */

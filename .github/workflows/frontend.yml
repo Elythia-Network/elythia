@@ -147,6 +147,9 @@ jobs:
       - name: check-dts self test
         run: node --test scripts/check-dts.test.mjs
 
+      - name: check-spdx self test
+        run: node --test scripts/check-spdx.test.mjs
+
       - name: SPDX headers
         run: node scripts/check-spdx.mjs --ci
 
