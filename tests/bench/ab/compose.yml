@@ -9,7 +9,9 @@
 # 止まる)、app の差と関係なく p99 が伸びていた。上限に当たった回数と時間は、回ごとに
 # throttle.csv に残す。GitHub-hosted runner での配分は、段階 (3) の実測で見直す。
 #
-# image は digest で固定する。日を変えて流した比較どうしで、app 以外の条件を揃える。
+# postgres / redis / nginx / k6 の image は digest で固定する。日を変えて流した比較どうしで、
+# app 以外の条件を揃える。seed の image (tests/bench/http/common/Dockerfile.seed) は
+# 固定していないが、計測の前に止めるので数字には入らない。
 #
 # project 名は本番 (mk) と衝突させない (CLAUDE.md Section 0)。
 name: mk-bench-ab
