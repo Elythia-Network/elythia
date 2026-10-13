@@ -4783,3 +4783,50 @@ func TestAccountsCreate_IgnoresMinimumUsernameLength(t *testing.T) {
 	rec = doPost(h.AccountsCreate, `{"username":"reserved","password":"pass1234"}`, rootUser)
 	assert.NotEqual(t, http.StatusOK, rec.Code, "予約 username が admin 経路で通っている")
 }
+
+// **受信を拒否するソフトウェアの一覧を admin/meta で返し、update-meta で受ける
+// (Elythia 独自、#3362)。**
+func TestUpdateMeta_InboxSuspendedSoftware(t *testing.T) {
+	h, _, metaRepo, _ := newTestHandler(t)
+	rec := doPost(h.UpdateMeta, `{"inboxSuspendedSoftware":[{"software":"misskey","versionRange":"/-cherrypick-/"}]}`, nil)
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	var entries []model.SuspendedSoftwareEntry
+	require.NoError(t, json.Unmarshal(metaRepo.Meta.InboxSuspendedSoftware, &entries))
+	assert.Equal(t, []model.SuspendedSoftwareEntry{{Software: "misskey", VersionRange: "/-cherrypick-/"}}, entries)
+
+	rec = doPost(h.AdminMeta, `{}`, adminUser)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.Equal(t, []any{map[string]any{"software": "misskey", "versionRange": "/-cherrypick-/"}}, got["inboxSuspendedSoftware"])
+}
+
+// **ソフトウェアの一覧の形を検査する (#3362)。** upstream の paramDef は
+// software / versionRange を string 必須にしていて、形が違えば 400 で弾く。
+// 以前の Elythia は検査せずに保存し、読めない要素が入りえた。null は従来どおり
+// 空の一覧として受ける。
+func TestUpdateMeta_SoftwareSuspensionListShape(t *testing.T) {
+	for _, key := range []string{"deliverSuspendedSoftware", "inboxSuspendedSoftware"} {
+		for _, bad := range []string{
+			`{"software":"mastodon","versionRange":"*"}`,
+			`[{"software":"mastodon","versionRange":1}]`,
+			`[{"software":1,"versionRange":"*"}]`,
+			`[{"software":"mastodon"}]`,
+			`["mastodon"]`,
+			// /.../ の形なのにコンパイルできない (#3362)。
+			`[{"software":"mastodon","versionRange":"/(/"}]`,
+		} {
+			h, _, _, _ := newTestHandler(t)
+			rec := doPost(h.UpdateMeta, `{"`+key+`":`+bad+`}`, nil)
+			assert.Equal(t, http.StatusBadRequest, rec.Code, "%s=%s", key, bad)
+		}
+		h, _, _, _ := newTestHandler(t)
+		rec := doPost(h.UpdateMeta, `{"`+key+`":null}`, nil)
+		assert.Equal(t, http.StatusNoContent, rec.Code, "%s=null", key)
+		rec = doPost(h.UpdateMeta, `{"`+key+`":[{"software":"a","versionRange":"*","note":"x"}]}`, nil)
+		assert.Equal(t, http.StatusNoContent, rec.Code, "%s: ほかのキーは見ない", key)
+		// コンパイルできる正規表現と、閉じていない (semver の範囲として読む) ものは受ける。
+		rec = doPost(h.UpdateMeta, `{"`+key+`":[{"software":"a","versionRange":"/-fork-/i"},{"software":"b","versionRange":"/1.2"}]}`, nil)
+		assert.Equal(t, http.StatusNoContent, rec.Code, "%s: 正しい正規表現", key)
+	}
+}

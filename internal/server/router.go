@@ -1088,6 +1088,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	inboxProcessor.SetRelayActorChecker(relaySvc)
 	inboxProcessor.SetSignatureVerifier(federationResolver)
 	inboxProcessor.SetHostBlockChecker(instanceService)
+	// 受信を拒否するソフトウェア (#3362)。設定は判定のたびに meta から読む。
+	inboxProcessor.SetSoftwareSuspensionChecker(corefederation.NewInboxSuspendedChecker(metaRepo, instanceRepo))
 	inboxProcessor.SetInstanceTracker(instanceTouchBuffer)
 	inboxProcessor.SetSignatureCapabilityRecorder(sigCapBuffer)
 	// LD-Signature verifier (#1164 Phase D)。inbound activity body に signature
@@ -4713,6 +4715,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"モデレーターの suspend / unsuspend が由来を刻まないので、解除が次の actor refresh で無言で戻る (#2973)"},
 		{"resolver.suspensionOriginRepo", federationResolver.HasSuspensionOriginRepo(),
 			"リモート actor の凍結を読まなくなる (#2951 が効かない)。読んだとしても由来を刻めないので、モデレーターが解除しても次の refresh で無言で戻る"},
+		{"inboxProcessor.softwareBlocker", inboxProcessor.HasSoftwareSuspensionChecker(),
+			"管理画面の受信を拒否するソフトウェアが効かず、その相手の activity を受け付ける (#3362)"},
 		{"deliverProcessor.suspendedChecker", deliverProcessor.HasSuspendedChecker(),
 			"管理画面の配送停止中のソフトウェアが配送に効かない (画面には配送停止と出る、#3558)"},
 		{"deliverProcessor.signingKeySource", deliverProcessor.HasSigningKeySource(),

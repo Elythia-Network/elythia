@@ -80,6 +80,7 @@ var knownMetaColumns = []string{
 	"iconUrl",
 	"id",
 	"impressumUrl",
+	"inboxSuspendedSoftware",
 	"infoImageUrl",
 	"inquiryUrl",
 	"langs",
