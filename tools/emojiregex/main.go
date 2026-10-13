@@ -1,21 +1,26 @@
-// Command emojiregex generates the Unicode emoji pattern of the MFM parser
-// (internal/activitypub/mfm/emoji_regex_gen.go) from the emoji regex of
-// @misskey-dev/emoji-data, the one mfm-js uses for its unicodeEmoji parser.
-// The regex is read from the frontend's MFM parser, @elythia-network/mfm,
-// which ships the same regex, so that the server and the frontend read the
-// same emoji.
+// Command emojiregex checks that the server and the frontend read the same
+// Unicode emoji in MFM.
 //
-// The JavaScript regex works on UTF-16 code units; the generated pattern is the
+// Both MFM parsers come from Elythia-Network/mfm: the server uses the Go module
+// github.com/elythia-network/mfm, whose emoji_regex_gen.go holds the emoji
+// pattern, and the frontend uses the npm package @elythia-network/mfm, which
+// ships the emoji regex of @misskey-dev/emoji-data (the one mfm-js uses for its
+// unicodeEmoji parser) in built/emoji-regex.gen.js. The command converts the
+// frontend's regex to a Go pattern and requires it to match the Go module's
+// file byte for byte, so that a version of one that the other has not caught
+// up with is caught here.
+//
+// The JavaScript regex works on UTF-16 code units; the converted pattern is the
 // same regex over code points for Go's regexp package. Both pick the first
 // matching alternative from the left, so they read the same emoji.
 //
 // Usage:
 //
-//	go run ./tools/emojiregex            # regenerate from frontend/
-//	go run ./tools/emojiregex -check     # fail when the outputs are stale
+//	go run ./tools/emojiregex            # check, then rewrite the snapshot from frontend/
+//	go run ./tools/emojiregex -check     # fail when the Go module or the snapshot is stale
 //
 // The regex source is also written to a snapshot file so that the tests of
-// this package can check the generated file without frontend/node_modules.
+// this package can check the Go module without frontend/node_modules.
 package main
 
 import (
@@ -27,6 +32,7 @@ import (
 	"go/format"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"regexp/syntax"
@@ -37,8 +43,10 @@ import (
 
 const (
 	defaultMisskeyDir = "frontend"
-	defaultOut        = "internal/activitypub/mfm/emoji_regex_gen.go"
-	defaultSnapshot   = "tools/emojiregex/testdata/source.txt"
+	// goModule is the Go MFM parser whose emoji pattern must match the frontend's.
+	goModule        = "github.com/elythia-network/mfm"
+	goModuleRegex   = "emoji_regex_gen.go"
+	defaultSnapshot = "tools/emojiregex/testdata/source.txt"
 )
 
 func main() {
@@ -52,7 +60,7 @@ func run(args []string, out, errOut io.Writer) error {
 	fs := flag.NewFlagSet("emojiregex", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	misskeyDir := fs.String("misskey", defaultMisskeyDir, "checkout of the Misskey fork with node_modules installed")
-	outPath := fs.String("out", defaultOut, "generated Go file")
+	outPath := fs.String("out", "", "emoji pattern file of the Go module (default: "+goModuleRegex+" of "+goModule+" in the module cache)")
 	snapshotPath := fs.String("snapshot", defaultSnapshot, "snapshot of the regex source")
 	check := fs.Bool("check", false, "compare instead of writing; fail when the outputs are stale")
 	if err := fs.Parse(args); err != nil {
@@ -60,6 +68,14 @@ func run(args []string, out, errOut io.Writer) error {
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("unexpected arguments: %v", fs.Args())
+	}
+
+	if *outPath == "" {
+		p, err := goModuleRegexPath()
+		if err != nil {
+			return err
+		}
+		*outPath = p
 	}
 
 	src, err := loadSource(*misskeyDir)
@@ -71,30 +87,59 @@ func run(args []string, out, errOut io.Writer) error {
 		return err
 	}
 	snap := src.snapshot()
+	// 生成物は Go のモジュールの中にあり、ここからは書き換えない。モジュールの側が
+	// frontend の版に追いついていなければ、snapshot を書く前に落とす
+	got, err := os.ReadFile(*outPath)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(got, gen) {
+		return fmt.Errorf("%s is stale: %s and the frontend's %s carry different emoji regexes; update both to the same release of Elythia-Network/mfm", *outPath, goModule, frontendMfmPackage)
+	}
 	if *check {
-		for _, f := range []struct {
-			path string
-			want []byte
-		}{{*outPath, gen}, {*snapshotPath, snap}} {
-			got, err := os.ReadFile(f.path)
-			if err != nil {
-				return err
-			}
-			if !bytes.Equal(got, f.want) {
-				return fmt.Errorf("%s is stale; run `make emoji-regex`", f.path)
-			}
+		got, err := os.ReadFile(*snapshotPath)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(got, snap) {
+			return fmt.Errorf("%s is stale; run `make emoji-regex`", *snapshotPath)
 		}
 		fmt.Fprintf(out, "emoji regex is up to date (mfm-js %s, emoji-data %s)\n", src.mfmjs, src.version)
 		return nil
 	}
-	if err := os.WriteFile(*outPath, gen, 0o644); err != nil {
-		return err
-	}
 	if err := os.WriteFile(*snapshotPath, snap, 0o644); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "wrote %s and %s (mfm-js %s, emoji-data %s)\n", *outPath, *snapshotPath, src.mfmjs, src.version)
+	fmt.Fprintf(out, "wrote %s (mfm-js %s, emoji-data %s); %s matches it\n", *snapshotPath, src.mfmjs, src.version, *outPath)
 	return nil
+}
+
+// goModuleRegexPath returns the emoji pattern file of the Go MFM parser in the
+// module cache, downloading the version this module's go.mod requires.
+//
+// go list -m はモジュールを取得しないので、キャッシュが空の CI (frontend-lint は
+// このモジュールを import するものをビルドしない) では Dir が空になる。go mod
+// download は go.mod の版を取得してから Dir を返す。
+func goModuleRegexPath() (string, error) {
+	// 失敗しても理由は stdout の JSON の Error に出るので、終了状態より先に読む
+	b, runErr := exec.Command("go", "mod", "download", "-json", goModule).Output()
+	var mod struct {
+		Dir   string
+		Error string
+	}
+	if err := json.Unmarshal(b, &mod); err != nil && runErr == nil {
+		return "", fmt.Errorf("download %s: %w", goModule, err)
+	}
+	if mod.Error != "" {
+		return "", fmt.Errorf("download %s: %s", goModule, mod.Error)
+	}
+	if runErr != nil {
+		return "", fmt.Errorf("download %s: %w", goModule, runErr)
+	}
+	if mod.Dir == "" {
+		return "", fmt.Errorf("download %s: no module directory", goModule)
+	}
+	return filepath.Join(mod.Dir, goModuleRegex), nil
 }
 
 // regexSource is the emoji regex of one emoji-data version, as used by one
@@ -111,8 +156,7 @@ const (
 )
 
 // mfm-js の版も snapshot に残す。正規表現が同じでも、写す mfm-js の版が変わったら
-// unicodeEmoji の使い方と期待値 (testdata/emoji_mfmjs.json) を確かめ直す必要が
-// あるので、版が変わったら -check を落とす。
+// unicodeEmoji の使い方と期待値を確かめ直す必要があるので、版が変わったら -check を落とす。
 func (s regexSource) snapshot() []byte {
 	return []byte(snapshotMfmJsHeader + s.mfmjs + "\n" + snapshotHeader + s.version + "\n" + s.source + "\n")
 }

@@ -1,8 +1,8 @@
 // Package hashtag provides hashtag extraction from note text.
 //
 // Misskey TS (mfm-js) は MFM パーサで text を構造化してから hashtag
-// ノードを取り出す。mk-go も同等の MFM パーサ (internal/activitypub/mfm)
-// を持つので、本パッケージはそれに hashtag 抽出を委譲し、note.tags 固有の
+// ノードを取り出す。mk-go も同等の MFM パーサ (github.com/elythia-network/mfm)
+// を使うので、本パッケージはそれに hashtag 抽出を委譲し、note.tags 固有の
 // 正規化 (長さ truncate / 大文字小文字 dedup) だけを担う。連合経由で受け
 // 取る ActivityPub Object には別途 tag 配列が付くので、本パッケージは
 // local note 作成時の text/cw 由来 hashtag だけを担当する。
@@ -12,8 +12,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/elythia-network/elythia/internal/activitypub/mfm"
 	"github.com/elythia-network/elythia/internal/misc/searchnorm"
+	"github.com/elythia-network/mfm"
 )
 
 // MaxUserTags は user.tags に格納する hashtag の最大件数。upstream

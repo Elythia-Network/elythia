@@ -12,7 +12,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const generatedPath = "../../internal/activitypub/mfm/emoji_regex_gen.go"
+// generatedPath returns the emoji pattern file of the Go MFM parser that the
+// build list of this module resolves to.
+func generatedPath(t *testing.T) string {
+	t.Helper()
+	p, err := goModuleRegexPath()
+	require.NoError(t, err)
+	return p
+}
+
+// copyGenerated copies the Go module's emoji pattern file to a writable path.
+func copyGenerated(t *testing.T, dst string) {
+	t.Helper()
+	b, err := os.ReadFile(generatedPath(t))
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(dst, b, 0o644))
+}
 
 func readSnapshot(t *testing.T) regexSource {
 	t.Helper()
@@ -23,10 +38,10 @@ func readSnapshot(t *testing.T) regexSource {
 	return src
 }
 
-// TestGeneratedFileIsUpToDate regenerates the Go file from the committed
-// snapshot of the emoji-data regex and requires it to be byte-identical.
+// TestGeneratedFileIsUpToDate converts the committed snapshot of the frontend's
+// emoji regex and requires the Go module's pattern file to be byte-identical.
 //
-// 生成物を手で直した、あるいは生成ツールを直して作り直し忘れたときにここで落ちる。
+// Go のモジュールだけを上げて、frontend の @elythia-network/mfm (snapshot) が古いままのときにここで落ちる。
 // frontend/ の node_modules が無くても回るように、元の正規表現は snapshot から読む。
 // snapshot 自体 (正規表現と mfm-js / emoji-data の版) が frontend/ の node_modules (@elythia-network/mfm) と一致しているかは `make emoji-regex-check` (CI では frontend workflow の frontend-lint、手元では make frontend-check から呼ぶ) で見る。
 func TestGeneratedFileIsUpToDate(t *testing.T) {
@@ -36,9 +51,9 @@ func TestGeneratedFileIsUpToDate(t *testing.T) {
 	require.True(t, strings.HasPrefix(src.source, `(?:\ud83d\udc68\ud83c\udffb\u200d\u2764\ufe0f\u200d\ud83d\udc8b`), "snapshot does not start with the known first alternative")
 	want, err := generate(src)
 	require.NoError(t, err)
-	got, err := os.ReadFile(generatedPath)
+	got, err := os.ReadFile(generatedPath(t))
 	require.NoError(t, err)
-	assert.True(t, bytes.Equal(want, got), "%s is stale; run `make emoji-regex`", generatedPath)
+	assert.True(t, bytes.Equal(want, got), "%s differs from the snapshot; update the Go module and the frontend's @elythia-network/mfm to the same release", generatedPath(t))
 	assert.Contains(t, string(got), `const emojiDataVersion = "`+src.version+`"`)
 	assert.Contains(t, string(got), `const emojiMfmJsVersion = "`+src.mfmjs+`"`)
 }
@@ -248,17 +263,13 @@ func TestRun_WritesThenChecks(t *testing.T) {
 	root := fakeMisskey(t, frontendMfmPackage, src.mfmjs, src.version, src.source, "y")
 	dir := t.TempDir()
 	out := filepath.Join(dir, "gen.go")
+	copyGenerated(t, out)
 	snap := filepath.Join(dir, "source.txt")
 	args := []string{"-misskey", root, "-out", out, "-snapshot", snap}
 
 	var stdout, stderr bytes.Buffer
 	require.NoError(t, run(args, &stdout, &stderr))
 	assert.Contains(t, stdout.String(), "wrote")
-	got, err := os.ReadFile(out)
-	require.NoError(t, err)
-	want, err := os.ReadFile(generatedPath)
-	require.NoError(t, err)
-	assert.True(t, bytes.Equal(want, got), "generating from the installed package must give the committed file")
 	gotSnap, err := os.ReadFile(snap)
 	require.NoError(t, err)
 	assert.Equal(t, src.snapshot(), gotSnap)
@@ -267,7 +278,7 @@ func TestRun_WritesThenChecks(t *testing.T) {
 	require.NoError(t, run(append(args, "-check"), &stdout, &stderr))
 	assert.Contains(t, stdout.String(), "up to date")
 
-	// 生成物か snapshot のどちらかがずれていたら落とす
+	// Go のモジュールか snapshot のどちらかがずれていたら落とす
 	for _, path := range []string{out, snap} {
 		orig, err := os.ReadFile(path)
 		require.NoError(t, err)
@@ -292,8 +303,33 @@ func TestRun_WritesThenChecks(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "stale")
 
+	// Go のモジュールが追いついていなければ、check でなくても snapshot を書かずに落とす
+	err = run([]string{"-misskey", changed, "-out", out, "-snapshot", snap}, &stdout, &stderr)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "stale")
+	gotSnap, err = os.ReadFile(snap)
+	require.NoError(t, err)
+	assert.Equal(t, src.snapshot(), gotSnap, "the snapshot must not follow a frontend the Go module does not match")
+
 	require.NoError(t, os.Remove(snap))
 	assert.Error(t, run(append(args, "-check"), &stdout, &stderr))
+}
+
+// TestRun_DefaultsToTheGoModule checks that without -out the command compares
+// against the Go module that this module's build list resolves to.
+func TestRun_DefaultsToTheGoModule(t *testing.T) {
+	src := readSnapshot(t)
+	root := fakeMisskey(t, frontendMfmPackage, src.mfmjs, src.version, src.source, "y")
+	snap := filepath.Join(t.TempDir(), "source.txt")
+	require.NoError(t, os.WriteFile(snap, src.snapshot(), 0o644))
+	var stdout, stderr bytes.Buffer
+	require.NoError(t, run([]string{"-misskey", root, "-snapshot", snap, "-check"}, &stdout, &stderr))
+	assert.Contains(t, stdout.String(), "up to date")
+	assert.True(t, strings.HasSuffix(filepath.ToSlash(generatedPath(t)), "/"+goModuleRegex))
+	assert.Contains(t, filepath.ToSlash(generatedPath(t)), "github.com/elythia-network/mfm@")
+
+	changed := fakeMisskey(t, frontendMfmPackage, src.mfmjs, src.version, strings.Replace(src.source, `\ufe0f`, `\ufe0e`, 1), "y")
+	assert.Error(t, run([]string{"-misskey", changed, "-snapshot", snap, "-check"}, &stdout, &stderr))
 }
 
 func TestRun_FailsOnBrokenInstall(t *testing.T) {
@@ -314,10 +350,12 @@ func TestRun_FailsOnBrokenInstall(t *testing.T) {
 	assert.Error(t, run([]string{"-unknown"}, &stdout, &stderr))
 	assert.Error(t, run([]string{"extra"}, &stdout, &stderr))
 
-	// 書き込めない出力先
+	// Go のモジュールの生成物が読めない / snapshot の書き込み先が無い
 	root := fakeMisskey(t, frontendMfmPackage, src.mfmjs, src.version, src.source, "y")
 	assert.Error(t, run([]string{"-misskey", root, "-out", filepath.Join(dir, "missing", "gen.go")}, &stdout, &stderr))
-	assert.Error(t, run([]string{"-misskey", root, "-out", filepath.Join(dir, "gen.go"), "-snapshot", filepath.Join(dir, "missing", "s.txt")}, &stdout, &stderr))
+	gen := filepath.Join(dir, "gen.go")
+	copyGenerated(t, gen)
+	assert.Error(t, run([]string{"-misskey", root, "-out", gen, "-snapshot", filepath.Join(dir, "missing", "s.txt")}, &stdout, &stderr))
 
 	// package.json が JSON でない / 正規表現のファイルが無い
 	for _, file := range []string{"package.json", "built/emoji-regex.gen.js"} {

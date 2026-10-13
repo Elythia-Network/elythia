@@ -13,10 +13,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/elythia-network/elythia/internal/activitypub/mfm"
+	apmfm "github.com/elythia-network/elythia/internal/activitypub/mfm"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/google/uuid"
+
+	"github.com/elythia-network/mfm"
 )
 
 // publishedLayout is the millisecond ISO8601 layout (JS Date.toISOString()) used
@@ -594,7 +596,7 @@ func (r *Renderer) enrichPersonFromProfile(p *Person, profile *model.UserProfile
 	p.MisskeySummary = lenientStringPtr(profile.Description)
 	if profile.Description != nil && *profile.Description != "" {
 		nodes := mfm.Parse(*profile.Description)
-		p.Summary = APLenientString(mfm.ToHTML(nodes, r.host))
+		p.Summary = APLenientString(apmfm.ToHTML(nodes, r.host))
 	}
 	if profile.Birthday != nil && *profile.Birthday != "" {
 		p.VcardBday = APLenientString(*profile.Birthday)
@@ -666,7 +668,7 @@ func (r *Renderer) renderNote(n *model.Note, idGen id.Generator, approvalOf func
 		nodes = mfm.Parse(text)
 		// 本家 ApMfmService.getNoteHtml と同じく、ノートの mentionedRemoteUsers 列を
 		// 渡し、リモートのメンションをその利用者の url (無ければ uri) へリンクする
-		htmlContent = mfm.ToHTMLWithMentions(nodes, r.host, mfm.ParseMentionedRemoteUsers(n.MentionedRemoteUsers))
+		htmlContent = apmfm.ToHTMLWithMentions(nodes, r.host, apmfm.ParseMentionedRemoteUsers(n.MentionedRemoteUsers))
 	}
 
 	out := &Note{
@@ -694,7 +696,7 @@ func (r *Renderer) renderNote(n *model.Note, idGen id.Generator, approvalOf func
 	// noMisskeyContent=false を強制するため、simple text でも必ず source/
 	// _misskey_content を出す (受信 Misskey が raw markdown を失わないように、#1948-11)。
 	hasExtraHTML := quoteURI != ""
-	if text != "" && (hasExtraHTML || !mfm.IsSimple(nodes)) {
+	if text != "" && (hasExtraHTML || !apmfm.IsSimple(nodes)) {
 		out.MisskeyContent = APLenientString(text)
 		out.Source = &Source{
 			Content:   text,
@@ -738,7 +740,7 @@ func (r *Renderer) renderNote(n *model.Note, idGen id.Generator, approvalOf func
 		// 付ける (#1560、upstream ApRendererService.ts:436-441)。class名
 		// `quote-inline` は非 Misskey クライアントの quote 表示に使われる。
 		// エスケープは本家と同じく escapeHtml (`'` は `&#039;`、`"` は `&quot;`)
-		esc := mfm.EscapeHTML(quoteURI)
+		esc := apmfm.EscapeHTML(quoteURI)
 		out.Content += `<br><br><span class="quote-inline">RE: <a href="` + esc + `">` + esc + `</a></span>`
 	}
 
@@ -1810,8 +1812,8 @@ func (r *Renderer) RenderMove(src *model.User, dstURI string) *Move {
 // `content` は mediaType を出していないので AS2 既定の text/html として解釈
 // される。生の本文をそのまま入れると `<script>` や `onerror=` が受信側の
 // content に HTML として載る (chat には入力時のサニタイズも無い)。RenderNote
-// と同じ mfm.Parse -> mfm.ToHTML を通すことで、text ノードは
-// mfm.EscapeHTML (本家の escapeHtml と同じ置き換え) でエスケープされ、MFM は
+// と同じ mfm.Parse -> apmfm.ToHTML を通すことで、text ノードは
+// apmfm.EscapeHTML (本家の escapeHtml と同じ置き換え) でエスケープされ、MFM は
 // ノートの content と同じ HTML になる。
 //
 // **source は常に出す (レビュー M1)。** RenderNote は「標準ノードだけなら
@@ -1825,7 +1827,7 @@ func (r *Renderer) setChatMessageContent(note *Note, text *string) {
 		return
 	}
 	nodes := mfm.Parse(*text)
-	note.Content = mfm.ToHTML(nodes, r.host)
+	note.Content = apmfm.ToHTML(nodes, r.host)
 	note.MisskeyContent = APLenientString(*text)
 	note.Source = &Source{
 		Content:   *text,

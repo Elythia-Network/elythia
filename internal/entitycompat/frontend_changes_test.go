@@ -73,7 +73,6 @@ func TestFrontendChangesStepDetectsRelevantPaths(t *testing.T) {
 		{"new branch push", "push", []string{"docs/ci.md"}, true, "true", 0, false, false},
 		{"manual run", "workflow_dispatch", []string{"docs/ci.md"}, false, "true", 0, false, false},
 		{"emoji regex tool", "pull_request", []string{"tools/emojiregex/testdata/source.txt"}, false, "true", 0, false, false},
-		{"emoji regex output", "pull_request", []string{"internal/activitypub/mfm/emoji_regex_gen.go"}, false, "true", 0, false, false},
 		// 変更の多い PR: 一覧が 64KiB を超えても判定が false に倒れないこと。
 		{"large diff", "pull_request", []string{"frontend/a.ts"}, false, "true", 3000, false, false},
 		{"force-pushed base", "push", []string{"docs/ci.md"}, false, "true", 0, true, false},

@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/elythia-network/elythia/internal/activitypub/mfm"
+	apmfm "github.com/elythia-network/elythia/internal/activitypub/mfm"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/hashtag"
 	"github.com/elythia-network/elythia/internal/misc/id"
@@ -27,6 +27,8 @@ import (
 
 	corechannel "github.com/elythia-network/elythia/internal/core/channel"
 	"github.com/elythia-network/elythia/internal/core/role"
+
+	"github.com/elythia-network/mfm"
 )
 
 // featured ランキング更新の sampling rate / note 年齢上限 (upstream
@@ -1445,7 +1447,7 @@ func (s *CreateService) mentionedRemoteUsersJSON(mentions []string) string {
 			urlByID[p.UserID] = p.URL
 		}
 	}
-	out := make([]mfm.MentionedRemoteUser, 0, len(remoteIDs))
+	out := make([]apmfm.MentionedRemoteUser, 0, len(remoteIDs))
 	for _, id := range mentions {
 		u, ok := byID[id]
 		if !ok {
@@ -1457,7 +1459,7 @@ func (s *CreateService) mentionedRemoteUsersJSON(mentions []string) string {
 		if u.URI != nil {
 			uri = *u.URI
 		}
-		out = append(out, mfm.MentionedRemoteUser{URI: uri, URL: urlByID[id], Username: u.Username, Host: u.Host})
+		out = append(out, apmfm.MentionedRemoteUser{URI: uri, URL: urlByID[id], Username: u.Username, Host: u.Host})
 	}
 	// JSON.stringify と同じく `<` `>` `&` をエスケープしない (url の query に
 	// `&` が入る)。要素は文字列とそのポインタだけなので、Encode は失敗しない

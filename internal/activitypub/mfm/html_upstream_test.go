@@ -1,9 +1,9 @@
 package mfm
 
 import (
-	"strings"
 	"testing"
 
+	mfmparser "github.com/elythia-network/mfm"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -84,7 +84,7 @@ func TestToHTML_MatchesUpstream(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.in, func(t *testing.T) {
-			assert.Equal(t, tc.want, ToHTML(Parse(tc.in), testHost))
+			assert.Equal(t, tc.want, ToHTML(mfmparser.Parse(tc.in), testHost))
 		})
 	}
 }
@@ -95,7 +95,7 @@ func TestToHTML_MatchesUpstream(t *testing.T) {
 // mk-go 同士の chat など、HTML から本文を戻す経路がある。以前の ToHTML は CR を
 // そのまま HTML に残していた。
 func TestToHTML_LineBreaksRoundTrip(t *testing.T) {
-	html := ToHTML(Parse("a\r\nb\rc\nd <plain>**e**</plain>"), testHost)
+	html := ToHTML(mfmparser.Parse("a\r\nb\rc\nd <plain>**e**</plain>"), testHost)
 	assert.Equal(t, "a<br />b<br />c<br />d <span>**e**</span>", html)
 	assert.Equal(t, "a\nb\nc\nd **e**", FromHTML(html))
 }
@@ -107,10 +107,10 @@ func TestToHTML_LineBreaksRoundTrip(t *testing.T) {
 // 本家はノートの HTML を作れずに例外になる。mk-go は配送や描画を止めないよう、
 // 本家の fnDefault と同じ斜体にする (docs/divergence.md)。
 func TestToHTML_RubyWithoutRubyTextIsItalic(t *testing.T) {
-	assert.Equal(t, "<i>base</i>", ToHTML(Parse("$[ruby.rt=x base]"), testHost))
-	assert.Equal(t, "<i><b>a</b></i>", ToHTML(Parse("$[ruby **a**]"), testHost))
-	assert.Equal(t, "<i></i>", ToHTML([]*Node{{Type: NodeFn, Props: map[string]any{"name": "ruby"}}}, testHost))
-	assert.Equal(t, "<i></i>", ToHTML([]*Node{{Type: NodeFn, Props: map[string]any{"name": "unixtime"}}}, testHost))
+	assert.Equal(t, "<i>base</i>", ToHTML(mfmparser.Parse("$[ruby.rt=x base]"), testHost))
+	assert.Equal(t, "<i><b>a</b></i>", ToHTML(mfmparser.Parse("$[ruby **a**]"), testHost))
+	assert.Equal(t, "<i></i>", ToHTML([]*mfmparser.Node{{Type: mfmparser.NodeFn, Props: map[string]any{"name": "ruby"}}}, testHost))
+	assert.Equal(t, "<i></i>", ToHTML([]*mfmparser.Node{{Type: mfmparser.NodeFn, Props: map[string]any{"name": "unixtime"}}}, testHost))
 }
 
 // TestToHTML_RubyTextIsEscaped checks that both parts of the ruby are escaped.
@@ -120,113 +120,31 @@ func TestToHTML_RubyWithoutRubyTextIsItalic(t *testing.T) {
 // ルビは属性ではなく要素の中身に書くので、エスケープが抜けると任意の HTML を
 // 連合先へ送ることになる。
 func TestToHTML_RubyTextIsEscaped(t *testing.T) {
-	one := &Node{Type: NodeFn, Props: map[string]any{"name": "ruby"}, Children: []*Node{Text(`<i>x <b>"'&`)}}
-	assert.Equal(t, "<ruby>&lt;i&gt;x<rp>(</rp><rt>&lt;b&gt;&quot;&#039;&amp;</rt><rp>)</rp></ruby>", ToHTML([]*Node{one}, testHost))
-	two := &Node{Type: NodeFn, Props: map[string]any{"name": "ruby"}, Children: []*Node{Text("<x>"), Text(` <b>"'& `)}}
-	assert.Equal(t, "<ruby>&lt;x&gt;<rp>(</rp><rt>&lt;b&gt;&quot;&#039;&amp;</rt><rp>)</rp></ruby>", ToHTML([]*Node{two}, testHost))
+	one := &mfmparser.Node{Type: mfmparser.NodeFn, Props: map[string]any{"name": "ruby"}, Children: []*mfmparser.Node{mfmparser.Text(`<i>x <b>"'&`)}}
+	assert.Equal(t, "<ruby>&lt;i&gt;x<rp>(</rp><rt>&lt;b&gt;&quot;&#039;&amp;</rt><rp>)</rp></ruby>", ToHTML([]*mfmparser.Node{one}, testHost))
+	two := &mfmparser.Node{Type: mfmparser.NodeFn, Props: map[string]any{"name": "ruby"}, Children: []*mfmparser.Node{mfmparser.Text("<x>"), mfmparser.Text(` <b>"'& `)}}
+	assert.Equal(t, "<ruby>&lt;x&gt;<rp>(</rp><rt>&lt;b&gt;&quot;&#039;&amp;</rt><rp>)</rp></ruby>", ToHTML([]*mfmparser.Node{two}, testHost))
 }
 
 // TestToHTML_MentionHrefFailureIsText checks that a mention whose href cannot
 // be parsed as a URL is written as its acct, as upstream does.
 func TestToHTML_MentionHrefFailureIsText(t *testing.T) {
-	n := &Node{Type: NodeMention, Props: map[string]any{"username": "u", "host": "e.x", "acct": "@u@<e>"}}
+	n := &mfmparser.Node{Type: mfmparser.NodeMention, Props: map[string]any{"username": "u", "host": "e.x", "acct": "@u@<e>"}}
 	broken := "https://e.x:99999/"
 	mentioned := []MentionedRemoteUser{{URI: "https://e.x/u", URL: &broken, Username: "u", Host: &[]string{"e.x"}[0]}}
-	assert.Equal(t, "@u@&lt;e&gt;", ToHTMLWithMentions([]*Node{n}, testHost, mentioned))
+	assert.Equal(t, "@u@&lt;e&gt;", ToHTMLWithMentions([]*mfmparser.Node{n}, testHost, mentioned))
 }
 
 // TestParse_MathBlockMatchesMfmJs fixes the math block to mfm-js 0.26.0
 // (#3329). Expected trees were produced by running mfm-js on each input.
 //
-// mfm-js は開きの直後と閉じの直前の改行を 1 つずつ外すだけで、空白は削らない。
-// 以前の mk-go は TrimSpace で前後の空白をすべて削り、空白だけの中身を数式に
-// しなかった。
-func TestParse_MathBlockMatchesMfmJs(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{"\\[\tx\\]", "mathBlock:\tx"},
-		{"\\[\n\tx \n\\]", "mathBlock:\tx "},
-		{"\\[\n\n x\n\n\\]", "mathBlock:\n x\n"},
-		{"\\[\r\nx\r\n\\]", "mathBlock:x"},
-		{"\\[\rx\r\\]", "mathBlock:x"},
-		{"\\[\n\n\n\\]", "mathBlock:\n"},
-		{"\\[ \\]", "mathBlock: "},
-		{"\\[\n\\]", "text:\\[\n\\]"},
-		{"\\[x\n\n\\]", "mathBlock:x\n"},
-		{"\\[\r\n\r\n\\]", "text:\\[\r\n\r\n\\]"},
-		{"\\[\n\r\n\\]", "text:\\[\n\r\n\\]"},
-		{"a\\[x\\]", "text:a\\[x\\]"},
-		{"\\[x\\]b", "text:\\[x\\]b"},
-		{"a\n\\[x\\]\nb", "text:a|mathBlock:x|text:b"},
-		{"\\[\u3000x\u3000\\]", "mathBlock:\u3000x\u3000"},
-		{"\\[\\]", "text:\\[\\]"},
-		{"\\[x\\]\\]", "text:\\[x\\]\\]"},
-		{"\\[\\]x\\]", "text:\\[\\]x\\]"},
-		{"\\[a\r\\]", "mathBlock:a"},
-		{"\\[a\r\n\n\\]", "mathBlock:a\r\n"},
-		{"\\[\n\nx\\]", "mathBlock:\nx"},
-		{"\\[x\\]\n\n", "mathBlock:x|text:\n"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.in, func(t *testing.T) {
-			assert.Equal(t, tc.want, serializeTreeDetailed(Parse(tc.in)))
-		})
-	}
-}
-
 // TestMathBlock_FallbackMatchesIndex checks that the math block reads the same
 // close with and without the index of closes.
 //
-// 索引を作れないのはメモ表の上限に届いたときだけなので、state を直接作って
-// 索引を使えない状態にする。
-func TestMathBlock_FallbackMatchesIndex(t *testing.T) {
-	inputs := []string{
-		"\\[x\\]", "\\[\nx\n\\]", "\\[\r\nx\r\n\\]", "\\[\rx\r\\]", "\\[\n\\]", "\\[\\]", "\\[x", "\\[ \\]x\\]", "\\[a\r\n\n\\]",
-	}
-	for _, in := range inputs {
-		indexed := newState(in, false)
-		fallback := newState(in, false)
-		fallback.memo.stopsState[stopMathBlockClose] = -1
-		want := indexed.tryMathBlock()
-		got := fallback.tryMathBlock()
-		assert.Equal(t, serializeTreeDetailed(nodesOf(want)), serializeTreeDetailed(nodesOf(got)), "%q", in)
-		assert.Equal(t, indexed.pos, fallback.pos, "%q: position", in)
-		assert.Equal(t, int8(1), indexed.memo.stopsState[stopMathBlockClose], "%q: index not used", in)
-	}
-}
-
-// TestMathBlock_FallbackCountsWork checks that the fallback search for the
-// close counts the bytes it reads against the work budget.
-func TestMathBlock_FallbackCountsWork(t *testing.T) {
-	s := newState(strings.Repeat("\\[a\n", 3000), false)
-	s.memo.stopsState[stopMathBlockClose] = -1
-	mergeText(s.parseNodes(false))
-	assert.True(t, s.budget.exhausted(), "used %d of %d", s.budget.used, s.budget.limit)
-}
-
 // TestParse_CodeBlockLangTrimMatchesMfmJs fixes the trimming of the code
 // block's language name to JavaScript's String.prototype.trim (#3329).
 // Expected trees were produced by running mfm-js on each input.
 //
-// Go の TrimSpace は U+0085 を削り U+FEFF を削らないが、JS の trim は逆。
-func TestParse_CodeBlockLangTrimMatchesMfmJs(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{"```\u0085js\u0085\ncode\n```", "blockCode:\u0085js\u0085:code"},
-		{"```\ufeffjs\ufeff\ncode\n```", "blockCode:js:code"},
-		{"```\u2028js\u2029\ncode\n```", "blockCode:js:code"},
-		{"```\u00a0\ncode\n```", "blockCode::code"},
-		{"```\ufeff\ncode\n```", "blockCode::code"},
-		{"```\u0085\ncode\n```", "blockCode:\u0085:code"},
-		{"```\u1680\u2000\u200a\u202f\u205f\u3000js\u000b\u000c\ncode\n```", "blockCode:js:code"},
-		{"```\u200bjs\ncode\n```", "blockCode:\u200bjs:code"},
-		{"```\u180ejs\ncode\n```", "blockCode:\u180ejs:code"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.in, func(t *testing.T) {
-			assert.Equal(t, tc.want, serializeTreeDetailed(Parse(tc.in)))
-		})
-	}
-}
-
 // TestWhatwgHref fixes whatwgHref to `new URL(x).href` on Node 26.4.0.
 // Expected values were produced by running Node on each input; false means
 // Node throws.

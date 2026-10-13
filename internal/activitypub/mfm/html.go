@@ -1,8 +1,13 @@
+// Package mfm converts between MFM and the HTML of ActivityPub objects. It
+// renders the trees of github.com/elythia-network/mfm as the HTML of
+// Note.content (ToHTML) and reads remote HTML back into MFM text (FromHTML).
 package mfm
 
 import (
 	"fmt"
 	"strings"
+
+	mfmparser "github.com/elythia-network/mfm"
 )
 
 // ToHTML converts MFM nodes to an HTML string without any mentioned remote
@@ -13,7 +18,7 @@ import (
 // 出力は本家 MfmService.toHtml に揃えてある (文字列を連結するだけで、DOM を
 // 通した直列化はしない)。本家で mentionedRemoteUsers を渡さない呼び出し
 // (ApRendererService.renderPerson の summary) はこちらに当たる。
-func ToHTML(nodes []*Node, host string) string {
+func ToHTML(nodes []*mfmparser.Node, host string) string {
 	return ToHTMLWithMentions(nodes, host, nil)
 }
 
@@ -23,7 +28,7 @@ func ToHTML(nodes []*Node, host string) string {
 //
 // 本家はノートの本文 (ApMfmService.getNoteHtml) とフィード (FeedService) で、
 // ノートの mentionedRemoteUsers 列を渡す。
-func ToHTMLWithMentions(nodes []*Node, host string, mentioned []MentionedRemoteUser) string {
+func ToHTMLWithMentions(nodes []*mfmparser.Node, host string, mentioned []MentionedRemoteUser) string {
 	if len(nodes) == 0 {
 		return ""
 	}
@@ -45,7 +50,7 @@ type htmlContext struct {
 // that don't require _misskey_content / source fields.
 // TS版の noMisskeyContent ロジックに対応: text, unicodeEmoji, emojiCode,
 // mention, hashtag, url のみの場合に true を返す。
-func IsSimple(nodes []*Node) bool {
+func IsSimple(nodes []*mfmparser.Node) bool {
 	for _, n := range nodes {
 		if !isSimpleNode(n) {
 			return false
@@ -54,68 +59,68 @@ func IsSimple(nodes []*Node) bool {
 	return true
 }
 
-func isSimpleNode(n *Node) bool {
+func isSimpleNode(n *mfmparser.Node) bool {
 	switch n.Type {
-	case NodeText, NodeUnicodeEmoji, NodeEmojiCode, NodeMention, NodeHashtag, NodeURL:
+	case mfmparser.NodeText, mfmparser.NodeUnicodeEmoji, mfmparser.NodeEmojiCode, mfmparser.NodeMention, mfmparser.NodeHashtag, mfmparser.NodeURL:
 		return true
 	default:
 		return false
 	}
 }
 
-func renderNode(b *strings.Builder, n *Node, hc *htmlContext) {
+func renderNode(b *strings.Builder, n *mfmparser.Node, hc *htmlContext) {
 	switch n.Type {
-	case NodeText:
-		renderText(b, n.textValue())
-	case NodeBold:
+	case mfmparser.NodeText:
+		renderText(b, textOf(n))
+	case mfmparser.NodeBold:
 		b.WriteString("<b>")
 		renderChildren(b, n.Children, hc)
 		b.WriteString("</b>")
-	case NodeItalic:
+	case mfmparser.NodeItalic:
 		b.WriteString("<i>")
 		renderChildren(b, n.Children, hc)
 		b.WriteString("</i>")
-	case NodeStrike:
+	case mfmparser.NodeStrike:
 		b.WriteString("<del>")
 		renderChildren(b, n.Children, hc)
 		b.WriteString("</del>")
-	case NodeSmall:
+	case mfmparser.NodeSmall:
 		b.WriteString("<small>")
 		renderChildren(b, n.Children, hc)
 		b.WriteString("</small>")
-	case NodeCenter:
+	case mfmparser.NodeCenter:
 		b.WriteString(`<div style="text-align: center;">`)
 		renderChildren(b, n.Children, hc)
 		b.WriteString("</div>")
-	case NodePlain:
+	case mfmparser.NodePlain:
 		b.WriteString("<span>")
 		renderChildren(b, n.Children, hc)
 		b.WriteString("</span>")
-	case NodeInlineCode:
+	case mfmparser.NodeInlineCode:
 		code, _ := n.Props["code"].(string)
 		b.WriteString("<code>")
 		b.WriteString(EscapeHTML(code))
 		b.WriteString("</code>")
-	case NodeBlockCode:
+	case mfmparser.NodeBlockCode:
 		code, _ := n.Props["code"].(string)
 		b.WriteString("<pre><code>")
 		b.WriteString(EscapeHTML(code))
 		b.WriteString("</code></pre>")
-	case NodeMathInline:
+	case mfmparser.NodeMathInline:
 		formula, _ := n.Props["formula"].(string)
 		b.WriteString("<code>")
 		b.WriteString(EscapeHTML(formula))
 		b.WriteString("</code>")
-	case NodeMathBlock:
+	case mfmparser.NodeMathBlock:
 		formula, _ := n.Props["formula"].(string)
 		b.WriteString("<pre><code>")
 		b.WriteString(EscapeHTML(formula))
 		b.WriteString("</code></pre>")
-	case NodeQuote:
+	case mfmparser.NodeQuote:
 		b.WriteString("<blockquote>")
 		renderChildren(b, n.Children, hc)
 		b.WriteString("</blockquote>")
-	case NodeSearch:
+	case mfmparser.NodeSearch:
 		// 本家 MfmService.toHtml と同じく、URL は encodeURIComponent 相当でエスケープし、
 		// リンクの文字には query ではなくボタンの語まで含む content を使う。
 		query, _ := n.Props["query"].(string)
@@ -123,7 +128,7 @@ func renderNode(b *strings.Builder, n *Node, hc *htmlContext) {
 		b.WriteString(fmt.Sprintf(`<a href="%s">%s</a>`,
 			EscapeHTML("https://www.google.com/search?q="+encodeURIComponent(query)),
 			EscapeHTML(content)))
-	case NodeURL:
+	case mfmparser.NodeURL:
 		// 本家と同じく href は `new URL(url).href` で正規化し、文字は元の url の
 		// まま出す。URL として読めなければリンクにしない
 		u, _ := n.Props["url"].(string)
@@ -134,7 +139,7 @@ func renderNode(b *strings.Builder, n *Node, hc *htmlContext) {
 		}
 		b.WriteString(fmt.Sprintf(`<a href="%s">%s</a>`,
 			EscapeHTML(href), EscapeHTML(u)))
-	case NodeLink:
+	case mfmparser.NodeLink:
 		// whatwgHref は http / https 以外を失敗にするので、javascript: などの
 		// scheme はリンクにならない (XSS 防止)。失敗は本家と同じく `[文字](url)` の
 		// 文字にする
@@ -151,7 +156,7 @@ func renderNode(b *strings.Builder, n *Node, hc *htmlContext) {
 		b.WriteString(fmt.Sprintf(`<a href="%s">`, EscapeHTML(href)))
 		renderChildren(b, n.Children, hc)
 		b.WriteString("</a>")
-	case NodeMention:
+	case mfmparser.NodeMention:
 		username, _ := n.Props["username"].(string)
 		mentionHost, _ := n.Props["host"].(string)
 		acct, _ := n.Props["acct"].(string)
@@ -162,35 +167,35 @@ func renderNode(b *strings.Builder, n *Node, hc *htmlContext) {
 		}
 		b.WriteString(fmt.Sprintf(`<a href="%s" class="u-url mention">%s</a>`,
 			EscapeHTML(href), EscapeHTML(acct)))
-	case NodeHashtag:
+	case mfmparser.NodeHashtag:
 		// 本家は encodeURIComponent でエスケープする。url.PathEscape は `&` `+` `=`
 		// などを残すので、href が本家と違っていた (#3329)
 		tag, _ := n.Props["hashtag"].(string)
 		b.WriteString(fmt.Sprintf(`<a href="https://%s/tags/%s" rel="tag">#%s</a>`,
 			hc.host, EscapeHTML(encodeURIComponent(tag)), EscapeHTML(tag)))
-	case NodeUnicodeEmoji:
+	case mfmparser.NodeUnicodeEmoji:
 		emoji, _ := n.Props["emoji"].(string)
 		b.WriteString(emoji)
-	case NodeEmojiCode:
+	case mfmparser.NodeEmojiCode:
 		name, _ := n.Props["name"].(string)
 		// ZWSP + :name: + ZWSP (TS版と同じ)
 		b.WriteString("\u200b:")
 		b.WriteString(EscapeHTML(name))
 		b.WriteString(":\u200b")
-	case NodeFn:
+	case mfmparser.NodeFn:
 		renderFn(b, n, hc)
 	}
 }
 
-func renderFn(b *strings.Builder, n *Node, hc *htmlContext) {
+func renderFn(b *strings.Builder, n *mfmparser.Node, hc *htmlContext) {
 	name, _ := n.Props["name"].(string)
 
 	switch name {
 	case "unixtime":
 		// 本家: new Date(parseInt(最初の子の文字, 10) * 1000).toISOString()。
 		// 最初の子が文字でなければ空文字を読んで失敗し、斜体に戻す
-		if len(n.Children) > 0 && n.Children[0].Type == NodeText {
-			if iso, ok := jsUnixtimeISO(n.Children[0].textValue()); ok {
+		if len(n.Children) > 0 && n.Children[0].Type == mfmparser.NodeText {
+			if iso, ok := jsUnixtimeISO(textOf(n.Children[0])); ok {
 				b.WriteString(fmt.Sprintf(`<time datetime="%s">%s</time>`, iso, iso))
 				return
 			}
@@ -216,16 +221,16 @@ func renderFn(b *strings.Builder, n *Node, hc *htmlContext) {
 // 本家は escapeHtml(undefined) で TypeError を投げ、ノートの HTML を作れない。
 // 例外で配送や描画を止めるわけにいかないので、mk-go は斜体に戻す
 // (docs/divergence.md)。
-func renderRuby(b *strings.Builder, n *Node, hc *htmlContext) bool {
+func renderRuby(b *strings.Builder, n *mfmparser.Node, hc *htmlContext) bool {
 	switch len(n.Children) {
 	case 0:
 		return false
 	case 1:
 		child := n.Children[0]
-		if child.Type != NodeText {
+		if child.Type != mfmparser.NodeText {
 			return false
 		}
-		parts := strings.Split(child.textValue(), " ")
+		parts := strings.Split(textOf(child), " ")
 		if len(parts) < 2 {
 			return false
 		}
@@ -238,8 +243,8 @@ func renderRuby(b *strings.Builder, n *Node, hc *htmlContext) bool {
 	}
 	last := n.Children[len(n.Children)-1]
 	rt := ""
-	if last.Type == NodeText {
-		rt = last.textValue()
+	if last.Type == mfmparser.NodeText {
+		rt = textOf(last)
 	}
 	b.WriteString("<ruby>")
 	renderChildren(b, n.Children[:len(n.Children)-1], hc)
@@ -283,7 +288,7 @@ var htmlEscaper = strings.NewReplacer(
 // エスケープの表記を本家に揃えるため、本家と同じ置き換えにする。
 func EscapeHTML(s string) string { return htmlEscaper.Replace(s) }
 
-func renderChildren(b *strings.Builder, children []*Node, hc *htmlContext) {
+func renderChildren(b *strings.Builder, children []*mfmparser.Node, hc *htmlContext) {
 	for _, c := range children {
 		renderNode(b, c, hc)
 	}
@@ -325,4 +330,10 @@ func isURIComponentUnreserved(c byte) bool {
 		return true
 	}
 	return false
+}
+
+// textOf returns the "text" prop of n, or "" when n has none.
+func textOf(n *mfmparser.Node) string {
+	s, _ := n.Props["text"].(string)
+	return s
 }

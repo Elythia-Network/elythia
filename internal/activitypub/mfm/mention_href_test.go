@@ -3,6 +3,7 @@ package mfm
 import (
 	"testing"
 
+	mfmparser "github.com/elythia-network/mfm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -50,7 +51,7 @@ func TestToHTMLWithMentions_MatchesUpstream(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, ToHTMLWithMentions(Parse(tc.in), testHost, tc.mentioned))
+			assert.Equal(t, tc.want, ToHTMLWithMentions(mfmparser.Parse(tc.in), testHost, tc.mentioned))
 		})
 	}
 }
@@ -66,14 +67,14 @@ func TestToHTMLWithMentions_NonHTTPURLIsText(t *testing.T) {
 	js := "javascript:alert(1)"
 	host := "remote.example"
 	mentioned := []MentionedRemoteUser{{URI: "https://remote.example/users/1", URL: &js, Username: "bob", Host: &host}}
-	assert.Equal(t, "@bob@remote.example", ToHTMLWithMentions(Parse("@bob@remote.example"), testHost, mentioned))
+	assert.Equal(t, "@bob@remote.example", ToHTMLWithMentions(mfmparser.Parse("@bob@remote.example"), testHost, mentioned))
 }
 
 // TestToHTML_IgnoresMentionedUsers checks that ToHTML links every mention to
 // this server, like upstream calls without mentionedRemoteUsers.
 func TestToHTML_IgnoresMentionedUsers(t *testing.T) {
 	assert.Equal(t, `<a href="https://example.com/@bob@remote.example" class="u-url mention">@bob@remote.example</a>`,
-		ToHTML(Parse("@bob@remote.example"), testHost))
+		ToHTML(mfmparser.Parse("@bob@remote.example"), testHost))
 	assert.Empty(t, ToHTMLWithMentions(nil, testHost, nil))
 }
 
