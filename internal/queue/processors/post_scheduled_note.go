@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+	"unicode/utf8"
 
 	"github.com/elythia-network/elythia/internal/core/note"
 	"github.com/elythia-network/elythia/internal/core/notification"
@@ -225,6 +226,9 @@ func (p *PostScheduledNoteProcessor) Handle(ctx context.Context, task driver.Tas
 	// として scheduledNotePostFailed を通知する。upstream も Date で表せない期限は
 	// fetchAndCreate が落ちて同じ通知になる (#3443)。lock を取った後で扱うため、
 	// ここでは控えるだけ。
+	// 本文と CW の長さも同じく publish 失敗として扱う。drafts/create・update は
+	// 本家と同じ上限で弾くが、それより前に保存された下書きは検査を通っていない。
+	inputErr := scheduledContentErr(draft.Text, draft.CW)
 	var pollErr error
 	if draft.HasPoll {
 		pollInput := &note.PollInput{
@@ -264,8 +268,11 @@ func (p *PostScheduledNoteProcessor) Handle(ctx context.Context, task driver.Tas
 		}
 	}
 	var publishedNote *model.Note
-	if pollErr != nil {
-		err = pollErr
+	if inputErr == nil {
+		inputErr = pollErr
+	}
+	if inputErr != nil {
+		err = inputErr
 	} else {
 		publishedNote, err = p.publisher.Create(in)
 	}
@@ -305,6 +312,25 @@ func (p *PostScheduledNoteProcessor) Handle(ctx context.Context, task driver.Tas
 		// TTL 内の再発火は silent skip になる。log のみ。
 		slog.Warn("scheduled note draft delete failed",
 			"noteDraftId", payload.NoteDraftID, "err", err)
+	}
+	return nil
+}
+
+// Upstream MAX_NOTE_TEXT_LENGTH and the cw limit of notes/create and
+// notes/drafts/create.
+const (
+	scheduledNoteTextMax = 3000
+	scheduledNoteCWMax   = 100
+)
+
+// scheduledContentErr reports a draft whose text or cw is longer than
+// notes/create accepts.
+func scheduledContentErr(text, cw *string) error {
+	if text != nil && utf8.RuneCountInString(*text) > scheduledNoteTextMax {
+		return errors.New("scheduled note text is too long")
+	}
+	if cw != nil && utf8.RuneCountInString(*cw) > scheduledNoteCWMax {
+		return errors.New("scheduled note cw is too long")
 	}
 	return nil
 }

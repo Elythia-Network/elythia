@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -572,3 +573,45 @@ func TestPostScheduledNote_NoNotifierConfigured(t *testing.T) {
 	require.NoError(t, p.Handle(context.Background(), taskFor("d1")))
 	assert.Len(t, pub.calls, 1)
 }
+
+// A draft saved before drafts/create and update checked lengths can still be
+// scheduled. Its text or cw over the notes/create limits is a publish failure:
+// notify scheduledNotePostFailed and do not publish.
+func TestPostScheduledNote_ContentOverLimit(t *testing.T) {
+	cases := map[string]struct {
+		text, cw *string
+		fail     bool
+	}{
+		"text at the limit": {text: ptr(strings.Repeat("あ", 3000)), fail: false},
+		"text over":         {text: ptr(strings.Repeat("あ", 3001)), fail: true},
+		"cw at the limit":   {text: ptr("x"), cw: ptr(strings.Repeat("あ", 100)), fail: false},
+		"cw over":           {text: ptr("x"), cw: ptr(strings.Repeat("あ", 101)), fail: true},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			scheduledAt := timeFromMs(1234)
+			drafts := map[string]*model.NoteDraft{
+				"d1": {
+					ID: "d1", UserID: "u1", Visibility: "public", Text: tc.text, CW: tc.cw,
+					IsActuallyScheduled: true, ScheduledAt: &scheduledAt,
+				},
+			}
+			p, dr, pub := newProcessor(drafts, map[string]*model.User{"u1": {ID: "u1"}})
+			notif := &stubNotifier{}
+			p.SetNotifier(notif)
+
+			require.NoError(t, p.Handle(context.Background(), taskFor("d1")), "publish 失敗は retry しない")
+			require.Len(t, notif.calls, 1)
+			if !tc.fail {
+				assert.Len(t, pub.calls, 1)
+				assert.Equal(t, notification.TypeScheduledNotePosted, notif.calls[0].Type)
+				return
+			}
+			assert.Empty(t, pub.calls, "長すぎる下書きは publish しない")
+			assert.Equal(t, notification.TypeScheduledNotePostFailed, notif.calls[0].Type)
+			assert.Empty(t, dr.deleted, "失敗した draft は消さない")
+		})
+	}
+}
+
+func ptr(s string) *string { return &s }
