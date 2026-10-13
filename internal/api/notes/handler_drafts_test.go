@@ -1210,3 +1210,97 @@ func TestThreadMutingCreate_ExistsDBFailureIsNot4xx(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "INTERNAL_ERROR")
 	assert.Contains(t, rec.Body.String(), `"kind":"server"`)
 }
+
+// draftLengthCases are the upstream drafts/create.ts / update.ts paramDef
+// length limits, each at the boundary: the last accepted value and the first
+// rejected one.
+func draftLengthCases() []struct {
+	name   string
+	params string
+	ok     bool
+} {
+	q := func(s string) string { return strconv.Quote(s) }
+	choices := func(n int, s string) string {
+		parts := make([]string, n)
+		for i := range parts {
+			parts[i] = q(s + strconv.Itoa(i))
+		}
+		return `{"choices":[` + strings.Join(parts, ",") + `]}`
+	}
+	ids := func(n int) string {
+		parts := make([]string, n)
+		for i := range parts {
+			parts[i] = q("f" + strconv.Itoa(i))
+		}
+		return "[" + strings.Join(parts, ",") + "]"
+	}
+	return []struct {
+		name   string
+		params string
+		ok     bool
+	}{
+		// 上限は rune で数える (あ は 1 文字)
+		{"text at the limit", `"text":` + q(strings.Repeat("あ", maxNoteTextLength)), true},
+		{"text over the limit", `"text":` + q(strings.Repeat("あ", maxNoteTextLength+1)), false},
+		{"cw at the limit", `"cw":` + q(strings.Repeat("あ", 100)), true},
+		{"cw over the limit", `"cw":` + q(strings.Repeat("あ", 101)), false},
+		{"empty cw", `"cw":""`, false},
+		{"null cw", `"cw":null`, true},
+		{"hashtag at the limit", `"hashtag":` + q(strings.Repeat("あ", 200)), true},
+		{"hashtag over the limit", `"hashtag":` + q(strings.Repeat("あ", 201)), false},
+		{"files at the limit", `"fileIds":` + ids(16), true},
+		{"too many files", `"fileIds":` + ids(17), false},
+		{"poll choices at the limit", `"poll":` + choices(10, strings.Repeat("あ", 49)), true},
+		{"too many poll choices", `"poll":` + choices(11, "c"), false},
+		{"poll choice too long", `"poll":` + choices(2, strings.Repeat("あ", 50)), false},
+		{"empty poll choice", `"poll":{"choices":["a",""]}`, false},
+	}
+}
+
+// TestDraftsCreate_LengthLimits checks that drafts/create rejects what upstream
+// paramDef rejects, before saving anything.
+func TestDraftsCreate_LengthLimits(t *testing.T) {
+	for _, tc := range draftLengthCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			h, repo := newDraftHandlerWithRepo()
+			rec := postDraft(h.DraftsCreate, `{`+tc.params+`}`, &model.User{ID: "u1"})
+			if !tc.ok {
+				assert.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+				assert.Contains(t, rec.Body.String(), "INVALID_PARAM")
+				assert.Empty(t, repo.drafts, "rejected drafts are not saved")
+				return
+			}
+			// 長さの検査を通ったものは、他の検査 (ファイルの所有など) の前に落ちない
+			assert.NotContains(t, rec.Body.String(), "INVALID_PARAM")
+		})
+	}
+}
+
+// TestDraftsUpdate_LengthLimits checks the same limits on drafts/update,
+// leaving the draft unchanged when rejected.
+func TestDraftsUpdate_LengthLimits(t *testing.T) {
+	for _, tc := range draftLengthCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			h, repo := newDraftHandlerWithRepo()
+			text := "old"
+			repo.drafts["d1"] = &model.NoteDraft{ID: "d1", UserID: "u1", Text: &text, Visibility: "public"}
+			rec := postDraft(h.DraftsUpdate, `{"draftId":"d1",`+tc.params+`}`, &model.User{ID: "u1"})
+			if !tc.ok {
+				assert.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+				assert.Contains(t, rec.Body.String(), "INVALID_PARAM")
+				assert.Equal(t, "old", *repo.drafts["d1"].Text, "rejected updates leave the draft unchanged")
+				return
+			}
+			assert.NotContains(t, rec.Body.String(), "INVALID_PARAM")
+		})
+	}
+}
+
+// The length limits come before the draft lookup on update, as upstream
+// paramDef is checked before the endpoint runs.
+func TestDraftsUpdate_LengthLimitsBeforeLookup(t *testing.T) {
+	h, _ := newDraftHandlerWithRepo()
+	rec := postDraft(h.DraftsUpdate, `{"draftId":"missing","text":`+strconv.Quote(strings.Repeat("a", maxNoteTextLength+1))+`}`, &model.User{ID: "u1"})
+	assert.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "INVALID_PARAM")
+}
