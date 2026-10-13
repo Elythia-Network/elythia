@@ -289,9 +289,23 @@ misskey-project` は upstream Misskey の著作権表示なので、Elythia 自�
 **fork frontend (`frontend/`) は別。** 本体へ取り込んだ後も、上流の SPDX ヘッダーは
 そのまま残す。消すのは §4 の「既存の告知をそのまま残す」に反する。AGPL 管轄
 ディレクトリへ新規ファイルを足すときも、`frontend/scripts/check-spdx.mjs`
-(CI の `frontend` workflow が回す) が落とすのでヘッダーが要る。`tools/pluginbuild`
-が生成する `server-plugins.generated.ts` がヘッダーを持つのも同じ理由で、あれは
-Go 側の方針の例外ではなく `frontend/` 側の要件。
+(CI の `frontend` workflow が回す) が落とすのでヘッダーが要る。
+
+新しく書くファイルのヘッダーは、上流の名義ではなく Elythia の名義にする (#3533)。
+理由は上の Go の場合と同じで、上流の行を付けると帰属が逆になる。
+
+```
+SPDX-FileCopyrightText: Elythia-Network
+SPDX-License-Identifier: AGPL-3.0-only
+```
+
+上流から移したコードを含むファイルは、上流の `SPDX-FileCopyrightText` の行を残し、
+Elythia-Network の `SPDX-FileCopyrightText` の行を足す (著作権の行が 2 行、
+ライセンスの行が 1 行になる)。`check-spdx.mjs --fix` が足すヘッダーと、`tools/pluginbuild`
+が生成する `server-plugins.generated.ts` のヘッダーも Elythia-Network
+の名義になっている。検査はライセンスの行 (または上流の著作権の行) があれば通すので、
+名義を変えても落ちない。生成物がヘッダーを持つのは Go 側の方針の例外ではなく、
+`frontend/` 側の要件。
 
 ## 変更の経緯 (旧 CLAUDE.md の更新記録)
 
