@@ -445,6 +445,7 @@ func TestPgRestoreReportsStderr(t *testing.T) {
 			gotProgram, gotArgs, gotEnv = program, args, env
 			b, _ := io.ReadAll(stdin)
 			assert.Equal(t, "x", string(b))
+			_, _ = stderr.Write([]byte("pg_restore: error: COPY failed for table \"t\": ERROR:  invalid input syntax for type uuid: \"SECRET-ROW\"\nCONTEXT:  COPY t, line 1: \"SECRET-ROW\"\n"))
 			_, _ = stderr.Write(bytes.Repeat([]byte("e"), 70<<10))
 			return errors.New("exit status 1")
 		},
@@ -454,8 +455,11 @@ func TestPgRestoreReportsStderr(t *testing.T) {
 	assert.Equal(t, "pg_restore", gotProgram)
 	assert.Equal(t, []string{"--exit-on-error", "--single-transaction", "--no-owner", "--no-privileges", "--dbname", "dbname=target"}, gotArgs)
 	assert.Equal(t, []string{"PGPASSWORD=p"}, gotEnv)
-	// stderr は先頭の 64 KiB だけを残す。
-	assert.Len(t, strings.TrimPrefix(err.Error(), "backup: pg_restore: exit status 1: "), 64<<10)
+	// エラーの文面 (journal や通知へ出る) には、プログラムの文言だけを残し、行の値は
+	// 出さない。全文はこのホストのログにだけ残す。
+	assert.Contains(t, err.Error(), "invalid input syntax for type uuid")
+	assert.NotContains(t, err.Error(), "SECRET-ROW")
+	assert.LessOrEqual(t, len(strings.TrimPrefix(err.Error(), "backup: pg_restore: exit status 1: ")), redactStderrMax+3)
 
 	r.PgRestore = "/usr/local/bin/pg_restore"
 	_ = r.pgRestore(context.Background(), "target", dump)

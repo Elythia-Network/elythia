@@ -1181,7 +1181,9 @@ func (r *Restorer) pgRestore(ctx context.Context, dbname, dump string) error {
 	var stderr bytes.Buffer
 	r.logf("running pg_restore into %s", dbname)
 	if err := run(ctx, program, args, env, f, io.Discard, &limitedWriter{w: &stderr, n: 64 << 10}); err != nil {
-		return fmt.Errorf("backup: pg_restore: %w: %s", err, strings.TrimSpace(stderr.String()))
+		full := strings.TrimSpace(stderr.String())
+		logProgramFailure("pg_restore", err, full)
+		return fmt.Errorf("backup: pg_restore: %w: %s", err, redactStderr(full))
 	}
 	return nil
 }

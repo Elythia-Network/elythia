@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -75,8 +77,102 @@ type ProgramError struct {
 	Stderr string
 }
 
+// Error reports the failure with the program's own messages only (see
+// redactStderr); the whole output stays in Stderr.
 func (e *ProgramError) Error() string {
-	return fmt.Sprintf("%s exited with status %d: %s", e.Program, e.ExitCode, e.Stderr)
+	return fmt.Sprintf("%s exited with status %d: %s", e.Program, e.ExitCode, redactStderr(e.Stderr))
+}
+
+// stderrPrefixes are the line prefixes redactStderr keeps.
+var stderrPrefixes = []string{
+	"pg_restore:", "pg_dump:", "initdb:", "pg_ctl:", "psql:",
+	"ERROR:", "FATAL:", "PANIC:", "WARNING:",
+}
+
+// programDetailLine reports whether line is a `<program>: detail:` or
+// `<program>: hint:` line.
+func programDetailLine(line string) bool {
+	_, rest, ok := strings.Cut(line, ": ")
+	return ok && (strings.HasPrefix(rest, "detail:") || strings.HasPrefix(rest, "hint:"))
+}
+
+// redactStderrMax bounds what redactStderr returns.
+const redactStderrMax = 4 << 10
+
+// redactStderr keeps the lines of a PostgreSQL program's standard error that
+// carry the program's own messages and the server's primary messages, with
+// double-quoted parts removed.
+//
+// **エラーの文面は、保存先・Redis・通知へ出ていく。** verify.json (dump を暗号化
+// していても平文で保存先に置く)、リストアの journal (Redis に 7 日)、失敗の通知
+// (外部の Webhook) に入る。DETAIL / CONTEXT / "Command was:" (続く行の SQL も
+// 含む) と、ERROR の行の引用符の中には、戻している行の値 (秘密鍵や token の列) が
+// 出る (`COPY user_keypair, line 1, column ...: "..."`、`invalid input syntax ...:
+// "..."`)。全文はこのホストのログにだけ残す (logProgramFailure)。
+func redactStderr(stderr string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(stderr, "\n") {
+		line = strings.TrimSpace(line)
+		keep := false
+		for _, p := range stderrPrefixes {
+			if strings.HasPrefix(line, p) {
+				keep = true
+				break
+			}
+		}
+		// プログラムの detail / hint の行 (PG15 以降の pg_restore は失敗した SQL を
+		// `pg_restore: detail: Command was: ...` の形で出す) も落とす。
+		if !keep || strings.Contains(line, "Command was:") || programDetailLine(line) {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteString("; ")
+		}
+		b.WriteString(strings.Join(strings.Fields(cutAtQuote(line)), " "))
+		if b.Len() >= redactStderrMax {
+			break
+		}
+	}
+	out := b.String()
+	if len(out) > redactStderrMax {
+		out = out[:redactStderrMax] + "..."
+	}
+	return out
+}
+
+// cutAtQuote drops the value a PostgreSQL message carries (the `: "..."` at
+// the end of `invalid input syntax for type ...: "<value>"` and the like) and
+// then the remaining double-quoted parts.
+//
+// 引用符の対で出入りを切り替えるだけ (stripQuoted) だと、値の中の `"` を
+// PostgreSQL が逃がさないので、`a"SECRET"b` のような値の中身が外へ残る。値は
+// `: "` の後ろに来るので、そこから後ろは丸ごと落とす。表の名前などの識別子は
+// その前にあり、従来どおり引用符の中だけを落とす。全文はログに残る。
+func cutAtQuote(line string) string {
+	if i := strings.Index(line, `: "`); i >= 0 {
+		line = line[:i+1]
+	}
+	return stripQuoted(line)
+}
+
+// logProgramFailure records the whole standard error of a failed program in
+// this host's log, where the operator can read the details redactStderr
+// leaves out of what is stored and sent.
+func logProgramFailure(program string, err error, stderr string) {
+	slog.Warn("backup: program failed", "program", program, "err", err, "stderr", clipLogged(stderr))
+}
+
+// clipLogged keeps the head and the tail of a long standard error.
+//
+// 先頭も残す。pg_restore --exit-on-error は最初のエラーの行を先頭に出し、続けて
+// 失敗した SQL の全文 (大きな関数や view の定義) を出すので、末尾だけだと
+// 肝心のエラーの行が落ちる。
+func clipLogged(stderr string) string {
+	const half = 8 << 10
+	if len(stderr) <= 2*half {
+		return stderr
+	}
+	return stderr[:half] + "\n... (" + strconv.Itoa(len(stderr)-2*half) + " bytes omitted) ...\n" + stderr[len(stderr)-half:]
 }
 
 // SpaceReporter is implemented by sandboxes that can tell how much space is
@@ -138,6 +234,7 @@ func (s LocalSandbox) Run(ctx context.Context, cmd SandboxCmd) error {
 	c.Stderr = &stderr
 	if err := c.Run(); err != nil {
 		msg := strings.TrimSpace(stderr.String())
+		logProgramFailure(cmd.Program, err, msg)
 		// 126 / 127 は sh や docker exec が「実行できない / 見つからない」に使う番号で、
 		// プログラム自身の失敗ではない。シグナルで止まったもの (-1) も同じ扱い。
 		var exitErr *exec.ExitError
@@ -146,7 +243,7 @@ func (s LocalSandbox) Run(ctx context.Context, cmd SandboxCmd) error {
 				return &ProgramError{Program: cmd.Program, ExitCode: code, Stderr: msg}
 			}
 		}
-		return fmt.Errorf("%s: %w: %s", cmd.Program, err, msg)
+		return fmt.Errorf("%s: %w: %s", cmd.Program, err, redactStderr(msg))
 	}
 	return nil
 }
