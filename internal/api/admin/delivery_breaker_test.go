@@ -119,3 +119,27 @@ func TestFederationCloseDeliveryBreaker_NoBreaker(t *testing.T) {
 	rec := doPost(h.FederationCloseDeliveryBreaker, `{"host":"x.example"}`, adminUser)
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 }
+
+// ブレーカーを手で閉じたらモデレーションログに残すこと (配送を再開させる書き込み)。
+func TestFederationCloseDeliveryBreaker_WritesModerationLog(t *testing.T) {
+	h, _, _, _ := newTestHandler(t)
+	h.SetDeliveryBreaker(&stubBreaker{})
+	repo := attachModLog(t, h)
+	rec := doPost(h.FederationCloseDeliveryBreaker, `{"host":"Down.Example"}`, adminUser)
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	require.Eventually(t, func() bool { return len(repo.Snapshot()) == 1 }, 500*time.Millisecond, 5*time.Millisecond)
+	logs := repo.Snapshot()
+	assert.Equal(t, "closeDeliveryBreaker", logs[0].Type)
+	var info map[string]any
+	require.NoError(t, json.Unmarshal(logs[0].Info, &info))
+	assert.Equal(t, "down.example", info["host"], "閉じた (正規化した) ホストを残す")
+
+	// 閉じられなかったら残さない。
+	h2, _, _, _ := newTestHandler(t)
+	h2.SetDeliveryBreaker(&stubBreaker{closeErr: errors.New("redis down")})
+	repo2 := attachModLog(t, h2)
+	rec = doPost(h2.FederationCloseDeliveryBreaker, `{"host":"down.example"}`, adminUser)
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
+	time.Sleep(50 * time.Millisecond)
+	assert.Empty(t, repo2.Snapshot())
+}

@@ -70,6 +70,9 @@ func TestLogTypeValues(t *testing.T) {
 		{LogRestoreBackup, "restoreBackup"},
 		{LogRollbackBackup, "rollbackBackup"},
 		{LogListKeptDatabases, "listKeptDatabases"},
+		{LogCloseDeliveryBreaker, "closeDeliveryBreaker"},
+		{LogApproveSignupApplication, "approveSignupApplication"},
+		{LogRejectSignupApplication, "rejectSignupApplication"},
 	}
 	for _, tc := range cases {
 		if string(tc.got) != tc.want {

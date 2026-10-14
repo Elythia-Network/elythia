@@ -169,6 +169,15 @@ const (
 	// 退避した DB の一覧 (#3463 (6d)、admin/backup/restore/candidates)。listBackups と
 	// 同じく閲覧も残す。本体が書く。info は {databaseCount}。
 	LogListKeptDatabases LogType = "listKeptDatabases"
+	// 配送のブレーカーを手で閉じた (#3048 の admin/federation/close-delivery-breaker)。
+	// info は {host}。止まっていた配送を再開させる書き込みなので、誰がいつどの
+	// ホストへの配送を戻したかを残す。
+	LogCloseDeliveryBreaker LogType = "closeDeliveryBreaker"
+	// 承認制の登録 (#2555) の審査。info は {applicationId}。承認は登録
+	// (registration_ticket の発行) につながるので、申請の行の processedById だけで
+	// なく、他の操作と同じ時系列に残す。
+	LogApproveSignupApplication LogType = "approveSignupApplication"
+	LogRejectSignupApplication  LogType = "rejectSignupApplication"
 )
 
 // UserInfo builds the standard {userId, userUsername, userHost} info
