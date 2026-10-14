@@ -43,8 +43,11 @@ func (p *Processor) SetChatRoomReceiver(r ChatRoomReceiver) {
 // 以前の id 引きは room が無くても no-op で成功していたので、この経路は
 // 無かった。生で返すと、取り込んでいない room への Accept / Reject が retry を
 // 使い切って dead になる。
+//
+// 満員 (ErrRoomFull) も送り直しで直らない (空いたら相手が承諾し直す)。招待を
+// 作る側と同じく受け取って捨てる。
 func nonRetryableChatRoomErr(err error) error {
-	if errors.Is(err, corechat.ErrNotFound) || errors.Is(err, corechat.ErrInvalidTarget) {
+	if errors.Is(err, corechat.ErrNotFound) || errors.Is(err, corechat.ErrInvalidTarget) || errors.Is(err, corechat.ErrRoomFull) {
 		return ErrUnsupportedActivity
 	}
 	return err

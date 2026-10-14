@@ -1308,6 +1308,11 @@ func reactionErr(c echo.Context, err error, noSuchMessageID string) error {
 	if errors.Is(err, corechat.ErrMessageAccess) {
 		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_MESSAGE", "No such message.", noSuchMessageID))
 	}
+	// upstream は絵文字でないリアクションを素の Error で投げて 500 になるが、
+	// 利用者の入力の誤りなので 400 にする。
+	if errors.Is(err, corechat.ErrInvalidReaction) {
+		return apierr.JSONInvalidParam(c)
+	}
 	return apierr.JSONInternalError(c)
 }
 
@@ -1465,10 +1470,29 @@ func (h *Handler) InvitationsAccept(c echo.Context) error {
 		return c.NoContent(http.StatusNoContent)
 	}
 	// メンバーシップを作成して招待を消費する。
-	m := &model.ChatRoomMembership{
-		ID: h.idGen.Generate(time.Now()), UserID: user.ID, RoomID: req.RoomID,
+	//
+	// **人数の上限を rooms/join と同じく見る。** 招待の作成は今の人数しか数えない
+	// (未承諾の招待は数えない) ので、ここで見ないと、上限の近い room で招待を
+	// 並べるだけで 50 人を超えて参加させられた。upstream に承諾の口は無く、参加は
+	// rooms/join (人数を数える) だけ。満員は rooms/join と同じ応答にし、招待は
+	// 残す (空いたら承諾できる)。
+	if _, merr := h.repo.FindMembership(user.ID, req.RoomID); merr != nil {
+		// **DB 障害を「まだメンバーでない」に丸めない** (#2792)。
+		if !repository.IsNotFound(merr) {
+			return apierr.JSONInternalError(c)
+		}
+		members, lerr := h.repo.ListMembersByRoom(req.RoomID)
+		if lerr != nil {
+			return apierr.JSONInternalError(c)
+		}
+		if len(members) >= maxRoomMembers {
+			return apierr.JSONInternalError(c) // 'room is full'
+		}
+		m := &model.ChatRoomMembership{
+			ID: h.idGen.Generate(time.Now()), UserID: user.ID, RoomID: req.RoomID,
+		}
+		_ = h.repo.CreateMembership(m)
 	}
-	_ = h.repo.CreateMembership(m)
 	_ = h.repo.DeleteInvitation(inv.ID)
 	// remote room の招待なら Accept を owner へ配送する (#1205)。local room は
 	// service 側で no-op。
