@@ -263,6 +263,7 @@ DBに拡張(pg_bigmなど)を入れているときは、このホストのPostgr
 | Elythiaとして読めるか | `usable` | 戻したDBの管理表(`schema_migrations`、あれば`schema_migrations_local`)がdirtyでなく、このバイナリの同梱のmigrationの最大番号より進んでいない。管理表の値が`meta.json`の`migrations`と一致する。`elythia fsck`と同じ検査が流れる |
 
 - 使い捨てのPostgreSQLは、`meta.json`の`databaseLocale`と同じencodingとlocaleで`initdb`する。一時ディレクトリのunix socketだけで待ち受け、TCPを開かない
+- **dumpはsuperuserで戻さない。** 使い捨てのPostgreSQLの中にsuperuserでないrole `elythia_verify`と、それが持つDB `elythia_verify`を作り、そこへそのroleで戻す。戻した後の行数の数え上げと`fsck`の検査も同じroleで行う。確かめるだけの処理(daemonの起動時や取った直後にも自動で流れる)に、保存先から読んだ中身へサーバー側の強い権限を渡さないため。**これが守るのは確かめる処理だけである。** 本番へ戻す(`backup restore`)ときは、設定のDBの利用者(superuserのこともある)でdumpを流す。`verify.json`も保存先に置かれ、署名は無い。そのため、保存先に書ける者は戻したときに本番のDBで動くものを置ける。保存先への書き込みの権限は、本番のDBへの権限と同じ重さで扱う。dumpが使う拡張(`meta.json`の`extensions`のうち`public`にあるもの)は、戻す前にsuperuserで`public`へ作っておく
 - 使い捨てのPostgreSQLとそのデータは、通っても通らなくても止めて消す。復号したdumpを置く一時ファイルも消す
 - 一時ディレクトリの空きは下の「一時ディレクトリの空き」
 - `rowCounts`が空の`meta.json`は、突き合わせが何も検査せずに通ってしまうので、`restorable`を失敗にする
@@ -614,7 +615,7 @@ ID                STATUS    SIZE  ENCRYPTED  VERIFIED  ELYTHIA  MIGRATION
 
 **進み具合(`status`)は、本体では認証しない。** 戻したDBに準備をしたセッションが無いと(準備をした後にサインインした場合など)、本体の認証が401で断り、画面が進み具合を読めなくなるため。画面はセッションのtokenを`i`ではなく`session`で送り、daemonが準備のときのticketとtokenのhashで照合する。誰の要求でもdaemonまで届くので、本体は接続元ごとに1分60回までにし(`enableIpRateLimit`が有効なとき。メンテナンス中の転送も同じ枠を数える)、daemonは`opId`の形が違えばRedisを読まずに断る。戻した後は、ほかの画面を開くとサインインし直すよう求められることがある。サインインし直すと別のセッションになるので、その戻す操作の進み具合は画面では読めない。daemonのログ(`backup: restore`の行)で確かめる。
 
-**再認証は、確定・中止も含めて常にdaemonが行う。** 本体で照合すると、同じTOTPのコードを本体とdaemonで二重に消費して落ちるため。daemonは照合のたびに本体のDBへ短い接続を張って閉じ(`application_name`は`elythia-backup/auth/...`)、名前を入れ替えている間は照合しない。照合は同時に2つまでで、超えたものは待たずに429で断る。メンテナンス中(ほかの操作のものも含む)は、準備・確定・中止を再認証の前に断る。取る・確かめるが走っている間の準備も、再認証の前に`BACKUP_SERVICE_BUSY`で断る(TOTPのコードを使わせない)。準備・確定・中止は1つずつ受け、重なったものは`BACKUP_SERVICE_BUSY`で断る。メンテナンス中に本体が転送するのは、進み具合・確定・中止だけ(準備は転送しない)。条件は[認証](#認証)と同じで、失敗の数え方(`passwordguard`)とTOTPの使い回しの記録も本体と同じRedisに置く。本体が動いている間は、本体も前段で管理者とブラウザのtokenかどうかを見る(`status`を除く)。
+**再認証は、確定・中止も含めて常にdaemonが行う。** 本体で照合すると、同じTOTPのコードを本体とdaemonで二重に消費して落ちるため。daemonは照合のたびに本体のDBへ短い接続を張って閉じ(`application_name`は`elythia-backup/auth/...`)、名前を入れ替えている間は照合しない。照合は同時に2つまでで、超えたものは待たずに429で断る。メンテナンス中(ほかの操作のものも含む)は、準備・確定・中止を再認証の前に断る。取る・確かめるが走っている間の準備も、再認証の前に`BACKUP_SERVICE_BUSY`で断る(TOTPのコードを使わせない)。準備・確定・中止は1つずつ受け、重なったものは`BACKUP_SERVICE_BUSY`で断る。メンテナンス中に本体が転送するのは、進み具合だけ(準備・確定・中止は、daemonがメンテナンス中は必ず断るので転送しない)。条件は[認証](#認証)と同じで、失敗の数え方(`passwordguard`)とTOTPの使い回しの記録も本体と同じRedisに置く。本体が動いている間は、本体も前段で管理者とブラウザのtokenかどうかを見る(`status`を除く)。
 
 **途中でdaemonが止まったら**、起動し直したときに、Redisに残した記録(`<prefix>elythia:maintenance:restore:<opId>`)と`pg_database`の名前の組から、どこまで進んだかを決める。daemonを止めた(SIGTERMなど)ことは失敗として扱わず、記録を最後に書いた段のまま残して、起動し直したときに続きを決める。段の記録を書けなかったとき(Redisの瞬断など)も、メンテナンスの段の切り替えや名前の入れ替えの前で止まり、同じく起動し直したときに続きを決める。メンテナンスに入れる要求が失敗したときは状態を読み直し、書けていれば抜けてから中止する。
 
