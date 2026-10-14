@@ -39,6 +39,26 @@ const ServiceAuthChallenge = `Bearer realm="elythia-backup"`
 // idServiceUnreachable is returned when the backup service cannot be reached.
 const idServiceUnreachable = "1d3f5b9a-27c4-4e60-9f0e-6a8b2c4d7e19"
 
+// IDRestoreUnavailable is the error ID of RESTORE_UNAVAILABLE, shared by the
+// backup service and the status forward.
+const IDRestoreUnavailable = "515b8e48-8f90-439a-bd56-2bdd4d8870a5"
+
+// opStatus is the progress of a restore, which the server does not
+// authenticate.
+const opStatus = "status"
+
+// statusUnavailable answers a status request the service cannot serve.
+//
+// **status は誰でも送れるので、読めない理由を分けて返さない。** 未設定 (400)、
+// daemon に届かない (502)、daemon が Redis を読めない (503) を分けて返すと、匿名で
+// 「バックアップのサービスが止まっている時間帯」を外から観測できた。画面はどれも
+// 「今は読めない」として読み直すだけなので、同じ 503 にする。理由は本体と daemon の
+// ログに残る。
+func statusUnavailable(w http.ResponseWriter) {
+	writeJSONBody(w, http.StatusServiceUnavailable, apierr.ErrorWithKind("RESTORE_UNAVAILABLE",
+		"The restore status cannot be read now. Please try again later.", IDRestoreUnavailable, apierr.KindServer))
+}
+
 // forwardTimeout bounds one forwarded request. 準備の検査 (保存先の meta.json、
 // DB の権限) を含むので、取る・確かめるの受け付けより長くする。
 const forwardTimeout = time.Minute
@@ -91,6 +111,10 @@ func (f *Forwarder) Serve(w http.ResponseWriter, r *http.Request, op, clientIP s
 		return
 	}
 	if !f.Configured() {
+		if op == opStatus {
+			statusUnavailable(w)
+			return
+		}
 		writeJSONBody(w, http.StatusBadRequest, apierr.Error("BACKUP_SERVICE_NOT_CONFIGURED",
 			"The backup service is not configured.", idServiceNotConfigured))
 		return
@@ -134,7 +158,7 @@ func (f *Forwarder) Serve(w http.ResponseWriter, r *http.Request, op, clientIP s
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, f.base+"/restore/"+op, bytes.NewReader(out))
 	if err != nil {
-		f.unreachable(w, err)
+		f.unreachable(w, op, err)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -148,13 +172,13 @@ func (f *Forwarder) Serve(w http.ResponseWriter, r *http.Request, op, clientIP s
 	}
 	res, err := f.client.Do(req)
 	if err != nil {
-		f.unreachable(w, err)
+		f.unreachable(w, op, err)
 		return
 	}
 	defer func() { _ = res.Body.Close() }()
 	data, err := io.ReadAll(io.LimitReader(res.Body, forwardResponseLimit+1))
 	if err != nil || len(data) > forwardResponseLimit {
-		f.unreachable(w, err)
+		f.unreachable(w, op, err)
 		return
 	}
 	if res.StatusCode == http.StatusUnauthorized && res.Header.Get("WWW-Authenticate") == ServiceAuthChallenge {
@@ -163,7 +187,11 @@ func (f *Forwarder) Serve(w http.ResponseWriter, r *http.Request, op, clientIP s
 		// 利用者の token が無いときの daemon の 401 (CREDENTIAL_REQUIRED) は、この
 		// ヘッダーを付けないので、そのまま返す。
 		slog.Error("admin/backup: the backup service refused the service token; check backup.server.serviceToken")
-		f.unreachable(w, nil)
+		f.unreachable(w, op, nil)
+		return
+	}
+	if op == opStatus && res.StatusCode >= http.StatusInternalServerError {
+		statusUnavailable(w)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
@@ -179,9 +207,13 @@ func (f *Forwarder) Serve(w http.ResponseWriter, r *http.Request, op, clientIP s
 	_, _ = w.Write(data)
 }
 
-func (f *Forwarder) unreachable(w http.ResponseWriter, err error) {
+func (f *Forwarder) unreachable(w http.ResponseWriter, op string, err error) {
 	if err != nil {
 		slog.Warn("admin/backup: cannot reach the backup service", "err", err)
+	}
+	if op == opStatus {
+		statusUnavailable(w)
+		return
 	}
 	writeJSONBody(w, http.StatusBadGateway, apierr.ErrorWithKind("BACKUP_SERVICE_UNREACHABLE",
 		"The backup service cannot be reached.", idServiceUnreachable, apierr.KindServer))

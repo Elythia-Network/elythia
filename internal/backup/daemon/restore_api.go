@@ -84,7 +84,7 @@ const restoreBodyLimit = 64 << 10
 
 // Error IDs of the restore. Elythia-only.
 const (
-	idRestoreUnavailable = "515b8e48-8f90-439a-bd56-2bdd4d8870a5"
+	idRestoreUnavailable = adminbackup.IDRestoreUnavailable
 	idRestoreBusy        = "46984259-1ce4-4d04-99fe-e366432cdbed"
 	idNotVerified        = "cccb6a55-05b4-4554-89c8-910abde07062"
 	idMaintenanceActive  = "373d46b6-1629-48e5-8548-ecead3ab39b8"

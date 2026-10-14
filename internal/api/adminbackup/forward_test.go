@@ -155,7 +155,7 @@ func TestForwarder_RelaysEmptyAndErrorResponses(t *testing.T) {
 
 	// daemon が serviceToken を断ったのは設定の食い違い。401 のままだと画面がサインアウトする。
 	srv, _ = fakeService(t, http.StatusUnauthorized, `{"error":"unauthorized"}`, map[string]string{"WWW-Authenticate": ServiceAuthChallenge})
-	rec = forward(NewForwarder(srv.URL, "wrong", nil), "status", `{}`, nil)
+	rec = forward(NewForwarder(srv.URL, "wrong", nil), "confirm", `{}`, nil)
 	assert.Equal(t, http.StatusBadGateway, rec.Code)
 	assert.Contains(t, rec.Body.String(), "BACKUP_SERVICE_UNREACHABLE")
 	// 利用者の token が無いという daemon の 401 は、設定の食い違いではないのでそのまま返す。
@@ -165,17 +165,45 @@ func TestForwarder_RelaysEmptyAndErrorResponses(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "CREDENTIAL_REQUIRED")
 
 	srv, _ = fakeService(t, http.StatusOK, strings.Repeat("x", forwardResponseLimit+1), nil)
-	rec = forward(NewForwarder(srv.URL, "svc", nil), "status", `{}`, nil)
+	rec = forward(NewForwarder(srv.URL, "svc", nil), "confirm", `{}`, nil)
 	assert.Equal(t, http.StatusBadGateway, rec.Code)
+}
+
+// 本体で認証しない status は、読めない理由 (未設定・daemon に届かない・daemon が
+// Redis を読めない・serviceToken の食い違い) を分けずに同じ 503 で返すこと。
+// 分けると、匿名で「バックアップのサービスが止まっている時間帯」を観測できた。
+// 画面はどれも読み直すだけなので、困らない。
+func TestForwarder_StatusFailuresLookTheSame(t *testing.T) {
+	want := func(t *testing.T, rec *httptest.ResponseRecorder, what string) {
+		t.Helper()
+		assert.Equal(t, http.StatusServiceUnavailable, rec.Code, what)
+		assert.JSONEq(t, `{"error":{"code":"RESTORE_UNAVAILABLE","id":"`+IDRestoreUnavailable+`","kind":"server","message":"The restore status cannot be read now. Please try again later."}}`, rec.Body.String(), what)
+	}
+	want(t, forward(NewForwarder("", "", nil), "status", `{}`, nil), "not configured")
+	want(t, forward(NewForwarder("http://127.0.0.1:1", "svc", nil), "status", `{}`, nil), "unreachable")
+	srv, _ := fakeService(t, http.StatusServiceUnavailable, `{"error":{"code":"RESTORE_UNAVAILABLE","message":"cannot read Redis"}}`, nil)
+	want(t, forward(NewForwarder(srv.URL, "svc", nil), "status", `{}`, nil), "the service cannot read Redis")
+	srv, _ = fakeService(t, http.StatusUnauthorized, `{"error":"unauthorized"}`, map[string]string{"WWW-Authenticate": ServiceAuthChallenge})
+	want(t, forward(NewForwarder(srv.URL, "wrong", nil), "status", `{}`, nil), "service token refused")
+
+	// 届いた daemon の判断 (操作が無い、ticket が合わない) は、そのまま返す
+	// (画面はこれで読み直しをやめる)。
+	srv, _ = fakeService(t, http.StatusNotFound, `{"error":{"code":"NO_SUCH_RESTORE"}}`, nil)
+	rec := forward(NewForwarder(srv.URL, "svc", nil), "status", `{}`, nil)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Contains(t, rec.Body.String(), "NO_SUCH_RESTORE")
+	// 認証する操作は、従来どおり理由を返す。
+	rec = forward(NewForwarder("", "", nil), "prepare", `{}`, nil)
+	assert.Contains(t, rec.Body.String(), "BACKUP_SERVICE_NOT_CONFIGURED")
 }
 
 func TestForwarder_Refusals(t *testing.T) {
 	srv, seen := fakeService(t, http.StatusOK, `{}`, nil)
 	f := NewForwarder(srv.URL, "svc", nil)
-	rec := forward(NewForwarder("", "", nil), "status", `{}`, nil)
+	rec := forward(NewForwarder("", "", nil), "prepare", `{}`, nil)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "BACKUP_SERVICE_NOT_CONFIGURED")
-	rec = forward(NewForwarder(srv.URL, "", nil), "status", `{}`, nil)
+	rec = forward(NewForwarder(srv.URL, "", nil), "prepare", `{}`, nil)
 	assert.Contains(t, rec.Body.String(), "BACKUP_SERVICE_NOT_CONFIGURED", "no token, nothing is sent")
 
 	rec = forward(f, "drop", `{}`, nil)
@@ -197,8 +225,8 @@ func TestForwarder_Refusals(t *testing.T) {
 	assert.Empty(t, *seen, "nothing invalid reaches the service")
 
 	unreachable := NewForwarder("http://127.0.0.1:1", "svc", nil)
-	rec = forward(unreachable, "status", `{}`, nil)
+	rec = forward(unreachable, "confirm", `{}`, nil)
 	assert.Equal(t, http.StatusBadGateway, rec.Code)
-	rec = forward(NewForwarder("http://[::1", "svc", nil), "status", `{}`, nil)
+	rec = forward(NewForwarder("http://[::1", "svc", nil), "confirm", `{}`, nil)
 	assert.Equal(t, http.StatusBadGateway, rec.Code)
 }
