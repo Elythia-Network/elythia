@@ -78,7 +78,9 @@ func (h *Handler) Create(c echo.Context) error {
 	now := time.Now()
 
 	policies := h.policies(user.ID)
-	if invLimit, ok := role.PolicyNumber(policies["inviteLimit"]); ok && invLimit > 0 {
+	// upstream は `if (policies.inviteLimit)` (0 は falsy で上限なし) の中で
+	// `count >= inviteLimit` を見るので、負の値は「作れない」になる。
+	if invLimit, ok := role.PolicyNumber(policies["inviteLimit"]); ok && invLimit != 0 {
 		// **`time.Duration(f) * time.Minute` と書かない。** Duration への変換で
 		// 小数が切り捨てられてから掛かるので 0.5 分が 0 になる (#2613)。
 		cycle := time.Duration(0)
@@ -284,7 +286,9 @@ func (h *Handler) Limit(c echo.Context) error {
 	user := middleware.GetUser(c)
 	policies := h.policies(user.ID)
 	invLimit, hasLimit := role.PolicyNumber(policies["inviteLimit"])
-	if !hasLimit || invLimit <= 0 {
+	// 負の値は falsy ではないので数えて 0 を返す (upstream と同じ。invite/create も
+	// 負の値では作れない)。null を返すと、画面には無制限と出るのに作れない。
+	if !hasLimit || invLimit == 0 {
 		return c.JSON(http.StatusOK, map[string]any{"remaining": nil})
 	}
 	cycle := time.Duration(0)

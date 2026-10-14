@@ -139,7 +139,8 @@ func (h *Handler) DraftsCreate(c echo.Context) error {
 	// 配線済 (timeline gate と共用)。CountByUser で current 件数を取得。
 	if h.policyProvider != nil {
 		policies := h.policyProvider.GetUserPolicies(user.ID)
-		if limit, ok := role.PolicyNumber(policies["noteDraftLimit"]); ok && limit >= 0 {
+		// 負の値は upstream と同じく「1 件も作れない」になる (`count >= limit` が常に真)。
+		if limit, ok := role.PolicyNumber(policies["noteDraftLimit"]); ok {
 			count, err := h.draftRepo.CountByUser(user.ID)
 			if err != nil {
 				return apierr.JSONInternalError(c)
@@ -151,7 +152,8 @@ func (h *Handler) DraftsCreate(c echo.Context) error {
 		// scheduledNoteLimit gate (#1040)。isActuallyScheduled draft の数を
 		// 集計して上限と比較する。upstream `NoteDraftService.create` と同 logic。
 		if req.IsActuallyScheduled {
-			if limit, ok := role.PolicyNumber(policies["scheduledNoteLimit"]); ok && limit >= 0 {
+			// 負の値は upstream と同じく「1 件も作れない」になる (`count >= limit` が常に真)。
+			if limit, ok := role.PolicyNumber(policies["scheduledNoteLimit"]); ok {
 				count, err := h.draftRepo.CountScheduledByUser(user.ID)
 				if err != nil {
 					return apierr.JSONInternalError(c)
@@ -334,6 +336,20 @@ func (h *Handler) DraftsUpdate(c echo.Context) error {
 		scheduleChanged = true
 	}
 	if req.IsActuallyScheduled != nil {
+		// **予約していない下書きを予約にするときも scheduledNoteLimit を見る**
+		// (upstream NoteDraftService.update)。見ないと、予約していない下書きを
+		// 作ってから更新で予約にするだけで、上限を超えて予約できた。
+		if *req.IsActuallyScheduled && !draft.IsActuallyScheduled && h.policyProvider != nil {
+			if limit, ok := role.PolicyNumber(h.policyProvider.GetUserPolicies(user.ID)["scheduledNoteLimit"]); ok {
+				count, err := h.draftRepo.CountScheduledByUser(user.ID)
+				if err != nil {
+					return apierr.JSONInternalError(c)
+				}
+				if float64(count) >= limit {
+					return c.JSON(http.StatusBadRequest, apierr.Error("TOO_MANY_SCHEDULED_NOTES", "You cannot create scheduled notes any more.", "02f5df79-08ae-4a33-8524-f1503c8f6212"))
+				}
+			}
+		}
 		draft.IsActuallyScheduled = *req.IsActuallyScheduled
 		scheduleChanged = true
 	}

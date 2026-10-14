@@ -69,7 +69,8 @@ func (h *Handler) ListsCreateFromPublic(c echo.Context) error {
 	}
 	// userListLimit gate (TOO_MANY_USERLISTS)。
 	if h.rolePolicyProvider != nil {
-		if limit, ok := role.PolicyNumber(h.rolePolicyProvider.GetUserPolicies(viewer.ID)["userListLimit"]); ok && limit >= 0 {
+		// 負の値は upstream と同じく「1 件も作れない」になる (`count >= limit` が常に真)。
+		if limit, ok := role.PolicyNumber(h.rolePolicyProvider.GetUserPolicies(viewer.ID)["userListLimit"]); ok {
 			count, cerr := h.userListRepo.CountByUser(viewer.ID)
 			if cerr != nil {
 				return apierr.JSONInternalError(c)
@@ -94,12 +95,11 @@ func (h *Handler) ListsCreateFromPublic(c echo.Context) error {
 		// list 自体は既に作成済みなので、メンバーコピー失敗時も新 list を返す。
 		return c.JSON(http.StatusOK, entity.PackUserList(newList, nil, h.idGen))
 	}
-	// member 上限 (userEachUserListsLimit)。-1 は無制限扱い。
-	memberLimit := -1.0
+	// member 上限 (userEachUserListsLimit)。ポリシーが無いときだけ上限なし。
+	// 負の値は upstream (addMember の `count >= limit`) と同じく 1 人も足せない。
+	memberLimit, hasMemberLimit := 0.0, false
 	if h.rolePolicyProvider != nil {
-		if l, ok := role.PolicyNumber(h.rolePolicyProvider.GetUserPolicies(viewer.ID)["userEachUserListsLimit"]); ok {
-			memberLimit = l
-		}
+		memberLimit, hasMemberLimit = role.PolicyNumber(h.rolePolicyProvider.GetUserPolicies(viewer.ID)["userEachUserListsLimit"])
 	}
 	memberIDs := make([]string, 0, len(members))
 	var remoteMembers []string
@@ -125,7 +125,7 @@ func (h *Handler) ListsCreateFromPublic(c echo.Context) error {
 			}
 		}
 		// TOO_MANY_USERS: member 上限に達したら中断 (upstream addMember の TooManyUsersError)。
-		if memberLimit >= 0 && float64(len(memberIDs)) >= memberLimit {
+		if hasMemberLimit && float64(len(memberIDs)) >= memberLimit {
 			return c.JSON(http.StatusBadRequest, apierr.Error("TOO_MANY_USERS", "You can not push users any more.", "1845ea77-38d1-426e-8e4e-8b83b24f5bd7"))
 		}
 		mb := &model.UserListMembership{

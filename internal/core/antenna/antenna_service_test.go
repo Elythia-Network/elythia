@@ -1644,3 +1644,19 @@ func TestRemoveNote_LegacyStreamIsNoOp(t *testing.T) {
 
 	assert.NoError(t, svc.RemoveNote("u1", "a-rml", "x"))
 }
+
+// negLimitPolicy reports a fixed antennaLimit.
+type negLimitPolicy struct{ limit float64 }
+
+func (p negLimitPolicy) GetUserPolicies(string) map[string]any {
+	return map[string]any{"antennaLimit": p.limit}
+}
+
+// 負の antennaLimit は upstream と同じく「1 件も作れない」こと (上限なしにしない)。
+func TestCreate_NegativeAntennaLimitDenies(t *testing.T) {
+	svc, repo := newSvc(t)
+	svc.SetRolePolicyProvider(negLimitPolicy{limit: -1})
+	_, err := svc.Create(CreateInput{OwnerID: "u1", Name: "alpha", Src: "home"})
+	require.ErrorIs(t, err, ErrTooManyAntennas)
+	assert.Empty(t, repo.Antennas)
+}

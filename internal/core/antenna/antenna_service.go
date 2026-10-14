@@ -260,7 +260,8 @@ func (s *Service) Create(in CreateInput) (*model.Antenna, error) {
 	if s.rolePolicyProvider != nil {
 		// float のまま比較する。int に丸めると 0.5 が 0 になり、`>= 0` の
 		// ガードは通っても上限が 0 になって挙動が変わる (#2613)。
-		if limit, ok := role.PolicyNumber(s.rolePolicyProvider.GetUserPolicies(in.OwnerID)["antennaLimit"]); ok && limit >= 0 {
+		// 負の値は upstream と同じく「1 件も作れない」になる (`count >= limit` が常に真)。
+		if limit, ok := role.PolicyNumber(s.rolePolicyProvider.GetUserPolicies(in.OwnerID)["antennaLimit"]); ok {
 			count, err := s.repo.CountByUser(in.OwnerID)
 			if err != nil {
 				return nil, err

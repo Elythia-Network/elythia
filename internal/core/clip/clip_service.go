@@ -99,7 +99,8 @@ func (s *Service) Create(in CreateInput) (*model.Clip, error) {
 	}
 	// clipLimit role policy gate (#1029)。
 	if s.rolePolicyProvider != nil {
-		if limit, ok := role.PolicyNumber(s.rolePolicyProvider.GetUserPolicies(in.OwnerID)["clipLimit"]); ok && limit >= 0 {
+		// 負の値は upstream と同じく「1 件も作れない」になる (`count >= limit` が常に真)。
+		if limit, ok := role.PolicyNumber(s.rolePolicyProvider.GetUserPolicies(in.OwnerID)["clipLimit"]); ok {
 			count, err := s.repo.CountByUser(in.OwnerID)
 			if err != nil {
 				return nil, err
@@ -276,7 +277,8 @@ func (s *Service) AddNote(ownerID, clipID, noteID string) error {
 	// owner の policy で評価する (clip 自体は owner-only mutation なので
 	// ownerID と一致する)。
 	if s.rolePolicyProvider != nil {
-		if limit, ok := role.PolicyNumber(s.rolePolicyProvider.GetUserPolicies(ownerID)["noteEachClipsLimit"]); ok && limit >= 0 {
+		// 負の値は upstream と同じく「1 件も作れない」になる (`count >= limit` が常に真)。
+		if limit, ok := role.PolicyNumber(s.rolePolicyProvider.GetUserPolicies(ownerID)["noteEachClipsLimit"]); ok {
 			count, err := s.noteRepo.CountByClip(clipID)
 			if err != nil {
 				return err

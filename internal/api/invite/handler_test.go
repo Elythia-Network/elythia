@@ -518,6 +518,18 @@ func TestLimit_UnlimitedWhenInviteLimitZero(t *testing.T) {
 	assert.Nil(t, out["remaining"], "policy 0 は falsy で null = 無制限")
 }
 
+// 負の inviteLimit は falsy ではないので、数えて 0 を返すこと (upstream と同じ)。
+// null (無制限) を返すと、作れないのに画面には無制限と出る。
+func TestLimit_NegativeInviteLimitIsZero(t *testing.T) {
+	h, _ := newTestHandler(t)
+	h.SetRolePolicyProvider(&stubInvitePolicy{policies: map[string]any{"inviteLimit": -1, "inviteLimitCycle": 60}})
+	rec := post(h.Limit, `{}`, &model.User{ID: "u1"})
+	require.Equal(t, http.StatusOK, rec.Code)
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
+	assert.Equal(t, float64(0), out["remaining"])
+}
+
 func TestLimit_ReturnsRemaining(t *testing.T) {
 	h, repo := newTestHandler(t)
 	user := "u1"
@@ -721,4 +733,15 @@ func TestDelete_LookupFailureIsNot204(t *testing.T) {
 	h := NewHandler(&findErrRepo{testutil.NewMockRegistrationTicketRepository()}, idGen)
 	rec := post(h.Delete, `{"inviteId":"t1"}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusInternalServerError, rec.Code, "DB 障害を 204 に潰さない")
+}
+
+// 負の inviteLimit は「作れない」こと。0 は upstream と同じく上限なし (上のテスト)。
+func TestCreate_NegativeLimitDenies(t *testing.T) {
+	h, repo := newTestHandler(t)
+	h.SetRolePolicyProvider(&stubInvitePolicy{policies: map[string]any{
+		"inviteLimit": -1,
+	}})
+	rec := post(h.Create, `{}`, &model.User{ID: "u1"})
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Empty(t, repo.Tickets)
 }
