@@ -636,3 +636,13 @@ func TestFilesCreateChunkedAppend_DoesNotReadPastTheSessionChunkSize(t *testing.
 	assert.LessOrEqual(t, seen.read, apiChunkSize+1,
 		"セッションの上限を超えて読んでいる (読んだのは %d バイト)", seen.read)
 }
+
+// 保存できない文字 (NUL) を含む comment は 400 にすること (drive/files/create と同じ)。
+// 500 になっていた。
+func TestFilesCreateChunkedStart_CommentWithNUL(t *testing.T) {
+	h, _, _ := newChunkedHandler(t)
+	c, rec := newJSONReq(t, `{"name":"video.bin","size":10485760,"comment":"a\u0000b"}`)
+	setUser(c, "u1")
+	require.NoError(t, h.FilesCreateChunkedStart(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+}

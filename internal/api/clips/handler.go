@@ -15,6 +15,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/notesfilter"
 	"github.com/elythia-network/elythia/internal/core/ugcvisibility"
 	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/misc/colfit"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
@@ -193,7 +194,8 @@ const (
 // name が nil の場合 (update の未指定) は検査しない。
 func validateClipParams(name *string, description **string) bool {
 	if name != nil {
-		if n := len([]rune(*name)); n < 1 || n > clipNameMaxLength {
+		// NUL と不正な UTF-8 は保存できない (SQLSTATE 22021 で 500 になっていた)。
+		if n := len([]rune(*name)); n < 1 || n > clipNameMaxLength || !colfit.Storable(*name) {
 			return false
 		}
 	}
@@ -201,7 +203,7 @@ func validateClipParams(name *string, description **string) bool {
 		if *(*description) == "" {
 			// 空文字は null に正規化して保存する (#1562)
 			*description = nil
-		} else if len([]rune(**description)) > clipDescriptionMaxLength {
+		} else if !colfit.Fits(**description, clipDescriptionMaxLength) {
 			return false
 		}
 	}

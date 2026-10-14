@@ -8,6 +8,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/misc/colfit"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
@@ -53,7 +54,7 @@ func (h *Handler) ListsCreateFromPublic(c echo.Context) error {
 		return apierr.JSONInvalidParam(c)
 	}
 	// upstream paramDef: name minLength:1 (=空チェック) / maxLength:100。
-	if utf8.RuneCountInString(req.Name) > 100 {
+	if !colfit.Fits(req.Name, 100) {
 		return apierr.JSONInvalidParam(c)
 	}
 	if h.userListRepo == nil {
@@ -258,7 +259,7 @@ func (h *Handler) ListsUpdate(c echo.Context) error {
 	// upstream update.ts は name を minLength:1/maxLength:100 で validate する。
 	// name は optional だが、渡されたら検証する (空文字や 100 超は INVALID_PARAM、#1550)。
 	if req.Name != nil {
-		if rc := utf8.RuneCountInString(*req.Name); rc < 1 || rc > 100 {
+		if rc := utf8.RuneCountInString(*req.Name); rc < 1 || rc > 100 || !colfit.Storable(*req.Name) {
 			return apierr.JSONInvalidParam(c)
 		}
 	}

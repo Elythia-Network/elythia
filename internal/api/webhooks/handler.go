@@ -7,6 +7,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/optional"
 	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/misc/colfit"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
@@ -122,11 +123,15 @@ func (h *Handler) Create(c echo.Context) error {
 	if !validateOnArray(req.On) {
 		return apierr.JSONInvalidParam(c)
 	}
+	if !webhookFieldsFit(req.Name, req.URL, req.Secret) {
+		return apierr.JSONInvalidParam(c)
+	}
 
 	// webhookLimit role policy gate (#1029)。policy 経由で取得した上限と
 	// 現在保有数を比較。provider 未配線 / policy 不在は gate skip。
 	if h.rolePolicyProvider != nil {
-		if limit, ok := role.PolicyNumber(h.rolePolicyProvider.GetUserPolicies(user.ID)["webhookLimit"]); ok && limit >= 0 {
+		// 負の値は upstream と同じく「1 件も作れない」になる (`count >= limit` が常に真)。
+		if limit, ok := role.PolicyNumber(h.rolePolicyProvider.GetUserPolicies(user.ID)["webhookLimit"]); ok {
 			count, err := h.repo.CountByUserID(user.ID)
 			if err != nil {
 				return apierr.JSONInternalError(c)
@@ -204,6 +209,13 @@ func (h *Handler) Update(c echo.Context) error {
 		return apierr.JSONInvalidParam(c)
 	}
 	if !validateOnArray(req.On) {
+		return apierr.JSONInvalidParam(c)
+	}
+	secret := ""
+	if req.Secret.Present && req.Secret.Value != nil {
+		secret = *req.Secret.Value
+	}
+	if !webhookFieldsFit(req.Name, req.URL, secret) {
 		return apierr.JSONInvalidParam(c)
 	}
 
@@ -337,3 +349,13 @@ func (h *Handler) Test(c echo.Context) error {
 // 未配線だと `webhookLimit` が効かず、webhook を無制限に作れる。起動時検査に
 // 使う (#2683)。
 func (h *Handler) HasRolePolicyProvider() bool { return h.rolePolicyProvider != nil }
+
+// webhookFieldsFit enforces the upstream paramDef maxLength of i/webhooks
+// create / update (name 100, url 1024, secret 1024) and rejects characters
+// PostgreSQL cannot store.
+//
+// 検査が無く、長い値や NUL は INSERT / UPDATE が SQLSTATE 22001 / 22021 で落ちて
+// 500 になっていた。空の値 (update の「変えない」) は通す。
+func webhookFieldsFit(name, url, secret string) bool {
+	return colfit.Fits(name, 100) && colfit.Fits(url, 1024) && colfit.Fits(secret, 1024)
+}

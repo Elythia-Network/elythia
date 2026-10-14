@@ -793,3 +793,35 @@ func TestDelete_ListNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "NO_SUCH_LIST")
 }
+
+// 負の userListLimit / userEachUserListsLimit は「作れない / 足せない」こと。
+func TestCreateAndPush_NegativeLimitsDeny(t *testing.T) {
+	h, repo := newTestHandler(t)
+	h.SetRolePolicyProvider(&stubRolePolicyProvider{policies: map[string]any{
+		"userListLimit":          -1,
+		"userEachUserListsLimit": -1,
+	}})
+	rec := doPost(h.Create, `{"name":"My List"}`, &model.User{ID: "u1"})
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "TOO_MANY_USERLISTS")
+
+	repo.Lists["l1"] = &model.UserList{ID: "l1", UserID: "u1"}
+	rec = doPost(h.Push, `{"listId":"l1","userId":"u_c"}`, &model.User{ID: "u1"})
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "TOO_MANY_USERS")
+}
+
+// 名前は upstream と同じく 100 文字まで。保存できない文字 (NUL) も 400 にする
+// (どちらも検査が無く 500 になっていた)。
+func TestCreate_NameValidation(t *testing.T) {
+	for _, body := range []string{`{"name":"a\u0000b"}`, `{"name":"` + strings.Repeat("n", 101) + `"}`} {
+		h, repo := newTestHandler(t)
+		rec := doPost(h.Create, body, &model.User{ID: "u1"})
+		assert.Equal(t, http.StatusBadRequest, rec.Code, body)
+		assert.Empty(t, repo.Lists)
+	}
+	h, repo := newTestHandler(t)
+	rec := doPost(h.Create, `{"name":"`+strings.Repeat("n", 100)+`"}`, &model.User{ID: "u1"})
+	assert.Equal(t, http.StatusOK, rec.Code, "100 文字ちょうどは通る")
+	assert.Len(t, repo.Lists, 1)
+}

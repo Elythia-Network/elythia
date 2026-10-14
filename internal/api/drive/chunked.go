@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	coredrive "github.com/elythia-network/elythia/internal/core/drive"
+	"github.com/elythia-network/elythia/internal/misc/colfit"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/labstack/echo/v4"
 )
@@ -67,7 +67,9 @@ func (h *Handler) FilesCreateChunkedStart(c echo.Context) error {
 	} else if !coredrive.ValidateFileName(name) {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_FILE_NAME", "Invalid file name.", "f449b209-0c60-4e51-84d5-29486263bfd4"))
 	}
-	if req.Comment != nil && utf8.RuneCountInString(*req.Comment) > maxDriveCommentLength {
+	// drive/files/create と同じく NUL と不正な UTF-8 も落とす (SQLSTATE 22021 で
+	// 500 になっていた)。
+	if req.Comment != nil && !colfit.Fits(*req.Comment, maxDriveCommentLength) {
 		return apierr.JSONInvalidParam(c)
 	}
 

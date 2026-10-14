@@ -21,6 +21,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/translate"
 	"github.com/elythia-network/elythia/internal/core/ugcvisibility"
 	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/misc/colfit"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/queue"
@@ -558,11 +559,14 @@ const maxNoteTextLength = 3000
 // Returns a non-nil error (its message becomes the INVALID_PARAM body) on the
 // first violation, matching upstream's 400 rejection (#1538)。
 func validateCreateInput(req *CreateRequest, fileIDs []string) error {
-	if req.Text != nil && len([]rune(*req.Text)) > maxNoteTextLength {
-		return errors.New("text is too long")
+	// **NUL と不正な UTF-8 も落とす。** note.text / cw は text 列で、そのまま INSERT
+	// すると PostgreSQL が SQLSTATE 22021 で落ち、認証済みの利用者が 1 文字で 500 を
+	// 起こせた (#3025 と同じ型)。既存の 400 に畳む。
+	if req.Text != nil && !colfit.Fits(*req.Text, maxNoteTextLength) {
+		return errors.New("text is too long or contains characters that cannot be stored")
 	}
 	if req.CW != nil {
-		if n := len([]rune(*req.CW)); n < 1 || n > 100 {
+		if n := len([]rune(*req.CW)); n < 1 || n > 100 || !colfit.Storable(*req.CW) {
 			return errors.New("cw must be between 1 and 100 characters")
 		}
 	}
@@ -575,7 +579,7 @@ func validateCreateInput(req *CreateRequest, fileIDs []string) error {
 		}
 		seen := make(map[string]bool, len(req.Poll.Choices))
 		for _, ch := range req.Poll.Choices {
-			if n := len([]rune(ch)); n < 1 || n > 50 {
+			if n := len([]rune(ch)); n < 1 || n > 50 || !colfit.Storable(ch) {
 				return errors.New("each poll choice must be between 1 and 50 characters")
 			}
 			// upstream notes/create.ts poll.choices は uniqueItems:true (#2027)。
