@@ -3,6 +3,7 @@ package chat_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	corechat "github.com/elythia-network/elythia/internal/core/chat"
@@ -158,6 +159,25 @@ func TestAddMemberViaAP_CreatesMembershipAndConsumesInvitation(t *testing.T) {
 	// 招待は consume される。
 	_, err = repo.FindInvitation("remoteUser", "room1")
 	assert.Error(t, err, "invitation should be consumed")
+}
+
+// 満員の room への Accept は参加させず、招待を残すこと (再送もさせない)。
+// 招待を作った時点では空きがあっても、承諾までに埋まりうる。
+func TestAddMemberViaAP_RoomFullKeepsInvitation(t *testing.T) {
+	svc, repo := newRoomFedService(t)
+	seedRemoteRoom(t, repo, "room1", "remoteOwner")
+	require.NoError(t, svc.CreateInvitationViaAP(remoteRoomURI("room1"), "remoteUser"))
+	for i := 0; i < 50; i++ {
+		require.NoError(t, repo.CreateMembership(&model.ChatRoomMembership{
+			ID: fmt.Sprintf("m%02d", i), UserID: fmt.Sprintf("member%02d", i), RoomID: "room1",
+		}))
+	}
+	err := svc.AddMemberViaAP(remoteRoomURI("room1"), "remoteUser")
+	require.ErrorIs(t, err, corechat.ErrRoomFull)
+	_, err = repo.FindMembership("remoteUser", "room1")
+	assert.Error(t, err, "満員の room に参加させた")
+	_, err = repo.FindInvitation("remoteUser", "room1")
+	assert.NoError(t, err, "招待を消した")
 }
 
 // owner 宛の Accept は membership 行を作らない (#2858)。owner は暗黙のメンバー
@@ -800,3 +820,20 @@ type roomIDLookupFailingRepo struct {
 }
 
 func (r *roomIDLookupFailingRepo) FindRoomByID(string) (*model.ChatRoom, error) { return nil, r.err }
+
+// 参加済みかの確認が DB 障害で失敗したら、まだメンバーでないと見なさずに
+// error を返すこと (#2792)。招待は残す。
+func TestAddMemberViaAP_MembershipLookupFailureIsError(t *testing.T) {
+	svc, repo := newRoomFedService(t)
+	seedRemoteRoom(t, repo, "room1", "remoteOwner")
+	require.NoError(t, svc.CreateInvitationViaAP(remoteRoomURI("room1"), "remoteUser"))
+	repo.FindMembershipErr = errors.New("db down")
+
+	err := svc.AddMemberViaAP(remoteRoomURI("room1"), "remoteUser")
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, corechat.ErrRoomFull)
+
+	repo.FindMembershipErr = nil
+	_, err = repo.FindInvitation("remoteUser", "room1")
+	assert.NoError(t, err, "失敗時に招待を消した")
+}

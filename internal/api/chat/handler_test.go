@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -990,6 +991,10 @@ func TestReactionsCreate(t *testing.T) {
 	repo.Messages["m1"] = &model.ChatMessage{ID: "m1", FromUserID: "sender", ToUserID: &to, Reads: model.StringArray{}, Reactions: model.StringArray{}}
 	rec := post(h.ReactionsCreate, `{"messageId":"m1","reaction":"👍"}`, u1)
 	assert.Equal(t, http.StatusNoContent, rec.Code)
+	// 絵文字でないリアクションは 400 (利用者の入力の誤り)。
+	rec = post(h.ReactionsCreate, `{"messageId":"m1","reaction":"plain text"}`, u1)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "INVALID_PARAM")
 }
 
 func TestReactionsDelete(t *testing.T) {
@@ -1369,6 +1374,43 @@ func TestInvitationsAccept(t *testing.T) {
 	rec := post(h.InvitationsAccept, `{"roomId":"r1"}`, u1)
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 	assert.Len(t, repo.Memberships, 1)
+}
+
+// 満員 (50 人) の room には招待を承諾しても入れないこと。招待は残す。
+//
+// 招待の作成は今の人数しか数えないので、承諾で数えないと、招待を並べるだけで
+// 上限を超えて参加させられた (rooms/join は数えている)。
+func TestInvitationsAccept_RoomFull(t *testing.T) {
+	h, repo := newTestHandler()
+	repo.Rooms["r1"] = &model.ChatRoom{ID: "r1", OwnerID: "someoneElse"}
+	for i := 0; i < 50; i++ {
+		id := fmt.Sprintf("m%02d", i)
+		repo.Memberships[id] = &model.ChatRoomMembership{ID: id, UserID: "member" + id, RoomID: "r1"}
+	}
+	repo.Invitations["i1"] = &model.ChatRoomInvitation{ID: "i1", UserID: "u1", RoomID: "r1"}
+	rec := post(h.InvitationsAccept, `{"roomId":"r1"}`, u1)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code, "rooms/join と同じ 'room is full'")
+	assert.Len(t, repo.Memberships, 50, "満員の room に入れた")
+	assert.Contains(t, repo.Invitations, "i1", "満員で断った招待を消した")
+
+	// 1 人空けば承諾できる (対照)。
+	delete(repo.Memberships, "m00")
+	rec = post(h.InvitationsAccept, `{"roomId":"r1"}`, u1)
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Len(t, repo.Memberships, 50)
+}
+
+// 参加済みかの確認が DB 障害で失敗したら 500 にし、参加も招待の消費もしない
+// こと (#2792)。
+func TestInvitationsAccept_MembershipLookupFailure(t *testing.T) {
+	h, repo := newTestHandler()
+	repo.Rooms["r1"] = &model.ChatRoom{ID: "r1", OwnerID: "someoneElse"}
+	repo.Invitations["i1"] = &model.ChatRoomInvitation{ID: "i1", UserID: "u1", RoomID: "r1"}
+	repo.FindMembershipErr = errors.New("db down")
+	rec := post(h.InvitationsAccept, `{"roomId":"r1"}`, u1)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Empty(t, repo.Memberships)
+	assert.Contains(t, repo.Invitations, "i1")
 }
 
 func TestInvitationsAccept_InvalidParam(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 
@@ -1285,4 +1286,65 @@ type failingUserRepo struct {
 
 func (f *failingUserRepo) FindByID(string) (*model.User, error) {
 	return nil, errors.New("db down")
+}
+
+// 絵文字でないリアクションは保存しないこと (upstream も 'invalid emoji' で拒否する)。
+//
+// 確かめないと、会話の相手のメッセージに任意の文字列をリアクションとして保存し、
+// 相手と room の全員へ配れた。
+func TestReact_RejectsNonEmoji(t *testing.T) {
+	cases := []string{
+		"",
+		"not-an-emoji",
+		"<b>bold</b>",
+	}
+	for _, raw := range cases {
+		svc, repo, pub := newSvc(t)
+		to := "bob"
+		repo.Messages["m1"] = &model.ChatMessage{ID: "m1", FromUserID: "carol", ToUserID: &to}
+		err := svc.React(context.Background(), "m1", &model.User{ID: "bob", Username: "bob"}, raw)
+		assert.ErrorIs(t, err, corechat.ErrInvalidReaction, "%q", raw)
+		assert.Empty(t, repo.Messages["m1"].Reactions, "%q を保存した", raw)
+		assert.Empty(t, pub.userCalls, "%q を配った", raw)
+	}
+	// 最初の絵文字 1 つだけを保存する (upstream normalizeEmojiString)。前後の文字や
+	// 2 つ目以降は捨てる。ZWJ の合字は 1 つとして扱い、異体字セレクタは落とす。
+	for raw, want := range map[string]string{
+		"👍text":                               "👍",
+		"text👍":                               "👍",
+		strings.Repeat("👍", 33):               "👍",
+		"👨\u200d👩\u200d👧":                     "👨\u200d👩\u200d👧",
+		"❤\ufe0f":                             "❤",
+		"<b>🎉</b>" + strings.Repeat("x", 900): "🎉",
+	} {
+		svc, repo, _ := newSvc(t)
+		to := "bob"
+		repo.Messages["m1"] = &model.ChatMessage{ID: "m1", FromUserID: "carol", ToUserID: &to}
+		require.NoError(t, svc.React(context.Background(), "m1", &model.User{ID: "bob", Username: "bob"}, raw), "%q", raw)
+		require.Len(t, repo.Messages["m1"].Reactions, 1, "%q", raw)
+		assert.Equal(t, "bob/"+want, repo.Messages["m1"].Reactions[0], "%q", raw)
+	}
+}
+
+// 最初の絵文字だけを保存するようになる前の行 (入力から FE0F を落としただけの
+// 形) も、付けた本人が外せること。ZWJ を含む絵文字は upstream と同じく FE0F を
+// 残して保存し、以前の FE0F の無い行も外せること。
+func TestUnreact_LegacyStoredForms(t *testing.T) {
+	for _, tc := range []struct{ stored, input string }{
+		{"bob/abc👍", "abc👍"},
+		{"bob/👍👍", "👍👍"},
+		{"bob/🏳‍🌈", "🏳️‍🌈"},
+	} {
+		svc, repo, pub := newSvc(t)
+		to := "bob"
+		repo.Messages["m1"] = &model.ChatMessage{ID: "m1", FromUserID: "carol", ToUserID: &to, Reactions: []string{tc.stored}}
+		require.NoError(t, svc.Unreact(context.Background(), "m1", &model.User{ID: "bob"}, tc.input), tc.input)
+		assert.Empty(t, repo.Messages["m1"].Reactions, "%q を外せない", tc.stored)
+		assert.Len(t, pub.userCalls, 1, tc.input)
+	}
+	svc, repo, _ := newSvc(t)
+	to := "bob"
+	repo.Messages["m1"] = &model.ChatMessage{ID: "m1", FromUserID: "carol", ToUserID: &to}
+	require.NoError(t, svc.React(context.Background(), "m1", &model.User{ID: "bob", Username: "bob"}, "🏳️‍🌈"))
+	assert.Equal(t, []string{"bob/🏳️‍🌈"}, []string(repo.Messages["m1"].Reactions), "ZWJ の絵文字の FE0F を落とした")
 }

@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/elythia-network/elythia/internal/activitypub"
 	"github.com/elythia-network/elythia/internal/activitypub/mfm"
@@ -26,6 +27,8 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/idnhost"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
+
+	"github.com/forPelevin/gomoji"
 )
 
 // AP 由来の値を書く chat 列の上限 (migration/000022_chat.up.sql)。溢れると
@@ -82,8 +85,12 @@ var (
 	// ErrNoSuchEmoji is returned by React when a custom emoji reaction references
 	// a local emoji that does not exist (upstream 'no such emoji').
 	ErrNoSuchEmoji = errors.New("no such emoji")
+	// ErrInvalidReaction is returned by React when the reaction is neither a
+	// `:name:` custom emoji nor a unicode emoji (upstream throws 'invalid emoji').
+	ErrInvalidReaction = errors.New("invalid reaction")
 	// ErrRoomFull is returned by CreateInvitationViaAP when the room's members
-	// plus its pending invitations already fill maxRoomMembers. Mirrors upstream
+	// plus its pending invitations already fill maxRoomMembers, and by
+	// AddMemberViaAP when the members alone do. Mirrors upstream
 	// createRoomInvitation's 'room is full' (upstream counts memberships only).
 	// Permanent: callers must not retry.
 	ErrRoomFull = errors.New("chat room is full")
@@ -963,6 +970,22 @@ func (s *Service) AddMemberViaAP(roomURI, userID string) error {
 		return nil
 	}
 	if _, err := s.repo.FindMembership(userID, roomID); err != nil {
+		// **DB 障害を「まだメンバーでない」に丸めない** (#2792)。丸めると満員の
+		// 判定と参加の作成へ進み、障害の間の判断を誤る。
+		if !repository.IsNotFound(err) {
+			return err
+		}
+		// **人数の上限を見る** (chat/invitations/accept と同じ)。招待を作るときは
+		// その時点の人数しか数えないので、見ないと、上限の近い room で招待を
+		// 並べて承諾させるだけで上限を超えて参加させられた。満員なら招待は残す
+		// (空いたら次の Accept で入れる)。ErrRoomFull は再送しない。
+		members, lerr := s.repo.ListMembersByRoom(roomID)
+		if lerr != nil {
+			return lerr
+		}
+		if len(members) >= maxRoomMembers {
+			return ErrRoomFull
+		}
 		if cerr := s.repo.CreateMembership(&model.ChatRoomMembership{
 			ID: s.idGen.Generate(time.Now()), UserID: userID, RoomID: roomID,
 		}); cerr != nil {
@@ -1767,9 +1790,40 @@ func (s *Service) normalizeChatReaction(raw string) (string, error) {
 		}
 		return ":" + name + ":", nil
 	}
-	// variation selector (U+FE0F) を strip して upstream の canonical form に揃える。
-	return strings.ReplaceAll(raw, "\ufe0f", ""), nil
+	// **最初の絵文字 1 つだけを保存する。** upstream の normalizeEmojiString は
+	// emojiRegex.exec (アンカー無し) で最初に見つかった絵文字を取り、無ければ
+	// 'invalid emoji' を投げる。以前は入力をそのまま保存しており、会話の相手の
+	// メッセージに任意の文字列 (約 1000 文字まで) をリアクションとして保存し、
+	// 相手と room の全員へ配れた。
+	first, ok := firstEmoji(raw)
+	if !ok {
+		return "", ErrInvalidReaction
+	}
+	return first, nil
 }
+
+// firstEmoji returns the first unicode emoji in s with its variation selectors
+// (U+FE0F) stripped, the canonical form upstream stores.
+func firstEmoji(s string) (string, bool) {
+	all := gomoji.CollectAll(s)
+	if len(all) == 0 {
+		return "", false
+	}
+	e := all[0].Character
+	// upstream normalizeEmojiString は ZWJ を含む絵文字では FE0F を残す
+	// (取ると合字が崩れる表示系がある)。TS 版から引き継いだ行とも一致させる。
+	if !strings.ContainsRune(e, '\u200d') {
+		e = strings.ReplaceAll(e, "\ufe0f", "")
+	}
+	// 1 つの絵文字 (ZWJ の合字や肌の色の修飾を含む) は十分この長さに収まる。
+	if e == "" || utf8.RuneCountInString(e) > maxChatReactionRunes {
+		return "", false
+	}
+	return e, true
+}
+
+// maxChatReactionRunes bounds a unicode chat reaction.
+const maxChatReactionRunes = 32
 
 // normalizeChatReactionForm canonicalises a chat reaction string WITHOUT validating
 // custom emoji existence: a `:name:` custom-emoji reaction is kept as `:name:`,
@@ -1780,7 +1834,11 @@ func normalizeChatReactionForm(raw string) string {
 	if m := chatCustomEmojiPattern.FindStringSubmatch(raw); m != nil {
 		return ":" + m[1] + ":"
 	}
-	return strings.ReplaceAll(raw, "️", "")
+	// React と同じく最初の絵文字だけを取る (保存した形と一致させる)。
+	if e, ok := firstEmoji(raw); ok {
+		return e
+	}
+	return strings.ReplaceAll(raw, "\ufe0f", "")
 }
 
 // Unreact removes a reaction and publishes an `unreact` stream event (#1549)。
@@ -1799,6 +1857,17 @@ func (s *Service) Unreact(ctx context.Context, messageID string, reactor *model.
 	removed, err := s.repo.RemoveReaction(messageID, reactor.ID+"/"+reaction)
 	if err != nil {
 		return fmt.Errorf("remove reaction: %w", err)
+	}
+	// 最初の絵文字だけを保存するようになる前の行 (入力から FE0F を落とした
+	// だけの形) も、付けた本人が外せるようにする。
+	if raw := strings.ReplaceAll(emoji, "\ufe0f", ""); !removed && raw != reaction && !chatCustomEmojiPattern.MatchString(emoji) {
+		removed, err = s.repo.RemoveReaction(messageID, reactor.ID+"/"+raw)
+		if err != nil {
+			return fmt.Errorf("remove reaction: %w", err)
+		}
+		if removed {
+			reaction = raw
+		}
 	}
 	// **実際に消えたときだけ publish する (#3037)。** 参加者でも、付けて
 	// いないリアクションを指定されたときにイベントを流さない。upstream
