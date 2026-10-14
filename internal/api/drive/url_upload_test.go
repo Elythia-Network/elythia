@@ -2,10 +2,12 @@ package drive
 
 import (
 	"context"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -282,4 +284,166 @@ func TestFilesUploadFromURL_NotWired(t *testing.T) {
 	require.NoError(t, h.FilesUploadFromURL(c))
 	// upstream と同じく空レスポンス (204)。
 	assert.Equal(t, http.StatusNoContent, rec.Code)
+}
+
+// limitedUploader is a mockDriveUploader that also reports a maxFileSizeMb
+// policy, like *coredrive.Service.
+type limitedUploader struct {
+	mockDriveUploader
+	limit int64
+	ok    bool
+}
+
+func (l *limitedUploader) MaxUploadBytes(*model.User) (int64, bool) { return l.limit, l.ok }
+
+// 利用者の maxFileSizeMb を超える本文は、Upload に渡す前 (読み切る前) に断ること。
+//
+// Upload も同じ判定をするが、そこに届くのは本文を全部メモリに載せた後で、
+// 30MB しか保存できない利用者でも config.maxFileSize (250MiB) まで確保させられた。
+func TestURLUploader_Process_PolicyLimitStopsBeforeUpload(t *testing.T) {
+	const total = 64 * 1024 * 1024
+	var served atomic.Int64
+	done := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		defer close(done)
+		// Content-Length を付けない (chunked) で、読む側の上限だけで止まること。
+		// 全部を読んでから大きさを見る形だと、送った量が total に届く。
+		w.Header().Set("Content-Type", "application/octet-stream")
+		chunk := make([]byte, 64*1024)
+		for served.Load() < total {
+			n, err := w.Write(chunk)
+			served.Add(int64(n))
+			if err != nil {
+				return
+			}
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+	}))
+	defer srv.Close()
+
+	up := &limitedUploader{limit: 1024 * 1024, ok: true} // 1MiB
+	pub := &mockMainPublisher{}
+	idGen, _ := id.NewGenerator("aidx")
+	u := NewURLUploader(http.DefaultClient, up, pub, idGen, "", 250*1024*1024)
+
+	_, err := u.fetchAndStore(context.Background(), URLUploadInput{User: &model.User{ID: "u1"}, URL: srv.URL + "/big.bin"})
+	require.ErrorIs(t, err, errURLUploadTooLarge)
+	assert.Nil(t, up.gotInput, "上限を超えた本文を Upload へ渡した")
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("配信側が止まらなかった (本文を読み続けている)")
+	}
+	assert.Less(t, served.Load(), int64(total/2), "上限を超えても本文を読み続けた")
+
+	// 上限内なら渡す (対照)。
+	small := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(make([]byte, 1000))
+	}))
+	defer small.Close()
+	up2 := &limitedUploader{mockDriveUploader: mockDriveUploader{ret: &model.DriveFile{ID: idGen.Generate(time.Now())}}, limit: 1024 * 1024, ok: true}
+	u2 := NewURLUploader(http.DefaultClient, up2, pub, idGen, "", 250*1024*1024)
+	_, err = u2.fetchAndStore(context.Background(), URLUploadInput{User: &model.User{ID: "u1"}, URL: small.URL + "/s.bin"})
+	require.NoError(t, err)
+	require.NotNil(t, up2.gotInput)
+	assert.Len(t, up2.gotInput.Body, 1000)
+}
+
+// 宣言された Content-Length が上限を超えるなら、本文を読まずに断ること。
+// 負の policy (本家と同じく「保存できない」) は取りに行きもしないこと。
+func TestURLUploader_Process_DeclaredLengthAndNegativePolicy(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		w.Header().Set("Content-Length", "5000000")
+		_, _ = w.Write([]byte("x"))
+	}))
+	defer srv.Close()
+
+	idGen, _ := id.NewGenerator("aidx")
+	up := &limitedUploader{limit: 1024, ok: true}
+	u := NewURLUploader(http.DefaultClient, up, &mockMainPublisher{}, idGen, "", 0)
+	_, err := u.fetchAndStore(context.Background(), URLUploadInput{User: &model.User{ID: "u1"}, URL: srv.URL + "/a"})
+	require.ErrorIs(t, err, errURLUploadTooLarge)
+	assert.Nil(t, up.gotInput)
+
+	neg := &limitedUploader{limit: -1, ok: true}
+	u = NewURLUploader(http.DefaultClient, neg, &mockMainPublisher{}, idGen, "", 0)
+	before := hits
+	_, err = u.fetchAndStore(context.Background(), URLUploadInput{User: &model.User{ID: "u1"}, URL: srv.URL + "/b"})
+	require.ErrorIs(t, err, errURLUploadTooLarge)
+	assert.Equal(t, before, hits, "保存できない利用者のために取りに行った")
+}
+
+// 1 人が同時に走らせられる取得は 1 本、全体では 4 本まで。待つ側は本文を持たない。
+func TestURLUploader_ConcurrencySlots(t *testing.T) {
+	idGen, _ := id.NewGenerator("aidx")
+	u := NewURLUploader(http.DefaultClient, &mockDriveUploader{}, &mockMainPublisher{}, idGen, "", 0)
+	ctx := context.Background()
+
+	rel1, err := u.acquire(ctx, "u1")
+	require.NoError(t, err)
+	// 同じ利用者の 2 本目は待たされる。
+	short, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+	_, err = u.acquire(short, "u1")
+	cancel()
+	require.Error(t, err, "同じ利用者の 2 本目が待たずに走った")
+
+	// 別の利用者は走れるが、全体で 4 本まで。
+	var rels []func()
+	for _, uid := range []string{"u2", "u3", "u4"} {
+		r, err := u.acquire(ctx, uid)
+		require.NoError(t, err)
+		rels = append(rels, r)
+	}
+	short, cancel = context.WithTimeout(ctx, 50*time.Millisecond)
+	_, err = u.acquire(short, "u5")
+	cancel()
+	require.Error(t, err, "全体で 5 本目が待たずに走った")
+
+	rel1()
+	for _, r := range rels {
+		r()
+	}
+	// 返したら走れる。待ちを諦めた分の枠も漏れていない。
+	r, err := u.acquire(ctx, "u1")
+	require.NoError(t, err)
+	r()
+	u.userMu.Lock()
+	n := len(u.userSlots)
+	u.userMu.Unlock()
+	assert.Equal(t, 0, n, "使い終えた利用者の枠が残っている")
+}
+
+// URL の path から取った名前が保存できない形なら 'untitled' にすること (upstream の addFile と同じ)。
+func TestURLUploader_Process_InvalidNameFallsBack(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("data"))
+	}))
+	defer srv.Close()
+	idGen, _ := id.NewGenerator("aidx")
+	for _, p := range []string{"/a%00b.png", "/a%5Cb.png", "/" + strings.Repeat("x", 201)} {
+		up := &mockDriveUploader{ret: &model.DriveFile{ID: idGen.Generate(time.Now())}}
+		u := NewURLUploader(http.DefaultClient, up, &mockMainPublisher{}, idGen, "", 0)
+		u.Process(context.Background(), URLUploadInput{User: &model.User{ID: "u1"}, URL: srv.URL + p})
+		require.NotNil(t, up.gotInput, p)
+		assert.Equal(t, "untitled", up.gotInput.Name, p)
+	}
+}
+
+// 上限が int64 の最大値でも、本文を空にせずに読むこと (limit+1 の溢れ)。
+func TestURLUploader_Process_MaxInt64LimitReadsBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(make([]byte, 1000))
+	}))
+	defer srv.Close()
+	idGen, _ := id.NewGenerator("aidx")
+	up := &mockDriveUploader{ret: &model.DriveFile{ID: idGen.Generate(time.Now())}}
+	u := NewURLUploader(http.DefaultClient, up, &mockMainPublisher{}, idGen, "", math.MaxInt64)
+	_, err := u.fetchAndStore(context.Background(), URLUploadInput{User: &model.User{ID: "u1"}, URL: srv.URL + "/s.bin"})
+	require.NoError(t, err)
+	require.NotNil(t, up.gotInput)
+	assert.Len(t, up.gotInput.Body, 1000)
 }
