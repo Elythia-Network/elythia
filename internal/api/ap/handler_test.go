@@ -2128,3 +2128,76 @@ func TestOutbox_UnstorableCursor_400(t *testing.T) {
 		})
 	}
 }
+
+// allowExternalApRedirect が false なら、AP の取得に対する外部への 301 / 302 を
+// 406 で止めること (upstream ServerService の onSend hook と同じ)。true (既定)
+// なら従来どおり転送し、ブラウザ (AP でない Accept) は false でも転送する。
+func TestUser_ExternalRedirectRefusedWhenDisallowed(t *testing.T) {
+	h, userRepo, _, _ := newHandler(t)
+	h.SetFederationGate(nil, "local.example")
+	host := "remote.example"
+	uri := "https://remote.example/users/abc"
+	userRepo.Users["u1"] = &model.User{ID: "u1", Username: "alice", Host: &host, URI: &uri}
+
+	allow := false
+	h.SetExternalRedirectPolicy(func() bool { return allow }, "https://local.example/")
+	c, rec := newReq(t, "id", "u1")
+	require.NoError(t, h.User(c))
+	assert.Equal(t, http.StatusNotAcceptable, rec.Code)
+	assert.Empty(t, rec.Header().Get("Location"))
+	assert.Equal(t, "<"+uri+">; rel=\"canonical\"", rec.Header().Get("Link"))
+
+	// 設定は毎回読む (再起動なしで戻る)。
+	allow = true
+	c, rec = newReq(t, "id", "u1")
+	require.NoError(t, h.User(c))
+	assert.Equal(t, http.StatusMovedPermanently, rec.Code)
+	assert.Equal(t, uri, rec.Header().Get("Location"))
+}
+
+// 自サーバーへの転送と、AP でない Accept は止めない。
+func TestRedirectAP_SelfAndNonAPPass(t *testing.T) {
+	h, _, _, _ := newHandler(t)
+	h.SetFederationGate(nil, "local.example")
+	h.SetExternalRedirectPolicy(func() bool { return false }, "https://local.example/")
+
+	c, rec := newReq(t, "id", "x")
+	require.NoError(t, h.redirectAP(c, http.StatusFound, "https://local.example/notes/1"))
+	assert.Equal(t, http.StatusFound, rec.Code, "自サーバーへの転送は止めない")
+
+	c, rec = newBrowserReq(t, "id", "x")
+	require.NoError(t, h.redirectAP(c, http.StatusFound, "https://remote.example/notes/1"))
+	assert.Equal(t, http.StatusFound, rec.Code, "AP の取得でなければ止めない")
+
+	c, rec = newReq(t, "id", "x")
+	c.Request().Header.Set("Accept", `application/ld+json; profile="https://www.w3.org/ns/activitystreams"`)
+	require.NoError(t, h.redirectAP(c, http.StatusFound, "https://remote.example/notes/1"))
+	assert.Equal(t, http.StatusNotAcceptable, rec.Code, "ld+json の activitystreams も AP の取得として扱う")
+
+	// 同じ hostname でも、ポートや scheme が違えば外部として扱う。相対は自分。
+	for _, loc := range []string{"https://local.example:8443/notes/1", "http://local.example/notes/1"} {
+		c, rec = newReq(t, "id", "x")
+		require.NoError(t, h.redirectAP(c, http.StatusFound, loc))
+		assert.Equal(t, http.StatusNotAcceptable, rec.Code, loc)
+	}
+	c, rec = newReq(t, "id", "x")
+	require.NoError(t, h.redirectAP(c, http.StatusFound, "/notes/1"))
+	assert.Equal(t, http.StatusFound, rec.Code, "相対の転送は止めない")
+}
+
+// リモートのノートの 302 も、allowExternalApRedirect が false なら止めること。
+func TestNote_ExternalRedirectRefusedWhenDisallowed(t *testing.T) {
+	h, _, noteRepo, _ := newHandler(t)
+	h.SetFederationGate(nil, "local.example")
+	h.SetExternalRedirectPolicy(func() bool { return false }, "https://local.example/")
+	host := "remote.example"
+	uri := "https://remote.example/notes/abc"
+	noteRepo.Notes["n1"] = &model.Note{
+		ID: "n1", UserID: "u1", Visibility: model.NoteVisibilityPublic,
+		UserHost: &host, URI: &uri,
+	}
+	c, rec := newReq(t, "id", "n1")
+	require.NoError(t, h.Note(c))
+	assert.Equal(t, http.StatusNotAcceptable, rec.Code)
+	assert.Empty(t, rec.Header().Get("Location"))
+}
