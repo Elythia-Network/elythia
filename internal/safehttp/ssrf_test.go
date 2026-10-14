@@ -68,6 +68,8 @@ func TestIsPrivateIP_IPv6Private(t *testing.T) {
 		{"rfc6145 ipv4-translatable", "0:0:0:0:ffff:0:7f00:1"},
 		{"NAT64 well-known", "64:ff9b::1"},
 		{"NAT64 well-known embeds loopback", "64:ff9b::7f00:1"},
+		{"IPv4-compatible embeds loopback", "::7f00:1"},
+		{"IPv4-compatible embeds private", "::a00:1"},
 		{"NAT64 local-use", "64:ff9b:1::1"},
 		{"6to4", "2002::1"},
 		{"6to4 embeds private v4", "2002:c0a8:1::1"},
