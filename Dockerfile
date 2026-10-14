@@ -17,7 +17,7 @@
 # ので、tag だけだと「どの builder で作ったか」を再現できない。digest があると
 # BuildKit は digest で pull する。tag は読む人向けと CI の版照合用に残す。
 # 更新は dependabot (`.github/dependabot.yml` の `docker`) が digest ごと上げる。
-FROM golang:1.27.2-alpine@sha256:85dc1069ac644ea3c527b177303a406eb3358192816cd7f9e5848eb658851673 AS builder
+FROM golang:1.27.2-alpine@sha256:f92b6ef800e499660581efdabdf25d9d817a9d124eaf900924f0504e7e27e12d AS builder
 
 # Step 2 (#618) で chai2010/webp → gen2brain/webp (libwebp on wazero/WASM) に
 # 切替えたので cgo 依存はゼロ。build-base (gcc + musl libc) は不要になった。
@@ -90,7 +90,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # builder とは別の stage でビルドする。builder は frontend/ の node_modules が無いと
 # 落ちるが、バックアップの image に frontend は要らない。命令は builder と同じ並びに
 # してあるので、BuildKit は go mod download までの layer を共有する。
-FROM golang:1.27.2-alpine@sha256:85dc1069ac644ea3c527b177303a406eb3358192816cd7f9e5848eb658851673 AS backup-builder
+FROM golang:1.27.2-alpine@sha256:f92b6ef800e499660581efdabdf25d9d817a9d124eaf900924f0504e7e27e12d AS backup-builder
 RUN apk add --no-cache git
 WORKDIR /app
 COPY go.mod go.sum ./
