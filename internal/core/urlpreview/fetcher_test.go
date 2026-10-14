@@ -3,6 +3,8 @@ package urlpreview
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,13 +14,13 @@ import (
 )
 
 func TestFetcher_Disabled(t *testing.T) {
-	f := NewFetcher(Config{Enabled: false}, nil, "", nil)
+	f := NewFetcher(Config{Enabled: false}, nil)
 	_, err := f.Fetch(context.Background(), "https://example.com")
 	assert.ErrorIs(t, err, ErrDisabled)
 }
 
 func newTestFetcher(cfg Config) *Fetcher {
-	f := NewFetcher(cfg, nil, "", nil)
+	f := NewFetcher(cfg, nil)
 	f.SetHTTPClient(&http.Client{Timeout: f.client.Timeout})
 	return f
 }
@@ -127,7 +129,7 @@ func TestFetcher_RequireContentLength(t *testing.T) {
 
 func TestFetcher_PrivateIP(t *testing.T) {
 	// SSRF チェック付きの Fetcher を使う (newTestFetcher ではなく NewFetcher)
-	f := NewFetcher(Config{Enabled: true, AllowRedirect: true, TimeoutMs: 5000, MaxContentLength: 1 << 20}, nil, "", nil)
+	f := NewFetcher(Config{Enabled: true, AllowRedirect: true, TimeoutMs: 5000, MaxContentLength: 1 << 20}, nil)
 	_, err := f.Fetch(context.Background(), "http://127.0.0.1:9999/test")
 	assert.ErrorIs(t, err, ErrPrivateIP)
 }
@@ -153,7 +155,7 @@ func TestFetcher_ViaProxy(t *testing.T) {
 	}))
 	defer proxy.Close()
 
-	f := NewFetcher(Config{Enabled: true, SummaryProxyURL: proxy.URL, TimeoutMs: 5000, MaxContentLength: 1 << 20}, nil, "", nil)
+	f := NewFetcher(Config{Enabled: true, SummaryProxyURL: proxy.URL, TimeoutMs: 5000, MaxContentLength: 1 << 20}, nil)
 	result, err := f.Fetch(context.Background(), "https://example.com")
 	require.NoError(t, err)
 	assert.Equal(t, "https://example.com", result.URL)
@@ -167,7 +169,7 @@ func TestFetcher_NoRedirect(t *testing.T) {
 
 	// AllowRedirect=false のとき 302 で止まる。SSRF チェックを外すために
 	// newTestFetcher は使えないので直接 client を差し替える。
-	f := NewFetcher(Config{Enabled: true, AllowRedirect: false, TimeoutMs: 5000, MaxContentLength: 1 << 20}, nil, "", nil)
+	f := NewFetcher(Config{Enabled: true, AllowRedirect: false, TimeoutMs: 5000, MaxContentLength: 1 << 20}, nil)
 	f.SetHTTPClient(&http.Client{
 		Timeout:       f.client.Timeout,
 		CheckRedirect: f.client.CheckRedirect,
@@ -280,7 +282,7 @@ func TestFetcher_ViaProxy_RejectsNonHTTPScheme(t *testing.T) {
 	}))
 	defer proxy.Close()
 
-	f := NewFetcher(Config{Enabled: true, SummaryProxyURL: proxy.URL, TimeoutMs: 5000, MaxContentLength: 1 << 20}, nil, "", nil)
+	f := NewFetcher(Config{Enabled: true, SummaryProxyURL: proxy.URL, TimeoutMs: 5000, MaxContentLength: 1 << 20}, nil)
 	_, err := f.Fetch(context.Background(), "https://example.com")
 	assert.ErrorIs(t, err, ErrFetchFailed)
 }
@@ -292,7 +294,7 @@ func TestFetcher_ViaProxy_AppliesSensitiveList(t *testing.T) {
 	}))
 	defer proxy.Close()
 
-	f := NewFetcher(Config{Enabled: true, SummaryProxyURL: proxy.URL, TimeoutMs: 5000, MaxContentLength: 1 << 20}, nil, "", nil)
+	f := NewFetcher(Config{Enabled: true, SummaryProxyURL: proxy.URL, TimeoutMs: 5000, MaxContentLength: 1 << 20}, nil)
 	f.SetSensitiveListProvider(func() []string { return []string{"nsfw.example"} })
 	result, err := f.Fetch(context.Background(), "https://nsfw.example/x")
 	require.NoError(t, err)
@@ -378,4 +380,59 @@ func TestFetcher_DropsHostlessResolvedThumbnail(t *testing.T) {
 	assert.Nil(t, result.Thumbnail, "host の無い thumbnail を返している")
 	require.NotNil(t, result.Icon, "解決して host を持つ icon は残す")
 	assert.Equal(t, srv.URL+"/favicon.ico", *result.Icon)
+}
+
+// 設定を毎回読むこと。管理画面で無効にしたら、再起動なしで取りに行かなくなる。
+func TestFetcher_ConfigProviderIsLive(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(`<html><head><title>T</title></head></html>`))
+	}))
+	defer srv.Close()
+
+	f := NewFetcher(Config{Enabled: true, TimeoutMs: 5000, MaxContentLength: 1 << 20}, nil)
+	f.SetHTTPClient(&http.Client{Timeout: f.client.Timeout})
+	cfg := Config{Enabled: false, TimeoutMs: 5000, MaxContentLength: 1 << 20}
+	f.SetConfigProvider(func() (Config, error) { return cfg, nil })
+
+	_, err := f.Fetch(context.Background(), srv.URL+"/a")
+	require.ErrorIs(t, err, ErrDisabled, "無効にした設定を読んでいない")
+	assert.Equal(t, 0, hits)
+
+	cfg.Enabled = true
+	_, err = f.Fetch(context.Background(), srv.URL+"/b")
+	require.NoError(t, err)
+	assert.Equal(t, 1, hits)
+
+	// 設定を読めないときは取りに行かない。
+	f.SetConfigProvider(func() (Config, error) { return Config{}, errors.New("db down") })
+	_, err = f.Fetch(context.Background(), srv.URL+"/c")
+	require.ErrorIs(t, err, ErrFetchFailed)
+	assert.Equal(t, 1, hits)
+}
+
+// キャッシュは件数に上限があり、覚えた URL は取り直さないこと。
+func TestFetcher_CacheIsBounded(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(`<html><head><title>T</title></head></html>`))
+	}))
+	defer srv.Close()
+
+	f := NewFetcher(Config{Enabled: true, TimeoutMs: 5000, MaxContentLength: 1 << 20}, nil)
+	f.SetHTTPClient(&http.Client{Timeout: f.client.Timeout})
+	for i := 0; i < 1010; i++ {
+		_, err := f.Fetch(context.Background(), fmt.Sprintf("%s/p?i=%d", srv.URL, i))
+		require.NoError(t, err)
+	}
+	assert.LessOrEqual(t, f.cache.Len(), 1000, "キャッシュが件数の上限を超えた")
+
+	before := hits
+	_, err := f.Fetch(context.Background(), fmt.Sprintf("%s/p?i=%d", srv.URL, 1009))
+	require.NoError(t, err)
+	assert.Equal(t, before, hits, "覚えた URL を取り直した")
 }

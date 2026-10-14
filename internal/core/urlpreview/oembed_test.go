@@ -93,7 +93,7 @@ func TestFetcher_OEmbedDiscoveryAndFetch(t *testing.T) {
 		AllowRedirect:    true,
 		TimeoutMs:        5000,
 		MaxContentLength: 1 << 20,
-	}, nil, "", nil)
+	}, nil)
 	// httptest server は plain TCP なので safehttp の SSRF guard を避ける
 	f.SetHTTPClient(&http.Client{Timeout: f.client.Timeout})
 
@@ -116,7 +116,7 @@ func TestFetcher_OEmbedFailureNonFatal(t *testing.T) {
 	}))
 	defer page.Close()
 
-	f := NewFetcher(Config{Enabled: true, AllowRedirect: true, TimeoutMs: 1000, MaxContentLength: 1 << 20}, nil, "", nil)
+	f := NewFetcher(Config{Enabled: true, AllowRedirect: true, TimeoutMs: 1000, MaxContentLength: 1 << 20}, nil)
 	f.SetHTTPClient(&http.Client{Timeout: f.client.Timeout})
 
 	res, err := f.Fetch(context.Background(), page.URL)

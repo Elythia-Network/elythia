@@ -39,6 +39,13 @@ var DefaultEndpointLimits = map[string]*EndpointLimit{
 	// 届く。画面は 2 秒に 1 回読むので、タブ 2 つぶんを上限にする。
 	"admin/backup/restore/status": {Duration: time.Minute, Max: 60},
 
+	// ── URL preview (Elythia 独自) ─────────────────────
+	// `GET /url` (summaly 互換)。`/api` の外なので RequireIPRateLimit で掛ける。
+	// 認証不要で、1 回ごとにサーバーから外向きの取得を 1 本起こすので、接続元
+	// ごとに絞る。画面はノートに出た URL ごとに 1 回読む (結果は 1 時間覚える)
+	// ので、タイムラインを流し読みしても届かない量にする。upstream に上限は無い。
+	URLPreviewRateLimitKey: {Duration: 10 * time.Minute, Max: 300},
+
 	// ── Bubble Game ────────────────────────────────────
 	"bubble-game/register": {Duration: time.Hour, Max: 120, MinInterval: 30 * time.Second},
 	// 対戦 (mk-go 独自、#3230)。招待は相手に通知が飛ぶので絞る。
