@@ -593,6 +593,10 @@ func (s *Service) Follow(followerID, followeeID string, opts FollowOptions) (*Fo
 			WithReplies:  opts.WithReplies,
 		}
 		if err := s.followRequestRepo.Create(req); err != nil {
+			// 確かめた後に並行の要求が同じ組を作った (一意制約)。500 にしない。
+			if repository.IsUniqueViolation(err) {
+				return nil, ErrAlreadyRequested
+			}
 			return nil, err
 		}
 		// 「静かにリクエストにする」(#3466) は通知だけを作らない。リクエストの
@@ -624,6 +628,12 @@ func (s *Service) Follow(followerID, followeeID string, opts FollowOptions) (*Fo
 		WithReplies:  opts.WithReplies,
 	}
 	if err := s.followingRepo.Create(f); err != nil {
+		// Exists で確かめた後に並行の要求が同じ組を作った (一意制約)。upstream の
+		// insertFollowingDoc も一意制約の違反を握って既にフォロー済みとして扱う。
+		// 500 にしない (カウントは作れた側だけが増やすのでずれない)。
+		if repository.IsUniqueViolation(err) {
+			return nil, ErrAlreadyFollowing
+		}
 		return nil, err
 	}
 	// **同じ組の申請が残っていれば消す (本家 insertFollowingDoc と同じ)。**

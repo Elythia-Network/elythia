@@ -15,9 +15,13 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// generateVerifyCode returns a random 16-char hex code for email verification.
+// generateVerifyCode returns a random 32-char hex code for email verification.
+//
+// 128 bit にする (登録の確認コードの generatePendingCode と同じ)。upstream は
+// secureRndstr(16) (約 83 bit)。verify-email は認証も回数の上限も無く、コードだけで
+// 照合する。
 func generateVerifyCode() string {
-	b := make([]byte, 8)
+	b := make([]byte, 16)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
 }
