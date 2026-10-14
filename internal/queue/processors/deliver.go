@@ -114,6 +114,11 @@ type DeliverProcessor struct {
 	suspendedChecker SuspendedChecker
 	deliveryGate     DeliveryGate
 	capabilities     Ed25519AcceptanceRecorder
+	// metadataRefresher は配送に成功した相手の nodeinfo を取り直す (#3564)。
+	// statsEnabled は meta.enableStatsForFederatedInstances を判定のたびに読む。
+	// nil なら有効として扱う。
+	metadataRefresher InstanceMetadataRefresher
+	statsEnabled      func() bool
 	// redis is used for the per-host Ed25519 degrade flag (#1067 / #1071).
 	// 未配線時は capability gate なしの楽観動作 (= payload に Ed25519 鍵が
 	// あれば必ず Ed25519 sign を試す) になるが、production では必須。
@@ -387,6 +392,17 @@ func (p *DeliverProcessor) recordEd25519Failure(host string) {
 	}
 }
 
+// SetMetadataRefresher attaches the background nodeinfo refresher (#3564).
+// statsEnabled gates it like upstream's enableStatsForFederatedInstances; nil
+// means always enabled.
+func (p *DeliverProcessor) SetMetadataRefresher(r InstanceMetadataRefresher, statsEnabled func() bool) {
+	p.metadataRefresher = r
+	p.statsEnabled = statsEnabled
+}
+
+// HasMetadataRefresher reports whether the nodeinfo refresher is wired (#3564).
+func (p *DeliverProcessor) HasMetadataRefresher() bool { return p.metadataRefresher != nil }
+
 // SetSuspendedChecker attaches a checker for deliverSuspendedSoftware.
 func (p *DeliverProcessor) SetSuspendedChecker(c SuspendedChecker) {
 	p.suspendedChecker = c
@@ -445,6 +461,22 @@ func (p *DeliverProcessor) recordSuccess(inbox string) {
 	if p.chartHook != nil {
 		p.chartHook.OnDelivered(host, true)
 	}
+}
+
+// refreshMetadata schedules a background nodeinfo refetch after a 2xx delivery
+// (#3564).
+//
+// 本家と同じく 2xx のときだけ、enableStatsForFederatedInstances が有効なときだけ
+// 取りに行く (DeliverProcessorService は 4xx を catch 側で扱い、そこでは呼ばない)。
+// 配送停止中の相手へは送らないのでここに来ないが、その相手は受信の側で取り直す。
+func (p *DeliverProcessor) refreshMetadata(host string) {
+	if p.metadataRefresher == nil || host == "" {
+		return
+	}
+	if p.statsEnabled != nil && !p.statsEnabled() {
+		return
+	}
+	p.metadataRefresher.MaybeRefresh(host)
 }
 
 // recordGoneSuspended is a best-effort wrapper that suspends the instance whose
@@ -645,6 +677,7 @@ func (p *DeliverProcessor) Handle(ctx context.Context, t driver.Task) error {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		p.recordSuccess(payload.Inbox)
 		_, _ = p.recordAttempt(a, deliveryhealth.ClassSuccess, resp.StatusCode, "")
+		p.refreshMetadata(host)
 		if signedWithEd25519 {
 			// Ed25519 で送って同期的に拒否されなかったことを記録する (#2393)。
 			// 「相手が検証できた」までは言えない (verify-in-worker な実装は検証前に
