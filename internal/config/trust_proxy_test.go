@@ -105,3 +105,35 @@ func TestParseTrustProxy(t *testing.T) {
 		assert.Contains(t, err.Error(), `"invalid"`)
 	})
 }
+
+// proxy / proxySmtp は、読めない値や未対応の scheme なら起動時に拒否すること。
+// 以前は直結に黙って倒れ、proxy で隠したつもりの送信元 IP が出ていた。
+// エラーに値そのもの (認証情報を含みうる) を出さないこと。
+func TestLoad_ProxyURLValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr string
+	}{
+		{name: "unset", yaml: ""},
+		{name: "http proxy", yaml: "proxy: http://proxy.example:3128\n"},
+		{name: "socks5 proxy", yaml: "proxy: socks5://proxy.example:1080\n"},
+		{name: "smtp socks5h with auth", yaml: "proxySmtp: socks5h://user:secretpass@proxy.example:1080\n"},
+		{name: "typo without scheme separator", yaml: "proxy: http//proxy.example:3128\n", wantErr: "invalid proxy"},
+		{name: "socks4 http proxy", yaml: "proxy: socks4://proxy.example:1080\n", wantErr: "unsupported scheme"},
+		{name: "socks4 smtp proxy", yaml: "proxySmtp: socks4://user:secretpass@proxy.example:1080\n", wantErr: "invalid proxySmtp"},
+		{name: "bare host", yaml: "proxySmtp: proxy.example:1080\n", wantErr: "invalid proxySmtp"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Load(writeTestConfig(t, testYAML+"\n"+tt.yaml))
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+			assert.NotContains(t, err.Error(), "secretpass", "エラーに認証情報を出した")
+		})
+	}
+}

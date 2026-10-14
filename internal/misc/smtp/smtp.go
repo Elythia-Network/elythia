@@ -271,9 +271,9 @@ func randomBoundary() string {
 //   - socks5h:// は socks5 と同じ扱い (Go 標準では区別しない)
 //   - http://host:port / https://host:port → HTTP CONNECT tunnel
 //
-// 不明な scheme / parse 失敗時は warn ログを出して direct dial にフォール
-// バックする (proxy 設定ミスでメール送信全停止になるよりは、direct で
-// 送れる経路があれば送る方を優先する)。
+// 不明な scheme / parse 失敗の値は config の読み込み (validateProxyURL) が起動時に
+// 拒否するので、ここには届かない。届いた場合 (config を通らない呼び出し) は
+// warn ログを出して direct dial に倒す。
 func dialSMTP(addr, proxyURL string, timeout time.Duration) (net.Conn, error) {
 	if proxyURL == "" {
 		return net.DialTimeout("tcp", addr, timeout)
