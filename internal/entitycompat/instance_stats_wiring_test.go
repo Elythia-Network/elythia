@@ -45,4 +45,8 @@ func TestInstanceStatsGateIsWired(t *testing.T) {
 		"accountMover.SetInstanceStats(instanceRepo, corefollowing.MetaInstanceStatsGate(metaRepo), chartHooks)",
 		"リモートアカウントが移行しても、その instance の followersCount と\n"+
 			"chart が減らない (#3330)")
+	assertWired(t, routerGo,
+		"deliverProcessor.SetMetadataRefresher(metadataRefresher, corefollowing.MetaInstanceStatsGate(metaRepo))",
+		"enableStatsForFederatedInstances を切っても、配送のたびに相手の nodeinfo を\n"+
+			"取り直し続ける (本家は切ると取りに行かない) (#3564)")
 }

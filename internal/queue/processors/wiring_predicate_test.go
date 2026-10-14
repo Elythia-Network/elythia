@@ -130,3 +130,20 @@ func TestInboxProcessor_HasSoftwareSuspensionChecker(t *testing.T) {
 	p.SetSoftwareSuspensionChecker(stubSuspendedChecker{})
 	assert.True(t, p.HasSoftwareSuspensionChecker(), "配線したら true")
 }
+
+// #3564: 受信と配送のたびに nodeinfo を取り直す。
+func TestProcessors_HasMetadataRefresher(t *testing.T) {
+	assert.False(t, (&InboxProcessor{}).HasMetadataRefresher(), "未配線なら false")
+	assert.False(t, (&DeliverProcessor{}).HasMetadataRefresher(), "未配線なら false")
+
+	ip := &InboxProcessor{}
+	ip.SetMetadataRefresher(stubRefresher{})
+	assert.True(t, ip.HasMetadataRefresher(), "配線したら true")
+	dp := &DeliverProcessor{}
+	dp.SetMetadataRefresher(stubRefresher{}, nil)
+	assert.True(t, dp.HasMetadataRefresher(), "配線したら true")
+}
+
+type stubRefresher struct{}
+
+func (stubRefresher) MaybeRefresh(string) {}

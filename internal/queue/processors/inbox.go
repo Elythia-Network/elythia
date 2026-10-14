@@ -97,6 +97,13 @@ type InstanceTracker interface {
 	MarkRequestReceived(host string) error
 }
 
+// InstanceMetadataRefresher refetches a remote instance's nodeinfo in the
+// background when it is older than 24 hours (#3564). 実装は
+// core/instance.MetadataRefresher。
+type InstanceMetadataRefresher interface {
+	MaybeRefresh(host string)
+}
+
 // InboxChartHook is invoked after a successfully verified inbound
 // activity so the chart subsystem can record federation / instance /
 // request charts. nil なら no-op。
@@ -153,8 +160,11 @@ type InboxProcessor struct {
 	hostBlocker     HostBlockChecker
 	softwareBlocker SoftwareSuspensionChecker
 	instanceTracker InstanceTracker
-	chartHook       InboxChartHook
-	capabilities    SignatureCapabilityRecorder
+	// metadataRefresher は受信のたびに相手の nodeinfo を 24 時間より古ければ
+	// 取り直す (#3564)。未配線なら取り直さない。
+	metadataRefresher InstanceMetadataRefresher
+	chartHook         InboxChartHook
+	capabilities      SignatureCapabilityRecorder
 	// telemetry は受信結果をホストごとに記録する (#2471)。未配線なら記録
 	// しないだけで、inbox 処理そのものには影響しない。
 	telemetry DeliveryTelemetry
@@ -222,6 +232,14 @@ func (p *InboxProcessor) SetSoftwareSuspensionChecker(c SoftwareSuspensionChecke
 func (p *InboxProcessor) SetInstanceTracker(t InstanceTracker) {
 	p.instanceTracker = t
 }
+
+// SetMetadataRefresher attaches the background nodeinfo refresher (#3564).
+func (p *InboxProcessor) SetMetadataRefresher(r InstanceMetadataRefresher) {
+	p.metadataRefresher = r
+}
+
+// HasMetadataRefresher reports whether the nodeinfo refresher is wired (#3564).
+func (p *InboxProcessor) HasMetadataRefresher() bool { return p.metadataRefresher != nil }
 
 // SetChartHook wires the InboxChartHook used to record federation /
 // inbox / request charts for a verified actor's host.
@@ -335,6 +353,13 @@ func (p *InboxProcessor) Handle(_ context.Context, t driver.Task) error {
 		// 記録も小文字にしたホストで残す (大文字混じりの keyId で別のホストとして
 		// 数えないため)。
 		p.recordInboxTelemetry(keyHost, deliveryhealth.ClassBlocked, started, "")
+		// **拒否した相手の nodeinfo も取り直す (#3564)。** 拒否の判定は保存済みの
+		// softwareVersion で行うので、ここで取り直さないと、相手が版を上げても
+		// 拒否が続く (受信で状態を戻す MarkRequestReceived はこの後にあり、届かない)。
+		// keyId は未検証なので、偽れば第三者が、登録済みで受信を拒否している
+		// ホストへの nodeinfo の取得を起こせる。取りに行くのは登録済みの相手だけで、
+		// 1 ホスト 1 日 1 回までに間引く。
+		p.refreshMetadata(keyHost)
 		return nil
 	}
 	if len(payload.Headers) > 0 && p.verifier != nil {
@@ -367,6 +392,9 @@ func (p *InboxProcessor) Handle(_ context.Context, t driver.Task) error {
 			// どれだけ来ているか」が一切見えない (#2471)。
 			if actor != nil && actor.Host != nil {
 				host = *actor.Host
+				// 受信を拒否するソフトウェアで止めた相手は取り直す (#3564)。
+				// ドメインブロックの相手は refreshMetadata が除く。
+				p.refreshMetadata(host)
 			}
 			p.recordInboxTelemetry(host, deliveryhealth.ClassBlocked, started, "")
 			return nil
@@ -421,6 +449,9 @@ func (p *InboxProcessor) Handle(_ context.Context, t driver.Task) error {
 			return nil
 		}
 		p.touchInstance(actor)
+		if actor != nil && actor.Host != nil {
+			p.refreshMetadata(*actor.Host)
+		}
 		p.recordSignatureCapability(actor, keyType, payload.Body)
 		p.commitChart(actor)
 		signer = actor
@@ -766,6 +797,23 @@ func (p *InboxProcessor) isBlocked(actor *model.User) bool {
 	// Delete / Undo も含めて拒否する。ソフトウェアが分からない相手は拒否しない
 	// (配送停止と同じ)。
 	return p.softwareBlocker != nil && p.softwareBlocker.IsSuspended(host)
+}
+
+// refreshMetadata schedules a background nodeinfo refetch for host unless the
+// host is domain-blocked or outside the federation allowlist (#3564).
+//
+// 本家はドメインブロックした相手には受信でも配送でも取りに行かない
+// (InboxProcessorService はブロックの判定で return した後に
+// fetchInstanceMetadata を呼ぶ)。受信を拒否するソフトウェアは Elythia 独自で、
+// 判定を更新するために取り直す。
+func (p *InboxProcessor) refreshMetadata(host string) {
+	if p.metadataRefresher == nil || host == "" {
+		return
+	}
+	if p.hostBlocker != nil && (p.hostBlocker.IsBlocked(host) || !p.hostBlocker.IsAllowed(host)) {
+		return
+	}
+	p.metadataRefresher.MaybeRefresh(host)
 }
 
 func (p *InboxProcessor) touchInstance(actor *model.User) {

@@ -954,6 +954,14 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 再利用して on-demand で再取得する (#351 フォロー)。
 	metadataFetcher := coreinstance.NewFetchMetadataService(instanceRepo, apFetcher)
 	instanceService.SetMetadataFetcher(metadataFetcher)
+	// 受信と配送のたびに、24 時間より古ければ nodeinfo を取り直す (#3564)。
+	// 本家の fetchInstanceMetadata と同じく、プロセスをまたいだ重複は Redis の
+	// ロックで防ぐ。取り直しは受信や配送のジョブとは切り離して走る。終了時は
+	// 新しい取り直しを止め、走っているものは短く待つだけにする (後に並ぶ hook の
+	// 時間を使い切らないため)。
+	metadataRefresher := coreinstance.NewMetadataRefresher(instanceRepo, metadataFetcher,
+		coreinstance.NewRedisRefreshLock(s.redis.Default))
+	s.registerShutdownHook(metadataRefresher.Close)
 
 	// inbox worker から呼ばれる MarkRequestReceived を per-host で 1s buffer
 	// に集約。同一 remote host の連続 inbox 受信で 10k UPDATE が 1 UPDATE に
@@ -1081,6 +1089,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 判定のたびに meta から読むので、常に配線する (#3558。以前は起動時に設定が
 	// 空なら配線せず、後から設定しても再起動するまで効かなかった)。
 	deliverProcessor.SetSuspendedChecker(corefederation.NewSuspendedChecker(metaRepo, instanceRepo))
+	// 配送に成功した相手の nodeinfo を取り直す (#3564)。本家と同じく
+	// enableStatsForFederatedInstances が有効なときだけ。
+	deliverProcessor.SetMetadataRefresher(metadataRefresher, corefollowing.MetaInstanceStatsGate(metaRepo))
 	s.queueServer.Handle(queue.TaskTypeDeliver, deliverProcessor.Handle)
 
 	// Inbox (#534 / #565): HTTP handler は body+signature 関連 header を
@@ -1097,6 +1108,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 受信を拒否するソフトウェア (#3362)。設定は判定のたびに meta から読む。
 	inboxProcessor.SetSoftwareSuspensionChecker(corefederation.NewInboxSuspendedChecker(metaRepo, instanceRepo))
 	inboxProcessor.SetInstanceTracker(instanceTouchBuffer)
+	// 受信のたびに相手の nodeinfo を取り直す (#3564)。受信を拒否した相手も
+	// 取り直し、拒否の判定を新しい版で行えるようにする。
+	inboxProcessor.SetMetadataRefresher(metadataRefresher)
 	inboxProcessor.SetSignatureCapabilityRecorder(sigCapBuffer)
 	// LD-Signature verifier (#1164 Phase D)。inbound activity body に signature
 	// field があれば RsaSignature2017 + 2026.5.4 hardening を実行する。signature
@@ -4733,6 +4747,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"受信を拒否するソフトウェアのホストの投稿を、リノートや返信の連鎖、ap/show で取り込む (#3563)"},
 		{"deliverProcessor.suspendedChecker", deliverProcessor.HasSuspendedChecker(),
 			"管理画面の配送停止中のソフトウェアが配送に効かない (画面には配送停止と出る、#3558)"},
+		{"inboxProcessor.metadataRefresher", inboxProcessor.HasMetadataRefresher(),
+			"受信で相手の nodeinfo を取り直さず、受信を拒否した相手が版を上げても拒否が続く (#3564)"},
+		{"deliverProcessor.metadataRefresher", deliverProcessor.HasMetadataRefresher(),
+			"配送で相手の nodeinfo を取り直さず、配信停止の判定が古い版のまま続く (#3564)"},
 		{"deliverProcessor.signingKeySource", deliverProcessor.HasSigningKeySource(),
 			"署名鍵は payload に載せず配送時に引くので、未配線だと全ての AP 配送が POST されないまま失敗する (連合が止まる)"},
 		{"notes.metaRepo", notesHandler.HasMetaRepo(),
