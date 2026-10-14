@@ -3,6 +3,7 @@ package reaction_test
 import (
 	"testing"
 
+	"github.com/elythia-network/elythia/internal/core/reaction"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -64,4 +65,27 @@ func TestService_Create_SameShortcodeLocalAndRemote(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, ":smile@remote.example:", got)
 	})
+}
+
+// リモートの利用者が自分以外のホストの絵文字を指したら ❤ に倒すこと (upstream と同じ)。
+// 自分のホストの絵文字は host 付きでも受ける (対照)。
+func TestService_Create_RemoteReactorCannotPickAnotherHostsEmoji(t *testing.T) {
+	host := "remote.example"
+	third := "third.example"
+	svc, repo, _, emojiRepo, _ := newService(t)
+	seedNote(repo, "n1", "author", model.NoteVisibilityPublic)
+	emojiRepo.Emojis["verified@third.example"] = &model.Emoji{Name: "verified", Host: &third}
+	emojiRepo.Emojis["smile@remote.example"] = &model.Emoji{Name: "smile", Host: &host}
+	remote := &model.User{ID: "remote-user", Host: &host}
+
+	got, err := svc.Create(remote, "n1", ":verified@third.example:")
+	require.NoError(t, err)
+	assert.Equal(t, reaction.FallbackReaction, got, "リモートの actor が第三のホストの絵文字を出せた")
+
+	svc2, repo2, _, emojiRepo2, _ := newService(t)
+	seedNote(repo2, "n1", "author", model.NoteVisibilityPublic)
+	emojiRepo2.Emojis["smile@remote.example"] = &model.Emoji{Name: "smile", Host: &host}
+	got, err = svc2.Create(remote, "n1", ":smile@Remote.Example:")
+	require.NoError(t, err)
+	assert.Equal(t, ":smile@remote.example:", got, "自分のホストの絵文字は受ける")
 }

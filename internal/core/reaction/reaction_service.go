@@ -642,6 +642,19 @@ func (s *Service) resolveReactionValue(raw string, actorHost *string) (string, *
 		if host == "." {
 			host = ""
 		}
+		// **リモートの利用者は、自分のホストの絵文字しか指せない。** upstream は
+		// `(?:@\.)?` しか受けず (`:name@otherhost:` は ❤ に倒れる)、名前を
+		// リアクションした人のホストで引く。他のホストを指させると、リモートの
+		// actor がリアクションの欄に第三のサーバーの絵文字 (公式マーク風のものなど)
+		// を出せた。ローカルの利用者が `:name@host:` で送る形は、frontend の相乗り
+		// (#2697) と揃えるために受ける (docs/divergence/frontend.md の mk.9)。
+		if host != "" && actorHost != nil && *actorHost != "" {
+			if !strings.EqualFold(host, *actorHost) {
+				return FallbackReaction, nil
+			}
+			// 大文字小文字の違いは、保存してある actor のホストの綴りで引く。
+			host = *actorHost
+		}
 		// reaction 文字列に @host が含まれず reactor が remote なら、
 		// 文字列 host が省略されているだけで実体はリモート絵文字。
 		// upstream ReactionService.create がやっているのと同じく
