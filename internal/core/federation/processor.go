@@ -520,7 +520,10 @@ func (p *Processor) process(body []byte, signer *model.User) error {
 	// {"id": "..."} object のケースを救済する (triage #999)。
 	act.normalizeActor(body)
 	if act.Actor == "" {
-		return errors.New("activity missing actor")
+		// 送り直しても actor は現れない。error で返すと inbox の job が再試行を
+		// 使い切ってから failed に積まれる (既定 8 回) ので、受け取って捨てる。
+		slog.Info("federation: dropping activity without an actor id")
+		return nil
 	}
 
 	// upstream performOneActivity は actor.isSuspended なら dispatch 前に
@@ -1161,7 +1164,10 @@ func (p *Processor) handleUndo(act genericActivity) error {
 	// 型エラーを握らないと、直後の normalizeActor (#999) が救うはずの
 	// `inner.actor` が embedded object のケースに**到達できない** (#2662)。
 	if err := unmarshalIgnoringTypeErrors(act.Object, &inner); err != nil {
-		return fmt.Errorf("invalid undo object: %w", err)
+		// object の形が壊れている Undo は送り直しても直らない。再試行を使い切らせ
+		// ないために受け取って捨てる (下の reject / flag も同じ)。
+		slog.Info("federation: dropping Undo with an unreadable object", "actor", act.Actor, "err", err)
+		return nil
 	}
 	// inner.actor が embedded object のケースも救済する (#999 / upstream #17340)。
 	//
@@ -1814,10 +1820,16 @@ func (p *Processor) handleCreate(act genericActivity, signer *model.User) error 
 	}
 	if errors.Is(err, ErrNoteAttributionMismatch) {
 		// id/attributedTo host 不一致・attribution≠配送actor (なりすまし forge) は
-		// retry で解消しないため ack して drop する (#1839)。malformed note
-		// (ErrInvalidNote) は従来どおり下の err 分岐で surface する。
+		// retry で解消しないため ack して drop する (#1839)。
 		slog.Info("federation: dropping forged inbound Create(Note) (attribution mismatch)",
 			"actor", act.Actor)
+		return nil
+	}
+	if errors.Is(err, ErrInvalidNote) {
+		// 形の壊れた note (object が文字列の URI だけ、必須の欄が無い等) も送り
+		// 直しで直らない。error で返すと 1 通で inbox の job が 8 回回って failed に
+		// 積まれていた。
+		slog.Info("federation: dropping inbound Create with an invalid note", "actor", act.Actor, "err", err)
 		return nil
 	}
 	if err != nil {
@@ -2428,7 +2440,11 @@ func (p *Processor) handleDelete(act genericActivity) error {
 		return fmt.Errorf("delete note: lookup note: %w", err)
 	}
 	if note.UserID != author.ID {
-		return errors.New("delete from non-author")
+		// 作者でない actor の Delete は何度送られても通らない。error で返すと、
+		// 1 通で inbox の job が 8 回回って failed に積まれる (公開ノートの URI を
+		// 知っていれば誰でも送れる)。upstream も文字列を返して ack する。
+		slog.Warn("federation: dropping Delete of a note by a non-author", "actor", act.Actor, "note", note.ID)
+		return nil
 	}
 	if p.noteDeleteSvc != nil {
 		return p.noteDeleteSvc.Delete(author, note.ID)
@@ -2624,7 +2640,8 @@ func (p *Processor) handleReject(act genericActivity) error {
 	} else if err := unmarshalIgnoringTypeErrors(act.Object, &inner); err != nil {
 		// 型エラーを握らないと、直後の normalizeActor (#999) が救うはずの
 		// `inner.actor` が embedded object のケースに**到達できない** (#2662)。
-		return fmt.Errorf("invalid reject object: %w", err)
+		slog.Info("federation: dropping Reject with an unreadable object", "actor", act.Actor, "err", err)
+		return nil
 	} else {
 		// inner.actor が embedded object のケースも救済する (#999 / upstream #17340)。
 		inner.normalizeActor(act.Object)
@@ -2777,10 +2794,12 @@ func (p *Processor) handleFlag(act genericActivity) error {
 	// string と []string しか受けず、object 形式の Flag を落としていた。
 	var uris activitypub.APIDList
 	if err := json.Unmarshal(act.Object, &uris); err != nil {
-		return errors.New("flag: cannot parse object")
+		slog.Info("federation: dropping Flag with an unreadable object", "actor", act.Actor)
+		return nil
 	}
 	if len(uris) == 0 {
-		return errors.New("flag: empty object")
+		slog.Info("federation: dropping Flag without an object", "actor", act.Actor)
+		return nil
 	}
 	// upstream flag() は object URI を config.url + '/users/' prefix の LOCAL
 	// user URI に絞ってから user id に map し users[0] を報告対象にする

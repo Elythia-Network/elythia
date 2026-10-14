@@ -55,3 +55,28 @@ func TestProcess_Flag_StripsNULFromComment(t *testing.T) {
 		assert.Equal(t, "spam\n[\"https://example.com/users/bob\"]", r.Comment)
 	}
 }
+
+// object の読めない / 空の Flag は送り直しても直らないので、error にせず (inbox の
+// job を 8 回回さず) 受け取って捨てること。通報は作らない。
+func TestProcess_Flag_UnreadableObjectIsDropped(t *testing.T) {
+	for _, obj := range []string{`123`, `[]`} {
+		p, repo, _ := newProcessorWithBlocking(t)
+		abuseRepo := testutil.NewMockAbuseReportRepository()
+		idGenFlag, _ := id.NewGenerator("aidx")
+		p.SetAbuseReportRepo(abuseRepo, idGenFlag)
+		repo.Users["bob"] = &model.User{ID: "bob", Username: "bob"}
+		body := []byte(`{"type":"Flag","actor":"https://remote.example/users/alice","object":` + obj + `,"content":"x"}`)
+		require.NoError(t, p.Process(body), obj)
+		assert.Empty(t, abuseRepo.Reports, obj)
+	}
+}
+
+// object の無い Undo / Reject は送り直しても直らないので、受け取って捨てること
+// (error で返すと inbox の job が再試行を使い切ってから failed に積まれる)。
+func TestProcess_UndoRejectWithoutObjectAreDropped(t *testing.T) {
+	for _, typ := range []string{"Undo", "Reject"} {
+		p, _, _ := newProcessorWithBlocking(t)
+		body := []byte(`{"type":"` + typ + `","actor":"https://remote.example/users/alice"}`)
+		assert.NoError(t, p.Process(body), typ)
+	}
+}

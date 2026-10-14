@@ -95,11 +95,11 @@ func TestProcess_CreateActorError(t *testing.T) {
 func TestProcess_CreateNoteIngestError(t *testing.T) {
 	env := newFullProcessor(t, aliceActor)
 	// object に id が無いケースは attributedTo を actor から補って (#1560) もなお
-	// IngestNoteWithCreated の ID 空チェックで ErrInvalidNote になり Process が
-	// error を surface する。
+	// IngestNoteWithCreated の ID 空チェックで ErrInvalidNote になる。送り直しても
+	// 直らないので、error で返さず (inbox の job を 8 回回さず) 受け取って捨てる。
 	body := []byte(`{"type":"Create","actor":"https://remote.example/users/alice","object":{"content":"no id"}}`)
-	err := env.processor.Process(body)
-	assert.Error(t, err)
+	require.NoError(t, env.processor.Process(body))
+	assert.Empty(t, env.noteRepo.Notes, "壊れた note を保存した")
 }
 
 // --- Like ---------------------------------------------------------------------
@@ -572,13 +572,19 @@ func TestProcess_SingletonArrayActivity_Foundkey(t *testing.T) {
 // 将来 batch 対応する余地を残すための保守的な挙動を pin する (#1185)。
 func TestProcess_MultiElementArray_NotUnwrapped(t *testing.T) {
 	env := newFullProcessor(t, aliceActor)
+	// 展開すれば消えるはずの note を置き、展開していないことを結果で見る。actor の
+	// 無い activity として受け取って捨てる (送り直しても直らないので error にしない)。
+	aliceURI := "https://remote.example/users/alice"
+	env.userRepo.Users["alice-id"] = &model.User{ID: "alice-id", Username: "alice", URI: &aliceURI}
+	uri := "https://remote.example/notes/x"
+	env.noteRepo.Notes["nx"] = &model.Note{ID: "nx", UserID: "alice-id", URI: &uri}
 	body := []byte(`[
-		{"type":"Delete","actor":"https://remote.example/users/alice","object":{"id":"x"}},
+		{"type":"Delete","actor":"https://remote.example/users/alice","object":{"id":"https://remote.example/notes/x"}},
 		{"type":"Delete","actor":"https://remote.example/users/alice","object":{"id":"y"}}
 	]`)
-	err := env.processor.Process(body)
-	assert.ErrorContains(t, err, "missing actor",
-		"multi-element array should not be unwrapped; downstream still fails with missing actor")
+	require.NoError(t, env.processor.Process(body))
+	_, err := env.noteRepo.FindByID("nx")
+	assert.NoError(t, err, "multi-element array should not be unwrapped")
 }
 
 func TestProcess_DeleteRemoteNote(t *testing.T) {
@@ -665,8 +671,11 @@ func TestProcess_DeleteFromNonAuthor(t *testing.T) {
 		"actor": "https://remote.example/users/alice",
 		"object": "https://remote.example/notes/n1"
 	}`)
-	err := env.processor.Process(body)
-	assert.Error(t, err)
+	// 作者でない actor の Delete は何度送られても通らない。error にすると 1 通で
+	// inbox の job が 8 回回るので、受け取って捨てる (ノートは消さない)。
+	require.NoError(t, env.processor.Process(body))
+	_, err := env.noteRepo.FindByID("n1")
+	assert.NoError(t, err, "作者でない actor の Delete でノートを消した")
 }
 
 // fakeAccountDeleteEnqueuer records cascade-purge enqueue calls.
