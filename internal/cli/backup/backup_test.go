@@ -395,3 +395,22 @@ func markedDir(t *testing.T) string {
 	require.NoError(t, backup.CreateDirMarker(dir))
 	return dir
 }
+
+// backup.integrityKeyFile が無ければ鍵は無し、短すぎる鍵のファイルは誤りとして
+// 返すこと (起動時に止める)。
+func TestIntegrityKey(t *testing.T) {
+	key, err := integrityKey(&config.BackupOptions{})
+	require.NoError(t, err)
+	assert.Nil(t, key)
+
+	short := filepath.Join(t.TempDir(), "key")
+	require.NoError(t, os.WriteFile(short, []byte("short"), 0o600))
+	_, err = integrityKey(&config.BackupOptions{IntegrityKeyFile: short})
+	require.ErrorContains(t, err, "backup.integrityKeyFile")
+
+	good := filepath.Join(t.TempDir(), "key")
+	require.NoError(t, os.WriteFile(good, []byte(strings.Repeat("a", 64)+"\n"), 0o600))
+	key, err = integrityKey(&config.BackupOptions{IntegrityKeyFile: good})
+	require.NoError(t, err)
+	assert.Len(t, key, 64)
+}

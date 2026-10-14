@@ -157,6 +157,9 @@ func verifyOptions(e verifyEnv, b *config.BackupOptions) (backup.VerifyOptions, 
 		}
 		opts.Identities = ids
 	}
+	if opts.IntegrityKey, err = integrityKey(b); err != nil {
+		return backup.VerifyOptions{}, err
+	}
 	return opts, nil
 }
 

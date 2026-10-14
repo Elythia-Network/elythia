@@ -113,8 +113,10 @@ func (w restoreWiring) open(cfg *config.Config, d *daemon.Daemon, storage backup
 	if err != nil {
 		idGen, _ = id.NewGenerator("aidx")
 	}
+	// 世代と同じ鍵で、リストアの記録の名前にも署名する。
+	store := restoreop.NewStore(clients.Default, prefix, r.IntegrityKey)
 	manager := restoreop.New(restoreop.Options{
-		Store: restoreop.NewStore(clients.Default, prefix),
+		Store: store,
 		DB:    r,
 		Maint: maint,
 		RunJudge: func(ctx context.Context) {

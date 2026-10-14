@@ -2,7 +2,9 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/elythia-network/elythia/internal/backup"
@@ -62,7 +64,11 @@ func (g Generation) Usable(requireVerified bool) bool {
 // 誤り) に関わらず「使えない世代」に倒す。使えない世代が増えても、PlanPrune の窓は
 // 古い方へ広がるだけで、消す世代は増えない。読めないことを理由に新しい世代を消す
 // ことは起きない。
-func Scan(ctx context.Context, st backup.Storage) ([]Generation, error) {
+//
+// **鍵があれば、署名の合わない世代を揃っていない世代として数える。** 保存先に書ける
+// 者が偽の世代 (と ok の verify.json) を置くと、使える世代として数えられ、整理で
+// 本物の古い世代を消させたり、未来の時刻の ID で遅れの通知を止めたりできた。
+func Scan(ctx context.Context, st backup.Storage, integrityKey []byte) ([]Generation, error) {
 	listed, err := backup.ListGenerations(ctx, st)
 	if err != nil {
 		return nil, fmt.Errorf("list generations: %w", err)
@@ -71,6 +77,14 @@ func Scan(ctx context.Context, st backup.Storage) ([]Generation, error) {
 	for _, l := range listed {
 		t, _ := backup.IDTime(l.ID)
 		g := Generation{ID: l.ID, Time: t, Complete: l.Complete(), Verify: VerifyNone, Size: l.Size}
+		if g.Complete && len(integrityKey) > 0 {
+			if _, err := backup.ReadMetaVerified(ctx, st, l.ID, integrityKey, false); err != nil {
+				g.Complete = false
+				if errors.Is(err, backup.ErrBadSignature) {
+					slog.Warn("backup: a generation's signature does not match; not counting it", "id", l.ID)
+				}
+			}
+		}
 		verifyKey := backup.Key(l.ID, backup.VerifyFile)
 		for _, o := range l.Objects {
 			if o.Key == verifyKey {

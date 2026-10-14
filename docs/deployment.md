@@ -124,14 +124,15 @@ dumpから戻す方法は、DBの大きさに比例して止まる時間が延�
 
 ### 戻すときに行うこと
 
-1. 保存先からdumpを一時ファイルへ落とし、大きさとsha256をメタ情報と突き合わせる。暗号化した世代は、`backup.encryption.identityFile`の鍵で復号する。**書き込む前に全部を確かめる**
-2. `pg_restore --exit-on-error --single-transaction --no-owner --no-privileges`で戻す。1つのトランザクションなので、途中で落ちたら何も残らない。`-mode swap`では、`<DB名>_restore_<日時>`を、バックアップに記録したencodingとlocale(メタ情報の`databaseLocale`)、今のDBの持ち主で作ってから戻す。記録が今のDBと違うとき(取った後にDBを作り直した、など)は、そのことを表示して、記録の値で作る
-3. 表ごとの行数を、メタ情報の行数(dumpと同じsnapshotで数えたもの)と突き合わせる
-4. `pg_dump`に入らないDB単位の設定(`ALTER DATABASE ... SET`)を、メタ情報の`databaseSettings`から入れ直す。取るときに`pg_db_role_setting`のうちDB単位のもの(ロール単位でないもの)を`名前=値`の形で記録しているので、`search_path`のような一覧の設定は要素ごとに分けて入れる。superuserにしか入れられない設定(`log_min_duration_statement`など)が付いていたら、superuserでないDBのユーザーではここで止まる
-5. `elythia migrate`と同じく、同梱のmigrationを当てる(本体の系列、forkの系列の順)。バイナリより古い版で取ったバックアップは、ここで追いつく
-6. `-mode swap`では、名前を1つのトランザクションで入れ替える。入れ替える直前に、今のDBと入れ替える側のDB(戻したDB。`-rollback`では退避したDB)の両方に、ほかの接続が無いことを確かめる。2〜6のどこかで落ちたら、作ったDBを消して止まる。今のDBには触らない。`-mode empty`で3〜5のどこかで落ちたら、戻した中身がDBに残るので、DBを作り直してから流し直す
-7. Redisの後始末(下の表)をし、`elythia doctor`のうち本体が動いていなくても回せる検査(DBの管理表、rootの利用者、Redis)を流す。後始末は、`-mode swap`と`-rollback`では既定で行う。`-mode empty`では、戻す世代が保存先の最新の世代なら既定で行わず、最新でなければ`-redis`の明示を求めて止まる(`-redis clean|keep`で変えられる。理由は[版を上げる手順](#postgresql-16--18-への移行-既存環境)の後の説明)
-8. 名前の入れ替えがサーバーの側で済んだ後に、接続が切れるなどしてエラーが返ったときは、`pg_database`を引き直して、入れ替わっていれば戻し終えたものとして7へ進む(`-rollback`の入れ替えも同じ)。どちらか分からなければ(繋がらない、両方の名前がある、など)、作ったDBを消さずに、確かめるべき2つのDBの名前を表示して終了コード1で止まる。そのときは、本体を起動する前に`pg_database`(`SELECT datname FROM pg_database`)を見て、次のどちらかを手で行う
+1. `backup.integrityKeyFile`を設定していれば、メタ情報の署名を確かめる。署名の無い世代は`-allow-unsigned`を付けて`-id`で明示したときだけ戻し、署名の合わない世代は戻さない([署名](backup.md#署名))
+2. 保存先からdumpを一時ファイルへ落とし、大きさとsha256をメタ情報と突き合わせる。暗号化した世代は、`backup.encryption.identityFile`の鍵で復号する。**書き込む前に全部を確かめる**
+3. `pg_restore --exit-on-error --single-transaction --no-owner --no-privileges`で戻す。1つのトランザクションなので、途中で落ちたら何も残らない。`-mode swap`では、`<DB名>_restore_<日時>`を、バックアップに記録したencodingとlocale(メタ情報の`databaseLocale`)、今のDBの持ち主で作ってから戻す。記録が今のDBと違うとき(取った後にDBを作り直した、など)は、そのことを表示して、記録の値で作る
+4. 表ごとの行数を、メタ情報の行数(dumpと同じsnapshotで数えたもの)と突き合わせる
+5. `pg_dump`に入らないDB単位の設定(`ALTER DATABASE ... SET`)を、メタ情報の`databaseSettings`から入れ直す。取るときに`pg_db_role_setting`のうちDB単位のもの(ロール単位でないもの)を`名前=値`の形で記録しているので、`search_path`のような一覧の設定は要素ごとに分けて入れる。superuserにしか入れられない設定(`log_min_duration_statement`など)が付いていたら、superuserでないDBのユーザーではここで止まる
+6. `elythia migrate`と同じく、同梱のmigrationを当てる(本体の系列、forkの系列の順)。バイナリより古い版で取ったバックアップは、ここで追いつく
+7. `-mode swap`では、名前を1つのトランザクションで入れ替える。入れ替える直前に、今のDBと入れ替える側のDB(戻したDB。`-rollback`では退避したDB)の両方に、ほかの接続が無いことを確かめる。3〜7のどこかで落ちたら、作ったDBを消して止まる。今のDBには触らない。`-mode empty`で4〜6のどこかで落ちたら、戻した中身がDBに残るので、DBを作り直してから流し直す
+8. Redisの後始末(下の表)をし、`elythia doctor`のうち本体が動いていなくても回せる検査(DBの管理表、rootの利用者、Redis)を流す。後始末は、`-mode swap`と`-rollback`では既定で行う。`-mode empty`では、戻す世代が保存先の最新の世代なら既定で行わず、最新でなければ`-redis`の明示を求めて止まる(`-redis clean|keep`で変えられる。理由は[版を上げる手順](#postgresql-16--18-への移行-既存環境)の後の説明)
+9. 名前の入れ替えがサーバーの側で済んだ後に、接続が切れるなどしてエラーが返ったときは、`pg_database`を引き直して、入れ替わっていれば戻し終えたものとして8へ進む(`-rollback`の入れ替えも同じ)。どちらか分からなければ(繋がらない、両方の名前がある、など)、作ったDBを消さずに、確かめるべき2つのDBの名前を表示して終了コード1で止まる。そのときは、本体を起動する前に`pg_database`(`SELECT datname FROM pg_database`)を見て、次のどちらかを手で行う
    - `<DB名>_before_restore_<日時>`があり、`<DB名>_restore_<日時>`が無い(入れ替わっている): [Redisの後始末](#redisの後始末)のkeyを消し、`vacuumdb --analyze-in-stages`を流してから起動する
    - `<DB名>_restore_<日時>`があり、`<DB名>_before_restore_<日時>`が無い(入れ替わっていない): `DROP DATABASE <DB名>_restore_<日時>`で作ったDBを消す。今のDBはそのまま使える
 

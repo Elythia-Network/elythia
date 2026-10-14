@@ -356,6 +356,10 @@ proxyBypassHosts:
 #      - age1...
 #    # Keep the private key outside the repository and .config.
 #    identityFile: /run/secrets/backup-identity.txt
+#  # HMAC key that signs each generation and the restore records. When set,
+#  # restore and verify refuse a generation not signed with it (docs/backup.md).
+#  # Keep it on the backup host only. openssl rand -hex 32 > backup-integrity.key
+#  integrityKeyFile: /run/secrets/backup-integrity.key
 #  # Paths of the PostgreSQL client programs. Empty means PATH. Their major
 #  # version must not be older than the server's.
 #  tools:

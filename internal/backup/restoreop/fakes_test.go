@@ -25,8 +25,11 @@ const testDB = "app"
 // maps to its "content" label, so that a test can tell which one has the
 // server's name after a swap.
 type fakeDB struct {
-	mu        sync.Mutex
-	dbs       map[string]string
+	mu  sync.Mutex
+	dbs map[string]string
+	// marks maps a database's content (the comment follows the database
+	// through renames, as in PostgreSQL) to the mark MarkOperation put on it.
+	marks     map[string]opMark
 	conns     map[string]int
 	verified  bool
 	fail      map[string]error
@@ -328,7 +331,7 @@ func newEnv(t *testing.T, mutate ...func(*Options)) *env {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
 	e := &env{t: t, mr: mr, rdb: rdb, db: newFakeDB()}
-	e.store = NewStore(rdb, "p:")
+	e.store = NewStore(rdb, "p:", nil)
 	e.maint = maintmode.NewStore(rdb, rdb, "p:")
 	e.opts = Options{
 		Store: e.store, DB: e.db, Maint: e.maint,
@@ -445,3 +448,37 @@ func (e *env) maintenance() *maintmode.State {
 	require.NoError(e.t, err)
 	return st
 }
+
+func (f *fakeDB) MarkOperation(_ context.Context, _, database, state, opID string) error {
+	if err := f.failing("mark"); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	content, ok := f.dbs[database]
+	if !ok {
+		return errors.New("no such database " + database)
+	}
+	if f.marks == nil {
+		f.marks = map[string]opMark{}
+	}
+	f.marks[content] = opMark{state: state, op: opID}
+	return nil
+}
+
+func (f *fakeDB) OperationMark(_ context.Context, _, database string) (string, string, bool, error) {
+	if err := f.failing("operationMark"); err != nil {
+		return "", "", false, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	content, ok := f.dbs[database]
+	if !ok {
+		return "", "", false, nil
+	}
+	m := f.marks[content]
+	return m.state, m.op, true, nil
+}
+
+// opMark is the comment MarkOperation put on a database.
+type opMark struct{ state, op string }

@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,7 +28,7 @@ func TestScanClassifiesGenerations(t *testing.T) {
 	st.set("generations/latest/meta.json", []byte("{}"))
 	st.set("generations/"+ok, []byte("not inside a directory"))
 
-	gens, err := Scan(context.Background(), st)
+	gens, err := Scan(context.Background(), st, nil)
 	require.NoError(t, err)
 	require.Len(t, gens, 5)
 	want := []struct {
@@ -69,7 +70,7 @@ func TestScanUsesVerifyPassed(t *testing.T) {
 	b, err = json.Marshal(backup.VerifyResult{ID: stale, OK: true})
 	require.NoError(t, err)
 	st.set(backup.Key(other, backup.VerifyFile), b)
-	gens, err := Scan(context.Background(), st)
+	gens, err := Scan(context.Background(), st, nil)
 	require.NoError(t, err)
 	require.Len(t, gens, 2)
 	assert.Equal(t, VerifyFailed, gens[0].Verify, "dumpSha256 differs from meta.json")
@@ -80,7 +81,7 @@ func TestScanErrors(t *testing.T) {
 	st := newMemStorage()
 	st.addGeneration(dayN(0), true, "ok")
 	st.listErr = errBoom
-	_, err := Scan(context.Background(), st)
+	_, err := Scan(context.Background(), st, nil)
 	require.ErrorIs(t, err, errBoom)
 }
 
@@ -89,7 +90,7 @@ func TestScanTreatsUnreadableFilesAsUnusable(t *testing.T) {
 	st := newMemStorage()
 	id := st.addGeneration(dayN(0), true, "ok")
 	st.getErr = errBoom
-	gens, err := Scan(context.Background(), st)
+	gens, err := Scan(context.Background(), st, nil)
 	require.NoError(t, err)
 	require.Len(t, gens, 1)
 	assert.False(t, gens[0].Complete, "meta.json that cannot be read")
@@ -99,7 +100,7 @@ func TestScanTreatsUnreadableFilesAsUnusable(t *testing.T) {
 	// meta.json はあるが、名指しする dump が無い世代は揃っていない。
 	st.getErr = nil
 	require.NoError(t, st.Delete(context.Background(), backup.Key(id, backup.DumpFile)))
-	gens, err = Scan(context.Background(), st)
+	gens, err = Scan(context.Background(), st, nil)
 	require.NoError(t, err)
 	assert.False(t, gens[0].Complete, "meta.json without its dump")
 	assert.Equal(t, VerifyOK, gens[0].Verify)
@@ -221,4 +222,31 @@ func TestPruneSkipsGenerationAlreadyGone(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{old}, deleted, "the generation already gone is not reported as deleted")
 	assert.Equal(t, []string{gone, newer}, st.ids())
+}
+
+// 鍵があれば、署名の合う世代だけを揃った世代として数えること。保存先に書ける者が
+// 置いた偽の世代 (ok の verify.json 付き) で、整理の窓を埋めたり遅れの通知を
+// 止めたりさせない。
+func TestScanCountsOnlySignedGenerationsWithKey(t *testing.T) {
+	key := []byte(strings.Repeat("k", 32))
+	st := newMemStorage()
+	signed := st.addGeneration(dayN(0), true, "ok")
+	st.set(backup.Key(signed, backup.MetaSigFile), []byte(backup.SignMeta(key, signed, mustGet(t, st, backup.Key(signed, backup.MetaFile)))))
+	unsigned := st.addGeneration(dayN(1), true, "ok")
+	forged := st.addGeneration(dayN(2), true, "ok")
+	st.set(backup.Key(forged, backup.MetaSigFile), []byte(backup.SignMeta([]byte(strings.Repeat("x", 32)), forged, mustGet(t, st, backup.Key(forged, backup.MetaFile)))))
+
+	gens, err := Scan(context.Background(), st, key)
+	require.NoError(t, err)
+	require.Len(t, gens, 3)
+	assert.True(t, gens[0].Usable(true), signed)
+	assert.False(t, gens[1].Usable(true), "署名の無い世代を使える世代に数えた: %s", unsigned)
+	assert.False(t, gens[2].Usable(true), "署名の合わない世代を使える世代に数えた")
+
+	// 鍵が無ければ従来どおり。
+	gens, err = Scan(context.Background(), st, nil)
+	require.NoError(t, err)
+	for _, g := range gens {
+		assert.True(t, g.Usable(true), g.ID)
+	}
 }

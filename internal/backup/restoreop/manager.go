@@ -31,6 +31,11 @@ type DB interface {
 	CheckDatabaseMigrations(ctx context.Context, dbname string) (*backup.DatabaseMigrations, error)
 	CheckRollback(ctx context.Context, maintenance, database, kept, keepAs string) error
 	KeptDatabases(ctx context.Context, maintenance, database string) ([]backup.KeptDatabase, error)
+	// MarkOperation / OperationMark keep, outside Redis, which operation is
+	// switching a database out and whether it has ended
+	// (backup.Restorer.MarkOperation).
+	MarkOperation(ctx context.Context, maintenance, database, state, opID string) error
+	OperationMark(ctx context.Context, maintenance, database string) (state, opID string, exists bool, err error)
 }
 
 // Maintenance is the maintenance state. *maintmode.Store implements it.
@@ -516,7 +521,7 @@ var errBadRecordNames = errors.New("the database names in the record do not have
 // リストアの Target は <db>_restore_<時刻>、ロールバックの Target と Before / Aside
 // は退避した DB の名前 (<db>_before_restore_<時刻> か <db>_rolled_back_<時刻>)。
 func checkRecordNames(rec *Record, database string) error {
-	if rec == nil || rec.Database != database {
+	if rec == nil || rec.Database != database || rec.integrity == integrityBad {
 		return errBadRecordNames
 	}
 	// **Target と Before の組も、作るときの形と合っているかを見る。** リストアの
@@ -524,10 +529,9 @@ func checkRecordNames(rec *Record, database string) error {
 	// (rolled_back) で作る。形の合わない記録 (壊れた記録や、別の操作の名前を
 	// 混ぜた記録) で DB を入れ替えない。
 	//
-	// **これは記録の真正さの検査ではない。** Redis に書ける者は、残っている退避の
-	// DB と同じ時刻の組で記録を作れるので、回復の巻き戻しでその DB を本番の名前へ
-	// 入れ替えさせられる (今の本番は rolled_back として残り、消えはしない)。
-	// 防ぐには記録に鍵で署名する必要があり、世代の改ざん検出と合わせて扱う。
+	// **形の検査だけでは記録の真正さは分からない。** Redis に書ける者は、残って
+	// いる退避の DB と同じ時刻の組で記録を作れる。backup.integrityKeyFile を設定
+	// すると記録に署名し (Store.SetIntegrityKey)、署名の合わない記録もここで断る。
 	switch rec.Kind {
 	case KindRollback:
 		if _, _, ok := backup.ParseKeptName(database, rec.Target); !ok {

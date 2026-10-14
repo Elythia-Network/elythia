@@ -217,7 +217,12 @@ func TestTake_Directory(t *testing.T) {
 	p.seedSimple(t)
 	st, err := NewDirStorage(markedDir(t))
 	require.NoError(t, err)
-	meta, err := Take(context.Background(), p.takeOptions(st))
+	opts := p.takeOptions(st)
+	opts.IntegrityKey = testIntegrityKey
+	meta, err := Take(context.Background(), opts)
+	require.NoError(t, err)
+	// 鍵があれば meta.json に署名し、その署名で読めること。
+	_, err = ReadMetaVerified(context.Background(), st, meta.ID, testIntegrityKey, false)
 	require.NoError(t, err)
 
 	assert.Equal(t, map[string]int64{

@@ -1074,3 +1074,17 @@ func TestDaemonAcquireHoldsTheJobSlot(t *testing.T) {
 		require.ErrorIs(t, err, ErrNotRunning, "after stopping")
 	})
 }
+
+// 鍵があれば、daemon は署名の無い世代を使える世代として数えないこと。保存先に
+// 置かれた偽の新しい世代があっても、取るのを先送りしない (使える世代が無い)。
+func TestDaemonIgnoresUnsignedGenerationsWithKey(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := mustSchedule(t, config.BackupScheduleOptions{Interval: "24h", At: "04:00", Keep: 3, Verify: true}, time.UTC)
+		r := newRig(t, s, func(r *rig) { r.st.addGeneration(epoch.Add(-time.Hour), true, "ok") })
+		r.d = New(Options{Schedule: s, Storage: r.st, Taker: r.taker, Verifier: r.ver, Notifier: r.notify,
+			Instance: "https://example.tld", Logger: discardLogger(), Clock: utcClock{}, IntegrityKey: []byte(strings.Repeat("k", 32))})
+		r.start(t)
+		assert.Equal(t, []time.Time{at(0, 0)}, r.taker.callTimes(), "署名の無い世代を使える世代に数えて、取るのを先送りした")
+		r.stop()
+	})
+}

@@ -662,3 +662,35 @@ func TestIsDuplicateDatabase(t *testing.T) {
 	assert.False(t, isDuplicateDatabase(&pgconn.PgError{Code: "42501"}), "insufficient_privilege")
 	assert.False(t, isDuplicateDatabase(errors.New("conn closed")))
 }
+
+// 鍵があれば、latest は署名の無い・合わない世代を飛ばして、署名の合う世代を選ぶ
+// こと。保存先に書ける者が新しい偽の世代を置いても、その下の本物の世代を選ぶ。
+func TestResolveLatestSkipsUnsignedWithKey(t *testing.T) {
+	ctx := context.Background()
+	s := newRSStorage()
+	put := func(id string) {
+		s.putJSON(t, Key(id, MetaFile), Meta{FormatVersion: MetaFormatVersion, ID: id, DumpFile: DumpFile})
+		s.objs[Key(id, DumpFile)] = []byte("dump")
+		s.putJSON(t, Key(id, VerifyFile), VerifyResult{ID: id, OK: true})
+	}
+	put("20261001T000000Z")
+	s.objs[Key("20261001T000000Z", MetaSigFile)] = []byte(SignMeta(testIntegrityKey, "20261001T000000Z", s.objs[Key("20261001T000000Z", MetaFile)]))
+	put("20261002T000000Z") // 署名なし
+	put("20261003T000000Z")
+	s.objs[Key("20261003T000000Z", MetaSigFile)] = []byte(SignMeta([]byte(strings.Repeat("x", 32)), "20261003T000000Z", s.objs[Key("20261003T000000Z", MetaFile)]))
+
+	r := &Restorer{Storage: s, IntegrityKey: testIntegrityKey}
+	id, verified, err := r.resolveID(ctx, LatestGeneration)
+	require.NoError(t, err)
+	assert.Equal(t, "20261001T000000Z", id)
+	assert.True(t, verified)
+
+	// -allow-unsigned でも、latest は署名の無い世代を選ばない (誰でも置けるため)。
+	// 署名の無い世代は ID を明示したときだけ戻す。
+	r.AllowUnsigned = true
+	id, _, err = r.resolveID(ctx, LatestGeneration)
+	require.NoError(t, err)
+	assert.Equal(t, "20261001T000000Z", id, "-allow-unsigned で latest が署名の無い世代を選んだ")
+	_, err = r.readMeta(ctx, "20261002T000000Z")
+	require.NoError(t, err, "ID を明示すれば署名の無い世代も読む")
+}

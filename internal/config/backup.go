@@ -11,6 +11,11 @@ type BackupOptions struct {
 	Storage BackupStorageOptions `mapstructure:"storage"`
 	// Encryption encrypts the dump with age when Enabled.
 	Encryption BackupEncryptionOptions `mapstructure:"encryption"`
+	// IntegrityKeyFile is the path of the HMAC key that signs each
+	// generation's meta.json. When set, restore and verify refuse a
+	// generation that is not signed with it, and the restore records in
+	// Redis are signed too. Empty disables signing.
+	IntegrityKeyFile string `mapstructure:"integrityKeyFile"`
 	// Schedule drives `elythia backup daemon` (#3460).
 	Schedule BackupScheduleOptions `mapstructure:"schedule"`
 	// Notify is where failures, mismatches and delays are reported (#3460).

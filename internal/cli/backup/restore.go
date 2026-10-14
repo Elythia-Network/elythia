@@ -73,6 +73,9 @@ func restore(e restoreEnv, args []string) int {
 	tmpDir := fs.String("tmp-dir", "", "directory for the downloaded dump (default: the system temporary directory)")
 	redisMode := fs.String("redis", redisAuto, "after switching databases: clean (delete timelines, caches and pending deliveries), keep, "+
 		"or auto (clean for -mode swap and -rollback; keep for -mode empty when restoring the newest generation, otherwise ask)")
+	allowUnsigned := fs.Bool("allow-unsigned", false, "with backup.integrityKeyFile set, also restore a generation that has no signature "+
+		"(one taken before the key was set) given by -id; -id latest still picks only signed generations, "+
+		"and a signature that does not match is refused regardless")
 	if code, ok := cliflag.Parse(fs, args); !ok {
 		return code
 	}
@@ -121,6 +124,9 @@ func restore(e restoreEnv, args []string) int {
 		fmt.Fprintf(e.stderr, "elythia backup restore: %v\n", err)
 		return 1
 	}
+	// 署名の無い世代を戻すのは、運営者が手元で明示したときだけ。画面からの
+	// 戻し (daemon) には同じ口を設けない。
+	r.AllowUnsigned = *allowUnsigned
 
 	if *redisMode == redisAuto && bkp.RestoreMode(*mode) == bkp.RestoreEmpty {
 		if code := e.checkNewest(ctx, r, *id); code != 0 {
@@ -308,6 +314,11 @@ func withBackupTools(r *bkp.Restorer, b *config.BackupOptions, storage bkp.Stora
 		}
 		r.Identities = ids
 	}
+	key, err := integrityKey(b)
+	if err != nil {
+		return err
+	}
+	r.IntegrityKey = key
 	return nil
 }
 

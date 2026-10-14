@@ -3,9 +3,7 @@ package backup
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"sort"
 )
 
@@ -87,9 +85,19 @@ func ListGenerations(ctx context.Context, st Storage) ([]Generation, error) {
 // ReadMeta reads and decodes meta.json of generation id. It rejects format
 // versions it does not know.
 func ReadMeta(ctx context.Context, st Storage, id string) (*Meta, error) {
-	var m Meta
-	if err := readJSON(ctx, st, id, MetaFile, &m); err != nil {
+	body, err := readObject(ctx, st, id, MetaFile)
+	if err != nil {
 		return nil, err
+	}
+	return decodeMeta(id, body)
+}
+
+// decodeMeta decodes meta.json body of generation id and rejects format
+// versions it does not know.
+func decodeMeta(id string, body []byte) (*Meta, error) {
+	var m Meta
+	if err := json.Unmarshal(body, &m); err != nil {
+		return nil, fmt.Errorf("backup: decode %s: %w", Key(id, MetaFile), err)
 	}
 	if m.FormatVersion != MetaFormatVersion {
 		return nil, fmt.Errorf("backup: %s has formatVersion %d, this elythia reads %d", Key(id, MetaFile), m.FormatVersion, MetaFormatVersion)
@@ -110,20 +118,9 @@ func ReadVerify(ctx context.Context, st Storage, id string) (*VerifyResult, erro
 }
 
 func readJSON(ctx context.Context, st Storage, id, name string, v any) error {
-	if !ValidID(id) {
-		return fmt.Errorf("backup: invalid generation id %q", id)
-	}
-	r, err := st.Get(ctx, Key(id, name))
+	body, err := readObject(ctx, st, id, name)
 	if err != nil {
 		return err
-	}
-	defer r.Close()
-	body, err := io.ReadAll(io.LimitReader(r, maxMetaBytes+1))
-	if err != nil {
-		return fmt.Errorf("backup: read %s: %w", Key(id, name), err)
-	}
-	if len(body) > maxMetaBytes {
-		return errors.New("backup: " + Key(id, name) + " is too large")
 	}
 	if err := json.Unmarshal(body, v); err != nil {
 		return fmt.Errorf("backup: decode %s: %w", Key(id, name), err)

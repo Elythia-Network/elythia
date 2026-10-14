@@ -3,6 +3,8 @@ package restoreop
 import (
 	"context"
 	"errors"
+	"github.com/elythia-network/elythia/internal/backup"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -34,12 +36,24 @@ func crashed(t *testing.T, step string, names map[string]string, phase string, a
 	for k, v := range names {
 		e.db.dbs[k] = v
 	}
+	markSwitchedOut(e, rec)
 	e.db.mu.Unlock()
 	if phase != "" {
 		require.NoError(t, e.maint.Enter(ctx, maintmode.State{OpID: rec.OpID, Kind: maintmode.KindRestore, Phase: phase}))
 	}
 	e.start()
 	return e, rec
+}
+
+// markSwitchedOut puts, as the switch does, rec's active mark on the
+// database kept aside (when it exists). The caller holds e.db.mu.
+func markSwitchedOut(e *env, rec *Record) {
+	if content, ok := e.db.dbs[rec.Before]; ok {
+		if e.db.marks == nil {
+			e.db.marks = map[string]opMark{}
+		}
+		e.db.marks[content] = opMark{state: backup.MarkActive, op: rec.OpID}
+	}
 }
 
 const (
@@ -427,12 +441,14 @@ func TestRecover_ReadsTheMaintenanceAgain(t *testing.T) {
 			e.stop()
 			e.process("p1")
 			ctx := context.Background()
-			require.NoError(t, e.store.create(ctx, &Record{OpID: "restore-x", Step: c.step, Database: testDB, Target: tgt, Before: before}))
+			rec := &Record{OpID: "restore-x", Step: c.step, Database: testDB, Target: tgt, Before: before}
+			require.NoError(t, e.store.create(ctx, rec))
 			e.db.mu.Lock()
 			e.db.dbs = map[string]string{}
 			for k, v := range c.names {
 				e.db.dbs[k] = v
 			}
+			markSwitchedOut(e, rec)
 			e.db.mu.Unlock()
 			require.NoError(t, e.maint.Enter(ctx, maintmode.State{OpID: "restore-x", Kind: maintmode.KindRestore, Phase: maintmode.PhaseHeld}))
 			h.mu.Lock()
@@ -584,4 +600,213 @@ func TestCheckRecordNames(t *testing.T) {
 	for _, r := range bad {
 		assert.ErrorIs(t, checkRecordNames(&r, testDB), errBadRecordNames, "%+v", r)
 	}
+}
+
+// 鍵があれば記録の名前に署名し、署名の合う記録だけを使うこと。
+func TestStore_SignsRecordNames(t *testing.T) {
+	ctx := context.Background()
+	key := []byte(strings.Repeat("k", 32))
+	e := newEnv(t)
+	e.stop()
+	e.store.SetIntegrityKey(key)
+	now := time.Now()
+	rec := &Record{OpID: "op-signed", Kind: KindRestore, Step: StepPreparing, Database: testDB, Target: tgt, Before: before, CreatedAt: now, UpdatedAt: now}
+	require.NoError(t, e.store.create(ctx, rec))
+
+	got, err := e.store.Get(ctx, rec.OpID)
+	require.NoError(t, err)
+	assert.NoError(t, checkRecordNames(got, testDB), "自分の書いた記録を断った")
+
+	// 退避の名前は後から書く。それにも署名する。
+	aside := testDB + "_rolled_back_20261010120500"
+	require.NoError(t, e.store.setStep(ctx, rec.OpID, "", StepReverting, now, "aside", aside))
+	got, err = e.store.Get(ctx, rec.OpID)
+	require.NoError(t, err)
+	assert.NoError(t, checkRecordNames(got, testDB))
+
+	// Redis に書ける者が名前を書き換えた (形は正しい) 記録は断る。
+	key2 := e.store.key(rec.OpID)
+	e.mr.HSet(key2, "aside", testDB+"_rolled_back_20250101000000")
+	got, err = e.store.Get(ctx, rec.OpID)
+	require.NoError(t, err)
+	assert.ErrorIs(t, checkRecordNames(got, testDB), errBadRecordNames, "書き換えた退避の名前を使った")
+
+	e.mr.HSet(key2, "aside", aside)
+	e.mr.HSet(key2, "before", testDB+"_before_restore_20250101000000", "target", testDB+"_restore_20250101000000")
+	got, err = e.store.Get(ctx, rec.OpID)
+	require.NoError(t, err)
+	assert.ErrorIs(t, checkRecordNames(got, testDB), errBadRecordNames, "書き換えた組の名前を使った")
+}
+
+// 鍵があるとき、署名の無い記録 (鍵を持たない者が書いたもの) で回復の巻き戻しを
+// しないこと。形と組の検査だけでは、残っている退避の DB と同じ時刻の組の記録を
+// 作られると、その DB を本番の名前へ入れ替えていた。
+func TestRecover_RefusesUnsignedRecordWithKey(t *testing.T) {
+	e := newEnv(t)
+	e.stop()
+	e.process("p1")
+	ctx := context.Background()
+	now := time.Now()
+	rec := &Record{
+		OpID: "restore-forged", Step: StepSwitched, GenerationID: "20261010T120000Z", Database: testDB,
+		Target: tgt, Before: before, UserID: "u1", CreatedAt: now, UpdatedAt: now,
+	}
+	require.NoError(t, e.store.create(ctx, rec)) // 鍵を持たない者が書いた記録
+	e.store.SetIntegrityKey([]byte(strings.Repeat("k", 32)))
+	e.db.mu.Lock()
+	e.db.dbs = map[string]string{testDB: "live-production", before: "old-kept-from-earlier-restore"}
+	e.db.mu.Unlock()
+	require.NoError(t, e.maint.Enter(ctx, maintmode.State{OpID: rec.OpID, Kind: maintmode.KindRestore, Phase: maintmode.PhaseHeld}))
+	e.start()
+	e.waitStep(rec.OpID, StepUnknown)
+	assert.Equal(t, 0, e.db.switches, "署名の無い記録で DB を入れ替えた")
+	assert.Equal(t, "live-production", e.db.dbs[testDB])
+}
+
+// 鍵がある運用で、リストアとロールバックが最後まで進み、退避した DB に終わった
+// 印を付けること。終わった記録を Redis で途中の段へ書き戻しても (署名は合う)、
+// 回復は印を見て巻き戻さないこと。
+func TestRecover_DoesNotReplayFinishedOperation(t *testing.T) {
+	key := []byte(strings.Repeat("k", 32))
+	for _, kind := range []string{KindRestore, KindRollback} {
+		t.Run(kind, func(t *testing.T) {
+			e := newEnv(t)
+			e.store.SetIntegrityKey(key)
+			e.process("p1")
+			ctx := context.Background()
+			var rec *Record
+			if kind == KindRollback {
+				e.withKept()
+				rec, _ = e.rollback()
+			} else {
+				rec, _ = e.prepare()
+			}
+			require.NoError(t, e.m.Confirm(ctx, rec.OpID))
+			e.waitStep(rec.OpID, StepDone)
+			prod := e.db.content(testDB)
+			kept := e.db.content(rec.Before)
+			e.db.mu.Lock()
+			marked := e.db.marks[kept]
+			switches := e.db.switches
+			e.db.mu.Unlock()
+			require.Equal(t, opMark{state: backup.MarkFinished, op: rec.OpID}, marked, "退避した DB に終わった印を付けていない")
+
+			// Redis に書ける者が、終わった記録を名前の入れ替えの後の段へ書き戻す。
+			e.stop()
+			e.mr.HSet(e.store.key(rec.OpID), "step", StepSwitched)
+			e.mr.SetTTL(e.store.key(rec.OpID), 0)
+			require.NoError(t, e.mr.Set(e.store.CurrentKey(), rec.OpID))
+			require.NoError(t, e.maint.Enter(ctx, maintmode.State{OpID: rec.OpID, Kind: maintmode.KindRestore, Phase: maintmode.PhaseHeld}))
+			got, err := e.store.Get(ctx, rec.OpID)
+			require.NoError(t, err)
+			require.NoError(t, checkRecordNames(got, testDB), "書き戻した記録の署名は合う (前提)")
+
+			e.start()
+			e.waitStep(rec.OpID, StepDone)
+			e.db.mu.Lock()
+			defer e.db.mu.Unlock()
+			assert.Equal(t, switches, e.db.switches, "終わった操作を巻き戻した")
+			assert.Equal(t, prod, e.db.dbs[testDB])
+		})
+	}
+}
+
+// replayAt puts rec back to step with the current marker and a held
+// maintenance, as someone who can write Redis would, and restarts the service.
+func replayAt(t *testing.T, e *env, rec *Record, step string) {
+	t.Helper()
+	ctx := context.Background()
+	e.stop()
+	e.mr.HSet(e.store.key(rec.OpID), "step", step)
+	e.mr.SetTTL(e.store.key(rec.OpID), 0)
+	require.NoError(t, e.mr.Set(e.store.CurrentKey(), rec.OpID))
+	_ = e.maint.Clear(ctx, rec.OpID)
+	require.NoError(t, e.maint.Enter(ctx, maintmode.State{OpID: rec.OpID, Kind: maintmode.KindRestore, Phase: maintmode.PhaseHeld}))
+	e.start()
+}
+
+// 名前を入れ替えた後に運営者へ渡した (unknown で終えた) 操作は、記録を途中の段へ
+// 書き戻されても巻き戻さず、メンテナンスも外さずに、運営者へ渡し直すこと。
+// 渡した直後に記録 (unknown) を書けずに途中の段のまま残ったときも同じ形になる。
+func TestRecover_DoesNotReplayGivenUpOperation(t *testing.T) {
+	swapped := map[string]string{testDB: "restored", before: "current"}
+	// メンテナンスが無いまま switched で落ちた: 戻す前に保てないので運営者に渡す。
+	e, rec := crashed(t, StepSwitched, swapped, "", "")
+	e.waitStep(rec.OpID, StepUnknown)
+	e.db.mu.Lock()
+	assert.Equal(t, opMark{state: backup.MarkHanded, op: rec.OpID}, e.db.marks["current"], "運営者に渡すときに印を替えていない")
+	switches := e.db.switches
+	e.db.mu.Unlock()
+
+	for _, step := range []string{StepSwitched, StepReverting, StepResuming} {
+		replayAt(t, e, rec, step)
+		e.waitStep(rec.OpID, StepUnknown)
+		e.db.mu.Lock()
+		assert.Equal(t, switches, e.db.switches, "運営者に渡した操作を巻き戻した (%s)", step)
+		assert.Equal(t, "restored", e.db.dbs[testDB], step)
+		e.db.mu.Unlock()
+		st := e.maintenance()
+		require.NotNil(t, st, "運営者に渡した操作のメンテナンスを外した (%s)", step)
+		assert.Equal(t, rec.OpID, st.OpID, step)
+	}
+}
+
+// 退避した DB に、この操作の進行中の印が無ければ巻き戻さないこと。鍵が無くても、
+// 残っている退避の DB を指す記録を作られて、それを本番へ入れ替えない。
+func TestRecover_RefusesKeptDatabaseWithoutThisOperationsMark(t *testing.T) {
+	for name, mark := range map[string]*opMark{
+		"no mark":            nil,
+		"another operation":  {state: backup.MarkActive, op: "restore-other"},
+		"finished elsewhere": {state: backup.MarkFinished, op: "restore-other"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t)
+			e.stop()
+			e.process("p1")
+			ctx := context.Background()
+			now := time.Now()
+			rec := &Record{OpID: "restore-forged", Step: StepSwitched, Database: testDB, Target: tgt, Before: before, CreatedAt: now, UpdatedAt: now}
+			require.NoError(t, e.store.create(ctx, rec))
+			e.db.mu.Lock()
+			e.db.dbs = map[string]string{testDB: "live", before: "old-kept"}
+			if mark != nil {
+				e.db.marks = map[string]opMark{"old-kept": *mark}
+			}
+			e.db.mu.Unlock()
+			require.NoError(t, e.maint.Enter(ctx, maintmode.State{OpID: rec.OpID, Kind: maintmode.KindRestore, Phase: maintmode.PhaseHeld}))
+			e.start()
+			e.waitStep(rec.OpID, StepUnknown)
+			e.db.mu.Lock()
+			defer e.db.mu.Unlock()
+			assert.Equal(t, 0, e.db.switches, "印の無い退避の DB を本番へ入れ替えた")
+			assert.Equal(t, "live", e.db.dbs[testDB])
+		})
+	}
+}
+
+// 入れ替える前に進行中の印を付けられなければ、入れ替えずに中止すること。
+func TestSwitch_RefusesWithoutTheMark(t *testing.T) {
+	e := newEnv(t)
+	e.process("p1")
+	rec, _ := e.prepare()
+	e.db.mu.Lock()
+	e.db.fail = map[string]error{"mark": errors.New("permission denied")}
+	e.db.mu.Unlock()
+	require.NoError(t, e.m.Confirm(context.Background(), rec.OpID))
+	e.waitStep(rec.OpID, StepAborted)
+	e.db.mu.Lock()
+	defer e.db.mu.Unlock()
+	assert.Equal(t, 0, e.db.switches, "印を付けずに入れ替えた")
+	assert.Equal(t, "current", e.db.dbs[testDB])
+}
+
+// resuming で落ち、判定役が既にメンテナンスを終えていたときも、退避した DB に
+// 終わった印を付けて done にすること。
+func TestRecover_ResumingAfterTheJudgeMarksFinished(t *testing.T) {
+	swapped := map[string]string{testDB: "restored", before: "current"}
+	e, rec := crashed(t, StepResuming, swapped, "", "")
+	e.waitStep(rec.OpID, StepDone)
+	e.db.mu.Lock()
+	defer e.db.mu.Unlock()
+	assert.Equal(t, opMark{state: backup.MarkFinished, op: rec.OpID}, e.db.marks["current"])
 }

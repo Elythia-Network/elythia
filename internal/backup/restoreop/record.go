@@ -14,6 +14,7 @@ package restoreop
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -111,7 +112,16 @@ type Record struct {
 
 	ticketHash string
 	tokenHash  string
+	// integrity is integrityBad when the Store has an integrity key and the
+	// record's signature does not match (checkRecordNames refuses it).
+	integrity int
 }
+
+const (
+	integrityUnchecked = iota
+	integrityOK
+	integrityBad
+)
 
 // JournalEntry is one line of an operation's journal.
 type JournalEntry struct {
@@ -128,12 +138,47 @@ type JournalEntry struct {
 type Store struct {
 	rdb    *redis.Client
 	prefix string
+	// macKey signs the database names of the records (SetIntegrityKey).
+	macKey []byte
+}
+
+// SetIntegrityKey makes the store sign the database names of every record it
+// writes, and mark a record whose signature does not match when it reads it
+// (backup.integrityKeyFile).
+//
+// **記録の名前は回復と確定で DB を入れ替える先になる。** 名前の形を見るだけでは、
+// Redis に書ける者が残っている退避の DB と同じ時刻の組で記録を作り、回復の巻き
+// 戻しでその DB を本番の名前へ入れ替えさせられる。鍵はバックアップ用のホストに
+// だけ置くので、署名の合う記録は daemon 自身が書いたもの。鍵を設定する前に書いた
+// 記録は署名が無く、運営者へ渡す (安全側)。
+func (s *Store) SetIntegrityKey(key []byte) { s.macKey = key }
+
+// recordMAC signs the names a record is created with.
+func recordMAC(key []byte, opID, kind, database, target, before, createdAt string) string {
+	mac := hmac.New(sha256.New, key)
+	for _, f := range []string{"elythia-restore-record-v1", opID, kind, database, target, before, createdAt} {
+		mac.Write([]byte(f))
+		mac.Write([]byte{0})
+	}
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// asideMAC signs the name the current database is moved to when a restore is
+// reverted, which is written after the record is created.
+func asideMAC(key []byte, opID, aside string) string {
+	mac := hmac.New(sha256.New, key)
+	for _, f := range []string{"elythia-restore-aside-v1", opID, aside} {
+		mac.Write([]byte(f))
+		mac.Write([]byte{0})
+	}
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 // NewStore returns a Store keeping its keys under prefix (the redis.prefix
-// of the config plus ':').
-func NewStore(rdb *redis.Client, prefix string) *Store {
-	return &Store{rdb: rdb, prefix: prefix}
+// of the config plus ':'). integrityKey is backup.integrityKeyFile (nil when
+// not set); see SetIntegrityKey.
+func NewStore(rdb *redis.Client, prefix string, integrityKey []byte) *Store {
+	return &Store{rdb: rdb, prefix: prefix, macKey: integrityKey}
 }
 
 func (s *Store) key(opID string) string     { return s.prefix + "elythia:maintenance:restore:" + opID }
@@ -180,12 +225,19 @@ func (s *Store) fields(r *Record) []any {
 		// 空の名前の DROP DATABASE は PostgreSQL が構文の誤りで断るので、何も消えない。
 		target, kept = "", r.Target
 	}
-	return []any{
+	out := []any{
 		"opId", r.OpID, "kind", r.Kind, "step", r.Step, "generationId", r.GenerationID, "database", r.Database,
 		"target", target, "keptTarget", kept, "before", r.Before, "aside", r.Aside, "userId", r.UserID, "error", r.Error,
 		"ticketHash", r.ticketHash, "tokenHash", r.tokenHash,
 		"createdAt", formatTime(r.CreatedAt), "updatedAt", formatTime(r.UpdatedAt), "readyAt", formatTime(r.ReadyAt),
 	}
+	if len(s.macKey) > 0 {
+		out = append(out, "mac", recordMAC(s.macKey, r.OpID, r.Kind, r.Database, r.Target, r.Before, formatTime(r.CreatedAt)))
+		if r.Aside != "" {
+			out = append(out, "asideMac", asideMAC(s.macKey, r.OpID, r.Aside))
+		}
+	}
+	return out
 }
 
 // Get returns the record of opID.
@@ -206,12 +258,25 @@ func (s *Store) Get(ctx context.Context, opID string) (*Record, error) {
 	if kind == KindRollback {
 		target = m["keptTarget"]
 	}
-	return &Record{
+	r := &Record{
 		OpID: m["opId"], Kind: kind, Step: m["step"], GenerationID: m["generationId"], Database: m["database"],
 		Target: target, Before: m["before"], Aside: m["aside"], UserID: m["userId"], Error: m["error"],
 		CreatedAt: parseTime(m["createdAt"]), UpdatedAt: parseTime(m["updatedAt"]), ReadyAt: parseTime(m["readyAt"]),
 		ticketHash: m["ticketHash"], tokenHash: m["tokenHash"],
-	}, nil
+	}
+	if len(s.macKey) > 0 {
+		// 時刻は書いたときの文字列のまま照合する (読み直して書式を作ると、丸めで
+		// 合わなくなる)。種類は欄が無ければ空のまま書かれている。
+		ok := hmac.Equal([]byte(m["mac"]), []byte(recordMAC(s.macKey, r.OpID, m["kind"], r.Database, r.Target, r.Before, m["createdAt"])))
+		if ok && r.Aside != "" {
+			ok = hmac.Equal([]byte(m["asideMac"]), []byte(asideMAC(s.macKey, r.OpID, r.Aside)))
+		}
+		r.integrity = integrityBad
+		if ok {
+			r.integrity = integrityOK
+		}
+	}
+	return r, nil
 }
 
 // Current returns the operation that is not finished, or nil.
@@ -256,6 +321,14 @@ func (s *Store) setStep(ctx context.Context, opID, from, to string, now time.Tim
 	}
 	args := []any{from, to, final, opID, int64(recordTTL / time.Second), "updatedAt", formatTime(now)}
 	args = append(args, extra...)
+	if len(s.macKey) > 0 {
+		for i := 0; i+1 < len(extra); i += 2 {
+			if name, _ := extra[i].(string); name == "aside" {
+				aside, _ := extra[i+1].(string)
+				args = append(args, "asideMac", asideMAC(s.macKey, opID, aside))
+			}
+		}
+	}
 	n, err := setStepScript.Run(ctx, s.rdb, []string{s.key(opID), s.CurrentKey(), s.journal(opID)}, args...).Int()
 	if err != nil {
 		return fmt.Errorf("restoreop: write record: %w", err)

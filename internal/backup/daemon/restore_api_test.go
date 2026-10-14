@@ -190,7 +190,7 @@ func newAPIRig(t *testing.T) *apiRig {
 		return true
 	}, 5*time.Second, time.Millisecond, "Run has started")
 	m := restoreop.New(restoreop.Options{
-		Store: restoreop.NewStore(rdb, "p:"), DB: db, Maint: maint,
+		Store: restoreop.NewStore(rdb, "p:", nil), DB: db, Maint: maint,
 		RunJudge: func(ctx context.Context) {
 			(&maintmode.Judge{Store: maint, Counter: noSessions{}, ID: "j", DrainTimeout: time.Hour}).Run(ctx, 5*time.Millisecond)
 		},
@@ -566,4 +566,9 @@ func TestLogThrottle(t *testing.T) {
 	assert.True(t, lt.allow(now))
 	assert.False(t, lt.allow(now.Add(storeErrLogInterval-time.Second)))
 	assert.True(t, lt.allow(now.Add(storeErrLogInterval)))
+}
+
+func (a *apiDB) MarkOperation(context.Context, string, string, string, string) error { return nil }
+func (a *apiDB) OperationMark(context.Context, string, string) (string, string, bool, error) {
+	return "", "", false, nil
 }
