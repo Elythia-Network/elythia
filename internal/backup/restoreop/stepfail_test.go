@@ -206,7 +206,7 @@ func TestStepNotWritten_AtStart(t *testing.T) {
 // database names are not as after the switch is left to an operator: the
 // record may lag behind a revert that already put the previous one back.
 func TestRecover_ResumingWithNamesNotSwapped(t *testing.T) {
-	names := map[string]string{testDB: "current", testDB + "_rolled_back_1": "restored"}
+	names := map[string]string{testDB: "current", testDB + "_rolled_back_20261010120500": "restored"}
 	e, rec := crashed(t, StepResuming, names, maintmode.PhaseHeld, "")
 	e.waitStep(rec.OpID, StepUnknown)
 	assert.Equal(t, names, e.db.names())

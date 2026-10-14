@@ -378,3 +378,23 @@ func TestValidOpID(t *testing.T) {
 		assert.False(t, ValidOpID(bad), bad)
 	}
 }
+
+// 準備の後に記録の名前が書き換えられたら、確定しても名前を入れ替えずに運営者へ
+// 渡すこと (Redis に書ける者が target を別の DB にしてから管理者が確定する経路)。
+func TestRestore_ConfirmRefusesTamperedRecord(t *testing.T) {
+	e := newEnv(t)
+	e.process("p1")
+	rec, ticket := e.prepare()
+	e.db.mu.Lock()
+	e.db.dbs["victim"] = "someone else's"
+	e.db.mu.Unlock()
+	require.NoError(t, e.rdb.HSet(context.Background(), e.store.key(rec.OpID), "target", "victim").Err())
+
+	got, err := e.m.CheckTicket(context.Background(), rec.OpID, ticket, "session-token-01")
+	require.NoError(t, err)
+	require.Error(t, e.m.Confirm(context.Background(), got.OpID))
+	e.waitStep(rec.OpID, StepUnknown)
+	assert.Equal(t, 0, e.db.switches, "書き換えられた記録で名前を入れ替えた")
+	assert.Equal(t, "someone else's", e.db.content("victim"))
+	assert.Equal(t, "current", e.db.content(testDB))
+}
