@@ -6,6 +6,17 @@ import (
 	"github.com/elythia-network/elythia/internal/api/apierr"
 )
 
+// PluginRouteDefaultLimit is applied, per route and per actor, to plugin
+// routes (`plugin/<name>/...`) that have no entry in DefaultEndpointLimits.
+//
+// 画面はプロフィールを開くたびに画像の口を何十回も叩きうるので、窓を長めに
+// して瞬間の多さは許し、叩き続けるものだけを止める。
+var PluginRouteDefaultLimit = EndpointLimit{Duration: 10 * time.Minute, Max: 600}
+
+// URLPreviewRateLimitKey is the DefaultEndpointLimits entry of `GET /url`.
+// `/api` の endpoint 名と衝突しない名前にする。
+const URLPreviewRateLimitKey = "@url-preview"
+
 // DefaultEndpointLimits defines per-endpoint rate limits matching
 // Misskey TS upstream. Endpoints not listed here have no rate limit.
 //
