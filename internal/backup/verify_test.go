@@ -597,10 +597,11 @@ func TestLocalSandbox(t *testing.T) {
 	assert.Equal(t, 1, pe.ExitCode)
 
 	// 上書きしていないプログラムは PATH から名前で探す。
-	err = sb.Run(ctx, SandboxCmd{Program: "sh", Args: []string{"-c", "echo oops >&2; exit 3"}})
-	require.ErrorContains(t, err, "oops")
+	err = sb.Run(ctx, SandboxCmd{Program: "sh", Args: []string{"-c", "echo oops >&2; echo 'ERROR:  boom' >&2; exit 3"}})
 	require.ErrorAs(t, err, &pe)
-	assert.Equal(t, ProgramError{Program: "sh", ExitCode: 3, Stderr: "oops"}, *pe)
+	// 全文は Stderr に残り、文面にはプログラムとサーバーの文言の行だけが出る。
+	assert.Equal(t, ProgramError{Program: "sh", ExitCode: 3, Stderr: "oops\nERROR:  boom"}, *pe)
+	assert.Equal(t, "sh exited with status 3: ERROR: boom", err.Error())
 
 	// 動かせなかったもの (見つからない、126 / 127、シグナル) は ProgramError にしない。
 	for _, c := range []SandboxCmd{

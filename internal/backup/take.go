@@ -377,7 +377,9 @@ func streamDump(ctx context.Context, st Storage, key string, runner Runner, pgDu
 
 	waitErr := cmd.Wait()
 	if waitErr != nil {
-		waitErr = fmt.Errorf("backup: %s: %w: %s", pgDump, waitErr, strings.TrimSpace(stderr.String()))
+		full := strings.TrimSpace(stderr.String())
+		logProgramFailure(pgDump, waitErr, full)
+		waitErr = fmt.Errorf("backup: %s: %w: %s", pgDump, waitErr, redactStderr(full))
 	} else if enc != nil {
 		if err := enc.Close(); err != nil {
 			waitErr = fmt.Errorf("backup: finish encryption: %w", err)

@@ -359,7 +359,7 @@ var envMarkers = []string{
 // ある場合を環境の誤りにし、残りは世代の欠陥に倒す。--exit-on-error の pg_restore が
 // 落ちるのは、ほとんどが dump の中の SQL やデータを戻せないときだから。環境の文言の
 // 一覧に無い環境の誤り (例: 未知の権限の問題) は世代の欠陥に見えるが、その場合でも
-// stderr の全文が verify.json の error に残る。
+// プログラムの文言 (redactStderr) が verify.json の error に、全文がログに残る。
 //
 // ここに来るのは保存物の sha256 が meta.json と一致した後なので、戻しているのは
 // 取ったときの dump そのもの。環境の誤りに倒して verify.json を書かないのは、その

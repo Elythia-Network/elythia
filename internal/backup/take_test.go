@@ -331,7 +331,10 @@ func TestTake_PgDumpFailureLeavesNothing(t *testing.T) {
 			opts.Dump.URI = "postgresql://" + pgUser + "@localhost:5432/no_such_db?sslmode=disable"
 			_, err := Take(context.Background(), opts)
 			require.Error(t, err)
-			assert.ErrorContains(t, err, "no_such_db")
+			// エラーの文面 (通知へ出る) には pg_dump の文言を残す。引用符の中 (DB の
+			// 名前など) は落とす (redactStderr)。
+			assert.ErrorContains(t, err, "database")
+			assert.ErrorContains(t, err, "does not exist")
 			objs, err := st.List(context.Background(), "")
 			require.NoError(t, err)
 			assert.Empty(t, objs)
