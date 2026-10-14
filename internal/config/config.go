@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -836,6 +837,12 @@ func resolve(src *Source) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := validateProxyURL("proxy", src.Proxy, httpProxySchemes); err != nil {
+		return nil, err
+	}
+	if err := validateProxyURL("proxySmtp", src.ProxySMTP, smtpProxySchemes); err != nil {
+		return nil, err
+	}
 
 	cfg := &Config{
 		Version:     MisskeyVersion,
@@ -1081,6 +1088,36 @@ func resolveRedisOrDefault(opts *RedisOptions, fallback RedisOptions, host strin
 	return resolveRedis(*opts, host)
 }
 
+// Proxy schemes each consumer can use: net/http's Transport.Proxy for
+// `proxy`, internal/misc/smtp's dialSMTP for `proxySmtp`.
+var (
+	httpProxySchemes = []string{"http", "https", "socks5", "socks5h"}
+	smtpProxySchemes = []string{"http", "https", "socks5", "socks5h"}
+)
+
+// validateProxyURL rejects a proxy setting the consumer cannot use.
+//
+// **起動時に止める。** 以前は解釈できない値 (scheme の無い `http//x`、未対応の
+// `socks4://`) を、HTTP 側はログも出さずに、SMTP 側は警告だけ出して、proxy を
+// 使わない直結に倒していた。proxy で送信元の IP を隠す運用では、設定したつもり
+// のまま素の IP で外へ出る。example も未対応の socks4 を例示していた。
+//
+// エラーには値そのものを出さない (`socks5://user:pass@host` の形で認証情報を
+// 含みうる)。
+func validateProxyURL(key, raw string, schemes []string) error {
+	if raw == "" {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return fmt.Errorf("invalid %s: not a URL with a host (expected e.g. http://proxy.example:3128)", key)
+	}
+	if !slices.Contains(schemes, strings.ToLower(u.Scheme)) {
+		return fmt.Errorf("invalid %s: unsupported scheme %q (supported: %s)", key, u.Scheme, strings.Join(schemes, ", "))
+	}
+	return nil
+}
+
 // resolveJobQueueDriver normalises the jobQueueDriver config value.
 // Empty / whitespace falls back to "mkq", the only driver (#2985)。
 // Unknown non-empty values return an error: silently swapping a typo
@@ -1099,6 +1136,7 @@ func resolveRedisOrDefault(opts *RedisOptions, fallback RedisOptions, host strin
 // に居り mkq (`bull:*`) からは見えない。新しいビルドは起動を拒むので、
 // **後から捌く手段が無い** — 旧ビルドで空にしてから上げるしかない。それを
 // 知らせる機会はこのエラーしか無いので、案内をここに入れる。
+
 func resolveJobQueueDriver(raw string) (string, error) {
 	v := strings.ToLower(strings.TrimSpace(raw))
 	switch v {

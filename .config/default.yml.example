@@ -477,7 +477,6 @@ proxyBypassHosts:
 
 # Proxy for SMTP/SMTPS
 #proxySmtp: http://127.0.0.1:3128
-#proxySmtp: socks4://127.0.0.1:1080
 #proxySmtp: socks5://127.0.0.1:1080
 
 # Media Proxy URL (deliver a common cache between instances).
