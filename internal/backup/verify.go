@@ -30,6 +30,23 @@ import (
 // sandboxSuperuser is the superuser initdb creates in the throwaway server.
 const sandboxSuperuser = "postgres"
 
+// sandboxRestoreRole / sandboxRestoreDB are the role that restores the dump in
+// the throwaway server, and the database it restores into (owned by it).
+//
+// **dump は superuser で流さない。** dump は保存先から読んだ SQL で、pg_restore は
+// それをそのままサーバーへ送る。検証は daemon の起動時や取った直後に自動で流れる
+// ので、保存先 (S3 や別の機器) の中身にサーバー側の強い権限を渡さない。本番へ
+// 戻す処理は設定の DB の利用者で流すので、そちらは保存先の中身を信頼している。使い捨てのサーバーはバックアップ用の
+// サービスと同じコンテナで動き、設定ファイルと本番の DB の socket に届く。
+// superuser でない role なら、サーバー側でプログラムやファイルに触る操作と、
+// 信頼されない言語の関数の作成は権限で落ちる (検証は失敗し、世代の欠陥として
+// 残る)。戻した後の数え上げと fsck も同じ role で行う (superuser で数えると、
+// 戻した view や関数を superuser の権限で実行する)。
+const (
+	sandboxRestoreRole = "elythia_verify"
+	sandboxRestoreDB   = "elythia_verify"
+)
+
 // BundledMigrations is the latest migration version this binary ships for
 // each track. A restored database whose tracking table is ahead of it cannot
 // be served by this binary.
@@ -242,7 +259,14 @@ func (v *verifier) run(ctx context.Context) (stages []StageResult, err, cleanupE
 		cleanupErr = cleanup(context.WithoutCancel(ctx))
 	}()
 
-	conn, db, err := connectSandbox(ctx, srv)
+	// 拡張が無いのは使い捨てのサーバー (環境) の問題で、世代の欠陥ではない。
+	// pg_restore の CREATE EXTENSION の失敗として restorable を落とすと、世代が
+	// 壊れているように見えるので、戻す前に環境の誤りとして止める。
+	if err := prepareRestoreTarget(ctx, srv, v.meta.Extensions); err != nil {
+		return stages, err, nil
+	}
+
+	conn, db, err := connectSandbox(ctx, srv, sandboxRestoreRole, sandboxRestoreDB)
 	if err != nil {
 		return stages, err, nil
 	}
@@ -250,13 +274,6 @@ func (v *verifier) run(ctx context.Context) (stages []StageResult, err, cleanupE
 		_ = conn.Close(context.WithoutCancel(ctx))
 		closeGorm(db)
 	}()
-
-	// 拡張が無いのは使い捨てのサーバー (環境) の問題で、世代の欠陥ではない。
-	// pg_restore の CREATE EXTENSION の失敗として restorable を落とすと、世代が
-	// 壊れているように見えるので、戻す前に環境の誤りとして止める。
-	if err := checkExtensions(ctx, conn, v.meta.Extensions); err != nil {
-		return stages, err, nil
-	}
 
 	ok, err = record(StageRestorable, v.restorable(ctx, srv, conn), nil)
 	if err != nil || !ok {
@@ -636,8 +653,8 @@ func initdbLocaleArgs(l DatabaseLocale) []string {
 // connectSandbox opens a pgx connection (for the row counts and the tracking
 // tables, read with the same functions Take uses) and a GORM handle (for
 // fsck) to the throwaway server.
-func connectSandbox(ctx context.Context, srv SandboxServer) (*pgx.Conn, *gorm.DB, error) {
-	dsn := fmt.Sprintf("host=%s port=%d user=%s dbname=postgres sslmode=disable", srv.Host, srv.Port, sandboxSuperuser)
+func connectSandbox(ctx context.Context, srv SandboxServer, user, dbname string) (*pgx.Conn, *gorm.DB, error) {
+	dsn := fmt.Sprintf("host=%s port=%d user=%s dbname=%s sslmode=disable", srv.Host, srv.Port, user, dbname)
 	conn, err := pgx.Connect(ctx, dsn)
 	if err != nil {
 		return nil, nil, fmt.Errorf("backup verify: connect to the throwaway server: %w", err)
@@ -648,6 +665,63 @@ func connectSandbox(ctx context.Context, srv SandboxServer) (*pgx.Conn, *gorm.DB
 		return nil, nil, fmt.Errorf("backup verify: connect to the throwaway server: %w", err)
 	}
 	return conn, db, nil
+}
+
+// prepareRestoreTarget creates, as the superuser, the role and the database
+// the dump is restored into, and installs the extensions meta.json records so
+// that the role does not need to.
+//
+// 拡張の作成には superuser が要るものがある (pg_bigm など)。dump の
+// `CREATE EXTENSION IF NOT EXISTS` は作ってあれば何もしないが、続く
+// `COMMENT ON EXTENSION` は拡張の所有者でないと落ちるので、作った拡張の所有者を
+// 戻す role に渡す (使い捨てのサーバーの中だけの操作)。拡張のスクリプトは image に
+// 入っているもので、dump から来るものではない。public 以外の schema の拡張は作らない
+// (dump の `CREATE SCHEMA` とぶつかる)。dump の側で作るので、信頼された拡張なら通り、
+// そうでなければ戻すところで落ちる。
+func prepareRestoreTarget(ctx context.Context, srv SandboxServer, exts []ExtensionInfo) error {
+	conn, err := pgx.Connect(ctx, fmt.Sprintf("host=%s port=%d user=%s dbname=postgres sslmode=disable", srv.Host, srv.Port, sandboxSuperuser))
+	if err != nil {
+		return fmt.Errorf("backup verify: connect to the throwaway server: %w", err)
+	}
+	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
+	if err := checkExtensions(ctx, conn, exts); err != nil {
+		return err
+	}
+	role := pgx.Identifier{sandboxRestoreRole}.Sanitize()
+	for _, q := range []string{
+		"CREATE ROLE " + role + " LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS",
+		"CREATE DATABASE " + pgx.Identifier{sandboxRestoreDB}.Sanitize() + " OWNER " + role,
+	} {
+		if _, err := conn.Exec(ctx, q); err != nil {
+			return fmt.Errorf("backup verify: prepare the restore target: %w", err)
+		}
+	}
+
+	var names []string
+	for _, e := range exts {
+		if e.Schema == "public" {
+			names = append(names, e.Name)
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	target, err := pgx.Connect(ctx, fmt.Sprintf("host=%s port=%d user=%s dbname=%s sslmode=disable", srv.Host, srv.Port, sandboxSuperuser, sandboxRestoreDB))
+	if err != nil {
+		return fmt.Errorf("backup verify: connect to the throwaway server: %w", err)
+	}
+	defer func() { _ = target.Close(context.WithoutCancel(ctx)) }()
+	for _, name := range names {
+		if _, err := target.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS "+pgx.Identifier{name}.Sanitize()+" WITH SCHEMA public"); err != nil {
+			return fmt.Errorf("backup verify: install extension %s in the throwaway server: %w", name, err)
+		}
+	}
+	if _, err := target.Exec(ctx,
+		`UPDATE pg_catalog.pg_extension SET extowner = (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = $1) WHERE extname = ANY($2)`,
+		sandboxRestoreRole, names); err != nil {
+		return fmt.Errorf("backup verify: hand the extensions to the restore role: %w", err)
+	}
+	return nil
 }
 
 func closeGorm(db *gorm.DB) {
@@ -706,7 +780,7 @@ func (v *verifier) restorable(ctx context.Context, srv SandboxServer, conn *pgx.
 	err := v.withDump(func(r io.Reader) error {
 		// 所有者と権限は戻す先に同じ role が無いので落とす。検証には要らない。
 		args := []string{
-			"-h", srv.ToolHost, "-p", strconv.Itoa(srv.ToolPort), "-U", sandboxSuperuser, "-d", "postgres",
+			"-h", srv.ToolHost, "-p", strconv.Itoa(srv.ToolPort), "-U", sandboxRestoreRole, "-d", sandboxRestoreDB,
 			"--no-owner", "--no-privileges", "--exit-on-error",
 		}
 		if err := v.opts.Sandbox.Run(ctx, SandboxCmd{Program: "pg_restore", Args: args, Stdin: r}); err != nil {
