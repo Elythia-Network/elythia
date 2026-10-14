@@ -480,7 +480,7 @@ func (m *Manager) dropTarget(ctx context.Context, rec *Record) {
 		// 書くと、同じ行が2つ並ぶ)。
 		return
 	}
-	if keptName(rec.Target, rec.Database) || keptName(rec.Target, m.o.Database) {
+	if keptName(rec.Target, rec.Database) || keptName(rec.Target, m.o.Database) || !isRestoreName(m.o.Database, rec.Target) {
 		m.log.Error("backup: refusing to drop a database this restore did not create", "opId", rec.OpID, "database", rec.Target)
 		m.journal(ctx, rec.OpID, "", "did not drop %s: it is not a database this restore created", rec.Target)
 		return
@@ -500,6 +500,71 @@ func targetFate(rec *Record) string {
 		return "kept " + rec.Target + " as it is"
 	}
 	return "dropped " + rec.Target
+}
+
+// errBadRecordNames reports a record whose database names do not have the
+// shapes this service writes.
+var errBadRecordNames = errors.New("the database names in the record do not have the shapes this service writes")
+
+// checkRecordNames reports whether the database names of rec have the shapes
+// this service writes for database, before they are dropped or renamed.
+//
+// **記録の名前を信じて DROP / RENAME しない。** 記録は Redis にあり、Redis に書ける
+// 者 (passwordguard やメンテナンスの状態を書き換えられる境界) が target を任意の
+// DB の名前にして daemon を起動し直させると、回復が同じクラスタの別の DB を消せた。
+// 名前は時刻から機械的に作るので、形で確かめられる: Database は設定の DB、
+// リストアの Target は <db>_restore_<時刻>、ロールバックの Target と Before / Aside
+// は退避した DB の名前 (<db>_before_restore_<時刻> か <db>_rolled_back_<時刻>)。
+func checkRecordNames(rec *Record, database string) error {
+	if rec == nil || rec.Database != database {
+		return errBadRecordNames
+	}
+	// **Target と Before の組も、作るときの形と合っているかを見る。** リストアの
+	// 組は RestoreNames が同じ時刻で作り、ロールバックの Before は RollbackName
+	// (rolled_back) で作る。形の合わない記録 (壊れた記録や、別の操作の名前を
+	// 混ぜた記録) で DB を入れ替えない。
+	//
+	// **これは記録の真正さの検査ではない。** Redis に書ける者は、残っている退避の
+	// DB と同じ時刻の組で記録を作れるので、回復の巻き戻しでその DB を本番の名前へ
+	// 入れ替えさせられる (今の本番は rolled_back として残り、消えはしない)。
+	// 防ぐには記録に鍵で署名する必要があり、世代の改ざん検出と合わせて扱う。
+	switch rec.Kind {
+	case KindRollback:
+		if _, _, ok := backup.ParseKeptName(database, rec.Target); !ok {
+			return errBadRecordNames
+		}
+		if kind, _, ok := backup.ParseKeptName(database, rec.Before); !ok || kind != backup.KeptRolledBack {
+			return errBadRecordNames
+		}
+	default:
+		if !isRestoreName(database, rec.Target) {
+			return errBadRecordNames
+		}
+		if rec.Before != database+"_"+backup.KeptBeforeRestore+"_"+strings.TrimPrefix(rec.Target, database+"_restore_") {
+			return errBadRecordNames
+		}
+	}
+	if rec.Aside != "" {
+		if _, _, ok := backup.ParseKeptName(database, rec.Aside); !ok {
+			return errBadRecordNames
+		}
+	}
+	return nil
+}
+
+// isRestoreName reports whether name is the new database of a restore of
+// database (backup.RestoreNames): <db>_restore_<14 digits>.
+func isRestoreName(database, name string) bool {
+	suffix, ok := strings.CutPrefix(name, database+"_restore_")
+	if !ok || len(suffix) != 14 {
+		return false
+	}
+	for _, c := range suffix {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // keptName reports whether name is database itself, a database kept by a
@@ -580,6 +645,12 @@ func (m *Manager) Confirm(ctx context.Context, opID string) error {
 	}
 	rec, err := m.o.Store.Get(ctx, opID)
 	if err != nil {
+		return err
+	}
+	if err := checkRecordNames(rec, m.o.Database); err != nil {
+		// 準備した後に記録が書き換えられた。名前を入れ替えずに運営者へ渡す。
+		live.cancelPrepare()
+		m.giveUp(ctx, rec, StepEntering, err)
 		return err
 	}
 	// 確定したので、準備の待ち (期限) は止める。

@@ -497,7 +497,9 @@ func TestDaemonRetriesTheRestore(t *testing.T) {
 	t.Cleanup(func() { _ = rdb.Close() })
 	store := restoreop.NewStore(rdb, "p:")
 	require.NoError(t, rdb.Set(context.Background(), store.CurrentKey(), "restore-0123456789abcdef", 0).Err())
-	require.NoError(t, rdb.HSet(context.Background(), "p:elythia:maintenance:restore:restore-0123456789abcdef", "opId", "restore-0123456789abcdef", "step", "aborting").Err())
+	require.NoError(t, rdb.HSet(context.Background(), "p:elythia:maintenance:restore:restore-0123456789abcdef", "opId", "restore-0123456789abcdef", "step", "aborting",
+		// 名前はこのサービスが作る形にする (形の違う記録は消さずに運営者へ渡す)。
+		"database", "app", "target", "app_restore_20261010120000", "before", "app_before_restore_20261010120000").Err())
 	var attempts atomic.Int32
 	closed := make(chan struct{})
 	e.openRestore = func(_ *config.Config, d *daemon.Daemon, _ backupkit.Storage, _ *slog.Logger) (*RestoreParts, error) {
@@ -505,7 +507,7 @@ func TestDaemonRetriesTheRestore(t *testing.T) {
 			return nil, errors.New("redis down")
 		}
 		m := restoreop.New(restoreop.Options{
-			Store: store, Maint: maintmode.NewStore(rdb, rdb, "p:"), DB: stubRestoreDB{},
+			Store: store, Maint: maintmode.NewStore(rdb, rdb, "p:"), DB: stubRestoreDB{}, Database: "app",
 			Acquire: func() (func(), error) { return d.Acquire(daemon.JobRestore) },
 			Poll:    5 * time.Millisecond, Logger: discardLogger(),
 		})
@@ -562,7 +564,7 @@ func TestDaemonStartsAndClosesTheRestore(t *testing.T) {
 	var acquired atomic.Int32
 	e.openRestore = func(_ *config.Config, d *daemon.Daemon, _ backupkit.Storage, _ *slog.Logger) (*RestoreParts, error) {
 		m := restoreop.New(restoreop.Options{
-			Store: store, Maint: maintmode.NewStore(rdb, rdb, "p:"), DB: stubRestoreDB{},
+			Store: store, Maint: maintmode.NewStore(rdb, rdb, "p:"), DB: stubRestoreDB{}, Database: "app",
 			Acquire: func() (func(), error) {
 				release, err := d.Acquire(daemon.JobRestore)
 				if err == nil {
@@ -576,7 +578,9 @@ func TestDaemonStartsAndClosesTheRestore(t *testing.T) {
 	}
 	// 前の実行が残した、片付けるべき記録 (中止の途中) を置く。
 	require.NoError(t, rdb.Set(context.Background(), store.CurrentKey(), "restore-left", 0).Err())
-	require.NoError(t, rdb.HSet(context.Background(), "p:elythia:maintenance:restore:restore-left", "opId", "restore-left", "step", "aborting").Err())
+	require.NoError(t, rdb.HSet(context.Background(), "p:elythia:maintenance:restore:restore-left", "opId", "restore-left", "step", "aborting",
+		// 名前はこのサービスが作る形にする (形の違う記録は消さずに運営者へ渡す)。
+		"database", "app", "target", "app_restore_20261010120000", "before", "app_before_restore_20261010120000").Err())
 	done := make(chan int, 1)
 	go func() { done <- runDaemon(e, nil) }()
 	require.Eventually(t, func() bool {

@@ -111,13 +111,13 @@ func TestRecover(t *testing.T) {
 		assert.Nil(t, e.maintenance())
 	})
 	t.Run("reverting before the swap back", func(t *testing.T) {
-		e, rec := crashed(t, StepReverting, swapped, maintmode.PhaseHeld, testDB+"_rolled_back_1")
+		e, rec := crashed(t, StepReverting, swapped, maintmode.PhaseHeld, testDB+"_rolled_back_20261010120500")
 		e.waitStep(rec.OpID, StepReverted)
-		assert.Equal(t, map[string]string{testDB: "current", testDB + "_rolled_back_1": "restored"}, e.db.names())
+		assert.Equal(t, map[string]string{testDB: "current", testDB + "_rolled_back_20261010120500": "restored"}, e.db.names())
 	})
 	t.Run("reverting after the swap back", func(t *testing.T) {
-		names := map[string]string{testDB: "current", testDB + "_rolled_back_1": "restored"}
-		e, rec := crashed(t, StepReverting, names, maintmode.PhaseHeld, testDB+"_rolled_back_1")
+		names := map[string]string{testDB: "current", testDB + "_rolled_back_20261010120500": "restored"}
+		e, rec := crashed(t, StepReverting, names, maintmode.PhaseHeld, testDB+"_rolled_back_20261010120500")
 		e.waitStep(rec.OpID, StepReverted)
 		assert.Equal(t, names, e.db.names())
 		assert.Equal(t, 0, e.db.switches, "it does not swap again")
@@ -204,8 +204,8 @@ func TestRecover_MaintenanceUnreadable(t *testing.T) {
 // finds the previous database back and the processes already resuming does
 // not clean Redis again: they write to it on the previous database.
 func TestRecover_RevertedWhileResumingKeepsRedis(t *testing.T) {
-	names := map[string]string{testDB: "current", testDB + "_rolled_back_1": "restored"}
-	e, rec := crashed(t, StepReverting, names, maintmode.PhaseResuming, testDB+"_rolled_back_1")
+	names := map[string]string{testDB: "current", testDB + "_rolled_back_20261010120500": "restored"}
+	e, rec := crashed(t, StepReverting, names, maintmode.PhaseResuming, testDB+"_rolled_back_20261010120500")
 	e.waitStep(rec.OpID, StepReverted)
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -345,8 +345,8 @@ func TestRecover_GivesUpWhenItCannotTell(t *testing.T) {
 			func(h *hookMaint) {
 				h.failSet = func(string) error { return errors.New("cannot write") }
 			}},
-		{"reverting with names of neither side", StepReverting, map[string]string{testDB: "x"}, maintmode.PhaseHeld, testDB + "_rolled_back_1", nil},
-		{"reverting with the maintenance unreadable", StepReverting, map[string]string{testDB: "current", testDB + "_rolled_back_1": "restored"}, maintmode.PhaseHeld, testDB + "_rolled_back_1",
+		{"reverting with names of neither side", StepReverting, map[string]string{testDB: "x"}, maintmode.PhaseHeld, testDB + "_rolled_back_20261010120500", nil},
+		{"reverting with the maintenance unreadable", StepReverting, map[string]string{testDB: "current", testDB + "_rolled_back_20261010120500": "restored"}, maintmode.PhaseHeld, testDB + "_rolled_back_20261010120500",
 			func(h *hookMaint) { h.failGet = errors.New("redis down") }},
 		{"an unknown step", "bogus", swapped, maintmode.PhaseHeld, "", nil},
 	}
@@ -515,4 +515,73 @@ func TestRecover_TellsWhenItRecovers(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	assert.Equal(t, []bool{true, false}, told)
+}
+
+// 記録の DB の名前が、このサービスが作る形でなければ、消しも入れ替えもせず
+// 運営者に渡すこと。
+//
+// 記録は Redis にあり、Redis に書ける者が target を同じクラスタの別の DB の名前に
+// して daemon を起動し直させると、回復がその DB を消せた。
+func TestRecover_TamperedNamesGiveUp(t *testing.T) {
+	cases := []struct {
+		name string
+		rec  Record
+	}{
+		{"target is another database", Record{Target: "victim", Before: before}},
+		{"target is the server's database", Record{Target: testDB, Before: before}},
+		{"target with a short time", Record{Target: testDB + "_restore_1", Before: before}},
+		{"before is another database", Record{Target: tgt, Before: "victim"}},
+		{"aside is another database", Record{Target: tgt, Before: before, Aside: "victim"}},
+		{"database is not the configured one", Record{Database: "victim", Target: "victim_restore_20261010120000", Before: "victim_before_restore_20261010120000"}},
+		{"rollback target is not a kept database", Record{Kind: KindRollback, Target: "victim", Before: testDB + "_rolled_back_20261010120500"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.stop()
+			ctx := context.Background()
+			rec := c.rec
+			rec.OpID, rec.Step = "restore-tampered", StepPreparing
+			if rec.Database == "" {
+				rec.Database = testDB
+			}
+			if rec.Kind == "" {
+				rec.Kind = KindRestore
+			}
+			e.db.mu.Lock()
+			e.db.dbs = map[string]string{testDB: "current", "victim": "someone else's"}
+			e.db.mu.Unlock()
+			require.NoError(t, e.store.create(ctx, &rec))
+			e.start()
+			e.waitStep(rec.OpID, StepUnknown)
+			assert.Empty(t, e.db.drops, "記録の名前を信じて DB を消した")
+			assert.Equal(t, 0, e.db.switches)
+			assert.Contains(t, e.db.names(), "victim")
+		})
+	}
+}
+
+// 正しい形の名前は通す (対照)。
+func TestCheckRecordNames(t *testing.T) {
+	ok := []Record{
+		{Kind: KindRestore, Database: testDB, Target: tgt, Before: before},
+		{Kind: KindRestore, Database: testDB, Target: tgt, Before: before, Aside: testDB + "_rolled_back_20261010120500"},
+		{Kind: KindRollback, Database: testDB, Target: before, Before: testDB + "_rolled_back_20261010120500", Aside: before},
+		{Database: testDB, Target: tgt, Before: before}, // Kind の欄より前の記録はリストア
+	}
+	for _, r := range ok {
+		assert.NoError(t, checkRecordNames(&r, testDB), "%+v", r)
+	}
+	assert.Error(t, checkRecordNames(nil, testDB))
+
+	// 形は正しくても、作るときの組と合わない名前は拒む (古い退避の DB への
+	// すり替え)。
+	bad := []Record{
+		{Kind: KindRestore, Database: testDB, Target: tgt, Before: testDB + "_before_restore_20250101000000"},
+		{Kind: KindRestore, Database: testDB, Target: tgt, Before: testDB + "_rolled_back_20261010120000"},
+		{Kind: KindRollback, Database: testDB, Target: before, Before: testDB + "_before_restore_20250101000000"},
+	}
+	for _, r := range bad {
+		assert.ErrorIs(t, checkRecordNames(&r, testDB), errBadRecordNames, "%+v", r)
+	}
 }

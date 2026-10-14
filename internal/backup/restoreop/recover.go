@@ -74,6 +74,10 @@ func (m *Manager) recoverOnStart(ctx context.Context, held func()) {
 }
 
 func (m *Manager) recoverRecord(ctx context.Context, rec *Record) {
+	if err := checkRecordNames(rec, m.o.Database); err != nil {
+		m.giveUp(ctx, rec, rec.Step, err)
+		return
+	}
 	switch rec.Step {
 	case StepPreparing, StepReady, StepAborting:
 		// まだ名前を入れ替えていない。メンテナンスに入れたまま落ちていれば (中止の
