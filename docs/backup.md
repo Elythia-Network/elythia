@@ -41,6 +41,7 @@ dumpには`CREATE EXTENSION`が入るので、戻す側のPostgreSQLにも同じ
 | `dump.pgc` | `pg_dump -Fc`の出力(暗号化しないとき) |
 | `dump.pgc.age` | 上をageで暗号化したもの(暗号化するとき) |
 | `meta.json` | メタ情報。**dumpを置いて読み直した後に、最後に置く** |
+| `meta.json.sig` | `meta.json`の署名([署名](#署名))。`backup.integrityKeyFile`を設定したときだけ、`meta.json`の直前に置く |
 | `take.lock` | その世代を取った`take`の印(乱数、ホスト名、プロセスID、始めた時刻)。**最初に置き、世代に残す**([同じ秒に2つ取ったとき](#同じ秒に2つ取ったとき)) |
 | `verify.json` | 確かめた結果([確かめる](#確かめる))。確かめた後に足される |
 
@@ -153,6 +154,25 @@ age-keygen -o /etc/elythia/backup-identity.txt
 
 手で戻すときは、`age -d -i backup-identity.txt dump.pgc.age > dump.pgc`で復号してから`pg_restore`に渡す。
 
+## 署名
+
+`backup.integrityKeyFile`に鍵のファイルを書くと、世代と、Redisに残すリストアの記録に署名する。**保存先に書ける者が置いた世代を、本番へ戻さないため。** 戻す処理は設定のDBの利用者(superuserのこともある)でdumpを流すので、保存先の中身を書き換えられると、戻したときに本番のDBで任意のSQLが動く。暗号化は守りにならない(公開鍵は秘密ではないので、誰でも暗号化した世代を作れる)。
+
+```bash
+# 鍵を作る。リポジトリの外に置き、バックアップ用のサービスにだけ渡す
+openssl rand -hex 32 > /etc/elythia/backup-integrity.key
+sudo chown 70:70 /etc/elythia/backup-integrity.key && sudo chmod 600 /etc/elythia/backup-integrity.key
+```
+
+- 取るときに、`meta.json`の署名(HMAC-SHA256。世代のIDも含める)を`meta.json.sig`に置く。`meta.json`はdumpの大きさとsha256(暗号化した世代は復号後のsha256も)を持ち、戻す・確かめる処理はdumpをそれと照合するので、`meta.json`の署名が合えばdumpも取ったときのものである
+- 戻す・確かめるときは、署名の無い世代と、署名の合わない世代を断る。確かめる処理は`verify.json`を書かずに終わる(判定しない)
+- 鍵を設定する前に取った世代には署名が無い。`elythia backup restore`に`-allow-unsigned`を付け、`-id`で世代のIDを明示したときだけ、署名の無い世代を戻せる(`-id latest`は付けても署名の合う世代だけから選ぶ。署名の無い世代は誰でも置けるため)。署名の合わない世代は、付けても戻さない。管理画面からの戻しには、この口は無い
+- Redisのリストアの記録(リストアやロールバックで入れ替えるDBの名前)にも同じ鍵で署名する。署名の合わない記録では、DBを消しも入れ替えもせず、運営者に渡す。鍵を設定する前に始めた操作の記録も、ここに当たる
+- 記録の署名は、正しく署名された過去の状態をそのまま書き戻されることまでは防げない。そこで、DBの名前を入れ替える直前に、退避する側(それまでの本番)へ「この操作が入れ替えている」という印(`COMMENT ON DATABASE`)を付ける。操作を終えるときは「終わった」に、運営者に渡すときは「渡した」に書き換える。印はそのDBの持ち主かsuperuserしか書けない。回復は、退避したDBにその操作の進行中の印があるときだけ、従来どおり巻き戻すか終える。「終わった」の印ならメンテナンスを終えて(残っていれば)完了とし、「渡した」の印、印が無い、別の操作の印なら、何もせずに運営者に渡す(印を付ける前の版で始めた操作も、ここに当たる)。これは鍵を設定していなくても効く(残っている退避のDBを指す記録を作られても、そのDBには進行中の印が無い)。印を付けられなければ、名前を入れ替えずに中止する。印を書き換えられなかった・読めなかった操作(接続が切れた、など)は、ログと記録の経過に残る。その操作の記録が書き戻されると巻き戻されうるので、印を手で直す(`COMMENT ON DATABASE <退避したDB> IS 'elythia-restore-finished:<opId>'`。運営者に渡した操作なら`finished`を`handed`にする)
+- daemonは、鍵があれば署名の合う世代だけを揃った世代として数える(整理と遅れの通知)。`-id latest`も、署名の合う世代だけから選ぶ。鍵を設定した直後は、署名のある世代を1つ取るまで、使える世代が無いものとして遅れを通知する
+- **鍵はバックアップ用のホストにだけ置く。** 保存先(S3やNAS)にもRedisにも置かない。鍵を持つ者は、署名の合う世代や記録を作れる。鍵を失っても世代は失われないが、署名の合う世代を新しく作れなくなる。鍵を替えたら、それまでの世代は`-allow-unsigned`でも戻せない(署名が合わない)ので、古い鍵は世代を消すまで控えておく
+- 署名が守るのは中身の書き換えである。保存先に書ける者は、世代を消したり、古い世代を残して新しい世代を消したりはできる。消されたことは、daemonの遅れの通知で分かる
+
 ## 取る
 
 どの構成でも、設定ファイル(本体と同じもの)に`backup:`の節を書いてから呼ぶ。書き方は`.config/default.yml.example`の末尾にある。
@@ -263,7 +283,7 @@ DBに拡張(pg_bigmなど)を入れているときは、このホストのPostgr
 | Elythiaとして読めるか | `usable` | 戻したDBの管理表(`schema_migrations`、あれば`schema_migrations_local`)がdirtyでなく、このバイナリの同梱のmigrationの最大番号より進んでいない。管理表の値が`meta.json`の`migrations`と一致する。`elythia fsck`と同じ検査が流れる |
 
 - 使い捨てのPostgreSQLは、`meta.json`の`databaseLocale`と同じencodingとlocaleで`initdb`する。一時ディレクトリのunix socketだけで待ち受け、TCPを開かない
-- **dumpはsuperuserで戻さない。** 使い捨てのPostgreSQLの中にsuperuserでないrole `elythia_verify`と、それが持つDB `elythia_verify`を作り、そこへそのroleで戻す。戻した後の行数の数え上げと`fsck`の検査も同じroleで行う。確かめるだけの処理(daemonの起動時や取った直後にも自動で流れる)に、保存先から読んだ中身へサーバー側の強い権限を渡さないため。**これが守るのは確かめる処理だけである。** 本番へ戻す(`backup restore`)ときは、設定のDBの利用者(superuserのこともある)でdumpを流す。`verify.json`も保存先に置かれ、署名は無い。そのため、保存先に書ける者は戻したときに本番のDBで動くものを置ける。保存先への書き込みの権限は、本番のDBへの権限と同じ重さで扱う。dumpが使う拡張(`meta.json`の`extensions`のうち`public`にあるもの)は、戻す前にsuperuserで`public`へ作っておく
+- **dumpはsuperuserで戻さない。** 使い捨てのPostgreSQLの中にsuperuserでないrole `elythia_verify`と、それが持つDB `elythia_verify`を作り、そこへそのroleで戻す。戻した後の行数の数え上げと`fsck`の検査も同じroleで行う。確かめるだけの処理(daemonの起動時や取った直後にも自動で流れる)に、保存先から読んだ中身へサーバー側の強い権限を渡さないため。**これが守るのは確かめる処理だけである。** 本番へ戻す(`backup restore`)ときは、設定のDBの利用者(superuserのこともある)でdumpを流す。本番へ戻すdumpを守るのは[署名](#署名)で、`backup.integrityKeyFile`を設定していなければ、保存先に書ける者は戻したときに本番のDBで動くものを置ける。dumpが使う拡張(`meta.json`の`extensions`のうち`public`にあるもの)は、戻す前にsuperuserで`public`へ作っておく
 - 使い捨てのPostgreSQLとそのデータは、通っても通らなくても止めて消す。復号したdumpを置く一時ファイルも消す
 - 一時ディレクトリの空きは下の「一時ディレクトリの空き」
 - `rowCounts`が空の`meta.json`は、突き合わせが何も検査せずに通ってしまうので、`restorable`を失敗にする
@@ -324,7 +344,7 @@ DBに拡張(pg_bigmなど)を入れているときは、このホストのPostgr
 
 `elythia backup daemon`は、設定した間隔でバックアップを[取り](#取る)、[確かめ](#確かめる)、古い世代を消す常駐のプロセス(#3460)。失敗したとき、検証で食い違ったとき、間隔を過ぎても新しい世代ができないときに、Webhookで運営者へ知らせる。本体の管理画面(#3462)が「今すぐ取る」「今すぐ確かめる」「状態」を頼むための制御APIも、このプロセスが持つ。
 
-取る処理と確かめる処理は、`backup take` / `backup verify`と同じもの(同じ設定、同じ`pg_dump` / `initdb` / `pg_ctl` / `pg_restore`)を使う。そのためバックアップ用のimageの中か、それらがあるホストで動かす。起動するときに、保存先が開けること、同梱のmigrationの番号が読めること(作業ディレクトリに`migration/`が要る)、`backup.encryption.identityFile`を書いたならそれが読めることを確かめ、どれかが駄目なら起動しない。暗号化していて`schedule.verify: true`なのに`identityFile`が空のときも起動しない(毎回の検証が復号できずに落ち、使える世代が1つもできないため)。
+取る処理と確かめる処理は、`backup take` / `backup verify`と同じもの(同じ設定、同じ`pg_dump` / `initdb` / `pg_ctl` / `pg_restore`)を使う。そのためバックアップ用のimageの中か、それらがあるホストで動かす。起動するときに、保存先が開けること、同梱のmigrationの番号が読めること(作業ディレクトリに`migration/`が要る)、`backup.encryption.identityFile`を書いたならそれが読めること、`backup.integrityKeyFile`を書いたならそれが読めて32バイト以上あることを確かめ、どれかが駄目なら起動しない。暗号化していて`schedule.verify: true`なのに`identityFile`が空のときも起動しない(毎回の検証が復号できずに落ち、使える世代が1つもできないため)。
 
 ### 設定
 

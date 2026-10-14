@@ -125,6 +125,13 @@ type Restorer struct {
 	PgRestore string
 	// Identities decrypt age-encrypted dumps.
 	Identities []age.Identity
+	// IntegrityKey, when set, makes Restore refuse a generation whose
+	// meta.json is not signed with it (backup.integrityKeyFile).
+	IntegrityKey []byte
+	// AllowUnsigned accepts a generation without a signature even when
+	// IntegrityKey is set (generations taken before the key was set). A
+	// signature that does not match is refused regardless.
+	AllowUnsigned bool
 	// CoreMigrationsDir and LocalMigrationsDir are the bundled migrations.
 	CoreMigrationsDir  string
 	LocalMigrationsDir string
@@ -962,9 +969,25 @@ func (r *Restorer) latestVerified(ctx context.Context) (string, bool, error) {
 		if g.Verify == nil && hasObject(g, Key(g.ID, VerifyFile)) {
 			return "", false, fmt.Errorf("backup: cannot read %s; pass a generation id explicitly", Key(g.ID, VerifyFile))
 		}
-		if VerifyPassed(g.ID, g.Verify, g.Meta) {
-			return g.ID, true, nil
+		if !VerifyPassed(g.ID, g.Verify, g.Meta) {
+			continue
 		}
+		// 鍵があれば、署名の無い・合わない世代は選ばない (選んでも readMeta が断る
+		// ので、latest が使えなくなるだけになる)。保存先に書ける者が置いた新しい
+		// 偽の世代は飛ばして、その下の本物の世代を選ぶ。**AllowUnsigned でも署名の
+		// 無い世代は選ばない。** 署名の無い世代は誰でも置けるので、それを最新として
+		// 選ぶと、古い世代を戻すつもりの運営者に偽の世代を戻させられる。署名の無い
+		// 世代は ID を明示したときだけ戻す。
+		if len(r.IntegrityKey) > 0 {
+			if _, err := ReadMetaVerified(ctx, r.Storage, g.ID, r.IntegrityKey, false); err != nil {
+				if errors.Is(err, ErrUnsigned) || errors.Is(err, ErrBadSignature) {
+					r.logf("skipping generation %s: %v", g.ID, err)
+					continue
+				}
+				return "", false, err
+			}
+		}
+		return g.ID, true, nil
 	}
 	return "", false, errors.New("backup: no verified generation; run `elythia backup verify` or pass a generation id explicitly")
 }
@@ -980,8 +1003,12 @@ func hasObject(g Generation, key string) bool {
 
 // readMeta reads meta.json of id (ReadMeta) and accepts only the dump names
 // Take writes.
+//
+// **鍵があれば署名を確かめる。** 戻す処理は設定の DB の利用者で dump を流すので、
+// 保存先に書ける者が置いた世代を戻すと、本番の DB で任意の SQL が動く。meta.json は
+// dump の sha256 を持つので、meta.json の署名が合えば dump も取ったときのもの。
 func (r *Restorer) readMeta(ctx context.Context, id string) (Meta, error) {
-	m, err := ReadMeta(ctx, r.Storage, id)
+	m, err := ReadMetaVerified(ctx, r.Storage, id, r.IntegrityKey, r.AllowUnsigned)
 	if errors.Is(err, ErrNotFound) {
 		return Meta{}, fmt.Errorf("backup: generation %s has no %s (incomplete or missing)", id, MetaFile)
 	}

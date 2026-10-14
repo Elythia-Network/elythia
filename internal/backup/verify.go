@@ -74,6 +74,9 @@ type VerifyOptions struct {
 	ElythiaVersion string
 	// Now returns the verification time; nil means time.Now.
 	Now func() time.Time
+	// IntegrityKey, when set, refuses to verify a generation whose meta.json
+	// is not signed with it (backup.integrityKeyFile).
+	IntegrityKey []byte
 }
 
 // stageError is a verification failure caused by the generation itself, as
@@ -114,7 +117,9 @@ func Verify(ctx context.Context, s Storage, id string, opts VerifyOptions) (Veri
 	if opts.Bundled.Core <= 0 {
 		return VerifyResult{}, errors.New("backup verify: the bundled core migration version is unknown")
 	}
-	meta, err := ReadMeta(ctx, s, id)
+	// 署名が無い・合わない世代は判定しない (verify.json を書かない)。署名の合わない
+	// 世代は戻す処理も断るので、前の結果が残っても戻されない。
+	meta, err := ReadMetaVerified(ctx, s, id, opts.IntegrityKey, false)
 	if errors.Is(err, ErrNotFound) {
 		// meta.json の無い世代は取り終わっていない (Meta の GoDoc)。
 		return VerifyResult{}, fmt.Errorf("backup verify: generation %s has no %s (incomplete)", id, MetaFile)

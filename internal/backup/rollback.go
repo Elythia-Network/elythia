@@ -200,3 +200,69 @@ func (r *Restorer) CheckRollback(ctx context.Context, maintenance, database, kep
 	// その閉じた接続が少しの間残る。名前の入れ替えと同じだけ待つ。
 	return waitNoConnections(ctx, admin, kept, replacementSettle)
 }
+
+// Operation marks MarkOperation puts on a database.
+const (
+	// MarkActive: the database is the one an operation is switching out.
+	MarkActive = "active"
+	// MarkFinished: the operation that switched the database out has ended.
+	MarkFinished = "finished"
+	// MarkHanded: the operation was handed to the operator after the switch.
+	MarkHanded = "handed"
+)
+
+// operationMarkPrefix starts the comment MarkOperation puts on a database.
+const operationMarkPrefix = "elythia-restore-"
+
+// MarkOperation records on database (COMMENT ON DATABASE) that operation
+// opID is switching it out (MarkActive) or has ended (MarkFinished).
+//
+// **操作の状態を Redis の外にも残す。** Redis の記録は、書ける者が終わった記録の
+// step を途中へ戻すだけで、回復の巻き戻しを起こせる (記録の署名は名前しか守れず、
+// 正しく署名された過去の状態をそのまま書き戻せる)。データベースの comment は、
+// その DB の持ち主か superuser しか書けない。入れ替える直前に本番の DB へ「この
+// 操作が入れ替えている」と書き、終えるときに「終わった」に書き換える。回復は、
+// 退避した DB にこの操作の進行中の印があるときだけ巻き戻す。
+func (r *Restorer) MarkOperation(ctx context.Context, maintenance, database, state, opID string) error {
+	admin, err := r.connect(ctx, maintenanceDB(maintenance))
+	if err != nil {
+		return err
+	}
+	defer admin.Close(context.Background())
+	sql := "COMMENT ON DATABASE " + pgx.Identifier{database}.Sanitize() + " IS " + literal(operationMarkPrefix+state+":"+opID)
+	if _, err := admin.Exec(ctx, sql); err != nil {
+		return fmt.Errorf("backup: mark %q: %w", database, err)
+	}
+	return nil
+}
+
+// OperationMark returns the mark MarkOperation put on database. exists is
+// false when there is no such database; state and opID are empty when it has
+// no mark.
+func (r *Restorer) OperationMark(ctx context.Context, maintenance, database string) (state, opID string, exists bool, err error) {
+	admin, err := r.connect(ctx, maintenanceDB(maintenance))
+	if err != nil {
+		return "", "", false, err
+	}
+	defer admin.Close(context.Background())
+	var comment *string
+	err = admin.QueryRow(ctx, `SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = $1`, database).Scan(&comment)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", false, nil
+	}
+	if err != nil {
+		return "", "", false, fmt.Errorf("backup: read the comment of %q: %w", database, err)
+	}
+	if comment == nil {
+		return "", "", true, nil
+	}
+	rest, ok := strings.CutPrefix(*comment, operationMarkPrefix)
+	if !ok {
+		return "", "", true, nil
+	}
+	state, opID, ok = strings.Cut(rest, ":")
+	if !ok || (state != MarkActive && state != MarkFinished && state != MarkHanded) {
+		return "", "", true, nil
+	}
+	return state, opID, true, nil
+}

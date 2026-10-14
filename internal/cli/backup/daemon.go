@@ -28,6 +28,8 @@ type Deps struct {
 	Storage  backupkit.Storage
 	Taker    daemon.Taker
 	Verifier daemon.Verifier
+	// IntegrityKey is backup.integrityKeyFile (nil when not set).
+	IntegrityKey []byte
 }
 
 // daemonEnv carries the process-level dependencies so tests can replace them.
@@ -283,7 +285,7 @@ func buildDaemon(e daemonEnv, cfg *config.Config, logger *slog.Logger) (*daemon.
 		return nil, err
 	}
 	return daemon.New(daemon.Options{
-		Schedule: sched, Storage: deps.Storage, Taker: deps.Taker, Verifier: deps.Verifier,
+		Schedule: sched, Storage: deps.Storage, Taker: deps.Taker, Verifier: deps.Verifier, IntegrityKey: deps.IntegrityKey,
 		Notifier: notifier, Instance: cfg.URL, Logger: logger,
 	}), nil
 }
@@ -318,9 +320,10 @@ func wireDeps(te env, ve verifyEnv) func(*config.Config, *slog.Logger) (Deps, er
 			logger.Warn("backup: " + w)
 		}
 		return Deps{
-			Storage:  st,
-			Taker:    newTaker(topts),
-			Verifier: verifier{st: st, opts: vopts, verify: ve.verify},
+			Storage:      st,
+			Taker:        newTaker(topts),
+			Verifier:     verifier{st: st, opts: vopts, verify: ve.verify},
+			IntegrityKey: topts.IntegrityKey,
 		}, nil
 	}
 }

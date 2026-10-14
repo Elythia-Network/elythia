@@ -36,6 +36,7 @@ func crashedRollback(t *testing.T, step string, names map[string]string, phase s
 	for k, v := range names {
 		e.db.dbs[k] = v
 	}
+	markSwitchedOut(e, rec)
 	e.db.mu.Unlock()
 	if phase != "" {
 		require.NoError(t, e.maint.Enter(ctx, maintmode.State{OpID: rec.OpID, Kind: maintmode.KindRollback, Phase: phase}))

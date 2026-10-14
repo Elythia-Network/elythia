@@ -378,7 +378,7 @@ func TestRestoreFromAdminEndToEnd(t *testing.T) {
 		st, out := r.call("/restore/prepare", map[string]any{"i": late2faToken, "kind": "rollback", "database": keptBefore, "password": adminPassword, "token": code}, "")
 		assert.Equal(t, http.StatusForbidden, st, out)
 		assert.Equal(t, "TWO_FACTOR_REQUIRED", e2eCode(out), "u5 registered 2FA after the backup, so the restored database has none")
-		cur, err := restoreop.NewStore(r.rdb, r.prefix).Current(r.ctx)
+		cur, err := restoreop.NewStore(r.rdb, r.prefix, nil).Current(r.ctx)
 		require.NoError(t, err)
 		assert.Nil(t, cur, "nothing is prepared")
 	})

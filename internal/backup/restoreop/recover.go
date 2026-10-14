@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/backup"
 	"github.com/elythia-network/elythia/internal/maintmode"
 )
 
@@ -78,6 +79,36 @@ func (m *Manager) recoverRecord(ctx context.Context, rec *Record) {
 		m.giveUp(ctx, rec, rec.Step, err)
 		return
 	}
+	// **この操作が入れ替えている印が無ければ、名前を入れ替えた後の回復をしない。**
+	// 入れ替える直前に本番へ進行中の印を付け (switch)、終えるとき・運営者に渡す
+	// ときに「終わった」に書き換える。Redis の記録を途中の段へ書き戻されても、
+	// 印は Redis の外にあるので、終わった操作や別の操作の退避した DB では巻き戻さ
+	// ない。退避した DB がまだ無い (入れ替える前) なら、従来どおりに進める。
+	switch rec.Step {
+	case StepEntering, StepSwitched, StepResuming, StepReverting:
+		state, op, exists, err := m.o.DB.OperationMark(ctx, m.o.MaintenanceDB, rec.Before)
+		if err != nil {
+			m.giveUp(ctx, rec, rec.Step, fmt.Errorf("read the mark of %s: %w", rec.Before, err))
+			return
+		}
+		switch {
+		case !exists:
+		case op == rec.OpID && state == backup.MarkFinished:
+			if st, err := m.readMaintenance(ctx); err == nil && st != nil && st.OpID == rec.OpID {
+				m.resumeCurrent(ctx, rec)
+			}
+			m.record(ctx, rec.OpID, rec.Step, StepDone)
+			m.journal(ctx, rec.OpID, StepDone, "%s is marked as kept by this finished operation; not reverting", rec.Before)
+			return
+		case op == rec.OpID && state == backup.MarkActive:
+		case op == rec.OpID && state == backup.MarkHanded:
+			m.giveUp(ctx, rec, rec.Step, fmt.Errorf("this operation was already handed to the operator (%s is marked as handed)", rec.Before))
+			return
+		default:
+			m.giveUp(ctx, rec, rec.Step, fmt.Errorf("%s is not marked as being switched out by this operation", rec.Before))
+			return
+		}
+	}
 	switch rec.Step {
 	case StepPreparing, StepReady, StepAborting:
 		// まだ名前を入れ替えていない。メンテナンスに入れたまま落ちていれば (中止の
@@ -120,6 +151,7 @@ func (m *Manager) recoverRecord(ctx context.Context, rec *Record) {
 		}
 		if st == nil || st.OpID != rec.OpID {
 			// 判定役が状態を消した後で落ちた。全プロセスが戻した DB で動いている。
+			m.markFinished(ctx, rec)
 			m.record(ctx, rec.OpID, StepResuming, StepDone)
 			m.journal(ctx, rec.OpID, StepDone, "the processes already serve the restored database")
 			return

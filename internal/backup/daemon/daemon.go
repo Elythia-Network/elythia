@@ -114,6 +114,9 @@ type Options struct {
 	Storage  backup.Storage
 	Taker    Taker
 	Verifier Verifier
+	// IntegrityKey, when set, makes Scan count only generations whose
+	// meta.json is signed with it (backup.integrityKeyFile).
+	IntegrityKey []byte
 	// Notifier is nil when no webhook is configured.
 	Notifier Notifier
 	// Instance is the server URL put into notifications.
@@ -193,7 +196,7 @@ func New(o Options) *Daemon {
 // (whose context is ctx, so it is cancelled too).
 func (d *Daemon) Run(ctx context.Context) {
 	now := d.clock.Now()
-	gens, err := Scan(ctx, d.opts.Storage)
+	gens, err := Scan(ctx, d.opts.Storage, d.opts.IntegrityKey)
 	if err != nil {
 		// 保存先に届かなくても止まらない。取る段で同じ理由で落ち、通知が出る。
 		d.log.Error("backup: cannot list generations at start", "error", err)
@@ -745,7 +748,7 @@ func (d *Daemon) prune(ctx context.Context) ([]string, error) {
 	if d.opts.Schedule != nil {
 		keep = d.opts.Schedule.Keep
 	}
-	gens, err := Scan(ctx, d.opts.Storage)
+	gens, err := Scan(ctx, d.opts.Storage, d.opts.IntegrityKey)
 	if err != nil {
 		return nil, err
 	}
@@ -771,7 +774,7 @@ func (d *Daemon) prune(ctx context.Context) ([]string, error) {
 // finish records res, refreshes the newest usable generation and starts a
 // deferred scheduled take.
 func (d *Daemon) finish(ctx context.Context, res JobResult) {
-	gens, err := Scan(ctx, d.opts.Storage)
+	gens, err := Scan(ctx, d.opts.Storage, d.opts.IntegrityKey)
 	if err != nil && ctx.Err() == nil {
 		d.log.Error("backup: cannot list generations", "error", err)
 	}

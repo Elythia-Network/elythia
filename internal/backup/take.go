@@ -82,6 +82,9 @@ type TakeOptions struct {
 	PgDump string
 	// Recipients enables age encryption when non-empty.
 	Recipients []age.Recipient
+	// IntegrityKey, when set, signs meta.json into MetaSigFile
+	// (backup.integrityKeyFile).
+	IntegrityKey []byte
 	// Now returns the time the generation ID is made from. Nil means time.Now.
 	Now    func() time.Time
 	Logger *slog.Logger
@@ -253,11 +256,21 @@ func Take(ctx context.Context, o TakeOptions) (meta *Meta, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("backup: encode meta: %w", err)
 	}
+	// **署名は meta.json より先に置く。** 読む側は meta.json があれば取り終わった
+	// 世代とみなすので、先に meta.json を置くと、署名の無い瞬間が生まれる。
+	if len(o.IntegrityKey) > 0 {
+		sig := SignMeta(o.IntegrityKey, id, body)
+		if err = o.Storage.Put(ctx, Key(id, MetaSigFile), strings.NewReader(sig+"\n")); err != nil {
+			deleteQuietly(ctx, o.Storage, logger, Key(id, MetaSigFile))
+			return nil, err
+		}
+	}
 	if err = o.Storage.Put(ctx, Key(id, MetaFile), bytes.NewReader(body)); err != nil {
 		// 失敗と返ってきても、実は置けていることがある (応答が途中で切れた場合など)。
 		// dump だけ消して meta.json が残ると、中身の無い世代が complete に見えるので、
 		// meta.json も消す。
 		deleteQuietly(ctx, o.Storage, logger, Key(id, MetaFile))
+		deleteQuietly(ctx, o.Storage, logger, Key(id, MetaSigFile))
 		return nil, err
 	}
 	logger.Info("backup: done", "id", id)

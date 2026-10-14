@@ -267,6 +267,7 @@ Elythia 側のマイグレーションには含めていない。pgroonga 拡張
 | `backup.encryption.enabled` | bool | dumpをageで暗号化する |
 | `backup.encryption.recipients` | string[] | ageの公開鍵(`age1...`)。`enabled`のとき1つ以上必須。取るのに要るのはこれだけ |
 | `backup.encryption.identityFile` | string | ageの秘密鍵のファイル。確かめる・戻すときに使う。リポジトリの外に置く |
+| `backup.integrityKeyFile` | string | 世代の`meta.json`とRedisのリストアの記録に署名する鍵(HMAC-SHA256)のファイル。32バイト以上(前後の空白は無視)。設定すると、取るときに署名し、戻す・確かめるときに署名の無い・合わない世代を断る。空なら署名しない。バックアップ用のホストにだけ置き、保存先には置かない([DBのバックアップ](backup.md#署名)) |
 | `backup.tools.pgDump` | string | `pg_dump`のパス。空ならPATHから探す |
 | `backup.tools.pgRestore` / `initdb` / `pgCtl` | string | `pg_restore` / `initdb` / `pg_ctl`のパス。空ならPATHから探す。`pg_restore`は、`elythia backup restore`がDBへ戻すときと、`elythia backup verify`が使い捨てのPostgreSQLへ戻すときに使う。`initdb` / `pg_ctl`は`verify`だけが使う |
 | `backup.schedule.interval` | string | `elythia backup daemon`が取る間隔(Goのduration。例: `24h`)。1分以上。空なら定期実行しない |

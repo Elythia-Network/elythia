@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -229,13 +230,18 @@ func TestWireDepsBuildsTakerAndVerifier(t *testing.T) {
 		gotStorage, gotID, gotOpts = st, id, o
 		return backupkit.VerifyResult{ID: id, OK: true}, errors.New("cleanup failed")
 	}
+	keyFile := filepath.Join(t.TempDir(), "integrity.key")
+	require.NoError(t, os.WriteFile(keyFile, []byte(strings.Repeat("k", 32)), 0o600))
 	b := &config.BackupOptions{
-		Storage: config.BackupStorageOptions{Type: backupkit.StorageTypeDir, Dir: config.BackupDirectoryOptions{Path: dir}},
-		Tools:   config.BackupToolsOptions{PgDump: "/opt/pg/pg_dump", Initdb: "/opt/pg/initdb"},
+		Storage:          config.BackupStorageOptions{Type: backupkit.StorageTypeDir, Dir: config.BackupDirectoryOptions{Path: dir}},
+		Tools:            config.BackupToolsOptions{PgDump: "/opt/pg/pg_dump", Initdb: "/opt/pg/initdb"},
+		IntegrityKeyFile: keyFile,
 	}
 	deps, err := wireDeps(te, ve)(cfgWith(b), discardLogger())
 	require.NoError(t, err)
 	require.IsType(t, &backupkit.DirStorage{}, deps.Storage)
+	// 署名の鍵は、取る・確かめる・世代を数える処理のすべてに渡す。
+	assert.Equal(t, strings.Repeat("k", 32), string(deps.IntegrityKey))
 
 	// 取る処理は backup.Take を、設定の pg_dump で呼ぶ。DB を待つのは別のテストで見る。
 	tk, ok := deps.Taker.(taker)
@@ -257,6 +263,8 @@ func TestWireDepsBuildsTakerAndVerifier(t *testing.T) {
 	assert.Same(t, deps.Storage, gotStorage)
 	assert.Equal(t, backupkit.BundledMigrations{Core: 9}, gotOpts.Bundled)
 	assert.Equal(t, backupkit.LocalSandbox{Tools: b.Tools}, gotOpts.Sandbox)
+	assert.Equal(t, deps.IntegrityKey, gotOpts.IntegrityKey)
+	assert.Equal(t, deps.IntegrityKey, tk.opts.IntegrityKey)
 }
 
 func testRecipient(t *testing.T) string {
@@ -495,7 +503,7 @@ func TestDaemonRetriesTheRestore(t *testing.T) {
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
-	store := restoreop.NewStore(rdb, "p:")
+	store := restoreop.NewStore(rdb, "p:", nil)
 	require.NoError(t, rdb.Set(context.Background(), store.CurrentKey(), "restore-0123456789abcdef", 0).Err())
 	require.NoError(t, rdb.HSet(context.Background(), "p:elythia:maintenance:restore:restore-0123456789abcdef", "opId", "restore-0123456789abcdef", "step", "aborting",
 		// 名前はこのサービスが作る形にする (形の違う記録は消さずに運営者へ渡す)。
@@ -559,7 +567,7 @@ func TestDaemonStartsAndClosesTheRestore(t *testing.T) {
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
-	store := restoreop.NewStore(rdb, "p:")
+	store := restoreop.NewStore(rdb, "p:", nil)
 	closed := make(chan struct{})
 	var acquired atomic.Int32
 	e.openRestore = func(_ *config.Config, d *daemon.Daemon, _ backupkit.Storage, _ *slog.Logger) (*RestoreParts, error) {
@@ -632,4 +640,9 @@ func (stubRestoreDB) CheckDatabaseMigrations(context.Context, string) (*backupki
 func (stubRestoreDB) CheckRollback(context.Context, string, string, string, string) error { return nil }
 func (stubRestoreDB) KeptDatabases(context.Context, string, string) ([]backupkit.KeptDatabase, error) {
 	return nil, nil
+}
+
+func (stubRestoreDB) MarkOperation(context.Context, string, string, string, string) error { return nil }
+func (stubRestoreDB) OperationMark(context.Context, string, string) (string, string, bool, error) {
+	return "", "", false, nil
 }

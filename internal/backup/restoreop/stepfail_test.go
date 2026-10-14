@@ -188,9 +188,11 @@ func TestStepNotWritten_AtStart(t *testing.T) {
 	e.stop()
 	e.process("p1")
 	ctx := context.Background()
-	require.NoError(t, e.store.create(ctx, &Record{OpID: "restore-0123456789abcdef", Step: StepSwitched, Database: testDB, Target: tgt, Before: before}))
+	rec := &Record{OpID: "restore-0123456789abcdef", Step: StepSwitched, Database: testDB, Target: tgt, Before: before}
+	require.NoError(t, e.store.create(ctx, rec))
 	e.db.mu.Lock()
 	e.db.dbs = map[string]string{testDB: "restored", before: "current"}
+	markSwitchedOut(e, rec)
 	e.db.mu.Unlock()
 	require.NoError(t, e.maint.Enter(ctx, maintmode.State{OpID: "restore-0123456789abcdef", Kind: maintmode.KindRestore, Phase: maintmode.PhaseHeld}))
 	f := newFailOnce(StepReverting)

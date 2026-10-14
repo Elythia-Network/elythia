@@ -189,3 +189,53 @@ func TestRollbackChecks(t *testing.T) {
 		require.ErrorIs(t, err, ErrRestoreNoPrivilege)
 	})
 }
+
+// DB に、アプリの DB の利用者 (持ち主) で操作の印を付けて読めること。印は改名に
+// 付いていく。持ち主でない DB には付けられないので、誤りを返すこと。
+func TestOperationMark(t *testing.T) {
+	pg := rsStartPG(t, "postgres:18-alpine")
+	rsSetupInstance(t, pg, true)
+	ctx := context.Background()
+	const db = rsAppDB + "_mark"
+	pg.exec(t, "postgres", "CREATE DATABASE "+db+" OWNER "+rsAppUser, "CREATE DATABASE not_owned")
+	app := pg.restorer(newRSStorage(), rsAppUser, rsAppPass)
+
+	state, op, exists, err := app.OperationMark(ctx, "", db)
+	require.NoError(t, err)
+	assert.True(t, exists)
+	assert.Empty(t, state)
+	assert.Empty(t, op)
+
+	require.NoError(t, app.MarkOperation(ctx, "", db, MarkActive, "op-1"))
+	state, op, _, err = app.OperationMark(ctx, "", db)
+	require.NoError(t, err)
+	assert.Equal(t, MarkActive, state)
+	assert.Equal(t, "op-1", op)
+
+	pg.exec(t, "postgres", "ALTER DATABASE "+db+" RENAME TO renamed_mark")
+	require.NoError(t, app.MarkOperation(ctx, "", "renamed_mark", MarkFinished, "op-1"))
+	state, op, _, err = app.OperationMark(ctx, "", "renamed_mark")
+	require.NoError(t, err)
+	assert.Equal(t, MarkFinished, state, "印が改名に付いていかない")
+	assert.Equal(t, "op-1", op)
+
+	require.NoError(t, app.MarkOperation(ctx, "", "renamed_mark", MarkHanded, "op-1"))
+	state, _, _, err = app.OperationMark(ctx, "", "renamed_mark")
+	require.NoError(t, err)
+	assert.Equal(t, MarkHanded, state)
+
+	_, _, exists, err = app.OperationMark(ctx, "", "no_such_db")
+	require.NoError(t, err)
+	assert.False(t, exists)
+
+	// 印でない comment は印として読まない。
+	for _, c := range []string{"something else", "elythia-restore-other:op-9", "elythia-restore-active"} {
+		pg.exec(t, "postgres", "COMMENT ON DATABASE not_owned IS '"+c+"'")
+		state, op, exists, err = app.OperationMark(ctx, "", "not_owned")
+		require.NoError(t, err)
+		assert.True(t, exists)
+		assert.Empty(t, state, c)
+		assert.Empty(t, op, c)
+	}
+	assert.Error(t, app.MarkOperation(ctx, "", "not_owned", MarkActive, "op-2"), "持ち主でない DB に印を付けた")
+}

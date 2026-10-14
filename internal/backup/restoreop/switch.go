@@ -218,6 +218,12 @@ func (m *Manager) switchSteps(ctx context.Context, rec *Record) {
 
 	// C5: 名前を入れ替える。SwitchDatabase は入れ替える直前に、もう一度
 	// pg_stat_activity で接続が無いことを確かめる (held は根拠にしない)。
+	// 入れ替える直前に、退避する側 (今の本番) へ進行中の印を付ける。付けられない
+	// なら入れ替えない (印の無い入れ替えは、回復が巻き戻せない)。
+	if err := m.o.DB.MarkOperation(ctx, m.o.MaintenanceDB, rec.Database, backup.MarkActive, rec.OpID); err != nil {
+		m.abortBeforeSwitch(ctx, rec, fmt.Errorf("mark %s before the switch: %w", rec.Database, err), true)
+		return
+	}
 	err = m.o.DB.SwitchDatabase(ctx, m.o.MaintenanceDB, rec.Database, rec.Before, rec.Target)
 	switch {
 	case errors.Is(err, backup.ErrRestoreSwitchUnknown):
@@ -280,6 +286,7 @@ func (m *Manager) awaitResume(ctx context.Context, rec *Record) {
 		m.revert(ctx, rec, StepResuming, fmt.Errorf("the processes did not serve again within %s", m.o.ResumeTimeout))
 		return
 	}
+	m.markFinished(ctx, rec)
 	m.record(ctx, rec.OpID, StepResuming, StepDone)
 	if rec.Kind == KindRollback {
 		m.journal(ctx, rec.OpID, StepDone, "rolled back to %s; the previous database is kept as %s", rec.Target, rec.Before)
@@ -330,6 +337,47 @@ func (m *Manager) abortBeforeSwitch(ctx context.Context, rec *Record, cause erro
 
 // resumeCurrent lets the processes come back and waits for them (best
 // effort: they keep retrying on their own).
+// markFinished replaces the active mark on the database kept aside with the
+// finished one, so that a record put back to an earlier step is not
+// recovered (recoverRecord). 書けなくても操作は終える (進行中の印が残り、その
+// 操作の記録の再生を防げないだけ)。
+func (m *Manager) markFinished(ctx context.Context, rec *Record) {
+	if err := m.o.DB.MarkOperation(ctx, m.o.MaintenanceDB, rec.Before, backup.MarkFinished, rec.OpID); err != nil {
+		m.log.Warn("backup: cannot mark the kept database as finished", "opId", rec.OpID, "database", rec.Before, "err", err)
+		m.journal(ctx, rec.OpID, "", "could not mark %s as finished: %v", rec.Before, err)
+	}
+}
+
+// retireMark marks the database kept aside as handed to the operator when it
+// carries this operation's active mark. giveUp uses it: an operation handed to
+// the operator must not be reverted later by a record put back to an earlier
+// step.
+//
+// 「終わった」と別の印にする。運営者に渡した直後に記録 (unknown) が書けずに
+// 途中の段のまま残ると、次の起動の回復は印を見る。「終わった」と書いていると、
+// 運営者に渡したメンテナンスを外して done にしてしまう。渡した印なら、回復も
+// 運営者に渡す。読み書きは時間を区切る (DB に繋がらないときに、通知を遅らせない)。
+func (m *Manager) retireMark(ctx context.Context, rec *Record) {
+	ctx, cancel := context.WithTimeout(ctx, markTimeout)
+	defer cancel()
+	state, op, exists, err := m.o.DB.OperationMark(ctx, m.o.MaintenanceDB, rec.Before)
+	if err != nil {
+		m.log.Warn("backup: cannot read the mark of the kept database", "opId", rec.OpID, "database", rec.Before, "err", err)
+		m.journal(ctx, rec.OpID, "", "could not read the mark of %s: %v", rec.Before, err)
+		return
+	}
+	if !exists || op != rec.OpID || state != backup.MarkActive {
+		return
+	}
+	if err := m.o.DB.MarkOperation(ctx, m.o.MaintenanceDB, rec.Before, backup.MarkHanded, rec.OpID); err != nil {
+		m.log.Warn("backup: cannot mark the kept database as handed to the operator", "opId", rec.OpID, "database", rec.Before, "err", err)
+		m.journal(ctx, rec.OpID, "", "could not mark %s as handed to the operator: %v", rec.Before, err)
+	}
+}
+
+// markTimeout bounds the mark retireMark reads and writes.
+const markTimeout = 15 * time.Second
+
 func (m *Manager) resumeCurrent(ctx context.Context, rec *Record) {
 	if err := m.o.Maint.SetPhase(ctx, rec.OpID, maintmode.PhaseResuming); err != nil {
 		if !errors.Is(err, maintmode.ErrNotActive) && !stopping(ctx) {
@@ -475,6 +523,7 @@ func (m *Manager) giveUp(ctx context.Context, rec *Record, from string, cause er
 			"To put another database under %s, enter the maintenance first (elythia maintenance enter), then elythia backup restore -rollback, then elythia maintenance exit",
 			kindWord(rec), rec.OpID, cause, rec.Database, names, rec.Database)
 	}
+	m.retireMark(ctx, rec)
 	m.record(ctx, rec.OpID, "", StepUnknown, "error", cause.Error())
 	m.journal(ctx, rec.OpID, from, "%s", msg)
 	m.log.Error("backup: " + msg)

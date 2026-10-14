@@ -83,7 +83,23 @@ func takeOptions(e env, cfg *config.Config, st backup.Storage, logger *slog.Logg
 			return opts, fmt.Errorf("invalid encryption settings: %w", err)
 		}
 	}
+	if opts.IntegrityKey, err = integrityKey(cfg.Backup); err != nil {
+		return opts, err
+	}
 	return opts, nil
+}
+
+// integrityKey loads backup.integrityKeyFile, or returns nil when it is not
+// set.
+func integrityKey(b *config.BackupOptions) ([]byte, error) {
+	if b == nil || b.IntegrityKeyFile == "" {
+		return nil, nil
+	}
+	key, err := backup.LoadIntegrityKey(b.IntegrityKeyFile)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read backup.integrityKeyFile: %w", err)
+	}
+	return key, nil
 }
 
 func take(ctx context.Context, e env, args []string) int {

@@ -152,6 +152,9 @@ services:
       # 秘密鍵はリポジトリの外 (.config にも置かない) に置き、取る側のホストには
       # 置かないのが望ましい。
       # - /etc/elythia/backup-identity.txt:/run/secrets/backup-identity.txt:ro
+      # backup.integrityKeyFile を使うときは、署名の鍵を渡す (取る・確かめる・戻す
+      # すべてで使う)。保存先には置かない。
+      # - /etc/elythia/backup-integrity.key:/run/secrets/backup-integrity.key:ro
       # verify は復号した dump と戻した DB を TMPDIR (既定は書き込み層の /tmp) に置く。
       # 本番の DB の volume と同じディスクを埋めないよう、別のディスクを mount して
       # 下の environment の TMPDIR をそこへ向ける (UID 70 が書けるようにする。docs/backup.md)。
