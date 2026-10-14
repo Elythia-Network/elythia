@@ -20,6 +20,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/userpack"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/misc/idnhost"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
@@ -75,6 +76,10 @@ type Handler struct {
 	// (nil) なら gate 無効 = 全 host 許可 (legacy 挙動)。
 	hostBlocker HostBlockChecker
 	localHost   string
+	// softwareBlocker は受信を拒否するソフトウェア (meta.inboxSuspendedSoftware) の
+	// 判定。ドメインブロックと同じく FEDERATION_NOT_ALLOWED にする (#3563)。resolver
+	// も取り込みを拒むが、ここで止めないと取得した生の AP JSON をそのまま返す。
+	softwareBlocker SoftwareSuspensionChecker
 	// backfillGroup collapses parallel lazy-backfill 経路の Generate +
 	// InsertIfAbsent を同 user ID で 1 回に集約する。多 goroutine が
 	// 同時に backfill しても entropy / CPU を浪費しない (#1081 review #1)。
@@ -123,6 +128,22 @@ func (h *Handler) SetFederationGate(c HostBlockChecker, localHost string) {
 	h.hostBlocker = c
 	h.localHost = localHost
 }
+
+// SoftwareSuspensionChecker reports whether a host runs software listed in
+// meta.inboxSuspendedSoftware (#3362)。実装は core/federation.NewInboxSuspendedChecker。
+type SoftwareSuspensionChecker interface {
+	IsSuspended(host string) bool
+}
+
+// SetSoftwareSuspensionChecker wires the meta.inboxSuspendedSoftware checker
+// used by APIShow (#3563).
+func (h *Handler) SetSoftwareSuspensionChecker(c SoftwareSuspensionChecker) {
+	h.softwareBlocker = c
+}
+
+// HasSoftwareSuspensionChecker reports whether SetSoftwareSuspensionChecker
+// was called with a non-nil checker (startup wiring check).
+func (h *Handler) HasSoftwareSuspensionChecker() bool { return h.softwareBlocker != nil }
 
 // federationDisabled reports whether the instance is fully isolated
 // (federation mode "none")。AP serve handler はこのとき 403 を返す
@@ -469,17 +490,16 @@ func (h *Handler) APIShow(c echo.Context) error {
 
 	// URI を解析して host を得る。http(s) でない / host 無しは URI_INVALID
 	// (upstream uriInvalid 1a5eab56)。
-	host, hostErr := apShowURIHost(req.URI)
+	_, hostErr := apShowURIHost(req.URI)
 	if hostErr != nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("URI_INVALID", "URI is invalid.", "1a5eab56-e47b-48c2-8d5e-217b897d70db"))
 	}
 	// federation-allow gate (upstream isFederationAllowedUri、#1557)。自 host は
-	// skip し、remote host が blocked / 非 federation なら FEDERATION_NOT_ALLOWED
-	// (974b799e) を返す。gate 未配線なら全許可 (legacy)。
-	if host != "" && host != h.localHost && h.hostBlocker != nil {
-		if h.hostBlocker.IsBlocked(host) || !h.hostBlocker.IsAllowed(host) {
-			return c.JSON(http.StatusBadRequest, apierr.Error("FEDERATION_NOT_ALLOWED", "Federation for this host is not allowed.", "974b799e-1a29-4889-b706-18d4dd93e266"))
-		}
+	// skip し、remote host が blocked / 非 federation、または受信を拒否する
+	// ソフトウェア (Elythia 独自、#3563) なら FEDERATION_NOT_ALLOWED (974b799e) を
+	// 返す。gate 未配線なら全許可 (legacy)。
+	if h.federationDenied(req.URI) {
+		return c.JSON(http.StatusBadRequest, apierr.Error("FEDERATION_NOT_ALLOWED", "Federation for this host is not allowed.", "974b799e-1a29-4889-b706-18d4dd93e266"))
 	}
 
 	// ローカルのノートURIかチェック (/notes/ を含む)
@@ -554,7 +574,13 @@ func (h *Handler) APIShow(c echo.Context) error {
 						})
 					}
 				}
-				// Resolver 無し or ResolveNote 失敗時は raw AP JSON を返す
+				// Resolver 無し or ResolveNote 失敗時は raw AP JSON を返す。**返す前に、
+				// 取得した文書の id のホストにも同じ判定を当てる** (#3563)。リダイレクトで
+				// 別のホストの文書が返ると、入口の判定 (要求した URI) をすり抜けた
+				// 拒否中のホストの中身を、resolver が取り込みを拒んだ後でそのまま返す。
+				if objID, _ := parsed["id"].(string); h.federationDenied(objID) {
+					return c.JSON(http.StatusBadRequest, apierr.Error("FEDERATION_NOT_ALLOWED", "Federation for this host is not allowed.", "974b799e-1a29-4889-b706-18d4dd93e266"))
+				}
 				return c.JSON(http.StatusOK, map[string]any{
 					"type":   "Note",
 					"object": parsed,
@@ -600,6 +626,35 @@ func apShowURIHost(uri string) (string, error) {
 		return "", errors.New("ap: invalid uri")
 	}
 	return u.Hostname(), nil
+}
+
+// federationDenied reports whether uri points at a remote host that ap/show
+// must not show: blocked / outside the federation allowlist, or running
+// software listed in meta.inboxSuspendedSoftware. 解析できない URI と自ホストは
+// false (呼び出し側が別に扱う)。
+//
+// 受信を拒否するソフトウェアの判定は、**instance の行と同じ形 (punycode の小文字、
+// 既定でないポートは残す。idnhost.HostPort) にしてから引く。** Hostname() のままだと、
+// IDN 表記や既定でないポートの URI が素通りする。
+func (h *Handler) federationDenied(uri string) bool {
+	host, err := apShowURIHost(uri)
+	if err != nil || host == "" || host == h.localHost {
+		return false
+	}
+	if h.hostBlocker != nil && (h.hostBlocker.IsBlocked(host) || !h.hostBlocker.IsAllowed(host)) {
+		return true
+	}
+	return h.softwareBlocker != nil && h.softwareBlocker.IsSuspended(apShowGateHost(uri))
+}
+
+// apShowGateHost returns the host of uri in the form instance rows use
+// (punycode, lower case, non-default port kept). 解析できなければ空文字。
+func apShowGateHost(uri string) string {
+	u, err := url.Parse(uri)
+	if err != nil || u.Hostname() == "" {
+		return ""
+	}
+	return idnhost.HostPort(u)
 }
 
 // resolveLocal attempts to resolve a local URI to an AP object.

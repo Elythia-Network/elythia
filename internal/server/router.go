@@ -924,7 +924,13 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// resolver の入口 (fetchActor / resolveNoteOnce / IngestNoteWithCreated) に
 	// 適用する。deliver_service / inboxProcessor と同じ instanceService を共有。
 	federationResolver.SetHostBlockChecker(instanceService)
+	// 受信を拒否するソフトウェア (#3362) のホストの投稿・actor も、リノートや返信の
+	// 連鎖、ap/show で取り込まない (#3563)。inbox と同じく判定のたびに meta を読む。
+	// メンションの解決も、ドメインブロックと同じく WebFinger を投げる前に止める。
+	inboxSoftwareChecker := corefederation.NewInboxSuspendedChecker(metaRepo, instanceRepo)
+	federationResolver.SetSoftwareSuspensionChecker(inboxSoftwareChecker)
 	remoteUserResolver.SetHostBlockChecker(instanceService)
+	remoteUserResolver.SetSoftwareSuspensionChecker(inboxSoftwareChecker)
 	federationResolver.SetSilencedHostChecker(instanceService)      // #2106 N14: silenced host の public note を home 降格
 	federationResolver.SetMediaSilencedHostChecker(instanceService) // #3218: media silenced host の添付をセンシティブに
 	// 受信した note の mentionLimit を投稿者 (リモート) の role policy から引く (#3330)。
@@ -2545,6 +2551,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// (config 起動時に validate 済で非空保証) を渡す — IsBlocked/IsAllowed は
 	// hostname suffix match のため。
 	apHandler.SetFederationGate(instanceService, s.config.Hostname)
+	// 受信を拒否するソフトウェアのホストも ap/show で FEDERATION_NOT_ALLOWED にする (#3563)。
+	apHandler.SetSoftwareSuspensionChecker(corefederation.NewInboxSuspendedChecker(metaRepo, instanceRepo))
 	// FEP-521a Multikey 対応で actor JSON に assertionMethod[] を expose する
 	// ため Ed25519 keypair repo を wire (#1067 / #1069)。
 	apHandler.SetKeypairExtraRepo(keypairExtraRepo)
@@ -4709,6 +4717,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"他人の drive ファイルをチャットに添付できる (IDOR)"},
 		{"ap.hostBlockChecker", apHandler.HasHostBlockChecker(),
 			"federation: none でも Person を AP serve し、ap/show の FEDERATION_NOT_ALLOWED gate も skip される"},
+		{"ap.softwareBlocker", apHandler.HasSoftwareSuspensionChecker(),
+			"受信を拒否するソフトウェアのホストを ap/show で引くと、取得した生の AP JSON をそのまま返す (#3563)"},
+		{"remoteUserResolver.softwareBlocker", remoteUserResolver.HasSoftwareSuspensionChecker(),
+			"受信を拒否するソフトウェアのホストにも、メンションの解決や users/show で WebFinger を投げる (#3563)"},
 		{"deliverProcessor.deliveryGate", deliverProcessor.HasDeliveryGate(),
 			"block / federation mode は enqueue 時チェックの第 2 の関門が外れ (積み残しと retry 中が漏れる)、suspend は enqueue 側に検査が無いので新規ジョブごと配送し続ける"},
 		{"admin.suspensionOriginRepo", adminHandler.HasSuspensionOriginRepo(),
@@ -4717,6 +4729,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"リモート actor の凍結を読まなくなる (#2951 が効かない)。読んだとしても由来を刻めないので、モデレーターが解除しても次の refresh で無言で戻る"},
 		{"inboxProcessor.softwareBlocker", inboxProcessor.HasSoftwareSuspensionChecker(),
 			"管理画面の受信を拒否するソフトウェアが効かず、その相手の activity を受け付ける (#3362)"},
+		{"resolver.softwareBlocker", federationResolver.HasSoftwareSuspensionChecker(),
+			"受信を拒否するソフトウェアのホストの投稿を、リノートや返信の連鎖、ap/show で取り込む (#3563)"},
 		{"deliverProcessor.suspendedChecker", deliverProcessor.HasSuspendedChecker(),
 			"管理画面の配送停止中のソフトウェアが配送に効かない (画面には配送停止と出る、#3558)"},
 		{"deliverProcessor.signingKeySource", deliverProcessor.HasSigningKeySource(),

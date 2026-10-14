@@ -1,10 +1,12 @@
 package federation
 
 import (
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
 
+	"github.com/elythia-network/elythia/internal/misc/idnhost"
 	"github.com/elythia-network/elythia/internal/misc/semverrange"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
@@ -121,11 +123,68 @@ func (c *SuspendedChecker) IsSuspended(host string) bool {
 	if len(entries) == 0 {
 		return false
 	}
-	inst, err := c.instanceRepo.FindByHost(host)
-	if err != nil {
+	inst := c.findInstance(host)
+	if inst == nil {
 		return false
 	}
 	return MatchSuspendedSoftware(inst.SoftwareName, inst.SoftwareVersion, entries)
+}
+
+// findInstance looks the instance row up by host as given (lower case and
+// punycode only) and, failing that, by suspensionLookupHost(host).
+//
+// **両方の形で引く** (#3563)。instance の行は idnhost.HostPort の形で、末尾の
+// ドット (`evil.example.`) や、http で :443 を使う相手の `h.example:443` を
+// そのまま持ちうる。揃えた形だけで引くと、それらの行に当たらなくなる
+// (受信の拒否と配送停止の両方)。揃えた形でも引くのは、呼び出し元ごとに渡す
+// ホストの形が違うため。そのままの形の行を優先する。
+func (c *SuspendedChecker) findInstance(host string) *model.Instance {
+	exact := idnhost.Puny(strings.TrimSpace(host))
+	canonical := suspensionLookupHost(host)
+	hosts := []string{exact}
+	if canonical != exact {
+		hosts = append(hosts, canonical)
+	}
+	rows, err := c.instanceRepo.FindManyByHosts(hosts)
+	if err != nil {
+		return nil
+	}
+	var fallback *model.Instance
+	for _, inst := range rows {
+		switch inst.Host {
+		case exact:
+			return inst
+		case canonical:
+			fallback = inst
+		}
+	}
+	return fallback
+}
+
+// suspensionLookupHost normalizes host into the usual form of instance rows
+// (punycode, lower case, no trailing dot, https default port removed).
+// findInstance uses it as the fallback key after the host as given.
+//
+// **呼び出し元ごとにホストの形が違う** (#3563)。inbox の keyId は `Host:443` や
+// Unicode のまま、users/show は利用者が書いた `host:443` や末尾のドット付き、
+// resolver は正規化済みの値を渡す。呼び出し元ごとに揃えると漏れるので、引く直前の
+// 1 か所で揃える。ポートの付かない名前は https として既定の :443 を落とす。
+func suspensionLookupHost(host string) string {
+	host = strings.TrimSpace(host)
+	u, err := url.Parse("https://" + host)
+	if err != nil || u.Hostname() == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+		return strings.ToLower(host)
+	}
+	name := strings.TrimSuffix(u.Hostname(), ".")
+	if strings.Contains(name, ":") {
+		name = "[" + name + "]"
+	}
+	if port := u.Port(); port != "" {
+		u.Host = name + ":" + port
+	} else {
+		u.Host = name
+	}
+	return idnhost.HostPort(u)
 }
 
 // ParseSuspendedSoftware decodes a deliverSuspendedSoftware JSON value. 表示と
