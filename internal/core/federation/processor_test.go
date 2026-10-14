@@ -430,9 +430,10 @@ func TestProcess_BadJSON(t *testing.T) {
 }
 
 func TestProcess_MissingActor(t *testing.T) {
-	p, _, _, _ := newProcessor(t, aliceActor)
-	err := p.Process([]byte(`{"type":"Follow"}`))
-	assert.Error(t, err)
+	p, _, followingRepo, _ := newProcessor(t, aliceActor)
+	// actor の無い activity は送り直しても直らない。error にせず受け取って捨てる。
+	require.NoError(t, p.Process([]byte(`{"type":"Follow","object":"https://example.com/users/bob"}`)))
+	assert.Empty(t, followingRepo.Followings)
 }
 
 // failingFollowingService isn't easy to construct since it's a concrete type;
