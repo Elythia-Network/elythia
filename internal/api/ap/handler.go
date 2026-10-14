@@ -76,6 +76,10 @@ type Handler struct {
 	// (nil) なら gate 無効 = 全 host 許可 (legacy 挙動)。
 	hostBlocker HostBlockChecker
 	localHost   string
+	// allowExternalRedirect は meta.allowExternalApRedirect を返す (未配線なら許す)。
+	allowExternalRedirect func() bool
+	// selfOrigin は config.url。外部への転送かどうかを scheme とポートまで見て決める。
+	selfOrigin *url.URL
 	// softwareBlocker は受信を拒否するソフトウェア (meta.inboxSuspendedSoftware) の
 	// 判定。ドメインブロックと同じく FEDERATION_NOT_ALLOWED にする (#3563)。resolver
 	// も取り込みを拒むが、ここで止めないと取得した生の AP JSON をそのまま返す。
@@ -372,7 +376,7 @@ func (h *Handler) apUserInfo(c echo.Context, bundle *coreuser.UserWithProfile) e
 			(h.localHost != "" && strings.EqualFold(*bundle.User.Host, h.localHost)) {
 			return c.NoContent(http.StatusInternalServerError)
 		}
-		return c.Redirect(http.StatusMovedPermanently, *bundle.User.URI)
+		return h.redirectAP(c, http.StatusMovedPermanently, *bundle.User.URI)
 	}
 	keypair, err := h.keypairRepo.FindByUserID(bundle.User.ID)
 	if err != nil {
@@ -807,7 +811,7 @@ func (h *Handler) Note(c echo.Context) error {
 			return c.NoContent(http.StatusInternalServerError)
 		}
 		// fastify の reply.redirect 既定と同じ 302。
-		return c.Redirect(http.StatusFound, *n.URI)
+		return h.redirectAP(c, http.StatusFound, *n.URI)
 	}
 	// upstream と同じキャッシュ指示 (public, max-age=180)。Vary: Accept を
 	// 立てているので AP 変種としてキャッシュされる。

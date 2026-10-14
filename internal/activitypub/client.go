@@ -77,15 +77,6 @@ func NewClient(httpClient *http.Client, userAgent string) *Client {
 	return &Client{httpClient: httpClient, userAgent: userAgent}
 }
 
-// DisableRedirect configures the HTTP client to reject all redirects.
-// meta.allowExternalApRedirect が false のとき呼ぶ。外部 AP サーバーが
-// 30x レスポンスを返した場合にオープンリダイレクト攻撃を防ぐ。
-func (c *Client) DisableRedirect() {
-	c.httpClient.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
-		return http.ErrUseLastResponse
-	}
-}
-
 // PostSigned sends a signed POST containing body to url, signed with key.
 // 戻り値は呼び出し側で Body.Close() すること。
 func (c *Client) PostSigned(url string, body []byte, key *PrivateKey) (*http.Response, error) {

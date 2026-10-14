@@ -849,10 +849,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// config.Proxy / ProxyBypassHosts も #485 で wire 済み。
 	apHTTPClient := s.outboundClient(30 * time.Second)
 	apClient := activitypub.NewClient(apHTTPClient, s.config.UserAgent)
-	// meta.allowExternalApRedirect が false なら AP fetch でのリダイレクトを拒否する。
-	if m, err := metaRepo.Fetch(); err == nil && !m.AllowExternalApRedirect {
-		apClient.DisableRedirect()
-	}
+	// meta.allowExternalApRedirect は外向きの取得には使わない。upstream と同じく、
+	// 自分が返す外部への 3xx を止める設定 (apHandler.SetExternalRedirectPolicy)。
 	apFetcher := corefederation.NewAPFetcher(apClient)
 	federationResolver := corefederation.NewResolver(userRepo, noteRepo, apURLs, apFetcher, idGen)
 	publickeyRepo := repository.NewUserPublickeyRepository(s.db)
@@ -883,8 +881,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// users/show 経由で host が指定されたリモートユーザーをローカル DB に
 	// キャッシュが無くても解決できるようにする (#269)。webfinger で actor URI
 	// を引いてから federationResolver.ResolveActor で User row を upsert する。
-	// redirect 追跡必須のため apClient とは *http.Client を分離し、
-	// apClient.DisableRedirect() の影響を受けないようにする。Timeout は
+	// redirect 追跡必須のため apClient とは *http.Client を分離する。Timeout は
 	// user-facing API 経由で呼ばれるので応答性優先で 10s に設定する。
 	webfingerClient := activitypub.NewWebFingerClient(s.outboundClient(10*time.Second), s.config.UserAgent)
 	// notes/create の DB に無いリモートの利用者へのメンションも同じ経路で取りに行く
@@ -2564,6 +2561,15 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// (config 起動時に validate 済で非空保証) を渡す — IsBlocked/IsAllowed は
 	// hostname suffix match のため。
 	apHandler.SetFederationGate(instanceService, s.config.Hostname)
+	apHandler.SetExternalRedirectPolicy(func() bool {
+		m, err := metaRepo.Fetch()
+		if err != nil || m == nil {
+			// 読めないときは既定 (true) に倒す。設定は外部への 3xx を止める
+			// 硬化で、止められないときは従来どおり転送するだけ。
+			return true
+		}
+		return m.AllowExternalApRedirect
+	}, s.config.URL)
 	// 受信を拒否するソフトウェアのホストも ap/show で FEDERATION_NOT_ALLOWED にする (#3563)。
 	apHandler.SetSoftwareSuspensionChecker(corefederation.NewInboxSuspendedChecker(metaRepo, instanceRepo))
 	// FEP-521a Multikey 対応で actor JSON に assertionMethod[] を expose する
