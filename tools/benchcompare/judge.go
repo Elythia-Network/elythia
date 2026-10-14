@@ -12,11 +12,13 @@ type Verdict string
 // Verdicts. Different is reported only when the ranges of the rounds do not
 // overlap and the medians differ by at least minEffectPercent and
 // minAbsDifference; Incomparable means the runs did not measure the same
-// thing.
+// thing; Reference means the measure is shown but not judged (see
+// referenceOnly).
 const (
 	VerdictDifferent    Verdict = "different"
 	VerdictSame         Verdict = "same"
 	VerdictIncomparable Verdict = "incomparable"
+	VerdictReference    Verdict = "reference"
 )
 
 // Comparison is the whole result.
@@ -291,11 +293,22 @@ func compareResources(base, head []*Run) []ResourceCompare {
 var minAbsDifference = map[string]float64{
 	"med":                1,
 	"p(95)":              1,
-	"p(99)":              1,
 	"cpu_seconds":        0.5,
 	"cpu_percent":        2,
 	"memory_peak_mib":    8,
 	"heap_inuse_max_mib": 8,
+}
+
+// referenceOnly lists the measures that are shown with their difference but
+// never judged, so they do not make an endpoint different.
+//
+// p99 は 1 ラウンド数千件のうち上位 1% で決まり、GC や CPU の取り合いで段を飛ぶ
+// ように動く (A/A の 5 回で home-timeline の p99 が 412〜759ms)。同じ commit
+// どうしでも、幅が重ならずに +19.0% と +15.9% の「差あり」が出た (#3559)。この 2 回
+// は下限 20% で防げるが、記録には約 510ms と約 700ms の段が両方あり、両側に分かれる
+// と 37% になるので、下限では防げない。
+var referenceOnly = map[string]bool{
+	"p(99)": true,
 }
 
 // newMeasure compares the per-round values of base and head.
@@ -309,6 +322,10 @@ func newMeasure(name string, lowerIsBetter bool, base, head []float64) Measure {
 	if m.Base.Median != 0 {
 		d := (m.Head.Median - m.Base.Median) / m.Base.Median * 100
 		m.DeltaPercent = &d
+	}
+	if referenceOnly[name] {
+		m.Verdict = VerdictReference
+		return m
 	}
 	// 幅が重なれば、差はラウンドごとのばらつきと区別できない。重ならなくても、
 	// 差が小さければ偶然と区別できない (minEffectPercent)
@@ -337,7 +354,7 @@ func spread(vs []float64) Spread {
 }
 
 // worst returns Incomparable if any measure is, else Different if any is,
-// else Same.
+// else Same. Reference measures count as Same.
 func worst(ms []Measure) Verdict {
 	v := VerdictSame
 	for _, m := range ms {

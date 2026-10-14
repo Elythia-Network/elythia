@@ -11,6 +11,7 @@ var verdictLabel = map[Verdict]string{
 	VerdictDifferent:    "差あり",
 	VerdictSame:         "差なし",
 	VerdictIncomparable: "比較不能",
+	VerdictReference:    "参考",
 }
 
 // renderMarkdown writes the report for the Actions summary.
@@ -32,7 +33,7 @@ func renderMarkdown(w io.Writer, c *Comparison) error {
 		_, err := io.WriteString(w, b.String())
 		return err
 	}
-	b.WriteString("判定は、各側のラウンドの最小〜最大の幅が重ならず、中央値の差が5%以上のときだけ「差あり」にする。あわせて、差の絶対量が遅延は1ms以上、CPU時間は0.5秒以上、CPU (%)は2ポイント以上、メモリとGoのヒープは8MiB以上であること。差の%は中央値どうしの比。失敗率か429の率がbaseとheadで1ポイントより大きく違うエンドポイントと、成功が0件の回があったエンドポイントは「比較不能」にする。\n\n")
+	b.WriteString("判定は、各側のラウンドの最小〜最大の幅が重ならず、中央値の差が5%以上のときだけ「差あり」にする。あわせて、差の絶対量が遅延は1ms以上、CPU時間は0.5秒以上、CPU (%)は2ポイント以上、メモリとGoのヒープは8MiB以上であること。差の%は中央値どうしの比。失敗率か429の率がbaseとheadで1ポイントより大きく違うエンドポイントと、成功が0件の回があったエンドポイントは「比較不能」にする。p99は同じcommitどうしでも段を飛ぶように動くので、差だけを出し、判定には使わない(「参考」)。\n\n")
 	b.WriteString("## まとめ\n\n| エンドポイント | 判定 |\n|---|---|\n")
 	for _, e := range c.Endpoints {
 		fmt.Fprintf(&b, "| %s | %s |\n", cell(e.Endpoint), endpointSummary(e))
