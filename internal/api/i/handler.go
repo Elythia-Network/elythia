@@ -1358,10 +1358,14 @@ func (h *Handler) securityKeysList(userID string) []map[string]any {
 	return list
 }
 
-// countMuteWords returns the total number of entries in a muted-words
-// payload, flattening AND-groups. mirrors upstream Misskey TS i/update.ts
-// `checkMuteWordCount`: 各 entry が string なら 1、array なら array.length
-// を加算する (#1029)。raw が nil / 空なら 0。
+// countMuteWords returns the total length of the words in a muted-words
+// payload, flattening AND-groups, as upstream Misskey TS i/update.ts
+// `checkMuteWordCount` counts it: the sum of `item.length` (UTF-16 code units)
+// over every string. raw が nil / 空なら 0。
+//
+// 以前は件数を数えていた (#1029 から)。既定の 200 は本家では文字数の上限で、
+// 件数として読むと 1 件の長さに上限が無くなり、長い正規表現をいくつでも並べ
+// られた。
 func countMuteWords(raw json.RawMessage) int {
 	if len(raw) == 0 {
 		return 0
@@ -1374,12 +1378,30 @@ func countMuteWords(raw json.RawMessage) int {
 	for _, item := range arr {
 		switch v := item.(type) {
 		case string:
-			length++
+			length += utf16Len(v)
 		case []any:
-			length += len(v)
+			for _, sub := range v {
+				if str, ok := sub.(string); ok {
+					length += utf16Len(str)
+				}
+			}
 		}
 	}
 	return length
+}
+
+// utf16Len returns the length of s in UTF-16 code units (JavaScript's
+// String.prototype.length).
+func utf16Len(s string) int {
+	n := 0
+	for _, r := range s {
+		if r >= 0x10000 {
+			n += 2
+		} else {
+			n++
+		}
+	}
+	return n
 }
 
 // normalizeMutedWords validates and normalizes the mutedWords / hardMutedWords
@@ -1705,7 +1727,8 @@ func (h *Handler) Update(c echo.Context) error {
 			wordMuteLimitChecked = true
 			if h.roleProvider != nil {
 				// 小数は切り捨てる (厳しい側)。ゲートが消える方向ではない (#2613)。
-				if v, ok := role.PolicyNumber(h.roleProvider.GetUserPolicies(me.ID)["wordMuteLimit"]); ok && v >= 0 {
+				// 負の値は upstream と同じく、空の配列も含めて保存できない (`length > limit` が常に真)。
+				if v, ok := role.PolicyNumber(h.roleProvider.GetUserPolicies(me.ID)["wordMuteLimit"]); ok {
 					wordMuteLimitValue = int(math.Floor(v))
 					wordMuteLimitOk = true
 				}
@@ -1717,7 +1740,14 @@ func (h *Handler) Update(c echo.Context) error {
 	// compile 不能なら INVALID_REGEXP(400) を投げる。mk-go も書き込み時に検証する (読み取り側
 	// wordmute は不正 regex を nil rule で握り潰すため、ここで弾かないとユーザーへの
 	// フィードバックが無く黙殺される)。
-	if wordmute.ValidateMutedWords(req.MutedWords) != nil || wordmute.ValidateMutedWords(req.HardMutedWords) != nil {
+	//
+	// hardMutedWords はサーバーがノートごとに評価するので、正規表現の大きさの上限も
+	// 見る (超えたものも INVALID_REGEXP。upstream の RE2 もコンパイルできない巨大な
+	// パターンを同じエラーで拒否する)。
+	//
+	// **件数の検査を正規表現の検査より先に行う** (upstream と同じ順)。逆だと、件数で
+	// 断られる大量の巨大なパターンを先に全部コンパイルさせられる。
+	invalidRegexp := func() error {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_REGEXP", "Invalid Regular Expression.", "0d786918-10df-41cd-8f33-8dec7d9a89a5"))
 	}
 	if mw, ok, err := normalizeMutedWords(req.MutedWords); err != nil {
@@ -1726,6 +1756,9 @@ func (h *Handler) Update(c echo.Context) error {
 		if limit, lok := wordMuteLimit(); lok && countMuteWords(mw) > limit {
 			return apierr.JSONTooManyMutedWords(c)
 		}
+		if wordmute.ValidateMutedWords(req.MutedWords) != nil {
+			return invalidRegexp()
+		}
 		in.MutedWords = &mw
 	}
 	if mw, ok, err := normalizeMutedWords(req.HardMutedWords); err != nil {
@@ -1733,6 +1766,9 @@ func (h *Handler) Update(c echo.Context) error {
 	} else if ok {
 		if limit, lok := wordMuteLimit(); lok && countMuteWords(mw) > limit {
 			return apierr.JSONTooManyMutedWords(c)
+		}
+		if wordmute.ValidateHardMutedWords(req.HardMutedWords) != nil {
+			return invalidRegexp()
 		}
 		in.HardMutedWords = &mw
 	}

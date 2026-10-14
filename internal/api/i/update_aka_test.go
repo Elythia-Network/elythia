@@ -1,7 +1,9 @@
 package i
 
 import (
+	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/elythia-network/elythia/internal/model"
@@ -211,4 +213,76 @@ func TestUpdate_InvalidMutedWordsRegex(t *testing.T) {
 	rec := post(h.Update, `{"mutedWords":["/[/"]}`, me)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "INVALID_REGEXP")
+}
+
+// hardMutedWords は正規表現の大きさの上限を超えたら INVALID_REGEXP(400)。
+// サーバーがノートごとに評価するので、巨大なパターン 1 件で CPU と配信が止まる。
+// 同じパターンでも mutedWords (クライアントだけが評価する) は受け付ける。
+func TestUpdate_HardMutedWordsRegexTooComplex(t *testing.T) {
+	h, me := akaHandler(t)
+	big := "/" + strings.Repeat(".?", 400) + "b/"
+	body, err := json.Marshal(map[string]any{"hardMutedWords": []string{big}})
+	require.NoError(t, err)
+	rec := post(h.Update, string(body), me)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "INVALID_REGEXP")
+
+	body, err = json.Marshal(map[string]any{"mutedWords": []string{big}})
+	require.NoError(t, err)
+	rec = post(h.Update, string(body), me)
+	assert.Equal(t, http.StatusOK, rec.Code, "mutedWords には大きさの上限を掛けない: %s", rec.Body.String())
+
+	body, err = json.Marshal(map[string]any{"hardMutedWords": []string{"/(?i)spam|scam/"}})
+	require.NoError(t, err)
+	rec = post(h.Update, string(body), me)
+	assert.Equal(t, http.StatusOK, rec.Code, "普通の正規表現は通ること: %s", rec.Body.String())
+}
+
+// 負の wordMuteLimit は upstream と同じく、ミュートする語を 1 つも置けないこと
+// (`count > limit` が常に真)。上限なしにしない。
+func TestUpdate_NegativeWordMuteLimitDenies(t *testing.T) {
+	h, me := akaHandler(t)
+	h.SetRoleProvider(&stubRoleProvider{policies: map[string]any{"wordMuteLimit": -1}})
+	rec := post(h.Update, `{"hardMutedWords":["spam"]}`, me)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "TOO_MANY_MUTED_WORDS")
+}
+
+// 件数の検査は正規表現の検査より先に行うこと (upstream と同じ順)。件数で断る
+// 入力の正規表現をコンパイルさせない。
+func TestUpdate_MuteWordCountCheckedBeforeRegex(t *testing.T) {
+	h, me := akaHandler(t)
+	h.SetRoleProvider(&stubRoleProvider{policies: map[string]any{"wordMuteLimit": 10}})
+	for _, key := range []string{"mutedWords", "hardMutedWords"} {
+		// 11 件 (上限 10 を超える) の、どれも正規表現として読めない語。
+		words := make([]string, 11)
+		for i := range words {
+			words[i] = "/(unclosed/"
+		}
+		body, err := json.Marshal(map[string]any{key: words})
+		require.NoError(t, err)
+		rec := post(h.Update, string(body), me)
+		assert.Equal(t, http.StatusBadRequest, rec.Code, key)
+		assert.Contains(t, rec.Body.String(), "TOO_MANY_MUTED_WORDS", key)
+	}
+}
+
+// wordMuteLimit は upstream と同じく件数ではなく文字数 (UTF-16 の単位) の合計で
+// 数えること。AND の組の中の語も足す。
+func TestUpdate_WordMuteLimitCountsCharacters(t *testing.T) {
+	h, me := akaHandler(t)
+	h.SetRoleProvider(&stubRoleProvider{policies: map[string]any{"wordMuteLimit": 10}})
+	for body, want := range map[string]int{
+		`{"hardMutedWords":["abcdefghijk"]}`:        http.StatusBadRequest, // 1 件でも 11 文字
+		`{"hardMutedWords":["abcde",["fgh","ij"]]}`: http.StatusOK,         // 10 文字
+		`{"mutedWords":["abcde",["fgh","ijk"]]}`:    http.StatusBadRequest, // 11 文字
+		`{"mutedWords":["😀😀😀😀😀"]}`:                  http.StatusOK,         // サロゲートで 10
+		`{"mutedWords":["😀😀😀😀😀a"]}`:                 http.StatusBadRequest, // 11
+	} {
+		rec := post(h.Update, body, me)
+		assert.Equal(t, want, rec.Code, "%s: %s", body, rec.Body.String())
+		if want == http.StatusBadRequest {
+			assert.Contains(t, rec.Body.String(), "TOO_MANY_MUTED_WORDS", body)
+		}
+	}
 }
