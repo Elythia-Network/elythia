@@ -413,3 +413,14 @@ func TestNotes_RenoteNestedMuteFiltered(t *testing.T) {
 	assert.NotContains(t, body, `"id":"n1"`, "renote whose target replies to a muted user must be filtered")
 	assert.Contains(t, body, `"id":"n2"`)
 }
+
+// 保存できない文字 (NUL) を含む名前と説明は 400 にすること (500 になっていた)。
+func TestCreate_NameOrDescriptionWithNULRejected(t *testing.T) {
+	for _, body := range []string{`{"name":"a\u0000b"}`, `{"name":"ok","description":"d\u0000"}`} {
+		h, _, _, _ := newHandler(t)
+		c, rec := newReq(t, body)
+		setUser(c, "alice")
+		require.NoError(t, h.Create(c))
+		assert.Equal(t, http.StatusBadRequest, rec.Code, body)
+	}
+}

@@ -1304,3 +1304,71 @@ func TestDraftsUpdate_LengthLimitsBeforeLookup(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 	assert.Contains(t, rec.Body.String(), "INVALID_PARAM")
 }
+
+// 負の noteDraftLimit / scheduledNoteLimit は「作れない」こと (upstream の `count >= limit`)。
+func TestDraftsCreate_NegativeLimitsDeny(t *testing.T) {
+	h, _ := newDraftHandlerWithRepo()
+	h.SetPolicyProvider(&draftStubPolicyProvider{policies: map[string]any{
+		"noteDraftLimit": -1,
+	}})
+	rec := postDraft(h.DraftsCreate, `{"text":"draft"}`, &model.User{ID: "u1"})
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "TOO_MANY_DRAFTS")
+
+	h2, _ := newDraftHandlerWithRepo()
+	h2.SetPolicyProvider(&draftStubPolicyProvider{policies: map[string]any{
+		"noteDraftLimit":     10,
+		"scheduledNoteLimit": -1,
+	}})
+	body := fmt.Sprintf(`{"text":"s","scheduledAt":%d,"isActuallyScheduled":true}`, futureMs(time.Hour))
+	rec = postDraft(h2.DraftsCreate, body, &model.User{ID: "u1"})
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "TOO_MANY_SCHEDULED_NOTES")
+}
+
+// 予約していない下書きを更新で予約にするときも scheduledNoteLimit を見ること
+// (upstream NoteDraftService.update)。既に予約している下書きの時刻の変更は
+// 数え直さない。
+func TestDraftsUpdate_ScheduledNoteLimit(t *testing.T) {
+	h, repo := newDraftHandlerWithRepo()
+	future := time.Now().Add(time.Hour)
+	repo.drafts["d1"] = &model.NoteDraft{ID: "d1", UserID: "u1", IsActuallyScheduled: true, ScheduledAt: &future}
+	repo.drafts["d2"] = &model.NoteDraft{ID: "d2", UserID: "u1", IsActuallyScheduled: true, ScheduledAt: &future}
+	repo.drafts["d3"] = &model.NoteDraft{ID: "d3", UserID: "u1"}
+	h.SetPolicyProvider(&draftStubPolicyProvider{policies: map[string]any{
+		"scheduledNoteLimit": 2,
+	}})
+	body := fmt.Sprintf(`{"draftId":"d3","scheduledAt":%d,"isActuallyScheduled":true}`, futureMs(time.Hour))
+	rec := postDraft(h.DraftsUpdate, body, &model.User{ID: "u1"})
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "TOO_MANY_SCHEDULED_NOTES")
+	assert.Contains(t, rec.Body.String(), "02f5df79-08ae-4a33-8524-f1503c8f6212")
+	assert.False(t, repo.drafts["d3"].IsActuallyScheduled, "上限を超えて予約にした")
+
+	body = fmt.Sprintf(`{"draftId":"d1","scheduledAt":%d,"isActuallyScheduled":true}`, futureMs(2*time.Hour))
+	rec = postDraft(h.DraftsUpdate, body, &model.User{ID: "u1"})
+	assert.Equal(t, http.StatusOK, rec.Code, "予約済みの下書きの時刻の変更は通す: %s", rec.Body.String())
+}
+
+// 列に入らない値 (NUL) を含む下書きは、作成でも更新でも INVALID_PARAM に
+// すること (保存で 500 にしない。notes/create と同じ)。
+func TestDrafts_RejectUnstorableText(t *testing.T) {
+	for _, body := range []string{
+		`{"text":"a\u0000b"}`,
+		`{"text":"ok","cw":"c\u0000w"}`,
+		`{"text":"ok","hashtag":"t\u0000g"}`,
+		`{"text":"ok","poll":{"choices":["x\u0000","y"],"multiple":false}}`,
+	} {
+		h, repo := newDraftHandlerWithRepo()
+		rec := postDraft(h.DraftsCreate, body, &model.User{ID: "u1"})
+		assert.Equal(t, http.StatusBadRequest, rec.Code, body)
+		assert.Contains(t, rec.Body.String(), "INVALID_PARAM", body)
+
+		text := "old"
+		repo.drafts["d1"] = &model.NoteDraft{ID: "d1", UserID: "u1", Text: &text, Visibility: "public"}
+		upd := `{"draftId":"d1",` + body[1:]
+		rec = postDraft(h.DraftsUpdate, upd, &model.User{ID: "u1"})
+		assert.Equal(t, http.StatusBadRequest, rec.Code, upd)
+		assert.Equal(t, "old", *repo.drafts["d1"].Text, upd)
+	}
+}

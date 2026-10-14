@@ -546,3 +546,42 @@ func TestCreate_OnRequired(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code, "空 on は許容")
 	assert.Contains(t, rec.Body.String(), `"on":[]`, "response on は [] (null でない、#2027)")
 }
+
+// 負の webhookLimit は upstream と同じく「1 件も作れない」こと (上限なしにしない)。
+func TestCreate_WebhookLimit_NegativeDenies(t *testing.T) {
+	h, _ := newTestHandler()
+	h.SetRolePolicyProvider(&stubRolePolicyProvider{policies: map[string]any{
+		"webhookLimit": -1,
+	}})
+	rec := post(h.Create, `{"name":"test","url":"https://example.com","on":["note"]}`, &model.User{ID: "u1"})
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "TOO_MANY_WEBHOOKS")
+}
+
+// 名前・URL・secret は upstream の maxLength (100 / 1024 / 1024) までで、保存できない
+// 文字 (NUL) を含むものも 400 にすること (500 になっていた)。
+func TestCreateAndUpdate_FieldLimits(t *testing.T) {
+	long := func(n int) string { return strings.Repeat("a", n) }
+	bad := []string{
+		`{"name":"` + long(101) + `","url":"https://example.com","on":["note"]}`,
+		`{"name":"x","url":"https://example.com/` + long(1024) + `","on":["note"]}`,
+		`{"name":"x","url":"https://example.com","secret":"` + long(1025) + `","on":["note"]}`,
+		`{"name":"a\u0000","url":"https://example.com","on":["note"]}`,
+	}
+	for _, body := range bad {
+		h, _ := newTestHandler()
+		rec := post(h.Create, body, &model.User{ID: "u1"})
+		assert.Equal(t, http.StatusBadRequest, rec.Code, body[:40])
+	}
+	h, repo := newTestHandler()
+	rec := post(h.Create, `{"name":"`+long(100)+`","url":"https://example.com","secret":"`+long(1024)+`","on":["note"]}`, &model.User{ID: "u1"})
+	require.Equal(t, http.StatusOK, rec.Code, "上限ちょうどは通る")
+	var id string
+	for k := range repo.webhooks {
+		id = k
+	}
+	rec = post(h.Update, `{"webhookId":"`+id+`","name":"`+long(101)+`"}`, &model.User{ID: "u1"})
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	rec = post(h.Update, `{"webhookId":"`+id+`","secret":"s\u0000"}`, &model.User{ID: "u1"})
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}

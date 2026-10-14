@@ -13,7 +13,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/elythia-network/elythia/internal/activitypub"
 	"github.com/elythia-network/elythia/internal/api/apierr"
@@ -1532,7 +1531,9 @@ func profileTextWithinLimit(s *string, max int) bool {
 	if s == nil || *s == "" {
 		return true
 	}
-	return utf8.RuneCountInString(*s) <= max
+	// NUL と不正な UTF-8 は長さに関わらず保存できない (SQLSTATE 22021 で 500 に
+	// なっていた)。同じ 400 に畳む。
+	return colfit.Fits(*s, max)
 }
 
 // jsWhitespace mirrors the code points JavaScript's String.prototype.trim

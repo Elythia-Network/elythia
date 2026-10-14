@@ -12,6 +12,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	corenote "github.com/elythia-network/elythia/internal/core/note"
 	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/misc/colfit"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/queue"
@@ -401,15 +402,17 @@ func (h *Handler) DraftsUpdate(c echo.Context) error {
 // 下書きは予約投稿で notes/create の検査を通らずにノートになるので、ここで
 // notes/create と同じ上限を掛けないと、長い本文がそのまま解析・配送される。
 func validateDraftLengths(text, cw, hashtag *string, fileIDs []string, poll *draftPoll) error {
-	if text != nil && utf8.RuneCountInString(*text) > maxNoteTextLength {
-		return errors.New("text is too long")
+	// 列に入らない値 (NUL や不正な UTF-8) は notes/create と同じく INVALID_PARAM
+	// にする。素通しすると保存で 500 になる。
+	if text != nil && !colfit.Fits(*text, maxNoteTextLength) {
+		return errors.New("text is too long or not storable")
 	}
 	if cw != nil {
-		if n := utf8.RuneCountInString(*cw); n < 1 || n > 100 {
+		if n := utf8.RuneCountInString(*cw); n < 1 || n > 100 || !colfit.Storable(*cw) {
 			return errors.New("cw must be between 1 and 100 characters")
 		}
 	}
-	if hashtag != nil && utf8.RuneCountInString(*hashtag) > 200 {
+	if hashtag != nil && !colfit.Fits(*hashtag, 200) {
 		return errors.New("hashtag is too long")
 	}
 	if len(fileIDs) > 16 {
@@ -420,7 +423,7 @@ func validateDraftLengths(text, cw, hashtag *string, fileIDs []string, poll *dra
 			return errors.New("poll must have at most 10 choices")
 		}
 		for _, choice := range poll.Choices {
-			if n := utf8.RuneCountInString(choice); n < 1 || n > 50 {
+			if n := utf8.RuneCountInString(choice); n < 1 || n > 50 || !colfit.Storable(choice) {
 				return errors.New("each poll choice must be between 1 and 50 characters")
 			}
 		}

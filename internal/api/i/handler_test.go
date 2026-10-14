@@ -2959,3 +2959,15 @@ func TestRolePayload_ProxiesRoleIcon(t *testing.T) {
 	assert.Equal(t, *entity.ProxyMediaURLPtr(&icon), *got)
 	assert.NotEqual(t, icon, *got, "a remote icon goes through the proxy")
 }
+
+// 保存できない文字 (NUL / 不正な UTF-8) を含むプロフィールの文字列は 400 にすること
+// (SQLSTATE 22021 で 500 になっていた)。
+func TestUpdate_ProfileTextWithNUL(t *testing.T) {
+	h, repo, _, _ := newTestHandler(t)
+	user := updateUser(repo)
+	for _, field := range []string{"name", "description", "location", "followedMessage"} {
+		rec := post(h.Update, `{"`+field+`":"a\u0000b"}`, user)
+		assert.Equal(t, http.StatusBadRequest, rec.Code, field)
+		assert.Contains(t, rec.Body.String(), "INVALID_PARAM", field)
+	}
+}

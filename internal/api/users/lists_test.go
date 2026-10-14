@@ -434,6 +434,17 @@ func TestListsCreateFromPublic_TooManyUsers(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "1845ea77-38d1-426e-8e4e-8b83b24f5bd7")
 }
 
+// 負の userEachUserListsLimit は upstream と同じく 1 人も足せないこと
+// (上限なしにしない。userlists/push と揃える)。
+func TestListsCreateFromPublic_NegativeMemberLimitDenies(t *testing.T) {
+	h, listRepo, userRepo, _, policy := newListsHandlerFull(t)
+	seedPublicSrc(t, listRepo, userRepo, "src", "m1")
+	policy.policies["userEachUserListsLimit"] = -1
+	rec := postStub(h.ListsCreateFromPublic, `{"listId":"src","name":"mine"}`, &model.User{ID: "me"})
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "1845ea77-38d1-426e-8e4e-8b83b24f5bd7")
+}
+
 func TestListsCreateFromPublic_NameTooLong(t *testing.T) {
 	h, listRepo, userRepo, _, _ := newListsHandlerFull(t)
 	seedPublicSrc(t, listRepo, userRepo, "src")
@@ -673,4 +684,30 @@ func TestListsUpdateMembership_EmitsUserUpdated(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "member1", body["id"])
 	assert.Equal(t, true, body["withReplies"])
+}
+
+// 負の userListLimit は「作れない」こと (upstream の `count >= limit`)。
+func TestListsCreateFromPublic_NegativeUserListLimitDenies(t *testing.T) {
+	h, listRepo, userRepo, _, policy := newListsHandlerFull(t)
+	seedPublicSrc(t, listRepo, userRepo, "src")
+	policy.policies["userListLimit"] = -1
+	rec := postStub(h.ListsCreateFromPublic, `{"listId":"src","name":"mine"}`, &model.User{ID: "me"})
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "e9c105b2-c595-47de-97fb-7f7c2c33e92f")
+}
+
+// 保存できない文字 (NUL) を含む名前は 400 にすること (500 になっていた)。
+func TestLists_NameWithNULRejected(t *testing.T) {
+	h, listRepo, userRepo, _, _ := newListsHandlerFull(t)
+	seedPublicSrc(t, listRepo, userRepo, "src")
+	rec := postStub(h.ListsCreateFromPublic, `{"listId":"src","name":"a\u0000b"}`, &model.User{ID: "me"})
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+
+	h2, _ := newTestHandler(t)
+	listRepo2 := testutil.NewMockUserListRepository()
+	listRepo2.Lists["l1"] = &model.UserList{ID: "l1", UserID: "u1", Name: "old"}
+	h2.SetUserListRepo(listRepo2)
+	rec = postStub(h2.ListsUpdate, `{"listId":"l1","name":"a\u0000b"}`, &model.User{ID: "u1"})
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Equal(t, "old", listRepo2.Lists["l1"].Name)
 }
