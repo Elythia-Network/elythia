@@ -939,6 +939,9 @@ func applySetting(game *model.ReversiGame, key string, raw json.RawMessage) erro
 		if err := json.Unmarshal(raw, &m); err != nil {
 			return ErrInvalidSetting
 		}
+		if !ValidMap(m) {
+			return ErrInvalidSetting
+		}
 		game.Map = m
 	case "bw":
 		var v any
@@ -985,9 +988,53 @@ func applySetting(game *model.ReversiGame, key string, raw json.RawMessage) erro
 	return nil
 }
 
+// maxMapSide bounds the width and the height of a reversi map. upstream の
+// 組み込みの盤面で最も大きいものより十分に大きい。
+const maxMapSide = 64
+
+// ValidMap reports whether m is a board the engine can play: at least one row,
+// every row the same length, both sides within maxMapSide, and only the cell
+// characters the map format uses ('-' empty, 'b' / 'w' stones, ' ' no cell).
+//
+// **行の長さが揃わない盤面は engine を panic させる。** 幅は先頭の行、盤面は
+// 全行を連結した長さで作るので、座標の検査を通った位置が盤面の外を指す。対局者
+// (自分の別アカウントでもよい) とリモートの対局者の `settings` から入るので、
+// 受け取るときに確かめる。upstream (JS) は範囲外の読み出しが undefined になる
+// だけで落ちないので、検査を持たない。
+func ValidMap(m []string) bool {
+	if len(m) == 0 || len(m) > maxMapSide {
+		return false
+	}
+	width := len(m[0])
+	if width == 0 || width > maxMapSide {
+		return false
+	}
+	for _, row := range m {
+		if len(row) != width {
+			return false
+		}
+		for i := 0; i < len(row); i++ {
+			switch row[i] {
+			case '-', 'b', 'w', ' ':
+			default:
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// ErrInvalidMap is returned when a stored game carries a map ValidMap refuses
+// (saved before the check existed).
+var ErrInvalidMap = errors.New("reversi: invalid map")
+
 // EngineFromGame restores a reversi.Game engine from the persisted state by
 // replaying the move log against the original map.
 func EngineFromGame(game *model.ReversiGame) (*Game, error) {
+	// 空の盤面は NewGame が既定の盤面にする (従来どおり)。
+	if len(game.Map) > 0 && !ValidMap([]string(game.Map)) {
+		return nil, ErrInvalidMap
+	}
 	opts := Options{
 		IsLlotheo:        game.IsLlotheo,
 		CanPutEverywhere: game.CanPutEverywhere,
