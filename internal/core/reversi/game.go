@@ -151,6 +151,10 @@ func (g *Game) PutStone(pos int) {
 	if g.Turn == nil {
 		return
 	}
+	// 盤面の外は置かない (記録の再生で壊れた値が来ても panic しない)。
+	if pos < 0 || pos >= len(g.Board) {
+		return
+	}
 	color := *g.Turn
 	g.PrevPos = pos
 	g.PrevColor = &color
@@ -190,7 +194,7 @@ func (g *Game) calcTurn() {
 // MapDataGet returns the cell type at a position.
 func (g *Game) MapDataGet(pos int) MapCell {
 	x, y := g.PosToXY(pos)
-	if x < 0 || y < 0 || x >= g.MapWidth || y >= g.MapHeight {
+	if x < 0 || y < 0 || x >= g.MapWidth || y >= g.MapHeight || pos < 0 || pos >= len(g.BoardMap) {
 		return CellNull
 	}
 	return g.BoardMap[pos]
