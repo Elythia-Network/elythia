@@ -21,6 +21,17 @@ gh workflow run bench-compare.yml --repo Elythia-Network/elythia \
 - **測る仕組み (`tests/bench/ab`、k6 のシナリオ、`tools/benchcompare`) は、workflow を起動したブランチ (通常は develop) のものを使います。** base / head の側のものではありません。app の image は`./cmd/elythia`をビルドするので、バイナリを`elythia`にまとめた #3394 より前の commit は比べられません
 - `head`に fork の PR を渡すときは`pull/<番号>/head`と書きます。workflow は secrets を使わず、token は読み取りだけなので、fork のコードを流しても書き込みはできません
 - 結果の表は、実行の Summary に出ます。k6 の生の JSON・リソースの時系列・ログは artifact (`bench-compare-<run id>`、14 日) に残ります
+- **結果の表は、対象の PR にもコメントで出ます** (`bench-compare-comment.yml`、#3560)。PR ごとに 1 つのコメントで、流し直すと同じコメントを書き換えます。対象の PR は次のとおりで、どれにも当たらない (develop 同士など)、PR が閉じている、実行を取り消した、実行の間に PR の head が変わった (PR の A/A のとき) のどれかのときはコメントしません
+  - PR で自動で流れた A/A: その PR
+  - 手動実行で`head`が`pull/<番号>/head`: その番号の PR
+  - 手動実行で`head`が 40 桁の SHA: その commit を含む開いている PR が 1 つだけなら、その PR
+  - 手動実行で`head`がブランチ名: そのブランチから開いている PR が 1 つだけなら、その PR (fork のブランチは引けないので`pull/<番号>/head`で渡す)
+- **コメントは PR ごとに 1 つなので、後から起動した実行 (実行 ID が大きい) の結果で置き換わります。終わった順ではありません。** 手動の比較の後に PR の A/A を起動すれば、A/A の結果になります (逆も同じ)。どちらの結果を残すかは選べません。前の結果は、実行の Summary と artifact に残ります
+- 書き換えるのは、前のコメントと同じか新しい実行 (同じ実行の re-run を含む) の結果だけです。古い実行を re-run しても、実行 ID は変わらないので、新しい結果を上書きしません
+- 既知の限界: ほぼ同時に終わった別の経路の実行どうし (同じ PR への手動の比較と A/A など) では、古い結果が残ることがあります
+- Dependabot が起点の実行 (actions の更新で bench-compare.yml を触る PR の A/A) ではコメントしません。そこから起動された`workflow_run`の token は読み取りだけになり、書き込めないためです
+- **fork の PR の A/A の結果は、畳んで「検証されていません」と注記します。** PR の A/A は`paths`の条件どおり、PR が bench-compare.yml などを触ったときにだけ、**PR の側の workflow ファイルで**流れます。fork の PR なら、そのファイルを書き換えて任意の`report.md`を作れるためです。同じリポジトリのブランチからの PR は、書き込み権限のある人が出したものなので、そのまま貼ります
+- コメントを書く workflow は、bench-compare の完了 (`workflow_run`) で develop にある版が動きます。head のコードは checkout も実行もせず、artifact の`report.md`を 60000 バイトまでで切って貼るだけです。`&`と`<`は実体参照にし、`@名前`と`#数字`の形のメンションと相互参照が効かないよう、幅 0 の空白を挟みます (それ以外の形の参照までは防ぎません)。対象の PR は artifact からではなく、bench-compare の実行名 (run-name) と GitHub の API から決めます。PR で流れた実行の run-name と artifact は PR を出した人が変えられる (PR の側の workflow ファイルで動くため) ので、**PR の head の SHA と repository が、GitHub が付けた実行の head と一致するときだけ**書きます。手動実行は書き込み権限のある人しか起動できないので、入力から作る run-name をそのまま使います。**bench-compare.yml の`run-name`の形を変えるときは、bench-compare-comment.yml の正規表現も直します**
 - ベンチの仕組み (workflow、`tests/bench/ab`、`tests/bench/http`の seed と k6 の共通部品、`tools/benchcompare`) を変えた develop 向けの PR では、PR の head 同士 (A/A) を自動で流します。仕組みを変えたときに、同じ commit で「差なし」がそろうかを見るためです
 - **check が見るのは、最後まで流れたかだけです。** 「差なし」かどうかは、Summary の表を見て確かめてください。A/A でも runner の揺れで「差あり」が出ることがあるので、判定で落とすと不安定な check になります
 - Summary に`report.md`が無いときは、準備の失敗・時間切れ・取り消し・集計の入力エラーのどれかです。artifact のログを見てください
