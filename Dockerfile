@@ -108,7 +108,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 # digest で固定する (理由は builder と同じ)。DB のサーバーの版を上げたら、ここも
 # 同じメジャーバージョンへ上げる。
-FROM postgres:18-alpine@sha256:4da1a4828be12604092fa55311276f08f9224a74a62dcb4708bd7439e2a03911 AS backup
+FROM postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873 AS backup
 # pg_bigm を入れておく。UDS の構成の DB (deploy/postgres-bigm) は pg_bigm 入りで、
 # CREATE EXTENSION した DB の dump を戻すには、戻す側にも拡張が要る。verify (#3459) は
 # この image の中で使い捨ての PostgreSQL に戻すので、無いと CREATE EXTENSION pg_bigm で
