@@ -290,6 +290,25 @@ func (rl *RateLimiter) AllowIP(ctx context.Context, endpoint, ip string) (bool, 
 	return false, max((info.ResetMs-time.Now().UnixMilli()+999)/1000, 0)
 }
 
+// RequireIPRateLimit applies the IP bucket of endpoint to a route outside the
+// `/api` group (whose Middleware does not see it). With no limiter, a missing
+// table entry, or enableIpRateLimit off, it lets every request through, as
+// AllowIP does.
+func RequireIPRateLimit(rl *RateLimiter, endpoint string) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			if rl == nil {
+				return next(c)
+			}
+			if ok, retry := rl.AllowIP(c.Request().Context(), endpoint, c.RealIP()); !ok {
+				c.Response().Header().Set("Retry-After", fmt.Sprintf("%d", retry))
+				return c.JSON(http.StatusTooManyRequests, apierr.RateLimitExceeded())
+			}
+			return next(c)
+		}
+	}
+}
+
 // rateLimitActor は単一 bucket を識別する key + factor のペア。
 // 認証済 user では userID 由来 actor (factor=user policy) と IP 由来 actor
 // (factor=1.0) が並ぶ。未認証では IP 由来 actor のみ。

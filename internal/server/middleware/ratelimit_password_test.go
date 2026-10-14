@@ -9,6 +9,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestDefaultEndpointLimits_TokenHolderCannotExhaustRecoveryEndpoints guards
@@ -89,4 +90,62 @@ func TestAllowIP_SharesTheBucketWithMiddleware(t *testing.T) {
 	assert.Positive(t, retry)
 	ok, _ = rl.AllowIP(context.Background(), "admin/backup/restore/confirm", "192.168.1.100")
 	assert.True(t, ok, "an endpoint without a limit")
+}
+
+// RequireIPRateLimit は `/api` の外のルート (`GET /url`) に IP の bucket を掛けること。
+func TestRequireIPRateLimit_URLPreview(t *testing.T) {
+	store := &mockLimitStore{}
+	rl := NewRateLimiter(store, true, DefaultEndpointLimits)
+	e, h := setupEcho(rl)
+	mw := RequireIPRateLimit(rl, URLPreviewRateLimitKey)
+
+	rec := doRequest(e, mw, h, "/url", nil)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	if assert.Len(t, store.calls, 1, "`/url` の要求を数えていない") {
+		assert.Contains(t, store.calls[0].Key, URLPreviewRateLimitKey)
+	}
+
+	store.results, store.idx = []mockResult{{Info: LimitInfo{Remaining: 0, ResetMs: time.Now().Add(time.Minute).UnixMilli()}}}, 0
+	rec = doRequest(e, mw, h, "/url", nil)
+	assert.Equal(t, http.StatusTooManyRequests, rec.Code)
+	assert.NotEmpty(t, rec.Header().Get("Retry-After"))
+
+	// 上限の表に載っていること (載っていないと AllowIP は素通しする)。
+	limit, ok := DefaultEndpointLimits[URLPreviewRateLimitKey]
+	require.True(t, ok)
+	assert.Positive(t, limit.Max)
+
+	// limiter が無い構成 (テスト用) では素通し。
+	rec = doRequest(e, RequireIPRateLimit(nil, URLPreviewRateLimitKey), h, "/url", nil)
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+// プラグインのルートには、表に無くても既定の上限が掛かること。peer の受け口は除く。
+func TestMiddleware_PluginRoutesGetDefaultLimit(t *testing.T) {
+	store := &mockLimitStore{}
+	rl := NewRateLimiter(store, true, DefaultEndpointLimits)
+	e, h := setupEcho(rl)
+
+	rec := doRequest(e, rl.Middleware(), h, "/api/plugin/status/me/set", nil)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	require.Len(t, store.calls, 1, "プラグインのルートを数えていない")
+	assert.Contains(t, store.calls[0].Key, "plugin/status/me/set")
+
+	store.results, store.idx = []mockResult{{Info: LimitInfo{Remaining: 0, ResetMs: time.Now().Add(time.Minute).UnixMilli()}}}, 0
+	rec = doRequest(e, rl.Middleware(), h, "/api/plugin/status/me/set", nil)
+	assert.Equal(t, http.StatusTooManyRequests, rec.Code)
+
+	// peer の受け口は専用の上限があるので数えない。
+	store.calls, store.results, store.idx = nil, nil, 0
+	rec = doRequest(e, rl.Middleware(), h, "/api/plugin/status/_peer", nil)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Empty(t, store.calls)
+
+	// 表が無い (disableEndpointRateLimits) なら掛けない。
+	store2 := &mockLimitStore{}
+	rl2 := NewRateLimiter(store2, true, nil)
+	e2, h2 := setupEcho(rl2)
+	rec = doRequest(e2, rl2.Middleware(), h2, "/api/plugin/status/me/set", nil)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Empty(t, store2.calls)
 }

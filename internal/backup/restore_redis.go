@@ -82,8 +82,8 @@ var defaultPatterns = []string{
 //     mk:signupform:nonce:* / limit:*: 再送・総当たり・再利用を止めるための記録。
 //     消すと、その窓が開き直る
 //   - apDelivery* / apInboxHealth:* / ed25519:* / reversi:federation:version:* /
-//     <prefix>url-preview:*: 相手のサーバーや外部の URL についての記録で、DB から
-//     作ったものではない
+//     <prefix>url-preview:* (以前の版が作ったもの。今の版はプロセス内に覚える):
+//     相手のサーバーや外部の URL についての記録で、DB から作ったものではない
 //   - <prefix>elythia:maintenance*: メンテナンスの状態 (#3463)。画面からの
 //     リストアは、メンテナンス中にこの後始末を呼ぶ
 //   - bull:* のうち deliver 以外の queue (jobQueue): バックアップより後に届いた

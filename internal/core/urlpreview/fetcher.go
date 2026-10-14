@@ -17,7 +17,7 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/keyword"
 	"github.com/elythia-network/elythia/internal/misc/remoteurl"
 	"github.com/elythia-network/elythia/internal/safehttp"
-	"github.com/redis/go-redis/v9"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	"golang.org/x/net/html/charset"
 )
 
@@ -32,8 +32,17 @@ var (
 	ErrPrivateIP = safehttp.ErrSSRFBlocked
 )
 
-const cachePrefix = "url-preview:"
-const cacheTTL = 24 * time.Hour
+// Cache bounds.
+//
+// **件数に上限のあるプロセス内のキャッシュにする。** 以前は Redis に URL ごとの
+// キーを 24 時間置いており、`/url` は認証も rate limit も無いので、クエリを
+// 変えた URL を投げ続けるだけで Redis (キュー・rate limit・タイムラインと同居)
+// のメモリを無制限に増やせた。upstream も MemoryKVCache (1 時間) のプロセス内
+// キャッシュで、件数で有界。
+const (
+	cacheSize = 1000
+	cacheTTL  = time.Hour
+)
 
 // Config holds URL preview settings read from Meta.
 type Config struct {
@@ -49,10 +58,14 @@ type Config struct {
 // Fetcher fetches and parses URL previews with caching and SSRF protection.
 type Fetcher struct {
 	cfg         Config
-	redis       *redis.Client
-	keyPrefix   string // TS drop-in互換用 `<host>:` prefix
 	client      *http.Client
 	proxyClient *http.Client
+	cache       *expirable.LRU[string, []byte]
+
+	// cfgProvider returns the current settings (meta). 管理画面で変えた値
+	// (有効/無効、リダイレクト、上限、timeout、summaryProxy) を再起動なしで
+	// 効かせる。nil なら NewFetcher に渡した Config を使い続ける (テスト用)。
+	cfgProvider func() (Config, error)
 
 	// sensitiveList は meta.urlPreviewSensitiveList を返す provider
 	// (upstream 2026.7.0 #17635)。admin が随時変更するため、起動時
@@ -73,49 +86,79 @@ func (f *Fetcher) SetHTTPClient(c *http.Client) {
 	f.client = c
 }
 
-// NewFetcher creates a URL preview Fetcher.
+// SetConfigProvider makes the fetcher read its settings on every request.
+func (f *Fetcher) SetConfigProvider(p func() (Config, error)) {
+	f.cfgProvider = p
+}
+
+// forRequest returns the fetcher to use for one request: f itself, or a copy
+// carrying the current settings and HTTP clients built from them.
 //
-// keyPrefix (通常は `cfg.Redis.KeyPrefix()` = `<host>:`) は TS 本家と同じ
-// キー名前空間の下にキャッシュキーを置くために前置される。空文字列なら
-// prefix 無し。
-//
-// allowedPrivateNetworks は SSRF guard で例外的に許可する CIDR (config の
-// allowedPrivateNetworks をそのまま渡す)。transportOpts は forward proxy /
-// outgoing address / address family などの outbound 設定で、AP fetch や
-// media proxy と挙動を揃えるため `safehttp.WithProxy(...)` などを渡す
-// (#638)。
-func NewFetcher(cfg Config, rdb *redis.Client, keyPrefix string, allowedPrivateNetworks []string, transportOpts ...safehttp.Option) *Fetcher {
+// transport (SSRF guard と proxy) は共有し、timeout と redirect の扱いだけを
+// 設定から組み直す。
+func (f *Fetcher) forRequest() (*Fetcher, error) {
+	if f.cfgProvider == nil {
+		return f, nil
+	}
+	cfg, err := f.cfgProvider()
+	if err != nil {
+		return nil, fmt.Errorf("%w: read settings: %v", ErrFetchFailed, err)
+	}
+	g := *f
+	g.cfg = cfg
+	g.client = newPreviewClient(cfg, f.client.Transport)
+	g.proxyClient = &http.Client{Timeout: previewTimeout(cfg)}
+	return &g, nil
+}
+
+func previewTimeout(cfg Config) time.Duration {
 	timeout := time.Duration(cfg.TimeoutMs) * time.Millisecond
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
+	return timeout
+}
 
+func newPreviewClient(cfg Config, transport http.RoundTripper) *http.Client {
 	client := &http.Client{
-		Timeout:   timeout,
-		Transport: safehttp.NewSSRFSafeTransport(allowedPrivateNetworks, transportOpts...),
+		Timeout:   previewTimeout(cfg),
+		Transport: transport,
 	}
 	if !cfg.AllowRedirect {
 		client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
 			return http.ErrUseLastResponse
 		}
 	}
+	return client
+}
 
+// NewFetcher creates a URL preview Fetcher.
+//
+// allowedPrivateNetworks は SSRF guard で例外的に許可する CIDR (config の
+// allowedPrivateNetworks をそのまま渡す)。transportOpts は forward proxy /
+// outgoing address / address family などの outbound 設定で、AP fetch や
+// media proxy と挙動を揃えるため `safehttp.WithProxy(...)` などを渡す
+// (#638)。
+func NewFetcher(cfg Config, allowedPrivateNetworks []string, transportOpts ...safehttp.Option) *Fetcher {
 	return &Fetcher{
-		cfg:       cfg,
-		redis:     rdb,
-		keyPrefix: keyPrefix,
-		client:    client,
+		cfg:    cfg,
+		client: newPreviewClient(cfg, safehttp.NewSSRFSafeTransport(allowedPrivateNetworks, transportOpts...)),
 		// proxyClient は管理者が設定した summalyProxy への呼び出し用。
 		// operator-trusted endpoint (社内 summaly や localhost に立てた
 		// proxy) を指定するケースがあるため SSRF guard は適用しない。
 		// ここに forward proxy を掛けると 127.0.0.1 への内向き呼び出しまで
 		// proxy 経由になって壊れるので、明示的に裸の Client を使う。
-		proxyClient: &http.Client{Timeout: timeout},
+		proxyClient: &http.Client{Timeout: previewTimeout(cfg)},
+		cache:       expirable.NewLRU[string, []byte](cacheSize, nil, cacheTTL),
 	}
 }
 
-// Fetch returns the URL preview, using Redis cache when available.
+// Fetch returns the URL preview, using the in-process cache when available.
 func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (*Result, error) {
+	f, err := f.forRequest()
+	if err != nil {
+		return nil, err
+	}
 	if !f.cfg.Enabled {
 		return nil, ErrDisabled
 	}
@@ -136,10 +179,10 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (*Result, error) {
 		return result, nil
 	}
 
-	// Redisキャッシュ確認
-	cacheKey := f.keyPrefix + cachePrefix + hashURL(rawURL)
-	if f.redis != nil {
-		if cached, err := f.redis.Get(ctx, cacheKey).Bytes(); err == nil {
+	// キャッシュ確認
+	cacheKey := hashURL(rawURL)
+	if f.cache != nil {
+		if cached, ok := f.cache.Get(cacheKey); ok {
 			var result Result
 			// 旧バージョン期に検証前の値が入った可能性に備え、cache 読み出し
 			// にも scheme 検証を掛ける (不正 entry は miss 扱いで再取得)。
@@ -163,11 +206,11 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (*Result, error) {
 		return nil, err
 	}
 
-	// Redisキャッシュ保存 (keyword 由来の sensitive 上書き前の生値を保存し、
+	// キャッシュ保存 (keyword 由来の sensitive 上書き前の生値を保存し、
 	// リスト変更が過去 entry へ遡って効くようにする)。
-	if f.redis != nil {
+	if f.cache != nil {
 		if data, err := json.Marshal(result); err == nil {
-			f.redis.Set(ctx, cacheKey, data, cacheTTL)
+			f.cache.Add(cacheKey, data)
 		}
 	}
 

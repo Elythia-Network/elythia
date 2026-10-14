@@ -1613,33 +1613,32 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	frontend := frontendHTML(s.config, metaRepo, proxyAccountResolver, chunkedUploadCapability)
 
 	// URL preview endpoint
-	if previewMeta, err := metaRepo.Fetch(); err == nil {
-		previewCfg := coreurlpreview.Config{
-			Enabled:              previewMeta.URLPreviewEnabled,
-			AllowRedirect:        previewMeta.URLPreviewAllowRedirect,
-			TimeoutMs:            previewMeta.URLPreviewTimeout,
-			MaxContentLength:     previewMeta.URLPreviewMaximumContentLength,
-			RequireContentLength: previewMeta.URLPreviewRequireContentLength,
+	//
+	// **設定は毎回読む。** 起動時の値で固定すると、管理画面で URL プレビューを
+	// 無効にしても (外向きの取得を止める緊急の手段)、再起動まで取りに行き続けた。
+	// upstream の UrlPreviewService もその都度 meta を見る。metaRepo は cache 付きで、
+	// update-meta で無効化される。
+	urlPreviewFetcher := coreurlpreview.NewFetcher(coreurlpreview.Config{}, s.config.AllowedPrivateNetworks, s.outboundOpts()...)
+	urlPreviewFetcher.SetConfigProvider(func() (coreurlpreview.Config, error) {
+		m, err := metaRepo.Fetch()
+		if err != nil {
+			return coreurlpreview.Config{}, err
 		}
-		if previewMeta.URLPreviewUserAgent != nil {
-			previewCfg.UserAgent = *previewMeta.URLPreviewUserAgent
+		return urlPreviewConfig(m), nil
+	})
+	// urlPreviewSensitiveList は admin が随時変更するため live provider で
+	// 渡す (metaRepo は cached、update-meta で invalidate される)。
+	urlPreviewFetcher.SetSensitiveListProvider(func() []string {
+		m, err := metaRepo.Fetch()
+		if err != nil || m == nil {
+			return nil
 		}
-		if previewMeta.URLPreviewSummaryProxyURL != nil {
-			previewCfg.SummaryProxyURL = *previewMeta.URLPreviewSummaryProxyURL
-		}
-		urlPreviewFetcher := coreurlpreview.NewFetcher(previewCfg, s.redis.Default, s.config.Redis.KeyPrefix(), s.config.AllowedPrivateNetworks, s.outboundOpts()...)
-		// urlPreviewSensitiveList は admin が随時変更するため live provider で
-		// 渡す (metaRepo は cached、update-meta で invalidate される)。
-		urlPreviewFetcher.SetSensitiveListProvider(func() []string {
-			m, err := metaRepo.Fetch()
-			if err != nil || m == nil {
-				return nil
-			}
-			return m.URLPreviewSensitiveList
-		})
-		urlHandler := apiurl.NewHandler(urlPreviewFetcher)
-		s.echo.GET("/url", urlHandler.Preview)
-	}
+		return m.URLPreviewSensitiveList
+	})
+	urlHandler := apiurl.NewHandler(urlPreviewFetcher)
+	// **接続元ごとの上限を付ける。** `/url` は認証不要で、1 回ごとにサーバーから
+	// 外向きの取得を 1 本起こす。`/api` の外なので API の rate limit は掛からない。
+	s.echo.GET("/url", urlHandler.Preview, middleware.RequireIPRateLimit(rateLimiter, middleware.URLPreviewRateLimitKey))
 
 	// Test-only endpoints — TestMode=true のときだけ公開する。
 	// Cypress の resetState コマンドが依存する /api/reset-db はここで登録する。
