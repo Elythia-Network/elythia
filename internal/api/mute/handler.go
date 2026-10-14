@@ -90,8 +90,11 @@ func (h *Handler) Create(c echo.Context) error {
 		return apierr.JSONInvalidParam(c)
 	}
 
+	// **0 は無期限** (upstream create.ts の `ps.expiresAt ? new Date(...) : null`。
+	// JS の 0 は falsy)。0 を 1970 年として渡すと、失効済みの no-op 分岐に入り、
+	// 204 を返すのにミュートを作らなかった。channels/mute/create も同じ扱い。
 	var expires *time.Time
-	if req.ExpiresAt != nil {
+	if req.ExpiresAt != nil && *req.ExpiresAt != 0 {
 		t := time.UnixMilli(*req.ExpiresAt)
 		expires = &t
 	}

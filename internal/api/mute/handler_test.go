@@ -389,3 +389,27 @@ func TestList_AcceptsOrdinaryCursor(t *testing.T) {
 	require.NoError(t, h.List(c))
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
+
+// expiresAt: 0 は無期限のミュートを作ること (upstream は 0 を falsy として null に倒す)。
+//
+// 0 を 1970 年として扱うと「失効済み」の no-op 分岐に入り、204 なのにミュートが
+// 作られなかった。
+func TestCreate_ExpiresAtZeroIsPermanent(t *testing.T) {
+	userRepo := testutil.NewMockUserRepository()
+	mutingRepo := testutil.NewMockMutingRepository()
+	idGen, _ := id.NewGenerator("aidx")
+	h := NewHandler(coremuting.NewService(userRepo, mutingRepo, idGen), userRepo, idGen)
+	addUser(userRepo, "alice")
+	addUser(userRepo, "bob")
+
+	c, rec := newReq(t, `{"userId":"bob","expiresAt":0}`)
+	setUser(c, "alice")
+	require.NoError(t, h.Create(c))
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	ok, err := mutingRepo.Exists("alice", "bob")
+	require.NoError(t, err)
+	require.True(t, ok, "expiresAt: 0 でミュートが作られなかった")
+	m, err := mutingRepo.FindByPair("alice", "bob")
+	require.NoError(t, err)
+	assert.Nil(t, m.ExpiresAt, "無期限のはず")
+}
