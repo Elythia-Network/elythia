@@ -20,7 +20,11 @@
 # **release tag ではなく commit SHA に固定する。** tag は force-push で
 # 差し替え可能だが、commit archive は immutable。SHA は v1.2-20250903
 # (PostgreSQL 18 を公式サポートした release) を指す。
-FROM postgres:18-alpine
+#
+# **base image も digest で固定する** (CLAUDE.md Section 8、ルートの Dockerfile の
+# backup stage と同じ値)。floating tag だと、同じ Dockerfile から別の中身の image が
+# できる。上げるときは backup stage と一緒に上げる。
+FROM postgres:18-alpine@sha256:4da1a4828be12604092fa55311276f08f9224a74a62dcb4708bd7439e2a03911
 
 # 上げるときは、ルートの Dockerfile の backup stage (バックアップを戻す側) も同じ値にする。
 ARG PG_BIGM_COMMIT=735dceba0ecdd8ac1aaaaa207226a7102b6bbd71
