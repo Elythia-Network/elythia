@@ -123,12 +123,16 @@ func (e *lifecycleEnv) requireNoBackends(t *testing.T) {
 		"generation の DB 接続が残っている")
 }
 
-// numSub returns how many Redis subscribers a channel has.
-func (e *lifecycleEnv) numSub(t *testing.T, channel string) int64 {
+// numPat returns how many distinct pattern subscriptions the Redis holds.
+//
+// PubSubService は topic ごとの SUBSCRIBE ではなく `<prefix>*` の PSUBSCRIBE を
+// 1 本持つので、チャネルの NUMSUB ではなく pattern の数で購読の有無を見る。この
+// Redis は環境ごとの専用なので、数はこのサーバーの世代のものだけになる。
+func (e *lifecycleEnv) numPat(t *testing.T) int64 {
 	t.Helper()
-	res, err := e.rdb.PubSubNumSub(context.Background(), channel).Result()
+	n, err := e.rdb.PubSubNumPat(context.Background()).Result()
 	require.NoError(t, err)
-	return res[channel]
+	return n
 }
 
 func serveStatus(t *testing.T, h http.Handler, method, path string) int {
@@ -203,7 +207,7 @@ func TestSupervisor_RecyclesGenerationsWithoutLeaking(t *testing.T) {
 		// /api/meta は DB を読む。世代が実際に DB に繋がっていることの確認。
 		require.Equal(t, http.StatusOK, serveStatus(t, sup, http.MethodPost, "/api/meta"), "cycle %d", cycle)
 		require.Positive(t, env.backends(t), "cycle %d: 世代が DB に繋がっていない (前提)", cycle)
-		require.EqualValues(t, 1, env.numSub(t, "internal:metaUpdated"), "cycle %d", cycle)
+		require.Positive(t, env.numPat(t), "cycle %d: 世代が Redis を購読していない (前提)", cycle)
 		ws := dialStreaming(t, ts, env.cfg.URL)
 
 		sup.genMu.Lock()
@@ -218,7 +222,7 @@ func TestSupervisor_RecyclesGenerationsWithoutLeaking(t *testing.T) {
 		assert.Zero(t, rep.OpenConns)
 		assert.Equal(t, stream.ServiceRestartCloseCode, closeCodeOf(t, ws), "cycle %d", cycle)
 		env.requireNoBackends(t)
-		assert.Zero(t, env.numSub(t, "internal:metaUpdated"), "cycle %d: 古い世代の購読が残っている", cycle)
+		assert.Zero(t, env.numPat(t), "cycle %d: 古い世代の購読が残っている", cycle)
 		assert.Equal(t, http.StatusServiceUnavailable, serveStatus(t, sup, http.MethodGet, "/healthz"))
 
 		require.NoError(t, sup.startGeneration(), "cycle %d", cycle)
