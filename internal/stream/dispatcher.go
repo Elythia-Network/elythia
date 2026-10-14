@@ -62,11 +62,11 @@ const maxChannelsPerConnection = 32
 //
 // **チャンネル単位の上限だけでは足りない。** ハッシュタグのチャンネルは
 // 1 つで最大 32 トピックを購読でき (`maxHashtagTopics`)、チャンネルは
-// 1 接続に 32 個まで作れるので、**1 本の接続から distinct な Redis 購読を
-// 1024 個**開ける。`PubSubService` は distinct トピックごとに Redis へ
-// 接続を張るので、`/streaming` を数本開くだけで valkey の `maxclients` に
-// 届き、インスタンス全体が新規接続を拒否する。**`/streaming` は未認証で
-// 張れて接続数の上限も無い。**
+// 1 接続に 32 個まで作れるので、**1 本の接続から distinct なトピックを
+// 1024 個**開ける。`PubSubService` は Redis の購読を 1 本にまとめたので
+// Redis の接続は増えないが、トピックはプロセスの中に枠を持つ。**`/streaming`
+// は未認証で張れて接続数の上限も無い**ので、1 接続が持てる数を絞る。
+// (以前は distinct トピックごとに Redis へ接続を張っていた。)
 //
 // 128 は「普通の利用者が同時に開く数」より十分大きい — upstream の
 // フロントエンドが張るのは HTL / LTL / STL / GTL / 通知 / メイン +
@@ -77,10 +77,11 @@ const maxTopicsPerConnection = 128
 // の上限。超えたら**最も古く購読したものから外す** (LRU)。
 //
 // subNote も noteStream:<id> を 1 トピックとして購読するので、上限が無いと
-// maxTopicsPerConnection と同じ理由で Redis の接続を無制限に増やせる。
+// maxTopicsPerConnection と同じ理由でプロセスの中のトピックを無制限に増やせる。
 // 公開ノートは未認証でも購読できるので、可視性の確認は歯止めにならない。
 // upstream も 1 接続あたりの件数に上限を設けて古いものから外す。値が upstream
-// (1536) より小さいのは、mk-go は購読 1 件ごとに Redis の接続を張るため。
+// (1536) より小さいのは、かつて購読 1 件ごとに Redis の接続を張っていた名残で、
+// 今もトピックの枠を小さく保つ意味がある。
 // フロントエンドは画面に出したノートを購読するので、流れて見えなくなった
 // ものから外れるだけで、表示中のノートの更新は届き続ける。
 const maxNoteSubsPerConnection = 128

@@ -143,9 +143,8 @@ func (allowAllNoteVisibility) RequireVisible(_ *model.User, id string) (*model.N
 //
 // チャンネル単位の上限 (`maxChannelsPerConnection` = 32) だけでは、ハッシュタグ
 // のように 1 チャンネルで多数のトピックを購読するもの (最大 32) を積まれると
-// **1 本の接続から distinct な Redis 購読を 1024 個**開ける。`PubSubService` は
-// distinct トピックごとに Redis へ接続を張るので、`/streaming` を数本開くだけで
-// valkey の `maxclients` に届き、インスタンス全体が新規接続を拒否する。
+// **1 本の接続から distinct なトピックを 1024 個**購読できる。トピックごとの
+// 状態はメモリに持つので、上限が無いと 1 本の接続で際限なく積める。
 // **`/streaming` は未認証で張れて接続数の上限も無い。**
 func TestDispatcher_CapsTopicsPerConnection(t *testing.T) {
 	bus := newStubBus()

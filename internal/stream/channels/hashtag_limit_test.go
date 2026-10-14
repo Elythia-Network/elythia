@@ -3,6 +3,7 @@ package channels
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/elythia-network/elythia/internal/stream"
@@ -12,10 +13,8 @@ import (
 
 // **購読するトピック数に上限があること。**
 //
-// mk-go は distinct なタグごとに Redis の SUBSCRIBE を張るので、1 通の
-// `connect` で Redis 接続を任意個増やせる。本番 valkey の `maxclients` に
-// 達すると、同じ valkey を使う job queue / timelines / reactions を含めて
-// インスタンス全体が新規接続を拒否する。
+// Elythia は distinct なタグごとにトピックを購読するので、1 通の `connect` で
+// トピックの枠を任意個増やせる。
 func TestCountDistinctTags(t *testing.T) {
 	t.Parallel()
 
@@ -47,7 +46,7 @@ func TestHashtag_RejectsTooManyTags(t *testing.T) {
 	ctx := newCtx(nil)
 	ch := NewHashtag(ctx)
 	require.ErrorIs(t, ch.Init(json.RawMessage(body)), stream.ErrInvalidParams,
-		"33 タグは拒否すること (Redis 購読がタグ数ぶん増える)")
+		"33 タグは拒否すること (トピックがタグ数ぶん増える)")
 	require.Empty(t, ctx.subs, "拒否したら 1 つも購読しないこと")
 	ch.Dispose()
 }
@@ -65,5 +64,30 @@ func TestHashtag_AcceptsUpToLimit(t *testing.T) {
 	ch := NewHashtag(ctx)
 	require.NoError(t, ch.Init(json.RawMessage(body)))
 	require.Len(t, ctx.subs, 32)
+	ch.Dispose()
+}
+
+// 保存できる長さ (128 文字) を超えるタグは拒否し、1 つも購読しないこと。
+//
+// 長いタグは他のタグより後ろに置く。途中で拒否する実装だと、前のタグを購読した
+// まま返してしまう。
+func TestHashtag_RejectsOverlongTag(t *testing.T) {
+	long := strings.Repeat("あ", 129)
+	body, err := json.Marshal(map[string]any{"q": [][]string{{"ok1", "ok2"}, {long}}})
+	require.NoError(t, err)
+
+	ctx := newCtx(nil)
+	ch := NewHashtag(ctx)
+	require.ErrorIs(t, ch.Init(json.RawMessage(body)), stream.ErrInvalidParams)
+	require.Empty(t, ctx.subs, "拒否したら 1 つも購読しないこと")
+	ch.Dispose()
+
+	// 128 文字ちょうどは通る。
+	body, err = json.Marshal(map[string]any{"q": [][]string{{strings.Repeat("あ", 128)}}})
+	require.NoError(t, err)
+	ctx = newCtx(nil)
+	ch = NewHashtag(ctx)
+	require.NoError(t, ch.Init(json.RawMessage(body)))
+	require.Len(t, ctx.subs, 1)
 	ch.Dispose()
 }
