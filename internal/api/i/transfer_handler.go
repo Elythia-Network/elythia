@@ -239,7 +239,8 @@ func (h *Handler) antennaImportWouldExceedLimit(userID, fileID string) bool {
 		return false
 	}
 	limit, ok := role.PolicyNumber(h.roleProvider.GetUserPolicies(userID)["antennaLimit"])
-	if !ok || limit < 0 {
+	// 負の値は upstream と同じく「取り込めない」になる (下の `>= limit` が常に真)。
+	if !ok {
 		return false
 	}
 	_, body, err := h.importDriveReader.Fetch(fileID)

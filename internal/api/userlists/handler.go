@@ -336,7 +336,8 @@ func (h *Handler) Push(c echo.Context) error {
 	// userEachUserListsLimit role policy gate (#1029)。list owner の policy
 	// で評価する (= owner == viewer は直上で確定済)。
 	if h.rolePolicyProvider != nil {
-		if limit, ok := role.PolicyNumber(h.rolePolicyProvider.GetUserPolicies(list.UserID)["userEachUserListsLimit"]); ok && limit >= 0 {
+		// 負の値は upstream と同じく「1 件も作れない」になる (`count >= limit` が常に真)。
+		if limit, ok := role.PolicyNumber(h.rolePolicyProvider.GetUserPolicies(list.UserID)["userEachUserListsLimit"]); ok {
 			count, err := h.repo.CountMembers(list.ID)
 			if err != nil {
 				return apierr.JSONInternalError(c)

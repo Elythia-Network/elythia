@@ -489,3 +489,19 @@ func TestCreate_ClipLimit_FractionalPasses(t *testing.T) {
 	_, err := svc.Create(clip.CreateInput{OwnerID: "u1", Name: "second"})
 	require.NoError(t, err)
 }
+
+// 負の clipLimit / noteEachClipsLimit は「作れない / 足せない」こと。
+func TestClipLimits_NegativeDenies(t *testing.T) {
+	svc, repo, _, notes := newSvc(t)
+	svc.SetRolePolicyProvider(&stubRolePolicyProvider{policies: map[string]any{
+		"clipLimit":          -1,
+		"noteEachClipsLimit": -1,
+	}})
+	_, err := svc.Create(clip.CreateInput{OwnerID: "u1", Name: "first"})
+	require.ErrorIs(t, err, clip.ErrTooManyClips)
+
+	repo.Clips["c1"] = &model.Clip{ID: "c1", UserID: "u1"}
+	notes.Notes["n1"] = &model.Note{ID: "n1"}
+	err = svc.AddNote("u1", "c1", "n1")
+	require.ErrorIs(t, err, clip.ErrTooManyClipNotes)
+}

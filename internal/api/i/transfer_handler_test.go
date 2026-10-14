@@ -481,3 +481,17 @@ func TestImport_DBFailureIsNot4xx(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	assert.Empty(t, enq.importCalls, "障害時に job を積んでいる")
 }
+
+// 負の antennaLimit ではアンテナを取り込めないこと (upstream の `>= antennaLimit`)。
+func TestImportAntennas_NegativeLimitDenies(t *testing.T) {
+	h, enq, driveRepo := newTransferHandlerWithDrive()
+	uid := ownerID
+	driveRepo.Files["ant"] = &model.DriveFile{ID: "ant", UserID: &uid, Size: 100}
+	h.SetImportDriveReader(&stubImportFileReader{body: []byte(`[{"name":"a"}]`)})
+	h.SetAntennaCounter(&stubAntennaCounter{count: 0})
+	h.SetRoleProvider(&stubRoleProvider{policies: map[string]any{"antennaLimit": -1}})
+	rec := post(h.ImportAntennas, `{"fileId":"ant"}`, &model.User{ID: ownerID})
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "TOO_MANY_ANTENNAS")
+	assert.Empty(t, enq.importCalls)
+}
