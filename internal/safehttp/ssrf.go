@@ -52,8 +52,12 @@ func init() {
 		// IPv4 の 0.0.0.0/8 と対称に IPv6 unspecified (::) も遮断する。これが無いと
 		// `http://[::]:PORT/` が isPrivateIP をすり抜け、Linux の connect(::) が
 		// loopback (::1) にルートされて SSRF 保護を回避できる。
-		"::/128",    // unspecified
-		"::1/128",   // loopback
+		"::/128",  // unspecified
+		"::1/128", // loopback
+		// IPv4-compatible (RFC4291 で廃止、`::a.b.c.d`)。To4() は展開しないので
+		// CIDR で遮断する。Linux は今は接続を拒むが、カーネルや経路の設定に頼らない
+		// (ipaddr.js の特殊なレンジにも無いが、表を閉じておく)。
+		"::/96",
 		"fc00::/7",  // unique-local (RFC4193)
 		"fe80::/10", // link-local
 		"fec0::/10", // deprecated site-local (RFC3879)
