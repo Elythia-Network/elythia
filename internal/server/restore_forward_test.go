@@ -143,8 +143,8 @@ func TestMaintenanceRestoreForwardResolvesTheClientLikeEcho(t *testing.T) {
 	}
 	fwd, paths := maintenanceRestoreForward(cfg, nil)
 	require.NotNil(t, fwd)
-	assert.ElementsMatch(t, []string{"/api/admin/backup/restore/status", "/api/admin/backup/restore/confirm", "/api/admin/backup/restore/abort"}, paths,
-		"prepare is not forwarded during a maintenance")
+	assert.ElementsMatch(t, []string{"/api/admin/backup/restore/status"}, paths,
+		"only the status is forwarded during a maintenance (the service refuses prepare, confirm and abort then)")
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/backup/restore/status", bytes.NewReader([]byte(`{"opId":"x"}`)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Forwarded-For", "203.0.113.9")
@@ -182,9 +182,13 @@ func TestMaintenanceHandlerForwardsTheRestore(t *testing.T) {
 	rec := httptest.NewRecorder()
 	m.handler.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	rec = httptest.NewRecorder()
-	m.handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/admin/backup/restore/prepare", bytes.NewReader([]byte(`{"id":"x"}`))))
-	assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "prepare is not forwarded during a maintenance")
+	for _, op := range []string{"prepare", "confirm", "abort"} {
+		rec = httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "/api/admin/backup/restore/"+op, bytes.NewReader([]byte(`{"opId":"x"}`)))
+		r.Header.Set("Content-Type", "application/json")
+		m.handler.ServeHTTP(rec, r)
+		assert.Equal(t, http.StatusServiceUnavailable, rec.Code, op+" is not forwarded during a maintenance")
+	}
 
 	t.Setenv(config.EnvOnlyQueue, "1")
 	var q maintTracker

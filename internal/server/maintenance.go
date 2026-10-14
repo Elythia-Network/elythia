@@ -141,13 +141,12 @@ func maintenanceRateLimiter(s *Supervisor) *middleware.RateLimiter {
 // maintenanceRestorePaths are the restore endpoints forwarded during a
 // maintenance.
 //
-// prepare は転送しない。メンテナンス中に始められる操作は無く (daemon も断る)、
-// 転送すると再認証のために DB へ接続を張る要求を、メンテナンス中に誰でも送れる
-// ことになるため。進み具合・確定・中止は、メンテナンスの中で続く操作に要る。
+// **進み具合 (status) だけを転送する。** 準備・確定・中止は、daemon がメンテナンス中
+// (ほかの操作のものも含む) は再認証の前に必ず断る (NoMaintenance)。転送しても通る
+// ことは無く、本体を止めている間に誰でも daemon と Redis まで要求を届けられる面が
+// 増えるだけだった。確定・中止は rate limit の表にも無いので、転送は上限も無かった。
 var maintenanceRestorePaths = []string{
 	adminbackup.RestorePathPrefix + "status",
-	adminbackup.RestorePathPrefix + "confirm",
-	adminbackup.RestorePathPrefix + "abort",
 }
 
 // holdingAtStartup reads the state once before the first generation is
