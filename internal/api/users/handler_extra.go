@@ -509,7 +509,23 @@ func (h *Handler) featuredNotesByUser(ctx context.Context, userID, viewerID, unt
 	if len(ids) == 0 {
 		return []*model.Note{}, nil
 	}
-	return h.noteRepo.FindManyByIDsWithUser(ids)
+	notes, err := h.noteRepo.FindManyByIDsWithUser(ids)
+	if err != nil {
+		return nil, err
+	}
+	// **凍結された利用者のノートを落とす** (upstream featured-notes.ts の
+	// generateSuspendedUserQueryForNote。著者と、返信先・リノート元の著者)。
+	// SQL の経路 (ListFeaturedByUser) は applySuspendedAuthorExclusion で落とす
+	// が、ランキングの経路には無く、凍結の後もランキングの窓 (最大 2 週間) の間、
+	// users/show が NO_SUCH_USER を返す利用者の注目ノートが匿名で本文ごと読めた。
+	out := notes[:0]
+	for _, n := range notes {
+		if notesfilter.HasSuspendedAuthor(n, nil) {
+			continue
+		}
+		out = append(out, n)
+	}
+	return out, nil
 }
 
 // sortAndPageFeaturedIDs sorts note IDs DESC, drops IDs >= untilID, and caps to

@@ -104,3 +104,30 @@ func TestFeaturedNotes_RankingLimitCap(t *testing.T) {
 	assert.NotContains(t, ids, "n01")
 	assert.NotContains(t, ids, "n02")
 }
+
+// ランキングの経路でも、凍結された利用者のノート (著者・リノート元の著者) を
+// 落とすこと (upstream featured-notes.ts の generateSuspendedUserQueryForNote)。
+//
+// SQL の経路には除外があるが、ランキングの経路には無く、凍結の後もランキングの
+// 窓の間、users/show が NO_SUCH_USER を返す利用者の注目ノートが匿名で読めた。
+func TestFeaturedNotes_RankingDropsSuspendedAuthors(t *testing.T) {
+	h, _, noteRepo := newExtraHandler(t)
+	suspended := &model.User{ID: "u1", IsSuspended: true}
+	noteRepo.Notes["a"] = &model.Note{ID: "a", UserID: "u1", Visibility: "public", User: suspended}
+	noteRepo.Notes["b"] = &model.Note{ID: "b", UserID: "u1", Visibility: "public", User: suspended}
+	h.SetFeaturedRanking(&fakePerUserReader{perUser: map[string][]string{"u1": {"a", "b"}}})
+	rec := postExtra(h.FeaturedNotes, `{"userId":"u1"}`, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Empty(t, featRespIDs(t, rec.Body.Bytes()), "凍結された利用者のノートを返した")
+
+	// リノート元の著者が凍結されている引用も落とす。凍結されていないものは残る (対照)。
+	h2, _, noteRepo2 := newExtraHandler(t)
+	ok := &model.User{ID: "u2"}
+	noteRepo2.Notes["c"] = &model.Note{ID: "c", UserID: "u2", Visibility: "public", User: ok,
+		Renote: &model.Note{ID: "r", UserID: "u9", User: &model.User{ID: "u9", IsSuspended: true}}}
+	noteRepo2.Notes["d"] = &model.Note{ID: "d", UserID: "u2", Visibility: "public", User: ok}
+	h2.SetFeaturedRanking(&fakePerUserReader{perUser: map[string][]string{"u2": {"c", "d"}}})
+	rec = postExtra(h2.FeaturedNotes, `{"userId":"u2"}`, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, []string{"d"}, featRespIDs(t, rec.Body.Bytes()))
+}
