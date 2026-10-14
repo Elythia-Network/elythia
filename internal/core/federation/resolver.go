@@ -456,6 +456,11 @@ type Resolver struct {
 	// リスト外 host からの取り込みを拒否する。未配線時は legacy 挙動
 	// (全 host 許可) にフォールバック。
 	hostBlocker HostBlockChecker
+	// softwareBlocker は受信を拒否するソフトウェア (meta.inboxSuspendedSoftware、
+	// #3362) の判定。hostAllowed でドメインブロックと同じ入口に当てる (#3563)。
+	// inbox だけで判定していた頃は、拒否していないサーバーのリノートや返信の
+	// 連鎖、ap/show で、拒否中のホストの投稿を取り込めた。未配線なら判定しない。
+	softwareBlocker SoftwareSuspensionChecker
 
 	// mediaSilencedChecker は meta.mediaSilencedHosts の判定 (#3218)。未配線なら
 	// 添付をセンシティブにしない。
@@ -723,6 +728,25 @@ func (r *Resolver) SetHostBlockChecker(c HostBlockChecker) {
 	r.hostBlocker = c
 }
 
+// SoftwareSuspensionChecker reports whether content from a host must be
+// refused because the instance runs software listed in
+// meta.inboxSuspendedSoftware (Elythia 独自、#3362)。実装は
+// NewInboxSuspendedChecker。
+type SoftwareSuspensionChecker interface {
+	IsSuspended(host string) bool
+}
+
+// SetSoftwareSuspensionChecker attaches the meta.inboxSuspendedSoftware
+// checker. 取り込みの入口 (hostAllowed) で、ドメインブロックと同じく
+// ErrHostNotAllowed にする (#3563)。
+func (r *Resolver) SetSoftwareSuspensionChecker(c SoftwareSuspensionChecker) {
+	r.softwareBlocker = c
+}
+
+// HasSoftwareSuspensionChecker reports whether a non-nil checker was attached
+// with SetSoftwareSuspensionChecker (startup wiring check).
+func (r *Resolver) HasSoftwareSuspensionChecker() bool { return r.softwareBlocker != nil }
+
 // SilencedHostChecker reports whether a remote host is in meta.silencedHosts.
 // *instance.Service implements it (IsSilenced).
 type SilencedHostChecker interface {
@@ -918,15 +942,29 @@ func (r *Resolver) isSelfHostURI(uri string) bool {
 }
 
 // hostAllowed reports whether the resolver may talk to / persist content
-// authored on host. host == "" (= local) は常に true。未配線時も true。
+// authored on host: the federation policy (blockedHosts / federation mode)
+// and meta.inboxSuspendedSoftware. host == "" (= local) は常に true。未配線時も true。
 func (r *Resolver) hostAllowed(host string) bool {
-	if r.hostBlocker == nil || host == "" {
+	return r.hostPolicyAllowed(host) && r.hostSoftwareAllowed(host)
+}
+
+// hostPolicyAllowed applies only the federation policy (blockedHosts /
+// federation mode). 判定はメモリ上で済む。
+func (r *Resolver) hostPolicyAllowed(host string) bool {
+	if host == "" || r.hostBlocker == nil {
 		return true
 	}
-	if r.hostBlocker.IsBlocked(host) {
-		return false
-	}
-	return r.hostBlocker.IsAllowed(host)
+	return !r.hostBlocker.IsBlocked(host) && r.hostBlocker.IsAllowed(host)
+}
+
+// hostSoftwareAllowed applies only meta.inboxSuspendedSoftware.
+//
+// 受信を拒否するソフトウェアのホストも、ドメインブロックと同じく取り込まない
+// (#3563)。既に DB にある行は、ドメインブロックと同じく呼び出し側で素通しになる。
+// こちらは instance の行を引く (meta はキャッシュ) ので、DB の照合で済む呼び出し側
+// (fetchUnknownMentionActors) は既知の行を除いてから呼ぶ。
+func (r *Resolver) hostSoftwareAllowed(host string) bool {
+	return host == "" || r.softwareBlocker == nil || !r.softwareBlocker.IsSuspended(host)
 }
 
 // hostAllowedForURI parses uri and applies hostAllowed. URI 解析不可は別
@@ -4325,7 +4363,7 @@ func (r *Resolver) fetchUnknownMentionActors(mentionLimit func() int, tagHrefs, 
 				continue
 			}
 			host, err := hostFromURI(href)
-			if err != nil || !r.hostAllowed(host) {
+			if err != nil || !r.hostPolicyAllowed(host) {
 				continue
 			}
 			if guard.failedRecently(href, host, r.clock()) {
@@ -4336,6 +4374,12 @@ func (r *Resolver) fetchUnknownMentionActors(mentionLimit func() int, tagHrefs, 
 				continue
 			case !repository.IsNotFound(ferr):
 				return
+			}
+			// 受信を拒否するソフトウェアの判定は instance の行を引くので、既知の利用者
+			// (上の FindByURI で当たったもの) を除いてから見る (#3563)。既知の利用者は
+			// どのみち取りに行かないので、結果は変わらない。
+			if !r.hostSoftwareAllowed(host) {
+				continue
 			}
 			if attempts >= mentionLimit() || time.Since(start) > inboundMentionFetchBudget {
 				slog.Info("federation: stopped fetching unknown mentioned actors",

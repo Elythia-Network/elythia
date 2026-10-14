@@ -50,6 +50,9 @@ type RemoteUserResolver struct {
 	// hostBlocker, when set, skips hosts the instance does not federate with
 	// before the WebFinger request.
 	hostBlocker HostBlockChecker
+	// softwareBlocker, when set, also skips hosts refused by
+	// meta.inboxSuspendedSoftware (#3563)。
+	softwareBlocker SoftwareSuspensionChecker
 	// group は同じ acct への並行な解決・再同期を 1 回にまとめる。users/show は
 	// 未認証でも叩けるので、同じ acct を並べて WebFinger を何度も焚かせない。
 	group singleflight.Group
@@ -66,6 +69,17 @@ var ErrRemoteUserHostNotAllowed = errors.New("remote user resolver: host is not 
 func (r *RemoteUserResolver) SetHostBlockChecker(c HostBlockChecker) {
 	r.hostBlocker = c
 }
+
+// SetSoftwareSuspensionChecker makes ResolveByUsernameHost skip hosts running
+// software listed in meta.inboxSuspendedSoftware without sending the WebFinger
+// request (#3563). ドメインブロックと同じ止め方に揃える。
+func (r *RemoteUserResolver) SetSoftwareSuspensionChecker(c SoftwareSuspensionChecker) {
+	r.softwareBlocker = c
+}
+
+// HasSoftwareSuspensionChecker reports whether a non-nil checker was attached
+// with SetSoftwareSuspensionChecker (startup wiring check).
+func (r *RemoteUserResolver) HasSoftwareSuspensionChecker() bool { return r.softwareBlocker != nil }
 
 // NewRemoteUserResolver constructs a RemoteUserResolver.
 //
@@ -146,7 +160,22 @@ func (r *RemoteUserResolver) ResolveByUsernameHost(username, host string) (*mode
 
 // hostAllowed reports whether the instance federates with host.
 func (r *RemoteUserResolver) hostAllowed(host string) bool {
+	return r.hostPolicyAllowed(host) && r.hostSoftwareAllowed(host)
+}
+
+// hostPolicyAllowed applies only the federation policy (blockedHosts /
+// federation mode).
+func (r *RemoteUserResolver) hostPolicyAllowed(host string) bool {
 	return r.hostBlocker == nil || (!r.hostBlocker.IsBlocked(host) && r.hostBlocker.IsAllowed(host))
+}
+
+// hostSoftwareAllowed applies only meta.inboxSuspendedSoftware.
+//
+// 受信を拒否するソフトウェアのホストにも WebFinger を投げない (#3563)。投げても
+// 続く ResolveActor が弾くので結果は同じで、外向きのリクエストだけが減る。ホストの
+// 形は SuspendedChecker が instance の行の形に揃える。
+func (r *RemoteUserResolver) hostSoftwareAllowed(host string) bool {
+	return r.softwareBlocker == nil || !r.softwareBlocker.IsSuspended(host)
 }
 
 // localUserByID returns the non-deleted local user with the given ID, as
@@ -222,8 +251,15 @@ func (r *RemoteUserResolver) resync(userID, host string) (*model.User, error) {
 	}
 	// 本家は連合しないホストにも WebFinger を投げ、updatePerson の取得で失敗する。
 	// 結果 (失敗) は同じなので、外向きのリクエストを出さずに失敗させる。
-	if !r.hostAllowed(host) {
+	if !r.hostPolicyAllowed(host) {
 		return nil, ErrRemoteUserHostNotAllowed
+	}
+	// **受信を拒否するソフトウェアのホストは、保存済みの行をそのまま返す** (#3563)。
+	// 受信の拒否は配送を止めない設計なので、失敗にすると、こちらから出す投稿の
+	// メンションや DM (specified) の宛先から既知の利用者が 24 時間に 1 回落ちる。
+	// 取りに行かない (WebFinger も actor の取得もしない) ことはドメインブロックと同じ。
+	if !r.hostSoftwareAllowed(host) {
+		return u, nil
 	}
 	usernameLower := strings.ToLower(u.Username)
 	href, err := r.webfinger.LookupActorURI(usernameLower, host)
