@@ -186,3 +186,16 @@ func TestUpdate_PinnedPage_DBFailureIsNot4xx(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError,
 		postExtra(h.Update, `{"pinnedPageId":"p1"}`, stubUser).Code)
 }
+
+// 確認コードは 128 bit (hex 32 文字) にすること。verify-email は認証も回数の
+// 上限も無く、コードだけで照合する。
+func TestGenerateVerifyCode_Strength(t *testing.T) {
+	seen := map[string]bool{}
+	for i := 0; i < 50; i++ {
+		code := generateVerifyCode()
+		assert.Len(t, code, 32)
+		assert.Regexp(t, `^[0-9a-f]{32}$`, code)
+		assert.False(t, seen[code], "重複した")
+		seen[code] = true
+	}
+}

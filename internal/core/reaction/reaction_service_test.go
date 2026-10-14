@@ -244,7 +244,8 @@ func TestService_Create_ReplaceDeleteError(t *testing.T) {
 
 // #3272: a concurrent replacement may remove the row after FindByPair but
 // before Delete. The loser must stop before decrementing the old count or
-// publishing removal/creation side effects.
+// publishing removal/creation side effects, and reports ErrAlreadyReacted
+// (notes/reactions/create does not map ErrReactionNotFound, which was a 500).
 func TestService_Create_ReplaceConcurrentZeroAffected(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	seedNote(noteRepo, "n1", "author", model.NoteVisibilityPublic)
@@ -272,7 +273,7 @@ func TestService_Create_ReplaceConcurrentZeroAffected(t *testing.T) {
 
 	_, err := svc.Create(&model.User{ID: "viewer"}, "n1", "new")
 
-	assert.ErrorIs(t, err, reaction.ErrReactionNotFound)
+	assert.ErrorIs(t, err, reaction.ErrAlreadyReacted)
 	assert.Equal(t, map[string]int{"old": 1}, noteRepo.ReactionCounts["n1"])
 	assert.Equal(t, map[string]*model.NoteReaction{
 		"existing": {ID: "existing", UserID: "viewer", NoteID: "n1", Reaction: "old"},
@@ -1003,5 +1004,40 @@ func TestService_NoteStreamHook_OnCreate_RemoteEmojiURLForm(t *testing.T) {
 		}
 		require.NotNil(t, hook.reacted[0].emoji, raw)
 		assert.Equal(t, want, hook.reacted[0].emoji.URL)
+	}
+}
+
+// undoRacingDeleteRepo simulates a concurrent Undo that removes the row
+// between FindByPair and Delete: the first Delete removes it and reports 0.
+type undoRacingDeleteRepo struct {
+	*testutil.MockNoteReactionRepository
+	raced bool
+}
+
+func (u *undoRacingDeleteRepo) Delete(r *model.NoteReaction) (int64, error) {
+	if !u.raced {
+		u.raced = true
+		delete(u.Reactions, r.ID)
+		return 0, nil
+	}
+	return u.MockNoteReactionRepository.Delete(r)
+}
+
+// 付け替えの途中で並行の Undo が古いリアクションを外したときは、読み直して
+// 新しいリアクションを保存すること (連合の Like を落とさない)。
+func TestService_Create_ReplaceAfterConcurrentUndoStoresNew(t *testing.T) {
+	noteRepo := testutil.NewMockNoteRepository()
+	seedNote(noteRepo, "n1", "author", model.NoteVisibilityPublic)
+	mock := testutil.NewMockNoteReactionRepository()
+	mock.Reactions["existing"] = &model.NoteReaction{ID: "existing", UserID: "viewer", NoteID: "n1", Reaction: "👍"}
+	idGen, _ := id.NewGenerator("aidx")
+	svc := reaction.NewService(noteRepo, &undoRacingDeleteRepo{MockNoteReactionRepository: mock},
+		testutil.NewMockEmojiRepository(), testutil.NewMockFollowingRepository(), idGen)
+	got, err := svc.Create(&model.User{ID: "viewer"}, "n1", "🎉")
+	require.NoError(t, err)
+	assert.Equal(t, "🎉", got)
+	require.Len(t, mock.Reactions, 1)
+	for _, r := range mock.Reactions {
+		assert.Equal(t, "🎉", r.Reaction)
 	}
 }

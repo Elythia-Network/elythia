@@ -290,6 +290,10 @@ func (s *Service) SetNoteStreamHook(h NoteStreamHook) {
 	s.noteStreamHook = h
 }
 
+// maxReplaceAttempts bounds how often Create re-reads the existing reaction
+// after losing a race while replacing it.
+const maxReplaceAttempts = 3
+
 // Create attaches a reaction by user to the target note.
 // 同じユーザーが既に同じリアクションをしている場合は ErrAlreadyReacted。
 // 異なるリアクションを既にしている場合は古い方を削除して新しい方を作成する。
@@ -347,7 +351,18 @@ func (s *Service) Create(user *model.User, noteID, rawReaction string) (string, 
 	reaction = s.applyReactionAcceptance(user, target, reaction, reactionEmoji)
 
 	// 既存リアクションを確認
-	if existing, err := s.reactionRepo.FindByPair(user.ID, target.ID); err == nil {
+	//
+	// **付け替えで Delete が 0 行なら、読み直してやり直す。** 読んだ後に並行の
+	// 要求が外した (リモートの付け替えは Undo と Like が別々に届き、並行に処理
+	// されうる) なら、読み直すと何も無いので新しいリアクションを足せる。並行の
+	// 付け替えが先に勝ったなら、勝った方を読んで同じ規則で決める。負けを
+	// ErrAlreadyReacted で返して終えると、連合の Like は受け取ったことになり、
+	// 新しいリアクションが保存されないまま再送もされない。
+	for attempt := 0; ; attempt++ {
+		existing, err := s.reactionRepo.FindByPair(user.ID, target.ID)
+		if err != nil {
+			break
+		}
 		if existing.Reaction == reaction {
 			return "", ErrAlreadyReacted
 		}
@@ -357,7 +372,12 @@ func (s *Service) Create(user *model.User, noteID, rawReaction string) (string, 
 			return "", err
 		}
 		if affected == 0 {
-			return "", ErrReactionNotFound
+			if attempt < maxReplaceAttempts-1 {
+				continue
+			}
+			// 何度読み直しても競合に負け続けるなら、他の要求が付け替え続けて
+			// いる。以前は ErrReactionNotFound が handler で 500 になっていた。
+			return "", ErrAlreadyReacted
 		}
 		// 集計列も古いリアクションを-1
 		_ = s.countWriter.Increment(target.ID, existing.Reaction, -1)
@@ -377,6 +397,7 @@ func (s *Service) Create(user *model.User, noteID, rawReaction string) (string, 
 		if s.noteStreamHook != nil {
 			s.noteStreamHook.OnUnreacted(target.ID, user.ID, decodeReactionForStream(existing.Reaction))
 		}
+		break
 	}
 
 	rec := &model.NoteReaction{

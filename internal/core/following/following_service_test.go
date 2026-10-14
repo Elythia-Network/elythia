@@ -10,6 +10,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/testutil"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1870,4 +1871,37 @@ func TestFollow_SkipsCountsWhenMoved(t *testing.T) {
 			assert.Len(t, chart.follows, tc.want)
 		})
 	}
+}
+
+// uniqueFollowingRepo reports a unique violation on Create, as when a
+// concurrent request inserted the same pair after the Exists check.
+type uniqueFollowingRepo struct {
+	*testutil.MockFollowingRepository
+}
+
+func (uniqueFollowingRepo) Create(*model.Following) error { return &pgconn.PgError{Code: "23505"} }
+
+type uniqueFollowRequestRepo struct {
+	*testutil.MockFollowRequestRepository
+}
+
+func (uniqueFollowRequestRepo) Create(*model.FollowRequest) error {
+	return &pgconn.PgError{Code: "23505"}
+}
+
+// 並行のフォローで一意制約に当たったら、既にフォロー済み / 申請済みとして返すこと
+// (500 にしない。upstream の insertFollowingDoc も一意制約の違反を握る)。
+func TestFollow_ConcurrentDuplicateIsAlreadyFollowing(t *testing.T) {
+	userRepo := testutil.NewMockUserRepository()
+	setupUsers(userRepo, "alice", "bob")
+	svc := newSvcWith(userRepo, uniqueFollowingRepo{testutil.NewMockFollowingRepository()}, testutil.NewMockFollowRequestRepository())
+	_, err := svc.Follow("alice", "bob", following.FollowOptions{})
+	assert.ErrorIs(t, err, following.ErrAlreadyFollowing)
+
+	userRepo2 := testutil.NewMockUserRepository()
+	setupUsers(userRepo2, "alice")
+	setupLockedUser(userRepo2, "bob")
+	svc2 := newSvcWith(userRepo2, testutil.NewMockFollowingRepository(), uniqueFollowRequestRepo{testutil.NewMockFollowRequestRepository()})
+	_, err = svc2.Follow("alice", "bob", following.FollowOptions{})
+	assert.ErrorIs(t, err, following.ErrAlreadyRequested)
 }
