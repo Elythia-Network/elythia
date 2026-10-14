@@ -14,6 +14,8 @@
 // amount, such as 1ms for latency). An endpoint whose error rate or
 // rate-limited rate differs between base and head by more than one point is
 // incomparable, since failing faster is not an improvement.
+// p99 is shown with its difference but not judged, since it jumps between
+// levels even when base and head are the same commit (#3559).
 //
 // A run missing one of the required k6 sub-metrics is a bug of the scenario
 // and exits 1, without a report.

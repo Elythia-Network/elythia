@@ -299,14 +299,45 @@ func TestCompare_SmallAbsoluteDifferenceIsSame(t *testing.T) {
 		{"cpu_seconds", 1.0, 1.45, VerdictSame},
 		{"med", 0.3, 0.9, VerdictSame},
 		{"med", 0.3, 1.3, VerdictDifferent},
-		{"p(99)", 0.3, 0.9, VerdictSame},
-		{"p(99)", 0.3, 1.3, VerdictDifferent},
 		{"heap_inuse_max_mib", 0, 7, VerdictSame},
 	}
 	for _, tc := range cases {
 		m := newMeasure(tc.name, true, []float64{tc.base, tc.base}, []float64{tc.head, tc.head})
 		assert.Equal(t, tc.want, m.Verdict, "%s %v -> %v", tc.name, tc.base, tc.head)
 	}
+}
+
+// TestCompare_P99IsReferenceOnly checks that p99 is shown with its
+// difference but never judged, using the home-timeline p99 of an A/A run
+// that was reported as different before #3559.
+func TestCompare_P99IsReferenceOnly(t *testing.T) {
+	p99 := map[Side][]float64{SideBase: {511.0, 516.4, 519.0}, SideHead: {577.4, 614.7, 704.2}}
+	c := compareDir(t, writeResults(t, pair(3, func(s Side, r int) fakeRun {
+		return withEndpoint(okRun(s, r, 100), "ping", func(e *fakeEndpoint) { e.p99 = p99[s][r-1] })
+	})...))
+	e := endpoint(t, c, "ping")
+	m := measure(t, e.Measures, "p(99)")
+	assert.Equal(t, VerdictReference, m.Verdict)
+	assert.Nil(t, m.Better)
+	require.NotNil(t, m.DeltaPercent)
+	assert.InDelta(t, 19.03, *m.DeltaPercent, 0.01)
+	assert.Equal(t, 516.4, m.Base.Median)
+	assert.Equal(t, VerdictSame, e.Verdict)
+
+	var md strings.Builder
+	require.NoError(t, renderMarkdown(&md, c))
+	assert.Contains(t, md.String(), "| ping | p99 (ms) | 516.4 [511.0, 519.0] | 614.7 [577.4, 704.2] | +19.0% | 参考 |")
+	assert.Contains(t, md.String(), "| ping | 差なし |")
+
+	// 失敗の割合が違うエンドポイントでは、p99 も他の指標と同じく比較不能にする
+	c = compareDir(t, writeResults(t, pair(3, func(s Side, r int) fakeRun {
+		run := withEndpoint(okRun(s, r, 100), "ping", func(e *fakeEndpoint) { e.p99 = p99[s][r-1] })
+		if s == SideHead {
+			run = withEndpoint(run, "ping", func(e *fakeEndpoint) { e.failed = e.requests / 10 })
+		}
+		return run
+	})...))
+	assert.Equal(t, VerdictIncomparable, measure(t, endpoint(t, c, "ping").Measures, "p(99)").Verdict)
 }
 
 // TestCompare_LatencyWithoutSuccess checks that a round with no successful
@@ -651,7 +682,7 @@ func TestRun_WritesReports(t *testing.T) {
 		"- base: `develop` (`0123456789ab`)",
 		"- head: `a'b\\|c` (`fedcba987654`)",
 		"- note: x\\|y z",
-		"| ping | 差あり (改善 3 / 悪化 0) |",
+		"| ping | 差あり (改善 2 / 悪化 0) |",
 		"| ping | p95 (ms) | 10.0 [10.0, 10.0] | 5.0 [5.0, 5.0] | -50.0% | 差あり (改善) |",
 		"| ping | リクエスト数 | 1000 [1000, 1000] | 1000 [1000, 1000] | +0.0% | 差なし |",
 		"| ping | 失敗率 / 429の率 | 0.0% / 0.0% | 0.0% / 0.0% | |  |",
@@ -676,7 +707,7 @@ func TestRun_WritesReports(t *testing.T) {
 		}
 		return withEndpoint(okRun(s, r, 20), "timeline", func(e *fakeEndpoint) { e.failed = 100 })
 	})...)}, &stdout, &stderr))
-	assert.Contains(t, stdout.String(), "| ping | 差あり (改善 0 / 悪化 3) |")
+	assert.Contains(t, stdout.String(), "| ping | 差あり (改善 0 / 悪化 2) |")
 	assert.Contains(t, stdout.String(), "| timeline | 比較不能 |")
 	assert.Contains(t, stdout.String(), "| timeline | 失敗率 / 429の率 | 0.0% / 0.0% | 20.0% / 0.0% | | 比較不能 |")
 	assert.Contains(t, stdout.String(), "- timeline: error rate differs: 0.0% vs 20.0%")
