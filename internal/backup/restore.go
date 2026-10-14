@@ -1523,6 +1523,17 @@ func splitGUCList(s string) []string {
 
 func ident(s string) string { return pgx.Identifier{s}.Sanitize() }
 
-// literal quotes s as a standard SQL string literal
-// (standard_conforming_strings is on by default since PostgreSQL 9.1).
-func literal(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
+// literal quotes s as an SQL string literal.
+//
+// **バックスラッシュを含む値は E 付きの形 (エスケープ文字列) にする。** 単引用符で
+// 囲むだけの形のバックスラッシュの扱いは standard_conforming_strings に依る (9.1
+// 以降の既定は on で、そのまま文字)。role やクラスタで off にされていると `\'` が
+// 引用符の終わりになり、meta.json の databaseSettings の値から後ろへ SQL を続け
+// られた。E 付きの形はその設定に依らず、バックスラッシュと単引用符を 2 つ重ねた
+// ものだけを 1 文字として読む。
+func literal(s string) string {
+	if !strings.ContainsRune(s, '\\') {
+		return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+	}
+	return "E'" + strings.ReplaceAll(strings.ReplaceAll(s, `\`, `\\`), "'", "''") + "'"
+}
