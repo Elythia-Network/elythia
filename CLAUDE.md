@@ -258,8 +258,9 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 | `dropin-frontend-e2e` | 毎日(schedule) | | 3つのTSインスタンス + cypressで、frontend視点のdrop-in互換 |
 | `queue-bench-smoke` | 毎日(schedule) | | queue driverがジョブを落としていないか |
 | `bench-compare` | PR(paths限定) | | baseとheadの2つのcommitを同じスタックで交互に流し、性能を比べる。主に手動で使う。PRでは、ベンチの仕組みを変えたときだけhead同士を流す |
+| `bench-compare-comment` | `bench-compare`の完了(`workflow_run`) | | `bench-compare`の結果を、対象のPRにコメントで出す。headのコードは動かさない。default branchにある版で動く |
 
-`ci.yml` / `dependency-review` / `build-with-plugins`以外は、手動(`workflow_dispatch`)でも起動できます。scheduleのものはPRでは回らないので、失敗はActions上で確認して別のPRで直します。各workflowの設計理由と、落ちたときの対処は[docs/ci.md](docs/ci.md)にあります。
+`ci.yml` / `dependency-review` / `build-with-plugins` / `bench-compare-comment`以外は、手動(`workflow_dispatch`)でも起動できます。scheduleのものはPRでは回らないので、失敗はActions上で確認して別のPRで直します。各workflowの設計理由と、落ちたときの対処は[docs/ci.md](docs/ci.md)にあります。
 
 ### workflowを書くときのルール
 
@@ -302,6 +303,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 
 このファイル自体を変えたときだけ、1行で追記します(新しいものを上に)。経緯の本文はリンク先にあります。個別のfixの履歴は`CHANGELOG.md`にあります。
 
+- 2026-10-14: `bench-compare`の結果をPRにコメントで出す`bench-compare-comment` workflowを足したので、Section 8の表に1行を足した (#3560) → [docs/bench-compare.md](docs/bench-compare.md)
 - 2026-10-14: 性能比較の`bench-compare` workflowを足したので、Section 8の表に1行を足した (#3545) → [docs/bench-compare.md](docs/bench-compare.md)
 - 2026-10-13: frontendで新しく書くファイルのSPDXヘッダーをElythia-Networkの名義にしたので、Section 5のfrontendの節を更新した (#3533) → [docs/contributing.md](docs/contributing.md#go-のソースに-spdx-ヘッダーは付けない)
 - 2026-10-08: forkのmigrationの系列(`migration/local/`)を足したので、Section 3の`migrate-down`の注釈を更新した (#3428) → [docs/fork-migrations.md](docs/fork-migrations.md)

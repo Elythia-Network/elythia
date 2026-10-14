@@ -13,6 +13,16 @@ name: Bench compare
 #   「差あり」が出うるので、落とすと flaky になる)。
 # - required check には**入れない**。3 ラウンドで約 35 分かかり、runner の揺れも受ける。
 
+# 結果を PR にコメントで出す bench-compare-comment.yml (#3560) が、対象の PR を決める
+# のにこの run-name を読む。形を変えるときは、あちらの正規表現も直す。PR の実行では
+# run-name は PR の側のこのファイルで決まり、PR を出した人が変えられる。あちらは
+# PR 番号を手がかりにするだけで、その PR の head が実行の head_sha と一致しなければ
+# 書かない。
+run-name: >-
+  ${{ github.event_name == 'pull_request'
+  && format('Bench compare A/A (PR #{0})', github.event.pull_request.number)
+  || format('Bench compare {0} ... {1}', inputs.base, inputs.head) }}
+
 on:
   workflow_dispatch:
     inputs:

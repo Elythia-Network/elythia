@@ -1,0 +1,252 @@
+name: Bench compare comment
+
+# bench-compare の結果 (artifact の report.md) を、対象の PR にコメントで出す (#3560)。
+# 使い方と判定の読み方は docs/bench-compare.md。
+#
+# - workflow_run で発火するので、**default branch (develop) にあるこのファイルの版**
+#   で動く。PR で足したり直したりしても、マージするまでは発火しない。
+# - **fork のコードは checkout も実行もしない。** 書き込み権限 (pull-requests: write)
+#   を持つのはこの job だけで、bench-compare 本体は読み取りの token で動く。
+#   pull_request_target は使わない。
+# - **PR で走った実行の run-name と artifact は、PR を出した人が自由にできる。**
+#   pull_request の実行は PR の側の workflow ファイルで動くので、fork の PR でも
+#   bench-compare.yml を書き換えれば run-name も artifact の中身も変えられる。
+#   そこで次のように扱う。
+#   - artifact の中身は信用しない。report.md を大きさの上限付きで Markdown として
+#     貼るだけにし、対象の PR は artifact からは決めない
+#   - 経路は GitHub が付ける workflow_run.event で決め、run-name の形からは推測しない
+#   - pull_request の実行は、run-name の PR 番号を手がかりにするだけで、**その PR の
+#     head の SHA と repository が、GitHub が付けた実行の head_sha /
+#     head_repository と一致しなければ何もしない。** run-name を書き換えても、
+#     書けるのは自分の PR だけになる
+#   - workflow_dispatch の実行は書き込み権限のある人しか起動できないので、run-name
+#     (入力から作る) の head を信用する。ただし実行の head_sha は起動したブランチ
+#     (develop など) のものなので、対象 PR の head とは突き合わせられない
+# - 対象の PR:
+#   - PR で走った A/A: run-name の PR 番号 (`Bench compare A/A (PR #<番号>)`) で、
+#     head が一致するもの
+#   - 手動実行で head に `pull/<番号>/head`: その番号
+#   - 手動実行で head に 40 桁の SHA: その commit を含む開いている PR が 1 つだけなら、それ
+#   - 手動実行で head にブランチ名: そのブランチから開いている PR が 1 つだけなら、それ
+#   どれにも当たらない (develop 同士など) か、PR が閉じていれば、何もせず成功する。
+#   PR を引く API が失敗したときは、「PR なし」と区別して失敗にする。
+# - コメントは PR ごとに 1 つ。先頭の印 (MARKER) で前のコメントを見つけ、書き換える。
+#   印には実行 ID を入れ、前のコメントより古い実行 (ID が小さい) では書き換えない。
+
+on:
+  workflow_run: # zizmor: ignore[dangerous-triggers] head のコードを checkout も実行もしない (冒頭のコメント)
+    workflows: [Bench compare]
+    types: [completed]
+
+permissions: {}
+
+# 同じ PR の結果が同時に終わったときに、コメントを 2 つ作らないようにする。PR の
+# 実行は head の repository と SHA、手動実行は run-name (base と head の入力) で
+# まとめる。cancel-in-progress を false にしても、待っている実行は 1 つしか持てず、
+# さらに来ると古いほうが取り消される。取り消されるのは古い実行の結果なので、書き換えの
+# 順序の規則 (古い実行では書き換えない) とは食い違わない。別の group の実行 (同じ PR
+# への手動実行など) と競合して 2 つできたときは、書いた後の後片付けで 1 つに収束させる。
+concurrency:
+  group: >-
+    bench-compare-comment-${{ github.event.workflow_run.event == 'pull_request'
+    && format('{0}@{1}', github.event.workflow_run.head_repository.full_name, github.event.workflow_run.head_sha)
+    || github.event.workflow_run.display_title }}
+  cancel-in-progress: false
+
+jobs:
+  comment:
+    # 取り消し・skip では report.md が無い。失敗と時間切れは report.md があれば貼る
+    # (比較不能の判定で run.sh が 2 を返したときなど)。path は、同じ名前の別の
+    # workflow (PR で足せる) の実行を拾わないための多層の防御。
+    # Dependabot が起点の実行では、workflow_run の token が読み取りだけになり、
+    # 書き込みが 403 で落ちるので動かさない。
+    if: >-
+      github.event.workflow_run.path == '.github/workflows/bench-compare.yml' &&
+      github.event.workflow_run.actor.login != 'dependabot[bot]' &&
+      (github.event.workflow_run.conclusion == 'success' ||
+      github.event.workflow_run.conclusion == 'failure' ||
+      github.event.workflow_run.conclusion == 'timed_out')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Post the report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          RUN_EVENT: ${{ github.event.workflow_run.event }}
+          RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_TITLE: ${{ github.event.workflow_run.display_title }}
+          RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+          MARKER_PREFIX: "<!-- elythia-bench-compare-report"
+          # GitHub のコメントの上限は 65536 文字。見出しと注記の分を残す。
+          MAX_REPORT_BYTES: "60000"
+          # artifact は k6 の生の JSON などを含み、実測で約 9MB。
+          MAX_ARTIFACT_BYTES: "209715200"
+        run: |
+          set -euo pipefail
+          shopt -s inherit_errexit
+          # 入力 (run-name など) は env で受け、式を run に直接書かない。
+          ref_re='[A-Za-z0-9._/][A-Za-z0-9._/-]*'
+          pr=""
+          case $RUN_EVENT in
+            pull_request)
+              if [[ $RUN_TITLE =~ ^Bench\ compare\ A/A\ \(PR\ \#([0-9]{1,9})\)$ ]]; then
+                pr=${BASH_REMATCH[1]}
+              fi
+              ;;
+            workflow_dispatch)
+              # base と head は ref の文字だけ (空白を含まない) なので、区切りは一意に決まる。
+              if [[ $RUN_TITLE =~ ^Bench\ compare\ ($ref_re)\ \.\.\.\ ($ref_re)$ ]]; then
+                head=${BASH_REMATCH[2]}
+                if [[ $head =~ ^pull/([0-9]{1,9})/head$ ]]; then
+                  pr=${BASH_REMATCH[1]}
+                elif [[ ${head,,} =~ ^[0-9a-f]{40}$ ]]; then
+                  pr=$(gh api "repos/$REPO/commits/${head,,}/pulls" \
+                    --jq '[.[] | select(.state == "open") | .number] | if length == 1 then .[0] else "" end')
+                else
+                  branch=${head#origin/}
+                  owner=${REPO%%/*}
+                  pr=$(gh api -X GET "repos/$REPO/pulls" -f state=open -f "head=$owner:$branch" \
+                    --jq 'if length == 1 then .[0].number else "" end')
+                fi
+              fi
+              ;;
+          esac
+          if [ -z "$pr" ]; then
+            echo "対象の PR がありません (event: $RUN_EVENT)。何もしません。"
+            exit 0
+          fi
+          if ! [[ $pr =~ ^[0-9]{1,9}$ ]]; then
+            echo "PR 番号ではありません: '$pr'" >&2
+            exit 1
+          fi
+          # API の失敗で止まるよう、プロセス置換ではなくコマンド置換で受ける。
+          info=$(gh api "repos/$REPO/pulls/$pr" \
+            --jq '[.state, .head.sha, (.head.repo.full_name // "")] | @tsv')
+          IFS=$'\t' read -r state pr_head_sha pr_head_repo <<< "$info"
+          if [ "$state" != open ]; then
+            echo "PR #$pr は開いていません ($state)。何もしません。"
+            exit 0
+          fi
+          # repository が空 (fork が消された、など) のときは、一致とみなさない。
+          if [ "$RUN_EVENT" = pull_request ] &&
+            { [ -z "$RUN_HEAD_REPO" ] || [ -z "$pr_head_repo" ] ||
+              [ "$pr_head_sha" != "$RUN_HEAD_SHA" ] || [ "$pr_head_repo" != "$RUN_HEAD_REPO" ]; }; then
+            echo "PR #$pr の head ($pr_head_repo@$pr_head_sha) が実行の head ($RUN_HEAD_REPO@$RUN_HEAD_SHA) と一致しません。何もしません。"
+            exit 0
+          fi
+
+          # 前のコメントは、この workflow (github-actions[bot]) が書いた、印で始まるもの
+          # だけを探す。実行 ID の大きい順 (同じなら古いコメント順) に並べ、先頭を前の
+          # コメントとする。その実行 ID が今の実行より新しければ、書き換えない
+          # (古い実行の re-run は実行 ID が変わらないので、新しい結果を上書きしない)。
+          work=$(mktemp -d)
+          list_marked() {
+            gh api --paginate "repos/$REPO/issues/$pr/comments" \
+              --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$MARKER_PREFIX\"))) | [.id, ([.body | capture(\"^<!-- elythia-bench-compare-report run=(?<run>[0-9]+) -->\").run][0] // \"0\")] | @tsv" \
+              > "$1"
+            sort -t $'\t' -k2,2nr -k1,1n -o "$1" "$1"
+          }
+          list_marked "$work/existing.tsv"
+          existing="" existing_run=0
+          if read -r existing existing_run < "$work/existing.tsv"; then
+            if [ "$existing_run" -gt "$RUN_ID" ]; then
+              echo "PR #$pr には新しい実行 ($existing_run) の結果があります。書き換えません。"
+              exit 0
+            fi
+          fi
+
+          name="bench-compare-$RUN_ID"
+          gh api "repos/$REPO/actions/runs/$RUN_ID/artifacts" \
+            --jq "[.artifacts[] | select(.name == \"$name\" and .expired == false)] | sort_by(.created_at) | last // empty | [.id, .size_in_bytes] | @tsv" \
+            > "$work/artifacts.tsv"
+          report="$work/report.md"
+          : > "$report"
+          if read -r artifact size < "$work/artifacts.tsv"; then
+            if [ "$size" -gt "$MAX_ARTIFACT_BYTES" ]; then
+              echo "artifact が大きすぎます ($size bytes)" >&2
+              exit 1
+            fi
+            gh api "repos/$REPO/actions/artifacts/$artifact/zip" > "$work/artifact.zip"
+            # report.md だけを取り出す。展開後の大きさは head -c で切る (zip の申告は
+            # 信用しない)。head が先に閉じると unzip は SIGPIPE で止まるので、終了
+            # コードは見ない。
+            { unzip -p "$work/artifact.zip" report.md 2>/dev/null || true; } \
+              | head -c "$((MAX_REPORT_BYTES + 1))" > "$work/report.raw" || true
+            # & と < は実体参照にし、HTML のタグ (下の <details> を閉じるものを含む)
+            # として効かせない (report.md の生成は実体参照もタグも使わない)。@ と、数字の
+            # 前の # の後ろに幅 0 の空白 (3 バイト) を挟み、`@名前` と `#数字` の形の
+            # メンションと相互参照を飛ばさない (見出しの # は数字が続かないので崩れない)。挟んだ後で切り、切った位置で壊れた UTF-8 を落とす (挟む前に
+            # 切ると、上限を超える)。制御文字 (タブと改行を除く) は API に拒まれうるので
+            # 落とす。iconv -c は落とした文字があると 0 以外で終わるので、終了コードは
+            # 見ない。
+            tr -d '\000-\010\013\014\016-\037\177' < "$work/report.raw" \
+              | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' \
+                -e 's/@/@\xe2\x80\x8b/g' -e 's/#\([0-9]\)/#\xe2\x80\x8b\1/g' > "$work/report.esc"
+            { head -c "$MAX_REPORT_BYTES" "$work/report.esc" | iconv -f UTF-8 -t UTF-8 -c; } > "$report" || true
+            if [ "$(wc -c < "$work/report.esc")" -gt "$MAX_REPORT_BYTES" ]; then
+              printf '\n\n(長すぎるので %s バイトで切りました。全体は実行の Summary か artifact を見てください)\n' "$MAX_REPORT_BYTES" >> "$report"
+            fi
+          fi
+
+          # fork の PR の A/A は、PR の側の bench-compare.yml (paths の条件で、PR が
+          # 触ったときだけ流れる) が作った結果なので、何でも書ける。注記を付けて畳む。
+          unverified=false
+          if [ "$RUN_EVENT" = pull_request ] && [ "$RUN_HEAD_REPO" != "$REPO" ]; then
+            unverified=true
+          fi
+          {
+            echo "$MARKER_PREFIX run=$RUN_ID -->"
+            # 見出しは report.md の「# 性能比較」に任せ、ここは見出しにしない。
+            echo "**Bench compare の結果** ([実行]($RUN_URL)、結果: \`$RUN_CONCLUSION\`)。判定の読み方は [docs/bench-compare.md](https://github.com/$REPO/blob/$DEFAULT_BRANCH/docs/bench-compare.md#判定) を見てください。「差あり」が 1 つ出ただけでは回帰と言えません。"
+            echo
+            if [ "$unverified" = true ]; then
+              echo "> [!WARNING]"
+              echo "> この結果は fork の PR の側の workflow が作ったもので、検証されていません。"
+              echo
+              echo "<details><summary>結果を開く</summary>"
+              echo
+            fi
+            if [ -s "$report" ]; then
+              cat "$report"
+            else
+              echo "report.md がありません (準備の失敗、時間切れ、集計の入力エラーのいずれか)。実行のログと artifact を見てください。"
+            fi
+            if [ "$unverified" = true ]; then
+              echo
+              echo "</details>"
+            fi
+          } > "$work/body.md"
+
+          jq -Rs '{body: .}' "$work/body.md" > "$work/payload.json"
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$existing" --input "$work/payload.json" > /dev/null
+            echo "PR #$pr のコメント $existing を書き換えました。"
+          else
+            gh api -X POST "repos/$REPO/issues/$pr/comments" --input "$work/payload.json" > /dev/null
+            echo "PR #$pr にコメントを書きました。"
+          fi
+
+          # 別の group の実行と競合して印付きのコメントが 2 つ以上できていたら、実行 ID の
+          # 最も大きいもの (同じなら古いコメント) だけを残して消す。消すのは、この
+          # workflow が書いた印付きのコメントだけ。
+          list_marked "$work/after.tsv"
+          # 既に消えている (別の実行が先に消した) 404 だけを成功とみなす。
+          tail -n +2 "$work/after.tsv" | while read -r stale _; do
+            if gh api -X DELETE "repos/$REPO/issues/comments/$stale" > /dev/null 2> "$work/delete.err"; then
+              echo "PR #$pr の古いコメント $stale を消しました。"
+            elif grep -q 'HTTP 404' "$work/delete.err"; then
+              echo "PR #$pr の古いコメント $stale は既にありません。"
+            else
+              cat "$work/delete.err" >&2
+              exit 1
+            fi
+          done

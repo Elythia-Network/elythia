@@ -113,7 +113,7 @@ PR を出すと十数個の check が走る。**どれが何を見ていて、�
 | `federation-mastodon` | Drop-in e2e | 本物の Mastodon との引用の承認 (FEP-044f): 双方向の引用が承認済みになるか、取り消しが双方向で効くか | 未計測 | `make federation-mastodon-e2e` |
 | `spec (Elythia 1/4)` 〜 `4/4` | Playwright | ブラウザからの統合互換 (298 spec ファイル) | 4-9 min | `make playwright-check` |
 | `build-and-push` / `-bundled` | Docker | image がビルドできるか (PR では push しない)。`-bundled` は image の中で frontend もビルドする (#3379) | 4 min (`-bundled` はキャッシュが冷えていると frontend の分だけ延びる。手元の冷えたビルドで frontend stage だけ約 3 分) | `docker build -f Dockerfile .` / `docker build -f Dockerfile.bundled .` |
-| `compare` | Bench compare | **ベンチの仕組みを変えた PR でだけ**、PR の head 同士 (A/A) を同じスタックで流し、最後まで完了するか。「差なし」かどうかは check では見ず、Summary を人が見る。base と head を選んで比べるときは手動で起動する (`gh workflow run bench-compare.yml -f base=develop -f head=<ref>`、[bench-compare.md](bench-compare.md)) | 35 min | `make bench-compare BASE=HEAD HEAD=HEAD SMOKE=1` (本番のホストでは smoke だけ) |
+| `compare` | Bench compare | **ベンチの仕組みを変えた PR でだけ**、PR の head 同士 (A/A) を同じスタックで流し、最後まで完了するか。「差なし」かどうかは check では見ず、Summary を人が見る。base と head を選んで比べるときは手動で起動する (`gh workflow run bench-compare.yml -f base=develop -f head=<ref>`、[bench-compare.md](bench-compare.md))。結果は対象の PR にコメントでも出る (下の「`bench-compare` / `bench-compare-comment` workflow」) | 35 min | `make bench-compare BASE=HEAD HEAD=HEAD SMOKE=1` (本番のホストでは smoke だけ) |
 | `build / build` | Build with plugins (selftest) | 運営者向けの reusable workflow が通るか。外部プラグインを実際に clone し、frontend を持つので `Dockerfile.bundled` の中でプラグインの .vue を含めた SPA のビルドまで走る。**`docker build --check` では見えない範囲** (pluginbuild / go build / frontend のビルドが通るか、生成物とプラグインの frontend が frontend stage に届くか) を確認できるのはこの check だけ | 6 min | paths に該当する PR で自動発火する。手動なら `gh workflow run build-with-plugins-selftest.yml --ref <branch>` (default branch にある場合のみ) |
 
 ### e2e 系が「何を守っているか」の違い
@@ -742,6 +742,17 @@ checkout / setup-go を除くと step は実行順に 3 つ。**required job な
   (`gh workflow run docker.yml -f tag=1.1.1`)。
 - `docker-branch.yml` は **image をビルドしない**。`develop` への push (paths フィルタ付き) と `workflow_dispatch` で、compose ファイルだけを載せた orphan ブランチ `docker` を force-push する (「pull して動かすだけ」の構成を配るため)。検査は `docker compose config --quiet` のみ。
 - PR の required check には**含めない**。
+
+#### `bench-compare` / `bench-compare-comment` workflow
+
+- `bench-compare.yml` は base と head を同じスタックで交互に流して比べる。手動実行と、ベンチの仕組みを変えた PR の A/A で発火する。token は読み取りだけで、secrets を使わない (fork のコードを流すため)。使い方は [bench-compare.md](bench-compare.md)
+- `bench-compare-comment.yml` (#3560) は、bench-compare の完了 (`workflow_run`) で発火し、artifact の `report.md` を対象の PR にコメントで出す。**`pull-requests: write` を持つのはこの job だけ**で、head のコードは checkout も実行もしない。`pull_request_target` は使わない
+  - `workflow_run` は **default branch にある版**で動く。PR でこのファイルを直しても、マージするまで発火しない。PR の上では、actionlint と、手元で step の script を切り出して流すことでしか確かめられない
+  - **PR で流れた実行の `run-name` と artifact は、PR を出した人が自由にできる** (pull_request の実行は PR の側の workflow ファイルで動き、fork の PR でも `bench-compare.yml` を書き換えられる)。そのため artifact の中身は信用せず、`report.md` だけを 60000 バイトまでで切り、制御文字を落とし、`&` と `<` を実体参照にし、`@` と数字の前の `#` の後ろに幅 0 の空白を挟んで (`@名前` と `#数字` の形に限り、メンションの通知と相互参照を飛ばさない) 貼る。fork の PR の A/A の結果は、PR の側の workflow が作ったものなので、「検証されていません」と注記して `<details>` に畳む
+  - 対象の PR は artifact からは決めない。経路は GitHub が付ける `workflow_run.event` で決め、PR の実行は `run-name` の PR 番号を手がかりに、**その PR の head の SHA と repository が実行の `head_sha` / `head_repository` と一致するときだけ**書く (どちらかの repository が空なら書かない)。手動実行は書き込み権限のある人しか起動できないので、入力から作る `run-name` を使う。`run-name` の形を変えるときは、両方の workflow を揃えて直す
+  - job の `if` で実行の `path` を `.github/workflows/bench-compare.yml` に限る (同じ名前の別の workflow を拾わない)。コメントの印に実行 ID を入れ、前のコメントより古い実行では書き換えない。同じ PR の実行は `concurrency` (head の repository と SHA、手動実行は `run-name`) で 1 つずつ処理し、それでも別の group と競合して印付きのコメントが 2 つできたら、書いた後に実行 ID の最も大きいもの以外を消す (消すのは bot の印付きのコメントだけ。既に消えていた 404 は成功とみなす)。ほぼ同時に終わった別の経路の実行どうしでは、古い結果が残ることがある (既知の限界)
+  - Dependabot が起点の実行では動かさない (`workflow_run` の token が読み取りだけになり、書き込みが 403 で落ちる)
+  - PR の check には出ない (`workflow_run` の実行は PR に紐づかない)。失敗は Actions の「Bench compare comment」で見る
 
 #### schedule で回る workflow
 
