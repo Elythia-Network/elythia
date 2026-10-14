@@ -10,6 +10,7 @@ import (
 	apiadmin "github.com/elythia-network/elythia/internal/api/admin"
 	"github.com/elythia-network/elythia/internal/core/signupapplication"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/datatypes"
@@ -237,4 +238,38 @@ func TestSignupApplicationApprove_ErrorMapping(t *testing.T) {
 			assert.Contains(t, rec.Body.String(), tt.wantBody)
 		})
 	}
+}
+
+// 承認・却下はモデレーションログに残すこと (承認は登録につながる操作)。
+// 失敗した審査は残さない。
+func TestSignupApplicationReview_WritesModerationLog(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		handler func(h *apiadmin.Handler) echo.HandlerFunc
+		want    string
+	}{
+		{"approve", func(h *apiadmin.Handler) echo.HandlerFunc { return h.SignupApplicationApprove }, "approveSignupApplication"},
+		{"reject", func(h *apiadmin.Handler) echo.HandlerFunc { return h.SignupApplicationReject }, "rejectSignupApplication"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newReviewerHandler(t, &stubReviewer{})
+			repo := attachModLog(t, h)
+			rec := doPost(tc.handler(h), `{"applicationId":"app-1"}`, testModerator)
+			require.Equal(t, http.StatusOK, rec.Code)
+			require.Eventually(t, func() bool { return len(repo.Snapshot()) == 1 }, 500*time.Millisecond, 5*time.Millisecond)
+			logs := repo.Snapshot()
+			assert.Equal(t, tc.want, logs[0].Type)
+			var info map[string]any
+			require.NoError(t, json.Unmarshal(logs[0].Info, &info))
+			assert.Equal(t, "app-1", info["applicationId"])
+		})
+	}
+
+	// 審査に失敗したら残さない。
+	h := newReviewerHandler(t, &stubReviewer{actErr: signupapplication.ErrNotPending})
+	repo := attachModLog(t, h)
+	rec := doPost(h.SignupApplicationApprove, `{"applicationId":"app-1"}`, testModerator)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	time.Sleep(50 * time.Millisecond)
+	assert.Empty(t, repo.Snapshot())
 }

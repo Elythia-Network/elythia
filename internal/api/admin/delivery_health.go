@@ -9,6 +9,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/core/deliveryhealth"
 	"github.com/elythia-network/elythia/internal/core/federation"
+	"github.com/elythia-network/elythia/internal/core/moderationlog"
 	"github.com/labstack/echo/v4"
 )
 
@@ -91,6 +92,7 @@ func (h *Handler) FederationCloseDeliveryBreaker(c echo.Context) error {
 		// 再開したと読む。
 		return apierr.JSONInternalError(c)
 	}
+	h.logModeration(c, moderationlog.LogCloseDeliveryBreaker, map[string]any{"host": host})
 	return c.NoContent(http.StatusNoContent)
 }
 

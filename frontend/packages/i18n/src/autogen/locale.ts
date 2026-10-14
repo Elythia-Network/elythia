@@ -12984,6 +12984,18 @@ export interface Locale extends ILocale {
          */
         "cleanGoneInstance": string;
         /**
+         * 配送の停止を解除
+         */
+        "closeDeliveryBreaker": string;
+        /**
+         * 登録の申請を承認
+         */
+        "approveSignupApplication": string;
+        /**
+         * 登録の申請を却下
+         */
+        "rejectSignupApplication": string;
+        /**
          * 連合のルールを作成
          */
         "createFederationRule": string;

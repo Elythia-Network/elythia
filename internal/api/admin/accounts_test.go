@@ -318,6 +318,21 @@ func TestUpdateProxyAccount_WritesModerationLog(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Eventually(t, func() bool { return len(repo.Snapshot()) == 1 }, 500*time.Millisecond, 5*time.Millisecond)
 	assert.Equal(t, "updateProxyAccountDescription", repo.Snapshot()[0].Type)
+
+	// 2 回目は変更前の値 ("hello") を before に残す (upstream は null 固定)。
+	rec = doPost(h.UpdateProxyAccount, `{"description":"world"}`, adminUser)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Eventually(t, func() bool { return len(repo.Snapshot()) == 2 }, 500*time.Millisecond, 5*time.Millisecond)
+	var info map[string]any
+	for _, l := range repo.Snapshot() {
+		var i map[string]any
+		require.NoError(t, json.Unmarshal(l.Info, &i))
+		if i["after"] == "world" {
+			info = i
+		}
+	}
+	require.NotNil(t, info)
+	assert.Equal(t, "hello", info["before"])
 }
 
 func TestAccountsDelete_WritesModerationLog(t *testing.T) {

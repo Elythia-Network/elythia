@@ -32,14 +32,18 @@ func (h *Handler) UpdateProxyAccount(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
 	}
 	if req.Description != nil {
+		// **変更前の値を残す。** upstream update-proxy-account.ts は before を null で
+		// 記録する (TODO のまま) が、それでは何から何へ変えたかが追えない。形
+		// ({before, after}) は同じなので、表示はそのまま使える。
+		var before any
+		if prev, perr := h.userRepo.FindProfileByUserID(proxy.ID); perr == nil && prev != nil {
+			before = prev.Description
+		}
 		if err := h.userRepo.UpdateProfile(proxy.ID, map[string]any{"description": req.Description}); err != nil {
 			return c.JSON(http.StatusInternalServerError, apierr.InternalError())
 		}
-		// Misskey TS update-proxy-account.ts は before を null で記録する
-		// (TODO コメントで before 取得が未実装の状態)。互換性のため同じ
-		// schema で出力する。
 		h.logModeration(c, moderationlog.LogUpdateProxyAccountDescription, map[string]any{
-			"before": nil,
+			"before": before,
 			"after":  req.Description,
 		})
 	}
