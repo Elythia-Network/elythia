@@ -192,7 +192,7 @@ func (rl *RateLimiter) Middleware() echo.MiddlewareFunc {
 				return next(c)
 			}
 			endpoint := strings.TrimPrefix(c.Path(), "/api/")
-			limit, ok := rl.limits[endpoint]
+			limit, ok := rl.limitFor(endpoint)
 			if !ok {
 				return next(c)
 			}
@@ -248,6 +248,26 @@ func (rl *RateLimiter) Middleware() echo.MiddlewareFunc {
 			return next(c)
 		}
 	}
+}
+
+// limitFor returns the limit of endpoint: its table entry, or the default
+// limit of plugin routes.
+//
+// **プラグインのルートにも既定の上限を掛ける。** 表は upstream の endpoint を
+// 写した静的なもので、プラグインのルートは載っていないので素通しになっていた
+// (毎回 UPSERT する設定の口や、リモートの利用者なら peer への送信を起こす口を
+// 無制限に叩けた)。`plugin.Router` には上限を宣言する口が無いので、ルートごと
+// (パスの型ごと) に一律の値を使う。表にあればそちらを優先する。peer の受け口
+// (`_peer`) は相手のサーバーが叩くもので、専用の上限 (plugin_peer_ratelimit.go)
+// があるので外す。表が nil (disableEndpointRateLimits) なら掛けない。
+func (rl *RateLimiter) limitFor(endpoint string) (*EndpointLimit, bool) {
+	if limit, ok := rl.limits[endpoint]; ok {
+		return limit, true
+	}
+	if rl.limits == nil || !strings.HasPrefix(endpoint, "plugin/") || strings.HasSuffix(endpoint, "/_peer") {
+		return nil, false
+	}
+	return &PluginRouteDefaultLimit, true
 }
 
 // AllowIP checks the IP bucket of endpoint for a request that does not go
