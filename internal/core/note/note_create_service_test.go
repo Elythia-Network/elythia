@@ -2437,3 +2437,72 @@ func TestCreateService_MentionLimitFallsBackToDefault(t *testing.T) {
 		})
 	}
 }
+
+// archivedChannelHook reports the channels in `archived` as not found (the
+// production hook maps archived channels to ErrChannelNotFound) and records
+// every checked channel ID.
+type archivedChannelHook struct {
+	archived map[string]bool
+	checked  []string
+}
+
+func (h *archivedChannelHook) EnsureChannelExists(channelID string) error {
+	h.checked = append(h.checked, channelID)
+	if h.archived[channelID] {
+		return note.ErrChannelNotFound
+	}
+	return nil
+}
+
+func (h *archivedChannelHook) OnNotePosted(string, string, string) {}
+
+// アーカイブ済みの channel の note に返信して、その channel に投稿できないこと。
+// reply は返信先の channel を継承するので、継承した channel も検証する。
+func TestCreateService_ReplyIntoArchivedChannelRejected(t *testing.T) {
+	cases := []struct {
+		name      string
+		specified *string
+		wantCheck []string
+	}{
+		{"no channel specified", nil, []string{"chArchived"}},
+		{"same channel specified", ptrString("chArchived"), []string{"chArchived"}},
+		{"other live channel specified", ptrString("chLive"), []string{"chLive", "chArchived"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, noteRepo, _ := newCreateService(t)
+			hook := &archivedChannelHook{archived: map[string]bool{"chArchived": true}}
+			svc.SetChannelHook(hook)
+			chA := "chArchived"
+			noteRepo.Notes["cn"] = &model.Note{ID: "cn", UserID: "other", Visibility: model.NoteVisibilityPublic, ChannelID: &chA}
+			text := "re"
+			rid := "cn"
+			before := len(noteRepo.Notes)
+			_, err := svc.Create(note.CreateInput{User: &model.User{ID: "u1"}, Text: &text, ReplyID: &rid, ChannelID: tc.specified})
+			require.ErrorIs(t, err, note.ErrChannelNotFound)
+			assert.Len(t, noteRepo.Notes, before, "no note must be created")
+			assert.Equal(t, tc.wantCheck, hook.checked)
+		})
+	}
+}
+
+// アーカイブされていない channel の note への返信は、従来どおり同じ channel に入る。
+// 同じ channel を指定しても検証は 1 回で済ませる。
+func TestCreateService_ReplyIntoLiveChannelAllowed(t *testing.T) {
+	for name, specified := range map[string]*string{"no channel specified": nil, "same channel specified": ptrString("chLive")} {
+		t.Run(name, func(t *testing.T) {
+			svc, noteRepo, _ := newCreateService(t)
+			hook := &archivedChannelHook{archived: map[string]bool{}}
+			svc.SetChannelHook(hook)
+			chL := "chLive"
+			noteRepo.Notes["cn"] = &model.Note{ID: "cn", UserID: "other", Visibility: model.NoteVisibilityPublic, ChannelID: &chL}
+			text := "re"
+			rid := "cn"
+			created, err := svc.Create(note.CreateInput{User: &model.User{ID: "u1"}, Text: &text, ReplyID: &rid, ChannelID: specified})
+			require.NoError(t, err)
+			require.NotNil(t, created.ChannelID)
+			assert.Equal(t, "chLive", *created.ChannelID)
+			assert.Equal(t, []string{"chLive"}, hook.checked)
+		})
+	}
+}

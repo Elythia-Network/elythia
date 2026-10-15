@@ -702,20 +702,33 @@ func (s *CreateService) Create(in CreateInput) (*model.Note, error) {
 		return nil, ErrCannotCreateAlreadyExpiredPoll
 	}
 
-	// user 指定 channel の存在チェック (空文字正規化済 specifiedChannelID)。reply
-	// 継承で得た channel は元 note が属する実在 channel なので検証不要 (#1859)。
-	// channelHook 未設定なら channel 機能無効として扱いエラーは返さない。
+	// user 指定 channel の存在チェック (空文字正規化済 specifiedChannelID) と、
+	// reply 継承で得た channel のアーカイブのチェック。channelHook 未設定なら
+	// channel 機能無効として扱いエラーは返さない。
+	//
+	// reply 継承の channel も検証する。元 note が属する channel なので実在はするが、
+	// アーカイブ済みかもしれない。アーカイブ済みの channel には、どの経路からも
+	// 新しいノートを入れないため。指定した channel と同じなら 1 回で済ませる。
 	// 注: reply 先 channel が削除済の極端ケースでは upstream (findOneBy→null で
-	// channel=null) と異なり dangling な channelId を残す。mk-go に channel 削除
-	// 経路が無く到達しない上、OnNotePosted も no-op で無害なため許容する。
-	if specifiedChannelID != nil && s.channelHook != nil {
-		if err := s.channelHook.EnsureChannelExists(*specifiedChannelID); err != nil {
-			// **DB 障害を not-found に丸めない** (#2792)。丸めると障害が
-			// NO_SUCH_CHANNEL (400) に化け、監視でも 5xx が立たない。
-			if errors.Is(err, ErrChannelNotFound) {
-				return nil, ErrChannelNotFound
+	// channel=null) と異なり NO_SUCH_CHANNEL になる。mk-go に channel 削除経路が
+	// 無く到達しない。
+	if s.channelHook != nil {
+		toCheck := make([]string, 0, 2)
+		if specifiedChannelID != nil {
+			toCheck = append(toCheck, *specifiedChannelID)
+		}
+		if effectiveChannelID != nil && (specifiedChannelID == nil || *effectiveChannelID != *specifiedChannelID) {
+			toCheck = append(toCheck, *effectiveChannelID)
+		}
+		for _, chID := range toCheck {
+			if err := s.channelHook.EnsureChannelExists(chID); err != nil {
+				// **DB 障害を not-found に丸めない** (#2792)。丸めると障害が
+				// NO_SUCH_CHANNEL (400) に化け、監視でも 5xx が立たない。
+				if errors.Is(err, ErrChannelNotFound) {
+					return nil, ErrChannelNotFound
+				}
+				return nil, fmt.Errorf("ensure channel exists: %w", err)
 			}
-			return nil, fmt.Errorf("ensure channel exists: %w", err)
 		}
 	}
 
