@@ -639,7 +639,21 @@ defer res.Body.Close() //nolint:errcheck // 読み捨て
 
 素の client を使うと、運営者が proxy を設定していても**そのプラグインだけがサーバーの素の IP で外へ出る**。リモートに「このインスタンスの所在」を渡すことになるので、匿名性を期待している運営者の前提が崩れる。
 
-**`Transport` を差し替えないこと。** 差し替えると上の 2 つが消える。もっと短い / 長い期限が要るなら `http.NewRequestWithContext` で per-request に付ける。
+**`Transport` を差し替えないこと。** 差し替えると上の 2 つが消える。
+
+**期限を延ばすときは、client の写しを作る。** `http.NewRequestWithContext` の context で期限を**縮める**ことはできるが、`Client.Timeout` (30 秒) は context とは別に効くので、context では**延ばせない**。長く待つ要求は、返ってきた client を書き換えずに写しを作り、写しの `Timeout` を変える (#3603)。
+
+```go
+hc := *ctx.HTTP()
+hc.Timeout = 2 * time.Minute
+res, err := hc.Do(hreq)
+if err != nil {
+	return err
+}
+defer res.Body.Close() //nolint:errcheck // 読み捨て
+```
+
+写しも同じ `Transport` を使うので、SSRF ガードと運営者の設定はそのまま効く。返ってきた client そのものの `Timeout` を書き換えると、そのプラグインの他の要求にも効き、並行に走る要求と data race になる。`Timeout` を 0 にすると期限が無くなるので、正の値を入れる (0 にするなら要求の context で必ず期限を付ける)。
 
 これは**セキュリティ境界ではない** — プラグインは `net/http` を直接使えるので、これは「間違えにくい既定」を配るもの。
 

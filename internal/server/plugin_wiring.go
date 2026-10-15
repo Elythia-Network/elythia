@@ -430,7 +430,8 @@ func (c *pluginContext) Secrets() plugin.Secrets {
 	return c.secrets
 }
 
-// HTTP returns the outbound client shared with the rest of mk-go.
+// HTTP returns the plugin's own outbound client. It has its own transport
+// (isolatedOutboundClient), not the one the rest of Elythia shares.
 //
 // **未配線でも nil を返さない (#3037)。** nil を返すと、プラグイン側の
 // `ctx.HTTP().Do(...)` がそのまま nil 参照 panic になる。素の client は
@@ -462,9 +463,17 @@ func (c *pluginContext) Queue() plugin.Queue { return c.queue }
 
 // pluginHTTPTimeout bounds one request made through ctx.HTTP().
 //
-// **プラグインの主な用途はリモートからの取り寄せ**なので、AP の配送
-// (10 秒) より長めに取る。足りないものは
-// `http.NewRequestWithContext` で per-request に伸ばせる。
+// **プラグインの主な用途はリモートからの取り寄せ**なので、webfinger や
+// 添付の確認 (10 秒) より長めに取る。
+//
+// **要求の context では延ばせない。** `http.Client.Timeout` は context とは
+// 別に効くので、context で縮めることはできても、この値より長くはできない。
+// 長く待つ要求は、プラグインの側で client の写しを作って Timeout を変える
+// (`hc := *ctx.HTTP(); hc.Timeout = 2 * time.Minute`)。写しも同じ Transport を
+// 使うので、proxy と SSRF のガードはそのまま効く (#3603)。
+//
+// 値を変えたら、`plugin/plugin.go` の `HTTP()` の GoDoc と
+// `docs/plugins/authoring.md` に書いた 30 秒も直す。
 const pluginHTTPTimeout = 30 * time.Second
 
 // pluginRetryBackoffBase is the exponential backoff base applied whenever a

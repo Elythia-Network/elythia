@@ -281,7 +281,21 @@ type Context interface {
 	// **そのプラグインだけがサーバーの素の IP で外へ出る**。
 	//
 	// **Transport を差し替えないこと。** 差し替えると上の 2 つが消える。
-	// per-request の timeout は `http.NewRequestWithContext` で付ける。
+	//
+	// 1 要求の期限は 30 秒。`http.NewRequestWithContext` の context で
+	// **縮める**ことはできるが、`Client.Timeout` は context とは別に効くので
+	// 30 秒より**延ばす**ことはできない。長く待つ要求は、返ってきた client を
+	// 書き換えずに写しを作り、写しの Timeout を変える:
+	//
+	//	hc := *ctx.HTTP()
+	//	hc.Timeout = 2 * time.Minute
+	//	res, err := hc.Do(req)
+	//
+	// 写しも同じ Transport を使うので、SSRF ガードと運営者の proxy などの設定は
+	// そのまま効く。返ってきた client そのものの Timeout を書き換えると、
+	// そのプラグインの他の要求にも効き、並行に走る要求と data race になる。
+	// Timeout を 0 にすると期限が無くなるので、正の値を入れる (0 にするなら
+	// 要求の context で必ず期限を付ける)。
 	//
 	// これはセキュリティ境界ではない (パッケージの doc を参照) — プラグインは
 	// `net/http` を直接使えるので、これは「間違えにくい既定」を配るもの。
