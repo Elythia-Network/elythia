@@ -228,6 +228,12 @@ export async function common(createVue: () => Promise<App<Element>>) {
 		}
 	}, { immediate: true });
 
+	// mk-go: 「アニメーション」の設定を CSS からも見えるようにする。未読の点滅 (_blink) は
+	// CSS だけで動いていて、設定を切っても止まらなかった (#3594)。
+	watch(prefer.r.animation, v => {
+		window.document.documentElement.classList.toggle('_noAnimation_', !v);
+	}, { immediate: true });
+
 	// Keep screen on
 	const onVisibilityChange = () => window.document.addEventListener('visibilitychange', () => {
 		if (window.document.visibilityState === 'visible') {
