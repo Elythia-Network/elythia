@@ -106,6 +106,52 @@ func (p *PubSubService) Publish(ctx context.Context, channel string, payload any
 	return p.client.Publish(ctx, p.channel(channel), data).Err()
 }
 
+// PublishMany sends the same message to every channel. The payload is
+// JSON-encoded once. The returned slice is nil when every publish succeeded;
+// otherwise it has len(channels) entries and errs[i] is the error of
+// channels[i].
+//
+// フォロワーの home へ配るとき (#3606)、宛先ごとに Publish を呼ぶと、同じ本文の
+// json.Marshal と Redis の 1 往復を宛先の数だけ繰り返していた。PUBLISH を
+// 1 本の pipeline にまとめる。Redis は 1 本の接続のコマンドを順に実行するので、
+// 同じチャネルの中の順序は Publish を順に呼んだときと変わらない。
+func (p *PubSubService) PublishMany(ctx context.Context, channels []string, payload any) []error {
+	if len(channels) == 0 {
+		return nil
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		err = fmt.Errorf("pubsub marshal: %w", err)
+		errs := make([]error, len(channels))
+		for i := range errs {
+			errs[i] = err
+		}
+		return errs
+	}
+	pipe := p.client.Pipeline()
+	cmds := make([]*redis.IntCmd, len(channels))
+	for i, ch := range channels {
+		cmds[i] = pipe.Publish(ctx, p.channel(ch), data)
+	}
+	// Exec は最初のエラーしか返さないので、成否はコマンドごとに取る。
+	//
+	// **既知の差: 送り直しで全チャネルに 2 回届きうる。** go-redis は読み取りの
+	// EOF やタイムアウトで pipeline を丸ごと送り直す。Redis が実行済みなら
+	// 購読者には同じ本文が 2 回届く。単発の Publish も同じ条件で送り直されて
+	// いたので、違うのは重複の単位が 1 件から 1 ページになったこと (#3606)。
+	_, _ = pipe.Exec(ctx)
+	var errs []error
+	for i, cmd := range cmds {
+		if err := cmd.Err(); err != nil {
+			if errs == nil {
+				errs = make([]error, len(channels))
+			}
+			errs[i] = err
+		}
+	}
+	return errs
+}
+
 // start opens the single pattern subscription and the goroutine that routes
 // its messages to topics.
 func (p *PubSubService) start(ctx context.Context) {
