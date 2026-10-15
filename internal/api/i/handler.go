@@ -148,6 +148,9 @@ type Handler struct {
 	// Misskey TS は持たない)。nil なら無保護 (= unit test / dev fallback)。
 	// production では必ず wire する。
 	totpReplayGuard twofactor.ReplayGuard
+	// twoFAPending は i/2fa/register が発行した仮の秘密の期限と、i/2fa/done の
+	// 失敗回数を数える。nil なら数えない (router は必ず配線する)。
+	twoFAPending twofactor.PendingGuard
 	// userRepo は movedTo / alsoKnownAs の URI→ローカルID 解決 (#1255) に使う。
 	// ローカル actor URI は FindByID、それ以外は FindByURI で引き、remote fetch はしない。
 	userRepo repository.UserRepository
@@ -488,6 +491,16 @@ func (h *Handler) SetMainStreamPublisher(p MainStreamPublisher) {
 func (h *Handler) SetTOTPReplayGuard(g twofactor.ReplayGuard) {
 	h.totpReplayGuard = g
 }
+
+// SetTwoFAPendingGuard wires the guard that bounds the lifetime and the
+// wrong-code budget of the temp secret issued by i/2fa/register. nil disables
+// the limit.
+func (h *Handler) SetTwoFAPendingGuard(g twofactor.PendingGuard) {
+	h.twoFAPending = g
+}
+
+// HasTwoFAPendingGuard reports whether the temp secret guard is wired.
+func (h *Handler) HasTwoFAPendingGuard() bool { return h.twoFAPending != nil }
 
 // SetInstanceRepo attaches an InstanceRepository so favorites/notifications
 // note embeds populate UserLite.Instance for remote users (#277).
