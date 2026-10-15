@@ -76,7 +76,6 @@ SPDX-License-Identifier: AGPL-3.0-only
 import { computed, watch, onUnmounted, provide, useTemplateRef, TransitionGroup, onMounted, shallowRef, ref, markRaw } from 'vue';
 import * as Misskey from 'misskey-js';
 import { useInterval } from '@@/js/use-interval.js';
-import { useDocumentVisibility } from '@@/js/use-document-visibility.js';
 import { getScrollContainer, scrollToTop } from '@@/js/scroll.js';
 import type { BasicTimelineType } from '@/timelines.js';
 import type { SoundStore } from '@/preferences/def.js';
@@ -97,6 +96,7 @@ import { globalEvents, useGlobalEvent } from '@/events.js';
 import { isSeparatorNeeded, getSeparatorInfo } from '@/utility/timeline-date-separate.js';
 import { Paginator } from '@/utility/paginator.js';
 import { createReconnectResync, paginatorResyncOptions } from '@/utility/reconnect-resync.js';
+import { useTimelineUpdatePause } from '@/composables/use-timeline-update-pause.js';
 
 const props = withDefaults(defineProps<{
 	src: BasicTimelineType | 'mentions' | 'directs' | 'list' | 'antenna' | 'channel' | 'role';
@@ -214,6 +214,16 @@ onMounted(() => {
 	}
 });
 
+// mk-go: 裏に回ったとき (KeepAlive で非アクティブ) も、document が隠れたときと同じく
+// 新着を描かずに queue へ積む。裏の一覧は DOM が画面に無いので isTop() が真になり、
+// 届いたノートを全部 mount して画像まで取りに行っていた。戻ったときに先頭にいれば
+// 一括で出し、そうでなければ「新しいノート」から出す (詳細は composable 側)。
+const { isPausing: isPausingUpdate, recordScrollPosition } = useTimelineUpdatePause({
+	isTop: () => isTop(),
+	onVisibleAtTop: () => releaseQueue(),
+	onActivatedAtTop: () => paginator.releaseQueue(),
+});
+
 function isTop() {
 	if (scrollContainer == null) return true;
 	if (rootEl.value == null) return true;
@@ -225,6 +235,7 @@ function isTop() {
 let scrollContainer: HTMLElement | null = null;
 
 function onScrollContainerScroll() {
+	recordScrollPosition();
 	if (isTop()) {
 		paginator.releaseQueue();
 	}
@@ -245,20 +256,6 @@ onUnmounted(() => {
 	}
 });
 
-const visibility = useDocumentVisibility();
-let isPausingUpdate = false;
-
-watch(visibility, () => {
-	if (visibility.value === 'hidden') {
-		isPausingUpdate = true;
-	} else { // 'visible'
-		isPausingUpdate = false;
-		if (isTop()) {
-			releaseQueue();
-		}
-	}
-});
-
 let adInsertionCounter = 0;
 
 const MIN_POLLING_INTERVAL = 1000 * 10;
@@ -272,7 +269,7 @@ if (!store.s.realtimeMode) {
 	// TODO: 先頭のノートの作成日時が1日以上前であれば流速が遅いTLと見做してインターバルを通常より延ばす
 	useInterval(async () => {
 		paginator.fetchNewer({
-			toQueue: !isTop() || isPausingUpdate,
+			toQueue: !isTop() || isPausingUpdate(),
 		});
 	}, POLLING_INTERVAL, {
 		immediate: false,
@@ -281,7 +278,7 @@ if (!store.s.realtimeMode) {
 
 	useGlobalEvent('notePosted', (note) => {
 		paginator.fetchNewer({
-			toQueue: !isTop() || isPausingUpdate,
+			toQueue: !isTop() || isPausingUpdate(),
 		});
 	});
 }
@@ -308,7 +305,10 @@ function prepend(note: Misskey.entities.Note & MisskeyEntity) {
 		note._shouldInsertAd_ = true;
 	}
 
-	if (isTop() && !isPausingUpdate) {
+	if (isTop() && !isPausingUpdate()) {
+		// mk-go: 先頭にいるのに queue が残っていたら (戻った直後に先頭と判定できなかった
+		// など、#3594)、先に出す。残したまま入れると、後で出したときに古い分が上に来る。
+		paginator.releaseQueue();
 		paginator.prepend(note);
 	} else {
 		paginator.enqueue(note);
@@ -425,7 +425,7 @@ function disconnectChannel() {
 const reconnectResync = createReconnectResync({
 	// 判断は `paginatorResyncOptions` 側 (SFC に置くとテストから触れない)。
 	...paginatorResyncOptions(paginator, {
-		toQueue: () => !isTop() || isPausingUpdate,
+		toQueue: () => !isTop() || isPausingUpdate(),
 	}),
 });
 

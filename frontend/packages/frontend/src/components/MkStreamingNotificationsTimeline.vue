@@ -63,7 +63,6 @@ import { onUnmounted, onMounted, computed, useTemplateRef, TransitionGroup, mark
 import * as Misskey from 'misskey-js';
 import { notificationTypes } from 'misskey-js';
 import { useInterval } from '@@/js/use-interval.js';
-import { useDocumentVisibility } from '@@/js/use-document-visibility.js';
 import { getScrollContainer, scrollToTop } from '@@/js/scroll.js';
 import XNotification from '@/components/MkNotification.vue';
 import MkRateLimitedNotice from '@/components/MkRateLimitedNotice.vue';
@@ -76,6 +75,7 @@ import { store } from '@/store.js';
 import { isSeparatorNeeded, getSeparatorInfo } from '@/utility/timeline-date-separate.js';
 import { Paginator } from '@/utility/paginator.js';
 import { createReconnectResync, paginatorResyncOptions, NOTIFICATION_RESYNC_PARAMS } from '@/utility/reconnect-resync.js';
+import { useTimelineUpdatePause } from '@/composables/use-timeline-update-pause.js';
 
 const props = defineProps<{
 	excludeTypes?: typeof notificationTypes[number][] | null;
@@ -113,6 +113,17 @@ if (!store.s.realtimeMode) {
 	});
 }
 
+// mk-go: 裏に回ったとき (KeepAlive で非アクティブ) も新着を描かずに queue へ積む。
+// 理由は MkStreamingNotesTimeline.vue と同じ (詳細は composable 側)。
+// **scroll の位置は記録しない (recordScrollPosition を呼ばない)。** この一覧は queue の
+// 件数を出さないので、下を見ていて離れた場合も戻ったときに出す。記録すると、裏にある
+// 間に届いた通知が何の表示も無く隠れたままになる。
+const { isPausing: isPausingUpdate } = useTimelineUpdatePause({
+	isTop: () => isTop(),
+	onVisibleAtTop: () => releaseQueue(),
+	onActivatedAtTop: () => paginator.releaseQueue(),
+});
+
 function isTop() {
 	if (scrollContainer == null) return true;
 	if (rootEl.value == null) return true;
@@ -142,20 +153,6 @@ watch(rootEl, (el) => {
 	}
 }, { immediate: true });
 
-const visibility = useDocumentVisibility();
-let isPausingUpdate = false;
-
-watch(visibility, () => {
-	if (visibility.value === 'hidden') {
-		isPausingUpdate = true;
-	} else { // 'visible'
-		isPausingUpdate = false;
-		if (isTop()) {
-			releaseQueue();
-		}
-	}
-});
-
 function onNotification(notification: Misskey.entities.Notification) {
 	const isMuted = props.excludeTypes ? props.excludeTypes.includes(notification.type as typeof notificationTypes[number]) : false;
 	if (isMuted || window.document.visibilityState === 'visible') {
@@ -165,7 +162,10 @@ function onNotification(notification: Misskey.entities.Notification) {
 	}
 
 	if (!isMuted) {
-		if (isTop() && !isPausingUpdate) {
+		if (isTop() && !isPausingUpdate()) {
+			// mk-go: 先頭にいるのに queue が残っていたら (戻った直後に先頭と判定できなかった
+			// など、#3594)、先に出す。残したまま入れると、後で出したときに古い分が上に来る。
+			paginator.releaseQueue();
 			paginator.prepend(notification);
 		} else {
 			paginator.enqueue(notification);
