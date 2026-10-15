@@ -44,6 +44,11 @@ type ServerStatsPublisher struct {
 	// O(1) append の circular buffer。TS の Array.unshift + length>200 で pop
 	// と同じ semantics を head pointer 方式で実装。
 	logBuf *statsRingBuffer
+
+	// enabled は meta の enableServerMachineStats を返す。本家は無効なら
+	// ServerStatsService が何もしないので、それに揃えて無効のあいだは集めも
+	// 流しもしない。nil (配線されていない) も無効として扱う。
+	enabled func() bool
 }
 
 // ServerStatsLogMax は requestLog 応答で返す最大件数。TS 本家と同じ 200。
@@ -61,6 +66,30 @@ func NewServerStatsPublisher(pub PubSubPublisher, interval time.Duration) *Serve
 		stopCh:   make(chan struct{}),
 		logBuf:   newStatsRingBuffer(ServerStatsLogMax),
 	}
+}
+
+// SetEnabledFunc sets the predicate that decides whether host metrics are
+// collected and published. Call it before Start. Without it nothing is
+// published.
+func (p *ServerStatsPublisher) SetEnabledFunc(fn func() bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.enabled = fn
+}
+
+// HasEnabledFunc reports whether SetEnabledFunc has been called with a non-nil
+// predicate (startup wiring check).
+func (p *ServerStatsPublisher) HasEnabledFunc() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.enabled != nil
+}
+
+func (p *ServerStatsPublisher) isEnabled() bool {
+	p.mu.Lock()
+	fn := p.enabled
+	p.mu.Unlock()
+	return fn != nil && fn()
 }
 
 // Start begins the collection loop in a goroutine. 二重呼び出しはno-op。
@@ -124,6 +153,13 @@ type serverStatsSnapshot struct {
 }
 
 func (p *ServerStatsPublisher) tick() {
+	if !p.isEnabled() {
+		// 管理画面で無効にした後は、有効だったあいだの履歴も requestLog で
+		// 返さない。差分の起点も捨て、再び有効にした最初の tick を初回として扱う。
+		p.logBuf.Reset()
+		p.prevTick = time.Time{}
+		return
+	}
 	snap := p.collect()
 	body, err := json.Marshal(snap)
 	if err != nil {
@@ -141,6 +177,10 @@ func (p *ServerStatsPublisher) tick() {
 // または ServerStatsLogMax を超える値は ServerStatsLogMax に丸める。frontend
 // 起動直後の requestLog で historical な timeline を埋めるために使う。
 func (p *ServerStatsPublisher) Log(maxLen int) []json.RawMessage {
+	// 無効にした直後、次の tick が履歴を捨てるまでの間も返さない。
+	if !p.isEnabled() {
+		return []json.RawMessage{}
+	}
 	return p.logBuf.Log(maxLen)
 }
 

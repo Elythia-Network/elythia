@@ -3310,6 +3310,12 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// factory の登録は role に関係なく行う (WebSocket が生えるのは server
 	// role だけなので、queue role では誰も subscribe しない)。
 	serverStatsPub := stream.NewServerStatsPublisher(streamPubSub, 0)
+	// 無効のあいだは集めも流しもしない (本家 ServerStatsService と同じ)。
+	// tick ごとに見るので、管理画面での切り替えは再起動を待たずに効く。
+	serverStatsPub.SetEnabledFunc(func() bool {
+		m, err := metaRepo.Fetch()
+		return err == nil && m != nil && m.EnableServerMachineStats
+	})
 	if s.role.RunsServer() {
 		serverStatsPub.Start()
 		s.registerShutdownHook(func(_ context.Context) { serverStatsPub.Stop() })
@@ -4657,6 +4663,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"2FA gate を持つ 9 endpoint と i/2fa/done で有効な TOTP コードを再利用でき、バックアップコードの単回予約も効かなくなる"},
 		{"i.twoFAPendingGuard", iHandler.HasTwoFAPendingGuard(),
 			"i/2fa/register の仮の秘密に期限と試行回数の上限が掛からない"},
+		{"stream.serverStatsEnabled", serverStatsPub.HasEnabledFunc(),
+			"enableServerMachineStats を有効にしても serverStats に値が流れない"},
 		{"i.authInvalidator", iHandler.HasAuthInvalidator(),
 			"revoke-token / regenerate-token / delete-account / update の後も古い token が auth cache の TTL のあいだ通る"},
 		{"admin.userTokenInvalidator", adminHandler.HasUserTokenInvalidator(),

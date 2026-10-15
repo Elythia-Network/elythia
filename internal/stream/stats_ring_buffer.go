@@ -47,6 +47,15 @@ func (rb *statsRingBuffer) Append(raw json.RawMessage) {
 	}
 }
 
+// Reset drops every stored entry.
+func (rb *statsRingBuffer) Reset() {
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+	clear(rb.buf)
+	rb.head = 0
+	rb.count = 0
+}
+
 // Log returns up to maxLen most-recent entries, newest first. maxLen<=0 か
 // cap 超は cap に丸める。戻り値は内部 slot を defensive copy したものなので、
 // caller が破壊的操作をしても内部 buffer は無影響。O(maxLen)。

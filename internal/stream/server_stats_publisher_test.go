@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -49,10 +50,18 @@ func (c *capturePubSub) snapshot() []struct {
 	return out
 }
 
+// newEnabledServerStatsPublisher は enableServerMachineStats が有効な状態の
+// publisher を作る。
+func newEnabledServerStatsPublisher(pub PubSubPublisher, interval time.Duration) *ServerStatsPublisher {
+	p := NewServerStatsPublisher(pub, interval)
+	p.SetEnabledFunc(func() bool { return true })
+	return p
+}
+
 func TestServerStatsPublisher_PublishesSnapshot(t *testing.T) {
 	pub := &capturePubSub{}
 	// 短い interval で Start → Stop し、最低 1 回 tick されたことを確認する。
-	p := NewServerStatsPublisher(pub, 20*time.Millisecond)
+	p := newEnabledServerStatsPublisher(pub, 20*time.Millisecond)
 	p.Start()
 	time.Sleep(60 * time.Millisecond)
 	p.Stop()
@@ -83,7 +92,7 @@ func TestServerStatsPublisher_PublishesSnapshot(t *testing.T) {
 
 func TestServerStatsPublisher_DoubleStartNoOp(t *testing.T) {
 	pub := &capturePubSub{}
-	p := NewServerStatsPublisher(pub, 50*time.Millisecond)
+	p := newEnabledServerStatsPublisher(pub, 50*time.Millisecond)
 	p.Start()
 	p.Start() // second call must be a no-op
 	time.Sleep(10 * time.Millisecond)
@@ -111,7 +120,7 @@ func TestDiffPerSec(t *testing.T) {
 // publisher が ring buffer に snapshot を貯めて Log() で返せること (#571 item 2)
 func TestServerStatsPublisher_LogReturnsRecentSnapshots(t *testing.T) {
 	pub := &capturePubSub{}
-	p := NewServerStatsPublisher(pub, 10*time.Millisecond)
+	p := newEnabledServerStatsPublisher(pub, 10*time.Millisecond)
 	p.Start()
 	time.Sleep(50 * time.Millisecond)
 	p.Stop()
@@ -133,7 +142,7 @@ func TestServerStatsPublisher_LogReturnsRecentSnapshots(t *testing.T) {
 // Log(maxLen) で件数が制限されること
 func TestServerStatsPublisher_LogRespectsMaxLen(t *testing.T) {
 	pub := &capturePubSub{}
-	p := NewServerStatsPublisher(pub, 5*time.Millisecond)
+	p := newEnabledServerStatsPublisher(pub, 5*time.Millisecond)
 	p.Start()
 	time.Sleep(50 * time.Millisecond)
 	p.Stop()
@@ -146,7 +155,7 @@ func TestServerStatsPublisher_LogRespectsMaxLen(t *testing.T) {
 // publisher の Append は private なので statsRingBuffer を直接 verify する。
 func TestServerStatsPublisher_LogCapAtMax(t *testing.T) {
 	pub := &capturePubSub{}
-	p := NewServerStatsPublisher(pub, 0) // default 2s — manually feed
+	p := newEnabledServerStatsPublisher(pub, 0) // default 2s — manually feed
 	// publisher の logBuf を直接叩いて 250 件詰める (max=200 で頭打ち)。
 	for i := 0; i < 250; i++ {
 		p.logBuf.Append(json.RawMessage(`{}`))
@@ -158,7 +167,7 @@ func TestServerStatsPublisher_LogCapAtMax(t *testing.T) {
 // Log の戻り値は publisher 内部 buffer を mutate しても影響しない (defensive copy)
 func TestServerStatsPublisher_LogDefensiveCopy(t *testing.T) {
 	pub := &capturePubSub{}
-	p := NewServerStatsPublisher(pub, 0)
+	p := newEnabledServerStatsPublisher(pub, 0)
 	original := json.RawMessage(`{"k":1}`)
 	p.logBuf.Append(original)
 
@@ -170,4 +179,70 @@ func TestServerStatsPublisher_LogDefensiveCopy(t *testing.T) {
 	logs2 := p.Log(0)
 	require.Len(t, logs2, 1)
 	assert.JSONEq(t, `{"k":1}`, string(logs2[0]), "internal buffer must not be aliased")
+}
+
+func TestServerStatsPublisher_DisabledPublishesNothing(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		set  func(p *ServerStatsPublisher)
+	}{
+		{name: "gate not wired", set: func(*ServerStatsPublisher) {}},
+		{name: "gate returns false", set: func(p *ServerStatsPublisher) { p.SetEnabledFunc(func() bool { return false }) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pub := &capturePubSub{}
+			p := NewServerStatsPublisher(pub, 0)
+			tc.set(p)
+			p.tick()
+			p.tick()
+			assert.Empty(t, pub.snapshot(), "nothing may be published while disabled")
+			assert.Empty(t, p.Log(0), "requestLog must not return snapshots while disabled")
+		})
+	}
+}
+
+func TestServerStatsPublisher_DisablingDropsHistory(t *testing.T) {
+	pub := &capturePubSub{}
+	p := NewServerStatsPublisher(pub, 0)
+	var enabled atomic.Bool
+	enabled.Store(true)
+	p.SetEnabledFunc(enabled.Load)
+
+	p.tick()
+	p.tick()
+	require.Len(t, pub.snapshot(), 2)
+	require.Len(t, p.Log(0), 2)
+
+	enabled.Store(false)
+	assert.Empty(t, p.Log(0), "history collected while enabled must not be served after disabling")
+	p.tick()
+	assert.Len(t, pub.snapshot(), 2, "no publish after disabling")
+
+	// 再び有効にしても、無効にする前の履歴は戻らない。差分の起点も捨てているので、
+	// 最初の tick は初回として扱われ、無効だった期間の平均を出さない。
+	assert.True(t, p.prevTick.IsZero(), "the rate baseline must be dropped while disabled")
+	enabled.Store(true)
+	assert.Empty(t, p.Log(0))
+	p.tick()
+	assert.Len(t, p.Log(0), 1)
+	assert.Len(t, pub.snapshot(), 3)
+}
+
+func TestServerStatsPublisher_HasEnabledFunc(t *testing.T) {
+	p := NewServerStatsPublisher(&capturePubSub{}, 0)
+	assert.False(t, p.HasEnabledFunc())
+	p.SetEnabledFunc(func() bool { return false })
+	assert.True(t, p.HasEnabledFunc())
+}
+
+func TestStatsRingBuffer_Reset(t *testing.T) {
+	rb := newStatsRingBuffer(3)
+	rb.Append(json.RawMessage(`1`))
+	rb.Append(json.RawMessage(`2`))
+	rb.Reset()
+	assert.Empty(t, rb.Log(0))
+	rb.Append(json.RawMessage(`3`))
+	logs := rb.Log(0)
+	require.Len(t, logs, 1)
+	assert.JSONEq(t, `3`, string(logs[0]))
 }
