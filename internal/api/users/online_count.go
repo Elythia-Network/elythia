@@ -4,6 +4,8 @@ import (
 	"net/http"
 
 	"github.com/labstack/echo/v4"
+
+	"github.com/elythia-network/elythia/internal/server/middleware"
 )
 
 // OnlineCount returns the number of locally active users.
@@ -18,7 +20,11 @@ import (
 func (h *Handler) OnlineCount(c echo.Context) error {
 	var count int64
 	if h.userRepo != nil {
-		count, _ = h.userRepo.CountOnlineUsers()
+		var err error
+		if count, err = h.userRepo.CountOnlineUsers(); err != nil {
+			// 数えられなかった 0 を public にしない (本家はエラーでキャッシュされない、#3593)。
+			middleware.SkipPublicCache(c)
+		}
 	}
 	return c.JSON(http.StatusOK, map[string]any{"count": count})
 }

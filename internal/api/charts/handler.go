@@ -244,6 +244,8 @@ func (h *Handler) parseRequest(req *Request) (chart.Span, int, *time.Time, *para
 
 // setCacheControl mirrors upstream ApiCallService: an unauthenticated GET
 // to a cacheSec endpoint receives `Cache-Control: public, max-age=<cacheSec>`.
+// On /api, middleware.APICacheControl sets the same value from APICacheSec;
+// this duplicate is kept for the handler's own tests (#3593).
 // 全 chart endpoint は `allowGet:true, cacheSec:60*60` なので max-age=3600。
 // POST / 認証済みリクエストには付けない。auth は e.Use(Authenticate()) で全
 // request に optional 適用済みのため、RequireAuth 無しの chart route でも

@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/elythia-network/elythia/internal/upstreamsrc"
@@ -42,7 +43,28 @@ var (
 	// **最も広く叩かれる `/api/i` が丸ごと検査対象から外れる** (実測で scope を
 	// 変異させても gate が緑のままだった)。
 	kindRe = regexp.MustCompile(`(?m)^\tkind:\s*['"]([^'"]+)['"]`)
+	// allowGet / cacheSec も meta の直下にだけ現れる。cacheSec は `60 * 60` の
+	// ように整数の積で書かれる (#3593)。
+	allowGetRe = regexp.MustCompile(`(?m)^\tallowGet:\s*true`)
+	cacheSecRe = regexp.MustCompile(`(?m)^\tcacheSec:\s*([0-9 *]+),`)
+	// cacheSecLineRe matches any meta-level cacheSec line, so a value the
+	// tool cannot evaluate (an identifier such as `ONE_HOUR`) stops it instead
+	// of being read as "no cacheSec".
+	cacheSecLineRe = regexp.MustCompile(`(?m)^\tcacheSec:`)
 )
+
+// cacheSecValue evaluates a cacheSec expression, a product of integers.
+func cacheSecValue(expr string) (int, error) {
+	v := 1
+	for f := range strings.SplitSeq(expr, "*") {
+		n, err := strconv.Atoi(strings.TrimSpace(f))
+		if err != nil {
+			return 0, fmt.Errorf("cacheSec %q: %w", expr, err)
+		}
+		v *= n
+	}
+	return v, nil
+}
 
 // level reduces an endpoint's meta to its access level. The hierarchy is
 // admin > moderator > auth > public; admin/moderator imply credential.
@@ -66,6 +88,7 @@ func main() {
 	epDir := flag.String("endpoints", filepath.Join(up, "packages/backend/src/server/api/endpoints"), "path to Misskey backend endpoints dir")
 	out := flag.String("out", "internal/entitycompat/testdata/golden_permissions.json", "golden snapshot output path")
 	kindsOut := flag.String("kinds-out", "internal/entitycompat/testdata/golden_oauth_kinds.json", "OAuth kind golden output path")
+	cacheOut := flag.String("cache-out", "internal/entitycompat/testdata/golden_cache_sec.json", "allowGet / cacheSec golden output path")
 	flag.Parse()
 	if err := upstreamsrc.Check(*epDir); err != nil {
 		fmt.Fprintln(os.Stderr, "permspec:", err)
@@ -74,6 +97,8 @@ func main() {
 
 	perms := map[string]string{}
 	kinds := map[string]string{}
+	// allowGet の endpoint -> cacheSec (無ければ 0)。
+	cacheSecs := map[string]int{}
 	err := filepath.WalkDir(*epDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -94,6 +119,25 @@ func main() {
 		perms[ep] = level(body)
 		if m := kindRe.FindStringSubmatch(body); m != nil {
 			kinds[ep] = m[1]
+		}
+		sec := 0
+		if m := cacheSecRe.FindStringSubmatch(body); m != nil {
+			v, err := cacheSecValue(m[1])
+			if err != nil {
+				return fmt.Errorf("%s: %w", ep, err)
+			}
+			sec = v
+		} else if cacheSecLineRe.MatchString(body) {
+			return fmt.Errorf("%s: cacheSec is not a product of integer literals; teach tools/permspec to read it", ep)
+		}
+		switch {
+		case allowGetRe.MatchString(body):
+			cacheSecs[ep] = sec
+		case sec != 0:
+			// 本家の ApiCallService は GET にしか cacheSec を使わないので、
+			// allowGet の無い cacheSec は意味を持たない。現れたら形式が変わった
+			// 疑いがあるので止める。
+			return fmt.Errorf("%s: cacheSec without allowGet", ep)
 		}
 		return nil
 	})
@@ -131,4 +175,19 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("permspec: wrote %d OAuth kinds -> %s\n", len(kinds), *kindsOut)
+
+	if len(cacheSecs) == 0 {
+		fmt.Fprintln(os.Stderr, "permspec: ERROR no allowGet endpoints parsed (upstream format change?)")
+		os.Exit(1)
+	}
+	cbuf, err := json.MarshalIndent(cacheSecs, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "permspec: marshal cacheSec: %v\n", err)
+		os.Exit(1)
+	}
+	if err := os.WriteFile(*cacheOut, append(cbuf, '\n'), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "permspec: write cacheSec: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("permspec: wrote %d allowGet endpoints -> %s\n", len(cacheSecs), *cacheOut)
 }

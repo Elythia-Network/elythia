@@ -6,6 +6,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/elythia-network/elythia/internal/repository"
+	"github.com/elythia-network/elythia/internal/server/middleware"
 )
 
 // SetRetentionRepo wires the repository backing POST /api/retention.
@@ -30,6 +31,8 @@ func (h *Handler) Retention(c echo.Context) error {
 	}
 	records, err := h.retentionRepo.ListRecent(retentionLimit)
 	if err != nil {
+		// 本家はエラーになりキャッシュされない。空の一覧を public にしない (#3593)。
+		middleware.SkipPublicCache(c)
 		return c.JSON(http.StatusOK, []any{})
 	}
 	out := make([]map[string]any, 0, len(records))

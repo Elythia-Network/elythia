@@ -315,7 +315,7 @@ var mkOnlyCategoryOrder = []struct {
 	{
 		cat:   CatGETVariant,
 		title: "GET variant 追加",
-		note:  "Misskey TS が POST のみ提供する endpoint に対し、mk-go が同パスへ GET を追加登録したもの。browser から直接 link で叩く用途等の利便目的で、対応する POST は両側に存在する。",
+		note:  "この表は Misskey TS の endpoint を POST だけで数えるので、同じパスで GET も受けるものがここに入る。多くは本家も `allowGet: true` で GET を受ける (本家と同じ GET の route と `cacheSec` は TestCacheSecDrift が確かめる)。対応する POST は両側に存在する。",
 	},
 	{
 		cat:   CatChatExt,

@@ -390,6 +390,8 @@ func writeCachedJSON(c echo.Context, body []byte) error {
 	// `GET && cacheSec && !token && !user` のときだけ Cache-Control を付ける。
 	// POST / 認証済み / raw token 付き GET には付けない (charts/bubble-game と同
 	// convention、#2054)。token は HasRawToken (解決可否に依らない) で判定する。
+	// /api では middleware.APICacheControl が同じ表 (APICacheSec) から同じ値を付けるので
+	// 二重になる。この handler 単体のテストが見ているので残す (#3593)。
 	if c.Request().Method == http.MethodGet && middleware.GetUser(c) == nil && !middleware.HasRawToken(c) {
 		resp.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", CacheSeconds))
 	}

@@ -124,15 +124,18 @@ func (h *Handler) FavoritesDelete(c echo.Context) error {
 // ハイライトタブから叩かれる経路)。過去はこの絞り込みが無く、無関係な
 // グローバルノートが混ざっていた (#489)。untilId は cursor pagination 用。
 func (h *Handler) Featured(c echo.Context) error {
+	// GET でも受ける (本家は allowGet: true) ので query の名前も付ける。無いと GET の
+	// channelId / limit が読まれず、別の内容の応答が public でキャッシュされる (#3593)。
 	var req struct {
-		Limit     *int   `json:"limit"`
-		Offset    int    `json:"offset"`
-		ChannelID string `json:"channelId"`
-		UntilID   string `json:"untilId"`
-		UntilDate *int64 `json:"untilDate"`
+		Limit     *int   `json:"limit" query:"limit"`
+		Offset    int    `json:"offset" query:"offset"`
+		ChannelID string `json:"channelId" query:"channelId"`
+		UntilID   string `json:"untilId" query:"untilId"`
+		UntilDate *int64 `json:"untilDate" query:"untilDate"`
 	}
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "Invalid parameters.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
+		// GET の query で数値に読めない値は、本家と同じ cast のエラーにする。
+		return apierr.JSONInvalidParam(c)
 	}
 	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
 	if !limitOK {

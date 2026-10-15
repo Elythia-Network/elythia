@@ -496,11 +496,17 @@ func (h *Handler) Reactions(c echo.Context) error {
 //     filter なので SQL push-down 対象外)。
 func (h *Handler) FeaturedNotes(c echo.Context) error {
 	var req struct {
-		UserID  string `json:"userId"`
-		Limit   *int   `json:"limit"`
-		UntilID string `json:"untilId"`
+		// GET でも受ける (本家は allowGet: true) ので query の名前も付ける (#3593)。
+		UserID  string `json:"userId" query:"userId"`
+		Limit   *int   `json:"limit" query:"limit"`
+		UntilID string `json:"untilId" query:"untilId"`
 	}
-	if err := c.Bind(&req); err != nil || req.UserID == "" {
+	if err := c.Bind(&req); err != nil {
+		// GET の query で数値に読めない値 (limit=abc) は、本家と同じ cast の
+		// エラーにする (binder が印を付けている)。
+		return apierr.JSONInvalidParam(c)
+	}
+	if req.UserID == "" {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "userId is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
 	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)

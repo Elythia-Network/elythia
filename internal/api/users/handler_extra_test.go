@@ -964,3 +964,30 @@ func TestReactions_BlockedAndRemote_ReturnsRemoteError(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "IS_REMOTE_USER")
 }
+
+// 本家の users/featured-notes は allowGet: true。GET の query でも同じ引数を
+// 読むこと (#3593)。
+func TestFeaturedNotes_GetReadsQuery(t *testing.T) {
+	h, _, noteRepo := newExtraHandler(t)
+	h.SetFollowingRepo(testutil.NewMockFollowingRepository())
+	for _, id := range []string{"fn_g1", "fn_g2", "fn_g3"} {
+		noteRepo.Notes[id] = &model.Note{ID: id, UserID: "u1", Visibility: "public", User: &model.User{ID: "u1"}}
+	}
+	get := func(query string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/api/users/featured-notes?"+query, nil)
+		rec := httptest.NewRecorder()
+		_ = h.FeaturedNotes(echo.New().NewContext(req, rec))
+		return rec
+	}
+
+	rec := get("userId=u1&limit=2&untilId=fn_g3")
+	require.Equal(t, http.StatusOK, rec.Code)
+	var out []map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
+	require.Len(t, out, 2)
+	assert.Equal(t, "fn_g2", out[0]["id"])
+	assert.Equal(t, "fn_g1", out[1]["id"])
+
+	assert.Equal(t, http.StatusBadRequest, get("limit=2").Code, "userId は必須")
+	assert.Equal(t, http.StatusBadRequest, get("userId=u1&limit=abc").Code, "数値に読めない limit")
+}

@@ -378,10 +378,22 @@ Elythiaは全認証がtoken経由(session無し)で、native token = `users.toke
 ### 運用
 
 ```bash
-make perm-check       # permission / secure / OAuth scope の 3 gate をローカル実行
+make perm-check       # permission / secure / OAuth scope / cacheSec の 4 gate をローカル実行
 make shapecheck-gen   # golden_permissions.json / golden_secure_endpoints.json /
-                      # golden_oauth_kinds.json をまとめて再生成
+                      # golden_oauth_kinds.json / golden_cache_sec.json をまとめて再生成
 ```
+
+## GET と cacheSec の drift gate（allowGet / cacheSec）
+
+本家は`allowGet: true`のendpointをGETでも受け、そのうち`cacheSec`を持つものは、資格情報の無いGETの成功応答に`Cache-Control: public, max-age=<cacheSec>`を付ける(`ApiCallService.handleRequest`)。Elythiaでは秒数の表を`middleware.APICacheSec`の1か所に置き、`/api`のgroupに付けた`middleware.APICacheControl`が付ける(#3593)。それまではhandlerごとに書いていて、GETのrouteが無いもの2本(`users/featured-notes`、`retention`)と、ヘッダーが付かないもの8本があった。
+
+`tools/permspec`が`allowGet: true`のendpointと`cacheSec`(`60 * 60`のような整数の積を計算した値、無ければ0)を`golden_cache_sec.json`に出し、`TestCacheSecDrift`が次を見る。
+
+- goldenの全endpointに、router.goのGETのroute(`api.GET`、またはGETを含む`api.Match`)がある
+- `middleware.APICacheSec`がgoldenの`cacheSec`と過不足なく一致する
+- router.goが`/api`のgroupに`api.Use(middleware.APICacheControl())`を付けている
+
+数え方: 2026.10.0では`allowGet: true`が24本で、24本とも`cacheSec`を持つ。`allowGet`の無い`cacheSec`は本家でも意味を持たないので、`tools/permspec`はそれを見つけたら形式の変化を疑って止まる。`cacheSec:`の行があるのに整数の積として読めない(`ONE_HOUR`のような識別子)ときも止まる。読めないものを0として通すと、そのendpointだけ黙って検査から外れるため。
 
 ## Schema drift gate（drop-in で生えない列）
 

@@ -1514,7 +1514,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// #2106 L56: upstream ApiServerService は /api scope の全応答に既定の
 	// Cache-Control: private, max-age=0, must-revalidate を付与する。cacheSec endpoint は
-	// handler 内で public, max-age=... に上書きする (handler の Set が後勝ち)。非 cacheSec の
+	// 直後の middleware.APICacheControl が、資格情報の無い GET の成功応答だけ
+	// public, max-age=... に上書きする (表は middleware.APICacheSec、#3593)。非 cacheSec の
 	// allowGet GET を中間 proxy が誤キャッシュするのを防ぐ。
 	api.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -1522,6 +1523,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			return next(c)
 		}
 	})
+	// 本家で cacheSec を持つ endpoint は、資格情報の無い GET の成功応答だけ
+	// public にする。表は middleware.APICacheSec の 1 か所 (#3593)。
+	api.Use(middleware.APICacheControl())
 
 	// 本家 (Fastify) は JSON 応答の Content-Type を
 	// `application/json; charset=utf-8` で返すが、Echo の c.JSON は charset を
@@ -2078,6 +2082,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/users/report-abuse", usersHandler.ReportAbuse, middleware.RequireAuth(), middleware.RequireScope("write:report-abuse"))
 	api.POST("/users/reactions", usersHandler.Reactions)
 	api.POST("/users/featured-notes", usersHandler.FeaturedNotes)
+	// 本家は allowGet: true (#3593)。
+	api.GET("/users/featured-notes", usersHandler.FeaturedNotes)
 	// upstream search-by-username-and-host.ts:13 は requireCredential:false かつ
 	// requiredRolePolicy 無し (匿名・全 role に開放)。mk-go が独自に付けていた
 	// RequireAuth + canSearchUsers gate を外して揃える (#1766)。
@@ -4308,6 +4314,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// retention — リテンション統計
 	api.POST("/retention", chartsHandler.Retention)
+	// 本家は allowGet: true (#3593)。
+	api.GET("/retention", chartsHandler.Retention)
 
 	// get-avatar-decorations — アバターデコレーション全件取得
 	avatarDecorationsHandler := avatardecorations.NewHandler(s.db, roleService.ExistingRoleIDSet, roleService.PublicRoleIDSet)

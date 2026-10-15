@@ -6,6 +6,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/elythia-network/elythia/internal/core/serverstats"
+	"github.com/elythia-network/elythia/internal/server/middleware"
 )
 
 // ServerInfo returns the public subset of server machine statistics.
@@ -20,8 +21,13 @@ import (
 // 落とさない** — frontend の server-metric widget は各キーを直接読む。
 func (h *Handler) ServerInfo(c echo.Context) error {
 	if h.metaRepo != nil {
-		if m, err := h.metaRepo.Fetch(); err == nil && m != nil && m.EnableServerMachineStats {
+		m, err := h.metaRepo.Fetch()
+		if err == nil && m != nil && m.EnableServerMachineStats {
 			return c.JSON(http.StatusOK, serverstats.CollectPublic())
+		}
+		if err != nil {
+			// 設定を読めなかったときの空の shape を public にしない (#3593)。
+			middleware.SkipPublicCache(c)
 		}
 	}
 	return c.JSON(http.StatusOK, serverstats.EmptyPublic())
