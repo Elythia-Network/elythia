@@ -376,23 +376,41 @@ func (r *followingRepository) ListFollowingByHost(host string, limit, offset int
 // a following list) and visibilityColumn the owner's matching user_profile
 // column. Mirrors upstream QueryService.generateFollowingRelationVisibilityQuery.
 //
+// otherColumn / otherVisibilityColumn name the other side of the relation:
+// a row of a followers list is also a row of the follower's following list
+// (and vice versa), so it is shown only when that side's list allows the
+// viewer too. The other side is judged like users/following and
+// users/followers: a missing profile counts as public.
+//
 // 本家と同じく持ち主の user_profile を INNER JOIN するので、profile 行の無い
 // 持ち主の行は出ない。条件は LIMIT より前 (同じ WHERE) に置く — 取ってから
 // 間引くとページが欠け、カーソルも進まなくなる。
-func followRelationVisibility(q *gorm.DB, ownerColumn, visibilityColumn string, viewer model.FollowListViewer) *gorm.DB {
+//
+// 行は相手側の一覧の行でもあるので、相手側の設定にも同じ判定を掛ける (本家は
+// 持ち主の側だけを見る)。相手側は profile が無くても行を落とさないよう
+// LEFT JOIN にし、users/following と同じく無い場合は public として扱う。
+func followRelationVisibility(q *gorm.DB, ownerColumn, visibilityColumn, otherColumn, otherVisibilityColumn string, viewer model.FollowListViewer) *gorm.DB {
 	if viewer.Moderator {
 		return q
 	}
 	owner := `"following".` + ownerColumn
-	visibility := `"ownerProfile".` + visibilityColumn
+	other := `"following".` + otherColumn
 	q = q.Joins(`INNER JOIN "user_profile" "ownerProfile" ON "ownerProfile"."userId" = ` + owner)
+	q = q.Joins(`LEFT JOIN "user_profile" "otherProfile" ON "otherProfile"."userId" = ` + other)
+	q = listVisibleTo(q, owner, `"ownerProfile".`+visibilityColumn, viewer)
+	return listVisibleTo(q, other, `COALESCE("otherProfile".`+otherVisibilityColumn+`, 'public')`, viewer)
+}
+
+// listVisibleTo adds the condition that the list of the user in userColumn,
+// whose visibility is the SQL expression visibility, is visible to viewer.
+func listVisibleTo(q *gorm.DB, userColumn, visibility string, viewer model.FollowListViewer) *gorm.DB {
 	if viewer.UserID == "" {
 		return q.Where(visibility + ` = 'public'`)
 	}
 	return q.Where(
 		`(`+visibility+` = 'public'`+
-			` OR `+owner+` = ?`+
-			` OR (`+visibility+` = 'followers' AND `+owner+` IN (SELECT "meFollowing"."followeeId" FROM "following" "meFollowing" WHERE "meFollowing"."followerId" = ?)))`,
+			` OR `+userColumn+` = ?`+
+			` OR (`+visibility+` = 'followers' AND `+userColumn+` IN (SELECT "meFollowing"."followeeId" FROM "following" "meFollowing" WHERE "meFollowing"."followerId" = ?)))`,
 		viewer.UserID, viewer.UserID)
 }
 
@@ -411,7 +429,7 @@ func (r *followingRepository) ListFollowersByHostCursor(host, sinceID, untilID s
 		limit = 100
 	}
 	q := r.db.Model(&model.Following{}).Select(`"following".*`).Where(`"following"."followeeHost" = ?`, host)
-	q = followRelationVisibility(q, `"followeeId"`, `"followersVisibility"`, viewer)
+	q = followRelationVisibility(q, `"followeeId"`, `"followersVisibility"`, `"followerId"`, `"followingVisibility"`, viewer)
 	if sinceID != "" {
 		q = q.Where(`"following"."id" > ?`, sinceID)
 	}
@@ -440,7 +458,7 @@ func (r *followingRepository) ListFollowingByHostCursor(host, sinceID, untilID s
 		limit = 100
 	}
 	q := r.db.Model(&model.Following{}).Select(`"following".*`).Where(`"following"."followerHost" = ?`, host)
-	q = followRelationVisibility(q, `"followerId"`, `"followingVisibility"`, viewer)
+	q = followRelationVisibility(q, `"followerId"`, `"followingVisibility"`, `"followeeId"`, `"followersVisibility"`, viewer)
 	if sinceID != "" {
 		q = q.Where(`"following"."id" > ?`, sinceID)
 	}
