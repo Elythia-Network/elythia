@@ -799,15 +799,63 @@ func (d *Dispatcher) forwardNoteEvent(noteID string, payload []byte) {
 	// upstream Connection.onNoteStreamMessage と同じく、未ログインの接続には
 	// ugcVisibilityForVisitor が none のとき noteUpdated を一切送らない。
 	// local のときの扱いは upstream も TODO のまま (none だけ見る) なので揃える。
-	if d.conn.User() == nil && ugcvisibility.HidesAll(d.ugcVisibilityForVisitor()) {
+	viewer := d.conn.User()
+	if viewer == nil && ugcvisibility.HidesAll(d.ugcVisibilityForVisitor()) {
 		return
+	}
+	body := env.Body
+	if env.Type == "pollVoted" {
+		viewerID := ""
+		if viewer != nil {
+			viewerID = viewer.ID
+		}
+		var ok bool
+		if body, ok = redactPollVoted(env.Body, viewerID); !ok {
+			return
+		}
 	}
 	_ = d.conn.Send(map[string]any{
 		"type": "noteUpdated",
 		"body": map[string]any{
 			"id":   noteID,
 			"type": env.Type,
-			"body": env.Body,
+			"body": body,
 		},
 	})
+}
+
+// redactPollVoted rewrites a pollVoted body for one subscriber: the voter's
+// own connection keeps the real userId, every other subscriber gets the
+// opaque voteId in its place. ok is false when the body is malformed.
+//
+// 本家は{choice, userId}を購読者全員(匿名を含む)へそのまま流すので、公開の
+// 投票をsubNoteして待つだけで、誰がどれに入れたかが分かる。APIには投票者の
+// 一覧が無いので、これはstreamingだけの漏れになる。
+//
+// userIdを消さずにvoteIdで置き換えるのは、本家のfrontendが
+// `${userId}:${choice}`を直前のイベントとの重複判定に使うため。消すと、別人が
+// 同じ選択肢に続けて入れたときに2件目が捨てられ、数が増えない。userIdを
+// 非nullの文字列で受ける型付きのクライアントも壊さない。voteIdは投票ごとに
+// 一意で、投票者には結び付かない(poll_vote.idはほかの経路で公開していない)。
+func redactPollVoted(raw json.RawMessage, viewerID string) (json.RawMessage, bool) {
+	var in struct {
+		Choice json.RawMessage `json:"choice"`
+		UserID string          `json:"userId"`
+		VoteID string          `json:"voteId"`
+	}
+	if err := json.Unmarshal(raw, &in); err != nil || len(in.Choice) == 0 {
+		return nil, false
+	}
+	userID := in.VoteID
+	if viewerID != "" && viewerID == in.UserID {
+		userID = in.UserID
+	}
+	out, err := json.Marshal(map[string]any{
+		"choice": in.Choice,
+		"userId": userID,
+	})
+	if err != nil {
+		return nil, false
+	}
+	return out, true
 }

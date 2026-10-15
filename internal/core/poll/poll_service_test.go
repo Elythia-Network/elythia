@@ -216,6 +216,10 @@ func TestVote_PublishesPollVotedEvent(t *testing.T) {
 	body := pub.body.(map[string]any)
 	assert.Equal(t, 1, body["choice"])
 	assert.Equal(t, "viewer", body["userId"])
+	// 投票者以外の購読者には userId の代わりに voteId を渡す (stream 側で差し替える)。
+	voteID, _ := body["voteId"].(string)
+	assert.NotEmpty(t, voteID)
+	assert.NotEqual(t, "viewer", voteID)
 }
 
 func TestVote_LocalPollFiresOnLocalPollUpdated(t *testing.T) {
