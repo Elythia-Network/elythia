@@ -130,6 +130,12 @@ type Config struct {
 	// Workers. Zero applies defaultSuperviseInterval; a negative value
 	// disables the periodic check (Resize still reconciles).
 	SuperviseInterval time.Duration
+
+	// StalledInterval is how often each queue scans for stalled jobs (jobs
+	// left in active by a worker that died). Zero applies mkq's default
+	// (30 seconds, as BullMQ). Only one Worker per queue runs the scan
+	// (#3592).
+	StalledInterval time.Duration
 }
 
 // defaultMaxMetricsDataPoints mirrors BullMQ TS's
@@ -474,6 +480,7 @@ func (d *Driver) Server() driver.Server {
 			stuckAfter:         d.cfg.StuckWorkerAfter,
 			handlerDeadline:    d.cfg.HandlerDeadline,
 			superviseInterval:  d.cfg.SuperviseInterval,
+			stalledInterval:    d.cfg.StalledInterval,
 			handlers:           make(map[string]driver.HandlerFunc),
 		}
 	}
