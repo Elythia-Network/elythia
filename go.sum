@@ -100,6 +100,8 @@ github.com/elythia-network/mfm v0.1.0 h1:gXtktNtTe/73oB0kCaEg76E6zoUTtzliUV1dF7M
 github.com/elythia-network/mfm v0.1.0/go.mod h1:8w2i3qqq6u6uvIDX5nLmRdiwyvnWqqTMkmaYs5QLmx0=
 github.com/elythia-network/mkq v1.5.0 h1:rblw5ZU8WJKPYukz0dWuWB1WqQ9Zq+Xh64H+ONBWSEA=
 github.com/elythia-network/mkq v1.5.0/go.mod h1:P2IxPDkoYKypg2A2c4fjJ3hhbtU4YqhTziP6v1fywHY=
+github.com/elythia-network/mkq v1.5.1 h1:ptBcspskZ7HvgiECvIYM2SpPtE4QV/+NMHgm3OOKam8=
+github.com/elythia-network/mkq v1.5.1/go.mod h1:Fm8qyewEpiLC21bzVhJNirvP0RWxe93JnkrWIzKqmGM=
 github.com/felixge/httpsnoop v1.0.4 h1:NFTV2Zj1bL4mc9sqWACXbQFVBBg2W3GPvqp8/ESS2Wg=
 github.com/felixge/httpsnoop v1.0.4/go.mod h1:m8KPJKqk1gH5J9DgRY2ASl2lWCfGKXixSwevea8zH2U=
 github.com/forPelevin/gomoji v1.4.1 h1:7U+Bl8o6RV/dOQz7coQFWj/jX6Ram6/cWFOuFDEPEUo=

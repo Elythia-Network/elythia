@@ -12,7 +12,7 @@ require (
 	github.com/bbrks/go-blurhash v1.2.0
 	github.com/blezek/tga v0.0.0-20150626111426-80720cbc1017
 	github.com/elythia-network/mfm v0.1.0
-	github.com/elythia-network/mkq v1.5.0
+	github.com/elythia-network/mkq v1.5.1
 	github.com/forPelevin/gomoji v1.4.1
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/gabriel-vasile/mimetype v1.4.15
