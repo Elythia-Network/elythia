@@ -276,7 +276,10 @@ func (r *followingRepository) ListFollowers(userID string, limit, offset int) ([
 // findBy({followeeId, notify:'normal'}) と完全一致で絞るため値も 'normal' に揃える。
 func (r *followingRepository) ListFollowersToNotify(userID string) ([]*model.Following, error) {
 	var rows []*model.Following
-	if err := r.db.Where(`"followeeId" = ? AND notify = ?`, userID, "normal").
+	// 'normal' は bind せずリテラルで書く。000131 の部分 index
+	// (WHERE "notify" = 'normal') は、prepared statement の generic plan では
+	// 値が bind 変数だと述語を満たすと判定できず使われない。
+	if err := r.db.Where(`"followeeId" = ? AND notify = 'normal'`, userID).
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
