@@ -30,6 +30,22 @@ const (
 // API 用に組んであり、認証不要で外から叩かれるこの endpoint とは要件が違う。
 const CSPReportPath = "/csp-report"
 
+// frontendShikiVersion is the shiki version the frontend loads from esm.sh. It
+// must equal `dependencies.shiki` of frontend/packages/frontend and
+// frontend-embed (checked by TestFrontendCSP_EsmShSourcesMatchFrontend).
+const frontendShikiVersion = "4.4.3"
+
+// esmShSources are the esm.sh path prefixes the frontend actually loads.
+//
+// vite の `externalPackages` が `shiki/langs` `shiki/themes` を
+// `https://esm.sh/shiki@<版>/langs` 等に書き換える。その中身は
+// `/shiki@<版>/es2022/...` を経て、言語は `/@shikijs/langs@<版>/...`、
+// テーマは `/@shikijs/themes@<版>/...` を読む (2026-10-15 に esm.sh の応答で
+// 確認)。CSP のパスは末尾が `/` なら前方一致になる。
+const esmShSources = "https://esm.sh/shiki@" + frontendShikiVersion + "/" +
+	" https://esm.sh/@shikijs/langs@" + frontendShikiVersion + "/" +
+	" https://esm.sh/@shikijs/themes@" + frontendShikiVersion + "/"
+
 // frontendCSPDirectives is the policy shared by the SPA shell and the embed shell.
 //
 // **緩すぎると違反が出ず観測の意味が無い**ので、最終的に enforce したい形から
@@ -74,10 +90,13 @@ var frontendCSPDirectives = []string{
 	// esm.sh に渡り、CDN 側の可用性と完全性に依存する。
 	//
 	// 言語を絞ってバンドルすれば両立できる可能性はある (未検証)。
+	//
+	// **origin 全体ではなく、shiki が読むパスだけを許す** (esmShSources)。
+	// esm.sh は任意の npm パッケージを配るので、読み込める範囲を shiki に限る。
 	// **`'unsafe-inline'` は入れない** (#2786)。SPA shell の inline script は
 	// `cspScriptHashes` が出す `'sha256-...'` で通す。hash は HTML に埋める
 	// 文字列そのものから導くので、片方だけ変えて壊れることはない。
-	"script-src 'self' https://esm.sh",
+	"script-src 'self' " + esmShSources,
 	// **style 側の `'unsafe-inline'` は残す** (#2786)。Vue の `:style` バインディングが
 	// 146 箇所あり、DOM の inline `style` 属性になる。属性は `style-src-attr` の
 	// 管轄で hash では救えず (`'unsafe-hashes'` が要る)、外すと UI が広範に壊れる。
@@ -98,8 +117,8 @@ var frontendCSPDirectives = []string{
 	// 開発環境で wss: にならないため。esm.sh は script-src で既に信頼している
 	// CDN で、実測で .map (source map) 取得の connect-src 違反 report が届いて
 	// 観測を汚すため明示する (#2501。取得元はブラウザや拡張に依存し、信頼先は
-	// 増えない)。
-	"connect-src 'self' ws: wss: https://esm.sh",
+	// 増えない)。source map も同じパスの下にあるので、script-src と同じパスに絞る。
+	"connect-src 'self' ws: wss: " + esmShSources,
 	"worker-src 'self' blob:",
 	// URL プレビューの埋め込みプレイヤー (MkUrlPreview の player.url iframe) は
 	// YouTube 等の任意 origin を指す (#2501)。iframe 側の sandbox 属性で制約
