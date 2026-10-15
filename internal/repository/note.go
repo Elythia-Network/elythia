@@ -1338,9 +1338,17 @@ func applyTimelineFilter(q *gorm.DB, f model.TimelineDBFilter) *gorm.DB {
 	if f.HideFollowersOnlyReplyFromNonFollowee && f.ViewerID != "" {
 		// 返信先が followers 限定なら、その投稿者を viewer がフォローしている
 		// (または viewer 自身の投稿) 場合だけ残す。
-		q = q.Where(`("replyId" IS NULL OR "replyUserId" IS NULL OR NOT EXISTS (
-			SELECT 1 FROM "note" rp WHERE rp.id = "note"."replyId" AND rp.visibility = 'followers'
-		) OR "replyUserId" = ? OR EXISTS (
+		//
+		// 返信先の公開範囲は、主キーで 1 行引く相関スカラー副問い合わせで読む。
+		// `NOT EXISTS (SELECT 1 FROM "note" rp WHERE rp.id = "note"."replyId" AND
+		// rp.visibility = 'followers')` と書くと、OR の中なので anti join にできず、
+		// プランナは followers の note を全件読んでハッシュ表を作っていた
+		// (60 万ノートの検証用 DB で 91ms / 35,826 buffer)。
+		// 意味は同じ: 返信先が消えていて行が無いときは NULL になり、
+		// `NULL IS DISTINCT FROM 'followers'` は真なので、NOT EXISTS と同じく残す。
+		q = q.Where(`("replyId" IS NULL OR "replyUserId" IS NULL OR (
+			SELECT rp.visibility FROM "note" rp WHERE rp.id = "note"."replyId"
+		) IS DISTINCT FROM 'followers' OR "replyUserId" = ? OR EXISTS (
 			SELECT 1 FROM "following" fw WHERE fw."followerId" = ? AND fw."followeeId" = "note"."replyUserId"
 		))`, f.ViewerID, f.ViewerID)
 	}

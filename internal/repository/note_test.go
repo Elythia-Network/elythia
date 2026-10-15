@@ -3593,6 +3593,20 @@ func TestApplyTimelineFilter_HideFollowersOnlyReply(t *testing.T) {
 		ReplyID: &src, ReplyUserID: &targetID,
 	}))
 	require.NoError(t, repo.Create(&model.Note{ID: "hfr_plain", UserID: author.ID, Visibility: model.NoteVisibilityPublic}))
+	// 未フォローの人の public な投稿への返信は、公開範囲の判定で弾かれない。
+	require.NoError(t, repo.Create(&model.Note{ID: "hfr_pub_src", UserID: target.ID, Visibility: model.NoteVisibilityPublic}))
+	pubSrc := "hfr_pub_src"
+	require.NoError(t, repo.Create(&model.Note{
+		ID: "hfr_pub_reply", UserID: author.ID, Visibility: model.NoteVisibilityPublic,
+		ReplyID: &pubSrc, ReplyUserID: &targetID,
+	}))
+	// 返信先が消えている (note の自己参照に FK は無い、000080) 返信は、返信先の
+	// 公開範囲が分からないので弾かない。NOT EXISTS で書いていたときと同じ扱い。
+	gone := "hfr_gone_src"
+	require.NoError(t, repo.Create(&model.Note{
+		ID: "hfr_orphan_reply", UserID: author.ID, Visibility: model.NoteVisibilityPublic,
+		ReplyID: &gone, ReplyUserID: &targetID,
+	}))
 
 	f := model.TimelineDBFilter{ViewerID: viewer.ID, HideFollowersOnlyReplyFromNonFollowee: true}
 	got, err := repo.ListGlobalTimeline(50, "", "", f)
@@ -3603,6 +3617,8 @@ func TestApplyTimelineFilter_HideFollowersOnlyReply(t *testing.T) {
 	}
 	assert.True(t, ids["hfr_plain"], "通常の投稿は残る")
 	assert.False(t, ids["hfr_reply"], "未フォローの followers 投稿への返信は弾く")
+	assert.True(t, ids["hfr_pub_reply"], "未フォローでも public な投稿への返信は残る")
+	assert.True(t, ids["hfr_orphan_reply"], "返信先が消えている返信は残る")
 
 	// viewer が target をフォローしていれば出る。
 	require.NoError(t, testDB.Create(&model.Following{
