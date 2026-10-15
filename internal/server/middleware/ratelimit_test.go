@@ -630,6 +630,9 @@ func TestDefaultEndpointLimits_UnauthenticatedEntryPoints(t *testing.T) {
 		"/api/admin/accounts/create",
 		// credential 無しで購読を解除できる (本家 2026.10.0 と同じ)。
 		"/api/sw/unregister",
+		// 1 回ごとに app / auth_session の行を作る (本家には上限が無い)。
+		"/api/app/create",
+		"/api/auth/session/generate",
 	}
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {

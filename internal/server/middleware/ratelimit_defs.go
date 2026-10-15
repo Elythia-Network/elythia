@@ -209,6 +209,15 @@ var DefaultEndpointLimits = map[string]*EndpointLimit{
 	// 問題にならないが、参照そのものの上限として signup-pending と同格を置く。
 	"signup-application/status": {Duration: time.Hour, Max: 30},
 
+	// ── App / 旧来の認可 (Elythia 独自の上限) ──────────
+	// どちらも credential 無しで叩けて、1 回ごとに `app` / `auth_session` の行を
+	// 1 つ作る。**upstream に上限は無い** (`app/create.ts` /
+	// `auth/session/generate.ts` の `meta` に `limit` が無い) ので意図的な乖離。
+	// 正規のクライアントはログインのたびに app/create と session/generate を
+	// 1 回ずつ呼ぶだけなので、同じ接続元から 1 時間に数十回の登録は普通は起きない。
+	"app/create":            {Duration: time.Hour, Max: 30},
+	"auth/session/generate": {Duration: time.Hour, Max: 60},
+
 	// ── Admin ──────────────────────────────────────────
 	"admin/system-webhook/test":   {Duration: 15 * time.Minute, Max: 60},
 	"admin/roles/assignment-show": {Duration: time.Minute, Max: 120},
