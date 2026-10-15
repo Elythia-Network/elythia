@@ -33,7 +33,9 @@ const (
 // Supervisor (#3463).
 //
 // 状態の読み直しと世代の切り替えは、監視の goroutine 1 本だけが行う。
-// pubsub の通知は取りこぼすので、maintmode.PollInterval ごとにも読み直す。
+// pubsub の通知は取りこぼすので、周期でも読み直す。周期は、メンテナンス中か
+// 通常どおり動いていないときは maintmode.PollInterval、それ以外 (待機中) は
+// maintmode.IdlePollInterval。
 // Redis が読めないときは今の状態のまま動かない (メンテナンス中なら抜けない。
 // 設計 §3.5)。
 type maintTracker struct {
@@ -62,8 +64,26 @@ type maintTracker struct {
 	// あるときだけ)。
 	judgeCancel context.CancelFunc
 	judgeDone   chan struct{}
-	// pollInterval は読み直しの間隔。テストで縮める。
+	// pollInterval / idleInterval は読み直しの間隔 (メンテナンス中 / 待機中)。
+	// テストで縮める。
 	pollInterval time.Duration
+	idleInterval time.Duration
+	// judgeWake は、監視がメンテナンスの状態を読んだときに判定役を起こす。
+	judgeWake chan struct{}
+
+	// reported / reportedAt は最後に書けた報告とその時刻 (mu で守る)。報告は
+	// 中身が変わったときか、前に書いてから今の周期が過ぎたときだけ書く。
+	// 以前は監視の読み直しと heartbeat がそれぞれ周期ごとに書いていて、待機中は
+	// 2 秒に 2 回書いていた。
+	reported   maintmode.ProcReport
+	reportedAt time.Time
+	// reportFailed は最後の書き込みが失敗したことを示す (mu で守る)。失敗した
+	// 間は待機中でも短い周期で書き直す。待機中の周期 (10 秒) のままだと、
+	// ProcTTL (30 秒) の間に試せるのが 2 回ほどしかなく、報告が切れうる。
+	reportFailed bool
+	writeMu      sync.Mutex
+	// subscribe は状態の変化の通知を購読する。テストで差し替える。
+	subscribe func(context.Context) <-chan struct{}
 }
 
 func (m *maintTracker) init(s *Supervisor) {
@@ -72,8 +92,19 @@ func (m *maintTracker) init(s *Supervisor) {
 	m.id = s.deps.ProcessID
 	m.proc = maintmode.ProcRunning
 	m.pollInterval = maintmode.PollInterval
+	m.idleInterval = maintmode.IdlePollInterval
 	if s.deps.MaintenancePoll > 0 {
+		// 周期を縮めるテストは、待機中も同じ周期で動かす (待機中の周期を別に
+		// 縮めたいときは MaintenanceIdlePoll)。
 		m.pollInterval = s.deps.MaintenancePoll
+		m.idleInterval = s.deps.MaintenancePoll
+	}
+	if s.deps.MaintenanceIdlePoll > 0 {
+		m.idleInterval = s.deps.MaintenanceIdlePoll
+	}
+	m.judgeWake = make(chan struct{}, 1)
+	if m.store != nil {
+		m.subscribe = m.store.Subscribe
 	}
 	if role, err := config.ResolveProcessRole(); err == nil {
 		m.role = string(role)
@@ -231,6 +262,7 @@ func (m *maintTracker) start() {
 		judge := &maintmode.Judge{
 			Store: m.store, Counter: counter, ID: m.id,
 			DrainTimeout: m.sup.cfg.Maintenance.DrainTimeout,
+			IdleInterval: m.idleInterval, Wake: m.judgeWake,
 		}
 		if judge.DrainTimeout <= 0 {
 			judge.DrainTimeout = config.DefaultMaintenanceDrainTimeout
@@ -242,16 +274,45 @@ func (m *maintTracker) start() {
 	}
 }
 
+// heartbeat keeps the report fresh while the watch loop is busy (building
+// or stopping a generation) or not started yet. When the watch loop writes
+// the report on time, it writes nothing.
 func (m *maintTracker) heartbeat(ctx context.Context) {
-	ticker := time.NewTicker(m.pollInterval)
-	defer ticker.Stop()
+	timer := time.NewTimer(m.interval())
+	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
-			m.report(ctx)
+		case <-timer.C:
+			m.refresh(ctx)
+			timer.Reset(m.interval())
 		}
+	}
+}
+
+// interval is how often the state is re-read and the report refreshed:
+// pollInterval while a maintenance is active or this process is not running
+// normally (starting, draining, drained, resuming, resume_failed), and
+// idleInterval otherwise.
+//
+// The last report write having failed also selects pollInterval, until a
+// write succeeds.
+func (m *maintTracker) interval() time.Duration {
+	m.mu.Lock()
+	busy := m.reportFailed || m.proc != maintmode.ProcRunning
+	m.mu.Unlock()
+	if busy || m.state.Load() != nil {
+		return m.pollInterval
+	}
+	return m.idleInterval
+}
+
+// wakeJudge makes the judge of this process step at once, if it waits.
+func (m *maintTracker) wakeJudge() {
+	select {
+	case m.judgeWake <- struct{}{}:
+	default:
 	}
 }
 
@@ -303,10 +364,10 @@ func (m *maintTracker) leave() {
 }
 
 func (m *maintTracker) watch(ctx context.Context) {
-	hints := m.store.Subscribe(ctx)
-	ticker := time.NewTicker(m.pollInterval)
-	defer ticker.Stop()
+	hints := m.subscribe(ctx)
 	m.reconcile(ctx)
+	timer := time.NewTimer(m.interval())
+	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -316,12 +377,18 @@ func (m *maintTracker) watch(ctx context.Context) {
 				// 購読が切れた。読み直しの周期だけで追い、次の周で張り直す。
 				hints = nil
 			}
-		case <-ticker.C:
+		case <-timer.C:
 			if hints == nil {
-				hints = m.store.Subscribe(ctx)
+				hints = m.subscribe(ctx)
 			}
 		}
 		m.reconcile(ctx)
+		wait := m.interval()
+		if hints == nil {
+			// 通知が届かない間は、待機中でも短い周期で読み直す。
+			wait = m.pollInterval
+		}
+		timer.Reset(wait)
 	}
 }
 
@@ -332,10 +399,13 @@ func (m *maintTracker) reconcile(ctx context.Context) {
 	cancel()
 	if err != nil {
 		slog.Warn("maintenance: failed to read the state; keeping the current one", "err", err)
-		m.report(ctx)
+		m.refresh(ctx)
 		return
 	}
 	m.state.Store(st)
+	if st != nil {
+		m.wakeJudge()
+	}
 	holding := st.Holding()
 	switch proc := m.procState(); {
 	case holding && proc == maintmode.ProcRunning:
@@ -346,7 +416,7 @@ func (m *maintTracker) reconcile(ctx context.Context) {
 	case !holding && (proc == maintmode.ProcDrained || proc == maintmode.ProcResumeFailed):
 		m.resume(ctx)
 	}
-	m.report(ctx)
+	m.refresh(ctx)
 }
 
 func (m *maintTracker) enter(ctx context.Context) {
@@ -405,15 +475,49 @@ func (m *maintTracker) resume(ctx context.Context) {
 // report writes this process's report. Failures are logged only: the next
 // poll writes it again.
 func (m *maintTracker) report(ctx context.Context) {
+	m.write(ctx, false)
+}
+
+// refresh writes this process's report when it changed, or when the current
+// interval has passed since it was last written.
+func (m *maintTracker) refresh(ctx context.Context) {
+	m.write(ctx, true)
+}
+
+func (m *maintTracker) write(ctx context.Context, onlyIfDue bool) {
 	if m.store == nil {
 		return
 	}
+	// 監視と heartbeat の書き込みを 1 本ずつにする。並ぶと、先に取った古い中身が
+	// 後から書かれ、次に書くまで報告が戻って見える。
+	m.writeMu.Lock()
+	defer m.writeMu.Unlock()
+	every := m.interval()
 	r := m.snapshot()
+	if onlyIfDue {
+		m.mu.Lock()
+		due := r != m.reported || time.Since(m.reportedAt) >= every
+		m.mu.Unlock()
+		if !due {
+			return
+		}
+	}
 	rctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	if err := m.store.Report(rctx, r); err != nil && ctx.Err() == nil {
-		slog.Warn("maintenance: failed to write the process report", "err", err)
+	if err := m.store.Report(rctx, r); err != nil {
+		if ctx.Err() == nil {
+			slog.Warn("maintenance: failed to write the process report", "err", err)
+		}
+		m.mu.Lock()
+		m.reportFailed = true
+		m.mu.Unlock()
+		return
 	}
+	m.mu.Lock()
+	m.reported = r
+	m.reportedAt = time.Now()
+	m.reportFailed = false
+	m.mu.Unlock()
 }
 
 // snapshot builds this process's report from the current state.

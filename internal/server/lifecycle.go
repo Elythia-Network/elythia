@@ -46,8 +46,11 @@ type SupervisorDeps struct {
 	MaintenanceCounter maintmode.Counter
 	// ProcessID names this process in its maintenance report and as a judge.
 	ProcessID string
-	// MaintenancePoll overrides maintmode.PollInterval (tests).
+	// MaintenancePoll overrides maintmode.PollInterval, and also
+	// maintmode.IdlePollInterval unless MaintenanceIdlePoll is set (tests).
 	MaintenancePoll time.Duration
+	// MaintenanceIdlePoll overrides maintmode.IdlePollInterval (tests).
+	MaintenanceIdlePoll time.Duration
 }
 
 // generation is one Server together with the DB pool it was built on.

@@ -571,7 +571,7 @@ func TestJudge_TerminatedIsDeduplicatedAndBounded(t *testing.T) {
 	f.set(sessionOf(7, "elythia/server/p1"))
 	j2 := c.judge(s, f, "j")
 	j2.reset("op")
-	j2.firstSeen = c.now().Add(-time.Hour)
+	j2.lettingGo["p1"] = c.now().Add(-time.Hour)
 	for range 3 {
 		_, _ = j2.entering(ctx, st)
 	}

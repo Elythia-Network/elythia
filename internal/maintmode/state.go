@@ -68,12 +68,29 @@ const (
 const Channel = "internal:maintenance"
 
 // ProcTTL is how long a process report lives without being refreshed.
-// Processes refresh it every PollInterval.
-const ProcTTL = 10 * time.Second
+// Processes refresh it at least every IdlePollInterval.
+//
+// 報告を書くのは、読み直しの周期 (待機中は IdlePollInterval) か、監視の
+// goroutine が世代の作り直しで塞がっている間は heartbeat の周期で、書く間隔は
+// 最大で周期の 2 倍になる。その 2 倍より長く取る。報告は「まだ待つ理由」で、
+// held の根拠は pg_stat_activity なので、延ばしても判定は誤らない。延びるのは、
+// 落ちたプロセスの報告が残って判定役が待つ時間 (最大でこの値) だけ。
+const ProcTTL = 3 * IdlePollInterval
 
 // PollInterval is how often a process re-reads the state besides the pubsub
-// hint, and refreshes its report. pubsub は取りこぼすので、読み直しを併用する。
+// hint, refreshes its report, and judges, while a maintenance is active (the
+// state exists) or the process is not running normally.
+// pubsub は取りこぼすので、読み直しを併用する。
 const PollInterval = 2 * time.Second
+
+// IdlePollInterval is PollInterval while no maintenance is active and the
+// process runs normally. A maintenance is normally noticed at once through
+// the pubsub hint; this only bounds how late a process that missed the hint
+// notices it.
+//
+// メンテナンスをしていない時間がほとんどなので、その間の Redis の往復を減らす
+// (待機中は 2 秒ごとに約 11 往復していた)。
+const IdlePollInterval = 10 * time.Second
 
 // ErrActive is returned by Enter when a maintenance is already active.
 var ErrActive = errors.New("maintmode: a maintenance is already active")
@@ -409,8 +426,8 @@ func mustJSON(v any) string {
 	return string(b)
 }
 
-// notify publishes the change hint. 取りこぼしても各プロセスは PollInterval で
-// 読み直すので、失敗は返さない。
+// notify publishes the change hint. 取りこぼしても各プロセスは IdlePollInterval
+// 以内に読み直すので、失敗は返さない。
 func (s *Store) notify(ctx context.Context) {
 	_ = s.pub.Publish(ctx, Channel, "changed").Err()
 }
