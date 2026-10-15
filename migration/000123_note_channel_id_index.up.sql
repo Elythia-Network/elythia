@@ -1,0 +1,22 @@
+-- #3590: `note."channelId"` に index を張る。
+--
+-- チャンネルのタイムライン (`listByChannelID`)、チャンネルのハイライトの
+-- fallback (`ListFeatured`)、検索の `channelId` 指定は
+-- `"channelId" = ? ORDER BY id DESC LIMIT n` で引くが、index が無いため主キーを
+-- 新しい方から読んで filter していた。**投稿の少ないチャンネルほど遅い**
+-- (検証用の 60 万ノートで、30 件のチャンネルが 600ms / 78,282 buffer)。
+--
+-- 名前は Elythia 独自にする。本家にも同じ名前の index
+-- (`IDX_note_on_channelId_and_id_desc`) があったが、1651224615271-foreign-key で
+-- 落とされ、今の本家は単独の `IDX_f22169eb10657bded6d875ac8f` ("channelId") だけを
+-- 持つ。本家の昔の名前を借りると、本家の index だと読み違える。
+-- `channelId` が NULL の行 (ほとんど全部) を入れない部分 index にする。部分で
+-- ない複合 index は 29MB、この形は 128kB だった (同じ fixture)。
+-- `"channelId" = $1` は厳格な演算子なので、prepared statement の generic plan
+-- でも述語 `IS NOT NULL` を満たすと判定でき、この index を使える。
+--
+-- 本番の `note` に CONCURRENTLY で張るときの注意 (所要時間、INVALID が残ったときの
+-- 回復) は docs/deployment.md の「大きな表に index を足す migration」にある。
+-- note は最大テーブルなので CONCURRENTLY で書き込みを止めずに作る。
+-- CONCURRENTLY は単一文でしか実行できないので、1 ファイルに 1 本にしている。
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_note_channelId_id_desc" ON "note" ("channelId", "id" DESC) WHERE "channelId" IS NOT NULL;

@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS "IDX_user_isSuspended_id";

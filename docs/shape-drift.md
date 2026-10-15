@@ -580,7 +580,7 @@ Elythia は `IDX_<table>_<col>`、upstream (TypeORM) は `IDX_e5848eac4940934e23
 
 **新しく index を足すとき、upstream に同じ (table, unique, method, columns) の index があるなら upstream の index 名をそのまま使うこと。** `000058_channel_muting_expires_at.up.sql` が前例。そうすれば `IF NOT EXISTS` が効いて二重化しない。
 
-既存の 167 本は `testdata/known_duplicate_indexes.json` に記録し、`000068` が実行時に落とす。意図的に定義を変えている場合 (partial 化等) も同ファイルに追加する。
+既存の 167 本は `testdata/known_duplicate_indexes.json` に記録し、`000068` が実行時に落とす。upstream と同じ列に、意図して部分 index を並べる場合 (#3590 の `IDX_following_followeeId_notify_normal`) は、`000068` の対象ではないので `testdata/intended_partial_indexes.json` に理由と一緒に載せる。gate は、そこに載っていて実際に `WHERE` を持つものだけを許し、migration に現れなくなった項目があると落ちる。
 
 ### golden の再生成
 

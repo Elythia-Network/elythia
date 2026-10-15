@@ -1,0 +1,14 @@
+-- #3590: `note."visibleUserIds"` に GIN index を張る。
+--
+-- `notes/mentions` (`ListMentions`) は
+-- `(mentions @> ARRAY[?] OR "visibleUserIds" @> ARRAY[?])` で引く。`mentions` には
+-- 000054 の GIN index があるが、`visibleUserIds` には無いので BitmapOr にできず、
+-- 主キーを新しい方から全行読んで filter していた。**メンションの少ない利用者ほど
+-- 遅い** (検証用の 60 万ノートで 99ms / 53,404 buffer)。
+--
+-- 名前と定義は本家 (1621479946000-add-note-indexes) に揃える。TS 版から移った DB
+-- には同じ名前の index が既にあり、`IF NOT EXISTS` で何もしない。
+--
+-- 本番の `note` に CONCURRENTLY で張るときの注意は docs/deployment.md の
+-- 「大きな表に index を足す migration」にある。
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_NOTE_VISIBLE_USER_IDS" ON "note" USING gin ("visibleUserIds");

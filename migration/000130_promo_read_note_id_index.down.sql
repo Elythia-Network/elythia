@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS "IDX_promo_read_noteId";
