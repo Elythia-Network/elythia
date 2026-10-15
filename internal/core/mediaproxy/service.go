@@ -549,6 +549,14 @@ func (s *Service) resolveLocal(ctx context.Context, rawURL, filesPrefix string, 
 		return nil, fmt.Errorf("mediaproxy: local file access: %w", err)
 	}
 
+	// 大きさが分かるなら、上限を超えるものは読む前に断る (リモートの
+	// Content-Length が上限を超えたときと同じ)。上限の手前まで読んでから
+	// 捨てる分のメモリと転送を省く。
+	if size, ok := coredrive.ObjectSize(body); ok && size > maxDownload {
+		body.Close()
+		return nil, ErrTooLarge
+	}
+
 	// ローカルファイルの場合はMIME判定して画像処理
 	data, readErr := io.ReadAll(io.LimitReader(body, maxDownload+1))
 	body.Close()

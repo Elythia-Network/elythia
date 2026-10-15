@@ -1067,6 +1067,52 @@ func TestFetch_LocalFile_TooLarge(t *testing.T) {
 	assert.ErrorIs(t, err, ErrTooLarge)
 }
 
+// sizedStorage returns bodies that report their size up front (as S3 with
+// Content-Length and local files do) and records how many bytes were read.
+type sizedStorage struct {
+	size  int64
+	read  int64
+	close int
+}
+
+func (m *sizedStorage) Put(_ string, _ io.Reader) (string, error) { return "", nil }
+func (m *sizedStorage) Delete(_ string) error                     { return nil }
+func (m *sizedStorage) Get(_ string) (io.ReadCloser, error)       { return &sizedReadBody{s: m}, nil }
+
+type sizedReadBody struct{ s *sizedStorage }
+
+func (b *sizedReadBody) Size() int64 { return b.s.size }
+func (b *sizedReadBody) Read(p []byte) (int, error) {
+	n := len(p)
+	if remaining := b.s.size - b.s.read; int64(n) > remaining {
+		n = int(remaining)
+	}
+	if n == 0 {
+		return 0, io.EOF
+	}
+	b.s.read += int64(n)
+	return n, nil
+}
+func (b *sizedReadBody) Close() error { b.s.close++; return nil }
+
+// 大きさが分かるローカルのファイルが上限を超えるなら、読む前に断る。
+func TestFetch_LocalFile_KnownSizeTooLargeIsNotRead(t *testing.T) {
+	st := &sizedStorage{size: maxDownload + 1}
+	s := NewService("https://example.com", "ua", st, &mockAllowlist{allowed: map[string]bool{}}, []byte("test-secret"), nil)
+
+	_, err := s.Fetch(context.Background(), "https://example.com/files/big", ModeDefault, FormatWebP, true)
+	assert.ErrorIs(t, err, ErrTooLarge)
+	assert.Zero(t, st.read, "the body must not be read once its size is over the limit")
+	assert.Equal(t, 1, st.close)
+
+	// 上限以下なら従来どおり読む (中身は画像ではないので結果は問わない)。
+	st = &sizedStorage{size: 1024}
+	s = NewService("https://example.com", "ua", st, &mockAllowlist{allowed: map[string]bool{}}, []byte("test-secret"), nil)
+	_, err = s.Fetch(context.Background(), "https://example.com/files/small", ModeDefault, FormatWebP, true)
+	assert.NotErrorIs(t, err, ErrTooLarge)
+	assert.Equal(t, int64(1024), st.read)
+}
+
 func TestFetch_Remote_ContentLengthExceedsMax(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		// Content-Lengthが maxDownload を超える値を設定
