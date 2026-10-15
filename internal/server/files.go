@@ -291,7 +291,7 @@ func serveRangedFile(c echo.Context, rg coredrive.RangeGetter, key string) error
 	}
 	body := bufio.NewReaderSize(obj.Body, coredrive.MIMESniffLen)
 	need := coredrive.MIMESniffLen
-	if total >= 0 && total < int64(need) {
+	if total >= 0 && total < coredrive.MIMESniffLen {
 		need = int(total)
 	}
 	var sniff []byte
