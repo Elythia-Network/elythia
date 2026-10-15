@@ -34,12 +34,19 @@ export function addCustomEmoji(emoji: Misskey.entities.EmojiSimple) {
 }
 
 export function updateCustomEmojis(emojis: Misskey.entities.EmojiSimple[]) {
-	customEmojis.value = customEmojis.value.map(item => emojis.find(search => search.name === item.name) ?? item);
+	const emojisByName = new Map<string, Misskey.entities.EmojiSimple>();
+	for (const emoji of emojis) {
+		if (!emojisByName.has(emoji.name)) {
+			emojisByName.set(emoji.name, emoji);
+		}
+	}
+	customEmojis.value = customEmojis.value.map(item => emojisByName.get(item.name) ?? item);
 	set('emojis', customEmojis.value);
 }
 
 export function removeCustomEmojis(emojis: Misskey.entities.EmojiSimple[]) {
-	customEmojis.value = customEmojis.value.filter(item => !emojis.some(search => search.name === item.name));
+	const emojiNames = new Set(emojis.map(emoji => emoji.name));
+	customEmojis.value = customEmojis.value.filter(item => !emojiNames.has(item.name));
 	set('emojis', customEmojis.value);
 }
 
