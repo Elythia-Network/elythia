@@ -615,3 +615,39 @@ func TestPostScheduledNote_ContentOverLimit(t *testing.T) {
 }
 
 func ptr(s string) *string { return &s }
+
+// A draft whose author left with the account retained (isDeleted) or is
+// suspended when the schedule fires is not published.
+func TestPostScheduledNote_DeletedOrSuspendedAuthor(t *testing.T) {
+	cases := map[string]struct {
+		user       model.User
+		wantNotify bool
+	}{
+		"deleted":   {user: model.User{ID: "u1", IsDeleted: true, IsSuspended: true}},
+		"suspended": {user: model.User{ID: "u1", IsSuspended: true}, wantNotify: true},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			scheduledAt := timeFromMs(1234)
+			drafts := map[string]*model.NoteDraft{
+				"d1": {ID: "d1", UserID: "u1", Visibility: "public", Text: ptr("x"),
+					IsActuallyScheduled: true, ScheduledAt: &scheduledAt},
+			}
+			user := tc.user
+			p, dr, pub := newProcessor(drafts, map[string]*model.User{"u1": &user})
+			notif := &stubNotifier{}
+			p.SetNotifier(notif)
+
+			require.NoError(t, p.Handle(context.Background(), taskFor("d1")), "retry しても変わらない")
+			assert.Empty(t, pub.calls, "publish しない")
+			assert.Empty(t, dr.deleted, "下書きは消さない")
+			if !tc.wantNotify {
+				assert.Empty(t, notif.calls, "退会した利用者には通知しない")
+				return
+			}
+			require.Len(t, notif.calls, 1)
+			assert.Equal(t, notification.TypeScheduledNotePostFailed, notif.calls[0].Type)
+			assert.Equal(t, "d1", notif.calls[0].Extra["noteDraftId"])
+		})
+	}
+}

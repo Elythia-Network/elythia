@@ -199,6 +199,15 @@ func (p *PostScheduledNoteProcessor) Handle(ctx context.Context, task driver.Tas
 		// 防御的: nil ユーザを Create に流すと panic の元なので skip。
 		return errors.New("scheduled note draft has nil user")
 	}
+	if user.IsDeleted {
+		// アカウントを残す退会でも、予約の時刻に投稿を出さない。本家はローカルの
+		// 退会で利用者の行ごと消すので、下書きも CASCADE で消えて投稿されない。
+		// 下書きは退会のジョブ (RevokeDeletedLocalCredentials) が消すので、
+		// ここでは触らない。
+		slog.Info("scheduled note draft user is deleted, skipping",
+			"noteDraftId", payload.NoteDraftID, "userId", draft.UserID)
+		return nil
+	}
 	in := note.CreateInput{
 		User:           user,
 		Text:           draft.Text,
@@ -229,6 +238,11 @@ func (p *PostScheduledNoteProcessor) Handle(ctx context.Context, task driver.Tas
 	// 本文と CW の長さも同じく publish 失敗として扱う。drafts/create・update は
 	// 本家と同じ上限で弾くが、それより前に保存された下書きは検査を通っていない。
 	inputErr := scheduledContentErr(draft.Text, draft.CW)
+	if user.IsSuspended {
+		// 凍結中の利用者の予約投稿は出さない (本家は凍結後も出す。意図的な乖離)。
+		// 投稿の失敗と同じく scheduledNotePostFailed を通知し、下書きは残す。
+		inputErr = errScheduledNoteAuthorSuspended
+	}
 	var pollErr error
 	if draft.HasPoll {
 		pollInput := &note.PollInput{
@@ -315,6 +329,10 @@ func (p *PostScheduledNoteProcessor) Handle(ctx context.Context, task driver.Tas
 	}
 	return nil
 }
+
+// errScheduledNoteAuthorSuspended is the publish failure for a draft whose
+// author is suspended when the schedule fires.
+var errScheduledNoteAuthorSuspended = errors.New("scheduled note author is suspended")
 
 // Upstream MAX_NOTE_TEXT_LENGTH and the cw limit of notes/create and
 // notes/drafts/create.

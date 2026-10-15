@@ -10,6 +10,7 @@ import (
 
 // RevokeDeletedLocalCredentials idempotently revokes a retained account's
 // authentication and delivery credentials, preserving identity and content.
+// Scheduled note drafts are deleted too so they are never published.
 func (r *userRepository) RevokeDeletedLocalCredentials(userID string) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		var user model.User
@@ -41,6 +42,11 @@ func (r *userRepository) RevokeDeletedLocalCredentials(userID string) error {
 			if err := tx.Where(`"userId" = ?`, userID).Delete(credential).Error; err != nil {
 				return err
 			}
+		}
+		// 予約投稿の下書きを残すと、退会した後も予約の時刻に投稿が出る。本家は
+		// 退会で利用者の行ごと消すので、下書きも CASCADE で消えている。
+		if err := tx.Where(`"userId" = ? AND "isActuallyScheduled" = ?`, userID, true).Delete(&model.NoteDraft{}).Error; err != nil {
+			return err
 		}
 		return nil
 	})
