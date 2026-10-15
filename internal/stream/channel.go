@@ -44,6 +44,12 @@ type Channel interface {
 type ChannelContext interface {
 	// ID returns the per-channel id supplied by the client.
 	ID() string
+	// HasPermission reports whether the connection's token carries the given
+	// OAuth2 permission. Native login tokens have every permission; anonymous
+	// or detached contexts have none. Channels check it before acting on a
+	// client message that changes state (the kind of the matching REST
+	// endpoint), since RequiredPermission only gates subscribing.
+	HasPermission(kind string) bool
 	// User returns the authenticated user, or nil for anonymous connections.
 	User() any
 	// Send marshals payload as JSON and queues it as a `channel` envelope to
