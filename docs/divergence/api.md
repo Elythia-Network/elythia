@@ -59,11 +59,11 @@ Page に作者だけが見られる `private` を足し、公開範囲を `publi
 
 upstream の endpoint は `endpoints/` 配下 438 件 + `ApiServerService.ts` の fastify 直登録 6 件 (POST 5 / GET 1) = **444 件**。うち **444 件すべてを実装済み (coverage 100.0%)**。
 
-### 1-1. Elythia にしかない (106)
+### 1-1. Elythia にしかない (108)
 
 | 分類 | 件数 | 内容 |
 |---|---|---|
-| GET variant 追加 | 23 | `charts/*` 12 件、`emoji` / `emojis` / `federation/instances` / `federation/stats` / `fetch-rss` / `get-online-users-count` / `hashtags/trend` / `notes/featured` / `notes/reactions` / `server-info` / `bubble-game/ranking`。**対応する POST は両側にある**。ブラウザから直接叩く利便目的 |
+| GET variant 追加 | 25 | `charts/*` 12 件、`emoji` / `emojis` / `federation/instances` / `federation/stats` / `fetch-rss` / `get-online-users-count` / `hashtags/trend` / `notes/featured` / `notes/reactions` / `server-info` / `bubble-game/ranking` / `users/featured-notes` / `retention`。**対応する POST は両側にある**。`notes/reactions` 以外の 24 件は本家も `allowGet: true` で GET を受ける (`tools/apicompat` は本家を POST だけで数えるので、ここに分類される)。GET の route と `cacheSec` の `Cache-Control` は `TestCacheSecDrift` が本家と突き合わせる (#3593)。`notes/reactions` は本家が 2026.9.0 で `allowGet` を外した後も GET を残している |
 | cherrypick chat 拡張 | 15 | `chat/messages` / `chat/messages/create` / `read` / `update` / `reactions/create` / `reactions/delete`、`chat/rooms/joined` / `unmute` / `transfer-ownership` / `members/ban` / `members/update-membership` / `invitations/accept` / `delete` / `reject`、`chat/unread-count` |
 | 分割アップロード | 4 | `drive/files/create-chunked/start` / `append` / `finish` / `abort` (#2313 / #2314)。upstream に分割アップロードが無いため対応物なし。S3 の multipart upload を包むもので、`UploadId` は `chunked_upload_session` に閉じてクライアントへ出さない。能力は `/api/meta` の `chunkedUpload` で告知し、**未対応構成では field ごと出さない**ので純正クライアントは単発アップロードに倒れる |
 | 承認制の登録の申請 | 4 | `signup-application/apply` / `status` / `register` / `form-token` (#2569 / #2806)。upstream に承認制が無いため対応物なし。認証不要で、本人性は申請時に発行するクレームコードが担保する (hash で保存し、平文は申請直後に 1 度だけ返す)。**外部サーバーには一切依存しない** — 当初は MiAuth を使っていたが、相手サーバーに消せない access_token 行と通知を残すため廃止した (#2568)。承認制が有効でない構成では 503。`form-token` は captcha の実 provider が 1 つも無いときに `apply` を守る署名付きトークンを発行する (#2806) — 発動条件は既存の meta フラグから両側が導出でき、**新しい meta 列は作らない** (drop-in の復路で fail-open する列を増やさない)。`testcaptcha` は実 provider として数えない (中身は文字列一致で、数えると「マジック文字列だけが効いてトークンは要求されない」最悪の組み合わせになる)。トークンは HMAC 署名 + 最短滞在時間 + Redis の nonce で使い捨て。鍵は `instance_secret` から取るので config 項目は増えない。**これは captcha の代替ではない** — 止まるのは「フォームを取得せずに endpoint を直接叩く」bot だけで、発行 endpoint を並列で叩き 1 回だけ待って一斉に送るスクリプトには**リクエスト数が約 2 倍になる負担しか課さない**。IP を回す攻撃者には大差ない。したがって captcha 未設定時の管理画面の警告・申請の一括却下・生きている申請の総数上限は引き続き必要 |

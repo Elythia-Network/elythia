@@ -6,6 +6,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/repository"
+	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/labstack/echo/v4"
 )
 
@@ -27,7 +28,9 @@ func NewHandler(emojiRepo repository.EmojiRepository) *Handler {
 func (h *Handler) Emojis(c echo.Context) error {
 	emojis, err := h.emojiRepo.ListLocal()
 	if err != nil {
-		// エラー時は空配列で返却 (best-effort)
+		// エラー時は空配列で返却 (best-effort)。本家はエラーになりキャッシュされない
+		// ので、空の一覧を public にしない (#3593)。
+		middleware.SkipPublicCache(c)
 		return c.JSON(http.StatusOK, map[string]any{"emojis": []any{}})
 	}
 

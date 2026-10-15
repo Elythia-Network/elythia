@@ -405,6 +405,38 @@ func TestFeatured_ChannelFilter(t *testing.T) {
 	assert.Equal(t, "n_ch", resp[0]["id"])
 }
 
+// 本家の notes/featured は allowGet: true。GET の query の channelId / limit も
+// 読むこと。読まないと、全体の注目ノートが channelId 付きの URL で public に
+// キャッシュされる (#3593)。
+func TestFeatured_GetReadsQuery(t *testing.T) {
+	h, noteRepo, _ := newExtraHandler(t)
+	chID := "ch1"
+	noteRepo.Notes["n_ch1"] = &model.Note{ID: "n_ch1", UserID: "u1", Visibility: "public", ChannelID: &chID, User: &model.User{ID: "u1"}}
+	noteRepo.Notes["n_ch2"] = &model.Note{ID: "n_ch2", UserID: "u1", Visibility: "public", ChannelID: &chID, User: &model.User{ID: "u1"}}
+	noteRepo.Notes["n_glb"] = &model.Note{ID: "n_glb", UserID: "u1", Visibility: "public", User: &model.User{ID: "u1"}}
+	get := func(query string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		_ = h.Featured(echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/api/notes/featured?"+query, nil), rec))
+		return rec
+	}
+
+	rec := get("channelId=ch1")
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp []map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Len(t, resp, 2)
+	for _, n := range resp {
+		assert.NotEqual(t, "n_glb", n["id"])
+	}
+
+	rec = get("channelId=ch1&limit=1")
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Len(t, resp, 1)
+
+	assert.Equal(t, http.StatusBadRequest, get("limit=abc").Code)
+}
+
 // --- Unrenote ---
 
 func TestUnrenote_Success(t *testing.T) {

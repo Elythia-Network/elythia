@@ -8,17 +8,17 @@
 - mk-go implemented (TS の subset): **444**
 - mk-go coverage of TS: **100.0%**
 - TS only (mk-go 未実装): **0**
-- mk-go only (TS spec 外): **106**
+- mk-go only (TS spec 外): **108**
 
 ## TS 側に存在するが mk-go で未実装 (0)
 
 (なし)
 
-## mk-go 側にしかない endpoint (106)
+## mk-go 側にしかない endpoint (108)
 
-### GET variant 追加 (23)
+### GET variant 追加 (25)
 
-Misskey TS が POST のみ提供する endpoint に対し、mk-go が同パスへ GET を追加登録したもの。browser から直接 link で叩く用途等の利便目的で、対応する POST は両側に存在する。
+この表は Misskey TS の endpoint を POST だけで数えるので、同じパスで GET も受けるものがここに入る。多くは本家も `allowGet: true` で GET を受ける (本家と同じ GET の route と `cacheSec` は TestCacheSecDrift が確かめる)。対応する POST は両側に存在する。
 
 | Method | Path |
 |--------|------|
@@ -44,7 +44,9 @@ Misskey TS が POST のみ提供する endpoint に対し、mk-go が同パス�
 | GET | `/api/hashtags/trend` |
 | GET | `/api/notes/featured` |
 | GET | `/api/notes/reactions` |
+| GET | `/api/retention` |
 | GET | `/api/server-info` |
+| GET | `/api/users/featured-notes` |
 
 ### cherrypick 系 chat 拡張 (15)
 

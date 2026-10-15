@@ -122,6 +122,8 @@ func (h *Handler) Ranking(c echo.Context) error {
 
 	records, err := h.repo.Ranking(gameMode, 10)
 	if err != nil {
+		// 本家はエラーになりキャッシュされない。空の一覧を public にしない (#3593)。
+		middleware.SkipPublicCache(c)
 		return c.JSON(http.StatusOK, []any{})
 	}
 
@@ -141,6 +143,8 @@ func (h *Handler) Ranking(c echo.Context) error {
 	}
 	// upstream ranking.ts は cacheSec:60 → 未認証 GET に Cache-Control: public,
 	// max-age=60 を付ける (ApiCallService。POST/認証済みには付けない、#2027)。
+	// /api では middleware.APICacheControl が同じ表 (APICacheSec) から同じ値を付けるので
+	// 二重になる。この handler 単体のテストが見ているので残す (#3593)。
 	// token は raw token (HasRawToken) で見るので無効 token GET でも cache を付けない (#2049)。
 	if c.Request().Method == http.MethodGet && middleware.GetUser(c) == nil && !middleware.HasRawToken(c) {
 		c.Response().Header().Set("Cache-Control", "public, max-age=60")
