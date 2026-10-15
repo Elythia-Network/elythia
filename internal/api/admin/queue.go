@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -992,7 +993,7 @@ func packTaskSummary(t *QueueTaskSummary) map[string]any {
 	stacktrace := make([]string, 0, len(t.Stacktrace))
 	for i := len(t.Stacktrace) - 1; i >= 0; i-- {
 		if t.Stacktrace[i] != "" {
-			stacktrace = append(stacktrace, t.Stacktrace[i])
+			stacktrace = append(stacktrace, redactJobErrorURL(t.Type, t.Stacktrace[i]))
 		}
 	}
 	// upstream: isFailed = !!failedReason || stacktrace.length > 0。
@@ -1033,8 +1034,9 @@ func packTaskSummary(t *QueueTaskSummary) map[string]any {
 	// **失敗していない job には出さない。** 空文字を出すと frontend の
 	// `!= null` 判定を通ってしまう (上の doc 参照)。
 	if t.LastErr != "" {
-		pack["failedReason"] = t.LastErr
-		pack["lastErr"] = t.LastErr
+		lastErr := redactJobErrorURL(t.Type, t.LastErr)
+		pack["failedReason"] = lastErr
+		pack["lastErr"] = lastErr
 	}
 	// returnValue も同じ。値が無いときに {} を出すと "Return value" タブが
 	// 常に表示される。upstream は Bull の null をそのまま渡してタブを消す。
@@ -1315,6 +1317,11 @@ var jobSecretKeys = map[string]struct{}{
 	// allowlist が無い)。upstream も job data に secret を入れているので
 	// parity ではあるが、読める必要は無い。
 	"overrideSecret": {},
+	// 同じくテスト送信の送信先。Discord や Slack の webhook は URL そのものが
+	// 資格情報なので、secret と同じ扱いにする。upstream の job data には送信先が
+	// 常に入っている (`to`) が、mk-go は保存済みの webhook を webhookId で引くので、
+	// URL が job に載るのはテスト送信だけ。
+	"overrideUrl": {},
 	// プラグイン peer の送信本文 (`peerJob.Envelope`、#3037)。**中身を決めるのは
 	// プラグイン**で、本体はそれが何かを知らない。実際の同梱プラグインは
 	// 利用者のノートや外部サービスの応答を載せうるし、peer は本来「その
@@ -1329,6 +1336,21 @@ var jobSecretKeys = map[string]struct{}{
 }
 
 const redactedPlaceholder = "[redacted]"
+
+// urlErrorPrefix matches the `<Op> "<URL>": ` part of a *url.Error message.
+var urlErrorPrefix = regexp.MustCompile(`([A-Za-z]+) "(?:[^"\\]|\\.)*": `)
+
+// redactJobErrorURL removes request URLs from a webhook job's failure text.
+//
+// processor は失敗の文面から URL を落とすようにした (webhook の URL は資格情報に
+// なりうる) が、それより前に失敗した job は URL 入りの文面を Redis に持っている。
+// 表示の側でも伏せる。検索はこの結果に対して行うので、URL で当てることもできない。
+func redactJobErrorURL(taskType, s string) string {
+	if taskType != queue.TaskTypeUserWebhook && taskType != queue.TaskTypeSystemWebhook {
+		return s
+	}
+	return urlErrorPrefix.ReplaceAllString(s, "$1 "+redactedPlaceholder+": ")
+}
 
 // redactJobSecrets replaces secret-bearing fields in a decoded job body.
 func redactJobSecrets(body any) any {

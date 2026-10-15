@@ -446,3 +446,44 @@ func TestWebhookProcessor_DrainsBoundedResponseBody(t *testing.T) {
 func TestDefaultWebhookTimeout_MatchesUpstream(t *testing.T) {
 	assert.Equal(t, 5*time.Second, processors.DefaultWebhookTimeout)
 }
+
+type webhookRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f webhookRoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// 失敗の文面は failedReason としてモデレーターの admin/queue に出る。Discord などの
+// webhook は URL が資格情報なので、*url.Error が載せる URL を残さない。
+func TestWebhookProcessor_ErrorOmitsURL(t *testing.T) {
+	const token = "SECRET-WEBHOOK-TOKEN"
+	failing := &http.Client{Transport: webhookRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("connection refused")
+	})}
+
+	cases := []struct {
+		name     string
+		client   processors.WebhookHTTPClient
+		hookURL  string
+		override string
+		wantErr  string
+	}{
+		{name: "network error on saved webhook", client: failing, hookURL: "https://hook.example/api/webhooks/1/" + token, wantErr: "connection refused"},
+		{name: "network error on test override", client: failing, override: "https://hook.example/api/webhooks/2/" + token, wantErr: "connection refused"},
+		{name: "unparsable url", client: &stubHTTPClient{}, hookURL: "://hook.example/" + token, wantErr: "missing protocol scheme"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p, _, _ := newTestWebhookProcessor(t, tc.client, map[string]*model.Webhook{
+				"h1": {ID: "h1", URL: tc.hookURL},
+			}, nil)
+			task := queue.NewUserWebhookTask(queue.WebhookPayload{
+				WebhookID: "h1", EventType: "note", Body: []byte(`{}`), OverrideURL: tc.override,
+			})
+			err := p.HandleUser(context.Background(), task)
+			require.Error(t, err)
+			assert.NotContains(t, err.Error(), token)
+			assert.NotContains(t, err.Error(), "hook.example")
+			// 原因は残す (運用で失敗の種類を見分けられるように)。
+			assert.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
+}

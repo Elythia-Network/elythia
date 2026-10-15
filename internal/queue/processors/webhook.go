@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	neturl "net/url"
 	"time"
 
 	"github.com/elythia-network/elythia/internal/queue"
@@ -122,7 +123,7 @@ func (p *WebhookProcessor) handle(ctx context.Context, t driver.Task, user bool)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload.Body))
 	if err != nil {
-		return fmt.Errorf("build webhook request: %w: %w", err, driver.ErrSkipRetry)
+		return fmt.Errorf("build webhook request: %w: %w", withoutWebhookURL(err), driver.ErrSkipRetry)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", p.userAgent)
@@ -148,8 +149,9 @@ func (p *WebhookProcessor) handle(ctx context.Context, t driver.Task, user bool)
 		if !isOverride {
 			p.recordStatus(payload.WebhookID, user, sentAt, 1)
 		}
+		err = withoutWebhookURL(err)
 		slog.Warn("webhook deliver: http error",
-			"hookId", payload.WebhookID, "url", url, "err", err)
+			"hookId", payload.WebhookID, "err", err)
 		return err
 	}
 	defer func() {
@@ -175,6 +177,21 @@ func (p *WebhookProcessor) handle(ctx context.Context, t driver.Task, user bool)
 		// 5xx 等は一時的障害としてリトライ。
 		return errors.New("webhook server error: " + resp.Status)
 	}
+}
+
+// withoutWebhookURL drops the request URL that *url.Error carries in its
+// message, keeping the operation and the underlying cause.
+//
+// 失敗の文面は job の failedReason になり、モデレーターが admin/queue から
+// 読める。Discord や Slack の webhook は URL そのものが資格情報なので、文面に
+// 載せない (backup の通知 internal/backup/daemon/notify.go と同じ伏せ方)。
+// 送信先は job の webhookId から辿れる。
+func withoutWebhookURL(err error) error {
+	var ue *neturl.Error
+	if !errors.As(err, &ue) {
+		return err
+	}
+	return fmt.Errorf("%s: %w", ue.Op, ue.Err)
 }
 
 // errWebhookConfig marks a wiring problem (repository not configured), which

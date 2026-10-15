@@ -63,7 +63,7 @@ func TestJobSecretKeysMatchPayloadTags(t *testing.T) {
 	}
 	specs := []spec{
 		{reflect.TypeOf(queue.DeliverPayload{}), []string{"KeyPEM", "Ed25519PrivPEM"}},
-		{reflect.TypeOf(queue.WebhookPayload{}), []string{"OverrideSecret"}},
+		{reflect.TypeOf(queue.WebhookPayload{}), []string{"OverrideSecret", "OverrideURL"}},
 	}
 
 	// **別 package の非公開 struct に由来するものは、ここでは名前で持つ。**
@@ -152,7 +152,10 @@ func TestPackTaskSummary_RedactsWebhookSecret(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContainsf(t, string(encoded), "HOOK-SECRET",
 		"レスポンスから webhook の secret が読める: %s", encoded)
-	require.Contains(t, string(encoded), "https://example/hook")
+	// テスト送信の送信先も伏せる (Discord などは URL が資格情報)。
+	require.NotContainsf(t, string(encoded), "example/hook",
+		"レスポンスから webhook の送信先が読める: %s", encoded)
+	require.Contains(t, string(encoded), "w1")
 }
 
 // **プラグイン peer の送信本文が API から読めないこと (#3037)。**
@@ -180,4 +183,37 @@ func TestPeerEnvelopeIsRedacted(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, redactedPlaceholder, m["envelope"])
 	assert.Equal(t, "peer.example", m["host"])
+}
+
+// **webhook の失敗の文面に載った送信先 URL が出ないこと。**
+//
+// processor は *url.Error の URL を落とすようにしたが、それより前に失敗した job は
+// URL 入りの文面を持っている。failedReason / lastErr / stacktrace のどれからも
+// 読めず、検索 (packTaskSummary の結果に対して行う) でも当たらないこと。
+func TestPackTaskSummary_RedactsWebhookErrorURL(t *testing.T) {
+	const reason = `Post "https://hook.example/api/webhooks/1/SECRET-TOKEN": dial tcp 192.0.2.1:443: connect: connection refused`
+	for _, typ := range []string{queue.TaskTypeUserWebhook, queue.TaskTypeSystemWebhook} {
+		t.Run(typ, func(t *testing.T) {
+			got := packTaskSummary(&QueueTaskSummary{
+				ID: "j1", Queue: "webhook", Type: typ, State: "failed",
+				Payload:    []byte(`{"webhookId":"w1"}`),
+				LastErr:    reason,
+				Stacktrace: []string{reason},
+			})
+			encoded, err := json.Marshal(got)
+			require.NoError(t, err)
+			assert.NotContains(t, string(encoded), "SECRET-TOKEN")
+			assert.NotContains(t, string(encoded), "hook.example")
+			// 原因は残す。
+			assert.Equal(t, `Post [redacted]: dial tcp 192.0.2.1:443: connect: connection refused`, got["failedReason"])
+			assert.Equal(t, got["failedReason"], got["lastErr"])
+			assert.Equal(t, []string{`Post [redacted]: dial tcp 192.0.2.1:443: connect: connection refused`}, got["stacktrace"])
+			assert.False(t, jobMatchesSearch(got, searchTerms("secret-token")), "URL で検索に当たってはいけない")
+		})
+	}
+
+	// webhook 以外の job の文面は変えない (配送先の inbox は資格情報ではなく、追跡に要る)。
+	other := `Post "https://remote.example/inbox": context deadline exceeded`
+	got := packTaskSummary(&QueueTaskSummary{ID: "j2", Queue: "deliver", Type: queue.TaskTypeDeliver, LastErr: other})
+	assert.Equal(t, other, got["failedReason"])
 }
