@@ -32,6 +32,9 @@ func (q *RoleNotesQuery) ListByRole(roleID string, limit int, sinceID, untilID s
 		Order(paginationOrder(sinceID, untilID, `"note"."id"`)).
 		Limit(limit)
 
+	// 本家 roles/notes は generateBaseNoteFilteringQuery を掛けるので、投稿者・
+	// 返信先・リノート先のいずれかの作者が凍結されていれば除く。
+	query = applySuspendedAuthorExclusion(query)
 	if sinceID != "" {
 		query = query.Where(`"note"."id" > ?`, sinceID)
 	}

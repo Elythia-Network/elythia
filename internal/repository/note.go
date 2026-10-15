@@ -516,6 +516,7 @@ func (r *noteRepository) ListByUserIDFiltered(userID, viewerID, untilID, sinceID
 	// N+1 になるため、LIMIT 前に SQL で絞る。条件は core/note.CanSeeNote と
 	// 一致させる (note_reaction.ListByUserID と同じ可視性定義)。
 	q = applyViewerVisibility(q, viewerID)
+	q = applySuspendedEmbedAuthorExclusion(q)
 	if untilID != "" {
 		q = q.Where("id < ?", untilID)
 	}
@@ -1445,6 +1446,21 @@ func applySuspendedAuthorExclusion(q *gorm.DB) *gorm.DB {
 			` AND ("replyUserId" IS NULL OR ` + notExists(`"note"."replyUserId"`) + `)` +
 			` AND ("renoteUserId" IS NULL OR ` + notExists(`"note"."renoteUserId"`) + `)`,
 	)
+}
+
+// applySuspendedEmbedAuthorExclusion excludes notes whose reply target or
+// renote target belongs to a suspended user other than the note's own author
+// (upstream generateSuspendedUserQueryForNote with excludeAuthor: true)。
+//
+// 一覧の持ち主が決まっている経路 (users/notes) 用。本家はこの経路で投稿者
+// 自身の凍結を見ず、返信先・リノート先の作者が投稿者と同じ場合も残す。
+// 第三者の凍結した利用者へのリノート・引用・返信は、本文ごと埋め込まれるので
+// ここで落とす。
+func applySuspendedEmbedAuthorExclusion(q *gorm.DB) *gorm.DB {
+	cond := func(col string) string {
+		return `(` + col + ` IS NULL OR ` + col + ` = "note"."userId" OR NOT EXISTS (SELECT 1 FROM "user" su WHERE su."id" = ` + col + ` AND su."isSuspended" = true))`
+	}
+	return q.Where(cond(`"note"."replyUserId"`) + ` AND ` + cond(`"note"."renoteUserId"`))
 }
 
 // ListHomeTimeline returns notes by the user and users they follow.
