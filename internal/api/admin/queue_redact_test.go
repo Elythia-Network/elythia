@@ -37,18 +37,18 @@ func TestPackJobData_RedactsSigningKeys(t *testing.T) {
 
 func TestRedactPayloadSecrets(t *testing.T) {
 	raw := []byte(`{"inbox":"https://remote.example/inbox","keyPem":"SECRET-RSA","ed25519PrivPem":"SECRET-ED"}`)
-	got := redactPayloadSecrets(raw)
+	got := redactPayloadSecrets(queue.TaskTypeDeliver, raw)
 	require.NotContains(t, got, "SECRET-RSA")
 	require.NotContains(t, got, "SECRET-ED")
 	require.Contains(t, got, "https://remote.example/inbox")
 
 	// 鍵を持たない payload は素通し (無駄な再シリアライズをしない)。
 	plain := []byte(`{"inbox":"https://remote.example/inbox"}`)
-	require.Equal(t, string(plain), redactPayloadSecrets(plain))
+	require.Equal(t, string(plain), redactPayloadSecrets(queue.TaskTypeDeliver, plain))
 
 	// JSON でないものはそのまま (非 JSON payload の job がありうる)。
-	require.Equal(t, "not-json", redactPayloadSecrets([]byte("not-json")))
-	require.Equal(t, "", redactPayloadSecrets(nil))
+	require.Equal(t, "not-json", redactPayloadSecrets(queue.TaskTypeWebPush, []byte("not-json")))
+	require.Equal(t, "", redactPayloadSecrets(queue.TaskTypeWebPush, nil))
 }
 
 // **redact の一覧が payload の json tag と一致していること。**
@@ -168,7 +168,7 @@ func TestPeerEnvelopeIsRedacted(t *testing.T) {
 	raw := []byte(`{"host":"peer.example","sendId":"s1","envelope":{"secret":"plugin data"}}`)
 
 	// mk-go 独自の `payload` フィールド側。
-	out := redactPayloadSecrets(raw)
+	out := redactPayloadSecrets("plugin:demo:_peer", raw)
 	assert.NotContains(t, out, "plugin data", "peer の送信本文がそのまま出ている")
 	assert.Contains(t, out, redactedPlaceholder)
 	// **伏せるのは envelope だけ。** host / sendId は追跡に要る。
@@ -176,7 +176,7 @@ func TestPeerEnvelopeIsRedacted(t *testing.T) {
 	assert.Contains(t, out, "s1")
 
 	// `data.body` 側。
-	body := redactJobSecrets(map[string]any{
+	body := redactJobSecrets("plugin:demo:_peer", map[string]any{
 		"host": "peer.example", "envelope": map[string]any{"secret": "plugin data"},
 	})
 	m, ok := body.(map[string]any)
@@ -216,4 +216,48 @@ func TestPackTaskSummary_RedactsWebhookErrorURL(t *testing.T) {
 	other := `Post "https://remote.example/inbox": context deadline exceeded`
 	got := packTaskSummary(&QueueTaskSummary{ID: "j2", Queue: "deliver", Type: queue.TaskTypeDeliver, LastErr: other})
 	assert.Equal(t, other, got["failedReason"])
+}
+
+// **Web Push の通知の中身が admin/queue から読めないこと。**
+//
+// チャットやダイレクトのノートの本文が入り、宛先の本人にしか見せないもの。
+// data / payload のどちらからも読めず、検索 (packTaskSummary の結果に対して
+// 行う) でも当たらないこと。宛先と種類は残す。
+func TestPackTaskSummary_RedactsWebPushBody(t *testing.T) {
+	raw, err := json.Marshal(queue.WebPushPayload{
+		UserID: "u1", Type: "newChatMessage",
+		Body: json.RawMessage(`{"type":"newChatMessage","body":{"text":"PRIVATE-CHAT-TEXT"}}`),
+	})
+	require.NoError(t, err)
+
+	got := packTaskSummary(&QueueTaskSummary{ID: "j1", Queue: "webpush", Type: queue.TaskTypeWebPush, Payload: raw})
+	encoded, err := json.Marshal(got)
+	require.NoError(t, err)
+	assert.NotContains(t, string(encoded), "PRIVATE-CHAT-TEXT")
+	assert.NotContains(t, got["payload"].(string), "PRIVATE-CHAT-TEXT", "payload フィールドから本文が読める")
+	dataJSON, err := json.Marshal(got["data"])
+	require.NoError(t, err)
+	assert.NotContains(t, string(dataJSON), "PRIVATE-CHAT-TEXT", "data フィールドから本文が読める")
+	assert.Contains(t, string(encoded), `"userId":"u1"`)
+	assert.Contains(t, string(encoded), "newChatMessage")
+	assert.False(t, jobMatchesSearch(got, searchTerms("private-chat-text")), "本文で検索に当たってはいけない")
+	assert.True(t, jobMatchesSearch(got, searchTerms("u1")), "宛先では検索できる")
+
+	// 同じ key でも webhook の送信本文は伏せない (upstream も job data に持つ)。
+	hook := packTaskSummary(&QueueTaskSummary{
+		ID: "j2", Queue: "webhook", Type: queue.TaskTypeUserWebhook,
+		Payload: []byte(`{"webhookId":"w1","body":{"text":"hook body"}}`),
+	})
+	hookJSON, err := json.Marshal(hook)
+	require.NoError(t, err)
+	assert.Contains(t, string(hookJSON), "hook body")
+}
+
+// jobSecretKeysByType の key が payload の json tag と一致していること
+// (tag を変えると黙って伏せなくなるため)。
+func TestJobSecretKeysByTypeMatchPayloadTags(t *testing.T) {
+	f, ok := reflect.TypeOf(queue.WebPushPayload{}).FieldByName("Body")
+	require.True(t, ok, "WebPushPayload.Body が無い (rename した? jobSecretKeysByType も直すこと)")
+	tag := strings.SplitN(f.Tag.Get("json"), ",", 2)[0]
+	assert.Equal(t, map[string]map[string]struct{}{queue.TaskTypeWebPush: {tag: {}}}, jobSecretKeysByType)
 }

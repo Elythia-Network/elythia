@@ -1023,7 +1023,7 @@ func packTaskSummary(t *QueueTaskSummary) map[string]any {
 		"queue":   t.Queue,
 		"type":    t.Type,
 		"state":   t.State,
-		"payload": redactPayloadSecrets(t.Payload),
+		"payload": redactPayloadSecrets(t.Type, t.Payload),
 		"retried": t.Retried,
 		// maxRetry は mk-go 独自 field。mkq driver は TaskSummary.MaxRetry を
 		// 埋めないので、opts.attempts から拾えるならそちらを使う (0 のまま出すと
@@ -1084,7 +1084,7 @@ func packJobData(t *QueueTaskSummary) map[string]any {
 	if body == nil {
 		body = map[string]any{}
 	}
-	body = redactJobSecrets(body)
+	body = redactJobSecrets(t.Type, body)
 	body = expandActivityBody(t.Type, body)
 	// Type が空になることは無い。mkq driver は framing が無ければ BullMQ の
 	// job.name に落とし、その既定は queue 名。
@@ -1318,9 +1318,8 @@ var jobSecretKeys = map[string]struct{}{
 	// parity ではあるが、読める必要は無い。
 	"overrideSecret": {},
 	// 同じくテスト送信の送信先。Discord や Slack の webhook は URL そのものが
-	// 資格情報なので、secret と同じ扱いにする。upstream の job data には送信先が
-	// 常に入っている (`to`) が、mk-go は保存済みの webhook を webhookId で引くので、
-	// URL が job に載るのはテスト送信だけ。
+	// 資格情報なので、secret と同じ扱いにする。mk-go は保存済みの webhook を
+	// webhookId で引くので、URL が job に載るのはテスト送信だけ。
 	"overrideUrl": {},
 	// プラグイン peer の送信本文 (`peerJob.Envelope`、#3037)。**中身を決めるのは
 	// プラグイン**で、本体はそれが何かを知らない。実際の同梱プラグインは
@@ -1333,6 +1332,27 @@ var jobSecretKeys = map[string]struct{}{
 	// 伏せても運用は困らない — 同じ job に `host` / `sendId` / 試行回数 /
 	// 失敗理由が出るので、送信の追跡はできる。
 	"envelope": {},
+}
+
+// jobSecretKeysByType are payload fields hidden only for one task type,
+// because the same key means something else in other payloads.
+var jobSecretKeysByType = map[string]map[string]struct{}{
+	// Web Push の通知の中身 (`queue.WebPushPayload.Body`)。チャットのメッセージや
+	// フォロワー限定・ダイレクトのノートの本文が入り、**宛先の本人にしか見せない
+	// もの**。upstream は push を queue に積まないので、モデレーターの queue 画面に
+	// 出るのは mk-go だけ。宛先 (`userId`) と種類 (`type`) は追跡に要るので残す。
+	// `body` は webhook の job では upstream も見せている送信本文なので、型を
+	// 限って伏せる。
+	queue.TaskTypeWebPush: {"body": {}},
+}
+
+// isJobSecretKey reports whether key must be redacted in a payload of taskType.
+func isJobSecretKey(taskType, key string) bool {
+	if _, ok := jobSecretKeys[key]; ok {
+		return true
+	}
+	_, ok := jobSecretKeysByType[taskType][key]
+	return ok
 }
 
 const redactedPlaceholder = "[redacted]"
@@ -1353,13 +1373,13 @@ func redactJobErrorURL(taskType, s string) string {
 }
 
 // redactJobSecrets replaces secret-bearing fields in a decoded job body.
-func redactJobSecrets(body any) any {
+func redactJobSecrets(taskType string, body any) any {
 	m, ok := body.(map[string]any)
 	if !ok {
 		return body
 	}
 	for k := range m {
-		if _, secret := jobSecretKeys[k]; secret {
+		if isJobSecretKey(taskType, k) {
 			m[k] = redactedPlaceholder
 		}
 	}
@@ -1371,7 +1391,7 @@ func redactJobSecrets(body any) any {
 // JSON として読めないものはそのまま返す (非 JSON payload の job がありうる)。
 // 伏せ損ねるより読めるほうを優先する形だが、この経路は `data` 側の redact と
 // 二重になっており、かつ producer は既に鍵を載せていないので実害は無い。
-func redactPayloadSecrets(raw []byte) string {
+func redactPayloadSecrets(taskType string, raw []byte) string {
 	if len(raw) == 0 {
 		return string(raw)
 	}
@@ -1381,7 +1401,7 @@ func redactPayloadSecrets(raw []byte) string {
 	}
 	var found bool
 	for k := range m {
-		if _, secret := jobSecretKeys[k]; secret {
+		if isJobSecretKey(taskType, k) {
 			m[k] = redactedPlaceholder
 			found = true
 		}
