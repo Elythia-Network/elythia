@@ -133,6 +133,7 @@ cp .config/docker.yml.example .config/docker.yml
 
 > **worker 数の扱い**:
 > - `mkq` driver は queue ごとに worker を分けているので `deliverJobConcurrency` / `inboxJobConcurrency` / `relationshipJobConcurrency` はそれぞれの queue 専用 worker 数として扱われる。明示指定の無い queue は hot queue 優先の per-queue 既定値 (inbox=16 / deliver=16 / relationship=4 / objectStorage=4 / webhook=4 / push=4 / export=2 / maintenance=2) を使う。旧来の `総budget / len(queues)` 均等割りだと inbox が starve していた (#1374) ため hot-tuned default に変更。worker 数 ≒ Redis 接続数 (worker 毎に BZPopMin で接続を保持) なので、`redisForJobQueue.poolSize` 未設定時は mkq driver が worker 総数 + 隔離許容ぶん (`queueStuckWorkerSeconds` 参照) + 余裕に自動サイジングする (`<queue>JobConcurrency` を上げると pool も追従)。明示設定した場合はその値が尊重される。**自動サイジングが効くのは `poolSize` 未指定のときだけで、`jobQueueAutoScale` による増加は見込んでいない。** autoscale を有効にするなら、追跡対象キューでは worker が最大 `max(<queue>JobConcurrency, maxWorkers) + max(<queue>JobConcurrency, 4)` 本走りうる (`queueStuckWorkerSeconds` 参照) ので、おおむね `maxWorkers` の 2 倍を賄える値を明示すること (隔離の許容幅は autoscale ではなく**設定値**に紐づくので、`maxWorkers + max(<queue>JobConcurrency, 4)` が正確な上限)。
+> - 落ちた worker が残した job を戻す走査 (stalled-check) は、queue ごとに 1 つの worker だけが回す (#3592)。縮小ではその worker を、queue の worker を全部止めるとき以外は止めない。そのため、縮小のときに idle な worker がその 1 つしか無いと、代わりに処理中の worker を 1 つ止める (縮小 1 回で最大 1 件。止めた job は retry に回り、試行を 1 回消費する)。縮小が起きるのは主に `jobQueueAutoScale` を有効にしたとき
 >
 > **rate limit (`*JobPerSec`) の挙動**:
 > - `mkq.WithRateLimit` で **worker pull レイヤ** に制御が入るため、レート制限が他 queue の処理を阻害しない。

@@ -90,6 +90,9 @@ type Server struct {
 	// (startSupervisor)。
 	stuckAfter        time.Duration
 	superviseInterval time.Duration
+	// stalledInterval is the stalled-job scan interval of the one Worker
+	// per queue that runs it. Zero keeps mkq's default.
+	stalledInterval time.Duration
 	// handlerDeadline bounds how long the dispatcher waits for one job's
 	// handler (#2658). Zero applies defaultHandlerDeadline; a negative
 	// value disables the bound. Task types in handlerDeadlines override it.
@@ -198,6 +201,8 @@ type workerPool struct {
 	optsBase []mkq.WorkerOption
 	// name is the queue name, used for log attribution only.
 	name string
+	// stalledInterval is passed to the stalled checker (0 = mkq's default).
+	stalledInterval time.Duration
 	// stuckAfter is how long a handler may run before its Worker stops
 	// counting towards the queue's worker budget. <= 0 disables liveness
 	// tracking for this pool.
@@ -299,6 +304,9 @@ type workerHandle struct {
 	completedAtReinstate uint64
 	// seq is a per-pool monotonic id for log attribution.
 	seq uint64
+	// stalledChecker marks the Worker started with the stalled-job scan.
+	// The others are started with mkq.WithStalledInterval(0). Fixed at spawn.
+	stalledChecker bool
 }
 
 // busyFor reports how long the handle has been inside its handler, or 0
@@ -440,6 +448,7 @@ func (s *Server) Start() error {
 			handler:         newDispatchHandler(handlersSnapshot, name, s.observer, s.handlerDeadline, &s.abandoned),
 			optsBase:        optsBase,
 			name:            name,
+			stalledInterval: s.stalledInterval,
 			stuckAfter:      s.resolvedStuckAfter(name),
 			nanos:           s.clock(),
 			baseConcurrency: concurrency,
@@ -976,17 +985,19 @@ func (p *workerPool) adjustLocked() error {
 		// scale-up: 不足分の Worker を新規 spawn
 		needed := n - current
 		spawned := make([]*workerHandle, 0, needed)
+		// roster に stalled-check の役が居なければ、最初に立てる 1 本に持たせる。
+		// 役を持つ Worker が隔離されたときと、0 本から立て直すときがここに来る
+		// (隔離した Worker は止めないので、戻るまで役が 2 本になる。Lua 側の
+		// stalled-check の key が残っている間の呼び出しは何もせずに返るので、
+		// 走査が倍になることはない)。
+		needChecker := !hasStalledChecker(p.workers)
 		for i := 0; i < needed; i++ {
-			opts := append([]mkq.WorkerOption{mkq.WithConcurrency(1)}, p.optsBase...)
-			h := &workerHandle{seq: p.seq}
-			w, err := mkq.Process(p.queue, p.trackedHandler(h), opts...)
+			h, err := p.spawnLocked(needChecker && i == 0)
 			if err != nil {
 				// 既に spawn した Worker は停止して回復
 				stopHandles(spawned)
-				return fmt.Errorf("mkqdriver: spawn worker: %w", err)
+				return err
 			}
-			h.w = w
-			p.seq++
 			spawned = append(spawned, h)
 		}
 		p.workers = append(p.workers, spawned...)
@@ -1019,6 +1030,50 @@ func (p *workerPool) adjustLocked() error {
 		stopHandles(toStop)
 		return nil
 	}
+}
+
+// spawnLocked starts one Worker for the pool. Only a stalledChecker Worker
+// scans for stalled jobs. Caller must hold pool.mu.
+//
+// mkq は Worker ごとに stalled-check の goroutine を持つ。concurrency を 1 に
+// して Worker を並べている (Resize のため) ので、何もしないとキューごとに
+// worker の数だけ stalled-check の Lua を呼ぶ (既定構成で 52 本が 30 秒ごと)。
+// Lua は stalled-check の key (TTL = stalledInterval) が残っていれば何もせずに
+// 返るので、余分な呼び出しは空振りの往復になる。1 キュー 1 本にした (#3592)。
+//
+// **実際の走査は約 2 周期に 1 回 (既定で約 60 秒ごと)。** mkq v1.5.0 の
+// stalledLoop は ticker の周期と key の TTL が同じ値なので、次の tick の時点で
+// まだ key が残っていて空振りし、その次の tick で走査する。回収には走査が 2 回
+// 要る (1 回目で印を付け、2 回目で戻す) ので、落ちた worker の job が戻るまで
+// 最大で約 2 分かかる。これは変更前 (全 Worker が同時に起動して同じ位相で回る)
+// でも同じ。直すには mkq 側で、走査の後に timer を貼り直すか、TTL を周期より
+// 少し短くするか、Queue 単位の走査の API を足す。
+func (p *workerPool) spawnLocked(checker bool) (*workerHandle, error) {
+	opts := append([]mkq.WorkerOption{mkq.WithConcurrency(1)}, p.optsBase...)
+	switch {
+	case !checker:
+		opts = append(opts, mkq.WithStalledInterval(0))
+	case p.stalledInterval > 0:
+		opts = append(opts, mkq.WithStalledInterval(p.stalledInterval))
+	}
+	h := &workerHandle{seq: p.seq, stalledChecker: checker}
+	w, err := mkq.Process(p.queue, p.trackedHandler(h), opts...)
+	if err != nil {
+		return nil, fmt.Errorf("mkqdriver: spawn worker: %w", err)
+	}
+	h.w = w
+	p.seq++
+	return h, nil
+}
+
+// hasStalledChecker reports whether one of hs runs the stalled-job scan.
+func hasStalledChecker(hs []*workerHandle) bool {
+	for _, h := range hs {
+		if h.stalledChecker {
+			return true
+		}
+	}
+	return false
 }
 
 // trackedHandler wraps the pool's dispatch handler so entry and exit are
@@ -1057,6 +1112,7 @@ func (p *workerPool) trackedHandler(h *workerHandle) mkq.Handler[framedPayload] 
 //
 //	0: idle (in-flight job が無いので停止しても何も失わない)
 //	1: 処理中 (停止すると job が cancel され retry になる)
+//	2: stalled-check の役を持つ Worker = 他を全部止めるときだけ選ぶ (#3592)
 //	-: 処理中かつ庇われている = 選ばない
 //
 // 同 rank 内は末尾優先で、従来の scale-down 挙動を保つ。
@@ -1079,8 +1135,28 @@ func splitForRemoval(ws []*workerHandle, k, maxBusy int, honourProtection bool) 
 		return ws, nil
 	}
 	type candidate struct {
-		idx  int
-		busy bool
+		idx     int
+		busy    bool
+		checker bool
+	}
+	// stalled-check の役を持つ Worker (最初の 1 本) は、roster を空にするとき
+	// 以外は選ばない。役は動いている Worker に後から付けられない (mkq の設定は
+	// Process のときだけ) ので、止めると役が居なくなる。代わりを立てて移すと
+	// 本数が 1 本増え、次の縮小でまた選ばれて立て直す、を繰り返しうる (立て
+	// 直した Worker の最初の走査は stalledInterval の後なので、繰り返す間は
+	// 走査が一度も回らない)。
+	//
+	// その代わり、idle が役持ちしか居ないときは、idle の役持ちを残して処理中の
+	// Worker を止める。縮小 (autoscale の Resize と、漏れの予算に当たって縮める
+	// とき) の 1 回で最大 1 件の job が cancel され、retry に回って試行を 1 回
+	// 消費する。根本の直し方は、mkq に Worker と独立した Queue 単位の走査の API を
+	// 足し、役を Worker に持たせないこと。
+	checkerIdx := -1
+	for i, h := range ws {
+		if h.stalledChecker {
+			checkerIdx = i
+			break
+		}
 	}
 	cands := make([]candidate, 0, len(ws))
 	for i, h := range ws {
@@ -1088,9 +1164,12 @@ func splitForRemoval(ws []*workerHandle, k, maxBusy int, honourProtection bool) 
 		if busy && h.protected && honourProtection {
 			continue
 		}
-		cands = append(cands, candidate{idx: i, busy: busy})
+		cands = append(cands, candidate{idx: i, busy: busy, checker: i == checkerIdx})
 	}
 	sort.SliceStable(cands, func(a, b int) bool {
+		if cands[a].checker != cands[b].checker {
+			return !cands[a].checker
+		}
 		if cands[a].busy != cands[b].busy {
 			return !cands[a].busy
 		}
@@ -1102,6 +1181,9 @@ func splitForRemoval(ws []*workerHandle, k, maxBusy int, honourProtection bool) 
 	for _, c := range cands {
 		if len(doomed) == k {
 			break
+		}
+		if c.checker && len(doomed) < len(ws)-1 {
+			continue
 		}
 		if c.busy {
 			if busyTaken >= maxBusy {
