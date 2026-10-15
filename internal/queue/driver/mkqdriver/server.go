@@ -1041,13 +1041,9 @@ func (p *workerPool) adjustLocked() error {
 // Lua は stalled-check の key (TTL = stalledInterval) が残っていれば何もせずに
 // 返るので、余分な呼び出しは空振りの往復になる。1 キュー 1 本にした (#3592)。
 //
-// **実際の走査は約 2 周期に 1 回 (既定で約 60 秒ごと)。** mkq v1.5.0 の
-// stalledLoop は ticker の周期と key の TTL が同じ値なので、次の tick の時点で
-// まだ key が残っていて空振りし、その次の tick で走査する。回収には走査が 2 回
-// 要る (1 回目で印を付け、2 回目で戻す) ので、落ちた worker の job が戻るまで
-// 最大で約 2 分かかる。これは変更前 (全 Worker が同時に起動して同じ位相で回る)
-// でも同じ。直すには mkq 側で、走査の後に timer を貼り直すか、TTL を周期より
-// 少し短くするか、Queue 単位の走査の API を足す。
+// 走査は周期ごとに回る (mkq v1.5.1 以降、mkq#136)。回収には走査が 2 回要る
+// (1 回目で印を付け、2 回目で戻す) ので、落ちた worker の job が戻るまでは
+// 最大で約 2 周期 (既定で約 1 分)。
 func (p *workerPool) spawnLocked(checker bool) (*workerHandle, error) {
 	opts := append([]mkq.WorkerOption{mkq.WithConcurrency(1)}, p.optsBase...)
 	switch {
