@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	corenote "github.com/elythia-network/elythia/internal/core/note"
 	"github.com/elythia-network/elythia/internal/core/translate"
 	"github.com/elythia-network/elythia/internal/entitycompat/shapetest"
+	"github.com/elythia-network/elythia/internal/misc/hashtag"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
@@ -777,6 +779,46 @@ func TestSearchByTag_InvalidParam(t *testing.T) {
 	h, _, _ := newExtraHandler(t)
 	rec := postExtra(h.SearchByTag, `{}`, nil)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+// query のグループ数とグループ内のタグ数に上限を置く。上限ちょうどは通し、
+// 1 つ超えたら本家の INVALID_PARAM で拒否する。
+func TestSearchByTag_QuerySizeLimits(t *testing.T) {
+	groupsOf := func(groups, tagsPerGroup int) string {
+		q := make([][]string, groups)
+		for i := range q {
+			q[i] = make([]string, tagsPerGroup)
+			for j := range q[i] {
+				q[i][j] = fmt.Sprintf("t%d_%d", i, j)
+			}
+		}
+		b, err := json.Marshal(map[string]any{"query": q})
+		require.NoError(t, err)
+		return string(b)
+	}
+	cases := []struct {
+		name string
+		body string
+		want int
+	}{
+		{"groups at limit", groupsOf(maxSearchByTagGroups, 1), http.StatusOK},
+		{"groups over limit", groupsOf(maxSearchByTagGroups+1, 1), http.StatusBadRequest},
+		{"tags per group at limit", groupsOf(1, hashtag.MaxNoteTags), http.StatusOK},
+		{"tags per group over limit", groupsOf(1, hashtag.MaxNoteTags+1), http.StatusBadRequest},
+		{"empty strings still count", `{"query":[["` + strings.Repeat(`","`, hashtag.MaxNoteTags) + `"]]}`, http.StatusBadRequest},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, _, _ := newExtraHandler(t)
+			rec := postExtra(h.SearchByTag, tc.body, nil)
+			require.Equal(t, tc.want, rec.Code, rec.Body.String())
+			if tc.want == http.StatusBadRequest {
+				var resp map[string]map[string]any
+				require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+				assert.Equal(t, "INVALID_PARAM", resp["error"]["code"])
+			}
+		})
+	}
 }
 
 // #1554 search-by-tag の reply filter: reply=true は reply note のみ返す。

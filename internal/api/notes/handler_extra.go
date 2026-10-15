@@ -16,6 +16,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/notesfilter"
 	"github.com/elythia-network/elythia/internal/core/ugcvisibility"
 	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/misc/hashtag"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
@@ -440,6 +441,10 @@ func (h *Handler) UserListTimeline(c echo.Context) error {
 	return c.JSON(http.StatusOK, h.packMany(c.Request().Context(), notes, me))
 }
 
+// maxSearchByTagGroups caps the number of OR groups in notes/search-by-tag's
+// query.
+const maxSearchByTagGroups = 32
+
 // SearchByTag handles POST /api/notes/search-by-tag.
 // TS互換: tag (string) または query (string[][] — 外側 OR・内側 AND の複合タグ
 // 検索) を受け付ける (#1683、upstream search-by-tag.ts)。tag が指定されれば
@@ -467,6 +472,20 @@ func (h *Handler) SearchByTag(c echo.Context) error {
 	if req.Tag != "" {
 		tagGroups = [][]string{{req.Tag}}
 	} else {
+		// **query の大きさに上限を置く。** 本家は上限を持たず、匿名で数万
+		// グループを送ると 1 要求で数秒 DB を使える。グループの数は hashtag
+		// ストリームの購読数の上限 (maxHashtagTopics) と同じ 32 に、グループ内の
+		// タグの数はノートが持てるタグの上限 (hashtag.MaxNoteTags) にする。後者を
+		// 超える AND は、どのノートにも一致しない。数えるのは空のタグを除く前の
+		// 個数 (空文字で水増しした要求も止める)。
+		if len(req.Query) > maxSearchByTagGroups {
+			return apierr.JSONInvalidParam(c)
+		}
+		for _, inner := range req.Query {
+			if len(inner) > hashtag.MaxNoteTags {
+				return apierr.JSONInvalidParam(c)
+			}
+		}
 		for _, inner := range req.Query {
 			g := make([]string, 0, len(inner))
 			for _, t := range inner {
