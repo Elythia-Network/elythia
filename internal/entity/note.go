@@ -173,15 +173,26 @@ func packPoll(p *model.Poll) *PollEntity {
 
 // HideNoteEntity blanks an embedded note's content for a viewer who is not
 // allowed to see it, mirroring upstream NoteEntityService.hideNote. It clears
-// exactly the 7 fields upstream clears (text/cw/poll/files/fileIds/visibleUserIds
-// + isHidden) and keeps everything else (id/userId/user/createdAt/reactions/
+// the 7 fields upstream clears (text/cw/poll/files/fileIds/visibleUserIds
+// + isHidden) and keeps the shell (id/userId/user/createdAt/reactions/
 // counts/hasPoll), so the frontend still renders a "hidden post" placeholder
 // card. Used by both the REST and streaming embed-visibility gates (#1536).
+//
+// In addition to upstream, it also clears the values derived from the body
+// (mentions / tags / emojis), which upstream leaves in place.
 //
 // fileIds / files は non-nil 空スライスにして JSON で [] を出す。
 // visibleUserIds は upstream hideNote (NoteEntityService.ts:184) と同じく nil に
 // して omitempty で key を落とす (#1561 で packer 全体を specified 限定 +
 // omitempty 化したことに合わせる)。
+//
+// mentions / tags / emojis は本文から作る値なので、本文と一緒に消す (本家は
+// 消さない)。返信先 (reply / replyId) など本文から作らない値は残す。
+// mentions / tags は本家でも空のとき key を省くので、nil にして omitempty で
+// 落とせば「何も書いていないノート」と同じ形になる。emojis はリモートのノート
+// では空でも `{}` を出す形なので、key は残して中身だけ空の map に差し替える
+// (packer が確保した map を共有している呼び出し元があっても書き換えないよう、
+// 新しい map にする)。
 func HideNoteEntity(n *NoteEntity) {
 	if n == nil {
 		return
@@ -192,6 +203,12 @@ func HideNoteEntity(n *NoteEntity) {
 	n.FileIDs = make([]string, 0)
 	n.Files = []any{}
 	n.VisibleUserIDs = nil
+	n.Mentions = nil
+	n.Tags = nil
+	if n.Emojis != nil {
+		empty := map[string]string{}
+		n.Emojis = &empty
+	}
 	n.IsHidden = true
 }
 
