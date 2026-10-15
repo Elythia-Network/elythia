@@ -738,6 +738,20 @@ func (r *noteRepository) SearchByFilter(f model.NoteSearchFilter) ([]*model.Note
 	// 非空なら viewer 自身の followers/specified/visibleUserIds note も含む。
 	// core/note.CanSeeNote と同条件 (mentions / search-by-tag と同じ helper)。
 	q = applyViewerVisibility(q, f.ViewerID)
+	// **閲覧者に本文が隠れるノートは LIMIT の前に除く。** 本文の検索は本文を
+	// 読めるノートだけを対象にし、ページの件数も揃えるため。SQL で決まる 2 つを
+	// ここで絞る:
+	//   - 凍結: 投稿者・返信先・リノート先の作者 (upstream searchNoteByLike の
+	//     generateBaseNoteFilteringQuery と同じ。以前は handler が後から除いていた)
+	//   - 未ログインの閲覧者に対する作者の requireSigninToViewContents (本家は
+	//     結果に載せて本文を伏せる。ここで除くのは本家との差)
+	// 期間で隠す設定 (makeNotesHiddenBefore / makeNotesFollowersOnlyBefore) は
+	// 作成時刻を ID から読む必要があり (ID の形式は設定で変わる)、SQL では
+	// 決められないので handler が後から除く。
+	q = applySuspendedAuthorExclusion(q)
+	if f.ViewerID == "" {
+		q = applyRequireSigninAuthorExclusion(q)
+	}
 	// upstream searchNoteByLike は userId 優先の排他: userId があれば channelId は
 	// 無視する (`if (opts.userId) {} else if (opts.channelId) {}`、SearchService.ts:208-212、
 	// #1938)。両指定時に mk-go が両方 AND していた divergence を解消する。
@@ -1217,6 +1231,11 @@ func (r *noteRepository) SearchByTag(tagGroups [][]string, viewerID string, limi
 	if filter.LocalUsersOnly {
 		q = q.Where(`"note"."userHost" IS NULL`)
 	}
+	// 未ログインの閲覧者に本文を見せない作者のノートも、SearchByFilter と同じく
+	// LIMIT の前に除く (期間で隠す設定は handler が後から除く)。
+	if viewerID == "" {
+		q = applyRequireSigninAuthorExclusion(q)
+	}
 	q = q.Order(paginationOrder(sinceID, untilID, "id")).Limit(limit)
 	if sinceID != "" {
 		q = q.Where("id > ?", sinceID)
@@ -1446,6 +1465,12 @@ func applySuspendedAuthorExclusion(q *gorm.DB) *gorm.DB {
 			` AND ("replyUserId" IS NULL OR ` + notExists(`"note"."replyUserId"`) + `)` +
 			` AND ("renoteUserId" IS NULL OR ` + notExists(`"note"."renoteUserId"`) + `)`,
 	)
+}
+
+// applyRequireSigninAuthorExclusion excludes notes whose author requires
+// sign-in to view their contents. Callers apply it for anonymous viewers only.
+func applyRequireSigninAuthorExclusion(q *gorm.DB) *gorm.DB {
+	return q.Where(`NOT EXISTS (SELECT 1 FROM "user" ru WHERE ru."id" = "note"."userId" AND ru."requireSigninToViewContents" = true)`)
 }
 
 // applySuspendedEmbedAuthorExclusion excludes notes whose reply target or
