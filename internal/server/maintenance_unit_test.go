@@ -60,7 +60,7 @@ func report(t *testing.T, store *maintmode.Store) maintmode.ProcReport {
 
 // TestMaintenance_ReportStaysFreshWhileStopping checks that the process keeps
 // refreshing its report while it is busy stopping the generation, so the
-// report (TTL 10s) does not expire and look like completion (#3463 review
+// report (ProcTTL) does not expire and look like completion (#3463 review
 // H2).
 func TestMaintenance_ReportStaysFreshWhileStopping(t *testing.T) {
 	f := newFakeGenerations(t)

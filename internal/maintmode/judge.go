@@ -71,19 +71,33 @@ type Judge struct {
 	Counter Counter
 	// ID names this judge in the lock.
 	ID string
-	// DrainTimeout is how long after it first saw the maintenance the judge
-	// waits before terminating the Elythia sessions that remain.
+	// DrainTimeout is how long after the judge first saw a process
+	// draining or drained it waits before terminating that process's
+	// Elythia sessions that remain.
 	DrainTimeout time.Duration
 	// Now returns the current time. Nil means time.Now.
 	Now func() time.Time
+	// IdleInterval is how long Run waits between steps while no maintenance
+	// is active. Zero means the interval given to Run.
+	IdleInterval time.Duration
+	// Wake, when set, makes Run step at once while it waits IdleInterval.
+	// The Supervisor sends to it when its watch loop reads an active state,
+	// so the judge notices a maintenance as soon as the process does.
+	Wake <-chan struct{}
+
+	// idle is set by Step when it saw no maintenance.
+	idle bool
+	// notHolding is set while this judge knows it does not hold the lock, so
+	// an idle step does not release it again.
+	notHolding bool
 
 	opID       string
-	firstSeen  time.Time
 	terminated []Blocker
 	// lettingGo holds the IDs of the processes seen draining or drained
-	// during this opId. Their sessions may be terminated even after their
-	// report is gone (the process died while letting go).
-	lettingGo map[string]bool
+	// during this opId, with the time this judge first saw them so. A
+	// process's sessions may be terminated DrainTimeout after that time,
+	// even after its report is gone (the process died while letting go).
+	lettingGo map[string]time.Time
 }
 
 // Outcome is what one Step did.
@@ -114,11 +128,23 @@ func (j *Judge) Step(ctx context.Context) (Outcome, error) {
 	if err != nil {
 		return NotJudging, err
 	}
+	j.idle = st == nil
 	if st == nil {
 		j.reset("")
-		return NotJudging, j.Store.releaseJudge(ctx, j.ID)
+		// 持っていないと分かっているロックは解きに行かない。待機中の判定のたびに
+		// Lua を 1 回撃っていた。
+		if j.notHolding {
+			return NotJudging, nil
+		}
+		if err := j.Store.releaseJudge(ctx, j.ID); err != nil {
+			return NotJudging, err
+		}
+		j.notHolding = true
+		return NotJudging, nil
 	}
 	ok, err := j.Store.acquireJudge(ctx, j.ID, JudgeLockTTL)
+	// 失敗したときは、前の延長で持ったままかもしれないので、持っている側に倒す。
+	j.notHolding = err == nil && !ok
 	if err != nil || !ok {
 		return NotJudging, err
 	}
@@ -144,21 +170,22 @@ func (j *Judge) Step(ctx context.Context) (Outcome, error) {
 
 func (j *Judge) reset(opID string) {
 	j.opID = opID
-	j.firstSeen = j.now()
 	j.terminated = nil
-	j.lettingGo = map[string]bool{}
+	j.lettingGo = map[string]time.Time{}
 }
 
-// remember records which processes said they let go, and forgets those that
-// serve again.
-func (j *Judge) remember(reports []ProcReport) {
+// remember records which processes said they let go, from when, and forgets
+// those that serve again.
+func (j *Judge) remember(reports []ProcReport, now time.Time) {
 	if j.lettingGo == nil {
-		j.lettingGo = map[string]bool{}
+		j.lettingGo = map[string]time.Time{}
 	}
 	for _, r := range reports {
 		switch r.State {
 		case ProcDraining, ProcDrained:
-			j.lettingGo[r.ID] = true
+			if _, ok := j.lettingGo[r.ID]; !ok {
+				j.lettingGo[r.ID] = now
+			}
 		case ProcStarting, ProcRunning, ProcResuming:
 			delete(j.lettingGo, r.ID)
 		}
@@ -202,7 +229,7 @@ func (j *Judge) entering(ctx context.Context, st *State) (Outcome, error) {
 		return Waiting, err
 	}
 	waiting := waitingFor(reports)
-	j.remember(reports)
+	j.remember(reports, now)
 	sessions, err := j.Counter.Sessions(ctx)
 	if err != nil {
 		_ = j.Store.progress(ctx, st.OpID, now, waiting, st.Blockers, j.terminated, err.Error())
@@ -215,11 +242,11 @@ func (j *Judge) entering(ctx context.Context, st *State) (Outcome, error) {
 		}
 		return MovedToHeld, nil
 	}
-	if len(sessions) > 0 && now.Sub(j.firstSeen) >= j.DrainTimeout {
+	if len(sessions) > 0 {
 		// 手放す途中で落ちたプロセスは報告が消える。一度 draining / drained と
 		// 見たプロセスの接続は、報告が消えた後も切ってよいとする。覚えずにいると、
 		// その接続を二度と自動で切らず、held に届かない (#3463 のレビュー2周目 3)。
-		sessions = j.terminateElythia(ctx, sessions, j.withRemembered(reports))
+		sessions = j.terminateElythia(ctx, now, sessions, j.withRemembered(reports))
 	}
 	return Waiting, j.Store.progress(ctx, st.OpID, now, waiting, sessions, j.terminated, "")
 }
@@ -234,10 +261,21 @@ func (j *Judge) entering(ctx context.Context, st *State) (Outcome, error) {
 // かもしれない) や running のプロセスの接続を切ると、そのプロセスはすぐに
 // 繋ぎ直し、held の後に接続が現れる。2 秒ごとに切り続けることにもなる
 // (#3463 のレビュー1周目 M-1)。運営者の psql など、Elythia 以外の接続も切らない。
-func (j *Judge) terminateElythia(ctx context.Context, sessions []Blocker, reports []ProcReport) []Blocker {
+//
+// 上限はプロセスごとに、判定役がそのプロセスの draining / drained を初めて
+// 見た時刻から数える。判定役がメンテナンスを見た時刻から数えると、通知を
+// 取りこぼして手放し始めるのが遅れたプロセス (待機中は最大
+// IdlePollInterval) の猶予がそのぶん縮み、drainTimeout をその遅れ以下に
+// した構成では手放し始めた直後に切ることになる (#3592 のレビュー L-2)。
+func (j *Judge) terminateElythia(ctx context.Context, now time.Time, sessions []Blocker, reports []ProcReport) []Blocker {
 	var remain []Blocker
 	for _, b := range sessions {
-		if !b.SameRole || !lettingGo(ownerOf(b.Application, reports)) {
+		owner := ownerOf(b.Application, reports)
+		if !b.SameRole || !lettingGo(owner) {
+			remain = append(remain, b)
+			continue
+		}
+		if since, ok := j.lettingGo[owner.ID]; !ok || now.Sub(since) < j.DrainTimeout {
 			remain = append(remain, b)
 			continue
 		}
@@ -357,10 +395,19 @@ func (j *Judge) Release(ctx context.Context) error {
 	return j.Store.releaseJudge(ctx, j.ID)
 }
 
-// Run steps every interval until ctx is done, then releases the lock.
+// Run steps every interval until ctx is done, then releases the lock. While
+// no maintenance is active it steps every IdleInterval instead, or at once
+// when Wake fires.
+//
+// ロックを他の判定役が持っている間は、待機中とは数えない (interval で見て、
+// その判定役が落ちたら引き継ぐ)。
 func (j *Judge) Run(ctx context.Context, interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+	idle := j.IdleInterval
+	if idle <= 0 {
+		idle = interval
+	}
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
 	defer func() {
 		rctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -370,10 +417,16 @@ func (j *Judge) Run(ctx context.Context, interval time.Duration) {
 		if _, err := j.Step(ctx); err != nil && ctx.Err() == nil {
 			slog.Warn("maintenance: judge step failed", "err", err)
 		}
+		wait, wake := interval, (<-chan struct{})(nil)
+		if j.idle {
+			wait, wake = idle, j.Wake
+		}
+		timer.Reset(wait)
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-timer.C:
+		case <-wake:
 		}
 	}
 }
