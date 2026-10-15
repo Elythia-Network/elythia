@@ -1918,10 +1918,19 @@ func (s *Service) IsRoomMember(userID, roomID string) (bool, error) {
 	if err == nil && room.OwnerID == userID {
 		return true, nil
 	}
-	if _, err := s.repo.FindMembership(userID, roomID); err == nil {
-		return true, nil
+	// **DB障害を「メンバーでない」に丸めない。** chatRoomチャンネルはイベントの
+	// たびにここを引き、メンバーでなければ購読を外すので、丸めると一時的な障害で
+	// 開いている部屋の配信が止まる。
+	if err != nil && !repository.IsNotFound(err) {
+		return false, err
 	}
-	return false, nil
+	if _, err := s.repo.FindMembership(userID, roomID); err != nil {
+		if !repository.IsNotFound(err) {
+			return false, err
+		}
+		return false, nil
+	}
+	return true, nil
 }
 
 // CanViewRoomTimeline reports whether userID may subscribe to the room's timeline
