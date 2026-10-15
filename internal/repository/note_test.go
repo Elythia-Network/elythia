@@ -4196,3 +4196,84 @@ func TestNoteRepository_ListByUserIDFiltered_ExcludesSuspendedEmbedAuthor(t *tes
 	assert.True(t, ids[selfReply.ID], "self reply is kept")
 	assert.True(t, ids[selfRenote.ID], "self renote is kept")
 }
+
+// SearchByFilter は、凍結 (投稿者・返信先・リノート先) と、未ログインの閲覧者に
+// 対する作者の requireSigninToViewContents を LIMIT の前に除く (ページが欠けない)。
+func TestNoteRepository_SearchByFilter_ExcludesHiddenBeforeLimit(t *testing.T) {
+	repo := NewNoteRepository(testDB)
+	plainUser := insertTestUser(t, "u_shl_p", "shlplain")
+	signinUser := insertTestUser(t, "u_shl_r", "shlsignin")
+	suspUser := insertTestUser(t, "u_shl_s", "shlsusp")
+	defer cleanupUser(t, plainUser.ID)
+	defer cleanupUser(t, signinUser.ID)
+	defer cleanupUser(t, suspUser.ID)
+	require.NoError(t, testDB.Exec(`UPDATE "user" SET "requireSigninToViewContents" = true WHERE id = ?`, signinUser.ID).Error)
+	require.NoError(t, testDB.Exec(`UPDATE "user" SET "isSuspended" = true WHERE id = ?`, suspUser.ID).Error)
+
+	text := "shlneedle"
+	mk := func(n *model.Note) {
+		n.Text = &text
+		n.Visibility = model.NoteVisibilityPublic
+		n.Reactions = datatypes.JSON([]byte("{}"))
+		require.NoError(t, repo.Create(n))
+		t.Cleanup(func() { cleanupNote(t, n.ID) })
+	}
+	// ID の昇順 = 古い順。最新が隠れるノートなので、後から除く方式では limit=1 の
+	// 結果が空になる。
+	mk(&model.Note{ID: "n_shl_1_plain", UserID: plainUser.ID})
+	mk(&model.Note{ID: "n_shl_2_susp", UserID: suspUser.ID})
+	mk(&model.Note{ID: "n_shl_3_reply", UserID: plainUser.ID, ReplyID: strPtr2("n_shl_2_susp"), ReplyUserID: &suspUser.ID})
+	mk(&model.Note{ID: "n_shl_4_signin", UserID: signinUser.ID})
+
+	search := func(viewerID string, limit int) []string {
+		rows, err := repo.SearchByFilter(model.NoteSearchFilter{Query: text, ViewerID: viewerID, Limit: limit})
+		require.NoError(t, err)
+		ids := make([]string, 0, len(rows))
+		for _, n := range rows {
+			ids = append(ids, n.ID)
+		}
+		return ids
+	}
+	assert.Equal(t, []string{"n_shl_1_plain"}, search("", 1), "anonymous: hidden notes must not take the LIMIT slot")
+	assert.Equal(t, []string{"n_shl_4_signin", "n_shl_1_plain"}, search(plainUser.ID, 10), "signed in: requireSignin author is searchable, suspended are not")
+}
+
+// SearchByTag も、凍結 (投稿者・返信先・リノート先) と、未ログインの閲覧者に
+// 対する作者の requireSigninToViewContents を LIMIT の前に除く。
+func TestNoteRepository_SearchByTag_ExcludesHiddenBeforeLimit(t *testing.T) {
+	repo := NewNoteRepository(testDB)
+	plainUser := insertTestUser(t, "u_sth_p", "sthplain")
+	signinUser := insertTestUser(t, "u_sth_r", "sthsignin")
+	suspUser := insertTestUser(t, "u_sth_s", "sthsusp")
+	defer cleanupUser(t, plainUser.ID)
+	defer cleanupUser(t, signinUser.ID)
+	defer cleanupUser(t, suspUser.ID)
+	require.NoError(t, testDB.Exec(`UPDATE "user" SET "requireSigninToViewContents" = true WHERE id = ?`, signinUser.ID).Error)
+	require.NoError(t, testDB.Exec(`UPDATE "user" SET "isSuspended" = true WHERE id = ?`, suspUser.ID).Error)
+
+	mk := func(n *model.Note) {
+		n.Tags = model.StringArray{"sthtag"}
+		n.Visibility = model.NoteVisibilityPublic
+		n.Reactions = datatypes.JSON([]byte("{}"))
+		require.NoError(t, repo.Create(n))
+		t.Cleanup(func() { cleanupNote(t, n.ID) })
+	}
+	// ID の昇順 = 古い順。新しい側が隠れるノートなので、後から除く方式では
+	// limit=1 の結果が空になる。
+	mk(&model.Note{ID: "n_sth_1_plain", UserID: plainUser.ID})
+	mk(&model.Note{ID: "n_sth_2_susp", UserID: suspUser.ID})
+	mk(&model.Note{ID: "n_sth_3_reply", UserID: plainUser.ID, ReplyID: strPtr2("n_sth_2_susp"), ReplyUserID: &suspUser.ID})
+	mk(&model.Note{ID: "n_sth_4_signin", UserID: signinUser.ID})
+
+	search := func(viewerID string, limit int) []string {
+		rows, err := repo.SearchByTag([][]string{{"sthtag"}}, viewerID, limit, "", "", model.NoteSearchTagFilter{})
+		require.NoError(t, err)
+		ids := make([]string, 0, len(rows))
+		for _, n := range rows {
+			ids = append(ids, n.ID)
+		}
+		return ids
+	}
+	assert.Equal(t, []string{"n_sth_1_plain"}, search("", 1), "anonymous: hidden notes must not take the LIMIT slot")
+	assert.Equal(t, []string{"n_sth_4_signin", "n_sth_1_plain"}, search(plainUser.ID, 10), "signed in: requireSignin author is listed, suspended are not")
+}

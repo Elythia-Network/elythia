@@ -472,12 +472,11 @@ func (h *Handler) SearchByTag(c echo.Context) error {
 	if req.Tag != "" {
 		tagGroups = [][]string{{req.Tag}}
 	} else {
-		// **query の大きさに上限を置く。** 本家は上限を持たず、匿名で数万
-		// グループを送ると 1 要求で数秒 DB を使える。グループの数は hashtag
-		// ストリームの購読数の上限 (maxHashtagTopics) と同じ 32 に、グループ内の
-		// タグの数はノートが持てるタグの上限 (hashtag.MaxNoteTags) にする。後者を
-		// 超える AND は、どのノートにも一致しない。数えるのは空のタグを除く前の
-		// 個数 (空文字で水増しした要求も止める)。
+		// **query の大きさに上限を置く。** 1 要求の検索の重さを一定に収めるため。
+		// グループの数は hashtag ストリームの購読数の上限 (maxHashtagTopics) と
+		// 同じ 32 に、グループ内のタグの数はノートが持てるタグの上限
+		// (hashtag.MaxNoteTags) にする。後者を超える AND は、どのノートにも一致
+		// しない。数えるのは空のタグを除く前の個数。
 		if len(req.Query) > maxSearchByTagGroups {
 			return apierr.JSONInvalidParam(c)
 		}
@@ -531,23 +530,39 @@ func (h *Handler) SearchByTag(c echo.Context) error {
 		}
 		filter.LocalUsersOnly = policy == ugcvisibility.Local
 	}
-	notes, err := h.noteRepo.SearchByTag(tagGroups, viewerID, limit, sinceID, untilID, filter)
-	if err != nil {
-		// tag 検索失敗は従来どおり空配列で返す (TS 互換) が、visibility
-		// push-down 追加で SQL エラーも黙殺されうるため診断用に 1 行残す。
-		// ユーザー挙動 (200 + 空配列) は不変で operator-actionable でもないため
-		// Warn ではなく Debug に留める (#1446 review)。
-		slog.Debug("notes/search-by-tag: SearchByTag failed", "tag", req.Tag, "err", err)
-		return c.JSON(http.StatusOK, []entity.NoteEntity{})
-	}
 	// upstream search-by-tag は generateBaseNoteFilteringQuery で被block / mute /
-	// instance-mute を除外する (#1554)。block/mute は post-fetch で適用する。
-	notes, err = h.applyMuteBlock(viewer, notes)
+	// instance-mute を除外する (#1554)。block/mute は post-fetch で適用する
+	// (searchVisiblePage の中)。notes/search と同じく、閲覧者に本文が隠れる
+	// ノートは結果に載せない。
+	packed, err := h.searchVisiblePage(c.Request().Context(), viewer, limit,
+		searchPage{sinceID: sinceID, untilID: untilID},
+		func(p searchPage) ([]*model.Note, error) {
+			notes, err := h.noteRepo.SearchByTag(tagGroups, viewerID, limit, p.sinceID, p.untilID, filter)
+			if err != nil {
+				return nil, errSearchByTagFetch{err}
+			}
+			return notes, nil
+		})
 	if err != nil {
+		var fetchErr errSearchByTagFetch
+		if errors.As(err, &fetchErr) {
+			// tag 検索失敗は従来どおり空配列で返す (TS 互換) が、visibility
+			// push-down 追加で SQL エラーも黙殺されうるため診断用に 1 行残す。
+			// ユーザー挙動 (200 + 空配列) は不変で operator-actionable でもないため
+			// Warn ではなく Debug に留める (#1446 review)。
+			slog.Debug("notes/search-by-tag: SearchByTag failed", "tag", req.Tag, "err", fetchErr.err)
+			return c.JSON(http.StatusOK, []entity.NoteEntity{})
+		}
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
-	return c.JSON(http.StatusOK, h.packMany(c.Request().Context(), notes, viewer))
+	return c.JSON(http.StatusOK, packed)
 }
+
+// errSearchByTagFetch marks an error returned by the repository search in
+// notes/search-by-tag, as opposed to one from the mute / block filter.
+type errSearchByTagFetch struct{ err error }
+
+func (e errSearchByTagFetch) Error() string { return e.err.Error() }
 
 // SetClipRepos wires the clip repos used by notes/clips (#1554)。未配線時は
 // 旧 stub 同様に空配列を返す。

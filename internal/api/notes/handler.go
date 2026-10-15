@@ -1025,24 +1025,30 @@ func (h *Handler) Search(c echo.Context) error {
 		localUsersOnly = policy == ugcvisibility.Local
 	}
 
-	notes, err := h.searchService.SearchNote(
-		viewer,
-		req.Query,
-		search.SearchOpts{
-			UserID:         req.UserID,
-			ChannelID:      req.ChannelID,
-			Host:           req.Host,
-			Offset:         req.Offset,
-			RangeStartAt:   req.RangeStartAt,
-			RangeEndAt:     req.RangeEndAt,
-			LocalUsersOnly: localUsersOnly,
-		},
-		search.Pagination{
-			UntilID: untilID,
-			SinceID: sinceID,
-			Limit:   limit,
-		},
-	)
+	opts := search.SearchOpts{
+		UserID:         req.UserID,
+		ChannelID:      req.ChannelID,
+		Host:           req.Host,
+		RangeStartAt:   req.RangeStartAt,
+		RangeEndAt:     req.RangeEndAt,
+		LocalUsersOnly: localUsersOnly,
+	}
+	// upstream searchNoteByLike / searchNoteByMeilisearch は generateBaseNoteFilteringQuery
+	// で suspended-user / blocked-host (匿名でも) と被block/mute/renote-mute user の note を
+	// 除外する。provider は visibility しか掛けないため、search-by-tag 等と同じく post-fetch で
+	// applyMuteBlock を適用する (#1938、searchVisiblePage の中)。upstream search は
+	// thread-mute を掛けないため applyThreadMute は不要。
+	packed, err := h.searchVisiblePage(c.Request().Context(), viewer, limit,
+		searchPage{sinceID: sinceID, untilID: untilID, offset: req.Offset},
+		func(p searchPage) ([]*model.Note, error) {
+			o := opts
+			o.Offset = p.offset
+			return h.searchService.SearchNote(viewer, req.Query, o, search.Pagination{
+				UntilID: p.untilID,
+				SinceID: p.sinceID,
+				Limit:   limit,
+			})
+		})
 	if err != nil {
 		// 空クエリは invalidParam として返す。
 		// それ以外のエラー (DB障害など) はinternalErrorで返す。
@@ -1056,16 +1062,92 @@ func (h *Handler) Search(c echo.Context) error {
 		}
 		return apierr.JSONInternalError(c)
 	}
-	// upstream searchNoteByLike / searchNoteByMeilisearch は generateBaseNoteFilteringQuery
-	// で suspended-user / blocked-host (匿名でも) と被block/mute/renote-mute user の note を
-	// 除外する。provider は visibility しか掛けないため、search-by-tag 等と同じく post-fetch で
-	// applyMuteBlock を適用する (#1938)。upstream search は thread-mute を掛けないため
-	// applyThreadMute は不要。
-	notes, err = h.applyMuteBlock(viewer, notes)
-	if err != nil {
-		return apierr.JSONInternalError(c)
+	return c.JSON(http.StatusOK, packed)
+}
+
+// maxSearchRefills caps the extra fetches searchVisiblePage makes to refill a
+// page whose notes were hidden from the viewer.
+const maxSearchRefills = 3
+
+// searchPage is the cursor of one fetch made by searchVisiblePage.
+type searchPage struct {
+	sinceID string
+	untilID string
+	offset  int
+}
+
+// searchVisiblePage runs a note search for notes/search and
+// notes/search-by-tag and returns up to limit notes whose own content the
+// viewer can read.
+//
+// fetch must return the notes of one page in the backend's order, before the
+// mute / block filter. When the notes left after the filters are fewer than
+// limit and the fetch returned a full page, it fetches the following page (at
+// most maxSearchRefills times). It never returns hidden notes, even when that
+// leaves the page empty.
+//
+// 本文を見せないノートは、検索の結果にも載せない。本文の検索は本文を読める
+// ノートだけを対象にするため。除くのは LIMIT の後なので、除いて空いた分は続きを
+// 取って埋める。空のページを返すと、本家の frontend (paginator.ts) は続きを
+// 読むのをやめ、それより古いノートに辿り着けなくなるため。
+// 続きは、最後に取得したノートを cursor にして取る。向きは取得したページの並び
+// から決める (SQL の backend は sinceId だけのとき昇順、Meilisearch は常に降順)。
+// offset で読んでいる要求は、cursor ではなく offset を進めて続きを取る。
+// 上限まで取っても 1 件も残らないときも、隠れるノートは返さない (空で返す)。
+// isHidden の形で返すと、そのノートが検索語に一致したことが分かるため。
+// 埋め込み (renote / reply) だけが隠れたノートは、本文が見えているので残す。
+func (h *Handler) searchVisiblePage(ctx context.Context, viewer *model.User, limit int, first searchPage, fetch func(searchPage) ([]*model.Note, error)) ([]entity.NoteEntity, error) {
+	muteBlock := h.newMuteBlockFilter(viewer)
+	out := make([]entity.NoteEntity, 0, limit)
+	page := first
+	for attempt := 0; attempt <= maxSearchRefills; attempt++ {
+		raw, err := fetch(page)
+		if err != nil {
+			return nil, err
+		}
+		if len(raw) == 0 {
+			break
+		}
+		filtered, err := muteBlock(raw)
+		if err != nil {
+			return nil, err
+		}
+		packed := h.packMany(ctx, filtered, viewer)
+		for _, n := range packed {
+			if n.IsHidden {
+				continue
+			}
+			out = append(out, n)
+			if len(out) == limit {
+				return out, nil
+			}
+		}
+		if len(raw) < limit {
+			// 結果の終わりまで読んだ。隠れるノートしか無くても空で返してよい。
+			return out, nil
+		}
+		page = nextSearchPage(page, raw)
 	}
-	return c.JSON(http.StatusOK, h.packMany(c.Request().Context(), notes, viewer))
+	return out, nil
+}
+
+// nextSearchPage returns the cursor of the page that follows raw.
+func nextSearchPage(page searchPage, raw []*model.Note) searchPage {
+	if page.offset > 0 {
+		page.offset += len(raw)
+		return page
+	}
+	last := raw[len(raw)-1].ID
+	ascending := page.sinceID != "" && page.untilID == ""
+	if len(raw) >= 2 {
+		ascending = raw[0].ID < last
+	}
+	if ascending {
+		page.sinceID = last
+	} else {
+		page.untilID = last
+	}
+	return page
 }
 
 // State handles POST /api/notes/state.

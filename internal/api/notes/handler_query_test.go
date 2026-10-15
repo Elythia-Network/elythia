@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	corenote "github.com/elythia-network/elythia/internal/core/note"
@@ -818,4 +819,59 @@ func TestShow_NoQueryServiceRejects(t *testing.T) {
 	require.NoError(t, h.Show(c))
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "NO_SUCH_NOTE")
+}
+
+// notes/search と notes/search-by-tag は、閲覧者に本文が隠れるノートを結果から
+// 除く。作者本人には残る。
+func TestSearch_DropsNotesHiddenFromViewer(t *testing.T) {
+	future := int(time.Now().Add(time.Hour).Unix())
+	cases := []struct {
+		name   string
+		setup  func(u *model.User)
+		viewer *model.User
+		want   int
+	}{
+		{"control", func(*model.User) {}, nil, 1},
+		{"requireSignin anonymous", func(u *model.User) { u.RequireSigninToViewContents = true }, nil, 0},
+		{"requireSignin signed in", func(u *model.User) { u.RequireSigninToViewContents = true }, &model.User{ID: "viewer"}, 1},
+		{"hiddenBefore anonymous", func(u *model.User) { u.MakeNotesHiddenBefore = &future }, nil, 0},
+		{"hiddenBefore other user", func(u *model.User) { u.MakeNotesHiddenBefore = &future }, &model.User{ID: "viewer"}, 0},
+		{"hiddenBefore author", func(u *model.User) { u.MakeNotesHiddenBefore = &future }, &model.User{ID: "author"}, 1},
+		{"followersOnlyBefore anonymous", func(u *model.User) { u.MakeNotesFollowersOnlyBefore = &future }, nil, 0},
+	}
+	endpoints := []struct {
+		name string
+		path string
+		body string
+		call func(h *Handler, c echo.Context) error
+	}{
+		{"search", "/api/notes/search", `{"query":"secret"}`, (*Handler).Search},
+		{"search-by-tag", "/api/notes/search-by-tag", `{"tag":"secret"}`, (*Handler).SearchByTag},
+	}
+	for _, ep := range endpoints {
+		for _, tc := range cases {
+			t.Run(ep.name+"/"+tc.name, func(t *testing.T) {
+				h, repo := newQueryHandler(t)
+				text := "secret word"
+				// 作成時刻を読める ID にする (読めないと epoch 0 扱いで隠れる側に倒れ、
+				// 期間の判定を試せない)。
+				gen, err := id.NewGenerator("aidx")
+				require.NoError(t, err)
+				n := seedPublicNote(repo, gen.Generate(time.Now().Add(-time.Minute)))
+				n.Text = &text
+				n.Tags = []string{"secret"}
+				tc.setup(n.User)
+
+				c, rec := newJSONRequest(t, ep.path, ep.body)
+				if tc.viewer != nil {
+					setAuthUser(c, tc.viewer)
+				}
+				require.NoError(t, ep.call(h, c))
+				require.Equal(t, http.StatusOK, rec.Code)
+				var resp []map[string]any
+				require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+				assert.Len(t, resp, tc.want)
+			})
+		}
+	}
 }
