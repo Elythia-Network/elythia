@@ -616,6 +616,39 @@ func TestHooks_OnUserShow_Anonymous(t *testing.T) {
 	assert.Empty(t, h.repos.active.hour)
 }
 
+// 匿名の訪問者のキー(接続元のIP)は、そのままではなく鍵付きのダイジェストで
+// 置く。同じキーは同じ値になるので、重複は従来どおり数えられる。
+func TestHooks_OnUserShow_AnonymousKeyIsDigested(t *testing.T) {
+	h := newHarness(t)
+	h.hooks.OnUserShow("owner", "", "203.0.113.7")
+	h.hooks.OnUserShow("owner", "", "203.0.113.7")
+	h.hooks.OnUserShow("owner", "", "198.51.100.4")
+	h.saveAll(t)
+	row := h.repos.puPv.hour["owner"][0]
+	assert.Equal(t, int64(3), toInt64(row.Cols["pv.visitor"]))
+	keys, ok := row.Cols["upv.visitor:unique"].([]string)
+	require.True(t, ok, "cols: %v", row.Cols)
+	assert.Len(t, keys, 2, "the same visitor is counted once")
+	for _, k := range keys {
+		assert.NotContains(t, k, "203.0.113.7")
+		assert.NotContains(t, k, "198.51.100.4")
+		assert.Regexp(t, `^[0-9a-f]{32}$`, k)
+	}
+	assert.Contains(t, keys, visitorKeyDigest("203.0.113.7"))
+}
+
+func TestVisitorKeyDigest(t *testing.T) {
+	a := visitorKeyDigest("203.0.113.7")
+	assert.Equal(t, a, visitorKeyDigest("203.0.113.7"))
+	assert.NotEqual(t, a, visitorKeyDigest("203.0.113.8"))
+
+	// 鍵が変われば値も変わる (鍵を使わないハッシュではない)。
+	orig := visitorKeySecret
+	t.Cleanup(func() { visitorKeySecret = orig })
+	visitorKeySecret = newVisitorKeySecret()
+	assert.NotEqual(t, a, visitorKeyDigest("203.0.113.7"))
+}
+
 func TestHooks_OnUserShow_NoOwner(t *testing.T) {
 	h := newHarness(t)
 	// owner が空の場合は pv chart は触らないが activeUsers は走る
