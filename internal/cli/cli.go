@@ -39,6 +39,7 @@ func Commands() []Command {
 		{Name: "backfill", Summary: "run a one-off maintenance batch", Sub: []Command{
 			{Name: "avatar-public-url", Summary: "point avatar / banner URLs at the metadata-stripped variant", Run: backfill.AvatarPublicURL},
 			{Name: "emoji-system-file", Summary: "copy approved custom emoji images to system-owned files (dry-run unless -apply)", Run: backfill.EmojiSystemFile},
+			{Name: "hashtag-mentions", Summary: "drop hashtag users counted only through followers / specified notes", Run: backfill.HashtagMentions},
 			{Name: "instance-counts", Summary: "recompute instance notesCount / usersCount", Run: backfill.InstanceCounts},
 			{Name: "note-tags", Summary: "normalize note.tags to NFKC + lowercase", Run: backfill.NoteTags},
 			{Name: "remote-host", Summary: "normalize stored remote hosts (UTS#46 + punycode)", Run: backfill.RemoteHost},

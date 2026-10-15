@@ -1448,6 +1448,31 @@ Elythia の `000001` も作るので、TS から引き継いだ DB でも Elythi
 deadlock で片方が失敗する (バッチ側は id の順に渡しているが、行を取る順は planner
 次第)。バッチが落ちたら `-from` で流し直せばよい。
 
+### `backfill hashtag-mentions` — 公開範囲を限ったノートだけで使われたタグの利用者を外す
+
+ハッシュタグの利用者 (`hashtag` の `mentioned{,Local,Remote}UserIds` と各数) は、本家と同じく
+public / home のノートだけから積む。それより前の版は、フォロワー限定・宛先指定のノートからも積んでいた。
+このバッチは、フォロワー限定・宛先指定でタグの付いたノートを id の順に読み、「作者 × タグ」の組ごとに、
+その作者に同じタグの public / home のノートが無ければ、利用者の配列と数から外す。利用者が誰も残らず、
+プロフィールのタグ (`attached*`) にも使われていない行は、名前ごと消す。
+
+本家は利用者を足すだけで、ノートを消しても引かない。このため、いまあるノートから全体を作り直すことは
+しない (消したノートの分まで落ちてしまう)。public / home のノートを消していて、公開範囲を限ったノートだけが
+残っている利用者は、外れる側に倒れる。
+
+```bash
+docker compose run --rm --no-deps --entrypoint /app/elythia app backfill hashtag-mentions \
+  -config /app/.config/default.yml -dry-run
+docker compose run --rm --no-deps --entrypoint /app/elythia app backfill hashtag-mentions \
+  -config /app/.config/default.yml -batch 1000 -sleep-ms 100
+```
+
+冪等で、`-from <note id>` で途中から再開できる。`--no-deps` と UDS 構成のサービス名は `backfill instance-counts` と同じ。
+
+サーバーを動かしたまま流せるが、判定は更新の文が始まった時点のノートで行う。このため、文の実行中に同じ利用者が
+public / home のノートで同じタグを使うと、その利用者が外れることがある (次にそのタグを public / home のノートで
+使えば、また数えられる)。文が始まる前に投稿された public / home のノートがある利用者は外さない。
+
 ### `backfill avatar-public-url` — アイコン / バナーの URL を公開用へ寄せ直す
 
 `user.avatarUrl` / `user.bannerUrl` は drive ファイルの**原本**を指していた。原本は
@@ -1579,7 +1604,7 @@ compose の `run` はサービスの volume をそのまま引き継ぐ。別の
 
 **既定は dry-run で、書き込みには `-apply` が要る。** 姉妹バッチ
 (`backfill remote-host` / `backfill note-tags` / `backfill avatar-public-url` /
-`backfill instance-counts`) は
+`backfill instance-counts` / `backfill hashtag-mentions`) は
 **逆** (無指定で書き込み、`-dry-run` で抑止) なので、手が覚えているほうで打たないこと。`-dry-run` と `-apply`
 を両方渡すと落ちる。
 

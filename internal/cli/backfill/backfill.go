@@ -42,12 +42,13 @@ type env struct {
 	sleep         func(time.Duration)
 	signalContext func() (context.Context, context.CancelFunc)
 
-	avatarBatch    func(db *gorm.DB, fromID string, batchSize int, dryRun bool) (maintenance.AvatarPublicURLBackfillResult, error)
-	instanceBatch  func(db *gorm.DB, fromID string, batchSize int, dryRun bool) (maintenance.InstanceCountsBackfillResult, error)
-	noteTagsBatch  func(db *gorm.DB, fromID string, batchSize int, dryRun bool) (maintenance.NoteTagsBackfillResult, error)
-	hostBatch      func(db *gorm.DB, col maintenance.HostColumn, fromKey string, batchSize int, dryRun bool) (maintenance.HostBackfillResult, error)
-	emojiBackfill  func(ctx context.Context, db *gorm.DB, copier maintenance.SystemFileCopier, opts maintenance.EmojiSystemFileBackfillOptions) (maintenance.EmojiSystemFileBackfillResult, error)
-	hostColumnList []maintenance.HostColumn
+	avatarBatch          func(db *gorm.DB, fromID string, batchSize int, dryRun bool) (maintenance.AvatarPublicURLBackfillResult, error)
+	instanceBatch        func(db *gorm.DB, fromID string, batchSize int, dryRun bool) (maintenance.InstanceCountsBackfillResult, error)
+	noteTagsBatch        func(db *gorm.DB, fromID string, batchSize int, dryRun bool) (maintenance.NoteTagsBackfillResult, error)
+	hashtagMentionsBatch func(db *gorm.DB, fromID string, batchSize int, dryRun bool, seen maintenance.HashtagMentionsSeen) (maintenance.HashtagMentionsBackfillResult, error)
+	hostBatch            func(db *gorm.DB, col maintenance.HostColumn, fromKey string, batchSize int, dryRun bool) (maintenance.HostBackfillResult, error)
+	emojiBackfill        func(ctx context.Context, db *gorm.DB, copier maintenance.SystemFileCopier, opts maintenance.EmojiSystemFileBackfillOptions) (maintenance.EmojiSystemFileBackfillResult, error)
+	hostColumnList       []maintenance.HostColumn
 }
 
 func defaultEnv() env {
@@ -63,12 +64,13 @@ func defaultEnv() env {
 		signalContext: func() (context.Context, context.CancelFunc) {
 			return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		},
-		avatarBatch:    maintenance.BackfillAvatarPublicURLBatch,
-		instanceBatch:  maintenance.BackfillInstanceCountsBatch,
-		noteTagsBatch:  maintenance.BackfillNoteTagsBatch,
-		hostBatch:      maintenance.BackfillHostColumnBatch,
-		emojiBackfill:  maintenance.BackfillEmojiSystemFiles,
-		hostColumnList: maintenance.HostColumns,
+		avatarBatch:          maintenance.BackfillAvatarPublicURLBatch,
+		instanceBatch:        maintenance.BackfillInstanceCountsBatch,
+		noteTagsBatch:        maintenance.BackfillNoteTagsBatch,
+		hashtagMentionsBatch: maintenance.BackfillHashtagMentionsBatch,
+		hostBatch:            maintenance.BackfillHostColumnBatch,
+		emojiBackfill:        maintenance.BackfillEmojiSystemFiles,
+		hostColumnList:       maintenance.HostColumns,
 	}
 }
 

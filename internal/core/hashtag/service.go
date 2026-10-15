@@ -49,7 +49,8 @@ func (s *Service) SetMetaRepo(r repository.MetaRepository) {
 }
 
 // OnNoteCreated is the HashtagHook implementation: for every tag in
-// note.Tags, record the author as having mentioned that tag.
+// note.Tags, record the author as having mentioned that tag. Only public and
+// home notes are recorded, matching upstream NoteCreateService.
 //
 // 振る舞い: caller への return を即座に行い、実際の repo 書き込みは
 // goroutine で行う (#719)。caller (note_create_service / federation/resolver)
@@ -70,6 +71,13 @@ func (s *Service) OnNoteCreated(note *model.Note, author *model.User) {
 		return
 	}
 	if len(note.Tags) == 0 {
+		return
+	}
+	// 本家 NoteCreateService は public / home のときだけ updateHashtags を呼ぶ。
+	// hashtag テーブルは公開の一覧 (hashtags/search・list・show) の元になるので、
+	// 公開範囲を限ったノートのタグは数えない。ローカルの投稿・連合の受信・連合の
+	// 更新の 3 経路がすべてここを通るので、呼び出し元ではなくここで絞る。
+	if note.Visibility != model.NoteVisibilityPublic && note.Visibility != model.NoteVisibilityHome {
 		return
 	}
 	isLocal := author.IsLocal()
