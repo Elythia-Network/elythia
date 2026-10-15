@@ -4138,3 +4138,61 @@ func TestNoteRepository_ListFeaturedByUser_ExcludesSuspendedAuthor(t *testing.T)
 	require.NoError(t, err)
 	require.Empty(t, got, "凍結後は返さないこと")
 }
+
+// users/notes は、凍結された第三者への返信・リノート・引用を返さない。投稿者
+// 自身の凍結と、自分のノートへの返信・リノートは見ない (upstream users/notes.ts
+// の generateBaseNoteFilteringQuery に excludeAuthor: true)。
+func TestNoteRepository_ListByUserIDFiltered_ExcludesSuspendedEmbedAuthor(t *testing.T) {
+	repo := NewNoteRepository(testDB)
+	owner := insertTestUser(t, "u_unsus_o", "unsusowner")
+	other := insertTestUser(t, "u_unsus_x", "unsusother")
+	defer cleanupUser(t, owner.ID)
+	defer cleanupUser(t, other.ID)
+
+	txt := "hi"
+	mkNote := func(n *model.Note) *model.Note {
+		n.Text = &txt
+		n.Visibility = model.NoteVisibilityPublic
+		n.Reactions = datatypes.JSON([]byte("{}"))
+		require.NoError(t, repo.Create(n))
+		t.Cleanup(func() { cleanupNote(t, n.ID) })
+		return n
+	}
+	otherNote := mkNote(&model.Note{ID: "n_unsus_other", UserID: other.ID})
+	ownBase := mkNote(&model.Note{ID: "n_unsus_base", UserID: owner.ID})
+	replyToOther := mkNote(&model.Note{ID: "n_unsus_rep", UserID: owner.ID, ReplyID: &otherNote.ID, ReplyUserID: &other.ID})
+	renoteOfOther := mkNote(&model.Note{ID: "n_unsus_rnt", UserID: owner.ID, RenoteID: &otherNote.ID, RenoteUserID: &other.ID})
+	quoteOfOther := mkNote(&model.Note{ID: "n_unsus_qt", UserID: owner.ID, RenoteID: &otherNote.ID, RenoteUserID: &other.ID})
+	selfReply := mkNote(&model.Note{ID: "n_unsus_self", UserID: owner.ID, ReplyID: &ownBase.ID, ReplyUserID: &owner.ID})
+	selfRenote := mkNote(&model.Note{ID: "n_unsus_selfrn", UserID: owner.ID, RenoteID: &ownBase.ID, RenoteUserID: &owner.ID})
+
+	list := func() map[string]bool {
+		rows, err := repo.ListByUserIDFiltered(owner.ID, "", "", "", 50, false, true, true, false)
+		require.NoError(t, err)
+		ids := map[string]bool{}
+		for _, n := range rows {
+			ids[n.ID] = true
+		}
+		return ids
+	}
+
+	// 凍結前は全部返る (対照)。
+	ids := list()
+	for _, n := range []*model.Note{replyToOther, renoteOfOther, quoteOfOther, ownBase, selfReply, selfRenote} {
+		require.True(t, ids[n.ID], "before suspension %s must be listed", n.ID)
+	}
+
+	require.NoError(t, testDB.Exec(`UPDATE "user" SET "isSuspended" = true WHERE id = ?`, other.ID).Error)
+	ids = list()
+	assert.False(t, ids[replyToOther.ID], "reply to a suspended user is excluded")
+	assert.False(t, ids[renoteOfOther.ID], "renote of a suspended user is excluded")
+	assert.False(t, ids[quoteOfOther.ID], "quote of a suspended user is excluded")
+	assert.True(t, ids[ownBase.ID], "own plain note is kept")
+
+	// 投稿者自身の凍結では、自分への返信・リノートを落とさない。
+	require.NoError(t, testDB.Exec(`UPDATE "user" SET "isSuspended" = true WHERE id = ?`, owner.ID).Error)
+	ids = list()
+	assert.True(t, ids[ownBase.ID], "author suspension is not checked here (excludeAuthor)")
+	assert.True(t, ids[selfReply.ID], "self reply is kept")
+	assert.True(t, ids[selfRenote.ID], "self renote is kept")
+}
