@@ -471,3 +471,106 @@ describe('Paginator.fetchNewer の同時要求', () => {
 		expect(p.items.value.map(x => x.id)).toEqual(['n101', 'n100']);
 	});
 });
+
+// 裏に回ったタイムラインは queue に積む時間が長い (#3594)。queue にある間の削除・更新と、
+// 出しそびれた queue が一覧の先頭より古くなった場合を固定する。
+describe('Paginator の queue と一覧の整合', () => {
+	test('removeItem は queue からも消す', async () => {
+		const p = await loaded(['n000']);
+		p.enqueue(item('n001') as never);
+		p.enqueue(item('n002') as never);
+		p.removeItem('n001');
+		expect(p.queuedAheadItemsCount.value).toBe(1);
+		p.releaseQueue();
+		expect(p.items.value.map(x => x.id)).toEqual(['n002', 'n000']);
+	});
+
+	test('updateItem は queue の分も更新する', async () => {
+		const p = await loaded(['n000']);
+		p.enqueue(item('n001') as never);
+		p.updateItem('n001', x => ({ ...x, updated: true }) as never);
+		p.releaseQueue();
+		expect(p.items.value[0]).toEqual({ id: 'n001', updated: true });
+	});
+
+	// queue を積んでいる間に一覧へ直接入った分 (ここでは prepend) より queue が古いとき。
+	test('queue を積んでいる間に一覧へ直接入った分と queue を、id で並べ直す', async () => {
+		const p = await loaded(['n000']);
+		p.enqueue(item('n001') as never);
+		p.enqueue(item('n002') as never);
+		p.prepend(item('n003') as never);
+		p.releaseQueue();
+		expect(p.items.value.map(x => x.id)).toEqual(['n003', 'n002', 'n001', 'n000']);
+	});
+
+	// 並べ直すのは上の範囲だけで、積み始める前からあった一覧には触れない。
+	test('積み始める前からあった一覧の並びは変えない', async () => {
+		const p = await loaded([]);
+		// 連合で遅れて届いたノート (n005) が、一覧の途中に到着順で入っている。
+		p.items.value = ['n010', 'n005', 'n009'].map(item) as never;
+		p.enqueue(item('n011') as never);
+		p.prepend(item('n013') as never);
+		p.enqueue(item('n012') as never);
+		p.releaseQueue();
+		expect(p.items.value.map(x => x.id)).toEqual(['n013', 'n012', 'n011', 'n010', 'n005', 'n009']);
+	});
+
+	test('fetchNewer で queue に積み始めたときも、それより前の一覧には触れない', async () => {
+		const p = await loaded([]);
+		p.items.value = ['n010', 'n005', 'n009'].map(item) as never;
+		h.api.mockResolvedValueOnce([item('n011')]);
+		await p.fetchNewer({ toQueue: true });
+		p.prepend(item('n013') as never);
+		p.releaseQueue();
+		expect(p.items.value.map(x => x.id)).toEqual(['n013', 'n011', 'n010', 'n005', 'n009']);
+	});
+
+	// リモートのノートの id は published から作るので、遅れて届いたノートは一覧の途中の id を
+	// 持つ。全体を並べ直すと 30 件目より下へ沈み、trim で黙って消える。
+	test('遅れて届いた古い id のノートを、queue から出しても消さない', async () => {
+		const p = await loaded([]);
+		p.items.value = Array.from({ length: 30 }, (_, i) => item(nid(100 - i))) as never;
+		p.enqueue(item(nid(101)) as never);
+		p.enqueue(item(nid(50)) as never);
+		p.releaseQueue();
+		// 直接入った分が無いので、本家と同じく到着順のまま出す。enqueue は先頭へ積むので
+		// queue は [n050, n101] で、それがそのまま一覧の先頭に入る。
+		const ids = p.items.value.map(x => x.id);
+		expect(ids.slice(0, 3)).toEqual([nid(50), nid(101), nid(100)]);
+		expect(ids).toHaveLength(30);
+		expect(ids.at(-1)).toBe(nid(73));
+	});
+
+	// 初回の取得を待つ間に queue へ積み始めた場合、初回の分は既存の一覧として扱う。
+	test('初回の取得の前から積んでいても、初回の分の並びは変えない', async () => {
+		h.api.mockReset();
+		const initial = deferred<unknown>();
+		h.api.mockImplementationOnce(() => initial.promise);
+		const p = new Paginator('i/notifications', { limit: 15 });
+		const loading = p.init();
+		p.enqueue(item('n101') as never);
+		initial.resolve(['n100', 'n050', 'n090'].map(item));
+		await loading;
+		p.prepend(item('n102') as never);
+		p.releaseQueue();
+		expect(p.items.value.map(x => x.id)).toEqual(['n102', 'n101', 'n100', 'n050', 'n090']);
+	});
+
+	test('控えた位置のノートが消えても、並べ直しの範囲を保つ', async () => {
+		const p = await loaded([]);
+		p.items.value = ['n010', 'n005', 'n009'].map(item) as never;
+		p.enqueue(item('n011') as never);
+		p.prepend(item('n013') as never);
+		p.removeItem('n010');
+		p.releaseQueue();
+		expect(p.items.value.map(x => x.id)).toEqual(['n013', 'n011', 'n005', 'n009']);
+	});
+
+	test('ふつうの順序のときは、queue をそのまま先頭へ出す', async () => {
+		const p = await loaded(['n000']);
+		p.enqueue(item('n001') as never);
+		p.enqueue(item('n002') as never);
+		p.releaseQueue();
+		expect(p.items.value.map(x => x.id)).toEqual(['n002', 'n001', 'n000']);
+	});
+});

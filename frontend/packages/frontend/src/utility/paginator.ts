@@ -170,6 +170,10 @@ export class Paginator<
 	private searchParamName: keyof E['req'] | 'search';
 	private canFetchDetection: 'safe' | 'limit' | null = null;
 	private aheadQueue: T[] = [];
+	// mk-go: queue が空から積まれ始めた時点の、一覧の先頭の id (一覧が空なら null)。
+	// queue を出すときに、積んでいる間に一覧へ直接入った分 (この id より上) を
+	// 見分けるために使う (#3594)。
+	private queueStartNewestShownId: string | null = null;
 	private inFlightFetchNewer = new Map<string, InFlightFetchNewer>();
 	private fetchNewerCount = 0;
 	private useShallowRef: SRef;
@@ -325,6 +329,12 @@ export class Paginator<
 		}
 
 		this.pushItems(apiRes);
+		// mk-go: 取得を待つ間に queue へ積み始めていたら、控えた位置は空の一覧のもの
+		// (null) で、今入った初回の分まで「直接入った分」として並べ直してしまう。
+		// 初回の分は既存の一覧として扱うよう、控え直す (#3594)。
+		if (this.aheadQueue.length > 0) {
+			this.queueStartNewestShownId = this.items.value[0]?.id ?? null;
+		}
 
 		if (this.canFetchDetection === 'limit') {
 			if (apiRes.length < FIRST_FETCH_LIMIT) {
@@ -627,6 +637,7 @@ export class Paginator<
 				// id は時系列順に増えるので、id で並べれば足りる。
 				// order:'oldest' はこの経路を使わない (fetchNewer の非 toQueue 側で
 				// pushItems に分岐する)。
+				this.markQueueStart();
 				this.aheadQueue.unshift(...fresh);
 				this.aheadQueue.sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
 			}
@@ -741,6 +752,7 @@ export class Paginator<
 		// `releaseQueue` が呼ぶ `unshiftItems` は items との重複しか見ないので、
 		// queue 内で重複した分はそのまま一覧に並ぶ。
 		if (this.hasItem(item.id)) return;
+		this.markQueueStart();
 		this.aheadQueue.unshift(item);
 		if (this.aheadQueue.length > MAX_QUEUE_ITEMS) {
 			// **落とすのは最古。** `pop()` は「queue が到着順に newest-first で
@@ -756,25 +768,68 @@ export class Paginator<
 		this.queuedAheadItemsCount.value = this.aheadQueue.length;
 	}
 
+	private markQueueStart(): void {
+		if (this.aheadQueue.length > 0) return;
+		this.queueStartNewestShownId = this.items.value[0]?.id ?? null;
+	}
+
 	public releaseQueue(): void {
 		if (this.aheadQueue.length === 0) return; // これやらないと余計なre-renderが走る
-		this.unshiftItems(this.aheadQueue);
+		const queued = this.aheadQueue;
 		this.aheadQueue = [];
 		this.queuedAheadItemsCount.value = 0;
+
+		// mk-go: **queue を積んでいる間に、一覧へ直接入った分がある**ことがある (再接続の
+		// 穴埋めやポーリングが toQueue: false で入れた分など、#3594)。そのまま queue を
+		// 先頭へ積むと、それより古い queue が上に来て時系列が逆転するので、その分と
+		// queue だけを id で並べ直す。
+		// **並べ直すのはこの範囲だけ。** 一覧の既存の分には触れない。リモートのノートの
+		// id は published から作るので、連合で遅れて届いたノートは一覧の途中の id を持つ。
+		// 全体を並べ直すと、それが一覧の下へ沈み、trim で黙って消える。
+		const items = this.items.value;
+		const base = this.queueStartNewestShownId;
+		const baseIndex = base == null ? items.length : items.findIndex(x => x.id === base);
+		if (baseIndex <= 0) {
+			// 直接入った分が無い (ふつうの経路) か、基準が一覧から消えて見分けられない。
+			// 本家と同じく、queue を到着順のまま先頭へ出す。
+			this.unshiftItems(queued);
+			return;
+		}
+
+		const above = items.slice(0, baseIndex);
+		const aboveIds = new Set(above.map(x => x.id));
+		const merged = [...above, ...queued.filter(x => !aboveIds.has(x.id) && !items.some(y => y.id === x.id))];
+		merged.sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+		this.items.value = [...merged, ...items.slice(baseIndex)];
+		this.trim(true);
 	}
 
 	public removeItem(id: string): void {
-		// TODO: queueからも消す
+		// mk-go: queue からも消す。裏に回ったタイムラインは queue に積む時間が長く
+		// (#3594)、消したノートが戻ったときに出てしまう。
+		if (this.aheadQueue.some(x => x.id === id)) {
+			this.aheadQueue = this.aheadQueue.filter(x => x.id !== id);
+			this.queuedAheadItemsCount.value = this.aheadQueue.length;
+		}
 
 		const index = this.items.value.findIndex(x => x.id === id);
 		if (index !== -1) {
+			// mk-go: 控えた位置のノートを消すと、queue を出すときに位置が見つからず
+			// 並べ直しが効かなくなる。控えを一つ下 (同じく既存の一覧の先頭) へずらす (#3594)。
+			if (this.queueStartNewestShownId === id) {
+				this.queueStartNewestShownId = this.items.value[index + 1]?.id ?? null;
+			}
 			this.items.value.splice(index, 1);
 			if (this.useShallowRef) triggerRef(this.items);
 		}
 	}
 
 	public updateItem(id: string, updater: (item: T) => T): void {
-		// TODO: queueのも更新
+		// mk-go: queue の分も更新する (removeItem と同じ理由、#3594)。
+		const queuedIndex = this.aheadQueue.findIndex(x => x.id === id);
+		if (queuedIndex !== -1) {
+			this.aheadQueue[queuedIndex] = updater(this.aheadQueue[queuedIndex]!);
+		}
 
 		const index = this.items.value.findIndex(x => x.id === id);
 		if (index !== -1) {
