@@ -1271,9 +1271,9 @@ func (s *Service) CreateMessageToRoom(ctx context.Context, fromUserID, roomID, t
 	// Room 宛も同様に、sender と **mute した member** を除く全 member
 	// (owner 含む) の main に newChatMessage を emit する。Misskey 本家
 	// ChatService.createMessageToRoom と同じ fan-out 方針。
-	s.emitRoomNewChatMessage(room, fromUserID, msg, nil)
+	members, membersLoaded := s.emitRoomNewChatMessage(room, fromUserID, msg, nil)
 	// remote member が居れば group Create を AP 配送する (best-effort)。
-	s.tryDeliverRoomMessage(msg, room, fromUserID)
+	s.tryDeliverRoomMessage(msg, room, fromUserID, members, membersLoaded)
 	return msg, nil
 }
 
@@ -1282,7 +1282,7 @@ func (s *Service) CreateMessageToRoom(ctx context.Context, fromUserID, roomID, t
 // `to` and carries the room URI as its `@context`. Best-effort: no-op when AP
 // delivery is unwired, the sender is remote, or the room has no remote members.
 // Per-recipient failures are logged and swallowed.
-func (s *Service) tryDeliverRoomMessage(msg *model.ChatMessage, room *model.ChatRoom, fromUserID string) {
+func (s *Service) tryDeliverRoomMessage(msg *model.ChatMessage, room *model.ChatRoom, fromUserID string, streamMembers []*model.ChatRoomMembership, streamMembersLoaded bool) {
 	if s.deliverer == nil || s.userRepo == nil || s.renderer == nil || s.urls == nil || room == nil {
 		return
 	}
@@ -1292,11 +1292,14 @@ func (s *Service) tryDeliverRoomMessage(msg *model.ChatMessage, room *model.Chat
 		return
 	}
 	// member 集合 = owner (暗黙メンバー) + membership 行。重複は set で除外する。
+	members := streamMembers
+	if !streamMembersLoaded {
+		// stream 側で取得できなかった場合も、AP 側で独立して再取得する。
+		members, _ = s.repo.ListMembersByRoom(room.ID)
+	}
 	memberIDs := map[string]struct{}{room.OwnerID: {}}
-	if members, merr := s.repo.ListMembersByRoom(room.ID); merr == nil {
-		for _, m := range members {
-			memberIDs[m.UserID] = struct{}{}
-		}
+	for _, m := range members {
+		memberIDs[m.UserID] = struct{}{}
 	}
 	memberURIs := make([]string, 0, len(memberIDs))
 	remoteRecipients := make([]*model.User, 0)
@@ -1529,14 +1532,16 @@ func (s *Service) isRoomMemberWith(room *model.ChatRoom, userID, roomID string) 
 // スキップする (message 自体の作成は成功として返される前に呼ばれる)。
 // sender は分かっていれば渡す (nil なら fromUserID で引き直す)。**remote sender は
 // user 表に居ないことがある**ので、AP 経路は必ず渡すこと。
-func (s *Service) emitRoomNewChatMessage(room *model.ChatRoom, fromUserID string, msg *model.ChatMessage, sender *model.User) {
+// 取得できた membership 一覧を返し、AP 準備でも同じ snapshot を使う。
+// 未取得なら loaded=false とし、AP 側の独立取得を残す。
+func (s *Service) emitRoomNewChatMessage(room *model.ChatRoom, fromUserID string, msg *model.ChatMessage, sender *model.User) ([]*model.ChatRoomMembership, bool) {
 	if s.mainStreamPublisher == nil || room == nil {
-		return
+		return nil, false
 	}
 	members, err := s.repo.ListMembersByRoom(room.ID)
 	if err != nil {
 		slog.Warn("chat: ListMembersByRoom failed, skipping newChatMessage emit", "roomID", room.ID, "err", err)
-		return
+		return nil, false
 	}
 	packed := s.packMessageStream(msg)
 	// push が無効な構成では引かない (1 メッセージあたり FindByID が 1 回増える)。
@@ -1577,6 +1582,7 @@ func (s *Service) emitRoomNewChatMessage(room *model.ChatRoom, fromUserID string
 		s.mainStreamPublisher.PublishMainEvent(uid, "newChatMessage", packed)
 		s.pushNewChatMessage(uid, packed, sender, room)
 	}
+	return members, true
 }
 
 // DeleteMessage removes a message and fans out a `deleted` event on the
