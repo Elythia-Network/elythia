@@ -270,11 +270,11 @@ func (f *failingPollVoteRepo) CountByUserAndNote(userID, noteID string) (int64, 
 	return f.MockPollVoteRepository.CountByUserAndNote(userID, noteID)
 }
 
-func (f *failingPollVoteRepo) Create(v *model.PollVote) error {
+func (f *failingPollVoteRepo) CreateIfNotVoted(v *model.PollVote, single bool) (bool, error) {
 	if f.failCreate {
-		return errStub
+		return false, errStub
 	}
-	return f.MockPollVoteRepository.Create(v)
+	return f.MockPollVoteRepository.CreateIfNotVoted(v, single)
 }
 
 func TestVote_CountError(t *testing.T) {

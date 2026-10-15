@@ -209,18 +209,23 @@ func (s *Service) Vote(user *model.User, noteID string, choice int) error {
 		NoteID: target.ID,
 		Choice: choice,
 	}
-	if err := s.pollVoteRepo.Create(v); err != nil {
+	// 上の検査は先に弾くための近道で、同時に届いた投票の重複はここで防ぐ
+	// (上の検査は並行する投票を見られないため)。
+	created, err := s.pollVoteRepo.CreateIfNotVoted(v, !p.Multiple)
+	if err != nil {
 		return err
+	}
+	if !created {
+		return ErrAlreadyVoted
 	}
 	_ = s.pollRepo.IncrementVote(target.ID, choice, 1)
 
 	// pollVoted を note の stream topic に publish して subscribe 中の
 	// frontend (note 詳細画面 / timeline) が reload なしで count を更新
 	// できるようにする (#690)。wire 上の形は Misskey TS の PollService.vote と
-	// 同じ {choice, userId} だが、userId を本人以外の購読者へそのまま流すと、
-	// 匿名の購読者にも誰がどれに入れたかが分かる。購読者ごとの差し替えは
-	// stream の配信段 (Dispatcher.forwardNoteEvent) で行い、本人以外には
-	// userId の代わりに voteId を載せる。voteId は購読者には直接は流れない。
+	// 同じ {choice, userId} だが、投票者の ID は本人の接続にだけ渡す。購読者ごとの
+	// 差し替えは stream の配信段 (Dispatcher.forwardNoteEvent) で行い、本人以外
+	// には userId の代わりに voteId を載せる。voteId は購読者には直接は流れない。
 	if s.eventPub != nil {
 		s.eventPub.PublishToNoteStream(target.ID, "pollVoted", map[string]any{
 			"choice": choice,
