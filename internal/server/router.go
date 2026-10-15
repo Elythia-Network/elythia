@@ -2744,7 +2744,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// code 再利用で token を revoke したとき、auth cache に残った entry で
 	// 通り続けないよう即時失効させる (RFC6749 §4.1.2)。
 	oauthHandler.SetAuthInvalidator(s.auth)
-	s.echo.GET("/oauth/authorize", oauthHandler.Authorize)
+	// 匿名で外部への取得と Redis への保存を起こせるので、接続元ごとに絞る。
+	s.echo.GET("/oauth/authorize", oauthHandler.Authorize, middleware.RequireIPRateLimit(rateLimiter, middleware.OAuthAuthorizeRateLimitKey))
 	s.echo.POST("/oauth/decision", oauthHandler.Decision)
 	// upstream は token server にだけ fastifyCors を登録している
 	// (createTokenServer)。ブラウザ上の SPA が PKCE でトークン交換できるように
