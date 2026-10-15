@@ -15,6 +15,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/testutil"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -532,4 +533,57 @@ func TestPubSubService_NoDeliveryAfterUnsubscribeOrClose(t *testing.T) {
 			assert.Equal(t, int32(1), handled.Load(), "止めた後も残りを配った")
 		})
 	}
+}
+
+func TestPubSubService_PublishMany(t *testing.T) {
+	svc := NewPubSubService(testRedis.Client, "many:")
+	ctx := context.Background()
+	defer svc.Close()
+
+	var mu sync.Mutex
+	received := map[string][]string{}
+	for _, ch := range []string{"a", "b", "c"} {
+		svc.Subscribe(ctx, ch, func(data []byte) {
+			mu.Lock()
+			received[ch] = append(received[ch], string(data))
+			mu.Unlock()
+		})
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	assert.Nil(t, svc.PublishMany(ctx, []string{"a", "b"}, map[string]string{"n": "1"}))
+	assert.Nil(t, svc.PublishMany(ctx, []string{"a", "b"}, json.RawMessage(`{"n":"2"}`)))
+	assert.Nil(t, svc.PublishMany(ctx, nil, "ignored"))
+
+	assert.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(received["a"]) >= 2 && len(received["b"]) >= 2
+	}, 2*time.Second, 20*time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	want := []string{`{"n":"1"}`, `{"n":"2"}`}
+	assert.Equal(t, want, received["a"], "same payload as Publish, in order")
+	assert.Equal(t, want, received["b"])
+	assert.Empty(t, received["c"], "only the listed channels")
+}
+
+func TestPubSubService_PublishManyErrors(t *testing.T) {
+	ctx := context.Background()
+	svc := NewPubSubService(testRedis.Client, "many:")
+	errs := svc.PublishMany(ctx, []string{"a", "b"}, func() {})
+	require.Len(t, errs, 2)
+	assert.ErrorContains(t, errs[0], "pubsub marshal")
+	assert.ErrorContains(t, errs[1], "pubsub marshal")
+
+	// 接続できないときは、宛先ごとにエラーが返る。
+	client := redis.NewClient(&redis.Options{Addr: testRedis.Addr})
+	require.NoError(t, client.Close())
+	closed := NewPubSubService(client, "many:")
+	errs = closed.PublishMany(ctx, []string{"a", "b"}, "x")
+	require.Len(t, errs, 2)
+	assert.Error(t, errs[0])
+	assert.Error(t, errs[1])
 }

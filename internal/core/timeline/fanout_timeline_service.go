@@ -155,6 +155,86 @@ func (s *FanoutTimelineService) Push(ctx context.Context, name Name, noteID stri
 	return nil
 }
 
+// PushMany is Push for many timelines at once: the same note goes onto every
+// list in names. The returned slice is nil when every push succeeded;
+// otherwise it has len(names) entries and errs[i] is the error of names[i].
+//
+// フォロワーへの配送 (#3606) で、宛先ごとに LPUSH を 1 往復ずつ送っていたのを
+// 1 本の pipeline にまとめる。**送るコマンドと順序は Push を宛先の順に呼んだ
+// ときと同じにする。** 直近のノートは宛先ごとに LPUSH と、確率で LTRIM を
+// 送る。pipeline の中の 1 コマンドが失敗しても他のコマンドは実行されるので、
+// 宛先ごとの成否は Push を 1 回ずつ呼んだときと同じに取れる。違いは、LTRIM を
+// LPUSH の結果を待たずに積むことだけで、LPUSH が失敗した宛先に LTRIM が
+// 届いても list を縮めるだけ (サイズはもともと確率で守るソフトな上限)。
+//
+// 古いノート (猶予の 3 分より前) は末尾と比べてから入れるので、LINDEX の
+// 結果を見て分岐する。pipeline にはできないので、Push を宛先ごとに呼ぶ。
+func (s *FanoutTimelineService) PushMany(ctx context.Context, names []Name, noteID string, maxLen int) []error {
+	if len(names) == 0 {
+		return nil
+	}
+	if maxLen <= 0 {
+		maxLen = defaultMaxLen
+	}
+	noteTime, err := s.idGen.ParseTime(noteID)
+	if err != nil {
+		err = fmt.Errorf("invalid note id %q: %w", noteID, err)
+		errs := make([]error, len(names))
+		for i := range errs {
+			errs[i] = err
+		}
+		return errs
+	}
+
+	var errs []error
+	setErr := func(i int, err error) {
+		if errs == nil {
+			errs = make([]error, len(names))
+		}
+		errs[i] = err
+	}
+	if s.nowFn().Sub(noteTime) > recentInsertGracePeriod {
+		for i, name := range names {
+			if err := s.Push(ctx, name, noteID, maxLen); err != nil {
+				setErr(i, err)
+			}
+		}
+		return errs
+	}
+
+	pipe := s.client.Pipeline()
+	pushes := make([]*redis.IntCmd, len(names))
+	for i, name := range names {
+		key := s.key(name)
+		pushes[i] = pipe.LPush(ctx, key, noteID)
+		if s.randFn() < trimProbability {
+			// Push と同じく LTRIM の失敗は握り潰す (下で結果を見ない)。
+			pipe.LTrim(ctx, key, 0, int64(maxLen-1))
+		}
+	}
+	// Exec の戻り値は最初に失敗したコマンドのエラーでしかないので、
+	// 宛先ごとの成否は各コマンドから取る。接続が切れたときは全コマンドに
+	// 同じエラーが入る。
+	//
+	// **既知の差: 送り直しで 1 ページ分が重複しうる。** go-redis は読み取りの
+	// EOF やタイムアウトで pipeline を丸ごと送り直すので、Redis が途中まで
+	// (または全部) 実行していれば、そのページの LPUSH が 2 回入る。1 件ずつ
+	// 送っていたころも単発のコマンドは同じ条件で送り直されていたので、起きる
+	// こと自体は同じで、重複の単位が 1 件から 1 ページになっただけ。list に
+	// 同じ ID が 2 つ入ると、読み出しの 1 回の hydrate (FindManyByIDsWithUser の
+	// `id IN`) の中では 1 件になる。ただし DB fallback を切っているときは、
+	// scanOlder が残りの ID を別の hydrate で引くので、重複した 2 つが 1 回目の
+	// 末尾と残りの先頭に分かれると、1 回の応答に同じノートが 2 回入りうる
+	// (filterAndSort は並べ替えるだけで重複を除かず、重複は隣り合う)。
+	_, _ = pipe.Exec(ctx)
+	for i, cmd := range pushes {
+		if err := cmd.Err(); err != nil {
+			setErr(i, err)
+		}
+	}
+	return errs
+}
+
 // Get returns IDs from the timeline filtered by the given since/until window.
 // 結果の向きは cursor に従う (sinceId 単独なら ASC、それ以外は id 降順)。limit<=0 のときは全件返す。
 func (s *FanoutTimelineService) Get(ctx context.Context, name Name, untilID, sinceID string, limit int) ([]string, error) {

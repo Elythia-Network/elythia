@@ -2,6 +2,7 @@ package timeline
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"slices"
 
@@ -42,6 +43,17 @@ type MetaCacheLimitsProvider interface {
 //   - "homeTimeline:<userID>"
 type StreamingPublisher interface {
 	PublishNote(topic string, n *model.Note, author *model.User)
+}
+
+// BatchStreamingPublisher is a StreamingPublisher that can publish one note to
+// many topics at once. FanoutHook uses it for the per-follower home topics
+// when the publisher implements it, and falls back to PublishNote per topic
+// otherwise.
+//
+// フォロワーごとに PUBLISH を 1 往復ずつ送っていたのを、ページごとに 1 本の
+// pipeline にまとめるため (#3606)。本文の JSON も 1 回だけ作る。
+type BatchStreamingPublisher interface {
+	PublishNoteMany(topics []string, n *model.Note, author *model.User)
 }
 
 // UserListMemberLookup abstracts the query "which user lists contain this
@@ -350,7 +362,7 @@ func resolveCap(limits CacheLimits, kind TimelineKind) int {
 
 // publishNote forwards the note to the StreamingPublisher when set. Best-
 // effort wrapper used by OnNoteCreated for non-follower topics; the per-
-// follower streaming publish is inlined in fanoutToFollowersAndStream.
+// follower topics go through publishNoteMany.
 func (h *FanoutHook) publishNote(topic string, n *model.Note, author *model.User) {
 	if h.publisher == nil {
 		return
@@ -412,6 +424,8 @@ func (h *FanoutHook) fanoutToFollowersAndStream(ctx context.Context, authorID st
 	isReply := n.ReplyID != nil
 	isSelfThread := isReply && n.ReplyUserID != nil && *n.ReplyUserID == n.UserID
 	isFollowersOnlyReply := isReply && n.Reply != nil && n.Reply.Visibility == model.NoteVisibilityFollowers
+	names := make([]Name, 0, pageSize)
+	topics := make([]string, 0, pageSize)
 	offset := 0
 	for {
 		rows, err := h.followingRepo.ListFollowers(authorID, pageSize, offset)
@@ -471,11 +485,16 @@ func (h *FanoutHook) fanoutToFollowersAndStream(ctx context.Context, authorID st
 					continue
 				}
 			}
-			h.pushWithLimit(ctx, HomeTimelineName(f.FollowerID), n.ID, homeCap)
-			if h.publisher != nil {
-				h.publisher.PublishNote("homeTimeline:"+f.FollowerID, n, author)
-			}
+			names = append(names, HomeTimelineName(f.FollowerID))
+			topics = append(topics, "homeTimeline:"+f.FollowerID)
 		}
+		// ページごとに、list への push を先に 1 本の pipeline で、stream への
+		// publish を後に 1 本の pipeline で送る (#3606)。どの宛先でも push が
+		// publish より先に Redis に届くのは、1 件ずつ送っていたときと同じ。
+		h.pushManyWithLimit(ctx, names, n.ID, homeCap)
+		h.publishNoteMany(topics, n, author)
+		names = names[:0]
+		topics = topics[:0]
 		if len(rows) < pageSize {
 			return
 		}
@@ -626,9 +645,11 @@ func (h *FanoutHook) fanoutToChannelFollowers(ctx context.Context, channelID, no
 		if len(ids) == 0 {
 			return
 		}
+		names := make([]Name, 0, len(ids))
 		for _, fid := range ids {
-			h.pushWithLimit(ctx, HomeTimelineName(fid), noteID, homeCap)
+			names = append(names, HomeTimelineName(fid))
 		}
+		h.pushManyWithLimit(ctx, names, noteID, homeCap)
 		if next == "" {
 			return
 		}
@@ -676,6 +697,79 @@ func (h *FanoutHook) pushWithLimit(ctx context.Context, name Name, id string, ma
 	}
 	if err := h.fanout.Push(ctx, name, id, maxLen); err != nil {
 		slog.Warn("timeline push failed", "name", string(name), "id", id, "err", err)
+	}
+}
+
+// pushManyWithLimit is pushWithLimit for many timelines: one pipeline, and
+// at most one warning per batch.
+//
+// **失敗はページごとに 1 行にまとめる。** Redis が落ちるとページの全宛先が
+// 同時に失敗する。1 件ずつ送っていたころは 1 件ごとにタイムアウトの待ちが
+// 挟まって出る速さが抑えられていたが、pipeline では最大 200 行 (チャンネルの
+// フォロワーは 500 行) が一度に出る (#3606)。
+//
+// 失敗した宛先は全部出す (1 ページ分に収まる)。あとから「この人の home に
+// 届かなかったか」を宛先の名前で探せるようにするため。失敗が 1 件だけなら、
+// 単発の pushWithLimit と同じ文言・同じ属性 (name / err) で出し、複数なら
+// 別の文言で names / errors (エラーの種類ごとの件数) を出す。同じ文言で属性の
+// 形 (name と names) が混ざると、属性で絞る検索が片方を取りこぼす。
+func (h *FanoutHook) pushManyWithLimit(ctx context.Context, names []Name, id string, maxLen int) {
+	if !fanoutEnabledFrom(ctx) || len(names) == 0 {
+		return
+	}
+	targets := make([]string, len(names))
+	for i, n := range names {
+		targets[i] = string(n)
+	}
+	failed, kinds, firstErr := summarizeFailures(targets, h.fanout.PushMany(ctx, names, id, maxLen))
+	switch {
+	case len(failed) == 0:
+		return
+	case len(failed) == 1:
+		slog.Warn("timeline push failed", "name", failed[0], "id", id, "err", firstErr)
+	default:
+		slog.Warn("timeline push failed for several timelines", "names", failed, "failed", len(failed), "total", len(names), "id", id, "errors", kinds)
+	}
+}
+
+// summarizeFailures returns the targets whose err is non-nil, in order, the
+// distinct error messages with their counts ("<count>: <message>", in order of
+// first appearance) and the first error.
+func summarizeFailures(targets []string, errs []error) (failed, kinds []string, first error) {
+	counts := map[string]int{}
+	var order []string
+	for i, err := range errs {
+		if err == nil {
+			continue
+		}
+		if first == nil {
+			first = err
+		}
+		failed = append(failed, targets[i])
+		msg := err.Error()
+		if _, ok := counts[msg]; !ok {
+			order = append(order, msg)
+		}
+		counts[msg]++
+	}
+	for _, msg := range order {
+		kinds = append(kinds, fmt.Sprintf("%d: %s", counts[msg], msg))
+	}
+	return failed, kinds, first
+}
+
+// publishNoteMany publishes the note to every topic, in one batch when the
+// publisher supports it.
+func (h *FanoutHook) publishNoteMany(topics []string, n *model.Note, author *model.User) {
+	if h.publisher == nil || len(topics) == 0 {
+		return
+	}
+	if bp, ok := h.publisher.(BatchStreamingPublisher); ok {
+		bp.PublishNoteMany(topics, n, author)
+		return
+	}
+	for _, topic := range topics {
+		h.publisher.PublishNote(topic, n, author)
 	}
 }
 

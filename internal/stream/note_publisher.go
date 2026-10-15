@@ -3,6 +3,7 @@ package stream
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sync"
 
@@ -19,6 +20,12 @@ import (
 // 循環依存を避けるため interface で受け取る。
 type PubSubPublisher interface {
 	Publish(ctx context.Context, channel string, payload any) error
+}
+
+// BatchPubSubPublisher is a PubSubPublisher that can send one payload to many
+// channels at once (core/event.PubSubService.PublishMany).
+type BatchPubSubPublisher interface {
+	PublishMany(ctx context.Context, channels []string, payload any) []error
 }
 
 // NotePublisher serializes a model.Note via entity.PackNote, embeds the author
@@ -143,8 +150,82 @@ func (p *NotePublisher) PublishNote(topic string, n *model.Note, author *model.U
 	}
 
 	if err := p.pub.Publish(context.Background(), topic, json.RawMessage(body)); err != nil {
-		slog.Warn("note publisher: publish failed", "topic", topic, "err", err)
+		slog.Warn("note publisher: publish failed", "topic", topic, "id", n.ID, "err", err)
 	}
+}
+
+// PublishNoteMany implements core/timeline.BatchStreamingPublisher: it
+// publishes the note to every topic, packing it once. When the underlying
+// publisher supports PublishMany the topics go out in one batch.
+func (p *NotePublisher) PublishNoteMany(topics []string, n *model.Note, author *model.User) {
+	if p.pub == nil || n == nil || author == nil || len(topics) == 0 {
+		return
+	}
+	// PublishNote と同じ凍結の gate (#2624)。
+	if notesfilter.HasSuspendedAuthor(n, author) {
+		return
+	}
+	body := p.packNote(n, author)
+	if body == nil {
+		return
+	}
+	payload := json.RawMessage(body)
+	var errs []error
+	if bp, ok := p.pub.(BatchPubSubPublisher); ok {
+		errs = bp.PublishMany(context.Background(), topics, payload)
+	} else {
+		for i, topic := range topics {
+			if err := p.pub.Publish(context.Background(), topic, payload); err != nil {
+				if errs == nil {
+					errs = make([]error, len(topics))
+				}
+				errs[i] = err
+			}
+		}
+	}
+	logPublishFailures(n.ID, topics, errs)
+}
+
+// logPublishFailures logs at most one warning for a batch.
+//
+// **1 行にまとめる。** Redis が落ちるとフォロワーのページの全宛先が同時に
+// 失敗し、宛先ごとに出すと 1 投稿で最大 200 行が一度に出る (#3606)。失敗した
+// 宛先は全部出す (1 ページ分に収まる)。失敗が 1 件だけなら PublishNote と
+// 同じ文言・同じ属性 (topic / err) で出し、複数なら別の文言で topics / errors
+// (エラーの種類ごとの件数) を出す。同じ文言で topic と topics が混ざると、
+// 属性で絞る検索が片方を取りこぼす。
+func logPublishFailures(noteID string, topics []string, errs []error) {
+	counts := map[string]int{}
+	var (
+		failed, order []string
+		first         error
+	)
+	for i, err := range errs {
+		if err == nil {
+			continue
+		}
+		if first == nil {
+			first = err
+		}
+		failed = append(failed, topics[i])
+		msg := err.Error()
+		if _, ok := counts[msg]; !ok {
+			order = append(order, msg)
+		}
+		counts[msg]++
+	}
+	switch len(failed) {
+	case 0:
+		return
+	case 1:
+		slog.Warn("note publisher: publish failed", "topic", failed[0], "id", noteID, "err", first)
+		return
+	}
+	kinds := make([]string, 0, len(order))
+	for _, msg := range order {
+		kinds = append(kinds, fmt.Sprintf("%d: %s", counts[msg], msg))
+	}
+	slog.Warn("note publisher: publish failed for several topics", "topics", failed, "failed", len(failed), "total", len(topics), "id", noteID, "errors", kinds)
 }
 
 // packNote returns the serialized JSON for the note. フォロワーfanout時に
