@@ -134,6 +134,11 @@ func (c *BubbleVersusMatchChannel) OnClientMessage(msgType string, body json.Raw
 	if c.matchID == "" {
 		return
 	}
+	// reversiGameと同じく、対戦の操作にはwrite:accountを要求する
+	// (bubble-game/versus/reportと同じ権限)。
+	if !c.ctx.HasPermission(gameWriteKind) {
+		return
+	}
 	ctx := context.Background()
 	var err error
 	switch msgType {

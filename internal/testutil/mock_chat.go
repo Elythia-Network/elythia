@@ -39,6 +39,10 @@ type MockChatRepository struct {
 	// AddReaction / RemoveReaction so tests can assert canonicalisation (#2106 N4).
 	AddedReactions   []string
 	RemovedReactions []string
+	// ReadAllCalls records MarkAllReadFromUser ("user:<reader>:<other>") and
+	// MarkAllReadInRoom ("room:<reader>:<room>") calls so stream tests can
+	// assert whether a read was performed.
+	ReadAllCalls []string
 
 	// CreateErr forces Create* to return this error without persisting.
 	CreateErr error
@@ -608,9 +612,20 @@ func (m *MockChatRepository) MarkRead(userID, messageID string) error {
 	return nil
 }
 
-func (m *MockChatRepository) MarkAllRead(_ string) error            { return nil }
-func (m *MockChatRepository) MarkAllReadFromUser(_, _ string) error { return nil }
-func (m *MockChatRepository) MarkAllReadInRoom(_, _ string) error   { return nil }
+func (m *MockChatRepository) MarkAllRead(_ string) error { return nil }
+func (m *MockChatRepository) MarkAllReadFromUser(readerID, otherID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.ReadAllCalls = append(m.ReadAllCalls, "user:"+readerID+":"+otherID)
+	return nil
+}
+
+func (m *MockChatRepository) MarkAllReadInRoom(readerID, roomID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.ReadAllCalls = append(m.ReadAllCalls, "room:"+readerID+":"+roomID)
+	return nil
+}
 
 // --- Delivery status / history ---
 

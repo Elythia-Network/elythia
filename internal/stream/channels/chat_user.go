@@ -70,6 +70,10 @@ func (c *ChatUserChannel) OnRedisEvent(payload []byte) {
 	_ = c.ctx.Send(env.Type, env.Body)
 }
 
+// chatWriteKind is the kind of chat/read-all, required for the "read" message
+// of the chat channels.
+const chatWriteKind = "write:chat"
+
 // OnClientMessage handles "read" to mark a DM as read. Other types ignored.
 func (c *ChatUserChannel) OnClientMessage(msgType string, body json.RawMessage) {
 	if c.svc == nil || c.otherID == "" {
@@ -81,6 +85,11 @@ func (c *ChatUserChannel) OnClientMessage(msgType string, body json.RawMessage) 
 	}
 	switch msgType {
 	case "read":
+		// 既読はread:chatの購読の中で書き込む操作なので、API (chat/read-all)と同じ
+		// write:chatを要求する。本家はstreamのreadでtokenの権限を見ない。
+		if !c.ctx.HasPermission(chatWriteKind) {
+			return
+		}
 		// upstream chat-user.ts onMessage('read') は body を見ず会話全体を既読化
 		// する (#1549)。message id 必須だった旧実装は id 無し read を no-op にして
 		// しまい unread が消えなかった。

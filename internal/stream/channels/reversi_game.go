@@ -71,6 +71,11 @@ func (c *ReversiGameChannel) OnRedisEvent(payload []byte) {
 	_ = c.ctx.Send(env.Type, env.Body)
 }
 
+// gameWriteKind is the kind required for the player actions sent over the
+// reversiGame and bubbleVersusMatch channels (the kind of reversi/match and
+// bubble-game/versus/report).
+const gameWriteKind = "write:account"
+
 // OnClientMessage dispatches player actions to the reversi service. Requires
 // authentication; anonymous clients and non-player spectators are ignored.
 // 失敗は `error` イベントでクライアントへ通知する。
@@ -80,6 +85,12 @@ func (c *ReversiGameChannel) OnClientMessage(msgType string, body json.RawMessag
 	}
 	user, ok := c.ctx.User().(*model.User)
 	if !ok || user == nil {
+		return
+	}
+	// 対局の操作には、対局を始めるAPI (reversi/match・reversi/surrender)と同じ
+	// write:accountを要求する。channelの購読はread:accountで足りるので、操作は
+	// 別に確かめる。
+	if !c.ctx.HasPermission(gameWriteKind) {
 		return
 	}
 	ctx := context.Background()

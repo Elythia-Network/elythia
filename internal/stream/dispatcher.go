@@ -555,6 +555,12 @@ type channelContext struct {
 }
 
 func (c *channelContext) ID() string { return c.id }
+
+// HasPermission reports whether the connection's token carries kind. 匿名の
+// 接続はpermissionsがnil (= 全許可) なので、利用者がいるかを先に見る。
+func (c *channelContext) HasPermission(kind string) bool {
+	return c.dispatcher.connHasPermission(kind)
+}
 func (c *channelContext) User() any {
 	if c.dispatcher.conn == nil {
 		return nil
@@ -635,9 +641,28 @@ func (c *channelContext) UGCVisibilityForVisitor() string {
 
 // --- readNotification / subNote / unsubNote ---
 
+// connHasPermission reports whether the connection is signed in and its token
+// carries kind (native login tokens carry every kind).
+func (d *Dispatcher) connHasPermission(kind string) bool {
+	if d.conn == nil || d.conn.User() == nil {
+		return false
+	}
+	return d.conn.HasPermission(kind)
+}
+
+// streamReadNotificationKind is the kind of notifications/mark-all-as-read,
+// the REST counterpart of the readNotification message.
+const streamReadNotificationKind = "write:notifications"
+
 // handleReadNotification marks all notifications as read for the connected user.
 func (d *Dispatcher) handleReadNotification() {
-	if d.notifReader == nil || d.conn == nil || d.conn.User() == nil {
+	if d.notifReader == nil {
+		return
+	}
+	// 本家はstreamのreadNotificationでtokenの権限を見ないので、read:accountだけの
+	// アプリでも全通知を既読にできた。同じ操作のAPI (notifications/mark-all-as-read)
+	// と同じwrite:notificationsを要求する。
+	if !d.connHasPermission(streamReadNotificationKind) {
 		return
 	}
 	if err := d.notifReader.ReadAll(d.conn.User().ID); err != nil {

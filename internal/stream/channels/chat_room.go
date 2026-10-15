@@ -91,6 +91,10 @@ func (c *ChatRoomChannel) OnClientMessage(msgType string, body json.RawMessage) 
 	}
 	switch msgType {
 	case "read":
+		// chat-userと同じく、既読にはwrite:chatを要求する。
+		if !c.ctx.HasPermission(chatWriteKind) {
+			return
+		}
 		// upstream chat-room.ts onMessage('read') は body を見ず部屋全体を既読化
 		// する (#1549)。
 		if err := c.svc.ReadRoomChat(context.Background(), user.ID, c.roomID); err != nil {

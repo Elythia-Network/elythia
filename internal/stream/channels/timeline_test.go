@@ -2,6 +2,7 @@ package channels
 
 import (
 	"encoding/json"
+	"slices"
 	"sync"
 	"testing"
 
@@ -27,6 +28,8 @@ type stubContext struct {
 	muteBlockSnap *stream.MuteBlockSnapshot
 	policies      map[string]any
 	ugcPolicy     string
+	// permissions mirrors stream.Connection: nil means every permission.
+	permissions []string
 }
 
 // followingUpdate records a call to UpdateFollowingSnapshot for assertions.
@@ -36,7 +39,10 @@ type followingUpdate struct {
 }
 
 func (s *stubContext) ID() string { return s.id }
-func (s *stubContext) User() any  { return s.user }
+func (s *stubContext) HasPermission(kind string) bool {
+	return s.permissions == nil || slices.Contains(s.permissions, kind)
+}
+func (s *stubContext) User() any { return s.user }
 func (s *stubContext) Send(msgType string, body any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
