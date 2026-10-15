@@ -1,10 +1,16 @@
 package emojis
 
 import (
+	"bytes"
+	"compress/gzip"
+	"encoding/json"
 	"net/http"
+	"strconv"
+	"sync/atomic"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/labstack/echo/v4"
@@ -16,6 +22,8 @@ type Handler struct {
 	// exportQueue は export-custom-emojis 用 (#2791 で router.go の inline
 	// closure から移設)。
 	exportQueue ExportEnqueuer
+	// encoded は /api/emojis の符号化済みの応答 (#3593)。
+	encoded atomic.Pointer[encodedEmojis]
 }
 
 // NewHandler creates a new emojis Handler.
@@ -25,6 +33,11 @@ func NewHandler(emojiRepo repository.EmojiRepository) *Handler {
 
 // Emojis returns local custom emojis.
 // POST /api/emojis
+//
+// The response body is encoded (and gzip-compressed) once per emoji list and
+// reused until the repository hands out a different list. The server's gzip
+// middleware skips this route (selfEncodedRoutes in internal/server), so the
+// handler negotiates Content-Encoding itself.
 func (h *Handler) Emojis(c echo.Context) error {
 	emojis, err := h.emojiRepo.ListLocal()
 	if err != nil {
@@ -33,7 +46,62 @@ func (h *Handler) Emojis(c echo.Context) error {
 		middleware.SkipPublicCache(c)
 		return c.JSON(http.StatusOK, map[string]any{"emojis": []any{}})
 	}
+	body := h.emojisBody(emojis)
+	res := c.Response()
+	res.Header().Add(echo.HeaderVary, echo.HeaderAcceptEncoding)
+	res.Header().Set(echo.HeaderContentType, "application/json; charset=utf-8")
+	payload := body.plain
+	if body.gzip != nil && middleware.AcceptsEncoding(c.Request().Header.Get(echo.HeaderAcceptEncoding), "gzip") {
+		res.Header().Set(echo.HeaderContentEncoding, "gzip")
+		payload = body.gzip
+	}
+	res.Header().Set(echo.HeaderContentLength, strconv.Itoa(len(payload)))
+	res.WriteHeader(http.StatusOK)
+	_, err = res.Write(payload)
+	return err
+}
 
+// emojisMinGzipLength mirrors the server's gzip middleware MinLength: smaller
+// bodies are sent uncompressed.
+const emojisMinGzipLength = 1024
+
+// encodedEmojis is the /api/emojis response for one emoji list.
+type encodedEmojis struct {
+	// src は元にした一覧。CachedEmojiRepository.ListLocal は無効化 (書き込み・
+	// pub/sub・TTL) まで同じ slice を返し、無効化の後は作り直した別の slice を
+	// 返す。slice の同一性を見れば、絵文字の cache を捨てる契機とこの cache を
+	// 捨てる契機が揃う。src を握っているので、古い配列の番地が別の一覧に
+	// 再利用されることはない。
+	src   []*model.Emoji
+	plain []byte
+	// gzip は plain が emojisMinGzipLength 以上のときだけ持つ。
+	gzip []byte
+}
+
+// sameList reports whether a and b are the same slice (same backing array
+// and length). Two empty lists encode identically, so they also match.
+func sameList(a, b []*model.Emoji) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	return len(a) == 0 || &a[0] == &b[0]
+}
+
+// emojisBody returns the encoded response for list, reusing the previous
+// encoding when list is the same slice.
+func (h *Handler) emojisBody(list []*model.Emoji) *encodedEmojis {
+	if cur := h.encoded.Load(); cur != nil && sameList(cur.src, list) {
+		return cur
+	}
+	next := encodeEmojis(list)
+	// 同時に作り直した要求どうしは、どちらが残っても同じ一覧から作った内容。
+	h.encoded.Store(next)
+	return next
+}
+
+// encodeEmojis builds the response for emojis. It cannot fail: the body holds
+// only strings, string slices and booleans, and both encoders write to memory.
+func encodeEmojis(emojis []*model.Emoji) *encodedEmojis {
 	result := make([]map[string]any, 0, len(emojis))
 	for _, e := range emojis {
 		// url は upstream packSimple と同じく publicUrl || originalUrl で、
@@ -65,8 +133,22 @@ func (h *Handler) Emojis(c echo.Context) error {
 		}
 		result = append(result, item)
 	}
-
-	return c.JSON(http.StatusOK, map[string]any{"emojis": result})
+	// c.JSON (internal/server の fastJSONSerializer) と同じ json.Encoder で書き、
+	// 末尾の改行まで含めて従来と同じ本文にする。
+	// 文字列・文字列の slice・真偽値だけなので encode は失敗しない。書き込み先も
+	// メモリなので、gzip の書き込みと Close も失敗しない (level は定数)。
+	var plain bytes.Buffer
+	_ = json.NewEncoder(&plain).Encode(map[string]any{"emojis": result})
+	out := &encodedEmojis{src: emojis, plain: plain.Bytes()}
+	if plain.Len() >= emojisMinGzipLength {
+		var gz bytes.Buffer
+		// 一覧が変わるまで使い回すので、1 回だけ最大の圧縮率で縮める。
+		zw, _ := gzip.NewWriterLevel(&gz, gzip.BestCompression)
+		_, _ = zw.Write(out.plain)
+		_ = zw.Close()
+		out.gzip = gz.Bytes()
+	}
+	return out
 }
 
 // Emoji returns a single custom emoji by name.
