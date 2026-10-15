@@ -36,6 +36,7 @@ type RolePolicyChecker interface {
 func RequireRolePolicy(checker RolePolicyChecker, policyKey string) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
+			admitHeldAppUser(c)
 			user := GetUser(c)
 			if user == nil {
 				return c.JSON(http.StatusUnauthorized, map[string]any{

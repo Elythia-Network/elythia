@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
@@ -47,7 +48,20 @@ const (
 	// account is (logically) deleted. HTTP では匿名として扱うが、/streaming は
 	// 凍結と同じくこの接続を拒否する (IsInactiveAccountRequest)。
 	deletedContextKey contextKey = "misskeyDeleted"
+	// heldAppUserContextKey holds the user of an app token that lacks
+	// AppReadKind, moved out of UserContextKey by HideAppUserWithoutRead until
+	// an endpoint gate admits it.
+	heldAppUserContextKey contextKey = "misskeyHeldAppUser"
 )
+
+// AppReadKind is the permission an app access token must hold to act as its
+// user on an endpoint that declares no kind and also accepts anonymous
+// callers (notes/show, users/notes, ...).
+//
+// app tokenで本人として読めるのは、利用者が読む権限を許したアプリだけにする。
+// 「本人として読む」に当たるread:accountを条件にする(notes/timeline・i・
+// /streamingと同じ権限)。本家はこの種のendpointでapp tokenの権限を見ない。
+const AppReadKind = "read:account"
 
 // AuthScope is the OAuth scope view of an authenticated request. IsApp is
 // true when the request used an app access_token (Scopes = its permission
@@ -182,6 +196,61 @@ func (a *AuthMiddleware) Authenticate() echo.MiddlewareFunc {
 	}
 }
 
+// HideAppUserWithoutRead treats a request made with an app access token that
+// lacks AppReadKind as anonymous, unless an endpoint gate (RequireAuth,
+// RequireScope, RequireSecure, RequireAdmin, RequireModerator,
+// RequireRolePolicy or AdmitAppUser) admits the user later in the chain.
+//
+// The net effect is that such a token reaches as its user only the endpoints
+// that declare a kind (which it must hold) or require credentials (which reject
+// it when they have no kind), and every endpoint that declares neither sees an
+// anonymous caller. Native login tokens and app tokens holding AppReadKind are
+// untouched. Place it in the /api group after the rate limiter and
+// RecordClientIP so those still key on the user.
+//
+// エラーにせず匿名へ落とすのは、本家のクライアントが同じトークンでnotes/showなどを
+// 呼んだときに失敗させないため (公開の内容はそのまま読める)。
+func HideAppUserWithoutRead() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			sc := GetAuthScope(c)
+			if sc == nil || !sc.IsApp || slices.Contains(sc.Scopes, AppReadKind) {
+				return next(c)
+			}
+			if u := GetUser(c); u != nil {
+				c.Set(string(heldAppUserContextKey), u)
+				c.Set(string(UserContextKey), nil)
+			}
+			return next(c)
+		}
+	}
+}
+
+// AdmitAppUser restores the user held by HideAppUserWithoutRead for an
+// endpoint that declares no kind but must still know which app token's owner
+// is calling (i/revoke-token, which lets any app token revoke itself).
+func AdmitAppUser() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			admitHeldAppUser(c)
+			return next(c)
+		}
+	}
+}
+
+// admitHeldAppUser moves the user held by HideAppUserWithoutRead back into
+// UserContextKey. Endpoint gates call it first: past the gate, the app token's
+// permission has been checked against the endpoint (or the gate rejects app
+// tokens outright), so the handler may see the user.
+func admitHeldAppUser(c echo.Context) {
+	u, ok := c.Get(string(heldAppUserContextKey)).(*model.User)
+	if !ok || u == nil {
+		return
+	}
+	c.Set(string(UserContextKey), u)
+	c.Set(string(heldAppUserContextKey), nil)
+}
+
 // IsSuspendedRequest reports whether the request carried a valid token whose
 // account is suspended. Handlers that do their own credential check (instead of
 // RequireAuth) need this to keep the 403 YOUR_ACCOUNT_SUSPENDED behaviour that
@@ -222,6 +291,7 @@ func credentialRequiredResponse(c echo.Context) error {
 func RequireAuth() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
+			admitHeldAppUser(c)
 			user := GetUser(c)
 			if user == nil {
 				return credentialRequiredResponse(c)
@@ -244,6 +314,7 @@ func RequireAuth() echo.MiddlewareFunc {
 func RequireSecure() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
+			admitHeldAppUser(c)
 			user := GetUser(c)
 			if user == nil {
 				return credentialRequiredResponse(c)
@@ -319,10 +390,9 @@ func RequireScope(kind string) echo.MiddlewareFunc {
 			if sc == nil || !sc.IsApp {
 				return next(c)
 			}
-			for _, p := range sc.Scopes {
-				if p == kind {
-					return next(c)
-				}
+			if slices.Contains(sc.Scopes, kind) {
+				admitHeldAppUser(c)
+				return next(c)
 			}
 			return c.JSON(http.StatusForbidden, apierr.PermissionDenied())
 		}
@@ -386,6 +456,7 @@ type RoleChecker interface {
 func RequireAdmin(checker RoleChecker) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
+			admitHeldAppUser(c)
 			user := GetUser(c)
 			if user == nil {
 				return credentialRequiredResponse(c)
@@ -410,6 +481,7 @@ func RequireAdmin(checker RoleChecker) echo.MiddlewareFunc {
 func RequireModerator(checker RoleChecker) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
+			admitHeldAppUser(c)
 			user := GetUser(c)
 			if user == nil {
 				return credentialRequiredResponse(c)
