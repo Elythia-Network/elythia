@@ -603,8 +603,8 @@ func (h *Handler) collectNotificationsWithDropped(c echo.Context, user *model.Us
 	// 走査して畳んでから、この集合でグループの中身を引く。
 	dropped := make(map[string]struct{})
 
-	// Batch-check pending follow requests once for the current page. Preserve the
-	// page order and limit by only filtering the rows already returned by List.
+	// 現在のページに含まれるフォローリクエストだけを一括で確認する。
+	// List が返した行だけを絞り込むため、ページの順序と上限は維持される。
 	var followRequestCandidates []string
 	var pendingFollowRequestIDs map[string]struct{}
 	followRequestLookupOK := false

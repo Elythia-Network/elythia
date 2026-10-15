@@ -128,8 +128,8 @@ func TestFollowRequestNotificationsBatchLookupPreservesPageAndOrder(t *testing.T
 				userRepo.Users[id] = &model.User{ID: id, Username: id}
 			}
 
-			// With newest-first paging, the oldest request remains outside this five-row page.
-			// It is still pending and must not be pulled in to replace resolved requests.
+			// 新しい順のページングでは、最も古いリクエストはこの5件のページ外に残る。
+			// 未処理でも、解決済み通知の代わりにページへ補充されてはならない。
 			createReceiveFollowRequests(t, svc, "outside", "bob", "carol", "dave", "bob", "bob")
 			baselineIDs := listedNotificationIDs(t, svc, 5)
 			require.Len(t, baselineIDs, 5)
@@ -137,19 +137,10 @@ func TestFollowRequestNotificationsBatchLookupPreservesPageAndOrder(t *testing.T
 			lookup := newFollowRequestLookupSpy("bob", "outside")
 			h.SetFollowRequestRepo(lookup)
 
-			wantIDs := make([]string, 0, len(baselineIDs))
-			for _, rowID := range baselineIDs {
-				// The three bob notifications are still pending. carol and dave represent
-				// accepted and cancelled requests, so their request rows are absent.
-				if rowID == "" {
-					t.Fatal("notification id must not be empty")
-				}
-				wantIDs = append(wantIDs, rowID)
-			}
-			// Resolve expected survivors from the same paged rows without changing their order.
+			// 同じページの行から順序を変えずに、残る通知の期待値を作る。
 			rows, err := svc.List(context.Background(), "alice", "", "", 5, nil, nil)
 			require.NoError(t, err)
-			wantIDs = wantIDs[:0]
+			wantIDs := make([]string, 0, len(rows))
 			pageNotifierIDs := make(map[string]struct{})
 			for _, row := range rows {
 				pageNotifierIDs[row.NotifierID] = struct{}{}
