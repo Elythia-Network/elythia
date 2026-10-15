@@ -351,8 +351,8 @@ func TestKindHelpers(t *testing.T) {
 	assert.Equal(t, "restored", swappedIn(rs))
 }
 
-// journalText joins the journal of opID.
-func (e *env) journalText(opID string) string {
+// fullJournalText joins the whole journal of opID as it is now.
+func (e *env) fullJournalText(opID string) string {
 	e.t.Helper()
 	j, err := e.store.Journal(context.Background(), opID)
 	require.NoError(e.t, err)
@@ -363,16 +363,33 @@ func (e *env) journalText(opID string) string {
 	return b.String()
 }
 
+// journalText joins the journal of opID as it was when its step became
+// final (finalJournal): the lines an admin page shows once it stops reading.
+func (e *env) journalText(opID string) string {
+	e.t.Helper()
+	var b strings.Builder
+	for _, x := range e.finalJournal(opID) {
+		b.WriteString(x.Message + "\n")
+	}
+	return b.String()
+}
+
 // TestRollback_JournalSaysKept checks that the journal of a rollback that
 // ended before the switch says the kept database stays, not that it was
 // dropped (the restore's wording).
 func TestRollback_JournalSaysKept(t *testing.T) {
 	ctx := context.Background()
-	check := func(t *testing.T, text string) {
+	check := func(t *testing.T, e *env, opID string) {
 		t.Helper()
-		assert.NotContains(t, text, "dropped")
-		// 戻す先の扱いは、最後の行に1回だけ書く (2行並べない)。
-		assert.Equal(t, 1, strings.Count(text, "kept "+keptDB+" as it is"), text)
+		// 最後の段になった瞬間 (管理画面が読むのを止める時点) と、操作の goroutine を
+		// 止めた後の journal 全体の両方で見る。後者は、最後の段の後に書かれた行
+		// (dropped や重なった行) を拾うため。
+		e.stop()
+		for _, text := range []string{e.journalText(opID), e.fullJournalText(opID)} {
+			assert.NotContains(t, text, "dropped")
+			// 戻す先の扱いは、最後の行に1回だけ書く (2行並べない)。
+			assert.Equal(t, 1, strings.Count(text, "kept "+keptDB+" as it is"), text)
+		}
 	}
 	t.Run("abort while ready", func(t *testing.T) {
 		e := newEnv(t)
@@ -380,7 +397,7 @@ func TestRollback_JournalSaysKept(t *testing.T) {
 		rec, _ := e.rollback()
 		require.NoError(t, e.m.Abort(ctx, rec.OpID))
 		e.waitStep(rec.OpID, StepAborted)
-		check(t, e.journalText(rec.OpID))
+		check(t, e, rec.OpID)
 	})
 	t.Run("expiry", func(t *testing.T) {
 		e := newEnv(t, func(o *Options) { o.ReadyTimeout = 30 * time.Millisecond })
@@ -388,12 +405,12 @@ func TestRollback_JournalSaysKept(t *testing.T) {
 		rec, _, err := e.m.PrepareRollback(ctx, RollbackRequest{Database: keptDB, UserID: "u1", Token: "t"})
 		require.NoError(t, err)
 		e.waitStep(rec.OpID, StepExpired)
-		check(t, e.journalText(rec.OpID))
+		check(t, e, rec.OpID)
 	})
 	t.Run("recovery", func(t *testing.T) {
 		e, rec := crashedRollback(t, StepReady, map[string]string{testDB: "current", keptDB: "kept"}, "")
 		e.waitStep(rec.OpID, StepAborted)
-		check(t, e.journalText(rec.OpID))
+		check(t, e, rec.OpID)
 	})
 	t.Run("migration fails", func(t *testing.T) {
 		e := newEnv(t)
@@ -403,7 +420,7 @@ func TestRollback_JournalSaysKept(t *testing.T) {
 		rec, _, err := e.m.PrepareRollback(ctx, RollbackRequest{Database: keptDB, UserID: "u1", Token: "t"})
 		require.NoError(t, err)
 		e.waitStep(rec.OpID, StepFailed)
-		check(t, e.journalText(rec.OpID))
+		check(t, e, rec.OpID)
 	})
 	t.Run("switch refused (A1)", func(t *testing.T) {
 		e := newEnv(t)
@@ -413,7 +430,7 @@ func TestRollback_JournalSaysKept(t *testing.T) {
 		rec, _ := e.rollback()
 		require.NoError(t, e.m.Confirm(ctx, rec.OpID))
 		e.waitStep(rec.OpID, StepAborted)
-		check(t, e.journalText(rec.OpID))
+		check(t, e, rec.OpID)
 	})
 	t.Run("a restore still says dropped", func(t *testing.T) {
 		e := newEnv(t)

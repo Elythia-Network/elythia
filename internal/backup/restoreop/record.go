@@ -298,13 +298,15 @@ func (s *Store) Current(ctx context.Context) (*Record, error) {
 }
 
 // setStepScript moves the record from ARGV[1] (any when empty) to ARGV[2]
-// and writes the other fields. 1: moved, 0: no record, -1: other step.
-// A final step also clears the current marker (when it names this record)
-// and puts a TTL on the record and its journal.
+// and writes the other fields (from ARGV[7]). When ARGV[6] is not empty, it
+// is appended to the journal in the same step. 1: moved, 0: no record,
+// -1: other step. A final step also clears the current marker (when it
+// names this record) and puts a TTL on the record and its journal.
 var setStepScript = redis.NewScript(`
 if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
 if ARGV[1] ~= '' and redis.call('HGET', KEYS[1], 'step') ~= ARGV[1] then return -1 end
-redis.call('HSET', KEYS[1], 'step', ARGV[2], unpack(ARGV, 6))
+redis.call('HSET', KEYS[1], 'step', ARGV[2], unpack(ARGV, 7))
+if ARGV[6] ~= '' then redis.call('RPUSH', KEYS[3], ARGV[6]) end
 if ARGV[3] == '1' then
   if redis.call('GET', KEYS[2]) == ARGV[4] then redis.call('DEL', KEYS[2]) end
   redis.call('EXPIRE', KEYS[1], tonumber(ARGV[5]))
@@ -315,11 +317,30 @@ return 1`)
 // setStep moves opID from `from` (any when empty) to `to`, with extra
 // fields. It returns ErrStep when the record is at another step.
 func (s *Store) setStep(ctx context.Context, opID, from, to string, now time.Time, extra ...any) error {
+	return s.setStepJournal(ctx, opID, from, to, now, nil, extra...)
+}
+
+// setStepJournal is setStep that also appends line to the journal of opID
+// when it moves the step (nothing when it does not, or when line is nil).
+//
+// **最後の段と、その段の結末を書く journal の行は、1 つの script で書く。** 段を
+// 先に書くと、最後の段を読んだ管理画面が読み直しを止め (Status.Final)、その後に
+// 書かれる結末の行 (作った DB を消したか、退避した DB を残したか) を見せない
+// ことがあった (#3600)。
+func (s *Store) setStepJournal(ctx context.Context, opID, from, to string, now time.Time, line *JournalEntry, extra ...any) error {
 	final := "0"
 	if Final(to) {
 		final = "1"
 	}
-	args := []any{from, to, final, opID, int64(recordTTL / time.Second), "updatedAt", formatTime(now)}
+	entry := ""
+	if line != nil {
+		b, err := json.Marshal(line)
+		if err != nil {
+			return err
+		}
+		entry = string(b)
+	}
+	args := []any{from, to, final, opID, int64(recordTTL / time.Second), entry, "updatedAt", formatTime(now)}
 	args = append(args, extra...)
 	if len(s.macKey) > 0 {
 		for i := 0; i+1 < len(extra); i += 2 {

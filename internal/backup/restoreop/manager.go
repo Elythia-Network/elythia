@@ -3,6 +3,7 @@ package restoreop
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -229,6 +230,124 @@ func (m *Manager) record(ctx context.Context, opID, from, to string, extra ...an
 	}
 }
 
+// journalLine is one journal line to write together with a step
+// (setStepWithLine).
+type journalLine struct {
+	step, msg string
+}
+
+// say makes a journal line for setStepWithLine and recordWithLine.
+func say(step, format string, args ...any) journalLine {
+	return journalLine{step: step, msg: fmt.Sprintf(format, args...)}
+}
+
+// errStepHook marks an error returned by failStep: nothing was sent to
+// Redis.
+var errStepHook = errors.New("restoreop: the step was not written (test hook)")
+
+// lineWrite is a journal line on its way into the journal: the entry is made
+// once, so that a line whose write had an unknown outcome can be looked for
+// (appendLine).
+type lineWrite struct {
+	opID  string
+	entry JournalEntry
+}
+
+// setStepWithLine is setStep that appends l to the journal in the same
+// write, when the step moves. Use it for a final step and the line that
+// tells how the operation ended: the admin page stops reading once the step
+// is final (Status.Final). It returns the line for appendLine.
+func (m *Manager) setStepWithLine(ctx context.Context, opID, from, to string, l journalLine, extra ...any) (lineWrite, error) {
+	w := lineWrite{opID: opID, entry: normalizeEntry(JournalEntry{At: m.now(), Step: l.step, Message: l.msg})}
+	if m.failStep != nil {
+		if err := m.failStep(to); err != nil {
+			return w, fmt.Errorf("%w: %w", errStepHook, err)
+		}
+	}
+	if err := m.o.Store.setStepJournal(context.WithoutCancel(ctx), opID, from, to, m.now(), &w.entry, extra...); err != nil {
+		return w, err
+	}
+	// ログは書けた後に出す。書けなかった段のログを残さない (書けなかったときは
+	// appendLine が出す)。
+	m.log.Info("backup: restore", "opId", opID, "step", l.step, "message", l.msg)
+	return w, nil
+}
+
+// normalizeEntry returns e as it reads back from the journal (through JSON).
+//
+// lineWritten は読み戻した行と比べる。JSON は不正な UTF-8 を U+FFFD に置き換える
+// (pg_restore の stderr はバイト単位で切るので、多バイト文字の途中で切れうる)
+// ので、元の文面のままだと一致せず、書けた行を書けなかったと誤る。
+func normalizeEntry(e JournalEntry) JournalEntry {
+	b, err := json.Marshal(e)
+	if err != nil {
+		return e
+	}
+	var out JournalEntry
+	if json.Unmarshal(b, &out) != nil {
+		return e
+	}
+	return out
+}
+
+// recordWithLine is record with the journal line of setStepWithLine. When
+// the step cannot be written, the line is still appended on its own, as
+// record followed by journal did.
+func (m *Manager) recordWithLine(ctx context.Context, opID, from, to string, l journalLine, extra ...any) {
+	if w, err := m.setStepWithLine(ctx, opID, from, to, l, extra...); err != nil {
+		m.log.Error("backup: cannot record the step of a restore", "opId", opID, "from", from, "to", to, "err", err)
+		m.appendLine(ctx, w, err)
+	}
+}
+
+// lineWritten reports whether the line of w is in the journal: whether a
+// write that failed with an error other than ErrNotFound or errStepHook had
+// in fact moved the step.
+//
+// go-redis は読み込みの時間切れや切断で script を自動で送り直す (MaxRetries)。
+// 1 回目で段と行が書けて応答だけが失われると、2 回目は段が違うので ErrStep を
+// 返す。ErrStep は「書けなかった」の印にならないので、行で確かめる。段だけで
+// 確かめないのは、同じ段へ別の経路が進めた場合と見分けるため。
+func (m *Manager) lineWritten(ctx context.Context, w lineWrite) (bool, error) {
+	journal, err := m.o.Store.Journal(context.WithoutCancel(ctx), w.opID)
+	if err != nil {
+		return false, err
+	}
+	for _, j := range journal {
+		if j.At.Equal(w.entry.At) && j.Step == w.entry.Step && j.Message == w.entry.Message {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// notSent reports whether err from setStepWithLine says that nothing was
+// written: the record does not exist (the script returned 0, which a write
+// that went through cannot make it do) or the test hook refused.
+func notSent(err error) bool {
+	return errors.Is(err, ErrNotFound) || errors.Is(err, errStepHook)
+}
+
+// appendLine appends the line of w on its own after setStepWithLine failed
+// with err, unless the failed write did append it.
+//
+// **送っていないと分かる誤り (notSent) のとき以外は、journal を読み直して同じ行が
+// 無いときだけ足す。** 結果の分からない誤り (応答の前の時間切れ・切断) や、送り
+// 直しが返した ErrStep では、行が既に入っていることがあり、そのまま足すと結末の
+// 行が2つ並ぶ。読めなければ足す (欠けるより、重なる方を選ぶ)。
+func (m *Manager) appendLine(ctx context.Context, w lineWrite, err error) {
+	ctx = context.WithoutCancel(ctx)
+	m.log.Info("backup: restore", "opId", w.opID, "step", w.entry.Step, "message", w.entry.Message)
+	if !notSent(err) {
+		if written, werr := m.lineWritten(ctx, w); werr == nil && written {
+			return
+		}
+	}
+	if aerr := m.o.Store.appendJournal(ctx, w.opID, w.entry); aerr != nil {
+		m.log.Warn("backup: cannot write the restore journal", "opId", w.opID, "err", aerr)
+	}
+}
+
 // PrepareRequest asks for a restore of one generation.
 type PrepareRequest struct {
 	GenerationID string
@@ -413,20 +532,31 @@ func (m *Manager) prepare(ctx context.Context, rec *Record, work func(context.Co
 	if !errors.Is(err, backup.ErrRestoreNotCreated) {
 		m.dropTarget(ctx, rec)
 	}
-	final := StepFailed
-	serr := m.setStep(ctx, rec.OpID, StepPreparing, StepFailed, "error", err.Error())
+	msg := err.Error()
+	if rec.Kind == KindRollback {
+		msg += "; " + targetFate(rec)
+	}
+	l := journalLine{step: StepFailed, msg: msg}
+	w, serr := m.setStepWithLine(ctx, rec.OpID, StepPreparing, StepFailed, l, "error", err.Error())
 	if errors.Is(serr, ErrStep) {
-		// 中止 (Abort) が先に aborting にした。
-		final = StepAborted
-		serr = m.setStep(ctx, rec.OpID, StepAborting, StepAborted)
+		written, werr := m.lineWritten(ctx, w)
+		switch {
+		case werr != nil:
+			// 読めなければ、送り直しか中止の先行かが分からない。aborted へは進まず、
+			// failed の行を appendLine に任せる (段は記録のまま残る)。
+			serr = fmt.Errorf("%w (and the journal could not be read: %w)", serr, werr)
+		case written:
+			// 送り直しが返した ErrStep。1 回目で failed と行が書けている。
+			serr = nil
+		default:
+			// 中止 (Abort) が先に aborting にした。
+			l.step = StepAborted
+			w, serr = m.setStepWithLine(ctx, rec.OpID, StepAborting, StepAborted, l)
+		}
 	}
 	if serr != nil {
 		m.log.Error("backup: cannot record the end of a restore", "opId", rec.OpID, "err", serr)
-	}
-	if rec.Kind == KindRollback {
-		m.journal(ctx, rec.OpID, final, "%v; %s", err, targetFate(rec))
-	} else {
-		m.journal(ctx, rec.OpID, final, "%v", err)
+		m.appendLine(ctx, w, serr)
 	}
 	m.finishLive(rec.OpID)
 }
@@ -467,8 +597,8 @@ func (m *Manager) waitConfirmation(ctx context.Context, rec *Record, live *liveO
 		return
 	}
 	m.dropTarget(ctx, rec)
-	m.record(ctx, rec.OpID, StepAborting, StepExpired)
-	m.journal(ctx, rec.OpID, StepExpired, "%s: nobody confirmed within %s", targetFate(rec), m.o.ReadyTimeout)
+	m.recordWithLine(ctx, rec.OpID, StepAborting, StepExpired,
+		say(StepExpired, "%s: nobody confirmed within %s", targetFate(rec), m.o.ReadyTimeout))
 	m.finishLive(rec.OpID)
 }
 
@@ -701,10 +831,17 @@ func (m *Manager) Abort(ctx context.Context, opID string) error {
 		}
 		m.mu.Unlock()
 		m.dropTarget(ctx, rec)
-		if err := m.setStep(ctx, opID, StepAborting, StepAborted); err != nil {
+		w, err := m.setStepWithLine(ctx, opID, StepAborting, StepAborted, say(StepAborted, "aborted; %s", targetFate(rec)))
+		if err != nil && !notSent(err) {
+			// 送り直しが返した ErrStep や結果の分からない誤りでも、行が入っていれば
+			// 書けている。
+			if written, _ := m.lineWritten(ctx, w); written {
+				err = nil
+			}
+		}
+		if err != nil {
 			return err
 		}
-		m.journal(ctx, opID, StepAborted, "aborted; %s", targetFate(rec))
 		m.finishLive(opID)
 		return nil
 	}

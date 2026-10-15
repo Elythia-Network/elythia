@@ -287,12 +287,11 @@ func (m *Manager) awaitResume(ctx context.Context, rec *Record) {
 		return
 	}
 	m.markFinished(ctx, rec)
-	m.record(ctx, rec.OpID, StepResuming, StepDone)
+	l := say(StepDone, "restored generation %s; the previous database is kept as %s", rec.GenerationID, rec.Before)
 	if rec.Kind == KindRollback {
-		m.journal(ctx, rec.OpID, StepDone, "rolled back to %s; the previous database is kept as %s", rec.Target, rec.Before)
-		return
+		l = say(StepDone, "rolled back to %s; the previous database is kept as %s", rec.Target, rec.Before)
 	}
-	m.journal(ctx, rec.OpID, StepDone, "restored generation %s; the previous database is kept as %s", rec.GenerationID, rec.Before)
+	m.recordWithLine(ctx, rec.OpID, StepResuming, StepDone, l)
 }
 
 func (m *Manager) cleanAndCheck(ctx context.Context) error {
@@ -327,12 +326,11 @@ func (m *Manager) abortBeforeSwitch(ctx context.Context, rec *Record, cause erro
 		}
 	}
 	m.dropTarget(ctx, rec)
-	m.record(ctx, rec.OpID, StepAborting, StepAborted)
+	l := say(StepAborted, "the current database %s was not changed", rec.Database)
 	if rec.Kind == KindRollback {
-		m.journal(ctx, rec.OpID, StepAborted, "the current database %s was not changed; %s", rec.Database, targetFate(rec))
-		return
+		l = say(StepAborted, "the current database %s was not changed; %s", rec.Database, targetFate(rec))
 	}
-	m.journal(ctx, rec.OpID, StepAborted, "the current database %s was not changed", rec.Database)
+	m.recordWithLine(ctx, rec.OpID, StepAborting, StepAborted, l)
 }
 
 // resumeCurrent lets the processes come back and waits for them (best
@@ -489,11 +487,12 @@ func (m *Manager) finishRevert(ctx context.Context, rec *Record) {
 			return
 		}
 	}
-	m.record(ctx, rec.OpID, StepReverting, StepReverted)
+	// 結末の行は段と一緒に書く。待ちの後に書くと、reverted を読んで読み直しを止めた
+	// 管理画面には、戻したことが最大 ResumeTimeout の間 (待ちが終わるまで) 出ない。
+	m.recordWithLine(ctx, rec.OpID, StepReverting, StepReverted, say(StepReverted, "reverted to the previous database"))
 	if m.waitCleared(ctx, rec.OpID, m.o.ResumeTimeout) == waitTimeout {
 		m.journal(ctx, rec.OpID, "", "the processes have not served again within %s; the maintenance stays at resuming and they keep retrying", m.o.ResumeTimeout)
 	}
-	m.journal(ctx, rec.OpID, StepReverted, "reverted to the previous database")
 }
 
 // giveUp stops and leaves the decision to an operator (it cannot tell the
@@ -524,8 +523,7 @@ func (m *Manager) giveUp(ctx context.Context, rec *Record, from string, cause er
 			kindWord(rec), rec.OpID, cause, rec.Database, names, rec.Database)
 	}
 	m.retireMark(ctx, rec)
-	m.record(ctx, rec.OpID, "", StepUnknown, "error", cause.Error())
-	m.journal(ctx, rec.OpID, from, "%s", msg)
+	m.recordWithLine(ctx, rec.OpID, "", StepUnknown, journalLine{step: from, msg: msg}, "error", cause.Error())
 	m.log.Error("backup: " + msg)
 	if m.o.Notify != nil {
 		m.o.Notify(context.WithoutCancel(ctx), msg)
