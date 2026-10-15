@@ -325,6 +325,16 @@ func NewService(instanceURL, userAgent string, driveStorage coredrive.Storage, a
 	return s
 }
 
+// SetTransport replaces the transport used to fetch remote media, keeping
+// the client timeout. The transport must apply the same SSRF guard
+// (safehttp.NewSSRFSafeTransport).
+//
+// サーバーは外向き全体で 1 つの Transport を共有して、同じ相手 (リモートの
+// 添付は actor と同じホストにあることが多い) への接続を使い回す (#3591)。
+func (s *Service) SetTransport(rt http.RoundTripper) {
+	s.httpClient = &http.Client{Timeout: s.httpClient.Timeout, Transport: rt}
+}
+
 // SetDriveLookup attaches a DriveFileLookup so the proxy can substitute the
 // cached thumbnail / webpublic variant for `?preview` and `?static` requests
 // against local files (#637 M1)。

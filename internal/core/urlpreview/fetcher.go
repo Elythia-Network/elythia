@@ -86,6 +86,16 @@ func (f *Fetcher) SetHTTPClient(c *http.Client) {
 	f.client = c
 }
 
+// SetTransport replaces the transport under the preview client, keeping
+// the timeout and redirect policy built from the settings. The transport
+// must apply the same SSRF guard (safehttp.NewSSRFSafeTransport).
+//
+// サーバーは外向き全体で 1 つの Transport を共有して、同じ相手への接続を
+// 使い回す (#3591)。設定を毎回読む構成では forRequest もこの Transport を引き継ぐ。
+func (f *Fetcher) SetTransport(rt http.RoundTripper) {
+	f.client = newPreviewClient(f.cfg, rt)
+}
+
 // SetConfigProvider makes the fetcher read its settings on every request.
 func (f *Fetcher) SetConfigProvider(p func() (Config, error)) {
 	f.cfgProvider = p

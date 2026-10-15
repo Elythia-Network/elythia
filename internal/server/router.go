@@ -1621,6 +1621,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// upstream の UrlPreviewService もその都度 meta を見る。metaRepo は cache 付きで、
 	// update-meta で無効化される。
 	urlPreviewFetcher := coreurlpreview.NewFetcher(coreurlpreview.Config{}, s.config.AllowedPrivateNetworks, s.outboundOpts()...)
+	// 同じ相手への接続を他の外向きの経路と使い回す (#3591)。
+	urlPreviewFetcher.SetTransport(s.outboundTransport())
 	urlPreviewFetcher.SetConfigProvider(func() (coreurlpreview.Config, error) {
 		m, err := metaRepo.Fetch()
 		if err != nil {
@@ -2540,6 +2542,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 画像処理の同時実行枠 (#3032)。0 なら mediaproxy 側の既定
 	// (GOMAXPROCS / 2、最低 1)。**配線しないと設定キーが黙って効かない。**
 	proxyService.SetCPUConcurrency(s.config.MediaProxyConcurrency)
+	// 同じ相手への接続を他の外向きの経路と使い回す (#3591)。
+	proxyService.SetTransport(s.outboundTransport())
 	// Local drive file の thumbnail / webpublic 変種を proxy 側で再 encode
 	// せず直接返せるようにする (#637 M1)。
 	proxyService.SetDriveLookup(driveFileLookupAdapter{repo: driveFileRepo})

@@ -60,12 +60,15 @@ type remoteCheckBreaker interface {
 
 // newRemoteCheckAdapter wires the diagnosis.
 //
-// **通信は outboundClient (SSRF-safe transport) だけを使う。** 宛先を管理者が
+// **通信は SSRF-safe な outbound の client だけを使う。** 宛先を管理者が
 // 指定する口なので、self-check の client (ガード無し) を渡してはいけない。
-// 署名付きの取得に使う fetcher も同じ transport の上に作られている。
+// nodeinfo / WebFinger / inbox は接続を使い回さない diagnosticOutboundClient で
+// 毎回張り直す (#3591)。署名付きの取得に使う fetcher は AP の client (共有の
+// transport) の上に作られていて、接続を使い回しうる。順番は nodeinfo と
+// WebFinger が先なので、名前の解決や証明書の異常はそちらで先に出る。
 func (s *Server) newRemoteCheckAdapter(src remoteCheckSources) *remoteCheckAdapter {
 	deps := remotecheck.Deps{
-		Client:          s.outboundClient(remoteCheckHTTPTimeout),
+		Client:          s.diagnosticOutboundClient(remoteCheckHTTPTimeout),
 		Fetcher:         src.fetcher,
 		Ed25519Degraded: src.degraded,
 	}

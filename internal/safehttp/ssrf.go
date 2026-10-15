@@ -295,13 +295,77 @@ func NewSSRFSafeTransport(allowedCIDRs []string, opts ...Option) *http.Transport
 			}
 			return nil, err
 		},
-		MaxIdleConns:        100,
+		// idle の接続の全体の上限。この Transport を単独で使う呼び出し元の既定。
+		// 外向きを全経路で共有する internal/server の outboundTransport は、
+		// 多数のホストへ行く経路 (media proxy、URL プレビュー、webhook) と配送が
+		// 同じ枠を取り合うので、そちらで上げている (#3591)。
+		MaxIdleConns: 100,
+		// 下の MaxIdleConnsPerHost と HTTP2 の ping は、ここで作る全ての Transport
+		// に効く (共有の outboundTransport のほか、backup daemon、webpush の既定、
+		// remote_stats、emojimeta、oauth_transport、media proxy と URL プレビューの
+		// constructor)。どれも外向きの取得で、接続を使い回して困るものは無い。
+		//
+		// 同じ相手に残しておく idle の接続の数。net/http の既定は 2 で、配送の
+		// worker (deliver queue の既定 16 本、mkqdriver の defaultQueueConcurrency)
+		// が同じ shared inbox へ並んで送ると、返した接続のうち 2 本を超える分が
+		// 捨てられ、HTTP/1.1 の相手には毎回 TCP + TLS の握手と DNS の問い合わせを
+		// やり直していた (16 並列 800 回で握手が約 250 回、TestNewSSRFSafeTransport_
+		// ReusesConnectionsUnderParallelDelivery、#3591)。
+		// 32 は deliver の 16 本に、同じ Transport を共有する inbox 側の取得
+		// (inbox の既定 16 本が actor / object を同じ相手から引く) を足した数。
+		// 全体の上限は MaxIdleConns (この Transport の既定は 100 本、共有の
+		// outboundTransport は 512 本) で、使わなければ IdleConnTimeout で閉じる。
+		//
+		// MaxConnsPerHost は付けない。付けると上限を超えた要求が接続の空きを
+		// 待って並び、遅い相手 1 つに worker が張り付いて配送全体が詰まる。
+		// 同時に張る本数は worker の数で既に抑えられている。
+		//
+		// 使い回しても SSRF の検査は弱まらない。ただし、どこで検査しているかは
+		// 経路で違う。
+		//
+		//   - 直接つなぐ場合 (proxy 無し、または bypass): 検査は DialContext で
+		//     接続を張るときに行う。使い回すのは検査を通った IP への接続だけで、
+		//     使い回しの単位は scheme + 宛先の host:port なので、別の名前は必ず
+		//     DialContext を通る。名前の解決が後から変わっても、idle の接続が
+		//     残る間 (最大 IdleConnTimeout) は古い IP へ送る。これは使い回しを
+		//     している以上どの値でも同じで、新しく張る接続は必ず検査される
+		//   - forward proxy 経由の場合: http:// の宛先は、宛先が違っても同じ
+		//     proxy への接続を使い回す (net/http の connectMethod.key() は、
+		//     proxy が http/https で宛先が http のとき宛先を鍵に含めない)。この
+		//     ときは DialContext を通らないので、安全なのは下の tr.Proxy の
+		//     callback がリクエストごとに宛先を検査しているから。https:// の
+		//     宛先は CONNECT のトンネルが宛先ごとに分かれる
+		//
+		// どちらもテストで固定している (conn_reuse_test.go)。
+		MaxIdleConnsPerHost: 32,
 		IdleConnTimeout:     90 * time.Second,
 		TLSHandshakeTimeout: 10 * time.Second,
 		// http.DefaultTransport と同様に HTTP/2 negotiation を有効にする。
 		// 既定の *http.Transport{} ではデフォルト false のため、AP fetch が
 		// HTTP/1.1 のみに退化するのを避ける (#323 Devin review)。
 		ForceAttemptHTTP2: true,
+		// HTTP/2 の接続が黙って切れたとき (相手や途中の NAT / LB が RST を
+		// 返さずに落とした) に、それを見つけて閉じるための ping。要求がタイム
+		// アウトしても net/http は stream を閉じるだけで接続は捨てないので、
+		// 設定しないと、新しい要求も死んだ接続に載り続け、各 client のタイム
+		// アウトまで待って失敗し続ける。外向きの Transport を全経路で共有した
+		// (#3591) ので、1 本が死ぬと、その相手への AP・webfinger・添付の確認・
+		// media proxy がまとめて止まる。
+		//
+		// 15 秒なにも届かなければ ping を送り、10 秒で応答が無ければ閉じる
+		// (最大 25 秒で捨て、次の要求からは張り直す)。client のタイムアウトは
+		// 3 秒 (添付の確認の context) から 60 秒まであり、短い経路では ping より
+		// 先に個々の要求が切れる。ping が守るのは「その後の要求が同じ死んだ接続
+		// に載り続けること」で、一番効くのは client にタイムアウトの無い経路
+		// (router の NewOfficialDetector は outboundClient(0) で、時間は要求ごと
+		// の context でしか掛けない)。idle の h2 接続には IdleConnTimeout (90 秒)
+		// まで 15 秒ごとに ping が出るが、frame 1 つなので費用は無視できる。
+		// HTTP/1.1 の接続には効かない (要求ごとに応答を待つので、黙って切れた
+		// 接続はその要求の失敗で捨てられる)。
+		HTTP2: &http.HTTP2Config{
+			SendPingTimeout: 15 * time.Second,
+			PingTimeout:     10 * time.Second,
+		},
 	}
 	if proxyURL != nil {
 		// upstream Misskey の HttpRequestService.getAgentByUrl と同じく
