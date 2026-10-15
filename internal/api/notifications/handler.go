@@ -603,6 +603,34 @@ func (h *Handler) collectNotificationsWithDropped(c echo.Context, user *model.Us
 	// 走査して畳んでから、この集合でグループの中身を引く。
 	dropped := make(map[string]struct{})
 
+	// Batch-check pending follow requests once for the current page. Preserve the
+	// page order and limit by only filtering the rows already returned by List.
+	var followRequestCandidates []string
+	var pendingFollowRequestIDs map[string]struct{}
+	followRequestLookupOK := false
+	if h.followReqRepo != nil {
+		seenFollowRequestIDs := make(map[string]struct{})
+		for _, n := range rows {
+			if n.Type != notification.TypeReceiveFollowReq || n.NotifierID == "" {
+				continue
+			}
+			if _, seen := seenFollowRequestIDs[n.NotifierID]; seen {
+				continue
+			}
+			seenFollowRequestIDs[n.NotifierID] = struct{}{}
+			followRequestCandidates = append(followRequestCandidates, n.NotifierID)
+		}
+		if len(followRequestCandidates) > 0 {
+			if pendingIDs, err := h.followReqRepo.FilterPendingToAnchor(user.ID, followRequestCandidates); err == nil {
+				followRequestLookupOK = true
+				pendingFollowRequestIDs = make(map[string]struct{}, len(pendingIDs))
+				for _, id := range pendingIDs {
+					pendingFollowRequestIDs[id] = struct{}{}
+				}
+			}
+		}
+	}
+
 	// 2-pass で組み立てる:
 	//   pass 1: followReq filter を通して残った rows と notifierID を集約
 	//   pass 2: userRepo.FindManyByIDs / noteRepo.FindManyByIDsWithUser で
@@ -615,8 +643,8 @@ func (h *Handler) collectNotificationsWithDropped(c echo.Context, user *model.Us
 		// 既に解決された follow request (accept / reject で消えた) に対応する
 		// receiveFollowRequest 通知はユーザー視点で既に古く「残り続ける」ので
 		// 除外する (#349 コメント対応、本家 NotificationEntityService 互換)。
-		if n.Type == notification.TypeReceiveFollowReq && h.followReqRepo != nil && n.NotifierID != "" {
-			if exists, err := h.followReqRepo.Exists(n.NotifierID, user.ID); err == nil && !exists {
+		if n.Type == notification.TypeReceiveFollowReq && followRequestLookupOK && n.NotifierID != "" {
+			if _, pending := pendingFollowRequestIDs[n.NotifierID]; !pending {
 				dropped[n.ID] = struct{}{}
 				continue
 			}
