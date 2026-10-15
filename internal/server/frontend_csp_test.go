@@ -322,6 +322,13 @@ func TestApplyFrontendCSP_PassesMediaOrigins(t *testing.T) {
 	assert.Contains(t, v, "img-src 'self' data: blob: https://objects.example")
 }
 
+// wantEsmShSources are the only esm.sh sources the policy may allow.
+var wantEsmShSources = []string{
+	"https://esm.sh/shiki@4.4.3/",
+	"https://esm.sh/@shikijs/langs@4.4.3/",
+	"https://esm.sh/@shikijs/themes@4.4.3/",
+}
+
 // esm.sh の許可は**意図的な妥協**なので、増えていないことを固定する (#2425)。
 //
 // Misskey frontend は shiki (コードブロックの syntax highlight) を CDN から
@@ -330,6 +337,8 @@ func TestApplyFrontendCSP_PassesMediaOrigins(t *testing.T) {
 //
 // **外部 origin がこれ以上増えるのは別の判断**なので、ここが落ちたら意図した
 // 追加かどうかを確認すること。
+//
+// esm.sh は origin 全体ではなく、shiki が読むパスだけを許す。
 func TestFrontendCSP_ExternalOriginsAreLimited(t *testing.T) {
 	policy := buildFrontendCSP(false, cspExtras{})
 
@@ -348,7 +357,7 @@ func TestFrontendCSP_ExternalOriginsAreLimited(t *testing.T) {
 				external = append(external, tok)
 			}
 		}
-		assert.Equal(t, []string{"https://esm.sh"}, external,
+		assert.Equal(t, wantEsmShSources, external,
 			"script-src の外部 origin を増やすときは理由を確認すること")
 	})
 
@@ -369,7 +378,7 @@ func TestFrontendCSP_ExternalOriginsAreLimited(t *testing.T) {
 				external = append(external, tok)
 			}
 		}
-		assert.Equal(t, []string{"https://esm.sh"}, external)
+		assert.Equal(t, wantEsmShSources, external)
 	})
 
 	// リモート添付動画 (MkMediaVideo が file.url を直接読む) と埋め込み
