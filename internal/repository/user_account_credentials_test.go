@@ -73,6 +73,31 @@ func TestRevokeDeletedLocalCredentials(t *testing.T) {
 	require.NoError(t, repo.RevokeDeletedLocalCredentials("absentcredentials"))
 }
 
+func TestRevokeDeletedLocalCredentialsDeletesScheduledDrafts(t *testing.T) {
+	seedRetainedCredentials(t, "crdr")
+	seedRetainedCredentials(t, "crdro")
+	at := time.Now().Add(time.Hour)
+	text := "scheduled"
+	drafts := []*model.NoteDraft{
+		{ID: "creddraftsched", UserID: "crdr", Text: &text, ScheduledAt: &at, IsActuallyScheduled: true},
+		{ID: "creddraftplain", UserID: "crdr", Text: &text},
+		{ID: "creddraftothersched", UserID: "crdro", Text: &text, ScheduledAt: &at, IsActuallyScheduled: true},
+	}
+	for _, d := range drafts {
+		require.NoError(t, testDB.Create(d).Error)
+		t.Cleanup(func() { testDB.Delete(&model.NoteDraft{}, "id = ?", d.ID) })
+	}
+	require.NoError(t, NewUserRepository(testDB).RevokeDeletedLocalCredentials("crdr"))
+	exists := func(id string) bool {
+		var count int64
+		require.NoError(t, testDB.Model(&model.NoteDraft{}).Where("id = ?", id).Count(&count).Error)
+		return count == 1
+	}
+	assert.False(t, exists("creddraftsched"), "a scheduled draft of the retained account is deleted")
+	assert.True(t, exists("creddraftplain"), "an unscheduled draft is kept")
+	assert.True(t, exists("creddraftothersched"), "another owner's scheduled draft is kept")
+}
+
 func TestRevokeDeletedLocalCredentialsRollsBack(t *testing.T) {
 	rows := seedRetainedCredentials(t, "credrollback")
 	require.NoError(t, testDB.Exec(`CREATE FUNCTION reject_retained_webhook_delete() RETURNS trigger LANGUAGE plpgsql AS $$
