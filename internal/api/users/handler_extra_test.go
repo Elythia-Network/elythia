@@ -87,6 +87,21 @@ func TestRelation_NilViewer(t *testing.T) {
 	assert.Equal(t, false, resp["isBlocking"])
 }
 
+// TestRelation_NilViewerArray covers the array form without a viewer: every
+// distinct id gets one all-false entry.
+func TestRelation_NilViewerArray(t *testing.T) {
+	h, _, _ := newExtraHandler(t)
+	rec := postExtra(h.Relation, `{"userId":["u2","u3","u2"]}`, nil)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var relArr []map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &relArr))
+	require.Len(t, relArr, 2)
+	assert.Equal(t, "u2", relArr[0]["id"])
+	assert.Equal(t, "u3", relArr[1]["id"])
+	assert.Equal(t, false, relArr[0]["isFollowing"])
+	assert.Equal(t, false, relArr[1]["isBlocked"])
+}
+
 // failingFollowingRepo always returns a non-NotFound error so the warn path
 // (#984) can be exercised — `users/relation` should silently fall back to
 // false and emit slog.Warn instead of leaking the error to the response.

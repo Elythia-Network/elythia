@@ -67,13 +67,74 @@ func (h *Handler) Relation(c echo.Context) error {
 	}
 	var arr []string
 	if err := json.Unmarshal(req.UserID, &arr); err == nil {
-		out := make([]map[string]any, 0, len(arr))
-		for _, id := range arr {
-			out = append(out, h.computeRelation(viewer, id))
-		}
-		return c.JSON(http.StatusOK, out)
+		return c.JSON(http.StatusOK, h.computeRelations(viewer, arr))
 	}
 	return invalidParam()
+}
+
+// relationChunkSize is how many distinct targets one batched relation lookup
+// covers. A variable so tests can shrink it.
+//
+// 本家と同じく件数に上限は無いが、IN の要素が多すぎると PostgreSQL の
+// バインド変数の上限 (65535) を超えるので、一定数ごとに分けて引く。
+var relationChunkSize = 1000
+
+// computeRelations builds the relation objects for the userId array form,
+// matching upstream getRelations: duplicated ids collapse into one entry kept
+// at its first position (upstream returns the values of a Map keyed by id),
+// and unknown ids get an all-false entry.
+//
+// 問い合わせの回数が配列の長さに比例しないよう、要素ごとに computeRelation を
+// 呼ばず、userrelation.Repos.ApplyMany で関係ごとにまとめて引く。
+func (h *Handler) computeRelations(viewer *model.User, ids []string) []map[string]any {
+	uniq := make([]string, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		uniq = append(uniq, id)
+	}
+	out := make([]map[string]any, 0, len(uniq))
+	repos := h.viewerRelationRepos()
+	// メモは relation の応答に含まれないので引かない。
+	repos.Memo = nil
+	for start := 0; start < len(uniq); start += relationChunkSize {
+		chunk := uniq[start:min(start+relationChunkSize, len(uniq))]
+		details := make([]*entity.UserDetailed, len(chunk))
+		targets := make([]*model.User, len(chunk))
+		profiles := make([]*model.UserProfile, len(chunk))
+		for i, id := range chunk {
+			details[i] = &entity.UserDetailed{}
+			targets[i] = &model.User{ID: id}
+		}
+		if viewer != nil {
+			repos.ApplyMany(viewer.ID, details, targets, profiles)
+		}
+		for i, id := range chunk {
+			out = append(out, relationFromDetailed(id, details[i]))
+		}
+	}
+	return out
+}
+
+// relationFromDetailed converts the relation block ApplyMany wrote onto d into
+// the users/relation response object. Fields ApplyMany left unset (repository
+// not wired, anonymous viewer, or the viewer itself) are false.
+func relationFromDetailed(id string, d *entity.UserDetailed) map[string]any {
+	b := func(p *bool) bool { return p != nil && *p }
+	return map[string]any{
+		"id":                             id,
+		"isFollowing":                    b(d.IsFollowing),
+		"isFollowed":                     b(d.IsFollowed),
+		"hasPendingFollowRequestFromYou": b(d.HasPendingFollowRequestFromYou),
+		"hasPendingFollowRequestToYou":   b(d.HasPendingFollowRequestToYou),
+		"isBlocking":                     b(d.IsBlocking),
+		"isBlocked":                      b(d.IsBlocked),
+		"isMuted":                        b(d.IsMuted),
+		"isRenoteMuted":                  b(d.IsRenoteMuted),
+	}
 }
 
 // computeRelation builds the relation object for a single target user, matching
