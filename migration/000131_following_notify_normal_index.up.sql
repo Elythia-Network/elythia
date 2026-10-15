@@ -1,0 +1,19 @@
+-- #3590: 投稿の通知を受け取るフォロワーを引く部分 index を張る。
+--
+-- ローカルの投稿のたびに `ListFollowersToNotify` が
+-- `"followeeId" = ? AND notify = 'normal'` で引く。`IDX_following_followeeId` で
+-- その利用者のフォロワーを全員読んでから filter していたので、フォロワーの多い
+-- 利用者ほど遅かった (3,376 人で 3〜6ms / 1,111 buffer → 0.05ms)。
+-- 通知を受け取る設定の行だけを入れるので、index は小さい。
+--
+-- 本家は `IDX_5108098457488634a4768e1d12` (`notify` 単独) を持つが、この形には
+-- 効かないので、Elythia 独自の名前で足す。先頭の列は本家の
+-- `IDX_24e0042143a18157b234df186c` ("followeeId") と同じだが、部分 index なので
+-- 定義は別物 (internal/entitycompat/testdata/intended_partial_indexes.json に理由と一緒に載せている)。
+-- **SQL 側の 'normal' はリテラルで書く** (internal/repository/following.go)。
+-- bind 変数にすると、prepared statement の generic plan では述語を満たすと判定
+-- できず、この部分 index を使えない。
+--
+-- `following` は大きくなりうるので CONCURRENTLY で書き込みを止めずに作る。
+-- 失敗したときの回復は docs/deployment.md の「大きな表に index を足す migration」にある。
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_following_followeeId_notify_normal" ON "following" ("followeeId") WHERE "notify" = 'normal';

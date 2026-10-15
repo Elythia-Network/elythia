@@ -241,7 +241,8 @@ TypeORM の decorator から正規形を再現できないため **実 DB から
 
 撮り直したら `TestIndexNaming_NoNewUpstreamDuplicates` を走らせる。Elythia 側に
 同内容・別名の index があれば検出されるので、upstream 名に揃えるか
-`known_duplicate_indexes.json` に追加して `000068` の扱いを見直す (#2246)。
+`known_duplicate_indexes.json` に追加して `000068` の扱いを見直す (#2246)。意図して並べる部分 index は
+`intended_partial_indexes.json` に理由と一緒に載せる (#3590)。
 
 ### 本家の版を上げた後に必須: MFM の絵文字の正規表現
 

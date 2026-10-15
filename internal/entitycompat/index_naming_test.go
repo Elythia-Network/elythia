@@ -32,6 +32,8 @@ import (
 func TestIndexNaming_NoNewUpstreamDuplicates(t *testing.T) {
 	upstream := loadUpstreamIndexes(t)
 	known := loadKnownDuplicateIndexes(t)
+	partialOK := loadIntendedPartialIndexes(t)
+	usedPartial := map[string]bool{}
 
 	var findings []string
 	for _, idx := range parseMigrationIndexes(t) {
@@ -44,6 +46,10 @@ func TestIndexNaming_NoNewUpstreamDuplicates(t *testing.T) {
 		}
 		if known[idx.name] {
 			continue // 既知の重複 (000068 が実行時に落とす)
+		}
+		if _, ok := partialOK[idx.name]; ok && idx.partial {
+			usedPartial[idx.name] = true
+			continue // 本家の index と並べて置く部分 index (理由は allowlist にある)
 		}
 		upNames := make([]string, 0, len(names))
 		for n := range names {
@@ -63,20 +69,32 @@ TS 製 DB では index 名が違うと二重に作られる (CREATE INDEX IF NOT
 名前でしか存在判定しない)。upstream の index 名をそのまま使うこと
 (000058_channel_muting_expires_at.up.sql が前例)。
 
-意図的に定義を変えている (partial にする等) 場合は
-testdata/known_duplicate_indexes.json に追加し、000068 の扱いも見直すこと。`,
+意図的に upstream と同じ列の部分 index を並べる場合は、
+testdata/intended_partial_indexes.json に理由と一緒に足すこと
+(known_duplicate_indexes.json は 000068 が落とすものの一覧なので混ぜない)。`,
 			len(findings), strings.Join(findings, "\n  "))
+	}
+	// 使われていない項目を残さない。部分 index でなくなった (WHERE を外した) ものも
+	// ここで落ちる。
+	for name := range partialOK {
+		if !usedPartial[name] {
+			t.Errorf("testdata/intended_partial_indexes.json の %s は、upstream と同じ列の部分 index として migration に現れない。項目を消すこと", name)
+		}
 	}
 }
 
 type migrationIndex struct {
-	name string
-	key  indexKey
+	name    string
+	key     indexKey
+	partial bool // WHERE を持つ
 }
 
 // indexKey is the structural identity of an index: same key means the two
 // indexes serve the same queries. 述語 (WHERE) は含めない。partial かどうかで
 // 名前を変えてよいわけではないので、まず key 一致で拾って allowlist で捌く。
+// 部分 index を upstream の index と並べて置くと決めたものは
+// testdata/intended_partial_indexes.json に理由と一緒に載せ、
+// migrationIndex.partial が真のときだけ許す。
 type indexKey struct {
 	table  string
 	unique bool
@@ -137,6 +155,31 @@ func parseGoldenDef(def string) (indexKey, bool) {
 	}, true
 }
 
+// loadIntendedPartialIndexes reads testdata/intended_partial_indexes.json: name
+// -> why the partial index is kept next to upstream's full index on the same
+// columns.
+//
+// known_duplicate_indexes.json とは分ける。あちらは「000068 が TS 製 DB で落とす、
+// upstream と定義が同じ index」の一覧で、部分 index は 000068 の対象ではない
+// (定義が違うので落とさない。TS 製 DB では upstream の index と並んで残る)。
+func loadIntendedPartialIndexes(t *testing.T) map[string]string {
+	t.Helper()
+	blob, err := os.ReadFile(filepath.Join("testdata", "intended_partial_indexes.json"))
+	if err != nil {
+		t.Fatalf("read partial allowlist: %v", err)
+	}
+	var out map[string]string
+	if err := json.Unmarshal(blob, &out); err != nil {
+		t.Fatalf("parse partial allowlist: %v", err)
+	}
+	for name, why := range out {
+		if strings.TrimSpace(why) == "" {
+			t.Errorf("intended_partial_indexes.json の %s に理由が無い", name)
+		}
+	}
+	return out
+}
+
 func loadKnownDuplicateIndexes(t *testing.T) map[string]bool {
 	t.Helper()
 	blob, err := os.ReadFile(filepath.Join("testdata", "known_duplicate_indexes.json"))
@@ -155,7 +198,7 @@ func loadKnownDuplicateIndexes(t *testing.T) map[string]bool {
 }
 
 var migrationIndexRe = regexp.MustCompile(
-	`(?is)CREATE\s+(UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?"([^"]+)"\s+ON\s+"([^"]+)"\s*(?:USING\s+(\w+)\s*)?\((.*?)\)\s*(?:WHERE[^;]*)?;`)
+	`(?is)CREATE\s+(UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?"([^"]+)"\s+ON\s+"([^"]+)"\s*(?:USING\s+(\w+)\s*)?\((.*?)\)\s*(WHERE[^;]*)?;`)
 
 func parseMigrationIndexes(t *testing.T) []migrationIndex {
 	t.Helper()
@@ -176,7 +219,8 @@ func parseMigrationIndexes(t *testing.T) []migrationIndex {
 				method = "btree"
 			}
 			out = append(out, migrationIndex{
-				name: m[2],
+				name:    m[2],
+				partial: strings.TrimSpace(m[6]) != "",
 				key: indexKey{
 					table:  m[3],
 					unique: strings.TrimSpace(m[1]) != "",

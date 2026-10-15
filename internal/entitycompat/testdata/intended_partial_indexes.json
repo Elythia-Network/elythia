@@ -1,0 +1,3 @@
+{
+ "IDX_following_followeeId_notify_normal": "000131 (#3590)。ListFollowersToNotify (\"followeeId\" = ? AND notify = 'normal') がローカルの投稿のたびに引く。upstream の IDX_24e0042143a18157b234df186c (\"followeeId\" 全行) では通知を受けない行まで読んで捨てる。TS 製 DB では両方が並ぶ"
+}

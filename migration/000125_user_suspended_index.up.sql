@@ -1,0 +1,13 @@
+-- #3590: 凍結した利用者の id だけを持つ部分 index を張る。
+--
+-- タイムラインなどの凍結した著者を除く条件
+-- (`applySuspendedAuthorExclusion` など) は
+-- `("replyUserId" IS NULL OR NOT EXISTS (SELECT 1 FROM "user" su WHERE su.id = ...
+-- AND su."isSuspended"))` の形で、OR の中の NOT EXISTS は anti join にできない。
+-- プランナは hashed SubPlan を選び、その中身が `user` の seq scan になっていた
+-- (投稿者・返信先・リノート先で最大 3 回)。この index があると、凍結した人数分の
+-- index only scan で済む (LTL が 13ms / 7,708 buffer から 0.7ms / 150 buffer)。
+--
+-- 本家にはこの index は無い (Elythia の SQL の形に合わせたもの)。`isSuspended` の
+-- 更新は稀なので、`notesCount` などの更新の HOT は崩れない。
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_user_isSuspended_id" ON "user" ("id") WHERE "isSuspended";

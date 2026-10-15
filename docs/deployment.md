@@ -585,7 +585,7 @@ worker 数は既定値がキューごとに違い、`stuck 検出` は**キュ�
 
 ```
   ok    config.url   https://example.com
-  ok    database     接続 ok / migration version 122
+  ok    database     接続 ok / migration version 131
   ok    database-health dead tuple と VACUUM に問題なし (122 テーブル)
   ok    root user    meta.rootUserId 設定済み
   ok    redis        接続 ok
@@ -1166,6 +1166,53 @@ SELECT version, dirty FROM schema_migrations;
 その系列の最初のファイル (本体なら `000001`。fork の系列は `900001` などから始まることがある) で止まったときは、`-force` では戻せない。管理表 (`schema_migrations`、fork の系列なら `schema_migrations_local`) を SQL で直す。
 - up で失敗したとき: 管理表は最初のファイルの番号で dirty になっているが、そのファイルは当たっていない。原因を取り除いた後に、管理表を `DROP TABLE` する。次の `elythia migrate` が管理表を作り直し、最初のファイルから流す
 - down で失敗したとき: 管理表は `-1` で dirty になっているが、最初のファイルは当たったまま。`UPDATE schema_migrations SET version = 1, dirty = false;` (fork の系列なら `schema_migrations_local` と、その系列の最初の番号) で戻す
+
+### 大きな表に index を足す migration
+
+`note` などの大きな表への index は、`CREATE INDEX CONCURRENTLY` で 1 ファイルに 1 本ずつ作る (例: `000054`、`000091`)。`000123`〜`000131` (#3590) も、`000126` を除いてこの形にしている。`000126` (`user` の `avatarId` / `bannerId`) は、TS 版から移った DB では作らないための条件を `DO` ブロックで書いており、`DO` の中では `CONCURRENTLY` が使えないので、普通の `CREATE INDEX` で作る。
+
+`CONCURRENTLY` は書き込みを止めないが、次の点に注意する。
+
+- **migration を流しているあいだ、Elythia は起動しない。** UDS の entrypoint と compose の `migrate` サービスは、migration を流し終えてからサーバーを起動する。作る時間は表の行数に比例する。検証用の DB (ノート 60 万件、`note` の本体 257MB、`note_unread` 10 万行、PostgreSQL 18、キャッシュに載った状態) では、`000123` (チャンネルの部分 index) が 0.34 秒、`000124` (`visibleUserIds` の GIN) が 0.39 秒、`000127` (`note_unread`) が 0.20 秒だった。本番の行数では測っていないので、`SELECT count(*) FROM note;` で見積もる
+- **止めずに済ませたいときは、旧版を動かしたまま同じ SQL を先に流してよい。** どれも `IF NOT EXISTS` なので、後で migration が流れたときは名前で何もしない。index を足すだけの migration に限る (旧版のサーバーが、知らない index があっても動くため)
+- **`000126` は、作るあいだ `user` への書き込みを止める。** 止まる時間は `user` の行数に比例する (規模の例: 利用者 22,000 人の DB で 2 本合わせて 50ms)。先に流すなら、書き込みの少ない時間帯にする。**`user` に書き込み中の長い transaction があると、`000126` はその終わりを待ち、待っているあいだも後から来た `user` への書き込みが全て後ろに並ぶ。** 下の `lock_timeout` を 0 にして流すときは、待ちが切られずに続くので、この意味でも書き込みの少ない時間帯を選ぶ
+- **`CONCURRENTLY` は、始まる前からある transaction が全て終わるのを待つ。** 長い transaction (バックアップの `pg_dump` など) が走っていると、その終わりまで進まない。待っているあいだも書き込みは止めないが、migration は終わらない
+- **DB やロールに `statement_timeout` / `lock_timeout` を設定していると、`CONCURRENTLY` が途中で切られる。** `statement_timeout` は作る時間全体に、`lock_timeout` は古い transaction の終わりを待つ部分に効く。どちらで切られても使えない (INVALID の) index が残り、管理表は dirty になる (下の項目と [マイグレーションが途中で止まったとき (dirty)](#マイグレーションが途中で止まったとき-dirty) で戻す)。設定は、Elythia と同じユーザーで同じ DB に繋いで `SHOW statement_timeout;` と `SHOW lock_timeout;` で確かめる (どちらも `0` なら切られない)。migration のあいだだけ両方を 0 にするには、接続の `options` で上書きする (バックアップの取得が自分の transaction で同じ設定を 0 にしているのと同じ考え方。[backup.md](backup.md))。`elythia migrate` は環境変数 `PGOPTIONS` を読む
+
+  ```bash
+  # バイナリ直接実行
+  PGOPTIONS='-c statement_timeout=0 -c lock_timeout=0' elythia migrate -direction up
+  # Docker Compose (TCP)
+  docker compose run --rm --no-deps -e PGOPTIONS='-c statement_timeout=0 -c lock_timeout=0' migrate migrate -config .config/default.yml -direction up
+  # Docker Compose (UDS)
+  docker compose -f compose.uds.yaml run --rm --no-deps -e PGOPTIONS='-c statement_timeout=0 -c lock_timeout=0' mkgo migrate -direction up
+  # 先に psql で流すなら、同じ接続で先に SET する
+  psql ... -c 'SET statement_timeout = 0' -c 'SET lock_timeout = 0' -c 'CREATE INDEX CONCURRENTLY IF NOT EXISTS ...'
+  ```
+
+- **途中で失敗すると、使えない (INVALID の) index が名前ごと残る。** 次に流すと `IF NOT EXISTS` が名前で何もしないので、**使えない index が残ったまま migration が成功扱いになる**。流し直す前に、INVALID の index が無いかを見る
+
+  ```sql
+  -- 000123〜000131 (#3590) の index に絞る。別の migration なら、その migration が作る名前に置き換える
+  SELECT i.relname FROM pg_index x JOIN pg_class i ON i.oid = x.indexrelid
+    JOIN pg_namespace n ON n.oid = i.relnamespace
+   WHERE n.nspname = current_schema() AND NOT x.indisvalid
+     AND i.relname IN ('IDX_note_channelId_id_desc', 'IDX_NOTE_VISIBLE_USER_IDS', 'IDX_user_isSuspended_id',
+                       'IDX_user_avatarId', 'IDX_user_bannerId', 'IDX_e637cba4dc4410218c4251260e',
+                       'IDX_antenna_note_unread_noteId', 'IDX_channel_note_unread_noteId',
+                       'IDX_promo_read_noteId', 'IDX_following_followeeId_notify_normal');
+  ```
+
+  名前で絞るのは、別の作業の index を消さないため。例えば `REINDEX CONCURRENTLY` の途中には `<名前>_ccnew` という INVALID の index ができ、その `REINDEX` が失敗するとそのまま残る。失敗して残ったものは作っている最中ではないので、下の `pg_stat_progress_create_index` の確認をすり抜ける。migration の index と取り違えて消すと、その作業の後始末の手がかりを失う
+
+  **作っている最中の index も INVALID に見える。** 別の `elythia migrate` (別のコンテナや、先に流した psql) がまだ作っていないかを、次で確かめる。`index_relid` に同じ index が出ているあいだは消さない
+
+  ```sql
+  SELECT pid, relid::regclass AS "table", index_relid::regclass AS "index", phase
+    FROM pg_stat_progress_create_index;
+  ```
+
+  作っているものが無ければ、`DROP INDEX CONCURRENTLY IF EXISTS "<名前>";` で消す。管理表の戻し方は [マイグレーションが途中で止まったとき (dirty)](#マイグレーションが途中で止まったとき-dirty) にある
 
 ### frontend を本体へ取り込んだ版へ上げる (#3379)
 

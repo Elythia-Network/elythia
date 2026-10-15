@@ -1,0 +1,15 @@
+-- #3590: `note_unread."noteId"` に index を張る。
+--
+-- `note_unread."noteId"` の FK は `ON DELETE CASCADE` なので、`note` を 1 行
+-- 消すたびに FK の処理が `note_unread` を seq scan していた。000038 の index は
+-- `userId` が先頭のものだけ。リモートのノートの掃除 (`DeleteExpiredRemoteNotesAfter`)、
+-- 利用者の削除、Delete activity の受信が `note_unread` の大きさに比例していた
+-- (`note_unread` 10 万行で、1,000 件の削除が 4.2〜4.5 秒 → 118ms)。
+--
+-- 名前と定義は本家 (1000000000000-Init) に揃える。TS 版から移った DB には同じ
+-- 名前の index が既にあり、`IF NOT EXISTS` で何もしない。
+--
+-- 未読の表は行数が読めない (利用者の未読の溜まり方しだい) ので、CONCURRENTLY で
+-- 書き込みを止めずに作る。失敗したときの回復は docs/deployment.md の
+-- 「大きな表に index を足す migration」にある。
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_e637cba4dc4410218c4251260e" ON "note_unread" ("noteId");
