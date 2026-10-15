@@ -549,6 +549,17 @@ html[data-color-scheme=dark] ._woodenFrame {
 
 ._blink {
 	animation: blink 1s infinite;
+
+	// mk-go: 未読がある間ずっと点滅し続けるので、「アニメーション」を切っているときと
+	// OS で動きを減らしているときは止め、点を出すだけにする (#3594)。
+	// 止めたときは animation の外の既定 (opacity 1、等倍) で見えたままになる。
+	html._noAnimation_ & {
+		animation: none;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		animation: none;
+	}
 }
 
 @keyframes blink {
