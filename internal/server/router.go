@@ -2109,6 +2109,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	followingService.SetMeUpdatedPublisher(iHandler)
 	iHandler.SetRoleProvider(roleService)
 	iHandler.SetTOTPReplayGuard(totpReplayGuard)
+	iHandler.SetTwoFAPendingGuard(coretwofactor.NewRedisPendingGuard(s.redis.Default))
 	// 現在のパスワードを照合する i/* の照合失敗をアカウント単位で数える。
 	// route ごとの limiter に置くと、token を持つだけの第三者が被害者の
 	// i/regenerate-token を使い切れる (passwordguard の package doc)。
@@ -4646,6 +4647,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"同期 fallback へ落ち、actor 一致検査・LD-Signature 検証・replay guard を通らない"},
 		{"i.totpReplayGuard", iHandler.HasTOTPReplayGuard(),
 			"2FA gate を持つ 9 endpoint と i/2fa/done で有効な TOTP コードを再利用でき、バックアップコードの単回予約も効かなくなる"},
+		{"i.twoFAPendingGuard", iHandler.HasTwoFAPendingGuard(),
+			"i/2fa/register の仮の秘密が期限なく残り、token だけで i/2fa/done の 6 桁を総当たりできる"},
 		{"i.authInvalidator", iHandler.HasAuthInvalidator(),
 			"revoke-token / regenerate-token / delete-account / update の後も古い token が auth cache の TTL のあいだ通る"},
 		{"admin.userTokenInvalidator", adminHandler.HasUserTokenInvalidator(),

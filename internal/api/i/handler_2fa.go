@@ -80,6 +80,15 @@ func (h *Handler) TwoFARegister(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
 
+	// 仮の秘密の期限と失敗回数を数え始める。DB へ書く前に置くので、ここで落ちれば
+	// 仮の秘密は前のまま残らない (前の記録は消えているので done は通らない)。
+	if h.twoFAPending != nil {
+		if err := h.twoFAPending.Start(c.Request().Context(), user.ID, secret); err != nil {
+			slog.Error("i/2fa/register: failed to start the temp secret", "userId", user.ID, "err", err)
+			return apierr.JSONInternalError(c)
+		}
+	}
+
 	// tempSecretに保存 (doneで確認後にsecretに移動)
 	if err := h.userService.UpdateProfileFields(user.ID, map[string]any{"twoFactorTempSecret": secret}); err != nil {
 		// 保存できていないと、次の `done` が必ず失敗する。QR を見せる前に落とす。
@@ -142,6 +151,23 @@ func (h *Handler) TwoFADone(c echo.Context) error {
 	// 全空白を除去してから検証する (authenticator が "123 456" のように表示する
 	// code を受け付ける、#1767)。strings.Fields は連続空白も畳む。
 	token := strings.Join(strings.Fields(req.Token), "")
+	// 仮の秘密は発行から PendingTTL のあいだ、PendingMaxAttempts 回まで確かめる
+	// (本家には期限も上限も無い)。超えた仮の秘密は捨て、register からやり直させる。
+	if h.twoFAPending != nil {
+		if err := h.twoFAPending.Attempt(c.Request().Context(), user.ID, *profile.TwoFactorTempSecret); err != nil {
+			if !errors.Is(err, twofactor.ErrPendingExpired) {
+				slog.Error("i/2fa/done: failed to count the attempt", "userId", user.ID, "err", err)
+				return apierr.JSONInternalError(c)
+			}
+			if err := h.userService.UpdateProfileFields(user.ID, map[string]any{"twoFactorTempSecret": nil}); err != nil {
+				slog.Error("i/2fa/done: failed to discard the expired temp secret", "userId", user.ID, "err", err)
+				return apierr.JSONInternalError(c)
+			}
+			_ = h.twoFAPending.Finish(context.WithoutCancel(c.Request().Context()), user.ID)
+			// 仮の秘密が無いときと同じ応答にする。
+			return apierr.JSONInvalidParam(c)
+		}
+	}
 	if !twofactor.ValidateWithReplay(c.Request().Context(), h.totpReplayGuard, user.ID, token, *profile.TwoFactorTempSecret) {
 		return c.JSON(http.StatusForbidden, apierr.InvalidToken())
 	}
@@ -164,6 +190,11 @@ func (h *Handler) TwoFADone(c echo.Context) error {
 	}); err != nil {
 		slog.Error("i/2fa/done: failed to enable 2FA", "userId", user.ID, "err", err)
 		return apierr.JSONInternalError(c)
+	}
+
+	if h.twoFAPending != nil {
+		// 消せなくても、仮の秘密は上で消えているので照合する相手が無い。期限で消える。
+		_ = h.twoFAPending.Finish(context.WithoutCancel(c.Request().Context()), user.ID)
 	}
 
 	// upstream (done.ts) は 2FA 有効化後に meUpdated を publish して UI を更新する
