@@ -154,6 +154,49 @@ func TestShow_FiresChartHookAnonymous(t *testing.T) {
 	assert.NotEmpty(t, hook.calls[0].visitor) // RemoteAddr is set by httptest
 }
 
+// 匿名訪問者の visitor key は接続元の IP で、port を含めない。RemoteAddr
+// (ip:port) のままだと、同じ訪問者が接続を張り直すたびに別人として数えられる。
+func TestShow_AnonymousVisitorKeyIsRealIPWithoutPort(t *testing.T) {
+	h, userRepo := newTestHandler(t)
+	addTestUser(userRepo)
+	hook := &stubChartHook{}
+	h.SetChartHook(hook)
+
+	e := echo.New()
+	// trustProxy で信頼した proxy の内側を想定し、XFF の値を実 IP として使う。
+	e.IPExtractor = echo.ExtractIPFromXFFHeader(echo.TrustLoopback(true))
+	for _, remoteAddr := range []string{"127.0.0.1:50001", "127.0.0.1:50002"} {
+		req := httptest.NewRequest(http.MethodPost, "/api/users/show", strings.NewReader(`{"userId": "user1"}`))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		req.Header.Set(echo.HeaderXForwardedFor, "203.0.113.7")
+		req.RemoteAddr = remoteAddr
+		c := e.NewContext(req, httptest.NewRecorder())
+		require.NoError(t, h.Show(c))
+	}
+
+	require.Len(t, hook.calls, 2)
+	assert.Equal(t, "203.0.113.7", hook.calls[0].visitor)
+	assert.Equal(t, hook.calls[0].visitor, hook.calls[1].visitor, "the same visitor must map to one key across connections")
+}
+
+func TestShow_AnonymousVisitorKeyDropsPortWithoutProxy(t *testing.T) {
+	h, userRepo := newTestHandler(t)
+	addTestUser(userRepo)
+	hook := &stubChartHook{}
+	h.SetChartHook(hook)
+
+	e := echo.New()
+	e.IPExtractor = echo.ExtractIPDirect()
+	req := httptest.NewRequest(http.MethodPost, "/api/users/show", strings.NewReader(`{"userId": "user1"}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	req.RemoteAddr = "198.51.100.4:61234"
+	c := e.NewContext(req, httptest.NewRecorder())
+	require.NoError(t, h.Show(c))
+
+	require.Len(t, hook.calls, 1)
+	assert.Equal(t, "198.51.100.4", hook.calls[0].visitor)
+}
+
 func TestShow_ByUsername(t *testing.T) {
 	h, userRepo := newTestHandler(t)
 	addTestUser(userRepo)

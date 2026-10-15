@@ -18,6 +18,10 @@
 package charthook
 
 import (
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"time"
 
 	"github.com/elythia-network/elythia/internal/core/chart"
@@ -441,12 +445,34 @@ func (h *Hooks) OnDelivered(host string, succeeded bool) {
 
 // --- pv / active-user read hooks ---------------------------------------------
 
+// visitorKeySecret keys visitorKeyDigest. It is drawn once per process.
+//
+// 訪問者のキー(接続元のIP)は重複を数えるためだけに使うので、DBには元の値に
+// 戻せない形で置く。鍵はプロセスごとに作り直すので、再起動をまたぐと同じ
+// 訪問者を別人として数えることがある(集計の期間は1時間・1日なので影響は小さい)。
+var visitorKeySecret = newVisitorKeySecret()
+
+func newVisitorKeySecret() []byte {
+	b := make([]byte, 32)
+	// crypto/rand.Read は Go 1.24 以降エラーを返さない(失敗すればプロセスを止める)。
+	_, _ = rand.Read(b)
+	return b
+}
+
+// visitorKeyDigest returns the value stored for an anonymous visitor key: the
+// first 32 hex digits of HMAC-SHA256(visitorKeySecret, key).
+func visitorKeyDigest(key string) string {
+	mac := hmac.New(sha256.New, visitorKeySecret)
+	mac.Write([]byte(key))
+	return hex.EncodeToString(mac.Sum(nil))[:32]
+}
+
 // OnUserShow records a profile view in PerUserPvChart and counts the
 // viewing user against ActiveUsersChart.Read when authenticated.
 //
 // `viewerID` may be empty for anonymous viewers; in that case
-// PerUserPvChart records the visitor key (typically a session id) and
-// ActiveUsersChart is not touched.
+// PerUserPvChart records a keyed digest of the visitor key (the client IP)
+// and ActiveUsersChart is not touched.
 func (h *Hooks) OnUserShow(ownerID, viewerID, visitorKey string) {
 	if h == nil {
 		return
@@ -455,7 +481,7 @@ func (h *Hooks) OnUserShow(ownerID, viewerID, visitorKey string) {
 		if viewerID != "" {
 			_ = h.PerUserPv.CommitByUser(ownerID, viewerID)
 		} else if visitorKey != "" {
-			_ = h.PerUserPv.CommitByVisitor(ownerID, visitorKey)
+			_ = h.PerUserPv.CommitByVisitor(ownerID, visitorKeyDigest(visitorKey))
 		}
 	}
 	if h.ActiveUsers != nil && viewerID != "" && h.IDGen != nil {

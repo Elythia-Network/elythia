@@ -618,14 +618,17 @@ func (h *Handler) Show(c echo.Context) error {
 	}
 
 	// チャート集計はベストエフォート。匿名訪問者は visitor key として
-	// リモートホスト名を使う (簡易実装; 認証済みなら viewer id を渡す)。
+	// 接続元の IP を使う (upstream show.ts も ip で数える。認証済みなら viewer id)。
+	// RemoteAddr は ip:port で、接続ごとに port が変わるうえ、proxy の内側では
+	// proxy のアドレスになる。trustProxy を見る RealIP で port を含めずに取る。
+	// DB には IP のままではなく鍵付きのダイジェストで置く (charthook.OnUserShow)。
 	if h.chartHook != nil {
 		viewerID := ""
 		visitorKey := ""
 		if viewer != nil {
 			viewerID = viewer.ID
 		} else {
-			visitorKey = c.Request().RemoteAddr
+			visitorKey = c.RealIP()
 		}
 		h.chartHook.OnUserShow(bundle.User.ID, viewerID, visitorKey)
 	}
