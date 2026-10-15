@@ -447,4 +447,27 @@ describe('Paginator.fetchNewer の同時要求', () => {
 
 		expect(p.items.value.map(x => x.id)).toEqual(['n100']);
 	});
+
+	test('reload 前の取得が保留中でも新世代の同条件要求を別に開始する', async () => {
+		const p = await loaded(['n000']);
+		const oldResponse = deferred<unknown>();
+		const newResponse = deferred<unknown>();
+		h.api.mockImplementationOnce(() => oldResponse.promise)
+			.mockResolvedValueOnce([item('n100')])
+			.mockImplementationOnce(() => newResponse.promise);
+
+		const oldFetch = p.fetchNewer({ toQueue: false });
+		await p.reload();
+		const newFetch = p.fetchNewer({ toQueue: false });
+		const callsWhileOldFetchIsPending = h.api.mock.calls.length;
+		const newSinceId = lastRequest().sinceId;
+
+		newResponse.resolve([item('n101')]);
+		oldResponse.resolve([item('n001')]);
+		await Promise.all([oldFetch, newFetch]);
+
+		expect(callsWhileOldFetchIsPending).toBe(4);
+		expect(newSinceId).toBe('n100');
+		expect(p.items.value.map(x => x.id)).toEqual(['n101', 'n100']);
+	});
 });
