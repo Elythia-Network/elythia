@@ -242,10 +242,14 @@ docker-update: ## pull → ビルド → 再起動 → 検証 (Docker Compose �
 	$(MAKE) docker-rebuild
 	$(MAKE) docker-restart
 
-uds-update: ## pull → ビルド → 再起動 → 検証 (UDS 本番構成)
+uds-update: ## pull → ビルド → 再起動 → 検証 → 事前圧縮 (UDS 本番構成)
 	$(MAKE) pull
 	$(MAKE) uds-rebuild
 	$(MAKE) uds-restart
+	@# 圧縮の失敗は反映の失敗ではない (無ければその場で gzip する)。警告にとどめ、
+	@# uds-update の終了コードは反映の成否だけで決める。
+	@$(MAKE) frontend-precompress || \
+		echo "==> 警告: 事前圧縮 (make frontend-precompress) に失敗した。反映は済んでいて、配信はその場の gzip で続く。原因を直して make frontend-precompress だけをやり直す" >&2
 
 
 # Binary output
@@ -772,6 +776,21 @@ e2e-frontend-build: plugins ## フロントエンドをビルド (本番の bind
 	docker run --rm -e CI=true -v $(PWD):$(E2E_WORKDIR) -w $(E2E_WORKDIR)/frontend \
 		"node:$$node_tag" \
 		bash -lc "npm i -g pnpm@$$pnpm_ver && pnpm install --frozen-lockfile && pnpm build"
+
+.PHONY: frontend-precompress
+# frontend/built に .br / .gz を足す (#3593)。サーバーは Accept-Encoding に応じて
+# それをそのまま返し、無ければその場で gzip するので、**再起動の後に流してよい**。
+# ビルド (pnpm build) の中で圧縮しないのは、uds-rebuild が出力先を消してから
+# 再起動するまでの区間 (本番の frontend が 404 になる区間) を延ばさないため。
+# 書き込みは一時ファイルからの rename で、途中のファイルは配信されない。作り済みで
+# 元より新しいものは飛ばすので、もう一度流しても残りだけを作る。
+# frontend/built はビルドのコンテナ (root) が作るので、同じ node のコンテナで流す。
+frontend-precompress: ## frontend/built に事前圧縮 (.br / .gz) を足す (再起動の後でよい)
+	@node_ver=$$(tr -d '[:space:]' < frontend/.node-version); \
+	if [ -z "$$node_ver" ]; then echo "frontend/.node-version を読めない" >&2; exit 1; fi; \
+	docker run --rm -v $(CURDIR)/frontend:$(E2E_WORKDIR)/frontend -w $(E2E_WORKDIR)/frontend \
+		"node:$$node_ver-$(FRONTEND_NODE_DISTRO)" \
+		node scripts/precompress.mjs built/_frontend_vite_ built/_frontend_embed_vite_
 
 # UDS-only compose stack (Phase 12-2)。Phase 12-1 で入った UNIX domain socket
 # 対応を使って nginx → mk-go → postgres / valkey をすべて UDS で繋ぐ。

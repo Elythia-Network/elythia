@@ -70,6 +70,8 @@ func logDevModeBanner(cfg *config.Config) {
 // registerFrontendAssets serves prefix (`/vite` or `/embed_vite`) from the
 // built assets in dir, or proxies it to the Vite dev server at devServer when
 // cfg enables dev mode. Outside dev mode a missing build answers 404.
+// Built assets are served by serveFrontendBuild (long-lived Cache-Control on
+// hashed files and precompressed variants, #3593).
 //
 // **dev server への proxy は dev モードのときだけにする。** 以前は「ビルド成果物が
 // 無ければ proxy」だったので、本番でビルド出力が欠けている (bind-mount の
@@ -83,12 +85,14 @@ func logDevModeBanner(cfg *config.Config) {
 // 返し、「JS のはずが HTML」という原因から遠い壊れ方になる。
 func registerFrontendAssets(e *echo.Echo, cfg *config.Config, prefix, dir, devServer string) {
 	if isDev(cfg) {
-		e.Any(prefix+"/*", newViteProxy(devServer))
+		// 全体の gzip middleware は `<prefix>/*` を外している (selfEncodedRoutes)
+		// ので、dev server の応答はここで従来どおり圧縮する。
+		e.Any(prefix+"/*", newViteProxy(devServer), frontendDynamicGzip())
 		return
 	}
 	_, err := os.Stat(dir)
 	if err == nil {
-		e.Static(prefix, dir)
+		e.GET(prefix+"/*", serveFrontendBuild(dir))
 		return
 	}
 	slog.Warn("frontend のビルド成果物が見つからないので 404 を返します。開発中なら dev: true (MK_DEV=1) で Vite dev server を使ってください",

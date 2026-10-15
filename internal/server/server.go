@@ -531,9 +531,13 @@ func accessLogConfig(out io.Writer) echomw.RequestLoggerConfig {
 // themselves, so the global gzip middleware must not wrap them (it does not
 // look at an existing Content-Encoding and would compress the body again).
 //
+//   - `/vite/*` / `/embed_vite/*`: 事前圧縮の .br / .gz を返し、無ければ
+//     自前で gzip する (serveFrontendBuild、dev では frontendDynamicGzip)
 //   - `/api/emojis`: 一覧が変わるまで gzip 済みの本文を使い回す (#3593)
 var selfEncodedRoutes = map[string]bool{
-	"/api/emojis": true,
+	"/vite/*":       true,
+	"/embed_vite/*": true,
+	"/api/emojis":   true,
 }
 
 // gzipConfig returns the GzipConfig used by the global middleware stack.

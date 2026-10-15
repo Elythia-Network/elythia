@@ -395,3 +395,18 @@ GTL が無傷なので、この食い違いは Elythia 側の退行として出�
 - WebSocket の接続は、入るときに close code 1012 (Service Restart) で閉じる。本家の misskey-js の `Stream` (reconnecting-websocket) は、閉じられると code に関係なく繋ぎ直す。メンテナンスの間は 503 で失敗し続け、抜けた後に繋がる
 - Service Worker は、`X-Elythia-Maintenance: 1` の付いた 503 をオフラインの画面に差し替えない ([frontend.md](frontend.md) の §4-2b と同じ扱いの独自変更)。直前にメンテナンスの画面を見ていれば、通信に失敗したときや前段の proxy が 5xx を返したときに、キャッシュしたその画面を出す (6 時間まで)
 - `/manifest.json` も 503 にした。最小の静的な JSON を返すと、ブラウザが PWA の名前やアイコンをそれで上書きしうるため
+
+## 5.8. frontend の配信のキャッシュと事前圧縮 (#3593)
+
+本家は`/vite/`と`/embed_vite/`を`@fastify/static`で`maxAge: 30 days, immutable`を付けて配信する(`ClientServerService.ts`)。Elythiaも同じ値(`Cache-Control: public, max-age=2592000, immutable`)を付けるが、次の点が違う。
+
+| | Elythia | 本家 |
+|---|---|---|
+| `immutable`を付けるファイル | 名前に内容のhashが入っているもの(`<名前>-<8文字>.<拡張子>`)の、2xxと304の応答だけ。2026.10.0のビルドで外れるのは`manifest.json`、`loader/boot.js`、`loader/style.css`、`mockServiceWorker.js`の4つで、これらには`Cache-Control`を付けない | prefixの下の全部 |
+| 圧縮 | `make frontend-precompress`(`frontend/scripts/precompress.mjs`)が、hashの付いたファイルに`.br`(brotli quality 10)と`.gz`(gzip level 9)を足し、Elythiaは`Accept-Encoding`のq値が高い方をそのまま返す(`Content-Encoding`、200には`Content-Length`)。hashの付いたファイルには常に`Vary: Accept-Encoding`を付ける。変種が無いファイルとhashの無いファイルは、従来どおりその場でgzipする | `@fastify/static`の事前圧縮は使っていない |
+
+- hashの無いファイルは、名前を変えずに中身だけが変わる。`immutable`にすると、更新の後も最長30日間、古い`boot.js`を使い続けるブラウザが出る。`loader/*`はHTMLに埋め込んでいる(#2551)ので、普段は要求されない
+- 事前圧縮はビルド(`pnpm build`)の中では行わない。ビルドは配信中の`frontend/built`を消してから作るので、ビルドの中で圧縮すると、再起動までfrontendが404になる時間がその分延びる。`make uds-update`は再起動の後に流す([deployment.md](../deployment.md))
+- `.br`と`.gz`の分だけ`frontend/built`が大きくなる(2026-10-14の本番のビルドの複製で、`_frontend_vite_`が212MBから368MB)。圧縮は8コアで約51秒(`_frontend_embed_vite_`は約4秒)
+
+`/api/emojis`は、絵文字の一覧の cache(`CachedEmojiRepository`)が同じ一覧を返すあいだ、JSONにしてgzipした本文を使い回す。本文は従来と同じバイト列で、gzipの圧縮の度合いだけが違う(level 9)。

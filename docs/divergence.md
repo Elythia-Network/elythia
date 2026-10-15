@@ -53,7 +53,7 @@ Elythia は Misskey TS からの drop-in 移行 (同じ DB / Redis / frontend �
 | [`divergence/federation.md`](divergence/federation.md) | §3 | ActivityPub (連合) |
 | [`divergence/config.md`](divergence/config.md) | §4 / §4-1 / §4-3 | 設定・streaming・job queue |
 | [`divergence/frontend.md`](divergence/frontend.md) | §4-2 / §4-2b | frontend |
-| [`divergence/operations.md`](divergence/operations.md) | §5 / §5.5 / §5.6 / §5.7 | 運用・性能 |
+| [`divergence/operations.md`](divergence/operations.md) | §5 / §5.5 / §5.6 / §5.7 / §5.8 | 運用・性能 |
 | [`divergence/security.md`](divergence/security.md) | §6 / §7 | セキュリティと安全側の差分 |
 | [`divergence/approximations.md`](divergence/approximations.md) | §8 / §9 | 逆方向の差分と近似 |
 
