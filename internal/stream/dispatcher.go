@@ -103,14 +103,17 @@ type Dispatcher struct {
 	busCancels map[string]*pendingCancel // topic → この Dispatcher の購読を外す枠
 
 	// subNote の refcount 管理 (noteID → count)
-	noteSubMu      sync.Mutex
-	noteSubs       map[string]int
-	noteCancels    map[string]*pendingCancel // noteID → 購読解除の枠
-	noteOrder      *list.List                // 購読した順 (先頭が最も古い)。値は noteID
-	noteElems      map[string]*list.Element  // noteID → noteOrder の要素
-	notifReader    NotificationReader
-	noteVisibility NoteVisibilityChecker
-	ugcVisibility  UGCVisibilityLookup
+	noteSubMu   sync.Mutex
+	noteSubs    map[string]int
+	noteCancels map[string]*pendingCancel // noteID → 購読解除の枠
+	noteOrder   *list.List                // 購読した順 (先頭が最も古い)。値は noteID
+	noteElems   map[string]*list.Element  // noteID → noteOrder の要素
+	// noteFollowGates は、フォローしていることで見えているfollowersの
+	// ノートの購読(noteID → 投稿者のID)。イベントのたびに見え方を見直す。
+	noteFollowGates map[string]string
+	notifReader     NotificationReader
+	noteVisibility  NoteVisibilityChecker
+	ugcVisibility   UGCVisibilityLookup
 }
 
 // NewDispatcher constructs a Dispatcher for the given connection. registry /
@@ -127,6 +130,8 @@ func NewDispatcher(conn *Connection, registry *Registry, bus PubSubBus) *Dispatc
 		noteCancels: make(map[string]*pendingCancel),
 		noteOrder:   list.New(),
 		noteElems:   make(map[string]*list.Element),
+
+		noteFollowGates: make(map[string]string),
 	}
 }
 
@@ -394,6 +399,7 @@ func (d *Dispatcher) CloseAll() {
 	d.noteCancels = make(map[string]*pendingCancel)
 	d.noteOrder = list.New()
 	d.noteElems = make(map[string]*list.Element)
+	d.noteFollowGates = make(map[string]string)
 	d.noteSubMu.Unlock()
 	for _, c := range cancels {
 		c()
@@ -659,9 +665,8 @@ func (d *Dispatcher) handleReadNotification() {
 	if d.notifReader == nil {
 		return
 	}
-	// 本家はstreamのreadNotificationでtokenの権限を見ないので、read:accountだけの
-	// アプリでも全通知を既読にできた。同じ操作のAPI (notifications/mark-all-as-read)
-	// と同じwrite:notificationsを要求する。
+	// 同じ操作のAPI (notifications/mark-all-as-read)と同じwrite:notificationsを
+	// 要求する。購読の権限(read:account)とは別に確かめる。
 	if !d.connHasPermission(streamReadNotificationKind) {
 		return
 	}
@@ -695,11 +700,17 @@ func (d *Dispatcher) handleSubNote(body json.RawMessage) {
 	if d.conn != nil {
 		viewer = d.conn.User()
 	}
-	if _, err := d.noteVisibility.RequireVisible(viewer, req.ID); err != nil {
+	n, err := d.noteVisibility.RequireVisible(viewer, req.ID)
+	if err != nil {
 		return
 	}
 	topic := "noteStream:" + req.ID
 	d.noteSubMu.Lock()
+	if needsFollowRecheck(viewer, n) {
+		d.noteFollowGates[req.ID] = n.UserID
+	} else {
+		delete(d.noteFollowGates, req.ID)
+	}
 	// 新しいノートで上限に達していたら、最も古く購読したものを外す。
 	var evicted func()
 	if _, ok := d.noteSubs[req.ID]; !ok && len(d.noteSubs) >= maxNoteSubsPerConnection {
@@ -741,6 +752,7 @@ func (d *Dispatcher) evictOldestNoteSubLocked() func() {
 	d.noteOrder.Remove(front)
 	delete(d.noteElems, id)
 	delete(d.noteSubs, id)
+	delete(d.noteFollowGates, id)
 	// 購読の確立中 (resolve 前) の枠でも take が印を残すので、後から埋まった
 	// ハンドルはその場で外れる (CloseAll と同じ)。
 	cancel := d.noteCancels[id].take()
@@ -770,6 +782,7 @@ func (d *Dispatcher) handleUnsubNote(body json.RawMessage) {
 			d.noteOrder.Remove(e)
 			delete(d.noteElems, req.ID)
 		}
+		delete(d.noteFollowGates, req.ID)
 		cancel := d.noteCancels[req.ID].take()
 		delete(d.noteCancels, req.ID)
 		d.noteSubMu.Unlock()
@@ -794,6 +807,9 @@ func (d *Dispatcher) forwardNoteEvent(noteID string, payload []byte) {
 		Body json.RawMessage `json:"body"`
 	}
 	if err := json.Unmarshal(payload, &env); err != nil || env.Type == "" {
+		return
+	}
+	if !d.noteStillVisible(noteID) {
 		return
 	}
 	// upstream Connection.onNoteStreamMessage と同じく、未ログインの接続には
@@ -824,13 +840,79 @@ func (d *Dispatcher) forwardNoteEvent(noteID string, payload []byte) {
 	})
 }
 
+// needsFollowRecheck reports whether a subscription to n stays visible only
+// while the viewer follows the author, so each event must re-check it.
+//
+// 見え方が後から変わりうるのはfollowersのノートだけ。public / homeは誰にでも
+// 見え、specifiedの宛先(visibleUserIds)は作成後に変わらない。投稿者本人は
+// 常に見える。
+func needsFollowRecheck(viewer *model.User, n *model.Note) bool {
+	if viewer == nil || n == nil {
+		return false
+	}
+	return n.Visibility == model.NoteVisibilityFollowers && n.UserID != viewer.ID
+}
+
+// noteStillVisible re-checks a followers-note subscription before an event is
+// forwarded, and drops the subscription once the viewer can no longer see the
+// note.
+//
+// subNoteの時点で見えていても、その後にフォローが外れた(ブロックで外される
+// 場合を含む)ら、以後のイベントは送らない。本家も接続のfollowingをイベント
+// ごとに見る。ここでは接続のフォローの一覧(フォローの
+// 変更で取り直される)を先に見て、載っていればDBを引かない。載っていないとき
+// (一覧の上限を超えた、メンションや返信先として見えている、一覧を取れなかった)
+// だけ可視性の判定を引き直す。見えなくなった購読は外すので、外れた後の
+// イベントでDBを引き続けることはない。
+func (d *Dispatcher) noteStillVisible(noteID string) bool {
+	d.noteSubMu.Lock()
+	authorID, gated := d.noteFollowGates[noteID]
+	d.noteSubMu.Unlock()
+	if !gated {
+		return true
+	}
+	viewer := d.conn.User()
+	if viewer != nil {
+		if _, ok := d.conn.FollowingSnapshot()[authorID]; ok {
+			return true
+		}
+		if d.noteVisibility != nil {
+			if _, err := d.noteVisibility.RequireVisible(viewer, noteID); err == nil {
+				return true
+			}
+		}
+	}
+	d.dropNoteSub(noteID)
+	return false
+}
+
+// dropNoteSub removes a note subscription regardless of its refcount.
+func (d *Dispatcher) dropNoteSub(noteID string) {
+	d.noteSubMu.Lock()
+	if _, ok := d.noteSubs[noteID]; !ok {
+		d.noteSubMu.Unlock()
+		return
+	}
+	delete(d.noteSubs, noteID)
+	if e, ok := d.noteElems[noteID]; ok {
+		d.noteOrder.Remove(e)
+		delete(d.noteElems, noteID)
+	}
+	delete(d.noteFollowGates, noteID)
+	cancel := d.noteCancels[noteID].take()
+	delete(d.noteCancels, noteID)
+	d.noteSubMu.Unlock()
+	// 解除はロックの外で呼ぶ。pubsubはハンドラの中からの解除を許す。
+	if cancel != nil {
+		cancel()
+	}
+}
+
 // redactPollVoted rewrites a pollVoted body for one subscriber: the voter's
 // own connection keeps the real userId, every other subscriber gets the
 // opaque voteId in its place. ok is false when the body is malformed.
 //
-// 本家は{choice, userId}を購読者全員(匿名を含む)へそのまま流すので、公開の
-// 投票をsubNoteして待つだけで、誰がどれに入れたかが分かる。APIには投票者の
-// 一覧が無いので、これはstreamingだけの漏れになる。
+// 誰がどれに入れたかはAPIでも公開しないので、streamingでも投票者本人にだけ渡す。
 //
 // userIdを消さずにvoteIdで置き換えるのは、本家のfrontendが
 // `${userId}:${choice}`を直前のイベントとの重複判定に使うため。消すと、別人が
