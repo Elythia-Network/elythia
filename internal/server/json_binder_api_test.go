@@ -386,3 +386,33 @@ func TestAPIRoutes_AttachCheckAfterRouteMiddleware(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, serve(http.MethodPost, "/api/match", `null`))
 	assert.Equal(t, http.StatusNoContent, serve(http.MethodGet, "/api/match", ``))
 }
+
+// GET の /api では本文を読まず、query だけを引数にする (本家の Fastify と同じ)。
+// 本文で query を上書きできると、cacheSec の endpoint の public な応答を URL と
+// 違う内容で汚せる (#3593)。
+func TestAPIBinder_GetIgnoresBody(t *testing.T) {
+	type params struct {
+		Name  string `json:"name" query:"name"`
+		Limit *int   `json:"limit" query:"limit"`
+	}
+	for _, path := range []string{"/api/emoji", "/api/charts/notes"} {
+		for _, method := range []string{http.MethodGet, http.MethodHead} {
+			e := echo.New()
+			e.JSONSerializer = fastJSONSerializer{}
+			req := httptest.NewRequest(method, path+"?name=foo", strings.NewReader(`{"name":"bar","limit":5}`))
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			c := e.NewContext(req, httptest.NewRecorder())
+			c.SetPath(path)
+			var got params
+			require.NoError(t, (&apiBinder{}).Bind(&got, c), "%s %s", method, path)
+			assert.Equal(t, "foo", got.Name, "%s %s: the query wins over the body", method, path)
+			assert.Nil(t, got.Limit, "%s %s: the body is not read", method, path)
+		}
+	}
+
+	// POST は従来どおり本文を読む。
+	var got params
+	_, err := bindAt(t, http.MethodPost, "/api/emoji", echo.MIMEApplicationJSON, `{"name":"bar"}`, &got)
+	require.NoError(t, err)
+	assert.Equal(t, "bar", got.Name)
+}

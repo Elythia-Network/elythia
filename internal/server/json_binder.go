@@ -89,15 +89,28 @@ type apiBinder struct {
 // 'object'`. An empty application/json body never gets here: JSONBodyParse
 // answers it with FST_ERR_CTP_EMPTY_JSON_BODY first, as Fastify does.
 //
-// For a GET request to an API endpoint it first rejects, with errQueryCast,
-// a query value that upstream cannot cast to its param's type (see
-// checkQueryCasts).
+// For a GET or HEAD request to an API endpoint it binds only the path and
+// query params, never the body, as upstream does. A GET first rejects, with
+// errQueryCast, a query value that upstream cannot cast to its param's type
+// (see checkQueryCasts).
 func (b *apiBinder) Bind(i any, c echo.Context) error {
 	req := c.Request()
-	if req.Method == http.MethodGet && isAPIEndpointRoute(c) {
-		if err := checkQueryCasts(c, reflect.TypeOf(i)); err != nil {
+	if (req.Method == http.MethodGet || req.Method == http.MethodHead) && isAPIEndpointRoute(c) {
+		if req.Method == http.MethodGet {
+			if err := checkQueryCasts(c, reflect.TypeOf(i)); err != nil {
+				return err
+			}
+		}
+		// **GET の本文は読まない。** 本家 (Fastify) は GET の本文を parse せず、
+		// ApiCallService は request.query だけを引数にする。echo の既定は query の
+		// 後に本文も bind して上書きするので、`GET /api/emoji?name=foo` に本文
+		// `{"name":"bar"}` を付けると bar の応答が返る。cacheSec の endpoint では
+		// それに public が付き、URL だけを鍵にする CDN が別の内容を配ってしまう
+		// (#3593)。
+		if err := b.BindPathParams(c, i); err != nil {
 			return err
 		}
+		return b.BindQueryParams(c, i)
 	}
 	err := b.DefaultBinder.Bind(i, c)
 	if req.Method == http.MethodGet || req.Method == http.MethodHead || !isAPIEndpointRoute(c) || !expectsObject(reflect.TypeOf(i)) {
