@@ -407,8 +407,11 @@ type Resolver struct {
 	// keyFetchFailures は refreshPublicKey が失敗した時刻 (userID → 時刻)。
 	// keysMu で保護する。keyFetchBackoff の説明を参照。
 	keyFetchFailures map[string]time.Time
-	clock            func() time.Time // テストで差し替える時計
-	actorTTL         time.Duration    // アクター情報の最大寿命
+	// missingExtra は user_publickey_extra に行が無かった (userID, keyId) の記録
+	// (#3610)。missingExtraKeyTTL の説明を参照。
+	missingExtra missingExtraKeys
+	clock        func() time.Time // テストで差し替える時計
+	actorTTL     time.Duration    // アクター情報の最大寿命
 	// mentionFetch は受信ノートの未知の actor の取得の同時実行数と失敗の記憶
 	// (inbox の worker 全体で共有する)。
 	mentionFetch *mentionFetchGuard
@@ -1791,6 +1794,8 @@ func (r *Resolver) refreshActor(existing *model.User, uri string, skipFeatured b
 	fields := map[string]any{
 		"lastFetchedAt": &now,
 	}
+	// 書き込みに失敗したとき、凍結の値だけは DB と同じに戻すために覚えておく。
+	wasSuspended := existing.IsSuspended
 	// actor type が変わるケース (Person ↔ Service など) を反映する。常に上書きする
 	// (TS Misskey も同様)。
 	isBot := activitypub.IsBotActorType(actor.Type.String())
@@ -1944,7 +1949,12 @@ func (r *Resolver) refreshActor(existing *model.User, uri string, skipFeatured b
 	existing.Tags = tags
 	existing.LastFetchedAt = &now
 	// UpdateUserエラーはベストエフォートで無視 (次回再試行される)
-	_ = r.userRepo.UpdateUser(existing.ID, fields)
+	if err := r.userRepo.UpdateUser(existing.ID, fields); err != nil {
+		// **凍結の値は DB に書けた値に戻す (#3610)。** inbox はこの行 (署名者) で
+		// 凍結を判定し、DB を引き直さない。書けなかった解除を手元の行だけに
+		// 残すと、DB では凍結のままの actor の activity を処理してしまう。
+		existing.IsSuspended = wasSuspended
+	}
 	// hashtag 集計を tags 差分で追従させる。remote なので isLocal=false。
 	// non-blocking hook (#1362)。
 	if r.hashtagHook != nil {
@@ -2451,6 +2461,10 @@ func (r *Resolver) cacheAssertionMethods(userID, actorURI string, ams activitypu
 	if r.publickeyExtraRepo == nil {
 		return
 	}
+	// **actor の文書を読み直したら「extra に鍵が無い」の記録を捨てる (#3610)。**
+	// 相手が鍵を足した (回転した) なら、ここで行が入る。upsert の後で捨てるので
+	// defer にする (先に捨てると、upsert までの間に引いた「無い」が残る)。
+	defer r.forgetMissingExtraKeys(userID)
 	// **読めなかったときは purge しない。** 下の purge は「actor が申告しなかった
 	// keyId を消す」= key rotation 追従だが、それが成立するのは actor の申告を
 	// 正しく読めた場合だけ。読めない形 (string や壊れた entry) で空リストを
@@ -2578,7 +2592,18 @@ func (r *Resolver) cacheAssertionMethods(userID, actorURI string, ams activitypu
 // 削除は cacheAssertionMethods 側で actor fetch 時に diff & delete するため、
 // ここでは古い行が引っかかる可能性は最小化される。
 func (r *Resolver) PublicKeyForKeyID(actorID, keyID string) (string, error) {
-	if r.publickeyExtraRepo != nil && keyID != "" {
+	// **列に入らない keyId は引くまでもなく無い (#3610)。** `user_publickey_extra.keyId`
+	// は varchar(256) (migration/000050_user_publickey_extra.up.sql、
+	// publicKeyKeyIDMaxRunes) で、cacheAssertionMethods は収まらない keyId を保存
+	// しない。NUL や不正な UTF-8 を含む keyId は repository の FindByUserAndKeyID も
+	// `storable` で弾いて not found を返すが、ここで先に弾けば列の長さも含めて
+	// 1 か所で判定できる。署名を検証する前に呼ばれるので、長い keyId で DB を
+	// 引かせ続ける経路と、否定キャッシュを埋める経路をここで閉じる (覚える必要も無い)。
+	if r.publickeyExtraRepo != nil && keyID != "" && fitsColumn(keyID, publicKeyKeyIDMaxRunes) &&
+		!r.missingExtra.known(actorID, keyID, r.clock()) {
+		// 問い合わせの前に世代を読む。問い合わせの間に actor が読み直されたら
+		// (= 鍵が足されたかもしれない)、見つからなかった結果を覚えない。
+		gen := r.missingExtra.generation()
 		row, err := r.publickeyExtraRepo.FindByUserAndKeyID(actorID, keyID)
 		if err == nil {
 			return row.KeyPEM, nil
@@ -2588,10 +2613,156 @@ func (r *Resolver) PublicKeyForKeyID(actorID, keyID string) (string, error) {
 				"actorID", actorID, "keyID", keyID, "error", err)
 			// **fallback へ落とさない** (#3121)。落とすと「その keyId の鍵は
 			// 無い」ことになり、呼び出し側が署名検証の失敗として ack する。
+			// 障害の結果は覚えない (覚えると障害が明けても「無い」が残る)。
 			return "", fmt.Errorf("%w: publickeyExtra %q/%q: %v", ErrLookupUnavailable, actorID, keyID, err)
 		}
+		r.missingExtra.remember(actorID, keyID, gen, r.clock())
 	}
 	return r.PublicKeyForActor(actorID)
+}
+
+// missingExtraKeyTTL is how long PublicKeyForKeyID remembers that
+// user_publickey_extra has no row for an (actor, keyId) (#3610).
+//
+// Misskey / Mastodon の `#main-key` は RSA の主鍵で、この表には行が無い。覚えないと
+// 受信 1 件ごとに必ず見つからない問い合わせが 1 回走る (ローカルの PostgreSQL で
+// 中央値 約 240µs)。
+//
+// **短くし、actor を読み直したら捨てる。** この表に行を足すのは
+// cacheAssertionMethods (actor の文書を読んだとき) だけで、そこで当該 actor の
+// 記録を消し、世代を進める。問い合わせの間に世代が進んでいたら覚えない。残るのは
+// 別のプロセスが行を足した場合で、その間は主鍵 (RSA) で検証される。相手が
+// Ed25519 で署名していれば検証に失敗し、**その activity は失われる** (inbox は
+// 202 を返しており、worker の署名の失敗は ack するので、相手は再送しない)。
+// 期限を 1 分にしているのはこの窓を狭くするため。
+const missingExtraKeyTTL = time.Minute
+
+// 否定キャッシュの上限 (#3610)。
+//
+// PublicKeyForKeyID は**署名を検証する前に**呼ばれ、keyId は署名ヘッダの値なので、
+// DB にある actor の URI に好きな fragment を付ければ、署名なしの要求で記録を
+// 増やせる。上限に達したら覚えない (毎回 DB を引く今の動きに戻るだけ)。
+const (
+	// missingExtraKeyMax は全体の件数。
+	missingExtraKeyMax = 10000
+	// missingExtraKeysPerActor は actor ごとの件数。正当な相手の keyId は数個しかない。
+	missingExtraKeysPerActor = 4
+	// missingExtraKeyIDMaxBytes を超える keyId は覚えない。
+	missingExtraKeyIDMaxBytes = 512
+)
+
+// missingExtraKeys remembers (userID, keyId) pairs that user_publickey_extra
+// does not have. The zero value is ready to use.
+type missingExtraKeys struct {
+	mu     sync.Mutex
+	byUser map[string]map[string]time.Time // userID → keyId → 見つからなかった時刻
+	total  int
+	// gen は forget のたびに進む。remember は問い合わせの前に読んだ値と一致する
+	// ときだけ書く。
+	gen uint64
+	// lastSweep は全体を掃いた時刻。掃くのは missingExtraKeyTTL に 1 回まで
+	// (満杯のまま毎回掃くと、mutex を握ったまま全件を走査し続ける)。
+	lastSweep time.Time
+}
+
+func (m *missingExtraKeys) known(userID, keyID string, now time.Time) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	keys := m.byUser[userID]
+	at, ok := keys[keyID]
+	if !ok {
+		return false
+	}
+	if now.Sub(at) >= missingExtraKeyTTL {
+		m.deleteLocked(userID, keyID)
+		return false
+	}
+	return true
+}
+
+func (m *missingExtraKeys) generation() uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.gen
+}
+
+func (m *missingExtraKeys) remember(userID, keyID string, gen uint64, now time.Time) {
+	if len(keyID) > missingExtraKeyIDMaxBytes {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if gen != m.gen {
+		return
+	}
+	keys := m.byUser[userID]
+	if _, ok := keys[keyID]; ok {
+		keys[keyID] = now
+		return
+	}
+	if len(keys) >= missingExtraKeysPerActor {
+		for k, at := range keys {
+			if now.Sub(at) >= missingExtraKeyTTL {
+				m.deleteLocked(userID, k)
+			}
+		}
+		if len(keys) >= missingExtraKeysPerActor {
+			return
+		}
+	}
+	if m.total >= missingExtraKeyMax {
+		if now.Sub(m.lastSweep) < missingExtraKeyTTL {
+			return
+		}
+		m.lastSweep = now
+		for uid, ks := range m.byUser {
+			for k, at := range ks {
+				if now.Sub(at) >= missingExtraKeyTTL {
+					m.deleteLocked(uid, k)
+				}
+			}
+		}
+		if m.total >= missingExtraKeyMax {
+			return
+		}
+	}
+	if m.byUser == nil {
+		m.byUser = make(map[string]map[string]time.Time)
+	}
+	keys = m.byUser[userID]
+	if keys == nil {
+		keys = make(map[string]time.Time)
+		m.byUser[strings.Clone(userID)] = keys
+	}
+	// keyId は署名ヘッダの部分文字列なので、写さないとヘッダ全体を保持し続ける。
+	keys[strings.Clone(keyID)] = now
+	m.total++
+}
+
+// forget drops every record for userID and advances the generation.
+func (m *missingExtraKeys) forget(userID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.gen++
+	m.total -= len(m.byUser[userID])
+	delete(m.byUser, userID)
+}
+
+func (m *missingExtraKeys) deleteLocked(userID, keyID string) {
+	keys := m.byUser[userID]
+	if _, ok := keys[keyID]; !ok {
+		return
+	}
+	delete(keys, keyID)
+	m.total--
+	if len(keys) == 0 {
+		delete(m.byUser, userID)
+	}
+}
+
+// forgetMissingExtraKeys drops every "no extra key" record for userID.
+func (r *Resolver) forgetMissingExtraKeys(userID string) {
+	r.missingExtra.forget(userID)
 }
 
 // ResolveActorByKeyID resolves an actor based on the keyId fragment URI.

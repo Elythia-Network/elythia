@@ -36,7 +36,7 @@ func (s *stubFedProcessor) Process(body []byte) error {
 	return nil
 }
 
-func mustEncode(t *testing.T, p queue.InboxPayload) []byte {
+func mustEncode(t testing.TB, p queue.InboxPayload) []byte {
 	t.Helper()
 	b, err := json.Marshal(p)
 	require.NoError(t, err)
@@ -146,14 +146,14 @@ func (s *stubInboxChartHook) OnInboxReceived(host string) {
 
 // signed builds a payload whose Headers/Method/Path can be re-verified
 // against the supplied private key. Mirrors what the new handler emits.
-func signedInboxPayload(t *testing.T, key *activitypub.PrivateKey, body []byte) queue.InboxPayload {
+func signedInboxPayload(t testing.TB, key *activitypub.PrivateKey, body []byte) queue.InboxPayload {
 	t.Helper()
 	return signedInboxPayloadAt(t, key, body, "https://example.com/inbox")
 }
 
 // signedInboxPayloadAt is signedInboxPayload for an arbitrary inbox URL. Path
 // carries the RequestURI (path + query) exactly as the async inbox handler does.
-func signedInboxPayloadAt(t *testing.T, key *activitypub.PrivateKey, body []byte, target string) queue.InboxPayload {
+func signedInboxPayloadAt(t testing.TB, key *activitypub.PrivateKey, body []byte, target string) queue.InboxPayload {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, target, nil)
 	req.Host = "example.com"

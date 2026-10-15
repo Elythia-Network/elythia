@@ -470,8 +470,24 @@ type genericActivity struct {
 // DB に積み上がっていた。
 //
 // signer が nil (署名なし経路 / 未配線) のときは従来どおり DB 経路に倒れる。
+//
+// signer は呼び出し側がこの job の中で DB から引いた行 (inbox では
+// Resolver.ResolveActor の戻り値) でなければならない。signer.URI が
+// activity.actor と一致するとき、凍結・削除の判定はこの行で行い、DB を
+// 引き直さない (#3610)。
 func (p *Processor) ProcessWithSigner(body []byte, signer *model.User) error {
 	return p.process(body, signer)
+}
+
+// ProcessNormalized is ProcessWithSigner for a body the caller has already
+// passed through NormalizeActivity (#3610).
+//
+// inbox の gate は actor / id を読むために同じ前処理 (配列の剥がし + Normalize +
+// decode) を済ませているので、その結果をそのまま使い、もう一度 Normalize しない。
+// NormalizedActivity は NormalizeActivity でしか中身を作れないので、正規化して
+// いない本文がこの入口を素通りすることは無い。
+func (p *Processor) ProcessNormalized(n NormalizedActivity, signer *model.User) error {
+	return p.processNormalized(n, signer)
 }
 
 // Process handles an inbound activity without signer information.
@@ -480,6 +496,32 @@ func (p *Processor) Process(body []byte) error {
 }
 
 func (p *Processor) process(body []byte, signer *model.User) error {
+	return p.processNormalized(NormalizeActivity(body), signer)
+}
+
+// NormalizedActivity is an inbound activity after the singleton-array unwrap,
+// activitypub.Normalize and decode that Process applies, done once (#3610).
+//
+// The zero value is an activity without an actor, which Process drops.
+// Fields are unexported so that only NormalizeActivity can produce one: a
+// caller cannot hand ProcessNormalized a body that skipped normalization.
+type NormalizedActivity struct {
+	// source は NormalizeActivity に渡された本文 (正規化の前の生のバイト)。
+	// 署名の検証や LD-Signature の検査に使うのはこちらで、act.raw ではない。
+	source []byte
+	act    genericActivity
+	err    error
+	// unwrappedFrom / unwrappedSize は 1 要素の配列を剥がしたときの前後の長さ
+	// (剥がしていなければ 0)。ログにだけ使う。
+	unwrappedFrom, unwrappedSize int
+}
+
+// NormalizeActivity runs the unwrap+Normalize+decode pass once.
+//
+// Normalize の失敗は err に残し、ProcessNormalized が Process と同じ扱い
+// (衝突キーは ErrUnsupportedActivity、それ以外は error) をする。
+func NormalizeActivity(body []byte) NormalizedActivity {
+	n := NormalizedActivity{source: body}
 	// Foundkey 系 fork instance は valid な AS Activity を 1 要素 JSON
 	// array で wrap して送信してくるケースがある (#1185)。AS 仕様上
 	// inbox direct POST は object 前提なので、array が来た時は剥がして
@@ -489,15 +531,42 @@ func (p *Processor) process(body []byte, signer *model.User) error {
 	// encode するが top-level の array → object 変換はしないので、
 	// object 化はここで済ませる必要がある。
 	if unwrapped, ok := tryUnwrapSingletonArray(body); ok {
+		n.unwrappedFrom, n.unwrappedSize = len(body), len(unwrapped)
+		body = unwrapped
+	}
+	normalized, err := activitypub.Normalize(body)
+	if err != nil {
+		n.err = err
+		return n
+	}
+	// Normalize は内部で json.Marshal して再エンコードするため、ここでの
+	// Unmarshal は構文エラーで失敗しない。型エラー (actor が object など) は
+	// 握り、読めたフィールドを使う。gate (Fields) と本処理は同じ値を見る。
+	_ = json.Unmarshal(normalized, &n.act)
+	n.act.raw = normalized
+	// upstream Misskey #17340: activity.actor が string IRI でなく embedded
+	// {"id": "..."} object のケースを救済する (triage #999)。
+	n.act.normalizeActor(normalized)
+	return n
+}
+
+// Source returns the body NormalizeActivity was given (before normalization).
+func (n NormalizedActivity) Source() []byte { return n.source }
+
+// Fields returns actor / id / type as Process will see them. All are "" when
+// the body could not be normalized.
+func (n NormalizedActivity) Fields() ActivityFields {
+	return ActivityFields{Actor: n.act.Actor, ID: n.act.ID, Type: n.act.Type}
+}
+
+func (p *Processor) processNormalized(n NormalizedActivity, signer *model.User) error {
+	if n.unwrappedFrom > 0 {
 		// 観測性のため発火を記録 (log message は中立的に表現、Foundkey 由来は
 		// helper / 本コメント側の doc に残す)。
 		slog.Info("federation: unwrapping singleton JSON array activity",
-			"originalSize", len(body), "unwrappedSize", len(unwrapped))
-		body = unwrapped
+			"originalSize", n.unwrappedFrom, "unwrappedSize", n.unwrappedSize)
 	}
-
-	normalized, err := activitypub.Normalize(body)
-	if err != nil {
+	if err := n.err; err != nil {
 		// **retry しても結果が変わらないものは ack する (レビュー L1)。** 衝突
 		// キーを持つ document も JSON として壊れた body も、同じ body を何度
 		// 投げ直しても同じ error になる。生で返すと inbox job が 8 回 retry して
@@ -509,16 +578,7 @@ func (p *Processor) process(body []byte, signer *model.User) error {
 		}
 		return fmt.Errorf("invalid activity json: %w", err)
 	}
-	body = normalized
-
-	// Normalize は内部で json.Marshal して再エンコードするため、ここでの
-	// Unmarshal は構文エラーで失敗しないことが保証される。
-	var act genericActivity
-	_ = json.Unmarshal(body, &act)
-	act.raw = body
-	// upstream Misskey #17340: activity.actor が string IRI でなく embedded
-	// {"id": "..."} object のケースを救済する (triage #999)。
-	act.normalizeActor(body)
+	act := n.act
 	if act.Actor == "" {
 		// 送り直しても actor は現れない。error で返すと inbox の job が再試行を
 		// 使い切ってから failed に積まれる (既定 8 回) ので、受け取って捨てる。
@@ -538,7 +598,18 @@ func (p *Processor) process(body []byte, signer *model.User) error {
 	// 届く act.Actor は、HTTP 署名の持ち主か、転送なら LD-Signature で認証された
 	// actor なので、どちらの経路もこの判定を通る。
 	if p.userRepo != nil {
-		actor, err := p.userRepo.FindByURI(act.Actor)
+		var actor *model.User
+		var err error
+		if signer != nil && signer.URI != nil && *signer.URI == act.Actor {
+			// **署名者がそのまま actor なら、引き直さない (#3610)。** signer は
+			// 同じ job の中で署名の検証のために DB から引いた行で、同じ URI を
+			// 引き直しても数ミリ秒前と同じ行が返るだけ。凍結を古い値で判定する
+			// 窓は、引き直しても残る「判定から処理までの間」と変わらない。
+			// 転送 (署名者 != actor) と署名の無い経路は今どおり DB を引く。
+			actor = signer
+		} else {
+			actor, err = p.userRepo.FindByURI(act.Actor)
+		}
 		switch {
 		case err == nil && actor != nil && actor.IsSuspended:
 			slog.Info("federation: dropping activity from suspended actor", "actor", act.Actor, "type", act.Type)
@@ -783,20 +854,7 @@ type ActivityFields struct {
 // 配列 wrap や `as:type` で読めず、gate が見ているものとずれる。
 // 取得不能 / 欠落の field は "" になる。
 func ExtractActivityFields(body []byte) ActivityFields {
-	if unwrapped, ok := tryUnwrapSingletonArray(body); ok {
-		body = unwrapped
-	}
-	normalized, err := activitypub.Normalize(body)
-	if err != nil {
-		return ActivityFields{}
-	}
-	var act genericActivity
-	// ExtractActorIRI と同じ理由で型エラーを握る。
-	if err := unmarshalIgnoringTypeErrors(normalized, &act); err != nil {
-		return ActivityFields{}
-	}
-	act.normalizeActor(normalized)
-	return ActivityFields{Actor: act.Actor, ID: act.ID, Type: act.Type}
+	return NormalizeActivity(body).Fields()
 }
 
 // SetBlockingService wires the blocking service for Block/Undo Block activities.
