@@ -142,13 +142,13 @@ func TestPollsVote_NoPoll(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "5f979967-52d9-4314-a911-1c673727f92f")
 }
 
-// failingVoteRepo causes Create to fail.
+// failingVoteRepo causes the vote insert to fail.
 type failingVoteRepo struct {
 	*testutil.MockPollVoteRepository
 }
 
-func (f *failingVoteRepo) Create(_ *model.PollVote) error {
-	return testutil.ErrNotFound
+func (f *failingVoteRepo) CreateIfNotVoted(_ *model.PollVote, _ bool) (bool, error) {
+	return false, testutil.ErrNotFound
 }
 
 func TestPollsVote_RepoError(t *testing.T) {

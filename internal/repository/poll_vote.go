@@ -8,6 +8,10 @@ import (
 // PollVoteRepository provides data access for the `poll_vote` table.
 type PollVoteRepository interface {
 	Create(v *model.PollVote) error
+	// CreateIfNotVoted inserts v unless the user already voted on the note
+	// (any choice when single, the same choice otherwise), atomically against
+	// concurrent votes by the same user. Reports whether v was inserted.
+	CreateIfNotVoted(v *model.PollVote, single bool) (bool, error)
 	FindByUserAndChoice(userID, noteID string, choice int) (*model.PollVote, error)
 	CountByUserAndNote(userID, noteID string) (int64, error)
 	ListByNoteID(noteID string) ([]*model.PollVote, error)
@@ -29,6 +33,48 @@ func NewPollVoteRepository(db *gorm.DB) PollVoteRepository {
 
 func (r *pollVoteRepository) Create(v *model.PollVote) error {
 	return r.db.Create(v).Error
+}
+
+// pollVoteLockNamespace keeps the advisory lock key of CreateIfNotVoted from
+// colliding with other features that lock on a hashed string.
+const pollVoteLockNamespace = 690
+
+// CreateIfNotVoted inserts v unless the user has already voted on the note:
+// for any choice when single is true, for the same choice otherwise. It
+// reports whether the row was inserted.
+//
+// 同時に届いた投票も含めて、単一選択では1人1票にする。単一選択は
+// (userId, noteId)では一意にできない(複数選択の投票は同じ組で複数行を持つ)ので、
+// 一意制約ではなく、利用者とノートの組のアドバイザリロックで数える側ごと
+// 直列にする。トランザクション版なので、commit / rollbackで自動的に外れる。
+func (r *pollVoteRepository) CreateIfNotVoted(v *model.PollVote, single bool) (bool, error) {
+	created := false
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(`SELECT pg_advisory_xact_lock(?, hashtext(?))`,
+			pollVoteLockNamespace, v.UserID+":"+v.NoteID).Error; err != nil {
+			return err
+		}
+		q := tx.Model(&model.PollVote{}).Where(`"userId" = ? AND "noteId" = ?`, v.UserID, v.NoteID)
+		if !single {
+			q = q.Where("choice = ?", v.Choice)
+		}
+		var n int64
+		if err := q.Count(&n).Error; err != nil {
+			return err
+		}
+		if n > 0 {
+			return nil
+		}
+		if err := tx.Create(v).Error; err != nil {
+			return err
+		}
+		created = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return created, nil
 }
 
 // FindByUserAndChoice returns the vote for the given (user, note, choice) triple.

@@ -3994,6 +3994,17 @@ func (m *MockPollVoteRepository) Create(v *model.PollVote) error {
 	return nil
 }
 
+// CreateIfNotVoted mirrors the live repo's duplicate check (not its locking).
+func (m *MockPollVoteRepository) CreateIfNotVoted(v *model.PollVote, single bool) (bool, error) {
+	for _, e := range m.Votes {
+		if e.UserID == v.UserID && e.NoteID == v.NoteID && (single || e.Choice == v.Choice) {
+			return false, nil
+		}
+	}
+	m.Votes[v.ID] = v
+	return true, nil
+}
+
 func (m *MockPollVoteRepository) FindByUserAndChoice(userID, noteID string, choice int) (*model.PollVote, error) {
 	for _, v := range m.Votes {
 		if v.UserID == userID && v.NoteID == noteID && v.Choice == choice {
