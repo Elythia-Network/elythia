@@ -2,10 +2,12 @@ package restoreop
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -297,6 +299,145 @@ type env struct {
 	mu      sync.Mutex
 	// stepHook, when set, is the failStep of the managers start makes.
 	stepHook func(to string) error
+	// recovered is closed when the recovery at start of the manager start
+	// made last has ended (Options.Recovering(false)).
+	recovered chan struct{}
+	// finals maps an opId to its journal as it was right after the command
+	// that made its step final (finalHook).
+	finalsMu sync.Mutex
+	finals   map[string][]JournalEntry
+	// replayTo, when set, is the step whose first script replays runs
+	// twice (replayStepTo).
+	replayTo string
+	// intercept, when set, fails a command before it is sent
+	// (interceptCmd).
+	intercept func(cmd redis.Cmder) error
+}
+
+// finalHook looks at the records after every Redis command and keeps the
+// journal of each one as it is when its step first becomes final: what an
+// admin page sees on the read that tells it to stop reading (Status.Final).
+type finalHook struct{ e *env }
+
+func (h finalHook) DialHook(next redis.DialHook) redis.DialHook { return next }
+
+func (h finalHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
+	return func(ctx context.Context, cmd redis.Cmder) error {
+		if err := h.e.intercepts(cmd); err != nil {
+			// 送らずに誤りを返す (時間切れなど)。
+			cmd.SetErr(err)
+			return err
+		}
+		err := next(ctx, cmd)
+		if err == nil && h.e.replays(cmd) {
+			// go-redis の送り直しを真似る: 1 回目は書けたが応答が失われ、同じ script を
+			// もう一度送った。cmd の結果は 2 回目のものになる。
+			err = next(ctx, cmd)
+		}
+		h.e.noteFinals()
+		return err
+	}
+}
+
+// replayStepTo makes the first script that moves a record to step run twice
+// (replays).
+func (e *env) replayStepTo(step string) {
+	e.finalsMu.Lock()
+	defer e.finalsMu.Unlock()
+	e.replayTo = step
+}
+
+// replayed reports whether the replay set by replayStepTo happened.
+func (e *env) replayed() bool {
+	e.finalsMu.Lock()
+	defer e.finalsMu.Unlock()
+	return e.replayTo == ""
+}
+
+// interceptCmd makes f decide, before each command is sent, whether to fail
+// it without sending it (a non-nil error).
+func (e *env) interceptCmd(f func(cmd redis.Cmder) error) {
+	e.finalsMu.Lock()
+	defer e.finalsMu.Unlock()
+	e.intercept = f
+}
+
+func (e *env) intercepts(cmd redis.Cmder) error {
+	e.finalsMu.Lock()
+	f := e.intercept
+	e.finalsMu.Unlock()
+	if f == nil {
+		return nil
+	}
+	return f(cmd)
+}
+
+// stepScriptTo reports whether cmd is the script that moves a record to
+// step.
+func stepScriptTo(cmd redis.Cmder, step string) bool {
+	if cmd.Name() != "evalsha" && cmd.Name() != "eval" {
+		return false
+	}
+	// EVALSHA sha 3 key key key from to ...
+	args := cmd.Args()
+	return len(args) >= 8 && fmt.Sprint(args[7]) == step
+}
+
+func (e *env) replays(cmd redis.Cmder) bool {
+	e.finalsMu.Lock()
+	defer e.finalsMu.Unlock()
+	if e.replayTo == "" || !stepScriptTo(cmd, e.replayTo) {
+		return false
+	}
+	e.replayTo = ""
+	return true
+}
+
+func (h finalHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return func(ctx context.Context, cmds []redis.Cmder) error {
+		err := next(ctx, cmds)
+		h.e.noteFinals()
+		return err
+	}
+}
+
+func (e *env) noteFinals() {
+	const prefix = "p:elythia:maintenance:restore:"
+	e.finalsMu.Lock()
+	defer e.finalsMu.Unlock()
+	for _, k := range e.mr.Keys() {
+		opID, ok := strings.CutPrefix(k, prefix)
+		if !ok || strings.Contains(opID, ":") {
+			continue
+		}
+		if _, seen := e.finals[opID]; seen {
+			continue
+		}
+		step := e.mr.HGet(k, "step")
+		if !Final(step) {
+			continue
+		}
+		raw, _ := e.mr.List(k + ":journal")
+		journal := []JournalEntry{}
+		for _, line := range raw {
+			var j JournalEntry
+			if json.Unmarshal([]byte(line), &j) == nil {
+				journal = append(journal, j)
+			}
+		}
+		e.finals[opID] = journal
+	}
+}
+
+// finalJournal returns the journal of opID as it was when its step became
+// final.
+func (e *env) finalJournal(opID string) []JournalEntry {
+	e.t.Helper()
+	e.finalsMu.Lock()
+	defer e.finalsMu.Unlock()
+	j, ok := e.finals[opID]
+	require.True(e.t, ok, "the step of %s has not become final", opID)
+	return j
 }
 
 // slot is the job slot of the backup service.
@@ -330,7 +471,8 @@ func newEnv(t *testing.T, mutate ...func(*Options)) *env {
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
-	e := &env{t: t, mr: mr, rdb: rdb, db: newFakeDB()}
+	e := &env{t: t, mr: mr, rdb: rdb, db: newFakeDB(), finals: map[string][]JournalEntry{}}
+	rdb.AddHook(finalHook{e})
 	e.store = NewStore(rdb, "p:", nil)
 	e.maint = maintmode.NewStore(rdb, rdb, "p:")
 	e.opts = Options{
@@ -376,7 +518,22 @@ func newEnv(t *testing.T, mutate ...func(*Options)) *env {
 		f(&e.opts)
 	}
 	e.start()
+	// 起動時の回復を終えてから返す。回復は別の goroutine で Current を読むので、
+	// 待たずに記録を書くテストでは、遅れて走った回復がその記録を「前の実行が残した
+	// もの」として片付け、段を書き換えることがあった (#3600)。
+	e.waitRecovered()
 	return e
+}
+
+// waitRecovered waits for the recovery at start of the current manager to
+// end.
+func (e *env) waitRecovered() {
+	e.t.Helper()
+	select {
+	case <-e.recovered:
+	case <-time.After(10 * time.Second):
+		e.t.Fatal("the recovery at start did not end")
+	}
 }
 
 // start starts a manager (again, after stop, for the recovery tests).
@@ -385,7 +542,20 @@ func (e *env) start() {
 	e.slot = &slot{}
 	e.opts.Acquire = e.slot.acquire
 	e.ctx, e.cancel = context.WithCancel(context.Background())
-	e.m = New(e.opts)
+	o := e.opts
+	recovered := make(chan struct{})
+	var once sync.Once
+	told := e.opts.Recovering
+	o.Recovering = func(v bool) {
+		if told != nil {
+			told(v)
+		}
+		if !v {
+			once.Do(func() { close(recovered) })
+		}
+	}
+	e.recovered = recovered
+	e.m = New(o)
 	e.m.failStep = e.stepHook
 	e.m.Start(e.ctx)
 	e.t.Cleanup(func() {

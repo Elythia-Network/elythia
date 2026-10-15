@@ -97,8 +97,8 @@ func (m *Manager) recoverRecord(ctx context.Context, rec *Record) {
 			if st, err := m.readMaintenance(ctx); err == nil && st != nil && st.OpID == rec.OpID {
 				m.resumeCurrent(ctx, rec)
 			}
-			m.record(ctx, rec.OpID, rec.Step, StepDone)
-			m.journal(ctx, rec.OpID, StepDone, "%s is marked as kept by this finished operation; not reverting", rec.Before)
+			m.recordWithLine(ctx, rec.OpID, rec.Step, StepDone,
+				say(StepDone, "%s is marked as kept by this finished operation; not reverting", rec.Before))
 			return
 		case op == rec.OpID && state == backup.MarkActive:
 		case op == rec.OpID && state == backup.MarkHanded:
@@ -129,8 +129,9 @@ func (m *Manager) recoverRecord(ctx context.Context, rec *Record) {
 		if rec.Step == StepPreparing {
 			final = StepFailed
 		}
-		m.record(ctx, rec.OpID, rec.Step, final, "error", "the backup service restarted before the switch")
-		m.journal(ctx, rec.OpID, final, "%s; the current database %s was not changed", targetFate(rec), rec.Database)
+		m.recordWithLine(ctx, rec.OpID, rec.Step, final,
+			say(final, "%s; the current database %s was not changed", targetFate(rec), rec.Database),
+			"error", "the backup service restarted before the switch")
 		return
 	case StepResuming:
 		// 名前の組が入れ替えた後のものか確かめる。記録だけを信じると、戻す処理の記録が
@@ -152,8 +153,7 @@ func (m *Manager) recoverRecord(ctx context.Context, rec *Record) {
 		if st == nil || st.OpID != rec.OpID {
 			// 判定役が状態を消した後で落ちた。全プロセスが戻した DB で動いている。
 			m.markFinished(ctx, rec)
-			m.record(ctx, rec.OpID, StepResuming, StepDone)
-			m.journal(ctx, rec.OpID, StepDone, "the processes already serve the restored database")
+			m.recordWithLine(ctx, rec.OpID, StepResuming, StepDone, say(StepDone, "the processes already serve the restored database"))
 			return
 		}
 		if st.Phase != maintmode.PhaseResuming {
