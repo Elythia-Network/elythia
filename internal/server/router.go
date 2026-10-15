@@ -1580,6 +1580,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// `auth.Authenticate()` (global) より後に走る** — 逆だと UserContextKey が
 	// まだ積まれておらず、常に何もしない middleware になる。
 	api.Use(middleware.RecordClientIP(ipLogService))
+	// read:accountを持たないapp tokenは、kindも資格情報の要求も無いendpoint
+	// (notes/showなど)では匿名として扱う。rate limiterとIPの記録は利用者で
+	// 数えたいので、その後ろに置く。kindを持つendpointではRequireScopeなどの
+	// gateが利用者を戻す。
+	api.Use(middleware.HideAppUserWithoutRead())
 
 	// Meta endpoint (public)
 	metaHandler := meta.NewHandler(s.config, metaRepo)
@@ -2378,7 +2383,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// requireCredential を外して endpoint 固有の CREDENTIAL_REQUIRED を投げるので、
 	// 汎用 middleware に任せると error id が食い違う。認証と「自分のトークン以外は
 	// 403」はどちらも handler 側で見る。
-	api.POST("/i/revoke-token", iHandler.RevokeToken)
+	// どの権限のapp tokenでも自分自身は失効できるよう、HideAppUserWithoutReadが
+	// 外した利用者をAdmitAppUserで戻す。
+	api.POST("/i/revoke-token", iHandler.RevokeToken, middleware.AdmitAppUser())
 	api.POST("/i/update-email", iHandler.UpdateEmail, middleware.RequireAuth(), middleware.RequireSecure())
 	api.POST("/verify-email", iHandler.VerifyEmail)
 	api.POST("/i/move", iHandler.Move, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireSecure())
@@ -4649,7 +4656,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		{"i.totpReplayGuard", iHandler.HasTOTPReplayGuard(),
 			"2FA gate を持つ 9 endpoint と i/2fa/done で有効な TOTP コードを再利用でき、バックアップコードの単回予約も効かなくなる"},
 		{"i.twoFAPendingGuard", iHandler.HasTwoFAPendingGuard(),
-			"i/2fa/register の仮の秘密が期限なく残り、token だけで i/2fa/done の 6 桁を総当たりできる"},
+			"i/2fa/register の仮の秘密に期限と試行回数の上限が掛からない"},
 		{"i.authInvalidator", iHandler.HasAuthInvalidator(),
 			"revoke-token / regenerate-token / delete-account / update の後も古い token が auth cache の TTL のあいだ通る"},
 		{"admin.userTokenInvalidator", adminHandler.HasUserTokenInvalidator(),
