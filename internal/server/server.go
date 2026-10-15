@@ -532,6 +532,15 @@ func accessLogConfig(out io.Writer) echomw.RequestLoggerConfig {
 	}
 }
 
+// selfEncodedRoutes are the routes whose handlers negotiate Content-Encoding
+// themselves, so the global gzip middleware must not wrap them (it does not
+// look at an existing Content-Encoding and would compress the body again).
+//
+//   - `/api/emojis`: 一覧が変わるまで gzip 済みの本文を使い回す (#3593)
+var selfEncodedRoutes = map[string]bool{
+	"/api/emojis": true,
+}
+
 // gzipConfig returns the GzipConfig used by the global middleware stack.
 // Shared with gzip_test.go so production and tests stay in sync.
 func gzipConfig() echomw.GzipConfig {
@@ -543,7 +552,7 @@ func gzipConfig() echomw.GzipConfig {
 			// 通信で gzip すると壊れる。
 			// /backup-download は数 GB の dump をそのまま渡す。gzip し直すと CPU を
 			// 使い、Content-Length が消えて進捗が出ず、Range の応答まで包まれる。
-			return c.Path() == "/streaming" || c.Path() == "/backup-download"
+			return c.Path() == "/streaming" || c.Path() == "/backup-download" || selfEncodedRoutes[c.Path()]
 		},
 		Level:     gzip.DefaultCompression,
 		MinLength: 1024,
