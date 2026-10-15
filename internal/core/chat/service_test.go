@@ -553,6 +553,26 @@ func TestIsRoomMember_Owner(t *testing.T) {
 	assert.True(t, ok, "owner should implicitly be a member")
 }
 
+func TestIsRoomMember_DBErrorIsNotNonMember(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(repo *testutil.MockChatRepository)
+	}{
+		{name: "room lookup fails", setup: func(repo *testutil.MockChatRepository) { repo.FindRoomErr = errors.New("db down") }},
+		{name: "membership lookup fails", setup: func(repo *testutil.MockChatRepository) { repo.FindMembershipErr = errors.New("db down") }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, repo, _ := newSvc(t)
+			seedRoom(t, repo, "r1", "alice", "bob")
+			tc.setup(repo)
+			ok, err := svc.IsRoomMember("bob", "r1")
+			require.Error(t, err)
+			assert.False(t, ok)
+		})
+	}
+}
+
 func TestIsRoomMember_NonMember(t *testing.T) {
 	svc, repo, _ := newSvc(t)
 	seedRoom(t, repo, "r1", "alice")
