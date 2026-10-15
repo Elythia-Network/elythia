@@ -216,11 +216,16 @@ func (s *Service) Vote(user *model.User, noteID string, choice int) error {
 
 	// pollVoted を note の stream topic に publish して subscribe 中の
 	// frontend (note 詳細画面 / timeline) が reload なしで count を更新
-	// できるようにする (#690)。Misskey TS の PollService.vote と同じ payload。
+	// できるようにする (#690)。wire 上の形は Misskey TS の PollService.vote と
+	// 同じ {choice, userId} だが、userId を本人以外の購読者へそのまま流すと、
+	// 匿名の購読者にも誰がどれに入れたかが分かる。購読者ごとの差し替えは
+	// stream の配信段 (Dispatcher.forwardNoteEvent) で行い、本人以外には
+	// userId の代わりに voteId を載せる。voteId は購読者には直接は流れない。
 	if s.eventPub != nil {
 		s.eventPub.PublishToNoteStream(target.ID, "pollVoted", map[string]any{
 			"choice": choice,
 			"userId": user.ID,
+			"voteId": v.ID,
 		})
 	}
 
