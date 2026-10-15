@@ -150,6 +150,9 @@ jobs:
       - name: check-spdx self test
         run: node --test scripts/check-spdx.test.mjs
 
+      - name: precompress self test
+        run: node --test scripts/precompress.test.mjs
+
       - name: SPDX headers
         run: node scripts/check-spdx.mjs --ci
 

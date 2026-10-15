@@ -1097,10 +1097,18 @@ make docker-update   # Docker Compose 構成
 段階的に実行したい場合は分解できる。
 
 ```bash
-make pull            # 本体 + プラグイン
-make uds-rebuild     # フロントエンド + イメージ (docker 構成では docker-rebuild)
-make uds-restart     # 再起動 + 配信アセットの検証 (同 docker-restart)
+make pull                  # 本体 + プラグイン
+make uds-rebuild           # フロントエンド + イメージ (docker 構成では docker-rebuild)
+make uds-restart           # 再起動 + 配信アセットの検証 (同 docker-restart)
+make frontend-precompress  # 事前圧縮 (.br / .gz) を足す。再起動の後でよい (#3593)
 ```
+
+`make frontend-precompress` は、`frontend/built` の JS / CSS などに brotli と gzip で圧縮したファイル (`.br` / `.gz`) を足す。Elythia は `Accept-Encoding` に応じてそれをそのまま返し、無いファイルはその場で gzip する。**ビルドの中では圧縮しない** — 圧縮には 8 コアで約 1 分かかり、ビルドの中に入れると下の 404 の窓がその分延びる。再起動の後に流せば、窓は今までと同じ長さで済み、圧縮が終わるまではその場の gzip で配信される。書き込みは一時ファイルからの rename なので、作りかけのファイルは配信されない。途中で止めても、もう一度流せば残りだけを作る。対象は名前に内容の hash が付いたファイルだけ (`manifest.json` や `loader/*` には作らず、作っても使わない)。
+
+- `make uds-update` は再起動の後にこれを呼ぶ。**圧縮が失敗しても `uds-update` は失敗にしない** (警告を出すだけ)。反映は済んでいて、配信はその場の gzip で続くので、原因を直して `make frontend-precompress` だけをやり直せばよい
+- `uds-rebuild` と `uds-restart` を分けて流すときは、`uds-restart` の後に `make frontend-precompress` も流す。流さなくても配信は壊れないが、新しいビルドのファイルはその場の gzip のままになる
+- 圧縮の間 (8 コアで約 1 分)、ホストの CPU をほぼ全コア使う。本番のサーバーと同じホストで流すなら、負荷の低い時間に流す
+- `docker-update` は呼ばない (使うなら手で流す)
 
 **フロントエンドのビルドは配信中のディレクトリを直接作り直す** (`packages/frontend/build.ts` が出力先を消してから作る)。ビルド開始から再起動完了までフロントエンドは 404 になる。#2885 の事故では、ビルド完了 (13:02:52) から再起動 (13:12:36) まででも **9 分 44 秒**、ビルド開始からならさらに長い窓ができた。**ビルドが失敗した場合はその窓が閉じない** — 配信物が消えたまま残るので、成功するまで直すこと。無停止で入れ替えたい場合は別ディレクトリにビルドして差し替える構成が要る。
 
