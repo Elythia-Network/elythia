@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync/atomic"
@@ -18,12 +19,17 @@ import (
 )
 
 // reportCounter counts the report writes a Supervisor sends to Redis, the
-// state reads, and the judge lock scripts.
+// state reads, and the judge lock scripts. While failReports is set, it fails
+// the report writes without sending them.
 type reportCounter struct {
-	n          atomic.Int32
-	stateReads atomic.Int32
-	judgeLocks atomic.Int32
+	n           atomic.Int32
+	stateReads  atomic.Int32
+	judgeLocks  atomic.Int32
+	failReports atomic.Bool
 }
+
+// errReportWrite is the error a failed report write returns in the tests.
+var errReportWrite = errors.New("LOADING the server is loading")
 
 func (h *reportCounter) DialHook(next redis.DialHook) redis.DialHook { return next }
 func (h *reportCounter) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
@@ -49,6 +55,18 @@ func (h *reportCounter) ProcessPipelineHook(next redis.ProcessPipelineHook) redi
 		for _, c := range cmds {
 			if c.Name() == "hset" && strings.Contains(fmt.Sprint(c.Args()[1]), ":proc:") {
 				h.n.Add(1)
+				// 報告の書き込みだけを、送らずに失敗させる。miniredis の SetError は
+				// MULTI も誤りにし、go-redis は MULTI が誤りだと残りの応答を読まずに
+				// 接続をプールへ戻す。次にその接続を使ったコマンド (テストの Reports の SCAN) が、
+				// SetError を戻した後に miniredis が処理した前の HSET の応答 (":0") を読んで
+				// 落ちていた (#3602)。本物の Redis は LOADING の間も MULTI を受け付けるので、
+				// LOADING による失敗ではこの形にならない。
+				if h.failReports.Load() {
+					for _, failed := range cmds {
+						failed.SetErr(errReportWrite)
+					}
+					return errReportWrite
+				}
 				break
 			}
 		}
@@ -61,7 +79,6 @@ func (h *reportCounter) ProcessPipelineHook(next redis.ProcessPipelineHook) redi
 type idleRig struct {
 	sup     *Supervisor
 	store   *maintmode.Store
-	mr      *miniredis.Miniredis
 	rc      *redis.Client
 	reports *reportCounter
 }
@@ -99,7 +116,7 @@ func newIdleRigWith(t *testing.T, poll, idle time.Duration, prepare func(*maintT
 	}
 	sup.maint.start()
 	t.Cleanup(func() { sup.maint.stop(context.Background()) })
-	return &idleRig{sup: sup, store: store, mr: mr, rc: rc, reports: reports}
+	return &idleRig{sup: sup, store: store, rc: rc, reports: reports}
 }
 
 // enterSilently writes a maintenance state without publishing the hint, as
@@ -217,9 +234,9 @@ func TestMaintenance_FailedReportIsRetriedAtTheShortInterval(t *testing.T) {
 	ctx := context.Background()
 	require.Equal(t, time.Hour, m.interval())
 
-	rig.mr.SetError("LOADING the server is loading")
+	rig.reports.failReports.Store(true)
 	m.report(ctx)
-	rig.mr.SetError("")
+	rig.reports.failReports.Store(false)
 	assert.Equal(t, 20*time.Millisecond, m.interval(), "a failed write keeps the idle interval")
 
 	before := report(t, rig.store).UpdatedAt
