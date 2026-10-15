@@ -264,3 +264,11 @@ func TestQueueStatsPublisher_LogCapAtMax(t *testing.T) {
 	}
 	assert.Equal(t, QueueStatsLogMax, len(p.Log(0)))
 }
+
+// TestQueueStatsPublisher_DefaultIntervalMatchesUpstream fixes the default
+// interval to the one of Misskey's QueueStatsService (10 seconds, #3592).
+func TestQueueStatsPublisher_DefaultIntervalMatchesUpstream(t *testing.T) {
+	p := NewQueueStatsPublisher(&stubQueueInspector{}, &capturePubSub{}, 0)
+	assert.Equal(t, 10*time.Second, p.interval)
+	assert.Equal(t, 10*time.Second, DefaultQueueStatsInterval)
+}

@@ -60,11 +60,19 @@ type QueueStatsPublisher struct {
 // QueueStatsLogMax は requestLog 応答で返す最大件数。TS 本家と同じ 200。
 const QueueStatsLogMax = 200
 
+// DefaultQueueStatsInterval is how often the queue stats are collected and
+// published when NewQueueStatsPublisher is given no interval. It is the
+// interval of Misskey's QueueStatsService.
+//
+// 以前は 3 秒で、待機中の Redis の往復の約 2 割を占めていた (#3592)。
+// requestLog の 200 件が覆う時間も本家と同じ約 33 分になる。
+const DefaultQueueStatsInterval = 10 * time.Second
+
 // NewQueueStatsPublisher constructs a QueueStatsPublisher. interval<=0 は
-// デフォルト (3秒) を使用する。
+// DefaultQueueStatsInterval を使用する。
 func NewQueueStatsPublisher(inspector QueueInspector, pub PubSubPublisher, interval time.Duration) *QueueStatsPublisher {
 	if interval <= 0 {
-		interval = 3 * time.Second
+		interval = DefaultQueueStatsInterval
 	}
 	return &QueueStatsPublisher{
 		inspector:     inspector,
