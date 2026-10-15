@@ -17,6 +17,10 @@ var PluginRouteDefaultLimit = EndpointLimit{Duration: 10 * time.Minute, Max: 600
 // `/api` の endpoint 名と衝突しない名前にする。
 const URLPreviewRateLimitKey = "@url-preview"
 
+// OAuthAuthorizeRateLimitKey is the DefaultEndpointLimits entry of
+// `GET /oauth/authorize`.
+const OAuthAuthorizeRateLimitKey = "@oauth-authorize"
+
 // DefaultEndpointLimits defines per-endpoint rate limits matching
 // Misskey TS upstream. Endpoints not listed here have no rate limit.
 //
@@ -45,6 +49,13 @@ var DefaultEndpointLimits = map[string]*EndpointLimit{
 	// ごとに絞る。画面はノートに出た URL ごとに 1 回読む (結果は 1 時間覚える)
 	// ので、タイムラインを流し読みしても届かない量にする。upstream に上限は無い。
 	URLPreviewRateLimitKey: {Duration: 10 * time.Minute, Max: 300},
+
+	// ── OAuth (Elythia 独自) ───────────────────────────
+	// `GET /oauth/authorize` (`/api` の外なので RequireIPRateLimit で掛ける)。
+	// 1 回ごとに client_id の文書をサーバーから取りに行き、承認の待ちを Redis に
+	// 置く。正規の利用は連携のたびに 1 回なので、同じ接続元から 10 分に 60 回は
+	// 普通は起きない。
+	OAuthAuthorizeRateLimitKey: {Duration: 10 * time.Minute, Max: 60},
 
 	// ── Bubble Game ────────────────────────────────────
 	"bubble-game/register": {Duration: time.Hour, Max: 120, MinInterval: 30 * time.Second},
@@ -210,11 +221,10 @@ var DefaultEndpointLimits = map[string]*EndpointLimit{
 	"signup-application/status": {Duration: time.Hour, Max: 30},
 
 	// ── App / 旧来の認可 (Elythia 独自の上限) ──────────
-	// どちらも credential 無しで叩けて、1 回ごとに `app` / `auth_session` の行を
-	// 1 つ作る。**upstream に上限は無い** (`app/create.ts` /
-	// `auth/session/generate.ts` の `meta` に `limit` が無い) ので意図的な乖離。
-	// 正規のクライアントはログインのたびに app/create と session/generate を
-	// 1 回ずつ呼ぶだけなので、同じ接続元から 1 時間に数十回の登録は普通は起きない。
+	// どちらも 1 回ごとに `app` / `auth_session` の行を 1 つ作るので、回数に上限を
+	// 置く (本家は上限なし。意図的な乖離)。正規のクライアントはログインのたびに
+	// app/create と session/generate を 1 回ずつ呼ぶだけなので、同じ接続元から
+	// 1 時間に数十回の登録は普通は起きない。
 	"app/create":            {Duration: time.Hour, Max: 30},
 	"auth/session/generate": {Duration: time.Hour, Max: 60},
 

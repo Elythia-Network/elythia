@@ -3,6 +3,7 @@ package oauth
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -93,6 +94,43 @@ func TestDiscoverClientInformation_JSONMetadata(t *testing.T) {
 	assert.Equal(t, srv.URL+"/icon.png", info.Logo)
 	assert.Contains(t, info.RedirectURIs, srv.URL+"/cb")
 	assert.Contains(t, info.RedirectURIs, srv.URL+"/relcb")
+}
+
+// The name and logo kept in the authorize transaction are bounded, whatever
+// the size of the client document.
+func TestDiscoverClientInformation_BoundsNameAndLogo(t *testing.T) {
+	cases := map[string]struct {
+		name, logoPath string
+		wantName       string
+		wantLogo       bool
+	}{
+		"within the limits": {name: strings.Repeat("あ", maxClientNameRunes), logoPath: "/icon.png",
+			wantName: strings.Repeat("あ", maxClientNameRunes), wantLogo: true},
+		"over the limits": {name: strings.Repeat("あ", maxClientNameRunes+1000), logoPath: "/" + strings.Repeat("a", maxClientLogoBytes),
+			wantName: strings.Repeat("あ", maxClientNameRunes), wantLogo: false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			var srvURL string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"client_id": "` + srvURL + `/", "client_uri": "` + srvURL + `/",
+					"client_name": "` + tc.name + `", "logo_uri": "` + tc.logoPath + `",
+					"redirect_uris": ["` + srvURL + `/cb"]}`))
+			}))
+			defer srv.Close()
+			srvURL = srv.URL
+
+			info, err := discoverClientInformation(testClient(), srv.URL+"/")
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantName, info.Name)
+			if tc.wantLogo {
+				assert.Equal(t, srv.URL+tc.logoPath, info.Logo)
+			} else {
+				assert.Empty(t, info.Logo)
+			}
+		})
+	}
 }
 
 func TestDiscoverClientInformation_JSONClientIDMismatch(t *testing.T) {

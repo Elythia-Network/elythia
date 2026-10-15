@@ -120,6 +120,24 @@ func TestRequireIPRateLimit_URLPreview(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
+// `GET /oauth/authorize` は匿名で外部への取得と Redis への保存を起こすので、
+// 接続元ごとの上限が表に載っていること。
+func TestRequireIPRateLimit_OAuthAuthorize(t *testing.T) {
+	limit, ok := DefaultEndpointLimits[OAuthAuthorizeRateLimitKey]
+	require.True(t, ok)
+	assert.Equal(t, 10*time.Minute, limit.Duration)
+	assert.Equal(t, 60, limit.Max)
+
+	store := &mockLimitStore{}
+	rl := NewRateLimiter(store, true, DefaultEndpointLimits)
+	e, h := setupEcho(rl)
+	rec := doRequest(e, RequireIPRateLimit(rl, OAuthAuthorizeRateLimitKey), h, "/oauth/authorize", nil)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	if assert.Len(t, store.calls, 1, "`/oauth/authorize` の要求を数えていない") {
+		assert.Contains(t, store.calls[0].Key, OAuthAuthorizeRateLimitKey)
+	}
+}
+
 // プラグインのルートには、表に無くても既定の上限が掛かること。peer の受け口は除く。
 func TestMiddleware_PluginRoutesGetDefaultLimit(t *testing.T) {
 	store := &mockLimitStore{}

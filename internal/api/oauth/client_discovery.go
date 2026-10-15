@@ -8,12 +8,23 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/net/html"
 )
 
 // maxClientDocBytes caps how much of the client_id document we read.
 const maxClientDocBytes = 1 << 20 // 1 MiB
+
+// Caps on the discovered name and logo URL. They are kept in the authorize
+// transaction (Redis, cacheTTL) and rendered on the consent page.
+//
+// 承認の待ちに置く値の大きさを、文書の大きさによらず一定に収める。名前は表示に
+// 足りる長さで切り、切ると意味を失うロゴの URL は長すぎれば出さない。
+const (
+	maxClientNameRunes = 256
+	maxClientLogoBytes = 2048
+)
 
 // errInvalidClient indicates the client_id or its discovered metadata is
 // invalid. Surfaced to the caller as an invalid_request authorization error.
@@ -131,7 +142,20 @@ func discoverClientInformation(httpClient *http.Client, id string) (*clientInfo,
 	if info.Name == "" {
 		info.Name = id
 	}
+	info.Name = truncateRunes(info.Name, maxClientNameRunes)
+	if len(info.Logo) > maxClientLogoBytes {
+		info.Logo = ""
+	}
 	return info, nil
+}
+
+// truncateRunes returns s cut to at most n runes.
+func truncateRunes(s string, n int) string {
+	if utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	r := []rune(s)
+	return string(r[:n])
 }
 
 // applyJSONMetadata parses IndieAuth JSON client metadata into info, enforcing
