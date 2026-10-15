@@ -133,6 +133,11 @@ type Server struct {
 	shutdownOnce  sync.Once
 	shutdownErr   error
 
+	// outboundTr は外向きの HTTP で共有する SSRF-safe な Transport
+	// (outboundTransport)。初めて使うときに 1 度だけ作る (#3591)。
+	outboundTrOnce sync.Once
+	outboundTr     *http.Transport
+
 	// reactionFlushWorkerはqueue roleの定期enqueue loop。field化はconstructor
 	// rollbackをsleep無しで検証し、起動前にownershipを登録するため。
 	reactionFlushWorker   func(context.Context, func() error)

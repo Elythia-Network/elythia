@@ -95,7 +95,7 @@ func (s *Server) setupPlugins(api *echo.Group, plugins []plugin.Definition, open
 			// **共通の outbound 設定を通す (#3037)。** プラグインが自分で
 			// `&http.Client{}` を作ると SSRF ガードも運営者の proxy 設定も
 			// 効かず、そのプラグインだけがサーバーの素の IP で外へ出る。
-			httpClient: s.outboundClient(pluginHTTPTimeout),
+			httpClient: s.isolatedOutboundClient(pluginHTTPTimeout),
 			// **プラグイン名で絞った口だけを渡す (#3470)。** 名前を受け取る
 			// 口を渡すと、他のプラグインの値を名指しで読めてしまう。
 			secrets: s.pluginSecretService().ForPlugin(def.Name),

@@ -200,3 +200,16 @@ func TestRemoteCheckAdapter_Lookups(t *testing.T) {
 	assert.Nil(t, a.deps.Delivery)
 	assert.Nil(t, a.deps.Breaker)
 }
+
+// 診断は配送の idle の接続を使い回さない (#3591)。使い回すと、相手の DNS や
+// 証明書が直前に壊れても、張ってあった接続で通って「接続できる」と出る。
+func TestRemoteCheckAdapter_DialsFreshConnections(t *testing.T) {
+	s := &Server{config: &config.Config{}}
+	a := s.newRemoteCheckAdapter(remoteCheckSources{})
+
+	tr, ok := a.deps.Client.Transport.(*http.Transport)
+	require.True(t, ok)
+	assert.True(t, tr.DisableKeepAlives, "every diagnosis request dials, resolves and handshakes again")
+	assert.NotSame(t, s.outboundTransport(), tr, "the diagnosis does not draw from the shared delivery pool")
+	assert.Equal(t, remoteCheckHTTPTimeout, a.deps.Client.Timeout)
+}
