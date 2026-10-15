@@ -18,6 +18,12 @@ function item(id: string) {
 	return { id };
 }
 
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>(r => { resolve = r; });
+	return { promise, resolve };
+}
+
 // **フィクスチャは ASC (古い順) で書く。** `sinceId` だけを送るページングは
 // バックエンドが昇順で返す (mk-go `internal/repository/pagination.go` / upstream
 // `QueryService.makePaginationQuery`)。降順のフィクスチャで書くと、production の
@@ -367,5 +373,101 @@ describe('Paginator.fetchNewer の起点', () => {
 		h.api.mockResolvedValueOnce([item('n6')]);
 		await p.fetchNewer({ toQueue: false });
 		expect(p.items.value.map(x => x.id)).toEqual(['n6', 'n5', 'n9']);
+	});
+});
+
+describe('Paginator.fetchNewer の同時要求', () => {
+	beforeEach(() => h.api.mockReset());
+
+	test.each([
+		['表示中', false],
+		['非表示または先頭外', true],
+	] as const)('ポーリングと投稿通知を同じ取得にまとめ、応答後に追随取得する (%s)', async (_state, toQueue) => {
+		const p = await loaded(['n000']);
+		const firstResponse = deferred<unknown>();
+		const followupResponse = deferred<unknown>();
+		h.api.mockImplementationOnce(() => firstResponse.promise)
+			.mockImplementationOnce(() => followupResponse.promise);
+
+		// 10 秒ポーリングと notePosted が、同じ一覧・cursor・表示状態で重なる。
+		const polling = p.fetchNewer({ toQueue });
+		const notePosted = p.fetchNewer({ toQueue });
+
+		// init の 1 回を除き、同条件の API 要求は 1 本だけにする。
+		expect(h.api).toHaveBeenCalledTimes(2);
+		expect(lastRequest().sinceId).toBe('n000');
+
+		// 最初の応答が要求開始時点の note までしか含まなくても、後続要求を
+		// 捨てず、新しい cursor からの 1 回で取りこぼしを拾う。
+		firstResponse.resolve([item('n001'), item('n002')]);
+		await vi.waitFor(() => expect(h.api).toHaveBeenCalledTimes(3));
+		expect(lastRequest().sinceId).toBe('n002');
+		followupResponse.resolve([item('n003')]);
+
+		await Promise.all([polling, notePosted]);
+		if (toQueue) {
+			expect(p.queuedAheadItemsCount.value).toBe(3);
+			p.releaseQueue();
+		}
+		expect(p.items.value.map(x => x.id)).toEqual(['n003', 'n002', 'n001', 'n000']);
+	});
+
+	test('検索条件が変わったら別の取得として開始する', async () => {
+		const p = await loaded(['n000']);
+		const firstResponse = deferred<unknown>();
+		const changedResponse = deferred<unknown>();
+		h.api.mockImplementationOnce(() => firstResponse.promise)
+			.mockImplementationOnce(() => changedResponse.promise);
+
+		const original = p.fetchNewer({ toQueue: false });
+		p.searchQuery.value = 'new condition';
+		const changed = p.fetchNewer({ toQueue: false });
+
+		expect(h.api).toHaveBeenCalledTimes(3);
+		expect(lastRequest().search).toBe('new condition');
+
+		changedResponse.resolve([item('n002')]);
+		await changed;
+		firstResponse.resolve([item('n001')]);
+		await original;
+
+		expect(p.items.value.map(x => x.id)).toEqual(['n002', 'n000']);
+	});
+
+	test('reload 完了後に返った古い世代の取得結果を一覧へ混ぜない', async () => {
+		const p = await loaded(['n000']);
+		const oldResponse = deferred<unknown>();
+		h.api.mockImplementationOnce(() => oldResponse.promise)
+			.mockResolvedValueOnce([item('n100')]);
+
+		const oldFetch = p.fetchNewer({ toQueue: false });
+		await p.reload();
+		oldResponse.resolve([item('n001')]);
+		await oldFetch;
+
+		expect(p.items.value.map(x => x.id)).toEqual(['n100']);
+	});
+
+	test('reload 前の取得が保留中でも新世代の同条件要求を別に開始する', async () => {
+		const p = await loaded(['n000']);
+		const oldResponse = deferred<unknown>();
+		const newResponse = deferred<unknown>();
+		h.api.mockImplementationOnce(() => oldResponse.promise)
+			.mockResolvedValueOnce([item('n100')])
+			.mockImplementationOnce(() => newResponse.promise);
+
+		const oldFetch = p.fetchNewer({ toQueue: false });
+		await p.reload();
+		const newFetch = p.fetchNewer({ toQueue: false });
+		const callsWhileOldFetchIsPending = h.api.mock.calls.length;
+		const newSinceId = lastRequest().sinceId;
+
+		newResponse.resolve([item('n101')]);
+		oldResponse.resolve([item('n001')]);
+		await Promise.all([oldFetch, newFetch]);
+
+		expect(callsWhileOldFetchIsPending).toBe(4);
+		expect(newSinceId).toBe('n100');
+		expect(p.items.value.map(x => x.id)).toEqual(['n101', 'n100']);
 	});
 });

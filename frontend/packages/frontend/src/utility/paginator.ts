@@ -28,6 +28,17 @@ type AbsEndpointType = {
 	res: unknown;
 };
 
+type FetchNewerOptions<Req> = {
+	toQueue?: boolean;
+	sinceId?: string;
+	params?: Partial<Req>;
+};
+
+type InFlightFetchNewer = {
+	promise: Promise<void>;
+	requestedAgain: boolean;
+};
+
 type FilterByEpRes<E extends Record<string, AbsEndpointType>> = {
 	[K in keyof E]: E[K]['res'] extends Array<{ id: string }> ? K : never
 }[keyof E];
@@ -159,6 +170,8 @@ export class Paginator<
 	private searchParamName: keyof E['req'] | 'search';
 	private canFetchDetection: 'safe' | 'limit' | null = null;
 	private aheadQueue: T[] = [];
+	private inFlightFetchNewer = new Map<string, InFlightFetchNewer>();
+	private fetchNewerCount = 0;
 	private useShallowRef: SRef;
 
 	// 配列内の要素をどのような順序で並べるか
@@ -484,34 +497,8 @@ export class Paginator<
 		}
 	}
 
-	// **レート制限中は撃たない (レビュー M-7)。** `fetchNewer` には
-	// `fetchOlder` のような `canFetch*` のガードが無く、streaming 系は
-	// `useInterval` で 10〜22 秒ごとに無条件で撃つ。止めたつもりの 'newer' 側が
-	// 実際には止まらない。
-	public async fetchNewer(options: {
-		toQueue?: boolean;
-
-		/**
-		 * mk-go: 取得の起点を呼び出し側が指定する (#3132)。
-		 *
-		 * 既定の `getNewestId()` は **queue があればその最大 id** を返すので、
-		 * 再接続の直後にストリーミングが 1 件でも届くと起点が切断中の穴を
-		 * 飛び越える。穴を埋めたい呼び出し側は、切断した時点の id をここへ渡す。
-		 * offsetMode では使わない (あちらは件数で位置を決める)。
-		 */
-		sinceId?: string;
-
-		/**
-		 * mk-go: この取得にだけ効く追加パラメータ (#3132)。再接続の穴埋めは
-		 * 利用者の操作ではないので、通知一覧では `markAsRead: false` を渡して
-		 * 既読化の副作用を切る (`i/notifications` は取得そのものが既読化を伴う)。
-		 */
-		params?: Partial<E['req']>;
-	} = {}): Promise<void> {
-		if (this.rateLimited.value) return;
-		this.fetchingNewer.value = true;
-
-		const data: E['req'] = {
+	private buildFetchNewerData(options: FetchNewerOptions<E['req']>): E['req'] {
+		return {
 			// **足すだけの位置に置く (いちばん前)。** 後ろにすると呼び出し側が
 			// `limit` / `sinceId` だけでなく、静的 params (`directs` の
 			// `visibility: 'specified'` など) や `computedParams`、検索語 — つまり
@@ -528,13 +515,93 @@ export class Paginator<
 				sinceId: options.sinceId ?? this.getNewestId(),
 			}),
 		};
+	}
 
+	private getFetchNewerKey(options: FetchNewerOptions<E['req']>, data: E['req'], generation: number): string {
+		// default cursor は取得完了で進むのでキーから外す。再接続など呼び出し側が
+		// 固定した sinceId は別の取得条件として残す。
+		const query = { ...data } as Record<string, unknown>;
+		delete query['limit'];
+		delete query['sinceId'];
+		if (this.offsetMode) delete query['offset'];
+
+		return JSON.stringify({
+			generation,
+			query,
+			toQueue: options.toQueue === true,
+			sinceId: this.offsetMode ? undefined : options.sinceId,
+			order: this.order.value,
+		});
+	}
+
+	// **レート制限中は撃たない (レビュー M-7)。** `fetchNewer` には
+	// `fetchOlder` のような `canFetch*` のガードが無く、streaming 系は
+	// `useInterval` で 10〜22 秒ごとに無条件で撃つ。止めたつもりの 'newer' 側が
+	// 実際には止まらない。
+	public async fetchNewer(options: FetchNewerOptions<E['req']> = {}): Promise<void> {
+		if (this.rateLimited.value) return;
+		const data = this.buildFetchNewerData(options);
+		const generation = this.generation;
+		const key = this.getFetchNewerKey(options, data, generation);
+		const current = this.inFlightFetchNewer.get(key);
+		if (current != null) {
+			// **呼び出しを捨てない。** 進行中の応答が始まった後に作られたノートは
+			// その応答に含まれないことがあるので、同条件の要求をまとめたうえで
+			// 完了後に最新 cursor から一度追随取得する。
+			current.requestedAgain = true;
+			await current.promise;
+			return;
+		}
+
+		const request: InFlightFetchNewer = {
+			promise: Promise.resolve(),
+			requestedAgain: false,
+		};
+		this.inFlightFetchNewer.set(key, request);
+		this.fetchNewerCount++;
+		this.fetchingNewer.value = true;
+		request.promise = this.runFetchNewer(options, data, generation, key, request);
+		await request.promise;
+	}
+
+	private async runFetchNewer(
+		options: FetchNewerOptions<E['req']>,
+		initialData: E['req'],
+		generation: number,
+		key: string,
+		request: InFlightFetchNewer,
+	): Promise<void> {
+		let data = initialData;
+		try {
+			while (true) {
+				request.requestedAgain = false;
+				await this.fetchNewerOnce(options, data, generation, key);
+				if (!request.requestedAgain || this.rateLimited.value || generation !== this.generation) return;
+
+				// 条件変更や reload が起きた場合、古い要求を新しい一覧に追随させない。
+				const followupData = this.buildFetchNewerData(options);
+				if (this.getFetchNewerKey(options, followupData, generation) !== key) return;
+				data = followupData;
+			}
+		} finally {
+			if (this.inFlightFetchNewer.get(key) === request) this.inFlightFetchNewer.delete(key);
+			this.fetchNewerCount--;
+			this.fetchingNewer.value = this.fetchNewerCount > 0;
+		}
+	}
+
+	private async fetchNewerOnce(
+		options: FetchNewerOptions<E['req']>,
+		data: E['req'],
+		generation: number,
+		key: string,
+	): Promise<void> {
 		const apiRes = (await misskeyApi<T[]>(this.endpoint, data).catch(err => {
 			this.noteRateLimit(err, 'newer');
 			return null;
 		})) as T[] | null;
 
-		this.fetchingNewer.value = false;
+		if (generation !== this.generation || this.getFetchNewerKey(options, this.buildFetchNewerData(options), generation) !== key) return;
 
 		if (apiRes == null || apiRes.length === 0) {
 			this.canFetchNewer.value = false;
