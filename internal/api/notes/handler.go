@@ -1098,7 +1098,7 @@ type searchPage struct {
 // 埋め込み (renote / reply) だけが隠れたノートは、本文が見えているので残す。
 func (h *Handler) searchVisiblePage(ctx context.Context, viewer *model.User, limit int, first searchPage, fetch func(searchPage) ([]*model.Note, error)) ([]entity.NoteEntity, error) {
 	muteBlock := h.newMuteBlockFilter(viewer)
-	out := make([]entity.NoteEntity, 0, limit)
+	out := []entity.NoteEntity{}
 	page := first
 	for attempt := 0; attempt <= maxSearchRefills; attempt++ {
 		raw, err := fetch(page)
