@@ -92,7 +92,7 @@ func newTestService(t *testing.T) (*Service, *fakeRepo) {
 func TestService_OnNoteCreated_LocalUser(t *testing.T) {
 	s, repo := newTestService(t)
 	user := &model.User{ID: "u1"} // Host == nil → local
-	note := &model.Note{ID: "n1", UserID: "u1", Tags: model.StringArray{"#go", "#test"}}
+	note := &model.Note{Visibility: model.NoteVisibilityPublic, ID: "n1", UserID: "u1", Tags: model.StringArray{"#go", "#test"}}
 
 	s.OnNoteCreated(note, user)
 	s.WaitForPendingWrites()
@@ -117,6 +117,31 @@ func TestService_OnNoteCreated_LocalUser(t *testing.T) {
 	}
 }
 
+// followers / specified のノートのタグは記録しない。本家 NoteCreateService の
+// updateHashtags は public / home のときだけ呼ばれる。
+func TestService_OnNoteCreated_OnlyPublicAndHome(t *testing.T) {
+	cases := map[string]struct {
+		visibility model.NoteVisibility
+		want       int
+	}{
+		"public":    {model.NoteVisibilityPublic, 1},
+		"home":      {model.NoteVisibilityHome, 1},
+		"followers": {model.NoteVisibilityFollowers, 0},
+		"specified": {model.NoteVisibilitySpecified, 0},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			s, repo := newTestService(t)
+			note := &model.Note{ID: "n1", UserID: "u1", Visibility: tc.visibility, Tags: model.StringArray{"#secret"}}
+			s.OnNoteCreated(note, &model.User{ID: "u1"})
+			s.WaitForPendingWrites()
+			if got := len(repo.snapshotCalls()); got != tc.want {
+				t.Fatalf("RecordMention calls = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
 // meta.sensitiveWords にマッチする tag は RecordMention されない (= featured
 // / trends に出ない、upstream HashtagService.updateHashtagsRanking と同
 // semantics)。テストユーザー報告経路と合わせて drop-in 互換を回復する。
@@ -127,7 +152,7 @@ func TestService_OnNoteCreated_SkipsSensitiveTags(t *testing.T) {
 	s.SetMetaRepo(metaRepo)
 
 	user := &model.User{ID: "u1"}
-	note := &model.Note{ID: "n1", UserID: "u1", Tags: model.StringArray{"#nsfw", "#safe"}}
+	note := &model.Note{Visibility: model.NoteVisibilityPublic, ID: "n1", UserID: "u1", Tags: model.StringArray{"#nsfw", "#safe"}}
 
 	s.OnNoteCreated(note, user)
 	s.WaitForPendingWrites()
@@ -151,7 +176,7 @@ func TestService_OnNoteCreated_SkipsHiddenTags(t *testing.T) {
 	s.SetMetaRepo(metaRepo)
 
 	user := &model.User{ID: "u1"}
-	note := &model.Note{ID: "n1", UserID: "u1", Tags: model.StringArray{"#hidden", "#visible"}}
+	note := &model.Note{Visibility: model.NoteVisibilityPublic, ID: "n1", UserID: "u1", Tags: model.StringArray{"#hidden", "#visible"}}
 
 	s.OnNoteCreated(note, user)
 	s.WaitForPendingWrites()
@@ -168,7 +193,7 @@ func TestService_OnNoteCreated_NoMetaRepoMeansNoFilter(t *testing.T) {
 	// SetMetaRepo を呼ばない
 
 	user := &model.User{ID: "u1"}
-	note := &model.Note{ID: "n1", UserID: "u1", Tags: model.StringArray{"#nsfw", "#anything"}}
+	note := &model.Note{Visibility: model.NoteVisibilityPublic, ID: "n1", UserID: "u1", Tags: model.StringArray{"#nsfw", "#anything"}}
 
 	s.OnNoteCreated(note, user)
 	s.WaitForPendingWrites()
@@ -182,7 +207,7 @@ func TestService_OnNoteCreated_RemoteUser(t *testing.T) {
 	s, repo := newTestService(t)
 	host := "remote.example"
 	user := &model.User{ID: "u2", Host: &host}
-	note := &model.Note{ID: "n2", UserID: "u2", Tags: model.StringArray{"#federation"}}
+	note := &model.Note{Visibility: model.NoteVisibilityPublic, ID: "n2", UserID: "u2", Tags: model.StringArray{"#federation"}}
 
 	s.OnNoteCreated(note, user)
 	s.WaitForPendingWrites()
@@ -202,7 +227,7 @@ func TestService_OnNoteCreated_SkipEmpty(t *testing.T) {
 		author *model.User
 	}{
 		"nil note":    {note: nil, author: &model.User{ID: "u"}},
-		"nil author":  {note: &model.Note{Tags: model.StringArray{"#x"}}, author: nil},
+		"nil author":  {note: &model.Note{Visibility: model.NoteVisibilityPublic, Tags: model.StringArray{"#x"}}, author: nil},
 		"empty tags":  {note: &model.Note{Tags: model.StringArray{}}, author: &model.User{ID: "u"}},
 		"nil tags":    {note: &model.Note{}, author: &model.User{ID: "u"}},
 		"empty entry": {note: &model.Note{Tags: model.StringArray{""}}, author: &model.User{ID: "u"}},
@@ -222,14 +247,14 @@ func TestService_OnNoteCreated_SkipEmpty(t *testing.T) {
 func TestService_OnNoteCreated_NilService(t *testing.T) {
 	// nil receiver でも panic しないこと (defensive guard)。
 	var s *Service
-	s.OnNoteCreated(&model.Note{Tags: model.StringArray{"#x"}}, &model.User{ID: "u"})
+	s.OnNoteCreated(&model.Note{Visibility: model.NoteVisibilityPublic, Tags: model.StringArray{"#x"}}, &model.User{ID: "u"})
 }
 
 func TestService_OnNoteCreated_NilRepo(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	s := &Service{repo: nil, idGen: idGen}
 	// repo nil でも panic せず early return すること。
-	s.OnNoteCreated(&model.Note{Tags: model.StringArray{"#x"}}, &model.User{ID: "u"})
+	s.OnNoteCreated(&model.Note{Visibility: model.NoteVisibilityPublic, Tags: model.StringArray{"#x"}}, &model.User{ID: "u"})
 }
 
 func TestService_OnNoteCreated_RepoError_BestEffort(t *testing.T) {
@@ -239,7 +264,7 @@ func TestService_OnNoteCreated_RepoError_BestEffort(t *testing.T) {
 	repo.errOn = "#fail"
 	repo.mu.Unlock()
 	user := &model.User{ID: "u3"}
-	note := &model.Note{Tags: model.StringArray{"#ok1", "#fail", "#ok2"}}
+	note := &model.Note{Visibility: model.NoteVisibilityPublic, Tags: model.StringArray{"#ok1", "#fail", "#ok2"}}
 
 	s.OnNoteCreated(note, user)
 	s.WaitForPendingWrites()
@@ -259,7 +284,7 @@ func TestService_OnNoteCreated_ReturnsImmediately(t *testing.T) {
 	s := NewService(slow, idGen)
 
 	user := &model.User{ID: "u1"}
-	note := &model.Note{Tags: model.StringArray{"#a"}}
+	note := &model.Note{Visibility: model.NoteVisibilityPublic, Tags: model.StringArray{"#a"}}
 
 	start := time.Now()
 	s.OnNoteCreated(note, user)
@@ -309,7 +334,7 @@ func TestService_Shutdown_DrainsPending(t *testing.T) {
 	repo := &slowRepo{block: make(chan struct{})}
 	s := &Service{repo: repo, idGen: idGen}
 	user := &model.User{ID: "u1"}
-	note := &model.Note{Tags: model.StringArray{"#a"}}
+	note := &model.Note{Visibility: model.NoteVisibilityPublic, Tags: model.StringArray{"#a"}}
 	s.OnNoteCreated(note, user)
 
 	go func() {
@@ -332,7 +357,7 @@ func TestService_Shutdown_RespectsContextDeadline(t *testing.T) {
 	repo := &slowRepo{block: make(chan struct{})}
 	s := &Service{repo: repo, idGen: idGen}
 	user := &model.User{ID: "u1"}
-	note := &model.Note{Tags: model.StringArray{"#a"}}
+	note := &model.Note{Visibility: model.NoteVisibilityPublic, Tags: model.StringArray{"#a"}}
 	s.OnNoteCreated(note, user)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)

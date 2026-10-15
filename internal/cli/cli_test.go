@@ -157,6 +157,7 @@ func TestCommands_WiresEveryNameToItsRunner(t *testing.T) {
 		"dump-routes":                serve.DumpRoutes,
 		"backfill avatar-public-url": backfill.AvatarPublicURL,
 		"backfill emoji-system-file": backfill.EmojiSystemFile,
+		"backfill hashtag-mentions":  backfill.HashtagMentions,
 		"backfill instance-counts":   backfill.InstanceCounts,
 		"backfill note-tags":         backfill.NoteTags,
 		"backfill remote-host":       backfill.RemoteHost,

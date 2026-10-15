@@ -1,9 +1,25 @@
 package repository
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/elythia-network/elythia/internal/model"
 	"gorm.io/gorm"
 )
+
+// hashtagRecordAttempts caps how many times recordImpl re-creates a hashtag
+// row that was deleted between its insert and its row lock.
+const hashtagRecordAttempts = 3
+
+// errHashtagRowVanished is returned when the hashtag row kept disappearing
+// for hashtagRecordAttempts attempts.
+var errHashtagRowVanished = errors.New("hashtag row deleted concurrently")
+
+// hashtagRecordAfterEnsure, when set, runs between recordImpl's insert and its
+// row lock with recordImpl's transaction. Tests use it to reproduce a
+// concurrent delete.
+var hashtagRecordAfterEnsure func(tx *gorm.DB, name string)
 
 // HashtagRepository は `hashtag` テーブルへのアクセスを提供する (#680)。
 //
@@ -114,19 +130,35 @@ func (r *hashtagRepository) recordImpl(
 	remoteIDsCol, remoteCountCol string,
 ) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
-		// 段階 1: 行確保。
-		if err := tx.Exec(
-			`INSERT INTO "hashtag" (id, name) VALUES (?, ?) ON CONFLICT (name) DO NOTHING`,
-			id, name,
-		).Error; err != nil {
-			return err
+		// 段階 1 と 1.5 は、行を掴めるまでやり直す。INSERT が既存の行に当たって
+		// DO NOTHING で済んだ後、SELECT FOR UPDATE までの間に別の処理 (backfill
+		// hashtag-mentions の DELETE など) が行を消すと、掴む行が無くなり、段階 2 の
+		// UPDATE が 0 行で記録が黙って失われるため。行を掴んだ後は commit まで
+		// 消されないので、段階 2 が 0 行なのは既に list に居るときだけになる。
+		locked := false
+		for attempt := 0; attempt < hashtagRecordAttempts && !locked; attempt++ {
+			// 段階 1: 行確保。
+			if err := tx.Exec(
+				`INSERT INTO "hashtag" (id, name) VALUES (?, ?) ON CONFLICT (name) DO NOTHING`,
+				id, name,
+			).Error; err != nil {
+				return err
+			}
+			if hashtagRecordAfterEnsure != nil {
+				hashtagRecordAfterEnsure(tx, name)
+			}
+			// 段階 1.5: #2106 L55: 同一 (name, userID) への concurrent record (連投 / inbox 同時処理)
+			// で array_append + count++ が二重発行され、attachedUserIds に重複が入り count が膨らむ
+			// race を防ぐため、対象 hashtag 行を FOR UPDATE で直列化する。2 つ目の tx は 1 つ目の
+			// commit を待ってから NOT (...=ANY) を再評価する (append 済の userID を見て skip)。
+			lock := tx.Exec(`SELECT 1 FROM "hashtag" WHERE name = ? FOR UPDATE`, name)
+			if lock.Error != nil {
+				return lock.Error
+			}
+			locked = lock.RowsAffected > 0
 		}
-		// 段階 1.5: #2106 L55: 同一 (name, userID) への concurrent record (連投 / inbox 同時処理)
-		// で array_append + count++ が二重発行され、attachedUserIds に重複が入り count が膨らむ
-		// race を防ぐため、対象 hashtag 行を FOR UPDATE で直列化する。2 つ目の tx は 1 つ目の
-		// commit を待ってから NOT (...=ANY) を再評価する (append 済の userID を見て skip)。
-		if err := tx.Exec(`SELECT 1 FROM "hashtag" WHERE name = ? FOR UPDATE`, name).Error; err != nil {
-			return err
+		if !locked {
+			return fmt.Errorf("hashtag %q: %w", name, errHashtagRowVanished)
 		}
 		// 段階 2: 該当 user がまだ list に居なければ append + count++。
 		// total / (local|remote) を 1 度の UPDATE で更新する。

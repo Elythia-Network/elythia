@@ -195,3 +195,55 @@ func TestHashtagRepository_RecordMention_ConcurrentInsert(t *testing.T) {
 	assert.Equal(t, "h_ht_pre", got.ID, "existing row id is preserved")
 	assert.Equal(t, 1, got.MentionedUsersCount)
 }
+
+// 行を確保した後、ロックを取る前に別の処理が行を消しても、行を作り直して
+// 記録する (以前は UPDATE が 0 行で、記録が黙って失われていた)。
+func TestHashtagRepository_RecordMention_RowDeletedBeforeLock(t *testing.T) {
+	repo := NewHashtagRepository(testDB)
+	cleanupHashtag(t, "#htvanish")
+	require.NoError(t, testDB.Exec(
+		`INSERT INTO "hashtag" (id, name) VALUES (?, ?)`, "h_ht_vanish_pre", "#htvanish",
+	).Error)
+	user := insertTestUser(t, "u_ht_vanish", "ht_vanish")
+	defer cleanupUser(t, user.ID)
+
+	deletes := 0
+	hashtagRecordAfterEnsure = func(_ *gorm.DB, name string) {
+		if deletes > 0 {
+			return
+		}
+		deletes++
+		// 記録のトランザクションの外 (別の接続) で消して commit する。
+		require.NoError(t, testDB.Exec(`DELETE FROM "hashtag" WHERE name = ?`, name).Error)
+	}
+	t.Cleanup(func() { hashtagRecordAfterEnsure = nil })
+
+	require.NoError(t, repo.RecordMention("h_ht_vanish_new", "#htvanish", user.ID, true))
+	assert.Equal(t, 1, deletes)
+
+	got, err := repo.FindByName("#htvanish")
+	require.NoError(t, err)
+	assert.Equal(t, "h_ht_vanish_new", got.ID)
+	assert.Equal(t, 1, got.MentionedUsersCount)
+	assert.Equal(t, model.StringArray{user.ID}, got.MentionedUserIds)
+}
+
+// 行が消され続けたら、回数の上限でエラーを返す (黙って成功にしない)。
+func TestHashtagRepository_RecordMention_RowKeepsVanishing(t *testing.T) {
+	repo := NewHashtagRepository(testDB)
+	cleanupHashtag(t, "#htvanish2")
+	calls := 0
+	hashtagRecordAfterEnsure = func(tx *gorm.DB, name string) {
+		calls++
+		// 記録のトランザクションが作った行は commit 前で外からは消せないので、
+		// 同じトランザクションの中で消して、掴む前に消える状態を毎回作る。
+		require.NoError(t, tx.Exec(`DELETE FROM "hashtag" WHERE name = ?`, name).Error)
+	}
+	t.Cleanup(func() { hashtagRecordAfterEnsure = nil })
+
+	err := repo.RecordMention("h_ht_vanish2_new", "#htvanish2", "u_ht_vanish2", true)
+	require.ErrorIs(t, err, errHashtagRowVanished)
+	assert.Equal(t, hashtagRecordAttempts, calls)
+	_, err = repo.FindByName("#htvanish2")
+	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+}
