@@ -1,12 +1,15 @@
 package server
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/textproto"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -130,6 +133,14 @@ func filesHandler(lookup filesDriveLookup, primary, local coredrive.Storage) ech
 				return c.NoContent(http.StatusInternalServerError)
 			}
 		}
+		// **オブジェクトストレージは Range を S3 に渡してストリームで返す。**
+		// 要求された範囲だけを読み、使うメモリをファイルの大きさによらず一定に
+		// 収める (seek できない Body を全量読んでから `http.ServeContent` に
+		// 渡す形にしない)。
+		storage = coredrive.ResolveStorage(storage)
+		if rg, ok := storage.(coredrive.RangeGetter); ok {
+			return serveRangedFile(c, rg, key)
+		}
 		body, err := storage.Get(key)
 		if err != nil {
 			// **ストレージ障害を「無い」に潰さない (#2792)。** #2990 が
@@ -146,9 +157,9 @@ func filesHandler(lookup filesDriveLookup, primary, local coredrive.Storage) ech
 		defer body.Close()
 
 		// LocalStorage は *os.File を返すので io.ReadSeeker として扱える。
-		// 互換性のため type assertion で seekable かを確認し、非対応 (将来
-		// S3 等の non-seekable storage を増やした場合) なら全 body を memory
-		// に読み込む fallback にフォールバックする。
+		// 互換性のため type assertion で seekable かを確認し、非対応 (seek も
+		// RangeGetter もできない storage) なら全 body を memory に読み込む
+		// fallback にフォールバックする。S3 は上の RangeGetter の経路を通る。
 		// modtime も *os.File なら Stat() から取得して If-Modified-Since の
 		// 304 経路を有効にする。それ以外は零値で http.ServeContent が
 		// Last-Modified を出さない (Cache-Control: immutable で代替)。
@@ -180,24 +191,261 @@ func filesHandler(lookup filesDriveLookup, primary, local coredrive.Storage) ech
 			return c.NoContent(http.StatusInternalServerError)
 		}
 
-		// `Cache-Control: no-transform` で Cloudflare Polish 等 CDN 中間層
-		// による画像再エンコードを抑止する (#730)。Polish は animated WebP
-		// を別 size で出力するため UDS デプロイ環境で「絵文字がチカチカ
-		// する + サイズが切れる」現象を起こす。`immutable` で長期 cache 化、
-		// `no-transform` で binary 1:1 配信を契約する。
-		c.Response().Header().Set("Cache-Control", "max-age=31536000, immutable, no-transform")
-		// #2106 H3: file origin からの script/object 実行を封じる。CSP は upstream
-		// FileServerService と同じ値。`Content-Disposition: inline` も upstream 相当
-		// (ただし upstream は `contentDisposition('inline', filename)` で filename も
-		// 載せる)。**この 3 つのうち mk-go 独自なのは nosniff だけ** — upstream の
-		// backend が明示的に付ける箇所は無い (直上の `Cache-Control` の
-		// `no-transform` も独自だが、そちらは 1 つ上のコメントで説明済み)。#2782 で global にも付くようになったが、
-		// ここは file 配信固有の多層防御として残す。
-		c.Response().Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'")
-		c.Response().Header().Set("X-Content-Type-Options", "nosniff")
-		c.Response().Header().Set("Content-Disposition", "inline")
-		c.Response().Header().Set(echo.HeaderContentType, contentType)
+		setFileResponseHeaders(c, contentType)
 		http.ServeContent(c.Response(), c.Request(), key, modtime, seeker)
 		return nil
 	}
+}
+
+// fileCacheControl is the Cache-Control of every `/files/:accessKey` response.
+const fileCacheControl = "max-age=31536000, immutable, no-transform"
+
+// setFileResponseHeaders sets the headers every `/files/:accessKey` response
+// carries, whichever storage served it.
+func setFileResponseHeaders(c echo.Context, contentType string) {
+	// `Cache-Control: no-transform` で Cloudflare Polish 等 CDN 中間層
+	// による画像再エンコードを抑止する (#730)。Polish は animated WebP
+	// を別 size で出力するため UDS デプロイ環境で「絵文字がチカチカ
+	// する + サイズが切れる」現象を起こす。`immutable` で長期 cache 化、
+	// `no-transform` で binary 1:1 配信を契約する。
+	c.Response().Header().Set("Cache-Control", fileCacheControl)
+	// #2106 H3: file origin からの script/object 実行を封じる。CSP は upstream
+	// FileServerService と同じ値。`Content-Disposition: inline` も upstream 相当
+	// (ただし upstream は `contentDisposition('inline', filename)` で filename も
+	// 載せる)。**この 3 つのうち mk-go 独自なのは nosniff だけ** — upstream の
+	// backend が明示的に付ける箇所は無い (直上の `Cache-Control` の
+	// `no-transform` も独自だが、そちらは 1 つ上のコメントで説明済み)。#2782 で global にも付くようになったが、
+	// ここは file 配信固有の多層防御として残す。
+	c.Response().Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'")
+	c.Response().Header().Set("X-Content-Type-Options", "nosniff")
+	c.Response().Header().Set("Content-Disposition", "inline")
+	c.Response().Header().Set(echo.HeaderContentType, contentType)
+}
+
+// sniffRangeSpec is the range fetched to sniff the MIME type when the
+// response body itself does not start with the object's first bytes.
+var sniffRangeSpec = "bytes=0-" + strconv.Itoa(coredrive.MIMESniffLen-1)
+
+// serveRangedFile streams an object from a RangeGetter (object storage)
+// without reading more of it than the response needs.
+//
+// `http.ServeContent` は seek できる全体を要求するので使わず、Range・HEAD・
+// If-None-Match・If-Modified-Since をここで扱う。Range の意味の解釈 (範囲外、
+// 末尾からの指定) は S3 に任せる。
+func serveRangedFile(c echo.Context, rg coredrive.RangeGetter, key string) error {
+	req := c.Request()
+	spec, ok := singleRangeSpec(req.Header.Get("Range"))
+	// 以前の http.ServeContent は ETag も Last-Modified も無い状態で If-Range を
+	// 評価していたので、If-Range 付きの Range は常に無視されていた。同じにする。
+	if req.Header.Get("If-Range") != "" {
+		spec, ok = "", true
+	}
+	if !ok {
+		return c.NoContent(http.StatusRequestedRangeNotSatisfiable)
+	}
+	head := req.Method == http.MethodHead
+	fetchSpec := spec
+	if head && spec == "" {
+		// HEAD は本文を返さないので、MIME の判定に要る先頭だけを取る。
+		// 全体の大きさは Content-Range から分かる。
+		fetchSpec = sniffRangeSpec
+	}
+	obj, err := rg.GetRange(key, fetchSpec)
+	emptyObject := false
+	switch {
+	case err == nil:
+	case errors.Is(err, coredrive.ErrObjectNotFound):
+		return c.NoContent(http.StatusNotFound)
+	case errors.Is(err, coredrive.ErrRangeNotSatisfiable) && fetchSpec != spec:
+		// 先頭を取る要求が範囲外になるのは、大きさ 0 のオブジェクトだけ。
+		emptyObject = true
+	case errors.Is(err, coredrive.ErrRangeNotSatisfiable):
+		return c.NoContent(http.StatusRequestedRangeNotSatisfiable)
+	default:
+		slog.Error("server: drive storage read failed", "accessKey", key, "err", err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+	if emptyObject {
+		setFileResponseHeaders(c, coredrive.BrowserSafeContentType(coredrive.DetectMIME(nil)))
+		c.Response().Header().Set(echo.HeaderContentLength, "0")
+		return c.NoContent(http.StatusOK)
+	}
+	defer obj.Body.Close()
+
+	h := c.Response().Header()
+	if obj.ETag != "" {
+		h.Set("ETag", obj.ETag)
+	}
+	if !obj.LastModified.IsZero() {
+		h.Set("Last-Modified", obj.LastModified.UTC().Format(http.TimeFormat))
+	}
+	if notModified(req, obj.ETag, obj.LastModified) {
+		// http.ServeContent と同じく、304 にも先に決まっている Cache-Control を残す。
+		h.Set("Cache-Control", fileCacheControl)
+		return c.NoContent(http.StatusNotModified)
+	}
+
+	start, total := parseContentRange(obj.ContentRange)
+	if obj.ContentRange == "" {
+		start, total = 0, obj.ContentLength
+	}
+	body := bufio.NewReaderSize(obj.Body, coredrive.MIMESniffLen)
+	need := coredrive.MIMESniffLen
+	if total >= 0 && total < int64(need) {
+		need = int(total)
+	}
+	var sniff []byte
+	if start == 0 {
+		sniff, _ = body.Peek(need)
+	}
+	if len(sniff) < need {
+		// 返す範囲が先頭から始まらない (動画のシークなど) か、先頭の判定に
+		// 足りないときは、先頭だけを別に取る。範囲だけを見て判定すると、
+		// 先頭以外の範囲で HTML などと誤判定され、許可リストの意味が変わる。
+		probe, perr := rg.GetRange(key, sniffRangeSpec)
+		switch {
+		case perr == nil:
+			sniff, perr = io.ReadAll(io.LimitReader(probe.Body, int64(coredrive.MIMESniffLen)))
+			probe.Body.Close()
+			if perr != nil {
+				slog.Error("server: drive storage read failed", "accessKey", key, "err", perr)
+				return c.NoContent(http.StatusInternalServerError)
+			}
+		case errors.Is(perr, coredrive.ErrRangeNotSatisfiable):
+			sniff = nil
+		default:
+			slog.Error("server: drive storage read failed", "accessKey", key, "err", perr)
+			return c.NoContent(http.StatusInternalServerError)
+		}
+	}
+	setFileResponseHeaders(c, coredrive.BrowserSafeContentType(coredrive.DetectMIME(sniff)))
+	h.Set("Accept-Ranges", "bytes")
+
+	status := http.StatusOK
+	length := obj.ContentLength
+	switch {
+	case head && spec == "":
+		// 先頭だけを取ったので、長さは全体の大きさで答える。
+		length = total
+	case obj.ContentRange != "":
+		status = http.StatusPartialContent
+		h.Set("Content-Range", obj.ContentRange)
+	}
+	if length >= 0 {
+		h.Set(echo.HeaderContentLength, strconv.FormatInt(length, 10))
+	}
+	c.Response().WriteHeader(status)
+	if head {
+		return nil
+	}
+	if _, err := io.Copy(c.Response(), body); err != nil {
+		// 送信中の切断はクライアント側の都合なので、記録だけにする。
+		slog.Debug("server: drive file stream interrupted", "accessKey", key, "err", err)
+	}
+	return nil
+}
+
+// singleRangeSpec validates a Range header the same way net/http does and
+// returns it as a single "bytes=" spec to pass to the storage. ok is false when
+// the header is malformed (416). An absent header, an empty range set and a
+// multi-range request all yield ("", true): the whole object is served.
+//
+// 複数の範囲は S3 が扱えないので、RFC 9110 が認める「Range を無視して全体を
+// 返す」にする。以前の http.ServeContent は multipart/byteranges で返していた。
+func singleRangeSpec(header string) (string, bool) {
+	if header == "" {
+		return "", true
+	}
+	const prefix = "bytes="
+	if !strings.HasPrefix(header, prefix) {
+		return "", false
+	}
+	var specs []string
+	for _, ra := range strings.Split(header[len(prefix):], ",") {
+		ra = textproto.TrimString(ra)
+		if ra == "" {
+			continue
+		}
+		first, last, found := strings.Cut(ra, "-")
+		if !found {
+			return "", false
+		}
+		first, last = textproto.TrimString(first), textproto.TrimString(last)
+		if first == "" {
+			if _, err := parseRangeInt(last); err != nil {
+				return "", false
+			}
+		} else {
+			i, err := parseRangeInt(first)
+			if err != nil {
+				return "", false
+			}
+			if last != "" {
+				j, err := parseRangeInt(last)
+				if err != nil || j < i {
+					return "", false
+				}
+			}
+		}
+		specs = append(specs, first+"-"+last)
+	}
+	if len(specs) != 1 {
+		return "", true
+	}
+	return prefix + specs[0], true
+}
+
+func parseRangeInt(s string) (int64, error) {
+	v, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || v < 0 {
+		return 0, errors.New("invalid range")
+	}
+	return v, nil
+}
+
+// parseContentRange extracts the first byte position and the total size from
+// a "bytes a-b/size" Content-Range. Unknown parts are returned as -1.
+func parseContentRange(cr string) (start, total int64) {
+	start, total = -1, -1
+	rest, ok := strings.CutPrefix(cr, "bytes ")
+	if !ok {
+		return start, total
+	}
+	span, size, _ := strings.Cut(rest, "/")
+	if first, _, found := strings.Cut(span, "-"); found {
+		if v, err := strconv.ParseInt(first, 10, 64); err == nil {
+			start = v
+		}
+	}
+	if v, err := strconv.ParseInt(size, 10, 64); err == nil {
+		total = v
+	}
+	return start, total
+}
+
+// notModified reports whether the request's validators match the object, in
+// the same precedence as http.ServeContent: If-None-Match (weak comparison)
+// first, If-Modified-Since only when If-None-Match is absent.
+func notModified(req *http.Request, etag string, modtime time.Time) bool {
+	if inm := req.Header.Get("If-None-Match"); inm != "" {
+		if etag == "" {
+			return false
+		}
+		for _, cand := range strings.Split(inm, ",") {
+			cand = textproto.TrimString(cand)
+			if cand == "*" || strings.TrimPrefix(cand, "W/") == strings.TrimPrefix(etag, "W/") {
+				return true
+			}
+		}
+		return false
+	}
+	ims := req.Header.Get("If-Modified-Since")
+	if ims == "" || modtime.IsZero() {
+		return false
+	}
+	t, err := http.ParseTime(ims)
+	if err != nil {
+		return false
+	}
+	return !modtime.Truncate(time.Second).After(t)
 }

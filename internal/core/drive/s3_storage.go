@@ -157,6 +157,10 @@ func (s *S3Storage) Get(accessKey string) (io.ReadCloser, error) {
 		}
 		return nil, fmt.Errorf("s3 get %s: %w", key, err)
 	}
+	// 大きさを読む前に分かるようにする (ObjectSize)。
+	if output.ContentLength != nil && *output.ContentLength >= 0 {
+		return &sizedBody{ReadCloser: output.Body, size: *output.ContentLength}, nil
+	}
 	return output.Body, nil
 }
 
