@@ -397,6 +397,13 @@ func (h *ssrMetaHandler) summaryMap(note *model.Note, hydrate bool) map[string]a
 		m["isHidden"] = true
 		return m
 	}
+	if !hydrate && embedHiddenFromVisitor(note, h.noteCreatedAtMs(note), time.Now().UnixMilli()) {
+		// 返信先・引用先は公開でも、作者の設定 (ログイン必須・期間で隠す) で
+		// 未ログインには見せないことがある。upstream は pack の shouldHideNote で
+		// (⛔) に落とすので、/embed/notes の notehide と同じ判定に揃える。
+		m["isHidden"] = true
+		return m
+	}
 	if note.CW != nil {
 		m["cw"] = *note.CW
 	}
@@ -429,11 +436,27 @@ func (h *ssrMetaHandler) summaryMap(note *model.Note, hydrate bool) map[string]a
 	return m
 }
 
+// embedHiddenFromVisitor reports whether an embedded reply / renote must be
+// summarized as hidden for an anonymous visitor, using the same decision as
+// the REST embed gate (notehide.HideEmbeds with viewer=nil).
+//
+// 作者の行が読めない (User が nil) ときは、設定を確かめられないので隠す。
+// REST の embed gate は設定が不明なら作者の設定を見ないが、SSR はクローラに
+// 渡る経路なので fail closed にする。
+func embedHiddenFromVisitor(note *model.Note, createdAtMs, nowMs int64) bool {
+	if note.User == nil {
+		return true
+	}
+	return corenote.HideEmbedDecision(nil, corenote.FactsFromModel(note, createdAtMs), nil, nowMs)
+}
+
+// noteByID fetches a reply / renote target with its author preloaded, so that
+// embedHiddenFromVisitor can read the author's preferences.
 func (h *ssrMetaHandler) noteByID(id string) *model.Note {
 	if h.noteRepo == nil || id == "" {
 		return nil
 	}
-	n, err := h.noteRepo.FindByID(id)
+	n, err := h.noteRepo.FindByIDWithUser(id)
 	if err != nil {
 		return nil
 	}
@@ -689,6 +712,11 @@ func (h *ssrMetaHandler) NotePage(c echo.Context) error {
 	}
 	// 投稿者が「ログインしないと見せない」設定なら meta も出さない。
 	// upstream note ハンドラの `!note.user.requireSigninToViewContents` (#2533)。
+	// 作者の行が読めないときは設定を確かめられないので、返信先・引用先と同じく
+	// 出さない側に倒す。
+	if note.User == nil {
+		return h.renderBareShell(c, noteIsRemote(note))
+	}
 	if !corenote.AnonymousPublicationAllowed(corenote.FactsFromModel(note, h.noteCreatedAtMs(note)), pinned, time.Now().UnixMilli()) {
 		return h.renderBareShell(c, noteIsRemote(note))
 	}
