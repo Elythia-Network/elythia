@@ -60,12 +60,10 @@ SPDX-License-Identifier: AGPL-3.0-only
 </template>
 
 <script lang="ts" setup>
-import { ref } from 'vue';
+import { defineAsyncComponent, ref } from 'vue';
 import * as Misskey from 'misskey-js';
 import { instanceName } from '@@/js/config.js';
 import type { MenuItem } from '@/types/menu.js';
-import XSigninDialog from '@/components/MkSigninDialog.vue';
-import XSignupDialog from '@/components/MkSignupDialog.vue';
 import MkButton from '@/components/MkButton.vue';
 import MkStreamingNotesTimeline from '@/components/MkStreamingNotesTimeline.vue';
 import MkInfo from '@/components/MkInfo.vue';
@@ -79,8 +77,11 @@ import { isRegistrationClosed } from '@/utility/registration-mode.js';
 const approvalRequiredForSignup = instance.approvalRequiredForSignup === true;
 const registrationClosed = isRegistrationClosed();
 import MkNumber from '@/components/MkNumber.vue';
-import XActiveUsersChart from '@/components/MkVisitorDashboard.ActiveUsersChart.vue';
 import { openInstanceMenu } from '@/ui/_common_/common.js';
+
+// mk-go: グラフ (chart.js 一式) とダイアログ (webauthn・captcha) は、出すとき・開くときだけ読む。
+// エントランスの中のダッシュボードも、グラフが出るまで chart.js を待たなくてよい。
+const XActiveUsersChart = defineAsyncComponent(() => import('@/components/MkVisitorDashboard.ActiveUsersChart.vue'));
 
 const stats = ref<Misskey.entities.StatsResponse | null>(null);
 
@@ -91,7 +92,7 @@ if (instance.clientOptions.showActivitiesForVisitor !== false) {
 }
 
 function signin() {
-	const { dispose } = os.popup(XSigninDialog, {
+	const { dispose } = os.popup(defineAsyncComponent(() => import('@/components/MkSigninDialog.vue')), {
 		autoSet: true,
 	}, {
 		closed: () => dispose(),
@@ -99,7 +100,7 @@ function signin() {
 }
 
 function signup() {
-	const { dispose } = os.popup(XSignupDialog, {
+	const { dispose } = os.popup(defineAsyncComponent(() => import('@/components/MkSignupDialog.vue')), {
 		autoSet: true,
 	}, {
 		closed: () => dispose(),
