@@ -104,4 +104,46 @@ func TestHideNoteEntity_JSONShape(t *testing.T) {
 	}
 }
 
+func TestHideNoteEntity_ClearsBodyDerivedFields(t *testing.T) {
+	text := "@bob #secrettag :blob:"
+	emojis := map[string]string{"blob": "https://remote.example/blob.png"}
+	n := &NoteEntity{
+		ID: "n", CreatedAt: "2026-01-02T03:04:05.000Z", UserID: "a",
+		User: UserLite{ID: "a"}, Text: &text, Visibility: "specified",
+		Reactions: datatypes.JSON([]byte(`{}`)), ReactionEmojis: map[string]string{},
+		FileIDs: []string{}, Files: []any{},
+		VisibleUserIDs: []string{"bob"},
+		Mentions:       []string{"bob"},
+		Tags:           []string{"secrettag"},
+		Emojis:         &emojis,
+	}
+	HideNoteEntity(n)
+	b, err := json.Marshal(n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	for _, leak := range []string{"bob", "secrettag", "blob"} {
+		if strings.Contains(s, leak) {
+			t.Errorf("hidden JSON leaks %q\n%s", leak, s)
+		}
+	}
+	// emojis は remote note の形 (`{}`) を保つ。
+	if !strings.Contains(s, `"emojis":{}`) {
+		t.Errorf("hidden remote note must keep emojis as {}\n%s", s)
+	}
+	// packer の map を書き換えずに差し替える。
+	if len(emojis) != 1 {
+		t.Errorf("original emojis map must not be mutated: %v", emojis)
+	}
+}
+
+func TestHideNoteEntity_LocalNoteKeepsEmojisOmitted(t *testing.T) {
+	n := &NoteEntity{ID: "n", Reactions: datatypes.JSON([]byte(`{}`))}
+	HideNoteEntity(n)
+	if n.Emojis != nil {
+		t.Errorf("local note emojis must stay nil (omitted), got %v", *n.Emojis)
+	}
+}
+
 func strp(s string) *string { return &s }
