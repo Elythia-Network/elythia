@@ -3436,6 +3436,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	chatService.SetChatPusher(webPushService)
 	// push の body に fromUser を載せるため sender を引く (#2840)。
 	chatService.SetUserRepo(userRepo)
+	chatService.SetLiteFiller(sharedUserPacker) // #3438: stream / push の fromUser・toUser の instance・絵文字
 	// CherryPick 互換 AP 連合: 1-on-1 DM を Create+Note(_misskey_talk:true) で配送 (#692)。
 	chatService.SetAPDelivery(userRepo, apRenderer, apURLs, deliverService)
 	// chatScope=followers/following/mutual 判定用に following repo を渡す (#692)。
@@ -4894,6 +4895,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"reversi/invitations のリモートの招待者に instance・絵文字が載らない"},
 		{"chat.liteFiller", chatHandler.HasLiteFiller(),
 			"chat の応答 (メッセージの fromUser・toUser・reactions[].user、ルームの owner、招待の user) のリモートの利用者に instance・絵文字が載らない"},
+		{"chat.streamLiteFiller", chatService.HasLiteFiller(),
+			"stream と Web Push で流す chat のメッセージ (fromUser・toUser) のリモートの利用者に instance・絵文字が載らない"},
 		{"admin.listPacker", adminHandler.HasListPacker(),
 			"admin/show-users・roles/users・abuse-user-reports・show-moderation-logs の利用者にピン留め・移行先・instance・絵文字が載らない"},
 		{"auth.detailExtras", authHandler.HasDetailExtras(),

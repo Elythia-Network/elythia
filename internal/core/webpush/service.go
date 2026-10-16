@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/elythia-network/elythia/internal/queue"
+	"github.com/rivo/uniseg"
 )
 
 // Service builds Web Push delivery jobs and enqueues them.
@@ -58,7 +59,11 @@ func (s *Service) push(userID, pushType string, body map[string]any) {
 	truncated := TruncateBody(pushType, body)
 	var raw json.RawMessage
 	if truncated != nil {
-		b, err := fitPayload(truncated)
+		fit := fitPayload
+		if pushType == TypeNewChatMessage {
+			fit = fitChatPayload
+		}
+		b, err := fit(truncated)
 		if err != nil {
 			slog.Warn("webpush: marshal body failed", "type", pushType, "err", err)
 			return
@@ -171,6 +176,72 @@ func fitPayload(body map[string]any) ([]byte, error) {
 	slog.Warn("webpush: payload exceeds the Web Push limit and could not be shrunk",
 		"bytes", len(raw), "limit", maxPushBodyBytes)
 	return raw, nil
+}
+
+// fitChatPayload marshals a `newChatMessage` body, cutting the top-level text
+// when it would not fit in a Web Push payload. Returns the marshaled JSON.
+//
+// chat の本文は最大 2000 文字 (日本語で 6000 B) で、それだけで上限を超える。
+// 縮めないと通知そのものが送られない (#3438 のレビュー)。SW は本文を通知の
+// 1 行に入れるだけなので、先頭を残して末尾を「…」で切る。core/chat 側は
+// body を SW が読む項目に絞ってあり、本文以外は小さい。
+func fitChatPayload(body map[string]any) ([]byte, error) {
+	raw, err := json.Marshal(body)
+	if err != nil || len(raw) <= maxPushBodyBytes {
+		return raw, err
+	}
+	if text, _ := body["text"].(string); text != "" {
+		work := make(map[string]any, len(body))
+		maps.Copy(work, body)
+		// 見積りではなく実際に marshal して二分探索する (shrinkNoteText と同じ理由)。
+		lo, hi := 0, len(text)
+		var best []byte
+		for lo <= hi {
+			mid := (lo + hi) / 2
+			work["text"] = truncateGraphemes(text, mid) + "\u2026"
+			out, merr := json.Marshal(work)
+			if merr == nil && len(out) <= maxPushBodyBytes {
+				best = out
+				lo = mid + 1
+			} else {
+				hi = mid - 1
+			}
+		}
+		if best != nil {
+			slog.Debug("webpush: truncated chat text to fit payload", "was", len(raw), "now", len(best))
+			return best, nil
+		}
+	}
+	slog.Warn("webpush: chat payload exceeds the Web Push limit and could not be shrunk",
+		"bytes", len(raw), "limit", maxPushBodyBytes)
+	return raw, nil
+}
+
+// truncateGraphemes returns the longest prefix of s within n bytes that ends
+// on a grapheme cluster boundary.
+//
+// rune の境界で切ると、ZWJ でつないだ絵文字・国旗 (地域指示子 2 つ)・結合文字の
+// 途中で切れ、家族の絵文字が 1 人になる・国旗が別の文字になる・「が」が「か」に
+// なる (#3438 のレビュー)。書記素クラスタの切れ目まで戻す。
+func truncateGraphemes(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	if n >= len(s) {
+		return s
+	}
+	end := 0
+	rest := s
+	state := -1
+	for rest != "" {
+		var cluster string
+		cluster, rest, _, state = uniseg.FirstGraphemeClusterInString(rest, state)
+		if end+len(cluster) > n {
+			break
+		}
+		end += len(cluster)
+	}
+	return s[:end]
 }
 
 // shrinkNoteText finds the longest cut of text that still fits, mutating work.
