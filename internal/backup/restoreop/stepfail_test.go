@@ -103,7 +103,7 @@ func TestStepNotWritten(t *testing.T) {
 			e.db.mu.Unlock()
 			e.waitStep(rec.OpID, c.final)
 			assert.Equal(t, "current", e.db.content(testDB))
-			require.Eventually(t, func() bool { return maintenanceOver(e) }, 5*time.Second, 5*time.Millisecond)
+			e.waitMaintenanceGone(5 * time.Second)
 			require.Eventually(t, func() bool { return !e.slot.isHeld() }, 5*time.Second, 5*time.Millisecond)
 			e.mu.Lock()
 			defer e.mu.Unlock()
@@ -168,7 +168,7 @@ func TestStepNotWritten_Notifies(t *testing.T) {
 			broken.Store(false)
 			e.interceptCmd(nil)
 			e.waitStep(rec.OpID, StepReverted)
-			require.Eventually(t, func() bool { return maintenanceOver(e) }, 5*time.Second, 5*time.Millisecond)
+			e.waitMaintenanceGone(5 * time.Second)
 			e.mu.Lock()
 			defer e.mu.Unlock()
 			assert.Len(t, e.notes, 1, "notified once")
@@ -235,7 +235,7 @@ func TestStepNotWritten_AtStart(t *testing.T) {
 	f.wait(t)
 	e.waitStep("restore-0123456789abcdef", StepReverted)
 	assert.Equal(t, "current", e.db.content(testDB))
-	require.Eventually(t, func() bool { return maintenanceOver(e) }, 5*time.Second, 5*time.Millisecond)
+	e.waitMaintenanceGone(5 * time.Second)
 }
 
 // TestRecover_ResumingWithNamesNotSwapped checks that a resuming record whose
@@ -249,16 +249,4 @@ func TestRecover_ResumingWithNamesNotSwapped(t *testing.T) {
 	st := e.maintenance()
 	require.NotNil(t, st)
 	assert.Equal(t, maintmode.PhaseHeld, st.Phase, "not resumed")
-}
-
-// maintenanceOver reports whether the maintenance is over, without failing
-// the test: it runs in the condition of Eventually, outside the test's
-// goroutine.
-//
-// e.maintenance は読めないと require で落とす。Eventually の条件は別の goroutine で
-// 回り、期限が切れた後も走り続けることがあるので、テストが終わった後に t へ書いて
-// panic し、元の失敗を消した (#3369)。
-func maintenanceOver(e *env) bool {
-	st, err := e.maint.Get(context.Background())
-	return err == nil && st == nil
 }

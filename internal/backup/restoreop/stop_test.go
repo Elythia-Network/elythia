@@ -115,7 +115,7 @@ func TestStoppedMidway_RecoveryFinishesTheOperation(t *testing.T) {
 			e.start()
 			e.waitStep(rec.OpID, c.final)
 			assert.Equal(t, c.content, e.db.content(testDB))
-			require.Eventually(t, func() bool { return e.maintenance() == nil }, 5*time.Second, 5*time.Millisecond)
+			e.waitMaintenanceGone(5 * time.Second)
 			e.mu.Lock()
 			defer e.mu.Unlock()
 			assert.Empty(t, e.notes)
@@ -141,7 +141,7 @@ func TestStoppedMidway_WhileReverting(t *testing.T) {
 			e.start()
 			e.waitStep(rec.OpID, StepReverted)
 			assert.Equal(t, "current", e.db.content(testDB))
-			require.Eventually(t, func() bool { return e.maintenance() == nil }, 5*time.Second, 5*time.Millisecond)
+			e.waitMaintenanceGone(5 * time.Second)
 			e.mu.Lock()
 			defer e.mu.Unlock()
 			assert.Empty(t, e.notes)
@@ -160,7 +160,7 @@ func TestStoppedMidway_WhileWaiting(t *testing.T) {
 		e.db.conns[testDB] = 1
 		e.db.mu.Unlock()
 		require.NoError(t, e.m.Confirm(context.Background(), rec.OpID))
-		require.Eventually(t, func() bool { st := e.maintenance(); return st != nil }, 5*time.Second, 5*time.Millisecond)
+		e.waitMaintenance(func(st *maintmode.State) bool { return st != nil }, 5*time.Second)
 		e.stop()
 		assertLeftForRecovery(t, e, rec.OpID)
 		e.db.mu.Lock()
@@ -169,7 +169,7 @@ func TestStoppedMidway_WhileWaiting(t *testing.T) {
 		e.start()
 		e.waitStep(rec.OpID, StepAborted)
 		assert.Equal(t, map[string]string{testDB: "current", "postgres": "maint"}, e.db.names())
-		require.Eventually(t, func() bool { return e.maintenance() == nil }, 5*time.Second, 5*time.Millisecond)
+		e.waitMaintenanceGone(5 * time.Second)
 	})
 	t.Run("for the processes to serve again", func(t *testing.T) {
 		e := newEnv(t, func(o *Options) { o.ResumeTimeout = time.Hour })
@@ -201,10 +201,7 @@ func TestStoppedMidway_WhileAborting(t *testing.T) {
 	p.setFailBack(true)
 	require.NoError(t, e.m.Confirm(context.Background(), rec.OpID))
 	e.waitStep(rec.OpID, StepAborting)
-	require.Eventually(t, func() bool {
-		st := e.maintenance()
-		return st != nil && st.Phase == maintmode.PhaseResuming
-	}, 5*time.Second, 5*time.Millisecond)
+	e.waitMaintenance(func(st *maintmode.State) bool { return st != nil && st.Phase == maintmode.PhaseResuming }, 5*time.Second)
 	e.stop()
 	assertLeftForRecovery(t, e, rec.OpID)
 	assert.Contains(t, e.db.names(), rec.Target, "dropped only after the processes are back")
@@ -215,7 +212,7 @@ func TestStoppedMidway_WhileAborting(t *testing.T) {
 	e.start()
 	e.waitStep(rec.OpID, StepAborted)
 	assert.NotContains(t, e.db.names(), rec.Target)
-	require.Eventually(t, func() bool { return e.maintenance() == nil }, 5*time.Second, 5*time.Millisecond)
+	e.waitMaintenanceGone(5 * time.Second)
 }
 
 // TestStoppedMidway_WhileRecovering stops the service again while the
@@ -233,10 +230,7 @@ func TestStoppedMidway_WhileRecovering(t *testing.T) {
 	p := e.process("p1")
 	p.setFailBack(true)
 	e.start()
-	require.Eventually(t, func() bool {
-		st, ok := e.maintenanceNow()
-		return ok && st != nil && st.Phase == maintmode.PhaseResuming
-	}, 5*time.Second, 5*time.Millisecond)
+	e.waitMaintenance(func(st *maintmode.State) bool { return st != nil && st.Phase == maintmode.PhaseResuming }, 5*time.Second)
 	e.stop()
 	assertLeftForRecovery(t, e, "restore-again")
 	assert.Contains(t, e.db.names(), tgt)

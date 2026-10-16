@@ -62,7 +62,7 @@ func TestRollback_HappyPath(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, KindRollback, got.Kind)
 	require.NoError(t, e.m.Confirm(context.Background(), rec.OpID))
-	require.Eventually(t, func() bool { return e.maintenance() != nil }, 2*time.Second, 5*time.Millisecond)
+	e.waitMaintenance(func(st *maintmode.State) bool { return st != nil }, 2*time.Second)
 	assert.Equal(t, maintmode.KindRollback, e.maintenance().Kind)
 	e.db.mu.Lock()
 	e.db.conns[testDB] = 0
@@ -256,7 +256,7 @@ func TestRollback_NeverDropsTheKeptDatabase(t *testing.T) {
 		assert.Contains(t, got.Error, "did not let go")
 		assertKept(t, e)
 		assert.Equal(t, "current", e.db.content(testDB))
-		require.Eventually(t, func() bool { st, ok := e.maintenanceNow(); return ok && st == nil }, 2*time.Second, 5*time.Millisecond)
+		e.waitMaintenanceGone(2 * time.Second)
 	})
 	t.Run("switch refused (A1)", func(t *testing.T) {
 		e := newEnv(t)

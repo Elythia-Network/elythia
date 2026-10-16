@@ -66,7 +66,7 @@ func TestRecover_RollbackKeepsTheKeptDatabase(t *testing.T) {
 			e.waitStep(rec.OpID, c.final)
 			assert.Equal(t, notSwapped, e.db.names(), "the kept database stays")
 			assert.Empty(t, e.db.drops)
-			require.Eventually(t, func() bool { return e.maintenance() == nil }, 2*time.Second, 5*time.Millisecond)
+			e.waitMaintenanceGone(2 * time.Second)
 		})
 	}
 

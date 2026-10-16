@@ -79,13 +79,13 @@ func TestRecover(t *testing.T) {
 		e, rec := crashed(t, StepAborting, notSwapped, maintmode.PhaseEntering, "")
 		e.waitStep(rec.OpID, StepAborted)
 		assert.Equal(t, map[string]string{testDB: "current"}, e.db.names())
-		require.Eventually(t, func() bool { return e.maintenance() == nil }, 2*time.Second, 5*time.Millisecond)
+		e.waitMaintenanceGone(2 * time.Second)
 	})
 	t.Run("entering before the switch resumes and drops", func(t *testing.T) {
 		e, rec := crashed(t, StepEntering, notSwapped, maintmode.PhaseHeld, "")
 		e.waitStep(rec.OpID, StepAborted)
 		assert.Equal(t, map[string]string{testDB: "current"}, e.db.names())
-		require.Eventually(t, func() bool { return e.maintenance() == nil }, 2*time.Second, 5*time.Millisecond)
+		e.waitMaintenanceGone(2 * time.Second)
 	})
 	t.Run("entering before Enter drops", func(t *testing.T) {
 		e, rec := crashed(t, StepEntering, notSwapped, "", "")
@@ -100,7 +100,7 @@ func TestRecover(t *testing.T) {
 		names := e.db.names()
 		assert.Equal(t, "current", names[testDB])
 		assert.Equal(t, "restored", names[got.Aside])
-		require.Eventually(t, func() bool { return e.maintenance() == nil }, 2*time.Second, 5*time.Millisecond)
+		e.waitMaintenanceGone(2 * time.Second)
 	})
 	t.Run("switched puts the previous back", func(t *testing.T) {
 		e, rec := crashed(t, StepSwitched, swapped, maintmode.PhaseHeld, "")
@@ -135,7 +135,7 @@ func TestRecover(t *testing.T) {
 		e.waitStep(rec.OpID, StepReverted)
 		assert.Equal(t, names, e.db.names())
 		assert.Equal(t, 0, e.db.switches, "it does not swap again")
-		require.Eventually(t, func() bool { return e.maintenance() == nil }, 2*time.Second, 5*time.Millisecond)
+		e.waitMaintenanceGone(2 * time.Second)
 	})
 	t.Run("unrecognised names give up", func(t *testing.T) {
 		weird := map[string]string{testDB: "x", tgt: "y", before: "z"}

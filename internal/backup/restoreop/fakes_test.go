@@ -15,6 +15,7 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/elythia-network/elythia/internal/backup"
@@ -704,14 +705,28 @@ func (e *env) prepare() (*Record, string) {
 	return rec, ticket
 }
 
-// maintenanceNow reads the maintenance state without touching t, for the
-// conditions of require.Eventually. ok is false when it cannot be read.
+// waitMaintenance waits until cond holds for the maintenance state. When it
+// does not within wait, the failure says why: the last state read, or the
+// error that kept it from being read.
 //
-// 条件は別の goroutine で動くので、t に触る maintenance() を使うと、待ちが切れた
-// 後に条件が t に触れて panic し、元の失敗を隠す (#3369)。
-func (e *env) maintenanceNow() (st *maintmode.State, ok bool) {
-	st, err := e.maint.Get(context.Background())
-	return st, err == nil
+// 条件の中で maintenance() (require で t に触る) を使わない。条件は別の goroutine
+// で動き、待ちが切れた後に t に触れると panic して元の失敗を隠す (#3369)。読めない
+// 誤りも捨てずに、EventuallyWithT の失敗の文面に残す。
+func (e *env) waitMaintenance(cond func(st *maintmode.State) bool, wait time.Duration, msgAndArgs ...any) {
+	e.t.Helper()
+	require.EventuallyWithT(e.t, func(c *assert.CollectT) {
+		st, err := e.maint.Get(context.Background())
+		if !assert.NoError(c, err, "read the maintenance") {
+			return
+		}
+		assert.True(c, cond(st), "the maintenance is %+v", st)
+	}, wait, 5*time.Millisecond, msgAndArgs...)
+}
+
+// waitMaintenanceGone waits until no maintenance is active.
+func (e *env) waitMaintenanceGone(wait time.Duration, msgAndArgs ...any) {
+	e.t.Helper()
+	e.waitMaintenance(func(st *maintmode.State) bool { return st == nil }, wait, msgAndArgs...)
 }
 
 func (e *env) maintenance() *maintmode.State {

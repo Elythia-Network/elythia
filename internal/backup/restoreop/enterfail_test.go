@@ -23,8 +23,7 @@ func TestEnterFailedAfterWriting(t *testing.T) {
 		h.afterEnter = func() error { return errors.New("i/o timeout reading the reply") }
 		require.NoError(t, e.m.Confirm(context.Background(), rec.OpID))
 		e.waitStep(rec.OpID, StepAborted)
-		require.Eventually(t, func() bool { return e.maintenance() == nil }, 5*time.Second, 5*time.Millisecond,
-			"the maintenance it wrote is ended")
+		e.waitMaintenanceGone(5*time.Second, "the maintenance it wrote is ended")
 		assert.Equal(t, "current", e.db.content(testDB))
 	})
 	t.Run("state written late", func(t *testing.T) {
@@ -40,7 +39,7 @@ func TestEnterFailedAfterWriting(t *testing.T) {
 		h.mu.Unlock()
 		require.NoError(t, e.m.Confirm(context.Background(), rec.OpID))
 		e.waitStep(rec.OpID, StepAborted)
-		require.Eventually(t, func() bool { return e.maintenance() == nil }, 5*time.Second, 5*time.Millisecond)
+		e.waitMaintenanceGone(5 * time.Second)
 	})
 	t.Run("state cannot be cleared", func(t *testing.T) {
 		var h *hookMaint

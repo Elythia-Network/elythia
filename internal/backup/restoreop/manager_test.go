@@ -68,7 +68,7 @@ func TestRestore_DoesNotSwitchBeforeHeld(t *testing.T) {
 	assert.Equal(t, 0, e.db.switches)
 	assert.Equal(t, "current", e.db.content(testDB))
 	assert.NotContains(t, e.db.names(), rec.Target, "the new database is dropped")
-	require.Eventually(t, func() bool { st, ok := e.maintenanceNow(); return ok && st == nil }, 2*time.Second, 5*time.Millisecond)
+	e.waitMaintenanceGone(2 * time.Second)
 }
 
 // TestRestore_SwitchRefusedKeepsCurrent (R1 at this level): when the name
@@ -86,7 +86,7 @@ func TestRestore_SwitchRefusedKeepsCurrent(t *testing.T) {
 	assert.Equal(t, "current", e.db.content(testDB))
 	assert.NotContains(t, e.db.names(), rec.Target)
 	assert.NotContains(t, e.db.drops, testDB, "the current database is never dropped")
-	require.Eventually(t, func() bool { return e.maintenance() == nil }, 2*time.Second, 5*time.Millisecond)
+	e.waitMaintenanceGone(2 * time.Second)
 }
 
 // TestRestore_PrepareFailureDropsOnlyTheNewDatabase (R3).
@@ -122,7 +122,7 @@ func TestRestore_FailureAfterSwitchPutsThePreviousBack(t *testing.T) {
 			assert.Equal(t, "restored:20261010T120000Z", names[got.Aside], "the restored one is kept aside")
 			assert.True(t, strings.HasPrefix(got.Aside, testDB+"_rolled_back_"))
 			assert.NotContains(t, names, rec.Before)
-			require.Eventually(t, func() bool { return e.maintenance() == nil }, 2*time.Second, 5*time.Millisecond)
+			e.waitMaintenanceGone(2 * time.Second)
 		})
 	}
 }
@@ -143,14 +143,18 @@ func TestRestore_ResumeFailurePutsThePreviousBack(t *testing.T) {
 	// する。reverting を見てすぐ戻れるようにすると、まだ resuming のうちに判定役が
 	// メンテナンスを外し、戻す処理は「戻した DB で動いているかもしれない」として運営者に
 	// 渡す (unknown)。
-	require.Eventually(t, func() bool {
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
 		got, err := e.store.Get(context.Background(), rec.OpID)
-		if err == nil && got.Step == StepReverted {
-			return true
+		if !assert.NoError(c, err, "read the record") || got.Step == StepReverted {
+			return
 		}
-		st, ok := e.maintenanceNow()
-		return ok && st != nil && st.OpID == rec.OpID && st.Phase != maintmode.PhaseResuming
-	}, 10*time.Second, 5*time.Millisecond, "the maintenance is not entered again")
+		st, err := e.maint.Get(context.Background())
+		if !assert.NoError(c, err, "read the maintenance") {
+			return
+		}
+		assert.True(c, st != nil && st.OpID == rec.OpID && st.Phase != maintmode.PhaseResuming,
+			"the maintenance is not entered again: %+v", st)
+	}, 10*time.Second, 5*time.Millisecond)
 	p.setFailBack(false)
 	e.waitStep(rec.OpID, StepReverted)
 	assert.Equal(t, "current", e.db.content(testDB))
