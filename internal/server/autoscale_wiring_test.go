@@ -582,7 +582,14 @@ func TestStartAutoScale_CappedResizeCommitsTheAppliedCount(t *testing.T) {
 	runner, err := startAutoScale(context.Background(), cfg, d, m, nil)
 	require.NoError(t, err)
 	require.NotNil(t, runner)
-	t.Cleanup(func() { runner.Stop(context.Background()) })
+	// 後片付けの Stop にも期限を付ける。下の t.Fatal で抜けたときもこれが走るので、
+	// 期限が無いと、tick が Resize の中で永久に固まる回帰では -timeout まで戻らず、
+	// t.Fatal の文言も出ない (#3369 のレビュー2周目で実測)。
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		runner.Stop(ctx)
+	})
 
 	// **起動時の Resize を数えない。** startAutoScale は probe 1 回 +
 	// 管理キューぶんの初期化で既に 8 回呼んでいるので、単純な下限で待つと
@@ -603,6 +610,21 @@ func TestStartAutoScale_CappedResizeCommitsTheAppliedCount(t *testing.T) {
 		}
 	}
 
+	// **止めてから台帳を読む。** tick は Resize の前に target を台帳へ積み
+	// (maxWorkersGlobal の予約、#1290)、Resize の後で実際の本数に書き直す。
+	// Resize の回数は Resize の入り口で数えるので、数えた直後に読むと、次の
+	// tick がまだ Resize の中にいて target が見える (高負荷の make check で
+	// 期待 2・実際 3 で落ちた、#3369)。Stop は処理中の tick を終わらせてから
+	// 戻るので、その後の台帳は最後に終わった tick が書いた値になる。
+	stopCtx, cancelStop := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelStop()
+	runner.Stop(stopCtx)
+	// Stop は期限が来ても戻る。そのときは tick が残っていて台帳の読みが競合に
+	// 戻るので、ここで止める (Resize の中で固まる回帰を、永久に固まる形でも
+	// テストの上限まで待たない。後片付けの Stop も期限付き)。
+	if stopCtx.Err() != nil {
+		t.Fatal("autoscale tick goroutines did not exit within 5s of Stop")
+	}
 	runner.mu.Lock()
 	ledger := runner.workerCounts["deliver"]
 	runner.mu.Unlock()
