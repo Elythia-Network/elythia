@@ -30,7 +30,8 @@ import (
 	"github.com/elythia-network/elythia/internal/server"
 )
 
-// shutdownTimeout bounds the graceful shutdown after a signal.
+// shutdownTimeout bounds the graceful shutdown after a signal or a start
+// failure.
 //
 // docker の既定の停止猶予 (10 秒) より短くする。終了の後に Sentry の flush
 // (最大 2 秒、internal/sentry の flushTimeout) が続くので、それを足しても 10 秒に
@@ -72,6 +73,8 @@ type env struct {
 	// signalContext is canceled when the process is asked to stop.
 	signalContext func() (context.Context, context.CancelFunc)
 	createFile    func(path string) (io.WriteCloser, error)
+	// shutdownTimeout overrides the shutdownTimeout constant when non-zero.
+	shutdownTimeout time.Duration
 }
 
 func defaultEnv() env {
@@ -129,7 +132,9 @@ func setupLogging(w io.Writer) *slog.Logger {
 
 // Serve implements "elythia serve": it starts the server and blocks until
 // SIGINT / SIGTERM, then shuts down gracefully. It returns the process exit
-// code.
+// code: 0 after a signal, non-zero when the server failed to start or stopped
+// serving with an error, in which case it shuts down without waiting for a
+// signal.
 func Serve(args []string) int { return serve(defaultEnv(), args) }
 
 // DumpRoutes implements "elythia dump-routes": it constructs the server,
@@ -202,25 +207,53 @@ func serve(e env, args []string) int {
 	ctx, stop := e.signalContext()
 	defer stop()
 
+	// Start は listener を閉じるまで返らない。正常な停止 (Shutdown の後の
+	// http.ErrServerClosed) では nil を返すので、エラーで返ったときだけ起動の失敗と
+	// みなす。listen に失敗したまま生き続けると、コンテナの再起動にもヘルスチェック
+	// にも任せられないので、シグナルを待たずに終了処理へ進み 0 以外で終える (#3633)。
+	// ログは goroutine の中で出す。シグナルの後 (終了処理の最中) に返ったエラーは
+	// 下の select では受けないので、ここで出さないと残らない。
+	startErr := make(chan error, 1)
+	startDone := make(chan struct{})
 	go func() {
+		defer close(startDone)
 		if err := srv.Start(); err != nil {
 			log.Error("server error", "error", err)
+			startErr <- err
 		}
 	}()
 
-	<-ctx.Done()
-	log.Info("shutting down server...")
+	exitCode := 0
+	select {
+	case <-ctx.Done():
+		log.Info("shutting down server...")
+	case <-startErr:
+		log.Info("shutting down server after a start failure...")
+		exitCode = 1
+	}
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	// 0 のときは定数を使う。テストの env はこのフィールドを埋めないので、既定を
+	// 0 で表す。
+	timeout := e.shutdownTimeout
+	if timeout == 0 {
+		timeout = shutdownTimeout
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Error("server shutdown error", "error", err)
 		keepRedis = errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
 	}
+	// Start が終了処理の最中にエラーで返ったとき、そのログをプロセスの終了より前に
+	// 出し切る。待つのは終了処理の期限までで、期限は延ばさない。
+	select {
+	case <-startDone:
+	case <-shutdownCtx.Done():
+	}
 
 	fmt.Fprintln(e.stdout, "Elythia stopped.")
-	return 0
+	return exitCode
 }
 
 // processID names this process in the maintenance reports, as the judge

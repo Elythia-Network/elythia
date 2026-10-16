@@ -637,6 +637,43 @@ MK_ONLY_QUEUE=1 ./built/elythia serve -config .config/default.yml
 前提で、特に `redisForJobQueue` がずれていると Web が積んだジョブを配送ノードが永久に
 拾わない。
 
+**同じホストで複数のプロセスを動かすときは、listen の先をプロセスごとに分ける。**
+「同じ設定ファイル」は DB と Redis の向き先の話で、`port` / `socket` まで同じにすると
+2 つ目以降のプロセスが listen できない。配送ノードも `/healthz` のために listen する
+([下](#各ノードが担うもの)) ので、Web と配送を同じホストで動かす場合や、配送を 2 つ以上
+動かす場合も当たる。`port` / `socket` は、設定ファイルはそのままにして環境変数で上書きできる。
+
+```bash
+# 同じホストで Web と配送を動かす例 (配送側の port だけを変える)
+MK_ONLY_SERVER=1 ./built/elythia serve -config .config/default.yml
+MK_ONLY_QUEUE=1 MK_PORT=3001 ./built/elythia serve -config .config/default.yml
+```
+
+UNIX ソケットで待ち受けている (`socket`) なら、`MK_SOCKET` でプロセスごとに別の path に
+する。**同じ path のままだと、後から起動したプロセスが先のプロセスのソケットファイルを
+消して listen し直す** (古いソケットを消してから listen する作りのため。先のプロセスは
+動き続けるが、その path では受けなくなる)。帰結は次の 2 つで、どちらも終了コードには
+出ない。
+
+- Web と配送で path が同じだと、後から起動した方が path を持つ。配送ノードが持つと、
+  nginx からの要求は `/healthz` 以外すべて 404 (メンテナンス中は 503) になり、サイト全体が落ちて見える
+- 先のプロセスが止まると、そのときに path を名前で消すので、後のプロセスのソケット
+  ファイルも消える。後のプロセスは動いたまま、どこからも受けなくなる
+
+`pidFile` を設定しているなら、2 つ目以降のプロセスはそれも別の path にするか外す。同じ
+path だと、生きている先のプロセスを指しているので `another instance appears to be running`
+で起動を拒む (終了コード 1、#497)。設定ファイルに `pidFile` が書いてあれば `MK_PIDFILE` で
+別の path に上書きできる。空にしても外せないので、外すならプロセスごとの設定ファイルを分ける。
+
+**listen できないと `elythia serve` は終了コード 1 で終わる (#3633)。** 以前は
+listen に失敗してもログを出して動き続け、配送ノードなら配送も続けていた。今は
+`Restart=always` の systemd ([例](#systemdユニット例)) や、host network で
+`restart:` を付けたコンテナでは、listen の先が重なったまま再起動を繰り返し、その間の
+配送はほぼ止まる。ログの `server error` に listen の失敗 (`address already in use`
+など) が出ていたら、上のとおりプロセスごとに分ける。コンテナごとに network namespace が
+分かれる通常の compose では、TCP の port は重ならない (UNIX ソケットを置くディレクトリを
+複数のコンテナで共有しているなら、path は重なる)。
+
 `redisForPubsub` などの `redisFor*` は**役割の指定ではない**。あれは用途ごとの Redis
 接続先で、Web ノードも `redisForJobQueue` を読んで enqueue する。
 
@@ -896,6 +933,12 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 ```
+
+起動の途中で失敗すると (listen できない、ジョブキューの worker を始められない、など)、
+`elythia serve` は終了処理をしてから終了コード 1 で終わり、`Restart=always` で起動し
+直される (#3633)。同じホストで Web と配送を別のユニットにするなら、片方に
+`Environment=MK_PORT=3001` (UNIX ソケットなら `MK_SOCKET`) を足して listen の先を分ける
+([Web と配送を別ノードに分ける](#web-と配送を別ノードに分ける))。
 
 ## フロントエンド配信
 
