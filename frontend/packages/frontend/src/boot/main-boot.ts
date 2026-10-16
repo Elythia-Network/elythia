@@ -12,7 +12,7 @@ import type { Component } from 'vue';
 import type { Keymap } from '@/utility/hotkey.js';
 import type { NightMeteorController } from '@/utility/night-meteor-effect.js';
 import { i18n } from '@/i18n.js';
-import { alert, confirm, popup, post } from '@/os.js';
+import { alert, confirm, popup, post, postFormComponent, preloadPostFormDialog } from '@/os.js';
 import { useStream } from '@/stream.js';
 import * as sound from '@/utility/sound.js';
 import { $i } from '@/i.js';
@@ -33,9 +33,16 @@ import { unisonReload } from '@/utility/unison-reload.js';
 import { isBirthday } from '@/utility/is-birthday.js';
 import { seasonalScreenEffectOf } from '@/utility/seasonal-screen-effect.js';
 import { themeManager } from '@/theme.js';
+import { runWhenIdle } from '@/utility/preloadable-component.js';
 
 export async function mainBoot() {
 	const { isClientUpdated, clientUpdate, lastVersion } = await common(async () => {
+		// Elythia: タイムラインに固定の投稿フォームを出している人は、UI と並べて先に読み始める。
+		// タイムラインより後に差し込まれて一覧がずれるのを避けるため (#3613、pages/timeline.vue)
+		if ($i && prefer.s.showFixedPostForm) {
+			postFormComponent.preload().catch(() => { /* タイムラインが読み込み直す */ });
+		}
+
 		let uiStyle = ui;
 		const searchParams = new URLSearchParams(window.location.search);
 
@@ -132,6 +139,11 @@ export async function mainBoot() {
 	//#endregion
 
 	if ($i) {
+		// Elythia: 投稿フォームは起動時の JS に入れず、空き時間に先に読み込む (#3613、os.ts の post())
+		runWhenIdle(() => {
+			preloadPostFormDialog().catch(() => { /* post() で読み込み直す */ });
+		});
+
 		store.loaded.then(async () => {
 			if (store.s.accountSetupWizard !== -1) {
 				const { dispose } = popup(defineAsyncComponent(() => import('@/components/MkUserSetupDialog.vue')), {}, {

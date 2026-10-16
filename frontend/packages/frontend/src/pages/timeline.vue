@@ -27,13 +27,12 @@ SPDX-License-Identifier: AGPL-3.0-only
 </template>
 
 <script lang="ts" setup>
-import { computed, watch, provide, useTemplateRef, ref, onMounted, onActivated } from 'vue';
+import { computed, watch, provide, useTemplateRef, ref, onMounted, onActivated, defineAsyncComponent } from 'vue';
 import type { Tab } from '@/components/global/MkPageHeader.tabs.vue';
 import type { MenuItem } from '@/types/menu.js';
 import type { BasicTimelineType } from '@/timelines.js';
 import type { PageHeaderItem } from '@/types/page-header.js';
 import MkStreamingNotesTimeline from '@/components/MkStreamingNotesTimeline.vue';
-import MkPostForm from '@/components/MkPostForm.vue';
 import * as os from '@/os.js';
 import { store } from '@/store.js';
 import { i18n } from '@/i18n.js';
@@ -45,6 +44,11 @@ import { deepMerge } from '@/utility/merge.js';
 import { miLocalStorage } from '@/local-storage.js';
 import { availableBasicTimelines, hasWithReplies, isAvailableBasicTimeline, isBasicTimeline, basicTimelineIconClass } from '@/timelines.js';
 import { prefer } from '@/preferences.js';
+
+// Elythia: 固定の投稿フォームは設定で出すときだけ使うので、起動時の JS に入れない (#3613)。
+// 読み込み済み (起動の最初か空き時間に先読みしたもの) なら同期的に使い、一覧の上に後から
+// 差し込まれてずれるのを避ける。まだのときだけ読み込みを待つ。
+const MkPostForm = os.postFormComponent.loaded ?? defineAsyncComponent(() => os.postFormComponent.preload());
 
 const tlComponent = useTemplateRef('tlComponent');
 
