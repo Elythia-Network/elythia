@@ -40,6 +40,9 @@ type ChartHook interface {
 
 // Handler handles user-related API endpoints.
 type Handler struct {
+	// relationCache は閲覧者のミュート・ブロックの一覧を要求をまたいで持つ
+	// (#3607)。nil なら repository から読む。
+	relationCache      *repository.RelationCache
 	userService        *user.Service
 	followingService   *corefollowing.Service
 	noteRepo           repository.NoteRepository
@@ -882,7 +885,7 @@ func (h *Handler) Notes(c echo.Context) error {
 	// ListByUserIDFiltered は visibility のみ push down するため、ミュート/
 	// ブロックした相手の renote 連鎖や mute 対象 instance の note がここを通る
 	// までフィルタされず漏れていた。set のロード/適用失敗は fail-closed で 500。
-	sets, err := notesfilter.LoadMuteBlockSets(viewer, h.mutingRepo, h.blockingRepo, h.channelMutingRepo, h.userRepo)
+	sets, err := notesfilter.LoadMuteBlockSetsCached(h.relationCache, viewer, h.mutingRepo, h.blockingRepo, h.channelMutingRepo, h.userRepo)
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -1372,4 +1375,10 @@ func pinnedPageVisibleTo(p *model.Page, viewer *model.User) bool {
 	}
 	// 非公開の Page は本人にだけ返す (`pages/show` の core service と同じ判定)。
 	return viewer != nil && viewer.ID == p.UserID
+}
+
+// SetRelationCache wires the per-user relation cache used by the mute / block
+// filter (#3607). nil keeps reading the repositories.
+func (h *Handler) SetRelationCache(rc *repository.RelationCache) {
+	h.relationCache = rc
 }

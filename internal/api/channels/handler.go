@@ -24,6 +24,9 @@ import (
 
 // Handler handles channel-related API endpoints.
 type Handler struct {
+	// relationCache は閲覧者のミュート・ブロックの一覧を要求をまたいで持つ
+	// (#3607)。nil なら repository から読む。
+	relationCache *repository.RelationCache
 	svc           *corechannel.Service
 	idGen         id.Generator
 	favoriteRepo  ChannelFavoriteRepository
@@ -691,7 +694,7 @@ func (h *Handler) Timeline(c echo.Context) error {
 	// チャンネルミュート自体は上の ApplyRenoteChannelMute が担うので、ここでは
 	// channelMutingRepo を渡さない (閲覧中チャンネルを巻き込まないため)。
 	if viewer != nil && h.blockingRepo != nil {
-		sets, err := notesfilter.LoadMuteBlockSets(viewer, h.userMutingRepo, h.blockingRepo, nil, h.userRepo)
+		sets, err := notesfilter.LoadMuteBlockSetsCached(h.relationCache, viewer, h.userMutingRepo, h.blockingRepo, nil, h.userRepo)
 		if err != nil {
 			return apierr.JSONInternalError(c)
 		}
@@ -919,4 +922,10 @@ func alreadyFollowing(c echo.Context) error {
 
 func notFollowing(c echo.Context) error {
 	return c.JSON(http.StatusBadRequest, apierr.Error("NOT_FOLLOWING", "You are not following that channel.", "1f87a25b-7c72-4ed1-b3c3-bcaf57636a64"))
+}
+
+// SetRelationCache wires the per-user relation cache used by the mute / block
+// filter (#3607). nil keeps reading the repositories.
+func (h *Handler) SetRelationCache(rc *repository.RelationCache) {
+	h.relationCache = rc
 }

@@ -52,6 +52,94 @@ type RenoteLookup interface {
 	FindManyByIDsWithUser(ids []string) ([]*model.Note, error)
 }
 
+// MuteeIDLister lists the ids a user mutes (active mutes only).
+// repository.MutingRepository satisfies it.
+type MuteeIDLister interface {
+	ListMuteeIDs(muterID string) ([]string, error)
+}
+
+// BlockerIDLister lists the ids of the users who block a user.
+// repository.BlockingRepository satisfies it.
+type BlockerIDLister interface {
+	ListBlockerIDs(blockeeID string) ([]string, error)
+}
+
+// ChannelMuteLister lists a user's active channel mutes.
+// repository.ChannelMutingRepository satisfies it.
+type ChannelMuteLister interface {
+	ListByUser(userID string) ([]*model.ChannelMuting, error)
+}
+
+// CachedListers returns listers that read from rc instead of the given
+// repositories (#3607). A nil repository stays nil (= that dimension is not
+// applied, as before), and a nil rc returns the repositories unchanged.
+//
+// 引数の repository を nil で渡している呼び出し (チャンネルのミュートを掛けない
+// clips / channels) は、キャッシュがあっても nil のまま返す。キャッシュの有無で
+// 絞り込む次元が変わらないようにするため。
+func CachedListers(
+	rc *repository.RelationCache,
+	muting MuteeIDLister,
+	blocking BlockerIDLister,
+	channelMuting ChannelMuteLister,
+) (MuteeIDLister, BlockerIDLister, ChannelMuteLister) {
+	if rc == nil {
+		return muting, blocking, channelMuting
+	}
+	if muting != nil {
+		muting = cachedMutees{rc}
+	}
+	if blocking != nil {
+		blocking = cachedBlockers{rc}
+	}
+	if channelMuting != nil {
+		channelMuting = cachedChannelMutes{rc}
+	}
+	return muting, blocking, channelMuting
+}
+
+// LoadMuteBlockSetsCached is LoadMuteBlockSets reading the lists through
+// CachedListers(rc, ...). A nil rc behaves exactly like LoadMuteBlockSets.
+func LoadMuteBlockSetsCached(
+	rc *repository.RelationCache,
+	viewer *model.User,
+	muting MuteeIDLister,
+	blocking BlockerIDLister,
+	channelMuting ChannelMuteLister,
+	profiles ProfileLookup,
+) (MuteBlockSets, error) {
+	m, b, cm := CachedListers(rc, muting, blocking, channelMuting)
+	return LoadMuteBlockSets(viewer, m, b, cm, profiles)
+}
+
+type cachedMutees struct{ rc *repository.RelationCache }
+
+func (c cachedMutees) ListMuteeIDs(muterID string) ([]string, error) {
+	return c.rc.MutedUserIDs(muterID)
+}
+
+type cachedBlockers struct{ rc *repository.RelationCache }
+
+func (c cachedBlockers) ListBlockerIDs(blockeeID string) ([]string, error) {
+	return c.rc.BlockerIDs(blockeeID)
+}
+
+type cachedChannelMutes struct{ rc *repository.RelationCache }
+
+// ListByUser returns rows carrying only UserID and ChannelID, which is all
+// LoadMuteBlockSets reads.
+func (c cachedChannelMutes) ListByUser(userID string) ([]*model.ChannelMuting, error) {
+	ids, err := c.rc.MutedChannelIDs(userID)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]*model.ChannelMuting, 0, len(ids))
+	for _, id := range ids {
+		rows = append(rows, &model.ChannelMuting{UserID: userID, ChannelID: id})
+	}
+	return rows, nil
+}
+
 // LoadMuteBlockSets resolves the viewer's muted-user / blocker /
 // muted-channel / muted-instances sets for use by ApplyMuteBlockChannel.
 //
@@ -62,9 +150,9 @@ type RenoteLookup interface {
 // unwired repo means the feature is disabled in that deployment.
 func LoadMuteBlockSets(
 	viewer *model.User,
-	mutingRepo repository.MutingRepository,
-	blockingRepo repository.BlockingRepository,
-	channelMutingRepo repository.ChannelMutingRepository,
+	mutingRepo MuteeIDLister,
+	blockingRepo BlockerIDLister,
+	channelMutingRepo ChannelMuteLister,
 	profiles ProfileLookup,
 ) (MuteBlockSets, error) {
 	sets := MuteBlockSets{}

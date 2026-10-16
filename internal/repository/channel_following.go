@@ -28,19 +28,36 @@ type ChannelFollowingRepository interface {
 
 type channelFollowingRepository struct {
 	db *gorm.DB
+	rc *RelationCache
 }
 
 // NewChannelFollowingRepository creates a new ChannelFollowingRepository.
 func NewChannelFollowingRepository(db *gorm.DB) ChannelFollowingRepository {
-	return &channelFollowingRepository{db: db}
+	return NewChannelFollowingRepositoryWithRelationCache(db, nil)
+}
+
+// NewChannelFollowingRepositoryWithRelationCache creates a
+// ChannelFollowingRepository whose writes invalidate rc (the follower's
+// RelationChannelFollowing entry, #3607).
+func NewChannelFollowingRepositoryWithRelationCache(db *gorm.DB, rc *RelationCache) ChannelFollowingRepository {
+	return &channelFollowingRepository{db: db, rc: rc}
 }
 
 func (r *channelFollowingRepository) Create(f *model.ChannelFollowing) error {
-	return r.db.Create(f).Error
+	if err := r.db.Create(f).Error; err != nil {
+		return err
+	}
+	r.rc.Invalidate(RelationChannelFollowing, f.FollowerID)
+	return nil
 }
 
 func (r *channelFollowingRepository) Delete(f *model.ChannelFollowing) error {
-	return r.db.Delete(f).Error
+	owners, err := deleteByIDReturning(r.db, f, f.ID, "followerId")
+	if err != nil {
+		return err
+	}
+	r.rc.Invalidate(RelationChannelFollowing, append(owners, f.FollowerID)...)
+	return nil
 }
 
 func (r *channelFollowingRepository) FindByPair(followerID, channelID string) (*model.ChannelFollowing, error) {

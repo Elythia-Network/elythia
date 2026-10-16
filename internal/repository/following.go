@@ -3,6 +3,7 @@ package repository
 import (
 	"github.com/elythia-network/elythia/internal/model"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // FollowingRepository provides data access for the `following` table.
@@ -130,19 +131,35 @@ type FollowingRepository interface {
 
 type followingRepository struct {
 	db *gorm.DB
+	rc *RelationCache
 }
 
 // NewFollowingRepository creates a new FollowingRepository.
 func NewFollowingRepository(db *gorm.DB) FollowingRepository {
-	return &followingRepository{db: db}
+	return NewFollowingRepositoryWithRelationCache(db, nil)
+}
+
+// NewFollowingRepositoryWithRelationCache creates a FollowingRepository whose
+// writes invalidate rc (the follower's RelationFollowing entry, #3607).
+func NewFollowingRepositoryWithRelationCache(db *gorm.DB, rc *RelationCache) FollowingRepository {
+	return &followingRepository{db: db, rc: rc}
 }
 
 func (r *followingRepository) Create(f *model.Following) error {
-	return r.db.Create(f).Error
+	if err := r.db.Create(f).Error; err != nil {
+		return err
+	}
+	r.rc.Invalidate(RelationFollowing, f.FollowerID)
+	return nil
 }
 
 func (r *followingRepository) Delete(f *model.Following) error {
-	return r.db.Delete(f).Error
+	owners, err := deleteByIDReturning(r.db, f, f.ID, "followerId")
+	if err != nil {
+		return err
+	}
+	r.rc.Invalidate(RelationFollowing, append(owners, f.FollowerID)...)
+	return nil
 }
 
 func (r *followingRepository) FindByPair(followerID, followeeID string) (*model.Following, error) {
@@ -523,9 +540,16 @@ func (r *followingRepository) UpdateRelation(followerID, followeeID string, fiel
 	if len(fields) == 0 {
 		return nil
 	}
-	return r.db.Model(&model.Following{}).
+	if err := r.db.Model(&model.Following{}).
 		Where(`"followerId" = ? AND "followeeId" = ?`, followerID, followeeID).
-		Updates(fields).Error
+		Updates(fields).Error; err != nil {
+		return err
+	}
+	// 今のキャッシュは followee の集合しか持たないので、notify / withReplies の
+	// 更新では中身が変わらない。それでも書き込みはすべて捨てる、という形を
+	// 崩さない (後から列をキャッシュに足したときに捨て損ねない)。
+	r.rc.Invalidate(RelationFollowing, followerID)
+	return nil
 }
 
 // UpdateAllByFollower applies a partial field update to every Following row
@@ -534,17 +558,35 @@ func (r *followingRepository) UpdateAllByFollower(followerID string, fields map[
 	if len(fields) == 0 {
 		return nil
 	}
-	return r.db.Model(&model.Following{}).
+	if err := r.db.Model(&model.Following{}).
 		Where(`"followerId" = ?`, followerID).
-		Updates(fields).Error
+		Updates(fields).Error; err != nil {
+		return err
+	}
+	r.rc.Invalidate(RelationFollowing, followerID)
+	return nil
 }
 
 // DeleteAllByUser removes every Following row whose follower or followee is
 // userID.
+//
+// userID をフォローしていた全員の一覧から userID が消えるので、消した行の
+// followerId を RETURNING で受け取り、その全員の項目を捨てる。
 func (r *followingRepository) DeleteAllByUser(userID string) (int64, error) {
-	tx := r.db.Where(`"followerId" = ? OR "followeeId" = ?`, userID, userID).
-		Delete(&model.Following{})
-	return tx.RowsAffected, tx.Error
+	var deleted []model.Following
+	tx := r.db.Clauses(clause.Returning{Columns: []clause.Column{{Name: "followerId"}}}).
+		Where(`"followerId" = ? OR "followeeId" = ?`, userID, userID).
+		Delete(&deleted)
+	if tx.Error != nil {
+		return tx.RowsAffected, tx.Error
+	}
+	owners := make([]string, 0, len(deleted)+1)
+	owners = append(owners, userID)
+	for _, f := range deleted {
+		owners = append(owners, f.FollowerID)
+	}
+	r.rc.Invalidate(RelationFollowing, owners...)
+	return tx.RowsAffected, nil
 }
 
 // ListRemoteFollowerInboxes returns deduplicated inbox URLs for remote
