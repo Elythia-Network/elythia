@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -102,7 +103,7 @@ func TestStepNotWritten(t *testing.T) {
 			e.db.mu.Unlock()
 			e.waitStep(rec.OpID, c.final)
 			assert.Equal(t, "current", e.db.content(testDB))
-			require.Eventually(t, func() bool { return e.maintenance() == nil }, 5*time.Second, 5*time.Millisecond)
+			require.Eventually(t, func() bool { return maintenanceOver(e) }, 5*time.Second, 5*time.Millisecond)
 			require.Eventually(t, func() bool { return !e.slot.isHeld() }, 5*time.Second, 5*time.Millisecond)
 			e.mu.Lock()
 			defer e.mu.Unlock()
@@ -134,8 +135,12 @@ func TestStepNotWritten_Notifies(t *testing.T) {
 				if to == StepSwitched && failed.CompareAndSwap(false, true) {
 					broken.Store(true)
 					if !c.readable {
-						// go-redis が再試行しない種類の誤り。
-						e.mr.SetError("ERR the record is not available")
+						// go-redis が再試行しない種類の誤り。送る前にクライアント側で返す。
+						// miniredis の SetError は、プロセスの報告の MULTI と EXEC の間で
+						// 切り替わると、サーバー側の接続を MULTI のまま残す。go-redis はその
+						// 接続をプールへ戻すので、戻した後も +QUEUED しか返らず、報告が
+						// 止まってメンテナンスが外れなかった (#3369)。
+						e.interceptCmd(func(redis.Cmder) error { return errors.New("ERR the record is not available") })
 					}
 				}
 				if broken.Load() {
@@ -161,9 +166,9 @@ func TestStepNotWritten_Notifies(t *testing.T) {
 			}
 			assert.True(t, e.slot.isHeld(), "the slot is kept while it waits")
 			broken.Store(false)
-			e.mr.SetError("")
+			e.interceptCmd(nil)
 			e.waitStep(rec.OpID, StepReverted)
-			require.Eventually(t, func() bool { return e.maintenance() == nil }, 5*time.Second, 5*time.Millisecond)
+			require.Eventually(t, func() bool { return maintenanceOver(e) }, 5*time.Second, 5*time.Millisecond)
 			e.mu.Lock()
 			defer e.mu.Unlock()
 			assert.Len(t, e.notes, 1, "notified once")
@@ -181,11 +186,14 @@ func TestStepNotWritten_RecordGone(t *testing.T) {
 	e.process("p1")
 	rec, _ := e.prepare()
 	var once sync.Once
+	// 消せたかは、manager の goroutine ではなくテストの goroutine で確かめる
+	// (FailNow はテストの goroutine から呼ぶ)。
+	deleted := make(chan error, 1)
 	e.m.failStep = func(to string) error {
 		var err error
 		if to == StepSwitched {
 			once.Do(func() {
-				require.NoError(t, e.rdb.Del(context.Background(), "p:elythia:maintenance:restore:"+rec.OpID).Err())
+				deleted <- e.rdb.Del(context.Background(), "p:elythia:maintenance:restore:"+rec.OpID).Err()
 				err = errors.New("redis: write failed")
 			})
 		}
@@ -193,6 +201,12 @@ func TestStepNotWritten_RecordGone(t *testing.T) {
 	}
 	require.NoError(t, e.m.Confirm(context.Background(), rec.OpID))
 	require.Eventually(t, func() bool { return !e.slot.isHeld() }, 5*time.Second, 5*time.Millisecond)
+	select {
+	case err := <-deleted:
+		require.NoError(t, err)
+	default:
+		t.Fatal("writing switched did not fail")
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	require.Len(t, e.notes, 1)
@@ -221,7 +235,7 @@ func TestStepNotWritten_AtStart(t *testing.T) {
 	f.wait(t)
 	e.waitStep("restore-0123456789abcdef", StepReverted)
 	assert.Equal(t, "current", e.db.content(testDB))
-	require.Eventually(t, func() bool { return e.maintenance() == nil }, 5*time.Second, 5*time.Millisecond)
+	require.Eventually(t, func() bool { return maintenanceOver(e) }, 5*time.Second, 5*time.Millisecond)
 }
 
 // TestRecover_ResumingWithNamesNotSwapped checks that a resuming record whose
@@ -235,4 +249,16 @@ func TestRecover_ResumingWithNamesNotSwapped(t *testing.T) {
 	st := e.maintenance()
 	require.NotNil(t, st)
 	assert.Equal(t, maintmode.PhaseHeld, st.Phase, "not resumed")
+}
+
+// maintenanceOver reports whether the maintenance is over, without failing
+// the test: it runs in the condition of Eventually, outside the test's
+// goroutine.
+//
+// e.maintenance は読めないと require で落とす。Eventually の条件は別の goroutine で
+// 回り、期限が切れた後も走り続けることがあるので、テストが終わった後に t へ書いて
+// panic し、元の失敗を消した (#3369)。
+func maintenanceOver(e *env) bool {
+	st, err := e.maint.Get(context.Background())
+	return err == nil && st == nil
 }
