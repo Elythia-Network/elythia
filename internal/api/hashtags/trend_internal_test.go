@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
+	corehashtag "github.com/elythia-network/elythia/internal/core/hashtag"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -70,6 +72,8 @@ func referenceTrend(rows []trendRow, gen id.Generator, now time.Time) []map[stri
 	return result
 }
 
+func noExclusion(string) bool { return false }
+
 // TestAggregateTrend_MatchesReference pins that the bitmask aggregation
 // returns exactly what per-bucket user sets return (#3579): same ranking,
 // same tie-break, same chart and usersCount.
@@ -105,7 +109,7 @@ func TestAggregateTrend_MatchesReference(t *testing.T) {
 
 			want := referenceTrend(rows, gen, now)
 			require.Len(t, want, trendTopN, "fixture must fill the top list")
-			assert.Equal(t, want, aggregateTrend(rows, gen, now))
+			assert.Equal(t, want, aggregateTrend(rows, gen, now, noExclusion))
 		})
 	}
 }
@@ -126,7 +130,7 @@ func TestAggregateTrend_BucketEdges(t *testing.T) {
 		{ID: gen.Generate(now.Add(-time.Minute)), UserID: "x", Tags: []string{"a_rival"}},
 		{ID: gen.Generate(now.Add(-time.Minute)), UserID: "y", Tags: []string{"a_rival"}},
 	}
-	got := aggregateTrend(rows, gen, now)
+	got := aggregateTrend(rows, gen, now, noExclusion)
 	require.Len(t, got, 2)
 	assert.Equal(t, "a_rival", got[0]["tag"], "ties are ordered by name; the note at 200 minutes must not count")
 	got = got[1:]
@@ -136,4 +140,89 @@ func TestAggregateTrend_BucketEdges(t *testing.T) {
 	assert.Equal(t, want, chart)
 	assert.Equal(t, 1, got[0]["usersCount"])
 	assert.Equal(t, want, referenceTrend(rows, gen, now)[1]["chart"])
+}
+
+// TestAggregateTrend_ExcludedTagsLeaveTheRanking pins that tags matching
+// meta.hiddenTags / meta.sensitiveWords are left out of the ranking (#3628),
+// and that the rest is exactly what the reference returns for the notes
+// without those tags: the next tags move up and their charts do not change.
+func TestAggregateTrend_ExcludedTagsLeaveTheRanking(t *testing.T) {
+	gen, err := id.NewGenerator("aidx")
+	require.NoError(t, err)
+	now := time.Date(2026, 10, 16, 12, 0, 0, 123456789, time.UTC)
+
+	for seed := uint64(1); seed <= 10; seed++ {
+		t.Run(fmt.Sprintf("seed=%d", seed), func(t *testing.T) {
+			rnd := rand.New(rand.NewPCG(seed, 3628))
+			var rows []trendRow
+			for range 2000 {
+				ago := time.Duration(rnd.IntN(200*60*1000)) * time.Millisecond
+				var tags []string
+				for range 1 + rnd.IntN(3) {
+					tags = append(tags, fmt.Sprintf("tag%d", rnd.IntN(40)*rnd.IntN(40)/40))
+				}
+				rows = append(rows, trendRow{
+					ID:     gen.Generate(now.Add(-ago)),
+					UserID: fmt.Sprintf("u%d", rnd.IntN(60)),
+					Tags:   tags,
+				})
+			}
+			full := referenceTrend(rows, gen, now)
+			require.Len(t, full, trendTopN)
+			// 1 位を hiddenTags (設定は大文字で書く)、3 位を sensitiveWords の
+			// regex で外す。
+			hiddenTag := full[0]["tag"].(string)
+			sensitiveTag := full[2]["tag"].(string)
+			filter := corehashtag.NewRankingFilter(
+				[]string{strings.ToUpper(hiddenTag)},
+				[]string{"/^" + sensitiveTag + "$/"},
+			)
+
+			// 期待値: 外すタグをノートから取り除いて数え直したもの。
+			var kept []trendRow
+			for _, r := range rows {
+				var tags []string
+				for _, tag := range r.Tags {
+					if tag != hiddenTag && tag != sensitiveTag {
+						tags = append(tags, tag)
+					}
+				}
+				kept = append(kept, trendRow{ID: r.ID, UserID: r.UserID, Tags: tags})
+			}
+			want := referenceTrend(kept, gen, now)
+			require.Len(t, want, trendTopN, "fixture must still fill the top list")
+
+			got := aggregateTrend(rows, gen, now, filter.Excludes)
+			assert.Equal(t, want, got)
+			for _, e := range got {
+				assert.NotEqual(t, hiddenTag, e["tag"])
+				assert.NotEqual(t, sensitiveTag, e["tag"])
+			}
+		})
+	}
+}
+
+// trendFlightKey must give different settings different keys, including
+// settings that would collide if the lists were simply joined (#3628).
+func TestTrendFlightKey(t *testing.T) {
+	keys := map[string]string{
+		"none":            trendFlightKey(nil, nil),
+		"hidden a":        trendFlightKey([]string{"a"}, nil),
+		"sensitive a":     trendFlightKey(nil, []string{"a"}),
+		"hidden a,b":      trendFlightKey([]string{"a", "b"}, nil),
+		"hidden a sens b": trendFlightKey([]string{"a"}, []string{"b"}),
+		"hidden ab":       trendFlightKey([]string{"ab"}, nil),
+		"hidden a,empty":  trendFlightKey([]string{"a", ""}, nil),
+		"hidden ab,c":     trendFlightKey([]string{"ab", "c"}, nil),
+		"hidden a,bc":     trendFlightKey([]string{"a", "bc"}, nil),
+	}
+	seen := map[string]string{}
+	for name, k := range keys {
+		if other, ok := seen[k]; ok {
+			t.Fatalf("%q and %q share the key %s", name, other, k)
+		}
+		seen[k] = name
+	}
+	assert.Equal(t, trendFlightKey([]string{"a"}, []string{"b"}), trendFlightKey([]string{"a"}, []string{"b"}), "same settings share a key")
+	assert.Equal(t, trendFlightKey(nil, nil), trendFlightKey([]string{}, []string{}), "nil and empty settings are the same")
 }

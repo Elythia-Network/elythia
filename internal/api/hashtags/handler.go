@@ -1,6 +1,9 @@
 package hashtags
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -11,11 +14,13 @@ import (
 	"github.com/elythia-network/elythia/internal/api/meself"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/api/userrelation"
+	corehashtag "github.com/elythia-network/elythia/internal/core/hashtag"
 	"github.com/elythia-network/elythia/internal/core/userpack"
 	"github.com/elythia-network/elythia/internal/misc/colfit"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/misc/searchnorm"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/labstack/echo/v4"
 	"golang.org/x/sync/singleflight"
@@ -38,7 +43,23 @@ type Handler struct {
 	// trendFlight は hashtags/trend の同時の集計を 1 回にまとめる (#3579)。
 	// プロセスごとに持つので、複数プロセスで動かすとプロセスの数だけ集計する。
 	trendFlight singleflight.Group
+	// meta は hashtags/trend から meta.hiddenTags / meta.sensitiveWords に当たる
+	// タグを外すのに使う (#3628)。キャッシュ付きの meta (metaUpdated で無効化される)
+	// を渡す。未配線なら外さない (起動時検査が production の配線漏れを拾う)。
+	meta repository.MetaRepository
 }
+
+// SetMetaRepo wires the meta repository whose hiddenTags / sensitiveWords are
+// kept out of hashtags/trend (#3628).
+func (h *Handler) SetMetaRepo(m repository.MetaRepository) {
+	h.meta = m
+}
+
+// HasMetaRepo reports whether the meta repository was wired.
+//
+// 未配線だと、管理画面で隠したタグとセンシティブな語のタグがトレンドに出る。
+// 起動時検査に使う。
+func (h *Handler) HasMetaRepo() bool { return h.meta != nil }
 
 // SetModeratorChecker wires the moderator check of hashtags/users (#3330).
 func (h *Handler) SetModeratorChecker(m userpack.ModeratorChecker) {
@@ -264,11 +285,28 @@ type trendRow struct {
 // 集計が終わった後に来た呼び出しは必ず集計し直す (鮮度を本家と揃える)。
 // 本家の cacheSec (60 秒) は匿名 GET の Cache-Control だけで、middleware の
 // APICacheControl が同じ値を付けている。
+//
+// 本家の updateHashtagsRanking と同じく、meta.hiddenTags と meta.sensitiveWords
+// に当たるタグはランキングに入れない (#3628)。
 func (h *Handler) Trend(c echo.Context) error {
+	hidden, sensitive, err := h.trendExclusions()
+	if err != nil {
+		// 隠すための設定が読めないまま集計すると、隠したタグを公開のトレンドに
+		// 出してしまう。meta はキャッシュから読むので、ここで落ちるのは DB に
+		// 届かないときで、そのときは集計の SELECT も通らない。
+		slog.Error("hashtags/trend: fetch meta", "error", err)
+		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
+	}
+	// まとめる単位を、除外の設定ごとに分ける。設定を変えた後に来た呼び出しが、
+	// 変える前の設定で始まっていた集計に合流して、外したはずのタグ (または
+	// 戻したはずのタグ) の結果を受け取らないようにする。変える前から待っていた
+	// 呼び出しには、変える前の設定の結果が返る (本家でも、変える前に積んだ
+	// ランキングはそのまま読まれる)。
+	key := trendFlightKey(hidden, sensitive)
 	// computeTrend はリクエストの context を使わない。使うと、先頭の呼び出しが
 	// 切断されたときに、待っていた呼び出しまで同じ誤りで 500 になる。
-	v, err, _ := h.trendFlight.Do("trend", func() (any, error) {
-		v, err := h.computeTrend()
+	v, err, _ := h.trendFlight.Do(key, func() (any, error) {
+		v, err := h.computeTrend(corehashtag.NewRankingFilter(hidden, sensitive))
 		if err != nil {
 			// 待っていた呼び出しにも同じエラーが返るので、記録は集計した側で 1 回だけ。
 			slog.Error("hashtags/trend: aggregate", "error", err)
@@ -283,9 +321,46 @@ func (h *Handler) Trend(c echo.Context) error {
 	return c.JSON(http.StatusOK, v)
 }
 
+// trendExclusions returns meta.hiddenTags and meta.sensitiveWords, or nothing
+// when the meta repository is not wired.
+func (h *Handler) trendExclusions() (hidden, sensitive []string, err error) {
+	if h.meta == nil {
+		return nil, nil, nil
+	}
+	m, err := h.meta.Fetch()
+	if err != nil {
+		return nil, nil, err
+	}
+	if m == nil {
+		return nil, nil, nil
+	}
+	return m.HiddenTags, m.SensitiveWords, nil
+}
+
+// trendFlightKey returns the singleflight key of a trend aggregation with the
+// given exclusions. Different settings never share a key.
+//
+// 設定は長くなりうるので、そのまま連ねずに hash にする。区切りの曖昧さで別の
+// 設定が同じ鍵にならないよう、要素ごとに長さを前置する。
+func trendFlightKey(hidden, sensitive []string) string {
+	sum := sha256.New()
+	var n [8]byte
+	for _, list := range [][]string{hidden, sensitive} {
+		binary.BigEndian.PutUint64(n[:], uint64(len(list)))
+		sum.Write(n[:])
+		for _, v := range list {
+			binary.BigEndian.PutUint64(n[:], uint64(len(v)))
+			sum.Write(n[:])
+			sum.Write([]byte(v))
+		}
+	}
+	return "trend:" + hex.EncodeToString(sum.Sum(nil))
+}
+
 // computeTrend reads the tagged public / home notes of the last 200 minutes
-// and aggregates them into the hashtags/trend response.
-func (h *Handler) computeTrend() ([]map[string]any, error) {
+// and aggregates them into the hashtags/trend response, leaving out the tags
+// that filter excludes.
+func (h *Handler) computeTrend(filter *corehashtag.RankingFilter) ([]map[string]any, error) {
 	gen, err := h.generator()
 	if err != nil {
 		return nil, err
@@ -323,7 +398,7 @@ func (h *Handler) computeTrend() ([]map[string]any, error) {
 	if err := sqlRows.Err(); err != nil {
 		return nil, err
 	}
-	return aggregateTrend(rows, gen, time.Now()), nil
+	return aggregateTrend(rows, gen, time.Now(), filter.Excludes), nil
 }
 
 // aggregateTrend ranks the tags of rows by unique users and builds the
@@ -334,7 +409,10 @@ func (h *Handler) computeTrend() ([]map[string]any, error) {
 // 多いと集計 1 回で数十万の allocation になっていた (#3579)。
 // 数えるものは同じ: total は tag の unique user 数、chart[i] は bucket i の
 // unique user 数。
-func aggregateTrend(rows []trendRow, gen id.Generator, now time.Time) []map[string]any {
+//
+// excluded が true を返すタグはランキングに入れない (#3628)。数えた後、並べる
+// 前に外すので、判定はタグの種類ごとに 1 回で済み、残るタグの値は変わらない。
+func aggregateTrend(rows []trendRow, gen id.Generator, now time.Time, excluded func(tag string) bool) []map[string]any {
 	perTag := make(map[string]map[string]uint32)
 	for _, r := range rows {
 		ts, perr := gen.ParseTime(r.ID)
@@ -366,6 +444,9 @@ func aggregateTrend(rows []trendRow, gen id.Generator, now time.Time) []map[stri
 	}
 	rankings := make([]ranked, 0, len(perTag))
 	for tag, users := range perTag {
+		if excluded(tag) {
+			continue
+		}
 		rankings = append(rankings, ranked{tag: tag, total: len(users)})
 	}
 	sort.Slice(rankings, func(i, j int) bool {

@@ -472,3 +472,62 @@ func TestService_UpdateUsertags_Guards(t *testing.T) {
 		t.Errorf("expected no attach for empty userID, got %d", got)
 	}
 }
+
+// TestRankingFilter_Excludes pins the ranking guard of upstream
+// HashtagService.updateHashtagsRanking (#3628): hiddenTags compare after
+// normalizeForSearch, sensitiveWords follow isKeyWordIncluded.
+func TestRankingFilter_Excludes(t *testing.T) {
+	f := NewRankingFilter(
+		[]string{"Hidden", "ＦＵＬＬ", ""},
+		[]string{"nsfw", "bad word", "/^r[0-9]+$/", "/CaseRe/i", "Upper", "/(broken/"},
+	)
+	cases := []struct {
+		name string
+		tag  string
+		want bool
+	}{
+		{name: "hidden tag matches after lowercasing the setting", tag: "hidden", want: true},
+		{name: "hidden tag matches after NFKC of the setting", tag: "full", want: true},
+		{name: "hidden tag is an exact match, not a substring", tag: "hiddenx", want: false},
+		{name: "not normalized tag is still matched", tag: "HIDDEN", want: true},
+		{name: "fullwidth tag is matched after NFKC", tag: "ＨＩＤＤＥＮ", want: true},
+		{name: "sensitive word matches as a substring", tag: "nsfwart", want: true},
+		{name: "space separated words must all appear", tag: "badword", want: true},
+		{name: "only one of the space separated words", tag: "bad", want: false},
+		{name: "regex filter", tag: "r18", want: true},
+		{name: "regex filter is anchored by the pattern", tag: "xr18", want: false},
+		{name: "regex i flag ignores case", tag: "casere", want: true},
+		{name: "plain sensitive word is case-sensitive like upstream", tag: "upper", want: false},
+		{name: "broken regex never matches", tag: "(broken", want: false},
+		{name: "sensitive words are matched against the normalized tag", tag: "ＮＳＦＷart", want: true},
+		{name: "ordinary tag", tag: "misskey", want: false},
+		{name: "empty tag", tag: "", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := f.Excludes(tc.tag); got != tc.want {
+				t.Fatalf("Excludes(%q) = %v, want %v", tc.tag, got, tc.want)
+			}
+		})
+	}
+}
+
+// Empty settings build no filter, and a nil filter excludes nothing.
+func TestRankingFilter_EmptySettings(t *testing.T) {
+	if f := NewRankingFilter(nil, nil); f != nil {
+		t.Fatalf("empty settings must build a nil filter, got %+v", f)
+	}
+	if f := NewRankingFilter([]string{""}, []string{"", "/(broken/"}); f != nil {
+		t.Fatalf("settings that can never match must build a nil filter, got %+v", f)
+	}
+	if f := NewRankingFilter([]string{"only"}, nil); !f.Excludes("only") {
+		t.Fatal("hiddenTags alone must build a filter")
+	}
+	if f := NewRankingFilter(nil, []string{"only"}); !f.Excludes("only") {
+		t.Fatal("sensitiveWords alone must build a filter")
+	}
+	var f *RankingFilter
+	if f.Excludes("anything") {
+		t.Fatal("nil filter must exclude nothing")
+	}
+}
