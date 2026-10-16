@@ -144,8 +144,8 @@ upstream `server/api/endpoints/` の endpoint 群を、ディレクトリ単位�
 | `blocking` `muting` | UserBlocking / UserMuting / UserRenoteMuting Service | ブロック/ミュート/リノートミュート |
 | `reaction` | ReactionService / ReactionsBufferingService | リアクション付与・削除・buffer flush |
 | `timeline` | FanoutTimeline / FanoutTimelineEndpoint Service | Redis fanout 配信 + 取得 |
-| `note` の filter / `notesfilter` | QueryService (+ check-word-mute) | 可視性 / mute / block / word-mute の SQL filter |
-| `wordmute` | check-word-mute.ts | 単語/正規表現ミュートのパース・LRU キャッシュ |
+| `note` の filter / `notesfilter` | QueryService (+ frontend の checkNoteWordMute) | 可視性 / mute / block / word-mute の SQL filter |
+| `wordmute` | frontend の utility/check-word-mute.ts と use-note.ts の checkNoteWordMute | ハードミュートの判定 (サーバーで掛ける。本家は frontend だけ)・規則のパースと LRU キャッシュ |
 | `federation` | core/activitypub/* | AP 受信処理・解決・配信（§3.6） |
 | `relay` | RelayService | リレー購読・配信 |
 | `instance` | FederatedInstance / FetchInstanceMetadata Service | リモートインスタンス情報 |
