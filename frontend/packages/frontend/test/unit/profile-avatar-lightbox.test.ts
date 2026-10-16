@@ -60,6 +60,8 @@ const AVATAR_URL = 'https://example.com/avatar.png';
 // 下の `settleLightboxImport` で await を挟むとその rejection がテスト実行中に
 // 着地して vitest の unhandled error (exit 1) になる。**空配列で答えて黙らせる** —
 // ここで見ているのはライトボックスの配線であって API ではない。
+// (今は `test/setup-network.unit.ts` が答えの無い API の要求を待たせるので、
+// stub が無くても reject はしない (#3369)。ノートの一覧に依存しない形として残す)
 //
 // **`vi.unstubAllGlobals()` は使わない。** あれは `setup.unit.ts` が張った stub
 // (`localStorage` / `AudioContext` など) まで巻き戻すので、この後ろに hook を足した
