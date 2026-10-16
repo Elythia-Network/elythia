@@ -98,8 +98,10 @@ func (s *Scheduler) Register(cronspec, taskType string, payload []byte, opts ...
 	s.attempted[o.Queue][taskType] = struct{}{}
 	s.mu.Unlock()
 
-	framed := framedPayload{Type: taskType, Body: payload}
-	if err := q.UpsertSchedulePattern(context.Background(), taskType, cronspec, framed, scheduleRetentionOptions(o)...); err != nil {
+	err := addFramed(newFramedPayload(taskType, payload), taskType, payload, func(f framedPayload) error {
+		return q.UpsertSchedulePattern(context.Background(), taskType, cronspec, f, scheduleRetentionOptions(o)...)
+	})
+	if err != nil {
 		s.countFailure()
 		return err
 	}

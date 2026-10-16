@@ -488,7 +488,7 @@ func jobToSummary(queue, state string, job *mkq.Job[framedPayload], st *mkq.JobS
 	if job == nil {
 		return nil
 	}
-	body := job.Data.Body
+	body := job.Data.payload()
 	taskType := job.Data.Type
 	if taskType == "" {
 		// Fallback for foreign jobs lacking the framing — surface the

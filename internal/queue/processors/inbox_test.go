@@ -1423,3 +1423,49 @@ func TestInboxProcessor_SoftwareSuspendedHostStoppedBeforeVerification(t *testin
 	assert.Zero(t, verifier.resolved, "拒否する相手の actor を解決しないこと")
 	assert.Empty(t, stub.calls)
 }
+
+// **job の本文の形 (#3614) を経ても、worker で署名の検証が通り、受け付けた本文が
+// 1 バイトも変わらずに処理へ渡ること。** 書く側を有効にすると、本文は base64 に
+// せず埋め込む。Misskey の本文は < をエスケープしない (`bodyEscaped` で載り、
+// 読むときに戻す)。詰まっていない JSON は文字列の形で載る。Digest と本文の照合は
+// 受付 (`VerifyInboxAdmission`) で済んでいるので、worker が扱う本文はそのバイト列
+// でなければならない。以前の形 (base64) の job も同じく通ること。
+func TestInboxProcessor_VerifiesSignatureForEveryBodyShape(t *testing.T) {
+	priv, pub, err := activitypub.GenerateRSAKeypair()
+	require.NoError(t, err)
+	key, err := activitypub.NewPrivateKey("https://remote.example/users/alice#main-key", priv)
+	require.NoError(t, err)
+	host := "remote.example"
+	aliceURI := "https://remote.example/users/alice"
+
+	const head = `"id":"https://remote.example/notes/1/activity","type":"Create","actor":"https://remote.example/users/alice"`
+	for name, tc := range map[string]struct {
+		body  string
+		shape string
+	}{
+		"compact":      {`{` + head + `,"object":{"content":"hello"}}`, `"body":{`},
+		"misskey html": {`{` + head + `,"object":{"content":"<p>今日は &amp; 晴れ</p>"}}`, `"bodyEscaped":{`},
+		"pretty":       {"{\n  " + head + ",\n  \"object\": {\"content\": \"<b>x</b>\"}\n}\n", `"bodyText":"`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			body := []byte(tc.body)
+			payload := signedInboxPayload(t, key, body)
+			compact, err := payload.MarshalCompactJSON()
+			require.NoError(t, err)
+			require.Contains(t, string(compact), tc.shape)
+			legacy, err := json.Marshal(map[string]any{"body": body, "method": payload.Method, "path": payload.Path, "headers": payload.Headers})
+			require.NoError(t, err)
+
+			// current はこの版が積む形 (書く側を有効にするまでは legacy と同じ)。
+			for enc, raw := range map[string][]byte{"current": mustEncode(t, payload), "compact": compact, "legacy": legacy} {
+				verifier := &stubVerifier{actor: &model.User{ID: "alice", Host: &host, URI: &aliceURI}, pubKey: pub}
+				stub := &stubFedProcessor{}
+				p := processors.NewInboxProcessor(stub)
+				p.SetSignatureVerifier(verifier)
+				require.NoError(t, p.Handle(context.Background(), driver.RawTask{TypeName: queue.TaskTypeInbox, Body: raw}))
+				require.Len(t, stub.calls, 1, "%s: signature must verify in the worker", enc)
+				assert.Equal(t, tc.body, string(stub.calls[0]), "%s: the body must reach Process unchanged", enc)
+			}
+		})
+	}
+}

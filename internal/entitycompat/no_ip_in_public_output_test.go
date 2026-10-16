@@ -488,6 +488,10 @@ func TestCustomJSONMarshalersAreKnown(t *testing.T) {
 		"internal/entitycompat/marshalerfixture/marshalers.go#Plain.MarshalJSON",
 		"internal/entitycompat/marshalerfixture/marshalers.go#Pointer.MarshalJSON",
 		"internal/entitycompat/marshalerfixture/marshalers.go#Text.MarshalText",
+		// job の payload (#3614)。struct の field (タグ付き) をそのまま書き、本文
+		// (activity) の形だけを変える。field は増やしていないので IP は持たない。
+		"internal/queue/activity_body.go#DeliverPayload.MarshalJSON",
+		"internal/queue/activity_body.go#InboxPayload.MarshalJSON",
 	}, found,
 		"自前の marshaler を持つ型が増減した。**タグ走査では中身が見えない**ので、"+
 			"新しい型が IP を吐かないことを人が確かめてから一覧を更新すること")

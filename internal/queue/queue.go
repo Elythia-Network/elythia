@@ -226,7 +226,13 @@ func backoffOptFromPolicy(p Policy) driver.EnqueueOption {
 // MaxAttempts=1 なら WithMaxRetry(0) = 「retry なし、初回のみ」になる
 // (#531 review)。
 func (c *Client) EnqueueDeliver(payload DeliverPayload, opts ...driver.EnqueueOption) error {
-	body := mustMarshal(payload)
+	// json.Marshal を通さずに直接呼ぶ。通すと MarshalJSON の出力をもう一度
+	// 走査 (compact) するので、1 つの投稿で inbox の数だけ積む配送では無駄が
+	// 大きい (#3614)。出力は json.Marshal と同じバイト列になる。
+	body, err := payload.MarshalJSON()
+	if err != nil {
+		return fmt.Errorf("queue: marshal deliver payload: %w", err)
+	}
 	// 1 回の policyFor で MaxAttempts と retention の両方を済ませる
 	// (RLock 1 回 / map lookup 1 回に集約)。
 	p := c.policyFor(QueueName)
@@ -415,7 +421,11 @@ func (c *Client) EnqueueImportCustomEmojis(payload ImportCustomEmojisPayload) er
 // 十分なため)。将来オプション渡しが必要になったら EnqueueDeliver と同じ
 // variadic pattern に揃える。
 func (c *Client) EnqueueInbox(ctx context.Context, payload InboxPayload) error {
-	body := mustMarshal(payload)
+	// EnqueueDeliver と同じ理由で、json.Marshal を通さない (#3614)。
+	body, err := payload.MarshalJSON()
+	if err != nil {
+		return fmt.Errorf("queue: marshal inbox payload: %w", err)
+	}
 	// EnqueueDeliver と同じ理由で 1-shot lookup (#1184 / #1193)。
 	p := c.policyFor(InboxQueueName)
 	base := []driver.EnqueueOption{driver.WithQueue(InboxQueueName)}
