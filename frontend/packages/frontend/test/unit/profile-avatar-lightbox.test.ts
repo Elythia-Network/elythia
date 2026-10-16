@@ -82,7 +82,11 @@ afterAll(() => {
 // `renderHome()` のたびに読み込みが始まる。テストの await の間に読み込みが終わると
 // `MkChart` の setup で `initChart` がテーマ未用意のまま
 // `currentCompiledTheme!.fg` を読み、unhandled error (exit 1) になる (#3366。CI で
-// 不定期に落ち、手元でも 15 回中 1 回再現した)。ここで見ているのはライトボックスの
+// 不定期に落ち、手元でも 15 回中 1 回再現した)。テーマは今は
+// `test/setup-theme.unit.ts` が当てる (#3369) が、読み込みが着地すると `MkChart` が
+// チャートの API を叩き、上の fetch の stub の応答 (`[]`) を統計として読んで
+// `raw.diffs.withFile` で落ちうる (このテストでは再現していないが、
+// `MkChart.vue` のコードの上では起こりうる)。ここで見ているのはライトボックスの
 // 配線なので、チャートは空の部品に差し替える。
 //
 // **`__esModule: true` を付ける。** 付けないと `defineAsyncComponent` がモジュールの
