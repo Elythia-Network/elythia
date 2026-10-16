@@ -102,7 +102,9 @@ func compactOrLegacyActivityBody(b []byte) activityBodyField {
 // appendActivityBody appends the activity field to head, the JSON object of
 // the other payload fields.
 func appendActivityBody(head []byte, f activityBodyField) []byte {
-	out := make([]byte, 0, len(head)+len(f.key)+len(f.value)+4)
+	// 容量を足し算で求めると CodeQL が overflow を指摘する (go/allocation-size-overflow)。
+	// 本文の大きさは受付の上限で抑えられているが、append の伸長に任せる。
+	out := make([]byte, 0, len(head))
 	out = append(out, head[:len(head)-1]...)
 	if len(head) > 2 {
 		out = append(out, ',')

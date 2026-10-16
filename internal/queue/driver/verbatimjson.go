@@ -214,7 +214,8 @@ func UnescapeJSONHTML(b []byte) []byte {
 // value classified as EmbedHTMLEscaped.
 func EscapeJSONHTML(b []byte) []byte {
 	const hex = "0123456789abcdef"
-	out := make([]byte, 0, len(b)+64)
+	// 容量に足し算を使うと CodeQL が overflow を指摘する。伸長は append に任せる。
+	out := make([]byte, 0, len(b))
 	start := 0
 	for i := 0; i < len(b); i++ {
 		c := b[i]
