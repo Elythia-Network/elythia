@@ -129,6 +129,23 @@ type matcherEntry struct {
 // filter is an error: callers that store filters validate them at write time
 // instead of silently never matching. Empty filters are skipped.
 func Compile(filters []string) (*Matcher, error) {
+	return compile(filters, false)
+}
+
+// CompileLenient precompiles filters with exactly the semantics of
+// IsKeyWordIncluded: a malformed regex filter never matches instead of being
+// an error.
+//
+// 管理画面で保存済みの値 (meta.sensitiveWords など) を読む側は、1 つの誤った
+// filter で判定全体を止めたくない。IsKeyWordIncluded と同じく誤った regex を
+// 「一致しない」として飛ばし、多くの文字列を続けて判定するときに regex を
+// 1 回だけコンパイルするために使う (#3628)。
+func CompileLenient(filters []string) *Matcher {
+	m, _ := compile(filters, true)
+	return m
+}
+
+func compile(filters []string, lenient bool) (*Matcher, error) {
 	m := &Matcher{}
 	for _, filter := range filters {
 		if filter == "" {
@@ -137,6 +154,9 @@ func Compile(filters []string) (*Matcher, error) {
 		if sub := regexpFilterRe.FindStringSubmatch(filter); sub != nil {
 			re, err := compileRegex(sub[1], sub[2])
 			if err != nil {
+				if lenient {
+					continue
+				}
 				return nil, fmt.Errorf("keyword: invalid regex %q: %w", filter, err)
 			}
 			m.entries = append(m.entries, matcherEntry{re: re})

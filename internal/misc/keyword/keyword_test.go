@@ -70,3 +70,21 @@ func TestCompile_RejectsInvalidRegex(t *testing.T) {
 		t.Fatal("nil matcher never matches")
 	}
 }
+
+// CompileLenient は IsKeyWordIncluded と同じく、不正な regex を「一致しない」と
+// して飛ばし、残りの filter で判定を続ける (#3628)。
+func TestCompileLenient_SkipsInvalidRegexLikeIsKeyWordIncluded(t *testing.T) {
+	filters := []string{"/(unclosed/", "hello world", "/fo+/i", "", "   ", "spam", "/[/"}
+	m := CompileLenient(filters)
+	for _, text := range []string{"", "(unclosed", "[", "hello there world", "hello", "FOOO", "f", "spammer", "nothing"} {
+		if got, want := m.Match(text), IsKeyWordIncluded(text, filters); got != want {
+			t.Errorf("Match(%q) = %v, IsKeyWordIncluded = %v", text, got, want)
+		}
+	}
+	if !m.Match("spammer") || !m.Match("FOOO") {
+		t.Fatal("valid filters after an invalid regex must still match")
+	}
+	if !CompileLenient([]string{"/(unclosed/"}).Empty() {
+		t.Fatal("only invalid regex filters must leave the matcher empty")
+	}
+}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/misc/keyword"
+	"github.com/elythia-network/elythia/internal/misc/searchnorm"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 )
@@ -104,11 +105,12 @@ func (s *Service) OnNoteCreated(note *model.Note, author *model.User) {
 				slog.Error("hashtag: panic in OnNoteCreated worker", "panic", r)
 			}
 		}()
-		// upstream HashtagService.updateHashtagsRanking と同じく hiddenTags /
-		// sensitiveWords にマッチする tag は record しない (= featured /
-		// trends に出ないように filter する drop-in compat)。meta fetch を
-		// 含めて goroutine 内で完結させることで caller 同期 thread の DB
-		// 待ちを完全に除く。
+		// hiddenTags / sensitiveWords に当たる tag は record しない。本家は
+		// hashtag テーブルには記録し、Redis のランキング (updateHashtagsRanking)
+		// からだけ外すので、記録そのものを止めるのは #3628 より前からの乖離
+		// (docs/divergence/api.md)。hashtags/trend の除外は RankingFilter で
+		// 別に行う。meta fetch を含めて goroutine 内で完結させることで caller
+		// 同期 thread の DB 待ちを完全に除く。
 		hidden, sensitive := s.fetchHiddenAndSensitive()
 		for _, name := range rawTags {
 			if isHiddenTag(name, hidden) {
@@ -133,7 +135,7 @@ func (s *Service) OnNoteCreated(note *model.Note, author *model.User) {
 // goroutine so callers (i/update, federation resolver) never block.
 //
 // 追加 tag は hiddenTags / sensitiveWords filter を OnNoteCreated と同様に適用する
-// (featured / trends に出さない drop-in compat)。detach は filter 対象外
+// (本家は記録では外さない。OnNoteCreated のコメントを参照)。detach は filter 対象外
 // (既に集計済みの user を外すだけなので hidden でも整合のため除去する)。
 func (s *Service) UpdateUsertags(userID string, isLocal bool, oldTags, newTags []string) {
 	if s == nil || s.repo == nil || userID == "" {
@@ -259,6 +261,62 @@ func isHiddenTag(tag string, hidden []string) bool {
 		}
 	}
 	return false
+}
+
+// RankingFilter decides which hashtags are kept out of hashtags/trend, mirroring
+// the guard at the top of upstream HashtagService.updateHashtagsRanking:
+//
+//	const hiddenTags = this.meta.hiddenTags.map(t => normalizeForSearch(t));
+//	if (hiddenTags.includes(hashtag)) return;
+//	if (this.utilityService.isKeyWordIncluded(hashtag, this.meta.sensitiveWords)) return;
+//
+// A nil *RankingFilter excludes nothing.
+type RankingFilter struct {
+	hidden    map[string]struct{}
+	sensitive *keyword.Matcher
+}
+
+// NewRankingFilter builds a RankingFilter from meta.hiddenTags and
+// meta.sensitiveWords. It returns nil when both are empty.
+//
+// sensitiveWords の regex はここで 1 回だけコンパイルする。多くの tag を続けて
+// 判定する経路 (hashtags/trend の集計、#3628) で tag ごとにコンパイルしないため。
+// 誤った regex は IsKeyWordIncluded と同じく「一致しない」として飛ばす。
+func NewRankingFilter(hiddenTags, sensitiveWords []string) *RankingFilter {
+	f := &RankingFilter{sensitive: keyword.CompileLenient(sensitiveWords)}
+	for _, h := range hiddenTags {
+		if h == "" {
+			continue
+		}
+		if f.hidden == nil {
+			f.hidden = make(map[string]struct{}, len(hiddenTags))
+		}
+		f.hidden[searchnorm.Normalize(h)] = struct{}{}
+	}
+	if f.hidden == nil && f.sensitive.Empty() {
+		return nil
+	}
+	return f
+}
+
+// Excludes reports whether tag must be kept out of the rankings: it equals a
+// hidden tag after normalizeForSearch, or it matches a sensitive word with
+// the semantics of isKeyWordIncluded (substring, space-separated AND, or
+// /regex/flags; case-sensitive unless the regex has the i flag).
+//
+// 本家は updateHashtag の冒頭で tag を正規化 (NFKC + 小文字化) してから、
+// hiddenTags (同じく正規化した設定) と sensitiveWords の両方を判定する。
+// note.tags は保存時に正規化済みだが、正規化されずに入った古い行でも同じ結果に
+// なるよう、ここでも 1 回正規化して両方の照合に渡す。
+func (f *RankingFilter) Excludes(tag string) bool {
+	if f == nil || tag == "" {
+		return false
+	}
+	n := searchnorm.Normalize(tag)
+	if _, ok := f.hidden[n]; ok {
+		return true
+	}
+	return f.sensitive.Match(n)
 }
 
 // noteCreatedAt は note ID から作成時刻を再計算するためのヘルパ。idGen の

@@ -2439,6 +2439,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	hashtagsHandler.SetIDGen(idGen)                     // #2106 L25: 設定済 ID generator を共有 (毎回 aidx 生成を廃止)
 	hashtagsHandler.SetRelationRepos(listRelationRepos) // #1957-a: hashtags/users の embed user に relation
 	hashtagsHandler.SetModeratorChecker(roleService)    // #3330: hashtags/users のモデレーター向けの項目とカウントのゲート
+	hashtagsHandler.SetMetaRepo(metaRepo)               // #3628: hashtags/trend から hiddenTags / sensitiveWords のタグを外す
 	api.POST("/hashtags/list", hashtagsHandler.List)
 	api.POST("/hashtags/search", hashtagsHandler.Search)
 	api.POST("/hashtags/show", hashtagsHandler.Show)
@@ -4865,6 +4866,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"hashtags/users の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
 		{"hashtags.moderatorChecker", hashtagsHandler.HasModeratorChecker(),
 			"hashtags/users でモデレーターにも moderationNote などが出ず、非公開のカウントが 0 のまま返る"},
+		// #3628: 本家の updateHashtagsRanking と同じく、隠したタグをトレンドから外す。
+		{"hashtags.metaRepo", hashtagsHandler.HasMetaRepo(),
+			"管理画面で隠したタグとセンシティブな語のタグが hashtags/trend に出る"},
 		{"blocking.detailExtras", blockingHandler.HasDetailExtras(),
 			"blocking/list の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
 		{"mute.detailExtras", muteHandler.HasDetailExtras(),
