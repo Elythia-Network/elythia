@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -249,14 +250,19 @@ func TestRestore_RevertCannotHoldAgain(t *testing.T) {
 	e.db.mu.Lock()
 	e.db.conns[testDB] = 1
 	e.db.mu.Unlock()
-	got := e.waitStep(rec.OpID, StepUnknown)
+	// ここから先の待ち (再開と、入り直した後の held) はどちらも期限で切れるはずなので、
+	// 時計を進めて切らせる。held の期限を短い実時間にすると、入れ替える前の held の
+	// 待ちも同じ期限で、負荷で切れて中止へ進む。
+	got := e.waitStepPassingTime(rec.OpID, StepUnknown)
 	assert.Contains(t, got.Error, "did not let go of the restored database")
 	assert.Equal(t, "restored:20261010T120000Z", e.db.content(testDB))
 }
 
 func TestRestore_RevertCannotEnterAgain(t *testing.T) {
 	var h *hookMaint
-	e := newEnv(t, withHook(&h))
+	// 再開の待ちが期限で切れて戻す処理に入る。プロセスは戻らないので、期限が負荷で
+	// 遅れても結末は変わらない。
+	e := newEnv(t, withHook(&h), func(o *Options) { o.ResumeTimeout = 50 * time.Millisecond })
 	p := e.process("p1")
 	p.setFailBack(true)
 	h.failSet = func(phase string) error {
@@ -292,7 +298,9 @@ func TestRestore_RevertCannotReadTheMaintenance(t *testing.T) {
 
 func TestRestore_AbortResumeTimesOut(t *testing.T) {
 	// 中止 (A1) の後、プロセスが戻らない。待ちきれなくても DB は消し、記録は残す。
-	e := newEnv(t)
+	// held の待ちも再開の待ちも期限で切れることを検査する。期限は、既定を変える前の
+	// 値 (500ms) を明示して保つ。
+	e := newEnv(t, func(o *Options) { o.HeldTimeout = 500 * time.Millisecond; o.ResumeTimeout = 500 * time.Millisecond })
 	p := e.process("p1")
 	e.db.mu.Lock()
 	e.db.conns[testDB] = 1
@@ -373,12 +381,36 @@ func TestRecordHelpers(t *testing.T) {
 
 func TestRestore_ExpiryLosesToAConfirmation(t *testing.T) {
 	// 期限と確定が重なったら、先に段を進めた方だけが動く。
-	e := newEnv(t, func(o *Options) { o.ReadyTimeout = 50 * time.Millisecond })
+	//
+	// 重なりは時間でなく、期限の script を送る直前に確定を書いて作る。期限を短い実時間に
+	// して確定を間に合わせる形だと、負荷で ready を見る前に期限が切れて落ちた (#3369)。
+	e := newEnv(t, func(o *Options) { o.ReadyTimeout = time.Millisecond })
+	var opID string
+	fired := make(chan struct{})
+	var once sync.Once
+	e.interceptCmd(func(cmd redis.Cmder) error {
+		if stepScriptTo(cmd, StepAborting) {
+			once.Do(func() {
+				// 確定が先に段を進めた。
+				assert.NoError(t, e.store.setStep(context.Background(), opID, StepReady, StepEntering, time.Now()))
+				close(fired)
+			})
+		}
+		return nil
+	})
+	// opId を受け取るまで準備を止める (期限は準備の後に数え始める)。
+	e.db.block = make(chan struct{})
 	rec, _, err := e.m.Prepare(context.Background(), PrepareRequest{GenerationID: "20261010T120000Z", UserID: "u1", Token: "t"})
 	require.NoError(t, err)
-	e.waitStep(rec.OpID, StepReady)
-	require.NoError(t, e.store.setStep(context.Background(), rec.OpID, StepReady, StepEntering, time.Now()))
-	time.Sleep(150 * time.Millisecond)
+	opID = rec.OpID
+	close(e.db.block)
+	select {
+	case <-fired:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the expiry did not fire")
+	}
+	// 期限の goroutine が終えるのを待つ。
+	e.stop()
 	got, err := e.store.Get(context.Background(), rec.OpID)
 	require.NoError(t, err)
 	assert.Equal(t, StepEntering, got.Step)
@@ -401,9 +433,10 @@ func TestRestore_RecordFailureIsLogged(t *testing.T) {
 }
 
 func TestRestore_AbortResumeCannotBeRequested(t *testing.T) {
-	// 中止 (A1) で resuming を書けなくても、作った DB は消す。
+	// 中止 (A1) で resuming を書けなくても、作った DB は消す。held の待ちが期限で
+	// 切れることから始まる (接続が残り続けるので、期限が負荷で遅れても結末は変わらない)。
 	var h *hookMaint
-	e := newEnv(t, withHook(&h))
+	e := newEnv(t, withHook(&h), func(o *Options) { o.HeldTimeout = 50 * time.Millisecond })
 	e.process("p1")
 	e.db.mu.Lock()
 	e.db.conns[testDB] = 1
