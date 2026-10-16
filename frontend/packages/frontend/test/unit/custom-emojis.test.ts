@@ -14,7 +14,8 @@ const h = vi.hoisted(() => ({
 vi.mock('@/utility/idb-proxy.js', () => ({ get: h.get, set: h.set }));
 vi.mock('@/utility/misskey-api.js', () => ({ misskeyApi: vi.fn(), misskeyApiGet: vi.fn() }));
 
-import { customEmojis, removeCustomEmojis, updateCustomEmojis } from '@/custom-emojis.js';
+import { customEmojis, refreshCustomEmojisOnBoot, removeCustomEmojis, updateCustomEmojis } from '@/custom-emojis.js';
+import { misskeyApiGet } from '@/utility/misskey-api.js';
 
 function emoji(name: string, url: string): Misskey.entities.EmojiSimple {
 	return { name, url, category: null, aliases: [] };
@@ -138,5 +139,58 @@ describe('removeCustomEmojis', () => {
 		removeCustomEmojis(events);
 
 		expect(eventNameReads).toBeLessThanOrEqual(events.length * 2);
+	});
+});
+
+// 手元に一覧があるときは、起動を /api/emojis の応答で待たせない (#3613)。
+describe('refreshCustomEmojisOnBoot', () => {
+	function deferred() {
+		let resolve!: (v: { emojis: Misskey.entities.EmojiSimple[] }) => void;
+		let reject!: (e: unknown) => void;
+		const promise = new Promise<{ emojis: Misskey.entities.EmojiSimple[] }>((res, rej) => { resolve = res; reject = rej; });
+		return { promise, resolve, reject };
+	}
+	async function settled(p: Promise<void>) {
+		let done = false;
+		p.then(() => { done = true; });
+		for (let i = 0; i < 10; i++) await Promise.resolve();
+		return done;
+	}
+
+	test('with a cached list it resolves before the request and swaps the list afterwards', async () => {
+		const res = deferred();
+		vi.mocked(misskeyApiGet).mockReturnValueOnce(res.promise as never);
+		customEmojis.value = [emoji('cached', '/cached.png')];
+
+		expect(await settled(refreshCustomEmojisOnBoot())).toBe(true);
+		expect(customEmojis.value.map(e => e.name)).toEqual(['cached']);
+
+		res.resolve({ emojis: [emoji('fresh', '/fresh.png')] });
+		for (let i = 0; i < 10; i++) await Promise.resolve();
+		expect(customEmojis.value.map(e => e.name)).toEqual(['fresh']);
+	});
+
+	test('without a cached list it waits for the request', async () => {
+		const res = deferred();
+		vi.mocked(misskeyApiGet).mockReturnValueOnce(res.promise as never);
+
+		const boot = refreshCustomEmojisOnBoot();
+		expect(await settled(boot)).toBe(false);
+
+		res.resolve({ emojis: [emoji('fresh', '/fresh.png')] });
+		await boot;
+		expect(customEmojis.value.map(e => e.name)).toEqual(['fresh']);
+	});
+
+	test('a failed request neither throws nor clears the cached list', async () => {
+		vi.mocked(misskeyApiGet).mockRejectedValueOnce(new Error('offline'));
+		customEmojis.value = [emoji('cached', '/cached.png')];
+		await refreshCustomEmojisOnBoot();
+		for (let i = 0; i < 10; i++) await Promise.resolve();
+		expect(customEmojis.value.map(e => e.name)).toEqual(['cached']);
+
+		vi.mocked(misskeyApiGet).mockRejectedValueOnce(new Error('offline'));
+		customEmojis.value = [];
+		await expect(refreshCustomEmojisOnBoot()).resolves.toBeUndefined();
 	});
 });

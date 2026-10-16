@@ -38,7 +38,7 @@ import { getEmojiNameFromReaction, isLocalCustomEmojiReaction } from '@@/js/emoj
 import XReaction from '@/components/MkReactionsViewer.reaction.vue';
 import { $i } from '@/i.js';
 import { prefer } from '@/preferences.js';
-import { customEmojisMap } from '@/custom-emojis.js';
+import { customEmojis, customEmojisMap } from '@/custom-emojis.js';
 import { DI } from '@/di.js';
 
 const props = withDefaults(defineProps<{
@@ -86,7 +86,10 @@ function canReact(reaction: string) {
 	return prefer.s.reactableRemoteReactionEnabled && localAlternativeReaction(reaction) != null;
 }
 
-watch([() => props.reactions, () => props.maxNumber], ([newSource, maxNumber]) => {
+// 並べたときに使った canReact の結果 (押せるリアクションを先に並べる設定のときだけ)
+let lastCanReact: Map<string, boolean> | null = null;
+
+function rebuildReactions(newSource: Misskey.entities.Note['reactions'], maxNumber: number) {
 	let newReactions: [string, number][] = [];
 	hasMoreReactions.value = Object.keys(newSource).length > maxNumber;
 
@@ -105,6 +108,7 @@ watch([() => props.reactions, () => props.maxNumber], ([newSource, maxNumber]) =
 		for (const [emoji] of sorted) {
 			canReactCache.set(emoji, canReact(emoji));
 		}
+		lastCanReact = canReactCache;
 		sorted.sort(([emojiA, countA], [emojiB, countB]) => {
 			const canReactA = canReactCache.get(emojiA)!;
 			const canReactB = canReactCache.get(emojiB)!;
@@ -128,7 +132,23 @@ watch([() => props.reactions, () => props.maxNumber], ([newSource, maxNumber]) =
 	}
 
 	_reactions.value = newReactions;
+}
+
+watch([() => props.reactions, () => props.maxNumber], ([newSource, maxNumber]) => {
+	rebuildReactions(newSource, maxNumber);
 }, { immediate: true, deep: true });
+
+// Elythia: 押せるリアクションを先に並べる設定では、並び順が customEmojis (canReact) に依る。
+// 起動時に手元の一覧で並べた後、取り直した一覧で押せるかどうかが変わったチップがあれば、
+// 最初から並べ直す (#3613)。変わらなければ並びに触れない (本家と同じく、並べた後は動かさない)。
+// customEmojis は deep に見ない (一覧全体をたどる費用を、ノートの数だけ払わないため)。
+watch(customEmojis, () => {
+	if (!prefer.s.showAvailableReactionsFirstInNote || lastCanReact == null) return;
+	const sortedWith = lastCanReact;
+	if (!Object.keys(props.reactions).some(r => sortedWith.has(r) && sortedWith.get(r) !== canReact(r))) return;
+	_reactions.value = [];
+	rebuildReactions(props.reactions, props.maxNumber);
+});
 </script>
 
 <style lang="scss" module>

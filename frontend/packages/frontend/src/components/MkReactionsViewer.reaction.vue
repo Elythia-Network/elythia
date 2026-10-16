@@ -68,6 +68,9 @@ const emojiName = computed(() => getEmojiNameFromReaction(props.reaction));
 const isLocalCustomEmoji = computed(() => isLocalCustomEmojiReaction(props.reaction));
 
 const canToggle = computed(() => {
+	// Elythia: customEmojisMap は素の Map なので、customEmojis を読んで依存を作る (#3613)。
+	// 起動時に手元の一覧で描いた後、取り直した一覧で押せるかどうかが変わったら追従する。
+	void customEmojis.value;
 	const emoji = isLocalCustomEmoji.value ? customEmojisMap.get(emojiName.value) : getUnicodeEmojiOrNull(props.reaction);
 
 	// TODO
