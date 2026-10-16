@@ -61,6 +61,9 @@ type Connection struct {
 	send         chan []byte
 	closeC       chan struct{}
 	pingInterval time.Duration
+	// closeFlushTimeout bounds how long CloseWithCode waits for the writer to
+	// flush before tearing the socket down unconditionally.
+	closeFlushTimeout time.Duration
 
 	closeOnce sync.Once
 	closed    bool
@@ -121,13 +124,14 @@ type Connection struct {
 // に割り当てる。MessageHandler が nil の場合、受信メッセージは破棄される。
 func NewConnection(id string, user *model.User, conn Conn) *Connection {
 	return &Connection{
-		id:           id,
-		user:         user,
-		conn:         conn,
-		send:         make(chan []byte, sendQueueSize),
-		closeC:       make(chan struct{}),
-		drainC:       make(chan struct{}),
-		pingInterval: defaultPingInterval,
+		id:                id,
+		user:              user,
+		conn:              conn,
+		send:              make(chan []byte, sendQueueSize),
+		closeC:            make(chan struct{}),
+		drainC:            make(chan struct{}),
+		pingInterval:      defaultPingInterval,
+		closeFlushTimeout: defaultCloseFlushTimeout,
 	}
 }
 
@@ -136,6 +140,19 @@ func NewConnection(id string, user *model.User, conn Conn) *Connection {
 func (c *Connection) SetPingInterval(d time.Duration) {
 	if d > 0 {
 		c.pingInterval = d
+	}
+}
+
+// SetCloseFlushTimeout overrides how long CloseWithCode waits for the writer
+// to flush. 主にテストで時計を縮めるための setter。0 以下は無視される。
+// CloseWithCode を呼ぶ前に設定すること。
+//
+// 以前はパッケージ変数をテストで書き換えていた。前のテストの接続を閉じる
+// goroutine (失効の購読など) がまだ読んでいるときに書き換えると、-race で
+// 落ちた (#3369)。接続ごとの値にして、ほかの接続に影響しないようにする。
+func (c *Connection) SetCloseFlushTimeout(d time.Duration) {
+	if d > 0 {
+		c.closeFlushTimeout = d
 	}
 }
 
@@ -362,9 +379,20 @@ func (c *Connection) Close() {
 	c.closeInternal()
 }
 
-// closeFlushTimeout bounds how long CloseWithCode waits for the writer to
-// flush before tearing the socket down unconditionally.
-var closeFlushTimeout = 5 * time.Second
+// defaultCloseFlushTimeout is the closeFlushTimeout of a new Connection.
+const defaultCloseFlushTimeout = 5 * time.Second
+
+// flushTimeout returns closeFlushTimeout, or defaultCloseFlushTimeout when it
+// is not set.
+//
+// NewConnection を通らないゼロ値の Connection でも、パッケージ変数だった頃と
+// 同じ 5 秒にする。0 のままだと、吐き切らずにすぐ閉じてしまう。
+func (c *Connection) flushTimeout() time.Duration {
+	if c.closeFlushTimeout <= 0 {
+		return defaultCloseFlushTimeout
+	}
+	return c.closeFlushTimeout
+}
 
 // CloseWithCode stops accepting new payloads, flushes the ones already queued,
 // sends a WebSocket close frame with code / reason and then tears the
@@ -388,7 +416,7 @@ func (c *Connection) CloseWithCode(code int, reason string) {
 	c.drainOnce.Do(func() { close(c.drainC) })
 	// writeLoop が動いていない (Start 前) / 書き込みで詰まっている場合でも
 	// 必ず閉じる。closeInternal は冪等なので、先に閉じ終わっていれば no-op。
-	time.AfterFunc(closeFlushTimeout, c.closeInternal)
+	time.AfterFunc(c.flushTimeout(), c.closeInternal)
 }
 
 // flushAndClose drains the queued payloads, writes the close frame and closes
@@ -398,7 +426,7 @@ func (c *Connection) flushAndClose() {
 	// 吐き切る間の書き込みに期限を置く。相手が読まないと WriteMessage は
 	// 送信バッファが空くまで戻らないので、CloseWithCode の保険 (closeFlushTimeout
 	// 後の closeInternal) に頼らず、writer 自身がそこで諦めて閉じる。
-	_ = c.conn.SetWriteDeadline(time.Now().Add(closeFlushTimeout))
+	_ = c.conn.SetWriteDeadline(time.Now().Add(c.flushTimeout()))
 	for {
 		select {
 		case body := <-c.send:
