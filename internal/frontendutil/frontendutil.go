@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -131,10 +132,16 @@ func RepoAssetsDir() string {
 
 // ClientEntryInfo holds the Vite entry point script, CSS dependencies, and
 // module preloads collected from the manifest by walking the entry's import chain.
+//
+// Preloads is every chunk the entry imports statically once the locale has
+// been inlined (`preloads.json`, written by the frontend build). Unlike
+// ModulePreloads it covers all depths and leaves out the i18n chunk, which
+// the localized build never fetches.
 type ClientEntryInfo struct {
 	Script         string
 	CSS            []string
 	ModulePreloads []string
+	Preloads       []string
 }
 
 // DetectClientEntry reads the Vite manifest to find the entry script and all
@@ -224,7 +231,42 @@ func detectEntry(dir, entryKey string) ClientEntryInfo {
 		Script:         entry.File,
 		CSS:            cssFiles,
 		ModulePreloads: modulePreloads,
+		Preloads:       readPreloads(dir, entryKey, entry.File),
 	}
+}
+
+// preloadFileRe is the shape of a preload entry. The names are written into
+// an inline script of the HTML shell, so anything else is dropped.
+var preloadFileRe = regexp.MustCompile(`^scripts/[A-Za-z0-9_-][A-Za-z0-9_.-]*\.js$`)
+
+// readPreloads returns the chunks listed for entryKey in dir/preloads.json.
+//
+// 一覧はビルドの locale inliner が書く (#3613)。manifest.json の imports は
+// inline 化の前の形で、ブラウザが取りに行かない i18n の chunk を含むので使わない。
+// ファイルが無い (古いビルド) か読めないときは nil を返し、modulepreload を出さない
+// だけにする。entry 自身と、形の合わない名前は落とす。
+func readPreloads(dir, entryKey, entryFile string) []string {
+	data, err := os.ReadFile(filepath.Join(dir, "preloads.json"))
+	if err != nil {
+		return nil
+	}
+	var all map[string][]string
+	if err := json.Unmarshal(data, &all); err != nil {
+		return nil
+	}
+	var out []string
+	seen := map[string]struct{}{entryFile: {}}
+	for _, f := range all[entryKey] {
+		if !preloadFileRe.MatchString(f) {
+			continue
+		}
+		if _, dup := seen[f]; dup {
+			continue
+		}
+		seen[f] = struct{}{}
+		out = append(out, f)
+	}
+	return out
 }
 
 // AssetsHandler returns a handler that tries to serve files from primary dir

@@ -36,6 +36,7 @@ async function buildAllLocale() {
 	inliner.collectsModifications();
 
 	await inliner.saveAllLocales(locales);
+	await inliner.savePreloads();
 
 	if (logger.errorCount > 0) {
 		throw new Error(`Build failed with ${logger.errorCount} errors and ${logger.warningCount} warnings.`);

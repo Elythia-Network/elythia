@@ -89,6 +89,21 @@ type shellOverrides struct {
 	RobotsTag []string
 }
 
+// clientPreloadsJS returns the JS array literal of the chunks the boot loader
+// should modulepreload before it imports the entry.
+//
+// 起動の読み込みは entry → 静的 import の深さ 1 → 2 → 3 と直列に進む。boot.js が
+// 一覧を先に modulepreload で並べると、取得が 1 往復にまとまる (#3613)。パスの
+// `scripts` はロケールに置き換わるので、ここでは一覧だけを渡し、boot.js が lang を
+// 当てはめる。dev モード (entry 無し) では空にする。
+func clientPreloadsJS(entry frontendutil.ClientEntryInfo) string {
+	if entry.Script == "" || len(entry.Preloads) == 0 {
+		return "[]"
+	}
+	b, _ := json.Marshal(entry.Preloads)
+	return escapeJSONForScript(string(b))
+}
+
 // defaultShellCacheControl mirrors upstream の renderBase (`public, max-age=30`)。
 const defaultShellCacheControl = "public, max-age=30"
 
@@ -301,8 +316,8 @@ func renderFrontendShell(c echo.Context, cfg *config.Config, metaRepo repository
 	// HTML 側と hash 側で別々に文字列を持つと、片方だけ変えたときに CSP を
 	// 有効にしている運用者の画面が真っ白になる (#2786)。
 	bootGlobals := fmt.Sprintf(
-		`const VERSION = %s; const CLIENT_ENTRY = %s; const LANGS = ["ja-JP","en-US"];`,
-		jsStringLiteral(cfg.Version), clientEntryJS)
+		`const VERSION = %s; const CLIENT_ENTRY = %s; const CLIENT_PRELOADS = %s; const LANGS = ["ja-JP","en-US"];`,
+		jsStringLiteral(cfg.Version), clientEntryJS, clientPreloadsJS(clientEntry))
 	// loader は inline のときだけ hash が要る (外部参照なら 'self' で通る)。
 	cspExtra.Script = append(cspExtra.Script, cspScriptHashes(bootGlobals, loader.JS)...)
 

@@ -10,6 +10,7 @@ import { collectModifications } from './locale-inliner/collect-modifications.js'
 import { applyWithLocale } from './locale-inliner/apply-with-locale.js';
 import { blankLogger } from './logger.js';
 import { detectI18nFacadeChunk } from './locale-inliner/facade-chunk-detection.js';
+import { collectStaticImports, staticImportClosure } from './locale-inliner/static-imports.js';
 import type { Logger } from './logger.js';
 import type { Locale } from 'i18n';
 import type { Manifest as ViteManifest } from 'vite';
@@ -50,6 +51,7 @@ export class LocaleInliner {
 			fileName: this.stripScriptDir(chunk.file),
 			src: chunk.src,
 			chunkName: chunk.name,
+			isEntry: chunk.isEntry === true,
 		}));
 	}
 
@@ -123,6 +125,35 @@ export class LocaleInliner {
 		}
 	}
 
+	/**
+	 * Writes `preloads.json`: for each entry chunk, the chunks it imports
+	 * statically after inlining (`{ "<src>": ["scripts/<file>", ...] }`).
+	 */
+	async savePreloads() {
+		await fs.writeFile(path.join(this.outputDir, 'preloads.json'), JSON.stringify(this.collectPreloads()));
+	}
+
+	collectPreloads(): Record<string, string[]> {
+		// Elythia: 起動の HTML から entry の静的 import を modulepreload で並べるための一覧 (#3613)。
+		// manifest.json の imports は inline 化の前の形で、ブラウザが取りに行かない i18n の chunk
+		// (ロケールの全文、ja-JP で約 290KB) を含む。inline 化で消した import を除いて数える。
+		const importsByFile = new Map<string, string[]>();
+		for (const chunk of this.chunks) {
+			if (chunk.sourceCode == null || !chunk.modifications) {
+				throw new Error(`Source code or modifications for ${chunk.fileName} is not available.`);
+			}
+			const removed = chunk.modifications.filter(x => x.type === 'delete');
+			importsByFile.set(chunk.fileName, collectStaticImports(chunk.sourceCode, removed));
+		}
+		const preloads: Record<string, string[]> = {};
+		for (const chunk of this.chunks) {
+			if (!chunk.isEntry || chunk.src == null) continue;
+			preloads[chunk.src] = staticImportClosure(chunk.fileName, f => importsByFile.get(f))
+				.map(f => `${this.scriptsDir}/${f}`);
+		}
+		return preloads;
+	}
+
 	isScriptFile(fileName: string) {
 		return fileName.startsWith(this.scriptsDir + '/') && fileName.endsWith('.js');
 	}
@@ -138,6 +169,8 @@ export class LocaleInliner {
 interface ScriptChunk {
 	fileName: string;
 	chunkName?: string;
+	src?: string;
+	isEntry?: boolean;
 	sourceCode?: string;
 	isFacadeOfI18n?: true;
 	modifications?: TextModification[];

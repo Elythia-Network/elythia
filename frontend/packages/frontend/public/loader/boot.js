@@ -46,6 +46,21 @@
 	localStorage.setItem('lang', lang);
 	//#endregion
 
+	//#region Preload
+	// Elythia: entry とそれが静的に import する chunk を、DOMContentLoaded を待たずに
+	// modulepreload で並べて取りに行く (#3613)。これが無いと entry → 深さ 1 → 2 → 3 と、
+	// chunk を読んで解析するたびに次の段が分かる直列の取得になる。一覧はサーバーが
+	// CLIENT_PRELOADS として埋め込む (ビルドが書く preloads.json)。無い HTML では何もしない。
+	if (CLIENT_ENTRY && typeof CLIENT_PRELOADS !== 'undefined' && Array.isArray(CLIENT_PRELOADS)) {
+		for (const file of [CLIENT_ENTRY, ...CLIENT_PRELOADS]) {
+			const link = document.createElement('link');
+			link.rel = 'modulepreload';
+			link.href = `/vite/${file.replace('scripts', lang)}`;
+			document.head.appendChild(link);
+		}
+	}
+	//#endregion
+
 	//#region Script
 	async function importAppScript() {
 		await import(CLIENT_ENTRY ? `/vite/${CLIENT_ENTRY.replace('scripts', lang)}` : '/vite/src/_boot_.ts')

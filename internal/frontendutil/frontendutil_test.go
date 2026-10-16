@@ -426,3 +426,55 @@ func TestResetLoaderCacheForTest(t *testing.T) {
 	ResetLoaderCacheForTest()
 	assert.Equal(t, "second", BootLoaderAssets().CSS)
 }
+
+// preloads.json (ビルドの locale inliner が書く) から、entry の modulepreload の一覧を
+// 読む (#3613)。HTML の inline script に入るので、形の合わない名前は落とす。
+func TestDetectClientEntry_Preloads(t *testing.T) {
+	manifest := `{"src/_boot_.ts":{"file":"scripts/entry-AAAAAAAA.js","isEntry":true,"imports":["_a.js"]},"_a.js":{"file":"scripts/a-BBBBBBBB.js"}}`
+	setup := func(t *testing.T, preloads string) ClientEntryInfo {
+		t.Helper()
+		dir := t.TempDir()
+		t.Setenv("MISSKEY_FRONTEND_DIR", dir)
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(manifest), 0644))
+		if preloads != "" {
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "preloads.json"), []byte(preloads), 0644))
+		}
+		return DetectClientEntry()
+	}
+
+	t.Run("reads the list of the entry", func(t *testing.T) {
+		info := setup(t, `{"src/_boot_.ts":["scripts/a-BBBBBBBB.js","scripts/c_D-EEEEEEEE.js"],"src/i18n.ts":["scripts/x-FFFFFFFF.js"]}`)
+		assert.Equal(t, []string{"scripts/a-BBBBBBBB.js", "scripts/c_D-EEEEEEEE.js"}, info.Preloads)
+	})
+
+	t.Run("drops the entry, duplicates and unexpected names", func(t *testing.T) {
+		info := setup(t, `{"src/_boot_.ts":[
+			"scripts/entry-AAAAAAAA.js",
+			"scripts/a-BBBBBBBB.js",
+			"scripts/a-BBBBBBBB.js",
+			"scripts/../manifest.js",
+			"scripts/x.js\"</script>",
+			"assets/style.css",
+			"/scripts/y.js",
+			"scripts/sub/z.js",
+			"scripts/w.mjs"
+		]}`)
+		assert.Equal(t, []string{"scripts/a-BBBBBBBB.js"}, info.Preloads)
+	})
+
+	t.Run("nil without the file", func(t *testing.T) {
+		info := setup(t, "")
+		assert.Equal(t, "scripts/entry-AAAAAAAA.js", info.Script)
+		assert.Nil(t, info.Preloads)
+	})
+
+	t.Run("nil on a broken file", func(t *testing.T) {
+		info := setup(t, `{broken`)
+		assert.Nil(t, info.Preloads)
+	})
+
+	t.Run("nil when the entry is not listed", func(t *testing.T) {
+		info := setup(t, `{"src/other.ts":["scripts/a-BBBBBBBB.js"]}`)
+		assert.Nil(t, info.Preloads)
+	})
+}
