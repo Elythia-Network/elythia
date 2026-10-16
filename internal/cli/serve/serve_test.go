@@ -102,29 +102,6 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
-// waitFor blocks until the log contains substr.
-func (b *syncBuffer) waitFor(t *testing.T, substr string) {
-	t.Helper()
-	timeout := time.After(5 * time.Second)
-	for {
-		b.mu.Lock()
-		if strings.Contains(b.buf.String(), substr) {
-			b.mu.Unlock()
-			return
-		}
-		if b.changed == nil {
-			b.changed = make(chan struct{})
-		}
-		changed := b.changed
-		b.mu.Unlock()
-		select {
-		case <-changed:
-		case <-timeout:
-			t.Fatalf("log never contained %q; got %q", substr, b.String())
-		}
-	}
-}
-
 type nopCloser struct{ *bytes.Buffer }
 
 func (nopCloser) Close() error { return nil }
@@ -232,17 +209,13 @@ func TestServe_DefaultConfigPath(t *testing.T) {
 	assert.Contains(t, h.steps, "config:.config/default.yml")
 }
 
-func TestServe_LogsStartAndShutdownErrors(t *testing.T) {
+func TestServe_LogsShutdownError(t *testing.T) {
 	h := newHarness()
-	h.srv.startErr = errors.New("bind failed")
 	h.srv.shutdownErr = errors.New("still busy")
 	assert.Equal(t, 0, h.runServe(t, nil))
 	assert.Contains(t, h.log.String(), "server shutdown error")
-	// Start の失敗は Start を走らせた goroutine が書く。serve が返った後に
-	// 書かれうるので、書かれるまで待つ。待たずにテストを終えると、次のテストの
-	// 実行中に書き込みが起き、読み出しと競合する。
-	h.log.waitFor(t, "server error")
-	assert.Contains(t, h.log.String(), "bind failed")
+	// Start の失敗のログは serve_start_test.go が確かめる (#3633 で起動の失敗は
+	// シグナルを待たずに終わるようになり、このテストの形と両立しない)。
 }
 
 // TestServe_KeepsRedisOpenWhileHooksMayRun checks #3463 review L-7: when
