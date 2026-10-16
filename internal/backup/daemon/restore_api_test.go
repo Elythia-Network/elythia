@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -146,6 +147,79 @@ type apiRig struct {
 	d      *Daemon
 	mr     *miniredis.Miniredis
 	log    *syncLog
+	// cmds counts the Redis commands sent while serving a request posted
+	// with postCounted.
+	cmds *requestCommands
+}
+
+// requestCommands is a go-redis hook that counts the commands sent with a
+// context derived from a request posted by postCounted, and records the
+// arguments of every command whatever its context.
+//
+// miniredis の CommandCount はサーバー全体の数で、要求と無関係な裏のコマンドも
+// 数える。起動時の回復 (restoreop の recoverOnStart) は負荷で遅れて走ると、この
+// 実行の準備が作った記録を Current で見つけ、その操作が枠を持っている間 Poll ごとに
+// 記録を読み直す。それが比べる区間に入り、数がずれて落ちた (#3369)。要求の context
+// から出たコマンドだけを数える。context を切って引く経路も見逃さないよう、全
+// コマンドの引数も記録し、不正な ID のキーが一度も使われないことも確かめる。
+type requestCommands struct {
+	mu   sync.Mutex
+	n    int
+	args []string
+}
+
+// usedArg reports whether any command sent so far had arg as an argument.
+func (c *requestCommands) usedArg(arg string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.Contains(c.args, arg)
+}
+
+func (c *requestCommands) record(cmds ...redis.Cmder) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, cmd := range cmds {
+		for _, a := range cmd.Args() {
+			if s, ok := a.(string); ok {
+				c.args = append(c.args, s)
+			}
+		}
+	}
+}
+
+type countedRequestKey struct{}
+
+func (c *requestCommands) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.n
+}
+
+func (c *requestCommands) note(ctx context.Context, cmds int) {
+	if ctx.Value(countedRequestKey{}) == nil {
+		return
+	}
+	c.mu.Lock()
+	c.n += cmds
+	c.mu.Unlock()
+}
+
+func (c *requestCommands) DialHook(next redis.DialHook) redis.DialHook { return next }
+
+func (c *requestCommands) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
+	return func(ctx context.Context, cmd redis.Cmder) error {
+		c.record(cmd)
+		c.note(ctx, 1)
+		return next(ctx, cmd)
+	}
+}
+
+func (c *requestCommands) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return func(ctx context.Context, cmds []redis.Cmder) error {
+		c.record(cmds...)
+		c.note(ctx, len(cmds))
+		return next(ctx, cmds)
+	}
 }
 
 // syncLog collects log output across goroutines.
@@ -171,6 +245,8 @@ func newAPIRig(t *testing.T) *apiRig {
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
+	cmds := &requestCommands{}
+	rdb.AddHook(cmds)
 	db := &apiDB{dbs: map[string]bool{"app": true}}
 	maint := maintmode.NewStore(rdb, rdb, "p:")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -208,7 +284,7 @@ func newAPIRig(t *testing.T) *apiRig {
 	v := &fakeReauth{}
 	h, err := Handler(d, testToken, &Restore{Manager: m, Verifier: v})
 	require.NoError(t, err)
-	return &apiRig{h: h, verify: v, db: db, maint: maint, m: m, d: d, mr: mr, log: logs}
+	return &apiRig{h: h, verify: v, db: db, maint: maint, m: m, d: d, mr: mr, log: logs, cmds: cmds}
 }
 
 type noSessions struct{}
@@ -220,9 +296,21 @@ func (noSessions) Terminate(context.Context, maintmode.Blocker) (bool, error) {
 
 func (r *apiRig) post(t *testing.T, path string, body map[string]any) (*httptest.ResponseRecorder, map[string]any) {
 	t.Helper()
+	return r.postCtx(t, context.Background(), path, body)
+}
+
+// postCounted posts like post and counts the Redis commands sent while the
+// request is served in r.cmds.
+func (r *apiRig) postCounted(t *testing.T, path string, body map[string]any) (*httptest.ResponseRecorder, map[string]any) {
+	t.Helper()
+	return r.postCtx(t, context.WithValue(context.Background(), countedRequestKey{}, true), path, body)
+}
+
+func (r *apiRig) postCtx(t *testing.T, ctx context.Context, path string, body map[string]any) (*httptest.ResponseRecorder, map[string]any) {
+	t.Helper()
 	b, err := json.Marshal(body)
 	require.NoError(t, err)
-	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(b))
+	req := httptest.NewRequestWithContext(ctx, http.MethodPost, path, bytes.NewReader(b))
 	req.Header.Set("Authorization", "Bearer "+testToken)
 	req.Header.Set(ClientIPHeader, "192.0.2.7")
 	rec := httptest.NewRecorder()
@@ -536,19 +624,34 @@ func TestRestoreAPI_RefusesWhileAJobRuns(t *testing.T) {
 func TestRestoreAPI_StatusFromAnyone(t *testing.T) {
 	r := newAPIRig(t)
 	opID, ticket := r.prepare(t)
-	before := r.mr.CommandCount()
-	for _, bad := range []string{"", "restore-", "restore-XYZ", "restore-0123456789abcdef0", "x" + opID, "../" + opID} {
-		rec, out := r.post(t, "/restore/status", map[string]any{"session": "session-token-01", "opId": bad, "ticket": ticket})
+	bads := []string{"", "restore-", "restore-XYZ", "restore-0123456789abcdef0", "x" + opID, "../" + opID}
+	for _, bad := range bads {
+		rec, out := r.postCounted(t, "/restore/status", map[string]any{"session": "session-token-01", "opId": bad, "ticket": ticket})
 		assert.Equal(t, http.StatusNotFound, rec.Code, bad)
 		assert.Equal(t, "NO_SUCH_RESTORE", errCode(out), bad)
 	}
-	assert.Equal(t, before, r.mr.CommandCount(), "a malformed ID does not reach Redis")
+	assert.Zero(t, r.cmds.count(), "a malformed ID does not reach Redis")
 
-	rec, _ := r.post(t, "/restore/status", map[string]any{"session": "session-token-01", "opId": "restore-0123456789abcdef", "ticket": ticket})
+	// 形の正しい ID は Redis を引く。数え方が要求のコマンドを拾えていることも
+	// ここで確かめる (拾えていなければ、上の 0 は何も確かめていない)。
+	rec, _ := r.postCounted(t, "/restore/status", map[string]any{"session": "session-token-01", "opId": "restore-0123456789abcdef", "ticket": ticket})
 	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Positive(t, r.cmds.count(), "a well-formed ID is looked up in Redis")
 	rec, _ = r.post(t, "/restore/status", map[string]any{"session": "other-session-01", "opId": opID, "ticket": ticket})
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 	assert.NotContains(t, r.log.String(), "cannot read a restore record")
+	// どの context から出たかによらず、不正な ID の記録のキーは使われていない。
+	// 裏の回復が読むのは restore-current と正しい ID の記録だけなので混ざらない。
+	// 遅れて出る経路も拾えるよう、ほかの要求の後で確かめる。
+	// キーの形は restoreop.Store.key と同じ。形が変われば下の正しい ID の確認が落ちる。
+	recordKey := func(id string) string { return "p:elythia:maintenance:restore:" + id }
+	for _, bad := range bads {
+		key := recordKey(bad)
+		assert.False(t, r.cmds.usedArg(key), "a malformed ID reached Redis: %s", key)
+		assert.False(t, r.cmds.usedArg(key+":journal"), "a malformed ID reached Redis: %s:journal", key)
+	}
+	assert.True(t, r.cmds.usedArg(recordKey(opID)), "the record keys are recorded")
+	assert.True(t, r.cmds.usedArg(recordKey(opID)+":journal"), "the journal keys are recorded")
 
 	r.mr.SetError("LOADING Redis is loading the dataset in memory")
 	for range 3 {
