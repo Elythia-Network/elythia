@@ -234,8 +234,8 @@ func TestStoppedMidway_WhileRecovering(t *testing.T) {
 	p.setFailBack(true)
 	e.start()
 	require.Eventually(t, func() bool {
-		st := e.maintenance()
-		return st != nil && st.Phase == maintmode.PhaseResuming
+		st, ok := e.maintenanceNow()
+		return ok && st != nil && st.Phase == maintmode.PhaseResuming
 	}, 5*time.Second, 5*time.Millisecond)
 	e.stop()
 	assertLeftForRecovery(t, e, "restore-again")
