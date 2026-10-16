@@ -17,6 +17,7 @@
 | `enableTimelineCache` / `timelineCacheTtlSeconds` | TL 1 ページ目の viewer 別短 TTL cache (opt-in) |
 | `db.maxOpenConns` ほか pool tuning / `redis*.poolSize` | Go 固有 |
 | `db.extra.sslmode` / `db.extra.sslrootcert` | DB 接続の TLS を libpq の語彙で指定する。upstream は `db.extra` を node-postgres の pool へ素通しするので `ssl` の object に任意の TLS オプション (PEM の `ca` など) を書けるが、pgx は CA をファイルパスでしか受けないため別キーにした (docs/configuration.md「DB 接続の TLS」) |
+| `db.extra.connectionTimeoutMillis` の範囲と既定 | キーと単位は upstream (node-postgres の pool option) と同じ。**区切る範囲と既定が違う**。Elythia が区切るのは接続の確立だけで、upstream (pg-pool) が同じ値で区切る pool の空き待ちは区切らない。upstream は 1 回の接続全体をミリ秒で、Elythia はアドレスごとに秒へ切り上げた `connect_timeout` で区切る。既定は upstream が待ち続ける、Elythia は 10 秒 (#3632、docs/configuration.md「DB への接続を待つ上限」) |
 | `redis*.path` | ioredis 互換の UDS alias。同じ config を TS/mk で共有する drop-in 切替のため |
 | `bcryptCost` | account password のハッシュ強度 (既定 10、範囲 4-31)。upstream は全経路 cost 8 固定で設定不可 |
 | `crossOriginOpenerPolicy` | `Cross-Origin-Opener-Policy` の値 (既定 `off`)。upstream はテスト専用の cross-origin-isolation モードでしか出さない |

@@ -57,9 +57,14 @@ db:
   # the connection to interception) use `ssl: { rejectUnauthorized: false }`
   # (or `ssl: no-verify`).
   # `sslmode` (libpq value) may be set instead of `ssl`. See docs/configuration.md.
+  # `connectionTimeoutMillis` (milliseconds, same key as upstream node-postgres)
+  # bounds how long one connection attempt waits for PostgreSQL to answer.
+  # Default 10000 (upstream waits forever); 0 waits forever. Rounded up to
+  # whole seconds. See docs/configuration.md.
   #extra:
   #  ssl: true
   #  sslrootcert: /etc/ssl/certs/pg-ca.pem
+  #  connectionTimeoutMillis: 10000
 
 dbReplications: false
 

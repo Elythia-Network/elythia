@@ -63,8 +63,23 @@ cp .config/docker.yml.example .config/docker.yml
 | `db.extra.ssl` | bool / map / `no-verify` | `false` | TLS接続。`true` は**サーバー証明書とホスト名を検証する** (`sslmode=verify-full`、システムの CA)。upstream (node-postgres) の形 `{ rejectUnauthorized: false }` と `'no-verify'` は検証しない TLS (`sslmode=require`)。詳細は下記 |
 | `db.extra.sslmode` | string | - | **Elythia 独自**。libpq の `sslmode` を直接指定する (`disable` / `allow` / `prefer` / `require` / `verify-ca` / `verify-full`)。`db.extra.ssl` と同時には書けない |
 | `db.extra.sslrootcert` | string | - | **Elythia 独自**。検証に使う CA 証明書 (PEM) の**ファイルパス**。自己署名 / 私設 CA の DB に使う |
+| `db.extra.connectionTimeoutMillis` | int (ミリ秒) | `10000` | 1 回の接続の確立 (TCP / UNIX ソケットの接続、TLS、認証) を待つ上限。`0` は待ち続ける。負の値・数でない値・`2147483647` を超える値は起動エラー。詳細は下記 |
 
-`dbReplications: true`とすると`dbSlaves`設定でリードレプリカを使用可能。レプリカは primary の `db.extra` の TLS 設定を引き継ぐ (ホスト名の検証はレプリカ自身の `host` で行う)。
+`dbReplications: true`とすると`dbSlaves`設定でリードレプリカを使用可能。レプリカは primary の `db.extra` の TLS 設定と接続の待ち時間 (`connectionTimeoutMillis`) を引き継ぐ (ホスト名の検証はレプリカ自身の `host` で行う)。
+
+#### DB への接続を待つ上限 (`db.extra.connectionTimeoutMillis`)
+
+接続を受け付けたまま応答しない相手 (止まりかけの PostgreSQL、経路の途中で詰まったネットワーク) に繋ぐと、上限が無ければ起動も DB を使う処理も戻らない (#3632)。Elythia は既定で 10 秒で区切る。
+
+- **キーと単位は upstream と同じだが、区切る範囲と既定が違う。** upstream は `db.extra` を node-postgres の pool へ素通しするので、`connectionTimeoutMillis` (pool の option、ミリ秒) を書いた設定はそのまま読める
+  - **区切る範囲**: Elythia が区切るのは接続の確立だけ。upstream (pg-pool) は同じ値で、pool が満杯のときに空きを待つ時間も区切る (`timeout exceeded when trying to connect`)。Elythia (database/sql) は空き待ちを区切らない。また upstream は 1 回の接続全体をミリ秒で、Elythia はアドレスごとに秒で区切る (下記)
+  - **既定**: upstream は TypeORM の `connectTimeoutMS` も指定しておらず、node-postgres の既定 `0` (待ち続ける) で動く。Elythia は 10 秒
+- **秒へ切り上げる。** pgx と libpq の `connect_timeout` は秒単位なので、`1500` は 2 秒、`1` は 1 秒になる (切り捨てると 1〜999 が `0` = 待ち続けるになるため)。`pg_dump` / `pg_restore` (libpq) は、libpq 16 以前だけ 1 秒を 2 秒に切り上げる (17 以降は 1 秒のまま。同梱の image は `postgres:18-alpine` の `pg_dump` を使うので 1 秒のまま)
+- **上限は接続先のアドレスごと。** `db.host` が複数のアドレスに解決される (`localhost` が `::1` と `127.0.0.1` になるなど) と、全体ではアドレスの数だけ長く待つことがある
+- 接続の確立だけを区切る。繋がった後のクエリの時間は区切らない (upstream が既定で付ける `statement_timeout` に当たる `db.extra.statement_timeout` は Elythia では読まない)
+- 本体・レプリカ (`dbSlaves`)・`elythia migrate`・バックアップ (`pg_dump` / `pg_restore` を含む)・プラグインの保存先など、`db:` から接続先を作る全ての接続に効く。UNIX ソケットでも効く
+- 起動時の最初の接続が時間切れになると、`elythia serve` と `elythia migrate` は相手のアドレスと設定のキー名を添えたエラーで終了する。serve は `failed to connect to database (PostgreSQL at <host>:<port> did not answer within 10s; ... db.extra.connectionTimeoutMillis ...)` (UNIX ソケットでは `<host>:<port>` の代わりに `<db.host>/.s.PGSQL.<port>`)、migrate は `failed to create migrator` のログの `hint` に同じ文を出す (標準の構成では migrate が先に DB へ繋ぐ)
+- 環境変数 `MK_DB_EXTRA_CONNECTIONTIMEOUTMILLIS` で、設定ファイルに書かなくても変えられる (`bindEnvKeys()` に登録してある)。libpq の `PGCONNECT_TIMEOUT` は読まない (接続文字列に常に書くため)
 
 #### DB 接続の TLS (`db.extra`)
 
@@ -77,11 +92,11 @@ cp .config/docker.yml.example .config/docker.yml
 | `sslmode: <値>` (+ `sslrootcert`) | libpq の意味そのまま (`prefer` / `allow` と `sslrootcert` の併記は起動エラー) | 指定値 |
 
 - **`ssl: true` の意味が変わった (破壊的変更)。** 以前の Elythia は `ssl: 'true'` (文字列) のときだけ `sslmode=require` = **証明書を検証しない TLS** で繋いでいた。しかも YAML の bool の `ssl: true` は設定の読み込みで `"1"` になって比較に外れ、**平文で繋いでいた**。upstream (node-postgres) の `ssl: true` は Node の既定 (`rejectUnauthorized: true`) で検証するので、それに揃えた。自己署名証明書の DB に `ssl: true` で繋いでいた構成は起動時に `certificate signed by unknown authority` 等で落ちる。その場合は (a) CA を `db.extra.sslrootcert` に指定する、または (b) 検証を明示的に無効にする (`ssl: { rejectUnauthorized: false }`) のどちらかを選ぶ。起動エラーにも同じ案内を出す。
-- **upstream の object 形式で解釈するのは `rejectUnauthorized` だけ。** node-postgres の `ca` は PEM の中身を受けるが、pgx はファイルパスしか受けないので `ca` は起動エラーにする (CA をファイルに保存して `sslrootcert` へ)。`cert` / `key` / `servername` 等も黙って捨てずに起動エラーにする。`ssl` 以外の `extra` のキー (`statement_timeout` 等、upstream が pool へ渡すもの) は無視する。
+- **upstream の object 形式で解釈するのは `rejectUnauthorized` だけ。** node-postgres の `ca` は PEM の中身を受けるが、pgx はファイルパスしか受けないので `ca` は起動エラーにする (CA をファイルに保存して `sslrootcert` へ)。`cert` / `key` / `servername` 等も黙って捨てずに起動エラーにする。`ssl` / `sslmode` / `sslrootcert` / `connectionTimeoutMillis` 以外の `extra` のキー (`statement_timeout` 等、upstream が pool へ渡すもの) は無視する。
 - **`ssl: no-verify` は `{ rejectUnauthorized: false }` と同じ。** node-postgres (upstream が使う pg 8.23.0 の `lib/connection-parameters.js`) が同じ意味で受ける書き方なので、そのまま移せる。
 - 矛盾する組み合わせ (`ssl` と `sslmode` の併記、TLS 無効なのに `sslrootcert`、`rejectUnauthorized: false` / `no-verify` と `sslrootcert` の併記、`sslmode: prefer` / `allow` と `sslrootcert` の併記) は起動エラーにする。最後のものは、pgx が `prefer` / `allow` では CA を渡しても**証明書を検証せず**、TLS を断られると**平文へ落ちる**ため (CA を書いた運営者の意図と逆になる)。検証したいなら `verify-full` (または `verify-ca`) にする。
 - 証明書の検証に失敗したときの起動エラーには、書いた設定に合わせた対処を添える (`ssl: true` なら「以前は検証していなかった」旨と `sslrootcert` / `rejectUnauthorized: false`、`sslmode` を明示していれば `sslrootcert` / `sslmode: require`、`sslrootcert` を指定していればその CA ファイルと `db.host` の確認)。
-- **環境変数で渡すなら設定ファイルにキーを書いておく。** `db.extra.*` は `bindEnvKeys()` に登録していないので、`MK_DB_EXTRA_SSL` / `MK_DB_EXTRA_SSLMODE` / `MK_DB_EXTRA_SSLROOTCERT` は**設定ファイルに同じキー (`extra:` の下の `ssl:` 等) があるときだけ**効く (下の「環境変数オーバーライド」を参照)。ファイルに無いまま export しても黙って平文で繋ぐ。
+- **環境変数で渡すなら設定ファイルにキーを書いておく。** `db.extra.*` は (`connectionTimeoutMillis` を除き) `bindEnvKeys()` に登録していないので、`MK_DB_EXTRA_SSL` / `MK_DB_EXTRA_SSLMODE` / `MK_DB_EXTRA_SSLROOTCERT` は**設定ファイルに同じキー (`extra:` の下の `ssl:` 等) があるときだけ**効く (下の「環境変数オーバーライド」を参照)。ファイルに無いまま export しても黙って平文で繋ぐ。
 - **UNIX ソケット (`host` が `/` 始まり) では TLS を張らない** (`sslmode=disable` 固定)。
 - `elythia migrate` / `elythia doctor` / `elythia backfill` などのサブコマンドも本体と同じ接続設定 (TLS・パスワードのエスケープ) を使う。
 
@@ -309,6 +324,7 @@ Elythia 側のマイグレーションには含めていない。pgroonga 拡張
 | `MK_DB_DB` | `db.db` |
 | `MK_DB_USER` | `db.user` |
 | `MK_DB_PASS` | `db.pass` |
+| `MK_DB_EXTRA_CONNECTIONTIMEOUTMILLIS` | `db.extra.connectionTimeoutMillis` |
 | `MK_REDIS_HOST` | `redis.host` |
 | `MK_REDIS_PORT` | `redis.port` |
 | `MK_REDIS_PASS` | `redis.pass` |
@@ -331,9 +347,9 @@ Elythia 側のマイグレーションには含めていない。pgroonga 拡張
 
 用途別Redisも同様 (例: `MK_REDISFORPUBSUB_HOST`)。
 
-**上表は一部。** `internal/config/config.go` の `bindEnvKeys()` は **93 キー**を
+**上表は一部。** `internal/config/config.go` の `bindEnvKeys()` は **94 キー**を
 登録している。内訳は用途別 Redis 5 系統 (`redis` / `redisForPubsub` /
-`redisForJobQueue` / `redisForTimelines` / `redisForReactions`) が各 9、`db.*` が 9、
+`redisForJobQueue` / `redisForTimelines` / `redisForReactions`) が各 9、`db.*` が 10、
 `logging.sql.*` が 2、`sentryForBackend.options.{dsn,environment}` が 2、
 `maintenance.*` が 2、残り 33 がトップレベル。全量はその関数を見ること。
 

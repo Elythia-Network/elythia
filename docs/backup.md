@@ -233,6 +233,8 @@ elythia backup list -config .config/default.yml -json   # JSONで出す
 | `sslrootcert`あり | そのCAで検証 | 同じ |
 | `ssl: no-verify` / `sslmode: require`など | 本体と同じ | 同じ |
 
+接続を待つ上限(`db.extra.connectionTimeoutMillis`、既定10秒)も、本体と同じ値を`connect_timeout`として`pg_dump` / `pg_restore`に渡す。libpq 16以前だけは1秒を2秒に切り上げる(17以降は1秒のまま。同梱のimageは`postgres:18-alpine`の`pg_dump`を使うので1秒のまま)。
+
 `sslrootcert`で指すCAファイルは、`pg_dump`が動く場所から同じパスで読める必要がある。composeでは、`backup`サービスにも同じパスでmountする。
 
 ## 確かめる
