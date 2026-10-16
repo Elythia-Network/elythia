@@ -234,35 +234,58 @@ DECLARE
         'IDX_drive_file_uri',
         'IDX_user_usernameLower_host_unique'
     ];
+    -- public の index の表名・名前・定義。先に配列へ読み切ってから比べる (#3369)。
+    idx_tables text[];
+    idx_names text[];
+    idx_defs text[];
     dup record;
 BEGIN
+    -- 定義は SELECT の側 (集約の入力) でだけ読む。以前は pg_indexes を 2 回引き、
+    -- EXISTS の中の WHERE で定義を比べていた。その条件は 2 つの index の定義を
+    -- 参照する join の条件なので、#3365 (1 つの index の scan まで押し下げられる形)
+    -- ほど直接ではないが、join の順によっては schema で絞る前の index に対して
+    -- pg_get_indexdef が評価されうる (理論上の危険)。並行する DDL (テストでは
+    -- 他のパッケージの schema に流れる migration) がその index を消していると
+    -- `could not open relation with OID` で落ちる。集約の入力は
+    -- 絞り込みの後に評価されるので、ここで読むのは public の index だけになる。
+    -- 比べるのは配列に移した値なので、plan がどうなっても catalog は読み直さない。
+    -- 落とす対象を決める規則 (A) / (B) は変えていない。
+    SELECT array_agg(tablename ORDER BY indexname),
+           array_agg(indexname ORDER BY indexname),
+           array_agg(indexdef ORDER BY indexname)
+      INTO idx_tables, idx_names, idx_defs
+      FROM pg_indexes
+     WHERE schemaname = 'public';
+
     FOR dup IN
+        WITH idx AS (
+            SELECT t.tablename, t.indexname, t.def
+            FROM unnest(idx_tables, idx_names, idx_defs) AS t(tablename, indexname, def)
+        )
         SELECT mine.indexname
-        FROM pg_indexes mine
-        WHERE mine.schemaname = 'public'
-          AND mine.indexname = ANY(mk_index_names)
+        FROM idx mine
+        WHERE mine.indexname = ANY(mk_index_names)
           AND EXISTS (
               SELECT 1
-              FROM pg_indexes other
-              WHERE other.schemaname = 'public'
-                AND other.tablename = mine.tablename
+              FROM idx other
+              WHERE other.tablename = mine.tablename
                 AND other.indexname <> mine.indexname
                 -- 生存させるのは upstream 由来の index のみ。mk-go 同士を
                 -- 突き合わせて片方を落とすことは無い。
                 AND NOT (other.indexname = ANY(mk_index_names))
                 AND (
                     -- (A) 定義が完全一致 (index 名だけを除いて比較)
-                    regexp_replace(other.indexdef, '^CREATE (UNIQUE )?INDEX \S+ ON ', '\1|')
-                      = regexp_replace(mine.indexdef, '^CREATE (UNIQUE )?INDEX \S+ ON ', '\1|')
+                    regexp_replace(other.def, '^CREATE (UNIQUE )?INDEX \S+ ON ', '\1|')
+                      = regexp_replace(mine.def, '^CREATE (UNIQUE )?INDEX \S+ ON ', '\1|')
                     OR
                     -- (B) mk-go 側が partial で、WHERE を外すと upstream の
                     --     full index と一致する (明示列挙したものだけ)
                     (
                         mine.indexname = ANY(partial_subset_names)
-                        AND other.indexdef !~ ' WHERE '
-                        AND regexp_replace(other.indexdef, '^CREATE (UNIQUE )?INDEX \S+ ON ', '\1|')
+                        AND other.def !~ ' WHERE '
+                        AND regexp_replace(other.def, '^CREATE (UNIQUE )?INDEX \S+ ON ', '\1|')
                           = regexp_replace(
-                                regexp_replace(mine.indexdef, ' WHERE .*$', ''),
+                                regexp_replace(mine.def, ' WHERE .*$', ''),
                                 '^CREATE (UNIQUE )?INDEX \S+ ON ', '\1|')
                     )
                 )
