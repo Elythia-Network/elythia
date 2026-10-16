@@ -25,12 +25,13 @@ const (
 // RunSet describes one comparison: the two commits, the conditions and the
 // runs. It is read from run.json at the top of the results directory.
 type RunSet struct {
-	Base     Commit            `json:"base"`
-	Head     Commit            `json:"head"`
-	Scenario string            `json:"scenario"`
-	Rounds   int               `json:"rounds"`
-	Runner   map[string]string `json:"runner,omitempty"`
-	Runs     []*Run            `json:"-"`
+	Base            Commit            `json:"base"`
+	Head            Commit            `json:"head"`
+	Scenario        string            `json:"scenario"`
+	Rounds          int               `json:"rounds"`
+	DeliveryEnabled bool              `json:"deliveryEnabled,omitempty"`
+	Runner          map[string]string `json:"runner,omitempty"`
+	Runs            []*Run            `json:"-"`
 }
 
 // Commit is one side of the comparison.
@@ -64,19 +65,22 @@ type Run struct {
 // DeliveryStats is the JSON emitted by tests/bench/queue/deliveryreceiver.
 // Counts are descriptive; benchcompare does not apply performance thresholds.
 type DeliveryStats struct {
-	Finalized          bool   `json:"finalized"`
-	Expected           uint64 `json:"expected"`
-	Attempts           uint64 `json:"attempts"`
-	Verified           uint64 `json:"verified"`
-	Pending            uint64 `json:"pending"`
-	Valid              uint64 `json:"valid"`
-	Unique             uint64 `json:"unique"`
-	Duplicates         uint64 `json:"duplicates"`
-	Invalid            uint64 `json:"invalid"`
-	ContentMismatch    uint64 `json:"contentMismatch"`
-	Unexpected         uint64 `json:"unexpected"`
-	UnexpectedAttempts uint64 `json:"unexpectedAttempts"`
-	Missing            uint64 `json:"missing"`
+	Finalized               bool     `json:"finalized"`
+	Expected                uint64   `json:"expected"`
+	Attempts                uint64   `json:"attempts"`
+	Verified                uint64   `json:"verified"`
+	Pending                 uint64   `json:"pending"`
+	Valid                   uint64   `json:"valid"`
+	Unique                  uint64   `json:"unique"`
+	Duplicates              uint64   `json:"duplicates"`
+	Invalid                 uint64   `json:"invalid"`
+	ContentMismatch         uint64   `json:"contentMismatch"`
+	Unexpected              uint64   `json:"unexpected"`
+	UnexpectedAttempts      uint64   `json:"unexpectedAttempts"`
+	Missing                 uint64   `json:"missing"`
+	ThroughputJobs          *uint64  `json:"throughputJobs,omitempty"`
+	ThroughputJobsPerSecond *float64 `json:"throughputJobsPerSecond,omitempty"`
+	DrainSeconds            *float64 `json:"drainSeconds,omitempty"`
 }
 
 // EndpointResult is what one run measured for one endpoint.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # base と head の 2 つの commit を、同じスタックで交互に流して比べる (#3544)。
 #
-#   run.sh --base <ref> --head <ref> [--rounds N] [--scenario prod-like|unlimited] [--out DIR] [--smoke]
+#   run.sh --base <ref> --head <ref> [--rounds N] [--scenario prod-like|unlimited] [--out DIR] [--smoke] [--delivery]
 #
 # --smoke は seed を 10 人 × 10 ノートにし、各エンドポイントを 5 秒だけ流す。手順が
 # 最後まで通るかを見るためのもので、結果を比較に使わない。
@@ -27,14 +27,15 @@ set -Eeuo pipefail
 trap 'exit 1' ERR
 
 usage() {
-  echo "usage: $0 --base <ref> --head <ref> [--rounds N] [--scenario prod-like|unlimited] [--out DIR] [--smoke]" >&2
+  echo "usage: $0 --base <ref> --head <ref> [--rounds N] [--scenario prod-like|unlimited] [--out DIR] [--smoke] [--delivery] [--project-name NAME]" >&2
   exit 1
 }
 
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(git -C "$here" rev-parse --show-toplevel)
 
-base_ref='' head_ref='' rounds=2 scenario=prod-like out='' smoke=0
+base_ref='' head_ref='' rounds=2 scenario=prod-like out='' smoke=0 delivery=0
+project_name="mk-bench-ab-$$" delivery_notes=2 delivery_followers=2
 while [ $# -gt 0 ]; do
   case $1 in
     --base) base_ref=$2; shift 2 ;;
@@ -43,6 +44,10 @@ while [ $# -gt 0 ]; do
     --scenario) scenario=$2; shift 2 ;;
     --out) out=$2; shift 2 ;;
     --smoke) smoke=1; shift ;;
+    --delivery) delivery=1; shift ;;
+    --delivery-notes) delivery_notes=$2; shift 2 ;;
+    --delivery-followers) delivery_followers=$2; shift 2 ;;
+    --project-name) project_name=$2; shift 2 ;;
     *) usage ;;
   esac
 done
@@ -50,6 +55,14 @@ if [ -z "$base_ref" ] || [ -z "$head_ref" ]; then usage; fi
 case $rounds in '' | *[!0-9]*) usage ;; esac
 # benchcompare は 2 回未満を比較できないとする。流してから分かるのは時間の無駄なので先に止める
 [ "$rounds" -ge 2 ] || { echo "run.sh: --rounds must be 2 or more" >&2; exit 1; }
+for count in "$delivery_notes" "$delivery_followers"; do
+  case $count in '' | *[!0-9]*) usage ;; esac
+  [ "$count" -gt 0 ] || usage
+done
+[[ "$project_name" =~ ^[a-z0-9][a-z0-9_-]{0,39}$ ]] || {
+  echo "run.sh: --project-name must be 1-40 lowercase letters, digits, '_' or '-'" >&2
+  exit 1
+}
 case $scenario in
   prod-like) disable_limits=false ;;
   unlimited) disable_limits=true ;;
@@ -68,7 +81,7 @@ out=${out:-$here/results/$(date -u +%Y%m%dT%H%M%SZ)-$scenario}
 mkdir -p "$out"
 out=$(cd "$out" && pwd)
 
-compose=(docker compose -f "$here/compose.yml")
+compose=(docker compose -p "$project_name" -f "$here/compose.yml")
 if [ "$smoke" -eq 1 ]; then
   export BENCH_SEED_USERS=10 BENCH_SEED_NOTES=10
   scenario=$scenario-smoke
@@ -78,22 +91,29 @@ BENCH_UID=$(id -u)
 BENCH_GID=$(id -g)
 
 work=$(mktemp -d)
+delivery_projects=()
+delivery_compose_files=()
 # shellcheck disable=SC2317 # trap から呼ぶ
 cleanup() {
   # 後始末の失敗で、比較の終了コード (0 / 2) を ERR trap の 1 に書き換えない
   trap - ERR
+  for i in "${!delivery_projects[@]}"; do
+    docker compose -p "${delivery_projects[$i]}" -f "${delivery_compose_files[$i]}" \
+      --profile bench --profile outbound --profile delivery down -v --remove-orphans >/dev/null 2>&1 || true
+  done
   "${compose[@]}" --profile tools down -v --remove-orphans >/dev/null 2>&1 || true
   for side in base head; do
     if [ -d "$work/$side" ]; then git -C "$repo" worktree remove --force "$work/$side" >/dev/null 2>&1 || true; fi
   done
   rm -rf "$work"
+  docker image rm "$(image_of base)" "$(image_of head)" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
 log() { echo "[run.sh $(date -u +%H:%M:%S)] $*" >&2; }
 
 # ── 1. image ─────────────────────────────────────────────
-image_of() { echo "mk-bench-ab-app:$1"; }
+image_of() { echo "mk-bench-ab-app:${project_name}-$1-$$"; }
 build() {
   local side=$1 commit=$2
   log "building $side ($commit)"
@@ -112,15 +132,19 @@ fi
 
 # ref は利用者が渡す文字列なので、JSON は python で組み立てる
 python3 - "$out/run.json" "$base_ref" "$base_commit" "$head_ref" "$head_commit" "$scenario" "$rounds" \
+  "$delivery" "$delivery_notes" "$delivery_followers" \
   "$(uname -r)" "$(nproc)" "$(awk -F': ' '/^model name/ {print $2; exit}' /proc/cpuinfo)" "$(docker version -f '{{.Server.Version}}')" <<'PY'
 import json, sys
-path, bref, bcommit, href, hcommit, scenario, rounds, kernel, cpus, model, docker = sys.argv[1:]
+path, bref, bcommit, href, hcommit, scenario, rounds, delivery, delivery_notes, delivery_followers, kernel, cpus, model, docker = sys.argv[1:]
 with open(path, "w") as f:
     json.dump({
         "base": {"ref": bref, "commit": bcommit},
         "head": {"ref": href, "commit": hcommit},
         "scenario": scenario,
         "rounds": int(rounds),
+        "deliveryEnabled": delivery == "1",
+        "deliveryNotes": int(delivery_notes) if delivery == "1" else None,
+        "deliveryFollowers": int(delivery_followers) if delivery == "1" else None,
         "runner": {"kernel": kernel, "cpus": cpus, "cpu_model": model, "docker": docker},
     }, f, indent=2)
 PY
@@ -188,6 +212,41 @@ measure() {
   "${compose[@]}" logs --no-color app 2>&1 | gzip > "$dir/app.log.gz" || true
 }
 
+measure_delivery() {
+  local dir=$1 round=$2 side=$3
+  local queue_compose="$repo/tests/bench/queue/compose.yml"
+  local delivery_project="${project_name}-delivery-r${round}-${side}"
+  local qcompose=(docker compose -p "$delivery_project" -f "$queue_compose")
+  local MKGO_IMAGE QUEUE_BENCH_DELIVERY=1 QUEUE_BENCH_STACKS=mkq QUEUE_BENCH_SEED_FAKER=0
+  local OUTBOUND_NOTES=$delivery_notes OUTBOUND_FOLLOWERS=$delivery_followers
+  local QUEUE_BENCH_EXPORT_DELIVERY=1 QUEUE_BENCH_DELIVERY_STACK=mkq QUEUE_BENCH_RESULTS=$dir
+  delivery_projects+=("$delivery_project")
+  delivery_compose_files+=("$queue_compose")
+
+  MKGO_IMAGE=$(image_of "$side")
+  export MKGO_IMAGE QUEUE_BENCH_DELIVERY QUEUE_BENCH_STACKS QUEUE_BENCH_SEED_FAKER
+  export OUTBOUND_NOTES OUTBOUND_FOLLOWERS QUEUE_BENCH_EXPORT_DELIVERY
+  export QUEUE_BENCH_DELIVERY_STACK QUEUE_BENCH_RESULTS
+
+  "${qcompose[@]}" --profile bench --profile outbound --profile delivery \
+    build -q seed driver-outbound deliveryreceiver-mkq \
+    > "$dir/delivery-build.log" 2>&1 || { delivery_reason="delivery fixture build failed"; return 1; }
+  "${qcompose[@]}" --profile delivery --no-build up -d --wait \
+    certs postgres-mkq redis-mkq app-mkq nginx-mkq deliveryreceiver-mkq \
+    > "$dir/delivery-compose.log" 2>&1 || { delivery_reason="delivery fixture stack failed to start"; return 1; }
+  "${qcompose[@]}" --profile bench run --no-deps --rm seed \
+    > "$dir/delivery-seed.log" 2>&1 || { delivery_reason="delivery seed failed"; return 1; }
+  "${qcompose[@]}" restart --no-deps app-mkq nginx-mkq \
+    >> "$dir/delivery-compose.log" 2>&1 || { delivery_reason="delivery stack restart failed"; return 1; }
+  "${qcompose[@]}" --no-build up -d --wait app-mkq nginx-mkq \
+    >> "$dir/delivery-compose.log" 2>&1 || { delivery_reason="delivery stack did not become healthy"; return 1; }
+  "${qcompose[@]}" --profile outbound run --no-deps --rm driver-outbound \
+    > "$dir/delivery-driver.log" 2>&1 || { delivery_reason="delivery driver failed"; return 1; }
+  [ -s "$dir/delivery.json" ] || { delivery_reason="delivery.json was not written"; return 1; }
+  "${qcompose[@]}" --profile bench --profile outbound --profile delivery \
+    down -v --remove-orphans --rmi local >/dev/null 2>&1 || true
+}
+
 run_one() {
   local round=$1 side=$2
   local dir=$out/r$round-$side
@@ -201,6 +260,15 @@ run_one() {
     reason=${reason:-failed}
     log "round $round $side: $reason"
     "${compose[@]}" logs --no-color > "$dir/compose.log" 2>&1 || true
+  fi
+  local delivery_reason=''
+  if [ "$delivery" -eq 1 ] && [ "$completed" = true ]; then
+    "${compose[@]}" --profile tools down -v --remove-orphans >/dev/null 2>&1 || true
+    if ! measure_delivery "$dir" "$round" "$side"; then
+      delivery_reason=${delivery_reason:-failed}
+      log "round $round $side delivery: $delivery_reason"
+      printf '%s\n' "$delivery_reason" > "$dir/delivery-error.txt"
+    fi
   fi
   "${compose[@]}" --profile tools down -v --remove-orphans >/dev/null 2>&1 || true
   python3 -c 'import json,sys; print(json.dumps({"side": sys.argv[1], "round": int(sys.argv[2]), "completed": sys.argv[3] == "true", "reason": sys.argv[4]}))' \

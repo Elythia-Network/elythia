@@ -93,6 +93,7 @@ services:
     networks: [bench]
 
   app-mkq:
+    image: ${MKGO_IMAGE:-mk-queue-bench-mkgo}
     build:
       context: ../../..
       dockerfile: tests/federation/common/Dockerfile.mkgo
@@ -192,6 +193,9 @@ services:
       FAKER_URL: http://faker:8081
       FAKER_HOST: faker
       FAKER_BASE_HTTPS: https://faker
+      OUTBOUND_FOLLOWERS: "${OUTBOUND_FOLLOWERS:-100}"
+      QUEUE_BENCH_STACKS: "${QUEUE_BENCH_STACKS:-mkq,ts}"
+      QUEUE_BENCH_SEED_FAKER: "${QUEUE_BENCH_SEED_FAKER:-1}"
       QUEUE_BENCH_DELIVERY: "${QUEUE_BENCH_DELIVERY:-0}"
     depends_on:
       app-mkq: { condition: service_healthy }
@@ -213,14 +217,20 @@ services:
     environment:
       MKGO_MKQ_URL: https://mk-mkq
       TS_URL: https://ts
-      OUTBOUND_NOTES: "100"
-      OUTBOUND_FOLLOWERS: "100"
+      OUTBOUND_NOTES: "${OUTBOUND_NOTES:-100}"
+      OUTBOUND_FOLLOWERS: "${OUTBOUND_FOLLOWERS:-100}"
+      QUEUE_BENCH_EXPORT_DELIVERY: "${QUEUE_BENCH_EXPORT_DELIVERY:-0}"
+      QUEUE_BENCH_DELIVERY_STACK: "${QUEUE_BENCH_DELIVERY_STACK:-mkq}"
       REDIS_MKQ_HOST: redis-mkq
       REDIS_TS_HOST: redis-ts
       QUEUE_BENCH_DELIVERY: "${QUEUE_BENCH_DELIVERY:-0}"
     volumes:
       - ./common:/app/common:ro
-      - ./results:/results
+      - type: bind
+        source: ${QUEUE_BENCH_RESULTS:-./results}
+        target: /results
+        bind:
+          create_host_path: true
       - seed-state:/state:ro
     command: ["python", "/app/common/driver_outbound.py"]
     networks: [bench]

@@ -185,6 +185,22 @@ class OutboundDeliveryTests(unittest.TestCase):
         self.assertIsNone(result["throughput_jobs"])
         self.assertIsNone(result["throughput_jobs_per_sec"])
 
+    def test_delivery_artifact_flattens_raw_stats_and_unique_rate(self) -> None:
+        artifact = driver.delivery_artifact({
+            "delivery": {"expected": 2, "unique": 2, "verified": 3, "duplicates": 1},
+            "deliveryStatus": "valid",
+            "deliveryReasons": [],
+            "throughput_jobs": 2,
+            "throughput_jobs_per_sec": 4.0,
+            "drain_seconds": 0.5,
+        })
+
+        self.assertEqual(artifact["expected"], 2)
+        self.assertEqual(artifact["verified"], 3)
+        self.assertEqual(artifact["throughputJobs"], 2)
+        self.assertEqual(artifact["throughputJobsPerSecond"], 4.0)
+        self.assertEqual(artifact["drainSeconds"], 0.5)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -275,6 +275,20 @@ def run_stack(stack: str, info: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def delivery_artifact(result: dict[str, Any]) -> dict[str, Any]:
+    """Flatten one stack's receiver counters and measured throughput for benchcompare."""
+    stats = result.get("delivery")
+    artifact = dict(stats) if isinstance(stats, dict) else {"finalized": False}
+    artifact.update({
+        "status": result.get("deliveryStatus", "incomplete"),
+        "reasons": result.get("deliveryReasons", []),
+        "throughputJobs": result.get("throughput_jobs"),
+        "throughputJobsPerSecond": result.get("throughput_jobs_per_sec"),
+        "drainSeconds": result.get("drain_seconds"),
+    })
+    return artifact
+
+
 def main() -> int:
     with open("/state/seed.json") as f:
         seed = json.load(f)
@@ -289,6 +303,12 @@ def main() -> int:
     with open(out_path, "w") as f:
         json.dump(results, f, indent=2)
     print(f"outbound.json written to {out_path}", flush=True)
+    if os.environ.get("QUEUE_BENCH_EXPORT_DELIVERY") == "1":
+        stack = os.environ.get("QUEUE_BENCH_DELIVERY_STACK", "mkq")
+        delivery_path = "/results/delivery.json"
+        with open(delivery_path, "w") as f:
+            json.dump(delivery_artifact(results.get(stack, {})), f, indent=2)
+        print(f"delivery.json written to {delivery_path}", flush=True)
     return 1 if delivery_preparation_failed else 0
 
 

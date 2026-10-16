@@ -30,11 +30,17 @@ STACKS = {
         "db_host": "postgres-ts",
     },
 }
+selected_stacks = os.environ.get("QUEUE_BENCH_STACKS", "mkq,ts").split(",")
+unknown_stacks = set(selected_stacks) - set(STACKS)
+if unknown_stacks or not selected_stacks or any(not stack for stack in selected_stacks):
+    raise ValueError(f"invalid QUEUE_BENCH_STACKS: {selected_stacks}")
+STACKS = {stack: STACKS[stack] for stack in selected_stacks}
 
-FAKER_URL = os.environ["FAKER_URL"]
-FAKER_HOST = os.environ["FAKER_HOST"]
-FAKER_BASE_HTTPS = os.environ["FAKER_BASE_HTTPS"]
+FAKER_URL = os.environ.get("FAKER_URL", "")
+FAKER_HOST = os.environ.get("FAKER_HOST", "")
+FAKER_BASE_HTTPS = os.environ.get("FAKER_BASE_HTTPS", "")
 FAKER_ACTOR_PATH = "/users/bench-sender"
+SEED_FAKER = os.environ.get("QUEUE_BENCH_SEED_FAKER", "1") == "1"
 OUTBOUND_FOLLOWERS = int(os.environ.get("OUTBOUND_FOLLOWERS", "100"))
 DELIVERY_MODE = os.environ.get("QUEUE_BENCH_DELIVERY", "0") == "1"
 DELIVERY_RECEIVERS = {
@@ -227,12 +233,13 @@ def main() -> int:
     for stack, info in STACKS.items():
         wait_health(info["url"])
 
-    faker_actor = fetch_faker_actor()
-    state["faker"] = {
-        "actor_uri": faker_actor["id"],
-        "inbox": faker_actor["inbox"],
-        "publicKeyId": faker_actor["publicKey"]["id"],
-    }
+    faker_actor = fetch_faker_actor() if SEED_FAKER else None
+    if faker_actor:
+        state["faker"] = {
+            "actor_uri": faker_actor["id"],
+            "inbox": faker_actor["inbox"],
+            "publicKeyId": faker_actor["publicKey"]["id"],
+        }
 
     for stack, info in STACKS.items():
         url = info["url"]
@@ -261,7 +268,11 @@ def main() -> int:
         followers = insert_fixture_followers(
             stack, info["db_host"], user_id, OUTBOUND_FOLLOWERS, receiver_url,
         )
-        faker_remote_id = insert_faker_actor(stack, info["db_host"], faker_actor)
+        faker_remote_id = (
+            insert_faker_actor(stack, info["db_host"], faker_actor)
+            if faker_actor
+            else ""
+        )
 
         stack_state: dict[str, Any] = {
             "url": url,
