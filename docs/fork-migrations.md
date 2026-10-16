@@ -438,7 +438,7 @@ migrationが途中で止まって管理表がdirtyになったときは、SQLで
 ## テスト
 
 - `testutil.ApplyMigrations`は、本体のmigrationの後に`migration/local/`のup migrationも流す。forkが足した列を使うモデルのテストが、テスト用のDBで動く
-- **migrationの中身を見るテストとゲートは、`migration/`の直下だけを読み、`migration/local/`を見ない。** 対象は、up → down → upの往復(`internal/repository/migration_roundtrip_test.go`)、冪等性(`internal/entitycompat/migration_idempotency_test.go`)、index名(`index_naming_test.go`)、seed(`migration_seed_test.go`)、schemaのドリフト(`schema_drift_test.go`)、`make gates`の本数の検査(`migrationdoc-check`)。forkの系列のdownや冪等性は、forkの側で確かめる
+- **migrationの中身を見るテストとゲートは、`catalog-check`を除いて、`migration/`の直下だけを読み、`migration/local/`を見ない。** 対象は、up → down → upの往復(`internal/repository/migration_roundtrip_test.go`)、冪等性(`internal/entitycompat/migration_idempotency_test.go`)、index名(`index_naming_test.go`)、seed(`migration_seed_test.go`)、schemaのドリフト(`schema_drift_test.go`)、`make gates`の本数の検査(`migrationdoc-check`)。forkの系列のdownや冪等性は、forkの側で確かめる。`catalog-check`(#3369)は`git ls-files -- 'migration/*.sql'`で列挙するので、`migration/local/`も読む。forkのmigrationでも、システムカタログはschemaで絞り、`indexdef`をWHEREに書かない
 
 ## その他
 
