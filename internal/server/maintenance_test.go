@@ -99,6 +99,47 @@ func waitProc(t *testing.T, sup *Supervisor, want string) {
 		15*time.Second, 20*time.Millisecond, "process did not reach %q (now %q)", want, sup.maint.procState())
 }
 
+// waitReports waits until the reports in Redis are exactly want (process ID
+// to state) and returns them.
+//
+// 報告は状態が変わった後に書く (enter は drained に変えてから戻り、reconcile の
+// 最後の refresh が書く)。waitProc はプロセスの中の状態を見るので、通った直後に
+// 報告を読むと、まだ前の状態のことがある (CI で drained のはずが draining で
+// 落ちた、#3369)。
+func waitReports(t *testing.T, store *maintmode.Store, want map[string]string) []maintmode.ProcReport {
+	t.Helper()
+	matches := func(reports []maintmode.ProcReport) bool {
+		if len(reports) != len(want) {
+			return false
+		}
+		for _, rep := range reports {
+			if state, ok := want[rep.ID]; !ok || rep.State != state {
+				return false
+			}
+		}
+		return true
+	}
+	// 一致した値をそのまま返す。条件の関数は別の goroutine で動くので、渡しは
+	// channel で行う (読み直すと、一致したものと違う値を返しうる)。
+	matched := make(chan []maintmode.ProcReport, 1)
+	ok := assert.Eventually(t, func() bool {
+		reports, err := store.Reports(context.Background())
+		if err != nil || !matches(reports) {
+			return false
+		}
+		select {
+		case matched <- reports:
+		default:
+		}
+		return true
+	}, 15*time.Second, 20*time.Millisecond, "reports did not become %v", want)
+	if !ok {
+		reports, err := store.Reports(context.Background())
+		t.Fatalf("reports: %+v (err: %v)", reports, err)
+	}
+	return <-matched
+}
+
 func enterMaintenance(t *testing.T, store *maintmode.Store) {
 	t.Helper()
 	require.NoError(t, store.Enter(context.Background(), maintmode.State{
@@ -150,11 +191,7 @@ func TestMaintenance_EnterReleasesDBAndExitRestoresEverything(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), `"maintenance":true`)
 
 	// 報告: drained で、残った接続は 0。
-	reports, err := r.store.Reports(context.Background())
-	require.NoError(t, err)
-	require.Len(t, reports, 1)
-	assert.Equal(t, "proc-a", reports[0].ID)
-	assert.Equal(t, maintmode.ProcDrained, reports[0].State)
+	reports := waitReports(t, r.store, map[string]string{"proc-a": maintmode.ProcDrained})
 	assert.Zero(t, reports[0].OpenConns)
 	assert.Equal(t, config.MkGoVersion, reports[0].Version)
 
@@ -185,10 +222,7 @@ func TestMaintenance_EnterReleasesDBAndExitRestoresEverything(t *testing.T) {
 	require.Eventually(t, func() bool { return newSrv.streamManager.Count() == 1 },
 		5*time.Second, 10*time.Millisecond, "streaming に繋がらない")
 	_ = ws2
-	reports, err = r.store.Reports(context.Background())
-	require.NoError(t, err)
-	require.Len(t, reports, 1)
-	assert.Equal(t, maintmode.ProcRunning, reports[0].State)
+	waitReports(t, r.store, map[string]string{"proc-a": maintmode.ProcRunning})
 }
 
 // mustDriver opens a queue driver of its own, standing in for another
@@ -233,12 +267,9 @@ func TestMaintenance_TwoProcessesFollowTheSameState(t *testing.T) {
 	waitProc(t, a, maintmode.ProcDrained)
 	waitProc(t, b, maintmode.ProcDrained)
 	r.env.requireNoBackends(t)
-	reports, err := r.store.Reports(context.Background())
-	require.NoError(t, err)
-	require.Len(t, reports, 2)
-	for _, rep := range reports {
-		assert.Equal(t, maintmode.ProcDrained, rep.State, rep.ID)
-	}
+	waitReports(t, r.store, map[string]string{
+		"proc-a": maintmode.ProcDrained, "proc-b": maintmode.ProcDrained,
+	})
 
 	require.NoError(t, r.store.Clear(context.Background(), ""))
 	waitProc(t, a, maintmode.ProcRunning)
