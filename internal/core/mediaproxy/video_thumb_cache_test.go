@@ -2,7 +2,6 @@ package mediaproxy
 
 import (
 	"context"
-	"github.com/elythia-network/elythia/internal/misc/imagedecode"
 	"hash/crc32"
 	"io"
 	"net/http"
@@ -11,6 +10,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/elythia-network/elythia/internal/misc/imagedecode"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 // 生成に失敗したダミー画像を、原因が一時的なら 1 年固定しない (#3035)。
@@ -86,7 +88,7 @@ func truncatingGenerator(t *testing.T) string {
 func TestVideoThumbnail_TransientFailureIsNotCachedForever(t *testing.T) {
 	for name, gen := range map[string]func(t *testing.T) string{
 		"generator が落ちている (接続拒否)": func(t *testing.T) string {
-			return "http://" + deadAddr(t) + "/thumb"
+			return "http://" + testutil.DeadAddr(t) + "/thumb"
 		},
 		"generator が 5xx": func(t *testing.T) string {
 			return statusGenerator(t, http.StatusServiceUnavailable)
@@ -138,7 +140,7 @@ func TestVideoThumbnail_UnwiredGeneratorKeepsDefaultCache(t *testing.T) {
 
 	t.Run("GET モードでローカル /files/ を skip", func(t *testing.T) {
 		s := testService(nil)
-		s.SetVideoThumbnailGeneratorWithMode("http://"+deadAddr(t)+"/thumb", "get")
+		s.SetVideoThumbnailGeneratorWithMode("http://"+testutil.DeadAddr(t)+"/thumb", "get")
 
 		res, err := s.processAndReturn(context.Background(), videoBytes(),
 			"video/mp4", ModePreview, FormatWebP, "https://example.com/files/abc", true)
@@ -218,7 +220,7 @@ func TestVideoThumbnail_SuccessKeepsDefaultCache(t *testing.T) {
 //
 // **`ErrVideoThumbnailUnavailable` を見ている側は変えていない。**
 func TestVideoThumbnailTransientAlsoSatisfiesUnavailable(t *testing.T) {
-	s := newVideoService(t, "http://"+deadAddr(t)+"/thumb")
+	s := newVideoService(t, "http://"+testutil.DeadAddr(t)+"/thumb")
 
 	_, _, err := s.fetchVideoThumbnail(context.Background(), videoBytes(), "video/mp4",
 		"https://remote.example/v.mp4")

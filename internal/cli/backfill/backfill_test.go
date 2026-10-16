@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"log"
-	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -128,16 +127,12 @@ func TestDefaultEnv(t *testing.T) {
 	cancel()
 	<-ctx.Done()
 	// 誰も listen していない宛先へは、接続確認の段で失敗する。
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	port := l.Addr().(*net.TCPAddr).Port
-	require.NoError(t, l.Close())
 	cfg := &config.Config{}
 	cfg.DB.Host = "127.0.0.1"
-	cfg.DB.Port = port
+	cfg.DB.Port = testutil.DeadPort(t)
 	cfg.DB.User = "none"
 	cfg.DB.DB = "none"
-	_, err = e.openDB(cfg)
+	_, err := e.openDB(cfg)
 	assert.Error(t, err)
 }
 

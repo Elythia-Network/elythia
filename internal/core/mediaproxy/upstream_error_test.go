@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -14,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/elythia-network/elythia/internal/safehttp"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 // リモートから取れなかったことと「無い」ことを混ぜない (#3034)。
@@ -24,22 +24,12 @@ import (
 // #2913 (403 が 1 日キャッシュされてアイコンが 1 日壊れた) と同型で、
 // #2792 の「lookup error を種別を見ずに 4xx へ潰さない」にも反する。
 
-// deadAddr returns an address nothing is listening on.
-func deadAddr(t *testing.T) string {
-	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	addr := l.Addr().String()
-	require.NoError(t, l.Close())
-	return addr
-}
-
 // **DNS 失敗は入れていない。** `httpClient.Do` の同じ 1 行を通るので変異
 // 検出力は増えず、名前解決はネットワーク依存で flaky 側に倒れる。TLS 側は
 // 下の別テストが踏む。
 func TestFetchRemote_TransportFailureIsNotNotFound(t *testing.T) {
 	// 接続拒否 (誰も listen していないポート)。
-	url := "http://" + deadAddr(t) + "/a.png"
+	url := "http://" + testutil.DeadAddr(t) + "/a.png"
 	s := testService(map[string]bool{url: true})
 
 	_, err := s.Fetch(context.Background(), url, ModeDefault, FormatWebP, true)
@@ -175,7 +165,7 @@ func TestFetchRemote_SSRFBlockedIsNotUpstreamUnavailable(t *testing.T) {
 // `TestFetchRemote_TLSFailureIsNotNotFound` も落とす (実測)。それでも残すのは、
 // SSRF 側の 1 本と並べて分類の境界が読めるようにするため。
 func TestFetchRemote_TransientFailureIsNotBlocked(t *testing.T) {
-	url := "http://" + deadAddr(t) + "/a.png"
+	url := "http://" + testutil.DeadAddr(t) + "/a.png"
 	s := testService(map[string]bool{url: true})
 
 	_, err := s.Fetch(context.Background(), url, ModeDefault, FormatWebP, true)
