@@ -1835,6 +1835,90 @@ func TestNoteRepository_ListFeaturedByUser_Error(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// #3612: SQL fallback は、見せてよいノートの新しい方から
+// FeaturedNotesPerUserCandidateWindow 件だけを候補にする。窓の外の古いノートは
+// engagement が最大でも選ばれない。窓のいちばん古い端のノートは選ばれる。
+func TestNoteRepository_ListFeaturedByUser_CandidateWindow(t *testing.T) {
+	repo := NewNoteRepository(testDB)
+	author := insertTestUser(t, "feat_win_u", "featwinu")
+	defer cleanupUser(t, author.ID)
+	defer testDB.Exec(`DELETE FROM "note" WHERE "userId" = ?`, author.ID)
+
+	const oldID = "feat_win_0000"
+	require.NoError(t, testDB.Create(&model.Note{
+		ID: oldID, UserID: author.ID, Visibility: "public", RenoteCount: 100,
+	}).Error)
+	recent := make([]*model.Note, 0, FeaturedNotesPerUserCandidateWindow)
+	for i := 1; i <= FeaturedNotesPerUserCandidateWindow; i++ {
+		recent = append(recent, &model.Note{
+			ID: fmt.Sprintf("feat_win_%04d", i), UserID: author.ID, Visibility: "public",
+		})
+	}
+	// 窓のいちばん古い端。窓が 1 件でも短いと選ばれなくなる。
+	const edgeID = "feat_win_0001"
+	recent[0].RenoteCount = 50
+	require.NoError(t, testDB.CreateInBatches(recent, 500).Error)
+
+	got, err := repo.ListFeaturedByUser(author.ID, "", "", 100)
+	require.NoError(t, err)
+	require.Len(t, got, FeaturedNotesPerUserPoolSize)
+	for _, n := range got {
+		assert.NotEqual(t, oldID, n.ID, "a note older than the candidate window must not be selected")
+		require.NotNil(t, n.User, "relations must still be preloaded")
+	}
+	// 窓の端 (0001) が engagement で選ばれ、残りの 49 件は同点 (engagement 0) なので
+	// id DESC の先頭 (0952〜1000) が選ばれる。表示は id DESC なので 0001 が末尾に来る。
+	assert.Equal(t, "feat_win_1000", got[0].ID)
+	assert.Equal(t, "feat_win_0952", got[len(got)-2].ID)
+	assert.Equal(t, edgeID, got[len(got)-1].ID, "the oldest note inside the candidate window must be selectable")
+}
+
+// #3612: 窓は、可視性・チャンネル・凍結の条件を満たしたノートで数える。
+// 新しい方の見えないノートが窓を埋めて、その奥の見えるノートが消えてはいけない。
+func TestNoteRepository_ListFeaturedByUser_CandidateWindowCountsOnlyEligibleNotes(t *testing.T) {
+	repo := NewNoteRepository(testDB)
+	author := insertTestUser(t, "feat_wel_u", "featwelu")
+	defer cleanupUser(t, author.ID)
+	suspended := insertTestUser(t, "feat_wel_s", "featwels")
+	defer cleanupUser(t, suspended.ID)
+	require.NoError(t, testDB.Exec(`UPDATE "user" SET "isSuspended" = true WHERE id = ?`, suspended.ID).Error)
+	defer testDB.Exec(`DELETE FROM "note" WHERE "userId" = ?`, author.ID)
+	chID := "feat_wel_ch"
+	require.NoError(t, testDB.Exec(`INSERT INTO channel (id, name, "userId") VALUES (?, ?, ?)`, chID, "feat-wel-ch", author.ID).Error)
+	defer testDB.Exec(`DELETE FROM channel WHERE id = ?`, chID)
+
+	const oldID = "feat_wel_0000"
+	require.NoError(t, testDB.Create(&model.Note{
+		ID: oldID, UserID: author.ID, Visibility: "public",
+	}).Error)
+	// 匿名には出せないノートを、条件ごとに窓 1 つぶんずつ新しい方へ置く。
+	// どれか 1 つの条件を窓の外へ出すと、その条件のノートだけで窓が埋まり、
+	// 古いノートが候補から外れる。
+	suspendedID := suspended.ID
+	recent := make([]*model.Note, 0, 4*FeaturedNotesPerUserCandidateWindow)
+	for i := 1; i <= 4*FeaturedNotesPerUserCandidateWindow; i++ {
+		n := &model.Note{ID: fmt.Sprintf("feat_wel_%04d", i), UserID: author.ID, Visibility: "public", RenoteCount: 10}
+		switch i % 4 {
+		case 0:
+			n.Visibility = "followers"
+		case 1:
+			n.ChannelID = &chID
+		case 2:
+			n.ReplyUserID = &suspendedID
+		case 3:
+			// 凍結した第三者へのリノート・引用。
+			n.RenoteUserID = &suspendedID
+		}
+		recent = append(recent, n)
+	}
+	require.NoError(t, testDB.CreateInBatches(recent, 500).Error)
+
+	got, err := repo.ListFeaturedByUser(author.ID, "", "", 10)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, oldID, got[0].ID)
+}
+
 // #1452: notes/user-list-timeline の visibility SQL push-down を覆う。
 // public/home は常時、followers は viewer が author 本人か follow 済みのときだけ、
 // 自分宛て (visibleUserIds / mentions) は visibility を問わず可視、channel 投稿は

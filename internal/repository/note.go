@@ -28,6 +28,17 @@ const aidxTime2000Ms int64 = 946684800000
 // ことを保証する (#1491 review B 指摘の二重定義解消)。
 const FeaturedNotesPerUserPoolSize = 50
 
+// FeaturedNotesPerUserCandidateWindow は users/featured-notes の SQL fallback
+// (利用者ごとのランキングが空のとき) で、engagement で並べる前に候補とする
+// 新しい方からのノートの件数 (#3612)。
+//
+// upstream はランキングが空なら `[]` を返し、この fallback は Elythia 独自
+// (docs/divergence/api.md)。窓は時間ではなく件数で、並べる値は
+// `renoteCount + repliesCount` の累計 (ランキングのような最近の反応の数ではない)。
+// 窓より古いノートは、累計が多くても選ばれない。
+// mock (internal/testutil/mock_repository.go) も同じ値を使う。
+const FeaturedNotesPerUserCandidateWindow = 1000
+
 // pureRenoteCondSQL は pure renote (= text/cw/files/poll/reply を伴わない renote)
 // を表す SQL 断片。upstream isPureRenote (= !isQuote) と揃える (#1888)。timeline
 // (withRenotes) / home TL / renote-mute の各 filter で共有し、列定義の drift を防ぐ。
@@ -156,6 +167,8 @@ type NoteRepository interface {
 	//  1. selection: engagement = (renoteCount + repliesCount) DESC, id DESC で
 	//     FeaturedNotesPerUserPoolSize (=50, upstream 同値) 件を SQL push-down で
 	//     選抜。visibility 条件と channel 除外もここで同時に絞る (LIMIT 前)。
+	//     候補は条件を満たすノートの新しい方から
+	//     FeaturedNotesPerUserCandidateWindow 件に限る (#3612)。
 	//     post-fetch FilterVisible だとページ過少充填 + followers 判定 N+1 を
 	//     起こすため (#1418 / #1440 と同 doctrine)。
 	//  2. display: 選抜結果を Go 側で id DESC に並べ替え、untilID < id でページング
@@ -1049,16 +1062,37 @@ func (r *noteRepository) ListFeaturedByUser(userID, viewerID, untilID string, li
 	// 同 pattern)。post-fetch FilterVisible だと limit が削られページ過少充填、
 	// followers 判定が N+1。untilID はここでは適用しない (engagement プール
 	// を id DESC でページングする display 段で適用する)。
-	q := preloadNoteRelations(r.db).
+	//
+	// **候補は、見せてよいノートのうち新しい方から
+	// FeaturedNotesPerUserCandidateWindow 件に絞ってから engagement で並べる
+	// (#3612)。** 全件を engagement で並べると、投稿の多い利用者 (15,566 件で
+	// 110ms) ほど遅くなる。絞り込みは `("userId", id DESC)` の索引を新しい方から
+	// 読んで窓の件数で止まる。可視性・チャンネル・凍結の条件は窓の内側に置き、
+	// 「見えないノートが窓を埋めて、見えるノートが候補から消える」形にしない。
+	candidates := r.db.Model(&model.Note{}).
 		Where(`"userId" = ?`, userID).
 		Where(`"channelId" IS NULL`)
-	q = applyViewerVisibility(q, viewerID)
+	candidates = applyViewerVisibility(candidates, viewerID)
 	// **凍結した利用者のノートを出さない。** upstream
 	// `users/featured-notes.ts` は `generateSuspendedUserQueryForNote` を
 	// 掛けている。`users/show` が凍結ユーザーを `NO_SUCH_USER` で隠すのに
 	// 同じ利用者のノートが本文つきで返るのは、経路ごとに結果が食い違う形。
-	q = applySuspendedAuthorExclusion(q)
-	q = q.Order(`("renoteCount" + "repliesCount") DESC, id DESC`).Limit(FeaturedNotesPerUserPoolSize)
+	//
+	// 条件は applySuspendedAuthorExclusion と同じ集合を返すが、**著者の判定は
+	// 列ではなく userID の bind 変数で書く。** 著者は userID に決まっているので
+	// 1 回だけ評価する条件 (InitPlan) になる。列の相関 NOT EXISTS のままだと、
+	// プランナが anti join の件数を少なく見積もり、窓を `("userId", id DESC)`
+	// の索引で新しい方から読んで止める計画を選ばず、その利用者の全ノートを
+	// bitmap で読んで並べ替えていた (ノート 15,566 件の利用者で、窓を付けても
+	// 74ms。この形で 2〜3ms)。
+	// 返信先・リノート元は applySuspendedEmbedAuthorExclusion で見る。著者と
+	// 同じ人なら、上の著者の判定で済んでいる。
+	candidates = candidates.Where(`NOT EXISTS (SELECT 1 FROM "user" su WHERE su."id" = ? AND su."isSuspended" = true)`, userID)
+	candidates = applySuspendedEmbedAuthorExclusion(candidates)
+	candidates = candidates.Order(`"id" DESC`).Limit(FeaturedNotesPerUserCandidateWindow)
+	// 窓の行をそのまま並べ替える (id で note を引き直さない)。
+	q := preloadNoteRelations(r.db.Table(`(?) AS "note"`, candidates)).
+		Order(`("renoteCount" + "repliesCount") DESC, id DESC`).Limit(FeaturedNotesPerUserPoolSize)
 	var pool []*model.Note
 	if err := q.Find(&pool).Error; err != nil {
 		return nil, err

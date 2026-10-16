@@ -55,6 +55,16 @@ Page に作者だけが見られる `private` を足し、公開範囲を `publi
 - 3 値のまま画面を作らなかったのは、`specified` には相手を選ぶ画面が、`followers` には Page の全経路でのフォロー判定が要るため
 - 連合には影響しない (Page は ActivityPub で配らない)
 
+## `users/featured-notes` で、利用者ごとのランキングが空のとき (#3612)
+
+本家は、利用者ごとのランキング (最近の反応を数える Redis の sorted set) が空なら `[]` を返す。Elythia は空のとき、DB から代わりの候補を選んで返す (#1687。最近反応の無い利用者でも、プロフィールのハイライトが空にならない)。
+
+- 候補は、閲覧者に見せてよいノート (可視性、チャンネルの外、著者・返信先・リノート元の著者が凍結されていない) の**新しい方から 1,000 件** (`repository.FeaturedNotesPerUserCandidateWindow`)。その中から `renoteCount + repliesCount` の多い順に 50 件を選び、id の新しい順に並べて `untilId` と `limit` を当てる
+- #3612 より前は、その利用者の全ノートを数の順に並べていた。ノート 15,566 件の利用者で 110ms かかったので、候補を絞った。**新しい方から 1,000 件より古いノートは、数が多くても選ばれなくなった**。窓は件数で数えるので、投稿の少ない利用者では何年ぶんにもなる。並べる値は `renoteCount + repliesCount` (ノートが作られてからの累計) で、ランキングのような最近の反応の数ではない (#3612 より前も同じ)
+- 候補には、閲覧者に見える返信や `home` / `followers` / `specified` のノートも入る。ランキングに入るのはローカルの `public` で返信でないノートだけ (`internal/core/reaction/reaction_service.go`、`internal/core/note/note_create_service.go`) なので、fallback はランキングと同じ種類のノートを出すわけではない (#1687 から)
+- リモートの利用者はランキングに入らないので、いつもこの fallback になる
+- ランキングが空でないときの選び方は本家と同じ
+
 ## 1. API endpoint
 
 upstream の endpoint は `endpoints/` 配下 438 件 + `ApiServerService.ts` の fastify 直登録 6 件 (POST 5 / GET 1) = **444 件**。うち **444 件すべてを実装済み (coverage 100.0%)**。

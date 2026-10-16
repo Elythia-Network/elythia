@@ -489,7 +489,7 @@ func (h *Handler) Reactions(c echo.Context) error {
 //   - selection: `ListFeaturedByUser` が `("renoteCount" + "repliesCount") DESC,
 //     id DESC` + visibility push-down + channel 除外 + LIMIT 50 で SQL から
 //     プールを取る (post-fetch FilterVisible のページ過少充填と followers 判定
-//     N+1 を回避)。
+//     N+1 を回避)。候補は新しい方から 1,000 件に限る (#3612)。
 //   - display: 同 repo 内で id DESC sort → untilId filter → 先頭 limit 件。
 //     id cursor とソート順が一致するので untilId ページングで重複/欠落しない。
 //   - hard mute は packing 前に post-fetch で適用 (visibility と独立な viewer 個別
@@ -582,8 +582,9 @@ func (h *Handler) featuredNotesByUser(ctx context.Context, userID, viewerID, unt
 	}
 	// **凍結された利用者のノートを落とす** (upstream featured-notes.ts の
 	// generateSuspendedUserQueryForNote。著者と、返信先・リノート元の著者)。
-	// SQL の経路 (ListFeaturedByUser) は applySuspendedAuthorExclusion で落とす
-	// が、ランキングの経路には無く、凍結の後もランキングの窓 (最大 2 週間) の間、
+	// SQL の経路 (ListFeaturedByUser) は、著者を userID の bind 変数で、返信先・
+	// リノート元を applySuspendedEmbedAuthorExclusion で判定して落とすが、
+	// ランキングの経路には無く、凍結の後もランキングの窓 (最大 2 週間) の間、
 	// users/show が NO_SUCH_USER を返す利用者の注目ノートが匿名で本文ごと読めた。
 	out := notes[:0]
 	for _, n := range notes {

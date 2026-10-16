@@ -1894,6 +1894,12 @@ func (m *MockNoteRepository) ListFeatured(channelID, untilID string, limit, offs
 // drift があれば testutil パッケージ自身のテストが落ちて即座に検出される。
 const mockFeaturedNotesPerUserPoolSize = 50
 
+// mockFeaturedNotesPerUserCandidateWindow は
+// repository.FeaturedNotesPerUserCandidateWindow と揃える候補の窓 (#3612)。
+// 二重定義の理由と drift の検査は mockFeaturedNotesPerUserPoolSize と同じ
+// (featured_pool_size_test.go)。
+const mockFeaturedNotesPerUserCandidateWindow = 1000
+
 // ListFeaturedByUser mirrors the real repository's 2-stage selection:
 // engagement DESC で top-50 を選抜したあと、id DESC でページングする。
 // channel 投稿は除外する。real repo の SQL push-down と一致 (#1487 / #1491)。
@@ -1915,6 +1921,13 @@ func (m *MockNoteRepository) ListFeaturedByUser(userID, viewerID, untilID string
 			continue
 		}
 		pool = append(pool, n)
+	}
+	// 実 repo と同じく、見えるノートの新しい方から窓の件数だけを候補にする (#3612)。
+	sort.Slice(pool, func(i, j int) bool {
+		return pool[i].ID > pool[j].ID
+	})
+	if len(pool) > mockFeaturedNotesPerUserCandidateWindow {
+		pool = pool[:mockFeaturedNotesPerUserCandidateWindow]
 	}
 	sort.Slice(pool, func(i, j int) bool {
 		ei := pool[i].RenoteCount + pool[i].RepliesCount
