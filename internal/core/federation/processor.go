@@ -1973,8 +1973,8 @@ func safeGoFedHook(fn func()) {
 }
 
 // hydrateNoteForFanout reloads a freshly-created note via
-// FindByIDWithRelations so that Renote/Reply relations are preloaded before
-// handing it to the fanout hook. reload が失敗した場合は元の note をその
+// FindByIDWithRelations so that its Renote/Reply relations (and their authors
+// and polls) are hydrated before handing it to the fanout hook. reload が失敗した場合は元の note をその
 // まま返す (best-effort)。
 func hydrateNoteForFanout(repo interface {
 	FindByIDWithRelations(id string) (*model.Note, error)

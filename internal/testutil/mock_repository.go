@@ -1448,7 +1448,7 @@ func (m *MockNoteRepository) FindByIDWithUserOnPrimary(id string) (*model.Note, 
 	return m.FindByIDWithUser(id)
 }
 
-// FindByIDWithRelations mirrors the production preloadNoteRelations behavior:
+// FindByIDWithRelations mirrors the production hydrateNoteRelations behavior:
 // shallow-copy the stored note and embed Renote / Reply targets from the map
 // when their IDs are set (#425)。コピーに書き込むので、同じ note を
 // FindByID で取り直した時に relation が連鎖的に残らない。

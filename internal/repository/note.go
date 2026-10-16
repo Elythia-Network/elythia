@@ -279,37 +279,6 @@ func NewNoteRepository(db *gorm.DB) NoteRepository {
 	return &noteRepository{db: db}
 }
 
-// preloadNoteRelations applies Preload for the author plus the reply/renote
-// targets (with their authors) needed by the NoteEntity packer. NoteEntity の
-// packer は renote/reply の target note を埋めるためこれらの preload が必須。
-// GORM の preload は明示した relation しか辿らないので N+1 には成らない。
-//
-// renote ブランチだけ 2 段展開する: 純粋リノート (boost) が引用投稿 (quote) を
-// 包む場合、renote (= quote) のさらに renote (= 引用先) まで preload しないと
-// frontend が引用先を「削除されたノート」として描画してしまう (packer の
-// maxNoteEmbedDepth=2 と一致)。packer は renote を detail 付きで pack するので
-// renote.renote と renote.reply の 2 つが depth-2 に出る。reply は detail 無しで
-// pack するため reply.* は展開されない。
-//
-// Poll は note.hasPoll==true のとき 1:1 で attach する (#690)。Preload は
-// 自動的に hasPoll=false の note では何も読まないので overhead は小さい
-// (発行されるのは poll table への 1 IN 句 query)。
-func preloadNoteRelations(db *gorm.DB) *gorm.DB {
-	return db.Preload("User").
-		Preload("Renote").
-		Preload("Renote.User").
-		Preload("Renote.Poll").
-		Preload("Renote.Renote").
-		Preload("Renote.Renote.User").
-		Preload("Renote.Renote.Poll").
-		Preload("Renote.Reply").
-		Preload("Renote.Reply.User").
-		Preload("Reply").
-		Preload("Reply.User").
-		Preload("Reply.Poll").
-		Preload("Poll")
-}
-
 func (r *noteRepository) Create(note *model.Note) error {
 	return r.db.Create(note).Error
 }
@@ -351,19 +320,30 @@ func (r *noteRepository) FindByIDWithRelations(id string) (*model.Note, error) {
 	if !storable(id) {
 		return nil, ErrNotFound
 	}
-	var note model.Note
-	if err := preloadNoteRelations(r.db).First(&note, "id = ?", id).Error; err != nil {
-		return nil, err
-	}
-	return &note, nil
+	// findByIDWithRelations 側にも guard を置く (#3025 のゲートは関数ごとに見る)。
+	return r.findByIDWithRelations(id, false)
 }
 
 func (r *noteRepository) FindByIDWithRelationsOnPrimary(id string) (*model.Note, error) {
 	if !storable(id) {
 		return nil, ErrNotFound
 	}
+	return r.findByIDWithRelations(id, true)
+}
+
+// findByIDWithRelations reads one note and hydrates it like the list paths.
+// Preload は relation ごとに 1 本ずつ (投票の無いノートでも poll を) 引くので、
+// 単純なノートでも 3 本、renote / reply があると 10 本前後になっていた (#3611)。
+func (r *noteRepository) findByIDWithRelations(id string, primary bool) (*model.Note, error) {
+	if !storable(id) {
+		return nil, ErrNotFound
+	}
+	db := r.reader(primary)
 	var note model.Note
-	if err := preloadNoteRelations(r.db.Clauses(dbresolver.Write)).First(&note, "id = ?", id).Error; err != nil {
+	if err := db().First(&note, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+	if err := hydrateNoteRelations(db, []*model.Note{&note}); err != nil {
 		return nil, err
 	}
 	return &note, nil
@@ -463,7 +443,7 @@ func (r *noteRepository) IncrementReaction(noteID, reaction string, delta int) e
 // constrained by sinceID/untilID for keyset pagination.
 func (r *noteRepository) ListByUserID(userID string, untilID, sinceID string, limit int) ([]*model.Note, error) {
 	var notes []*model.Note
-	q := preloadNoteRelations(r.db).Where("\"userId\" = ?", userID)
+	q := r.db.Where("\"userId\" = ?", userID)
 	if untilID != "" {
 		q = q.Where("id < ?", untilID)
 	}
@@ -473,12 +453,12 @@ func (r *noteRepository) ListByUserID(userID string, untilID, sinceID string, li
 	if err := q.Order(paginationOrder(sinceID, untilID, "id")).Limit(limit).Find(&notes).Error; err != nil {
 		return nil, err
 	}
-	return notes, nil
+	return r.hydrate(notes)
 }
 
 func (r *noteRepository) ListPublicByUserID(userID string, untilID, sinceID string, limit int) ([]*model.Note, error) {
 	var notes []*model.Note
-	q := preloadNoteRelations(r.db).
+	q := r.db.
 		Where("\"userId\" = ?", userID).
 		Where("visibility IN ?", []string{"public", "home"}).
 		Where("\"localOnly\" = ?", false)
@@ -491,7 +471,7 @@ func (r *noteRepository) ListPublicByUserID(userID string, untilID, sinceID stri
 	if err := q.Order(paginationOrder(sinceID, untilID, "id")).Limit(limit).Find(&notes).Error; err != nil {
 		return nil, err
 	}
-	return notes, nil
+	return r.hydrate(notes)
 }
 
 // ListByUserIDFiltered は ListByUserID に upstream 互換 filter を加えた版。
@@ -507,7 +487,7 @@ func (r *noteRepository) ListPublicByUserID(userID string, untilID, sinceID stri
 // フィードに出してはいけない。
 func (r *noteRepository) ListPublicNotesForFeed(userID string, limit int) ([]*model.Note, error) {
 	var notes []*model.Note
-	err := preloadNoteRelations(r.db).
+	err := r.db.
 		Where(`"userId" = ?`, userID).
 		Where(`"renoteId" IS NULL`).
 		Where(`visibility IN ?`, []string{string(model.NoteVisibilityPublic), string(model.NoteVisibilityHome)}).
@@ -517,12 +497,12 @@ func (r *noteRepository) ListPublicNotesForFeed(userID string, limit int) ([]*mo
 	if err != nil {
 		return nil, err
 	}
-	return notes, nil
+	return r.hydrate(notes)
 }
 
 func (r *noteRepository) ListByUserIDFiltered(userID, viewerID, untilID, sinceID string, limit int, withFiles, withReplies, withRenotes, withChannelNotes bool) ([]*model.Note, error) {
 	var notes []*model.Note
-	q := preloadNoteRelations(r.db).Where(`"userId" = ?`, userID)
+	q := r.db.Where(`"userId" = ?`, userID)
 	// upstream の generateVisibilityQuery 相当を LIMIT 前に push down する。
 	// post-fetch filter だと viewer が見られない note を除外した分 1 ページが
 	// limit 未満になりページネーションが途切れる + followers 判定が note ごとの
@@ -568,7 +548,7 @@ func (r *noteRepository) ListByUserIDFiltered(userID, viewerID, untilID, sinceID
 	if err := q.Order(paginationOrder(sinceID, untilID, "id")).Limit(limit).Find(&notes).Error; err != nil {
 		return nil, err
 	}
-	return notes, nil
+	return r.hydrate(notes)
 }
 
 // ListByChannelID returns notes posted to the channel that viewerID can see.
@@ -587,7 +567,7 @@ func (r *noteRepository) ListLocalByChannelID(channelID, viewerID, untilID, sinc
 
 func (r *noteRepository) listByChannelID(channelID, viewerID, untilID, sinceID string, limit int, localOnly bool) ([]*model.Note, error) {
 	var notes []*model.Note
-	q := preloadNoteRelations(r.db).Where("\"channelId\" = ?", channelID)
+	q := r.db.Where("\"channelId\" = ?", channelID)
 	// チャンネルには remote 利用者の返信も入る (返信先のチャンネルを引き継ぐ) ので、
 	// LIMIT の後で落とすとページが過少充填される。LIMIT 前に絞る。
 	if localOnly {
@@ -613,14 +593,14 @@ func (r *noteRepository) listByChannelID(channelID, viewerID, untilID, sinceID s
 	if err := q.Order(paginationOrder(sinceID, untilID, "id")).Limit(limit).Find(&notes).Error; err != nil {
 		return nil, err
 	}
-	return notes, nil
+	return r.hydrate(notes)
 }
 
 // ListRenotesOf returns notes whose renoteId equals noteID.
 // テキストやファイルを伴わない pure renote だけでなく quote renote も含む。
 func (r *noteRepository) ListRenotesOf(noteID, viewerID, untilID, sinceID string, limit int) ([]*model.Note, error) {
 	var notes []*model.Note
-	q := preloadNoteRelations(r.db).Where("\"renoteId\" = ?", noteID)
+	q := r.db.Where("\"renoteId\" = ?", noteID)
 	// visibility push-down (#1500): viewer が見られる renote のみ LIMIT 前に絞る。
 	q = applyViewerVisibility(q, viewerID)
 	if untilID != "" {
@@ -632,7 +612,7 @@ func (r *noteRepository) ListRenotesOf(noteID, viewerID, untilID, sinceID string
 	if err := q.Order(paginationOrder(sinceID, untilID, "id")).Limit(limit).Find(&notes).Error; err != nil {
 		return nil, err
 	}
-	return notes, nil
+	return r.hydrate(notes)
 }
 
 // ListRenoteOrReplyRemoteUserIDs returns the distinct ids of remote users who
@@ -667,7 +647,7 @@ func (r *noteRepository) ListRenoteOrReplyRemoteUserIDs(noteID string) ([]string
 // すべてのユーザーからの返信を返す(ミュート判定はServiceで行う)。
 func (r *noteRepository) ListRepliesOf(noteID, viewerID, untilID, sinceID string, limit int) ([]*model.Note, error) {
 	var notes []*model.Note
-	q := preloadNoteRelations(r.db).Where("\"replyId\" = ?", noteID)
+	q := r.db.Where("\"replyId\" = ?", noteID)
 	// visibility push-down (#1500): viewer が見られる reply のみ LIMIT 前に絞る。
 	q = applyViewerVisibility(q, viewerID)
 	if untilID != "" {
@@ -679,7 +659,7 @@ func (r *noteRepository) ListRepliesOf(noteID, viewerID, untilID, sinceID string
 	if err := q.Order(paginationOrder(sinceID, untilID, "id")).Limit(limit).Find(&notes).Error; err != nil {
 		return nil, err
 	}
-	return notes, nil
+	return r.hydrate(notes)
 }
 
 // ListChildrenOf returns notes that are either replies or quote-renotes of the given noteID.
@@ -695,7 +675,7 @@ func (r *noteRepository) ListChildrenOf(noteID, viewerID, untilID, sinceID strin
 	// text/cw/file/poll/reply のいずれかを持つ引用 renote のみ含める。pure renote は
 	// children に出さない (#1554、quote 判定は #1888 で cw/reply 込みに統一)。
 	// reply 側にはこの content ガードを掛けない (返信は本文が空でも子として返す)。
-	q := preloadNoteRelations(r.db).
+	q := r.db.
 		Where(`("replyId" = ? OR ("renoteId" = ? AND `+renoteHasContentSQL+`))`, noteID, noteID)
 	// visibility push-down (#1500): viewer が見られる child のみ LIMIT 前に絞る。
 	q = applyViewerVisibility(q, viewerID)
@@ -708,7 +688,7 @@ func (r *noteRepository) ListChildrenOf(noteID, viewerID, untilID, sinceID strin
 	if err := q.Order(paginationOrder(sinceID, untilID, "id")).Limit(limit).Find(&notes).Error; err != nil {
 		return nil, err
 	}
-	return notes, nil
+	return r.hydrate(notes)
 }
 
 // SearchByFilter returns notes matching the filter criteria.
@@ -724,7 +704,7 @@ func (r *noteRepository) SearchByFilter(f model.NoteSearchFilter) ([]*model.Note
 		return nil, nil
 	}
 	var notes []*model.Note
-	q := preloadNoteRelations(r.db)
+	q := r.db
 	if f.Pgroonga {
 		// upstream TS では `note.text &@~ :q` を使用。`&@~` は PGroonga の
 		// "クエリ文字列モード" マッチで、空白区切りの AND/OR 等が解釈される。
@@ -812,7 +792,7 @@ func (r *noteRepository) SearchByFilter(f model.NoteSearchFilter) ([]*model.Note
 	if err := q.Find(&notes).Error; err != nil {
 		return nil, err
 	}
-	return notes, nil
+	return r.hydrate(notes)
 }
 
 // ExistingNoteIDsOnPrimary implements NoteRepository.
@@ -845,24 +825,7 @@ func (r *noteRepository) findManyByIDsWithUser(ids []string, primary bool) ([]*m
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	// timeline read hot path。GORM の Preload は relation ごとに別クエリを発行する
-	// ため preloadNoteRelations は 1 ページ多数往復になる (#1368 計測)。ここでは
-	// relation を種類ごとに batch IN で引いて Go 側で配線し、往復を ~5 query
-	// (notes / sub-notes / sub-sub-notes / users / polls) に畳む。出力 shape は
-	// preload 版と同一 (TestNoteRepository_FindManyByIDsWithUser_HydratesRelations
-	// が回帰を捕捉)。
-	//
-	// renote ブランチは 2 段展開する: 純粋リノート (boost) が引用投稿 (quote) を
-	// 包む場合、renote (= quote) のさらに renote/reply (= 引用先) まで配線しないと
-	// frontend が引用先を「削除されたノート」として描画する (packer の
-	// maxNoteEmbedDepth=2 / detail gate と一致)。reply embed は detail:false で
-	// 子を持たないため、reply target の子は辿らない。
-	db := func() *gorm.DB {
-		if primary {
-			return r.db.Clauses(dbresolver.Write)
-		}
-		return r.db
-	}
+	db := r.reader(primary)
 	var notes []*model.Note
 	if err := db().Where("id IN ?", ids).Find(&notes).Error; err != nil {
 		return nil, err
@@ -870,8 +833,76 @@ func (r *noteRepository) findManyByIDsWithUser(ids []string, primary bool) ([]*m
 	if len(notes) == 0 {
 		return nil, nil
 	}
+	if err := hydrateNoteRelations(db, notes); err != nil {
+		return nil, err
+	}
 
-	// (2) renote / reply 先 (sub-note) を 1 query で取得し配線する。
+	// ids の順序を保って返す。
+	byID := make(map[string]*model.Note, len(notes))
+	for _, n := range notes {
+		byID[n.ID] = n
+	}
+	ordered := make([]*model.Note, 0, len(ids))
+	for _, id := range ids {
+		if n, ok := byID[id]; ok {
+			ordered = append(ordered, n)
+		}
+	}
+	return ordered, nil
+}
+
+// reader returns a function yielding the handle that hydration reads from:
+// the primary when primary is true, otherwise the default (replica-routed) DB.
+func (r *noteRepository) reader(primary bool) func() *gorm.DB {
+	return func() *gorm.DB {
+		if primary {
+			return r.db.Clauses(dbresolver.Write)
+		}
+		return r.db
+	}
+}
+
+// hydrate attaches the pack relations to notes read from the default DB and
+// returns them. It is the tail of every list query (see hydrateNoteRelations).
+func (r *noteRepository) hydrate(notes []*model.Note) ([]*model.Note, error) {
+	if err := hydrateNoteRelations(r.reader(false), notes); err != nil {
+		return nil, err
+	}
+	return notes, nil
+}
+
+// HydrateNotes attaches the pack relations (author, renote / reply targets
+// and their authors, polls) to notes that were read without them, in place.
+// Callers that merge several unhydrated lists use it after truncating, so the
+// discarded rows are never hydrated.
+func (r *noteRepository) HydrateNotes(notes []*model.Note) error {
+	return hydrateNoteRelations(r.reader(false), notes)
+}
+
+// hydrateNoteRelations wires the relations the NoteEntity packer reads onto
+// notes, in place, with one query per kind instead of GORM's one query per
+// relation path.
+//
+// GORM の Preload は relation ごとに別クエリを発行するため、preload 版は 1 ページ
+// 多数往復になる (#1368 計測)。ここでは relation を種類ごとに batch IN で引いて
+// Go 側で配線し、往復を最大 5 本 (sub-notes / sub-sub-notes / users / polls、
+// 呼び出し元の notes 本体を除く) に畳む。出力 shape は preload 版と同一
+// (TestNoteRepository_FindManyByIDsWithUser_HydratesRelations と
+// TestNoteRepository_HydrateMatchesPreload が回帰を捕捉)。一覧の経路 (#3611) も
+// 単発の FindByIDWithRelations もここを通る。
+//
+// renote ブランチは 2 段展開する: 純粋リノート (boost) が引用投稿 (quote) を
+// 包む場合、renote (= quote) のさらに renote/reply (= 引用先) まで配線しないと
+// frontend が引用先を「削除されたノート」として描画する (packer の
+// maxNoteEmbedDepth=2 / detail gate と一致)。reply embed は detail:false で
+// 子を持たないため、reply target の子は辿らない。この深さを変えるときは、
+// 可視性のゲート (notehide / note_filter / webpush / webhook) も同じ深さに揃える。
+func hydrateNoteRelations(db func() *gorm.DB, notes []*model.Note) error {
+	if len(notes) == 0 {
+		return nil
+	}
+
+	// (1) renote / reply 先 (sub-note) を 1 query で取得し配線する。
 	subIDSet := make(map[string]struct{})
 	for _, n := range notes {
 		if n.RenoteID != nil && *n.RenoteID != "" {
@@ -885,7 +916,7 @@ func (r *noteRepository) findManyByIDsWithUser(ids []string, primary bool) ([]*m
 	if len(subIDSet) > 0 {
 		var subs []*model.Note
 		if err := db().Where("id IN ?", mapKeys(subIDSet)).Find(&subs).Error; err != nil {
-			return nil, err
+			return err
 		}
 		for _, s := range subs {
 			subByID[s.ID] = s
@@ -900,7 +931,7 @@ func (r *noteRepository) findManyByIDsWithUser(ids []string, primary bool) ([]*m
 		}
 	}
 
-	// (2.5) 2 段目: 1 段目 renote target (= quote 候補) の renote (= 引用先) と
+	// (2) 2 段目: 1 段目 renote target (= quote 候補) の renote (= 引用先) と
 	// reply (= 返信先) をさらに 1 query で取得し配線する。pure renote → quote →
 	// 引用先 の 3 段目を埋めるため。packer は renote を detail 付きで pack する
 	// ので renote.renote と renote.reply が depth-2 に出る (reply.* は出さない)。
@@ -926,7 +957,7 @@ func (r *noteRepository) findManyByIDsWithUser(ids []string, primary bool) ([]*m
 	if len(lvl2IDSet) > 0 {
 		var lvl2 []*model.Note
 		if err := db().Where("id IN ?", mapKeys(lvl2IDSet)).Find(&lvl2).Error; err != nil {
-			return nil, err
+			return err
 		}
 		for _, s := range lvl2 {
 			subByID[s.ID] = s
@@ -963,7 +994,7 @@ func (r *noteRepository) findManyByIDsWithUser(ids []string, primary bool) ([]*m
 	if len(userIDSet) > 0 {
 		var users []*model.User
 		if err := db().Where("id IN ?", mapKeys(userIDSet)).Find(&users).Error; err != nil {
-			return nil, err
+			return err
 		}
 		userByID := make(map[string]*model.User, len(users))
 		for _, u := range users {
@@ -974,17 +1005,22 @@ func (r *noteRepository) findManyByIDsWithUser(ids []string, primary bool) ([]*m
 		}
 	}
 
-	// (4) poll を 1 query で取得し配線する。preload 版と同じく全 note を対象にして
-	// HasPoll の正確性に依存しない (poll 行が在れば attach、無ければ nil)。
-	noteIDs := make([]string, 0, len(hydrate))
+	// (4) poll は hasPoll が真のノートについてだけ 1 query で引く (#3611)。
+	// 本家の packer も `note.hasPoll ? populatePoll(...) : undefined` で hasPoll を
+	// 見て引く。以前は全ノートを対象に引いており、投票の無いページでも毎回 1 本
+	// 出ていた。投稿は note の INSERT → poll の INSERT → hasPoll の UPDATE の順
+	// なので、その間に読むと poll が出ない (本家と同じ窓)。
+	pollNoteIDs := make([]string, 0)
 	for _, n := range hydrate {
-		noteIDs = append(noteIDs, n.ID)
+		if n.HasPoll {
+			pollNoteIDs = append(pollNoteIDs, n.ID)
+		}
 	}
-	var polls []*model.Poll
-	if err := db().Where(`"noteId" IN ?`, noteIDs).Find(&polls).Error; err != nil {
-		return nil, err
-	}
-	if len(polls) > 0 {
+	if len(pollNoteIDs) > 0 {
+		var polls []*model.Poll
+		if err := db().Where(`"noteId" IN ?`, pollNoteIDs).Find(&polls).Error; err != nil {
+			return err
+		}
 		pollByNote := make(map[string]*model.Poll, len(polls))
 		for _, p := range polls {
 			pollByNote[p.NoteID] = p
@@ -995,19 +1031,7 @@ func (r *noteRepository) findManyByIDsWithUser(ids []string, primary bool) ([]*m
 			}
 		}
 	}
-
-	// (5) ids の順序を保って返す。
-	byID := make(map[string]*model.Note, len(notes))
-	for _, n := range notes {
-		byID[n.ID] = n
-	}
-	ordered := make([]*model.Note, 0, len(ids))
-	for _, id := range ids {
-		if n, ok := byID[id]; ok {
-			ordered = append(ordered, n)
-		}
-	}
-	return ordered, nil
+	return nil
 }
 
 func (r *noteRepository) FindManyByIDsWithUserOnPrimary(ids []string) ([]*model.Note, error) {
@@ -1028,7 +1052,7 @@ func (r *noteRepository) ListFeatured(channelID, untilID string, limit, offset i
 	if limit <= 0 {
 		limit = 10
 	}
-	q := preloadNoteRelations(r.db).Where("visibility = 'public'")
+	q := r.db.Where("visibility = 'public'")
 	if channelID != "" {
 		// チャンネル指定時は当該チャンネル内のノートだけを返す
 		// (upstream FeaturedService.getInChannelNotesRanking と一致)。
@@ -1048,7 +1072,7 @@ func (r *noteRepository) ListFeatured(channelID, untilID string, limit, offset i
 	if err := q.Find(&notes).Error; err != nil {
 		return nil, err
 	}
-	return notes, nil
+	return r.hydrate(notes)
 }
 
 func (r *noteRepository) ListFeaturedByUser(userID, viewerID, untilID string, limit int) ([]*model.Note, error) {
@@ -1091,7 +1115,7 @@ func (r *noteRepository) ListFeaturedByUser(userID, viewerID, untilID string, li
 	candidates = applySuspendedEmbedAuthorExclusion(candidates)
 	candidates = candidates.Order(`"id" DESC`).Limit(FeaturedNotesPerUserCandidateWindow)
 	// 窓の行をそのまま並べ替える (id で note を引き直さない)。
-	q := preloadNoteRelations(r.db.Table(`(?) AS "note"`, candidates)).
+	q := r.db.Table(`(?) AS "note"`, candidates).
 		Order(`("renoteCount" + "repliesCount") DESC, id DESC`).Limit(FeaturedNotesPerUserPoolSize)
 	var pool []*model.Note
 	if err := q.Find(&pool).Error; err != nil {
@@ -1116,7 +1140,7 @@ func (r *noteRepository) ListFeaturedByUser(userID, viewerID, untilID string, li
 	if len(pool) > limit {
 		pool = pool[:limit]
 	}
-	return pool, nil
+	return r.hydrate(pool)
 }
 
 // ListRenotesByUser returns all notes authored by userID that renote renoteID.
@@ -1148,7 +1172,7 @@ func (r *noteRepository) ListMentions(userID, visibility string, following bool,
 	// 論理的に等価で、将来 visibleUserIds に GIN index を足せば mentions 枝
 	// (IDX_note_mentions, #1427) と揃って planner が BitmapOr で両枝 index 利用できる
 	// (#1484 review)。
-	q := preloadNoteRelations(r.db).
+	q := r.db.
 		Where(`(mentions @> ARRAY[?]::varchar[] OR "visibleUserIds" @> ARRAY[?]::varchar[])`, userID, userID)
 	// visibility push-down: mention 対象 (= viewer = userID) が CanSeeNote で
 	// 見られる note のみ返す。mentions 配列は本文の @user パース結果で specified
@@ -1191,7 +1215,7 @@ func (r *noteRepository) ListMentions(userID, visibility string, following bool,
 	if err := q.Find(&notes).Error; err != nil {
 		return nil, err
 	}
-	return notes, nil
+	return r.hydrate(notes)
 }
 
 func (r *noteRepository) SearchByTag(tagGroups [][]string, viewerID string, limit int, sinceID, untilID string, filter model.NoteSearchTagFilter) ([]*model.Note, error) {
@@ -1230,7 +1254,7 @@ func (r *noteRepository) SearchByTag(tagGroups [][]string, viewerID string, limi
 	if len(conds) == 0 {
 		return []*model.Note{}, nil
 	}
-	q := preloadNoteRelations(r.db).
+	q := r.db.
 		Where("("+strings.Join(conds, " OR ")+")", args...)
 	// visibility push-down: core/note.CanSeeNote と同じ条件を LIMIT 前に絞る。
 	// ListByUserIDFiltered / clip の ListByClipVisible と同じ可視性定義 (#1439)。
@@ -1281,7 +1305,7 @@ func (r *noteRepository) SearchByTag(tagGroups [][]string, viewerID string, limi
 	if err := q.Find(&notes).Error; err != nil {
 		return nil, err
 	}
-	return notes, nil
+	return r.hydrate(notes)
 }
 
 func (r *noteRepository) ListByFileID(fileID, sinceID, untilID string, limit int) ([]*model.Note, error) {
@@ -1291,7 +1315,7 @@ func (r *noteRepository) ListByFileID(fileID, sinceID, untilID string, limit int
 	if limit > 100 {
 		limit = 100
 	}
-	q := preloadNoteRelations(r.db).Where(`"fileIds" @> ARRAY[?]::varchar[]`, fileID)
+	q := r.db.Where(`"fileIds" @> ARRAY[?]::varchar[]`, fileID)
 	if sinceID != "" {
 		q = q.Where(`"id" > ?`, sinceID)
 	}
@@ -1302,7 +1326,7 @@ func (r *noteRepository) ListByFileID(fileID, sinceID, untilID string, limit int
 	if err := q.Order(paginationOrder(sinceID, untilID, `"id"`)).Limit(limit).Find(&notes).Error; err != nil {
 		return nil, err
 	}
-	return notes, nil
+	return r.hydrate(notes)
 }
 
 func (r *noteRepository) IncrementUserNotesCount(userID string, delta int) error {
@@ -1541,7 +1565,17 @@ func applySuspendedEmbedAuthorExclusion(q *gorm.DB) *gorm.DB {
 //     `channelId IN (...)` で追加で含める (mute 済 channel は handler 側で
 //     除外済)。
 func (r *noteRepository) ListHomeTimeline(userID string, limit int, sinceID, untilID string, filter model.TimelineDBFilter) ([]*model.Note, error) {
-	q := preloadNoteRelations(r.db)
+	notes, err := r.ListHomeTimelineUnhydrated(userID, limit, sinceID, untilID, filter)
+	if err != nil {
+		return nil, err
+	}
+	return r.hydrate(notes)
+}
+
+// ListHomeTimelineUnhydrated is ListHomeTimeline without the pack relations, for callers that
+// merge it with another list and hydrate only the rows they keep (#3611).
+func (r *noteRepository) ListHomeTimelineUnhydrated(userID string, limit int, sinceID, untilID string, filter model.TimelineDBFilter) ([]*model.Note, error) {
+	q := r.db
 	if len(filter.FollowedChannelIDs) > 0 {
 		q = q.Where(
 			`(("userId" = ? OR "userId" IN (SELECT "followeeId" FROM "following" WHERE "followerId" = ?)) AND "channelId" IS NULL OR "channelId" IN ?)`,
@@ -1575,7 +1609,17 @@ func (r *noteRepository) ListHomeTimeline(userID string, limit int, sinceID, unt
 
 // ListLocalTimeline returns public/home notes by local users.
 func (r *noteRepository) ListLocalTimeline(limit int, sinceID, untilID string, filter model.TimelineDBFilter) ([]*model.Note, error) {
-	q := preloadNoteRelations(r.db).
+	notes, err := r.ListLocalTimelineUnhydrated(limit, sinceID, untilID, filter)
+	if err != nil {
+		return nil, err
+	}
+	return r.hydrate(notes)
+}
+
+// ListLocalTimelineUnhydrated is ListLocalTimeline without the pack relations, for callers that
+// merge it with another list and hydrate only the rows they keep (#3611).
+func (r *noteRepository) ListLocalTimelineUnhydrated(limit int, sinceID, untilID string, filter model.TimelineDBFilter) ([]*model.Note, error) {
+	q := r.db.
 		Where(`"userHost" IS NULL AND "visibility" = 'public' AND "channelId" IS NULL`).
 		Order(paginationOrder(sinceID, untilID, `"id"`)).Limit(limit)
 	if sinceID != "" {
@@ -1597,7 +1641,7 @@ func (r *noteRepository) ListLocalTimeline(limit int, sinceID, untilID string, f
 // Unlike ListGlobalTimeline this does NOT exclude channel notes (upstream notes.ts
 // has no channelId filter) (#2106 L4 / #2215).
 func (r *noteRepository) ListPublicNotes(filter model.PublicNotesFilter, limit int, sinceID, untilID string) ([]*model.Note, error) {
-	q := preloadNoteRelations(r.db).
+	q := r.db.
 		Where(`"visibility" = 'public' AND "localOnly" = FALSE`).
 		Order(paginationOrder(sinceID, untilID, `"id"`)).Limit(limit)
 	if sinceID != "" {
@@ -1641,13 +1685,13 @@ func (r *noteRepository) ListPublicNotes(filter model.PublicNotesFilter, limit i
 	if err := q.Find(&notes).Error; err != nil {
 		return nil, err
 	}
-	return notes, nil
+	return r.hydrate(notes)
 }
 
 // ListGlobalTimeline returns all public notes.
 // channelId IS NULL でチャンネルノートを除外する (TS互換)。
 func (r *noteRepository) ListGlobalTimeline(limit int, sinceID, untilID string, filter model.TimelineDBFilter) ([]*model.Note, error) {
-	q := preloadNoteRelations(r.db).
+	q := r.db.
 		Where(`"visibility" = 'public' AND "channelId" IS NULL`).
 		Order(paginationOrder(sinceID, untilID, `"id"`)).Limit(limit)
 	if sinceID != "" {
@@ -1661,7 +1705,7 @@ func (r *noteRepository) ListGlobalTimeline(limit int, sinceID, untilID string, 
 	if err := q.Find(&notes).Error; err != nil {
 		return nil, err
 	}
-	return notes, nil
+	return r.hydrate(notes)
 }
 
 // noteRemovableExpr is the per-note removal criteria shared by the root
@@ -1857,7 +1901,7 @@ func (r *noteRepository) ListByUserList(listID string, limit int, sinceID, until
 	// #1452 (visibility) / #1496 (reply) push-down は viewer ID を使う。旧 viewerID
 	// 引数を filter.ViewerID に畳み込んだ (#1498)。
 	viewerID := filter.ViewerID
-	q := preloadNoteRelations(r.db).
+	q := r.db.
 		Joins(`INNER JOIN "user_list_membership" m ON m."userId" = "note"."userId" AND m."userListId" = ?`, listID).
 		Where(`"note"."channelId" IS NULL`)
 	// visibility push-down: handler の post-fetch FilterVisible を SQL へ移し、
@@ -1921,7 +1965,7 @@ func (r *noteRepository) ListByUserList(listID string, limit int, sinceID, until
 	if err := q.Order(paginationOrder(sinceID, untilID, `"note"."id"`)).Limit(limit).Find(&notes).Error; err != nil {
 		return nil, err
 	}
-	return notes, nil
+	return r.hydrate(notes)
 }
 
 // recentReplyScanLimit は CountReplyTargets が集計対象にする直近の返信件数。
