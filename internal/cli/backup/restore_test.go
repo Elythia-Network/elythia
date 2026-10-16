@@ -383,7 +383,8 @@ func TestConnFor(t *testing.T) {
 	assert.Contains(t, c.SQL("other"), "dbname=other")
 	assert.Contains(t, c.Migrate("other"), "pgx5://app:p%40ss%20word@db.internal:5432/other")
 	tool, env := c.Tool("other")
-	assert.Equal(t, "postgresql://app@db.internal:5432/other?sslmode=disable", tool)
+	// pg_restore / psql (libpq) にも本体と同じ接続の待ち時間が渡る (#3632)。
+	assert.Equal(t, "postgresql://app@db.internal:5432/other?connect_timeout=10&sslmode=disable", tool)
 	assert.Equal(t, []string{"PGPASSWORD=p@ss word"}, env)
 	assert.Equal(t, "elythia", cfg.DB.DB, "connFor must not change the config")
 

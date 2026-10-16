@@ -51,7 +51,8 @@ var validSSLModes = map[string]bool{
 //   - sslmode: an explicit libpq sslmode. Mutually exclusive with ssl.
 //   - sslrootcert: a path to a PEM CA file used for verification.
 //
-// Unknown keys other than these are ignored, because upstream forwards
+// connectionTimeoutMillis is read by ResolveDBConnectTimeout. Unknown keys
+// other than these are ignored, because upstream forwards
 // db.extra to the node-postgres pool as-is and configs carry pool options
 // (statement_timeout etc.) that mk-go does not use.
 func ResolveDBTLS(extra map[string]any) (DBTLS, error) {
@@ -235,7 +236,12 @@ func dsnQuote(s string) string {
 }
 
 // buildKeywordDSN renders a libpq keyword/value DSN.
-func buildKeywordDSN(host string, port int, user, pass, dbname string, t DBTLS) string {
+//
+// connectTimeout は秒。pgx は connect_timeout をアドレスごとの接続全体 (dial、
+// TLS、認証) の上限として使い、UNIX ソケットでも効く (#3632)。0 は待ち続ける。
+// 常に書くのは、未指定だと pgx が環境変数 PGCONNECT_TIMEOUT を読み、設定と
+// 違う値で動くため。
+func buildKeywordDSN(host string, port int, user, pass, dbname string, t DBTLS, connectTimeout int) string {
 	if IsUnixSocketPath(host) {
 		// UDS では TLS を張れない。
 		t = DBTLS{SSLMode: "disable"}
@@ -247,6 +253,7 @@ func buildKeywordDSN(host string, port int, user, pass, dbname string, t DBTLS) 
 		"password=" + dsnQuote(pass),
 		"dbname=" + dsnQuote(dbname),
 		"sslmode=" + t.SSLMode,
+		"connect_timeout=" + strconv.Itoa(connectTimeout),
 	}
 	if t.SSLRootCert != "" {
 		parts = append(parts, "sslrootcert="+dsnQuote(t.SSLRootCert))
@@ -261,7 +268,7 @@ func buildKeywordDSN(host string, port int, user, pass, dbname string, t DBTLS) 
 // (socket 名 .s.PGSQL.<port> の末尾数字) を渡す。UDS では TLS を張れないので
 // sslmode は強制的に disable になる。TLS の設定は ResolveDBTLS を参照。
 func (c *Config) DSN() string {
-	return c.withApplicationName(buildKeywordDSN(c.DB.Host, c.DB.Port, c.DB.User, c.DB.Pass, c.DB.DB, c.dbTLS()))
+	return c.withApplicationName(buildKeywordDSN(c.DB.Host, c.DB.Port, c.DB.User, c.DB.Pass, c.DB.DB, c.dbTLS(), c.dbConnectTimeoutSeconds()))
 }
 
 // withApplicationName appends application_name to a keyword/value DSN when
@@ -280,7 +287,7 @@ func (c *Config) withApplicationName(dsn string) string {
 // SlaveDSN returns the PostgreSQL connection string for the idx-th read
 // replica declared in DBSlaves. idx が範囲外の場合は空文字列を返す。
 //
-// SSL/sslmode / Unix socket 判定は primary の DB 設定に合わせる。
+// SSL/sslmode / Unix socket 判定と connect_timeout は primary の DB 設定に合わせる。
 // Misskey 本家では dbSlaves エントリ内で sslmode を個別指定する API は無いため、
 // primary の extra を継承する (same-network / same-cluster replica を前提)。
 func (c *Config) SlaveDSN(idx int) string {
@@ -288,7 +295,7 @@ func (c *Config) SlaveDSN(idx int) string {
 		return ""
 	}
 	s := c.DBSlaves[idx]
-	return c.withApplicationName(buildKeywordDSN(s.Host, s.Port, s.User, s.Pass, s.DB, c.dbTLS()))
+	return c.withApplicationName(buildKeywordDSN(s.Host, s.Port, s.User, s.Pass, s.DB, c.dbTLS(), c.dbConnectTimeoutSeconds()))
 }
 
 // DatabaseURL returns the primary connection as a postgres URL with the given
@@ -310,6 +317,9 @@ func (c *Config) DatabaseURL(scheme string) string {
 	}
 	u.User = url.UserPassword(c.DB.User, c.DB.Pass)
 	q.Set("sslmode", t.SSLMode)
+	// pgx (golang-migrate、バックアップ) と libpq (pg_dump / pg_restore) の
+	// どちらも URL の connect_timeout を秒として読む。
+	q.Set("connect_timeout", strconv.Itoa(c.dbConnectTimeoutSeconds()))
 	if t.SSLRootCert != "" {
 		q.Set("sslrootcert", t.SSLRootCert)
 	}

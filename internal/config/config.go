@@ -642,6 +642,9 @@ func bindEnvKeys(v *viper.Viper) {
 		"url", "port", "socket",
 		"frontendContentSecurityPolicy",
 		"db.host", "db.port", "db.db", "db.user", "db.pass",
+		// 本家 (node-postgres) の pool option。db.extra の他のキーと違い、
+		// ファイルに書かなくても MK_ だけで区切りを変えられるようにする (#3632)。
+		"db.extra.connectionTimeoutMillis",
 		"redis.host", "redis.path", "redis.port", "redis.pass", "redis.db", "redis.username",
 		"redis.family", "redis.prefix",
 		"redisForPubsub.host", "redisForPubsub.path", "redisForPubsub.port", "redisForPubsub.pass",
@@ -830,6 +833,9 @@ func resolve(src *Source) (*Config, error) {
 	// DSN() は Config から毎回導出するので、誤った db.extra はここで起動を
 	// 止める (DSN 側で黙って既定に倒すと、平文 / 無検証で繋がってしまう)。
 	if _, err := ResolveDBTLS(src.DB.Extra); err != nil {
+		return nil, err
+	}
+	if _, err := ResolveDBConnectTimeout(src.DB.Extra); err != nil {
 		return nil, err
 	}
 
