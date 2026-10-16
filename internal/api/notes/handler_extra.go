@@ -193,11 +193,7 @@ func (h *Handler) featuredNotes(ctx context.Context, viewer *model.User, channel
 		}
 		notes = out
 	}
-	// upstream featured.ts は me の mute / 被block を isUserRelated で除外する
-	// (#1682。ignoreAuthor を渡さないので著者も見る)。Elythia は取得後に
-	// applyMuteBlock で被block / mute に加えて instance-mute・チャンネルのミュートも掛け、
-	// blocked-host / suspended もここで落とす (#1783)。
-	notes, err = h.applyMuteBlock(viewer, notes)
+	notes, err = h.filterFeatured(viewer, notes)
 	if err != nil {
 		return nil, err
 	}
@@ -209,13 +205,55 @@ func (h *Handler) featuredNotes(ctx context.Context, viewer *model.User, channel
 	return notes, nil
 }
 
+// filterFeatured drops the featured candidates upstream notes/featured.ts
+// (2026.10.0) drops: notes whose author, reply-target author, or
+// renote-target author has blocked the viewer or is muted by the viewer
+// (isUserRelated without ignoreAuthor), belongs to an admin-blocked host
+// (generateBlockedHostQueryForNote), or is suspended
+// (generateSuspendedUserQueryForNote). Only depth 1 is inspected. Channel
+// mutes, instance mutes, and renote mutes are not applied.
+//
+// Lookup errors are returned (fail-closed); the caller answers 500.
+func (h *Handler) filterFeatured(viewer *model.User, notes []*model.Note) ([]*model.Note, error) {
+	// 本家 featured.ts は他の一覧と違い generateBaseNoteFilteringQuery を使わず、
+	// 取得後に isUserRelated で被block と mute だけを見る。#3369 より前は
+	// applyMuteBlock を通していて、チャンネル・インスタンスのミュートと、
+	// リノート元の返信先・リノート元 (2 段目) でも落としていた。どれも閲覧者の
+	// 好みによる絞り込みで、外しても見えてはいけないノートが出るわけではない。
+	if viewer != nil {
+		muting, blocking, _ := h.newRequestRelations(viewer).listers()
+		sets, err := notesfilter.LoadMuteBlockSets(viewer, muting, blocking, nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		notes = notesfilter.DropUserRelated(notes, sets.BlockerIDs, false)
+		notes = notesfilter.DropUserRelated(notes, sets.MutedUserIDs, false)
+	}
+	blocked, err := h.blockedHosts()
+	if err != nil {
+		return nil, err
+	}
+	notes = notesfilter.ApplyBlockedHosts(notes, blocked)
+	// 本家は著者に加えて返信先・リノート元の著者の凍結も見る
+	// (replyUser / renoteUser の isSuspended)。#3369 より前は著者だけを見ていた。
+	out := make([]*model.Note, 0, len(notes))
+	for _, n := range notes {
+		if n == nil || notesfilter.HasSuspendedAuthor(n, nil) {
+			continue
+		}
+		out = append(out, n)
+	}
+	return out, nil
+}
+
 // fetchFeaturedNotes fetches the featured candidates before featuredNotes
 // filters them. The ranking path returns every ranked note below untilID; the
-// SQL fallback returns at most limit rows from offset.
+// SQL fallback returns at most limit rows from offset, drawn only from notes
+// upstream could put into the ranking (see repository ListFeatured).
 func (h *Handler) fetchFeaturedNotes(ctx context.Context, channelID, untilID string, limit, offset int) ([]*model.Note, error) {
 	// SQL fallback (ranking が無い / 空のとき) は upstream に無い経路なので、
 	// これまでどおり limit / offset で引いてから絞る (件数が欠けることがある。
-	// docs/divergence.md)。
+	// docs/divergence/security.md)。
 	if h.featuredRanking == nil {
 		return h.noteRepo.ListFeatured(channelID, untilID, limit, offset)
 	}
