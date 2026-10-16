@@ -273,11 +273,12 @@ func TestUpdate_WordMuteLimitCountsCharacters(t *testing.T) {
 	h, me := akaHandler(t)
 	h.SetRoleProvider(&stubRoleProvider{policies: map[string]any{"wordMuteLimit": 10}})
 	for body, want := range map[string]int{
-		`{"hardMutedWords":["abcdefghijk"]}`:        http.StatusBadRequest, // 1 件でも 11 文字
-		`{"hardMutedWords":["abcde",["fgh","ij"]]}`: http.StatusOK,         // 10 文字
-		`{"mutedWords":["abcde",["fgh","ijk"]]}`:    http.StatusBadRequest, // 11 文字
-		`{"mutedWords":["😀😀😀😀😀"]}`:                  http.StatusOK,         // サロゲートで 10
-		`{"mutedWords":["😀😀😀😀😀a"]}`:                 http.StatusBadRequest, // 11
+		`{"hardMutedWords":[["abcdefghijk"]]}`:        http.StatusBadRequest, // 1 件でも 11 文字
+		`{"hardMutedWords":[["abcde"],["fgh","ij"]]}`: http.StatusOK,         // 10 文字
+		`{"hardMutedWords":["/abc/",["fgh","ij"]]}`:   http.StatusOK,         // 正規表現も文字数で数える (/ を含め 5 + 5)
+		`{"mutedWords":[["abcde"],["fgh","ijk"]]}`:    http.StatusBadRequest, // 11 文字
+		`{"mutedWords":[["😀😀😀😀😀"]]}`:                  http.StatusOK,         // サロゲートで 10
+		`{"mutedWords":[["😀😀😀😀😀a"]]}`:                 http.StatusBadRequest, // 11
 	} {
 		rec := post(h.Update, body, me)
 		assert.Equal(t, want, rec.Code, "%s: %s", body, rec.Body.String())

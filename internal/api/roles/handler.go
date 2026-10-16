@@ -387,7 +387,7 @@ func (h *Handler) Notes(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
-	notes = notesfilter.ApplyHardMute(h.userRepo, viewer, notes)
+	notes = notesfilter.ApplyHardMute(h.userRepo, viewer, notes, h.idGen)
 	// **ブロック済みインスタンスのノートを落とす** (upstream
 	// generateBlockedHostQueryForNote)。`ListByRole` には入っていないので
 	// post-fetch で落とす。

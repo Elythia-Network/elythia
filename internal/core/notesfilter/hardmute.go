@@ -7,7 +7,11 @@
 package notesfilter
 
 import (
+	"time"
+
+	corenote "github.com/elythia-network/elythia/internal/core/note"
 	"github.com/elythia-network/elythia/internal/core/wordmute"
+	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 )
 
@@ -25,11 +29,13 @@ type ProfileLookup interface {
 // Best-effort semantics: anonymous viewer / lookup not wired / profile
 // fetch error / empty rule list all degrade to "return input untouched"
 // so a transient failure never hides legitimate timeline traffic. The
-// match target follows upstream check-word-mute.ts (cw + "\n" + text)
-// and the viewer's own posts are exempted. Caller passes a lookup the
-// handler already holds; one extra DB read per list endpoint is OK since
-// streaming hot paths use MatchOne with pre-fetched rules.
-func ApplyHardMute(lookup ProfileLookup, viewer *model.User, notes []*model.Note) []*model.Note {
+// decision follows upstream (wordmute.MatchAppearNote): a pure renote is
+// judged by the renoted note, and the reply / quote targets are checked too.
+// The notes must be hydrated (Reply / Renote / Renote.Reply / Renote.Renote and
+// their authors) like every list the packer reads. idGen decodes note IDs for
+// the authors' time-window visibility settings; nil treats every note as
+// created at epoch 0 (those notes are then not judged, never wrongly hidden).
+func ApplyHardMute(lookup ProfileLookup, viewer *model.User, notes []*model.Note, idGen id.Generator) []*model.Note {
 	if viewer == nil || lookup == nil || len(notes) == 0 {
 		return notes
 	}
@@ -38,16 +44,10 @@ func ApplyHardMute(lookup ProfileLookup, viewer *model.User, notes []*model.Note
 		return notes
 	}
 	rules := []byte(profile.HardMutedWords)
+	nowMs := time.Now().UnixMilli()
 	out := notes[:0]
 	for _, n := range notes {
-		var text, cw string
-		if n.Text != nil {
-			text = *n.Text
-		}
-		if n.CW != nil {
-			cw = *n.CW
-		}
-		if wordmute.MatchNote(rules, n.UserID, viewer.ID, text, cw) {
+		if wordmute.MatchAppearNote(rules, viewer.ID, hardMuteTree(viewer, n, idGen, nowMs)) {
 			continue
 		}
 		out = append(out, n)
@@ -55,22 +55,73 @@ func ApplyHardMute(lookup ProfileLookup, viewer *model.User, notes []*model.Note
 	return out
 }
 
-// MatchOne is a single-note convenience used by streaming code paths that
-// publish per-note. Unlike ApplyHardMute the caller already holds the
-// pre-fetched rules JSON (the streaming worker keeps a per-connection
-// cache) so we don't re-fetch the profile on every published note.
+// hardMuteTree converts a hydrated note into the hard-mute view, marking the
+// parts the viewer is not allowed to see.
 //
-// Returns true when the note should be hidden from the viewer.
-func MatchOne(rulesJSON []byte, viewerID string, n *model.Note) bool {
-	if n == nil || len(rulesJSON) == 0 {
-		return false
+// **見えるかどうかは、パックした後に notehide が隠すものと同じ判定で決める。**
+// 本家は hideNote で本文を消した後のノートを判定する。ここはパックの前に
+// 落とすので、同じ判定 (top-level は著者の設定だけ、埋め込みは全部) をここで
+// 当てる。フォローの集合は引かない (フォロー中の人のフォロワー限定のノートは
+// 見えない側として扱い、その中身では隠さない)。見えないノートの中身は判定に
+// 使わないので、迷ったら見えない側にする。
+//
+// top-level に著者の設定の判定だけを当てるのは、ここに来る一覧がどれも、
+// 閲覧者が見られる top-level のノートだけを引いているため (SQL の可視性の条件か
+// FilterVisible)。見えない top-level を返す経路 (notes/conversation) には
+// ハードミュートを掛けない。
+func hardMuteTree(viewer *model.User, n *model.Note, idGen id.Generator, nowMs int64) *wordmute.Note {
+	if n == nil {
+		return nil
 	}
-	var text, cw string
+	top := hardMuteNode(n)
+	topFacts := corenote.FactsFromModel(n, createdAtMs(idGen, n.ID))
+	if n.Reply != nil {
+		topFacts.ReplyTargetAuthorID = n.Reply.UserID
+	}
+	top.Hidden = corenote.HideNoteByPrefsDecision(viewer, topFacts, neverFollows, nowMs)
+	top.PureRenote = corenote.IsPureRenote(n)
+	top.Reply = hardMuteEmbed(viewer, n.Reply, idGen, nowMs)
+	top.Renote = hardMuteEmbed(viewer, n.Renote, idGen, nowMs)
+	if top.Renote != nil {
+		// 埋め込みの 2 段目 (renote.reply / renote.renote) はパックされるものだけ。
+		// reply の埋め込みは子を持たない (packer の detail:false)。
+		top.Renote.Reply = hardMuteEmbed(viewer, n.Renote.Reply, idGen, nowMs)
+		top.Renote.Renote = hardMuteEmbed(viewer, n.Renote.Renote, idGen, nowMs)
+	}
+	return top
+}
+
+func hardMuteEmbed(viewer *model.User, n *model.Note, idGen id.Generator, nowMs int64) *wordmute.Note {
+	if n == nil {
+		return nil
+	}
+	node := hardMuteNode(n)
+	node.Hidden = corenote.HideEmbedDecision(viewer, corenote.FactsFromModel(n, createdAtMs(idGen, n.ID)), neverFollows, nowMs)
+	return node
+}
+
+func hardMuteNode(n *model.Note) *wordmute.Note {
+	node := &wordmute.Note{UserID: n.UserID}
 	if n.Text != nil {
-		text = *n.Text
+		node.Text = *n.Text
 	}
 	if n.CW != nil {
-		cw = *n.CW
+		node.CW = *n.CW
 	}
-	return wordmute.MatchNote(rulesJSON, n.UserID, viewerID, text, cw)
+	return node
+}
+
+func neverFollows(string) bool { return false }
+
+// createdAtMs decodes a note ID's timestamp. 0 (epoch) on failure fails closed
+// on the time-window gates, like notehide's parseCreatedAtMs.
+func createdAtMs(idGen id.Generator, noteID string) int64 {
+	if idGen == nil {
+		return 0
+	}
+	t, err := idGen.ParseTime(noteID)
+	if err != nil {
+		return 0
+	}
+	return t.UnixMilli()
 }

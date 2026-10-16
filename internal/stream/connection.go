@@ -85,7 +85,7 @@ type Connection struct {
 
 	// hardMuteRules は viewer の user_profile.hardMutedWords をそのまま保持する
 	// jsonb 由来 byte slice (#787)。streaming channel が per-note dispatch 時に
-	// notesfilter.MatchOne でこの rules と照合し、match したら send しない。
+	// channels の shouldEmit (hardMutedPayload) でこの rules と照合し、match したら send しない。
 	// 認証時に router が一度だけ fetch、また i/update 経由で reload 通知
 	// (#791) が来たときに更新される。read (per-publish) と write (reload) が
 	// 並行するので hardMuteMu で protect する。
@@ -188,7 +188,7 @@ func (c *Connection) SetHardMuteRules(rules []byte) {
 //
 // 戻り値は internal slice の参照 — caller は **絶対に mutate しないこと**。
 // per-publish hot path で defensive copy を避けるための約束で、現状の唯一の
-// caller (notesfilter.MatchOne) は read-only で扱う。
+// caller (channels の shouldEmit) は read-only で扱う。
 func (c *Connection) HardMuteRules() []byte {
 	c.hardMuteMu.RLock()
 	defer c.hardMuteMu.RUnlock()

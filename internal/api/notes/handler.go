@@ -822,7 +822,7 @@ func (h *Handler) serveList(c echo.Context, noSuchNoteID string, fn func(*model.
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
-	return c.JSON(http.StatusOK, h.packMany(c.Request().Context(), notes, viewer))
+	return c.JSON(http.StatusOK, h.packManyWithoutHardMute(c.Request().Context(), notes, viewer))
 }
 
 // applyMuteBlock filters out notes the viewer should not see per the mute/block
@@ -1218,14 +1218,14 @@ func (h *Handler) Conversation(c echo.Context) error {
 	}
 	// Conversation は非可視な祖先も raw に返すので、ここで CanSee 判定して
 	// 非可視 note を hideNote stub する (upstream packMany(_, me) の hideNote 挙動、
-	// #1948-17)。index ずれ (ApplyHardMute の drop) に強いよう note ID で突合する。
+	// #1948-17)。note ID で突合する。
 	hidden := make(map[string]struct{})
 	for _, n := range notes {
 		if !h.queryService.CanSee(viewer, n) {
 			hidden[n.ID] = struct{}{}
 		}
 	}
-	packed := h.packMany(c.Request().Context(), notes, viewer)
+	packed := h.packManyWithoutHardMute(c.Request().Context(), notes, viewer)
 	if len(hidden) > 0 {
 		for i := range packed {
 			if _, ok := hidden[packed[i].ID]; ok {
@@ -1279,7 +1279,8 @@ func (h *Handler) BulkShow(c echo.Context) error {
 		// mk-go 独自の noteIds 経路にも、一覧側と同じ ugcVisibilityForVisitor の
 		// 方針を掛ける (upstream には該当する経路が無い)。
 		notes = h.filterVisitorUGC(viewer, notes)
-		return c.JSON(http.StatusOK, h.packMany(c.Request().Context(), notes, viewer))
+		// ID を指定して引く経路は notes/show と同じ単体の取得なので、ハードミュートを掛けない。
+		return c.JSON(http.StatusOK, h.packManyWithoutHardMute(c.Request().Context(), notes, viewer))
 	}
 
 	// noteIds 不在時は upstream notes.ts の public note 一覧。public note のみなので追加の
@@ -1356,17 +1357,29 @@ func (h *Handler) packReferencedNote(ctx context.Context, n *model.Note, viewer 
 // あり、他の PackNotes 利用 handler (antennas / users / pinned 等) と共通化
 // している (#426)。
 //
-// 全 list endpoint (TL / Search / Conversation / Mentions / UserList /
-// SearchByTag) が本関数を経由するので、hardMutedWords の filter (#787) は
+// hardMutedWords の filter (#787) は、本家の frontend が `withHardMute` で
+// 描画する一覧 (タイムライン、検索、メンションなど) に当たる endpoint だけで、
 // PackNotes に渡す前に一括で適用する。viewer == nil / userRepo 未配線 /
 // 規則無し のいずれも no-op に倒す best-effort 設計。
+//
+// **詳細画面が読む endpoint (children / replies / renotes / conversation /
+// show-partial-bulk、noteIds を指定した notes) には掛けない** (#3369)。本家は
+// そこを `MkNoteSub` などで描画し、ハードミュートしない。掛けると、ミュートの語を
+// 含むノートの詳細画面で返信やリノートが 1 件も出なくなる。これらは
+// packManyWithoutHardMute を使う。
 //
 // 注意: filter を意図的に bypass したい admin 系 path (例: モデレーション目的で
 // 隠さず全件を見せたい / pinned notes 等) は本関数を経由せず entity.PackNotes
 // を直接呼ぶ慣習。pinned (i/show, users/show) と i/favorites は upstream に
 // 揃えて既に packMany を経由していない。
 func (h *Handler) packMany(ctx context.Context, notes []*model.Note, viewer *model.User) []entity.NoteEntity {
-	notes = notesfilter.ApplyHardMute(h.userRepo, viewer, notes)
+	notes = notesfilter.ApplyHardMute(h.userRepo, viewer, notes, h.idGen)
+	return h.packManyWithoutHardMute(ctx, notes, viewer)
+}
+
+// packManyWithoutHardMute is packMany without the hardMutedWords filter, for
+// the endpoints the note detail view reads (see packMany).
+func (h *Handler) packManyWithoutHardMute(ctx context.Context, notes []*model.Note, viewer *model.User) []entity.NoteEntity {
 	out := entity.PackNotes(ctx, notes, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
 	h.fieldResolver().Apply(out, viewer)
 	notehide.HideEmbeds(viewer, out)

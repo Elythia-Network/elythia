@@ -1112,7 +1112,7 @@ func (h *Handler) FilesAttachedNotes(c echo.Context) error {
 	if !viewerIsOwner {
 		notes = notesfilter.FilterVisible(viewer, notes, nil)
 	}
-	notes = notesfilter.ApplyHardMute(h.userRepo, viewer, notes)
+	notes = notesfilter.ApplyHardMute(h.userRepo, viewer, notes, h.idGen)
 	out := entity.PackNotes(c.Request().Context(), notes, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
 	h.fieldRes.Apply(out, viewer)
 	notehide.HideEmbeds(viewer, out)

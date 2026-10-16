@@ -459,7 +459,7 @@ func (h *Handler) Notes(c echo.Context) error {
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
-	notes = notesfilter.ApplyHardMute(h.userRepo, user, notes)
+	notes = notesfilter.ApplyHardMute(h.userRepo, user, notes, h.idGen)
 	// #2106 N5: admin の blockedHosts でブロックした remote host の note と、suspended な
 	// author の note を除外する (upstream notes.ts:132-133 の generateBaseNoteFilteringQuery
 	// = generateBlockedHostQueryForNote + generateSuspendedUserQueryForNote)。clips/notes が

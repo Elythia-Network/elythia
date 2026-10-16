@@ -1,12 +1,16 @@
-// Package wordmute implements Misskey TS upstream `check-word-mute.ts` for
-// hard mute filtering on the server side (#787). The wire format is the
+// Package wordmute implements Misskey's word-mute matcher (`checkWordMute`)
+// for hard mute filtering on the server side (#787). The wire format is the
 // jsonb array stored in user_profile.mutedWords / hardMutedWords:
 //
 //	[
-//	  "single keyword",     // case-insensitive substring match
-//	  ["a", "b"],           // AND group: text must contain every element
+//	  ["a", "b"],           // AND group: text must contain every element (case-sensitive)
 //	  "/regex/i"            // RegExp literal: parsed as Go regexp
 //	]
+//
+// The judgement follows upstream frontend utility/check-word-mute.ts, which is
+// the matcher upstream actually applies (backend misc/check-word-mute.ts has no
+// caller in 2026.10.0): keywords are compared case-sensitively, and a string
+// entry that is not a /pattern/flags literal never matches.
 //
 // Frontend sends and renders the same shape, so persistence layer never
 // transforms the structure.
@@ -96,17 +100,16 @@ var (
 )
 
 func matchRules(rules []rule, text string) bool {
-	lowered := strings.ToLower(text)
+	// **大文字と小文字を区別する。** 本家の判定 (frontend の checkWordMute) は
+	// `text.includes(keyword)` で比べる。区別しないと、本家のクライアントが
+	// 表示するノートをサーバーだけが隠す (#3369)。区別しないで隠したいときは
+	// `/word/i` の正規表現を使う (本家と同じ)。
 	for _, r := range rules {
 		switch v := r.(type) {
-		case stringRule:
-			if strings.Contains(lowered, string(v)) {
-				return true
-			}
 		case andRule:
 			hit := true
 			for _, kw := range v {
-				if !strings.Contains(lowered, kw) {
+				if !strings.Contains(text, kw) {
 					hit = false
 					break
 				}
@@ -126,12 +129,8 @@ func matchRules(rules []rule, text string) bool {
 // rule is one parsed entry of the muted-words array.
 type rule any
 
-// stringRule represents a single keyword. Stored already-lowercased so the
-// hot path can compare against `strings.ToLower(text)` without re-allocating.
-type stringRule string
-
 // andRule represents `["a", "b"]` — every element must appear in the text
-// (case-insensitive). Stored lowercased.
+// (case-sensitive, like upstream `text.includes`).
 type andRule []string
 
 // regexRule wraps a compiled `/foo/flag` literal. Compilation failure
@@ -141,10 +140,35 @@ type regexRule struct {
 	re *regexp.Regexp
 }
 
-// regexLiteral matches Misskey's `/pattern/flags` wire syntax. Anchors are
-// required (no leading whitespace allowed) since the frontend always emits
-// the canonical form.
-var regexLiteral = regexp.MustCompile(`^/(.+)/([gimsuy]*)$`)
+// regexLiteral matches Misskey's `/pattern/flags` wire syntax with the same
+// shape upstream reads (`/^\/(.+)\/(.*)$/` in JavaScript, both in i/update and in
+// the frontend): any flags, and `.` does not cross JavaScript line terminators.
+//
+// **形は本家と同じにする (#3369)。** flags を `gimsuy` に限っていたので、本家と
+// fork の frontend が受け付ける `/foo/v` や `/foo/d` を i/update が拒否していた。
+var regexLiteral = regexp.MustCompile(`^/([^\n\r\x{2028}\x{2029}]+)/([^\n\r\x{2028}\x{2029}]*)$`)
+
+// evaluableFlags reports whether the server evaluates a literal with these
+// flags. The frontend (`new RegExp(pattern, flags)`) only accepts the flags
+// `dgimsuvy`, each at most once and not `u` with `v`; for anything else its
+// checkWordMute gets no regexp and never matches, so neither does the server.
+//
+// **`v` の付いたものはサーバーでは当てない。** `v` は文字クラスの書き方
+// (集合の演算、入れ子のクラス、`\q{}`) を変えるが、Go の regexp では表せず、
+// 同じ文字列が別の意味で読まれる (例えば `[a&&b]` を Go は 3 文字のクラスとして
+// 読む)。当てると frontend が表示するノートを隠しうるので、判定しない側に倒す。
+// frontend は本家と同じく `v` 付きでも判定する。
+func evaluableFlags(flags string) bool {
+	seen := map[rune]bool{}
+	for _, f := range flags {
+		if !strings.ContainsRune("dgimsuvy", f) || seen[f] {
+			return false
+		}
+		seen[f] = true
+	}
+	// `u` と `v` の同時指定は frontend では例外になるが、`v` を当てない以上どちらも false。
+	return !seen['v']
+}
 
 // inlineFlagPrefix detects an existing `(?flags)` or `(?flags:...)` inline
 // flag group at the start of a pattern. 既に inline flag を含んでいるなら
@@ -235,19 +259,25 @@ func parseEntry(e json.RawMessage) (rule, int) {
 	var s string
 	if err := json.Unmarshal(e, &s); err == nil {
 		// Misskey TS upstream allows /regex/flags literal as a string entry.
+		if m := regexLiteral.FindStringSubmatch(s); m != nil && !evaluableFlags(m[2]) {
+			return nil, 0
+		}
 		if re, insts, isLiteral, err := goRegexFromLiteral(s); isLiteral {
 			if err != nil || insts > maxRegexInsts {
 				return nil, 0
 			}
 			return regexRule{re: re}, insts
 		}
-		return stringRule(strings.ToLower(s)), 0
+		// **正規表現の形でない文字列は、何にも一致させない。** 本家の判定は文字列の
+		// 要素を必ず正規表現として読み、`/.../` の形でなければ false を返す
+		// (i/update も本家ではこの形を INVALID_REGEXP で拒む)。以前は部分一致の
+		// 語として扱い、本家のクライアントが表示するノートを隠していた (#3369)。
+		return nil, 0
 	}
 	var arr []string
 	if err := json.Unmarshal(e, &arr); err == nil {
 		out := make(andRule, 0, len(arr))
 		for _, kw := range arr {
-			kw = strings.ToLower(kw)
 			if kw == "" {
 				continue
 			}
@@ -265,7 +295,8 @@ func parseEntry(e json.RawMessage) (rule, int) {
 var errRegexpTooLarge = errors.New("regexp literal too large")
 
 // goRegexFromLiteral compiles a /pattern/flags literal into a Go regexp, applying
-// the i/m/s inline-flag conversion (g/u/y are no-ops, see parseEntry), and
+// the i/m/s inline-flag conversion and the y anchor (other flags are ignored,
+// like node-re2 in upstream i/update; see literalProgram), and
 // reports the number of instructions of the compiled program. Returns
 // (nil, 0, false, nil) when s is not a /.../ literal, and (nil, 0, true, err)
 // when it is a literal that fails to compile or is too large (#2106 L3
@@ -315,9 +346,20 @@ func literalProgram(s string, compile bool) (string, int, bool, error) {
 	if strings.ContainsRune(flags, 's') {
 		inline += "s"
 	}
+	// **`y` は先頭に固定する。** frontend は lastIndex を 0 に戻してから test する
+	// ので、sticky な正規表現は本文の先頭でしか当たらない。無視すると、frontend が
+	// 表示するノートをサーバーだけが隠す。`g` / `d` は判定の結果を変えない。`u` は
+	// JavaScript では `.` や `\p{…}` の読み方を変えるが、Go の regexp は常に Unicode で
+	// 読むので写すものが無い (u の無い正規表現との構文の差は docs/divergence/api.md)。
+	// それ以外の flags は無視する (本家 i/update の node-re2 も知らない flags を
+	// 無視して受け付ける。判定に使うかは parseEntry の evaluableFlags が決める)。
+	sticky := strings.ContainsRune(flags, 'y')
 	// 二重指定回避: pattern が既に inline flag group `(?ims)` で始まる場合のみ skip。
 	if inline != "" && !inlineFlagPrefix.MatchString(pattern) {
 		pattern = "(?" + inline + ")" + pattern
+	}
+	if sticky {
+		pattern = `\A(?:` + pattern + `)`
 	}
 	// 命令数は regexp.Compile と同じ手順 (Parse → Simplify → Compile) で数える。
 	parsed, err := syntax.Parse(pattern, syntax.Perl)
@@ -402,11 +444,12 @@ var ErrInvalidRegexp = errors.New("invalid regexp literal in muted words")
 // the same error).
 var ErrRegexpTooComplex = errors.New("regexp literal in muted words is too complex")
 
-// ValidateMutedWords reports whether every /pattern/flags regex-literal entry in
-// the muted-words JSON compiles, returning ErrInvalidRegexp on the first failure
-// (#2106 L3, upstream i/update.ts validateMuteWordRegex). Non-regex entries (plain
-// keywords / AND-group arrays) and shape errors are ignored here (shape is handled
-// by the caller's normalize step).
+// ValidateMutedWords reports whether every string entry in the muted-words JSON
+// is a /pattern/flags literal that compiles, returning ErrInvalidRegexp on the
+// first failure (#2106 L3 / #3369, upstream i/update.ts validateMuteWordRegex).
+// A string that is not a literal is rejected too, like upstream. AND-group arrays
+// and shape errors are ignored here (shape is handled by the caller's normalize
+// step).
 //
 // mutedWords (soft mute) is evaluated only by clients, so the instruction limits
 // do not apply; the source length limit does (it keeps this validation itself
@@ -454,7 +497,9 @@ func validate(raw json.RawMessage, compile bool) ([]int, error) {
 		}
 		_, n, isLiteral, err := literalProgram(s, compile)
 		if !isLiteral {
-			continue
+			// **`/.../` の形でない文字列は拒否する** (本家 i/update の
+			// validateMuteWordRegex と同じ。#3369)。受け付けても何にも当たらない。
+			return nil, ErrInvalidRegexp
 		}
 		if errors.Is(err, ErrRegexpTooComplex) {
 			return nil, err
@@ -477,4 +522,48 @@ func MatchNote(rulesJSON []byte, noteUserID, viewerID, noteText, noteCW string) 
 	}
 	combined := strings.TrimSpace(noteCW + "\n" + noteText)
 	return Match(rulesJSON, combined)
+}
+
+// Note is the part of one note, and of the notes it embeds, that the hard-mute
+// decision reads. Callers build it from their own representation (REST from
+// the repository model, streaming from the published payload).
+type Note struct {
+	UserID string
+	Text   string
+	CW     string
+	// Hidden reports that the viewer is not allowed to see this note's content
+	// (upstream NoteEntityService.hideNote blanks text and cw). A hidden note
+	// never matches.
+	Hidden bool
+	// PureRenote reports that the note is a renote without its own content.
+	PureRenote bool
+	Reply      *Note
+	Renote     *Note
+}
+
+// MatchAppearNote reports whether n must be hidden from viewerID by the hard
+// mute rules. It mirrors upstream frontend use-note.ts: the note shown for a
+// pure renote is the renoted note (getAppearNote), and checkNoteWordMute checks
+// that note, its reply target and its renote (quote) target, each with
+// checkWordMute (so each one skips its own author's viewer).
+func MatchAppearNote(rulesJSON []byte, viewerID string, n *Note) bool {
+	if n == nil || len(rulesJSON) == 0 {
+		return false
+	}
+	appear := n
+	if n.PureRenote && n.Renote != nil {
+		appear = n.Renote
+	}
+	return matchVisible(rulesJSON, viewerID, appear) ||
+		matchVisible(rulesJSON, viewerID, appear.Reply) ||
+		matchVisible(rulesJSON, viewerID, appear.Renote)
+}
+
+func matchVisible(rulesJSON []byte, viewerID string, n *Note) bool {
+	// **隠される中身では判定しない。** 本家は hideNote で本文を消した後の packed
+	// note を判定するので一致しない。見えないノートの中身は判定に使わない。
+	if n == nil || n.Hidden {
+		return false
+	}
+	return MatchNote(rulesJSON, n.UserID, viewerID, n.Text, n.CW)
 }
