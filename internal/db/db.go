@@ -35,6 +35,9 @@ func New(cfg *config.Config) (*gorm.DB, error) {
 		if hint := cfg.DBTLSErrorHint(err); hint != "" {
 			return nil, fmt.Errorf("failed to connect to database (%s): %w", hint, err)
 		}
+		if hint := cfg.DBConnectTimeoutHint(err); hint != "" {
+			return nil, fmt.Errorf("failed to connect to database (%s): %w", hint, err)
+		}
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
@@ -97,6 +100,9 @@ func New(cfg *config.Config) (*gorm.DB, error) {
 			SetConnMaxLifetime(connMaxLifetime).
 			SetConnMaxIdleTime(connMaxIdleTime),
 		); err != nil {
+			if hint := cfg.DBReplicaConnectTimeoutHint(err); hint != "" {
+				return nil, fmt.Errorf("failed to register db replicas (%s): %w", hint, err)
+			}
 			return nil, fmt.Errorf("failed to register db replicas: %w", err)
 		}
 		slog.Info("registered PostgreSQL read replicas", "count", len(cfg.DBSlaves))

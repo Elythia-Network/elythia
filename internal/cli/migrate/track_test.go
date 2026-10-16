@@ -191,7 +191,7 @@ func TestLatestVersion(t *testing.T) {
 }
 
 func TestWithMigrationsTable(t *testing.T) {
-	got, err := withMigrationsTable("pgx5://mk:p%40ss@/misskey?host=%2Fvar%2Frun%2Fpostgresql&port=5432&sslmode=disable", LocalTable)
+	got, err := withMigrationsTable("pgx5://mk:p%40ss@/misskey?host=%2Fvar%2Frun%2Fpostgresql&port=5432&sslmode=disable&connect_timeout=10", LocalTable)
 	require.NoError(t, err)
 	u, err := url.Parse(got)
 	require.NoError(t, err)
@@ -199,6 +199,8 @@ func TestWithMigrationsTable(t *testing.T) {
 	// 既存の query と資格情報を壊さない (UDS は host query で渡している)。
 	assert.Equal(t, "/var/run/postgresql", u.Query().Get("host"))
 	assert.Equal(t, "5432", u.Query().Get("port"))
+	// local の系列も本体と同じ接続の待ち時間で区切る (#3632)。
+	assert.Equal(t, "10", u.Query().Get("connect_timeout"))
 	pass, _ := u.User.Password()
 	assert.Equal(t, "p@ss", pass)
 
