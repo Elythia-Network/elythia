@@ -1052,13 +1052,28 @@ func (r *noteRepository) ListFeatured(channelID, untilID string, limit, offset i
 	if limit <= 0 {
 		limit = 10
 	}
-	q := r.db.Where("visibility = 'public'")
+	// 候補は本家のランキングへ入りうるノートに揃える (#3369)。本家は reaction
+	// (ReactionService) と renote (NoteCreateService.incRenoteCount) のときだけ
+	// ランキングへ足し、その条件はチャンネルなら返信でないこと、全体なら公開・
+	// ローカル・返信でない・チャンネル外であること。pure renote にはリアクション
+	// もリノートもできないので入らない。notes/featured の絞り込みは本家と同じく
+	// チャンネル・インスタンスのミュートを見ないので、候補が本家より広いと、
+	// ミュートしたチャンネルやインスタンスのノートが全体の注目に出てしまう。
+	// 揃えるのは候補だけで、並べ方 (count の合計) は従来どおり。投入のたびに
+	// 見る条件 (3 日以内のノート、30% の抽選、自分のリアクションと bot の
+	// リノートを数えない) は、count の合計で並べるこの fallback には対応する
+	// ものが無いので持ち込まない。
+	q := r.db.Where("visibility = 'public'").
+		Where(`"replyId" IS NULL`).
+		Where(`NOT (` + pureRenoteCondSQL + `)`)
 	if channelID != "" {
 		// チャンネル指定時は当該チャンネル内のノートだけを返す
 		// (upstream FeaturedService.getInChannelNotesRanking と一致)。
 		// 過去はこの WHERE 節が無く、グローバル featured が混ざってチャンネル
 		// ハイライトに無関係ノートが出ていた (#489)。
 		q = q.Where(`"channelId" = ?`, channelID)
+	} else {
+		q = q.Where(`"channelId" IS NULL AND "userHost" IS NULL`)
 	}
 	if untilID != "" {
 		q = q.Where(`id < ?`, untilID)

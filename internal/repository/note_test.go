@@ -1665,10 +1665,96 @@ func TestNoteRepository_ListFeatured_ChannelFilter(t *testing.T) {
 	require.NoError(t, testDB.Create(otherNote).Error)
 	defer testDB.Exec(`DELETE FROM "note" WHERE id = ?`, otherNote.ID)
 
+	// 本家はチャンネルの返信をランキングへ入れず、pure renote にはリアクションも
+	// リノートもできないので、fallback の候補にもしない (#3369)。
+	chReply := &model.Note{ID: "feat_chrp", UserID: user.ID, Visibility: "public", RenoteCount: 20, ChannelID: &chPtr, ReplyID: &chNote.ID}
+	require.NoError(t, testDB.Create(chReply).Error)
+	defer testDB.Exec(`DELETE FROM "note" WHERE id = ?`, chReply.ID)
+	chRenote := &model.Note{ID: "feat_chrn", UserID: user.ID, Visibility: "public", RenoteCount: 20, ChannelID: &chPtr, RenoteID: &chNote.ID}
+	require.NoError(t, testDB.Create(chRenote).Error)
+	defer testDB.Exec(`DELETE FROM "note" WHERE id = ?`, chRenote.ID)
+
 	rows, err := repo.ListFeatured(chID, "", 10, 0)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	assert.Equal(t, chNote.ID, rows[0].ID)
+}
+
+// Without a channel, the fallback returns only notes upstream could put into
+// the global ranking: public, local, outside channels, not a reply, and not a
+// pure renote. A quote renote, including one carrying only a CW, files, or a
+// poll, stays a candidate (#3369).
+func TestNoteRepository_ListFeatured_GlobalCandidates(t *testing.T) {
+	repo := NewNoteRepository(testDB)
+	user := insertTestUser(t, "feat_gu", "featgu")
+	defer cleanupUser(t, user.ID)
+	chID := "feat_gch"
+	require.NoError(t, testDB.Exec(`INSERT INTO channel (id, name, "userId") VALUES (?, ?, ?)`, chID, "feat-gch", user.ID).Error)
+	defer testDB.Exec(`DELETE FROM channel WHERE id = ?`, chID)
+	defer testDB.Exec(`DELETE FROM "note" WHERE id LIKE 'feat_g%'`)
+
+	text := "quote"
+	host := "remote.example"
+	root := "feat_groot"
+	notes := []*model.Note{
+		{ID: root, UserID: user.ID, Visibility: "public", RenoteCount: 30000},
+		{ID: "feat_gquote", UserID: user.ID, Visibility: "public", RenoteCount: 30000, RenoteID: &root, Text: &text},
+		// 本文が無くても CW・添付・投票のどれかがあれば引用 (pure renote ではない)。
+		{ID: "feat_gqcw", UserID: user.ID, Visibility: "public", RenoteCount: 30000, RenoteID: &root, CW: &text},
+		{ID: "feat_gqfile", UserID: user.ID, Visibility: "public", RenoteCount: 30000, RenoteID: &root, FileIDs: []string{"feat_gfile"}},
+		{ID: "feat_gqpoll", UserID: user.ID, Visibility: "public", RenoteCount: 30000, RenoteID: &root, HasPoll: true},
+		{ID: "feat_gpure", UserID: user.ID, Visibility: "public", RenoteCount: 30000, RenoteID: &root},
+		{ID: "feat_greply", UserID: user.ID, Visibility: "public", RenoteCount: 30000, ReplyID: &root, Text: &text},
+		{ID: "feat_gchan", UserID: user.ID, Visibility: "public", RenoteCount: 30000, ChannelID: &chID},
+		{ID: "feat_gremote", UserID: user.ID, Visibility: "public", RenoteCount: 30000, UserHost: &host},
+		{ID: "feat_ghome", UserID: user.ID, Visibility: "home", RenoteCount: 30000},
+	}
+	for _, n := range notes {
+		require.NoError(t, testDB.Create(n).Error)
+	}
+
+	rows, err := repo.ListFeatured("", "", 100, 0)
+	require.NoError(t, err)
+	got := []string{}
+	for _, n := range rows {
+		if strings.HasPrefix(n.ID, "feat_g") {
+			got = append(got, n.ID)
+		}
+	}
+	sort.Strings(got)
+	assert.Equal(t, []string{"feat_gqcw", "feat_gqfile", "feat_gqpoll", "feat_gquote", "feat_groot"}, got)
+}
+
+// The fallback orders candidates by renoteCount + repliesCount descending,
+// then id descending. Neither id order nor renoteCount alone gives the same
+// order for these rows (#3369).
+func TestNoteRepository_ListFeatured_OrdersByRenotesPlusReplies(t *testing.T) {
+	repo := NewNoteRepository(testDB)
+	user := insertTestUser(t, "feat_ou", "featou")
+	defer cleanupUser(t, user.ID)
+	defer testDB.Exec(`DELETE FROM "note" WHERE id LIKE 'feat_ord%'`)
+
+	// 他のテストの行より上に来るよう count を大きくしておく。
+	notes := []*model.Note{
+		{ID: "feat_ord1", UserID: user.ID, Visibility: "public", RenoteCount: 20005},
+		{ID: "feat_ord2", UserID: user.ID, Visibility: "public", RenoteCount: 20001, RepliesCount: 10},
+		{ID: "feat_ord3", UserID: user.ID, Visibility: "public", RenoteCount: 20003},
+		{ID: "feat_ord4", UserID: user.ID, Visibility: "public", RenoteCount: 20003},
+	}
+	for _, n := range notes {
+		require.NoError(t, testDB.Create(n).Error)
+	}
+
+	rows, err := repo.ListFeatured("", "", 100, 0)
+	require.NoError(t, err)
+	got := []string{}
+	for _, n := range rows {
+		if strings.HasPrefix(n.ID, "feat_ord") {
+			got = append(got, n.ID)
+		}
+	}
+	// 合計 20011 > 20005 > 20003 (同点は id の降順)。
+	assert.Equal(t, []string{"feat_ord2", "feat_ord1", "feat_ord4", "feat_ord3"}, got)
 }
 
 func TestNoteRepository_ListFeatured_Error(t *testing.T) {

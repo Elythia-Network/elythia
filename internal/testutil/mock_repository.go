@@ -1849,16 +1849,23 @@ func (m *MockNoteRepository) FindManyByIDsWithUserOnPrimary(ids []string) ([]*mo
 	return m.FindManyByIDsWithUser(ids)
 }
 
+// mockIsPureRenote mirrors the repository's pure-renote condition.
+func mockIsPureRenote(n *model.Note) bool {
+	return n.RenoteID != nil && n.Text == nil && n.CW == nil && len(n.FileIDs) == 0 && !n.HasPoll && n.ReplyID == nil
+}
+
 func (m *MockNoteRepository) ListFeatured(channelID, untilID string, limit, offset int) ([]*model.Note, error) {
 	var result []*model.Note
 	for _, n := range m.Notes {
-		if string(n.Visibility) != "public" {
+		if string(n.Visibility) != "public" || n.ReplyID != nil || mockIsPureRenote(n) {
 			continue
 		}
 		if channelID != "" {
 			if n.ChannelID == nil || *n.ChannelID != channelID {
 				continue
 			}
+		} else if n.ChannelID != nil || n.UserHost != nil {
+			continue
 		}
 		if untilID != "" && n.ID >= untilID {
 			continue
