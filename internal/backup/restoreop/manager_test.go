@@ -166,6 +166,65 @@ func TestRestore_ResumeFailurePutsThePreviousBack(t *testing.T) {
 		"the processes are let back on the previous database: %+v", st)
 }
 
+// TestRestore_RevertLeavesResumingWhenTheProcessesDoNotComeBack checks that
+// after putting the previous database back, an operation whose processes do
+// not serve again within ResumeTimeout says so in the journal, ends, and
+// leaves the maintenance at resuming for them to keep retrying.
+func TestRestore_RevertLeavesResumingWhenTheProcessesDoNotComeBack(t *testing.T) {
+	// 期限は時計を進めて切らせる。戻す処理は held を待ち直すので、時計を進めても
+	// その待ちが切れないよう HeldTimeout を十分に長くする。再開の待ち (A3 と戻した
+	// 後) は既定の 1 時間で、時計を進めたときだけ切れる。HeldTimeout は、下の待ちが
+	// 10 秒で進める時計 (5ms ごとに 1 時間、最大約 2000 時間) より桁違いに長くする。
+	// 短いと、戻した後の待ちが期限を ResumeTimeout でなく HeldTimeout で数える取り違えも
+	// 10 秒のうちに切れて、見逃す (#3369)。
+	e := newEnv(t, func(o *Options) { o.HeldTimeout = 100000 * time.Hour })
+	p := e.process("p1")
+	p.setFailBack(true)
+	rec, _ := e.prepare()
+	require.NoError(t, e.m.Confirm(context.Background(), rec.OpID))
+	e.waitStep(rec.OpID, StepResuming)
+	// プロセスが再開を見て resume_failed を報告し直してから時計を進める。前の報告は
+	// drained なので、それまでに判定役がメンテナンスを外すことは無い。
+	e.waitReport("p1", maintmode.ProcResumeFailed)
+	e.waitStepPassingTime(rec.OpID, StepReverting, StepReverted)
+	e.waitStep(rec.OpID, StepReverted)
+	assert.Equal(t, "current", e.db.content(testDB))
+	// 戻した DB でも、プロセスは戻れないまま resume_failed を報告する。
+	e.waitReport("p1", maintmode.ProcResumeFailed)
+
+	const line = "the processes have not served again within"
+	require.Eventually(t, func() bool {
+		// 戻した後の再開の待ち (finishRevert) を時計で切らせる。
+		e.clock.Add(int64(time.Hour))
+		j, err := e.store.Journal(context.Background(), rec.OpID)
+		if err != nil {
+			return false
+		}
+		for _, x := range j {
+			if strings.Contains(x.Message, line) {
+				return true
+			}
+		}
+		return false
+	}, 10*time.Second, 5*time.Millisecond, "the timeout of the wait after the revert is not in the journal")
+	require.Eventually(t, func() bool { return !e.slot.isHeld() }, 10*time.Second, 5*time.Millisecond, "the operation did not end")
+
+	text := e.fullJournalText(rec.OpID)
+	const revertedLine = "reverted to the previous database"
+	require.Equal(t, 1, strings.Count(text, line), "journal:\n%s", text)
+	require.Equal(t, 1, strings.Count(text, revertedLine), "journal:\n%s", text)
+	assert.Less(t, strings.Index(text, revertedLine), strings.Index(text, line),
+		"the timeout is written after the revert: journal:\n%s", text)
+	got, err := e.store.Get(context.Background(), rec.OpID)
+	require.NoError(t, err)
+	assert.Equal(t, StepReverted, got.Step)
+	st := e.maintenance()
+	require.NotNil(t, st, "the maintenance stays for the processes to come back")
+	assert.Equal(t, rec.OpID, st.OpID)
+	assert.Equal(t, maintmode.PhaseResuming, st.Phase)
+	assert.Empty(t, e.notes)
+}
+
 // TestRestore_UnknownSwitchStopsInMaintenance (R5).
 func TestRestore_UnknownSwitchStopsInMaintenance(t *testing.T) {
 	e := newEnv(t)
