@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/elythia-network/elythia/internal/maintmode"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 // hookMaint wraps the maintenance store to fail chosen calls.
@@ -137,7 +138,7 @@ func TestRestore_PrepareStoreErrors(t *testing.T) {
 	require.NoError(t, e.rdb.Del(ctx, e.store.CurrentKey()).Err())
 
 	// Redis が落ちていれば、記録を作れずに断る (何も作らない)。
-	e.mr.Close()
+	testutil.MiniredisDown(e.mr)
 	_, _, err = e.m.Prepare(ctx, req)
 	assert.Error(t, err)
 	assert.False(t, e.slot.isHeld())
@@ -351,7 +352,7 @@ func TestStatus(t *testing.T) {
 	st, err = e.m.Status(ctx, rec)
 	require.NoError(t, err)
 	assert.Nil(t, st.Maintenance, "another maintenance is not shown as this one's")
-	e.mr.Close()
+	testutil.MiniredisDown(e.mr)
 	_, err = e.m.Status(ctx, rec)
 	assert.Error(t, err)
 }
@@ -389,7 +390,7 @@ func TestRestore_RecordFailureIsLogged(t *testing.T) {
 	// 記録の無い opId へ書いても、止まらずにログだけを残す。
 	e.m.record(context.Background(), "restore-none", "", StepDone)
 	e.m.journal(context.Background(), "restore-none", StepDone, "x")
-	e.mr.Close()
+	testutil.MiniredisDown(e.mr)
 	e.m.journal(context.Background(), "restore-none", StepDone, "redis is down")
 	assert.Error(t, e.store.appendJournal(context.Background(), "restore-none", JournalEntry{}))
 	_, err := e.store.Get(context.Background(), "restore-none")

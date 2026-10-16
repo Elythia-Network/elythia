@@ -13,6 +13,7 @@ import (
 	apiurl "github.com/elythia-network/elythia/internal/api/url"
 	"github.com/elythia-network/elythia/internal/core/urlpreview"
 	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -65,9 +66,8 @@ func TestPreview_Disabled_Returns403(t *testing.T) {
 
 // #2106 N18: enabled fetcher が取得失敗すると 422 + URL_PREVIEW_FAILED を返す。
 func TestPreview_FetchFailed_Returns422(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	failURL := srv.URL
-	srv.Close() // close して connection refused にし fetch を失敗させる
+	// 誰も応えないポートへ向け、connection refused で fetch を失敗させる。
+	failURL := "http://" + testutil.DeadAddr(t)
 
 	f := urlpreview.NewFetcher(urlpreview.Config{
 		Enabled: true, TimeoutMs: 2000, MaxContentLength: 1 << 20,

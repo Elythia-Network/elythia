@@ -11,6 +11,8 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 type testClock struct{ now time.Time }
@@ -329,7 +331,9 @@ func TestBreaker_NilAndEmptyHostAreHarmless(t *testing.T) {
 // Redis が読めなければ通す (観測の仕組みが全配送を止める側に倒れない)。
 func TestBreaker_RedisDownAllows(t *testing.T) {
 	b, _, mr := newTestBreaker(t)
-	mr.Close()
+	// 先に開いておく。Redisが読めれば止める状態なので、通すのは読めないときだけ。
+	require.True(t, failN(b, "x.example", BreakerThreshold))
+	testutil.MiniredisDown(mr)
 	d, _, state := check(b, context.Background(), "x.example")
 	assert.Equal(t, BreakerAllow, d)
 	assert.False(t, state)
@@ -403,7 +407,7 @@ func TestBreaker_ListDropsStaleIndexEntries(t *testing.T) {
 func TestBreaker_ListReportsRedisErrors(t *testing.T) {
 	b, _, mr := newTestBreaker(t)
 	failN(b, "down.example", BreakerThreshold)
-	mr.Close()
+	testutil.MiniredisDown(mr)
 	_, err := b.List(context.Background())
 	assert.Error(t, err)
 	// 閉じられなかったことも隠さない (管理画面が「再開した」と見せないように)。

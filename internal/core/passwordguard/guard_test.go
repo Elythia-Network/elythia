@@ -12,6 +12,8 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 func newTestGuard(t *testing.T) (*RedisGuard, *miniredis.Miniredis, *time.Time) {
@@ -112,7 +114,7 @@ func TestRedisGuard_ConcurrentReservationsStopAtMax(t *testing.T) {
 
 func TestRedisGuard_StoreErrorIsReturned(t *testing.T) {
 	g, mr, _ := newTestGuard(t)
-	mr.Close()
+	testutil.MiniredisDown(mr)
 	_, err := g.Begin(context.Background(), "u1", "192.0.2.1")
 	require.Error(t, err)
 	assert.False(t, errors.Is(err, ErrTooManyFailures))

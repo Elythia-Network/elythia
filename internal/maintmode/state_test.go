@@ -12,12 +12,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/elythia-network/elythia/internal/pgactivity"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 func newTestStore(t *testing.T) (*Store, *miniredis.Miniredis) {
 	t.Helper()
 	mr := miniredis.RunT(t)
-	// 閉じた miniredis を使うエラーのテストで、再試行の待ちに時間を取られないようにする。
+	// 落とした miniredis (testutil.MiniredisDown) を使うエラーのテストで、再試行の待ちに時間を取られないようにする。
 	c := redis.NewClient(&redis.Options{Addr: mr.Addr(), MaxRetries: -1})
 	t.Cleanup(func() { _ = c.Close() })
 	return NewStore(c, nil, "pfx:"), mr
@@ -168,7 +169,7 @@ func TestStore_SubscribeDeliversHints(t *testing.T) {
 
 func TestStore_ErrorsSurface(t *testing.T) {
 	s, mr := newTestStore(t)
-	mr.Close()
+	testutil.MiniredisDown(mr)
 	ctx := context.Background()
 	_, err := s.Get(ctx)
 	assert.Error(t, err)
@@ -312,7 +313,7 @@ func TestStore_JudgeLock(t *testing.T) {
 
 func TestStore_JudgeErrorsSurface(t *testing.T) {
 	s, mr := newTestStore(t)
-	mr.Close()
+	testutil.MiniredisDown(mr)
 	ctx := context.Background()
 	_, err := s.acquireJudge(ctx, "a", time.Second)
 	assert.Error(t, err)

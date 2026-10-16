@@ -14,6 +14,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/maintmode"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 // TestRun_RefusesDuringMaintenance checks that migrate does not touch the
@@ -74,7 +75,8 @@ func TestReadMaintenance(t *testing.T) {
 	require.NotNil(t, st)
 	assert.Equal(t, "op-9", st.OpID)
 
-	mr.Close()
+	dead := config.RedisOptions{Host: "127.0.0.1", Port: testutil.DeadPort(t), Prefix: "pfx"}
+	cfg = &config.Config{Redis: dead, RedisForPubsub: dead, RedisForJobQueue: dead, RedisForTimelines: dead, RedisForReactions: dead}
 	_, err = readMaintenance(cfg)
 	assert.Error(t, err)
 }

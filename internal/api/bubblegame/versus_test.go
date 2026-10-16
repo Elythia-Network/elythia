@@ -17,6 +17,7 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 type fakeUsers struct {
@@ -249,7 +250,7 @@ func TestVersusPack_MissingUser(t *testing.T) {
 func TestVersus_RedisDown(t *testing.T) {
 	e := newVersus(t)
 	mid := e.invite(t)
-	e.mr.Close()
+	testutil.MiniredisDown(e.mr)
 	for name, h := range map[string]func() int{
 		"show":        func() int { return post(e.h.Show, matchBody(mid), vAlice).Code },
 		"invitations": func() int { return post(e.h.Invitations, `{}`, vBob).Code },

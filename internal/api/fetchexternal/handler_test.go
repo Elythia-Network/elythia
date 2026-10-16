@@ -12,6 +12,8 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 func hashOf(data string) string {
@@ -82,10 +84,8 @@ func TestFetch_Non2xxIsInvalidSchema(t *testing.T) {
 }
 
 func TestFetch_ConnectionFailureIsInvalidSchema(t *testing.T) {
-	// 到達不能なサーバ (close 済) への fetch 失敗も invalidSchema に落ちる。
-	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	url := srv.URL
-	srv.Close()
+	// 到達不能なサーバへの fetch 失敗も invalidSchema に落ちる。
+	url := "http://" + testutil.DeadAddr(t)
 	h := New(http.DefaultClient, "mk-test")
 	rec := do(t, h, `{"url":"`+url+`","hash":"x"}`)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)

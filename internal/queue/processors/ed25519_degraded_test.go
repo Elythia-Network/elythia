@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/elythia-network/elythia/internal/queue/processors"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 // 疎通の診断 (#3055) が読む格下げフラグは、配送側が立てるものと同じキーを見る。
@@ -39,7 +40,7 @@ func TestDeliverProcessor_Ed25519Degraded(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, d)
 
-	mr.Close()
+	testutil.MiniredisDown(mr)
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	_, err = p.Ed25519Degraded(ctx, "remote.example")

@@ -16,6 +16,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/backup"
 	"github.com/elythia-network/elythia/internal/safehttp"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 // hookServer records the bodies posted to it.
@@ -142,9 +143,7 @@ func TestWebhookDoesNotFollowRedirects(t *testing.T) {
 }
 
 func TestWebhookErrorDoesNotLeakURL(t *testing.T) {
-	h := newHookServer(t)
-	url := h.URL + "/api/webhooks/123/secret-token"
-	h.Close()
+	url := "http://" + testutil.DeadAddr(t) + "/api/webhooks/123/secret-token"
 	err := testWebhook(t, url, FormatDiscord).Notify(context.Background(), mismatchEvent)
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "secret-token")

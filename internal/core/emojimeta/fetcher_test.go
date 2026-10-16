@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 func TestSupportsHost(t *testing.T) {
@@ -191,9 +192,7 @@ func TestFetch_BrokenJSON(t *testing.T) {
 
 // 接続できない相手はエラーになる (ErrNotFound に丸めない)。
 func TestFetch_TransportError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	url := srv.URL
-	srv.Close() // 閉じてから叩く
+	url := "http://" + testutil.DeadAddr(t)
 
 	f := NewFetcherWithClient(&http.Client{})
 	_, err := f.fetchFrom(context.Background(), url+"/api/emoji?name=x", "x")

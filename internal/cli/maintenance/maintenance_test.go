@@ -375,7 +375,7 @@ func TestCommands_Failures(t *testing.T) {
 		})
 		t.Run(name+" redis down after connecting", func(t *testing.T) {
 			h := newHarness(t)
-			h.mr.Close()
+			testutil.MiniredisDown(h.mr)
 			assert.Equal(t, 1, run(h.e, nil))
 		})
 		t.Run(name+" flags", func(t *testing.T) {
@@ -395,7 +395,7 @@ func TestWaits_RedisDownWhileWaiting(t *testing.T) {
 	h.e.now = func() time.Time {
 		calls++
 		if calls == 2 {
-			h.mr.Close()
+			testutil.MiniredisDown(h.mr)
 		}
 		return time.Now()
 	}
@@ -409,7 +409,7 @@ func TestWaits_RedisDownWhileWaiting(t *testing.T) {
 	h2.e.now = func() time.Time {
 		calls++
 		if calls == 2 {
-			h2.mr.Close()
+			testutil.MiniredisDown(h2.mr)
 		}
 		return time.Now()
 	}
@@ -440,7 +440,8 @@ func TestDefaultEnv(t *testing.T) {
 	require.NoError(t, err)
 	defer closeFn()
 	assert.Equal(t, "pfx:elythia:maintenance", store.StateKey())
-	mr.Close()
+	dead := config.RedisOptions{Host: "127.0.0.1", Port: testutil.DeadPort(t), Prefix: "pfx"}
+	cfg = &config.Config{Redis: dead, RedisForPubsub: dead, RedisForJobQueue: dead, RedisForTimelines: dead, RedisForReactions: dead}
 	_, _, err = e.openStore(cfg)
 	assert.Error(t, err)
 }

@@ -7,6 +7,8 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 func TestNewRedisPendingGuard_NilClient(t *testing.T) {
@@ -72,7 +74,7 @@ func TestRedisPendingGuard_StoreErrors(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close() })
 	g := NewRedisPendingGuard(client)
 	ctx := context.Background()
-	mr.Close()
+	testutil.MiniredisDown(mr)
 
 	assert.Error(t, g.Start(ctx, "u1", "secret"))
 	err := g.Attempt(ctx, "u1", "secret")
