@@ -56,6 +56,27 @@ type Run struct {
 	// not start, so the load was lower than requested.
 	Dropped   int64
 	Resources map[string]ResourceUsage
+	// Delivery is an optional receiver fixture summary, separate from k6
+	// endpoint metrics and resource samples.
+	Delivery *DeliveryStats
+}
+
+// DeliveryStats is the JSON emitted by tests/bench/queue/deliveryreceiver.
+// Counts are descriptive; benchcompare does not apply performance thresholds.
+type DeliveryStats struct {
+	Finalized          bool   `json:"finalized"`
+	Expected           uint64 `json:"expected"`
+	Attempts           uint64 `json:"attempts"`
+	Verified           uint64 `json:"verified"`
+	Pending            uint64 `json:"pending"`
+	Valid              uint64 `json:"valid"`
+	Unique             uint64 `json:"unique"`
+	Duplicates         uint64 `json:"duplicates"`
+	Invalid            uint64 `json:"invalid"`
+	ContentMismatch    uint64 `json:"contentMismatch"`
+	Unexpected         uint64 `json:"unexpected"`
+	UnexpectedAttempts uint64 `json:"unexpectedAttempts"`
+	Missing            uint64 `json:"missing"`
 }
 
 // EndpointResult is what one run measured for one endpoint.
@@ -174,7 +195,28 @@ func loadRun(dir string) (*Run, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resources.csv: %w", err)
 	}
+	run.Delivery, err = readDeliveryStats(filepath.Join(dir, "delivery.json"))
+	if err != nil {
+		return nil, fmt.Errorf("delivery.json: %w", err)
+	}
 	return run, nil
+}
+
+// readDeliveryStats reports file and JSON decoding errors. Semantic issues are
+// retained for deliveryStatus so the comparison can report their raw counts.
+func readDeliveryStats(path string) (*DeliveryStats, error) {
+	b, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var s DeliveryStats
+	if err := json.Unmarshal(b, &s); err != nil {
+		return nil, err
+	}
+	return &s, nil
 }
 
 func readJSON(path string, v any) error {

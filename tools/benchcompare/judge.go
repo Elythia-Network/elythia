@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 )
 
 // Verdict is the result of comparing one measure between base and head.
@@ -32,7 +33,30 @@ type Comparison struct {
 	Problems  []string          `json:"problems,omitempty"`
 	Endpoints []EndpointCompare `json:"endpoints"`
 	Resources []ResourceCompare `json:"resources"`
+	Delivery  []DeliveryRound   `json:"delivery,omitempty"`
 }
+
+// DeliveryRound carries receiver counts and a data-quality status through to
+// JSON and Markdown output. A delivery problem makes the performance
+// comparison invalid; the raw counts remain available for diagnosis.
+type DeliveryRound struct {
+	Side    Side           `json:"side"`
+	Round   int            `json:"round"`
+	Status  DeliveryStatus `json:"status"`
+	Reasons []string       `json:"reasons,omitempty"`
+	DeliveryStats
+}
+
+// DeliveryStatus describes whether a normal delivery run is suitable for a
+// performance comparison. It is a correctness status, not a performance
+// threshold.
+type DeliveryStatus string
+
+const (
+	DeliveryStatusValid      DeliveryStatus = "valid"
+	DeliveryStatusIncomplete DeliveryStatus = "incomplete"
+	DeliveryStatusInvalid    DeliveryStatus = "invalid"
+)
 
 // EndpointCompare compares one endpoint.
 type EndpointCompare struct {
@@ -98,6 +122,7 @@ const minEffectPercent = 5.0
 // compare judges a run set.
 func compare(rs *RunSet) *Comparison {
 	c := &Comparison{Base: rs.Base, Head: rs.Head, Scenario: rs.Scenario, Rounds: rs.Rounds, Runner: rs.Runner, Valid: true}
+	validateDeliveryRuns(c, rs.Runs)
 	bySide := map[Side][]*Run{}
 	for _, r := range rs.Runs {
 		if !r.Meta.Completed {
@@ -127,6 +152,93 @@ func compare(rs *RunSet) *Comparison {
 	c.Endpoints = compareEndpoints(base, head)
 	c.Resources = compareResources(base, head)
 	return c
+}
+
+func validateDeliveryRuns(c *Comparison, runs []*Run) {
+	hasDelivery := false
+	for _, r := range runs {
+		if r.Delivery != nil {
+			hasDelivery = true
+			break
+		}
+	}
+	if !hasDelivery {
+		return
+	}
+
+	for _, r := range runs {
+		if r.Delivery == nil {
+			c.problem("%s round %d delivery stats are missing", r.Meta.Side, r.Meta.Round)
+			continue
+		}
+		status, reasons := deliveryStatus(*r.Delivery)
+		c.Delivery = append(c.Delivery, DeliveryRound{
+			Side: r.Meta.Side, Round: r.Meta.Round, Status: status,
+			Reasons: reasons, DeliveryStats: *r.Delivery,
+		})
+		if status != DeliveryStatusValid {
+			c.problem("%s round %d delivery %s: %s", r.Meta.Side, r.Meta.Round, status, strings.Join(reasons, ", "))
+		}
+	}
+}
+
+func deliveryStatus(s DeliveryStats) (DeliveryStatus, []string) {
+	var reasons []string
+	if !s.Finalized {
+		reasons = append(reasons, "manifest is not finalized")
+	}
+	if s.Pending > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d arrivals are pending", s.Pending))
+	}
+	if s.Expected == 0 {
+		reasons = append(reasons, "expected delivery count is zero")
+	}
+	if s.Missing > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d expected deliveries are missing", s.Missing))
+	}
+	if s.Invalid > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d invalid deliveries", s.Invalid))
+	}
+	if s.ContentMismatch > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d content mismatches", s.ContentMismatch))
+	}
+	if s.Unexpected > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d unexpected delivery pairs", s.Unexpected))
+	}
+	countReasons := deliveryCountConsistencyReasons(s)
+	reasons = append(reasons, countReasons...)
+	if len(reasons) == 0 {
+		return DeliveryStatusValid, nil
+	}
+	if s.Expected == 0 || s.Invalid > 0 || s.ContentMismatch > 0 || s.Unexpected > 0 || len(countReasons) > 0 {
+		return DeliveryStatusInvalid, reasons
+	}
+	return DeliveryStatusIncomplete, reasons
+}
+
+func deliveryCountConsistencyReasons(s DeliveryStats) []string {
+	var reasons []string
+	if s.Valid > s.Attempts || s.Invalid > s.Attempts-s.Valid || s.UnexpectedAttempts != s.Attempts-s.Valid-s.Invalid {
+		reasons = append(reasons, fmt.Sprintf("attempts %d != valid %d + invalid %d + unexpected attempts %d", s.Attempts, s.Valid, s.Invalid, s.UnexpectedAttempts))
+	}
+	if s.ContentMismatch > s.Invalid {
+		reasons = append(reasons, fmt.Sprintf("content mismatch %d exceeds invalid %d", s.ContentMismatch, s.Invalid))
+	}
+	if s.Valid > s.Verified || s.ContentMismatch > s.Verified-s.Valid || s.UnexpectedAttempts != s.Verified-s.Valid-s.ContentMismatch {
+		reasons = append(reasons, fmt.Sprintf("verified %d != valid %d + content mismatch %d + unexpected attempts %d", s.Verified, s.Valid, s.ContentMismatch, s.UnexpectedAttempts))
+	}
+	if s.Duplicates > s.Valid || s.Unique != s.Valid-s.Duplicates {
+		reasons = append(reasons, fmt.Sprintf("valid %d != unique %d + duplicates %d", s.Valid, s.Unique, s.Duplicates))
+	}
+	if s.Unique > s.Expected {
+		reasons = append(reasons, fmt.Sprintf("unique %d exceeds expected %d", s.Unique, s.Expected))
+	} else if s.Missing != s.Expected-s.Unique {
+		reasons = append(reasons, fmt.Sprintf("missing %d != expected %d - unique %d", s.Missing, s.Expected, s.Unique))
+	}
+	if s.Unexpected > s.UnexpectedAttempts {
+		reasons = append(reasons, fmt.Sprintf("unexpected pairs %d exceeds unexpected attempts %d", s.Unexpected, s.UnexpectedAttempts))
+	}
+	return reasons
 }
 
 // checkRounds requires every side to have run each round 1..rs.Rounds

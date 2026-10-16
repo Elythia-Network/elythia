@@ -23,6 +23,7 @@ from typing import Any
 
 import httpx
 
+from delivery_manifest import build_deliveries, created_note_id
 from queue_probe import DriverKind, make_probe
 
 OUTBOUND_NOTES = int(os.environ.get("OUTBOUND_NOTES", "100"))
@@ -46,8 +47,82 @@ def blackhole_hits() -> int:
     return int(r.json()["hits"])
 
 
+def receiver_stats(receiver_url: str) -> dict[str, Any]:
+    r = httpx.get(f"{receiver_url}/stats", timeout=5)
+    r.raise_for_status()
+    return r.json()
+
+
+def wait_receiver(receiver_url: str, timeout: float = 30.0) -> None:
+    deadline = time.monotonic() + timeout
+    last_error: Exception | None = None
+    while time.monotonic() < deadline:
+        try:
+            health = httpx.get(f"{receiver_url}/healthz", timeout=3)
+            health.raise_for_status()
+            return
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            time.sleep(0.25)
+    raise TimeoutError(f"delivery receiver {receiver_url} not ready: {last_error}")
+
+
+def prepare_receiver(info: dict[str, Any]) -> None:
+    """Register the synthetic sender's existing public key with its receiver."""
+    receiver_url = info["delivery_receiver_url"]
+    wait_receiver(receiver_url)
+    actor = httpx.get(
+        f"{info['url']}/users/{info['user_id']}",
+        headers={"Accept": "application/activity+json"},
+        timeout=10,
+        verify=False,
+    )
+    actor.raise_for_status()
+    public_key = actor.json().get("publicKey")
+    if not isinstance(public_key, dict):
+        raise ValueError("synthetic actor document has no publicKey")
+    key_id = public_key.get("id")
+    public_pem = public_key.get("publicKeyPem")
+    if not isinstance(key_id, str) or not isinstance(public_pem, str):
+        raise ValueError("synthetic actor document has an incomplete publicKey")
+    configured = httpx.post(
+        f"{receiver_url}/keys",
+        json={"keys": {key_id: public_pem}},
+        timeout=10,
+    )
+    configured.raise_for_status()
+
+
+def finalize_delivery(info: dict[str, Any], note_ids: list[str]) -> tuple[dict[str, Any], str | None]:
+    """Fetch expected activities after timing and reconcile the receiver."""
+    receiver_url = info["delivery_receiver_url"]
+    try:
+        if len(note_ids) != OUTBOUND_NOTES or any(not note_id for note_id in note_ids):
+            raise ValueError(f"expected {OUTBOUND_NOTES} created note IDs, got {len(note_ids)}")
+        deliveries: list[dict[str, str]] = []
+        for note_id in note_ids:
+            response = httpx.get(
+                f"{info['url']}/notes/{note_id}/activity",
+                headers={"Accept": "application/activity+json"},
+                timeout=10,
+                verify=False,
+            )
+            response.raise_for_status()
+            deliveries.extend(build_deliveries(response.content, info["delivery_inboxes"]))
+        expected = httpx.post(
+            f"{receiver_url}/expect",
+            json={"deliveries": deliveries},
+            timeout=30,
+        )
+        expected.raise_for_status()
+        return receiver_stats(receiver_url), None
+    except Exception as exc:  # noqa: BLE001
+        return receiver_stats(receiver_url), f"{type(exc).__name__}: {exc}"
+
+
 def post_notes_async(url: str, token: str, count: int, done: threading.Event,
-                     elapsed: dict[str, float], post_count: dict[str, int]) -> None:
+                     elapsed: dict[str, float], post_count: dict[str, int],
+                     post_responses: list[bytes] | None = None) -> None:
     with httpx.Client(base_url=url, timeout=30, verify=False) as http:
         ok = 0
         start = time.monotonic()
@@ -59,6 +134,8 @@ def post_notes_async(url: str, token: str, count: int, done: threading.Event,
                 )
                 if r.status_code in (200, 204):
                     ok += 1
+                    if post_responses is not None:
+                        post_responses.append(r.content)
             except Exception:  # noqa: BLE001
                 pass
         elapsed["v"] = time.monotonic() - start
@@ -73,9 +150,33 @@ def run_stack(stack: str, info: dict[str, Any]) -> dict[str, Any]:
 
     follower_count = info["follower_count"]
     expected_jobs = OUTBOUND_NOTES * follower_count
+    delivery_enabled = bool(info.get("delivery_enabled"))
+    post_responses: list[bytes] | None = [] if delivery_enabled else None
 
-    reset_blackhole()
-    baseline_hits = blackhole_hits()  # 通常 0 だが念の為
+    if not delivery_enabled:
+        reset_blackhole()
+    if delivery_enabled:
+        try:
+            prepare_receiver(info)
+            httpx.post(f"{info['delivery_receiver_url']}/reset", timeout=5).raise_for_status()
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "stack": stack,
+                "url": info["url"],
+                "follower_count": follower_count,
+                "notes_posted": 0,
+                "expected_jobs": expected_jobs,
+                "delivered_hits": 0,
+                "post_elapsed_s": 0.0,
+                "drain_seconds": 0.0,
+                "timed_out": True,
+                "throughput_jobs_per_sec": 0.0,
+                "peak_queue_depth": 0,
+                "samples": [],
+                "delivery": {"finalized": False},
+                "deliveryPreparationError": f"{type(exc).__name__}: {exc}",
+            }
+    baseline_hits = 0 if delivery_enabled else blackhole_hits()
 
     samples: list[dict[str, float]] = []
     post_done = threading.Event()
@@ -85,7 +186,7 @@ def run_stack(stack: str, info: dict[str, Any]) -> dict[str, Any]:
     poller_start = time.monotonic()
     poller = threading.Thread(
         target=post_notes_async,
-        args=(info["url"], info["token"], OUTBOUND_NOTES, post_done, elapsed, post_count),
+        args=(info["url"], info["token"], OUTBOUND_NOTES, post_done, elapsed, post_count, post_responses),
     )
     poller.start()
 
@@ -93,7 +194,11 @@ def run_stack(stack: str, info: dict[str, Any]) -> dict[str, Any]:
     drained_at: float | None = None
     while time.monotonic() < deadline:
         depth = probe.depth()
-        hits = blackhole_hits() - baseline_hits
+        hits = (
+            int(receiver_stats(info["delivery_receiver_url"]).get("verified", 0))
+            if delivery_enabled
+            else blackhole_hits() - baseline_hits
+        )
         t = time.monotonic() - poller_start
         samples.append({"t": t, "depth": depth, "hits": hits})
         if post_done.is_set() and depth == 0 and hits >= expected_jobs:
@@ -102,7 +207,18 @@ def run_stack(stack: str, info: dict[str, Any]) -> dict[str, Any]:
         time.sleep(POLL_INTERVAL_S)
     poller.join()
 
-    final_hits = blackhole_hits() - baseline_hits
+    note_ids: list[str] = []
+    if post_responses is not None:
+        for body in post_responses:
+            note_id = created_note_id(body)
+            if note_id:
+                note_ids.append(note_id)
+
+    final_hits = (
+        int(receiver_stats(info["delivery_receiver_url"]).get("verified", 0))
+        if delivery_enabled
+        else blackhole_hits() - baseline_hits
+    )
     drain_time = drained_at if drained_at is not None else (time.monotonic() - poller_start)
     timed_out = drained_at is None
     throughput = final_hits / drain_time if drain_time > 0 else 0.0
@@ -114,7 +230,7 @@ def run_stack(stack: str, info: dict[str, Any]) -> dict[str, Any]:
         f"{throughput:.0f} jobs/s, peak depth={peak}",
         flush=True,
     )
-    return {
+    result = {
         "stack": stack,
         "url": info["url"],
         "follower_count": follower_count,
@@ -128,6 +244,12 @@ def run_stack(stack: str, info: dict[str, Any]) -> dict[str, Any]:
         "peak_queue_depth": peak,
         "samples": samples[-200:],
     }
+    if delivery_enabled:
+        delivery, preparation_error = finalize_delivery(info, note_ids)
+        result["delivery"] = delivery
+        if preparation_error:
+            result["deliveryPreparationError"] = preparation_error
+    return result
 
 
 def main() -> int:
@@ -135,14 +257,16 @@ def main() -> int:
         seed = json.load(f)
 
     results = {}
+    delivery_preparation_failed = False
     for stack, info in seed["stacks"].items():
         results[stack] = run_stack(stack, info)
+        delivery_preparation_failed |= bool(results[stack].get("deliveryPreparationError"))
 
     out_path = "/results/outbound.json"
     with open(out_path, "w") as f:
         json.dump(results, f, indent=2)
     print(f"outbound.json written to {out_path}", flush=True)
-    return 0
+    return 1 if delivery_preparation_failed else 0
 
 
 if __name__ == "__main__":

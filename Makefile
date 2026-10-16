@@ -995,6 +995,8 @@ bench-compare-down: ## bench-compare のスタックを撤去
 # Queue bench (#563): deliver/inbox throughput comparison between
 # Misskey TS (BullMQ) and mk-go (mkq). asynq driver は #2985 で削除。
 QUEUE_BENCH_COMPOSE=tests/bench/queue/compose.yml
+QUEUE_BENCH_DELIVERY ?= 0
+export QUEUE_BENCH_DELIVERY
 
 queue-bench-up: ## queue-bench スタックを起動
 	docker compose -f $(QUEUE_BENCH_COMPOSE) up -d --build
@@ -1067,6 +1069,14 @@ queue-bench-seed: ## queue-bench 用のデータを投入
 	echo "nginx fronts are not wired to their own apps:$$bad" >&2; \
 	echo "hint: nginx resolves its upstream once at startup (#2917)" >&2; exit 1
 
+queue-bench-delivery-seed: export QUEUE_BENCH_DELIVERY = 1
+queue-bench-delivery-seed: queue-bench-seed ## 隔離 receiver 用の synthetic 配送 fixture を seed
+
+queue-bench-delivery-outbound: export QUEUE_BENCH_DELIVERY = 1
+queue-bench-delivery-outbound: queue-bench-delivery-seed ## 署名検証と配送 tuple 照合を記録
+	QUEUE_BENCH_DELIVERY=1 docker compose -f $(QUEUE_BENCH_COMPOSE) --profile delivery up -d --build deliveryreceiver-mkq deliveryreceiver-ts
+	QUEUE_BENCH_DELIVERY=1 docker compose -f $(QUEUE_BENCH_COMPOSE) --profile outbound up --abort-on-container-exit --force-recreate --no-deps driver-outbound
+
 queue-bench-outbound: ## queue-bench の outbound 計測
 	# queue-bench-seed と同じ理由で `--force-recreate` (#1163)。
 	docker compose -f $(QUEUE_BENCH_COMPOSE) --profile outbound up --abort-on-container-exit --force-recreate --no-deps driver-outbound
@@ -1086,7 +1096,7 @@ queue-bench-down: ## queue-bench スタックを撤去
 	# compose ファイルに定義が無い container で、profile 付きは「定義はあるが
 	# 有効でない」だけなので対象外 (実測で確認)。profile を明示する必要がある。
 	docker compose -f $(QUEUE_BENCH_COMPOSE) \
-		--profile bench --profile outbound --profile inbound --profile report \
+		--profile bench --profile outbound --profile inbound --profile report --profile delivery \
 		down -v --remove-orphans
 
 queue-bench-logs: ## queue-bench のログを表示

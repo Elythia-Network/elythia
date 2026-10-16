@@ -202,6 +202,214 @@ func TestLoad_RealK6Output(t *testing.T) {
 	assert.Equal(t, int64(20), limited.RateLimited)
 }
 
+func TestLoadRun_DeliveryStats(t *testing.T) {
+	dir := writeResults(t, okRun(SideBase, 1, 10))
+	statsPath := filepath.Join(dir, "00-base-1", "delivery.json")
+	writeFile(t, statsPath, `{"finalized":true,"expected":4,"attempts":5,"verified":4,"pending":0,"valid":2,"unique":2,"duplicates":0,"invalid":2,"contentMismatch":1,"unexpected":1,"unexpectedAttempts":1,"missing":2}`)
+
+	run, err := loadRun(filepath.Join(dir, "00-base-1"))
+	require.NoError(t, err)
+	require.NotNil(t, run.Delivery)
+	assert.Equal(t, DeliveryStats{Finalized: true, Expected: 4, Attempts: 5, Verified: 4, Pending: 0, Valid: 2, Unique: 2, Duplicates: 0, Invalid: 2, ContentMismatch: 1, Unexpected: 1, UnexpectedAttempts: 1, Missing: 2}, *run.Delivery)
+}
+
+func TestLoadRun_RetainsInconsistentDeliveryStats(t *testing.T) {
+	dir := writeResults(t, okRun(SideBase, 1, 10))
+	statsPath := filepath.Join(dir, "00-base-1", "delivery.json")
+	writeFile(t, statsPath, `{"finalized":true,"expected":1,"attempts":1,"verified":1,"pending":0,"valid":1,"unique":1,"duplicates":1,"invalid":0,"contentMismatch":0,"unexpected":0,"unexpectedAttempts":0,"missing":0}`)
+
+	run, err := loadRun(filepath.Join(dir, "00-base-1"))
+	require.NoError(t, err)
+	require.NotNil(t, run.Delivery)
+	assert.Equal(t, uint64(1), run.Delivery.Attempts)
+	assert.Equal(t, uint64(1), run.Delivery.Duplicates)
+}
+
+func TestLoadRun_RetainsUnfinalizedDeliveryStats(t *testing.T) {
+	dir := writeResults(t, okRun(SideBase, 1, 10))
+	statsPath := filepath.Join(dir, "00-base-1", "delivery.json")
+	writeFile(t, statsPath, `{"finalized":false,"expected":0,"attempts":1,"verified":1,"pending":1,"valid":0,"unique":0,"duplicates":0,"invalid":0,"contentMismatch":0,"unexpected":0,"unexpectedAttempts":0,"missing":0}`)
+
+	run, err := loadRun(filepath.Join(dir, "00-base-1"))
+	require.NoError(t, err)
+	require.NotNil(t, run.Delivery)
+	assert.False(t, run.Delivery.Finalized)
+	assert.Equal(t, uint64(1), run.Delivery.Pending)
+}
+
+func TestLoadRun_RetainsEmptyDeliveryStats(t *testing.T) {
+	dir := writeResults(t, okRun(SideBase, 1, 10))
+	statsPath := filepath.Join(dir, "00-base-1", "delivery.json")
+	writeFile(t, statsPath, `{"finalized":true,"expected":0,"attempts":0,"verified":0,"pending":0,"valid":0,"unique":0,"duplicates":0,"invalid":0,"contentMismatch":0,"unexpected":0,"unexpectedAttempts":0,"missing":0}`)
+
+	run, err := loadRun(filepath.Join(dir, "00-base-1"))
+	require.NoError(t, err)
+	require.NotNil(t, run.Delivery)
+	assert.Equal(t, uint64(0), run.Delivery.Expected)
+}
+
+func TestRun_UnfinalizedDeliveryJSONProducesIncomparableReport(t *testing.T) {
+	dir := writeResults(t, pair(2, func(side Side, round int) fakeRun {
+		return okRun(side, round, 10)
+	})...)
+	validStats := `{"finalized":true,"expected":1,"attempts":1,"verified":1,"pending":0,"valid":1,"unique":1,"duplicates":0,"invalid":0,"contentMismatch":0,"unexpected":0,"unexpectedAttempts":0,"missing":0}`
+	for _, runDir := range []string{"00-base-1", "01-head-1", "02-base-2", "03-head-2"} {
+		writeFile(t, filepath.Join(dir, runDir, "delivery.json"), validStats)
+	}
+	// A setup failure can leave this syntactically valid, unfinalized record.
+	writeFile(t, filepath.Join(dir, "00-base-1", "delivery.json"), `{"finalized":false}`)
+	// Counter inconsistencies are also reported with the parsed raw values.
+	writeFile(t, filepath.Join(dir, "02-base-2", "delivery.json"), `{"finalized":true,"expected":1,"attempts":1,"verified":1,"pending":0,"valid":1,"unique":1,"duplicates":1,"invalid":0,"contentMismatch":0,"unexpected":0,"unexpectedAttempts":0,"missing":0}`)
+
+	outputDir := t.TempDir()
+	mdPath, jsonPath := filepath.Join(outputDir, "report.md"), filepath.Join(outputDir, "report.json")
+	var stdout, stderr bytes.Buffer
+	err := run([]string{"-dir", dir, "-md", mdPath, "-json", jsonPath}, &stdout, &stderr)
+	require.ErrorIs(t, err, errIncomparable, "valid JSON with unfinished stats is a reported comparison failure, not a fatal input error")
+
+	var got Comparison
+	reportJSON, readErr := os.ReadFile(jsonPath)
+	require.NoError(t, readErr)
+	require.NoError(t, json.Unmarshal(reportJSON, &got))
+	assert.False(t, got.Valid)
+	require.Len(t, got.Delivery, 4)
+	assert.Equal(t, DeliveryStatusInvalid, got.Delivery[0].Status)
+	assert.Equal(t, DeliveryStats{}, got.Delivery[0].DeliveryStats, "raw parsed counters remain visible")
+	assert.Contains(t, got.Delivery[0].Reasons, "manifest is not finalized")
+	assert.Contains(t, got.Delivery[0].Reasons, "expected delivery count is zero")
+	assert.Contains(t, got.Problems, "base round 1 delivery invalid: manifest is not finalized, expected delivery count is zero")
+	assert.Equal(t, DeliveryStatusInvalid, got.Delivery[2].Status)
+	assert.Equal(t, uint64(1), got.Delivery[2].DeliveryStats.Duplicates)
+	assert.Contains(t, got.Delivery[2].Reasons, "valid 1 != unique 1 + duplicates 1")
+
+	markdown, readErr := os.ReadFile(mdPath)
+	require.NoError(t, readErr)
+	assert.Contains(t, string(markdown), "| base | 1 | invalid | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |")
+	assert.Contains(t, string(markdown), "| base | 2 | invalid | 1 | 1 | 1 | 0 | 1 | 1 | 1 | 0 | 0 | 0 | 0 | 0 |")
+}
+
+func TestDeliveryStatusTreatsCountInconsistencyAsInvalid(t *testing.T) {
+	cases := []struct {
+		name   string
+		stats  DeliveryStats
+		reason string
+	}{
+		{"attempts", DeliveryStats{Finalized: true, Expected: 1, Attempts: 1, Missing: 1}, "attempts 1 != valid 0 + invalid 0 + unexpected attempts 0"},
+		{"content mismatch", DeliveryStats{Finalized: true, Expected: 1, Attempts: 2, Verified: 3, Invalid: 1, ContentMismatch: 2, UnexpectedAttempts: 1, Unexpected: 1, Missing: 1}, "content mismatch 2 exceeds invalid 1"},
+		{"verified", DeliveryStats{Finalized: true, Expected: 1, Attempts: 1, Verified: 0, Valid: 1, Unique: 1}, "verified 0 != valid 1 + content mismatch 0 + unexpected attempts 0"},
+		{"duplicates", DeliveryStats{Finalized: true, Expected: 1, Attempts: 1, Verified: 1, Valid: 1, Unique: 1, Duplicates: 1}, "valid 1 != unique 1 + duplicates 1"},
+		{"unique", DeliveryStats{Finalized: true, Expected: 1, Attempts: 2, Verified: 2, Valid: 2, Unique: 2}, "unique 2 exceeds expected 1"},
+		{"missing", DeliveryStats{Finalized: true, Expected: 2, Attempts: 1, Verified: 1, Valid: 1, Unique: 1}, "missing 0 != expected 2 - unique 1"},
+		{"unexpected pairs", DeliveryStats{Finalized: true, Expected: 1, Attempts: 1, Verified: 1, Valid: 1, Unique: 1, Unexpected: 1}, "unexpected pairs 1 exceeds unexpected attempts 0"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			status, reasons := deliveryStatus(tc.stats)
+			assert.Equal(t, DeliveryStatusInvalid, status)
+			assert.Contains(t, reasons, tc.reason)
+		})
+	}
+}
+
+func TestDeliveryStatusReportsUnfinalizedAndPendingStatsAsIncomplete(t *testing.T) {
+	cases := []struct {
+		name   string
+		stats  DeliveryStats
+		reason string
+	}{
+		{"unfinalized", DeliveryStats{Expected: 1, Missing: 1}, "manifest is not finalized"},
+		{"pending", DeliveryStats{Finalized: true, Expected: 1, Pending: 1, Missing: 1}, "1 arrivals are pending"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			status, reasons := deliveryStatus(tc.stats)
+			assert.Equal(t, DeliveryStatusIncomplete, status)
+			assert.Contains(t, reasons, tc.reason)
+		})
+	}
+}
+
+func TestLoadRun_UnexpectedDeliveryDoesNotCoverMissingExpectedTuple(t *testing.T) {
+	dir := writeResults(t, okRun(SideBase, 1, 10))
+	statsPath := filepath.Join(dir, "00-base-1", "delivery.json")
+	writeFile(t, statsPath, `{"finalized":true,"expected":1,"attempts":1,"verified":1,"pending":0,"valid":0,"unique":0,"duplicates":0,"invalid":0,"contentMismatch":0,"unexpected":1,"unexpectedAttempts":1,"missing":1}`)
+
+	run, err := loadRun(filepath.Join(dir, "00-base-1"))
+	require.NoError(t, err)
+	require.NotNil(t, run.Delivery)
+	assert.Equal(t, uint64(1), run.Delivery.Unexpected)
+	assert.Equal(t, uint64(1), run.Delivery.Missing)
+}
+
+func TestCompare_DeliveryIssuesInvalidatePerformanceComparisonAndPreserveCounts(t *testing.T) {
+	valid := &DeliveryStats{Finalized: true, Expected: 4, Attempts: 4, Verified: 4, Valid: 4, Unique: 4}
+	incomplete := &DeliveryStats{Finalized: true, Expected: 4, Attempts: 2, Verified: 2, Valid: 2, Unique: 2, Missing: 2}
+	invalid := &DeliveryStats{Finalized: true, Expected: 4, Attempts: 4, Verified: 4, Valid: 2, Unique: 2, Invalid: 1, ContentMismatch: 1, Unexpected: 1, UnexpectedAttempts: 1, Missing: 2}
+	runs := []*Run{
+		{Meta: RunMeta{Side: SideBase, Round: 1, Completed: true}, Delivery: incomplete},
+		{Meta: RunMeta{Side: SideBase, Round: 2, Completed: true}, Delivery: invalid},
+		{Meta: RunMeta{Side: SideHead, Round: 1, Completed: true}, Delivery: valid},
+		{Meta: RunMeta{Side: SideHead, Round: 2, Completed: true}, Delivery: valid},
+	}
+	c := compare(&RunSet{Rounds: 2, Runs: runs})
+
+	assert.False(t, c.Valid)
+	assert.Empty(t, c.Endpoints, "invalid delivery data must not receive a performance verdict")
+	assert.Empty(t, c.Resources, "invalid delivery data must not receive a performance verdict")
+	require.Len(t, c.Delivery, 4)
+	assert.Equal(t, DeliveryStatusIncomplete, c.Delivery[0].Status)
+	assert.Equal(t, DeliveryStatusInvalid, c.Delivery[1].Status)
+	assert.Equal(t, DeliveryStatusValid, c.Delivery[2].Status)
+	assert.Equal(t, uint64(2), c.Delivery[1].Missing)
+	assert.Equal(t, uint64(1), c.Delivery[1].ContentMismatch)
+	assert.Contains(t, c.Problems, "base round 1 delivery incomplete: 2 expected deliveries are missing")
+	assert.Contains(t, c.Problems, "base round 2 delivery invalid: 2 expected deliveries are missing, 1 invalid deliveries, 1 content mismatches, 1 unexpected delivery pairs")
+	payload, err := json.Marshal(c)
+	require.NoError(t, err)
+	assert.Contains(t, string(payload), `"status":"incomplete"`)
+	assert.Contains(t, string(payload), `"status":"invalid"`)
+	assert.Contains(t, string(payload), `"missing":2`)
+
+	var report bytes.Buffer
+	require.NoError(t, renderMarkdown(&report, c))
+	assert.Contains(t, report.String(), "## 比較不能")
+	assert.Contains(t, report.String(), "| base | 1 | incomplete | 4 | 2 | 2 |")
+	assert.Contains(t, report.String(), "| base | 2 | invalid | 4 | 4 | 4 |")
+	assert.Contains(t, report.String(), "content mismatch")
+}
+
+func TestCompare_MissingDeliveryStatsInvalidatePerformanceComparison(t *testing.T) {
+	valid := &DeliveryStats{Finalized: true, Expected: 1, Attempts: 1, Verified: 1, Valid: 1, Unique: 1}
+	runs := []*Run{
+		{Meta: RunMeta{Side: SideBase, Round: 1, Completed: true}, Delivery: valid},
+		{Meta: RunMeta{Side: SideBase, Round: 2, Completed: true}, Delivery: valid},
+		{Meta: RunMeta{Side: SideHead, Round: 1, Completed: true}, Delivery: valid},
+		{Meta: RunMeta{Side: SideHead, Round: 2, Completed: true}},
+	}
+	c := compare(&RunSet{Rounds: 2, Runs: runs})
+
+	assert.False(t, c.Valid)
+	assert.Empty(t, c.Endpoints)
+	assert.Contains(t, c.Problems, "head round 2 delivery stats are missing")
+	require.Len(t, c.Delivery, 3)
+}
+
+func TestCompare_ValidDeliveryWithDuplicateAttemptsRemainsComparable(t *testing.T) {
+	withDuplicate := &DeliveryStats{Finalized: true, Expected: 3, Attempts: 4, Verified: 4, Valid: 4, Unique: 3, Duplicates: 1}
+	runs := []*Run{
+		{Meta: RunMeta{Side: SideBase, Round: 1, Completed: true}, Delivery: withDuplicate},
+		{Meta: RunMeta{Side: SideBase, Round: 2, Completed: true}, Delivery: withDuplicate},
+		{Meta: RunMeta{Side: SideHead, Round: 1, Completed: true}, Delivery: withDuplicate},
+		{Meta: RunMeta{Side: SideHead, Round: 2, Completed: true}, Delivery: withDuplicate},
+	}
+	c := compare(&RunSet{Rounds: 2, Runs: runs})
+
+	assert.True(t, c.Valid, c.Problems)
+	require.Len(t, c.Delivery, 4)
+	assert.Equal(t, DeliveryStatusValid, c.Delivery[0].Status)
+	assert.Equal(t, uint64(1), c.Delivery[0].Duplicates)
+}
+
 // TestCompare_OverlappingRangesAreSame checks that rounds whose ranges overlap
 // are "same" even when the medians differ.
 func TestCompare_OverlappingRangesAreSame(t *testing.T) {
@@ -736,19 +944,20 @@ func TestLoad_Errors(t *testing.T) {
 	cases := map[string]struct {
 		file, content, want string
 	}{
-		"bad side":            {"meta.json", `{"side":"left","round":1,"completed":true}`, "side is"},
-		"round 0":             {"meta.json", `{"side":"base","round":0,"completed":true}`, "round is 0"},
-		"broken meta":         {"meta.json", `{`, "meta.json"},
-		"no endpoint metrics": {"k6-summary.json", `{"metrics":{"http_reqs":{"count":1}}}`, "no endpoint metrics"},
-		"non-numeric value":   {"k6-summary.json", `{"metrics":{"http_reqs{endpoint:ping}":{"count":"x"}}}`, "count"},
-		"bad dropped":         {"k6-summary.json", strings.Replace(onlyPingSummary, `"dropped_iterations":{"count":0}`, `"dropped_iterations":{"count":"x"}`, 1), "dropped_iterations"},
-		"bad header":          {"resources.csv", "t,container\n", "header is"},
-		"empty csv":           {"resources.csv", "", "header"},
-		"bad number":          {"resources.csv", "t_ms,container,cpu_usage_usec,memory_peak,heap_inuse\nx,app,0,0,\n", "line 2: t_ms"},
-		"short row":           {"resources.csv", "t_ms,container,cpu_usage_usec,memory_peak,heap_inuse\n0,app\n", "wrong number of fields"},
-		"one sample":          {"resources.csv", "t_ms,container,cpu_usage_usec,memory_peak,heap_inuse\n0,app,5,0,\n", "fewer than 2 samples"},
-		"same time":           {"resources.csv", "t_ms,container,cpu_usage_usec,memory_peak,heap_inuse\n0,app,5,0,\n0,app,6,0,\n", "fewer than 2 samples"},
-		"no samples":          {"resources.csv", "t_ms,container,cpu_usage_usec,memory_peak,heap_inuse\n", "no samples"},
+		"bad side":              {"meta.json", `{"side":"left","round":1,"completed":true}`, "side is"},
+		"round 0":               {"meta.json", `{"side":"base","round":0,"completed":true}`, "round is 0"},
+		"broken meta":           {"meta.json", `{`, "meta.json"},
+		"broken delivery stats": {"delivery.json", `{`, "delivery.json"},
+		"no endpoint metrics":   {"k6-summary.json", `{"metrics":{"http_reqs":{"count":1}}}`, "no endpoint metrics"},
+		"non-numeric value":     {"k6-summary.json", `{"metrics":{"http_reqs{endpoint:ping}":{"count":"x"}}}`, "count"},
+		"bad dropped":           {"k6-summary.json", strings.Replace(onlyPingSummary, `"dropped_iterations":{"count":0}`, `"dropped_iterations":{"count":"x"}`, 1), "dropped_iterations"},
+		"bad header":            {"resources.csv", "t,container\n", "header is"},
+		"empty csv":             {"resources.csv", "", "header"},
+		"bad number":            {"resources.csv", "t_ms,container,cpu_usage_usec,memory_peak,heap_inuse\nx,app,0,0,\n", "line 2: t_ms"},
+		"short row":             {"resources.csv", "t_ms,container,cpu_usage_usec,memory_peak,heap_inuse\n0,app\n", "wrong number of fields"},
+		"one sample":            {"resources.csv", "t_ms,container,cpu_usage_usec,memory_peak,heap_inuse\n0,app,5,0,\n", "fewer than 2 samples"},
+		"same time":             {"resources.csv", "t_ms,container,cpu_usage_usec,memory_peak,heap_inuse\n0,app,5,0,\n0,app,6,0,\n", "fewer than 2 samples"},
+		"no samples":            {"resources.csv", "t_ms,container,cpu_usage_usec,memory_peak,heap_inuse\n", "no samples"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

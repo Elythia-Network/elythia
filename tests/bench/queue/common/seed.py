@@ -1,9 +1,9 @@
 """Seed for queue-bench (#563).
 
-Creates per-stack local users + admin tokens, inserts dummy followers
-(pointing at blackhole) for outbound bench, inserts the faker actor as
-a remote user for inbound bench, and writes the bundle to /state/seed.json
-so subsequent driver runs can read tokens / actor metadata.
+Creates per-stack local users + admin tokens, inserts synthetic followers
+(pointing at blackhole by default or an isolated delivery receiver when
+enabled), inserts the faker actor as a remote user for inbound bench, and
+writes the bundle to /state/seed.json for subsequent driver runs.
 """
 from __future__ import annotations
 
@@ -36,6 +36,11 @@ FAKER_HOST = os.environ["FAKER_HOST"]
 FAKER_BASE_HTTPS = os.environ["FAKER_BASE_HTTPS"]
 FAKER_ACTOR_PATH = "/users/bench-sender"
 OUTBOUND_FOLLOWERS = int(os.environ.get("OUTBOUND_FOLLOWERS", "100"))
+DELIVERY_MODE = os.environ.get("QUEUE_BENCH_DELIVERY", "0") == "1"
+DELIVERY_RECEIVERS = {
+    "mkq": "http://deliveryreceiver-mkq",
+    "ts": "http://deliveryreceiver-ts",
+}
 DB_USER = "misskey"
 DB_PASS = "testpass"
 DB_NAME = "misskey"
@@ -103,10 +108,11 @@ def enable_federation(stack: str, db_host: str) -> None:
             )
 
 
-def insert_blackhole_followers(stack: str, db_host: str, local_user_id: str, count: int) -> list[dict[str, str]]:
-    """Insert N remote follower users that point at the blackhole, then
-    follow local_user_id. Returns list of (id, uri) for caller bookkeeping."""
-    print(f"  [{stack}] inserting {count} blackhole followers...", flush=True)
+def insert_fixture_followers(stack: str, db_host: str, local_user_id: str, count: int,
+                             inbox_base: str = "http://blackhole") -> list[dict[str, str]]:
+    """Insert N remote follower users that point at a local fixture, then
+    follow local_user_id. Returns id, actor URI, and inbox for bookkeeping."""
+    print(f"  [{stack}] inserting {count} synthetic followers...", flush=True)
     followers: list[dict[str, str]] = []
     with psycopg.connect(host=db_host, user=DB_USER, password=DB_PASS, dbname=DB_NAME) as conn:
         conn.autocommit = True
@@ -116,10 +122,9 @@ def insert_blackhole_followers(stack: str, db_host: str, local_user_id: str, cou
                 username = f"black{i:04d}"
                 uri = f"http://blackhole/users/{fid}"
                 # 各 follower にユニークな inbox を割り当てないと
-                # DeliverActivity の dedup (seen map) で 1 job に縮退する。
-                # blackhole は path をすべて 204 で受けるので path だけ
-                # 変えれば良い。
-                inbox = f"http://blackhole/inbox/{fid}"
+                # Inbox paths are unique per synthetic follower so the
+                # receiver can reconcile each expected Activity/inbox tuple.
+                inbox = f"{inbox_base}/inbox/{fid}"
                 shared_inbox = inbox
                 # Misskey の user table はカラムが多いが NOT NULL 制約のある
                 # ものだけ埋めれば INSERT 可能。default でも残りは埋まる。
@@ -144,7 +149,7 @@ def insert_blackhole_followers(stack: str, db_host: str, local_user_id: str, cou
                     """,
                     (aidx_id("fl"), fid, local_user_id, "blackhole", inbox, shared_inbox),
                 )
-                followers.append({"id": fid, "uri": uri})
+                followers.append({"id": fid, "uri": uri, "inbox": inbox})
     print(f"  [{stack}] inserted {len(followers)} followers", flush=True)
     return followers
 
@@ -252,7 +257,10 @@ def main() -> int:
                 target_note_uri = f"{url}/notes/{note_id}"
 
         enable_federation(stack, info["db_host"])
-        followers = insert_blackhole_followers(stack, info["db_host"], user_id, OUTBOUND_FOLLOWERS)
+        receiver_url = DELIVERY_RECEIVERS[stack] if DELIVERY_MODE else "http://blackhole"
+        followers = insert_fixture_followers(
+            stack, info["db_host"], user_id, OUTBOUND_FOLLOWERS, receiver_url,
+        )
         faker_remote_id = insert_faker_actor(stack, info["db_host"], faker_actor)
 
         stack_state: dict[str, Any] = {
@@ -263,6 +271,10 @@ def main() -> int:
             "follower_count": len(followers),
             "faker_remote_user_id": faker_remote_id,
         }
+        if DELIVERY_MODE:
+            stack_state["delivery_enabled"] = True
+            stack_state["delivery_receiver_url"] = receiver_url
+            stack_state["delivery_inboxes"] = [f["inbox"] for f in followers]
         # 空文字列ではなく key 自体を omit する。consumer 側は
         # info.get("target_note_uri", "") で取り出すので互換は維持される。
         if target_note_uri:
