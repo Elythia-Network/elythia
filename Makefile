@@ -1528,8 +1528,8 @@ compose-check: ## 配布する compose のログの上限と、検証用 compose
 	go test ./internal/entitycompat/... -run 'TestComposeServicesHaveLogLimits|TestRootComposeFilesAreOperatorOnly|TestTestComposeFilesAreSelfContained|TestTestComposeUntrackedSourcesAreUsed' -count=1 -v
 
 .PHONY: catalog-check
-catalog-check: ## システムカタログのクエリが schema で絞られているか検査
-	go test ./internal/entitycompat/... -run 'TestCatalogQueriesAreSchemaScoped|TestCatalogQueryGate_Predicates' -count=1 -v
+catalog-check: ## システムカタログのクエリが schema で絞られ、indexdef を WHERE に書いていないか検査
+	go test ./internal/entitycompat/... -run 'TestCatalogQueriesAreSchemaScoped|TestCatalogQueryGate_' -count=1 -v
 
 .PHONY: notfound-check
 notfound-check: ## repository の lookup error を種別を見ずに 4xx にしていないか検査
