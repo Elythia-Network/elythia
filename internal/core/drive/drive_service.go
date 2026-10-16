@@ -267,18 +267,22 @@ type Service struct {
 // defaultMediaProcessingConcurrency is how many uploads may decode at once.
 //
 // **枠が無いと確保量を掛け算できた。** `processImage` は寸法 / blurhash /
-// サムネイル / webpublic で**順に 4 回デコードする**ため、GC が前の 1 枚を
-// 返す前に次を確保しうる。認証済みの利用者が並行アップロードを投げるだけで
-// それを人数分重ねられた (`semaphore` / `Acquire(` の grep が 0 件だった)。
+// サムネイル / webpublic で**順に 4 回デコードしていた**ため、GC が前の 1 枚を
+// 返す前に次を確保しえた (#3609 で 1 回にした)。認証済みの利用者が並行
+// アップロードを投げるだけでそれを人数分重ねられた (`semaphore` / `Acquire(`
+// の grep が 0 件だった)。
 //
 // **1 枠あたりの最悪値は 1GB 級 (#3037 レビュー 2 周目で実測)。**
 // drive が渡すのは `imagedecode.MaxPixels` (64MP) ではなく
 // `UpstreamMaxPixels` (0x3FFF^2 = 268MP) — upstream に揃える判断で、
 // 厳しくすると 102MP の実写真が webpublic を失い EXIF の GPS が公開側へ
 // 出るため (`imagedecode.go` 参照)。16383x16383 の全画素ゼロ PNG は
-// **764 KiB** で作れて `UpstreamMaxPixels` にちょうど一致するので上限を
-// 通り抜け、8 core / 32GB の実測で `processImage` の 4 段を通すと
-// **ピーク RSS 2.23 GiB / 13.6 秒**だった (デコード単体で TotalAlloc 768MiB)。
+// 数 MB 以下 (#3037 の計測では **764 KiB**。圧縮の設定で変わる) で作れて
+// `UpstreamMaxPixels` にちょうど一致するので上限を通り抜ける。16383x16383 の入力 1 本の最大 RSS は、RGBA 8bit の全画素ゼロ
+// PNG で、4 段がそれぞれデコードしていたころ **2.2〜3.0 GiB** (GC の時機で
+// 揺れる。#3037 で 2.23 GiB、#3609 で 2.67〜2.99 GiB)、#3609 で 1 回にした後
+// **1.09 GiB**。EXIF の向きを持つ JPEG は回転前と回転後の像を同時に持つので
+// 後でも **1.40 GiB** (前は 2.35 GiB)。測り方は `docs/divergence/security.md`。
 //
 // **バイト予算はこの帯を縛らない。** 確保量の判定は
 // `画素数 x 1 画素あたりのバイト数 > 上限画素数 x 4` なので、8bit 画像には
@@ -286,8 +290,8 @@ type Service struct {
 //
 // **枠の本数はこの最悪値を前提にしていない。** 値と根拠は media proxy の枠
 // (#3032) から採っており、あちらは 64MP の cap で測っている。2GB の VPS は
-// `GOMAXPROCS / 2 = 1` なので、764 KiB のアップロード 1 本で RAM を使い切り
-// うる。`GOMEMLIMIT` の設定はリポジトリに無い (grep 0 件)。**残存リスクとして
+// `GOMAXPROCS / 2 = 1` なので、数 MB 以下のアップロード 1 本で RAM を使い
+// 切りうる。`GOMEMLIMIT` の設定はリポジトリに無い (grep 0 件)。**残存リスクとして
 // `docs/divergence.md` に記録してある。**
 //
 // **値と根拠は media proxy の枠 (#3032) と同じ。** 同じデコーダで同じ中間
@@ -1147,6 +1151,9 @@ func (s *Service) acquireMediaSlot(ctx context.Context) (func(), bool) {
 
 // processImage runs all image processing steps (best-effort).
 func (s *Service) processImage(body []byte, mimeType string) *generateAltsResult {
+	if bp, ok := s.imageProcessor.(BatchImageProcessor); ok {
+		return processImageOnce(bp, body, mimeType)
+	}
 	result := &generateAltsResult{}
 
 	// 寸法取得
@@ -1169,6 +1176,28 @@ func (s *Service) processImage(body []byte, mimeType string) *generateAltsResult
 	// Webpublic
 	result.webpublic, _ = s.imageProcessor.GenerateWebpublic(body, mimeType)
 
+	return result
+}
+
+// processImageOnce is processImage for processors that decode once (#3609).
+// 読めない画像は代替画像なしで続行する (アップロードは拒否しない)。
+func processImageOnce(bp BatchImageProcessor, body []byte, mimeType string) *generateAltsResult {
+	result := &generateAltsResult{}
+	alts := bp.ProcessAll(body, mimeType)
+	if alts == nil {
+		return result
+	}
+	if alts.Width > 0 || alts.Height > 0 {
+		props := map[string]int{"width": alts.Width, "height": alts.Height}
+		if data, err := json.Marshal(props); err == nil {
+			result.properties = datatypes.JSON(data)
+		}
+	}
+	if alts.Blurhash != "" {
+		result.blurhash = &alts.Blurhash
+	}
+	result.thumbnail = alts.Thumbnail
+	result.webpublic = alts.Webpublic
 	return result
 }
 

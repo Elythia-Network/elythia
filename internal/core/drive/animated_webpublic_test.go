@@ -11,6 +11,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// **本番のアップロードは `GenerateWebpublic` ではなく `ProcessAll` を通る (#3609)。**
+// このファイルのテストは共通の判定 (`skipWebpublicBeforeDecode` /
+// `needsWebpublic`) の中身を守るが、`ProcessAll` の呼び出し側の条件は見ない。
+// アニメーションやメタデータの条件を変えたら、`process_once_test.go` の
+// `TestProcessAll_MatchesPerStepMethods` の表にも入力を足すこと。
+
 // animatedGIF builds a multi-frame GIF of the given size.
 func animatedGIF(t *testing.T, w, h, frames int) []byte {
 	t.Helper()

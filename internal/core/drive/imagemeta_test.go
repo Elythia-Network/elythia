@@ -13,6 +13,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// **本番のアップロードは `GenerateWebpublic` ではなく `ProcessAll` を通る (#3609)。**
+// ここのテストは `hasStrippableMetadata` の中身を守るが、`ProcessAll` の呼び出し側の
+// 条件は見ない。メタデータの条件を変えたら、`process_once_test.go` の
+// `TestProcessAll_MatchesPerStepMethods` の表にも入力を足すこと。
+
 // **メタデータの検出を JPEG 以外にも広げる (#3037)。**
 //
 // 以前は JPEG の APP1 しか見ていなかったので、PNG / WebP / TIFF に GPS を
