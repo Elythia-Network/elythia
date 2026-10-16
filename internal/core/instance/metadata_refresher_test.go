@@ -600,7 +600,7 @@ func TestRedisRefreshLock(t *testing.T) {
 		t.Fatal("stale release must not delete the new holder's lock")
 	}
 
-	mr.Close()
+	testutil.MiniredisDown(mr)
 	if _, _, err := lock.TryAcquire(ctx, "remote.example"); err == nil {
 		t.Fatal("redis down must return an error")
 	}

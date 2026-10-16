@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -116,10 +115,7 @@ func TestCheckDatabase_LocalMigrations(t *testing.T) {
 // Run は最初の失敗で打ち切らない。打ち切ると運用者が直しては走らせ直すことに
 // なる。
 func TestRun_ContinuesAfterFailure(t *testing.T) {
-	srv := httptest.NewServer(nil)
-	srv.Close() // 到達不能にする
-
-	report := Run(context.Background(), NewChecker(srv.URL), LocalDeps{})
+	report := Run(context.Background(), NewChecker("http://"+testutil.DeadAddr(t)), LocalDeps{})
 	assert.False(t, report.OK)
 	assert.Len(t, report.Results, 9, "全項目ぶんの結果が返る")
 }

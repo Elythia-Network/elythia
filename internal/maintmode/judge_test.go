@@ -14,6 +14,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/pgactivity"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 // fakeCounter stands in for pg_stat_activity.
@@ -369,7 +370,7 @@ func TestJudge_RunStepsAndReleases(t *testing.T) {
 func TestJudge_StoreErrorsSurface(t *testing.T) {
 	s, mr := newTestStore(t)
 	j := &Judge{Store: s, Counter: &fakeCounter{}, ID: "j"}
-	mr.Close()
+	testutil.MiniredisDown(mr)
 	out, err := j.Step(context.Background())
 	assert.Error(t, err)
 	assert.Equal(t, NotJudging, out)

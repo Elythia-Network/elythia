@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 func TestSanitizeHeaderValue(t *testing.T) {
@@ -295,14 +297,7 @@ func TestSend_DialFailureIsBestEffort(t *testing.T) {
 			t.Fatalf("Send panicked: %v", r)
 		}
 	}()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	_, portStr, _ := net.SplitHostPort(ln.Addr().String())
-	port, _ := strconv.Atoi(portStr)
-	_ = ln.Close()
-	Send("127.0.0.1", port, nil, nil, "from@example.com", "to@example.com", "subj", "body")
+	Send("127.0.0.1", testutil.DeadPort(t), nil, nil, "from@example.com", "to@example.com", "subj", "body")
 }
 
 // #496: HTTP CONNECT proxy 経由で SMTP サーバに接続できることを確認する。

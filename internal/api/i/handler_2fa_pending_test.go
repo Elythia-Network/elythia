@@ -10,6 +10,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/elythia-network/elythia/internal/core/twofactor"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/pquerna/otp/totp"
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
@@ -133,7 +134,7 @@ func TestTwoFA_PendingStoreFailure(t *testing.T) {
 	mr := newPendingGuard(t, h)
 	user := setupUserWithPassword(repo, "u1", "pass")
 	secret := registerTwoFA(t, h, user)
-	mr.Close()
+	testutil.MiniredisDown(mr)
 
 	valid, err := totp.GenerateCode(secret, time.Now())
 	require.NoError(t, err)
