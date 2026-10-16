@@ -246,9 +246,12 @@ type fakeProcess struct {
 	mu       sync.Mutex
 	failBack bool // stay at resume_failed instead of coming back
 	serving  string
+	// reported is closed once the first report is written.
+	reported chan struct{}
 }
 
 func (p *fakeProcess) run(ctx context.Context) {
+	var reportedOnce sync.Once
 	for {
 		st, err := p.store.Get(ctx)
 		if err == nil {
@@ -264,7 +267,9 @@ func (p *fakeProcess) run(ctx context.Context) {
 				p.serving = p.db.content(testDB)
 			}
 			p.mu.Unlock()
-			_ = p.store.Report(ctx, maintmode.ProcReport{ID: p.id, Role: "both", Version: "1.0", State: state})
+			if p.store.Report(ctx, maintmode.ProcReport{ID: p.id, Role: "both", Version: "1.0", State: state}) == nil {
+				reportedOnce.Do(func() { close(p.reported) })
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -614,8 +619,13 @@ func (e *env) stop() {
 	e.m.Wait()
 }
 
+// process starts a fake process and returns once it has reported.
+//
+// 最初の報告を待ってから返す。判定役は報告の無いプロセスを待たない (resuming の
+// 判定は報告だけで決まる) ので、報告より先に再開を判定されると、戻れないはずの
+// プロセスがいないものとしてメンテナンスが外れる (#3369)。
 func (e *env) process(id string) *fakeProcess {
-	p := &fakeProcess{id: id, store: e.maint, db: e.db}
+	p := &fakeProcess{id: id, store: e.maint, db: e.db, reported: make(chan struct{})}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -626,6 +636,11 @@ func (e *env) process(id string) *fakeProcess {
 		cancel()
 		<-done
 	})
+	select {
+	case <-p.reported:
+	case <-time.After(10 * time.Second):
+		e.t.Fatalf("process %s did not report", id)
+	}
 	return p
 }
 
