@@ -202,6 +202,8 @@ func loadRun(dir string) (*Run, error) {
 	return run, nil
 }
 
+// readDeliveryStats reports file and JSON decoding errors. Semantic issues are
+// retained for deliveryStatus so the comparison can report their raw counts.
 func readDeliveryStats(path string) (*DeliveryStats, error) {
 	b, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -213,36 +215,6 @@ func readDeliveryStats(path string) (*DeliveryStats, error) {
 	var s DeliveryStats
 	if err := json.Unmarshal(b, &s); err != nil {
 		return nil, err
-	}
-	if !s.Finalized {
-		return nil, errors.New("delivery manifest is not finalized")
-	}
-	if s.Pending != 0 {
-		return nil, fmt.Errorf("finalized delivery manifest has %d pending requests", s.Pending)
-	}
-	if s.Expected == 0 {
-		return nil, errors.New("expected delivery count must be greater than zero")
-	}
-	if s.Valid > s.Attempts || s.Invalid > s.Attempts-s.Valid || s.UnexpectedAttempts != s.Attempts-s.Valid-s.Invalid {
-		return nil, fmt.Errorf("attempts %d != valid %d + invalid %d + unexpected attempts %d", s.Attempts, s.Valid, s.Invalid, s.UnexpectedAttempts)
-	}
-	if s.ContentMismatch > s.Invalid {
-		return nil, fmt.Errorf("content mismatch %d exceeds invalid %d", s.ContentMismatch, s.Invalid)
-	}
-	if s.Valid > s.Verified || s.ContentMismatch > s.Verified-s.Valid || s.UnexpectedAttempts != s.Verified-s.Valid-s.ContentMismatch {
-		return nil, fmt.Errorf("verified %d != valid %d + content mismatch %d + unexpected attempts %d", s.Verified, s.Valid, s.ContentMismatch, s.UnexpectedAttempts)
-	}
-	if s.Duplicates > s.Valid || s.Unique != s.Valid-s.Duplicates {
-		return nil, fmt.Errorf("valid %d != unique %d + duplicates %d", s.Valid, s.Unique, s.Duplicates)
-	}
-	if s.Unique > s.Expected {
-		return nil, fmt.Errorf("unique %d exceeds expected %d", s.Unique, s.Expected)
-	}
-	if s.Missing != s.Expected-s.Unique {
-		return nil, fmt.Errorf("missing %d != expected %d - unique %d", s.Missing, s.Expected, s.Unique)
-	}
-	if s.Unexpected > s.UnexpectedAttempts {
-		return nil, fmt.Errorf("unexpected pairs %d exceeds unexpected attempts %d", s.Unexpected, s.UnexpectedAttempts)
 	}
 	return &s, nil
 }

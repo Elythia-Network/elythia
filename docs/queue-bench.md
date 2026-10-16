@@ -21,6 +21,8 @@
 
 `make queue-bench-delivery-outbound` は stack ごとの隔離 receiver を使い、既存 synthetic sender の公開鍵で HTTP 署名を検証する。計測時間の外で各 synthetic note の `/notes/{id}/activity` を取得して `(Activity ID, Inbox, canonical body SHA-256)` の期待集合を作り、receiver の到着・重複・不一致・欠測を `outbound.json` に記録する。fixture はベンチ用 Compose network 内だけに置き、公開ポートを開けない。private key の取得や実インスタンスへの接続は行わない。
 
+正常配送の性能比較では、benchcompareは未確定・`pending`・未着を`incomplete`、期待数0・件数の不整合・`invalid` / `contentMismatch` / `unexpected`を`invalid`として、比較全体を比較不能(exit 2)にする。状態・理由と配送の生値はレポートに残し、性能値は出さない。読み取れない、または壊れた`delivery.json`は入力エラー(exit 1)として扱う。性能劣化の閾値は設けない。故意の不正・未着ケースは期待結果との一致を別テストで判定し、正常系の性能値に混ぜない。現在の`tests/bench/ab/run.sh`は`delivery.json`を生成しない。
+
 この mode は blackhole mode と同じ synthetic follower を作るため、**既存 seed を再利用せず、volume を消した新しい stack で実行する**。delivery target は seed も実行する。
 
 ### Inbound (inbox job throughput)

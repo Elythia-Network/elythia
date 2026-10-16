@@ -121,6 +121,40 @@ func TestReceiverDoesNotLetUnexpectedIDFillMissingExpectedPair(t *testing.T) {
 	assert.Equal(t, uint64(1), got.Missing)
 }
 
+func TestReceiverDoesNotLetUnexpectedInboxFillMissingExpectedPair(t *testing.T) {
+	r, key := newTestReceiver(t)
+	body := activityBody(testActivityID, "expected")
+	finalizeExpected(t, r, expectedTuple(t, testActivityID, "http://receiver.example/inbox/one", body))
+
+	assert.Equal(t, http.StatusNoContent, send(t, r, signedRequest(t, key, "/inbox/unlisted", body)))
+
+	got := r.stats()
+	assert.Equal(t, uint64(1), got.Attempts)
+	assert.Equal(t, uint64(1), got.Verified)
+	assert.Zero(t, got.Valid)
+	assert.Zero(t, got.Unique)
+	assert.Equal(t, uint64(1), got.Unexpected)
+	assert.Equal(t, uint64(1), got.UnexpectedAttempts)
+	assert.Equal(t, uint64(1), got.Missing)
+}
+
+func TestReceiverRejectsActivityActorNotOwnedBySigningKey(t *testing.T) {
+	r, key := newTestReceiver(t)
+	expectedBody := activityBody(testActivityID, "expected")
+	finalizeExpected(t, r, expectedTuple(t, testActivityID, "http://receiver.example/inbox/one", expectedBody))
+
+	forgedActorBody := strings.Replace(expectedBody, "https://sender.example/users/bench", "https://other.example/users/unknown", 1)
+	assert.Equal(t, http.StatusUnauthorized, send(t, r, signedRequest(t, key, "/inbox/one", forgedActorBody)))
+
+	got := r.stats()
+	assert.Equal(t, uint64(1), got.Attempts)
+	assert.Zero(t, got.Verified)
+	assert.Zero(t, got.Valid)
+	assert.Zero(t, got.Unexpected)
+	assert.Equal(t, uint64(1), got.Invalid)
+	assert.Equal(t, uint64(1), got.Missing)
+}
+
 func TestReceiverRejectsSameExpectedIDWithDifferentSignedBody(t *testing.T) {
 	r, key := newTestReceiver(t)
 	expectedBody := activityBody(testActivityID, "expected body")

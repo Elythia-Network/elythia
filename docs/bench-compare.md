@@ -103,7 +103,11 @@ make bench-compare-down   # 途中で止めたときの片付け
 | `memory_peak_mib` | コンテナの cgroup の`memory.peak`(起動し直してからの最大、MiB)。ページキャッシュを含む |
 | `heap_inuse_max_mib` | app だけ。pprof の`HeapInuse`を 5 秒ごとに読んだ最大 (MiB) |
 
-配送 receiver fixture を使う run は、run directory に任意の`delivery.json`を置けます。`finalized` / `expected` / `attempts` / `verified` / `pending` / `valid` / `unique` / `duplicates` / `invalid` / `contentMismatch` / `unexpected` / `unexpectedAttempts` / `missing`を記録し、benchcompare は各 side・round の数値をそのまま表示します。確定済みmanifestがない場合、または件数の整合性 (`attempts = valid + invalid + unexpectedAttempts`、`verified = valid + contentMismatch + unexpectedAttempts`、`valid = unique + duplicates`、`missing = expected - unique`) が崩れている場合は読み込み時に失敗します。`unexpected`は未登録の(Activity ID, Inbox)組の数で、未着のexpected組を埋めません。`valid`は署名に加えてexpected Activity ID・Inbox・本文digestが一致した試行だけです。配送数に判定基準は設けません。ファイルがないroundは未計測として表から省きます。
+配送receiver fixtureを使うrunは、run directoryに任意の`delivery.json`を置けます。`finalized` / `expected` / `attempts` / `verified` / `pending` / `valid` / `unique` / `duplicates` / `invalid` / `contentMismatch` / `unexpected` / `unexpectedAttempts` / `missing`を記録します。`unexpected`は未登録の(Activity ID, Inbox)組の数で、未着のexpected組を埋めません。`valid`は署名に加えてexpected Activity ID・Inbox・本文digestが一致した試行だけです。現在の`tests/bench/ab/run.sh`は`delivery.json`を生成しないため、同scriptの結果は配送未計測として扱います。
+
+JSONを読めない場合、または壊れたJSONの場合だけ入力エラー(exit 1)にします。読み取れた統計の意味上の異常はloaderで拒否せず、`status` / `reasons`と生の件数をレポートに残して比較不能(exit 2)にします。未確定manifest・`pending`・未着は`incomplete`、`expected`が0・件数の整合性違反・`invalid` / `contentMismatch` / `unexpected`があるroundは`invalid`です。
+
+配送統計が1つでもある比較では、すべてのside・roundに統計が必要です。比較不能のときは性能値を出さず、正常配送の性能比較として扱いません。配送数に新しい性能閾値は設けません。重複数は生値として表示します。故意に不正署名・本文・宛先や未到着を起こすcorrectnessケースは、期待結果との一致を別テストで判定し、正常系の性能runやその`delivery.json`に混ぜません。配送統計がどのroundにもない比較は、従来どおり配送未計測として扱います。
 
 ## 判定
 

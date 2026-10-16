@@ -62,7 +62,8 @@ type stats struct {
 }
 
 type activity struct {
-	ID string `json:"id"`
+	ID    string `json:"id"`
+	Actor string `json:"actor"`
 }
 
 type receiver struct {
@@ -308,8 +309,12 @@ func (r *receiver) receive(w http.ResponseWriter, req *http.Request) {
 	}
 
 	var act activity
-	if err := json.Unmarshal(body, &act); err != nil || strings.TrimSpace(act.ID) == "" {
+	if err := json.Unmarshal(body, &act); err != nil || strings.TrimSpace(act.ID) == "" || strings.TrimSpace(act.Actor) == "" {
 		r.reject(w, http.StatusBadRequest)
+		return
+	}
+	if act.Actor != activitypub.ResolveKeyURL(parsed.KeyID) {
+		r.reject(w, http.StatusUnauthorized)
 		return
 	}
 	bodyDigest, err := activityBodyDigest(body)
