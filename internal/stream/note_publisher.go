@@ -469,6 +469,31 @@ func (p *NotificationPublisher) Pack(notifieeID string, n *corenotification.Noti
 	if n == nil {
 		return nil
 	}
+	var load func() (*model.Note, error)
+	if p.noteRepo != nil {
+		noteID := n.NoteID
+		load = func() (*model.Note, error) { return p.noteRepo.FindByIDWithRelations(noteID) }
+	}
+	return p.pack(notifieeID, n, load)
+}
+
+// PackWithNoteSource implements core/notification.NoteSourcePacker: it is
+// Pack with the referenced note taken from src, which the Web Push payload of
+// the same notification also reads (#3611). The visibility gate is the same.
+func (p *NotificationPublisher) PackWithNoteSource(notifieeID string, n *corenotification.Notification, src *corenotification.NoteSource) any {
+	if n == nil {
+		return nil
+	}
+	// note の repository を配線していない構成では、従来どおり note を埋めない。
+	if src == nil || p.noteRepo == nil {
+		return p.Pack(notifieeID, n)
+	}
+	return p.pack(notifieeID, n, src.Note)
+}
+
+// pack is the body of Pack. loadNote reads the note referenced by n.NoteID;
+// nil means no note repository is wired.
+func (p *NotificationPublisher) pack(notifieeID string, n *corenotification.Notification, loadNote func() (*model.Note, error)) any {
 	if p.userRepo == nil || p.idGen == nil {
 		return n
 	}
@@ -479,8 +504,8 @@ func (p *NotificationPublisher) Pack(notifieeID string, n *corenotification.Noti
 		}
 	}
 	var note *model.Note
-	if n.NoteID != "" && p.noteRepo != nil {
-		if n2, err := p.noteRepo.FindByIDWithRelations(n.NoteID); err == nil {
+	if n.NoteID != "" && loadNote != nil {
+		if n2, err := loadNote(); err == nil {
 			// visibility gate (#1471): note embed を pack に通す前に
 			// notifiee が見られるかを判定。core/note.CanSeeNote と同じ
 			// 条件を、stream → repository への直接依存を避けるため inline

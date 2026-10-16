@@ -165,6 +165,9 @@ type CreateInput struct {
 	Extra          map[string]any
 	// AppAccessTokenID は 'app' 通知を作った access token の ID (#1557)。
 	AppAccessTokenID string
+	// NoteSource, when set, supplies the note referenced by NoteID to the
+	// packers instead of each of them reading it again (#3611). Not persisted.
+	NoteSource *NoteSource
 }
 
 // StreamingPublisher receives a freshly created notification so that
@@ -193,6 +196,12 @@ type MainStreamPublisher interface {
 // ときに note field を落として本文 leak を防ぐ。
 type Packer interface {
 	Pack(notifieeID string, n *Notification) any
+}
+
+// NoteSourcePacker is implemented by a Packer that can take the referenced
+// note from a NoteSource instead of reading it by n.NoteID (#3611).
+type NoteSourcePacker interface {
+	PackWithNoteSource(notifieeID string, n *Notification, src *NoteSource) any
 }
 
 // unreadPublishDelay は Notification 永続化から `unreadNotification` を main
@@ -565,7 +574,11 @@ func (s *Service) createWithPush(ctx context.Context, in CreateInput, pushFn fun
 	// 未読が食い違うので行は残して note detail だけ落とす。
 	var packed any = n
 	if s.packer != nil {
-		packed = s.packer.Pack(in.NotifieeID, n)
+		if sp, ok := s.packer.(NoteSourcePacker); ok && in.NoteSource != nil && in.NoteID != "" {
+			packed = sp.PackWithNoteSource(in.NotifieeID, n, in.NoteSource)
+		} else {
+			packed = s.packer.Pack(in.NotifieeID, n)
+		}
 		if packed == nil {
 			// packer が通知を drop した (roleAssigned で role 削除済など)。upstream
 			// は stream へ出す前に filter するので、永続化済みの本通知は realtime

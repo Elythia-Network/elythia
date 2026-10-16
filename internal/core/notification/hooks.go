@@ -31,6 +31,18 @@ type NotePacker interface {
 	PackNoteByID(noteID, viewerID string) (map[string]any, bool)
 }
 
+// PrimaryNotePacker is implemented by a NotePacker that can read the note
+// from the primary before packing it (#3611).
+type PrimaryNotePacker interface {
+	PackNoteByIDOnPrimary(noteID, viewerID string) (map[string]any, bool)
+}
+
+// LoadedNotePacker is implemented by a NotePacker that can pack a note the
+// caller already holds, with the same visibility gate as PackNoteByID (#3611).
+type LoadedNotePacker interface {
+	PackLoadedNote(n *model.Note, viewerID string) (map[string]any, bool)
+}
+
 // UserPacker packs a user ID into a JSON-serializable representation matching
 // the Misskey-packed user shape.
 type UserPacker interface {
@@ -63,6 +75,14 @@ type Hook struct {
 	// createdObserver は実際に作った通知を受け取る (#3469)。プラグインが管理する
 	// アカウントへの通知を、そのプラグインへ届けるのに使う。未配線なら呼ばない。
 	createdObserver CreatedObserver
+	// noteLoader reads the note a notification references, with the relations
+	// the packers need (FindByIDWithRelations)。配線すると、1 件の通知の stream と
+	// Web Push が同じ読み込みを共有する (#3611)。未配線なら各 packer が読む。
+	noteLoader func(id string) (*model.Note, error)
+	// noteIDs reports which of the given notes still exist, reading the
+	// primary. Web Push が共有の読み込み (作成時の値) を使うときに、送る直前に
+	// 確かめる (#3611)。未配線なら共有の値を使わず、push が自分で読み直す。
+	noteIDs PrimaryNoteIDChecker
 }
 
 // CreatedObserver is told about each notification the Hook actually persisted
@@ -73,6 +93,36 @@ type Hook struct {
 // 止めないよう、実装は重い処理をせず (queue に積むなど) すぐ戻ること。
 type CreatedObserver interface {
 	NotificationCreated(ctx context.Context, recipient *model.User, n *Notification)
+}
+
+// SetNoteLoader attaches the reader the Hook uses to load a notification's
+// note once for both its streaming and its Web Push payload (#3611).
+func (h *Hook) SetNoteLoader(load func(id string) (*model.Note, error)) {
+	h.noteLoader = load
+}
+
+// SetNoteExistenceChecker attaches the primary-read existence check the Web
+// Push payload runs before reusing the note read at creation time (#3611).
+// In production it is the note repository (ExistingNoteIDsOnPrimary).
+func (h *Hook) SetNoteExistenceChecker(c PrimaryNoteIDChecker) {
+	h.noteIDs = c
+}
+
+// noteSourceFor returns the source that notifyLocalUser hands to the packers:
+// src when the caller supplied one, otherwise a lazy read of noteID through
+// the note loader (nil when unwired, so each packer reads as before).
+func (h *Hook) noteSourceFor(noteID string, src *NoteSource) *NoteSource {
+	if noteID == "" {
+		return nil
+	}
+	if src != nil {
+		return src
+	}
+	if h.noteLoader == nil {
+		return nil
+	}
+	load := h.noteLoader
+	return NewNoteSource(func() (*model.Note, error) { return load(noteID) })
 }
 
 // SetCreatedObserver attaches the observer told about created notifications.
@@ -159,6 +209,17 @@ func (h *Hook) OnNoteCreated(n *model.Note, author *model.User, replyTarget, ren
 	// 両path (通知 / note_unread) で共有する。userRepo未配線なら空スライス。
 	mentionedIDs := h.resolveMentionIDs(n, author.ID)
 
+	// この投稿から作る通知 (reply / renote / quote / mention / note) は、どれも
+	// 同じノートを指す。作成側が relation まで揃えて渡しているので、通知ごとに
+	// 読み直さず使い回す (#3611)。揃っていなければ、最初に要ったときに 1 回だけ
+	// 読み、残りの通知はそれを使う。
+	var src *NoteSource
+	if hydratedForPack(n) {
+		src = LoadedNoteSource(n)
+	} else {
+		src = h.noteSourceFor(n.ID, nil)
+	}
+
 	// specified noteのvisibleUserIds / mentions経由でnote_unreadを
 	// 差し込む。通知の有無に関係なくDBに永続化するため、通知抑制 (mute等)
 	// や通知未生成のケース (visibleUserIdsに含まれるがmentionされていない
@@ -185,6 +246,7 @@ func (h *Hook) OnNoteCreated(n *model.Note, author *model.User, replyTarget, ren
 			Type:           TypeReply,
 			NoteID:         n.ID,
 			NoteVisibility: string(n.Visibility),
+			NoteSource:     src,
 		})
 	}
 
@@ -201,6 +263,7 @@ func (h *Hook) OnNoteCreated(n *model.Note, author *model.User, replyTarget, ren
 			Type:           t,
 			NoteID:         n.ID,
 			NoteVisibility: string(n.Visibility),
+			NoteSource:     src,
 		})
 	}
 
@@ -224,11 +287,12 @@ func (h *Hook) OnNoteCreated(n *model.Note, author *model.User, replyTarget, ren
 			Type:           TypeMention,
 			NoteID:         n.ID,
 			NoteVisibility: string(n.Visibility),
+			NoteSource:     src,
 		})
 	}
 
 	// note 通知: notify='normal' フォロワーへ投稿を fan-out する (#1559)。
-	h.notifyFollowersOfNote(ctx, n, author)
+	h.notifyFollowersOfNote(ctx, n, author, src)
 }
 
 // notifyFollowersOfNote fans a 'note' notification out to followers who set
@@ -238,7 +302,7 @@ func (h *Hook) OnNoteCreated(n *model.Note, author *model.User, replyTarget, ren
 //   - reply には付かない (data.reply == null のときだけ)
 //   - visibility が specified のノートは対象外
 //   - pure renote は、その投稿者の renote を mute しているフォロワーには送らない
-func (h *Hook) notifyFollowersOfNote(ctx context.Context, n *model.Note, author *model.User) {
+func (h *Hook) notifyFollowersOfNote(ctx context.Context, n *model.Note, author *model.User, src *NoteSource) {
 	if h.followingRepo == nil {
 		return
 	}
@@ -268,6 +332,7 @@ func (h *Hook) notifyFollowersOfNote(ctx context.Context, n *model.Note, author 
 			Type:           TypeNote,
 			NoteID:         n.ID,
 			NoteVisibility: string(n.Visibility),
+			NoteSource:     src,
 		})
 	}
 }
@@ -464,6 +529,25 @@ func (h *Hook) OnReactionCreated(notifieeID, notifierID, noteID, reaction string
 	})
 }
 
+// OnReactionCreatedWithNote is OnReactionCreated with a loader for the
+// reacted note as it is after the reaction was written (#3611).
+//
+// load は通知を作るときに 1 回だけ呼ばれ、stream と Web Push の両方がその結果を
+// 使う。届けない通知 (リモートの投稿者、ミュートなど) では呼ばれない。
+func (h *Hook) OnReactionCreatedWithNote(notifieeID, notifierID, noteID, reaction string, load func() (*model.Note, error)) {
+	in := CreateInput{
+		NotifieeID: notifieeID,
+		NotifierID: notifierID,
+		Type:       TypeReaction,
+		NoteID:     noteID,
+		Reaction:   reaction,
+	}
+	if load != nil {
+		in.NoteSource = NewNoteSource(load)
+	}
+	h.notifyLocalUser(context.Background(), notifieeID, in)
+}
+
 // OnReactionRemoved removes the reaction notification notifierID left on the
 // note author's stream when the reaction is withdrawn or replaced (#3201).
 //
@@ -606,11 +690,15 @@ func (h *Hook) notifyLocalUser(ctx context.Context, notifieeID string, in Create
 	// 永続化済 Notification から push body を組んで配信する。
 	// packer 未設定でも type/id/userId は最低限埋まるので sw.js 側の 24h 破棄チェックと
 	// ユーザー判定は成立する。
+	// stream と Web Push が同じ読み込みを使うよう、ここで 1 つにまとめる (#3611)。
+	// 抑制の判定より後に作るので、届けない通知のためには読まない。
+	in.NoteSource = h.noteSourceFor(in.NoteID, in.NoteSource)
+	src := in.NoteSource
 	var pushFn func(*Notification)
 	if h.webpush != nil {
 		pushFn = func(n *Notification) {
 			if n != nil {
-				h.webpush.PushNotification(notifieeID, h.buildPushBody(n, notifieeID))
+				h.webpush.PushNotification(notifieeID, h.buildPushBody(n, notifieeID, src))
 			}
 		}
 	}
@@ -723,7 +811,7 @@ func (h *Hook) listContains(ownerID, listID, userID string) bool {
 // buildPushBody converts a persisted Notification into a map matching
 // the Misskey `Packed<'Notification'>` shape. Missing fields are omitted so
 // that sw.js gracefully falls back to defaults.
-func (h *Hook) buildPushBody(n *Notification, notifieeID string) map[string]any {
+func (h *Hook) buildPushBody(n *Notification, notifieeID string, src *NoteSource) map[string]any {
 	body := map[string]any{
 		"id":        n.ID,
 		"createdAt": n.CreatedAt.UTC().Format("2006-01-02T15:04:05.000Z"),
@@ -745,7 +833,7 @@ func (h *Hook) buildPushBody(n *Notification, notifieeID string) map[string]any 
 		// そちらに揃えないこと (push を落とすと通知自体が届かなくなる)。
 		// packer 未配線時は note 省略。
 		if h.notePacker != nil {
-			if packed, ok := h.notePacker.PackNoteByID(n.NoteID, notifieeID); ok {
+			if packed, ok := h.packPushNote(n.NoteID, notifieeID, src); ok {
 				body["note"] = packed
 			}
 		}
@@ -757,6 +845,82 @@ func (h *Hook) buildPushBody(n *Notification, notifieeID string) map[string]any 
 		body["choice"] = *n.Choice
 	}
 	return body
+}
+
+// packPushNote packs the notification's note for the push recipient, taking
+// it from src when the packer can pack a loaded note and the note, and every
+// note embedded in it, still exist.
+//
+// 共有の読み込みは作成時の値なので、push を送る 2 秒後には消されているかも
+// しれない。**本家は作成時に pack した値をそのまま push に載せる** が、Elythia は
+// 以前から push の時点で読み直しており、その間に消されたノートの本文は載せて
+// いなかった。この点を保つため、送る直前に、ノート自身と埋め込み先 (返信先・
+// リノート先と、リノート先の返信先・リノート先) の行があるかだけを、1 本の
+// クエリで primary に確かめる (#3611)。レプリカで確かめると、遅れて消えた
+// ノートが残って見え、本文が載りうる。
+//
+// 埋め込み先は外部キーで道連れに消えない (000080 / #2623 で自己参照 FK を外して
+// いる) ので、ノート自身の確かめだけでは、消えた返信先の本文が要約 ("RE: ...")
+// に載る。
+//   - ノート自身が消えていた / 確かめられなかった: 以前の読み直しの失敗と同じく
+//     note を落とす (通知自体は送る)
+//   - 埋め込み先が消えていた: push が primary から読み直す。以前と同じく、
+//     消えた埋め込みは無いものとして pack される (消された直後だけの稀な経路)。
+//     読み直しもレプリカから読むと、確かめを primary で行った意味が無くなる
+//     (遅れたレプリカが消えた返信先をまだ返し、"RE: ..." に本文が載る)
+//   - 確かめる手段が未配線: 共有の値を使わず、以前どおり push が読み直す
+//   - 共有の読み込み自体が失敗していた: push が自分で読み直す (一時的な DB の断
+//     で note が落ちないよう、以前と同じく独立に読む)
+func (h *Hook) packPushNote(noteID, notifieeID string, src *NoteSource) (map[string]any, bool) {
+	lp, ok := h.notePacker.(LoadedNotePacker)
+	if !ok || src == nil || h.noteIDs == nil {
+		return h.notePacker.PackNoteByID(noteID, notifieeID)
+	}
+	note, err := src.Note()
+	if err != nil {
+		return h.notePacker.PackNoteByID(noteID, notifieeID)
+	}
+	ids := pushEmbeddedNoteIDs(note)
+	found, err := h.noteIDs.ExistingNoteIDsOnPrimary(ids)
+	if err != nil {
+		return nil, false
+	}
+	exists := make(map[string]bool, len(found))
+	for _, id := range found {
+		exists[id] = true
+	}
+	if !exists[note.ID] {
+		return nil, false
+	}
+	for _, id := range ids[1:] {
+		if !exists[id] {
+			if pp, ok := h.notePacker.(PrimaryNotePacker); ok {
+				return pp.PackNoteByIDOnPrimary(noteID, notifieeID)
+			}
+			return h.notePacker.PackNoteByID(noteID, notifieeID)
+		}
+	}
+	return lp.PackLoadedNote(note, notifieeID)
+}
+
+// pushEmbeddedNoteIDs returns n's id followed by the ids of the notes the
+// packer embeds in it: its reply and renote, and the renote's reply and
+// renote (packed with detail). Embeds that are already missing are skipped,
+// since they are not packed.
+func pushEmbeddedNoteIDs(n *model.Note) []string {
+	ids := []string{n.ID}
+	add := func(e *model.Note) {
+		if e != nil {
+			ids = append(ids, e.ID)
+		}
+	}
+	add(n.Reply)
+	add(n.Renote)
+	if n.Renote != nil {
+		add(n.Renote.Reply)
+		add(n.Renote.Renote)
+	}
+	return ids
 }
 
 // isQuote reports whether the note is a quote renote (renote with

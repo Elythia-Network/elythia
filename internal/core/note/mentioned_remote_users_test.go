@@ -101,18 +101,36 @@ func TestCreateService_MentionedRemoteUsersIncludesWebFingerResolved(t *testing.
 // findManyCountingUserRepo counts FindManyByIDs calls on top of the mock.
 type findManyCountingUserRepo struct {
 	*testutil.MockUserRepository
+	notes         *testutil.MockNoteRepository
 	findManyByIDs int
+	authorReread  int
 }
 
 func (c *findManyCountingUserRepo) FindManyByIDs(ids []string) ([]*model.User, error) {
+	// 作成後に作者を読み直す 1 件 (#3611) は、宛先の解決とは別なので数えない。
+	// 数えないのは、作者 ("author") のノートが保存された後の最初の 1 件だけ。
+	// 宛先の解決が作者を引く回帰 (保存の前、または 2 回目) は数える。
+	if len(ids) == 1 && ids[0] == "author" && c.authorReread == 0 && c.authorNoteStored() {
+		c.authorReread++
+		return c.MockUserRepository.FindManyByIDs(ids)
+	}
 	c.findManyByIDs++
 	return c.MockUserRepository.FindManyByIDs(ids)
+}
+
+func (c *findManyCountingUserRepo) authorNoteStored() bool {
+	for _, n := range c.notes.Notes {
+		if n.UserID == "author" {
+			return true
+		}
+	}
+	return false
 }
 
 func newCountingMentionService(t *testing.T) (*note.CreateService, *findManyCountingUserRepo, *testutil.MockNoteRepository) {
 	t.Helper()
 	svc, noteRepo, _ := newCreateService(t)
-	repo := &findManyCountingUserRepo{MockUserRepository: testutil.NewMockUserRepository()}
+	repo := &findManyCountingUserRepo{MockUserRepository: testutil.NewMockUserRepository(), notes: noteRepo}
 	svc.SetUserRepo(repo)
 	return svc, repo, noteRepo
 }

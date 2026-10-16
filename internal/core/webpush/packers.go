@@ -61,6 +61,39 @@ func (p *NoteRepoPacker) PackNoteByID(noteID, viewerID string) (map[string]any, 
 	if err != nil {
 		return nil, false
 	}
+	return p.PackLoadedNote(n, viewerID)
+}
+
+// PackNoteByIDOnPrimary implements notification.PrimaryNotePacker: it is
+// PackNoteByID reading the note from the primary (#3611). The push uses it
+// when the pre-send check on the primary found an embedded note deleted, so a
+// lagging replica cannot put the deleted note back.
+//
+// repository が primary の読み込みを持たない構成 (テストの mock など) では、
+// PackNoteByID と同じ読み込みに倒す。
+func (p *NoteRepoPacker) PackNoteByIDOnPrimary(noteID, viewerID string) (map[string]any, bool) {
+	if p == nil || p.repo == nil {
+		return nil, false
+	}
+	primary, ok := p.repo.(repository.NotePrimaryReader)
+	if !ok {
+		return p.PackNoteByID(noteID, viewerID)
+	}
+	n, err := primary.FindByIDWithRelationsOnPrimary(noteID)
+	if err != nil {
+		return nil, false
+	}
+	return p.PackLoadedNote(n, viewerID)
+}
+
+// PackLoadedNote implements notification.LoadedNotePacker: PackNoteByID for a
+// note the caller already read with its relations (#3611). The streaming
+// payload of the same notification reads the note once and both use it.
+// The visibility gate and the embed hiding are the same as PackNoteByID.
+func (p *NoteRepoPacker) PackLoadedNote(n *model.Note, viewerID string) (map[string]any, bool) {
+	if p == nil || n == nil {
+		return nil, false
+	}
 	var viewer *model.User
 	if viewerID != "" {
 		viewer = &model.User{ID: viewerID}
