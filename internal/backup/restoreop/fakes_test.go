@@ -312,6 +312,12 @@ type env struct {
 	// intercept, when set, fails a command before it is sent
 	// (interceptCmd).
 	intercept func(cmd redis.Cmder) error
+	// pauseTo, when set, is the step whose first script holds the goroutine
+	// that sent it, right after it ran, until pauseRelease is closed
+	// (pauseAfterStepTo).
+	pauseTo      string
+	pauseReached chan struct{}
+	pauseRelease chan struct{}
 }
 
 // finalHook looks at the records after every Redis command and keeps the
@@ -335,8 +341,46 @@ func (h finalHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 			err = next(ctx, cmd)
 		}
 		h.e.noteFinals()
+		if err == nil {
+			h.e.pauses(cmd)
+		}
 		return err
 	}
+}
+
+// pauseAfterStepTo makes the first script sent to step (whether or not it
+// moved the record: a script that found another step pauses too) hold the
+// goroutine that sent it, right after the script ran, until release is
+// called. reached is closed when the script has run. It lets a test put
+// another goroutine's commands between that script and what its sender does
+// next. Call it after the manager has started (newEnv): release is
+// registered with t.Cleanup, which must run before the Cleanup of start that
+// waits for the manager.
+func (e *env) pauseAfterStepTo(step string) (reached <-chan struct{}, release func()) {
+	e.finalsMu.Lock()
+	defer e.finalsMu.Unlock()
+	e.pauseTo = step
+	e.pauseReached = make(chan struct{})
+	e.pauseRelease = make(chan struct{})
+	var once sync.Once
+	rel := e.pauseRelease
+	release = func() { once.Do(func() { close(rel) }) }
+	// 止めたまま終わると、Manager.Wait が返らずにテストが固まる。
+	e.t.Cleanup(release)
+	return e.pauseReached, release
+}
+
+func (e *env) pauses(cmd redis.Cmder) {
+	e.finalsMu.Lock()
+	if e.pauseTo == "" || !stepScriptTo(cmd, e.pauseTo) {
+		e.finalsMu.Unlock()
+		return
+	}
+	e.pauseTo = ""
+	reached, release := e.pauseReached, e.pauseRelease
+	e.finalsMu.Unlock()
+	close(reached)
+	<-release
 }
 
 // replayStepTo makes the first script that moves a record to step run twice

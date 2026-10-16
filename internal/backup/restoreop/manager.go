@@ -256,7 +256,10 @@ type lineWrite struct {
 // setStepWithLine is setStep that appends l to the journal in the same
 // write, when the step moves. Use it for a final step and the line that
 // tells how the operation ended: the admin page stops reading once the step
-// is final (Status.Final). It returns the line for appendLine.
+// is final (Status.Final). Use it also for a step that another goroutine can
+// move on from (ready, aborting from preparing), so that the line is in the
+// journal before any line of the next step (#3626). It returns the line for
+// appendLine.
 func (m *Manager) setStepWithLine(ctx context.Context, opID, from, to string, l journalLine, extra ...any) (lineWrite, error) {
 	w := lineWrite{opID: opID, entry: normalizeEntry(JournalEntry{At: m.now(), Step: l.step, Message: l.msg})}
 	if m.failStep != nil {
@@ -267,10 +270,30 @@ func (m *Manager) setStepWithLine(ctx context.Context, opID, from, to string, l 
 	if err := m.o.Store.setStepJournal(context.WithoutCancel(ctx), opID, from, to, m.now(), &w.entry, extra...); err != nil {
 		return w, err
 	}
-	// ログは書けた後に出す。書けなかった段のログを残さない (書けなかったときは
-	// appendLine が出す)。
-	m.log.Info("backup: restore", "opId", opID, "step", l.step, "message", l.msg)
+	// ログは書けた後に出す。書けなかった段のログを残さない (送り直しで書けて
+	// いたときは wroteLine が、行だけを書き直すときは appendLine が出す)。
+	m.logLine(w)
 	return w, nil
+}
+
+// logLine logs the line of w as written.
+func (m *Manager) logLine(w lineWrite) {
+	m.log.Info("backup: restore", "opId", w.opID, "step", w.entry.Step, "message", w.entry.Message)
+}
+
+// wroteLine reports whether err from setStepWithLine came from a write that
+// went through all the same: the error says the outcome is not known (a
+// replay's ErrStep, a timeout) and the line of w is in the journal. It logs
+// the line then, as setStepWithLine does on success.
+func (m *Manager) wroteLine(ctx context.Context, w lineWrite, err error) bool {
+	if err == nil || notSent(err) {
+		return false
+	}
+	if written, _ := m.lineWritten(ctx, w); !written {
+		return false
+	}
+	m.logLine(w)
+	return true
 }
 
 // normalizeEntry returns e as it reads back from the journal (through JSON).
@@ -308,6 +331,10 @@ func (m *Manager) recordWithLine(ctx context.Context, opID, from, to string, l j
 // 1 回目で段と行が書けて応答だけが失われると、2 回目は段が違うので ErrStep を
 // 返す。ErrStep は「書けなかった」の印にならないので、行で確かめる。段だけで
 // 確かめないのは、同じ段へ別の経路が進めた場合と見分けるため。
+//
+// It relies on At (Options.Now, nanoseconds in production) being unique per
+// write: two writes of the same step and message with the same At cannot be
+// told apart.
 func (m *Manager) lineWritten(ctx context.Context, w lineWrite) (bool, error) {
 	journal, err := m.o.Store.Journal(context.WithoutCancel(ctx), w.opID)
 	if err != nil {
@@ -337,7 +364,7 @@ func notSent(err error) bool {
 // 行が2つ並ぶ。読めなければ足す (欠けるより、重なる方を選ぶ)。
 func (m *Manager) appendLine(ctx context.Context, w lineWrite, err error) {
 	ctx = context.WithoutCancel(ctx)
-	m.log.Info("backup: restore", "opId", w.opID, "step", w.entry.Step, "message", w.entry.Message)
+	m.logLine(w)
 	if !notSent(err) {
 		if written, werr := m.lineWritten(ctx, w); werr == nil && written {
 			return
@@ -519,9 +546,17 @@ func (m *Manager) modlog(ctx context.Context, database string, rec *Record, phas
 func (m *Manager) prepare(ctx context.Context, rec *Record, work func(context.Context) error, live *liveOp) {
 	err := work(ctx)
 	if err == nil {
-		err = m.setStep(ctx, rec.OpID, StepPreparing, StepReady, "readyAt", formatTime(m.now()))
+		// ready の段と行は 1 つの script で書く。別々に書くと、ready を見た管理者の
+		// 中止・確定が先に結末の行を書き、その後に ready の行が入る (#3626)。
+		var w lineWrite
+		w, err = m.setStepWithLine(ctx, rec.OpID, StepPreparing, StepReady,
+			say(StepReady, "ready to switch; waiting for the confirmation"), "readyAt", formatTime(m.now()))
+		// 送り直しが返した ErrStep や結果の分からない誤りでも、行が入っていれば
+		// ready は書けている (Abort と同じ扱い)。
+		if m.wroteLine(ctx, w, err) {
+			err = nil
+		}
 		if err == nil {
-			m.journal(ctx, rec.OpID, StepReady, "ready to switch; waiting for the confirmation")
 			m.waitConfirmation(ctx, rec, live)
 			return
 		}
@@ -547,6 +582,7 @@ func (m *Manager) prepare(ctx context.Context, rec *Record, work func(context.Co
 			serr = fmt.Errorf("%w (and the journal could not be read: %w)", serr, werr)
 		case written:
 			// 送り直しが返した ErrStep。1 回目で failed と行が書けている。
+			m.logLine(w)
 			serr = nil
 		default:
 			// 中止 (Abort) が先に aborting にした。
@@ -815,11 +851,17 @@ func (m *Manager) Abort(ctx context.Context, opID string) error {
 		}
 		// 先に aborting にしてから止める。止めた後に準備が ready を書くと、誰も期限を
 		// 見ない ready が残る。準備の goroutine が作った DB を消して aborted にする。
-		if err := m.setStep(ctx, opID, StepPreparing, StepAborting, "error", "aborted by the administrator"); err != nil {
+		// aborting の段と「abort requested」の行は 1 つの script で書く。別々に書くと、
+		// 準備の goroutine が先に aborted の結末の行を書き、その後にこの行が入る (#3626)。
+		w, err := m.setStepWithLine(ctx, opID, StepPreparing, StepAborting,
+			say(StepPreparing, "abort requested"), "error", "aborted by the administrator")
+		if m.wroteLine(ctx, w, err) {
+			err = nil
+		}
+		if err != nil {
 			return err
 		}
 		live.cancelPrepare()
-		m.journal(ctx, opID, StepPreparing, "abort requested")
 		return nil
 	case StepReady:
 		if err := m.setStep(ctx, opID, StepReady, StepAborting, "error", "aborted by the administrator"); err != nil {
@@ -832,12 +874,10 @@ func (m *Manager) Abort(ctx context.Context, opID string) error {
 		m.mu.Unlock()
 		m.dropTarget(ctx, rec)
 		w, err := m.setStepWithLine(ctx, opID, StepAborting, StepAborted, say(StepAborted, "aborted; %s", targetFate(rec)))
-		if err != nil && !notSent(err) {
-			// 送り直しが返した ErrStep や結果の分からない誤りでも、行が入っていれば
-			// 書けている。
-			if written, _ := m.lineWritten(ctx, w); written {
-				err = nil
-			}
+		// 送り直しが返した ErrStep や結果の分からない誤りでも、行が入っていれば
+		// 書けている。
+		if m.wroteLine(ctx, w, err) {
+			err = nil
 		}
 		if err != nil {
 			return err
