@@ -25,23 +25,10 @@ import (
 	"github.com/elythia-network/elythia/internal/testutil"
 )
 
-// unreachablePort is a TCP port nothing listens on, so dialing it fails fast.
-//
-// 実際に listen して閉じたポートを使う。固定の 1 番などは環境によって
-// フィルタされ、拒否ではなくタイムアウトになることがある。
-func unreachablePort(t *testing.T) int {
-	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	port := l.Addr().(*net.TCPAddr).Port
-	require.NoError(t, l.Close())
-	return port
-}
-
 // writeConfig writes a minimal configuration file and returns its path.
 func writeConfig(t *testing.T, port int, extra string) string {
 	t.Helper()
-	dead := unreachablePort(t)
+	dead := testutil.DeadPort(t)
 	body := fmt.Sprintf(`url: http://127.0.0.1:%d/
 port: %d
 db:
@@ -165,7 +152,7 @@ func TestHealthcheck(t *testing.T) {
 	})
 	t.Run("nothing listening", func(t *testing.T) {
 		e, _, stderr := testEnv()
-		path := writeConfig(t, unreachablePort(t), "")
+		path := writeConfig(t, testutil.DeadPort(t), "")
 		assert.Equal(t, 1, healthcheck(e, []string{"-config", path}))
 		assert.Contains(t, stderr.String(), "healthcheck: ")
 	})
@@ -189,7 +176,7 @@ func TestDoctor_WithDatabaseAndRedis(t *testing.T) {
 	}
 	// Redis は繋がらない宛先にする。接続を作る枝を通すことが目的で、
 	// 検査そのものは FAIL になる。
-	path := writeConfig(t, 3000, fmt.Sprintf("redis:\n  host: 127.0.0.1\n  port: %d\n", unreachablePort(t)))
+	path := writeConfig(t, 3000, fmt.Sprintf("redis:\n  host: 127.0.0.1\n  port: %d\n", testutil.DeadPort(t)))
 	assert.Equal(t, 1, doctor(e, []string{"-config", path}))
 	assert.True(t, closed, "doctor must close the DB it opened")
 	assert.Contains(t, stdout.String(), "FAIL")
