@@ -1,0 +1,12 @@
+-- #3612: `note_reaction` に ("userId", id DESC) の index を張る。
+--
+-- `users/reactions` (`ListByUserID`) は `"userId" = ? ORDER BY id DESC LIMIT ?` で
+-- 引く。既存の index は ("userId") と ("userId", "noteId") だけで id の順に読めず、
+-- その利用者の全リアクションを `note` に突き合わせて (可視性と凍結の判定) から
+-- 並べ替えるか、主キーを新しい方から読んで filter していた
+-- (リアクション 431 件の利用者で 20ms / 20,011 buffer → 0.67ms / 145 buffer)。
+--
+-- 本家にこの列の組の index は無いので、Elythia 独自の名前にする。
+-- `note_reaction` は大きくなりうるので CONCURRENTLY で書き込みを止めずに作る。
+-- 失敗したときの回復は docs/deployment.md の「大きな表に index を足す migration」にある。
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_note_reaction_userId_id" ON "note_reaction" ("userId", "id" DESC);
