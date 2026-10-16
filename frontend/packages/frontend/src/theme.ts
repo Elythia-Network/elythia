@@ -10,7 +10,7 @@ import { EventEmitter } from 'eventemitter3';
 import lightTheme from '@@/themes/_light.json5';
 import darkTheme from '@@/themes/_dark.json5';
 import { version } from '@@/js/config.js';
-import { getBuiltinThemes, parseThemeCode, themeProps, compile } from '@@/js/theme.js';
+import { getBuiltinThemes, themeProps, compile } from '@@/js/theme.js';
 import type { Theme, CompiledTheme } from '@@/js/theme.js';
 import { deepClone } from '@/utility/clone.js';
 import { miLocalStorage } from '@/local-storage.js';
@@ -203,7 +203,25 @@ export async function removeTheme(theme: Theme): Promise<void> {
 	prefer.commit('themes', themes);
 }
 
+/**
+ * Thrown by installTheme when the theme parser chunk could not be loaded.
+ */
+export class ThemeCodeLoadError extends Error {
+	constructor(cause: unknown) {
+		super('Failed to load the theme parser', { cause });
+		this.name = 'ThemeCodeLoadError';
+	}
+}
+
 export async function installTheme(code: string): Promise<void> {
+	// json5 を起動時の JS に入れないため、使うときに読む (#3613)。
+	// 読み込みの失敗 (デプロイで古い chunk が消えた、通信が切れた) は、テーマの不正と区別する
+	let parseThemeCode: typeof import('@@/js/theme-code.js').parseThemeCode;
+	try {
+		({ parseThemeCode } = await import('@@/js/theme-code.js'));
+	} catch (err) {
+		throw new ThemeCodeLoadError(err);
+	}
 	const theme = parseThemeCode(code);
 	if (theme == null) return;
 	await addTheme(theme);
@@ -216,7 +234,13 @@ export function clearAppliedThemeCache() {
 }
 
 export function handleThemeInstallError(err: unknown) {
-	if (err instanceof Error) {
+	if (err instanceof ThemeCodeLoadError) {
+		os.alert({
+			type: 'error',
+			title: i18n.ts.somethingHappened,
+			text: 'CODE: ASYNC_COMP_LOAD_FAIL',
+		});
+	} else if (err instanceof Error) {
 		let message = '';
 		switch (err.message.toLowerCase()) {
 			case 'this theme is already installed':
