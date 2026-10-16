@@ -1846,9 +1846,9 @@ func TestPackMessageDetailed_FieldsPresent(t *testing.T) {
 	assert.NotNil(t, out["room"])
 	// fromUser に avatarUrl の identicon fallback が入る (assertion 失敗時は
 	// require.IsType がテスト終了させるので panic せずに見やすいエラーになる)。
-	require.IsType(t, map[string]any{}, out["fromUser"])
-	from := out["fromUser"].(map[string]any)
-	assert.Equal(t, "/identicon/from@remote.example", from["avatarUrl"])
+	require.IsType(t, &chatUser{}, out["fromUser"])
+	from := out["fromUser"].(*chatUser)
+	assert.Equal(t, "/identicon/from@remote.example", from.AvatarURL)
 }
 
 func TestInvitationsIgnore(t *testing.T) {
@@ -2154,9 +2154,9 @@ func TestPackMessageDetailed_RoomReactionsIncludeUser(t *testing.T) {
 	require.True(t, ok)
 	require.Len(t, reactions, 1, "u1 は解決され、ghost (未解決) は drop")
 	assert.Equal(t, "👍", reactions[0]["reaction"])
-	user, ok := reactions[0]["user"].(map[string]any)
+	user, ok := reactions[0]["user"].(*chatUser)
 	require.True(t, ok, "room reaction は user (UserLite) を含む")
-	assert.Equal(t, "u1", user["id"])
+	assert.Equal(t, "u1", user.ID)
 }
 
 // 1on1 (lite) message の reactions は user を含まない。

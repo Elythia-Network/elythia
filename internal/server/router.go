@@ -4250,6 +4250,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	chatHandler.SetDriveFileRepo(driveFileRepo)
 	chatHandler.SetModeratorChecker(roleService)
 	chatHandler.SetUserRepo(userRepo)
+	chatHandler.SetLiteFiller(sharedUserPacker)         // #3438: UserLite の instance・絵文字を応答ごとにまとめて埋める
 	chatHandler.SetChatAvailabilityChecker(roleService) // #1796: recipient の chatAvailability(write) 検査
 	chatHandler.SetModLog(modLogService)                // #1541: moderator による chat room 削除の監査ログ
 	// chatRoomInvitationReceived 通知 (#1559): 招待作成 (local handler / AP service)
@@ -4891,6 +4892,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"roles/users の利用者に関係・ピン留め・移行先・instance・絵文字が載らない"},
 		{"reversi.liteFiller", reversiHandler.HasLiteFiller(),
 			"reversi/invitations のリモートの招待者に instance・絵文字が載らない"},
+		{"chat.liteFiller", chatHandler.HasLiteFiller(),
+			"chat の応答 (メッセージの fromUser・toUser・reactions[].user、ルームの owner、招待の user) のリモートの利用者に instance・絵文字が載らない"},
 		{"admin.listPacker", adminHandler.HasListPacker(),
 			"admin/show-users・roles/users・abuse-user-reports・show-moderation-logs の利用者にピン留め・移行先・instance・絵文字が載らない"},
 		{"auth.detailExtras", authHandler.HasDetailExtras(),
