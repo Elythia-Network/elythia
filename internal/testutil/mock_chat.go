@@ -255,6 +255,12 @@ func (m *MockChatRepository) FindMessageByID(id string) (*model.ChatMessage, err
 	return nil, ErrNotFound
 }
 
+// FindMessageDetailedByID returns the stored row as FindMessageByID does; the
+// mock keeps whatever relations the test stored.
+func (m *MockChatRepository) FindMessageDetailedByID(id string) (*model.ChatMessage, error) {
+	return m.FindMessageByID(id)
+}
+
 func (m *MockChatRepository) FindMessageByURI(uri string) (*model.ChatMessage, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

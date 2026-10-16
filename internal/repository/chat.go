@@ -28,6 +28,10 @@ type ChatRepository interface {
 	// Message operations
 	CreateMessage(msg *model.ChatMessage) error
 	FindMessageByID(id string) (*model.ChatMessage, error)
+	// FindMessageDetailedByID is FindMessageByID that also loads the recipient
+	// user and the room (with its owner), for packing the upstream ChatMessage
+	// (packMessageDetailed) of chat/messages/show.
+	FindMessageDetailedByID(id string) (*model.ChatMessage, error)
 	FindMessageByURI(uri string) (*model.ChatMessage, error)
 	UpdateMessage(msg *model.ChatMessage) error
 	DeleteMessage(id string) error
@@ -295,7 +299,9 @@ func (r *chatRepository) DeleteRoom(id string) error {
 
 func (r *chatRepository) ListRoomsByOwner(ownerID, sinceID, untilID string, limit int) ([]*model.ChatRoom, error) {
 	var rooms []*model.ChatRoom
-	q := applyIDCursor(r.db.Where(`"ownerId" = ?`, ownerID), `"id"`, sinceID, untilID, limit, 30)
+	// owner は ChatRoom の必須 field (packRoom が UserLite にする)。読み込まないと
+	// 応答から owner が落ちる (#3438)。
+	q := applyIDCursor(r.db.Preload("Owner").Where(`"ownerId" = ?`, ownerID), `"id"`, sinceID, untilID, limit, 30)
 	if err := q.Find(&rooms).Error; err != nil {
 		return nil, err
 	}
@@ -304,7 +310,7 @@ func (r *chatRepository) ListRoomsByOwner(ownerID, sinceID, untilID string, limi
 
 func (r *chatRepository) ListJoinedRooms(userID, sinceID, untilID string, limit int) ([]*model.ChatRoom, error) {
 	var rooms []*model.ChatRoom
-	q := r.db.Joins(`JOIN "chat_room_membership" ON "chat_room_membership"."roomId" = "chat_room"."id"`).
+	q := r.db.Preload("Owner").Joins(`JOIN "chat_room_membership" ON "chat_room_membership"."roomId" = "chat_room"."id"`).
 		Where(`"chat_room_membership"."userId" = ?`, userID)
 	q = applyIDCursor(q, `"chat_room"."id"`, sinceID, untilID, limit, 30)
 	if err := q.Find(&rooms).Error; err != nil {
@@ -323,6 +329,23 @@ func (r *chatRepository) FindMessageByID(id string) (*model.ChatMessage, error) 
 	}
 	var msg model.ChatMessage
 	if err := r.db.Preload("FromUser").Preload("File").Where(`"id" = ?`, id).First(&msg).Error; err != nil {
+		return nil, err
+	}
+	return &msg, nil
+}
+
+// FindMessageDetailedByID loads a message with FromUser / ToUser / ToRoom
+// (and ToRoom.Owner) / File.
+//
+// FindMessageByID は更新・削除・リアクションでも引くので、そちらに Preload を
+// 足すと使わない行まで読む。messages/show だけがこれを使う (#3438)。
+func (r *chatRepository) FindMessageDetailedByID(id string) (*model.ChatMessage, error) {
+	if !storable(id) {
+		return nil, ErrNotFound
+	}
+	var msg model.ChatMessage
+	if err := r.db.Preload("FromUser").Preload("ToUser").Preload("ToRoom").Preload("ToRoom.Owner").Preload("File").
+		Where(`"id" = ?`, id).First(&msg).Error; err != nil {
 		return nil, err
 	}
 	return &msg, nil
@@ -361,7 +384,7 @@ func (r *chatRepository) ListMessagesByFileID(fileID, untilID, sinceID string, l
 	if limit <= 0 {
 		limit = 10
 	}
-	q := r.db.Preload("FromUser").Preload("ToUser").Preload("ToRoom").Preload("File").
+	q := r.db.Preload("FromUser").Preload("ToUser").Preload("ToRoom").Preload("ToRoom.Owner").Preload("File").
 		Where(`"fileId" = ?`, fileID)
 	if untilID != "" {
 		q = q.Where(`"id" < ?`, untilID)
@@ -558,7 +581,7 @@ func (r *chatRepository) MarkRead(userID, messageID string) error {
 
 func (r *chatRepository) ListInvitationsByUser(userID string, ignored bool, sinceID, untilID string, limit int) ([]*model.ChatRoomInvitation, error) {
 	var rows []*model.ChatRoomInvitation
-	q := applyIDCursor(r.db.Preload("Room").Where(`"userId" = ? AND "ignored" = ?`, userID, ignored),
+	q := applyIDCursor(r.db.Preload("Room").Preload("Room.Owner").Where(`"userId" = ? AND "ignored" = ?`, userID, ignored),
 		`"id"`, sinceID, untilID, limit, 30)
 	if err := q.Find(&rows).Error; err != nil {
 		return nil, err
@@ -629,7 +652,7 @@ func (r *chatRepository) ListHistory(userID string, limit int) ([]*model.ChatMes
 		return nil, nil
 	}
 	var msgs []*model.ChatMessage
-	if err := r.db.Preload("FromUser").Preload("ToUser").Preload("ToRoom").Preload("File").Where("id IN ?", ids).Order("id DESC").Find(&msgs).Error; err != nil {
+	if err := r.db.Preload("FromUser").Preload("ToUser").Preload("ToRoom").Preload("ToRoom.Owner").Preload("File").Where("id IN ?", ids).Order("id DESC").Find(&msgs).Error; err != nil {
 		return nil, err
 	}
 	return msgs, nil
@@ -703,7 +726,7 @@ func (r *chatRepository) ListRoomHistory(userID string, limit int) ([]*model.Cha
 		return nil, nil
 	}
 	var msgs []*model.ChatMessage
-	if err := r.db.Preload("FromUser").Preload("ToRoom").Preload("File").Where("id IN ?", ids).Order("id DESC").Find(&msgs).Error; err != nil {
+	if err := r.db.Preload("FromUser").Preload("ToRoom").Preload("ToRoom.Owner").Preload("File").Where("id IN ?", ids).Order("id DESC").Find(&msgs).Error; err != nil {
 		return nil, err
 	}
 	return msgs, nil
