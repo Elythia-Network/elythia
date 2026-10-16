@@ -12,6 +12,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	corechat "github.com/elythia-network/elythia/internal/core/chat"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
+	"github.com/elythia-network/elythia/internal/core/userpack"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
@@ -78,7 +79,28 @@ type Handler struct {
 	// (#1541, upstream ChatService.deleteRoom の moderationLog.log)。未配線なら
 	// 記録を skip する。
 	modLog ModLogger
+	// lites は応答に含まれる UserLite (fromUser / toUser / reactions[].user /
+	// owner / invitation の user) の instance と絵文字を、応答ごとに 1 回で
+	// まとめて埋める (本家 packMany と同じ、#3438)。通知に埋める招待
+	// (PackInvitationByID) は通知 1 件ごとに呼ばれるので、そこでは通知 1 件ごとに
+	// 1 回になる。未配線なら埋めない。
+	lites userpack.LiteFiller
 }
+
+// SetLiteFiller wires the batch resolver of instance / emojis for the UserLite
+// values embedded in chat responses (#3438).
+func (h *Handler) SetLiteFiller(f userpack.LiteFiller) { h.lites = f }
+
+// HasLiteFiller reports whether the lite filler was wired.
+//
+// 未配線だと chat の応答に含まれるリモートの利用者に instance と絵文字が載らない。
+// 起動時検査に使う。
+func (h *Handler) HasLiteFiller() bool { return h.lites != nil }
+
+// maxChatMessageTextRunes is the upstream paramDef maxLength of the chat
+// message text (create-to-user / create-to-room). messages/update uses the same
+// limit.
+const maxChatMessageTextRunes = 2000
 
 // maxRoomMembers mirrors upstream ChatService.MAX_ROOM_MEMBERS。join /
 // invitations/create で room の membership 数がこの上限に達したら拒否する。
@@ -158,7 +180,11 @@ func (h *Handler) PackInvitationByID(invitationID, viewerID string) (map[string]
 		return nil, false
 	}
 	inv.User = u
-	return h.packInvitationDetailed(inv, viewerID), true
+	packed := h.packInvitationDetailed(inv, viewerID)
+	// 通知の一覧では通知 1 件ごとにここを通るので、FillLites も通知 1 件ごとに
+	// 1 回になる (もともと招待・room・利用者を通知 1 件ごとに引いている)。
+	h.fillUsers(packed)
+	return packed, true
 }
 
 // NewHandler creates a new chat handler.
@@ -427,6 +453,27 @@ func (h *Handler) packMembershipDetailed(m *model.ChatRoomMembership, meID strin
 // mk-go 側で先に追加すると upstream と逆方向の shape drift を生むため
 // **意図的に未対応** とする。upstream が isRead を実装した場合に追従する。
 func (h *Handler) packMessageDetailed(m *model.ChatMessage, meID string) map[string]any {
+	return h.packMessageDetailedWith(m, meID, h.reactionUsers([]*model.ChatMessage{m}))
+}
+
+// packMessagesDetailed packs a list of messages like packMessageDetailed, but
+// resolves the reacting users of all messages with one query (upstream
+// packMessagesDetailed packs them with one packMany).
+//
+// メッセージごとに packMessageDetailed を呼ぶと、reactions の利用者を引く
+// 問い合わせがメッセージの数だけ走る (#3438)。
+func (h *Handler) packMessagesDetailed(msgs []*model.ChatMessage, meID string) []map[string]any {
+	users := h.reactionUsers(msgs)
+	out := make([]map[string]any, 0, len(msgs))
+	for _, m := range msgs {
+		out = append(out, h.packMessageDetailedWith(m, meID, users))
+	}
+	return out
+}
+
+// packMessageDetailedWith is packMessageDetailed with the reacting users
+// already resolved (see reactionUsers).
+func (h *Handler) packMessageDetailedWith(m *model.ChatMessage, meID string, reactionUsers map[string]*model.User) map[string]any {
 	result := h.packMessageWithCreatedAt(m)
 	if m.ToUser != nil {
 		result["toUser"] = packUser(m.ToUser)
@@ -446,8 +493,52 @@ func (h *Handler) packMessageDetailed(m *model.ChatMessage, meID string) map[str
 	// (packedChatMessageSchema) を使い、1on1 message でも reactions[].user を必須にする
 	// (frontend XMessage.vue が record.user.id を参照する)。packRoomReactions は ToRoomID
 	// 非依存に "userID/reaction" を解決できるので、room/1on1 双方で user を埋める。
-	result["reactions"] = h.packRoomReactions(m)
+	result["reactions"] = h.packRoomReactions(m, reactionUsers)
 	return result
+}
+
+// splitReaction splits the stored "<userId>/<reaction>" form. userID is empty
+// when the record has no "/".
+func splitReaction(r string) (userID, reaction string) {
+	if i := strings.Index(r, "/"); i >= 0 {
+		return r[:i], r[i+1:]
+	}
+	return "", r
+}
+
+// reactionUsers resolves the users who reacted to any of msgs with one
+// FindManyByIDs. It returns nil when userRepo is not wired (packRoomReactions
+// then degrades to {reaction}); a lookup failure yields an empty map, which
+// drops every reaction like an unresolved user.
+func (h *Handler) reactionUsers(msgs []*model.ChatMessage) map[string]*model.User {
+	if h.userRepo == nil {
+		return nil
+	}
+	idSet := make(map[string]struct{})
+	ids := make([]string, 0)
+	for _, m := range msgs {
+		for _, r := range m.Reactions {
+			uid, _ := splitReaction(r)
+			if uid == "" {
+				continue
+			}
+			if _, dup := idSet[uid]; dup {
+				continue
+			}
+			idSet[uid] = struct{}{}
+			ids = append(ids, uid)
+		}
+	}
+	userByID := make(map[string]*model.User, len(ids))
+	if len(ids) == 0 {
+		return userByID
+	}
+	if users, err := h.userRepo.FindManyByIDs(ids); err == nil {
+		for _, u := range users {
+			userByID[u.ID] = u
+		}
+	}
+	return userByID
 }
 
 // packRoomReactions builds room-message reactions as {user, reaction} by
@@ -455,63 +546,86 @@ func (h *Handler) packMessageDetailed(m *model.ChatMessage, meID string) map[str
 // full/room schema は reactions[].user を required non-null とするため、user を
 // 解決できた reaction だけ emit する (= 削除済 user の reaction は drop して、
 // user 欠落で client が crash しないよう保証)。userRepo 未配線 (test / early
-// boot) は base の {reaction} に degrade する。
-func (h *Handler) packRoomReactions(m *model.ChatMessage) []map[string]any {
-	if h.userRepo == nil {
+// boot、users == nil) は base の {reaction} に degrade する。users は
+// reactionUsers で引いたもの。
+func (h *Handler) packRoomReactions(m *model.ChatMessage, users map[string]*model.User) []map[string]any {
+	if users == nil {
 		return packChatReactions(m.Reactions)
 	}
-	type parsed struct{ userID, reaction string }
-	items := make([]parsed, 0, len(m.Reactions))
-	idSet := make(map[string]struct{}, len(m.Reactions))
+	out := make([]map[string]any, 0, len(m.Reactions))
 	for _, r := range m.Reactions {
-		uid, reaction := "", r
-		if i := strings.Index(r, "/"); i >= 0 {
-			uid, reaction = r[:i], r[i+1:]
-		}
-		items = append(items, parsed{uid, reaction})
-		if uid != "" {
-			idSet[uid] = struct{}{}
-		}
-	}
-	userByID := make(map[string]*model.User, len(idSet))
-	if len(idSet) > 0 {
-		ids := make([]string, 0, len(idSet))
-		for id := range idSet {
-			ids = append(ids, id)
-		}
-		if users, err := h.userRepo.FindManyByIDs(ids); err == nil {
-			for _, u := range users {
-				userByID[u.ID] = u
-			}
-		}
-	}
-	out := make([]map[string]any, 0, len(items))
-	for _, it := range items {
-		u, ok := userByID[it.userID]
+		uid, reaction := splitReaction(r)
+		u, ok := users[uid]
 		if !ok {
 			continue // user 未解決 (削除済等) の reaction は drop
 		}
-		out = append(out, map[string]any{"user": packUser(u), "reaction": it.reaction})
+		out = append(out, map[string]any{"user": packUser(u), "reaction": reaction})
 	}
 	return out
 }
 
-// packUser produces the UserLite shape consumed by FE chat components.
-// FE の MkAvatar / MkUserName が `avatarUrl` / `avatarBlurhash` を読むため、
-// 含めないとアイコンが空のまま表示される (#692)。avatarUrl 未設定時は
-// `entity.IdenticonURL` 経由で identicon URL に fallback する (TS upstream
-// `getIdenticonUrl` 相当)。
-func packUser(u *model.User) map[string]any {
-	return map[string]any{
-		"id":             u.ID,
-		"username":       u.Username,
-		"name":           u.Name,
-		"host":           u.Host,
-		"avatarUrl":      entity.IdenticonURL(u),
-		"avatarBlurhash": u.AvatarBlurhash,
-		"isBot":          u.IsBot,
-		"isCat":          u.IsCat,
+// chatUser is the UserLite embedded in chat responses. src keeps the source
+// row so that instance / emojis can be resolved in one batch (fillUsers) right
+// before the response is written; it is not serialized.
+type chatUser struct {
+	entity.UserLite
+	src *model.User
+}
+
+// packUser packs u as upstream's UserLite (packedUserLiteSchema) via the shared
+// entity.PackUserLite, so avatarDecorations / emojis / onlineStatus /
+// badgeRoles are present like every other UserLite response. instance and the
+// display-name emojis are filled later by fillUsers.
+//
+// 以前は chat だけの縮めた形 (id / username / name / host / avatarUrl /
+// avatarBlurhash / isBot / isCat) を返しており、misskey-js の UserLite で必須の
+// avatarDecorations / emojis / onlineStatus が欠けていた (#3438)。
+func packUser(u *model.User) *chatUser {
+	return &chatUser{UserLite: entity.PackUserLite(u), src: u}
+}
+
+// fillUsers resolves instance / emojis of every chatUser reachable from v
+// with one batched lookup (upstream packMany). v is a packed response built of
+// map[string]any / []map[string]any values (the only containers the chat
+// packers produce).
+//
+// 利用者ごとに引くと、メッセージの一覧で fromUser と reactions[].user の数だけ
+// 問い合わせが増える (N+1)。応答を組み終えてから集めて 1 回で引く。
+func (h *Handler) fillUsers(v any) {
+	if h.lites == nil {
+		return
 	}
+	var users []*model.User
+	var lites []*entity.UserLite
+	var walk func(any)
+	walk = func(v any) {
+		switch x := v.(type) {
+		case *chatUser:
+			if x != nil && x.src != nil {
+				users = append(users, x.src)
+				lites = append(lites, &x.UserLite)
+			}
+		case map[string]any:
+			for _, e := range x {
+				walk(e)
+			}
+		case []map[string]any:
+			for _, e := range x {
+				walk(e)
+			}
+		}
+	}
+	walk(v)
+	if len(users) > 0 {
+		h.lites.FillLites(users, lites)
+	}
+}
+
+// jsonOK fills the embedded UserLite values of v (fillUsers) and writes it as
+// a 200 response. Every chat response carrying a packed user goes through it.
+func (h *Handler) jsonOK(c echo.Context, v any) error {
+	h.fillUsers(v)
+	return c.JSON(http.StatusOK, v)
 }
 
 // AttachedChatMessages handles POST /api/drive/files/attached-chat-messages.
@@ -566,11 +680,7 @@ func (h *Handler) AttachedChatMessages(c echo.Context) error {
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
-	out := make([]map[string]any, 0, len(msgs))
-	for _, m := range msgs {
-		out = append(out, h.packMessageDetailed(m, user.ID))
-	}
-	return c.JSON(http.StatusOK, out)
+	return h.jsonOK(c, h.packMessagesDetailed(msgs, user.ID))
 }
 
 // --- Rooms ---
@@ -601,7 +711,7 @@ func (h *Handler) RoomsCreate(c echo.Context) error {
 	// owner を解決して必ず含めるため、作成者 (= 認証 user) を attach してから
 	// pack する (#1284)。未 attach だと packRoom が owner を omit していた。
 	room.Owner = user
-	return c.JSON(http.StatusOK, h.packRoomDetailed(room, user.ID))
+	return h.jsonOK(c, h.packRoomDetailed(room, user.ID))
 }
 
 // RoomsShow handles POST /api/chat/rooms/show.
@@ -633,7 +743,7 @@ func (h *Handler) RoomsShow(c echo.Context) error {
 			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_ROOM", "No such room.", "857ae02f-8759-4d20-9adb-6e95fffe4fd7"))
 		}
 	}
-	return c.JSON(http.StatusOK, h.packRoomDetailed(room, user.ID))
+	return h.jsonOK(c, h.packRoomDetailed(room, user.ID))
 }
 
 // RoomsUpdate handles POST /api/chat/rooms/update.
@@ -670,7 +780,7 @@ func (h *Handler) RoomsUpdate(c echo.Context) error {
 	if err := h.repo.UpdateRoom(room); err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
-	return c.JSON(http.StatusOK, h.packRoomDetailed(room, user.ID))
+	return h.jsonOK(c, h.packRoomDetailed(room, user.ID))
 }
 
 // RoomsDelete handles POST /api/chat/rooms/delete.
@@ -730,7 +840,7 @@ func (h *Handler) RoomsOwned(c echo.Context) error {
 		// を false に固定する。
 		result[i] = h.packRoomDetailed(r, user.ID)
 	}
-	return c.JSON(http.StatusOK, result)
+	return h.jsonOK(c, result)
 }
 
 // RoomsJoined handles POST /api/chat/rooms/joined.
@@ -753,7 +863,7 @@ func (h *Handler) RoomsJoined(c echo.Context) error {
 		// hint cache 化は別 issue で扱う。
 		result[i] = h.packRoomDetailed(r, user.ID)
 	}
-	return c.JSON(http.StatusOK, result)
+	return h.jsonOK(c, result)
 }
 
 // RoomsLeave handles POST /api/chat/rooms/leave.
@@ -960,7 +1070,7 @@ func (h *Handler) MessagesCreate(c echo.Context) error {
 	}
 	// upstream paramDef は text maxLength:2000 (create-to-user.ts/create-to-room.ts)。
 	// 超過は schema validation 段階で弾かれるため INVALID_PARAM 相当で reject する。
-	if utf8.RuneCountInString(text) > 2000 {
+	if utf8.RuneCountInString(text) > maxChatMessageTextRunes {
 		return apierr.JSONInvalidParam(c)
 	}
 	fileID := ""
@@ -1025,7 +1135,7 @@ func (h *Handler) MessagesCreate(c echo.Context) error {
 	if err != nil {
 		return h.mapChatErr(c, err)
 	}
-	return c.JSON(http.StatusOK, h.packMessageDetailed(withSender(h.reloadIfFilePending(msg), user), user.ID))
+	return h.jsonOK(c, h.packMessageDetailed(withSender(h.reloadIfFilePending(msg), user), user.ID))
 }
 
 // messagesCreateLegacy preserves pre-Phase-9.8 behaviour for callers that
@@ -1040,7 +1150,7 @@ func (h *Handler) messagesCreateLegacy(c echo.Context, user *model.User, text, t
 	if err := h.repo.CreateMessage(msg); err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
-	return c.JSON(http.StatusOK, h.packMessageDetailed(withSender(h.reloadIfFilePending(msg), user), user.ID))
+	return h.jsonOK(c, h.packMessageDetailed(withSender(h.reloadIfFilePending(msg), user), user.ID))
 }
 
 // withSender attaches the authenticated sender as FromUser when the row has
@@ -1080,7 +1190,9 @@ func (h *Handler) MessagesShow(c echo.Context) error {
 	if err := c.Bind(&req); err != nil || req.MessageID == "" {
 		return apierr.JSONInvalidParam(c)
 	}
-	msg, err := h.repo.FindMessageByID(req.MessageID)
+	// 本家 show.ts は packMessageDetailed で toUser / toRoom も返すので、
+	// 両方を読み込む版で引く (#3438)。
+	msg, err := h.repo.FindMessageDetailedByID(req.MessageID)
 	if err != nil && !repository.IsNotFound(err) {
 		// **DB 障害を not-found に丸めない** (#2792)。
 		return apierr.JSONInternalError(c)
@@ -1099,7 +1211,7 @@ func (h *Handler) MessagesShow(c echo.Context) error {
 	if msg.FromUserID != user.ID && (msg.ToUserID == nil || *msg.ToUserID != user.ID) && !h.isModerator(user.ID) {
 		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_MESSAGE", "No such message.", "006d73c9-dada-5b5d-a0f5-00b01f70bc3c"))
 	}
-	return c.JSON(http.StatusOK, h.packMessageDetailed(msg, user.ID))
+	return h.jsonOK(c, h.packMessageDetailed(msg, user.ID))
 }
 
 // MessagesUpdate handles POST /api/chat/messages/update.
@@ -1110,6 +1222,13 @@ func (h *Handler) MessagesUpdate(c echo.Context) error {
 		Text      *string `json:"text"`
 	}
 	if err := c.Bind(&req); err != nil || req.MessageID == "" {
+		return apierr.JSONInvalidParam(c)
+	}
+	// 本文の上限は作成 (create-to-user / create-to-room の maxLength:2000) と揃える。
+	// update は本家に無い独自の endpoint なので、作成と同じく schema 検査の段階の
+	// INVALID_PARAM で弾く。検査しないと 2000 文字を超えて書き換えられ、列
+	// (varchar(4096)) を超えると DB エラーの 500 になる (#3438)。
+	if req.Text != nil && utf8.RuneCountInString(*req.Text) > maxChatMessageTextRunes {
 		return apierr.JSONInvalidParam(c)
 	}
 	if h.svc == nil {
@@ -1215,11 +1334,7 @@ func (h *Handler) Messages(c echo.Context) error {
 	} else if req.UserID != "" {
 		msgs, _ = h.repo.ListMessagesByUser(user.ID, req.UserID, "", "", req.Limit)
 	}
-	result := make([]map[string]any, len(msgs))
-	for i, m := range msgs {
-		result[i] = h.packMessageDetailed(m, user.ID)
-	}
-	return c.JSON(http.StatusOK, result)
+	return h.jsonOK(c, h.packMessagesDetailed(msgs, user.ID))
 }
 
 // MessagesSearch handles POST /api/chat/messages/search.
@@ -1248,11 +1363,7 @@ func (h *Handler) MessagesSearch(c echo.Context) error {
 		}
 	}
 	msgs, _ := h.repo.SearchMessages(user.ID, req.Query, req.Limit, req.UserID, req.RoomID)
-	result := make([]map[string]any, len(msgs))
-	for i, m := range msgs {
-		result[i] = h.packMessageDetailed(m, user.ID)
-	}
-	return c.JSON(http.StatusOK, result)
+	return h.jsonOK(c, h.packMessagesDetailed(msgs, user.ID))
 }
 
 // ReactionsCreate handles POST /api/chat/messages/reactions/create and
@@ -1395,7 +1506,7 @@ func (h *Handler) InvitationsCreate(c echo.Context) error {
 	// upstream res は packed ChatRoomInvitation を返す (旧 mk-go は 204)。
 	inv.Room = room
 	inv.User = inviteeUser
-	return c.JSON(http.StatusOK, h.packInvitationDetailed(inv, user.ID))
+	return h.jsonOK(c, h.packInvitationDetailed(inv, user.ID))
 }
 
 // InvitationsDelete handles POST /api/chat/rooms/invitations/delete.
@@ -1641,11 +1752,7 @@ func (h *Handler) UserTimeline(c echo.Context) error {
 	if err := h.repo.MarkAllReadFromUser(user.ID, req.UserID); err != nil {
 		slog.Warn("chat: MarkAllReadFromUser failed", "readerId", user.ID, "fromUserId", req.UserID, "err", err)
 	}
-	out := make([]map[string]any, 0, len(msgs))
-	for _, m := range msgs {
-		out = append(out, h.packMessageDetailed(m, user.ID))
-	}
-	return c.JSON(http.StatusOK, out)
+	return h.jsonOK(c, h.packMessagesDetailed(msgs, user.ID))
 }
 
 // RoomTimeline handles POST /api/chat/messages/room-timeline.
@@ -1685,11 +1792,7 @@ func (h *Handler) RoomTimeline(c echo.Context) error {
 	if err := h.repo.MarkAllReadInRoom(user.ID, req.RoomID); err != nil {
 		slog.Warn("chat: MarkAllReadInRoom failed", "readerId", user.ID, "roomId", req.RoomID, "err", err)
 	}
-	out := make([]map[string]any, 0, len(msgs))
-	for _, m := range msgs {
-		out = append(out, h.packMessageDetailed(m, user.ID))
-	}
-	return c.JSON(http.StatusOK, out)
+	return h.jsonOK(c, h.packMessagesDetailed(msgs, user.ID))
 }
 
 // ReadAll handles POST /api/chat/read-all.
@@ -1734,15 +1837,14 @@ func (h *Handler) InvitationsInbox(c echo.Context) error {
 	}
 	out := make([]map[string]any, 0, len(rows))
 	for _, inv := range rows {
-		entry := map[string]any{"id": inv.ID, "roomId": inv.RoomID, "userId": inv.UserID}
-		if inv.Room != nil {
-			// inbox は本人が invitee (= owner ではない)。lookup で
-			// invitationExists = true、isMuted = false (まだ非 member) になる。
-			entry["room"] = h.packRoomDetailed(inv.Room, user.ID)
-		}
-		out = append(out, entry)
+		// 本家 packRoomInvitation と同じ ChatRoomInvitation の形 (createdAt と
+		// user は必須) にする。inbox の招待は本人宛てなので、user は閲覧者自身で、
+		// 引き直さずに済む (#3438)。room は本人が invitee (= owner ではない) なので
+		// invitationExists = true、isMuted = false (まだ非 member) になる。
+		inv.User = user
+		out = append(out, h.packInvitationDetailed(inv, user.ID))
 	}
-	return c.JSON(http.StatusOK, out)
+	return h.jsonOK(c, out)
 }
 
 // InvitationsOutbox handles POST /api/chat/rooms/invitations/outbox.
@@ -1781,7 +1883,7 @@ func (h *Handler) InvitationsOutbox(c echo.Context) error {
 		inv.Room = room
 		out = append(out, h.packInvitationDetailed(inv, user.ID))
 	}
-	return c.JSON(http.StatusOK, out)
+	return h.jsonOK(c, out)
 }
 
 // RoomsJoin handles POST /api/chat/rooms/join.
@@ -1857,7 +1959,7 @@ func (h *Handler) RoomsJoining(c echo.Context) error {
 	for _, m := range rows {
 		out = append(out, h.packMembershipDetailed(m, user.ID))
 	}
-	return c.JSON(http.StatusOK, out)
+	return h.jsonOK(c, out)
 }
 
 // RoomsMembers handles POST /api/chat/rooms/members.
@@ -1907,7 +2009,7 @@ func (h *Handler) RoomsMembers(c echo.Context) error {
 		}
 		out = append(out, entry)
 	}
-	return c.JSON(http.StatusOK, out)
+	return h.jsonOK(c, out)
 }
 
 // --- Other ---
@@ -1949,13 +2051,11 @@ func (h *Handler) History(c echo.Context) error {
 	// upstream history.ts は packMessagesDetailed の後に会話ごとの read 状態を
 	// 計算して各 message に isRead を載せる (#1749)。packMessageDetailed 自体は
 	// isRead を出さない (#861) ため、history endpoint でのみ上乗せする。
-	out := make([]map[string]any, 0, len(msgs))
-	for _, m := range msgs {
-		packed := h.packMessageDetailed(m, user.ID)
-		packed["isRead"] = h.historyItemIsRead(user.ID, m, req.Room)
-		out = append(out, packed)
+	out := h.packMessagesDetailed(msgs, user.ID)
+	for i, m := range msgs {
+		out[i]["isRead"] = h.historyItemIsRead(user.ID, m, req.Room)
 	}
-	return c.JSON(http.StatusOK, out)
+	return h.jsonOK(c, out)
 }
 
 // historyItemIsRead reports whether the conversation represented by a history
