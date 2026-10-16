@@ -192,7 +192,9 @@ func TestStoppedMidway_WhileWaiting(t *testing.T) {
 // for held: the new database must not be dropped yet, or the recovery would
 // lose track of an operation that still holds the maintenance.
 func TestStoppedMidway_WhileAborting(t *testing.T) {
-	e := newEnv(t, func(o *Options) { o.ResumeTimeout = time.Hour; o.HeldTimeout = 50 * time.Millisecond })
+	// 切らせるのは held の待ちだけ。時計は 1 時間ずつ進めるので、aborting を見るまでに
+	// 余分に進んでも、再開の待ち (1000 時間) は切れない。
+	e := newEnv(t, func(o *Options) { o.ResumeTimeout = 1000 * time.Hour })
 	p := e.process("p1")
 	rec, _ := e.prepare()
 	e.db.mu.Lock()
@@ -200,7 +202,11 @@ func TestStoppedMidway_WhileAborting(t *testing.T) {
 	e.db.mu.Unlock()
 	p.setFailBack(true)
 	require.NoError(t, e.m.Confirm(context.Background(), rec.OpID))
-	e.waitStep(rec.OpID, StepAborting)
+	// プロセスがメンテナンスを見て報告し直す (drained) のを待ってから期限を切らせる。
+	// 待たずに中止へ進むと、判定役はメンテナンスの前の running の報告を見て
+	// メンテナンスを外す (#3369)。
+	e.waitReport("p1", maintmode.ProcDrained)
+	e.waitStepPassingTime(rec.OpID, StepAborting)
 	e.waitMaintenance(func(st *maintmode.State) bool { return st != nil && st.Phase == maintmode.PhaseResuming }, 5*time.Second)
 	e.stop()
 	assertLeftForRecovery(t, e, rec.OpID)

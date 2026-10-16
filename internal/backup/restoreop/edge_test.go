@@ -298,9 +298,9 @@ func TestRestore_RevertCannotReadTheMaintenance(t *testing.T) {
 
 func TestRestore_AbortResumeTimesOut(t *testing.T) {
 	// 中止 (A1) の後、プロセスが戻らない。待ちきれなくても DB は消し、記録は残す。
-	// held の待ちも再開の待ちも期限で切れることを検査する。期限は、既定を変える前の
-	// 値 (500ms) を明示して保つ。
-	e := newEnv(t, func(o *Options) { o.HeldTimeout = 500 * time.Millisecond; o.ResumeTimeout = 500 * time.Millisecond })
+	// held の待ちも再開の待ちも期限で切れることを検査する。期限はどちらも時計を
+	// 進めて切らせ、実時間には頼らない。
+	e := newEnv(t, func(o *Options) { o.ResumeTimeout = 100 * time.Hour })
 	p := e.process("p1")
 	e.db.mu.Lock()
 	e.db.conns[testDB] = 1
@@ -308,7 +308,26 @@ func TestRestore_AbortResumeTimesOut(t *testing.T) {
 	rec, _ := e.prepare()
 	p.setFailBack(true)
 	require.NoError(t, e.m.Confirm(context.Background(), rec.OpID))
-	e.waitStep(rec.OpID, StepAborted)
+	// プロセスがメンテナンスを見て手放した (drained) と報告し直してから、held の待ちを
+	// 切らせる。短い実時間の期限だと、プロセスが報告し直す前に中止へ進み、判定役は
+	// メンテナンスの前に書かれた running の報告を見て、戻れないはずのプロセスを
+	// 戻ったものとしてメンテナンスを外した (#3369)。時計は 1 時間ずつ進めるので、
+	// aborting を見るまでに余分に進んでも、再開の待ち (100 時間) は切れない。
+	e.waitReport("p1", maintmode.ProcDrained)
+	e.waitStepPassingTime(rec.OpID, StepAborting)
+	// 再開の待ちは、戻れないこと (resume_failed) が判定役に見えてから切らせる。先に
+	// 切らせると、判定役がメンテナンスを誤って外す場合も同じ結末になり、「戻らない
+	// から期限で切れた」を確かめられない。
+	e.waitMaintenance(func(st *maintmode.State) bool { return st != nil && st.Phase == maintmode.PhaseResuming }, 5*time.Second)
+	e.waitReport("p1", maintmode.ProcResumeFailed)
+	require.Never(t, func() bool {
+		st, err := e.maint.Get(context.Background())
+		return err == nil && st == nil
+	}, 500*time.Millisecond, 5*time.Millisecond, "the maintenance stays at resuming while the process cannot come back")
+	e.clock.Add(int64(1000 * time.Hour))
+	// 負荷で、再開の待ちが期限を数え始めるのが上で進めた後になっても切れるように、
+	// 見るたびにも進める。
+	e.waitStepPassingTime(rec.OpID, StepAborted)
 	journal, err := e.store.Journal(context.Background(), rec.OpID)
 	require.NoError(t, err)
 	found := false

@@ -676,7 +676,9 @@ func (e *env) waitStep(opID string, steps ...string) *Record {
 // waitStepPassingTime is waitStep that moves the managers' clock an hour
 // ahead on every look, so that every wait with a deadline (HeldTimeout,
 // ResumeTimeout) the manager is in, or enters, ends with its timeout. Use
-// it only once every wait left in the operation is meant to time out.
+// it only once every wait left in the operation is meant to time out, or
+// give the waits that must not time out a deadline far beyond the few hours
+// it may move after the step is reached.
 func (e *env) waitStepPassingTime(opID string, steps ...string) *Record {
 	e.t.Helper()
 	var rec *Record
@@ -727,6 +729,29 @@ func (e *env) waitMaintenance(cond func(st *maintmode.State) bool, wait time.Dur
 func (e *env) waitMaintenanceGone(wait time.Duration, msgAndArgs ...any) {
 	e.t.Helper()
 	e.waitMaintenance(func(st *maintmode.State) bool { return st == nil }, wait, msgAndArgs...)
+}
+
+// waitReport waits until the latest report of the process id says state.
+//
+// 期限の待ちを時計で切らせるテストは、プロセスがメンテナンスを見て報告し直すのを
+// これで待ってから時計を進める。待たずに進めると、判定役がメンテナンスの前に
+// 書かれた running の報告を見て、戻れないはずのプロセスを戻ったものとして
+// メンテナンスを外す (#3369)。
+func (e *env) waitReport(id, state string) {
+	e.t.Helper()
+	require.EventuallyWithT(e.t, func(c *assert.CollectT) {
+		reports, err := e.maint.Reports(context.Background())
+		if !assert.NoError(c, err, "read the reports") {
+			return
+		}
+		for _, r := range reports {
+			if r.ID == id {
+				assert.Equal(c, state, r.State, "the report of %s", id)
+				return
+			}
+		}
+		assert.Fail(c, "no report", "process %s has no report", id)
+	}, 10*time.Second, 5*time.Millisecond)
 }
 
 func (e *env) maintenance() *maintmode.State {
