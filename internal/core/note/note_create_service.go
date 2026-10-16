@@ -961,6 +961,7 @@ func (s *CreateService) Create(in CreateInput) (*model.Note, error) {
 	}
 
 	// 投票が指定されていればPollレコードを作成しnote.hasPollを更新
+	var createdPoll *model.Poll
 	if in.Poll != nil && len(in.Poll.Choices) > 0 {
 		votes := make([]int64, len(in.Poll.Choices))
 		poll := &model.Poll{
@@ -981,17 +982,10 @@ func (s *CreateService) Create(in CreateInput) (*model.Note, error) {
 			return nil, err
 		}
 		note.HasPoll = true
+		createdPoll = poll
 	}
 
-	// User / Renote / Reply リレーションをpreloadして返す。失敗時は引数の
-	// Userをそのまま埋めて返す。fanout / hook 先で renote/reply embed を
-	// 触るため full version を使う (#425)。
-	finalNote := note
-	if loaded, err := s.noteRepo.FindByIDWithRelations(noteID); err == nil && loaded != nil {
-		finalNote = loaded
-	} else {
-		finalNote.User = in.User
-	}
+	finalNote := s.hydrateCreated(note, in.User, createdPoll)
 
 	// ベストエフォートフックを非同期で並列実行する。各フックは独立しており、
 	// 失敗してもノート作成自体は成功扱い。TS版と同様にfire-and-forgetで配信する。
@@ -1053,6 +1047,45 @@ func (s *CreateService) Create(in CreateInput) (*model.Note, error) {
 	})
 
 	return finalNote, nil
+}
+
+// hydrateCreated returns the just-inserted note with the relations the
+// packers and hooks read (User / Poll, and Renote / Reply with their own
+// relations).
+//
+// 返信でもリノートでもない投稿は、INSERT した手元の値をそのまま使う (#3611)。
+// 以前は FindByIDWithRelations で note + poll + user を読み直していた。手元の値で
+// 足りるのは次の理由による。
+//   - DB が埋める列 (default のある列) は、GORM が INSERT の RETURNING で手元へ
+//     書き戻す。note にトリガーは無い
+//   - 作成から hook までの間に、この要求が note の行に書くのは hasPoll だけで、
+//     手元にも反映している
+//   - poll は作った値をそのまま付ける (投票数は 0 で、まだ誰も投票できない)
+//
+// 作者は、要求の認証で使った in.User (token のキャッシュから来うる) ではなく
+// DB から 1 本で読み直す。読み直していた頃と同じく、名前やアイコンの変更を
+// 直後の投稿にも反映するため。CachedUserRepository.FindManyByIDs はキャッシュを
+// 読まずに委譲する。
+//
+// 返信・リノートでは、埋め込む相手の relation (2 段目まで) が要るので、従来
+// どおり FindByIDWithRelations で読み直す。どの経路でも、失敗したときは手元の
+// 値に in.User を付けて返す (従来と同じ)。
+func (s *CreateService) hydrateCreated(note *model.Note, author *model.User, poll *model.Poll) *model.Note {
+	if note.ReplyID != nil || note.RenoteID != nil {
+		if loaded, err := s.noteRepo.FindByIDWithRelations(note.ID); err == nil && loaded != nil {
+			return loaded
+		}
+		note.User = author
+		return note
+	}
+	note.User = author
+	if s.userRepo != nil {
+		if users, err := s.userRepo.FindManyByIDs([]string{author.ID}); err == nil && len(users) == 1 && users[0] != nil {
+			note.User = users[0]
+		}
+	}
+	note.Poll = poll
+	return note
 }
 
 // updateFeaturedOnRenote boosts the renoted target note's featured engagement

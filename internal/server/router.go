@@ -557,6 +557,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		corewebpush.NewUserRepoPacker(userRepo),
 		corewebpush.NewNoteRepoPacker(noteRepo, idGen, followingRepo, driveFileRepo),
 	)
+	// 1 件の通知の stream と Web Push が、ノートの読み込みを共有する (#3611)。
+	notificationHook.SetNoteLoader(noteRepo.FindByIDWithRelations)
+	// push は送る直前に、ノートがまだあるかだけを primary で確かめる (#3611)。
+	notificationHook.SetNoteExistenceChecker(noteRepo)
 	webPushCache := corewebpush.NewSubscriptionCache(swSubRepo, s.redis.Default)
 	// Web Push delivery: webpush-go の HTTPClient field に SSRF-safe client
 	// を注入して FCM / Mozilla / Apple endpoint への配送も outbound 政策

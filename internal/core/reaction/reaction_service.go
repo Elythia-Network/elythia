@@ -99,6 +99,13 @@ type NotificationHook interface {
 	OnReactionRemoved(notifieeID, notifierID, noteID string)
 }
 
+// NoteLoadingNotificationHook is implemented by a NotificationHook that can
+// take the reacted note from the caller instead of reading it again (#3611).
+// load returns the note as it is after the reaction was written.
+type NoteLoadingNotificationHook interface {
+	OnReactionCreatedWithNote(notifieeID, notifierID, noteID, reaction string, load func() (*model.Note, error))
+}
+
 // FederationHook is invoked after a reaction is created or removed so that
 // the ActivityPub layer can deliver Like / Undo Like activities. パッケージ間
 // の循環依存を避けるためinterfaceで受け取る (実装は core/federation)。
@@ -428,7 +435,11 @@ func (s *Service) Create(user *model.User, noteID, rawReaction string) (string, 
 
 	// 通知発行 (自分自身へのリアクションは内部で抑制される)
 	if s.notificationHook != nil && target.UserID != user.ID {
-		s.notificationHook.OnReactionCreated(target.UserID, user.ID, target.ID, reaction)
+		if nh, ok := s.notificationHook.(NoteLoadingNotificationHook); ok {
+			nh.OnReactionCreatedWithNote(target.UserID, user.ID, target.ID, reaction, s.reactedNoteLoader(target))
+		} else {
+			s.notificationHook.OnReactionCreated(target.UserID, user.ID, target.ID, reaction)
+		}
 	}
 	// AP配信もベストエフォート。
 	if s.federationHook != nil {
@@ -451,6 +462,34 @@ func (s *Service) Create(user *model.User, noteID, rawReaction string) (string, 
 	s.updateFeaturedOnReaction(target, user.ID)
 
 	return reaction, nil
+}
+
+// reactedNoteLoader returns a loader for target as it is after the reaction
+// was written: the note row is read again, and the relations are taken from
+// target.
+//
+// 通知の pack は、書き込みの後の値 (reactions の数) を出す。以前は
+// FindByIDWithRelations で relation ごと読み直していたが、リアクションが変える
+// のは note の行 (reactions) だけで、作者・投票・リノート先・返信先は変えない。
+// なので行だけを 1 本で読み直し、relation は同じ要求の最初に読んだものを使う
+// (#3611)。行の読み直しを省いて手元で数を足すことはしない — buffered な
+// writer では DB の行に足されないので、手元で足すと従来 (DB の行を読む) と値が
+// 変わる。並行の別のリアクションも、従来どおり読んだ時点の行に入る。
+func (s *Service) reactedNoteLoader(target *model.Note) func() (*model.Note, error) {
+	return func() (*model.Note, error) {
+		row, err := s.noteRepo.FindByID(target.ID)
+		if err != nil {
+			return nil, err
+		}
+		// 読んだ値を書き換えずに写してから relation を付ける (repository が
+		// キャッシュした値を返す実装でも、それを壊さない)。
+		fresh := *row
+		fresh.User = target.User
+		fresh.Poll = target.Poll
+		fresh.Renote = target.Renote
+		fresh.Reply = target.Reply
+		return &fresh, nil
+	}
 }
 
 // updateFeaturedOnReaction boosts the reacted note's featured engagement ranking
