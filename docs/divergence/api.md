@@ -83,6 +83,36 @@ Page に作者だけが見られる `private` を足し、公開範囲を `publi
 - 外す時点は違う。本家は積むとき (`updateHashtagsRanking`) に外し、ランキングは今の 1 時間の窓と 1 つ前の窓を読む。そのため、設定を変えても、すでに積んだ分は、積んだ窓と次の窓が終わるまで (最大で約 2 時間) ランキングに残る。設定を外しても、その間に積まなかった分は戻らない。Elythia は集計のたびに今の設定で外すので、設定の変更は次の呼び出しから両方向に効く (meta のキャッシュは `metaUpdated` で無効化される)。設定を変える前に始まっていた集計を待っていた呼び出しには、変える前の設定の結果が返る。meta が読めないときは、隠したタグを出さないよう 500 を返す
 - **`hashtag` テーブルへの記録では、Elythia だけがこの 2 つで外す (#3628 より前から)。** 本家の `updateHashtag` は、ランキング (`updateHashtagsRanking`) からは外すが、`hashtag` テーブルには設定に関係なく記録する。Elythia の記録 (`internal/core/hashtag` の `OnNoteCreated` / `UpdateUsertags` の追加側) は記録そのものを止めるので、隠したタグとセンシティブな語のタグは `hashtags/list` / `search` / `show` の元データ (`hashtag` テーブル) から抜け、設定を外しても抜けた分は戻らない。記録側の hiddenTags の比較は、正規化ではなく大文字小文字だけを無視する比較 (`strings.EqualFold`) で、trend の判定とは別。#3628 では記録側を変えていない
 
+## ハードミュート (`hardMutedWords`) をサーバー側で掛ける (#787 / #3369)
+
+本家 (2026.10.0) のサーバーは `hardMutedWords` を保存して `i` などで返すだけで、ノートの選別には使わない (`misc/check-word-mute.ts` はユニットテストからしか呼ばれていない)。隠すのは frontend で、ノートは届いたうえで描画しない。`withHardMute` を付けて描画するのは `MkNotesTimeline` / `MkStreamingNotesTimeline` / `MkStreamingNotificationsTimeline` の 3 つだけ。Elythia は frontend の判定 (本家と同じもの) に加えて、**本家の frontend がこの 3 つで描画する一覧**では、サーバーでも応答とストリームの配信から落とす。本家のクライアントにも、自分で判定しないクライアントにも、ミュートしたノートが届かないようにするため。
+
+| 経路 | 本家 | Elythia |
+|---|---|---|
+| ノートの一覧 (REST) | サーバーは落とさない。frontend の `MkNotesTimeline` / `MkStreamingNotesTimeline` が描画しない | 応答から落とす。`notes/timeline` / `local-timeline` / `global-timeline` / `hybrid-timeline` / `user-list-timeline` / `mentions` / `search` / `search-by-tag` / `featured` / `polls/recommendation` と、`users/notes` / `users/featured-notes` / `antennas/notes` / `roles/notes` / `clips/notes` / `channels/timeline` / `drive/files/attached-notes`。frontend はどれもこの 2 つの部品で描画する (`users/notes` はメディアの一覧 (`MkNoteMediaGrid`) からも読まれ、そこでは本家は隠さない)。`noteIds` を指定しない `notes` (公開ノートの一覧。frontend は使わない) も落とす。落とした分だけ `limit` より少なく返ることがある (`untilId` で続きを取れる) |
+| ストリームのノート | サーバーは落とさない (`isNoteMutedOrBlocked` は語を見ない)。frontend の `MkStreamingNotesTimeline` が描画しない | 送らない。`localTimeline` / `globalTimeline` / `homeTimeline` / `hybridTimeline` / `hashtag` / `channel` / `roleTimeline` / `userList` / `antenna` |
+| 通知の返信・引用・メンション | frontend の `MkStreamingNotificationsTimeline` が描画しない | サーバーは落とさない (frontend が本家と同じく描画しない) |
+| ノートの詳細画面が読むもの (`notes/children` / `notes/renotes` / `notes/conversation` / `notes/show-partial-bulk` (リアクションの更新) / `notes/show`) と、同じ種類の `notes/replies` / `noteIds` を指定した `notes` (どちらも frontend は使わない) | 隠さない (`MkNoteDetailed` / `MkNoteSub` などは `withHardMute` を付けない) | 隠さない (本家と同じ) |
+
+判定は本家の frontend (`use-note.ts` の `checkNoteWordMute(getAppearNote(note))` と `utility/check-word-mute.ts`) と同じにしている (`internal/core/wordmute`)。
+
+- 純粋なリノートは、リノート元で判定する。判定するのは、そのノート (リノートならリノート元)・その返信先・その引用先の 3 つで、それより深くは見ない。投票の選択肢は見ない
+- 見る文字列は `cw + "\n" + text` の前後の空白を除いたもの。それぞれの著者が閲覧者自身なら、そのノートでは隠さない (自分の投稿をリノートされたものは隠れない。自分が他人の投稿をリノートしたものは隠れる)
+- 語の組 (`[["a", "b"]]`) は全部を含むときに当たり、大文字と小文字を区別する。`/pattern/flags` の文字列は正規表現として当てる
+- `i/update` は、`/.../` の形でない文字列の要素を本家と同じく `INVALID_REGEXP` で拒否する。#3369 より前に保存されたものは、migration `000133` で同じ語の組 (`"foo"` → `["foo"]`) に書き換えた
+- **閲覧者に見えないノートの中身は判定に使わない。** 本家は `hideNote` で本文を消した後のノートを判定するので、見えない返信先や引用先では隠れない。Elythia はパックの前に落とすので、`notehide` と同じ判定 (top-level は著者の設定、埋め込みは可視性と著者の設定) を当て、見えないものは判定しない
+
+本家と残っている差:
+
+- **フォロー中の人のフォロワー限定のノートが返信先・引用先・リノート元にあるとき、その中身ではサーバーは隠さない。** 判定のたびにフォローの関係を引かないため、見えない側として扱う (隠さない側に倒す)。frontend は本家と同じく判定するので、画面では本家と同じく描画されない
+- 正規表現の評価が違う。本家の frontend は JavaScript の `RegExp`、Elythia のサーバーは Go の `regexp` で評価する。たとえば `\s` は JavaScript では Unicode の空白に当たるが Go では ASCII の 5 文字 (`\t` `\n` `\f` `\r` と空白) だけ、`.` は JavaScript では `\n` `\r` U+2028 U+2029 に当たらないが Go では `\n` にだけ当たらない、`i` は Go が Unicode の大文字小文字の対応 (K と U+212A など) で比べる。サーバーが隠さなかったものは frontend が判定するので、画面で残るのはサーバーだけが隠す側の差。`i/update` の検査は Go の `regexp` で行う。先読みなどは本家 (RE2) と Elythia の両方で拒否されるが、`\u3042` のように本家の node-re2 が JavaScript の構文から変換して受け付けるものを、Elythia だけが拒否する (#2106 から)。評価の大きさの上限は [security.md](security.md) の `i/update` の行を参照
+- 正規表現の形と flags。`i/update` は本家と同じ形 (`^\/(.+)\/(.*)$`、`.` は改行類に当たらない) を見て、flags は本家の node-re2 と同じく知らないものを無視して受け付ける (`/foo/v` や `/foo/d` も保存できる)。サーバーが判定に使うのは、frontend の `new RegExp` が受け付ける flags (`dgimsuvy` を 1 回ずつ、`u` と `v` は同時に使わない) のときだけで、それ以外 (`/foo/x` など) は frontend と同じく何にも当てない。`i` `m` `s` は Go の同じ指定に、`y` は本文の先頭への固定に読み替え、`g` `d` は結果を変えないので無視する。`u` は JavaScript では `.` が絵文字を 1 文字として読むか、`\p{…}` が使えるか、`i` の大文字小文字の対応を変えるが、Go の regexp は常に `u` があるのに近い読み方をするので、写すものが無い (`u` の無い正規表現では次の構文の差になる)。**`v` の付いたものはサーバーでは当てない** — `v` は文字クラスの書き方 (集合の演算など) を変えるが Go では表せず、同じ文字列を別の意味で読むと frontend が表示するノートを隠しうるため。frontend は本家と同じく `v` 付きでも判定する
+- **Go の regexp だけが読む構文は、サーバーだけが当てる (#787 から)。** たとえば `/\p{Han}/` は、Go では漢字に当たり、そのノートを一覧とストリームから落とすが、本家の frontend では `u` が無いので `p{Han}` という文字列として読み (`u` を付けると例外になる)、何も隠れない。ほかに `(?i)` などの埋め込みの指定、`\pL`、`[[:alpha:]]`、`\Q…\E`、`\A`、`\z`、`u` の無い `.` (絵文字を UTF-16 の 2 単位として読む) も、frontend と別の意味になる。逆に `\p{Script=Han}` (`u` 付き) は frontend だけが読み、Elythia の `i/update` は拒否する
+- `hardMutedWords` に `000133` が文字列のまま残した、Go の形にだけ当たる文字列 (パターンの中に `\r` や U+2028 を含むもの) は、以後何にも当たらない。#3369 より前はサーバーだけが正規表現として当てていた (frontend は当てていなかった)。保存し直すと、本家と同じく `INVALID_REGEXP` になる
+- サーバーは本文の前後の空白を Go の `strings.TrimSpace` で除き、frontend は JavaScript の `trim()` で除く。U+0085 は Go だけが、U+FEFF は JavaScript だけが除くので、本文の先頭に固定する規則 (`/^foo/`、`/foo/y`) は、本文がこれらの文字で始まるときに片方だけが当たる
+- サーバーで当てない規則 (`v` や frontend が受け付けない flags の付いたもの) にも、`i/update` は `hardMutedWords` の命令数の上限を掛ける。本家が受け付ける大きな規則を、Elythia だけが `INVALID_REGEXP` にしうる
+- #3369 より前は、語を大文字と小文字を区別せずに比べ、`/.../` の形でない文字列も部分一致の語として扱い、判定はノート自身の本文と CW だけで、詳細画面の一覧 (`children` / `replies` / `renotes` / `conversation`) と `show-partial-bulk` にも掛けていた
+
 ## 1. API endpoint
 
 upstream の endpoint は `endpoints/` 配下 438 件 + `ApiServerService.ts` の fastify 直登録 6 件 (POST 5 / GET 1) = **444 件**。うち **444 件すべてを実装済み (coverage 100.0%)**。
