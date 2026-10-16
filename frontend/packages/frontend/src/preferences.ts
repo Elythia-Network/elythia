@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { BroadcastChannel } from 'broadcast-channel';
 import { createVisibilityAwareInterval } from '@@/js/interval.js';
 import type { StorageProvider } from '@/preferences/manager.js';
 import { cloudBackup } from '@/preferences/utility.js';
@@ -13,6 +12,7 @@ import { store } from '@/store.js';
 import { $i } from '@/i.js';
 import { misskeyApi } from '@/utility/misskey-api.js';
 import { TAB_ID } from '@/tab-id.js';
+import { TypedBroadcastChannel } from '@/utility/broadcast-channel.js';
 
 // クラウド同期用グループ名
 const syncGroup = 'default';
@@ -107,7 +107,7 @@ let latestPreferencesUpdate: {
 	timestamp: number;
 } | null = null;
 
-const preferencesChannel = new BroadcastChannel<{
+const preferencesChannel = new TypedBroadcastChannel<{
 	type: 'preferencesUpdate';
 	tabId: string;
 	timestamp: number;
