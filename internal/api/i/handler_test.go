@@ -17,6 +17,7 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/id"
 	miscsmtp "github.com/elythia-network/elythia/internal/misc/smtp"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/labstack/echo/v4"
@@ -2969,5 +2970,157 @@ func TestUpdate_ProfileTextWithNUL(t *testing.T) {
 		rec := post(h.Update, `{"`+field+`":"a\u0000b"}`, user)
 		assert.Equal(t, http.StatusBadRequest, rec.Code, field)
 		assert.Contains(t, rec.Body.String(), "INVALID_PARAM", field)
+	}
+}
+
+// stubUnreadFlags is a MeUnreadFlagsReader returning fixed flags.
+type stubUnreadFlags struct {
+	flags  repository.MeUnreadFlags
+	err    error
+	gotIDs []string
+}
+
+func (s *stubUnreadFlags) ReadMeUnreadFlags(userID string) (repository.MeUnreadFlags, error) {
+	s.gotIDs = append(s.gotIDs, userID)
+	return s.flags, s.err
+}
+
+// With a MeUnreadFlagsReader wired, the four yes/no unread fields come from
+// its single read (not from the per-table repositories, whose answers here
+// are the opposite), and each is still written only when its repository is
+// wired (#3608).
+func TestMe_UnreadFlagsReader(t *testing.T) {
+	// 表ごとの repo はどれも「ある」と答えるよう仕込む。reader の答えと
+	// 食い違わせ、どちらが使われたかを見分ける。
+	wireAll := func(h *Handler) {
+		frRepo := testutil.NewMockFollowRequestRepository()
+		require.NoError(t, frRepo.Create(&model.FollowRequest{ID: "fr1", FollowerID: "other", FolloweeID: "u1"}))
+		h.SetFollowRequestRepo(frRepo)
+		h.SetChatRepo(&stubChatRepo{n: 1})
+		h.SetAntennaUnreadRepo(&stubUnreadSource{has: true})
+		h.SetChannelUnreadRepo(&stubUnreadSource{has: true})
+	}
+
+	t.Run("fields come from the reader", func(t *testing.T) {
+		for _, flags := range []repository.MeUnreadFlags{
+			{},
+			{HasPendingReceivedFollowRequest: true},
+			{HasUnreadChatMessages: true},
+			{HasUnreadAntenna: true},
+			{HasUnreadChannel: true},
+		} {
+			h, userRepo, _, _ := newTestHandler(t)
+			wireAll(h)
+			reader := &stubUnreadFlags{flags: flags}
+			h.SetMeUnreadFlagsReader(reader)
+			resp := runMe(t, h, userRepo, "u1")
+			assert.Equal(t, []string{"u1"}, reader.gotIDs)
+			assert.Equal(t, flags.HasPendingReceivedFollowRequest, resp["hasPendingReceivedFollowRequest"], "%+v", flags)
+			assert.Equal(t, flags.HasUnreadChatMessages, resp["hasUnreadChatMessages"], "%+v", flags)
+			assert.Equal(t, flags.HasUnreadAntenna, resp["hasUnreadAntenna"], "%+v", flags)
+			assert.Equal(t, flags.HasUnreadChannel, resp["hasUnreadChannel"], "%+v", flags)
+		}
+	})
+
+	t.Run("unwired repositories keep their field false", func(t *testing.T) {
+		all := repository.MeUnreadFlags{
+			HasPendingReceivedFollowRequest: true, HasUnreadChatMessages: true,
+			HasUnreadAntenna: true, HasUnreadChannel: true,
+		}
+		for _, wire := range []struct {
+			name string
+			set  func(*Handler)
+			key  string
+		}{
+			{"follow request", func(h *Handler) { h.SetFollowRequestRepo(testutil.NewMockFollowRequestRepository()) }, "hasPendingReceivedFollowRequest"},
+			{"chat", func(h *Handler) { h.SetChatRepo(&stubChatRepo{}) }, "hasUnreadChatMessages"},
+			{"antenna", func(h *Handler) { h.SetAntennaUnreadRepo(&stubUnreadSource{}) }, "hasUnreadAntenna"},
+			{"channel", func(h *Handler) { h.SetChannelUnreadRepo(&stubUnreadSource{}) }, "hasUnreadChannel"},
+		} {
+			h, userRepo, _, _ := newTestHandler(t)
+			wire.set(h)
+			h.SetMeUnreadFlagsReader(&stubUnreadFlags{flags: all})
+			resp := runMe(t, h, userRepo, "u1")
+			for _, k := range []string{"hasPendingReceivedFollowRequest", "hasUnreadChatMessages", "hasUnreadAntenna", "hasUnreadChannel"} {
+				assert.Equal(t, k == wire.key, resp[k], "%s wired: %s", wire.name, k)
+			}
+		}
+	})
+
+	t.Run("a failed read leaves every field false", func(t *testing.T) {
+		h, userRepo, _, _ := newTestHandler(t)
+		wireAll(h)
+		h.SetMeUnreadFlagsReader(&stubUnreadFlags{
+			flags: repository.MeUnreadFlags{HasPendingReceivedFollowRequest: true, HasUnreadChannel: true},
+			err:   errors.New("db down"),
+		})
+		resp := runMe(t, h, userRepo, "u1")
+		assert.Equal(t, false, resp["hasPendingReceivedFollowRequest"])
+		assert.Equal(t, false, resp["hasUnreadChatMessages"])
+		assert.Equal(t, false, resp["hasUnreadAntenna"])
+		assert.Equal(t, false, resp["hasUnreadChannel"])
+	})
+}
+
+// stubStreamNotification is an UnreadNotificationSource that also implements
+// UnreadStreamSource. UnreadSummary answers hasSpecified=true so that a call
+// to it (instead of UnreadStreamSummary) shows in the response.
+type stubStreamNotification struct {
+	fromDB        bool
+	streamErr     error
+	summaryCalled bool
+	streamCalled  bool
+}
+
+func (s *stubStreamNotification) UnreadSummary(context.Context, string, []notification.Type) (notification.UnreadSummary, error) {
+	s.summaryCalled = true
+	return notification.UnreadSummary{TotalCount: 2, HasMentions: true, HasSpecifiedNote: true}, nil
+}
+
+func (s *stubStreamNotification) SpecifiedNoteFromDB() bool { return s.fromDB }
+
+func (s *stubStreamNotification) UnreadStreamSummary(context.Context, string, []notification.Type) (notification.UnreadSummary, error) {
+	s.streamCalled = true
+	if s.streamErr != nil {
+		return notification.UnreadSummary{}, s.streamErr
+	}
+	return notification.UnreadSummary{TotalCount: 2, HasMentions: true}, nil
+}
+
+// When the notification service reads note_unread and a MeUnreadFlagsReader
+// is wired, hasUnreadSpecifiedNotes comes from the reader's single statement
+// and the service only scans the stream (#3608). A failed stream scan keeps
+// it false, as UnreadSummary does.
+func TestMe_UnreadSpecifiedNotesFromReader(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		svc         *stubStreamNotification
+		reader      *stubUnreadFlags
+		want        bool
+		wantStream  bool
+		wantSummary bool
+	}{
+		{"reader true", &stubStreamNotification{fromDB: true}, &stubUnreadFlags{flags: repository.MeUnreadFlags{HasUnreadSpecifiedNotes: true}}, true, true, false},
+		{"reader false", &stubStreamNotification{fromDB: true}, &stubUnreadFlags{}, false, true, false},
+		{"reader failed", &stubStreamNotification{fromDB: true}, &stubUnreadFlags{flags: repository.MeUnreadFlags{HasUnreadSpecifiedNotes: true}, err: errors.New("db down")}, false, true, false},
+		{"stream failed", &stubStreamNotification{fromDB: true, streamErr: errors.New("redis down")}, &stubUnreadFlags{flags: repository.MeUnreadFlags{HasUnreadSpecifiedNotes: true}}, false, true, false},
+		{"service reads the stream only", &stubStreamNotification{fromDB: false}, &stubUnreadFlags{}, true, false, true},
+		{"no reader", &stubStreamNotification{fromDB: true}, nil, true, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, userRepo, _, _ := newTestHandler(t)
+			h.SetNotificationService(tc.svc)
+			if tc.reader != nil {
+				h.SetMeUnreadFlagsReader(tc.reader)
+			}
+			resp := runMe(t, h, userRepo, "u1")
+			assert.Equal(t, tc.want, resp["hasUnreadSpecifiedNotes"])
+			assert.Equal(t, tc.wantStream, tc.svc.streamCalled)
+			assert.Equal(t, tc.wantSummary, tc.svc.summaryCalled)
+			if tc.svc.streamErr == nil {
+				assert.Equal(t, float64(2), resp["unreadNotificationsCount"])
+				assert.Equal(t, true, resp["hasUnreadMentions"])
+			}
+		})
 	}
 }

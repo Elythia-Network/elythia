@@ -48,6 +48,7 @@ type Handler struct {
 	abuseRepo          repository.AbuseReportRepository
 	followingRepo      repository.FollowingRepository
 	memoRepo           repository.UserMemoRepository
+	relationReader     repository.UserRelationReader
 	blockingRepo       repository.BlockingRepository
 	rolePolicyProvider role.PolicyProvider
 	proxyFollow        ProxyFollowEnqueuer
@@ -307,6 +308,13 @@ func (h *Handler) SetMemoRepo(r repository.UserMemoRepository) {
 	h.memoRepo = r
 }
 
+// SetUserRelationReader attaches the reader that fetches the users/show
+// relation block in one statement (#3608). Without it the block is read with
+// one query per relation; the response is the same either way.
+func (h *Handler) SetUserRelationReader(r repository.UserRelationReader) {
+	h.relationReader = r
+}
+
 // viewerRelationRepos returns the Repos bundle used to populate viewer->target
 // relation fields on packed users (users/show, users/recommendation,
 // get-frequently-replied-users)。二重実装を避けるため抽出 (#1802 / #1973)。
@@ -318,6 +326,7 @@ func (h *Handler) viewerRelationRepos() userrelation.Repos {
 		RenoteMuting:  h.renoteMutingRepo,
 		FollowRequest: h.followRequestRepo,
 		Memo:          h.memoRepo,
+		Relation:      h.relationReader,
 	}
 }
 

@@ -7,7 +7,9 @@
 package userrelation
 
 import (
+	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/model"
@@ -24,6 +26,16 @@ type Repos struct {
 	RenoteMuting  repository.RenoteMutingRepository
 	FollowRequest repository.FollowRequestRepository
 	Memo          repository.UserMemoRepository
+	// Relation, when set, makes Apply read the whole relation in one
+	// statement instead of one query per relation (#3608). Which fields are
+	// written is still decided by the repositories above, so a bundle with
+	// Relation set writes exactly what it writes without it. ApplyMany does
+	// not use it (it already batches per relation).
+	//
+	// The values then do not go through the repositories above: a repository
+	// wrapped with extra filtering or caching would be bypassed. Keep the
+	// production repositories plain, or change the reader's SQL with them.
+	Relation repository.UserRelationReader
 }
 
 // Apply computes the viewer->target relation flags and writes them onto
@@ -34,8 +46,9 @@ type Repos struct {
 // the viewer follows the target; callers gate follower/following count
 // visibility on it (#1558).
 //
-// 各リポジトリへのクエリは独立なので goroutine で並列実行し、全結果が揃ってから
-// detailed に反映する (元々 users/show にインラインだった実装を共有化、#1802)。
+// Relation が配線されていれば 1 文で引く (#3608)。無いときは各リポジトリへの
+// クエリを goroutine で並列実行し、全結果が揃ってから detailed に反映する
+// (元々 users/show にインラインだった実装を共有化、#1802)。
 func (r Repos) Apply(detailed *entity.UserDetailed, viewerID string, target *model.User, profile *model.UserProfile) bool {
 	if detailed == nil || target == nil || viewerID == "" {
 		return false
@@ -46,6 +59,10 @@ func (r Repos) Apply(detailed *entity.UserDetailed, viewerID string, target *mod
 		// (自分用のメモを自分のプロフィールから読める)。
 		r.applyMemo(detailed, viewerID, target.ID)
 		return false
+	}
+
+	if r.Relation != nil {
+		return r.write(detailed, r.readOne(viewerID, target.ID), profile)
 	}
 
 	var (
@@ -84,6 +101,37 @@ func (r Repos) Apply(detailed *entity.UserDetailed, viewerID string, target *mod
 
 	wg.Wait()
 	return r.write(detailed, rel, profile)
+}
+
+// readOne reads the relation through r.Relation in one statement.
+//
+// 失敗したときは「関係なし」に倒す。表ごとに引く経路も各 Exists の err を
+// 捨てて false にしているので、DB が落ちているときの応答はどちらも同じになる。
+func (r Repos) readOne(viewerID, targetID string) relation {
+	s, err := r.Relation.ReadUserRelation(viewerID, targetID, time.Now())
+	if err != nil {
+		// 1 文なので全項目が同時に消える。障害の原因を追えるよう記録する。
+		slog.Warn("userrelation: relation read failed", "viewer", viewerID, "target", targetID, "err", err)
+		return relation{}
+	}
+	rel := relation{
+		isFollowing:    s.IsFollowing,
+		isFollowed:     s.IsFollowed,
+		isBlocking:     s.IsBlocking,
+		isBlocked:      s.IsBlocked,
+		isMuted:        s.IsMuted,
+		isRenoteMuted:  s.IsRenoteMuted,
+		hasPendingFrom: s.HasPendingFrom,
+		hasPendingTo:   s.HasPendingTo,
+	}
+	// write が読むのは following の行の notify と withReplies、メモの本文だけ。
+	if s.IsFollowing {
+		rel.followRec = &model.Following{Notify: s.FollowNotify, WithReplies: s.FollowWithReplies}
+	}
+	if s.HasMemo {
+		rel.memo = &model.UserMemo{Memo: s.Memo}
+	}
+	return rel
 }
 
 // relation is the viewer->target relation state read from the repositories.

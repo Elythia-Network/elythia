@@ -106,6 +106,7 @@ type Handler struct {
 	chatRepo              ChatUnreadSource
 	antennaUnreadRepo     AntennaUnreadSource
 	channelUnreadRepo     ChannelUnreadSource
+	unreadFlags           repository.MeUnreadFlagsReader
 	piningRepo            repository.UserNotePiningRepository
 	noteRepo              repository.NoteRepository
 	pageRepo              repository.PageRepository
@@ -549,6 +550,19 @@ type UnreadNotificationSource interface {
 	UnreadSummary(ctx context.Context, userID string, mentionTypes []notification.Type) (notification.UnreadSummary, error)
 }
 
+// UnreadStreamSource is implemented by notification.Service. It lets /api/i
+// read hasUnreadSpecifiedNotes from note_unread together with the other
+// unread flags in one statement instead of inside UnreadSummary (#3608).
+type UnreadStreamSource interface {
+	// SpecifiedNoteFromDB reports whether UnreadSummary reads note_unread.
+	SpecifiedNoteFromDB() bool
+	// UnreadStreamSummary is UnreadSummary without the note_unread read.
+	UnreadStreamSummary(ctx context.Context, userID string, mentionTypes []notification.Type) (notification.UnreadSummary, error)
+}
+
+// 名前を変えると型アサーションが黙って外れて 5 本に戻るので、コンパイルで縛る。
+var _ UnreadStreamSource = (*notification.Service)(nil)
+
 // AchievementNotifier creates the achievementEarned notification when a user
 // unlocks a new achievement (claim-achievement)。未配線なら通知は作らず実績の
 // 記録だけ行う (degrade)。実装は *notification.Service。
@@ -724,6 +738,20 @@ func (h *Handler) SetAntennaUnreadRepo(r AntennaUnreadSource) {
 // false (current behaviour).
 func (h *Handler) SetChannelUnreadRepo(r ChannelUnreadSource) {
 	h.channelUnreadRepo = r
+}
+
+// SetMeUnreadFlagsReader wires the reader that fetches
+// hasPendingReceivedFollowRequest / hasUnreadChatMessages / hasUnreadAntenna /
+// hasUnreadChannel, and hasUnreadSpecifiedNotes when the notification service
+// takes it from note_unread, in one statement (#3608). Each field is still
+// written only when its source above is wired, so the response is the same
+// with or without it; without it each field is one query.
+//
+// The values do not go through the repositories above: a repository wrapped
+// with extra filtering would be bypassed. Keep them plain, or change
+// repository.meUnreadFlagsSQL with them.
+func (h *Handler) SetMeUnreadFlagsReader(r repository.MeUnreadFlagsReader) {
+	h.unreadFlags = r
 }
 
 // SetPiningRepo wires the user_note_pining repository used to fill
@@ -2579,10 +2607,30 @@ func (h *Handler) fillUnreadFields(ctx context.Context, u *model.User, resp map[
 	// の 3 XRevRange scan に分かれていたが、hot path 最適化のため統合した。
 	// err 時も summary に格納済みの部分結果は採用する (Redis 成功 + DB 失敗
 	// で mentions 判定までは保持する partial resilience)。
+	//
+	// 表ごとに 1 本ずつ引くと note_unread を含めて 5 本になるので、まとめて
+	// 引ける reader があれば先に 1 文で引く (#3608)。失敗したら nil。
+	var flags *repository.MeUnreadFlags
+	if h.unreadFlags != nil {
+		flags = h.readUnreadFlags(u.ID)
+	}
 	if h.notificationSvc != nil {
-		summary, err := h.notificationSvc.UnreadSummary(ctx, u.ID, []notification.Type{
-			notification.TypeMention, notification.TypeReply,
-		})
+		mentionTypes := []notification.Type{notification.TypeMention, notification.TypeReply}
+		var (
+			summary notification.UnreadSummary
+			err     error
+		)
+		if stream, ok := h.notificationSvc.(UnreadStreamSource); ok && h.unreadFlags != nil && stream.SpecifiedNoteFromDB() {
+			// note_unread は reader の 1 文で引いた。UnreadSummary は stream の
+			// 読み取りに失敗すると note_unread を見ずに返す (false のまま) ので、
+			// そのときは reader の値も使わない。
+			summary, err = stream.UnreadStreamSummary(ctx, u.ID, mentionTypes)
+			if err == nil && flags != nil {
+				summary.HasSpecifiedNote = flags.HasUnreadSpecifiedNotes
+			}
+		} else {
+			summary, err = h.notificationSvc.UnreadSummary(ctx, u.ID, mentionTypes)
+		}
 		if err != nil {
 			slog.Warn("UnreadSummary partial failure", "userID", u.ID, "err", err)
 		}
@@ -2592,11 +2640,13 @@ func (h *Handler) fillUnreadFields(ctx context.Context, u *model.User, resp map[
 		resp["hasUnreadSpecifiedNotes"] = summary.HasSpecifiedNote
 	}
 
-	// FollowRequest (DB)
-	if h.followRequestRepo != nil {
-		if n, err := h.followRequestRepo.CountReceived(u.ID); err == nil {
-			resp["hasPendingReceivedFollowRequest"] = n > 0
+	// 出すかどうかは従来どおり各 repo の配線で決める。
+	if h.unreadFlags != nil {
+		if flags != nil {
+			h.applyUnreadFlags(*flags, resp)
 		}
+	} else {
+		h.fillUnreadFlagsEach(u.ID, resp)
 	}
 
 	// Announcement (DB)
@@ -2622,21 +2672,60 @@ func (h *Handler) fillUnreadFields(ctx context.Context, u *model.User, resp map[
 		}
 	}
 
-	// Chat (Redis set, wrapped in ChatRepository)
+}
+
+// readUnreadFlags reads the unread flags through h.unreadFlags, or returns
+// nil when the read fails. 失敗したときは各項目を既定の false のままにする
+// (表ごとに引く経路も、失敗した項目は false のままにしている)。
+func (h *Handler) readUnreadFlags(userID string) *repository.MeUnreadFlags {
+	f, err := h.unreadFlags.ReadMeUnreadFlags(userID)
+	if err != nil {
+		// 1 文なので全項目が同時に消える。障害の原因を追えるよう記録する。
+		slog.Warn("i: unread flags read failed", "userID", userID, "err", err)
+		return nil
+	}
+	return &f
+}
+
+// applyUnreadFlags writes the four yes/no unread fields of f whose
+// repository is wired (hasUnreadSpecifiedNotes is written with the
+// notification summary).
+func (h *Handler) applyUnreadFlags(f repository.MeUnreadFlags, resp map[string]any) {
+	if h.followRequestRepo != nil {
+		resp["hasPendingReceivedFollowRequest"] = f.HasPendingReceivedFollowRequest
+	}
 	if h.chatRepo != nil {
-		if n, err := h.chatRepo.CountUnread(u.ID); err == nil {
+		resp["hasUnreadChatMessages"] = f.HasUnreadChatMessages
+	}
+	if h.antennaUnreadRepo != nil {
+		resp["hasUnreadAntenna"] = f.HasUnreadAntenna
+	}
+	if h.channelUnreadRepo != nil {
+		resp["hasUnreadChannel"] = f.HasUnreadChannel
+	}
+}
+
+// fillUnreadFlagsEach is fillUnreadFlags with one query per field, used when
+// no MeUnreadFlagsReader is wired.
+func (h *Handler) fillUnreadFlagsEach(userID string, resp map[string]any) {
+	if h.followRequestRepo != nil {
+		if n, err := h.followRequestRepo.CountReceived(userID); err == nil {
+			resp["hasPendingReceivedFollowRequest"] = n > 0
+		}
+	}
+	// chat_message は DB の表 (ChatRepository.CountUnread)。
+	if h.chatRepo != nil {
+		if n, err := h.chatRepo.CountUnread(userID); err == nil {
 			resp["hasUnreadChatMessages"] = n > 0
 		}
 	}
-
-	// Antenna / Channel (DB)
 	if h.antennaUnreadRepo != nil {
-		if ok, err := h.antennaUnreadRepo.HasAnyByUser(u.ID); err == nil {
+		if ok, err := h.antennaUnreadRepo.HasAnyByUser(userID); err == nil {
 			resp["hasUnreadAntenna"] = ok
 		}
 	}
 	if h.channelUnreadRepo != nil {
-		if ok, err := h.channelUnreadRepo.HasAnyByUser(u.ID); err == nil {
+		if ok, err := h.channelUnreadRepo.HasAnyByUser(userID); err == nil {
 			resp["hasUnreadChannel"] = ok
 		}
 	}

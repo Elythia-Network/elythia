@@ -17,6 +17,7 @@ import (
 	"github.com/elythia-network/elythia/internal/entitycompat/shapetest"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/labstack/echo/v4"
@@ -2666,4 +2667,14 @@ func TestPinnedPageVisibleTo(t *testing.T) {
 	// visibility 未設定は既定 (public) 扱い。
 	def := &model.Page{ID: "p3", UserID: "owner"}
 	require.True(t, pinnedPageVisibleTo(def, nil))
+}
+
+// viewerRelationRepos hands the reader wired by SetUserRelationReader to the
+// relation bundle, so users/show reads the relation in one statement (#3608).
+func TestViewerRelationReposCarriesRelationReader(t *testing.T) {
+	h, _ := newTestHandler(t)
+	assert.Nil(t, h.viewerRelationRepos().Relation)
+	reader := repository.NewUserRelationRepository(nil)
+	h.SetUserRelationReader(reader)
+	assert.Equal(t, reader, h.viewerRelationRepos().Relation)
 }

@@ -949,6 +949,30 @@ type UnreadSummary struct {
 // Redis or the note_unread repo are returned unmodified; partial results are
 // preserved when possible.
 func (s *Service) UnreadSummary(ctx context.Context, userID string, mentionTypes []Type) (UnreadSummary, error) {
+	summary, err := s.UnreadStreamSummary(ctx, userID, mentionTypes)
+	if err != nil {
+		return summary, err
+	}
+	if s.noteUnreadRepo != nil {
+		has, err := s.noteUnreadRepo.HasAnySpecified(userID)
+		if err != nil {
+			return summary, err
+		}
+		summary.HasSpecifiedNote = has
+	}
+	return summary, nil
+}
+
+// SpecifiedNoteFromDB reports whether UnreadSummary takes HasSpecifiedNote
+// from the note_unread table (repository.NoteUnreadRepository.HasAnySpecified)
+// rather than from the notification stream.
+func (s *Service) SpecifiedNoteFromDB() bool { return s.noteUnreadRepo != nil }
+
+// UnreadStreamSummary is UnreadSummary without the note_unread read: when
+// SpecifiedNoteFromDB is true, HasSpecifiedNote is left false for the caller
+// to fill (e.g. from repository.MeUnreadFlagsReader, which reads it together
+// with the other /api/i flags in one statement, #3608).
+func (s *Service) UnreadStreamSummary(ctx context.Context, userID string, mentionTypes []Type) (UnreadSummary, error) {
 	var summary UnreadSummary
 	readID, err := s.LatestReadID(ctx, userID)
 	if err != nil {
@@ -996,14 +1020,6 @@ func (s *Service) UnreadSummary(ctx context.Context, userID string, mentionTypes
 				}
 			}
 		}
-	}
-
-	if s.noteUnreadRepo != nil {
-		has, err := s.noteUnreadRepo.HasAnySpecified(userID)
-		if err != nil {
-			return summary, err
-		}
-		summary.HasSpecifiedNote = has
 	}
 
 	return summary, nil
