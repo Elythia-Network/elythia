@@ -143,7 +143,7 @@ func TestLoad_DBExtraSSL(t *testing.T) {
 	}
 }
 
-// db.extra.* は bindEnvKeys に登録していないので、MK_DB_EXTRA_SSL が効くのは
+// db.extra.* は connectionTimeoutMillis のほかは bindEnvKeys に登録していないので、MK_DB_EXTRA_SSL が効くのは
 // 設定ファイルにそのキーがあるときだけ。docs/configuration.md の記述を固定する。
 func TestLoad_DBExtraSSLFromEnv(t *testing.T) {
 	const base = "url: https://example.com\ndb:\n  host: db.internal\n  port: 5432\n  db: misskey\n  user: u\n  pass: p\n"

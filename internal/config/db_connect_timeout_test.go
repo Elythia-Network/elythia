@@ -143,8 +143,8 @@ func TestDBConnectTimeoutHint(t *testing.T) {
 	assert.Contains(t, hint, "db.extra.connectionTimeoutMillis")
 	assert.Contains(t, cfg.DBReplicaConnectTimeoutHint(timeout), "a PostgreSQL read replica (dbSlaves) did not answer within 3s")
 
-	uds := &Config{DB: DBOptions{Host: "/var/run/postgresql", Port: 5432}}
-	assert.Contains(t, uds.DBConnectTimeoutHint(timeout), "PostgreSQL at /var/run/postgresql/.s.PGSQL.5432 did not answer within 10s")
+	uds := &Config{DB: DBOptions{Host: "/var/run/postgresql", Port: 5433}}
+	assert.Contains(t, uds.DBConnectTimeoutHint(timeout), "PostgreSQL at /var/run/postgresql/.s.PGSQL.5433 did not answer within 10s")
 }
 
 func TestDatabaseURL_ConnectTimeoutForLibpq(t *testing.T) {
