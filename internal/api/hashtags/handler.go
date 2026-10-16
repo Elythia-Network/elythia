@@ -1,6 +1,7 @@
 package hashtags
 
 import (
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/labstack/echo/v4"
+	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 )
 
@@ -33,6 +35,9 @@ type Handler struct {
 	// moderators は閲覧者がモデレーターかを判定する。本家 packMany はモデレーターに
 	// moderationNote と 2FA の項目を足し、カウントのゲートを外す (#3330)。
 	moderators userpack.ModeratorChecker
+	// trendFlight は hashtags/trend の同時の集計を 1 回にまとめる (#3579)。
+	// プロセスごとに持つので、複数プロセスで動かすとプロセスの数だけ集計する。
+	trendFlight singleflight.Group
 }
 
 // SetModeratorChecker wires the moderator check of hashtags/users (#3330).
@@ -214,45 +219,79 @@ func (h *Handler) Show(c echo.Context) error {
 	return c.JSON(http.StatusOK, packTag(&tag))
 }
 
+// trendBucketSeconds / trendBucketCount / trendTopN define the hashtags/trend
+// window: 20 buckets of 10 minutes (200 minutes), top 10 tags.
+const (
+	trendBucketSeconds = 600 // 10 分
+	trendBucketCount   = 20  // 過去 200 分
+	trendTopN          = 10
+)
+
+// aggregateTrend は bucket を uint32 の bit で持つので、32 個を超えるとコンパイルを止める。
+var _ [32 - trendBucketCount]struct{}
+
+// trendRow is one public / home note that carries tags, as read by Trend.
+type trendRow struct {
+	ID     string
+	UserID string
+	Tags   []string
+}
+
 // Trend handles POST /api/hashtags/trend.
 //
-// Misskey TS 互換: 直近 200 分 (10 分 × 20 bucket) の note 数を hashtag
-// 別に集計し、frontend の MkMiniChart が描画できる時系列を返す。
-//
-// TS 上流 (HashtagService.getCharts) は Redis HyperLogLog で users 単位
-// のユニーク数を count するが、mk-go では HLL を維持せず note テーブル
-// から動的に集計する。
+// 応答の形 (tag / chart / usersCount) は本家と同じだが、数え方は Elythia
+// 独自。直近 200 分 (10 分 × 20 bucket) の note から、hashtag ごとに投稿した
+// user の数 (重複を除く) を数え、frontend の MkMiniChart が描画できる時系列を
+// 返す。本家は Redis の 1 時間の窓のランキングと HyperLogLog から組み立て、
+// 窓の取り方も件数も違う (docs/divergence/api.md「hashtags/trend のランキングの
+// 数え方」)。mk-go では HLL を維持せず note テーブルから動的に集計する。
 //
 // mk-go の note テーブルは createdAt 列を持たず、aidx ID 先頭 8 文字に
 // ms timestamp が埋め込まれている (`internal/misc/id`)。200 分前の
 // cutoff prefix を生成して `id > cutoffID` で範囲フィルタをかける。
-// tags 配列 (varchar(128)[]) には migration 000043 で GIN index を張った
-// ので `<>` フィルタも index で効く。
 //
 // visibility フィルタ: TS の HashtagService.updateHashtag は public /
 // home の note のみ集計対象にする。followers / specified を含めると
 // 公開トレンドに非公開タグが現れてプライバシー上の問題になるため、
 // SQL の WHERE で同じ条件を強制する。
 //
-// 取得した row は Go 側で aidx parse → bucket idx 計算 → tag/bucket 別
-// の unique users を集計する。直近 200 分の対象 note 数は中規模インス
-// タンスなら数千件オーダーで、Go 側の集計コストは無視できる。
-//
 // chart の bucket は新しいもの順 (index 0 = 直近 10 分、index 19 = 200 分前)。
-// usersCount は TS と同じく `max(chart)` で算出する。
+// usersCount は本家と同じく `max(chart)` で算出する。
+//
+// 同時に来た呼び出しは 1 回の集計にまとめる (#3579)。結果は閲覧者・認証・
+// リクエストの中身に依らないので、誰に返しても同じ値になる。期限付きの
+// キャッシュは持たない — 本家はサーバー側で毎回 Redis から引き直すので、
+// 集計が終わった後に来た呼び出しは必ず集計し直す (鮮度を本家と揃える)。
+// 本家の cacheSec (60 秒) は匿名 GET の Cache-Control だけで、middleware の
+// APICacheControl が同じ値を付けている。
 func (h *Handler) Trend(c echo.Context) error {
-	const (
-		bucketSeconds = 600 // 10 分
-		bucketCount   = 20  // 過去 200 分
-		topN          = 10
-	)
-
-	gen, err := h.generator()
+	// computeTrend はリクエストの context を使わない。使うと、先頭の呼び出しが
+	// 切断されたときに、待っていた呼び出しまで同じ誤りで 500 になる。
+	v, err, _ := h.trendFlight.Do("trend", func() (any, error) {
+		v, err := h.computeTrend()
+		if err != nil {
+			// 待っていた呼び出しにも同じエラーが返るので、記録は集計した側で 1 回だけ。
+			slog.Error("hashtags/trend: aggregate", "error", err)
+		}
+		return v, err
+	})
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
+	// 同じ値を複数の呼び出しへ返すので、ここから先で書き換えない (JSON に
+	// するだけ)。
+	return c.JSON(http.StatusOK, v)
+}
 
-	cutoff := time.Now().Add(-time.Duration(bucketSeconds*bucketCount) * time.Second)
+// computeTrend reads the tagged public / home notes of the last 200 minutes
+// and aggregates them into the hashtags/trend response.
+func (h *Handler) computeTrend() ([]map[string]any, error) {
+	gen, err := h.generator()
+	if err != nil {
+		return nil, err
+	}
+
+	cutoff := time.Now().Add(-time.Duration(trendBucketSeconds*trendBucketCount) * time.Second)
 	cutoffID := id.AidxCutoffPrefix(cutoff)
 
 	// model.StringArray を含む struct を Scan(&rows) に渡すと GORM の
@@ -260,12 +299,7 @@ func (h *Handler) Trend(c echo.Context) error {
 	// (model.StringArray の Scanner で runtime には正しく動くが、初期 type
 	// infer で躓く)。Rows().Scan() で個別に scan するとこの noise を回避
 	// できるので、本 handler では明示的なループ scan を採用する。
-	type row struct {
-		ID     string
-		UserID string
-		Tags   []string
-	}
-	var rows []row
+	var rows []trendRow
 	sqlRows, err := h.db.Raw(`
 		SELECT "id", "userId", "tags"
 		FROM "note"
@@ -274,54 +308,54 @@ func (h *Handler) Trend(c echo.Context) error {
 		  AND "visibility" IN ('public', 'home')
 	`, cutoffID).Rows()
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
+		return nil, err
 	}
 	defer sqlRows.Close()
 	for sqlRows.Next() {
-		var r row
+		var r trendRow
 		var tags model.StringArray
 		if err := sqlRows.Scan(&r.ID, &r.UserID, &tags); err != nil {
-			return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
+			return nil, err
 		}
 		r.Tags = []string(tags)
 		rows = append(rows, r)
 	}
 	if err := sqlRows.Err(); err != nil {
-		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
+		return nil, err
 	}
+	return aggregateTrend(rows, gen, time.Now()), nil
+}
 
-	// bucketUsers[tag][bucketIdx] = set of unique userId
-	bucketUsers := make(map[string][bucketCount]map[string]struct{})
-	totalUsers := make(map[string]map[string]struct{})
-
-	now := time.Now()
+// aggregateTrend ranks the tags of rows by unique users and builds the
+// per-bucket unique-user chart of the top tags.
+//
+// tag ごとに「user → その user が投稿した bucket の bit 集合」を持つ。
+// 以前は tag ごとに bucket 20 個分の set を作っていたので、tag の種類が
+// 多いと集計 1 回で数十万の allocation になっていた (#3579)。
+// 数えるものは同じ: total は tag の unique user 数、chart[i] は bucket i の
+// unique user 数。
+func aggregateTrend(rows []trendRow, gen id.Generator, now time.Time) []map[string]any {
+	perTag := make(map[string]map[string]uint32)
 	for _, r := range rows {
 		ts, perr := gen.ParseTime(r.ID)
 		if perr != nil {
 			continue
 		}
 		secsAgo := now.Sub(ts).Seconds()
-		if secsAgo < 0 || secsAgo >= float64(bucketSeconds*bucketCount) {
+		if secsAgo < 0 || secsAgo >= float64(trendBucketSeconds*trendBucketCount) {
 			continue
 		}
-		bucketIdx := int(secsAgo) / bucketSeconds
+		bit := uint32(1) << (int(secsAgo) / trendBucketSeconds)
 		for _, tag := range r.Tags {
 			if tag == "" {
 				continue
 			}
-			buckets, exists := bucketUsers[tag]
-			if !exists {
-				for i := range buckets {
-					buckets[i] = map[string]struct{}{}
-				}
-				bucketUsers[tag] = buckets
+			users := perTag[tag]
+			if users == nil {
+				users = make(map[string]uint32)
+				perTag[tag] = users
 			}
-			bucketUsers[tag][bucketIdx][r.UserID] = struct{}{}
-
-			if _, exists := totalUsers[tag]; !exists {
-				totalUsers[tag] = map[string]struct{}{}
-			}
-			totalUsers[tag][r.UserID] = struct{}{}
+			users[r.UserID] |= bit
 		}
 	}
 
@@ -330,8 +364,8 @@ func (h *Handler) Trend(c echo.Context) error {
 		tag   string
 		total int
 	}
-	rankings := make([]ranked, 0, len(totalUsers))
-	for tag, users := range totalUsers {
+	rankings := make([]ranked, 0, len(perTag))
+	for tag, users := range perTag {
 		rankings = append(rankings, ranked{tag: tag, total: len(users)})
 	}
 	sort.Slice(rankings, func(i, j int) bool {
@@ -340,18 +374,22 @@ func (h *Handler) Trend(c echo.Context) error {
 		}
 		return rankings[i].tag < rankings[j].tag
 	})
-	if len(rankings) > topN {
-		rankings = rankings[:topN]
+	if len(rankings) > trendTopN {
+		rankings = rankings[:trendTopN]
 	}
 
 	result := make([]map[string]any, 0, len(rankings))
 	for _, rk := range rankings {
-		chart := make([]int, bucketCount)
-		buckets := bucketUsers[rk.tag]
+		chart := make([]int, trendBucketCount)
+		for _, bits := range perTag[rk.tag] {
+			for i := 0; i < trendBucketCount; i++ {
+				if bits&(1<<i) != 0 {
+					chart[i]++
+				}
+			}
+		}
 		maxUsers := 0
-		for i := 0; i < bucketCount; i++ {
-			n := len(buckets[i])
-			chart[i] = n
+		for _, n := range chart {
 			if n > maxUsers {
 				maxUsers = n
 			}
@@ -362,7 +400,7 @@ func (h *Handler) Trend(c echo.Context) error {
 			"usersCount": maxUsers,
 		})
 	}
-	return c.JSON(http.StatusOK, result)
+	return result
 }
 
 // validUsersSorts は upstream Misskey TS hashtags/users paramDef enum と一致 (#925)。

@@ -2,9 +2,13 @@ package hashtags_test
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,7 +24,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/datatypes"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 var testDB *gorm.DB
@@ -411,6 +417,148 @@ func TestTrend_VisibilityFilterExcludesPrivate(t *testing.T) {
 		"followers visibility は集計対象外であるべき")
 	assert.NotContains(t, body, `"specified_tag"`,
 		"specified visibility は集計対象外であるべき")
+}
+
+// TestTrend_ConcurrentCallsShareOneQuery pins that calls arriving while a
+// trend aggregation is running share its result instead of each reading the
+// 200-minute window again (#3579), and that the shared result still leaves
+// out followers / specified notes.
+func TestTrend_ConcurrentCallsShareOneQuery(t *testing.T) {
+	cleanupNotes()
+	defer cleanupNotes()
+
+	gen, err := id.NewGenerator("aidx")
+	require.NoError(t, err)
+	now := time.Now()
+	insertNoteWithVisibility(t, gen, "tu_p", []string{"shared_public"}, now.Add(-5*time.Minute), "public")
+	insertNoteWithVisibility(t, gen, "tu_f", []string{"shared_followers"}, now.Add(-5*time.Minute), "followers")
+
+	// testDB と同じ接続を使い、callback だけ別に持つ DB を作る。testDB に
+	// callback を足すと、同じパッケージの他のテストにも効いてしまう。
+	sqlDB, err := testDB.DB()
+	require.NoError(t, err)
+	db, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB}), &gorm.Config{Logger: logger.Discard})
+	require.NoError(t, err)
+	var queries atomic.Int32
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseAll := func() { releaseOnce.Do(func() { close(release) }) }
+	// 途中で落ちても、止めた SELECT を残さない。
+	t.Cleanup(releaseAll)
+	require.NoError(t, db.Callback().Row().Before("gorm:row").Register("trend_test:hold", func(*gorm.DB) {
+		queries.Add(1)
+		// 最初の集計を止めておき、その間に他の呼び出しを全部到着させる。
+		<-release
+	}))
+	h := hashtags.NewHandler(db)
+	h.SetIDGen(gen)
+
+	const callers = 8
+	recs := make([]*httptest.ResponseRecorder, callers)
+	var wg sync.WaitGroup
+	for i := range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			recs[i] = doPost(h.Trend, `{}`)
+		}()
+	}
+	// 全員が singleflight の Do に入るまで待ってから離す。時間の猶予に頼ると、
+	// 遅れて来た呼び出しが離した後に 2 回目の SELECT を起こして揺れる。
+	// まとめていなければ (Do を通らなければ) 待っても揃わず、期限で離した後に
+	// SELECT が呼び出しの数だけ数えられて落ちる。
+	// 枠の名前に結び付いているので、まとめ方を Do 以外 (DoChan など) に変えたら
+	// ここの名前も変える。
+	waitGoroutinesIn(t, "singleflight.(*Group).Do(", callers, 10*time.Second)
+	releaseAll()
+	wg.Wait()
+
+	assert.EqualValues(t, 1, queries.Load(), "concurrent trend calls must share one aggregation")
+	for _, rec := range recs {
+		require.Equal(t, http.StatusOK, rec.Code)
+		assert.Contains(t, rec.Body.String(), `"shared_public"`)
+		assert.NotContains(t, rec.Body.String(), `"shared_followers"`)
+		assert.JSONEq(t, recs[0].Body.String(), rec.Body.String())
+	}
+}
+
+// waitGoroutinesIn waits until at least n goroutines have frame in their
+// stack, or until timeout passes. On timeout it logs how many it saw and the
+// goroutine dump, so a slow runner can be told apart from an implementation
+// that no longer goes through frame.
+func waitGoroutinesIn(t *testing.T, frame string, n int, timeout time.Duration) {
+	t.Helper()
+	buf := make([]byte, 1<<20)
+	deadline := time.Now().Add(timeout)
+	for {
+		size := runtime.Stack(buf, true)
+		for size == len(buf) {
+			buf = make([]byte, 2*len(buf))
+			size = runtime.Stack(buf, true)
+		}
+		got := strings.Count(string(buf[:size]), frame)
+		if got >= n {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Logf("only %d of %d goroutines reached %s before the timeout; goroutines:\n%s", got, n, frame, buf[:size])
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// TestTrend_FailureIsNotKept pins that a failed aggregation is not reused:
+// the next call aggregates again and succeeds (#3579).
+func TestTrend_FailureIsNotKept(t *testing.T) {
+	cleanupNotes()
+	defer cleanupNotes()
+
+	gen, err := id.NewGenerator("aidx")
+	require.NoError(t, err)
+	insertNote(t, gen, "tu_1", []string{"after_failure"}, time.Now().Add(-time.Minute))
+
+	// testDB と同じ接続を使い、callback だけ別に持つ DB を作る。
+	sqlDB, err := testDB.DB()
+	require.NoError(t, err)
+	db, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB}), &gorm.Config{Logger: logger.Discard})
+	require.NoError(t, err)
+	var queries atomic.Int32
+	require.NoError(t, db.Callback().Row().Before("gorm:row").Register("trend_test:fail_first", func(tx *gorm.DB) {
+		if queries.Add(1) == 1 {
+			_ = tx.AddError(errors.New("injected failure"))
+		}
+	}))
+	h := hashtags.NewHandler(db)
+	h.SetIDGen(gen)
+
+	assert.Equal(t, http.StatusInternalServerError, doPost(h.Trend, `{}`).Code)
+	rec := doPost(h.Trend, `{}`)
+	require.Equal(t, http.StatusOK, rec.Code, "a failed aggregation must not be kept")
+	assert.Contains(t, rec.Body.String(), `"after_failure"`)
+	assert.EqualValues(t, 2, queries.Load())
+}
+
+// TestTrend_DoesNotReuseFinishedResult pins that trend keeps upstream's
+// freshness (#3579): upstream reads Redis on every call, so a call made after
+// an aggregation finished must aggregate again and see newer notes.
+func TestTrend_DoesNotReuseFinishedResult(t *testing.T) {
+	cleanupNotes()
+	defer cleanupNotes()
+
+	gen, err := id.NewGenerator("aidx")
+	require.NoError(t, err)
+	h := newHandler()
+
+	insertNote(t, gen, "tu_1", []string{"first_tag"}, time.Now().Add(-time.Minute))
+	rec := doPost(h.Trend, `{}`)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.NotContains(t, rec.Body.String(), `"second_tag"`)
+
+	insertNote(t, gen, "tu_2", []string{"second_tag"}, time.Now())
+	rec = doPost(h.Trend, `{}`)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"second_tag"`, "a call after the previous aggregation finished must see new notes")
 }
 
 // --- Users ---
