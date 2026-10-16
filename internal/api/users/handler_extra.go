@@ -494,6 +494,8 @@ func (h *Handler) Reactions(c echo.Context) error {
 //     id cursor とソート順が一致するので untilId ページングで重複/欠落しない。
 //   - hard mute は packing 前に post-fetch で適用 (visibility と独立な viewer 個別
 //     filter なので SQL push-down 対象外)。
+//   - ミュート・ブロックは本家の isUserRelated と同じ判定 (ミュートは著者を
+//     見ない、#3369)。
 func (h *Handler) FeaturedNotes(c echo.Context) error {
 	var req struct {
 		// GET でも受ける (本家は allowGet: true) ので query の名前も付ける (#3593)。
@@ -532,16 +534,20 @@ func (h *Handler) FeaturedNotes(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
 	notes = notesfilter.ApplyHardMute(h.userRepo, viewer, notes)
-	// viewer が mute した user / viewer を block している user が note/reply/renote
-	// の author なら除外する (upstream featured-notes.ts:93-98 の isUserRelated、#1547)。
-	sets, err := notesfilter.LoadMuteBlockSetsCached(h.relationCache, viewer, h.mutingRepo, h.blockingRepo, h.channelMutingRepo, h.userRepo)
+	// upstream featured-notes.ts:93-98 と同じく、閲覧者をブロックしている人は
+	// 著者・返信先・リノート元の著者を、閲覧者がミュートした人は返信先・
+	// リノート元の著者だけを見る (isUserRelated の第 3 引数 ignoreAuthor)。
+	// 著者は userId の本人なので、ミュートした相手のプロフィールを開いても
+	// その人の注目ノートは出る。#3369 より前は他の一覧と同じ
+	// ApplyMuteBlockChannel を通していて、著者のミュートで全部消えていた。
+	// 本家はこの endpoint でチャンネル・インスタンスのミュートも、リノート元の
+	// 返信先・リノート元 (2 段目) も見ないので、それらの集合は読まない。
+	sets, err := notesfilter.LoadMuteBlockSetsCached(h.relationCache, viewer, h.mutingRepo, h.blockingRepo, nil, nil)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
-	notes, err = notesfilter.ApplyMuteBlockChannel(notes, sets, h.noteRepo)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
-	}
+	notes = notesfilter.DropUserRelated(notes, sets.BlockerIDs, false)
+	notes = notesfilter.DropUserRelated(notes, sets.MutedUserIDs, true)
 	// **ブロック済みインスタンスのノートを落とす** (upstream
 	// generateBlockedHostQueryForNote)。ランキング / SQL のどちらの経路にも
 	// 入っていないので post-fetch で落とす。

@@ -194,8 +194,9 @@ func (h *Handler) featuredNotes(ctx context.Context, viewer *model.User, channel
 		notes = out
 	}
 	// upstream featured.ts は me の mute / 被block を isUserRelated で除外する
-	// (#1682)。users/featured-notes (#1547) と同じく被block / mute / instance-mute を
-	// 取得後に除外し、blocked-host / suspended も applyMuteBlock が落とす (#1783)。
+	// (#1682。ignoreAuthor を渡さないので著者も見る)。Elythia は取得後に
+	// applyMuteBlock で被block / mute に加えて instance-mute・チャンネルのミュートも掛け、
+	// blocked-host / suspended もここで落とす (#1783)。
 	notes, err = h.applyMuteBlock(viewer, notes)
 	if err != nil {
 		return nil, err
