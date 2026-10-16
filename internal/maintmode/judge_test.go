@@ -352,6 +352,35 @@ func TestJudge_ResumingClearsWhenEveryProcessRuns(t *testing.T) {
 	assert.Empty(t, holder)
 }
 
+// TestJudge_ResumingWaitsForAProcessThatFailedToResume checks that a process
+// reporting resume_failed keeps the maintenance at resuming until it serves
+// again.
+//
+// resume_failed は DB に繋ぎ直せなかったプロセスの報告で、メンテナンスの応答のまま
+// 繋ぎ直しを繰り返している。これを running と同じに扱って外すと、戻れない
+// プロセスを残したまま抜け、リストアの再開の待ち (A3) が戻すべき失敗を見逃す。
+func TestJudge_ResumingWaitsForAProcessThatFailedToResume(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+	c := newClock()
+	j := c.judge(s, &fakeCounter{}, "j")
+	require.NoError(t, s.Enter(ctx, State{OpID: "op", Phase: PhaseResuming}))
+	require.NoError(t, s.Report(ctx, ProcReport{ID: "p1", State: ProcResumeFailed}))
+	require.NoError(t, s.Report(ctx, ProcReport{ID: "p2", State: ProcRunning}))
+	for i := 0; i < 3; i++ {
+		out, err := j.Step(ctx)
+		require.NoError(t, err)
+		assert.Equal(t, Waiting, out)
+		assert.Equal(t, PhaseResuming, phase(t, s), "cleared while a process could not resume")
+	}
+
+	require.NoError(t, s.Report(ctx, ProcReport{ID: "p1", State: ProcRunning}))
+	out, err := j.Step(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, Cleared, out)
+	assert.Empty(t, phase(t, s))
+}
+
 func TestJudge_RunStepsAndReleases(t *testing.T) {
 	s, _ := newTestStore(t)
 	j := &Judge{Store: s, Counter: &fakeCounter{}, ID: "j", DrainTimeout: time.Second}
