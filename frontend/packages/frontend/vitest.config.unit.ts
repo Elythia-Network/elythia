@@ -5,7 +5,7 @@ export default mergeConfig(getConfig(), defineConfig({
 	test: {
 		include: ['./test/unit/**/*.test.ts'],
 		environment: 'happy-dom',
-		setupFiles: ['./test/setup.unit.ts', './test/setup-theme.unit.ts'],
+		setupFiles: ['./test/setup-network.unit.ts', './test/setup.unit.ts', './test/setup-theme.unit.ts'],
 		deps: {
 			optimizer: {
 				web: {
