@@ -19,6 +19,8 @@
 
 #### Signed delivery fixture (optional, #3569)
 
+Signed delivery mode の計測区間は投稿 poller の起動から、投稿完了・Redis queue depth=0・receiver verified 数が expected 以上になった時点まで。Activity manifest の取得と receiver との照合は計測区間の後に行い、throughput の分子には妥当性確認済みの `unique` 件数だけを使う。重複・不正・内容不一致・予期しない配送・欠測・未確定・タイムアウトでは throughput を出さず、状態・理由と receiver の生カウントを記録する。`verified` は配送試行を含む診断値で、throughput の分子ではない。
+
 `make queue-bench-delivery-outbound` は stack ごとの隔離 receiver を使い、既存 synthetic sender の公開鍵で HTTP 署名を検証する。計測時間の外で各 synthetic note の `/notes/{id}/activity` を取得して `(Activity ID, Inbox, canonical body SHA-256)` の期待集合を作り、receiver の到着・重複・不一致・欠測を `outbound.json` に記録する。fixture はベンチ用 Compose network 内だけに置き、公開ポートを開けない。private key の取得や実インスタンスへの接続は行わない。
 
 正常配送の性能比較では、benchcompareは未確定・`pending`・未着を`incomplete`、期待数0・件数の不整合・`invalid` / `contentMismatch` / `unexpected`を`invalid`として、比較全体を比較不能(exit 2)にする。状態・理由と配送の生値はレポートに残し、性能値は出さない。読み取れない、または壊れた`delivery.json`は入力エラー(exit 1)として扱う。性能劣化の閾値は設けない。故意の不正・未着ケースは期待結果との一致を別テストで判定し、正常系の性能値に混ぜない。現在の`tests/bench/ab/run.sh`は`delivery.json`を生成しない。

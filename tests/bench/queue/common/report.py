@@ -27,27 +27,72 @@ def render_outbound(out: dict[str, Any]) -> list[str]:
     lines = [
         "## Outbound (deliver job throughput)",
         "",
-        "各 stack の local user → blackhole に向けた deliver job を drain する時間。",
+        (
+            "各 stack の outbound deliver job を drain する時間。"
+            "signed-delivery mode では unique receipt を分子にする。"
+        ),
         "",
-        "| Stack | Notes posted | Expected jobs | Drain (s) | Throughput (jobs/s) | Peak depth | Timed out |",
-        "|---|---|---|---|---|---|---|",
+        (
+            "| Stack | Notes posted | Expected jobs | Drain (s) | Throughput (jobs/s) | "
+            "Delivery status | Peak depth | Timed out |"
+        ),
+        "|---|---|---|---|---|---|---|---|",
     ]
     for stack in ORDER:
         if stack not in out:
             continue
         r = out[stack]
         lines.append(
-            "| {label} | {posted} | {expected} | {drain} | {tp} | {peak} | {to} |".format(
+            (
+                "| {label} | {posted} | {expected} | {drain} | {tp} | {status} | "
+                "{peak} | {to} |"
+            ).format(
                 label=STACK_LABELS.get(stack, stack),
                 posted=fmt(r["notes_posted"], 0),
                 expected=fmt(r["expected_jobs"], 0),
                 drain=fmt(r["drain_seconds"], 2),
                 tp=fmt(r["throughput_jobs_per_sec"], 1),
+                status=fmt(r.get("deliveryStatus")),
                 peak=fmt(r["peak_queue_depth"], 0),
                 to=fmt(r["timed_out"]),
             )
         )
     lines.append("")
+    delivery_runs = [
+        (stack, out[stack])
+        for stack in ORDER
+        if stack in out and "delivery" in out[stack]
+    ]
+    if delivery_runs:
+        lines += [
+            "### Signed delivery validation",
+            "",
+            (
+                "| Stack | Status | Expected | Attempts | Verified | Pending | Valid | Unique | "
+                "Duplicates | Invalid | Content mismatch | Unexpected pairs | "
+                "Unexpected attempts | Missing |"
+            ),
+            "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        ]
+        for stack, r in delivery_runs:
+            stats = r.get("delivery", {})
+            fields = (
+                "expected", "attempts", "verified", "pending", "valid", "unique",
+                "duplicates", "invalid", "contentMismatch", "unexpected",
+                "unexpectedAttempts", "missing",
+            )
+            values = [fmt(stats.get(field), 0) for field in fields]
+            lines.append(
+                "| {label} | {status} | {counts} |".format(
+                    label=STACK_LABELS.get(stack, stack),
+                    status=fmt(r.get("deliveryStatus")),
+                    counts=" | ".join(values),
+                )
+            )
+            reasons = r.get("deliveryReasons", [])
+            if reasons:
+                lines.append(f"\n- {STACK_LABELS.get(stack, stack)}: " + "; ".join(reasons))
+        lines.append("")
     return lines
 
 
