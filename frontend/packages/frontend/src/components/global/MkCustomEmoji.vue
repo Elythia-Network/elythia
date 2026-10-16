@@ -37,11 +37,11 @@ SPDX-License-Identifier: AGPL-3.0-only
 </template>
 
 <script lang="ts" setup>
-import { computed, defineAsyncComponent, inject, ref } from 'vue';
+import { computed, defineAsyncComponent, inject, ref, watch } from 'vue';
 import { normalizeCustomEmojiName, isLocalCustomEmojiName, getCustomEmojiImagePath } from '@@/js/emoji-name.js';
 import type { MenuItem } from '@/types/menu.js';
 import { getProxiedImageUrl, getStaticImageUrl } from '@/utility/media-proxy.js';
-import { customEmojisMap } from '@/custom-emojis.js';
+import { customEmojis, customEmojisMap } from '@/custom-emojis.js';
 import * as os from '@/os.js';
 import { misskeyApi, misskeyApiGet } from '@/utility/misskey-api.js';
 import { copyToClipboard } from '@/utility/copy-to-clipboard.js';
@@ -81,6 +81,10 @@ const rawUrl = computed(() => {
 		return props.url;
 	}
 	if (isLocal.value) {
+		// Elythia: customEmojisMap は素の Map なので、customEmojis を読んで依存を作る (#3613)。
+		// 起動時に手元の一覧で先に描き、裏で取り直した一覧に差し替えたとき、足された・URL が
+		// 変わった・消えた絵文字の表示がここで追従する。
+		void customEmojis.value;
 		return customEmojisMap.get(customEmojiName.value)?.url ?? null;
 	}
 	return getCustomEmojiImagePath(customEmojiName.value, props.host);
@@ -105,6 +109,11 @@ const url = computed(() => {
 
 const alt = computed(() => `:${customEmojiName.value}:`);
 const errored = ref(url.value == null);
+// URL が変わったら (一覧の取り直しで名前が解決されたときなど) 表示を決め直す (#3613)。
+// URL が同じままの読み込みの失敗 (@error) はここでは戻さない。
+watch(url, (newUrl) => {
+	errored.value = newUrl == null;
+});
 
 function onClick(ev: PointerEvent) {
 	if (props.menu) {
