@@ -3,7 +3,6 @@ package backup
 import (
 	"context"
 	"log/slog"
-	"net"
 	"strings"
 	"testing"
 
@@ -14,6 +13,7 @@ import (
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
 	"github.com/elythia-network/elythia/internal/core/selfcheck"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 func TestReportError(t *testing.T) {
@@ -32,25 +32,15 @@ func TestModLogType(t *testing.T) {
 	assert.Equal(t, moderationlog.LogRestoreBackup, modLogType(""))
 }
 
-// closedPort returns a local port nothing listens on.
-func closedPort(t *testing.T) int {
-	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	port := ln.Addr().(*net.TCPAddr).Port
-	require.NoError(t, ln.Close())
-	return port
-}
-
 func TestOpenRestoreFailures(t *testing.T) {
 	cfg := cfgWith(&config.BackupOptions{})
 	cfg.Redis.Host = "127.0.0.1"
-	cfg.Redis.Port = closedPort(t)
+	cfg.Redis.Port = testutil.DeadPort(t)
 	_, err := openRestore(cfg, nil, emptyStorage{}, slog.Default())
 	assert.ErrorContains(t, err, "connect to redis")
 
 	cfg.DB.Host = "127.0.0.1"
-	cfg.DB.Port = closedPort(t)
+	cfg.DB.Port = testutil.DeadPort(t)
 	cfg.DB.DB = "elythia"
 	_, _, err = openOnce(context.Background(), cfg)
 	assert.Error(t, err)

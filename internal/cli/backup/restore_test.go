@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -21,23 +20,15 @@ import (
 	bkp "github.com/elythia-network/elythia/internal/backup"
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/core/selfcheck"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 const rsCoreMigrations = "../../../migration"
 
-func rsDeadPort(t *testing.T) int {
-	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	port := l.Addr().(*net.TCPAddr).Port
-	require.NoError(t, l.Close())
-	return port
-}
-
 // rsConfig writes a configuration file. extra is appended verbatim.
 func rsConfig(t *testing.T, db string, extra string) string {
 	t.Helper()
-	dead := rsDeadPort(t)
+	dead := testutil.DeadPort(t)
 	body := fmt.Sprintf(`url: http://127.0.0.1:%d/
 port: 3000
 db:
