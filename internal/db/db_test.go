@@ -2,7 +2,11 @@ package db_test
 
 import (
 	"fmt"
+	"net"
+	"os"
+	"path/filepath"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -106,6 +110,8 @@ func TestNew_BadDSNFails(t *testing.T) {
 	}
 	_, err := db.New(cfg)
 	assert.Error(t, err)
+	// 拒まれたのは時間切れではないので、区切りの設定へ誘導しない。
+	assert.NotContains(t, err.Error(), "connectionTimeoutMillis")
 }
 
 func TestNew_PoolSettings(t *testing.T) {
@@ -201,4 +207,103 @@ func TestClose_ClosesPrimaryAndReplicaPools(t *testing.T) {
 	// 2 回目は何もしない。
 	require.NoError(t, db.Close(gdb))
 	require.NoError(t, db.Close(nil))
+}
+
+// silentListener accepts connections and never answers, like a stalled
+// PostgreSQL or a path that swallows packets after the handshake. It returns
+// the address to dial; the connections are closed when the test ends.
+func silentListener(t *testing.T, network, address string) net.Addr {
+	t.Helper()
+	l, err := net.Listen(network, address)
+	require.NoError(t, err)
+	var mu sync.Mutex
+	var conns []net.Conn
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			conns = append(conns, c)
+			mu.Unlock()
+		}
+	}()
+	t.Cleanup(func() {
+		_ = l.Close()
+		mu.Lock()
+		defer mu.Unlock()
+		for _, c := range conns {
+			_ = c.Close()
+		}
+	})
+	return l.Addr()
+}
+
+// newWithin runs db.New and fails the test if it does not return within
+// limit, so a missing connect timeout fails instead of hanging the package.
+func newWithin(t *testing.T, cfg *config.Config, limit time.Duration) (time.Duration, error) {
+	t.Helper()
+	type result struct {
+		err     error
+		elapsed time.Duration
+	}
+	done := make(chan result, 1)
+	start := time.Now()
+	go func() {
+		_, err := db.New(cfg)
+		done <- result{err: err, elapsed: time.Since(start)}
+	}()
+	select {
+	case r := <-done:
+		return r.elapsed, r.err
+	case <-time.After(limit):
+		t.Fatalf("db.New did not return within %s against a server that never answers", limit)
+		return 0, nil
+	}
+}
+
+func TestNew_TimesOutAgainstSilentServer(t *testing.T) {
+	addr := silentListener(t, "tcp", "127.0.0.1:0").(*net.TCPAddr)
+	cfg := &config.Config{DB: config.DBOptions{
+		Host: "127.0.0.1", Port: addr.Port, DB: "x", User: "x", Pass: "x",
+		Extra: map[string]any{"connectionTimeoutMillis": 1000},
+	}}
+	elapsed, err := newWithin(t, cfg, 15*time.Second)
+	require.Error(t, err)
+	// 1 秒で区切る。早すぎるなら別の理由で落ちている。
+	assert.GreaterOrEqual(t, elapsed, 900*time.Millisecond)
+	assert.Less(t, elapsed, 5*time.Second)
+	msg := err.Error()
+	assert.Contains(t, msg, fmt.Sprintf("PostgreSQL at 127.0.0.1:%d did not answer within 1s", addr.Port))
+	assert.Contains(t, msg, "db.extra.connectionTimeoutMillis")
+}
+
+func TestNew_TimesOutAgainstSilentUnixSocket(t *testing.T) {
+	// ソケットのパスは 108 バイトまでなので、短い一時ディレクトリを使う。
+	dir, err := os.MkdirTemp("", "mk3632")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	silentListener(t, "unix", filepath.Join(dir, ".s.PGSQL.5432"))
+	cfg := &config.Config{DB: config.DBOptions{
+		Host: dir, Port: 5432, DB: "x", User: "x", Pass: "x",
+		Extra: map[string]any{"connectionTimeoutMillis": 1000},
+	}}
+	elapsed, err := newWithin(t, cfg, 15*time.Second)
+	require.Error(t, err)
+	assert.Less(t, elapsed, 5*time.Second)
+	assert.Contains(t, err.Error(), "PostgreSQL at "+filepath.Join(dir, ".s.PGSQL.5432")+" did not answer within 1s")
+}
+
+func TestNew_ReplicaTimesOutAgainstSilentServer(t *testing.T) {
+	skipIfNoTestDB(t)
+	addr := silentListener(t, "tcp", "127.0.0.1:0").(*net.TCPAddr)
+	cfg := testCfgFromEnv(t)
+	cfg.DB.Extra = map[string]any{"connectionTimeoutMillis": 1000}
+	cfg.DBReplications = true
+	cfg.DBSlaves = []config.DBSlaveOptions{{Host: "127.0.0.1", Port: addr.Port, DB: "x", User: "x", Pass: "x"}}
+	elapsed, err := newWithin(t, cfg, 15*time.Second)
+	require.Error(t, err)
+	assert.Less(t, elapsed, 5*time.Second)
+	assert.Contains(t, err.Error(), "failed to register db replicas (a PostgreSQL read replica (dbSlaves) did not answer within 1s")
 }

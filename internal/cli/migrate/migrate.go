@@ -498,9 +498,14 @@ func upVersions(dir string) ([]uint, error) {
 }
 
 // logDBError logs a DB error, adding the TLS remediation hint when the
-// failure was a certificate verification error.
+// failure was a certificate verification error, or the connect timeout hint
+// when the server did not answer within db.extra.connectionTimeoutMillis.
 func logDBError(logger *slog.Logger, cfg *config.Config, msg string, err error) {
 	if hint := cfg.DBTLSErrorHint(err); hint != "" {
+		logger.Error(msg, "error", err, "hint", hint)
+		return
+	}
+	if hint := cfg.DBConnectTimeoutHint(err); hint != "" {
 		logger.Error(msg, "error", err, "hint", hint)
 		return
 	}
