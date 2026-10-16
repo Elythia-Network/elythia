@@ -103,6 +103,8 @@ make bench-compare-down   # 途中で止めたときの片付け
 | `memory_peak_mib` | コンテナの cgroup の`memory.peak`(起動し直してからの最大、MiB)。ページキャッシュを含む |
 | `heap_inuse_max_mib` | app だけ。pprof の`HeapInuse`を 5 秒ごとに読んだ最大 (MiB) |
 
+配送 receiver fixture を使う run は、run directory に任意の`delivery.json`を置けます。`finalized` / `expected` / `attempts` / `verified` / `pending` / `valid` / `unique` / `duplicates` / `invalid` / `contentMismatch` / `unexpected` / `unexpectedAttempts` / `missing`を記録し、benchcompare は各 side・round の数値をそのまま表示します。確定済みmanifestがない場合、または件数の整合性 (`attempts = valid + invalid + unexpectedAttempts`、`verified = valid + contentMismatch + unexpectedAttempts`、`valid = unique + duplicates`、`missing = expected - unique`) が崩れている場合は読み込み時に失敗します。`unexpected`は未登録の(Activity ID, Inbox)組の数で、未着のexpected組を埋めません。`valid`は署名に加えてexpected Activity ID・Inbox・本文digestが一致した試行だけです。配送数に判定基準は設けません。ファイルがないroundは未計測として表から省きます。
+
 ## 判定
 
 各指標を、base と head それぞれのラウンドの値 (最小〜最大の幅と中央値) で比べます。

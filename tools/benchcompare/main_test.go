@@ -202,6 +202,65 @@ func TestLoad_RealK6Output(t *testing.T) {
 	assert.Equal(t, int64(20), limited.RateLimited)
 }
 
+func TestLoadRun_DeliveryStats(t *testing.T) {
+	dir := writeResults(t, okRun(SideBase, 1, 10))
+	statsPath := filepath.Join(dir, "00-base-1", "delivery.json")
+	writeFile(t, statsPath, `{"finalized":true,"expected":4,"attempts":5,"verified":4,"pending":0,"valid":2,"unique":2,"duplicates":0,"invalid":2,"contentMismatch":1,"unexpected":1,"unexpectedAttempts":1,"missing":2}`)
+
+	run, err := loadRun(filepath.Join(dir, "00-base-1"))
+	require.NoError(t, err)
+	require.NotNil(t, run.Delivery)
+	assert.Equal(t, DeliveryStats{Finalized: true, Expected: 4, Attempts: 5, Verified: 4, Pending: 0, Valid: 2, Unique: 2, Duplicates: 0, Invalid: 2, ContentMismatch: 1, Unexpected: 1, UnexpectedAttempts: 1, Missing: 2}, *run.Delivery)
+}
+
+func TestLoadRun_RejectsInconsistentDeliveryStats(t *testing.T) {
+	dir := writeResults(t, okRun(SideBase, 1, 10))
+	statsPath := filepath.Join(dir, "00-base-1", "delivery.json")
+	writeFile(t, statsPath, `{"finalized":true,"expected":1,"attempts":1,"verified":1,"pending":0,"valid":1,"unique":1,"duplicates":1,"invalid":0,"contentMismatch":0,"unexpected":0,"unexpectedAttempts":0,"missing":0}`)
+
+	_, err := loadRun(filepath.Join(dir, "00-base-1"))
+	require.ErrorContains(t, err, "delivery.json")
+}
+
+func TestLoadRun_RejectsUnfinalizedDeliveryStats(t *testing.T) {
+	dir := writeResults(t, okRun(SideBase, 1, 10))
+	statsPath := filepath.Join(dir, "00-base-1", "delivery.json")
+	writeFile(t, statsPath, `{"finalized":false,"expected":0,"attempts":1,"verified":1,"pending":1,"valid":0,"unique":0,"duplicates":0,"invalid":0,"contentMismatch":0,"unexpected":0,"unexpectedAttempts":0,"missing":0}`)
+
+	_, err := loadRun(filepath.Join(dir, "00-base-1"))
+	require.ErrorContains(t, err, "not finalized")
+}
+
+func TestLoadRun_UnexpectedDeliveryDoesNotCoverMissingExpectedTuple(t *testing.T) {
+	dir := writeResults(t, okRun(SideBase, 1, 10))
+	statsPath := filepath.Join(dir, "00-base-1", "delivery.json")
+	writeFile(t, statsPath, `{"finalized":true,"expected":1,"attempts":1,"verified":1,"pending":0,"valid":0,"unique":0,"duplicates":0,"invalid":0,"contentMismatch":0,"unexpected":1,"unexpectedAttempts":1,"missing":1}`)
+
+	run, err := loadRun(filepath.Join(dir, "00-base-1"))
+	require.NoError(t, err)
+	require.NotNil(t, run.Delivery)
+	assert.Equal(t, uint64(1), run.Delivery.Unexpected)
+	assert.Equal(t, uint64(1), run.Delivery.Missing)
+}
+
+func TestCompare_ReportsDeliveryCountsWithoutJudgment(t *testing.T) {
+	runs := []*Run{
+		{Meta: RunMeta{Side: SideBase, Round: 1, Completed: true}, Delivery: &DeliveryStats{Finalized: true, Expected: 4, Attempts: 5, Verified: 4, Valid: 2, Unique: 2, Invalid: 2, ContentMismatch: 1, Unexpected: 1, UnexpectedAttempts: 1, Missing: 2}},
+		{Meta: RunMeta{Side: SideHead, Round: 1, Completed: true}, Delivery: &DeliveryStats{Finalized: true, Expected: 4, Attempts: 4, Verified: 4, Valid: 4, Unique: 4}},
+	}
+	c := compare(&RunSet{Rounds: 1, Runs: runs})
+	require.Len(t, c.Delivery, 2)
+	assert.Equal(t, SideBase, c.Delivery[0].Side)
+	assert.Equal(t, uint64(1), c.Delivery[0].Unexpected)
+	assert.Equal(t, uint64(2), c.Delivery[0].Missing)
+
+	var report bytes.Buffer
+	require.NoError(t, renderMarkdown(&report, c))
+	assert.Contains(t, report.String(), "## 配送受信")
+	assert.Contains(t, report.String(), "計測値のみ表示し、判定はしません")
+	assert.Contains(t, report.String(), "content mismatch")
+}
+
 // TestCompare_OverlappingRangesAreSame checks that rounds whose ranges overlap
 // are "same" even when the medians differ.
 func TestCompare_OverlappingRangesAreSame(t *testing.T) {

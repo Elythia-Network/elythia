@@ -30,6 +30,7 @@ func renderMarkdown(w io.Writer, c *Comparison) error {
 		for _, p := range c.Problems {
 			fmt.Fprintf(&b, "- %s\n", cell(p))
 		}
+		renderDeliverySection(&b, c.Delivery)
 		_, err := io.WriteString(w, b.String())
 		return err
 	}
@@ -69,8 +70,22 @@ func renderMarkdown(w io.Writer, c *Comparison) error {
 			fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s |\n", cell(r.Container), measureLabel(m.Name), fmtSpread(m.Base, m.Name), fmtSpread(m.Head, m.Name), fmtDelta(m), fmtVerdict(m))
 		}
 	}
+	renderDeliverySection(&b, c.Delivery)
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+func renderDeliverySection(b *strings.Builder, rounds []DeliveryRound) {
+	if len(rounds) == 0 {
+		return
+	}
+	b.WriteString("\n## 配送受信\n\n計測値のみ表示し、判定はしません。表にない round は未計測です。`valid` は期待 Activity ID・Inbox・本文 digest が一致した試行、`unique` はその一意 tuple 数です。\n\n")
+	b.WriteString("| side | round | expected | attempts | verified | pending | valid | unique | duplicates | invalid | content mismatch | unexpected pairs | unexpected attempts | missing |\n")
+	b.WriteString("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
+	for _, r := range rounds {
+		fmt.Fprintf(b, "| %s | %d | %d | %d | %d | %d | %d | %d | %d | %d | %d | %d | %d | %d |\n",
+			cell(string(r.Side)), r.Round, r.Expected, r.Attempts, r.Verified, r.Pending, r.Valid, r.Unique, r.Duplicates, r.Invalid, r.ContentMismatch, r.Unexpected, r.UnexpectedAttempts, r.Missing)
+	}
 }
 
 // endpointSummary is the verdict of an endpoint, with how many of its

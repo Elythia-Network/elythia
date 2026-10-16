@@ -32,6 +32,15 @@ type Comparison struct {
 	Problems  []string          `json:"problems,omitempty"`
 	Endpoints []EndpointCompare `json:"endpoints"`
 	Resources []ResourceCompare `json:"resources"`
+	Delivery  []DeliveryRound   `json:"delivery,omitempty"`
+}
+
+// DeliveryRound carries optional receiver counts through to JSON and Markdown
+// output. These counts are shown without a verdict or threshold.
+type DeliveryRound struct {
+	Side  Side `json:"side"`
+	Round int  `json:"round"`
+	DeliveryStats
 }
 
 // EndpointCompare compares one endpoint.
@@ -98,6 +107,11 @@ const minEffectPercent = 5.0
 // compare judges a run set.
 func compare(rs *RunSet) *Comparison {
 	c := &Comparison{Base: rs.Base, Head: rs.Head, Scenario: rs.Scenario, Rounds: rs.Rounds, Runner: rs.Runner, Valid: true}
+	for _, r := range rs.Runs {
+		if r.Delivery != nil {
+			c.Delivery = append(c.Delivery, DeliveryRound{Side: r.Meta.Side, Round: r.Meta.Round, DeliveryStats: *r.Delivery})
+		}
+	}
 	bySide := map[Side][]*Run{}
 	for _, r := range rs.Runs {
 		if !r.Meta.Completed {

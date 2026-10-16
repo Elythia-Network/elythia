@@ -23,6 +23,32 @@ services:
       retries: 10
     networks: [bench]
 
+  deliveryreceiver-mkq:
+    profiles: [delivery]
+    build:
+      context: ../../..
+      dockerfile: tests/bench/queue/deliveryreceiver/Dockerfile
+    command: ["-addr", ":80", "-host", "deliveryreceiver-mkq"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/healthz"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    networks: [bench]
+
+  deliveryreceiver-ts:
+    profiles: [delivery]
+    build:
+      context: ../../..
+      dockerfile: tests/bench/queue/deliveryreceiver/Dockerfile
+    command: ["-addr", ":80", "-host", "deliveryreceiver-ts"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/healthz"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    networks: [bench]
+
   faker:
     build:
       context: ../../..
@@ -166,6 +192,7 @@ services:
       FAKER_URL: http://faker:8081
       FAKER_HOST: faker
       FAKER_BASE_HTTPS: https://faker
+      QUEUE_BENCH_DELIVERY: "${QUEUE_BENCH_DELIVERY:-0}"
     depends_on:
       app-mkq: { condition: service_healthy }
       nginx-ts: { condition: service_started }
@@ -190,6 +217,7 @@ services:
       OUTBOUND_FOLLOWERS: "100"
       REDIS_MKQ_HOST: redis-mkq
       REDIS_TS_HOST: redis-ts
+      QUEUE_BENCH_DELIVERY: "${QUEUE_BENCH_DELIVERY:-0}"
     volumes:
       - ./common:/app/common:ro
       - ./results:/results

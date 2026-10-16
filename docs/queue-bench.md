@@ -17,6 +17,12 @@
 - `blackhole` は POST を全て 204 で即返すので receiver overhead 無し
 - 計測: post 開始から blackhole hit が expected 数に達するまでの drain 時間 / RPS
 
+#### Signed delivery fixture (optional, #3569)
+
+`make queue-bench-delivery-outbound` は stack ごとの隔離 receiver を使い、既存 synthetic sender の公開鍵で HTTP 署名を検証する。計測時間の外で各 synthetic note の `/notes/{id}/activity` を取得して `(Activity ID, Inbox, canonical body SHA-256)` の期待集合を作り、receiver の到着・重複・不一致・欠測を `outbound.json` に記録する。fixture はベンチ用 Compose network 内だけに置き、公開ポートを開けない。private key の取得や実インスタンスへの接続は行わない。
+
+この mode は blackhole mode と同じ synthetic follower を作るため、**既存 seed を再利用せず、volume を消した新しい stack で実行する**。delivery target は seed も実行する。
+
 ### Inbound (inbox job throughput)
 
 `faker` (Go HTTPS, AP HTTP signature 直接) → 各 receiver inbox に signed activity を blast。
@@ -46,6 +52,11 @@ make queue-bench-seed
 
 # 3) outbound 計測
 make queue-bench-outbound
+
+# optional: 新しい volume の stack で signed delivery fixture を使う
+make queue-bench-down
+make queue-bench-up
+make queue-bench-delivery-outbound
 
 # 4a) inbound 計測 (default: Create 経路)
 make queue-bench-inbound
