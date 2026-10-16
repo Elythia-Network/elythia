@@ -3,6 +3,8 @@ package restoreop
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -130,7 +132,8 @@ func TestStepNotWritten_Notifies(t *testing.T) {
 			e.process("p1")
 			rec, _ := e.prepare()
 			var failed, broken atomic.Bool
-			var writes atomic.Int32
+			var writes, unread atomic.Int32
+			recordKey := "p:elythia:maintenance:restore:" + rec.OpID
 			e.m.failStep = func(to string) error {
 				if to == StepSwitched && failed.CompareAndSwap(false, true) {
 					broken.Store(true)
@@ -140,7 +143,12 @@ func TestStepNotWritten_Notifies(t *testing.T) {
 						// 切り替わると、サーバー側の接続を MULTI のまま残す。go-redis はその
 						// 接続をプールへ戻すので、戻した後も +QUEUED しか返らず、報告が
 						// 止まってメンテナンスが外れなかった (#3369)。
-						e.interceptCmd(func(redis.Cmder) error { return errors.New("ERR the record is not available") })
+						e.interceptCmd(func(cmd redis.Cmder) error {
+							if isRecordRead(cmd, recordKey) {
+								unread.Add(1)
+							}
+							return errors.New("ERR the record is not available")
+						})
 					}
 				}
 				if broken.Load() {
@@ -164,6 +172,12 @@ func TestStepNotWritten_Notifies(t *testing.T) {
 				w := writes.Load()
 				require.Eventually(t, func() bool { return writes.Load() >= w+3 }, 5*time.Second, 5*time.Millisecond)
 			}
+			if !c.readable {
+				// 読めない状態が実際に起きたこと (記録の読み出しを止めたこと) を確かめる。
+				// 読み出しが止めの効かない形に変わると、このケースは読めるときと同じ経路を
+				// 通り、読めない誤りの扱いを検査しなくなる (#3369)。
+				require.Positive(t, unread.Load(), "no read of the record was made unreadable")
+			}
 			assert.True(t, e.slot.isHeld(), "the slot is kept while it waits")
 			broken.Store(false)
 			e.interceptCmd(nil)
@@ -175,6 +189,37 @@ func TestStepNotWritten_Notifies(t *testing.T) {
 			assert.Contains(t, e.notes[0], "cannot write or read its record")
 		})
 	}
+}
+
+// isRecordRead reports whether cmd may read the record stored at key
+// (Store.Get), whether it is sent alone or in a pipeline: an HGETALL of key,
+// or a script given key among its KEYS.
+//
+// Get の読み方 (HGETALL を単発・pipeline で送るか、Lua で読むか) を変える正しい
+// 書き換えで、読めない状態が起きているのに数えずに落ちないよう、記録のキーを
+// KEYS で渡す script も数える (#3369)。HGETALL でも、記録のキーを KEYS で渡す
+// script でもない読み方 (ARGV でキーを渡すなど) に変えたら、ここも直す。
+func isRecordRead(cmd redis.Cmder, key string) bool {
+	args := cmd.Args()
+	switch cmd.Name() {
+	case "hgetall":
+		return len(args) >= 2 && fmt.Sprint(args[1]) == key
+	case "eval", "evalsha", "eval_ro", "evalsha_ro":
+		// EVAL script numkeys key [key ...] arg [arg ...]
+		if len(args) < 3 {
+			return false
+		}
+		n, err := strconv.Atoi(fmt.Sprint(args[2]))
+		if err != nil {
+			return false
+		}
+		for i := 3; i < 3+n && i < len(args); i++ {
+			if fmt.Sprint(args[i]) == key {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // TestStepNotWritten_RecordGone checks that an operation whose record is gone
