@@ -530,10 +530,19 @@ func (s *Supervisor) shutdownNow(b shutdownBudget, stopCalled chan<- struct{}) e
 	httpCtx, cancelHTTP := context.WithDeadline(context.Background(), b.deadline)
 	errs = append(errs, s.httpSrv.Shutdown(httpCtx))
 	cancelHTTP()
-	// UDS listen していた場合、Shutdown で net.Listener.Close() は呼ばれる
-	// が、ソケットファイル自体は残るので明示的に unlink しておく。
-	if rmErr := config.RemoveUnixSocket(s.cfg.Socket); rmErr != nil {
-		slog.Warn("failed to remove socket file", "socket", s.cfg.Socket, "err", rmErr)
+	// UDS で listen していた場合、ソケットファイルは httpSrv.Shutdown が listener を
+	// 閉じた時点で消えている (net.Listen("unix") の UnixListener は Close で自分の
+	// path を unlink する)。ここでは念のためもう一度消す。
+	// listen に至らなかったときは消さない。そのときこの path にあるのは自分の
+	// ソケットではなく、ListenUnixSocket が消すのを拒んだソケット以外のファイルか
+	// もしれない。起動に失敗したら serve がシグナルを待たずに Shutdown を呼ぶので
+	// (#3633)、ここで消すと拒んだ意味が無くなる。
+	select {
+	case <-s.listening:
+		if rmErr := config.RemoveUnixSocket(s.cfg.Socket); rmErr != nil {
+			slog.Warn("failed to remove socket file", "socket", s.cfg.Socket, "err", rmErr)
+		}
+	default:
 	}
 	return errors.Join(errs...)
 }
