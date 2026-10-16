@@ -68,7 +68,7 @@ func TestRestore_DoesNotSwitchBeforeHeld(t *testing.T) {
 	assert.Equal(t, 0, e.db.switches)
 	assert.Equal(t, "current", e.db.content(testDB))
 	assert.NotContains(t, e.db.names(), rec.Target, "the new database is dropped")
-	require.Eventually(t, func() bool { return e.maintenance() == nil }, 2*time.Second, 5*time.Millisecond)
+	require.Eventually(t, func() bool { st, ok := e.maintenanceNow(); return ok && st == nil }, 2*time.Second, 5*time.Millisecond)
 }
 
 // TestRestore_SwitchRefusedKeepsCurrent (R1 at this level): when the name
@@ -148,8 +148,8 @@ func TestRestore_ResumeFailurePutsThePreviousBack(t *testing.T) {
 		if err == nil && got.Step == StepReverted {
 			return true
 		}
-		st := e.maintenance()
-		return st != nil && st.OpID == rec.OpID && st.Phase != maintmode.PhaseResuming
+		st, ok := e.maintenanceNow()
+		return ok && st != nil && st.OpID == rec.OpID && st.Phase != maintmode.PhaseResuming
 	}, 10*time.Second, 5*time.Millisecond, "the maintenance is not entered again")
 	p.setFailBack(false)
 	e.waitStep(rec.OpID, StepReverted)

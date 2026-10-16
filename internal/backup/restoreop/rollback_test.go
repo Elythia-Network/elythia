@@ -256,7 +256,7 @@ func TestRollback_NeverDropsTheKeptDatabase(t *testing.T) {
 		assert.Contains(t, got.Error, "did not let go")
 		assertKept(t, e)
 		assert.Equal(t, "current", e.db.content(testDB))
-		require.Eventually(t, func() bool { return e.maintenance() == nil }, 2*time.Second, 5*time.Millisecond)
+		require.Eventually(t, func() bool { st, ok := e.maintenanceNow(); return ok && st == nil }, 2*time.Second, 5*time.Millisecond)
 	})
 	t.Run("switch refused (A1)", func(t *testing.T) {
 		e := newEnv(t)

@@ -704,6 +704,16 @@ func (e *env) prepare() (*Record, string) {
 	return rec, ticket
 }
 
+// maintenanceNow reads the maintenance state without touching t, for the
+// conditions of require.Eventually. ok is false when it cannot be read.
+//
+// 条件は別の goroutine で動くので、t に触る maintenance() を使うと、待ちが切れた
+// 後に条件が t に触れて panic し、元の失敗を隠す (#3369)。
+func (e *env) maintenanceNow() (st *maintmode.State, ok bool) {
+	st, err := e.maint.Get(context.Background())
+	return st, err == nil
+}
+
 func (e *env) maintenance() *maintmode.State {
 	e.t.Helper()
 	st, err := e.maint.Get(context.Background())
