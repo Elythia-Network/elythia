@@ -533,7 +533,7 @@ func (h *Handler) FeaturedNotes(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
-	notes = notesfilter.ApplyHardMute(h.userRepo, viewer, notes)
+	notes = notesfilter.ApplyHardMute(h.userRepo, viewer, notes, h.idGen)
 	// upstream featured-notes.ts:93-98 と同じく、閲覧者をブロックしている人は
 	// 著者・返信先・リノート元の著者を、閲覧者がミュートした人は返信先・
 	// リノート元の著者だけを見る (isUserRelated の第 3 引数 ignoreAuthor)。

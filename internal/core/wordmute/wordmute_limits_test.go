@@ -15,7 +15,7 @@ import (
 //
 // 上限の値はリテラルで書く (定数を参照すると、緩める変異と一緒に期待値が動く)。
 func TestValidateHardMutedWords_Limits(t *testing.T) {
-	ok := json.RawMessage(`["/(?i)spam|scam/", "keyword", ["a", "b"]]`)
+	ok := json.RawMessage(`["/(?i)spam|scam/", ["keyword"], ["a", "b"]]`)
 	assert.NoError(t, ValidateHardMutedWords(ok))
 
 	// 幅の指定 (`.{0,200}`) を含む普通の大きさは通る (405 命令)。
@@ -61,7 +61,7 @@ func TestMatch_SkipsRegexOverLimits(t *testing.T) {
 	under := mustJSON(t, []string{mid, third})
 	assert.True(t, Match(under, text))
 	// 正規表現でない語は合計に数えない。
-	words := mustJSON(t, []string{mid, mid, "aaaab"})
+	words := mustJSON(t, []any{mid, mid, []string{"aaaab"}})
 	assert.True(t, Match(words, text))
 }
 

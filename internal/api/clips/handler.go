@@ -533,7 +533,7 @@ func (h *Handler) Notes(c echo.Context) error {
 		return apierr.JSONInternalError(c)
 	}
 	notes = notesfilter.ApplyBlockedHosts(notes, blockedHosts)
-	notes = notesfilter.ApplyHardMute(h.userRepo, user, notes)
+	notes = notesfilter.ApplyHardMute(h.userRepo, user, notes, h.idGen)
 	entities := entity.PackNotes(c.Request().Context(), notes, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
 	h.fieldRes.Apply(entities, user)
 	notehide.HideEmbeds(user, entities)

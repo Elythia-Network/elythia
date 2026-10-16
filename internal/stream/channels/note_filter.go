@@ -611,39 +611,122 @@ func (n *notePayload) isPureRenote() bool {
 // そのまま渡す。空 / nil なら hard mute は no-op。viewerID は self skip 用、
 // streaming は authenticated path のみ呼ばれるので空文字は anonymous 扱い。
 func (f *noteFilter) shouldEmit(payload []byte, hardMuteRules []byte, viewerID string) bool {
-	var note notePayload
-	if err := json.Unmarshal(payload, &note); err != nil {
-		// パース失敗時はそのまま送信
+	// **payload の decode は 1 回にする** (#3369)。規則が無ければ判定に要る欄だけを
+	// 読み、規則があれば埋め込みまで含めた probe を 1 回で読む。
+	if len(hardMuteRules) == 0 {
+		var note emitProbe
+		if err := json.Unmarshal(payload, &note); err != nil {
+			// パース失敗時はそのまま送信
+			return true
+		}
+		return f.passes(note)
+	}
+	var p hardMuteProbe
+	if err := json.Unmarshal(payload, &p); err != nil {
 		return true
 	}
+	if !f.passes(p.emitProbe) {
+		return false
+	}
+	// hardMutedWords filter (#787)。
+	return !hardMutedProbe(&p, hardMuteRules, viewerID, time.Now().UnixMilli())
+}
 
+// passes applies the renote / file conditions of the connect params.
+func (f *noteFilter) passes(note emitProbe) bool {
 	// 純リノート (text/cw/files/poll/reply 全て空 + renoteId あり) をフィルタ。
 	// SQL pureRenoteCondSQL / timeline_filter.go の isPureRenote と一致させる (#1888)。
 	if !f.WithRenotes && note.isPureRenote() {
 		return false
 	}
-
 	// ファイル付きのみモード
 	if f.WithFiles && len(note.FileIDs) == 0 {
 		return false
 	}
-
-	// hardMutedWords filter (#787)。rules 空なら no-op。
-	if len(hardMuteRules) > 0 {
-		text, cw := "", ""
-		if note.Text != nil {
-			text = *note.Text
-		}
-		if note.CW != nil {
-			cw = *note.CW
-		}
-		if wordmute.MatchNote(hardMuteRules, note.UserID, viewerID, text, cw) {
-			return false
-		}
-	}
-
 	return true
 }
+
+// emitProbe is the part of a note payload the connect-param filters read.
+type emitProbe struct {
+	Text     *string         `json:"text"`
+	CW       *string         `json:"cw"`
+	RenoteID *string         `json:"renoteId"`
+	ReplyID  *string         `json:"replyId"`
+	FileIDs  []string        `json:"fileIds"`
+	Poll     json.RawMessage `json:"poll"`
+}
+
+func (p emitProbe) isPureRenote() bool {
+	return (&notePayload{
+		RenoteID: p.RenoteID, Text: p.Text, CW: p.CW, ReplyID: p.ReplyID, FileIDs: p.FileIDs, Poll: p.Poll,
+	}).isPureRenote()
+}
+
+// hardMuteProbe is the part of a published note payload the hard-mute decision
+// reads: the content, the visibility facts, and the embedded reply / renote
+// (the packer emits renote.reply and renote.renote one level deeper).
+type hardMuteProbe struct {
+	embedProbe
+	emitProbe
+	Reply  *hardMuteProbe `json:"reply"`
+	Renote *hardMuteProbe `json:"renote"`
+}
+
+// hardMutedPayload decodes payload and reports whether viewerID's hard mute
+// rules hide it (see hardMutedProbe). An undecodable payload is not muted.
+func hardMutedPayload(payload, rules []byte, viewerID string, nowMs int64) bool {
+	var p hardMuteProbe
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return false
+	}
+	return hardMutedProbe(&p, rules, viewerID, nowMs)
+}
+
+// hardMutedProbe reports whether viewerID's hard mute rules hide the note.
+// It builds the same view as notesfilter.ApplyHardMute (REST): a pure renote is
+// judged by the renoted note, the reply / quote targets are checked too, and
+// any part the viewer cannot see (the gates hideEmbeds applies before sending)
+// is not judged. The follow snapshot is not consulted, so followers-only parts
+// count as unseen, the same as REST.
+func hardMutedProbe(p *hardMuteProbe, rules []byte, viewerID string, nowMs int64) bool {
+	viewer := &model.User{ID: viewerID}
+	top := hardMuteNodeFromProbe(p)
+	f := embedFactsFromProbe(p.embedProbe)
+	if p.Reply != nil {
+		f.ReplyTargetAuthorID = p.Reply.UserID
+	}
+	top.Hidden = corenote.HideNoteByPrefsDecision(viewer, f, neverFollows, nowMs)
+	top.PureRenote = p.isPureRenote()
+	top.Reply = hardMuteEmbedFromProbe(p.Reply, viewer, nowMs)
+	top.Renote = hardMuteEmbedFromProbe(p.Renote, viewer, nowMs)
+	if top.Renote != nil {
+		top.Renote.Reply = hardMuteEmbedFromProbe(p.Renote.Reply, viewer, nowMs)
+		top.Renote.Renote = hardMuteEmbedFromProbe(p.Renote.Renote, viewer, nowMs)
+	}
+	return wordmute.MatchAppearNote(rules, viewerID, top)
+}
+
+func hardMuteEmbedFromProbe(p *hardMuteProbe, viewer *model.User, nowMs int64) *wordmute.Note {
+	if p == nil {
+		return nil
+	}
+	n := hardMuteNodeFromProbe(p)
+	n.Hidden = corenote.HideEmbedDecision(viewer, embedFactsFromProbe(p.embedProbe), neverFollows, nowMs)
+	return n
+}
+
+func hardMuteNodeFromProbe(p *hardMuteProbe) *wordmute.Note {
+	n := &wordmute.Note{UserID: p.UserID}
+	if p.Text != nil {
+		n.Text = *p.Text
+	}
+	if p.CW != nil {
+		n.CW = *p.CW
+	}
+	return n
+}
+
+func neverFollows(string) bool { return false }
 
 // renotedReplyVisibleTo reports whether a pure renote's target reply is visible
 // to the viewer. followers 限定投稿への返信をリノートされたとき、返信先の

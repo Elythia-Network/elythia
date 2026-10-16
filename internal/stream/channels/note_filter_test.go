@@ -2,6 +2,8 @@ package channels
 
 import (
 	"encoding/json"
+	"fmt"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -289,15 +291,15 @@ func TestShouldEmit_NormalNote(t *testing.T) {
 // #787: hardMutedWords による per-publish filter (streaming path)。
 func TestShouldEmit_HardMute_TextHit(t *testing.T) {
 	f := noteFilter{WithRenotes: true, WithReplies: true, WithFiles: false}
-	payload := []byte(`{"userId":"author","text":"this contains POLITICS"}`)
-	rules := []byte(`["politics"]`)
+	payload := []byte(`{"userId":"author","text":"this contains politics"}`)
+	rules := []byte(`[["politics"]]`)
 	assert.False(t, f.shouldEmit(payload, rules, "viewer"))
 }
 
 func TestShouldEmit_HardMute_CWHit(t *testing.T) {
 	f := noteFilter{WithRenotes: true, WithReplies: true, WithFiles: false}
 	payload := []byte(`{"userId":"author","text":"clean body","cw":"spoiler ahead"}`)
-	rules := []byte(`["spoiler"]`)
+	rules := []byte(`[["spoiler"]]`)
 	assert.False(t, f.shouldEmit(payload, rules, "viewer"))
 }
 
@@ -305,7 +307,7 @@ func TestShouldEmit_HardMute_ViewerOwnNoteExempt(t *testing.T) {
 	f := noteFilter{WithRenotes: true, WithReplies: true, WithFiles: false}
 	// note.userId == viewerID なので self skip で送信される
 	payload := []byte(`{"userId":"viewer","text":"politics by self"}`)
-	rules := []byte(`["politics"]`)
+	rules := []byte(`[["politics"]]`)
 	assert.True(t, f.shouldEmit(payload, rules, "viewer"))
 }
 
@@ -314,6 +316,114 @@ func TestShouldEmit_HardMute_NoRulesIsNoOp(t *testing.T) {
 	payload := []byte(`{"userId":"author","text":"politics"}`)
 	assert.True(t, f.shouldEmit(payload, nil, "viewer"))
 	assert.True(t, f.shouldEmit(payload, []byte("[]"), "viewer"))
+}
+
+// #3369: 本家の checkNoteWordMute(getAppearNote(note)) と同じ対象を見る。
+// 期待値は本家 frontend use-note.ts / utility/check-word-mute.ts から書き下した。
+func TestHardMutedPayload_UpstreamAppearNote(t *testing.T) {
+	rules := []byte(`[["muted"]]`)
+	const now = int64(1_800_000_000_000)
+	cases := []struct {
+		name    string
+		payload string
+		want    bool
+	}{
+		{"pure renote is judged by the renoted note",
+			`{"userId":"booster","renoteId":"r1","renote":{"userId":"author","text":"a muted word"}}`, true},
+		{"pure renote of a clean note is shown",
+			`{"userId":"booster","renoteId":"r1","renote":{"userId":"author","text":"clean"}}`, false},
+		{"pure renote of the viewer's own note is not muted by it",
+			`{"userId":"booster","renoteId":"r1","renote":{"userId":"viewer","text":"muted by me"}}`, false},
+		{"pure renote by the viewer of a muted note is hidden",
+			`{"userId":"viewer","renoteId":"r1","renote":{"userId":"author","text":"muted"}}`, true},
+		{"pure renote of a reply checks the renoted note's reply target",
+			`{"userId":"booster","renoteId":"r1","renote":{"userId":"author","text":"clean","replyId":"p1","reply":{"userId":"other","text":"muted parent"}}}`, true},
+		{"pure renote of a quote checks the quoted note",
+			`{"userId":"booster","renoteId":"r1","renote":{"userId":"author","text":"clean","renoteId":"q1","renote":{"userId":"other","cw":"muted cw"}}}`, true},
+		{"quote checks the quoted note",
+			`{"userId":"author","text":"clean","renoteId":"q1","renote":{"userId":"other","text":"muted"}}`, true},
+		{"quote's own text is checked",
+			`{"userId":"author","text":"muted comment","renoteId":"q1","renote":{"userId":"other","text":"clean"}}`, true},
+		{"quote does not look two levels into the quoted note",
+			`{"userId":"author","text":"clean","renoteId":"q1","renote":{"userId":"other","text":"clean","renoteId":"q2","renote":{"userId":"third","text":"muted"}}}`, false},
+		{"reply checks the reply target",
+			`{"userId":"author","text":"clean","replyId":"p1","reply":{"userId":"other","text":"muted"}}`, true},
+		{"reply to the viewer's own muted note is shown",
+			`{"userId":"author","text":"clean","replyId":"p1","reply":{"userId":"viewer","text":"muted"}}`, false},
+		{"followers-only embed the viewer cannot see is not judged",
+			`{"userId":"author","text":"clean","replyId":"p1","reply":{"userId":"other","visibility":"followers","text":"muted"}}`, false},
+		{"specified embed addressed to the viewer is judged",
+			`{"userId":"author","text":"clean","replyId":"p1","reply":{"userId":"other","visibility":"specified","visibleUserIds":["viewer"],"text":"muted"}}`, true},
+		{"pure renote of a quote whose target the viewer cannot see",
+			`{"userId":"booster","renoteId":"r1","renote":{"userId":"author","text":"clean","renoteId":"q1","renote":{"userId":"other","visibility":"followers","text":"muted"}}}`, false},
+		{"pure renote of a reply whose target the viewer cannot see",
+			`{"userId":"booster","renoteId":"r1","renote":{"userId":"author","text":"clean","replyId":"p1","reply":{"userId":"other","visibility":"followers","text":"muted"}}}`, false},
+		{"specified embed not addressed to the viewer is not judged",
+			`{"userId":"author","text":"clean","replyId":"p1","reply":{"userId":"other","visibility":"specified","visibleUserIds":["x"],"text":"muted"}}`, false},
+		{"renote with a poll is not pure, its own empty text does not match but the target does",
+			`{"userId":"author","renoteId":"q1","poll":{"choices":[]},"renote":{"userId":"other","text":"muted"}}`, true},
+		{"poll choices are not judged",
+			`{"userId":"author","text":"clean","poll":{"choices":[{"text":"muted"}]}}`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, hardMutedPayload([]byte(tc.payload), rules, "viewer", now))
+		})
+	}
+}
+
+func TestHardMutedPayload_TopLevelHiddenByAuthorPrefsIsNotJudged(t *testing.T) {
+	// makeNotesHiddenBefore で本文が消されるノートは、本家と同じく判定しない。
+	hidden := -1
+	payload := []byte(`{"userId":"author","text":"muted","visibility":"public","createdAt":"2020-01-01T00:00:00.000Z","user":{"id":"author","makeNotesHiddenBefore":` + strconv.Itoa(hidden) + `}}`)
+	assert.False(t, hardMutedPayload(payload, []byte(`[["muted"]]`), "viewer", 1_800_000_000_000))
+	visible := []byte(`{"userId":"author","text":"muted","visibility":"public","createdAt":"2020-01-01T00:00:00.000Z","user":{"id":"author"}}`)
+	assert.True(t, hardMutedPayload(visible, []byte(`[["muted"]]`), "viewer", 1_800_000_000_000))
+}
+
+func TestHardMutedPayload_DowngradedReplyToViewerIsJudged(t *testing.T) {
+	// makeNotesFollowersOnlyBefore で降格しても、viewer への返信なら見えるので判定する。
+	base := `{"userId":"author","text":"muted","visibility":"public","createdAt":"2020-01-01T00:00:00.000Z","user":{"id":"author","makeNotesFollowersOnlyBefore":-1},"replyId":"p1","reply":{"userId":"%s","text":"q"}}`
+	rules := []byte(`[["muted"]]`)
+	assert.True(t, hardMutedPayload([]byte(fmt.Sprintf(base, "viewer")), rules, "viewer", 1_800_000_000_000))
+	assert.False(t, hardMutedPayload([]byte(fmt.Sprintf(base, "someone")), rules, "viewer", 1_800_000_000_000))
+}
+
+func TestHardMutedPayload_FollowersOnlyTopLevelIsJudged(t *testing.T) {
+	// チャンネルの配信先はトップのノートを見られる人だけなので、フォロワー限定の
+	// トップは判定する (トップに当てるのは著者の設定の判定だけ)。
+	payload := []byte(`{"userId":"author","visibility":"followers","text":"muted"}`)
+	assert.True(t, hardMutedPayload(payload, []byte(`[["muted"]]`), "viewer", 1_800_000_000_000))
+}
+
+func TestHardMutedPayload_RenoteWithReplyIsNotPure(t *testing.T) {
+	// 返信でもあるリノートは純粋なリノートではないので、リノート元の返信先は見ない。
+	payload := []byte(`{"userId":"booster","renoteId":"t","replyId":"p","reply":{"userId":"other","text":"clean"},"renote":{"userId":"author","text":"clean","replyId":"i","reply":{"userId":"third","text":"muted"}}}`)
+	assert.False(t, hardMutedPayload(payload, []byte(`[["muted"]]`), "viewer", 1_800_000_000_000))
+	pure := []byte(`{"userId":"booster","renoteId":"t","renote":{"userId":"author","text":"clean","replyId":"i","reply":{"userId":"third","text":"muted"}}}`)
+	assert.True(t, hardMutedPayload(pure, []byte(`[["muted"]]`), "viewer", 1_800_000_000_000))
+}
+
+func TestShouldEmit_HardMuteRulesKeepConnectParamFilters(t *testing.T) {
+	// 規則を持つ閲覧者でも、withRenotes / withFiles の条件は同じく効く。
+	rules := []byte(`[["nomatch"]]`)
+	noRenotes := noteFilter{WithRenotes: false}
+	assert.False(t, noRenotes.shouldEmit([]byte(`{"userId":"a","renoteId":"r1","renote":{"userId":"b","text":"x"}}`), rules, "viewer"))
+	filesOnly := noteFilter{WithRenotes: true, WithFiles: true}
+	assert.False(t, filesOnly.shouldEmit([]byte(`{"userId":"a","text":"x","fileIds":[]}`), rules, "viewer"))
+	assert.True(t, filesOnly.shouldEmit([]byte(`{"userId":"a","text":"x","fileIds":["f1"]}`), rules, "viewer"))
+	// 規則があっても、読めない payload は以前どおり送る。
+	assert.True(t, filesOnly.shouldEmit([]byte(`{invalid`), rules, "viewer"))
+}
+
+func TestHardMutedPayload_InvalidJSONIsNotMuted(t *testing.T) {
+	assert.False(t, hardMutedPayload([]byte(`{invalid`), []byte(`[["x"]]`), "viewer", 0))
+}
+
+func TestShouldEmit_HardMute_PureRenoteOfMutedNote(t *testing.T) {
+	f := noteFilter{WithRenotes: true}
+	payload := []byte(`{"userId":"booster","renoteId":"r1","renote":{"userId":"author","text":"muted"}}`)
+	assert.False(t, f.shouldEmit(payload, []byte(`[["muted"]]`), "viewer"))
 }
 
 func TestAnonRequireSigninDrop(t *testing.T) {

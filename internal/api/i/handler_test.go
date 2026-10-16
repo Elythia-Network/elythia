@@ -1753,7 +1753,7 @@ func TestUpdate_HardMutedWordsTriggersReload(t *testing.T) {
 	repo.Users["user1"] = user
 	repo.Profiles["user1"] = &model.UserProfile{UserID: "user1", Fields: datatypes.JSON([]byte("[]"))}
 
-	rec := post(h.Update, `{"hardMutedWords":["spoiler"]}`, user)
+	rec := post(h.Update, `{"hardMutedWords":[["spoiler"]]}`, user)
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, []string{"user1"}, pub.published)
 }
@@ -1789,7 +1789,7 @@ func TestUpdate_HardMutedWordsNoPublisherIsNoOp(t *testing.T) {
 	repo.Users["user1"] = user
 	repo.Profiles["user1"] = &model.UserProfile{UserID: "user1", Fields: datatypes.JSON([]byte("[]"))}
 
-	rec := post(h.Update, `{"hardMutedWords":["x"]}`, user)
+	rec := post(h.Update, `{"hardMutedWords":[["x"]]}`, user)
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
@@ -1803,13 +1803,61 @@ func TestUpdate_MutedWordsAccepted(t *testing.T) {
 	repo.Users["user1"] = user
 	repo.Profiles["user1"] = &model.UserProfile{UserID: "user1", Fields: datatypes.JSON([]byte("[]"))}
 
-	rec := post(h.Update, `{"mutedWords":[["foo"],["bar","baz"]],"hardMutedWords":["spoiler"]}`, user)
+	rec := post(h.Update, `{"mutedWords":[["foo"],["bar","baz"]],"hardMutedWords":[["spoiler"],"/spo+iler/i"]}`, user)
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	got := repo.Profiles["user1"]
 	require.NotNil(t, got)
 	assert.JSONEq(t, `[["foo"],["bar","baz"]]`, string(got.MutedWords))
-	assert.JSONEq(t, `["spoiler"]`, string(got.HardMutedWords))
+	assert.JSONEq(t, `[["spoiler"],"/spo+iler/i"]`, string(got.HardMutedWords))
+}
+
+// #3369: `/.../` の形でない文字列の要素は、本家 i/update と同じく INVALID_REGEXP
+// (同じ code / id / message) で拒否し、保存しない。
+func TestUpdate_MutedWordsRejectsNonRegexString(t *testing.T) {
+	for _, body := range []string{
+		`{"hardMutedWords":["spoiler"]}`,
+		`{"hardMutedWords":[["ok"],"plain"]}`,
+		`{"mutedWords":["plain"]}`,
+		`{"mutedWords":[""]}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			h, repo, _, _ := newTestHandler(t)
+			user := &model.User{ID: "user1", Username: "user1", AvatarDecorations: datatypes.JSON([]byte("[]"))}
+			repo.Users["user1"] = user
+			repo.Profiles["user1"] = &model.UserProfile{UserID: "user1", Fields: datatypes.JSON([]byte("[]")), MutedWords: datatypes.JSON([]byte("[]")), HardMutedWords: datatypes.JSON([]byte("[]"))}
+			rec := post(h.Update, body, user)
+			assert.Equal(t, http.StatusBadRequest, rec.Code)
+			var resp struct {
+				Error struct {
+					Code    string `json:"code"`
+					ID      string `json:"id"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+			assert.Equal(t, "INVALID_REGEXP", resp.Error.Code)
+			assert.Equal(t, "0d786918-10df-41cd-8f33-8dec7d9a89a5", resp.Error.ID)
+			assert.Equal(t, "Invalid Regular Expression.", resp.Error.Message)
+			got := repo.Profiles["user1"]
+			assert.JSONEq(t, `[]`, string(got.MutedWords))
+			assert.JSONEq(t, `[]`, string(got.HardMutedWords))
+		})
+	}
+}
+
+// #3369: 本家 i/update (node-re2) は flags を問わず受け付けるので、fork の frontend
+// で書ける `/foo/v` や `/foo/d` を拒否しない。
+func TestUpdate_MutedWordsAcceptsAnyRegexFlags(t *testing.T) {
+	h, repo, _, _ := newTestHandler(t)
+	user := &model.User{ID: "user1", Username: "user1", AvatarDecorations: datatypes.JSON([]byte("[]"))}
+	repo.Users["user1"] = user
+	repo.Profiles["user1"] = &model.UserProfile{UserID: "user1", Fields: datatypes.JSON([]byte("[]"))}
+	rec := post(h.Update, `{"mutedWords":["/foo/v","/foo/d"],"hardMutedWords":["/foo/v","/foo/d",["x"]]}`, user)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	got := repo.Profiles["user1"]
+	assert.JSONEq(t, `["/foo/v","/foo/d"]`, string(got.MutedWords))
+	assert.JSONEq(t, `["/foo/v","/foo/d",["x"]]`, string(got.HardMutedWords))
 }
 
 func TestUpdate_MutedWordsEmptyArrayClears(t *testing.T) {

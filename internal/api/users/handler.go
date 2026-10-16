@@ -901,7 +901,7 @@ func (h *Handler) Notes(c echo.Context) error {
 		return apierr.JSONInternalError(c)
 	}
 
-	notes = notesfilter.ApplyHardMute(h.userRepo, viewer, notes)
+	notes = notesfilter.ApplyHardMute(h.userRepo, viewer, notes, h.idGen)
 	// **ブロック済みインスタンスのノートを落とす** (upstream
 	// generateBlockedHostQueryForNote)。`ListByUserIDFiltered` が push down
 	// するのは visibility だけなので、ブロック後も既存のノートが出続けていた。

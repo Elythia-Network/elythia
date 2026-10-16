@@ -702,7 +702,7 @@ func (h *Handler) Timeline(c echo.Context) error {
 			return apierr.JSONInternalError(c)
 		}
 	}
-	notes = notesfilter.ApplyHardMute(h.userRepo, viewer, notes)
+	notes = notesfilter.ApplyHardMute(h.userRepo, viewer, notes, h.idGen)
 	// **ブロック済みインスタンスのノートを落とす** (upstream
 	// generateBlockedHostQueryForNote)。チャンネルは連合先からも投稿されるので、
 	// ブロック後も既存のノートがタイムラインに出続けていた。

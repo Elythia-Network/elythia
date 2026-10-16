@@ -839,7 +839,9 @@ func (h *Handler) ShowPartialBulk(c echo.Context) error {
 	// 軽量 diff のみ返す (reaction polling 用途、本文/可視性詳細は返さない)。
 	// packMany が reactions (buffered merge 込み) と reactionEmojis を解決済みなので
 	// それを投影して shape を揃える (#1538)。
-	packed := h.packMany(c.Request().Context(), notes, viewer)
+	// 詳細画面に表示中のノートのリアクションを更新する経路なので、ハードミュートを掛けない
+	// (本家の fetchDiffs も掛けない)。
+	packed := h.packManyWithoutHardMute(c.Request().Context(), notes, viewer)
 	diffs := make([]map[string]any, 0, len(packed))
 	for i := range packed {
 		diffs = append(diffs, map[string]any{
