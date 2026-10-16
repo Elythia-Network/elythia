@@ -35,6 +35,7 @@ type Comparison struct {
 	Endpoints []EndpointCompare `json:"endpoints"`
 	Resources []ResourceCompare `json:"resources"`
 	Delivery  []DeliveryRound   `json:"delivery,omitempty"`
+	DeliveryMeasures []Measure  `json:"deliveryMeasures,omitempty"`
 }
 
 // DeliveryRound carries receiver counts and a data-quality status through to
@@ -167,7 +168,7 @@ const minEffectPercent = 5.0
 // compare judges a run set.
 func compare(rs *RunSet) *Comparison {
 	c := &Comparison{Base: rs.Base, Head: rs.Head, Scenario: rs.Scenario, Rounds: rs.Rounds, Runner: rs.Runner, Labels: rs.Labels, Valid: true}
-	validateDeliveryRuns(c, rs.Runs)
+	validateDeliveryRuns(c, rs)
 	bySide := map[Side][]*Run{}
 	for _, r := range rs.Runs {
 		if !r.Meta.Completed {
@@ -205,9 +206,9 @@ func compare(rs *RunSet) *Comparison {
 	return c
 }
 
-func validateDeliveryRuns(c *Comparison, runs []*Run) {
-	hasDelivery := false
-	for _, r := range runs {
+func validateDeliveryRuns(c *Comparison, rs *RunSet) {
+	hasDelivery := rs.DeliveryEnabled
+	for _, r := range rs.Runs {
 		if r.Delivery != nil {
 			hasDelivery = true
 			break
@@ -217,9 +218,12 @@ func validateDeliveryRuns(c *Comparison, runs []*Run) {
 		return
 	}
 
-	for _, r := range runs {
+	allValid := true
+	throughput := map[Side][]float64{SideBase: {}, SideHead: {}}
+	for _, r := range rs.Runs {
 		if r.Delivery == nil {
 			c.problem("%s round %d delivery stats are missing", r.Meta.Side, r.Meta.Round)
+			allValid = false
 			continue
 		}
 		status, reasons := deliveryStatus(*r.Delivery)
@@ -229,8 +233,50 @@ func validateDeliveryRuns(c *Comparison, runs []*Run) {
 		})
 		if status != DeliveryStatusValid {
 			c.problem("%s round %d delivery %s: %s", r.Meta.Side, r.Meta.Round, status, strings.Join(reasons, ", "))
+			allValid = false
+			continue
 		}
+		if !rs.DeliveryEnabled {
+			continue
+		}
+		rate, reason := deliveryThroughput(*r.Delivery)
+		if reason != "" {
+			c.problem("%s round %d delivery throughput: %s", r.Meta.Side, r.Meta.Round, reason)
+			allValid = false
+			continue
+		}
+		throughput[r.Meta.Side] = append(throughput[r.Meta.Side], rate)
 	}
+	if !rs.DeliveryEnabled {
+		return
+	}
+	if allValid && len(throughput[SideBase]) == rs.Rounds && len(throughput[SideHead]) == rs.Rounds {
+		c.DeliveryMeasures = append(
+			c.DeliveryMeasures,
+			newMeasure("delivery_unique_jobs_per_sec", false, throughput[SideBase], throughput[SideHead]),
+		)
+	} else if allValid {
+		c.problem("delivery throughput is missing from one or more side rounds")
+	}
+}
+
+func deliveryThroughput(s DeliveryStats) (float64, string) {
+	if s.ThroughputJobs == nil || *s.ThroughputJobs != s.Unique {
+		return 0, "throughputJobs is missing or differs from unique deliveries"
+	}
+	if s.DrainSeconds == nil || *s.DrainSeconds <= 0 {
+		return 0, "drainSeconds is missing or not positive"
+	}
+	if s.ThroughputJobsPerSecond == nil || *s.ThroughputJobsPerSecond <= 0 {
+		return 0, "throughputJobsPerSecond is missing or not positive"
+	}
+	expected := float64(s.Unique) / *s.DrainSeconds
+	delta := math.Abs(*s.ThroughputJobsPerSecond - expected)
+	tolerance := math.Max(1e-9, math.Abs(expected)*1e-6)
+	if delta > tolerance {
+		return 0, fmt.Sprintf("throughput %.9g does not match unique/drain %.9g", *s.ThroughputJobsPerSecond, expected)
+	}
+	return *s.ThroughputJobsPerSecond, ""
 }
 
 func deliveryStatus(s DeliveryStats) (DeliveryStatus, []string) {
@@ -561,8 +607,8 @@ var minAbsDifference = map[string]float64{
 // は下限 20% で防げるが、記録には約 510ms と約 700ms の段が両方あり、両側に分かれる
 // と 37% になるので、下限では防げない。
 var referenceOnly = map[string]bool{
-	"p(99)":    true,
-	"requests": true,
+	"p(99)":                        true,
+	"delivery_unique_jobs_per_sec": true,
 }
 
 // newMeasure compares the per-round values of base and head.

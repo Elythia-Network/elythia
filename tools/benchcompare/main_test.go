@@ -428,6 +428,65 @@ func TestCompare_DeliveryIssuesInvalidatePerformanceComparisonAndPreserveCounts(
 	assert.Contains(t, report.String(), "content mismatch")
 }
 
+func TestCompare_DeliveryThroughputMedianIsReferenceOnly(t *testing.T) {
+	stats := func(rate float64) *DeliveryStats {
+		jobs, drain := uint64(2), 2.0/rate
+		return &DeliveryStats{
+			Finalized: true, Expected: 2, Attempts: 2, Verified: 2,
+			Valid: 2, Unique: 2, Missing: 0,
+			ThroughputJobs: &jobs, ThroughputJobsPerSecond: &rate, DrainSeconds: &drain,
+		}
+	}
+	runs := []*Run{
+		{Meta: RunMeta{Side: SideBase, Round: 1, Completed: true}, Delivery: stats(1.0)},
+		{Meta: RunMeta{Side: SideBase, Round: 2, Completed: true}, Delivery: stats(2.0)},
+		{Meta: RunMeta{Side: SideHead, Round: 1, Completed: true}, Delivery: stats(1.5)},
+		{Meta: RunMeta{Side: SideHead, Round: 2, Completed: true}, Delivery: stats(2.5)},
+	}
+	c := compare(&RunSet{Rounds: 2, DeliveryEnabled: true, Runs: runs})
+
+	assert.True(t, c.Valid)
+	require.Len(t, c.DeliveryMeasures, 1)
+	measure := c.DeliveryMeasures[0]
+	assert.Equal(t, "delivery_unique_jobs_per_sec", measure.Name)
+	assert.Equal(t, VerdictReference, measure.Verdict)
+	assert.Equal(t, 1.5, measure.Base.Median)
+	assert.Equal(t, 2.0, measure.Head.Median)
+	assert.Equal(t, 2, measure.Base.Rounds)
+	var markdown bytes.Buffer
+	require.NoError(t, renderMarkdown(&markdown, c))
+	assert.Contains(t, markdown.String(), "Unique delivery throughput (reference only)")
+	assert.Contains(t, markdown.String(), "| unique delivery (jobs/s) | 1.5 [1.0, 2.0] | 2.0 [1.5, 2.5] |")
+}
+
+func TestCompare_LegacyDeliveryStatsWithoutThroughputRemainValid(t *testing.T) {
+	stats := &DeliveryStats{Finalized: true, Expected: 1, Attempts: 1, Verified: 1, Valid: 1, Unique: 1}
+	runs := []*Run{
+		{Meta: RunMeta{Side: SideBase, Round: 1, Completed: true}, Delivery: stats},
+		{Meta: RunMeta{Side: SideBase, Round: 2, Completed: true}, Delivery: stats},
+		{Meta: RunMeta{Side: SideHead, Round: 1, Completed: true}, Delivery: stats},
+		{Meta: RunMeta{Side: SideHead, Round: 2, Completed: true}, Delivery: stats},
+	}
+	c := compare(&RunSet{Rounds: 2, Runs: runs})
+
+	assert.True(t, c.Valid)
+	assert.Empty(t, c.DeliveryMeasures)
+}
+
+func TestCompare_DeliveryEnabledRequiresEveryRunArtifact(t *testing.T) {
+	runs := []*Run{
+		{Meta: RunMeta{Side: SideBase, Round: 1, Completed: true}},
+		{Meta: RunMeta{Side: SideBase, Round: 2, Completed: true}},
+		{Meta: RunMeta{Side: SideHead, Round: 1, Completed: true}},
+		{Meta: RunMeta{Side: SideHead, Round: 2, Completed: true}},
+	}
+	c := compare(&RunSet{Rounds: 2, DeliveryEnabled: true, Runs: runs})
+
+	assert.False(t, c.Valid)
+	assert.Len(t, c.Problems, 4)
+	assert.Contains(t, c.Problems[0], "delivery stats are missing")
+}
+
 func TestCompare_MissingDeliveryStatsInvalidatePerformanceComparison(t *testing.T) {
 	valid := &DeliveryStats{Finalized: true, Expected: 1, Attempts: 1, Verified: 1, Valid: 1, Unique: 1}
 	runs := []*Run{
@@ -445,7 +504,11 @@ func TestCompare_MissingDeliveryStatsInvalidatePerformanceComparison(t *testing.
 }
 
 func TestCompare_ValidDeliveryWithDuplicateAttemptsRemainsComparable(t *testing.T) {
-	withDuplicate := &DeliveryStats{Finalized: true, Expected: 3, Attempts: 4, Verified: 4, Valid: 4, Unique: 3, Duplicates: 1}
+	jobs, rate, drain := uint64(3), 4.0, 0.75
+	withDuplicate := &DeliveryStats{
+		Finalized: true, Expected: 3, Attempts: 4, Verified: 4, Valid: 4, Unique: 3, Duplicates: 1,
+		ThroughputJobs: &jobs, ThroughputJobsPerSecond: &rate, DrainSeconds: &drain,
+	}
 	runs := []*Run{
 		{Meta: RunMeta{Side: SideBase, Round: 1, Completed: true}, Delivery: withDuplicate},
 		{Meta: RunMeta{Side: SideBase, Round: 2, Completed: true}, Delivery: withDuplicate},

@@ -163,9 +163,11 @@ report の冒頭には、runner の機種 (`run.json`の`runner.cpu_model`) を�
 
 配送receiver fixtureを使うrunは、run directoryに任意の`delivery.json`を置けます。`finalized` / `expected` / `attempts` / `verified` / `pending` / `valid` / `unique` / `duplicates` / `invalid` / `contentMismatch` / `unexpected` / `unexpectedAttempts` / `missing`を記録します。`unexpected`は未登録の(Activity ID, Inbox)組の数で、未着のexpected組を埋めません。`valid`は署名に加えてexpected Activity ID・Inbox・本文digestが一致した試行だけです。現在の`tests/bench/ab/run.sh`は`delivery.json`を生成しないため、同scriptの結果は配送未計測として扱います。
 
+配送receiver fixtureを使うrunは、run directoryに任意の`delivery.json`を置けます。`finalized` / `expected` / `attempts` / `verified` / `pending` / `valid` / `unique` / `duplicates` / `invalid` / `contentMismatch` / `unexpected` / `unexpectedAttempts` / `missing`を記録します。`unexpected`は未登録の(Activity ID, Inbox)組の数で、未着のexpected組を埋めません。`valid`は署名に加えてexpected Activity ID・Inbox・本文digestが一致した試行だけです。`tests/bench/ab/run.sh --delivery`を指定すると、各`rN-side/`に receiver の生カウント、`throughputJobs`、`throughputJobsPerSecond`、`drainSeconds`を含む`delivery.json`を出力します。`benchcompare`は全side・roundが妥当なときだけ`unique / drainSeconds`の中央値と範囲を表示し、この指標は参考値として表示して性能判定には使いません。`--delivery-notes`と`--delivery-followers`で合成 fixture の件数を指定でき、既定は2×2です。
+
 JSONを読めない場合、または壊れたJSONの場合だけ入力エラー(exit 1)にします。読み取れた統計の意味上の異常はloaderで拒否せず、`status` / `reasons`と生の件数をレポートに残して比較不能(exit 2)にします。未確定manifest・`pending`・未着は`incomplete`、`expected`が0・件数の整合性違反・`invalid` / `contentMismatch` / `unexpected`があるroundは`invalid`です。
 
-配送統計が1つでもある比較では、すべてのside・roundに統計が必要です。比較不能のときは性能値を出さず、正常配送の性能比較として扱いません。配送数に新しい性能閾値は設けません。重複数は生値として表示します。故意に不正署名・本文・宛先や未到着を起こすcorrectnessケースは、期待結果との一致を別テストで判定し、正常系の性能runやその`delivery.json`に混ぜません。配送統計がどのroundにもない比較は、従来どおり配送未計測として扱います。
+配送統計が1つでもある比較では、すべてのside・roundに統計が必要です。比較不能のときは性能値を出さず、正常配送の性能比較として扱いません。配送数に新しい性能閾値は設けません。重複数は生値として表示します。故意に不正署名・本文・宛先や未到着を起こすcorrectnessケースは、期待結果との一致を別テストで判定し、正常系の性能runやその`delivery.json`に混ぜません。配送統計がどのroundにもなく`run.json`の`deliveryEnabled`もfalseなら配送未計測です。`deliveryEnabled`がtrueの場合は、全ファイルが欠けていても比較不能として報告します。
 
 ## 判定
 
