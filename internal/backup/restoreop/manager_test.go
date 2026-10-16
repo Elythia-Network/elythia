@@ -54,7 +54,9 @@ func TestRestore_HappyPath(t *testing.T) {
 // TestRestore_DoesNotSwitchBeforeHeld (R2): while a session stays on the
 // database, the maintenance is not held and the names are not swapped.
 func TestRestore_DoesNotSwitchBeforeHeld(t *testing.T) {
-	e := newEnv(t)
+	// held の待ちが期限で切れることを検査する。接続が残り続けるので、期限が負荷で
+	// 遅れても結末は変わらない。
+	e := newEnv(t, func(o *Options) { o.HeldTimeout = 50 * time.Millisecond })
 	e.process("p1")
 	e.db.mu.Lock()
 	e.db.conns[testDB] = 1
@@ -128,16 +130,36 @@ func TestRestore_FailureAfterSwitchPutsThePreviousBack(t *testing.T) {
 // TestRestore_ResumeFailurePutsThePreviousBack (A3): the processes do not
 // come back on the restored database within ResumeTimeout.
 func TestRestore_ResumeFailurePutsThePreviousBack(t *testing.T) {
-	e := newEnv(t)
+	// 期限を検査するのは再開の待ち (ResumeTimeout) だけ。プロセスは戻らないので、
+	// 期限が負荷で遅れても結末は変わらない。held の待ちは既定の切れない期限のまま、
+	// 判定役が held にするのを待つ。
+	e := newEnv(t, func(o *Options) { o.ResumeTimeout = 500 * time.Millisecond })
 	p := e.process("p1")
 	p.setFailBack(true)
 	rec, _ := e.prepare()
 	require.NoError(t, e.m.Confirm(context.Background(), rec.OpID))
 	e.waitStep(rec.OpID, StepReverting, StepReverted)
+	// 戻す処理がメンテナンスに入り直してから (resuming でなくなってから) 戻れるように
+	// する。reverting を見てすぐ戻れるようにすると、まだ resuming のうちに判定役が
+	// メンテナンスを外し、戻す処理は「戻した DB で動いているかもしれない」として運営者に
+	// 渡す (unknown)。
+	require.Eventually(t, func() bool {
+		got, err := e.store.Get(context.Background(), rec.OpID)
+		if err == nil && got.Step == StepReverted {
+			return true
+		}
+		st := e.maintenance()
+		return st != nil && st.OpID == rec.OpID && st.Phase != maintmode.PhaseResuming
+	}, 10*time.Second, 5*time.Millisecond, "the maintenance is not entered again")
 	p.setFailBack(false)
 	e.waitStep(rec.OpID, StepReverted)
 	assert.Equal(t, "current", e.db.content(testDB))
-	require.Eventually(t, func() bool { return e.maintenance() == nil }, 2*time.Second, 5*time.Millisecond)
+	// reverted を書く前に再開 (resuming) を出している。外れるまでは待たない: 戻した後の
+	// 待ちも同じ短い ResumeTimeout で、負荷で切れると操作の判定役が止まり、外すのは
+	// 本番なら各プロセスの判定役になる。
+	st := e.maintenance()
+	assert.True(t, st == nil || (st.OpID == rec.OpID && st.Phase == maintmode.PhaseResuming),
+		"the processes are let back on the previous database: %+v", st)
 }
 
 // TestRestore_UnknownSwitchStopsInMaintenance (R5).
@@ -148,7 +170,10 @@ func TestRestore_UnknownSwitchStopsInMaintenance(t *testing.T) {
 	rec, _ := e.prepare()
 	require.NoError(t, e.m.Confirm(context.Background(), rec.OpID))
 	e.waitStep(rec.OpID, StepUnknown)
-	time.Sleep(50 * time.Millisecond)
+	// 操作が終わる (枠を返す) のを待つ。決まった時間だけ眠る形だと、負荷で操作が
+	// まだ枠を持っていて、下の Prepare が ErrMaintenanceActive でなく枠の取り合い
+	// (busy) で断られた (#3369)。
+	require.Eventually(t, func() bool { return !e.slot.isHeld() }, 10*time.Second, 5*time.Millisecond)
 	st := e.maintenance()
 	require.NotNil(t, st, "the maintenance stays on")
 	assert.Equal(t, rec.OpID, st.OpID)

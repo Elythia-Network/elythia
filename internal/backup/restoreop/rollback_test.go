@@ -242,7 +242,9 @@ func TestRollback_NeverDropsTheKeptDatabase(t *testing.T) {
 		assertKept(t, e)
 	})
 	t.Run("not let go (A1)", func(t *testing.T) {
-		e := newEnv(t)
+		// held の待ちが期限で切れる。接続が残り続けるので、期限が負荷で遅れても結末は
+		// 変わらない。
+		e := newEnv(t, func(o *Options) { o.HeldTimeout = 50 * time.Millisecond })
 		e.withKept()
 		e.process("p1")
 		e.db.mu.Lock()

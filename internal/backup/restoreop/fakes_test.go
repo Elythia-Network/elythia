@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -302,6 +303,9 @@ type env struct {
 	notes   []string
 	slot    *slot
 	mu      sync.Mutex
+	// clock is how far the managers' clock (Options.Now) is ahead of the
+	// wall clock, in nanoseconds (waitStepPassingTime).
+	clock atomic.Int64
 	// stepHook, when set, is the failStep of the managers start makes.
 	stepHook func(to string) error
 	// recovered is closed when the recovery at start of the manager start
@@ -558,10 +562,15 @@ func newEnv(t *testing.T, mutate ...func(*Options)) *env {
 			e.notes = append(e.notes, msg)
 		},
 		Database: testDB, MaintenanceDB: "postgres", Version: "1.0",
-		ReadyTimeout: time.Hour, HeldTimeout: 500 * time.Millisecond, ResumeTimeout: 500 * time.Millisecond,
+		// 期限は既定では切れない長さにし、状態 (held、メンテナンスが外れる) を待って
+		// 進ませる。短い実時間の期限を全部に置くと、負荷で判定役が間に合わないときに、
+		// 期限を検査しないテストまで中止や運営者に渡す側へ進んで落ちる (#3369)。期限が
+		// 切れることを検査するテストは、短い期限を自分で置くか、waitStepPassingTime で
+		// 時計を進める。
+		ReadyTimeout: time.Hour, HeldTimeout: time.Hour, ResumeTimeout: time.Hour,
 		Poll:   5 * time.Millisecond,
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Now:    func() time.Time { return time.Now() },
+		Now:    func() time.Time { return time.Now().Add(time.Duration(e.clock.Load())) },
 	}
 	for _, f := range mutate {
 		f(&e.opts)
@@ -648,6 +657,30 @@ func (e *env) waitStep(opID string, steps ...string) *Record {
 	e.t.Helper()
 	var rec *Record
 	require.Eventually(e.t, func() bool {
+		r, err := e.store.Get(context.Background(), opID)
+		if err != nil {
+			return false
+		}
+		rec = r
+		for _, s := range steps {
+			if r.Step == s {
+				return true
+			}
+		}
+		return false
+	}, 10*time.Second, 5*time.Millisecond, "waiting for %v", steps)
+	return rec
+}
+
+// waitStepPassingTime is waitStep that moves the managers' clock an hour
+// ahead on every look, so that every wait with a deadline (HeldTimeout,
+// ResumeTimeout) the manager is in, or enters, ends with its timeout. Use
+// it only once every wait left in the operation is meant to time out.
+func (e *env) waitStepPassingTime(opID string, steps ...string) *Record {
+	e.t.Helper()
+	var rec *Record
+	require.Eventually(e.t, func() bool {
+		e.clock.Add(int64(time.Hour))
 		r, err := e.store.Get(context.Background(), opID)
 		if err != nil {
 			return false
