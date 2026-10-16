@@ -1,10 +1,13 @@
 package restoreop
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -247,7 +250,8 @@ func TestFinalStep_ReplayedScript(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			e := newEnv(t, func(o *Options) { o.ReadyTimeout = 30 * time.Millisecond })
+			logs := &logBuffer{}
+			e := newEnv(t, logs.into, func(o *Options) { o.ReadyTimeout = 30 * time.Millisecond })
 			e.replayStepTo(c.to)
 			opID := c.start(e)
 			e.waitStep(opID, c.to)
@@ -263,6 +267,8 @@ func TestFinalStep_ReplayedScript(t *testing.T) {
 				assert.NotEqual(t, StepAborted, x.Step, "%v", j)
 			}
 			assert.Equal(t, 1, n, "the ending is journaled once: %v", j)
+			// 送り直しを書けたとみなした経路でも、結末の行のログは 1 回だけ出る。
+			assert.Equal(t, 1, logs.count("step="+c.to+" message="), logs.String())
 		})
 	}
 }
@@ -293,13 +299,15 @@ func crashedFinished(t *testing.T) (*env, *Record) {
 // journals its ending once.
 func TestAbort_ReplayedScript(t *testing.T) {
 	ctx := context.Background()
-	e := newEnv(t)
+	logs := &logBuffer{}
+	e := newEnv(t, logs.into)
 	rec, _ := e.prepare()
 	e.replayStepTo(StepAborted)
 	require.NoError(t, e.m.Abort(ctx, rec.OpID))
 	require.True(t, e.replayed(), "the script was not replayed")
 	assert.False(t, e.slot.isHeld(), "the operation is finished and gives back the slot")
 	e.stop()
+	assert.Equal(t, 1, logs.count(`message="aborted; dropped`), logs.String())
 	j, err := e.store.Journal(ctx, rec.OpID)
 	require.NoError(t, err)
 	n := 0
@@ -331,3 +339,229 @@ func TestAbort_LostScript(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, StepAborting, got.Step)
 }
+
+// TestStepLine_NothingAfterTheEnding checks that the line of a step another
+// goroutine can move on from (ready, and the abort requested while
+// preparing) is in the journal before that goroutine writes the ending:
+// the sender of the step is held right after its script, and the ending is
+// written meanwhile (#3626).
+func TestStepLine_NothingAfterTheEnding(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		name, pause, final, want string
+		// act moves the operation on while the sender of pause is held, and
+		// returns once the ending is written. release lets the sender go on.
+		act func(t *testing.T, e *env, opID string, release func())
+	}{
+		{"aborted while ready", StepReady, StepAborted, "aborted; dropped " + testDB + "_restore_", func(t *testing.T, e *env, opID string, release func()) {
+			require.NoError(t, e.m.Abort(ctx, opID))
+			release()
+		}},
+		{"confirmed while ready", StepReady, StepDone, "restored generation 20261010T120000Z", func(t *testing.T, e *env, opID string, release func()) {
+			e.process("p1")
+			require.NoError(t, e.m.Confirm(ctx, opID))
+			e.waitStep(opID, StepDone)
+			release()
+		}},
+		{"aborted while preparing", StepAborting, StepAborted, "", func(t *testing.T, e *env, opID string, release func()) {
+			// 中止の側を止めている間に、準備を終わらせて aborted まで進める。
+			close(e.db.block)
+			e.waitStep(opID, StepAborted)
+			release()
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t)
+			if c.pause == StepAborting {
+				e.db.block = make(chan struct{})
+			}
+			reached, release := e.pauseAfterStepTo(c.pause)
+			rec, _, err := e.m.Prepare(ctx, PrepareRequest{GenerationID: "20261010T120000Z", UserID: "u1", Token: "t"})
+			require.NoError(t, err)
+			abortDone := make(chan error, 1)
+			if c.pause == StepAborting {
+				e.waitStep(rec.OpID, StepPreparing)
+				go func() { abortDone <- e.m.Abort(ctx, rec.OpID) }()
+			}
+			select {
+			case <-reached:
+			case <-time.After(10 * time.Second):
+				t.Fatalf("the script to %s did not run", c.pause)
+			}
+			c.act(t, e, rec.OpID, release)
+			if c.pause == StepAborting {
+				require.NoError(t, <-abortDone)
+			}
+			// 止めていた側が書き終えるまで待つ。
+			e.stop()
+			got, err := e.store.Get(ctx, rec.OpID)
+			require.NoError(t, err)
+			require.Equal(t, c.final, got.Step)
+			j, err := e.store.Journal(ctx, rec.OpID)
+			require.NoError(t, err)
+			require.NotEmpty(t, j)
+			last := j[len(j)-1]
+			if c.want != "" {
+				assert.Contains(t, last.Message, c.want, "%v", j)
+			}
+			assert.Equal(t, c.final, last.Step, "%v", j)
+			// 段と同じ script で書く値も、前の 2 コマンドの形と同じであること。
+			switch c.pause {
+			case StepReady:
+				assert.False(t, got.ReadyAt.IsZero(), "readyAt is written with ready")
+				assert.Equal(t, StepReady, lineStep(j, "ready to switch; waiting for the confirmation"), "%v", j)
+			case StepAborting:
+				assert.Equal(t, "aborted by the administrator", got.Error)
+				assert.Equal(t, StepPreparing, lineStep(j, "abort requested"), "%v", j)
+			}
+		})
+	}
+}
+
+// TestStepLine_ReplayedScript checks that a replayed script for ready or for
+// the abort requested while preparing, whose second run returns ErrStep, is
+// taken as written: the line is in the journal (#3626).
+func TestStepLine_ReplayedScript(t *testing.T) {
+	ctx := context.Background()
+	t.Run("ready", func(t *testing.T) {
+		logs := &logBuffer{}
+		e := newEnv(t, logs.into)
+		e.process("p1")
+		e.replayStepTo(StepReady)
+		rec, _ := e.prepare()
+		require.NoError(t, e.m.Confirm(ctx, rec.OpID))
+		e.waitStep(rec.OpID, StepDone, StepFailed, StepAborted)
+		e.stop()
+		// 送り直しは準備の goroutine の中で終わるので、止めた後に確かめる。
+		require.True(t, e.replayed(), "the script was not replayed")
+		assert.Equal(t, 1, logs.count(`message="ready to switch; waiting for the confirmation"`), logs.String())
+		got, err := e.store.Get(ctx, rec.OpID)
+		require.NoError(t, err)
+		assert.Equal(t, StepDone, got.Step)
+		j, err := e.store.Journal(ctx, rec.OpID)
+		require.NoError(t, err)
+		n := 0
+		for _, x := range j {
+			assert.NotEqual(t, StepFailed, x.Step, "%v", j)
+			if x.Message == "ready to switch; waiting for the confirmation" {
+				n++
+			}
+		}
+		assert.Equal(t, 1, n, "%v", j)
+	})
+	t.Run("abort while preparing", func(t *testing.T) {
+		logs := &logBuffer{}
+		e := newEnv(t, logs.into)
+		e.db.block = make(chan struct{})
+		rec, _, err := e.m.Prepare(ctx, PrepareRequest{GenerationID: "20261010T120000Z", UserID: "u1", Token: "t"})
+		require.NoError(t, err)
+		e.waitStep(rec.OpID, StepPreparing)
+		e.replayStepTo(StepAborting)
+		require.NoError(t, e.m.Abort(ctx, rec.OpID))
+		require.True(t, e.replayed(), "the script was not replayed")
+		e.waitStep(rec.OpID, StepAborted)
+		e.stop()
+		assert.Equal(t, 1, logs.count(`message="abort requested"`), logs.String())
+		j, err := e.store.Journal(ctx, rec.OpID)
+		require.NoError(t, err)
+		n := 0
+		for _, x := range j {
+			if x.Message == "abort requested" {
+				n++
+			}
+		}
+		assert.Equal(t, 1, n, "%v", j)
+	})
+}
+
+// TestStepLine_AbortLosesToReady checks that an abort requested while
+// preparing, whose script finds the step already moved to ready by the
+// preparation, returns ErrStep and leaves the preparation alone: the line is
+// not in the journal, so the ErrStep is not a replay (#3626). The ready
+// operation can still be confirmed, and still expires when nobody confirms.
+func TestStepLine_AbortLosesToReady(t *testing.T) {
+	ctx := context.Background()
+	for _, confirm := range []bool{true, false} {
+		name := "then expires"
+		if confirm {
+			name = "then confirmed"
+		}
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t, func(o *Options) {
+				if !confirm {
+					o.ReadyTimeout = 300 * time.Millisecond
+				}
+			})
+			e.db.block = make(chan struct{})
+			rec, _, err := e.m.Prepare(ctx, PrepareRequest{GenerationID: "20261010T120000Z", UserID: "u1", Token: "t"})
+			require.NoError(t, err)
+			e.waitStep(rec.OpID, StepPreparing)
+			var once sync.Once
+			e.interceptCmd(func(cmd redis.Cmder) error {
+				if stepScriptTo(cmd, StepAborting) {
+					// 中止の script を送る前に準備を終わらせ、段が ready になるまで待つ。
+					once.Do(func() {
+						close(e.db.block)
+						deadline := time.Now().Add(10 * time.Second)
+						for time.Now().Before(deadline) {
+							if e.mr.HGet("p:elythia:maintenance:restore:"+rec.OpID, "step") == StepReady {
+								return
+							}
+							time.Sleep(time.Millisecond)
+						}
+					})
+				}
+				return nil
+			})
+			assert.ErrorIs(t, e.m.Abort(ctx, rec.OpID), ErrStep)
+			e.interceptCmd(nil)
+			got, err := e.store.Get(ctx, rec.OpID)
+			require.NoError(t, err)
+			require.Equal(t, StepReady, got.Step)
+			if confirm {
+				e.process("p1")
+				require.NoError(t, e.m.Confirm(ctx, rec.OpID))
+				e.waitStep(rec.OpID, StepDone)
+				return
+			}
+			// 中止が準備を止めていなければ、期限を見る待ちが残っていて expired になる。
+			e.waitStep(rec.OpID, StepExpired)
+		})
+	}
+}
+
+// lineStep returns the step of the journal line whose message is msg, or ""
+// when there is none.
+func lineStep(j []JournalEntry, msg string) string {
+	for _, x := range j {
+		if x.Message == msg {
+			return x.Step
+		}
+	}
+	return ""
+}
+
+// logBuffer collects the log of a manager (Options.Logger) for a test.
+type logBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *logBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *logBuffer) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
+}
+
+// count returns how many times s appears in the log.
+func (l *logBuffer) count(s string) int { return strings.Count(l.String(), s) }
+
+// into is a newEnv option that sends the manager's log to l.
+func (l *logBuffer) into(o *Options) { o.Logger = slog.New(slog.NewTextHandler(l, nil)) }
