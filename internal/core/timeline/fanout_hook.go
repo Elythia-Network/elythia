@@ -418,7 +418,7 @@ func (h *FanoutHook) fanoutToFollowersAndStream(ctx context.Context, authorID st
 	// target を follow していない follower は drop する (= stream filter
 	// `replyShouldEmit` の followers-visibility gate と symmetric)。「context
 	// が見えない reply 本文だけが流れる」privacy 漏洩を防ぐ。`n.Reply` が
-	// nil (= FindByIDWithRelations の preload 失敗) の case は visibility 不明
+	// nil (= FindByIDWithRelations で返信先を配線できなかった) の case は visibility 不明
 	// なので保守的に gate を skip (= 既存挙動 = push)。stream filter は drop
 	// に倒すが fanout は全 follower への影響が大きいので over-restrict を避ける。
 	isReply := n.ReplyID != nil

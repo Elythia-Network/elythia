@@ -115,3 +115,66 @@ func BenchmarkFindManyByIDsWithUser(b *testing.B) {
 		}
 	})
 }
+
+// BenchmarkFindByIDWithRelations compares the single-note read the write paths
+// use (reaction, notification packing) between the hydrate (#3611) and the
+// former Preload chain, on a pure renote of a quote (the deepest embed) and on
+// a plain note. Run with:
+//
+//	go test ./internal/repository -bench BenchmarkFindByIDWithRelations -benchmem -run x
+func BenchmarkFindByIDWithRelations(b *testing.B) {
+	repo := NewNoteRepository(testDB)
+	cleanup := func() {
+		testDB.Exec(`DELETE FROM "poll" WHERE "noteId" LIKE 'bf3611_%'`)
+		testDB.Exec(`DELETE FROM "note" WHERE id LIKE 'bf3611_%'`)
+		testDB.Exec(`DELETE FROM "user" WHERE id LIKE 'bf3611u_%'`)
+	}
+	cleanup()
+	b.Cleanup(cleanup)
+	for i := 0; i < 3; i++ {
+		uid := fmt.Sprintf("bf3611u_%d", i)
+		if err := testDB.Create(&model.User{ID: uid, Username: uid, UsernameLower: uid, AvatarDecorations: datatypes.JSON([]byte("[]"))}).Error; err != nil {
+			b.Fatalf("seed user: %v", err)
+		}
+	}
+	text := "body"
+	mk := func(id, uid string, renote *string, poll bool) {
+		n := &model.Note{ID: id, UserID: uid, Text: &text, Visibility: model.NoteVisibilityPublic, RenoteID: renote, HasPoll: poll, Reactions: datatypes.JSON([]byte(`{}`)), FileIDs: model.StringArray{}}
+		if renote != nil && id == "bf3611_boost" {
+			n.Text = nil
+		}
+		if err := testDB.Create(n).Error; err != nil {
+			b.Fatalf("seed note: %v", err)
+		}
+		if poll {
+			if err := testDB.Create(&model.Poll{NoteID: id, Choices: model.StringArray{"a"}, Votes: model.Int64Array{0}, NoteVisibility: model.NoteVisibilityPublic, UserID: uid}).Error; err != nil {
+				b.Fatalf("seed poll: %v", err)
+			}
+		}
+	}
+	quoted, quote := "bf3611_quoted", "bf3611_quote"
+	mk(quoted, "bf3611u_0", nil, true)
+	mk(quote, "bf3611u_1", &quoted, false)
+	mk("bf3611_boost", "bf3611u_2", &quote, false)
+	mk("bf3611_plain", "bf3611u_0", nil, false)
+
+	for _, id := range []string{"bf3611_boost", "bf3611_plain"} {
+		b.Run(id+"/Hydrate", func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if _, err := repo.FindByIDWithRelations(id); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+		b.Run(id+"/Preload", func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				var n model.Note
+				if err := preloadNoteRelations(testDB).First(&n, "id = ?", id).Error; err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}

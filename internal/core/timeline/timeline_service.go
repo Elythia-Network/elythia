@@ -664,11 +664,19 @@ func (s *Service) hybridDBFallback(viewer *model.User, untilID, sinceID string, 
 	// 掛からないので、読めなかったときに home 側の例外だけを広げると、その返信が
 	// DB から出てしまう。
 	homeFilter.KeepHomeFanoutReplies = homeFilter.HideFollowersOnlyReplyFromNonFollowee
-	homeNotes, err := s.noteRepo.ListHomeTimeline(viewer.ID, limit, sinceID, untilID, homeFilter)
+	// 併合して limit 件に切ってから relation を引く (#3611)。home / local を
+	// それぞれ hydrate すると、最大 2*limit 件分を引いて半分を捨てていた。
+	// repository が対応していなければ、従来どおり hydrate 済みの一覧を併合する。
+	lister, deferHydrate := s.noteRepo.(unhydratedTimelineLister)
+	listHome, listLocal := s.noteRepo.ListHomeTimeline, s.noteRepo.ListLocalTimeline
+	if deferHydrate {
+		listHome, listLocal = lister.ListHomeTimelineUnhydrated, lister.ListLocalTimelineUnhydrated
+	}
+	homeNotes, err := listHome(viewer.ID, limit, sinceID, untilID, homeFilter)
 	if err != nil {
 		return nil, err
 	}
-	localNotes, err := s.noteRepo.ListLocalTimeline(limit, sinceID, untilID, dbFilter)
+	localNotes, err := listLocal(limit, sinceID, untilID, dbFilter)
 	if err != nil {
 		return nil, err
 	}
@@ -710,7 +718,21 @@ func (s *Service) hybridDBFallback(viewer *model.User, untilID, sinceID string, 
 	if len(out) > limit {
 		out = out[:limit]
 	}
+	if deferHydrate {
+		if err := lister.HydrateNotes(out); err != nil {
+			return nil, err
+		}
+	}
 	return out, nil
+}
+
+// unhydratedTimelineLister is implemented by a note repository that can list
+// the home / local timelines without the pack relations and hydrate them
+// afterwards (#3611). hybridDBFallback uses it to hydrate only the merged page.
+type unhydratedTimelineLister interface {
+	ListHomeTimelineUnhydrated(userID string, limit int, sinceID, untilID string, filter model.TimelineDBFilter) ([]*model.Note, error)
+	ListLocalTimelineUnhydrated(limit int, sinceID, untilID string, filter model.TimelineDBFilter) ([]*model.Note, error)
+	HydrateNotes(notes []*model.Note) error
 }
 
 // toDBFilter converts a TimelineFilter to a model.TimelineDBFilter.
