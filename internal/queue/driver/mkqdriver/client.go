@@ -34,9 +34,12 @@ func (c *Client) Enqueue(ctx context.Context, taskType string, payload []byte, o
 		return fmt.Errorf("mkqdriver: unknown queue %q (taskType=%q)", o.Queue, taskType)
 	}
 
-	framed := framedPayload{Type: taskType, Body: payload}
 	addOpts := toMkqAddOptions(o, taskType, payload)
-	if _, err := q.Add(ctx, framed, addOpts...); err != nil {
+	err := addFramed(newFramedPayload(taskType, payload), taskType, payload, func(f framedPayload) error {
+		_, err := q.Add(ctx, f, addOpts...)
+		return err
+	})
+	if err != nil {
 		if errors.Is(err, mkq.ErrDuplicateJob) {
 			// TTL 内の重複 enqueue は black-hole 扱い。
 			return nil

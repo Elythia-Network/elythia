@@ -1391,7 +1391,7 @@ func newDispatchHandler(handlers map[string]driver.HandlerFunc, qname string, ob
 				return job.Log(lc, line)
 			})
 			d := handlerDeadlineFor(taskType, deadline)
-			return runBounded(c, h, mkqTask{taskType: taskType, payload: job.Data.Body},
+			return runBounded(c, h, mkqTask{taskType: taskType, payload: job.Data.payload()},
 				d, graceFor(d),
 				abandonInfo{queue: qname, taskType: taskType, jobID: job.ID}, ab)
 		}

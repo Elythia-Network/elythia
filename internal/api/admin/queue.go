@@ -2,7 +2,6 @@ package admin
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -1074,62 +1073,126 @@ func packTaskSummary(t *QueueTaskSummary) map[string]any {
 // packJobData renders the job payload for the admin Data tab.
 //
 // **upstream と 1 点だけ意図的に違う。** upstream は Bull の `job.data` を
-// そのまま返すが、mk-go は payload を `{"type": …, "body": <base64>}` で包んで
-// 保存しているので、そのまま返すと Data タブが base64 の塊になって読めない。
-// 包みの形は保ったまま body だけ decode して返す (docs/divergence.md)。
+// そのまま返すが、mk-go は payload を `{"type": …, "body": <base64>}` (#3614 の
+// 書く側を有効にした後は `{"type": …, "bodyJson": <JSON>}`) で包んで保存して
+// いるので、そのまま返すと Data タブが包みの形で見える (base64 なら読めない塊に
+// なる)。包みの形は `{"type": …, "body": <payload>}` に揃えて返す
+// (docs/divergence.md)。
 //
 // 以前は body だけを返していたため **type が落ちていた** (#2689)。
 func packJobData(t *QueueTaskSummary) map[string]any {
+	if m, ok := activityPayloadFields(t); ok {
+		return map[string]any{"type": t.Type, "body": m}
+	}
 	body := rawJSONOrString(t.Payload)
 	if body == nil {
 		body = map[string]any{}
 	}
 	body = redactJobSecrets(t.Type, body)
-	body = expandActivityBody(t.Type, body)
 	// Type が空になることは無い。mkq driver は framing が無ければ BullMQ の
 	// job.name に落とし、その既定は queue 名。
 	return map[string]any{"type": t.Type, "body": body}
 }
 
-// expandActivityBody embeds the activity carried by deliver / inbox payloads
-// as JSON, so the Data tab shows it as an object.
+// activityPayloadFields decodes a deliver / inbox payload for the Data tab,
+// with the activity embedded as JSON (see embedActivityBody).
 //
-// **配送と受信の payload は、本文を []byte で持つ** (`DeliverPayload.Body` /
-// `InboxPayload.Body`)。JSON では base64 の長い 1 行の文字列になり、Data タブの
-// ハイライトがそこで数秒固まる (#3550。同じノートの配送で、base64 のままだと
-// 3,886ms、展開すると 760ms)。upstream は受信の job data に activity を
-// オブジェクトで持つ (配送は JSON 文字列)。
+// **値を木に展開しない** (`map[string]json.RawMessage`)。#3614 から本文は
+// オブジェクトのまま payload に載るので、`map[string]any` に読むと本文ごと
+// 展開され、一覧 (最大 505 件) の 1 回でメモリが約 15 倍になる (#3550)。
+// 元のバイト列なら、キーの順序や大きな整数も変わらない。
+func activityPayloadFields(t *QueueTaskSummary) (map[string]json.RawMessage, bool) {
+	if t.Type != queue.TaskTypeDeliver && t.Type != queue.TaskTypeInbox {
+		return nil, false
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(t.Payload, &m); err != nil || m == nil {
+		return nil, false
+	}
+	for k := range m {
+		if isJobSecretKey(t.Type, k) {
+			m[k] = json.RawMessage(`"` + redactedPlaceholder + `"`)
+		}
+	}
+	embedActivityBody(m)
+	return m, true
+}
+
+// embedActivityBody puts the activity carried by a deliver / inbox payload
+// into m["body"] as JSON, so the Data tab shows it as an object.
 //
-// **木に展開せず、元のバイト列をそのまま埋め込む** (`json.RawMessage`)。受信の
-// 本文は外から 64KB まで積めるので、`map[string]any` に展開すると一覧 (最大
-// 505 件) の 1 回でメモリが約 15 倍になった。元のバイト列なら、キーの順序や
-// 大きな整数も変わらない。オブジェクトか配列として読めるときだけ置き換え、
-// それ以外 (壊れた本文や JSON の文字列) は base64 のまま返す。**不正な UTF-8 も
+// 本文は 4 つの形で payload に載る (`internal/queue/activity_body.go`)。
+// オブジェクト (#3614 以降の既定)、< などをエスケープしたオブジェクト
+// (`bodyEscaped`、Misskey からの受信の本文)、文字列 (`bodyText`、詰まって
+// いない本文など)、base64 (#3614 より前と、どれにも当てはまらないもの)。base64 のままだと
+// Data タブのハイライトがそこで数秒固まった (#3550。同じノートの配送で、base64
+// のままだと 3,886ms、展開すると 760ms)。upstream は受信の job data に activity
+// をオブジェクトで持つ (配送は JSON 文字列)。
+//
+// オブジェクトか配列として読めるときだけ置き換え、それ以外 (壊れた本文や JSON の
+// 文字列) は元の形 (base64 か、読める文字列) のまま返す。**不正な UTF-8 も
 // 埋め込まない。** RawMessage は書き直さずに出すので、UTF-8 を厳密に読む
 // クライアントで一覧全体が読めなくなる (受信の本文は受付で UTF-8 を検査しない)。
-func expandActivityBody(taskType string, body any) any {
-	if taskType != queue.TaskTypeDeliver && taskType != queue.TaskTypeInbox {
-		return body
+func embedActivityBody(m map[string]json.RawMessage) {
+	// 優先の順は worker (`queue` の activityBodyWire.decode) と同じく
+	// bodyEscaped > bodyText > body。書く側は 1 つしか出さないが、揃えておく。
+	if escaped, ok := m["bodyEscaped"]; ok {
+		// < などをエスケープしたままのオブジェクト。JSON としては元の本文と同じ
+		// 値なので、そのまま `body` に置けばよい (バイト列まで戻すのは worker だけ
+		// でよい)。
+		m["body"] = escaped
+		delete(m, "bodyEscaped")
+		delete(m, "bodyText")
+	} else if rawText, ok := m["bodyText"]; ok {
+		// 文字列の形は、Data タブでは `body` に置く (形を base64 のときと揃える)。
+		// 埋め込めない本文 (壊れた JSON や深すぎる本文) は文字列のまま出す。
+		// base64 と違って読めるので、そのまま見せてよい。
+		var text string
+		if json.Unmarshal(rawText, &text) != nil {
+			return
+		}
+		if raw, ok := embeddableActivity([]byte(text)); ok {
+			m["body"] = raw
+		} else {
+			m["body"] = rawText
+		}
+		delete(m, "bodyText")
+		return
 	}
-	m, ok := body.(map[string]any)
-	if !ok {
-		return body
+	body := m["body"]
+	if len(body) == 0 {
+		return
 	}
-	encoded, ok := m["body"].(string)
-	if !ok {
-		return body
+	switch body[0] {
+	case '"':
+		var raw []byte
+		if json.Unmarshal(body, &raw) != nil {
+			return
+		}
+		if emb, ok := embeddableActivity(raw); ok {
+			m["body"] = emb
+		}
+	case '{', '[':
+		// 載せる側 (`driver.IsVerbatimJSON`) が深さを抑えているが、読む側でも
+		// 確かめる。深すぎると一覧の書き出しが失敗する (maxEmbeddedActivityDepth)。
+		if !jsonNestingWithin(body, maxEmbeddedActivityDepth) {
+			if s, err := json.Marshal(string(body)); err == nil {
+				m["body"] = s
+			}
+		}
 	}
-	raw, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil {
-		return body
-	}
+}
+
+// embeddableActivity returns raw trimmed for embedding when it is a JSON
+// object or array that nests at most maxEmbeddedActivityDepth levels and is
+// valid UTF-8.
+func embeddableActivity(raw []byte) (json.RawMessage, bool) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || (trimmed[0] != '{' && trimmed[0] != '[') ||
 		!jsonNestingWithin(trimmed, maxEmbeddedActivityDepth) || !json.Valid(trimmed) || !utf8.Valid(trimmed) {
-		return body
+		return nil, false
 	}
-	m["body"] = json.RawMessage(trimmed)
-	return m
+	return json.RawMessage(trimmed), true
 }
 
 // maxEmbeddedActivityDepth bounds the nesting of an activity embedded by
@@ -1395,14 +1458,17 @@ func redactPayloadSecrets(taskType string, raw []byte) string {
 	if len(raw) == 0 {
 		return string(raw)
 	}
-	var m map[string]any
+	// 値は木に展開しない。配送と受信の payload は本文をオブジェクトのまま持つ
+	// (#3614) ので、`map[string]any` に読むと一覧の 1 回でメモリが膨らむ
+	// (activityPayloadFields と同じ理由)。
+	var m map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return string(raw)
 	}
 	var found bool
 	for k := range m {
 		if isJobSecretKey(taskType, k) {
-			m[k] = redactedPlaceholder
+			m[k] = json.RawMessage(`"` + redactedPlaceholder + `"`)
 			found = true
 		}
 	}

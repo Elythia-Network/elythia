@@ -95,6 +95,26 @@ cron の多重実行防止は **job option ではなく mkq の job ID 設計**�
 
 再試行は **Elythia の方が手厚い**。upstream は `attempts` を設定しないので単発試行で終わり、失敗した実体は failed job として残るだけで自動復旧しない。Elythia は指数バックオフ付きで 4 回まで再試行する (object storage の一時的な 5xx / タイムアウトは待てば回復するため)。queue 自体が使えないときは同期削除にフォールバックし、実体を取りこぼさない。
 
+**job の data の形は Elythia 固有** (BullMQ の HASH の field の構成・job 名・opts は upstream と同じ)。data は `{"type": <task type>, "body": <payload の base64>}` で、配送 (`ap:deliver`) と受信 (`ap:inbox`) の payload の中の本文 (activity) もさらに base64 なので、Redis に本文の約 1.86 倍で載る (2.8KB の配送で data が 5,231 バイト)。#3614 で base64 にしない形を足したが、**2 段に分けて出す**。この版は**読む側だけ**で、積む job は以前の形のまま。
+
+- **読む側 (この版から)**: 以前の形に加えて、data の `{"type": …, "bodyJson": <payload の JSON>}` と、本文の 3 つの形 — オブジェクトの `body` (そのまま埋め込んだもの)、`bodyEscaped` (`<` などをエスケープしたオブジェクト。読むときに戻す)、文字列の `bodyText` — を読む (`internal/queue/driver/mkqdriver/payload.go`、`internal/queue/activity_body.go`)
+- **書く側 (次のリリースで有効にする)**: `internal/queue/driver/job_payload_format.go` の定数 `CompactJobPayloads` を `true` にすると、新しい形で積む。payload は、オブジェクトか配列で、詰まっていて (トークンの間に空白が無い)、HTML の文字 (`<` `>` `&`、U+2028 / U+2029) を生で含まず、入れ子が 72 段以内で、正しい UTF-8 の JSON のときだけ `bodyJson` に埋め込み、それ以外は以前の base64 の形で包む。本文は、上の条件 (入れ子は 64 段以内) を満たせば `body`、生の HTML の文字を含むがエスケープすれば戻せれば `bodyEscaped`、どちらでもなく正しい UTF-8 なら `bodyText`、それ以外 (不正な UTF-8 など) は以前の base64 の `body`。`bodyEscaped` と `bodyText` は base64 より大きくなるなら使わない。data の大きさは、配送で本文の約 1.07 倍、受信で約 1.27〜1.35 倍 (署名のヘッダーを含む。HTML ばかりの本文では約 1.64 倍) になる (2.8KB の本文で測った値。#3614 の測定)
+- 読む側を先に出すのは、**書く側を有効にした版から 1 つ前の版 (この版) へは戻せる**ようにするため。#3614 より前の版は新しい形を読めない
+- **upstream の worker とは元から job を共有できない**。upstream の deliver の data は `{user, content, to, isSharedInbox, …}`、inbox は `{activity, signature}` で、Elythia の `{type, body}` とは別物 (#3614 の前から)。drop-in で TS 版から引き継いだ Redis に残った job は Elythia の task type を持たないので、Elythia は処理者の無い job として再試行せずに failed にする (これも #3614 の前から同じ)
+
+**書く側を有効にするリリースの注意 (#3614)**: **#3614 より前の版から上げるときは、読む側を持つ版 (この版) を経由する。** 飛ばして直接上げると、Web と配送を別ノードに分ける構成 ([deployment.md](../deployment.md#web-と配送を別ノードに分ける)。`MK_ONLY_SERVER` / `MK_ONLY_QUEUE`) や複数のプロセスで動かす構成では、更新の途中でまだ古い worker が新しい形の job を取り、下と同じく落とす。経由できないなら、全プロセスを止めてから同時に入れ替える。
+
+その版から**#3614 より前の版**へ戻すと、新しい形の job は処理されない。古い版は `bodyJson` を知らない key として無視し (job の組み立て自体は失敗しないので、管理画面の一覧は読める)、本文の無い job として扱う。この版 (読む側を持つ版) へ戻すぶんには問題ない。
+
+- 配送・受信・follow・webhook などは payload の decode に失敗して**再試行せずに failed** に入る
+- **予約投稿 (`note:postScheduled`)** は予約時刻まで遅延 job として残るので、戻す前に queue を空にすることができない。古い版は予約時刻に decode に失敗して failed にし、**予約投稿は投稿されない** (下書きの行は残る)
+- 同じく、**アカウント移行で 24 時間後に積む unfollow** (`EnqueueUnfollowBulkDelayed`) と、**プラグインの cron の次の 1 回** (template は古い版が起動時に登録し直すが、すでに作られた次の 1 回は新しい形のまま残る) も、戻す前に空にできない
+- **アカウント削除 (`maintenance:deleteAccount`)** は、利用者は DB の上では削除済みになるが、消去の処理が failed に入る
+- **プラグインが登録した job** は、ハンドラに空の payload が渡る。どうなるかはプラグイン次第
+- `objectStorage` の job は decode の失敗をログに出して**成功で終わる** (S3 の実体が消されずに残る)
+- payload を持たない job (本体の cron など) は影響を受けない
+- 戻すなら、#3614 より前の版ではなく読む側を持つ版へ戻す。どうしても前の版へ戻すときは、戻した後に failed に入った job を、新しい版に上げ直してから管理画面で再実行する (`objectStorage` の分は取り戻せない)
+
 **管理画面のタブはこの構成に合わせて fork 側で書き換えている** (`misskey-js` の `queueTypes`、`2026.7.0-mk.8`)。upstream のタブは API 応答ではなくこの定数から生成されるため、書き換えないと Elythia に存在しないタブが常時ゼロ表示になり、実在する `push` / `export` / `webhook` / `maintenance` / `objectStorage` が画面から見えなくなる (#2323)。**Elythia の queue を増減したら fork の `queueTypes` も合わせること。**
 
 **プラグイン専用の `plugin:<名前>` キュー (#2818) は意図的にこの規則の外**。名前が構成で変わるので静的な定数には載せられず、**タブとしては出ない**。概要タブのカード (`admin/queue/queues` = 実際に worker が見ているキュー) から辿る。一時停止・再開は API 側が接頭辞で受け付けるので動く。
