@@ -2,6 +2,7 @@ package testutil
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -162,6 +163,18 @@ func openTestDBForPackage(pkg string) (*gorm.DB, error) {
 	if err := ensureSchema(db, pkg); err != nil {
 		if sqlDB, derr := db.DB(); derr == nil {
 			_ = sqlDB.Close()
+		}
+		return nil, err
+	}
+	if err := claimSchema(pkg); err != nil {
+		if sqlDB, derr := db.DB(); derr == nil {
+			_ = sqlDB.Close()
+		}
+		// **error で返さず panic する。** 呼び出し側の多くは開けないと「PostgreSQL
+		// が無い」として t.Skip するので、error で返すと 2 本目のプロセスが黙って
+		// 全部 skip して緑になる (#3369 で実測)。接続できないときは従来どおり error。
+		if errors.Is(err, errSchemaInUse) {
+			panic(err)
 		}
 		return nil, err
 	}
