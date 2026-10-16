@@ -1552,7 +1552,7 @@ func TestDelete_WithoutLocalStorageFallsBackToPrimary(t *testing.T) {
 // blockingImageProcessor reports the peak number of concurrent calls.
 //
 // **画像で測る。** 枠が守っているのは「同時に確保される中間バッファの本数」で、
-// その根拠 (`imagedecode` の pixel cap / `processImage` の 4 回デコード) は
+// その根拠 (`imagedecode` の pixel cap / `processImage` のデコード) は
 // すべて画像の話。動画で測っていた 1 稿目は、**画像だけ枠を外す変異が素通り
 // する**ことを敵対的レビューで実測された。
 type blockingImageProcessor struct {
