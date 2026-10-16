@@ -135,6 +135,24 @@ func (e *lifecycleEnv) numPat(t *testing.T) int64 {
 	return n
 }
 
+// requireNoPatterns waits for the pattern subscriptions to go away: closing a
+// subscription closes its connection, and Redis drops the pattern
+// asynchronously after it notices the closed socket.
+//
+// go-redis の PubSub.Close は PUNSUBSCRIBE を送らず接続を閉じるだけなので、
+// Close の直後に別の接続で PUBSUB NUMPAT を数えると、まだ数に入っていることが
+// ある (待機中の手元でも Close の直後の 2000 回中 79 回、#3369)。
+func (e *lifecycleEnv) requireNoPatterns(t *testing.T, msgAndArgs ...any) {
+	t.Helper()
+	ok := assert.Eventually(t, func() bool {
+		n, err := e.rdb.PubSubNumPat(context.Background()).Result()
+		return err == nil && n == 0
+	}, 5*time.Second, 20*time.Millisecond, msgAndArgs...)
+	if !ok {
+		t.Logf("PUBSUB NUMPAT = %d", e.numPat(t))
+	}
+}
+
 func serveStatus(t *testing.T, h http.Handler, method, path string) int {
 	t.Helper()
 	return serveRequest(t, h, method, path).Code
@@ -215,14 +233,27 @@ func TestSupervisor_RecyclesGenerationsWithoutLeaking(t *testing.T) {
 		sup.genMu.Unlock()
 		require.Eventually(t, func() bool { return oldSrv.streamManager.Count() == 1 },
 			5*time.Second, 10*time.Millisecond)
+		// 購読を閉じるのは stopGeneration の中で終わっていること。Redis 側が pattern を
+		// 外すのは非同期なので下で待つが、プロセスの中の購読は戻った時点で 0 のはず。
+		// stream: の本体の購読は streamManager.CloseAll が先に全部外すので、それを
+		// 見ても PubSubService.Close を見たことにならない。テストが自分で 1 つ
+		// 購読し (解除の関数は捨てる)、Close でしか消えないものを見る。
+		const probeTopic = "lifecycle-test-probe"
+		_ = oldSrv.streamPubSub.Subscribe(context.Background(), probeTopic, func([]byte) {})
+		require.Positive(t, oldSrv.internalPubSub.SubscriberCount("metaUpdated"), "cycle %d: 前提", cycle)
+		require.Positive(t, oldSrv.streamPubSub.SubscriberCount(probeTopic), "cycle %d: 前提", cycle)
 
 		rep := sup.stopGeneration(http.HandlerFunc(unavailable))
 		require.NoError(t, rep.Err, "cycle %d", cycle)
+		assert.Zero(t, oldSrv.internalPubSub.SubscriberCount("metaUpdated"),
+			"cycle %d: stopGeneration が internal: の購読を閉じずに戻った", cycle)
+		assert.Zero(t, oldSrv.streamPubSub.SubscriberCount(probeTopic),
+			"cycle %d: stopGeneration が stream: の購読を閉じずに戻った", cycle)
 		assert.Zero(t, rep.InFlight)
 		assert.Zero(t, rep.OpenConns)
 		assert.Equal(t, stream.ServiceRestartCloseCode, closeCodeOf(t, ws), "cycle %d", cycle)
 		env.requireNoBackends(t)
-		assert.Zero(t, env.numPat(t), "cycle %d: 古い世代の購読が残っている", cycle)
+		env.requireNoPatterns(t, "cycle %d: 古い世代の購読が残っている", cycle)
 		assert.Equal(t, http.StatusServiceUnavailable, serveStatus(t, sup, http.MethodGet, "/healthz"))
 
 		require.NoError(t, sup.startGeneration(), "cycle %d", cycle)
