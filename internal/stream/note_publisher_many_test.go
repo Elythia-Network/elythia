@@ -100,9 +100,6 @@ func TestNotePublisher_PublishNoteMany_FallsBackToPublish(t *testing.T) {
 	assert.Empty(t, failing.topics)
 
 	// 単発の PublishNote の失敗のログにもノート ID を出す。
-	// 新しいテスト関数にしないのは、-shuffle=3 の順序を変えると、既存の
-	// TestConnection_CloseWithCode_FallsBackWhenWriterIsNotRunning の
-	// data race (closeFlushTimeout の書き換え) を踏む順序になるため。
 	logs := captureSlog(t)
 	NewNotePublisher(&stubPublisher{err: errors.New("down")}, idGen).PublishNote("homeTimeline:a", n, user)
 	recs := logs.records(t, "note publisher: publish failed")

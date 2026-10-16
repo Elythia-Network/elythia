@@ -107,23 +107,29 @@ func TestConnection_CloseWithCode_IgnoresClientMessagesWhileFlushing(t *testing.
 func TestConnection_CloseWithCode_SetsWriteDeadlineForFlush(t *testing.T) {
 	fc := newFakeConn()
 	c := NewConnection("c1", nil, fc)
+	c.SetCloseFlushTimeout(0) // 0 以下は無視し、既定の期限のまま
 	require.NoError(t, c.Send(map[string]string{"type": "queued"}))
 	start := time.Now()
 	c.CloseWithCode(RevokeCloseCode, "x")
 	go c.Start()
 	require.Eventually(t, fc.isClosed, 2*time.Second, 5*time.Millisecond)
-	assert.WithinDuration(t, start.Add(closeFlushTimeout), fc.getWriteDeadline(), time.Second)
+	assert.WithinDuration(t, start.Add(defaultCloseFlushTimeout), fc.getWriteDeadline(), time.Second)
+}
+
+// 期限を持たない (NewConnection を通らない) 接続でも、既定の期限で吐き切る。
+func TestConnection_FlushTimeout_DefaultsWhenUnset(t *testing.T) {
+	assert.Equal(t, defaultCloseFlushTimeout, (&Connection{}).flushTimeout())
+	c := NewConnection("c1", nil, newFakeConn())
+	c.SetCloseFlushTimeout(20 * time.Millisecond)
+	assert.Equal(t, 20*time.Millisecond, c.flushTimeout())
 }
 
 // writeLoop が動いていなくても (Start 前 / 書き込みで詰まっている) 必ず閉じる。
 func TestConnection_CloseWithCode_FallsBackWhenWriterIsNotRunning(t *testing.T) {
-	orig := closeFlushTimeout
-	closeFlushTimeout = 20 * time.Millisecond
-	t.Cleanup(func() { closeFlushTimeout = orig })
-
 	fc := newFakeConn()
 	closedByHandler := make(chan struct{})
 	c := NewConnection("c1", nil, fc)
+	c.SetCloseFlushTimeout(20 * time.Millisecond)
 	c.SetCloseHandler(func() { close(closedByHandler) })
 	c.CloseWithCode(RevokeCloseCode, "x")
 
