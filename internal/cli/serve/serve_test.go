@@ -63,13 +63,66 @@ func (f *fakeServer) DumpRoutes(w io.Writer) error {
 type harness struct {
 	e              env
 	stdout, stderr bytes.Buffer
-	log            bytes.Buffer
+	log            syncBuffer
 	steps          []string
 	srv            *fakeServer
 	files          map[string]*bytes.Buffer
 	cancel         context.CancelFunc
 	// appName は newSupervisor に渡った cfg の DBApplicationName。
 	appName string
+}
+
+// syncBuffer is the log sink of the harness. serve logs a Start error from
+// the goroutine that runs Start, which may still be writing after serve has
+// returned, so the buffer is locked and a test can wait for a line.
+//
+// fake の Start は started を閉じてからエラーを返すので、serve が終わった後に
+// "server error" が書かれることがある。素の bytes.Buffer だと、それとテストの
+// 読み出しが -race で競合して落ちた (#3369)。
+type syncBuffer struct {
+	mu      sync.Mutex
+	buf     bytes.Buffer
+	changed chan struct{}
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n, err := b.buf.Write(p)
+	if b.changed != nil {
+		close(b.changed)
+		b.changed = nil
+	}
+	return n, err
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// waitFor blocks until the log contains substr.
+func (b *syncBuffer) waitFor(t *testing.T, substr string) {
+	t.Helper()
+	timeout := time.After(5 * time.Second)
+	for {
+		b.mu.Lock()
+		if strings.Contains(b.buf.String(), substr) {
+			b.mu.Unlock()
+			return
+		}
+		if b.changed == nil {
+			b.changed = make(chan struct{})
+		}
+		changed := b.changed
+		b.mu.Unlock()
+		select {
+		case <-changed:
+		case <-timeout:
+			t.Fatalf("log never contained %q; got %q", substr, b.String())
+		}
+	}
 }
 
 type nopCloser struct{ *bytes.Buffer }
@@ -185,6 +238,11 @@ func TestServe_LogsStartAndShutdownErrors(t *testing.T) {
 	h.srv.shutdownErr = errors.New("still busy")
 	assert.Equal(t, 0, h.runServe(t, nil))
 	assert.Contains(t, h.log.String(), "server shutdown error")
+	// Start の失敗は Start を走らせた goroutine が書く。serve が返った後に
+	// 書かれうるので、書かれるまで待つ。待たずにテストを終えると、次のテストの
+	// 実行中に書き込みが起き、読み出しと競合する。
+	h.log.waitFor(t, "server error")
+	assert.Contains(t, h.log.String(), "bind failed")
 }
 
 // TestServe_KeepsRedisOpenWhileHooksMayRun checks #3463 review L-7: when
@@ -370,12 +428,9 @@ func TestDefaultEnv(t *testing.T) {
 	require.NoError(t, f.Close())
 	assert.FileExists(t, path)
 
-	// 誰も listen していない宛先へ繋ぐと、Redis の接続確認で失敗して閉じる関数を
+	// 繋いでもすぐ切られる宛先へ繋ぐと、Redis の接続確認で失敗して閉じる関数を
 	// 返さない。
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	port := l.Addr().(*net.TCPAddr).Port
-	require.NoError(t, l.Close())
+	port := refusingPort(t)
 	cfg := &config.Config{}
 	cfg.Redis.Host = "127.0.0.1"
 	cfg.Redis.Port = port
@@ -401,7 +456,7 @@ func TestDefaultEnv(t *testing.T) {
 	require.NotNil(t, clients)
 	closeFn()
 
-	// 既定の Supervisor は DB を開くところから始める。誰も listen していない
+	// 既定の Supervisor は DB を開くところから始める。繋いでもすぐ切られる
 	// 宛先なら、DB の接続の失敗として返る。
 	// その前にメンテナンスの状態を Redis から読む (#3463)。
 	mr := miniredis.RunT(t)
@@ -411,11 +466,43 @@ func TestDefaultEnv(t *testing.T) {
 	sup, err := e.newSupervisor(cfg, &cache.RedisClients{Default: rc, Pubsub: rc})
 	assert.ErrorContains(t, err, "connect to database")
 	assert.Nil(t, sup)
-	// Redis が読めなければ、DB を開く前に失敗する。
-	mr.Close()
+	// Redis が読めなければ、DB を開く前に失敗する。miniredis を閉じず、エラーを
+	// 返させる (閉じた port は並行する別のテストに取り直されうる。refusingPort と
+	// 同じ理由)。
+	mr.SetError("LOADING Redis is loading the dataset in memory")
 	_, err = e.newSupervisor(cfg, &cache.RedisClients{Default: rc, Pubsub: rc})
 	// 最初に Redis へ書くのは「起動中」の報告 (#3463 のレビュー M1')。
 	assert.ErrorContains(t, err, "write the starting report")
+}
+
+// refusingPort returns a local port that stays bound for the whole test and
+// closes every connection as soon as it is accepted.
+//
+// 以前は listen して閉じた port を「誰も listen していない宛先」として使って
+// いた。閉じた port は、並行して走る別のテストの miniredis などがすぐに取り直し
+// うる。取り直した相手は PostgreSQL の起動要求に応えないので、DB の接続が返らず
+// テストが止まった (#3369 の調査で、-race を 12 本並べて 1 回起きた)。テストの
+// 間ずっと port を持ち、受けた接続はすぐ切る。
+func refusingPort(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			_ = c.Close()
+		}
+	}()
+	t.Cleanup(func() {
+		_ = l.Close()
+		<-done
+	})
+	return l.Addr().(*net.TCPAddr).Port
 }
 
 func TestDBApplicationName(t *testing.T) {
