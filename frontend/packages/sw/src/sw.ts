@@ -14,6 +14,8 @@ import { swLang } from '@/scripts/lang.js';
 import { MAINTENANCE_CACHE, keepCacheOnActivate, maintenanceAwareNavigation } from '@/scripts/maintenance.js';
 import type { MaintenanceStore } from '@/scripts/maintenance.js';
 import * as swos from '@/scripts/operations.js';
+import { registerStaticRoutes } from '@/scripts/routes.js';
+import type { RouteInstallEvent } from '@/scripts/routes.js';
 
 // Elythia: メンテナンスの画面を覚えておく先 (#3463)。
 const MAINTENANCE_MARK_KEY = 'elythia-maintenance-at';
@@ -78,18 +80,14 @@ async function offlineContentHTML() {
 globalThis.addEventListener('install', (ev) => {
 	// 次の問題が発生するため、ServiceWorkerAutoPreload をオプトアウトする必要がある
 	// https://issues.chromium.org/issues/466790291
-	if ('addRoutes' in ev) {
-		// doc: https://developer.mozilla.org/en-US/docs/Web/API/InstallEvent/addRoutes
+	// Elythia: 規則はナビゲーションだけを fetch-event に回し、残りを network に送る形にした (#3613)
+	// doc: https://developer.mozilla.org/en-US/docs/Web/API/InstallEvent/addRoutes
+	const routes = registerStaticRoutes(ev as unknown as RouteInstallEvent, (init) => {
+		// doc: https://developer.mozilla.org/ja/docs/Web/API/URLPattern
 		// @ts-expect-error 実験的なAPIなので型定義がない
-		ev.addRoutes({
-			condition: {
-				// doc: https://developer.mozilla.org/ja/docs/Web/API/URLPattern
-				// @ts-expect-error 実験的なAPIなので型定義がない
-				urlPattern: new URLPattern({}),
-			},
-			source: 'fetch-event',
-		});
-	}
+		return new URLPattern(init);
+	});
+	if (routes) ev.waitUntil(routes);
 });
 
 globalThis.addEventListener('activate', ev => {
