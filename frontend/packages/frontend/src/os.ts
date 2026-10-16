@@ -20,10 +20,10 @@ import type { MkDialogReturnType } from '@/components/MkDialog.vue';
 import type { OverloadToUnion } from '@/types/overload-to-union.js';
 import type MkRoleSelectDialog_TypeReferenceOnly from '@/components/MkRoleSelectDialog.vue';
 import type MkEmojiPickerDialog_TypeReferenceOnly from '@/components/MkEmojiPickerDialog.vue';
+import type MkPostFormDialog_TypeReferenceOnly from '@/components/MkPostFormDialog.vue';
 import { misskeyApi } from '@/utility/misskey-api.js';
 import { prefer } from '@/preferences.js';
 import { i18n } from '@/i18n.js';
-import MkPostFormDialog from '@/components/MkPostFormDialog.vue';
 import MkWaitingDialog from '@/components/MkWaitingDialog.vue';
 import MkPageWindow from '@/components/MkPageWindow.vue';
 import MkToast from '@/components/MkToast.vue';
@@ -35,6 +35,7 @@ import { pleaseLogin } from '@/utility/please-login.js';
 import { showMovedDialog } from '@/utility/show-moved-dialog.js';
 import { getHTMLElementOrNull } from '@/utility/get-dom-node-or-null.js';
 import { focusParent } from '@/utility/focus.js';
+import { createPreloadableComponent } from '@/utility/preloadable-component.js';
 
 export const openingWindowsCount = ref(0);
 
@@ -689,6 +690,20 @@ export function contextMenu(items: MenuItem[], ev: PointerEvent): Promise<void> 
 	}));
 }
 
+// Elythia: 投稿フォーム一式 (アップローダー、画像の縮小、投票の編集など) を起動時の JS から外す (#3613)。
+// dynamic import のままだと iOS でテキストエリアに自動でフォーカスできない (ユーザー操作の中で
+// 同期的に開く必要がある) ので、ログイン中は起動の後の空き時間に preloadPostFormDialog() で
+// 先に読み込んでおき、post() は読み込み済みのものを同期的に使う。まだのときだけ読み込みを待つ。
+const postFormDialog = createPreloadableComponent(() => import('@/components/MkPostFormDialog.vue'));
+
+// タイムラインの固定の投稿フォーム (pages/timeline.vue)。読み込み済みなら同期的に使い、後から
+// 差し込まれて一覧がずれないようにする。設定で出している人は起動の最初に読み始める (main-boot.ts)。
+export const postFormComponent = createPreloadableComponent(() => import('@/components/MkPostForm.vue'));
+
+export function preloadPostFormDialog(): Promise<unknown> {
+	return Promise.all([postFormDialog.preload(), postFormComponent.preload()]);
+}
+
 export async function post(props: PostFormProps = {}): Promise<void> {
 	const isLoggedIn = await pleaseLogin({
 		openOnRemote: (props.initialText || props.initialNote ? {
@@ -703,6 +718,62 @@ export async function post(props: PostFormProps = {}): Promise<void> {
 	if (!isLoggedIn) return;
 
 	showMovedDialog();
+
+	// 読み込み済みなら、ここで同期的に開く (iOS の自動フォーカスのため。下の NOTE)
+	const loaded = postFormDialog.loaded;
+	if (loaded != null) return openPostFormDialog(loaded, props);
+
+	// まだなら読み込みを待つ。待つ間に押し直されても、ダイアログを 2 つ開かないよう 1 回にまとめ、
+	// 最後に押したもの (返信先・引用などの props) を開く
+	propsWhileLoading = props;
+	if (postWhileLoading != null) return postWhileLoading;
+	postWhileLoading = (async () => {
+		let component: typeof MkPostFormDialog_TypeReferenceOnly | null;
+		try {
+			component = await loadPostFormDialogWithWaiting();
+		} finally {
+			// 失敗した後も次の post() が待ち続けないよう、ここで戻す
+			postWhileLoading = null;
+		}
+		const latestProps = propsWhileLoading;
+		propsWhileLoading = {};
+		if (component == null) return;
+		return openPostFormDialog(component, latestProps);
+	})();
+	return postWhileLoading;
+}
+
+let postWhileLoading: Promise<void> | null = null;
+let propsWhileLoading: PostFormProps = {};
+
+// 読み込みに時間がかかれば待機の表示を出し、失敗したらエラーを出す (popupAsyncWithDialog と同じ)。
+// 失敗は呼び出し元へ投げない (投稿ボタンなどは post() を待たないので、投げても何も出ない)。
+async function loadPostFormDialogWithWaiting(): Promise<typeof MkPostFormDialog_TypeReferenceOnly | null> {
+	let closeWaiting = () => { };
+	const timer = window.setTimeout(() => {
+		closeWaiting = waiting();
+	}, 100);
+	try {
+		return await postFormDialog.preload();
+	} catch (err) {
+		console.error(err);
+		// ブラウザは取得に失敗したモジュールを、ページを読み込み直すまで覚えている (module map)。
+		// 次の post() でも同じ失敗になるので、再読み込みを促す
+		confirm({
+			type: 'error',
+			title: i18n.ts.somethingHappened,
+			text: `CODE: ASYNC_COMP_LOAD_FAIL\n${i18n.ts.reloadConfirm}`,
+		}).then(({ canceled }) => {
+			if (!canceled) window.location.reload();
+		});
+		return null;
+	} finally {
+		window.clearTimeout(timer);
+		closeWaiting();
+	}
+}
+
+function openPostFormDialog(MkPostFormDialog: typeof MkPostFormDialog_TypeReferenceOnly, props: PostFormProps): Promise<void> {
 	return new Promise(resolve => {
 		// NOTE: MkPostFormDialogをdynamic importするとiOSでテキストエリアに自動フォーカスできない
 		// NOTE: ただ、dynamic importしない場合、MkPostFormDialogインスタンスが使いまわされ、
