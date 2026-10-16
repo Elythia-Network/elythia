@@ -3,10 +3,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-// SafariがBroadcastChannel未実装なのでライブラリを使う
-import { BroadcastChannel } from 'broadcast-channel';
+import { TypedBroadcastChannel } from '@/utility/broadcast-channel.js';
 
-export const reloadChannel = new BroadcastChannel<string | null>('reload');
+export const reloadChannel = new TypedBroadcastChannel<string | null>('reload');
 
 // BroadcastChannelを用いて、クライアントが一斉にreloadするようにします。
 export function unisonReload(path?: string) {

@@ -8,7 +8,6 @@
 // TODO: Misskeyのドメイン知識があるのでutilityなどに移動する
 
 import { customRef, ref, watch, onScopeDispose } from 'vue';
-import { BroadcastChannel } from 'broadcast-channel';
 import type { Ref } from 'vue';
 import { $i } from '@/i.js';
 import { misskeyApi } from '@/utility/misskey-api.js';
@@ -16,6 +15,7 @@ import { get, set } from '@/utility/idb-proxy.js';
 import { store } from '@/store.js';
 import { deepClone } from '@/utility/clone.js';
 import { deepMerge } from '@/utility/merge.js';
+import { TypedBroadcastChannel } from '@/utility/broadcast-channel.js';
 
 type StateDef = Record<string, {
 	where: 'account' | 'device' | 'deviceAccount';
@@ -56,7 +56,7 @@ export class Pizzax<T extends StateDef> {
 	 */
 	public readonly r: ReactiveState<T>;
 
-	private pizzaxChannel: BroadcastChannel<PizzaxChannelMessage<T>>;
+	private pizzaxChannel: TypedBroadcastChannel<PizzaxChannelMessage<T>>;
 
 	// 簡易的にキューイングして占有ロックとする
 	private currentIdbJob: Promise<unknown> = Promise.resolve();
@@ -76,7 +76,7 @@ export class Pizzax<T extends StateDef> {
 		this.registryCacheKeyName = $i ? `pizzax::${key}::cache::${$i.id}` : '';
 		this.def = def;
 
-		this.pizzaxChannel = new BroadcastChannel(`pizzax::${key}`);
+		this.pizzaxChannel = new TypedBroadcastChannel(`pizzax::${key}`);
 
 		this.s = {} as State<T>;
 		this.r = {} as ReactiveState<T>;
