@@ -1084,7 +1084,7 @@ func TestCreateMessageToUser_PushesNewChatMessage(t *testing.T) {
 	// `fromUser.name` / `fromUser.avatarUrl` を読む。無いと TypeError で
 	// **通知が 1 件も出ない** (publish 側は body を読まないので気付けない)。
 	require.Len(t, push.calls, 1)
-	from, ok := push.calls[0].body["fromUser"].(map[string]any)
+	from, ok := jsonObject3438(t, push.calls[0].body)["fromUser"].(map[string]any)
 	require.True(t, ok, "fromUser が無い: %v", push.calls[0].body)
 	assert.Equal(t, "alice", from["id"])
 	assert.Contains(t, from, "name")
@@ -1159,7 +1159,7 @@ func TestCreateMessageViaAP_PushesNewChatMessage(t *testing.T) {
 	assert.Equal(t, []string{"local1"}, push.recipients())
 	assert.Equal(t, main.mainRecipients(), push.recipients())
 	require.Len(t, push.calls, 1)
-	from, ok := push.calls[0].body["fromUser"].(map[string]any)
+	from, ok := jsonObject3438(t, push.calls[0].body)["fromUser"].(map[string]any)
 	require.True(t, ok, "fromUser が無い: %v", push.calls[0].body)
 	assert.Equal(t, "remote1", from["id"])
 }
@@ -1244,7 +1244,7 @@ func TestCreateRoomMessageViaAP_PushesNewChatMessage(t *testing.T) {
 
 	assert.ElementsMatch(t, []string{"alice", "carol"}, push.recipients())
 	require.NotEmpty(t, push.calls)
-	from, ok := push.calls[0].body["fromUser"].(map[string]any)
+	from, ok := jsonObject3438(t, push.calls[0].body)["fromUser"].(map[string]any)
 	require.True(t, ok, "fromUser が無い: %v", push.calls[0].body)
 	assert.Equal(t, "remote1", from["id"])
 }

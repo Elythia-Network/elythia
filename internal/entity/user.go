@@ -474,9 +474,8 @@ type InstanceLite struct {
 // `/identicon/<username>(@<host>)` route when the user has no explicit
 // avatarUrl. Mirrors upstream Misskey TS の identicon URL 規則。
 //
-// 共有 helper として切り出してあるので、UserLite 以外のレスポンス
-// (e.g. internal/api/chat の packUser / internal/core/chat の packUserStream)
-// も同じ規則を使える (#692 / #708 review)。
+// 共有 helper として切り出してあるので、UserLite 以外のレスポンスも同じ規則を
+// 使える (#692 / #708 review)。chat の利用者は #3438 から PackUserLite を通る。
 func IdenticonURL(u *model.User) string {
 	avatar := ""
 	if u.AvatarURL != nil {

@@ -283,13 +283,34 @@ func TestService_PushNotification_DropsNoteAsLastResort(t *testing.T) {
 	assert.Equal(t, "a1b2c3d4e5f6g7hy", decoded["noteId"], "noteId は残す")
 }
 
-// note を持たない body (newChatMessage) は縮めようがないので、そのまま渡す。
-// **ここで捨てない。** 配信は webpush-go 側で失敗するが、握り潰して無音にする
-// より、warn を出して失敗を観測できるほうがよい。
+// newChatMessage の本文が長すぎるときは、先頭を残して切って上限に収める (#3438)。
+// 以前は縮める段が無く、日本語で概ね 1100 文字を超えると送られなかった。
+func TestService_PushNewChatMessage_LongTextIsCut(t *testing.T) {
+	enq := &fakeEnqueuer{}
+	text := strings.Repeat("あ", 3000)
+	webpush.NewService(enq).PushNewChatMessage("u1", map[string]any{
+		"id": "m1", "text": text,
+	})
+	require.Len(t, enq.calls, 1)
+	assert.LessOrEqual(t, len(enq.calls[0].Body), 3800)
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(enq.calls[0].Body, &decoded))
+	got, _ := decoded["text"].(string)
+	require.True(t, strings.HasSuffix(got, "\u2026"), "a cut text ends with an ellipsis")
+	head := strings.TrimSuffix(got, "\u2026")
+	assert.True(t, strings.HasPrefix(text, head))
+	// 上限まで詰める (1 文字足すと超える程度まで残す)。
+	assert.Greater(t, len(enq.calls[0].Body), 3800-len("あ")-len(`"id":"m1",`), "the text is kept as long as it fits")
+	assert.Equal(t, "m1", decoded["id"])
+}
+
+// 本文以外が大きくて縮めようがない body は、そのまま渡す。**ここで捨てない。**
+// 配信は webpush-go 側で失敗するが、握り潰して無音にするより、warn を出して
+// 失敗を観測できるほうがよい。
 func TestService_PushNewChatMessage_OversizedIsPassedThrough(t *testing.T) {
 	enq := &fakeEnqueuer{}
 	webpush.NewService(enq).PushNewChatMessage("u1", map[string]any{
-		"id": "m1", "text": strings.Repeat("あ", 3000),
+		"id": "m1", "text": "hi", "other": strings.Repeat("あ", 3000),
 	})
 	require.Len(t, enq.calls, 1)
 	assert.Greater(t, len(enq.calls[0].Body), 3800, "縮められないものはそのまま")
@@ -383,4 +404,38 @@ func TestService_PushNotification_TruncationKeepsMultipleMarkers(t *testing.T) {
 	note, _ := decoded["note"].(map[string]any)
 	text, _ := note["text"].(string)
 	assert.True(t, strings.HasSuffix(text, tail), "末尾のマーカーがまとめて残ること: %q", text[max(0, len(text)-40):])
+}
+
+// newChatMessage の本文を切るときは、書記素クラスタの途中で切らない (#3438)。
+// rune の境界で切ると、ZWJ でつないだ絵文字が 1 人になり、国旗が地域指示子
+// 1 つになり、結合用濁点が外れて「が」が「か」になる。
+func TestService_PushNewChatMessage_CutKeepsGraphemeClusters(t *testing.T) {
+	family := "\U0001F468\u200D\U0001F469\u200D\U0001F467\u200D\U0001F466" // 家族の絵文字 (ZWJ で 4 人をつなぐ、25 B)
+	flag := "\U0001F1EF\U0001F1F5"                                         // 🇯🇵 (8 B)
+	ga := "\u304B\u3099"                                                   // か + 結合用濁点 (6 B)
+	for _, tc := range []struct {
+		name, unit string
+	}{
+		{"ZWJ sequence", family},
+		{"regional indicator pair", flag},
+		{"combining mark", ga},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// 単位の長さを互いに素にずらすため、先頭に 1〜3 B の前置きを付けて試す。
+			for _, prefix := range []string{"", "a", "ab", "abc"} {
+				enq := &fakeEnqueuer{}
+				text := prefix + strings.Repeat(tc.unit, 2000)
+				webpush.NewService(enq).PushNewChatMessage("u1", map[string]any{"id": "m1", "text": text})
+				require.Len(t, enq.calls, 1)
+				assert.LessOrEqual(t, len(enq.calls[0].Body), 3800)
+				var decoded map[string]any
+				require.NoError(t, json.Unmarshal(enq.calls[0].Body, &decoded))
+				got, _ := decoded["text"].(string)
+				require.True(t, strings.HasSuffix(got, "…"))
+				kept := strings.TrimPrefix(strings.TrimSuffix(got, "…"), prefix)
+				require.NotEmpty(t, kept)
+				assert.Empty(t, strings.ReplaceAll(kept, tc.unit, ""), "prefix %q: the cut must land between whole clusters", prefix)
+			}
+		})
+	}
 }

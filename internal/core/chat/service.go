@@ -21,6 +21,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/activitypub"
 	"github.com/elythia-network/elythia/internal/activitypub/mfm"
+	"github.com/elythia-network/elythia/internal/core/userpack"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/colfit"
 	"github.com/elythia-network/elythia/internal/misc/id"
@@ -166,6 +167,9 @@ type Service struct {
 	deliverer           APDeliverer
 	mainStreamPublisher MainStreamPublisher
 	chatPusher          ChatPusher
+	// lites は stream / push の fromUser・toUser (UserLite) の instance と絵文字を
+	// payload ごとに 1 回で埋める (#3438)。未配線なら埋めない。
+	lites userpack.LiteFiller
 	// moderatorChecker: chat/rooms/show 等の権限 gate で「moderator は閲覧可」
 	// を判定するために使う (upstream 2026.5.4 互換)。nil 安全。
 	moderatorChecker ModeratorChecker
@@ -279,16 +283,26 @@ func (s *Service) SetUserRepo(r repository.UserRepository) {
 	s.userRepo = r
 }
 
+// SetLiteFiller wires the batch resolver of instance / emojis for the UserLite
+// values (fromUser / toUser) of stream and push payloads (#3438).
+func (s *Service) SetLiteFiller(f userpack.LiteFiller) { s.lites = f }
+
+// HasLiteFiller reports whether the lite filler was wired.
+//
+// 未配線だと stream と Web Push で流す chat のメッセージのリモートの利用者に
+// instance と絵文字が載らない。起動時検査に使う。
+func (s *Service) HasLiteFiller() bool { return s.lites != nil }
+
 // pushNewChatMessage sends the Web Push half. **main stream の publish と必ず
 // 対で呼ぶこと** — 片方だけになると、タブを開いている利用者にしか届かない。
 //
 // **body は publish と同じでは足りない。** SW の newChatMessage ハンドラ
 // (packages/sw/src/scripts/create-notification.ts) は `fromUser.name` /
 // `fromUser.avatarUrl` を無条件で読み、room なら `toRoom.name` も読む。
-// packMessageStream は `msg.FromUser` / `msg.ToRoom` が nil だと該当キーを
-// 落とすが、create 経路は行を素で組むので**必ず nil** (repo は Preload しない)。
-// そのまま渡すと SW が TypeError を投げ、**通知が 1 件も出ない** —
-// publish 側は body を読まない (main-boot.ts は引数を捨てる) ので気付けない。
+// packed (packMessageDetailedStream) は sender / room を引けなかったときに
+// fromUser / toRoom を落とすので、ここでも補う。欠けたまま渡すと SW が
+// TypeError を投げ、**通知が 1 件も出ない** — publish 側は body を読まない
+// (main-boot.ts は引数を捨てる) ので気付けない。
 func (s *Service) pushNewChatMessage(userID string, packed map[string]any, sender *model.User, room *model.ChatRoom) {
 	if s.chatPusher == nil {
 		return
@@ -303,15 +317,34 @@ func (s *Service) pushNewChatMessage(userID string, packed map[string]any, sende
 	s.chatPusher.PushNewChatMessage(userID, s.packMessagePush(packed, sender, room))
 }
 
-// packMessagePush augments the stream payload with the fields the service
-// worker dereferences unconditionally.
+// packMessagePush builds the Web Push body of `newChatMessage` from the main
+// stream payload: the message fields as is, fromUser narrowed to what the
+// service worker reads, toRoom narrowed to {id, name}, and no toUser.
+//
+// **main stream の payload をそのまま送らない。** Web Push は本文が実質 3800 B
+// まで (webpush.maxPushBodyBytes) で、超えると送られずに消える。packMessageDetailed
+// の形 (UserLite 3 人分 + room の description) をそのまま載せると、本文 1000 文字の
+// room や description の長い room で上限を超える (#3438 のレビューで実測)。SW
+// (packages/sw の create-notification.ts / operations.ts) が読むのは fromUser の
+// name / username / avatarUrl、toRoom の name、text、fromUserId / toUserId /
+// toRoomId だけなので、それ以外を落とす。本家は packMessageDetailed をそのまま
+// 送る (docs/divergence/security.md の「`newChatMessage` の Web Push」の行)。本文が長すぎる分は webpush の fitChatPayload が
+// 切り詰める。
 func (s *Service) packMessagePush(packed map[string]any, sender *model.User, room *model.ChatRoom) map[string]any {
-	out := make(map[string]any, len(packed)+2)
+	out := make(map[string]any, len(packed))
 	for k, v := range packed {
+		switch k {
+		case "fromUser", "toUser", "toRoom":
+			continue
+		}
 		out[k] = v
 	}
-	if _, ok := out["fromUser"]; !ok {
-		out["fromUser"] = packUserStream(sender)
+	out["fromUser"] = map[string]any{
+		"id":        sender.ID,
+		"username":  sender.Username,
+		"host":      sender.Host,
+		"name":      sender.Name,
+		"avatarUrl": entity.IdenticonURL(sender),
 	}
 	// **text キーを必ず持たせる。** packMessage は msg.Text が nil だとキーごと
 	// 落とすが、SW は `${name}: ${body.text}` を無条件に組むので添付のみの
@@ -325,21 +358,6 @@ func (s *Service) packMessagePush(packed map[string]any, sender *model.User, roo
 		out["toRoom"] = map[string]any{"id": room.ID, "name": room.Name}
 	}
 	return out
-}
-
-// senderForPush resolves the message author for the push body. Returns nil when
-// the repo is unwired or the lookup fails; pushNewChatMessage then drops the
-// push entirely rather than sending a body the service worker cannot read.
-func (s *Service) senderForPush(fromUserID string) *model.User {
-	if s.userRepo == nil {
-		return nil
-	}
-	u, err := s.userRepo.FindByID(fromUserID)
-	if err != nil {
-		slog.Warn("chat: sender lookup failed, skipping newChatMessage push", "fromUserId", fromUserID, "err", err)
-		return nil
-	}
-	return u
 }
 
 // SetMainStreamPublisher attaches a publisher used to emit `newChatMessage`
@@ -529,12 +547,12 @@ func (s *Service) CreateMessageToUser(ctx context.Context, fromUserID, toUserID,
 		}
 	}
 	// recipient は observer (#3469) にも渡す。引けていなければ nil。
-	var recipient *model.User
+	var recipient, sender *model.User
 	if !otherApprovedMe && s.userRepo != nil {
 		if r, err := s.userRepo.FindByID(toUserID); err == nil {
 			recipient = r
-			sender, err := s.userRepo.FindByID(fromUserID)
-			if err == nil {
+			if u, err := s.userRepo.FindByID(fromUserID); err == nil {
+				sender = u
 				if err := s.canChat(sender, recipient); err != nil {
 					return nil, err
 				}
@@ -581,12 +599,15 @@ func (s *Service) CreateMessageToUser(ctx context.Context, fromUserID, toUserID,
 	// 作成と同時に recipient (toUserID) の main に emit する (sender には
 	// 送らない: TS と同じ fan-out 方針)。
 	if s.mainStreamPublisher != nil {
-		packed := s.packMessageStream(msg)
+		// 本家は newChatMessage を packMessageDetailed で組む (fromUser / toUser が
+		// UserLite)。scope 検査で引いた利用者があれば使い回す (#3438)。
+		// recipient はこの後の notifyMessageObserver (プラグインの通知) にも渡る。
+		// 承認済みの会話では scope の検査で引いていないので、以前は nil を渡して
+		// いた。main stream が配線されているときは、ここで引いた値が渡る。
+		// observer の契約は「引いてあれば渡す、無ければ nil」なので、どちらも正しい。
+		sender, recipient = s.resolveUserPair(sender, recipient, fromUserID, toUserID)
+		packed := s.packMessageDetailedStream(msg, sender, recipient, nil)
 		s.mainStreamPublisher.PublishMainEvent(toUserID, "newChatMessage", packed)
-		var sender *model.User
-		if s.chatPusher != nil {
-			sender = s.senderForPush(fromUserID)
-		}
 		s.pushNewChatMessage(toUserID, packed, sender, nil)
 	}
 	// リモートユーザー宛ならAP配送 (best-effort)
@@ -1208,13 +1229,15 @@ func (s *Service) CreateMessageViaAP(ctx context.Context, uri string, fromUser *
 	// (= 以降 local recipient は scope に依らず remote sender へ返信できる、#1748)。
 	s.recordChatApproval(fromUser.ID, toUserID)
 	if s.publisher != nil {
-		s.publisher.PublishUserMessage(ctx, fromUser.ID, toUserID, EventMessage, packMessage(msg))
+		// 本家の ChatMessageLiteFor1on1 は createdAt が必須。fromUser を持たない形
+		// なので、msg.FromUser を入れずに packMessageStream を通す (#3438)。
+		s.publisher.PublishUserMessage(ctx, fromUser.ID, toUserID, EventMessage, s.packMessageStream(msg))
 	}
 	// Remote → local DM を受信した場合も、CreateMessageToUser と同じく
 	// recipient の main チャネルに newChatMessage を emit してフロントの
 	// 未読インジケータを更新させる。sender は remote なので emit 対象外。
 	if s.mainStreamPublisher != nil {
-		packed := s.packMessageStream(msg)
+		packed := s.packMessageDetailedStream(msg, fromUser, s.resolveUser(recipient, toUserID), nil)
 		s.mainStreamPublisher.PublishMainEvent(toUserID, "newChatMessage", packed)
 		// **引数の fromUser をそのまま使う。** remote sender は user 表に
 		// 居ないこともあるので、引き直すと sender 未解決で push を落とす。
@@ -1265,13 +1288,21 @@ func (s *Service) CreateMessageToRoom(ctx context.Context, fromUserID, roomID, t
 	if err := s.repo.CreateMessage(msg); err != nil {
 		return nil, fmt.Errorf("create room message: %w", err)
 	}
+	// 本家の room の message (ChatMessageLiteForRoom) は fromUser が必須。行は素で
+	// 組んだので、送信者を 1 回だけ引いて載せる。newChatMessage にも同じものを
+	// 使う (#3438)。
+	var sender *model.User
+	if s.publisher != nil || s.mainStreamPublisher != nil {
+		sender = s.resolveUser(nil, fromUserID)
+		msg.FromUser = sender
+	}
 	if s.publisher != nil {
 		s.publisher.PublishRoomMessage(ctx, roomID, EventMessage, s.packMessageStream(msg))
 	}
 	// Room 宛も同様に、sender と **mute した member** を除く全 member
 	// (owner 含む) の main に newChatMessage を emit する。Misskey 本家
 	// ChatService.createMessageToRoom と同じ fan-out 方針。
-	members, membersLoaded := s.emitRoomNewChatMessage(room, fromUserID, msg, nil)
+	members, membersLoaded := s.emitRoomNewChatMessage(room, fromUserID, msg, sender)
 	// remote member が居れば group Create を AP 配送する (best-effort)。
 	s.tryDeliverRoomMessage(msg, room, fromUserID, members, membersLoaded)
 	return msg, nil
@@ -1505,6 +1536,8 @@ func (s *Service) CreateRoomMessageViaAP(uri string, sender *model.User, roomURI
 	if err := s.repo.CreateMessage(msg); err != nil {
 		return fmt.Errorf("create AP room message: %w", err)
 	}
+	// room の message は fromUser が必須 (本家 ChatMessageLiteForRoom、#3438)。
+	msg.FromUser = sender
 	if s.publisher != nil {
 		s.publisher.PublishRoomMessage(context.Background(), roomID, EventMessage, s.packMessageStream(msg))
 	}
@@ -1543,11 +1576,10 @@ func (s *Service) emitRoomNewChatMessage(room *model.ChatRoom, fromUserID string
 		slog.Warn("chat: ListMembersByRoom failed, skipping newChatMessage emit", "roomID", room.ID, "err", err)
 		return nil, false
 	}
-	packed := s.packMessageStream(msg)
-	// push が無効な構成では引かない (1 メッセージあたり FindByID が 1 回増える)。
-	if sender == nil && s.chatPusher != nil {
-		sender = s.senderForPush(fromUserID)
-	}
+	// 本家は newChatMessage を packMessageDetailed で組む (fromUser と toRoom を
+	// 含む)。宛先ごとではなくメッセージごとに 1 回だけ組む (#3438)。
+	sender = s.resolveUser(sender, fromUserID)
+	packed := s.packMessageDetailedStream(msg, sender, nil, room)
 	// 重複 emit を防ぐため set 相当で ID を管理する (membership + owner)。
 	emitted := make(map[string]bool, len(members)+1)
 	// **owner は never-muted として扱う** (mute 判定より前に seed する)。
@@ -2016,30 +2048,137 @@ func (s *Service) packMessageStream(msg *model.ChatMessage) map[string]any {
 			out["createdAt"] = t.UTC().Format("2006-01-02T15:04:05.000Z")
 		}
 	}
-	if msg.FromUser != nil {
-		out["fromUser"] = packUserStream(msg.FromUser)
+	// fromUser と toUser は 1 回でまとめて埋める (利用者ごとに引かない)。
+	lites := s.packUsersStream(msg.FromUser, msg.ToUser)
+	if lites[0] != nil {
+		out["fromUser"] = lites[0]
 	}
-	if msg.ToUser != nil {
-		out["toUser"] = packUserStream(msg.ToUser)
+	if lites[1] != nil {
+		out["toUser"] = lites[1]
 	}
 	return out
 }
 
-// packUserStream is a UserLite-shaped projection for stream payloads.
-// FE の MkAvatar / chat 一覧が avatarUrl / avatarBlurhash を読むため、
-// fromUser / toUser に含める。avatarUrl 未設定時は `entity.IdenticonURL`
-// 経由で identicon URL に fallback する (#692)。
-func packUserStream(u *model.User) map[string]any {
-	return map[string]any{
-		"id":             u.ID,
-		"username":       u.Username,
-		"name":           u.Name,
-		"host":           u.Host,
-		"avatarUrl":      entity.IdenticonURL(u),
-		"avatarBlurhash": u.AvatarBlurhash,
-		"isBot":          u.IsBot,
-		"isCat":          u.IsCat,
+// packMessageDetailedStream packs msg as upstream's ChatMessage
+// (ChatEntityService.packMessageDetailed) for the main stream `newChatMessage`
+// and its Web Push: fromUser, toUser (direct message) and toRoom (room
+// message, as ChatRoom with owner) on top of packMessage + createdAt. The
+// UserLite values are resolved with one FillLites call.
+//
+// 本家は viewer 無しで toRoom を packRoom する。そのとき membership も invitation
+// も null になるので、isMuted / invitationExists は常に false になる。閲覧者に
+// 依らない固定値なので、ここでも false を出す。sender / toUser を引けなかった
+// ときは該当キーを落とす (push 側は sender が無ければ送らない)。
+func (s *Service) packMessageDetailedStream(msg *model.ChatMessage, sender, toUser *model.User, room *model.ChatRoom) map[string]any {
+	out := packMessage(msg)
+	if s.idGen != nil {
+		if t, err := s.idGen.ParseTime(msg.ID); err == nil {
+			out["createdAt"] = t.UTC().Format("2006-01-02T15:04:05.000Z")
+		}
 	}
+	var owner *model.User
+	if room != nil {
+		owner = s.resolveUser(room.Owner, room.OwnerID)
+	}
+	if msg.ToUserID == nil {
+		toUser = nil
+	}
+	lites := s.packUsersStream(sender, toUser, owner)
+	if lites[0] != nil {
+		out["fromUser"] = lites[0]
+	}
+	if lites[1] != nil {
+		out["toUser"] = lites[1]
+	}
+	if room != nil {
+		r := map[string]any{
+			"id":          room.ID,
+			"name":        room.Name,
+			"description": room.Description,
+			"ownerId":     room.OwnerID,
+			// 本家 packRoom の me 無しの値 (上の説明)。
+			"isMuted":          false,
+			"invitationExists": false,
+		}
+		if s.idGen != nil {
+			if t, err := s.idGen.ParseTime(room.ID); err == nil {
+				r["createdAt"] = t.UTC().Format("2006-01-02T15:04:05.000Z")
+			}
+		}
+		if lites[2] != nil {
+			r["owner"] = lites[2]
+		}
+		out["toRoom"] = r
+	}
+	return out
+}
+
+// resolveUserPair is resolveUser for the sender and the recipient of a direct
+// message. When neither is known, both are loaded with one FindManyByIDs.
+//
+// 承認済みの会話では scope の検査を飛ばすので、どちらも引いていない。1 人ずつ
+// 引くと 1 メッセージあたり 2 回になる (#3438 のレビュー)。
+func (s *Service) resolveUserPair(from, to *model.User, fromID, toID string) (*model.User, *model.User) {
+	if from == nil && to == nil && s.userRepo != nil && fromID != "" && toID != "" {
+		users, err := s.userRepo.FindManyByIDs([]string{fromID, toID})
+		if err != nil {
+			slog.Warn("chat: user lookup for stream payload failed", "fromUserId", fromID, "toUserId", toID, "err", err)
+			return nil, nil
+		}
+		for _, u := range users {
+			switch u.ID {
+			case fromID:
+				from = u
+			case toID:
+				to = u
+			}
+		}
+		return from, to
+	}
+	return s.resolveUser(from, fromID), s.resolveUser(to, toID)
+}
+
+// resolveUser returns known when it is non-nil, and otherwise loads the user
+// by id. It returns nil when the repository is not wired or the lookup fails.
+func (s *Service) resolveUser(known *model.User, id string) *model.User {
+	if known != nil {
+		return known
+	}
+	if s.userRepo == nil || id == "" {
+		return nil
+	}
+	u, err := s.userRepo.FindByID(id)
+	if err != nil {
+		slog.Warn("chat: user lookup for stream payload failed", "userId", id, "err", err)
+		return nil
+	}
+	return u
+}
+
+// packUsersStream packs users as upstream's UserLite (the same
+// entity.PackUserLite the REST API uses) and resolves instance / emojis of all
+// of them with one FillLites call. out[i] is nil when users[i] is nil.
+//
+// 本家の stream / push の fromUser・toUser は userEntityService.pack の UserLite。
+// 以前は chat だけの縮めた形で、avatarDecorations / emojis / onlineStatus が
+// 欠けていた (#3438)。
+func (s *Service) packUsersStream(users ...*model.User) []*entity.UserLite {
+	out := make([]*entity.UserLite, len(users))
+	present := make([]*model.User, 0, len(users))
+	lites := make([]*entity.UserLite, 0, len(users))
+	for i, u := range users {
+		if u == nil {
+			continue
+		}
+		l := entity.PackUserLite(u)
+		out[i] = &l
+		present = append(present, u)
+		lites = append(lites, &l)
+	}
+	if s.lites != nil && len(present) > 0 {
+		s.lites.FillLites(present, lites)
+	}
+	return out
 }
 
 // HasBlockingRepo reports whether the blocking repository was wired.
