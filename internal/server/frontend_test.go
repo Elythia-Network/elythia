@@ -1078,3 +1078,43 @@ func TestFrontendHTML_CreditImageOriginsInCSP(t *testing.T) {
 		}
 	}
 }
+
+// 起動の HTML は、entry が静的に import する chunk の一覧を CLIENT_PRELOADS として
+// boot.js に渡す (#3613)。boot.js はこれを modulepreload で並べる。一覧の入った inline
+// script も CSP の hash に載ること (載らないと enforce で起動しない)。
+func TestRenderFrontendShell_ClientPreloads(t *testing.T) {
+	render := func(t *testing.T, entry frontendutil.ClientEntryInfo) (string, string) {
+		t.Helper()
+		cfg := &config.Config{URL: "https://example.test", Version: "0.0.1-test", FrontendContentSecurityPolicy: CSPModeEnforce}
+		e := echo.New()
+		rec := httptest.NewRecorder()
+		c := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)
+		require.NoError(t, renderFrontendShell(c, cfg, testutil.NewMockMetaRepository(), nil, nil, entry, shellOverrides{}))
+		return rec.Body.String(), rec.Header().Get("Content-Security-Policy")
+	}
+	scriptHash := func(t *testing.T, body string) string {
+		t.Helper()
+		m := regexp.MustCompile(`<script>(const VERSION = [^<]*)</script>`).FindStringSubmatch(body)
+		require.NotNil(t, m, "boot globals script not found")
+		return cspScriptHashes(m[1])[0]
+	}
+
+	t.Run("lists the preloads of a built entry", func(t *testing.T) {
+		body, csp := render(t, frontendutil.ClientEntryInfo{
+			Script:   "scripts/entry-AAAAAAAA.js",
+			Preloads: []string{"scripts/a-BBBBBBBB.js", "scripts/b-CCCCCCCC.js"},
+		})
+		assert.Contains(t, body, `const CLIENT_PRELOADS = ["scripts/a-BBBBBBBB.js","scripts/b-CCCCCCCC.js"];`)
+		assert.Contains(t, csp, scriptHash(t, body))
+	})
+
+	t.Run("empty without a built entry", func(t *testing.T) {
+		body, _ := render(t, frontendutil.ClientEntryInfo{Preloads: []string{"scripts/a-BBBBBBBB.js"}})
+		assert.Contains(t, body, `const CLIENT_PRELOADS = [];`)
+	})
+
+	t.Run("empty without preloads.json", func(t *testing.T) {
+		body, _ := render(t, frontendutil.ClientEntryInfo{Script: "scripts/entry-AAAAAAAA.js"})
+		assert.Contains(t, body, `const CLIENT_PRELOADS = [];`)
+	})
+}
