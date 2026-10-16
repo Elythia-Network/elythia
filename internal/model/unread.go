@@ -28,8 +28,9 @@ func (ChannelNoteUnread) TableName() string { return "channel_note_unread" }
 
 // NoteUnread represents the `note_unread` table tracking specified /
 // mentioned notes a user has not yet read. Matches the TS schema so /api/i
-// can surface hasUnreadSpecifiedNotes and hasUnreadMentions without scanning
-// the Redis notification stream.
+// can surface hasUnreadSpecifiedNotes without scanning the Redis notification
+// stream. IsMentioned is written but not read; hasUnreadMentions comes from
+// the notification stream.
 type NoteUnread struct {
 	ID          string `gorm:"column:id;type:varchar(32);primaryKey" json:"id"`
 	UserID      string `gorm:"column:userId;type:varchar(32);not null" json:"userId"`

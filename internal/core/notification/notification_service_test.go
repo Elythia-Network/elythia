@@ -969,3 +969,39 @@ func TestService_MarkAllAsRead_ReadsMarkerBeforeStream(t *testing.T) {
 		"既読位置はストリームより先に読むこと。逆順だと並走した既読要求の書き込みを"+
 			"読んでしまい publish しない側へ倒れる")
 }
+
+// UnreadStreamSummary is UnreadSummary without the note_unread read: with a
+// note_unread repository it leaves HasSpecifiedNote to the caller (/api/i
+// reads it in its one-statement query, #3608); without one it still takes it
+// from the stream.
+func TestService_UnreadStreamSummary_LeavesNoteUnreadToCaller(t *testing.T) {
+	ctx := context.Background()
+
+	svc := newTestSvc(t)
+	unread := testutil.NewMockNoteUnreadRepository()
+	svc.SetNoteUnreadRepo(unread)
+	_ = unread.Upsert(&model.NoteUnread{
+		ID: "nu1", UserID: "alice", NoteID: "n1", NoteUserID: "bob", IsSpecified: true,
+	})
+	// stream 側の通知も specified にしておく。note_unread を持つ Service では
+	// note_unread が正なので、stream から HasSpecifiedNote を立ててはいけない
+	// (立てると、note_unread では読み終えているのに true になりうる)。
+	_, err := svc.Create(ctx, CreateInput{NotifieeID: "alice", NotifierID: "bob", Type: TypeMention, NoteID: "n2", NoteVisibility: "specified"})
+	require.NoError(t, err)
+
+	assert.True(t, svc.SpecifiedNoteFromDB())
+	stream, err := svc.UnreadStreamSummary(ctx, "alice", []Type{TypeMention})
+	require.NoError(t, err)
+	assert.Equal(t, UnreadSummary{TotalCount: 1, HasMentions: true}, stream)
+	full, err := svc.UnreadSummary(ctx, "alice", []Type{TypeMention})
+	require.NoError(t, err)
+	assert.Equal(t, UnreadSummary{TotalCount: 1, HasMentions: true, HasSpecifiedNote: true}, full)
+
+	plain := newTestSvc(t)
+	assert.False(t, plain.SpecifiedNoteFromDB())
+	_, err = plain.Create(ctx, CreateInput{NotifieeID: "carol", NotifierID: "bob", Type: TypeMention, NoteID: "n3", NoteVisibility: "specified"})
+	require.NoError(t, err)
+	stream, err = plain.UnreadStreamSummary(ctx, "carol", nil)
+	require.NoError(t, err)
+	assert.True(t, stream.HasSpecifiedNote, "note_unread が無ければ stream から求める")
+}

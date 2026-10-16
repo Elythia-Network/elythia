@@ -186,6 +186,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	pollRepo := repository.NewPollRepository(s.db)
 	followingRepo := repository.NewFollowingRepository(s.db)
 	followRequestRepo := repository.NewFollowRequestRepository(s.db)
+	// users/show などの関係を 1 文で引く (#3608)。userrelation.Repos を組む箇所すべてに渡す。
+	userRelationRepo := repository.NewUserRelationRepository(s.db)
 	piningRepo := repository.NewUserNotePiningRepository(s.db)
 	reactionRepo := repository.NewNoteReactionRepository(s.db)
 	// emoji の ListLocal はタイムライン描画ごとに毎回フルスキャンしていた
@@ -1678,6 +1680,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		RenoteMuting:  renoteMutingRepo,
 		FollowRequest: followRequestRepo,
 		Memo:          repository.NewUserMemoRepository(s.db),
+		Relation:      userRelationRepo,
 	}
 	// follow / unfollow の Webhook は本家と同じく、フォローした側から見た
 	// UserDetailedNotMe で相手を送る。followed は UserLite (#3269)。
@@ -2091,6 +2094,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/users/update-memo", usersHandler.UpdateMemo, middleware.RequireAuth(), middleware.RequireScope("write:account"))
 	usersHandler.SetAbuseRepo(repository.NewAbuseReportRepository(s.db))
 	usersHandler.SetMemoRepo(repository.NewUserMemoRepository(s.db))
+	usersHandler.SetUserRelationReader(userRelationRepo) // #3608: users/show の関係を 1 文で引く
 	usersHandler.SetUserListFavoriteRepo(userListFavoriteRepo)
 	usersHandler.SetUserListRepo(userListRepo)
 	// users/reactions で moderator/admin が remote / 非 public reactions を
@@ -2214,6 +2218,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// Phase 7-2 follow-up (#271)
 	iHandler.SetAntennaUnreadRepo(antennaNoteUnreadRepo)
 	iHandler.SetChannelUnreadRepo(channelNoteUnreadRepo)
+	iHandler.SetMeUnreadFlagsReader(repository.NewMeUnreadFlagsRepository(s.db)) // #3608: 未読の真偽値 (note_unread を含む) を 1 文で引く
 	// Phase 7-3 (#245): pinnedNoteIds / pinnedNotes / pinnedPageId / pinnedPage
 	iHandler.SetPiningRepo(piningRepo)
 	iHandler.SetNoteRepo(noteRepo)
@@ -2462,6 +2467,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		RenoteMuting:  renoteMutingRepo,
 		FollowRequest: followRequestRepo,
 		Memo:          repository.NewUserMemoRepository(s.db),
+		Relation:      userRelationRepo,
 	})
 	blockingHandler.SetModeratorChecker(roleService) // #1985: blocking/list の count gate で moderator viewer 判定
 	blockingHandler.SetUserPacker(sharedUserPacker)  // #3330: create・delete の応答を本家の UserDetailedNotMe に揃える
@@ -2603,6 +2609,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		RenoteMuting:  renoteMutingRepo,
 		FollowRequest: followRequestRepo,
 		Memo:          repository.NewUserMemoRepository(s.db),
+		Relation:      userRelationRepo,
 	})
 	// AP リソース系エンドポイントは Accept ヘッダで content negotiation する。
 	// ブラウザからのリロード (Accept: text/html など) では SPA 用の HTML を

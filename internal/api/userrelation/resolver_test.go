@@ -2,10 +2,13 @@ package userrelation
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -145,4 +148,40 @@ func TestApply_PartialReposSkipFlags(t *testing.T) {
 	assert.Nil(t, d.IsMuted, "muting 未配線なら isMuted は omit")
 	require.NotNil(t, d.IsBlocking, "blocking は wire 済みなので emit")
 	assert.True(t, *d.IsBlocking)
+}
+
+// failingRelationReader always fails, like a dropped DB connection. It also
+// returns a non-empty state so that a caller using the state despite the
+// error is caught.
+type failingRelationReader struct{}
+
+func (failingRelationReader) ReadUserRelation(string, string, time.Time) (repository.UserRelationState, error) {
+	notify := "normal"
+	return repository.UserRelationState{
+		IsFollowing: true, FollowNotify: &notify, FollowWithReplies: true,
+		IsBlocked: true, IsMuted: true, HasPendingTo: true, HasMemo: true, Memo: "x",
+	}, errors.New("db down")
+}
+
+// When the one-statement read fails, Apply writes the same "no relation"
+// block that the per-relation path writes when every query fails, and does
+// not fall back to the per-relation repositories.
+func TestApply_RelationReadErrorMeansNoRelation(t *testing.T) {
+	r, target, profile := fullRepos(t)
+	notify := "normal"
+	require.NoError(t, r.Following.(*testutil.MockFollowingRepository).Create(&model.Following{ID: "f1", FollowerID: "viewer", FolloweeID: "target", Notify: &notify}))
+	require.NoError(t, r.Memo.(*testutil.MockUserMemoRepository).CreateOrUpdate(&model.UserMemo{ID: "m1", UserID: "viewer", TargetUserID: "target", Memo: "x"}))
+	r.Relation = failingRelationReader{}
+
+	var d entity.UserDetailed
+	assert.False(t, r.Apply(&d, "viewer", target, profile))
+	require.NotNil(t, d.IsFollowing)
+	assert.False(t, *d.IsFollowing)
+	assert.False(t, *d.IsBlocked)
+	assert.False(t, *d.IsMuted)
+	assert.False(t, *d.HasPendingFollowRequestToYou)
+	assert.Equal(t, "none", *d.Notify)
+	assert.False(t, *d.WithReplies)
+	assert.Nil(t, d.Memo)
+	assert.Nil(t, d.FollowedMessage)
 }
