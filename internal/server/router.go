@@ -118,6 +118,7 @@ import (
 	corepoll "github.com/elythia-network/elythia/internal/core/poll"
 	"github.com/elythia-network/elythia/internal/core/procstats"
 	corereaction "github.com/elythia-network/elythia/internal/core/reaction"
+	corerelationcache "github.com/elythia-network/elythia/internal/core/relationcache"
 	corerelay "github.com/elythia-network/elythia/internal/core/relay"
 	coreretention "github.com/elythia-network/elythia/internal/core/retention"
 	corereversi "github.com/elythia-network/elythia/internal/core/reversi"
@@ -184,7 +185,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		slog.Error("failed to ensure initial meta row", "err", err)
 	}
 	pollRepo := repository.NewPollRepository(s.db)
-	followingRepo := repository.NewFollowingRepository(s.db)
+	// 関係の repository は書き込みのたびに relationCache を捨てる (#3607)。
+	// **ここ以外で関係の repository を作らない。** キャッシュを渡さずに作った
+	// repository から書くと、そのプロセスのキャッシュが捨てられない。
+	followingRepo := repository.NewFollowingRepositoryWithRelationCache(s.db, s.relationCache)
 	followRequestRepo := repository.NewFollowRequestRepository(s.db)
 	piningRepo := repository.NewUserNotePiningRepository(s.db)
 	reactionRepo := repository.NewNoteReactionRepository(s.db)
@@ -203,9 +207,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// **`emojiRepo` より後・絵文字を変える配線より前に置く。** zip インポータと
 	// admin handler の両方がこの invalidator を受け取る。
 	emojiDecorationResolver := avatardecoration.NewEmojiResolver(emojiRepo)
-	blockingRepo := repository.NewBlockingRepository(s.db)
-	mutingRepo := repository.NewMutingRepository(s.db)
-	renoteMutingRepo := repository.NewRenoteMutingRepository(s.db)
+	blockingRepo := repository.NewBlockingRepositoryWithRelationCache(s.db, s.relationCache)
+	mutingRepo := repository.NewMutingRepositoryWithRelationCache(s.db, s.relationCache)
+	renoteMutingRepo := repository.NewRenoteMutingRepositoryWithRelationCache(s.db, s.relationCache)
 	pollVoteRepo := repository.NewPollVoteRepository(s.db)
 	driveFileRepo := repository.NewDriveFileRepository(s.db)
 	driveFolderRepo := repository.NewDriveFolderRepository(s.db)
@@ -240,7 +244,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		slog.Warn("instance follow-counts recompute failed", "err", err)
 	}
 	channelRepo := repository.NewChannelRepository(s.db)
-	channelFollowingRepo := repository.NewChannelFollowingRepository(s.db)
+	channelFollowingRepo := repository.NewChannelFollowingRepositoryWithRelationCache(s.db, s.relationCache)
 	// antenna は inbound note 1 件ごとに ListAllActive が引かれる (#2752)。
 	// プロセス内キャッシュを挟み、書き込みで invalidate する。cross-worker の
 	// 伝播は下の internal:antennaUpdated (meta と同じ形)。
@@ -270,7 +274,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	ipLogService := iplog.NewService(userIPRepo, metaRepo, iplog.DedupeWindow)
 	chatRepo := repository.NewChatRepository(s.db)
 	channelFavoriteRepo := repository.NewChannelFavoriteRepository(s.db)
-	channelMutingRepo := repository.NewChannelMutingRepository(s.db)
+	channelMutingRepo := repository.NewChannelMutingRepositoryWithRelationCache(s.db, s.relationCache)
 	clipFavoriteRepo := repository.NewClipFavoriteRepository(s.db)
 	userListFavoriteRepo := repository.NewUserListFavoriteRepository(s.db)
 	retentionRepo := repository.NewRetentionAggregationRepository(s.db)
@@ -3077,6 +3081,19 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		cachedAntenna.Invalidate()
 	})
 
+	// #3607: 閲覧者ごとの関係のキャッシュの cross-worker invalidation。
+	// 関係の repository に書いたプロセスは自分のキャッシュを捨ててから
+	// internal:relationCacheInvalidated を publish し、他のプロセスは受けて捨てる。
+	// 連合の受信 (Block / Follow / Undo / Accept / Reject) は MK_ONLY_QUEUE の
+	// プロセスで書かれ、タイムラインは API のプロセスで読まれるので、繋がないと
+	// ミュート・ブロックが TTL (1 分) の間効かない。自分の publish は受け流す。
+	corerelationcache.Connect(s.relationCache, internalPubSub, idGen.Generate(time.Now()))
+	notesHandler.SetRelationCache(s.relationCache)
+	usersHandler.SetRelationCache(s.relationCache)
+	antennasHandler.SetRelationCache(s.relationCache)
+	channelsHandler.SetRelationCache(s.relationCache)
+	clipsHandler.SetRelationCache(s.relationCache)
+
 	// #3383: 絵文字の (name, host) cache の cross-worker invalidation。
 	// リモート絵文字の作成・更新は連合の受信 (MK_ONLY_QUEUE のプロセス) で
 	// 起き、それを表示に使うのは API のプロセスなので、繋がないと作られた
@@ -3536,6 +3553,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// Public roles (Phase 6)
 	rolesHandler := apiroles.NewHandler(roleService, idGen)
+	rolesHandler.SetRelationCache(s.relationCache)
 	rolesHandler.SetNotesQuery(repository.NewRoleNotesQuery(s.db))
 	rolesHandler.SetNoteRepo(noteRepo) // #1630: notes の renote 入れ子 mute/block 検査
 	rolesHandler.SetMetaRepo(metaRepo) // roles/notes の blocked-host filter

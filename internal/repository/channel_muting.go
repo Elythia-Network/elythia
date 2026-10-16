@@ -32,11 +32,19 @@ type ChannelMutingRepository interface {
 
 type channelMutingRepository struct {
 	db *gorm.DB
+	rc *RelationCache
 }
 
 // NewChannelMutingRepository creates a new ChannelMutingRepository.
 func NewChannelMutingRepository(db *gorm.DB) ChannelMutingRepository {
-	return &channelMutingRepository{db: db}
+	return NewChannelMutingRepositoryWithRelationCache(db, nil)
+}
+
+// NewChannelMutingRepositoryWithRelationCache creates a
+// ChannelMutingRepository whose writes invalidate rc (the user's
+// RelationChannelMuting entry, #3607).
+func NewChannelMutingRepositoryWithRelationCache(db *gorm.DB, rc *RelationCache) ChannelMutingRepository {
+	return &channelMutingRepository{db: db, rc: rc}
 }
 
 func (r *channelMutingRepository) Create(m *model.ChannelMuting) error {
@@ -45,15 +53,23 @@ func (r *channelMutingRepository) Create(m *model.ChannelMuting) error {
 	// 500 になる (#1603)。能動的muteは呼び出し側 Exists で 204 short-circuit され
 	// るため、ここに来るのは「行なし」か「期限切れ行」のみ。後者は expiresAt を
 	// 更新して mute を再活性化させる upsert にする。
-	return r.db.Clauses(clause.OnConflict{
+	if err := r.db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "userId"}, {Name: "channelId"}},
 		DoUpdates: clause.AssignmentColumns([]string{"expiresAt"}),
-	}).Create(m).Error
+	}).Create(m).Error; err != nil {
+		return err
+	}
+	r.rc.Invalidate(RelationChannelMuting, m.UserID)
+	return nil
 }
 
 func (r *channelMutingRepository) Delete(userID, channelID string) error {
-	return r.db.Where(`"userId" = ? AND "channelId" = ?`, userID, channelID).
-		Delete(&model.ChannelMuting{}).Error
+	if err := r.db.Where(`"userId" = ? AND "channelId" = ?`, userID, channelID).
+		Delete(&model.ChannelMuting{}).Error; err != nil {
+		return err
+	}
+	r.rc.Invalidate(RelationChannelMuting, userID)
+	return nil
 }
 
 func (r *channelMutingRepository) ListByUser(userID string) ([]*model.ChannelMuting, error) {
@@ -90,5 +106,6 @@ func (r *channelMutingRepository) DeleteExpired(now time.Time) ([]string, error)
 	for _, m := range deleted {
 		userIDs = append(userIDs, m.UserID)
 	}
+	r.rc.Invalidate(RelationChannelMuting, userIDs...)
 	return userIDs, nil
 }

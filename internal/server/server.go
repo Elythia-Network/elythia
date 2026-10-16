@@ -47,7 +47,10 @@ type Server struct {
 	// userRepo は CachedUserRepository でラップ済みの共有 instance。
 	// auth middleware と setupRoutes の両方からこれを使うことで、片側の
 	// mutation で他方の cache が stale 化するのを防ぐ (#300 3-3)。
-	userRepo       repository.UserRepository
+	userRepo repository.UserRepository
+	// relationCache は閲覧者ごとのミュート・ブロック・フォローの一覧 (#3607)。
+	// 関係の repository と userRepo の書き込みがここを捨てる。
+	relationCache  *repository.RelationCache
 	config         *config.Config
 	db             *gorm.DB
 	redis          *cache.RedisClients
@@ -760,7 +763,11 @@ func newServer(cfg *config.Config, db *gorm.DB, redis *cache.RedisClients, plugi
 
 	// CachedUserRepository を一度だけ構築して auth middleware と
 	// setupRoutes (services) が同じ cache を共有するようにする (#300 3-3)。
-	userRepo := repository.NewCachedUserRepository(repository.NewUserRepository(db))
+	//
+	// relationCache は userRepo より先に作る。HardDeleteUser の CASCADE で消える
+	// 関係の行を、userRepo の側から捨てるため (#3607)。
+	relationCache := repository.NewRelationCache(db)
+	userRepo := repository.NewCachedUserRepository(repository.NewUserRepositoryWithRelationCache(db, relationCache))
 	accessTokenRepo := repository.NewAccessTokenRepository(db)
 
 	// body size 制限は auth.Authenticate より前に置く: auth は token 抽出のため
@@ -825,6 +832,7 @@ func newServer(cfg *config.Config, db *gorm.DB, redis *cache.RedisClients, plugi
 	s := &Server{
 		echo:           e,
 		userRepo:       userRepo,
+		relationCache:  relationCache,
 		config:         cfg,
 		db:             db,
 		redis:          redis,

@@ -25,13 +25,16 @@ import (
 
 // Handler handles clip-related API endpoints.
 type Handler struct {
-	svc          *coreclip.Service
-	idGen        id.Generator
-	favoriteRepo ClipFavoriteRepository
-	instanceRepo repository.InstanceRepository
-	emojiRepo    repository.EmojiRepository
-	bufReader    entity.BufferedReactionsReader
-	fieldRes     *entity.NoteFieldResolver
+	// relationCache は閲覧者のミュート・ブロックの一覧を要求をまたいで持つ
+	// (#3607)。nil なら repository から読む。
+	relationCache *repository.RelationCache
+	svc           *coreclip.Service
+	idGen         id.Generator
+	favoriteRepo  ClipFavoriteRepository
+	instanceRepo  repository.InstanceRepository
+	emojiRepo     repository.EmojiRepository
+	bufReader     entity.BufferedReactionsReader
+	fieldRes      *entity.NoteFieldResolver
 	// userRepo は clips/notes 経由で他人の clip を閲覧する際の hardMutedWords
 	// filter (#787) のために viewer profile を引く。未配線時は filter skip。
 	userRepo repository.UserRepository
@@ -517,7 +520,7 @@ func (h *Handler) Notes(c echo.Context) error {
 	// clips/notes が適用しないため渡さない。upstream が併せ持つ
 	// muted-instances と renote 入れ子変種 (renote の reply/renote author) は
 	// #1544 と同じく未対応の follow-up。
-	mbSets, err := notesfilter.LoadMuteBlockSets(user, h.mutingRepo, h.blockingRepo, nil, h.userRepo)
+	mbSets, err := notesfilter.LoadMuteBlockSetsCached(h.relationCache, user, h.mutingRepo, h.blockingRepo, nil, h.userRepo)
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -638,4 +641,10 @@ func (h *Handler) HasMetaRepo() bool { return h.metaRepo != nil }
 // 使う (#2709 review)。
 func (h *Handler) HasMuteBlockRepos() bool {
 	return h.mutingRepo != nil && h.blockingRepo != nil
+}
+
+// SetRelationCache wires the per-user relation cache used by the mute / block
+// filter (#3607). nil keeps reading the repositories.
+func (h *Handler) SetRelationCache(rc *repository.RelationCache) {
+	h.relationCache = rc
 }

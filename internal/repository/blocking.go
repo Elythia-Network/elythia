@@ -26,19 +26,38 @@ type BlockingRepository interface {
 
 type blockingRepository struct {
 	db *gorm.DB
+	rc *RelationCache
 }
 
 // NewBlockingRepository creates a new BlockingRepository.
 func NewBlockingRepository(db *gorm.DB) BlockingRepository {
-	return &blockingRepository{db: db}
+	return NewBlockingRepositoryWithRelationCache(db, nil)
 }
 
+// NewBlockingRepositoryWithRelationCache creates a BlockingRepository whose
+// writes invalidate rc (the blockee's RelationBlockedBy entry, #3607).
+func NewBlockingRepositoryWithRelationCache(db *gorm.DB, rc *RelationCache) BlockingRepository {
+	return &blockingRepository{db: db, rc: rc}
+}
+
+// キャッシュは「誰に block されているか」を blockee ごとに持つので、捨てるのは
+// blocker ではなく blockee の項目。
+
 func (r *blockingRepository) Create(b *model.Blocking) error {
-	return r.db.Create(b).Error
+	if err := r.db.Create(b).Error; err != nil {
+		return err
+	}
+	r.rc.Invalidate(RelationBlockedBy, b.BlockeeID)
+	return nil
 }
 
 func (r *blockingRepository) Delete(b *model.Blocking) error {
-	return r.db.Delete(b).Error
+	owners, err := deleteByIDReturning(r.db, b, b.ID, "blockeeId")
+	if err != nil {
+		return err
+	}
+	r.rc.Invalidate(RelationBlockedBy, append(owners, b.BlockeeID)...)
+	return nil
 }
 
 func (r *blockingRepository) FindByPair(blockerID, blockeeID string) (*model.Blocking, error) {

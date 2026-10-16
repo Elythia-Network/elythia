@@ -51,19 +51,35 @@ type MutingRepository interface {
 
 type mutingRepository struct {
 	db *gorm.DB
+	rc *RelationCache
 }
 
 // NewMutingRepository creates a new MutingRepository.
 func NewMutingRepository(db *gorm.DB) MutingRepository {
-	return &mutingRepository{db: db}
+	return NewMutingRepositoryWithRelationCache(db, nil)
+}
+
+// NewMutingRepositoryWithRelationCache creates a MutingRepository whose
+// writes invalidate rc (the muter's RelationMuting entry, #3607).
+func NewMutingRepositoryWithRelationCache(db *gorm.DB, rc *RelationCache) MutingRepository {
+	return &mutingRepository{db: db, rc: rc}
 }
 
 func (r *mutingRepository) Create(m *model.Muting) error {
-	return r.db.Create(m).Error
+	if err := r.db.Create(m).Error; err != nil {
+		return err
+	}
+	r.rc.Invalidate(RelationMuting, m.MuterID)
+	return nil
 }
 
 func (r *mutingRepository) Delete(m *model.Muting) error {
-	return r.db.Delete(m).Error
+	owners, err := deleteByIDReturning(r.db, m, m.ID, "muterId")
+	if err != nil {
+		return err
+	}
+	r.rc.Invalidate(RelationMuting, append(owners, m.MuterID)...)
+	return nil
 }
 
 func (r *mutingRepository) FindByPair(muterID, muteeID string) (*model.Muting, error) {
@@ -172,6 +188,9 @@ func (r *mutingRepository) DeleteExpired(now time.Time) ([]string, error) {
 	for _, m := range deleted {
 		muterIDs = append(muterIDs, m.MuterID)
 	}
+	// 一覧は読むときに期限で判定しているので、ここで捨てなくても期限切れの
+	// ミュートは効かない。行が消えたことに合わせて、念のため捨てる。
+	r.rc.Invalidate(RelationMuting, muterIDs...)
 	return muterIDs, nil
 }
 
@@ -191,19 +210,35 @@ type RenoteMutingRepository interface {
 
 type renoteMutingRepository struct {
 	db *gorm.DB
+	rc *RelationCache
 }
 
 // NewRenoteMutingRepository creates a new RenoteMutingRepository.
 func NewRenoteMutingRepository(db *gorm.DB) RenoteMutingRepository {
-	return &renoteMutingRepository{db: db}
+	return NewRenoteMutingRepositoryWithRelationCache(db, nil)
+}
+
+// NewRenoteMutingRepositoryWithRelationCache creates a RenoteMutingRepository
+// whose writes invalidate rc (the muter's RelationRenoteMuting entry, #3607).
+func NewRenoteMutingRepositoryWithRelationCache(db *gorm.DB, rc *RelationCache) RenoteMutingRepository {
+	return &renoteMutingRepository{db: db, rc: rc}
 }
 
 func (r *renoteMutingRepository) Create(m *model.RenoteMuting) error {
-	return r.db.Create(m).Error
+	if err := r.db.Create(m).Error; err != nil {
+		return err
+	}
+	r.rc.Invalidate(RelationRenoteMuting, m.MuterID)
+	return nil
 }
 
 func (r *renoteMutingRepository) Delete(m *model.RenoteMuting) error {
-	return r.db.Delete(m).Error
+	owners, err := deleteByIDReturning(r.db, m, m.ID, "muterId")
+	if err != nil {
+		return err
+	}
+	r.rc.Invalidate(RelationRenoteMuting, append(owners, m.MuterID)...)
+	return nil
 }
 
 func (r *renoteMutingRepository) FindByPair(muterID, muteeID string) (*model.RenoteMuting, error) {

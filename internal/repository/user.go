@@ -124,11 +124,18 @@ type UserRepository interface {
 
 type userRepository struct {
 	db *gorm.DB
+	rc *RelationCache
 }
 
 // NewUserRepository creates a new UserRepository.
 func NewUserRepository(db *gorm.DB) UserRepository {
-	return &userRepository{db: db}
+	return NewUserRepositoryWithRelationCache(db, nil)
+}
+
+// NewUserRepositoryWithRelationCache creates a UserRepository whose
+// HardDeleteUser drops every RelationCache entry (#3607).
+func NewUserRepositoryWithRelationCache(db *gorm.DB, rc *RelationCache) UserRepository {
+	return &userRepository{db: db, rc: rc}
 }
 
 func (r *userRepository) Create(u *model.User) error {
@@ -527,7 +534,19 @@ func (r *userRepository) HardDeleteUser(userID string) error {
 	if userID == "" {
 		return nil
 	}
-	return r.db.Exec(`DELETE FROM "user" WHERE "id" = ?`, userID).Error
+	if err := r.db.Exec(`DELETE FROM "user" WHERE "id" = ?`, userID).Error; err != nil {
+		return err
+	}
+	// ON DELETE CASCADE で muting / blocking / following などの行が repository を
+	// 通らずに消え、消えた行を持っていた相手を知る手段が無い。物理削除はローカルの
+	// アカウントの削除だけで頻度が低いので、関係のキャッシュを丸ごと捨てる。
+	//
+	// DeleteOrphanRemoteUsers は following / follow_request / blocking / muting の
+	// 行が無い利用者だけを消すので、ここに並べていない。CASCADE で消えうるのは
+	// renote_muting と channel_* の行だが、消えるのは削除された利用者の ID で、
+	// 古い一覧に残っても存在しない利用者を余分に除くだけになる。
+	r.rc.InvalidateAll()
+	return nil
 }
 
 // UpdateProfile updates the given columns on the user_profile table.

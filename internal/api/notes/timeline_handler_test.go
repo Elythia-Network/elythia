@@ -796,7 +796,8 @@ func TestTimeline_PageFilterLoadsOnceAndSkipsPassedNotes(t *testing.T) {
 		}
 	}
 	assert.Equal(t, 2, targetLookups, "リノート先の検査は、新しく通す束 (2 回目と 3 回目) ごとに 1 回だけ")
-	// loadMutedUserIDs (TimelineFilter.MutedUserIDs) で 1 本、PageFilter で 1 本。
-	assert.Equal(t, 2, muting.muteeLists, "mute の読み込みは PageFilter 全体で 1 回だけ")
+	// TimelineFilter.MutedUserIDs と PageFilter は同じ読み込みを使い回す (#3607)。
+	// 以前は TimelineFilter で 1 本、PageFilter で 1 本の計 2 本だった。
+	assert.Equal(t, 1, muting.muteeLists, "mute の読み込みは要求全体で 1 回だけ")
 	assert.Equal(t, 1, meta.fetches, "meta の読み込みは 1 回だけ")
 }

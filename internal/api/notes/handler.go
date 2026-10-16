@@ -70,7 +70,10 @@ type Handler struct {
 	// mute / instance-mute filter を適用するのに使う (#1554、upstream
 	// generateBaseNoteFilteringQuery 相当)。未配線時は filter skip。
 	blockingRepo repository.BlockingRepository
-	instanceRepo repository.InstanceRepository
+	// relationCache は閲覧者のミュート・ブロック・フォローの一覧を、
+	// 要求をまたいで持つ (#3607)。nil なら repository から読む。
+	relationCache *repository.RelationCache
+	instanceRepo  repository.InstanceRepository
 	// metaRepo は list endpoint の blocked-host filter で meta.blockedHosts を
 	// 引く (#1783)。未配線時は blocked-host filter を skip。
 	metaRepo        repository.MetaRepository
@@ -854,6 +857,13 @@ func (h *Handler) applyMuteBlock(viewer *model.User, notes []*model.Note) ([]*mo
 // Redis から解決した範囲と重ならず、同じ ID が別の内容で来ないため。
 // fallbackRange を変えるときはこの前提も見直すこと。
 func (h *Handler) newMuteBlockFilter(viewer *model.User) func([]*model.Note) ([]*model.Note, error) {
+	return h.newMuteBlockFilterWith(viewer, h.newRequestRelations(viewer))
+}
+
+// newMuteBlockFilterWith is newMuteBlockFilter reading the mute / block /
+// channel-mute lists from rel, so a timeline shares them with its
+// TimelineFilter instead of loading them a second time (#3607).
+func (h *Handler) newMuteBlockFilterWith(viewer *model.User, rel *requestRelations) func([]*model.Note) ([]*model.Note, error) {
 	var (
 		loaded  bool
 		sets    notesfilter.MuteBlockSets
@@ -867,7 +877,8 @@ func (h *Handler) newMuteBlockFilter(viewer *model.User) func([]*model.Note) ([]
 			if viewer != nil && h.blockingRepo != nil {
 				// channelMutingRepo を渡さないと MutedChannelIDs が空のままになり、
 				// チャンネルミュートが post-fetch 側で一切効かない。
-				s, err := notesfilter.LoadMuteBlockSets(viewer, h.mutingRepo, h.blockingRepo, h.channelMutingRepo, h.userRepo)
+				muting, blocking, channelMuting := rel.listers()
+				s, err := notesfilter.LoadMuteBlockSets(viewer, muting, blocking, channelMuting, h.userRepo)
 				if err != nil {
 					return nil, err
 				}

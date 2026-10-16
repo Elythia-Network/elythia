@@ -25,14 +25,17 @@ type RoleNotesQuery interface {
 
 // Handler handles public role API endpoints.
 type Handler struct {
-	roleService  *role.Service
-	notesQuery   RoleNotesQuery
-	noteRepo     repository.NoteRepository
-	idGen        id.Generator
-	instanceRepo repository.InstanceRepository
-	emojiRepo    repository.EmojiRepository
-	bufReader    entity.BufferedReactionsReader
-	fieldRes     *entity.NoteFieldResolver
+	// relationCache は閲覧者のミュート・ブロックの一覧を要求をまたいで持つ
+	// (#3607)。nil なら repository から読む。
+	relationCache *repository.RelationCache
+	roleService   *role.Service
+	notesQuery    RoleNotesQuery
+	noteRepo      repository.NoteRepository
+	idGen         id.Generator
+	instanceRepo  repository.InstanceRepository
+	emojiRepo     repository.EmojiRepository
+	bufReader     entity.BufferedReactionsReader
+	fieldRes      *entity.NoteFieldResolver
 	// userRepo は roles/notes の hardMutedWords filter (#787)。
 	userRepo repository.UserRepository
 	// mutingRepo / blockingRepo / channelMutingRepo は roles/notes で viewer が
@@ -376,7 +379,7 @@ func (h *Handler) Notes(c echo.Context) error {
 	// notes.ts の generateBaseNoteFilteringQuery + channelMuting に相当。set の
 	// ロードに失敗したら fail-closed で 500 を返す (security 項目なので
 	// silently leak しない)。
-	mbSets, err := notesfilter.LoadMuteBlockSets(viewer, h.mutingRepo, h.blockingRepo, h.channelMutingRepo, h.userRepo)
+	mbSets, err := notesfilter.LoadMuteBlockSetsCached(h.relationCache, viewer, h.mutingRepo, h.blockingRepo, h.channelMutingRepo, h.userRepo)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
@@ -415,4 +418,10 @@ func (h *Handler) Notes(c echo.Context) error {
 // usersCount は active assignment 数 (role は少数なので per-role count)。
 func (h *Handler) packRole(r *model.Role) map[string]any {
 	return entity.PackRole(r, h.roleService.CountAssignedUsers(r.ID), h.idGen, role.DefaultPolicies())
+}
+
+// SetRelationCache wires the per-user relation cache used by the mute / block
+// filter (#3607). nil keeps reading the repositories.
+func (h *Handler) SetRelationCache(rc *repository.RelationCache) {
+	h.relationCache = rc
 }

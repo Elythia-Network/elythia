@@ -394,7 +394,7 @@ func (h *Handler) Reactions(c echo.Context) error {
 	// reaction 先 note の author/reply/renote author を viewer が mute / 自分を
 	// block している場合は除外する (upstream reactions.ts:115-121 の isUserRelated、
 	// #1547)。ApplyMuteBlockChannel で生き残った note id のみ残す。
-	sets, err := notesfilter.LoadMuteBlockSets(viewer, h.mutingRepo, h.blockingRepo, h.channelMutingRepo, h.userRepo)
+	sets, err := notesfilter.LoadMuteBlockSetsCached(h.relationCache, viewer, h.mutingRepo, h.blockingRepo, h.channelMutingRepo, h.userRepo)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
@@ -534,7 +534,7 @@ func (h *Handler) FeaturedNotes(c echo.Context) error {
 	notes = notesfilter.ApplyHardMute(h.userRepo, viewer, notes)
 	// viewer が mute した user / viewer を block している user が note/reply/renote
 	// の author なら除外する (upstream featured-notes.ts:93-98 の isUserRelated、#1547)。
-	sets, err := notesfilter.LoadMuteBlockSets(viewer, h.mutingRepo, h.blockingRepo, h.channelMutingRepo, h.userRepo)
+	sets, err := notesfilter.LoadMuteBlockSetsCached(h.relationCache, viewer, h.mutingRepo, h.blockingRepo, h.channelMutingRepo, h.userRepo)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
