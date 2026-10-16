@@ -409,7 +409,9 @@ func (e *env) replayed() bool {
 }
 
 // interceptCmd makes f decide, before each command is sent, whether to fail
-// it without sending it (a non-nil error).
+// it without sending it (a non-nil error). It also sees every command of a
+// pipeline, MULTI and EXEC included; when it fails one of them, the whole
+// pipeline fails without being sent.
 func (e *env) interceptCmd(f func(cmd redis.Cmder) error) {
 	e.finalsMu.Lock()
 	defer e.finalsMu.Unlock()
@@ -449,6 +451,24 @@ func (e *env) replays(cmd redis.Cmder) bool {
 
 func (h finalHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
 	return func(ctx context.Context, cmds []redis.Cmder) error {
+		// pipeline (MULTI / EXEC を含む) にも interceptCmd を効かせる。効かせないと、
+		// 読み出しを pipeline に変えただけで「読めない」状態が起きなくなり、それを
+		// 検査するテストが黙って別の経路を通る (#3369)。どれか 1 つでも止めるなら、
+		// 全体を送らずに誤りにする。一部だけ送ると、サーバー側の接続が MULTI のまま
+		// 残りうる。止めると決まった後も残りのコマンドを f に見せる。f が止めた
+		// コマンドを数えるテストは、MULTI の後ろにあるコマンドも数えたい。
+		var ierr error
+		for _, cmd := range cmds {
+			if err := h.e.intercepts(cmd); err != nil && ierr == nil {
+				ierr = err
+			}
+		}
+		if ierr != nil {
+			for _, c := range cmds {
+				c.SetErr(ierr)
+			}
+			return ierr
+		}
 		err := next(ctx, cmds)
 		h.e.noteFinals()
 		return err
