@@ -118,7 +118,7 @@ make frontend-lint / frontend-test   # frontend/のeslint / vitest
 
 - **DBを読み書きするテストで`OpenSharedTestDB`を使わない。** 接続処理そのものを試すテスト専用
 - **`public.`のように、`search_path`をまたぐ生SQLを書かない**
-- **システムカタログは自分のschemaに絞る。** `pg_indexes`は`schemaname = current_schema()`、`information_schema`は`table_schema = current_schema()`で絞る。絞らないと、他のschemaの同名オブジェクトを取り違えるか、DDL中のエラーで落ちる
+- **システムカタログは自分のschemaに絞る。** `pg_indexes`は`schemaname = current_schema()`、`information_schema`は`table_schema = current_schema()`で絞る。絞らないと、他のschemaの同名オブジェクトを取り違えるか、DDL中のエラーで落ちる。**`indexdef`(`pg_get_indexdef`)はWHEREに書かない。** schemaで絞る前に全schemaのindexで評価され、同じエラーで落ちる。読むのはSELECTの側でよい(`make catalog-check`が検査する)
 - **複数行が返りうるクエリを`Scan(&string)`で受けない。** GORMは最後の1行を黙って返す
 - **`db.Create(x)`の戻り値は必ず検査する。** FK違反が黙って流れる
 - **列を落とすテストを書かない。** 落とした列もPostgreSQLの1600列の上限に数えられる。形を変えたいときは`testutil.OpenTestDBSchema("<suffix>")`を使う
@@ -303,6 +303,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 
 このファイル自体を変えたときだけ、1行で追記します(新しいものを上に)。経緯の本文はリンク先にあります。個別のfixの履歴は`CHANGELOG.md`にあります。
 
+- 2026-10-16: システムカタログの`indexdef`をWHEREに書かないことを、`catalog-check`が検査するようにしたので、Section 4の行に注意を足した (#3369) → [docs/testing.md](docs/testing.md)
 - 2026-10-14: `bench-compare`の結果をPRにコメントで出す`bench-compare-comment` workflowを足したので、Section 8の表に1行を足した (#3560) → [docs/bench-compare.md](docs/bench-compare.md)
 - 2026-10-14: 性能比較の`bench-compare` workflowを足したので、Section 8の表に1行を足した (#3545) → [docs/bench-compare.md](docs/bench-compare.md)
 - 2026-10-13: frontendで新しく書くファイルのSPDXヘッダーをElythia-Networkの名義にしたので、Section 5のfrontendの節を更新した (#3533) → [docs/contributing.md](docs/contributing.md#go-のソースに-spdx-ヘッダーは付けない)

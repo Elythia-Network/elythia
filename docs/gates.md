@@ -15,7 +15,7 @@
 | `limitspec-check` | ページネーションの default / max の drift を検査 |
 | `perm-check` | router middleware の権限が upstream より緩くないか検査 |
 | `wiring-check` | router で配線が必要なものが外れていないか検査 |
-| `catalog-check` | システムカタログのクエリが schema で絞られているか検査 |
+| `catalog-check` | システムカタログのクエリが schema で絞られ、indexdef を WHERE に書いていないか検査 |
 | `notfound-check` | repository の lookup error を種別を見ずに 4xx にしていないか検査 |
 | `nulparam-check` | 列に入らない値 (NUL) が SQL の bind parameter に載らないか検査 |
 | `compose-check` | 配布する compose のログの上限と、検証用 compose の置き場所・相対パス・name: を検査 |
