@@ -585,7 +585,7 @@ worker 数は既定値がキューごとに違い、`stuck 検出` は**キュ�
 
 ```
   ok    config.url   https://example.com
-  ok    database     接続 ok / migration version 131
+  ok    database     接続 ok / migration version 132
   ok    database-health dead tuple と VACUUM に問題なし (122 テーブル)
   ok    root user    meta.rootUserId 設定済み
   ok    redis        接続 ok
@@ -1185,7 +1185,7 @@ SELECT version, dirty FROM schema_migrations;
 
 ### 大きな表に index を足す migration
 
-`note` などの大きな表への index は、`CREATE INDEX CONCURRENTLY` で 1 ファイルに 1 本ずつ作る (例: `000054`、`000091`)。`000123`〜`000131` (#3590) も、`000126` を除いてこの形にしている。`000126` (`user` の `avatarId` / `bannerId`) は、TS 版から移った DB では作らないための条件を `DO` ブロックで書いており、`DO` の中では `CONCURRENTLY` が使えないので、普通の `CREATE INDEX` で作る。
+`note` などの大きな表への index は、`CREATE INDEX CONCURRENTLY` で 1 ファイルに 1 本ずつ作る (例: `000054`、`000091`)。`000123`〜`000131` (#3590) も、`000126` を除いてこの形にしている。`000132` (#3612、`note_reaction` の `IDX_note_reaction_userId_id`) も同じ形。`000126` (`user` の `avatarId` / `bannerId`) は、TS 版から移った DB では作らないための条件を `DO` ブロックで書いており、`DO` の中では `CONCURRENTLY` が使えないので、普通の `CREATE INDEX` で作る。
 
 `CONCURRENTLY` は書き込みを止めないが、次の点に注意する。
 
@@ -1209,14 +1209,15 @@ SELECT version, dirty FROM schema_migrations;
 - **途中で失敗すると、使えない (INVALID の) index が名前ごと残る。** 次に流すと `IF NOT EXISTS` が名前で何もしないので、**使えない index が残ったまま migration が成功扱いになる**。流し直す前に、INVALID の index が無いかを見る
 
   ```sql
-  -- 000123〜000131 (#3590) の index に絞る。別の migration なら、その migration が作る名前に置き換える
+  -- 000123〜000132 (#3590 / #3612) の index に絞る。別の migration なら、その migration が作る名前に置き換える
   SELECT i.relname FROM pg_index x JOIN pg_class i ON i.oid = x.indexrelid
     JOIN pg_namespace n ON n.oid = i.relnamespace
    WHERE n.nspname = current_schema() AND NOT x.indisvalid
      AND i.relname IN ('IDX_note_channelId_id_desc', 'IDX_NOTE_VISIBLE_USER_IDS', 'IDX_user_isSuspended_id',
                        'IDX_user_avatarId', 'IDX_user_bannerId', 'IDX_e637cba4dc4410218c4251260e',
                        'IDX_antenna_note_unread_noteId', 'IDX_channel_note_unread_noteId',
-                       'IDX_promo_read_noteId', 'IDX_following_followeeId_notify_normal');
+                       'IDX_promo_read_noteId', 'IDX_following_followeeId_notify_normal',
+                       'IDX_note_reaction_userId_id');
   ```
 
   名前で絞るのは、別の作業の index を消さないため。例えば `REINDEX CONCURRENTLY` の途中には `<名前>_ccnew` という INVALID の index ができ、その `REINDEX` が失敗するとそのまま残る。失敗して残ったものは作っている最中ではないので、下の `pg_stat_progress_create_index` の確認をすり抜ける。migration の index と取り違えて消すと、その作業の後始末の手がかりを失う

@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS "IDX_note_reaction_userId_id";
