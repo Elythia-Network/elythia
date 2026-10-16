@@ -54,19 +54,35 @@ func TestStepNotWritten(t *testing.T) {
 		to        string
 		failCheck bool
 		holdConn  bool
-		final     string
+		// heldExpires is whether the case is about the wait for held running
+		// out (HeldTimeout): only then is the wait short.
+		heldExpires bool
+		final       string
 		// cleaned is how often Redis was cleaned in all: a step that was not
 		// written must not be followed by the cleanup it guards.
 		cleaned int
 	}{
-		{"switched", StepSwitched, false, false, StepReverted, 1},
-		{"resuming", StepResuming, false, false, StepReverted, 2},
-		{"reverting", StepReverting, true, false, StepReverted, 2},
-		{"aborting", StepAborting, false, true, StepAborted, 0},
+		{"switched", StepSwitched, false, false, false, StepReverted, 1},
+		{"resuming", StepResuming, false, false, false, StepReverted, 2},
+		{"reverting", StepReverting, true, false, false, StepReverted, 2},
+		{"aborting", StepAborting, false, true, true, StepAborted, 0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			e := newEnv(t, func(o *Options) { o.HeldTimeout = 100 * time.Millisecond })
+			e := newEnv(t, func(o *Options) {
+				// 待ちの期限を切らすのは、held を待って中止へ進むケース (heldExpires) だけ。
+				// ほかは判定役が held にするのを待つ (段が書けないのは held の後)。全部を
+				// 100ms にしていたときは、負荷の下で判定役が間に合わず、書けないはずの段の
+				// 前で中止へ進んで落ちた (#3369)。
+				o.HeldTimeout = time.Hour
+				if c.heldExpires {
+					o.HeldTimeout = 100 * time.Millisecond
+				}
+				// 戻した後の再開の待ちも、判定役がメンテナンスを外すまで待たせる。期限で
+				// 待ちを抜けると操作が終わって判定役も止まり、このテストには外す者が残らない
+				// (本番では各プロセスの判定役が外す)。
+				o.ResumeTimeout = time.Hour
+			})
 			e.process("p1")
 			if c.failCheck {
 				e.db.fail["check"] = errors.New("doctor failed")
@@ -159,7 +175,9 @@ func TestStepNotWritten_Notifies(t *testing.T) {
 // TestStepNotWritten_RecordGone checks that an operation whose record is gone
 // stops, notifies and gives the slot back instead of reading forever.
 func TestStepNotWritten_RecordGone(t *testing.T) {
-	e := newEnv(t)
+	// 書けなくするのは held の後の段。held の待ちが期限で切れると中止へ進み、記録を
+	// 消す前に終わる (#3369)。
+	e := newEnv(t, func(o *Options) { o.HeldTimeout = time.Hour })
 	e.process("p1")
 	rec, _ := e.prepare()
 	var once sync.Once
@@ -184,7 +202,9 @@ func TestStepNotWritten_RecordGone(t *testing.T) {
 // TestStepNotWritten_AtStart checks that the recovery at start also goes on
 // from the written step when it cannot write one (settle after recoverRecord).
 func TestStepNotWritten_AtStart(t *testing.T) {
-	e := newEnv(t)
+	// 戻した後の再開の待ちが期限で抜けると、回復が終わって判定役も止まり、メンテナンスを
+	// 外す者が残らない (#3369)。
+	e := newEnv(t, func(o *Options) { o.ResumeTimeout = time.Hour })
 	e.stop()
 	e.process("p1")
 	ctx := context.Background()
