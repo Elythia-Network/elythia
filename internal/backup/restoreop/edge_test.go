@@ -153,7 +153,7 @@ func TestRestore_SomeoneEndsTheMaintenanceBeforeHeld(t *testing.T) {
 	e.db.mu.Unlock()
 	rec, _ := e.prepare()
 	require.NoError(t, e.m.Confirm(context.Background(), rec.OpID))
-	require.Eventually(t, func() bool { st := e.maintenance(); return st != nil && st.OpID == rec.OpID }, 2*time.Second, 5*time.Millisecond)
+	e.waitMaintenance(func(st *maintmode.State) bool { return st != nil && st.OpID == rec.OpID }, 2*time.Second)
 	require.NoError(t, e.maint.Clear(context.Background(), rec.OpID))
 	got := e.waitStep(rec.OpID, StepAborted)
 	assert.Contains(t, got.Error, "ended by someone else")
@@ -168,7 +168,7 @@ func TestRestore_StoppedWhileWaitingThenRecovered(t *testing.T) {
 	e.db.mu.Unlock()
 	rec, _ := e.prepare()
 	require.NoError(t, e.m.Confirm(context.Background(), rec.OpID))
-	require.Eventually(t, func() bool { st := e.maintenance(); return st != nil && st.OpID == rec.OpID }, 2*time.Second, 5*time.Millisecond)
+	e.waitMaintenance(func(st *maintmode.State) bool { return st != nil && st.OpID == rec.OpID }, 2*time.Second)
 	// サービスが止められた。記録は entering のまま、メンテナンスも残る。
 	e.stop()
 	got, err := e.store.Get(context.Background(), rec.OpID)
@@ -183,7 +183,7 @@ func TestRestore_StoppedWhileWaitingThenRecovered(t *testing.T) {
 	e.waitStep(rec.OpID, StepAborted)
 	assert.Equal(t, "current", e.db.content(testDB))
 	assert.NotContains(t, e.db.names(), rec.Target)
-	require.Eventually(t, func() bool { return e.maintenance() == nil }, 2*time.Second, 5*time.Millisecond)
+	e.waitMaintenanceGone(2 * time.Second)
 }
 
 func TestRestore_StoppedWhileReady(t *testing.T) {
