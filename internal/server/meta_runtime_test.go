@@ -403,9 +403,37 @@ func TestMetaRuntime_AppliesInThisProcessWithoutPubSub(t *testing.T) {
 	h.createUser("metart-user-9", "metart_user9", token, false)
 	noteID := h.createNote(h.rootID, "react here")
 
-	h.updateMetaHere(map[string]any{"enableReactionsBuffering": true})
+	require.Equal(t, "before", h.nodeinfoName())
+
+	h.updateMetaHere(map[string]any{"enableReactionsBuffering": true, "name": "changed here"})
 	h.react(token, noteID)
 	require.True(t, h.mr.Exists("reaction-buffer:"+noteID))
+	require.Equal(t, "changed here", h.nodeinfoName())
+}
+
+// nodeinfoName reads metadata.nodeName from /nodeinfo/2.1.
+func (h *metaRuntimeHarness) nodeinfoName() string {
+	h.t.Helper()
+	rec := h.get("/nodeinfo/2.1")
+	require.Equal(h.t, http.StatusOK, rec.Code, rec.Body.String())
+	var doc struct {
+		Metadata struct {
+			NodeName string `json:"nodeName"`
+		} `json:"metadata"`
+	}
+	require.NoError(h.t, json.Unmarshal(rec.Body.Bytes(), &doc))
+	return doc.Metadata.NodeName
+}
+
+func TestMetaRuntime_NodeinfoFollowsMetaUpdated(t *testing.T) {
+	h := newMetaRuntimeHarness(t)
+	require.Equal(t, "before", h.nodeinfoName())
+
+	h.updateMetaHere(map[string]any{"name": "changed here"})
+	require.Equal(t, "changed here", h.nodeinfoName())
+
+	h.updateMetaElsewhere(map[string]any{"name": "changed elsewhere"})
+	require.Equal(t, "changed elsewhere", h.nodeinfoName())
 }
 
 // web だけのプロセスも ticker を回し (設定の読み直しのため)、flush は積まない。
@@ -449,4 +477,44 @@ func TestMetaRuntime_ReactionTickReloadsInServerOnlyRole(t *testing.T) {
 	w.SetBuffering(true)
 	require.NoError(t, tick())
 	require.False(t, w.Buffering(), "a web-only process must re-read enableReactionsBuffering on each tick")
+}
+
+// metaUpdatedHandled は購読の処理が全部終わった後に呼ぶ。前で呼ぶと、
+// updateMetaElsewhere の待ちが処理の終わりを待たなくなり、テストが処理の
+// 速さに頼って通る。呼ばれた時点で効いていることを、その場で確かめる。
+func TestMetaRuntime_HandledHookRunsAfterProcessing(t *testing.T) {
+	h := newMetaRuntimeHarness(t)
+	require.Equal(t, "before", h.nodeinfoName())
+	require.NoError(t, h.db.Model(&model.Meta{}).Where("1 = 1").Update("name", "after hook").Error)
+
+	const marker = `"metart-hook-order"`
+	seen := make(chan string, 1)
+	hook := func(payload []byte) {
+		if string(payload) != marker {
+			return
+		}
+		// 別の goroutine なので require は使わない。
+		req := httptest.NewRequest(http.MethodGet, "/nodeinfo/2.1", nil)
+		rec := httptest.NewRecorder()
+		h.srv.Handler().ServeHTTP(rec, req)
+		var doc struct {
+			Metadata struct {
+				NodeName string `json:"nodeName"`
+			} `json:"metadata"`
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &doc)
+		select {
+		case seen <- doc.Metadata.NodeName:
+		default:
+		}
+	}
+	h.srv.metaUpdatedHandled.Store(&hook)
+	defer h.srv.metaUpdatedHandled.Store(nil)
+	require.NoError(t, h.rdb.Publish(context.Background(), "internal:metaUpdated", marker).Err())
+	select {
+	case name := <-seen:
+		require.Equal(t, "after hook", name, "the hook must run after the handler has dropped the caches")
+	case <-time.After(10 * time.Second):
+		t.Fatal("this process did not handle internal:metaUpdated")
+	}
 }
