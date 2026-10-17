@@ -727,6 +727,7 @@ listen に失敗してもログを出して動き続け、配送ノードなら�
 重い migration や DB の作業の間、**全プロセスに DB への接続を手放させる**モード (#3463)。
 プロセスは止めず、listener だけを残してメンテナンスの応答を返す。抜けると、各プロセスが
 DB に繋ぎ直し、サーバーの中身 (キャッシュ・購読・ジョブの worker など) を作り直す。
+**設定ファイルは読み直さない** (起動時に読んだものを使い回す。[configuration.md](configuration.md#設定ファイル))。
 
 状態は Redis (`redis` の接続先) のキー `elythia:maintenance` に置く (`redis.prefix` を設定していれば、その後ろに `:` を挟んで付く)。
 **Redis の `maxmemory-policy` は `noeviction` か `volatile-*` にする。** `allkeys-*` だとメモリが

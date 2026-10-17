@@ -8,6 +8,10 @@
 ./built/elythia serve -config .config/default.yml
 ```
 
+**設定ファイル(と、それを上書きする`MK_*`の環境変数)は、プロセスの起動時に読んだ値を使い続ける。** [メンテナンスモード](deployment.md#メンテナンスモード)を抜けるときの作り直し(DBへの接続とサーバーの中身を作り直す)でも読み直さない。`Supervisor`(`internal/server/lifecycle.go`)が、起動時に読んだ同じ`*config.Config`で作り直すため。設定ファイルを変えたら、プロセスを再起動する。
+
+管理画面の設定(DBの`meta`)は、これとは別の経路で読む。変えると`internal:metaUpdated`が全プロセスに届き、各プロセスが`meta`のキャッシュを捨てる。DeepLのキー(`deeplAuthKey` / `deeplIsPro`)、`enableReactionsBuffering`、`/nodeinfo`の応答も、再起動せずにこれで変わる(#3663)。ただし`/nodeinfo`で捨てるのはサーバーが持つ分だけで、応答には`Cache-Control: public, max-age=600`を付けているので、前段のプロキシやCDN、取得した側は最大10分古いものを持ちうる。通知を取りこぼしたプロセスでは、DeepLのキーは`meta`のキャッシュの期限(5分)で、`/nodeinfo`は応答のキャッシュの期限(10分)で揃う。`enableReactionsBuffering`は、全部のプロセスがflushの周期(30秒)ごとに`meta`から読み直すので、`meta`のキャッシュの期限(5分)で揃う。
+
 ### 初回セットアップ
 
 `.config/` 配下には Misskey 本家流儀で `.example` テンプレートを配布している。初回は以下のいずれかを手元の `.config/default.yml` (および `docker.yml`) として複製してから編集する:
