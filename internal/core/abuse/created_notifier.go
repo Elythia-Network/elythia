@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/elythia-network/elythia/internal/bgwork"
 	corewebhook "github.com/elythia-network/elythia/internal/core/webhook"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
@@ -74,6 +75,10 @@ type CreatedNotifier struct {
 	mailRecipients RecipientLister
 	profiles       ProfileFinder
 	meta           MetaFetcher
+
+	// background はメールの送信を起動する箱 (#3661)。世代の停止で待つ。nil なら
+	// 素の goroutine で起動する (テスト)。
+	background *bgwork.Group
 }
 
 // NewCreatedNotifier constructs a CreatedNotifier. Any nil dependency
@@ -94,6 +99,13 @@ func (n *CreatedNotifier) SetWebhook(d SystemWebhookDispatcher, recipients Recip
 	n.lookups = lookups
 	n.idGen = idGen
 }
+
+// SetBackground sets the group the mail is sent in, so stopping the server
+// generation waits for it (#3661).
+func (n *CreatedNotifier) SetBackground(g *bgwork.Group) { n.background = g }
+
+// HasBackground reports whether SetBackground received a group.
+func (n *CreatedNotifier) HasBackground() bool { return n.background != nil }
 
 // SetMail wires the email channel (#3265): 本家 notifyMail と同じく、有効な
 // メール方式の通知先と meta.email へ送る。
@@ -119,7 +131,7 @@ func (n *CreatedNotifier) NotifyCreated(ctx context.Context, report *model.Abuse
 	n.dispatchWebhook(report, reporter, target)
 	if n.mail != nil {
 		// SMTP は数秒かかりうるので、通報の API や inbox の処理を待たせない。
-		go n.sendMail(report)
+		n.background.Go(func(context.Context) { n.sendMail(report) })
 	}
 }
 
