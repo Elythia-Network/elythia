@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/bgwork"
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/core/cache"
 	"github.com/elythia-network/elythia/internal/core/chart"
@@ -156,7 +157,11 @@ type Server struct {
 	reactionFlushWorker func(context.Context, func() error)
 	// reactionCountWriter は世代のリアクションの書き込み先 (#3663)。テストが
 	// 取りこぼしたプロセスの状態を作るために読む。
-	reactionCountWriter   *corereaction.SwitchableWriter
+	reactionCountWriter *corereaction.SwitchableWriter
+	// background は、この世代で応答の後などに投げっぱなしで起動する goroutine
+	// (投稿後の hook、サインインの記録、メールなど) を数える箱 (#3661)。
+	// 世代の停止 (shutdown) で上限付きで待ち、待ちの終わり近くで ctx を切る。
+	background            *bgwork.Group
 	pluginGoStarter       func(func())
 	pluginGoGate          *pluginGoGate
 	beforePluginGoRelease func()
@@ -882,6 +887,7 @@ func newServer(cfg *config.Config, db *gorm.DB, redis *cache.RedisClients, plugi
 		// 背景処理を出し分ける。
 		role:                role,
 		reactionFlushWorker: runReactionFlushWorker,
+		background:          bgwork.New(),
 	}
 	for _, fn := range beforeSetup {
 		fn(s)
@@ -929,6 +935,11 @@ func (s *Server) cleanupConstruction() {
 		for _, hook := range s.shutdownHooks {
 			hook(context.Background())
 		}
+		// 構築の途中で起動したものがあれば止める (#3661)。構築に失敗した世代は
+		// 使われないので、待ちは短くてよい。
+		bgCtx, bgCancel := context.WithTimeout(context.Background(), time.Second)
+		s.background.Stop(bgCtx)
+		bgCancel()
 		s.shutdownHooks = nil
 		if s.queueDriver != nil {
 			if err := s.queueDriver.Close(); err != nil {
@@ -1186,6 +1197,25 @@ func lateSaveContext(ctx context.Context) (context.Context, context.CancelFunc) 
 	return context.WithDeadline(context.WithoutCancel(ctx), deadline)
 }
 
+// lateBackgroundWaitMin is the least wait of the late path for the
+// goroutines of the generation, even when the shutdown ctx has expired.
+const lateBackgroundWaitMin = time.Second
+
+// lateBackgroundWait is how long the late path of the shutdown (after a queue
+// worker that did not stop in time) waits for the goroutines of the
+// generation: a quarter of what is left of ctx like bgwork.Group.Stop, but at
+// least lateBackgroundWaitMin and at most bgwork.MaxWait.
+//
+// 下限を置くのは、ここでは停止の期限が切れていることが多いから。止まらなかった
+// worker が起動した hook は、ここで待たないと閉じた DB に当たる。
+func lateBackgroundWait(ctx context.Context) time.Duration {
+	limit := bgwork.MaxWait
+	if deadline, ok := ctx.Deadline(); ok {
+		limit = min(limit, time.Until(deadline)/4)
+	}
+	return max(limit, lateBackgroundWaitMin)
+}
+
 // shutdownStepContext derives the deadline of one waiting step of the
 // shutdown: at most limit and at most a third of what is left of ctx.
 func shutdownStepContext(ctx context.Context, limit time.Duration) (context.Context, context.CancelFunc) {
@@ -1260,10 +1290,17 @@ func (s *Server) shutdown(ctx context.Context) error {
 	// されずに消える。hook どうしは登録順のまま走らせる。後に登録した hook の
 	// 処理が、先に登録した hook の閉じるものを使う組は無い (#3662 で全件を確認)。
 	queueDone, queueStopped := s.stopQueue(ctx)
-	// #3661 の箱 (投げっぱなしの goroutine を待つ) は、queue が止まった後・hook の前で
-	// 待つ。queueStopped=false のときは、止まらなかった worker がまだ箱へ足しうる
-	// ので、箱を閉じるのは下の <-queueDone の後にする (先に閉じると、その worker の
-	// 分が実行されずに捨てられる)。
+	// 投げっぱなしの goroutine (投稿後の hook、サインインの記録、メールなど) を
+	// 回収する (#3661)。hook と chart より前に置くのは、箱の goroutine が書く
+	// バッファと chart の分を、flush と保存に含めるため。queue の後に置くのは、
+	// 受信の処理 (inbox) が止まるまで hook を起動し続けるため。待ちには上限があり、
+	// 止まらない goroutine は残して進む (DB を閉じた後に失敗する)。
+	// queue が上限内に止まらなかったときは、止まらなかった worker がまだ箱へ
+	// 足しうるので、閉じるのは下の <-queueDone の後にする (先に閉じると、その
+	// worker のジョブが起動する fanout・アンテナ・通知が捨てられる)。
+	if queueStopped {
+		s.background.Stop(ctx)
+	}
 	// 登録順に shutdown hook を走らせる。publisher goroutine の clean 停止と、
 	// graceful drain が必要な service (hashtag #727 等) の Shutdown(ctx) を
 	// 兼ねる。hook が ctx を取るので timeout 共有が可能 (#764)。
@@ -1278,12 +1315,16 @@ func (s *Server) shutdown(ctx context.Context) error {
 	// 保存する。
 	if !queueStopped {
 		<-queueDone
-		// (#3661 の箱は、queueStopped=false のときはここで待つ。chart の保存の前。)
+		// 箱を先に回収してから保存する。ここでは停止の期限が切れていることが多い
+		// ので、箱の待ちは ctx の取り消しに縛られない上限 (lateBackgroundWait) で
+		// 取る。保存の期限 (lateSaveContext) は待った後に取るので、保存の時間は
+		// 箱の待ちに削られない (#3661 のレビュー2周目 L-3)。
+		s.background.StopWithin(lateBackgroundWait(ctx))
+		saveCtx, cancel := lateSaveContext(ctx)
 		if s.chartMgmt != nil {
-			saveCtx, cancel := lateSaveContext(ctx)
 			_ = s.chartMgmt.SaveAll(saveCtx)
-			cancel()
 		}
+		cancel()
 	}
 	// queueClient.Close を直接呼ばないこと。queueDriver.Close が
 	// Client / Inspector を含むサブコンポーネントの Close を一括処理する。

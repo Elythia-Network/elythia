@@ -434,9 +434,11 @@ func newShutdownBudget(ctx context.Context, now time.Time) shutdownBudget {
 		return shutdownBudget{start: now, drainUntil: now, deadline: now.Add(shutdownStopMin)}
 	}
 	// 待ちの段は全体の 1/3 まで。残りの 2/3 から streaming を閉じる待ち
-	// (streamCloseContext、その 1/3 まで) と queue の停止の待ち (stopQueue、さらに
-	// その残りの 1/3 まで) を引いても、shutdown hook には全体の 8/27 以上 (7 秒で
-	// 約 2.07 秒) が残る。
+	// (streamCloseContext、その 1/3 まで)、queue の停止の待ち (stopQueue、さらに
+	// その残りの 1/3 まで)、投げっぱなしの goroutine の待ち (bgwork.Group.Stop、
+	// さらにその残りの 1/4 まで) を引いても、shutdown hook には全体の 2/9 以上
+	// (7 秒で約 1.56 秒) が残る。goroutine の待ちに下限は置かない (期限が切れて
+	// いれば待たない) ので、残りが短いときも hook の時間を食わない。
 	return shutdownBudget{start: now, drainUntil: now.Add(total / 3), deadline: deadline}
 }
 
@@ -449,7 +451,7 @@ func newShutdownBudget(ctx context.Context, now time.Time) shutdownBudget {
 //  2. 処理中の HTTP リクエストを待つ (WebSocket は数えない)。世代の切り替えが
 //     走っていればその終わりも待つ。どちらも全体の 1/3 まで
 //  3. 世代の背景処理を止める (StopBackground: streaming を 1012 で閉じ、queue の
-//     停止・shutdown hook・chart の保存)。処理中のリクエストの待ちが上限に達しても
+//     停止・投げっぱなしの goroutine の回収・shutdown hook・chart の保存)。処理中のリクエストの待ちが上限に達しても
 //     呼ぶ。渡す ctx の期限は全体の期限 (切れていればそこから shutdownStopMin)
 //  4. 最後に DB を閉じ、メンテナンスの報告を消す。処理中のリクエストが残って
 //     いたら、その数をログに出す
