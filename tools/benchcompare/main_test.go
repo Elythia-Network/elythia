@@ -21,7 +21,16 @@ type fakeEndpoint struct {
 	p50                   float64
 	requests, failed      int64
 	rateLimited, timeouts int64
+	// window replaces the default window [0, 10000] of the endpoint's
+	// scenario when set.
+	window *[2]float64
 }
+
+// resHeader is the header of resources.csv.
+const resHeader = "t_ms,container,cpu_usage_usec,memory_peak,heap_inuse,nr_periods,nr_throttled,throttled_usec"
+
+// k6Rows are k6 samples over [0, 10000] in which k6 was never throttled.
+const k6Rows = "0,k6,0,1,,0,0,0\n10000,k6,1,1,,100,0,0\n"
 
 // fakeRun is one fake run directory.
 type fakeRun struct {
@@ -33,6 +42,11 @@ type fakeRun struct {
 	endpoints map[string]fakeEndpoint
 	// cpu is the CPU time of the app in seconds over a 10 second run.
 	cpu float64
+	// k6Throttled is how many of k6's 100 CPU periods over the run were
+	// throttled.
+	k6Throttled int64
+	// k6CPU replaces k6's CPU time over the run (1 second) when set.
+	k6CPU float64
 	// noHeap leaves heap_inuse empty.
 	noHeap bool
 	// resources replaces resources.csv when set.
@@ -110,6 +124,12 @@ func writeResultsRounds(t *testing.T, rounds int, runs ...fakeRun) string {
 			metrics["http_req_failed"+tag] = metric(map[string]float64{"passes": float64(e.failed), "fails": float64(e.requests - e.failed), "value": 0})
 			metrics["bench_rate_limited"+tag] = metric(map[string]float64{"count": float64(e.rateLimited), "rate": 0})
 			metrics["bench_timeouts"+tag] = metric(map[string]float64{"count": float64(e.timeouts), "rate": 0})
+			window := [2]float64{0, 10000}
+			if e.window != nil {
+				window = *e.window
+			}
+			metrics["bench_window_start_ms"+tag] = metric(map[string]float64{"value": window[0], "min": window[0], "max": window[0]})
+			metrics["bench_window_end_ms"+tag] = metric(map[string]float64{"value": window[1], "min": window[1], "max": window[1]})
 		}
 		summary, err := json.Marshal(map[string]any{"metrics": metrics})
 		require.NoError(t, err)
@@ -120,14 +140,21 @@ func writeResultsRounds(t *testing.T, rounds int, runs ...fakeRun) string {
 			if r.noHeap {
 				heap = ""
 			}
+			k6CPU := r.k6CPU
+			if k6CPU == 0 {
+				k6CPU = 1
+			}
 			res = strings.Join([]string{
-				"t_ms,container,cpu_usage_usec,memory_peak,heap_inuse",
-				"0,app,0,104857600," + heap,
-				"0,postgres,0,52428800,",
-				fmt.Sprintf("5000,app,%d,209715200,%s", int64(r.cpu*1e6/2), heap),
-				"5000,postgres,1000000,62914560,",
-				fmt.Sprintf("10000,app,%d,157286400,%s", int64(r.cpu*1e6), heap),
-				"10000,postgres,2000000,57671680,",
+				resHeader,
+				"0,app,0,104857600," + heap + ",0,0,0",
+				"0,postgres,0,52428800,,0,0,0",
+				"0,k6,0,10485760,,0,0,0",
+				fmt.Sprintf("5000,app,%d,209715200,%s,50,0,0", int64(r.cpu*1e6/2), heap),
+				"5000,postgres,1000000,62914560,,50,0,0",
+				fmt.Sprintf("5000,k6,%d,10485760,,50,%d,0", int64(k6CPU*1e6/2), r.k6Throttled/2),
+				fmt.Sprintf("10000,app,%d,157286400,%s,100,0,0", int64(r.cpu*1e6), heap),
+				"10000,postgres,2000000,57671680,,100,0,0",
+				fmt.Sprintf("10000,k6,%d,10485760,,100,%d,0", int64(k6CPU*1e6), r.k6Throttled),
 			}, "\n") + "\n"
 		}
 		writeFile(t, filepath.Join(rd, "resources.csv"), res)
@@ -183,8 +210,9 @@ func withEndpoint(r fakeRun, name string, f func(*fakeEndpoint)) fakeRun {
 }
 
 // TestLoad_RealK6Output reads a --summary-export written by k6 0.55 (the
-// script is testdata/k6-0.55-summary.js): metrics carry a "thresholds"
-// object, latency comes from the expected_response:true sub-metric, and
+// script is testdata/k6-0.55-summary.js, served by busybox httpd): metrics
+// carry a "thresholds" object, latency comes from the expected_response:true
+// sub-metric, the window gauges carry Unix milliseconds, and
 // dropped_iterations is absent when zero.
 func TestLoad_RealK6Output(t *testing.T) {
 	b, err := os.ReadFile("testdata/k6-0.55-summary.json")
@@ -199,8 +227,11 @@ func TestLoad_RealK6Output(t *testing.T) {
 	ping := got["ping"]
 	assert.Equal(t, int64(20), ping.Requests)
 	assert.Zero(t, ping.Failed)
-	assert.InDelta(t, 2.9925785, ping.Latency["med"], 1e-9)
-	assert.InDelta(t, 5.06898303, ping.Latency["p(99)"], 1e-9)
+	assert.InDelta(t, 0.28523200000000004, ping.Latency["med"], 1e-9)
+	assert.InDelta(t, 0.42068221999999994, ping.Latency["p(99)"], 1e-9)
+	// 区間の gauge は Unix ミリ秒のまま読める (float64 で桁が落ちない)
+	assert.Equal(t, int64(1792225545636), ping.WindowStartMs)
+	assert.Equal(t, int64(1792225575636), ping.WindowEndMs)
 
 	limited := got["limited"]
 	assert.Equal(t, int64(20), limited.Requests)
@@ -702,9 +733,14 @@ func TestCompare_InvalidRunSets(t *testing.T) {
 	dropped := okRun(SideHead, 2, 10)
 	dropped.dropped = 1
 	restarted := okRun(SideBase, 2, 10)
-	restarted.resources = "t_ms,container,cpu_usage_usec,memory_peak,heap_inuse\n0,app,500,1,\n1000,app,10,1,\n"
+	restarted.resources = resHeader + "\n0,app,500,1,,,,\n1000,app,10,1,,,,\n"
+	k6Back := okRun(SideHead, 2, 10)
+	k6Back.resources = resHeader + "\n0,k6,0,1,,100,5,0\n1000,k6,10,1,,10,0,0\n"
+	// 区切りの数は進んでも、止められた数だけが戻ったのも作り直し
+	k6ThrottledBack := okRun(SideBase, 2, 10)
+	k6ThrottledBack.resources = resHeader + "\n0,k6,0,1,,100,5,0\n1000,k6,10,1,,110,4,0\n"
 	clockBack := okRun(SideHead, 1, 10)
-	clockBack.resources = "t_ms,container,cpu_usage_usec,memory_peak,heap_inuse\n1000,app,0,1,\n500,app,10,1,\n"
+	clockBack.resources = resHeader + "\n1000,app,0,1,,,,\n500,app,10,1,,,,\n"
 	cases := map[string]struct {
 		rounds int
 		runs   []fakeRun
@@ -725,6 +761,14 @@ func TestCompare_InvalidRunSets(t *testing.T) {
 		"container restarted": {
 			runs: []fakeRun{ok(SideBase, 1), ok(SideHead, 1), restarted, ok(SideHead, 2)},
 			want: "base round 2 did not complete: measurement did not hold",
+		},
+		"k6 throttling counters went backwards": {
+			runs: []fakeRun{ok(SideBase, 1), ok(SideHead, 1), ok(SideBase, 2), k6Back},
+			want: "head round 2 did not complete: measurement did not hold: line 3: k6: throttling counters went backwards",
+		},
+		"k6 throttled count went backwards": {
+			runs: []fakeRun{ok(SideBase, 1), ok(SideHead, 1), k6ThrottledBack, ok(SideHead, 2)},
+			want: "base round 2 did not complete: measurement did not hold: line 3: k6: throttling counters went backwards",
 		},
 		"clock went backwards": {
 			runs: []fakeRun{ok(SideBase, 1), clockBack, ok(SideBase, 2), ok(SideHead, 2)},
@@ -809,8 +853,8 @@ func TestCompare_Resources(t *testing.T) {
 		return run
 	})...))
 	require.True(t, c.Valid)
-	require.Len(t, c.Resources, 2)
-	app, pg := c.Resources[0], c.Resources[1]
+	require.Len(t, c.Resources, 3)
+	app, k6, pg := c.Resources[0], c.Resources[1], c.Resources[2]
 	assert.Equal(t, "app", app.Container)
 	cpu := measure(t, app.Measures, "cpu_seconds")
 	assert.Equal(t, VerdictDifferent, cpu.Verdict)
@@ -820,6 +864,25 @@ func TestCompare_Resources(t *testing.T) {
 	// memory.peak の最大は最後のサンプル (150MiB) ではなく途中の 200MiB
 	assert.InDelta(t, 200, measure(t, app.Measures, "memory_peak_mib").Base.Median, 1e-9)
 	assert.InDelta(t, 100, measure(t, app.Measures, "heap_inuse_max_mib").Base.Median, 1e-9)
+
+	// 負荷をかける側 (k6) の CPU も並べるが、サーバーの良し悪しではないので参考にする (#3656)
+	assert.Equal(t, "k6", k6.Container)
+	assert.InDelta(t, 1, measure(t, k6.Measures, "cpu_seconds").Base.Median, 1e-9)
+	for _, m := range k6.Measures {
+		assert.Equal(t, VerdictReference, m.Verdict, m.Name)
+	}
+	c = compareDir(t, writeResults(t, pair(2, func(s Side, r int) fakeRun {
+		run := okRun(s, r, 10)
+		if s == SideHead {
+			run.k6CPU = 3
+		}
+		return run
+	})...))
+	k6cpu := measure(t, c.Resources[1].Measures, "cpu_seconds")
+	assert.Equal(t, VerdictReference, k6cpu.Verdict, "a real difference of k6's CPU is not judged")
+	assert.Nil(t, k6cpu.Better)
+	require.NotNil(t, k6cpu.DeltaPercent)
+	assert.InDelta(t, 200, *k6cpu.DeltaPercent, 1e-9, "the difference is still shown")
 
 	assert.Equal(t, "postgres", pg.Container)
 	for _, m := range pg.Measures {
@@ -839,16 +902,16 @@ func TestCompare_Resources(t *testing.T) {
 // TestParseResources_Heap checks the heap of a container whose samples mix
 // measured and empty heap values, and the largest heap rather than the last.
 func TestParseResources_Heap(t *testing.T) {
-	got, err := parseResources(strings.NewReader("t_ms,container,cpu_usage_usec,memory_peak,heap_inuse\n0,app,0,1,300\n1000,app,10,1,\n2000,app,20,1,200\n"))
+	got, _, err := parseResources(strings.NewReader(resHeader + "\n0,app,0,1,300,,,\n1000,app,10,1,,,,\n2000,app,20,1,200,,,\n"))
 	require.NoError(t, err)
 	assert.True(t, got["app"].HasHeap)
 	assert.Equal(t, int64(300), got["app"].HeapInuseMaxBytes)
 
-	got, err = parseResources(strings.NewReader("t_ms,container,cpu_usage_usec,memory_peak,heap_inuse\n0,app,0,1,\n1000,app,10,1,200\n"))
+	got, _, err = parseResources(strings.NewReader(resHeader + "\n0,app,0,1,,,,\n1000,app,10,1,200,,,\n"))
 	require.NoError(t, err)
 	assert.True(t, got["app"].HasHeap, "a heap in a later sample counts")
 
-	got, err = parseResources(strings.NewReader("t_ms,container,cpu_usage_usec,memory_peak,heap_inuse\n0,app,0,1,200\n1000,app,10,1,\n"))
+	got, _, err = parseResources(strings.NewReader(resHeader + "\n0,app,0,1,200,,,\n1000,app,10,1,,,,\n"))
 	require.NoError(t, err)
 	assert.True(t, got["app"].HasHeap, "a heap in an earlier sample counts")
 }
@@ -861,13 +924,13 @@ func TestCompare_ContainerMissingInARoundIsIncomparable(t *testing.T) {
 			c := compareDir(t, writeResults(t, pair(2, func(s Side, r int) fakeRun {
 				run := okRun(s, r, 10)
 				if s == side && r == 2 {
-					run.resources = "t_ms,container,cpu_usage_usec,memory_peak,heap_inuse\n0,app,0,1,1\n10000,app,1,1,1\n"
+					run.resources = resHeader + "\n0,app,0,1,1,,,\n10000,app,1,1,1,,,\n" + k6Rows
 				}
 				return run
 			})...))
 			require.True(t, c.Valid)
-			require.Equal(t, "postgres", c.Resources[1].Container)
-			for _, m := range c.Resources[1].Measures {
+			require.Equal(t, "postgres", c.Resources[2].Container)
+			for _, m := range c.Resources[2].Measures {
 				assert.Equal(t, VerdictIncomparable, m.Verdict, m.Name)
 			}
 		})
@@ -900,6 +963,7 @@ func TestRun_WritesReports(t *testing.T) {
 		"| ping | p95 (ms) | 10.0 [10.0, 10.0] | 5.0 [5.0, 5.0] | -50.0% | 差あり (改善) |",
 		"| ping | リクエスト数 | 1000 [1000, 1000] | 1000 [1000, 1000] | +0.0% | 差なし |",
 		"| ping | 失敗率 / 429の率 | 0.0% / 0.0% | 0.0% / 0.0% | |  |",
+		"| ping | k6が止められた区切り (%、最大) | 0.0% | 0.0% | |  |",
 		"| app | CPU (%) | 50.0 [50.0, 50.0] | 50.0 [50.0, 50.0] | +0.0% | 差なし |",
 	} {
 		assert.Contains(t, string(md), want)
@@ -959,11 +1023,17 @@ func TestLoad_Errors(t *testing.T) {
 		"bad dropped":           {"k6-summary.json", strings.Replace(onlyPingSummary, `"dropped_iterations":{"count":0}`, `"dropped_iterations":{"count":"x"}`, 1), "dropped_iterations"},
 		"bad header":            {"resources.csv", "t,container\n", "header is"},
 		"empty csv":             {"resources.csv", "", "header"},
-		"bad number":            {"resources.csv", "t_ms,container,cpu_usage_usec,memory_peak,heap_inuse\nx,app,0,0,\n", "line 2: t_ms"},
-		"short row":             {"resources.csv", "t_ms,container,cpu_usage_usec,memory_peak,heap_inuse\n0,app\n", "wrong number of fields"},
-		"one sample":            {"resources.csv", "t_ms,container,cpu_usage_usec,memory_peak,heap_inuse\n0,app,5,0,\n", "fewer than 2 samples"},
-		"same time":             {"resources.csv", "t_ms,container,cpu_usage_usec,memory_peak,heap_inuse\n0,app,5,0,\n0,app,6,0,\n", "fewer than 2 samples"},
-		"no samples":            {"resources.csv", "t_ms,container,cpu_usage_usec,memory_peak,heap_inuse\n", "no samples"},
+		"bad number":            {"resources.csv", resHeader + "\nx,app,0,0,,,,\n", "line 2: t_ms"},
+		"short row":             {"resources.csv", resHeader + "\n0,app\n", "wrong number of fields"},
+		"one sample":            {"resources.csv", resHeader + "\n0,app,5,0,,,,\n", "fewer than 2 samples"},
+		"same time":             {"resources.csv", resHeader + "\n0,app,5,0,,,,\n0,app,6,0,,,,\n", "fewer than 2 samples"},
+		"no samples":            {"resources.csv", resHeader + "\n", "no samples"},
+		"no k6":                 {"resources.csv", resHeader + "\n0,app,0,1,,0,0,0\n1000,app,1,1,,10,0,0\n", "throttling samples of the k6 container"},
+		"k6 without counters":   {"resources.csv", resHeader + "\n0,k6,0,1,,,,\n1000,k6,1,1,,,,\n", "throttling samples of the k6 container"},
+		"one k6 sample":         {"resources.csv", resHeader + "\n0,k6,0,1,,0,0,0\n1000,k6,1,1,,,,\n", "throttling samples of the k6 container"},
+		"partial counters":      {"resources.csv", resHeader + "\n0,k6,0,1,,1,,\n", "line 2: nr_throttled"},
+		"no periods":            {"resources.csv", resHeader + "\n0,k6,0,1,,,1,1\n", "line 2: nr_periods"},
+		"bad counter":           {"resources.csv", resHeader + "\n0,k6,0,1,,1,1,x\n", "line 2: throttled_usec"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -1029,7 +1099,9 @@ const onlyPingSummary = `{"metrics":{
 "http_reqs{endpoint:ping}":{"count":10,"rate":1,"thresholds":{"count>=0":false}},
 "http_req_failed{endpoint:ping}":{"passes":1,"fails":9,"value":0.1,"thresholds":{"rate>=0":false}},
 "bench_rate_limited{endpoint:ping}":{"count":0,"rate":0,"thresholds":{"count>=0":false}},
-"bench_timeouts{endpoint:ping}":{"count":0,"rate":0,"thresholds":{"count>=0":false}}}}`
+"bench_timeouts{endpoint:ping}":{"count":0,"rate":0,"thresholds":{"count>=0":false}},
+"bench_window_start_ms{endpoint:ping}":{"value":1000,"min":1000,"max":1000,"thresholds":{"value>=0":false}},
+"bench_window_end_ms{endpoint:ping}":{"value":31000,"min":31000,"max":31000,"thresholds":{"value>=0":false}}}}`
 
 // TestSummary_Endpoints checks which keys are read and that an endpoint
 // missing one of the required sub-metrics fails instead of reading 0.
@@ -1043,7 +1115,7 @@ func TestSummary_Endpoints(t *testing.T) {
 	got, dropped, err := parse(t, onlyPingSummary)
 	require.NoError(t, err)
 	assert.Zero(t, dropped)
-	assert.Equal(t, EndpointResult{Requests: 10, Failed: 1, Latency: map[string]float64{"med": 1, "p(95)": 2, "p(99)": 3}}, got["ping"])
+	assert.Equal(t, EndpointResult{Requests: 10, Failed: 1, Latency: map[string]float64{"med": 1, "p(95)": 2, "p(99)": 3}, WindowStartMs: 1000, WindowEndMs: 31000}, got["ping"])
 
 	// 他のタグの submetric と、読めない key は無視する
 	extra := strings.Replace(onlyPingSummary, `"dropped_iterations":{"count":0},`, `"dropped_iterations":{"count":0},
@@ -1059,7 +1131,7 @@ func TestSummary_Endpoints(t *testing.T) {
 	require.Len(t, got, 1)
 	assert.Equal(t, int64(10), got["ping"].Requests)
 
-	for _, missing := range []string{"http_reqs{endpoint:ping}", "http_req_failed{endpoint:ping}", "bench_rate_limited{endpoint:ping}", "bench_timeouts{endpoint:ping}", "http_req_duration{endpoint:ping,expected_response:true}"} {
+	for _, missing := range []string{"http_reqs{endpoint:ping}", "http_req_failed{endpoint:ping}", "bench_rate_limited{endpoint:ping}", "bench_timeouts{endpoint:ping}", "http_req_duration{endpoint:ping,expected_response:true}", "bench_window_start_ms{endpoint:ping}", "bench_window_end_ms{endpoint:ping}"} {
 		var s k6Summary
 		require.NoError(t, json.Unmarshal([]byte(onlyPingSummary), &s))
 		delete(s.Metrics, missing)
@@ -1077,6 +1149,14 @@ func TestSummary_Endpoints(t *testing.T) {
 	zero := strings.Replace(onlyPingSummary, `{"count":10,`, `{"count":0,`, 1)
 	_, _, err = parse(t, zero)
 	assert.ErrorContains(t, err, "no requests")
+
+	// 区間が読めない (値が無い、終わりが始まりより前) と、k6 の CPU を区切れないので読まない
+	noValue := strings.Replace(onlyPingSummary, `{"value":1000,`, `{`, 1)
+	_, _, err = parse(t, noValue)
+	assert.ErrorContains(t, err, "do not give a window")
+	reversed := strings.Replace(onlyPingSummary, `{"value":31000,`, `{"value":1000,`, 1)
+	_, _, err = parse(t, reversed)
+	assert.ErrorContains(t, err, "do not give a window")
 }
 
 func TestSpread_Median(t *testing.T) {
@@ -1149,12 +1229,12 @@ func TestCompare_LabeledHeapIsOneSidedReference(t *testing.T) {
 	c = compareDir(t, writeLabeledResults(t, pair(2, func(s Side, r int) fakeRun {
 		run := okRun(s, r, 10)
 		if s == SideBase {
-			run.resources = "t_ms,container,cpu_usage_usec,memory_peak,heap_inuse\n0,app,0,1,\n10000,app,1,1,\n"
+			run.resources = resHeader + "\n0,app,0,1,,,,\n10000,app,1,1,,,,\n" + k6Rows
 		}
 		return run
 	})...))
-	require.Equal(t, "postgres", c.Resources[1].Container)
-	for _, m := range c.Resources[1].Measures {
+	require.Equal(t, "postgres", c.Resources[2].Container)
+	for _, m := range c.Resources[2].Measures {
 		assert.Equal(t, VerdictIncomparable, m.Verdict, m.Name)
 	}
 
@@ -1269,4 +1349,114 @@ func TestLoad_LabelsMustNameBothSides(t *testing.T) {
 		_, err := loadRunSet(dir)
 		assert.ErrorContains(t, err, "labels must name both", labels)
 	}
+}
+
+// TestCompare_K6Bottleneck checks that an endpoint is incomparable when k6 was
+// throttled in more than maxK6ThrottledPercent of its CPU periods in any
+// round of either side, and comparable at the limit itself (#3656).
+func TestCompare_K6Bottleneck(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		side      Side
+		round     int
+		throttled int64
+		want      bool
+	}{
+		{"base over the limit", SideBase, 2, 3, true},
+		{"head over the limit", SideHead, 2, 3, true},
+		// 後の回が律速でなくても、前の回の律速は消えない (各側の最大で見る)
+		{"first round over the limit", SideHead, 1, 3, true},
+		{"at the limit", SideHead, 2, 2, false},
+		{"at the limit on base", SideBase, 2, 2, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := compareDir(t, writeResults(t, pair(2, func(s Side, r int) fakeRun {
+				run := okRun(s, r, 10)
+				if s == SideHead {
+					run = okRun(s, r, 5)
+				}
+				if s == tc.side && r == tc.round {
+					run.k6Throttled = tc.throttled
+				}
+				return run
+			})...))
+			require.True(t, c.Valid, "a k6 bottleneck is per endpoint, not the whole comparison")
+			for _, name := range []string{"ping", "timeline"} {
+				e := endpoint(t, c, name)
+				got, other := e.BaseK6ThrottledPercent, e.HeadK6ThrottledPercent
+				if tc.side == SideHead {
+					got, other = other, got
+				}
+				require.NotNil(t, got)
+				require.NotNil(t, other)
+				assert.InDelta(t, float64(tc.throttled), *got, 1e-9, "the largest share over the rounds")
+				assert.Zero(t, *other)
+				if !tc.want {
+					assert.Equal(t, VerdictDifferent, e.Verdict, name)
+					assert.Empty(t, e.Reasons, name)
+					continue
+				}
+				assert.Equal(t, VerdictIncomparable, e.Verdict, name)
+				assert.Contains(t, strings.Join(e.Reasons, "\n"), "k6 was the bottleneck", name)
+				for _, m := range e.Measures {
+					assert.Equal(t, VerdictIncomparable, m.Verdict, m.Name)
+				}
+			}
+		})
+	}
+}
+
+// TestCompare_K6ThrottlingIsCutByWindow checks that k6's throttling is read
+// in each endpoint's own window, and that an endpoint whose window has fewer
+// than two k6 samples is incomparable rather than read as not throttled.
+func TestCompare_K6ThrottlingIsCutByWindow(t *testing.T) {
+	// k6 は 5000ms までは止められず、5000〜10000ms の 50 区切りのうち 10 で止められた
+	res := resHeader + "\n" + strings.Join([]string{
+		"0,app,0,1,,0,0,0", "0,k6,0,1,,0,0,0",
+		"5000,app,1,1,,50,0,0", "5000,k6,1,1,,50,0,0",
+		"10000,app,2,1,,100,0,0", "10000,k6,2,1,,100,10,0",
+	}, "\n") + "\n"
+	windows := func(timeline [2]float64) []fakeRun {
+		return pair(2, func(s Side, r int) fakeRun {
+			run := okRun(s, r, 10)
+			run.resources = res
+			run = withEndpoint(run, "ping", func(e *fakeEndpoint) { e.window = &[2]float64{0, 5000} })
+			return withEndpoint(run, "timeline", func(e *fakeEndpoint) { e.window = &timeline })
+		})
+	}
+
+	c := compareDir(t, writeResults(t, windows([2]float64{5000, 10000})...))
+	require.True(t, c.Valid)
+	ping, tl := endpoint(t, c, "ping"), endpoint(t, c, "timeline")
+	assert.Equal(t, VerdictSame, ping.Verdict, "ping's window had no throttling")
+	assert.Zero(t, *ping.BaseK6ThrottledPercent)
+	assert.Equal(t, VerdictIncomparable, tl.Verdict)
+	assert.InDelta(t, 20, *tl.HeadK6ThrottledPercent, 1e-9, "10 of the 50 periods in the window, not 10 of 100 over the run")
+
+	// 区間の中のサンプルが 0 個 (6000〜9000ms) でも 1 個 (4000〜9000ms) でも、差が取れない
+	for _, w := range [][2]float64{{6000, 9000}, {4000, 9000}} {
+		c = compareDir(t, writeResults(t, windows(w)...))
+		tl = endpoint(t, c, "timeline")
+		assert.Equal(t, VerdictIncomparable, tl.Verdict, w)
+		assert.Contains(t, tl.Reasons, "k6's CPU was not sampled in the endpoint's window in every round", w)
+		assert.Nil(t, tl.BaseK6ThrottledPercent, w)
+	}
+
+	var out, errOut bytes.Buffer
+	require.NoError(t, run([]string{"-dir", writeResults(t, windows([2]float64{6000, 9000})...)}, &out, &errOut))
+	assert.Contains(t, out.String(), "| timeline | k6が止められた区切り (%、最大) | - | - | | 比較不能 |")
+	assert.Contains(t, out.String(), "| ping | k6が止められた区切り (%、最大) | 0.0% | 0.0% | |  |")
+
+	out.Reset()
+	require.NoError(t, run([]string{"-dir", writeResults(t, windows([2]float64{5000, 10000})...)}, &out, &errOut))
+	assert.Contains(t, out.String(), "| timeline | k6が止められた区切り (%、最大) | 20.0% | 20.0% | | 比較不能 |")
+	assert.Contains(t, out.String(), "- timeline: k6 was the bottleneck: throttled in up to 20.0% / 20.0% of its CPU periods (more than 2%)")
+}
+
+// TestThrottledPercent_NoPeriods checks a window in which k6 was never
+// runnable: no period was counted, so none was throttled.
+func TestThrottledPercent_NoPeriods(t *testing.T) {
+	p, ok := throttledPercent([]ThrottleSample{{TimeMs: 0, Periods: 5}, {TimeMs: 1000, Periods: 5}}, 0, 1000)
+	assert.True(t, ok)
+	assert.Zero(t, p)
 }

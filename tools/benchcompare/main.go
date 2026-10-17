@@ -8,16 +8,23 @@
 //	                                implementations (upstream Misskey, #3654)
 //	<run>/meta.json                 side ("base" or "head"), round, completed, reason
 //	<run>/k6-summary.json           k6 --summary-export
-//	<run>/resources.csv             t_ms,container,cpu_usage_usec,memory_peak,heap_inuse
+//	<run>/resources.csv             t_ms,container,cpu_usage_usec,memory_peak,heap_inuse,
+//	                                nr_periods,nr_throttled,throttled_usec (one row per
+//	                                container a second, including the k6 container)
 //
 // Each measure is compared over the rounds of both sides: it is reported as
 // different only when the ranges (min to max) of base and head do not
 // overlap and the medians differ by at least 5% (and a per-measure absolute
 // amount, such as 1ms for latency). An endpoint whose error rate or
 // rate-limited rate differs between base and head by more than one point is
-// incomparable, since failing faster is not an improvement.
+// incomparable, since failing faster is not an improvement. So is an
+// endpoint during whose window k6 was throttled by its CPU limit in more than
+// 2% of its CPU periods in any round (#3656): the latency then includes k6's
+// own wait.
 // p99 is shown with its difference but not judged, since it jumps between
-// levels even when base and head are the same commit (#3559).
+// levels even when base and head are the same commit (#3559). Neither are
+// the k6 container's resources, which are the load generator's and not the
+// server's.
 //
 // With labels, the report names the sides by them, adds the ratio base / head
 // of p50, p95, CPU time and memory, and shows a measure only one side has (the
