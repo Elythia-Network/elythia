@@ -56,7 +56,7 @@ func renderMarkdown(w io.Writer, c *Comparison) error {
 		for _, p := range c.Problems {
 			fmt.Fprintf(&b, "- %s\n", cell(p))
 		}
-		renderDeliverySection(&b, c.Delivery, c.DeliveryMeasures)
+		renderDeliverySection(&b, c.Delivery, c.DeliveryMeasures, n)
 		_, err := io.WriteString(w, b.String())
 		return err
 	}
@@ -117,7 +117,7 @@ func renderMarkdown(w io.Writer, c *Comparison) error {
 			fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s |\n", cell(r.Container), measureLabel(m.Name), fmtSpread(m.Base, m.Name), fmtSpread(m.Head, m.Name), fmtDelta(m), fmtVerdict(m, n))
 		}
 	}
-	renderDeliverySection(&b, c.Delivery, c.DeliveryMeasures)
+	renderDeliverySection(&b, c.Delivery, c.DeliveryMeasures, n)
 	_, err := io.WriteString(w, b.String())
 	return err
 }
@@ -235,7 +235,7 @@ func lowerSide(m Measure, n sideNames, suffix string) string {
 	return cell(n.base) + suffix
 }
 
-func renderDeliverySection(b *strings.Builder, rounds []DeliveryRound, measures []Measure) {
+func renderDeliverySection(b *strings.Builder, rounds []DeliveryRound, measures []Measure, n sideNames) {
 	if len(rounds) == 0 {
 		return
 	}
@@ -262,7 +262,7 @@ func renderDeliverySection(b *strings.Builder, rounds []DeliveryRound, measures 
 		b.WriteString("|---|---:|---:|---:|---|\n")
 		for _, m := range measures {
 			fmt.Fprintf(b, "| %s | %s | %s | %s | %s |\n",
-				measureLabel(m.Name), fmtSpread(m.Base, m.Name), fmtSpread(m.Head, m.Name), fmtDelta(m), fmtVerdict(m))
+				measureLabel(m.Name), fmtSpread(m.Base, m.Name), fmtSpread(m.Head, m.Name), fmtDelta(m), fmtVerdict(m, n))
 		}
 	}
 }

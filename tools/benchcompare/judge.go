@@ -677,6 +677,7 @@ var minAbsDifference = map[string]float64{
 // と 37% になるので、下限では防げない。
 var referenceOnly = map[string]bool{
 	"p(99)":                        true,
+	"requests":                     true,
 	"delivery_unique_jobs_per_sec": true,
 }
 
