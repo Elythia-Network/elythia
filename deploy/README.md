@@ -1,6 +1,6 @@
 # Elythia
 
-Misskey互換のGoバックエンド実装 [Elythia](https://github.com/Elythia-Network/elythia) を、
+Misskeyから生まれたGo製のActivityPubサーバー [Elythia](https://github.com/Elythia-Network/elythia) を、
 **ビルド無しで動かすためだけ**のブランチ。
 
 必要なのはこの3ファイルだけで、Goのソースもフロントエンドのソースも含まない。
