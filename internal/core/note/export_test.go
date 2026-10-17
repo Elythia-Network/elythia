@@ -3,7 +3,7 @@ package note
 import "time"
 
 // SafeGoForTest exposes safeGo to package-external tests.
-func SafeGoForTest(fn func()) { safeGo(fn) }
+func SafeGoForTest(fn func()) { safeGo(nil, fn) }
 
 // ResolveMentionUserIDsForTest runs the mention → userID mapping the create
 // path uses (DB lookup, then the WebFinger fetch) so the host rules (#2704,

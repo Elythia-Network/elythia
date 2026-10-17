@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/elythia-network/elythia/internal/bgwork"
 )
 
 // withHookConcurrency sets the limit for one test and restores it afterwards.
@@ -51,7 +53,7 @@ func TestSafeGoKind_BoundsConcurrency(t *testing.T) {
 
 	for range 30 {
 		wg.Add(1)
-		safeGoKind(hookFanout, func() {
+		safeGoKind(nil, hookFanout, func() {
 			defer wg.Done()
 			cur := atomic.AddInt64(&running, 1)
 			for {
@@ -92,7 +94,7 @@ func TestSafeGoKind_FanoutNotStarvedByOtherHooks(t *testing.T) {
 	occupied := make(chan struct{}, 2)
 	// other の枠を上限まで占有する。
 	for range 2 {
-		safeGoKind(hookOther, func() {
+		safeGoKind(nil, hookOther, func() {
 			occupied <- struct{}{}
 			<-blocked
 		})
@@ -107,7 +109,7 @@ func TestSafeGoKind_FanoutNotStarvedByOtherHooks(t *testing.T) {
 
 	// other が全枠を握っていても fanout は走れること。
 	ran := make(chan struct{})
-	safeGoKind(hookFanout, func() { close(ran) })
+	safeGoKind(nil, hookFanout, func() { close(ran) })
 	select {
 	case <-ran:
 	case <-time.After(5 * time.Second):
@@ -123,7 +125,7 @@ func TestSafeGoKind_ReleasesSlotOnPanic(t *testing.T) {
 	withHookConcurrency(t, 1)
 
 	done := make(chan struct{})
-	safeGoKind(hookFanout, func() { defer close(done); panic("boom") })
+	safeGoKind(nil, hookFanout, func() { defer close(done); panic("boom") })
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
@@ -132,7 +134,7 @@ func TestSafeGoKind_ReleasesSlotOnPanic(t *testing.T) {
 
 	// 枠が返っていれば次が走る。
 	ran := make(chan struct{})
-	safeGoKind(hookFanout, func() { close(ran) })
+	safeGoKind(nil, hookFanout, func() { close(ran) })
 	select {
 	case <-ran:
 	case <-time.After(5 * time.Second):
@@ -146,7 +148,7 @@ func TestSafeGo_UsesOtherKind(t *testing.T) {
 
 	blocked := make(chan struct{})
 	started := make(chan struct{})
-	safeGo(func() { close(started); <-blocked })
+	safeGo(nil, func() { close(started); <-blocked })
 	select {
 	case <-started:
 	case <-time.After(5 * time.Second):
@@ -155,7 +157,7 @@ func TestSafeGo_UsesOtherKind(t *testing.T) {
 
 	// other が埋まっていても fanout は独立して走れる。
 	ran := make(chan struct{})
-	safeGoKind(hookFanout, func() { close(ran) })
+	safeGoKind(nil, hookFanout, func() { close(ran) })
 	select {
 	case <-ran:
 	case <-time.After(5 * time.Second):
@@ -163,4 +165,59 @@ func TestSafeGo_UsesOtherKind(t *testing.T) {
 		t.Fatal("safeGo が fanout の枠を使っている")
 	}
 	close(blocked)
+}
+
+// 世代の停止の待ちの間に枠が空けば、枠を待っていたフックは走る (#3661 の
+// レビュー M-2)。止めた瞬間に捨てると、間に合っていた配送や通知が消える。
+func TestSafeGoKind_RunsAHookWhoseSlotFreesUpDuringTheStop(t *testing.T) {
+	withHookConcurrency(t, 1)
+
+	blocked := make(chan struct{})
+	occupied := make(chan struct{})
+	safeGoKind(nil, hookOther, func() { close(occupied); <-blocked })
+	<-occupied
+
+	g := bgwork.New()
+	var ran atomic.Bool
+	safeGoKind(g, hookOther, func() { ran.Store(true) })
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		close(blocked)
+	}()
+	if left := g.StopWithin(2 * time.Second); left != 0 {
+		t.Fatalf("フックが終わらない (left=%d)", left)
+	}
+	if !ran.Load() {
+		t.Fatal("待ちの間に枠が空いたのに、フックを捨てた")
+	}
+	if g.Dropped() != 0 {
+		t.Fatalf("Dropped = %d, want 0", g.Dropped())
+	}
+}
+
+// 待ちの終わり近くまで枠が空かなければ捨て、捨てたことを数える (#3661)。
+// **捨てないと、止める側は上限まで待たされ、その後でフックが閉じた DB へ書きに行く。**
+func TestSafeGoKind_DropsAHookWaitingForASlotWhenTheStopGivesUp(t *testing.T) {
+	withHookConcurrency(t, 1)
+
+	blocked := make(chan struct{})
+	occupied := make(chan struct{})
+	safeGoKind(nil, hookOther, func() { close(occupied); <-blocked })
+	<-occupied
+
+	g := bgwork.New()
+	var ran atomic.Bool
+	safeGoKind(g, hookOther, func() { ran.Store(true) })
+
+	if left := g.StopWithin(400 * time.Millisecond); left != 0 {
+		t.Fatalf("枠を待っているフックが、ctx が切れても戻らない (left=%d)", left)
+	}
+	close(blocked)
+	time.Sleep(50 * time.Millisecond)
+	if ran.Load() {
+		t.Fatal("世代を止めた後にフックが走った")
+	}
+	if g.Dropped() != 1 {
+		t.Fatalf("捨てたフックが数えられていない (Dropped = %d)", g.Dropped())
+	}
 }
