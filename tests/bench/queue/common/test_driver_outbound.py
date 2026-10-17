@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import importlib
+import json
 import os
 import sys
 import types
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
-from delivery_result import throughput_result
+from delivery_result import classify_delivery, throughput_result
 
 
 def load_driver():
@@ -184,6 +186,75 @@ class OutboundDeliveryTests(unittest.TestCase):
         self.assertEqual(result["deliveryStatus"], "incomplete")
         self.assertIsNone(result["throughput_jobs"])
         self.assertIsNone(result["throughput_jobs_per_sec"])
+
+    def test_timeout_suppresses_throughput(self) -> None:
+        result = throughput_result(
+            {
+                "finalized": True,
+                "expected": 2,
+                "attempts": 2,
+                "verified": 2,
+                "pending": 0,
+                "valid": 2,
+                "unique": 2,
+                "duplicates": 0,
+                "invalid": 0,
+                "contentMismatch": 0,
+                "unexpected": 0,
+                "unexpectedAttempts": 0,
+                "missing": 0,
+            },
+            1.0,
+            benchmark_expected=2,
+            timed_out=True,
+        )
+
+        self.assertEqual(result["deliveryStatus"], "incomplete")
+        self.assertIn("delivery drain timed out", result["deliveryReasons"])
+        self.assertIsNone(result["throughput_jobs"])
+        self.assertIsNone(result["throughput_jobs_per_sec"])
+
+    def test_benchmark_expected_mismatch_is_invalid(self) -> None:
+        result = throughput_result(
+            {
+                "finalized": True,
+                "expected": 2,
+                "attempts": 2,
+                "verified": 2,
+                "pending": 0,
+                "valid": 2,
+                "unique": 2,
+                "duplicates": 0,
+                "invalid": 0,
+                "contentMismatch": 0,
+                "unexpected": 0,
+                "unexpectedAttempts": 0,
+                "missing": 0,
+            },
+            1.0,
+            benchmark_expected=3,
+        )
+
+        self.assertEqual(result["deliveryStatus"], "invalid")
+        self.assertIn(
+            "receiver expected 2 != benchmark expected 3",
+            result["deliveryReasons"],
+        )
+        self.assertIsNone(result["throughput_jobs"])
+        self.assertIsNone(result["throughput_jobs_per_sec"])
+
+    def test_shared_delivery_classification_cases(self) -> None:
+        cases_path = Path(__file__).with_name("delivery_classification_cases.json")
+        cases = json.loads(cases_path.read_text(encoding="utf-8"))
+        for case in cases:
+            with self.subTest(case=case["name"]):
+                status, reasons = classify_delivery(
+                    case["stats"],
+                    benchmark_expected=case.get("benchmarkExpected"),
+                    timed_out=case.get("timedOut", False),
+                )
+                self.assertEqual(status, case["expectedStatus"])
+                self.assertEqual(reasons, case["expectedReasons"])
 
     def test_delivery_artifact_flattens_raw_stats_and_unique_rate(self) -> None:
         artifact = driver.delivery_artifact({

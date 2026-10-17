@@ -33,9 +33,10 @@ usage() {
 
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(git -C "$here" rev-parse --show-toplevel)
+. "$here/run_helpers.sh"
 
 base_ref='' head_ref='' rounds=2 scenario=prod-like out='' smoke=0 delivery=0
-project_name="mk-bench-ab-$$" delivery_notes=2 delivery_followers=2
+project_name="mk-bench-ab-$(date -u +%s)-$$" delivery_notes=2 delivery_followers=2
 while [ $# -gt 0 ]; do
   case $1 in
     --base) base_ref=$2; shift 2 ;;
@@ -59,8 +60,8 @@ for count in "$delivery_notes" "$delivery_followers"; do
   case $count in '' | *[!0-9]*) usage ;; esac
   [ "$count" -gt 0 ] || usage
 done
-[[ "$project_name" =~ ^[a-z0-9][a-z0-9_-]{0,39}$ ]] || {
-  echo "run.sh: --project-name must be 1-40 lowercase letters, digits, '_' or '-'" >&2
+bench_validate_project_name "$project_name" || {
+  echo "run.sh: --project-name must start with 'mk-bench-ab-' and contain at most 32 lowercase letters, digits, '_' or '-'" >&2
   exit 1
 }
 case $scenario in
@@ -73,6 +74,10 @@ if [ ! -r /sys/fs/cgroup/cgroup.controllers ]; then
   echo "run.sh: cgroup v2 is required (memory.peak and cpu.stat are read directly)" >&2
   exit 1
 fi
+
+# Compose's project-scoped `down -v` must never target an existing stack.
+# Check both running and stopped projects before any destructive operation.
+bench_assert_project_available "$project_name"
 
 base_commit=$(git -C "$repo" rev-parse --verify "$base_ref^{commit}")
 head_commit=$(git -C "$repo" rev-parse --verify "$head_ref^{commit}")
@@ -93,13 +98,13 @@ BENCH_GID=$(id -g)
 work=$(mktemp -d)
 delivery_projects=()
 delivery_compose_files=()
+delivery_cleanup_failed=0
 # shellcheck disable=SC2317 # trap から呼ぶ
 cleanup() {
   # 後始末の失敗で、比較の終了コード (0 / 2) を ERR trap の 1 に書き換えない
   trap - ERR
   for i in "${!delivery_projects[@]}"; do
-    docker compose -p "${delivery_projects[$i]}" -f "${delivery_compose_files[$i]}" \
-      --profile bench --profile outbound --profile delivery down -v --remove-orphans >/dev/null 2>&1 || true
+    bench_cleanup_delivery_project "${delivery_projects[$i]}" "${delivery_compose_files[$i]}" || true
   done
   "${compose[@]}" --profile tools down -v --remove-orphans >/dev/null 2>&1 || true
   for side in base head; do
@@ -220,9 +225,6 @@ measure_delivery() {
   local MKGO_IMAGE QUEUE_BENCH_DELIVERY=1 QUEUE_BENCH_STACKS=mkq QUEUE_BENCH_SEED_FAKER=0
   local OUTBOUND_NOTES=$delivery_notes OUTBOUND_FOLLOWERS=$delivery_followers
   local QUEUE_BENCH_EXPORT_DELIVERY=1 QUEUE_BENCH_DELIVERY_STACK=mkq QUEUE_BENCH_RESULTS=$dir
-  delivery_projects+=("$delivery_project")
-  delivery_compose_files+=("$queue_compose")
-
   MKGO_IMAGE=$(image_of "$side")
   export MKGO_IMAGE QUEUE_BENCH_DELIVERY QUEUE_BENCH_STACKS QUEUE_BENCH_SEED_FAKER
   export OUTBOUND_NOTES OUTBOUND_FOLLOWERS QUEUE_BENCH_EXPORT_DELIVERY
@@ -243,8 +245,6 @@ measure_delivery() {
   "${qcompose[@]}" --profile outbound run --no-deps --rm driver-outbound \
     > "$dir/delivery-driver.log" 2>&1 || { delivery_reason="delivery driver failed"; return 1; }
   [ -s "$dir/delivery.json" ] || { delivery_reason="delivery.json was not written"; return 1; }
-  "${qcompose[@]}" --profile bench --profile outbound --profile delivery \
-    down -v --remove-orphans --rmi local >/dev/null 2>&1 || true
 }
 
 run_one() {
@@ -264,10 +264,28 @@ run_one() {
   local delivery_reason=''
   if [ "$delivery" -eq 1 ] && [ "$completed" = true ]; then
     "${compose[@]}" --profile tools down -v --remove-orphans >/dev/null 2>&1 || true
-    if ! measure_delivery "$dir" "$round" "$side"; then
+    local delivery_project="${project_name}-delivery-r${round}-${side}"
+    local queue_compose="$repo/tests/bench/queue/compose.yml"
+    if [ "${#delivery_project}" -gt 63 ]; then
+      delivery_reason="delivery Compose project name exceeds 63 characters"
+    elif ! bench_assert_project_available "$delivery_project"; then
+      delivery_reason="delivery Compose project name is already in use"
+    else
+      delivery_projects+=("$delivery_project")
+      delivery_compose_files+=("$queue_compose")
+      if ! bench_run_delivery_with_cleanup "$delivery_project" "$queue_compose" \
+        measure_delivery "$dir" "$round" "$side"; then
+        delivery_reason=${delivery_reason:-failed}
+      fi
+    fi
+    if [ -n "$delivery_reason" ]; then
       delivery_reason=${delivery_reason:-failed}
       log "round $round $side delivery: $delivery_reason"
       printf '%s\n' "$delivery_reason" > "$dir/delivery-error.txt"
+    fi
+    if [ "$delivery_cleanup_failed" -eq 1 ]; then
+      echo "run.sh: delivery fixture cleanup failed; stopping before another measurement" >&2
+      exit 1
     fi
   fi
   "${compose[@]}" --profile tools down -v --remove-orphans >/dev/null 2>&1 || true

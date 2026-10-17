@@ -53,11 +53,11 @@ make bench-compare-down   # 途中で止めたときの片付け
 
 ### スタック
 
-`tests/bench/ab/compose.yml`(project 名`mk-bench-ab`)。postgres / redis / nginx / k6 の image は digest で固定しています。seed の image は固定していませんが、計測の前に止めるので数字には入りません。
+`tests/bench/ab/compose.yml`を使います。run.shは`mk-bench-ab-<timestamp>-<pid>`形式の専用project名を使い、`mk-bench-ab-` prefixと長さを検証し、既存Compose projectとの衝突があればcleanup前に停止します。postgres / redis / nginx / k6 の image は digest で固定しています。seed の image は固定していませんが、計測の前に止めるので数字には入りません。
 
 | サービス | 中身 | CPU の上限 |
 |---|---|---|
-| app | base / head の Elythia (`mk-bench-ab-app:base` / `:head`) | 1.25 |
+| app | base / head の Elythia (`mk-bench-ab-app:<project>-base-<pid>` / `mk-bench-ab-app:<project>-head-<pid>`) | 1.25 |
 | postgres | PostgreSQL 18 | 0.75 |
 | redis | Redis | 0.5 |
 | web | nginx (worker 1) | 0.5 |
@@ -103,7 +103,7 @@ make bench-compare-down   # 途中で止めたときの片付け
 | `memory_peak_mib` | コンテナの cgroup の`memory.peak`(起動し直してからの最大、MiB)。ページキャッシュを含む |
 | `heap_inuse_max_mib` | app だけ。pprof の`HeapInuse`を 5 秒ごとに読んだ最大 (MiB) |
 
-配送receiver fixtureを使うrunは、run directoryに任意の`delivery.json`を置けます。`finalized` / `expected` / `attempts` / `verified` / `pending` / `valid` / `unique` / `duplicates` / `invalid` / `contentMismatch` / `unexpected` / `unexpectedAttempts` / `missing`を記録します。`unexpected`は未登録の(Activity ID, Inbox)組の数で、未着のexpected組を埋めません。`valid`は署名に加えてexpected Activity ID・Inbox・本文digestが一致した試行だけです。`tests/bench/ab/run.sh --delivery`を指定すると、各`rN-side/`に receiver の生カウント、`throughputJobs`、`throughputJobsPerSecond`、`drainSeconds`を含む`delivery.json`を出力します。`benchcompare`は全side・roundが妥当なときだけ`unique / drainSeconds`の中央値と範囲を表示し、この指標は参考値として表示して性能判定には使いません。`--delivery-notes`と`--delivery-followers`で合成 fixture の件数を指定でき、既定は2×2です。
+配送receiver fixtureを使うrunは、run directoryに任意の`delivery.json`を置けます。`finalized` / `expected` / `attempts` / `verified` / `pending` / `valid` / `unique` / `duplicates` / `invalid` / `contentMismatch` / `unexpected` / `unexpectedAttempts` / `missing`を記録します。`unexpected`は未登録の(Activity ID, Inbox)組の数で、未着のexpected組を埋めません。`valid`は署名に加えてexpected Activity ID・Inbox・本文digestが一致した試行だけです。`tests/bench/ab/run.sh --delivery`を指定すると、各`rN-side/`に receiver の生カウント、`throughputJobs`、`throughputJobsPerSecond`、`drainSeconds`を含む`delivery.json`を出力します。`benchcompare`は全side・roundが妥当なときだけ`unique / drainSeconds`の中央値と範囲を表示し、この指標は参考値として表示して性能判定には使いません。`--delivery-notes`と`--delivery-followers`で合成 fixture の件数を指定でき、既定は2×2です。**この既定値は経路・集計のsmokeであり、性能差を推定する標本ではありません。**
 
 JSONを読めない場合、または壊れたJSONの場合だけ入力エラー(exit 1)にします。読み取れた統計の意味上の異常はloaderで拒否せず、`status` / `reasons`と生の件数をレポートに残して比較不能(exit 2)にします。未確定manifest・`pending`・未着は`incomplete`、`expected`が0・件数の整合性違反・`invalid` / `contentMismatch` / `unexpected`があるroundは`invalid`です。
 

@@ -59,7 +59,8 @@ type Run struct {
 	Resources map[string]ResourceUsage
 	// Delivery is an optional receiver fixture summary, separate from k6
 	// endpoint metrics and resource samples.
-	Delivery *DeliveryStats
+	Delivery      *DeliveryStats
+	DeliveryError string
 }
 
 // DeliveryStats is the JSON emitted by tests/bench/queue/deliveryreceiver.
@@ -81,6 +82,8 @@ type DeliveryStats struct {
 	ThroughputJobs          *uint64  `json:"throughputJobs,omitempty"`
 	ThroughputJobsPerSecond *float64 `json:"throughputJobsPerSecond,omitempty"`
 	DrainSeconds            *float64 `json:"drainSeconds,omitempty"`
+	ArtifactStatus          string   `json:"deliveryStatus,omitempty"`
+	ArtifactReasons         []string `json:"deliveryReasons,omitempty"`
 }
 
 // EndpointResult is what one run measured for one endpoint.
@@ -174,14 +177,22 @@ func loadRun(dir string) (*Run, error) {
 	if run.Meta.Round < 1 {
 		return nil, fmt.Errorf("meta.json: round is %d, want 1 or more", run.Meta.Round)
 	}
+	var err error
+	run.DeliveryError, err = readOptionalText(filepath.Join(dir, "delivery-error.txt"))
+	if err != nil {
+		return nil, fmt.Errorf("delivery-error.txt: %w", err)
+	}
 	if !run.Meta.Completed {
 		return run, nil
+	}
+	run.Delivery, err = readDeliveryStats(filepath.Join(dir, "delivery.json"))
+	if err != nil {
+		return nil, fmt.Errorf("delivery.json: %w", err)
 	}
 	var summary k6Summary
 	if err := readJSON(filepath.Join(dir, "k6-summary.json"), &summary); err != nil {
 		return nil, err
 	}
-	var err error
 	run.Endpoints, run.Dropped, err = summary.endpoints()
 	if err != nil {
 		return nil, fmt.Errorf("k6-summary.json: %w", err)
@@ -198,10 +209,6 @@ func loadRun(dir string) (*Run, error) {
 	}
 	if err != nil {
 		return nil, fmt.Errorf("resources.csv: %w", err)
-	}
-	run.Delivery, err = readDeliveryStats(filepath.Join(dir, "delivery.json"))
-	if err != nil {
-		return nil, fmt.Errorf("delivery.json: %w", err)
 	}
 	return run, nil
 }
@@ -232,6 +239,17 @@ func readJSON(path string, v any) error {
 		return fmt.Errorf("%s: %w", filepath.Base(path), err)
 	}
 	return nil
+}
+
+func readOptionalText(path string) (string, error) {
+	b, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(b)), nil
 }
 
 // k6Summary is k6's --summary-export JSON. A metric's values are numbers,

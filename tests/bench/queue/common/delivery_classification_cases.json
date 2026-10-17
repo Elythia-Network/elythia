@@ -1,0 +1,66 @@
+[
+  {
+    "name": "valid",
+    "stats": {
+      "finalized": true,
+      "expected": 2,
+      "attempts": 2,
+      "verified": 2,
+      "pending": 0,
+      "valid": 2,
+      "unique": 2,
+      "duplicates": 0,
+      "invalid": 0,
+      "contentMismatch": 0,
+      "unexpected": 0,
+      "unexpectedAttempts": 0,
+      "missing": 0
+    },
+    "benchmarkExpected": 2,
+    "expectedStatus": "valid",
+    "expectedReasons": []
+  },
+  {
+    "name": "timed out after valid counters",
+    "stats": {
+      "finalized": true,
+      "expected": 2,
+      "attempts": 2,
+      "verified": 2,
+      "pending": 0,
+      "valid": 2,
+      "unique": 2,
+      "duplicates": 0,
+      "invalid": 0,
+      "contentMismatch": 0,
+      "unexpected": 0,
+      "unexpectedAttempts": 0,
+      "missing": 0
+    },
+    "benchmarkExpected": 2,
+    "timedOut": true,
+    "expectedStatus": "incomplete",
+    "expectedReasons": ["delivery drain timed out"]
+  },
+  {
+    "name": "benchmark expected mismatch",
+    "stats": {
+      "finalized": true,
+      "expected": 2,
+      "attempts": 2,
+      "verified": 2,
+      "pending": 0,
+      "valid": 2,
+      "unique": 2,
+      "duplicates": 0,
+      "invalid": 0,
+      "contentMismatch": 0,
+      "unexpected": 0,
+      "unexpectedAttempts": 0,
+      "missing": 0
+    },
+    "benchmarkExpected": 3,
+    "expectedStatus": "invalid",
+    "expectedReasons": ["receiver expected 2 != benchmark expected 3"]
+  }
+]
