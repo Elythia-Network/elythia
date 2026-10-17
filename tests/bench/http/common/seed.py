@@ -50,6 +50,13 @@ VISIBILITY = os.environ.get("SEED_VISIBILITY", "public")
 # default off). A comparison that seeds less data on one side than the other
 # would otherwise look like a performance difference (#3544).
 STRICT = os.environ.get("SEED_STRICT", "") == "1"
+# Role policy rateLimitFactor left on the base role after seeding (opt-in,
+# default: the policies are not touched). When set, seeding runs with the
+# factor 0 (upstream Misskey skips the per-user limits then) and the given
+# factor is written back at the end: "1" keeps the default limits, "0" turns
+# them off. Used for upstream Misskey, whose limits are only switched off by
+# NODE_ENV (which also logs every SQL query) or by this policy (#3654).
+RATE_LIMIT_FACTOR = os.environ.get("SEED_RATE_LIMIT_FACTOR", "")
 
 # A minimal valid 1x1 PNG, used for drive uploads when FILES_PER_USER > 0.
 # Embedding the bytes keeps the seeder self-contained (no asset file mount).
@@ -188,6 +195,15 @@ def seed_mutes(http: httpx.Client, tokens: list[str], user_ids: list[str]) -> in
     return edges
 
 
+def set_rate_limit_factor(http: httpx.Client, admin_token: str, factor: float) -> None:
+    """Write the base role's rateLimitFactor policy.
+
+    update-default-policies replaces the stored policies as a whole; the seed
+    starts from an empty database, so there is nothing else to keep.
+    """
+    api(http, "admin/roles/update-default-policies", {"policies": {"rateLimitFactor": factor}}, admin_token)
+
+
 def parse_visibility(spec: str) -> list[tuple[str, int]]:
     """Parse SEED_VISIBILITY ("public:80,home:15" or just "public")."""
     weights: list[tuple[str, int]] = []
@@ -211,6 +227,12 @@ def main() -> None:
     if not admin_token:
         print("ERROR: failed to get admin token", file=sys.stderr)
         sys.exit(1)
+
+    # 本家は利用者ごとの制限を seed の投稿・フォローにも数える。seed の分が計測の
+    # 枠を食わないよう、seed の間は factor 0 (制限なし) にしておく
+    rate_limit_factor = float(RATE_LIMIT_FACTOR) if RATE_LIMIT_FACTOR else None
+    if rate_limit_factor is not None:
+        set_rate_limit_factor(http, admin_token, 0)
 
     tokens = [admin_token]
     usernames = ["benchadmin"]
@@ -333,6 +355,10 @@ def main() -> None:
     print(f"Created {len(note_ids)} notes on {TARGET_NAME}")
     if REPLY_RATIO > 0:
         print(f"Of which {replies} are replies (SEED_REPLY_RATIO={REPLY_RATIO})")
+
+    if rate_limit_factor is not None:
+        set_rate_limit_factor(http, admin_token, rate_limit_factor)
+        print(f"Set rateLimitFactor={rate_limit_factor:g} on {TARGET_NAME}")
 
     # 結果出力
     os.makedirs(OUTPUT_DIR, exist_ok=True)

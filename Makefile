@@ -14,7 +14,7 @@
 	dropin-frontend-mk-up dropin-frontend-mk-down dropin-frontend-swap-test \
 	e2e-frontend-build \
 	uds-init uds-layout-check uds-frontend-build uds-build uds-rebuild uds-restart uds-up uds-down uds-down-v uds-logs uds-ps \
-	bench-up bench-run bench-down bench-logs bench-compare bench-compare-down \
+	bench-up bench-run bench-down bench-logs bench-compare bench-compare-down bench-upstream \
 	apicompat apicompat-routes apicompat-render \
 	test-fast fuzz-imagedecode shapecheck shapecheck-gen shapecheck-report errorid-check limitspec-check perm-check wiring-check catalog-check notfound-check nulparam-check compose-check testflags-check gaterun-check secretfield-check ipshape-check iprecord-check \
 	diff-up diff-test diff-down diff-logs \
@@ -989,8 +989,16 @@ SCENARIO ?= prod-like
 bench-compare: ## base と head の commit の性能を比べる (BASE= HEAD= ROUNDS= SCENARIO= BENCH_OUT= SMOKE=1)
 	tests/bench/ab/run.sh --base '$(BASE)' --head '$(HEAD)' --rounds '$(ROUNDS)' --scenario '$(SCENARIO)' $(if $(BENCH_OUT),--out '$(BENCH_OUT)') $(if $(filter 1,$(SMOKE)),--smoke)
 
-bench-compare-down: ## bench-compare のスタックを撤去
+bench-compare-down: ## bench-compare / bench-upstream のスタックを撤去
 	docker compose -f $(BENCH_AB_COMPOSE) --profile tools down -v --remove-orphans
+
+# 本家 Misskey の公式 image と HEAD の Elythia を、bench-compare と同じスタックで比べる
+# (#3654)。UPSTREAM_VERSION=default は UPSTREAM_MISSKEY_VERSION の版。片付けは
+# bench-compare-down。負荷をかけるので、本番が動いているホストでは SMOKE=1 だけにする。
+UPSTREAM_VERSION ?= default
+
+bench-upstream: ## 本家 Misskey と Elythia の性能を比べる (UPSTREAM_VERSION= HEAD= ROUNDS= SCENARIO= BENCH_OUT= SMOKE=1)
+	tests/bench/ab/run.sh --upstream '$(UPSTREAM_VERSION)' --head '$(HEAD)' --rounds '$(ROUNDS)' --scenario '$(SCENARIO)' $(if $(BENCH_OUT),--out '$(BENCH_OUT)') $(if $(filter 1,$(SMOKE)),--smoke)
 
 # Queue bench (#563): deliver/inbox throughput comparison between
 # Misskey TS (BullMQ) and mk-go (mkq). asynq driver は #2985 で削除。
