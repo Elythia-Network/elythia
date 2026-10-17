@@ -136,7 +136,7 @@ jobs:
             type=raw,value=${{ inputs.tag }},enable=${{ inputs.tag != '' }}
           labels: |
             org.opencontainers.image.title=${{ github.event.repository.name }}
-            org.opencontainers.image.description=Misskey rewritten in Go
+            org.opencontainers.image.description=ActivityPub server born from Misskey, rebuilt in Go
             org.opencontainers.image.source=${{ github.event.repository.html_url }}
 
       - name: Build and push
@@ -206,7 +206,7 @@ jobs:
             type=raw,value=${{ inputs.tag }},suffix=-bundled,enable=${{ inputs.tag != '' }}
           labels: |
             org.opencontainers.image.title=${{ github.event.repository.name }}
-            org.opencontainers.image.description=Misskey rewritten in Go (frontend assets bundled)
+            org.opencontainers.image.description=ActivityPub server born from Misskey, rebuilt in Go (frontend assets bundled)
             org.opencontainers.image.source=${{ github.event.repository.html_url }}
 
       - name: Build and push
