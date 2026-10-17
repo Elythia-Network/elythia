@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"strings"
 	"sync"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/elythia-network/elythia/internal/misc/redisglob"
 )
 
 // topicQueueLimit caps how many undelivered messages one topic may hold.
@@ -85,16 +86,7 @@ func (p *PubSubService) channel(ch string) string {
 // **prefix の glob の特殊文字は逃がす。** 逃がさないと、prefix に `*` や `[` が
 // あるとき別のサービスや別のアプリのチャネルまで受けてしまう。
 func (p *PubSubService) pattern() string {
-	var b strings.Builder
-	for _, r := range p.prefix {
-		switch r {
-		case '*', '?', '[', ']', '\\':
-			b.WriteRune('\\')
-		}
-		b.WriteRune(r)
-	}
-	b.WriteByte('*')
-	return b.String()
+	return redisglob.Escape(p.prefix) + "*"
 }
 
 // Publish sends a message to a channel. The payload is JSON-encoded.

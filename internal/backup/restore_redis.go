@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/elythia-network/elythia/internal/misc/redisglob"
 )
 
 // RedisCleanupTarget is one Redis client and the key prefix the server
@@ -156,10 +158,10 @@ func CleanRedisAfterRestore(ctx context.Context, t RedisCleanupTargets) (RedisCl
 	}
 	var jobs []job
 	for _, p := range timelinePatterns {
-		jobs = append(jobs, job{target: t.Timelines, pattern: escapeGlob(t.Timelines.Prefix) + p})
+		jobs = append(jobs, job{target: t.Timelines, pattern: redisglob.Escape(t.Timelines.Prefix) + p})
 	}
 	for _, p := range defaultPrefixedPatterns {
-		jobs = append(jobs, job{target: t.Default, pattern: escapeGlob(t.Default.Prefix) + p})
+		jobs = append(jobs, job{target: t.Default, pattern: redisglob.Escape(t.Default.Prefix) + p})
 	}
 	for _, p := range defaultPatterns {
 		jobs = append(jobs, job{target: t.Default, pattern: p})
@@ -202,17 +204,4 @@ func deleteMatching(ctx context.Context, c *redis.Client, pattern string, keep f
 		}
 		cursor = next
 	}
-}
-
-// escapeGlob escapes the glob characters of a Redis MATCH pattern.
-func escapeGlob(s string) string {
-	var b strings.Builder
-	for _, c := range s {
-		switch c {
-		case '\\', '*', '?', '[', ']':
-			b.WriteRune('\\')
-		}
-		b.WriteRune(c)
-	}
-	return b.String()
 }
