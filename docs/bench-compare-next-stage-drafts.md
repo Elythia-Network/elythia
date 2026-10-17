@@ -70,3 +70,32 @@ nightly/長時間・混合負荷、性能劣化の閾値、実インスタンス
 remote attachment の取り込み・cache と media proxy のどちらを初回対象にするか、cache reset 方法、fixture の private-network 許可要否、画像サイズ・同時取得数、異常系を初回に含めるか、手動 workflow の実行時間。
 
 nightly 混合・長時間負荷と性能判定基準は配送・画像の小規模測定後に別途相談する。
+
+## Windows checkout での Compose certs fixture
+
+Windows の `core.autocrlf=true` checkout では、`gen-certs.sh` の Git blob は LF でも worktree は CRLF になる（`git ls-files --eol tests/bench/queue/common/gen-certs.sh` で `i/lf w/crlf`）。Compose の certs service は bind mount した `/gen-certs.sh` を直接実行するため、Linux container では `/bin/sh\r` を見つけられず `sh: /gen-certs.sh: not found`、exit 127 になる。
+
+repo と Git 設定を変えずに再現・回避するには、専用 `E:\tmp` 作業先に LF copy と Compose override を作り、base compose と一緒に指定する。
+
+```powershell
+$root = 'E:\tmp\elythia3464-smoke'
+New-Item -ItemType Directory -Path $root | Out-Null
+$source = [System.IO.File]::ReadAllText((Resolve-Path 'tests/bench/queue/common/gen-certs.sh'), [System.Text.UTF8Encoding]::new($false))
+$lf = $source.Replace("`r`n", "`n").Replace("`r", "`n")
+$utf8 = [System.Text.UTF8Encoding]::new($false)
+[System.IO.File]::WriteAllText((Join-Path $root 'gen-certs.sh'), $lf, $utf8)
+$override = "services:`n  certs:`n    volumes:`n      - 'E:/tmp/elythia3464-smoke/gen-certs.sh:/gen-certs.sh:ro'`n"
+[System.IO.File]::WriteAllText((Join-Path $root 'compose.override.yml'), $override, $utf8)
+docker compose -p elythia3464-smoke -f tests/bench/queue/compose.yml -f "$root/compose.override.yml" config --quiet
+```
+
+この override は certs script の bind source だけを一時 copy に置き換える。`core.autocrlf`、repo 内 script、ネットワーク許可、認証・SSRF 保護は変更しない。
+
+## 2026-10-16 の配送 A/A smoke 記録
+
+- 同一ソース SHA `aca50cb55a6e8f7821bcf0bcd3269503ff8cd1fc` を base/head 両側に指定し、配送集計だけを確認した。`r1-base` は先行する 2 notes × 2 follower inbox smoke の成果物を再利用し、残り3 run (`r1-head`、`r2-base`、`r2-head`) のみを実行した。
+- 各 round の `delivery.json` と `outbound.json` は `status=valid`。期待・試行・検証済み・valid・unique はすべて4、pending・duplicate・invalid・content mismatch・unexpected・missing はすべて0。`throughputJobs` は unique 件数と一致し、配送率は unique/drain と一致した。
+- `tools/benchcompare` の一時テストで4 round の JSON 読込、aggregate、Markdown 出力を確認した。表示は base `30.6 [30.2, 31.0]` jobs/s、head `15.7 [12.1, 19.3]` jobs/s、delta `-48.6%`、判定 `参考`。`delivery.json` が欠ける場合は比較不能となり、配送 throughput measure を出さないことも確認した。一時テストファイルは実行後に削除した。
+- 詳細出力は `E:/tmp/elythia3464-unique-smoke-20261016/report.md` にある。Compose project とその container/volume/network、project専用 image tag、一時 helper は終了後に削除した。
+
+この確認は小規模な合成配送データで同じ SHA の集計経路を試した smoke であり、性能改善または性能差の証拠ではない。round 間で stack/DB を独立に reset した統計的な A/A ではなく、HTTP負荷試験、長時間負荷、外部配送、実ユーザーデータは使っていない。次段階の performance 判定基準を決める根拠にも使わない。
