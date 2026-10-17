@@ -21,4 +21,4 @@ func TestHandler_HasAuthInvalidator(t *testing.T) {
 
 type stubOAuthTokenInvalidator struct{}
 
-func (stubOAuthTokenInvalidator) InvalidateToken(string) {}
+func (stubOAuthTokenInvalidator) InvalidateUserToken(string, string) {}

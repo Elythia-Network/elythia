@@ -465,16 +465,18 @@ func TestRegenerateToken_PublishesMyTokenRegenerated(t *testing.T) {
 	assert.Nil(t, pub.calls[0].body)
 }
 
-// stubTokenInvalidator captures InvalidateToken / InvalidateTokensForUser
+// stubTokenInvalidator captures InvalidateUserToken / InvalidateTokensForUser
 // calls for assertion. token-base (#884) と user-base (#965/#967) の両 API
 // を持つ TokenInvalidator interface を test 内で full にスタブ化する。
 type stubTokenInvalidator struct {
-	calls     []string // token-base 履歴
-	userCalls []string // user-base 履歴 (for #967 / i/delete-account)
+	calls      []string // token-base 履歴 (token)
+	tokenUsers []string // token-base 履歴 (その token の利用者)
+	userCalls  []string // user-base 履歴 (for #967 / i/delete-account)
 }
 
-func (s *stubTokenInvalidator) InvalidateToken(token string) {
+func (s *stubTokenInvalidator) InvalidateUserToken(userID, token string) {
 	s.calls = append(s.calls, token)
+	s.tokenUsers = append(s.tokenUsers, userID)
 }
 
 func (s *stubTokenInvalidator) InvalidateTokensForUser(userID string) {
@@ -498,6 +500,7 @@ func TestRegenerateToken_InvalidatesOldToken(t *testing.T) {
 
 	require.Len(t, inv.calls, 1, "old token must be invalidated exactly once")
 	assert.Equal(t, oldToken, inv.calls[0])
+	assert.Equal(t, []string{"u1"}, inv.tokenUsers, "the other processes drop the user's entries (#3664)")
 }
 
 // --- Error path tests ---

@@ -1480,9 +1480,8 @@ func TestUpdate_FieldsEmptyClears(t *testing.T) {
 }
 
 // #960: Update が成功した後に auth middleware の tokenCache を invalidate
-// する。同じ token の次 request で stale な user object が返るのを防ぐ。
-// invalidator が wire されており request context に token がある場合のみ
-// invalidate を呼ぶ — どちらが欠けても panic / 不正呼び出しにならない。
+// する。stale な user object が返るのを防ぐ。#3664 からは本 request の token
+// ではなく利用者の全 token を (全プロセスで) 捨てる。
 func TestUpdate_InvalidatesTokenCacheOnSuccess(t *testing.T) {
 	h, repo, _, _ := newTestHandler(t)
 	user := &model.User{ID: "user1", Username: "user1", AvatarDecorations: datatypes.JSON([]byte("[]"))}
@@ -1502,8 +1501,9 @@ func TestUpdate_InvalidatesTokenCacheOnSuccess(t *testing.T) {
 
 	require.NoError(t, h.Update(c))
 	assert.Equal(t, http.StatusOK, rec.Code)
-	require.Equal(t, []string{"the-current-request-token"}, inv.calls,
-		"成功した i/update は本 request の token を invalidate するべき")
+	require.Equal(t, []string{"user1"}, inv.userCalls,
+		"成功した i/update は利用者の token を全部 invalidate するべき")
+	assert.Empty(t, inv.calls)
 }
 
 // /api/i は middleware が渡す user (tokenCache 由来、30 秒 TTL) ではなく
@@ -1573,10 +1573,9 @@ func TestUpdate_NoInvalidatorIsNoop(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
-func TestUpdate_NoTokenInContextIsNoop(t *testing.T) {
-	// invalidator は wire 済みだが context に token が無いケース (= 認証
-	// pipeline が新旧混在している過渡期や unit test 直叩き)。invalidate
-	// 呼び出しは skip し、handler は 200 で完了する。
+func TestUpdate_NoTokenInContextStillInvalidatesUser(t *testing.T) {
+	// invalidator は wire 済みだが context に token が無いケース (= unit test
+	// 直叩きなど)。利用者単位で捨てるので token は要らない (#3664)。
 	h, repo, _, _ := newTestHandler(t)
 	user := &model.User{ID: "user1", Username: "user1", AvatarDecorations: datatypes.JSON([]byte("[]"))}
 	repo.Users["user1"] = user
@@ -1586,7 +1585,7 @@ func TestUpdate_NoTokenInContextIsNoop(t *testing.T) {
 
 	rec := post(h.Update, `{"name":"updated"}`, user)
 	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Empty(t, inv.calls, "token が context に無いとき invalidate は呼ばれない")
+	assert.Equal(t, []string{"user1"}, inv.userCalls)
 }
 
 // upstream paramDef は maxItems 16。それ超えは INVALID_PARAM (400)。

@@ -84,6 +84,11 @@ type AuthMiddleware struct {
 	// 認証要リクエストの DB hit を 30 秒 TTL で消す。logout/token revoke の
 	// 反映遅延は許容範囲内 (TTL 以内)。
 	tokenCache *tokenCache
+
+	// onInvalidate は、利用者の entry を捨てた後に利用者 ID で呼ぶ (#3664)。
+	// 他のプロセスへ伝える配線 (core/cachebus) が入る。構築時に 1 回だけ設定する。
+	// **token を渡さない。** 他のプロセスは利用者単位で捨てる。
+	onInvalidate func(userID string)
 }
 
 // NewAuthMiddleware creates a new AuthMiddleware.
@@ -95,15 +100,25 @@ func NewAuthMiddleware(userRepo repository.UserRepository, accessTokenRepo repos
 	}
 }
 
-// InvalidateToken removes a token entry from the auth cache so the next
-// /api/i request with that token re-resolves through the DB (= will fail
-// after `users.token` was rotated by i/regenerate-token、#884 security
-// fix)。本 method は i.TokenInvalidator interface の実装。
-func (a *AuthMiddleware) InvalidateToken(token string) {
+// InvalidateUserToken removes the entry of token, which belongs to userID,
+// from this process's auth cache so the next request with it re-resolves
+// through the DB (i/regenerate-token #884, i/revoke-token, OAuth code
+// replay), and tells the other processes to drop userID's entries (#3664).
+// An empty userID only drops the local entry.
+//
+// Call it after the change to the token (or the user) is committed to the DB.
+// 先に捨てると、捨てた後・commit の前に DB を読み始めたリクエストが古い行を
+// 読み、印より後に読み始めているので積んでしまう (他のプロセスも同じ)。
+//
+// 他のプロセスへは token ではなく利用者 ID を伝える (秘密を pub/sub に流さない)。
+// 他のプロセスはその利用者の entry を全部捨てるが、捨てすぎても次の要求で DB を
+// 引き直すだけ。
+func (a *AuthMiddleware) InvalidateUserToken(userID, token string) {
 	if token == "" {
 		return
 	}
-	a.tokenCache.invalidate(token)
+	a.tokenCache.invalidateUserToken(userID, token)
+	a.notifyInvalidated(userID)
 }
 
 // InvalidateTokensForUser drops every cached entry that resolves to the
@@ -111,15 +126,52 @@ func (a *AuthMiddleware) InvalidateToken(token string) {
 // tokens). Admin actions (suspend / unsuspend / delete-account) call this
 // so the target user is locked out of (or restored back into) the cache
 // without waiting up to 30s for natural TTL expiry (#965). #884 の
-// InvalidateToken は本 request の token 単独削除なので、admin が他 user
+// InvalidateUserToken は token 単独削除なので、admin が他 user
 // の全 session を即時失効したいケースには別 method が要る。
 //
 // noop when userID is empty.
+//
+// Call it after the change to the user is committed to the DB (see
+// InvalidateUserToken).
+//
+// 他のプロセスにも伝える (#3664。SetInvalidationHook)。自プロセスの entry は
+// 先に捨てるので、伝えられなくても自プロセスは今までどおり。
 func (a *AuthMiddleware) InvalidateTokensForUser(userID string) {
 	if userID == "" {
 		return
 	}
 	a.tokenCache.invalidateByUserID(userID)
+	a.notifyInvalidated(userID)
+}
+
+// InvalidateTokensForUserLocally drops userID's entries from this process's
+// auth cache without telling the other processes. It is what an invalidation
+// received from another process applies, and what the credential revoke
+// event (which every process receives) uses.
+func (a *AuthMiddleware) InvalidateTokensForUserLocally(userID string) {
+	if userID == "" {
+		return
+	}
+	a.tokenCache.invalidateByUserID(userID)
+}
+
+// InvalidateAllLocally drops every entry of this process's auth cache. It is
+// what an unreadable or dropped invalidation from another process applies.
+func (a *AuthMiddleware) InvalidateAllLocally() {
+	a.tokenCache.invalidateAll()
+}
+
+// SetInvalidationHook registers fn, called with the user id after this
+// process dropped that user's entries through InvalidateUserToken or
+// InvalidateTokensForUser (#3664). Call it once while wiring.
+func (a *AuthMiddleware) SetInvalidationHook(fn func(userID string)) {
+	a.onInvalidate = fn
+}
+
+func (a *AuthMiddleware) notifyInvalidated(userID string) {
+	if userID != "" && a.onInvalidate != nil {
+		a.onInvalidate(userID)
+	}
 }
 
 // Authenticate is an Echo middleware that extracts and validates the user token.
@@ -175,7 +227,7 @@ func (a *AuthMiddleware) Authenticate() echo.MiddlewareFunc {
 			// (30s TTL) 経由でも bypass できてしまうため、cache miss → DB
 			// fetch 経路で確実に弾く。cache hit (凍結前 entry) は stale な
 			// isSuspended=false を返すので self-mutation / admin 経路は
-			// InvalidateToken(sForUser) で 30s → μs window に縮める。
+			// InvalidateUserToken / InvalidateTokensForUser で 30s → μs window に縮める。
 			if user.IsSuspended {
 				c.Set(string(suspendedContextKey), true)
 				return next(c)
@@ -571,6 +623,8 @@ func (a *AuthMiddleware) resolveUser(token string) (user *model.User, scopes []s
 	if u, sc, tid, app, ok := a.tokenCache.get(token); ok {
 		return u, sc, tid, app, nil
 	}
+	// DB を引き始めた時刻。これ以降に捨てられた利用者の結果は積まない (#3664)。
+	readStart := a.tokenCache.now()
 
 	// まずnative tokenで検索 (= user 自身の login token, full access)。
 	user, err = a.userRepo.FindByToken(token)
@@ -579,7 +633,7 @@ func (a *AuthMiddleware) resolveUser(token string) (user *model.User, scopes []s
 		// user.token は char(16) で、PostgreSQL の char 比較は末尾の空白を
 		// 無視するので、"<token> " も同じ利用者に解決される。認証自体は通っても
 		// 害が無いように見えるが、この文字列は tokenCache の別キーになり
-		// (InvalidateToken が消すのは空白なしのキーだけ)、WebSocket の失効の鍵も
+		// (InvalidateUserToken が消すのは空白なしのキーだけ)、WebSocket の失効の鍵も
 		// 「リクエストの文字列」から作られて i/regenerate-token で閉じなくなる。
 		// 正当なクライアントが空白を足すことは無いので、完全一致を要求する
 		// (upstream の findOneBy も char 比較なので、ここは安全側への乖離)。
@@ -588,7 +642,7 @@ func (a *AuthMiddleware) resolveUser(token string) (user *model.User, scopes []s
 		user, err = nil, gorm.ErrRecordNotFound
 	}
 	if err == nil {
-		a.tokenCache.put(token, user, nil, "", false)
+		a.tokenCache.putIfFresh(readStart, token, user, nil, "", false)
 		return user, nil, "", false, nil
 	}
 
@@ -616,7 +670,7 @@ func (a *AuthMiddleware) resolveUser(token string) (user *model.User, scopes []s
 	// として扱い、RequireScope が kind 不足を弾けるようにする。tokenID は
 	// registry domain 分離用 (#1717)。
 	scopes = []string(accessToken.Permission)
-	a.tokenCache.put(token, accessToken.User, scopes, accessToken.ID, true)
+	a.tokenCache.putIfFresh(readStart, token, accessToken.User, scopes, accessToken.ID, true)
 	return accessToken.User, scopes, accessToken.ID, true, nil
 }
 

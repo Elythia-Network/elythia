@@ -105,7 +105,7 @@ func TestTokenCache_AutoSweepOnPut(t *testing.T) {
 func TestTokenCache_Invalidate(t *testing.T) {
 	c := newTokenCache()
 	c.put("tok", &model.User{ID: "u1"}, nil, "", false)
-	c.invalidate("tok")
+	c.invalidateUserToken("", "tok")
 	_, _, _, _, ok := c.get("tok")
 	assert.False(t, ok)
 }

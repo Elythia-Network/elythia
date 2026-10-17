@@ -115,6 +115,12 @@ func (h *Handler) Move(c echo.Context) error {
 		moveTo = uri
 	}
 	err := h.mover.Move(me, moveTo)
+	// 移行は movedToUri を立て、以後の書き込み (RequireNotMoved) を止める。
+	// auth middleware の tokenCache は移行前の利用者を持っているので、全プロセスで
+	// 捨てる (#3664。本家の AccountMoveService も localUserUpdated を出す)。
+	// 途中で失敗しても movedToUri が書かれている場合があるので、成否を問わず
+	// 捨てる (捨てすぎても次の要求で DB を引き直すだけ)。
+	h.invalidateUserTokenCache(me.ID)
 	switch {
 	case err == nil:
 		return h.Me(c)
