@@ -19,6 +19,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/meself"
 	"github.com/elythia-network/elythia/internal/api/pagination"
+	"github.com/elythia-network/elythia/internal/bgwork"
 	"github.com/elythia-network/elythia/internal/config"
 	coreabuse "github.com/elythia-network/elythia/internal/core/abuse"
 	"github.com/elythia-network/elythia/internal/core/captcha"
@@ -110,6 +111,9 @@ type UnfollowEnqueuer interface {
 
 // Handler handles admin API endpoints.
 type Handler struct {
+	// background は応答の後の処理 (テストメールの送信) を起動する箱 (#3661)。世代の停止で
+	// 待つ。nil なら素の goroutine で起動する (テスト)。
+	background *bgwork.Group
 	// detailExtras は UserDetailed のピン留め・移行先を users/show と同じ規則で埋める (#3330)。
 	detailExtras userpack.DetailExtras
 	// listPacker は一覧の利用者を本家 packMany と同じ形に組む (#3330)。
@@ -861,6 +865,13 @@ type QueueScaleEvent struct {
 func (h *Handler) SetQueueRuntimeProvider(p QueueRuntimeProvider) {
 	h.queueRuntime = p
 }
+
+// SetBackground sets the group the work after a response runs in, so stopping
+// the server generation waits for it (#3661).
+func (h *Handler) SetBackground(g *bgwork.Group) { h.background = g }
+
+// HasBackground reports whether SetBackground received a group.
+func (h *Handler) HasBackground() bool { return h.background != nil }
 
 // NewHandler creates a new admin Handler.
 func NewHandler(
