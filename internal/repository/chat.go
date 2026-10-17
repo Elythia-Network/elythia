@@ -93,12 +93,14 @@ type ChatRepository interface {
 
 	// ListUserHistory is the DM-only variant: 1-on-1 conversations only,
 	// rooms excluded. Mirrors upstream ChatService.userHistory (#692)。
-	ListUserHistory(userID string, limit int) ([]*model.ChatMessage, error)
+	// A non-empty untilID returns only the conversations whose latest message
+	// is older than it (an Elythia addition, #3653).
+	ListUserHistory(userID string, limit int, untilID string) ([]*model.ChatMessage, error)
 
 	// ListRoomHistory is the room-only variant: per-room latest message,
 	// for rooms the user owns or has membership in. Mirrors upstream
-	// ChatService.roomHistory (#692)。
-	ListRoomHistory(userID string, limit int) ([]*model.ChatMessage, error)
+	// ChatService.roomHistory (#692)。untilID is as in ListUserHistory.
+	ListRoomHistory(userID string, limit int, untilID string) ([]*model.ChatMessage, error)
 
 	// Mark all as read
 	MarkAllRead(userID string) error
@@ -661,7 +663,12 @@ func (r *chatRepository) ListHistory(userID string, limit int) ([]*model.ChatMes
 // ListUserHistory returns the latest DM (1-on-1) message per peer, ordered
 // by recency. Mirrors upstream ChatService.userHistory (#692)。room messages
 // (toRoomId IS NOT NULL) は対象外。
-func (r *chatRepository) ListUserHistory(userID string, limit int) ([]*model.ChatMessage, error) {
+//
+// untilID は会話の最新のメッセージの id で絞る (#3653)。会話を最新の id の
+// 降順に並べたうえで切るので、前のページの最後の id を渡せば続きになる。
+// 絞るのは会話ごとの最新を選んだ後で、選ぶ前に絞ると、新しいメッセージの
+// ある会話が古いメッセージで別のページに再び現れる。
+func (r *chatRepository) ListUserHistory(userID string, limit int, untilID string) ([]*model.ChatMessage, error) {
 	if limit <= 0 {
 		limit = 10
 	}
@@ -679,9 +686,10 @@ func (r *chatRepository) ListUserHistory(userID string, limit int) ([]*model.Cha
 			) sub
 			ORDER BY conversation_key, id DESC
 		) conversations
+		WHERE (? = '' OR id < ?)
 		ORDER BY id DESC
 		LIMIT ?
-	`, userID, userID, limit).Pluck("id", &ids).Error
+	`, userID, userID, untilID, untilID, limit).Pluck("id", &ids).Error
 	if err != nil {
 		return nil, err
 	}
@@ -697,7 +705,7 @@ func (r *chatRepository) ListUserHistory(userID string, limit int) ([]*model.Cha
 
 // ListRoomHistory returns the latest message per room that userID owns or
 // is a member of. Mirrors upstream ChatService.roomHistory (#692)。
-func (r *chatRepository) ListRoomHistory(userID string, limit int) ([]*model.ChatMessage, error) {
+func (r *chatRepository) ListRoomHistory(userID string, limit int, untilID string) ([]*model.ChatMessage, error) {
 	if limit <= 0 {
 		limit = 10
 	}
@@ -716,9 +724,10 @@ func (r *chatRepository) ListRoomHistory(userID string, limit int) ([]*model.Cha
 			)
 			ORDER BY "toRoomId", cm.id DESC
 		) conversations
+		WHERE (? = '' OR id < ?)
 		ORDER BY id DESC
 		LIMIT ?
-	`, userID, userID, limit).Pluck("id", &ids).Error
+	`, userID, userID, untilID, untilID, limit).Pluck("id", &ids).Error
 	if err != nil {
 		return nil, err
 	}

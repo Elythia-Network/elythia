@@ -420,10 +420,10 @@ func TestChatRepository_ListHistory(t *testing.T) {
 func TestChatRepository_ListHistory_Variants_NoMessages(t *testing.T) {
 	repo := NewChatRepository(testDB)
 
-	uh, err := repo.ListUserHistory("nope_user_id", 10)
+	uh, err := repo.ListUserHistory("nope_user_id", 10, "")
 	require.NoError(t, err)
 	assert.Empty(t, uh)
-	rh, err := repo.ListRoomHistory("nope_user_id", 10)
+	rh, err := repo.ListRoomHistory("nope_user_id", 10, "")
 	require.NoError(t, err)
 	assert.Empty(t, rh)
 }
@@ -465,7 +465,7 @@ func TestChatRepository_ListUserHistory(t *testing.T) {
 	require.NoError(t, repo.CreateMessage(rm))
 	defer testDB.Exec(`DELETE FROM "chat_message" WHERE id = ?`, rm.ID)
 
-	hist, err := repo.ListUserHistory(me.ID, 10)
+	hist, err := repo.ListUserHistory(me.ID, 10, "")
 	require.NoError(t, err)
 	// 2 つの DM 会話 (me-other1, me-other2)。room は除外。
 	assert.Len(t, hist, 2)
@@ -474,10 +474,24 @@ func TestChatRepository_ListUserHistory(t *testing.T) {
 	}
 
 	// limit clamp: 0 -> 10, 大きすぎる値 -> 100
-	defHist, _ := repo.ListUserHistory(me.ID, 0)
+	defHist, _ := repo.ListUserHistory(me.ID, 0, "")
 	assert.Len(t, defHist, 2)
-	clampHist, _ := repo.ListUserHistory(me.ID, 9999)
+	clampHist, _ := repo.ListUserHistory(me.ID, 9999, "")
 	assert.Len(t, clampHist, 2)
+
+	// #3653: untilId は会話の最新の id で切る。cm_uh2 より前で切っても、
+	// other1 の古いメッセージ (cm_uh1) が別の会話として現れてはいけない。
+	page2, err := repo.ListUserHistory(me.ID, 10, "cm_uh3")
+	require.NoError(t, err)
+	require.Len(t, page2, 1)
+	assert.Equal(t, "cm_uh2", page2[0].ID)
+	page3, err := repo.ListUserHistory(me.ID, 10, "cm_uh2")
+	require.NoError(t, err)
+	assert.Empty(t, page3)
+	first, err := repo.ListUserHistory(me.ID, 1, "")
+	require.NoError(t, err)
+	require.Len(t, first, 1)
+	assert.Equal(t, "cm_uh3", first[0].ID)
 }
 
 // #692: ListRoomHistory は room 限定 (toRoomId NOT NULL かつ owner / member) で
@@ -513,7 +527,7 @@ func TestChatRepository_ListRoomHistory(t *testing.T) {
 	defer testDB.Exec(`DELETE FROM "chat_message" WHERE id = ?`, dm.ID)
 
 	// owner は r1 / r2 のオーナーなので両方含む
-	hist, err := repo.ListRoomHistory(owner.ID, 10)
+	hist, err := repo.ListRoomHistory(owner.ID, 10, "")
 	require.NoError(t, err)
 	assert.Len(t, hist, 2)
 	for _, h := range hist {
@@ -521,14 +535,23 @@ func TestChatRepository_ListRoomHistory(t *testing.T) {
 	}
 
 	// other はメンバーシップ無し → 空
-	histOther, err := repo.ListRoomHistory(other.ID, 10)
+	histOther, err := repo.ListRoomHistory(other.ID, 10, "")
 	require.NoError(t, err)
 	assert.Empty(t, histOther)
 
 	// limit clamp
-	defHist, _ := repo.ListRoomHistory(owner.ID, 0)
+	// #3653: untilId は room ごとの最新の id で切る。
+	page2, err := repo.ListRoomHistory(owner.ID, 10, "cm_rh3")
+	require.NoError(t, err)
+	require.Len(t, page2, 1)
+	assert.Equal(t, "cm_rh2", page2[0].ID)
+	page3, err := repo.ListRoomHistory(owner.ID, 10, "cm_rh2")
+	require.NoError(t, err)
+	assert.Empty(t, page3)
+
+	defHist, _ := repo.ListRoomHistory(owner.ID, 0, "")
 	assert.Len(t, defHist, 2)
-	clampHist, _ := repo.ListRoomHistory(owner.ID, 9999)
+	clampHist, _ := repo.ListRoomHistory(owner.ID, 9999, "")
 	assert.Len(t, clampHist, 2)
 }
 
