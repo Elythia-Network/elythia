@@ -3,7 +3,8 @@
 2 つの commit (base と head) を、同じスタックで交互に流して性能を比べる仕組みです (#3542)。PR やリリースの前後で、同じ条件の数字を並べるために使います。
 
 - 集計と判定は`tools/benchcompare`(#3543)、スタックは`tests/bench/ab`(#3544)、workflow は`.github/workflows/bench-compare.yml`(#3545)
-- 本家 Misskey との比較 (`tests/bench/http`) とは別物です。こちらは Elythia 同士だけを比べます
+- 同じ仕組みで、base を本家 Misskey の公式 image に替えて比べることもできます (`bench-upstream`、#3654)。下の「[本家 Misskey との比較](#本家-misskey-との比較-bench-upstream)」を見てください
+- `tests/bench/http`(`make bench-up` / `bench-run`) は、本家と Elythia を 1 つのホストに同時に立てる古い比較です。workflow は無く、pprof を取るときに手元で使います ([bench-pprof.md](bench-pprof.md))
 
 ## 使い方
 
@@ -142,3 +143,79 @@ GitHub-hosted runner (ubuntu-24.04、AMD EPYC 7763 の 4 vCPU) で、同じ comm
 - base と head が違う commit なら、image のビルドがもう 1 回 (約 2 分) 増えて、36〜37 分の見込みです
 - 4 ラウンドは計測だけで約 43 分になり、ビルドを足すと job の上限 (45 分) を超えるので、`rounds`は 3 までにしています
 - この実行では、7 つのエンドポイントと app / postgres / redis のリソースが、すべて「差なし」でした。app は CPU の上限 (1.25) に、計測の区切り (100ms) のうち約 14% で当たっていました (`throttle.csv`)
+
+## 本家 Misskey との比較 (bench-upstream)
+
+本家 Misskey の公式 image (`misskey/misskey:<版>`) と Elythia を、上と同じスタック・同じ流し方で交互に流して比べます (#3654)。base が本家、head が Elythia です。workflow は`.github/workflows/bench-upstream.yml`、スタックは`tests/bench/ab`に本家の側の重ね合わせ (`compose.upstream.yml`と`misskey.yml`) を足したものです。
+
+### 発火
+
+| 経路 | Elythia | 本家の版 | ラウンド |
+|---|---|---|---|
+| schedule (毎週月曜日 05:40 日本時間 = 日曜日 20:40 UTC) | develop | `UPSTREAM_MISSKEY_VERSION` | 3 |
+| 手動 (`workflow_dispatch`) | `ref` (既定 develop) | `upstream` (空なら`UPSTREAM_MISSKEY_VERSION`) | `rounds` (2 か 3) |
+| `UPSTREAM_MISSKEY_VERSION`か、ベンチの仕組み (`bench-upstream.yml`、`tests/bench/ab/**`、`tests/bench/http/common/**`、`tests/bench/http/k6/lib/**`、`tools/benchcompare/**`) を変えた develop 向けの PR | PR の head | PR の`UPSTREAM_MISSKEY_VERSION` | 3 |
+
+```bash
+gh workflow run bench-upstream.yml --repo Elythia-Network/elythia \
+  -f ref=develop -f upstream=2026.10.0 -f rounds=3 -f scenario=prod-like
+```
+
+- schedule の時刻は、ほかの schedule の workflow (queue-bench-smoke の毎日 17:30 UTC、dropin-frontend-e2e の毎日 19:00 UTC、codeql の月曜日 20:30 UTC) と重ならない枠にしています
+- `ref`の受け方 (英数字と`._/-`だけ、fork の PR は`pull/<番号>/head`) は bench-compare と同じです。`upstream`は`2026.10.0`や`2026.10.0-beta.1`の形だけを受けます
+- secrets は使わず、token は読み取りだけです。結果を PR にコメントする workflow はありません (bench-compare-comment は bench-compare だけを見ます)
+- ベンチの仕組みを変えた PR では、bench-compare の A/A とこの比較の両方が流れます (別の runner で並行に、それぞれ 40 分ほど)。二重に流れるのは意図どおりで、`run.sh --upstream`の経路が壊れたことに、次の月曜日の schedule まで気付かないのを防ぐためです
+- check が見るのは、最後まで流れたかだけです。どちらが速いかで落としません
+- 結果の表は実行の Summary に出ます。k6 の生の JSON・リソースの時系列・ログは artifact (`bench-upstream-<run id>`、30 日) に残ります
+- required check ではありません
+
+### 手元で流す
+
+```bash
+make bench-upstream HEAD=HEAD ROUNDS=2 SCENARIO=prod-like SMOKE=1
+make bench-compare-down   # 途中で止めたときの片付け (project は bench-compare と同じ mk-bench-ab)
+```
+
+- `UPSTREAM_VERSION=`で本家の版を選べます。既定の`default`は`UPSTREAM_MISSKEY_VERSION`の版です
+- **本番が動いているホストでは`SMOKE=1`の 2 ラウンドだけにします** (bench-compare と同じ理由)。比較の数字は CI で取ります
+
+### 条件
+
+上の「測定の条件」(スタック・流し方・seed・シナリオ) は、そのまま本家にも当てはまります。違うのは次の点です。
+
+| | 本家 | Elythia |
+|---|---|---|
+| image | 公式 image を pull し、既定の CMD (`pnpm run migrateandstart`) のまま動かす (運営者が動かすのと同じ形)。tag は付け替えられるので、実際に流した image の digest を省略せずに report の先頭 (本家の行) に出す | 測る ref から`Dockerfile.app`でビルドする |
+| 設定 | `tests/bench/ab/misskey.yml`(`NODE_ENV=production`、`enableIpRateLimit: false`) | `tests/bench/ab/elythia.yml` + 環境変数 (bench-compare と同じ) |
+| 利用者ごとの制限 | 基本ロールの`rateLimitFactor`で決める。seed の間は 0 (制限なし)、終わったら`prod-like`は 1 (既定の制限)、`unlimited`は 0 | 環境変数`MK_DISABLEENDPOINTRATELIMITS` (bench-compare と同じ) |
+| app の cgroup のプロセス | Node.js が 4 つ。pnpm の外側の 2 つ (`pnpm run migrateandstart`と、そこから起動される`pnpm start`)、server を動かす親プロセス、queue を動かす worker 1 つ (`clusterLimit`無しの既定) | `elythia serve`の 1 つ |
+| pprof | 無し | sampler がヒープを 5 秒に 1 回読む (Elythia にだけかかる小さな負荷) |
+| CPU / メモリの上限 | 1.25 / 2048M | 1.25 / 2048M |
+
+- **本家は`NODE_ENV=production`で動かします。** `tests/bench/http`は`NODE_ENV=development`で制限を外していましたが、production 以外では TypeORM がすべての SQL をログに書く (`packages/backend/src/postgres.ts`) ので、本家だけが遅くなります。制限は、本家に元からある基本ロールの`rateLimitFactor` (0 で利用者ごとの制限を飛ばす) で外します
+- seed の間に制限を外すのは、seed の投稿とフォローが本家の利用者ごとの枠 (`notes/create`は 1 時間に 300) を食わないようにするためです。Elythia の側は bench-compare と同じく、seed の間だけ環境変数で外しています
+- 本家の CPU 時間とメモリは、pnpm の 2 つを含めた 4 つの合計です。pnpm の分は CPU をほとんど使いませんが、メモリは 1 つあたり匿名メモリで約 100MiB を常に持ちます (公式 image で`pnpm exec`を待たせて`/proc`の`RssAnon`を読んだ値、2026-10-17)。手元の smoke で本家の`memory.peak`は約 595MiB で、そのうち約 200MiB が pnpm の分と見込まれます。本家のサーバーだけと比べた値ではなく、公式 image をそのまま動かしたときの値として読みます
+- app のメモリの上限は、両側とも 2048M にしています (bench-compare は 1024M)。本家は 4 つの Node.js のプロセスと、起動のたびの migration があるためです。`memory.peak`は上限ではなく使った量の最大なので、上限を上げても Elythia の値は変わりません
+- タイムラインは、両側とも既定のままです (本家は Redis のタイムライン (FTT) が有効、Elythia は bench-compare と同じく JSON のキャッシュが off)
+- burn-in は、本家と Elythia の両方を 1 回ずつ起動します (image が 2 つあるため)
+
+### 読み方
+
+- report の「まとめ」の次に「比 (本家 / Elythia)」の表が出ます。エンドポイントごとの p50 / p95 と、app / postgres / redis / web の CPU 時間・メモリの最大を、本家の中央値 ÷ Elythia の中央値で並べます。**1 より大きければ Elythia のほうが速い (リソースなら少ない)** です
+- 判定 (差あり / 差なし / 比較不能) の基準は bench-compare と同じです。「差あり」には、どちらが良いか (「Elythiaが良い」「本家が良い」) を添えます。差なしのときは、比が 1 から離れていてもどちらが速いとは言いません
+- p99 は bench-compare と同じく参考です (判定に使わない)
+- Go のヒープ (`HeapInuse`) は Elythia にしか無いので、Elythia の値だけを参考として出します。Elythia の側で途中の回だけ取れなかったときと、ヒープ以外の指標が片側で欠けたときは「比較不能」です。**Elythia の側で全回とも取れなかったときは、両側とも値が無いので、ヒープの行が表から黙って消えます** (比較は「完了」のまま。pprof が効かなくなったなど)。ヒープの行が無い report は、artifact の`resources.csv`の`heap_inuse`の列と app のログを確かめてください
+- 比較不能のエンドポイントは、比の表でも比を「-」にします
+- **回をまたいで絶対値を比べません。** runner の CPU は回ごとに違います (上の「判定」の節の記録で 3 種類)。週ごとの推移を見るときも、同じ回の中の比を並べます
+- `memory.peak`はページキャッシュを含みます。Node.js と Go ではメモリの使い方 (ヒープの確保のしかた、GC) が違うので、メモリの比は「その負荷で cgroup がどこまで膨らんだか」として読みます
+- 失敗率か 429 の率が両者で 1 ポイントより大きく違うエンドポイントは「比較不能」になります。`prod-like`で本家だけが 429 を返すようになったら、本家の制限が変わった可能性があります。`notes-create`の上限は両側とも 1 時間に 300 です
+
+### 所要時間
+
+手元 (Xeon E-2274G、8 コア) で`SMOKE=1`の 2 ラウンドを流したときの 1 回は、本家が約 2 分 06 秒、Elythia が約 1 分 50 秒でした (2026-10-17)。本家の burn-in (postgres / redis / web と一緒に起動して、空の DB への migration を流し、healthy になってから止めるまで) は約 24 秒で、1 回あたりの差 (約 16 秒) は本家の起動 (1 回に 2 度) の分です。smoke でない 1 回は bench-compare と同じく約 5 分半の見込みで、3 ラウンド (6 回) にビルド・pull・burn-in を足して約 40 分です。4 ラウンドは約 50 分になり、job の上限 (60 分) に対して余裕が 10 分を切るので、`rounds`は 3 までにしています。GitHub-hosted runner での実測は、PR の上の実行で取ります
+
+### tests/bench/http を直さずに tests/bench/ab に足した理由
+
+- `tests/bench/ab`には、ラウンドを交互に回す流し方、cgroup から読む資源の測り方、digest で固定した周りの image、`tools/benchcompare`の判定がすでにあり、本家の側は app を替えるだけで済む
+- `tests/bench/http`は本家と Elythia を同じホストに同時に立てる (CPU を取り合う)、1 回だけ流す (ばらつきが分からない)、資源を測らない、TLS の証明書を作る、Elythia を連合の e2e 用の Dockerfile でビルドする、という作りで、runner の上で比べるには作り直しが要る
+- 同じスタックを使うので、seed (利用者・フォロー・ノートの分布) と k6 のシナリオが、bench-compare と本家との比較で必ず揃う

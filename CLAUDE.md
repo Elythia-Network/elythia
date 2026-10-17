@@ -259,6 +259,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 | `queue-bench-smoke` | 毎日(schedule) | | queue driverがジョブを落としていないか |
 | `bench-compare` | PR(paths限定) | | baseとheadの2つのcommitを同じスタックで交互に流し、性能を比べる。主に手動で使う。PRでは、ベンチの仕組みを変えたときだけhead同士を流す |
 | `bench-compare-comment` | `bench-compare`の完了(`workflow_run`) | | `bench-compare`の結果を、対象のPRにコメントで出す。headのコードは動かさない。default branchにある版で動く |
+| `bench-upstream` | 毎週月曜日(schedule)、PR(paths限定) | | 本家Misskeyの公式imageとElythiaを`bench-compare`と同じスタックで交互に流し、性能を比べる。PRでは、本家の版(`UPSTREAM_MISSKEY_VERSION`)かベンチの仕組みを変えたときだけ流す |
 
 `ci.yml` / `dependency-review` / `build-with-plugins` / `bench-compare-comment`以外は、手動(`workflow_dispatch`)でも起動できます。scheduleのものはPRでは回らないので、失敗はActions上で確認して別のPRで直します。各workflowの設計理由と、落ちたときの対処は[docs/ci.md](docs/ci.md)にあります。
 
@@ -303,6 +304,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 
 このファイル自体を変えたときだけ、1行で追記します(新しいものを上に)。経緯の本文はリンク先にあります。個別のfixの履歴は`CHANGELOG.md`にあります。
 
+- 2026-10-17: 本家Misskeyとの性能比較の`bench-upstream` workflowを足したので、Section 8の表に1行を足した (#3654) → [docs/bench-compare.md](docs/bench-compare.md#本家-misskey-との比較-bench-upstream)
 - 2026-10-16: システムカタログの`indexdef`をWHEREに書かないことを、`catalog-check`が検査するようにしたので、Section 4の行に注意を足した (#3369) → [docs/testing.md](docs/testing.md)
 - 2026-10-14: `bench-compare`の結果をPRにコメントで出す`bench-compare-comment` workflowを足したので、Section 8の表に1行を足した (#3560) → [docs/bench-compare.md](docs/bench-compare.md)
 - 2026-10-14: 性能比較の`bench-compare` workflowを足したので、Section 8の表に1行を足した (#3545) → [docs/bench-compare.md](docs/bench-compare.md)

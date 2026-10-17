@@ -114,6 +114,7 @@ PR を出すと十数個の check が走る。**どれが何を見ていて、�
 | `spec (Elythia 1/4)` 〜 `4/4` | Playwright | ブラウザからの統合互換 (298 spec ファイル) | 4-9 min | `make playwright-check` |
 | `build-and-push` / `-bundled` | Docker | image がビルドできるか (PR では push しない)。`-bundled` は image の中で frontend もビルドする (#3379) | 4 min (`-bundled` はキャッシュが冷えていると frontend の分だけ延びる。手元の冷えたビルドで frontend stage だけ約 3 分) | `docker build -f Dockerfile .` / `docker build -f Dockerfile.bundled .` |
 | `compare` | Bench compare | **ベンチの仕組みを変えた PR でだけ**、PR の head 同士 (A/A) を同じスタックで流し、最後まで完了するか。「差なし」かどうかは check では見ず、Summary を人が見る。base と head を選んで比べるときは手動で起動する (`gh workflow run bench-compare.yml -f base=develop -f head=<ref>`、[bench-compare.md](bench-compare.md))。結果は対象の PR にコメントでも出る (下の「`bench-compare` / `bench-compare-comment` workflow」) | 35 min | `make bench-compare BASE=HEAD HEAD=HEAD SMOKE=1` (本番のホストでは smoke だけ) |
+| `compare` | Bench upstream | **本家の版 (`UPSTREAM_MISSKEY_VERSION`) かベンチの仕組み (bench-compare と同じ paths) を変えた PR でだけ**、本家の公式 image と PR の head を同じスタックで流し、最後まで完了するか。どちらが速いかは check では見ず、Summary を人が見る。毎週月曜日 (日本時間) の schedule と手動でも流れる (`gh workflow run bench-upstream.yml -f ref=develop`、[bench-compare.md](bench-compare.md#本家-misskey-との比較-bench-upstream)) | 未計測 (見込み 40 min) | `make bench-upstream SMOKE=1` (本番のホストでは smoke だけ) |
 | `build / build` | Build with plugins (selftest) | 運営者向けの reusable workflow が通るか。外部プラグインを実際に clone し、frontend を持つので `Dockerfile.bundled` の中でプラグインの .vue を含めた SPA のビルドまで走る。**`docker build --check` では見えない範囲** (pluginbuild / go build / frontend のビルドが通るか、生成物とプラグインの frontend が frontend stage に届くか) を確認できるのはこの check だけ | 6 min | paths に該当する PR で自動発火する。手動なら `gh workflow run build-with-plugins-selftest.yml --ref <branch>` (default branch にある場合のみ) |
 
 ### e2e 系が「何を守っているか」の違い
@@ -754,6 +755,14 @@ checkout / setup-go を除くと step は実行順に 3 つ。**required job な
   - Dependabot が起点の実行では動かさない (`workflow_run` の token が読み取りだけになり、書き込みが 403 で落ちる)
   - PR の check には出ない (`workflow_run` の実行は PR に紐づかない)。失敗は Actions の「Bench compare comment」で見る
 
+#### `bench-upstream` workflow
+
+- `bench-upstream.yml` (#3654) は、本家 Misskey の公式 image (`misskey/misskey:<版>`) と Elythia を、bench-compare と同じスタックで交互に流して比べる (`tests/bench/ab/run.sh --upstream`)。毎週月曜日 05:40 (日本時間、cron は日曜日 20:40 UTC) の schedule、手動実行、本家の版かベンチの仕組みを変える PR で発火する (仕組みを変えた PR では bench-compare の A/A と二重に流れる)。token は読み取りだけで、secrets を使わない。使い方と読み方は [bench-compare.md](bench-compare.md#本家-misskey-との比較-bench-upstream)
+- 本家の image は workflow にも compose にも版を書かず、`UPSTREAM_MISSKEY_VERSION` (手動実行では入力) から作る。版を上げる PR で自動で流れるので、上げた版で本家との差がどう変わったかを PR の上で見られる
+- 本家は公式 image を既定の CMD のまま、`NODE_ENV=production` で動かし、利用者ごとの制限は基本ロールの `rateLimitFactor` で決める (production 以外では本家が全 SQL をログに書き、本家だけが遅くなるため)
+- 結果を PR にコメントする workflow は無い。Summary と artifact (`bench-upstream-<run id>`、30 日) で見る
+- **回をまたいで絶対値を比べない。** runner の CPU が回ごとに違うので、同じ回の中の比 (本家 / Elythia) だけを読む
+
 #### schedule で回る workflow
 
 PR では回らないので、失敗は Actions 上で確認して別 PR で対処する。
@@ -762,6 +771,7 @@ PR では回らないので、失敗は Actions 上で確認して別 PR で対�
 |---|---|---|
 | `dropin-frontend-e2e.yml` | 3 TS インスタンス + cypress で frontend 視点の drop-in 互換 | 19:00 UTC |
 | `queue-bench-smoke.yml` | queue driver がジョブを落としていないか (`ok == sent`) | 17:30 UTC |
+| `bench-upstream.yml` | 本家 Misskey との性能比較 (develop と`UPSTREAM_MISSKEY_VERSION`の版) | 日曜日 20:40 UTC (月曜日 05:40 日本時間) |
 
 #### CI失敗時の対応
 
