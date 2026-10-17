@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sync/atomic"
+	"time"
 
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/redis/go-redis/v9"
@@ -74,13 +76,19 @@ func (w *bufferedWriter) Increment(noteID, reaction string, delta int) error {
 // Lua script で HGETALL + DEL をアトミックに実行し、flush 中の Increment
 // ロスを防ぐ。
 func (w *bufferedWriter) Flush(ctx context.Context) error {
+	_, err := w.flushAll(ctx)
+	return err
+}
+
+// flushAll is Flush that also reports how many keys it found.
+func (w *bufferedWriter) flushAll(ctx context.Context) (int, error) {
 	// SCAN でバッファキーを探す
 	var cursor uint64
 	var flushed int
 	for {
 		keys, next, err := w.rdb.Scan(ctx, cursor, bufferKeyPrefix+"*", 100).Result()
 		if err != nil {
-			return fmt.Errorf("reaction flush: scan: %w", err)
+			return flushed, fmt.Errorf("reaction flush: scan: %w", err)
 		}
 		for _, key := range keys {
 			if err := w.flushKey(ctx, key); err != nil {
@@ -97,7 +105,7 @@ func (w *bufferedWriter) Flush(ctx context.Context) error {
 	if flushed > 0 {
 		slog.Info("reaction flush: completed", "notes", flushed)
 	}
-	return nil
+	return flushed, nil
 }
 
 // flushKey atomically reads and deletes one buffer key, then applies
@@ -227,4 +235,157 @@ func MergeReactions(reactionsJSON []byte, buffered map[string]int64) []byte {
 	}
 	out, _ := json.Marshal(reactions)
 	return out
+}
+
+// --- Switchable (follows meta.enableReactionsBuffering at runtime) ---
+
+// FlushInterval is how often the queue role enqueues a reaction flush.
+const FlushInterval = 30 * time.Second
+
+// BufferDrainWindow is how long a SwitchableWriter keeps merging and flushing
+// the Redis buffer after buffering was turned off (or at startup with buffering
+// off).
+//
+// **meta のキャッシュの期限より長くする。** 無効の通知を取りこぼしたプロセスは、
+// meta のキャッシュが切れて tick が読み直すまで (最大 MetaCacheTTL +
+// FlushInterval) 溜め続ける。窓がそれより先に閉じると、そのプロセスが溜めた分を
+// 他のプロセスが移さずに DB へ書き、順序が崩れる。さらに flush が数回回る分の
+// 余裕を足す。窓の内の flush がまだ残りを見つけたら、窓を延ばす (Flush)。
+const BufferDrainWindow = repository.MetaCacheTTL + 3*FlushInterval
+
+// SwitchableWriter chooses between the direct and the buffered writer on every
+// call, so meta.enableReactionsBuffering can change without rebuilding the
+// server (#3663).
+//
+// 切り替えの途中の扱い:
+//   - 1 回の Increment は、そのときの設定に従ってどちらか一方へだけ書く。
+//     DB と Redis の両方へは書かないので、二重に足すことはない
+//   - 有効 → 無効: Redis に溜まった分は消さない。無効にしてから
+//     BufferDrainWindow の間は、読みも溜まった分を足し、queue の役割の
+//     ticker も flush を積み続ける (NeedsFlush)
+//   - **窓の内で DB へ直接書くときは、先にその note の溜まった分を DB へ移す。**
+//     DB の数は 0 未満にならない (IncrementReaction は 0 以下で key を消す)
+//     ので、溜まった +1 より先に取り消しの -1 を DB へ書くと -1 が消え、後の
+//     flush の +1 だけが残って数が 1 つ多いまま固まる。移してから書けば、
+//     DB へ当たる順序が付けた順・取り消した順と同じになる。ただし周期の
+//     flush が同じ key を Redis から消して DB へ足すまでの間 (1 回の UPDATE の
+//     間) に取り消しが来ると、移す分がもう無く、順序は保証できない。複数の
+//     プロセスにまたがって閉じる手段 (DB と Redis をまたぐロック) の重さに
+//     見合わないので許している
+//   - Flush は設定に関わらず Redis のバッファを DB へ移す (key ごとに
+//     HGETALL + DEL を原子的に行うので、複数のプロセスが同時に Flush しても
+//     二重に足さない)。無効のときの Flush が残りを見つけたら、その Flush を
+//     実行したプロセスの窓を延ばす。
+//     queue の遅れや、通知を取りこぼして溜め続けるプロセスがあっても、
+//     残りが無くなるまで flush を積み続けるため
+//   - 無効 → 有効: 以後の Increment が Redis へ行く。前に DB へ書いた分は
+//     そのまま
+//
+// 本家は有効 → 無効の metaUpdated を受けたプロセスがすぐに bake する。
+// ここではすぐには移さず、次の flush (最大 FlushInterval 後) か、その note への
+// 次の書き込みで移す。その間も読みには溜まった分を足す。
+type SwitchableWriter struct {
+	direct    ReactionCountWriter
+	buffered  *bufferedWriter
+	buffering atomic.Bool
+	// drainUntil は、溜まった分を読みに足し flush を積み続ける期限 (UnixNano)。
+	drainUntil atomic.Int64
+	now        func() time.Time
+}
+
+// NewSwitchableWriter returns a writer that starts in the given mode.
+//
+// 無効で始めるときも BufferDrainWindow の間は Redis のバッファを見る。前の
+// プロセスや世代が有効のまま溜めた分を、無効にしてから flush する前に
+// 作り直したときに取り残さないため。
+func NewSwitchableWriter(rdb *redis.Client, noteRepo repository.NoteRepository, buffering bool) *SwitchableWriter {
+	w := &SwitchableWriter{
+		direct:   NewDirectWriter(noteRepo),
+		buffered: &bufferedWriter{rdb: rdb, noteRepo: noteRepo},
+		now:      time.Now,
+	}
+	w.buffering.Store(buffering)
+	if !buffering {
+		w.extendDrain()
+	}
+	return w
+}
+
+func (w *SwitchableWriter) extendDrain() {
+	w.drainUntil.Store(w.now().Add(BufferDrainWindow).UnixNano())
+}
+
+// SetBuffering switches the mode. 有効 → 無効のときだけ、溜まった分を移す期限を
+// 延ばす。同じ値を何度渡してもよい (metaUpdated は自プロセスの更新でも届き、
+// queue の ticker も毎回読み直す)。
+func (w *SwitchableWriter) SetBuffering(on bool) {
+	if was := w.buffering.Swap(on); was && !on {
+		w.extendDrain()
+	}
+}
+
+// Buffering reports whether increments currently go to Redis.
+func (w *SwitchableWriter) Buffering() bool {
+	return w.buffering.Load()
+}
+
+// NeedsFlush reports whether the Redis buffer may hold counts: buffering is on,
+// or it was turned off less than BufferDrainWindow ago (extended while flushes
+// keep finding counts).
+func (w *SwitchableWriter) NeedsFlush() bool {
+	return w.buffering.Load() || w.now().UnixNano() < w.drainUntil.Load()
+}
+
+// Increment writes to the writer of the current mode only. While draining, it
+// first moves the note's buffered counts to the DB so that the DB sees the
+// increments in order.
+func (w *SwitchableWriter) Increment(noteID, reaction string, delta int) error {
+	if w.buffering.Load() {
+		return w.buffered.Increment(noteID, reaction, delta)
+	}
+	if w.NeedsFlush() {
+		if err := w.buffered.flushKey(context.Background(), bufferKeyPrefix+noteID); err != nil {
+			// 移せなくても書き込みは止めない (リアクション自体は成立している)。
+			// 残った分は後の flush が移す。
+			slog.Warn("reaction: moving the buffered counts before a direct write failed", "note", noteID, "err", err)
+		}
+	}
+	return w.direct.Increment(noteID, reaction, delta)
+}
+
+// Flush moves the Redis buffer to the DB whatever the current mode is.
+//
+// 無効でも移す。設定を見て飛ばすと、有効の間に溜まった分が Redis に残り続ける
+// (#1780)。無効のときに残りを見つけたら窓を延ばす。
+func (w *SwitchableWriter) Flush(ctx context.Context) error {
+	n, err := w.buffered.flushAll(ctx)
+	// 延ばすのは残りを見つけたときだけ。SCAN の失敗では延ばさない (次の tick が
+	// 試し直す)。延ばすと、Redis が落ちている間ずっと窓が閉じず、無効なのに
+	// 書き込みと読みのたびに落ちた Redis を引く。
+	if !w.buffering.Load() && n > 0 {
+		w.extendDrain()
+	}
+	return err
+}
+
+// SetClock replaces the clock used for the drain window. Intended for tests.
+func (w *SwitchableWriter) SetClock(now func() time.Time) {
+	w.now = now
+}
+
+// GetBuffered returns the unflushed counts while the buffer may hold some.
+func (w *SwitchableWriter) GetBuffered(ctx context.Context, noteID string) (map[string]int64, error) {
+	if !w.NeedsFlush() {
+		// 無効のまま期限を過ぎたら Redis を引かない (読むたびの往復を増やさない)。
+		return nil, nil
+	}
+	return w.buffered.GetBuffered(ctx, noteID)
+}
+
+// GetBufferedMany is the batched GetBuffered.
+func (w *SwitchableWriter) GetBufferedMany(ctx context.Context, noteIDs []string) (map[string]map[string]int64, error) {
+	if !w.NeedsFlush() {
+		return nil, nil
+	}
+	return w.buffered.GetBufferedMany(ctx, noteIDs)
 }

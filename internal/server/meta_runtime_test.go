@@ -49,11 +49,25 @@ var metaRuntimeColumns = []string{"name", "deeplAuthKey", "deeplIsPro", "enableR
 
 func newMetaRuntimeHarness(t *testing.T, beforeSetup ...func(*Server)) *metaRuntimeHarness {
 	t.Helper()
+	return newMetaRuntimeHarnessWith(t, metaRuntimeOptions{onlyServer: "1"}, beforeSetup...)
+}
+
+// metaRuntimeOptions varies the process the harness builds.
+type metaRuntimeOptions struct {
+	// onlyServer is MK_ONLY_SERVER ("" runs the queue role too).
+	onlyServer string
+	// pubsubDown points the pub/sub client at a stopped Redis, so the process
+	// receives no internal:metaUpdated, not even its own.
+	pubsubDown bool
+}
+
+func newMetaRuntimeHarnessWith(t *testing.T, opts metaRuntimeOptions, beforeSetup ...func(*Server)) *metaRuntimeHarness {
+	t.Helper()
 	if serverIntegrationDB == nil {
 		t.Skip("PostgreSQL unavailable")
 	}
 	db := serverIntegrationDB
-	t.Setenv(config.EnvOnlyServer, "1")
+	t.Setenv(config.EnvOnlyServer, opts.onlyServer)
 	t.Setenv(config.EnvOnlyQueue, "")
 	// ドライブのファイルは作業ディレクトリ相対に置かれるので、リポジトリを汚さない。
 	t.Chdir(t.TempDir())
@@ -74,6 +88,13 @@ func newMetaRuntimeHarness(t *testing.T, beforeSetup ...func(*Server)) *metaRunt
 	redisClients := &cache.RedisClients{
 		Default: redisClient, Pubsub: redisClient, JobQueue: redisClient,
 		Timelines: redisClient, Reactions: redisClient,
+	}
+	if opts.pubsubDown {
+		down := miniredis.RunT(t)
+		pubsubClient := redis.NewClient(&redis.Options{Addr: down.Addr(), MaxRetries: -1})
+		down.Close()
+		t.Cleanup(func() { _ = pubsubClient.Close() })
+		redisClients.Pubsub = pubsubClient
 	}
 	redisPort, err := strconv.Atoi(mr.Port())
 	require.NoError(t, err)
@@ -273,4 +294,159 @@ func TestMetaRuntime_DeepLSettingsApplyWithoutRebuild(t *testing.T) {
 	require.Contains(t, rec.Body.String(), "UNAVAILABLE")
 	_, n = fake.last()
 	require.Equal(t, 2, n, "a removed key must not reach DeepL")
+}
+
+// noteReactionsInDB reads the reaction counts stored on the note row.
+func (h *metaRuntimeHarness) noteReactionsInDB(noteID string) map[string]int {
+	h.t.Helper()
+	var n model.Note
+	require.NoError(h.t, h.db.Select("reactions").Take(&n, "id = ?", noteID).Error)
+	out := map[string]int{}
+	if len(n.Reactions) > 0 {
+		require.NoError(h.t, json.Unmarshal(n.Reactions, &out))
+	}
+	return out
+}
+
+// noteReactionsShown reads the reaction counts the API returns.
+func (h *metaRuntimeHarness) noteReactionsShown(noteID string) map[string]int {
+	h.t.Helper()
+	rec := h.post("/api/notes/show", h.rootToken, map[string]any{"noteId": noteID})
+	require.Equal(h.t, http.StatusOK, rec.Code, rec.Body.String())
+	var body struct {
+		Reactions map[string]int `json:"reactions"`
+	}
+	require.NoError(h.t, json.Unmarshal(rec.Body.Bytes(), &body))
+	return body.Reactions
+}
+
+func (h *metaRuntimeHarness) react(token, noteID string) {
+	h.t.Helper()
+	rec := h.post("/api/notes/reactions/create", token, map[string]any{"noteId": noteID, "reaction": "👍"})
+	require.Equal(h.t, http.StatusNoContent, rec.Code, rec.Body.String())
+}
+
+func TestMetaRuntime_ReactionsBufferingSwitchesWithoutRebuild(t *testing.T) {
+	h := newMetaRuntimeHarness(t)
+	tokens := []string{"metartuser000001", "metartuser000002", "metartuser000003"}
+	for i, tok := range tokens {
+		h.createUser("metart-user-"+strconv.Itoa(i), "metart_user"+strconv.Itoa(i), tok, false)
+	}
+	noteID := h.createNote(h.rootID, "react here")
+	bufferKey := "reaction-buffer:" + noteID
+
+	// 無効のまま: DB へ直接書く。
+	h.react(tokens[0], noteID)
+	require.Equal(t, map[string]int{"👍": 1}, h.noteReactionsInDB(noteID))
+	require.False(t, h.mr.Exists(bufferKey))
+
+	// 同じプロセスの管理画面で有効にする: Redis へ溜める。
+	h.updateMetaHere(map[string]any{"enableReactionsBuffering": true})
+	h.react(tokens[1], noteID)
+	require.True(t, h.mr.Exists(bufferKey), "buffering must apply right after the admin enables it")
+	require.Equal(t, map[string]int{"👍": 1}, h.noteReactionsInDB(noteID))
+	require.Equal(t, map[string]int{"👍": 2}, h.noteReactionsShown(noteID))
+
+	// 別のプロセスが無効にする (通知は 1 回)。溜まった分は消さず読みに足す。
+	h.updateMetaElsewhere(map[string]any{"enableReactionsBuffering": false})
+	require.Equal(t, map[string]int{"👍": 2}, h.noteReactionsShown(noteID))
+
+	// flush の前に、溜めた側の人が取り消す。DB へ直接書く前に溜まった分を移すので、
+	// 数は 1 に戻り、Redis には何も残らない (#3663 のレビュー M-1)。
+	h.unreact(tokens[1], noteID)
+	require.Equal(t, map[string]int{"👍": 1}, h.noteReactionsInDB(noteID))
+	require.False(t, h.mr.Exists(bufferKey), "the buffered count must be moved before the direct write")
+	require.Equal(t, map[string]int{"👍": 1}, h.noteReactionsShown(noteID))
+
+	h.react(tokens[2], noteID)
+	require.Equal(t, map[string]int{"👍": 2}, h.noteReactionsInDB(noteID))
+	require.Equal(t, map[string]int{"👍": 2}, h.noteReactionsShown(noteID))
+}
+
+func (h *metaRuntimeHarness) unreact(token, noteID string) {
+	h.t.Helper()
+	rec := h.post("/api/notes/reactions/delete", token, map[string]any{"noteId": noteID})
+	require.Equal(h.t, http.StatusNoContent, rec.Code, rec.Body.String())
+}
+
+// 無効で起動しても、queue の役割は flush の ticker を回す。起動時の値で
+// ticker の有無を決めていたので、後から有効にしても誰も flush しなかった。
+func TestMetaRuntime_ReactionFlushTickerRunsWhenStartedDisabled(t *testing.T) {
+	started := make(chan func() error, 1)
+	_ = newMetaRuntimeHarnessWith(t, metaRuntimeOptions{}, func(s *Server) {
+		s.reactionFlushWorker = func(ctx context.Context, fn func() error) {
+			started <- fn
+			<-ctx.Done()
+		}
+	})
+	var enqueue func() error
+	select {
+	case enqueue = <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the reaction flush worker must start even when buffering is off at startup")
+	}
+
+	// 起動直後は前の世代の残りを移す期限の内なので、flush を積みに行く。
+	// miniredis は mkq の Lua (cmsgpack) を実行できないので、積みに行ったことを
+	// mkq のエラーで確かめる (積まずに返すと nil になる)。
+	err := enqueue()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "mkq")
+}
+
+// 管理画面で変えたプロセスは、pub/sub が届かなくても (自分の通知も届かない)
+// その場で切り替える。metaUpdated の購読だけに頼ると、Redis の pub/sub が
+// 切れている間は変えたプロセスでさえ効かない。
+func TestMetaRuntime_AppliesInThisProcessWithoutPubSub(t *testing.T) {
+	h := newMetaRuntimeHarnessWith(t, metaRuntimeOptions{onlyServer: "1", pubsubDown: true})
+	token := "metartuser000009"
+	h.createUser("metart-user-9", "metart_user9", token, false)
+	noteID := h.createNote(h.rootID, "react here")
+
+	h.updateMetaHere(map[string]any{"enableReactionsBuffering": true})
+	h.react(token, noteID)
+	require.True(t, h.mr.Exists("reaction-buffer:"+noteID))
+}
+
+// web だけのプロセスも ticker を回し (設定の読み直しのため)、flush は積まない。
+func TestMetaRuntime_ReactionTickerRunsInServerOnlyRoleWithoutEnqueue(t *testing.T) {
+	started := make(chan func() error, 1)
+	_ = newMetaRuntimeHarnessWith(t, metaRuntimeOptions{onlyServer: "1"}, func(s *Server) {
+		s.reactionFlushWorker = func(ctx context.Context, fn func() error) {
+			started <- fn
+			<-ctx.Done()
+		}
+	})
+	var tick func() error
+	select {
+	case tick = <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the reaction ticker must run in the server-only role to re-read the setting")
+	}
+	// 起動直後の窓の内でも、queue の役割でなければ積みに行かない (積みに行くと
+	// miniredis が mkq の Lua を実行できずにエラーになる)。
+	require.NoError(t, tick())
+}
+
+// web だけのプロセスも tick で meta から設定を読み直す。通知を取りこぼして
+// 有効のまま溜め続けている状態を作り、tick で DB の値 (無効) に揃うことを見る。
+func TestMetaRuntime_ReactionTickReloadsInServerOnlyRole(t *testing.T) {
+	started := make(chan func() error, 1)
+	h := newMetaRuntimeHarnessWith(t, metaRuntimeOptions{onlyServer: "1"}, func(s *Server) {
+		s.reactionFlushWorker = func(ctx context.Context, fn func() error) {
+			started <- fn
+			<-ctx.Done()
+		}
+	})
+	var tick func() error
+	select {
+	case tick = <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the reaction ticker did not start")
+	}
+	w := h.srv.reactionCountWriter
+	require.NotNil(t, w)
+	w.SetBuffering(true)
+	require.NoError(t, tick())
+	require.False(t, w.Buffering(), "a web-only process must re-read enableReactionsBuffering on each tick")
 }
