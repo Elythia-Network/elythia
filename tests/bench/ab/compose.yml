@@ -50,7 +50,7 @@ services:
     networks: [bench]
 
   app:
-    # run.sh が回ごとに mk-bench-ab-app:base / :head を渡す。既定値は down など
+    # run.sh が専用 project 名を含む一意な tag を回ごとに渡す。既定値は down など
     # image を使わない操作のためのもの
     image: ${APP_IMAGE:-mk-bench-ab-app:base}
     environment:

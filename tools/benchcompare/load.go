@@ -25,12 +25,13 @@ const (
 // RunSet describes one comparison: the two commits, the conditions and the
 // runs. It is read from run.json at the top of the results directory.
 type RunSet struct {
-	Base     Commit            `json:"base"`
-	Head     Commit            `json:"head"`
-	Scenario string            `json:"scenario"`
-	Rounds   int               `json:"rounds"`
-	Runner   map[string]string `json:"runner,omitempty"`
-	Runs     []*Run            `json:"-"`
+	Base            Commit            `json:"base"`
+	Head            Commit            `json:"head"`
+	Scenario        string            `json:"scenario"`
+	Rounds          int               `json:"rounds"`
+	DeliveryEnabled bool              `json:"deliveryEnabled,omitempty"`
+	Runner          map[string]string `json:"runner,omitempty"`
+	Runs            []*Run            `json:"-"`
 }
 
 // Commit is one side of the comparison.
@@ -58,25 +59,31 @@ type Run struct {
 	Resources map[string]ResourceUsage
 	// Delivery is an optional receiver fixture summary, separate from k6
 	// endpoint metrics and resource samples.
-	Delivery *DeliveryStats
+	Delivery      *DeliveryStats
+	DeliveryError string
 }
 
-// DeliveryStats is the JSON emitted by tests/bench/queue/deliveryreceiver.
+// DeliveryStats is the outbound delivery artifact produced from receiver stats.
 // Counts are descriptive; benchcompare does not apply performance thresholds.
 type DeliveryStats struct {
-	Finalized          bool   `json:"finalized"`
-	Expected           uint64 `json:"expected"`
-	Attempts           uint64 `json:"attempts"`
-	Verified           uint64 `json:"verified"`
-	Pending            uint64 `json:"pending"`
-	Valid              uint64 `json:"valid"`
-	Unique             uint64 `json:"unique"`
-	Duplicates         uint64 `json:"duplicates"`
-	Invalid            uint64 `json:"invalid"`
-	ContentMismatch    uint64 `json:"contentMismatch"`
-	Unexpected         uint64 `json:"unexpected"`
-	UnexpectedAttempts uint64 `json:"unexpectedAttempts"`
-	Missing            uint64 `json:"missing"`
+	Finalized               bool     `json:"finalized"`
+	Expected                uint64   `json:"expected"`
+	Attempts                uint64   `json:"attempts"`
+	Verified                uint64   `json:"verified"`
+	Pending                 uint64   `json:"pending"`
+	Valid                   uint64   `json:"valid"`
+	Unique                  uint64   `json:"unique"`
+	Duplicates              uint64   `json:"duplicates"`
+	Invalid                 uint64   `json:"invalid"`
+	ContentMismatch         uint64   `json:"contentMismatch"`
+	Unexpected              uint64   `json:"unexpected"`
+	UnexpectedAttempts      uint64   `json:"unexpectedAttempts"`
+	Missing                 uint64   `json:"missing"`
+	ThroughputJobs          *uint64  `json:"throughputJobs,omitempty"`
+	ThroughputJobsPerSecond *float64 `json:"throughputJobsPerSecond,omitempty"`
+	DrainSeconds            *float64 `json:"drainSeconds,omitempty"`
+	ArtifactStatus          string   `json:"status,omitempty"`
+	ArtifactReasons         []string `json:"reasons,omitempty"`
 }
 
 // EndpointResult is what one run measured for one endpoint.
@@ -170,14 +177,22 @@ func loadRun(dir string) (*Run, error) {
 	if run.Meta.Round < 1 {
 		return nil, fmt.Errorf("meta.json: round is %d, want 1 or more", run.Meta.Round)
 	}
+	var err error
+	run.DeliveryError, err = readOptionalText(filepath.Join(dir, "delivery-error.txt"))
+	if err != nil {
+		return nil, fmt.Errorf("delivery-error.txt: %w", err)
+	}
 	if !run.Meta.Completed {
 		return run, nil
+	}
+	run.Delivery, err = readDeliveryStats(filepath.Join(dir, "delivery.json"))
+	if err != nil {
+		return nil, fmt.Errorf("delivery.json: %w", err)
 	}
 	var summary k6Summary
 	if err := readJSON(filepath.Join(dir, "k6-summary.json"), &summary); err != nil {
 		return nil, err
 	}
-	var err error
 	run.Endpoints, run.Dropped, err = summary.endpoints()
 	if err != nil {
 		return nil, fmt.Errorf("k6-summary.json: %w", err)
@@ -194,10 +209,6 @@ func loadRun(dir string) (*Run, error) {
 	}
 	if err != nil {
 		return nil, fmt.Errorf("resources.csv: %w", err)
-	}
-	run.Delivery, err = readDeliveryStats(filepath.Join(dir, "delivery.json"))
-	if err != nil {
-		return nil, fmt.Errorf("delivery.json: %w", err)
 	}
 	return run, nil
 }
@@ -228,6 +239,17 @@ func readJSON(path string, v any) error {
 		return fmt.Errorf("%s: %w", filepath.Base(path), err)
 	}
 	return nil
+}
+
+func readOptionalText(path string) (string, error) {
+	b, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(b)), nil
 }
 
 // k6Summary is k6's --summary-export JSON. A metric's values are numbers,

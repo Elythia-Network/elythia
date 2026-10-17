@@ -213,6 +213,24 @@ func TestLoadRun_DeliveryStats(t *testing.T) {
 	assert.Equal(t, DeliveryStats{Finalized: true, Expected: 4, Attempts: 5, Verified: 4, Pending: 0, Valid: 2, Unique: 2, Duplicates: 0, Invalid: 2, ContentMismatch: 1, Unexpected: 1, UnexpectedAttempts: 1, Missing: 2}, *run.Delivery)
 }
 
+func TestLoadRun_DeliveryArtifactProducedByPython(t *testing.T) {
+	dir := writeResults(t, okRun(SideBase, 1, 10))
+	artifactPath := filepath.Join("..", "..", "tests", "bench", "queue", "common", "testdata", "delivery_artifact.json")
+	artifact, err := os.ReadFile(artifactPath)
+	require.NoError(t, err)
+	writeFile(t, filepath.Join(dir, "00-base-1", "delivery.json"), string(artifact))
+
+	run, err := loadRun(filepath.Join(dir, "00-base-1"))
+	require.NoError(t, err)
+	require.NotNil(t, run.Delivery)
+	assert.Equal(t, "incomplete", run.Delivery.ArtifactStatus)
+	assert.Equal(t, []string{"delivery drain timed out"}, run.Delivery.ArtifactReasons)
+	assert.Equal(t, uint64(2), run.Delivery.Unique)
+	assert.Nil(t, run.Delivery.ThroughputJobs)
+	assert.Nil(t, run.Delivery.ThroughputJobsPerSecond)
+	assert.Equal(t, 0.5, *run.Delivery.DrainSeconds)
+}
+
 func TestLoadRun_RetainsInconsistentDeliveryStats(t *testing.T) {
 	dir := writeResults(t, okRun(SideBase, 1, 10))
 	statsPath := filepath.Join(dir, "00-base-1", "delivery.json")
@@ -246,6 +264,32 @@ func TestLoadRun_RetainsEmptyDeliveryStats(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, run.Delivery)
 	assert.Equal(t, uint64(0), run.Delivery.Expected)
+}
+
+func TestLoadRunSet_DeliveryEnabled(t *testing.T) {
+	dir := writeResults(t, okRun(SideBase, 1, 10))
+	runJSONPath := filepath.Join(dir, "run.json")
+	runJSON, err := os.ReadFile(runJSONPath)
+	require.NoError(t, err)
+	updated := strings.Replace(string(runJSON), `"rounds":1`, `"rounds":1,"deliveryEnabled":true`, 1)
+	require.NotEqual(t, string(runJSON), updated)
+	writeFile(t, runJSONPath, updated)
+
+	rs, err := loadRunSet(dir)
+	require.NoError(t, err)
+	assert.True(t, rs.DeliveryEnabled)
+}
+
+func TestLoadRun_RetainsDeliveryErrorForIncompleteRun(t *testing.T) {
+	dir := writeResults(t, fakeRun{side: SideBase, round: 1, reason: "setup failed"})
+	runDir := filepath.Join(dir, "00-base-1")
+	writeFile(t, filepath.Join(runDir, "delivery-error.txt"), "delivery seed failed\n")
+	writeFile(t, filepath.Join(runDir, "delivery.json"), "not finalized JSON")
+
+	run, err := loadRun(runDir)
+	require.NoError(t, err)
+	assert.Equal(t, "delivery seed failed", run.DeliveryError)
+	assert.Nil(t, run.Delivery, "an incomplete run keeps its metadata even if no final delivery artifact exists")
 }
 
 func TestRun_UnfinalizedDeliveryJSONProducesIncomparableReport(t *testing.T) {
@@ -329,6 +373,77 @@ func TestDeliveryStatusReportsUnfinalizedAndPendingStatsAsIncomplete(t *testing.
 	}
 }
 
+func TestDeliveryThroughputValidatesUniqueJobsDrainAndRate(t *testing.T) {
+	jobs, drain, rate := uint64(3), 0.75, 4.0
+	valid := DeliveryStats{Unique: 3, ThroughputJobs: &jobs, DrainSeconds: &drain, ThroughputJobsPerSecond: &rate}
+	got, reason := deliveryThroughput(valid)
+	assert.Empty(t, reason)
+	assert.Equal(t, 4.0, got)
+
+	wrongJobs := valid
+	wrongJobs.ThroughputJobs = pointer(uint64(4))
+	_, reason = deliveryThroughput(wrongJobs)
+	assert.Contains(t, reason, "differs from unique")
+
+	zeroDrain := valid
+	zeroDrain.DrainSeconds = pointer(0.0)
+	_, reason = deliveryThroughput(zeroDrain)
+	assert.Contains(t, reason, "not positive")
+
+	wrongRate := valid
+	wrongRate.ThroughputJobsPerSecond = pointer(4.1)
+	_, reason = deliveryThroughput(wrongRate)
+	assert.Contains(t, reason, "does not match unique/drain")
+}
+
+func pointer[T any](value T) *T { return &value }
+
+func TestDeliveryClassificationCasesSharedWithPython(t *testing.T) {
+	type classificationCase struct {
+		Name              string        `json:"name"`
+		Stats             DeliveryStats `json:"stats"`
+		BenchmarkExpected *uint64       `json:"benchmarkExpected"`
+		TimedOut          bool          `json:"timedOut"`
+		ExpectedStatus    string        `json:"expectedStatus"`
+		ExpectedReasons   []string      `json:"expectedReasons"`
+	}
+	data, err := os.ReadFile(filepath.Join("..", "..", "tests", "bench", "queue", "common", "delivery_classification_cases.json"))
+	require.NoError(t, err)
+	var cases []classificationCase
+	require.NoError(t, json.Unmarshal(data, &cases))
+	for _, tc := range cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			if tc.TimedOut || (tc.BenchmarkExpected != nil && *tc.BenchmarkExpected != tc.Stats.Expected) {
+				t.Skip("Python-only delivery conditions are covered by artifact tests")
+			}
+			status, reasons := deliveryStatus(tc.Stats)
+			assert.Equal(t, DeliveryStatus(tc.ExpectedStatus), status)
+			if len(tc.ExpectedReasons) == 0 {
+				assert.Empty(t, reasons)
+			} else {
+				assert.Equal(t, tc.ExpectedReasons, reasons)
+			}
+		})
+	}
+}
+
+func TestDeliveryArtifactStatusAndErrorCanOnlyWorsenStatus(t *testing.T) {
+	valid := DeliveryStats{Finalized: true, Expected: 1, Attempts: 1, Verified: 1, Valid: 1, Unique: 1}
+	status, reasons := deliveryStatus(valid)
+	status, reasons = mergeDeliveryArtifactStatus(status, reasons, "incomplete", []string{"delivery drain timed out"}, "driver failed")
+	assert.Equal(t, DeliveryStatusIncomplete, status)
+	assert.Contains(t, reasons, "delivery drain timed out")
+	assert.Contains(t, reasons, "delivery run error: driver failed")
+
+	status, reasons = mergeDeliveryArtifactStatus(DeliveryStatusInvalid, []string{"bad count"}, "valid", nil, "")
+	assert.Equal(t, DeliveryStatusInvalid, status)
+	assert.Contains(t, reasons, "bad count")
+
+	status, reasons = mergeDeliveryArtifactStatus(DeliveryStatusValid, nil, "valid", []string{"contradictory reason"}, "")
+	assert.Equal(t, DeliveryStatusIncomplete, status)
+	assert.Contains(t, reasons, "contradictory reason")
+}
+
 func TestLoadRun_UnexpectedDeliveryDoesNotCoverMissingExpectedTuple(t *testing.T) {
 	dir := writeResults(t, okRun(SideBase, 1, 10))
 	statsPath := filepath.Join(dir, "00-base-1", "delivery.json")
@@ -378,6 +493,65 @@ func TestCompare_DeliveryIssuesInvalidatePerformanceComparisonAndPreserveCounts(
 	assert.Contains(t, report.String(), "content mismatch")
 }
 
+func TestCompare_DeliveryThroughputMedianIsReferenceOnly(t *testing.T) {
+	stats := func(rate float64) *DeliveryStats {
+		jobs, drain := uint64(2), 2.0/rate
+		return &DeliveryStats{
+			Finalized: true, Expected: 2, Attempts: 2, Verified: 2,
+			Valid: 2, Unique: 2, Missing: 0,
+			ThroughputJobs: &jobs, ThroughputJobsPerSecond: &rate, DrainSeconds: &drain,
+		}
+	}
+	runs := []*Run{
+		{Meta: RunMeta{Side: SideBase, Round: 1, Completed: true}, Delivery: stats(1.0)},
+		{Meta: RunMeta{Side: SideBase, Round: 2, Completed: true}, Delivery: stats(2.0)},
+		{Meta: RunMeta{Side: SideHead, Round: 1, Completed: true}, Delivery: stats(1.5)},
+		{Meta: RunMeta{Side: SideHead, Round: 2, Completed: true}, Delivery: stats(2.5)},
+	}
+	c := compare(&RunSet{Rounds: 2, DeliveryEnabled: true, Runs: runs})
+
+	assert.True(t, c.Valid)
+	require.Len(t, c.DeliveryMeasures, 1)
+	measure := c.DeliveryMeasures[0]
+	assert.Equal(t, "delivery_unique_jobs_per_sec", measure.Name)
+	assert.Equal(t, VerdictReference, measure.Verdict)
+	assert.Equal(t, 1.5, measure.Base.Median)
+	assert.Equal(t, 2.0, measure.Head.Median)
+	assert.Equal(t, 2, measure.Base.Rounds)
+	var markdown bytes.Buffer
+	require.NoError(t, renderMarkdown(&markdown, c))
+	assert.Contains(t, markdown.String(), "Unique delivery throughput (reference only)")
+	assert.Contains(t, markdown.String(), "| unique delivery (jobs/s) | 1.5 [1.0, 2.0] | 2.0 [1.5, 2.5] |")
+}
+
+func TestCompare_LegacyDeliveryStatsWithoutThroughputRemainValid(t *testing.T) {
+	stats := &DeliveryStats{Finalized: true, Expected: 1, Attempts: 1, Verified: 1, Valid: 1, Unique: 1}
+	runs := []*Run{
+		{Meta: RunMeta{Side: SideBase, Round: 1, Completed: true}, Delivery: stats},
+		{Meta: RunMeta{Side: SideBase, Round: 2, Completed: true}, Delivery: stats},
+		{Meta: RunMeta{Side: SideHead, Round: 1, Completed: true}, Delivery: stats},
+		{Meta: RunMeta{Side: SideHead, Round: 2, Completed: true}, Delivery: stats},
+	}
+	c := compare(&RunSet{Rounds: 2, Runs: runs})
+
+	assert.True(t, c.Valid)
+	assert.Empty(t, c.DeliveryMeasures)
+}
+
+func TestCompare_DeliveryEnabledRequiresEveryRunArtifact(t *testing.T) {
+	runs := []*Run{
+		{Meta: RunMeta{Side: SideBase, Round: 1, Completed: true}},
+		{Meta: RunMeta{Side: SideBase, Round: 2, Completed: true}},
+		{Meta: RunMeta{Side: SideHead, Round: 1, Completed: true}},
+		{Meta: RunMeta{Side: SideHead, Round: 2, Completed: true}},
+	}
+	c := compare(&RunSet{Rounds: 2, DeliveryEnabled: true, Runs: runs})
+
+	assert.False(t, c.Valid)
+	assert.Len(t, c.Problems, 4)
+	assert.Contains(t, c.Problems[0], "delivery stats are missing")
+}
+
 func TestCompare_MissingDeliveryStatsInvalidatePerformanceComparison(t *testing.T) {
 	valid := &DeliveryStats{Finalized: true, Expected: 1, Attempts: 1, Verified: 1, Valid: 1, Unique: 1}
 	runs := []*Run{
@@ -395,19 +569,58 @@ func TestCompare_MissingDeliveryStatsInvalidatePerformanceComparison(t *testing.
 }
 
 func TestCompare_ValidDeliveryWithDuplicateAttemptsRemainsComparable(t *testing.T) {
-	withDuplicate := &DeliveryStats{Finalized: true, Expected: 3, Attempts: 4, Verified: 4, Valid: 4, Unique: 3, Duplicates: 1}
+	jobs, rate, drain := uint64(3), 4.0, 0.75
+	withDuplicate := &DeliveryStats{
+		Finalized: true, Expected: 3, Attempts: 4, Verified: 4, Valid: 4, Unique: 3, Duplicates: 1,
+		ThroughputJobs: &jobs, ThroughputJobsPerSecond: &rate, DrainSeconds: &drain,
+	}
 	runs := []*Run{
 		{Meta: RunMeta{Side: SideBase, Round: 1, Completed: true}, Delivery: withDuplicate},
 		{Meta: RunMeta{Side: SideBase, Round: 2, Completed: true}, Delivery: withDuplicate},
 		{Meta: RunMeta{Side: SideHead, Round: 1, Completed: true}, Delivery: withDuplicate},
 		{Meta: RunMeta{Side: SideHead, Round: 2, Completed: true}, Delivery: withDuplicate},
 	}
-	c := compare(&RunSet{Rounds: 2, Runs: runs})
+	c := compare(&RunSet{Rounds: 2, DeliveryEnabled: true, Runs: runs})
 
 	assert.True(t, c.Valid, c.Problems)
 	require.Len(t, c.Delivery, 4)
 	assert.Equal(t, DeliveryStatusValid, c.Delivery[0].Status)
 	assert.Equal(t, uint64(1), c.Delivery[0].Duplicates)
+	require.Len(t, c.DeliveryMeasures, 1)
+	assert.Equal(t, 4.0, c.DeliveryMeasures[0].Base.Median, "throughput is unique / drain, not attempt count / drain")
+}
+
+func TestCompare_InvalidRunOmitsDeliveryThroughputEverywhere(t *testing.T) {
+	jobs, rate, drain := uint64(2), 2.0, 1.0
+	stats := &DeliveryStats{
+		Finalized: true, Expected: 2, Attempts: 2, Verified: 2, Valid: 2, Unique: 2,
+		ThroughputJobs: &jobs, ThroughputJobsPerSecond: &rate, DrainSeconds: &drain,
+	}
+	runs := []*Run{
+		{Meta: RunMeta{Side: SideBase, Round: 1, Completed: true}, Dropped: 1, Delivery: stats},
+		{Meta: RunMeta{Side: SideBase, Round: 2, Completed: true}, Delivery: stats},
+		{Meta: RunMeta{Side: SideHead, Round: 1, Completed: true}, Delivery: stats},
+		{Meta: RunMeta{Side: SideHead, Round: 2, Completed: true}, Delivery: stats},
+	}
+	c := compare(&RunSet{Rounds: 2, DeliveryEnabled: true, Runs: runs})
+	assert.False(t, c.Valid)
+	assert.Empty(t, c.DeliveryMeasures)
+
+	encoded, err := json.Marshal(c)
+	require.NoError(t, err)
+	assert.NotContains(t, string(encoded), `"deliveryMeasures"`)
+	var markdown bytes.Buffer
+	require.NoError(t, renderMarkdown(&markdown, c))
+	assert.NotContains(t, markdown.String(), "Unique delivery throughput")
+}
+
+func TestCompare_MissingDeliveryWithErrorReportsReason(t *testing.T) {
+	runs := []*Run{
+		{Meta: RunMeta{Side: SideBase, Round: 1, Completed: true}, DeliveryError: "delivery seed failed"},
+	}
+	c := compare(&RunSet{Rounds: 1, DeliveryEnabled: true, Runs: runs})
+	assert.False(t, c.Valid)
+	assert.Contains(t, c.Problems, "base round 1 delivery stats are missing; delivery seed failed")
 }
 
 // TestCompare_OverlappingRangesAreSame checks that rounds whose ranges overlap

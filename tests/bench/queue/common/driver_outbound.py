@@ -4,13 +4,14 @@ Per stack:
   1. Reset blackhole hit counter
   2. Concurrently start a depth/hits poller AND post `OUTBOUND_NOTES`
      notes/create requests against the sender stack
-  3. Drain detection = blackhole hits reach the expected total AND the
+  3. Drain detection = receiver count reaches the expected total AND the
      redis queue depth has settled to 0
-  4. Compute drain time = T_drain - T_post_start, throughput = jobs/s
+  4. Compute drain time = T_drain - T_post_start; signed delivery throughput
+     uses only the final, reconciled unique delivery count
 
-The blackhole receiver counter is the authoritative source of truth for
-"job completed" because the queue probe alone can miss bursts shorter
-than the 100ms polling interval.
+The receiver counter is the authoritative source of truth for "job
+completed" because the queue probe alone can miss bursts shorter than the
+100ms polling interval. Manifest reconciliation runs after the timed interval.
 """
 from __future__ import annotations
 
@@ -24,6 +25,7 @@ from typing import Any
 import httpx
 
 from delivery_manifest import build_deliveries, created_note_id
+from delivery_result import throughput_result
 from queue_probe import DriverKind, make_probe
 
 OUTBOUND_NOTES = int(os.environ.get("OUTBOUND_NOTES", "100"))
@@ -117,7 +119,14 @@ def finalize_delivery(info: dict[str, Any], note_ids: list[str]) -> tuple[dict[s
         expected.raise_for_status()
         return receiver_stats(receiver_url), None
     except Exception as exc:  # noqa: BLE001
-        return receiver_stats(receiver_url), f"{type(exc).__name__}: {exc}"
+        error = f"{type(exc).__name__}: {exc}"
+        try:
+            return receiver_stats(receiver_url), error
+        except Exception as stats_exc:  # noqa: BLE001
+            return {"finalized": False}, (
+                f"{error}; receiver stats unavailable: "
+                f"{type(stats_exc).__name__}: {stats_exc}"
+            )
 
 
 def post_notes_async(url: str, token: str, count: int, done: threading.Event,
@@ -160,6 +169,7 @@ def run_stack(stack: str, info: dict[str, Any]) -> dict[str, Any]:
             prepare_receiver(info)
             httpx.post(f"{info['delivery_receiver_url']}/reset", timeout=5).raise_for_status()
         except Exception as exc:  # noqa: BLE001
+            error = f"{type(exc).__name__}: {exc}"
             return {
                 "stack": stack,
                 "url": info["url"],
@@ -170,11 +180,14 @@ def run_stack(stack: str, info: dict[str, Any]) -> dict[str, Any]:
                 "post_elapsed_s": 0.0,
                 "drain_seconds": 0.0,
                 "timed_out": True,
-                "throughput_jobs_per_sec": 0.0,
+                "throughput_jobs": None,
+                "throughput_jobs_per_sec": None,
                 "peak_queue_depth": 0,
                 "samples": [],
                 "delivery": {"finalized": False},
-                "deliveryPreparationError": f"{type(exc).__name__}: {exc}",
+                "deliveryStatus": "incomplete",
+                "deliveryReasons": [f"delivery receiver setup failed: {error}"],
+                "deliveryPreparationError": error,
             }
     baseline_hits = 0 if delivery_enabled else blackhole_hits()
 
@@ -221,15 +234,8 @@ def run_stack(stack: str, info: dict[str, Any]) -> dict[str, Any]:
     )
     drain_time = drained_at if drained_at is not None else (time.monotonic() - poller_start)
     timed_out = drained_at is None
-    throughput = final_hits / drain_time if drain_time > 0 else 0.0
     peak = max((s["depth"] for s in samples), default=0)
 
-    print(
-        f"[{stack}] post {post_count['v']}/{OUTBOUND_NOTES} in {elapsed['v']:.2f}s, "
-        f"drain={drain_time:.2f}s, hits={final_hits}/{expected_jobs}, "
-        f"{throughput:.0f} jobs/s, peak depth={peak}",
-        flush=True,
-    )
     result = {
         "stack": stack,
         "url": info["url"],
@@ -240,16 +246,47 @@ def run_stack(stack: str, info: dict[str, Any]) -> dict[str, Any]:
         "post_elapsed_s": elapsed["v"],
         "drain_seconds": drain_time,
         "timed_out": timed_out,
-        "throughput_jobs_per_sec": throughput,
+        "throughput_jobs": final_hits,
+        "throughput_jobs_per_sec": final_hits / drain_time if drain_time > 0 else None,
         "peak_queue_depth": peak,
         "samples": samples[-200:],
     }
     if delivery_enabled:
         delivery, preparation_error = finalize_delivery(info, note_ids)
-        result["delivery"] = delivery
+        result.update(throughput_result(
+            delivery,
+            drain_time,
+            benchmark_expected=expected_jobs,
+            timed_out=timed_out,
+            preparation_error=preparation_error,
+        ))
         if preparation_error:
             result["deliveryPreparationError"] = preparation_error
+    throughput = result["throughput_jobs_per_sec"]
+    throughput_label = (
+        f"{throughput:.0f} jobs/s" if throughput is not None else "throughput unavailable"
+    )
+    print(
+        f"[{stack}] post {post_count['v']}/{OUTBOUND_NOTES} in {elapsed['v']:.2f}s, "
+        f"drain={drain_time:.2f}s, hits={final_hits}/{expected_jobs}, "
+        f"{throughput_label}, peak depth={peak}",
+        flush=True,
+    )
     return result
+
+
+def delivery_artifact(result: dict[str, Any]) -> dict[str, Any]:
+    """Flatten one stack's receiver counters and measured throughput for benchcompare."""
+    stats = result.get("delivery")
+    artifact = dict(stats) if isinstance(stats, dict) else {"finalized": False}
+    artifact.update({
+        "status": result.get("deliveryStatus", "incomplete"),
+        "reasons": result.get("deliveryReasons", []),
+        "throughputJobs": result.get("throughput_jobs"),
+        "throughputJobsPerSecond": result.get("throughput_jobs_per_sec"),
+        "drainSeconds": result.get("drain_seconds"),
+    })
+    return artifact
 
 
 def main() -> int:
@@ -266,6 +303,12 @@ def main() -> int:
     with open(out_path, "w") as f:
         json.dump(results, f, indent=2)
     print(f"outbound.json written to {out_path}", flush=True)
+    if os.environ.get("QUEUE_BENCH_EXPORT_DELIVERY") == "1":
+        stack = os.environ.get("QUEUE_BENCH_DELIVERY_STACK", "mkq")
+        delivery_path = "/results/delivery.json"
+        with open(delivery_path, "w") as f:
+            json.dump(delivery_artifact(results.get(stack, {})), f, indent=2)
+        print(f"delivery.json written to {delivery_path}", flush=True)
     return 1 if delivery_preparation_failed else 0
 
 
