@@ -3,7 +3,9 @@
 //
 // Input is a results directory:
 //
-//	run.json                        base / head commits, scenario, rounds, runner
+//	run.json                        base / head commits, scenario, rounds, runner,
+//	                                and labels when the sides are different
+//	                                implementations (upstream Misskey, #3654)
 //	<run>/meta.json                 side ("base" or "head"), round, completed, reason
 //	<run>/k6-summary.json           k6 --summary-export
 //	<run>/resources.csv             t_ms,container,cpu_usage_usec,memory_peak,heap_inuse
@@ -16,6 +18,10 @@
 // incomparable, since failing faster is not an improvement.
 // p99 is shown with its difference but not judged, since it jumps between
 // levels even when base and head are the same commit (#3559).
+//
+// With labels, the report names the sides by them, adds the ratio base / head
+// of p50, p95, CPU time and memory, and shows a measure only one side has (the
+// Go heap) as a reference.
 //
 // A run missing one of the required k6 sub-metrics is a bug of the scenario
 // and exits 1, without a report.
