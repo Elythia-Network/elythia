@@ -55,6 +55,13 @@ type Service struct {
 	// path の FindByHost DB 往復を cacheTTL の間だけ省く (#1407)。
 	suspendCache map[string]suspendEntry
 	cacheTTL     time.Duration
+	// suspendInvalidated は InvalidateSuspendCache が自プロセスのキャッシュを
+	// 捨てた後に呼ぶ (#3664)。他のプロセスへ伝える配線 (core/cachebus) が入る。
+	// 書き込みの前に読む必要は無いので、配線は構築時に 1 回だけ行う。
+	suspendInvalidated func(host string)
+	// suspendGen は停止判定のキャッシュを捨てるたびに進める。DB を読んでいる
+	// 間に捨てられた判定を、読み終わった後に書き戻さないために使う。
+	suspendGen uint64
 	// requestReceivedCache は host -> 窓失効時刻 (= 最終書込 + requestReceivedWindow)。
 	// MarkRequestReceived の latestRequestReceivedAt 書込を host あたり窓内 1 回に
 	// 間引く。窓内は SELECT も UPDATE も省く。Misskey TS InboxProcessorService の
@@ -221,11 +228,18 @@ func (s *Service) MarkRequestReceived(host string) error {
 	}
 	// autoSuspendedForNotResponding の instance から正当な inbound を受けたら
 	// suspensionState を none に自動復活させる (upstream の shouldUnsuspend)。
-	if inst.SuspensionState == model.SuspensionStateAutoSuspendedForNotResponding {
+	unsuspend := inst.SuspensionState == model.SuspensionStateAutoSuspendedForNotResponding
+	if unsuspend {
 		fields["suspensionState"] = string(model.SuspensionStateNone)
 	}
 	if err := s.repo.UpdateFields(host, fields); err != nil {
 		return err
+	}
+	if unsuspend {
+		// 自動の停止の解除も、停止の側 (RecordResponseError) と同じく判定の
+		// キャッシュを捨てて全プロセスへ伝える。捨てないと、戻ってきた相手への
+		// 配送が cacheTTL の間 skip され、skip したジョブは落ちる (#3664)。
+		s.InvalidateSuspendCache(host)
 	}
 	// is-not-responding を clear したので、stale healthy-cache が回復 UPDATE を
 	// 取りこぼす逆経路を避けるため healthy-cache も整合させる。
@@ -333,9 +347,15 @@ func (s *Service) RecordResponseError(host string) error {
 		}
 		if inst.SuspensionState == model.SuspensionStateNone &&
 			!inst.NotRespondingSince.After(now.Add(-autoSuspendNotRespondingThreshold)) {
-			return s.repo.UpdateFields(host, map[string]any{
+			if err := s.repo.UpdateFields(host, map[string]any{
 				"suspensionState": string(model.SuspensionStateAutoSuspendedForNotResponding),
-			})
+			}); err != nil {
+				return err
+			}
+			// 自動の停止も、管理画面からの停止 (Suspend) と同じく判定のキャッシュを
+			// 捨てて全プロセスへ伝える。捨てないと cacheTTL の間は配送が続く (#3664)。
+			s.InvalidateSuspendCache(host)
+			return nil
 		}
 		return nil
 	}
@@ -646,11 +666,20 @@ func (s *Service) shouldSkipBySuspend(host string) bool {
 		s.mu.Unlock()
 		return e.skip
 	}
+	gen := s.suspendGen
 	s.mu.Unlock()
 
 	skip := s.lookupSuspended(host)
 
 	s.mu.Lock()
+	if s.suspendGen != gen {
+		// 読んでいる間に停止の変更が届いた。読んだ値は変更の前のものかもしれない
+		// ので、キャッシュに残さない (残すと cacheTTL の間、停止が効かない)。
+		// 他のプロセスからの通知は DB の書き込みの直後に届くので、配送が続いて
+		// いる相手では読み込みと重なりうる (#3664)。
+		s.mu.Unlock()
+		return skip
+	}
 	// cache miss / 期限切れ時に書き込むついでに、既に期限切れの他 entry も
 	// 掃除する。配送先 host は有界 (連合先数) だが、過去に配送した host が
 	// 二度と来ない場合でも map に滞留し続けないよう、書き込みコストに相乗り
@@ -680,18 +709,46 @@ func (s *Service) evictExpiredLocked(now time.Time) {
 //
 // 同じホスト名の別ポート (`host:8443`) の判定も `host` の行を見ているので、
 // あわせて捨てる (lookupSuspended の doc)。
+//
+// **他のプロセスにも伝える (#3664)。** 停止の操作を受けたプロセスだけが捨てると、
+// `MK_ONLY_QUEUE`の配送のプロセスは cacheTTL (5 分) の間、停止したはずの相手へ
+// 配送を続ける。SetSuspendInvalidationHook の hook がそれを担い、自プロセスの
+// キャッシュは hook より先に (Redis に届かなくても) 捨てる。
 func (s *Service) InvalidateSuspendCache(host string) {
 	if host == "" {
 		return
 	}
+	s.DropSuspendCacheLocally(host)
+	if s.suspendInvalidated != nil {
+		s.suspendInvalidated(host)
+	}
+}
+
+// SetSuspendInvalidationHook registers fn, called with the host after every
+// InvalidateSuspendCache has dropped this process's entries (#3664). Call it
+// once while wiring, before the service is used.
+func (s *Service) SetSuspendInvalidationHook(fn func(host string)) {
+	s.suspendInvalidated = fn
+}
+
+// DropSuspendCacheLocally drops this process's cached suspend decision for
+// host (and for the same host name on other ports) without calling the
+// invalidation hook. An empty host drops every entry. It is what an
+// invalidation received from another process applies.
+func (s *Service) DropSuspendCacheLocally(host string) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.suspendGen++
+	if host == "" {
+		clear(s.suspendCache)
+		return
+	}
 	delete(s.suspendCache, host)
 	for h := range s.suspendCache {
 		if idnhost.BareHost(h) == host {
 			delete(s.suspendCache, h)
 		}
 	}
-	s.mu.Unlock()
 }
 
 // SuspendCacheLen returns the number of entries currently held in the suspend
