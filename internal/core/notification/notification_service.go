@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/bgwork"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/redis/go-redis/v9"
@@ -224,6 +225,9 @@ type Service struct {
 	noteUnreadRepo      repository.NoteUnreadRepository
 	unreadPublishDelay  time.Duration
 	policyResolver      PolicyResolver
+	// background は unreadNotification と Web Push を遅らせて送る timer を持つ
+	// 箱 (#3661)。nil なら time.AfterFunc で待つ (テスト)。
+	background *bgwork.Group
 }
 
 // PolicyResolver reports the notification types a user has opted out of
@@ -251,9 +255,17 @@ func NewService(client *redis.Client, idGen id.Generator, keyPrefix string) *Ser
 	}
 }
 
+// SetBackground sets the group the delayed unreadNotification and Web Push
+// run in, so stopping the server generation sends them before it closes the
+// DB and the queue (#3661).
+func (s *Service) SetBackground(g *bgwork.Group) { s.background = g }
+
+// HasBackground reports whether SetBackground received a group.
+func (s *Service) HasBackground() bool { return s.background != nil }
+
 // SetUnreadPublishDelay overrides the delay between Notification persistence
 // and `unreadNotification` publish. 0 makes the publish synchronous (used by
-// tests so they don't have to wait for time.AfterFunc to fire).
+// tests so they don't have to wait for the delay).
 func (s *Service) SetUnreadPublishDelay(d time.Duration) {
 	s.unreadPublishDelay = d
 }
@@ -824,7 +836,19 @@ func (s *Service) scheduleUnreadPublish(notifieeID, streamID string, packed any,
 		publish()
 		return
 	}
-	time.AfterFunc(s.unreadPublishDelay, publish)
+	// 遅らせて送るのは世代の箱の timer で行う (#3661)。time.AfterFunc のままだと、
+	// 世代を止めた後に発火し、閉じた DB で利用者とノートを詰められず、閉じた queue に
+	// Web Push を積もうとして失敗する。世代が止まり始めたら、待たずに今送る (箱が
+	// 止め始めに走らせ、その終わりを待つ)。既読の確認を待つ時間は短くなるが、捨てる
+	// より送るほうがよい (通知は再送されない)。
+	//
+	// 止め始めた後に作られた通知 (停止の待ちの間に走る投稿後の hook など) は、
+	// 予約できないので、呼び出し元の goroutine でこの場で送る。呼び出し元が箱の
+	// goroutine なら、停止はその終わりを待つので、DB と queue はまだ開いている
+	// (#3661 のレビュー2周目 L-1)。
+	if !s.background.AfterFunc(s.unreadPublishDelay, publish) {
+		publish()
+	}
 }
 
 // MarkAllAsRead advances the user's notification read marker to the newest
