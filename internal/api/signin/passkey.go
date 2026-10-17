@@ -2,6 +2,7 @@ package signin
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -276,7 +277,8 @@ func (h *Handler) finishPasskeySignin(c echo.Context, user *model.User, cred *we
 	}
 	if h.signinRepo != nil && h.idGen != nil {
 		hdrs := c.Request().Header.Clone()
-		go h.recordSignin(user.ID, c.RealIP(), hdrs, true)
+		uid, ip := user.ID, c.RealIP()
+		h.background.Go(func(context.Context) { h.recordSignin(uid, ip, hdrs, true) })
 	}
 	return c.JSON(http.StatusOK, map[string]any{
 		"signinResponse": signinResp,
