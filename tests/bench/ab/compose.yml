@@ -14,12 +14,25 @@
 # app 以外の条件を揃える。seed の image (tests/bench/http/common/Dockerfile.seed) は
 # 固定していないが、計測の前に止めるので数字には入らない。
 #
+# **postgres は fsync / synchronous_commit / full_page_writes を切って動かす (#3659)。**
+# GitHub-hosted runner の一部の機種 (AMD EPYC 9V74) では、ノートの INSERT / COMMIT が
+# ディスクの書き込みの待ちで断続的に数十〜数百 ms 止まり、notes-create の p95 が、
+# 同じ commit 同士でも 2.5ms〜39.5ms に揺れた。本家も同じく止まる。測りたいのは app の
+# 差なので、fsync・full page write・COMMIT の待ちを外す。これで #3659 の揺れが消えるかは、
+# PR の上の実行で確かめる (止まっている箇所は COMMIT の fsync とは限らない)。
+# 設定は compose.yml の postgres にだけ書き、compose.upstream.yml では postgres を
+# 触らない (base / head、本家 / Elythia の両側に同じ条件がかかる。
+# TestBenchPostgresSkipsDiskWaits が見る)。本番・e2e の compose には入れない。
+# 経緯は issue #3659。
+#
 # project 名は本番 (mk) と衝突させない (CLAUDE.md Section 0)。
 name: mk-bench-ab
 
 services:
   postgres:
     image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+    # 落ちたら DB ごと捨てる使い捨てのスタックなので、クラッシュ時の安全は要らない
+    command: ["postgres", "-c", "fsync=off", "-c", "synchronous_commit=off", "-c", "full_page_writes=off"]
     environment:
       POSTGRES_DB: misskey
       POSTGRES_USER: misskey
