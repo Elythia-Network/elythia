@@ -1,6 +1,7 @@
 package i
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"log/slog"
@@ -152,11 +153,8 @@ func (h *Handler) UpdateEmail(c echo.Context) error {
 				EmailSettingsLabel: l10n.EmailSettingsLabel(lang),
 				BodyHTML:           bodyHTML,
 			})
-			go h.emailSender(addr, miscsmtp.Message{
-				Subject: subject,
-				Text:    text,
-				HTML:    html,
-			})
+			msg := miscsmtp.Message{Subject: subject, Text: text, HTML: html}
+			h.background.Go(func(context.Context) { h.emailSender(addr, msg) })
 		}
 	}
 

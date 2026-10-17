@@ -17,6 +17,7 @@ import (
 	"github.com/elythia-network/elythia/internal/activitypub"
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/notehide"
+	"github.com/elythia-network/elythia/internal/bgwork"
 	"github.com/elythia-network/elythia/internal/core/avatardecoration"
 	"github.com/elythia-network/elythia/internal/core/following"
 	"github.com/elythia-network/elythia/internal/core/notification"
@@ -77,6 +78,9 @@ type MoveInValidator interface {
 
 // Handler handles account-related API endpoints.
 type Handler struct {
+	// background は応答の後の処理 (rel=me の検証とメール) を起動する箱 (#3661)。世代の停止で
+	// 待つ。nil なら素の goroutine で起動する (テスト)。
+	background       *bgwork.Group
 	userService      *user.Service
 	idGen            id.Generator
 	roleProvider     RoleProvider
@@ -758,6 +762,13 @@ func (h *Handler) SetPageRepo(r repository.PageRepository) {
 func (h *Handler) SetAvatarDecorationRepo(r repository.AvatarDecorationRepository) {
 	h.avatarDecorationRepo = r
 }
+
+// SetBackground sets the group the work after a response runs in, so stopping
+// the server generation waits for it (#3661).
+func (h *Handler) SetBackground(g *bgwork.Group) { h.background = g }
+
+// HasBackground reports whether SetBackground received a group.
+func (h *Handler) HasBackground() bool { return h.background != nil }
 
 // NewHandler creates a new account Handler.
 func NewHandler(userService *user.Service, idGen id.Generator) *Handler {
@@ -2041,11 +2052,11 @@ func (h *Handler) Update(c echo.Context) error {
 		myLink := strings.TrimRight(h.serverURL, "/") + "/@" + me.Username
 		if urls := httpsFieldValues(bundle.Profile); len(urls) > 0 {
 			uid := me.ID
-			go func() {
+			h.background.Go(func(context.Context) {
 				if verified := verifyLinks(h.verifyLinkClient, myLink, urls); len(verified) > 0 {
 					_ = h.userService.UpdateProfileFields(uid, map[string]any{"verifiedLinks": model.StringArray(verified)})
 				}
-			}()
+			})
 		}
 	}
 
