@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/bgwork"
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/core/userpack"
 	"github.com/elythia-network/elythia/internal/entity"
@@ -23,6 +24,9 @@ import (
 
 // Handler handles MiAuth endpoints.
 type Handler struct {
+	// background は応答の後の処理 (token 作成の通知) を起動する箱 (#3661)。世代の停止で
+	// 待つ。nil なら素の goroutine で起動する (テスト)。
+	background *bgwork.Group
 	// detailExtras は UserDetailed のピン留め・移行先を users/show と同じ規則で埋める (#3330)。
 	detailExtras userpack.DetailExtras
 	repo         repository.AuthSessionRepository
@@ -42,6 +46,13 @@ type Handler struct {
 type TokenNotifier interface {
 	OnCreateToken(userID string)
 }
+
+// SetBackground sets the group the work after a response runs in, so stopping
+// the server generation waits for it (#3661).
+func (h *Handler) SetBackground(g *bgwork.Group) { h.background = g }
+
+// HasBackground reports whether SetBackground received a group.
+func (h *Handler) HasBackground() bool { return h.background != nil }
 
 // NewHandler creates a new auth handler.
 func NewHandler(repo repository.AuthSessionRepository, cfg *config.Config, idGen id.Generator) *Handler {
@@ -294,7 +305,8 @@ func (h *Handler) GenToken(c echo.Context) error {
 
 	// createToken 通知を本人へ送る (upstream miauth/gen-token、#1559)。
 	if h.tokenNotifier != nil {
-		go h.tokenNotifier.OnCreateToken(user.ID)
+		uid := user.ID
+		h.background.Go(func(context.Context) { h.tokenNotifier.OnCreateToken(uid) })
 	}
 
 	return c.JSON(http.StatusOK, map[string]any{"token": tokenStr})
