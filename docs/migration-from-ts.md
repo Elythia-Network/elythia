@@ -75,6 +75,8 @@ Elythiaの追加テーブルを作り、共有テーブルを upstream の形に
 
 共有テーブルにも触るものが 20 件あるので、内容と、TS へ戻したときの影響 (保証はしない) を[破壊的なマイグレーション](#破壊的なマイグレーション)にまとめてある。**先に読むこと。**
 
+**適用する前に、データベースのバックアップを取ること。** down が何もしない (戻せない) ものがあり、戻す手段はバックアップだけになる。
+
 ```bash
 # ローカルビルドの場合
 go run ./cmd/elythia migrate -direction up
@@ -201,7 +203,7 @@ admin 画面 (全般 → 情報) で上書きする。
 | `000072` | `instance_secret` を **テーブルごと** DROP する。`GetOrCreate` はテーブル不在を `ErrRecordNotFound` として扱わないので、**この状態で起動すると `resolveMediaProxySecret` が失敗して Elythia が立ち上がらない**。`mediaProxySecret` を設定ファイルに書いていれば回避できる |
 | `000074` | backfill で入れた行と実観測で入った行を区別できないので、`instance_signature_capability` の内容は適用前に戻せない |
 
-Elythiaのmigrationを当てた後のデータベースで、Misskey-TSを動かし直せることは保証しない (#3191)。今どこまで戻せるかは[戻らなくなったもの](#戻らなくなったもの)を参照。
+Elythia の migration を当てた後のデータベースで、Misskey-TS を動かし直せることは保証しない (#3191)。戻す場合の注意と、今どこまで戻れるかは [Misskey-TSへのロールバック](#misskey-tsへのロールバック) を参照。
 
 ## 5. Misskey-TSの停止
 

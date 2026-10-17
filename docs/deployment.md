@@ -1098,7 +1098,7 @@ upstream以外の設定はTCP構成と同じ。
 
 既存のMisskey (TypeScript版)からの移行手順は[TS版からの移行ガイド](migration-from-ts.md)を参照。
 
-ElythiaはTS版と同じPostgreSQL/Redisを共有できるため、バイナリの差し替えだけで移行可能。マイグレーションはTS版テーブルに対して原則追加のみだが、例外が 20 件ある ([TS版からの移行](migration-from-ts.md#破壊的なマイグレーション))。
+ElythiaはTS版のPostgreSQL/Redisをそのまま引き継いで起動できる。設定の`id`をTS版と揃えること、`migrate up`の前にバックアップを取ることなどの条件は移行ガイドにある。TS版へ戻すことは保証しない (#3191)。マイグレーションはTS版テーブルに対して原則追加のみだが、例外が 20 件ある ([TS版からの移行](migration-from-ts.md#破壊的なマイグレーション))。
 
 ## アップデート
 
