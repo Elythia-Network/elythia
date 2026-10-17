@@ -1,11 +1,13 @@
 package resetpassword
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/bgwork"
 	coreemail "github.com/elythia-network/elythia/internal/core/email"
 	"github.com/elythia-network/elythia/internal/l10n"
 	"github.com/elythia-network/elythia/internal/misc"
@@ -24,13 +26,23 @@ type EmailSender func(to string, msg miscsmtp.Message)
 
 // Handler handles password reset endpoints.
 type Handler struct {
-	userRepo  repository.UserRepository
-	resetRepo repository.PasswordResetRequestRepository
-	metaRepo  repository.MetaRepository
-	idGen     id.Generator
-	email     EmailSender
-	serverURL string
+	// background は応答の後の処理 (リセットメールの送信) を起動する箱 (#3661)。世代の停止で
+	// 待つ。nil なら素の goroutine で起動する (テスト)。
+	background *bgwork.Group
+	userRepo   repository.UserRepository
+	resetRepo  repository.PasswordResetRequestRepository
+	metaRepo   repository.MetaRepository
+	idGen      id.Generator
+	email      EmailSender
+	serverURL  string
 }
+
+// SetBackground sets the group the work after a response runs in, so stopping
+// the server generation waits for it (#3661).
+func (h *Handler) SetBackground(g *bgwork.Group) { h.background = g }
+
+// HasBackground reports whether SetBackground received a group.
+func (h *Handler) HasBackground() bool { return h.background != nil }
 
 // NewHandler creates a new password reset Handler.
 func NewHandler(userRepo repository.UserRepository, resetRepo repository.PasswordResetRequestRepository, idGen id.Generator) *Handler {
@@ -111,11 +123,9 @@ func (h *Handler) RequestReset(c echo.Context) error {
 			EmailSettingsLabel: l10n.EmailSettingsLabel(lang),
 			BodyHTML:           bodyHTML,
 		})
-		go h.email(*profile.Email, miscsmtp.Message{
-			Subject: subject,
-			Text:    text,
-			HTML:    html,
-		})
+		to := *profile.Email
+		msg := miscsmtp.Message{Subject: subject, Text: text, HTML: html}
+		h.background.Go(func(context.Context) { h.email(to, msg) })
 	}
 
 	return c.NoContent(http.StatusNoContent)
