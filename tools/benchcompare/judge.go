@@ -75,6 +75,13 @@ type EndpointCompare struct {
 	// Nil when a round could not be measured.
 	BaseK6ThrottledPercent *float64 `json:"baseK6ThrottledPercent"`
 	HeadK6ThrottledPercent *float64 `json:"headK6ThrottledPercent"`
+	// Iterations the arrival rate asked for but k6 could not start, over all
+	// rounds of each side.
+	BaseDropped int64 `json:"baseDropped"`
+	HeadDropped int64 `json:"headDropped"`
+	// DroppedTooMany is true when either side dropped more than
+	// maxDroppedPercent of the endpoint's iterations.
+	DroppedTooMany bool `json:"droppedTooMany"`
 }
 
 // ResourceCompare compares one container.
@@ -131,6 +138,20 @@ const maxRateGapPoints = 1.0
 // 区間も 94.7〜100%) ので、飽和した回はこの線で確実に分かれる。
 const maxK6ThrottledPercent = 2.0
 
+// maxDroppedPercent is the largest share, in percent, of an endpoint's
+// iterations (sent and dropped, over all rounds of a side) that k6 may drop
+// before the endpoint is incomparable (#3656).
+//
+// 送れなかった iteration は、その側が決めた率より軽い負荷で測ったことを示す。ただ、
+// 毎秒 1000 件のエンドポイントでは、50ms ほどの詰まり (GC の停止や CPU の区切りの待ち) で
+// 応答を待つ VU が 100 個に届き、数件が落ちうる。30000 件のうちの数件は、判定に使う p95
+// (上位 5%) をほとんど動かさない。落ちた iteration は送られず測られないので、落ちた分が
+// すべて遅い応答 (詰まりの最中) だったとすると、測った分布から上位が抜け、p95 はサーバーの
+// 分布の p94.9 (95 × 99.9%) の方へ下がる。落とした側がわずかに速く見える向きで、0.1% まで
+// ならその偏りは 0.1 分位にとどまる。それを超えたら、その側は率に追いつけていないとして
+// 比較不能にする。
+const maxDroppedPercent = 0.1
+
 // minRounds is the fewest rounds per side that give a range to compare.
 // With one round any difference would look like a real one.
 const minRounds = 2
@@ -157,8 +178,14 @@ func compare(rs *RunSet) *Comparison {
 			c.problem("%s round %d did not complete: %s", r.Meta.Side, r.Meta.Round, reason)
 			continue
 		}
-		if r.Dropped > 0 {
-			c.problem("%s round %d dropped %d iterations (the load was lower than requested)", r.Meta.Side, r.Meta.Round, r.Dropped)
+		// エンドポイントのシナリオで落ちた分は、そのエンドポイントだけを比較不能にする。
+		// どのシナリオにも数えられない分は、どこの負荷が減ったか分からないので比較全体を止める
+		var attributed int64
+		for _, e := range r.Endpoints {
+			attributed += e.Dropped
+		}
+		if n := r.Dropped - attributed; n > 0 {
+			c.problem("%s round %d dropped %d iterations outside the endpoints' scenarios (the load was lower than requested)", r.Meta.Side, r.Meta.Round, n)
 		}
 		bySide[r.Meta.Side] = append(bySide[r.Meta.Side], r)
 	}
@@ -309,8 +336,8 @@ func compareEndpoints(base, head []*Run) []EndpointCompare {
 	for _, name := range sortedKeys(names) {
 		ec := EndpointCompare{Endpoint: name}
 		var missing bool
-		var bReq, bFail, bLim, hReq, hFail, hLim int64
-		collect := func(runs []*Run, req, fail, lim *int64) (lat map[string][]float64, thr []float64) {
+		var bReq, bFail, bLim, bDrop, hReq, hFail, hLim, hDrop int64
+		collect := func(runs []*Run, req, fail, lim, drop *int64) (lat map[string][]float64, thr []float64) {
 			lat = map[string][]float64{}
 			for _, r := range runs {
 				e, ok := r.Endpoints[name]
@@ -322,6 +349,7 @@ func compareEndpoints(base, head []*Run) []EndpointCompare {
 				// timeout も http_req_failed に数えられているので、足すと二重になる
 				*fail += e.Failed
 				*lim += e.RateLimited
+				*drop += e.Dropped
 				// 成功が 0 件の回は、k6 が遅延を 0 で書き出す。測っていない値なので使わない
 				if e.Requests > e.Failed {
 					for _, st := range latencyStats {
@@ -333,8 +361,9 @@ func compareEndpoints(base, head []*Run) []EndpointCompare {
 			return lat, thr
 		}
 		var noSuccess bool
-		bLat, bThr := collect(base, &bReq, &bFail, &bLim)
-		hLat, hThr := collect(head, &hReq, &hFail, &hLim)
+		bLat, bThr := collect(base, &bReq, &bFail, &bLim, &bDrop)
+		hLat, hThr := collect(head, &hReq, &hFail, &hLim, &hDrop)
+		ec.BaseDropped, ec.HeadDropped = bDrop, hDrop
 		ec.BaseErrorRate, ec.HeadErrorRate = percent(bFail, bReq), percent(hFail, hReq)
 		ec.BaseRateLimitRate, ec.HeadRateLimitRate = percent(bLim, bReq), percent(hLim, hReq)
 		var bK6OK, hK6OK bool
@@ -343,6 +372,12 @@ func compareEndpoints(base, head []*Run) []EndpointCompare {
 
 		if missing {
 			ec.Reasons = append(ec.Reasons, "not measured in every round")
+		}
+		// 送れなかった分が多ければ、その側は決めた率より軽い負荷で測っている。サーバーか k6 が
+		// 率に追いつかなかったことを示し、時間は同じ負荷どうしの比較にならない
+		ec.DroppedTooMany = tooManyDropped(bDrop, bReq) || tooManyDropped(hDrop, hReq)
+		if ec.DroppedTooMany {
+			ec.Reasons = append(ec.Reasons, fmt.Sprintf("more than %.1f%% of the iterations were dropped (the server or k6 did not keep up with the arrival rate): %d / %d", maxDroppedPercent, bDrop, hDrop))
 		}
 		// k6 が律速なら、速さの差はサーバーではなく k6 の待ちかもしれない
 		if !bK6OK || !hK6OK {
@@ -383,6 +418,12 @@ func compareEndpoints(base, head []*Run) []EndpointCompare {
 		out = append(out, ec)
 	}
 	return out
+}
+
+// tooManyDropped reports whether dropped iterations are more than
+// maxDroppedPercent of the iterations asked for (sent plus dropped).
+func tooManyDropped(dropped, sent int64) bool {
+	return percent(dropped, sent+dropped) > maxDroppedPercent
 }
 
 // maxK6Throttled returns the largest k6 throttled share of the endpoint's
@@ -510,13 +551,18 @@ var minAbsDifference = map[string]float64{
 // referenceOnly lists the measures that are shown with their difference but
 // never judged, so they do not make an endpoint different.
 //
+// requests は到着率で送るので、送れなかった分が無ければ両側とも率 × 時間でほぼ決まる。
+// 送れなかった分が多ければ、そのエンドポイントは別に比較不能になる。多い少ないで良し
+// 悪しを言える場面が無いので、判定しない (#3656)。
+//
 // p99 は 1 ラウンド数千件のうち上位 1% で決まり、GC や CPU の取り合いで段を飛ぶ
 // ように動く (A/A の 5 回で home-timeline の p99 が 412〜759ms)。同じ commit
 // どうしでも、幅が重ならずに +19.0% と +15.9% の「差あり」が出た (#3559)。この 2 回
 // は下限 20% で防げるが、記録には約 510ms と約 700ms の段が両方あり、両側に分かれる
 // と 37% になるので、下限では防げない。
 var referenceOnly = map[string]bool{
-	"p(99)": true,
+	"p(99)":    true,
+	"requests": true,
 }
 
 // newMeasure compares the per-round values of base and head.
