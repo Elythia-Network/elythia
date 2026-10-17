@@ -1,9 +1,12 @@
 package note
 
 import (
+	"context"
 	"log/slog"
 	"runtime"
 	"sync"
+
+	"github.com/elythia-network/elythia/internal/bgwork"
 )
 
 // ノート作成後のベストエフォートフックの同時実行数を絞る。
@@ -87,18 +90,33 @@ func hookSem(k hookKind) chan struct{} {
 	return hookSems[k]
 }
 
-// safeGo runs fn in a new goroutine, recovering from panics.
+// safeGo runs fn in a new goroutine of g, recovering from panics.
 // ベストエフォートフックでパニックが発生してもプロセス全体が落ちないようにする。
-func safeGo(fn func()) { safeGoKind(hookOther, fn) }
+func safeGo(g *bgwork.Group, fn func()) { safeGoKind(g, hookOther, fn) }
 
 // safeGoKind is safeGo with an explicit hook kind, so the slot budget of one
 // kind cannot be consumed by another.
-func safeGoKind(k hookKind, fn func()) {
+//
+// g is the group of the server generation (#3661). A hook still waiting for
+// its slot when the generation stop cancels the context of g is dropped
+// (and counted in g.Dropped) instead of run.
+func safeGoKind(g *bgwork.Group, k hookKind, fn func()) {
 	sem := hookSem(k)
-	go func() {
+	g.Go(func(ctx context.Context) {
 		// **枠は goroutine の中で取る。** 外で取ると呼び出し元 (= 応答を返す
 		// 経路) が待たされ、非同期にした意味が無くなる。
-		sem <- struct{}{}
+		//
+		// 世代の停止の待ちが終わり近くになっても枠が取れなければ、走らせずに捨てる
+		// (#3661)。ctx は待ちの 3/4 を過ぎるまで切れないので、待ちの間に枠が空けば
+		// 走る。まだ何も書いていないので捨てても途中の状態は残らない。走らせると
+		// 閉じる DB へ書きに行く。捨てたことは件数とログに残す (配送や通知は冪等な
+		// 後追いが無いため、黙って消すと気付けない)。
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			g.RecordDropped("note hook", "no slot before the generation stop gave up")
+			return
+		}
 		defer func() { <-sem }()
 		defer func() {
 			if r := recover(); r != nil {
@@ -106,5 +124,5 @@ func safeGoKind(k hookKind, fn func()) {
 			}
 		}()
 		fn()
-	}()
+	})
 }

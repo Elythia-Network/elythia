@@ -1,12 +1,14 @@
 package note_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/bgwork"
 	corechannel "github.com/elythia-network/elythia/internal/core/channel"
 	"github.com/elythia-network/elythia/internal/core/note"
 	"github.com/elythia-network/elythia/internal/core/role"
@@ -2505,4 +2507,42 @@ func TestCreateService_ReplyIntoLiveChannelAllowed(t *testing.T) {
 			assert.Equal(t, []string{"chLive"}, hook.checked)
 		})
 	}
+}
+
+// TestCreateService_HooksRunInTheBackgroundGroup checks that every
+// best-effort hook starts in the group of the server generation (#3661): once
+// the group has stopped, creating a note starts none of them.
+func TestCreateService_HooksRunInTheBackgroundGroup(t *testing.T) {
+	svc, _, _ := newCreateService(t)
+	fanout := newRecordingHook()
+	svc.SetFanoutHook(fanout)
+	notification := newRecordingNotificationHook()
+	svc.SetNotificationHook(notification)
+	federation := newRecordingFederationHook()
+	svc.SetFederationHook(federation)
+	channel := newRecordingChannelHook()
+	svc.SetChannelHook(channel)
+	index := newRecordingIndexHook()
+	svc.SetIndexHook(index)
+	chart := newRecordingChartHook()
+	svc.SetChartHook(chart)
+	webhook := newRecordingNotificationHook()
+	svc.SetWebhookHook(webhook)
+	g := bgwork.New()
+	svc.SetBackground(g)
+	assert.True(t, svc.HasBackground())
+	require.Zero(t, g.Stop(context.Background()))
+
+	text := "hello"
+	channelID := "ch1"
+	_, err := svc.Create(note.CreateInput{User: &model.User{ID: "u1"}, Text: &text, ChannelID: &channelID})
+	require.NoError(t, err)
+	time.Sleep(100 * time.Millisecond)
+	assert.False(t, fanout.called.Load(), "世代を止めた後に fanout のフックが走った")
+	assert.False(t, notification.called.Load(), "世代を止めた後に通知のフックが走った")
+	assert.False(t, channel.postedCalled.Load(), "世代を止めた後にチャンネルのフックが走った")
+	assert.False(t, webhook.called.Load(), "世代を止めた後に webhook のフックが走った")
+	// fanout・通知・連合・チャンネル・索引・chart・webhook・notesCount の 8 つ。
+	// 1 つでも素の goroutine に戻ると数が減る。
+	assert.EqualValues(t, 8, g.Dropped())
 }

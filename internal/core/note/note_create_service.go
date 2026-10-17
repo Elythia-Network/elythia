@@ -17,6 +17,7 @@ import (
 	"time"
 
 	apmfm "github.com/elythia-network/elythia/internal/activitypub/mfm"
+	"github.com/elythia-network/elythia/internal/bgwork"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/hashtag"
 	"github.com/elythia-network/elythia/internal/misc/id"
@@ -224,7 +225,10 @@ type SilencingProvider interface {
 
 // CreateService provides note creation logic.
 type CreateService struct {
-	noteRepo repository.NoteRepository
+	// background は作成後のベストエフォートフックを起動する箱 (#3661)。
+	// 世代の停止で待つ。nil なら素の goroutine で起動する (テスト)。
+	background *bgwork.Group
+	noteRepo   repository.NoteRepository
 	// rolePolicyProvider は mentionLimit の gate に使う (#2321)。nil なら
 	// DefaultMentionLimit にフォールバックする。
 	rolePolicyProvider role.PolicyProvider
@@ -280,6 +284,13 @@ type RemoteUserResyncer interface {
 	NeedsResync(u *model.User) bool
 	ResyncIfStale(u *model.User) (*model.User, error)
 }
+
+// SetBackground sets the group the best-effort hooks run in, so stopping the
+// server generation waits for them (#3661).
+func (s *CreateService) SetBackground(g *bgwork.Group) { s.background = g }
+
+// HasBackground reports whether SetBackground received a group.
+func (s *CreateService) HasBackground() bool { return s.background != nil }
 
 // SetRemoteUserResolver wires the resolver used to fetch mentioned remote
 // users that are not in the DB, as upstream RemoteUserResolveService.resolveUser
@@ -990,13 +1001,13 @@ func (s *CreateService) Create(in CreateInput) (*model.Note, error) {
 	// ベストエフォートフックを非同期で並列実行する。各フックは独立しており、
 	// 失敗してもノート作成自体は成功扱い。TS版と同様にfire-and-forgetで配信する。
 	if s.fanoutHook != nil {
-		safeGoKind(hookFanout, func() { s.fanoutHook.OnNoteCreated(finalNote, in.User) })
+		safeGoKind(s.background, hookFanout, func() { s.fanoutHook.OnNoteCreated(finalNote, in.User) })
 	}
 	if s.notificationHook != nil {
-		safeGo(func() { s.notificationHook.OnNoteCreated(finalNote, in.User, replyTarget, renoteTarget) })
+		safeGo(s.background, func() { s.notificationHook.OnNoteCreated(finalNote, in.User, replyTarget, renoteTarget) })
 	}
 	if s.federationHook != nil {
-		safeGo(func() { s.federationHook.OnNoteCreated(finalNote, in.User) })
+		safeGo(s.background, func() { s.federationHook.OnNoteCreated(finalNote, in.User) })
 	}
 	// OnNotePosted は note が実際に属する effective channel (re-scope 後、#1859) で
 	// 発火する。reply で別 channel に入った/外れた場合も正しい channel に通知する。
@@ -1004,7 +1015,7 @@ func (s *CreateService) Create(in CreateInput) (*model.Note, error) {
 		chID := *effectiveChannelID
 		noteID := finalNote.ID
 		authorID := in.User.ID
-		safeGo(func() { s.channelHook.OnNotePosted(chID, noteID, authorID) })
+		safeGo(s.background, func() { s.channelHook.OnNotePosted(chID, noteID, authorID) })
 	}
 	if s.antennaHook != nil {
 		// アンテナへの fan-out は同期で行う。upstream は
@@ -1017,10 +1028,10 @@ func (s *CreateService) Create(in CreateInput) (*model.Note, error) {
 		s.antennaHook.OnNoteCreated(finalNote, in.User)
 	}
 	if s.indexHook != nil {
-		safeGo(func() { s.indexHook.OnNoteCreated(finalNote) })
+		safeGo(s.background, func() { s.indexHook.OnNoteCreated(finalNote) })
 	}
 	if s.chartHook != nil {
-		safeGo(func() { s.chartHook.OnNoteCreated(finalNote) })
+		safeGo(s.background, func() { s.chartHook.OnNoteCreated(finalNote) })
 	}
 	if s.hashtagHook != nil {
 		// HashtagHook は実装側 (core/hashtag.Service) が内部で goroutine を
@@ -1028,7 +1039,7 @@ func (s *CreateService) Create(in CreateInput) (*model.Note, error) {
 		s.hashtagHook.OnNoteCreated(finalNote, in.User)
 	}
 	if s.webhookHook != nil {
-		safeGo(func() { s.webhookHook.OnNoteCreated(finalNote, in.User, replyTarget, renoteTarget) })
+		safeGo(s.background, func() { s.webhookHook.OnNoteCreated(finalNote, in.User, replyTarget, renoteTarget) })
 	}
 	// reply / renote / mention 各イベントを対象local userのmainにemit。
 	// Misskey本家NoteCreateServiceと同じfan-out方針 (TS lines 792 / 809 / 935)。
@@ -1038,7 +1049,7 @@ func (s *CreateService) Create(in CreateInput) (*model.Note, error) {
 	// で CachedUserRepository wrapper の invalidate が走り、stale notesCount
 	// が profile API に出続ける問題を防ぐ (Devin review #552 BUG-2)。
 	// userRepo 未配線の旧経路は noteRepo の同等メソッドにフォールバック。
-	safeGo(func() {
+	safeGo(s.background, func() {
 		if s.userRepo != nil {
 			_ = s.userRepo.IncrementNotesCount(in.User.ID, 1)
 			return
