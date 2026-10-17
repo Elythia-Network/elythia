@@ -1401,3 +1401,38 @@ func TestTranslate_BlankText_204(t *testing.T) {
 		assert.Empty(t, *sent, "DeepL を呼ばない (%q)", txt)
 	}
 }
+
+// notConfiguredTranslator answers like a MetaDeepL whose meta has no key.
+type notConfiguredTranslator struct{ calls int }
+
+func (n *notConfiguredTranslator) Translate(context.Context, string, string) (*translate.TranslateResult, error) {
+	n.calls++
+	return nil, translate.ErrNotConfigured
+}
+
+// キーを翻訳のたびに meta から読むので (#3663)、未設定は Translate の
+// ErrNotConfigured で分かる。本家の `deeplAuthKey == null` と同じ
+// UNAVAILABLE にし、空白だけの本文の 204 はその前に返す (本家の順序)。
+func TestTranslate_TranslatorNotConfigured_Unavailable(t *testing.T) {
+	noteRepo := testutil.NewMockNoteRepository()
+	followingRepo := testutil.NewMockFollowingRepository()
+	idGen, _ := id.NewGenerator("aidx")
+	h := NewHandler(noteRepo, nil, nil, corenote.NewQueryService(noteRepo, followingRepo), nil, nil, nil, nil, idGen)
+	tr := &notConfiguredTranslator{}
+	h.SetTranslator(tr)
+
+	txt, blank := "本文", "  "
+	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: "u1", Visibility: model.NoteVisibilityPublic, Text: &txt}
+	noteRepo.Notes["n2"] = &model.Note{ID: "n2", UserID: "u1", Visibility: model.NoteVisibilityPublic, Text: &blank}
+
+	rec := postExtra(h.Translate, `{"noteId":"n1","targetLang":"en"}`, nil)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	code, idStr := translateBody(t, rec)
+	assert.Equal(t, "UNAVAILABLE", code)
+	assert.Equal(t, "50a70314-2d8a-431b-b433-efa5cc56444c", idStr)
+	assert.Equal(t, 1, tr.calls)
+
+	rec = postExtra(h.Translate, `{"noteId":"n2","targetLang":"en"}`, nil)
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Equal(t, 1, tr.calls, "blank text must not reach the translator")
+}

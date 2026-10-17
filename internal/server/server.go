@@ -148,6 +148,16 @@ type Server struct {
 	pluginGoStarter       func(func())
 	pluginGoGate          *pluginGoGate
 	beforePluginGoRelease func()
+	// metaUpdatedHandled is a test hook called after this process has handled
+	// one internal:metaUpdated message (#3663). 本番では nil。
+	//
+	// テストが「別のプロセスの通知 1 回」で効くことを、処理の終わりを待って
+	// 確かめるために使う。目印を同じトピックへ流して待つと購読が 2 回走り、
+	// 購読の中の順序の誤りを見逃す。
+	//
+	// **購読の最後 (全部の処理の後) で呼ぶこと。** 前で呼ぶと、テストが処理の
+	// 終わる前に検査を始める。
+	metaUpdatedHandled atomic.Pointer[func(payload []byte)]
 }
 
 // registerShutdownHook registers fn to be invoked during Shutdown.

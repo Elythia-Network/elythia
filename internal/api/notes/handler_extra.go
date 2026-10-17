@@ -14,6 +14,7 @@ import (
 	coreachievement "github.com/elythia-network/elythia/internal/core/achievement"
 	corenote "github.com/elythia-network/elythia/internal/core/note"
 	"github.com/elythia-network/elythia/internal/core/notesfilter"
+	"github.com/elythia-network/elythia/internal/core/translate"
 	"github.com/elythia-network/elythia/internal/core/ugcvisibility"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/hashtag"
@@ -766,7 +767,15 @@ func (h *Handler) Translate(c echo.Context) error {
 	}
 
 	result, err := h.translator.Translate(c.Request().Context(), text, req.TargetLang)
+	if errors.Is(err, translate.ErrNotConfigured) {
+		// キーは翻訳のたびに meta から読む (#3663)。未設定は本家の
+		// `deeplAuthKey == null` と同じ unavailable にする (上の nil と同じ応答)。
+		return c.JSON(http.StatusBadRequest, apierr.Error("UNAVAILABLE", "Translate of notes unavailable.", "50a70314-2d8a-431b-b433-efa5cc56444c"))
+	}
 	if err != nil {
+		// 利用者には汎用の文言だけを返す。キーは err に入らない (DeepL の応答本文の
+		// 抜粋か、meta を読めなかった理由だけ)。
+		slog.Error("notes/translate: translation failed", "err", err)
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Translation failed.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
 

@@ -1946,11 +1946,20 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// **毎回読む。** 起動時に焼き込むと、運営者が管理画面で締めても
 	// プロセスを再起動するまで API に反映されない。
 	notesHandler.SetUGCVisibilityLookup(func() string { return metaUGCVisibility(metaRepo) })
-	if m, err := metaRepo.Fetch(); err == nil {
-		if m.DeeplAuthKey != nil && *m.DeeplAuthKey != "" {
-			notesHandler.SetTranslator(coretranslate.NewDeepL(*m.DeeplAuthKey, m.DeeplIsPro, s.outboundClient(10*time.Second)))
+	// **キーと Pro は翻訳のたびに読む (#3663)。** 起動時の値で翻訳器を作ると、
+	// 管理画面でキーを入れても外しても、プロセスか世代を作り直すまで変わら
+	// なかった。metaRepo はキャッシュだが、`internal:metaUpdated` で全プロセスの
+	// 分が捨てられる。
+	notesHandler.SetTranslator(coretranslate.NewMetaDeepL(func() (string, bool, error) {
+		m, err := metaRepo.Fetch()
+		if err != nil {
+			return "", false, err
 		}
-	}
+		if m.DeeplAuthKey == nil {
+			return "", false, nil
+		}
+		return *m.DeeplAuthKey, m.DeeplIsPro, nil
+	}, s.outboundClient(10*time.Second)))
 	api.POST("/notes/create", notesHandler.Create, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:notes"))
 	api.POST("/notes/show", notesHandler.Show)
 	api.POST("/notes/delete", notesHandler.Delete, middleware.RequireAuth(), middleware.RequireScope("write:notes"))
@@ -3023,10 +3032,13 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			slog.Warn("meta: publish metaUpdated failed", "err", err)
 		}
 	})
-	internalPubSub.Subscribe(context.Background(), "metaUpdated", func([]byte) {
+	internalPubSub.Subscribe(context.Background(), "metaUpdated", func(payload []byte) {
 		cachedMeta.Invalidate()
 		metaHandler.InvalidateResponseCache()
 		reloadCaptcha()
+		if hook := s.metaUpdatedHandled.Load(); hook != nil {
+			(*hook)(payload)
+		}
 	})
 	// 連合のルール (#3090) は受信の経路でスナップショットを持つので、管理画面で
 	// 変えたら他のプロセスにも読み直させる (繋がないと最大 5 分古いルールで
