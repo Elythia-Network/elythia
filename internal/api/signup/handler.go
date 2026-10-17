@@ -13,6 +13,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/bgwork"
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/core/captcha"
 	coreemail "github.com/elythia-network/elythia/internal/core/email"
@@ -51,6 +52,9 @@ type SigninRecorder interface {
 
 // Handler handles POST /api/signup.
 type Handler struct {
+	// background は応答の後の処理 (確認メールの送信) を起動する箱 (#3661)。世代の停止で
+	// 待つ。nil なら素の goroutine で起動する (テスト)。
+	background    *bgwork.Group
 	signupService *coresignup.Service
 	metaRepo      repository.MetaRepository
 	idGen         id.Generator
@@ -125,6 +129,13 @@ func (h *Handler) fireSigninSideEffects(c echo.Context, userID string) {
 func (h *Handler) SetTestMode(v bool) {
 	h.testMode = v
 }
+
+// SetBackground sets the group the work after a response runs in, so stopping
+// the server generation waits for it (#3661).
+func (h *Handler) SetBackground(g *bgwork.Group) { h.background = g }
+
+// HasBackground reports whether SetBackground received a group.
+func (h *Handler) HasBackground() bool { return h.background != nil }
 
 // NewHandler creates a new signup Handler.
 func NewHandler(signupService *coresignup.Service, metaRepo repository.MetaRepository, idGen id.Generator) *Handler {
@@ -510,11 +521,8 @@ func (h *Handler) sendSignupConfirmation(meta *model.Meta, to, code, acceptLangu
 		Subject:  subject,
 		BodyHTML: bodyHTML,
 	})
-	go h.emailSender(to, miscsmtp.Message{
-		Subject: subject,
-		Text:    text,
-		HTML:    html,
-	})
+	msg := miscsmtp.Message{Subject: subject, Text: text, HTML: html}
+	h.background.Go(func(context.Context) { h.emailSender(to, msg) })
 }
 
 // signupConfirmURL builds the email confirmation link Misskey TS uses
