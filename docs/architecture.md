@@ -468,6 +468,7 @@ CLAUDE.md の Section 1 / 2 にあった表とツリーを、#3248 でここへ�
 │   ├── frontendutil/       # 同梱フロントエンドの資産配信ヘルパー
 │   ├── pgarray/            # database/sql 用の PostgreSQL 配列型
 │   ├── pgactivity/         # pg_stat_activity で DB に繋いでいる接続を数えて切る。バックアップの戻しとメンテナンスモードが使う (#3463)
+│   ├── bgwork/             # 世代ごとに、投げっぱなしで起動する goroutine を数える箱。世代の停止で上限付きで待ち、待ちの 3/4 で ctx を切る (#3661)
 │   ├── sentry/             # sentry-go の配線
 │   ├── redislog/           # go-redis の内部ロガーを slog へ流す配線
 │   ├── misc/               # ユーティリティ（ID生成 等。既定は`aidx`、Section 6 参照）
