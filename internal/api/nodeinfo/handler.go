@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -60,6 +61,9 @@ type Handler struct {
 	cacheTTL time.Duration
 	cacheMu  sync.Mutex
 	cache    map[string]cacheEntry
+	// cacheGen は捨てるたびに進む世代。捨てる前に読み始めた build の結果を、
+	// 捨てた後に積まないために使う (#3663)。
+	cacheGen uint64
 	sf       singleflight.Group
 }
 
@@ -89,6 +93,7 @@ func (h *Handler) SetCacheTTL(d time.Duration) {
 	defer h.cacheMu.Unlock()
 	h.cacheTTL = d
 	h.cache = make(map[string]cacheEntry)
+	h.cacheGen++
 }
 
 // now reads the injected clock, falling back to time.Now for a zero-value
@@ -100,25 +105,30 @@ func (h *Handler) now() time.Time {
 	return h.clock()
 }
 
-// cacheGet returns the cached body for version when it is still fresh.
-func (h *Handler) cacheGet(version string) ([]byte, bool) {
+// cacheGet returns the cached body for version when it is still fresh, and the
+// current cache generation.
+func (h *Handler) cacheGet(version string) ([]byte, uint64, bool) {
 	h.cacheMu.Lock()
 	defer h.cacheMu.Unlock()
 	if h.cacheTTL <= 0 {
-		return nil, false
+		return nil, h.cacheGen, false
 	}
 	e, ok := h.cache[version]
 	if !ok || !h.now().Before(e.expires) {
-		return nil, false
+		return nil, h.cacheGen, false
 	}
-	return e.body, true
+	return e.body, h.cacheGen, true
 }
 
-// cachePut stores the marshalled body for version.
-func (h *Handler) cachePut(version string, body []byte) {
+// cachePut stores the marshalled body for version, unless the cache was
+// dropped after generation gen was read.
+//
+// **捨てた後に積まない。** 捨てる前の meta で組み立てた document を、捨てた
+// 直後に積むと、そこから TTL (10 分) の間古いままになる。
+func (h *Handler) cachePut(version string, body []byte, gen uint64) {
 	h.cacheMu.Lock()
 	defer h.cacheMu.Unlock()
-	if h.cacheTTL <= 0 {
+	if h.cacheTTL <= 0 || gen != h.cacheGen {
 		return
 	}
 	if h.cache == nil {
@@ -135,6 +145,18 @@ func (h *Handler) invalidateCache() {
 	h.cacheMu.Lock()
 	defer h.cacheMu.Unlock()
 	h.cache = make(map[string]cacheEntry)
+	h.cacheGen++
+}
+
+// InvalidateCache drops the cached documents, so the next request rebuilds
+// them from the current meta.
+//
+// internal:metaUpdated で呼ぶ (#3663)。呼ばないと、管理画面でサーバーの名前や
+// 登録の可否を変えても、最大 CacheTTL (10 分) 古い document を配り続ける。
+// **meta 行のキャッシュを先に捨ててから呼ぶこと** (逆だと、捨てた直後の
+// 組み立てが古い meta 行を読む)。本家はここを捨てず、TTL まで古いまま。
+func (h *Handler) InvalidateCache() {
+	h.invalidateCache()
 }
 
 // documentBody returns the marshalled nodeinfo document for version, building
@@ -144,20 +166,24 @@ func (h *Handler) invalidateCache() {
 // `delete base.software.repository` するため、2.0 を先に引くと 2.1 からも
 // repository が消える。mk-go は version ごとに build して同じ穴を作らない。
 func (h *Handler) documentBody(version string) ([]byte, error) {
-	if body, ok := h.cacheGet(version); ok {
+	body, gen, ok := h.cacheGet(version)
+	if ok {
 		return body, nil
 	}
-	v, err, _ := h.sf.Do(version, func() (any, error) {
+	// **世代を key に含める。** 捨てた後に来たリクエストを、捨てる前に始まった
+	// build に相乗りさせない (古い document を受け取ってしまう)。
+	v, err, _ := h.sf.Do(version+"@"+strconv.FormatUint(gen, 10), func() (any, error) {
 		// singleflight 入場時に再確認する。直前に coalesce された呼び出しが
 		// 積んでいれば build せずに済む。
-		if body, ok := h.cacheGet(version); ok {
+		body, gen, ok := h.cacheGet(version)
+		if ok {
 			return body, nil
 		}
 		body, err := json.Marshal(h.buildDocument(version))
 		if err != nil {
 			return nil, err
 		}
-		h.cachePut(version, body)
+		h.cachePut(version, body, gen)
 		return body, nil
 	})
 	if err != nil {

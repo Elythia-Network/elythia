@@ -3054,6 +3054,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	}
 	cachedMeta.SetInvalidationHook(func() {
 		metaHandler.InvalidateResponseCache()
+		// /nodeinfo の応答 (10 分) も meta から組むので、同じ順序で捨てる (#3663)。
+		nodeinfoHandler.InvalidateCache()
 		reloadCaptcha()
 		reloadReactionBuffering()
 		if err := internalPubSub.Publish(context.Background(), "metaUpdated", struct{}{}); err != nil {
@@ -3063,6 +3065,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	internalPubSub.Subscribe(context.Background(), "metaUpdated", func(payload []byte) {
 		cachedMeta.Invalidate()
 		metaHandler.InvalidateResponseCache()
+		nodeinfoHandler.InvalidateCache()
 		reloadCaptcha()
 		reloadReactionBuffering()
 		if hook := s.metaUpdatedHandled.Load(); hook != nil {
