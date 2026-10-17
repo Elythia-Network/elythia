@@ -55,6 +55,17 @@ Page に作者だけが見られる `private` を足し、公開範囲を `publi
 - 3 値のまま画面を作らなかったのは、`specified` には相手を選ぶ画面が、`followers` には Page の全経路でのフォロー判定が要るため
 - 連合には影響しない (Page は ActivityPub で配らない)
 
+## チャットの既読の持ち方 (#3653)
+
+**本家 (と CherryPick) は、チャットの既読を Redis にだけ持ち、`chat_message.reads` を書かない** (作るときに空の配列を入れるだけ)。DM を受け取ると `newUserChatMessageExists:<受け手>:<送り手>` (最新の未読の id) と `newChatMessagesExists:<受け手>` の set の `user:<送り手>` を置き、会話を読むと両方を消す。ルームも同じ形 (`newRoomChatMessageExists:<受け手>:<ルーム>`、set の `room:<ルーム>`) で持つ。`/api/i` の `hasUnreadChatMessages` は set が空でないか、`chat/history` の `isRead` は marker が無いかで決まる。「全チャットを既読にする」は set だけを消して marker を残すので、本家では、バッジは消えても一覧の未読の印が残る。
+
+**Elythia は既読を `reads` に持ち、本体は Redis のこれらのキーを読みも書きもしない** (読むのは下の `backfill chat-reads` だけ)。 `/api/i` も `chat/history` の `isRead` も `reads` から決める。
+
+- **移行した DB では、移行の前に受け取った DM がすべて未読になる。** `elythia backfill chat-reads` で、移行元の Redis の記録を `reads` へ移す。marker と set の両方が未読を示す会話だけを未読のまま残し、それ以外を既読にする (本家の「全チャットを既読にする」の後に marker だけが残った会話も既読になる)。手順は [移行ガイド](../migration-from-ts.md#55-チャットdmの既読を引き継ぐ)
+- **ルームは移さない。** `/api/i` の `hasUnreadChatMessages` は DM だけを数え (`"toUserId" = ?`)、ルームの未読ではバッジが付かない (本家は set に `room:` も入れるので付く)。移行の前のルームのメッセージは、一覧で未読の印が付いたまま出ることがあり、開けば消える
+- **`chat/history` は `untilId` で続きを読める** (§1-1c)。本家は `limit` (上限 100) しか持たず、それより古い会話の未読は、本家では set に、Elythia では `reads` に残ったまま一覧に出ない。frontend は「もっと見る」で続きを読む
+- TS へ戻すと (保証はしない)、本家は `reads` を読まないので、Elythia で受け取った DM には未読の記録が無く、すべて既読に見える。移行の時点で残っていた本家の記録は、そのまま効く
+
 ## `users/featured-notes` で、利用者ごとのランキングが空のとき (#3612)
 
 本家は、利用者ごとのランキング (最近の反応を数える Redis の sorted set) が空なら `[]` を返す。Elythia は空のとき、DB から代わりの候補を選んで返す (#1687。最近反応の無い利用者でも、プロフィールのハイライトが空にならない)。
@@ -216,6 +227,7 @@ upstream 由来のクライアントはそのまま通る (省略時は upstream
 | `i/update` | `avatarDecorations[].scale` | デコレーションの大きさ (#2975)。**0.1 以上 1 以下**で、外れると `INVALID_PARAM`。**拡大を許さないのが要点** — `.decoration` は既にアバターの 2 倍の枠に描かれるので、1 が upstream と同じ最大サイズにあたる。**1 (既定) は保存しない** — 既存の行は `scale` を持たず、読み出し側はどのみち「無ければ 1」を実装するので、既定を書き込むと意味が変わらないのに全員の jsonb が書き換わる。同梱 frontend は**新規に絵文字を装着するときだけ 0.5 を初期値**にする (カタログ由来は従来どおり 1 から始まる) |
 | `i/update` | `avatarDecorations[].emojiName` | ローカルのカスタム絵文字をアバターデコレーションとして装着する (#2975)。**指定があると同じ要素の `id` は読まない** — クライアントは `avatarDecorations` を配列ごと送り直す作りなので、絵文字の要素を編集するたびに前回保存された `emoji` 行の id が一緒に返ってくる。両方を見る形にすると「name は A、id は B」という入力の扱いを決めねばならず、どちらに倒しても利用者の意図と食い違いうる。**逆に `emojiName` が無く `id` が `emoji` 行を指す場合は絵文字として扱う** — 未知 field を落とす型付きクライアントのための fallback で、検証は同じものを通す。検証は `canUseEmojiAsAvatarDecoration` (無ければ `RESTRICTED_BY_ROLE`)、ローカルに存在するか (無ければ `NO_SUCH_EMOJI`)、センシティブでないか (だめなら Elythia 固有の `SENSITIVE_EMOJI_NOT_ALLOWED`)、絵文字側のロール制限 (`roleIdsThatCanBeUsedThisEmojiAsReaction`、無ければ `RESTRICTED_BY_ROLE`) の順。**センシティブを「存在しない」に丸めない** — 丸めると利用者は名前を打ち間違えたと思って探し続ける。**検証はキャッシュではなく DB を引く** (`CachedEmojiRepository.FindByNameAndHost` / `FindByID` はどちらも無キャッシュで inner へ委譲する) — 作ったばかりの絵文字が TTL のあいだ使えない、センシティブにした直後の絵文字が TTL のあいだ設定できる、という窓を作らないため。個数は `avatarDecorationLimit` に合算する。**リモート絵文字は対象外** — 連合先が消すと壊れるため、ローカル (`host IS NULL`) だけに絞ってある |
 | `i/update` | `followApprovalAction` | フォローの止め方 (#3466)。`request` / `silentRequest` / `silentFollow` 以外は `INVALID_PARAM`。`null` は省略と同じ。期間の `followApprovalLocalSeconds` / `followApprovalRemoteSeconds` (整数、0〜2592000、`null` 可) は本家の次の版 (PR 17998) の引数で、範囲も本家と同じ。本家の ajv (`type: integer`) と同じく、整数の値なら `2.0` や `1e3` の書き方も受け、`1.5` は拒否する |
+| `chat/history` | `untilId` | 続きのページを読む (#3653)。会話を最新のメッセージの id の降順に並べ、`untilId` より古いものだけを返す (前のページの最後の id を渡す)。会話ごとの最新を選んだ後で切るので、会話が別のページに再び現れることはない。省略時は本家と同じ。NUL を含む値は `INVALID_PARAM`。本家は `limit` (上限 100) しか持たず、それより古い会話を読む手段が無い。詳細は上の「[チャットの既読の持ち方](#チャットの既読の持ち方-3653)」 |
 | `pages/create` / `pages/update` | `visibility` | Page の公開範囲 (#3479)。`public` / `private`。詳細は上の「[Page の公開範囲](#page-の公開範囲-3479)」 |
 | `/avatar/@acct` | `static` | 静止画設定 (`disableShowingAnimatedImages` / `dataSaver.avatar`) のとき frontend が付ける (#2908)。**upstream には無い** — あちらは media proxy が open proxy なので `getStaticImageUrl` が組む `<mediaProxy>/static.webp?url=<instance>/avatar/@u@h&static=1` がそのまま通る。Elythia の proxy は allowlist が DB に実在する URL だけを通すため、その URL は **403 + `max-age=86400`** になり静止画になるどころか 1 日壊れていた。`/avatar/` 側で受けて署名付きプロキシ URL へ 302 する (`/emoji/:path` の `static` と同じ形、#2905)。**除外は identicon fallback だけ** — `/identicon/<id>` は相対 URL なので proxy の `Fetch` が `fetchRemote` に落ちて取りに行けない URL として弾かれ、400 + `max-age=86400` になる (#3034 より前は 404 + 同じキャッシュ。PNG を生成して返すのでアニメーションもしない)。**同一オリジンは除外しない** — ローカルの drive アバターも GIF / APNG / animated WebP になりうる。allowlist は判断材料にならない (署名付き URL を組むので `Authorize` は allowlist より先に HMAC で通る) |
 

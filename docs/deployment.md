@@ -1462,6 +1462,27 @@ SQL migration として書けない一回限りの正規化は、`elythia backfi
 **稼働中の本体プロセスに影響しない使い捨てコンテナ**で流す。entrypoint を `/app/elythia` に
 差し替えて、サブコマンドを渡す。`docker-compose.yml` の `migrate` サービスと同じ手法。
 
+### `backfill chat-reads` — 移行元のチャット(DM)の既読を引き継ぐ (#3653)
+
+Misskey TS / CherryPick から移行したサーバーで、移行の前に受け取った DM がすべて未読になり、
+チャットの未読バッジが消えない問題を直す。本家は DM の既読を Redis にだけ持ち、
+`chat_message.reads` を書かないため。**`-before` (移行した時点) は必須**で、指定が無いと
+何もせずに止まる。手順・判定の仕方・Redis の記録が無いときの `-assume-read` は
+[TS版からの移行](migration-from-ts.md#55-チャットdmの既読を引き継ぐ)にまとめてある。
+
+```bash
+docker compose run --rm --no-deps --entrypoint /app/elythia app backfill chat-reads \
+  -config /app/.config/default.yml -before 2026-10-01T00:00:00+09:00 -dry-run
+```
+
+**無指定で書き込み、`-dry-run` で抑止する**側の作法 (`backfill instance-counts` と同じ)。
+冪等で、`-from <message id>` で途中から再開できる。**`--no-deps` は db / redis を起動しない**ので、
+stack を止めているなら先に `docker compose up -d db redis` で起こしておく (配布の image の構成は
+`-f docker-compose.image.yml` を付ける。UDS 構成は `-f compose.uds.yaml` を付け、`app` を `mkgo` に、
+`db redis` を `postgres valkey` にする)。`-before` が移行より
+遅いことが分かったとき (本家の記録より `-too-late-margin` (既定 5 分) を越えて新しい DM がある) は、
+何も書かずに止まる。今より後の `-before` は受け付けない。
+
 ### `backfill instance-counts` — instance の `notesCount` / `usersCount` を数え直す (#3330)
 
 `instance.notesCount` / `usersCount` (`federation/instances` の `notesCount` / `usersCount`、
@@ -1711,7 +1732,7 @@ compose の `run` はサービスの volume をそのまま引き継ぐ。別の
 
 **既定は dry-run で、書き込みには `-apply` が要る。** 姉妹バッチ
 (`backfill remote-host` / `backfill note-tags` / `backfill avatar-public-url` /
-`backfill instance-counts` / `backfill hashtag-mentions`) は
+`backfill instance-counts` / `backfill hashtag-mentions` / `backfill chat-reads`) は
 **逆** (無指定で書き込み、`-dry-run` で抑止) なので、手が覚えているほうで打たないこと。`-dry-run` と `-apply`
 を両方渡すと落ちる。
 
