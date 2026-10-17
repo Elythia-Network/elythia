@@ -566,6 +566,10 @@ func (q *fakeQueue) Enqueue(_ context.Context, name string, payload any, opts ..
 // 競合が入る。
 func (c *fakeContext) Go(fn func()) { fn() }
 
+// GoContext runs fn synchronously with a context that is never canceled, for
+// the same reason as Go.
+func (c *fakeContext) GoContext(fn func(context.Context)) { fn(context.Background()) }
+
 type fakeStorage struct{ db *sql.DB }
 
 func (s *fakeStorage) DB() *sql.DB { return s.db }
