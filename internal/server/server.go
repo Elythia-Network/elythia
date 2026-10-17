@@ -52,6 +52,10 @@ type Server struct {
 	// userCache は userRepo の中身 (同じもの)。他のプロセスとキャッシュの
 	// 無効化をやりとりする配線 (#3664) が、具体的な型を要る。
 	userCache *repository.CachedUserRepository
+	// crossProcessCaches は、他のプロセスと無効化をやりとりする部品 (#3664)。
+	// 配線の検査が、受けたプロセスで実際に捨てた (読み直した) ことを見るために
+	// 持つ。本体のコードからは使わない。
+	crossProcessCaches crossProcessCaches
 	// relationCache は閲覧者ごとのミュート・ブロック・フォローの一覧 (#3607)。
 	// 関係の repository と userRepo の書き込みがここを捨てる。
 	relationCache  *repository.RelationCache
