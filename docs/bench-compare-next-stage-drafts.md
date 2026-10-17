@@ -99,3 +99,16 @@ docker compose -p elythia3464-smoke -f tests/bench/queue/compose.yml -f "$root/c
 - 詳細出力は `E:/tmp/elythia3464-unique-smoke-20261016/report.md` にある。Compose project とその container/volume/network、project専用 image tag、一時 helper は終了後に削除した。
 
 この確認は小規模な合成配送データで同じ SHA の集計経路を試した smoke であり、性能改善または性能差の証拠ではない。round 間で stack/DB を独立に reset した統計的な A/A ではなく、HTTP負荷試験、長時間負荷、外部配送、実ユーザーデータは使っていない。次段階の performance 判定基準を決める根拠にも使わない。
+
+## 2026-10-17 latest develop への適合確認
+
+最新 `origin/develop` (`bfb4649dad76eecc5486d78670d926afee76de4f`) を取得し、この未公開 branch を rebase した。共通祖先が同 SHA になり、対象 bench paths に rebase conflict はなかった。現行 branch の配送コードを対象に次を実行した。
+
+- `go test -vet=off ./tools/benchcompare -count=1` — PASS。
+- `python -m unittest discover -s tests/bench/queue/common -p test_driver_outbound.py -v` — 6 tests PASS。
+- `python -m unittest discover -s tests/bench/queue/common -p test_delivery_manifest.py -v` — 4 tests PASS。
+- `docker compose -f tests/bench/queue/compose.yml config --quiet` — PASS (静的設定確認。container は起動していない)。
+- `bash -n tests/bench/ab/run.sh` — PASS。
+- `git log --check origin/develop..HEAD` — whitespace error なし。
+
+全 repository の `make check`、高負荷・長時間 benchmark は未実施。PR 後は通常 CI の結果を確認する。
