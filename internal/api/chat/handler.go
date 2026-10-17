@@ -2026,8 +2026,18 @@ func (h *Handler) History(c echo.Context) error {
 	var req struct {
 		Limit int  `json:"limit"`
 		Room  bool `json:"room"`
+		// UntilID is an Elythia addition (#3653): the id of the last message
+		// of the previous page. Upstream has no way to read past `limit`
+		// conversations.
+		UntilID string `json:"untilId"`
 	}
 	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
+	// 列に入らない値 (NUL) を bind parameter に載せると PostgreSQL がクエリごと
+	// 落とす (#3025)。
+	_, untilID, cursorOK := id.NormalizeCursor("", req.UntilID, nil, nil)
+	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
 	if req.Limit <= 0 {
@@ -2041,9 +2051,9 @@ func (h *Handler) History(c echo.Context) error {
 		err  error
 	)
 	if req.Room {
-		msgs, err = h.repo.ListRoomHistory(user.ID, req.Limit)
+		msgs, err = h.repo.ListRoomHistory(user.ID, req.Limit, untilID)
 	} else {
-		msgs, err = h.repo.ListUserHistory(user.ID, req.Limit)
+		msgs, err = h.repo.ListUserHistory(user.ID, req.Limit, untilID)
 	}
 	if err != nil {
 		return apierr.JSONInternalError(c)

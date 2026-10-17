@@ -80,7 +80,7 @@ func TestChatRepository_RoomListsLoadOwner(t *testing.T) {
 		requireOwner(t, msgs[0].ToRoom)
 	})
 	t.Run("ListRoomHistory", func(t *testing.T) {
-		msgs, err := repo.ListRoomHistory(member.ID, 10)
+		msgs, err := repo.ListRoomHistory(member.ID, 10, "")
 		require.NoError(t, err)
 		require.Len(t, msgs, 1)
 		requireOwner(t, msgs[0].ToRoom)
