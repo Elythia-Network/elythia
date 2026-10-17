@@ -1,0 +1,206 @@
+name: Bench upstream
+
+# 本家 Misskey の公式 image (misskey/misskey:<版>) と Elythia を、同じスタックで交互に
+# 流して性能を比べる (#3654)。仕組みは bench-compare (#3542) と同じで、base の側を
+# 本家に替えたもの (tests/bench/ab/run.sh --upstream)。使い方と結果の読み方は
+# docs/bench-compare.md の「本家 Misskey との比較」。
+#
+# - schedule: 毎週月曜日の 05:40 (日本時間)。ほかの schedule (queue-bench-smoke は
+#   毎日 17:30 UTC、dropin-frontend-e2e は毎日 19:00 UTC、codeql は月曜日 20:30 UTC)
+#   と重ならない日曜日 20:40 UTC にする。develop を、UPSTREAM_MISSKEY_VERSION の版と比べる
+# - workflow_dispatch: Elythia の ref、本家の版、シナリオ、ラウンド数を渡せる。
+#   **secrets は使わず、token は読み取りだけ**なので、fork のコードを流しても書き込みは
+#   できない
+# - pull_request: 本家の版 (UPSTREAM_MISSKEY_VERSION) か、ベンチの仕組み (この workflow、
+#   tests/bench/ab、seed と k6 の共通部品、tools/benchcompare) を変えた PR で、PR の head を
+#   PR の版と比べる。仕組みを変えた PR では bench-compare の A/A も流れる (二重に流れるのは
+#   意図どおりで、--upstream の経路が壊れたのを次の月曜日まで気付かないのを防ぐ)。新しい
+#   workflow は default branch に入るまで dispatch できないので、PR の上で確かめる経路も
+#   兼ねる (CLAUDE.md Section 8)。check が見るのは最後まで流れたかだけで、どちらが速いかで
+#   落とさない
+# - required check には**入れない**。3 ラウンドで 40 分ほどかかり、runner の揺れも受ける。
+#
+# 回ごとに runner の CPU が違うので、**同じ回の中の比 (本家 / Elythia) だけを読み、回を
+# またいで絶対値を比べない**。
+
+run-name: >-
+  ${{ github.event_name == 'pull_request'
+  && format('Bench upstream (PR #{0})', github.event.pull_request.number)
+  || github.event_name == 'schedule' && 'Bench upstream (weekly)'
+  || format('Bench upstream {0} ... {1}', inputs.upstream || 'default', inputs.ref) }}
+
+on:
+  schedule:
+    - cron: "40 20 * * 0"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "比べる Elythia の ref か SHA (fork の PR は pull/<番号>/head)"
+        required: true
+        default: develop
+      upstream:
+        description: "本家の版 (例 2026.10.0)。空なら UPSTREAM_MISSKEY_VERSION"
+        required: false
+        default: ""
+      rounds:
+        description: "ラウンド数 2 か 3 (1 ラウンド = 本家と Elythia を 1 回ずつ)"
+        required: true
+        default: "3"
+      scenario:
+        description: "prod-like (利用者ごとの制限あり) か unlimited (制限なし)"
+        required: true
+        type: choice
+        default: prod-like
+        options:
+          - prod-like
+          - unlimited
+  pull_request:
+    branches: [develop]
+    paths:
+      - UPSTREAM_MISSKEY_VERSION
+      - .github/workflows/bench-upstream.yml
+      # bench-compare.yml と同じ「ベンチの仕組み」。compose.upstream.yml と misskey.yml もここに入る
+      - tests/bench/ab/**
+      - tests/bench/http/common/**
+      - tests/bench/http/k6/lib/**
+      - tools/benchcompare/**
+
+permissions:
+  contents: read
+
+# PR では、同じ PR に push し直したら古い実行を止める。dispatch と schedule は 1 回ごとに
+# 別の group にする (bench-compare.yml と同じ理由)。
+concurrency:
+  group: bench-upstream-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    # 1 回は bench-compare と同じく約 5 分半 (本家の側は migration の分だけ十数秒長い)。
+    # 3 ラウンド (6 回) とビルド・pull・burn-in で約 40 分の見込み。4 ラウンドは約 50 分に
+    # なり余裕が 10 分を切るので、rounds は 3 までにする。所要時間は docs/bench-compare.md
+    timeout-minutes: 60
+    steps:
+      # Elythia の ref を worktree に出すので、履歴をすべて取る。
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # run.sh が tools/benchcompare をホストでビルドする。
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Resolve inputs
+        id: refs
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REF_INPUT: ${{ inputs.ref }}
+          UPSTREAM_INPUT: ${{ inputs.upstream }}
+          ROUNDS_INPUT: ${{ inputs.rounds }}
+        run: |
+          set -euo pipefail
+          # $(...) の中でも set -e を効かせる (bench-compare.yml と同じ理由)
+          shopt -s inherit_errexit
+          # 入力は env で受け、式を run に直接書かない (書くとシェルに注入できる)。
+          resolve() {
+            local ref=$1 sha
+            if ! [[ $ref =~ ^[A-Za-z0-9._/][A-Za-z0-9._/-]*$ ]]; then
+              echo "not a ref: '$ref'" >&2
+              return 1
+            fi
+            if sha=$(git rev-parse --verify --quiet "$ref^{commit}"); then echo "$sha"; return; fi
+            if sha=$(git rev-parse --verify --quiet "origin/$ref^{commit}"); then echo "$sha"; return; fi
+            rm -f "$(git rev-parse --git-dir)/FETCH_HEAD"
+            git fetch --quiet --no-tags origin "$ref" >&2 || return 1
+            git rev-parse --verify "FETCH_HEAD^{commit}"
+          }
+          case $EVENT in
+            pull_request)
+              name="PR head"
+              head=$PR_HEAD_SHA
+              upstream=default
+              rounds=3
+              ;;
+            schedule)
+              name=develop
+              head=$(resolve develop)
+              upstream=default
+              rounds=3
+              ;;
+            *)
+              name=$REF_INPUT
+              head=$(resolve "$REF_INPUT")
+              upstream=${UPSTREAM_INPUT:-default}
+              rounds=$ROUNDS_INPUT
+              ;;
+          esac
+          # 版の形は run.sh も確かめるが、Summary に書く前にここでも止める
+          if [ "$upstream" = default ]; then
+            upstream=$(tr -d '[:space:]' < UPSTREAM_MISSKEY_VERSION)
+          fi
+          if ! [[ $upstream =~ ^[0-9][0-9A-Za-z.-]*$ ]]; then
+            echo "not an upstream version: '$upstream'" >&2
+            exit 1
+          fi
+          # 1 ラウンド (本家と Elythia を 1 回ずつ) は約 11 分。timeout-minutes に余裕を
+          # 残せるのは 3 ラウンドまで (docs/bench-compare.md)
+          case $rounds in
+            2 | 3) ;;
+            *) echo "rounds must be 2 or 3: $rounds" >&2; exit 1 ;;
+          esac
+          {
+            echo "head=$head"
+            echo "upstream=$upstream"
+            echo "rounds=$rounds"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "## Bench upstream"
+            echo
+            echo "- 本家: \`misskey/misskey:$upstream\`"
+            echo "- Elythia: \`$name\` ($head)"
+            echo "- rounds: $rounds"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # make を通さず run.sh を呼ぶ (bench-compare.yml と同じ理由)。
+      - name: Compare
+        env:
+          HEAD_SHA: ${{ steps.refs.outputs.head }}
+          UPSTREAM: ${{ steps.refs.outputs.upstream }}
+          ROUNDS: ${{ steps.refs.outputs.rounds }}
+          SCENARIO: ${{ inputs.scenario || 'prod-like' }}
+          OUT: ${{ runner.temp }}/bench-upstream
+        run: |
+          mkdir -p "$OUT"
+          started=$(date +%s)
+          status=0
+          tests/bench/ab/run.sh --upstream "$UPSTREAM" --head "$HEAD_SHA" --rounds "$ROUNDS" --scenario "$SCENARIO" --out "$OUT" || status=$?
+          echo "elapsed: $(( $(date +%s) - started ))s (exit $status)" | tee "$OUT/elapsed.txt"
+          exit "$status"
+
+      - name: Summary
+        if: always()
+        env:
+          OUT: ${{ runner.temp }}/bench-upstream
+        run: |
+          if [ -f "$OUT/report.md" ]; then
+            cat "$OUT/report.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "report.md がありません (準備の失敗、時間切れ、取り消し、集計の入力エラーのいずれか)。artifact のログを見てください。" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -f "$OUT/elapsed.txt" ]; then
+            printf '\n%s\n' "$(cat "$OUT/elapsed.txt")" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bench-upstream-${{ github.run_id }}
+          path: ${{ runner.temp }}/bench-upstream
+          retention-days: 30
+          if-no-files-found: warn
