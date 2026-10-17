@@ -21,6 +21,8 @@ import (
 const (
 	// TopicInstanceSuspension carries InstanceSuspensionInvalidation.
 	TopicInstanceSuspension = "instanceSuspendCacheInvalidated"
+	// TopicRelay carries RelayInvalidation.
+	TopicRelay = "relayCacheInvalidated"
 )
 
 // publishTimeout bounds one synchronous publish. It runs on the write path.

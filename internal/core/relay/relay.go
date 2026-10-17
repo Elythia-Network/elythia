@@ -75,6 +75,9 @@ type Service struct {
 	cacheLoaded time.Time
 	cacheRelays []*model.Relay
 	cacheMaxAge time.Duration
+	// invalidated は自プロセスの一覧を捨てた後に呼ぶ (#3664)。他のプロセスへ
+	// 伝える配線 (core/cachebus) が入る。構築時に 1 回だけ設定する。
+	invalidated func()
 }
 
 // NewService constructs a Service.
@@ -351,10 +354,33 @@ func (s *Service) acceptedCached() ([]*model.Relay, error) {
 	return fresh, nil
 }
 
+// invalidateCache drops this process's accepted-relay list and tells the
+// other processes through the invalidation hook.
+//
+// **他のプロセスにも伝える (#3664)。** relay の Accept は連合の受信
+// (MK_ONLY_QUEUE のプロセス) で書かれ、ノートを relay へ配るのは投稿を受けた
+// Web のプロセスなので、繋がないと承認された relay へ最大 10 分配らない
+// (削除した relay へは最大 10 分配り続ける)。
 func (s *Service) invalidateCache() {
+	s.InvalidateCacheLocally()
+	if s.invalidated != nil {
+		s.invalidated()
+	}
+}
+
+// InvalidateCacheLocally drops this process's accepted-relay list without
+// calling the invalidation hook. It is what an invalidation received from
+// another process applies.
+func (s *Service) InvalidateCacheLocally() {
 	s.cacheMu.Lock()
 	s.cacheRelays = nil
 	s.cacheMu.Unlock()
+}
+
+// SetInvalidationHook registers fn, called after every local write has dropped
+// this process's accepted-relay list (#3664). Call it once while wiring.
+func (s *Service) SetInvalidationHook(fn func()) {
+	s.invalidated = fn
 }
 
 // IsRelayActor reports whether the given remote user matches one of the
