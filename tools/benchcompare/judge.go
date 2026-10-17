@@ -70,6 +70,11 @@ type EndpointCompare struct {
 	HeadErrorRate     float64 `json:"headErrorRate"`
 	BaseRateLimitRate float64 `json:"baseRateLimitRate"`
 	HeadRateLimitRate float64 `json:"headRateLimitRate"`
+	// The largest share, in percent, of k6's CPU periods in which k6 was
+	// throttled during the endpoint's window, over the rounds of each side.
+	// Nil when a round could not be measured.
+	BaseK6ThrottledPercent *float64 `json:"baseK6ThrottledPercent"`
+	HeadK6ThrottledPercent *float64 `json:"headK6ThrottledPercent"`
 }
 
 // ResourceCompare compares one container.
@@ -110,6 +115,21 @@ type Spread struct {
 // incomparable. A side that fails more answers faster, so its latency is not
 // an improvement.
 const maxRateGapPoints = 1.0
+
+// maxK6ThrottledPercent is the largest share, in percent, of k6's CPU periods
+// during an endpoint's window in which k6 may be throttled (stopped by its CPU
+// limit) before the endpoint is incomparable (#3656).
+//
+// k6 が CPU の上限で止められると、止まっている間に返った応答は、止まった分だけ長く
+// 測られる。1 つの区切り (100ms) の中で止まるのは枠を使い切った後の残りだけなので、
+// 止められた区切りの割合が r なら、止まっていた時間は区間の r 未満になる。到着が一定
+// (constant-arrival-rate) なら、長く測られる応答もおおむね r 未満になる。判定に使う
+// いちばん上の分位は p95 (上位 5%) で、r が 5% に近づくと p95 が k6 の待ちで決まりうる。
+// 2% なら、長く測られた応答がすべて上位に寄っても、p95 はサーバーの分布の p97 (上位 5% の
+// うち 2% を k6 の分が占め、残り 3% / 98%) までにとどまる。k6 が飽和すると、区切りの
+// ほぼすべてで止められる (手元で CPU 0.75 の k6 を飽和させたとき、どのエンドポイントの
+// 区間も 94.7〜100%) ので、飽和した回はこの線で確実に分かれる。
+const maxK6ThrottledPercent = 2.0
 
 // minRounds is the fewest rounds per side that give a range to compare.
 // With one round any difference would look like a real one.
@@ -317,9 +337,18 @@ func compareEndpoints(base, head []*Run) []EndpointCompare {
 		hLat, hThr := collect(head, &hReq, &hFail, &hLim)
 		ec.BaseErrorRate, ec.HeadErrorRate = percent(bFail, bReq), percent(hFail, hReq)
 		ec.BaseRateLimitRate, ec.HeadRateLimitRate = percent(bLim, bReq), percent(hLim, hReq)
+		var bK6OK, hK6OK bool
+		ec.BaseK6ThrottledPercent, bK6OK = maxK6Throttled(base, name)
+		ec.HeadK6ThrottledPercent, hK6OK = maxK6Throttled(head, name)
 
 		if missing {
 			ec.Reasons = append(ec.Reasons, "not measured in every round")
+		}
+		// k6 が律速なら、速さの差はサーバーではなく k6 の待ちかもしれない
+		if !bK6OK || !hK6OK {
+			ec.Reasons = append(ec.Reasons, "k6's CPU was not sampled in the endpoint's window in every round")
+		} else if *ec.BaseK6ThrottledPercent > maxK6ThrottledPercent || *ec.HeadK6ThrottledPercent > maxK6ThrottledPercent {
+			ec.Reasons = append(ec.Reasons, fmt.Sprintf("k6 was the bottleneck: throttled in up to %.1f%% / %.1f%% of its CPU periods (more than %.0f%%)", *ec.BaseK6ThrottledPercent, *ec.HeadK6ThrottledPercent, maxK6ThrottledPercent))
 		}
 		if math.Abs(ec.BaseErrorRate-ec.HeadErrorRate) > maxRateGapPoints {
 			ec.Reasons = append(ec.Reasons, fmt.Sprintf("error rate differs: %.1f%% vs %.1f%%", ec.BaseErrorRate, ec.HeadErrorRate))
@@ -356,7 +385,53 @@ func compareEndpoints(base, head []*Run) []EndpointCompare {
 	return out
 }
 
-// compareResources compares the containers. With crossImpl (the sides are
+// maxK6Throttled returns the largest k6 throttled share of the endpoint's
+// window over runs, and false when a run measured the endpoint but not k6's
+// CPU in its window (the result is then nil).
+func maxK6Throttled(runs []*Run, endpoint string) (*float64, bool) {
+	worst := 0.0
+	for _, r := range runs {
+		e, ok := r.Endpoints[endpoint]
+		if !ok {
+			continue
+		}
+		p, ok := throttledPercent(r.K6CPU, e.WindowStartMs, e.WindowEndMs)
+		if !ok {
+			return nil, false
+		}
+		worst = max(worst, p)
+	}
+	return &worst, true
+}
+
+// throttledPercent is the share, in percent, of the CPU periods between the
+// first and the last sample inside [start, end] in which the container was
+// throttled. It is false with fewer than two samples inside the window.
+func throttledPercent(samples []ThrottleSample, start, end int64) (float64, bool) {
+	var first, last *ThrottleSample
+	for i := range samples {
+		s := &samples[i]
+		if s.TimeMs < start || s.TimeMs > end {
+			continue
+		}
+		if first == nil {
+			first = s
+		}
+		last = s
+	}
+	if first == nil || first == last {
+		return 0, false
+	}
+	periods := last.Periods - first.Periods
+	if periods == 0 {
+		// 1 度も動かなかった (区切りが数えられなかった) なら、止められてもいない
+		return 0, true
+	}
+	return float64(last.Throttled-first.Throttled) / float64(periods) * 100, true
+}
+
+// compareResources compares the containers. The load generator's container
+// (k6) is shown as a reference only. With crossImpl (the sides are
 // different implementations), the Go heap that one side never has (upstream
 // Misskey runs on Node.js) is shown for the other side only, as a reference,
 // when the other side has it in every round. Any other gap stays
@@ -406,6 +481,10 @@ func compareResources(base, head []*Run, crossImpl bool) []ResourceCompare {
 			ms := newMeasure(m.name, true, b, h)
 			if len(b) != len(base) || len(h) != len(head) {
 				ms.Verdict, ms.Better = VerdictIncomparable, nil
+			} else if name == k6Container {
+				// k6 は負荷をかける側で、その CPU やメモリはサーバーの良し悪しではない。応答の
+				// 形 (gzip の有無など) で k6 が読む手間も変わるので、差は出すが判定しない
+				ms.Verdict, ms.Better = VerdictReference, nil
 			}
 			rc.Measures = append(rc.Measures, ms)
 		}
