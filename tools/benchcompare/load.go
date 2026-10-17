@@ -61,8 +61,9 @@ type Run struct {
 	Dir       string
 	Meta      RunMeta
 	Endpoints map[string]EndpointResult
-	// Dropped is k6's dropped_iterations: iterations the load generator could
-	// not start, so the load was lower than requested.
+	// Dropped is k6's dropped_iterations over the whole run: iterations the
+	// load generator could not start, so the load was lower than requested.
+	// Each endpoint's share is in EndpointResult.Dropped.
 	Dropped   int64
 	Resources map[string]ResourceUsage
 	// K6CPU is the CPU throttling of the load generator's container (k6), one
@@ -101,6 +102,10 @@ type EndpointResult struct {
 	Failed      int64
 	RateLimited int64
 	Timeouts    int64
+	// Dropped is dropped_iterations of the endpoint's scenario: iterations
+	// the arrival rate asked for but k6 could not start, because every VU was
+	// still waiting for a response (#3656).
+	Dropped int64
 	// Latencies of the successful responses in milliseconds by stat name
 	// ("med", "p(95)", "p(99)").
 	Latency map[string]float64
@@ -296,12 +301,27 @@ var endpointMetrics = []string{
 	"bench_window_end_ms",
 }
 
+// droppedPrefix is the key of dropped_iterations of one scenario. k6 does not
+// put the scenario's tags (endpoint) on dropped_iterations, so the scenarios
+// are named after their endpoints and the metric is read by the scenario tag.
+const droppedPrefix = "dropped_iterations{scenario:"
+
 // endpoints returns the per-endpoint results and the dropped_iterations
-// count. It fails when no endpoint, or an endpoint without one of
-// endpointMetrics, is found.
+// count of the whole run. It fails when no endpoint, or an endpoint without
+// one of endpointMetrics or its scenario's dropped_iterations, is found.
 func (s k6Summary) endpoints() (map[string]EndpointResult, int64, error) {
 	found := map[string]map[string]map[string]float64{}
+	droppedBy := map[string]int64{}
 	for key, raw := range s.Metrics {
+		if scenario, ok := strings.CutPrefix(key, droppedPrefix); ok && strings.HasSuffix(scenario, "}") {
+			// 他のタグも付いた key は名前が "ping,x:y" のようになり、どのエンドポイントにも当たらない
+			vals, err := numbers(raw)
+			if err != nil {
+				return nil, 0, fmt.Errorf("%s: %w", key, err)
+			}
+			droppedBy[strings.TrimSuffix(scenario, "}")] = int64(vals["count"])
+			continue
+		}
 		metric, tags, ok := parseMetricKey(key)
 		if !ok {
 			continue
@@ -359,6 +379,11 @@ func (s k6Summary) endpoints() (map[string]EndpointResult, int64, error) {
 			return nil, 0, fmt.Errorf("endpoint %s: bench_window_start_ms / bench_window_end_ms do not give a window", endpoint)
 		}
 		r.WindowStartMs, r.WindowEndMs = int64(start), int64(end)
+		dropped, ok := droppedBy[endpoint]
+		if !ok {
+			return nil, 0, fmt.Errorf("endpoint %s: %s%s} is missing (put a threshold on it)", endpoint, droppedPrefix, endpoint)
+		}
+		r.Dropped = dropped
 		out[endpoint] = r
 	}
 	dropped, err := numbers(s.Metrics["dropped_iterations"])
@@ -369,8 +394,8 @@ func (s k6Summary) endpoints() (map[string]EndpointResult, int64, error) {
 }
 
 // numbers returns the numeric values of one metric, skipping "thresholds".
-// A missing metric (k6 leaves out dropped_iterations when it is zero) has
-// no values.
+// A missing metric has no values (k6 leaves out the whole-run
+// dropped_iterations when it is zero and no threshold names it).
 func numbers(raw map[string]json.RawMessage) (map[string]float64, error) {
 	out := make(map[string]float64, len(raw))
 	for k, v := range raw {

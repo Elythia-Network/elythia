@@ -1,16 +1,23 @@
 // base / head の比較 (#3544) で流す k6 のシナリオ。
 //
-// tests/bench/http と同じ 7 つのエンドポイントを、同じ負荷の形 (lib/config.js) で
-// 順に流す。結果は tools/benchcompare が読む。
+// tests/bench/http と同じ 7 つのエンドポイントを、1 つずつ順に流す。結果は
+// tools/benchcompare が読む。
 //
-// **エンドポイントごとに、benchcompare が要求する 7 つの sub-metric すべてに
+// 負荷は constant-arrival-rate (open-loop) で、エンドポイントごとの率 (lib/config.js の
+// arrivalRates) で送る (#3656)。応答が遅れても送る間隔は変わらないので、両側で同じ件数を
+// 同じ間隔で送り、その件数を捌く時間を比べる。VU が足りずに送れなかった分は k6 が
+// dropped_iterations に数え、benchcompare はそのエンドポイントを比較不能にする。
+//
+// **エンドポイントごとに、benchcompare が要求する 8 つの sub-metric すべてに
 // threshold を置く。** k6 の --summary-export は threshold の付いた sub-metric しか
 // 出さない。1 つでも欠けると benchcompare はその回を読めないとして exit 1 で止まる
 // (失敗率を 0 と読んで比較を続けると、失敗の差で速く見える側を見逃すため)。
-// threshold はどれも必ず通る形にして、k6 自身は止めない。
+// threshold はどれも必ず通る形にして、k6 自身は止めない。dropped_iterations には
+// シナリオの tags (endpoint) が付かないので、scenario タグ (シナリオ名 = エンドポイント名)
+// で絞る。
 //
-// SHORT=1 のときは、同じエンドポイントを短く弱く流す。ウォームアップ (結果は捨てる) と、
-// run.sh --smoke (手順が通るかだけを見る) で使う。
+// SHORT=1 のときは、同じエンドポイントを同じ率で 5 秒ずつ流す。ウォームアップ (結果は
+// 捨てる) と、run.sh --smoke (手順が通るかだけを見る) で使う。
 //
 // START_DELAY (秒) は、最初のシナリオを始めるまでの待ち。run.sh は k6 を起動してから
 // そのコンテナを資源の記録 (sampler) に加えるので、その間に負荷をかけ始めないよう待たせる。
@@ -24,7 +31,7 @@ import { check } from "k6";
 import { SharedArray } from "k6/data";
 import { Counter, Gauge } from "k6/metrics";
 import { MisskeyClient } from "../lib/client.js";
-import { readStages, writeStages, SCENARIO_DURATION } from "../lib/config.js";
+import { arrivalRates, ARRIVAL_DURATION, SCENARIO_DURATION } from "../lib/config.js";
 
 const SHORT = __ENV.SHORT === "1";
 const SHORT_DURATION = 5;
@@ -54,42 +61,52 @@ const username = seed[0].username;
 // prod-like で 429 を測ることになる。
 //
 // 50 人に均すと、上限は 50 × 300 = 15000 件。seed は制限を外して流すので数に入らず、
-// 使うのはウォームアップと計測だけになる。tests/bench/results の過去の実測では計測が
-// 6000〜7500 件で、2 倍ほどの余裕がある。上限に当たると、速い側ほど 429 が増えて
-// benchcompare が「比較不能」にするので、黙って誤った判定にはならない
+// 使うのはウォームアップと計測だけになる (到着率で 1050 件、lib/config.js)。上限に当たると、
+// 429 の率の差で benchcompare が「比較不能」にするので、黙って誤った判定にはならない
 function token() {
   return tokens[exec.scenario.iterationInTest % tokens.length];
 }
 
 const endpoints = [
-  { name: "ping", exec: "ping", stages: readStages },
-  { name: "meta", exec: "meta", stages: readStages },
-  { name: "local-timeline", exec: "localTimeline", stages: readStages },
-  { name: "users-show", exec: "usersShow", stages: readStages },
-  { name: "i", exec: "i", stages: readStages },
-  { name: "notes-create", exec: "notesCreate", stages: writeStages },
-  { name: "home-timeline", exec: "homeTimeline", stages: readStages },
+  { name: "ping", exec: "ping" },
+  { name: "meta", exec: "meta" },
+  { name: "local-timeline", exec: "localTimeline" },
+  { name: "users-show", exec: "usersShow" },
+  { name: "i", exec: "i" },
+  { name: "notes-create", exec: "notesCreate" },
+  { name: "home-timeline", exec: "homeTimeline" },
 ];
 
-// stages の duration は "5s" の形だけを使う
-function stageSeconds(stages) {
-  return stages.reduce((sum, st) => sum + Number(st.duration.replace(/s$/, "")), 0);
-}
+// 1 つのシナリオの長さ (秒)。区間の gauge にも使う
+const duration = SHORT ? SHORT_DURATION : ARRIVAL_DURATION;
+// VU は最初に maxVUs まで作っておく。k6 は送る時刻に空いた VU が無いと、その iteration を
+// dropped_iterations に数えて落としてから VU を足す (毎秒 100 件、1 件 0.5 秒で 50 VU が要る
+// ところを preAllocatedVUs 10 で流すと、5 秒で 41 件落ちた。100 にすると 0 件)。途中で VU を
+// 足すと、その初期化 (スクリプトの評価と seed の取り出し) の CPU も計測の区間に入る。
+// VU はシナリオの間で使い回すので、作るのは初期化のときの 100 個だけ。100 個が全部応答を
+// 待っているほど遅いときは、送れなかった分が dropped_iterations に数えられる
+const PRE_ALLOCATED_VUS = 100;
+const MAX_VUS = 100;
 
 const scenarios = {};
 const thresholds = {};
-const windowSeconds = {};
 endpoints.forEach((e, idx) => {
-  const stages = SHORT ? [{ duration: `${SHORT_DURATION}s`, target: 5 }] : e.stages;
-  windowSeconds[e.name] = stageSeconds(stages);
+  const rate = arrivalRates[e.name];
+  if (!(rate > 0)) throw new Error(`no arrival rate for ${e.name} in lib/config.js`);
   scenarios[e.name] = {
-    executor: "ramping-vus",
-    startVUs: 0,
-    stages,
+    executor: "constant-arrival-rate",
+    rate,
+    timeUnit: "1s",
+    duration: `${duration}s`,
+    preAllocatedVUs: PRE_ALLOCATED_VUS,
+    maxVUs: MAX_VUS,
+    // 次のシナリオまでの 1 秒の間に終わらせ、区間を重ねない
+    gracefulStop: "1s",
     exec: e.exec,
     tags: { endpoint: e.name },
     startTime: `${START_DELAY + idx * (SHORT ? SHORT_DURATION + 1 : SCENARIO_DURATION)}s`,
   };
+  thresholds[`dropped_iterations{scenario:${e.name}}`] = ["count>=0"];
   thresholds[`http_req_duration{endpoint:${e.name},expected_response:true}`] = ["p(95)>=0"];
   thresholds[`http_reqs{endpoint:${e.name}}`] = ["count>=0"];
   thresholds[`http_req_failed{endpoint:${e.name}}`] = ["rate>=0"];
@@ -110,7 +127,7 @@ function record(endpoint, res) {
   if (exec.vu.iterationInScenario === 0) {
     const start = exec.scenario.startTime;
     windowStart.add(start, { endpoint });
-    windowEnd.add(start + windowSeconds[endpoint] * 1000, { endpoint });
+    windowEnd.add(start + duration * 1000, { endpoint });
   }
   if (res.status === 429) rateLimited.add(1, { endpoint });
   // 1050 は k6 の request timeout
