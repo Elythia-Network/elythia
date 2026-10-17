@@ -21,6 +21,7 @@ type fakeEndpoint struct {
 	p50                   float64
 	requests, failed      int64
 	rateLimited, timeouts int64
+	dropped               int64
 	// window replaces the default window [0, 10000] of the endpoint's
 	// scenario when set.
 	window *[2]float64
@@ -38,6 +39,7 @@ type fakeRun struct {
 	round     int
 	completed bool
 	reason    string
+	// dropped is dropped_iterations outside the endpoints' scenarios.
 	dropped   int64
 	endpoints map[string]fakeEndpoint
 	// cpu is the CPU time of the app in seconds over a 10 second run.
@@ -108,10 +110,15 @@ func writeResultsRounds(t *testing.T, rounds int, runs ...fakeRun) string {
 			"http_reqs":         metric(map[string]float64{"count": 9999}),
 			"http_req_duration": metric(map[string]float64{"med": 100, "p(95)": 100, "p(99)": 100}),
 		}
-		if r.dropped > 0 {
-			metrics["dropped_iterations"] = map[string]float64{"count": float64(r.dropped), "rate": 1}
+		total := r.dropped
+		for _, e := range r.endpoints {
+			total += e.dropped
+		}
+		if total > 0 {
+			metrics["dropped_iterations"] = map[string]float64{"count": float64(total), "rate": 1}
 		}
 		for name, e := range r.endpoints {
+			metrics["dropped_iterations{scenario:"+name+"}"] = metric(map[string]float64{"count": float64(e.dropped), "rate": 0})
 			tag := "{endpoint:" + name + "}"
 			med := e.p95 / 2
 			if e.p50 != 0 {
@@ -213,7 +220,7 @@ func withEndpoint(r fakeRun, name string, f func(*fakeEndpoint)) fakeRun {
 // script is testdata/k6-0.55-summary.js, served by busybox httpd): metrics
 // carry a "thresholds" object, latency comes from the expected_response:true
 // sub-metric, the window gauges carry Unix milliseconds, and
-// dropped_iterations is absent when zero.
+// dropped_iterations is counted per scenario by the scenario tag.
 func TestLoad_RealK6Output(t *testing.T) {
 	b, err := os.ReadFile("testdata/k6-0.55-summary.json")
 	require.NoError(t, err)
@@ -221,17 +228,23 @@ func TestLoad_RealK6Output(t *testing.T) {
 	require.NoError(t, json.Unmarshal(b, &s))
 	got, dropped, err := s.endpoints()
 	require.NoError(t, err)
-	assert.Zero(t, dropped)
-	require.Len(t, got, 2)
+	assert.Equal(t, int64(19), dropped)
+	require.Len(t, got, 3)
 
 	ping := got["ping"]
 	assert.Equal(t, int64(20), ping.Requests)
 	assert.Zero(t, ping.Failed)
-	assert.InDelta(t, 0.28523200000000004, ping.Latency["med"], 1e-9)
-	assert.InDelta(t, 0.42068221999999994, ping.Latency["p(99)"], 1e-9)
+	assert.Zero(t, ping.Dropped)
+	assert.InDelta(t, 0.5083105, ping.Latency["med"], 1e-9)
+	assert.InDelta(t, 0.8848505299999998, ping.Latency["p(99)"], 1e-9)
 	// 区間の gauge は Unix ミリ秒のまま読める (float64 で桁が落ちない)
-	assert.Equal(t, int64(1792225545636), ping.WindowStartMs)
-	assert.Equal(t, int64(1792225575636), ping.WindowEndMs)
+	assert.Equal(t, int64(1792226036831), ping.WindowStartMs)
+	assert.Equal(t, int64(1792226066831), ping.WindowEndMs)
+
+	// 送れなかった分は、シナリオのタグ (endpoint) ではなく scenario のタグに付く
+	slow := got["slow"]
+	assert.Equal(t, int64(2), slow.Requests)
+	assert.Equal(t, int64(19), slow.Dropped)
 
 	limited := got["limited"]
 	assert.Equal(t, int64(20), limited.Requests)
@@ -464,7 +477,8 @@ func TestCompare_OverlappingRangesAreSame(t *testing.T) {
 }
 
 // TestCompare_SeparatedRangesAreDifferent checks "different" and its
-// direction for latency (lower is better) and requests (higher is better).
+// direction for latency (lower is better) and for a higher-is-better
+// measure, and that requests are shown but not judged (#3656).
 func TestCompare_SeparatedRangesAreDifferent(t *testing.T) {
 	c := compareDir(t, writeResults(t, pair(2, func(s Side, r int) fakeRun {
 		if s == SideBase {
@@ -483,10 +497,17 @@ func TestCompare_SeparatedRangesAreDifferent(t *testing.T) {
 	require.NotNil(t, p95.DeltaPercent)
 	assert.InDelta(t, (20-10.5)/10.5*100, *p95.DeltaPercent, 1e-9)
 
+	// リクエスト数は到着率で決まるので、差は出すが判定しない
 	reqs := measure(t, ping.Measures, "requests")
-	assert.Equal(t, VerdictDifferent, reqs.Verdict)
-	require.NotNil(t, reqs.Better)
-	assert.True(t, *reqs.Better, "more requests is better")
+	assert.Equal(t, VerdictReference, reqs.Verdict)
+	assert.Nil(t, reqs.Better)
+	require.NotNil(t, reqs.DeltaPercent)
+	assert.InDelta(t, 20, *reqs.DeltaPercent, 1e-9)
+
+	higher := newMeasure("throughput", false, []float64{100, 101}, []float64{120, 121})
+	assert.Equal(t, VerdictDifferent, higher.Verdict)
+	require.NotNil(t, higher.Better)
+	assert.True(t, *higher.Better, "more is better for a higher-is-better measure")
 
 	// 幅がちょうど接する (head の最小 = base の最大) ときは重なりとして扱う
 	c = compareDir(t, writeResults(t, pair(2, func(s Side, r int) fakeRun {
@@ -519,7 +540,7 @@ func TestCompare_SmallSeparatedDifferenceIsSame(t *testing.T) {
 	assert.Equal(t, VerdictDifferent, m.Verdict)
 
 	// ちょうど 5% は差ありにする
-	m = newMeasure("requests", false, []float64{100, 100}, []float64{105, 105})
+	m = newMeasure("cpu_seconds", true, []float64{100, 100}, []float64{105, 105})
 	require.NotNil(t, m.DeltaPercent)
 	assert.InDelta(t, 5.0, *m.DeltaPercent, 1e-9)
 	assert.Equal(t, VerdictDifferent, m.Verdict)
@@ -756,7 +777,7 @@ func TestCompare_InvalidRunSets(t *testing.T) {
 		},
 		"dropped iterations": {
 			runs: []fakeRun{ok(SideBase, 1), ok(SideHead, 1), ok(SideBase, 2), dropped},
-			want: "dropped 1 iterations",
+			want: "head round 2 dropped 1 iterations outside the endpoints' scenarios",
 		},
 		"container restarted": {
 			runs: []fakeRun{ok(SideBase, 1), ok(SideHead, 1), restarted, ok(SideHead, 2)},
@@ -961,7 +982,7 @@ func TestRun_WritesReports(t *testing.T) {
 		"- note: x\\|y z",
 		"| ping | 差あり (改善 2 / 悪化 0) |",
 		"| ping | p95 (ms) | 10.0 [10.0, 10.0] | 5.0 [5.0, 5.0] | -50.0% | 差あり (改善) |",
-		"| ping | リクエスト数 | 1000 [1000, 1000] | 1000 [1000, 1000] | +0.0% | 差なし |",
+		"| ping | リクエスト数 | 1000 [1000, 1000] | 1000 [1000, 1000] | +0.0% | 参考 |",
 		"| ping | 失敗率 / 429の率 | 0.0% / 0.0% | 0.0% / 0.0% | |  |",
 		"| ping | k6が止められた区切り (%、最大) | 0.0% | 0.0% | |  |",
 		"| app | CPU (%) | 50.0 [50.0, 50.0] | 50.0 [50.0, 50.0] | +0.0% | 差なし |",
@@ -1101,7 +1122,8 @@ const onlyPingSummary = `{"metrics":{
 "bench_rate_limited{endpoint:ping}":{"count":0,"rate":0,"thresholds":{"count>=0":false}},
 "bench_timeouts{endpoint:ping}":{"count":0,"rate":0,"thresholds":{"count>=0":false}},
 "bench_window_start_ms{endpoint:ping}":{"value":1000,"min":1000,"max":1000,"thresholds":{"value>=0":false}},
-"bench_window_end_ms{endpoint:ping}":{"value":31000,"min":31000,"max":31000,"thresholds":{"value>=0":false}}}}`
+"bench_window_end_ms{endpoint:ping}":{"value":31000,"min":31000,"max":31000,"thresholds":{"value>=0":false}},
+"dropped_iterations{scenario:ping}":{"count":0,"rate":0,"thresholds":{"count>=0":false}}}}`
 
 // TestSummary_Endpoints checks which keys are read and that an endpoint
 // missing one of the required sub-metrics fails instead of reading 0.
@@ -1131,7 +1153,7 @@ func TestSummary_Endpoints(t *testing.T) {
 	require.Len(t, got, 1)
 	assert.Equal(t, int64(10), got["ping"].Requests)
 
-	for _, missing := range []string{"http_reqs{endpoint:ping}", "http_req_failed{endpoint:ping}", "bench_rate_limited{endpoint:ping}", "bench_timeouts{endpoint:ping}", "http_req_duration{endpoint:ping,expected_response:true}", "bench_window_start_ms{endpoint:ping}", "bench_window_end_ms{endpoint:ping}"} {
+	for _, missing := range []string{"http_reqs{endpoint:ping}", "http_req_failed{endpoint:ping}", "bench_rate_limited{endpoint:ping}", "bench_timeouts{endpoint:ping}", "http_req_duration{endpoint:ping,expected_response:true}", "bench_window_start_ms{endpoint:ping}", "bench_window_end_ms{endpoint:ping}", "dropped_iterations{scenario:ping}"} {
 		var s k6Summary
 		require.NoError(t, json.Unmarshal([]byte(onlyPingSummary), &s))
 		delete(s.Metrics, missing)
@@ -1157,6 +1179,20 @@ func TestSummary_Endpoints(t *testing.T) {
 	reversed := strings.Replace(onlyPingSummary, `{"value":31000,`, `{"value":1000,`, 1)
 	_, _, err = parse(t, reversed)
 	assert.ErrorContains(t, err, "do not give a window")
+
+	// 送れなかった件数はシナリオ名 (= エンドポイント名) で引く。読めない値は止め、形の
+	// 違う key は読まない (エンドポイントの分が無いことになるので、上の「is missing」で止まる)
+	badDropped := strings.Replace(onlyPingSummary, `"dropped_iterations{scenario:ping}":{"count":0,`, `"dropped_iterations{scenario:ping}":{"count":"x",`, 1)
+	_, _, err = parse(t, badDropped)
+	assert.ErrorContains(t, err, "dropped_iterations{scenario:ping}: count")
+	for _, key := range []string{"dropped_iterations{scenario:ping,x:y}", "dropped_iterations{scenario:ping"} {
+		renamed := strings.Replace(onlyPingSummary, `"dropped_iterations{scenario:ping}"`, `"`+key+`"`, 1)
+		_, _, err = parse(t, renamed)
+		assert.ErrorContains(t, err, "dropped_iterations{scenario:ping} is missing", key)
+	}
+	got, _, err = parse(t, strings.Replace(onlyPingSummary, `"dropped_iterations{scenario:ping}":{"count":0,`, `"dropped_iterations{scenario:ping}":{"count":3,`, 1))
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), got["ping"].Dropped)
 }
 
 func TestSpread_Median(t *testing.T) {
@@ -1459,4 +1495,81 @@ func TestThrottledPercent_NoPeriods(t *testing.T) {
 	p, ok := throttledPercent([]ThrottleSample{{TimeMs: 0, Periods: 5}, {TimeMs: 1000, Periods: 5}}, 0, 1000)
 	assert.True(t, ok)
 	assert.Zero(t, p)
+}
+
+// TestCompare_DroppedIterationsPerEndpoint checks that iterations dropped in
+// an endpoint's scenario make that endpoint incomparable, on either side,
+// without invalidating the other endpoints (#3656).
+func TestCompare_DroppedIterationsPerEndpoint(t *testing.T) {
+	for _, side := range []Side{SideBase, SideHead} {
+		t.Run(string(side), func(t *testing.T) {
+			dir := writeResults(t, pair(2, func(s Side, r int) fakeRun {
+				run := okRun(s, r, 10)
+				if s == side && r == 1 {
+					run = withEndpoint(run, "timeline", func(e *fakeEndpoint) { e.dropped = 7 })
+				}
+				return run
+			})...)
+			c := compareDir(t, dir)
+			require.True(t, c.Valid, "dropped iterations of one scenario do not invalidate the comparison")
+			tl := endpoint(t, c, "timeline")
+			assert.Equal(t, VerdictIncomparable, tl.Verdict)
+			got, other := tl.BaseDropped, tl.HeadDropped
+			if side == SideHead {
+				got, other = other, got
+			}
+			assert.Equal(t, int64(7), got)
+			assert.Zero(t, other)
+			assert.Contains(t, strings.Join(tl.Reasons, "\n"), "of the iterations were dropped")
+			assert.Equal(t, VerdictSame, endpoint(t, c, "ping").Verdict)
+
+			var out, errOut bytes.Buffer
+			require.NoError(t, run([]string{"-dir", dir}, &out, &errOut))
+			want := "| timeline | 送れなかった件数 (合計) | 7 | 0 | | 比較不能 |"
+			if side == SideHead {
+				want = "| timeline | 送れなかった件数 (合計) | 0 | 7 | | 比較不能 |"
+			}
+			assert.Contains(t, out.String(), want)
+			assert.Contains(t, out.String(), "| ping | 送れなかった件数 (合計) | 0 | 0 | |  |")
+		})
+	}
+}
+
+// TestCompare_DroppedIterationsLimit checks the share of dropped iterations
+// over all rounds of a side: maxDroppedPercent itself is comparable, more is
+// not, on either side.
+func TestCompare_DroppedIterationsLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		side    Side
+		dropped [2]int64
+		want    bool
+	}{
+		// 2 回で 2000 件を求め、2 件 (0.1%) 落ちた
+		{"head at the limit", SideHead, [2]int64{1, 1}, false},
+		{"base at the limit", SideBase, [2]int64{1, 1}, false},
+		// 3 件 (0.15%)
+		{"head over the limit", SideHead, [2]int64{1, 2}, true},
+		{"base over the limit", SideBase, [2]int64{2, 1}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := compareDir(t, writeResults(t, pair(2, func(s Side, r int) fakeRun {
+				run := withEndpoint(okRun(s, r, 10), "ping", func(e *fakeEndpoint) { e.requests = 1000 })
+				if s == tc.side {
+					d := tc.dropped[r-1]
+					run = withEndpoint(run, "ping", func(e *fakeEndpoint) { e.requests, e.dropped = 1000-d, d })
+				}
+				return run
+			})...))
+			require.True(t, c.Valid)
+			ping := endpoint(t, c, "ping")
+			assert.Equal(t, tc.want, ping.DroppedTooMany)
+			if tc.want {
+				assert.Equal(t, VerdictIncomparable, ping.Verdict)
+				assert.Contains(t, strings.Join(ping.Reasons, "\n"), "more than 0.1% of the iterations were dropped")
+			} else {
+				assert.Equal(t, VerdictSame, ping.Verdict, ping.Reasons)
+			}
+		})
+	}
 }

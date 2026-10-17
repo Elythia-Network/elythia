@@ -20,11 +20,13 @@
 // incomparable, since failing faster is not an improvement. So is an
 // endpoint during whose window k6 was throttled by its CPU limit in more than
 // 2% of its CPU periods in any round (#3656): the latency then includes k6's
-// own wait.
+// own wait. And so is an endpoint whose scenario dropped more than 0.1% of
+// its iterations on a side (k6 could not keep the arrival rate, because the
+// server or k6 did not keep up).
 // p99 is shown with its difference but not judged, since it jumps between
 // levels even when base and head are the same commit (#3559). Neither are
-// the k6 container's resources, which are the load generator's and not the
-// server's.
+// the requests, which the arrival rate fixes, and the k6 container's
+// resources, which are the load generator's and not the server's.
 //
 // With labels, the report names the sides by them, adds the ratio base / head
 // of p50, p95, CPU time and memory, and shows a measure only one side has (the
@@ -39,7 +41,8 @@
 //
 // Exit status: 0 when the runs could be compared (whatever the verdicts),
 // 1 when the input could not be read, 2 when the runs could not be compared
-// (a run did not complete, dropped iterations, too few rounds).
+// (a run did not complete, dropped iterations outside the endpoints'
+// scenarios, too few rounds).
 package main
 
 import (
