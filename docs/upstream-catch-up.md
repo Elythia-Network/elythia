@@ -327,6 +327,8 @@ Elythia と Misskey TS を並べて比較するハーネスは、**比較対象�
 落ちるのは配った先だけ。`tests/bench/http/` の compose (本家と並べるスタック) はどの workflow からも
 参照されていない (`tests/bench/queue/` は nightly の `queue-bench-smoke.yml` が引く。
 `bench-compare.yml` が使うのは seed と k6 の共通部品だけで、本家の image は使わない)。
+毎週の本家との性能比較 (`bench-upstream.yml`、#3654) は本家の image の版を
+`UPSTREAM_MISSKEY_VERSION` から作るので、この表に載せる tag は無い (版を上げる PR で自動で流れる)。
 
 以前は `Dockerfile.bundled` の `MISSKEY_ASSETS_IMAGE` (fork が publish する assets image)
 もこの表に入っていて、表に載せた後も実際に置き去りになった (#2877 / #3011)。#3379 で
