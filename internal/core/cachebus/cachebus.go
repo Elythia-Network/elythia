@@ -27,6 +27,8 @@ const (
 	TopicEmoji = "emojiCacheInvalidated"
 	// TopicAvatarDecoration carries AvatarDecorationInvalidation.
 	TopicAvatarDecoration = "avatarDecorationCacheInvalidated"
+	// TopicUser carries repository.UserCacheInvalidation.
+	TopicUser = "userCacheInvalidated"
 	// TopicRelay carries RelayInvalidation.
 	TopicRelay = "relayCacheInvalidated"
 )

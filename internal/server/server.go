@@ -49,6 +49,9 @@ type Server struct {
 	// auth middleware と setupRoutes の両方からこれを使うことで、片側の
 	// mutation で他方の cache が stale 化するのを防ぐ (#300 3-3)。
 	userRepo repository.UserRepository
+	// userCache は userRepo の中身 (同じもの)。他のプロセスとキャッシュの
+	// 無効化をやりとりする配線 (#3664) が、具体的な型を要る。
+	userCache *repository.CachedUserRepository
 	// relationCache は閲覧者ごとのミュート・ブロック・フォローの一覧 (#3607)。
 	// 関係の repository と userRepo の書き込みがここを捨てる。
 	relationCache  *repository.RelationCache
@@ -850,6 +853,7 @@ func newServer(cfg *config.Config, db *gorm.DB, redis *cache.RedisClients, plugi
 	s := &Server{
 		echo:           e,
 		userRepo:       userRepo,
+		userCache:      userRepo,
 		relationCache:  relationCache,
 		config:         cfg,
 		db:             db,
