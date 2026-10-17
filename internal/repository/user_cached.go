@@ -57,6 +57,34 @@ type CachedUserRepository struct {
 	// ため、これを cache せずに DB に行くと PR #566 で軽量化した HTTP
 	// 受信 fast path に対して worker drain がボトルネックになる (#567)。
 	byURI map[string]uriCacheEntry
+	// urisByID は userID → その利用者を指している byURI のキー (#3664)。
+	// invalidate は以前 byURI を全走査していたが、他のプロセスの書き込みでも
+	// 捨てるようになり、全プロセスが全書き込みのたびに走査することになったので
+	// 引けるようにした。byURI の正の entry を置き換える・消す・掃除する箇所は
+	// すべて unindexURILocked を通し、索引と一致させる。invalidate は念のため
+	// entry の userID も確かめてから消す。
+	urisByID map[string][]string
+	// allInvalidatedAt は最後に全体を捨てた時刻。staleLocked / uriStaleLocked
+	// は、これ以降に始まっていない読み込みを書き戻させない (in-flight の読み
+	// 込みを壊さない全消し)。
+	allInvalidatedAt time.Time
+	// onInvalidate は自プロセスのキャッシュを捨てた後に呼ぶ (#3664)。他の
+	// プロセスへ伝える配線 (core/cachebus) が入る。構築時に 1 回だけ設定する。
+	onInvalidate func(UserCacheInvalidation)
+}
+
+// UserCacheInvalidation describes the CachedUserRepository entries a write
+// made stale. It is what the invalidation hook receives and what
+// ApplyRemoteInvalidation applies from other processes, so it is JSON-encoded
+// on the wire.
+type UserCacheInvalidation struct {
+	// IDs are user ids whose user / profile / URI entries must be dropped.
+	IDs []string `json:"ids,omitempty"`
+	// URIs are AP URIs whose byURI entry (positive or negative) must be
+	// dropped. Set when a user with that URI is created.
+	URIs []string `json:"uris,omitempty"`
+	// All drops every entry.
+	All bool `json:"all,omitempty"`
 }
 
 type userCacheEntry struct {
@@ -80,10 +108,11 @@ type uriCacheEntry struct {
 }
 
 // userCacheTTL は CachedUserRepository のデフォルト TTL。短すぎると
-// timeline 描画で hit 率が落ち、長すぎると out-of-band の (例: 別の mk
-// プロセスが共有 DB に書き込む) write が反映されるまで lag が出る。
-// admin / federation processor / signin はすべて当該 wrapper 経由なので、
-// 単一プロセス運用では TTL で守る必要は無いが、保守的に 5 分を採用する。
+// timeline 描画で hit 率が落ち、長すぎると out-of-band の write が反映される
+// まで lag が出る。admin / federation processor / signin はすべて当該 wrapper
+// 経由で、別のプロセスの書き込みも pub/sub で伝わる (#3664) ので、TTL が効くのは
+// wrapper を通らない書き込みと、他のプロセスからの通知を取りこぼしたときだけ
+// だが、保守的に 5 分を採用する。
 const userCacheTTL = 5 * time.Minute
 
 // userCacheMaxEntries は per-map (users / profiles) のエントリ上限。
@@ -118,6 +147,7 @@ func newCachedUserRepository(inner UserRepository, ttl time.Duration, maxEntries
 		users:            make(map[string]userCacheEntry),
 		profiles:         make(map[string]profileCacheEntry),
 		byURI:            make(map[string]uriCacheEntry),
+		urisByID:         make(map[string][]string),
 		invalidatedAt:    make(map[string]time.Time),
 		uriInvalidatedAt: make(map[string]time.Time),
 	}
@@ -142,7 +172,22 @@ func (c *CachedUserRepository) SetMaxEntriesForTest(n int) {
 // FollowingCount / IsSuspended 等) を最大 5 分返してしまう問題があり、
 // FindByID 経路と一貫性が取れない。byURI map walk は最悪 O(maxEntries)
 // だが mutation 経由でのみ発火するので per-request hot path には影響無し。
+//
+// **他のプロセスにも伝える (#3664)。** 自プロセスのキャッシュを捨ててから、
+// SetInvalidationHook の hook に渡す。queue のプロセスがリモートの利用者を
+// 更新 (凍結の反映、Update の受信など) しても、Web のプロセスは TTL (5 分) の
+// 間古い行を返していた。
 func (c *CachedUserRepository) invalidate(userID string) {
+	if userID == "" {
+		return
+	}
+	c.invalidateLocal(userID)
+	c.notify(UserCacheInvalidation{IDs: []string{userID}})
+}
+
+// invalidateLocal drops this process's entries for userID without calling the
+// hook.
+func (c *CachedUserRepository) invalidateLocal(userID string) {
 	if userID == "" {
 		return
 	}
@@ -150,13 +195,60 @@ func (c *CachedUserRepository) invalidate(userID string) {
 	c.mu.Lock()
 	delete(c.users, userID)
 	delete(c.profiles, userID)
-	for uri, e := range c.byURI {
-		if !e.missing && e.user != nil && e.user.ID == userID {
+	for _, uri := range c.urisByID[userID] {
+		if e, ok := c.byURI[uri]; ok && !e.missing && e.user != nil && e.user.ID == userID {
 			delete(c.byURI, uri)
 			c.uriInvalidatedAt[uri] = now
 		}
 	}
+	delete(c.urisByID, userID)
 	c.markInvalidatedLocked(userID, now)
+	c.mu.Unlock()
+}
+
+// notify hands inv to the invalidation hook, if any.
+func (c *CachedUserRepository) notify(inv UserCacheInvalidation) {
+	if c.onInvalidate != nil {
+		c.onInvalidate(inv)
+	}
+}
+
+// SetInvalidationHook registers fn, called after every write through this
+// wrapper has dropped this process's entries (#3664). Call it once while
+// wiring, before the repository is used.
+func (c *CachedUserRepository) SetInvalidationHook(fn func(UserCacheInvalidation)) {
+	c.onInvalidate = fn
+}
+
+// ApplyRemoteInvalidation drops the entries another process invalidated. It
+// never calls the invalidation hook, so a received invalidation is not
+// published again.
+func (c *CachedUserRepository) ApplyRemoteInvalidation(inv UserCacheInvalidation) {
+	if inv.All {
+		c.invalidateAllLocal()
+		return
+	}
+	for _, id := range inv.IDs {
+		c.invalidateLocal(id)
+	}
+	for _, uri := range inv.URIs {
+		c.invalidateURILocal(uri)
+	}
+}
+
+// invalidateAllLocal drops every entry of this process. Reads in flight when
+// it runs are not stored afterwards (see allInvalidatedAt).
+func (c *CachedUserRepository) invalidateAllLocal() {
+	now := time.Now()
+	c.mu.Lock()
+	clear(c.users)
+	clear(c.profiles)
+	clear(c.byURI)
+	clear(c.urisByID)
+	// 個別の印は全体の印が包含するので捨ててよい (残すと上限まで溜まる)。
+	clear(c.invalidatedAt)
+	clear(c.uriInvalidatedAt)
+	c.allInvalidatedAt = now
 	c.mu.Unlock()
 }
 
@@ -189,12 +281,18 @@ func (c *CachedUserRepository) markInvalidatedLocked(userID string, now time.Tim
 // be stored: true when userID was invalidated at or after readStart.
 // Caller must hold c.mu.
 func (c *CachedUserRepository) staleLocked(userID string, readStart time.Time) bool {
+	if !c.allInvalidatedAt.IsZero() && !c.allInvalidatedAt.Before(readStart) {
+		return true
+	}
 	t, ok := c.invalidatedAt[userID]
 	return ok && !t.Before(readStart)
 }
 
 // uriStaleLocked is staleLocked for the byURI map. Caller must hold c.mu.
 func (c *CachedUserRepository) uriStaleLocked(uri string, readStart time.Time) bool {
+	if !c.allInvalidatedAt.IsZero() && !c.allInvalidatedAt.Before(readStart) {
+		return true
+	}
 	t, ok := c.uriInvalidatedAt[uri]
 	return ok && !t.Before(readStart)
 }
@@ -359,15 +457,42 @@ func (c *CachedUserRepository) storeURI(uri string, u *model.User, readStart tim
 	// invalidate された場合は uriInvalidatedAt に印が付かないため。
 	if !c.uriStaleLocked(uri, readStart) && !(u != nil && c.staleLocked(u.ID, readStart)) {
 		c.evictExpiredURIsLocked()
+		c.unindexURILocked(uri)
 		c.byURI[uri] = uriCacheEntry{user: u, expiresAt: time.Now().Add(c.ttl)}
+		if u != nil && u.ID != "" {
+			c.urisByID[u.ID] = append(c.urisByID[u.ID], uri)
+		}
 	}
 	c.mu.Unlock()
+}
+
+// unindexURILocked removes uri from urisByID of the user its current byURI
+// entry points to. Call it before that entry is replaced or deleted. Caller
+// must hold c.mu.
+func (c *CachedUserRepository) unindexURILocked(uri string) {
+	e, ok := c.byURI[uri]
+	if !ok || e.missing || e.user == nil {
+		return
+	}
+	uris := c.urisByID[e.user.ID]
+	for i, u := range uris {
+		if u == uri {
+			uris = append(uris[:i], uris[i+1:]...)
+			break
+		}
+	}
+	if len(uris) == 0 {
+		delete(c.urisByID, e.user.ID)
+	} else {
+		c.urisByID[e.user.ID] = uris
+	}
 }
 
 func (c *CachedUserRepository) storeURIMissing(uri string, readStart time.Time) {
 	c.mu.Lock()
 	if !c.uriStaleLocked(uri, readStart) {
 		c.evictExpiredURIsLocked()
+		c.unindexURILocked(uri)
 		c.byURI[uri] = uriCacheEntry{missing: true, expiresAt: time.Now().Add(c.ttl)}
 	}
 	c.mu.Unlock()
@@ -408,6 +533,7 @@ func (c *CachedUserRepository) evictExpiredURIsLocked() {
 	now := time.Now()
 	for k, e := range c.byURI {
 		if now.After(e.expiresAt) {
+			c.unindexURILocked(k)
 			delete(c.byURI, k)
 		}
 	}
@@ -438,12 +564,27 @@ func (c *CachedUserRepository) Create(u *model.User) error {
 // 知っている呼び出し側専用 (例: Create / Update でリモート user を作る /
 // 更新するとき)。byURI map の負 cache が CREATE と競合して 404 を返す
 // 問題への対処 (#568)。
+//
+// 他のプロセスにも伝える (invalidate と同じ)。他のプロセスに「その URI の
+// 利用者は居ない」が残ると、そのプロセスの受信は作られた利用者を見つけられず、
+// 取り直して作ろうとする。
 func (c *CachedUserRepository) invalidateURI(uri string) {
+	if uri == "" {
+		return
+	}
+	c.invalidateURILocal(uri)
+	c.notify(UserCacheInvalidation{URIs: []string{uri}})
+}
+
+// invalidateURILocal drops this process's byURI entry for uri without calling
+// the hook.
+func (c *CachedUserRepository) invalidateURILocal(uri string) {
 	if uri == "" {
 		return
 	}
 	now := time.Now()
 	c.mu.Lock()
+	c.unindexURILocked(uri)
 	delete(c.byURI, uri)
 	c.uriInvalidatedAt[uri] = now
 	c.markInvalidatedLocked("", now)
@@ -526,8 +667,9 @@ func (c *CachedUserRepository) RevokeDeletedLocalCredentials(userID string) erro
 // **DeleteOrphanRemoteUsers は意図的に override しない** (#2862)。
 //
 // 消えた userID を返さないので個別に invalidate できず、`invalidate("")` は
-// no-op (`userID == ""` の early return)。`invalidatedAt` は per-userID / per-URI なので、
-// 「in-flight read を壊さない全消し」を表す語彙がそもそも無い。
+// no-op (`userID == ""` の early return)。全消し (`invalidateAllLocal`、#3664 で
+// 他のプロセスから溢れた通知を受けるために足した) はあるが、後始末のバッチの
+// たびに全プロセスのキャッシュを空にするほどの影響ではないので使わない。
 //
 // 残る影響は「削除済みの remote user が最大 TTL 分キャッシュに残る」だけで、
 // 対象は grace 期間を過ぎた非活動ユーザー。**この 1 つだけが override されて

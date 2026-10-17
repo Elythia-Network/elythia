@@ -3216,6 +3216,15 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 他のプロセスは TTL (30 秒) の間、作ったばかりのデコレーションを装着から落とす。
 	cachebus.ConnectAvatarDecorations(avatarDecorationResolver, emojiDecorationResolver, internalPubSub, idGen.Generate(time.Now()))
 
+	// #3664: 利用者のキャッシュ (CachedUserRepository) の cross-worker invalidation。
+	// queue のプロセスがリモートの利用者を更新 (凍結の反映、Update の受信) しても、
+	// 繋がないと Web のプロセスは TTL (5 分) の間古い行を返す。書き込みの頻度が
+	// 高いので、publish は書き込みの経路から切り離し、溜まった id を 1 通に
+	// まとめて送る (理由と量は cachebus.userQueue)。停止時は溜まっている分を
+	// 最大 2 秒かけて送ってから止まる (絵文字と同じ)。
+	userCacheLink := cachebus.ConnectUsers(s.userCache, internalPubSub, idGen.Generate(time.Now()))
+	s.startConstructionWorker(userCacheLink.Run)
+
 	// pollVoted / reacted / unreacted / deleted を noteStream:<id> に publish
 	// する共通 publisher。subNote / sn メッセージで購読しているクライアントへ
 	// リアクション・削除イベントが流れる (#690 / #700)。pollService /
