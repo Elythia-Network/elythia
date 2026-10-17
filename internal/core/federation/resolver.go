@@ -22,6 +22,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/activitypub"
 	"github.com/elythia-network/elythia/internal/activitypub/mfm"
+	"github.com/elythia-network/elythia/internal/bgwork"
 	coredrive "github.com/elythia-network/elythia/internal/core/drive"
 	"github.com/elythia-network/elythia/internal/core/fedrule"
 	corenote "github.com/elythia-network/elythia/internal/core/note"
@@ -391,6 +392,8 @@ type PublickeyExtraStore interface {
 // する。エントリは actorTTL を超えると miss として扱い、次回 ResolveActor 時
 // にリフレッシュされる。
 type Resolver struct {
+	// background は新しく作ったノートの chart hook を起動する箱 (#3661)。
+	background *bgwork.Group
 	// rules は連合のルール (#3090)。nil なら評価しない。
 	rules    RuleEvaluator
 	userRepo repository.UserRepository
@@ -566,7 +569,7 @@ func (r *Resolver) fireNoteCreated(note *model.Note) {
 	if r.noteChartHook == nil || note == nil {
 		return
 	}
-	safeGoFedHook(func() { r.noteChartHook.OnNoteCreated(note) })
+	safeGoFedHook(r.background, func() { r.noteChartHook.OnNoteCreated(note) })
 }
 
 // SetHashtagHook attaches a HashtagHook invoked after a remote note has
@@ -839,6 +842,13 @@ type ProhibitedWordsProvider interface {
 func (r *Resolver) SetProhibitedWordsProvider(p ProhibitedWordsProvider) {
 	r.prohibitedWordsProvider = p
 }
+
+// SetBackground sets the group the chart hook of new notes runs in, so
+// stopping the server generation waits for it (#3661).
+func (r *Resolver) SetBackground(g *bgwork.Group) { r.background = g }
+
+// HasBackground reports whether SetBackground received a group.
+func (r *Resolver) HasBackground() bool { return r.background != nil }
 
 // HasProhibitedWordsSource reports whether a source for meta.prohibitedWords is
 // reachable (either the explicit setter or the hostBlocker's optional面).
