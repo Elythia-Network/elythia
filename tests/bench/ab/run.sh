@@ -321,10 +321,11 @@ measure_delivery() {
     > "$dir/delivery-compose.log" 2>&1 || { delivery_reason="delivery fixture stack failed to start"; return 1; }
   "${qcompose[@]}" --profile bench run --no-deps --rm seed \
     > "$dir/delivery-seed.log" 2>&1 || { delivery_reason="delivery seed failed"; return 1; }
-  "${qcompose[@]}" restart --no-deps app-mkq nginx-mkq \
-    >> "$dir/delivery-compose.log" 2>&1 || { delivery_reason="delivery stack restart failed"; return 1; }
-  "${qcompose[@]}" --no-build up -d --wait app-mkq nginx-mkq \
-    >> "$dir/delivery-compose.log" 2>&1 || { delivery_reason="delivery stack did not become healthy"; return 1; }
+  bench_restart_delivery_stack "${qcompose[@]}" \
+    >> "$dir/delivery-compose.log" 2>&1 || {
+      delivery_reason="delivery stack restart or health check failed"
+      return 1
+    }
   "${qcompose[@]}" --profile outbound run --no-deps --rm driver-outbound \
     > "$dir/delivery-driver.log" 2>&1 || { delivery_reason="delivery driver failed"; return 1; }
   [ -s "$dir/delivery.json" ] || { delivery_reason="delivery.json was not written"; return 1; }

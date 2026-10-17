@@ -63,4 +63,15 @@ bench_run_delivery_with_cleanup mk-bench-ab-safe_1-delivery-r2-head \
 [[ "$status" -eq 1 ]]
 [[ "$delivery_cleanup_failed" -eq 1 ]]
 [[ "${#delivery_projects[@]}" -eq 1 ]]
+
+: > "$BENCH_HELPER_TEST_LOG"
+bench_restart_delivery_stack docker compose -p mk-bench-ab-order -f /tmp/order-compose.yml
+expected_restart_order=$(cat <<'EXPECTED'
+docker:compose -p mk-bench-ab-order -f /tmp/order-compose.yml restart --no-deps app-mkq
+docker:compose -p mk-bench-ab-order -f /tmp/order-compose.yml --no-build up -d --wait app-mkq
+docker:compose -p mk-bench-ab-order -f /tmp/order-compose.yml restart --no-deps nginx-mkq
+docker:compose -p mk-bench-ab-order -f /tmp/order-compose.yml --no-build up -d --wait nginx-mkq
+EXPECTED
+)
+[[ "$(cat "$BENCH_HELPER_TEST_LOG")" == "$expected_restart_order" ]]
 echo "run helper checks passed"

@@ -28,6 +28,16 @@ bench_cleanup_delivery_project() {
     down -v --remove-orphans --rmi local >/dev/null 2>&1
 }
 
+# nginx resolves app-mkq's container address when nginx starts. Restart the
+# app first and wait for it to become healthy before restarting nginx.
+bench_restart_delivery_stack() {
+  local -a compose=("$@")
+  "${compose[@]}" restart --no-deps app-mkq || return $?
+  "${compose[@]}" --no-build up -d --wait app-mkq || return $?
+  "${compose[@]}" restart --no-deps nginx-mkq || return $?
+  "${compose[@]}" --no-build up -d --wait nginx-mkq
+}
+
 bench_forget_delivery_project() {
   local project=$1 i
   for i in "${!delivery_projects[@]}"; do
