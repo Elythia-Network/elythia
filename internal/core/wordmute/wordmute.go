@@ -4,7 +4,7 @@
 //
 //	[
 //	  ["a", "b"],           // AND group: text must contain every element (case-sensitive)
-//	  "/regex/i"            // RegExp literal: parsed as Go regexp
+//	  "/regex/i"            // RegExp literal: parsed as Go regexp when it means the same in JavaScript
 //	]
 //
 // The judgement follows upstream frontend utility/check-word-mute.ts, which is
@@ -58,7 +58,7 @@ const (
 // concatenation). When the text is empty after trim, no rule can hit so the
 // function returns false fast.
 func Match(rulesJSON []byte, text string) bool {
-	text = strings.TrimSpace(text)
+	text = jsTrim(text)
 	if text == "" {
 		return false
 	}
@@ -104,6 +104,8 @@ func matchRules(rules []rule, text string) bool {
 	// `text.includes(keyword)` で比べる。区別しないと、本家のクライアントが
 	// 表示するノートをサーバーだけが隠す (#3369)。区別しないで隠したいときは
 	// `/word/i` の正規表現を使う (本家と同じ)。
+	var features textGuard
+	featuresReady := false
 	for _, r := range rules {
 		switch v := r.(type) {
 		case andRule:
@@ -118,6 +120,16 @@ func matchRules(rules []rule, text string) bool {
 				return true
 			}
 		case regexRule:
+			if v.guard != 0 {
+				if !featuresReady {
+					features, featuresReady = textFeatures(text), true
+				}
+				// JavaScript と Go で結果が変わりうる文字が本文にあれば、この規則では
+				// 判定しない (frontend が判定する。jsRisk)。
+				if v.guard&features != 0 {
+					continue
+				}
+			}
 			if v.re != nil && v.re.MatchString(text) {
 				return true
 			}
@@ -138,6 +150,8 @@ type andRule []string
 // (caller should not fail an entire timeline because one entry is malformed).
 type regexRule struct {
 	re *regexp.Regexp
+	// guard lists the text features under which the rule is not evaluated.
+	guard textGuard
 }
 
 // regexLiteral matches Misskey's `/pattern/flags` wire syntax with the same
@@ -259,14 +273,25 @@ func parseEntry(e json.RawMessage) (rule, int) {
 	var s string
 	if err := json.Unmarshal(e, &s); err == nil {
 		// Misskey TS upstream allows /regex/flags literal as a string entry.
-		if m := regexLiteral.FindStringSubmatch(s); m != nil && !evaluableFlags(m[2]) {
-			return nil, 0
+		var guard textGuard
+		if m := regexLiteral.FindStringSubmatch(s); m != nil {
+			if !evaluableFlags(m[2]) {
+				return nil, 0
+			}
+			// 長さの上限を超えるものは走査しない (goRegexFromLiteral でも落とす)。
+			if len(m[1]) > maxRegexPatternBytes {
+				return nil, 0
+			}
+			var ok bool
+			if guard, ok = jsRisk(m[1], m[2]); !ok {
+				return nil, 0
+			}
 		}
 		if re, insts, isLiteral, err := goRegexFromLiteral(s); isLiteral {
 			if err != nil || insts > maxRegexInsts {
 				return nil, 0
 			}
-			return regexRule{re: re}, insts
+			return regexRule{re: re, guard: guard}, insts
 		}
 		// **正規表現の形でない文字列は、何にも一致させない。** 本家の判定は文字列の
 		// 要素を必ず正規表現として読み、`/.../` の形でなければ false を返す
@@ -349,9 +374,9 @@ func literalProgram(s string, compile bool) (string, int, bool, error) {
 	// **`y` は先頭に固定する。** frontend は lastIndex を 0 に戻してから test する
 	// ので、sticky な正規表現は本文の先頭でしか当たらない。無視すると、frontend が
 	// 表示するノートをサーバーだけが隠す。`g` / `d` は判定の結果を変えない。`u` は
-	// JavaScript では `.` や `\p{…}` の読み方を変えるが、Go の regexp は常に Unicode で
-	// 読むので写すものが無い (u の無い正規表現との構文の差は docs/divergence/api.md)。
-	// それ以外の flags は無視する (本家 i/update の node-re2 も知らない flags を
+	// JavaScript では `.` が絵文字を 1 文字として読むか、`\p{…}` が使えるか、`i` の
+	// 大文字と小文字の対応を変える。Go の regexp には写せないので、その差が出うる
+	// 構文を含む規則は判定に使わない (jsRisk)。それ以外の flags は無視する (本家 i/update の node-re2 も知らない flags を
 	// 無視して受け付ける。判定に使うかは parseEntry の evaluableFlags が決める)。
 	sticky := strings.ContainsRune(flags, 'y')
 	// 二重指定回避: pattern が既に inline flag group `(?ims)` で始まる場合のみ skip。
@@ -520,7 +545,7 @@ func MatchNote(rulesJSON []byte, noteUserID, viewerID, noteText, noteCW string) 
 	if viewerID != "" && noteUserID == viewerID {
 		return false
 	}
-	combined := strings.TrimSpace(noteCW + "\n" + noteText)
+	combined := jsTrim(noteCW + "\n" + noteText)
 	return Match(rulesJSON, combined)
 }
 
