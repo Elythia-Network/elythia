@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/activitypub"
+	"github.com/elythia-network/elythia/internal/bgwork"
 	coreblocking "github.com/elythia-network/elythia/internal/core/blocking"
 	corechat "github.com/elythia-network/elythia/internal/core/chat"
 	corefollowing "github.com/elythia-network/elythia/internal/core/following"
@@ -64,6 +65,9 @@ type RelayActorChecker interface {
 
 // Processor dispatches inbound activities to the right handler.
 type Processor struct {
+	// background は受信後のベストエフォートフックを起動する箱 (#3661)。
+	// 世代の停止で待つ。nil なら素の goroutine で起動する (テスト)。
+	background *bgwork.Group
 	// rules は連合のルール (#3090)。nil なら評価しない。
 	rules            RuleEvaluator
 	resolver         *Resolver
@@ -231,6 +235,13 @@ func (p *Processor) SetLocalBaseURL(baseURL string) {
 // 自ホストの URI であることを要求する (fail-closed) ので、ここが空だと
 // relay の状態遷移が全て落ちる。ローカル URI の判定も全部外れる。
 func (p *Processor) HasLocalBaseURL() bool { return p.localBaseURL != "" }
+
+// SetBackground sets the group the best-effort hooks run in, so stopping the
+// server generation waits for them (#3661).
+func (p *Processor) SetBackground(g *bgwork.Group) { p.background = g }
+
+// HasBackground reports whether SetBackground received a group.
+func (p *Processor) HasBackground() bool { return p.background != nil }
 
 // resolveTargetUser looks up a user referenced by URI in an inbound activity.
 // ローカルユーザの user.uri は DB 上 NULL なので FindByURI では解決できない。
@@ -1919,7 +1930,7 @@ func (p *Processor) handleCreate(act genericActivity, signer *model.User) error 
 		// 待ちで block されないようにする (#569)。順序保証は Misskey TS と
 		// 同じく各 hook 側の冪等性で吸収する。
 		if p.fanoutHook != nil {
-			safeGoFedHook(func() { p.fanoutHook.OnNoteCreated(hydrated, actor) })
+			p.goHook(func() { p.fanoutHook.OnNoteCreated(hydrated, actor) })
 		}
 		// **リレー経由では発火させない (#2743)。** Mastodon 系リレーは元の
 		// Create をそのまま転送して署名だけがリレーのものになるので、
@@ -1933,7 +1944,7 @@ func (p *Processor) handleCreate(act genericActivity, signer *model.User) error 
 		// している構成では取りこぼしが恒常化する。再配送での WS 重複は
 		// fanoutHook も同じく許している側で、こちらのほうが軽い。
 		if p.antennaHook != nil && !viaRelay {
-			safeGoFedHook(func() { p.antennaHook.OnNoteCreated(hydrated, actor) })
+			p.goHook(func() { p.antennaHook.OnNoteCreated(hydrated, actor) })
 		}
 		// 通知フックは dedup hit では発火させない。**通知は冪等ではない** —
 		// 呼ぶたびに新しい id で 1 件積まれるので、同じ Create(Note) が再配送
@@ -1944,7 +1955,7 @@ func (p *Processor) handleCreate(act genericActivity, signer *model.User) error 
 		// upstream も通知は NoteCreateService.create の中でしか作らないので、
 		// 既存ノートを返した経路では通知が出ない (= ここと同じ挙動)。
 		if p.notificationHook != nil && created {
-			safeGoFedHook(func() {
+			p.goHook(func() {
 				// reply / quote / mention 通知を local notifiee に対して
 				// 生成する。hydrated.Reply / hydrated.Renote は preload
 				// 済みなので、notification hook 側で UserID を取れる
@@ -1959,17 +1970,22 @@ func (p *Processor) handleCreate(act genericActivity, signer *model.User) error 
 	return nil
 }
 
-// safeGoFedHook runs fn in a new goroutine, recovering from panics. local
-// note service の safeGo と同じ振る舞い (`note_create_service.go`)。
-func safeGoFedHook(fn func()) {
-	go func() {
+// goHook runs a best-effort hook in the group of the server generation. 呼び出し
+// 側で箱を選ばせないために、Processor の hook は全部ここを通す (#3661)。
+func (p *Processor) goHook(fn func()) { safeGoFedHook(p.background, fn) }
+
+// safeGoFedHook runs fn in a new goroutine of g, recovering from panics. local
+// note service の safeGo と同じ振る舞い (`note_create_service.go`)。g は世代の
+// 箱で、世代が止まった後は fn を走らせない (#3661)。
+func safeGoFedHook(g *bgwork.Group, fn func()) {
+	g.Go(func(context.Context) {
 		defer func() {
 			if r := recover(); r != nil {
 				slog.Error("recovered panic in federation best-effort hook", "panic", r)
 			}
 		}()
 		fn()
-	}()
+	})
 }
 
 // hydrateNoteForFanout reloads a freshly-created note via
@@ -2212,7 +2228,7 @@ func (p *Processor) handleAnnounce(act genericActivity, signer *model.User) erro
 			slog.Warn("federation: announced target has no resolvable author, skipping antenna",
 				"noteURI", targetURI, "userId", target.UserID)
 		} else {
-			safeGoFedHook(func() { p.antennaHook.OnNoteCreated(hydratedTarget, author) })
+			p.goHook(func() { p.antennaHook.OnNoteCreated(hydratedTarget, author) })
 		}
 	}
 	if act.Published != "" {
@@ -2324,7 +2340,7 @@ func (p *Processor) handleAnnounce(act genericActivity, signer *model.User) erro
 	// `target` は handleAnnounce 内 local 変数で関数 return 後も生存するため
 	// goroutine 上の参照は安全 (race なし)。
 	if p.fanoutHook != nil {
-		safeGoFedHook(func() { p.fanoutHook.OnNoteCreated(hydrated, announcer) })
+		p.goHook(func() { p.fanoutHook.OnNoteCreated(hydrated, announcer) })
 	}
 	// **リレー経由では発火させない (#2743)。** Misskey 系リレー (announcer が
 	// relay actor 本人) は上の `if viaRelay` で publishRelayDeliveredNote へ
@@ -2339,13 +2355,13 @@ func (p *Processor) handleAnnounce(act genericActivity, signer *model.User) erro
 	// 指定のある antenna はこの行では当たらない。ブースト対象そのものは上の
 	// #2751 の block が別途渡している (新規取り込み時のみ)。
 	if p.antennaHook != nil && !viaRelay && !p.isRelayDelivery(signer) {
-		safeGoFedHook(func() { p.antennaHook.OnNoteCreated(hydrated, announcer) })
+		p.goHook(func() { p.antennaHook.OnNoteCreated(hydrated, announcer) })
 	}
 	if p.notificationHook != nil {
 		// remote user が local note を renote した時に元投稿者へ通知を出す
 		// (#415)。target が renoteTarget。reply 通知は Announce では発生
 		// しないので nil を渡す。
-		safeGoFedHook(func() {
+		p.goHook(func() {
 			p.notificationHook.OnNoteCreated(hydrated, announcer, nil, target)
 		})
 	}
@@ -2360,7 +2376,7 @@ func (p *Processor) handleAnnounce(act genericActivity, signer *model.User) erro
 	// Announce を出す実装は実運用ではほぼ無いので影響軽微だが、`act.ID` の
 	// dedup 強化は別 issue でフォロー (= renote 重複そのものの解消が主題)。
 	if p.noteChartHook != nil {
-		safeGoFedHook(func() { p.noteChartHook.OnNoteCreated(hydrated) })
+		p.goHook(func() { p.noteChartHook.OnNoteCreated(hydrated) })
 	}
 	return nil
 }
@@ -2388,7 +2404,7 @@ func (p *Processor) publishRelayDeliveredNote(target *model.Note, targetURI, rel
 		return nil
 	}
 	if p.fanoutHook != nil {
-		safeGoFedHook(func() { p.fanoutHook.OnNoteCreated(hydrated, author) })
+		p.goHook(func() { p.fanoutHook.OnNoteCreated(hydrated, author) })
 	}
 	// **antennaHook はここでは発火させない (#2743)。** 理由は AntennaHook の
 	// doc を参照。handleCreate / handleAnnounce との差はこの 1 点だけなので、
