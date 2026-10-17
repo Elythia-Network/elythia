@@ -3156,6 +3156,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 繋がないと停止したはずの相手へ最大 5 分 (判定のキャッシュの TTL) 配送が続く。
 	// 自プロセスの判定は publish の前に捨て済みで、自分の publish は受け流す。
 	cachebus.ConnectInstanceSuspension(instanceService, internalPubSub, idGen.Generate(time.Now()))
+	// #3664: relay の一覧 (承認済みのもの) も同じ。Accept / Reject は連合の受信で、
+	// 追加・削除は管理画面で書かれ、ノートを relay へ配るのは投稿を受けたプロセス。
+	cachebus.ConnectRelays(relaySvc, internalPubSub, idGen.Generate(time.Now()))
 
 	// #3383: 絵文字の (name, host) cache の cross-worker invalidation。
 	// リモート絵文字の作成・更新は連合の受信 (MK_ONLY_QUEUE のプロセス) で
