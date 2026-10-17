@@ -128,7 +128,8 @@ type Server struct {
 	// ための SetSyncDeliverHookForTest を呼べるよう参照を保持する。
 	deliverSvc *corefederation.DeliverService
 
-	// shutdownHooks は Shutdown() 時に queue / HTTP echo より先に呼ばれる。
+	// shutdownHooks は Shutdown() 時に queue の worker を止め始めた後 (上限内に
+	// 止まらなかった worker は並行して走る)、chart と HTTP echo より先に呼ばれる。
 	// ctx-aware にすることで graceful drain (例: hashtag service の
 	// in-flight worker、#727) を hook で wire できる。シンプルな
 	// stop/close 系 hook は引数 _ で受け流すだけ。
@@ -150,7 +151,9 @@ type Server struct {
 }
 
 // registerShutdownHook registers fn to be invoked during Shutdown.
-// Hooks run in registration order before the queue / echo shutdown.
+// Hooks run in registration order, after the queue worker has been told to
+// stop and before the chart management and echo are stopped. A worker that
+// did not stop within queueStopMax keeps running alongside the hooks.
 // ctx は Shutdown() の caller から伝播され、graceful drain の deadline
 // として使える (#764)。
 func (s *Server) registerShutdownHook(fn func(context.Context)) {
@@ -1130,11 +1133,87 @@ const streamCloseMax = 3 * time.Second
 // most streamCloseMax and at most a third of what is left of ctx, so the
 // shutdown hooks keep most of the time.
 func streamCloseContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	limit := streamCloseMax
+	return shutdownStepContext(ctx, streamCloseMax)
+}
+
+// queueStopMax bounds how long stopping a generation waits for the queue
+// worker before it runs the shutdown hooks.
+const queueStopMax = 3 * time.Second
+
+// lateChartSaveMax is the least time given to the chart save after a queue
+// worker that did not stop within the queue wait of stopQueue has finally
+// stopped (see lateSaveContext).
+//
+// ここに来るのは、worker が min(queueStopMax, 残りの 1/3) 以内に止まらなかった
+// ときで、止まるまでの待ちの上限は driver の側 (mkq は 30 秒) にある。止まった
+// 時点で停止の ctx は切れていることがあり、切れた ctx では保存が DB に届かない。
+// 上限が要るのは、メンテナンスの作り直しが genMu を握ったままここを通るため。
+// SIGTERM では、Supervisor.Shutdown が期限で返った後にプロセスが終われば、この
+// 保存も途中で切られる。
+const lateChartSaveMax = 2 * time.Second
+
+// lateSaveContext derives the context of the chart save after a late queue
+// worker: ctx without its cancellation, with the later of ctx's deadline and
+// now+lateChartSaveMax. ctx に時間が残っていれば、それを 2 秒で切らずに使う。
+func lateSaveContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	deadline := time.Now().Add(lateChartSaveMax)
+	if d, ok := ctx.Deadline(); ok && d.After(deadline) {
+		deadline = d
+	}
+	return context.WithDeadline(context.WithoutCancel(ctx), deadline)
+}
+
+// shutdownStepContext derives the deadline of one waiting step of the
+// shutdown: at most limit and at most a third of what is left of ctx.
+func shutdownStepContext(ctx context.Context, limit time.Duration) (context.Context, context.CancelFunc) {
 	if deadline, ok := ctx.Deadline(); ok {
 		limit = min(limit, time.Until(deadline)/3)
 	}
 	return context.WithTimeout(ctx, limit)
+}
+
+// stopQueue stops the auto-scale controller, the scheduler and the queue
+// worker in the background and waits for them at most queueStopMax (and a
+// third of what is left of ctx). It returns a channel closed once they have
+// stopped, and whether they stopped within the wait.
+func (s *Server) stopQueue(ctx context.Context) (<-chan struct{}, bool) {
+	done := make(chan struct{})
+	// 止めるものが無い構成 (MK_ONLY_SERVER で autoscale も無い) は待たない。期限の
+	// 切れた ctx では、下の select が止まっている queue を「止まらなかった」と
+	// 取り違え、誤った警告と 2 回目の chart の保存を出しうる。
+	if s.autoscale == nil && !s.role.RunsQueue() {
+		close(done)
+		return done, true
+	}
+	go func() {
+		defer close(done)
+		// queueServer.Shutdown 前に controller を停止 (Resize 呼びの停止 = pool に
+		// 余計な変更が走らない状態で queueServer の pool を畳める)。Shutdown ctx を
+		// 伝播することで autoscale の goroutine drain にも graceful deadline が効く。
+		s.autoscale.Stop(ctx)
+		// RoleServer では scheduler も worker も起動していない。mkq driver は
+		// どちらの Shutdown も未起動で安全だが、「起動済み」を前提にした driver へ
+		// 差し替わっても壊れないよう role で守る (#2459)。
+		if s.role.RunsQueue() {
+			if s.queueScheduler != nil {
+				s.queueScheduler.Shutdown()
+			}
+			s.queueServer.Shutdown()
+		}
+	}()
+	waitCtx, cancel := shutdownStepContext(ctx, queueStopMax)
+	defer cancel()
+	select {
+	case <-done:
+		return done, true
+	case <-waitCtx.Done():
+		// 止まらない worker は、キャンセルを見ない handler が掴んでいる。待ち続けると
+		// 後の hook (バッファの flush や chart の保存) の時間が無くなるので先へ進む。
+		// バッファは閉じた後の書き込みをその場で書くので、この worker の書き込みも
+		// 残る。chart は queue が止まった後でもう一度保存する (lateChartSaveMax)。
+		slog.Warn("queue worker did not stop before the shutdown hooks; continuing")
+		return done, false
+	}
 }
 
 func (s *Server) shutdown(ctx context.Context) error {
@@ -1152,6 +1231,16 @@ func (s *Server) shutdown(ctx context.Context) error {
 			slog.Warn("streaming connections did not close before the deadline", "left", left)
 		}
 	}
+	// **queue の worker と scheduler を、hook と chart より先に止める (#3662)。**
+	// worker のジョブはバッファ (TouchBuffer など) と chart へ書くので、先に
+	// それらを閉じると、止まるまでに終わったジョブの書き込みが誰にも flush
+	// されずに消える。hook どうしは登録順のまま走らせる。後に登録した hook の
+	// 処理が、先に登録した hook の閉じるものを使う組は無い (#3662 で全件を確認)。
+	queueDone, queueStopped := s.stopQueue(ctx)
+	// #3661 の箱 (投げっぱなしの goroutine を待つ) は、queue が止まった後・hook の前で
+	// 待つ。queueStopped=false のときは、止まらなかった worker がまだ箱へ足しうる
+	// ので、箱を閉じるのは下の <-queueDone の後にする (先に閉じると、その worker の
+	// 分が実行されずに捨てられる)。
 	// 登録順に shutdown hook を走らせる。publisher goroutine の clean 停止と、
 	// graceful drain が必要な service (hashtag #727 等) の Shutdown(ctx) を
 	// 兼ねる。hook が ctx を取るので timeout 共有が可能 (#764)。
@@ -1161,18 +1250,17 @@ func (s *Server) shutdown(ctx context.Context) error {
 	if s.chartMgmt != nil {
 		s.chartMgmt.Stop(ctx)
 	}
-	// queueServer.Shutdown 前に controller を停止 (Resize 呼びの停止 = pool に
-	// 余計な変更が走らない状態で queueServer の pool を畳める)。Shutdown ctx を
-	// 伝播することで autoscale の goroutine drain にも graceful deadline が効く。
-	s.autoscale.Stop(ctx)
-	// RoleServer では scheduler も worker も起動していない。mkq driver は
-	// どちらの Shutdown も未起動で安全だが、「起動済み」を前提にした driver へ
-	// 差し替わっても壊れないよう role で守る (#2459)。
-	if s.role.RunsQueue() {
-		if s.queueScheduler != nil {
-			s.queueScheduler.Shutdown()
+	// 上限内に止まらなかった worker は、driver を閉じる前にここで待つ (以前と
+	// 同じく、待ちの上限は driver の側にある)。止まるまでに chart へ足された分を
+	// 保存する。
+	if !queueStopped {
+		<-queueDone
+		// (#3661 の箱は、queueStopped=false のときはここで待つ。chart の保存の前。)
+		if s.chartMgmt != nil {
+			saveCtx, cancel := lateSaveContext(ctx)
+			_ = s.chartMgmt.SaveAll(saveCtx)
+			cancel()
 		}
-		s.queueServer.Shutdown()
 	}
 	// queueClient.Close を直接呼ばないこと。queueDriver.Close が
 	// Client / Inspector を含むサブコンポーネントの Close を一括処理する。
