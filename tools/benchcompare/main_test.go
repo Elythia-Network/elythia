@@ -1578,7 +1578,7 @@ func TestCompare_DroppedIterationsLimit(t *testing.T) {
 // the runner fields, and that the model of #3659 gets a note, also when the
 // comparison is incomparable. The note does not stop the comparison.
 func TestRun_RunnerCPUModel(t *testing.T) {
-	const note = "**注意: この機種(AMD EPYC 9V74)では書き込みが揺れうる (#3659)。**"
+	const note = "**注意: この機種(AMD EPYC 9V74)では、以前は書き込みが揺れていた (#3659)。**"
 	report := func(t *testing.T, model string, runs []fakeRun) string {
 		t.Helper()
 		dir := writeResults(t, runs...)

@@ -143,7 +143,7 @@ func renderRunner(b *strings.Builder, runner map[string]string) {
 		}
 		fmt.Fprintf(b, "- runnerのCPU: %s\n", cell(shown))
 		if strings.Contains(strings.ToUpper(model), strings.ToUpper(writeJitterCPUModel)) {
-			fmt.Fprintf(b, "- **注意: この機種(%s)では書き込みが揺れうる (#3659)。** PostgreSQLはfsync・full page write・COMMITの待ちを外して動かしているが、それで揺れが消えるかは確かめていない。`notes-create`の差は流し直して確かめる\n", writeJitterCPUModel)
+			fmt.Fprintf(b, "- **注意: この機種(%s)では、以前は書き込みが揺れていた (#3659)。** PostgreSQLのfsync・full page write・COMMITの待ちを外した今の設定では、この機種でも揺れないことを確かめてある (PR #3660)。`notes-create`だけに差が出たときは、念のため流し直して確かめる\n", writeJitterCPUModel)
 		}
 	}
 	for _, k := range sortedRunnerKeys(runner) {
