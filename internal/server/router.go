@@ -77,6 +77,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/avatardecoration"
 	coreblocking "github.com/elythia-network/elythia/internal/core/blocking"
 	corebubbleversus "github.com/elythia-network/elythia/internal/core/bubbleversus"
+	"github.com/elythia-network/elythia/internal/core/cachebus"
 	corecaptcha "github.com/elythia-network/elythia/internal/core/captcha"
 	corechannel "github.com/elythia-network/elythia/internal/core/channel"
 	"github.com/elythia-network/elythia/internal/core/chart"
@@ -3149,6 +3150,12 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	antennasHandler.SetRelationCache(s.relationCache)
 	channelsHandler.SetRelationCache(s.relationCache)
 	clipsHandler.SetRelationCache(s.relationCache)
+
+	// #3664: インスタンスの停止判定の cross-worker invalidation。停止の操作は
+	// Web のプロセスで受け、配送の判定は MK_ONLY_QUEUE のプロセスで走るので、
+	// 繋がないと停止したはずの相手へ最大 5 分 (判定のキャッシュの TTL) 配送が続く。
+	// 自プロセスの判定は publish の前に捨て済みで、自分の publish は受け流す。
+	cachebus.ConnectInstanceSuspension(instanceService, internalPubSub, idGen.Generate(time.Now()))
 
 	// #3383: 絵文字の (name, host) cache の cross-worker invalidation。
 	// リモート絵文字の作成・更新は連合の受信 (MK_ONLY_QUEUE のプロセス) で
