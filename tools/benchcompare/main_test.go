@@ -16,7 +16,9 @@ import (
 
 // fakeEndpoint is what one fake run measured for one endpoint.
 type fakeEndpoint struct {
-	p95, p99              float64
+	p95, p99 float64
+	// p50 replaces the default median (half of p95) when set.
+	p50                   float64
 	requests, failed      int64
 	rateLimited, timeouts int64
 }
@@ -97,7 +99,11 @@ func writeResultsRounds(t *testing.T, rounds int, runs ...fakeRun) string {
 		}
 		for name, e := range r.endpoints {
 			tag := "{endpoint:" + name + "}"
-			metrics["http_req_duration{endpoint:"+name+",expected_response:true}"] = metric(map[string]float64{"med": e.p95 / 2, "p(95)": e.p95, "p(99)": e.p99})
+			med := e.p95 / 2
+			if e.p50 != 0 {
+				med = e.p50
+			}
+			metrics["http_req_duration{endpoint:"+name+",expected_response:true}"] = metric(map[string]float64{"med": med, "p(95)": e.p95, "p(99)": e.p99})
 			// 失敗も含めた遅延は読まない (成功だけの submetric を読む)
 			metrics["http_req_duration"+tag] = metric(map[string]float64{"med": 1, "p(95)": 1, "p(99)": 1})
 			metrics["http_reqs"+tag] = metric(map[string]float64{"count": float64(e.requests), "rate": 1})
@@ -1095,4 +1101,172 @@ func TestNewMeasure_EdgeCases(t *testing.T) {
 	assert.Equal(t, "", fmtDelta(Measure{Verdict: VerdictIncomparable}))
 	assert.Zero(t, percent(1, 0))
 	assert.Equal(t, `a\|b c d e`, cell("a|b\nc\r\nd\re"))
+}
+
+// writeLabeledResults is writeResults with labels in run.json, and without
+// the Go heap on the base side (upstream Misskey has none).
+func writeLabeledResults(t *testing.T, runs ...fakeRun) string {
+	t.Helper()
+	return writeLabeledResultsNoHeap(t, SideBase, runs...)
+}
+
+// writeLabeledResultsNoHeap is writeLabeledResults with the Go heap missing on
+// the given side instead.
+func writeLabeledResultsNoHeap(t *testing.T, noHeap Side, runs ...fakeRun) string {
+	t.Helper()
+	for i := range runs {
+		if runs[i].side == noHeap {
+			runs[i].noHeap = true
+		}
+	}
+	dir := writeResults(t, runs...)
+	writeFile(t, filepath.Join(dir, "run.json"), `{"base":{"ref":"misskey/misskey:2026.10.0","commit":"sha256:0123456789abcdef0123"},"head":{"ref":"develop","commit":"fedcba9876543210"},"scenario":"prod-like","rounds":2,"labels":{"base":"本家","head":"Elythia"}}`)
+	return dir
+}
+
+// TestCompare_LabeledHeapIsOneSidedReference checks that, between two
+// implementations, the Go heap only Elythia has is a reference rather than
+// incomparable, while two commits still treat a missing heap as incomparable.
+func TestCompare_LabeledHeapIsOneSidedReference(t *testing.T) {
+	c := compareDir(t, writeLabeledResults(t, pair(2, func(s Side, r int) fakeRun { return okRun(s, r, 10) })...))
+	require.True(t, c.Valid)
+	require.NotNil(t, c.Labels)
+	heap := measure(t, c.Resources[0].Measures, "heap_inuse_max_mib")
+	assert.Equal(t, VerdictReference, heap.Verdict)
+	assert.Equal(t, 0, heap.Base.Rounds)
+	assert.Equal(t, Spread{Median: 100, Min: 100, Max: 100, Rounds: 2}, heap.Head)
+	assert.Equal(t, VerdictSame, measure(t, c.Resources[0].Measures, "cpu_seconds").Verdict)
+
+	// Elythia の側のヒープが途中の回だけ欠けたのは、測れなかったので比較不能のまま
+	c = compareDir(t, writeLabeledResults(t, pair(2, func(s Side, r int) fakeRun {
+		run := okRun(s, r, 10)
+		run.noHeap = r == 2
+		return run
+	})...))
+	assert.Equal(t, VerdictIncomparable, measure(t, c.Resources[0].Measures, "heap_inuse_max_mib").Verdict)
+
+	// ヒープ以外の指標が片側の全回で欠けたのも、参考ではなく比較不能
+	c = compareDir(t, writeLabeledResults(t, pair(2, func(s Side, r int) fakeRun {
+		run := okRun(s, r, 10)
+		if s == SideBase {
+			run.resources = "t_ms,container,cpu_usage_usec,memory_peak,heap_inuse\n0,app,0,1,\n10000,app,1,1,\n"
+		}
+		return run
+	})...))
+	require.Equal(t, "postgres", c.Resources[1].Container)
+	for _, m := range c.Resources[1].Measures {
+		assert.Equal(t, VerdictIncomparable, m.Verdict, m.Name)
+	}
+
+	// 逆の側 (base にだけヒープがある) も同じ扱い: 全回あれば参考、途中の回の欠けは比較不能
+	c = compareDir(t, writeLabeledResultsNoHeap(t, SideHead, pair(2, func(s Side, r int) fakeRun { return okRun(s, r, 10) })...))
+	heap = measure(t, c.Resources[0].Measures, "heap_inuse_max_mib")
+	assert.Equal(t, VerdictReference, heap.Verdict)
+	assert.Equal(t, Spread{Median: 100, Min: 100, Max: 100, Rounds: 2}, heap.Base)
+	assert.Equal(t, 0, heap.Head.Rounds)
+	c = compareDir(t, writeLabeledResultsNoHeap(t, SideHead, pair(2, func(s Side, r int) fakeRun {
+		run := okRun(s, r, 10)
+		run.noHeap = r == 2
+		return run
+	})...))
+	assert.Equal(t, VerdictIncomparable, measure(t, c.Resources[0].Measures, "heap_inuse_max_mib").Verdict)
+
+	// labels が無ければ、片側にヒープが無いのは測れなかったということなので判定しない
+	c = compareDir(t, writeResults(t, pair(2, func(s Side, r int) fakeRun {
+		run := okRun(s, r, 10)
+		run.noHeap = s == SideBase
+		return run
+	})...))
+	assert.Equal(t, VerdictIncomparable, measure(t, c.Resources[0].Measures, "heap_inuse_max_mib").Verdict)
+}
+
+// TestRun_LabeledReport checks the report of two implementations: the sides
+// are named by the labels, and the ratio section shows base / head.
+func TestRun_LabeledReport(t *testing.T) {
+	dir := writeLabeledResults(t, pair(2, func(s Side, r int) fakeRun {
+		if s == SideBase {
+			run := okRun(s, r, 20)
+			run.cpu = 8
+			return run
+		}
+		return okRun(s, r, 5)
+	})...)
+	var stdout, stderr bytes.Buffer
+	require.NoError(t, run([]string{"-dir", dir}, &stdout, &stderr))
+	md := stdout.String()
+	for _, want := range []string{
+		"# 性能比較 (本家 と Elythia)",
+		"- 本家: `misskey/misskey:2026.10.0` (`sha256:0123456789abcdef0123`)",
+		"- Elythia: `develop` (`fedcba9876543210`)",
+		"回をまたいで絶対値を比べない",
+		"| ping | 差あり (Elythiaが良い 2 / 本家が良い 0) |",
+		"## 比 (本家 / Elythia)",
+		"| ping | 10.0 | 2.5 | 4.00 | 20.0 | 5.0 | 4.00 | Elythiaが速い / Elythiaが速い |",
+		"| app | CPU時間 (秒) | 8.0 | 5.0 | 1.60 | Elythiaが少ない |",
+		"| app | メモリの最大 (MiB) | 200.0 | 200.0 | 1.00 | 差なし |",
+		"| エンドポイント | 指標 | 本家 (中央値 [最小, 最大]) | Elythia (中央値 [最小, 最大]) | 差 | 判定 |",
+		"| ping | p95 (ms) | 20.0 [20.0, 20.0] | 5.0 [5.0, 5.0] | -75.0% | 差あり (Elythiaが良い) |",
+		"| app | Goのヒープの最大 (MiB) | - | 100.0 [100.0, 100.0] | n/a | 参考 |",
+	} {
+		assert.Contains(t, md, want)
+	}
+	assert.NotContains(t, md, "改善")
+
+	// 本家のほうが速いときは本家の名前を出す
+	stdout.Reset()
+	require.NoError(t, run([]string{"-dir", writeLabeledResults(t, pair(2, func(s Side, r int) fakeRun {
+		if s == SideBase {
+			return okRun(s, r, 5)
+		}
+		return okRun(s, r, 20)
+	})...)}, &stdout, &stderr))
+	assert.Contains(t, stdout.String(), "| ping | 2.5 | 10.0 | 0.25 | 5.0 | 20.0 | 0.25 | 本家が速い / 本家が速い |")
+
+	// 比較不能のエンドポイントは、比の節でも比を出さない (失敗の差で速く見えるだけかもしれない)
+	stdout.Reset()
+	require.NoError(t, run([]string{"-dir", writeLabeledResults(t, pair(2, func(s Side, r int) fakeRun {
+		if s == SideBase {
+			return withEndpoint(okRun(s, r, 20), "timeline", func(e *fakeEndpoint) { e.rateLimited, e.failed = 100, 100 })
+		}
+		return okRun(s, r, 5)
+	})...)}, &stdout, &stderr))
+	assert.Contains(t, stdout.String(), "| timeline | 100.0 | 25.0 | - | 200.0 | 50.0 | - | 比較不能 / 比較不能 |")
+
+	// p50 と p95 の判定は別々に出す (p50 だけ差あり)
+	stdout.Reset()
+	require.NoError(t, run([]string{"-dir", writeLabeledResults(t, pair(2, func(s Side, r int) fakeRun {
+		run := okRun(s, r, 10)
+		p50 := 10.0
+		if s == SideHead {
+			p50 = 2
+		}
+		return withEndpoint(run, "ping", func(e *fakeEndpoint) { e.p50 = p50 })
+	})...)}, &stdout, &stderr))
+	assert.Contains(t, stdout.String(), "| ping | 10.0 | 2.0 | 5.00 | 10.0 | 10.0 | 1.00 | Elythiaが速い / 差なし |")
+
+	// 成功が 1 件も無かった側は、中央値も「-」にする (0 と書かない)
+	stdout.Reset()
+	require.NoError(t, run([]string{"-dir", writeLabeledResults(t, pair(2, func(s Side, r int) fakeRun {
+		if s == SideBase {
+			return withEndpoint(okRun(s, r, 20), "timeline", func(e *fakeEndpoint) { e.failed = e.requests })
+		}
+		return okRun(s, r, 5)
+	})...)}, &stdout, &stderr))
+	assert.Contains(t, stdout.String(), "| timeline | - | - | - | - | - | - | 比較不能 / 比較不能 |")
+
+	// 2 つの commit の比較には比の節を出さない
+	stdout.Reset()
+	require.NoError(t, run([]string{"-dir", writeResults(t, pair(2, func(s Side, r int) fakeRun { return okRun(s, r, 10) })...)}, &stdout, &stderr))
+	assert.NotContains(t, stdout.String(), "## 比 (")
+}
+
+// TestLoad_LabelsMustNameBothSides checks that a run.json naming only one side
+// is an input error.
+func TestLoad_LabelsMustNameBothSides(t *testing.T) {
+	for _, labels := range []string{`{"base":"本家","head":""}`, `{"base":" ","head":"Elythia"}`, `{}`} {
+		dir := writeResults(t, pair(2, func(s Side, r int) fakeRun { return okRun(s, r, 10) })...)
+		writeFile(t, filepath.Join(dir, "run.json"), `{"base":{"ref":"a","commit":"b"},"head":{"ref":"c","commit":"d"},"scenario":"prod-like","rounds":2,"labels":`+labels+`}`)
+		_, err := loadRunSet(dir)
+		assert.ErrorContains(t, err, "labels must name both", labels)
+	}
 }

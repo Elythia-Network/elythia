@@ -14,12 +14,40 @@ var verdictLabel = map[Verdict]string{
 	VerdictReference:    "参考",
 }
 
+// sideNames is how the report calls base and head, and how it says which
+// one was better.
+type sideNames struct {
+	base, head string
+	// better and worse follow a real difference: "改善" / "悪化" for two
+	// commits, "<head>が良い" / "<base>が良い" for two implementations.
+	better, worse string
+	labeled       bool
+}
+
+func namesOf(c *Comparison) sideNames {
+	if c.Labels == nil {
+		return sideNames{base: "base", head: "head", better: "改善", worse: "悪化"}
+	}
+	return sideNames{base: c.Labels.Base, head: c.Labels.Head, better: c.Labels.Head + "が良い", worse: c.Labels.Base + "が良い", labeled: true}
+}
+
 // renderMarkdown writes the report for the Actions summary.
 func renderMarkdown(w io.Writer, c *Comparison) error {
+	n := namesOf(c)
 	var b strings.Builder
-	b.WriteString("# 性能比較\n\n")
-	fmt.Fprintf(&b, "- base: %s (%s)\n", code(c.Base.Ref), code(short(c.Base.Commit)))
-	fmt.Fprintf(&b, "- head: %s (%s)\n", code(c.Head.Ref), code(short(c.Head.Commit)))
+	if n.labeled {
+		fmt.Fprintf(&b, "# 性能比較 (%s と %s)\n\n", cell(n.base), cell(n.head))
+	} else {
+		b.WriteString("# 性能比較\n\n")
+	}
+	// 本家の image の digest は、artifact が消えた後も Summary から pull し直せるよう、
+	// 実装の違う比較では切らずに出す
+	shorten := short
+	if n.labeled {
+		shorten = func(s string) string { return s }
+	}
+	fmt.Fprintf(&b, "- %s: %s (%s)\n", cell(n.base), code(c.Base.Ref), code(shorten(c.Base.Commit)))
+	fmt.Fprintf(&b, "- %s: %s (%s)\n", cell(n.head), code(c.Head.Ref), code(shorten(c.Head.Commit)))
 	fmt.Fprintf(&b, "- シナリオ: %s、ラウンド: %d\n", code(c.Scenario), c.Rounds)
 	for _, k := range sortedRunnerKeys(c.Runner) {
 		fmt.Fprintf(&b, "- %s: %s\n", cell(k), cell(c.Runner[k]))
@@ -34,17 +62,24 @@ func renderMarkdown(w io.Writer, c *Comparison) error {
 		_, err := io.WriteString(w, b.String())
 		return err
 	}
-	b.WriteString("判定は、各側のラウンドの最小〜最大の幅が重ならず、中央値の差が5%以上のときだけ「差あり」にする。あわせて、差の絶対量が遅延は1ms以上、CPU時間は0.5秒以上、CPU (%)は2ポイント以上、メモリとGoのヒープは8MiB以上であること。差の%は中央値どうしの比。失敗率か429の率がbaseとheadで1ポイントより大きく違うエンドポイントと、成功が0件の回があったエンドポイントは「比較不能」にする。p99は同じcommitどうしでも段を飛ぶように動くので、差だけを出し、判定には使わない(「参考」)。\n\n")
+	if n.labeled {
+		fmt.Fprintf(&b, "判定は、各側のラウンドの最小〜最大の幅が重ならず、中央値の差が5%%以上のときだけ「差あり」にする。あわせて、差の絶対量が遅延は1ms以上、CPU時間は0.5秒以上、CPU (%%)は2ポイント以上、メモリは8MiB以上であること。差の%%は%sに対する%sの中央値の増減。失敗率か429の率が両者で1ポイントより大きく違うエンドポイントと、成功が0件の回があったエンドポイントは「比較不能」にする。p99は同じものどうしでも段を飛ぶように動くので、差だけを出し、判定には使わない(「参考」)。**同じ回の中の比だけを読み、回をまたいで絶対値を比べない**(runnerのCPUが回ごとに違う)。\n\n", cell(n.base), cell(n.head))
+	} else {
+		b.WriteString("判定は、各側のラウンドの最小〜最大の幅が重ならず、中央値の差が5%以上のときだけ「差あり」にする。あわせて、差の絶対量が遅延は1ms以上、CPU時間は0.5秒以上、CPU (%)は2ポイント以上、メモリとGoのヒープは8MiB以上であること。差の%は中央値どうしの比。失敗率か429の率がbaseとheadで1ポイントより大きく違うエンドポイントと、成功が0件の回があったエンドポイントは「比較不能」にする。p99は同じcommitどうしでも段を飛ぶように動くので、差だけを出し、判定には使わない(「参考」)。\n\n")
+	}
 	b.WriteString("## まとめ\n\n| エンドポイント | 判定 |\n|---|---|\n")
 	for _, e := range c.Endpoints {
-		fmt.Fprintf(&b, "| %s | %s |\n", cell(e.Endpoint), endpointSummary(e))
+		fmt.Fprintf(&b, "| %s | %s |\n", cell(e.Endpoint), endpointSummary(e, n))
+	}
+	if n.labeled {
+		renderRatioSection(&b, c, n)
 	}
 	b.WriteString("\n## エンドポイント\n\n")
-	b.WriteString("| エンドポイント | 指標 | base (中央値 [最小, 最大]) | head (中央値 [最小, 最大]) | 差 | 判定 |\n")
+	fmt.Fprintf(&b, "| エンドポイント | 指標 | %s (中央値 [最小, 最大]) | %s (中央値 [最小, 最大]) | 差 | 判定 |\n", cell(n.base), cell(n.head))
 	b.WriteString("|---|---|---|---|---|---|\n")
 	for _, e := range c.Endpoints {
 		for _, m := range e.Measures {
-			fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s |\n", cell(e.Endpoint), measureLabel(m.Name), fmtSpread(m.Base, m.Name), fmtSpread(m.Head, m.Name), fmtDelta(m), fmtVerdict(m))
+			fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s |\n", cell(e.Endpoint), measureLabel(m.Name), fmtSpread(m.Base, m.Name), fmtSpread(m.Head, m.Name), fmtDelta(m), fmtVerdict(m, n))
 		}
 		rateVerdict := ""
 		if len(e.Reasons) > 0 {
@@ -62,17 +97,84 @@ func renderMarkdown(w io.Writer, c *Comparison) error {
 		b.WriteString("\n比較不能の理由:\n\n" + strings.Join(reasons, "\n") + "\n")
 	}
 	b.WriteString("\n## リソース\n\n")
-	b.WriteString("CPUは1コアを100%とする。メモリはcgroupの`memory.peak`、Goのヒープはappの`HeapInuse`の最大。\n\n")
-	b.WriteString("| コンテナ | 指標 | base (中央値 [最小, 最大]) | head (中央値 [最小, 最大]) | 差 | 判定 |\n")
+	if n.labeled {
+		b.WriteString("CPUは1コアを100%とする。メモリはcgroupの`memory.peak`(ページキャッシュを含む)。Goのヒープはappの`HeapInuse`の最大で、片側にしか無いときは参考として出す。\n\n")
+	} else {
+		b.WriteString("CPUは1コアを100%とする。メモリはcgroupの`memory.peak`、Goのヒープはappの`HeapInuse`の最大。\n\n")
+	}
+	fmt.Fprintf(&b, "| コンテナ | 指標 | %s (中央値 [最小, 最大]) | %s (中央値 [最小, 最大]) | 差 | 判定 |\n", cell(n.base), cell(n.head))
 	b.WriteString("|---|---|---|---|---|---|\n")
 	for _, r := range c.Resources {
 		for _, m := range r.Measures {
-			fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s |\n", cell(r.Container), measureLabel(m.Name), fmtSpread(m.Base, m.Name), fmtSpread(m.Head, m.Name), fmtDelta(m), fmtVerdict(m))
+			fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s |\n", cell(r.Container), measureLabel(m.Name), fmtSpread(m.Base, m.Name), fmtSpread(m.Head, m.Name), fmtDelta(m), fmtVerdict(m, n))
 		}
 	}
 	renderDeliverySection(&b, c.Delivery)
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+// renderRatioSection writes p50 / p95 of each endpoint and the CPU time and
+// memory of each container with the ratio base / head, for a comparison of
+// two implementations (#3654).
+func renderRatioSection(b *strings.Builder, c *Comparison, n sideNames) {
+	fmt.Fprintf(b, "\n## 比 (%s / %s)\n\n", cell(n.base), cell(n.head))
+	fmt.Fprintf(b, "比は、%sの中央値を%sの中央値で割ったもの。1より大きければ%sのほうが速い(リソースなら少ない)。判定は下の表と同じ基準で、差なしのときはどちらが速いとも言わない。\n\n", cell(n.base), cell(n.head), cell(n.head))
+	fmt.Fprintf(b, "| エンドポイント | p50 %s | p50 %s | p50の比 | p95 %s | p95 %s | p95の比 | 判定 (p50 / p95) |\n", cell(n.base), cell(n.head), cell(n.base), cell(n.head))
+	b.WriteString("|---|---|---|---|---|---|---|---|\n")
+	for _, e := range c.Endpoints {
+		p50, p95 := findMeasure(e.Measures, "med"), findMeasure(e.Measures, "p(95)")
+		fmt.Fprintf(b, "| %s | %s | %s | %s | %s | %s | %s | %s / %s |\n", cell(e.Endpoint),
+			fmtMedian(p50.Base), fmtMedian(p50.Head), fmtRatio(p50),
+			fmtMedian(p95.Base), fmtMedian(p95.Head), fmtRatio(p95),
+			lowerSide(p50, n, "が速い"), lowerSide(p95, n, "が速い"))
+	}
+	fmt.Fprintf(b, "\n| コンテナ | 指標 | %s | %s | 比 | 判定 |\n", cell(n.base), cell(n.head))
+	b.WriteString("|---|---|---|---|---|---|\n")
+	for _, r := range c.Resources {
+		for _, name := range []string{"cpu_seconds", "memory_peak_mib"} {
+			m := findMeasure(r.Measures, name)
+			if m.Name == "" {
+				continue
+			}
+			fmt.Fprintf(b, "| %s | %s | %s | %s | %s | %s |\n", cell(r.Container), measureLabel(name), fmtMedian(m.Base), fmtMedian(m.Head), fmtRatio(m), lowerSide(m, n, "が少ない"))
+		}
+	}
+}
+
+func findMeasure(ms []Measure, name string) Measure {
+	for _, m := range ms {
+		if m.Name == name {
+			return m
+		}
+	}
+	return Measure{}
+}
+
+func fmtMedian(s Spread) string {
+	if s.Rounds == 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%.1f", s.Median)
+}
+
+func fmtRatio(m Measure) string {
+	if m.Verdict == VerdictIncomparable || m.BaseOverHead == nil {
+		return "-"
+	}
+	return fmt.Sprintf("%.2f", *m.BaseOverHead)
+}
+
+// lowerSide says which side was lower for a lower-is-better measure, as
+// "<name><suffix>" ("が速い" for latency, "が少ない" for resources).
+func lowerSide(m Measure, n sideNames, suffix string) string {
+	if m.Verdict != VerdictDifferent || m.Better == nil {
+		return verdictLabel[m.Verdict]
+	}
+	if *m.Better {
+		return cell(n.head) + suffix
+	}
+	return cell(n.base) + suffix
 }
 
 func renderDeliverySection(b *strings.Builder, rounds []DeliveryRound) {
@@ -90,7 +192,7 @@ func renderDeliverySection(b *strings.Builder, rounds []DeliveryRound) {
 
 // endpointSummary is the verdict of an endpoint, with how many of its
 // measures got better or worse when it differs.
-func endpointSummary(e EndpointCompare) string {
+func endpointSummary(e EndpointCompare, n sideNames) string {
 	if e.Verdict != VerdictDifferent {
 		return verdictLabel[e.Verdict]
 	}
@@ -105,7 +207,7 @@ func endpointSummary(e EndpointCompare) string {
 			worse++
 		}
 	}
-	return fmt.Sprintf("%s (改善 %d / 悪化 %d)", verdictLabel[e.Verdict], better, worse)
+	return fmt.Sprintf("%s (%s %d / %s %d)", verdictLabel[e.Verdict], cell(n.better), better, cell(n.worse), worse)
 }
 
 func measureLabel(name string) string {
@@ -158,15 +260,15 @@ func cell(s string) string {
 }
 
 // fmtVerdict adds whether a real difference is better or worse for head.
-func fmtVerdict(m Measure) string {
+func fmtVerdict(m Measure, n sideNames) string {
 	label := verdictLabel[m.Verdict]
 	if m.Better == nil {
 		return label
 	}
 	if *m.Better {
-		return label + " (改善)"
+		return label + " (" + cell(n.better) + ")"
 	}
-	return label + " (悪化)"
+	return label + " (" + cell(n.worse) + ")"
 }
 
 // code writes text as inline code, with the backticks in it replaced so that
@@ -176,6 +278,10 @@ func code(s string) string {
 }
 
 func short(sha string) string {
+	// image の digest は sha256: の後ろを 12 桁にする
+	if d, ok := strings.CutPrefix(sha, "sha256:"); ok {
+		return "sha256:" + short(d)
+	}
 	if len(sha) > 12 {
 		return sha[:12]
 	}

@@ -29,6 +29,7 @@ type Comparison struct {
 	Scenario  string            `json:"scenario"`
 	Rounds    int               `json:"rounds"`
 	Runner    map[string]string `json:"runner,omitempty"`
+	Labels    *Labels           `json:"labels,omitempty"`
 	Valid     bool              `json:"valid"`
 	Problems  []string          `json:"problems,omitempty"`
 	Endpoints []EndpointCompare `json:"endpoints"`
@@ -88,6 +89,9 @@ type Measure struct {
 	// DeltaPercent is the head median against the base median; nil when the
 	// base median is 0.
 	DeltaPercent *float64 `json:"deltaPercent"`
+	// BaseOverHead is the base median over the head median; nil when the
+	// head median is 0. Above 1, head is lower (faster, for a latency).
+	BaseOverHead *float64 `json:"baseOverHead,omitempty"`
 	Verdict      Verdict  `json:"verdict"`
 	Better       *bool    `json:"better,omitempty"`
 }
@@ -121,7 +125,7 @@ const minEffectPercent = 5.0
 
 // compare judges a run set.
 func compare(rs *RunSet) *Comparison {
-	c := &Comparison{Base: rs.Base, Head: rs.Head, Scenario: rs.Scenario, Rounds: rs.Rounds, Runner: rs.Runner, Valid: true}
+	c := &Comparison{Base: rs.Base, Head: rs.Head, Scenario: rs.Scenario, Rounds: rs.Rounds, Runner: rs.Runner, Labels: rs.Labels, Valid: true}
 	validateDeliveryRuns(c, rs.Runs)
 	bySide := map[Side][]*Run{}
 	for _, r := range rs.Runs {
@@ -150,7 +154,7 @@ func compare(rs *RunSet) *Comparison {
 		return c
 	}
 	c.Endpoints = compareEndpoints(base, head)
-	c.Resources = compareResources(base, head)
+	c.Resources = compareResources(base, head, rs.Labels != nil)
 	return c
 }
 
@@ -352,7 +356,12 @@ func compareEndpoints(base, head []*Run) []EndpointCompare {
 	return out
 }
 
-func compareResources(base, head []*Run) []ResourceCompare {
+// compareResources compares the containers. With crossImpl (the sides are
+// different implementations), the Go heap that one side never has (upstream
+// Misskey runs on Node.js) is shown for the other side only, as a reference,
+// when the other side has it in every round. Any other gap stays
+// incomparable.
+func compareResources(base, head []*Run, crossImpl bool) []ResourceCompare {
 	names := map[string]bool{}
 	for _, r := range append(append([]*Run{}, base...), head...) {
 		for n := range r.Resources {
@@ -384,6 +393,14 @@ func compareResources(base, head []*Run) []ResourceCompare {
 			b, h := pick(base, m.heap, m.f), pick(head, m.heap, m.f)
 			// Go のヒープは app にしか無い。どの回にも無ければ行を出さない
 			if len(b) == 0 && len(h) == 0 {
+				continue
+			}
+			// 本家 (Node.js) には Go のヒープが無い。測れなかったのではなく元から無いので、
+			// 比較不能にせず、ある側の値だけを参考として出す。片側だけになってよいのは
+			// ヒープだけで、もう片側は全回で取れていること。CPU やメモリが片側で欠けた
+			// のと、途中の回だけ欠けたのは、測れなかったので比較不能のままにする
+			if crossImpl && m.heap && ((len(b) == 0 && len(h) == len(head)) || (len(h) == 0 && len(b) == len(base))) {
+				rc.Measures = append(rc.Measures, oneSided(m.name, b, h))
 				continue
 			}
 			ms := newMeasure(m.name, true, b, h)
@@ -435,6 +452,10 @@ func newMeasure(name string, lowerIsBetter bool, base, head []float64) Measure {
 		d := (m.Head.Median - m.Base.Median) / m.Base.Median * 100
 		m.DeltaPercent = &d
 	}
+	if m.Head.Median != 0 {
+		r := m.Base.Median / m.Head.Median
+		m.BaseOverHead = &r
+	}
 	if referenceOnly[name] {
 		m.Verdict = VerdictReference
 		return m
@@ -450,6 +471,19 @@ func newMeasure(name string, lowerIsBetter bool, base, head []float64) Measure {
 		m.Better = &better
 	} else {
 		m.Verdict = VerdictSame
+	}
+	return m
+}
+
+// oneSided is a measure that only one side has. It is a reference: there is
+// nothing to compare it with.
+func oneSided(name string, base, head []float64) Measure {
+	m := Measure{Name: name, LowerIsBetter: true, Verdict: VerdictReference}
+	if len(base) > 0 {
+		m.Base = spread(base)
+	}
+	if len(head) > 0 {
+		m.Head = spread(head)
 	}
 	return m
 }
