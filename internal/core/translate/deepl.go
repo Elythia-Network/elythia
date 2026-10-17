@@ -19,6 +19,9 @@ var (
 	ErrNotConfigured = errors.New("translate: translator not configured")
 	ErrRequestFailed = errors.New("translate: request failed")
 	ErrNoResult      = errors.New("translate: no translation result")
+	// ErrSettingsUnavailable means the translator settings could not be read
+	// (e.g. the meta row). DeepL への要求の失敗 (ErrRequestFailed) と分ける。
+	ErrSettingsUnavailable = errors.New("translate: settings unavailable")
 )
 
 const (
@@ -48,6 +51,55 @@ func NewDeepL(authKey string, isPro bool, client *http.Client) *DeepLClient {
 		client = http.DefaultClient
 	}
 	return &DeepLClient{authKey: authKey, apiURL: apiURL, client: client}
+}
+
+// Translator translates note text. *DeepLClient and *MetaDeepL implement it.
+type Translator interface {
+	Translate(ctx context.Context, text, targetLang string) (*TranslateResult, error)
+}
+
+// DeepLSettings returns the DeepL auth key and whether it is a Pro key. An
+// empty key means translation is not configured.
+type DeepLSettings func() (authKey string, isPro bool, err error)
+
+// MetaDeepL is a DeepL translator that reads its key and plan on every call,
+// so changes in the admin settings apply without rebuilding the server (#3663).
+//
+// 起動時の値で DeepLClient を作ると、キーを入れても外しても Pro を切り替えても、
+// プロセスか世代を作り直すまで変わらなかった。本家は `meta` を
+// `metaUpdated` で差し替え、翻訳のたびにそこから読む。ここでは settings に
+// meta のキャッシュ (metaUpdated で捨てられる) を読む関数を渡す。
+type MetaDeepL struct {
+	settings DeepLSettings
+	client   *http.Client
+	freeURL  string
+	proURL   string
+}
+
+// NewMetaDeepL creates a translator that resolves the DeepL settings per call.
+// client は NewDeepL と同じく、本番では SSRF-safe な outbound client を渡す。
+func NewMetaDeepL(settings DeepLSettings, client *http.Client) *MetaDeepL {
+	if client == nil {
+		client = http.DefaultClient
+	}
+	return &MetaDeepL{settings: settings, client: client, freeURL: deeplFreeURL, proURL: deeplProURL}
+}
+
+// Translate reads the current settings and translates text. It returns
+// ErrNotConfigured when no auth key is set.
+func (m *MetaDeepL) Translate(ctx context.Context, text, targetLang string) (*TranslateResult, error) {
+	key, isPro, err := m.settings()
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrSettingsUnavailable, err)
+	}
+	if key == "" {
+		return nil, ErrNotConfigured
+	}
+	apiURL := m.freeURL
+	if isPro {
+		apiURL = m.proURL
+	}
+	return NewDeepLWithClient(key, apiURL, m.client).Translate(ctx, text, targetLang)
 }
 
 // NewDeepLWithClient allows injecting a custom http.Client (for tests).

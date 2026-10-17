@@ -3,6 +3,7 @@ package translate
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -118,4 +119,64 @@ func TestDeepL_Translate_NonOKLargeBody_IncludesSnippet(t *testing.T) {
 	// "x" がerror messageに多数含まれているはず (snippetとして)
 	assert.Contains(t, err.Error(), "status 400")
 	assert.Contains(t, err.Error(), strings.Repeat("x", 100))
+}
+
+// fakeDeepLServers starts a Free and a Pro endpoint that record the auth
+// header they received.
+func fakeDeepLServers(t *testing.T) (free, pro *httptest.Server, got *[]string) {
+	t.Helper()
+	var calls []string
+	handler := func(plan string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			calls = append(calls, plan+" "+r.Header.Get("Authorization"))
+			_, _ = w.Write([]byte(`{"translations":[{"detected_source_language":"JA","text":"Hello"}]}`))
+		}
+	}
+	free = httptest.NewServer(handler("free"))
+	pro = httptest.NewServer(handler("pro"))
+	t.Cleanup(free.Close)
+	t.Cleanup(pro.Close)
+	return free, pro, &calls
+}
+
+func TestMetaDeepL_ReadsSettingsOnEveryCall(t *testing.T) {
+	free, pro, calls := fakeDeepLServers(t)
+	key, isPro := "", false
+	m := NewMetaDeepL(func() (string, bool, error) { return key, isPro, nil }, free.Client())
+	m.freeURL, m.proURL = free.URL, pro.URL
+
+	_, err := m.Translate(context.Background(), "text", "en")
+	require.ErrorIs(t, err, ErrNotConfigured)
+	assert.Empty(t, *calls)
+
+	key = "free-key"
+	res, err := m.Translate(context.Background(), "text", "en")
+	require.NoError(t, err)
+	assert.Equal(t, "Hello", res.Text)
+
+	key, isPro = "pro-key", true
+	_, err = m.Translate(context.Background(), "text", "en")
+	require.NoError(t, err)
+
+	key = ""
+	_, err = m.Translate(context.Background(), "text", "en")
+	require.ErrorIs(t, err, ErrNotConfigured)
+
+	assert.Equal(t, []string{"free DeepL-Auth-Key free-key", "pro DeepL-Auth-Key pro-key"}, *calls)
+}
+
+func TestMetaDeepL_SettingsError(t *testing.T) {
+	m := NewMetaDeepL(func() (string, bool, error) { return "", false, errors.New("db down") }, nil)
+	_, err := m.Translate(context.Background(), "text", "en")
+	require.ErrorIs(t, err, ErrSettingsUnavailable)
+	assert.Contains(t, err.Error(), "db down")
+	assert.NotErrorIs(t, err, ErrNotConfigured)
+	assert.NotErrorIs(t, err, ErrRequestFailed)
+}
+
+func TestNewMetaDeepL_DefaultEndpoints(t *testing.T) {
+	m := NewMetaDeepL(func() (string, bool, error) { return "", false, nil }, nil)
+	assert.Equal(t, deeplFreeURL, m.freeURL)
+	assert.Equal(t, deeplProURL, m.proURL)
+	assert.Same(t, http.DefaultClient, m.client)
 }

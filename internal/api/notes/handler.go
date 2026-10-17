@@ -102,7 +102,7 @@ type Handler struct {
 	// ugcVisibility controls what unauthenticated visitors can see.
 	// "all" (default), "local", "none"
 	ugcVisibility string
-	translator    *translate.DeepLClient
+	translator    translate.Translator
 	// policyProvider は LocalTimeline / GlobalTimeline / HybridTimeline で
 	// ltlAvailable / gtlAvailable policy を gate するために使う (#1026)。
 	// 匿名 viewer (userID="") に対しても base policies を返す upstream 互換
@@ -217,8 +217,9 @@ func (h *Handler) SetBlockingRepo(r repository.BlockingRepository) {
 	h.blockingRepo = r
 }
 
-// SetTranslator attaches a DeepL translator for /api/notes/translate.
-func (h *Handler) SetTranslator(t *translate.DeepLClient) {
+// SetTranslator attaches the translator for /api/notes/translate. A translator
+// that returns translate.ErrNotConfigured makes the endpoint answer UNAVAILABLE.
+func (h *Handler) SetTranslator(t translate.Translator) {
 	h.translator = t
 }
 
