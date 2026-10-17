@@ -38,6 +38,7 @@ func Commands() []Command {
 		{Name: "migrate", Summary: "apply or roll back database migrations", Run: migrate.Run},
 		{Name: "backfill", Summary: "run a one-off maintenance batch", Sub: []Command{
 			{Name: "avatar-public-url", Summary: "point avatar / banner URLs at the metadata-stripped variant", Run: backfill.AvatarPublicURL},
+			{Name: "chat-reads", Summary: "carry the direct-message read state of Misskey / CherryPick from Redis into chat_message.reads (-before required)", Run: backfill.ChatReads},
 			{Name: "emoji-system-file", Summary: "copy approved custom emoji images to system-owned files (dry-run unless -apply)", Run: backfill.EmojiSystemFile},
 			{Name: "hashtag-mentions", Summary: "drop hashtag users counted only through followers / specified notes", Run: backfill.HashtagMentions},
 			{Name: "instance-counts", Summary: "recompute instance notesCount / usersCount", Run: backfill.InstanceCounts},

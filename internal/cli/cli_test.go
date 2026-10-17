@@ -156,6 +156,7 @@ func TestCommands_WiresEveryNameToItsRunner(t *testing.T) {
 		"healthcheck":                diag.Healthcheck,
 		"dump-routes":                serve.DumpRoutes,
 		"backfill avatar-public-url": backfill.AvatarPublicURL,
+		"backfill chat-reads":        backfill.ChatReads,
 		"backfill emoji-system-file": backfill.EmojiSystemFile,
 		"backfill hashtag-mentions":  backfill.HashtagMentions,
 		"backfill instance-counts":   backfill.InstanceCounts,
