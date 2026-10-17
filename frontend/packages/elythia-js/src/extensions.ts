@@ -66,6 +66,14 @@ export type ElythiaRequestExtensions = {
 		 */
 		inboxSuspendedSoftware?: SuspendedSoftware[];
 	};
+	'chat/history': {
+		/**
+		 * Returns only the conversations whose latest message is older than this
+		 * id: pass the id of the last item of the previous page (#3653).
+		 * Upstream cannot read past `limit` conversations.
+		 */
+		untilId?: string;
+	};
 	'i/update': {
 		/**
 		 * Holds back follows from local accounts younger than this many seconds

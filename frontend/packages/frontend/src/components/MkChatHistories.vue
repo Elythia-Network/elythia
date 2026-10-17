@@ -1,5 +1,6 @@
 <!--
 SPDX-FileCopyrightText: syuilo and misskey-project
+SPDX-FileCopyrightText: Elythia-Network
 SPDX-License-Identifier: AGPL-3.0-only
 -->
 
@@ -27,6 +28,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 			<div :class="$style.messageBodyText"><span v-if="item.isMe" :class="$style.youSaid">{{ i18n.ts.you }}:</span>{{ item.message.text }}</div>
 		</div>
 	</MkA>
+	<MkButton v-if="hasMore" :class="$style.more" :disabled="fetching" rounded @click="loadMore">{{ i18n.ts.loadMore }}</MkButton>
 </div>
 <MkResult v-if="!initializing && history.length == 0" type="empty" :text="i18n.ts._chat.noHistory"/>
 <MkLoading v-if="initializing"/>
@@ -39,6 +41,8 @@ import { useInterval } from '@@/js/use-interval.js';
 import { misskeyApi } from '@/utility/misskey-api.js';
 import { i18n } from '@/i18n.js';
 import { ensureSignin } from '@/i.js';
+import MkButton from '@/components/MkButton.vue';
+import { createChatHistoryLoader } from '@/utility/chat-history.js';
 
 const $i = ensureSignin();
 
@@ -50,19 +54,18 @@ const history = ref<{
 }[]>([]);
 
 const initializing = ref(true);
-const fetching = ref(false);
 
-async function fetchHistory() {
-	if (fetching.value) return;
+// Elythia: 新しい10会話より古い会話も読めるようにする (#3653)。読み込む数を増やし、
+// 再読み込みのたびにその数までまとめて取り直す (utility/chat-history.ts)。
+const loader = createChatHistoryLoader((room, params) => misskeyApi('chat/history', { room, ...params }));
+const fetching = loader.fetching;
+const hasMore = loader.hasMore;
 
-	fetching.value = true;
+async function fetchHistory(load = loader.refresh) {
+	const res = await load();
+	if (res == null) return;
 
-	const [userMessages, roomMessages] = await Promise.all([
-		misskeyApi('chat/history', { room: false }),
-		misskeyApi('chat/history', { room: true }),
-	]);
-
-	history.value = [...userMessages, ...roomMessages]
+	history.value = [...res.user, ...res.room]
 		.toSorted((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
 		.map(m => ({
 			id: m.id,
@@ -71,8 +74,11 @@ async function fetchHistory() {
 			isMe: m.fromUserId === $i.id,
 		}));
 
-	fetching.value = false;
 	initializing.value = false;
+}
+
+function loadMore() {
+	fetchHistory(loader.loadMore);
 }
 
 let isActivated = true;
@@ -141,6 +147,10 @@ onMounted(() => {
 		font-size: 80%;
 		padding: 12px 16px;
 	}
+}
+
+.more {
+	margin: 0 auto;
 }
 
 .messageAvatar {
