@@ -18,6 +18,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/notehide"
 	"github.com/elythia-network/elythia/internal/api/pagination"
+	"github.com/elythia-network/elythia/internal/bgwork"
 	coredrive "github.com/elythia-network/elythia/internal/core/drive"
 	"github.com/elythia-network/elythia/internal/core/notesfilter"
 	"github.com/elythia-network/elythia/internal/entity"
@@ -32,6 +33,9 @@ import (
 
 // Handler handles drive-related API endpoints.
 type Handler struct {
+	// background は応答の後の処理 (URL からのアップロード) を起動する箱 (#3661)。世代の停止で
+	// 待つ。nil なら素の goroutine で起動する (テスト)。
+	background   *bgwork.Group
 	svc          *coredrive.Service
 	idGen        id.Generator
 	fileRepo     repository.DriveFileRepository
@@ -66,6 +70,13 @@ func (h *Handler) SetURLUploader(p URLUploadProcessor) {
 func (h *Handler) SetNoteFieldResolver(r *entity.NoteFieldResolver) {
 	h.fieldRes = r
 }
+
+// SetBackground sets the group the work after a response runs in, so stopping
+// the server generation waits for it (#3661).
+func (h *Handler) SetBackground(g *bgwork.Group) { h.background = g }
+
+// HasBackground reports whether SetBackground received a group.
+func (h *Handler) HasBackground() bool { return h.background != nil }
 
 // NewHandler creates a new drive Handler.
 func NewHandler(svc *coredrive.Service, idGen id.Generator) *Handler {
@@ -1149,7 +1160,8 @@ func (h *Handler) FilesUploadFromURL(c echo.Context) error {
 		return c.NoContent(http.StatusNoContent)
 	}
 	// upstream は fire-and-forget。request context は応答後に cancel されるため
-	// download はバックグラウンド context で継続する。
+	// download は世代の箱の context で継続する。世代が止まるとその context が
+	// 切れ、download を打ち切る (#3661)。
 	in := URLUploadInput{
 		User:        user,
 		URL:         req.URL,
@@ -1160,7 +1172,7 @@ func (h *Handler) FilesUploadFromURL(c echo.Context) error {
 		Force:       req.Force,
 		RequestIP:   requestIPValue(c),
 	}
-	go h.urlUploader.Process(context.Background(), in)
+	h.background.Go(func(ctx context.Context) { h.urlUploader.Process(ctx, in) })
 	return c.NoContent(http.StatusNoContent)
 }
 

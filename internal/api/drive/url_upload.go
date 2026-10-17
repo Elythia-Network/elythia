@@ -50,6 +50,10 @@ const (
 // errURLUploadTooLarge reports a body over the effective size limit.
 var errURLUploadTooLarge = errors.New("max file size exceeded")
 
+// errURLUploadAbandoned reports a download that finished after the server
+// generation started stopping, so the file is not saved (#3661).
+var errURLUploadAbandoned = errors.New("abandoned before saving because the server generation is stopping")
+
 // mainEventPublisher emits a `{type, body}` event to a single user's main
 // stream (satisfied by *stream.MainStreamPublisher).
 type mainEventPublisher interface {
@@ -275,7 +279,17 @@ func (u *URLUploader) fetchAndStore(ctx context.Context, in URLUploadInput) (*mo
 	if in.RequestIP != "" {
 		ip = &in.RequestIP
 	}
-	return u.uploader.Upload(ctx, coredrive.UploadInput{
+	// **取得が終わった後は、ctx の取り消しで保存を止めない (#3661)。** ctx は世代の
+	// 停止で切れる。Upload の途中で切れると、サムネイルの生成が枠を取れずに飛び、
+	// センシティブの判定が fail-open で通って、劣化したファイルが確定する。打ち切って
+	// よいのは外向きの取得だけにする。取得の後に既に切れていたら、保存を始めずに
+	// 諦める。利用者には urlUploadFinished を送らない (取得に失敗したときと同じ)。
+	// 保存には期限を付けない。付けると、期限が来たときに同じ fail-open で劣化する。
+	// 世代の停止が待ちきれずに DB を閉じれば、保存は失敗して確定しない。
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("%w: %w", errURLUploadAbandoned, err)
+	}
+	return u.uploader.Upload(context.WithoutCancel(ctx), coredrive.UploadInput{
 		User:        in.User,
 		Body:        body,
 		Name:        name,
