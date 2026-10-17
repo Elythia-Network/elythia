@@ -176,7 +176,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	}
 	// cross-worker cache invalidation (#1740) のため concrete *CachedMetaRepository
 	// を保持する。internal event bus との配線は streamPubSub 生成箇所で行う。
-	cachedMeta := repository.NewCachedMetaRepositoryWithTTL(repository.NewMetaRepository(s.db), 5*time.Minute)
+	cachedMeta := repository.NewCachedMetaRepositoryWithTTL(repository.NewMetaRepository(s.db), repository.MetaCacheTTL)
 	var metaRepo repository.MetaRepository = cachedMeta
 	// Seed the singleton meta row on first boot so that fresh installs
 	// can run /api/admin/accounts/create (initial setup) without tripping
@@ -439,13 +439,18 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// Reactions buffering (issue #57): meta.enableReactionsBuffering が true なら
 	// Redis にバッファし、30秒ごとに DB へ flush する。
-	var reactionCountWriter corereaction.ReactionCountWriter
-	if bufMeta, err := metaRepo.Fetch(); err == nil && bufMeta.EnableReactionsBuffering {
-		reactionCountWriter = corereaction.NewBufferedWriter(s.redis.Default, noteRepo)
-		reactionService.SetCountWriter(reactionCountWriter)
-	} else {
-		reactionCountWriter = reactionService.CountWriter()
+	//
+	// **書き込みのたびに設定に従う (#3663)。** 以前は起動時の値で writer の型を
+	// 選んでいたので、管理画面で切り替えても作り直すまで効かなかった (#1780)。
+	// 切り替えは下の metaUpdated の購読で行う。読めなければ無効で始める
+	// (従来と同じ)。
+	reactionBufferingAtStart := false
+	if bufMeta, err := metaRepo.Fetch(); err == nil {
+		reactionBufferingAtStart = bufMeta.EnableReactionsBuffering
 	}
+	reactionCountWriter := corereaction.NewSwitchableWriter(s.redis.Default, noteRepo, reactionBufferingAtStart)
+	s.reactionCountWriter = reactionCountWriter
+	reactionService.SetCountWriter(reactionCountWriter)
 
 	// Notifications (Redis Streams)
 	// keyPrefix で TS 本家と同じ `<host>:notificationTimeline:*` 等に揃える (#362)。
@@ -1269,21 +1274,32 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	s.queueServer.Handle(queue.TaskTypeBlock, blockProcessor.Handle)
 	unblockProcessor := processors.NewUnblockProcessor(blockingService)
 	s.queueServer.Handle(queue.TaskTypeUnblock, unblockProcessor.Handle)
-	// buffering 有効起動時のみ 30s ごとに buffered reaction count を DB へ drain
-	// する。30s ticker は upstream の日次 cron より高頻度で反映遅延を抑える
-	// mk-go の運用。writer 型は起動時固定なので、実行時 OFF にしても ticker が
-	// buffered writer を drain し続け滞留しない (#1780)。
+	// 30s ごとに buffered reaction count を DB へ drain する。30s ticker は
+	// upstream の日次 cron より高頻度で反映遅延を抑える mk-go の運用。
 	//
-	// **queue role でだけ回す** (#2459)。`EnqueueReactionFlush` の
+	// **ticker は設定に関わらず回し、積むかは毎回 writer に聞く (#3663)。**
+	// 有効の間と、無効にしてから `BufferDrainWindow` の間だけ積む。起動時の
+	// 値で ticker の有無を決めると、無効で起動してから有効にしたときに誰も
+	// flush しない。
+	//
+	// **ticker は全部の役割で回し、tick ごとに meta から設定を読み直す。**
+	// web だけのプロセスも、通知を取りこぼしたまま溜め続けたり、窓を過ぎて
+	// 移さずに書いたりしないよう、meta のキャッシュの期限で揃える
+	// (reactionFlushTick)。止め方は他の構築時の worker と同じ
+	// (startConstructionWorker の停止の hook)。
+	//
+	// **flush を積むのは queue role だけ** (#2459)。`EnqueueReactionFlush` の
 	// `WithUnique` TTL は 25s で ticker 間隔 30s より短いため、複数ノードが
 	// 別タイミングで打つと重複排除をすり抜けて二重に積まれる。
+	var enqueueReactionFlush func() error
 	if s.role.RunsQueue() {
-		if bufMeta, err := metaRepo.Fetch(); err == nil && bufMeta.EnableReactionsBuffering {
-			s.startConstructionWorker(func(ctx context.Context) {
-				s.reactionFlushWorker(ctx, s.queueClient.EnqueueReactionFlush)
-			})
-		}
+		enqueueReactionFlush = s.queueClient.EnqueueReactionFlush
 	}
+	s.startConstructionWorker(func(ctx context.Context) {
+		s.reactionFlushWorker(ctx, func() error {
+			return reactionFlushTick(cachedMeta, reactionCountWriter, enqueueReactionFlush)
+		})
+	})
 
 	// Charts (Phase 4 Step Q / 4.7) — 12 chart engines + management
 	// service + hook adapter. The hooks must be wired before any
@@ -3025,9 +3041,21 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		}
 		captchaSvc.Reload(m)
 	}
+	// enableReactionsBuffering も同じ 2 つの経路で読み直す (#3663)。切り替えの
+	// 途中のバッファの扱いは corereaction.SwitchableWriter に書いてある。
+	reloadReactionBuffering := func() {
+		m, err := cachedMeta.Fetch()
+		if err != nil || m == nil {
+			// 読めなければ据え置く (captcha と同じ)。
+			slog.Warn("reactions: buffering reload skipped (meta unavailable)", "err", err)
+			return
+		}
+		reactionCountWriter.SetBuffering(m.EnableReactionsBuffering)
+	}
 	cachedMeta.SetInvalidationHook(func() {
 		metaHandler.InvalidateResponseCache()
 		reloadCaptcha()
+		reloadReactionBuffering()
 		if err := internalPubSub.Publish(context.Background(), "metaUpdated", struct{}{}); err != nil {
 			slog.Warn("meta: publish metaUpdated failed", "err", err)
 		}
@@ -3036,6 +3064,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		cachedMeta.Invalidate()
 		metaHandler.InvalidateResponseCache()
 		reloadCaptcha()
+		reloadReactionBuffering()
 		if hook := s.metaUpdatedHandled.Load(); hook != nil {
 			(*hook)(payload)
 		}

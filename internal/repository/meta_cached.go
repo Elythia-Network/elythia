@@ -26,9 +26,13 @@ type CachedMetaRepository struct {
 	onUpdate func()
 }
 
-// NewCachedMetaRepository creates a cached wrapper with a 5-minute TTL.
+// MetaCacheTTL is the TTL of the server's meta cache. internal:metaUpdated を
+// 取りこぼしたプロセスも、この期限で新しい meta を読む (#3663)。
+const MetaCacheTTL = 5 * time.Minute
+
+// NewCachedMetaRepository creates a cached wrapper with the MetaCacheTTL TTL.
 func NewCachedMetaRepository(inner MetaRepository) MetaRepository {
-	return &CachedMetaRepository{inner: inner, ttl: 5 * time.Minute}
+	return &CachedMetaRepository{inner: inner, ttl: MetaCacheTTL}
 }
 
 // NewCachedMetaRepositoryWithTTL creates a cached wrapper with a custom TTL.

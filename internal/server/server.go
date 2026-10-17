@@ -24,6 +24,7 @@ import (
 	corenote "github.com/elythia-network/elythia/internal/core/note"
 	"github.com/elythia-network/elythia/internal/core/pluginaccount"
 	"github.com/elythia-network/elythia/internal/core/pluginsecret"
+	corereaction "github.com/elythia-network/elythia/internal/core/reaction"
 	corerole "github.com/elythia-network/elythia/internal/core/role"
 	"github.com/elythia-network/elythia/internal/misc/password"
 	"github.com/elythia-network/elythia/internal/misc/redact"
@@ -142,9 +143,13 @@ type Server struct {
 	outboundTrOnce sync.Once
 	outboundTr     *http.Transport
 
-	// reactionFlushWorkerはqueue roleの定期enqueue loop。field化はconstructor
-	// rollbackをsleep無しで検証し、起動前にownershipを登録するため。
-	reactionFlushWorker   func(context.Context, func() error)
+	// reactionFlushWorkerは全部の役割で回すリアクションのtickのloop。tickごとに
+	// metaから設定を読み直し、flushを積むのはqueue roleだけ(#3663)。field化は
+	// constructor rollbackをsleep無しで検証し、起動前にownershipを登録するため。
+	reactionFlushWorker func(context.Context, func() error)
+	// reactionCountWriter は世代のリアクションの書き込み先 (#3663)。テストが
+	// 取りこぼしたプロセスの状態を作るために読む。
+	reactionCountWriter   *corereaction.SwitchableWriter
 	pluginGoStarter       func(func())
 	pluginGoGate          *pluginGoGate
 	beforePluginGoRelease func()
@@ -188,7 +193,7 @@ func (s *Server) startConstructionWorker(run func(context.Context)) {
 }
 
 func runReactionFlushWorker(ctx context.Context, enqueue func() error) {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(corereaction.FlushInterval)
 	defer ticker.Stop()
 	for {
 		select {

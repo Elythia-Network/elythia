@@ -14,13 +14,11 @@ type ReactionFlushProcessor struct {
 
 // NewReactionFlushProcessor creates the processor.
 //
-// NOTE (#1780): upstream BakeBufferedReactionsProcessorService は process() 毎に
-// meta.enableReactionsBuffering を再評価して無効ならスキップするが、mk-go は
-// buffered/direct の writer 型を起動時に固定する設計で、ここで meta を見て Flush を
-// skip すると「起動時 buffering=ON → 実行時 OFF」のとき buffered writer が drain
-// されず Redis に delta が滞留する。よって本 processor は meta を見ず常に Flush する
-// (buffering OFF 起動時は direct writer で Flush が no-op)。実行時の buffering
-// hot-toggle (writer 差し替え + 即時 bake) は別 feature として未対応。
+// NOTE (#1780, #3663): upstream BakeBufferedReactionsProcessorService は process()
+// 毎に meta.enableReactionsBuffering を再評価して無効ならスキップするが、ここでは
+// meta を見ず常に Flush する。無効にした直後に飛ばすと、有効の間に溜まった
+// delta が Redis に滞留する。設定に従うのは writer (corereaction.SwitchableWriter)
+// の側で、その Flush は設定に関わらず Redis のバッファを DB へ移す。
 func NewReactionFlushProcessor(writer reaction.ReactionCountWriter) *ReactionFlushProcessor {
 	return &ReactionFlushProcessor{writer: writer}
 }
