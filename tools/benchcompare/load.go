@@ -30,7 +30,16 @@ type RunSet struct {
 	Scenario string            `json:"scenario"`
 	Rounds   int               `json:"rounds"`
 	Runner   map[string]string `json:"runner,omitempty"`
-	Runs     []*Run            `json:"-"`
+	// Labels names the two sides when they are different implementations
+	// (upstream Misskey against Elythia, #3654). Nil for two commits.
+	Labels *Labels `json:"labels,omitempty"`
+	Runs   []*Run  `json:"-"`
+}
+
+// Labels are the display names of base and head.
+type Labels struct {
+	Base string `json:"base"`
+	Head string `json:"head"`
 }
 
 // Commit is one side of the comparison.
@@ -121,6 +130,9 @@ func loadRunSet(dir string) (*RunSet, error) {
 	var rs RunSet
 	if err := readJSON(filepath.Join(dir, "run.json"), &rs); err != nil {
 		return nil, err
+	}
+	if rs.Labels != nil && (strings.TrimSpace(rs.Labels.Base) == "" || strings.TrimSpace(rs.Labels.Head) == "") {
+		return nil, errors.New("run.json: labels must name both base and head")
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
