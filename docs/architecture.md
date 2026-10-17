@@ -1,6 +1,6 @@
 # アーキテクチャ
 
-Elythia は Misskey (TypeScript/NestJS) のバックエンドを Go で書き換えたプロジェクトです。
+Elythia は Misskey (TypeScript/NestJS) から生まれ、バックエンドを Go で再構築した ActivityPub サーバーです。
 本ドキュメントは各レイヤ・パッケージが**どのような責務を持ち、Misskey-TS のどこに対応するか**を
 詳述します。upstream の参照実装は `make upstream-fetch` が取得する `.cache/misskey/<版>/packages/backend/`（版は `UPSTREAM_MISSKEY_VERSION`、#3378）。
 

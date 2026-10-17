@@ -1,6 +1,6 @@
 # Misskey-TSからElythiaへの移行ガイド
 
-本ガイドでは、既存のMisskey-TSインスタンスのバックエンドをElythiaに置き換え、同じデータベース・Redis・フロントエンド資産を共有させる手順を説明する。
+本ガイドでは、既存のMisskey-TSインスタンスを、データベースとRedisを引き継いだままElythiaへ移行する手順を説明する。移行した後にMisskey-TSへ戻すことは保証しない (#3191)。
 
 ## 前提条件
 
@@ -21,7 +21,7 @@ go build -o built/elythia ./cmd/elythia
 
 ## 2. フロントエンド資産の準備
 
-ElythiaはMisskey-TSと同じフロントエンドを利用する。2つの方法がある。
+フロントエンドは、Elythiaに同梱のもの (Misskeyのフロントエンドを取り込み、独自に手を入れたもの、#3379) を使うか、既存のMisskey-TSのビルド済み資産を使う。2つの方法がある。
 
 ### 方法A: 同梱のフロントエンド (`frontend/`) をビルド (推奨)
 
@@ -201,7 +201,7 @@ admin 画面 (全般 → 情報) で上書きする。
 | `000072` | `instance_secret` を **テーブルごと** DROP する。`GetOrCreate` はテーブル不在を `ErrRecordNotFound` として扱わないので、**この状態で起動すると `resolveMediaProxySecret` が失敗して Elythia が立ち上がらない**。`mediaProxySecret` を設定ファイルに書いていれば回避できる |
 | `000074` | backfill で入れた行と実観測で入った行を区別できないので、`instance_signature_capability` の内容は適用前に戻せない |
 
-両バックエンドは同じデータベース上で共存できる。
+Elythiaのmigrationを当てた後のデータベースで、Misskey-TSを動かし直せることは保証しない (#3191)。今どこまで戻せるかは[戻らなくなったもの](#戻らなくなったもの)を参照。
 
 ## 5. Misskey-TSの停止
 
