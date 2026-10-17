@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
@@ -28,7 +29,7 @@ func (h *Handler) SendEmail(c echo.Context) error {
 	}
 	if h.metaRepo != nil {
 		sender := smtp.SubjectBodySenderFromMeta(h.metaRepo, h.smtpProxyURL)
-		go sender(req.To, req.Subject, req.Text)
+		h.background.Go(func(context.Context) { sender(req.To, req.Subject, req.Text) })
 	}
 	return c.NoContent(http.StatusNoContent)
 }
