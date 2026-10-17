@@ -199,6 +199,9 @@ func compare(rs *RunSet) *Comparison {
 		c.problem("fewer than %d completed rounds per side", minRounds)
 	}
 	if !c.Valid {
+		// Delivery throughput is useful only when the whole comparison is
+		// comparable. Do not leave a valid-looking measure beside a failed run.
+		c.DeliveryMeasures = nil
 		return c
 	}
 	c.Endpoints = compareEndpoints(base, head)
@@ -209,7 +212,7 @@ func compare(rs *RunSet) *Comparison {
 func validateDeliveryRuns(c *Comparison, rs *RunSet) {
 	hasDelivery := rs.DeliveryEnabled
 	for _, r := range rs.Runs {
-		if r.Delivery != nil {
+		if r.Delivery != nil || r.DeliveryError != "" {
 			hasDelivery = true
 			break
 		}
@@ -222,11 +225,16 @@ func validateDeliveryRuns(c *Comparison, rs *RunSet) {
 	throughput := map[Side][]float64{SideBase: {}, SideHead: {}}
 	for _, r := range rs.Runs {
 		if r.Delivery == nil {
-			c.problem("%s round %d delivery stats are missing", r.Meta.Side, r.Meta.Round)
+			reason := "delivery stats are missing"
+			if r.DeliveryError != "" {
+				reason += "; " + r.DeliveryError
+			}
+			c.problem("%s round %d %s", r.Meta.Side, r.Meta.Round, reason)
 			allValid = false
 			continue
 		}
 		status, reasons := deliveryStatus(*r.Delivery)
+		status, reasons = mergeDeliveryArtifactStatus(status, reasons, r.Delivery.ArtifactStatus, r.Delivery.ArtifactReasons, r.DeliveryError)
 		c.Delivery = append(c.Delivery, DeliveryRound{
 			Side: r.Meta.Side, Round: r.Meta.Round, Status: status,
 			Reasons: reasons, DeliveryStats: *r.Delivery,
@@ -258,6 +266,67 @@ func validateDeliveryRuns(c *Comparison, rs *RunSet) {
 	} else if allValid {
 		c.problem("delivery throughput is missing from one or more side rounds")
 	}
+}
+
+func mergeDeliveryArtifactStatus(
+	status DeliveryStatus,
+	reasons []string,
+	artifactStatus string,
+	artifactReasons []string,
+	deliveryError string,
+) (DeliveryStatus, []string) {
+	merged := append([]string(nil), reasons...)
+	addReason := func(reason string) {
+		if reason == "" {
+			return
+		}
+		for _, existing := range merged {
+			if existing == reason {
+				return
+			}
+		}
+		merged = append(merged, reason)
+	}
+
+	artifact := DeliveryStatus(artifactStatus)
+	switch artifact {
+	case "":
+	case DeliveryStatusValid, DeliveryStatusIncomplete, DeliveryStatusInvalid:
+		status = worseDeliveryStatus(status, artifact)
+	default:
+		status = worseDeliveryStatus(status, DeliveryStatusInvalid)
+		addReason(fmt.Sprintf("unrecognized delivery artifact status %q", artifactStatus))
+	}
+	if len(artifactReasons) > 0 && (artifact == "" || artifact == DeliveryStatusValid) {
+		// A valid artifact must not carry failure reasons. Treat contradictory
+		// metadata as incomplete rather than trusting its optimistic status.
+		status = worseDeliveryStatus(status, DeliveryStatusIncomplete)
+	}
+	for _, reason := range artifactReasons {
+		addReason(reason)
+	}
+	if deliveryError != "" {
+		status = worseDeliveryStatus(status, DeliveryStatusIncomplete)
+		addReason("delivery run error: " + deliveryError)
+	}
+	return status, merged
+}
+
+func worseDeliveryStatus(a, b DeliveryStatus) DeliveryStatus {
+	rank := func(s DeliveryStatus) int {
+		switch s {
+		case DeliveryStatusInvalid:
+			return 2
+		case DeliveryStatusIncomplete:
+			return 1
+		default:
+			return 0
+		}
+	}
+	if rank(b) > rank(a) {
+		return b
+	}
+	return a
 }
 
 func deliveryThroughput(s DeliveryStats) (float64, string) {
