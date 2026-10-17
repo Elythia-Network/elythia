@@ -75,7 +75,7 @@ type Run struct {
 	DeliveryError string
 }
 
-// DeliveryStats is the JSON emitted by tests/bench/queue/deliveryreceiver.
+// DeliveryStats is the outbound delivery artifact produced from receiver stats.
 // Counts are descriptive; benchcompare does not apply performance thresholds.
 type DeliveryStats struct {
 	Finalized               bool     `json:"finalized"`
@@ -94,8 +94,8 @@ type DeliveryStats struct {
 	ThroughputJobs          *uint64  `json:"throughputJobs,omitempty"`
 	ThroughputJobsPerSecond *float64 `json:"throughputJobsPerSecond,omitempty"`
 	DrainSeconds            *float64 `json:"drainSeconds,omitempty"`
-	ArtifactStatus          string   `json:"deliveryStatus,omitempty"`
-	ArtifactReasons         []string `json:"deliveryReasons,omitempty"`
+	ArtifactStatus          string   `json:"status,omitempty"`
+	ArtifactReasons         []string `json:"reasons,omitempty"`
 }
 
 // EndpointResult is what one run measured for one endpoint.

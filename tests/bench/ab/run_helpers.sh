@@ -25,7 +25,7 @@ bench_cleanup_delivery_project() {
   local project=$1 compose_file=$2
   docker compose -p "$project" -f "$compose_file" \
     --profile bench --profile outbound --profile delivery \
-    down -v --remove-orphans >/dev/null 2>&1
+    down -v --remove-orphans --rmi local >/dev/null 2>&1
 }
 
 bench_forget_delivery_project() {

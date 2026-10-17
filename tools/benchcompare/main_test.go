@@ -263,6 +263,24 @@ func TestLoadRun_DeliveryStats(t *testing.T) {
 	assert.Equal(t, DeliveryStats{Finalized: true, Expected: 4, Attempts: 5, Verified: 4, Pending: 0, Valid: 2, Unique: 2, Duplicates: 0, Invalid: 2, ContentMismatch: 1, Unexpected: 1, UnexpectedAttempts: 1, Missing: 2}, *run.Delivery)
 }
 
+func TestLoadRun_DeliveryArtifactProducedByPython(t *testing.T) {
+	dir := writeResults(t, okRun(SideBase, 1, 10))
+	artifactPath := filepath.Join("..", "..", "tests", "bench", "queue", "common", "testdata", "delivery_artifact.json")
+	artifact, err := os.ReadFile(artifactPath)
+	require.NoError(t, err)
+	writeFile(t, filepath.Join(dir, "00-base-1", "delivery.json"), string(artifact))
+
+	run, err := loadRun(filepath.Join(dir, "00-base-1"))
+	require.NoError(t, err)
+	require.NotNil(t, run.Delivery)
+	assert.Equal(t, "incomplete", run.Delivery.ArtifactStatus)
+	assert.Equal(t, []string{"delivery drain timed out"}, run.Delivery.ArtifactReasons)
+	assert.Equal(t, uint64(2), run.Delivery.Unique)
+	assert.Nil(t, run.Delivery.ThroughputJobs)
+	assert.Nil(t, run.Delivery.ThroughputJobsPerSecond)
+	assert.Equal(t, 0.5, *run.Delivery.DrainSeconds)
+}
+
 func TestLoadRun_RetainsInconsistentDeliveryStats(t *testing.T) {
 	dir := writeResults(t, okRun(SideBase, 1, 10))
 	statsPath := filepath.Join(dir, "00-base-1", "delivery.json")
@@ -432,10 +450,12 @@ func pointer[T any](value T) *T { return &value }
 
 func TestDeliveryClassificationCasesSharedWithPython(t *testing.T) {
 	type classificationCase struct {
-		Name            string        `json:"name"`
-		Stats           DeliveryStats `json:"stats"`
-		ExpectedStatus  string        `json:"expectedStatus"`
-		ExpectedReasons []string      `json:"expectedReasons"`
+		Name              string        `json:"name"`
+		Stats             DeliveryStats `json:"stats"`
+		BenchmarkExpected *uint64       `json:"benchmarkExpected"`
+		TimedOut          bool          `json:"timedOut"`
+		ExpectedStatus    string        `json:"expectedStatus"`
+		ExpectedReasons   []string      `json:"expectedReasons"`
 	}
 	data, err := os.ReadFile(filepath.Join("..", "..", "tests", "bench", "queue", "common", "delivery_classification_cases.json"))
 	require.NoError(t, err)
@@ -443,8 +463,10 @@ func TestDeliveryClassificationCasesSharedWithPython(t *testing.T) {
 	require.NoError(t, json.Unmarshal(data, &cases))
 	for _, tc := range cases {
 		t.Run(tc.Name, func(t *testing.T) {
+			if tc.TimedOut || (tc.BenchmarkExpected != nil && *tc.BenchmarkExpected != tc.Stats.Expected) {
+				t.Skip("Python-only delivery conditions are covered by artifact tests")
+			}
 			status, reasons := deliveryStatus(tc.Stats)
-			status, reasons = mergeDeliveryArtifactStatus(status, reasons, tc.ExpectedStatus, tc.ExpectedReasons, "")
 			assert.Equal(t, DeliveryStatus(tc.ExpectedStatus), status)
 			if len(tc.ExpectedReasons) == 0 {
 				assert.Empty(t, reasons)
