@@ -217,6 +217,48 @@ pm2 stop misskey
 docker compose stop web
 ```
 
+## 5.5. チャット(DM)の既読を引き継ぐ
+
+**Misskey-TS(とCherryPick)は、DMの既読をRedisにだけ持ち、DBの`chat_message.reads`には書かない**(作るときに空の配列を入れるだけ)。Elythiaは既読を`reads`で判定するので、何もしないと、移行の前に受け取ったDMがすべて未読になる。`/api/i`の`hasUnreadChatMessages`がtrueのまま残り、再読込するたびにチャットの未読バッジが出る(#3653)。
+
+Misskey-TSを止めた後、Elythiaを起動する前に、`elythia backfill chat-reads`で移行元の既読を`reads`へ移す。
+
+```bash
+# まず件数だけを見る (書き込まない)
+./built/elythia backfill chat-reads -config .config/default.yml \
+  -before 2026-10-01T00:00:00+09:00 -dry-run
+
+# 実行
+./built/elythia backfill chat-reads -config .config/default.yml \
+  -before 2026-10-01T00:00:00+09:00
+```
+
+Dockerなら`docker compose run --rm --no-deps --entrypoint /app/elythia app backfill chat-reads -config /app/.config/default.yml -before ...`の形で流す。**PostgreSQLとRedisは起動しておく。** `--no-deps`は依存するサービスを起動しないので、stackごと止めているとDBやRedisにつながらずに失敗する(何も書かずに止まる)。先に`docker compose up -d db redis`で起こしておく。composeファイルによって、次のように読み替える。
+
+- 配布のimageで動かす構成(`docker-compose.image.yml`): `docker compose`に`-f docker-compose.image.yml`を付ける(例 `docker compose -f docker-compose.image.yml up -d db redis`、`docker compose -f docker-compose.image.yml run --rm --no-deps --entrypoint /app/elythia app backfill chat-reads ...`)。付けないと、同じ場所の`docker-compose.yml`の`app`(`build: .`)が選ばれる
+- UDS構成(`compose.uds.yaml`): `-f compose.uds.yaml`を付け、`app`を`mkgo`に、`db` / `redis`を`postgres` / `valkey`にする(例 `docker compose -f compose.uds.yaml up -d postgres valkey`、`docker compose -f compose.uds.yaml run --rm --no-deps --entrypoint /app/elythia mkgo backfill chat-reads -config /app/.config/default.yml ...`)
+
+- **`-before`は必須で、Misskey-TSを止めた時点を、時差の付いたRFC 3339で渡す**(`2026-10-01T00:00:00+09:00`や`2026-09-30T15:00:00Z`)。指定が無い・読めないときは、何もせずに使い方を出して終了コード2で止まる。対象はこの時点より前に作られたDMだけで、作られた時点はメッセージのidから読む(設定の`id`の方式で読む。読めないidの行は触らずに`unparsable-id`として数える)。それより後のDMはElythiaが`reads`を書いているので触らない。**Elythiaを動かし始めた後の時点を渡さないこと。** Elythiaが受けたDMの未読まで、移行元の記録(Elythiaは書かない)で判定して既読にしてしまう。`reads`から受け手を外す手段は無いので、書いた後では戻せない
+- **今より後の`-before`は受け付けない**(終了コード2)
+- **遅すぎる`-before`は、分かる範囲で検出して止める。** 本家は新着のたびにmarkerを最新のidで上書きするので、markerが残っている会話に「markerより新しく、`-before`より前」のDMがあれば、それは本家が受けていない(移行の後にElythiaで受けた)DMである。比べるのはidから読んだ時刻だけで、**markerの時刻から`-too-late-margin`(既定5分)を越えて新しいDMだけを証拠にする**。本家はidを作ってからDBに書き、その後でmarkerを書くので、同じ会話にほぼ同時に2通来るとmarkerが古い方を指すことがある。また`objectid`は秒、`meid` / `ulid`は乱数の部分があり、同じ時刻の中のidの並びは作った順にならない。幅はそれを吸収するためのもの。1件でもあれば、何も書かずに終了コード1で止まり、該当の会話を`too-late reader=<id> sender=<id> marker=<id> marker-at=<日時> newer=<件数> newest-at=<日時>`で出す(`-dry-run`では止めずに警告として出す。日時はUTC)。そのために、書く前に全部を書かずに見てから、2周目で書く。**検出できるのは本家のmarkerが残っている会話だけ**で、移行の前に読み終えていた会話や、移行の後に始まった会話にElythiaで受けた未読があっても分からない。出力の`newest targeted message: <日時>`(対象のうち最も新しいDMが作られた日時、UTC。`-before`より後のDMは入らない)を、移行した時刻と見比べること
+- **止まったときの確かめ方。** `too-late`の行の`newest-at`が移行した時刻より後なら、`-before`が遅い。移行した時刻に直して流し直す。`newest-at`が移行の前で`marker-at`との差が小さい(移行元を止める直前に続けて届いたDMなど)なら、正しい`-before`での誤検出なので、差より大きい`-too-late-margin`(例 `-too-late-margin 30m`)を付けて流し直す。幅を広げると、移行のすぐ後に届いたDMは検出されにくくなる
+- **Redisは本体と同じ設定(`redis`)で読む。** キーには`redis.prefix`(未設定ならURLのhost)と`:`が付く。本家と同じ扱いなので、移行元と同じ設定ファイルを使えば一致する。**移行のときにRedisを新しくした(移行元のRedisが今の設定と別の)場合**は、`redis`の節(と`url`、`redis.prefix`を省いているなら)だけを移行元に合わせた設定ファイルを一時的に作り、`-config`で渡す。DBは今のものを指したままにする。**本番の設定ファイルは書き換えない**(戻し忘れると、次の起動で本体が移行元のRedisを見る)。移行元のRedisが残っているのに`-assume-read`を選ぶと、本当の未読も既読になる
+  - **`MK_REDIS_*`の環境変数は設定ファイルより優先される。** 配布の`docker-compose.image.yml`は`app`に`MK_REDIS_HOST: redis`を渡しているので、一時ファイルの`redis.host`は黙って無視され、今のRedisを読む。composeの`environment`に`MK_REDIS_*`(`MK_REDIS_HOST` / `MK_REDIS_PORT` / `MK_REDIS_PASS` / `MK_REDIS_DB` / `MK_REDIS_PREFIX`など)があれば、`-e`で移行元の値を渡して上書きする
+  - Dockerでは、ホストに作った一時ファイルは`-v`でコンテナに渡す。例: `docker compose -f docker-compose.image.yml run --rm --no-deps -v ./.config/chat-reads-source.yml:/app/.config/source.yml:ro -e MK_REDIS_HOST=<移行元のRedisのhost> --entrypoint /app/elythia app backfill chat-reads -config /app/.config/source.yml -before ... -dry-run`(UDS構成なら上のとおり`-f compose.uds.yaml`と`mkgo`に読み替える)
+- **会話ごとに決める。** 本家は、DMを受け取ると`newUserChatMessageExists:<受け手>:<送り手>`(値は最新の未読のメッセージのid)を置き、`newChatMessagesExists:<受け手>`(set)に`user:<送り手>`を足す。会話を開くと両方を消す。**両方が残っている会話は未読のまま残す**(どこまで読んだかは分からない。開けば既読になる)。それ以外の会話は、対象のDMをすべて既読にする。本家の「全チャットを既読にする」はsetだけを消してmarkerを残すので、markerだけが残る会話も既読にする
+- **対象は宛先がローカルの利用者のDMだけ。** リモートの宛先には本家も未読の記録を作らない。**ルーム(`toRoomId`)のメッセージも対象にしない。** `/api/i`の`hasUnreadChatMessages`はルームを数えないので、埋めても未読のバッジは変わらない。チャットのホームの一覧では、移行の前のルームのメッセージが未読の印を付けたまま出ることがあり、ルームを開けば消える
+- **Redisに記録が無いときは止まる。** 対象のDMがあるのに、prefixの下に上の2つの形のキーが1つも無ければ、終了コード1で止まる。prefixを取り違えたまま流すと、全部の会話が「記録が無い=既読」になるため。移行の途中でRedisを作り直した・空にしたなど、記録が残っていないと分かっているときは、`-assume-read`を付けて流す。Redisを読まずに、対象のDMをすべて既読にする。**このときは、上の遅すぎる`-before`の検出が働かない**(移行元の記録を読まないため)。`-before`が遅くても止まらないので、`-dry-run`の`newest targeted message`を移行の時刻と必ず見比べてから流す。**Redisにつながらないときも止まる**(黙って全部を既読にはしない)
+- **型の違うキー(壊れた記録)の会話は、未読のまま残して`broken-conversations`に数える。** 止まらずに続ける
+- **キーが部分的に消えている会話は、既読になる。** 消えたキーと「読んだので消えた」キーは区別できない。Redisがメモリの上限に達したことがあり`maxmemory-policy`が`allkeys-*`だった、AOF / RDBが欠けた、手で消した、などの場合は、未読だった会話の一部が既読になる。記録が1つも無いときだけは上のとおり止まる
+- 出力は、会話ごとの`conversation reader=<id> sender=<id> state=<read|unread|broken> marked=<件数> kept=<件数>`、利用者ごとの合計、全体の合計。メッセージの本文は出さない
+- **冪等。** 受け手が既に`reads`にある行は対象にならないので、2回流しても受け手を二重に足さない。まとまり(`-batch`、既定1000件)ごとに更新し、間に`-sleep-ms`(既定100)だけ待つ。途中で失敗したら、出力の`-from <id>`から再開できる。書かない1周目の分だけ、DMの表を2回読む
+
+### すでに移行したサーバーで流す
+
+Elythiaへ移行した後でも、同じコマンドで引き継げる。`-before`には、Misskey-TSを止めた(Elythiaを最初に起動した)時点を渡す。Elythiaは本家の未読の記録を書きも消しもしないので、Redisを作り直していなければ、記録は移行した時点のまま残っている。稼働中に流してよい(受け手を足すだけで、利用者がElythiaで開いて既読にした行は対象から外れる)。
+
+Redisを作り直した・空にした後なら、記録は残っていないので`-assume-read`を付ける。どちらの場合も、利用者の側では設定の「その他」の「全チャットを既読にする」(`chat/read-all`)でも未読を消せる(移行の前のものに限らず、受け取ったDMが全部既読になる)。
+
 ## 6. Elythiaの起動
 
 ```bash
@@ -363,6 +405,11 @@ Playwright spec (#744) を **298 ファイル / 40 directory** (directory は sp
   ウィザードで「1 人用」以外を選んだインスタンスは既定で off になっている。
   Redis の timeline list が空の状態 (= 移行直後) で最も影響が大きい。詳細は
   [divergence/operations.md §5.6](divergence/operations.md#56-timeline-の-db-fallback-を止めるつまみ)
+
+### チャットを全部読んだのに、再読込すると未読のバッジが出る
+
+- 移行の前に受け取ったDMが未読のまま残っている。[5.5. チャット(DM)の既読を引き継ぐ](#55-チャットdmの既読を引き継ぐ)の`backfill chat-reads`を流す
+- チャットのホームの一覧は新しい10会話から出す。未読の会話がそれより古いときは、一覧の下の「もっと見る」で続きを読む(#3653)
 
 ### ファイルアップロードが `CREDENTIAL_REQUIRED` で失敗する
 
