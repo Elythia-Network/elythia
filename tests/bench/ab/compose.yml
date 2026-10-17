@@ -18,8 +18,8 @@
 # GitHub-hosted runner の一部の機種 (AMD EPYC 9V74) では、ノートの INSERT / COMMIT が
 # ディスクの書き込みの待ちで断続的に数十〜数百 ms 止まり、notes-create の p95 が、
 # 同じ commit 同士でも 2.5ms〜39.5ms に揺れた。本家も同じく止まる。測りたいのは app の
-# 差なので、fsync・full page write・COMMIT の待ちを外す。これで #3659 の揺れが消えるかは、
-# PR の上の実行で確かめる (止まっている箇所は COMMIT の fsync とは限らない)。
+# 差なので、fsync・full page write・COMMIT の待ちを外す。これで 9V74 でも揺れなくなることを、
+# PR #3660 の上の実行で確かめた (docs/bench-compare.md)。
 # 設定は compose.yml の postgres にだけ書き、compose.upstream.yml では postgres を
 # 触らない (base / head、本家 / Elythia の両側に同じ条件がかかる。
 # TestBenchPostgresSkipsDiskWaits が見る)。本番・e2e の compose には入れない。
