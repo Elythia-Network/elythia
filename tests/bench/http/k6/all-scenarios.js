@@ -15,14 +15,18 @@ const seedData = new SharedArray("seed", function () {
   }
 });
 
+// SharedArray は添字で読むたびに要素 (seed 全体) を JSON.parse し直すので、VU の初期化で
+// 1 回だけ取り出す。iteration ごとに読むと、k6 の CPU がそれで飽和する (#3656)
+const tokens = seedData[0].tokens;
+const username = seedData[0].username || "benchadmin";
+
 function getToken() {
-  const tokens = seedData[0].tokens;
   if (tokens.length === 0) return null;
   return tokens[__VU % tokens.length];
 }
 
 function getUsername() {
-  return seedData[0].username || "benchadmin";
+  return username;
 }
 
 // 各シナリオをstartTimeでずらして逐次実行する

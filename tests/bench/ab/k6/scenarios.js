@@ -31,6 +31,12 @@ const timeouts = new Counter("bench_timeouts");
 const seed = new SharedArray("seed", function () {
   return [JSON.parse(open("/seed/seed-data.json"))];
 });
+// SharedArray は添字で読むたびに要素を JSON.parse し直す。要素は seed 全体 (約 63KB、
+// 1 回約 4ms) なので、iteration ごとに seed[0] を読むと k6 (CPU 0.75) がそれだけで
+// 飽和し、毎秒約 160 件で頭打ちになっていた (#3656)。使う値は VU の初期化で 1 回だけ
+// 取り出し、iteration の中では SharedArray に触れない
+const tokens = seed[0].tokens;
+const username = seed[0].username;
 
 // 認証の要るエンドポイントは、iteration ごとに利用者を順に替える。VU ごとに
 // 固定すると、notes/create の利用者ごとの上限 (1 時間に 300) に数人だけが当たり、
@@ -41,7 +47,6 @@ const seed = new SharedArray("seed", function () {
 // 6000〜7500 件で、2 倍ほどの余裕がある。上限に当たると、速い側ほど 429 が増えて
 // benchcompare が「比較不能」にするので、黙って誤った判定にはならない
 function token() {
-  const tokens = seed[0].tokens;
   return tokens[exec.scenario.iterationInTest % tokens.length];
 }
 
@@ -99,7 +104,7 @@ export function localTimeline() {
 }
 
 export function usersShow() {
-  record("users-show", client.usersShow(seed[0].username));
+  record("users-show", client.usersShow(username));
 }
 
 export function i() {
