@@ -103,10 +103,18 @@ BENCH_UID=$(id -u)
 BENCH_GID=$(id -g)
 
 work=$(mktemp -d)
+# 計測の k6 のコンテナの名前 (compose run -d で、回ごとに決まった名前を付けて起動する)。
+# measure はコマンド置換の subshell で動くので、名前は変数で受け渡さず、回から作り直す
+k6_name() { echo "mk-bench-ab-k6-r$1-$2"; }
 # shellcheck disable=SC2317 # trap から呼ぶ
 cleanup() {
   # 後始末の失敗で、比較の終了コード (0 / 2) を ERR trap の 1 に書き換えない
   trap - ERR
+  # 途中で止めると、-d で起動した k6 は動き続ける
+  local r s
+  for r in $(seq 1 "$rounds"); do
+    for s in base head; do docker rm -f "$(k6_name "$r" "$s")" >/dev/null 2>&1 || true; done
+  done
   "${compose_main[@]}" --profile tools down -v --remove-orphans >/dev/null 2>&1 || true
   for side in base head; do
     if [ -d "$work/$side" ]; then git -C "$repo" worktree remove --force "$work/$side" >/dev/null 2>&1 || true; fi
@@ -194,7 +202,7 @@ started_at() {
 }
 
 measure() {
-  local dir=$1 side=$2
+  local dir=$1 side=$2 round=$3
   export BENCH_RUN_DIR=$dir
   # 本家の利用者ごとの制限は、seed が基本ロールの rateLimitFactor で決める。seed の間は
   # 0 (制限なし) で、終わったら prod-like は 1 (既定の制限)、unlimited は 0 にする。
@@ -221,7 +229,7 @@ measure() {
   "${compose[@]}" --profile tools run --rm -e SHORT=1 k6 run -q --no-summary /scripts/ab/scenarios.js > "$dir/warmup.log" 2>&1 \
     || { echo "warmup failed"; return 1; }
 
-  local before after port heap_url ids=() s id
+  local before after port heap_url ids=() s id k6_id
   before=$(started_at)
   # 本家には Go のヒープが無い。"-" を渡すと sampler は読まない
   heap_url=-
@@ -234,17 +242,33 @@ measure() {
     if [ -z "$id" ]; then echo "$s is not running"; return 1; fi
     ids+=("$s=$id")
   done
-  "$here/sampler.sh" "$dir/resources.csv" "$heap_url" "${ids[@]}" &
+  # k6 のコンテナも資源の記録に加える (#3656)。k6 が CPU の上限で止められると、その待ちが
+  # 応答の時間に乗るので、benchcompare が k6 の律速を見分けられるようにする。--rm で前に
+  # 置いて待つとコンテナの id を sampler に渡せないので、-d で起動して id を引き、終わるのを
+  # docker wait で待つ。START_DELAY は、sampler が k6 を読み始めるまで負荷をかけ始めない
+  # ための待ち (秒)
+  local k6_container
+  k6_container=$(k6_name "$round" "$side")
+  docker rm -f "$k6_container" >/dev/null 2>&1 || true
+  "${compose[@]}" --profile tools run -d --name "$k6_container" -e SHORT="$smoke" -e START_DELAY=3 \
+    k6 run -q --summary-export=/out/k6-summary.json /scripts/ab/scenarios.js > "$dir/k6-start.log" 2>&1 \
+    || { echo "k6 did not start"; return 1; }
+  k6_id=$(docker inspect -f '{{.Id}}' "$k6_container") || { echo "k6 container not found"; return 1; }
+  ids+=("k6=$k6_id")
+  # k6 は計測の終わりに自分で終わり、cgroup が消える。sampler には終わってよいと伝える
+  "$here/sampler.sh" --may-exit k6 "$dir/resources.csv" "$heap_url" "${ids[@]}" &
   local sampler=$!
-  local k6_status=0
-  "${compose[@]}" --profile tools run --rm -e SHORT="$smoke" k6 run -q --summary-export=/out/k6-summary.json /scripts/ab/scenarios.js > "$dir/k6.log" 2>&1 || k6_status=$?
+  local k6_status
+  k6_status=$(docker wait "$k6_container") || k6_status=wait-failed
+  docker logs "$k6_container" > "$dir/k6.log" 2>&1 || true
+  docker rm -f "$k6_container" >/dev/null 2>&1 || true
   kill -TERM "$sampler"
   local sampler_status=0
   wait "$sampler" || sampler_status=$?
   after=$(started_at)
 
   # k6 がすぐ落ちると sampler も trap を張る前に止められて失敗するので、k6 を先に見る
-  [ "$k6_status" -eq 0 ] || { echo "k6 exited with $k6_status"; return 1; }
+  [ "$k6_status" = 0 ] || { echo "k6 exited with $k6_status"; return 1; }
   [ "$sampler_status" -eq 0 ] || { echo "sampler failed"; return 1; }
   # sampler は CPU 時間の逆行で再起動を検出するが、1 秒の間に落ちて戻ると見えない
   [ "$before" = "$after" ] || { echo "a container stopped or restarted during the run"; return 1; }
@@ -261,12 +285,14 @@ run_one() {
   APP_IMAGE=$(image_of "$side")
   use_side "$side"
   local reason completed=true
-  if ! reason=$(measure "$dir" "$side"); then
+  if ! reason=$(measure "$dir" "$side" "$round"); then
     completed=false
     reason=${reason:-failed}
     log "round $round $side: $reason"
     "${compose[@]}" logs --no-color > "$dir/compose.log" 2>&1 || true
   fi
+  # 途中で失敗した回の k6 が残っていると、down -v が seed の volume を消せない
+  docker rm -f "$(k6_name "$round" "$side")" >/dev/null 2>&1 || true
   "${compose[@]}" --profile tools down -v --remove-orphans >/dev/null 2>&1 || true
   python3 -c 'import json,sys; print(json.dumps({"side": sys.argv[1], "round": int(sys.argv[2]), "completed": sys.argv[3] == "true", "reason": sys.argv[4]}))' \
     "$side" "$round" "$completed" "${reason:-}" > "$dir/meta.json"

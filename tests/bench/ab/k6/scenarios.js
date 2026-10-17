@@ -3,7 +3,7 @@
 // tests/bench/http と同じ 7 つのエンドポイントを、同じ負荷の形 (lib/config.js) で
 // 順に流す。結果は tools/benchcompare が読む。
 //
-// **エンドポイントごとに、benchcompare が要求する 5 つの sub-metric すべてに
+// **エンドポイントごとに、benchcompare が要求する 7 つの sub-metric すべてに
 // threshold を置く。** k6 の --summary-export は threshold の付いた sub-metric しか
 // 出さない。1 つでも欠けると benchcompare はその回を読めないとして exit 1 で止まる
 // (失敗率を 0 と読んで比較を続けると、失敗の差で速く見える側を見逃すため)。
@@ -11,15 +11,24 @@
 //
 // SHORT=1 のときは、同じエンドポイントを短く弱く流す。ウォームアップ (結果は捨てる) と、
 // run.sh --smoke (手順が通るかだけを見る) で使う。
+//
+// START_DELAY (秒) は、最初のシナリオを始めるまでの待ち。run.sh は k6 を起動してから
+// そのコンテナを資源の記録 (sampler) に加えるので、その間に負荷をかけ始めないよう待たせる。
+//
+// 各エンドポイントの区間 (予定の開始と終了、Unix ミリ秒) を gauge
+// (bench_window_start_ms / bench_window_end_ms) に書く。benchcompare は、この区間で k6 の
+// コンテナが CPU の上限で止められた割合を出し、k6 が律速になったエンドポイントを比較不能に
+// する (#3656)。
 import exec from "k6/execution";
 import { check } from "k6";
 import { SharedArray } from "k6/data";
-import { Counter } from "k6/metrics";
+import { Counter, Gauge } from "k6/metrics";
 import { MisskeyClient } from "../lib/client.js";
 import { readStages, writeStages, SCENARIO_DURATION } from "../lib/config.js";
 
 const SHORT = __ENV.SHORT === "1";
 const SHORT_DURATION = 5;
+const START_DELAY = Number(__ENV.START_DELAY || 0);
 
 const client = new MisskeyClient(__ENV.TARGET_URL);
 // 既定の 60 秒だと、詰まった回が 1 分ずつ伸びる。10 秒で打ち切って timeout として数える
@@ -27,6 +36,8 @@ client.params.timeout = "10s";
 
 const rateLimited = new Counter("bench_rate_limited");
 const timeouts = new Counter("bench_timeouts");
+const windowStart = new Gauge("bench_window_start_ms");
+const windowEnd = new Gauge("bench_window_end_ms");
 
 const seed = new SharedArray("seed", function () {
   return [JSON.parse(open("/seed/seed-data.json"))];
@@ -60,22 +71,32 @@ const endpoints = [
   { name: "home-timeline", exec: "homeTimeline", stages: readStages },
 ];
 
+// stages の duration は "5s" の形だけを使う
+function stageSeconds(stages) {
+  return stages.reduce((sum, st) => sum + Number(st.duration.replace(/s$/, "")), 0);
+}
+
 const scenarios = {};
 const thresholds = {};
+const windowSeconds = {};
 endpoints.forEach((e, idx) => {
+  const stages = SHORT ? [{ duration: `${SHORT_DURATION}s`, target: 5 }] : e.stages;
+  windowSeconds[e.name] = stageSeconds(stages);
   scenarios[e.name] = {
     executor: "ramping-vus",
     startVUs: 0,
-    stages: SHORT ? [{ duration: `${SHORT_DURATION}s`, target: 5 }] : e.stages,
+    stages,
     exec: e.exec,
     tags: { endpoint: e.name },
-    startTime: `${idx * (SHORT ? SHORT_DURATION + 1 : SCENARIO_DURATION)}s`,
+    startTime: `${START_DELAY + idx * (SHORT ? SHORT_DURATION + 1 : SCENARIO_DURATION)}s`,
   };
   thresholds[`http_req_duration{endpoint:${e.name},expected_response:true}`] = ["p(95)>=0"];
   thresholds[`http_reqs{endpoint:${e.name}}`] = ["count>=0"];
   thresholds[`http_req_failed{endpoint:${e.name}}`] = ["rate>=0"];
   thresholds[`bench_rate_limited{endpoint:${e.name}}`] = ["count>=0"];
   thresholds[`bench_timeouts{endpoint:${e.name}}`] = ["count>=0"];
+  thresholds[`bench_window_start_ms{endpoint:${e.name}}`] = ["value>=0"];
+  thresholds[`bench_window_end_ms{endpoint:${e.name}}`] = ["value>=0"];
 });
 
 export const options = {
@@ -85,6 +106,12 @@ export const options = {
 };
 
 function record(endpoint, res) {
+  // 区間はシナリオごとに決まった値なので、VU ごとに最初の iteration でだけ書く
+  if (exec.vu.iterationInScenario === 0) {
+    const start = exec.scenario.startTime;
+    windowStart.add(start, { endpoint });
+    windowEnd.add(start + windowSeconds[endpoint] * 1000, { endpoint });
+  }
   if (res.status === 429) rateLimited.add(1, { endpoint });
   // 1050 は k6 の request timeout
   if (res.error_code === 1050) timeouts.add(1, { endpoint });

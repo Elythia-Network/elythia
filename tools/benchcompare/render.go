@@ -63,9 +63,9 @@ func renderMarkdown(w io.Writer, c *Comparison) error {
 		return err
 	}
 	if n.labeled {
-		fmt.Fprintf(&b, "判定は、各側のラウンドの最小〜最大の幅が重ならず、中央値の差が5%%以上のときだけ「差あり」にする。あわせて、差の絶対量が遅延は1ms以上、CPU時間は0.5秒以上、CPU (%%)は2ポイント以上、メモリは8MiB以上であること。差の%%は%sに対する%sの中央値の増減。失敗率か429の率が両者で1ポイントより大きく違うエンドポイントと、成功が0件の回があったエンドポイントは「比較不能」にする。p99は同じものどうしでも段を飛ぶように動くので、差だけを出し、判定には使わない(「参考」)。**同じ回の中の比だけを読み、回をまたいで絶対値を比べない**(runnerのCPUが回ごとに違う)。\n\n", cell(n.base), cell(n.head))
+		fmt.Fprintf(&b, "判定は、各側のラウンドの最小〜最大の幅が重ならず、中央値の差が5%%以上のときだけ「差あり」にする。あわせて、差の絶対量が遅延は1ms以上、CPU時間は0.5秒以上、CPU (%%)は2ポイント以上、メモリは8MiB以上であること。差の%%は%sに対する%sの中央値の増減。失敗率か429の率が両者で1ポイントより大きく違うエンドポイントと、成功が0件の回があったエンドポイント、負荷をかける側のk6が律速だった(エンドポイントの区間で、k6がCPUの上限で止められた区切りが2%%を超えた)エンドポイントは「比較不能」にする。p99は同じものどうしでも段を飛ぶように動くので、差だけを出し、判定には使わない(「参考」)。**同じ回の中の比だけを読み、回をまたいで絶対値を比べない**(runnerのCPUが回ごとに違う)。\n\n", cell(n.base), cell(n.head))
 	} else {
-		b.WriteString("判定は、各側のラウンドの最小〜最大の幅が重ならず、中央値の差が5%以上のときだけ「差あり」にする。あわせて、差の絶対量が遅延は1ms以上、CPU時間は0.5秒以上、CPU (%)は2ポイント以上、メモリとGoのヒープは8MiB以上であること。差の%は中央値どうしの比。失敗率か429の率がbaseとheadで1ポイントより大きく違うエンドポイントと、成功が0件の回があったエンドポイントは「比較不能」にする。p99は同じcommitどうしでも段を飛ぶように動くので、差だけを出し、判定には使わない(「参考」)。\n\n")
+		b.WriteString("判定は、各側のラウンドの最小〜最大の幅が重ならず、中央値の差が5%以上のときだけ「差あり」にする。あわせて、差の絶対量が遅延は1ms以上、CPU時間は0.5秒以上、CPU (%)は2ポイント以上、メモリとGoのヒープは8MiB以上であること。差の%は中央値どうしの比。失敗率か429の率がbaseとheadで1ポイントより大きく違うエンドポイントと、成功が0件の回があったエンドポイント、負荷をかける側のk6が律速だった(エンドポイントの区間で、k6がCPUの上限で止められた区切りが2%を超えた)エンドポイントは「比較不能」にする。p99は同じcommitどうしでも段を飛ぶように動くので、差だけを出し、判定には使わない(「参考」)。\n\n")
 	}
 	b.WriteString("## まとめ\n\n| エンドポイント | 判定 |\n|---|---|\n")
 	for _, e := range c.Endpoints {
@@ -86,6 +86,11 @@ func renderMarkdown(w io.Writer, c *Comparison) error {
 			rateVerdict = verdictLabel[VerdictIncomparable]
 		}
 		fmt.Fprintf(&b, "| %s | 失敗率 / 429の率 | %.1f%% / %.1f%% | %.1f%% / %.1f%% | | %s |\n", cell(e.Endpoint), e.BaseErrorRate, e.BaseRateLimitRate, e.HeadErrorRate, e.HeadRateLimitRate, rateVerdict)
+		k6Verdict := ""
+		if k6Bottleneck(e) {
+			k6Verdict = verdictLabel[VerdictIncomparable]
+		}
+		fmt.Fprintf(&b, "| %s | k6が止められた区切り (%%、最大) | %s | %s | | %s |\n", cell(e.Endpoint), fmtPercent(e.BaseK6ThrottledPercent), fmtPercent(e.HeadK6ThrottledPercent), k6Verdict)
 	}
 	var reasons []string
 	for _, e := range c.Endpoints {
@@ -98,9 +103,9 @@ func renderMarkdown(w io.Writer, c *Comparison) error {
 	}
 	b.WriteString("\n## リソース\n\n")
 	if n.labeled {
-		b.WriteString("CPUは1コアを100%とする。メモリはcgroupの`memory.peak`(ページキャッシュを含む)。Goのヒープはappの`HeapInuse`の最大で、片側にしか無いときは参考として出す。\n\n")
+		b.WriteString("CPUは1コアを100%とする。メモリはcgroupの`memory.peak`(ページキャッシュを含む)。Goのヒープはappの`HeapInuse`の最大で、片側にしか無いときは参考として出す。k6は負荷をかける側なので、差だけを出して判定しない(「参考」)。\n\n")
 	} else {
-		b.WriteString("CPUは1コアを100%とする。メモリはcgroupの`memory.peak`、Goのヒープはappの`HeapInuse`の最大。\n\n")
+		b.WriteString("CPUは1コアを100%とする。メモリはcgroupの`memory.peak`、Goのヒープはappの`HeapInuse`の最大。k6は負荷をかける側なので、差だけを出して判定しない(「参考」)。\n\n")
 	}
 	fmt.Fprintf(&b, "| コンテナ | 指標 | %s (中央値 [最小, 最大]) | %s (中央値 [最小, 最大]) | 差 | 判定 |\n", cell(n.base), cell(n.head))
 	b.WriteString("|---|---|---|---|---|---|\n")
@@ -140,6 +145,24 @@ func renderRatioSection(b *strings.Builder, c *Comparison, n sideNames) {
 			fmt.Fprintf(b, "| %s | %s | %s | %s | %s | %s |\n", cell(r.Container), measureLabel(name), fmtMedian(m.Base), fmtMedian(m.Head), fmtRatio(m), lowerSide(m, n, "が少ない"))
 		}
 	}
+}
+
+// k6Bottleneck reports whether k6 was throttled beyond the limit, or not
+// measured, on either side of the endpoint.
+func k6Bottleneck(e EndpointCompare) bool {
+	for _, p := range []*float64{e.BaseK6ThrottledPercent, e.HeadK6ThrottledPercent} {
+		if p == nil || *p > maxK6ThrottledPercent {
+			return true
+		}
+	}
+	return false
+}
+
+func fmtPercent(p *float64) string {
+	if p == nil {
+		return "-"
+	}
+	return fmt.Sprintf("%.1f%%", *p)
 }
 
 func findMeasure(ms []Measure, name string) Measure {

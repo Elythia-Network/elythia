@@ -65,6 +65,10 @@ type Run struct {
 	// not start, so the load was lower than requested.
 	Dropped   int64
 	Resources map[string]ResourceUsage
+	// K6CPU is the CPU throttling of the load generator's container (k6), one
+	// sample a second, used to tell when k6 rather than the server set the
+	// latency of an endpoint (#3656).
+	K6CPU []ThrottleSample
 	// Delivery is an optional receiver fixture summary, separate from k6
 	// endpoint metrics and resource samples.
 	Delivery *DeliveryStats
@@ -100,7 +104,27 @@ type EndpointResult struct {
 	// Latencies of the successful responses in milliseconds by stat name
 	// ("med", "p(95)", "p(99)").
 	Latency map[string]float64
+	// WindowStartMs and WindowEndMs are when the endpoint's scenario was
+	// scheduled to start and end, in Unix milliseconds (the clock of the
+	// resource samples).
+	WindowStartMs, WindowEndMs int64
 }
+
+// ThrottleSample is one sample of a container's cumulative CPU throttling
+// counters from cpu.stat.
+type ThrottleSample struct {
+	TimeMs int64
+	// Periods is nr_periods: the enforcement periods (100ms) in which the
+	// container was runnable.
+	Periods int64
+	// Throttled is nr_throttled: the periods in which it used up its quota
+	// and was stopped until the next period.
+	Throttled int64
+}
+
+// k6Container is the name the runner gives the load generator's container in
+// resources.csv.
+const k6Container = "k6"
 
 // ResourceUsage is what one run measured for one container.
 type ResourceUsage struct {
@@ -199,13 +223,20 @@ func loadRun(dir string) (*Run, error) {
 		return nil, fmt.Errorf("open resources: %w", err)
 	}
 	defer f.Close()
-	run.Resources, err = parseResources(f)
+	var throttle map[string][]ThrottleSample
+	run.Resources, throttle, err = parseResources(f)
 	if errors.Is(err, errMeasurement) {
 		run.Meta.Completed, run.Meta.Reason, run.Resources = false, err.Error(), nil
 		return run, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("resources.csv: %w", err)
+	}
+	// k6 の CPU が無いと、k6 が律速になったエンドポイントを見分けられない。0 と読むと
+	// 「律速でなかった」になるので、記録の漏れ (sampler に k6 を渡していない) として止める
+	run.K6CPU = throttle[k6Container]
+	if len(run.K6CPU) < 2 {
+		return nil, fmt.Errorf("resources.csv: fewer than 2 throttling samples of the %s container (the sampler must record it)", k6Container)
 	}
 	run.Delivery, err = readDeliveryStats(filepath.Join(dir, "delivery.json"))
 	if err != nil {
@@ -261,6 +292,8 @@ var endpointMetrics = []string{
 	"http_req_failed",
 	"bench_rate_limited",
 	"bench_timeouts",
+	"bench_window_start_ms",
+	"bench_window_end_ms",
 }
 
 // endpoints returns the per-endpoint results and the dropped_iterations
@@ -319,6 +352,13 @@ func (s k6Summary) endpoints() (map[string]EndpointResult, int64, error) {
 		if r.Requests == 0 {
 			return nil, 0, fmt.Errorf("endpoint %s: no requests", endpoint)
 		}
+		// 区間はシナリオが gauge に書く (scenarios.js の record)。k6 の CPU をこの区間で区切る
+		start, okStart := m["bench_window_start_ms"]["value"]
+		end, okEnd := m["bench_window_end_ms"]["value"]
+		if !okStart || !okEnd || end <= start {
+			return nil, 0, fmt.Errorf("endpoint %s: bench_window_start_ms / bench_window_end_ms do not give a window", endpoint)
+		}
+		r.WindowStartMs, r.WindowEndMs = int64(start), int64(end)
 		out[endpoint] = r
 	}
 	dropped, err := numbers(s.Metrics["dropped_iterations"])
@@ -370,25 +410,30 @@ func parseMetricKey(key string) (metric string, tags map[string]string, ok bool)
 // resourceColumns are the columns of resources.csv, written by the sampler
 // once a second per container. cpu_usage_usec is cpu.stat's usage_usec
 // (cumulative); memory_peak is memory.peak; heap_inuse is empty except for
-// the app.
+// the app. nr_periods, nr_throttled and throttled_usec are cpu.stat's
+// cumulative throttling counters, empty when the cgroup has no cpu
+// controller.
 //
 // memory.peak is the peak over the cgroup's lifetime, and it cannot be reset
 // on the kernels the runners use, so every run must start from freshly
 // created containers (the runner does down -v before each run).
-var resourceColumns = []string{"t_ms", "container", "cpu_usage_usec", "memory_peak", "heap_inuse"}
+var resourceColumns = []string{"t_ms", "container", "cpu_usage_usec", "memory_peak", "heap_inuse", "nr_periods", "nr_throttled", "throttled_usec"}
 
 // parseResources turns the sampler's time series into one usage per
-// container. It returns errMeasurement when a container's CPU time or the
-// clock goes backwards, which happens when the container restarted.
-func parseResources(r io.Reader) (map[string]ResourceUsage, error) {
+// container, and the throttling samples of each container that has them. It
+// returns errMeasurement when a container's CPU time, its throttling
+// counters or the clock goes backwards, which happens when the container
+// restarted.
+func parseResources(r io.Reader) (map[string]ResourceUsage, map[string][]ThrottleSample, error) {
 	cr := csv.NewReader(r)
 	header, err := cr.Read()
 	if err != nil {
-		return nil, fmt.Errorf("header: %w", err)
+		return nil, nil, fmt.Errorf("header: %w", err)
 	}
 	if strings.Join(header, ",") != strings.Join(resourceColumns, ",") {
-		return nil, fmt.Errorf("header is %q, want %q", strings.Join(header, ","), strings.Join(resourceColumns, ","))
+		return nil, nil, fmt.Errorf("header is %q, want %q", strings.Join(header, ","), strings.Join(resourceColumns, ","))
 	}
+	throttle := map[string][]ThrottleSample{}
 	type span struct {
 		firstT, lastT     int64
 		firstCPU, lastCPU int64
@@ -402,7 +447,7 @@ func parseResources(r io.Reader) (map[string]ResourceUsage, error) {
 			break
 		}
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		// heap_inuse は app 以外では空。空は 0 ではなく「測っていない」として扱う
 		hasHeap := rec[4] != ""
@@ -414,18 +459,29 @@ func parseResources(r io.Reader) (map[string]ResourceUsage, error) {
 			}
 			n, err := strconv.ParseInt(rec[col], 10, 64)
 			if err != nil {
-				return nil, fmt.Errorf("line %d: %s: %w", line, resourceColumns[col], err)
+				return nil, nil, fmt.Errorf("line %d: %s: %w", line, resourceColumns[col], err)
 			}
 			nums = append(nums, n)
 		}
 		t, cpu, peak, heap := nums[0], nums[1], nums[2], nums[3]
+		ts, hasThrottle, err := parseThrottle(rec, line, t)
+		if err != nil {
+			return nil, nil, err
+		}
 		s := spans[rec[1]]
 		if s == nil {
 			s = &span{firstT: t, lastT: t, firstCPU: cpu, lastCPU: cpu}
 			spans[rec[1]] = s
 		}
 		if t < s.lastT || cpu < s.lastCPU {
-			return nil, fmt.Errorf("%w: line %d: %s: time or cpu went backwards (restarted?)", errMeasurement, line, rec[1])
+			return nil, nil, fmt.Errorf("%w: line %d: %s: time or cpu went backwards (restarted?)", errMeasurement, line, rec[1])
+		}
+		if hasThrottle {
+			prev := throttle[rec[1]]
+			if n := len(prev); n > 0 && (ts.Periods < prev[n-1].Periods || ts.Throttled < prev[n-1].Throttled) {
+				return nil, nil, fmt.Errorf("%w: line %d: %s: throttling counters went backwards (restarted?)", errMeasurement, line, rec[1])
+			}
+			throttle[rec[1]] = append(prev, ts)
 		}
 		s.lastT, s.lastCPU = t, cpu
 		s.peak = max(s.peak, peak)
@@ -436,7 +492,7 @@ func parseResources(r io.Reader) (map[string]ResourceUsage, error) {
 	for name, s := range spans {
 		// 時刻の違う 2 点が無いと区間が無く、CPU 使用率が出せない
 		if s.lastT == s.firstT {
-			return nil, fmt.Errorf("%s: fewer than 2 samples", name)
+			return nil, nil, fmt.Errorf("%s: fewer than 2 samples", name)
 		}
 		cpuSec := float64(s.lastCPU-s.firstCPU) / 1e6
 		wallSec := float64(s.lastT-s.firstT) / 1e3
@@ -449,7 +505,26 @@ func parseResources(r io.Reader) (map[string]ResourceUsage, error) {
 		}
 	}
 	if len(out) == 0 {
-		return nil, errors.New("no samples")
+		return nil, nil, errors.New("no samples")
 	}
-	return out, nil
+	return out, throttle, nil
+}
+
+// parseThrottle reads the throttling columns of one row. All three empty
+// means the cgroup had no cpu controller (not measured); only some empty is
+// a broken row.
+func parseThrottle(rec []string, line int, t int64) (ThrottleSample, bool, error) {
+	cols := rec[5:8]
+	if cols[0] == "" && cols[1] == "" && cols[2] == "" {
+		return ThrottleSample{}, false, nil
+	}
+	var nums [3]int64
+	for i, v := range cols {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return ThrottleSample{}, false, fmt.Errorf("line %d: %s: %w", line, resourceColumns[5+i], err)
+		}
+		nums[i] = n
+	}
+	return ThrottleSample{TimeMs: t, Periods: nums[0], Throttled: nums[1]}, true, nil
 }
