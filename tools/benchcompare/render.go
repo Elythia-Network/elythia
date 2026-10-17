@@ -49,9 +49,7 @@ func renderMarkdown(w io.Writer, c *Comparison) error {
 	fmt.Fprintf(&b, "- %s: %s (%s)\n", cell(n.base), code(c.Base.Ref), code(shorten(c.Base.Commit)))
 	fmt.Fprintf(&b, "- %s: %s (%s)\n", cell(n.head), code(c.Head.Ref), code(shorten(c.Head.Commit)))
 	fmt.Fprintf(&b, "- シナリオ: %s、ラウンド: %d\n", code(c.Scenario), c.Rounds)
-	for _, k := range sortedRunnerKeys(c.Runner) {
-		fmt.Fprintf(&b, "- %s: %s\n", cell(k), cell(c.Runner[k]))
-	}
+	renderRunner(&b, c.Runner)
 	b.WriteString("\n")
 	if !c.Valid {
 		b.WriteString("## 比較不能\n\n測定が揃わなかったので、差を判定しない。\n\n")
@@ -122,6 +120,38 @@ func renderMarkdown(w io.Writer, c *Comparison) error {
 	renderDeliverySection(&b, c.Delivery)
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+// writeJitterCPUModel is the runner CPU on which PostgreSQL's writes were
+// seen to stall (#3659). It is matched case-insensitively as a substring of
+// cpu_model, which is the "model name" line of /proc/cpuinfo
+// ("AMD EPYC 9V74 80-Core Processor").
+const writeJitterCPUModel = "AMD EPYC 9V74"
+
+// renderRunner writes the runner's CPU model first, with a note when it is
+// the model of #3659, and then the other runner fields.
+func renderRunner(b *strings.Builder, runner map[string]string) {
+	// 機種は回ごとに違い、数字の読み方が変わる (#3659) ので、他の項目より先に、
+	// 日本語の見出しで出す
+	// 機種の書き方はハイパーバイザで大文字小文字が変わる例がある (Intelで
+	// `INTEL(R) XEON(R) PLATINUM 8573C`) ので、比べるときは大文字に揃える。
+	// /proc/cpuinfo に model name が無い環境では空になるので「(不明)」と出す
+	if model, ok := runner["cpu_model"]; ok {
+		shown := strings.TrimSpace(model)
+		if shown == "" {
+			shown = "(不明)"
+		}
+		fmt.Fprintf(b, "- runnerのCPU: %s\n", cell(shown))
+		if strings.Contains(strings.ToUpper(model), strings.ToUpper(writeJitterCPUModel)) {
+			fmt.Fprintf(b, "- **注意: この機種(%s)では書き込みが揺れうる (#3659)。** PostgreSQLはfsync・full page write・COMMITの待ちを外して動かしているが、それで揺れが消えるかは確かめていない。`notes-create`の差は流し直して確かめる\n", writeJitterCPUModel)
+		}
+	}
+	for _, k := range sortedRunnerKeys(runner) {
+		if k == "cpu_model" {
+			continue
+		}
+		fmt.Fprintf(b, "- %s: %s\n", cell(k), cell(runner[k]))
+	}
 }
 
 // renderRatioSection writes p50 / p95 of each endpoint and the CPU time and

@@ -1573,3 +1573,56 @@ func TestCompare_DroppedIterationsLimit(t *testing.T) {
 		})
 	}
 }
+
+// TestRun_RunnerCPUModel checks that the runner's CPU model comes first among
+// the runner fields, and that the model of #3659 gets a note, also when the
+// comparison is incomparable. The note does not stop the comparison.
+func TestRun_RunnerCPUModel(t *testing.T) {
+	const note = "**注意: この機種(AMD EPYC 9V74)では書き込みが揺れうる (#3659)。**"
+	report := func(t *testing.T, model string, runs []fakeRun) string {
+		t.Helper()
+		dir := writeResults(t, runs...)
+		writeFile(t, filepath.Join(dir, "run.json"), fmt.Sprintf(`{"base":{"ref":"develop","commit":"0123456789abcdef"},"head":{"ref":"pr","commit":"fedcba9876543210"},"scenario":"prod-like","rounds":2,"runner":{"cpus":"4","cpu_model":%q,"kernel":"6.8"}}`, model))
+		var stdout, stderr bytes.Buffer
+		err := run([]string{"-dir", dir}, &stdout, &stderr)
+		if err != nil {
+			require.ErrorIs(t, err, errIncomparable)
+		}
+		return stdout.String()
+	}
+	same := pair(2, func(s Side, r int) fakeRun { return okRun(s, r, 10) })
+
+	md := report(t, "AMD EPYC 9V74 80-Core Processor", same)
+	cpu := strings.Index(md, "- runnerのCPU: AMD EPYC 9V74 80-Core Processor\n")
+	require.GreaterOrEqual(t, cpu, 0, md)
+	assert.Less(t, cpu, strings.Index(md, "- cpus: 4\n"), "the CPU model comes before the other runner fields")
+	assert.Less(t, strings.Index(md, "- シナリオ:"), cpu)
+	assert.Less(t, cpu, strings.Index(md, note), md)
+	assert.Contains(t, md, "- runnerのCPU: AMD EPYC 9V74 80-Core Processor\n- "+note, "the note follows the CPU line")
+	assert.Less(t, strings.Index(md, note), strings.Index(md, "## まとめ"), "the note is at the top of the report")
+	assert.NotContains(t, md, "cpu_model", "the raw key is not shown")
+	assert.Contains(t, md, "- kernel: 6.8\n")
+	assert.Contains(t, md, "| ping | 差なし |", "the model does not stop the comparison")
+
+	md = report(t, "AMD EPYC 7763 64-Core Processor", same)
+	assert.Contains(t, md, "- runnerのCPU: AMD EPYC 7763 64-Core Processor\n")
+	assert.NotContains(t, md, "#3659")
+
+	// 大文字小文字の違う書き方でも注記する
+	md = report(t, "amd epyc 9v74 80-core processor", same)
+	assert.Contains(t, md, "- runnerのCPU: amd epyc 9v74 80-core processor\n- "+note)
+
+	// model name が取れなかったときは空の行にしない
+	md = report(t, "", same)
+	assert.Contains(t, md, "- runnerのCPU: (不明)\n")
+	assert.NotContains(t, md, "#3659")
+	md = report(t, "  ", same)
+	assert.Contains(t, md, "- runnerのCPU: (不明)\n")
+
+	// 比較不能の report にも出す
+	incomplete := pair(2, func(s Side, r int) fakeRun { return okRun(s, r, 10) })
+	incomplete[3].completed, incomplete[3].reason = false, "app did not start"
+	md = report(t, "AMD EPYC 9V74 80-Core Processor", incomplete)
+	assert.Contains(t, md, "## 比較不能")
+	assert.Contains(t, md, note)
+}
