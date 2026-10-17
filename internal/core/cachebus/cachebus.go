@@ -21,6 +21,12 @@ import (
 const (
 	// TopicInstanceSuspension carries InstanceSuspensionInvalidation.
 	TopicInstanceSuspension = "instanceSuspendCacheInvalidated"
+	// TopicEmoji carries repository.EmojiCacheInvalidation from the emoji
+	// cache (#3383). It is published in internal/server and applied by
+	// SubscribeEmojiCache.
+	TopicEmoji = "emojiCacheInvalidated"
+	// TopicAvatarDecoration carries AvatarDecorationInvalidation.
+	TopicAvatarDecoration = "avatarDecorationCacheInvalidated"
 	// TopicRelay carries RelayInvalidation.
 	TopicRelay = "relayCacheInvalidated"
 )

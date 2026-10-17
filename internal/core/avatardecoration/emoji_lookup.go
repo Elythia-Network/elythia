@@ -41,6 +41,10 @@ type EmojiResolver struct {
 	mu      sync.RWMutex
 	entries map[string]emojiEntry
 	loaded  time.Time
+	// invalidated は Invalidate が自プロセスの map を捨てた後に呼ぶ (#3664)。
+	invalidated func()
+	// gen は Resolver.gen と同じ (読み込みと重なった無効化で書き戻さない)。
+	gen uint64
 }
 
 // NewEmojiResolver constructs an EmojiResolver. Pass nil repo to disable
@@ -63,10 +67,7 @@ func (r *EmojiResolver) LookupEmojiDecoration(emojiID string) (string, string, b
 		return e.url, e.name, ok
 	}
 	r.mu.RUnlock()
-	r.refresh()
-	r.mu.RLock()
-	e, ok := r.entries[emojiID]
-	r.mu.RUnlock()
+	e, ok := r.refresh()[emojiID]
 	return e.url, e.name, ok
 }
 
@@ -75,14 +76,36 @@ func (r *EmojiResolver) LookupEmojiDecoration(emojiID string) (string, string, b
 // (#2258): without it, an emoji created and attached inside one cacheTTL
 // window is missing from the map and the entry is silently dropped even though
 // the DB row is already correct.
+//
+// 他のプロセスにも伝える (#3664、Resolver.Invalidate と同じ)。
 func (r *EmojiResolver) Invalidate() {
+	if r == nil {
+		return
+	}
+	r.InvalidateLocally()
+	if r.invalidated != nil {
+		r.invalidated()
+	}
+}
+
+// InvalidateLocally drops this process's emoji map without calling the
+// invalidation hook. It is what an invalidation received from another process
+// applies.
+func (r *EmojiResolver) InvalidateLocally() {
 	if r == nil {
 		return
 	}
 	r.mu.Lock()
 	r.loaded = time.Time{}
 	r.entries = nil
+	r.gen++
 	r.mu.Unlock()
+}
+
+// SetInvalidationHook registers fn, called after every Invalidate has dropped
+// this process's emoji map (#3664). Call it once while wiring.
+func (r *EmojiResolver) SetInvalidationHook(fn func()) {
+	r.invalidated = fn
 }
 
 // refresh reloads the local emoji map, keeping only what may be worn.
@@ -91,13 +114,18 @@ func (r *EmojiResolver) Invalidate() {
 // と同じ理由: 障害中の hot path が毎回 repo を叩く retry storm を防ぐ)。
 // **初回の失敗では map が空のまま**なので、絵文字由来のデコレーションは全て
 // 落ちる — 「出すかどうかの判断ができないなら出さない」側に倒してある。
-func (r *EmojiResolver) refresh() {
+//
+// It returns the map the caller should answer from (see Resolver.refresh).
+func (r *EmojiResolver) refresh() map[string]emojiEntry {
+	r.mu.RLock()
+	gen := r.gen
+	r.mu.RUnlock()
 	rows, err := r.repo.ListLocal()
 	if err != nil {
 		r.mu.Lock()
+		defer r.mu.Unlock()
 		r.loaded = time.Now().Add(-cacheTTL).Add(failureBackoff)
-		r.mu.Unlock()
-		return
+		return r.entries
 	}
 	entries := make(map[string]emojiEntry, len(rows))
 	for _, e := range rows {
@@ -107,9 +135,12 @@ func (r *EmojiResolver) refresh() {
 		entries[e.ID] = emojiEntry{name: e.Name, url: EmojiDecorationURL(e)}
 	}
 	r.mu.Lock()
-	r.entries = entries
-	r.loaded = time.Now()
+	if r.gen == gen {
+		r.entries = entries
+		r.loaded = time.Now()
+	}
 	r.mu.Unlock()
+	return entries
 }
 
 // EmojiUsableAsDecoration reports whether an emoji row may be worn on an
