@@ -145,9 +145,15 @@ func TestNew_QueueOnlyRegistersEffectivePolicyBeforePluginJobs(t *testing.T) {
 	require.NoError(t, finalizationResult.err)
 	pluginCtx.Go(func() { pluginWork <- "runtime" })
 	require.Equal(t, "runtime", <-pluginWork)
+	var runtimeCtx context.Context
+	pluginCtx.GoContext(func(ctx context.Context) { runtimeCtx = ctx })
+	require.NotNil(t, runtimeCtx)
+	require.NoError(t, runtimeCtx.Err())
 	require.NoError(t, srv.Shutdown(context.Background()))
 	require.NoError(t, srv.Shutdown(context.Background()))
 	require.Equal(t, 1, cleanupCalls)
+	// GoContext の ctx は、Context を渡したサーバーの世代が止まると切れる (#3661)。
+	require.Error(t, runtimeCtx.Err(), "サーバーの世代を止めても plugin の ctx が切れない")
 	select {
 	case got := <-pluginWork:
 		t.Fatalf("queued plugin work ran more than once: %s", got)

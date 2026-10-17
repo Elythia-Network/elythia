@@ -440,9 +440,11 @@ handler 自体は止まらない** (Go では goroutine を殺せない) ので�
 
 キューに載せるほどでもない、プロセス内で完結する非同期処理は `ctx.Go()` を使う（recover 付き）。**再起動をまたがない**ので、跨いでほしい処理はキューへ。
 
-起動中に呼んだ`ctx.Go()`は、全pluginのstorage、migration、`EffectivePolicies`、`Routes`、`Jobs`とhost側のroute配線が成功するまで開始されない。起動に失敗した場合は保留した処理を破棄する。起動成功後の呼び出しは直ちに開始する。cancelやdrainは提供しないため、正常終了時の停止が必要な処理はplugin側で終了条件を持つこと。
+起動中に呼んだ`ctx.Go()`は、全pluginのstorage、migration、`EffectivePolicies`、`Routes`、`Jobs`とhost側のroute配線が成功するまで開始されない。起動に失敗した場合は保留した処理を破棄する。起動成功後の呼び出しは直ちに開始する。
 
-**`Migrations`・`Peer`・`EffectivePolicies`・`Routes`・`Jobs`は、1つのプロセスの中で何度呼ばれてもよいように書く。** メンテナンスモード (#3463、[deployment.md](../deployment.md#メンテナンスモード)) を抜けるたびに、Elythiaはサーバーを作り直し、これらをもう一度呼ぶ。storageのpoolは古いものが閉じられ、新しいものが渡される。パッケージ変数に前回の`Context`やstorageを持ち続けると、閉じたpoolを使ってエラーになる。`ctx.Go()`で起動した長く走るgoroutineは止められないので、作り直しの後も古いものが残る (`Context`から終了を知る手段は今は無い)。
+`ctx.Go()`で起動したgoroutineは、その`Context`を渡したサーバーの世代が止まるとき (プロセスの終了と、メンテナンスモードに入るとき) に待たれる (#3661)。待つ時間には上限があり (止める側の期限の残りの1/4、最大3秒。期限が切れていれば待たない。下限は無い)、過ぎたものは残したまま止める。長く走る処理は`ctx.GoContext(func(c context.Context) { ... })`を使い、`c`が切れたら戻ること。`c`は待ちの3/4を過ぎた時点で切れ、残りの1/4がその後の戻りのための時間になる。世代が止まった後に呼んだ`ctx.Go()` / `ctx.GoContext()`は走らない。
+
+**`Migrations`・`Peer`・`EffectivePolicies`・`Routes`・`Jobs`は、1つのプロセスの中で何度呼ばれてもよいように書く。** メンテナンスモード (#3463、[deployment.md](../deployment.md#メンテナンスモード)) を抜けるたびに、Elythiaはサーバーを作り直し、これらをもう一度呼ぶ。storageのpoolは古いものが閉じられ、新しいものが渡される。パッケージ変数に前回の`Context`やstorageを持ち続けると、閉じたpoolを使ってエラーになる。`ctx.Go()`で起動した長く走るgoroutineは、作り直しの前に待たれるが、待ちの上限を過ぎると古いものが残る。長く走るものは`ctx.GoContext()`で起動し、受け取った`context.Context`が切れたら戻ること (#3661)。
 
 > **プラグインが素の `go` を書くとプロセスごと落ちる。** Go は他 goroutine の panic を回収できず、Elythia 側の recover では止められない。
 
@@ -1215,6 +1217,7 @@ type Context interface
   Queue() Queue
   HTTP() *http.Client
   Go(func())
+  GoContext(func(context.Context))
 
 type Peer interface
   Send(context.Context, string, any) (string, error)

@@ -19,6 +19,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	apiadmin "github.com/elythia-network/elythia/internal/api/admin"
+	"github.com/elythia-network/elythia/internal/bgwork"
 	coredrive "github.com/elythia-network/elythia/internal/core/drive"
 	corerole "github.com/elythia-network/elythia/internal/core/role"
 	"github.com/elythia-network/elythia/internal/pluginstore"
@@ -83,6 +84,9 @@ func (s *Server) setupPlugins(api *echo.Group, plugins []plugin.Definition, open
 			name:    def.Name,
 			goGate:  goGate,
 			goStart: s.pluginGoStarter,
+			// ctx.Go() / GoContext() は世代の箱から起動する (#3661)。世代を止めると
+			// 上限付きで待たれ、待ちの 3/4 で ctx が切れる。
+			background: s.background,
 			logger: slog.With(
 				slog.String("plugin", def.Name),
 				slog.String("pluginVersion", def.Version),
@@ -404,6 +408,7 @@ type pluginContext struct {
 	httpClient *http.Client
 	goGate     *pluginGoGate
 	goStart    func(func())
+	background *bgwork.Group
 }
 
 func (c *pluginContext) Name() string            { return c.name }
@@ -543,7 +548,7 @@ type pluginGoGate struct {
 
 type queuedPluginGo struct {
 	ctx *pluginContext
-	fn  func()
+	fn  func(context.Context)
 }
 
 const (
@@ -552,7 +557,7 @@ const (
 	pluginGoDiscarded
 )
 
-func (g *pluginGoGate) enqueue(ctx *pluginContext, fn func()) {
+func (g *pluginGoGate) enqueue(ctx *pluginContext, fn func(context.Context)) {
 	g.mu.Lock()
 	switch g.state {
 	case pluginGoPending:
@@ -721,6 +726,10 @@ func (s *pluginStorage) Migrate(ctx context.Context, migrations []plugin.Migrati
 // **プラグインが素の `go` を書くとプロセスごと落ちる。** Go は他 goroutine の
 // panic を回収できず、echo の Recover middleware では止められない。
 func (c *pluginContext) Go(fn func()) {
+	c.GoContext(func(context.Context) { fn() })
+}
+
+func (c *pluginContext) GoContext(fn func(context.Context)) {
 	if c.goGate != nil {
 		c.goGate.enqueue(c, fn)
 		return
@@ -728,20 +737,23 @@ func (c *pluginContext) Go(fn func()) {
 	c.startGo(fn)
 }
 
-func (c *pluginContext) startGo(fn func()) {
-	run := func() {
+func (c *pluginContext) startGo(fn func(context.Context)) {
+	run := func(ctx context.Context) {
 		defer func() {
 			if r := recover(); r != nil {
 				c.logger.Error("plugin の goroutine が panic しました", "panic", r)
 			}
 		}()
-		fn()
+		fn(ctx)
 	}
 	if c.goStart != nil {
-		c.goStart(run)
+		ctx := c.background.Context()
+		c.goStart(func() { run(ctx) })
 		return
 	}
-	go run()
+	// 世代が止まった後に呼ばれたら走らせない。storage の pool はもう閉じている。
+	// 捨てたことは箱がプラグイン名付きで 1 行ログに出す。
+	c.background.GoAs("plugin "+c.name, run)
 }
 
 // --- Router ---

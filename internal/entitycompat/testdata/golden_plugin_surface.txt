@@ -148,6 +148,7 @@ plugin:   method Context.API() API
 plugin:   method Context.Accounts() Accounts
 plugin:   method Context.Config() Config
 plugin:   method Context.Go(func())
+plugin:   method Context.GoContext(func(context.Context))
 plugin:   method Context.HTTP() *http.Client
 plugin:   method Context.Logger() *slog.Logger
 plugin:   method Context.Name() string

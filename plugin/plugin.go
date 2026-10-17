@@ -21,6 +21,7 @@
 package plugin
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -306,5 +307,19 @@ type Context interface {
 	// **プラグインが自分で `go` を書くとプロセスごと落ちる。** Go は他の
 	// goroutine の panic を回収できないため、mk-go 側の recover
 	// (echo の Recover middleware 等) では止められない。
+	//
+	// fn は、この Context を渡したサーバーの世代が止まるとき (メンテナンス、
+	// プロセスの終了) に待たれる。待つ時間には上限があるので、長く走る処理は
+	// GoContext を使い、ctx の終了で戻ること。世代が止まった後に呼ぶと fn は
+	// 走らない (#3661)。
 	Go(fn func())
+
+	// GoContext is Go with a context that is canceled when the server
+	// generation this Context belongs to stops (maintenance or process exit).
+	// fn should return soon after ctx is done.
+	//
+	// 世代を作り直すと、プラグインの storage の pool は閉じられ、新しい Context で
+	// もう一度 Routes などが呼ばれる。ctx を見ずに走り続ける goroutine は、閉じた
+	// pool を使ってエラーになる (#3661)。
+	GoContext(fn func(context.Context))
 }

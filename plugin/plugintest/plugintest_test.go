@@ -168,6 +168,13 @@ func TestContext_GoRunsSynchronously(t *testing.T) {
 	assert.True(t, ran)
 }
 
+func TestContext_GoContextRunsSynchronously(t *testing.T) {
+	var got context.Context
+	plugintest.New(t).Context().GoContext(func(ctx context.Context) { got = ctx })
+	require.NotNil(t, got)
+	assert.NoError(t, got.Err())
+}
+
 func TestContext_APIDefaultsToNil(t *testing.T) {
 	assert.Nil(t, plugintest.New(t).Context().API())
 
