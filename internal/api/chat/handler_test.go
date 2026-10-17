@@ -1526,12 +1526,32 @@ type historyRepo struct {
 	*testutil.MockChatRepository
 	userHistory []*model.ChatMessage
 	roomHistory []*model.ChatMessage
+	untilIDs    []string
 }
 
-func (r *historyRepo) ListUserHistory(string, int) ([]*model.ChatMessage, error) {
+// #3653: untilId (Elythia の追加の引数) を repository まで渡し、列に入らない値は弾く。
+func TestHistory_UntilID(t *testing.T) {
+	base := testutil.NewMockChatRepository()
+	idGen, _ := id.NewGenerator("aidx")
+	hr := &historyRepo{MockChatRepository: base}
+	h := NewHandler(hr, idGen)
+
+	assert.Equal(t, http.StatusOK, post(h.History, `{"untilId":"m5"}`, u1).Code)
+	assert.Equal(t, http.StatusOK, post(h.History, `{"room":true,"untilId":"r3"}`, u1).Code)
+	assert.Equal(t, http.StatusOK, post(h.History, `{}`, u1).Code)
+	assert.Equal(t, []string{"m5", "r3", ""}, hr.untilIDs)
+
+	assert.Equal(t, http.StatusBadRequest, post(h.History, `{"untilId":"a\u0000b"}`, u1).Code)
+	assert.Equal(t, http.StatusBadRequest, post(h.History, `{"untilId":5}`, u1).Code)
+	assert.Len(t, hr.untilIDs, 3, "a rejected request must not reach the repository")
+}
+
+func (r *historyRepo) ListUserHistory(_ string, _ int, untilID string) ([]*model.ChatMessage, error) {
+	r.untilIDs = append(r.untilIDs, untilID)
 	return r.userHistory, nil
 }
-func (r *historyRepo) ListRoomHistory(string, int) ([]*model.ChatMessage, error) {
+func (r *historyRepo) ListRoomHistory(_ string, _ int, untilID string) ([]*model.ChatMessage, error) {
+	r.untilIDs = append(r.untilIDs, untilID)
 	return r.roomHistory, nil
 }
 

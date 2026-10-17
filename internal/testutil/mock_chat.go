@@ -641,11 +641,11 @@ func (m *MockChatRepository) ListHistory(_ string, _ int) ([]*model.ChatMessage,
 	return nil, nil
 }
 
-func (m *MockChatRepository) ListUserHistory(_ string, _ int) ([]*model.ChatMessage, error) {
+func (m *MockChatRepository) ListUserHistory(_ string, _ int, _ string) ([]*model.ChatMessage, error) {
 	return nil, nil
 }
 
-func (m *MockChatRepository) ListRoomHistory(_ string, _ int) ([]*model.ChatMessage, error) {
+func (m *MockChatRepository) ListRoomHistory(_ string, _ int, _ string) ([]*model.ChatMessage, error) {
 	return nil, nil
 }
 
