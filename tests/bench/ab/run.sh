@@ -2,6 +2,12 @@
 # base と head の 2 つの commit を、同じスタックで交互に流して比べる (#3544)。
 #
 #   run.sh --base <ref> --head <ref> [--rounds N] [--scenario prod-like|unlimited] [--out DIR] [--smoke]
+#   run.sh --upstream <版> --head <ref> [--rounds N] [--scenario prod-like|unlimited] [--out DIR] [--smoke]
+#
+# --upstream は base を本家 Misskey の公式 image (misskey/misskey:<版>) にする (#3654)。
+# 本家の側の回は compose.upstream.yml を重ね、app だけを本家に替える。seed・k6 の
+# シナリオ・資源の上限・測り方は Elythia どうしの比較と同じ。版に `default` を渡すと
+# UPSTREAM_MISSKEY_VERSION の版を使う。
 #
 # --smoke は seed を 10 人 × 10 ノートにし、各エンドポイントを 5 秒だけ流す。手順が
 # 最後まで通るかを見るためのもので、結果を比較に使わない。
@@ -27,17 +33,18 @@ set -Eeuo pipefail
 trap 'exit 1' ERR
 
 usage() {
-  echo "usage: $0 --base <ref> --head <ref> [--rounds N] [--scenario prod-like|unlimited] [--out DIR] [--smoke]" >&2
+  echo "usage: $0 (--base <ref> | --upstream <version>) --head <ref> [--rounds N] [--scenario prod-like|unlimited] [--out DIR] [--smoke]" >&2
   exit 1
 }
 
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(git -C "$here" rev-parse --show-toplevel)
 
-base_ref='' head_ref='' rounds=2 scenario=prod-like out='' smoke=0
+base_ref='' head_ref='' rounds=2 scenario=prod-like out='' smoke=0 upstream=''
 while [ $# -gt 0 ]; do
   case $1 in
     --base) base_ref=$2; shift 2 ;;
+    --upstream) upstream=$2; shift 2 ;;
     --head) head_ref=$2; shift 2 ;;
     --rounds) rounds=$2; shift 2 ;;
     --scenario) scenario=$2; shift 2 ;;
@@ -46,7 +53,9 @@ while [ $# -gt 0 ]; do
     *) usage ;;
   esac
 done
-if [ -z "$base_ref" ] || [ -z "$head_ref" ]; then usage; fi
+if [ -n "$upstream" ] && [ -n "$base_ref" ]; then usage; fi
+if [ -z "$upstream" ] && [ -z "$base_ref" ]; then usage; fi
+if [ -z "$head_ref" ]; then usage; fi
 case $rounds in '' | *[!0-9]*) usage ;; esac
 # benchcompare は 2 回未満を比較できないとする。流してから分かるのは時間の無駄なので先に止める
 [ "$rounds" -ge 2 ] || { echo "run.sh: --rounds must be 2 or more" >&2; exit 1; }
@@ -61,14 +70,30 @@ if [ ! -r /sys/fs/cgroup/cgroup.controllers ]; then
   exit 1
 fi
 
-base_commit=$(git -C "$repo" rev-parse --verify "$base_ref^{commit}")
+if [ -n "$upstream" ]; then
+  if [ "$upstream" = default ]; then
+    upstream=$(tr -d '[:space:]' < "$repo/UPSTREAM_MISSKEY_VERSION")
+  fi
+  # image の tag に使える形 (2026.10.0、2026.10.0-beta.1 など) だけを受ける。
+  # 先頭の - は docker の option になる
+  if ! [[ $upstream =~ ^[0-9][0-9A-Za-z.-]*$ ]]; then
+    echo "run.sh: not an upstream version: '$upstream'" >&2
+    exit 1
+  fi
+  base_ref=misskey/misskey:$upstream
+fi
+if [ -z "$upstream" ]; then
+  base_commit=$(git -C "$repo" rev-parse --verify "$base_ref^{commit}")
+fi
 head_commit=$(git -C "$repo" rev-parse --verify "$head_ref^{commit}")
 
 out=${out:-$here/results/$(date -u +%Y%m%dT%H%M%SZ)-$scenario}
 mkdir -p "$out"
 out=$(cd "$out" && pwd)
 
-compose=(docker compose -f "$here/compose.yml")
+compose_main=(docker compose -f "$here/compose.yml")
+compose_upstream=(docker compose -f "$here/compose.yml" -f "$here/compose.upstream.yml")
+compose=("${compose_main[@]}")
 if [ "$smoke" -eq 1 ]; then
   export BENCH_SEED_USERS=10 BENCH_SEED_NOTES=10
   scenario=$scenario-smoke
@@ -82,7 +107,7 @@ work=$(mktemp -d)
 cleanup() {
   # 後始末の失敗で、比較の終了コード (0 / 2) を ERR trap の 1 に書き換えない
   trap - ERR
-  "${compose[@]}" --profile tools down -v --remove-orphans >/dev/null 2>&1 || true
+  "${compose_main[@]}" --profile tools down -v --remove-orphans >/dev/null 2>&1 || true
   for side in base head; do
     if [ -d "$work/$side" ]; then git -C "$repo" worktree remove --force "$work/$side" >/dev/null 2>&1 || true; fi
   done
@@ -93,36 +118,64 @@ trap cleanup EXIT
 log() { echo "[run.sh $(date -u +%H:%M:%S)] $*" >&2; }
 
 # ── 1. image ─────────────────────────────────────────────
-image_of() { echo "mk-bench-ab-app:$1"; }
+image_of() {
+  if [ -n "$upstream" ] && [ "$1" = base ]; then echo "$base_ref"; return; fi
+  echo "mk-bench-ab-app:$1"
+}
+# 本家の側の回は compose.upstream.yml を重ねる
+use_side() {
+  if [ -n "$upstream" ] && [ "$1" = base ]; then
+    compose=("${compose_upstream[@]}")
+  else
+    compose=("${compose_main[@]}")
+  fi
+}
 build() {
   local side=$1 commit=$2
   log "building $side ($commit)"
   git -C "$repo" worktree add --detach "$work/$side" "$commit" >/dev/null
   docker build -q -f "$here/Dockerfile.app" -t "$(image_of "$side")" "$work/$side" >/dev/null
 }
-build base "$base_commit"
-if [ "$head_commit" = "$base_commit" ]; then
-  # 同じ commit なら同じ image を使う。ビルドの差を比較に持ち込まない
-  docker tag "$(image_of base)" "$(image_of head)"
-else
+if [ -n "$upstream" ]; then
+  log "pulling $base_ref"
+  docker pull -q "$base_ref" >/dev/null
+  # tag は付け替えられるので、実際に流した image を digest で残す
+  base_commit=$(docker image inspect -f '{{index .RepoDigests 0}}' "$base_ref")
+  base_commit=${base_commit#*@}
+  # 本家の公式 image は Node.js のプロセスが 4 つ (pnpm run migrateandstart と pnpm start の
+  # 外側の 2 つ、server、queue の worker) で、起動のたびに migration を流す。両側とも同じ
+  # 上限にする
+  export BENCH_APP_MEMORY=2048M
   build head "$head_commit"
+else
+  build base "$base_commit"
+  if [ "$head_commit" = "$base_commit" ]; then
+    # 同じ commit なら同じ image を使う。ビルドの差を比較に持ち込まない
+    docker tag "$(image_of base)" "$(image_of head)"
+  else
+    build head "$head_commit"
+  fi
 fi
 "${compose[@]}" --profile tools build -q seed
 "${compose[@]}" --profile tools pull -q k6 postgres redis web
 
 # ref は利用者が渡す文字列なので、JSON は python で組み立てる
 python3 - "$out/run.json" "$base_ref" "$base_commit" "$head_ref" "$head_commit" "$scenario" "$rounds" \
-  "$(uname -r)" "$(nproc)" "$(awk -F': ' '/^model name/ {print $2; exit}' /proc/cpuinfo)" "$(docker version -f '{{.Server.Version}}')" <<'PY'
+  "$(uname -r)" "$(nproc)" "$(awk -F': ' '/^model name/ {print $2; exit}' /proc/cpuinfo)" "$(docker version -f '{{.Server.Version}}')" "$upstream" <<'PY'
 import json, sys
-path, bref, bcommit, href, hcommit, scenario, rounds, kernel, cpus, model, docker = sys.argv[1:]
+path, bref, bcommit, href, hcommit, scenario, rounds, kernel, cpus, model, docker, upstream = sys.argv[1:]
+run = {
+    "base": {"ref": bref, "commit": bcommit},
+    "head": {"ref": href, "commit": hcommit},
+    "scenario": scenario,
+    "rounds": int(rounds),
+    "runner": {"kernel": kernel, "cpus": cpus, "cpu_model": model, "docker": docker},
+}
+if upstream:
+    # benchcompare は labels があると、両側をこの名前で呼び、比 (本家 / Elythia) の節を足す
+    run["labels"] = {"base": "本家", "head": "Elythia"}
 with open(path, "w") as f:
-    json.dump({
-        "base": {"ref": bref, "commit": bcommit},
-        "head": {"ref": href, "commit": hcommit},
-        "scenario": scenario,
-        "rounds": int(rounds),
-        "runner": {"kernel": kernel, "cpus": cpus, "cpu_model": model, "docker": docker},
-    }, f, indent=2)
+    json.dump(run, f, indent=2, ensure_ascii=False)
 PY
 
 # ── 2. 1 回分 ────────────────────────────────────────────
@@ -141,8 +194,15 @@ started_at() {
 }
 
 measure() {
-  local dir=$1
+  local dir=$1 side=$2
   export BENCH_RUN_DIR=$dir
+  # 本家の利用者ごとの制限は、seed が基本ロールの rateLimitFactor で決める。seed の間は
+  # 0 (制限なし) で、終わったら prod-like は 1 (既定の制限)、unlimited は 0 にする。
+  # Elythia の側は環境変数 (BENCH_DISABLE_ENDPOINT_RATE_LIMITS) で決めるので渡さない
+  export BENCH_SEED_RATE_LIMIT_FACTOR=''
+  if [ -n "$upstream" ] && [ "$side" = base ]; then
+    if [ "$disable_limits" = true ]; then BENCH_SEED_RATE_LIMIT_FACTOR=0; else BENCH_SEED_RATE_LIMIT_FACTOR=1; fi
+  fi
 
   # この関数は `if ! reason=$(measure ...)` の中で呼ぶので set -e が効かない。失敗しうる
   # 工程には、すべて `|| { echo <理由>; return 1; }` を付ける
@@ -163,8 +223,12 @@ measure() {
 
   local before after port heap_url ids=() s id
   before=$(started_at)
-  port=$("${compose[@]}" port app 3000) || { echo "app port not published"; return 1; }
-  heap_url="http://$port/debug/pprof/heap?debug=1"
+  # 本家には Go のヒープが無い。"-" を渡すと sampler は読まない
+  heap_url=-
+  if [ -z "$upstream" ] || [ "$side" != base ]; then
+    port=$("${compose[@]}" port app 3000) || { echo "app port not published"; return 1; }
+    heap_url="http://$port/debug/pprof/heap?debug=1"
+  fi
   for s in "${services[@]}"; do
     id=$("${compose[@]}" ps -q "$s") || id=''
     if [ -z "$id" ]; then echo "$s is not running"; return 1; fi
@@ -195,8 +259,9 @@ run_one() {
   log "round $round/$rounds: $side"
   export APP_IMAGE
   APP_IMAGE=$(image_of "$side")
+  use_side "$side"
   local reason completed=true
-  if ! reason=$(measure "$dir"); then
+  if ! reason=$(measure "$dir" "$side"); then
     completed=false
     reason=${reason:-failed}
     log "round $round $side: $reason"
@@ -207,11 +272,18 @@ run_one() {
     "$side" "$round" "$completed" "${reason:-}" > "$dir/meta.json"
 }
 
-# 最初の回だけが image の読み込みなどの初回の負担を負わないよう、計測しない起動を 1 回挟む
-log "burn-in"
-APP_IMAGE=$(image_of base) BENCH_DISABLE_ENDPOINT_RATE_LIMITS=$disable_limits "${compose[@]}" up -d --wait "${services[@]}" >/dev/null 2>&1 \
-  || { echo "run.sh: the stack did not start" >&2; exit 1; }
-"${compose[@]}" --profile tools down -v --remove-orphans >/dev/null 2>&1
+# 最初の回だけが image の読み込みなどの初回の負担を負わないよう、計測しない起動を 1 回挟む。
+# 本家と比べるときは image が 2 つあるので、両方を 1 回ずつ起動する
+burn_in_sides=(base)
+if [ -n "$upstream" ]; then burn_in_sides=(base head); fi
+for side in "${burn_in_sides[@]}"; do
+  log "burn-in ($side)"
+  use_side "$side"
+  APP_IMAGE=$(image_of "$side") BENCH_DISABLE_ENDPOINT_RATE_LIMITS=$disable_limits "${compose[@]}" up -d --wait "${services[@]}" >/dev/null 2>&1 \
+    || { echo "run.sh: the stack did not start ($side)" >&2; "${compose[@]}" logs --no-color app > "$out/burn-in-$side.log" 2>&1 || true; exit 1; }
+  "${compose[@]}" --profile tools down -v --remove-orphans >/dev/null 2>&1
+done
+use_side base
 
 for round in $(seq 1 "$rounds"); do
   if [ $((round % 2)) -eq 1 ]; then order=(base head); else order=(head base); fi

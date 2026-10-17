@@ -1,5 +1,6 @@
 # base / head の 2 つの commit を、同じスタックで交互に流す (#3544)。
-# run.sh から使う。app の image は APP_IMAGE で差し替える。
+# run.sh から使う。app の image は APP_IMAGE で差し替える。本家 Misskey と比べる
+# ときは、本家の側の回だけ compose.upstream.yml を重ねる (#3654)。
 #
 # **CPU の上限の合計は 3.75 にしてある。** GitHub-hosted runner は 4 vCPU で、
 # 残りを OS・dockerd・sampler に残す。上限が足りずに奪い合うと、どちらの commit が
@@ -80,7 +81,10 @@ services:
       resources:
         limits:
           cpus: "1.25"
-          memory: 1024M
+          # 本家との比較 (run.sh --upstream) は両側とも 2048M にする。本家の公式 image は
+          # Node.js のプロセスが 4 つ (pnpm の外側の 2 つ、server、queue の worker) で、
+          # 1024M では足りなくなるおそれがある
+          memory: "${BENCH_APP_MEMORY:-1024M}"
     networks: [bench]
 
   web:
@@ -117,6 +121,8 @@ services:
       SEED_VISIBILITY: "public:80,home:15,followers:5"
       # 作れなかった利用者・ノート・フォローがあれば非 0 で終わる
       SEED_STRICT: "1"
+      # 本家の側の回でだけ run.sh が渡す (本家の利用者ごとの制限を基本ロールで決める)
+      SEED_RATE_LIMIT_FACTOR: "${BENCH_SEED_RATE_LIMIT_FACTOR:-}"
       OUTPUT_DIR: /seed
     volumes:
       - seed:/seed
