@@ -242,20 +242,20 @@ jobs:
           path: coverage-shard-${{ matrix.shard }}.out
           if-no-files-found: ignore
 
-  # ブランチ保護が要求する `test` check を満たすためのaggregator。全shardと
-  # bench-helpersの結果を集約し、いずれかが失敗したらこのjob自体を失敗させる。
-  # `if: always()` を付けないと依存job失敗時にskipされ "test" check が完了しない。
+  # Go の test-shards では実行しない Python/Bash のベンチ補助テスト。
   bench-helpers:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Test outbound delivery artifact contract
-        run: python3 -m unittest discover -s tests/bench/queue/common -p test_driver_outbound.py -v
+      - name: Test benchmark helper contracts
+        run: python3 -m unittest discover -s tests/bench/queue/common -p 'test_*.py' -v
 
       - name: Test A/B benchmark helper safety
         run: bash tests/bench/ab/test_run_helpers.sh
 
+  # ブランチ保護で必要な `test` check を満たす集約 job。全 shard と bench-helpers の
+  # 結果を集約する。依存先の失敗後も実行するため `if: always()` が必要。
   test:
     runs-on: ubuntu-latest
     needs: [test-shards, bench-helpers]

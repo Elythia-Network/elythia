@@ -302,6 +302,7 @@ func TestRun_UnfinalizedDeliveryJSONProducesIncomparableReport(t *testing.T) {
 	}
 	// A setup failure can leave this syntactically valid, unfinalized record.
 	writeFile(t, filepath.Join(dir, "00-base-1", "delivery.json"), `{"finalized":false}`)
+	writeFile(t, filepath.Join(dir, "00-base-1", "delivery-error.txt"), "delivery driver exited with status 1\n")
 	// Counter inconsistencies are also reported with the parsed raw values.
 	writeFile(t, filepath.Join(dir, "02-base-2", "delivery.json"), `{"finalized":true,"expected":1,"attempts":1,"verified":1,"pending":0,"valid":1,"unique":1,"duplicates":1,"invalid":0,"contentMismatch":0,"unexpected":0,"unexpectedAttempts":0,"missing":0}`)
 
@@ -320,8 +321,9 @@ func TestRun_UnfinalizedDeliveryJSONProducesIncomparableReport(t *testing.T) {
 	assert.Equal(t, DeliveryStatusInvalid, got.Delivery[0].Status)
 	assert.Equal(t, DeliveryStats{}, got.Delivery[0].DeliveryStats, "raw parsed counters remain visible")
 	assert.Contains(t, got.Delivery[0].Reasons, "manifest is not finalized")
+	assert.Contains(t, got.Delivery[0].Reasons, "delivery run error: delivery driver exited with status 1")
 	assert.Contains(t, got.Delivery[0].Reasons, "expected delivery count is zero")
-	assert.Contains(t, got.Problems, "base round 1 delivery invalid: manifest is not finalized, expected delivery count is zero")
+	assert.Contains(t, got.Problems, "base round 1 delivery invalid: manifest is not finalized, expected delivery count is zero, delivery run error: delivery driver exited with status 1")
 	assert.Equal(t, DeliveryStatusInvalid, got.Delivery[2].Status)
 	assert.Equal(t, uint64(1), got.Delivery[2].DeliveryStats.Duplicates)
 	assert.Contains(t, got.Delivery[2].Reasons, "valid 1 != unique 1 + duplicates 1")
