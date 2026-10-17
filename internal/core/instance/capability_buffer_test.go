@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -303,4 +304,84 @@ func TestCapabilityBuffer_ConcurrentObservations(t *testing.T) {
 	b.FlushNow()
 
 	assert.ElementsMatch(t, []string{"inboundAlg", "ldSignature"}, target.signals())
+}
+
+// TestCapabilityBuffer_WritesThroughAfterClose checks that an observation
+// made after Close is written at once instead of being left in a pending map
+// nothing flushes any more (#3662).
+func TestCapabilityBuffer_WritesThroughAfterClose(t *testing.T) {
+	target := &fakeCapabilityTarget{}
+	b := NewCapabilityBuffer(target, time.Hour)
+	b.Start(context.Background())
+	b.Close()
+	b.ObserveInboundAlg("late.example", model.SignatureAlgEd25519)
+	b.ObserveLDSignature("late.example")
+	b.ObserveEd25519Accepted("late.example")
+	assert.Equal(t, []string{"inboundAlg", "ldSignature", "ed25519Accepted"}, target.signals())
+	assert.Equal(t, model.SignatureAlgEd25519, target.snapshot()[0].alg)
+}
+
+// TestCapabilityBuffer_WritesThroughAfterContextCancel checks the same once
+// the flush loop has stopped because its context was canceled.
+func TestCapabilityBuffer_WritesThroughAfterContextCancel(t *testing.T) {
+	target := &fakeCapabilityTarget{}
+	b := NewCapabilityBuffer(target, time.Hour)
+	ctx, cancel := context.WithCancel(context.Background())
+	b.Start(ctx)
+	b.ObserveLDSignature("first.example")
+	cancel()
+	require.Eventually(t, func() bool { return len(target.snapshot()) == 1 }, 2*time.Second, 5*time.Millisecond)
+	b.ObserveLDSignature("late.example")
+	assert.Len(t, target.snapshot(), 2)
+}
+
+// blockingCapabilityTarget blocks its first write until release is closed,
+// so a test can act while the last flush is writing.
+type blockingCapabilityTarget struct {
+	fakeCapabilityTarget
+	first   atomic.Bool
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (f *blockingCapabilityTarget) RecordInboundAlg(host, alg string, at time.Time) error {
+	// sync.Once は使わない。2 本目の呼び出しも 1 本目の終わりまで待たせてしまい、
+	// 順序の逆転を隠す。
+	if f.first.CompareAndSwap(false, true) {
+		close(f.entered)
+		<-f.release
+	}
+	return f.fakeCapabilityTarget.RecordInboundAlg(host, alg, at)
+}
+
+// TestCapabilityBuffer_ObservationAfterCloseIsNotOverwrittenByTheLastFlush
+// checks that an observation made after Close, while the last flush is still
+// writing an older one for the same host, is written after it (#3662). upsert
+// は時刻を比べないので、後に着いた古い値が残ってしまう。
+func TestCapabilityBuffer_ObservationAfterCloseIsNotOverwrittenByTheLastFlush(t *testing.T) {
+	target := &blockingCapabilityTarget{entered: make(chan struct{}), release: make(chan struct{})}
+	b := NewCapabilityBuffer(target, time.Hour)
+	b.Start(context.Background())
+	b.ObserveInboundAlg("x.example", model.SignatureAlgRSA)
+	closed := make(chan struct{})
+	go func() {
+		b.Close()
+		close(closed)
+	}()
+	<-target.entered // 最後の flush が古い観測 (rsa) を書いている途中
+	late := make(chan struct{})
+	go func() {
+		b.ObserveInboundAlg("x.example", model.SignatureAlgEd25519)
+		close(late)
+	}()
+	select {
+	case <-late:
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(target.release)
+	<-closed
+	<-late
+	calls := target.snapshot()
+	require.NotEmpty(t, calls)
+	assert.Equal(t, model.SignatureAlgEd25519, calls[len(calls)-1].alg, "古い観測が新しい観測の後に書かれた: %+v", calls)
 }
