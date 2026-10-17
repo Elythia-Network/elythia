@@ -1,18 +1,15 @@
 # Elythia
 
-Misskey互換のGoバックエンド実装。TypeScript/NestJS製の[Misskey](https://github.com/misskey-dev/misskey)と同一のDB・Redis・フロントエンドを共有し、バックエンドを差し替えられる。
-
-互換バージョン: **Misskey 2026.10.0** (Elythia `2.0.0`)
+Elythiaは、Goで書かれたActivityPubサーバーです。[Misskey](https://github.com/misskey-dev/misskey)から生まれ、Misskeyのクライアントや連合とつながったまま、独自の機能を育てています。
 
 ## 特徴
 
-- Go 1.27 / Echo v4 / GORM + pgx / go-redis v9
-- Misskeyフロントエンド(SPA)をそのまま配信
-- TypeScript版と同じPostgreSQL/Redisを共有、無停止で移行可能
-- ActivityPub連合対応（HTTP Signatures、リモートオブジェクト解決、配信キュー）
-- ジョブキューは `mkq` (BullMQ wire-compat)
-- Playwright e2e (298 spec ファイル) を PR ごとに実行。upstream 追従時は Misskey TS backend に対しても回して drop-in 互換を検証
-- `RemoteStatsFetcher` でリモートユーザーの notesCount / followersCount / followingCount を origin から取得 (Elythia 独自拡張)
+- **Misskeyのクライアントがそのまま使える** — 本家のAPIを保ち、独自の拡張は追加だけで行います
+- **TS版Misskeyから乗り換えられる** — 既存のDBを引き継いで起動できます(TS版へ戻すことは保証していません)
+- **Goで再構築** — バックエンドを一から書き直し、少ない資源で動くことを目指しています
+- **プラグインで広げられる** — コアを変えずに、APIの追加・定期ジョブ・通知の処理などを足せます(ビルド時に組み込み)
+- **ActivityPubで連合** — MisskeyやMastodonなど、ほかのサーバーの利用者と交流できます
+- **互換性をCIで確かめ続ける** — APIの応答形式、本家のテスト、実際のMisskey・Mastodonとの連合を検証しています
 
 ## クイックスタート
 
