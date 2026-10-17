@@ -130,3 +130,69 @@ func TestTouchBuffer_StopsOnContextCancel(t *testing.T) {
 	}
 	assert.GreaterOrEqual(t, target.calls.Load(), int64(1))
 }
+
+// TestTouchBuffer_WritesThroughAfterClose checks that a host marked after
+// Close is written at once instead of being left in a pending map nothing
+// flushes any more (#3662). 停止の途中でまだ動いている inbox の処理が呼ぶ。
+func TestTouchBuffer_WritesThroughAfterClose(t *testing.T) {
+	target := &recordingTarget{}
+	buf := instance.NewTouchBuffer(target, time.Hour)
+	buf.Start(context.Background())
+	buf.Close()
+	require.NoError(t, buf.MarkRequestReceived("late.example"))
+	assert.Equal(t, []string{"late.example"}, target.hosts)
+}
+
+// TestTouchBuffer_WritesThroughAfterContextCancel checks the same once the
+// flush loop has stopped because its context was canceled.
+func TestTouchBuffer_WritesThroughAfterContextCancel(t *testing.T) {
+	target := &recordingTarget{}
+	buf := instance.NewTouchBuffer(target, time.Hour)
+	ctx, cancel := context.WithCancel(context.Background())
+	buf.Start(ctx)
+	require.NoError(t, buf.MarkRequestReceived("first.example"))
+	cancel()
+	// 最後の flush が済んだ = ループが閉じた後。ここからの書き込みは積まれない。
+	require.Eventually(t, func() bool { return target.calls.Load() == 1 }, 2*time.Second, 5*time.Millisecond)
+	require.NoError(t, buf.MarkRequestReceived("late.example"))
+	assert.EqualValues(t, 2, target.calls.Load())
+}
+
+// blockingTouchTarget blocks the write of block until release is closed.
+type blockingTouchTarget struct {
+	recordingTarget
+	block   string
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (r *blockingTouchTarget) MarkRequestReceived(host string) error {
+	if host == r.block {
+		close(r.entered)
+		<-r.release
+	}
+	return r.recordingTarget.MarkRequestReceived(host)
+}
+
+// TestTouchBuffer_ClosesBeforeTheLastFlush checks that Close marks the
+// buffer closed before its last flush: a host marked while that flush is
+// still writing is written at once, not left in a pending map nothing will
+// flush (#3662).
+func TestTouchBuffer_ClosesBeforeTheLastFlush(t *testing.T) {
+	target := &blockingTouchTarget{block: "first.example", entered: make(chan struct{}), release: make(chan struct{})}
+	buf := instance.NewTouchBuffer(target, time.Hour)
+	buf.Start(context.Background())
+	require.NoError(t, buf.MarkRequestReceived("first.example"))
+	closed := make(chan struct{})
+	go func() {
+		buf.Close()
+		close(closed)
+	}()
+	<-target.entered // 最後の flush が書いている途中
+	require.NoError(t, buf.MarkRequestReceived("late.example"))
+	close(target.release)
+	<-closed
+	target.mu.Lock()
+	defer target.mu.Unlock()
+	assert.ElementsMatch(t, []string{"first.example", "late.example"}, target.hosts)
+}

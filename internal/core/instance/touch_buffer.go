@@ -36,6 +36,10 @@ type TouchBuffer struct {
 	// (#580 Devin BUG: docstring 「Start を呼んでいない場合の Close は no-op」
 	// に対して旧実装は doneCh で deadlock していた)。
 	started atomic.Bool
+	// closed=true の後の MarkRequestReceived は pending に積まず、その場で書く。
+	// 閉じた後の pending は誰も flush しないので、積むと黙って消える (#3662)。
+	// mu で守る。
+	closed bool
 }
 
 // NewTouchBuffer returns a buffer that flushes every flushInterval.
@@ -68,6 +72,7 @@ func (b *TouchBuffer) Start(ctx context.Context) {
 // に pending を best-effort で flush して return する (旧実装は doneCh で
 // deadlock した。#580 Devin BUG-1)。
 func (b *TouchBuffer) Close() {
+	b.markClosed()
 	if !b.started.Load() {
 		// Start を呼んでいないので runLoop は無く doneCh が close される
 		// ことはない。pending に積まれているもの (テスト等で直接
@@ -85,15 +90,29 @@ func (b *TouchBuffer) Close() {
 }
 
 // MarkRequestReceived stores the host into the pending map. inbox
-// processor が per-request で呼ぶ hot path。
+// processor が per-request で呼ぶ hot path。After Close (or once the flush
+// loop has stopped) it writes through to the target instead, since nothing
+// would flush the pending map any more.
 func (b *TouchBuffer) MarkRequestReceived(host string) error {
 	if host == "" {
 		return nil
 	}
 	b.mu.Lock()
+	if b.closed {
+		b.mu.Unlock()
+		return b.target.MarkRequestReceived(host)
+	}
 	b.pending[host] = b.clock()
 	b.mu.Unlock()
 	return nil
+}
+
+// markClosed makes later writes bypass the pending map. 最後の flush より前に
+// 呼ぶこと。後に呼ぶと、その間に積まれた分が残る。
+func (b *TouchBuffer) markClosed() {
+	b.mu.Lock()
+	b.closed = true
+	b.mu.Unlock()
 }
 
 // FlushNow drains the pending map and applies updates synchronously.
@@ -109,6 +128,7 @@ func (b *TouchBuffer) runLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			b.markClosed()
 			b.flushOnce()
 			return
 		case <-b.stopCh:

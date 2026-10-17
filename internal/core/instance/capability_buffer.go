@@ -52,6 +52,14 @@ type CapabilityBuffer struct {
 	// Close は started=false なら doneCh を待たずに pending だけ flush する
 	// (TouchBuffer が #580 で踏んだ deadlock と同じ穴を塞ぐ)。
 	started atomic.Bool
+	// closed=true の後の観測は、積んだその場で flush する (閉じた後の pending は
+	// 誰も flush しない、#3662)。mu で守る。
+	closed bool
+	// writeMu は flushOnce の取り出しから書き込みまでを直列にする。閉じた後の
+	// その場の flush と、Close の最後の flush が並行すると、古い観測を持つ側が
+	// 後から着いて新しい値を上書きしうる (upsert は時刻を比べない)。直列にすれば、
+	// 後に取り出した側が必ず新しい値を持ち、後に書く (#3662)。
+	writeMu sync.Mutex
 }
 
 // NewCapabilityBuffer returns a buffer that flushes every flushInterval.
@@ -83,6 +91,7 @@ func (b *CapabilityBuffer) Start(ctx context.Context) {
 // Start を呼ばずに Close した場合は doneCh を待たずに pending を best-effort で
 // flush して return する。
 func (b *CapabilityBuffer) Close() {
+	b.markClosed()
 	if !b.started.Load() {
 		b.flushOnce()
 		return
@@ -134,6 +143,8 @@ func (b *CapabilityBuffer) FlushNow() {
 	b.flushOnce()
 }
 
+// withPending applies one observation to host's pending entry. After Close
+// it flushes the pending map at once, since nothing else would.
 func (b *CapabilityBuffer) withPending(host string, apply func(*capabilityObservation)) {
 	b.mu.Lock()
 	obs, ok := b.pending[host]
@@ -142,7 +153,11 @@ func (b *CapabilityBuffer) withPending(host string, apply func(*capabilityObserv
 		b.pending[host] = obs
 	}
 	apply(obs)
+	closed := b.closed
 	b.mu.Unlock()
+	if closed {
+		b.flushOnce()
+	}
 }
 
 func (b *CapabilityBuffer) runLoop(ctx context.Context) {
@@ -152,6 +167,7 @@ func (b *CapabilityBuffer) runLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			b.markClosed()
 			b.flushOnce()
 			return
 		case <-b.stopCh:
@@ -169,6 +185,8 @@ func (b *CapabilityBuffer) runLoop(ctx context.Context) {
 // する部分 upsert になっているため。窓内で観測されなかった系統を呼ばないことで、
 // 既存の記録を消さずに済む。
 func (b *CapabilityBuffer) flushOnce() {
+	b.writeMu.Lock()
+	defer b.writeMu.Unlock()
 	b.mu.Lock()
 	if len(b.pending) == 0 {
 		b.mu.Unlock()
@@ -178,24 +196,37 @@ func (b *CapabilityBuffer) flushOnce() {
 	b.pending = make(map[string]*capabilityObservation, len(pending))
 	b.mu.Unlock()
 
+	for host, obs := range pending {
+		b.write(host, obs)
+	}
+}
+
+// markClosed makes later observations bypass the pending map. 最後の flush
+// より前に呼ぶこと。
+func (b *CapabilityBuffer) markClosed() {
+	b.mu.Lock()
+	b.closed = true
+	b.mu.Unlock()
+}
+
+// write records each signal observed in obs for host.
+func (b *CapabilityBuffer) write(host string, obs *capabilityObservation) {
 	if b.target == nil {
 		return
 	}
-	for host, obs := range pending {
-		if !obs.inboundAt.IsZero() {
-			if err := b.target.RecordInboundAlg(host, obs.inboundAlg, obs.inboundAt); err != nil {
-				slog.Warn("signature capability flush failed", "host", host, "signal", "inboundAlg", "err", err)
-			}
+	if !obs.inboundAt.IsZero() {
+		if err := b.target.RecordInboundAlg(host, obs.inboundAlg, obs.inboundAt); err != nil {
+			slog.Warn("signature capability flush failed", "host", host, "signal", "inboundAlg", "err", err)
 		}
-		if !obs.ldSignatureAt.IsZero() {
-			if err := b.target.RecordLDSignature(host, obs.ldSignatureAt); err != nil {
-				slog.Warn("signature capability flush failed", "host", host, "signal", "ldSignature", "err", err)
-			}
+	}
+	if !obs.ldSignatureAt.IsZero() {
+		if err := b.target.RecordLDSignature(host, obs.ldSignatureAt); err != nil {
+			slog.Warn("signature capability flush failed", "host", host, "signal", "ldSignature", "err", err)
 		}
-		if !obs.ed25519AcceptedAt.IsZero() {
-			if err := b.target.RecordEd25519Accepted(host, obs.ed25519AcceptedAt); err != nil {
-				slog.Warn("signature capability flush failed", "host", host, "signal", "ed25519Accepted", "err", err)
-			}
+	}
+	if !obs.ed25519AcceptedAt.IsZero() {
+		if err := b.target.RecordEd25519Accepted(host, obs.ed25519AcceptedAt); err != nil {
+			slog.Warn("signature capability flush failed", "host", host, "signal", "ed25519Accepted", "err", err)
 		}
 	}
 }

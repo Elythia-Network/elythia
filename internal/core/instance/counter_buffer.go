@@ -47,6 +47,9 @@ type CounterBuffer struct {
 	// started=true は Start() が既に bg goroutine を起動済であることを表す
 	// (TouchBuffer #580 と同じく、Start 前の Close で deadlock しないため)。
 	started atomic.Bool
+	// closed=true の後の Add は pending に積まず、その場で書く (TouchBuffer と
+	// 同じ。閉じた後の pending は誰も flush しない、#3662)。mu で守る。
+	closed bool
 }
 
 // NewCounterBuffer returns a buffer that flushes every flushInterval.
@@ -66,7 +69,7 @@ func NewCounterBuffer(target CounterTarget, flushInterval time.Duration) *Counte
 
 // Add accumulates delta for the given host and counter column. Empty hosts,
 // zero deltas and columns other than CounterNotesCount / CounterUsersCount are
-// ignored.
+// ignored. After Close it writes the increment through instead.
 func (b *CounterBuffer) Add(host, column string, delta int) {
 	if host == "" || delta == 0 {
 		return
@@ -76,7 +79,20 @@ func (b *CounterBuffer) Add(host, column string, delta int) {
 		return
 	}
 	b.mu.Lock()
+	if b.closed {
+		b.mu.Unlock()
+		b.write(counterKey{host: host, column: column}, delta)
+		return
+	}
 	b.pending[counterKey{host: host, column: column}] += delta
+	b.mu.Unlock()
+}
+
+// markClosed makes later increments bypass the pending map. 最後の flush より
+// 前に呼ぶこと。
+func (b *CounterBuffer) markClosed() {
+	b.mu.Lock()
+	b.closed = true
 	b.mu.Unlock()
 }
 
@@ -91,6 +107,7 @@ func (b *CounterBuffer) Start(ctx context.Context) {
 // Close stops the background goroutine after a final flush. Without a prior
 // Start it flushes the pending increments synchronously.
 func (b *CounterBuffer) Close() {
+	b.markClosed()
 	if !b.started.Load() {
 		b.flushOnce()
 		return
@@ -116,6 +133,7 @@ func (b *CounterBuffer) runLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			b.markClosed()
 			b.flushOnce()
 			return
 		case <-b.stopCh:
@@ -145,9 +163,13 @@ func (b *CounterBuffer) flushOnce() {
 		if delta == 0 {
 			continue
 		}
-		if err := b.target.IncrementCount(k.host, k.column, delta); err != nil {
-			slog.Warn("instance counter buffer flush failed",
-				"host", k.host, "column", k.column, "delta", delta, "err", err)
-		}
+		b.write(k, delta)
+	}
+}
+
+func (b *CounterBuffer) write(k counterKey, delta int) {
+	if err := b.target.IncrementCount(k.host, k.column, delta); err != nil {
+		slog.Warn("instance counter buffer flush failed",
+			"host", k.host, "column", k.column, "delta", delta, "err", err)
 	}
 }
