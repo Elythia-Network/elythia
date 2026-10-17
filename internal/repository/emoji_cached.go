@@ -87,9 +87,9 @@ type EmojiCacheInvalidation struct {
 	All bool `json:"all,omitempty"`
 }
 
-// mayAffectLocal reports whether ev can concern a local emoji, i.e. whether
+// MayAffectLocal reports whether ev can concern a local emoji, i.e. whether
 // the ListLocal cache must be dropped too.
-func (ev EmojiCacheInvalidation) mayAffectLocal() bool {
+func (ev EmojiCacheInvalidation) MayAffectLocal() bool {
 	if ev.All || len(ev.IDs) > 0 {
 		// id だけでは host が分からないので、local の可能性を残す側に倒す。
 		return true
@@ -163,7 +163,7 @@ func (c *CachedEmojiRepository) ApplyRemoteInvalidation(ev EmojiCacheInvalidatio
 	// 他プロセスのリモート絵文字の作成 (連合の受信で頻繁に起きる) で ListLocal
 	// まで落とすと、/api/emojis のフルスキャンが受信のたびに走る。local に
 	// 関わりうるものだけ落とす。
-	if ev.mayAffectLocal() {
+	if ev.MayAffectLocal() {
 		c.Invalidate()
 	}
 }

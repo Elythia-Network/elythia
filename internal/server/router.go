@@ -3182,7 +3182,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	emojiInvalidationQueue := repository.NewEmojiInvalidationQueue(1024, func(inv repository.EmojiCacheInvalidation) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		if err := internalPubSub.Publish(ctx, "emojiCacheInvalidated", emojiCacheMessage{From: emojiCacheSender, Inv: inv}); err != nil {
+		if err := internalPubSub.Publish(ctx, cachebus.TopicEmoji, emojiCacheMessage{From: emojiCacheSender, Inv: inv}); err != nil {
 			slog.Warn("emoji: publish emojiCacheInvalidated failed", "err", err)
 		}
 	})
@@ -3205,20 +3205,16 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		}
 	})
 	emojiRepo.SetInvalidationHook(emojiInvalidationQueue.Enqueue)
-	internalPubSub.Subscribe(context.Background(), "emojiCacheInvalidated", func(payload []byte) {
-		var msg emojiCacheMessage
-		if err := json.Unmarshal(payload, &msg); err != nil {
-			// **読めない通知は全体を落とす側に倒す。** 何を落とすべきか分からない
-			// まま捨てると、TTL の間古い絵文字を出し続ける。
-			slog.Warn("emoji: malformed emojiCacheInvalidated", "err", err)
-			emojiRepo.ApplyRemoteInvalidation(repository.EmojiCacheInvalidation{All: true})
-			return
-		}
-		if msg.From == emojiCacheSender {
-			return
-		}
-		emojiRepo.ApplyRemoteInvalidation(msg.Inv)
-	})
+	// 受けた側は絵文字のキャッシュを捨て、ローカルの絵文字に関わる通知では絵文字
+	// 由来のデコレーションの map も、その後で捨てる (#3664。順の理由は
+	// SubscribeEmojiCache)。**読めない通知と受け側の溢れでは全体を落とす。**
+	// 何を落とすべきか分からないまま捨てると、TTL の間古い絵文字を出し続ける。
+	cachebus.SubscribeEmojiCache(emojiRepo, emojiDecorationResolver, internalPubSub, emojiCacheSender)
+
+	// #3664: アバターのデコレーション (catalog と絵文字由来の 2 種) の
+	// cross-worker invalidation。管理画面の操作を受けたプロセスだけが捨てると、
+	// 他のプロセスは TTL (30 秒) の間、作ったばかりのデコレーションを装着から落とす。
+	cachebus.ConnectAvatarDecorations(avatarDecorationResolver, emojiDecorationResolver, internalPubSub, idGen.Generate(time.Now()))
 
 	// pollVoted / reacted / unreacted / deleted を noteStream:<id> に publish
 	// する共通 publisher。subNote / sn メッセージで購読しているクライアントへ
