@@ -69,6 +69,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/users"
 	apiwebhooks "github.com/elythia-network/elythia/internal/api/webhooks"
 	"github.com/elythia-network/elythia/internal/api/wellknown"
+	"github.com/elythia-network/elythia/internal/bgwork"
 	"github.com/elythia-network/elythia/internal/config"
 	coreabuse "github.com/elythia-network/elythia/internal/core/abuse"
 	coreachievement "github.com/elythia-network/elythia/internal/core/achievement"
@@ -303,6 +304,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// FEP-521a Multikey 対応で Ed25519 鍵対も併発行 (#1067 / #1068)。
 	signupService.SetKeypairExtraRepo(keypairExtraRepo)
 	noteCreateService := corenote.NewCreateService(noteRepo, pollRepo, idGen, followingRepo)
+	noteCreateService.SetBackground(s.background) // #3661: 世代の停止で待つ
 	// Phase 7-1 follow-up (#254): 本家互換の残存 error 検出ロジック用依存を注入。
 	// Setter経由なのでテストでは任意に省略可能。既存の同repository変数を再利用。
 	noteCreateService.SetBlockingRepo(blockingRepo)
@@ -456,6 +458,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// Notifications (Redis Streams)
 	// keyPrefix で TS 本家と同じ `<host>:notificationTimeline:*` 等に揃える (#362)。
 	notificationService := corenotification.NewService(s.redis.Default, idGen, s.config.Redis.KeyPrefix())
+	notificationService.SetBackground(s.background) // #3661: 世代の停止で送り切る
 	notificationService.SetNoteUnreadRepo(noteUnreadRepo)
 	notificationHook := corenotification.NewHook(notificationService, userRepo)
 	notificationHook.SetNoteUnreadRepo(noteUnreadRepo)
@@ -869,6 +872,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 自分が返す外部への 3xx を止める設定 (apHandler.SetExternalRedirectPolicy)。
 	apFetcher := corefederation.NewAPFetcher(apClient)
 	federationResolver := corefederation.NewResolver(userRepo, noteRepo, apURLs, apFetcher, idGen)
+	federationResolver.SetBackground(s.background) // #3661: 世代の停止で待つ
 	publickeyRepo := repository.NewUserPublickeyRepository(s.db)
 	federationResolver.SetPublickeyRepo(publickeyRepo)
 	// FEP-521a Multikey 対応で remote actor の assertionMethod[] を parse して
@@ -892,6 +896,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	attachmentProbeClient := s.outboundClient(10 * time.Second)
 	federationResolver.SetAttachmentProbeClient(attachmentProbeClient)
 	federationProcessor := corefederation.NewProcessor(federationResolver, followingService, reactionService, noteDeleteService, userRepo, noteRepo)
+	federationProcessor.SetBackground(s.background) // #3661: 世代の停止で待つ
 	federationProcessor.SetLocalBaseURL(s.config.URL)
 
 	// users/show 経由で host が指定されたリモートユーザーをローカル DB に
@@ -1753,6 +1758,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	signupTicketRepo := repository.NewRegistrationTicketRepository(s.db)
 	signupService.SetTicketRepo(signupTicketRepo)
 	signupHandler := apisignup.NewHandler(signupService, metaRepo, idGen)
+	signupHandler.SetBackground(s.background) // #3661: 世代の停止で待つ
 	// #2673: signup も upstream と同じく実効 policy を返す (meta の base override /
 	// role 集約 / server cap 込み)。素の default を返すと /api/i と食い違う。
 	signupHandler.SetUserPolicyResolver(roleService)
@@ -1825,6 +1831,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// Signin (Phase 6)
 	signinHandler := apisignin.NewHandler(userRepo)
+	signinHandler.SetBackground(s.background) // #3661: 世代の停止で待つ
 	if captchaSvc != nil {
 		signinHandler.SetCaptcha(captchaSvc)
 	}
@@ -1855,6 +1862,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// パスワードリセット (認証不要)
 	resetReqRepo := repository.NewPasswordResetRequestRepository(s.db)
 	resetHandler := apiresetpassword.NewHandler(userRepo, resetReqRepo, idGen)
+	resetHandler.SetBackground(s.background) // #3661: 世代の停止で待つ
 	resetHandler.SetServerURL(s.config.URL)
 	// password reset の確認メール送信。配線パターンは signup と同じく
 	// SenderFromMeta で per-call 再 Fetch、runtime 設定変更追従 (#1112)。
@@ -2155,6 +2163,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// Account endpoints
 	registryRepo := repository.NewRegistryRepository(s.db)
 	iHandler := i.NewHandler(userService, idGen)
+	iHandler.SetBackground(s.background) // #3661: 世代の停止で待つ
 	iHandler.SetUserRepo(userRepo)
 	// フォロー申請の作成・承認・取り消しで followee に meUpdated を流す (#3330)。
 	followingService.SetMeUpdatedPublisher(iHandler)
@@ -2530,6 +2539,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// Drive endpoints
 	driveHandler := drive.NewHandler(driveService, idGen)
+	driveHandler.SetBackground(s.background) // #3661: 世代の停止で待つ
 	driveHandler.SetRepos(driveFileRepo, driveFolderRepo, noteRepo)
 	driveHandler.SetUserRepo(userRepo)
 	driveHandler.SetInstanceRepo(instanceRepo)
@@ -3298,7 +3308,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	streamManager.SetNoteVisibilityChecker(noteQueryService)
 	// onlineStatus の source。upstream と同じく WebSocket 接続中だけ
 	// lastActiveDate を更新する (REST では更新しない、#2350)。
-	streamManager.SetLastActiveRecorder(&lastActiveRecorderAdapter{userRepo: userRepo})
+	streamManager.SetLastActiveRecorder(&lastActiveRecorderAdapter{userRepo: userRepo, background: s.background})
 	// timeline channel (LTL/GTL/HTL) の ltlAvailable / gtlAvailable gate 用に role
 	// policy provider を配線する (#1942)。REST timeline と同じく WS でも policy で
 	// 無効化された timeline を subscribe させない (policy bypass 解消)。
@@ -3405,6 +3415,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// recipientRepo (無効にした通知先の除外に使う) が揃う後段で SetWebhook する。
 	abuseInAppNotifier := coreabuse.NewInAppNotifier(roleService, notificationService, repository.NewAbuseReportRepository(s.db))
 	abuseCreatedNotifier := coreabuse.NewCreatedNotifier(abuseInAppNotifier, roleService, stream.NewAdminStreamPublisher(streamPubSub))
+	abuseCreatedNotifier.SetBackground(s.background) // #3661: 世代の停止で待つ
 	usersHandler.SetAbuseReportCreatedNotifier(abuseCreatedNotifier)
 
 	// server / queue stats publishers (#344)。起動時から tick を回して
@@ -3722,6 +3733,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 未設定でも配線しておいてよい (そのときは送らない)。
 	abuseCreatedNotifier.SetMail(miscsmtp.SubjectBodySenderFromMeta(metaRepo, s.config.ProxySMTP), recipientRepo, userRepo, metaRepo)
 	adminHandler := apiadmin.NewHandler(signupService, roleService, metaRepo, userRepo, idGen)
+	adminHandler.SetBackground(s.background)     // #3661: 世代の停止で待つ
 	adminHandler.SetDetailExtras(usersHandler)   // #3330: find-by-email・update-proxy-account のピン留め・移行先
 	adminHandler.SetListPacker(sharedUserPacker) // #3330: show-users・roles/users・abuse-user-reports・show-moderation-logs の利用者を本家 packMany と同じ形に
 	// モデレーターの suspend / unsuspend を local 由来として刻む (#2973)。
@@ -3864,6 +3876,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	adminHandler.SetConfigSetupPassword(s.config.SetupPassword)
 	adminHandler.SetSMTPProxyURL(s.config.ProxySMTP)
 	modLogService := coremodlog.New(modLogRepo, idGen)
+	modLogService.SetBackground(s.background) // #3661: 世代の停止で待つ
 	adminHandler.SetModLogService(modLogService)
 	// #1765: moderator が他人の note を削除したとき deleteNote moderation log を残す。
 	noteDeleteService.SetModeratorDeleteHook(coremodlog.NewNoteDeleteHook(modLogService))
@@ -4221,6 +4234,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// auth/* — MiAuth/OAuth セッション
 	authSessionRepo := repository.NewAuthSessionRepository(s.db)
 	authHandler := apiauth.NewHandler(authSessionRepo, s.config, idGen)
+	authHandler.SetBackground(s.background)   // #3661: 世代の停止で待つ
 	authHandler.SetDetailExtras(usersHandler) // #3330: auth/session/userkey・miauth check のピン留め・移行先
 	api.POST("/auth/session/generate", authHandler.SessionGenerate)
 	api.POST("/auth/session/show", authHandler.SessionShow)
@@ -5022,6 +5036,36 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"isBlockedByTarget が常に false になり、被ブロック中の相手の users/notes・reactions・featured-notes が読める"},
 		{"notes.renoteMutingRepo", notesHandler.HasRenoteMutingRepo(),
 			"renote ミュートが read 時に一切効かない"},
+		// #3661: 応答の後などに投げっぱなしで起動する goroutine は世代の箱から
+		// 起動する。配線が外れると素の goroutine に戻り、世代の停止で待たれない。
+		// 制限が緩む種類の劣化ではないが、外れても起動もテストも通り、メンテナンスで
+		// 世代を作り直すときにだけ表に出るので、ここで起動時に落とす。
+		{"note.background", noteCreateService.HasBackground(),
+			"世代を止めても投稿後のhookのgoroutineを待たず、閉じたDBへ書きに行く"},
+		{"federation.processor.background", federationProcessor.HasBackground(),
+			"世代を止めても受信後のhookのgoroutineを待たず、閉じたDBへ書きに行く"},
+		{"federation.resolver.background", federationResolver.HasBackground(),
+			"世代を止めても新しいノートのchart hookのgoroutineを待たず、閉じたDBへ書きに行く"},
+		{"moderationlog.background", modLogService.HasBackground(),
+			"世代を止めてもモデレーションログのgoroutineを待たず、閉じたDBへ書きに行く"},
+		{"signin.background", signinHandler.HasBackground(),
+			"世代を止めてもサインインの記録・通知・メールのgoroutineを待たず、閉じたDBへ書きに行く"},
+		{"auth.background", authHandler.HasBackground(),
+			"世代を止めてもtokenの作成の通知のgoroutineを待たず、閉じたDBへ書きに行く"},
+		{"i.background", iHandler.HasBackground(),
+			"世代を止めてもrel=meの検証と確認メールのgoroutineを待たず、閉じたDBへ書きに行く"},
+		{"drive.background", driveHandler.HasBackground(),
+			"世代を止めてもURLからのアップロードのgoroutineを待たず、閉じたDBへ書きに行く"},
+		{"signup.background", signupHandler.HasBackground(),
+			"世代を止めても確認メールのgoroutineを待たず、閉じたDBへ書きに行く"},
+		{"resetpassword.background", resetHandler.HasBackground(),
+			"世代を止めてもリセットのメールのgoroutineを待たず、閉じたDBへ書きに行く"},
+		{"admin.background", adminHandler.HasBackground(),
+			"世代を止めてもテストメールのgoroutineを待たず、閉じたDBへ書きに行く"},
+		{"abuse.background", abuseCreatedNotifier.HasBackground(),
+			"世代を止めても通報のメールのgoroutineを待たず、閉じたDBへ書きに行く"},
+		{"notification.background", notificationService.HasBackground(),
+			"世代を止めても遅らせて送るunreadNotificationとWeb Pushを待たず、閉じたDBとqueueを使う"},
 	})
 }
 
@@ -5061,17 +5105,20 @@ func (a *notifReaderAdapter) ReadAll(userID string) error {
 // 書き込みは goroutine に逃がして接続処理を待たせない。
 type lastActiveRecorderAdapter struct {
 	userRepo repository.UserRepository
+	// background は更新の goroutine を起動する世代の箱 (#3661)。接続の close
+	// handler からも呼ばれるので、世代の停止で待たないと閉じた DB へ書きに行く。
+	background *bgwork.Group
 }
 
 func (a *lastActiveRecorderAdapter) RecordActive(userID string) {
 	if a.userRepo == nil || userID == "" {
 		return
 	}
-	go func() {
+	a.background.Go(func(context.Context) {
 		if err := a.userRepo.UpdateUser(userID, map[string]any{"lastActiveDate": time.Now()}); err != nil {
 			slog.Debug("streaming: lastActiveDate update failed", "userId", userID, "err", err)
 		}
-	}()
+	})
 }
 
 // sensitiveChannelLookup answers "is this channel sensitive?" for antenna

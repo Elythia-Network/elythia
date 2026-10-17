@@ -222,6 +222,8 @@ func TestNew_FailedConstructionClosesItsSubscriptions(t *testing.T) {
 	require.NotNil(t, built.internalPubSub, "前提: 購読を作る所まで進んでから失敗している")
 	assert.Eventually(t, func() bool { return len(mr.PubSubChannels("*")) == 0 },
 		5*time.Second, 20*time.Millisecond, "失敗した構築の購読が残っている: %v", mr.PubSubChannels("*"))
+	// 失敗した構築の箱も閉じている (#3661)。使われない世代の goroutine を起動しない。
+	assert.False(t, built.background.Go(func(context.Context) {}), "失敗した構築の箱が閉じていない")
 }
 
 // TestNewServer_ConstructionIsSerialized checks that two constructions in one
