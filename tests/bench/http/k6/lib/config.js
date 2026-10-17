@@ -36,8 +36,10 @@ export const SCENARIO_DURATION = 31;
 // エンドポイントを比較不能にする。値は PR の上の A/A で見直す。base と head (本家と Elythia)
 // は必ず同じ率で流す (このファイルを両側で共有する)。
 export const arrivalRates = {
-  ping: 1000,
-  meta: 1000,
+  // 1000 では PR #3658 の上の実行で、k6 が止められた区切りが本家・Elythia とも最大 2〜5%
+  // になった (meta は応答が大きい分 ping より多い)。半分にして 2% の線から離す
+  ping: 500,
+  meta: 500,
   "local-timeline": 50,
   "users-show": 100,
   i: 100,
