@@ -3222,6 +3222,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 高いので、publish は書き込みの経路から切り離し、溜まった id を 1 通に
 	// まとめて送る (理由と量は cachebus.userQueue)。停止時は溜まっている分を
 	// 最大 2 秒かけて送ってから止まる (絵文字と同じ)。
+	s.crossProcessCaches = crossProcessCaches{
+		instances: instanceService, relays: relaySvc, decorations: avatarDecorationResolver,
+		emojiDecorations: emojiDecorationResolver, emojis: emojiRepo,
+	}
+
 	userCacheLink := cachebus.ConnectUsers(s.userCache, internalPubSub, idGen.Generate(time.Now()))
 	s.startConstructionWorker(userCacheLink.Run)
 
@@ -5446,4 +5451,15 @@ func (s *instanceActorSigner) loadLocked() (*activitypub.PrivateKey, func()) {
 		}
 	}
 	return key, nil
+}
+
+// crossProcessCaches holds the caches whose invalidations travel between
+// processes (#3664), for the wiring test.
+type crossProcessCaches struct {
+	instances   *coreinstance.Service
+	relays      *corerelay.Service
+	decorations *avatardecoration.Resolver
+	// emojiDecorations と emojis は、絵文字由来のデコレーションの配線を見るため。
+	emojiDecorations *avatardecoration.EmojiResolver
+	emojis           *repository.CachedEmojiRepository
 }
