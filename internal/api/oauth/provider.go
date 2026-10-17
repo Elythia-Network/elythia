@@ -35,10 +35,11 @@ type TokenStore interface {
 	DeleteByID(id string) error
 }
 
-// TokenInvalidator drops a raw token from the auth middleware cache. Without
-// it, a revoked token keeps working until the 30s TTL expires.
+// TokenInvalidator drops a raw token of userID from the auth middleware
+// cache (and that user's entries on the other processes, #3664). Without it,
+// a revoked token keeps working until the 30s TTL expires.
 type TokenInvalidator interface {
-	InvalidateToken(token string)
+	InvalidateUserToken(userID, token string)
 }
 
 // IDGenerator generates access-token row IDs (aidx).
@@ -339,7 +340,7 @@ func (h *Handler) Token(c echo.Context) error {
 				slog.Warn("oauth: failed to revoke token on code replay", "tokenId", tid, "err", derr)
 			} else {
 				if raw != "" && h.authInvalidator != nil {
-					h.authInvalidator.InvalidateToken(raw)
+					h.authInvalidator.InvalidateUserToken(g.UserID, raw)
 				}
 				// その token で既に張られた WebSocket も閉じる (mk-go 独自)。
 				if h.streamRevoker != nil {

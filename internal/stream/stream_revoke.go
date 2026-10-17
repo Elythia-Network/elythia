@@ -71,11 +71,12 @@ func (m *Manager) settleDelay() time.Duration {
 // defaultRevokeRecheck は 1 回目の閉じ処理から 2 回目 (安全網) までの間隔。
 //
 // **HTTP 側の tokenCache (30 秒) より長くする。** 失効の直前に DB を引いた
-// リクエストが、無効化 event を受けた後で cache に積む競合は避けられない
-// (引いた時点では旧 token が有効だった)。その entry は最長で TTL の間生きるので、
-// 1 回目で閉じた直後の再接続がそれで認証されうる。TTL が切れた後にもう一度同じ
-// 条件で閉じれば、その経路で張り直された接続も残らない。router は
-// middleware の TTL から明示的に設定する (SetRevokeRecheckDelay)。
+// リクエストが、無効化 event を受けた後で cache に積む競合は、tokenCache が
+// 「読んでいる間に捨てられた利用者は積まない」ので塞がっている (#3664) が、
+// 無効化の通知を取りこぼしたプロセスには旧 token の entry が最長で TTL の間
+// 残りうる。1 回目で閉じた直後の再接続がそれで認証されても、TTL が切れた後に
+// もう一度同じ条件で閉じれば残らない。router は middleware の TTL から明示的に
+// 設定する (SetRevokeRecheckDelay)。
 const defaultRevokeRecheck = 35 * time.Second
 
 // SetRevokeRecheckDelay overrides the delay before the second (safety-net)

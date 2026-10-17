@@ -283,6 +283,8 @@ func TestRevokeToken_ByRawTokenForAppIssuedToken(t *testing.T) {
 	// invalidator が raw token で呼ばれていることを確認 (= drop-in 互換)。
 	// hash の形で認証された鍵も消す (#3490)。
 	require.Equal(t, []string{rawToken, hashWithSecret}, inv.calls)
+	// 他のプロセスへは token ではなく利用者で伝わる (#3664)。
+	assert.Equal(t, []string{stubUser.ID, stubUser.ID}, inv.tokenUsers)
 }
 
 // TestRevokeToken_InvalidatorByTokenIDPath は tokenId 経由の revoke でも

@@ -479,7 +479,7 @@ func (h *Handler) RegenerateToken(c echo.Context) error {
 	// 場合は old token entry を即時削除する。production では router で必ず
 	// wire される。
 	if h.authInvalidator != nil && oldToken != "" {
-		h.authInvalidator.InvalidateToken(oldToken)
+		h.authInvalidator.InvalidateUserToken(u.ID, oldToken)
 	}
 	// TS本家 regenerate-token.ts:60 と同じく、token再生成成功後にmainへ
 	// publishする。body無し(type のみで、他セッションはtoken無効化を

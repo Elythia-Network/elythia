@@ -188,3 +188,56 @@ func TestMove_UnexpectedError(t *testing.T) {
 	rec := post(h.Move, `{"moveToAccount":"https://x","password":"pw"}`, user)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
+
+// TestMove_InvalidatesAuthCache pins that i/move drops the mover's auth cache
+// entries (and tells the other processes, #3664): the cached user predates
+// movedToUri, so the endpoints closed to moved accounts would keep accepting
+// it for the cache TTL. It drops them whether or not the move succeeded,
+// since a failed move may have written movedToUri already.
+func TestMove_InvalidatesAuthCache(t *testing.T) {
+	for name, err := range map[string]error{"success": nil, "failure": errors.New("boom")} {
+		t.Run(name, func(t *testing.T) {
+			h, user, setMover := moveHandlerWithPasswordUser(t)
+			setMover(&stubMover{err: err})
+			inv := &stubTokenInvalidator{}
+			h.SetAuthInvalidator(inv)
+			post(h.Move, `{"moveToAccount":"https://other.example/users/x","password":"pw"}`, user)
+			assert.Equal(t, []string{"me"}, inv.userCalls)
+		})
+	}
+
+	// 移行まで進まなかった (パスワードが違う) ときは捨てない。
+	h, user, setMover := moveHandlerWithPasswordUser(t)
+	setMover(&stubMover{})
+	inv := &stubTokenInvalidator{}
+	h.SetAuthInvalidator(inv)
+	post(h.Move, `{"moveToAccount":"https://other.example/users/x","password":"wrong"}`, user)
+	assert.Empty(t, inv.userCalls)
+}
+
+// moveOrderInvalidator checks, when the auth cache is invalidated, that the
+// move has already been carried out.
+type moveOrderInvalidator struct {
+	mover *stubMover
+	seen  []bool
+}
+
+func (m *moveOrderInvalidator) InvalidateUserToken(string, string) {}
+
+func (m *moveOrderInvalidator) InvalidateTokensForUser(string) {
+	m.seen = append(m.seen, m.mover.called)
+}
+
+// TestMove_InvalidatesAfterTheMove pins that i/move drops the cached
+// authentications only after the mover wrote movedToUri (#3664). Dropping
+// first lets a request between the drop and the write cache the user from
+// before the move again.
+func TestMove_InvalidatesAfterTheMove(t *testing.T) {
+	h, user, setMover := moveHandlerWithPasswordUser(t)
+	sm := &stubMover{}
+	setMover(sm)
+	inv := &moveOrderInvalidator{mover: sm}
+	h.SetAuthInvalidator(inv)
+	post(h.Move, `{"moveToAccount":"https://other.example/users/x","password":"pw"}`, user)
+	assert.Equal(t, []bool{true}, inv.seen)
+}

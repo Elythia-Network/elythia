@@ -183,8 +183,11 @@ type Handler struct {
 // で使う (#965)。token 単独削除では他端末の cache が最大 30s stale 続け、
 // 削除済 user 名義で操作可能な攻撃面が残るため (PR #966 で admin 経路
 // から要求された same-shape gap)。
+//
+// InvalidateUserToken は token 1 つを捨てる。他のプロセスへは利用者 ID で伝わる
+// (token は pub/sub に流さない、#3664)。
 type TokenInvalidator interface {
-	InvalidateToken(token string)
+	InvalidateUserToken(userID, token string)
 	InvalidateTokensForUser(userID string)
 }
 
@@ -436,28 +439,6 @@ func (h *Handler) SetAuthInvalidator(inv TokenInvalidator) {
 	h.authInvalidator = inv
 }
 
-// invalidateRequestTokenCache removes the current request's token entry
-// from the auth middleware tokenCache so that subsequent requests with the
-// same token are forced to re-resolve user state from DB. Self-mutation
-// handlers call this after committing changes that would otherwise be
-// invisible to subsequent middleware.GetUser(c) reads within the cache
-// TTL window (#960 / #962 P0).
-//
-// noop when invalidator is not wired (= unit test or router-config drift)
-// or when no token is in the request context (= request was authenticated
-// via a non-token mechanism, or middleware wiring drift). Defensive nil-
-// guard so handler success paths do not regress on minor wiring changes.
-func (h *Handler) invalidateRequestTokenCache(c echo.Context) {
-	if h.authInvalidator == nil {
-		return
-	}
-	tok := middleware.GetToken(c)
-	if tok == "" {
-		return
-	}
-	h.authInvalidator.InvalidateToken(tok)
-}
-
 // invalidateUserTokenCache removes every cached entry that resolves to the
 // given userID, across all of the user's tokens (native login + access
 // tokens / multi-device sessions). Self-mutation that affects the entire
@@ -465,11 +446,11 @@ func (h *Handler) invalidateRequestTokenCache(c echo.Context) {
 // of the same user are also locked out within the cache TTL window
 // (#967, sibling of admin-side #966 user-token invalidate).
 //
-// noop when invalidator is not wired or userID is empty. invalidateRequest
-// TokenCache (token 単独削除) との関係: 本 helper は user 全 token を対象
-// にするので、自分以外の device session も即時 cache から消える上位互換。
-// 自分 1 device しか想定しない update 系では request-token helper の方が
-// 軽い (O(1) vs O(N))。
+// i/update と i/move もこれを使う (#3664。本家の localUserUpdated と同じく
+// 利用者単位で、他のプロセスへも伝わる)。**DB への書き込みを commit した後に
+// 呼ぶこと** (AuthMiddleware.InvalidateTokensForUser の前提)。
+//
+// noop when invalidator is not wired or userID is empty.
 func (h *Handler) invalidateUserTokenCache(userID string) {
 	if h.authInvalidator == nil || userID == "" {
 		return
@@ -2087,10 +2068,10 @@ func (h *Handler) Update(c echo.Context) error {
 	}
 
 	// auth middleware の tokenCache (30 秒 TTL) は name / description などの
-	// mutable field を持つ user object を保持するため、更新後も同じ token で
-	// stale な値が返り続けてしまう。helper 経由で本 request の token を即時
-	// invalidate して、次回 lookup で DB から fresh fetch させる (#960)。
-	h.invalidateRequestTokenCache(c)
+	// mutable field を持つ user object を保持するため、更新後も stale な値が
+	// 返り続けてしまう (#960)。本 request の token だけでなく、利用者の全 token
+	// を全プロセスで捨てる (#3664。本家の localUserUpdated と同じく利用者単位)。
+	h.invalidateUserTokenCache(me.ID)
 
 	// upstream Misskey TS UserEntityService.ts:590-630 の MeDetailed shape を
 	// drop-in 互換で返す。i/update のレスポンスはフロントの
@@ -2800,8 +2781,8 @@ func (h *Handler) HasTOTPReplayGuard() bool { return h.totpReplayGuard != nil }
 // 通り続ける**。router 側のコメントもこれを security regression と呼んで
 // いる (#2682)。
 //
-// 引くのは 4 箇所: i/regenerate-token / i/revoke-token (apps.go) /
-// i/delete-account (handler_extra.go) / invalidateRequestTokenCache。
+// 引くのは 5 箇所: i/regenerate-token / i/revoke-token (apps.go) /
+// i/delete-account (handler_extra.go) / i/update / i/move (move.go)。
 // **失効の主経路である i/revoke-token を含む**ので、これだけを
 // regenerate-token の話と読まないこと。
 func (h *Handler) HasAuthInvalidator() bool { return h.authInvalidator != nil }

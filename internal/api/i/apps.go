@@ -245,7 +245,7 @@ func (h *Handler) RevokeToken(c echo.Context) error {
 	// cache TTL (= 30 秒) 遅延して上流互換でなくなるため、regenerate-token
 	// (#884) と同じく invalidator が wire されている場合は即時削除する。
 	if h.authInvalidator != nil && tok.Token != "" {
-		h.authInvalidator.InvalidateToken(tok.Token)
+		h.authInvalidator.InvalidateUserToken(u.ID, tok.Token)
 	}
 	// **hash の形で認証された分も消す (#3490)。** 本家の app 認証のクライアントは
 	// i = sha256(accessToken + appSecret) (= 保存した hash) を送るので、cache の
@@ -253,7 +253,7 @@ func (h *Handler) RevokeToken(c echo.Context) error {
 	// (`OnStreamRevoke` → `InvalidateTokensForUser`) ので大文字の形も含めて消えるが、
 	// revoker を配線しない構成でも小文字の形は即時に消えるよう、ここでも消す。
 	if h.authInvalidator != nil && tok.Hash != "" {
-		h.authInvalidator.InvalidateToken(tok.Hash)
+		h.authInvalidator.InvalidateUserToken(u.ID, tok.Hash)
 	}
 	// その token で張られた WebSocket も閉じる (mk-go 独自)。アプリ連携の解除も
 	// この endpoint を通る。

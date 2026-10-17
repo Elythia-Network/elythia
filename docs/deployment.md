@@ -718,7 +718,7 @@ listen に失敗してもログを出して動き続け、配送ノードなら�
   通知が届かない場合の上限は、どれもそれぞれのキャッシュの TTL になる。自分の通知の
   扱いは 2 通りある。`metaUpdated`・`federationRulesUpdated`・`antennaUpdated` は送信元を
   載せず、書いたプロセスも自分の通知を受けて捨て直す。それ以外 (`rolesUpdated`・
-  `relationCacheInvalidated`・`emojiCacheInvalidated` と #3664 の 4 つ) は送信元の id を
+  `relationCacheInvalidated`・`emojiCacheInvalidated` と #3664 の 5 つ) は送信元の id を
   載せ、書いたプロセスは publish の前に自分のキャッシュを捨て、自分の通知は受け流す
 
   | キャッシュ | event | 通知が届かないときの上限 (TTL) |
@@ -733,16 +733,19 @@ listen に失敗してもログを出して動き続け、配送ノードなら�
   | アバターのデコレーション (catalog と絵文字由来) | `avatarDecorationCacheInvalidated` | 30 秒 |
   | インスタンスの停止判定 (配送の可否) | `instanceSuspendCacheInvalidated` | 5 分 |
   | 承認済みの relay の一覧 | `relayCacheInvalidated` | 10 分 |
+  | 認証 (token から利用者を引いた結果) | `authCacheInvalidated` | 30 秒 |
 
-  下の 4 つは #3664 で足した。それまでは書いたプロセスでしか捨てず、例えば管理画面で
+  下の 5 つは #3664 で足した。それまでは書いたプロセスでしか捨てず、例えば管理画面で
   インスタンスを停止しても、配送ノードは最大 5 分その相手へ配送を続けていた。
-  この 4 つと `emojiCacheInvalidated` は、受け側の待ち行列 (トピックごとに 1024 通) が
+  この 5 つと `emojiCacheInvalidated` は、受け側の待ち行列 (トピックごとに 1024 通) が
   溢れて通知を捨てたときも、そのキャッシュを丸ごと捨てて埋める (捨てる呼び出しは
   トピックごとに同時に 1 つで、呼んでいる間や直後に捨てた分は、前の呼び出しから
   200 ミリ秒以上空けてもう 1 回。溢れが続いても、捨てる回数は 1 秒に数回まで)。
   絵文字由来のデコレーションは絵文字の一覧のキャッシュから作るので、
   `emojiCacheInvalidated` を受けたプロセスは、ローカルの絵文字に関わる通知では絵文字の
   キャッシュを捨てた後にデコレーションの map も捨てる (読めない通知・溢れでは両方)。
+  認証の event は捨てた利用者の ID だけを載せ (token も hash も載せない)、受けた
+  プロセスはその利用者の分を全部捨てる。
   **利用者の event は書き込みの頻度が高い** (リモートの投稿を受けるたびに投稿者の
   `notesCount` を数え直すなど、`CachedUserRepository` を通る書き込み 1 回で id を
   1 つ捨てる)。そのため絵文字と同じく publish を別の goroutine から行い、送っている

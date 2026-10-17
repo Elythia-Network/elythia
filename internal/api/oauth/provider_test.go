@@ -104,10 +104,14 @@ func (s *fakeTokenStore) DeleteByID(id string) error {
 	return nil
 }
 
-// fakeInvalidator records raw tokens dropped from the auth cache.
-type fakeInvalidator struct{ tokens []string }
+// fakeInvalidator records raw tokens dropped from the auth cache and their
+// users.
+type fakeInvalidator struct{ tokens, users []string }
 
-func (f *fakeInvalidator) InvalidateToken(t string) { f.tokens = append(f.tokens, t) }
+func (f *fakeInvalidator) InvalidateUserToken(userID, t string) {
+	f.tokens = append(f.tokens, t)
+	f.users = append(f.users, userID)
+}
 
 type fakeIDGen struct{ n int }
 
@@ -411,6 +415,8 @@ func TestToken_ReplayRevokesAndRejects(t *testing.T) {
 	assert.Contains(t, hn.tokens.deleted, issuedID, "replay は発行済み token を revoke する")
 	// DB から消すだけでは auth cache (30s TTL) が残るので、raw token も落とす。
 	assert.Contains(t, inv.tokens, issuedToken, "replay は auth cache も無効化する")
+	// 他のプロセスへは利用者で伝わる (#3664)。
+	assert.Equal(t, []string{"u1"}, inv.users)
 }
 
 type fakeStreamRevoker struct {

@@ -3159,6 +3159,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// #3664: relay の一覧 (承認済みのもの) も同じ。Accept / Reject は連合の受信で、
 	// 追加・削除は管理画面で書かれ、ノートを relay へ配るのは投稿を受けたプロセス。
 	cachebus.ConnectRelays(relaySvc, internalPubSub, idGen.Generate(time.Now()))
+	// #3664: 認証の tokenCache の cross-worker invalidation。捨てた利用者の ID だけを
+	// 伝え、他のプロセスはその利用者の entry を捨てる (token は流さない)。
+	cachebus.ConnectAuth(s.auth, internalPubSub, idGen.Generate(time.Now()))
 
 	// #3383: 絵文字の (name, host) cache の cross-worker invalidation。
 	// リモート絵文字の作成・更新は連合の受信 (MK_ONLY_QUEUE のプロセス) で
@@ -3326,7 +3329,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// entry を落とす。tokenCache はプロセス内の map なので、Web ノードが複数
 	// あると失効を処理したノード以外に旧 token の entry が残り、閉じた接続が
 	// そのノードへ再接続すると無期限に残る。
-	streamManager.OnStreamRevoke(s.auth.InvalidateTokensForUser)
+	// 自プロセスだけで捨てる口を使う。失効の通知は全プロセスに届くので、ここから
+	// さらに authCacheInvalidated を publish すると、受けたプロセスの数だけ同じ
+	// 通知が飛ぶ。
+	streamManager.OnStreamRevoke(s.auth.InvalidateTokensForUserLocally)
 	// 2 回目の閉じ処理は tokenCache の TTL が切れた後に行う (DB を引いた直後に
 	// 無効化 event を追い越して積まれた entry も、そこで確実に切れている)。
 	streamManager.SetRevokeRecheckDelay(middleware.AuthCacheTTL + 5*time.Second)
