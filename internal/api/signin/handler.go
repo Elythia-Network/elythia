@@ -2,6 +2,7 @@ package signin
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	jsonv2 "encoding/json/v2"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/bgwork"
 	"github.com/elythia-network/elythia/internal/core/captcha"
 	coreemail "github.com/elythia-network/elythia/internal/core/email"
 	"github.com/elythia-network/elythia/internal/core/twofactor"
@@ -62,6 +64,9 @@ type MainStreamPublisher interface {
 
 // Handler handles signin-related API endpoints.
 type Handler struct {
+	// background は応答の後の処理 (サインインの記録・通知・メール) を起動する箱 (#3661)。世代の停止で
+	// 待つ。nil なら素の goroutine で起動する (テスト)。
+	background          *bgwork.Group
 	userRepo            repository.UserRepository
 	webauthnSvc         *twofactor.WebAuthnService
 	securityKeyRepo     repository.UserSecurityKeyRepository
@@ -114,6 +119,13 @@ func (h *Handler) HasMetaRepo() bool { return h.metaRepo != nil }
 func (h *Handler) SetIPRecorder(rec IPRecorder) {
 	h.ipRecorder = rec
 }
+
+// SetBackground sets the group the work after a response runs in, so stopping
+// the server generation waits for it (#3661).
+func (h *Handler) SetBackground(g *bgwork.Group) { h.background = g }
+
+// HasBackground reports whether SetBackground received a group.
+func (h *Handler) HasBackground() bool { return h.background != nil }
 
 // NewHandler creates a new signin Handler.
 func NewHandler(userRepo repository.UserRepository) *Handler {
@@ -639,13 +651,13 @@ func (h *Handler) RecordSuccessfulSignin(userID, ip string, headers http.Header)
 		h.ipRecorder.Record(userID, ip)
 	}
 	if h.signinRepo != nil && h.idGen != nil {
-		go h.recordSignin(userID, ip, headers, true)
+		h.background.Go(func(context.Context) { h.recordSignin(userID, ip, headers, true) })
 	}
 	if h.loginNotifier != nil {
-		go h.loginNotifier.OnLogin(userID)
+		h.background.Go(func(context.Context) { h.loginNotifier.OnLogin(userID) })
 	}
 	if h.emailSender != nil {
-		go h.sendNewLoginEmail(userID)
+		h.background.Go(func(context.Context) { h.sendNewLoginEmail(userID) })
 	}
 }
 
@@ -810,7 +822,8 @@ const verifierRetryAfterSeconds = "360"
 func (h *Handler) fail(c echo.Context, user *model.User, status int, errID string) error {
 	if user != nil && h.signinRepo != nil && h.idGen != nil {
 		hdrs := c.Request().Header.Clone()
-		go h.recordSignin(user.ID, c.RealIP(), hdrs, false)
+		uid, ip := user.ID, c.RealIP()
+		h.background.Go(func(context.Context) { h.recordSignin(uid, ip, hdrs, false) })
 	}
 	return c.JSON(status, errBody(errID))
 }
