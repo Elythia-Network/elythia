@@ -475,7 +475,6 @@ func TestExecLocal(t *testing.T) {
 }
 
 func TestRedisGlobAndProtection(t *testing.T) {
-	assert.Equal(t, `a\*b\?c\[d\]e\\f:`, escapeGlob(`a*b?c[d]e\f:`))
 	for _, k := range []string{
 		"passwordguard:failures:u1", "passwordguard:failures:u1:10.0.0.0/24",
 		"mk:2fa:totp:used:u1:123456", "mk:ap:inbox:seen:abc", "mk:signupform:nonce:n",
@@ -560,6 +559,24 @@ func TestCleanRedisAfterRestore(t *testing.T) {
 	require.NoError(t, def.Close())
 	_, err = CleanRedisAfterRestore(ctx, RedisCleanupTargets{Default: RedisCleanupTarget{Client: def}})
 	assert.Error(t, err)
+}
+
+// 接頭辞の glob の記号は逃がして渡す。逃がさないと `a[b]:` が `ab:` の key まで消す。
+func TestCleanRedisAfterRestore_EscapesPrefix(t *testing.T) {
+	rdb := rsStartRedis(t)
+	ctx := context.Background()
+	const p = "a[b]:"
+	for _, k := range []string{p + "list:homeTimeline:u1", p + "cleanRemoteNotes:cursor", "ab:list:homeTimeline:u1", "ab:cleanRemoteNotes:cursor"} {
+		require.NoError(t, rdb.Set(ctx, k, "1", 0).Err())
+	}
+	res, err := CleanRedisAfterRestore(ctx, RedisCleanupTargets{
+		Default:   RedisCleanupTarget{Client: rdb, Prefix: p},
+		Timelines: RedisCleanupTarget{Client: rdb, Prefix: p},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), res.Total())
+	assert.Equal(t, int64(0), rdb.Exists(ctx, p+"list:homeTimeline:u1", p+"cleanRemoteNotes:cursor").Val())
+	assert.Equal(t, int64(2), rdb.Exists(ctx, "ab:list:homeTimeline:u1", "ab:cleanRemoteNotes:cursor").Val())
 }
 
 // TestCleanRedisManyKeys crosses SCAN pages.
