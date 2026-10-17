@@ -587,3 +587,144 @@ func TestPubSubService_PublishManyErrors(t *testing.T) {
 	assert.Error(t, errs[0])
 	assert.Error(t, errs[1])
 }
+
+// TestPubSubService_OverflowNotifiesSubscriber pins how a subscriber that
+// asked for it learns that messages of its topic were dropped (#3664): one
+// call at a time per topic however many messages are dropped, and drops made
+// while the function runs are covered by exactly one more call after it
+// returns. Plain subscribers and removed handlers are not called.
+func TestPubSubService_OverflowNotifiesSubscriber(t *testing.T) {
+	svc := NewPubSubService(testRedis.Client, "overflow:")
+	ctx := context.Background()
+	defer svc.Close()
+
+	release := make(chan struct{})
+	defer close(release)
+	var calls, running, maxRunning atomic.Int32
+	proceed := make(chan struct{})
+	stop := svc.SubscribeWithOverflow(ctx, "q", func([]byte) { <-release }, func() {
+		n := running.Add(1)
+		for {
+			m := maxRunning.Load()
+			if n <= m || maxRunning.CompareAndSwap(m, n) {
+				break
+			}
+		}
+		calls.Add(1)
+		<-proceed
+		running.Add(-1)
+	})
+	// 同じトピックの、溢れを知らせない購読者。
+	_ = svc.Subscribe(ctx, "q", func([]byte) {})
+
+	fill := func(n int) {
+		for range n {
+			svc.enqueue(svc.channel("q"), []byte("1"))
+		}
+	}
+	runnerDone := func() bool {
+		svc.mu.Lock()
+		defer svc.mu.Unlock()
+		return !svc.subs[svc.channel("q")].overflowRunning
+	}
+
+	// drain を 1 件目で止めた状態で、上限を超えて積む。関数は止めておく。
+	fill(topicQueueLimit + 50)
+	require.Eventually(t, func() bool { return calls.Load() == 1 }, 5*time.Second, time.Millisecond)
+	// 関数が止まっている間に何件捨てても、呼び出しは増えず、同時に走るのは 1 つ。
+	fill(200)
+	time.Sleep(50 * time.Millisecond)
+	assert.Equal(t, int32(1), calls.Load(), "no further call while one is running")
+	assert.Equal(t, int32(1), maxRunning.Load())
+
+	// 戻すと、走っている間に捨てた分のためにもう 1 回だけ呼ぶ。
+	proceed <- struct{}{}
+	require.Eventually(t, func() bool { return calls.Load() == 2 }, 5*time.Second, time.Millisecond,
+		"drops during the call must be covered by one more call")
+	proceed <- struct{}{}
+	require.Eventually(t, runnerDone, 5*time.Second, time.Millisecond)
+	assert.Equal(t, int32(2), calls.Load(), "nothing was dropped during the second call")
+	assert.Equal(t, int32(1), maxRunning.Load())
+
+	// 呼び終えた後に捨てた分は、新しい 1 回で知らせる。1 件だけ捨てる (複数を
+	// 捨てると、呼び始めた後の分のためにもう一周しうる)。
+	fill(1)
+	require.Eventually(t, func() bool { return calls.Load() == 3 }, 5*time.Second, time.Millisecond)
+	proceed <- struct{}{}
+	require.Eventually(t, runnerDone, 5*time.Second, time.Millisecond)
+
+	// 外したハンドラには知らせない。
+	stop()
+	fill(10)
+	time.Sleep(50 * time.Millisecond)
+	assert.Equal(t, int32(3), calls.Load())
+	assert.Equal(t, int32(1), maxRunning.Load())
+}
+
+// TestPubSubService_OverflowAfterCloseIsNotCalled pins that a pending
+// overflow call does nothing once the service is closed.
+func TestPubSubService_OverflowAfterCloseIsNotCalled(t *testing.T) {
+	svc := NewPubSubService(testRedis.Client, "overflowclose:")
+	var called atomic.Bool
+	_ = svc.SubscribeWithOverflow(context.Background(), "q", func([]byte) {}, func() { called.Store(true) })
+	svc.mu.Lock()
+	ts := svc.subs[svc.channel("q")]
+	ts.overflowDirty = true
+	ts.overflowRunning = true
+	svc.mu.Unlock()
+	require.NoError(t, svc.Close())
+	svc.runOverflow(svc.channel("q"), ts)
+	assert.False(t, called.Load())
+	assert.False(t, ts.overflowRunning)
+}
+
+// TestPubSubService_OverflowCallsAreSpacedOut pins that while messages keep
+// being dropped, the overflow function runs at most once per minimum interval
+// instead of about once per dropped message, and that a drop after the last
+// call is still covered by one more call (#3664).
+func TestPubSubService_OverflowCallsAreSpacedOut(t *testing.T) {
+	svc := NewPubSubService(testRedis.Client, "overflowrate:")
+	const interval = 50 * time.Millisecond
+	svc.overflowMinInterval = interval
+	ctx := context.Background()
+	defer svc.Close()
+
+	release := make(chan struct{})
+	defer close(release)
+	var mu sync.Mutex
+	var calls []time.Time
+	_ = svc.SubscribeWithOverflow(ctx, "q", func([]byte) { <-release }, func() {
+		mu.Lock()
+		calls = append(calls, time.Now())
+		mu.Unlock()
+	})
+	drop := func() { svc.enqueue(svc.channel("q"), []byte("1")) }
+	for range topicQueueLimit + 1 {
+		drop()
+	}
+
+	// 1 ms ごとに 1 件ずつ、0.5 秒捨て続ける。
+	var lastDrop time.Time
+	for start := time.Now(); time.Since(start) < 500*time.Millisecond; {
+		drop()
+		lastDrop = time.Now()
+		time.Sleep(time.Millisecond)
+	}
+	// 最後に捨てた分も、その後の 1 回で埋まる。
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(calls) > 0 && calls[len(calls)-1].After(lastDrop)
+	}, 5*time.Second, time.Millisecond, "a drop after the last call must be covered")
+
+	mu.Lock()
+	defer mu.Unlock()
+	// 最初の呼び出しから最後に捨てるまでの実測の時間を間隔で割った回数と、最初と
+	// 最後の 1 回ずつ (負荷でループが延びても上限が一緒に延びる)。間隔が無ければ
+	// 捨てた件数とほぼ同じ回数 (数百回) になる。
+	limit := int(lastDrop.Sub(calls[0])/interval) + 2
+	assert.LessOrEqual(t, len(calls), limit, "calls: %d", len(calls))
+	for i := 1; i < len(calls); i++ {
+		assert.GreaterOrEqual(t, calls[i].Sub(calls[i-1]), interval-5*time.Millisecond, "call %d came too soon", i)
+	}
+}

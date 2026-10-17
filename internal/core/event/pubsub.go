@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 
@@ -52,6 +53,10 @@ type PubSubService struct {
 	// 張り替えをまたいで同じ id が再利用されると、未呼び出しの解除関数が
 	// 別人のハンドラを消す。
 	nextID uint64
+
+	// overflowMinInterval は、溢れの関数を続けて呼ぶときの最小の間隔
+	// (0 なら defaultOverflowMinInterval)。テストで縮める。
+	overflowMinInterval time.Duration
 }
 
 // topicSubscription is the in-process state of one topic: its handlers and the
@@ -65,6 +70,14 @@ type topicSubscription struct {
 	pending  [][]byte
 	draining bool
 	dropped  uint64
+	// overflow は待ち行列が溢れて捨てたときに呼ぶもの (SubscribeWithOverflow、
+	// ハンドラの id ごと)。呼び出しはトピックごとに高々 1 つの goroutine
+	// (runOverflow) が順に行う。overflowRunning はその goroutine が居る印、
+	// overflowDirty は「最後に関数を呼び始めた後に捨てた」印で、立っていれば
+	// 呼び終えた後にもう一周する。
+	overflow        map[uint64]func()
+	overflowRunning bool
+	overflowDirty   bool
 }
 
 // NewPubSubService creates a new PubSubService.
@@ -170,6 +183,21 @@ func (p *PubSubService) start(ctx context.Context) {
 // 購読者を外すのかを表現できず、他人の購読を閉じてしまう。戻り値は何度呼んで
 // も安全。
 func (p *PubSubService) Subscribe(ctx context.Context, channel string, handler func([]byte)) func() {
+	return p.SubscribeWithOverflow(ctx, channel, handler, nil)
+}
+
+// SubscribeWithOverflow is Subscribe with a function called when messages of
+// the channel were dropped because its queue was full. onOverflow runs on its
+// own goroutine, possibly concurrently with handler, and never concurrently
+// with itself: per topic one goroutine calls the functions, and drops that
+// happen while it is calling them make it call them once more afterwards, at
+// least defaultOverflowMinInterval after the previous call. A nil onOverflow
+// is the same as Subscribe.
+//
+// 通常の購読者 (タイムラインなど) は落ちた通知を取り戻す手段が無いので、
+// 捨てるだけ (ログは出す)。キャッシュの無効化のように「全部を捨てる」で
+// 取りこぼしを埋められる購読者だけが使う (#3664)。
+func (p *PubSubService) SubscribeWithOverflow(ctx context.Context, channel string, handler func([]byte), onOverflow func()) func() {
 	p.start(ctx)
 	prefixed := p.channel(channel)
 
@@ -182,6 +210,12 @@ func (p *PubSubService) Subscribe(ctx context.Context, channel string, handler f
 	id := p.nextID
 	p.nextID++
 	ts.handlers[id] = handler
+	if onOverflow != nil {
+		if ts.overflow == nil {
+			ts.overflow = make(map[uint64]func())
+		}
+		ts.overflow[id] = onOverflow
+	}
 	p.mu.Unlock()
 
 	var once sync.Once
@@ -212,6 +246,16 @@ func (p *PubSubService) enqueue(prefixed string, payload []byte) {
 	if len(ts.pending) >= topicQueueLimit {
 		ts.dropped++
 		n := ts.dropped
+		if len(ts.overflow) > 0 {
+			// 呼んでいる最中なら印を立てるだけ (終わった後にもう一周する)。
+			// 捨てるたびに goroutine を起こすと、詰まっている間は捨てた件数だけ
+			// 全体を捨てる呼び出しが並行に走る (#3664 のレビュー 2 周目)。
+			ts.overflowDirty = true
+			if !ts.overflowRunning {
+				ts.overflowRunning = true
+				go p.runOverflow(prefixed, ts)
+			}
+		}
 		p.mu.Unlock()
 		// 詰まっている間は毎回出さない (ログを埋めない)。
 		if n == 1 || n%1000 == 0 {
@@ -225,6 +269,56 @@ func (p *PubSubService) enqueue(prefixed string, payload []byte) {
 		go p.drain(prefixed, ts)
 	}
 	p.mu.Unlock()
+}
+
+// runOverflow calls the overflow functions of ts until no message was dropped
+// since it last started calling them. It is the only caller for its topic
+// (overflowRunning).
+//
+// 印 (overflowDirty) は関数を呼ぶ前に下ろす。呼んでいる間に捨てた分は印を
+// 立て直すので、呼び終えた後のもう一周が受け持つ (取りこぼさない)。
+func (p *PubSubService) runOverflow(prefixed string, ts *topicSubscription) {
+	for {
+		p.mu.Lock()
+		cur, ok := p.subs[prefixed]
+		if !ts.overflowDirty || p.closed || !ok || cur != ts {
+			ts.overflowRunning = false
+			ts.overflowDirty = false
+			p.mu.Unlock()
+			return
+		}
+		ts.overflowDirty = false
+		fns := make([]func(), 0, len(ts.overflow))
+		for _, fn := range ts.overflow {
+			fns = append(fns, fn)
+		}
+		p.mu.Unlock()
+		for _, fn := range fns {
+			fn()
+		}
+		// 呼んだ後は間隔を置いてから、印を見直す。その間に捨てた分は印が残るので、
+		// 間隔の後の 1 回が受け持つ (取りこぼさない)。間隔の間はこの goroutine が
+		// 居続けるので、捨てるたびに新しい呼び出しが起きることもない。間隔を
+		// 置かないと、溢れが続く間は捨てた通知とほぼ同じ回数だけ全体を捨て、その
+		// プロセスのキャッシュがほぼ効かなくなる (#3664 のレビュー 3 周目)。
+		time.Sleep(p.overflowInterval())
+	}
+}
+
+// defaultOverflowMinInterval is the shortest time between two calls of the
+// overflow functions of one topic while messages keep being dropped.
+//
+// 溢れは受け側が詰まっている異常時にしか起きず、その間に捨てた通知の分は、
+// この間隔だけ遅れて全体を捨てることで埋まる (古い値が残る上限がこの分延びる)。
+// 捨てる対象はメモリ上のキャッシュで、毎回作り直しに DB を引かせるので、
+// 1 秒に数回で十分。短くしすぎると詰まっている間の負荷を増やすだけになる。
+const defaultOverflowMinInterval = 200 * time.Millisecond
+
+func (p *PubSubService) overflowInterval() time.Duration {
+	if p.overflowMinInterval > 0 {
+		return p.overflowMinInterval
+	}
+	return defaultOverflowMinInterval
 }
 
 // drain hands the pending messages of one topic to its handlers, in order, and
@@ -273,6 +367,7 @@ func (p *PubSubService) removeHandler(prefixed string, id uint64) {
 		return
 	}
 	delete(ts.handlers, id)
+	delete(ts.overflow, id)
 	if len(ts.handlers) == 0 {
 		delete(p.subs, prefixed)
 		// 配り待ちは捨てる。drain は `cur == ts` で外れたことに気づく。
