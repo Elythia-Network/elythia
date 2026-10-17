@@ -212,7 +212,7 @@ make bench-compare-down   # 途中で止めたときの片付け (project は be
 
 ### 所要時間
 
-手元 (Xeon E-2274G、8 コア) で`SMOKE=1`の 2 ラウンドを流したときの 1 回は、本家が約 2 分 06 秒、Elythia が約 1 分 50 秒でした (2026-10-17)。本家の burn-in (postgres / redis / web と一緒に起動して、空の DB への migration を流し、healthy になってから止めるまで) は約 24 秒で、1 回あたりの差 (約 16 秒) は本家の起動 (1 回に 2 度) の分です。smoke でない 1 回は bench-compare と同じく約 5 分半の見込みで、3 ラウンド (6 回) にビルド・pull・burn-in を足して約 40 分です。4 ラウンドは約 50 分になり、job の上限 (60 分) に対して余裕が 10 分を切るので、`rounds`は 3 までにしています。GitHub-hosted runner での実測は、PR の上の実行で取ります
+手元 (Xeon E-2274G、8 コア) で`SMOKE=1`の 2 ラウンドを流したときの 1 回は、本家が約 2 分 06 秒、Elythia が約 1 分 50 秒でした (2026-10-17)。本家の burn-in (postgres / redis / web と一緒に起動して、空の DB への migration を流し、healthy になってから止めるまで) は約 24 秒で、1 回あたりの差 (約 16 秒) は本家の起動 (1 回に 2 度) の分です。smoke でない 1 回は bench-compare と同じく約 5 分半の見込みで、3 ラウンド (6 回) にビルド・pull・burn-in を足して約 40 分です。4 ラウンドは約 50 分になり、job の上限 (60 分) に対して余裕が 10 分を切るので、`rounds`は 3 までにしています。GitHub-hosted runner (AMD EPYC 9V74 の 4 vCPU) での実測は、#3655 の PR の上の実行 (2026-10-17、`prod-like`、3 ラウンド) で、`run.sh`の合計が 2,156 秒 (約 36 分)、job 全体が約 36 分半でした
 
 ### tests/bench/http を直さずに tests/bench/ab に足した理由
 
