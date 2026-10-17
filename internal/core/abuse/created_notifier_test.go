@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/elythia-network/elythia/internal/bgwork"
 	"github.com/elythia-network/elythia/internal/core/abuse"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
@@ -318,4 +319,23 @@ func TestCreatedNotifier_SetMailKeepsWebhookRecipients(t *testing.T) {
 	n.NotifyCreated(context.Background(), cnReport(t, idGen), nil, nil)
 	require.Len(t, hook.calls, 1)
 	assert.Equal(t, []string{inactive}, hook.calls[0].excludes, "webhook の除外は SetWebhook で渡した通知先から作る")
+}
+
+// メールは世代の箱から送る (#3661)。止まった世代からは送らない。
+func TestCreatedNotifier_MailRunsInTheBackgroundGroup(t *testing.T) {
+	idGen, err := id.NewGenerator("aidx")
+	require.NoError(t, err)
+	mail := &cnMail{}
+	email := "instance@example.test"
+	n := abuse.NewCreatedNotifier(nil, nil, nil)
+	n.SetMail(mail.send, nil, nil, cnMeta{meta: &model.Meta{Email: &email}})
+	g := bgwork.New()
+	n.SetBackground(g)
+	assert.True(t, n.HasBackground())
+	require.Zero(t, g.Stop(context.Background()))
+
+	n.NotifyCreated(context.Background(), cnReport(t, idGen), nil, nil)
+	time.Sleep(100 * time.Millisecond)
+	assert.Empty(t, mail.snapshot(), "世代を止めた後にメールを送った")
+	assert.EqualValues(t, 1, g.Dropped())
 }
