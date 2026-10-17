@@ -59,12 +59,37 @@ make bench-compare-down   # 途中で止めたときの片付け
 | サービス | 中身 | CPU の上限 |
 |---|---|---|
 | app | base / head の Elythia (`mk-bench-ab-app:base` / `:head`) | 1.25 |
-| postgres | PostgreSQL 18 | 0.75 |
+| postgres | PostgreSQL 18 (fsync などを切った設定、下の「postgres の設定」) | 0.75 |
 | redis | Redis | 0.5 |
 | web | nginx (worker 1) | 0.5 |
 | k6 | 負荷をかける側 | 0.75 |
 
 合計は 3.75 で、GitHub-hosted runner の 4 vCPU に収まるようにしています。上限に当たった回数と時間は、回ごとに`throttle.csv`(計測の始めと終わりの差) と`resources.csv`(1 秒ごとの累積値) に残ります。k6 のコンテナも記録の対象です (#3656)。
+
+### postgres の設定 (fsync などを切る、#3659)
+
+**postgres は`fsync=off`・`synchronous_commit=off`・`full_page_writes=off`で動かします。** `tests/bench/ab/compose.yml`の postgres の`command`で渡し、本家との比較の overlay (`compose.upstream.yml`) は postgres を触りません。base / head、本家 / Elythia の両側が同じ postgres の service を使うので、compose の上では両側に同じ設定がかかります。`internal/entitycompat`の`TestBenchPostgresSkipsDiskWaits`(`make compose-check`) は次のときに落ちます。
+
+- `compose.yml`の postgres の`command`から、3 つのどれかが欠けたとき
+- overlay が postgres を定義したとき、または overlay のどれかの service の`command` / `entrypoint` / `environment`に 3 つの設定の名前が現れたとき (app の`PGOPTIONS`で本家の側だけ`synchronous_commit`を戻す、など)
+- `tests/bench/`の外の compose (本番の雛形`compose.uds.yaml.example`、e2e、開発用) のどれかの service の`command` / `entrypoint` / `environment` (`PGOPTIONS`や`POSTGRES_INITDB_ARGS`を含む) に、3 つの設定の名前が値に関係なく (大文字小文字も問わず) 現れたとき。語として見るので、valkey の`--appendfsync`やコメントでは落ちません。`tests/bench/`の下のほかのベンチは本番と関係しないので見ません
+
+ゲートが見るのは compose だけです。`run.sh`や app の設定ファイル (`elythia.yml` / `misskey.yml`) から接続ごとに設定を変える経路は見ていません (今はどちらにも無い)。
+
+理由は、GitHub-hosted runner の機種によって、ディスクの書き込みの遅延が大きく違い、それが`notes-create`の p95 に直接出ていたためです (#3659 の調査、2026-10-17)。
+
+- runner が`AMD EPYC 9V74`のとき、ノートの INSERT とその COMMIT が、ディスクの待ちで断続的に数十〜数百 ms 止まりました。app / postgres が CPU の上限で止められた区切りは (Elythia の回で) 0 で、読み取りだけのエンドポイントは同じ時間帯に止まっていませんでした。本家も同じ機種で同じように止まります (TypeORM の`query is slow: INSERT INTO "note"`)
+- 同じ develop 同士の A/A で、`notes-create`の p95 (各ラウンド) は、9V74 の runner で base 2.5 / 3.0 / 13.9ms、head 39.5 / 4.5 / 31.9ms に揺れ、Intel Xeon Platinum 8573C の runner では 2.4〜2.8ms に収まりました
+- artifact の残っていた 21 回の比較で、ノートの INSERT の slow log (200ms 以上) は、9V74 の 7 回のうち 6 回に計 570 件あり、AMD EPYC 7763 の 12 回と Intel の 2 回には 1 件もありませんでした
+- 機種は選べない (GitHub-hosted では runner の機種を指定できない) ので、機種で比較を止めるのではなく、両側の postgres から fsync・full page write・COMMIT の待ちを外しました
+- **これで #3659 の揺れが消えるかは、まだ確かめていません。** 調査では、9V74 で止まっている箇所が COMMIT の fsync だとは確定していません (本家の記録は INSERT の文だけで、その中でも止まっていた)。`fsync=off`でも、データのファイルの書き込みと拡張は runner のディスクの上のファイルシステムを通ります。PR の上で 9V74 に当たった実行を見て確かめ、結果をここに書きます
+
+この設定にしたことで、次のことは**もう測りません**。
+
+- **ディスクが遅いときの挙動。** WAL の fsync・full page write・COMMIT の待ちを外すので、ディスクへの書き込みを減らす変更 (COMMIT の回数を減らすなど) の効果は、この比較にはほとんど出ません
+- **本番と同じ書き込みの経路。** 本番の PostgreSQL はこの設定にしません (落ちたときにデータが壊れます)。ベンチのスタックは毎回まっさらな DB から始めて捨てる (`run.sh`は各回の始めと終わりに`down -v`する) ので、クラッシュ時の安全は要りません。なお、seed の後の`compose stop`で postgres が 10 秒以内に止まらず SIGKILL されると、`synchronous_commit=off`ではまだ WAL に書いていない直前の COMMIT が消えることがあります。fast shutdown の checkpoint は`fsync=off`で速いので、起きる見込みは低いと見ています。この設定はベンチのスタックだけのもので、本番・e2e の compose には入れません
+
+report の冒頭には、runner の機種 (`run.json`の`runner.cpu_model`) を「runnerのCPU」として、ほかの runner の項目より先に出します。`AMD EPYC 9V74`のときは「この機種では書き込みが揺れうる (#3659)」と注記します。機種は大文字小文字を区別せずに比べ、`model name`が取れなかったときは「(不明)」と出します。注記は読み方の目安で、比較は止めません。この設定で 9V74 でも揺れなくなったと確かめられたら、注記を残すか (残すなら文言) を決め直します。それまでは、`notes-create`だけに差が出たときは流し直して確かめてください。
 
 ### 流し方
 
