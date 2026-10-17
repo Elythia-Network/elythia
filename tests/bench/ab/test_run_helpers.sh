@@ -50,7 +50,7 @@ bench_run_delivery_with_cleanup mk-bench-ab-safe_1-delivery-r1-base \
   /tmp/isolated-compose.yml fail_driver || status=$?
 [[ "$status" -eq 17 ]]
 commands=$(cat "$BENCH_HELPER_TEST_LOG")
-[[ "$commands" == *"driver:failed"*"docker:compose -p mk-bench-ab-safe_1-delivery-r1-base -f /tmp/isolated-compose.yml --profile bench --profile outbound --profile delivery down -v --remove-orphans"* ]]
+[[ "$commands" == *"driver:failed"*"docker:compose -p mk-bench-ab-safe_1-delivery-r1-base -f /tmp/isolated-compose.yml --profile bench --profile outbound --profile delivery down -v --remove-orphans --rmi local"* ]]
 [[ "${#delivery_projects[@]}" -eq 0 ]]
 
 succeed_driver() { return 0; }

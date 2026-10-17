@@ -256,21 +256,34 @@ class OutboundDeliveryTests(unittest.TestCase):
                 self.assertEqual(status, case["expectedStatus"])
                 self.assertEqual(reasons, case["expectedReasons"])
 
-    def test_delivery_artifact_flattens_raw_stats_and_unique_rate(self) -> None:
-        artifact = driver.delivery_artifact({
-            "delivery": {"expected": 2, "unique": 2, "verified": 3, "duplicates": 1},
-            "deliveryStatus": "valid",
-            "deliveryReasons": [],
-            "throughput_jobs": 2,
-            "throughput_jobs_per_sec": 4.0,
+    def test_delivery_artifact_matches_shared_go_fixture(self) -> None:
+        result = {
+            "delivery": {
+                "finalized": True,
+                "expected": 2,
+                "attempts": 2,
+                "verified": 2,
+                "pending": 0,
+                "valid": 2,
+                "unique": 2,
+                "duplicates": 0,
+                "invalid": 0,
+                "contentMismatch": 0,
+                "unexpected": 0,
+                "unexpectedAttempts": 0,
+                "missing": 0,
+            },
+            "deliveryStatus": "incomplete",
+            "deliveryReasons": ["delivery drain timed out"],
+            "throughput_jobs": None,
+            "throughput_jobs_per_sec": None,
             "drain_seconds": 0.5,
-        })
+        }
+        artifact = driver.delivery_artifact(result)
+        expected_path = Path(__file__).with_name("testdata") / "delivery_artifact.json"
+        expected = json.loads(expected_path.read_text(encoding="utf-8"))
 
-        self.assertEqual(artifact["expected"], 2)
-        self.assertEqual(artifact["verified"], 3)
-        self.assertEqual(artifact["throughputJobs"], 2)
-        self.assertEqual(artifact["throughputJobsPerSecond"], 4.0)
-        self.assertEqual(artifact["drainSeconds"], 0.5)
+        self.assertEqual(artifact, expected)
 
 
 if __name__ == "__main__":
