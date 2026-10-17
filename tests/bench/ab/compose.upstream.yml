@@ -1,0 +1,40 @@
+# 本家 Misskey との比較 (#3654) で、app を本家の公式 image に替える重ね合わせ。
+# run.sh --upstream が本家の側の回でだけ `-f compose.yml -f compose.upstream.yml` で
+# 使う。ほかのサービス・資源の上限は compose.yml のまま。
+#
+# **公式 image を、運営者が動かすのと同じ形 (既定の CMD) で測る。** CMD は
+# `pnpm run migrateandstart` で、計測の間も pnpm の外側の 2 つのプロセス
+# (`pnpm run migrateandstart` と、そこから起動される `pnpm start`) が残る。app の
+# cgroup には、それと server (親プロセス)・queue の worker の計 4 つの Node.js の
+# プロセスが入り、CPU 時間とメモリはその合計になる。pnpm の分は CPU をほとんど使わず、
+# メモリは 1 つあたり匿名メモリで約 100MiB (公式 image で `pnpm exec` を待たせて
+# /proc の RssAnon を読んだ値、2026-10-17)。
+#
+# 本家は NODE_ENV=production のまま動かす。NODE_ENV を production 以外にすると
+# 制限は外れるが、TypeORM が全 SQL をログに書き、本家だけが遅くなる
+# (packages/backend/src/postgres.ts)。制限は seed が基本ロールの rateLimitFactor で
+# 決める (SEED_RATE_LIMIT_FACTOR)。
+#
+# image の版は run.sh が APP_IMAGE で渡す (既定は UPSTREAM_MISSKEY_VERSION)。ここに
+# 版を書かないのは、TestUpstreamVersionIsConsistent と二重に管理しないため。
+#
+# name は compose.yml と同じにする (重ね合わせなので同じ project。
+# TestTestComposeFilesAreSelfContained が揃っているかを見る)。
+name: mk-bench-ab
+
+services:
+  app:
+    environment:
+      NODE_ENV: production
+    volumes:
+      - ./misskey.yml:/misskey/.config/default.yml:ro
+    healthcheck:
+      # 公式 image の HEALTHCHECK と同じ /healthz (DB と Redis と起動の完了を見る)
+      test: ["CMD", "curl", "-fsSo/dev/null", "http://localhost:3000/healthz"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      # 起動のたびに migration を流す (pnpm run migrateandstart)。空の DB でも手元の実測は
+      # 十数秒だが、遅い runner でも落ちないよう余裕を持たせる
+      start_period: 600s
+      start_interval: 2s

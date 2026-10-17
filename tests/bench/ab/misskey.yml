@@ -1,0 +1,22 @@
+# 本家 Misskey との比較 (#3654) で、本家の app に読ませる設定。elythia.yml と同じ
+# 接続先・同じ id の方式にする。
+url: http://web/
+port: 3000
+
+db:
+  host: postgres
+  port: 5432
+  db: misskey
+  user: misskey
+  pass: testpass
+
+redis:
+  host: redis
+  port: 6379
+
+id: aidx
+
+# 負荷は k6 の 1 つの IP から来るので、IP の制限だけ外す (Elythia の
+# MK_ENABLEIPRATELIMIT=false と同じ)。利用者ごとの制限は、seed が基本ロールの
+# rateLimitFactor で決める (run.sh)
+enableIpRateLimit: false
