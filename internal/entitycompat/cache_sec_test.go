@@ -4,7 +4,6 @@ import (
 	_ "embed"
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -32,33 +31,43 @@ var (
 	methodsVarRe = regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]*)\s*:?=\s*\[\]string\{([^}]*)\}`)
 )
 
-// parseGetRoutes returns the /api endpoints router.go registers for GET,
-// either with api.GET or with api.Match whose method list holds GET.
-func parseGetRoutes(t *testing.T, path string) map[string]bool {
+// parseGetRoutes returns the /api endpoints the given router sources register
+// for GET, either with api.GET or with api.Match whose method list holds GET.
+//
+// **method の一覧の変数は、同じファイルの中だけで引く (#3672)。**
+// `chartMethods := []string{...}` はローカル変数なので、別のファイルの同名の
+// 変数は別物。引けなければ GET を含まない扱いになり、golden 側の
+// 「GET の route が無い」として落ちる (緩む方向には倒れない)。
+func parseGetRoutes(t *testing.T, paths ...string) map[string]bool {
 	t.Helper()
-	src, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read router: %v", err)
-	}
-	s := stripGoComments(string(src))
-	methodVars := map[string]string{}
-	for _, m := range methodsVarRe.FindAllStringSubmatch(s, -1) {
-		methodVars[m[1]] = m[2]
+	if len(paths) == 0 {
+		t.Fatal("parseGetRoutes: 読むファイルが無い")
 	}
 	hasGet := func(list string) bool {
 		return strings.Contains(list, "http.MethodGet") || strings.Contains(list, `"GET"`)
 	}
 	out := map[string]bool{}
-	for _, m := range apiGetRouteRe.FindAllStringSubmatch(s, -1) {
-		out[strings.TrimPrefix(m[1], "/")] = true
-	}
-	for _, m := range apiMatchRouteRe.FindAllStringSubmatch(s, -1) {
-		list := m[1]
-		if !strings.HasPrefix(list, "[]string") {
-			list = methodVars[list]
+	for _, path := range paths {
+		src, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read router: %v", err)
 		}
-		if hasGet(list) {
-			out[strings.TrimPrefix(m[2], "/")] = true
+		s := stripGoComments(string(src))
+		methodVars := map[string]string{}
+		for _, m := range methodsVarRe.FindAllStringSubmatch(s, -1) {
+			methodVars[m[1]] = m[2]
+		}
+		for _, m := range apiGetRouteRe.FindAllStringSubmatch(s, -1) {
+			out[strings.TrimPrefix(m[1], "/")] = true
+		}
+		for _, m := range apiMatchRouteRe.FindAllStringSubmatch(s, -1) {
+			list := m[1]
+			if !strings.HasPrefix(list, "[]string") {
+				list = methodVars[list]
+			}
+			if hasGet(list) {
+				out[strings.TrimPrefix(m[2], "/")] = true
+			}
 		}
 	}
 	return out
@@ -75,8 +84,6 @@ func parseGetRoutes(t *testing.T, path string) map[string]bool {
 // retention) と、cacheSec の Cache-Control が付かないもの 8 本があった。
 // handler ごとに書く形では付け忘れを検出できない。
 func TestCacheSecDrift(t *testing.T) {
-	root := repoRoot(t)
-
 	var golden map[string]int
 	if err := json.Unmarshal(embeddedCacheSecJSON, &golden); err != nil {
 		t.Fatalf("parse golden_cache_sec.json: %v", err)
@@ -87,25 +94,20 @@ func TestCacheSecDrift(t *testing.T) {
 		t.Fatalf("cacheSec golden looks broken (%d entries, emojis=%d); regenerate with `make shapecheck-gen`", len(golden), golden["emojis"])
 	}
 
-	routerPath := filepath.Join(root, "internal/server/router.go")
 	// 表があっても、/api の group に middleware を付けていなければ何も起きない。
-	src, err := os.ReadFile(routerPath)
-	if err != nil {
-		t.Fatalf("read router: %v", err)
-	}
-	if !apiCacheControlUseRe.MatchString(stripGoComments(string(src))) {
-		t.Fatal("router.go must mount middleware.APICacheControl() on the /api group (api.Use)")
+	if !apiCacheControlMounted(serverSources(t)) {
+		t.Fatal("internal/server must mount middleware.APICacheControl() on the /api group (api.Use)")
 	}
 
-	gets := parseGetRoutes(t, routerPath)
+	gets := parseGetRoutes(t, serverSourcePaths(t)...)
 	if len(gets) < 20 || !gets["emojis"] || !gets["charts/notes"] {
-		t.Fatalf("parsed %d GET routes from router.go without emojis / charts/notes; the parser likely broke", len(gets))
+		t.Fatalf("parsed %d GET routes from internal/server without emojis / charts/notes; the parser likely broke", len(gets))
 	}
 
 	var problems []string
 	for ep, sec := range golden {
 		if !gets[ep] {
-			problems = append(problems, ep+": upstream allowGet, but router.go has no GET route")
+			problems = append(problems, ep+": upstream allowGet, but internal/server has no GET route")
 		}
 		got, ok := middleware.APICacheSec[ep]
 		switch {
@@ -123,5 +125,28 @@ func TestCacheSecDrift(t *testing.T) {
 	if len(problems) > 0 {
 		sort.Strings(problems)
 		t.Fatal("allowGet / cacheSec drift against upstream:\n  " + strings.Join(problems, "\n  "))
+	}
+}
+
+// apiCacheControlMounted reports whether any of the sources mounts
+// APICacheControl on the /api group (comments do not count).
+func apiCacheControlMounted(sources []serverSource) bool {
+	for _, f := range sources {
+		if apiCacheControlUseRe.MatchString(stripGoComments(string(f.src))) {
+			return true
+		}
+	}
+	return false
+}
+
+// どのファイルで付けても見つけ、コメントの中は数えないこと (#3672 レビュー M-1)。
+func TestAPICacheControlMountedReadsEveryFile(t *testing.T) {
+	src := func(rel, body string) serverSource { return serverSource{rel: rel, src: []byte(body)} }
+	const use = "api.Use(middleware.APICacheControl())\n"
+	if !apiCacheControlMounted([]serverSource{src("a.go", "x := 1\n"), src("b.go", use)}) {
+		t.Error("2 つ目のファイルの api.Use を見つけていない")
+	}
+	if apiCacheControlMounted([]serverSource{src("a.go", "// "+use), src("b.go", "x := 1\n")}) {
+		t.Error("コメントの中の api.Use を数えている")
 	}
 }

@@ -48,7 +48,7 @@ func TestLimitSpecDrift(t *testing.T) {
 		t.Fatalf("limit golden has only %d endpoints (expected >=50); regenerate with `make shapecheck-gen`", len(golden))
 	}
 
-	routes := parseRoutes(t, filepath.Join(root, "internal/server/router.go"))
+	routes := parseRoutes(t, serverSourcePaths(t)...)
 
 	type drift struct {
 		endpoint  string

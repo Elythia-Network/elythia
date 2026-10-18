@@ -57,7 +57,7 @@ func TestErrorHTTPStatusDrift(t *testing.T) {
 		t.Fatalf("status golden has only %d endpoints (expected >=5); regenerate with `make shapecheck-gen`", len(golden))
 	}
 
-	routes := parseRoutes(t, filepath.Join(root, "internal/server/router.go"))
+	routes := parseRoutes(t, serverSourcePaths(t)...)
 	helpers, _ := parseApierr(t, filepath.Join(root, "internal/api/apierr/errors.go"))
 	wrappers := parseJSONWrapperStatuses(t, filepath.Join(root, "internal/api/apierr/echo.go"), helpers)
 

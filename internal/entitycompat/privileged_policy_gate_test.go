@@ -22,7 +22,7 @@ import (
 // `internal/server` はカバレッジ対象外で router を組み立てるテストも無いので、
 // この片側更新は build もテストも緑のまま起きる。
 func TestPrivilegedPolicyKeysMatchAdminRoutes(t *testing.T) {
-	routes := parseRouteRegistrations(t, filepath.Join("..", "server", "router.go"))
+	routes := parseRouteRegistrations(t, serverSourcePaths(t)...)
 	require.Greater(t, len(routes), 400, "route の抽出が壊れている")
 
 	// **`RequireRolePolicy` の引数そのものを読む (#3037 レビュー 2 周目)。**

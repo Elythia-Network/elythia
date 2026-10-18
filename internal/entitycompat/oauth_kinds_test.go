@@ -3,7 +3,6 @@ package entitycompat
 import (
 	_ "embed"
 	"encoding/json"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -39,8 +38,6 @@ var kindMissingScope = map[string]string{}
 // app holding only the emoji scope could read queue stats, while an app holding
 // the queue scope could not.
 func TestOAuthKindDrift(t *testing.T) {
-	root := repoRoot(t)
-
 	var golden map[string]string
 	if err := json.Unmarshal(embeddedOAuthKindsJSON, &golden); err != nil {
 		t.Fatalf("parse golden_oauth_kinds.json: %v", err)
@@ -51,9 +48,9 @@ func TestOAuthKindDrift(t *testing.T) {
 		t.Fatalf("oauth kinds golden has only %d entries (expected >=200); regenerate with `make shapecheck-gen`", len(golden))
 	}
 
-	regs := parseRouteRegistrations(t, filepath.Join(root, "internal/server/router.go"))
+	regs := parseRouteRegistrations(t, serverSourcePaths(t)...)
 	if len(regs) < 200 {
-		t.Fatalf("parsed only %d routes from router.go (expected >=200); the parser likely broke", len(regs))
+		t.Fatalf("parsed only %d routes from internal/server (expected >=200); the parser likely broke", len(regs))
 	}
 
 	var mismatched, missing, staleAllow []string
