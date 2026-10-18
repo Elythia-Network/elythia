@@ -100,6 +100,7 @@ cd mk && docker compose up -d
 | `make docker-restart` | `app` を再起動して配信エントリを検証 (Docker Compose 構成) |
 | `make docker-update` | pull → ビルド → 再起動 → 検証 (Docker Compose 構成) |
 | `make uds-rebuild` `make uds-restart` `make uds-update` | 同上 (UDS 本番構成) |
+| `make uds-backup-refresh` | backup-daemon (と作ってあれば backup) の image を作り直し、動いていれば入れ替える (UDS。`uds-update` が再起動の後に呼ぶ) |
 
 `docker-update` / `uds-update` は**フロントエンドの再ビルドと再起動を必ずセットで実行する**。Elythia はエントリポイントを起動時に 1 回だけ解決してキャッシュするため、ビルドだけして再起動しないと HTML が消えた古い `scripts/<hash>.js` を指したまま 404 になる。
 
@@ -408,7 +409,7 @@ make plugin-dev             # 編集しながら動かす (PLUGIN=plugins/status
 
 # 更新 (運用)
 make pull                   # 本体 + plugins/ の独立リポジトリを一括 pull
-make uds-update             # pull → ビルド → 再起動 → 配信 entry の検証 (UDS 本番)
+make uds-update             # pull → ビルド → 再起動 → 配信 entry の検証 → バックアップの image → 事前圧縮 (UDS 本番)
 make docker-update          # 同上 (Docker Compose 構成)
 make uds-restart            # mkgo を再起動して配信 entry を検証だけする
                             # **`up -d` は再起動を保証しない** — frontend は bind mount

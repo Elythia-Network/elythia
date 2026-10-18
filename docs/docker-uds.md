@@ -80,7 +80,7 @@ curl -i -X POST http://localhost/api/meta -H 'Content-Type: application/json' -d
 
 ## mkgo のイメージは専用のビルダーでビルドする
 
-`make uds-build` (と、それを呼ぶ `uds-up` / `uds-rebuild` / `uds-update`) は、`mkgo` のイメージを dockerd の外のビルダー (BuildKit を動かすコンテナ、既定の名前は `elythia-builder`) でビルドし、終わったらビルダーを止めます (#3477)。`postgres` など他のサービスは、従来どおり dockerd の中のビルダーでビルドします。こちらは `docker buildx use` などで選んでいるビルダーに関係なく、名前で指定します。
+`make uds-build` (と、それを呼ぶ `uds-up` / `uds-rebuild` / `uds-update`) と `make uds-backup-refresh` (`backup` / `backup-daemon`、#3682) は、`mkgo` と同じ Go のビルドを含むイメージを dockerd の外のビルダー (BuildKit を動かすコンテナ、既定の名前は `elythia-builder`) でビルドし、終わったらビルダーを止めます (#3477)。`postgres` など他のサービスは、従来どおり dockerd の中のビルダーでビルドします。こちらは `docker buildx use` などで選んでいるビルダーに関係なく、名前で指定します。
 
 **dockerd にメモリを残さないため。** 既定のビルダーは BuildKit を dockerd の中で動かすので、ビルドで使ったメモリの大半が dockerd に残り、時間をおいても戻りません。戻すには dockerd を再起動するしかなく、`live-restore` が無効なら本番のコンテナも止まります。実測は次のとおりです。
 
