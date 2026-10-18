@@ -283,7 +283,8 @@ func (p *jsRegexpParser) hex(at, n int) (rune, bool) {
 	if at+n > len(p.src) {
 		return 0, false
 	}
-	v, err := strconv.ParseUint(string(p.src[at:at+n]), 16, 32)
+	// nは2か4なので16bitに収まる。bitSizeで上限を明示し、runeへの変換で溢れないようにする。
+	v, err := strconv.ParseUint(string(p.src[at:at+n]), 16, 16)
 	if err != nil {
 		return 0, false
 	}
