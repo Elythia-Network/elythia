@@ -15,6 +15,17 @@ func TestRelationSingleStatementReadersAreWired(t *testing.T) {
 		"/api/i の未読の真偽値が 1 文でなく 5 本の問い合わせに戻る (#3608)")
 	assertWired(t, serverPkg, "userRelationRepo := repository.NewUserRelationRepository(s.db)",
 		"users/show などの関係の reader が作られない (#3608)")
+	// 上の構築の行は buildRepos の中にある (#3684)。setupRoutes が使うのは別名なので、
+	// 構築から別名までの 3 段も照合する。上の行だけだと、setupRoutes の別名を nil に
+	// 書き換えても緑のまま通る (#3684 のレビューで実測)。
+	assertWired(t, serverPkg, "userRelation: userRelationRepo",
+		"buildRepos が作った関係の reader を repos に入れていない (#3608)")
+	// wiring のリテラル全体ではなく、repos のキーだけを照合する。後の段階で wiring に
+	// フィールドを足す書き方 (リテラルに足す / w.core = ... と後から入れる) のどちらでも当たる。
+	assertWired(t, serverPkg, "repos: s.buildRepos()",
+		"setupRoutes が buildRepos の repository を使っていない (#3608)")
+	assertWired(t, serverPkg, "userRelationRepo := w.repos.userRelation",
+		"setupRoutes の関係の reader が buildRepos で作ったものでなくなる (#3608)")
 }
 
 // internal/server で組み立てる userrelation.Repos は、すべて Relation を持つこと。

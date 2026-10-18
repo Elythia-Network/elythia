@@ -194,42 +194,98 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	reversiPublisher := stream.NewReversiGamePublisher(streamPubSub)
 	mainStreamPublisher := stream.NewMainStreamPublisher(streamPubSub)
 
-	// Repositories
-	// userRepo は server.New で構築した CachedUserRepository を再利用する。
-	// auth middleware と service 層が同じ cache を共有することで mutation
-	// 時の invalidate が両方に反映される (#300 3-3)。
-	userRepo := s.userRepo
-	noteRepo := repository.NewNoteRepository(s.db)
-	if _, ok := noteRepo.(repository.NotePrimaryReader); !ok {
-		panic("repository.NewNoteRepository must implement NotePrimaryReader")
-	}
-	// cross-worker cache invalidation (#1740) のため concrete *CachedMetaRepository
-	// を保持する。internal event bus との配線は下の stream の節 (metaUpdated の購読) で行う。
-	cachedMeta := repository.NewCachedMetaRepositoryWithTTL(repository.NewMetaRepository(s.db), repository.MetaCacheTTL)
+	// Repositories (#3684)。作るのは buildRepos (wiring_repos.go) で、ここでは
+	// 今までと同じ名前の別名を置くだけにする。以降の部分は書き換えない
+	// (wiring-check などのゲートが照合する文字列を変えないため)。repository は作っても
+	// DB に触らないので、作る位置が下の EnsureInitial などより前に移っても、DB の文の
+	// 順は変わらない。
+	w := &wiring{repos: s.buildRepos()}
+	userRepo := w.repos.user
+	noteRepo := w.repos.note
+	cachedMeta := w.repos.cachedMeta
 	var metaRepo repository.MetaRepository = cachedMeta
+	pollRepo := w.repos.poll
+	followingRepo := w.repos.following
+	followRequestRepo := w.repos.followRequest
+	userRelationRepo := w.repos.userRelation
+	piningRepo := w.repos.pining
+	reactionRepo := w.repos.reaction
+	emojiRepo := w.repos.emoji
+	blockingRepo := w.repos.blocking
+	mutingRepo := w.repos.muting
+	renoteMutingRepo := w.repos.renoteMuting
+	pollVoteRepo := w.repos.pollVote
+	driveFileRepo := w.repos.driveFile
+	driveFolderRepo := w.repos.driveFolder
+	keypairRepo := w.repos.keypair
+	keypairExtraRepo := w.repos.keypairExtra
+	suspensionOriginRepo := w.repos.suspensionOrigin
+	instanceRepo := w.repos.instance
+	channelRepo := w.repos.channel
+	channelFollowingRepo := w.repos.channelFollowing
+	cachedAntenna := w.repos.cachedAntenna
+	var antennaRepo repository.AntennaRepository = cachedAntenna
+	clipRepo := w.repos.clip
+	clipNoteRepo := w.repos.clipNote
+	pageRepo := w.repos.page
+	pageLikeRepo := w.repos.pageLike
+	flashRepo := w.repos.flash
+	flashLikeRepo := w.repos.flashLike
+	roleRepo := w.repos.role
+	roleAssignmentRepo := w.repos.roleAssignment
+	swSubRepo := w.repos.swSub
+	noteFavoriteRepo := w.repos.noteFavorite
+	noteThreadMutingRepo := w.repos.noteThreadMuting
+	userListRepo := w.repos.userList
+	webhookRepo := w.repos.webhook
+	systemWebhookRepo := w.repos.systemWebhook
+	reversiRepo := w.repos.reversi
+	userIPRepo := w.repos.userIP
+	chatRepo := w.repos.chat
+	channelFavoriteRepo := w.repos.channelFavorite
+	channelMutingRepo := w.repos.channelMuting
+	clipFavoriteRepo := w.repos.clipFavorite
+	userListFavoriteRepo := w.repos.userListFavorite
+	retentionRepo := w.repos.retention
+	promoReadRepo := w.repos.promoRead
+	hashtagRepo := w.repos.hashtag
+	channelNoteUnreadRepo := w.repos.channelNoteUnread
+	antennaNoteUnreadRepo := w.repos.antennaNoteUnread
+	chunkedUploadSessionRepo := w.repos.chunkedUploadSession
+	publickeyRepo := w.repos.publickey
+	goneInstanceRepo := w.repos.goneInstance
+	userPendingRepo := w.repos.userPending
+	signupTicketRepo := w.repos.signupTicket
+	usedUsernameRepo := w.repos.usedUsername
+	signinRepo := w.repos.signin
+	noteDraftRepo := w.repos.noteDraft
+	avatarDecorationRepo := w.repos.avatarDecoration
+	announcementRepo := w.repos.announcement
+	modLogRepo := w.repos.modLog
+	recipientRepo := w.repos.recipient
+	ipLookupLogRepo := w.repos.ipLookupLog
+	moveSystemAccountRepo := w.repos.moveSystemAccount
+	noteUnreadRepo := w.repos.noteUnread
+	abuseReportRepoForNotif := w.repos.abuseReportForNotif
+	emojiApplicationRepoForNotif := w.repos.emojiApplicationForNotif
+	signupApplicationRepoForNotif := w.repos.signupApplicationForNotif
+	fedRuleRepo := w.repos.fedRule
+	sigCapRepo := w.repos.sigCap
+	quoteAuthorizationRepo := w.repos.quoteAuthorization
+	resetReqRepo := w.repos.resetReq
+	userSecurityKeyRepo := w.repos.userSecurityKey
+	registryRepo := w.repos.registry
+	bubbleVersusRecordRepo := w.repos.bubbleVersusRecord
+	abuseReportRepo := w.repos.abuseReport
+	authSessionRepo := w.repos.authSession
+	bubbleGameRepo := w.repos.bubbleGame
+
 	// Seed the singleton meta row on first boot so that fresh installs
 	// can run /api/admin/accounts/create (initial setup) without tripping
 	// over a missing meta row.
 	if err := metaRepo.EnsureInitial(idGen.Generate(time.Now())); err != nil {
 		slog.Error("failed to ensure initial meta row", "err", err)
 	}
-	pollRepo := repository.NewPollRepository(s.db)
-	// 関係の repository は書き込みのたびに relationCache を捨てる (#3607)。
-	// **ここ以外で関係の repository を作らない。** キャッシュを渡さずに作った
-	// repository から書くと、そのプロセスのキャッシュが捨てられない。
-	followingRepo := repository.NewFollowingRepositoryWithRelationCache(s.db, s.relationCache)
-	followRequestRepo := repository.NewFollowRequestRepository(s.db)
-	// users/show などの関係を 1 文で引く (#3608)。userrelation.Repos を組む箇所すべてに渡す。
-	userRelationRepo := repository.NewUserRelationRepository(s.db)
-	piningRepo := repository.NewUserNotePiningRepository(s.db)
-	reactionRepo := repository.NewNoteReactionRepository(s.db)
-	// emoji の ListLocal はタイムライン描画ごとに毎回フルスキャンしていた
-	// hot path だが、絵文字テーブルの mutation は admin 経由のみで頻度が低い。
-	// 5 分 TTL の in-memory cache + mutation 時 invalidate で DB 負荷を消す
-	// (#300 3-6)。ノートを詰めるときの (name, host) → URL の解決も、同じ
-	// wrapper の cache でページをまたいで使い回す (#3383、他プロセスへの
-	// invalidation の配線は internalPubSub の emojiCacheInvalidated)。
-	emojiRepo := repository.NewCachedEmojiRepository(repository.NewEmojiRepository(s.db))
 	// 絵文字由来のアバターデコレーション (#2975) の解決に使う。**catalog と同じ形の
 	// TTL cache だが、載せるのはローカルかつ非センシティブなものだけ**で、その
 	// 条件がそのまま「表示してよいか」の判定になっている。絵文字をセンシティブに
@@ -238,13 +294,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// **`emojiRepo` より後・絵文字を変える配線より前に置く。** zip インポータと
 	// admin handler の両方がこの invalidator を受け取る。
 	emojiDecorationResolver := avatardecoration.NewEmojiResolver(emojiRepo)
-	blockingRepo := repository.NewBlockingRepositoryWithRelationCache(s.db, s.relationCache)
-	mutingRepo := repository.NewMutingRepositoryWithRelationCache(s.db, s.relationCache)
-	renoteMutingRepo := repository.NewRenoteMutingRepositoryWithRelationCache(s.db, s.relationCache)
-	pollVoteRepo := repository.NewPollVoteRepository(s.db)
-	driveFileRepo := repository.NewDriveFileRepository(s.db)
-	driveFolderRepo := repository.NewDriveFolderRepository(s.db)
-	keypairRepo := repository.NewUserKeypairRepository(s.db)
 	// mk-go は #2378 以前、ローカルユーザーの RSA 秘密鍵を PKCS#1 で発行していた。
 	// mk-go 自身は両形式を読めるが **Misskey TS は PKCS#8 しか読めない** ので、
 	// そのまま TS へ引き渡すとそのユーザーの送信側の連合が全滅する (受信は動くので
@@ -259,10 +308,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	} else if converted > 0 {
 		slog.Info("user_keypair を PKCS#8 に正規化した", "converted", converted)
 	}
-	keypairExtraRepo := repository.NewUserKeypairExtraRepository(s.db)
-	// 凍結の由来 (local / remote)。モデレーターの判断をリモートに巻き戻させない (#2973)。
-	suspensionOriginRepo := repository.NewUserSuspensionOriginRepository(s.db)
-	instanceRepo := repository.NewInstanceRepository(s.db)
 	// instance.{followersCount,followingCount} は following service の
 	// adjustInstanceCountsForFollowing (Follow/Unfollow/AcceptRequest) で
 	// incremental に維持される。block による解除も following.Service の
@@ -274,63 +319,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	if err := instanceRepo.RecomputeFollowCounts(); err != nil {
 		slog.Warn("instance follow-counts recompute failed", "err", err)
 	}
-	channelRepo := repository.NewChannelRepository(s.db)
-	channelFollowingRepo := repository.NewChannelFollowingRepositoryWithRelationCache(s.db, s.relationCache)
-	// antenna は inbound note 1 件ごとに ListAllActive が引かれる (#2752)。
-	// プロセス内キャッシュを挟み、書き込みで invalidate する。cross-worker の
-	// 伝播は下の internal:antennaUpdated (meta と同じ形)。
-	cachedAntenna := repository.NewCachedAntennaRepository(repository.NewAntennaRepository(s.db))
-	var antennaRepo repository.AntennaRepository = cachedAntenna
-	clipRepo := repository.NewClipRepository(s.db)
-	clipNoteRepo := repository.NewClipNoteRepository(s.db)
-	pageRepo := repository.NewPageRepository(s.db)
-	pageLikeRepo := repository.NewPageLikeRepository(s.db)
-	flashRepo := repository.NewFlashRepository(s.db)
-	flashLikeRepo := repository.NewFlashLikeRepository(s.db)
-	roleRepo := repository.NewRoleRepository(s.db)
-	roleAssignmentRepo := repository.NewRoleAssignmentRepository(s.db)
-	swSubRepo := repository.NewSwSubscriptionRepository(s.db)
-	noteFavoriteRepo := repository.NewNoteFavoriteRepository(s.db)
-	noteThreadMutingRepo := repository.NewNoteThreadMutingRepository(s.db)
-	userListRepo := repository.NewUserListRepository(s.db)
-	webhookRepo := repository.NewWebhookRepository(s.db)
-	systemWebhookRepo := repository.NewSystemWebhookRepository(s.db)
-	reversiRepo := repository.NewReversiRepository(s.db)
-	// userIPRepo は signin handler (Phase 6) と clean cron processor (#1563)
-	// の双方で使うため、他 repo と同じ早い段階で構築する。
-	userIPRepo := repository.NewUserIPRepository(s.db)
 	// 認証済みリクエストの IP を記録する (#3103)。**meta は呼び出しのたびに読む**
 	// ので、`enableIpLogging` の切り替えが再起動なしで効く (#3107)。重複排除の窓は
 	// upstream の `userIpHistories` に合わせて 1 時間。
 	ipLogService := iplog.NewService(userIPRepo, metaRepo, iplog.DedupeWindow)
-	chatRepo := repository.NewChatRepository(s.db)
-	channelFavoriteRepo := repository.NewChannelFavoriteRepository(s.db)
-	channelMutingRepo := repository.NewChannelMutingRepositoryWithRelationCache(s.db, s.relationCache)
-	clipFavoriteRepo := repository.NewClipFavoriteRepository(s.db)
-	userListFavoriteRepo := repository.NewUserListFavoriteRepository(s.db)
-	retentionRepo := repository.NewRetentionAggregationRepository(s.db)
-	promoReadRepo := repository.NewPromoReadRepository(s.db)
-	hashtagRepo := repository.NewHashtagRepository(s.db)
-	// 以下は受け手 (service / handler) より後で作り、後から setter で入れていたもの
-	// (#3676)。repository は作っても DB に触らないので、ここで先に作る。
-	channelNoteUnreadRepo := repository.NewChannelNoteUnreadRepository(s.db)
-	antennaNoteUnreadRepo := repository.NewAntennaNoteUnreadRepository(s.db)
-	chunkedUploadSessionRepo := repository.NewChunkedUploadSessionRepository(s.db)
-	publickeyRepo := repository.NewUserPublickeyRepository(s.db)
-	goneInstanceRepo := repository.NewGoneInstanceRepository(s.db)
-	userPendingRepo := repository.NewUserPendingRepository(s.db)
-	signupTicketRepo := repository.NewRegistrationTicketRepository(s.db)
-	usedUsernameRepo := repository.NewUsedUsernameRepository(s.db)
-	signinRepo := repository.NewSigninRepository(s.db)
-	noteDraftRepo := repository.NewNoteDraftRepository(s.db)
-	avatarDecorationRepo := repository.NewAvatarDecorationRepository(s.db)
-	announcementRepo := repository.NewAnnouncementRepository(s.db)
-	modLogRepo := repository.NewModerationLogRepository(s.db)
-	recipientRepo := repository.NewAbuseReportNotificationRecipientRepository(s.db)
-	ipLookupLogRepo := repository.NewIPLookupLogRepository(s.db)
-	// proxy account の user id を引く専用 (accountMover 用)。newProxyAccountResolver は
-	// username を返す別用途の resolver。
-	moveSystemAccountRepo := repository.NewSystemAccountRepository(s.db)
 
 	// Charts (Phase 4 Step Q / 4.7) — 12 chart engines + hook adapter (#3676)。
 	// どちらも DB の handle と idGen にしか依存せず、作っても goroutine も起動しない
@@ -540,7 +532,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// Phase 7-2 follow-up (#271): channel note 着信時に follower ごとの
 	// unread row を作成して /api/i の hasUnreadChannel に反映する。
 	channelService.SetUnreadRepo(channelNoteUnreadRepo)
-	noteUnreadRepo := repository.NewNoteUnreadRepository(s.db)
 	noteCreateService.SetChannelHook(corechannel.NewNoteCreateHook(channelService))
 
 	// Antennas (Phase 4.3)
@@ -607,7 +598,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// roleAssigned 通知 (#1559): local public role 割当時に発火し、entity 側で
 	// read 時に packed role へ解決する。lookup は role 削除済なら (nil,false)。
 	roleService.SetRoleAssignNotifier(notificationHook)
-	abuseReportRepoForNotif := repository.NewAbuseReportRepository(s.db)
 	roleNotifLookup := func(roleID string) (map[string]any, bool) {
 		r, err := roleRepo.FindByID(roleID)
 		if err != nil || r == nil {
@@ -627,7 +617,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	//
 	// **申請が消えていたら false を返して通知ごと落とす。** 経緯を辿れない
 	// 「処理されました」だけの通知は読んだ人に何も伝えない。
-	emojiApplicationRepoForNotif := repository.NewEmojiApplicationRepository(s.db)
 	emojiApplicationNotifLookup := func(applicationID string) (entity.EmojiApplicationStatus, bool) {
 		app, err := emojiApplicationRepoForNotif.FindByID(applicationID)
 		if err != nil {
@@ -647,7 +636,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// アカウントの登録申請の read 時の状態 (#2987)。**回答は載せない** —
 	// 運営者が定義した任意の項目で氏名や連絡先が入りうる。
-	signupApplicationRepoForNotif := repository.NewSignupApplicationRepository(s.db)
 	signupApplicationNotifLookup := func(applicationID string) (entity.SignupApplicationStatus, bool) {
 		app, err := signupApplicationRepoForNotif.FindByID(applicationID)
 		if err != nil {
@@ -1109,7 +1097,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 連合のルール (#3090)。ホスト単位の設定 (上の hostBlocker / silenced) に
 	// 追加の層として重ねる。activity のルールは inbox の署名検証の後
 	// (dispatchActivity の入口)、投稿のルールは取り込みの全経路で評価する。
-	fedRuleRepo := repository.NewFederationRuleRepository(s.db)
 	fedRuleHits := fedrule.NewHitStore(s.redis.Default)
 	fedRuleService := fedrule.NewService(fedRuleRepo, fedRuleHits, idGen.ParseTime)
 	federationResolver.SetRuleEvaluator(fedRuleService)
@@ -1147,7 +1134,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// メタデータで秒単位の鮮度を要求しないため。1s のままだと連合先の数だけ毎秒
 	// UPDATE が増え、instance touch の書き込み負荷を実質倍にしてしまう。相手の
 	// 署名方式はそう頻繁に変わらないので、60s 窓で十分に追随できる。
-	sigCapRepo := repository.NewInstanceSignatureCapabilityRepository(s.db)
 	sigCapBuffer := coreinstance.NewCapabilityBuffer(sigCapRepo, time.Minute)
 	sigCapBuffer.Start(context.Background())
 	s.registerShutdownHook(func(_ context.Context) { sigCapBuffer.Close() })
@@ -1206,7 +1192,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// Follow の id を保持したまま相手に返すため、service 層を経由しない)。
 	federationProcessor.SetInboundFollowAcceptor(followingDeliveryHook)
 	// FEP-044f: リモートからの QuoteRequest に答え、承認の実体を配る (#3234)。
-	quoteAuthorizationRepo := repository.NewNoteQuoteAuthorizationRepository(s.db)
 	quoteRequestHandler := corefederation.NewQuoteRequestHandler(corefederation.QuoteRequestDeps{
 		Notes:     noteRepo,
 		Users:     userRepo,
@@ -1969,7 +1954,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/signin-with-passkey", signinHandler.SigninWithPasskey)
 
 	// パスワードリセット (認証不要)
-	resetReqRepo := repository.NewPasswordResetRequestRepository(s.db)
 	resetHandler := apiresetpassword.NewHandler(userRepo, resetReqRepo, idGen)
 	resetHandler.SetBackground(s.background) // #3661: 世代の停止で待つ
 	resetHandler.SetServerURL(s.config.URL)
@@ -1981,9 +1965,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/reset-password", resetHandler.Reset)
 
 	// WebAuthn / 2FA (issue #42)
-	// userSecurityKeyRepo + WebAuthnService を構築して signin と /api/i に注入する。
+	// WebAuthnService を構築し、userSecurityKeyRepo (buildRepos で作る) と一緒に
+	// signin と /api/i に注入する。
 	// Redis セッションは redis.default を流用する (用途別分離は不要)。
-	userSecurityKeyRepo := repository.NewUserSecurityKeyRepository(s.db)
 	webauthnSvc, webauthnErr := coretwofactor.NewWebAuthnService(s.config.URL, config.DisplayName, s.redis.Default)
 	if webauthnErr != nil {
 		slog.Warn("webauthn service unavailable", "err", webauthnErr)
@@ -2265,7 +2249,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/users/lists/update-membership", usersHandler.ListsUpdateMembership, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:account"))
 
 	// Account endpoints
-	registryRepo := repository.NewRegistryRepository(s.db)
 	iHandler := i.NewHandler(userService, idGen)
 	iHandler.SetBackground(s.background) // #3661: 世代の停止で待つ
 	iHandler.SetHardMutePublisher(&hardMutePublisherAdapter{pubsub: streamPubSub})
@@ -3561,7 +3544,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// バブルゲームの対戦 (#3230)。対局の状態は Redis にだけ置き、記録 (両者の
 	// 報告と勝敗) は DB に書く (#3232)。
-	bubbleVersusRecordRepo := repository.NewBubbleVersusRepository(s.db)
 	bubbleVersusService := corebubbleversus.NewService(s.redis.Default, stream.NewBubbleVersusPublisher(streamPubSub), blockingService, idGen)
 	bubbleVersusService.SetRecordStore(bubbleVersusRecordRepo)
 	streamRegistry.RegisterCredentialed("bubbleVersus", channels.NewBubbleVersus)
@@ -3775,7 +3757,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/i/read-announcement", announcementHandler.ReadAnnouncement, middleware.RequireAuth(), middleware.RequireScope("write:account"))
 
 	// Admin endpoints (Phase 5)
-	abuseReportRepo := repository.NewAbuseReportRepository(s.db)
 	// 通報の abuseReport system webhook (#1542)。local と Flag の両方に効く
 	// (#3256)。recipientRepo がここで揃うため本箇所で配線する。
 	abuseCreatedNotifier.SetWebhook(webhookService, recipientRepo, coreabuse.UserLookups{Instances: instanceRepo, Emojis: emojiRepo}, idGen)
@@ -4279,7 +4260,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/announcements/show", announcementHandler.Show)
 
 	// auth/* — MiAuth/OAuth セッション
-	authSessionRepo := repository.NewAuthSessionRepository(s.db)
 	authHandler := apiauth.NewHandler(authSessionRepo, s.config, idGen)
 	authHandler.SetBackground(s.background)   // #3661: 世代の停止で待つ
 	authHandler.SetDetailExtras(usersHandler) // #3330: auth/session/userkey・miauth check のピン留め・移行先
@@ -4348,7 +4328,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/reversi/verify", reversiHandler.Verify)
 
 	// bubble-game/* — バブルゲーム (実データ)
-	bubbleGameRepo := repository.NewBubbleGameRepository(s.db)
 	bubbleGameHandler := apibubblegame.NewHandler(bubbleGameRepo, idGen)
 	api.POST("/bubble-game/register", bubbleGameHandler.Register, middleware.RequireAuth(), middleware.RequireScope("write:account"))
 	// ranking は upstream ranking.ts が allowGet:true。frontend drop-and-fusion.vue は
