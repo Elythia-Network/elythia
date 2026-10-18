@@ -214,6 +214,8 @@ services:
     build:
       context: .
       dockerfile: common/Dockerfile.driver
+    # 結果を bind 先の利用者が扱えるよう、run.sh が渡す UID/GID で動かす。
+    user: "${BENCH_UID:-0}:${BENCH_GID:-0}"
     environment:
       MKGO_MKQ_URL: https://mk-mkq
       TS_URL: https://ts
