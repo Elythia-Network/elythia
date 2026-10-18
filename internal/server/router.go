@@ -264,11 +264,13 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	modLogRepo := w.repos.modLog
 	recipientRepo := w.repos.recipient
 	ipLookupLogRepo := w.repos.ipLookupLog
-	moveSystemAccountRepo := w.repos.moveSystemAccount
+	moveSystemAccountRepo := w.repos.systemAccount
+	systemAccountRepo := w.repos.systemAccount
 	noteUnreadRepo := w.repos.noteUnread
-	abuseReportRepoForNotif := w.repos.abuseReportForNotif
-	emojiApplicationRepoForNotif := w.repos.emojiApplicationForNotif
-	signupApplicationRepoForNotif := w.repos.signupApplicationForNotif
+	abuseReportRepoForNotif := w.repos.abuseReport
+	emojiApplicationRepoForNotif := w.repos.emojiApplication
+	signupApplicationRepoForNotif := w.repos.signupApplication
+	signupApplicationRepo := w.repos.signupApplication
 	fedRuleRepo := w.repos.fedRule
 	sigCapRepo := w.repos.sigCap
 	quoteAuthorizationRepo := w.repos.quoteAuthorization
@@ -279,6 +281,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	abuseReportRepo := w.repos.abuseReport
 	authSessionRepo := w.repos.authSession
 	bubbleGameRepo := w.repos.bubbleGame
+	userMemoRepo := w.repos.userMemo
+	galleryRepo := w.repos.gallery
+	accessTokenRepo := w.repos.accessToken
+	publickeyExtraRepo := w.repos.publickeyExtra
+	adRepo := w.repos.ad
 
 	// Seed the singleton meta row on first boot so that fresh installs
 	// can run /api/admin/accounts/create (initial setup) without tripping
@@ -395,7 +402,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// i/regenerate-token を使い切れる (passwordguard の package doc)。
 	passwordFailureGuard := passwordguard.NewRedisGuard(s.redis.Default)
 	// proxy account の username。meta / nodeinfo の handler と、frontend の HTML が共有する。
-	proxyAccountResolver := newProxyAccountResolver(repository.NewSystemAccountRepository(s.db), userRepo)
+	proxyAccountResolver := newProxyAccountResolver(systemAccountRepo, userRepo)
 	// DB の健全性 (#3095)。統計はプライマリから読み、1 分キャッシュする。
 	dbHealth := dbhealth.NewService(s.db, s.config.DBReplications && len(s.config.DBSlaves) > 0)
 	// Web Push (Phase 9.3)。通知・チャット・既読の push を queue へ積む。
@@ -1016,7 +1023,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	federationResolver.SetPublickeyRepo(publickeyRepo)
 	// FEP-521a Multikey 対応で remote actor の assertionMethod[] を parse して
 	// user_publickey_extra に persist する (#1067 / #1070)。
-	federationResolver.SetPublickeyExtraRepo(repository.NewUserPublickeyExtraRepository(s.db))
+	federationResolver.SetPublickeyExtraRepo(publickeyExtraRepo)
 	federationResolver.SetPollRepo(pollRepo)
 	// リモート actor の featured コレクション (ピン留め投稿) を取り込む (#2552)。
 	// inbound の Add (processor 側) はピン留めされた瞬間にしか飛んで来ないので、
@@ -1150,7 +1157,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// **未配線だと actor の `toot:suspended` を読まない** — 由来を持てない状態で
 	// 自動凍結すると、モデレーターが解除しても次の refresh で無言で戻る (#2973)。
 	federationResolver.SetSuspensionOriginRepo(suspensionOriginRepo)
-	deliverService.SetPublickeyExtraRepo(repository.NewUserPublickeyExtraRepository(s.db))
+	deliverService.SetPublickeyExtraRepo(publickeyExtraRepo)
 	// test (#780) で queue を bypass して同期 deliver する hook を後付けで
 	// 差し替えられるよう、Server から参照を保持する。
 	s.deliverSvc = deliverService
@@ -1163,7 +1170,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// relay.Service は AP delivery を必要とするので deliverService 構築の
 	// 直後でセットアップする。admin/relays ハンドラへ注入し、Accept/Reject
 	// inbox 処理で status を更新できるように processor にも渡す。
-	sysAcctSvc := coresystemaccount.NewService(userRepo, keypairRepo, repository.NewSystemAccountRepository(s.db), idGen)
+	sysAcctSvc := coresystemaccount.NewService(userRepo, keypairRepo, systemAccountRepo, idGen)
 	// FEP-521a Multikey 対応で system account も Ed25519 鍵対を併発行 (#1067 / #1068)。
 	sysAcctSvc.SetKeypairExtraRepo(keypairExtraRepo)
 	// #1704: list に remote user を追加したとき proxy account がフォローして連合
@@ -1366,12 +1373,17 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// Daily generic clean (#1563): scheduler の cron (0 0 * * *) が enqueue する。
 	// user_ip 90 日 prune / 期限切れ role_assignment 削除 / reversi outdated game 削除 /
 	// 未使用 antenna の deactivate (#1604, deactivateAntennaThreshold ミリ秒)。
+	// 最後の引数と下の SetIPLookupLogPruner は、buildRepos の userPendingRepo /
+	// ipLookupLogRepo と同じ種類の repository をここで作っている (#3684 でまとめなかった)。
+	// ゲート (TestCleanProcessorReceivesThePendingPruner / TestIPLookupLogRetentionIsWired)
+	// が、nil を渡せないよう構築の式そのものを照合しているため。どちらも db しか
+	// 持たないので、2 つあっても動きは同じ。
 	cleanGenericProcessor := processors.NewCleanProcessor(userIPRepo, roleAssignmentRepo, reversiRepo, idGen, antennaRepo, time.Duration(s.config.DeactivateAntennaThreshold)*time.Millisecond, repository.NewUserPendingRepository(s.db))
 	// IP 照会の監査記録にも保持期間を掛ける (#3106)。**この行が無いと記録が永久に
 	// 残り、`moderation_log` に IP を書くのと変わらなくなる。**
 	cleanGenericProcessor.SetIPLookupLogPruner(repository.NewIPLookupLogRepository(s.db))
 	// 対戦の記録は終局から 30 日で消す (#3232)。
-	cleanGenericProcessor.SetBubbleVersusRecordPruner(repository.NewBubbleVersusRepository(s.db))
+	cleanGenericProcessor.SetBubbleVersusRecordPruner(bubbleVersusRecordRepo)
 	s.queueServer.Handle(queue.TaskTypeClean, cleanGenericProcessor.Handle)
 
 	// 分割アップロードセッションの GC (#2313): scheduler の cron (*/15) が
@@ -1730,7 +1742,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 初回セットアップの判定は admin/accounts/create と同じ数え方にする。
 	// プラグインが管理するアカウント (#3468) は数えない。
 	meta.SetLocalUserCounter(func() (int64, error) { return userRepo.CountLocalUsersForSetup() })
-	metaHandler.SetAdRepo(repository.NewAdRepository(s.db))
+	metaHandler.SetAdRepo(adRepo)
 	metaHandler.SetProxyAccountResolver(proxyAccountResolver)
 	// 分割アップロード (#2313) の能力告知。未対応構成では field ごと出さないので、
 	// フロントエンドは undefined を見て従来の単発アップロードに倒れる。
@@ -1806,7 +1818,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		Muting:        mutingRepo,
 		RenoteMuting:  renoteMutingRepo,
 		FollowRequest: followRequestRepo,
-		Memo:          repository.NewUserMemoRepository(s.db),
+		Memo:          userMemoRepo,
 		Relation:      userRelationRepo,
 	}
 	// follow / unfollow の Webhook は本家と同じく、フォローした側から見た
@@ -1847,7 +1859,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	signupService.SetUserPendingRepo(userPendingRepo)
 	// 承認制の登録を確認メールに乗せた経路 (#2571) で、申請の確定をアカウント
 	// 作成と同じ tx に入れる (#2576)。
-	signupService.SetSignupApplicationRepo(repository.NewSignupApplicationRepository(s.db))
+	signupService.SetSignupApplicationRepo(signupApplicationRepo)
 	// PromotePending を transaction 化して partial failure rollback と
 	// invitation ticket の SELECT FOR UPDATE ロックを有効化する (#600 item 2 + #604)。
 	signupService.SetDB(s.db)
@@ -1872,7 +1884,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 復路は保証しなくなった。#3191)。
 	// signup (申請・登録) と admin (審査) の両方が同じインスタンスを見る。
 	signupApplicationService := signupapplication.NewService(
-		repository.NewSignupApplicationRepository(s.db), idGen)
+		signupApplicationRepo, idGen)
 	signupHandler.SetTicketStore(signupTicketRepo)
 	// 承認制の登録 (#2554 / #2569)。本人性はクレームコードが担保するので、
 	// 外部サーバーには一切依存しない。
@@ -2171,7 +2183,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	usersHandler.SetClipFavoriteRepo(clipFavoriteRepo) // #1562: users/clips の favoritedCount / isFavorited
 	usersHandler.SetClipNoteRepo(clipNoteRepo)         // #2243: users/clips の notesCount 実カウント
 	usersHandler.SetFlashRepo(flashRepo)
-	usersHandler.SetGalleryRepo(repository.NewGalleryRepository(s.db))
+	usersHandler.SetGalleryRepo(galleryRepo)
 	usersHandler.SetPageRepo(pageRepo)
 	// users/pages の page も attachedFiles / eyeCatchingImage を解決する (#1662)。
 	usersHandler.SetDriveFileRepo(driveFileRepo)
@@ -2222,8 +2234,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// RequireAuth + canSearchUsers gate を外して揃える (#1766)。
 	api.POST("/users/search-by-username-and-host", usersHandler.SearchByUsernameAndHost)
 	api.POST("/users/update-memo", usersHandler.UpdateMemo, middleware.RequireAuth(), middleware.RequireScope("write:account"))
-	usersHandler.SetAbuseRepo(repository.NewAbuseReportRepository(s.db))
-	usersHandler.SetMemoRepo(repository.NewUserMemoRepository(s.db))
+	usersHandler.SetAbuseRepo(abuseReportRepo)
+	usersHandler.SetMemoRepo(userMemoRepo)
 	usersHandler.SetUserRelationReader(userRelationRepo) // #3608: users/show の関係を 1 文で引く
 	usersHandler.SetUserListFavoriteRepo(userListFavoriteRepo)
 	usersHandler.SetUserListRepo(userListRepo)
@@ -2289,8 +2301,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	iHandler.SetImportDriveReader(driveReader)
 	iHandler.SetAntennaCounter(antennaRepo)
 	// P4-6 (#166): i/authorized-apps, i/revoke-token, i/gallery/*, i/page-likes
-	iHandler.SetAccessTokenRepo(repository.NewAccessTokenRepository(s.db))
-	iHandler.SetGalleryRepo(repository.NewGalleryRepository(s.db))
+	iHandler.SetAccessTokenRepo(accessTokenRepo)
+	iHandler.SetGalleryRepo(galleryRepo)
 	iHandler.SetPageLikeRepo(pageLikeRepo)
 	// P4-6 followup (#174): i/move は federation resolver + deliverService を使って
 	// 宛先 actor 解決 → alsoKnownAs 検証 → MovedTo 書き込み → Move activity 配送。
@@ -2502,7 +2514,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	notificationsHandler.SetNoteFieldResolver(noteFieldResolver)
 	// notifications/create の 'app' 通知で header/icon を token.name/iconUrl に
 	// fallback するため access token repo を配線 (#1557)。
-	notificationsHandler.SetAccessTokenRepo(repository.NewAccessTokenRepository(s.db))
+	notificationsHandler.SetAccessTokenRepo(accessTokenRepo)
 	api.POST("/i/notifications", notificationsHandler.Show, middleware.RequireAuth(), middleware.RequireScope("read:notifications"))
 	api.POST("/i/notifications-grouped", notificationsHandler.Grouped, middleware.RequireAuth(), middleware.RequireScope("read:notifications"))
 	api.POST("/notifications/mark-all-as-read", notificationsHandler.MarkAllAsRead, middleware.RequireAuth(), middleware.RequireScope("write:notifications"))
@@ -2593,7 +2605,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		Muting:        mutingRepo,
 		RenoteMuting:  renoteMutingRepo,
 		FollowRequest: followRequestRepo,
-		Memo:          repository.NewUserMemoRepository(s.db),
+		Memo:          userMemoRepo,
 		Relation:      userRelationRepo,
 	})
 	blockingHandler.SetModeratorChecker(roleService) // #1985: blocking/list の count gate で moderator viewer 判定
@@ -2743,7 +2755,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		Muting:        mutingRepo,
 		RenoteMuting:  renoteMutingRepo,
 		FollowRequest: followRequestRepo,
-		Memo:          repository.NewUserMemoRepository(s.db),
+		Memo:          userMemoRepo,
 		Relation:      userRelationRepo,
 	})
 	// AP リソース系エンドポイントは Accept ヘッダで content negotiation する。
@@ -2766,11 +2778,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			Page:         pageRepo,
 			Clip:         clipRepo,
 			Flash:        flashRepo,
-			Gallery:      repository.NewGalleryRepository(s.db),
+			Gallery:      galleryRepo,
 			Drive:        driveFileRepo,
 			Channel:      channelRepo,
 			Reversi:      reversiRepo,
-			Announcement: repository.NewAnnouncementRepository(s.db),
+			Announcement: announcementRepo,
 			IDGen:        idGen,
 		},
 	)
@@ -2892,7 +2904,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			Transport: oauthDiscoveryTransport(s.config.AllowedPrivateNetworks, s.config.TestMode, s.outboundOpts()...),
 		},
 		userRepo,
-		repository.NewAccessTokenRepository(s.db),
+		accessTokenRepo,
 		idGen,
 		s.config.URL,
 		// 本家 OAuth2ProviderService は NODE_ENV === 'test' のとき http の
@@ -3470,6 +3482,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 配線していたので Flag の経路だけ admin stream と webhook が抜けていた
 	// (#3256)。連打の絞り (#3200) も通報の出どころで変わらない。webhook は
 	// recipientRepo (無効にした通知先の除外に使う) が揃う後段で SetWebhook する。
+	// 最後の引数は buildRepos の abuseReportRepo と同じ種類だが、ゲート
+	// (TestAbuseReportNotifierIsWired) が構築の式そのものを照合するので、ここで作る
+	// (#3684)。db しか持たないので、2 つあっても動きは同じ。
 	abuseInAppNotifier := coreabuse.NewInAppNotifier(roleService, notificationService, repository.NewAbuseReportRepository(s.db))
 	abuseCreatedNotifier := coreabuse.NewCreatedNotifier(abuseInAppNotifier, roleService, stream.NewAdminStreamPublisher(streamPubSub))
 	abuseCreatedNotifier.SetBackground(s.background) // #3661: 世代の停止で待つ
@@ -3580,7 +3595,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// Phase 9.7: federation processor / reversi handler に reversi 依存を注入。
 	federationProcessor.SetReversi(reversiService, reversiRepo, idGen, reversiFedCache)
 	federationProcessor.SetBlockingService(blockingService)
-	federationProcessor.SetAbuseReportRepo(repository.NewAbuseReportRepository(s.db), idGen)
+	federationProcessor.SetAbuseReportRepo(abuseReportRepo, idGen)
 	// リモートからの通報 (AP Flag) もローカルと同じ通知を出す (#2868 / #3256)。
 	// **配線しないと通報の出どころで通知の有無が変わる。**
 	federationProcessor.SetAbuseReportCreatedNotifier(abuseCreatedNotifier)
@@ -3949,9 +3964,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// resolve-abuse-user-report 時に abuseReportResolved system webhook を発火
 	// する dispatcher (#1723)。
 	adminHandler.SetSystemWebhookDispatcher(webhookService)
-	adminHandler.SetAdRepo(repository.NewAdRepository(s.db))
-	adminHandler.SetAvatarDecorationRepo(repository.NewAvatarDecorationRepository(s.db))
-	adminHandler.SetInviteRepo(repository.NewRegistrationTicketRepository(s.db))
+	adminHandler.SetAdRepo(adRepo)
+	adminHandler.SetAvatarDecorationRepo(avatarDecorationRepo)
+	adminHandler.SetInviteRepo(signupTicketRepo)
 	adminHandler.SetPromoNoteRepo(repository.NewPromoNoteRepository(s.db))
 	adminHandler.SetNoteFinder(noteRepo)
 	if s.queueInspector != nil {
