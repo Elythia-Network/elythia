@@ -10,8 +10,6 @@
 //     spec even if the UI falls back to the generic display).
 //
 // Types defined in upstream but skipped for now:
-//   - markSensitiveDriveFile / unmarkSensitiveDriveFile / deleteDriveFile:
-//     mk-go admin/drive write handlers are not implemented
 //   - deleteNote / deletePage / deleteFlash / deleteGalleryPost / deleteChatRoom:
 //     out of scope for the current modlog rollout
 package moderationlog
@@ -89,6 +87,13 @@ const (
 	LogCreateAbuseReportNotificationRecipient LogType = "createAbuseReportNotificationRecipient"
 	LogUpdateAbuseReportNotificationRecipient LogType = "updateAbuseReportNotificationRecipient"
 	LogDeleteAbuseReportNotificationRecipient LogType = "deleteAbuseReportNotificationRecipient"
+
+	// Drive files of other users, changed by moderators through
+	// drive/files/update and drive/files/delete (#3678)。info は本家と同じ
+	// {fileId, fileUserId, fileUserUsername, fileUserHost}。
+	LogMarkSensitiveDriveFile   LogType = "markSensitiveDriveFile"
+	LogUnmarkSensitiveDriveFile LogType = "unmarkSensitiveDriveFile"
+	LogDeleteDriveFile          LogType = "deleteDriveFile"
 
 	// Content deletion by moderators
 	LogDeleteGalleryPost LogType = "deleteGalleryPost"

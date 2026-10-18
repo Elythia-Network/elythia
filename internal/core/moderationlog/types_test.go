@@ -54,6 +54,9 @@ func TestLogTypeValues(t *testing.T) {
 		{LogUpdateAbuseReportNotificationRecipient, "updateAbuseReportNotificationRecipient"},
 		{LogDeleteAbuseReportNotificationRecipient, "deleteAbuseReportNotificationRecipient"},
 		{LogUpdateProxyAccountDescription, "updateProxyAccountDescription"},
+		{LogMarkSensitiveDriveFile, "markSensitiveDriveFile"},
+		{LogUnmarkSensitiveDriveFile, "unmarkSensitiveDriveFile"},
+		{LogDeleteDriveFile, "deleteDriveFile"},
 		// **upstream に無い mk-go 独自の値 (#2962)。** wire 文字列は
 		// moderation_log.type に入り frontend の locale 引きにも使われるので、
 		// 変えると過去のログの見出しが空欄になる。
