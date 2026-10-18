@@ -1,0 +1,285 @@
+[
+	{
+		"name": "type-after-enum-when-the-type-has-a-keyword-group",
+		"paramDef": { "type": "string", "enum": ["a", "bb"], "maxLength": 1 },
+		"inputs": ["123", "null", "\"bb\"", "\"c\"", "\"a\""]
+	},
+	{
+		"name": "type-before-enum-without-a-keyword-group",
+		"paramDef": { "type": "string", "enum": ["a"] },
+		"inputs": ["123", "null", "\"b\"", "\"a\""]
+	},
+	{
+		"name": "nullable-type-is-checked-up-front",
+		"paramDef": { "type": "string", "nullable": true, "enum": ["a", null], "maxLength": 1 },
+		"inputs": ["123", "null", "\"b\"", "\"bb\""]
+	},
+	{
+		"name": "other-type-groups-run-before-the-type-error",
+		"paramDef": { "type": "string", "maxLength": 3, "minimum": 2, "maxItems": 1 },
+		"inputs": ["1", "3", "[1,2]", "[1]", "{}", "\"abcd\"", "\"abc\""]
+	},
+	{
+		"name": "object-group-type-error",
+		"paramDef": { "type": "object", "required": ["a"], "enum": [1, "x", null] },
+		"inputs": ["[1]", "1", "\"x\"", "null", "{}", "{\"a\":1}"]
+	},
+	{
+		"name": "type-null-and-boolean-and-integer",
+		"paramDef": { "type": "object", "properties": { "n": { "type": "null" }, "b": { "type": "boolean", "enum": [true] }, "i": { "type": "integer", "maximum": 3 } } },
+		"inputs": ["{\"n\":null}", "{\"n\":0}", "{\"b\":false}", "{\"b\":1}", "{\"i\":3.0}", "{\"i\":3.5}", "{\"i\":4}", "{\"i\":1e400}", "{\"i\":-1e400}", "{\"i\":\"3\"}"]
+	},
+	{
+		"name": "number-limits-and-messages",
+		"paramDef": { "type": "object", "properties": { "big": { "type": "number", "maximum": 1e21 }, "huge": { "type": "number", "maximum": 123456789012345680000 }, "tiny": { "type": "number", "minimum": 1e-7, "maximum": 2.5e-7 }, "neg": { "type": "number", "minimum": -0.25, "maximum": 0.5 }, "both": { "type": "integer", "minimum": 5, "maximum": 1 } } },
+		"inputs": ["{\"big\":1e22}", "{\"big\":1e21}", "{\"huge\":1e21}", "{\"tiny\":1e-8}", "{\"tiny\":0}", "{\"tiny\":3e-7}", "{\"neg\":-0.3}", "{\"neg\":0.6}", "{\"neg\":-0}", "{\"both\":3}", "{\"both\":0}", "{\"both\":9}"]
+	},
+	{
+		"name": "string-lengths-in-code-points",
+		"paramDef": { "type": "object", "properties": { "s": { "type": "string", "minLength": 2, "maxLength": 3 }, "both": { "type": "string", "minLength": 5, "maxLength": 3 } } },
+		"inputs": ["{\"both\":\"abcd\"}", "{\"both\":\"ab\"}", "{\"both\":\"abcdef\"}", "{\"s\":\"\\ud83d\\ude00\"}", "{\"s\":\"\\ud83d\\ude00\\ud83d\\ude00\"}", "{\"s\":\"ab\\ud83d\\ude00\"}", "{\"s\":\"abc\\ud83d\\ude00\"}", "{\"s\":\"e\\u0301\"}", "{\"s\":\"\"}", "{\"s\":\"abcd\"}"]
+	},
+	{
+		"name": "property-names-in-schema-paths",
+		"paramDef": { "type": "object", "properties": { "a/b": { "type": "string" }, "a~b": { "type": "string" }, "日本": { "type": "string" }, "a b%": { "type": "string" }, "x!*'()-_.": { "type": "string" } }, "required": ["日本"] },
+		"inputs": ["{}", "{\"日本\":1}", "{\"日本\":\"\",\"a/b\":1}", "{\"日本\":\"\",\"a~b\":1}", "{\"日本\":\"\",\"a b%\":1}", "{\"日本\":\"\",\"x!*'()-_.\":1}"]
+	},
+	{
+		"name": "required-order-and-defaults-first",
+		"paramDef": { "type": "object", "properties": { "a": { "type": "integer", "default": 1 }, "b": { "type": "string" }, "c": { "type": "object", "default": { "x": [1] } } }, "required": ["c", "b", "a"] },
+		"inputs": ["{}", "{\"b\":\"x\"}", "{\"b\":\"x\",\"a\":null}", "{\"b\":1,\"a\":\"z\"}", "{\"a\":\"z\",\"b\":1}"]
+	},
+	{
+		"name": "nested-defaults-in-items-allof-and-then",
+		"paramDef": {
+			"type": "object",
+			"properties": { "list": { "type": "array", "items": { "type": "object", "properties": { "k": { "type": "string", "default": "d" } } } }, "flag": { "type": "boolean" } },
+			"allOf": [{ "type": "object", "properties": { "fromAllOf": { "type": "integer", "default": 7 } } }],
+			"if": { "properties": { "flag": { "enum": [true] } }, "required": ["flag"] },
+			"then": { "properties": { "fromThen": { "type": "string", "default": "t" } } }
+		},
+		"inputs": ["{}", "{\"list\":[{},{\"k\":\"x\"},{}]}", "{\"list\":[{\"k\":1}]}", "{\"flag\":true}", "{\"flag\":false}", "{\"fromAllOf\":\"x\"}", "{\"flag\":true,\"fromThen\":1}"]
+	},
+	{
+		"name": "if-then-else",
+		"paramDef": { "type": "object", "if": { "properties": { "kind": { "enum": ["a"] } } }, "then": { "required": ["a"] }, "else": { "required": ["b"] } },
+		"inputs": ["{}", "{\"kind\":\"a\"}", "{\"kind\":\"a\",\"a\":1}", "{\"kind\":\"b\"}", "{\"kind\":\"b\",\"b\":1}"]
+	},
+	{
+		"name": "if-then-inside-anyof",
+		"paramDef": { "anyOf": [{ "if": { "type": "string" }, "then": { "minLength": 2 } }, { "type": "integer" }] },
+		"inputs": ["\"a\"", "\"ab\"", "1", "1.5", "null"]
+	},
+	{
+		"name": "anyof-reports-the-first-branch-error",
+		"paramDef": { "anyOf": [{ "type": "object", "required": ["a"] }, { "type": "object", "required": ["b"] }, { "type": "string", "maxLength": 1 }] },
+		"inputs": ["{}", "{\"a\":1}", "{\"b\":1}", "\"ab\"", "\"a\"", "1"]
+	},
+	{
+		"name": "oneof-two-passing-and-branch-errors",
+		"paramDef": { "type": "object", "properties": { "x": { "oneOf": [{ "type": "integer" }, { "type": "string" }, { "type": "string", "maxLength": 3 }, { "type": "string", "minLength": 9 }] } } },
+		"inputs": ["{\"x\":1}", "{\"x\":\"abc\"}", "{\"x\":\"abcd\"}", "{\"x\":\"abcdefghij\"}", "{\"x\":null}", "{\"x\":1.5}"]
+	},
+	{
+		"name": "errors-of-a-passed-anyof-or-oneof-are-dropped",
+		"paramDef": { "type": "object", "anyOf": [{ "required": ["a"] }, { "required": ["b"] }], "oneOf": [{ "required": ["c"] }, { "required": ["d"] }], "properties": { "x": { "type": "string" } } },
+		"inputs": ["{\"b\":1,\"d\":1,\"x\":1}", "{\"b\":1,\"d\":1}", "{\"a\":1,\"d\":1,\"x\":1}", "{\"b\":1,\"c\":1,\"x\":1}", "{\"b\":1,\"c\":1,\"d\":1}", "{\"d\":1}"]
+	},
+	{
+		"name": "errors-of-a-passed-nested-anyof-are-dropped",
+		"paramDef": { "anyOf": [{ "type": "object", "anyOf": [{ "required": ["a"] }, { "required": ["b"] }], "properties": { "x": { "type": "string" } } }, { "type": "object", "required": ["z"] }] },
+		"inputs": ["{\"b\":1,\"x\":1}", "{\"b\":1}", "{\"z\":1}", "{\"b\":1,\"x\":1,\"z\":1}"]
+	},
+	{
+		"name": "oneof-first-branches-pass",
+		"paramDef": { "oneOf": [{ "type": "string" }, { "type": "string" }, { "type": "integer" }] },
+		"inputs": ["\"a\"", "1", "null"]
+	},
+	{
+		"name": "allof-stops-at-the-first-failing-branch",
+		"paramDef": { "allOf": [{ "type": "object", "required": ["a"] }, { "type": "object", "required": ["b"] }] },
+		"inputs": ["{}", "{\"a\":1}", "{\"a\":1,\"b\":2}"]
+	},
+	{
+		"name": "unique-items-with-a-primitive-item-type",
+		"paramDef": { "type": "object", "properties": { "s": { "type": "array", "uniqueItems": true, "items": { "type": "string" } }, "n": { "type": "array", "uniqueItems": true, "items": { "type": "number" } }, "ns": { "type": "array", "uniqueItems": true, "items": { "type": "string", "nullable": true } }, "b": { "type": "array", "uniqueItems": true, "items": { "type": "boolean" } } } },
+		"inputs": ["{\"s\":[\"a\",\"b\",\"a\"]}", "{\"s\":[\"a\",\"a\",\"b\",\"b\"]}", "{\"s\":[\"__proto__\",\"__proto__\"]}", "{\"s\":[\"constructor\",\"constructor\"]}", "{\"s\":[\"toString\",\"x\",\"toString\"]}", "{\"n\":[1,2,1.0]}", "{\"n\":[0,-0]}", "{\"n\":[1e21,1e21]}", "{\"ns\":[null,\"null\"]}", "{\"ns\":[null,null]}", "{\"ns\":[\"null\",\"null\"]}", "{\"ns\":[\"__proto__\",\"__proto__\"]}", "{\"b\":[true,false,true]}"]
+	},
+	{
+		"name": "max-items-before-min-items",
+		"paramDef": { "type": "array", "minItems": 3, "maxItems": 1 },
+		"inputs": ["[1,2]", "[1]", "[1,2,3]"]
+	},
+	{
+		"name": "items-before-unique-items-and-limits-first",
+		"paramDef": { "type": "array", "maxItems": 3, "minItems": 2, "uniqueItems": true, "items": { "type": "integer", "maximum": 5 } },
+		"inputs": ["[]", "[1]", "[1,1]", "[9,9]", "[1,2,3,4]", "[1.5,1.5]", "[1,9,1]"]
+	},
+	{
+		"name": "javascript-regexp-semantics",
+		"paramDef": {
+			"type": "object",
+			"properties": {
+				"dot": { "type": "string", "pattern": "^a.b$" },
+				"notSpace": { "type": "string", "pattern": "^\\S+$" },
+				"space": { "type": "string", "pattern": "^a\\sb$" },
+				"spaceClass": { "type": "string", "pattern": "^[\\s,]+$" },
+				"escapes": { "type": "string", "pattern": "^\\x41\\u0042\\u{1F600}\\uD83D\\uDE00[\\b]\\t\\0$" },
+				"classes": { "type": "string", "pattern": "^[\\d\\w-]+$" },
+				"negClasses": { "type": "string", "pattern": "^[\\D\\W]+$" },
+				"word": { "type": "string", "pattern": "\\bab\\b" },
+				"quant": { "type": "string", "pattern": "^(?:ab){2,3}?c*d+e?f{2}g{1,}$" },
+				"alt": { "type": "string", "pattern": "^(x|y)$|^z" },
+				"syntaxChars": { "type": "string", "pattern": "^\\^\\$\\\\\\.\\*\\+\\?\\(\\)\\[\\]\\{\\}\\|\\/[\\-\\]]$" },
+				"posix": { "type": "string", "pattern": "^[[:a]\\]$" },
+				"ranges": { "type": "string", "pattern": "^[a-c-e]+$" },
+				"controls": { "type": "string", "pattern": "^\\n\\v\\f\\r$" }
+			}
+		},
+		"inputs": [
+			"{\"dot\":\"axb\"}", "{\"dot\":\"a\\nb\"}", "{\"dot\":\"a\\rb\"}", "{\"dot\":\"a\\u2028b\"}", "{\"dot\":\"a\\u0085b\"}", "{\"dot\":\"a\\ud83d\\ude00b\"}",
+			"{\"space\":\"a b\"}", "{\"space\":\"a\\u3000b\"}", "{\"space\":\"a\\u0085b\"}", "{\"space\":\"a\\u2028b\"}", "{\"space\":\"ab\"}",
+			"{\"notSpace\":\"abc\"}", "{\"notSpace\":\"a\\u3000\"}", "{\"notSpace\":\"\\u0085\"}", "{\"notSpace\":\"\\ufeff\"}", "{\"notSpace\":\"\\u200b\"}",
+			"{\"spaceClass\":\" ,\\u00a0\\u1680\\u2000\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff\\t\\n\\u000b\\f\\r\"}", "{\"spaceClass\":\"\\u0085\"}", "{\"spaceClass\":\"\\u180e\"}",
+			"{\"escapes\":\"AB\\ud83d\\ude00\\ud83d\\ude00\\b\\t\\u0000\"}", "{\"escapes\":\"AB\\ud83d\\ude00\\ud83d\\ude00\\t\\t\\u0000\"}",
+			"{\"classes\":\"a_1-\"}", "{\"classes\":\"é\"}", "{\"negClasses\":\"é \"}", "{\"negClasses\":\"a\"}",
+			"{\"word\":\"x ab\"}", "{\"word\":\"xab\"}", "{\"word\":\" abc\"}", "{\"word\":\" ab\"}", "{\"word\":\"éab\"}", "{\"word\":\"\\ud83d\\ude00ab\\ud83d\\ude00\"}",
+			"{\"quant\":\"ababdff\"}", "{\"quant\":\"abababccddeffg\"}", "{\"quant\":\"abdffg\"}", "{\"quant\":\"ababababdffg\"}",
+			"{\"alt\":\"x\"}", "{\"alt\":\"xy\"}", "{\"alt\":\"zz\"}",
+			"{\"syntaxChars\":\"^$\\\\.*+?()[]{}|/-\"}", "{\"syntaxChars\":\"^$\\\\.*+?()[]{}|/]\"}", "{\"syntaxChars\":\"^$\\\\.*+?()[]{}|/x\"}",
+			"{\"posix\":\":]\"}", "{\"posix\":\"a]\"}", "{\"posix\":\"[]\"}", "{\"posix\":\"l]\"}",
+			"{\"ranges\":\"abc-e\"}", "{\"ranges\":\"d\"}",
+			"{\"controls\":\"\\n\\u000b\\f\\r\"}", "{\"controls\":\"\\n\\n\\f\\r\"}"
+		]
+	},
+	{
+		"name": "nullable-object-and-additional-properties",
+		"paramDef": { "type": "object", "properties": { "o": { "type": "object", "nullable": true, "additionalProperties": true, "properties": { "a": { "type": "integer" } }, "required": ["a"] } } },
+		"inputs": ["{\"o\":null}", "{\"o\":{}}", "{\"o\":{\"a\":1,\"z\":[]}}", "{\"o\":[]}", "{\"o\":{\"a\":null}}"]
+	},
+	{
+		"name": "empty-schema-accepts-everything",
+		"paramDef": {},
+		"inputs": ["null", "[]", "1", "\"x\"", "{\"a\":1}"]
+	},
+	{
+		"name": "untyped-properties-only-apply-to-objects",
+		"paramDef": { "properties": { "a": { "type": "string", "default": "d" } }, "required": ["a"] },
+		"inputs": ["{}", "{\"a\":1}", "1", "null", "[]"]
+	},
+	{
+		"name": "description-and-primitive-enum",
+		"paramDef": { "type": "object", "description": "x", "properties": { "e": { "description": "y", "enum": [1, "1", null, false] } } },
+		"inputs": ["{\"e\":1.0}", "{\"e\":\"1\"}", "{\"e\":null}", "{\"e\":false}", "{\"e\":0}", "{\"e\":[1]}", "{\"e\":{\"1\":1}}", "{\"e\":true}", "{\"e\":[]}"]
+	},
+	{
+		"name": "strict-equality-and-integers",
+		"paramDef": { "type": "object", "properties": { "z": { "enum": [0] }, "nz": { "enum": [-1, 0.5] }, "i": { "type": "integer" } } },
+		"inputs": ["{\"z\":-0}", "{\"z\":-0.0}", "{\"z\":0.0}", "{\"z\":0e5}", "{\"nz\":-1.0}", "{\"nz\":5e-1}", "{\"i\":1000000000000000.5}", "{\"i\":4503599627370495.5}", "{\"i\":4503599627370496.5}", "{\"i\":9007199254740993}", "{\"i\":-1000000000000000.5}"]
+	},
+	{
+		"name": "enum-strings-are-case-sensitive",
+		"paramDef": { "type": "object", "properties": { "v": { "type": "string", "enum": ["public", "home"] } } },
+		"inputs": ["{\"v\":\"PUBLIC\"}", "{\"v\":\"Home\"}", "{\"v\":\"home\"}"]
+	},
+	{
+		"name": "anyof-before-allof",
+		"paramDef": { "anyOf": [{ "type": "string" }], "allOf": [{ "type": "integer" }] },
+		"inputs": ["true", "\"a\"", "1", "null"]
+	},
+	{
+		"name": "compile-error-unknown-keyword",
+		"paramDef": { "type": "object", "unknownKeyword": 1 },
+		"compileError": true
+	},
+	{
+		"name": "compile-error-unknown-format",
+		"paramDef": { "type": "string", "format": "email" },
+		"compileError": true
+	},
+	{
+		"name": "compile-error-default-inside-anyof",
+		"paramDef": { "anyOf": [{ "type": "object", "properties": { "a": { "type": "integer", "default": 1 } } }] },
+		"compileError": true
+	},
+	{
+		"name": "compile-error-default-inside-oneof",
+		"paramDef": { "oneOf": [{ "type": "object", "properties": { "a": { "type": "integer", "default": 1 } } }] },
+		"compileError": true
+	},
+	{
+		"name": "compile-error-default-inside-if",
+		"paramDef": { "if": { "properties": { "a": { "type": "integer", "default": 1 } } }, "then": { "required": ["a"] } },
+		"compileError": true
+	},
+	{
+		"name": "compile-error-default-inside-allof-inside-anyof",
+		"paramDef": { "anyOf": [{ "allOf": [{ "properties": { "a": { "default": 1 } } }] }] },
+		"compileError": true
+	},
+	{
+		"name": "compile-error-default-at-the-root",
+		"paramDef": { "type": "object", "default": {} },
+		"compileError": true
+	},
+	{
+		"name": "compile-error-nullable-without-type",
+		"paramDef": { "nullable": true },
+		"compileError": true
+	},
+	{
+		"name": "compile-error-null-type-not-nullable",
+		"paramDef": { "type": "null", "nullable": false },
+		"compileError": true
+	},
+	{
+		"name": "compile-error-if-without-then",
+		"paramDef": { "if": { "type": "string" } },
+		"compileError": true
+	},
+	{
+		"name": "compile-error-then-without-if",
+		"paramDef": { "then": { "type": "string" } },
+		"compileError": true
+	},
+	{
+		"name": "compile-error-empty-enum",
+		"paramDef": { "enum": [] },
+		"compileError": true
+	},
+	{
+		"name": "compile-error-unknown-type",
+		"paramDef": { "type": "date" },
+		"compileError": true
+	},
+	{
+		"name": "compile-error-invalid-pattern",
+		"paramDef": { "type": "string", "pattern": "(" },
+		"compileError": true
+	},
+	{
+		"name": "compile-error-identity-escape-under-u",
+		"paramDef": { "type": "string", "pattern": "\\q" },
+		"compileError": true
+	},
+	{
+		"name": "compile-error-posix-class-is-a-lone-bracket-under-u",
+		"paramDef": { "type": "string", "pattern": "^[[:alpha:]]$" },
+		"compileError": true
+	},
+	{
+		"name": "compile-error-lone-brace-under-u",
+		"paramDef": { "type": "string", "pattern": "a{" },
+		"compileError": true
+	},
+	{
+		"name": "compile-error-negative-max-length",
+		"paramDef": { "type": "string", "maxLength": -1 },
+		"compileError": true
+	},
+	{
+		"name": "compile-error-required-not-strings",
+		"paramDef": { "type": "object", "required": [1] },
+		"compileError": true
+	}
+]
