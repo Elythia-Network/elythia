@@ -287,14 +287,15 @@ dispatcher が shareable channel の共有・pong ack を upstream `Connection.t
 
 ## 4. DI / 配線
 
-すべてのサービス生成・配線は `internal/server/router.go` の `setupRoutes()` で手動実行（NestJS 相当を関数呼び出しで構築）。DI フレームワークは使わない。repository だけは `setupRoutes()` から呼ぶ `buildRepos()` (`internal/server/wiring_repos.go`) で作る (4.2)。
+すべてのサービス生成・配線は `internal/server/router.go` の `setupRoutes()` で手動実行（NestJS 相当を関数呼び出しで構築）。DI フレームワークは使わない。repository は `setupRoutes()` から呼ぶ `buildRepos()` (`internal/server/wiring_repos.go`) で、core の service の一部は `buildCore()` (`internal/server/wiring_core.go`) で作る (4.2)。
 
 ```
 server.New() → setupRoutes()
   ├→ stream の pubsub と publisher 生成 (購読はまだ始めない)
   ├→ Repository 生成 (buildRepos → wiring.repos。setupRoutes では userRepo, noteRepo, … の別名を置く)
   ├→ chart の hook と、作るだけで副作用の無い部品の生成
-  ├→ Core サービス生成 (noteCreateService, followingService, …)
+  ├→ Core サービス生成 (作るだけのものは buildCore → wiring.core で作り、別名を置く。
+  │   setter はそれぞれ元の位置で呼ぶ。副作用や後の領域への依存があるものはその場で作る)
   ├→ hook 注入 (§5)
   ├→ Handler 生成 + ルート登録 (§3.1)
   └→ stream (pubsub の購読をここで始める) / WebSocket / 静的ファイル / middleware
@@ -337,20 +338,32 @@ setter は依存を先に作っても、元の位置 (streaming の publisher �
 `featuredService`、`hashtagService`、`modLogService`、`instanceService` など) を
 受け手より先に作るようにした (こちらは setter を呼ぶ位置は変えていない)。
 
-| | #3676 の前 (`b9db7e49b`) | #3676 の後 | 今 (#3684 の後) |
-|---|---|---|---|
-| setter で依存を入れる辺 | 877 | 877 | 879 |
-| うち、受け手より後で作った依存を入れるもの | 192 (受け手 55 個) | 107 (受け手 41 個) | 104 (受け手 41 個) |
-| うち、循環しているもの | 40 | 40 | 40 |
-| うち、それ以外 | 152 | 67 | 64 |
-| setter の呼び出しが受け手から離れているもの (下の数え方) | 359 | 307 | 308 |
+| | #3676 の前 (`b9db7e49b`) | #3676 の後 | #3684 の後 | 今 (#3686 の後) |
+|---|---|---|---|---|
+| setter で依存を入れる辺 | 877 | 877 | 879 | 879 |
+| うち、受け手より後で作った依存を入れるもの | 192 (受け手 55 個) | 107 (受け手 41 個) | 104 (受け手 41 個) | 103 (受け手 40 個) |
+| うち、循環しているもの | 40 | 40 | 40 | 39 |
+| うち、それ以外 | 152 | 67 | 64 | 64 |
+| setter の呼び出しが受け手から離れているもの (下の数え方) | 359 | 307 | 308 | 392 |
 
-今の列は #3684 の後の `router.go` を同じ道具で数えた。#3676 の後に入った変更で、setter の
+#3684 の後の列は、#3684 の後の `router.go` を同じ道具で数えた。#3676 の後に入った変更で、setter の
 辺と呼び出しが離れている辺が 2 つずつ増えている (#3684 の直前の `692710223` で
 879 / 107 / 309)。#3684 で、後から入れる辺は 3 つ減った。repository の別名を
 `setupRoutes()` の先頭に置いたことによる (下の「まだ手を付けていない」の項)。呼び出しが
 離れている辺は 1 つ減った。`noteCreateService.SetChannelHook(...)` の受け手・依存と
 呼び出しの間で定義していた `noteUnreadRepo` を、先頭の別名へ移したため (配線は同じ)。
+
+#3686 で core の service 46 個を `buildCore()` へ移し、その別名を `setupRoutes()` の
+`featuredService` を作っていた位置に置いた (4.2)。setter を呼ぶ位置は変えていない。
+後から入れる辺は 1 つ減った。`apFetcher.SetSigner(sysAcctSvc)` の依存
+`sysAcctSvc` が、受け手より前で定義されるようになったため。循環が 1 つ減り、それ以外が
+同じなのは、`noteQueryService.SetEphemeralReader(ephemeralStore)` の分類が循環から
+それ以外へ変わったため。これは道具の数え方による。道具は名前で辿り、`ephemeralStore` の
+右辺のクロージャの中の `err` を、`setupRoutes()` の中のすべての `err` と同じ節点として
+辿っていた。別名にしたので、右辺は `coreSvcs.ephemeralStore` だけになった。呼び出しが
+離れている辺は 84 増えた。受け手の定義が前へ移り、setter の呼び出しは元の位置に
+残したので、間に定義が挟まるようになったため。これは、setter を元の位置に残すという
+方針の結果である。段階 3 以降で setter を領域の関数へ寄せるときの目安になる。
 
 数え方 (`setupRoutes()` の構文木。道具はコミットしていない):
 
@@ -361,7 +374,8 @@ setter は依存を先に作っても、元の位置 (streaming の publisher �
   に `X` 以外の節点 `B` が現れるもの。1 回の呼び出しに 2 つの節点が現れれば 2 辺
 - 後から入れる辺: `B` の定義の行が `X` の定義の行より後のもの
 - 循環: 依存の図 (`A := f(... B ...)` の右辺と、setter の引数から張る `A → B`) で、
-  `B` から `X` へ辿り着けるもの
+  `B` から `X` へ辿り着けるもの。図は `setupRoutes()` の中だけで張り、`buildRepos()`・
+  `buildCore()` の中の構築の依存は辿らない (別名 `x := coreSvcs.y` の依存は `coreSvcs` だけ)
 - 「後から入れる辺」は**定義の順だけを見ていて、setter を呼ぶ位置は見ていない**。依存の
   定義だけを前へ移した辺 (setter の呼び出しは元の位置) も、元の位置に残した
   `notificationService.SetMainStreamPublisher` も、後から入れる辺には数えない。呼ぶ位置は
@@ -402,7 +416,8 @@ setter は依存を先に作っても、元の位置 (streaming の publisher �
 
 **`setupRoutes()` で作る部品は、領域ごとの関数で作り、コンテナの構造体 `wiring`
 (`internal/server/wiring.go`) の領域ごとのフィールドに入れる。** #3666 の段階 2。
-#3684 で repository を移した。今のフィールドは `repos` だけ。
+#3684 で repository を、#3686 で core の service の一部を移した。今のフィールドは `repos` と
+`core` の 2 つ。
 
 ```
 setupRoutes()
@@ -437,10 +452,24 @@ setupRoutes()
   緑のまま通る。`TestRelationSingleStatementReadersAreWired` は、構築の行に加えて
   `userRelation: userRelationRepo`、`repos: s.buildRepos()`、
   `userRelationRepo := w.repos.userRelation` も照合する (#3684 のレビューで、別名を nil に
-  する変異が通ったため)。`wiring` は、リテラル全体ではなくフィールドのキー
-  (`repos: s.buildRepos()`) で照合すると、後でフィールドを足しても書き直さずに済む。
-  後の領域 (core 以降は setter の照合が大半) を移すときも同じ形にする。守られているかを
-  機械で見る検査は無い
+  する変異が通ったため)。後の領域 (core 以降は setter の照合が大半) を移すときも同じ。
+  守られているかを機械で見る検査は無い
+- **コンテナへは、別名がコンパイル時に順序を守れる形で入れ、照合もその形で行う。**
+  別名を、コンテナへ値を入れるより前に書けてしまう形だと、別名はゼロ値 (nil) を黙って
+  受け取り、文字列の照合はすべて残ったまま緑になる (#3686 のレビューで実測)。今の形は
+  2 つある
+  - `repos` はリテラルのキー (`w := &wiring{repos: s.buildRepos()}`)。`w` を定義する文で
+    入れるので、それより前に `w.repos.x` を書くとコンパイルが通らない。照合はキー
+    `repos: s.buildRepos()` で行い、リテラル全体は見ない (後でフィールドを足しても
+    書き直さずに済む)
+  - `core` は変数を経由した代入 (`coreSvcs := s.buildCore(w, idGen)`、
+    `w.core = coreSvcs`、別名は `x := coreSvcs.x`)。`buildCore()` が `w.repos` を読むので
+    リテラルには足せない。`w.core = …` から直接別名を取ると、別名を代入より前に書いても
+    コンパイルが通るので、別名は変数から取る。照合はこの 3 つの行で行う
+  - **後の領域の `build…()` も、先に作った領域を `w.core.x` のようにコンテナから読まず、
+    `coreSvcs` のような変数を引数で受ける。** コンテナのフィールドから読むと、その
+    `build…()` を代入より前に置いてもコンパイルが通り、ゼロ値を受け取る (別名と同じ穴)。
+    今 `w.core` を読む箇所は無い (#3686 のレビュー 2 周目)
 - **関数に移してよいのは、作るだけで副作用の無いものだけ (4.1 と同じ)。** 作るときに
   DB に触る文 (`EnsureInitial`、`NormalizePrivateKeysToPKCS8`、`RecomputeFollowCounts`)
   は `setupRoutes()` に残し、互いの順も変えていない。repository のコンストラクタは
@@ -459,8 +488,71 @@ setupRoutes()
 の内側の呼び出しも 1 回に数え、repository でない `NewEmojiInvalidationQueue` なども
 含む。panic の文字列の中の `repository.NewNoteRepository` は `(` が続かないので数えない。
 
-**残りの領域は、次の順で同じ形に移す。** core の service → activitypub → queue の
-processor → stream → handler とルート (ルートはファイルを分ける)。どれも
+#### core の service (#3686)
+
+```
+setupRoutes()
+  …                                     // repository の別名、EnsureInitial、chart の hook
+  coreSvcs := s.buildCore(w, idGen)     // wiring_core.go
+  w.core = coreSvcs
+  roleService := coreSvcs.role          // 別名 (変数から取る)
+  …
+  roleService.SetUserRepo(userRepo)     // setter は元の位置のまま
+```
+
+- **`buildCore()` は `*Server` のメソッドで、repository は `w` から受け取る。** 中の行は
+  `setupRoutes()` にあった行をそのまま移し、作る順も元のまま。repository を
+  `setupRoutes()` と同じ名前の別名で受け直すのは、ゲートが構築の式を引数まで含めて照合する
+  ため。使う `Server` のフィールドは `s.redis` / `s.config` / `s.queueClient` / `s.db`
+- **移すのは、作るだけのものに限る。** 作るときに DB にも Redis にも外部にも触らず、
+  ログを出さず、goroutine・timer・shutdown hook・グローバルの書き換え・hook の登録の
+  どれもせず、依存が repository と先に作った core だけのもの。コンストラクタの本体
+  (中で呼ぶ関数を含む) を 1 つずつ読んで確かめた
+- **setter は 1 つも動かさない。** 構築の途中で動く処理 (4.1) から見える配線を変えない
+  ため。`buildCore()` を呼ぶ位置は、移したものの中で最初に作っていた `featuredService` の
+  位置。移した構築は副作用を持たないので、DB と Redis の文の順は変わらない
+- **`wiring` へは変数を経由した代入で入れ、別名は変数から取る** (上の規則)。ゲートは
+  この形を照合する (`TestAbuseReportNotifierIsWired`)
+- **フィールド名は、今までのローカル変数の名前から `Service` / `Svc` を落としたもの。**
+  型はコンストラクタが返す具体的な型のまま (`collectRoutes` の型の解決と、interface を
+  満たすかどうかを変えないため)
+
+照合する行が `buildCore()` の中にだけあるゲートは、`TestAbuseReportNotifierIsWired` の
+`coreabuse.NewInAppNotifier(...)` の 1 本だった (確かめ方: `internal/entitycompat` /
+`internal/server` / `tools` の `_test.go` の文字列リテラルを、`wiring_core.go` と
+`internal/server` のほかのファイルに当てた)。ほかのゲートは setter の行を照合して
+おり、setter は動かしていない。このゲートは、上の規則のとおり
+`abuseInAppNotifier: abuseInAppNotifier`、`coreSvcs := s.buildCore(w, idGen)`、
+`w.core = coreSvcs`、`abuseInAppNotifier := coreSvcs.abuseInAppNotifier` も照合する。
+
+**`setupRoutes()` に残したもの** (`core*.New…` の 46 回の呼び出し、`corefederation` を除く):
+
+| 理由 | 例 |
+|---|---|
+| setter の引数や、別の部品の構築の引数の中で作る (20 回) | `corechannel.NewNoteCreateHook(channelService)`、`coretwofactor.NewRedisPendingGuard(...)` など。setter の行そのものなので動かさない |
+| `if` の中で作る (3 回) | `pollExpiryWorker` (queue role だけ、構築の途中で動く worker)、sensitive media の detector (meta を読んだ分岐の中) |
+| 作るときに副作用がある | `urlPreviewFetcher` (中の LRU cache が goroutine を起動する)、`proxyService` (transport を作るときに、設定によってはログを出す)、`exporter` (引数の `s.outboundClient()` が共有の transport を初めて作りうる)、`searchService` (4.1)、`reactionCountWriter` と `captchaSvc` (meta を読んだ値で作る)、`webauthnSvc` (作れなかったときの分岐がある) |
+| `Start` と shutdown hook を対で持つ | `instanceTouchBuffer`・`sigCapBuffer`・`instanceCounterBuffer`、`metadataRefresher` |
+| stream・連合・`setupRoutes()` で作る部品に依存する | `abuseCreatedNotifier`・`reversiService`・`bubbleVersusService`・`modActivitySvc` (stream)、`relaySvc`・`accountMover`・`ephemeralMaterializer`・`metadataFetcher` (連合)、`emojiImporter` (`emojiDecorationResolver`) |
+| setter の依存が後の領域で、先に作ると後から入れる辺が増える | `chatService` (stream・連合・`sharedUserPacker`)、`pluginAccountSvc` (`adminHandler`)。2 つとも移すと、後から入れる辺が 104 から 107 に増えた |
+| ゲートが同じファイルを要求する | `webPushCache` (`TestPushSubscriptionCacheIsShared` が、生成と配送・無効化への受け渡しを同じファイルに置くことを要求する) |
+
+| | #3686 の前 (`a997a195c`) | 後 |
+|---|---|---|
+| `setupRoutes()` の `core*.New…` の呼び出し | 120 (うち `corefederation` 28) | 74 (うち `corefederation` 28) |
+| `buildCore()` の `core*.New…` の呼び出し | — | 46 |
+| `setupRoutes()` で `core*.New…` を呼ぶ package | 46 | 30 |
+| `core` のフィールド (`buildCore()` で作る部品) | — | 46 |
+| setter で後から入れる辺 (4.1 の数え方) | 104 | 103 |
+
+数え方: `setupRoutes()` と `buildCore()` の本文に `grep -oE '\bcore[a-z]+\.New[A-Z]'` を
+当てた。`coremodlog.New(` は `New` の後が大文字でないので数えない。`buildCore()` の
+`coretransfer.NewFollowingServiceAdapter(...)` (`importer` の引数) は数える。なので
+フィールドの数と呼び出しの数は、どちらも 46 だが中身は 1 つずつ違う。
+
+**残りの領域は、次の順で同じ形に移す。** activitypub → queue の
+processor → stream → handler とルート (ルートはファイルを分ける)。上で残した core の
+service は、依存する領域を移すときに一緒に扱う。どれも
 `wiring` にフィールドを 1 つ足し、`build…` の関数で作り、`setupRoutes()` では別名を
 置く。前の領域の部品は `w` から受け取る。後の領域ほど、構築の途中で動く処理
 (4.1) と shutdown hook を登録するものが多いので、それらを動かさずに残す範囲を
