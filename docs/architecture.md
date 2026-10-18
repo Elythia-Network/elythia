@@ -287,7 +287,7 @@ dispatcher が shareable channel の共有・pong ack を upstream `Connection.t
 
 ## 4. DI / 配線
 
-すべてのサービス生成・配線は `internal/server/router.go` の `setupRoutes()` で手動実行（NestJS 相当を関数呼び出しで構築）。DI フレームワークは使わない。repository は `setupRoutes()` から呼ぶ `buildRepos()` (`internal/server/wiring_repos.go`) で、core の service の一部は `buildCore()` (`internal/server/wiring_core.go`) で作る (4.2)。
+すべてのサービス生成・配線は `internal/server/router.go` の `setupRoutes()` で手動実行（NestJS 相当を関数呼び出しで構築）。DI フレームワークは使わない。repository は `setupRoutes()` から呼ぶ `buildRepos()` (`internal/server/wiring_repos.go`) で、core の service の一部は `buildCore()` (`internal/server/wiring_core.go`) で、連合の部品の一部は `buildFederation()` (`internal/server/wiring_fed.go`) で作る (4.2)。
 
 ```
 server.New() → setupRoutes()
@@ -296,6 +296,8 @@ server.New() → setupRoutes()
   ├→ chart の hook と、作るだけで副作用の無い部品の生成
   ├→ Core サービス生成 (作るだけのものは buildCore → wiring.core で作り、別名を置く。
   │   setter はそれぞれ元の位置で呼ぶ。副作用や後の領域への依存があるものはその場で作る)
+  ├→ 連合の部品の生成 (作るだけのものは buildFederation → wiring.fed で作り、別名を置く。
+  │   setter と、outbound client に依存するもの (apClient、resolver など) は元の位置)
   ├→ hook 注入 (§5)
   ├→ Handler 生成 + ルート登録 (§3.1)
   └→ stream (pubsub の購読をここで始める) / WebSocket / 静的ファイル / middleware
@@ -338,13 +340,13 @@ setter は依存を先に作っても、元の位置 (streaming の publisher �
 `featuredService`、`hashtagService`、`modLogService`、`instanceService` など) を
 受け手より先に作るようにした (こちらは setter を呼ぶ位置は変えていない)。
 
-| | #3676 の前 (`b9db7e49b`) | #3676 の後 | #3684 の後 | 今 (#3686 の後) |
-|---|---|---|---|---|
-| setter で依存を入れる辺 | 877 | 877 | 879 | 879 |
-| うち、受け手より後で作った依存を入れるもの | 192 (受け手 55 個) | 107 (受け手 41 個) | 104 (受け手 41 個) | 103 (受け手 40 個) |
-| うち、循環しているもの | 40 | 40 | 40 | 39 |
-| うち、それ以外 | 152 | 67 | 64 | 64 |
-| setter の呼び出しが受け手から離れているもの (下の数え方) | 359 | 307 | 308 | 392 |
+| | #3676 の前 (`b9db7e49b`) | #3676 の後 | #3684 の後 | #3686 の後 | 今 (#3688 の後) |
+|---|---|---|---|---|---|
+| setter で依存を入れる辺 | 877 | 877 | 879 | 879 | 872 |
+| うち、受け手より後で作った依存を入れるもの | 192 (受け手 55 個) | 107 (受け手 41 個) | 104 (受け手 41 個) | 103 (受け手 40 個) | 96 (受け手 40 個) |
+| うち、循環しているもの | 40 | 40 | 40 | 39 | 35 |
+| うち、それ以外 | 152 | 67 | 64 | 64 | 61 |
+| setter の呼び出しが受け手から離れているもの (下の数え方) | 359 | 307 | 308 | 392 | 415 |
 
 #3684 の後の列は、#3684 の後の `router.go` を同じ道具で数えた。#3676 の後に入った変更で、setter の
 辺と呼び出しが離れている辺が 2 つずつ増えている (#3684 の直前の `692710223` で
@@ -365,6 +367,27 @@ setter は依存を先に作っても、元の位置 (streaming の publisher �
 残したので、間に定義が挟まるようになったため。これは、setter を元の位置に残すという
 方針の結果である。段階 3 以降で setter を領域の関数へ寄せるときの目安になる。
 
+#3688 で連合の部品 13 個を `buildFederation()` へ移し、その別名を `setupRoutes()` の
+`inboxSoftwareChecker` を作っていた位置に置いた (4.2)。setter を呼ぶ位置は変えていない。
+setter で依存を入れる辺は 7 つ減った。同じ種類を 2〜3 回作っていたものを 1 つにまとめ、
+setter の引数が構築の式から変数 1 つに変わったため (`iHandler` と `adminHandler` の
+`NewUserModerationDeliveryHook(deliverService, apRenderer, userRepo)` で 2 つずつ、
+`inboxProcessor` と `apHandler` の `NewInboxSuspendedChecker(metaRepo, instanceRepo)` で
+1 つずつ、`blockingService.SetQuoteRevoker` の中の `NewQuoteRequestDeliveryHook` で 1 つ)。
+後から入れる辺も 7 つ減った。6 つは、依存の定義が受け手より前へ移ったため
+(`iHandler.SetProfileUpdateHook`・`iHandler.SetPinDeliveryHook`・
+`federationProcessor.SetInboundFollowAcceptor`・`federationProcessor.SetRelayActorChecker`・
+`federationProcessor.SetRelayMarker`・`deliverProcessor.SetDeliveryBreaker`)。残る 1 つは
+`blockingService.SetQuoteRevoker` で、後から入れる依存が `deliverService` と `apRenderer` の
+2 つから `quoteRequestDeliveryHook` の 1 つになった。循環が 4 つ減り、それ以外が 3 つ
+減ったのは、上の分に加えて `followingService.SetFederationHook(followingDeliveryHook)` の
+分類が循環からそれ以外へ変わったため。#3686 の `ephemeralStore` と同じく道具の数え方に
+よる (別名 `followingDeliveryHook := fedSvcs.followingDeliveryHook` の依存は `fedSvcs`
+だけ)。`relaySvc` も `buildFederation()` へ移したので、`noteDeliveryHook` などの
+`SetRelayBroadcaster(relaySvc)` は後から入れる辺にならない。呼び出しが離れている辺は
+23 増えた。#3686 と同じく、受け手と依存の定義が前へ移り、setter の呼び出しは元の位置に
+残したため。
+
 数え方 (`setupRoutes()` の構文木。道具はコミットしていない):
 
 - 節点: `setupRoutes()` の中で `:=` か `var` で定義した名前 (関数リテラルの中と、
@@ -375,7 +398,8 @@ setter は依存を先に作っても、元の位置 (streaming の publisher �
 - 後から入れる辺: `B` の定義の行が `X` の定義の行より後のもの
 - 循環: 依存の図 (`A := f(... B ...)` の右辺と、setter の引数から張る `A → B`) で、
   `B` から `X` へ辿り着けるもの。図は `setupRoutes()` の中だけで張り、`buildRepos()`・
-  `buildCore()` の中の構築の依存は辿らない (別名 `x := coreSvcs.y` の依存は `coreSvcs` だけ)
+  `buildCore()`・`buildFederation()` の中の構築の依存は辿らない (別名 `x := coreSvcs.y` の
+  依存は `coreSvcs` だけ)
 - 「後から入れる辺」は**定義の順だけを見ていて、setter を呼ぶ位置は見ていない**。依存の
   定義だけを前へ移した辺 (setter の呼び出しは元の位置) も、元の位置に残した
   `notificationService.SetMainStreamPublisher` も、後から入れる辺には数えない。呼ぶ位置は
@@ -416,8 +440,8 @@ setter は依存を先に作っても、元の位置 (streaming の publisher �
 
 **`setupRoutes()` で作る部品は、領域ごとの関数で作り、コンテナの構造体 `wiring`
 (`internal/server/wiring.go`) の領域ごとのフィールドに入れる。** #3666 の段階 2。
-#3684 で repository を、#3686 で core の service の一部を移した。今のフィールドは `repos` と
-`core` の 2 つ。
+#3684 で repository を、#3686 で core の service の一部を、#3688 で連合の部品の一部を移した。
+今のフィールドは `repos`・`core`・`fed` の 3 つ。
 
 ```
 setupRoutes()
@@ -466,10 +490,13 @@ setupRoutes()
     `w.core = coreSvcs`、別名は `x := coreSvcs.x`)。`buildCore()` が `w.repos` を読むので
     リテラルには足せない。`w.core = …` から直接別名を取ると、別名を代入より前に書いても
     コンパイルが通るので、別名は変数から取る。照合はこの 3 つの行で行う
+  - `fed` も `core` と同じ形 (`fedSvcs := s.buildFederation(w, coreSvcs, idGen)`、
+    `w.fed = fedSvcs`、別名は `x := fedSvcs.x`)
   - **後の領域の `build…()` も、先に作った領域を `w.core.x` のようにコンテナから読まず、
     `coreSvcs` のような変数を引数で受ける。** コンテナのフィールドから読むと、その
     `build…()` を代入より前に置いてもコンパイルが通り、ゼロ値を受け取る (別名と同じ穴)。
-    今 `w.core` を読む箇所は無い (#3686 のレビュー 2 周目)
+    今 `w.core` と `w.fed` を読む箇所は無い (#3686 のレビュー 2 周目。`buildFederation()` は
+    `coreSvcs` を引数で受ける)
 - **関数に移してよいのは、作るだけで副作用の無いものだけ (4.1 と同じ)。** 作るときに
   DB に触る文 (`EnsureInitial`、`NormalizePrivateKeysToPKCS8`、`RecomputeFollowCounts`)
   は `setupRoutes()` に残し、互いの順も変えていない。repository のコンストラクタは
@@ -550,11 +577,95 @@ setupRoutes()
 `coretransfer.NewFollowingServiceAdapter(...)` (`importer` の引数) は数える。なので
 フィールドの数と呼び出しの数は、どちらも 46 だが中身は 1 つずつ違う。
 
-**残りの領域は、次の順で同じ形に移す。** activitypub → queue の
-processor → stream → handler とルート (ルートはファイルを分ける)。上で残した core の
-service は、依存する領域を移すときに一緒に扱う。どれも
-`wiring` にフィールドを 1 つ足し、`build…` の関数で作り、`setupRoutes()` では別名を
-置く。前の領域の部品は `w` から受け取る。後の領域ほど、構築の途中で動く処理
+`relaySvc` は #3688 で `buildFederation()` へ移した (下の連合の部品の節)。
+
+#### 連合の部品 (#3688)
+
+```
+setupRoutes()
+  …                                                // core の別名
+  fedSvcs := s.buildFederation(w, coreSvcs, idGen) // wiring_fed.go
+  w.fed = fedSvcs
+  apRenderer := fedSvcs.apRenderer                 // 別名 (変数から取る)
+  …
+  apRenderer.SetIDGenerator(idGen)                 // setter は元の位置のまま
+```
+
+- **`buildFederation()` は `*Server` のメソッドで、repository は `w` から、core の
+  service は `buildCore()` の戻り値 `coreSvcs` から受け取る。** 中の行は `setupRoutes()` に
+  あった行をそのまま移し、作る順も元のまま。使う `Server` のフィールドは `s.config` /
+  `s.queueClient` / `s.redis` / `s.db`。`coreSvcs` から使うのは `sysAcct` だけ (`relaySvc`
+  の引数)
+- **移す条件は core と同じ。** 作るときに DB にも Redis にも外部にも触らず、ログを出さず、
+  goroutine・timer・shutdown hook・グローバルの書き換え・hook の登録のどれもせず、依存が
+  repository・core・先に作った連合の部品・設定だけのもの。コンストラクタの本体を 1 つずつ
+  読んで確かめた。移したのは 13 個: `inboxSoftwareChecker`、`apURLs`、`apRenderer`、
+  `deliverService`、`relaySvc` (core/relay。配送に依存するので core から外していた)、
+  配送の hook 7 個 (`noteDeliveryHook`、`followingDeliveryHook`、
+  `quoteRequestDeliveryHook`、`noteDeleteHook`、`userModerationDeliveryHook`、
+  `profileUpdateHook`、`pinDeliveryHook`)、`deliveryBreaker`
+- **setter は 1 つも動かさない。** `federationProcessor` と `federationResolver` への
+  setter を含め、呼ぶ位置も順も元のまま。`buildFederation()` を呼ぶ位置は、移したものの
+  中で最初に作っていた `inboxSoftwareChecker` の位置 (core の別名より後の `dbHealth` の直後)。移した構築は
+  副作用を持たないので、DB と Redis の文の順は変わらない
+- **同じ種類を 2 回以上作っていたもののうち、状態を持たない 3 種類を 1 つにまとめた。**
+  `NewInboxSuspendedChecker` (3 回。resolver と `remoteUserResolver` が共有していたもの、
+  inbox の processor、ap/show)、`NewQuoteRequestDeliveryHook` (2 回。QuoteRequest の
+  handler、`QuoteRevoker`)、`NewUserModerationDeliveryHook` (2 回。i/delete-account、
+  admin)。どれもフィールドをコンストラクタでしか書かず、setter も無く、メソッドは
+  フィールドを読むだけなので、1 つを共有しても使う側ごとに作るのと動きが同じ。setter の
+  引数が構築の式から別名に変わったが、setter の位置は変えていない
+- **`wiring` へは変数を経由した代入で入れ、別名は変数から取る** (上の規則)。別名を
+  `buildFederation()` の呼び出しより前に書くと、`buildFederation()` を `buildCore()` より
+  前に置くと、どちらもコンパイルが通らない (変異で確かめた)
+
+照合する行が `buildFederation()` の中にだけあるゲートは無かった (確かめ方: core と同じく、
+tracked な `_test.go` すべてと `tools/apicompat/main.go` の文字列リテラルのうち、#3688 の前の
+`router.go` に現れ、後の `router.go` と `internal/server` のほかのファイル (`wiring_fed.go`
+を除く) に現れないものを探した。0 件)。連合の部品を照合しているゲートは setter の行
+(`apRenderer.SetIDGenerator(idGen)` など) を照合しており、setter は動かしていない。
+なので、ゲートは変えていない。
+
+**`setupRoutes()` に残したもの** (`activitypub` / `corefederation` / `fedrule` /
+`deliveryhealth` の `New…` の呼び出し 25 回):
+
+| 理由 | 例 |
+|---|---|
+| outbound の HTTP client に依存する | `apClient` (`apHTTPClient := s.outboundClient(...)` が共有の transport を初めて作りうる)、`webfingerClient`。それに依存する `apFetcher`・`federationResolver`・`federationProcessor`・`remoteUserResolver`、`federationResolver.FetchNoteForVerification` を受け取る `quoteRequestHandler` と、それに依存する `quoteOutbox` |
+| 作るときに副作用がある | `remoteStatsFetcher` (作るときに transport を作る)、`fedRuleService` (作るときに DB からルールを読む、4.1) |
+| `Start` と shutdown hook を対で持つ | `fedRuleHits`、`deliveryHealth`・`inboxHealth` (queue role の分岐で `Start`。`NewStore` / `NewStoreForDirection` を含む) |
+| setter の引数や、別の部品の構築の引数の中で作る | `NewUserMentionResolver`・`NewPollDeliveryHook`・`NewQuoteRevoker`・`NewReactionDeliveryHook`・`NewBlockingDeliveryHook`・`NewSuspendedChecker`・`NewLDSignatureVerifier`・`NewAccountCreatedAtFiller`・`fedrule.NewManager`、`s.peerDeps` の中の `activitypub.NewPublicKeyCache` |
+
+`NewSuspendedChecker` (配送の停止) は `NewInboxSuspendedChecker` と同じ型だが、読む設定が
+違う (`deliverSuspendedSoftware`) ので別の値のまま。`setupRoutes()` で作る core の service
+のうち連合に依存する `accountMover`・`ephemeralMaterializer`・`metadataFetcher` は、
+`federationResolver` か `apFetcher` に依存するので残した。
+
+| | #3688 の前 (`8db95c0e2`) | 後 |
+|---|---|---|
+| `setupRoutes()` の `corefederation.New…` の呼び出し | 28 | 15 |
+| `setupRoutes()` の `activitypub.New…` の呼び出し | 5 | 3 |
+| `setupRoutes()` の `fedrule.New…` / `deliveryhealth.New…` の呼び出し | 3 / 5 | 3 / 4 |
+| `setupRoutes()` の `core*.New…` の呼び出し (`corefederation` を含む) | 74 | 60 |
+| `buildFederation()` の `New…` の呼び出し | — | 14 (`corefederation` 9、`activitypub` 2、`deliveryhealth` 1、`corerelay` 1、`repository` 1) |
+| `fed` のフィールド (`buildFederation()` で作る部品) | — | 13 |
+| setter で後から入れる辺 (4.1 の数え方) | 103 | 96 |
+
+数え方: `setupRoutes()` と `buildFederation()` の本文 (`func` の行から、行頭の `}` まで)
+に `grep -oE '\b<package>\.New[A-Z]'` を当てた。`corefederation` の 28 から 15 への差の
+13 は、移した 7 回 (`NewInboxSuspendedChecker`・`NewDeliverService`・
+`NewNoteDeliveryHook`・`NewFollowingDeliveryHook`・`NewNoteDeleteDeliveryHook`・
+`NewProfileUpdateDeliveryHook`・`NewPinDeliveryHook`) と、まとめて無くなった 6 回
+(`NewInboxSuspendedChecker` 2、`NewQuoteRequestDeliveryHook` 2、
+`NewUserModerationDeliveryHook` 2)。`buildFederation()` の `corefederation` の 9 は、
+移した 7 種類に、まとめた `NewQuoteRequestDeliveryHook` と
+`NewUserModerationDeliveryHook` を 1 回ずつ足したもの。
+
+**残りの領域は、次の順で同じ形に移す。** queue の processor → stream → handler と
+ルート (ルートはファイルを分ける)。上で残した core の service と連合の部品は、依存する
+領域を移すときに一緒に扱う。どれも `wiring` にフィールドを 1 つ足し、`build…` の関数で
+作り、`setupRoutes()` では別名を置く。repository は `w` から、それより後の領域は
+`coreSvcs` / `fedSvcs` のような変数から受け取る。後の領域ほど、構築の途中で動く処理
 (4.1) と shutdown hook を登録するものが多いので、それらを動かさずに残す範囲を
 PR ごとに決める。
 
