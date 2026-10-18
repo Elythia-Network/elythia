@@ -16495,4 +16495,10 @@ export interface Locale extends ILocale {
          */
         "inboxNotSuspended": string;
     };
+    "_mkgoDrive": {
+        /**
+         * このファイルは、サーバーのファイル（絵文字の画像など）か、カスタム絵文字の画像として使われているため、ここからは削除できません。絵文字の画像なら、絵文字の管理から絵文字を削除してください。
+         */
+        "cannotDeleteProtectedFile": string;
+    };
 }
