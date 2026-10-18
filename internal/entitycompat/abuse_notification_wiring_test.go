@@ -15,6 +15,19 @@ func TestAbuseReportNotifierIsWired(t *testing.T) {
 	// Set 側だけ見る gate は緑のまま、NotifyNewReport が黙って no-op になる。
 	assertWired(t, serverPkg, "coreabuse.NewInAppNotifier(roleService, notificationService, repository.NewAbuseReportRepository(s.db))",
 		"通報の通知を作る依存が欠け、通知欄に何も残らなくなる。")
+	// 上の構築の行は buildCore の中にある (#3686)。setupRoutes が使うのは別名なので、
+	// 構築から別名までの段も照合する。上の行だけだと、setupRoutes の別名を nil に
+	// 書き換えても緑のまま通る (docs/architecture.md 4.2)。別名は buildCore の戻り値を
+	// 受けた変数 coreSvcs から取る形にしてあり、別名を buildCore の呼び出しより前に
+	// 書くとコンパイルが通らない。照合もその形で行う。
+	assertWired(t, serverPkg, "abuseInAppNotifier: abuseInAppNotifier",
+		"buildCore が作った通報の通知を core に入れていない。")
+	assertWired(t, serverPkg, "coreSvcs := s.buildCore(w, idGen)",
+		"setupRoutes が buildCore の core service を使っていない。")
+	assertWired(t, serverPkg, "w.core = coreSvcs",
+		"buildCore の core service を wiring に入れていない。")
+	assertWired(t, serverPkg, "abuseInAppNotifier := coreSvcs.abuseInAppNotifier",
+		"setupRoutes の通報の通知が buildCore で作ったものでなくなる。")
 	assertWired(t, serverPkg, "coreabuse.NewCreatedNotifier(abuseInAppNotifier, roleService, stream.NewAdminStreamPublisher(streamPubSub))",
 		"通報の通知欄と admin stream (newAbuseUserReport) が出なくなる。")
 	assertWired(t, serverPkg, "usersHandler.SetAbuseReportCreatedNotifier(abuseCreatedNotifier)",
