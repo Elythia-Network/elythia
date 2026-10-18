@@ -287,12 +287,12 @@ dispatcher が shareable channel の共有・pong ack を upstream `Connection.t
 
 ## 4. DI / 配線
 
-すべてのサービス生成・配線は `internal/server/router.go` の `setupRoutes()` で手動実行（NestJS 相当を関数呼び出しで構築）。DI フレームワークは使わない。
+すべてのサービス生成・配線は `internal/server/router.go` の `setupRoutes()` で手動実行（NestJS 相当を関数呼び出しで構築）。DI フレームワークは使わない。repository だけは `setupRoutes()` から呼ぶ `buildRepos()` (`internal/server/wiring_repos.go`) で作る (4.2)。
 
 ```
 server.New() → setupRoutes()
   ├→ stream の pubsub と publisher 生成 (購読はまだ始めない)
-  ├→ Repository 生成 (userRepo, noteRepo, …)
+  ├→ Repository 生成 (buildRepos → wiring.repos。setupRoutes では userRepo, noteRepo, … の別名を置く)
   ├→ chart の hook と、作るだけで副作用の無い部品の生成
   ├→ Core サービス生成 (noteCreateService, followingService, …)
   ├→ hook 注入 (§5)
@@ -337,13 +337,20 @@ setter は依存を先に作っても、元の位置 (streaming の publisher �
 `featuredService`、`hashtagService`、`modLogService`、`instanceService` など) を
 受け手より先に作るようにした (こちらは setter を呼ぶ位置は変えていない)。
 
-| | #3676 の前 (`b9db7e49b`) | 後 |
-|---|---|---|
-| setter で依存を入れる辺 | 877 | 877 |
-| うち、受け手より後で作った依存を入れるもの | 192 (受け手 55 個) | 107 (受け手 41 個) |
-| うち、循環しているもの | 40 | 40 |
-| うち、それ以外 | 152 | 67 |
-| setter の呼び出しが受け手から離れているもの (下の数え方) | 359 | 307 |
+| | #3676 の前 (`b9db7e49b`) | #3676 の後 | 今 (#3684 の後) |
+|---|---|---|---|
+| setter で依存を入れる辺 | 877 | 877 | 879 |
+| うち、受け手より後で作った依存を入れるもの | 192 (受け手 55 個) | 107 (受け手 41 個) | 104 (受け手 41 個) |
+| うち、循環しているもの | 40 | 40 | 40 |
+| うち、それ以外 | 152 | 67 | 64 |
+| setter の呼び出しが受け手から離れているもの (下の数え方) | 359 | 307 | 308 |
+
+今の列は #3684 の後の `router.go` を同じ道具で数えた。#3676 の後に入った変更で、setter の
+辺と呼び出しが離れている辺が 2 つずつ増えている (#3684 の直前の `692710223` で
+879 / 107 / 309)。#3684 で、後から入れる辺は 3 つ減った。repository の別名を
+`setupRoutes()` の先頭に置いたことによる (下の「まだ手を付けていない」の項)。呼び出しが
+離れている辺は 1 つ減った。`noteCreateService.SetChannelHook(...)` の受け手・依存と
+呼び出しの間で定義していた `noteUnreadRepo` を、先頭の別名へ移したため (配線は同じ)。
 
 数え方 (`setupRoutes()` の構文木。道具はコミットしていない):
 
@@ -364,7 +371,7 @@ setter は依存を先に作っても、元の位置 (streaming の publisher �
   依存を入れているのは `chartHooks.InstanceCounter = instanceCounterBuffer` の 1 つ
   (goroutine と shutdown hook を持つバッファを元の位置に残したため)
 
-残した 107 辺:
+#3676 で残した 107 辺 (内訳の数は #3676 の時点の値):
 
 - **循環している 40 辺。** 通知 (`notificationHook` / `notificationPublisher`)、フォロー・
   ブロック・ミュート、連合の配送 (`apRenderer` / `quoteOutbox` / `noteDeliveryHook`)、
@@ -383,11 +390,81 @@ setter は依存を先に作っても、元の位置 (streaming の publisher �
   かったもの。依存が別の service・hook・連合の部品で、それ自身も多くの部品に依存する
   もの (`timelineFanoutHook`、`notificationHook`、`deliverService`、
   `ephemeralMaterializer`、`chatService` など) が多いが、作るだけで副作用の無いもの
-  (`apURLs`、`imgProcessor`、`quoteAuthorizationRepo`、`sigCapRepo`、`deliveryHealth`
-  など) や、shutdown hook を登録する部品・queue role の分岐・作れなかったときは配線しない
-  分岐と同じ節に置いているもの (`metadataFetcher`、`deliveryBreaker`、`webauthnSvc` など)、
-  プラグインの節でまとめて扱う値 (`registeredPlugins` / `peered`) も含む。段階 2 で
-  領域ごとの関数に分けるときに扱う
+  (`apURLs`、`imgProcessor`、`deliveryHealth` など) や、shutdown hook を登録する部品・
+  queue role の分岐・作れなかったときは配線しない分岐と同じ節に置いているもの
+  (`metadataFetcher`、`deliveryBreaker`、`webauthnSvc` など)、プラグインの節でまとめて
+  扱う値 (`registeredPlugins` / `peered`) も含む。段階 2 で領域ごとの関数に分けるときに
+  扱う。今は 55 辺。#3684 で repository の別名を `setupRoutes()` の先頭に置いたので、
+  repository を依存とする 3 辺 (`quoteAuthorizationRepo`・`sigCapRepo`・
+  `userSecurityKeyRepo`) が消えた (4.2)
+
+### 4.2 組み立てのコンテナと、領域ごとの関数 (#3684)
+
+**`setupRoutes()` で作る部品は、領域ごとの関数で作り、コンテナの構造体 `wiring`
+(`internal/server/wiring.go`) の領域ごとのフィールドに入れる。** #3666 の段階 2。
+#3684 で repository を移した。今のフィールドは `repos` だけ。
+
+```
+setupRoutes()
+  w := &wiring{repos: s.buildRepos()}   // wiring_repos.go
+  noteRepo := w.repos.note              // 別名。以降の行はこの名前を使う
+  …
+```
+
+- **`setupRoutes()` では、先頭で今までと同じ名前の別名を置き、以降の行は書き換えない。**
+  wiring-check など、`setupRoutes()` の行を引数まで含めて照合するゲートが多いため
+  (`docs/gates.md`)。別名の型は `repos` のフィールドの型から引けるので、
+  `collectRoutes` の型の解決も変わらない
+- **`buildRepos()` は `*Server` のメソッドにした。** 中で今までと同じ行
+  (`userRelationRepo := repository.NewUserRelationRepository(s.db)` など) で作り、
+  最後に `repos` を組む。ゲートが照合する `s.db` を含む行をそのまま残すためで、使うのは
+  `s.db` / `s.relationCache` / `s.userRepo` だけ
+- **1 つの種類は 1 つのフィールドにし、使う側すべてで共有する。** 状態を持たない
+  repository (db のハンドルと relationCache だけを持つもの) は、共有しても使う側ごとに
+  作るのと動きが同じ。キャッシュ付きのもの (`cachedMeta`・`emoji`・`cachedAntenna`、
+  `s.userRepo` の `user`) は状態を持ち、invalidation の hook と他のプロセスからの購読が
+  そのインスタンスに繋がっているので、別の値に置き換えない
+- **例外として、同じ種類をその場で作っている所が 3 か所ある。** `NewCleanProcessor` の
+  `repository.NewUserPendingRepository(s.db)`、`SetIPLookupLogPruner` の
+  `repository.NewIPLookupLogRepository(s.db)`、`coreabuse.NewInAppNotifier` の
+  `repository.NewAbuseReportRepository(s.db)`。ゲート
+  (`TestCleanProcessorReceivesThePendingPruner`・`TestIPLookupLogRetentionIsWired`・
+  `TestAbuseReportNotifierIsWired`) が、nil を渡せないよう構築の式そのものを照合して
+  いるため。どれも状態を持たないので、2 つあっても動きは同じ
+- **照合する行が `build…` の関数の中へ移ったゲートは、`setupRoutes()` がその値を受け取る
+  別名の行と、コンテナのフィールドへ入れる行も照合する。** 構築の式でも setter の呼び出し
+  でも同じ。照合した行だけを見ると、`setupRoutes()` の別名を nil や別の式に書き換えても
+  緑のまま通る。`TestRelationSingleStatementReadersAreWired` は、構築の行に加えて
+  `userRelation: userRelationRepo`、`repos: s.buildRepos()`、
+  `userRelationRepo := w.repos.userRelation` も照合する (#3684 のレビューで、別名を nil に
+  する変異が通ったため)。`wiring` は、リテラル全体ではなくフィールドのキー
+  (`repos: s.buildRepos()`) で照合すると、後でフィールドを足しても書き直さずに済む。
+  後の領域 (core 以降は setter の照合が大半) を移すときも同じ形にする。守られているかを
+  機械で見る検査は無い
+- **関数に移してよいのは、作るだけで副作用の無いものだけ (4.1 と同じ)。** 作るときに
+  DB に触る文 (`EnsureInitial`、`NormalizePrivateKeysToPKCS8`、`RecomputeFollowCounts`)
+  は `setupRoutes()` に残し、互いの順も変えていない。repository のコンストラクタは
+  どれも構造体を作るだけなので、`buildRepos()` がこれらより先に走っても DB の文の順は
+  変わらない
+
+| | #3684 の前 (`692710223`) | 後 |
+|---|---|---|
+| `repository.New…(` の呼び出し | 122 | 102 |
+| 呼び出している種類 | 99 | 99 |
+| 2 回以上呼んでいる種類 | 14 | 3 (上の例外) |
+| setter で後から入れる辺 (4.1 の数え方) | 107 | 104 |
+
+数え方: `setupRoutes()` (#3684 の後は `buildRepos()` も合わせる) の本文に現れる
+`repository\.New[A-Za-z]+\(` を数えた。`NewCachedMetaRepositoryWithTTL(repository.NewMetaRepository(s.db), …)`
+の内側の呼び出しも 1 回に数え、repository でない `NewEmojiInvalidationQueue` なども
+含む。panic の文字列の中の `repository.NewNoteRepository` は `(` が続かないので数えない。
+
+**残りの領域は、次の順で同じ形に移す。** core の service → activitypub → queue の
+processor → stream → handler とルート (ルートはファイルを分ける)。どれも
+`wiring` にフィールドを 1 つ足し、`build…` の関数で作り、`setupRoutes()` では別名を
+置く。前の領域の部品は `w` から受け取る。後の領域ほど、構築の途中で動く処理
+(4.1) と shutdown hook を登録するものが多いので、それらを動かさずに残す範囲を
+PR ごとに決める。
 
 ## 5. フック注入パターン
 
