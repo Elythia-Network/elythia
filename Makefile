@@ -1259,10 +1259,28 @@ upstream-fetch: ## UPSTREAM_MISSKEY_VERSION の本家を .cache/misskey/<版> �
 # golden が本家の版に追いついているか。本家から作り直して差分が無いことと、
 # 本家を読むテストが skip されずに通ることを見る。本家を取得する
 # apicompat.yml が回す (本家を読まない `make gates` には入れない)。
+# paramdef-genはnodeとfrontend/node_modules (TypeScript)も使う。
 upstream-check: ## golden と本家を読むテストが UPSTREAM_MISSKEY_VERSION の本家と一致するか検査
 	$(MAKE) shapecheck-gen
 	git diff --exit-code -- internal/entitycompat/testdata
+	$(MAKE) paramdef-gen
+	git diff --exit-code -- $(PARAMDEF_GOLDEN)
 	MK_UPSTREAM_REQUIRE=1 go test ./internal/misc/achievement/... -run 'TestTypes_MatchUpstream' -count=1 -v
+
+# 本家のparamDef (引数のschema)のgoldenを作り直す(#3673)。本家のendpointの
+# .tsを、frontend/に入っているTypeScriptのパーサーで読んでJSONにする。
+# 手順の全体はdocs/upstream-catch-up.mdの「引数のschema」。
+#
+# **nodeの道具をtools/paramdefspecに置き、Goの道具と同じくmakeから呼ぶ。**
+# TypeScriptのASTを読むのでGoでは書けない。依存はfrontend/node_modulesを
+# 読むだけで、pnpm installはしない(無ければ落ちる)。
+PARAMDEF_JSON = internal/api/paramschema/upstream_paramdefs.json
+PARAMDEF_GOLDEN = $(PARAMDEF_JSON)
+PARAMDEF_NODE_MODULES ?= frontend/node_modules
+.PHONY: paramdef-gen
+paramdef-gen: ## 本家のparamDefのgoldenを作り直す(nodeとfrontend/node_modulesが要る)
+	@test -d "$(PARAMDEF_NODE_MODULES)/typescript" || { echo "$(PARAMDEF_NODE_MODULES)/typescript が無い。frontend/ で pnpm install する" >&2; exit 1; }
+	node tools/paramdefspec/extract.mjs --typescript "$(PARAMDEF_NODE_MODULES)/typescript" --upstream "$(UPSTREAM_DIR)" --out $(PARAMDEF_JSON)
 
 # 本家の新しい版 (TO=<版>) の差分のうち、frontend/ が取り込むパスだけを 3-way で当てる
 # (設計 D4、#3379)。手順の全体は docs/upstream-catch-up.md。
