@@ -248,9 +248,11 @@ func InvalidParam(msg ...string) map[string]any {
 // plain Error helper も出すようになったため、本 helper の差分は info のみ。
 // upstream の schema-validation envelope を厳密に再現したい endpoint はこちらを使う。
 //
-// param は upstream では ajv の schemaPath、reason は ajv の message。mk-go は
-// 手動 validation で ajv を持たないため、呼び出し側が ajv 互換の文字列を
-// best-effort で与える (frontend は info を参照しないため dev 向け説明に留まる)。
+// paramはupstreamではajvのschemaPath、reasonはajvのmessage。handlerの
+// 手書きの検証では、呼び出し側がajv互換の文字列をbest-effortで与える
+// (frontendはinfoを参照しないためdev向け説明に留まる)。本家のparamDefで
+// 検証するinternal/api/paramschema (#3673)は、ajvと同じ文字列でこれを呼ぶ
+// (Error.Response)。
 func InvalidParamClient(param, reason string) map[string]any {
 	e := Error("INVALID_PARAM", "Invalid param.", UUIDInvalidParam)
 	e["error"].(map[string]any)["info"] = map[string]any{
