@@ -2,89 +2,106 @@ package server
 
 import "github.com/elythia-network/elythia/internal/repository"
 
-// repos holds every repository setupRoutes uses (#3684).
+// repos holds the repositories setupRoutes uses (#3684).
 //
 // Each field is built once by buildRepos and shared by every consumer that
 // setupRoutes wires. Fields are named after the local variables setupRoutes
-// has always used, without the Repo suffix.
+// has always used, without the Repo suffix. Repositories that setupRoutes
+// builds in place for a single consumer (for example the relay repository)
+// are not listed here.
+//
+// One repository type has one field. The plain repositories hold only the DB
+// handle (and the relation cache; ipLookupLog also holds a constant statement
+// timeout), so sharing one instance among consumers behaves the same as
+// building one per consumer. The exceptions are three consumers that still
+// build their own UserPending, IPLookupLog and AbuseReport repository,
+// because gates match those construction expressions verbatim
+// (docs/architecture.md 4.2). The cached wrappers (cachedMeta, emoji,
+// cachedAntenna, and user, which is s.userRepo) keep state and must stay
+// single instances: their invalidation hooks and cross-process subscribers
+// are wired to these exact values.
 type repos struct {
-	user                      repository.UserRepository
-	note                      repository.NoteRepository
-	cachedMeta                *repository.CachedMetaRepository
-	poll                      repository.PollRepository
-	following                 repository.FollowingRepository
-	followRequest             repository.FollowRequestRepository
-	userRelation              repository.UserRelationReader
-	pining                    repository.UserNotePiningRepository
-	reaction                  repository.NoteReactionRepository
-	emoji                     *repository.CachedEmojiRepository
-	blocking                  repository.BlockingRepository
-	muting                    repository.MutingRepository
-	renoteMuting              repository.RenoteMutingRepository
-	pollVote                  repository.PollVoteRepository
-	driveFile                 repository.DriveFileRepository
-	driveFolder               repository.DriveFolderRepository
-	keypair                   repository.UserKeypairRepository
-	keypairExtra              repository.UserKeypairExtraRepository
-	suspensionOrigin          repository.UserSuspensionOriginRepository
-	instance                  repository.InstanceRepository
-	channel                   repository.ChannelRepository
-	channelFollowing          repository.ChannelFollowingRepository
-	cachedAntenna             *repository.CachedAntennaRepository
-	clip                      repository.ClipRepository
-	clipNote                  repository.ClipNoteRepository
-	page                      repository.PageRepository
-	pageLike                  repository.PageLikeRepository
-	flash                     repository.FlashRepository
-	flashLike                 repository.FlashLikeRepository
-	role                      repository.RoleRepository
-	roleAssignment            repository.RoleAssignmentRepository
-	swSub                     repository.SwSubscriptionRepository
-	noteFavorite              repository.NoteFavoriteRepository
-	noteThreadMuting          repository.NoteThreadMutingRepository
-	userList                  repository.UserListRepository
-	webhook                   repository.WebhookRepository
-	systemWebhook             repository.SystemWebhookRepository
-	reversi                   repository.ReversiRepository
-	userIP                    repository.UserIPRepository
-	chat                      repository.ChatRepository
-	channelFavorite           repository.ChannelFavoriteRepository
-	channelMuting             repository.ChannelMutingRepository
-	clipFavorite              repository.ClipFavoriteRepository
-	userListFavorite          repository.UserListFavoriteRepository
-	retention                 repository.RetentionAggregationRepository
-	promoRead                 repository.PromoReadRepository
-	hashtag                   repository.HashtagRepository
-	channelNoteUnread         repository.ChannelNoteUnreadRepository
-	antennaNoteUnread         repository.AntennaNoteUnreadRepository
-	chunkedUploadSession      repository.ChunkedUploadSessionRepository
-	publickey                 repository.UserPublickeyRepository
-	goneInstance              *repository.GoneInstanceRepository
-	userPending               repository.UserPendingRepository
-	signupTicket              repository.RegistrationTicketRepository
-	usedUsername              repository.UsedUsernameRepository
-	signin                    repository.SigninRepository
-	noteDraft                 repository.NoteDraftRepository
-	avatarDecoration          repository.AvatarDecorationRepository
-	announcement              repository.AnnouncementRepository
-	modLog                    repository.ModerationLogRepository
-	recipient                 repository.AbuseReportNotificationRecipientRepository
-	ipLookupLog               repository.IPLookupLogRepository
-	moveSystemAccount         repository.SystemAccountRepository
-	noteUnread                repository.NoteUnreadRepository
-	abuseReportForNotif       repository.AbuseReportRepository
-	emojiApplicationForNotif  repository.EmojiApplicationRepository
-	signupApplicationForNotif repository.SignupApplicationRepository
-	fedRule                   *repository.FederationRuleRepository
-	sigCap                    repository.InstanceSignatureCapabilityRepository
-	quoteAuthorization        *repository.NoteQuoteAuthorizationRepository
-	resetReq                  repository.PasswordResetRequestRepository
-	userSecurityKey           repository.UserSecurityKeyRepository
-	registry                  repository.RegistryRepository
-	bubbleVersusRecord        repository.BubbleVersusRepository
-	abuseReport               repository.AbuseReportRepository
-	authSession               repository.AuthSessionRepository
-	bubbleGame                repository.BubbleGameRepository
+	user                 repository.UserRepository
+	note                 repository.NoteRepository
+	cachedMeta           *repository.CachedMetaRepository
+	poll                 repository.PollRepository
+	following            repository.FollowingRepository
+	followRequest        repository.FollowRequestRepository
+	userRelation         repository.UserRelationReader
+	pining               repository.UserNotePiningRepository
+	reaction             repository.NoteReactionRepository
+	emoji                *repository.CachedEmojiRepository
+	blocking             repository.BlockingRepository
+	muting               repository.MutingRepository
+	renoteMuting         repository.RenoteMutingRepository
+	pollVote             repository.PollVoteRepository
+	driveFile            repository.DriveFileRepository
+	driveFolder          repository.DriveFolderRepository
+	keypair              repository.UserKeypairRepository
+	keypairExtra         repository.UserKeypairExtraRepository
+	suspensionOrigin     repository.UserSuspensionOriginRepository
+	instance             repository.InstanceRepository
+	channel              repository.ChannelRepository
+	channelFollowing     repository.ChannelFollowingRepository
+	cachedAntenna        *repository.CachedAntennaRepository
+	clip                 repository.ClipRepository
+	clipNote             repository.ClipNoteRepository
+	page                 repository.PageRepository
+	pageLike             repository.PageLikeRepository
+	flash                repository.FlashRepository
+	flashLike            repository.FlashLikeRepository
+	role                 repository.RoleRepository
+	roleAssignment       repository.RoleAssignmentRepository
+	swSub                repository.SwSubscriptionRepository
+	noteFavorite         repository.NoteFavoriteRepository
+	noteThreadMuting     repository.NoteThreadMutingRepository
+	userList             repository.UserListRepository
+	webhook              repository.WebhookRepository
+	systemWebhook        repository.SystemWebhookRepository
+	reversi              repository.ReversiRepository
+	userIP               repository.UserIPRepository
+	chat                 repository.ChatRepository
+	channelFavorite      repository.ChannelFavoriteRepository
+	channelMuting        repository.ChannelMutingRepository
+	clipFavorite         repository.ClipFavoriteRepository
+	userListFavorite     repository.UserListFavoriteRepository
+	retention            repository.RetentionAggregationRepository
+	promoRead            repository.PromoReadRepository
+	hashtag              repository.HashtagRepository
+	channelNoteUnread    repository.ChannelNoteUnreadRepository
+	antennaNoteUnread    repository.AntennaNoteUnreadRepository
+	chunkedUploadSession repository.ChunkedUploadSessionRepository
+	publickey            repository.UserPublickeyRepository
+	goneInstance         *repository.GoneInstanceRepository
+	userPending          repository.UserPendingRepository
+	signupTicket         repository.RegistrationTicketRepository
+	usedUsername         repository.UsedUsernameRepository
+	signin               repository.SigninRepository
+	noteDraft            repository.NoteDraftRepository
+	avatarDecoration     repository.AvatarDecorationRepository
+	announcement         repository.AnnouncementRepository
+	modLog               repository.ModerationLogRepository
+	recipient            repository.AbuseReportNotificationRecipientRepository
+	ipLookupLog          repository.IPLookupLogRepository
+	systemAccount        repository.SystemAccountRepository
+	noteUnread           repository.NoteUnreadRepository
+	emojiApplication     repository.EmojiApplicationRepository
+	signupApplication    repository.SignupApplicationRepository
+	fedRule              *repository.FederationRuleRepository
+	sigCap               repository.InstanceSignatureCapabilityRepository
+	quoteAuthorization   *repository.NoteQuoteAuthorizationRepository
+	resetReq             repository.PasswordResetRequestRepository
+	userSecurityKey      repository.UserSecurityKeyRepository
+	registry             repository.RegistryRepository
+	bubbleVersusRecord   repository.BubbleVersusRepository
+	abuseReport          repository.AbuseReportRepository
+	authSession          repository.AuthSessionRepository
+	bubbleGame           repository.BubbleGameRepository
+	userMemo             repository.UserMemoRepository
+	gallery              repository.GalleryRepository
+	accessToken          repository.AccessTokenRepository
+	publickeyExtra       repository.UserPublickeyExtraRepository
+	ad                   repository.AdRepository
 }
 
 // buildRepos constructs the repositories of one server generation.
@@ -182,14 +199,13 @@ func (s *Server) buildRepos() repos {
 	modLogRepo := repository.NewModerationLogRepository(s.db)
 	recipientRepo := repository.NewAbuseReportNotificationRecipientRepository(s.db)
 	ipLookupLogRepo := repository.NewIPLookupLogRepository(s.db)
-	// proxy account の user id を引く専用 (accountMover 用)。newProxyAccountResolver は
-	// username を返す別用途の resolver。
-	moveSystemAccountRepo := repository.NewSystemAccountRepository(s.db)
+	// system account の行。accountMover (proxy account の user id)、
+	// newProxyAccountResolver (username)、coresystemaccount の service が共有する。
+	systemAccountRepo := repository.NewSystemAccountRepository(s.db)
 	// 以下は setupRoutes の中で、使う場所の近くで作っていたもの (#3684 でここへ移した)。
 	noteUnreadRepo := repository.NewNoteUnreadRepository(s.db)
-	abuseReportRepoForNotif := repository.NewAbuseReportRepository(s.db)
-	emojiApplicationRepoForNotif := repository.NewEmojiApplicationRepository(s.db)
-	signupApplicationRepoForNotif := repository.NewSignupApplicationRepository(s.db)
+	emojiApplicationRepo := repository.NewEmojiApplicationRepository(s.db)
+	signupApplicationRepo := repository.NewSignupApplicationRepository(s.db)
 	fedRuleRepo := repository.NewFederationRuleRepository(s.db)
 	sigCapRepo := repository.NewInstanceSignatureCapabilityRepository(s.db)
 	quoteAuthorizationRepo := repository.NewNoteQuoteAuthorizationRepository(s.db)
@@ -200,84 +216,93 @@ func (s *Server) buildRepos() repos {
 	abuseReportRepo := repository.NewAbuseReportRepository(s.db)
 	authSessionRepo := repository.NewAuthSessionRepository(s.db)
 	bubbleGameRepo := repository.NewBubbleGameRepository(s.db)
+	userMemoRepo := repository.NewUserMemoRepository(s.db)
+	galleryRepo := repository.NewGalleryRepository(s.db)
+	accessTokenRepo := repository.NewAccessTokenRepository(s.db)
+	publickeyExtraRepo := repository.NewUserPublickeyExtraRepository(s.db)
+	adRepo := repository.NewAdRepository(s.db)
 
 	return repos{
-		user:                      userRepo,
-		note:                      noteRepo,
-		cachedMeta:                cachedMeta,
-		poll:                      pollRepo,
-		following:                 followingRepo,
-		followRequest:             followRequestRepo,
-		userRelation:              userRelationRepo,
-		pining:                    piningRepo,
-		reaction:                  reactionRepo,
-		emoji:                     emojiRepo,
-		blocking:                  blockingRepo,
-		muting:                    mutingRepo,
-		renoteMuting:              renoteMutingRepo,
-		pollVote:                  pollVoteRepo,
-		driveFile:                 driveFileRepo,
-		driveFolder:               driveFolderRepo,
-		keypair:                   keypairRepo,
-		keypairExtra:              keypairExtraRepo,
-		suspensionOrigin:          suspensionOriginRepo,
-		instance:                  instanceRepo,
-		channel:                   channelRepo,
-		channelFollowing:          channelFollowingRepo,
-		cachedAntenna:             cachedAntenna,
-		clip:                      clipRepo,
-		clipNote:                  clipNoteRepo,
-		page:                      pageRepo,
-		pageLike:                  pageLikeRepo,
-		flash:                     flashRepo,
-		flashLike:                 flashLikeRepo,
-		role:                      roleRepo,
-		roleAssignment:            roleAssignmentRepo,
-		swSub:                     swSubRepo,
-		noteFavorite:              noteFavoriteRepo,
-		noteThreadMuting:          noteThreadMutingRepo,
-		userList:                  userListRepo,
-		webhook:                   webhookRepo,
-		systemWebhook:             systemWebhookRepo,
-		reversi:                   reversiRepo,
-		userIP:                    userIPRepo,
-		chat:                      chatRepo,
-		channelFavorite:           channelFavoriteRepo,
-		channelMuting:             channelMutingRepo,
-		clipFavorite:              clipFavoriteRepo,
-		userListFavorite:          userListFavoriteRepo,
-		retention:                 retentionRepo,
-		promoRead:                 promoReadRepo,
-		hashtag:                   hashtagRepo,
-		channelNoteUnread:         channelNoteUnreadRepo,
-		antennaNoteUnread:         antennaNoteUnreadRepo,
-		chunkedUploadSession:      chunkedUploadSessionRepo,
-		publickey:                 publickeyRepo,
-		goneInstance:              goneInstanceRepo,
-		userPending:               userPendingRepo,
-		signupTicket:              signupTicketRepo,
-		usedUsername:              usedUsernameRepo,
-		signin:                    signinRepo,
-		noteDraft:                 noteDraftRepo,
-		avatarDecoration:          avatarDecorationRepo,
-		announcement:              announcementRepo,
-		modLog:                    modLogRepo,
-		recipient:                 recipientRepo,
-		ipLookupLog:               ipLookupLogRepo,
-		moveSystemAccount:         moveSystemAccountRepo,
-		noteUnread:                noteUnreadRepo,
-		abuseReportForNotif:       abuseReportRepoForNotif,
-		emojiApplicationForNotif:  emojiApplicationRepoForNotif,
-		signupApplicationForNotif: signupApplicationRepoForNotif,
-		fedRule:                   fedRuleRepo,
-		sigCap:                    sigCapRepo,
-		quoteAuthorization:        quoteAuthorizationRepo,
-		resetReq:                  resetReqRepo,
-		userSecurityKey:           userSecurityKeyRepo,
-		registry:                  registryRepo,
-		bubbleVersusRecord:        bubbleVersusRecordRepo,
-		abuseReport:               abuseReportRepo,
-		authSession:               authSessionRepo,
-		bubbleGame:                bubbleGameRepo,
+		user:                 userRepo,
+		note:                 noteRepo,
+		cachedMeta:           cachedMeta,
+		poll:                 pollRepo,
+		following:            followingRepo,
+		followRequest:        followRequestRepo,
+		userRelation:         userRelationRepo,
+		pining:               piningRepo,
+		reaction:             reactionRepo,
+		emoji:                emojiRepo,
+		blocking:             blockingRepo,
+		muting:               mutingRepo,
+		renoteMuting:         renoteMutingRepo,
+		pollVote:             pollVoteRepo,
+		driveFile:            driveFileRepo,
+		driveFolder:          driveFolderRepo,
+		keypair:              keypairRepo,
+		keypairExtra:         keypairExtraRepo,
+		suspensionOrigin:     suspensionOriginRepo,
+		instance:             instanceRepo,
+		channel:              channelRepo,
+		channelFollowing:     channelFollowingRepo,
+		cachedAntenna:        cachedAntenna,
+		clip:                 clipRepo,
+		clipNote:             clipNoteRepo,
+		page:                 pageRepo,
+		pageLike:             pageLikeRepo,
+		flash:                flashRepo,
+		flashLike:            flashLikeRepo,
+		role:                 roleRepo,
+		roleAssignment:       roleAssignmentRepo,
+		swSub:                swSubRepo,
+		noteFavorite:         noteFavoriteRepo,
+		noteThreadMuting:     noteThreadMutingRepo,
+		userList:             userListRepo,
+		webhook:              webhookRepo,
+		systemWebhook:        systemWebhookRepo,
+		reversi:              reversiRepo,
+		userIP:               userIPRepo,
+		chat:                 chatRepo,
+		channelFavorite:      channelFavoriteRepo,
+		channelMuting:        channelMutingRepo,
+		clipFavorite:         clipFavoriteRepo,
+		userListFavorite:     userListFavoriteRepo,
+		retention:            retentionRepo,
+		promoRead:            promoReadRepo,
+		hashtag:              hashtagRepo,
+		channelNoteUnread:    channelNoteUnreadRepo,
+		antennaNoteUnread:    antennaNoteUnreadRepo,
+		chunkedUploadSession: chunkedUploadSessionRepo,
+		publickey:            publickeyRepo,
+		goneInstance:         goneInstanceRepo,
+		userPending:          userPendingRepo,
+		signupTicket:         signupTicketRepo,
+		usedUsername:         usedUsernameRepo,
+		signin:               signinRepo,
+		noteDraft:            noteDraftRepo,
+		avatarDecoration:     avatarDecorationRepo,
+		announcement:         announcementRepo,
+		modLog:               modLogRepo,
+		recipient:            recipientRepo,
+		ipLookupLog:          ipLookupLogRepo,
+		systemAccount:        systemAccountRepo,
+		noteUnread:           noteUnreadRepo,
+		emojiApplication:     emojiApplicationRepo,
+		signupApplication:    signupApplicationRepo,
+		fedRule:              fedRuleRepo,
+		sigCap:               sigCapRepo,
+		quoteAuthorization:   quoteAuthorizationRepo,
+		resetReq:             resetReqRepo,
+		userSecurityKey:      userSecurityKeyRepo,
+		registry:             registryRepo,
+		bubbleVersusRecord:   bubbleVersusRecordRepo,
+		abuseReport:          abuseReportRepo,
+		authSession:          authSessionRepo,
+		bubbleGame:           bubbleGameRepo,
+		userMemo:             userMemoRepo,
+		gallery:              galleryRepo,
+		accessToken:          accessTokenRepo,
+		publickeyExtra:       publickeyExtraRepo,
+		ad:                   adRepo,
 	}
 }
