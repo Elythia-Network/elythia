@@ -1,7 +1,6 @@
 package entitycompat
 
 import (
-	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -29,7 +28,7 @@ func TestCredentialRoutesWithoutScopeRejectAppTokens(t *testing.T) {
 	// 持つこと自体がドリフト源。**そのパーサ自身がコメント中の括弧を数えて
 	// いたのはレビュー 3 周目で直した** — 括弧入りのコメントを 1 行足すだけで
 	// 後続 route を飲み込み、その route の middleware が手前の判定に混ざる。
-	routes := parseRouteRegistrations(t, filepath.Join("..", "server", "router.go"))
+	routes := parseRouteRegistrations(t, serverSourcePaths(t)...)
 	require.Greater(t, len(routes), 400, "route の抽出が壊れている")
 	require.Contains(t, routes, "i/change-password")
 	assert.Contains(t, routes["i/change-password"], "RequireSecure", "middleware を拾えていない")
@@ -78,10 +77,10 @@ var appTokenGateExempt = map[string]string{}
 // 何を守っているのか分からなくなる。gate を後から付けた route が残っていても
 // 同じなので、そちらも落とす (#3037 レビュー)。
 func TestAppTokenGateExemptHasNoDeadEntries(t *testing.T) {
-	routes := parseRouteRegistrations(t, filepath.Join("..", "server", "router.go"))
+	routes := parseRouteRegistrations(t, serverSourcePaths(t)...)
 	for path, reason := range appTokenGateExempt {
 		raw, ok := routes[strings.TrimPrefix(path, "/")]
-		assert.True(t, ok, "appTokenGateExempt の %q が router.go に無い", path)
+		assert.True(t, ok, "appTokenGateExempt の %q が internal/server に無い", path)
 		assert.NotEmpty(t, reason, "%q に理由が無い", path)
 
 		reg := stripGoComments(raw)

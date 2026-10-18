@@ -18,7 +18,7 @@ import (
 func writeRouter(t *testing.T, body string) string {
 	t.Helper()
 	dir := t.TempDir()
-	path := filepath.Join(dir, "router.go")
+	path := filepath.Join(dir, "routes.go")
 	src := "package server\n\nfunc setup() {\n" + body + "\n}\n"
 	require.NoError(t, os.WriteFile(path, []byte(src), 0o644))
 	return path
@@ -112,6 +112,7 @@ func TestCountInlineHandlers(t *testing.T) {
 	api := s.echo.Group("/api")
 	api.POST("/ctor", promo.NewHandler(a, b, c).Read)
 	api.POST("/ok", promoHandler.Read)
+	api.POST("/field", h.promo.Read)
 `)
 		assert.Equal(t, []string{"/ctor"}, countInlineHandlers(t, path))
 	})

@@ -1,7 +1,6 @@
 package entitycompat
 
 import (
-	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -14,7 +13,7 @@ import (
 // (管理者・native token・2FA の登録・操作ごとの再認証) を課す。再認証は
 // backupGuard (strongauth) が見るので、route に付け忘れると、管理者の token
 // だけでバックアップ (利用者の秘密鍵・token・パスワードの hash を含む) を
-// 落とせるようになる。build もテストも通るので、router.go を読んで確かめる。
+// 落とせるようになる。build もテストも通るので、internal/server のソースを読んで確かめる。
 //
 // reauth-challenge だけは、パスキーの再認証の challenge を出す前段なので
 // backupGuard を付けない (handler の中で、再認証以外の条件を見る)。
@@ -37,7 +36,7 @@ var backupRoutesWithoutAdmin = map[string]string{
 }
 
 func TestBackupAdminRoutesAreGuarded(t *testing.T) {
-	routes := parseRouteRegistrations(t, filepath.Join("..", "server", "router.go"))
+	routes := parseRouteRegistrations(t, serverSourcePaths(t)...)
 	var found []string
 	for ep, raw := range routes {
 		if !strings.HasPrefix(ep, "admin/backup/") {
@@ -60,7 +59,7 @@ func TestBackupAdminRoutesAreGuarded(t *testing.T) {
 	sort.Strings(found)
 	// 抽出が空振りすると全部緑になるので、実在するものを名指しで要求する。
 	for _, want := range []string{"admin/backup/list", "admin/backup/download", "admin/backup/delete", "admin/backup/reauth-challenge"} {
-		require.Contains(t, found, want, "router.go から admin/backup/* を読めない")
+		require.Contains(t, found, want, "internal/server から admin/backup/* を読めない")
 	}
 	for ep := range backupRoutesWithoutReauth {
 		assert.Contains(t, found, ep, "backupRoutesWithoutReauth の %s は実在しない", ep)

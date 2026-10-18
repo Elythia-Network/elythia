@@ -48,7 +48,7 @@ func TestErrorKindDrift(t *testing.T) {
 		t.Fatalf("parse golden_error_ids.json: %v", err)
 	}
 
-	routes := parseRoutes(t, filepath.Join(root, "internal/server/router.go"))
+	routes := parseRoutes(t, serverSourcePaths(t)...)
 	helpers, consts := parseApierr(t, filepath.Join(root, "internal/api/apierr/errors.go"))
 	for name, em := range parseJSONWrappers(t, filepath.Join(root, "internal/api/apierr/echo.go"), helpers) {
 		helpers[name] = em

@@ -3,8 +3,6 @@ package entitycompat
 import (
 	_ "embed"
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -22,8 +20,6 @@ var embeddedSecureEndpointsJSON []byte
 // reachable only via the native session token; without RequireSecure a
 // third-party OAuth app holding a valid access token could drive them.
 func TestSecureDrift(t *testing.T) {
-	root := repoRoot(t)
-
 	var golden []string
 	if err := json.Unmarshal(embeddedSecureEndpointsJSON, &golden); err != nil {
 		t.Fatalf("parse golden_secure_endpoints.json: %v", err)
@@ -36,7 +32,7 @@ func TestSecureDrift(t *testing.T) {
 		secure[ep] = true
 	}
 
-	regs := parseRouteRegistrations(t, filepath.Join(root, "internal/server/router.go"))
+	regs := parseRouteRegistrations(t, serverSourcePaths(t)...)
 
 	var missing []string
 	for ep, reg := range regs {
@@ -130,27 +126,10 @@ const backupSecureReason = "Elythia-only backup admin (#3462): backups hold priv
 // 文字列・コメントを数えない」と書いて採用したが、事実と逆だった。**
 // `stripGoComments` は rune / 文字列リテラルを保つので、route の path に
 // 含まれる `(` が消えることはない。
-func parseRouteRegistrations(t *testing.T, path string) map[string]string {
-	src, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read router: %v", err)
-	}
-	s := stripGoComments(string(src))
-	out := map[string]string{}
-	for _, loc := range routeRegRe.FindAllStringSubmatchIndex(s, -1) {
-		ep := strings.TrimPrefix(s[loc[2]:loc[3]], "/")
-		open := strings.LastIndex(s[loc[0]:loc[1]], "(") + loc[0]
-		depth, j := 1, open+1
-		for j < len(s) && depth > 0 {
-			switch s[j] {
-			case '(':
-				depth++
-			case ')':
-				depth--
-			}
-			j++
-		}
-		out[ep] = s[open:j]
-	}
-	return out
+//
+// **ファイルごとに読む (#3672)。** offset はファイルの中でだけ意味を持つ。
+// 同じ endpoint を 2 つのファイルが登録していたら落とす (routeRegistrationsOf)。
+func parseRouteRegistrations(t *testing.T, paths ...string) map[string]string {
+	t.Helper()
+	return routeRegistrationsOf(t, "parseRouteRegistrations", paths)
 }

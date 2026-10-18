@@ -3,8 +3,8 @@ package entitycompat
 import (
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -38,8 +38,6 @@ var routeRegRe = regexp.MustCompile(`\bapi\.(?:GET|POST|PUT|DELETE)\("(/[^"]*)"`
 // on a public endpoint) is a defensible hardening choice, not a security bug,
 // so it is not flagged.
 func TestPermissionDrift(t *testing.T) {
-	root := repoRoot(t)
-
 	var golden map[string]string
 	if err := json.Unmarshal(embeddedPermissionsJSON, &golden); err != nil {
 		t.Fatalf("parse golden_permissions.json: %v", err)
@@ -48,9 +46,9 @@ func TestPermissionDrift(t *testing.T) {
 		t.Fatalf("permissions golden has only %d endpoints (expected >=200); regenerate with `make shapecheck-gen`", len(golden))
 	}
 
-	mk := parseRouteLevels(t, filepath.Join(root, "internal/server/router.go"))
+	mk := parseRouteLevels(t, serverSourcePaths(t)...)
 	if len(mk) < 200 {
-		t.Fatalf("parsed only %d routes from router.go (expected >=200); the parser likely broke", len(mk))
+		t.Fatalf("parsed only %d routes from internal/server (expected >=200); the parser likely broke", len(mk))
 	}
 
 	type drift struct{ endpoint, misskey, mkLevel string }
@@ -79,32 +77,14 @@ func TestPermissionDrift(t *testing.T) {
 	}
 }
 
-// parseRouteLevels reads router.go and returns endpoint path -> access level by
-// balancing parentheses from each api.METHOD("/path" to the end of the
-// registration call, so middleware on the closing line of a multi-line inline
-// handler (}, middleware.RequireAuth())) is captured too.
-func parseRouteLevels(t *testing.T, path string) map[string]string {
-	src, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read router: %v", err)
-	}
-	s := string(src)
+// parseRouteLevels reads the given router sources and returns endpoint path ->
+// access level by balancing parentheses from each api.METHOD("/path" to the end
+// of the registration call, so middleware on the closing line of a multi-line
+// inline handler (}, middleware.RequireAuth())) is captured too.
+func parseRouteLevels(t *testing.T, paths ...string) map[string]string {
+	t.Helper()
 	levels := map[string]string{}
-	for _, loc := range routeRegRe.FindAllStringSubmatchIndex(s, -1) {
-		ep := strings.TrimPrefix(s[loc[2]:loc[3]], "/")
-		// Balance parens from the opening '(' of api.METHOD( to its match.
-		open := strings.LastIndex(s[loc[0]:loc[1]], "(") + loc[0]
-		depth, j := 1, open+1
-		for j < len(s) && depth > 0 {
-			switch s[j] {
-			case '(':
-				depth++
-			case ')':
-				depth--
-			}
-			j++
-		}
-		reg := s[open:j]
+	for ep, reg := range routeRegistrationsOf(t, "parseRouteLevels", paths) {
 		switch {
 		case strings.Contains(reg, "RequireAdmin"):
 			levels[ep] = "admin"
@@ -119,4 +99,74 @@ func parseRouteLevels(t *testing.T, path string) map[string]string {
 		}
 	}
 	return levels
+}
+
+// routeRegistrationsOf returns endpoint path -> the registration text (balanced
+// parens from `api.METHOD(` to its match) of every file, comments removed.
+func routeRegistrationsOf(t *testing.T, caller string, paths []string) map[string]string {
+	t.Helper()
+	if len(paths) == 0 {
+		t.Fatalf("%s: 読むファイルが無い", caller)
+	}
+	names := make([]string, len(paths))
+	srcs := make([]string, len(paths))
+	for i, path := range paths {
+		src, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read router: %v", err)
+		}
+		names[i] = relPath(t, path)
+		srcs[i] = string(src)
+	}
+	out, err := routeRegistrationsFrom(names, srcs)
+	if err != nil {
+		t.Fatalf("%s: %v", caller, err)
+	}
+	return out
+}
+
+// routeRegistrationsFrom is routeRegistrationsOf on sources already read.
+//
+// **コメントを先に落とす。** 別のファイルのコメントに書いた `api.POST(...)` の
+// 例を、登録として数えないため (#3672 レビュー L-1)。1 つのファイルの中でも、
+// コメントの例が本物を後勝ちで上書きしなくなる。
+//
+// **同じ method と endpoint を 2 つのファイルが登録していたらエラーにする
+// (#3672)。** 1 つのファイルの中では後勝ち (従来どおり) だが、ファイルをまたぐと
+// 「どちらが後か」はファイル名の順でしかなく、Echo の登録順とは関係が無い。
+// 緩い方を黙って捨てて検査するのを防ぐ。**method は鍵に含める** (レビュー L-4)。
+// GET と POST で同じ endpoint を登録しているものがあり (`emojis` など)、GET だけを
+// 別のファイルへ集めるのは正当な分け方なので落とさない。返す表は endpoint ごとで、
+// GET と POST が別々のファイルにあるときは、後に読んだファイルのものになる
+// (1 つのファイルの中で後勝ちなのと同じ)。
+func routeRegistrationsFrom(names, srcs []string) (map[string]string, error) {
+	out := map[string]string{}
+	from := map[string]string{}
+	for i, name := range names {
+		s := stripGoComments(srcs[i])
+		for _, loc := range routeRegRe.FindAllStringSubmatchIndex(s, -1) {
+			ep := strings.TrimPrefix(s[loc[2]:loc[3]], "/")
+			// Balance parens from the opening '(' of api.METHOD( to its match.
+			open := strings.LastIndex(s[loc[0]:loc[1]], "(") + loc[0]
+			method := s[strings.Index(s[loc[0]:loc[1]], ".")+loc[0]+1 : open]
+			depth, j := 1, open+1
+			for j < len(s) && depth > 0 {
+				switch s[j] {
+				case '(':
+					depth++
+				case ')':
+					depth--
+				}
+				j++
+			}
+			key := method + " " + ep
+			if prev, ok := from[key]; ok && prev != name {
+				return nil, fmt.Errorf("%s %s を %s と %s の両方が登録している。"+
+					"どちらを検査するか決まらないので、登録を 1 つのファイルにまとめること", method, ep, prev, name)
+			}
+			from[key] = name
+			out[ep] = s[open:j]
+		}
+	}
+	return out, nil
 }
