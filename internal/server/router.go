@@ -72,11 +72,9 @@ import (
 	"github.com/elythia-network/elythia/internal/bgwork"
 	"github.com/elythia-network/elythia/internal/config"
 	coreabuse "github.com/elythia-network/elythia/internal/core/abuse"
-	coreachievement "github.com/elythia-network/elythia/internal/core/achievement"
 	coreannouncement "github.com/elythia-network/elythia/internal/core/announcement"
 	coreantenna "github.com/elythia-network/elythia/internal/core/antenna"
 	"github.com/elythia-network/elythia/internal/core/avatardecoration"
-	coreblocking "github.com/elythia-network/elythia/internal/core/blocking"
 	corebubbleversus "github.com/elythia-network/elythia/internal/core/bubbleversus"
 	"github.com/elythia-network/elythia/internal/core/cachebus"
 	corecaptcha "github.com/elythia-network/elythia/internal/core/captcha"
@@ -84,7 +82,6 @@ import (
 	"github.com/elythia-network/elythia/internal/core/chart"
 	"github.com/elythia-network/elythia/internal/core/chart/charthook"
 	corechat "github.com/elythia-network/elythia/internal/core/chat"
-	coreclip "github.com/elythia-network/elythia/internal/core/clip"
 	"github.com/elythia-network/elythia/internal/core/dbhealth"
 	"github.com/elythia-network/elythia/internal/core/deliveryhealth"
 	coredrive "github.com/elythia-network/elythia/internal/core/drive"
@@ -94,13 +91,10 @@ import (
 	"github.com/elythia-network/elythia/internal/core/emojimeta"
 	coreephemeral "github.com/elythia-network/elythia/internal/core/ephemeral"
 	"github.com/elythia-network/elythia/internal/core/event"
-	corefeatured "github.com/elythia-network/elythia/internal/core/featured"
 	corefederation "github.com/elythia-network/elythia/internal/core/federation"
 	"github.com/elythia-network/elythia/internal/core/fedrule"
-	coreflash "github.com/elythia-network/elythia/internal/core/flash"
 	corefollowing "github.com/elythia-network/elythia/internal/core/following"
 	"github.com/elythia-network/elythia/internal/core/gonecleanup"
-	corehashtag "github.com/elythia-network/elythia/internal/core/hashtag"
 	coreinstance "github.com/elythia-network/elythia/internal/core/instance"
 	"github.com/elythia-network/elythia/internal/core/iplog"
 	"github.com/elythia-network/elythia/internal/core/iplookuplog"
@@ -108,10 +102,7 @@ import (
 	coremodlog "github.com/elythia-network/elythia/internal/core/moderationlog"
 	coremoderatoractivity "github.com/elythia-network/elythia/internal/core/moderatoractivity"
 	coremove "github.com/elythia-network/elythia/internal/core/move"
-	coremuting "github.com/elythia-network/elythia/internal/core/muting"
-	corenote "github.com/elythia-network/elythia/internal/core/note"
 	corenotification "github.com/elythia-network/elythia/internal/core/notification"
-	corepage "github.com/elythia-network/elythia/internal/core/page"
 	"github.com/elythia-network/elythia/internal/core/passwordguard"
 	corepluginaccount "github.com/elythia-network/elythia/internal/core/pluginaccount"
 	corepluginnotify "github.com/elythia-network/elythia/internal/core/pluginnotify"
@@ -122,12 +113,10 @@ import (
 	corereaction "github.com/elythia-network/elythia/internal/core/reaction"
 	corerelationcache "github.com/elythia-network/elythia/internal/core/relationcache"
 	corerelay "github.com/elythia-network/elythia/internal/core/relay"
-	coreretention "github.com/elythia-network/elythia/internal/core/retention"
 	corereversi "github.com/elythia-network/elythia/internal/core/reversi"
 	corerole "github.com/elythia-network/elythia/internal/core/role"
 	coresearch "github.com/elythia-network/elythia/internal/core/search"
 	"github.com/elythia-network/elythia/internal/core/selfcheck"
-	coresignup "github.com/elythia-network/elythia/internal/core/signup"
 	"github.com/elythia-network/elythia/internal/core/signupapplication"
 	"github.com/elythia-network/elythia/internal/core/signupform"
 	"github.com/elythia-network/elythia/internal/core/strongauth"
@@ -137,8 +126,6 @@ import (
 	coretranslate "github.com/elythia-network/elythia/internal/core/translate"
 	coretwofactor "github.com/elythia-network/elythia/internal/core/twofactor"
 	coreurlpreview "github.com/elythia-network/elythia/internal/core/urlpreview"
-	coreuser "github.com/elythia-network/elythia/internal/core/user"
-	coreuserlist "github.com/elythia-network/elythia/internal/core/userlist"
 	"github.com/elythia-network/elythia/internal/core/userpack"
 	corewebhook "github.com/elythia-network/elythia/internal/core/webhook"
 	corewebpush "github.com/elythia-network/elythia/internal/core/webpush"
@@ -230,7 +217,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	pageRepo := w.repos.page
 	pageLikeRepo := w.repos.pageLike
 	flashRepo := w.repos.flash
-	flashLikeRepo := w.repos.flashLike
 	roleRepo := w.repos.role
 	roleAssignmentRepo := w.repos.roleAssignment
 	swSubRepo := w.repos.swSub
@@ -248,7 +234,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	userListFavoriteRepo := w.repos.userListFavorite
 	retentionRepo := w.repos.retention
 	promoReadRepo := w.repos.promoRead
-	hashtagRepo := w.repos.hashtag
 	channelNoteUnreadRepo := w.repos.channelNoteUnread
 	antennaNoteUnreadRepo := w.repos.antennaNoteUnread
 	chunkedUploadSessionRepo := w.repos.chunkedUploadSession
@@ -261,7 +246,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	noteDraftRepo := w.repos.noteDraft
 	avatarDecorationRepo := w.repos.avatarDecoration
 	announcementRepo := w.repos.announcement
-	modLogRepo := w.repos.modLog
 	recipientRepo := w.repos.recipient
 	ipLookupLogRepo := w.repos.ipLookupLog
 	moveSystemAccountRepo := w.repos.systemAccount
@@ -365,38 +349,74 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 読ませる (#3330)。
 	chartHooks.SetMetaSource(metaRepo.Fetch)
 
-	// 以下は受け手より後で作り、後から setter で入れていたもの (#3676)。どれも作るだけで
-	// DB にも Redis にも触らず、goroutine も起動しないので、受け手より先に作る。
+	// Core services (#3686)。作るのは buildCore (wiring_core.go) で、ここでは今までと
+	// 同じ名前の別名を置くだけにする。移したのは、作るだけで DB にも Redis にも外部にも
+	// 触らず、goroutine も shutdown hook も持たず、依存が repository と先に作った core
+	// だけのもの。**setter の呼び出しは 1 つも動かしていない** (下の元の位置のまま)。
+	// 構築の途中で動く worker から見える配線を変えないため (docs/architecture.md 4.1)。
+	// 副作用のあるものと、stream・handler・連合の部品に依存するものは、下の元の位置で作る。
+	// **別名は変数 coreSvcs から取る。** w.core から取ると、別名を代入より前に書いても
+	// コンパイルが通り、ゼロ値 (nil) を黙って受け取る (#3686 のレビュー)。
+	coreSvcs := s.buildCore(w, idGen)
+	w.core = coreSvcs
+	featuredService := coreSvcs.featured
+	hashtagService := coreSvcs.hashtag
+	modLogService := coreSvcs.modLog
+	reversiFedCache := coreSvcs.reversiFedCache
+	totpReplayGuard := coreSvcs.totpReplayGuard
+	webPushService := coreSvcs.webPush
+	instanceService := coreSvcs.instance
+	roleService := coreSvcs.role
+	signupService := coreSvcs.signup
+	noteCreateService := coreSvcs.noteCreate
+	noteDeleteService := coreSvcs.noteDelete
+	noteQueryService := coreSvcs.noteQuery
+	userService := coreSvcs.user
+	followingService := coreSvcs.following
+	timelineFanoutHook := coreSvcs.timelineFanoutHook
+	ephemeralStore := coreSvcs.ephemeralStore
+	timelineService := coreSvcs.timeline
+	channelService := coreSvcs.channel
+	antennaService := coreSvcs.antenna
+	clipService := coreSvcs.clip
+	pageService := coreSvcs.page
+	flashService := coreSvcs.flash
+	reactionService := coreSvcs.reaction
+	notificationService := coreSvcs.notification
+	notificationHook := coreSvcs.notificationHook
+	webhookService := coreSvcs.webhook
+	webhookNoteHook := coreSvcs.webhookNoteHook
+	webhookReactionHook := coreSvcs.webhookReactionHook
+	webhookFollowingHook := coreSvcs.webhookFollowingHook
+	blockingService := coreSvcs.blocking
+	mutingService := coreSvcs.muting
+	renoteMutingService := coreSvcs.renoteMuting
+	pollService := coreSvcs.poll
+	localDriveStorage := coreSvcs.localDriveStorage
+	driveStorage := coreSvcs.driveStorage
+	driveService := coreSvcs.drive
+	imgProcessor := coreSvcs.imgProcessor
+	driveReader := coreSvcs.driveReader
+	importer := coreSvcs.importer
+	sysAcctSvc := coreSvcs.sysAcct
+	listProxyFollow := coreSvcs.listProxyFollow
+	retentionSvc := coreSvcs.retention
+	achievementService := coreSvcs.achievement
+	proxyAllowlist := coreSvcs.proxyAllowlist
+	abuseInAppNotifier := coreSvcs.abuseInAppNotifier
+
+	// 以下は #3676 で受け手より先に作るようにした部品のうち、buildCore へ移さなかった
+	// もの (passwordFailureGuard・proxyAccountResolver・dbHealth・inboxSoftwareChecker)
+	// と、buildCore へ移した部品 (featuredService・hashtagService など) への setter。
+	// 部品はどれも作るだけで DB にも Redis にも触らず、goroutine も起動しない。
 	// 受け手への setter の呼び出しは元の位置のまま。
 	//
-	// featured engagement ランキング (#1687)。reaction / renote の hook が
-	// global / in-channel / per-user の Redis windowed ZSET を更新し、
-	// notes/featured・users/featured-notes が読む。upstream と同じ default Redis。
-	featuredService := corefeatured.NewService(s.redis.Default)
-	// Hashtag service: ノート作成 (local / federation 両経路) で hashtag table の
-	// mentionedUsersCount / mentionedUserIds を更新する (#680)。/api/hashtags/list
-	// 等の trends ranking はこの集計を見るので、未配線だと空集合のままになる。
-	hashtagService := corehashtag.NewService(hashtagRepo, idGen)
 	// meta.hiddenTags / meta.sensitiveWords を見て tag の record / featuring
 	// を skip するため metaRepo を inject (upstream HashtagService.updateHashtags
 	// Ranking と同 semantics、未配線だと sensitive tag が featured に出る
 	// drop-in regression が再発するので必ず wire する)。
 	hashtagService.SetMetaRepo(metaRepo)
-	// moderation log (#1548 / #1765)。admin / announcement / gallery / flash と、moderator の
-	// note 削除が同じ instance を共有する。
-	modLogService := coremodlog.New(modLogRepo, idGen)
 	modLogService.SetBackground(s.background) // #3661: 世代の停止で待つ
-	// reversi の連合 (Phase 9.7)。FederationIDCache は本家 Misskey DB スキーマ互換の
-	// ため DB カラムを持たず Redis のみで session↔gameID の双方向 mapping を保持する。
-	// api handler と federation inbox で同じインスタンスを共有する。
-	reversiFedCache := corereversi.NewFederationIDCache(s.redis.Default)
-	// TOTP replay guard — accept した TOTP コードを Redis に SETNX で
-	// 記録し、acceptance window 内 (~90s) の再利用を refuse する
-	// (RFC 6238 §5.2)。mk-go が先行実装した hardening だが、upstream も
-	// 2026.6.0 の UserAuthService.validateOtp で同等機構 (Redis SET NX EX、
-	// TTL 90s) を入れたため現在は挙動が揃っている。
-	// signin と /api/i の 2 経路で共通の guard を共有する。
-	totpReplayGuard := coretwofactor.NewRedisReplayGuard(s.redis.Default)
 	// 現在のパスワードを照合する i/ 配下の API の照合失敗をアカウント単位で数える。
 	// route ごとの limiter に置くと、token を持つだけの第三者が被害者の
 	// i/regenerate-token を使い切れる (passwordguard の package doc)。
@@ -405,17 +425,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	proxyAccountResolver := newProxyAccountResolver(systemAccountRepo, userRepo)
 	// DB の健全性 (#3095)。統計はプライマリから読み、1 分キャッシュする。
 	dbHealth := dbhealth.NewService(s.db, s.config.DBReplications && len(s.config.DBSlaves) > 0)
-	// Web Push (Phase 9.3)。通知・チャット・既読の push を queue へ積む。
-	webPushService := corewebpush.NewService(s.queueClient)
 	// 受信を拒否するソフトウェア (#3362) の判定。連合の resolver と、WebFinger で
 	// 利用者を引く remoteUserResolver が共有する。
 	inboxSoftwareChecker := corefederation.NewInboxSuspendedChecker(metaRepo, instanceRepo)
-	// Instance management (Phase 3 Step H)。インスタンスの停止・サイレンスの判定を、
-	// 連合・following・reaction・配送が共有する。
-	instanceService := coreinstance.NewService(instanceRepo, metaRepo, idGen)
 
 	// Core services
-	roleService := corerole.NewService(roleRepo, roleAssignmentRepo, metaRepo, idGen)
 	roleService.SetEffectivePolicyProviderCacheEntries(s.config.EffectivePolicyProviderCacheEntries)
 	// server 全体の upload 上限 (MB) を role policy maxFileSizeMb の cap に使う (#2069/#17389)。
 	roleService.SetServerMaxFileSizeMb(int(s.config.MaxFileSize / (1024 * 1024)))
@@ -427,12 +441,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// プラグインのルートで管理者判定に使う (#2477)。setupPlugins より前に入れる。
 	s.pluginRoles = roleService
 	s.roleService = roleService
-	signupService := coresignup.NewService(userRepo, metaRepo, idGen)
 	// ActivityPub 配信のためにローカルユーザーは RSA 鍵対を必要とする。
 	signupService.SetKeypairRepo(keypairRepo)
 	// FEP-521a Multikey 対応で Ed25519 鍵対も併発行 (#1067 / #1068)。
 	signupService.SetKeypairExtraRepo(keypairExtraRepo)
-	noteCreateService := corenote.NewCreateService(noteRepo, pollRepo, idGen, followingRepo)
 	noteCreateService.SetBackground(s.background) // #3661: 世代の停止で待つ
 	noteCreateService.SetMainStreamPublisher(mainStreamPublisher)
 	noteCreateService.SetChartHook(chartHooks)
@@ -450,14 +462,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	noteCreateService.SetRolePolicyProvider(roleService)
 	// reply/mention の main-stream event をスレッドミュート済 recipient に出さない (#1954)。
 	noteCreateService.SetThreadMutingRepo(noteThreadMutingRepo)
-	noteDeleteService := corenote.NewDeleteService(noteRepo)
 	noteDeleteService.SetUserRepo(userRepo) // #1538: resolve author for moderator delete
 	noteDeleteService.SetNoteStreamHook(&noteDeleteStreamAdapter{pub: noteEventPub})
 	noteDeleteService.SetChartHook(chartHooks)
-	noteQueryService := corenote.NewQueryService(noteRepo, followingRepo)
 	noteQueryService.SetFavoriteRepo(noteFavoriteRepo)
 	noteQueryService.SetThreadMutingRepo(noteThreadMutingRepo)
-	userService := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
 	userService.SetMainStreamPublisher(mainStreamPublisher)
 	// PinNote の上限を role policy `pinLimit` で override 可能にする (#1029)。
 	userService.SetRolePolicyProvider(roleService)
@@ -468,7 +477,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// local 限定にする upstream 互換 remap (#1064) のため、自 hostname を
 	// Service に渡す。空文字なら remap は "." 一致のみになる。
 	userService.SetSelfHostname(s.config.Hostname)
-	followingService := corefollowing.NewService(userRepo, followingRepo, followRequestRepo, idGen)
 	followingService.SetRelationReloadPublisher(relationReloadPublisher)
 	followingService.SetMainStreamPublisher(mainStreamPublisher)
 	followingService.SetChartHook(chartHooks)
@@ -481,27 +489,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	followingService.SetInstanceStatsGate(corefollowing.MetaInstanceStatsGate(metaRepo))
 
 	// Timeline services (Redis-backed fanout)
-	// keyPrefix で TS 本家と同じ `<host>:list:*` 名前空間に揃える (#362)。
-	fanoutTimelineService := coretimeline.NewFanoutTimelineService(
-		s.redis.Timelines, idGen, s.config.RedisForTimelines.KeyPrefix())
-	timelineFanoutHook := coretimeline.NewFanoutHook(fanoutTimelineService, followingRepo)
-
-	// リレー経由でしか観測しない投稿の置き場 (#2332)。DB に入れず Redis に
-	// TTL 付きで置き、ローカルユーザーが触ったときだけ materialize する。
-	// meta を都度読むのは、起動時固定にすると管理画面の変更が再起動まで
-	// 効かないため (#2315 と同じ轍を踏まない)。
-	ephemeralStore := coreephemeral.NewStore(
-		s.redis.Timelines, s.config.RedisForTimelines.KeyPrefix(),
-		func() coreephemeral.Settings {
-			m, err := metaRepo.Fetch()
-			if err != nil || m == nil {
-				return coreephemeral.Settings{}
-			}
-			return coreephemeral.Settings{
-				Enabled: m.EnableEphemeralRelayNotes,
-				TTL:     time.Duration(m.EphemeralRelayNoteTTLMinutes) * time.Minute,
-			}
-		})
 	// 引用先が DB 側にある (= リレー由来でない投稿を引用している) ケースを
 	// 埋められるようにする (#2397)。未配線だと Redis 側の引用先しか復元できず、
 	// 残りが「削除された投稿」として描画される。
@@ -509,7 +496,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// timeline の hydrate が DB に無い ID を Redis から補えるようにする。
 	// store 自体は常に配線し、機能の有効・無効は取り込み側で判定する
 	// (無効化しても既に置かれているぶんは TTL 切れまで読めた方がよい)。
-	timelineService := coretimeline.NewService(fanoutTimelineService, noteRepo, followingRepo)
 	timelineService.SetEphemeralLookup(ephemeralStore)
 	// Phase DB-compat (#51): meta から timeline cache cap を動的に読む。
 	// 4 つのカラム (perLocal / perRemote / perHome / perList) が反映される。
@@ -532,7 +518,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	noteDeleteService.SetTimelineHook(timelineFanoutHook)
 
 	// Channels (Phase 4.2)
-	channelService := corechannel.NewService(channelRepo, channelFollowingRepo, noteRepo, idGen)
 	// channels/update の moderator bypass (#1540): owner でなくても moderator
 	// なら他人の channel を編集できる upstream 互換のため roleService を inject。
 	channelService.SetModeratorChecker(roleService)
@@ -542,7 +527,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	noteCreateService.SetChannelHook(corechannel.NewNoteCreateHook(channelService))
 
 	// Antennas (Phase 4.3)
-	antennaService := coreantenna.NewService(antennaRepo, userRepo, s.redis.Default, idGen)
 	antennaService.SetFollowingRepo(followingRepo)
 	antennaService.SetUserListRepo(userListRepo)
 	antennaService.SetRolePolicyProvider(roleService) // #1029: antennaLimit
@@ -557,17 +541,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	noteCreateService.SetAntennaHook(coreantenna.NewNoteCreateHook(antennaService))
 
 	// Clips (Phase 4.4)
-	clipService := coreclip.NewService(clipRepo, clipNoteRepo, noteRepo, idGen)
 	clipService.SetRolePolicyProvider(roleService) // #1029: clipLimit / noteEachClipsLimit
-
-	// Pages / Flash (Phase 4.5)
-	pageService := corepage.NewService(pageRepo, pageLikeRepo, idGen)
-	flashService := coreflash.NewService(flashRepo, flashLikeRepo, idGen)
 
 	noteCreateService.SetFeaturedRanking(featuredService)
 
 	// Reactions
-	reactionService := corereaction.NewService(noteRepo, reactionRepo, emojiRepo, followingRepo, idGen)
 	reactionService.SetFeaturedRanking(featuredService)
 	reactionService.SetNoteStreamHook(&reactionNoteStreamAdapter{pub: noteEventPub})
 	reactionService.SetChartHook(chartHooks)
@@ -588,11 +566,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	reactionService.SetCountWriter(reactionCountWriter)
 
 	// Notifications (Redis Streams)
-	// keyPrefix で TS 本家と同じ `<host>:notificationTimeline:*` 等に揃える (#362)。
-	notificationService := corenotification.NewService(s.redis.Default, idGen, s.config.Redis.KeyPrefix())
 	notificationService.SetBackground(s.background) // #3661: 世代の停止で送り切る
 	notificationService.SetNoteUnreadRepo(noteUnreadRepo)
-	notificationHook := corenotification.NewHook(notificationService, userRepo)
 	notificationHook.SetNoteUnreadRepo(noteUnreadRepo)
 	// note 通知 (notify='normal' フォロワーへの投稿通知、#1559) の fan-out 依存。
 	notificationHook.SetNoteNotifyRepos(followingRepo, renoteMutingRepo)
@@ -709,17 +684,13 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	s.queueServer.Handle(queue.TaskTypeWebPush, webPushProcessor.Handle)
 
 	// Webhook (Phase 9.5): ユーザー/システムwebhookの配信を非同期処理する。
-	webhookService := corewebhook.NewService(s.queueClient, webhookRepo, systemWebhookRepo, s.config.URL)
-	webhookNoteHook := corewebhook.NewNoteCreateHook(webhookService, idGen)
 	// reply/mention webhook をスレッドミュート済 recipient に出さない (#1965)。
 	webhookNoteHook.SetThreadMutingRepo(noteThreadMutingRepo)
 	// note payload の embed (renote/reply/引用先) を受信者の可視性で gate する。
 	webhookNoteHook.SetFollowingRepo(followingRepo)
 	noteCreateService.SetWebhookHook(webhookNoteHook)
-	webhookReactionHook := corewebhook.NewReactionCreateHook(webhookService, idGen)
 	webhookReactionHook.SetFollowingRepo(followingRepo)
 	reactionService.SetWebhookHook(webhookReactionHook)
-	webhookFollowingHook := corewebhook.NewFollowingHook(webhookService)
 	followingService.SetWebhookHook(webhookFollowingHook)
 	signupService.SetWebhookHook(corewebhook.NewSignupHook(webhookService))
 	// Webhook delivery: SSRF-safe transport + forward proxy 経由で user-supplied
@@ -730,7 +701,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	s.queueServer.Handle(queue.TaskTypeSystemWebhook, webhookProcessor.HandleSystem)
 
 	// Blocking & Muting
-	blockingService := coreblocking.NewService(userRepo, blockingRepo, idGen)
 	blockingService.SetRelationReloadPublisher(relationReloadPublisher)
 	// block 時に保留中の follow request を双方向で取り消す。upstream
 	// UserBlockingService.block の cancelRequest 相当。
@@ -742,8 +712,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// block で、ブロックされた側のリストからブロックした人を外す
 	// (本家 removeFromList、#3330)。
 	blockingService.SetUserListRepo(userListRepo)
-	mutingService := coremuting.NewService(userRepo, mutingRepo, idGen)
-	renoteMutingService := coremuting.NewRenoteService(userRepo, renoteMutingRepo, idGen)
 	mutingService.SetRelationReloadPublisher(relationReloadPublisher)
 	renoteMutingService.SetRelationReloadPublisher(relationReloadPublisher)
 	followingService.SetBlockingChecker(blockingService)
@@ -751,7 +719,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	notificationHook.SetMuteChecker(mutingService)
 
 	// Polls
-	pollService := corepoll.NewService(noteRepo, pollRepo, pollVoteRepo, followingRepo, idGen)
 	// pollVoted を note の stream topic に publish して subscribe 中の
 	// frontend (note 詳細 / timeline) が reload なしで count を更新できる
 	// ようにする (#690)。
@@ -777,18 +744,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	}
 
 	// Drive storage (Phase 4.9: Meta に基づいて Local / S3 を切り替え)
-	// localDriveStorage は driveStorage が S3 に切り替わっても、
-	// storedInternal=true な drive_file を `/files/:accessKey` で提供する
-	// fallback として常に保持する (#1414)。
-	localDriveStorage := coredrive.NewLocalStorage("./drive-files", s.config.DriveURL)
-	// backend は meta から都度解決する (#2315)。起動時に固定していた頃は、
-	// コントロールパネルでオブジェクトストレージを有効にしても再起動するまで
-	// ローカルに書き続けていた。upstream Misskey は metaUpdated で meta を
-	// in-place 更新し、アップロードのたびに S3 client を組み立てるので即反映
-	// される。指紋が変わらない限り backend は使い回すので、都度解決でも
-	// S3 client を作り直すコストはかからない。
-	driveStorage := coredrive.NewMetaStorage(metaRepo.Fetch, "./drive-files", s.config.DriveURL)
-	driveService := coredrive.NewService(driveFileRepo, driveFolderRepo, driveStorage, idGen)
 	driveService.SetStreamingPublisher(drivePublisher)
 	// folder の folderCreated/folderUpdated/folderDeleted も同じ drive channel
 	// publisher で配信する (#1564)。
@@ -825,7 +780,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	}
 
 	// Image processing (Phase 4.8)
-	imgProcessor := coredrive.NewDefaultImageProcessor()
 	driveService.SetImageProcessor(imgProcessor)
 	driveService.SetVideoProcessor(coredrive.NewFFmpegVideoProcessor(imgProcessor, nil))
 
@@ -912,22 +866,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		EmojiRepo:         emojiRepo,
 		EmojiImageFetcher: coretransfer.NewHTTPEmojiImageFetcher(s.outboundClient(60*time.Second), s.config.UserAgent, 0),
 	})
-	driveReader := coretransfer.NewRepoBackedDriveReader(driveFileRepo, driveStorage)
 	// storedInternal=true な行 (object storage 有効化より前に保存されたファイル)
 	// はローカル FS にあるので、import がそちらも読めるようにする (#2315)。
 	driveReader.SetLocalStorage(localDriveStorage)
-	importer := coretransfer.NewImporter(coretransfer.ImporterDeps{
-		UserRepo:     userRepo,
-		UserListRepo: userListRepo,
-		AntennaRepo:  antennaRepo,
-		Drive:        driveReader,
-		Following:    coretransfer.NewFollowingServiceAdapter(followingService),
-		Blocking:     blockingService,
-		Muting:       mutingService,
-		Notifier:     notificationService,
-		IDGen:        idGen,
-		SelfHost:     s.config.Host,
-	})
 	exportProcessor := processors.NewExportProcessor(exporter)
 	importProcessor := processors.NewImportProcessor(importer)
 	s.queueServer.Handle(queue.TaskTypeExport, exportProcessor.Handle)
@@ -1170,12 +1111,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// relay.Service は AP delivery を必要とするので deliverService 構築の
 	// 直後でセットアップする。admin/relays ハンドラへ注入し、Accept/Reject
 	// inbox 処理で status を更新できるように processor にも渡す。
-	sysAcctSvc := coresystemaccount.NewService(userRepo, keypairRepo, systemAccountRepo, idGen)
 	// FEP-521a Multikey 対応で system account も Ed25519 鍵対を併発行 (#1067 / #1068)。
 	sysAcctSvc.SetKeypairExtraRepo(keypairExtraRepo)
-	// #1704: list に remote user を追加したとき proxy account がフォローして連合
-	// 投稿を受信できるようにする enqueuer。push / create-from-public で使う。
-	listProxyFollow := coreuserlist.NewProxyFollower(sysAcctSvc, s.queueClient)
 	relaySvc := corerelay.NewService(repository.NewRelayRepository(s.db), sysAcctSvc, apRenderer, deliverService, idGen)
 	// relay 配送 activity に RsaSignature2017 LD-Signature を付与する (#1870)。
 	// relay は downstream へ転送する際に元 HTTP-sig を保持できないので、LD-sig が
@@ -1575,7 +1512,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 本家 AggregateRetentionProcessorService と同等で、retention_aggregation
 	// テーブルに 1 日 1 行 cohort を追加し、過去 31 日分の data フィールドを
 	// 更新する。/api/retention と admin overview の「定着率」heatmap が読む。
-	retentionSvc := coreretention.NewService(userRepo, retentionRepo, idGen)
 	retentionProc := processors.NewRetentionAggregateProcessor(retentionSvc)
 	s.queueServer.Handle(queue.TaskTypeRetentionAggregate, retentionProc.Handle)
 
@@ -2006,10 +1942,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 使うため、これがないと「結果を見る」toggle が reload で揮発する。
 	noteFieldResolver.SetPollVoteLookup(pollVoteRepo)
 
-	// #1762: local note を favorite されたとき著者に myNoteFavorited1 を付与する
-	// server-side achievement infra。claim-achievement と同じ profile.achievements
-	// を更新する。
-	achievementService := coreachievement.NewService(userService, notificationService)
 	// Notes endpoints
 	notesHandler := notes.NewHandler(noteRepo, noteCreateService, noteDeleteService, noteQueryService, timelineService, reactionService, pollService, searchService, idGen)
 	notesHandler.SetPiningRepo(piningRepo)
@@ -2691,7 +2623,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	s.echo.GET("/files/:accessKey", filesHandler(driveFileRepo, driveStorage, localDriveStorage))
 
 	// Media proxy endpoint
-	proxyAllowlist := coremediaproxy.NewDBAllowlistChecker(s.db)
 	proxyService := coremediaproxy.NewService(
 		s.config.URL, s.config.UserAgent, driveStorage,
 		proxyAllowlist, s.mediaProxySecret,
@@ -3482,10 +3413,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 配線していたので Flag の経路だけ admin stream と webhook が抜けていた
 	// (#3256)。連打の絞り (#3200) も通報の出どころで変わらない。webhook は
 	// recipientRepo (無効にした通知先の除外に使う) が揃う後段で SetWebhook する。
-	// 最後の引数は buildRepos の abuseReportRepo と同じ種類だが、ゲート
-	// (TestAbuseReportNotifierIsWired) が構築の式そのものを照合するので、ここで作る
-	// (#3684)。db しか持たないので、2 つあっても動きは同じ。
-	abuseInAppNotifier := coreabuse.NewInAppNotifier(roleService, notificationService, repository.NewAbuseReportRepository(s.db))
 	abuseCreatedNotifier := coreabuse.NewCreatedNotifier(abuseInAppNotifier, roleService, stream.NewAdminStreamPublisher(streamPubSub))
 	abuseCreatedNotifier.SetBackground(s.background) // #3661: 世代の停止で待つ
 	usersHandler.SetAbuseReportCreatedNotifier(abuseCreatedNotifier)
