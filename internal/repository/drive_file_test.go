@@ -1148,3 +1148,86 @@ func TestDriveFileRepository_TypeFilterStillMatches(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, got, 1, "完全一致が効いていない")
 }
+
+// TestDriveFileRepository_IsReferencedByEmoji は、moderator の削除の拒否
+// (#3678) と孤児 cleanup の guard が同じ URL の照合 (emojiURLMatchesFile) を使うこと
+// を確かめる。絵文字の originalUrl / publicUrl のどちらかがファイルの url に
+// 一致すれば参照とみなす。webpublicUrl とは突き合わせない (理由は
+// emojiReferencesFile の doc)。moderator の側はローカルの絵文字だけを数え、
+// cleanup の側はリモートの絵文字も数える。
+func TestDriveFileRepository_IsReferencedByEmoji(t *testing.T) {
+	repo := NewDriveFileRepository(testDB)
+	emojiRepo := NewEmojiRepository(testDB)
+	user := insertTestUser(t, "u_er3678", "er3678")
+	defer cleanupUser(t, user.ID)
+
+	newFile := func(id string, owned bool) *model.DriveFile {
+		f := newTestDriveFile(id, user.ID, "md5"+id, nil)
+		if !owned {
+			f.UserID = nil
+		}
+		f.URL = "http://test/" + id + ".png"
+		wp := "http://test/" + id + "-webpublic.webp"
+		f.WebpublicURL = &wp
+		require.NoError(t, repo.Create(f))
+		t.Cleanup(func() { cleanupDriveFile(t, f.ID) })
+		return f
+	}
+	byOriginal := newFile("er3678_orig", true)
+	byPublic := newFile("er3678_pub", true)
+	byPublicOrphan := newFile("er3678_pub_orphan", false)
+	webpublicOnly := newFile("er3678_wp", true)
+	unreferenced := newFile("er3678_none", true)
+	unreferencedOrphan := newFile("er3678_none_orphan", false)
+	byRemote := newFile("er3678_remote", true)
+	byRemoteOrphan := newFile("er3678_remote_orphan", false)
+	remoteHost := "remote.example"
+
+	emojis := []*model.Emoji{
+		{ID: "er3678_e1", Name: "er3678_e1", OriginalURL: byOriginal.URL, PublicURL: "http://test/other1.png"},
+		{ID: "er3678_e2", Name: "er3678_e2", OriginalURL: "http://test/other2.png", PublicURL: byPublic.URL},
+		{ID: "er3678_e3", Name: "er3678_e3", OriginalURL: "http://test/other3.png", PublicURL: byPublicOrphan.URL},
+		{ID: "er3678_e4", Name: "er3678_e4", OriginalURL: *webpublicOnly.WebpublicURL, PublicURL: *webpublicOnly.WebpublicURL},
+		{ID: "er3678_e5", Name: "er3678_e5", Host: &remoteHost, OriginalURL: byRemote.URL, PublicURL: byRemote.URL},
+		{ID: "er3678_e6", Name: "er3678_e6", Host: &remoteHost, OriginalURL: byRemoteOrphan.URL, PublicURL: byRemoteOrphan.URL},
+	}
+	for _, e := range emojis {
+		require.NoError(t, emojiRepo.Create(e))
+		id := e.ID
+		t.Cleanup(func() { testDB.Exec(`DELETE FROM "emoji" WHERE id = ?`, id) })
+	}
+
+	for _, tc := range []struct {
+		f    *model.DriveFile
+		want bool
+	}{
+		{byOriginal, true},
+		{byPublic, true},
+		{byPublicOrphan, true},
+		{webpublicOnly, false},
+		{unreferenced, false},
+		{unreferencedOrphan, false},
+		// moderator の削除の拒否はローカルの絵文字だけを数える。
+		{byRemote, false},
+		{byRemoteOrphan, false},
+	} {
+		got, err := repo.IsReferencedByEmoji(tc.f.ID)
+		require.NoError(t, err)
+		assert.Equal(t, tc.want, got, tc.f.ID)
+	}
+	got, err := repo.IsReferencedByEmoji("er3678_missing")
+	require.NoError(t, err)
+	assert.False(t, got)
+
+	// 同じ述語なので、cleanup の判定と食い違わない。
+	orphans, err := repo.ListOrphans(1000)
+	require.NoError(t, err)
+	ids := map[string]bool{}
+	for _, o := range orphans {
+		ids[o.ID] = true
+	}
+	assert.False(t, ids[byPublicOrphan.ID], "絵文字が参照する行は孤児ではない")
+	assert.True(t, ids[unreferencedOrphan.ID])
+	// 孤児 cleanup は従来どおりリモートの絵文字も数えて、守る側に倒す。
+	assert.False(t, ids[byRemoteOrphan.ID], "リモートの絵文字が参照する行も cleanup からは守る")
+}

@@ -94,6 +94,9 @@ func (f *fakeDriveFileRepo) ListSystemFiles(_, _, _ string, _ int) ([]*model.Dri
 	return nil, nil
 }
 func (f *fakeDriveFileRepo) DeleteOrphans() (int64, error) { return 0, nil }
+func (f *fakeDriveFileRepo) IsReferencedByEmoji(_ string) (bool, error) {
+	return false, nil
+}
 func (f *fakeDriveFileRepo) ListOrphans(_ int) ([]*model.DriveFile, error) {
 	return nil, nil
 }
