@@ -17,7 +17,7 @@ import (
 // 呼ばれていること」だけ。引数まで照合するので、`driveusage.NewService(..., 0, 0)`
 // のように定数へ書き換えてキャッシュを無効化する形も落ちる。
 func TestDriveUsageProviderIsWired(t *testing.T) {
-	assertWired(t, routerGo,
+	assertWired(t, serverPkg,
 		"adminHandler.SetDriveUsageProvider(driveusage.NewService("+
 			"repository.NewDriveUsageRepository(s.db), driveusage.DefaultTTL, driveusage.DefaultTopN))",
 		"admin/drive/usage が 500 を返し、ストレージ使用量の画面が開かなくなる (#3053)")
@@ -31,7 +31,7 @@ func TestDriveUsageProviderIsWired(t *testing.T) {
 // 固定されていない。middleware を落として誰でも叩ける状態にすると、リモート
 // ホストの一覧と利用者ごとの使用量が無認証で読めることになる。
 func TestDriveUsageRouteIsRegistered(t *testing.T) {
-	assertWired(t, routerGo,
+	assertWired(t, serverPkg,
 		`api.POST("/admin/drive/usage", adminHandler.DriveUsage, `+
 			`middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:drive"))`,
 		"admin/drive/usage が 404 になる、あるいは認証段が緩む (#3053)")

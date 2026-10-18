@@ -10,9 +10,9 @@ import "testing"
 // なる (本体はブロックでは通知を止めない)。
 func TestPluginNotificationDispatcherIsWired(t *testing.T) {
 	const symptom = "プラグインが管理するアカウントへの通知・チャットが、プラグインの handler に届かない"
-	assertWired(t, routerGo,
+	assertWired(t, serverPkg,
 		"newPluginNotificationDispatcher(registeredPlugins, s.config.Plugins, s.queueClient, corepluginnotify.Deps{Users: userRepo, Mutes: mutingService, Blocks: blockingRepo})",
 		symptom+" (またはミュート・ブロックした相手のものまで届く)")
-	assertWired(t, routerGo, "notificationHook.SetCreatedObserver(d)", symptom)
-	assertWired(t, routerGo, "chatService.SetMessageObserver(d)", symptom)
+	assertWired(t, serverPkg, "notificationHook.SetCreatedObserver(d)", symptom)
+	assertWired(t, serverPkg, "chatService.SetMessageObserver(d)", symptom)
 }

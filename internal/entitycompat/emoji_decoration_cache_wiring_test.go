@@ -22,11 +22,11 @@ import (
 // と tier を定義しており、未配線で起きるのが「空配列 / 0 / 使えない」のものは
 // 意図的に載せていない (兄弟の `SetAvatarDecorationInvalidator` も同様)。
 func TestEmojiDecorationCacheIsWired(t *testing.T) {
-	assertWired(t, routerGo, "adminHandler.SetEmojiDecorationInvalidator(emojiDecorationResolver)",
+	assertWired(t, serverPkg, "adminHandler.SetEmojiDecorationInvalidator(emojiDecorationResolver)",
 		"admin の絵文字変更 (追加 / 更新 / 削除 / bulk / 申請の承認) が\n"+
 			"絵文字デコレーションのキャッシュに伝わらず、作った直後の絵文字を\n"+
 			"装着しても最大 30 秒 avatarDecorations が空で返る。")
-	assertWired(t, routerGo, "DecorationCache: emojiDecorationResolver",
+	assertWired(t, serverPkg, "DecorationCache: emojiDecorationResolver",
 		"絵文字 zip インポートがキャッシュに伝わらない。インポート直後の\n"+
 			"絵文字は装着しても出ず、置き換えで消えた絵文字は残り続ける。")
 }
@@ -223,6 +223,6 @@ func callsAny(fn *ast.FuncDecl, names map[string]bool, recv func(ast.Expr) bool)
 // 返す (upstream 2026.10.0)。第 3 引数を全ロールの集合に取り違えると、テストの
 // 単体の handler は通ったまま、本番だけ非公開ロールの ID を返す。
 func TestAvatarDecorationRoleSetsAreWired(t *testing.T) {
-	assertWired(t, routerGo, "avatardecorations.NewHandler(s.db, roleService.ExistingRoleIDSet, roleService.PublicRoleIDSet)",
+	assertWired(t, serverPkg, "avatardecorations.NewHandler(s.db, roleService.ExistingRoleIDSet, roleService.PublicRoleIDSet)",
 		"ログインしていない利用者に、非公開ロールの ID を返してしまう。")
 }

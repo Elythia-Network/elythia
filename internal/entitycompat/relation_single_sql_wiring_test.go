@@ -2,9 +2,6 @@ package entitycompat
 
 import (
 	"go/ast"
-	"go/parser"
-	"go/token"
-	"path/filepath"
 	"testing"
 )
 
@@ -12,29 +9,25 @@ import (
 // (#3608)。配線が無くても応答は同じ (表ごとに引く経路に戻る) なので、**行を
 // 消しても build もテストも通り、黙って 10 本 / 5 本に戻る**。ここで固定する。
 func TestRelationSingleStatementReadersAreWired(t *testing.T) {
-	assertWired(t, routerGo, "usersHandler.SetUserRelationReader(userRelationRepo)",
+	assertWired(t, serverPkg, "usersHandler.SetUserRelationReader(userRelationRepo)",
 		"users/show の関係が 1 文でなく 10 本の同時の問い合わせに戻る (#3608)")
-	assertWired(t, routerGo, "iHandler.SetMeUnreadFlagsReader(repository.NewMeUnreadFlagsRepository(s.db))",
+	assertWired(t, serverPkg, "iHandler.SetMeUnreadFlagsReader(repository.NewMeUnreadFlagsRepository(s.db))",
 		"/api/i の未読の真偽値が 1 文でなく 5 本の問い合わせに戻る (#3608)")
-	assertWired(t, routerGo, "userRelationRepo := repository.NewUserRelationRepository(s.db)",
+	assertWired(t, serverPkg, "userRelationRepo := repository.NewUserRelationRepository(s.db)",
 		"users/show などの関係の reader が作られない (#3608)")
 }
 
-// router.go で組み立てる userrelation.Repos は、すべて Relation を持つこと。
+// internal/server で組み立てる userrelation.Repos は、すべて Relation を持つこと。
 //
 // 1 箇所だけ Relation を書き忘れると、その経路 (blocking/create・ap/show など)
 // だけが 10 本に戻る。文字列の照合では「どれか 1 つにある」しか言えないので、
 // 複合リテラルを 1 つずつ見る。抽出が空振りして緑になるのを防ぐため、今ある
 // 3 箇所を下限として要求する。
 func TestEveryRouterRelationReposHasRelation(t *testing.T) {
-	path := filepath.Join(repoRoot(t), routerGo)
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, path, nil, 0)
-	if err != nil {
-		t.Fatalf("parse %s: %v", routerGo, err)
-	}
+	// internal/server の全ファイルを読む (#3672)。報告はファイル名と行の組で出る。
+	fset, files := parseServerFiles(t, 0)
 	found := 0
-	ast.Inspect(f, func(n ast.Node) bool {
+	inspectServerFiles(files, func(n ast.Node) bool {
 		lit, ok := n.(*ast.CompositeLit)
 		if !ok {
 			return true
@@ -65,7 +58,7 @@ func TestEveryRouterRelationReposHasRelation(t *testing.T) {
 	})
 	if found < 3 {
 		t.Fatalf("%s の userrelation.Repos の複合リテラルが %d 個しか見つからない (3 個以上あるはず)。"+
-			"書き方を変えたならこの gate も直すこと", routerGo, found)
+			"書き方を変えたならこの gate も直すこと", serverPkg, found)
 	}
 }
 

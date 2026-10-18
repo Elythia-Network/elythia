@@ -68,6 +68,6 @@ func TestBackupAdminRoutesAreGuarded(t *testing.T) {
 		assert.Contains(t, found, ep, "backupRoutesWithoutAdmin の %s は実在しない", ep)
 		assert.Contains(t, backupRoutesWithoutReauth, ep, "%s は再認証も daemon に任せる", ep)
 	}
-	assertWired(t, routerGo, "backupGuard := backupHandler.Guard()",
+	assertWired(t, serverPkg, "backupGuard := backupHandler.Guard()",
 		"admin/backup/* の再認証が無い guard になる")
 }

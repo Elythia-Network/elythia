@@ -14,10 +14,10 @@ import (
 // `internal/core/urlpreview` / `internal/core/mediaproxy` の transport_test.go が
 // 見ている。ここが見るのは router から共有の Transport を渡していることだけ。
 func TestOutboundTransportIsShared(t *testing.T) {
-	assertWired(t, routerGo,
+	assertWired(t, serverPkg,
 		"urlPreviewFetcher.SetTransport(s.outboundTransport())",
 		"URL プレビューが共有の Transport を使わず、同じ相手への接続を他の経路と使い回さなくなる (#3591)")
-	assertWired(t, routerGo,
+	assertWired(t, serverPkg,
 		"proxyService.SetTransport(s.outboundTransport())",
 		"media proxy が共有の Transport を使わず、同じ相手への接続を他の経路と使い回さなくなる (#3591)")
 }

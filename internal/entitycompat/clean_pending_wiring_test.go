@@ -52,13 +52,12 @@ func TestCleanProcessorReceivesThePendingPruner(t *testing.T) {
 		"NewCleanProcessor に %s の引数が無い (rename した?)", pendingPrunerParamType)
 
 	// (b) 呼び出し側がその位置に constructor を渡していること。
-	f, err := parser.ParseFile(fset,
-		filepath.Join("..", "server", "router.go"), nil, parser.ParseComments)
-	require.NoError(t, err)
+	// internal/server の全ファイルを読む (#3672)。
+	_, files := parseServerFiles(t, parser.ParseComments)
 
 	found := false
 	wired := false
-	ast.Inspect(f, func(n ast.Node) bool {
+	inspectServerFiles(files, func(n ast.Node) bool {
 		call, isCall := n.(*ast.CallExpr)
 		if !isCall {
 			return true
@@ -80,7 +79,7 @@ func TestCleanProcessorReceivesThePendingPruner(t *testing.T) {
 		return true
 	})
 
-	require.True(t, found, "router.go に NewCleanProcessor の呼び出しが無い (rename した?)")
+	require.True(t, found, "internal/server に NewCleanProcessor の呼び出しが無い (rename した?)")
 	assert.True(t, wired,
 		"NewCleanProcessor の %d 番目の引数に %s(...) を渡していない。"+
 			"渡さないと期限切れの登録 (メールアドレスとパスワードハッシュ) が無期限に貯まる",

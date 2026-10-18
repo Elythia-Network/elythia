@@ -13,16 +13,16 @@ import "testing"
 func TestAbuseReportNotifierIsWired(t *testing.T) {
 	// 通知欄: notifier の中身も固定する (#3200)。構築の引数を nil にしても
 	// Set 側だけ見る gate は緑のまま、NotifyNewReport が黙って no-op になる。
-	assertWired(t, routerGo, "coreabuse.NewInAppNotifier(roleService, notificationService, repository.NewAbuseReportRepository(s.db))",
+	assertWired(t, serverPkg, "coreabuse.NewInAppNotifier(roleService, notificationService, repository.NewAbuseReportRepository(s.db))",
 		"通報の通知を作る依存が欠け、通知欄に何も残らなくなる。")
-	assertWired(t, routerGo, "coreabuse.NewCreatedNotifier(abuseInAppNotifier, roleService, stream.NewAdminStreamPublisher(streamPubSub))",
+	assertWired(t, serverPkg, "coreabuse.NewCreatedNotifier(abuseInAppNotifier, roleService, stream.NewAdminStreamPublisher(streamPubSub))",
 		"通報の通知欄と admin stream (newAbuseUserReport) が出なくなる。")
-	assertWired(t, routerGo, "usersHandler.SetAbuseReportCreatedNotifier(abuseCreatedNotifier)",
+	assertWired(t, serverPkg, "usersHandler.SetAbuseReportCreatedNotifier(abuseCreatedNotifier)",
 		"ローカルの通報 (users/report-abuse) で通知が一切出なくなる。")
-	assertWired(t, routerGo, "federationProcessor.SetAbuseReportCreatedNotifier(abuseCreatedNotifier)",
+	assertWired(t, serverPkg, "federationProcessor.SetAbuseReportCreatedNotifier(abuseCreatedNotifier)",
 		"連合経由の通報 (Flag) で通知が一切出なくなる (#3256 と同じ形の穴)。")
-	assertWired(t, routerGo, "abuseCreatedNotifier.SetWebhook(webhookService, recipientRepo, coreabuse.UserLookups{Instances: instanceRepo, Emojis: emojiRepo}, idGen)",
+	assertWired(t, serverPkg, "abuseCreatedNotifier.SetWebhook(webhookService, recipientRepo, coreabuse.UserLookups{Instances: instanceRepo, Emojis: emojiRepo}, idGen)",
 		"通報の abuseReport system webhook が、ローカルでも連合経由でも出なくなる。")
-	assertWired(t, routerGo, "abuseCreatedNotifier.SetMail(miscsmtp.SubjectBodySenderFromMeta(metaRepo, s.config.ProxySMTP), recipientRepo, userRepo, metaRepo)",
+	assertWired(t, serverPkg, "abuseCreatedNotifier.SetMail(miscsmtp.SubjectBodySenderFromMeta(metaRepo, s.config.ProxySMTP), recipientRepo, userRepo, metaRepo)",
 		"通報のメールが、通知先にも meta.email にも届かなくなる (#3265)。")
 }
