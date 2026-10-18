@@ -188,7 +188,6 @@ fi
 
 # ref は利用者が渡す文字列なので、JSON は python で組み立てる
 python3 - "$out/run.json" "$base_ref" "$base_commit" "$head_ref" "$head_commit" "$scenario" "$rounds" \
-python3 - "$out/run.json" "$base_ref" "$base_commit" "$head_ref" "$head_commit" "$scenario" "$rounds" \
   "$delivery" "$delivery_notes" "$delivery_followers" \
   "$(uname -r)" "$(nproc)" "$(awk -F': ' '/^model name/ {print $2; exit}' /proc/cpuinfo)" "$(docker version -f '{{.Server.Version}}')" "$upstream" <<'PY'
 import json, sys
