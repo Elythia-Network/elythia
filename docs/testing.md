@@ -82,7 +82,7 @@ CI は **`-shuffle=3` を全 shard 共通の固定値として**回す。`on` (�
 
 **カバレッジは順序に依存しうる。** 実測で 173 パッケージ中 3 つ (`internal/core/reversi` / `internal/core/role` / `internal/testutil`) が seed によって 0.1-0.5pt 動いた。いずれも閾値まで 2pt 以上あるので現状は落ちないが、閾値ぎりぎりのパッケージを 90.0% 台で放置すると seed 変更で落ちうる。
 
-**プロセス共有の状態を張り替えるテストは必ず戻すこと。** `internal/server` の `newServer` / `New` はグローバルを 12 個 (`entity` の 7 つ: `SetMediaURLContext` / `SetAvatarDecorationLookup` / `SetCanChatLookup` / `SetUserRolesLookup` / `SetShowRemoteBadgesLookup` / `SetInstanceIconURLLookup` / `SetSilencedLookup`、加えて `notehide.SetFollowingRepo` / `coretwofactor.SetTestMode` / `meself.SetEnricher` / `password.SetCost` / `corenote.SetHookConcurrency`) 差し替える。1 度きりの起動を模したテストが戻さなかったため、後続の `avatar` / `emoji_redirect` が素の URL ではなく署名付きプロキシURL を受け取って落ちていた (5 seed すべてで失敗)。`internal/server/global_state_test.go` の `restoreProcessGlobals` を使う。`frontendutil` の loader キャッシュも同様で、fixture は `t.TempDir()` に置くので**ディレクトリが消えた後もキャッシュに内容が残る**。
+**プロセス共有の状態を張り替えるテストは必ず戻すこと。** `internal/server` の `newServer` / `New` はグローバルを 15 個 (`entity` の 8 つ、`notehide` の 2 つ、`coretwofactor.SetTestMode` / `meself.SetEnricher` / `meta.SetLocalUserCounter` / `password.SetCost` / `corenote.SetHookConcurrency`) 差し替える。一覧は `TestProcessGlobalsAreRestored` の表で、`internal/server` の非テストの `.go` 全部から `pkg.SetXxx(...)` の呼び出しを数えて突き合わせる (どのファイルで呼ぶかは見ない。#3672)。1 度きりの起動を模したテストが戻さなかったため、後続の `avatar` / `emoji_redirect` が素の URL ではなく署名付きプロキシURL を受け取って落ちていた (5 seed すべてで失敗)。`internal/server/global_state_test.go` の `restoreProcessGlobals` を使う。`frontendutil` の loader キャッシュも同様で、fixture は `t.TempDir()` に置くので**ディレクトリが消えた後もキャッシュに内容が残る**。
 
 ## DB を使うテストの分離 (#2450)
 

@@ -192,7 +192,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_xxx" ON "yyy" ("zzz");
 | ターゲット | 検出対象 |
 |---|---|
 | `make shapecheck` | レスポンス形状の drift。`make shapecheck-gen` で golden snapshot を再生成、`make shapecheck-report` でレポート出力 |
-| `make errorid-check` | error id / HTTP status / kind の drift。id gate は **router.go に inline endpoint が復活したら落とす** (#2791 で全 14 件を `internal/api` へ移設済み。closure は gate から漏れる) |
+| `make errorid-check` | error id / HTTP status / kind の drift。id gate は **`internal/server` に inline endpoint が復活したら落とす** (#2791 で全 14 件を `internal/api` へ移設済み。closure は gate から漏れる) |
 | `make limitspec-check` | ページネーションの default / max の drift |
 | `make perm-check` | router middleware の権限が Misskey 本家より緩くないか (アクセス階層 / `secure` の双方向 / OAuth scope の 3 本)。あわせて、`allowGet`のGETのrouteと`cacheSec`の`Cache-Control`の表が本家と一致するかも見る |
 | `make wiring-check` | router / server で配線しないと効かないもの (FTT のトグル、global な security header、invite の moderator bypass、プラグイン peer の本文上限 / rate limit / catchall / 専用キュー / enqueuer、Web Push の producer 配線、chart management の logger を配線時に解決する形、ドライブ使用量の集計と route (#3053)、IP 履歴の記録 3 本 (#3103)、IP からの関連アカウント検索の repository と route (#3104)、`criticalWiringCount` の実数照合) が外れていないか。判定は AST 照合なので `//` でも `/* */` でも落ちる (#2856)。**既知の限界**: `if cond { ... }` の条件付き配線、未参照の関数の中に置かれた同じ配線、`e := e.Group(...)` のようにレシーバを同名でシャドウする形は素通りする |

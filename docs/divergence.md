@@ -67,7 +67,7 @@ Elythia は Misskey TS からの drop-in 移行 (Misskey TS の DB / Redis を�
   - `TestMigrationSeed_CoversUpstream` — TypeORM `migrations` テーブルの seed 漏れ (TS 復帰時の再実行)
   - `TestMigrationIdempotency_RequiresIfExists` — DDL の `IF [NOT] EXISTS` 漏れ (drop-in で migration が dirty 停止)
   - `TestIndexNaming_NoNewUpstreamDuplicates` — upstream と同内容の index を別名で追加 (TS 製 DB で二重化)
-- **本ドキュメントの件数**: `TestDivergenceDoc_*` 7 件が CI で強制する (§1-1 の内部整合と生成物との突き合わせ、§2-1 / §2-2 の実 schema との突き合わせ、§4-1 の streaming チャンネル、§4-2 の fork tag、目次と `docs/divergence/` のファイルの突き合わせ)。ゲートは目次と、目次がリンクする領域ごとのファイルを続けて読む。**領域のファイルを足したら目次の表に行を足す** (足さないと `TestDivergenceDoc_IndexListsEveryAreaFile` が落ちる)。別途 `TestAPICompatDoc_MatchesRouter` が §1-1 の突き合わせ先 (`docs/api-compat.md`) を router.go と照合し、**錨が腐らないこと**を担保する。
+- **本ドキュメントの件数**: `TestDivergenceDoc_*` 7 件が CI で強制する (§1-1 の内部整合と生成物との突き合わせ、§2-1 / §2-2 の実 schema との突き合わせ、§4-1 の streaming チャンネル、§4-2 の fork tag、目次と `docs/divergence/` のファイルの突き合わせ)。ゲートは目次と、目次がリンクする領域ごとのファイルを続けて読む。**領域のファイルを足したら目次の表に行を足す** (足さないと `TestDivergenceDoc_IndexListsEveryAreaFile` が落ちる)。別途 `TestAPICompatDoc_MatchesRouter` が §1-1 の突き合わせ先 (`docs/api-compat.md`) を `internal/server` の非テストの `.go` 全部の登録と照合し (#3672)、**錨が腐らないこと**を担保する。
   - §1-1 は (a) 見出し・表・サマリの内部整合と、(b) **`docs/api-compat.md` (= `make apicompat` の生成物) との突き合わせ**。(a) だけでは 3 箇所が揃って同じだけ間違っている状態を通す (develop では §1-1 が 53、生成物が 49、真値が 58 だった。5 件のうち 4 件は生成物の側には載っていたので、突き合わせていれば気付けた、#2640)
   - §2-1 / §2-2 は**実 schema (migration + `golden_upstream_columns.json`) との突き合わせ**。件数だけでなく行の有無も見るので、テーブル・カラムを足して表を更新し忘れると落ちる (#2634)
   - §4-2 の fork frontend tag は冒頭サマリの件数・範囲・連番と突き合わせる。§4-2 は #3379 で凍結した記録なので、表とサマリはもう動かない

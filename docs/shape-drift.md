@@ -36,7 +36,7 @@ Misskey互換クライアント(Miria等)は、misskey-jsの型に従ってレ�
 | `internal/entitycompat/plugin_surface_test.go` | 公開プラグイン API の面 (`TestPluginSurfaceDrift`) |
 | `internal/entitycompat/plugin_doc_test.go` | `docs/plugins/authoring.md` の一覧 ↔ 公開面 golden (`TestPluginDoc_*` 5 本) |
 | `internal/entitycompat/elythiajs_endpoints_test.go` | Elythia 独自の POST のエンドポイント (`docs/api-compat.md`) ↔ `frontend/packages/elythia-js` の型と `pending-endpoints.txt` (`TestElythiaJS_EndpointsMatchRouter`、#3417) |
-| `internal/entitycompat/divergence_doc_test.go` | `docs/divergence.md` と `docs/divergence/` ↔ 実 schema / 生成物 / router.go / 目次 (`TestDivergenceDoc_*` 7 本)、`docs/api-compat.md` ↔ router.go (`TestAPICompatDoc_MatchesRouter`) |
+| `internal/entitycompat/divergence_doc_test.go` | `docs/divergence.md` と `docs/divergence/` ↔ 実 schema / 生成物 / `internal/server` の登録 / 目次 (`TestDivergenceDoc_*` 7 本)、`docs/api-compat.md` ↔ `internal/server` の登録 (`TestAPICompatDoc_MatchesRouter`) |
 | `internal/entitycompat/schema_drift_test.go` | migration の列 ↔ upstream entity (`TestSchemaDrift_CreateOnlyColumns`) |
 | `internal/entitycompat/migration_seed_test.go` | TypeORM `migrations` seed の網羅 (`TestMigrationSeed_CoversUpstream`) |
 
@@ -240,7 +240,7 @@ Misskeyのエラーは`{code, message, id}`形式で、クライアントは`cod
 
 echo wrapperはhandlerの最頻送出経路なので外すとgateが大半のrouteを素通しする(実例: これを足すと解決数が577→652に増え、未検出だったdrift 25件が露出した)。
 
-**`internal/server/router.go`のインラインendpointは0件**。#2791で全14件を`internal/api`配下へ移設したので、上のapi walkがそのまま拾う。
+**`internal/server`のインラインendpointは0件**(gateは`internal/server`の非テストの`.go`を全部読む。#3672)。#2791で全14件を`internal/api`配下へ移設したので、上のapi walkがそのまま拾う。
 
 gateは「golden と突合できた数の下限」から**「inlineが復活したら落とす」向きに反転**させた。判定に使うのは`countInlineHandlers`で、`/api` group tree配下のroute登録のうち**`handlerVar.Method`で解決できない形**を数える:
 
@@ -317,7 +317,7 @@ Misskeyは`limit: { type:'integer', minimum, maximum, default }`を宣言し、a
 
 ### 仕組み
 
-handlerは`pagination.ClampLimit(limit, def, max)`でlimitを正規化する。gateは各call siteの`def`/`max`**リテラル**を読み、`router.go`で囲むmethodをendpointに解決し、Misskey paramDefから生成したgolden(`golden_limit_specs.json`、`tools/limitspec`が生成)と突合する。L3と同様**段階的**で、`ClampLimit`へ移行済みのcall siteだけがgate対象(未移行は素通し)。
+handlerは`pagination.ClampLimit(limit, def, max)`でlimitを正規化する。gateは各call siteの`def`/`max`**リテラル**を読み、`internal/server`のrouteの登録で囲むmethodをendpointに解決し、Misskey paramDefから生成したgolden(`golden_limit_specs.json`、`tools/limitspec`が生成)と突合する。L3と同様**段階的**で、`ClampLimit`へ移行済みのcall siteだけがgate対象(未移行は素通し)。
 
 clampロジック自体(mk=clamp / Misskey=範囲外reject)は揃えない — mk側のclampの方が寛容で、揃えると既存クライアントを壊しうる。**default/max値のみ**が契約として gate される。
 
@@ -389,9 +389,9 @@ make shapecheck-gen   # golden_permissions.json / golden_secure_endpoints.json /
 
 `tools/permspec`が`allowGet: true`のendpointと`cacheSec`(`60 * 60`のような整数の積を計算した値、無ければ0)を`golden_cache_sec.json`に出し、`TestCacheSecDrift`が次を見る。
 
-- goldenの全endpointに、router.goのGETのroute(`api.GET`、またはGETを含む`api.Match`)がある
+- goldenの全endpointに、`internal/server`のGETのroute(`api.GET`、またはGETを含む`api.Match`)がある
 - `middleware.APICacheSec`がgoldenの`cacheSec`と過不足なく一致する
-- router.goが`/api`のgroupに`api.Use(middleware.APICacheControl())`を付けている
+- `internal/server`が`/api`のgroupに`api.Use(middleware.APICacheControl())`を付けている
 
 数え方: 2026.10.0では`allowGet: true`が24本で、24本とも`cacheSec`を持つ。`allowGet`の無い`cacheSec`は本家でも意味を持たないので、`tools/permspec`はそれを見つけたら形式の変化を疑って止まる。`cacheSec:`の行があるのに整数の積として読めない(`ONE_HOUR`のような識別子)ときも止まる。読めないものを0として通すと、そのendpointだけ黙って検査から外れるため。
 
@@ -480,7 +480,7 @@ upstream の endpoint 一覧を `tools/apicompat` から直接引くことはで
 
 ### `TestDivergenceDoc_StreamChannelsMatchRegistry`
 
-§4-1 のチャンネル一覧 == `router.go` の `streamRegistry.Register*` の登録名。
+§4-1 のチャンネル一覧 == `internal/server` の `streamRegistry.Register*` の登録名。
 
 **チャンネル名はソースのファイル名と違う。** upstream のソースは `chat-room.ts` だが
 wire 上の名前 (`chName`) は `chatRoom`。#2640 の初稿はファイル名をそのまま
@@ -500,7 +500,7 @@ job は本家のソースを取得しないため。doc と実装を同時に間
 
 ### `TestAPICompatDoc_MatchesRouter`
 
-`docs/api-compat.md` の endpoint 行 == `router.go` が静的登録する `/api/*`。POST と GET の
+`docs/api-compat.md` の endpoint 行 == `internal/server` が静的登録する `/api/*`。POST と GET の
 両方を見る (「endpoint を足す操作は必ず POST を伴う」は成り立たない —
 `/api/v1/instance/peers` は upstream 側も `get()` 直登録で Elythia も `api.GET` 一本)。
 
@@ -509,7 +509,7 @@ job は本家のソースを取得しないため。doc と実装を同時に間
 endpoint を足して**どちらも更新しない**と両方が古いまま緑になる (develop では
 `mk-go version: 1.1.2` / `mk-go only: 49` のまま腐っていた)。
 
-route dump には stack が要るのでテストからは呼べない。代わりに router.go の
+route dump には stack が要るのでテストからは呼べない。代わりに `internal/server` の
 `api.POST(` / `api.GET(` / `api.Match(chartMethods, ` を静的に抽出して突き合わせる。
 同梱プラグインのルート (`/api/plugin/*`) は literal で現れないので母集団から外す。
 生成物側は「`mk-go 側にしかない`」「両方に存在する」の 2 セクションだけを見る
@@ -528,7 +528,8 @@ route dump には stack が要るのでテストからは呼べない。代わ�
 
 **0 件チェックだけでは足りない** — 部分的な取りこぼしは router 側の集合が小さく
 なるだけで、生成物との差が出ずに黙って一致する。走査は `internal/server/` の
-非テスト `.go` 全体で、router.go だけを見ると別ファイルからの登録を取りこぼす。
+非テスト `.go` 全体 (`git ls-files` で列挙する。#3672) で、router.go だけを見ると
+別ファイルからの登録を取りこぼす。
 
 3 は「正当な理由でその形を使うことになったら、抽出をそちらへ拡張してから固定を
 解除する」という運用。`Static` / `File` / `RouteNotFound` も対象に含める
