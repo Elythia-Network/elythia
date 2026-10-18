@@ -1203,6 +1203,7 @@ make docker-update   # Docker Compose 構成
 make pull                  # 本体 + プラグイン
 make uds-rebuild           # フロントエンド + イメージ (docker 構成では docker-rebuild)
 make uds-restart           # 再起動 + 配信アセットの検証 (同 docker-restart)
+make uds-backup-refresh    # backup-daemon (と作ってあれば backup) の image を作り直す (UDS だけ、#3682)
 make frontend-precompress  # 事前圧縮 (.br / .gz) を足す。再起動の後でよい (#3593)
 ```
 
@@ -1212,6 +1213,8 @@ make frontend-precompress  # 事前圧縮 (.br / .gz) を足す。再起動の�
 - `uds-rebuild` と `uds-restart` を分けて流すときは、`uds-restart` の後に `make frontend-precompress` も流す。流さなくても配信は壊れないが、新しいビルドのファイルはその場の gzip のままになる
 - 圧縮の間 (8 コアで約 1 分)、ホストの CPU をほぼ全コア使う。本番のサーバーと同じホストで流すなら、負荷の低い時間に流す
 - `docker-update` は呼ばない (使うなら手で流す)
+
+`make uds-update` は、`make pull` の後の段を `make uds-deploy` として、取ってきた Makefile で動かす (段を足した版を取り込んだ回にも新しい段が走るように)。その中で、再起動と配信の検証の後に `make uds-backup-refresh` を呼ぶ (前に置くと、frontend が 404 になる時間に Go のビルドが入って延びる)。`backup-daemon` は profile にあるので `uds-build` / `uds-restart` の対象に入らず、作り直さないと古い版のまま残る (定期の検証が「このバイナリより新しい migration」で落ち続ける)。コンテナがあれば作り直し、動いていれば `--no-deps` で入れ替え、使っていなければ何もしない。失敗しても `uds-update` は失敗にしない (警告を出す)。手順と注意は [backup.md](backup.md) の「UDS」。`docker-update` は呼ばない (Docker Compose 構成は `.env` の `COMPOSE_PROFILES=backup-daemon` で `up -d` に含める)
 
 **フロントエンドのビルドは配信中のディレクトリを直接作り直す** (`packages/frontend/build.ts` が出力先を消してから作る)。ビルド開始から再起動完了までフロントエンドは 404 になる。#2885 の事故では、ビルド完了 (13:02:52) から再起動 (13:12:36) まででも **9 分 44 秒**、ビルド開始からならさらに長い窓ができた。**ビルドが失敗した場合はその窓が閉じない** — 配信物が消えたまま残るので、成功するまで直すこと。無停止で入れ替えたい場合は別ディレクトリにビルドして差し替える構成が要る。
 

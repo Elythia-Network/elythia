@@ -1,5 +1,5 @@
 .PHONY: help check gates version plugin-test frontend-check diff-check playwright-check e2e-down-all \
-	update pull pull-plugins docker-update docker-rebuild docker-restart uds-update \
+	update pull pull-plugins docker-update docker-rebuild docker-restart uds-update uds-deploy uds-backup-refresh \
 	image-up image-down image-down-v image-logs image-build \
 	build run dev clean tidy test fmt lint plugin-doc-check migrate-up migrate-down migrate-down-local migrate-create migrate-create-local \
 	plugins plugins-all plugin-dev plugin-vet \
@@ -242,10 +242,25 @@ docker-update: ## pull → ビルド → 再起動 → 検証 (Docker Compose �
 	$(MAKE) docker-rebuild
 	$(MAKE) docker-restart
 
-uds-update: ## pull → ビルド → 再起動 → 検証 → 事前圧縮 (UDS 本番構成)
+uds-update: ## pull → ビルド → 再起動 → 検証 → バックアップの image → 事前圧縮 (UDS 本番構成)
 	$(MAKE) pull
+	@# pull の後の段は、pull で取ってきた Makefile で動かす。make は動いている
+	@# レシピを読み直さないので、ここに段を並べると、段を足した版を取り込んだ回
+	@# だけ古い段のまま走る (#3682)
+	$(MAKE) uds-deploy
+
+uds-deploy: ## uds-update の pull より後 (ビルド → 再起動 → 検証 → バックアップの image → 事前圧縮)
 	$(MAKE) uds-rebuild
 	$(MAKE) uds-restart
+	@# バックアップの image の失敗は本体の反映の失敗ではない。古い版のまま残ると
+	@# 定期の検証が落ち続けるので、警告ははっきり出す (#3682)。**再起動の後に
+	@# 流す** — 前に置くと、frontend/built を消してから再起動するまでの 404 の
+	@# 時間に Go のビルドが入って延びる (事前圧縮を後ろに置くのと同じ理由)。
+	@# 新しい daemon が起動してすぐ取り始めて、本体の migration を待たせることも
+	@# 無くなる。入れ替えまでの数分は新しい本体と古い daemon が並び、その間に
+	@# 定期の検証が走ると落ちて通知が来ることがある
+	@$(MAKE) uds-backup-refresh || \
+		echo "==> 警告: バックアップの image の作り直し (make uds-backup-refresh) に失敗した。本体の反映は済んでいる。backup-daemon は古い版のままなので、原因を直して make uds-backup-refresh だけをやり直す" >&2
 	@# 圧縮の失敗は反映の失敗ではない (無ければその場で gzip する)。警告にとどめ、
 	@# uds-update の終了コードは反映の成否だけで決める。
 	@$(MAKE) frontend-precompress || \
@@ -938,6 +953,50 @@ uds-restart: uds-layout-check | $(UDS_COMPOSE) $(UDS_CONFIG) ## mkgo を再起�
 		printf "==> up -d が起動し直したので restart は省略\n"; \
 	fi
 	@./deploy/check-frontend-entry.sh $(UDS_CONFIG)
+
+# backup / backup-daemon は profile にあるので、uds-build (config --services) にも
+# uds-restart (up -d) にも入らない。入れないと本体だけが新しい版になり、
+# backup-daemon は前に手で作った版のまま、新しい migration の世代を「この
+# バイナリより新しい」として検証で落とし続ける (#3682)。
+# - backup-daemon のコンテナがあれば (止めてあっても) image を作り直す。入れ替え
+#   (up -d --no-deps) は動いているときだけ。止めてあるものは起動しない。再開は
+#   `start` ではなく `up -d --no-deps backup-daemon` で (start は古い image のまま動く)
+# - 1 回きりの backup は、image を作ってあるときだけ作り直す (使っていない
+#   運営者に image を増やさない)
+# - どちらも無い (節が無い古い compose を含む) なら何もしない。compose 自体が
+#   読めないときは落とす (「使っていない」に見せない)
+# - backup の image はプラグインを含めた Go のビルドで重いので、mkgo と同じ専用の
+#   ビルダーでビルドする (uds_with_builder。dockerd にメモリを残さない、#3477)
+# - 入れ替えは走っている取得・検証を止める (停止の猶予は compose の既定)
+uds-backup-refresh: uds-layout-check | $(UDS_COMPOSE) ## backup-daemon (と作ってあれば backup) の image を本体と同じ版に作り直す (UDS)
+	@all=$$(docker compose -f $(UDS_COMPOSE) --profile backup --profile backup-daemon config --services) || { \
+		echo "==> $(UDS_COMPOSE) を読めない" >&2; exit 1; }; \
+	services=""; running=""; \
+	if printf '%s\n' "$$all" | grep -qx backup-daemon; then \
+		ids=$$(docker compose -f $(UDS_COMPOSE) --profile backup-daemon ps -a -q backup-daemon) || { \
+			echo "==> backup-daemon のコンテナを調べられない" >&2; exit 1; }; \
+		if [ -n "$$ids" ]; then \
+			services="backup-daemon"; \
+			running=$$(docker compose -f $(UDS_COMPOSE) --profile backup-daemon ps -q backup-daemon) || { \
+				echo "==> backup-daemon が動いているかを調べられない" >&2; exit 1; }; \
+		fi; \
+	fi; \
+	if printf '%s\n' "$$all" | grep -qx backup; then \
+		img=$$(docker compose -f $(UDS_COMPOSE) --profile backup config --images backup) || { \
+			echo "==> backup の image の名前を調べられない" >&2; exit 1; }; \
+		if [ -n "$$img" ] && docker image inspect "$$img" >/dev/null 2>&1; then services="$$services backup"; fi; \
+	fi; \
+	services=$${services# }; \
+	if [ -z "$$services" ]; then \
+		echo "==> backup-daemon のコンテナも backup の image も無いので作り直さない"; exit 0; \
+	fi; \
+	echo "==> バックアップの image を作り直す: $$services"; \
+	( $(call uds_with_builder,MKGO_COMMIT=$$(git rev-parse --short HEAD 2>/dev/null) docker compose -f $(UDS_COMPOSE) --profile backup --profile backup-daemon build $$services) ) || exit 1; \
+	if [ -n "$$running" ]; then \
+		docker compose -f $(UDS_COMPOSE) --profile backup-daemon up -d --no-deps backup-daemon || exit 1; \
+	elif printf '%s\n' "$$services" | grep -q backup-daemon; then \
+		echo "==> backup-daemon は止めてあるので起動しない。再開は docker compose -f $(UDS_COMPOSE) --profile backup-daemon up -d --no-deps backup-daemon で (start だと古い image のまま動く)"; \
+	fi
 
 uds-down: | $(UDS_COMPOSE) ## UDS スタックを停止
 	docker compose -f $(UDS_COMPOSE) down

@@ -541,6 +541,15 @@ MKGO_COMMIT=$(git rev-parse --short HEAD) docker compose -f compose.uds.yaml --p
 docker compose -f compose.uds.yaml --profile backup-daemon up -d --no-deps backup-daemon
 ```
 
+初回はこの2行で起動する。**Elythiaを更新するときは`make uds-update`が作り直す**(`make uds-backup-refresh`、#3682)。`backup`と`backup-daemon`はprofileにあるので、`uds-build`と`uds-restart`の対象には入らず、作り直さないと古い版のまま、新しいmigrationの世代を検証で落とし続ける。
+
+- `backup-daemon`のコンテナがあれば(止めてあっても)imageを作り直す。入れ替え(`up -d --no-deps`)は動いているときだけ行う。**止めてある`backup-daemon`を再開するときは`start`ではなく`up -d --no-deps backup-daemon`で** — `start`は古いimageのコンテナをそのまま動かす
+- 1回きりの`backup`のimageは、作ってあるときだけ作り直す。どちらも無ければ何もしない
+- ビルドは`mkgo`と同じ専用のビルダーで行う([docker-uds.md](docker-uds.md)の「mkgoのイメージは専用のビルダーでビルドする」)
+- 本体の再起動の後に流す(前に置くと、frontendが404になる時間にGoのビルドが入って延びる)。入れ替えまでの数分は新しい本体と古い`backup-daemon`が並ぶので、その間に定期の検証が走ると落ちて通知が来ることがある。入れ替えは、そのとき走っている取得・検証を止める
+- 作り直しに失敗しても`uds-update`は失敗にせず、警告を出す(本体の反映は済んでいる)。そのときは原因を直して`make uds-backup-refresh`だけをやり直す
+- この組み込みを含む版を取り込んだ回の`make uds-update`では、まだ古い手順で走る(`make`は動いているレシピを読み直さない)ので、その回だけ`make uds-backup-refresh`を手で流す
+
 #### バイナリ直接実行
 
 [取る](#バイナリ直接実行)・[確かめる](#バイナリ直接実行-1)ときと同じく、DBのサーバーと同じ版の`pg_dump` / `initdb` / `pg_ctl` / `pg_restore`がPATHにあるホストで、リポジトリ(または`migration/`のある場所)を作業ディレクトリにして呼ぶ。
