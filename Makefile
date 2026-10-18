@@ -1265,6 +1265,7 @@ upstream-check: ## golden と本家を読むテストが UPSTREAM_MISSKEY_VERSIO
 	git diff --exit-code -- internal/entitycompat/testdata
 	$(MAKE) paramdef-gen
 	git diff --exit-code -- $(PARAMDEF_GOLDEN)
+	MK_UPSTREAM_REQUIRE=1 go test ./internal/api/paramschema/ -run 'TestGoldenMatchesPinnedUpstream|TestResponseMatchesUpstreamEndpointBase' -count=1 -v
 	MK_UPSTREAM_REQUIRE=1 go test ./internal/misc/achievement/... -run 'TestTypes_MatchUpstream' -count=1 -v
 
 # 本家のparamDef (引数のschema)のgoldenを作り直す(#3673)。本家のendpointの
