@@ -56,7 +56,7 @@ func renderMarkdown(w io.Writer, c *Comparison) error {
 		for _, p := range c.Problems {
 			fmt.Fprintf(&b, "- %s\n", cell(p))
 		}
-		renderDeliverySection(&b, c.Delivery)
+		renderDeliverySection(&b, c.Delivery, c.DeliveryMeasures, n)
 		_, err := io.WriteString(w, b.String())
 		return err
 	}
@@ -117,7 +117,7 @@ func renderMarkdown(w io.Writer, c *Comparison) error {
 			fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s |\n", cell(r.Container), measureLabel(m.Name), fmtSpread(m.Base, m.Name), fmtSpread(m.Head, m.Name), fmtDelta(m), fmtVerdict(m, n))
 		}
 	}
-	renderDeliverySection(&b, c.Delivery)
+	renderDeliverySection(&b, c.Delivery, c.DeliveryMeasures, n)
 	_, err := io.WriteString(w, b.String())
 	return err
 }
@@ -235,16 +235,35 @@ func lowerSide(m Measure, n sideNames, suffix string) string {
 	return cell(n.base) + suffix
 }
 
-func renderDeliverySection(b *strings.Builder, rounds []DeliveryRound) {
+func renderDeliverySection(b *strings.Builder, rounds []DeliveryRound, measures []Measure, n sideNames) {
 	if len(rounds) == 0 {
 		return
 	}
 	b.WriteString("\n## 配送受信\n\n`status` は配送統計の完了状態と件数の整合性を表します。`incomplete` / `invalid` の round がある比較は性能判定を行わず、比較不能にします。生の件数は診断用に残します。未確定・未着は`incomplete`、期待数0・件数の不整合・`invalid` / `contentMismatch` / `unexpected` は`invalid`です。`valid` は期待 Activity ID・Inbox・本文 digest が一致した試行、`unique` はその一意 tuple 数です。故意の不正・未到着 correctness ケースは別のテストとして期待結果を判定し、性能 run に混ぜません。\n\n")
-	b.WriteString("| side | round | status | expected | attempts | verified | pending | valid | unique | duplicates | invalid | content mismatch | unexpected pairs | unexpected attempts | missing |\n")
-	b.WriteString("|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
+	b.WriteString("| side | round | status | expected | attempts | verified | pending | valid | unique | duplicates | invalid | content mismatch | unexpected pairs | unexpected attempts | missing | throughput jobs | drain (s) | throughput (jobs/s) |\n")
+	b.WriteString("|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
 	for _, r := range rounds {
-		fmt.Fprintf(b, "| %s | %d | %s | %d | %d | %d | %d | %d | %d | %d | %d | %d | %d | %d | %d |\n",
-			cell(string(r.Side)), r.Round, cell(string(r.Status)), r.Expected, r.Attempts, r.Verified, r.Pending, r.Valid, r.Unique, r.Duplicates, r.Invalid, r.ContentMismatch, r.Unexpected, r.UnexpectedAttempts, r.Missing)
+		jobs, drain, rate := "-", "-", "-"
+		if r.ThroughputJobs != nil {
+			jobs = fmt.Sprint(*r.ThroughputJobs)
+		}
+		if r.DrainSeconds != nil {
+			drain = fmt.Sprintf("%.3f", *r.DrainSeconds)
+		}
+		if r.ThroughputJobsPerSecond != nil {
+			rate = fmt.Sprintf("%.1f", *r.ThroughputJobsPerSecond)
+		}
+		fmt.Fprintf(b, "| %s | %d | %s | %d | %d | %d | %d | %d | %d | %d | %d | %d | %d | %d | %d | %s | %s | %s |\n",
+			cell(string(r.Side)), r.Round, cell(string(r.Status)), r.Expected, r.Attempts, r.Verified, r.Pending, r.Valid, r.Unique, r.Duplicates, r.Invalid, r.ContentMismatch, r.Unexpected, r.UnexpectedAttempts, r.Missing, jobs, drain, rate)
+	}
+	if len(measures) > 0 {
+		b.WriteString("\n### Unique delivery throughput (reference only)\n\n")
+		b.WriteString("| Measure | base median [min, max] | head median [min, max] | delta | verdict |\n")
+		b.WriteString("|---|---:|---:|---:|---|\n")
+		for _, m := range measures {
+			fmt.Fprintf(b, "| %s | %s | %s | %s | %s |\n",
+				measureLabel(m.Name), fmtSpread(m.Base, m.Name), fmtSpread(m.Head, m.Name), fmtDelta(m), fmtVerdict(m, n))
+		}
 	}
 }
 
@@ -278,6 +297,8 @@ func measureLabel(name string) string {
 		return "p99 (ms)"
 	case "requests":
 		return "リクエスト数"
+	case "delivery_unique_jobs_per_sec":
+		return "unique delivery (jobs/s)"
 	case "cpu_seconds":
 		return "CPU時間 (秒)"
 	case "cpu_percent":

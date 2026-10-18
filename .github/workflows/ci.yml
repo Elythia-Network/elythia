@@ -105,7 +105,7 @@ jobs:
 
   # 各shardは並列に走るが、checkは `test-shards (N)` という名前で個別に登録される。
   # ブランチ保護が `test` という名前のcheckを要求するため、後段の `test` job が
-  # 全shardを束ねて単一の `test` checkを公開する (needs: test-shards)。
+  # 全shardと bench-helpers を束ねて単一の `test` checkを公開する。
   test-shards:
     runs-on: ubuntu-latest
 
@@ -242,13 +242,23 @@ jobs:
           path: coverage-shard-${{ matrix.shard }}.out
           if-no-files-found: ignore
 
-  # ブランチ保護が要求する `test` check を満たすためのaggregator。全shardの結果を
-  # `needs.test-shards.result` で集約し、いずれかが失敗したらこのjob自体を失敗
-  # させる。`if: always()` を付けないとshard失敗時にskipされ "test" check が
-  # 完了状態にならない。
+  # Go の test-shards では実行しない Python/Bash のベンチ補助テスト。
+  bench-helpers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Test benchmark helper contracts
+        run: python3 -m unittest discover -s tests/bench/queue/common -p 'test_*.py' -v
+
+      - name: Test A/B benchmark helper safety
+        run: bash tests/bench/ab/test_run_helpers.sh
+
+  # ブランチ保護で必要な `test` check を満たす集約 job。全 shard と bench-helpers の
+  # 結果を集約する。依存先の失敗後も実行するため `if: always()` が必要。
   test:
     runs-on: ubuntu-latest
-    needs: test-shards
+    needs: [test-shards, bench-helpers]
     if: always()
     steps:
       - name: Verify all shards passed
@@ -258,6 +268,14 @@ jobs:
             exit 1
           fi
           echo "All test shards passed"
+
+      - name: Verify benchmark helper tests passed
+        run: |
+          if [ "${{ needs.bench-helpers.result }}" != "success" ]; then
+            echo "bench-helpers result: ${{ needs.bench-helpers.result }}"
+            exit 1
+          fi
+          echo "Benchmark helper tests passed"
 
   # 同梱プラグインのテストを実行する (#2588)。
   #

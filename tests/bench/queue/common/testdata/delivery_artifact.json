@@ -1,0 +1,20 @@
+{
+  "finalized": true,
+  "expected": 2,
+  "attempts": 2,
+  "verified": 2,
+  "pending": 0,
+  "valid": 2,
+  "unique": 2,
+  "duplicates": 0,
+  "invalid": 0,
+  "contentMismatch": 0,
+  "unexpected": 0,
+  "unexpectedAttempts": 0,
+  "missing": 0,
+  "status": "incomplete",
+  "reasons": ["delivery drain timed out"],
+  "throughputJobs": null,
+  "throughputJobsPerSecond": null,
+  "drainSeconds": 0.5
+}
