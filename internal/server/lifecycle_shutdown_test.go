@@ -213,15 +213,24 @@ func TestServer_StopBackgroundSends1012AndLeavesTimeForHooks(t *testing.T) {
 // TestNew_FailedConstructionClosesItsSubscriptions checks that a server that
 // fails to build releases the Redis subscriptions setupRoutes opened. 作り直しの
 // 失敗はメンテナンスの後で繰り返すので、漏れると試すたびに増える (#3463 review M2)。
+//
+// **PubSubService はパターン (PSUBSCRIBE) で購読するので、PubSubNumPat で数える。**
+// 以前は PubSubChannels("*") で数えていたが、miniredis はパターンの購読をそこに
+// 出さないので、cleanupConstruction の Close を消しても通っていた。前提 (購読を
+// 張ってから失敗している) も、失敗させる時点のパターンの数で直接確かめる。
 func TestNew_FailedConstructionClosesItsSubscriptions(t *testing.T) {
 	db, clients, mr, cfg := constructionFixture(t)
 	restoreProcessGlobals(t)
 	var built *Server
-	_, err := newServer(cfg, db, clients, []plugin.Definition{failingRoutes()}, noopStorage, func(s *Server) { built = s })
+	patternsAtFailure := -1
+	fail := failingRoutesWith(func() { patternsAtFailure = mr.PubSubNumPat() })
+	_, err := newServer(cfg, db, clients, []plugin.Definition{fail}, noopStorage, func(s *Server) { built = s })
 	require.Error(t, err)
-	require.NotNil(t, built.internalPubSub, "前提: 購読を作る所まで進んでから失敗している")
-	assert.Eventually(t, func() bool { return len(mr.PubSubChannels("*")) == 0 },
-		5*time.Second, 20*time.Millisecond, "失敗した構築の購読が残っている: %v", mr.PubSubChannels("*"))
+	require.Positive(t, patternsAtFailure, "前提: 購読を張ってから失敗している")
+	// 待った後の数を出すため EventuallyWithT で読む (Eventually の引数は待つ前に評価される)。
+	assert.EventuallyWithT(t, func(c *assert.CollectT) {
+		assert.Zero(c, mr.PubSubNumPat(), "失敗した構築の購読が残っている")
+	}, 5*time.Second, 20*time.Millisecond)
 	// 失敗した構築の箱も閉じている (#3661)。使われない世代の goroutine を起動しない。
 	assert.False(t, built.background.Go(func(context.Context) {}), "失敗した構築の箱が閉じていない")
 }
@@ -265,10 +274,19 @@ func TestNewServer_ConstructionIsSerialized(t *testing.T) {
 
 // failingRoutes is a plugin whose Routes fails, so a construction stops
 // right after setupRoutes has opened its subscriptions.
-func failingRoutes() plugin.Definition {
+func failingRoutes() plugin.Definition { return failingRoutesWith(nil) }
+
+// failingRoutesWith is failingRoutes that calls onFail (when non-nil) just
+// before Routes fails.
+func failingRoutesWith(onFail func()) plugin.Definition {
 	return plugin.Definition{
 		Name: "fails-to-route", APIVersion: plugin.APIVersion,
-		Routes: func(plugin.Context, plugin.Router) error { return errors.New("boom") },
+		Routes: func(plugin.Context, plugin.Router) error {
+			if onFail != nil {
+				onFail()
+			}
+			return errors.New("boom")
+		},
 	}
 }
 
