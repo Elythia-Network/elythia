@@ -27,7 +27,7 @@ import (
 // 通り抜け、bypass が死んだまま緑になる。それでも `if cond { ... }` のような
 // 条件付きの配線は検出できない — ソースを読む gate 共通の限界。
 func TestInviteModeratorCheckerIsWired(t *testing.T) {
-	assertWired(t, routerGo,
+	assertWired(t, serverPkg,
 		"inviteHandler.SetModeratorChecker(roleService)",
 		"モデレーターが他人の / createdById が NULL の招待を消せなくなる (#2812)")
 }

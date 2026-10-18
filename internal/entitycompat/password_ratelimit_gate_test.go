@@ -109,7 +109,7 @@ func TestPasswordChecksAreFailureLimited(t *testing.T) {
 // guard が nil だと beginPasswordCheck は素通しにするので、配線を落としても
 // build もテストも通る。
 func TestPasswordFailureGuardIsWired(t *testing.T) {
-	assertWired(t, routerGo, "iHandler.SetPasswordFailureGuard(passwordFailureGuard)",
+	assertWired(t, serverPkg, "iHandler.SetPasswordFailureGuard(passwordFailureGuard)",
 		"現在のパスワードを照合する i/* の総当たりが無制限になる。エラーもログも出ない。")
 }
 
@@ -228,92 +228,36 @@ func packageFuncs(t *testing.T, dir string) []*funcInfo {
 	return out
 }
 
-// routeLimitedPasswordRoutes returns the router.go endpoints (without the
-// `/api/` prefix) whose handler reaches a routeLimitedVerifiers function
+// routeLimitedPasswordRoutes returns the internal/server endpoints (without
+// the `/api/` prefix) whose handler reaches a routeLimitedVerifiers function
 // through the same package.
+//
+// **handler の package は collectRoutes が型で引く (#3672)。** 組み立てを関数に
+// 切り出して handler を引数や戻り値で受け渡しても、同じ package に解決する。
+// 引けない /api の route があることは TestAPIRouteHandlersResolve が落とす。
 func routeLimitedPasswordRoutes(t *testing.T, root string) []string {
 	t.Helper()
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, filepath.Join(root, routerGo), nil, 0)
-	require.NoError(t, err)
-
-	imports := map[string]string{} // alias -> import path
-	for _, imp := range f.Imports {
-		p, _ := strconv.Unquote(imp.Path.Value)
-		name := filepath.Base(p)
-		if imp.Name != nil {
-			name = imp.Name.Name
-		}
-		imports[name] = p
-	}
-
-	// handler 変数 -> package の import path。`x := pkg.NewHandler(...)` と
-	// `x := &pkg.Handler{...}` を拾う。
-	handlerPkg := map[string]string{}
-	ast.Inspect(f, func(n ast.Node) bool {
-		as, ok := n.(*ast.AssignStmt)
-		if !ok || len(as.Lhs) != len(as.Rhs) {
-			return true
-		}
-		for i, lhs := range as.Lhs {
-			id, ok := lhs.(*ast.Ident)
-			if !ok {
-				continue
-			}
-			if p := pkgOfExpr(as.Rhs[i], imports); p != "" {
-				handlerPkg[id.Name] = p
-			}
-		}
-		return true
-	})
-
 	reaching := map[string]map[string]bool{} // import path -> method names
 	var out []string
 	resolved := 0
-	ast.Inspect(f, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok || len(call.Args) < 2 {
-			return true
+	for _, r := range serverRoutes(t) {
+		if !r.apiRoot || (r.method != "POST" && r.method != "GET") {
+			continue
 		}
-		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok || (sel.Sel.Name != "POST" && sel.Sel.Name != "GET") {
-			return true
-		}
-		if x, ok := sel.X.(*ast.Ident); !ok || x.Name != "api" {
-			return true
-		}
-		lit, ok := call.Args[0].(*ast.BasicLit)
-		if !ok || lit.Kind != token.STRING {
-			return true
-		}
-		path, err := strconv.Unquote(lit.Value)
-		if err != nil {
-			return true
-		}
-		h, ok := call.Args[1].(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		hv, ok := h.X.(*ast.Ident)
-		if !ok {
-			return true
-		}
-		pkg, ok := handlerPkg[hv.Name]
-		if !ok || !strings.HasPrefix(pkg, modulePath+"internal/api/") {
-			return true
+		if r.handler == "" || !strings.HasPrefix(r.pkg, modulePath+"internal/api/") {
+			continue
 		}
 		resolved++
-		if _, done := reaching[pkg]; !done {
-			rel := strings.TrimPrefix(pkg, modulePath)
-			reaching[pkg] = funcsReaching(packageFuncs(t, filepath.Join(root, rel)), rel)
+		if _, done := reaching[r.pkg]; !done {
+			rel := strings.TrimPrefix(r.pkg, modulePath)
+			reaching[r.pkg] = funcsReaching(packageFuncs(t, filepath.Join(root, rel)), rel)
 		}
-		if reaching[pkg][h.Sel.Name] {
-			out = append(out, strings.TrimPrefix(path, "/"))
+		if reaching[r.pkg][r.handler] {
+			out = append(out, strings.TrimPrefix(r.path, "/"))
 		}
-		return true
-	})
+	}
 	// handler 変数の解決が壊れると全 route が素通りになる。
-	require.Greater(t, resolved, 300, "router.go の handler 変数を package へ解決できていない")
+	require.Greater(t, resolved, 300, "internal/server の handler 変数を package へ解決できていない")
 	sort.Strings(out)
 	return out
 }
@@ -343,29 +287,4 @@ func funcsReaching(funcs []*funcInfo, rel string) map[string]bool {
 		}
 	}
 	return found
-}
-
-// pkgOfExpr returns the import path of `pkg.F(...)` / `&pkg.T{...}`.
-func pkgOfExpr(e ast.Expr, imports map[string]string) string {
-	if u, ok := e.(*ast.UnaryExpr); ok && u.Op == token.AND {
-		e = u.X
-	}
-	var fun ast.Expr
-	switch v := e.(type) {
-	case *ast.CallExpr:
-		fun = v.Fun
-	case *ast.CompositeLit:
-		fun = v.Type
-	default:
-		return ""
-	}
-	sel, ok := fun.(*ast.SelectorExpr)
-	if !ok {
-		return ""
-	}
-	x, ok := sel.X.(*ast.Ident)
-	if !ok {
-		return ""
-	}
-	return imports[x.Name]
 }

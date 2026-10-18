@@ -20,7 +20,7 @@ import (
 // いること」だけ。引数まで照合するので、`iplog.NewService(userIPRepo, metaRepo, 0)` の
 // ように窓を書き換える形も落ちる。
 func TestIPLogServiceIsWired(t *testing.T) {
-	assertWired(t, routerGo,
+	assertWired(t, serverPkg,
 		"iplog.NewService(userIPRepo, metaRepo, iplog.DedupeWindow)",
 		"IP 履歴が 1 件も記録されなくなり、関連アカウント検索 (#3066) の材料が消える")
 }
@@ -31,7 +31,7 @@ func TestIPLogServiceIsWired(t *testing.T) {
 // 入らなくなり、記録はサインイン時だけ = #3103 以前の密度へ戻る。エラーにも
 // 警告にもならない。
 func TestClientIPMiddlewareIsWired(t *testing.T) {
-	assertWired(t, routerGo,
+	assertWired(t, serverPkg,
 		"api.Use(middleware.RecordClientIP(ipLogService))",
 		"認証済みリクエストの IP が記録されなくなり、サインイン時の観測しか残らない (#3103)")
 }
@@ -39,7 +39,7 @@ func TestClientIPMiddlewareIsWired(t *testing.T) {
 // サインイン経路も同じサービスを通す。**未配線だと再ログイン時の観測が落ちる**
 // うえ、`enableIpLogging` を起動時に読む旧配線へ戻す変更を検出できない (#3107)。
 func TestSigninIPRecorderIsWired(t *testing.T) {
-	assertWired(t, routerGo,
+	assertWired(t, serverPkg,
 		"signinHandler.SetIPRecorder(ipLogService)",
 		"サインイン時の IP が記録されなくなる (#3103 / #3107)")
 }

@@ -16,7 +16,7 @@ import (
 // だけ。引数まで照合するので、`SetCPUConcurrency(0)` のように定数へ
 // 書き換えて設定を無視する形も落ちる。
 func TestMediaProxyConcurrencyIsWired(t *testing.T) {
-	assertWired(t, routerGo,
+	assertWired(t, serverPkg,
 		"proxyService.SetCPUConcurrency(s.config.MediaProxyConcurrency)",
 		"mediaProxyConcurrency を設定しても効かず、画像処理の枠が既定のままになる (#3032)")
 }

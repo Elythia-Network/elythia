@@ -9,7 +9,7 @@ import "testing"
 // 届き続け、エラーもログも出ない。#2762 の meta.enableFanoutTimelineDbFallback
 // と同じ「列と設定 UI はあるが読み取り経路に配線されていない」型。
 func TestNotificationPolicyResolverIsWired(t *testing.T) {
-	assertWired(t, routerGo, "notificationService.SetPolicyResolver(roleService)",
+	assertWired(t, serverPkg, "notificationService.SetPolicyResolver(roleService)",
 		"optOutNotificationTypes を設定しても通知が届き続ける。\n"+
 			"エラーもログも出ないので、設定した側からは効いているように見える。")
 }

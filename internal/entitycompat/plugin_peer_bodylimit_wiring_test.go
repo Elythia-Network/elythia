@@ -39,7 +39,7 @@ func TestPluginPeerBodyLimitIsWired(t *testing.T) {
 // KeyValueExpr も集めるので同じ形で書ける。空白は正規化されるので、gofmt の
 // 整列が変わっても落ちない (実際に変わって落ちたことがある)。
 func TestPluginPeerRateLimiterIsWired(t *testing.T) {
-	assertWired(t, routerGo,
+	assertWired(t, serverPkg,
 		"limiter: newPeerRateLimiter()",
 		"pluginPeerDeps の limiter が nil になり、peer の受け口が無制限になる")
 }
@@ -51,7 +51,7 @@ func TestPluginPeerRateLimiterIsWired(t *testing.T) {
 // 「受け口の無いプラグインへの POST が 200 + {} に戻る」ところで、症状は
 // 相手側にしか出ない (#2822)。
 func TestAPICatchallIsWired(t *testing.T) {
-	assertWired(t, routerGo,
+	assertWired(t, serverPkg,
 		`api.Any("/*", apiCatchall)`,
 		"peer の受け口が無いプラグインへの POST が 200 + {} に戻る")
 }
@@ -76,7 +76,7 @@ func TestPluginJobQueuesAreWired(t *testing.T) {
 // warn を出して捨てるので、落ちるのは「送信が全部消える」ところ。相手側にしか
 // 症状が出ないうえ、こちらのログを見ないと気付けない。
 func TestPluginPeerEnqueuerIsWired(t *testing.T) {
-	assertWired(t, routerGo,
+	assertWired(t, serverPkg,
 		"enqueuer: s.queueClient",
 		"pluginPeerDeps の enqueuer が nil になり、peer の送信が全部捨てられる")
 }

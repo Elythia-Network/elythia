@@ -12,9 +12,9 @@ import "testing"
 // TestProcess_FollowFillsAccountCreatedAtBestEffort /
 // TestAccountCreatedAtFiller_DB_MisskeyFallback が見る。
 func TestAccountCreatedAtIsWired(t *testing.T) {
-	assertWired(t, routerGo, "apRenderer.SetIDGenerator(idGen)",
+	assertWired(t, serverPkg, "apRenderer.SetIDGenerator(idGen)",
 		"こちらの actor に published (アカウントの作成日時) が載らなくなる (#3465)")
-	assertWired(t, routerGo,
+	assertWired(t, serverPkg,
 		"federationProcessor.SetAccountCreatedAtFiller(corefederation.NewAccountCreatedAtFiller(remoteStatsFetcher, instanceRepo, userRepo).Fill)",
 		"published を送らない Misskey 系の人の作成日時を、フォローを受けても取りに行かなくなる (#3465)")
 }

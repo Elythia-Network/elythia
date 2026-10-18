@@ -10,6 +10,6 @@ import "testing"
 // リアクション (SetNotificationHook は作成側と同じ配線) と連合の Undo(Announce)
 // (federationProcessor.SetNotificationHook) は既存の配線を共有する。
 func TestUndoNotificationHookIsWired(t *testing.T) {
-	assertWired(t, routerGo, "noteDeleteService.SetNotificationHook(notificationHook)",
+	assertWired(t, serverPkg, "noteDeleteService.SetNotificationHook(notificationHook)",
 		"取り消したリノートの通知が stream に残り、未読件数に数えられ続ける。")
 }

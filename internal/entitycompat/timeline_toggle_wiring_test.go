@@ -21,7 +21,7 @@ import (
 // `/* */` でも同じように落ちる (#2856)。**引数まで照合する** ので、
 // 初版の前方一致では通り抜けた `WireMetaToggles(hook, nil, nil)` も落ちる。
 func TestTimelineTogglesAreWired(t *testing.T) {
-	assertWired(t, routerGo,
+	assertWired(t, serverPkg,
 		"coretimeline.WireMetaToggles(timelineFanoutHook, timelineService, metaRepo)",
 		"FTT のトグル (enableFanoutTimeline / enableFanoutTimelineDbFallback) が "+
 			"admin から切り替えても効かなくなる (#2762)")

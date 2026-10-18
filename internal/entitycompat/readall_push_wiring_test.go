@@ -14,14 +14,18 @@ import (
 	"testing"
 )
 
-// The files whose wiring these gates pin.
-const (
-	routerGo = "internal/server/router.go"
-	serverGo = "internal/server/server.go"
-)
+// serverGo is the file whose process-wide wiring (security headers, the queue
+// driver) some gates pin. The rest of the wiring is read package-wide through
+// serverPkg.
+const serverGo = "internal/server/server.go"
 
 // wiringNodes returns normalised source text for every call, struct-literal
-// field, and assignment in the given file.
+// field, and assignment in the given file, or in every non-test source of
+// internal/server when rel is serverPkg.
+//
+// **internal/server はパッケージ全体を読む (#3672)。** 組み立てのコードを
+// 別のファイルへ移しても、配線のゲートが同じ配線を見続けるため。ファイル名を
+// 名指しする形だと、移すたびにゲートを直すことになる。
 //
 // **AST で読む理由。** 初版は行の文字列一致で「`//` で始まる行は数えない」と
 // していたが、それだと `/* ... */` で囲んだ配線が生きたものとして通る
@@ -45,17 +49,39 @@ const (
 // も素通りする — AST のテキストが同一になるため。塞ぐには型解決が要る。
 func wiringNodes(t *testing.T, rel string) map[string]bool {
 	t.Helper()
-	// 絶対パスはそのまま使う (テスト用 fixture がリポジトリ外に置かれるため)。
-	path := rel
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(repoRoot(t), rel)
+	out := make(map[string]bool)
+	if rel == serverPkg {
+		for _, s := range serverSources(t) {
+			collectWiringNodes(t, s.rel, s.src, out)
+		}
+	} else {
+		// 絶対パスはそのまま使う (テスト用 fixture がリポジトリ外に置かれるため)。
+		path := rel
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(repoRoot(t), rel)
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		collectWiringNodes(t, rel, src, out)
 	}
+	// **1 つも読めなかったら落とす。** 書式が変わって拾えなくなると、
+	// 検査していないのに緑になる。
+	if len(out) == 0 {
+		t.Fatalf("%s から配線を 1 つも読めなかった", rel)
+	}
+	return out
+}
+
+// collectWiringNodes adds the normalised wiring nodes of one file to out.
+func collectWiringNodes(t *testing.T, rel string, src []byte, out map[string]bool) {
+	t.Helper()
 	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, path, nil, 0)
+	f, err := parser.ParseFile(fset, rel, src, 0)
 	if err != nil {
 		t.Fatalf("parse %s: %v", rel, err)
 	}
-	out := make(map[string]bool)
 	render := func(n ast.Node) {
 		var buf bytes.Buffer
 		// **元の fset を渡さない。** go/printer はソースの改行位置を保存するので、
@@ -75,12 +101,6 @@ func wiringNodes(t *testing.T, rel string) map[string]bool {
 		}
 		return true
 	})
-	// **1 つも読めなかったら落とす。** 書式が変わって拾えなくなると、
-	// 検査していないのに緑になる。
-	if len(out) == 0 {
-		t.Fatalf("%s から配線を 1 つも読めなかった", rel)
-	}
-	return out
 }
 
 // normalizeWiring collapses runs of whitespace so gofmt's struct alignment and
@@ -144,7 +164,8 @@ func wiredContains(t *testing.T, rel, key string) bool {
 //
 // **ファイル名から node 集合を引く。** 集合と「どのファイルの話か」を別々に
 // 受け取る形だと、router.go を読みながら server.go の配線として緑になる
-// 組み合わせが書けてしまう (実測)。
+// 組み合わせが書けてしまう (実測)。rel は serverPkg (internal/server の全体) か、
+// serverGo のような 1 つのファイル。
 func assertWired(t *testing.T, rel, wiring, symptom string) {
 	t.Helper()
 	if !wiredContains(t, rel, normalizeWiring(wiring)) {
@@ -168,7 +189,7 @@ func assertWired(t *testing.T, rel, wiring, symptom string) {
 // **引数まで含めて照合する** — 関数名だけ見ると `SetReadAllPusher(nil)` が通り抜けて、
 // push が死んだまま緑になる。
 func TestReadAllNotificationsPusherIsWired(t *testing.T) {
-	assertWired(t, routerGo, "notificationService.SetReadAllPusher(webPushService)",
+	assertWired(t, serverPkg, "notificationService.SetReadAllPusher(webPushService)",
 		"readAllNotifications の Web Push が出なくなり、他端末に表示中の\n"+
 			"OS 通知が「すべて既読」でも閉じなくなる。エラーもログも出ない。")
 }
@@ -187,9 +208,9 @@ func TestReadAllNotificationsPusherIsWired(t *testing.T) {
 // `SetAPDelivery` が同じ repo を上書きするので消しても動いてしまい、
 // 「実は効いていない配線」に見える状態を避けるためここで固定する。
 func TestChatPusherIsWired(t *testing.T) {
-	assertWired(t, routerGo, "chatService.SetChatPusher(webPushService)",
+	assertWired(t, serverPkg, "chatService.SetChatPusher(webPushService)",
 		"チャットの Web Push が出なくなる。エラーもログも出ない")
-	assertWired(t, routerGo, "chatService.SetUserRepo(userRepo)",
+	assertWired(t, serverPkg, "chatService.SetUserRepo(userRepo)",
 		"push body の fromUser を引けず、チャットの Web Push が全滅する")
 }
 
@@ -207,7 +228,7 @@ func TestChatPusherIsWired(t *testing.T) {
 // **`internal/server` はカバレッジ 0% 例外で router のテストが薄い。** この 1 行を
 // 戻しても build もテストも通ることを実測したので、ここで固定する。
 func TestChartManagementLoggerIsResolvedAtWiring(t *testing.T) {
-	assertWired(t, routerGo, "chartMgmt.SetLogger(slog.Default().Warn)",
+	assertWired(t, serverPkg, "chartMgmt.SetLogger(slog.Default().Warn)",
 		"起動後に slog.SetDefault を呼ぶコードが入った時点で、chart の save エラーが\n"+
 			"ticker の書き込み時点の default に出るようになり、Chart 側 (構築時に固定)\n"+
 			"と食い違う。**今は起きない** — 非テストの SetDefault は internal/cli/serve と\n"+
@@ -263,7 +284,7 @@ func keysOf(m map[string]bool) []string {
 // 「誰をいつ見たか」が漏れる**。統計は付加情報なので、取れないより出すほうが
 // 悪い。
 func TestRemoteStatsGateUsesFailClosedPredicate(t *testing.T) {
-	assertWired(t, routerGo,
+	assertWired(t, serverPkg,
 		"remoteStatsFetcher.SetHostAllowedChecker(instanceService.CanFetchOptionalRemoteData)",
 		"リモート統計の取得は fail-closed な述語で配線すること。\n"+
 			"`ShouldSkipDelivery` は meta が読めないとき配送する側へ倒れるので、\n"+

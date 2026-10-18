@@ -2,9 +2,7 @@ package entitycompat
 
 import (
 	"go/ast"
-	"go/parser"
 	"go/token"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -36,10 +34,9 @@ import (
 // nil meta を据え置くことは `internal/core/captcha` の captcha_test.go が
 // 変異検証付きで固定している。ここが見るのは「2 経路とも呼んでいること」だけ。
 func TestCaptchaReloadIsWired(t *testing.T) {
-	file := filepath.Join(repoRoot(t), routerGo)
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, file, nil, 0)
-	require.NoError(t, err, "router.go を読めない")
+	// internal/server の全ファイルを読む (#3672)。組み立てのコードを別の
+	// ファイルへ移しても、同じ配線を見続ける。
+	_, files := parseServerFiles(t, 0)
 
 	var (
 		hookHasReload              bool
@@ -66,7 +63,7 @@ func TestCaptchaReloadIsWired(t *testing.T) {
 		return found
 	}
 
-	ast.Inspect(f, func(n ast.Node) bool {
+	inspectServerFiles(files, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
 			return true
@@ -120,7 +117,7 @@ func TestCaptchaReloadIsWired(t *testing.T) {
 	// **reloadCaptcha が実際に差し替えていることも見る。** 上の 2 つは「呼ばれて
 	// いること」しか見ないので、closure の中身を空振りさせる変異が素通りする
 	// (実測)。こちらは 1 箇所しか無いので集合ベースの assertWired で足りる。
-	assertWired(t, routerGo, "captchaSvc.Reload(m)",
+	assertWired(t, serverPkg, "captchaSvc.Reload(m)",
 		"reloadCaptcha が呼ばれるだけで provider 集合を差し替えていない")
 
 	// **handler へ渡していること (#3037 レビュー 2 周目)。**
@@ -132,9 +129,9 @@ func TestCaptchaReloadIsWired(t *testing.T) {
 	// 消えたことに気付く経路がどこにも無い。症状はこの gate の doc が
 	// 書いているものそのもの — **有効化したつもりのまま `/api/signup` と
 	// `/api/signin` が素通りする**。
-	assertWired(t, routerGo, "signupHandler.SetCaptcha(captchaSvc)",
+	assertWired(t, serverPkg, "signupHandler.SetCaptcha(captchaSvc)",
 		"captcha service を signup handler に渡していない (登録が captcha を検証しない)")
-	assertWired(t, routerGo, "signinHandler.SetCaptcha(captchaSvc)",
+	assertWired(t, serverPkg, "signinHandler.SetCaptcha(captchaSvc)",
 		"captcha service を signin handler に渡していない (サインインが captcha を検証しない)")
 
 	// **subscriber は先に meta の cache を落とすこと。** `reloadCaptcha` は
@@ -146,7 +143,7 @@ func TestCaptchaReloadIsWired(t *testing.T) {
 	// `captchaSvc == nil` で即 return するので、**その後 meta が読めるように
 	// なっても captcha が永久に無効**になる。この配線が塞ごうとしている状態
 	// そのもの。空の meta で作っておけば次の `metaUpdated` で provider が入る。
-	require.True(t, captchaServiceIsUnconditional(f),
+	require.True(t, captchaServiceIsUnconditional(files),
 		"captchaSvc を条件付きで作っている。起動時に meta を読めないと captcha が永久に無効になる")
 
 	require.True(t, subInvalidatesBeforeReload,
@@ -160,7 +157,7 @@ func TestCaptchaReloadIsWired(t *testing.T) {
 // **形で見るしかない。** `internal/server` は CI のカバレッジ対象外で router を
 // 組み立てるテストも無いので、nil のまま残る経路は build もテストも緑のまま
 // 起きる。
-func captchaServiceIsUnconditional(f *ast.File) bool {
+func captchaServiceIsUnconditional(files []*ast.File) bool {
 	// **`:=` の右辺が constructor そのものであることまで見る (#3037 レビュー)。**
 	//
 	// 「`:=` があって `var` が無い」だけだと、
@@ -172,7 +169,7 @@ func captchaServiceIsUnconditional(f *ast.File) bool {
 	// 巻き戻し前の特定 diff 1 形だけだった。**
 	assigned := false
 	conditional := false
-	ast.Inspect(f, func(n ast.Node) bool {
+	inspectServerFiles(files, func(n ast.Node) bool {
 		switch t := n.(type) {
 		case *ast.DeclStmt:
 			// `var captchaSvc *corecaptcha.Service` を探す。

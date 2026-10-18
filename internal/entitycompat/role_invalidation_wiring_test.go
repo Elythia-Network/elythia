@@ -2,9 +2,6 @@ package entitycompat
 
 import (
 	"go/ast"
-	"go/parser"
-	"go/token"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -32,10 +29,9 @@ import (
 // 呼ぶとそこから再び publish され、ワーカー同士が通知を投げ合って止まらなく
 // なる。
 func TestRoleInvalidationIsWired(t *testing.T) {
-	file := filepath.Join(repoRoot(t), routerGo)
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, file, nil, 0)
-	require.NoError(t, err, "router.go を読めない")
+	// internal/server の全ファイルを読む (#3672)。組み立てのコードを別の
+	// ファイルへ移しても、同じ配線を見続ける。
+	_, files := parseServerFiles(t, 0)
 
 	var (
 		sawHook        bool
@@ -84,7 +80,7 @@ func TestRoleInvalidationIsWired(t *testing.T) {
 		return found
 	}
 
-	ast.Inspect(f, func(n ast.Node) bool {
+	inspectServerFiles(files, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
 			return true

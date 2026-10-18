@@ -745,7 +745,7 @@ func findDivergenceHeading(t *testing.T, lines []string, section string) (int, b
 var apiCompatRowRe = regexp.MustCompile("^\\| (GET|POST) \\| `(/api/[^`]*)` \\|")
 
 // routerPostRe / routerMatchRe extract the statically registered `/api/*`
-// routes from router.go. `api` is the echo group mounted at `/api`.
+// routes from internal/server. `api` is the echo group mounted at `/api`.
 var (
 	routerPostRe  = regexp.MustCompile(`\bapi\.POST\("([^"]+)"`)
 	routerGetRe   = regexp.MustCompile(`\bapi\.GET\("([^"]+)"`)
@@ -758,7 +758,7 @@ var (
 )
 
 // TestAPICompatDoc_MatchesRouter asserts that the committed
-// docs/api-compat.md still describes the routes router.go registers.
+// docs/api-compat.md still describes the routes internal/server registers.
 //
 // **生成物そのものが腐ると、それを錨にしている gate も一緒に無力化する。**
 // TestDivergenceDoc_EndpointCountMatchesAPICompat は divergence/api.md (§1-1) と
@@ -767,14 +767,14 @@ var (
 // `mk-go only: 49` のまま腐っていた (#2640)。
 //
 // `make apicompat` の route dump には stack (DB / Redis) が要るのでテストからは
-// 呼べない。代わりに router.go の**静的な登録**と突き合わせる。
+// 呼べない。代わりに internal/server の**静的な登録**と突き合わせる。
 //
 // **POST と GET の両方を見る。** 「endpoint を足す操作は必ず POST を伴う」は
 // 成り立たない — `/api/v1/instance/peers` は upstream 側も fastify の
 // `get()` 直登録で、mk-go も `api.GET` 一本しか持たない。POST だけを母集団に
 // すると同種の GET-only endpoint がこの gate から見えなくなる。
 //
-// 同梱プラグインのルート (`/api/plugin/*`) は router.go に literal で現れず、
+// 同梱プラグインのルート (`/api/plugin/*`) は internal/server に literal で現れず、
 // 生成物にも (bundled のうち enabled なものだけが) 載る。母集団から外す。
 func TestAPICompatDoc_MatchesRouter(t *testing.T) {
 	blob, err := os.ReadFile(filepath.Join("..", "..", "docs", "api-compat.md"))
@@ -783,7 +783,7 @@ func TestAPICompatDoc_MatchesRouter(t *testing.T) {
 	}
 	// **セクションを見る。** 生成物は「TS 側に存在するが mk-go で未実装」も同じ
 	// 行書式で出す。全行を拾うと、upstream が endpoint を足した直後 (= 生成物が
-	// 正しい状態) に「api-compat.md にあって router.go に無い」で落ち、しかも
+	// 正しい状態) に「api-compat.md にあって internal/server に無い」で落ち、しかも
 	// 診断が逆を指す。本家の版を上げるたびに現実的に起きる。
 	doc := map[string]bool{}
 	inScope := false
@@ -803,10 +803,7 @@ func TestAPICompatDoc_MatchesRouter(t *testing.T) {
 		doc[m[1]+" "+strings.TrimPrefix(m[2], "/api")] = true
 	}
 
-	joined, err := serverPackageSource()
-	if err != nil {
-		t.Fatalf("read internal/server/*.go: %v", err)
-	}
+	joined := serverPackageSource(t)
 	router := map[string]bool{}
 	for _, m := range routerPostRe.FindAllStringSubmatch(joined, -1) {
 		router["POST "+m[1]] = true
@@ -825,7 +822,7 @@ func TestAPICompatDoc_MatchesRouter(t *testing.T) {
 		t.Fatal("docs/api-compat.md の endpoint セクションから行を 1 件も読めない (tools/apicompat の出力書式か見出しが変わった?)")
 	}
 	if len(router) == 0 {
-		t.Fatal("internal/server/router.go から api.POST/GET(...) を 1 件も読めない (登録の書き方が変わった?)")
+		t.Fatal("internal/server から api.POST/GET(...) を 1 件も読めない (登録の書き方が変わった?)")
 	}
 
 	// **0 件チェックだけでは足りない。** 部分的な取りこぼしは router 側の集合が
@@ -847,7 +844,7 @@ func TestAPICompatDoc_MatchesRouter(t *testing.T) {
 	} {
 		got, matched := len(c.loose.FindAllString(joined, -1)), len(c.strict.FindAllStringSubmatch(joined, -1))
 		if got != matched {
-			t.Fatalf(`router.go の %s は %d 件あるが、path を抽出できたのは %d 件。
+			t.Fatalf(`internal/server の %s は %d 件あるが、path を抽出できたのは %d 件。
 
 **取りこぼした分だけ gate が緩くなる。** path が literal でない (定数 / 変数経由) か、
 呼び出しが複数行に分かれている可能性がある。このテストの正規表現を実態に
@@ -881,7 +878,7 @@ func TestAPICompatDoc_MatchesRouter(t *testing.T) {
 			"group を通さず /api 配下へ直接登録すると、このテストから見えない"},
 	} {
 		if n := len(g.re.FindAllString(joined, -1)); n != g.want {
-			t.Fatalf(`router.go の %s が %d 件 (想定 %d)。
+			t.Fatalf(`internal/server の %s が %d 件 (想定 %d)。
 
 理由: %s。**そこに足した endpoint は生成物と照合されない**ので、抽出をその形に
 対応させてからこの固定を解除すること。`, g.name, n, g.want, g.why)
@@ -893,15 +890,15 @@ func TestAPICompatDoc_MatchesRouter(t *testing.T) {
 	if len(missing) == 0 && len(stale) == 0 {
 		return
 	}
-	t.Errorf(`docs/api-compat.md が internal/server/router.go と食い違っている。
+	t.Errorf(`docs/api-compat.md が internal/server の登録と食い違っている。
 
 **再生成が要る**: `+"`make apicompat`"+` (route dump に stack 起動が必要)。生成物が腐ると
 TestDivergenceDoc_EndpointCountMatchesAPICompat の錨も一緒に無力化する。
 
-router.go にあって api-compat.md に無い (%d 件、= endpoint を足したが再生成していない):
+internal/server にあって api-compat.md に無い (%d 件、= endpoint を足したが再生成していない):
   %s
 
-api-compat.md にあって router.go に無い (%d 件、= endpoint を消したか、登録の書き方が
+api-compat.md にあって internal/server に無い (%d 件、= endpoint を消したか、登録の書き方が
 regexp から外れた。後者ならこのテストの routerPostRe を直す):
   %s`,
 		len(missing), strings.Join(missing, "\n  "),
@@ -931,38 +928,23 @@ var (
 // serverPackageSource concatenates internal/server's non-test sources with
 // comments removed. **package 全体を読む** — router.go だけを見ると別
 // ファイルからの登録を取りこぼす。実際 plugin_wiring.go は `api.Group(...)` で
-// `/api` 配下を生やしている。
+// `/api` 配下を生やしている。列挙は serverSources (`git ls-files`、#3672)。
 //
 // **コメントが落ちるのは `parser.ParseFile` の mode が 0 だから。**
 // `parser.ParseComments` に変えると `printer.Fprint` が `*ast.File` の
 // `Comments` を印字するので、`/* */` で囲んだ登録が黙って復活する。
-// `TestServerPackageSourceDropsBlockComments` がそれを固定している。
-func serverPackageSource() (string, error) {
-	files, err := filepath.Glob(filepath.Join("..", "..", "internal", "server", "*.go"))
-	if err != nil {
-		return "", err
-	}
+// `TestGoSourceWithoutComments` がそれを固定している。
+func serverPackageSource(t *testing.T) string {
+	t.Helper()
 	var body []string
-	read := 0
-	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
-		}
-		src, err := os.ReadFile(f)
+	for _, f := range serverSources(t) {
+		stripped, err := goSourceWithoutComments(f.rel, f.src)
 		if err != nil {
-			return "", err
-		}
-		read++
-		stripped, perr := goSourceWithoutComments(f, src)
-		if perr != nil {
-			return "", perr
+			t.Fatalf("read internal/server/*.go: %v", err)
 		}
 		body = append(body, stripped)
 	}
-	if read == 0 {
-		return "", fmt.Errorf("internal/server/*.go を 1 ファイルも読めない")
-	}
-	return strings.Join(body, "\n"), nil
+	return strings.Join(body, "\n")
 }
 
 // goSourceWithoutComments re-prints Go source with every comment dropped.
@@ -1004,10 +986,7 @@ var docChannelRowRe = regexp.MustCompile("^\\| `([a-zA-Z]+)` \\|")
 func TestDivergenceDoc_StreamChannelsMatchRegistry(t *testing.T) {
 	// 走査は `TestAPICompatDoc_MatchesRouter` と揃えて package 全体。router.go
 	// だけを見ると別ファイルからの登録を取りこぼす。
-	joined, err := serverPackageSource()
-	if err != nil {
-		t.Fatalf("read internal/server/*.go: %v", err)
-	}
+	joined := serverPackageSource(t)
 	registry := map[string]bool{}
 	for _, m := range streamRegistryRe.FindAllStringSubmatch(joined, -1) {
 		registry[m[1]] = true

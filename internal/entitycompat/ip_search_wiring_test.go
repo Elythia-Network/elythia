@@ -2,9 +2,7 @@ package entitycompat
 
 import (
 	"go/ast"
-	"go/parser"
 	"go/token"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -20,7 +18,7 @@ import (
 // 組み立てるテストも無いため、配線を落としても build もテストも全部緑になる。
 // #2762 (`WireMetaToggles`) / #3053 と同じ形で router.go の呼び出しを固定する。
 func TestIPAccountSearchRepoIsWired(t *testing.T) {
-	assertWired(t, routerGo,
+	assertWired(t, serverPkg,
 		"adminHandler.SetIPSearchRepo(repository.NewUserIPSearchRepository(s.db))",
 		"admin/ip/accounts が 500 を返し、IP からの関連アカウント検索が使えなくなる (#3104)")
 }
@@ -39,7 +37,7 @@ func TestIPAccountSearchRepoIsWired(t *testing.T) {
 // 誰も異常に気付かない。引数まで照合するので、policy 名を別のものに差し替える
 // 形も落ちる。
 func TestIPAccountSearchRouteIsRegistered(t *testing.T) {
-	assertWired(t, routerGo,
+	assertWired(t, serverPkg,
 		`api.POST("/admin/ip/accounts", adminHandler.IPAccounts, `+
 			`middleware.RequireModerator(roleService), `+
 			`middleware.RequireRolePolicy(roleService, corerole.PolicyCanSearchIPHistory), `+
@@ -55,7 +53,7 @@ func TestIPAccountSearchRouteIsRegistered(t *testing.T) {
 // 「利用者 ↔ IP の対応」なので、認証段が片方だけ緩むと**緩いほうから同じ情報が
 // 全部引ける**。
 func TestIPRelatedAccountsRouteIsRegistered(t *testing.T) {
-	assertWired(t, routerGo,
+	assertWired(t, serverPkg,
 		`api.POST("/admin/ip/related-accounts", adminHandler.IPRelatedAccounts, `+
 			`middleware.RequireModerator(roleService), `+
 			`middleware.RequireRolePolicy(roleService, corerole.PolicyCanSearchIPHistory), `+
@@ -71,10 +69,10 @@ func TestIPRelatedAccountsRouteIsRegistered(t *testing.T) {
 // `HasIPLookupAudit()` の戻り値を見るだけなので、**配線そのものを落とす変更**は
 // ここで止める。
 func TestIPLookupAuditIsWired(t *testing.T) {
-	assertWired(t, routerGo,
+	assertWired(t, serverPkg,
 		"adminHandler.SetIPLookupAudit(iplookuplog.NewService(ipLookupLogRepo, idGen))",
 		"IP 照会が監査に残らない (照会そのものは成立するので誰も気付けない、#3106)")
-	assertWired(t, routerGo,
+	assertWired(t, serverPkg,
 		"adminHandler.SetIPLookupLogRepo(ipLookupLogRepo)",
 		"admin/ip/lookup-log が 500 を返し、監査記録を読めなくなる (#3106)")
 }
@@ -82,7 +80,7 @@ func TestIPLookupAuditIsWired(t *testing.T) {
 // **監査記録にも保持期間を掛ける。** この行が無いと記録が永久に残り、
 // `moderation_log` に IP を書くのと変わらなくなる — 専用テーブルにした意味が消える。
 func TestIPLookupLogRetentionIsWired(t *testing.T) {
-	assertWired(t, routerGo,
+	assertWired(t, serverPkg,
 		"cleanGenericProcessor.SetIPLookupLogPruner(repository.NewIPLookupLogRepository(s.db))",
 		"IP 照会の監査記録が永久に残る (照会に使った IP がそのまま入る、#3106)")
 }
@@ -92,7 +90,7 @@ func TestIPLookupLogRetentionIsWired(t *testing.T) {
 // **この応答自体が機密。** 照会に使った IP がそのまま入るので、ここが緩むと
 // 「IP を引く権限は無いが、誰がどの IP を引いたかは読める」状態になる。
 func TestIPLookupLogRouteIsRegistered(t *testing.T) {
-	assertWired(t, routerGo,
+	assertWired(t, serverPkg,
 		`api.POST("/admin/ip/lookup-log", adminHandler.IPLookupLog, `+
 			`middleware.RequireModerator(roleService), `+
 			`middleware.RequireRolePolicy(roleService, corerole.PolicyCanSearchIPHistory), `+
@@ -113,7 +111,7 @@ func TestIPLookupLogRouteIsRegistered(t *testing.T) {
 // **2 つの一覧を突き合わせるのはここだけ。**
 func TestIPLookupRoutesHaveRateLimits(t *testing.T) {
 	registered := registeredAPIPostPaths(t)
-	// router.go に登録されている path (`/api` は Echo の group が付ける)。
+	// internal/server が登録する path (`/api` は Echo の group が付ける)。
 	routes := []string{
 		"/admin/ip/accounts",
 		"/admin/ip/related-accounts",
@@ -144,17 +142,15 @@ func TestIPLookupRoutesHaveRateLimits(t *testing.T) {
 }
 
 // registeredAPIPostPaths collects the literal paths of `api.POST("...", ...)`
-// calls in router.go.
+// calls in internal/server (every non-test source, #3672).
 //
 // **コメントは数えない** (go/parser が落とす)。**1 つも拾えなかったら落とす** —
 // 書式が変わって空振りすると、検査していないのに緑になる。
 func registeredAPIPostPaths(t *testing.T) map[string]bool {
 	t.Helper()
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, filepath.Join("..", "..", routerGo), nil, 0)
-	require.NoError(t, err)
+	_, files := parseServerFiles(t, 0)
 	out := map[string]bool{}
-	ast.Inspect(f, func(n ast.Node) bool {
+	inspectServerFiles(files, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok || len(call.Args) == 0 {
 			return true
@@ -176,6 +172,6 @@ func registeredAPIPostPaths(t *testing.T) map[string]bool {
 		}
 		return true
 	})
-	require.NotEmpty(t, out, "router.go から api.POST の path を 1 つも拾えていない")
+	require.NotEmpty(t, out, "internal/server から api.POST の path を 1 つも拾えていない")
 	return out
 }

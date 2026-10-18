@@ -2,6 +2,9 @@ package entitycompat
 
 import (
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -149,6 +152,32 @@ func serverSourcePaths(t *testing.T) []string {
 		out[i] = f.abs
 	}
 	return out
+}
+
+// parseServerFiles parses every serverSources file into one FileSet.
+//
+// **FileSet を 1 つにする。** `fset.Position` がファイル名と行の組を返すので、
+// 報告がどのファイルの話かを失わない。ファイル名は repository からの相対
+// パスで登録する。
+func parseServerFiles(t *testing.T, mode parser.Mode) (*token.FileSet, []*ast.File) {
+	t.Helper()
+	fset := token.NewFileSet()
+	var files []*ast.File
+	for _, s := range serverSources(t) {
+		f, err := parser.ParseFile(fset, s.rel, s.src, mode)
+		if err != nil {
+			t.Fatalf("parse %s: %v", s.rel, err)
+		}
+		files = append(files, f)
+	}
+	return fset, files
+}
+
+// inspectServerFiles walks every file returned by parseServerFiles.
+func inspectServerFiles(files []*ast.File, fn func(ast.Node) bool) {
+	for _, f := range files {
+		ast.Inspect(f, fn)
+	}
 }
 
 // relPath returns p relative to the repository root, for diagnostics. Paths
@@ -316,5 +345,48 @@ func TestCountCriticalWiringInRejectsTwoCalls(t *testing.T) {
 	}
 	if n, err := countCriticalWiringIn([]string{"a.go"}, []string{call}); err != nil || n != 1 {
 		t.Errorf("countCriticalWiringIn = %d, %v (1 のはず)", n, err)
+	}
+}
+
+// assertWired(serverPkg, ...) と AST のゲートが、internal/server の全ファイルを
+// 読むこと (#3672)。
+//
+// **今の配線はほぼ router.go にあるので、router.go だけを読む形に戻しても
+// 配線のゲートは全部緑のまま通る。** 組み立てを別のファイルへ移した時点で
+// 初めて「配線が無い」と落ち、移した人がゲートを直すことになる。ここで
+// 各ファイルの配線と構文木が、全体の集合に入っていることを直接見る。
+func TestServerPkgReadersCoverEveryFile(t *testing.T) {
+	sources := serverSources(t)
+
+	fset, files := parseServerFiles(t, 0)
+	var parsed, listed []string
+	for _, f := range files {
+		parsed = append(parsed, fset.Position(f.Pos()).Filename)
+	}
+	for _, s := range sources {
+		listed = append(listed, s.rel)
+	}
+	if !slices.Equal(parsed, listed) {
+		t.Errorf("parseServerFiles が読んだファイル %v が、列挙 %v と違う", parsed, listed)
+	}
+
+	union := wiringNodes(t, serverPkg)
+	withNodes := 0
+	for _, s := range sources {
+		nodes := map[string]bool{}
+		collectWiringNodes(t, s.rel, s.src, nodes)
+		if len(nodes) > 0 {
+			withNodes++
+		}
+		for n := range nodes {
+			if !union[n] {
+				t.Errorf("%s の %q が wiringNodes(serverPkg) に無い", s.rel, n)
+				break
+			}
+		}
+	}
+	// 列挙が 1 ファイルに縮んでも、上の比較は自分自身と比べて通る。
+	if withNodes < 2 {
+		t.Fatalf("配線を持つファイルが %d しか無い (router.go と server.go の 2 つ以上あるはず)", withNodes)
 	}
 }
