@@ -271,20 +271,27 @@ func requireObjectBody(next echo.HandlerFunc) echo.HandlerFunc {
 }
 
 // apiRoutes is the /api group whose POST and Match registrations get
-// requireObjectBody as their last route middleware.
+// withParamShadow and requireObjectBody as their last route middleware, and
+// whose GET registrations get withParamShadow.
 type apiRoutes struct {
 	*echo.Group
 }
 
-// POST registers a POST route like echo.Group.POST, then requireObjectBody.
+// POST registers a POST route like echo.Group.POST, then withParamShadow and
+// requireObjectBody.
 func (g apiRoutes) POST(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) *echo.Route {
-	return g.Group.POST(path, h, append(m, requireObjectBody)...)
+	return g.Group.POST(path, h, append(m, withParamShadow, requireObjectBody)...)
 }
 
-// Match registers routes like echo.Group.Match, then requireObjectBody (which
-// skips GET / HEAD itself).
+// Match registers routes like echo.Group.Match, then withParamShadow and
+// requireObjectBody (which skips GET / HEAD itself).
 func (g apiRoutes) Match(methods []string, path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) []*echo.Route {
-	return g.Group.Match(methods, path, h, append(m, requireObjectBody)...)
+	return g.Group.Match(methods, path, h, append(m, withParamShadow, requireObjectBody)...)
+}
+
+// GET registers a GET route like echo.Group.GET, then withParamShadow.
+func (g apiRoutes) GET(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) *echo.Route {
+	return g.Group.GET(path, h, append(m, withParamShadow)...)
 }
 
 // isNonObjectJSON reports whether data (valid JSON) is a top-level value

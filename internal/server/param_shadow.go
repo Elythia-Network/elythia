@@ -1,0 +1,84 @@
+package server
+
+import (
+	"context"
+	"log/slog"
+	"time"
+
+	"github.com/labstack/echo/v4"
+
+	"github.com/elythia-network/elythia/internal/api/paramschema"
+	"github.com/elythia-network/elythia/internal/server/paramshadow"
+)
+
+// paramShadowContextKey is the echo.Context key under which the /api group
+// hands the param shadow validation (#3677) to withParamShadow.
+const paramShadowContextKey = "mk.server.paramShadow"
+
+// paramShadowMiddleware returns the /api group middleware that enables the
+// param shadow validation for the request, or nil when it is disabled
+// (disableParamShadow). The validation itself runs in withParamShadow, at
+// the end of the route's middleware.
+//
+// It also registers a shutdown hook that writes the counts of this server
+// generation.
+func (s *Server) paramShadowMiddleware() echo.MiddlewareFunc {
+	if s.config.DisableParamShadow {
+		slog.Info("param shadow validation disabled (disableParamShadow)")
+		return nil
+	}
+	eps, err := paramschema.Upstream()
+	if err != nil {
+		slog.Warn("param shadow validation disabled: the embedded upstream paramDefs do not load", "err", err)
+		return nil
+	}
+	for name, ep := range eps {
+		if ep.CompileErr != nil {
+			slog.Warn("param shadow validation: an upstream paramDef does not compile; its requests are counted as compile_error",
+				"endpoint", name, "err", ep.CompileErr)
+		}
+	}
+	interval := time.Duration(s.config.ParamShadowLogSeconds) * time.Second
+	rec := paramshadow.NewRecorder(slog.Default(), interval)
+	// 定期の要約は、リクエストのgoroutineではなく世代の箱(bgwork)で書く。
+	// 箱が止まった後(停止の途中)は、下のhookが最後の分を書く。
+	rec.SetAsync(func(flush func()) bool {
+		// 箱が止まり始めていたら任せない(Recordが自分で書く)。GoAsに渡すと、
+		// 捨てていないのに「捨てた」と警告し、Droppedを数えてしまう(#3677の
+		// レビュー2周目L-1)。見てからGoAsまでの間に止まり始めた場合だけは残る。
+		select {
+		case <-s.background.Stopping():
+			return false
+		default:
+		}
+		return s.background.GoAs("paramshadow summary", func(context.Context) { flush() })
+	})
+	// 停止のときに、最後の要約からの分を出す。メンテナンスで作り直す世代も
+	// それぞれが自分の分を出す。
+	s.registerShutdownHook(func(context.Context) { rec.Flush() })
+	shadow := paramshadow.Middleware(eps, rec)
+	slog.Info("param shadow validation enabled", "endpoints", len(eps), "logInterval", interval.String())
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			c.Set(paramShadowContextKey, shadow)
+			return next(c)
+		}
+	}
+}
+
+// withParamShadow runs the param shadow validation around next when the /api
+// group enabled it for the request. apiRoutes appends it after the route's
+// own middleware, so it sees the requests that passed the credential and
+// permission checks: the requests upstream hands to ajv.
+//
+// **routeのmiddlewareの末尾で走らせる。** groupのmiddlewareはrouteの認証・
+// 権限の検査より先に走るので、そこで検証すると、本家ならajvに届かない
+// リクエスト(401 / 403になるもの)まで数えてしまう。
+func withParamShadow(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		if shadow, ok := c.Get(paramShadowContextKey).(echo.MiddlewareFunc); ok {
+			return shadow(next)(c)
+		}
+		return next(c)
+	}
+}

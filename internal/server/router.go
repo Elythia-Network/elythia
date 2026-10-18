@@ -1728,6 +1728,12 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 数えたいので、その後ろに置く。kindを持つendpointではRequireScopeなどの
 	// gateが利用者を戻す。
 	api.Use(middleware.HideAppUserWithoutRead())
+	// 本家のparamDefでの検証だけを走らせ、handlerと判定が分かれた件数を数える
+	// (#3677)。応答は変えない。検証そのものはrouteのmiddlewareの末尾
+	// (withParamShadow)で走る。
+	if mw := s.paramShadowMiddleware(); mw != nil {
+		api.Use(mw)
+	}
 
 	// Meta endpoint (public)
 	metaHandler := meta.NewHandler(s.config, metaRepo)

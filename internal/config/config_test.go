@@ -1317,3 +1317,44 @@ func TestLoad_JobQueueDriver_EnvOverride(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "mkq", cfg.JobQueueDriver)
 }
+
+// 本家のparamDefでの検証だけの実行 (#3677) は既定で動き、間隔は10分。
+func TestLoad_ParamShadowDefaults(t *testing.T) {
+	path := writeTestConfig(t, testYAML)
+	cfg, err := Load(path)
+	require.NoError(t, err)
+	assert.False(t, cfg.DisableParamShadow)
+	assert.Equal(t, 600, cfg.ParamShadowLogSeconds)
+}
+
+func TestLoad_ParamShadowFromFile(t *testing.T) {
+	path := writeTestConfig(t, testYAML+`
+disableParamShadow: true
+paramShadowLogSeconds: 60
+`)
+	cfg, err := Load(path)
+	require.NoError(t, err)
+	assert.True(t, cfg.DisableParamShadow)
+	assert.Equal(t, 60, cfg.ParamShadowLogSeconds)
+}
+
+// 0以下の間隔は既定に戻す(毎リクエストで要約を出さない)。
+func TestLoad_ParamShadowNonPositiveInterval(t *testing.T) {
+	for _, v := range []string{"0", "-5"} {
+		path := writeTestConfig(t, testYAML+"paramShadowLogSeconds: "+v+"\n")
+		cfg, err := Load(path)
+		require.NoError(t, err)
+		assert.Equal(t, DefaultParamShadowLogSeconds, cfg.ParamShadowLogSeconds, v)
+	}
+}
+
+// bindEnvKeys に登録してあるので、設定ファイルに書かなくても環境変数だけで止められる。
+func TestLoad_ParamShadowFromEnv(t *testing.T) {
+	t.Setenv("MK_DISABLEPARAMSHADOW", "true")
+	t.Setenv("MK_PARAMSHADOWLOGSECONDS", "120")
+	path := writeTestConfig(t, testYAML)
+	cfg, err := Load(path)
+	require.NoError(t, err)
+	assert.True(t, cfg.DisableParamShadow)
+	assert.Equal(t, 120, cfg.ParamShadowLogSeconds)
+}
