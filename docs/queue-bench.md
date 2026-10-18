@@ -19,7 +19,7 @@
 
 #### Signed delivery fixture (optional, #3569)
 
-Signed delivery mode の計測区間は投稿 poller の起動から、投稿完了・Redis queue depth=0・receiver verified 数が expected 以上になった時点まで。Activity manifest の取得と receiver との照合は計測区間の後に行い、throughput の分子には妥当性確認済みの `unique` 件数だけを使う。重複・不正・内容不一致・予期しない配送・欠測・未確定・タイムアウトでは throughput を出さず、状態・理由と receiver の生カウントを記録する。`verified` は配送試行を含む診断値で、throughput の分子ではない。
+Signed delivery mode の計測区間は投稿 poller の起動から、投稿完了・Redis queue depth=0・receiver verified 数が expected 以上になった時点まで。Activity manifest の取得と receiver との照合は計測区間の後に行い、throughput の分子には妥当性確認済みの `unique` 件数だけを使う。不正・内容不一致・予期しない配送・欠測・未確定・タイムアウトでは throughput を出さず、状態・理由と receiver の生カウントを記録する。drain 判定後に `verified` が増えた場合も、増加分が unique / duplicate のどちらであっても区間外到着として `incomplete` にし、throughput を出さない。重複は分子に含めず、生カウントとして記録する。`verified` は配送試行を含む診断値で、throughput の分子ではない。
 
 `make queue-bench-delivery-outbound` は stack ごとの隔離 receiver を使い、既存 synthetic sender の公開鍵で HTTP 署名を検証する。計測時間の外で各 synthetic note の `/notes/{id}/activity` を取得して `(Activity ID, Inbox, canonical body SHA-256)` の期待集合を作り、receiver の到着・重複・不一致・欠測を `outbound.json` に記録する。fixture はベンチ用 Compose network 内だけに置き、公開ポートを開けない。private key の取得や実インスタンスへの接続は行わない。
 

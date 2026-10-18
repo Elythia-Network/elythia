@@ -4,7 +4,10 @@
 #   run.sh --base <ref> --head <ref> [--rounds N] [--scenario prod-like|unlimited] [--out DIR] [--smoke] [--delivery] [--delivery-notes N] [--delivery-followers N] [--project-name NAME]
 #   run.sh --upstream <version> --head <ref> [--rounds N] [--scenario prod-like|unlimited] [--out DIR] [--smoke] [--project-name NAME]
 #
-# --upstream は公式 Misskey image (#3654) と比較し、upstream 用の Compose overlay を使う。
+# --upstream は base を本家 Misskey の公式 image (misskey/misskey:<版>) にする (#3654)。
+# 本家の側の回は compose.upstream.yml を重ね、app だけを本家に替える。seed・k6 の
+# シナリオ・資源の上限・測り方は Elythia どうしの比較と同じ。版に `default` を渡すと
+# UPSTREAM_MISSKEY_VERSION の版を使う。
 # delivery fixture は Elythia の base/head 比較用で、upstream image とは実行しない。
 #
 # --smoke は seed を 10 人 × 10 ノートにし、各エンドポイントを 5 秒だけ流す。手順が
@@ -98,7 +101,7 @@ fi
 if [ -z "$upstream" ]; then
   base_commit=$(git -C "$repo" rev-parse --verify "$base_ref^{commit}")
 fi
-# Refuse to tear down a Compose project that was already in use.
+# 既に使われている Compose project は停止・削除しない。
 bench_assert_project_available "$project_name"
 head_commit=$(git -C "$repo" rev-parse --verify "$head_ref^{commit}")
 
@@ -118,7 +121,8 @@ BENCH_UID=$(id -u)
 BENCH_GID=$(id -g)
 
 work=$(mktemp -d)
-# run_one は measure の結果を command substitution で受け取るため、round/side から k6 名を再構成する。
+# 計測の k6 コンテナには、回ごとに決まった名前を付けて compose run -d で起動する。
+# measure はコマンド置換の subshell で動くため、project/round/side から名前を再構成する。
 k6_name() { bench_k6_container_name "$project_name" "$1" "$2"; }
 delivery_projects=()
 delivery_compose_files=()
@@ -127,7 +131,7 @@ delivery_cleanup_failed=0
 cleanup() {
   # 後始末の失敗で、比較の終了コード (0 / 2) を ERR trap の 1 に書き換えない
   trap - ERR
-  # Remove detached k6 runs left by interruption before tearing down their volumes.
+  # 途中で止めると、-d で起動した k6 は動き続ける。
   local r s
   for r in $(seq 1 "$rounds"); do
     for s in base head; do docker rm -f "$(k6_name "$r" "$s")" >/dev/null 2>&1 || true; done
@@ -151,6 +155,7 @@ image_of() {
   if [ -n "$upstream" ] && [ "$1" = base ]; then echo "$base_ref"; return; fi
   echo "mk-bench-ab-app:$project_name-$1-$$"
 }
+# 本家の側の回は compose.upstream.yml を重ねる
 use_side() {
   if [ -n "$upstream" ] && [ "$1" = base ]; then
     compose=("${compose_upstream[@]}")
@@ -204,6 +209,7 @@ run = {
     "runner": {"kernel": kernel, "cpus": cpus, "cpu_model": model, "docker": docker},
 }
 if upstream:
+    # benchcompare は labels があると、両側をこの名前で呼び、比 (本家 / Elythia) の節を足す
     run["labels"] = {"base": "本家", "head": "Elythia"}
 with open(path, "w") as f:
     json.dump(run, f, indent=2, ensure_ascii=False)
@@ -345,7 +351,7 @@ run_one() {
     log "round $round $side: $reason"
     "${compose[@]}" logs --no-color > "$dir/compose.log" 2>&1 || true
   fi
-  # Remove a leftover detached k6 container before Compose teardown.
+  # 途中で失敗した回の k6 が残っていると、down -v が seed の volume を消せない
   docker rm -f "$(k6_name "$round" "$side")" >/dev/null 2>&1 || true
   local delivery_reason=''
   if [ "$delivery" -eq 1 ] && [ "$completed" = true ]; then
