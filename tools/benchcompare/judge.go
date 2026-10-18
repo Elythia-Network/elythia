@@ -24,18 +24,18 @@ const (
 
 // Comparison is the whole result.
 type Comparison struct {
-	Base      Commit            `json:"base"`
-	Head      Commit            `json:"head"`
-	Scenario  string            `json:"scenario"`
-	Rounds    int               `json:"rounds"`
-	Runner    map[string]string `json:"runner,omitempty"`
-	Labels    *Labels           `json:"labels,omitempty"`
-	Valid     bool              `json:"valid"`
-	Problems  []string          `json:"problems,omitempty"`
-	Endpoints []EndpointCompare `json:"endpoints"`
-	Resources []ResourceCompare `json:"resources"`
-	Delivery  []DeliveryRound   `json:"delivery,omitempty"`
-	DeliveryMeasures []Measure  `json:"deliveryMeasures,omitempty"`
+	Base             Commit            `json:"base"`
+	Head             Commit            `json:"head"`
+	Scenario         string            `json:"scenario"`
+	Rounds           int               `json:"rounds"`
+	Runner           map[string]string `json:"runner,omitempty"`
+	Labels           *Labels           `json:"labels,omitempty"`
+	Valid            bool              `json:"valid"`
+	Problems         []string          `json:"problems,omitempty"`
+	Endpoints        []EndpointCompare `json:"endpoints"`
+	Resources        []ResourceCompare `json:"resources"`
+	Delivery         []DeliveryRound   `json:"delivery,omitempty"`
+	DeliveryMeasures []Measure         `json:"deliveryMeasures,omitempty"`
 }
 
 // DeliveryRound carries receiver counts and a data-quality status through to

@@ -65,6 +65,7 @@ bench_run_delivery_with_cleanup mk-bench-ab-safe_1-delivery-r2-head \
 [[ "${#delivery_projects[@]}" -eq 1 ]]
 
 : > "$BENCH_HELPER_TEST_LOG"
+export BENCH_HELPER_TEST_DOCKER_EXIT=0
 bench_restart_delivery_stack docker compose -p mk-bench-ab-order -f /tmp/order-compose.yml
 expected_restart_order=$(cat <<'EXPECTED'
 docker:compose -p mk-bench-ab-order -f /tmp/order-compose.yml restart --no-deps app-mkq
