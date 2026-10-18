@@ -84,6 +84,11 @@ type DriveFileRepository interface {
 	// ListRemoteCache's batched shape. See the orphanWhere const in this file
 	// for why unowned remote rows are kept.
 	ListOrphans(limit int) ([]*model.DriveFile, error)
+	// IsReferencedByEmoji reports whether a local custom emoji (host IS NULL)
+	// uses the file as its image, matching URLs the same way as the condition
+	// that keeps the file out of DeleteOrphans (emojiReferencesFile), which
+	// also counts remote emojis. False for an unknown id.
+	IsReferencedByEmoji(id string) (bool, error)
 	// ListOrphanRemoteAttachmentCandidates returns up to limit IDs of link-only
 	// remote attachments that no note references and whose ID predates
 	// cutoffID, in ascending ID order starting after afterID. The caller must
@@ -478,9 +483,11 @@ func (r *driveFileRepository) ListSystemFiles(fileType, untilID, sinceID string,
 	// リモート添付は owner 無しで保存され (#2717)、DeleteOrphanRemoteUsers
 	// (#2340) が親 user を消した行も ON DELETE SET NULL で NULL になる。
 	//
-	// **問題はラベルであって削除経路ではない。** owner 無しの行は誰も個別削除
-	// できない (drive_service.go の findOwnedFile が userId nil を無条件で弾き、
-	// admin/drive/* に per-file の削除 endpoint が無い)。ただし
+	// **問題はラベルであって削除経路ではない。** owner 無しの行を個別に削除
+	// できるのは moderator の drive/files/delete だけで、それもリモートの添付
+	// (userHost 付き) に限る。system 所有の行は moderator でも消せない
+	// (drive_service.go の Delete、#3678。admin/drive/* に per-file の削除
+	// endpoint は無い)。ただし
 	// 「emoji copy / import zip の保管先」という説明のまま**表示中の note が
 	// 参照している添付**を並べるので、運用判断の材料として誤っている。
 	//
@@ -544,11 +551,55 @@ func (r *driveFileRepository) DeleteOrphans() (int64, error) {
 // note の印が無い」ことを条件に消す。こちらの条件を
 // リモートへ広げてはいけない (admin から任意のタイミングで走るので、TTL 内の
 // ephemeral 添付を巻き込む)。
-const orphanWhere = `"userId" IS NULL AND "userHost" IS NULL AND NOT EXISTS (
+const orphanWhere = `"userId" IS NULL AND "userHost" IS NULL AND NOT ` + emojiReferencesFile
+
+// emojiReferencesFile は、絵文字がその drive_file を画像として使っている
+// ことを表す述語。孤児 cleanup の guard (orphanWhere) が使う。moderator の
+// 削除の拒否 (IsReferencedByEmoji、#3678) も、URL の照合 (emojiURLMatchesFile)
+// を**この 1 か所から共有する**。片方だけ直すと「cleanup からは守られるのに
+// moderator には消せる」行ができる。
+//
+// **`webpublicUrl` とは突き合わせない。** 本家の `admin/emoji/add` / `update` も
+// Elythia の複製の経路も、`originalUrl` には必ずファイルの `url` を入れる
+// (#722 の不変条件。本家は `publicUrl` にだけ `webpublicUrl ?? url` を入れる)
+// ので、`url` との一致で TS 版から移行した絵文字も拾える。webpublic だけを
+// 指す絵文字は cleanup からも守られない、という各所の前提 (emoji 登録の経路の
+// コメント) もこの形に依っている。
+//
+// `emoji."originalUrl"` / `"publicUrl"` にはどちらも index がある (#3383、
+// migration 000112 / 000113) ので、等値条件は BitmapOr で引ける。
+const emojiReferencesFile = `EXISTS (
 	SELECT 1 FROM "emoji" e
-	WHERE e."originalUrl" = "drive_file"."url"
-	   OR e."publicUrl"   = "drive_file"."url"
+	WHERE ` + emojiURLMatchesFile + `
 )`
+
+// emojiURLMatchesFile は、絵文字 e の URL がその drive_file の url と一致する
+// 条件。emojiReferencesFile と localEmojiReferencesFile が共有する。照合は
+// url の完全一致 (大文字小文字・query も区別する)。
+const emojiURLMatchesFile = `e."originalUrl" = "drive_file"."url"
+	   OR e."publicUrl"   = "drive_file"."url"`
+
+// localEmojiReferencesFile は emojiReferencesFile に「ローカルの絵文字」
+// (`host IS NULL`) の条件を 1 つ重ねたもの。moderator の削除の拒否
+// (IsReferencedByEmoji、#3678) だけが使う。
+//
+// **リモートの絵文字は数えない。** リモートの絵文字の URL は、受信した Emoji
+// タグの `icon.url` をそのまま入れたもので、送信元のホストと一致するかは見て
+// いない。数えると、リモートのアカウントがローカルのファイルの URL を
+// `icon.url` に入れたノートやリアクションを 1 回送るだけで、そのファイルを
+// moderator の削除から守れてしまう。孤児 cleanup の側 (orphanWhere) は
+// 守る方向に倒れるだけなので、従来どおり絞らない。
+const localEmojiReferencesFile = `EXISTS (
+	SELECT 1 FROM "emoji" e
+	WHERE e."host" IS NULL AND (` + emojiURLMatchesFile + `)
+)`
+
+func (r *driveFileRepository) IsReferencedByEmoji(id string) (bool, error) {
+	var referenced bool
+	err := r.db.Raw(`SELECT EXISTS (SELECT 1 FROM "drive_file" WHERE "drive_file"."id" = ? AND `+localEmojiReferencesFile+`)`, id).
+		Scan(&referenced).Error
+	return referenced, err
+}
 
 func (r *driveFileRepository) ListOrphans(limit int) ([]*model.DriveFile, error) {
 	if limit <= 0 {

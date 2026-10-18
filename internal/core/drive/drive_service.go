@@ -25,6 +25,7 @@ import (
 	"golang.org/x/sync/semaphore"
 	"gorm.io/datatypes"
 
+	"github.com/elythia-network/elythia/internal/core/moderationlog"
 	"github.com/elythia-network/elythia/internal/core/role"
 )
 
@@ -220,6 +221,18 @@ type RoleChecker interface {
 	GetUserPolicies(userID string) map[string]any
 }
 
+// ModerationLogger records a moderator's action on another user's file.
+// Satisfied by *core/moderationlog.Service.
+type ModerationLogger interface {
+	Log(ctx context.Context, moderatorID string, t moderationlog.LogType, info map[string]any)
+}
+
+// ModerationLogUserLookup resolves the owner of a file for the moderation
+// log entry. Satisfied by repository.UserRepository.
+type ModerationLogUserLookup interface {
+	FindByID(id string) (*model.User, error)
+}
+
 // Service manages drive files and folders.
 type Service struct {
 	fileRepo            repository.DriveFileRepository
@@ -239,9 +252,14 @@ type Service struct {
 	officialSensitiveDetector *OfficialDetector
 	// sensitiveSettingsProvider は meta を都度参照する live settings 源。
 	sensitiveSettingsProvider func() SensitiveSettings
-	// Optional moderator bypass for Show. Nil keeps the default "owner-only"
-	// guard.
+	// Optional moderator bypass for Show, and for the sensitive flag and
+	// deletion of other users' files (#3678). Nil keeps the default
+	// "owner-only" guard.
 	roleChecker RoleChecker
+	// modLog / modLogUsers は moderator が他人のファイルを操作したときの
+	// モデレーションログ (#3678)。どちらかが nil ならログを残さない。
+	modLog      ModerationLogger
+	modLogUsers ModerationLogUserLookup
 	// folderPublisher emits folderCreated/folderUpdated/folderDeleted to the
 	// drive channel (#1564)。nil disables folder events.
 	folderPublisher FolderStreamingPublisher
@@ -385,6 +403,14 @@ func (s *Service) publishFolderEvent(userID, eventType string, body any) {
 // inspect any file (matching upstream Misskey's drive/files/show behaviour).
 // Nil keeps the existing owner-only check.
 func (s *Service) SetRoleChecker(rc RoleChecker) { s.roleChecker = rc }
+
+// SetModerationLog wires the moderation log written when a moderator changes
+// the sensitive flag of, or deletes, another user's file (#3678). users
+// resolves the owner's username and host for the entry.
+func (s *Service) SetModerationLog(l ModerationLogger, users ModerationLogUserLookup) {
+	s.modLog = l
+	s.modLogUsers = users
+}
 
 // SetLocalStorage wires the always-local backend used to reach rows whose
 // `storedInternal` is true while object storage is the active backend (#1414 /
@@ -1206,12 +1232,13 @@ func processImageOnce(bp BatchImageProcessor, body []byte, mimeType string) *gen
 // drive/files/show.ts semantics so admin moderation surfaces and remote-media
 // detail views work without 403.
 //
-// 注意: write 経路 (Update / Delete) では moderator bypass を意図的に
-// 適用しない。他ユーザーの file への moderator 経由の write/delete を
-// 許してしまう privilege escalation を避けるため、それらは
-// findOwnedFile() を使って owner-only ガードする (#499)。moderator が
-// 他ユーザーの file を編集 / 削除する正規経路は admin/drive/* 側に
-// 別途存在する。
+// 注意: write 経路 (Update / Delete) の moderator bypass は限定してある
+// (findWritableFile)。moderator が他人のファイルにできるのは、センシティブの
+// 付け外しと削除だけ (#3678。system 所有のファイルは削除もできない)。名前・
+// フォルダ・説明文は所有者だけが変えられる。
+// #499 で write 経路を所有者だけに絞ったが、admin/drive/* にはセンシティブを
+// 付ける口も削除する口も無く、本家の frontend はどちらも drive/files/* を呼ぶ
+// ので、moderation の操作ができなくなっていた。
 func (s *Service) Show(user *model.User, id string) (*model.DriveFile, error) {
 	if user == nil {
 		return nil, errors.New("user is required")
@@ -1266,25 +1293,68 @@ func (s *Service) IsModerator(userID string) bool {
 	return s.roleChecker != nil && s.roleChecker.IsModerator(userID)
 }
 
-// findOwnedFile is the strict owner-only equivalent of Show, used by write
-// paths (Update / Delete). It never honours the moderator bypass so that
-// drive write/delete operations can never escalate via moderator role.
-func (s *Service) findOwnedFile(user *model.User, id string) (*model.DriveFile, error) {
+// findWritableFile loads the file for the write paths (Update / Delete).
+// The owner may write; otherwise a moderator may, and byModerator is true so
+// the caller can restrict what the moderator changes and write the
+// moderation log. Anyone else gets ErrAccessDenied.
+//
+// 本家 drive/files/update.ts / delete.ts と同じく、所有者が居ないファイル
+// (system のファイル、著者を materialize していないリモートの添付) も
+// moderator は操作できる。ただし system 所有のファイルの削除は Delete が拒む。
+func (s *Service) findWritableFile(user *model.User, id string) (f *model.DriveFile, byModerator bool, err error) {
 	if user == nil {
-		return nil, errors.New("user is required")
+		return nil, false, errors.New("user is required")
 	}
-	f, err := s.fileRepo.FindByID(id)
+	f, err = s.fileRepo.FindByID(id)
 	if err != nil {
 		// **DB 障害を not-found に丸めない** (#2799)。
 		if !repository.IsNotFound(err) {
-			return nil, err
+			return nil, false, err
 		}
-		return nil, ErrFileNotFound
+		return nil, false, ErrFileNotFound
 	}
-	if f.UserID == nil || *f.UserID != user.ID {
-		return nil, ErrAccessDenied
+	if f.UserID != nil && *f.UserID == user.ID {
+		return f, false, nil
 	}
-	return f, nil
+	if s.IsModerator(user.ID) {
+		return f, true, nil
+	}
+	return nil, false, ErrAccessDenied
+}
+
+// fileOwnerID returns the owner's id of f, or "" for a file without one.
+func fileOwnerID(f *model.DriveFile) string {
+	if f.UserID == nil {
+		return ""
+	}
+	return *f.UserID
+}
+
+// logModeratorAction writes a moderation log entry for a moderator's action
+// on another user's file. info は本家 DriveService の
+// {fileId, fileUserId, fileUserUsername, fileUserHost} と同じ形。
+func (s *Service) logModeratorAction(moderator *model.User, t moderationlog.LogType, f *model.DriveFile) {
+	if !s.HasModerationLog() {
+		return
+	}
+	info := map[string]any{
+		"fileId":           f.ID,
+		"fileUserId":       f.UserID,
+		"fileUserUsername": nil,
+		"fileUserHost":     nil,
+	}
+	if f.UserID != nil {
+		// 本家は findOneByOrFail で引き、引けなければ例外になる。ここでは操作は
+		// 済んでいるので、名前が引けなくてもログ自体は残す。
+		owner, err := s.modLogUsers.FindByID(*f.UserID)
+		if err != nil {
+			slog.Warn("drive: moderation log owner lookup failed", "fileId", f.ID, "err", err)
+		} else {
+			info["fileUserUsername"] = owner.Username
+			info["fileUserHost"] = owner.Host
+		}
+	}
+	s.modLog.Log(context.Background(), moderator.ID, t, info)
 }
 
 // FindByHash returns every file of the user with the given md5 hash.
@@ -1322,21 +1392,29 @@ type UpdateInput struct {
 	IsSensitive *bool
 }
 
-// Update applies the non-nil fields to a drive file owned by the user.
-// Owner-only: moderator が他ユーザーの file を編集できないよう
-// findOwnedFile() を使う (#499)。
+// Update applies the non-nil fields to a drive file. The owner may change
+// every field. A moderator may change only IsSensitive of another user's
+// file; any other field returns ErrAccessDenied (#3678).
 //
-// upstream drive/files/update.ts は `!isModerator && file.userId !== me.id` の
-// ときのみ ACCESS_DENIED とし、moderator は他人の file を編集できる (markSensitive
-// の moderationLog も残す)。mk-go はこの moderator write bypass を**意図的に
-// 排除**している (#499 で privilege-escalation として hardening 済)。moderator が
-// 他ユーザーの file を moderation する正規経路は /admin/drive/* で、本 endpoint は
-// owner-only を維持する。これは upstream からの deliberate deviation (#1948-16)。
+// 本家 drive/files/update.ts は `!isModerator && file.userId !== me.id` の
+// ときだけ ACCESS_DENIED とし、moderator は他人のファイルの名前・フォルダ・
+// 説明文も変えられる。Elythia は moderator にセンシティブの付け外しだけを
+// 許す。モデレーションに要らない書き換えの権限を閉じるため
+// (docs/divergence/security.md §6)。#499 で write 経路を所有者だけに絞り、
+// #1948-16 でそれを本家との差として記録したが、センシティブの付け外しまで
+// 閉じてしまっていたので #3678 で戻した。
 func (s *Service) Update(user *model.User, id string, in UpdateInput) (*model.DriveFile, error) {
-	f, err := s.findOwnedFile(user, id)
+	f, byModerator, err := s.findWritableFile(user, id)
 	if err != nil {
 		return nil, err
 	}
+	if byModerator && (in.Name != nil || in.Comment != nil || in.FolderID != nil) {
+		return nil, ErrAccessDenied
+	}
+	// mock の repository は保持している行をそのまま書き換えるので、比べる値は
+	// 更新の前に取っておく。
+	wasSensitive := f.IsSensitive
+	ownerID := fileOwnerID(f)
 	fields := map[string]any{}
 	if in.Name != nil {
 		// upstream DriveService.updateFile は values.name に validateFileName
@@ -1363,27 +1441,29 @@ func (s *Service) Update(user *model.User, id string, in UpdateInput) (*model.Dr
 				}
 				return nil, ErrFolderNotFound
 			}
-			if folder.UserID == nil || *folder.UserID != user.ID {
+			if folder.UserID == nil || *folder.UserID != ownerID {
 				return nil, ErrFolderNotFound
 			}
 		}
 		fields["folderId"] = *in.FolderID
 	}
 	if in.IsSensitive != nil {
-		// alwaysMarkNsfw role policy が true の user は isSensitive を false
-		// に変更できない (upstream DriveService.updateFile と同 logic、#1028)。
-		// 自分自身の policy なので file.userId == user.ID 前提で role を見る。
+		// alwaysMarkNsfw role policy が true の user のファイルは isSensitive を
+		// false に変更できない (upstream DriveService.updateFile と同 logic、#1028)。
 		//
-		// moderator bypass はしない (= 上の findOwnedFile() が moderator にも
-		// owner-only を強制する設計と整合)。admin が自分にも alwaysMarkNsfw を
-		// 持つ場合、自分の file も例外なく sensitive 維持する (= self-restriction、
-		// upstream は file.userId 起点で policies を見る semantics で同挙動)。
-		// 「自分の role を override したい admin は role 編集経由で剥がす」が
-		// 公式の脱出経路。i/update の admin bypass とは目的が異なる: i/update
-		// は profile field 設定の意思表明への gate、drive Update は実 file 属性
-		// の操作。
-		if !*in.IsSensitive && f.IsSensitive && s.roleChecker != nil {
-			policies := s.roleChecker.GetUserPolicies(user.ID)
+		// 見るのは操作した人ではなく**ファイルの所有者**の policy (本家も
+		// file.userId で引く、#3678)。moderator が他人のファイルを外そうとしても、
+		// 所有者が alwaysMarkNsfw なら RESTRICTED_BY_ROLE になる。所有者の
+		// 居ないファイルは本家の getUserPolicies(null) と同じく base の policy
+		// (GetUserPolicies("")) で判定する。
+		//
+		// 所有者が admin で自分にも alwaysMarkNsfw を持つ場合も例外にしない
+		// (= self-restriction)。「自分の role を override したい admin は role
+		// 編集経由で剥がす」が公式の脱出経路。i/update の admin bypass とは目的が
+		// 異なる: i/update は profile field 設定の意思表明への gate、drive Update
+		// は実 file 属性の操作。
+		if !*in.IsSensitive && wasSensitive && s.roleChecker != nil {
+			policies := s.roleChecker.GetUserPolicies(ownerID)
 			if policies != nil {
 				if v, ok := policies["alwaysMarkNsfw"].(bool); ok && v {
 					return nil, ErrCannotUnmarkSensitive
@@ -1399,17 +1479,59 @@ func (s *Service) Update(user *model.User, id string, in UpdateInput) (*model.Dr
 	if err != nil {
 		return nil, err
 	}
-	s.publishEvent(user.ID, "fileUpdated", entity.PackDriveFileSelf(updated, s.idGen))
+	// イベントは操作した人ではなく所有者の drive stream へ送る (本家
+	// publishDriveStream(file.userId, ...))。所有者が居なければ送らない。
+	s.publishEvent(ownerID, "fileUpdated", entity.PackDriveFileSelf(updated, s.idGen))
+	// 本家と同じく、値が実際に変わったときだけ残す。
+	if byModerator && in.IsSensitive != nil && *in.IsSensitive != wasSensitive {
+		t := moderationlog.LogUnmarkSensitiveDriveFile
+		if *in.IsSensitive {
+			t = moderationlog.LogMarkSensitiveDriveFile
+		}
+		s.logModeratorAction(user, t, f)
+	}
 	return updated, nil
 }
 
-// Delete removes a file from storage and the database.
-// Owner-only: moderator が他ユーザーの file を削除できないよう
-// findOwnedFile() を使う (#499)。
+// Delete removes a file from storage and the database. The owner or a
+// moderator may delete it; a moderator deleting another user's file leaves a
+// deleteDriveFile moderation log entry (#3678). A moderator cannot delete,
+// even here, a system-owned file (IsSystemOwned) or a file a custom emoji
+// uses as its image; the owner still can delete their own file.
 func (s *Service) Delete(user *model.User, id string) error {
-	f, err := s.findOwnedFile(user, id)
+	f, byModerator, err := s.findWritableFile(user, id)
 	if err != nil {
 		return err
+	}
+	// **system 所有のファイルは moderator でも消させない (#3678)。** 本家は
+	// moderator なら消せる。system 所有のファイルは、絵文字の画像 (#2999 /
+	// #3014 / #2966 / #670 で複製したもの) などで、どの利用者の
+	// drive 操作でも壊れないことを前提にしている。所有者の居ないリモートの添付
+	// (userHost 付き) は system 所有ではないので、本家と同じく消せる。
+	// センシティブの付け外しは system 所有でも許す (Update は見ない)。
+	// 所有者の経路に system 所有のファイルは来ないので、byModerator は見ない。
+	if IsSystemOwned(f) {
+		return ErrAccessDenied
+	}
+	// **絵文字が画像として使っているファイルも、moderator には消させない
+	// (#3678)。** system 所有でなくても、TS 版から移行した絵文字・#2999 /
+	// #3014 より前に登録した絵文字・`admin/emoji/add` の `url` 直接指定は、
+	// 利用者 (多くは管理者やモデレーター) のファイルを指したまま残っている。
+	// それを絵文字の管理権限を持たない moderator がここから消すと、絵文字の
+	// 画像が 404 になる。絵文字は絵文字の管理から消す。数えるのはローカルの
+	// 絵文字だけで、URL の照合は孤児 cleanup の guard と同じ (repository の
+	// IsReferencedByEmoji)。リモートの絵文字を数えると、リモートのアカウントが
+	// Emoji タグの icon.url にこちらのファイルの URL を入れるだけで、そのファイルを
+	// moderator の削除から守れてしまう。所有者本人の削除は今までどおり止めない
+	// (本人が消せば壊れるのは #3678 より前から同じ)。
+	if byModerator {
+		referenced, err := s.fileRepo.IsReferencedByEmoji(f.ID)
+		if err != nil {
+			return err
+		}
+		if referenced {
+			return ErrAccessDenied
+		}
 	}
 	if err := s.deleteFileObjects(f); err != nil {
 		return err
@@ -1417,10 +1539,14 @@ func (s *Service) Delete(user *model.User, id string) error {
 	if err := s.fileRepo.Delete(f); err != nil {
 		return err
 	}
-	// upstream は fileDeleted に file.id (文字列) だけを送る (#2002)。
-	s.publishEvent(user.ID, "fileDeleted", f.ID)
+	// upstream は fileDeleted に file.id (文字列) だけを、所有者の drive stream
+	// へ送る (#2002)。
+	s.publishEvent(fileOwnerID(f), "fileDeleted", f.ID)
 	if s.chartHook != nil {
 		s.chartHook.OnFileDeleted(f)
+	}
+	if byModerator {
+		s.logModeratorAction(user, moderationlog.LogDeleteDriveFile, f)
 	}
 	return nil
 }
@@ -1428,7 +1554,7 @@ func (s *Service) Delete(user *model.User, id string) error {
 // DeleteSystemFile removes a system-owned file (userId IS NULL) by id (#2966).
 //
 // **所有者チェックを通せないので別の口にする。** `Delete` は
-// `findOwnedFile` が user を要求するが、絵文字の実体として作るファイルは
+// `findWritableFile` が user を要求するが、絵文字の実体として作るファイルは
 // 誰のものでもない。代わりに**「利用者のファイルではないこと」を確かめる** —
 // id を取り違えたときに利用者のファイルを消さないため。
 //
@@ -1756,3 +1882,7 @@ func normalizeMimePatterns(raw any) []string {
 // **1 つの nil で 4 つの制限が同時に外れる** — MIME 許可リスト、NSFW 強制、
 // ファイルサイズ上限、容量上限。起動時検査に使う (#2683)。
 func (s *Service) HasRoleChecker() bool { return s.roleChecker != nil }
+
+// HasModerationLog reports whether SetModerationLog received both
+// dependencies.
+func (s *Service) HasModerationLog() bool { return s.modLog != nil && s.modLogUsers != nil }

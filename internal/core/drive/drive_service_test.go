@@ -335,9 +335,9 @@ func TestUpdate_NotFound(t *testing.T) {
 	require.ErrorIs(t, err, drive.ErrFileNotFound)
 }
 
-// moderator は他ユーザーの file を Update できない (#499 privilege
-// escalation 回帰防止)。Show() は moderator bypass を許す一方で、
-// write 経路は owner-only に保たれていることを保証する。
+// moderator でも他ユーザーの file の名前は変えられない (#499 / #3678)。
+// moderator に許すのはセンシティブの付け外しと削除だけ。残りの組み合わせは
+// moderator_write_test.go にある。
 func TestUpdate_ModeratorCannotEditOthersFile(t *testing.T) {
 	svc, fileRepo, _ := newSvc(t)
 	other := "other"
@@ -349,15 +349,16 @@ func TestUpdate_ModeratorCannotEditOthersFile(t *testing.T) {
 	require.ErrorIs(t, err, drive.ErrAccessDenied)
 }
 
-// 同様に Delete も moderator bypass の対象外。
-func TestDelete_ModeratorCannotDeleteOthersFile(t *testing.T) {
+// moderator でない利用者は他ユーザーの file を削除できない (#499)。
+func TestDelete_NonModeratorCannotDeleteOthersFile(t *testing.T) {
 	svc, fileRepo, _ := newSvc(t)
 	other := "other"
 	fileRepo.Files["f1"] = &model.DriveFile{ID: "f1", UserID: &other}
-	svc.SetRoleChecker(&fakeMod{moderators: map[string]bool{"u1": true}})
+	svc.SetRoleChecker(&fakeMod{})
 
 	err := svc.Delete(&model.User{ID: "u1"}, "f1")
 	require.ErrorIs(t, err, drive.ErrAccessDenied)
+	assert.Contains(t, fileRepo.Files, "f1")
 }
 
 // --- #1028: role policy gate (alwaysMarkNsfw / uploadableFileTypes) ---
@@ -1130,8 +1131,7 @@ func TestDelete_FiresChartHook(t *testing.T) {
 
 // failingFindByIDRepo wraps the mock to make FindByID fail when called the
 // second time (after the initial create succeeds in Update). 1 回目の
-// findOwnedFile() (#499 で Show() から差し替え済) は成功させ、2 回目
-// (Update 後の reload) で失敗させる。
+// findWritableFile() は成功させ、2 回目 (Update 後の reload) で失敗させる。
 type failingFindByIDRepo struct {
 	*testutil.MockDriveFileRepository
 	calls int

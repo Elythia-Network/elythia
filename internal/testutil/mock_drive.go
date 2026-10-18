@@ -11,15 +11,20 @@ import (
 type MockDriveFileRepository struct {
 	Files map[string]*model.DriveFile // keyed by ID
 	// EmojiReferencedURLs は DeleteOrphans / ListOrphans の guard を mock する
-	// ための「emoji が参照している drive_file.url 集合」。production の SQL は
-	// `NOT EXISTS (SELECT 1 FROM emoji WHERE originalUrl = url OR publicUrl = url)`
+	// ための「emoji が参照している drive_file.url 集合」。production の SQL
+	// (`emojiReferencesFile`) は
+	// `EXISTS (SELECT 1 FROM emoji WHERE originalUrl = url OR publicUrl = url)`
 	// で、**2 列のどちらか**が一致すれば除外する (#722)。本フィールドはその
 	// 和集合を表すので、片方の列だけを模倣しているわけではない。
+	// IsReferencedByEmoji (#3678) も同じ集合を見る (production はローカルの
+	// 絵文字だけを数えるが、mock は絵文字のホストを区別しない)。
 	//
 	// 空なら emoji guard は効かない。ただしそれは「userId NULL を全削除」を
 	// 意味しない — userHost 条件が別にあるため、リモートの owner 無し行は
 	// emoji 参照が無くても残る (#2721)。
 	EmojiReferencedURLs map[string]bool
+	// IsReferencedByEmojiErr forces IsReferencedByEmoji to fail.
+	IsReferencedByEmojiErr error
 
 	// NoteReferencedFileIDs は ListOrphanRemoteAttachmentCandidates の guard を
 	// mock するための「いずれかの note.fileIds に載っている drive_file.id 集合」
@@ -645,7 +650,7 @@ func (m *MockDriveFileRepository) DeleteOrphans() (int64, error) {
 		if f.UserHost != nil {
 			continue
 		}
-		if m.EmojiReferencedURLs[f.URL] {
+		if m.emojiReferenced(f) {
 			continue
 		}
 		delete(m.Files, id)
@@ -691,6 +696,25 @@ func (m *MockDriveFileRepository) ListOrphanRemoteAttachmentCandidates(cutoffID,
 	return ids, nil
 }
 
+// emojiReferenced mirrors the repository's emojiReferencesFile: the file's
+// url is in EmojiReferencedURLs.
+func (m *MockDriveFileRepository) emojiReferenced(f *model.DriveFile) bool {
+	return m.EmojiReferencedURLs[f.URL]
+}
+
+// IsReferencedByEmoji mirrors the repository (#3678). IsReferencedByEmojiErr
+// forces it to fail.
+func (m *MockDriveFileRepository) IsReferencedByEmoji(id string) (bool, error) {
+	if m.IsReferencedByEmojiErr != nil {
+		return false, m.IsReferencedByEmojiErr
+	}
+	f, ok := m.Files[id]
+	if !ok {
+		return false, nil
+	}
+	return m.emojiReferenced(f), nil
+}
+
 // ListOrphans mirrors DeleteOrphans's selection without deleting (#1724).
 func (m *MockDriveFileRepository) ListOrphans(limit int) ([]*model.DriveFile, error) {
 	if m.ListOrphansErr != nil {
@@ -708,7 +732,7 @@ func (m *MockDriveFileRepository) ListOrphans(limit int) ([]*model.DriveFile, er
 		if f.UserHost != nil {
 			continue
 		}
-		if m.EmojiReferencedURLs[f.URL] {
+		if m.emojiReferenced(f) {
 			continue
 		}
 		out = append(out, f)
