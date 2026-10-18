@@ -1259,7 +1259,7 @@ upstream-fetch: ## UPSTREAM_MISSKEY_VERSION の本家を .cache/misskey/<版> �
 # golden が本家の版に追いついているか。本家から作り直して差分が無いことと、
 # 本家を読むテストが skip されずに通ることを見る。本家を取得する
 # apicompat.yml が回す (本家を読まない `make gates` には入れない)。
-# paramdef-genはnodeとfrontend/node_modules (TypeScript)も使う。
+# paramdef-genはnodeとfrontend/node_modules (TypeScriptとajv)も使う。
 upstream-check: ## golden と本家を読むテストが UPSTREAM_MISSKEY_VERSION の本家と一致するか検査
 	$(MAKE) shapecheck-gen
 	git diff --exit-code -- internal/entitycompat/testdata
@@ -1274,13 +1274,20 @@ upstream-check: ## golden と本家を読むテストが UPSTREAM_MISSKEY_VERSIO
 # **nodeの道具をtools/paramdefspecに置き、Goの道具と同じくmakeから呼ぶ。**
 # TypeScriptのASTを読むのでGoでは書けない。依存はfrontend/node_modulesを
 # 読むだけで、pnpm installはしない(無ければ落ちる)。
+#
+# 続けて、そのgoldenの全endpointについて、本家と同じ版・同じ設定のajvで判定
+# した照合のcorpusを作る。internal/api/paramschemaの検証器は、このcorpusの
+# 全件と判定・最初のエラー・defaultを入れた後の値が一致することをテストで守る。
+# ajvはfrontend/に推移的に入っている、本家のpackage.jsonと同じ版を使う。
 PARAMDEF_JSON = internal/api/paramschema/upstream_paramdefs.json
-PARAMDEF_GOLDEN = $(PARAMDEF_JSON)
+PARAMDEF_CORPUS = internal/api/paramschema/testdata/ajv_corpus.jsonl
+PARAMDEF_GOLDEN = $(PARAMDEF_JSON) $(PARAMDEF_CORPUS)
 PARAMDEF_NODE_MODULES ?= frontend/node_modules
 .PHONY: paramdef-gen
-paramdef-gen: ## 本家のparamDefのgoldenを作り直す(nodeとfrontend/node_modulesが要る)
+paramdef-gen: ## 本家のparamDefのgoldenと、ajvの照合corpusを作り直す(nodeとfrontend/node_modulesが要る)
 	@test -d "$(PARAMDEF_NODE_MODULES)/typescript" || { echo "$(PARAMDEF_NODE_MODULES)/typescript が無い。frontend/ で pnpm install する" >&2; exit 1; }
 	node tools/paramdefspec/extract.mjs --typescript "$(PARAMDEF_NODE_MODULES)/typescript" --upstream "$(UPSTREAM_DIR)" --out $(PARAMDEF_JSON)
+	node tools/paramdefspec/corpus.mjs --paramdefs $(PARAMDEF_JSON) --synthetic tools/paramdefspec/synthetic.json --node-modules "$(PARAMDEF_NODE_MODULES)" --out $(PARAMDEF_CORPUS)
 
 # 本家の新しい版 (TO=<版>) の差分のうち、frontend/ が取り込むパスだけを 3-way で当てる
 # (設計 D4、#3379)。手順の全体は docs/upstream-catch-up.md。

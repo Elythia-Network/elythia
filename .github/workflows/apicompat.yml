@@ -13,9 +13,10 @@
 # (#3378)。本家から golden を作り直して差分が無いことと、本家を読むテストが skip
 # されずに通ることを確かめる。
 #
-# **本家のparamDefのgolden (#3673)もここで見る。**本家の.tsをTypeScriptの
-# パーサーで読むのでnodeとfrontend/の依存が要る。どちらも本家の取得を前提にする
-# 検査なので、frontend workflowではなくこちらに置く。
+# **本家のparamDefのgoldenとajvの照合corpus (#3673)もここで見る。**本家の.tsを
+# TypeScriptのパーサーで読み、本家と同じ版のajvで判定するので、nodeとfrontend/の
+# 依存が要る。本家の取得を前提にする検査なので、frontend workflowではなく
+# こちらに置く。
 #
 # **required check には含めない。** 判定材料に本家の内容が入るので、こちらの
 # コードを触っていない PR でも upstream の bump で赤くなりうる (`vulncheck` と同じ理由)。
@@ -106,8 +107,9 @@ jobs:
         with:
           go-version-file: go.mod
 
-      # upstream-checkのparamdef-genは、本家の.tsをfrontend/のTypeScriptで読む
-      # (#3673)。frontend workflowと同じ手順で依存だけを入れる(buildはしない)。
+      # upstream-checkのparamdef-genは、本家の.tsをfrontend/のTypeScriptで読み、
+      # 照合のcorpusをfrontend/のajvで作る(#3673)。frontend workflowと同じ手順で
+      # 依存だけを入れる(buildはしない)。
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           package_json_file: frontend/package.json
