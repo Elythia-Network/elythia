@@ -1,12 +1,8 @@
 package server
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/stretchr/testify/require"
 )
 
 // The notification Hook reads a notification's note once for its stream and
@@ -15,17 +11,15 @@ import (
 // would drop them from both payloads. The existence check must be the note
 // repository, whose ExistingNoteIDsOnPrimary reads the primary.
 func TestNotificationNoteLoaderIsWired(t *testing.T) {
-	router := filepath.Join(repoRootDir(t), "internal", "server", "router.go")
-	raw, err := os.ReadFile(router)
-	require.NoError(t, err)
-	src := stripComments(string(raw))
+	// パッケージ全体を読む (#3672)。組み立てを別のファイルへ移しても同じ配線を見る。
+	src := packageSourceWithoutComments(t)
 
 	for _, call := range []string{
 		"notificationHook.SetNoteLoader(noteRepo.FindByIDWithRelations)",
 		"notificationHook.SetNoteExistenceChecker(noteRepo)",
 	} {
 		if !strings.Contains(src, call) {
-			t.Errorf("router.go must wire %s", call)
+			t.Errorf("internal/server must wire %s", call)
 		}
 	}
 }

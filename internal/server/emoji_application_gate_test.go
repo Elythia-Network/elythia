@@ -95,11 +95,9 @@ var mustDetectEmojiManagerPages = map[string]string{
 // 作ったのと同じ型。
 func TestEmojiApplicationIsWired(t *testing.T) {
 	root := repoRootDir(t)
-	router := filepath.Join(root, "internal", "server", "router.go")
-
-	raw, err := os.ReadFile(router)
-	require.NoError(t, err)
-	src := stripComments(string(raw))
+	// パッケージ全体を読む (#3672)。組み立てを別のファイルへ移しても同じ登録を見る。
+	const router = "internal/server"
+	src := packageSourceWithoutComments(t)
 
 	createLine := createRouteRe.FindString(src)
 	require.NotEmptyf(t, createLine,

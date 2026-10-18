@@ -1,8 +1,6 @@
 package server
 
 import (
-	"os"
-	"path/filepath"
 	"regexp"
 	"testing"
 
@@ -27,11 +25,10 @@ var instanceInfoRouteRe = regexp.MustCompile(`s\.echo\.GET\("/instance-info/:hos
 // `/* */` で囲んだだけで緑のまま通る (#2856 が `wiring-check` で踏んだのと
 // 同じ形)。コメントアウトは「消す」のと同じ。
 func TestInstanceInfoRouteIsNoindex(t *testing.T) {
-	router := filepath.Join(repoRootDir(t), "internal", "server", "router.go")
-	raw, err := os.ReadFile(router)
-	require.NoError(t, err)
-
-	ms := instanceInfoRouteRe.FindAllStringSubmatch(stripComments(string(raw)), -1)
+	// パッケージ全体を読む (#3672)。登録を別のファイルへ移しても同じ登録を見て、
+	// 2 つのファイルに分かれた再登録も数える。
+	const router = "internal/server"
+	ms := instanceInfoRouteRe.FindAllStringSubmatch(packageSourceWithoutComments(t), -1)
 	// **ちょうど 1 件であることまで要求する。** Echo は同じ method + path の
 	// 再登録を黙って後勝ちで上書きするので、先頭一致だけを見る形だと、後段で
 	// 別のハンドラに登録し直されても緑のまま noindex が消える

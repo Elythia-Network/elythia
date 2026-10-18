@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 
@@ -106,8 +108,8 @@ func TestLoaderCacheDoesNotOutliveFixture(t *testing.T) {
 		"fixture の loader CSS がキャッシュに居座っている (#2795)")
 }
 
-// **`restoreProcessGlobals` の一覧が `router.go` / `server.go` の実際の呼び出しと
-// 一致していること** (#2795)。
+// **`restoreProcessGlobals` の一覧が、このパッケージの非テストのソースの実際の
+// 呼び出しと一致していること** (#2795)。
 //
 // 手で数えると漏れる。初版は `entity` の 7 つだけを戻しており、
 // `notehide.SetFollowingRepo` / `coretwofactor.SetTestMode` /
@@ -118,38 +120,48 @@ func TestLoaderCacheDoesNotOutliveFixture(t *testing.T) {
 // 判定はソースの文字列一致。**コメント行は数えない** (コメントアウトして残すのは
 // 消すのと同じ)。同 package の `wiring_check` が生ソースを読む形なのに合わせて
 // ある。
+//
+// **どのファイルで呼ぶかは見ない (#3672)。** 以前は `router.go` と `server.go` の
+// 2 つだけを読んでいたので、setter を別のファイルへ移すと (あるいは別のファイルで
+// 足すと) 一覧から黙って消えた。今はパッケージ全体を読み、呼び出しの集合だけを
+// 突き合わせる。
 func TestProcessGlobalsAreRestored(t *testing.T) {
 	// **ソース側を AST で数え、表と突き合わせる。** 表 → ソースの片方向だけだと、
 	// 「新しい setter を足したが表にも restore にも書かなかった」が素通りする —
 	// **漏らす人は表にも書き忘れる**ので、表だけを正にしても意味がない。
-	found := processGlobalSetters(t)
+	found, _ := processGlobalSetters(t)
 
-	want := map[string]string{
-		"entity.SetAvatarDecorationLookup": "router.go",
-		"entity.SetEmojiDecorationLookup":  "router.go",
-		"entity.SetCanChatLookup":          "router.go",
-		"entity.SetUserRolesLookup":        "router.go",
-		"entity.SetShowRemoteBadgesLookup": "router.go",
-		"entity.SetInstanceIconURLLookup":  "router.go",
-		"entity.SetMediaURLContext":        "router.go",
-		"entity.SetSilencedLookup":         "router.go",
-		"notehide.SetFollowingRepo":        "router.go",
-		"notehide.SetUGCVisibilityLookup":  "router.go",
-		"coretwofactor.SetTestMode":        "router.go",
-		"meself.SetEnricher":               "router.go",
-		"meta.SetLocalUserCounter":         "router.go",
-		"password.SetCost":                 "server.go",
-		"corenote.SetHookConcurrency":      "server.go",
+	want := []string{
+		"corenote.SetHookConcurrency",
+		"coretwofactor.SetTestMode",
+		"entity.SetAvatarDecorationLookup",
+		"entity.SetCanChatLookup",
+		"entity.SetEmojiDecorationLookup",
+		"entity.SetInstanceIconURLLookup",
+		"entity.SetMediaURLContext",
+		"entity.SetShowRemoteBadgesLookup",
+		"entity.SetSilencedLookup",
+		"entity.SetUserRolesLookup",
+		"meself.SetEnricher",
+		"meta.SetLocalUserCounter",
+		"notehide.SetFollowingRepo",
+		"notehide.SetUGCVisibilityLookup",
+		"password.SetCost",
 	}
+	got := make([]string, 0, len(found))
+	for call := range found {
+		got = append(got, call)
+	}
+	sort.Strings(got)
 
-	assert.Equal(t, want, found,
+	assert.Equal(t, want, got,
 		"起動時に張り替えるグローバルの一覧が変わった。足したなら "+
-			"restoreProcessGlobals にも足すこと (#2795)")
+			"restoreProcessGlobals にも足すこと (#2795)。呼んでいるファイル: %v", found)
 
 	// restore が実際に呼んでいるか。表と一致していても、restore が呼ばなければ
 	// 意味がない。
 	restore := restoreFuncBody(t)
-	for call := range want {
+	for _, call := range want {
 		// **`(` まで含めて照合する。** 名前だけだと `_ = meself.SetEnricher` の
 		// ような「参照はするが呼ばない」形を通してしまう (実際に通した)。
 		name := call[strings.LastIndex(call, ".")+1:] + "("
@@ -158,18 +170,29 @@ func TestProcessGlobalsAreRestored(t *testing.T) {
 	}
 }
 
-// processGlobalSetters returns every `pkg.SetXxx(...)` call that `router.go`
-// and `server.go` make on an imported package, keyed by `pkg.SetXxx`.
+// processGlobalSetters returns every `pkg.SetXxx(...)` call that the non-test
+// sources of this package make on an imported package, keyed by `pkg.SetXxx`,
+// with the files that make it. It also returns the files it read.
+func processGlobalSetters(t *testing.T) (map[string][]string, []string) {
+	t.Helper()
+	return globalSettersIn(t, packageSources(t))
+}
+
+// globalSettersIn is processGlobalSetters over the given files. It returns the
+// names of the files it parsed.
 //
 // **メソッド呼び出し (`s.foo.SetBar(...)`) は除く。** それはインスタンスの
-// 設定であってプロセス共有の状態ではない。パッケージ名は import で解決する。
-func processGlobalSetters(t *testing.T) map[string]string {
+// 設定であってプロセス共有の状態ではない。パッケージ名は import で解決する
+// (import はファイルごとなので、ファイルごとに引く)。
+func globalSettersIn(t *testing.T, files []packageSource) (map[string][]string, []string) {
 	t.Helper()
-	out := map[string]string{}
-	for _, file := range []string{"router.go", "server.go"} {
-		src := readNonCommentSource(t, file)
+	out := map[string][]string{}
+	var read []string
+	for _, file := range files {
+		read = append(read, file.name)
+		src := nonCommentSource(file.src)
 		fset := token.NewFileSet()
-		f, err := parser.ParseFile(fset, file, src, 0)
+		f, err := parser.ParseFile(fset, file.name, src, 0)
 		require.NoError(t, err)
 
 		pkgs := map[string]bool{}
@@ -195,11 +218,40 @@ func processGlobalSetters(t *testing.T) map[string]string {
 			if !ok || !pkgs[id.Name] {
 				return true
 			}
-			out[id.Name+"."+sel.Sel.Name] = file
+			key := id.Name + "." + sel.Sel.Name
+			if !slices.Contains(out[key], file.name) {
+				out[key] = append(out[key], file.name)
+			}
 			return true
 		})
 	}
-	return out
+	return out, read
+}
+
+// setter をパッケージのどのファイルで呼んでも数えること (#3672 レビュー M-1)。
+//
+// **今の setter は router.go と server.go にしか無いので、2 つだけを読む形に
+// 戻しても TestProcessGlobalsAreRestored は緑のまま通る。** 段階 2 で組み立てを
+// 分けると、移した先の setter が一覧から黙って消える。ここで、(a) 2 つ以外の
+// ファイルの setter を数えること、(b) processGlobalSetters が packageSources の
+// 全ファイルを読むこと、を見る。
+func TestProcessGlobalSettersReadEveryFile(t *testing.T) {
+	got, _ := globalSettersIn(t, []packageSource{
+		{name: "setup.go", src: "package server\n\nimport \"example.com/entity\"\n\nfunc a() { entity.SetA(1) }\n"},
+		{name: "routes_users.go", src: "package server\n\nimport \"example.com/notehide\"\n\nfunc b() { notehide.SetB(2); s.x.SetC(3) }\n"},
+	})
+	require.Equal(t, map[string][]string{
+		"entity.SetA":   {"setup.go"},
+		"notehide.SetB": {"routes_users.go"},
+	}, got)
+
+	// processGlobalSetters が packageSources の全ファイルを読んでいること。
+	_, read := processGlobalSetters(t)
+	var listed []string
+	for _, f := range packageSources(t) {
+		listed = append(listed, f.name)
+	}
+	require.Equal(t, listed, read, "processGlobalSetters が読んだファイルが、パッケージの非テストの .go と一致しない")
 }
 
 // restoreFuncBody returns the body of restoreProcessGlobals, comments removed.
@@ -219,10 +271,15 @@ func readNonCommentSource(t *testing.T, name string) string {
 	t.Helper()
 	b, err := os.ReadFile(name)
 	require.NoError(t, err)
+	return nonCommentSource(string(b))
+}
+
+// nonCommentSource is readNonCommentSource for source already in memory.
+func nonCommentSource(src string) string {
 	// **block comment も落とす。** `/* entity.SetSilencedLookup(...) */` は
 	// 行コメント判定だけだと生き残り、「コメントアウトして残すのは消すのと
 	// 同じ」が成立しなくなる。
-	src := regexp.MustCompile(`(?s)/\*.*?\*/`).ReplaceAllString(string(b), "")
+	src = regexp.MustCompile(`(?s)/\*.*?\*/`).ReplaceAllString(src, "")
 	var kept []string
 	for _, line := range strings.Split(src, "\n") {
 		if strings.HasPrefix(strings.TrimSpace(line), "//") {

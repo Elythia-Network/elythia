@@ -240,12 +240,34 @@ plugins:
 // リテラルなので、片方を変えると表だけが外れて上限が黙って /api の既定に戻る。**
 // 配線の gate は配線が「書かれていること」しか見ないので緑のままになる。
 func TestAPIGroupPrefixMatchesRouter(t *testing.T) {
-	src, err := os.ReadFile(filepath.Join("router.go"))
-	require.NoError(t, err)
+	// パッケージ全体を読む (#3672)。組み立てを別のファイルへ移しても同じ行を見る。
+	src := packageSourceWithoutComments(t)
 	// **`api :=` まで含めて照合する。** router には pprof など別の group も
 	// あるので、Group( だけを拾うと最初の 1 件を取って空振りする。
-	m := regexp.MustCompile(`(?m)^\s*api := apiRoutes\{s\.echo\.Group\("([^"]+)"\)\}`).FindSubmatch(src)
-	require.NotNil(t, m, "router.go に `api := apiRoutes{s.echo.Group(\"...\")}` が無い。書き方を変えたならこの gate も直すこと")
-	assert.Equal(t, apiGroupPrefix, string(m[1]),
+	// **ちょうど 1 件を要求する。** ファイルをまたいで 2 つあると、どちらが
+	// /api の group かを読み取れない。
+	prefixes := apiGroupPrefixes(src)
+	require.Len(t, prefixes, 1, "internal/server に `api := apiRoutes{s.echo.Group(\"...\")}` がちょうど 1 つ無い。書き方を変えたならこの gate も直すこと")
+	assert.Equal(t, apiGroupPrefix, prefixes[0],
 		"router の API グループと apiGroupPrefix がずれている。peer の受け口の本文上限が効かなくなる")
+}
+
+// apiGroupLineRe matches the line that creates the /api group.
+var apiGroupLineRe = regexp.MustCompile(`(?m)^\s*api := apiRoutes\{s\.echo\.Group\("([^"]+)"\)\}`)
+
+// apiGroupPrefixes returns the prefix of every `api := apiRoutes{s.echo.Group(...)}`
+// line in src.
+func apiGroupPrefixes(src string) []string {
+	var out []string
+	for _, m := range apiGroupLineRe.FindAllStringSubmatch(src, -1) {
+		out = append(out, m[1])
+	}
+	return out
+}
+
+// 2 つ目の行も拾うこと (#3672 レビュー M-1)。ファイルをまたいで 2 つあると、
+// どちらが /api の group かを読み取れないので、ゲートはちょうど 1 つを要求する。
+func TestAPIGroupPrefixesFindsEveryLine(t *testing.T) {
+	src := "\tapi := apiRoutes{s.echo.Group(\"/api\")}\n\n\tapi := apiRoutes{s.echo.Group(\"/v2\")}\n"
+	assert.Equal(t, []string{"/api", "/v2"}, apiGroupPrefixes(src))
 }
