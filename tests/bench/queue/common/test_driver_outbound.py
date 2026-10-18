@@ -9,6 +9,7 @@ import sys
 import types
 import unittest
 from pathlib import Path
+from typing import Any, Callable
 from unittest.mock import patch
 
 from delivery_result import classify_delivery, throughput_result
@@ -40,6 +41,18 @@ class ImmediateProbe:
         return 0
 
 
+class InlineThread:
+    def __init__(self, target: Callable[..., None], args: tuple[Any, ...]) -> None:
+        self.target = target
+        self.args = args
+
+    def start(self) -> None:
+        self.target(*self.args)
+
+    def join(self) -> None:
+        pass
+
+
 class OutboundDeliveryTests(unittest.TestCase):
     def run_delivery(self, final_stats: dict[str, object]) -> dict[str, object]:
         info = {
@@ -54,7 +67,7 @@ class OutboundDeliveryTests(unittest.TestCase):
             url: str,
             token: str,
             count: int,
-            done: object,
+            done: Any,
             elapsed: dict[str, float],
             post_count: dict[str, int],
             responses: list[bytes],
@@ -130,6 +143,74 @@ class OutboundDeliveryTests(unittest.TestCase):
         self.assertEqual(result.get("deliveryStatus"), "incomplete")
         self.assertTrue(result.get("deliveryReasons"))
         self.assertEqual(result["delivery"]["missing"], 1)
+
+    def test_delivery_after_drain_interval_suppresses_throughput(self) -> None:
+        info = {
+            "follower_count": 2,
+            "delivery_enabled": True,
+            "delivery_receiver_url": "http://receiver",
+            "url": "https://sender",
+            "token": "synthetic-token",
+        }
+        final_stats = {
+            "finalized": True,
+            "expected": 4,
+            "attempts": 5,
+            "verified": 5,
+            "pending": 0,
+            "valid": 5,
+            "unique": 4,
+            "duplicates": 1,
+            "invalid": 0,
+            "contentMismatch": 0,
+            "unexpected": 0,
+            "unexpectedAttempts": 0,
+            "missing": 0,
+        }
+
+        def post_notes(
+            url: str,
+            token: str,
+            count: int,
+            done: Any,
+            elapsed: dict[str, float],
+            post_count: dict[str, int],
+            responses: list[bytes],
+        ) -> None:
+            elapsed["v"] = 0.1
+            post_count["v"] = count
+            responses.extend([
+                b'{"createdNote":{"id":"note-1"}}',
+                b'{"createdNote":{"id":"note-2"}}',
+            ])
+            done.set()
+
+        with (
+            patch.object(driver, "OUTBOUND_NOTES", 2),
+            patch.object(driver, "make_probe", return_value=ImmediateProbe()),
+            patch.object(driver, "prepare_receiver"),
+            patch.object(
+                driver.httpx,
+                "post",
+                return_value=types.SimpleNamespace(raise_for_status=lambda: None),
+            ),
+            patch.object(
+                driver,
+                "receiver_stats",
+                side_effect=[{"verified": 4}, {"verified": 4}],
+            ),
+            patch.object(driver, "post_notes_async", side_effect=post_notes),
+            patch.object(driver, "finalize_delivery", return_value=(final_stats, None)),
+            patch.object(driver.threading, "Thread", InlineThread),
+        ):
+            result = driver.run_stack("mkq", info)
+
+        self.assertEqual(result["deliveryStatus"], "incomplete")
+        self.assertEqual(result["delivered_hits"], 5)
+        self.assertEqual(result["delivery"]["unique"], 4)
+        self.assertIsNone(result["throughput_jobs"])
+        self.assertIsNone(result["throughput_jobs_per_sec"])
+        self.assertIn("4 -> 5", result["deliveryMeasurementError"])
 
     def test_content_mismatch_is_invalid_and_keeps_raw_counts(self) -> None:
         result = self.run_delivery({

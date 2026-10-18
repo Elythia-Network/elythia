@@ -7,6 +7,10 @@ bench_validate_project_name() {
   [[ "$name" =~ ^mk-bench-ab-[a-z0-9][a-z0-9_-]{0,19}$ ]]
 }
 
+bench_k6_container_name() {
+  printf '%s-k6-r%s-%s' "$1" "$2" "$3"
+}
+
 bench_assert_project_available() {
   local project=$1 existing name
   if ! existing=$(docker compose ls --all --quiet); then

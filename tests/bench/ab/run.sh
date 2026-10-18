@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # base と head の 2 つの commit を、同じスタックで交互に流して比べる (#3544)。
 #
-#   run.sh --base <ref> --head <ref> [--rounds N] [--scenario prod-like|unlimited] [--out DIR] [--smoke] [--delivery] [--project-name NAME]
-#   run.sh --upstream <version> --head <ref> [--rounds N] [--scenario prod-like|unlimited] [--out DIR] [--smoke]
+#   run.sh --base <ref> --head <ref> [--rounds N] [--scenario prod-like|unlimited] [--out DIR] [--smoke] [--delivery] [--delivery-notes N] [--delivery-followers N] [--project-name NAME]
+#   run.sh --upstream <version> --head <ref> [--rounds N] [--scenario prod-like|unlimited] [--out DIR] [--smoke] [--project-name NAME]
 #
-# --upstream compares against the official Misskey image (#3654), using the upstream compose overlay.
-# Delivery fixture mode is for Elythia base/head comparisons; it does not run against the upstream image.
+# --upstream は公式 Misskey image (#3654) と比較し、upstream 用の Compose overlay を使う。
+# delivery fixture は Elythia の base/head 比較用で、upstream image とは実行しない。
 #
 # --smoke は seed を 10 人 × 10 ノートにし、各エンドポイントを 5 秒だけ流す。手順が
 # 最後まで通るかを見るためのもので、結果を比較に使わない。
@@ -31,7 +31,7 @@ set -Eeuo pipefail
 trap 'exit 1' ERR
 
 usage() {
-  echo "usage: $0 (--base <ref> | --upstream <version>) --head <ref> [--rounds N] [--scenario prod-like|unlimited] [--out DIR] [--smoke] [--delivery] [--project-name NAME]" >&2
+  echo "usage: $0 (--base <ref> | --upstream <version>) --head <ref> [--rounds N] [--scenario prod-like|unlimited] [--out DIR] [--smoke] [--delivery] [--delivery-notes N] [--delivery-followers N] [--project-name NAME]" >&2
   exit 1
 }
 
@@ -118,7 +118,8 @@ BENCH_UID=$(id -u)
 BENCH_GID=$(id -g)
 
 work=$(mktemp -d)
-k6_name() { echo "mk-bench-ab-k6-r$1-$2"; }
+# run_one は measure の結果を command substitution で受け取るため、round/side から k6 名を再構成する。
+k6_name() { bench_k6_container_name "$project_name" "$1" "$2"; }
 delivery_projects=()
 delivery_compose_files=()
 delivery_cleanup_failed=0

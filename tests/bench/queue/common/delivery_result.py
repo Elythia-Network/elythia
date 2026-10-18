@@ -25,6 +25,7 @@ def classify_delivery(
     benchmark_expected: int | None = None,
     timed_out: bool = False,
     preparation_error: str | None = None,
+    measurement_error: str | None = None,
 ) -> tuple[str, list[str]]:
     """Return correctness status and reasons, matching benchcompare semantics."""
     reasons: list[str] = []
@@ -122,6 +123,8 @@ def classify_delivery(
         reasons.append("delivery drain timed out")
     if preparation_error:
         reasons.append(f"delivery preparation/finalization failed: {preparation_error}")
+    if measurement_error:
+        reasons.append(f"delivery measurement incomplete: {measurement_error}")
 
     if preparation_error and len(counts) != len(COUNT_FIELDS):
         return "incomplete", reasons
@@ -144,6 +147,7 @@ def throughput_result(
     benchmark_expected: int,
     timed_out: bool = False,
     preparation_error: str | None = None,
+    measurement_error: str | None = None,
 ) -> dict[str, Any]:
     """Keep raw receiver counts and emit throughput only for complete valid runs."""
     status, reasons = classify_delivery(
@@ -151,6 +155,7 @@ def throughput_result(
         benchmark_expected=benchmark_expected,
         timed_out=timed_out,
         preparation_error=preparation_error,
+        measurement_error=measurement_error,
     )
     is_valid = status == "valid" and drain_seconds > 0
     unique = stats.get("unique") if is_valid else None

@@ -27,6 +27,26 @@ if bench_validate_project_name mk; then
   exit 1
 fi
 bench_validate_project_name mk-bench-ab-safe_1
+[[ "$(bench_k6_container_name mk-bench-ab-run1 2 base)" == "mk-bench-ab-run1-k6-r2-base" ]]
+[[ "$(bench_k6_container_name mk-bench-ab-run1 2 base)" != "$(bench_k6_container_name mk-bench-ab-run2 2 base)" ]]
+max_project=mk-bench-ab-aaaaaaaaaaaaaaaaaaaa
+bench_validate_project_name "$max_project"
+if bench_validate_project_name mk-bench-ab-Uppercase; then
+  echo "uppercase project name was accepted" >&2
+  exit 1
+fi
+for invalid_project in \
+  mk-bench-ab-bad/name \
+  mk-bench-ab-aaaaaaaaaaaaaaaaaaaaa; do
+  if bench_validate_project_name "$invalid_project"; then
+    echo "invalid project name was accepted: $invalid_project" >&2
+    exit 1
+  fi
+done
+max_k6_name=$(bench_k6_container_name "$max_project" 12 head)
+[[ "$max_k6_name" == "$max_project-k6-r12-head" ]]
+[[ "$max_k6_name" =~ ^[a-z0-9][a-z0-9_-]*$ ]]
+[[ "${#max_k6_name}" -le 63 ]]
 
 export BENCH_HELPER_TEST_PROJECTS=mk-bench-ab-existing
 if bench_assert_project_available mk-bench-ab-existing; then

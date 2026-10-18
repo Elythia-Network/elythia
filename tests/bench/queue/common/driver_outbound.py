@@ -205,6 +205,7 @@ def run_stack(stack: str, info: dict[str, Any]) -> dict[str, Any]:
 
     deadline = time.monotonic() + DRAIN_TIMEOUT_S
     drained_at: float | None = None
+    drained_verified: int | None = None
     while time.monotonic() < deadline:
         depth = probe.depth()
         hits = (
@@ -216,6 +217,8 @@ def run_stack(stack: str, info: dict[str, Any]) -> dict[str, Any]:
         samples.append({"t": t, "depth": depth, "hits": hits})
         if post_done.is_set() and depth == 0 and hits >= expected_jobs:
             drained_at = t
+            if delivery_enabled:
+                drained_verified = hits
             break
         time.sleep(POLL_INTERVAL_S)
     poller.join()
@@ -232,8 +235,21 @@ def run_stack(stack: str, info: dict[str, Any]) -> dict[str, Any]:
         if delivery_enabled
         else blackhole_hits() - baseline_hits
     )
+    delivery: dict[str, Any] | None = None
+    preparation_error: str | None = None
+    if delivery_enabled:
+        delivery, preparation_error = finalize_delivery(info, note_ids)
+        finalized_hits = delivery.get("verified")
+        if type(finalized_hits) is int and finalized_hits >= 0:
+            final_hits = max(final_hits, finalized_hits)
     drain_time = drained_at if drained_at is not None else (time.monotonic() - poller_start)
     timed_out = drained_at is None
+    measurement_error = None
+    if delivery_enabled and drained_verified is not None and final_hits > drained_verified:
+        measurement_error = (
+            "verified deliveries increased after drain interval "
+            f"({drained_verified} -> {final_hits})"
+        )
     peak = max((s["depth"] for s in samples), default=0)
 
     result = {
@@ -252,16 +268,19 @@ def run_stack(stack: str, info: dict[str, Any]) -> dict[str, Any]:
         "samples": samples[-200:],
     }
     if delivery_enabled:
-        delivery, preparation_error = finalize_delivery(info, note_ids)
+        assert delivery is not None
         result.update(throughput_result(
             delivery,
             drain_time,
             benchmark_expected=expected_jobs,
             timed_out=timed_out,
             preparation_error=preparation_error,
+            measurement_error=measurement_error,
         ))
         if preparation_error:
             result["deliveryPreparationError"] = preparation_error
+        if measurement_error:
+            result["deliveryMeasurementError"] = measurement_error
     throughput = result["throughput_jobs_per_sec"]
     throughput_label = (
         f"{throughput:.0f} jobs/s" if throughput is not None else "throughput unavailable"
