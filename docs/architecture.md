@@ -290,12 +290,103 @@ dispatcher が shareable channel の共有・pong ack を upstream `Connection.t
 
 ```
 server.New() → setupRoutes()
-  ├→ Repository 生成 (userRepo, noteRepo, … 30+)
+  ├→ stream の pubsub と publisher 生成 (購読はまだ始めない)
+  ├→ Repository 生成 (userRepo, noteRepo, …)
+  ├→ chart の hook と、作るだけで副作用の無い部品の生成
   ├→ Core サービス生成 (noteCreateService, followingService, …)
-  ├→ hook 注入 (§6)
+  ├→ hook 注入 (§5)
   ├→ Handler 生成 + ルート登録 (§3.1)
-  └→ WebSocket / 静的ファイル / middleware
+  └→ stream (pubsub の購読をここで始める) / WebSocket / 静的ファイル / middleware
 ```
+
+### 4.1 作る順と、後から入れる依存 (#3676)
+
+**依存は受け手より先に作り、受け手を作った直後に渡す。** setter で後から入れるのは、
+循環しているものと、作るときに副作用があって今の位置から動かせないものに限る。
+`setupRoutes()` を領域ごとの関数に分けるとき (#3666 の段階 2)、受け手より後で作る
+依存は関数をまたぐ配線になるため。
+
+**動かしてよいのは、作るだけで DB にも Redis にも外部にも触らず、goroutine も起動せず、
+shutdown hook も登録しないものだけ。** shutdown hook は登録順 (FIFO) で止まり、
+Redis への命令や DB の読み書きの順も起動の手順の一部なので、それらを伴う文は動かさない。
+例外は chart の hook と一緒に前へ移した meta のフラグの写し (`metaRepo.Fetch()`、
+cachedMeta の最初の読み出しなので DB を読みうる) で、元の位置との間に DB の文が無いので、
+PostgreSQL の文の順は変わらない。
+pubsub の購読 (`Subscribe`) も、今の位置 (stream の節) から動かさない。早めると、
+handler ができる前に届いた event が、まだ配線していない service を触る。
+
+**構築の途中で動く処理から見える配線も変えない。** `setupRoutes()` が終わる前から動く
+goroutine は、`startConstructionWorker` で起動する worker 4 つ (`pollExpiryWorker`、
+reaction の flush、retention の集計、利用者のキャッシュの invalidation)、pubsub の購読の
+handler、`fedRuleHits` / `instanceTouchBuffer` / `sigCapBuffer` / `instanceCounterBuffer`
+の `Start`、queue role の `deliveryHealth` / `inboxHealth` の `Start`、
+`emojiInvalidationQueue` の `Run`、server / queue の stats publisher の `Start` がある。
+そこから辿れる setter を、その起動より前へ移すと、構築中の動きが変わる。#3676 で前へ
+移した setter のうち、これらから辿れるのは下の 1 本だけで、ほかの受け手 (note・
+following・reaction・drive・連合・queue の processor・handler など) には届かない。例えば `notificationService.SetMainStreamPublisher` を前へ移すと、
+`pollExpiryWorker` が構築中に作った通知が、packer (`SetPacker`、worker の起動より後) を
+通らない形で `unreadNotification` として流れる (#3676 のレビューで実測)。なので、この
+setter は依存を先に作っても、元の位置 (streaming の publisher の隣) に残している。
+
+#3676 で、stream の pubsub と publisher (`streamPubSub` / `internalPubSub` /
+`noteEventPub` / `relationReloadPublisher` / `mainStreamPublisher` / `drivePublisher` /
+`reversiPublisher`) を `setupRoutes()` の先頭へ、chart の engine と hook
+(`chartCharts` / `chartHooks`) を repository の直後へ移し、受け手には作った直後に渡す
+ようにした (上の `notificationService.SetMainStreamPublisher` だけは元の位置)。ほかに、受け手より後で作っていた純粋な部品 (repository 16 個、
+`featuredService`、`hashtagService`、`modLogService`、`instanceService` など) を
+受け手より先に作るようにした (こちらは setter を呼ぶ位置は変えていない)。
+
+| | #3676 の前 (`b9db7e49b`) | 後 |
+|---|---|---|
+| setter で依存を入れる辺 | 877 | 877 |
+| うち、受け手より後で作った依存を入れるもの | 192 (受け手 55 個) | 107 (受け手 41 個) |
+| うち、循環しているもの | 40 | 40 |
+| うち、それ以外 | 152 | 67 |
+| setter の呼び出しが受け手から離れているもの (下の数え方) | 359 | 307 |
+
+数え方 (`setupRoutes()` の構文木。道具はコミットしていない):
+
+- 節点: `setupRoutes()` の中で `:=` か `var` で定義した名前 (関数リテラルの中と、
+  `if` / `for` / `switch` の初期化文の一時変数を除く) と、`s.<フィールド>`。定義の位置は
+  最初の定義の行 (`s.<フィールド>` は `setupRoutes()` の中で最初に代入した行、無ければ 0)
+- 辺: `X.SetYyy(...)` の呼び出しで、受け手 `X` が節点で、引数 (関数リテラルの中を含む)
+  に `X` 以外の節点 `B` が現れるもの。1 回の呼び出しに 2 つの節点が現れれば 2 辺
+- 後から入れる辺: `B` の定義の行が `X` の定義の行より後のもの
+- 循環: 依存の図 (`A := f(... B ...)` の右辺と、setter の引数から張る `A → B`) で、
+  `B` から `X` へ辿り着けるもの
+- 「後から入れる辺」は**定義の順だけを見ていて、setter を呼ぶ位置は見ていない**。依存の
+  定義だけを前へ移した辺 (setter の呼び出しは元の位置) も、元の位置に残した
+  `notificationService.SetMainStreamPublisher` も、後から入れる辺には数えない。呼ぶ位置は
+  別に、「`X` と `B` の両方ができた後、別の節点を 1 つでも定義してから setter を呼んでいる
+  辺」として数えた (表の最後の行)。段階 2 で関数に分けるときに節をまたぐ配線の目安になる
+- setter を通らない注入は数えていない。フィールドへの直接の代入で、受け手より後の
+  依存を入れているのは `chartHooks.InstanceCounter = instanceCounterBuffer` の 1 つ
+  (goroutine と shutdown hook を持つバッファを元の位置に残したため)
+
+残した 107 辺:
+
+- **循環している 40 辺。** 通知 (`notificationHook` / `notificationPublisher`)、フォロー・
+  ブロック・ミュート、連合の配送 (`apRenderer` / `quoteOutbox` / `noteDeliveryHook`)、
+  アカウントの移行 (`accountMover`)、ephemeral (`ephemeralMaterializer`)、
+  `sharedUserPacker` ⇄ `usersHandler`、`followingService` ⇄ `iHandler` など。core が
+  api の handler に依存している箇所 (`sharedUserPacker.SetDetailExtras(usersHandler)`、
+  `followingService.SetMeUpdatedPublisher(iHandler)`) が循環を api まで広げている。
+  解くには interface の切り出しが要り、作る順の入れ替えでは消えない
+- **作るときに DB や外部に触るか、その結果から作るもの 7 辺。** `fedRuleService` (作るときに
+  DB からルールを読む)、`searchService` (Meilisearch を使う設定では、作るときに index の
+  設定を書き込む)、`sensCfg` / `nsfwDetector` (meta を DB から読んだ分岐の中で作る)
+- **pubsub の publish と購読を対で置いているもの 2 辺。** `roleService` と `cachedMeta`
+  の invalidation hook (`rolesUpdatedSender`、`nodeinfoHandler`)。hook と `Subscribe`
+  を同じ場所に置いて、片方だけ消える抜けを防いでいる
+- **まだ手を付けていない 58 辺。** 作る順を入れ替えれば消せるが、#3676 では動かさな
+  かったもの。依存が別の service・hook・連合の部品で、それ自身も多くの部品に依存する
+  もの (`timelineFanoutHook`、`notificationHook`、`deliverService`、
+  `ephemeralMaterializer`、`chatService` など) が多いが、作るだけで副作用の無いもの
+  (`apURLs`、`imgProcessor`、`quoteAuthorizationRepo`、`sigCapRepo`、`deliveryHealth`
+  など) や、shutdown hook を登録する部品・queue role の分岐・作れなかったときは配線しない
+  分岐と同じ節に置いているもの (`metadataFetcher`、`deliveryBreaker`、`webauthnSvc` など)、
+  プラグインの節でまとめて扱う値 (`registeredPlugins` / `peered`) も含む。段階 2 で
+  領域ごとの関数に分けるときに扱う
 
 ## 5. フック注入パターン
 
