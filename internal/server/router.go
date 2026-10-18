@@ -312,6 +312,40 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	reversiPublisher := stream.NewReversiGamePublisher(streamPubSub)
 	mainStreamPublisher := stream.NewMainStreamPublisher(streamPubSub)
 
+	// Charts (Phase 4 Step Q / 4.7) — 12 chart engines + hook adapter (#3676)。
+	// どちらも DB の handle と idGen にしか依存せず、作っても goroutine も起動しない
+	// (定期の保存は下の chartMgmt、instance の件数のバッファも下)。なので受け手より
+	// 先に作り、受け手を作った直後に SetChartHook で渡す。
+	// 下の meta のフラグの写し (cachedMeta の読み出し) も一緒に前へ移した。最初の読み
+	// 出しなので DB を読みうるが、元の位置との間に DB の文が無いので、PostgreSQL の
+	// 文の順は変わらない。
+	chartCharts := buildChartBundle(s.db)
+	chartHooks := charthook.New(charthook.Config{
+		Notes:            chartCharts.Notes,
+		Users:            chartCharts.Users,
+		Drive:            chartCharts.Drive,
+		Federation:       chartCharts.Federation,
+		Instance:         chartCharts.Instance,
+		ApRequest:        chartCharts.ApRequest,
+		ActiveUsers:      chartCharts.ActiveUsers,
+		PerUserNotes:     chartCharts.PerUserNotes,
+		PerUserDrive:     chartCharts.PerUserDrive,
+		PerUserFollowing: chartCharts.PerUserFollowing,
+		PerUserPv:        chartCharts.PerUserPv,
+		PerUserReaction:  chartCharts.PerUserReaction,
+		IDGen:            idGen,
+	})
+	// meta フラグでチャート生成を制御する。
+	if m, err := metaRepo.Fetch(); err == nil {
+		chartHooks.ChartsForRemoteUser = m.EnableChartsForRemoteUser
+		chartHooks.ChartsForFederatedInst = m.EnableChartsForFederatedInstances
+		chartHooks.StatsForFederatedInst = m.EnableStatsForFederatedInstances
+	}
+	// 上の 3 つは起動時の写しで、読めなかったときの代わり。本家は meta をその場で
+	// 読むので、admin での切り替えが再起動を待たずに効くよう毎回 cachedMeta を
+	// 読ませる (#3330)。
+	chartHooks.SetMetaSource(metaRepo.Fetch)
+
 	// Core services
 	roleService := corerole.NewService(roleRepo, roleAssignmentRepo, metaRepo, idGen)
 	roleService.SetEffectivePolicyProviderCacheEntries(s.config.EffectivePolicyProviderCacheEntries)
@@ -333,6 +367,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	noteCreateService := corenote.NewCreateService(noteRepo, pollRepo, idGen, followingRepo)
 	noteCreateService.SetBackground(s.background) // #3661: 世代の停止で待つ
 	noteCreateService.SetMainStreamPublisher(mainStreamPublisher)
+	noteCreateService.SetChartHook(chartHooks)
 	// Phase 7-1 follow-up (#254): 本家互換の残存 error 検出ロジック用依存を注入。
 	// Setter経由なのでテストでは任意に省略可能。既存の同repository変数を再利用。
 	noteCreateService.SetBlockingRepo(blockingRepo)
@@ -350,6 +385,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	noteDeleteService := corenote.NewDeleteService(noteRepo)
 	noteDeleteService.SetUserRepo(userRepo) // #1538: resolve author for moderator delete
 	noteDeleteService.SetNoteStreamHook(&noteDeleteStreamAdapter{pub: noteEventPub})
+	noteDeleteService.SetChartHook(chartHooks)
 	noteQueryService := corenote.NewQueryService(noteRepo, followingRepo)
 	noteQueryService.SetFavoriteRepo(noteFavoriteRepo)
 	noteQueryService.SetThreadMutingRepo(noteThreadMutingRepo)
@@ -367,6 +403,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	followingService := corefollowing.NewService(userRepo, followingRepo, followRequestRepo, idGen)
 	followingService.SetRelationReloadPublisher(relationReloadPublisher)
 	followingService.SetMainStreamPublisher(mainStreamPublisher)
+	followingService.SetChartHook(chartHooks)
 	// remote instance の followersCount / followingCount を Follow/Unfollow 時に
 	// incremental 更新する (#596)。未配線でも本機能には影響しないが、admin
 	// dashboard の federation pie chart が起動直後以外で 0 に偏る。
@@ -472,6 +509,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	reactionService := corereaction.NewService(noteRepo, reactionRepo, emojiRepo, followingRepo, idGen)
 	reactionService.SetFeaturedRanking(featuredService)
 	reactionService.SetNoteStreamHook(&reactionNoteStreamAdapter{pub: noteEventPub})
+	reactionService.SetChartHook(chartHooks)
 
 	// Reactions buffering (issue #57): meta.enableReactionsBuffering が true なら
 	// Redis にバッファし、30秒ごとに DB へ flush する。
@@ -699,6 +737,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// publisher で配信する (#1564)。
 	driveService.SetFolderStreamingPublisher(drivePublisher)
 	driveService.SetMainStreamPublisher(mainStreamPublisher)
+	driveService.SetChartHook(chartHooks)
 	// storedInternal=true な行 (object storage 有効化より前 / TS 時代に保存された
 	// ファイル) はローカル FS にあるので、削除経路がそちらに届くようにする。
 	driveService.SetLocalStorage(localDriveStorage)
@@ -915,6 +954,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	apFetcher := corefederation.NewAPFetcher(apClient)
 	federationResolver := corefederation.NewResolver(userRepo, noteRepo, apURLs, apFetcher, idGen)
 	federationResolver.SetBackground(s.background) // #3661: 世代の停止で待つ
+	federationResolver.SetChartHook(chartHooks)
+	// resolver が新しく作った note (inbound Create、返信元・引用・Announce の
+	// 対象など) は resolver 側で数える (#3330)。processor は Announce の renote
+	// 行だけを数えるので、こちらも配線しないと Create が一切数えられない。
+	federationResolver.SetNoteChartHook(chartHooks)
 	publickeyRepo := repository.NewUserPublickeyRepository(s.db)
 	federationResolver.SetPublickeyRepo(publickeyRepo)
 	// FEP-521a Multikey 対応で remote actor の assertionMethod[] を parse して
@@ -940,6 +984,12 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	federationProcessor := corefederation.NewProcessor(federationResolver, followingService, reactionService, noteDeleteService, userRepo, noteRepo)
 	federationProcessor.SetBackground(s.background) // #3661: 世代の停止で待つ
 	federationProcessor.SetLocalBaseURL(s.config.URL)
+	// federation 経由のリモートノート (Create / Announce) も PerUserNotesChart
+	// 等の note 系 chart に +1 を記録するために配線する (#1156)。これが無いと
+	// リモートユーザーのプロフィール「アクティビティ」タブの heatmap が空に
+	// なり、削除 (-1) だけが note_delete_service 経由で記録されてマイナス側に
+	// しか動かなくなる drop-in regression が発生する。
+	federationProcessor.SetNoteChartHook(chartHooks)
 	// 連合 inbox 経由の invite 受信時にも local 被招待者の reversi stream に
 	// `invited` を push する (#417 P2: リアルタイム招待)。
 	federationProcessor.SetReversiStreamPublisher(reversiPublisher)
@@ -1133,6 +1183,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	noteDeleteHook.SetNoteRepo(noteRepo)
 	noteDeleteService.SetFederationHook(noteDeleteHook)
 	deliverProcessor := processors.NewDeliverProcessor(apClient)
+	deliverProcessor.SetChartHook(chartHooks)
 	// 配信結果に応じて instance.isNotResponding を更新する
 	deliverProcessor.SetResponseHook(instanceService)
 	// suspend / block されたインスタンスへは dispatch 時に配送を止める (#1404)。
@@ -1164,6 +1215,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// inbound throughput が ~2x に改善する (#565)。順序保証は各 activity
 	// handler の冪等性で吸収する Misskey TS 互換戦略。
 	inboxProcessor := processors.NewInboxProcessor(federationProcessor)
+	inboxProcessor.SetChartHook(chartHooks)
 	// LD-Signature 検証で解決する著者に「リレー由来」の印を付ける (#2340)。
 	inboxProcessor.SetRelayActorChecker(relaySvc)
 	inboxProcessor.SetSignatureVerifier(federationResolver)
@@ -1184,7 +1236,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 同じ用途 (短命の使用済みマーカー) で、timelines / reactions のような
 	// 用途別インスタンスに載せる理由が無い。
 	inboxProcessor.SetInboxReplayGuard(processors.NewRedisInboxReplayGuard(s.redis.Default))
-	// chartHook は後段で SetChartHook 注入する (deliverProcessor と同じ pattern)。
 	s.queueServer.Handle(queue.TaskTypeInbox, inboxProcessor.Handle)
 
 	// Remote notes cleaning (issue #46): enqueue 契機は scheduler の cron
@@ -1356,11 +1407,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		})
 	})
 
-	// Charts (Phase 4 Step Q / 4.7) — 12 chart engines + management
-	// service + hook adapter. The hooks must be wired before any
-	// service that consumes them is invoked, so we construct the
-	// bundle here, before the handler-binding section below.
-	chartCharts := buildChartBundle(s.db)
+	// Charts (Phase 4 Step Q / 4.7) — management service. The 12 chart
+	// engines (chartCharts) and the hook adapter (chartHooks) are built
+	// right after the repositories so that each consumer gets the hook
+	// as soon as it is constructed (#3676).
 	chartMgmt := chart.NewManagementService([]*chart.Chart{
 		chartCharts.Notes,
 		chartCharts.Users,
@@ -1383,47 +1433,17 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// `slog.Default()` に出る。Chart 側と揃えて、配線した時点のものに固定する。
 	chartMgmt.SetLogger(slog.Default().Warn)
 	s.setChartManagement(chartMgmt)
-	chartHooks := charthook.New(charthook.Config{
-		Notes:            chartCharts.Notes,
-		Users:            chartCharts.Users,
-		Drive:            chartCharts.Drive,
-		Federation:       chartCharts.Federation,
-		Instance:         chartCharts.Instance,
-		ApRequest:        chartCharts.ApRequest,
-		ActiveUsers:      chartCharts.ActiveUsers,
-		PerUserNotes:     chartCharts.PerUserNotes,
-		PerUserDrive:     chartCharts.PerUserDrive,
-		PerUserFollowing: chartCharts.PerUserFollowing,
-		PerUserPv:        chartCharts.PerUserPv,
-		PerUserReaction:  chartCharts.PerUserReaction,
-		IDGen:            idGen,
-	})
-	// meta フラグでチャート生成を制御する。
-	if m, err := metaRepo.Fetch(); err == nil {
-		chartHooks.ChartsForRemoteUser = m.EnableChartsForRemoteUser
-		chartHooks.ChartsForFederatedInst = m.EnableChartsForFederatedInstances
-		chartHooks.StatsForFederatedInst = m.EnableStatsForFederatedInstances
-	}
-	// 上の 3 つは起動時の写しで、読めなかったときの代わり。本家は meta をその場で
-	// 読むので、admin での切り替えが再起動を待たずに効くよう毎回 cachedMeta を
-	// 読ませる (#3330)。
-	chartHooks.SetMetaSource(metaRepo.Fetch)
 	// instance の notesCount / usersCount (#3330)。本家と同じく chart hook の
 	// enableStatsForFederatedInstances の分岐の中で動かす。notesCount の加算は
 	// inbox の最頻経路なので、本家の CollapsedQueue と同じく窓で合算してから書く。
+	//
+	// chartHooks は repository の直後で作るが、このバッファは goroutine を起動し、
+	// shutdown hook を登録するので、hook の登録順 (FIFO で止まる) を変えないよう
+	// ここに残す (#3676)。chartHooks のフィールドに入れるだけなので setter の辺ではない。
 	instanceCounterBuffer := coreinstance.NewCounterBuffer(instanceRepo, 30*time.Second)
 	instanceCounterBuffer.Start(context.Background())
 	s.registerShutdownHook(func(_ context.Context) { instanceCounterBuffer.Close() })
 	chartHooks.InstanceCounter = instanceCounterBuffer
-	// 各サービスへ chart hook を注入する。Set* は nil 安全なので順序は不問。
-	noteCreateService.SetChartHook(chartHooks)
-	noteDeleteService.SetChartHook(chartHooks)
-	followingService.SetChartHook(chartHooks)
-	reactionService.SetChartHook(chartHooks)
-	driveService.SetChartHook(chartHooks)
-	federationResolver.SetChartHook(chartHooks)
-	deliverProcessor.SetChartHook(chartHooks)
-	inboxProcessor.SetChartHook(chartHooks)
 	// 配送先ホストごとの健全性テレメトリ (#2461)。upstream は結果を
 	// `isNotResponding` の真偽値にしか残さないので、mk-go 独自の観測。
 	//
@@ -1453,16 +1473,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		inboxHealth.Start(context.Background())
 		s.registerShutdownHook(func(ctx context.Context) { inboxHealth.Stop(ctx) })
 	}
-	// federation 経由のリモートノート (Create / Announce) も PerUserNotesChart
-	// 等の note 系 chart に +1 を記録するために配線する (#1156)。これが無いと
-	// リモートユーザーのプロフィール「アクティビティ」タブの heatmap が空に
-	// なり、削除 (-1) だけが note_delete_service 経由で記録されてマイナス側に
-	// しか動かなくなる drop-in regression が発生する。
-	federationProcessor.SetNoteChartHook(chartHooks)
-	// resolver が新しく作った note (inbound Create、返信元・引用・Announce の
-	// 対象など) は resolver 側で数える (#3330)。processor は Announce の renote
-	// 行だけを数えるので、こちらも配線しないと Create が一切数えられない。
-	federationResolver.SetNoteChartHook(chartHooks)
 
 	// Hashtag service: ノート作成 (local / federation 両経路) で hashtag table の
 	// mentionedUsersCount / mentionedUserIds を更新する (#680)。/api/hashtags/list
