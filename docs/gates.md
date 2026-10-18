@@ -152,6 +152,29 @@ go/types へ移せば消える。
 受け取るのは `registerPluginSecretRoutes` (`plugin_secrets.go`) だけ。そこの route は path を
 定数で書くので、もともとどの抽出にも載らない (プラグインの route は本家の golden に無い)。
 
+**既知の限界 (`TestAPIRegistrationsGoThroughAPIRoutes`、#3677)**: このテストは、`apiRoutes` の
+`POST` / `Match` / `GET` を通らない /api の登録 (`withParamShadow` と `requireObjectBody` が
+付かない) を、**名前の正規表現**で探す。落とすのは、普通に書いたときに踏む形 (`api.Group.POST`、
+`api.Group.Add`、`api.Add`、`api.PUT`、`"/api/..."` を書いた `s.echo.POST` など) だけである。
+次の形は拾わない。
+
+- `*echo.Group` 型の引数で受け取った group に登録する (`registerX(api.Group)` と
+  `func registerX(g *echo.Group)`)
+- `s.echo.Group("/api")` で別の group を作って登録する
+- `g := api.Group` のように別名を通して登録する
+- path の `"/api/"` を定数や変数で書いて `s.echo.POST` に渡す
+- `e := s.echo` のように echo のインスタンスを別名にして、`e.POST("/api/x", h)` と書く
+- path を raw string (`` s.echo.POST(`/api/x`, h) ``) で書く
+
+この列挙は、敵対的レビュー (#3677 の 2 周目と 3 周目) で確かめた形で、網羅ではない。
+
+本家の golden にある endpoint をこれらの形へ移すと、`TestAPICompatDoc_MatchesRouter` と
+`TestParamShadowChangesNoResponse` が別の理由で落とす (#3677 の敵対的レビュー 2 周目で実測)。
+`collectRoutes` の型で引く方式へ寄せることも検討した。ただし `collectRoutes` は受け手の名前が
+`api` なら /api の group そのものとみなすので、`apiRoutes` と `*echo.Group` を区別しない。
+`*echo.Group` 型の引数 (上の 1 つ目) も /api と結び付けない。どちらも足すと
+`internal/entitycompat` の解析を広げる大きさになるので、ここでは限界として書くにとどめた。
+
 ## 変更の経緯 (旧 CLAUDE.md の更新記録)
 
 CLAUDE.md の「更新記録」に書かれていた本文を、#3248 でここへ移した。**記述は当時のまま**で、文中の「Section N」は当時の CLAUDE.md の節を指す。新しいものが上。
