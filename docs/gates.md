@@ -31,6 +31,127 @@
 | `sqlbind-check` | 値をクォート内へ差し込まずバインドしているか検査 |
 | `gaterun-check` | gates の -run が名指しするテストが実在するか検査 |
 
+## `internal/server` のソースを読むゲート (#3672)
+
+`perm-check` / `errorid-check` / `limitspec-check` / `wiring-check` と、`internal/server` の
+ソースを読むテストは、**`git ls-files` で列挙した `internal/server` 直下の非テストの `.go` を
+全部読む**。`router.go` のような 1 つのファイルを名指ししない。組み立てのコード
+(`setupRoutes`) を別のファイルへ移すたびに、ゲートが「抽出が 0 件」で落ちて直すことに
+ならないようにするため (#3666 の部品化の前提)。`internal/server/middleware` は別の
+パッケージで、route の登録も配線も持たないので読まない。
+
+新しくゲートを書くときも、ファイル名ではなく次のヘルパーを通す。
+
+| パッケージ | ヘルパー | 返すもの |
+|---|---|---|
+| `internal/entitycompat` | `serverSources` / `serverSourcePaths` | 列挙したファイルの本文 / 絶対パス |
+| `internal/entitycompat` | `parseServerFiles` / `inspectServerFiles` | 1 つの `FileSet` に載せた構文木と、その全ファイルの走査 |
+| `internal/entitycompat` | `assertWired(t, serverPkg, ...)` | 全ファイルの配線の集合に、その配線があるか |
+| `internal/server` | `packageSources` / `packageSourceWithoutComments` | 列挙したファイルの本文 / コメントを落として改行でつないだ本文 |
+
+ルートを解析するヘルパー (`parseRoutes` / `parseRouteRegistrations` / `parseRouteLevels` /
+`parseGetRoutes` / `scanInlineRoutes` / `countInlineHandlers` / `countCriticalWiringEntries`) は
+可変長でファイルを受け取るので、fixture を渡すテストは 1 ファイルでも複数ファイルでも書ける。
+
+### handler の package は型で引く
+
+error id / kind / status / limit とパスワードの rate limit のゲートは、route の handler
+(`recv.Method`) の受け手から `internal/api` の package を引き、そのパッケージのソースと
+突き合わせる。受け手は `collectRoutes` が **Go のスコープと型で** 引く。
+
+1. route を囲むブロック (内側から): `{}`、if / for / switch の初期化、range、case、関数の
+   引数。ブロックの中では route より前の宣言だけを見る。宣言の右辺は、宣言の位置で引く。
+   宣言が見つかったら、型が分からなくても外側へは行かない
+2. パッケージのトップレベルの `var` (どのファイルでもよい。Go と同じ)
+
+**同じ関数の中で同じ名前の宣言 (`:=` / `var` / 引数 / range / type switch) が 2 つ以上あり、
+引いた型が食い違う (引けないものが混じる) ときは「引けない」に倒す。** `=` の代入は数えない
+(Go では `=` で静的な型は変わらず、別の型の値を入れると compile が通らない。数えると、
+wrapper に通して入れ直すような正当な形まで落ちる)。 `{ h := ah ... } { h := ch ... }` のように、ブロックごとに
+同じ名前を別の handler に使う形は、解決を誤ると antennas の route を clips のメソッドとして
+検査する (敵対的レビュー 2 周目で、実際の router.go の antennas 6 本と clips 11 本をこの形へ
+移して実測。引けない側に倒した今は TestAPIRouteHandlersResolve が 17 本を落とす)。ブロックの
+規則を読み違えても、黙って別の package に解決しないための保険で、名前を分ければ通る。
+
+**`go/types` で型検査しない理由。** internal/server の import 先 (約 930 package) の export
+data が要る。`go list -export` は、キャッシュが冷えていると 8 コアで 38 秒 (CPU 3 分 50 秒)
+かかった。CI の test は `-race` と `-cover` で build するので、`-race` 無しの export data は
+キャッシュに無く、毎回この compile が走る。`go list -race -export` なら test の build が
+温めた export data を使えるが、それでも entitycompat が入る shard の package を `-race -cover`
+で build した後に約 18 秒 (8 コアで 17.6 秒。internal/server の shard の後なら 6.7 秒) かかった
+(敵対的レビュー 3 周目の実測)。fixture を型検査が通る形に書き直す手間もある。
+
+型は、引数や `var` の型、`pkg.NewX(...)`、`&pkg.T{}` / `pkg.T{}`、同じパッケージの関数や
+メソッドの戻り値の型、同じパッケージの構造体のフィールドの型から引く。メソッドの戻り値は、
+受け手の型を同じパッケージの型として引けたときだけ使う (他の package の値の `m.Handler()` を、
+同じ名前のローカルのメソッドと取り違えないため)。
+`func registerNotesRoutes(api apiRoutes, h *notes.Handler)` のように handler を引数で
+受け取る形も、`iHandler, _ := s.buildAccount()` のように戻り値で受け取る形も、
+`h.notes.Create` のように構造体で持つ形も解決する。
+
+**名前の表で引いてはいけない。** #3672 の 1 回目の実装は `h := pkg.NewX(...)` の名前の表を
+他のファイルへ落として引いたので、段階 2 で普通に書く `registerNotesRoutes(api apiRoutes,
+h *notes.Handler)` の `h` を、別のファイルの `h := pluginsecrets.New(...)` と取り違えた
+(敵対的レビューで実測。notes の 37 本の route が pluginsecrets のメソッドとして解決され、
+全テストが緑のまま notes の error id が検査から外れた)。引数名を表に無い名前にすると、
+37 本が黙って解決されなくなった。
+
+**解決できない /api の route は 0 本に保つ** (`TestAPIRouteHandlersResolve`)。`/api` の group
+(`api` という名前か `apiRoutes` 型の値) と、そこから `.Group(...)` で作った group に登録した
+route (GET / POST / PUT / DELETE。`api.Match` の chart は含まない) について、(a) handler が
+`x.Method` の形でない、(b) 受け手の型を引けない、(c) 引いた先が `internal/api` の外、
+(d) 引いた先のパッケージにそのメソッドが無い、のどれかなら落とす。正当に残すものは
+`apiRouteResolveAllowlist` に「どの経路で出るか」を書く (今は空。使われていない項目も落とす)。
+#3672 の時点で 528 本がすべて解決する (数え方: `collectRoutes` が拾った
+`X.<METHOD>("/path", ...)` の登録 589 本のうち、上の group に登録したもの。残りの 61 本は
+`s.echo` や pprof の group に登録した /api の外の route で、対象外)。
+
+### ファイルをまたぐときの決まり
+
+- **下限は名指しで置く。** 列挙は `server.go` と `wiring_check.go` を返さなければ落ちる。
+  各ゲートの下限 (`emojis` の GET、`recordCriticalWiring` の呼び出しなど) は従来どおり
+- **closure の束縛、group の変数、method の一覧の変数は、同じファイルの中でだけ引く。**
+  別のファイルの同名の変数は別物
+- **どれを検査するか決まらない形は落とす。** 同じ method と endpoint を 2 つのファイルが
+  登録している、`recordCriticalWiring` が 2 回呼ばれている、`api := apiRoutes{...}` や
+  `/instance-info/:host` の登録が 2 つある、のいずれか。**GET と POST で同じ endpoint を
+  登録しているもの (`emojis` など) は、別々のファイルに分けてよい** (method を鍵に含める)
+- **順序や変数名で突き合わせる検査は、同じファイルにあることを要求する。** offset はファイルの
+  中でだけ意味を持つ (`HideAppUserWithoutRead` の順序)。名前が同じでも別のファイルの変数は
+  同じ instance とは言えない (push の購読のキャッシュ)
+- **コメントの中の登録は数えない。** 別のファイルのコメントに書いた `api.POST(...)` の例で
+  「両方が登録している」と落ちないようにするため
+- **報告はファイル名と行の組で出す。** 構文木は 1 つの `FileSet` に repository からの
+  相対パスで載せる
+- **`git add` していない `.go` は読まれない。** 手元と CI で結果はずれないが、`go build` は
+  通るので気付きにくい。列挙するテストが落ちたときは、`internal/server` の未追跡の `.go` の
+  名前をログに出す
+
+**今の配線と登録はほぼ `router.go` にあるので、読む範囲を `router.go` だけに戻しても、
+ほとんどのゲートは緑のまま通る。** 読む範囲と、ファイルをまたぐ決まりそのものは、2 ファイルの
+fixture を使うテストが見ている (`internal/entitycompat` のものは `make wiring-check` で回る。
+`internal/server` の `TestPackageSourcesCoverEveryFile` / `TestProcessGlobalSettersReadEveryFile` /
+`TestJoinWithoutCommentsSeparatesFiles` / `TestAPIGroupPrefixesFindsEveryLine` は `make check` で回る)。
+
+**既知の限界 (スコープ)**: ローカルの変数が import の名前を隠す形 (`notes := &factory{};
+h := notes.NewHandler()`) は、import の `notes` の constructor とみなす。関数の中で宣言した型が
+パッケージの同じ名前の型を隠す形も、パッケージの型で引く。どちらも黙って別の package に
+解決しうるが、段階 2 で書く見込みは低いので直していない (敵対的レビュー 3 周目の Y17 / Y20)。
+go/types へ移せば消える。
+
+**既知の限界**: perm / secure / oauth / cacheSec と `TestAPICompatDoc_MatchesRouter` の抽出は、
+正規表現で `api.` を見る。`api` 以外の名前で group を渡すと (型が `apiRoutes` でも)、そこに
+登録した route はこれらの抽出から外れる。そのときは `TestAPICompatDoc_MatchesRouter` が
+「api-compat.md にあって internal/server に無い」で落とす (敵対的レビューで、37 本を
+`g apiRoutes` の関数へ移した形で実測。GET の route を含めると `TestCacheSecDrift` も落ちる)。
+`TestAPIRouteHandlersResolve` は型で group を見るので、この形でも handler を検査する。
+また、`api.Group(...)` で作った派生 group を `*echo.Group` 型の引数で別の関数へ渡すと、その
+関数の中の route は /api の外として扱われ、`TestAPIRouteHandlersResolve` の対象からも外れる
+(`parseRoutes` は group の前置きが抜けた path で引くので、error id の golden と照合されない)。
+#3672 の時点で /api の派生 group は `plugin_wiring.go` のプラグイン用だけで、それを引数で
+受け取るのは `registerPluginSecretRoutes` (`plugin_secrets.go`) だけ。そこの route は path を
+定数で書くので、もともとどの抽出にも載らない (プラグインの route は本家の golden に無い)。
+
 ## 変更の経緯 (旧 CLAUDE.md の更新記録)
 
 CLAUDE.md の「更新記録」に書かれていた本文を、#3248 でここへ移した。**記述は当時のまま**で、文中の「Section N」は当時の CLAUDE.md の節を指す。新しいものが上。
