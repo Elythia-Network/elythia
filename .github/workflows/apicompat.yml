@@ -19,9 +19,12 @@ name: apicompat
 
 on:
   pull_request:
+    # **internal/server はディレクトリごと見る (#3672)。** route の登録は
+    # router.go だけにあるとは限らない (plugin_wiring.go が /api 配下を生やす)。
+    # 組み立てを別のファイルへ移した PR で発火しなくなるのを防ぐ。
     paths:
       - 'internal/api/**'
-      - 'internal/server/router.go'
+      - 'internal/server/**'
       - 'UPSTREAM_MISSKEY_VERSION'
       - 'tools/**'
       - 'internal/upstreamsrc/**'
