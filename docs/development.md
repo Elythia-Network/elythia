@@ -235,6 +235,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_xxx" ON "yyy" ("zzz");
 | `make playwright-up` `playwright-test` `playwright-down` | Playwright によるフロントエンド / API テスト | [Playwright](playwright.md) |
 | `make upstream-fetch` | 比較対象の本家 (`UPSTREAM_MISSKEY_VERSION` の版) を `.cache/misskey/<版>/` へ取得する。golden の再生成・本家 backend e2e・apicompat の前提 (#3378) | [本家への追従](upstream-catch-up.md) |
 | `make upstream-check` | golden と本家を読むテストが本家の版と一致するか (本家から作り直して差分が無いこと)。`apicompat` workflow が回す | [shape drift](shape-drift.md) |
+| `make paramdef-gen` | 本家の`paramDef`のgoldenと、ajvの照合corpusを作り直す(#3673)。nodeと`frontend/node_modules`(TypeScriptと、本家と同じ版のajv)が要る。`make upstream-check`からも呼ばれる | [本家への追従](upstream-catch-up.md#本家の版を上げた後に必須-引数のschemaparamdefのgoldenとajvの照合corpus) |
 | `make upstream-sync TO=<版>` | 本家の新しい版の差分のうち、`frontend/` が取り込むパスだけを 3-way で当てる (設計 D4、#3379)。区分に当たらないパスがあれば何も当てずに止まる。`DRY=1` で分類だけを表示 | [本家への追従](upstream-catch-up.md) |
 | `make upstream-sync-lock` | `frontend/pnpm-lock.yaml` を、直前の lock を基点に package.json から作り直す (`pnpm install --lockfile-only`、node の container で実行) | [本家への追従](upstream-catch-up.md) |
 | `make upstream-e2e-deps` `upstream-e2e-up` `upstream-e2e-migrate` `upstream-e2e-test` `upstream-e2e-down` | Misskey 本家の backend e2e をテスト本体無改変で Elythia に向けて実行 | [本家 backend e2e](upstream-backend-e2e.md) |

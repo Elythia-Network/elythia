@@ -103,7 +103,7 @@ PR を出すと十数個の check が走る。**どれが何を見ていて、�
 | `review` | Dependency review | PR が**新しく持ち込む**依存に既知の脆弱性が無いか (base と head の差分を比較、high 以上で失敗) | 未計測 | 手元では回せない (GitHub の advisory DB を引く) |
 | `analyze (go)` / `analyze (actions)` | CodeQL | **自分のコード**の静的解析 (Go の全 module と workflow の式) | 未計測 | 手元では回せない (CodeQL CLI が要る)。Code scanning alerts で見る |
 | `plugin-tests` | CI | 同梱プラグインのテスト (別 module なので `go list ./...` に入らない) | 1 min | `make plugin-test` |
-| `apicompat` | apicompat | **`docs/api-compat.md` が実態とずれていないか** (生成物なので再生成して diff を見る)。あわせて golden が本家の版に追いついているか (`make upstream-check`、#3378) | 未計測 | `make apicompat` (**プラグイン抜き + testMode が要る**。手順は docs/development.md) |
+| `apicompat` | apicompat | **`docs/api-compat.md` が実態とずれていないか** (生成物なので再生成して diff を見る)。あわせて golden (本家の`paramDef`とajvの照合corpusを含む、#3673) が本家の版に追いついているか (`make upstream-check`、#3378) | 未計測 | `make apicompat` (**プラグイン抜き + testMode が要る**。手順は docs/development.md) |
 | `e2e (1/4)` 〜 `4/4` | Upstream backend e2e | **本家の backend e2e 1256 テスト**が Elythia に対して通るか | 3-7 min | `make upstream-e2e` |
 | `diff` | Diff e2e | Elythia と TS の**レスポンスの値**が一致するか (endpoint 比較 35 件) | 4 min | `make diff-check` |
 | `swap-test` | Drop-in e2e | TS→mk 切替で state が保たれるか | 5 min | `make dropin-swap-test` |
@@ -654,6 +654,13 @@ checkout / setup-go を除くと step は実行順に 3 つ。**required job な
   (route dump がサーバーを組み立てる) の両方が要るが、`test-shards` は本家を checkout せず、
   `frontend` workflow は DB を持たない。本家を取得するので、golden の追いつき
   (`make upstream-check`) もこの workflow で見る (#3378)。
+- **本家の`paramDef`のgoldenとajvの照合corpus(#3673)も`make upstream-check`で見る。**
+  抜き出し器(`tools/paramdefspec`)は本家の`.ts`をTypeScriptのパーサーで読むnodeの道具で、
+  corpusは本家と同じ版のajvで作るので、`frontend/`の依存を`pnpm i --frozen-lockfile`で
+  入れてから回す(buildはしない)。本家を前提にする検査なので、requiredの`frontend` workflowには
+  置かない。ajvやTypeScriptの版はlockで変わるので、pathsに`frontend/pnpm-lock.yaml`を入れている。
+  検証器がcorpusの全件と一致するかは、nodeの要らない`go test`として`test-shards`で走る。
+  手順は[本家への追従](upstream-catch-up.md#本家の版を上げた後に必須-引数のschemaparamdefのgoldenとajvの照合corpus)
 - **config は `tests/upstream-e2e/mkgo.yml`。** `testMode: true` が要る — 無いと
   `/api/reset-db` が route に載らず、マトリクスが「TS 側に存在するが未実装 1 件」に化ける。
   接続先だけ `MK_*` で service container へ向ける。

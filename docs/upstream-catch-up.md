@@ -218,6 +218,33 @@ git add internal/entitycompat/testdata/
 
 詳細は [shape-drift.md](./shape-drift.md)。
 
+### 本家の版を上げた後に必須: 引数のschema(paramDef)のgoldenとajvの照合corpus
+
+本家の各endpointの`paramDef`(引数のJSON Schema)と、本家がajvに渡す設定(ajvの版、`new Ajv({...})`の引数、`addFormat`)は`internal/api/paramschema/upstream_paramdefs.json`に、その全endpointについて本家と同じ版・同じ設定のajvで判定した照合のcorpusは`internal/api/paramschema/testdata/ajv_corpus.jsonl`にある(#3673)。`internal/api/paramschema`の検証器は、corpusの全件と、判定・最初のエラー(`schemaPath`と`message`)・defaultを入れた後の値が一致することを`TestConformsToAJVCorpus`で守る。どちらも生成物なので手で直さない。
+
+```bash
+make upstream-fetch                    # UPSTREAM_MISSKEY_VERSION の本家を取得
+make paramdef-gen                      # 抜き出し (extract.mjs) → corpus (corpus.mjs)
+go test ./internal/api/paramschema/    # 検証器が新しい paramDef と corpus に合うか
+git add internal/api/paramschema/upstream_paramdefs.json internal/api/paramschema/testdata/ajv_corpus.jsonl
+```
+
+- **`frontend/node_modules`が要る。** 抜き出しは本家の`.ts`を`frontend/node_modules/typescript`のパーサーで読み(実行はしない)、corpusは`frontend/node_modules/.pnpm/ajv@<版>`のajvで判定する。ajvの版は本家の`packages/backend/package.json`から読む。frontendはajvに直接依存しておらず、推移的に入っている版を名指しして読むので、本家がajvを上げてその版が`frontend/`の依存に無いと`paramdef-gen`が落ちる。そのときは`frontend/package.json`のdevDependenciesにその版のajvを足し、`make upstream-sync-lock`でlockを作り直す
+- **抜き出しは、評価できない式が1つでもあれば落ちる**(`unresolved values`)。本家のparamDefが新しい書き方を使い始めたら、`tools/paramdefspec/extract.mjs`の`ev`にその式の評価を足す。推測の値で埋めない
+- **解くのはトップレベルの`const`だけ。** 宣言の後に書き換えられる名前も解かずに落とす。実行時の値が宣言の初期値と違うかもしれないため。`unresolved values`の行の読み方は次のとおり
+  - `<名前> is not a const in <ファイル>`: paramDefが`let` / `var`の名前を参照している。宣言の初期値をそのまま使わず、実行時の値を確かめてから`extract.mjs`での扱いを決める
+  - `<名前> is written after its declaration in <ファイル>`: そのファイルの中に、その名前への代入・`++` / `--`・`delete`・`Object.assign`などの書き換える関数・`push`などの書き換えるメソッドがある。名前の有効範囲は見ないので、同じ名前の局所変数への代入や、書き換えに見える読み取り(`[...X].sort()`、分割代入の既定値やキー)でも落ちる。本当の書き換えなら実行時の値を確かめて扱いを決める。書き換えでなければ、`extract.mjs`の`writtenNames`の判定を直す
+- **書き換えの検出は名前で見るので、見つけられないものがある。** 別名を通した書き換え(`const p = paramDef.properties; p.limit.maximum = 7`)、関数やcallbackの引数として渡した先での書き換え、`Object['assign']`のように名前で書かない呼び出し、定義のファイルとendpointのファイル以外(第3のファイル)からの書き換えは、落ちずにgoldenが実行時の値と違ったままになる。本家の版を上げたときは、本家の差分にparamDefやそれが参照する定数への書き換えが無いかを読む
+- **corpusは決定的に作る。** 同じgoldenと同じajvからは同じバイト列になる。endpointごとに、正しい入力と、1か所ずつ壊した入力(型の取り違え、制限の前後の値、必須の欠落、2か所の同時の違反など)を作る。`tools/paramdefspec/synthetic.json`には、本家のparamDefに無い形でkeywordの順や境界を確かめる手書きのschemaと入力を置いてあり、これもajvに判定させる。ajvが受理した入力のうち、受理した後の値にInfinity(`1e400`)が残るものはJSONに書けないので記録しない(2026.10.0では1件)
+- 落ちたテストの読み方
+  - `TestGoldenMatchesPinnedUpstream`: goldenが`UPSTREAM_MISSKEY_VERSION`の版から作られていない。`make paramdef-gen`を流す
+  - `TestConformsToAJVCorpus`の`was not built from the current`: goldenだけを作り直し、corpusを作り直していない(corpusのヘッダーにgoldenのsha256がある)
+  - `TestEveryUpstreamParamDefCompiles`: 本家が、検証器の扱わないkeyword・format・正規表現の構文を使い始めた。enumのobject・配列の値と、型の無い(またはobject・配列の)itemsへの`uniqueItems`もここで落ちる。ajvはこれらをfast-deep-equalで比べ、比べるobjectの`constructor` / `toString` / `valueOf`キーで判定が変わる(または例外を投げる)ので、検証器は写さずに拒んでいる。`internal/api/paramschema`に足し、ajvでの挙動を`synthetic.json`に足してcorpusで確かめる
+  - `TestGoldenAJVConfigIsWhatThisPackageImplements`: 本家がajvの版・設定・formatを変えた。ajvの変更点を読み、検証器の挙動を合わせてからテストの期待値を更新する
+  - `TestCorpusRejectsAtEveryReachableKeyword`: 本家のparamDefのkeywordの位置のうち、corpusにそのschemaPathで拒否されたcaseが無いものがある。新しい形のparamDefに生成器(`corpus.mjs`の`mutate`)が届いていない。生成器を直す。errors[0]にならない位置なら、`coverage_test.go`の規則か個別の項目に理由と一緒に足す(使われなくなった規則や項目があっても落ちる)
+  - `TestConformsToAJVCorpus`の個々の不一致: 検証器とajvの判定が食い違った。不一致を例外にして通さず、検証器を直す
+- CIでは、`apicompat` workflowの`make upstream-check`が`paramdef-gen`を流して差分が無いことを見る。corpusとの一致は、nodeの要らない`go test`として`test`(`test-shards`)で走る
+
 ### 本家の版を上げた後に必須: TypeORM migrations seed の追加
 
 upstream に新しい migration が入った場合、`migrations` テーブルへの seed も追加する。
