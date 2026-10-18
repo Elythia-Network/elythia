@@ -126,6 +126,7 @@ upstream `server/api/endpoints/` の endpoint 群を、ディレクトリ単位�
 |---|---|
 | `apierr` | Misskey 互換のエラーコード/UUID 定義 |
 | `pagination` | sinceId/untilId/sinceDate/untilDate の正規化 |
+| `paramschema` | 本家の`paramDef`(引数のJSON Schema)で、本家のajvと同じ判定・同じ最初のエラー・同じdefaultの挿入をする検証器(#3673)。まだどのhandlerにも繋いでいない |
 | `optional` | JSON の null/absent を区別する Nullable 型 |
 | `notehide` | per-viewer の hideNote ゲートを全 REST に一律適用（TS は各 pack 内 `hideNote`） |
 | `userrelation` | viewer 視点の relation block (isFollowing 等) 解決 |
