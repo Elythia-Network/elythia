@@ -3858,3 +3858,5 @@ _mkgoSuspendedSoftware:
   inboxStatus: "Inbox refusal by software"
   inboxSuspended: "Refusing"
   inboxNotSuspended: "Not applicable"
+_mkgoDrive:
+  cannotDeleteProtectedFile: "This file cannot be deleted here because it belongs to the server (such as an emoji image) or is used as a custom emoji image. If it is an emoji image, delete the emoji from the custom emoji settings."

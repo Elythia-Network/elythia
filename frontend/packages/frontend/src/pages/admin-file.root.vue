@@ -115,8 +115,15 @@ async function del() {
 	});
 	if (canceled) return;
 
+	// Elythia: このページでモデレーターが ACCESS_DENIED を受け取るのは、system 所有の
+	// ファイルか絵文字が使っているファイルを消そうとしたときだけ (#3678)。理由と
+	// 消し方を出す
 	os.apiWithDialog('drive/files/delete', {
 		fileId: props.file.id,
+	}, undefined, {
+		'5eb8d909-2540-4970-90b8-dd6f86088121': {
+			text: i18n.ts._mkgoDrive.cannotDeleteProtectedFile,
+		},
 	});
 }
 
