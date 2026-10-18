@@ -1,19 +1,13 @@
 package server
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/stretchr/testify/require"
 )
 
 func TestMoveTargetLocalURIResolutionIsWired(t *testing.T) {
-	router := filepath.Join(repoRootDir(t), "internal", "server", "router.go")
-	raw, err := os.ReadFile(router)
-	require.NoError(t, err)
-	src := stripComments(string(raw))
+	// パッケージ全体を読む (#3672)。組み立てを別のファイルへ移しても同じ配線を見る。
+	src := packageSourceWithoutComments(t)
 
 	for _, wiring := range []struct {
 		call, endpoint string
