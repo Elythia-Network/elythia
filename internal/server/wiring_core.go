@@ -49,7 +49,9 @@ import (
 // timer, shutdown hook or global write, and dependencies limited to the
 // repositories and the services built before them here. Services that need
 // a stream publisher, a handler, a federation part or a value read from the
-// DB at construction stay in setupRoutes (docs/architecture.md 4.2).
+// DB at construction are not built here: the relay service is built by
+// buildFederation (#3688), the others stay in setupRoutes
+// (docs/architecture.md 4.2).
 //
 // buildCore only constructs. Every setter on these services is still called
 // at its old position in setupRoutes, because workers started during

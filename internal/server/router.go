@@ -406,8 +406,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	abuseInAppNotifier := coreSvcs.abuseInAppNotifier
 
 	// 以下は #3676 で受け手より先に作るようにした部品のうち、buildCore へ移さなかった
-	// もの (passwordFailureGuard・proxyAccountResolver・dbHealth・inboxSoftwareChecker)
-	// と、buildCore へ移した部品 (featuredService・hashtagService など) への setter。
+	// もの (passwordFailureGuard・proxyAccountResolver・dbHealth) と、buildCore へ移した
+	// 部品 (featuredService・hashtagService など) への setter。inboxSoftwareChecker は
+	// 下の buildFederation で作る (#3688)。
 	// 部品はどれも作るだけで DB にも Redis にも触らず、goroutine も起動しない。
 	// 受け手への setter の呼び出しは元の位置のまま。
 	//
@@ -425,9 +426,28 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	proxyAccountResolver := newProxyAccountResolver(systemAccountRepo, userRepo)
 	// DB の健全性 (#3095)。統計はプライマリから読み、1 分キャッシュする。
 	dbHealth := dbhealth.NewService(s.db, s.config.DBReplications && len(s.config.DBSlaves) > 0)
-	// 受信を拒否するソフトウェア (#3362) の判定。連合の resolver と、WebFinger で
-	// 利用者を引く remoteUserResolver が共有する。
-	inboxSoftwareChecker := corefederation.NewInboxSuspendedChecker(metaRepo, instanceRepo)
+	// 連合の部品 (#3688)。作るのは buildFederation (wiring_fed.go) で、ここでは今までと
+	// 同じ名前の別名を置く。呼ぶ位置は、移した部品の中で最初に作っていた
+	// inboxSoftwareChecker の位置。移した部品は作るだけで副作用を持たないので、
+	// apURLs や deliverService を作る位置が前へ移っても、DB と Redis の文の順は
+	// 変わらない。setter はそれぞれ元の位置のまま。
+	// **別名は変数 fedSvcs から取る。** w.fed から取ると、別名を代入より前に書いても
+	// コンパイルが通り、ゼロ値を黙って受け取る (docs/architecture.md 4.2)。
+	fedSvcs := s.buildFederation(w, coreSvcs, idGen)
+	w.fed = fedSvcs
+	inboxSoftwareChecker := fedSvcs.inboxSoftwareChecker
+	apURLs := fedSvcs.apURLs
+	apRenderer := fedSvcs.apRenderer
+	deliverService := fedSvcs.deliver
+	relaySvc := fedSvcs.relay
+	noteDeliveryHook := fedSvcs.noteDeliveryHook
+	followingDeliveryHook := fedSvcs.followingDeliveryHook
+	quoteRequestDeliveryHook := fedSvcs.quoteRequestDeliveryHook
+	noteDeleteHook := fedSvcs.noteDeleteHook
+	deliveryBreaker := fedSvcs.deliveryBreaker
+	userModerationDeliveryHook := fedSvcs.userModerationDeliveryHook
+	profileUpdateHook := fedSvcs.profileUpdateHook
+	pinDeliveryHook := fedSvcs.pinDeliveryHook
 
 	// Core services
 	roleService.SetEffectivePolicyProviderCacheEntries(s.config.EffectivePolicyProviderCacheEntries)
@@ -726,9 +746,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	pollService.SetNotificationHook(notificationHook)
 	// note 著者にブロックされた user の投票を弾く (upstream youHaveBeenBlocked、#1538)。
 	pollService.SetBlockingChecker(blockingService)
-	// poll federation hook は deliverService が下で生成されるので、
-	// `pollService.SetFederationHook(...)` の呼び出しは deliverService 構築後
-	// (router.go:493 以降) に行う。下方の wire-up コメント参照。
+	// poll federation hook の deliverService は buildFederation で作る (#3688)。
+	// `pollService.SetFederationHook(...)` の呼び出しは、setter を元の位置に残す
+	// 規則 (docs/architecture.md 4.1) により、下方の wire-up の位置のまま。
 	// pollEnded 通知は周期 ticker (60s) で expiresAt < NOW() AND notifiedAt
 	// IS NULL を scan して著者 + ローカル投票者に発火する (#690)。Misskey TS
 	// は BullMQ delayed job で実装しているが mk-go では queue infra を経由
@@ -896,9 +916,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	noteCreateService.SetIndexHook(coresearch.NewNoteIndexHook(searchService))
 	noteDeleteService.SetIndexHook(coresearch.NewNoteIndexHook(searchService))
 
-	// ActivityPub
-	apURLs := activitypub.NewURLBuilder(s.config.URL)
-	apRenderer := activitypub.NewRenderer(apURLs)
+	// ActivityPub。apURLs と apRenderer は buildFederation で作る (#3688)。
 	// actor の `published` (アカウントの作成日時) を ID から出す (#3465)。
 	apRenderer.SetIDGenerator(idGen)
 	// Mention tag を AP Note に埋め込むための resolver。
@@ -1089,8 +1107,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// inbound ほど高頻度ではないので buffer を挟まない。
 	federationResolver.SetSignatureCapabilityDeclarer(sigCapRepo)
 
-	// AP delivery: DeliverService + フック登録 + queue processor 登録
-	deliverService := corefederation.NewDeliverService(s.queueClient, userRepo, followingRepo, keypairRepo, apURLs)
+	// AP delivery: DeliverService + フック登録 + queue processor 登録。
+	// deliverService と配送の hook は buildFederation で作る (#3688)。
 	deliverService.SetHostBlockChecker(instanceService)
 	// FEP-521a Multikey 対応で recipient capable + sender Ed25519 鍵あり 経路で
 	// Ed25519 sign を試行できるよう wire (#1067 / #1071)。
@@ -1108,12 +1126,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	pollService.SetFederationHook(corefederation.NewPollDeliveryHook(apRenderer, deliverService, userRepo, apURLs, idGen))
 
 	// Relay 連携 (#161): relay actor system account + relay.Service。
-	// relay.Service は AP delivery を必要とするので deliverService 構築の
-	// 直後でセットアップする。admin/relays ハンドラへ注入し、Accept/Reject
-	// inbox 処理で status を更新できるように processor にも渡す。
+	// relay.Service は buildFederation で作る (#3688)。admin/relays ハンドラへ注入し、
+	// Accept/Reject inbox 処理で status を更新できるように processor にも渡す。
 	// FEP-521a Multikey 対応で system account も Ed25519 鍵対を併発行 (#1067 / #1068)。
 	sysAcctSvc.SetKeypairExtraRepo(keypairExtraRepo)
-	relaySvc := corerelay.NewService(repository.NewRelayRepository(s.db), sysAcctSvc, apRenderer, deliverService, idGen)
 	// relay 配送 activity に RsaSignature2017 LD-Signature を付与する (#1870)。
 	// relay は downstream へ転送する際に元 HTTP-sig を保持できないので、LD-sig が
 	// 無いと downstream が真正性を検証できず reject する。署名者は activity の
@@ -1127,10 +1143,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 同じ keyID 形式 = `<baseURL>/users/<id>#main-key`)。
 	apFetcher.SetSigner(newInstanceActorSigner(sysAcctSvc, keypairRepo, apURLs))
 
-	noteDeliveryHook := corefederation.NewNoteDeliveryHook(deliverService, apRenderer, apURLs, idGen, userRepo, noteRepo)
 	noteDeliveryHook.SetRelayBroadcaster(relaySvc)
 	noteCreateService.SetFederationHook(noteDeliveryHook)
-	followingDeliveryHook := corefederation.NewFollowingDeliveryHook(deliverService, apRenderer, apURLs)
 	followingService.SetFederationHook(followingDeliveryHook)
 	// inbound Follow に対する Accept 返送は processor から直接呼ぶ (original
 	// Follow の id を保持したまま相手に返すため、service 層を経由しない)。
@@ -1143,7 +1157,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		Follows:   followingService,
 		Approvals: quoteAuthorizationRepo,
 		FetchNote: federationResolver.FetchNoteForVerification,
-		Respond:   corefederation.NewQuoteRequestDeliveryHook(deliverService, apRenderer),
+		Respond:   quoteRequestDeliveryHook,
 		URLs:      apURLs,
 		IDGen:     idGen,
 	})
@@ -1159,12 +1173,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	s.queueServer.Handle(queue.TaskTypeResendQuoteRequests, processors.NewResendQuoteRequestsProcessor(quoteOutbox).Handle)
 	// ブロックした相手の引用に出していた承認を取り消す (#3234 段階 4)。
 	blockingService.SetQuoteRevoker(corefederation.NewQuoteRevoker(quoteAuthorizationRepo, userRepo, noteRepo,
-		corefederation.NewQuoteRequestDeliveryHook(deliverService, apRenderer), noteDeliveryHook, apURLs))
+		quoteRequestDeliveryHook, noteDeliveryHook, apURLs))
 	reactionService.SetFederationHook(corefederation.NewReactionDeliveryHook(deliverService, apRenderer, apURLs, idGen, userRepo))
 	// local user が remote user を (un)block した際に Block / Undo(Block) を
 	// 相手 inbox へ配信する (#1560)。
 	blockingService.SetFederationHook(corefederation.NewBlockingDeliveryHook(deliverService, userRepo, apRenderer))
-	noteDeleteHook := corefederation.NewNoteDeleteDeliveryHook(deliverService, apRenderer, apURLs)
 	noteDeleteHook.SetUserRepo(userRepo)
 	noteDeleteHook.SetNoteRepo(noteRepo)
 	noteDeleteService.SetFederationHook(noteDeleteHook)
@@ -1207,7 +1220,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	inboxProcessor.SetSignatureVerifier(federationResolver)
 	inboxProcessor.SetHostBlockChecker(instanceService)
 	// 受信を拒否するソフトウェア (#3362)。設定は判定のたびに meta から読む。
-	inboxProcessor.SetSoftwareSuspensionChecker(corefederation.NewInboxSuspendedChecker(metaRepo, instanceRepo))
+	inboxProcessor.SetSoftwareSuspensionChecker(inboxSoftwareChecker)
 	inboxProcessor.SetInstanceTracker(instanceTouchBuffer)
 	// 受信のたびに相手の nodeinfo を取り直す (#3564)。受信を拒否した相手も
 	// 取り直し、拒否の判定を新しい版で行えるようにする。
@@ -1451,8 +1464,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		deliveryhealth.DefaultMaxHosts, 0)
 	// 落ちた配送先へのブレーカーと 429 の間隔 (#3048)。状態は Redis に置くので、
 	// queue ノードが複数あっても判断を共有する。管理画面 (Web ノード) からも
-	// 同じ状態を読み、手で閉じる。
-	deliveryBreaker := deliveryhealth.NewBreaker(s.redis.Default)
+	// 同じ状態を読み、手で閉じる。deliveryBreaker は buildFederation で作る (#3688)。
 	if s.role.RunsQueue() {
 		if deliveryBreaker != nil {
 			deliverProcessor.SetDeliveryBreaker(deliveryBreaker)
@@ -2386,7 +2398,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// #2230: i/delete-account の cascade 削除 (notes/drive/following purge) と AP Delete(actor)
 	// 配信を admin/delete-account と同経路で配線する。未配線だと論理削除フラグだけ立って実削除が走らない。
 	iHandler.SetDeleteAccountEnqueuer(s.queueClient)
-	iHandler.SetAccountDeletionFederationHook(corefederation.NewUserModerationDeliveryHook(deliverService, apRenderer, userRepo))
+	iHandler.SetAccountDeletionFederationHook(userModerationDeliveryHook)
 	api.POST("/i/export-notes", iHandler.ExportNotes, middleware.RequireAuth(), middleware.RequireSecure())
 	api.POST("/i/export-following", iHandler.ExportFollowing, middleware.RequireAuth(), middleware.RequireSecure())
 	api.POST("/i/export-blocking", iHandler.ExportBlocking, middleware.RequireAuth(), middleware.RequireSecure())
@@ -2673,7 +2685,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		return m.AllowExternalApRedirect
 	}, s.config.URL)
 	// 受信を拒否するソフトウェアのホストも ap/show で FEDERATION_NOT_ALLOWED にする (#3563)。
-	apHandler.SetSoftwareSuspensionChecker(corefederation.NewInboxSuspendedChecker(metaRepo, instanceRepo))
+	apHandler.SetSoftwareSuspensionChecker(inboxSoftwareChecker)
 	// FEP-521a Multikey 対応で actor JSON に assertionMethod[] を expose する
 	// ため Ed25519 keypair repo を wire (#1067 / #1069)。
 	apHandler.SetKeypairExtraRepo(keypairExtraRepo)
@@ -3377,13 +3389,12 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	oauthHandler.SetStreamRevoker(streamRevokePublisher)
 	// profile 編集を remote followers に Update(Person) で配信する (#1560)。
 	// actor endpoint と同じ shape にするため ed25519 keypair を、follower 以外の
-	// relay subscriber にも届けるため relay broadcaster を配線する。
-	profileUpdateHook := corefederation.NewProfileUpdateDeliveryHook(deliverService, apRenderer, userRepo, keypairRepo)
+	// relay subscriber にも届けるため relay broadcaster を配線する。hook は
+	// buildFederation で作る (#3688。下の pinDeliveryHook も同じ)。
 	profileUpdateHook.SetKeypairExtraRepo(keypairExtraRepo)
 	profileUpdateHook.SetRelayBroadcaster(relaySvc)
 	iHandler.SetProfileUpdateHook(profileUpdateHook)
 	// note pin/unpin の Add/Remove(featured collection) を followers/relay へ配信 (#2024)。
-	pinDeliveryHook := corefederation.NewPinDeliveryHook(deliverService, apRenderer, userRepo, noteRepo)
 	pinDeliveryHook.SetRelayBroadcaster(relaySvc)
 	iHandler.SetPinDeliveryHook(pinDeliveryHook)
 	notePublisher := stream.NewNotePublisher(streamPubSub, idGen)
@@ -3839,8 +3850,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	adminHandler.SetAbuseRepo(abuseReportRepo)
 	adminHandler.SetAbuseForwarder(coreabuse.NewForwarder(abuseReportRepo, sysAcctSvc, apRenderer, deliverService))
 	// suspend / delete-account / unsuspend 時に対象 local user の AP Delete /
-	// Undo(Delete) を remote instances へ配信する (#1759)。
-	adminHandler.SetUserModerationFederationHook(corefederation.NewUserModerationDeliveryHook(deliverService, apRenderer, userRepo))
+	// Undo(Delete) を remote instances へ配信する (#1759)。i/delete-account と同じ
+	// hook を使う (#3688)。
+	adminHandler.SetUserModerationFederationHook(userModerationDeliveryHook)
 	adminHandler.SetDeleteAccountEnqueuer(s.queueClient)
 	adminHandler.SetServerURL(s.config.URL)
 	adminHandler.SetConfigSetupPassword(s.config.SetupPassword)
