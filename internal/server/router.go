@@ -284,6 +284,26 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	retentionRepo := repository.NewRetentionAggregationRepository(s.db)
 	promoReadRepo := repository.NewPromoReadRepository(s.db)
 	hashtagRepo := repository.NewHashtagRepository(s.db)
+	// 以下は受け手 (service / handler) より後で作り、後から setter で入れていたもの
+	// (#3676)。repository は作っても DB に触らないので、ここで先に作る。
+	channelNoteUnreadRepo := repository.NewChannelNoteUnreadRepository(s.db)
+	antennaNoteUnreadRepo := repository.NewAntennaNoteUnreadRepository(s.db)
+	chunkedUploadSessionRepo := repository.NewChunkedUploadSessionRepository(s.db)
+	publickeyRepo := repository.NewUserPublickeyRepository(s.db)
+	goneInstanceRepo := repository.NewGoneInstanceRepository(s.db)
+	userPendingRepo := repository.NewUserPendingRepository(s.db)
+	signupTicketRepo := repository.NewRegistrationTicketRepository(s.db)
+	usedUsernameRepo := repository.NewUsedUsernameRepository(s.db)
+	signinRepo := repository.NewSigninRepository(s.db)
+	noteDraftRepo := repository.NewNoteDraftRepository(s.db)
+	avatarDecorationRepo := repository.NewAvatarDecorationRepository(s.db)
+	announcementRepo := repository.NewAnnouncementRepository(s.db)
+	modLogRepo := repository.NewModerationLogRepository(s.db)
+	recipientRepo := repository.NewAbuseReportNotificationRecipientRepository(s.db)
+	ipLookupLogRepo := repository.NewIPLookupLogRepository(s.db)
+	// proxy account の user id を引く専用 (accountMover 用)。newProxyAccountResolver は
+	// username を返す別用途の resolver。
+	moveSystemAccountRepo := repository.NewSystemAccountRepository(s.db)
 
 	// Streaming の Redis pubsub と publisher (#3676)。どれも Redis の pubsub にしか
 	// 依存せず、作っても接続も購読も始めない (Redis に繋ぐのは最初の Subscribe)。
@@ -345,6 +365,55 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 読むので、admin での切り替えが再起動を待たずに効くよう毎回 cachedMeta を
 	// 読ませる (#3330)。
 	chartHooks.SetMetaSource(metaRepo.Fetch)
+
+	// 以下は受け手より後で作り、後から setter で入れていたもの (#3676)。どれも作るだけで
+	// DB にも Redis にも触らず、goroutine も起動しないので、受け手より先に作る。
+	// 受け手への setter の呼び出しは元の位置のまま。
+	//
+	// featured engagement ランキング (#1687)。reaction / renote の hook が
+	// global / in-channel / per-user の Redis windowed ZSET を更新し、
+	// notes/featured・users/featured-notes が読む。upstream と同じ default Redis。
+	featuredService := corefeatured.NewService(s.redis.Default)
+	// Hashtag service: ノート作成 (local / federation 両経路) で hashtag table の
+	// mentionedUsersCount / mentionedUserIds を更新する (#680)。/api/hashtags/list
+	// 等の trends ranking はこの集計を見るので、未配線だと空集合のままになる。
+	hashtagService := corehashtag.NewService(hashtagRepo, idGen)
+	// meta.hiddenTags / meta.sensitiveWords を見て tag の record / featuring
+	// を skip するため metaRepo を inject (upstream HashtagService.updateHashtags
+	// Ranking と同 semantics、未配線だと sensitive tag が featured に出る
+	// drop-in regression が再発するので必ず wire する)。
+	hashtagService.SetMetaRepo(metaRepo)
+	// moderation log (#1548 / #1765)。admin / announcement / gallery / flash と、moderator の
+	// note 削除が同じ instance を共有する。
+	modLogService := coremodlog.New(modLogRepo, idGen)
+	modLogService.SetBackground(s.background) // #3661: 世代の停止で待つ
+	// reversi の連合 (Phase 9.7)。FederationIDCache は本家 Misskey DB スキーマ互換の
+	// ため DB カラムを持たず Redis のみで session↔gameID の双方向 mapping を保持する。
+	// api handler と federation inbox で同じインスタンスを共有する。
+	reversiFedCache := corereversi.NewFederationIDCache(s.redis.Default)
+	// TOTP replay guard — accept した TOTP コードを Redis に SETNX で
+	// 記録し、acceptance window 内 (~90s) の再利用を refuse する
+	// (RFC 6238 §5.2)。mk-go が先行実装した hardening だが、upstream も
+	// 2026.6.0 の UserAuthService.validateOtp で同等機構 (Redis SET NX EX、
+	// TTL 90s) を入れたため現在は挙動が揃っている。
+	// signin と /api/i の 2 経路で共通の guard を共有する。
+	totpReplayGuard := coretwofactor.NewRedisReplayGuard(s.redis.Default)
+	// 現在のパスワードを照合する i/ 配下の API の照合失敗をアカウント単位で数える。
+	// route ごとの limiter に置くと、token を持つだけの第三者が被害者の
+	// i/regenerate-token を使い切れる (passwordguard の package doc)。
+	passwordFailureGuard := passwordguard.NewRedisGuard(s.redis.Default)
+	// proxy account の username。meta / nodeinfo の handler と、frontend の HTML が共有する。
+	proxyAccountResolver := newProxyAccountResolver(repository.NewSystemAccountRepository(s.db), userRepo)
+	// DB の健全性 (#3095)。統計はプライマリから読み、1 分キャッシュする。
+	dbHealth := dbhealth.NewService(s.db, s.config.DBReplications && len(s.config.DBSlaves) > 0)
+	// Web Push (Phase 9.3)。通知・チャット・既読の push を queue へ積む。
+	webPushService := corewebpush.NewService(s.queueClient)
+	// 受信を拒否するソフトウェア (#3362) の判定。連合の resolver と、WebFinger で
+	// 利用者を引く remoteUserResolver が共有する。
+	inboxSoftwareChecker := corefederation.NewInboxSuspendedChecker(metaRepo, instanceRepo)
+	// Instance management (Phase 3 Step H)。インスタンスの停止・サイレンスの判定を、
+	// 連合・following・reaction・配送が共有する。
+	instanceService := coreinstance.NewService(instanceRepo, metaRepo, idGen)
 
 	// Core services
 	roleService := corerole.NewService(roleRepo, roleAssignmentRepo, metaRepo, idGen)
@@ -470,7 +539,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	channelService.SetModeratorChecker(roleService)
 	// Phase 7-2 follow-up (#271): channel note 着信時に follower ごとの
 	// unread row を作成して /api/i の hasUnreadChannel に反映する。
-	channelNoteUnreadRepo := repository.NewChannelNoteUnreadRepository(s.db)
 	channelService.SetUnreadRepo(channelNoteUnreadRepo)
 	noteUnreadRepo := repository.NewNoteUnreadRepository(s.db)
 	noteCreateService.SetChannelHook(corechannel.NewNoteCreateHook(channelService))
@@ -487,7 +555,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	antennaService.SetPrimaryNoteExistence(noteRepo)
 	// Phase 7-2 follow-up (#271): antenna 着信時に所有者の unread row を
 	// 作成して /api/i の hasUnreadAntenna に反映する。
-	antennaNoteUnreadRepo := repository.NewAntennaNoteUnreadRepository(s.db)
 	antennaService.SetUnreadRepo(antennaNoteUnreadRepo)
 	noteCreateService.SetAntennaHook(coreantenna.NewNoteCreateHook(antennaService))
 
@@ -499,10 +566,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	pageService := corepage.NewService(pageRepo, pageLikeRepo, idGen)
 	flashService := coreflash.NewService(flashRepo, flashLikeRepo, idGen)
 
-	// featured engagement ランキング (#1687)。reaction / renote の hook が
-	// global / in-channel / per-user の Redis windowed ZSET を更新し、
-	// notes/featured・users/featured-notes が読む。upstream と同じ default Redis。
-	featuredService := corefeatured.NewService(s.redis.Default)
 	noteCreateService.SetFeaturedRanking(featuredService)
 
 	// Reactions
@@ -631,7 +694,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	reactionService.SetNotificationHook(notificationHook)
 
 	// Web Push (Phase 9.3): 通知作成後にサブスクライバーへpush配信する。
-	webPushService := corewebpush.NewService(s.queueClient)
 	notificationHook.SetWebPushPublisher(webPushService)
 	notificationHook.SetPackers(
 		corewebpush.NewUserRepoPacker(userRepo),
@@ -750,7 +812,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 分割アップロード (#2313)。設定も backend (#2315) も meta から都度読むので、
 	// admin の変更は再起動なしで効く。オブジェクトストレージ未使用の構成では
 	// backend が MultipartStorage を満たさず、配線しても機能は無効のままになる。
-	chunkedUploadSessionRepo := repository.NewChunkedUploadSessionRepository(s.db)
 	driveService.SetChunkedUpload(chunkedUploadSessionRepo, func() coredrive.ChunkedUploadSettings {
 		m, err := metaRepo.Fetch()
 		if err != nil {
@@ -952,6 +1013,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// meta.allowExternalApRedirect は外向きの取得には使わない。upstream と同じく、
 	// 自分が返す外部への 3xx を止める設定 (apHandler.SetExternalRedirectPolicy)。
 	apFetcher := corefederation.NewAPFetcher(apClient)
+	// AP attachment の先頭取得 (#461 / #3243) 用 outbound HTTP client。
+	// SSRF-safe transport で内部 IP / cloud metadata エンドポイントへの
+	// アクセスを拒否する。timeout は先頭だけの単発 fetch なので apHTTPClient
+	// (30s) より短めの 10s にする。
+	attachmentProbeClient := s.outboundClient(10 * time.Second)
 	federationResolver := corefederation.NewResolver(userRepo, noteRepo, apURLs, apFetcher, idGen)
 	federationResolver.SetBackground(s.background) // #3661: 世代の停止で待つ
 	federationResolver.SetChartHook(chartHooks)
@@ -959,7 +1025,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 対象など) は resolver 側で数える (#3330)。processor は Announce の renote
 	// 行だけを数えるので、こちらも配線しないと Create が一切数えられない。
 	federationResolver.SetNoteChartHook(chartHooks)
-	publickeyRepo := repository.NewUserPublickeyRepository(s.db)
 	federationResolver.SetPublickeyRepo(publickeyRepo)
 	// FEP-521a Multikey 対応で remote actor の assertionMethod[] を parse して
 	// user_publickey_extra に persist する (#1067 / #1070)。
@@ -975,11 +1040,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	federationResolver.SetPollVoter(pollService)
 	federationResolver.SetEmojiRepo(emojiRepo)
 	federationResolver.SetDriveFileRepo(driveFileRepo)
-	// AP attachment の先頭取得 (#461 / #3243) 用 outbound HTTP client。
-	// SSRF-safe transport で内部 IP / cloud metadata エンドポイントへの
-	// アクセスを拒否する。timeout は先頭だけの単発 fetch なので apHTTPClient
-	// (30s) より短めの 10s にする。
-	attachmentProbeClient := s.outboundClient(10 * time.Second)
 	federationResolver.SetAttachmentProbeClient(attachmentProbeClient)
 	federationProcessor := corefederation.NewProcessor(federationResolver, followingService, reactionService, noteDeleteService, userRepo, noteRepo)
 	federationProcessor.SetBackground(s.background) // #3661: 世代の停止で待つ
@@ -1014,11 +1074,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	userService.SetRemoteUserResolver(remoteUserResolver)
 	noteCreateService.SetRemoteUserResolver(remoteUserResolver)
 
-	// Instance management (Phase 3 Step H)
-	instanceService := coreinstance.NewService(instanceRepo, metaRepo, idGen)
+	// Instance management (Phase 3 Step H)。instanceService は先頭近くで作る (#3676)。
 	// goneSuspended になった時刻を残す (#3067)。消えたインスタンスとのフォロー関係を
 	// 片付ける候補を「いつから消えているか」で並べる。
-	goneInstanceRepo := repository.NewGoneInstanceRepository(s.db)
 	instanceService.SetGoneRecorder(goneInstanceRepo)
 	federationResolver.SetInstanceTracker(instanceService)
 	// #1538: reactionAcceptance gate — role-gated emoji + media-silenced host。
@@ -1040,7 +1098,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 受信を拒否するソフトウェア (#3362) のホストの投稿・actor も、リノートや返信の
 	// 連鎖、ap/show で取り込まない (#3563)。inbox と同じく判定のたびに meta を読む。
 	// メンションの解決も、ドメインブロックと同じく WebFinger を投げる前に止める。
-	inboxSoftwareChecker := corefederation.NewInboxSuspendedChecker(metaRepo, instanceRepo)
 	federationResolver.SetSoftwareSuspensionChecker(inboxSoftwareChecker)
 	remoteUserResolver.SetHostBlockChecker(instanceService)
 	remoteUserResolver.SetSoftwareSuspensionChecker(inboxSoftwareChecker)
@@ -1474,15 +1531,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		s.registerShutdownHook(func(ctx context.Context) { inboxHealth.Stop(ctx) })
 	}
 
-	// Hashtag service: ノート作成 (local / federation 両経路) で hashtag table の
-	// mentionedUsersCount / mentionedUserIds を更新する (#680)。/api/hashtags/list
-	// 等の trends ranking はこの集計を見るので、未配線だと空集合のままになる。
-	hashtagService := corehashtag.NewService(hashtagRepo, idGen)
-	// meta.hiddenTags / meta.sensitiveWords を見て tag の record / featuring
-	// を skip するため metaRepo を inject (upstream HashtagService.updateHashtags
-	// Ranking と同 semantics、未配線だと sensitive tag が featured に出る
-	// drop-in regression が再発するので必ず wire する)。
-	hashtagService.SetMetaRepo(metaRepo)
 	noteCreateService.SetHashtagHook(hashtagService)
 	federationResolver.SetHashtagHook(hashtagService)
 	// i/update の profile description 由来 user.tags 変更で hashtag attach 集計
@@ -1692,7 +1740,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// プラグインが管理するアカウント (#3468) は数えない。
 	meta.SetLocalUserCounter(func() (int64, error) { return userRepo.CountLocalUsersForSetup() })
 	metaHandler.SetAdRepo(repository.NewAdRepository(s.db))
-	proxyAccountResolver := newProxyAccountResolver(repository.NewSystemAccountRepository(s.db), userRepo)
 	metaHandler.SetProxyAccountResolver(proxyAccountResolver)
 	// 分割アップロード (#2313) の能力告知。未対応構成では field ごと出さないので、
 	// フロントエンドは undefined を見て従来の単発アップロードに倒れる。
@@ -1806,7 +1853,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	captchaSvc := corecaptcha.NewServiceWithClient(captchaMeta, s.outboundClient(10*time.Second))
 
 	// Signup (public)
-	userPendingRepo := repository.NewUserPendingRepository(s.db)
 	signupService.SetUserPendingRepo(userPendingRepo)
 	// 承認制の登録を確認メールに乗せた経路 (#2571) で、申請の確定をアカウント
 	// 作成と同じ tx に入れる (#2576)。
@@ -1814,7 +1860,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// PromotePending を transaction 化して partial failure rollback と
 	// invitation ticket の SELECT FOR UPDATE ロックを有効化する (#600 item 2 + #604)。
 	signupService.SetDB(s.db)
-	signupTicketRepo := repository.NewRegistrationTicketRepository(s.db)
 	signupService.SetTicketRepo(signupTicketRepo)
 	signupHandler := apisignup.NewHandler(signupService, metaRepo, idGen)
 	signupHandler.SetBackground(s.background) // #3661: 世代の停止で待つ
@@ -1883,7 +1928,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 無し) && (preservedUsernames 非該当) の3条件で判定し、paramDef の
 	// localUsernameSchema で format 検証する (#1551)。format 不正は paramDef レベルで
 	// 弾かれるため INVALID_PARAM を返す。
-	usedUsernameRepo := repository.NewUsedUsernameRepository(s.db)
 	signupService.SetUsedUsernameRepo(usedUsernameRepo) // #2080: 削除済 username 再利用を弾く
 	signupHandler.SetUsernameLookups(userRepo, usedUsernameRepo)
 	api.POST("/username/available", signupHandler.UsernameAvailable)
@@ -1906,7 +1950,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 記録するかどうかは iplog.Service が呼び出しのたびに meta から判断する。
 	signinHandler.SetIPRecorder(ipLogService)
 	// signin履歴レコード注入
-	signinRepo := repository.NewSigninRepository(s.db)
 	signinHandler.SetSigninRepo(signinRepo, idGen)
 	signinHandler.SetLoginNotifier(notificationHook)
 	// new-login 通知メール (#2454)。SenderFromMeta が per-call で meta を読み直すので
@@ -1942,13 +1985,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		signinHandler.SetWebAuthn(webauthnSvc, userSecurityKeyRepo)
 	}
 
-	// TOTP replay guard — accept した TOTP コードを Redis に SETNX で
-	// 記録し、acceptance window 内 (~90s) の再利用を refuse する
-	// (RFC 6238 §5.2)。mk-go が先行実装した hardening だが、upstream も
-	// 2026.6.0 の UserAuthService.validateOtp で同等機構 (Redis SET NX EX、
-	// TTL 90s) を入れたため現在は挙動が揃っている。
-	// signin と /api/i の 2 経路で共通の guard を共有する。
-	totpReplayGuard := coretwofactor.NewRedisReplayGuard(s.redis.Default)
 	signinHandler.SetTOTPReplayGuard(totpReplayGuard)
 
 	// Emojis endpoints (public)
@@ -1968,6 +2004,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 使うため、これがないと「結果を見る」toggle が reload で揮発する。
 	noteFieldResolver.SetPollVoteLookup(pollVoteRepo)
 
+	// #1762: local note を favorite されたとき著者に myNoteFavorited1 を付与する
+	// server-side achievement infra。claim-achievement と同じ profile.achievements
+	// を更新する。
+	achievementService := coreachievement.NewService(userService, notificationService)
 	// Notes endpoints
 	notesHandler := notes.NewHandler(noteRepo, noteCreateService, noteDeleteService, noteQueryService, timelineService, reactionService, pollService, searchService, idGen)
 	notesHandler.SetPiningRepo(piningRepo)
@@ -2068,10 +2108,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/notes/polls/vote", notesHandler.PollsVote, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:votes"))
 	// Notes extra endpoints (Phase 6)
 	notesHandler.SetFavoriteRepo(noteFavoriteRepo)
-	// #1762: local note を favorite されたとき著者に myNoteFavorited1 を付与する
-	// server-side achievement infra。claim-achievement と同じ profile.achievements
-	// を更新する。
-	achievementService := coreachievement.NewService(userService, notificationService)
 	notesHandler.SetAchievementGranter(achievementService)
 	api.POST("/notes/favorites/create", notesHandler.FavoritesCreate, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:favorites"))
 	api.POST("/notes/favorites/delete", notesHandler.FavoritesDelete, middleware.RequireAuth(), middleware.RequireScope("write:favorites"))
@@ -2089,7 +2125,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		middleware.RequireScope("read:account"))
 	api.POST("/notes/show-partial-bulk", notesHandler.ShowPartialBulk)
 	// notes/drafts + notes/thread-muting + notes/polls/recommendation (実データ)
-	noteDraftRepo := repository.NewNoteDraftRepository(s.db)
 	notesHandler.SetDraftRepo(noteDraftRepo)
 	notesHandler.SetScheduledNoteEnqueuer(s.queueClient)
 
@@ -2236,10 +2271,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	iHandler.SetRoleProvider(roleService)
 	iHandler.SetTOTPReplayGuard(totpReplayGuard)
 	iHandler.SetTwoFAPendingGuard(coretwofactor.NewRedisPendingGuard(s.redis.Default))
-	// 現在のパスワードを照合する i/* の照合失敗をアカウント単位で数える。
-	// route ごとの limiter に置くと、token を持つだけの第三者が被害者の
-	// i/regenerate-token を使い切れる (passwordguard の package doc)。
-	passwordFailureGuard := passwordguard.NewRedisGuard(s.redis.Default)
 	iHandler.SetPasswordFailureGuard(passwordFailureGuard)
 	// upstream UserAuthService と同じテスト用バイパス。testMode 以外では無効。
 	coretwofactor.SetTestMode(s.config.TestMode)
@@ -2280,8 +2311,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	accountMover.SetFollowQueue(s.queueClient)
 	// proxy account はリスト購読のため機械的に follow しているだけなので
 	// 引き継ぎ対象から外す。newProxyAccountResolver は username を返す別用途の
-	// resolver なので、ここでは user id を引く専用のものを渡す。
-	moveSystemAccountRepo := repository.NewSystemAccountRepository(s.db)
+	// resolver なので、ここでは user id を引く専用のもの (moveSystemAccountRepo) を渡す。
 	accountMover.SetProxyAccountResolver(func() (string, bool) {
 		sa, err := moveSystemAccountRepo.FindByType("proxy")
 		if err != nil || sa == nil {
@@ -2335,7 +2365,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	iHandler.SetInstanceRepo(instanceRepo)
 	iHandler.SetEmojiRepo(emojiRepo)
 	iHandler.SetReactionReader(reactionCountWriter)
-	avatarDecorationRepo := repository.NewAvatarDecorationRepository(s.db)
 	iHandler.SetAvatarDecorationRepo(avatarDecorationRepo)
 	// PackUserLite が avatarDecorations の各エントリに url を埋め込めるよう
 	// 共有 catalog resolver を entity package に登録する (#521)。catalog は
@@ -2417,8 +2446,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// なので、UserDetailed pack は単一 user の detail 取得が主用途であり許容範囲。
 	entity.SetSilencedLookup(roleService)
 	iHandler.SetNoteFieldResolver(noteFieldResolver)
-	// announcementRepoは後続で構築されるため SetupAdditional() 相当の順序依存があるが、
-	// 現状 announcementRepo := ... の行がここより後にあるため下で wire する。
+	// announcementRepo (/api/i の未読のお知らせ) は、下の meself.SetEnricher の直前で入れる。
 
 	// i/export-* and i/import-* (Phase 9.4)
 	iHandler.SetTransferEnqueuer(s.queueClient)
@@ -3562,10 +3590,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	streamRegistry.RegisterCredentialed("chatRoom", chatRoomFactory.New)
 	streamRegistry.RegisterCredentialed("chatUser", channels.NewChatUserFactory(chatService).New)
 	// Phase 9.7: federation processor / reversi handler に reversi 依存を注入。
-	// FederationIDCache は本家 Misskey DB スキーマ互換のため DB カラムを持たず
-	// Redis のみで session↔gameID の双方向 mapping を保持する。api handler と
-	// federation inbox で同じインスタンスを共有する。
-	reversiFedCache := corereversi.NewFederationIDCache(s.redis.Default)
 	federationProcessor.SetReversi(reversiService, reversiRepo, idGen, reversiFedCache)
 	federationProcessor.SetBlockingService(blockingService)
 	federationProcessor.SetAbuseReportRepo(repository.NewAbuseReportRepository(s.db), idGen)
@@ -3712,7 +3736,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/users/lists/delete", userListHandler.Delete, middleware.RequireAuth(), middleware.RequireScope("write:account"))
 
 	// Announcements (Phase 6)
-	announcementRepo := repository.NewAnnouncementRepository(s.db)
 
 	// Moderator-activity check (#1563): scheduler の cron (30 * * * *) が enqueue
 	// する。全 moderator が 7 日非アクティブだと登録を招待制へ自動切替し、残 2 日で
@@ -3747,14 +3770,14 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// Admin endpoints (Phase 5)
 	abuseReportRepo := repository.NewAbuseReportRepository(s.db)
-	modLogRepo := repository.NewModerationLogRepository(s.db)
-	recipientRepo := repository.NewAbuseReportNotificationRecipientRepository(s.db)
 	// 通報の abuseReport system webhook (#1542)。local と Flag の両方に効く
 	// (#3256)。recipientRepo がここで揃うため本箇所で配線する。
 	abuseCreatedNotifier.SetWebhook(webhookService, recipientRepo, coreabuse.UserLookups{Instances: instanceRepo, Emojis: emojiRepo}, idGen)
 	// 通報のメール (#3265)。SMTP の設定は送るたびに meta から読み直すので、
 	// 未設定でも配線しておいてよい (そのときは送らない)。
 	abuseCreatedNotifier.SetMail(miscsmtp.SubjectBodySenderFromMeta(metaRepo, s.config.ProxySMTP), recipientRepo, userRepo, metaRepo)
+	// 通知の lookup が先に作った実体を使い回す (2 つ作らない)。
+	emojiApplicationRepo := emojiApplicationRepoForNotif
 	adminHandler := apiadmin.NewHandler(signupService, roleService, metaRepo, userRepo, idGen)
 	adminHandler.SetBackground(s.background)     // #3661: 世代の停止で待つ
 	adminHandler.SetDetailExtras(usersHandler)   // #3330: find-by-email・update-proxy-account のピン留め・移行先
@@ -3789,7 +3812,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	adminHandler.SetIPSearchRepo(repository.NewUserIPSearchRepository(s.db))
 	// IP 照会の監査 (#3106)。**未配線だと照会が記録されないまま通る** — 照会は
 	// 成立するので誰も気付けない。critical wiring 検査で落とす。
-	ipLookupLogRepo := repository.NewIPLookupLogRepository(s.db)
 	adminHandler.SetIPLookupAudit(iplookuplog.NewService(ipLookupLogRepo, idGen))
 	adminHandler.SetIPLookupLogRepo(ipLookupLogRepo)
 	// ドライブ使用量の集計 (#3053)。**この行を落とすと admin/drive/usage が
@@ -3803,8 +3825,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// **承認時の emoji 生成は adminHandler が行う。** service に持たせると
 	// admin/emoji/add と別経路になり、MIME の allowlist などの検証が申請
 	// だけ抜ける。ここでは依存を逆向きに渡すだけ。
-	// 通知の lookup が先に作った実体を使い回す (2 つ作らない)。
-	emojiApplicationRepo := emojiApplicationRepoForNotif
 	emojiApplicationService := emojiapplication.NewService(
 		emojiApplicationRepo,
 		emojiRepo,
@@ -3857,8 +3877,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 連合セルフ診断 (#2463)。migration 本数は起動時に数えず 0 を渡す
 	// (server 側は既に migrate 済みで動いている前提。適用漏れの検出は
 	// `elythia doctor` の担当で、あちらは同梱ファイルを数えられる)。
-	// DB の健全性 (#3095)。統計はプライマリから読み、1 分キャッシュする。
-	dbHealth := dbhealth.NewService(s.db, s.config.DBReplications && len(s.config.DBSlaves) > 0)
 	adminHandler.SetDatabaseHealth(dbHealth)
 	adminHandler.SetSelfCheckRunner(&selfCheckAdapter{
 		checker: selfcheck.NewChecker(s.config.URL),
@@ -3887,7 +3905,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// の suspend 判定 cache へ TTL を待たず即時反映する (#1407 review)。
 	adminHandler.SetInstanceSuspendCacheInvalidator(instanceService)
 	// admin/show-user の signins field を実データで埋める (#1198)。signinRepo
-	// は signin handler 配線時に既に構築済 (line ~1030)。
+	// は signin handler と共有する (先頭の repository の節で作る)。
 	adminHandler.SetSigninRepo(signinRepo)
 	adminHandler.SetAbuseRepo(abuseReportRepo)
 	adminHandler.SetAbuseForwarder(coreabuse.NewForwarder(abuseReportRepo, sysAcctSvc, apRenderer, deliverService))
@@ -3898,8 +3916,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	adminHandler.SetServerURL(s.config.URL)
 	adminHandler.SetConfigSetupPassword(s.config.SetupPassword)
 	adminHandler.SetSMTPProxyURL(s.config.ProxySMTP)
-	modLogService := coremodlog.New(modLogRepo, idGen)
-	modLogService.SetBackground(s.background) // #3661: 世代の停止で待つ
 	adminHandler.SetModLogService(modLogService)
 	// #1765: moderator が他人の note を削除したとき deleteNote moderation log を残す。
 	noteDeleteService.SetModeratorDeleteHook(coremodlog.NewNoteDeleteHook(modLogService))
