@@ -3886,6 +3886,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	announcementHandler.SetUserRepo(userRepo)
 	galleryHandler.SetModLog(modLogService) // #1548: moderator による gallery post 削除の監査ログ
 	flashHandler.SetModLog(modLogService)   // #1548: moderator による flash 削除の監査ログ
+	// #3678: moderator が他人の drive ファイルのセンシティブを変えたとき・削除したときの監査ログ。
+	driveService.SetModerationLog(modLogService, userRepo)
 	adminHandler.SetEmojiRepo(emojiRepo)
 	// emoji の add/update/delete を broadcast stream へ流し emoji picker を live-refresh (#2046)。
 	adminHandler.SetBroadcastPublisher(broadcastPublisher)
@@ -4836,6 +4838,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"ロール限定カスタム絵文字を誰でも使える"},
 		{"drive.roleChecker", driveService.HasRoleChecker(),
 			"MIME 許可リスト・NSFW 強制・ファイルサイズ上限・容量上限が同時に無効になる"},
+		{"drive.moderationLog", driveService.HasModerationLog(),
+			"moderator が他人のファイルのセンシティブを変えても削除しても、モデレーションログに残らない"},
 		{"move.carryOverRepos", accountMover.HasCarryOverRepos(),
 			"移行先アカウントにブロック / ミュート / リストが引き継がれない"},
 		{"note.blockingRepo", noteCreateService.HasBlockingRepo(),
