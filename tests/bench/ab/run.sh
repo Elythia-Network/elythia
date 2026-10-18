@@ -207,7 +207,6 @@ if upstream:
 with open(path, "w") as f:
     json.dump(run, f, indent=2, ensure_ascii=False)
 PY
-PY
 
 # ── 2. 1 回分 ────────────────────────────────────────────
 # 失敗しても止めずに meta.json に理由を残し、次の回へ進む。benchcompare が
