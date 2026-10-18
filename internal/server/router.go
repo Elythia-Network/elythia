@@ -177,7 +177,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		panic("repository.NewNoteRepository must implement NotePrimaryReader")
 	}
 	// cross-worker cache invalidation (#1740) のため concrete *CachedMetaRepository
-	// を保持する。internal event bus との配線は streamPubSub 生成箇所で行う。
+	// を保持する。internal event bus との配線は下の stream の節 (metaUpdated の購読) で行う。
 	cachedMeta := repository.NewCachedMetaRepositoryWithTTL(repository.NewMetaRepository(s.db), repository.MetaCacheTTL)
 	var metaRepo repository.MetaRepository = cachedMeta
 	// Seed the singleton meta row on first boot so that fresh installs
@@ -285,6 +285,33 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	promoReadRepo := repository.NewPromoReadRepository(s.db)
 	hashtagRepo := repository.NewHashtagRepository(s.db)
 
+	// Streaming の Redis pubsub と publisher (#3676)。どれも Redis の pubsub にしか
+	// 依存せず、作っても接続も購読も始めない (Redis に繋ぐのは最初の Subscribe)。
+	// なので受け手より先に作り、受け手を作った直後に渡す。
+	// **購読を始める位置は下の stream の節のまま。** 早めると、handler ができる前に
+	// 届いた event が、まだ配線していない service を触る。
+	streamPubSub := event.NewPubSubService(s.redis.Pubsub, "stream:")
+	s.streamPubSub = streamPubSub
+	internalPubSub := event.NewPubSubService(s.redis.Pubsub, "internal:")
+	s.internalPubSub = internalPubSub
+	// pollVoted / reacted / unreacted / deleted を noteStream:<id> に publish
+	// する共通 publisher。subNote / sn メッセージで購読しているクライアントへ
+	// リアクション・削除イベントが流れる (#690 / #700)。
+	noteEventPub := stream.NewNoteEventPublisher(streamPubSub)
+	// relation 変更 (#2400) の publisher。7 系統すべてを繋がないと「一部の操作だけ
+	// 反映されない」形の抜けになる。
+	//   Muting          -> core/muting
+	//   BlockingMe      -> core/blocking (通知先は blockee、向きに注意)
+	//   RenoteMuting    -> core/muting の RenoteService
+	//   MutedInstances  -> api/i の update
+	//   MutingChannels  -> api/channels の mute
+	//   following       -> core/following (Follow / Unfollow / AcceptRequest)
+	// 加えて、期限付き mute の自然失効を cron (checkExpiredMutingsProcessor) が通知する。
+	relationReloadPublisher := &relationReloadPublisherAdapter{pubsub: streamPubSub}
+	drivePublisher := stream.NewDrivePublisher(streamPubSub)
+	reversiPublisher := stream.NewReversiGamePublisher(streamPubSub)
+	mainStreamPublisher := stream.NewMainStreamPublisher(streamPubSub)
+
 	// Core services
 	roleService := corerole.NewService(roleRepo, roleAssignmentRepo, metaRepo, idGen)
 	roleService.SetEffectivePolicyProviderCacheEntries(s.config.EffectivePolicyProviderCacheEntries)
@@ -305,6 +332,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	signupService.SetKeypairExtraRepo(keypairExtraRepo)
 	noteCreateService := corenote.NewCreateService(noteRepo, pollRepo, idGen, followingRepo)
 	noteCreateService.SetBackground(s.background) // #3661: 世代の停止で待つ
+	noteCreateService.SetMainStreamPublisher(mainStreamPublisher)
 	// Phase 7-1 follow-up (#254): 本家互換の残存 error 検出ロジック用依存を注入。
 	// Setter経由なのでテストでは任意に省略可能。既存の同repository変数を再利用。
 	noteCreateService.SetBlockingRepo(blockingRepo)
@@ -321,10 +349,12 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	noteCreateService.SetThreadMutingRepo(noteThreadMutingRepo)
 	noteDeleteService := corenote.NewDeleteService(noteRepo)
 	noteDeleteService.SetUserRepo(userRepo) // #1538: resolve author for moderator delete
+	noteDeleteService.SetNoteStreamHook(&noteDeleteStreamAdapter{pub: noteEventPub})
 	noteQueryService := corenote.NewQueryService(noteRepo, followingRepo)
 	noteQueryService.SetFavoriteRepo(noteFavoriteRepo)
 	noteQueryService.SetThreadMutingRepo(noteThreadMutingRepo)
 	userService := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
+	userService.SetMainStreamPublisher(mainStreamPublisher)
 	// PinNote の上限を role policy `pinLimit` で override 可能にする (#1029)。
 	userService.SetRolePolicyProvider(roleService)
 	// /api/i/update の avatarId / bannerId 経路 (#467) で drive_file の
@@ -335,6 +365,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// Service に渡す。空文字なら remap は "." 一致のみになる。
 	userService.SetSelfHostname(s.config.Hostname)
 	followingService := corefollowing.NewService(userRepo, followingRepo, followRequestRepo, idGen)
+	followingService.SetRelationReloadPublisher(relationReloadPublisher)
+	followingService.SetMainStreamPublisher(mainStreamPublisher)
 	// remote instance の followersCount / followingCount を Follow/Unfollow 時に
 	// incremental 更新する (#596)。未配線でも本機能には影響しないが、admin
 	// dashboard の federation pie chart が起動直後以外で 0 に偏る。
@@ -439,6 +471,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// Reactions
 	reactionService := corereaction.NewService(noteRepo, reactionRepo, emojiRepo, followingRepo, idGen)
 	reactionService.SetFeaturedRanking(featuredService)
+	reactionService.SetNoteStreamHook(&reactionNoteStreamAdapter{pub: noteEventPub})
 
 	// Reactions buffering (issue #57): meta.enableReactionsBuffering が true なら
 	// Redis にバッファし、30秒ごとに DB へ flush する。
@@ -603,6 +636,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// Blocking & Muting
 	blockingService := coreblocking.NewService(userRepo, blockingRepo, idGen)
+	blockingService.SetRelationReloadPublisher(relationReloadPublisher)
 	// block 時に保留中の follow request を双方向で取り消す。upstream
 	// UserBlockingService.block の cancelRequest 相当。
 	blockingService.SetFollowRequestCanceller(followingService)
@@ -615,12 +649,18 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	blockingService.SetUserListRepo(userListRepo)
 	mutingService := coremuting.NewService(userRepo, mutingRepo, idGen)
 	renoteMutingService := coremuting.NewRenoteService(userRepo, renoteMutingRepo, idGen)
+	mutingService.SetRelationReloadPublisher(relationReloadPublisher)
+	renoteMutingService.SetRelationReloadPublisher(relationReloadPublisher)
 	followingService.SetBlockingChecker(blockingService)
 	reactionService.SetBlockingChecker(blockingService)
 	notificationHook.SetMuteChecker(mutingService)
 
 	// Polls
 	pollService := corepoll.NewService(noteRepo, pollRepo, pollVoteRepo, followingRepo, idGen)
+	// pollVoted を note の stream topic に publish して subscribe 中の
+	// frontend (note 詳細 / timeline) が reload なしで count を更新できる
+	// ようにする (#690)。
+	pollService.SetEventPublisher(noteEventPub)
 	pollService.SetNotificationHook(notificationHook)
 	// note 著者にブロックされた user の投票を弾く (upstream youHaveBeenBlocked、#1538)。
 	pollService.SetBlockingChecker(blockingService)
@@ -640,9 +680,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		pollExpiryWorker := corepoll.NewExpiryWorker(pollRepo, pollVoteRepo, noteRepo, userRepo, notificationService, 60*time.Second, 100)
 		s.startConstructionWorker(pollExpiryWorker.Run)
 	}
-	// pollVoted を note の stream topic に publish して subscribe 中の
-	// frontend (note 詳細 / timeline) が reload なしで count を更新できる
-	// ようにする (#690)。streamPubSub は下方で生成されるため遅延配線。
 
 	// Drive storage (Phase 4.9: Meta に基づいて Local / S3 を切り替え)
 	// localDriveStorage は driveStorage が S3 に切り替わっても、
@@ -657,6 +694,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// S3 client を作り直すコストはかからない。
 	driveStorage := coredrive.NewMetaStorage(metaRepo.Fetch, "./drive-files", s.config.DriveURL)
 	driveService := coredrive.NewService(driveFileRepo, driveFolderRepo, driveStorage, idGen)
+	driveService.SetStreamingPublisher(drivePublisher)
+	// folder の folderCreated/folderUpdated/folderDeleted も同じ drive channel
+	// publisher で配信する (#1564)。
+	driveService.SetFolderStreamingPublisher(drivePublisher)
+	driveService.SetMainStreamPublisher(mainStreamPublisher)
 	// storedInternal=true な行 (object storage 有効化より前 / TS 時代に保存された
 	// ファイル) はローカル FS にあるので、削除経路がそちらに届くようにする。
 	driveService.SetLocalStorage(localDriveStorage)
@@ -898,6 +940,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	federationProcessor := corefederation.NewProcessor(federationResolver, followingService, reactionService, noteDeleteService, userRepo, noteRepo)
 	federationProcessor.SetBackground(s.background) // #3661: 世代の停止で待つ
 	federationProcessor.SetLocalBaseURL(s.config.URL)
+	// 連合 inbox 経由の invite 受信時にも local 被招待者の reversi stream に
+	// `invited` を push する (#417 P2: リアルタイム招待)。
+	federationProcessor.SetReversiStreamPublisher(reversiPublisher)
 
 	// users/show 経由で host が指定されたリモートユーザーをローカル DB に
 	// キャッシュが無くても解決できるようにする (#269)。webfinger で actor URI
@@ -1219,6 +1264,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// Expired-mute prune (#1563 / #1603): scheduler の cron (*/5) が enqueue する。
 	// user mute と channel mute の両方の期限切れ行を prune する。
 	checkExpiredMutingsProcessor := processors.NewCheckExpiredMutingsProcessor(mutingRepo, channelMutingRepo)
+	// 期限付き mute の**自然失効**も snapshot に反映させる (#2453)。relationReloadPublisher
+	// の他の配線はすべて利用者の操作が起点だが、期限切れは誰も操作しないので cron が唯一の
+	// 通知点になる。ここを繋がないと「1 時間だけミュート」が接続中は解除されない。
+	checkExpiredMutingsProcessor.SetRelationReloadPublisher(relationReloadPublisher)
 	s.queueServer.Handle(queue.TaskTypeCheckExpiredMutings, checkExpiredMutingsProcessor.Handle)
 
 	// Daily generic clean (#1563): scheduler の cron (0 0 * * *) が enqueue する。
@@ -1832,6 +1881,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// Signin (Phase 6)
 	signinHandler := apisignin.NewHandler(userRepo)
 	signinHandler.SetBackground(s.background) // #3661: 世代の停止で待つ
+	signinHandler.SetMainStreamPublisher(mainStreamPublisher)
 	if captchaSvc != nil {
 		signinHandler.SetCaptcha(captchaSvc)
 	}
@@ -2056,6 +2106,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// Users endpoints
 	usersHandler := users.NewHandler(userService, followingService, noteRepo, idGen)
+	// users/lists/update-membership の withReplies 変更を userUpdated として流し、接続中の
+	// userList channel snapshot を live 更新する (#2051)。
+	usersHandler.SetUserListEventPublisher(stream.NewUserListStreamPublisher(streamPubSub))
 	// /pinned-users は meta.pinnedUsers の acct を解決する (#2791 で router.go の
 	// inline closure から移設)。
 	usersHandler.SetMetaRepo(metaRepo)
@@ -2164,6 +2217,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	registryRepo := repository.NewRegistryRepository(s.db)
 	iHandler := i.NewHandler(userService, idGen)
 	iHandler.SetBackground(s.background) // #3661: 世代の停止で待つ
+	iHandler.SetHardMutePublisher(&hardMutePublisherAdapter{pubsub: streamPubSub})
+	iHandler.SetRelationReloadPublisher(relationReloadPublisher)
+	iHandler.SetMainStreamPublisher(mainStreamPublisher)
 	iHandler.SetUserRepo(userRepo)
 	// フォロー申請の作成・承認・取り消しで followee に meUpdated を流す (#3330)。
 	followingService.SetMeUpdatedPublisher(iHandler)
@@ -2540,6 +2596,13 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// Drive endpoints
 	driveHandler := drive.NewHandler(driveService, idGen)
 	driveHandler.SetBackground(s.background) // #3661: 世代の停止で待つ
+	// /drive/files/upload-from-url: SSRF-safe client で URL を download し、
+	// drive へ保存後 urlUploadFinished を main stream に流す (#1217)。download は
+	// 大きめになりうるので 60s timeout、cap は cfg.MaxFileSize に揃える。
+	driveHandler.SetURLUploader(drive.NewURLUploader(
+		s.outboundClient(60*time.Second), driveService, mainStreamPublisher,
+		idGen, s.config.UserAgent, s.config.MaxFileSize,
+	))
 	driveHandler.SetRepos(driveFileRepo, driveFolderRepo, noteRepo)
 	driveHandler.SetUserRepo(userRepo)
 	driveHandler.SetInstanceRepo(instanceRepo)
@@ -2903,6 +2966,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// Channels endpoints (Phase 4.2)
 	channelsHandler := apichannels.NewHandler(channelService, idGen)
+	channelsHandler.SetRelationReloadPublisher(relationReloadPublisher)
 	channelsHandler.SetFavoriteRepo(channelFavoriteRepo)
 	channelsHandler.SetMutingRepo(channelMutingRepo)
 	channelsHandler.SetFollowingRepo(channelFollowingRepo)
@@ -2981,6 +3045,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// Pages endpoints (Phase 4.5)
 	pagesHandler := pages.NewHandler(pageService, idGen)
+	pagesHandler.SetMainStreamPublisher(mainStreamPublisher)
 	pagesHandler.SetUserPacker(sharedUserPacker) // #3330: pageEvent の利用者を持ち主から見た本家 pack と同じ形に
 	// page content の image block / eyeCatchingImageId から drive file を解決して
 	// attachedFiles / eyeCatchingImage を埋める (#1662)。
@@ -3011,9 +3076,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/i/flashs/likes", flashHandler.MyLikes, middleware.RequireAuth(), middleware.RequireScope("read:flash-likes"))
 
 	// Streaming (Phase 4.1 Step K)
-	// 1. Redis pubsub bus (核となる publish/subscribe チャンネル)
-	streamPubSub := event.NewPubSubService(s.redis.Pubsub, "stream:")
-	s.streamPubSub = streamPubSub
+	// 1. Redis pubsub bus (核となる publish/subscribe チャンネル)。streamPubSub と
+	// internalPubSub は、受け手へ早く渡せるよう repository の直後で作っている (#3676)。
 	streamBus := stream.NewEventPubSubBus(streamPubSub)
 
 	// #1740: meta 更新の cross-worker cache invalidation。更新した worker は
@@ -3029,8 +3093,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// しまう (その窓は respCache の世代チェックでは塞げない)。hook 側は
 	// CachedMetaRepository.Update が invalidate してから notifyUpdate する
 	// 実装がその順序を保証しており、subscriber 側はここの並び順で保証する。
-	internalPubSub := event.NewPubSubService(s.redis.Pubsub, "internal:")
-	s.internalPubSub = internalPubSub
 	// captcha の provider 集合は起動時の meta スナップショットから組まれるので、
 	// **ここで繋がないと管理画面で有効にしても再起動まで一切検証されない**。
 	// `/api/meta` は DB を読むのでフロントは captcha を描画し、運営者からは
@@ -3243,15 +3305,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	userCacheLink := cachebus.ConnectUsers(s.userCache, internalPubSub, idGen.Generate(time.Now()))
 	s.startConstructionWorker(userCacheLink.Run)
 
-	// pollVoted / reacted / unreacted / deleted を noteStream:<id> に publish
-	// する共通 publisher。subNote / sn メッセージで購読しているクライアントへ
-	// リアクション・削除イベントが流れる (#690 / #700)。pollService /
-	// reactionService / noteDeleteService は streamPubSub 生成より前に作るため、
-	// ここで後付け配線する。
-	noteEventPub := stream.NewNoteEventPublisher(streamPubSub)
-	pollService.SetEventPublisher(noteEventPub)
-	reactionService.SetNoteStreamHook(&reactionNoteStreamAdapter{pub: noteEventPub})
-	noteDeleteService.SetNoteStreamHook(&noteDeleteStreamAdapter{pub: noteEventPub})
 	// 取り消したリノート / 削除した引用の通知を消す (#3201)。**配線しないと build も
 	// テストも通ったまま** 未読件数に中身の無い通知が数えられ続ける。
 	noteDeleteService.SetNotificationHook(notificationHook)
@@ -3352,26 +3405,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	streamRevokePublisher := stream.NewStreamRevokePublisher(streamPubSub, streamManager)
 	iHandler.SetStreamRevoker(streamRevokePublisher)
 	oauthHandler.SetStreamRevoker(streamRevokePublisher)
-	iHandler.SetHardMutePublisher(&hardMutePublisherAdapter{pubsub: streamPubSub})
-	// relation 変更 (#2400) の publisher を各 mutation 側へ配線する。7 系統すべてを
-	// 繋がないと「一部の操作だけ反映されない」形の抜けになるので、まとめて置く。
-	//   Muting          -> core/muting
-	//   BlockingMe      -> core/blocking (通知先は blockee、向きに注意)
-	//   RenoteMuting    -> core/muting の RenoteService
-	//   MutedInstances  -> api/i の update
-	//   MutingChannels  -> api/channels の mute
-	//   following       -> core/following (Follow / Unfollow / AcceptRequest)
-	relationReloadPublisher := &relationReloadPublisherAdapter{pubsub: streamPubSub}
-	mutingService.SetRelationReloadPublisher(relationReloadPublisher)
-	blockingService.SetRelationReloadPublisher(relationReloadPublisher)
-	renoteMutingService.SetRelationReloadPublisher(relationReloadPublisher)
-	followingService.SetRelationReloadPublisher(relationReloadPublisher)
-	channelsHandler.SetRelationReloadPublisher(relationReloadPublisher)
-	iHandler.SetRelationReloadPublisher(relationReloadPublisher)
-	// 期限付き mute の**自然失効**も snapshot に反映させる (#2453)。上の 7 系統は
-	// すべて利用者の操作が起点だが、期限切れは誰も操作しないので cron が唯一の
-	// 通知点になる。ここを繋がないと「1 時間だけミュート」が接続中は解除されない。
-	checkExpiredMutingsProcessor.SetRelationReloadPublisher(relationReloadPublisher)
 	// profile 編集を remote followers に Update(Person) で配信する (#1560)。
 	// actor endpoint と同じ shape にするため ed25519 keypair を、follower 以外の
 	// relay subscriber にも届けるため relay broadcaster を配線する。
@@ -3403,9 +3436,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	notificationPublisher.SetSignupApplicationLookup(signupApplicationNotifLookup)
 	// streaming の通知 payload にも note の files / channel を載せる (#2735)。
 	notificationPublisher.SetFieldResolver(noteFieldResolver)
-	drivePublisher := stream.NewDrivePublisher(streamPubSub)
-	reversiPublisher := stream.NewReversiGamePublisher(streamPubSub)
-	mainStreamPublisher := stream.NewMainStreamPublisher(streamPubSub)
 	// broadcast stream publisher (emoji / global announcement 等を全 connection へ、#2046/#2056)。
 	broadcastPublisher := stream.NewBroadcastPublisher(streamPubSub)
 	// 通報の通知 (通知欄 #2868 / admin stream #1549 / abuseReport system webhook
@@ -3462,6 +3492,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// のみで pubsub publish が欠落していた)。
 	antennaService.SetStreamingPublisher(notePublisher)
 	notificationService.SetStreamingPublisher(notificationPublisher)
+	// main stream の publisher は、pollExpiryWorker (構築の途中で起動し、初回の Tick で
+	// 通知を作る) より後で入れる (#3676)。前へ移すと、構築中に作った pollEnded の通知が
+	// packer を通らない形で unreadNotification として流れる (SetPacker はここより後)。
+	// 元の配線と同じにするため、streaming の publisher の隣に残す。
 	notificationService.SetMainStreamPublisher(mainStreamPublisher)
 	// readAllNotifications は upstream postReadAllNotifications と同じく
 	// main stream と Web Push の両方へ送る。これが無いと SW 側の
@@ -3471,24 +3505,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// ロール単位の通知 opt-out (#2898)。**配線しないと optOutNotificationTypes
 	// を設定しても効かない** — Service は resolver 未設定なら全ての通知を通す。
 	notificationService.SetPolicyResolver(roleService)
-	driveService.SetStreamingPublisher(drivePublisher)
-	// folder の folderCreated/folderUpdated/folderDeleted も同じ drive channel
-	// publisher で配信する (#1564)。
-	driveService.SetFolderStreamingPublisher(drivePublisher)
-	driveService.SetMainStreamPublisher(mainStreamPublisher)
-	// /drive/files/upload-from-url: SSRF-safe client で URL を download し、
-	// drive へ保存後 urlUploadFinished を main stream に流す (#1217)。download は
-	// 大きめになりうるので 60s timeout、cap は cfg.MaxFileSize に揃える。
-	driveHandler.SetURLUploader(drive.NewURLUploader(
-		s.outboundClient(60*time.Second), driveService, mainStreamPublisher,
-		idGen, s.config.UserAgent, s.config.MaxFileSize,
-	))
-	followingService.SetMainStreamPublisher(mainStreamPublisher)
-	userService.SetMainStreamPublisher(mainStreamPublisher)
-	noteCreateService.SetMainStreamPublisher(mainStreamPublisher)
-	signinHandler.SetMainStreamPublisher(mainStreamPublisher)
-	iHandler.SetMainStreamPublisher(mainStreamPublisher)
-	pagesHandler.SetMainStreamPublisher(mainStreamPublisher)
 	pagesHandler.SetUserSource(userService)
 
 	// 5. Reversi WebSocket channel (Phase 9.6) を登録する
@@ -3672,9 +3688,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	userListHandler.SetFavoriteRepo(userListFavoriteRepo)                                      // #1550: show forPublic likedCount/isLiked
 	userListHandler.SetProxyFollow(listProxyFollow)                                            // #1704: push remote member proxy follow
 	userListHandler.SetUserListEventPublisher(stream.NewUserListStreamPublisher(streamPubSub)) // #1549: push/pull userAdded/userRemoved
-	// users/lists/update-membership の withReplies 変更を userUpdated として流し、接続中の
-	// userList channel snapshot を live 更新する (#2051)。
-	usersHandler.SetUserListEventPublisher(stream.NewUserListStreamPublisher(streamPubSub))
 	// list は requireCredential:false の public endpoint (userId 指定で他人の
 	// public list を閲覧可、#1550)。未認証 && userId 未指定は handler が INVALID_PARAM。
 	api.POST("/users/lists/list", userListHandler.List, middleware.RequireScope("read:account"))
@@ -4294,9 +4307,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	reversiService.SetFederationDeliverer(deliverService)
 	reversiService.SetUserRepo(userRepo)
 	reversiService.SetBaseURL(s.config.URL)
-	// 連合 inbox 経由の invite 受信時にも local 被招待者の reversi stream に
-	// `invited` を push する (#417 P2: リアルタイム招待)。
-	federationProcessor.SetReversiStreamPublisher(reversiPublisher)
 	api.POST("/reversi/games", reversiHandler.Games)
 	api.POST("/reversi/invitations", reversiHandler.Invitations, middleware.RequireAuth(), middleware.RequireScope("read:account"))
 	api.POST("/reversi/show-game", reversiHandler.ShowGame)
