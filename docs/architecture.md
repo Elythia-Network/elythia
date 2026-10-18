@@ -126,11 +126,12 @@ upstream `server/api/endpoints/` の endpoint 群を、ディレクトリ単位�
 |---|---|
 | `apierr` | Misskey 互換のエラーコード/UUID 定義 |
 | `pagination` | sinceId/untilId/sinceDate/untilDate の正規化 |
-| `paramschema` | 本家の`paramDef`(引数のJSON Schema)で、本家のajvと同じ判定・同じ最初のエラー・同じdefaultの挿入をする検証器(#3673)。まだどのhandlerにも繋いでいない |
+| `paramschema` | 本家の`paramDef`(引数のJSON Schema)で、本家のajvと同じ判定・同じ最初のエラー・同じdefaultの挿入をする検証器(#3673)。handlerの判定にはまだ使っていない。本番では`internal/server/paramshadow`が検証だけを走らせて、handlerと判定が分かれた件数を数える(#3677) |
 | `optional` | JSON の null/absent を区別する Nullable 型 |
 | `notehide` | per-viewer の hideNote ゲートを全 REST に一律適用（TS は各 pack 内 `hideNote`） |
 | `userrelation` | viewer 視点の relation block (isFollowing 等) 解決 |
 | `middleware` (**`internal/server/middleware`**。`internal/api/` 配下ではない) | 認証 / rate limit / WWW-Authenticate / Cache-Control |
+| `paramshadow` (**`internal/server/paramshadow`**) | 本家の`paramDef`での検証を、応答を変えずにhandlerの前で走らせ、判定が分かれた件数をログに出す(#3677、[param-shadow.md](param-shadow.md)) |
 
 ### 3.2 `internal/core/` — ビジネスロジック（≈50 パッケージ）
 

@@ -243,6 +243,7 @@ git add internal/api/paramschema/upstream_paramdefs.json internal/api/paramschem
   - `TestGoldenAJVConfigIsWhatThisPackageImplements`: 本家がajvの版・設定・formatを変えた。ajvの変更点を読み、検証器の挙動を合わせてからテストの期待値を更新する
   - `TestCorpusRejectsAtEveryReachableKeyword`: 本家のparamDefのkeywordの位置のうち、corpusにそのschemaPathで拒否されたcaseが無いものがある。新しい形のparamDefに生成器(`corpus.mjs`の`mutate`)が届いていない。生成器を直す。errors[0]にならない位置なら、`coverage_test.go`の規則か個別の項目に理由と一緒に足す(使われなくなった規則や項目があっても落ちる)
   - `TestConformsToAJVCorpus`の個々の不一致: 検証器とajvの判定が食い違った。不一致を例外にして通さず、検証器を直す
+- **goldenはバイナリに埋め込まれる。** 本番で検証だけを走らせて本家と判定が分かれる件数を数える仕組み(#3677、[param-shadow.md](param-shadow.md))が、このgoldenで判定する。作り直したgoldenは、次のビルドから数え方に効く
 - CIでは、`apicompat` workflowの`make upstream-check`が`paramdef-gen`を流して差分が無いことを見る。corpusとの一致は、nodeの要らない`go test`として`test`(`test-shards`)で走る
 
 ### 本家の版を上げた後に必須: TypeORM migrations seed の追加
