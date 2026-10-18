@@ -167,6 +167,33 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		idGen, _ = id.NewGenerator("aidx")
 	}
 
+	// Streaming の Redis pubsub と publisher (#3676)。どれも Redis の pubsub にしか
+	// 依存せず、作っても接続も購読も始めない (Redis に繋ぐのは最初の Subscribe)。
+	// なので受け手より先に作り、受け手を作った直後に渡す。
+	// **購読を始める位置は下の stream の節のまま。** 早めると、handler ができる前に
+	// 届いた event が、まだ配線していない service を触る。
+	streamPubSub := event.NewPubSubService(s.redis.Pubsub, "stream:")
+	s.streamPubSub = streamPubSub
+	internalPubSub := event.NewPubSubService(s.redis.Pubsub, "internal:")
+	s.internalPubSub = internalPubSub
+	// pollVoted / reacted / unreacted / deleted を noteStream:<id> に publish
+	// する共通 publisher。subNote / sn メッセージで購読しているクライアントへ
+	// リアクション・削除イベントが流れる (#690 / #700)。
+	noteEventPub := stream.NewNoteEventPublisher(streamPubSub)
+	// relation 変更 (#2400) の publisher。7 系統すべてを繋がないと「一部の操作だけ
+	// 反映されない」形の抜けになる。
+	//   Muting          -> core/muting
+	//   BlockingMe      -> core/blocking (通知先は blockee、向きに注意)
+	//   RenoteMuting    -> core/muting の RenoteService
+	//   MutedInstances  -> api/i の update
+	//   MutingChannels  -> api/channels の mute
+	//   following       -> core/following (Follow / Unfollow / AcceptRequest)
+	// 加えて、期限付き mute の自然失効を cron (checkExpiredMutingsProcessor) が通知する。
+	relationReloadPublisher := &relationReloadPublisherAdapter{pubsub: streamPubSub}
+	drivePublisher := stream.NewDrivePublisher(streamPubSub)
+	reversiPublisher := stream.NewReversiGamePublisher(streamPubSub)
+	mainStreamPublisher := stream.NewMainStreamPublisher(streamPubSub)
+
 	// Repositories
 	// userRepo は server.New で構築した CachedUserRepository を再利用する。
 	// auth middleware と service 層が同じ cache を共有することで mutation
@@ -304,33 +331,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// proxy account の user id を引く専用 (accountMover 用)。newProxyAccountResolver は
 	// username を返す別用途の resolver。
 	moveSystemAccountRepo := repository.NewSystemAccountRepository(s.db)
-
-	// Streaming の Redis pubsub と publisher (#3676)。どれも Redis の pubsub にしか
-	// 依存せず、作っても接続も購読も始めない (Redis に繋ぐのは最初の Subscribe)。
-	// なので受け手より先に作り、受け手を作った直後に渡す。
-	// **購読を始める位置は下の stream の節のまま。** 早めると、handler ができる前に
-	// 届いた event が、まだ配線していない service を触る。
-	streamPubSub := event.NewPubSubService(s.redis.Pubsub, "stream:")
-	s.streamPubSub = streamPubSub
-	internalPubSub := event.NewPubSubService(s.redis.Pubsub, "internal:")
-	s.internalPubSub = internalPubSub
-	// pollVoted / reacted / unreacted / deleted を noteStream:<id> に publish
-	// する共通 publisher。subNote / sn メッセージで購読しているクライアントへ
-	// リアクション・削除イベントが流れる (#690 / #700)。
-	noteEventPub := stream.NewNoteEventPublisher(streamPubSub)
-	// relation 変更 (#2400) の publisher。7 系統すべてを繋がないと「一部の操作だけ
-	// 反映されない」形の抜けになる。
-	//   Muting          -> core/muting
-	//   BlockingMe      -> core/blocking (通知先は blockee、向きに注意)
-	//   RenoteMuting    -> core/muting の RenoteService
-	//   MutedInstances  -> api/i の update
-	//   MutingChannels  -> api/channels の mute
-	//   following       -> core/following (Follow / Unfollow / AcceptRequest)
-	// 加えて、期限付き mute の自然失効を cron (checkExpiredMutingsProcessor) が通知する。
-	relationReloadPublisher := &relationReloadPublisherAdapter{pubsub: streamPubSub}
-	drivePublisher := stream.NewDrivePublisher(streamPubSub)
-	reversiPublisher := stream.NewReversiGamePublisher(streamPubSub)
-	mainStreamPublisher := stream.NewMainStreamPublisher(streamPubSub)
 
 	// Charts (Phase 4 Step Q / 4.7) — 12 chart engines + hook adapter (#3676)。
 	// どちらも DB の handle と idGen にしか依存せず、作っても goroutine も起動しない
@@ -3115,7 +3115,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// Streaming (Phase 4.1 Step K)
 	// 1. Redis pubsub bus (核となる publish/subscribe チャンネル)。streamPubSub と
-	// internalPubSub は、受け手へ早く渡せるよう repository の直後で作っている (#3676)。
+	// internalPubSub は、受け手へ早く渡せるよう setupRoutes の先頭で作っている (#3676)。
 	streamBus := stream.NewEventPubSubBus(streamPubSub)
 
 	// #1740: meta 更新の cross-worker cache invalidation。更新した worker は
