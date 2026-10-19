@@ -219,7 +219,12 @@ func collectRoutes(names, srcs []string) (*routeIndex, []routeRef, error) {
 }
 
 // maxResolveDepth bounds the recursion through variable copies and calls.
-const maxResolveDepth = 8
+//
+// setupRoutes の別名 (`usersHandler := hSvcs.users`) から、buildHandlers の戻り値の
+// 構造体のフィールドの型までを引くと 9 段要る (#3694。8 では引けず、/api の route の
+// 解決が 280 本に落ちた)。次の段でルートの登録を関数に分けて 1〜2 段増えても
+// 足りるよう、余裕を持たせる。
+const maxResolveDepth = 16
 
 // isAPIRoot reports whether x is the /api group itself.
 func (ix *routeIndex) isAPIRoot(x ast.Expr, fi int, sc scope) bool {
@@ -949,11 +954,21 @@ const apiPkg = modulePath + "internal/api/"
 func TestCollectRoutesResolvesHandlerTypes(t *testing.T) {
 	routes := fixtureRoutes(t, map[string]string{
 		"setup.go": `import (
+	"github.com/elythia-network/elythia/internal/api/following"
 	"github.com/elythia-network/elythia/internal/api/meta"
 	"github.com/elythia-network/elythia/internal/api/notes"
 )
 
 var metaHandler = meta.NewHandler()
+
+// #3694: handler をコンテナの構造体で作り、setupRoutes で別名を置く形。
+type apiHandlers struct {
+	following *following.Handler
+}
+
+func (s *Server) buildHandlers(w *wiring) apiHandlers {
+	return apiHandlers{following: following.NewHandler()}
+}
 
 type apiRoutes struct{ *echo.Group }
 
@@ -971,6 +986,10 @@ func (s *Server) setupRoutes() {
 	promo.POST("/read", h.PromoRead)
 	s.echo.GET("/tags/:tag", h.Tag)
 	registerUsersRoutes(api, nil)
+	hSvcs := s.buildHandlers(w)
+	w.handlers = hSvcs
+	followingHandler := hSvcs.following
+	api.POST("/following/create", followingHandler.Create)
 }
 `,
 		"routes_users.go": `import "github.com/elythia-network/elythia/internal/api/users"
@@ -1032,6 +1051,8 @@ func registerLocal(api apiRoutes) {
 		"POST /clips/show":    {apiPkg + "clips", "Show", true, false},
 		"POST /channels/show": {apiPkg + "channels", "Show", true, false},
 		"POST /local":         {"", "Run", true, false},
+		// #3694: 別名から、build の関数の戻り値の構造体のフィールドの型まで引く。
+		"POST /following/create": {apiPkg + "following", "Create", true, false},
 	} {
 		got, ok := routes[key]
 		if !ok {
@@ -1043,8 +1064,8 @@ func registerLocal(api apiRoutes) {
 				key, got.pkg, got.handler, got.apiRoot, got.apiDerived, want.pkg, want.handler, want.root, want.derived)
 		}
 	}
-	if len(routes) != 9 {
-		t.Errorf("route が %d 本 (9 本のはず)", len(routes))
+	if len(routes) != 10 {
+		t.Errorf("route が %d 本 (10 本のはず)", len(routes))
 	}
 }
 
