@@ -1228,7 +1228,7 @@ func TestShowPartialBulk_InvalidParam(t *testing.T) {
 
 // queryService 未配線時は note 行があっても空配列を返す fail-closed 挙動
 // を担保する (Devin #529 FLAG-1、Show / BulkShow と同種の defensive)。
-// router.go で RequireAuth() 無しに公開している endpoint なので、
+// internal/server のルートの登録で RequireAuth() 無しに公開している endpoint なので、
 // followers / specified visibility のノートを匿名閲覧者に漏らさないため
 // に重要。
 func TestShowPartialBulk_NoQueryServiceRejects(t *testing.T) {
