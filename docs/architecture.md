@@ -294,7 +294,7 @@ dispatcher が shareable channel の共有・pong ack を upstream `Connection.t
 
 ## 4. DI / 配線
 
-すべてのサービス生成・配線は `internal/server/router.go` の `setupRoutes()` で手動実行（NestJS 相当を関数呼び出しで構築）。DI フレームワークは使わない。repository は `setupRoutes()` から呼ぶ `buildRepos()` (`internal/server/wiring_repos.go`) で、core の service の一部は `buildCore()` (`internal/server/wiring_core.go`) で、連合の部品の一部は `buildFederation()` (`internal/server/wiring_fed.go`) で、queue の processor の一部は `buildQueue()` (`internal/server/wiring_queue.go`) で、stream の部品の一部は `buildStream()` (`internal/server/wiring_stream.go`) で作る (4.2)。
+すべてのサービス生成・配線は `internal/server/router.go` の `setupRoutes()` で手動実行（NestJS 相当を関数呼び出しで構築）。DI フレームワークは使わない。repository は `setupRoutes()` から呼ぶ `buildRepos()` (`internal/server/wiring_repos.go`) で、core の service の一部は `buildCore()` (`internal/server/wiring_core.go`) で、連合の部品の一部は `buildFederation()` (`internal/server/wiring_fed.go`) で、queue の processor の一部は `buildQueue()` (`internal/server/wiring_queue.go`) で、stream の部品の一部は `buildStream()` (`internal/server/wiring_stream.go`) で、API の handler の一部は `buildHandlers()` (`internal/server/wiring_handlers.go`) で作る (4.2)。
 
 ```
 server.New() → setupRoutes()
@@ -308,8 +308,10 @@ server.New() → setupRoutes()
   ├→ queue の processor の生成 (作るだけのものは buildQueue → wiring.queue で作り、別名を置く。
   │   setter と、outbound client や setupRoutes で作る部品に依存するものは元の位置)
   ├→ hook 注入 (§5)
-  ├→ Handler 生成 + ルート登録 (§3.1)。この途中 (プラグインの準備より前) で、queue の
-  │   handler を registerQueueHandlers で 1 回だけ登録する (一覧は builtinQueueHandlers)
+  ├→ Handler 生成 + ルート登録 (§3.1)。作るだけの handler は buildHandlers → wiring.handlers
+  │   で作り、usersHandler の位置で別名を置く。setter とルートの登録は元の位置。この途中
+  │   (プラグインの準備より前) で、queue の handler を registerQueueHandlers で 1 回だけ
+  │   登録する (一覧は builtinQueueHandlers)
   └→ stream (bus・registry・manager と、ここから配る publisher は buildStream → wiring.stream
       で作り、別名を置く。pubsub の購読をここで始める。WebSocket のチャンネルは
       registerStreamChannels で 1 回だけ登録する。一覧は builtinStreamChannels) /
@@ -353,13 +355,13 @@ setter は依存を先に作っても、元の位置 (streaming の publisher �
 `featuredService`、`hashtagService`、`modLogService`、`instanceService` など) を
 受け手より先に作るようにした (こちらは setter を呼ぶ位置は変えていない)。
 
-| | #3676 の前 (`b9db7e49b`) | #3676 の後 | #3684 の後 | #3686 の後 | #3688 の後 | #3690 の後 | 今 (#3692 の後) |
-|---|---|---|---|---|---|---|---|
-| setter で依存を入れる辺 | 877 | 877 | 879 | 879 | 872 | 872 | 872 |
-| うち、受け手より後で作った依存を入れるもの | 192 (受け手 55 個) | 107 (受け手 41 個) | 104 (受け手 41 個) | 103 (受け手 40 個) | 96 (受け手 40 個) | 96 (受け手 40 個) | 96 (受け手 40 個) |
-| うち、循環しているもの | 40 | 40 | 40 | 39 | 35 | 35 | 34 |
-| うち、それ以外 | 152 | 67 | 64 | 64 | 61 | 61 | 62 |
-| setter の呼び出しが受け手から離れているもの (下の数え方) | 359 | 307 | 308 | 392 | 415 | 426 | 444 |
+| | #3676 の前 (`b9db7e49b`) | #3676 の後 | #3684 の後 | #3686 の後 | #3688 の後 | #3690 の後 | #3692 の後 | 今 (#3694 の後) |
+|---|---|---|---|---|---|---|---|---|
+| setter で依存を入れる辺 | 877 | 877 | 879 | 879 | 872 | 872 | 872 | 872 |
+| うち、受け手より後で作った依存を入れるもの | 192 (受け手 55 個) | 107 (受け手 41 個) | 104 (受け手 41 個) | 103 (受け手 40 個) | 96 (受け手 40 個) | 96 (受け手 40 個) | 96 (受け手 40 個) | 96 (受け手 40 個) |
+| うち、循環しているもの | 40 | 40 | 40 | 39 | 35 | 35 | 34 | 34 |
+| うち、それ以外 | 152 | 67 | 64 | 64 | 61 | 61 | 62 | 62 |
+| setter の呼び出しが受け手から離れているもの (下の数え方) | 359 | 307 | 308 | 392 | 415 | 426 | 444 | 660 |
 
 #3684 の後の列は、#3684 の後の `router.go` を同じ道具で数えた。#3676 の後に入った変更で、setter の
 辺と呼び出しが離れている辺が 2 つずつ増えている (#3684 の直前の `692710223` で
@@ -435,6 +437,17 @@ manager と note・notification の publisher (どれも setter の受け手) �
 なので、#3676 で先頭に置いた 4 つの publisher は先頭に残し、`buildStream()` は stream の節で
 呼んだ (4.2)。
 
+#3694 で API の handler 30 個を `buildHandlers()` へ移し、その別名を `setupRoutes()` の
+`usersHandler` を作っていた位置に置いた (4.2)。setter を呼ぶ位置は変えていない。setter の辺、
+後から入れる辺、循環、それ以外は、どれも数が変わらない。後から入れる 96 辺は、行番号を除けば
+受け手・依存・setter・分類が前と同じ (道具の一覧を行番号を消して突き合わせた)。移す handler を、
+`usersHandler` の位置へ前倒ししても後から入れる辺が増えないものに限ったため (4.2)。呼び出しが
+離れている辺は 216 増えた。受け手の定義が前へ移り、setter の呼び出しは元の位置に残したため
+(受け手が移した handler の辺が 213。多いのは `usersHandler` の 29、`iHandler` の 26、
+`apHandler` の 20。依存が移した handler の辺が 3。`sharedUserPacker.SetDetailExtras` と
+`SetDetailExtrasMany` の `usersHandler`、`followingService.SetMeUpdatedPublisher` の
+`iHandler`)。ルートの登録は setter ではないので、どの行にも数えない。
+
 数え方 (`setupRoutes()` の構文木。道具はコミットしていない):
 
 - 節点: `setupRoutes()` の中で `:=` か `var` で定義した名前 (関数リテラルの中と、
@@ -445,8 +458,8 @@ manager と note・notification の publisher (どれも setter の受け手) �
 - 後から入れる辺: `B` の定義の行が `X` の定義の行より後のもの
 - 循環: 依存の図 (`A := f(... B ...)` の右辺と、setter の引数から張る `A → B`) で、
   `B` から `X` へ辿り着けるもの。図は `setupRoutes()` の中だけで張り、`buildRepos()`・
-  `buildCore()`・`buildFederation()`・`buildQueue()`・`buildStream()` の中の構築の依存は
-  辿らない (別名 `x := coreSvcs.y` の依存は `coreSvcs` だけ)
+  `buildCore()`・`buildFederation()`・`buildQueue()`・`buildStream()`・`buildHandlers()` の中の
+  構築の依存は辿らない (別名 `x := coreSvcs.y` の依存は `coreSvcs` だけ)
 - 「後から入れる辺」は**定義の順だけを見ていて、setter を呼ぶ位置は見ていない**。依存の
   定義だけを前へ移した辺 (setter の呼び出しは元の位置) も、元の位置に残した
   `notificationService.SetMainStreamPublisher` も、後から入れる辺には数えない。呼ぶ位置は
@@ -488,8 +501,8 @@ manager と note・notification の publisher (どれも setter の受け手) �
 **`setupRoutes()` で作る部品は、領域ごとの関数で作り、コンテナの構造体 `wiring`
 (`internal/server/wiring.go`) の領域ごとのフィールドに入れる。** #3666 の段階 2。
 #3684 で repository を、#3686 で core の service の一部を、#3688 で連合の部品の一部を、
-#3690 で queue の processor の一部を、#3692 で stream の部品の一部を移した。今のフィールドは
-`repos`・`core`・`fed`・`queue`・`stream` の 5 つ。
+#3690 で queue の processor の一部を、#3692 で stream の部品の一部を、#3694 で API の handler の
+一部を移した。今のフィールドは `repos`・`core`・`fed`・`queue`・`stream`・`handlers` の 6 つ。
 
 ```
 setupRoutes()
@@ -546,11 +559,16 @@ setupRoutes()
     `w.stream = streamSvcs`、別名は `x := streamSvcs.x`)。`buildStream()` は `Server` の
     フィールドを読まないので、メソッドではなく普通の関数にした。stream の pubsub は
     `setupRoutes()` の先頭で作った変数 `streamPubSub` を引数で受ける
+  - `handlers` も同じ形 (`hSvcs := s.buildHandlers(w, coreSvcs, fedSvcs, idGen)`、
+    `w.handlers = hSvcs`、別名は `x := hSvcs.x`)
   - **後の領域の `build…()` も、先に作った領域を `w.core.x` のようにコンテナから読まず、
     `coreSvcs` のような変数を引数で受ける。** コンテナのフィールドから読むと、その
     `build…()` を代入より前に置いてもコンパイルが通り、ゼロ値を受け取る (別名と同じ穴)。
-    今 `w.core`・`w.fed`・`w.queue`・`w.stream` を読む箇所は無い (#3686 のレビュー 2 周目。
-    `buildFederation()` と `buildQueue()` は `coreSvcs` を引数で受ける)
+    今 `w.core`・`w.fed`・`w.queue`・`w.stream`・`w.handlers` を読む箇所は無い (#3686 の
+    レビュー 2 周目。`buildFederation()` と `buildQueue()` は `coreSvcs` を、`buildHandlers()` は
+    `coreSvcs` と `fedSvcs` を引数で受ける。`w.handlers` については、
+    `TestSetupRoutesAliasesEveryBuiltHandler` がパッケージ全体で `<x>.handlers.<y>` の読み出しを
+    落とす)
 - **関数に移してよいのは、作るだけで副作用の無いものだけ (4.1 と同じ)。** 作るときに
   DB に触る文 (`EnsureInitial`、`NormalizePrivateKeysToPKCS8`、`RecomputeFollowCounts`)
   は `setupRoutes()` に残し、互いの順も変えていない。repository のコンストラクタは
@@ -960,13 +978,126 @@ registry は `buildStream()` で作り、登録は `setupRoutes()` の別名に�
 `streamParts` のフィールドの行数、行数は `setupRoutes()` の本文の `wc -l`。行数が増えたのは、
 `streamChannelDeps` のリテラルと、移した理由を書いたコメントのため。
 
-**残りの領域は、次の順で同じ形に移す。** handler と
-ルート (ルートはファイルを分ける)。上で残した core の service・連合の部品・queue の
-processor・stream の部品は、依存する領域を移すときに一緒に扱う。どれも `wiring` にフィールドを 1 つ足し、
-`build…` の関数で作り、`setupRoutes()` では別名を置く。repository は `w` から、それより後の
-領域は `coreSvcs` / `fedSvcs` / `queueSvcs` / `streamSvcs` のような変数から受け取る。後の領域ほど、構築の途中で動く処理
-(4.1) と shutdown hook を登録するものが多いので、それらを動かさずに残す範囲を
-PR ごとに決める。
+#### API の handler (#3694)
+
+```
+setupRoutes()
+  …                                                      // meta・notes などの handler とルート
+  hSvcs := s.buildHandlers(w, coreSvcs, fedSvcs, idGen)  // wiring_handlers.go
+  w.handlers = hSvcs
+  usersHandler := hSvcs.users                            // 別名 (変数から取る)
+  …
+  // Users endpoints
+  usersHandler.SetUserListEventPublisher(…)              // setter とルートの登録は元の位置のまま
+  …
+  api.POST("/get-avatar-decorations", avatarDecorationsHandler.Get)
+```
+
+- **`buildHandlers()` は `*Server` のメソッドで、repository は `w` から、core の service と
+  連合の部品は `buildCore()` / `buildFederation()` の戻り値 `coreSvcs` / `fedSvcs` から
+  受け取る。** 中の行は `setupRoutes()` にあった行をそのまま移し、作る順も元のまま。使う
+  `Server` のフィールドは `s.db` / `s.config` / `s.echo`。`s.echo` は endpoints の handler の
+  closure の中で読むだけで、作るときには読まない (呼ばれたときにルートを数える)。連合の部品
+  から使うのは `apRenderer` (ap/show など) と `apURLs` (WebFinger)
+- **移す条件は core・連合・queue・stream と同じ。** handler のコンストラクタの本体を 1 つずつ
+  読み、引数を構造体に入れるだけなのを確かめた (nodeinfo は空の cache の map も作る)。
+  移したのは 30 個: `usersHandler`、`iHandler`、`webhookHandler`、`notificationsHandler`、
+  `hashtagsHandler`、`galleryHandler`、`blockingHandler`、`muteHandler`、`renoteMuteHandler`、
+  `driveHandler`、`apHandler`、`wellknownHandler`、`nodeinfoHandler`、`federationHandler`、
+  `channelsHandler`、`antennasHandler`、`clipsHandler`、`pagesHandler`、`flashHandler`、
+  `followingHandler`、`rolesHandler`、`userListHandler`、`authHandler`、`appHandler`、
+  `bubbleGameHandler`、`endpointsHandler`、`avatarDecorationsHandler`、`promoHandler`、
+  `inviteHandler`、`echoTestHandler`
+- **setter もルートの登録も 1 つも動かさない。** `buildHandlers()` を呼ぶ位置は、移した
+  handler の中で最初に作っていた `usersHandler` の位置。移した構築は副作用を持たないので、
+  DB と Redis の文の順は変わらない。handler へ依存を入れる setter (`setupRoutes()` で
+  `…Handler.Set…` を呼ぶ 385 行) は、位置も順も元のまま
+- **移すのは、`usersHandler` の位置へ前倒ししても、setter で後から入れる辺 (4.1) が増えない
+  handler に限る。** 前倒しすると、その handler の setter の依存のうち、`usersHandler` の位置
+  から元の位置までの間で定義していたものが、受け手より後で作った依存になる。呼ぶ位置は、
+  移せる handler が最も多くなる位置を、#3676 の道具で handler を作っていた位置ごとに数えて
+  選んだ (`usersHandler` の位置で 30 個。1 つ前の `notesHandler` の位置では 24 個、最初の
+  `metaHandler` の位置では 16 個)
+- **`/api/test` の echo の handler (`apitest.NewEchoHandler()`) と、test mode の
+  `/api/reset-db` の handler (`apitest.NewHandler(...)`) は、型は同じだが別の値のまま。**
+  echo の方はフィールドを持たず (`&Handler{}`)、`Test` もフィールドを読まない。reset-db の方は
+  test mode の `if` の中で DB・Redis・meta を持って作る。test mode でないときは作らないので、
+  1 つにまとめると「test mode でなくても reset-db の依存を持つ値ができる」か「echo を test mode
+  の分岐に入れる」のどちらかになり、元と同じにならない。echo の方だけを `buildHandlers()` へ
+  移した。`apibubblegame` の `NewHandler` (バブルゲームの記録) と `NewVersusHandler` (対戦) は
+  別の型で、同じ handler を 2 回作ってはいない。記録の方だけを移した (対戦の方は
+  `setupRoutes()` で作る `bubbleVersusService` に依存する)
+- **`wiring` へは変数を経由した代入で入れ、別名は変数から取る** (上の規則)。別名を
+  `buildHandlers()` の呼び出しより前に書くと、`buildHandlers()` を `buildCore()` や
+  `buildFederation()` より前に置くと、どちらもコンパイルが通らない。`setupRoutes()` で
+  使わなくなった別名 (`promoReadRepo`・`authSessionRepo`・`bubbleGameRepo`・`pageService`・
+  `flashService`) は消した
+
+照合する行が `buildHandlers()` の中にだけ移ったゲートは、`TestAvatarDecorationRoleSetsAreWired`
+の `avatardecorations.NewHandler(s.db, roleService.ExistingRoleIDSet, roleService.PublicRoleIDSet)`
+の 1 本だった (確かめ方: #3692 と同じく、tracked な `_test.go` すべてと
+`tools/apicompat/main.go` の文字列リテラルのうち、#3694 の前の `router.go` に現れ、後の
+`router.go` と `internal/server` のほかのファイル (`wiring_handlers.go` を除く) に現れないものを
+探した。11 件で、ほかの 10 件はテストの import 宣言と `collectRoutes` の fixture の import の
+パス 9 件と、関係の無いテストの `Existing`。どれも `internal/server` の行を照合しない)。上の規則のとおり、
+`avatarDecorations: avatarDecorationsHandler`、`hSvcs := s.buildHandlers(w, coreSvcs, fedSvcs, idGen)`、
+`w.handlers = hSvcs`、`avatarDecorationsHandler := hSvcs.avatarDecorations` と、ルートの登録
+`api.POST("/get-avatar-decorations", avatarDecorationsHandler.Get)` も照合する。
+`internal/server/wiring_handlers_test.go` のテストも付けた (`buildHandlers()` が `apiHandlers` の
+欄をすべて埋めること。method value は nil のレシーバでも作れるので、欄を書き忘れると最初の
+リクエストまで気付かない。`setupRoutes()` が本文の直下で `hSvcs := s.buildHandlers(...)` と
+`w.handlers = hSvcs` をこの順に 1 回ずつ書き、欄ごとに `x := hSvcs.<欄>` を 1 回だけ、
+`w.handlers = hSvcs` より後に書くこと。別名と `hSvcs` を関数リテラルの中を含めて `=` で入れ替えず、
+`:=` で定義し直さないこと。`hSvcs` の欄を書き換えず (`hSvcs.<欄> = …`)、`&hSvcs` を取らないこと。
+欄の書き換えは、構築・別名・代入の行の文字列がどれも残るので、上の文字列で照合するゲートでは
+捕まらない。パッケージのどこでも `<x>.handlers.<y>` の形でコンテナから読み戻さない
+こと)。
+
+ルートから handler の型を引くゲート (`collectRoutes`、docs/gates.md) は、別名
+(`usersHandler := hSvcs.users`) から `buildHandlers()` の戻り値の構造体のフィールドの型までを
+辿る。この形は 9 段の再帰が要り、辿る深さの上限 (`maxResolveDepth`) が 8 のままだと、/api の
+route の解決が 280 本に落ちた (`TestAPIRouteHandlersResolve` の下限は 500)。上限を 16 に上げ、
+`TestCollectRoutesResolvesHandlerTypes` の fixture にこの形を足した (上限を 8 に戻すと落ちる)。
+別名を通しても、ルートはどれも前と同じ package の同じメソッドへ解決する。
+
+**`setupRoutes()` に残したもの** (`internal/api` の `New…` の 27 回の呼び出し):
+
+| 理由 | 例 |
+|---|---|
+| `buildHandlers()` を呼ぶ位置より前で作る | `metaHandler`・`resetHandler`・`emojisHandler` (どれも作るだけで、依存も先の領域だけ。位置の選び方は上)、`notesHandler` (`searchService` にも依存する。4.1)、`signupHandler`・`signinHandler` (setter の依存 `captchaSvc` は outbound client を使う)、`urlHandler` (`urlPreviewFetcher` は作るときに goroutine を起動する)、`statsHandler` (chart の engine)、`testHandler` (test mode の `if` の中) |
+| `setupRoutes()` で作る部品に依存する | `proxyHandler` (`proxyService`)、`oauthHandler` (`chunkedUploadCapability`・`proxyAccountResolver`・`s.outboundOpts`)、`inboxHandler` (`federationResolver`・`federationProcessor`。outbound client に依存する)、`chartsHandler` (chart の engine)、`emojiApplicationHandler` (`emojiApplicationService`)、`backupHandler` (`backupVerifier`。`webauthnSvc` の有無で分岐して作り、作れなければ panic する)、`swHandler` (`webPushCache`。`TestPushSubscriptionCacheIsShared` が、キャッシュの生成と `apisw.NewHandler` への受け渡しを同じファイルに置くことを要求する)、`bubbleVersusHandler` (`bubbleVersusService`。stream の publisher に依存する) |
+| stream の部品に依存する | `streamingHandler` (`streamManager`。`buildStream()` は stream の節で呼ぶ) |
+| `usersHandler` の位置で作ると、setter で後から入れる辺が増える | `adminHandler` (`avatarDecorationResolver`・`streamRevokePublisher`・`emojiApplicationRepo`・`broadcastPublisher` の 4 辺)、`announcementHandler` (`broadcastPublisher`)、`reversiHandler` (`reversiService`)、`chatHandler` (`chatService`) |
+| outbound の HTTP client を使う | `fetchExternalHandler`・`fetchRSSHandler` (`s.outboundClient(...)` が共有の transport を初めて作りうる) |
+| setter の引数の中で作る | `drive.NewURLUploader`、`oauth.NewRedisStore`、`apiadmin.NewEmojiImageFetcher` |
+
+| | #3694 の前 (`75226e7a4`) | 後 |
+|---|---|---|
+| `setupRoutes()` の `internal/api` の `New…` の呼び出し | 57 | 27 |
+| `buildHandlers()` の `internal/api` の `New…` の呼び出し | — | 30 |
+| `handlers` のフィールド (`buildHandlers()` で作る handler) | — | 30 |
+| `setupRoutes()` の `…Handler.Set…` の行 | 387 (setter の呼び出しは 385) | 387 (同じ 385) |
+| setter を呼ぶ handler (受け手) | 40 | 40 |
+| `setupRoutes()` の行数 | 4,838 | 4,843 |
+| setter で後から入れる辺 (4.1 の数え方) | 96 | 96 |
+
+数え方: `internal/api` の `New…` は、`setupRoutes()` と `buildHandlers()` の構文木で、
+`internal/api/` の下を import した名前の `New` で始まる関数の呼び出しを数えた (setter や別の
+構築の引数の中の呼び出しも 1 回に数える)。`…Handler.Set…` の行は `setupRoutes()` の本文
+(`func` の行から、行頭の `}` まで) の `grep -cE 'Handler\.Set[A-Z]'` で、うち 2 行はコメント
+(`apHandler.SetExternalRedirectPolicy`) とルートの登録 (`bubbleVersusHandler.SetPublic`) なので、
+setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手はその 385 行の `<名前>Handler`
+の種類。行の中身と順は前後で同じ (行の列を突き合わせた)。行数は同じ本文の `wc -l`。5 行増えたのは、
+`hSvcs` の 2 行・別名の 30 行・理由を書いたコメント 9 行・空行 1 行 (計 42 行) を足し、構築の
+30 行・使わなくなった別名 5 行・`buildHandlers()` へ移したコメント 2 行 (計 37 行) を消したため。
+
+**残りは、ルートの登録を領域ごとのファイルに分ける段 (#3666 の段階 2-7)。** 上で残した
+core の service・連合の部品・queue の processor・stream の部品・handler は、依存する領域を
+移すときに一緒に扱う。部品を移すときは、どれも `wiring` のフィールドに入れ、`build…` の関数で
+作り、`setupRoutes()` では別名を置く。repository は `w` から、それより後の領域は
+`coreSvcs` / `fedSvcs` / `queueSvcs` / `streamSvcs` / `hSvcs` のような変数から受け取る。後の
+領域ほど、構築の途中で動く処理 (4.1) と shutdown hook を登録するものが多いので、それらを
+動かさずに残す範囲を PR ごとに決める。
 
 ## 5. フック注入パターン
 
