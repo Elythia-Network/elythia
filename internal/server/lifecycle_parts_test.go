@@ -183,20 +183,15 @@ func assertPartTypes(t *testing.T, s *Server) {
 // although their value has a shape that a registration from the value takes
 // (valueShape). The value is the reason the part keeps its closure stop.
 //
-// closure のまま残した 8 つ (docs/architecture.md 4.3) のうち、形を満たすのは
-// emojiInvalidationQueue だけ。足すときは、なぜ値から作る登録にしないか (closure の停止が
-// 何をするか) を書く。
-var addPartShapeAllowlist = map[string]string{
-	// #3705 で Start と Stop を足した。setupRoutes はまだ Run を構築の途中で go 文で回し、
-	// その ctx を切って Run を待つ closure で止める。値から作る登録へは次のコミットで移す。
-	"emojiInvalidationQueue": "setupRoutes runs Run in a go statement during construction and stops it by a closure",
-}
+// 今は空。closureのまま残した7つ(docs/architecture.md 4.3)は、どれも形を満たさない。
+// 足すときは、なぜ値から作る登録にしないか (closure の停止が何をするか) を書く。
+var addPartShapeAllowlist = map[string]string{}
 
 // addPartsInspected names the parts added by addPart with a value that
 // addPartShapeViolations has to see in at least one combination. It is the lower
 // bound of the check: with an empty allowlist, a check that inspects nothing
 // would pass as well.
-var addPartsInspected = []string{"fedRuleHits", "hashtagService", "emojiInvalidationQueue", "paramShadowRecorder"}
+var addPartsInspected = []string{"fedRuleHits", "hashtagService", "paramShadowRecorder"}
 
 // addPartShapeViolations returns a message for each of parts that was added
 // by addPart although its value has a shape valueShape knows and its name is
@@ -499,7 +494,8 @@ func TestNewServer_ShutdownStopsThePartsInTheirOrder(t *testing.T) {
 	}
 	for _, name := range []string{
 		"metadataRefresher", "instanceTouchBuffer", "sigCapBuffer", "instanceCounterBuffer",
-		"deliveryHealth", "inboxHealth", "serverStatsPub", "queueStatsPub", "pluginStorage:lifecyclea",
+		"deliveryHealth", "inboxHealth", "emojiInvalidationQueue", "serverStatsPub", "queueStatsPub",
+		"pluginStorage:lifecyclea",
 	} {
 		assert.Truef(t, fromValue[name], "part %q is not marked as added from its value in any combination", name)
 	}

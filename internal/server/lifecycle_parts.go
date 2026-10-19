@@ -55,11 +55,9 @@ type lifecyclePart struct {
 // docs/architecture.md 4.3).
 //
 // The zero value is an empty list ready to use. Building a generation only
-// adds the parts; no part with a start runs until startAll. One part without
-// a start is the exception: setupRoutes runs emojiInvalidationQueue in a go
-// statement during construction and adds it with its stop only.
-//
-// emojiInvalidationQueueを一覧の起動へ移すかは、次の段で決める(#3666に記録)。
+// adds the parts; no part runs until startAll. emojiInvalidationQueue, the
+// last part that construction used to run in a go statement, is started by
+// startAll as well (#3705).
 //
 // 構築では作って登録するだけにし、起動はStartBackgroundに寄せる(#3703)。構築だけして
 // 起動しない使い方(dump-routes、テストのnewServer)で部品が動かないようにし、段階(6)で

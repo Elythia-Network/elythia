@@ -2829,22 +2829,13 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	})
 	// 停止時は Run が溜まっている分を最大 2 秒 (送信中の 1 件の timeout を足すと最悪約 4 秒)
 	// かけて送ってから返る。プロセスが
-	// 先に終わると送れないので、shutdown の deadline の範囲でその完了を待つ。
+	// 先に終わると送れないので、shutdown の deadline の範囲でその完了を待つ(Stop)。
 	// Run が返った後の書き込み (停止中にまだ走っている受信ジョブ) は送られず、
 	// TTL が上限になる。
-	emojiInvalidationCtx, stopEmojiInvalidation := context.WithCancel(context.Background())
-	emojiInvalidationDone := make(chan struct{})
-	go func() {
-		defer close(emojiInvalidationDone)
-		emojiInvalidationQueue.Run(emojiInvalidationCtx)
-	}()
-	s.addPart("emojiInvalidationQueue", emojiInvalidationQueue, func(ctx context.Context) {
-		stopEmojiInvalidation()
-		select {
-		case <-emojiInvalidationDone:
-		case <-ctx.Done():
-		}
-	})
+	//
+	// RunはStartBackgroundで起動する(#3705)。hookは今の位置で繋ぐので、構築から
+	// 起動までに積まれた分は溜めておき、起動の後に送る。
+	s.startPartWithStop(context.Background(), "emojiInvalidationQueue", emojiInvalidationQueue)
 	emojiRepo.SetInvalidationHook(emojiInvalidationQueue.Enqueue)
 	// 受けた側は絵文字のキャッシュを捨て、ローカルの絵文字に関わる通知では絵文字
 	// 由来のデコレーションの map も、その後で捨てる (#3664。順の理由は

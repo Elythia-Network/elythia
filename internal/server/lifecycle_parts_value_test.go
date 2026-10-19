@@ -399,12 +399,13 @@ func TestValueShape_ClassifiesThePartTypes(t *testing.T) {
 		{name: "fake Close(ctx)", part: fakeCtxCloser{}, use: "addCloser"},
 		{name: "fake Close() error", part: fakeErrCloser{}, use: "addErrCloser"},
 
-		// 値から作る登録で足す 9 つの部品の型 (8 つ。deliveryHealth と inboxHealth は同じ型)。
+		// 値から作る登録で足す10個の部品の型(9つ。deliveryHealthとinboxHealthは同じ型)。
 		// pluginstore.Store だけは setupRoutes ではなく dbBackedStorage が登録する。
 		{name: "TouchBuffer", part: (*coreinstance.TouchBuffer)(nil), use: "startPartWithClose"},
 		{name: "CapabilityBuffer", part: (*coreinstance.CapabilityBuffer)(nil), use: "startPartWithClose"},
 		{name: "CounterBuffer", part: (*coreinstance.CounterBuffer)(nil), use: "startPartWithClose"},
 		{name: "deliveryhealth.Service", part: (*deliveryhealth.Service)(nil), use: "startPartWithStop"},
+		{name: "EmojiInvalidationQueue", part: (*repository.EmojiInvalidationQueue)(nil), use: "startPartWithStop"},
 		{name: "ServerStatsPublisher", part: (*stream.ServerStatsPublisher)(nil), use: "startPartWithoutCtx"},
 		{name: "QueueStatsPublisher", part: (*stream.QueueStatsPublisher)(nil), use: "startPartWithoutCtx"},
 		{name: "MetadataRefresher", part: (*coreinstance.MetadataRefresher)(nil), use: "addCloser"},
@@ -413,9 +414,6 @@ func TestValueShape_ClassifiesThePartTypes(t *testing.T) {
 		// closure でしか止められないので addPart で足す型と、値を持たない worker。
 		{name: "fedrule.HitStore", part: (*fedrule.HitStore)(nil)},
 		{name: "hashtag.Service", part: (*corehashtag.Service)(nil)},
-		// Start と Stop を持つので形を満たす (#3705)。setupRoutes はまだ addPart で登録する
-		// (addPartShapeAllowlist)。
-		{name: "EmojiInvalidationQueue", part: (*repository.EmojiInvalidationQueue)(nil), use: "startPartWithStop"},
 		{name: "paramshadow.Recorder", part: (*paramshadow.Recorder)(nil)},
 		{name: "no value", part: nil},
 	}

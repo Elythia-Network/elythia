@@ -36,6 +36,7 @@ var partsStartedByStartBackground = map[string]bool{
 	"deliveryHealth":              true,
 	"inboxHealth":                 true,
 	"retentionAggregateAtStartup": true,
+	"emojiInvalidationQueue":      true,
 	"userCacheLink":               true,
 	"serverStatsPub":              true,
 	"queueStatsPub":               true,
@@ -78,6 +79,7 @@ var partGoroutineMarkers = map[string]string{
 	"serverStatsPub":             "stream.(*ServerStatsPublisher).loop(",
 	"queueStatsPub":              "stream.(*QueueStatsPublisher).loop(",
 	"fedRuleHits":                "fedrule.(*HitStore).Start.func",
+	"emojiInvalidationQueue":     "repository.(*EmojiInvalidationQueue).Run(",
 	// pollExpiryWorker・reactionFlushWorker・userCacheLinkの3つ。
 	"workers": "server.(*Server).startConstructionWorker.func",
 }
@@ -100,7 +102,7 @@ func countPartGoroutines(t *testing.T) map[string]int {
 }
 
 // TestNewServer_ConstructionStartsNoPart checks, on a server built by
-// newServer with both roles, that construction starts none of the twelve
+// newServer with both roles, that construction starts none of the thirteen
 // parts that have a start, and that StartBackground starts them (#3703).
 // It looks at what the parts do, not at the list: the goroutines they run
 // and the row the retention worker writes.
@@ -145,7 +147,7 @@ func TestNewServer_ConstructionStartsNoPart(t *testing.T) {
 	for key, n := range map[string]int{
 		"instanceTouchBuffer": 1, "sigCapBuffer": 1, "instanceCounterBuffer": 1,
 		"deliveryHealth+inboxHealth": 2, "serverStatsPub": 1, "queueStatsPub": 1,
-		"fedRuleHits": 1, "workers": 3,
+		"fedRuleHits": 1, "emojiInvalidationQueue": 1, "workers": 3,
 	} {
 		want[key] += n
 	}
