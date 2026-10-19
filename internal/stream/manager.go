@@ -436,6 +436,12 @@ func (m *Manager) HasPolicyProvider() bool { return m.policyProvider != nil }
 // (fail-open) ので、起動時検査に使う。
 func (m *Manager) HasUGCVisibilityLookup() bool { return m.ugcVisibility != nil }
 
+// Registry returns the channel registry the manager's dispatchers look
+// channels up in. It exists for the server's wiring tests (#3692): the
+// channels are registered on a registry the server holds separately, and only
+// the manager's own registry shows whether a client can connect to them.
+func (m *Manager) Registry() *Registry { return m.registry }
+
 // subscribeManaged registers a process-wide bus handler and remembers how to
 // remove it again.
 func (m *Manager) subscribeManaged(topic string, handler func([]byte)) {
