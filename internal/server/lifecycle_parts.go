@@ -30,6 +30,11 @@ type lifecyclePart struct {
 	// stop stops the part. It receives the shutdown ctx, which bounds any
 	// graceful drain the part does.
 	stop func(context.Context)
+	// fromValue reports that the part was added by a registration that
+	// builds its stop from part (startPartWithClose and the others, #3701),
+	// not by addPart. Production code never reads it; tests use it to find
+	// a part that could be added from its value but went through addPart.
+	fromValue bool
 }
 
 // lifecycle is the ordered list of the named parts of one server generation
@@ -112,9 +117,25 @@ func (l *lifecycle) stopAll(ctx context.Context) {
 // It is for a part whose stop cannot be built from its value (a ctx to
 // cancel, a goroutine to wait for, a warning to log). A part whose start and
 // stop are its own methods is added by startPartWithClose, startPartWithStop,
-// startPartWithoutCtx, addCloser or addErrCloser instead.
+// startPartWithoutCtx, addCloser or addErrCloser instead. Tests check that
+// no part of setupRoutes with one of those shapes comes through addPart
+// (docs/architecture.md 4.3); addPart itself does not refuse it.
+//
+// 実行時には拒まない。部品の型にメソッドを足しただけで本番の構築が失敗し、
+// 案内どおりに直すと closure の停止 (時間切れの警告など) が失われるため (#3701 の
+// レビュー L-2)。検査は newServer で作った一覧をテストで見る。
 func (s *Server) addPart(name string, part any, stop func(context.Context)) {
 	s.lifecycle.add(name, part, stop)
+}
+
+// addFromValue adds a part whose stop is built from part itself, and marks it
+// so (lifecyclePart.fromValue).
+func (l *lifecycle) addFromValue(name string, part any, stop func(context.Context)) {
+	n := len(l.parts)
+	l.add(name, part, stop)
+	if len(l.parts) > n {
+		l.parts[n].fromValue = true
+	}
 }
 
 // The shapes of a part whose start and stop are its own methods (#3701).
@@ -157,27 +178,27 @@ type (
 // 起動してから登録する (#3699 の前からの順)。起動が panic した部品は一覧に入らない。
 func (s *Server) startPartWithClose(ctx context.Context, name string, p startCloser) {
 	p.Start(ctx)
-	s.lifecycle.add(name, p, func(context.Context) { p.Close() })
+	s.lifecycle.addFromValue(name, p, func(context.Context) { p.Close() })
 }
 
 // startPartWithStop starts p with ctx and then adds it as a part named name,
 // stopped by p.Stop with the shutdown ctx.
 func (s *Server) startPartWithStop(ctx context.Context, name string, p startStopper) {
 	p.Start(ctx)
-	s.lifecycle.add(name, p, p.Stop)
+	s.lifecycle.addFromValue(name, p, p.Stop)
 }
 
 // startPartWithoutCtx starts p and then adds it as a part named name,
 // stopped by p.Stop(). Neither takes a ctx.
 func (s *Server) startPartWithoutCtx(name string, p plainStartStopper) {
 	p.Start()
-	s.lifecycle.add(name, p, func(context.Context) { p.Stop() })
+	s.lifecycle.addFromValue(name, p, func(context.Context) { p.Stop() })
 }
 
 // addCloser adds p as a part named name, stopped by p.Close with the
 // shutdown ctx. It does not start p.
 func (s *Server) addCloser(name string, p ctxCloser) {
-	s.lifecycle.add(name, p, p.Close)
+	s.lifecycle.addFromValue(name, p, p.Close)
 }
 
 // addErrCloser adds p as a part named name, stopped by p.Close(). The
@@ -186,5 +207,5 @@ func (s *Server) addCloser(name string, p ctxCloser) {
 //
 // エラーを捨てるのは #3699 の前の hook と同じ。停止の一覧はエラーを返す口を持たない。
 func (s *Server) addErrCloser(name string, p errCloser) {
-	s.lifecycle.add(name, p, func(context.Context) { _ = p.Close() })
+	s.lifecycle.addFromValue(name, p, func(context.Context) { _ = p.Close() })
 }

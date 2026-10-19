@@ -4,10 +4,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/elythia-network/elythia/internal/core/deliveryhealth"
+	"github.com/elythia-network/elythia/internal/core/fedrule"
+	corehashtag "github.com/elythia-network/elythia/internal/core/hashtag"
+	coreinstance "github.com/elythia-network/elythia/internal/core/instance"
+	"github.com/elythia-network/elythia/internal/pluginstore"
+	"github.com/elythia-network/elythia/internal/repository"
+	"github.com/elythia-network/elythia/internal/server/paramshadow"
+	"github.com/elythia-network/elythia/internal/stream"
 )
 
 // partCalls records the calls made on one fake part, in order.
@@ -153,6 +165,9 @@ func TestServer_RegistersAPartFromItsValue(t *testing.T) {
 			vb, _ := s.lifecycle.partValue("b")
 			assert.Equal(t, pa, va, "part a does not hold the registered value")
 			assert.Equal(t, pb, vb, "part b does not hold the registered value")
+			for _, part := range s.lifecycle.parts {
+				assert.Truef(t, part.fromValue, "part %q is not marked as added from its value", part.name)
+			}
 
 			// 止めると、登録したその値のメソッドが 1 回ずつ呼ばれる。
 			s.lifecycle.stopAll(shutdownCtx)
@@ -179,3 +194,140 @@ func TestServer_StartPartDoesNotAddAPartWhoseStartPanics(t *testing.T) {
 type panickingStartCloser struct{ fakeStartCloser }
 
 func (panickingStartCloser) Start(context.Context) { panic("start failed") }
+
+// TestServer_AddPartDoesNotMarkThePartAsFromValue checks that a part added by
+// addPart, even one that has a shape of its own, is not marked as added from
+// its value, and that addPart does not refuse it at run time (#3701 review
+// L-2: the check is in TestNewServer_ShutdownStopsThePartsInTheirOrder).
+func TestServer_AddPartDoesNotMarkThePartAsFromValue(t *testing.T) {
+	s := &Server{}
+	s.addPart("closure", fakeStartCloser{}, func(context.Context) {})
+	require.NoError(t, s.lifecycle.err)
+	require.Len(t, s.lifecycle.parts, 1)
+	assert.False(t, s.lifecycle.parts[0].fromValue)
+}
+
+// valueShapes lists, for each registration that builds the stop of a part
+// from its value, the interface its value parameter has and a match on it.
+// TestValueShapes_CoverEveryRegistrationFromValue keeps it in step with
+// lifecycle_parts.go.
+var valueShapes = []struct {
+	registration string
+	iface        string
+	matches      func(any) bool
+}{
+	{"startPartWithClose", "startCloser", func(v any) bool { _, ok := v.(startCloser); return ok }},
+	{"startPartWithStop", "startStopper", func(v any) bool { _, ok := v.(startStopper); return ok }},
+	{"startPartWithoutCtx", "plainStartStopper", func(v any) bool { _, ok := v.(plainStartStopper); return ok }},
+	{"addCloser", "ctxCloser", func(v any) bool { _, ok := v.(ctxCloser); return ok }},
+	{"addErrCloser", "errCloser", func(v any) bool { _, ok := v.(errCloser); return ok }},
+}
+
+// valueShape returns the registration that builds the start and the stop of
+// part from part itself, or "" when part has none of those shapes.
+func valueShape(part any) string {
+	for _, sh := range valueShapes {
+		if sh.matches(part) {
+			return sh.registration
+		}
+	}
+	return ""
+}
+
+// TestValueShapes_CoverEveryRegistrationFromValue reads lifecycle_parts.go and
+// lists every method of Server that adds a part through addFromValue, with
+// the interface type of the parameter it passes as the value. valueShapes has
+// to list exactly those, so a new shape added to the registrations cannot be
+// missed by the check of addPart (addPartShapeViolations).
+//
+// 構文木で読むのは、形を判定する関数が interface の一覧を実行時に取れないため。
+// 本体の登録を足して valueShapes に足し忘れると、addPart の検査がその形を見逃す。
+// 読むのは lifecycle_parts.go の Server のメソッドだけなので、登録は Server の
+// メソッドとしてこのファイルに置くこと。別のファイルのメソッドと、型パラメータを
+// 持つ自由関数で書いた登録は拾えない (#3701 のレビュー 3 周目、#3369 に記録)。
+func TestValueShapes_CoverEveryRegistrationFromValue(t *testing.T) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "lifecycle_parts.go", nil, 0)
+	require.NoError(t, err)
+	got := map[string]string{}
+	for _, decl := range f.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv == nil || fn.Body == nil {
+			continue
+		}
+		params := map[string]string{}
+		for _, field := range fn.Type.Params.List {
+			ident, ok := field.Type.(*ast.Ident)
+			if !ok {
+				continue
+			}
+			for _, n := range field.Names {
+				params[n.Name] = ident.Name
+			}
+		}
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || sel.Sel.Name != "addFromValue" || len(call.Args) != 3 {
+				return true
+			}
+			arg, ok := call.Args[1].(*ast.Ident)
+			if !assert.Truef(t, ok, "%s passes a value to addFromValue that is not a parameter", fn.Name.Name) {
+				return true
+			}
+			got[fn.Name.Name] = params[arg.Name]
+			return true
+		})
+	}
+	// 何も拾えなかったら落とす (書式が変わって抽出が空振りしたとき)。
+	require.NotEmpty(t, got, "found no registration that calls addFromValue in lifecycle_parts.go")
+	want := map[string]string{}
+	for _, sh := range valueShapes {
+		want[sh.registration] = sh.iface
+	}
+	assert.Equal(t, want, got, "valueShapes does not list the registrations of lifecycle_parts.go")
+}
+
+// TestValueShape_ClassifiesThePartTypes pins valueShape on fakes of the five
+// shapes and on the types of the parts newServer adds, listed by name, so a
+// part type that gains or loses a method shows up here.
+func TestValueShape_ClassifiesThePartTypes(t *testing.T) {
+	tests := []struct {
+		name string
+		part any
+		// use is the registration valueShape names, or "" for none.
+		use string
+	}{
+		{name: "fake Start(ctx) and Close()", part: fakeStartCloser{}, use: "startPartWithClose"},
+		{name: "fake Start(ctx) and Stop(ctx)", part: fakeStartStopper{}, use: "startPartWithStop"},
+		{name: "fake Start() and Stop()", part: fakePlainStartStopper{}, use: "startPartWithoutCtx"},
+		{name: "fake Close(ctx)", part: fakeCtxCloser{}, use: "addCloser"},
+		{name: "fake Close() error", part: fakeErrCloser{}, use: "addErrCloser"},
+
+		// 値から作る登録で足す 9 つの部品の型 (8 つ。deliveryHealth と inboxHealth は同じ型)。
+		// pluginstore.Store だけは setupRoutes ではなく dbBackedStorage が登録する。
+		{name: "TouchBuffer", part: (*coreinstance.TouchBuffer)(nil), use: "startPartWithClose"},
+		{name: "CapabilityBuffer", part: (*coreinstance.CapabilityBuffer)(nil), use: "startPartWithClose"},
+		{name: "CounterBuffer", part: (*coreinstance.CounterBuffer)(nil), use: "startPartWithClose"},
+		{name: "deliveryhealth.Service", part: (*deliveryhealth.Service)(nil), use: "startPartWithStop"},
+		{name: "ServerStatsPublisher", part: (*stream.ServerStatsPublisher)(nil), use: "startPartWithoutCtx"},
+		{name: "QueueStatsPublisher", part: (*stream.QueueStatsPublisher)(nil), use: "startPartWithoutCtx"},
+		{name: "MetadataRefresher", part: (*coreinstance.MetadataRefresher)(nil), use: "addCloser"},
+		{name: "pluginstore.Store", part: (*pluginstore.Store)(nil), use: "addErrCloser"},
+
+		// closure でしか止められないので addPart で足す型と、値を持たない worker。
+		{name: "fedrule.HitStore", part: (*fedrule.HitStore)(nil)},
+		{name: "hashtag.Service", part: (*corehashtag.Service)(nil)},
+		{name: "EmojiInvalidationQueue", part: (*repository.EmojiInvalidationQueue)(nil)},
+		{name: "paramshadow.Recorder", part: (*paramshadow.Recorder)(nil)},
+		{name: "no value", part: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.use, valueShape(tt.part))
+		})
+	}
+}

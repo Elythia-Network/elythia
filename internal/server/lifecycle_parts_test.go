@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -177,12 +178,120 @@ func assertPartTypes(t *testing.T, s *Server) {
 	}
 }
 
+// addPartShapeAllowlist lists the parts that newServer may add by addPart
+// although their value has a shape that a registration from the value takes
+// (valueShape). The value is the reason the part keeps its closure stop.
+//
+// 今は空。closure のまま残した 8 つ (docs/architecture.md 4.3) は、どれも形を満たさない。
+// 足すときは、なぜ値から作る登録にしないか (closure の停止が何をするか) を書く。
+var addPartShapeAllowlist = map[string]string{}
+
+// addPartsInspected names the parts added by addPart with a value that
+// addPartShapeViolations has to see in at least one combination. It is the lower
+// bound of the check: with an empty allowlist, a check that inspects nothing
+// would pass as well.
+var addPartsInspected = []string{"fedRuleHits", "hashtagService", "emojiInvalidationQueue", "paramShadowRecorder"}
+
+// addPartShapeViolations returns a message for each of parts that was added
+// by addPart although its value has a shape valueShape knows and its name is
+// not in allowlist. It records the parts it inspected (added by addPart with
+// a value) and the allowlist entries it used.
+func addPartShapeViolations(parts []lifecyclePart, allowlist map[string]string, inspected, used map[string]bool) []string {
+	var out []string
+	for _, p := range parts {
+		if p.fromValue || p.part == nil {
+			continue
+		}
+		inspected[p.name] = true
+		use := valueShape(p.part)
+		if use == "" {
+			continue
+		}
+		if _, ok := allowlist[p.name]; ok {
+			used[p.name] = true
+			continue
+		}
+		out = append(out, fmt.Sprintf("part %q (%T) is added by addPart, but its value can be added by %s", p.name, p.part, use))
+	}
+	return out
+}
+
+// sharedPartValues returns a message for each part of parts that holds the
+// same value as an earlier part, and for each part whose value is not a
+// pointer.
+//
+// 値から作る登録では、値が起動と停止を決める。同じ値を 2 回渡すと、もう片方の部品は
+// 起動も停止もされない (#3701 のレビュー L-1)。部品の値は同一性で比べるので、ポインタに限る。
+// **ポインタでない値を持つ部品は、それだけでここに出る。** 値の型 (struct のまま渡すもの) の
+// 部品を足すときは、比べ方から見直す。
+func sharedPartValues(parts []lifecyclePart) []string {
+	var out []string
+	seen := map[any]string{}
+	for _, p := range parts {
+		if p.part == nil {
+			continue
+		}
+		if reflect.ValueOf(p.part).Kind() != reflect.Pointer {
+			out = append(out, fmt.Sprintf("part %q holds a %T, not a pointer", p.name, p.part))
+			continue
+		}
+		if prev, ok := seen[p.part]; ok {
+			out = append(out, fmt.Sprintf("parts %q and %q hold the same value (%T)", prev, p.name, p.part))
+			continue
+		}
+		seen[p.part] = p.name
+	}
+	return out
+}
+
+// TestPartChecks_ReportViolations is the positive control of
+// addPartShapeViolations and sharedPartValues: each reports a part list built
+// by hand that breaks its rule, and stays quiet on one that keeps it.
+func TestPartChecks_ReportViolations(t *testing.T) {
+	stop := func(context.Context) {}
+	shaped := fakeStartCloser{&partCalls{}}
+	t.Run("a part with a shape added by addPart", func(t *testing.T) {
+		s := &Server{}
+		s.addPart("closure", shaped, stop)
+		s.addPart("noShape", &struct{ n int }{}, stop)
+		s.addPart("worker", nil, stop)
+		s.startPartWithClose(context.Background(), "fromValue", fakeStartCloser{&partCalls{srv: s}})
+		inspected, used := map[string]bool{}, map[string]bool{}
+		got := addPartShapeViolations(s.lifecycle.parts, nil, inspected, used)
+		assert.Equal(t, []string{`part "closure" (server.fakeStartCloser) is added by addPart, but its value can be added by startPartWithClose`}, got)
+		assert.Equal(t, map[string]bool{"closure": true, "noShape": true}, inspected)
+		assert.Empty(t, used)
+
+		// 許可リストに載せると報告せず、使ったことを記録する。
+		got = addPartShapeViolations(s.lifecycle.parts, map[string]string{"closure": "test"}, inspected, used)
+		assert.Empty(t, got)
+		assert.Equal(t, map[string]bool{"closure": true}, used)
+	})
+	t.Run("two parts with the same pointer", func(t *testing.T) {
+		v := &struct{ n int }{}
+		var l lifecycle
+		l.add("a", v, stop)
+		l.add("b", &struct{ n int }{}, stop)
+		l.add("c", v, stop)
+		l.add("worker", nil, stop)
+		l.add("other", nil, stop)
+		assert.Equal(t, []string{`parts "a" and "c" hold the same value (*struct { n int })`}, sharedPartValues(l.parts))
+	})
+	t.Run("a part whose value is not a pointer", func(t *testing.T) {
+		var l lifecycle
+		l.add("value", struct{ n int }{}, stop)
+		assert.Equal(t, []string{`part "value" holds a struct { n int }, not a pointer`}, sharedPartValues(l.parts))
+	})
+}
+
 // TestNewServer_ShutdownStopsThePartsInTheirOrder pins the stop order of the
 // named parts (#3699) for each combination of the process role and the
 // settings that change what setupRoutes registers, on a server built by
 // newServer. It also checks that StopBackground calls every listed part, in
 // that order and with its ctx, and the type of each part value
-// (lifecyclePartTypes).
+// (lifecyclePartTypes). It also checks that no two parts hold the same value
+// and that no part with a shape of its own comes through addPart
+// (sharedPartValues and addPartShapeViolations, #3701).
 //
 // 並びは #3699 の前の登録の順 (無名の hook の順) と、組ごとに突き合わせて同じで
 // あることを確かめてある。部品を足す・動かすときは、この表と
@@ -290,8 +399,16 @@ func TestNewServer_ShutdownStopsThePartsInTheirOrder(t *testing.T) {
 	for name := range lifecyclePartTypes {
 		assert.Truef(t, seen[name], "lifecyclePartTypes has %q, which no combination lists", name)
 	}
+	inspected := map[string]bool{}
+	used := map[string]bool{}
+	fromValue := map[string]bool{}
+	// 始まった組の数。-run で組を絞ったときは、下の組をまたぐ検査をしない。
+	// 数えるのは subtest の先頭で行う。途中で return や Skip をした組も数え、
+	// 組をまたぐ検査が黙って省かれないようにする (#3701 のレビュー 3 周目)。
+	ran := 0
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			ran++
 			db, clients, _, cfg := constructionFixture(t)
 			restoreProcessGlobals(t)
 			switch tt.role {
@@ -325,6 +442,17 @@ func TestNewServer_ShutdownStopsThePartsInTheirOrder(t *testing.T) {
 			require.Equal(t, tt.role, srv.role)
 			assert.Equal(t, tt.want, srv.lifecycle.names())
 			assertPartTypes(t, srv)
+			for _, v := range sharedPartValues(srv.lifecycle.parts) {
+				t.Error(v)
+			}
+			for _, v := range addPartShapeViolations(srv.lifecycle.parts, addPartShapeAllowlist, inspected, used) {
+				t.Error(v)
+			}
+			for _, p := range srv.lifecycle.parts {
+				if p.fromValue {
+					fromValue[p.name] = true
+				}
+			}
 
 			var rec lifecycleRecorder
 			rec.wrap(srv)
@@ -334,6 +462,25 @@ func TestNewServer_ShutdownStopsThePartsInTheirOrder(t *testing.T) {
 			assert.Equal(t, tt.want, called, "StopBackground did not stop the listed parts in order")
 			assert.Empty(t, noCtx, "these parts did not get the shutdown ctx")
 		})
+	}
+	if ran != len(tests) {
+		t.Logf("%d of %d combinations ran; skipping the checks across all of them", ran, len(tests))
+		return
+	}
+	// 許可リストの使われていない項目を落とす。
+	for name := range addPartShapeAllowlist {
+		assert.Truef(t, used[name], "addPartShapeAllowlist has %q, which no combination adds by addPart with a shape", name)
+	}
+	// 検査が部品を見たことの下限。許可リストが空のときは上の検査が空振りするので、
+	// closure の部品を名指しで要求し、値から作る印が実際に付いていることも見る。
+	for _, name := range addPartsInspected {
+		assert.Truef(t, inspected[name], "addPartShapeViolations did not inspect %q", name)
+	}
+	for _, name := range []string{
+		"metadataRefresher", "instanceTouchBuffer", "sigCapBuffer", "instanceCounterBuffer",
+		"deliveryHealth", "inboxHealth", "serverStatsPub", "queueStatsPub", "pluginStorage:lifecyclea",
+	} {
+		assert.Truef(t, fromValue[name], "part %q is not marked as added from its value in any combination", name)
 	}
 }
 
