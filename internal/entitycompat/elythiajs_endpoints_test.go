@@ -15,7 +15,7 @@ import (
 // 突き合わせて、片方だけの変更を落とす。
 //
 // Go 側の一覧は docs/api-compat.md の「mk-go 側にしかない endpoint」から取る。
-// あの表は TestAPICompatDoc_MatchesRouter が router.go と一致することを保証して
+// あの表は TestAPICompatDoc_MatchesRouter が internal/server の登録と一致することを保証して
 // いるので、ルーターを読み直さずに済む。GET の別名 (本家にもあるエンドポイント
 // を GET で呼べるようにしたもの) は misskey-js のクライアントが使わないので
 // 対象にしない。

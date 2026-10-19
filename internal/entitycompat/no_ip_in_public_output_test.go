@@ -138,7 +138,7 @@ func TestResponseAndFederationShapesHaveNoIPField(t *testing.T) {
 var ipShapeAllowlist = map[string]string{
 	// --- admin/ip/* (#3104 / #3105 / #3106) ---
 	//
-	// 3 段で守られている (`internal/server/router.go`): `RequireModerator` +
+	// 3 段で守られている (`internal/server/routes_admin.go`): `RequireModerator` +
 	// `RequireRolePolicy(canSearchIpHistory)` + `RequireScope("read:admin:user-ips")`。
 	// policy の既定は false で admin は bypass するので、既定の挙動は upstream と
 	// 同じ「管理者のみ」。
