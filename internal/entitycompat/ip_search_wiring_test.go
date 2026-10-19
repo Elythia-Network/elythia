@@ -37,7 +37,7 @@ func TestIPAccountSearchRepoIsWired(t *testing.T) {
 // 誰も異常に気付かない。引数まで照合するので、policy 名を別のものに差し替える
 // 形も落ちる。
 func TestIPAccountSearchRouteIsRegistered(t *testing.T) {
-	assertWired(t, serverPkg,
+	assertRouteRegisteredBy(t, "routes_admin.go", "registerAdminRoutes",
 		`api.POST("/admin/ip/accounts", adminHandler.IPAccounts, `+
 			`middleware.RequireModerator(roleService), `+
 			`middleware.RequireRolePolicy(roleService, corerole.PolicyCanSearchIPHistory), `+
@@ -53,7 +53,7 @@ func TestIPAccountSearchRouteIsRegistered(t *testing.T) {
 // 「利用者 ↔ IP の対応」なので、認証段が片方だけ緩むと**緩いほうから同じ情報が
 // 全部引ける**。
 func TestIPRelatedAccountsRouteIsRegistered(t *testing.T) {
-	assertWired(t, serverPkg,
+	assertRouteRegisteredBy(t, "routes_admin.go", "registerAdminRoutes",
 		`api.POST("/admin/ip/related-accounts", adminHandler.IPRelatedAccounts, `+
 			`middleware.RequireModerator(roleService), `+
 			`middleware.RequireRolePolicy(roleService, corerole.PolicyCanSearchIPHistory), `+
@@ -90,7 +90,7 @@ func TestIPLookupLogRetentionIsWired(t *testing.T) {
 // **この応答自体が機密。** 照会に使った IP がそのまま入るので、ここが緩むと
 // 「IP を引く権限は無いが、誰がどの IP を引いたかは読める」状態になる。
 func TestIPLookupLogRouteIsRegistered(t *testing.T) {
-	assertWired(t, serverPkg,
+	assertRouteRegisteredBy(t, "routes_admin.go", "registerAdminRoutes",
 		`api.POST("/admin/ip/lookup-log", adminHandler.IPLookupLog, `+
 			`middleware.RequireModerator(roleService), `+
 			`middleware.RequireRolePolicy(roleService, corerole.PolicyCanSearchIPHistory), `+
@@ -103,11 +103,11 @@ func TestIPLookupLogRouteIsRegistered(t *testing.T) {
 // いること (#3106)。
 //
 // **limiter は未登録のキーを素通しする。** キーは `strings.TrimPrefix(c.Path(),
-// "/api/")` で引くだけなので、router.go 側で path を rename すると**上限が
+// "/api/")` で引くだけなので、internal/server の登録で path を rename すると**上限が
 // 黙って消える** — 表にキーは残るので誰も気付かない。
 //
 // `internal/server/middleware` 側のテストは表のキーと値を固定するが、それは
-// path の文字列を自分で書いているので、router.go との対応までは見ていない。
+// path の文字列を自分で書いているので、internal/server の登録との対応までは見ていない。
 // **2 つの一覧を突き合わせるのはここだけ。**
 func TestIPLookupRoutesHaveRateLimits(t *testing.T) {
 	registered := registeredAPIPostPaths(t)
@@ -122,7 +122,7 @@ func TestIPLookupRoutesHaveRateLimits(t *testing.T) {
 	for _, route := range routes {
 		t.Run(route, func(t *testing.T) {
 			require.True(t, registered[route],
-				"%s が router.go に登録されていない、あるいは path が変わっている。\n"+
+				"%s が internal/server に登録されていない、あるいは path が変わっている。\n"+
 					"rename したなら、この一覧と DefaultEndpointLimits のキーも一緒に直すこと (#3106)", route)
 			key := strings.TrimPrefix(route, "/")
 			limit, ok := middleware.DefaultEndpointLimits[key]

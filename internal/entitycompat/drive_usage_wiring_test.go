@@ -31,7 +31,7 @@ func TestDriveUsageProviderIsWired(t *testing.T) {
 // 固定されていない。middleware を落として誰でも叩ける状態にすると、リモート
 // ホストの一覧と利用者ごとの使用量が無認証で読めることになる。
 func TestDriveUsageRouteIsRegistered(t *testing.T) {
-	assertWired(t, serverPkg,
+	assertRouteRegisteredBy(t, "routes_admin.go", "registerAdminRoutes",
 		`api.POST("/admin/drive/usage", adminHandler.DriveUsage, `+
 			`middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:drive"))`,
 		"admin/drive/usage が 404 になる、あるいは認証段が緩む (#3053)")

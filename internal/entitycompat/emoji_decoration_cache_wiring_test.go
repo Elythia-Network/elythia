@@ -241,6 +241,8 @@ func TestAvatarDecorationRoleSetsAreWired(t *testing.T) {
 		"buildHandlers の handler を wiring に入れていない。")
 	assertWired(t, serverPkg, "avatarDecorationsHandler := hSvcs.avatarDecorations",
 		"get-avatar-decorations に登録する handler が、buildHandlers で作ったものでなくなる。")
-	assertWired(t, serverPkg, `api.POST("/get-avatar-decorations", avatarDecorationsHandler.Get)`,
+	// ルートの登録は registerEmojisRoutes へ移った (#3697)。行の avatarDecorationsHandler は
+	// その関数の引数なので、setupRoutes がその引数に同じ名前の別名を渡していることまで照合する。
+	assertRouteRegisteredBy(t, "routes_emojis.go", "registerEmojisRoutes", `api.POST("/get-avatar-decorations", avatarDecorationsHandler.Get)`,
 		"get-avatar-decorations のルートが、buildHandlers で作った handler を使っていない。")
 }
