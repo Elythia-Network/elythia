@@ -87,7 +87,11 @@ data が要る。`go list -export` は、キャッシュが冷えていると 8 
 同じ名前のローカルのメソッドと取り違えないため)。
 `func registerNotesRoutes(api apiRoutes, h *notes.Handler)` のように handler を引数で
 受け取る形も、`iHandler, _ := s.buildAccount()` のように戻り値で受け取る形も、
-`h.notes.Create` のように構造体で持つ形も解決する。
+`h.notes.Create` のように構造体で持つ形も解決する。`setupRoutes()` の別名
+(`usersHandler := hSvcs.users`。`hSvcs` は `s.buildHandlers(...)` の戻り値の構造体、#3694) も
+解決する。この形は route の受け手から構造体のフィールドの型までを辿るのに 9 段の再帰が要るので、
+辿る深さの上限 (`maxResolveDepth`) を 8 から 16 に上げた (8 のままだと、解決できる /api の
+route が 280 本に落ちた)。
 
 **名前の表で引いてはいけない。** #3672 の 1 回目の実装は `h := pkg.NewX(...)` の名前の表を
 他のファイルへ落として引いたので、段階 2 で普通に書く `registerNotesRoutes(api apiRoutes,
