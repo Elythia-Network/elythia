@@ -480,7 +480,7 @@ upstream の endpoint 一覧を `tools/apicompat` から直接引くことはで
 
 ### `TestDivergenceDoc_StreamChannelsMatchRegistry`
 
-§4-1 のチャンネル一覧 == `internal/server` の `streamRegistry.Register*` の登録名。
+§4-1 のチャンネル一覧 == `internal/server` の登録名 (`builtinStreamChannels()` の一覧、#3692)。
 
 **チャンネル名はソースのファイル名と違う。** upstream のソースは `chat-room.ts` だが
 wire 上の名前 (`chName`) は `chatRoom`。#2640 の初稿はファイル名をそのまま
@@ -488,9 +488,10 @@ wire 上の名前 (`chName`) は `chatRoom`。#2640 の初稿はファイル名�
 しない名前**だった。人が目で照合すると通る類の誤り。
 
 doc 側は §4-1 の表 (Elythia 独自) と ```text フェンス (upstream 由来) の和を母集団に、
-実装側は `internal/server/` 非テスト `.go` 全体の `streamRegistry.Register*` を見る。
-呼び出しの総数と抽出できた数が一致することも見る (名前が定数経由だったり英字以外を
-含むと registry から丸ごと消えるため)。
+実装側は `internal/server/` 非テスト `.go` 全体から、`builtinStreamChannels()` の項目の名前を
+構文木で読み (名前が文字列リテラルでない項目は落とす)、一覧の外の
+`streamRegistry.Register*` の直接の登録も拾う。直接の登録は、呼び出しの総数と抽出できた数が
+一致することも見る (名前が定数経由だったり英字以外を含むと registry から丸ごと消えるため)。
 
 **固定できるのは「doc の一覧 == Elythia の登録」だけ。** §4-1 のもう半分の主張
 「upstream は 18」「名前も upstream に揃えてある」は検証していない — `test-shards`
