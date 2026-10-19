@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/queue"
+	"github.com/elythia-network/elythia/internal/queue/driver"
 	"github.com/elythia-network/elythia/internal/queue/processors"
 	"github.com/elythia-network/elythia/internal/repository"
 )
@@ -23,8 +25,9 @@ import (
 // fetcher, the moderator activity service, the quote outbox), stay in
 // setupRoutes (docs/architecture.md 4.2).
 //
-// buildQueue only constructs. Every setter on these processors, and every
-// handler registration, is still done at its old position in setupRoutes.
+// buildQueue only constructs. Every setter on these processors is still
+// called at its old position in setupRoutes. The handlers are registered in
+// one place, from the list builtinQueueHandlers returns.
 type queueProcs struct {
 	importProcessor              *processors.ImportProcessor
 	cleanProcessor               *processors.CleanRemoteNotesProcessor
@@ -213,5 +216,97 @@ func (s *Server) buildQueue(w *wiring, coreSvcs core, idGen id.Generator) queueP
 		unblockProcessor:             unblockProcessor,
 		retentionProc:                retentionProc,
 		postScheduledNoteProcessor:   postScheduledNoteProcessor,
+	}
+}
+
+// queueHandlerProcs holds every processor that handles a built-in task type
+// (#3690): the ones buildQueue builds and the ones setupRoutes still builds
+// itself. setupRoutes fills it from the same local names its setters use, so
+// the registered handler is bound to the processor the setters configured.
+//
+// Field names follow the task types rather than the local variable names, so
+// a gate that matches a "name: name" line of buildQueue's result does not
+// also match this literal.
+type queueHandlerProcs struct {
+	webPush                 *processors.WebPushProcessor
+	webhook                 *processors.WebhookProcessor
+	dataExport              *processors.ExportProcessor
+	dataImport              *processors.ImportProcessor
+	emojiImport             *processors.ImportCustomEmojisProcessor
+	resendQuoteRequests     *processors.ResendQuoteRequestsProcessor
+	deliver                 *processors.DeliverProcessor
+	inbox                   *processors.InboxProcessor
+	cleanRemoteNotes        *processors.CleanRemoteNotesProcessor
+	orphanUserCleanup       *processors.OrphanUserCleanupProcessor
+	orphanAttachmentCleanup *processors.OrphanAttachmentCleanupProcessor
+	checkExpiredMutings     *processors.CheckExpiredMutingsProcessor
+	clean                   *processors.CleanProcessor
+	chunkedUploadGC         *processors.ChunkedUploadGCProcessor
+	objectStorage           *processors.ObjectStorageProcessor
+	reactionFlush           *processors.ReactionFlushProcessor
+	deleteAccount           *processors.DeleteAccountProcessor
+	unfollow                *processors.UnfollowProcessor
+	follow                  *processors.FollowProcessor
+	block                   *processors.BlockProcessor
+	unblock                 *processors.UnblockProcessor
+	chart                   *processors.ChartProcessor
+	instanceRefresh         *processors.InstanceRefreshProcessor
+	retentionAggregate      *processors.RetentionAggregateProcessor
+	postScheduledNote       *processors.PostScheduledNoteProcessor
+	checkModeratorsActivity *processors.CheckModeratorsActivityProcessor
+}
+
+// queueHandler pairs a built-in task type with the handler that runs it.
+type queueHandler struct {
+	taskType string
+	handle   driver.HandlerFunc
+}
+
+// builtinQueueHandlers returns the built-in task types and their handlers
+// (#3690). It is the only place that says which processor method handles
+// which task type. Each task type appears once; the driver keeps handlers in a
+// map keyed by task type, so a second entry would silently replace the first.
+// Plugin task types are registered by the plugin wiring, not here.
+func builtinQueueHandlers(p queueHandlerProcs) []queueHandler {
+	return []queueHandler{
+		{queue.TaskTypeWebPush, p.webPush.Handle},
+		{queue.TaskTypeUserWebhook, p.webhook.HandleUser},
+		{queue.TaskTypeSystemWebhook, p.webhook.HandleSystem},
+		{queue.TaskTypeExport, p.dataExport.Handle},
+		{queue.TaskTypeImport, p.dataImport.Handle},
+		{queue.TaskTypeImportCustomEmojis, p.emojiImport.Handle},
+		{queue.TaskTypeResendQuoteRequests, p.resendQuoteRequests.Handle},
+		{queue.TaskTypeDeliver, p.deliver.Handle},
+		{queue.TaskTypeInbox, p.inbox.Handle},
+		{queue.TaskTypeCleanRemoteNotes, p.cleanRemoteNotes.Handle},
+		{queue.TaskTypeOrphanUserCleanup, p.orphanUserCleanup.Handle},
+		{queue.TaskTypeOrphanAttachmentCleanup, p.orphanAttachmentCleanup.Handle},
+		{queue.TaskTypeCheckExpiredMutings, p.checkExpiredMutings.Handle},
+		{queue.TaskTypeClean, p.clean.Handle},
+		{queue.TaskTypeChunkedUploadGC, p.chunkedUploadGC.Handle},
+		{queue.TaskTypeObjectStorageDeleteFile, p.objectStorage.HandleDeleteFile},
+		{queue.TaskTypeCleanRemoteFiles, p.objectStorage.HandleCleanRemoteFiles},
+		{queue.TaskTypeReactionFlush, p.reactionFlush.Handle},
+		{queue.TaskTypeDeleteAccount, p.deleteAccount.Handle},
+		{queue.TaskTypeUnfollow, p.unfollow.Handle},
+		{queue.TaskTypeFollow, p.follow.Handle},
+		{queue.TaskTypeBlock, p.block.Handle},
+		{queue.TaskTypeUnblock, p.unblock.Handle},
+		{queue.TaskTypeChartTick, p.chart.HandleTick},
+		{queue.TaskTypeChartResync, p.chart.HandleResync},
+		{queue.TaskTypeChartClean, p.chart.HandleClean},
+		{queue.TaskTypeInstanceRefresh, p.instanceRefresh.Handle},
+		{queue.TaskTypeRetentionAggregate, p.retentionAggregate.Handle},
+		{queue.TaskTypePostScheduledNote, p.postScheduledNote.Handle},
+		{queue.TaskTypeCheckModeratorsActivity, p.checkModeratorsActivity.Handle},
+	}
+}
+
+// registerQueueHandlers registers hs on s.queueServer, in order. It must run
+// before s.queueServer.Start: the driver copies its handler map at Start and
+// panics on a later Handle.
+func (s *Server) registerQueueHandlers(hs []queueHandler) {
+	for _, h := range hs {
+		s.queueServer.Handle(h.taskType, h.handle)
 	}
 }

@@ -136,7 +136,6 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/idnhost"
 	miscsmtp "github.com/elythia-network/elythia/internal/misc/smtp"
 	"github.com/elythia-network/elythia/internal/model"
-	"github.com/elythia-network/elythia/internal/queue"
 	"github.com/elythia-network/elythia/internal/queue/processors"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
@@ -699,7 +698,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	webPushProcessor := processors.NewWebPushProcessor(
 		webPushCache, swSubRepo, metaRepo, webPushSender, s.config.URL,
 	)
-	s.queueServer.Handle(queue.TaskTypeWebPush, webPushProcessor.Handle)
 
 	// Webhook (Phase 9.5): ユーザー/システムwebhookの配信を非同期処理する。
 	// reply/mention webhook をスレッドミュート済 recipient に出さない (#1965)。
@@ -715,8 +713,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// URL に POST する (#638)。Timeout は processors 側の DefaultWebhookTimeout
 	// に揃える。
 	webhookProcessor := processors.NewWebhookProcessor(webhookRepo, systemWebhookRepo, s.outboundClient(processors.DefaultWebhookTimeout), s.config.Host)
-	s.queueServer.Handle(queue.TaskTypeUserWebhook, webhookProcessor.HandleUser)
-	s.queueServer.Handle(queue.TaskTypeSystemWebhook, webhookProcessor.HandleSystem)
 
 	// Blocking & Muting
 	blockingService.SetRelationReloadPublisher(relationReloadPublisher)
@@ -914,8 +910,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	unblockProcessor := queueSvcs.unblockProcessor
 	retentionProc := queueSvcs.retentionProc
 	postScheduledNoteProcessor := queueSvcs.postScheduledNoteProcessor
-	s.queueServer.Handle(queue.TaskTypeExport, exportProcessor.Handle)
-	s.queueServer.Handle(queue.TaskTypeImport, importProcessor.Handle)
 
 	// Phase 9.9: admin/emoji/import-zip を非同期で処理するワーカー。
 	// driveReader と driveService を再利用し ZIP 展開→Drive 保存→emoji 行作成。
@@ -930,7 +924,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		DecorationCache: emojiDecorationResolver,
 	})
 	emojiImportProcessor := processors.NewImportCustomEmojisProcessor(emojiImporter)
-	s.queueServer.Handle(queue.TaskTypeImportCustomEmojis, emojiImportProcessor.Handle)
 
 	// Search (Phase 4.6)
 	// 設定に従って provider を選択する。Meilisearch が設定されていれば
@@ -1193,7 +1186,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	federationProcessor.SetQuoteAnswerHandler(quoteOutbox)
 	apRenderer.SetQuoteApprovalResolver(quoteOutbox.ApprovalURI)
 	// 保留のまま残った QuoteRequest を毎分確かめて送り直す (#3238)。
-	s.queueServer.Handle(queue.TaskTypeResendQuoteRequests, processors.NewResendQuoteRequestsProcessor(quoteOutbox).Handle)
+	resendQuoteRequestsProcessor := processors.NewResendQuoteRequestsProcessor(quoteOutbox)
 	// ブロックした相手の引用に出していた承認を取り消す (#3234 段階 4)。
 	blockingService.SetQuoteRevoker(corefederation.NewQuoteRevoker(quoteAuthorizationRepo, userRepo, noteRepo,
 		quoteRequestDeliveryHook, noteDeliveryHook, apURLs))
@@ -1228,7 +1221,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 配送に成功した相手の nodeinfo を取り直す (#3564)。本家と同じく
 	// enableStatsForFederatedInstances が有効なときだけ。
 	deliverProcessor.SetMetadataRefresher(metadataRefresher, corefollowing.MetaInstanceStatsGate(metaRepo))
-	s.queueServer.Handle(queue.TaskTypeDeliver, deliverProcessor.Handle)
 
 	// Inbox (#534 / #565): HTTP handler は body+signature 関連 header を
 	// payload に詰めて 202 即返し。worker 側 (本 processor) で signature
@@ -1258,7 +1250,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 同じ用途 (短命の使用済みマーカー) で、timelines / reactions のような
 	// 用途別インスタンスに載せる理由が無い。
 	inboxProcessor.SetInboxReplayGuard(processors.NewRedisInboxReplayGuard(s.redis.Default))
-	s.queueServer.Handle(queue.TaskTypeInbox, inboxProcessor.Handle)
 
 	// Remote notes cleaning (issue #46)。processor と、設定を毎回 meta から読む
 	// 関数は buildQueue で作る (#3690)。cursor の setter はここ。
@@ -1266,19 +1257,12 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		Client: s.redis.Default,
 		Key:    s.config.Redis.KeyPrefix() + processors.CleanRemoteNotesCursorKey,
 	})
-	s.queueServer.Handle(queue.TaskTypeCleanRemoteNotes, cleanProcessor.Handle)
-
-	// リレー由来の孤児リモートユーザーの掃除 (#2340) と、owner 無しのリモート添付の
-	// 掃除 (#2722)。processor と cutoff 用の generator は buildQueue で作る (#3690)。
-	s.queueServer.Handle(queue.TaskTypeOrphanUserCleanup, orphanUserProcessor.Handle)
-	s.queueServer.Handle(queue.TaskTypeOrphanAttachmentCleanup, orphanAttachmentProcessor.Handle)
 
 	// Expired-mute prune (#1563 / #1603)。processor は buildQueue で作る (#3690)。
 	// 期限付き mute の**自然失効**も snapshot に反映させる (#2453)。relationReloadPublisher
 	// の他の配線はすべて利用者の操作が起点だが、期限切れは誰も操作しないので cron が唯一の
 	// 通知点になる。ここを繋がないと「1 時間だけミュート」が接続中は解除されない。
 	checkExpiredMutingsProcessor.SetRelationReloadPublisher(relationReloadPublisher)
-	s.queueServer.Handle(queue.TaskTypeCheckExpiredMutings, checkExpiredMutingsProcessor.Handle)
 
 	// Daily generic clean (#1563)。processor は buildQueue で作る (#3690)。
 	// 下の SetIPLookupLogPruner は、buildRepos の ipLookupLogRepo と同じ種類の
@@ -1290,17 +1274,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	cleanGenericProcessor.SetIPLookupLogPruner(repository.NewIPLookupLogRepository(s.db))
 	// 対戦の記録は終局から 30 日で消す (#3232)。
 	cleanGenericProcessor.SetBubbleVersusRecordPruner(bubbleVersusRecordRepo)
-	s.queueServer.Handle(queue.TaskTypeClean, cleanGenericProcessor.Handle)
-
-	// 分割アップロードセッションの GC (#2313) と object storage の実体削除 (#2325)。
-	// processor は buildQueue で作る (#3690)。
-	s.queueServer.Handle(queue.TaskTypeChunkedUploadGC, chunkedUploadGCProcessor.Handle)
-	s.queueServer.Handle(queue.TaskTypeObjectStorageDeleteFile, objectStorageProcessor.HandleDeleteFile)
-	s.queueServer.Handle(queue.TaskTypeCleanRemoteFiles, objectStorageProcessor.HandleCleanRemoteFiles)
 
 	// Reaction flush (issue #57): buffered writer 使用時は 30 秒ごとに flush。
 	flushProcessor := processors.NewReactionFlushProcessor(reactionCountWriter)
-	s.queueServer.Handle(queue.TaskTypeReactionFlush, flushProcessor.Handle)
 
 	// Account cascade deletion (issue #187)。processor は buildQueue で作る (#3690)。
 	// #2230: local user の物理削除に userRepo を配線。未配線だと soft 削除止まりで行が残る。
@@ -1310,14 +1286,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// #3207: 消した sw_subscription が購読キャッシュに残って push され続けないよう、
 	// Web Push の配送が読むのと同じキャッシュを渡す。
 	deleteAccountProcessor.SetPushSubscriptionCache(webPushCache)
-	s.queueServer.Handle(queue.TaskTypeDeleteAccount, deleteAccountProcessor.Handle)
 
-	// Per-pair Unfollow job (#587) と Follow / Block / Unblock job (#1605)。
-	// processor は buildQueue で作る (#3690)。
-	s.queueServer.Handle(queue.TaskTypeUnfollow, unfollowProcessor.Handle)
-	s.queueServer.Handle(queue.TaskTypeFollow, followProcessor.Handle)
-	s.queueServer.Handle(queue.TaskTypeBlock, blockProcessor.Handle)
-	s.queueServer.Handle(queue.TaskTypeUnblock, unblockProcessor.Handle)
 	// 30s ごとに buffered reaction count を DB へ drain する。30s ticker は
 	// upstream の日次 cron より高頻度で反映遅延を抑える mk-go の運用。
 	//
@@ -1444,20 +1413,13 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		chartCharts.PerUserPv,
 		chartCharts.PerUserReaction,
 	})
-	s.queueServer.Handle(queue.TaskTypeChartTick, chartProcessor.HandleTick)
-	s.queueServer.Handle(queue.TaskTypeChartResync, chartProcessor.HandleResync)
-	s.queueServer.Handle(queue.TaskTypeChartClean, chartProcessor.HandleClean)
 
 	// Periodic remote-instance metadata refresh (#393)。
 	// `metadataFetcher` は instance service 初期化時に作成済の
 	// coreinstance.FetchMetadataService を流用する。
 	instanceRefreshProc := processors.NewInstanceRefreshProcessor(instanceRepo, metadataFetcher, processors.InstanceRefreshConfig{})
-	s.queueServer.Handle(queue.TaskTypeInstanceRefresh, instanceRefreshProc.Handle)
 
-	// Daily retention aggregation (#421)。processor は buildQueue で作る (#3690)。
-	s.queueServer.Handle(queue.TaskTypeRetentionAggregate, retentionProc.Handle)
-
-	// 起動時にも 1 回 aggregation を発火する。cron (0 0 * * *) を待つと
+	// 起動時にも 1 回 retention の aggregation (#421) を発火する。cron (0 0 * * *) を待つと
 	// 新規デプロイ後最大 24h は heatmap が空のままになるので、その日の
 	// cohort 行を即座に作って描画を始められるようにする (#421)。同じ
 	// dateKey で 2 回目を Insert しても repository.ErrDuplicateKey で
@@ -2012,7 +1974,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// publish 結果通知 (#1045 Phase 2-B): scheduledNotePosted (= 成功) /
 	// scheduledNotePostFailed (= 失敗) を user の通知 stream に発火する。
 	postScheduledNoteProcessor.SetNotifier(notificationService)
-	s.queueServer.Handle(queue.TaskTypePostScheduledNote, postScheduledNoteProcessor.Handle)
 	api.POST("/notes/drafts/list", notesHandler.DraftsList, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("read:account"))
 	api.POST("/notes/drafts/create", notesHandler.DraftsCreate, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:account"))
 	api.POST("/notes/drafts/update", notesHandler.DraftsUpdate, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:account"))
@@ -3620,8 +3581,43 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		idGen,
 		miscsmtp.SubjectBodySenderFromMeta(metaRepo, s.config.ProxySMTP),
 	)
-	s.queueServer.Handle(queue.TaskTypeCheckModeratorsActivity,
-		processors.NewCheckModeratorsActivityProcessor(modActivitySvc).Handle)
+	checkModeratorsActivityProcessor := processors.NewCheckModeratorsActivityProcessor(modActivitySvc)
+
+	// queue の handler の登録 (#3690)。組み込みの job 種別とそれを受ける processor の
+	// 対応は builtinQueueHandlers (wiring_queue.go) の一覧にだけ書き、ここで 1 回
+	// 登録する。登録は driver の map に入れるだけで、読まれるのは queueServer.Start
+	// (New の後) で map を写すときだけなので、上に散らばっていた 30 か所の登録を
+	// ここへ集めても動きは変わらない。processor への setter はすべてこれより前にある。
+	// 置く位置は、最後の登録 (moderator の活動) があった位置。プラグインの登録
+	// (setupPlugins) はこれより後のまま。
+	s.registerQueueHandlers(builtinQueueHandlers(queueHandlerProcs{
+		webPush:                 webPushProcessor,
+		webhook:                 webhookProcessor,
+		dataExport:              exportProcessor,
+		dataImport:              importProcessor,
+		emojiImport:             emojiImportProcessor,
+		resendQuoteRequests:     resendQuoteRequestsProcessor,
+		deliver:                 deliverProcessor,
+		inbox:                   inboxProcessor,
+		cleanRemoteNotes:        cleanProcessor,
+		orphanUserCleanup:       orphanUserProcessor,
+		orphanAttachmentCleanup: orphanAttachmentProcessor,
+		checkExpiredMutings:     checkExpiredMutingsProcessor,
+		clean:                   cleanGenericProcessor,
+		chunkedUploadGC:         chunkedUploadGCProcessor,
+		objectStorage:           objectStorageProcessor,
+		reactionFlush:           flushProcessor,
+		deleteAccount:           deleteAccountProcessor,
+		unfollow:                unfollowProcessor,
+		follow:                  followProcessor,
+		block:                   blockProcessor,
+		unblock:                 unblockProcessor,
+		chart:                   chartProcessor,
+		instanceRefresh:         instanceRefreshProc,
+		retentionAggregate:      retentionProc,
+		postScheduledNote:       postScheduledNoteProcessor,
+		checkModeratorsActivity: checkModeratorsActivityProcessor,
+	}))
 
 	// Phase 7-2 (#244): /api/i の hasUnreadAnnouncement / unreadAnnouncements 配線
 	iHandler.SetAnnouncementRepo(announcementRepo)
