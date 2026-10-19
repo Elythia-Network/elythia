@@ -165,6 +165,13 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// pollVoted / reacted / unreacted / deleted を noteStream:<id> に publish
 	// する共通 publisher。subNote / sn メッセージで購読しているクライアントへ
 	// リアクション・削除イベントが流れる (#690 / #700)。
+	//
+	// 下の 4 つと userListStreamPublisher は buildStream へ移さず、ここで作る (#3692)。
+	// どれも buildStream を呼ぶ stream の節より前にある受け手へ渡す依存 (4 つは core の
+	// service・連合の processor・handler、userListStreamPublisher は usersHandler) で、
+	// それより前に要る。buildStream をここで呼ぶと、manager と note / notification の
+	// publisher (setter の受け手) まで先頭へ移り、後から入れる辺が 96 から 117 に
+	// 増える (docs/architecture.md 4.1 の数え方)。
 	noteEventPub := stream.NewNoteEventPublisher(streamPubSub)
 	// relation 変更 (#2400) の publisher。7 系統すべてを繋がないと「一部の操作だけ
 	// 反映されない」形の抜けになる。
@@ -179,6 +186,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	drivePublisher := stream.NewDrivePublisher(streamPubSub)
 	reversiPublisher := stream.NewReversiGamePublisher(streamPubSub)
 	mainStreamPublisher := stream.NewMainStreamPublisher(streamPubSub)
+	// users/lists/update-membership の withReplies 変更 (#2051) と、users/lists/push /
+	// pull の userAdded / userRemoved (#1549) を流す publisher。前は 2 つの handler の
+	// setter の引数でそれぞれ作っていた。持つのは pubsub だけで書き換える口も無いので、
+	// 1 つを共有しても動きは同じ (#3692)。
+	userListStreamPublisher := stream.NewUserListStreamPublisher(streamPubSub)
 
 	// Repositories (#3684)。作るのは buildRepos (wiring_repos.go) で、ここでは
 	// 今までと同じ名前の別名を置くだけにする。以降の部分は書き換えない
@@ -1987,7 +1999,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	usersHandler := users.NewHandler(userService, followingService, noteRepo, idGen)
 	// users/lists/update-membership の withReplies 変更を userUpdated として流し、接続中の
 	// userList channel snapshot を live 更新する (#2051)。
-	usersHandler.SetUserListEventPublisher(stream.NewUserListStreamPublisher(streamPubSub))
+	usersHandler.SetUserListEventPublisher(userListStreamPublisher)
 	// /pinned-users は meta.pinnedUsers の acct を解決する (#2791 で router.go の
 	// inline closure から移設)。
 	usersHandler.SetMetaRepo(metaRepo)
@@ -2948,7 +2960,19 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// Streaming (Phase 4.1 Step K)
 	// 1. Redis pubsub bus (核となる publish/subscribe チャンネル)。streamPubSub と
 	// internalPubSub は、受け手へ早く渡せるよう setupRoutes の先頭で作っている (#3676)。
-	streamBus := stream.NewEventPubSubBus(streamPubSub)
+	// bus・registry・manager と、ここより後で渡す publisher は buildStream
+	// (wiring_stream.go) で作る (#3692)。ここでは今までと同じ名前の別名を置くだけにし、
+	// 以降の部分は書き換えない。どれも作るだけで Redis に繋がず、購読も始めない。
+	// setter と購読 (Subscribe…)、s.streamManager への代入は元の位置のまま。
+	streamSvcs := buildStream(streamPubSub, idGen)
+	w.stream = streamSvcs
+	streamRegistry := streamSvcs.streamRegistry
+	streamManager := streamSvcs.streamManager
+	streamRevokePublisher := streamSvcs.streamRevokePublisher
+	notePublisher := streamSvcs.notePublisher
+	notificationPublisher := streamSvcs.notificationPublisher
+	broadcastPublisher := streamSvcs.broadcastPublisher
+	chatPublisher := streamSvcs.chatPublisher
 
 	// #1740: meta 更新の cross-worker cache invalidation。更新した worker は
 	// internal:metaUpdated を publish し、各 worker は受信して自プロセスの
@@ -3180,7 +3204,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	noteDeleteService.SetNotificationHook(notificationHook)
 
 	// 2. Channel registry: Misskey 互換のチャンネル名で各 factory を登録する
-	streamRegistry := stream.NewRegistry()
 	streamRegistry.RegisterCredentialed("homeTimeline", channels.NewHomeTimeline)
 	streamRegistry.Register("localTimeline", channels.NewLocalTimeline)
 	streamRegistry.Register("globalTimeline", channels.NewGlobalTimeline)
@@ -3198,8 +3221,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// serverStats / queueStats は publisher を後段で構築するため、ここでは
 	// 仮 register せず、publisher 生成後に登録する (1497 行付近)。
 
-	// 3. Connection manager + 各 publisher の生成
-	streamManager := stream.NewManager(streamRegistry, streamBus)
+	// 3. Connection manager と各 publisher への配線。manager と publisher は
+	// buildStream で作る (#3692)。
 	s.streamManager = streamManager
 	// readNotificationメッセージをnotificationServiceに橋渡しする
 	streamManager.SetNotificationReader(&notifReaderAdapter{svc: notificationService})
@@ -3272,7 +3295,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// WebSocket は接続時に 1 度しか認証しないので、tokenCache を落とすだけでは
 	// 既存の接続が閉じない。失効を扱う handler へ revoke publisher を配る。
 	// 自プロセスの Manager も渡す — publish が失敗しても、ここに居る接続は閉じる。
-	streamRevokePublisher := stream.NewStreamRevokePublisher(streamPubSub, streamManager)
+	// revoke publisher は buildStream で作る (#3692)。
 	iHandler.SetStreamRevoker(streamRevokePublisher)
 	oauthHandler.SetStreamRevoker(streamRevokePublisher)
 	// profile 編集を remote followers に Update(Person) で配信する (#1560)。
@@ -3285,13 +3308,12 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// note pin/unpin の Add/Remove(featured collection) を followers/relay へ配信 (#2024)。
 	pinDeliveryHook.SetRelayBroadcaster(relaySvc)
 	iHandler.SetPinDeliveryHook(pinDeliveryHook)
-	notePublisher := stream.NewNotePublisher(streamPubSub, idGen)
+	// note / notification の publisher は buildStream で作る (#3692)。setter はここ。
 	notePublisher.SetEmojiLookup(emojiRepo)
 	notePublisher.SetInstanceLookup(instanceRepo)
 	notePublisher.SetReactionReader(reactionCountWriter)
 	notePublisher.SetReactionPairReader(reactionRepo) // #2067: renote embed の pair cache を note_reaction から埋める
 	notePublisher.SetFieldResolver(noteFieldResolver)
-	notificationPublisher := stream.NewNotificationPublisher(streamPubSub)
 	notificationPublisher.SetRepos(userRepo, noteRepo, idGen)
 	notificationPublisher.SetInstanceLookup(instanceRepo)
 	notificationPublisher.SetEmojiLookup(emojiRepo)
@@ -3305,8 +3327,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	notificationPublisher.SetSignupApplicationLookup(signupApplicationNotifLookup)
 	// streaming の通知 payload にも note の files / channel を載せる (#2735)。
 	notificationPublisher.SetFieldResolver(noteFieldResolver)
-	// broadcast stream publisher (emoji / global announcement 等を全 connection へ、#2046/#2056)。
-	broadcastPublisher := stream.NewBroadcastPublisher(streamPubSub)
 	// 通報の通知 (通知欄 #2868 / admin stream #1549 / abuseReport system webhook
 	// #1542)。**local と連合 (Flag) で同じ notifier を共有する** — 入口ごとに
 	// 配線していたので Flag の経路だけ admin stream と webhook が抜けていた
@@ -3391,7 +3411,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	streamRegistry.RegisterCredentialed("bubbleVersusMatch", channels.NewBubbleVersusMatchFactory(bubbleVersusService).New)
 
 	// 6. Chat WebSocket channels (Phase 9.8): chatRoom と chatUser を登録する
-	chatPublisher := stream.NewChatPublisher(streamPubSub)
 	chatService := corechat.NewService(chatRepo, idGen)
 	chatService.SetStreamingPublisher(chatPublisher)
 	chatService.SetMainStreamPublisher(mainStreamPublisher)
@@ -3545,12 +3564,12 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// User lists (Phase 6)
 	userListHandler := apiuserlists.NewHandler(userListRepo, idGen)
-	userListHandler.SetRolePolicyProvider(roleService)                                         // #1029: userListLimit / userEachUserListsLimit
-	userListHandler.SetUserRepo(userRepo)                                                      // #1550: push NO_SUCH_USER check
-	userListHandler.SetBlockingRepo(blockingRepo)                                              // #1550: push YOU_HAVE_BEEN_BLOCKED check
-	userListHandler.SetFavoriteRepo(userListFavoriteRepo)                                      // #1550: show forPublic likedCount/isLiked
-	userListHandler.SetProxyFollow(listProxyFollow)                                            // #1704: push remote member proxy follow
-	userListHandler.SetUserListEventPublisher(stream.NewUserListStreamPublisher(streamPubSub)) // #1549: push/pull userAdded/userRemoved
+	userListHandler.SetRolePolicyProvider(roleService)                 // #1029: userListLimit / userEachUserListsLimit
+	userListHandler.SetUserRepo(userRepo)                              // #1550: push NO_SUCH_USER check
+	userListHandler.SetBlockingRepo(blockingRepo)                      // #1550: push YOU_HAVE_BEEN_BLOCKED check
+	userListHandler.SetFavoriteRepo(userListFavoriteRepo)              // #1550: show forPublic likedCount/isLiked
+	userListHandler.SetProxyFollow(listProxyFollow)                    // #1704: push remote member proxy follow
+	userListHandler.SetUserListEventPublisher(userListStreamPublisher) // #1549: push/pull userAdded/userRemoved
 	// list は requireCredential:false の public endpoint (userId 指定で他人の
 	// public list を閲覧可、#1550)。未認証 && userId 未指定は handler が INVALID_PARAM。
 	api.POST("/users/lists/list", userListHandler.List, middleware.RequireScope("read:account"))
