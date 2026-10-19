@@ -47,6 +47,7 @@
 | `internal/entitycompat` | `serverSources` / `serverSourcePaths` | 列挙したファイルの本文 / 絶対パス |
 | `internal/entitycompat` | `parseServerFiles` / `inspectServerFiles` | 1 つの `FileSet` に載せた構文木と、その全ファイルの走査 |
 | `internal/entitycompat` | `assertWired(t, serverPkg, ...)` | 全ファイルの配線の集合に、その配線があるか |
+| `internal/entitycompat` | `assertRouteRegisteredBy(t, file, fn, route, ...)` | /api のルートの行が `routes_<領域>.go` の登録の関数 `fn` にあり、`setupRoutes()` がその関数に、引数と同じ名前の変数を渡して 1 回だけ呼んでいるか (#3697) |
 | `internal/server` | `packageSources` / `packageSourceWithoutComments` | 列挙したファイルの本文 / コメントを落として改行でつないだ本文 |
 
 ルートを解析するヘルパー (`parseRoutes` / `parseRouteRegistrations` / `parseRouteLevels` /
@@ -127,12 +128,19 @@ route (GET / POST / PUT / DELETE。`api.Match` の chart は含まない) につ
   「両方が登録している」と落ちないようにするため
 - **報告はファイル名と行の組で出す。** 構文木は 1 つの `FileSet` に repository からの
   相対パスで載せる
+- **/api のルートは `routes_<領域>.go` の `register…Routes(api apiRoutes, …)` で登録し、行に出る
+  名前は関数の引数の名前にする (#3697)。** 引数の名前は `setupRoutes()` の変数の名前と揃え、
+  `setupRoutes()` は同じ名前の変数を渡す。ルートの行を文字列で照合するゲートは、行だけでなく
+  関数と呼び出しまで照合する (`assertRouteRegisteredBy`)。形は `internal/server` の
+  `routes_registrars_test.go` が見る (呼び出しの位置と回数、引数の名前、書き換えていないこと、
+  登録の関数の外で `api` に登録していないこと。docs/architecture.md 4.2)
 - **`git add` していない `.go` は読まれない。** 手元と CI で結果はずれないが、`go build` は
   通るので気付きにくい。列挙するテストが落ちたときは、`internal/server` の未追跡の `.go` の
   名前をログに出す
 
-**今の配線と登録はほぼ `router.go` にあるので、読む範囲を `router.go` だけに戻しても、
-ほとんどのゲートは緑のまま通る。** 読む範囲と、ファイルをまたぐ決まりそのものは、2 ファイルの
+**/api のルートの登録は `routes_<領域>.go` に、ほかの配線はほぼ `router.go` にある (#3697)。**
+読む範囲を `router.go` だけに戻すと、ルートを読むゲートは「抽出が 0 件」や下限で落ちるが、
+配線のゲートの多くは緑のまま通る。読む範囲と、ファイルをまたぐ決まりそのものは、2 ファイルの
 fixture を使うテストが見ている (`internal/entitycompat` のものは `make wiring-check` で回る。
 `internal/server` の `TestPackageSourcesCoverEveryFile` / `TestProcessGlobalSettersReadEveryFile` /
 `TestJoinWithoutCommentsSeparatesFiles` / `TestAPIGroupPrefixesFindsEveryLine` は `make check` で回る)。
@@ -171,6 +179,11 @@ go/types へ移せば消える。
 - path を raw string (`` s.echo.POST(`/api/x`, h) ``) で書く
 
 この列挙は、敵対的レビュー (#3677 の 2 周目と 3 周目) で確かめた形で、網羅ではない。
+
+許可した登録 (`apiRegistrationAllowed`) は、書いてあるファイルでだけ許す (#3697)。catchall を
+`router.go` から `routes_<領域>.go` へ移すと落ちる。1 つ目の形のうち、`register…Routes` という
+名前の関数で最初の引数を `apiRoutes` 以外にしたものは、`internal/server` の
+`TestSetupRoutesCallsEveryRouteRegistrarOnce` が落とす。名前が違う関数は、そこでも拾わない。
 
 本家の golden にある endpoint をこれらの形へ移すと、`TestAPICompatDoc_MatchesRouter` と
 `TestParamShadowChangesNoResponse` が別の理由で落とす (#3677 の敵対的レビュー 2 周目で実測)。
