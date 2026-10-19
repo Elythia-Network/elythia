@@ -22,6 +22,13 @@ func TestFormatID(t *testing.T) {
 	assert.Equal(t, "ff", formatID(255))
 }
 
+// Registry は dispatcher が引くのと同じ registry を返す (#3692)。
+func TestManager_RegistryReturnsTheConstructedRegistry(t *testing.T) {
+	r := NewRegistry()
+	assert.Same(t, r, NewManager(r, nil).Registry())
+	assert.Nil(t, NewManager(nil, nil).Registry())
+}
+
 func TestManager_AllocateIDIncrements(t *testing.T) {
 	m := NewManager(nil, nil)
 	a := m.allocateID()

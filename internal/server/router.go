@@ -3203,23 +3203,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// テストも通ったまま** 未読件数に中身の無い通知が数えられ続ける。
 	noteDeleteService.SetNotificationHook(notificationHook)
 
-	// 2. Channel registry: Misskey 互換のチャンネル名で各 factory を登録する
-	streamRegistry.RegisterCredentialed("homeTimeline", channels.NewHomeTimeline)
-	streamRegistry.Register("localTimeline", channels.NewLocalTimeline)
-	streamRegistry.Register("globalTimeline", channels.NewGlobalTimeline)
-	streamRegistry.RegisterCredentialed("hybridTimeline", channels.NewHybridTimeline)
-	streamRegistry.RegisterCredentialed("notifications", channels.NewNotifications)
-	streamRegistry.RegisterCredentialed("main", channels.NewMain)
-	streamRegistry.RegisterCredentialed("drive", channels.NewDrive)
-	streamRegistry.Register("hashtag", channels.NewHashtag)
-	streamRegistry.RegisterCredentialed("antenna", channels.NewAntennaFactory(antennaRepo).New)
-	streamRegistry.Register("channel", channels.NewChannelTimeline)
-	// userList は membership lookup を渡して per-member withReplies gate を有効化 (#2020)。
-	streamRegistry.Register("userList", channels.NewUserListFactory(userListRepo).New)
-	streamRegistry.Register("roleTimeline", channels.NewRoleTimelineFactory(roleService).New)
-	streamRegistry.RegisterCredentialed("admin", channels.NewAdminFactory(roleService).New)
-	// serverStats / queueStats は publisher を後段で構築するため、ここでは
-	// 仮 register せず、publisher 生成後に登録する (1497 行付近)。
+	// 2. Channel registry: Misskey 互換のチャンネル名と factory の対応は
+	// builtinStreamChannels (wiring_stream.go) の一覧にまとめ、chat の service を
+	// 作った後で 1 回だけ登録する (#3692)。
 
 	// 3. Connection manager と各 publisher への配線。manager と publisher は
 	// buildStream で作る (#3692)。
@@ -3358,17 +3344,15 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		serverStatsPub.Start()
 		s.registerShutdownHook(func(_ context.Context) { serverStatsPub.Stop() })
 	}
-	streamRegistry.Register("serverStats", channels.NewServerStatsFactory(serverStatsPub))
+	// queueInspector が無い起動 (テスト等) では nil のまま。チャンネルの一覧
+	// (builtinStreamChannels) が、そのとき fallback の factory を選ぶ (#3692)。
+	var queueStatsPub *stream.QueueStatsPublisher
 	if s.queueInspector != nil {
-		queueStatsPub := stream.NewQueueStatsPublisher(&queueStatsInspectorAdapter{inner: s.queueInspector}, streamPubSub, 0)
+		queueStatsPub = stream.NewQueueStatsPublisher(&queueStatsInspectorAdapter{inner: s.queueInspector}, streamPubSub, 0)
 		if s.role.RunsServer() {
 			queueStatsPub.Start()
 			s.registerShutdownHook(func(_ context.Context) { queueStatsPub.Stop() })
 		}
-		streamRegistry.Register("queueStats", channels.NewQueueStatsFactory(queueStatsPub))
-	} else {
-		// queueInspector が無い起動 (テスト等) では fallback factory で空配列のみ返す
-		streamRegistry.Register("queueStats", channels.NewQueueStats)
 	}
 
 	// 4. 既存サービスへ publisher を注入する。これらはいずれも nil 安全な
@@ -3395,22 +3379,19 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	notificationService.SetPolicyResolver(roleService)
 	pagesHandler.SetUserSource(userService)
 
-	// 5. Reversi WebSocket channel (Phase 9.6) を登録する
+	// 5. Reversi WebSocket channel (Phase 9.6) の service。channel の登録は下の
+	// registerStreamChannels でまとめて行う (#3692。バブルゲームと chat も同じ)。
 	reversiService := corereversi.NewService(reversiRepo, reversiPublisher, s.redis.Default)
 	// stream で配る対局の UserLite も、API と同じくリモートのアイコンをメディア
 	// プロキシに通す。配線しないとリモートの人は identicon になる。
 	reversiService.SetAvatarURLFunc(entity.IdenticonURL)
-	streamRegistry.Register("reversiGame", channels.NewReversiGameFactory(reversiService).New)
-	streamRegistry.RegisterCredentialed("reversi", channels.NewReversi)
 
 	// バブルゲームの対戦 (#3230)。対局の状態は Redis にだけ置き、記録 (両者の
 	// 報告と勝敗) は DB に書く (#3232)。
 	bubbleVersusService := corebubbleversus.NewService(s.redis.Default, stream.NewBubbleVersusPublisher(streamPubSub), blockingService, idGen)
 	bubbleVersusService.SetRecordStore(bubbleVersusRecordRepo)
-	streamRegistry.RegisterCredentialed("bubbleVersus", channels.NewBubbleVersus)
-	streamRegistry.RegisterCredentialed("bubbleVersusMatch", channels.NewBubbleVersusMatchFactory(bubbleVersusService).New)
 
-	// 6. Chat WebSocket channels (Phase 9.8): chatRoom と chatUser を登録する
+	// 6. Chat WebSocket channels (Phase 9.8): chatRoom と chatUser の service
 	chatService := corechat.NewService(chatRepo, idGen)
 	chatService.SetStreamingPublisher(chatPublisher)
 	chatService.SetMainStreamPublisher(mainStreamPublisher)
@@ -3435,8 +3416,23 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 1-on-1 DM の chatApproval bypass + 送信後 approval 挿入に使う (#1748)。
 	chatService.SetApprovalRepo(repository.NewChatApprovalRepository(s.db))
 	chatRoomFactory := channels.NewChatRoomFactory(chatService)
-	streamRegistry.RegisterCredentialed("chatRoom", chatRoomFactory.New)
-	streamRegistry.RegisterCredentialed("chatUser", channels.NewChatUserFactory(chatService).New)
+	// WebSocket のチャンネルの登録 (#3692)。チャンネル名と factory の対応は
+	// builtinStreamChannels の一覧にだけ書く。registry は factory を map に入れる
+	// だけで、引くのは接続を受けたとき (dispatcher の Lookup)。登録の位置は、前に
+	// 散らばっていた 22 行のうち最後の行 (chatUser) があった位置で、/streaming を
+	// 生やすより前。factory が依存する service と publisher (reversi・バブルゲームの
+	// 対戦・chat、stats) は、setter を呼んだのと同じ名前から渡す。
+	registerStreamChannels(streamRegistry, builtinStreamChannels(streamChannelDeps{
+		antennas:     antennaRepo,
+		userLists:    userListRepo,
+		roles:        roleService,
+		serverStats:  serverStatsPub,
+		queueStats:   queueStatsPub,
+		reversi:      reversiService,
+		bubbleVersus: bubbleVersusService,
+		chatRoom:     chatRoomFactory,
+		chat:         chatService,
+	}))
 	// Phase 9.7: federation processor / reversi handler に reversi 依存を注入。
 	federationProcessor.SetReversi(reversiService, reversiRepo, idGen, reversiFedCache)
 	federationProcessor.SetBlockingService(blockingService)

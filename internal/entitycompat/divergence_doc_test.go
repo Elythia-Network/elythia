@@ -3,6 +3,7 @@ package entitycompat
 import (
 	"bytes"
 	"fmt"
+	"go/ast"
 	"go/parser"
 	"go/printer"
 	"go/token"
@@ -917,9 +918,77 @@ func diffKeys(a, b map[string]bool) []string {
 	return out
 }
 
+// streamChannelListFunc is the function of internal/server whose returned
+// list holds the built-in stream channels (#3692).
+const streamChannelListFunc = "builtinStreamChannels"
+
+// builtinStreamChannelNames reads the channel names of the entries
+// streamChannelListFunc returns, from the git-tracked sources of
+// internal/server.
+//
+// **登録は一覧に集めた (#3692)。** 前は setupRoutes に
+// `streamRegistry.Register("name", …)` が 22 行あったので、下の正規表現だけで
+// 名前を読めた。一覧の項目は `{"name", factory, credentialed}` の形なので、
+// 構文木から読む。**名前が文字列リテラルでない項目は落とす。** 定数や変数経由の
+// 名前を読み飛ばすと、その分だけ doc の照合が黙って緩くなる。
+func builtinStreamChannelNames(t *testing.T) []string {
+	t.Helper()
+	var names []string
+	found := 0
+	for _, src := range serverSources(t) {
+		fset := token.NewFileSet()
+		f, err := parser.ParseFile(fset, src.rel, src.src, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", src.rel, err)
+		}
+		for _, decl := range f.Decls {
+			fd, ok := decl.(*ast.FuncDecl)
+			if !ok || fd.Recv != nil || fd.Name.Name != streamChannelListFunc || fd.Body == nil {
+				continue
+			}
+			found++
+			ast.Inspect(fd.Body, func(n ast.Node) bool {
+				ret, ok := n.(*ast.ReturnStmt)
+				if !ok {
+					return true
+				}
+				for _, res := range ret.Results {
+					list, ok := res.(*ast.CompositeLit)
+					if !ok {
+						t.Fatalf("%s: %s が一覧のリテラルを返していない", fset.Position(res.Pos()), streamChannelListFunc)
+					}
+					for _, el := range list.Elts {
+						item, ok := el.(*ast.CompositeLit)
+						if !ok || len(item.Elts) == 0 {
+							t.Fatalf("%s: %s の項目が {\"name\", …} の形でない", fset.Position(el.Pos()), streamChannelListFunc)
+						}
+						lit, ok := item.Elts[0].(*ast.BasicLit)
+						if !ok || lit.Kind != token.STRING {
+							t.Fatalf("%s: %s の項目の名前が文字列リテラルでない。この検査は名前を評価しないので、リテラルで書くこと",
+								fset.Position(item.Pos()), streamChannelListFunc)
+						}
+						name, err := strconv.Unquote(lit.Value)
+						if err != nil {
+							t.Fatalf("%s: %v", fset.Position(lit.Pos()), err)
+						}
+						names = append(names, name)
+					}
+				}
+				return true
+			})
+		}
+	}
+	if found != 1 {
+		t.Fatalf("internal/server に %s が %d 個ある (1 個のはず。rename した?)", streamChannelListFunc, found)
+	}
+	return names
+}
+
 // streamRegistryRe matches `streamRegistry.Register("name", …)` and its
 // Credentialed variant. streamRegistryCallRe counts the calls so a name the
-// strict form cannot read is detected instead of silently dropped.
+// strict form cannot read is detected instead of silently dropped. The
+// built-in channels are listed by builtinStreamChannels since #3692; these
+// still catch a direct registration added elsewhere.
 var (
 	streamRegistryRe     = regexp.MustCompile(`\bstreamRegistry\.Register(?:Credentialed)?\("([a-zA-Z]+)"`)
 	streamRegistryCallRe = regexp.MustCompile(`\bstreamRegistry\.Register(?:Credentialed)?\(`)
@@ -988,11 +1057,16 @@ func TestDivergenceDoc_StreamChannelsMatchRegistry(t *testing.T) {
 	// だけを見ると別ファイルからの登録を取りこぼす。
 	joined := serverPackageSource(t)
 	registry := map[string]bool{}
-	for _, m := range streamRegistryRe.FindAllStringSubmatch(joined, -1) {
-		registry[m[1]] = true
+	// 組み込みのチャンネルは builtinStreamChannels の一覧にある (#3692)。
+	for _, name := range builtinStreamChannelNames(t) {
+		registry[name] = true
 	}
 	if len(registry) == 0 {
-		t.Fatal("internal/server から streamRegistry.Register(...) を 1 件も読めない (登録の書き方が変わった?)")
+		t.Fatal("internal/server の builtinStreamChannels からチャンネル名を 1 件も読めない (一覧の書き方が変わった?)")
+	}
+	// 一覧の外で直接登録しているチャンネルも拾う。
+	for _, m := range streamRegistryRe.FindAllStringSubmatch(joined, -1) {
+		registry[m[1]] = true
 	}
 	// **抽出の取りこぼしを検出する。** 名前が定数 / 変数経由だったり、`[a-zA-Z]+`
 	// に収まらない文字 (数字・`_`・`-`) を含むと registry から丸ごと消え、doc に
