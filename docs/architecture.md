@@ -258,6 +258,10 @@ driver は `mkq`（BullMQ wire 互換）のみ。legacy の `asynq` は #2985 �
 | `instance_refresh` | FetchInstanceMetadata 系 | instance メタ更新 |
 | `clean` | Clean/CleanCharts ProcessorService | 定期クリーンアップ |
 
+組み込みの job 種別と、それを受ける processor のメソッドの対応は、
+`internal/server/wiring_queue.go` の `builtinQueueHandlers()` の一覧にだけある (#3690、4.2)。
+プラグインの job 種別は、プラグインの配線 (`plugin_wiring.go`・`plugin_notifications.go`) が登録する。
+
 ### 3.8 `internal/stream/` — WebSocket
 
 `server/api/stream/channels/*` に対応。`channels/` 配下:
@@ -287,7 +291,7 @@ dispatcher が shareable channel の共有・pong ack を upstream `Connection.t
 
 ## 4. DI / 配線
 
-すべてのサービス生成・配線は `internal/server/router.go` の `setupRoutes()` で手動実行（NestJS 相当を関数呼び出しで構築）。DI フレームワークは使わない。repository は `setupRoutes()` から呼ぶ `buildRepos()` (`internal/server/wiring_repos.go`) で、core の service の一部は `buildCore()` (`internal/server/wiring_core.go`) で、連合の部品の一部は `buildFederation()` (`internal/server/wiring_fed.go`) で作る (4.2)。
+すべてのサービス生成・配線は `internal/server/router.go` の `setupRoutes()` で手動実行（NestJS 相当を関数呼び出しで構築）。DI フレームワークは使わない。repository は `setupRoutes()` から呼ぶ `buildRepos()` (`internal/server/wiring_repos.go`) で、core の service の一部は `buildCore()` (`internal/server/wiring_core.go`) で、連合の部品の一部は `buildFederation()` (`internal/server/wiring_fed.go`) で、queue の processor の一部は `buildQueue()` (`internal/server/wiring_queue.go`) で作る (4.2)。
 
 ```
 server.New() → setupRoutes()
@@ -298,8 +302,11 @@ server.New() → setupRoutes()
   │   setter はそれぞれ元の位置で呼ぶ。副作用や後の領域への依存があるものはその場で作る)
   ├→ 連合の部品の生成 (作るだけのものは buildFederation → wiring.fed で作り、別名を置く。
   │   setter と、outbound client に依存するもの (apClient、resolver など) は元の位置)
+  ├→ queue の processor の生成 (作るだけのものは buildQueue → wiring.queue で作り、別名を置く。
+  │   setter と、outbound client や setupRoutes で作る部品に依存するものは元の位置)
   ├→ hook 注入 (§5)
-  ├→ Handler 生成 + ルート登録 (§3.1)
+  ├→ Handler 生成 + ルート登録 (§3.1)。この途中 (プラグインの準備より前) で、queue の
+  │   handler を registerQueueHandlers で 1 回だけ登録する (一覧は builtinQueueHandlers)
   └→ stream (pubsub の購読をここで始める) / WebSocket / 静的ファイル / middleware
 ```
 
@@ -340,13 +347,13 @@ setter は依存を先に作っても、元の位置 (streaming の publisher �
 `featuredService`、`hashtagService`、`modLogService`、`instanceService` など) を
 受け手より先に作るようにした (こちらは setter を呼ぶ位置は変えていない)。
 
-| | #3676 の前 (`b9db7e49b`) | #3676 の後 | #3684 の後 | #3686 の後 | 今 (#3688 の後) |
-|---|---|---|---|---|---|
-| setter で依存を入れる辺 | 877 | 877 | 879 | 879 | 872 |
-| うち、受け手より後で作った依存を入れるもの | 192 (受け手 55 個) | 107 (受け手 41 個) | 104 (受け手 41 個) | 103 (受け手 40 個) | 96 (受け手 40 個) |
-| うち、循環しているもの | 40 | 40 | 40 | 39 | 35 |
-| うち、それ以外 | 152 | 67 | 64 | 64 | 61 |
-| setter の呼び出しが受け手から離れているもの (下の数え方) | 359 | 307 | 308 | 392 | 415 |
+| | #3676 の前 (`b9db7e49b`) | #3676 の後 | #3684 の後 | #3686 の後 | #3688 の後 | 今 (#3690 の後) |
+|---|---|---|---|---|---|---|
+| setter で依存を入れる辺 | 877 | 877 | 879 | 879 | 872 | 872 |
+| うち、受け手より後で作った依存を入れるもの | 192 (受け手 55 個) | 107 (受け手 41 個) | 104 (受け手 41 個) | 103 (受け手 40 個) | 96 (受け手 40 個) | 96 (受け手 40 個) |
+| うち、循環しているもの | 40 | 40 | 40 | 39 | 35 | 35 |
+| うち、それ以外 | 152 | 67 | 64 | 64 | 61 | 61 |
+| setter の呼び出しが受け手から離れているもの (下の数え方) | 359 | 307 | 308 | 392 | 415 | 426 |
 
 #3684 の後の列は、#3684 の後の `router.go` を同じ道具で数えた。#3676 の後に入った変更で、setter の
 辺と呼び出しが離れている辺が 2 つずつ増えている (#3684 の直前の `692710223` で
@@ -388,6 +395,17 @@ setter の引数が構築の式から変数 1 つに変わったため (`iHandle
 23 増えた。#3686 と同じく、受け手と依存の定義が前へ移り、setter の呼び出しは元の位置に
 残したため。
 
+#3690 で queue の processor 15 個を `buildQueue()` へ移し、その別名を `setupRoutes()` の
+`importProcessor` を作っていた位置に置いた (4.2)。setter を呼ぶ位置は変えていない。
+setter の辺、後から入れる辺、循環、それ以外は、どれも数が変わらない。後から入れる 96 辺は、
+行番号を除けば受け手・依存・setter が前と同じ (道具の一覧を行番号を消して突き合わせた)。
+移した processor の setter の依存 (`relationReloadPublisher`・`pageRepo`・`webPushCache`・
+`notificationService` など) が、どれも `buildQueue()` を呼ぶ位置より前で定義されているため。
+呼び出しが離れている辺は 11 増えた。受け手の定義が前へ移り、setter の呼び出しは元の位置に
+残したため (`cleanProcessor.SetCursorStore` の 2 辺、`checkExpiredMutingsProcessor` の 1 辺、
+`cleanGenericProcessor` の 2 辺、`deleteAccountProcessor` の 3 辺、`postScheduledNoteProcessor`
+の 3 辺)。handler の登録 (`s.queueServer.Handle`) は setter ではないので、どの行にも数えない。
+
 数え方 (`setupRoutes()` の構文木。道具はコミットしていない):
 
 - 節点: `setupRoutes()` の中で `:=` か `var` で定義した名前 (関数リテラルの中と、
@@ -398,8 +416,8 @@ setter の引数が構築の式から変数 1 つに変わったため (`iHandle
 - 後から入れる辺: `B` の定義の行が `X` の定義の行より後のもの
 - 循環: 依存の図 (`A := f(... B ...)` の右辺と、setter の引数から張る `A → B`) で、
   `B` から `X` へ辿り着けるもの。図は `setupRoutes()` の中だけで張り、`buildRepos()`・
-  `buildCore()`・`buildFederation()` の中の構築の依存は辿らない (別名 `x := coreSvcs.y` の
-  依存は `coreSvcs` だけ)
+  `buildCore()`・`buildFederation()`・`buildQueue()` の中の構築の依存は辿らない (別名
+  `x := coreSvcs.y` の依存は `coreSvcs` だけ)
 - 「後から入れる辺」は**定義の順だけを見ていて、setter を呼ぶ位置は見ていない**。依存の
   定義だけを前へ移した辺 (setter の呼び出しは元の位置) も、元の位置に残した
   `notificationService.SetMainStreamPublisher` も、後から入れる辺には数えない。呼ぶ位置は
@@ -440,8 +458,8 @@ setter の引数が構築の式から変数 1 つに変わったため (`iHandle
 
 **`setupRoutes()` で作る部品は、領域ごとの関数で作り、コンテナの構造体 `wiring`
 (`internal/server/wiring.go`) の領域ごとのフィールドに入れる。** #3666 の段階 2。
-#3684 で repository を、#3686 で core の service の一部を、#3688 で連合の部品の一部を移した。
-今のフィールドは `repos`・`core`・`fed` の 3 つ。
+#3684 で repository を、#3686 で core の service の一部を、#3688 で連合の部品の一部を、
+#3690 で queue の processor の一部を移した。今のフィールドは `repos`・`core`・`fed`・`queue` の 4 つ。
 
 ```
 setupRoutes()
@@ -464,7 +482,7 @@ setupRoutes()
   `s.userRepo` の `user`) は状態を持ち、invalidation の hook と他のプロセスからの購読が
   そのインスタンスに繋がっているので、別の値に置き換えない
 - **例外として、同じ種類をその場で作っている所が 3 か所ある。** `NewCleanProcessor` の
-  `repository.NewUserPendingRepository(s.db)`、`SetIPLookupLogPruner` の
+  `repository.NewUserPendingRepository(s.db)` (#3690 から `buildQueue()` の中)、`SetIPLookupLogPruner` の
   `repository.NewIPLookupLogRepository(s.db)`、`coreabuse.NewInAppNotifier` の
   `repository.NewAbuseReportRepository(s.db)`。ゲート
   (`TestCleanProcessorReceivesThePendingPruner`・`TestIPLookupLogRetentionIsWired`・
@@ -492,11 +510,13 @@ setupRoutes()
     コンパイルが通るので、別名は変数から取る。照合はこの 3 つの行で行う
   - `fed` も `core` と同じ形 (`fedSvcs := s.buildFederation(w, coreSvcs, idGen)`、
     `w.fed = fedSvcs`、別名は `x := fedSvcs.x`)
+  - `queue` も同じ形 (`queueSvcs := s.buildQueue(w, coreSvcs, idGen)`、
+    `w.queue = queueSvcs`、別名は `x := queueSvcs.x`)
   - **後の領域の `build…()` も、先に作った領域を `w.core.x` のようにコンテナから読まず、
     `coreSvcs` のような変数を引数で受ける。** コンテナのフィールドから読むと、その
     `build…()` を代入より前に置いてもコンパイルが通り、ゼロ値を受け取る (別名と同じ穴)。
-    今 `w.core` と `w.fed` を読む箇所は無い (#3686 のレビュー 2 周目。`buildFederation()` は
-    `coreSvcs` を引数で受ける)
+    今 `w.core`・`w.fed`・`w.queue` を読む箇所は無い (#3686 のレビュー 2 周目。
+    `buildFederation()` と `buildQueue()` は `coreSvcs` を引数で受ける)
 - **関数に移してよいのは、作るだけで副作用の無いものだけ (4.1 と同じ)。** 作るときに
   DB に触る文 (`EnsureInitial`、`NormalizePrivateKeysToPKCS8`、`RecomputeFollowCounts`)
   は `setupRoutes()` に残し、互いの順も変えていない。repository のコンストラクタは
@@ -661,11 +681,118 @@ tracked な `_test.go` すべてと `tools/apicompat/main.go` の文字列リテ
 移した 7 種類に、まとめた `NewQuoteRequestDeliveryHook` と
 `NewUserModerationDeliveryHook` を 1 回ずつ足したもの。
 
-**残りの領域は、次の順で同じ形に移す。** queue の processor → stream → handler と
-ルート (ルートはファイルを分ける)。上で残した core の service と連合の部品は、依存する
-領域を移すときに一緒に扱う。どれも `wiring` にフィールドを 1 つ足し、`build…` の関数で
-作り、`setupRoutes()` では別名を置く。repository は `w` から、それより後の領域は
-`coreSvcs` / `fedSvcs` のような変数から受け取る。後の領域ほど、構築の途中で動く処理
+#### queue の processor (#3690)
+
+```
+setupRoutes()
+  …                                               // 連合の別名
+  exportProcessor := processors.NewExportProcessor(exporter)
+  queueSvcs := s.buildQueue(w, coreSvcs, idGen)   // wiring_queue.go
+  w.queue = queueSvcs
+  cleanGenericProcessor := queueSvcs.cleanGenericProcessor  // 別名 (変数から取る)
+  …
+  cleanGenericProcessor.SetIPLookupLogPruner(…)   // setter は元の位置のまま
+  …
+  s.registerQueueHandlers(builtinQueueHandlers(queueHandlerProcs{  // handler の登録は 1 回
+    clean: cleanGenericProcessor,
+    …
+  }))
+```
+
+- **`buildQueue()` は `*Server` のメソッドで、repository は `w` から、core の service は
+  `buildCore()` の戻り値 `coreSvcs` から受け取る。** 中の行は `setupRoutes()` にあった行を
+  そのまま移し、作る順も元のまま。使う `Server` のフィールドは `s.config` / `s.db`。
+  連合の部品は使わないので、`fedSvcs` は受け取らない
+- **移す条件は core・連合と同じ。** コンストラクタの本体を 1 つずつ読み、構造体を作るだけ
+  なのを確かめた。移したのは 15 個: `importProcessor`、`cleanProcessor` (meta を job の
+  たびに読む関数 `cleanCfgFn` ごと)、`orphanUserProcessor`、`orphanAttachmentProcessor`
+  (cutoff 用の ID の generator ごと。作るときは乱数を読むだけ)、
+  `checkExpiredMutingsProcessor`、`cleanGenericProcessor`、`chunkedUploadGCProcessor`、
+  `objectStorageProcessor`、`deleteAccountProcessor`、`unfollowProcessor`・
+  `followProcessor`・`blockProcessor`・`unblockProcessor`、`retentionProc`、
+  `postScheduledNoteProcessor`。meta を読む関数は job のたびに呼ばれるもので、作るときには
+  呼ばない
+- **setter は 1 つも動かさない。** `buildQueue()` を呼ぶ位置は、移したものの中で最初に
+  作っていた `importProcessor` の位置 (`exportProcessor` の直後)。移した構築は副作用を
+  持たないので、DB と Redis の文の順は変わらない。起動時に 1 回だけ流す retention の集計
+  (`startConstructionWorker`、queue role だけ) も、位置も条件も元のまま
+- **`wiring` へは変数を経由した代入で入れ、別名は変数から取る** (上の規則)。
+  `setupRoutes()` で使わなくなった別名 (`roleAssignmentRepo`・`importer`) は消した
+
+**handler の登録は、job 種別と processor のメソッドの一覧 (`builtinQueueHandlers()`) に
+まとめ、`setupRoutes()` で 1 回だけ登録する (`registerQueueHandlers()`)。** 前は
+`s.queueServer.Handle(...)` が `setupRoutes()` の 30 か所に散らばっていた。
+
+- **登録の場所を変えても動きは変わらない。** mkqdriver の `Server.Handle` は job 種別を
+  キーに map へ入れるだけで、map を読むのは `Start` が写しを取るときだけ (`Start` の後の
+  `Handle` は panic する)。`Start` は `New` の後に呼ぶ。30 個の job 種別は
+  `internal/queue/tasks.go` の `TaskType…` の定数 30 個と 1 対 1 で、重複は無い。登録は前も
+  今も役割 (web / queue) を問わず常に行う。メンテナンスで世代を作り直すときも、`New` の中で
+  登録するのは同じ
+- **登録の位置は、最後の登録 (moderator の活動) があった位置。** processor への setter は
+  すべてこれより前にある。`setupRoutes()` はプラグインの準備に失敗すると途中で return
+  するが、前の 30 か所はすべてその return より前にあり、今の 1 か所も前にある。
+  プラグインの登録 (`plugin_wiring.go`・`plugin_notifications.go`。job 種別の接頭辞が別) は
+  これより後のままで、変えていない
+- **登録する processor は、setter を呼ぶのと同じ `setupRoutes()` の名前から渡す
+  (`queueHandlerProcs`)。** 一覧の欄名は job 種別に合わせ (`clean: cleanGenericProcessor`
+  など)、別名や `queueProcs` の欄名と重ならないようにした。ゲートが `name: name` の形で
+  照合するときに、別の行を拾わないため
+- `Handle` の引数の中で作っていた `NewResendQuoteRequestsProcessor` と
+  `NewCheckModeratorsActivityProcessor` は、元の位置で変数に入れるようにした
+
+照合する行が `buildQueue()` の中にだけ移ったゲートは、
+`TestCleanProcessorReceivesThePendingPruner` の `NewCleanProcessor` の 1 本だった (確かめ方:
+#3688 と同じく、tracked な `_test.go` すべてと `tools/apicompat/main.go` の文字列リテラルの
+うち、#3690 の前の `router.go` に現れ、後の `router.go` と `internal/server` のほかのファイル
+(`wiring_queue.go` を除く) に現れないものを探した。4 件で、ほかの 3 件は関係の無いテストの
+`/api/retention`・`reader`・`role_assignment`)。このゲートは AST で `internal/server` の全体を
+読むので、移しても通る。上の規則のとおり、`cleanGenericProcessor: cleanGenericProcessor`、
+`queueSvcs := s.buildQueue(w, coreSvcs, idGen)`、`w.queue = queueSvcs`、
+`cleanGenericProcessor := queueSvcs.cleanGenericProcessor` と、一覧へ渡す
+`clean: cleanGenericProcessor` も照合する。ほかのゲートは setter の行を照合しており、setter は
+動かしていない。一覧には `internal/server/wiring_queue_test.go` のテストを付けた (一覧が
+`internal/queue` の `TaskType…` の定数 (パッケージの tracked な非テストのファイルすべてから
+読み、値が文字列リテラルでなければ落とす) をすべて 1 回ずつ含むこと、job 種別ごとのメソッド、
+登録が一覧のとおりであること、`setupRoutes()` が登録を本文の直下の文として 1 回だけ、
+どの return よりも前で呼び (関数リテラル・`go` 文・`if` の中での呼び出しは落とす)、
+関数リテラルの中を含めて `s.queueServer.Handle` を直接呼ばないこと、`queueHandlerProcs` の
+欄の値がどれも `setupRoutes()` の本文で `:=` で 1 回だけ定義し、`=` で書き換えていない変数で、
+欄の書き忘れが無いこと、パッケージの中で queue の server の `Handle` を呼ぶ関数が
+`registerQueueHandlers()` とプラグインの登録の 3 つ (`setupPlugins()`・
+`registerPluginNotifications()`・`(*pluginJobs).Handle`) に限られること。許す関数の一覧には、
+使われていない項目を落とす検査も付けた)。`setupRoutes()` は `router.go` を名指しせず、
+`git ls-files` で列挙したファイルから探す。
+
+**`setupRoutes()` に残したもの** (`processors.New…` の 14 回の呼び出し):
+
+| 理由 | 例 |
+|---|---|
+| outbound の HTTP client を使う | `webPushProcessor` (`webPushSender` の `s.outboundClient(...)`)、`webhookProcessor` |
+| `setupRoutes()` で作る部品に依存する | `exportProcessor` (`exporter`)、`emojiImportProcessor` (`emojiImporter`)、`resendQuoteRequestsProcessor` (`quoteOutbox`)、`deliverProcessor` (`apClient`)、`inboxProcessor` (`federationProcessor`)、`flushProcessor` (`reactionCountWriter`)、`chartProcessor` (chart の engine `chartCharts`)、`instanceRefreshProc` (`metadataFetcher`)、`checkModeratorsActivityProcessor` (`modActivitySvc`。stream の publisher に依存する) |
+| setter の引数の中で作る | `NewRepoSigningKeySource`、`NewRedisInboxReplayGuard`、`NewRedisScheduledNoteLock` |
+
+| | #3690 の前 (`53475bb41`) | 後 |
+|---|---|---|
+| `setupRoutes()` の `processors.New…` の呼び出し | 29 | 14 |
+| `buildQueue()` の `processors.New…` の呼び出し | — | 15 |
+| `queue` のフィールド (`buildQueue()` で作る processor) | — | 15 |
+| `setupRoutes()` の `s.queueServer.Handle(` | 30 | 0 |
+| `builtinQueueHandlers()` の項目 (job 種別) | — | 30 (processor は 26 個) |
+| `setupRoutes()` の行数 | 4,899 | 4,823 |
+| setter で後から入れる辺 (4.1 の数え方) | 96 | 96 |
+
+数え方: `setupRoutes()` と `buildQueue()` の本文 (`func` の行から、行頭の `}` まで) に
+`grep -oE '\bprocessors\.New[A-Z]'` を当てた。`Handle` は同じ本文の
+`grep -c 'queueServer\.Handle('`、一覧の項目は `builtinQueueHandlers()` の本文の
+`grep -c '{queue\.TaskType'`、processor の数は `queueHandlerProcs` のフィールドの行数、
+行数は同じ本文の `wc -l`。
+
+**残りの領域は、次の順で同じ形に移す。** stream → handler と
+ルート (ルートはファイルを分ける)。上で残した core の service・連合の部品・queue の
+processor は、依存する領域を移すときに一緒に扱う。どれも `wiring` にフィールドを 1 つ足し、
+`build…` の関数で作り、`setupRoutes()` では別名を置く。repository は `w` から、それより後の
+領域は `coreSvcs` / `fedSvcs` / `queueSvcs` のような変数から受け取る。後の領域ほど、構築の途中で動く処理
 (4.1) と shutdown hook を登録するものが多いので、それらを動かさずに残す範囲を
 PR ごとに決める。
 
