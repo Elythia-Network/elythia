@@ -1572,8 +1572,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		return settings.ChunkSize, ok
 	}
 	metaHandler.SetChunkedUploadCapability(chunkedUploadCapability)
-	api.POST("/meta", metaHandler.Meta)
-	api.POST("/ping", metaHandler.Ping)
 
 	// Frontend SPA shell — AP resource handlers fall back to this when the
 	// request prefers HTML over application/activity+json, and the final
@@ -1623,7 +1621,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	notesChart := chartCharts.Notes
 	usersChart := chartCharts.Users
 	statsHandler := stats.NewHandler(s.db, notesChart, usersChart)
-	api.POST("/stats", statsHandler.Stats)
 
 	// listRelationRepos は embed user に viewer 視点の relation block を付与する
 	// 共有 Repos。mute/renote-mute/following/federation/hashtags handler が
@@ -1737,14 +1734,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	} else {
 		signupHandler.SetFormTokenIssuer(signupform.NewIssuer(secret, nonces))
 	}
-	api.POST("/signup", signupHandler.Signup)
-	// 承認制の登録 (#2554 / #2556)。認証は不要 — 本人確認は MiAuth が担う。
-	// 有効になっていない構成では 503 を返す。
-	api.POST("/signup-application/form-token", signupHandler.ApplicationFormToken)
-	api.POST("/signup-application/apply", signupHandler.ApplicationApply)
-	api.POST("/signup-application/status", signupHandler.ApplicationStatus)
-	api.POST("/signup-application/register", signupHandler.ApplicationRegister)
-	api.POST("/signup-pending", signupHandler.SignupPending)
 
 	// Username availability check (フロントエンドの signup フォームが呼ぶ)
 	//
@@ -1754,7 +1743,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 弾かれるため INVALID_PARAM を返す。
 	signupService.SetUsedUsernameRepo(usedUsernameRepo) // #2080: 削除済 username 再利用を弾く
 	signupHandler.SetUsernameLookups(userRepo, usedUsernameRepo)
-	api.POST("/username/available", signupHandler.UsernameAvailable)
 
 	// Signin (Phase 6)
 	signinHandler := apisignin.NewHandler(userRepo)
@@ -1782,9 +1770,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	signinHandler.SetMetaRepo(metaRepo)
 	// アカウント作成時も signin 副作用 (履歴 / login 通知 / main publish) を通す (#1804)。
 	signupHandler.SetSigninRecorder(signinHandler)
-	api.POST("/signin", signinHandler.Signin)
-	api.POST("/signin-flow", signinHandler.SigninFlow)
-	api.POST("/signin-with-passkey", signinHandler.SigninWithPasskey)
 
 	// パスワードリセット (認証不要)
 	resetHandler := apiresetpassword.NewHandler(userRepo, resetReqRepo, idGen)
@@ -1794,8 +1779,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// SenderFromMeta で per-call 再 Fetch、runtime 設定変更追従 (#1112)。
 	resetHandler.SetMetaRepo(metaRepo)
 	resetHandler.SetEmailSender(miscsmtp.SenderFromMeta(metaRepo, s.config.ProxySMTP))
-	api.POST("/request-reset-password", resetHandler.RequestReset)
-	api.POST("/reset-password", resetHandler.Reset)
 
 	// WebAuthn / 2FA (issue #42)
 	// WebAuthnService を構築し、userSecurityKeyRepo (buildRepos で作る) と一緒に
@@ -1813,10 +1796,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// Emojis endpoints (public)
 	emojisHandler := apiemojis.NewHandler(emojiRepo)
 	emojisHandler.SetExportEnqueuer(s.queueClient)
-	api.POST("/emojis", emojisHandler.Emojis)
-	api.GET("/emojis", emojisHandler.Emojis)
-	api.POST("/emoji", emojisHandler.Emoji)
-	api.GET("/emoji", emojisHandler.Emoji)
 
 	// 7+ handlers across api/* pack notes via entity.PackNotes. Files /
 	// MyReaction / Channel の post-pack 解決は notes 以外でも必要 (#426)。
@@ -1904,45 +1883,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		}
 		return *m.DeeplAuthKey, m.DeeplIsPro, nil
 	}, s.outboundClient(10*time.Second)))
-	api.POST("/notes/create", notesHandler.Create, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:notes"))
-	api.POST("/notes/show", notesHandler.Show)
-	api.POST("/notes/delete", notesHandler.Delete, middleware.RequireAuth(), middleware.RequireScope("write:notes"))
-	api.POST("/notes/renotes", notesHandler.Renotes)
-	api.POST("/notes/replies", notesHandler.Replies)
-	api.POST("/notes/children", notesHandler.Children)
-	api.POST("/notes/conversation", notesHandler.Conversation)
-	// upstream search.ts は requireCredential:false で匿名も handler に到達させ、
-	// canSearchNotes policy を handler 内で検査して UNAVAILABLE を返す (#1783)。
-	// route 側の RequireAuth + RequireRolePolicy は外す。
-	api.POST("/notes/search", notesHandler.Search)
-	api.POST("/notes/state", notesHandler.State, middleware.RequireAuth(), middleware.RequireScope("read:account"))
-	api.POST("/notes/timeline", notesHandler.Timeline, middleware.RequireAuth(), middleware.RequireScope("read:account"))
-	api.POST("/notes/local-timeline", notesHandler.LocalTimeline)
-	api.POST("/notes/global-timeline", notesHandler.GlobalTimeline)
-	api.POST("/notes/hybrid-timeline", notesHandler.HybridTimeline, middleware.RequireAuth(), middleware.RequireScope("read:account"))
-	api.POST("/notes/reactions", notesHandler.Reactions)
-	api.GET("/notes/reactions", notesHandler.Reactions)
-	api.POST("/notes/reactions/create", notesHandler.ReactionsCreate, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:reactions"))
-	api.POST("/notes/reactions/delete", notesHandler.ReactionsDelete, middleware.RequireAuth(), middleware.RequireScope("write:reactions"))
-	api.POST("/notes/polls/vote", notesHandler.PollsVote, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:votes"))
 	// Notes extra endpoints (Phase 6)
 	notesHandler.SetFavoriteRepo(noteFavoriteRepo)
 	notesHandler.SetAchievementGranter(achievementService)
-	api.POST("/notes/favorites/create", notesHandler.FavoritesCreate, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:favorites"))
-	api.POST("/notes/favorites/delete", notesHandler.FavoritesDelete, middleware.RequireAuth(), middleware.RequireScope("write:favorites"))
-	api.POST("/notes/featured", notesHandler.Featured)
-	api.GET("/notes/featured", notesHandler.Featured)
-	api.POST("/notes/unrenote", notesHandler.Unrenote, middleware.RequireAuth(), middleware.RequireScope("write:notes"))
-	api.POST("/notes/mentions", notesHandler.Mentions, middleware.RequireAuth(), middleware.RequireScope("read:account"))
-	api.POST("/notes/user-list-timeline", notesHandler.UserListTimeline, middleware.RequireAuth(), middleware.RequireScope("read:account"))
-	api.POST("/notes/search-by-tag", notesHandler.SearchByTag)
-	api.POST("/notes/clips", notesHandler.Clips)
-	// canUseTranslator は upstream translate.ts 同様 handler 側で評価し、拒否時は
-	// 503 UNAVAILABLE を返す (RequireRolePolicy の 403 ではない、#2010)。
-	api.POST("/notes/translate", notesHandler.Translate,
-		middleware.RequireAuth(),
-		middleware.RequireScope("read:account"))
-	api.POST("/notes/show-partial-bulk", notesHandler.ShowPartialBulk)
 	// notes/drafts + notes/thread-muting + notes/polls/recommendation (実データ)
 	notesHandler.SetDraftRepo(noteDraftRepo)
 	notesHandler.SetScheduledNoteEnqueuer(s.queueClient)
@@ -1955,14 +1898,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// publish 結果通知 (#1045 Phase 2-B): scheduledNotePosted (= 成功) /
 	// scheduledNotePostFailed (= 失敗) を user の通知 stream に発火する。
 	postScheduledNoteProcessor.SetNotifier(notificationService)
-	api.POST("/notes/drafts/list", notesHandler.DraftsList, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("read:account"))
-	api.POST("/notes/drafts/create", notesHandler.DraftsCreate, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:account"))
-	api.POST("/notes/drafts/update", notesHandler.DraftsUpdate, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:account"))
-	api.POST("/notes/drafts/delete", notesHandler.DraftsDelete, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:account"))
-	api.POST("/notes/drafts/count", notesHandler.DraftsCount, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("read:account"))
-	api.POST("/notes/thread-muting/create", notesHandler.ThreadMutingCreate, middleware.RequireAuth(), middleware.RequireScope("write:account"))
-	api.POST("/notes/thread-muting/delete", notesHandler.ThreadMutingDelete, middleware.RequireAuth(), middleware.RequireScope("write:account"))
-	api.POST("/notes/polls/recommendation", notesHandler.PollsRecommendation, middleware.RequireAuth(), middleware.RequireScope("read:account"))
 
 	// API の handler (#3694)。作るのは buildHandlers (wiring_handlers.go) で、ここでは
 	// 今までと同じ名前の別名を置く。呼ぶ位置は、移した handler の中で最初に作っていた
@@ -2058,36 +1993,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	usersHandler.SetRemoteStatsFetcher(&remoteStatsFetcherAdapter{
 		fetcher: remoteStatsFetcher,
 	})
-	// Users endpoint (public) — ユーザー一覧
-	api.POST("/users", usersHandler.List)
 
-	// Pinned users (public)
-	//
-	// upstream pinned-users.ts は res が UserDetailed 配列で、各 pinnedUsers の
-	// acct を Acct.parse して host?? IsNull() で local/remote 両方を検索する
-	// (#1551)。mk-go も acct の host 部分を解決し UserDetailed で返す。
-	api.POST("/pinned-users", usersHandler.PinnedUsers)
-
-	api.POST("/users/show", usersHandler.Show)
-	// upstream search.ts:15-16 は requireCredential:false + requiredRolePolicy:
-	// canSearchUsers。canSearchUsers の base default は true なので匿名も検索でき、
-	// false の role のみ 403 になる。RequireAuth(401) は付けない (#1784)。
-	api.POST("/users/search", usersHandler.Search,
-		middleware.RequireRolePolicyPublic(roleService, corerole.PolicyCanSearchUsers))
-	api.POST("/users/notes", usersHandler.Notes)
-	api.POST("/users/followers", usersHandler.Followers)
-	api.POST("/users/following", usersHandler.Following)
-	api.POST("/users/relation", usersHandler.Relation, middleware.RequireAuth(), middleware.RequireScope("read:account"))
-	api.POST("/users/report-abuse", usersHandler.ReportAbuse, middleware.RequireAuth(), middleware.RequireScope("write:report-abuse"))
-	api.POST("/users/reactions", usersHandler.Reactions)
-	api.POST("/users/featured-notes", usersHandler.FeaturedNotes)
-	// 本家は allowGet: true (#3593)。
-	api.GET("/users/featured-notes", usersHandler.FeaturedNotes)
-	// upstream search-by-username-and-host.ts:13 は requireCredential:false かつ
-	// requiredRolePolicy 無し (匿名・全 role に開放)。mk-go が独自に付けていた
-	// RequireAuth + canSearchUsers gate を外して揃える (#1766)。
-	api.POST("/users/search-by-username-and-host", usersHandler.SearchByUsernameAndHost)
-	api.POST("/users/update-memo", usersHandler.UpdateMemo, middleware.RequireAuth(), middleware.RequireScope("write:account"))
 	usersHandler.SetAbuseRepo(abuseReportRepo)
 	usersHandler.SetMemoRepo(userMemoRepo)
 	usersHandler.SetUserRelationReader(userRelationRepo) // #3608: users/show の関係を 1 文で引く
@@ -2096,23 +2002,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// users/reactions で moderator/admin が remote / 非 public reactions を
 	// 閲覧できるようにする (upstream の iAmModerator bypass)。
 	usersHandler.SetModeratorChecker(roleService)
-	// Phase 7.3: users/* 完全化 (実データハンドラ)
-	api.POST("/users/achievements", usersHandler.Achievements)
-	api.POST("/users/clips", usersHandler.Clips)
-	api.POST("/users/flashs", usersHandler.Flashs)
-	api.POST("/users/gallery/posts", usersHandler.GalleryPosts)
-	api.POST("/users/pages", usersHandler.Pages)
-	api.POST("/users/get-frequently-replied-users", usersHandler.GetFrequentlyRepliedUsers)
-	api.POST("/users/get-following-users-by-birthday", usersHandler.GetFollowingUsersByBirthday, middleware.RequireAuth(), middleware.RequireScope("read:account"))
-	api.POST("/users/recommendation", usersHandler.UserRecommendation, middleware.RequireAuth(), middleware.RequireScope("read:account"))
-	// get-memberships は requireCredential:false の public endpoint (#1550)。
-	// RequireScope は app token のみ gate するため public でも残してよい。
-	api.POST("/users/lists/get-memberships", usersHandler.ListsGetMemberships, middleware.RequireScope("read:account"))
-	api.POST("/users/lists/create-from-public", usersHandler.ListsCreateFromPublic, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:account"))
-	api.POST("/users/lists/favorite", usersHandler.ListsFavorite, middleware.RequireAuth(), middleware.RequireScope("write:account"))
-	api.POST("/users/lists/unfavorite", usersHandler.ListsUnfavorite, middleware.RequireAuth(), middleware.RequireScope("write:account"))
-	api.POST("/users/lists/update", usersHandler.ListsUpdate, middleware.RequireAuth(), middleware.RequireScope("write:account"))
-	api.POST("/users/lists/update-membership", usersHandler.ListsUpdateMembership, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:account"))
 
 	// Account endpoints
 	iHandler.SetBackground(s.background) // #3661: 世代の停止で待つ
@@ -2188,19 +2077,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	federationResolver.SetMoveProcessor(accountMover)
 	// #2415: 移行直後 (相互確認済み + 2h 以内) だけ import の上限を緩和する。
 	iHandler.SetMoveInValidator(accountMover)
-	api.POST("/i", iHandler.Me, middleware.RequireAuth(), middleware.RequireScope("read:account"))
-	api.POST("/i/update", iHandler.Update, middleware.RequireAuth(), middleware.RequireScope("write:account"))
-	api.POST("/i/pin", iHandler.Pin, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:account"))
-	api.POST("/i/unpin", iHandler.Unpin, middleware.RequireAuth(), middleware.RequireScope("write:account"))
-	api.POST("/i/registry/get", iHandler.RegistryGet, middleware.RequireAuth(), middleware.RequireScope("read:account"))
-	api.POST("/i/registry/set", iHandler.RegistrySet, middleware.RequireAuth(), middleware.RequireScope("write:account"))
-	api.POST("/i/registry/get-all", iHandler.RegistryGetAll, middleware.RequireAuth(), middleware.RequireScope("read:account"))
-	api.POST("/i/registry/keys-with-type", iHandler.RegistryKeysWithType, middleware.RequireAuth(), middleware.RequireScope("read:account"))
-	api.POST("/i/registry/remove", iHandler.RegistryRemove, middleware.RequireAuth(), middleware.RequireScope("write:account"))
-	api.POST("/i/change-password", iHandler.ChangePassword, middleware.RequireAuth(), middleware.RequireSecure())
-	api.POST("/i/delete-account", iHandler.DeleteAccount, middleware.RequireAuth(), middleware.RequireSecure())
-	api.POST("/i/favorites", iHandler.Favorites, middleware.RequireAuth(), middleware.RequireScope("read:favorites"))
-	api.POST("/i/regenerate-token", iHandler.RegenerateToken, middleware.RequireAuth(), middleware.RequireSecure())
 	iHandler.SetFavoriteRepo(noteFavoriteRepo)
 	// Phase 7-2 (#244): /api/i の未読系フィールドを実クエリ化。
 	iHandler.SetNotificationService(notificationService)
@@ -2308,41 +2184,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 配信を admin/delete-account と同経路で配線する。未配線だと論理削除フラグだけ立って実削除が走らない。
 	iHandler.SetDeleteAccountEnqueuer(s.queueClient)
 	iHandler.SetAccountDeletionFederationHook(userModerationDeliveryHook)
-	api.POST("/i/export-notes", iHandler.ExportNotes, middleware.RequireAuth(), middleware.RequireSecure())
-	api.POST("/i/export-following", iHandler.ExportFollowing, middleware.RequireAuth(), middleware.RequireSecure())
-	api.POST("/i/export-blocking", iHandler.ExportBlocking, middleware.RequireAuth(), middleware.RequireSecure())
-	api.POST("/i/export-mute", iHandler.ExportMute, middleware.RequireAuth(), middleware.RequireSecure())
-	api.POST("/i/export-favorites", iHandler.ExportFavorites, middleware.RequireAuth(), middleware.RequireSecure())
-	api.POST("/i/export-user-lists", iHandler.ExportUserLists, middleware.RequireAuth(), middleware.RequireSecure())
-	api.POST("/i/export-antennas", iHandler.ExportAntennas, middleware.RequireAuth(), middleware.RequireSecure())
-	api.POST("/i/export-clips", iHandler.ExportClips, middleware.RequireAuth(), middleware.RequireSecure())
-	// i/import-* の canImport* role policy gate は #1020 で追加。policy=false
-	// の user (default 全 false) は 403 ROLE_PERMISSION_DENIED を返す。
-	api.POST("/i/import-following", iHandler.ImportFollowing,
-		middleware.RequireAuth(), middleware.RequireNotMoved(),
-		middleware.RequireRolePolicy(roleService, corerole.PolicyCanImportFollowing), middleware.RequireSecure())
-	api.POST("/i/import-blocking", iHandler.ImportBlocking,
-		middleware.RequireAuth(), middleware.RequireNotMoved(),
-		middleware.RequireRolePolicy(roleService, corerole.PolicyCanImportBlocking), middleware.RequireSecure())
-	api.POST("/i/import-muting", iHandler.ImportMuting,
-		middleware.RequireAuth(), middleware.RequireNotMoved(),
-		middleware.RequireRolePolicy(roleService, corerole.PolicyCanImportMuting), middleware.RequireSecure())
-	api.POST("/i/import-user-lists", iHandler.ImportUserLists,
-		middleware.RequireAuth(), middleware.RequireNotMoved(),
-		middleware.RequireRolePolicy(roleService, corerole.PolicyCanImportUserLists), middleware.RequireSecure())
-	api.POST("/i/import-antennas", iHandler.ImportAntennas,
-		middleware.RequireAuth(), middleware.RequireNotMoved(),
-		middleware.RequireRolePolicy(roleService, corerole.PolicyCanImportAntennas), middleware.RequireSecure())
 
 	// i/webhooks/* — Webhook管理 (実データ)
 	webhookHandler.SetDispatcher(webhookService)
 	webhookHandler.SetRolePolicyProvider(roleService) // #1029: webhookLimit
-	api.POST("/i/webhooks/create", webhookHandler.Create, middleware.RequireAuth(), middleware.RequireScope("write:account"))
-	api.POST("/i/webhooks/list", webhookHandler.List, middleware.RequireAuth(), middleware.RequireScope("read:account"))
-	api.POST("/i/webhooks/show", webhookHandler.Show, middleware.RequireAuth(), middleware.RequireScope("read:account"))
-	api.POST("/i/webhooks/update", webhookHandler.Update, middleware.RequireAuth(), middleware.RequireScope("write:account"))
-	api.POST("/i/webhooks/delete", webhookHandler.Delete, middleware.RequireAuth(), middleware.RequireScope("write:account"))
-	api.POST("/i/webhooks/test", webhookHandler.Test, middleware.RequireAuth(), middleware.RequireSecure(), middleware.RequireScope("read:account"))
 
 	// Notifications endpoints
 	notificationsHandler.SetRepos(userRepo, noteRepo)
@@ -2366,45 +2211,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// notifications/create の 'app' 通知で header/icon を token.name/iconUrl に
 	// fallback するため access token repo を配線 (#1557)。
 	notificationsHandler.SetAccessTokenRepo(accessTokenRepo)
-	api.POST("/i/notifications", notificationsHandler.Show, middleware.RequireAuth(), middleware.RequireScope("read:notifications"))
-	api.POST("/i/notifications-grouped", notificationsHandler.Grouped, middleware.RequireAuth(), middleware.RequireScope("read:notifications"))
-	api.POST("/notifications/mark-all-as-read", notificationsHandler.MarkAllAsRead, middleware.RequireAuth(), middleware.RequireScope("write:notifications"))
-	api.POST("/notifications/create", notificationsHandler.Create, middleware.RequireAuth(), middleware.RequireScope("write:notifications"))
-	api.POST("/notifications/flush", notificationsHandler.Flush, middleware.RequireAuth(), middleware.RequireScope("write:notifications"))
-	api.POST("/notifications/test-notification", notificationsHandler.TestNotification, middleware.RequireAuth(), middleware.RequireScope("write:notifications"))
-
-	// i/* ハンドラ
-	// claim-achievement / import-* は upstream で prohibitMoved:true (移行済
-	// アカウントは YOUR_ACCOUNT_MOVED 403)。RequireNotMoved を配線する (#1555)。
-	api.POST("/i/claim-achievement", iHandler.ClaimAchievement, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:account"))
-	api.POST("/i/apps", iHandler.Apps, middleware.RequireAuth(), middleware.RequireSecure())
-	api.POST("/i/authorized-apps", iHandler.AuthorizedApps, middleware.RequireAuth(), middleware.RequireSecure())
-	api.POST("/i/signin-history", iHandler.SigninHistory, middleware.RequireAuth(), middleware.RequireSecure())
-	// upstream c07ce75281: サードパーティアプリが自身のアクセストークンを失効
-	// できるよう secure を外した。**RequireAuth も付けない** — upstream は
-	// requireCredential を外して endpoint 固有の CREDENTIAL_REQUIRED を投げるので、
-	// 汎用 middleware に任せると error id が食い違う。認証と「自分のトークン以外は
-	// 403」はどちらも handler 側で見る。
-	// どの権限のapp tokenでも自分自身は失効できるよう、HideAppUserWithoutReadが
-	// 外した利用者をAdmitAppUserで戻す。
-	api.POST("/i/revoke-token", iHandler.RevokeToken, middleware.AdmitAppUser())
-	api.POST("/i/update-email", iHandler.UpdateEmail, middleware.RequireAuth(), middleware.RequireSecure())
-	api.POST("/verify-email", iHandler.VerifyEmail)
-	api.POST("/i/move", iHandler.Move, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireSecure())
-	api.POST("/i/2fa/register", iHandler.TwoFARegister, middleware.RequireAuth(), middleware.RequireSecure())
-	api.POST("/i/2fa/done", iHandler.TwoFADone, middleware.RequireAuth(), middleware.RequireSecure())
-	api.POST("/i/2fa/unregister", iHandler.TwoFAUnregister, middleware.RequireAuth(), middleware.RequireSecure())
-	api.POST("/i/2fa/register-key", iHandler.TwoFARegisterKey, middleware.RequireAuth(), middleware.RequireSecure())
-	api.POST("/i/2fa/key-done", iHandler.TwoFAKeyDone, middleware.RequireAuth(), middleware.RequireSecure())
-	api.POST("/i/2fa/remove-key", iHandler.TwoFARemoveKey, middleware.RequireAuth(), middleware.RequireSecure())
-	api.POST("/i/2fa/update-key", iHandler.TwoFAUpdateKey, middleware.RequireAuth(), middleware.RequireSecure())
-	api.POST("/i/2fa/password-less", iHandler.TwoFAPasswordLess, middleware.RequireAuth(), middleware.RequireSecure())
-	api.POST("/i/gallery/likes", iHandler.GalleryLikes, middleware.RequireAuth(), middleware.RequireScope("read:gallery-likes"))
-	api.POST("/i/gallery/posts", iHandler.GalleryPosts, middleware.RequireAuth(), middleware.RequireScope("read:gallery"))
-	api.POST("/i/page-likes", iHandler.PageLikes, middleware.RequireAuth(), middleware.RequireScope("read:page-likes"))
-	api.POST("/i/registry/get-detail", iHandler.RegistryGetDetail, middleware.RequireAuth(), middleware.RequireScope("read:account"))
-	api.POST("/i/registry/keys", iHandler.RegistryKeys, middleware.RequireAuth(), middleware.RequireScope("read:account"))
-	api.POST("/i/registry/scopes-with-domain", iHandler.RegistryScopesWithDomain, middleware.RequireAuth(), middleware.RequireSecure())
 
 	// i/export-* / i/import-* は上方 (line ~1245-1265) の explicit registration
 	// が active (iHandler.Export* / Import* via transfer_handler.go) で、proper
@@ -2420,28 +2226,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	hashtagsHandler.SetRelationRepos(listRelationRepos) // #1957-a: hashtags/users の embed user に relation
 	hashtagsHandler.SetModeratorChecker(roleService)    // #3330: hashtags/users のモデレーター向けの項目とカウントのゲート
 	hashtagsHandler.SetMetaRepo(metaRepo)               // #3628: hashtags/trend から hiddenTags / sensitiveWords のタグを外す
-	api.POST("/hashtags/list", hashtagsHandler.List)
-	api.POST("/hashtags/search", hashtagsHandler.Search)
-	api.POST("/hashtags/show", hashtagsHandler.Show)
-	api.POST("/hashtags/trend", hashtagsHandler.Trend)
-	// upstream Misskey の hashtags/trend は allowGet: true なので
-	// frontend (misskeyApiGet) は GET で叩く。WidgetTrends がここを毎分
-	// 呼ぶため GET でも応答できるよう同じ handler を 2 重 wire する。
-	api.GET("/hashtags/trend", hashtagsHandler.Trend)
-	api.POST("/hashtags/users", hashtagsHandler.Users)
 
 	// Gallery endpoints (Phase 6)
 	galleryHandler.SetRanking(featuredService) // #1548: like/unlike/featured ランキング
 	galleryHandler.SetRoleChecker(roleService) // #1548: posts/delete モデレータ削除
-	api.POST("/gallery/featured", galleryHandler.Featured)
-	api.POST("/gallery/popular", galleryHandler.Popular)
-	api.POST("/gallery/posts", galleryHandler.Posts)
-	api.POST("/gallery/posts/create", galleryHandler.PostsCreate, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:gallery"))
-	api.POST("/gallery/posts/show", galleryHandler.PostsShow)
-	api.POST("/gallery/posts/delete", galleryHandler.PostsDelete, middleware.RequireAuth(), middleware.RequireScope("write:gallery"))
-	api.POST("/gallery/posts/update", galleryHandler.PostsUpdate, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:gallery"))
-	api.POST("/gallery/posts/like", galleryHandler.PostsLike, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:gallery-likes"))
-	api.POST("/gallery/posts/unlike", galleryHandler.PostsUnlike, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:gallery-likes"))
 
 	// Blocking endpoints
 	blockingHandler.SetDetailExtras(usersHandler) // #3330: blocking/list のピン留め・移行先
@@ -2458,25 +2246,16 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	})
 	blockingHandler.SetModeratorChecker(roleService) // #1985: blocking/list の count gate で moderator viewer 判定
 	blockingHandler.SetUserPacker(sharedUserPacker)  // #3330: create・delete の応答を本家の UserDetailedNotMe に揃える
-	api.POST("/blocking/create", blockingHandler.Create, middleware.RequireAuth(), middleware.RequireScope("write:blocks"))
-	api.POST("/blocking/delete", blockingHandler.Delete, middleware.RequireAuth(), middleware.RequireScope("write:blocks"))
-	api.POST("/blocking/list", blockingHandler.List, middleware.RequireAuth(), middleware.RequireScope("read:blocks"))
 
 	// Mute endpoints
 	muteHandler.SetDetailExtras(usersHandler) // #3330: mute/list のピン留め・移行先
 	muteHandler.SetRelationRepos(listRelationRepos)
 	muteHandler.SetModeratorChecker(roleService) // #1985: mute/list の count gate で moderator viewer 判定
-	api.POST("/mute/create", muteHandler.Create, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:mutes"))
-	api.POST("/mute/delete", muteHandler.Delete, middleware.RequireAuth(), middleware.RequireScope("write:mutes"))
-	api.POST("/mute/list", muteHandler.List, middleware.RequireAuth(), middleware.RequireScope("read:mutes"))
 
 	// Renote mute endpoints
 	renoteMuteHandler.SetDetailExtras(usersHandler) // #3330: renote-mute/list のピン留め・移行先
 	renoteMuteHandler.SetRelationRepos(listRelationRepos)
 	renoteMuteHandler.SetModeratorChecker(roleService) // #1985: renote-mute/list の count gate で moderator viewer 判定
-	api.POST("/renote-mute/create", renoteMuteHandler.Create, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:mutes"))
-	api.POST("/renote-mute/delete", renoteMuteHandler.Delete, middleware.RequireAuth(), middleware.RequireScope("write:mutes"))
-	api.POST("/renote-mute/list", renoteMuteHandler.List, middleware.RequireAuth(), middleware.RequireScope("read:mutes"))
 
 	// Drive endpoints
 	driveHandler.SetBackground(s.background) // #3661: 世代の停止で待つ
@@ -2494,35 +2273,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	driveHandler.SetReactionReader(reactionCountWriter)
 	driveHandler.SetNoteFieldResolver(noteFieldResolver)
 	driveHandler.SetMetaRepo(metaRepo) // #2106 S4: enableIpLogging を尊重して requestIp/headers 保存を gate
-	api.POST("/drive", driveHandler.Usage, middleware.RequireAuth(), middleware.RequireScope("read:drive"))
-	api.POST("/drive/files", driveHandler.FilesList, middleware.RequireAuth(), middleware.RequireScope("read:drive"))
-	api.POST("/drive/files/create", driveHandler.FilesCreate, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:drive"))
-	// 分割アップロード (#2313)。mk-go 独自拡張。保護は create と同一
-	// (RequireAuth + RequireNotMoved + write:drive) — append は
-	// BodyLimitByPath の 1MiB 制限から外れるため、未認証で到達できる経路を
-	// 増やさないことが前提になっている。
-	api.POST("/drive/files/create-chunked/start", driveHandler.FilesCreateChunkedStart, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:drive"))
-	api.POST("/drive/files/create-chunked/append", driveHandler.FilesCreateChunkedAppend, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:drive"))
-	api.POST("/drive/files/create-chunked/finish", driveHandler.FilesCreateChunkedFinish, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:drive"))
-	api.POST("/drive/files/create-chunked/abort", driveHandler.FilesCreateChunkedAbort, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:drive"))
-	api.POST("/drive/files/show", driveHandler.FilesShow, middleware.RequireAuth(), middleware.RequireScope("read:drive"))
-	api.POST("/drive/files/update", driveHandler.FilesUpdate, middleware.RequireAuth(), middleware.RequireScope("write:drive"))
-	api.POST("/drive/files/delete", driveHandler.FilesDelete, middleware.RequireAuth(), middleware.RequireScope("write:drive"))
-	api.POST("/drive/files/find-by-hash", driveHandler.FilesFindByHash, middleware.RequireAuth(), middleware.RequireScope("read:drive"))
-	api.POST("/drive/folders/create", driveHandler.FoldersCreate, middleware.RequireAuth(), middleware.RequireScope("write:drive"))
-	api.POST("/drive/folders/show", driveHandler.FoldersShow, middleware.RequireAuth(), middleware.RequireScope("read:drive"))
-	api.POST("/drive/folders/update", driveHandler.FoldersUpdate, middleware.RequireAuth(), middleware.RequireScope("write:drive"))
-	api.POST("/drive/folders/delete", driveHandler.FoldersDelete, middleware.RequireAuth(), middleware.RequireScope("write:drive"))
-	api.POST("/drive/folders", driveHandler.FoldersList, middleware.RequireAuth(), middleware.RequireScope("read:drive"))
-	api.POST("/drive/folders/find", driveHandler.FoldersFind, middleware.RequireAuth(), middleware.RequireScope("read:drive"))
-	api.POST("/drive/files/find", driveHandler.FilesFind, middleware.RequireAuth(), middleware.RequireScope("read:drive"))
-	api.POST("/drive/files/check-existence", driveHandler.FilesCheckExistence, middleware.RequireAuth(), middleware.RequireScope("read:drive"))
-	api.POST("/drive/files/attached-notes", driveHandler.FilesAttachedNotes, middleware.RequireAuth(), middleware.RequireScope("read:drive"))
-	// drive/files/attached-chat-messages は chat message を pack するため chat
-	// handler 側で処理する (route 登録は chatHandler 構築後、#1218)。
-	api.POST("/drive/files/upload-from-url", driveHandler.FilesUploadFromURL, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:drive"))
-	api.POST("/drive/files/move-bulk", driveHandler.FilesMoveBulk, middleware.RequireAuth(), middleware.RequireScope("write:drive"))
-	api.POST("/drive/stream", driveHandler.Stream, middleware.RequireAuth(), middleware.RequireScope("read:drive"))
 	// Phase 7.4: drive/* — 全て実データハンドラに移行済み
 
 	// Static file serving for LocalStorage / S3 backend. `storedInternal=true`
@@ -2823,25 +2573,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	federationHandler.SetModeratorChecker(roleService)
 	// instance 一覧 / show-instance の signatureCapability field (#2393)。
 	federationHandler.SetSignatureCapabilityLookup(sigCapRepo)
-	api.POST("/federation/instances", federationHandler.Instances)
-	api.GET("/federation/instances", federationHandler.Instances)
-	api.POST("/federation/show-instance", federationHandler.ShowInstance)
-	api.POST("/federation/followers", federationHandler.Followers)
-	api.POST("/federation/following", federationHandler.Following)
-	api.POST("/federation/users", federationHandler.Users)
-	// admin overview から `misskeyApiGet` で叩かれるため GET も登録 (#421)。
-	api.POST("/federation/stats", federationHandler.Stats)
-	api.GET("/federation/stats", federationHandler.Stats)
-	// upstream 2026.9.1 で `requireCredential: true` / `kind: 'read:account'` /
-	// 1 時間 30 回になった (それまでは未認証でも叩けた)。mk-go は #2106 で先に
-	// RequireAuth を付けていたので、scope とレート制限 (ratelimit_defs.go) を足して
-	// 揃える。RequireModerator にしないのは、frontend がリモートユーザーの
-	// メニューで全ログインユーザーに出すため。
-	api.POST("/federation/update-remote-user", federationHandler.UpdateRemoteUser, middleware.RequireAuth(), middleware.RequireScope("read:account"))
-	// Mastodon 互換のピア一覧 (#2245)。upstream は endpoints/ 配下ではなく
-	// ApiServerService.ts で fastify に直接登録しているので、mk-go でも
-	// endpoint 群とは別に /api/v1/... として生やす。
-	api.GET("/v1/instance/peers", federationHandler.Peers)
 
 	// Channels endpoints (Phase 4.2)
 	channelsHandler.SetRelationReloadPublisher(relationReloadPublisher)
@@ -2854,20 +2585,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// channels/timeline の匿名 visitor への ugcVisibilityForVisitor gate。
 	// notes 側と同じ理由で無条件に配線し、毎回読む (#2708)。
 	channelsHandler.SetUGCVisibilityLookup(func() string { return metaUGCVisibility(metaRepo) })
-	// channels/create の canCreateChannel gate は #1020 で middleware に
-	// 昇格 (handler 内 RolePolicyChecker → middleware.RequireRolePolicy)。
-	api.POST("/channels/create", channelsHandler.Create,
-		middleware.RequireAuth(), middleware.RequireNotMoved(),
-		middleware.RequireRolePolicy(roleService, corerole.PolicyCanCreateChannel), middleware.RequireScope("write:channels"))
-	api.POST("/channels/show", channelsHandler.Show)
-	api.POST("/channels/update", channelsHandler.Update, middleware.RequireAuth(), middleware.RequireScope("write:channels"))
-	api.POST("/channels/follow", channelsHandler.Follow, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:channels"))
-	api.POST("/channels/unfollow", channelsHandler.Unfollow, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:channels"))
-	api.POST("/channels/followed", channelsHandler.Followed, middleware.RequireAuth(), middleware.RequireScope("read:channels"))
-	api.POST("/channels/owned", channelsHandler.Owned, middleware.RequireAuth(), middleware.RequireScope("read:channels"))
-	api.POST("/channels/featured", channelsHandler.Featured)
-	api.POST("/channels/search", channelsHandler.Search)
-	api.POST("/channels/timeline", channelsHandler.Timeline)
 	channelsHandler.SetInstanceRepo(instanceRepo)
 	channelsHandler.SetEmojiRepo(emojiRepo)
 	channelsHandler.SetReactionReader(reactionCountWriter)
@@ -2890,13 +2607,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	antennasHandler.SetQueryService(noteQueryService)                              // #1464: Notes の visibility filter (defense-in-depth)
 	antennasHandler.SetMuteBlockRepos(mutingRepo, blockingRepo, channelMutingRepo) // #1544: Notes の mute/block/channel-mute filter
 	antennasHandler.SetMetaRepo(metaRepo)                                          // #2106 N5: Notes の blocked-host filter
-	api.POST("/antennas/create", antennasHandler.Create, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:account"))
-	api.POST("/antennas/show", antennasHandler.Show, middleware.RequireAuth(), middleware.RequireScope("read:account"))
-	api.POST("/antennas/update", antennasHandler.Update, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:account"))
-	api.POST("/antennas/delete", antennasHandler.Delete, middleware.RequireAuth(), middleware.RequireScope("write:account"))
-	api.POST("/antennas/list", antennasHandler.List, middleware.RequireAuth(), middleware.RequireScope("read:account"))
-	api.POST("/antennas/notes", antennasHandler.Notes, middleware.RequireAuth(), middleware.RequireScope("read:account"))
-	api.POST("/antennas/remove-note", antennasHandler.RemoveNote, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:account")) // #2069 #17463
 
 	// Clips endpoints (Phase 4.4)
 	clipsHandler.SetFavoriteRepo(clipFavoriteRepo)
@@ -2910,14 +2620,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	clipsHandler.SetMetaRepo(metaRepo)                       // #1562: Notes の blocked-host filter
 	// clips/notes の匿名 visitor への ugcVisibilityForVisitor gate (notes 側と同じく無条件・毎回読む)。
 	clipsHandler.SetUGCVisibilityLookup(func() string { return metaUGCVisibility(metaRepo) })
-	api.POST("/clips/create", clipsHandler.Create, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:account"))
-	api.POST("/clips/show", clipsHandler.Show, middleware.RequireScope("read:account"))
-	api.POST("/clips/update", clipsHandler.Update, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:account"))
-	api.POST("/clips/delete", clipsHandler.Delete, middleware.RequireAuth(), middleware.RequireScope("write:account"))
-	api.POST("/clips/list", clipsHandler.List, middleware.RequireAuth(), middleware.RequireScope("read:account"))
-	api.POST("/clips/add-note", clipsHandler.AddNote, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:account"))
-	api.POST("/clips/remove-note", clipsHandler.RemoveNote, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:account"))
-	api.POST("/clips/notes", clipsHandler.Notes, middleware.RequireScope("read:account"))
 
 	// Pages endpoints (Phase 4.5)
 	pagesHandler.SetMainStreamPublisher(mainStreamPublisher)
@@ -2925,29 +2627,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// page content の image block / eyeCatchingImageId から drive file を解決して
 	// attachedFiles / eyeCatchingImage を埋める (#1662)。
 	pagesHandler.SetDriveFileRepo(driveFileRepo)
-	api.POST("/pages/create", pagesHandler.Create, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:pages"))
-	api.POST("/pages/show", pagesHandler.Show)
-	api.POST("/pages/update", pagesHandler.Update, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:pages"))
-	api.POST("/pages/delete", pagesHandler.Delete, middleware.RequireAuth(), middleware.RequireScope("write:pages"))
-	api.POST("/pages/featured", pagesHandler.Featured)
-	api.POST("/pages/like", pagesHandler.Like, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:page-likes"))
-	api.POST("/pages/unlike", pagesHandler.Unlike, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:page-likes"))
-	api.POST("/i/pages", pagesHandler.My, middleware.RequireAuth(), middleware.RequireScope("read:pages"))
 
 	// Flash endpoints (Phase 4.5)
 	flashHandler.SetRoleChecker(roleService) // #1548: flash/delete モデレータ削除
-	api.POST("/flash/create", flashHandler.Create, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:flash"))
-	api.POST("/flash/show", flashHandler.Show)
-	api.POST("/flash/update", flashHandler.Update, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:flash"))
-	api.POST("/flash/delete", flashHandler.Delete, middleware.RequireAuth(), middleware.RequireScope("write:flash"))
-	api.POST("/flash/featured", flashHandler.Featured)
-	api.POST("/flash/search", flashHandler.Search)
-	api.POST("/flash/like", flashHandler.Like, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:flash-likes"))
-	api.POST("/flash/unlike", flashHandler.Unlike, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:flash-likes"))
-	api.POST("/flash/my", flashHandler.My, middleware.RequireAuth(), middleware.RequireScope("read:flash"))
-	api.POST("/flash/my-likes", flashHandler.MyLikes, middleware.RequireAuth(), middleware.RequireScope("read:flash-likes"))
-	api.POST("/i/flashs", flashHandler.My, middleware.RequireAuth(), middleware.RequireScope("read:flash"))
-	api.POST("/i/flashs/likes", flashHandler.MyLikes, middleware.RequireAuth(), middleware.RequireScope("read:flash-likes"))
 
 	// Streaming (Phase 4.1 Step K)
 	// 1. Redis pubsub bus (核となる publish/subscribe チャンネル)。streamPubSub と
@@ -3486,48 +3168,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// /retention は chart engine ではなく集計済みテーブルを読む (#2791 で
 	// router.go の inline closure から移設)。
 	chartsHandler.SetRetentionRepo(retentionRepo)
-	chartMethods := []string{http.MethodGet, http.MethodPost}
-	api.Match(chartMethods, "/charts/notes", chartsHandler.Notes)
-	api.Match(chartMethods, "/charts/users", chartsHandler.Users)
-	api.Match(chartMethods, "/charts/drive", chartsHandler.Drive)
-	api.Match(chartMethods, "/charts/federation", chartsHandler.Federation)
-	api.Match(chartMethods, "/charts/instance", chartsHandler.Instance)
-	api.Match(chartMethods, "/charts/ap-request", chartsHandler.ApRequest)
-	api.Match(chartMethods, "/charts/active-users", chartsHandler.ActiveUsers)
-	api.Match(chartMethods, "/charts/user/notes", chartsHandler.UserNotes)
-	api.Match(chartMethods, "/charts/user/drive", chartsHandler.UserDrive)
-	api.Match(chartMethods, "/charts/user/following", chartsHandler.UserFollowing)
-	api.Match(chartMethods, "/charts/user/pv", chartsHandler.UserPv)
-	api.Match(chartMethods, "/charts/user/reactions", chartsHandler.UserReactions)
 
 	// Following endpoints
 	followingHandler.SetIDGen(idGen)
 	followingHandler.SetListPacker(sharedUserPacker) // #1912 / #3330: following/list・requests/* の embed user を本家 packMany と同じ形に
-	api.POST("/following/create", followingHandler.Create, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:following"))
-	api.POST("/following/delete", followingHandler.Delete, middleware.RequireAuth(), middleware.RequireScope("write:following"))
-	api.POST("/following/list", followingHandler.List, middleware.RequireAuth(), middleware.RequireScope("read:following"))
-	api.POST("/following/requests/list", followingHandler.ListRequests, middleware.RequireAuth(), middleware.RequireScope("read:following"))
-	api.POST("/following/requests/accept", followingHandler.AcceptRequest, middleware.RequireAuth(), middleware.RequireScope("write:following"))
-	api.POST("/following/requests/reject", followingHandler.RejectRequest, middleware.RequireAuth(), middleware.RequireScope("write:following"))
-	api.POST("/following/requests/cancel", followingHandler.CancelRequest, middleware.RequireAuth(), middleware.RequireScope("write:following"))
-	// following 残り
-	api.POST("/following/invalidate", followingHandler.Invalidate, middleware.RequireAuth(), middleware.RequireScope("write:following"))
-	api.POST("/following/update", followingHandler.UpdateFollow, middleware.RequireAuth(), middleware.RequireScope("write:following"))
-	api.POST("/following/update-all", followingHandler.UpdateFollowAll, middleware.RequireAuth(), middleware.RequireScope("write:following"))
-	api.POST("/following/requests/sent", followingHandler.RequestsSent, middleware.RequireAuth(), middleware.RequireScope("read:following"))
-	// Elythia 独自 (#3466): 通知を出さずに成立させたフォローの一覧。
-	api.POST("/following/silent/list", followingHandler.ListSilent, middleware.RequireAuth(), middleware.RequireScope("read:following"))
-	// channels 残り
-	api.POST("/channels/favorite", channelsHandler.Favorite, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:channels"))
-	api.POST("/channels/unfavorite", channelsHandler.Unfavorite, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:channels"))
-	api.POST("/channels/mute/create", channelsHandler.MuteCreate, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:channels"))
-	api.POST("/channels/mute/delete", channelsHandler.MuteDelete, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:channels"))
-	api.POST("/channels/my-favorites", channelsHandler.MyFavorites, middleware.RequireAuth(), middleware.RequireScope("read:channels"))
-	api.POST("/channels/mute/list", channelsHandler.MuteList, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("read:channels"))
-	// clips 残り
-	api.POST("/clips/favorite", clipsHandler.Favorite, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:clip-favorite"))
-	api.POST("/clips/unfavorite", clipsHandler.Unfavorite, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:clip-favorite"))
-	api.POST("/clips/my-favorites", clipsHandler.MyFavorites, middleware.RequireAuth(), middleware.RequireScope("read:clip-favorite"))
 	// federation の残ルートは上で登録済 (federationHandler 初期化直後)
 
 	// Public roles (Phase 6)
@@ -3542,11 +3186,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	rolesHandler.SetUserRepo(userRepo)
 	rolesHandler.SetMuteBlockRepos(mutingRepo, blockingRepo, channelMutingRepo) // #1544: Notes の mute/block/channel-mute filter
 	rolesHandler.SetListPacker(sharedUserPacker)                                // #1973 / #3330: roles/users の embed user を本家 packMany と同じ形に
-	api.POST("/roles/list", rolesHandler.List, middleware.RequireAuth(), middleware.RequireScope("read:account"))
-	api.POST("/roles/show", rolesHandler.Show)
-	api.POST("/roles/assignment-show", rolesHandler.AssignmentShow, middleware.RequireAuth(), middleware.RequireScope("read:account"))
-	api.POST("/roles/users", rolesHandler.Users)
-	api.POST("/roles/notes", rolesHandler.Notes, middleware.RequireAuth(), middleware.RequireScope("read:account"))
 
 	// User lists (Phase 6)
 	userListHandler.SetRolePolicyProvider(roleService)                 // #1029: userListLimit / userEachUserListsLimit
@@ -3555,18 +3194,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	userListHandler.SetFavoriteRepo(userListFavoriteRepo)              // #1550: show forPublic likedCount/isLiked
 	userListHandler.SetProxyFollow(listProxyFollow)                    // #1704: push remote member proxy follow
 	userListHandler.SetUserListEventPublisher(userListStreamPublisher) // #1549: push/pull userAdded/userRemoved
-	// list は requireCredential:false の public endpoint (userId 指定で他人の
-	// public list を閲覧可、#1550)。未認証 && userId 未指定は handler が INVALID_PARAM。
-	api.POST("/users/lists/list", userListHandler.List, middleware.RequireScope("read:account"))
-	api.POST("/users/lists/create", userListHandler.Create, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:account"))
-	// upstream users/lists/show.ts:16 は requireCredential:false (kind は token
-	// 認証時のみ適用)。public list は匿名でも閲覧可能で、Show handler も
-	// viewer==nil を許容する。RequireAuth を外し RequireScope のみ残す (匿名は
-	// RequireScope を素通り、app token のみ scope を強制、#1766)。
-	api.POST("/users/lists/show", userListHandler.Show, middleware.RequireScope("read:account"))
-	api.POST("/users/lists/push", userListHandler.Push, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:account"))
-	api.POST("/users/lists/pull", userListHandler.Pull, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:account"))
-	api.POST("/users/lists/delete", userListHandler.Delete, middleware.RequireAuth(), middleware.RequireScope("write:account"))
 
 	// Announcements (Phase 6)
 
@@ -3633,8 +3260,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	announcementHandler := apiannouncements.NewHandler(announcementRepo, idGen)
 	announcementHandler.SetMainStreamPublisher(mainStreamPublisher)
 	announcementHandler.SetBroadcastPublisher(broadcastPublisher) // global announcementCreated (#2056)
-	api.POST("/announcements", announcementHandler.List)
-	api.POST("/i/read-announcement", announcementHandler.ReadAnnouncement, middleware.RequireAuth(), middleware.RequireScope("write:account"))
 
 	// Admin endpoints (Phase 5)
 	// 通報の abuseReport system webhook (#1542)。local と Flag の両方に効く
@@ -3722,23 +3347,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// リモート申請は `remoteHost + remoteName` で引く。**未配線だと preview が
 	// `unknown` になる** — 「消えた」と断定しないので害は「理由が出ない」だけ。
 	emojiApplicationHandler.SetEmojiLookup(emojiRepo)
-	// **申請できる人をロールで絞る (#2934)。** canManageCustomEmojis を持つ人は
-	// 申請ではなく直接登録できるので、この policy は「登録はできないが頼める人」。
-	//
-	// **第三者アプリのトークンは入れない (#3037)。** この 3 つは mk-go 独自
-	// なので upstream の `kind` にあたる宣言が無く、`RequireScope` を配線
-	// できない。upstream は「`kind` が無く、かつ資格情報を要する endpoint」に
-	// 対し app token を一律で拒否する (`ApiCallService.ts:412-413`) ので、
-	// 同じ側に倒す。本体の他の kind 無し endpoint は `RequireSecure` で
-	// もっと強く塞がれており、抜けていたのはここだけ。
-	api.POST("/emoji-application/create", emojiApplicationHandler.Create,
-		middleware.RequireAuth(),
-		middleware.RejectAppToken(),
-		middleware.RequireRolePolicy(roleService, corerole.PolicyCanRequestCustomEmojis))
-	// **一覧と取り下げは policy で塞がない。** 後から policy を外された人が
-	// 自分の申請を確認することも取り下げることもできなくなる。
-	api.POST("/emoji-application/list-mine", emojiApplicationHandler.ListMine, middleware.RequireAuth(), middleware.RejectAppToken())
-	api.POST("/emoji-application/cancel", emojiApplicationHandler.Cancel, middleware.RequireAuth(), middleware.RejectAppToken())
 	adminHandler.SetEmojiApplicationReviewer(emojiApplicationService)
 	adminHandler.SetEmojiApplicationRepo(emojiApplicationRepo)
 	// 連合セルフ診断 (#2463)。migration 本数は起動時に数えず 0 を渡す
@@ -3860,88 +3468,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	adminHandler.SetUnfollowEnqueuer(s.queueClient)
 	// suspend 時の双方向 followRequest 削除に使う (#1759)。
 	adminHandler.SetFollowRequestRepo(followRequestRepo)
-	api.POST("/admin/accounts/create", adminHandler.AccountsCreate)
-	api.POST("/admin/show-user", adminHandler.ShowUser, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:show-user"))
-	api.POST("/admin/show-users", adminHandler.ShowUsers, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:show-user"))
-	api.POST("/admin/suspend-user", adminHandler.SuspendUser, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:suspend-user"))
-	api.POST("/admin/unsuspend-user", adminHandler.UnsuspendUser, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:unsuspend-user"))
-	api.POST("/admin/meta", adminHandler.AdminMeta, middleware.RequireAdmin(roleService), middleware.RequireScope("read:admin:meta"))
-	// mk-go 独自 (additive): 組み込み済みサーバープラグインの一覧 (#2497)。
-	// プラグインの管理画面 (/admin/plugin/*) と権限を揃えてモデレーター以上。
-	api.POST("/admin/server-plugins", adminHandler.ServerPlugins, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:meta"))
-	api.POST("/admin/update-meta", adminHandler.UpdateMeta, middleware.RequireAdmin(roleService), middleware.RequireScope("write:admin:meta"))
-	api.POST("/admin/roles/create", adminHandler.RolesCreate, middleware.RequireAdmin(roleService), middleware.RequireScope("write:admin:roles"))
-	api.POST("/admin/roles/show", adminHandler.RolesShow, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:roles"))
-	api.POST("/admin/roles/list", adminHandler.RolesList, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:roles"))
-	api.POST("/admin/roles/update", adminHandler.RolesUpdate, middleware.RequireAdmin(roleService), middleware.RequireScope("write:admin:roles"))
-	api.POST("/admin/roles/delete", adminHandler.RolesDelete, middleware.RequireAdmin(roleService), middleware.RequireScope("write:admin:roles"))
-	api.POST("/admin/roles/assign", adminHandler.RolesAssign, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:roles"))
-	api.POST("/admin/roles/unassign", adminHandler.RolesUnassign, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:roles"))
-	api.POST("/admin/roles/assignment-show", adminHandler.RolesAssignmentShow, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:roles"))
-	api.POST("/admin/roles/users", adminHandler.RolesUsers, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:roles"))
-	api.POST("/admin/roles/update-default-policies", adminHandler.RolesUpdateDefaultPolicies, middleware.RequireAdmin(roleService), middleware.RequireScope("write:admin:roles"))
-	api.POST("/admin/abuse-user-reports", adminHandler.AbuseReports, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:abuse-user-reports"))
-	api.POST("/admin/resolve-abuse-user-report", adminHandler.ResolveAbuseReport, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:resolve-abuse-user-report"))
-	api.POST("/admin/show-moderation-logs", adminHandler.ShowModerationLogs, middleware.RequireAdmin(roleService), middleware.RequireScope("read:admin:show-moderation-log"))
-	// admin/emoji/* と admin/avatar-decorations/* は upstream Misskey TS の
-	// ApiCallService.ts が requiredRolePolicy (canManageCustomEmojis /
-	// canManageAvatarDecorations) のみで gate する (requireModerator/Admin
-	// flag は設定されていない) ため、mk-go も RequireRolePolicy に揃える
-	// (#1025)。admin role 持ちは HasRolePolicy 内で常に true → 自動 bypass、
-	// それ以外は role で明示的に policy=true 必要。
-	api.POST("/admin/emoji/add", adminHandler.EmojiAdd, middleware.RequireRolePolicy(roleService, corerole.PolicyCanManageCustomEmojis), middleware.RequireScope("write:admin:emoji"))
-	api.POST("/admin/emoji/update", adminHandler.EmojiUpdate, middleware.RequireRolePolicy(roleService, corerole.PolicyCanManageCustomEmojis), middleware.RequireScope("write:admin:emoji"))
-	api.POST("/admin/emoji/delete", adminHandler.EmojiDelete, middleware.RequireRolePolicy(roleService, corerole.PolicyCanManageCustomEmojis), middleware.RequireScope("write:admin:emoji"))
-	api.POST("/admin/emoji/list", adminHandler.EmojiList, middleware.RequireRolePolicy(roleService, corerole.PolicyCanManageCustomEmojis), middleware.RequireScope("read:admin:emoji"))
-	api.POST("/admin/announcements/create", announcementHandler.AdminCreate, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:announcements"))
-	api.POST("/admin/announcements/update", announcementHandler.AdminUpdate, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:announcements"))
-	api.POST("/admin/announcements/delete", announcementHandler.AdminDelete, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:announcements"))
-	api.POST("/admin/announcements/list", announcementHandler.AdminList, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:announcements"))
 
-	// Phase 7.5: admin/* 残りエンドポイント (ハンドラメソッド化)
-	api.POST("/admin/delete-account", adminHandler.DeleteAccount, middleware.RequireAdmin(roleService), middleware.RequireScope("write:admin:delete-account"))
-	api.POST("/admin/delete-all-files-of-a-user", adminHandler.DeleteAllFilesOfUser, middleware.RequireAdmin(roleService), middleware.RequireScope("write:admin:delete-all-files-of-a-user"))
-	api.POST("/admin/reset-password", adminHandler.ResetPassword, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:reset-password"))
-	api.POST("/admin/unset-mfa", adminHandler.UnsetMfa, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:unset-mfa"))
-	api.POST("/admin/send-email", adminHandler.SendEmail, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:send-email"))
-	api.POST("/admin/unset-user-avatar", adminHandler.UnsetUserAvatar, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:unset-user-avatar"))
-	api.POST("/admin/unset-user-banner", adminHandler.UnsetUserBanner, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:unset-user-banner"))
-	api.POST("/admin/update-user-note", adminHandler.UpdateUserNote, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:user-note"))
-	api.POST("/admin/update-proxy-account", adminHandler.UpdateProxyAccount, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:account"))
-	api.POST("/admin/forward-abuse-user-report", adminHandler.ForwardAbuseUserReport, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:resolve-abuse-user-report"))
-	api.POST("/admin/update-abuse-user-report", adminHandler.UpdateAbuseUserReport, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:resolve-abuse-user-report"))
-	api.POST("/admin/accounts/delete", adminHandler.AccountsDelete, middleware.RequireAdmin(roleService), middleware.RequireScope("write:admin:account"))
-	api.POST("/admin/accounts/find-by-email", adminHandler.AccountsFindByEmail, middleware.RequireAdmin(roleService), middleware.RequireScope("read:admin:account"))
-	api.POST("/admin/get-user-ips", adminHandler.GetUserIPs, middleware.RequireAdmin(roleService), middleware.RequireScope("read:admin:user-ips"))
-	// mk-go 独自 (#3104、親 #3066)。IP からローカルアカウントを引く。
-	//
-	// **`RequireModerator` と policy を併用する。** upstream の `admin/get-user-ips`
-	// (上の行) は `requireAdmin` なので、同じ「利用者 ↔ IP の対応」に対して
-	// モデレーターだけで開くと既存より緩い経路を新設することになる。policy の
-	// 既定は false で、admin は policy を bypass するため、**既定の挙動は
-	// upstream と同じ「管理者のみ」**になる。モデレーターへ開きたい運営者が
-	// ロールで有効にする。scope は upstream の口と同じものを再利用する
-	// (`internal/misc/permissions` は misskey-js と完全一致させる契約)。
-	api.POST("/admin/ip/accounts", adminHandler.IPAccounts,
-		middleware.RequireModerator(roleService),
-		middleware.RequireRolePolicy(roleService, corerole.PolicyCanSearchIPHistory),
-		middleware.RequireScope("read:admin:user-ips"))
-	// 関連アカウント候補 (#3105)。**同じ policy と scope を再利用する** —
-	// 扱うのは同じ「利用者 ↔ IP の対応」で、別 policy にすると片方だけ開けてしまう。
-	api.POST("/admin/ip/related-accounts", adminHandler.IPRelatedAccounts,
-		middleware.RequireModerator(roleService),
-		middleware.RequireRolePolicy(roleService, corerole.PolicyCanSearchIPHistory),
-		middleware.RequireScope("read:admin:user-ips"))
-	// 照会の監査記録 (#3106)。**この応答自体が機密** — 照会に使った IP がそのまま
-	// 入るので、照会と同じ 3 段で守る。
-	api.POST("/admin/ip/lookup-log", adminHandler.IPLookupLog,
-		middleware.RequireModerator(roleService),
-		middleware.RequireRolePolicy(roleService, corerole.PolicyCanSearchIPHistory),
-		middleware.RequireScope("read:admin:user-ips"))
-	api.POST("/admin/get-index-stats", adminHandler.GetIndexStats, middleware.RequireAdmin(roleService), middleware.RequireScope("read:admin:index-stats"))
-	api.POST("/admin/get-table-stats", adminHandler.GetTableStats, middleware.RequireAdmin(roleService), middleware.RequireScope("read:admin:table-stats"))
-	// DB の健全性 (#3095、mk-go 独自)。get-table-stats と同じ権限。
-	api.POST("/admin/database-health", adminHandler.DatabaseHealth, middleware.RequireAdmin(roleService), middleware.RequireScope("read:admin:table-stats"))
 	// DB のバックアップの管理画面 (#3462、Elythia 独自)。閲覧を含む全ての操作に、
 	// 管理者・ブラウザでログインした token・2FA かパスキーの登録・操作ごとの
 	// 再認証を課す (strongauth)。RequireAdmin / RequireSecure は gate が読む
@@ -3969,25 +3496,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 含む全条件は daemon が DB を見て照合する。管理者と native token の確認は、本体が
 	// 動いている間の前段として残す (メンテナンス中は maintmode が転送するので通らない)。
 	backupHandler.SetForwarder(newRestoreForwarder(s.config))
-	api.POST("/admin/backup/restore/prepare", backupHandler.RestorePrepare, middleware.RequireAdmin(roleService), middleware.RequireSecure())
-	api.POST("/admin/backup/restore/confirm", backupHandler.RestoreConfirm, middleware.RequireAdmin(roleService), middleware.RequireSecure())
-	api.POST("/admin/backup/restore/abort", backupHandler.RestoreAbort, middleware.RequireAdmin(roleService), middleware.RequireSecure())
-	// status は本体の認証を通さない。名前を入れ替えた後、戻した DB にこのセッションが
-	// 無いと、本体の認証が 401 で断り、画面は進み具合を読めなくなる (frontend はセッション
-	// を i ではなく session で送る)。daemon が準備のときの ticket とセッションの hash で
-	// 照合し、DB を引かない。
-	api.POST("/admin/backup/restore/status", backupHandler.RestoreStatus)
-	// 退避した DB の一覧 (#3463 (6d))。一覧 (admin/backup/list) と同じく、本体が
-	// backupGuard で再認証してから daemon へ転送する (daemon は照合しない)。閲覧だけで
-	// DB を変えないので、操作のように daemon に照合させる理由が無い。メンテナンス中は
-	// 転送しない (maintenance.go の ForwardPaths に無い)。
-	api.POST("/admin/backup/restore/candidates", backupHandler.RestoreCandidates, middleware.RequireAdmin(roleService), middleware.RequireSecure(), backupGuard)
-	api.POST("/admin/backup/list", backupHandler.List, middleware.RequireAdmin(roleService), middleware.RequireSecure(), backupGuard)
-	api.POST("/admin/backup/take", backupHandler.Take, middleware.RequireAdmin(roleService), middleware.RequireSecure(), backupGuard)
-	api.POST("/admin/backup/verify", backupHandler.Verify, middleware.RequireAdmin(roleService), middleware.RequireSecure(), backupGuard)
-	api.POST("/admin/backup/delete", backupHandler.Delete, middleware.RequireAdmin(roleService), middleware.RequireSecure(), backupGuard)
-	api.POST("/admin/backup/download", backupHandler.Download, middleware.RequireAdmin(roleService), middleware.RequireSecure(), backupGuard)
-	api.POST("/admin/backup/reauth-challenge", backupHandler.ReauthChallenge, middleware.RequireAdmin(roleService), middleware.RequireSecure())
 	// ディレクトリの保存先のダウンロード。ブラウザのダウンロードは Authorization を
 	// 付けられないので、admin/backup/download が出した短い期限の token で渡す
 	// (S3 の署名付き URL と同じ扱い)。token は path でなく query の `token` に
@@ -3996,183 +3504,20 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// nginx の error_log はエラー行にリクエスト行をそのまま付けるので、そこには
 	// 残りうる (伏せる手段が無い。有効なのは 5 分)。
 	s.echo.GET("/backup-download", backupHandler.ServeDownload)
-	api.POST("/admin/server-info", adminHandler.ServerInfo, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:server-info"))
-	// mk-go 独自 (#2395)。upstream に対応する endpoint は無いので scope も
-	// server-info のものを流用する (admin UI 以外の consumer を想定しない)。
-	api.POST("/admin/server-metrics", adminHandler.ServerMetrics, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:server-info"))
-	api.POST("/admin/captcha/current", adminHandler.CaptchaCurrent, middleware.RequireAdmin(roleService), middleware.RequireScope("read:admin:meta"))
-	api.POST("/admin/captcha/save", adminHandler.CaptchaSave, middleware.RequireAdmin(roleService), middleware.RequireScope("write:admin:meta"))
-	api.POST("/admin/ad/create", adminHandler.AdCreate, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:ad"))
-	api.POST("/admin/ad/delete", adminHandler.AdDelete, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:ad"))
-	api.POST("/admin/ad/list", adminHandler.AdList, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:ad"))
-	api.POST("/admin/ad/update", adminHandler.AdUpdate, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:ad"))
-	api.POST("/admin/avatar-decorations/create", adminHandler.AvatarDecorationsCreate, middleware.RequireRolePolicy(roleService, corerole.PolicyCanManageAvatarDecorations), middleware.RequireScope("write:admin:avatar-decorations"))
-	api.POST("/admin/avatar-decorations/delete", adminHandler.AvatarDecorationsDelete, middleware.RequireRolePolicy(roleService, corerole.PolicyCanManageAvatarDecorations), middleware.RequireScope("write:admin:avatar-decorations"))
-	api.POST("/admin/avatar-decorations/list", adminHandler.AvatarDecorationsList, middleware.RequireRolePolicy(roleService, corerole.PolicyCanManageAvatarDecorations), middleware.RequireScope("read:admin:avatar-decorations"))
-	api.POST("/admin/avatar-decorations/update", adminHandler.AvatarDecorationsUpdate, middleware.RequireRolePolicy(roleService, corerole.PolicyCanManageAvatarDecorations), middleware.RequireScope("write:admin:avatar-decorations"))
-	api.POST("/admin/drive/clean-remote-files", adminHandler.DriveCleanRemoteFiles, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:drive"))
-	api.POST("/admin/drive/cleanup", adminHandler.DriveCleanup, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:drive"))
-	api.POST("/admin/drive/files", adminHandler.DriveFiles, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:drive"))
-	api.POST("/admin/drive/show-file", adminHandler.DriveShowFile, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:drive"))
-	// mk-go 独自 (#3053)。インスタンス全体のドライブ使用量と内訳。upstream は
-	// per-user の `driveCapacityMb` しか持たず、合計を出す口が無い。
-	api.POST("/admin/drive/usage", adminHandler.DriveUsage, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:drive"))
-	api.POST("/admin/emoji/add-aliases-bulk", adminHandler.EmojiAddAliasesBulk, middleware.RequireRolePolicy(roleService, corerole.PolicyCanManageCustomEmojis), middleware.RequireScope("write:admin:emoji"))
-	api.POST("/admin/emoji/copy", adminHandler.EmojiCopy, middleware.RequireRolePolicy(roleService, corerole.PolicyCanManageCustomEmojis), middleware.RequireScope("write:admin:emoji"))
-	// mk-go 独自 (#2698)。リモート絵文字のインポート時に、AP では運ばれない
-	// カテゴリ・エイリアス・センシティブを相手の REST API から取ってくる。
-	// **作成はしない**ので read 系の scope で足りるが、絵文字管理権限に揃える
-	// (取得先を相手に決められる = 外向き通信を起こす操作なので、誰でも叩けると
-	// 探索に使える)。
-	api.POST("/admin/emoji/fetch-remote-meta", adminHandler.EmojiFetchRemoteMeta, middleware.RequireRolePolicy(roleService, corerole.PolicyCanManageCustomEmojis), middleware.RequireScope("read:admin:emoji"))
-	api.POST("/admin/emoji/delete-bulk", adminHandler.EmojiDeleteBulk, middleware.RequireRolePolicy(roleService, corerole.PolicyCanManageCustomEmojis), middleware.RequireScope("write:admin:emoji"))
-	// upstream 2026.9.0 は emoji import zip の堅牢化 (GHSA 経由) と同時に
-	// requiredRolePolicy:'canManageCustomEmojis' から requireAdmin へ変えた。
-	// fork frontend も iAmAdmin でインポート UI を出し分けるので backend も揃える。
-	api.POST("/admin/emoji/import-zip", adminHandler.EmojiImportZip, middleware.RequireAdmin(roleService), middleware.RequireSecure())
-	api.POST("/admin/emoji/list-remote", adminHandler.EmojiListRemote, middleware.RequireRolePolicy(roleService, corerole.PolicyCanManageCustomEmojis), middleware.RequireScope("read:admin:emoji"))
-	// 絵文字の登録申請の審査 (#2934)。canManageCustomEmojis で gate する —
-	// 承認は実質 admin/emoji/add と同じ操作なので、同じ権限を要求する。
-	api.POST("/admin/emoji-application/list", adminHandler.EmojiApplicationList,
-		middleware.RequireRolePolicy(roleService, corerole.PolicyCanManageCustomEmojis),
-		middleware.RequireScope("read:admin:emoji"))
-	api.POST("/admin/emoji-application/approve", adminHandler.EmojiApplicationApprove,
-		middleware.RequireRolePolicy(roleService, corerole.PolicyCanManageCustomEmojis),
-		middleware.RequireScope("write:admin:emoji"))
-	api.POST("/admin/emoji-application/reject", adminHandler.EmojiApplicationReject,
-		middleware.RequireRolePolicy(roleService, corerole.PolicyCanManageCustomEmojis),
-		middleware.RequireScope("write:admin:emoji"))
-	// 関連する過去の申請 (#2960)。**読むだけなので read scope**。
-	api.POST("/admin/emoji-application/related", adminHandler.EmojiApplicationRelated,
-		middleware.RequireRolePolicy(roleService, corerole.PolicyCanManageCustomEmojis),
-		middleware.RequireScope("read:admin:emoji"))
-	// ユーザーモデレーション画面の申請履歴と集計 (#2961)。**却下理由と
-	// モデレーターへの補足が載るので、一般ユーザー向けには公開しない。**
-	api.POST("/admin/emoji-application/list-by-user", adminHandler.EmojiApplicationListByUser,
-		middleware.RequireRolePolicy(roleService, corerole.PolicyCanManageCustomEmojis),
-		middleware.RequireScope("read:admin:emoji"))
-	api.POST("/admin/emoji-application/user-summary", adminHandler.EmojiApplicationUserSummary,
-		middleware.RequireRolePolicy(roleService, corerole.PolicyCanManageCustomEmojis),
-		middleware.RequireScope("read:admin:emoji"))
-	// 申請枠の手動リセット (#2962)。**書き込みなので write scope**。
-	api.POST("/admin/emoji-application/reset-user-quota", adminHandler.EmojiApplicationResetUserQuota,
-		middleware.RequireRolePolicy(roleService, corerole.PolicyCanManageCustomEmojis),
-		middleware.RequireScope("write:admin:emoji"))
-	api.POST("/admin/emoji/remove-aliases-bulk", adminHandler.EmojiRemoveAliasesBulk, middleware.RequireRolePolicy(roleService, corerole.PolicyCanManageCustomEmojis), middleware.RequireScope("write:admin:emoji"))
-	api.POST("/admin/emoji/set-aliases-bulk", adminHandler.EmojiSetAliasesBulk, middleware.RequireRolePolicy(roleService, corerole.PolicyCanManageCustomEmojis), middleware.RequireScope("write:admin:emoji"))
-	api.POST("/admin/emoji/set-category-bulk", adminHandler.EmojiSetCategoryBulk, middleware.RequireRolePolicy(roleService, corerole.PolicyCanManageCustomEmojis), middleware.RequireScope("write:admin:emoji"))
-	api.POST("/admin/emoji/set-license-bulk", adminHandler.EmojiSetLicenseBulk, middleware.RequireRolePolicy(roleService, corerole.PolicyCanManageCustomEmojis), middleware.RequireScope("write:admin:emoji"))
-	api.POST("/admin/federation/delete-all-files", adminHandler.FederationDeleteAllFiles, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:federation"))
-	api.POST("/admin/federation/refresh-remote-instance-metadata", adminHandler.FederationRefreshRemoteInstanceMetadata, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:federation"))
-	api.POST("/admin/federation/remove-all-following", adminHandler.FederationRemoveAllFollowing, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:federation"))
-	api.POST("/admin/federation/update-instance", adminHandler.FederationUpdateInstance, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:federation"))
-	// mk-go 独自 (#2461)。scope は **既存のものを再利用する**。
-	// `internal/misc/permissions` は upstream misskey-js の一覧と完全一致させる
-	// 契約で、RFC8414 の scopes_supported にもそのまま出るので、mk-go 固有の
-	// scope を足せない。`admin/federation/*` に read 系の scope が無いため、
-	// 同じく mk-go 独自の read endpoint である admin/server-metrics に倣って
-	// read:admin:server-info を要求する。
-	// mk-go 独自 (#2463)。scope は delivery-health と同じ理由で既存を再利用する。
-	api.POST("/admin/self-check", adminHandler.SelfCheck, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:server-info"))
-	// mk-go 独自 (#2471)。送信側と同じ scope を再利用する。
-	api.POST("/admin/federation/inbox-health", adminHandler.FederationInboxHealth, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:server-info"))
-	api.POST("/admin/federation/delivery-health", adminHandler.FederationDeliveryHealth, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:server-info"))
-	// mk-go 独自 (#3055)。指定したホストとの疎通を 1 回だけ検査する。相手へ GET を
-	// 送るだけで状態を変えないので、観測系と同じ scope。
-	api.POST("/admin/federation/check-host", adminHandler.FederationCheckHost, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:server-info"))
-	// mk-go 独自 (#3067)。消えたインスタンスと、残っているフォロー関係の件数。
-	api.POST("/admin/federation/gone-instances", adminHandler.FederationGoneInstances, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:server-info"))
-	// mk-go 独自 (#3067)。消えたインスタンスとのフォロー関係を片付ける。取り返しが
-	// つかない書き込みなので、既存の admin/federation/* の書き込み系と同じ scope。
-	api.POST("/admin/federation/clean-gone-instance", adminHandler.FederationCleanGoneInstance, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:federation"))
-	// 連合のルール (#3090、mk-go 独自)。meta.blockedHosts と同じく受信を丸ごと
-	// 止められる設定なので、変更は管理者に限る (blockedHosts は update-meta で
-	// 管理者のみ)。一覧と当たった記録はモデレーターにも見せる。
-	api.POST("/admin/federation/rules/list", adminHandler.FederationRules, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:meta"))
-	api.POST("/admin/federation/rules/hits", adminHandler.FederationRuleHits, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:meta"))
-	api.POST("/admin/federation/rules/create", adminHandler.FederationRuleCreate, middleware.RequireAdmin(roleService), middleware.RequireScope("write:admin:meta"))
-	api.POST("/admin/federation/rules/update", adminHandler.FederationRuleUpdate, middleware.RequireAdmin(roleService), middleware.RequireScope("write:admin:meta"))
-	api.POST("/admin/federation/rules/delete", adminHandler.FederationRuleDelete, middleware.RequireAdmin(roleService), middleware.RequireScope("write:admin:meta"))
-	// mk-go 独自 (#3048)。落ちた配送先へのブレーカーを手で閉じる。配送の挙動を
-	// 変える書き込みなので、既存の admin/federation/* の書き込み系と同じ scope。
-	api.POST("/admin/federation/close-delivery-breaker", adminHandler.FederationCloseDeliveryBreaker, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:federation"))
-	api.POST("/admin/invite/create", adminHandler.InviteCreate, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:invite-codes"))
-	api.POST("/admin/invite/list", adminHandler.InviteList, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:invite-codes"))
-	// 承認制の登録の審査 (#2555)。mk-go 独自。scope は invite-codes を再利用する
-	// — 承認はメール確認の経路で registration_ticket の発行につながるので管轄が同じで、
-	// internal/misc/permissions は upstream misskey-js と完全一致させる契約が
-	// あり mk-go 固有 scope を足せない。
-	api.POST("/admin/signup-application/list", adminHandler.SignupApplicationList, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:invite-codes"))
-	api.POST("/admin/signup-application/approve", adminHandler.SignupApplicationApprove, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:invite-codes"))
-	api.POST("/admin/signup-application/reject", adminHandler.SignupApplicationReject, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:invite-codes"))
-	api.POST("/admin/promo/create", adminHandler.PromoCreate, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:promo"))
-	api.POST("/admin/relays/add", adminHandler.RelaysAdd, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:relays"))
-	api.POST("/admin/relays/list", adminHandler.RelaysList, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:relays"))
-	api.POST("/admin/relays/remove", adminHandler.RelaysRemove, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:relays"))
-	api.POST("/admin/system-webhook/create", adminHandler.SystemWebhookCreate, middleware.RequireModerator(roleService), middleware.RequireSecure(), middleware.RequireScope("write:admin:system-webhook"))
-	api.POST("/admin/system-webhook/delete", adminHandler.SystemWebhookDelete, middleware.RequireModerator(roleService), middleware.RequireSecure(), middleware.RequireScope("write:admin:system-webhook"))
-	api.POST("/admin/system-webhook/list", adminHandler.SystemWebhookList, middleware.RequireModerator(roleService), middleware.RequireSecure(), middleware.RequireScope("write:admin:system-webhook"))
-	api.POST("/admin/system-webhook/show", adminHandler.SystemWebhookShow, middleware.RequireModerator(roleService), middleware.RequireSecure(), middleware.RequireScope("write:admin:system-webhook"))
-	api.POST("/admin/system-webhook/test", adminHandler.SystemWebhookTest, middleware.RequireModerator(roleService), middleware.RequireSecure(), middleware.RequireScope("read:admin:system-webhook"))
-	api.POST("/admin/system-webhook/update", adminHandler.SystemWebhookUpdate, middleware.RequireModerator(roleService), middleware.RequireSecure(), middleware.RequireScope("write:admin:system-webhook"))
-	api.POST("/admin/abuse-report/notification-recipient/create", adminHandler.AbuseReportNotificationRecipientCreate, middleware.RequireModerator(roleService), middleware.RequireSecure(), middleware.RequireScope("write:admin:abuse-report:notification-recipient"))
-	api.POST("/admin/abuse-report/notification-recipient/delete", adminHandler.AbuseReportNotificationRecipientDelete, middleware.RequireModerator(roleService), middleware.RequireSecure(), middleware.RequireScope("write:admin:abuse-report:notification-recipient"))
-	api.POST("/admin/abuse-report/notification-recipient/list", adminHandler.AbuseReportNotificationRecipientList, middleware.RequireModerator(roleService), middleware.RequireSecure(), middleware.RequireScope("read:admin:abuse-report:notification-recipient"))
-	api.POST("/admin/abuse-report/notification-recipient/show", adminHandler.AbuseReportNotificationRecipientShow, middleware.RequireModerator(roleService), middleware.RequireSecure(), middleware.RequireScope("read:admin:abuse-report:notification-recipient"))
-	api.POST("/admin/abuse-report/notification-recipient/update", adminHandler.AbuseReportNotificationRecipientUpdate, middleware.RequireModerator(roleService), middleware.RequireSecure(), middleware.RequireScope("write:admin:abuse-report:notification-recipient"))
-	api.POST("/admin/queue/clear", adminHandler.QueueClear, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:queue"))
-	api.POST("/admin/queue/deliver-delayed", adminHandler.QueueDeliverDelayed, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:queue"))
-	api.POST("/admin/queue/inbox-delayed", adminHandler.QueueInboxDelayed, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:queue"))
-	api.POST("/admin/queue/jobs", adminHandler.QueueJobs, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:queue"))
-	api.POST("/admin/queue/promote-jobs", adminHandler.QueuePromoteJobs, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:queue"))
-	api.POST("/admin/queue/pause", adminHandler.QueuePause, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:queue"))   // #2069 #17436
-	api.POST("/admin/queue/resume", adminHandler.QueueResume, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:queue")) // #2069 #17436
-	api.POST("/admin/queue/queue-stats", adminHandler.QueueQueueStats, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:queue"))
-	api.POST("/admin/queue/queues", adminHandler.QueueQueues, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:queue"))
-	api.POST("/admin/queue/remove-job", adminHandler.QueueRemoveJob, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:queue"))
-	api.POST("/admin/queue/retry-job", adminHandler.QueueRetryJob, middleware.RequireModerator(roleService), middleware.RequireScope("write:admin:queue"))
-	api.POST("/admin/queue/show-job", adminHandler.QueueShowJob, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:queue"))
-	api.POST("/admin/queue/show-job-logs", adminHandler.QueueShowJobLogs, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:queue"))
-	api.POST("/admin/queue/stats", adminHandler.QueueStats, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:queue"))
 
 	// --- Phase 7.6b: chat/*, auth/*, ap/*, sw/*, reversi/*, bubble-game/*, misc ---
-
-	// announcements/show — 個別アナウンスメント取得
-	api.POST("/announcements/show", announcementHandler.Show)
 
 	// auth/* — MiAuth/OAuth セッション
 	authHandler.SetBackground(s.background)   // #3661: 世代の停止で待つ
 	authHandler.SetDetailExtras(usersHandler) // #3330: auth/session/userkey・miauth check のピン留め・移行先
-	api.POST("/auth/session/generate", authHandler.SessionGenerate)
-	api.POST("/auth/session/show", authHandler.SessionShow)
-	api.POST("/auth/session/userkey", authHandler.SessionUserkey)
-	api.POST("/auth/accept", authHandler.Accept, middleware.RequireAuth(), middleware.RequireSecure())
 
-	// miauth/gen-token — アクセストークン直接生成
-	api.POST("/miauth/gen-token", authHandler.GenToken, middleware.RequireAuth(), middleware.RequireSecure())
 	// miauth/:session/check — 3rd-party client が session 紐付き token を取得する
 	// (#1224)。token をまだ持たない client が叩くため RequireAuth は付けない。
 	authHandler.SetUserRepo(userRepo)
 	authHandler.SetTokenNotifier(notificationHook)
-	api.POST("/miauth/:session/check", authHandler.MiAuthCheck)
-
-	// app/* — アプリ管理API
-	api.POST("/app/create", appHandler.Create)
-	api.POST("/app/show", appHandler.Show)
-	api.POST("/my/apps", appHandler.MyApps, middleware.RequireAuth(), middleware.RequireScope("read:account"))
-
-	// ap/* — ActivityPub API lookup (実データ: ローカルオブジェクト解決)
-	// /api/ap/notes は upstream Misskey にも存在しない vestigial route だった
-	// ため #587 で削除済 (旧実装は常に空配列返却の stub)。
-	api.POST("/ap/get", apHandler.APIGet, middleware.RequireAdmin(roleService), middleware.RequireScope("read:federation"))
-	api.POST("/ap/show", apHandler.APIShow, middleware.RequireAuth(), middleware.RequireScope("read:account"))
 
 	// sw/* — Service Worker push notifications (実データ)
 	swHandler := apisw.NewHandler(swSubRepo, metaRepo, idGen, webPushCache)
-	api.POST("/sw/register", swHandler.Register, middleware.RequireAuth(), middleware.RequireSecure())
-	api.POST("/sw/show-registration", swHandler.ShowRegistration, middleware.RequireAuth(), middleware.RequireSecure())
-	api.POST("/sw/update-registration", swHandler.UpdateRegistration, middleware.RequireAuth(), middleware.RequireSecure())
-	api.POST("/sw/unregister", swHandler.Unregister)
 
 	// reversi/* — オセロゲーム (実データ)
 	reversiHandler := apireversi.NewHandler(reversiRepo, idGen)
@@ -4198,35 +3543,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	reversiService.SetFederationDeliverer(deliverService)
 	reversiService.SetUserRepo(userRepo)
 	reversiService.SetBaseURL(s.config.URL)
-	api.POST("/reversi/games", reversiHandler.Games)
-	api.POST("/reversi/invitations", reversiHandler.Invitations, middleware.RequireAuth(), middleware.RequireScope("read:account"))
-	api.POST("/reversi/show-game", reversiHandler.ShowGame)
-	api.POST("/reversi/match", reversiHandler.Match, middleware.RequireAuth(), middleware.RequireScope("write:account"))
-	api.POST("/reversi/cancel-match", reversiHandler.CancelMatch, middleware.RequireAuth(), middleware.RequireScope("write:account"))
-	api.POST("/reversi/surrender", reversiHandler.Surrender, middleware.RequireAuth(), middleware.RequireScope("write:account"))
-	api.POST("/reversi/verify", reversiHandler.Verify)
 
-	// bubble-game/* — バブルゲーム (実データ)
-	api.POST("/bubble-game/register", bubbleGameHandler.Register, middleware.RequireAuth(), middleware.RequireScope("write:account"))
-	// ranking は upstream ranking.ts が allowGet:true。frontend drop-and-fusion.vue は
-	// misskeyApiGet で GET を投げるため GET+POST を二重 wire する (hashtags/trend や
-	// fetch-rss と同様、#1774)。
-	api.POST("/bubble-game/ranking", bubbleGameHandler.Ranking)
-	api.GET("/bubble-game/ranking", bubbleGameHandler.Ranking)
 	// bubble-game/versus/* — 1:1 の対戦 (mk-go 独自、#3230)
 	bubbleVersusHandler := apibubblegame.NewVersusHandler(bubbleVersusService, userRepo)
-	api.POST("/bubble-game/versus/invite", bubbleVersusHandler.Invite, middleware.RequireAuth(), middleware.RequireScope("write:account"))
-	api.POST("/bubble-game/versus/invitations", bubbleVersusHandler.Invitations, middleware.RequireAuth(), middleware.RequireScope("read:account"))
-	api.POST("/bubble-game/versus/show", bubbleVersusHandler.Show, middleware.RequireAuth(), middleware.RequireScope("read:account"))
-	api.POST("/bubble-game/versus/accept", bubbleVersusHandler.Accept, middleware.RequireAuth(), middleware.RequireScope("write:account"))
-	api.POST("/bubble-game/versus/decline", bubbleVersusHandler.Decline, middleware.RequireAuth(), middleware.RequireScope("write:account"))
-	api.POST("/bubble-game/versus/cancel", bubbleVersusHandler.Cancel, middleware.RequireAuth(), middleware.RequireScope("write:account"))
-	api.POST("/bubble-game/versus/report", bubbleVersusHandler.Report, middleware.RequireAuth(), middleware.RequireScope("write:account"))
 	// 対戦の記録 (#3232)。見せる範囲は handler の canView が決める。
 	bubbleVersusHandler.SetRecords(bubbleVersusRecordRepo, blockingService)
-	api.POST("/bubble-game/versus/history", bubbleVersusHandler.History, middleware.RequireAuth(), middleware.RequireScope("read:account"))
-	api.POST("/bubble-game/versus/record", bubbleVersusHandler.ShowRecord, middleware.RequireAuth(), middleware.RequireScope("read:account"))
-	api.POST("/bubble-game/versus/set-public", bubbleVersusHandler.SetPublic, middleware.RequireAuth(), middleware.RequireScope("write:account"))
 
 	// chat/* — Misskey v2026 チャット機能 (実データ)
 	chatHandler := apichat.NewHandler(chatRepo, idGen)
@@ -4247,92 +3568,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	chatService.SetInvitationNotifier(notificationHook)
 	notificationsHandler.SetChatInvitationLookup(chatHandler.PackInvitationByID)
 	notificationPublisher.SetChatInvitationLookup(chatHandler.PackInvitationByID)
-	api.POST("/drive/files/attached-chat-messages", chatHandler.AttachedChatMessages, middleware.RequireAuth(), middleware.RequireScope("read:drive"))
-	// #1796: 全 chat endpoint に chatAvailability role-policy gate (upstream
-	// checkChatAvailability(me.id, 'read'|'write')) を付与する。mode は upstream
-	// の各 endpoint 呼び出しに一致させる (read = available|readonly、write =
-	// available のみ)。RequireScope の scope (read/write:chat) とは一致しない
-	// ものがある点に注意 (例: rooms/members は write:chat scope だが read availability)。
-	chatRead := func() echo.MiddlewareFunc { return middleware.RequireChatAvailability(roleService, "read") }
-	chatWrite := func() echo.MiddlewareFunc { return middleware.RequireChatAvailability(roleService, "write") }
-	api.POST("/chat/rooms/create", chatHandler.RoomsCreate, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:chat"), chatWrite())
-	api.POST("/chat/rooms/show", chatHandler.RoomsShow, middleware.RequireAuth(), middleware.RequireScope("read:chat"), chatRead())
-	api.POST("/chat/rooms/update", chatHandler.RoomsUpdate, middleware.RequireAuth(), middleware.RequireScope("write:chat"), chatWrite())
-	api.POST("/chat/rooms/delete", chatHandler.RoomsDelete, middleware.RequireAuth(), middleware.RequireScope("write:chat"), chatWrite())
-	api.POST("/chat/rooms/owned", chatHandler.RoomsOwned, middleware.RequireAuth(), middleware.RequireScope("read:chat"), chatRead())
-	api.POST("/chat/rooms/joined", chatHandler.RoomsJoined, middleware.RequireAuth(), middleware.RequireScope("read:chat"), chatRead())
-	api.POST("/chat/rooms/leave", chatHandler.RoomsLeave, middleware.RequireAuth(), middleware.RequireScope("write:chat"), chatWrite())
-	api.POST("/chat/rooms/mute", chatHandler.RoomsMute, middleware.RequireAuth(), middleware.RequireScope("write:chat"), chatWrite())
-	api.POST("/chat/rooms/unmute", chatHandler.RoomsUnmute, middleware.RequireAuth(), middleware.RequireScope("write:chat"), chatWrite())
-	api.POST("/chat/rooms/transfer-ownership", chatHandler.RoomsTransferOwnership, middleware.RequireAuth(), middleware.RequireScope("write:chat"), chatWrite())
-	api.POST("/chat/rooms/join", chatHandler.RoomsJoin, middleware.RequireAuth(), middleware.RequireScope("write:chat"), chatWrite())
-	api.POST("/chat/rooms/joining", chatHandler.RoomsJoining, middleware.RequireAuth(), middleware.RequireScope("read:chat"), chatRead())
-	api.POST("/chat/rooms/members", chatHandler.RoomsMembers, middleware.RequireAuth(), middleware.RequireScope("write:chat"), chatRead())
-	api.POST("/chat/rooms/invitations/create", chatHandler.InvitationsCreate, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:chat"), chatWrite())
-	api.POST("/chat/rooms/invitations/delete", chatHandler.InvitationsDelete, middleware.RequireAuth(), middleware.RequireScope("write:chat"), chatWrite())
-	api.POST("/chat/rooms/invitations/accept", chatHandler.InvitationsAccept, middleware.RequireAuth(), middleware.RequireScope("write:chat"), chatWrite())
-	api.POST("/chat/rooms/invitations/reject", chatHandler.InvitationsReject, middleware.RequireAuth(), middleware.RequireScope("write:chat"), chatWrite())
-	api.POST("/chat/rooms/invitations/ignore", chatHandler.InvitationsIgnore, middleware.RequireAuth(), middleware.RequireScope("write:chat"), chatWrite())
-	api.POST("/chat/rooms/invitations/inbox", chatHandler.InvitationsInbox, middleware.RequireAuth(), middleware.RequireScope("read:chat"), chatRead())
-	api.POST("/chat/rooms/invitations/outbox", chatHandler.InvitationsOutbox, middleware.RequireAuth(), middleware.RequireScope("read:chat"), chatRead())
-	api.POST("/chat/rooms/members/ban", chatHandler.MembersBan, middleware.RequireAuth(), middleware.RequireScope("write:chat"), chatWrite())
-	api.POST("/chat/rooms/members/update-membership", chatHandler.MembersUpdateMembership, middleware.RequireAuth(), middleware.RequireScope("write:chat"), chatWrite())
-	api.POST("/chat/messages", chatHandler.Messages, middleware.RequireAuth(), middleware.RequireScope("read:chat"), chatRead())
-	// create は create-to-user / create-to-room と同じ処理を呼ぶので、移行済みの
-	// アカウントを拒む RequireNotMoved も揃える。どれか1本でも欠くと、そこから迂回できる (#3437)。
-	api.POST("/chat/messages/create", chatHandler.MessagesCreate, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:chat"), chatWrite())
-	api.POST("/chat/messages/create-to-user", chatHandler.MessagesCreateToUser, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:chat"), chatWrite())
-	api.POST("/chat/messages/create-to-room", chatHandler.MessagesCreateToRoom, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:chat"), chatWrite())
-	api.POST("/chat/messages/show", chatHandler.MessagesShow, middleware.RequireAuth(), middleware.RequireScope("read:chat"), chatRead())
-	api.POST("/chat/messages/update", chatHandler.MessagesUpdate, middleware.RequireAuth(), middleware.RequireScope("write:chat"), chatWrite())
-	api.POST("/chat/messages/delete", chatHandler.MessagesDelete, middleware.RequireAuth(), middleware.RequireScope("write:chat"), chatWrite())
-	api.POST("/chat/messages/read", chatHandler.MessagesRead, middleware.RequireAuth(), middleware.RequireScope("write:chat"), chatRead())
-	api.POST("/chat/messages/search", chatHandler.MessagesSearch, middleware.RequireAuth(), middleware.RequireScope("read:chat"), chatRead())
-	api.POST("/chat/messages/user-timeline", chatHandler.UserTimeline, middleware.RequireAuth(), middleware.RequireScope("read:chat"), chatRead())
-	api.POST("/chat/messages/room-timeline", chatHandler.RoomTimeline, middleware.RequireAuth(), middleware.RequireScope("read:chat"), chatRead())
-	api.POST("/chat/messages/react", chatHandler.ReactionsCreate, middleware.RequireAuth(), middleware.RequireScope("write:chat"), chatWrite())
-	api.POST("/chat/messages/unreact", chatHandler.ReactionsDelete, middleware.RequireAuth(), middleware.RequireScope("write:chat"), chatWrite())
-	api.POST("/chat/messages/reactions/create", chatHandler.ReactionsCreate, middleware.RequireAuth(), middleware.RequireScope("write:chat"), chatWrite())
-	api.POST("/chat/messages/reactions/delete", chatHandler.ReactionsDelete, middleware.RequireAuth(), middleware.RequireScope("write:chat"), chatWrite())
-	api.POST("/chat/history", chatHandler.History, middleware.RequireAuth(), middleware.RequireScope("read:chat"), chatRead())
-	api.POST("/chat/read-all", chatHandler.ReadAll, middleware.RequireAuth(), middleware.RequireScope("write:chat"), chatRead())
-	api.POST("/chat/unread-count", chatHandler.UnreadCount, middleware.RequireAuth(), middleware.RequireScope("read:chat"), chatRead())
 
 	// --- Phase P3: 補助公開エンドポイント ---
-
-	// get-online-users-count — オンラインユーザー数。フロントが
-	// `misskeyApiGet` で GET 呼び出ししても catchall に落ちないよう
-	// 両メソッドを受ける (#421)。POST のみだと `count` が undefined になり
-	// admin overview の「NaN 人」表示の原因になっていた。
-	api.GET("/get-online-users-count", usersHandler.OnlineCount)
-	api.POST("/get-online-users-count", usersHandler.OnlineCount)
-
-	// server-info (公開版) — サーバー情報
-	// frontend の server-metric widget は `misskeyApiGet` で GET 呼び出し、
-	// それ以外の MkVisitorDashboard 等は POST で呼ぶため両メソッドを登録。
-	api.POST("/server-info", metaHandler.ServerInfo)
-	api.GET("/server-info", metaHandler.ServerInfo)
-
-	// endpoints — 登録済みAPIエンドポイント一覧
-	api.POST("/endpoints", endpointsHandler.Endpoints)
-
-	// endpoint — 指定 endpoint の情報を返す (#1695)。upstream endpoint.ts は
-	// 未知 endpoint で null、既知なら { params: [{name,type}, ...] } を返す。
-	// mk-go は per-endpoint の paramDef メタデータを保持しない (handler は
-	// router.go の inline closure で param schema を構造化していない) ため、
-	// param 名/型までは導出できない。ここでは response の shape (params は配列)
-	// と未知 endpoint の null だけ upstream に揃える。params 内容の導出は
-	// endpoint registry の新設が必要で本 endpoint の用途 (API introspection) に
-	// 対して費用対効果が低いため非対応 (#1695 に明記)。
-	api.POST("/endpoint", endpointsHandler.Endpoint)
-
-	// retention — リテンション統計
-	api.POST("/retention", chartsHandler.Retention)
-	// 本家は allowGet: true (#3593)。
-	api.GET("/retention", chartsHandler.Retention)
-
-	// get-avatar-decorations — アバターデコレーション全件取得
-	api.POST("/get-avatar-decorations", avatarDecorationsHandler.Get)
 
 	// email-address/available — メールアドレスの利用可否チェック (public)
 	//
@@ -4343,11 +3580,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 行わず、format → used (emailVerified=true 一致) → banned の順で判定する
 	// (upstream の enableActiveEmailValidation=false 相当)。
 	signupHandler.SetEmailAvailabilityDB(s.db)
-	api.POST("/email-address/available", signupHandler.EmailAvailable)
-
-	// promo/read — プロモノートの既読マーク (認証必須)
-	api.POST("/promo/read", promoHandler.Read,
-		middleware.RequireAuth(), middleware.RequireScope("write:account"))
 
 	// invite/* — 招待コード user-scope 4 endpoint。canInvite role policy gate
 	// (#1020) + inviteLimit / inviteLimitCycle / inviteExpirationTime (#1029
@@ -4361,60 +3593,54 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// (緩む側ではなく厳しい側に倒れる)。この行が消えていないことは
 	// `TestInviteModeratorCheckerIsWired` が見る。
 	inviteHandler.SetModeratorChecker(roleService)
-	api.POST("/invite/create", inviteHandler.Create,
-		middleware.RequireAuth(),
-		middleware.RequireRolePolicy(roleService, corerole.PolicyCanInvite), middleware.RequireScope("write:invite-codes"))
-
-	// upstream は invite/list・delete・limit にも create と同じ
-	// requiredRolePolicy:'canInvite' を付ける。canInvite 非保持ユーザーが招待コード
-	// 一覧/削除/残数取得を実行できないよう gate を揃える (#1776)。
-	api.POST("/invite/list", inviteHandler.List,
-		middleware.RequireAuth(),
-		middleware.RequireRolePolicy(roleService, corerole.PolicyCanInvite), middleware.RequireScope("read:invite-codes"))
-	api.POST("/invite/delete", inviteHandler.Delete,
-		middleware.RequireAuth(),
-		middleware.RequireRolePolicy(roleService, corerole.PolicyCanInvite), middleware.RequireScope("write:invite-codes"))
-	api.POST("/invite/limit", inviteHandler.Limit,
-		middleware.RequireAuth(),
-		middleware.RequireRolePolicy(roleService, corerole.PolicyCanInvite), middleware.RequireScope("read:invite-codes"))
-
-	// notes (plain) — bulk note lookup by noteIds
-	api.POST("/notes", notesHandler.BulkShow)
-
-	// export-custom-emojis — 全 local custom emoji を zip (画像 + meta.json) に
-	// export する非同期ジョブを enqueue する (#1217)。upstream 同様 endpoint は
-	// 即 204 を返し、生成完了後に exportCompleted 通知 + drive file で受け取る。
-	api.POST("/export-custom-emojis", emojisHandler.ExportCustomEmojis,
-		middleware.RequireAuth(), middleware.RequireSecure())
 
 	// fetch-external-resources — external JSON resource を hash 検証付きで取得
 	// (#1222)。外部 theme/plugin 等を integrity-check して返す。SSRF-safe client
 	// 経由、upstream requireCredential 相当で RequireAuth を要求する。
 	fetchExternalHandler := apifetchexternal.New(s.outboundClient(apifetchexternal.FetchTimeout), s.config.UserAgent)
-	api.POST("/fetch-external-resources", fetchExternalHandler.Fetch, middleware.RequireAuth(), middleware.RequireSecure())
 
 	// fetch-rss — RSS / Atom feed プロキシ。frontend RSS / RSSTicker ウィジェット
 	// が GET で叩く実装になっているため Misskey TS と同じく allowGet 相当で
 	// GET / POST の両方を受け付ける。
 	fetchRSSHandler := apifetchrss.New(s.outboundClient(apifetchrss.FetchTimeout), s.config.UserAgent)
-	api.GET("/fetch-rss", fetchRSSHandler.Fetch)
-	api.POST("/fetch-rss", fetchRSSHandler.Fetch)
 
-	// page-push — page scriptが任意のeventをpage所有者のmainに emit する。
-	api.POST("/page-push", pagesHandler.PagePush, middleware.RequireAuth(), middleware.RequireSecure())
-
-	// v2/admin/emoji/list — v2はページネーション情報付きオブジェクトを返す専用ハンドラ
-	api.POST("/v2/admin/emoji/list", adminHandler.EmojiListV2, middleware.RequireRolePolicy(roleService, corerole.PolicyCanManageCustomEmojis), middleware.RequireScope("read:admin:emoji"))
-
-	// --- その他の残りエンドポイント ---
-	// test — paramDef の検証挙動そのものを確認するための endpoint
-	// (upstream test.ts、#1551)。validate 済の ps をそのまま echo する。
+	// /api のルートを登録する (#3697)。登録は領域ごとの routes_<領域>.go の関数にあり、
+	// 引数には setupRoutes の同じ名前の変数をそのまま渡す (docs/architecture.md 4.2)。
+	// ルートの行は移す前と同じ文字列なので、行を照合するゲートの名前がここで繋がる。
 	//
-	//   - required:['required'] が未指定なら 400
-	//   - `id` は format:'misskey:id' なので空文字は 400
-	//   - default 付きの param はキー省略時のみ既定値。`nullableDefault: null`
-	//     は明示 null として通す (default で潰さない)
-	api.POST("/test", echoTestHandler.Test)
+	// **すべての api.Use より後で、プラグインの準備に失敗したときの return より前に呼ぶ。**
+	// echo の group は、Use より前に登録したルートに middleware を付けない。return の後に
+	// 置くと、その経路で /api のルートが無いまま止まる。
+	//
+	// **ルートの行の引数は、ここで呼んだ時点で評価される。** 元は handler を作った直後に
+	// 登録していたので、渡す変数をここまでの間に書き換えると、登録が受け取る値が変わる。
+	// 書き換えていないこと、ここで 1 回ずつ呼ぶことは TestSetupRoutesCallsEveryRouteRegistrarOnce
+	// が見る。test mode の /api/reset-db (handler を if の中で作る) と catchall
+	// (プラグインのルートより後) はここに入れず、元の位置に残した。
+	registerMetaRoutes(api, metaHandler, statsHandler, endpointsHandler, echoTestHandler)
+	registerAuthRoutes(api, signupHandler, signinHandler, resetHandler, authHandler, appHandler, inviteHandler, roleService)
+	registerEmojisRoutes(api, emojisHandler, emojiApplicationHandler, avatarDecorationsHandler, roleService)
+	registerNotesRoutes(api, notesHandler, promoHandler)
+	registerUsersRoutes(api, usersHandler, userListHandler, roleService)
+	registerIRoutes(api, iHandler, webhookHandler, notificationsHandler, pagesHandler, flashHandler, announcementHandler, roleService)
+	registerNotificationsRoutes(api, notificationsHandler, swHandler)
+	registerHashtagsRoutes(api, hashtagsHandler)
+	registerGalleryRoutes(api, galleryHandler)
+	registerRelationsRoutes(api, blockingHandler, muteHandler, renoteMuteHandler, followingHandler)
+	registerDriveRoutes(api, driveHandler, chatHandler)
+	registerFederationRoutes(api, federationHandler, apHandler, roleService)
+	registerChannelsRoutes(api, channelsHandler, roleService)
+	registerAntennasRoutes(api, antennasHandler)
+	registerClipsRoutes(api, clipsHandler)
+	registerPagesRoutes(api, pagesHandler)
+	registerFlashRoutes(api, flashHandler)
+	registerChartsRoutes(api, chartsHandler)
+	registerRolesRoutes(api, rolesHandler)
+	registerAnnouncementsRoutes(api, announcementHandler)
+	registerAdminRoutes(api, adminHandler, announcementHandler, backupHandler, roleService, backupGuard)
+	registerGamesRoutes(api, reversiHandler, bubbleGameHandler, bubbleVersusHandler)
+	registerChatRoutes(api, chatHandler, roleService)
+	registerFetchRoutes(api, fetchExternalHandler, fetchRSSHandler)
 
 	// プラグインのルート (#2478)。catchall より前に登録する。
 	// Echo の radix tree は静的パスを wildcard より優先するので順序に依存

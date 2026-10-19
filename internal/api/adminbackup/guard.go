@@ -57,7 +57,7 @@ func subject(c echo.Context) strongauth.Subject {
 // Guard requires every strongauth condition, including the re-authentication
 // sent in the body (`password` and either `token` or `credential`).
 //
-// router.go の RequireAdmin / RequireSecure と重なるが、ここでも全条件を見る。
+// ルートの登録 (internal/server の routes_admin.go) の RequireAdmin / RequireSecure と重なるが、ここでも全条件を見る。
 // route の middleware を付け忘れても閉じたままにするためと、メンテナンス中に
 // バックアップ用のサービスが同じ判定を使えるようにするため (#3463)。
 func Guard(v *strongauth.Verifier) echo.MiddlewareFunc {

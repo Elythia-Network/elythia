@@ -36,7 +36,7 @@ func (h *Handler) SetAbuseRepo(r repository.AbuseReportRepository) {
 // server/api/common/getRelation.ts) と同 semantics で viewer と target の
 // follow / follow-request / block / mute / renote-mute の関係性を返す。
 //
-// 認証は router.go の `middleware.RequireAuth()` で前段強制されているため
+// 認証はルートの登録 (internal/server の routes_users.go) の `middleware.RequireAuth()` で前段強制されているため
 // production では viewer == nil は到達不可。下の `viewer == nil` branch は
 // defensive guard + 単体テスト用 (= handler を直接叩く test path)。
 //
