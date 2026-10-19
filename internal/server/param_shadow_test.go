@@ -57,7 +57,7 @@ func captureDefaultLog(t *testing.T) *syncBuffer {
 func TestParamShadowMiddlewareDisabled(t *testing.T) {
 	s := &Server{config: &config.Config{DisableParamShadow: true}}
 	assert.Nil(t, s.paramShadowMiddleware())
-	assert.Empty(t, s.shutdownHooks)
+	assert.Empty(t, s.lifecycle.names())
 }
 
 // TestParamShadowRunsAfterTheRouteMiddleware pins the wiring of
@@ -70,7 +70,7 @@ func TestParamShadowRunsAfterTheRouteMiddleware(t *testing.T) {
 	s := &Server{config: &config.Config{ParamShadowLogSeconds: 3600}}
 	mw := s.paramShadowMiddleware()
 	require.NotNil(t, mw)
-	require.Len(t, s.shutdownHooks, 1)
+	require.Equal(t, []string{"paramShadowRecorder"}, s.lifecycle.names())
 
 	e := echo.New()
 	api := apiRoutes{e.Group("/api")}
@@ -101,7 +101,7 @@ func TestParamShadowRunsAfterTheRouteMiddleware(t *testing.T) {
 	// requireObjectBody は検証の内側で答える(検証器も#/typeで拒否するので一致)。
 	assert.Equal(t, http.StatusBadRequest, serve(http.MethodPost, "/api/notes/show", `null`))
 
-	s.shutdownHooks[0](context.Background())
+	s.lifecycle.stopAll(context.Background())
 	out := logs.String()
 	for _, want := range []string{
 		`"endpoint":"notes/show","kind":"rejected_handler_ok","schemaPath":"#/properties/noteId/format"`,

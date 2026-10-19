@@ -137,14 +137,15 @@ type Server struct {
 	// ための SetSyncDeliverHookForTest を呼べるよう参照を保持する。
 	deliverSvc *corefederation.DeliverService
 
-	// shutdownHooks は Shutdown() 時に queue の worker を止め始めた後 (上限内に
-	// 止まらなかった worker は並行して走る)、chart と HTTP echo より先に呼ばれる。
-	// ctx-aware にすることで graceful drain (例: hashtag service の
-	// in-flight worker、#727) を hook で wire できる。シンプルな
-	// stop/close 系 hook は引数 _ で受け流すだけ。
-	shutdownHooks []func(context.Context)
-	shutdownOnce  sync.Once
-	shutdownErr   error
+	// lifecycle は、この世代の部品のうち停止が要るものの名前付きの一覧 (#3699)。
+	// Shutdown() 時に queue の worker を止め始めた後 (上限内に止まらなかった worker
+	// は並行して走る)、chart と HTTP echo より先に、登録した順に止める。
+	// ctx を渡すので graceful drain (例: hashtag service の in-flight worker、
+	// #727) もここで止められる。テストが組む Server のリテラルでも使えるよう、
+	// ポインタではなく値で持つ (ゼロ値が空の一覧)。
+	lifecycle    lifecycle
+	shutdownOnce sync.Once
+	shutdownErr  error
 
 	// outboundTr は外向きの HTTP で共有する SSRF-safe な Transport
 	// (outboundTransport)。初めて使うときに 1 度だけ作る (#3591)。
@@ -177,21 +178,16 @@ type Server struct {
 	metaUpdatedHandled atomic.Pointer[func(payload []byte)]
 }
 
-// registerShutdownHook registers fn to be invoked during Shutdown.
-// Hooks run in registration order, after the queue worker has been told to
-// stop and before the chart management and echo are stopped. A worker that
-// did not stop within queueStopMax keeps running alongside the hooks.
-// ctx は Shutdown() の caller から伝播され、graceful drain の deadline
-// として使える (#764)。
-func (s *Server) registerShutdownHook(fn func(context.Context)) {
-	s.shutdownHooks = append(s.shutdownHooks, fn)
-}
-
-func (s *Server) startConstructionWorker(run func(context.Context)) {
+// startConstructionWorker starts run in a goroutine during construction and
+// adds a part named name whose stop cancels run's ctx and waits for run to
+// return (at most until the shutdown ctx is done).
+//
+// 同じ関数から複数の部品を登録するので、名前は呼び出し元が渡す (#3699)。
+func (s *Server) startConstructionWorker(name string, run func(context.Context)) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	var once sync.Once
-	s.registerShutdownHook(func(shutdownCtx context.Context) {
+	s.addPart(name, nil, func(shutdownCtx context.Context) {
 		once.Do(cancel)
 		select {
 		case <-done:
@@ -932,15 +928,13 @@ func (s *Server) cleanupConstruction() {
 		if s.pluginGoGate != nil {
 			s.pluginGoGate.discard()
 		}
-		for _, hook := range s.shutdownHooks {
-			hook(context.Background())
-		}
+		s.lifecycle.stopAll(context.Background())
 		// 構築の途中で起動したものがあれば止める (#3661)。構築に失敗した世代は
 		// 使われないので、待ちは短くてよい。
 		bgCtx, bgCancel := context.WithTimeout(context.Background(), time.Second)
 		s.background.Stop(bgCtx)
 		bgCancel()
-		s.shutdownHooks = nil
+		s.lifecycle.parts = nil
 		if s.queueDriver != nil {
 			if err := s.queueDriver.Close(); err != nil {
 				slog.Warn("queue driver close failed during server construction rollback", "err", err)
@@ -1301,12 +1295,10 @@ func (s *Server) shutdown(ctx context.Context) error {
 	if queueStopped {
 		s.background.Stop(ctx)
 	}
-	// 登録順に shutdown hook を走らせる。publisher goroutine の clean 停止と、
+	// 部品の一覧 (#3699) を登録順に止める。publisher goroutine の clean 停止と、
 	// graceful drain が必要な service (hashtag #727 等) の Shutdown(ctx) を
-	// 兼ねる。hook が ctx を取るので timeout 共有が可能 (#764)。
-	for _, hook := range s.shutdownHooks {
-		hook(ctx)
-	}
+	// 兼ねる。ctx を渡すので timeout 共有が可能 (#764)。
+	s.lifecycle.stopAll(ctx)
 	if s.chartMgmt != nil {
 		s.chartMgmt.Stop(ctx)
 	}

@@ -697,7 +697,9 @@ func (s *Server) dbBackedStorage() pluginStorageOpener {
 		if err != nil {
 			return nil, err
 		}
-		s.registerShutdownHook(func(context.Context) { _ = store.Close() })
+		// プラグインごとに1つ開くので、名前にプラグイン名を入れる(#3699)。
+		// 同じ名前のプラグインはplugin.Registerがpanicで落とすので、本番では重複しない。
+		s.addPart("pluginStorage:"+name, store, func(context.Context) { _ = store.Close() })
 		return &pluginStorage{store: store}, nil
 	}
 }

@@ -194,7 +194,7 @@ func TestServer_StopBackgroundSends1012AndLeavesTimeForHooks(t *testing.T) {
 
 	s := &Server{echo: echo.New(), config: &config.Config{}, role: config.RoleServer, streamManager: m}
 	hookHadTime := make(chan time.Duration, 1)
-	s.registerShutdownHook(func(ctx context.Context) {
+	s.addPart("testPart", nil, func(ctx context.Context) {
 		deadline, _ := ctx.Deadline()
 		hookHadTime <- time.Until(deadline)
 	})
