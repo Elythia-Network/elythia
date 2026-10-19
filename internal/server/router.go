@@ -17,46 +17,23 @@ import (
 	apiadmin "github.com/elythia-network/elythia/internal/api/admin"
 	"github.com/elythia-network/elythia/internal/api/adminbackup"
 	apiannouncements "github.com/elythia-network/elythia/internal/api/announcements"
-	"github.com/elythia-network/elythia/internal/api/antennas"
-	"github.com/elythia-network/elythia/internal/api/ap"
-	apiapp "github.com/elythia-network/elythia/internal/api/app"
-	apiauth "github.com/elythia-network/elythia/internal/api/auth"
-	"github.com/elythia-network/elythia/internal/api/avatardecorations"
-	"github.com/elythia-network/elythia/internal/api/blocking"
 	apibubblegame "github.com/elythia-network/elythia/internal/api/bubblegame"
-	apichannels "github.com/elythia-network/elythia/internal/api/channels"
 	apicharts "github.com/elythia-network/elythia/internal/api/charts"
 	apichat "github.com/elythia-network/elythia/internal/api/chat"
-	"github.com/elythia-network/elythia/internal/api/clips"
 	"github.com/elythia-network/elythia/internal/api/drive"
 	apiemojiapplications "github.com/elythia-network/elythia/internal/api/emojiapplications"
 	apiemojis "github.com/elythia-network/elythia/internal/api/emojis"
-	"github.com/elythia-network/elythia/internal/api/endpoints"
-	apifederation "github.com/elythia-network/elythia/internal/api/federation"
 	apifetchexternal "github.com/elythia-network/elythia/internal/api/fetchexternal"
 	apifetchrss "github.com/elythia-network/elythia/internal/api/fetchrss"
-	apiflash "github.com/elythia-network/elythia/internal/api/flash"
-	"github.com/elythia-network/elythia/internal/api/following"
-	apigallery "github.com/elythia-network/elythia/internal/api/gallery"
-	apihashtags "github.com/elythia-network/elythia/internal/api/hashtags"
-	"github.com/elythia-network/elythia/internal/api/i"
 	"github.com/elythia-network/elythia/internal/api/inbox"
-	apiinvite "github.com/elythia-network/elythia/internal/api/invite"
 	"github.com/elythia-network/elythia/internal/api/meself"
 	"github.com/elythia-network/elythia/internal/api/meta"
-	"github.com/elythia-network/elythia/internal/api/mute"
-	"github.com/elythia-network/elythia/internal/api/nodeinfo"
 	"github.com/elythia-network/elythia/internal/api/notehide"
 	"github.com/elythia-network/elythia/internal/api/notes"
-	"github.com/elythia-network/elythia/internal/api/notifications"
 	"github.com/elythia-network/elythia/internal/api/oauth"
-	"github.com/elythia-network/elythia/internal/api/pages"
-	"github.com/elythia-network/elythia/internal/api/promo"
 	apiproxy "github.com/elythia-network/elythia/internal/api/proxy"
-	"github.com/elythia-network/elythia/internal/api/renotemute"
 	apiresetpassword "github.com/elythia-network/elythia/internal/api/resetpassword"
 	apireversi "github.com/elythia-network/elythia/internal/api/reversi"
-	apiroles "github.com/elythia-network/elythia/internal/api/roles"
 	apisignin "github.com/elythia-network/elythia/internal/api/signin"
 	apisignup "github.com/elythia-network/elythia/internal/api/signup"
 	"github.com/elythia-network/elythia/internal/api/stats"
@@ -64,11 +41,8 @@ import (
 	apisw "github.com/elythia-network/elythia/internal/api/sw"
 	apitest "github.com/elythia-network/elythia/internal/api/test"
 	apiurl "github.com/elythia-network/elythia/internal/api/url"
-	apiuserlists "github.com/elythia-network/elythia/internal/api/userlists"
 	"github.com/elythia-network/elythia/internal/api/userrelation"
 	"github.com/elythia-network/elythia/internal/api/users"
-	apiwebhooks "github.com/elythia-network/elythia/internal/api/webhooks"
-	"github.com/elythia-network/elythia/internal/api/wellknown"
 	"github.com/elythia-network/elythia/internal/bgwork"
 	"github.com/elythia-network/elythia/internal/config"
 	coreabuse "github.com/elythia-network/elythia/internal/core/abuse"
@@ -243,7 +217,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	clipFavoriteRepo := w.repos.clipFavorite
 	userListFavoriteRepo := w.repos.userListFavorite
 	retentionRepo := w.repos.retention
-	promoReadRepo := w.repos.promoRead
 	channelNoteUnreadRepo := w.repos.channelNoteUnread
 	antennaNoteUnreadRepo := w.repos.antennaNoteUnread
 	chunkedUploadSessionRepo := w.repos.chunkedUploadSession
@@ -273,8 +246,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	registryRepo := w.repos.registry
 	bubbleVersusRecordRepo := w.repos.bubbleVersusRecord
 	abuseReportRepo := w.repos.abuseReport
-	authSessionRepo := w.repos.authSession
-	bubbleGameRepo := w.repos.bubbleGame
 	userMemoRepo := w.repos.userMemo
 	galleryRepo := w.repos.gallery
 	accessTokenRepo := w.repos.accessToken
@@ -389,8 +360,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	channelService := coreSvcs.channel
 	antennaService := coreSvcs.antenna
 	clipService := coreSvcs.clip
-	pageService := coreSvcs.page
-	flashService := coreSvcs.flash
 	reactionService := coreSvcs.reaction
 	notificationService := coreSvcs.notification
 	notificationHook := coreSvcs.notificationHook
@@ -1995,8 +1964,49 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/notes/thread-muting/delete", notesHandler.ThreadMutingDelete, middleware.RequireAuth(), middleware.RequireScope("write:account"))
 	api.POST("/notes/polls/recommendation", notesHandler.PollsRecommendation, middleware.RequireAuth(), middleware.RequireScope("read:account"))
 
+	// API の handler (#3694)。作るのは buildHandlers (wiring_handlers.go) で、ここでは
+	// 今までと同じ名前の別名を置く。呼ぶ位置は、移した handler の中で最初に作っていた
+	// usersHandler の位置。移した handler は作るだけで副作用を持たないので、作る位置が
+	// 前へ移っても、DB と Redis の文の順は変わらない。setter とルートの登録はそれぞれ
+	// 元の位置のまま。ここより前で作る handler (meta・notes など) と、setupRoutes で作る
+	// 部品・stream・outbound client に依存する handler、ここで作ると setter で後から
+	// 入れる辺が増える handler (admin など) は、元の位置で作る (docs/architecture.md 4.2)。
+	// **別名は変数 hSvcs から取る。** w.handlers から取ると、別名を代入より前に書いても
+	// コンパイルが通り、ゼロ値を黙って受け取る (docs/architecture.md 4.2)。
+	hSvcs := s.buildHandlers(w, coreSvcs, fedSvcs, idGen)
+	w.handlers = hSvcs
+	usersHandler := hSvcs.users
+	iHandler := hSvcs.i
+	webhookHandler := hSvcs.webhook
+	notificationsHandler := hSvcs.notifications
+	hashtagsHandler := hSvcs.hashtags
+	galleryHandler := hSvcs.gallery
+	blockingHandler := hSvcs.blocking
+	muteHandler := hSvcs.mute
+	renoteMuteHandler := hSvcs.renoteMute
+	driveHandler := hSvcs.drive
+	apHandler := hSvcs.ap
+	wellknownHandler := hSvcs.wellknown
+	nodeinfoHandler := hSvcs.nodeinfo
+	federationHandler := hSvcs.federation
+	channelsHandler := hSvcs.channels
+	antennasHandler := hSvcs.antennas
+	clipsHandler := hSvcs.clips
+	pagesHandler := hSvcs.pages
+	flashHandler := hSvcs.flash
+	followingHandler := hSvcs.following
+	rolesHandler := hSvcs.roles
+	userListHandler := hSvcs.userList
+	authHandler := hSvcs.auth
+	appHandler := hSvcs.app
+	bubbleGameHandler := hSvcs.bubbleGame
+	endpointsHandler := hSvcs.endpoints
+	avatarDecorationsHandler := hSvcs.avatarDecorations
+	promoHandler := hSvcs.promo
+	inviteHandler := hSvcs.invite
+	echoTestHandler := hSvcs.echoTest
+
 	// Users endpoints
-	usersHandler := users.NewHandler(userService, followingService, noteRepo, idGen)
 	// users/lists/update-membership の withReplies 変更を userUpdated として流し、接続中の
 	// userList channel snapshot を live 更新する (#2051)。
 	usersHandler.SetUserListEventPublisher(userListStreamPublisher)
@@ -2105,7 +2115,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/users/lists/update-membership", usersHandler.ListsUpdateMembership, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:account"))
 
 	// Account endpoints
-	iHandler := i.NewHandler(userService, idGen)
 	iHandler.SetBackground(s.background) // #3661: 世代の停止で待つ
 	iHandler.SetHardMutePublisher(&hardMutePublisherAdapter{pubsub: streamPubSub})
 	iHandler.SetRelationReloadPublisher(relationReloadPublisher)
@@ -2326,7 +2335,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		middleware.RequireRolePolicy(roleService, corerole.PolicyCanImportAntennas), middleware.RequireSecure())
 
 	// i/webhooks/* — Webhook管理 (実データ)
-	webhookHandler := apiwebhooks.NewHandler(webhookRepo, idGen)
 	webhookHandler.SetDispatcher(webhookService)
 	webhookHandler.SetRolePolicyProvider(roleService) // #1029: webhookLimit
 	api.POST("/i/webhooks/create", webhookHandler.Create, middleware.RequireAuth(), middleware.RequireScope("write:account"))
@@ -2337,7 +2345,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/i/webhooks/test", webhookHandler.Test, middleware.RequireAuth(), middleware.RequireSecure(), middleware.RequireScope("read:account"))
 
 	// Notifications endpoints
-	notificationsHandler := notifications.NewHandler(notificationService, idGen)
 	notificationsHandler.SetRepos(userRepo, noteRepo)
 	notificationsHandler.SetQueryService(noteQueryService)
 	notificationsHandler.SetFollowRequestRepo(followRequestRepo)
@@ -2408,7 +2415,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// route override 経由で active 実装を蹴る悪影響があった。#1031 で削除済。
 
 	// Hashtags endpoints (Phase 6)
-	hashtagsHandler := apihashtags.NewHandler(s.db)
 	hashtagsHandler.SetDetailExtras(usersHandler)       // #3330: hashtags/users のピン留め・移行先
 	hashtagsHandler.SetIDGen(idGen)                     // #2106 L25: 設定済 ID generator を共有 (毎回 aidx 生成を廃止)
 	hashtagsHandler.SetRelationRepos(listRelationRepos) // #1957-a: hashtags/users の embed user に relation
@@ -2425,7 +2431,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/hashtags/users", hashtagsHandler.Users)
 
 	// Gallery endpoints (Phase 6)
-	galleryHandler := apigallery.NewHandler(s.db, idGen)
 	galleryHandler.SetRanking(featuredService) // #1548: like/unlike/featured ランキング
 	galleryHandler.SetRoleChecker(roleService) // #1548: posts/delete モデレータ削除
 	api.POST("/gallery/featured", galleryHandler.Featured)
@@ -2439,7 +2444,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/gallery/posts/unlike", galleryHandler.PostsUnlike, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:gallery-likes"))
 
 	// Blocking endpoints
-	blockingHandler := blocking.NewHandler(blockingService, userRepo, idGen)
 	blockingHandler.SetDetailExtras(usersHandler) // #3330: blocking/list のピン留め・移行先
 	// blocking/create・delete のレスポンスに viewer→blockee の relation block
 	// (isBlocking 等) を載せるための共有 resolver 依存 (#1802)。
@@ -2459,7 +2463,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/blocking/list", blockingHandler.List, middleware.RequireAuth(), middleware.RequireScope("read:blocks"))
 
 	// Mute endpoints
-	muteHandler := mute.NewHandler(mutingService, userRepo, idGen)
 	muteHandler.SetDetailExtras(usersHandler) // #3330: mute/list のピン留め・移行先
 	muteHandler.SetRelationRepos(listRelationRepos)
 	muteHandler.SetModeratorChecker(roleService) // #1985: mute/list の count gate で moderator viewer 判定
@@ -2468,7 +2471,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/mute/list", muteHandler.List, middleware.RequireAuth(), middleware.RequireScope("read:mutes"))
 
 	// Renote mute endpoints
-	renoteMuteHandler := renotemute.NewHandler(renoteMutingService, userRepo, idGen)
 	renoteMuteHandler.SetDetailExtras(usersHandler) // #3330: renote-mute/list のピン留め・移行先
 	renoteMuteHandler.SetRelationRepos(listRelationRepos)
 	renoteMuteHandler.SetModeratorChecker(roleService) // #1985: renote-mute/list の count gate で moderator viewer 判定
@@ -2477,7 +2479,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/renote-mute/list", renoteMuteHandler.List, middleware.RequireAuth(), middleware.RequireScope("read:mutes"))
 
 	// Drive endpoints
-	driveHandler := drive.NewHandler(driveService, idGen)
 	driveHandler.SetBackground(s.background) // #3661: 世代の停止で待つ
 	// /drive/files/upload-from-url: SSRF-safe client で URL を download し、
 	// drive へ保存後 urlUploadFinished を main stream に流す (#1217)。download は
@@ -2567,7 +2568,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	s.echo.GET("/proxy/*", proxyHandler.Handle)
 
 	// ActivityPub resource endpoints
-	apHandler := ap.NewHandler(apRenderer, userService, noteQueryService, keypairRepo, idGen)
 	apHandler.SetDetailExtras(usersHandler) // #3330: ap/show の利用者のピン留め・移行先
 	apHandler.SetRemote(apFetcher, federationResolver)
 	// ap/show の federation-allow gate (#1557)。instanceService が blocked /
@@ -2712,7 +2712,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	s.echo.GET("/gallery/:post", ssrMeta.GalleryPage)
 
 	// Discovery endpoints
-	wellknownHandler := wellknown.NewHandler(apURLs, userService, s.config.Host, s.config.URL)
 	// federation='none' のとき discovery を 403 で塞ぐため metaRepo を inject (#1924)。
 	wellknownHandler.SetMetaRepo(metaRepo)
 	// 非 API の Web リソース (#2345)。SPA catchall (s.echo.GET("/*")) より先に
@@ -2789,7 +2788,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// token はここに落ちない。
 	s.echo.Any("/oauth/*", oauthHandler.NotFound)
 
-	nodeinfoHandler := nodeinfo.NewHandler(s.config)
 	nodeinfoHandler.SetMetaRepo(metaRepo)
 	nodeinfoHandler.SetUsageRepos(userRepo, noteRepo)
 	// metadata.proxyAccountName 用に meta と同じ resolver を共有する (#1777)。
@@ -2816,7 +2814,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	s.echo.POST("/users/:id/inbox", inboxHandler.Inbox)
 
 	// Federation endpoints
-	federationHandler := apifederation.NewHandler(instanceService)
 	federationHandler.SetFollowingRepo(followingRepo)
 	federationHandler.SetUserRepo(userRepo)
 	federationHandler.SetIDGen(idGen)
@@ -2847,7 +2844,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.GET("/v1/instance/peers", federationHandler.Peers)
 
 	// Channels endpoints (Phase 4.2)
-	channelsHandler := apichannels.NewHandler(channelService, idGen)
 	channelsHandler.SetRelationReloadPublisher(relationReloadPublisher)
 	channelsHandler.SetFavoriteRepo(channelFavoriteRepo)
 	channelsHandler.SetMutingRepo(channelMutingRepo)
@@ -2886,7 +2882,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	channelsHandler.SetMetaRepo(metaRepo) // channels/timeline の blocked-host filter
 
 	// Antennas endpoints (Phase 4.3)
-	antennasHandler := antennas.NewHandler(antennaService, noteRepo, idGen)
 	antennasHandler.SetInstanceRepo(instanceRepo)
 	antennasHandler.SetEmojiRepo(emojiRepo)
 	antennasHandler.SetReactionReader(reactionCountWriter)
@@ -2904,7 +2899,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/antennas/remove-note", antennasHandler.RemoveNote, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:account")) // #2069 #17463
 
 	// Clips endpoints (Phase 4.4)
-	clipsHandler := clips.NewHandler(clipService, idGen)
 	clipsHandler.SetFavoriteRepo(clipFavoriteRepo)
 	clipsHandler.SetInstanceRepo(instanceRepo)
 	clipsHandler.SetEmojiRepo(emojiRepo)
@@ -2926,7 +2920,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/clips/notes", clipsHandler.Notes, middleware.RequireScope("read:account"))
 
 	// Pages endpoints (Phase 4.5)
-	pagesHandler := pages.NewHandler(pageService, idGen)
 	pagesHandler.SetMainStreamPublisher(mainStreamPublisher)
 	pagesHandler.SetUserPacker(sharedUserPacker) // #3330: pageEvent の利用者を持ち主から見た本家 pack と同じ形に
 	// page content の image block / eyeCatchingImageId から drive file を解決して
@@ -2942,7 +2935,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/i/pages", pagesHandler.My, middleware.RequireAuth(), middleware.RequireScope("read:pages"))
 
 	// Flash endpoints (Phase 4.5)
-	flashHandler := apiflash.NewHandler(flashService, userRepo, idGen)
 	flashHandler.SetRoleChecker(roleService) // #1548: flash/delete モデレータ削除
 	api.POST("/flash/create", flashHandler.Create, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:flash"))
 	api.POST("/flash/show", flashHandler.Show)
@@ -3509,7 +3501,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.Match(chartMethods, "/charts/user/reactions", chartsHandler.UserReactions)
 
 	// Following endpoints
-	followingHandler := following.NewHandler(followingService, userService)
 	followingHandler.SetIDGen(idGen)
 	followingHandler.SetListPacker(sharedUserPacker) // #1912 / #3330: following/list・requests/* の embed user を本家 packMany と同じ形に
 	api.POST("/following/create", followingHandler.Create, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:following"))
@@ -3540,7 +3531,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// federation の残ルートは上で登録済 (federationHandler 初期化直後)
 
 	// Public roles (Phase 6)
-	rolesHandler := apiroles.NewHandler(roleService, idGen)
 	rolesHandler.SetRelationCache(s.relationCache)
 	rolesHandler.SetNotesQuery(repository.NewRoleNotesQuery(s.db))
 	rolesHandler.SetNoteRepo(noteRepo) // #1630: notes の renote 入れ子 mute/block 検査
@@ -3559,7 +3549,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/roles/notes", rolesHandler.Notes, middleware.RequireAuth(), middleware.RequireScope("read:account"))
 
 	// User lists (Phase 6)
-	userListHandler := apiuserlists.NewHandler(userListRepo, idGen)
 	userListHandler.SetRolePolicyProvider(roleService)                 // #1029: userListLimit / userEachUserListsLimit
 	userListHandler.SetUserRepo(userRepo)                              // #1550: push NO_SUCH_USER check
 	userListHandler.SetBlockingRepo(blockingRepo)                      // #1550: push YOU_HAVE_BEEN_BLOCKED check
@@ -4152,7 +4141,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/announcements/show", announcementHandler.Show)
 
 	// auth/* — MiAuth/OAuth セッション
-	authHandler := apiauth.NewHandler(authSessionRepo, s.config, idGen)
 	authHandler.SetBackground(s.background)   // #3661: 世代の停止で待つ
 	authHandler.SetDetailExtras(usersHandler) // #3330: auth/session/userkey・miauth check のピン留め・移行先
 	api.POST("/auth/session/generate", authHandler.SessionGenerate)
@@ -4169,7 +4157,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/miauth/:session/check", authHandler.MiAuthCheck)
 
 	// app/* — アプリ管理API
-	appHandler := apiapp.NewHandler(authSessionRepo, idGen)
 	api.POST("/app/create", appHandler.Create)
 	api.POST("/app/show", appHandler.Show)
 	api.POST("/my/apps", appHandler.MyApps, middleware.RequireAuth(), middleware.RequireScope("read:account"))
@@ -4220,7 +4207,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/reversi/verify", reversiHandler.Verify)
 
 	// bubble-game/* — バブルゲーム (実データ)
-	bubbleGameHandler := apibubblegame.NewHandler(bubbleGameRepo, idGen)
 	api.POST("/bubble-game/register", bubbleGameHandler.Register, middleware.RequireAuth(), middleware.RequireScope("write:account"))
 	// ranking は upstream ranking.ts が allowGet:true。frontend drop-and-fusion.vue は
 	// misskeyApiGet で GET を投げるため GET+POST を二重 wire する (hashtags/trend や
@@ -4328,9 +4314,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.GET("/server-info", metaHandler.ServerInfo)
 
 	// endpoints — 登録済みAPIエンドポイント一覧
-	// **Lister は closure で遅延評価する。** ここでの登録時点ではまだ全ルートが
-	// 生えていないので、呼ばれたときに数える必要がある。
-	endpointsHandler := endpoints.NewHandler(func() []string { return apiEndpointNames(s.echo) })
 	api.POST("/endpoints", endpointsHandler.Endpoints)
 
 	// endpoint — 指定 endpoint の情報を返す (#1695)。upstream endpoint.ts は
@@ -4349,7 +4332,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.GET("/retention", chartsHandler.Retention)
 
 	// get-avatar-decorations — アバターデコレーション全件取得
-	avatarDecorationsHandler := avatardecorations.NewHandler(s.db, roleService.ExistingRoleIDSet, roleService.PublicRoleIDSet)
 	api.POST("/get-avatar-decorations", avatarDecorationsHandler.Get)
 
 	// email-address/available — メールアドレスの利用可否チェック (public)
@@ -4364,7 +4346,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	api.POST("/email-address/available", signupHandler.EmailAvailable)
 
 	// promo/read — プロモノートの既読マーク (認証必須)
-	promoHandler := promo.NewHandler(noteRepo, promoReadRepo, idGen)
 	api.POST("/promo/read", promoHandler.Read,
 		middleware.RequireAuth(), middleware.RequireScope("write:account"))
 
@@ -4372,7 +4353,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// (#1020) + inviteLimit / inviteLimitCycle / inviteExpirationTime (#1029
 	// PR-2) は handler 側で enforcement。handler 抽出後の unit test は
 	// internal/api/invite/handler_test.go を参照。
-	inviteHandler := apiinvite.NewHandler(signupTicketRepo, idGen)
 	inviteHandler.SetRolePolicyProvider(roleService)
 	// invite/list が createdBy / usedBy を UserLite で解決するため (#1776)。
 	inviteHandler.SetUserRepo(userRepo)
@@ -4434,7 +4414,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	//   - `id` は format:'misskey:id' なので空文字は 400
 	//   - default 付きの param はキー省略時のみ既定値。`nullableDefault: null`
 	//     は明示 null として通す (default で潰さない)
-	echoTestHandler := apitest.NewEchoHandler()
 	api.POST("/test", echoTestHandler.Test)
 
 	// プラグインのルート (#2478)。catchall より前に登録する。
