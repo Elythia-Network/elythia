@@ -47,6 +47,13 @@ func (d *constructionCloseDriver) Close() error {
 	return d.closeErr
 }
 
+// closedChan returns a channel that is already closed.
+func closedChan() <-chan struct{} {
+	c := make(chan struct{})
+	close(c)
+	return c
+}
+
 func TestNew_QueueOnlyRegistersEffectivePolicyBeforePluginJobs(t *testing.T) {
 	t.Setenv(config.EnvOnlyServer, "")
 	t.Setenv(config.EnvOnlyQueue, "1")
@@ -254,8 +261,8 @@ func TestNew_PluginSetupFailureRollsBackConstructionResources(t *testing.T) {
 			}
 
 			cleanupCalls := 0
+			partStoppedAfterDriverClose := false
 			workerStarted := make(chan struct{})
-			workerStopped := make(chan struct{})
 			var failedServer *Server
 			var closeDriver *constructionCloseDriver
 			// **`newServer` はプロセス共有の状態を張り替える** (#2795)。
@@ -263,17 +270,21 @@ func TestNew_PluginSetupFailureRollsBackConstructionResources(t *testing.T) {
 			srv, err := newServer(cfg, db, redisClients, plugins, nil, func(s *Server) {
 				failedServer = s
 				s.pluginGoStarter = func(fn func()) { fn() }
+				// 構築に失敗した世代では、一覧のworkerは起動しない(#3703)。
 				s.reactionFlushWorker = func(ctx context.Context, _ func() error) {
 					close(workerStarted)
 					<-ctx.Done()
-					close(workerStopped)
 				}
 				closeDriver = &constructionCloseDriver{
-					Driver: s.queueDriver, workerStopped: workerStopped,
+					Driver: s.queueDriver, workerStopped: closedChan(),
 					closeErr: errors.New("queue close failed during rollback"),
 				}
 				s.queueDriver = closeDriver
-				s.addPart("testPart", nil, func(context.Context) { cleanupCalls++ })
+				s.addPart("testPart", nil, func(context.Context) {
+					cleanupCalls++
+					// 部品の停止は、queue driverを閉じる前に回す。
+					partStoppedAfterDriverClose = closeDriver.closeCalls > 0
+				})
 			})
 			require.Nil(t, srv)
 			require.ErrorIs(t, err, errPluginEffectivePolicySetup)
@@ -293,18 +304,13 @@ func TestNew_PluginSetupFailureRollsBackConstructionResources(t *testing.T) {
 				require.Error(t, store.PingContext(context.Background()))
 			}
 			require.Equal(t, 1, cleanupCalls)
+			require.False(t, partStoppedAfterDriverClose, "the rollback closed the queue driver before stopping the parts")
 			select {
 			case <-workerStarted:
+				t.Fatal("the reaction flush worker started in a construction that failed")
 			default:
-				t.Fatal("reaction flush worker did not start")
-			}
-			select {
-			case <-workerStopped:
-			default:
-				t.Fatal("reaction flush worker was still active after rollback")
 			}
 			require.Equal(t, 1, closeDriver.closeCalls)
-			require.False(t, closeDriver.closedTooEarly)
 			failedServer.cleanupConstruction()
 			require.NoError(t, failedServer.Shutdown(context.Background()))
 			require.Equal(t, 1, closeDriver.closeCalls)
@@ -329,6 +335,7 @@ func TestStartConstructionWorkerCleanupWaitsAndRunsOnce(t *testing.T) {
 		close(cancelled)
 		<-allowExit
 	})
+	require.NoError(t, s.lifecycle.startAll())
 
 	returned := make(chan struct{})
 	go func() {
@@ -369,6 +376,7 @@ func TestServerShutdown_DeadlineBoundsReactionFlushDrain(t *testing.T) {
 	s.startConstructionWorker("reactionFlushWorker", func(ctx context.Context) {
 		s.reactionFlushWorker(ctx, func() error { return nil })
 	})
+	require.NoError(t, s.StartBackground())
 	<-workerStarted
 
 	shutdownCtx, cancel := context.WithCancel(context.Background())

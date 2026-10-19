@@ -121,6 +121,8 @@ func newShutdownOrderFixture(t *testing.T) *shutdownOrderFixture {
 	f.srv.startPartWithClose(context.Background(), "instanceTouchBuffer", f.touch)
 	f.srv.startPartWithClose(context.Background(), "sigCapBuffer", f.sigCap)
 	f.srv.startPartWithClose(context.Background(), "instanceCounterBuffer", f.counter)
+	// 本番と同じく、バッファはqueueより先に起動しておく(StartBackground、#3703)。
+	require.NoError(t, f.srv.lifecycle.startAll())
 	mgmt := chart.NewManagementService([]*chart.Chart{f.apReq}, time.Hour)
 	f.srv.setChartManagement(mgmt)
 	require.NoError(t, mgmt.Start(context.Background()))

@@ -72,6 +72,10 @@ func TestSetupRoutes_CacheInvalidationReachesOtherProcess(t *testing.T) {
 	srvB, err := New(cfg, db, redisClients)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, srvB.Shutdown(context.Background())) })
+	// 利用者のキャッシュの通知は、一覧の部品(userCacheLink)が送る。部品は構築では
+	// 起動しないので、本番と同じくStartBackgroundで起動する(#3703)。
+	require.NoError(t, srvA.StartBackground())
+	require.NoError(t, srvB.StartBackground())
 
 	const prefix = "cinv3664_"
 	const host = "cinv3664.example"

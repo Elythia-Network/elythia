@@ -146,6 +146,10 @@ type Server struct {
 	lifecycle    lifecycle
 	shutdownOnce sync.Once
 	shutdownErr  error
+	// startOnce makes StartBackground start the generation once; later calls
+	// return startErr, the result of the first (#3703).
+	startOnce sync.Once
+	startErr  error
 
 	// outboundTr は外向きの HTTP で共有する SSRF-safe な Transport
 	// (outboundTransport)。初めて使うときに 1 度だけ作る (#3591)。
@@ -176,28 +180,6 @@ type Server struct {
 	// **購読の最後 (全部の処理の後) で呼ぶこと。** 前で呼ぶと、テストが処理の
 	// 終わる前に検査を始める。
 	metaUpdatedHandled atomic.Pointer[func(payload []byte)]
-}
-
-// startConstructionWorker starts run in a goroutine during construction and
-// adds a part named name whose stop cancels run's ctx and waits for run to
-// return (at most until the shutdown ctx is done).
-//
-// 同じ関数から複数の部品を登録するので、名前は呼び出し元が渡す (#3699)。
-func (s *Server) startConstructionWorker(name string, run func(context.Context)) {
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	var once sync.Once
-	s.addPart(name, nil, func(shutdownCtx context.Context) {
-		once.Do(cancel)
-		select {
-		case <-done:
-		case <-shutdownCtx.Done():
-		}
-	})
-	go func() {
-		defer close(done)
-		run(ctx)
-	}()
 }
 
 func runReactionFlushWorker(ctx context.Context, enqueue func() error) {
@@ -928,6 +910,8 @@ func (s *Server) cleanupConstruction() {
 		if s.pluginGoGate != nil {
 			s.pluginGoGate.discard()
 		}
+		// 一覧の部品は、構築では起動していない(#3703)。起動していない部品の停止は
+		// 待たずに返る(docs/architecture.md 4.3)。
 		s.lifecycle.stopAll(context.Background())
 		// 構築の途中で起動したものがあれば止める (#3661)。構築に失敗した世代は
 		// 使われないので、待ちは短くてよい。
@@ -1006,8 +990,10 @@ func (s *Server) DumpRoutes(w io.Writer) error {
 	return enc.Encode(payload)
 }
 
-// StartBackgroundForTest starts the queue worker (and optional
-// scheduler / chart management) without launching the HTTP listener.
+// StartBackgroundForTest starts the named parts of the generation, the queue
+// worker and the optional auto-scale and scheduler, without launching the
+// HTTP listener. Unlike StartBackground it does not look at the process role
+// and does not start the chart management.
 // 用途: e2e_federation 系のテストで `httptest.Server` 経由で echo handler を
 // 外部 listener にぶら下げつつ、deliver / inbox 処理など async queue 経路も
 // 動かしたい場合 (#435)。本番経路 (Server.Start) は HTTP listener を含めて
@@ -1016,6 +1002,10 @@ func (s *Server) DumpRoutes(w io.Writer) error {
 //
 // production code から呼ばないこと。
 func (s *Server) StartBackgroundForTest() error {
+	// 部品はStartBackgroundと同じく、queueより先に起動する(#3703)。
+	if err := s.lifecycle.startAll(); err != nil {
+		return err
+	}
 	if err := s.queueServer.Start(); err != nil {
 		return fmt.Errorf("start queue worker: %w", err)
 	}
@@ -1088,14 +1078,34 @@ func (s *Server) SetSyncDeliverHookForTest(fn func(payload queue.DeliverPayload)
 	}
 }
 
-// StartBackground launches the background work of this server generation:
+// StartBackground launches the background work of this server generation, in
+// this order: the named parts of the lifecycle list in list order (#3703),
 // the queue worker, auto-scale and scheduler (when the process role runs the
 // queue) and the chart save loop. It does not listen; the Supervisor owns the
 // listener and routes requests to Handler / ServeHandler.
 //
+// Only the first call starts anything; later calls return its result. When
+// it returns an error, the caller stops the generation with StopBackground,
+// which also stops the parts that did not start.
+//
 // listener を Server から外したのは、メンテナンスで Server を作り直しても
 // listener を張ったままにするため (#3463)。
 func (s *Server) StartBackground() error {
+	s.startOnce.Do(func() {
+		s.startErr = s.startBackground()
+	})
+	return s.startErr
+}
+
+func (s *Server) startBackground() error {
+	// 部品(バッファ、配送の健全性、statsのpublisher、構築時のworkerなど)を、queueより
+	// 先に一覧の順で起動する(#3703)。queueのworkerのジョブがバッファ・健全性・連合の
+	// ルールの記録へ書くので、書き手より先に、溜めたものをflushする側を動かす。
+	// #3703より前は構築の途中で起動していたので、queue・chartより先という順は変わらない。
+	// 部品の起動が失敗したら(panic)、queueもchartも起動せずに返す。止めるのは呼び出し元。
+	if err := s.lifecycle.startAll(); err != nil {
+		return err
+	}
 	// queue 側 (worker / autoscale / scheduler) は RoleServer では起動しない。
 	// Web ノードもジョブを **enqueue** はするので queueClient は生かしたまま、
 	// 消費側だけ止める (#2459)。
