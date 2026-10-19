@@ -457,6 +457,21 @@ func TestNewServer_ShutdownStopsThePartsInTheirOrder(t *testing.T) {
 
 			var rec lifecycleRecorder
 			rec.wrap(srv)
+			// 構築では一覧を起動せず、StartBackgroundが一覧の順に1回ずつ起動する(#3703)。
+			// 2回呼んでも2回目は何も起動しない。起動の差し替えは構築の後なので、構築の
+			// 途中の起動は一覧の印(started)で見る。一覧を通らない起動は
+			// TestNewServer_ConstructionStartsNoPartが見る。
+			assert.False(t, srv.lifecycle.started, "construction started the parts of the list")
+			started := wrapStarts(srv)
+			var wantStarted []string
+			for _, name := range tt.want {
+				if partsStartedByStartBackground[name] {
+					wantStarted = append(wantStarted, name)
+				}
+			}
+			require.NoError(t, srv.StartBackground())
+			require.NoError(t, srv.StartBackground())
+			assert.Equal(t, wantStarted, started(), "StartBackground did not start the parts with a start once, in list order")
 			ctx := context.WithValue(context.Background(), lifecycleCtxKey{}, true)
 			require.NoError(t, srv.StopBackground(ctx))
 			called, noCtx := rec.result()
@@ -499,7 +514,19 @@ func TestNewServer_FailedConstructionStopsTheRegisteredParts(t *testing.T) {
 		listed = built.lifecycle.names()
 		rec.wrap(built)
 	})
-	_, err := newServer(cfg, db, clients, []plugin.Definition{fail}, noopStorage, func(s *Server) { built = s })
+	// 後始末はcontext.Background()で止めるので、起動していないworkerの停止がdoneを
+	// 待つと返らない(#3703)。上限を置き、超えたら落とす。
+	errc := make(chan error, 1)
+	go func() {
+		_, err := newServer(cfg, db, clients, []plugin.Definition{fail}, noopStorage, func(s *Server) { built = s })
+		errc <- err
+	}()
+	var err error
+	select {
+	case err = <-errc:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the rollback of a failed construction did not return: a stop waits for a part that never started")
+	}
 	require.Error(t, err)
 	require.Contains(t, listed, "userCacheLink", "前提: 部品を登録してから失敗している")
 	called, noCtx := rec.result()
@@ -584,6 +611,9 @@ func TestNewServer_ShutdownStopsTheNamedParts(t *testing.T) {
 	}}
 	srv, err := newServer(cfg, db, clients, defs, nil)
 	require.NoError(t, err)
+	// 本番と同じく起動してから止める(#3703)。起動しないと、バッファは起動していない側の
+	// Close()しか通らず、起動した部品の止め方を見なくなる。
+	require.NoError(t, srv.StartBackground())
 
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
