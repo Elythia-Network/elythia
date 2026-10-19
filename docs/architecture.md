@@ -308,7 +308,7 @@ dispatcher が shareable channel の共有・pong ack を upstream `Connection.t
 
 ## 4. DI / 配線
 
-すべてのサービス生成・配線は `internal/server/router.go` の `setupRoutes()` で手動実行（NestJS 相当を関数呼び出しで構築）。DI フレームワークは使わない。repository は `setupRoutes()` から呼ぶ `buildRepos()` (`internal/server/wiring_repos.go`) で、core の service の一部は `buildCore()` (`internal/server/wiring_core.go`) で、連合の部品の一部は `buildFederation()` (`internal/server/wiring_fed.go`) で、queue の processor の一部は `buildQueue()` (`internal/server/wiring_queue.go`) で、stream の部品の一部は `buildStream()` (`internal/server/wiring_stream.go`) で、API の handler の一部は `buildHandlers()` (`internal/server/wiring_handlers.go`) で作る。`/api` のルートは、領域ごとのファイル (`internal/server/routes_<領域>.go`) の `register…Routes()` が登録し、`setupRoutes()` はそれを 1 回ずつ呼ぶ (4.2)。停止が要る部品は、名前を付けて一覧 `lifecycle` に登録し、世代を止めるときに登録した順に止める (4.3)。
+すべてのサービス生成・配線は `internal/server/router.go` の `setupRoutes()` で手動実行（NestJS 相当を関数呼び出しで構築）。DI フレームワークは使わない。repository は `setupRoutes()` から呼ぶ `buildRepos()` (`internal/server/wiring_repos.go`) で、core の service の一部は `buildCore()` (`internal/server/wiring_core.go`) で、連合の部品の一部は `buildFederation()` (`internal/server/wiring_fed.go`) で、queue の processor の一部は `buildQueue()` (`internal/server/wiring_queue.go`) で、stream の部品の一部は `buildStream()` (`internal/server/wiring_stream.go`) で、API の handler の一部は `buildHandlers()` (`internal/server/wiring_handlers.go`) で作る。`/api` のルートは、領域ごとのファイル (`internal/server/routes_<領域>.go`) の `register…Routes()` が登録し、`setupRoutes()` はそれを 1 回ずつ呼ぶ (4.2)。停止が要る部品は、名前を付けて一覧 `lifecycle` に登録し、世代を止めるときに登録した順に止める。構築では登録するだけで、起動を持つ部品は`StartBackground`が一覧の順に起動する(4.3、#3703)。
 
 ```
 server.New() → setupRoutes()
@@ -335,6 +335,11 @@ server.New() → setupRoutes()
   │   (ActivityPub・SSR・well-known など) は s.echo へ元の位置で登録する
   └→ プラグインの準備 (失敗したらここで return) / /api の catchall / 静的ファイル /
       SPA の catchall
+
+Server.StartBackground() (Supervisor が構築の後に呼ぶ。4.3)
+  ├→ 一覧の部品のうち起動を持つものを、一覧の順に起動する (#3703)
+  ├→ queue の worker・autoscale・scheduler (queue role のとき)
+  └→ chart の保存の loop
 ```
 
 ### 4.1 作る順と、後から入れる依存 (#3676)
@@ -353,18 +358,20 @@ PostgreSQL の文の順は変わらない。
 pubsub の購読 (`Subscribe`) も、今の位置 (stream の節) から動かさない。早めると、
 handler ができる前に届いた event が、まだ配線していない service を触る。
 
-**構築の途中で動く処理から見える配線も変えない。** `setupRoutes()` が終わる前から動く
-goroutine は、`startConstructionWorker` で起動する worker 4 つ (`pollExpiryWorker`、
-reaction の flush、retention の集計、利用者のキャッシュの invalidation)、pubsub の購読の
-handler、`fedRuleHits` / `instanceTouchBuffer` / `sigCapBuffer` / `instanceCounterBuffer`
-の `Start`、queue role の `deliveryHealth` / `inboxHealth` の `Start`、
-`emojiInvalidationQueue` の `Run`、server / queue の stats publisher の `Start` がある。
-そこから辿れる setter を、その起動より前へ移すと、構築中の動きが変わる。#3676 で前へ
-移した setter のうち、これらから辿れるのは下の 1 本だけで、ほかの受け手 (note・
-following・reaction・drive・連合・queue の processor・handler など) には届かない。例えば `notificationService.SetMainStreamPublisher` を前へ移すと、
-`pollExpiryWorker` が構築中に作った通知が、packer (`SetPacker`、worker の起動より後) を
-通らない形で `unreadNotification` として流れる (#3676 のレビューで実測)。なので、この
-setter は依存を先に作っても、元の位置 (streaming の publisher の隣) に残している。
+**構築の途中で動く処理から見える配線も変えない。** #3703の後、`setupRoutes()`が終わる前から
+動いて配線を辿るのは、pubsubの購読のhandlerと`emojiInvalidationQueue`の`Run`だけになった
+(ほかに`urlPreviewFetcher`のLRUの期限切れのgoroutineが立つが、配線は辿らない)。そこから辿れる
+setterを、その起動より前へ移すと、構築中の動きが変わる。一覧の部品(workerの4つ、`fedRuleHits`、
+バッファ3つ、`deliveryHealth`/`inboxHealth`、statsのpublisher)は、構築では起動せず、
+`StartBackground`(構築の後)で起動する(4.3)。
+
+#3703の前は、それらも構築の途中で起動していた。#3676で前へ移したsetterのうち、それらから
+辿れたのは`notificationService.SetMainStreamPublisher`の1本だけで、ほかの受け手(note・
+following・reaction・drive・連合・queueのprocessor・handlerなど)には届かなかった。このsetterを
+前へ移すと、`pollExpiryWorker`が構築中に作った通知が、packer(`SetPacker`、workerの起動より後)を
+通らない形で`unreadNotification`として流れた(#3676のレビューで実測)。なので、このsetterは
+依存を先に作っても、元の位置(streamingのpublisherの隣)に残した。#3703で`pollExpiryWorker`の
+起動が構築の後になったので、この流れは起きなくなったが、setterの位置は変えていない。
 
 #3676 で、stream の pubsub と publisher (`streamPubSub` / `internalPubSub` /
 `noteEventPub` / `relationReloadPublisher` / `mainStreamPublisher` / `drivePublisher` /
@@ -482,6 +489,11 @@ setter も構築も動かしていないので、どの行も数が変わらな�
 もう 1 つのプラグインの store は `setupRoutes()` の外の `dbBackedStorage` で登録する)。起動の位置も
 登録の順も変えていないので、どの行も数が変わらない。後から入れる
 96 辺と、呼び出しが離れている 660 辺は、どちらも行番号を除けば前と同じ。節点も 361 のまま。
+
+#3703で、構築の途中で起動していた12個の部品の起動を`StartBackground`へ移した(4.3)。`setupRoutes()`
+の中で変えたのは`fedRuleHits`の1か所(`fedRuleHits.Start(hitsCtx)`と`s.addPart(...)`の2行を、
+`s.addPartWithStart(...)`の1行にした)だけで、setterも構築の順も動かしていない。後から入れる96辺と、
+呼び出しが離れている660辺は、どちらも行番号を除けば前と同じ。節点も361のまま。
 
 数え方 (`setupRoutes()` の構文木。道具はコミットしていない):
 
@@ -669,7 +681,7 @@ setupRoutes()
 | 理由 | 例 |
 |---|---|
 | setter の引数や、別の部品の構築の引数の中で作る (20 回) | `corechannel.NewNoteCreateHook(channelService)`、`coretwofactor.NewRedisPendingGuard(...)` など。setter の行そのものなので動かさない |
-| `if` の中で作る (3 回) | `pollExpiryWorker` (queue role だけ、構築の途中で動く worker)、sensitive media の detector (meta を読んだ分岐の中) |
+| `if` の中で作る (3 回) | `pollExpiryWorker` (queue role だけで登録する worker。#3703の前は構築の途中で動いていた)、sensitive media の detector (meta を読んだ分岐の中) |
 | 作るときに副作用がある | `urlPreviewFetcher` (中の LRU cache が goroutine を起動する)、`proxyService` (transport を作るときに、設定によってはログを出す)、`exporter` (引数の `s.outboundClient()` が共有の transport を初めて作りうる)、`searchService` (4.1)、`reactionCountWriter` と `captchaSvc` (meta を読んだ値で作る)、`webauthnSvc` (作れなかったときの分岐がある) |
 | `Start` と shutdown hook を対で持つ | `instanceTouchBuffer`・`sigCapBuffer`・`instanceCounterBuffer`、`metadataRefresher` |
 | stream・連合・`setupRoutes()` で作る部品に依存する | `abuseCreatedNotifier`・`reversiService`・`bubbleVersusService`・`modActivitySvc` (stream)、`relaySvc`・`accountMover`・`ephemeralMaterializer`・`metadataFetcher` (連合)、`emojiImporter` (`emojiDecorationResolver`) |
@@ -1317,30 +1329,29 @@ stream の部品・handler と、/api の外のルートの登録は、依存す
 領域ほど、構築の途中で動く処理 (4.1) と shutdown hook を登録するものが多いので、それらを
 動かさずに残す範囲を PR ごとに決める。
 
-### 4.3 部品の起動と停止の一覧 (#3699、#3701)
+### 4.3 部品の起動と停止の一覧 (#3699、#3701、#3703)
 
 **停止が要る部品は、名前を付けて 1 つの一覧 `lifecycle` (`internal/server/lifecycle_parts.go`)
 に登録する。** #3666 の段階 (3)。前は `registerShutdownHook(func(context.Context))`
 の無名の closure の並びで、どの部品の停止かがテストからも実行時からも見えなかった。#3699 で
 すべての呼び出しを名前付きの登録に置き換え、`registerShutdownHook` と `shutdownHooks` を消した。
 無名で登録する口は残していない。#3701 で、起動と停止が部品自身のメソッドであるものは、値を 1 つ
-渡すだけで起動と停止の登録を済ませる形にした。
+渡すだけで起動と停止の登録を済ませる形にした。#3703で、一覧の項目に起動を持たせ、構築では登録だけを
+行い、起動は`StartBackground`が一覧の順にまとめて行う形にした(下の「起動」)。
 
-- 項目は名前・止める値 (`part`)・停止 (`func(context.Context)`) を持つ。`part` は停止が働きかける値
-  (バッファ・publisher・service・プラグインの store など) で、本番のコードは読まない。名前どおりの
+- 項目は名前・止める値 (`part`)・起動 (`func()`。起動するものが無い部品はnil)・停止
+  (`func(context.Context)`) を持つ。`part` は停止が働きかける値 (バッファ・publisher・service・
+  プラグインの store など) で、本番のコードは読まない。名前どおりの
   値を止めたかをテストが確かめるために持つ
 - 一覧は `Server.lifecycle` が値で持つ (テストが組む `Server` のリテラルでも、ゼロ値が空の一覧として
-  使える)。登録はどれも `Server` のメソッド (下の表の 6 つ) を通し、止めるのも `s.lifecycle` から回す
+  使える)。登録はどれも `Server` のメソッド (下の表の 8 つ) を通し、起動と停止も `s.lifecycle` から回す
   (`paramShadowMiddleware` と `dbBackedStorage` は `w` を受け取らない)。コンテナの
   `wiring.lifecycle` は同じ一覧を指すが、**今は誰も読まない** (消してもテストは落ちない)。
   段階 (6) で、メンテナンスの作り直しの範囲を部品の単位に絞るときに使う
-- **項目は起動を持たない。** 起動は、構築の途中の今の位置で呼ぶ。値から作る登録 (下の表) は、
-  登録したその場で起動し、それから一覧に足す。#3701 の前の「`Start` の行の直後に登録の行」と
-  同じ順で、起動の位置も渡す ctx (どれも `context.Background()`) も変えていない。起動を一覧から
-  まとめて呼ぶ形にしなかったのは、起動の位置を動かすと、構築の途中で動く処理から見える配線が
-  変わるため (4.1)。起動が panic した部品は一覧に入らない (前と同じ)。`StartBackground` が起動する
-  もの (queue の worker・autoscale・scheduler・chart の保存の loop) は、下の直書きの手順と対になって
-  いて、一覧には入れていない
+- **構築では起動しない(#3703)。** 登録は部品と起動・停止を一覧に足すだけで、起動は
+  `StartBackground`が一覧の順に呼ぶ(下の「起動」)。`StartBackground`自身が起動するもの(queueの
+  worker・autoscale・scheduler・chartの保存のloop)は、下の直書きの手順と対になっていて、一覧には
+  入れていない
 - **名前は、部品を持つ変数の名前にする** (`setupRoutes()` の局所変数か、`Server` のフィールド)。
   例外は 3 つで、起動時に 1 回だけ走る retention の集計は `retentionAggregateAtStartup`
   (変数 `retentionSvc` は集計の service で、止めるのは起動時の 1 回の実行だけ)、param shadow の
@@ -1357,18 +1368,25 @@ stream の部品・handler と、/api の外のルートの登録は、依存す
 
 | 登録 | 受ける形 | 起動 | 停止 | 部品 |
 |---|---|---|---|---|
-| `s.startPartWithClose(ctx, name, part)` | `Start(ctx)` + `Close()` | その場で `Start(ctx)` | `Close()`。停止の ctx は捨てる | `instanceTouchBuffer`・`sigCapBuffer`・`instanceCounterBuffer` |
-| `s.startPartWithStop(ctx, name, part)` | `Start(ctx)` + `Stop(ctx)` | その場で `Start(ctx)` | 停止の ctx を渡して `Stop(ctx)` | `deliveryHealth`・`inboxHealth` |
-| `s.startPartWithoutCtx(name, part)` | `Start()` + `Stop()` | その場で `Start()` | `Stop()`。停止の ctx は捨てる | `serverStatsPub`・`queueStatsPub` |
+| `s.startPartWithClose(ctx, name, part)` | `Start(ctx)` + `Close()` | `StartBackground`で`Start(ctx)`(ctxは登録で渡したもの) | `Close()`。停止の ctx は捨てる | `instanceTouchBuffer`・`sigCapBuffer`・`instanceCounterBuffer` |
+| `s.startPartWithStop(ctx, name, part)` | `Start(ctx)` + `Stop(ctx)` | `StartBackground`で`Start(ctx)`(ctxは登録で渡したもの) | 停止の ctx を渡して `Stop(ctx)` | `deliveryHealth`・`inboxHealth` |
+| `s.startPartWithoutCtx(name, part)` | `Start()` + `Stop()` | `StartBackground`で`Start()` | `Stop()`。停止の ctx は捨てる | `serverStatsPub`・`queueStatsPub` |
 | `s.addCloser(name, part)` | `Close(ctx)` | しない | 停止の ctx を渡して `Close(ctx)` | `metadataRefresher` |
 | `s.addErrCloser(name, part)` | `Close() error` | しない | `Close()`。エラーと停止の ctx は捨てる (エラーを捨てるのは前の hook と同じ) | `pluginStorage:<名前>` (`setupRoutes()` の外の `dbBackedStorage` で登録する) |
-| `s.addPart(name, part, stop)` | 問わない (停止を closure で渡す) | しない (呼び出し元が起動する) | 渡した `stop` | 下の 8 つ |
+| `s.addPartWithStart(name, part, start, stop)` | 問わない (起動と停止を closure で渡す) | `StartBackground`で渡した`start` | 渡した `stop` | `fedRuleHits` |
+| `s.startConstructionWorker(name, run)` | 値を持たない (関数を渡す) | `StartBackground`で`run`をgoroutineで回す | ctx を切り、`run` が返るのを待つ。起動していなければ待たずに返す | 下の worker の 4 つ |
+| `s.addPart(name, part, stop)` | 問わない (停止を closure で渡す) | しない (起動するものが無い) | 渡した `stop` | `hashtagService`・`emojiInvalidationQueue`・`paramShadowRecorder` |
+
+名前の`start…`は、#3703より前の「登録したその場で起動する」の名残で、今は「`StartBackground`で
+起動する部品を登録する」の意味。`startConstructionWorker`も構築の途中では起動しない。名前を
+変えなかったのは、この段の差分を起動の移動だけにするため(テストの`valueShapes`の表や、この節と
+4.1の記録が名前で登録を指している)。
 
 **closure のまま残した 8 つ** は、停止が部品のメソッド 1 つでは書けないもの。
 
 | 名前 | closure が要る理由 | `part` |
 |---|---|---|
-| `fedRuleHits` | `Start` に渡した ctx を切って止める。`HitStore` に停止のメソッドは無い | `*fedrule.HitStore` |
+| `fedRuleHits` | `Start` に渡した ctx を切って止める。`HitStore` に停止のメソッドは無い。`addPartWithStart`で起動も渡す | `*fedrule.HitStore` |
 | `hashtagService` | `Shutdown(ctx)` がエラーを返し、時間切れを警告に出す | `*hashtag.Service` |
 | `emojiInvalidationQueue` | `Run` を `go` 文で回し、その ctx を切ってから、返るのを停止の ctx の期限まで待つ | `*repository.EmojiInvalidationQueue` |
 | `paramShadowRecorder` | 停止は `Flush()` で、停止のための口ではない | `*paramshadow.Recorder` |
@@ -1423,31 +1441,113 @@ closure の 4 つの型と値の無い worker は満たさない。部品の型�
   型の表のテストが落とす。停止の closure が別の部品を止める誤りは、観測している `hashtagService` の
   ほかは落とせない
 
-止める順と、登録の条件は次のとおり (上から順に止める。登録した順と同じ)。
+起動と停止の順と、登録の条件は次のとおり(上から順に起動し、上から順に止める。どちらも登録した順と同じ)。
+「起動」が○の12個は`StartBackground`が起動し、構築だけでは動かない(#3703)。
 
-| 順 | 名前 | 登録 | 止め方 | 登録の条件 |
-|---|---|---|---|---|
-| 1 | `pollExpiryWorker` | `startConstructionWorker` | ctx を切り、`Run` が返るのを待つ | queue role |
-| 2 | `fedRuleHits` | `addPart` | `Start` に渡した ctx を切る | 常に |
-| 3 | `metadataRefresher` | `addCloser` | `Close(ctx)`。新しい取り直しを止め、走っているものを短く待つ | 常に |
-| 4 | `instanceTouchBuffer` | `startPartWithClose` | `Close()`。残りを flush する | 常に |
-| 5 | `sigCapBuffer` | `startPartWithClose` | `Close()`。残りを flush する | 常に |
-| 6 | `reactionFlushWorker` | `startConstructionWorker` | 1 と同じ | 常に |
-| 7 | `instanceCounterBuffer` | `startPartWithClose` | `Close()`。残りを flush する | 常に |
-| 8 | `deliveryHealth` | `startPartWithStop` | `Stop(ctx)` | queue role |
-| 9 | `inboxHealth` | `startPartWithStop` | `Stop(ctx)` | queue role |
-| 10 | `hashtagService` | `addPart` | `Shutdown(ctx)`。in-flight の集計を待つ (#727) | 常に |
-| 11 | `retentionAggregateAtStartup` | `startConstructionWorker` | 1 と同じ | queue role |
-| 12 | `paramShadowRecorder` | `addPart` | `Flush()`。最後の要約を書く | `disableParamShadow` でなく、本家の paramDef を読めたとき |
-| 13 | `emojiInvalidationQueue` | `addPart` | ctx を切り、`Run` が溜まった分を送って返るのを待つ | 常に |
-| 14 | `userCacheLink` | `startConstructionWorker` | 1 と同じ | 常に |
-| 15 | `serverStatsPub` | `startPartWithoutCtx` | `Stop()` | server role |
-| 16 | `queueStatsPub` | `startPartWithoutCtx` | `Stop()` | server role で、queueInspector があるとき |
-| 17〜 | `pluginStorage:<名前>` | `addErrCloser` | `Close()` (DB のプールを閉じる) | 有効なプラグインごと (`newServer` が DB の store を開くとき。本番の経路)。プラグインの順 |
+| 順 | 名前 | 登録 | 起動 | 止め方 | 登録の条件 |
+|---|---|---|---|---|---|
+| 1 | `pollExpiryWorker` | `startConstructionWorker` | ○ | ctx を切り、`Run` が返るのを待つ | queue role |
+| 2 | `fedRuleHits` | `addPartWithStart` | ○ | `Start` に渡した ctx を切る | 常に |
+| 3 | `metadataRefresher` | `addCloser` | | `Close(ctx)`。新しい取り直しを止め、走っているものを短く待つ | 常に |
+| 4 | `instanceTouchBuffer` | `startPartWithClose` | ○ | `Close()`。残りを flush する | 常に |
+| 5 | `sigCapBuffer` | `startPartWithClose` | ○ | `Close()`。残りを flush する | 常に |
+| 6 | `reactionFlushWorker` | `startConstructionWorker` | ○ | 1 と同じ | 常に |
+| 7 | `instanceCounterBuffer` | `startPartWithClose` | ○ | `Close()`。残りを flush する | 常に |
+| 8 | `deliveryHealth` | `startPartWithStop` | ○ | `Stop(ctx)` | queue role |
+| 9 | `inboxHealth` | `startPartWithStop` | ○ | `Stop(ctx)` | queue role |
+| 10 | `hashtagService` | `addPart` | | `Shutdown(ctx)`。in-flight の集計を待つ (#727) | 常に |
+| 11 | `retentionAggregateAtStartup` | `startConstructionWorker` | ○ | 1 と同じ | queue role |
+| 12 | `paramShadowRecorder` | `addPart` | | `Flush()`。最後の要約を書く | `disableParamShadow` でなく、本家の paramDef を読めたとき |
+| 13 | `emojiInvalidationQueue` | `addPart` | | ctx を切り、`Run` が溜まった分を送って返るのを待つ | 常に |
+| 14 | `userCacheLink` | `startConstructionWorker` | ○ | 1 と同じ | 常に |
+| 15 | `serverStatsPub` | `startPartWithoutCtx` | ○ | `Stop()` | server role |
+| 16 | `queueStatsPub` | `startPartWithoutCtx` | ○ | `Stop()` | server role で、queueInspector があるとき |
+| 17〜 | `pluginStorage:<名前>` | `addErrCloser` | | `Close()` (DB のプールを閉じる) | 有効なプラグインごと (`newServer` が DB の store を開くとき。本番の経路)。プラグインの順 |
 
 「常に」は role と設定に関係なく登録するもの。両方の role (既定) では 1〜16 がすべて、server role
 では 2〜7・10・12〜16、queue role では 1〜14 が並ぶ。`deliveryBreaker` は停止を持たないので、
 有無で並びは変わらない。
+
+**起動(#3703)。** `StartBackground`は次の順に起動する。本番の経路(Supervisor)は「構築 →
+`StartBackground` → リクエストを回す」の順なので、リクエストを受けるときに動いている部品の集合は
+#3703の前と変わらない。
+
+1. **一覧の部品のうち起動を持つものを、一覧の順に起動する**(`lifecycle.startAll`)
+2. queueのworkerを起動し、autoscaleとschedulerを起動する(queue roleのとき。前と同じ)
+3. chartの保存のloopを起動する(両方のrole。前と同じ)
+
+- **一覧をqueueより先に起動する理由。** queueのworkerのジョブが、バッファ(`instanceTouchBuffer`・
+  `sigCapBuffer`・`instanceCounterBuffer`)、配送の健全性(`deliveryHealth`・`inboxHealth`)、連合の
+  ルールの記録(`fedRuleHits`)へ書く。書き手より先に、溜めたものを流す側を動かす。schedulerの
+  cronのジョブも同じworkerが処理する。#3703の前は構築の途中で起動していたので、queue・
+  autoscale・scheduler・chartより先という相対的な順は変わらない。停止はqueueを先に止めてから一覧を
+  止めるので(下の手順2と4)、起動と停止はqueueを挟んで対になる
+- **chartとの前後。** 一覧の部品はchartの保存のloopに頼らない(chartのhookはメモリの集計へ書くだけで、
+  loopの有無に関係なく書ける)。前と同じくchartを最後にした
+- **起動のctx。** 前と同じく、登録で渡した`context.Background()`(`fedRuleHits`は自分でcancelするctx)を
+  使う。`StartBackground`はctxを受け取らず、部品は停止のメソッド(`Close`・`Stop`・ctxのcancel)で
+  止める。停止で切れるctxを渡すと、バッファの`runLoop`が`Close`の最後のflushより先にctxで抜けるなど、
+  止まり方が変わる
+- **起動の失敗。** 部品の起動はどれもgoroutineを立てるだけで、エラーを返さない。panicしたときは
+  `startAll`が回収してエラー(`errLifecycleStart`)にし、後の部品を起動せずに返す。`StartBackground`は
+  queueもchartも起動せずにそのエラーを返す。Supervisorはそれを受けて世代を`StopBackground`で止め、
+  DBのプールを閉じる(`startGenerationLocked`。最初の世代は`Start`がエラーを返し、`serve`が
+  `Shutdown`する)。#3703の前は構築の中で起動していたので、panicは構築ごとプロセスを落としていた
+- **2回呼んだとき。** `StartBackground`は1回目だけ起動し、2回目からは1回目の結果を返す(`startOnce`)。
+  `startAll`も1回目だけ起動し、`stopAll`を始めた後は何も起動しない(止める人の居ないgoroutineを
+  残さないため)。本番の経路で`StartBackground`を呼ぶのは、最初の世代を`Supervisor.Start`が、
+  作り直した世代を`startGenerationLocked`が呼ぶ2か所で、同じ世代に2回は呼ばない(`Start`は
+  listenより前に呼び、メンテナンスの監視は`Start`の中のlistenの後で始まる)
+- `StartBackgroundForTest`(e2e-federationが使う)も、queueより先に一覧を起動する。roleを見ないことと
+  chartを起動しないことは前と同じ
+
+**起動していない部品を止めても安全であること。** 構築に失敗した世代(`cleanupConstruction`)と、
+`StartBackground`に失敗した世代(Supervisorの`StopBackground`)では、起動していない部品も止める。
+部品ごとに次のとおり。
+
+| 部品 | 起動していないときの停止 |
+|---|---|
+| `instanceTouchBuffer`・`sigCapBuffer`・`instanceCounterBuffer` | `Close()`は`started`の印が無ければ、loopを待たずに残りを同期でflushして返る(`doneCh`を待たない) |
+| `deliveryHealth`・`inboxHealth` | `Stop(ctx)`は`cancel`がnilなら何もせずに返る |
+| `serverStatsPub`・`queueStatsPub` | `Stop()`は`started`がfalseなら何もせずに返る |
+| `fedRuleHits` | 停止はctxをcancelするだけ。起動していなければ待つgoroutineも無い |
+| worker の 4 つ(`startConstructionWorker`) | 停止はctxをcancelし、起動していなければ`done`を待たずに返る。`done`は起動しないと閉じないので、待つと停止のctxの期限まで固まる(後始末は`context.Background()`で止めるので、永久に返らない) |
+| 起動を持たない部品(`metadataRefresher`・`hashtagService`・`paramShadowRecorder`・`emojiInvalidationQueue`・`pluginStorage:<名前>`) | 起動の扱いは#3703の前と同じ(`emojiInvalidationQueue`は構築の途中で`go`文で回す。ほかは起動するものが無い) |
+
+**意図して変えた動き(#3703)。**
+
+- `elythia dump-routes`と、構築だけして起動しない使い方(テストの`newServer`など)では、上の12個が
+  動かない。`dump-routes`の起動の間のRedisの命令の列とPostgreSQLの文の集合から、`queueStatsPub`の
+  1回目のtick(deliverとinboxのqueueの状態を読んで`stream:queueStats`へpublishする)、
+  `retentionAggregateAtStartup`(登録ユーザーと最近のユーザーを読み、その日の行をINSERTする)、
+  `pollExpiryWorker`の1回目の走査(`poll`のSELECT)が消えた
+- 本番の経路では、12個の起動が構築中のほかの副作用(起動時のDBの文、Redisの購読、ログ)より後になる。
+  `serve`のログでは、`retentionAggregateAtStartup`が書くgormのログが、構築の途中のログ(param shadow
+  の行の前)から、構築の最後のログ(frontendの警告)の後へ動いた。`pollExpiryWorker`の最初の走査も
+  構築の後になったので、構築の途中で作ったpollEndedの通知が配線の途中のnotificationServiceを
+  通ることは無くなった(`router.go`の`notificationService.SetMainStreamPublisher`の行のコメント)
+- 構築の失敗の後始末では、起動していない部品を止める(上の表)
+- 部品の起動のpanicは、前はプロセスごと落としていた。今は`StartBackground`のエラーになり、
+  Supervisorが世代を止める。メンテナンスを抜けるときの作り直しでは、ほかの失敗と同じく
+  `ProcResumeFailed`のまま、間隔を延ばしながら作り直しを繰り返す(`maintenance.go`の`resume`)
+- プラグインの`ctx.Go`で保留したworkは、今までどおり`newServer`の最後(`pluginGoGate.open()`)で
+  動き始めるので、12個の部品より先に動き始める順になった。プラグインのworkが一覧の部品へ書いても
+  困らない。書き込みの口はどれも待たずに返り(バッファは溜めるだけ、`userCacheLink`の
+  `Enqueue`は溜めて起こすだけ、`fedRuleHits`の`Record`は溢れたら捨てる、健全性はメモリの集計へ
+  足すだけ)、溜めた分は部品の起動の後に流れる。queueへ積むジョブも、workerの起動を待って処理される
+
+**Redisの購読は動かしていない。** streamの節で始める購読(`internalPubSub.Subscribe`の
+`metaUpdated`など4つと、`cachebus`・`relationcache`の`Connect…`/`Subscribe…`)は、#3703の後も
+構築の途中で始める。一覧に乗せなかった理由は3つ。
+
+- 購読を閉じるのは一覧ではなく、queueのdriverの後の直書きの手順(下の手順8)で、pubsubごと閉じる。
+  起動だけを一覧に乗せると、起動と停止が別の仕組みに分かれる
+- 購読の多くは、他の部品への配線と1つの関数(`cachebus.ConnectUsers`など)で行っていて、購読だけを
+  後で始めるには、それらの関数の形から変える必要がある
+- 購読を始める時刻を動かすと、構築から`StartBackground`までの間に他のプロセスが送った通知
+  (キャッシュの無効化、`metaUpdated`)を受け取らなくなる。受けるかどうかは、通知ごとに確かめる必要がある
+
+一覧に乗せるかは、段階(6)でメンテナンスの作り直しの範囲を決めるときに、別に決める。
 
 **世代の停止 (`shutdown`) は、一覧を次の位置で回す。** 順を決めている理由は #3662 と #3661。
 
@@ -1482,13 +1582,31 @@ closure の 4 つの型と値の無い worker は満たさない。部品の型�
 | pubsub の `Close` | 購読は stream の節で始めるが、閉じるのは driver の後。一覧に入れると、一覧より後に止める 5〜7 より先に閉じることになる |
 | echo の `Shutdown` | 戻り値が `StopBackground` の戻り値になる |
 
-**テストが見ている範囲は次のとおり** (どれも `internal/server/lifecycle_parts_test.go`。実際に
-`newServer` で作ったサーバーで見る)。部品を足す・動かすときは、テストの表とこの節の表を一緒に直す。
+**テストが見ている範囲は次のとおり** (`internal/server/lifecycle_parts_test.go`・
+`lifecycle_parts_value_test.go`・`lifecycle_start_test.go`。多くは実際に`newServer`で作ったサーバーで見る)。部品を足す・動かすときは、テストの表とこの節の表を一緒に直す。
 
 - **名前の並びと登録の条件。** `TestNewServer_ShutdownStopsThePartsInTheirOrder` が、role (両方・
   server・queue) と設定 (queueInspector の有無、`disableParamShadow`、DB の store を持つプラグインの
   有無) の 7 つの組で、一覧の名前の並びを固定する。`StopBackground` が一覧の停止の関数を、その順に、
   停止の ctx を渡して全部呼ぶことも見る
+- **起動の順と回数(#3703)。** 同じテストが7つの組で、構築の後に一覧の起動の印(`lifecycle.started`)が
+  立っていないことと、`StartBackground`を2回呼んでも、起動を持つ部品(表`partsStartedByStartBackground`の12個のうち、その組で
+  登録されるもの)が一覧の順に1回ずつ起動されることを見る。起動を持つ部品の集合が表とずれても落ちる
+- **構築だけでは部品が動かないこと(#3703)。** 一覧の起動を差し替えて見る上の検査は、一覧を通らずに構築の
+  途中で起動する書き方を落とせない。`TestNewServer_ConstructionStartsNoPart`が両方のroleで、部品が回す
+  goroutine(スタックの関数名で数える)とretentionの集計が書く行を見て、構築の後には増えず、
+  `StartBackground`の後に増えることを確かめる
+- **起動の失敗と、起動していない部品の停止(#3703)。** `TestSupervisor_FailedStartStopsEveryPart`が、
+  Supervisorの作り直し(`startGeneration`)で一覧の中ほどの部品の起動をpanicさせ、エラーが返ること、
+  一覧の全部の部品(起動していないworkerを含む)がその順に止まること、停止が`DrainTimeout`まで待たずに
+  返ること、世代のDBの接続とRedisの購読が残らないことを見る。`TestLifecycle_StartAllRecoversAPanickingStart`・
+  `TestLifecycle_StartAllStartsNothingAfterStopAll`・`TestServer_ConstructionWorkerRunsOnlyOnceStarted`が、
+  panicの回収、止め始めた後の起動、workerの起動と停止を一覧の単位で見る
+- **queueとの前後(#3703)。** `TestServer_StartBackgroundStartsThePartsBeforeTheQueue`が、
+  `StartBackground`と`StartBackgroundForTest`のどちらも、一覧の部品を一覧の順に、queueのworkerの
+  `Start`より先に起動することを見る(queueの起動を記録する差し替えのdriverを使う)。
+  `TestServer_FailedPartStartDoesNotStartTheQueue`が、部品の起動が失敗したら後の部品もqueueも
+  起動しないことを見る
 - **値の型。** 同じテストが、各部品の `part` の動的な型を表 (`lifecyclePartTypes`) と照合する。
   名前が別の種類の値を持つ取り違え (`serverStatsPub` に `hashtagService` を渡すなど) は落ちるが、
   **同じ型の部品どうしの名前の取り違えは落とせない**。`deliveryHealth` と `inboxHealth` はどちらも
@@ -1500,13 +1618,12 @@ closure の 4 つの型と値の無い worker は満たさない。部品の型�
   比べ方から見直す)。2 つの検査は違反の一覧を返す関数 (`sharedPartValues`・`addPartShapeViolations`) で、
   `TestPartChecks_ReportViolations` が手で組んだ一覧で違反を報告すること (正の対照) を固定する
 - **値から作る登録。** `TestServer_RegistersAPartFromItsValue` が 5 つの登録それぞれについて、次を見る。
-  起動を、登録したその場で 1 回だけ、一覧に足す前に、渡した ctx で呼ぶこと。`part` が渡した値そのもので
+  登録では起動せず、`startAll`が1回だけ、一覧の順に、登録で渡したctxで起動すること(#3703)。`part` が渡した値そのもので
   あること。止めるとその値のメソッドが 1 回呼ばれ、停止の ctx を `Stop(ctx)`・`Close(ctx)` には渡し、
   ほかでは捨てること。`Close() error` のエラーを一覧のエラーにしないこと。同じ型の部品を 2 つ登録し、
-  それぞれが自分の値を止めることも見る。`TestServer_StartPartDoesNotAddAPartWhoseStartPanics` は、
-  起動が panic した部品が一覧に入らないこと (起動してから登録する順) を見る
-- **名前どおりの値を止めたこと。** `TestNewServer_ShutdownStopsTheNamedParts` が、`StopBackground` の
-  後に、次の部品が実際に止まったことを観測する。`instanceTouchBuffer`・`sigCapBuffer`・
+  それぞれが自分の値を止めることも見る
+- **名前どおりの値を止めたこと。** `TestNewServer_ShutdownStopsTheNamedParts` が、`StartBackground`で起動してから
+  (#3703)、`StopBackground` の後に、次の部品が実際に止まったことを観測する。`instanceTouchBuffer`・`sigCapBuffer`・
   `instanceCounterBuffer` (閉じた後の書き込みは、溜めずにその場で DB へ書く)、`hashtagService`
   (書き込み中の worker を表の lock で止めておくと、`Shutdown(ctx)` が期限まで待って警告を出す)、
   `pluginStorage:<名前>` (閉じた後は DB のプールに Ping できない)。停止が ctx を無視する退行が
@@ -1517,7 +1634,8 @@ closure の 4 つの型と値の無い worker は満たさない。部品の型�
   関数が呼ばれることまでしか見ていない。停止の関数が名前どおりの値を止めているかは、外から観測する
   口が無く、テストしていない (`paramShadowRecorder` の停止が要約を書くことは
   `TestParamShadowRunsAfterTheRouteMiddleware` が別に見る)
-- 後始末が一覧を順に回すことは `TestNewServer_FailedConstructionStopsTheRegisteredParts`、重複で構築が
+- 後始末が一覧を順に回し、起動していないworkerを待って固まらないことは
+  `TestNewServer_FailedConstructionStopsTheRegisteredParts`、重複で構築が
   失敗することは `TestNewServer_DuplicatePartFailsTheConstruction` が見る。`addPart` が部品に値から
   作った印を付けず、形を満たす値も拒まないことは `TestServer_AddPartDoesNotMarkThePartAsFromValue` が見る
 
@@ -1550,6 +1668,26 @@ closure の 4 つの型と値の無い worker は満たさない。部品の型�
   登録は拾わない。後の `router.go` の `s.startPartWithClose(<ctx>, "<名前>", X)` と
   `s.startPartWithStop(<ctx>, "<名前>", X)` を `X.Start(<ctx>)` に、`s.startPartWithoutCtx("<名前>", X)` を
   `X.Start()` に戻すと (7 行)、前と一致した
+
+#3703の前後で、意図した変化(上の「意図して変えた動き」)のほかは同じであることは、次のように
+確かめた(道具はコミットしていない)。
+
+- 起動と停止の順: 前後の木の両方に、#3701と同じ使い捨ての記録(値から作る9つの部品と`fedRuleHits`の
+  `Start`/`Stop`/`Close`の先頭)と、`startConstructionWorker`がgoroutineを立てる位置の記録を当てた。
+  #3699と同じ8つの組で、`newServer`・`StartBackground`・`StopBackground`のそれぞれの間に起動した部品と
+  停止の列を記録した。前の木で構築の間に起動した部品(組により7〜12個)は、後の木では構築の間に1つも
+  起動せず、`StartBackground`の間に同じ順で起動した。停止の列(一覧の停止の名前と、各部品の`Stop`/`Close`
+  と受けたctxの型)は前後で一致した。どちらの木も2回回して揺れないことを確かめた
+- `elythia dump-routes`: 出力(ルート)と起動ログは一致した。Redisの命令の列とPostgreSQLの文の集合の差は、
+  上の「意図して変えた動き」に書いた`queueStatsPub`・`retentionAggregateAtStartup`・`pollExpiryWorker`の
+  分だけだった(前の木どうしでは差が無い)
+- `serve`: 隔離したPostgreSQLとRedisに向けて、前後のバイナリをUNIXソケットで25秒ずつ2回動かし、
+  SIGTERMで止めた。分の境目をまたがないよう、毎分2秒に始めた。PostgreSQLの文の集合と、Redisの
+  命令とキーの組の集合は、前後の4通りの組み合わせのどれでも一致した(値まで含めた集合は、ジョブの
+  時刻・msgpackのキーの順・worker名で、前の木どうしでも揺れる)。起動ログは、
+  `retentionAggregateAtStartup`のgormのログの位置が動いた(上の「意図して変えた動き」)ほかは一致した
+- 4.1の道具の数は変わらない(4.1)。#3676のseqの道具の列は、`fedRuleHits.Start(hitsCtx)`の行が
+  `s.addPartWithStart(...)`に変わった1行だけが違う
 
 コメントの「shutdown hook」は、この一覧の部品の停止を指す。
 
