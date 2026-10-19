@@ -15,6 +15,24 @@ func TestStreamRevokeIsWired(t *testing.T) {
 		"失効した token / 凍結・削除した利用者の WebSocket が閉じなくなる。publish は成功するのでエラーも出ない")
 	assertWired(t, serverPkg, "stream.NewStreamRevokePublisher(streamPubSub, streamManager)",
 		"失効を他プロセスの stream.Manager へ配れなくなる / publish が失敗したとき自プロセスの接続も閉じなくなる")
+	// 上の構築の行は buildStream の中にある (#3692)。setupRoutes が handler へ配るのも、
+	// 購読を始める manager も別名なので、構築から別名までの段も照合する。上の行だけだと、
+	// setupRoutes の別名を別の publisher や manager に書き換えても緑のまま通る
+	// (docs/architecture.md 4.2)。別名は buildStream の戻り値を受けた変数 streamSvcs から
+	// 取る形にしてあり、別名を buildStream の呼び出しより前に書くとコンパイルが通らない。
+	// 照合もその形で行う。
+	assertWired(t, serverPkg, "streamRevokePublisher: streamRevokePublisher",
+		"buildStream が作った revoke publisher を stream に入れていない。")
+	assertWired(t, serverPkg, "streamManager: streamManager",
+		"buildStream が作った manager (revoke publisher が閉じる側) を stream に入れていない。")
+	assertWired(t, serverPkg, "streamSvcs := buildStream(streamPubSub, idGen)",
+		"setupRoutes が buildStream の stream の部品を使っていない。")
+	assertWired(t, serverPkg, "w.stream = streamSvcs",
+		"buildStream の stream の部品を wiring に入れていない。")
+	assertWired(t, serverPkg, "streamRevokePublisher := streamSvcs.streamRevokePublisher",
+		"handler へ配る revoke publisher が buildStream で作ったものでなくなる。")
+	assertWired(t, serverPkg, "streamManager := streamSvcs.streamManager",
+		"失効を購読する manager が、revoke publisher が自プロセスで閉じる manager と別物になる。")
 	assertWired(t, serverPkg, "streamManager.OnStreamRevoke(s.auth.InvalidateTokensForUserLocally)",
 		"Web ノードが複数あると、失効を処理したノード以外の tokenCache に旧 token が残り、閉じた接続がそこへ再接続して無期限に残る")
 	assertWired(t, serverPkg, "cachebus.ConnectAuth(s.auth, internalPubSub, idGen.Generate(time.Now()))",
