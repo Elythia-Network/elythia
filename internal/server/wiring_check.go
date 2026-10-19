@@ -108,6 +108,11 @@ func (s *Server) constructionError() error {
 	if s.pluginSetupErr != nil {
 		return s.pluginSetupErr
 	}
+	// 部品の一覧への不正な登録 (名前の重複など、#3699)。停止の順を名前で検査する
+	// 前提が崩れるので、起動させない。
+	if s.lifecycle.err != nil {
+		return s.lifecycle.err
+	}
 	if !s.wiringChecked {
 		return errWiringCheckSkipped
 	}

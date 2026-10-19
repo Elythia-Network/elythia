@@ -66,7 +66,7 @@ func (f *fakeGenerations) deps(drain time.Duration) SupervisorDeps {
 			})
 			srv := &Server{echo: e, config: cfg, role: config.RoleServer}
 			if f.hook != nil {
-				srv.registerShutdownHook(f.hook)
+				srv.addPart("testPart", nil, f.hook)
 			}
 			return srv, nil
 		},

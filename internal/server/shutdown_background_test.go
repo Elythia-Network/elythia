@@ -56,7 +56,7 @@ func TestServer_StopBackgroundCollectsGoroutinesOfAWorkerStoppingAfterTheDeadlin
 	// goroutine は、切れた ctx のまま Stop で待てば (0 秒) 間に合わず、
 	// lateBackgroundWait で待てば間に合う (#3661 のレビュー L-2)。
 	startsBackgroundChartWrite(t, f, 700*time.Millisecond)
-	f.srv.registerShutdownHook(func(ctx context.Context) {
+	f.srv.addPart("testPart", nil, func(ctx context.Context) {
 		<-ctx.Done()
 		close(f.job.block)
 	})
@@ -105,7 +105,7 @@ func TestServer_StopBackgroundBoundsTheLateWait(t *testing.T) {
 		finish()
 		require.True(t, f.srv.background.Go(func(context.Context) { <-release }))
 	}
-	f.srv.registerShutdownHook(func(ctx context.Context) {
+	f.srv.addPart("testPart", nil, func(ctx context.Context) {
 		<-ctx.Done()
 		close(f.job.block)
 	})
@@ -178,7 +178,7 @@ func TestServer_StopBackgroundLeavesTheLateSaveItsTime(t *testing.T) {
 		// 止まらない goroutine。箱の待ちは上限 (期限切れなので 1 秒) まで使われる。
 		require.True(t, f.srv.background.Go(func(context.Context) { <-release }))
 	}
-	f.srv.registerShutdownHook(func(ctx context.Context) {
+	f.srv.addPart("testPart", nil, func(ctx context.Context) {
 		<-ctx.Done()
 		close(f.job.block)
 	})

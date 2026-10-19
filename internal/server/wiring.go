@@ -18,11 +18,21 @@ package server
 // pubsub and the ID generator). A group that depends on an earlier group receives it as an
 // argument, from the variable that holds the earlier builder's result, never
 // by reading the earlier field back from w (docs/architecture.md 4.2).
+//
+// lifecycle points at the Server's ordered list of the named parts that have
+// to be stopped (#3699, docs/architecture.md 4.3), set in the literal that
+// defines w. Nothing reads it yet: the parts are added through s.addPart and
+// stopped through s.lifecycle. It is kept for stage 6 of #3666, which narrows
+// what a maintenance rebuild recreates.
+//
+// 今は誰も読まないので、消してもテストは落ちない。段階 (6) で、作り直す範囲を
+// 部品の単位に絞るときに使う。
 type wiring struct {
-	repos    repos
-	core     core
-	fed      fed
-	queue    queueProcs
-	stream   streamParts
-	handlers apiHandlers
+	repos     repos
+	core      core
+	fed       fed
+	queue     queueProcs
+	stream    streamParts
+	handlers  apiHandlers
+	lifecycle *lifecycle
 }

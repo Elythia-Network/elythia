@@ -20,8 +20,8 @@ const paramShadowContextKey = "mk.server.paramShadow"
 // (disableParamShadow). The validation itself runs in withParamShadow, at
 // the end of the route's middleware.
 //
-// It also registers a shutdown hook that writes the counts of this server
-// generation.
+// It also adds the part paramShadowRecorder (#3699), whose stop writes the
+// counts of this server generation.
 func (s *Server) paramShadowMiddleware() echo.MiddlewareFunc {
 	if s.config.DisableParamShadow {
 		slog.Info("param shadow validation disabled (disableParamShadow)")
@@ -55,7 +55,7 @@ func (s *Server) paramShadowMiddleware() echo.MiddlewareFunc {
 	})
 	// 停止のときに、最後の要約からの分を出す。メンテナンスで作り直す世代も
 	// それぞれが自分の分を出す。
-	s.registerShutdownHook(func(context.Context) { rec.Flush() })
+	s.addPart("paramShadowRecorder", rec, func(context.Context) { rec.Flush() })
 	shadow := paramshadow.Middleware(eps, rec)
 	slog.Info("param shadow validation enabled", "endpoints", len(eps), "logInterval", interval.String())
 	return func(next echo.HandlerFunc) echo.HandlerFunc {

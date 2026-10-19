@@ -171,7 +171,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// (wiring-check などのゲートが照合する文字列を変えないため)。repository は作っても
 	// DB に触らないので、作る位置が下の EnsureInitial などより前に移っても、DB の文の
 	// 順は変わらない。
-	w := &wiring{repos: s.buildRepos()}
+	// lifecycle は Server が持つ部品の一覧 (#3699) を指す。登録は s.addPart で行う。
+	w := &wiring{repos: s.buildRepos(), lifecycle: &s.lifecycle}
 	userRepo := w.repos.user
 	noteRepo := w.repos.note
 	cachedMeta := w.repos.cachedMeta
@@ -735,7 +736,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// retention aggregate は同じ理由で既にゲートされており、ここだけ漏れていた。
 	if s.role.RunsQueue() {
 		pollExpiryWorker := corepoll.NewExpiryWorker(pollRepo, pollVoteRepo, noteRepo, userRepo, notificationService, 60*time.Second, 100)
-		s.startConstructionWorker(pollExpiryWorker.Run)
+		s.startConstructionWorker("pollExpiryWorker", pollExpiryWorker.Run)
 	}
 
 	// Drive storage (Phase 4.9: Meta に基づいて Local / S3 を切り替え)
@@ -1067,7 +1068,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	{
 		hitsCtx, stopHits := context.WithCancel(context.Background())
 		fedRuleHits.Start(hitsCtx)
-		s.registerShutdownHook(func(context.Context) { stopHits() })
+		s.addPart("fedRuleHits", fedRuleHits, func(context.Context) { stopHits() })
 	}
 	// 新規 instance row 発見時に nodeinfo を取得して metadata を更新する。
 	// admin/federation/refresh-remote-instance-metadata でも同じ fetcher を
@@ -1081,14 +1082,14 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 時間を使い切らないため)。
 	metadataRefresher := coreinstance.NewMetadataRefresher(instanceRepo, metadataFetcher,
 		coreinstance.NewRedisRefreshLock(s.redis.Default))
-	s.registerShutdownHook(metadataRefresher.Close)
+	s.addPart("metadataRefresher", metadataRefresher, metadataRefresher.Close)
 
 	// inbox worker から呼ばれる MarkRequestReceived を per-host で 1s buffer
 	// に集約。同一 remote host の連続 inbox 受信で 10k UPDATE が 1 UPDATE に
 	// 縮退する (#569)。
 	instanceTouchBuffer := coreinstance.NewTouchBuffer(instanceService, time.Second)
 	instanceTouchBuffer.Start(context.Background())
-	s.registerShutdownHook(func(_ context.Context) { instanceTouchBuffer.Close() })
+	s.addPart("instanceTouchBuffer", instanceTouchBuffer, func(_ context.Context) { instanceTouchBuffer.Close() })
 
 	// 署名方式の観測 (#2393)。inbound は同一 host から高頻度に来るので、
 	// TouchBuffer と同じ縮退方式で per-host per系統 1 UPDATE にまとめる。
@@ -1099,7 +1100,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 署名方式はそう頻繁に変わらないので、60s 窓で十分に追随できる。
 	sigCapBuffer := coreinstance.NewCapabilityBuffer(sigCapRepo, time.Minute)
 	sigCapBuffer.Start(context.Background())
-	s.registerShutdownHook(func(_ context.Context) { sigCapBuffer.Close() })
+	s.addPart("sigCapBuffer", sigCapBuffer, func(_ context.Context) { sigCapBuffer.Close() })
 	// 宣言 (assertionMethod の Ed25519) は actor resolve 経路で同期に書く。
 	// inbound ほど高頻度ではないので buffer を挟まない。
 	federationResolver.SetSignatureCapabilityDeclarer(sigCapRepo)
@@ -1289,7 +1290,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	if s.role.RunsQueue() {
 		enqueueReactionFlush = s.queueClient.EnqueueReactionFlush
 	}
-	s.startConstructionWorker(func(ctx context.Context) {
+	s.startConstructionWorker("reactionFlushWorker", func(ctx context.Context) {
 		s.reactionFlushWorker(ctx, func() error {
 			return reactionFlushTick(cachedMeta, reactionCountWriter, enqueueReactionFlush)
 		})
@@ -1326,11 +1327,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// inbox の最頻経路なので、本家の CollapsedQueue と同じく窓で合算してから書く。
 	//
 	// chartHooks は repository の直後で作るが、このバッファは goroutine を起動し、
-	// shutdown hook を登録するので、hook の登録順 (FIFO で止まる) を変えないよう
+	// 停止の部品 (#3699) を登録するので、部品の登録順 (FIFO で止まる) を変えないよう
 	// ここに残す (#3676)。chartHooks のフィールドに入れるだけなので setter の辺ではない。
 	instanceCounterBuffer := coreinstance.NewCounterBuffer(instanceRepo, 30*time.Second)
 	instanceCounterBuffer.Start(context.Background())
-	s.registerShutdownHook(func(_ context.Context) { instanceCounterBuffer.Close() })
+	s.addPart("instanceCounterBuffer", instanceCounterBuffer, func(_ context.Context) { instanceCounterBuffer.Close() })
 	chartHooks.InstanceCounter = instanceCounterBuffer
 	// 配送先ホストごとの健全性テレメトリ (#2461)。upstream は結果を
 	// `isNotResponding` の真偽値にしか残さないので、mk-go 独自の観測。
@@ -1355,10 +1356,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		}
 		deliverProcessor.SetDeliveryTelemetry(deliveryHealth)
 		deliveryHealth.Start(context.Background())
-		s.registerShutdownHook(func(ctx context.Context) { deliveryHealth.Stop(ctx) })
+		s.addPart("deliveryHealth", deliveryHealth, func(ctx context.Context) { deliveryHealth.Stop(ctx) })
 		inboxProcessor.SetDeliveryTelemetry(inboxHealth)
 		inboxHealth.Start(context.Background())
-		s.registerShutdownHook(func(ctx context.Context) { inboxHealth.Stop(ctx) })
+		s.addPart("inboxHealth", inboxHealth, func(ctx context.Context) { inboxHealth.Stop(ctx) })
 	}
 
 	noteCreateService.SetHashtagHook(hashtagService)
@@ -1371,7 +1372,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// ctx timeout で諦める (idempotent な RecordMention なので次回再カウント)。
 	// #764: 旧版は Server.hashtagService field 経由で Shutdown() から呼ばれて
 	// いたが、ctx-aware hook 化で field 不要になった。
-	s.registerShutdownHook(func(ctx context.Context) {
+	s.addPart("hashtagService", hashtagService, func(ctx context.Context) {
 		if err := hashtagService.Shutdown(ctx); err != nil {
 			slog.Warn("hashtag service shutdown timed out", "err", err)
 		}
@@ -1416,7 +1417,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 書きに行く (実測で "sql: database is closed" が出た)。shutdown hook が
 	// 終わるのを待つので、DB を閉じる前に終わる。
 	if s.role.RunsQueue() {
-		s.startConstructionWorker(func(ctx context.Context) {
+		s.startConstructionWorker("retentionAggregateAtStartup", func(ctx context.Context) {
 			if err := retentionSvc.Aggregate(ctx); err != nil {
 				slog.Warn("retention aggregate at startup failed", "err", err)
 			}
@@ -2840,7 +2841,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		defer close(emojiInvalidationDone)
 		emojiInvalidationQueue.Run(emojiInvalidationCtx)
 	}()
-	s.registerShutdownHook(func(ctx context.Context) {
+	s.addPart("emojiInvalidationQueue", emojiInvalidationQueue, func(ctx context.Context) {
 		stopEmojiInvalidation()
 		select {
 		case <-emojiInvalidationDone:
@@ -2871,7 +2872,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	}
 
 	userCacheLink := cachebus.ConnectUsers(s.userCache, internalPubSub, idGen.Generate(time.Now()))
-	s.startConstructionWorker(userCacheLink.Run)
+	s.startConstructionWorker("userCacheLink", userCacheLink.Run)
 
 	// 取り消したリノート / 削除した引用の通知を消す (#3201)。**配線しないと build も
 	// テストも通ったまま** 未読件数に中身の無い通知が数えられ続ける。
@@ -3016,7 +3017,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	})
 	if s.role.RunsServer() {
 		serverStatsPub.Start()
-		s.registerShutdownHook(func(_ context.Context) { serverStatsPub.Stop() })
+		s.addPart("serverStatsPub", serverStatsPub, func(_ context.Context) { serverStatsPub.Stop() })
 	}
 	// queueInspector が無い起動 (テスト等) では nil のまま。チャンネルの一覧
 	// (builtinStreamChannels) が、そのとき fallback の factory を選ぶ (#3692)。
@@ -3025,7 +3026,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		queueStatsPub = stream.NewQueueStatsPublisher(&queueStatsInspectorAdapter{inner: s.queueInspector}, streamPubSub, 0)
 		if s.role.RunsServer() {
 			queueStatsPub.Start()
-			s.registerShutdownHook(func(_ context.Context) { queueStatsPub.Stop() })
+			s.addPart("queueStatsPub", queueStatsPub, func(_ context.Context) { queueStatsPub.Stop() })
 		}
 	}
 

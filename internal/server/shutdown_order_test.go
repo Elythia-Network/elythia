@@ -118,12 +118,15 @@ func newShutdownOrderFixture(t *testing.T) *shutdownOrderFixture {
 		queueDriver: d, queueServer: queue.NewServer(d),
 	}
 	// setupRoutes と同じ順で、同じ形の hook を登録する。
-	for _, b := range []interface {
-		Start(context.Context)
-		Close()
-	}{f.touch, f.sigCap, f.counter} {
-		b.Start(context.Background())
-		f.srv.registerShutdownHook(func(context.Context) { b.Close() })
+	for _, b := range []struct {
+		name string
+		buf  interface {
+			Start(context.Context)
+			Close()
+		}
+	}{{"instanceTouchBuffer", f.touch}, {"sigCapBuffer", f.sigCap}, {"instanceCounterBuffer", f.counter}} {
+		b.buf.Start(context.Background())
+		f.srv.addPart(b.name, b.buf, func(context.Context) { b.buf.Close() })
 	}
 	mgmt := chart.NewManagementService([]*chart.Chart{f.apReq}, time.Hour)
 	f.srv.setChartManagement(mgmt)
@@ -190,7 +193,7 @@ func TestServer_StopBackgroundDoesNotLetAStuckWorkerEatTheHooks(t *testing.T) {
 	hookHadTime := make(chan time.Duration, 1)
 	// バッファの hook の後に登録する。worker はここで初めて止まるので、ジョブの
 	// 書き込みはバッファが閉じた後になる。
-	f.srv.registerShutdownHook(func(ctx context.Context) {
+	f.srv.addPart("testPart", nil, func(ctx context.Context) {
 		deadline, _ := ctx.Deadline()
 		hookHadTime <- time.Until(deadline)
 		assert.NoError(t, corechartcharts.NewApRequestChart(f.apReq).Inbox())
@@ -232,7 +235,7 @@ func TestServer_StopBackgroundSavesTheChartOfAWorkerStoppingAfterTheDeadline(t *
 	f := newShutdownOrderFixture(t)
 	f.job.block = make(chan struct{})
 	// worker は停止の期限が切れてから止まる。
-	f.srv.registerShutdownHook(func(ctx context.Context) {
+	f.srv.addPart("testPart", nil, func(ctx context.Context) {
 		<-ctx.Done()
 		close(f.job.block)
 	})

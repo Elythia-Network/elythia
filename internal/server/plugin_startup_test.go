@@ -131,7 +131,7 @@ func TestNew_QueueOnlyRegistersEffectivePolicyBeforePluginJobs(t *testing.T) {
 	srv, err := newServer(cfg, db, redisClients, []plugin.Definition{def}, noopStorage, func(s *Server) {
 		s.pluginGoStarter = func(fn func()) { fn() }
 		s.beforePluginGoRelease = func() { finalized = true }
-		s.registerShutdownHook(func(context.Context) { cleanupCalls++ })
+		s.addPart("testPart", nil, func(context.Context) { cleanupCalls++ })
 	})
 	require.NoError(t, err)
 	require.Zero(t, cleanupCalls)
@@ -273,7 +273,7 @@ func TestNew_PluginSetupFailureRollsBackConstructionResources(t *testing.T) {
 					closeErr: errors.New("queue close failed during rollback"),
 				}
 				s.queueDriver = closeDriver
-				s.registerShutdownHook(func(context.Context) { cleanupCalls++ })
+				s.addPart("testPart", nil, func(context.Context) { cleanupCalls++ })
 			})
 			require.Nil(t, srv)
 			require.ErrorIs(t, err, errPluginEffectivePolicySetup)
@@ -323,7 +323,7 @@ func TestStartConstructionWorkerCleanupWaitsAndRunsOnce(t *testing.T) {
 	allowExit := make(chan struct{})
 	runCalls := 0
 	s := &Server{}
-	s.startConstructionWorker(func(ctx context.Context) {
+	s.startConstructionWorker("testWorker", func(ctx context.Context) {
 		runCalls++
 		<-ctx.Done()
 		close(cancelled)
@@ -366,7 +366,7 @@ func TestServerShutdown_DeadlineBoundsReactionFlushDrain(t *testing.T) {
 			close(workerStopped)
 		},
 	}
-	s.startConstructionWorker(func(ctx context.Context) {
+	s.startConstructionWorker("reactionFlushWorker", func(ctx context.Context) {
 		s.reactionFlushWorker(ctx, func() error { return nil })
 	})
 	<-workerStarted
