@@ -225,4 +225,22 @@ func callsAny(fn *ast.FuncDecl, names map[string]bool, recv func(ast.Expr) bool)
 func TestAvatarDecorationRoleSetsAreWired(t *testing.T) {
 	assertWired(t, serverPkg, "avatardecorations.NewHandler(s.db, roleService.ExistingRoleIDSet, roleService.PublicRoleIDSet)",
 		"ログインしていない利用者に、非公開ロールの ID を返してしまう。")
+	// 上の構築の行は buildHandlers の中にある (#3694)。ルートを登録する setupRoutes が
+	// 使うのは別名なので、構築から別名までの段も照合する。上の行だけだと、setupRoutes の
+	// 別名を別の式に書き換えても緑のまま通る (docs/architecture.md 4.2)。別名は
+	// buildHandlers の戻り値を受けた変数 hSvcs から取る形にしてあり、別名を
+	// buildHandlers の呼び出しより前に書くとコンパイルが通らない。照合もその形で行う。
+	// **hSvcs の欄を代入で書き換える形 (`hSvcs.avatarDecorations = …`) は、ここでは
+	// 捕まらない。** 構築・別名・代入の行の文字列がどれも残るため。その形は
+	// internal/server の TestSetupRoutesAliasesEveryBuiltHandler が落とす。
+	assertWired(t, serverPkg, "avatarDecorations: avatarDecorationsHandler",
+		"buildHandlers が作った get-avatar-decorations の handler を apiHandlers に入れていない。")
+	assertWired(t, serverPkg, "hSvcs := s.buildHandlers(w, coreSvcs, fedSvcs, idGen)",
+		"setupRoutes が buildHandlers の handler を使っていない。")
+	assertWired(t, serverPkg, "w.handlers = hSvcs",
+		"buildHandlers の handler を wiring に入れていない。")
+	assertWired(t, serverPkg, "avatarDecorationsHandler := hSvcs.avatarDecorations",
+		"get-avatar-decorations に登録する handler が、buildHandlers で作ったものでなくなる。")
+	assertWired(t, serverPkg, `api.POST("/get-avatar-decorations", avatarDecorationsHandler.Get)`,
+		"get-avatar-decorations のルートが、buildHandlers で作った handler を使っていない。")
 }
