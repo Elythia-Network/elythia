@@ -117,17 +117,10 @@ func newShutdownOrderFixture(t *testing.T) *shutdownOrderFixture {
 		echo: echo.New(), config: &config.Config{}, role: config.RoleBoth,
 		queueDriver: d, queueServer: queue.NewServer(d),
 	}
-	// setupRoutes と同じ順で、同じ形の hook を登録する。
-	for _, b := range []struct {
-		name string
-		buf  interface {
-			Start(context.Context)
-			Close()
-		}
-	}{{"instanceTouchBuffer", f.touch}, {"sigCapBuffer", f.sigCap}, {"instanceCounterBuffer", f.counter}} {
-		b.buf.Start(context.Background())
-		f.srv.addPart(b.name, b.buf, func(context.Context) { b.buf.Close() })
-	}
+	// setupRoutes と同じ順で、同じ形で登録する。
+	f.srv.startPartWithClose(context.Background(), "instanceTouchBuffer", f.touch)
+	f.srv.startPartWithClose(context.Background(), "sigCapBuffer", f.sigCap)
+	f.srv.startPartWithClose(context.Background(), "instanceCounterBuffer", f.counter)
 	mgmt := chart.NewManagementService([]*chart.Chart{f.apReq}, time.Hour)
 	f.srv.setChartManagement(mgmt)
 	require.NoError(t, mgmt.Start(context.Background()))
