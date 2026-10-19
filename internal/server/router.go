@@ -171,7 +171,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// (wiring-check などのゲートが照合する文字列を変えないため)。repository は作っても
 	// DB に触らないので、作る位置が下の EnsureInitial などより前に移っても、DB の文の
 	// 順は変わらない。
-	// lifecycle は Server が持つ部品の一覧 (#3699) を指す。登録は s.addPart で行う。
+	// lifecycle は Server が持つ部品の一覧 (#3699) を指す。登録は s.startPartWithClose などの
+	// 値から作る登録か s.addPart で行う (docs/architecture.md 4.3)。
 	w := &wiring{repos: s.buildRepos(), lifecycle: &s.lifecycle}
 	userRepo := w.repos.user
 	noteRepo := w.repos.note
@@ -1082,14 +1083,13 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 時間を使い切らないため)。
 	metadataRefresher := coreinstance.NewMetadataRefresher(instanceRepo, metadataFetcher,
 		coreinstance.NewRedisRefreshLock(s.redis.Default))
-	s.addPart("metadataRefresher", metadataRefresher, metadataRefresher.Close)
+	s.addCloser("metadataRefresher", metadataRefresher)
 
 	// inbox worker から呼ばれる MarkRequestReceived を per-host で 1s buffer
 	// に集約。同一 remote host の連続 inbox 受信で 10k UPDATE が 1 UPDATE に
 	// 縮退する (#569)。
 	instanceTouchBuffer := coreinstance.NewTouchBuffer(instanceService, time.Second)
-	instanceTouchBuffer.Start(context.Background())
-	s.addPart("instanceTouchBuffer", instanceTouchBuffer, func(_ context.Context) { instanceTouchBuffer.Close() })
+	s.startPartWithClose(context.Background(), "instanceTouchBuffer", instanceTouchBuffer)
 
 	// 署名方式の観測 (#2393)。inbound は同一 host から高頻度に来るので、
 	// TouchBuffer と同じ縮退方式で per-host per系統 1 UPDATE にまとめる。
@@ -1099,8 +1099,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// UPDATE が増え、instance touch の書き込み負荷を実質倍にしてしまう。相手の
 	// 署名方式はそう頻繁に変わらないので、60s 窓で十分に追随できる。
 	sigCapBuffer := coreinstance.NewCapabilityBuffer(sigCapRepo, time.Minute)
-	sigCapBuffer.Start(context.Background())
-	s.addPart("sigCapBuffer", sigCapBuffer, func(_ context.Context) { sigCapBuffer.Close() })
+	s.startPartWithClose(context.Background(), "sigCapBuffer", sigCapBuffer)
 	// 宣言 (assertionMethod の Ed25519) は actor resolve 経路で同期に書く。
 	// inbound ほど高頻度ではないので buffer を挟まない。
 	federationResolver.SetSignatureCapabilityDeclarer(sigCapRepo)
@@ -1330,8 +1329,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 停止の部品 (#3699) を登録するので、部品の登録順 (FIFO で止まる) を変えないよう
 	// ここに残す (#3676)。chartHooks のフィールドに入れるだけなので setter の辺ではない。
 	instanceCounterBuffer := coreinstance.NewCounterBuffer(instanceRepo, 30*time.Second)
-	instanceCounterBuffer.Start(context.Background())
-	s.addPart("instanceCounterBuffer", instanceCounterBuffer, func(_ context.Context) { instanceCounterBuffer.Close() })
+	s.startPartWithClose(context.Background(), "instanceCounterBuffer", instanceCounterBuffer)
 	chartHooks.InstanceCounter = instanceCounterBuffer
 	// 配送先ホストごとの健全性テレメトリ (#2461)。upstream は結果を
 	// `isNotResponding` の真偽値にしか残さないので、mk-go 独自の観測。
@@ -1355,11 +1353,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			deliverProcessor.SetDeliveryBreaker(deliveryBreaker)
 		}
 		deliverProcessor.SetDeliveryTelemetry(deliveryHealth)
-		deliveryHealth.Start(context.Background())
-		s.addPart("deliveryHealth", deliveryHealth, func(ctx context.Context) { deliveryHealth.Stop(ctx) })
+		s.startPartWithStop(context.Background(), "deliveryHealth", deliveryHealth)
 		inboxProcessor.SetDeliveryTelemetry(inboxHealth)
-		inboxHealth.Start(context.Background())
-		s.addPart("inboxHealth", inboxHealth, func(ctx context.Context) { inboxHealth.Stop(ctx) })
+		s.startPartWithStop(context.Background(), "inboxHealth", inboxHealth)
 	}
 
 	noteCreateService.SetHashtagHook(hashtagService)
@@ -3016,8 +3012,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		return err == nil && m != nil && m.EnableServerMachineStats
 	})
 	if s.role.RunsServer() {
-		serverStatsPub.Start()
-		s.addPart("serverStatsPub", serverStatsPub, func(_ context.Context) { serverStatsPub.Stop() })
+		s.startPartWithoutCtx("serverStatsPub", serverStatsPub)
 	}
 	// queueInspector が無い起動 (テスト等) では nil のまま。チャンネルの一覧
 	// (builtinStreamChannels) が、そのとき fallback の factory を選ぶ (#3692)。
@@ -3025,8 +3020,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	if s.queueInspector != nil {
 		queueStatsPub = stream.NewQueueStatsPublisher(&queueStatsInspectorAdapter{inner: s.queueInspector}, streamPubSub, 0)
 		if s.role.RunsServer() {
-			queueStatsPub.Start()
-			s.addPart("queueStatsPub", queueStatsPub, func(_ context.Context) { queueStatsPub.Stop() })
+			s.startPartWithoutCtx("queueStatsPub", queueStatsPub)
 		}
 	}
 
