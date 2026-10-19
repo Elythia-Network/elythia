@@ -307,22 +307,33 @@ var apiBypassingRegistration = regexp.MustCompile(
 //
 // goldenのendpointをこれらの形へ移すと、TestAPICompatDoc_MatchesRouterと
 // TestParamShadowChangesNoResponseが落とす。
+//
+// **許可した登録は、書いてあるファイルでだけ許す (#3697)。** ルートの登録を
+// routes_<領域>.goへ分けたので、catchallを別のファイル(登録の関数の中など)へ
+// 移すと、プラグインのルートより前に登録される形になりうる。ファイルごとに
+// 照合し、許可リストのファイルと違えば落とす。
 func TestAPIRegistrationsGoThroughAPIRoutes(t *testing.T) {
-	src := packageSourceWithoutComments(t)
+	files := packageSources(t)
 	used := map[string]bool{}
-	for _, m := range apiBypassingRegistration.FindAllString(src, -1) {
-		call := strings.TrimSpace(m)
-		if _, ok := apiRegistrationAllowed[call]; ok {
-			used[call] = true
-			continue
+	posts := 0
+	for _, f := range files {
+		src := stripComments(f.src)
+		posts += strings.Count(src, "api.POST(")
+		for _, m := range apiBypassingRegistration.FindAllString(src, -1) {
+			call := strings.TrimSpace(m)
+			if file, ok := apiRegistrationAllowed[call]; ok {
+				assert.Equalf(t, file, f.name, "%s is allowed only in %s", call, file)
+				used[call] = true
+				continue
+			}
+			t.Errorf("an /api route bypasses apiRoutes in %s: %s (register it with api.POST / api.Match / api.GET, or add it to apiRegistrationAllowed with the reason)", f.name, call)
 		}
-		t.Errorf("an /api route bypasses apiRoutes: %s (register it with api.POST / api.Match / api.GET, or add it to apiRegistrationAllowed with the reason)", call)
 	}
 	for call, file := range apiRegistrationAllowed {
 		assert.Truef(t, used[call], "apiRegistrationAllowed has %s (%s) but the source no longer does", call, file)
 	}
 	// 何も拾えなかったら落とす。apiRoutesを通る登録が読めていることも見る。
-	assert.Greater(t, strings.Count(src, "api.POST("), 400, "the /api POST registrations were not read")
+	assert.Greater(t, posts, 400, "the /api POST registrations were not read")
 }
 
 func TestAPIBypassingRegistrationPattern(t *testing.T) {
