@@ -609,7 +609,7 @@ func TestDefaultEndpointLimits_SwUnregister(t *testing.T) {
 // 気づけない。未認証で叩けてサーバー側に行やメールを作る入口だけは、ここで
 // 名指しで固定する。
 //
-// **router.go の実パスから引ける形で確かめる。** テーブルのキー名を直接見ると、
+// **ルートの登録 (internal/server の routes_<領域>.go) の実パスから引ける形で確かめる。** テーブルのキー名を直接見ると、
 // `/api` prefix の剥がし方が変わったときに「キーはあるのに引けない」状態を
 // 見逃す。
 func TestDefaultEndpointLimits_UnauthenticatedEntryPoints(t *testing.T) {

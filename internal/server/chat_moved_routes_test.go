@@ -23,7 +23,7 @@ import (
 //
 // 3本は同じ MessagesCreate を呼ぶので、どれか1本でも RequireNotMoved を欠くと
 // そこから移行済みのアカウントが送信できてしまう (#3437)。middleware 単体の
-// テストでは配線の抜けを拾えないので、router.go の登録をそのまま通す。
+// テストでは配線の抜けを拾えないので、本番の登録 (routes_chat.go) をそのまま通す。
 func TestSetupRoutes_ChatMessageCreateRejectsMovedAccount(t *testing.T) {
 	// 既定の trustProxy で組んだ、本番と同じ router を使う。
 	srv := newServerWithTrustProxy(t, nil)

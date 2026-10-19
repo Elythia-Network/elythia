@@ -25,18 +25,18 @@ func (stubRoleChecker) IsModerator(string) bool     { return true }
 
 // TestRequireScopeWiring は #1607 の中核契約を end-to-end で検証する。
 // 既存の auth_test.go は AuthScope を context に直接 set して RequireScope 単体
-// を見ているだけだが、ここでは router.go と同一の middleware 合成
+// を見ているだけだが、ここでは本番の組み立てと同一の middleware 合成
 // (グローバル auth.Authenticate + 各 route の RequireAuth/RequireModerator +
 // RequireScope("<kind>")) を実 HTTP request で通し、access_token の permission
 // から scope が解決され kind が強制されるまでの経路全体を担保する。
 //
 // 代表 route は scope family ごとに 1 本ずつ選ぶ (write:notes / write:account /
-// write:drive / write:chat / read:account(public) / write:admin:*)。router.go の
-// 該当行とミドルウェア構成を一致させること。
+// write:drive / write:chat / read:account(public) / write:admin:*)。ルートの登録
+// (routes_<領域>.go、#3697) の該当行とミドルウェア構成を一致させること。
 func TestRequireScopeWiring(t *testing.T) {
 	role := stubRoleChecker{}
 
-	// 代表 route 表。mws は router.go の該当行と同じ順序・構成にする
+	// 代表 route 表。mws は routes_<領域>.go の該当行と同じ順序・構成にする
 	// (RequireScope は role/auth gate の後)。
 	cases := []struct {
 		name       string
