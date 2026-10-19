@@ -39,7 +39,7 @@ Elythia は Misskey (TypeScript/NestJS) から生まれ、バックエンドを 
 
 | 観点 | Misskey-TS | Elythia | 理由 |
 |---|---|---|---|
-| DI | NestJS (`@Injectable`, `di-symbols.ts`) | **手動配線** (`internal/server/router.go`) | フレームワーク非依存・起動経路の明示化 |
+| DI | NestJS (`@Injectable`, `di-symbols.ts`) | **手動配線** (`internal/server/router.go` の `setupRoutes()` と、そこから呼ぶ `wiring_*.go` / `routes_*.go` の関数) | フレームワーク非依存・起動経路の明示化 |
 | データアクセス | サービスが TypeORM repository を直接注入 | **明示的な `repository` interface 層** | mock 注入による単体テスト容易性 |
 | pack | `*EntityService.pack()` は DI されたサービス | **`entity.PackX()` は純関数** | 変換とドメインロジックの分離 |
 | クロスカット | `GlobalEventService` (event emitter) + 直接注入 | **明示的 hook interface** (`SetFanoutHook` 等) | import cycle 回避（§6） |
@@ -64,27 +64,41 @@ Elythia は Misskey (TypeScript/NestJS) から生まれ、バックエンドを 
 | `internal/misc/id` | `core/IdService` | ID 生成 (aidx 既定) |
 | `internal/safehttp` | `core/HttpRequestService`(の SSRF guard) | private-network 拒否 transport |
 | `internal/config` + `internal/cli` | `config.ts` + `boot/` | 設定・起動 |
-| `internal/server/router.go` | NestJS `MainModule`/`ServerModule` の配線 | DI 相当を手動で |
+| `internal/server/router.go` (+ `wiring_*.go` / `routes_*.go`) | NestJS `MainModule`/`ServerModule` の配線 | DI 相当を手動で。/api のルートの登録は `routes_<領域>.go` (§4.2) |
 
 ---
 
 ## 3. レイヤ詳細
 
-### 3.1 `internal/api/` — HTTP ハンドラ（52 パッケージ / 503 ルート）
+### 3.1 `internal/api/` — HTTP ハンドラ（60 パッケージ / 553 ルート）
 
 upstream `server/api/endpoints/` の endpoint 群を、ディレクトリ単位で実装。**upstream の 444 endpoint をすべて実装済み** (coverage 100.0%)。一次情報は `make apicompat` が生成する [api-compat.md](api-compat.md)。
 
-ルート数は `router.go` が `/api/*` に静的登録する数 (`api.POST` 466 + `api.GET` 12 +
-`api.Match(chartMethods, …)` 12 × 2 methods + catchall の `api.Any` 1 = 503)。実行時は
-これに同梱プラグインのルートが乗る。`docs/api-compat.md` の 444 + 58 = 502 に catchall を
-足した数と一致する。
+ルート数は `internal/server` が `/api/*` に静的登録する数 (`api.POST` 514 + `api.GET` 14 +
+`api.Match(chartMethods, …)` 12 × 2 methods + catchall の `api.Any` 1 = 553。test mode でだけ
+登録する `/api/reset-db` を含む)。登録は、catchall と `/api/reset-db` が `router.go` の
+`setupRoutes()`、ほかは領域ごとの `routes_<領域>.go` にある (#3697、4.2)。実行時は
+これに同梱プラグインのルートが乗る。`docs/api-compat.md` の 444 + 108 = 552 に catchall を
+足した数と一致する。パッケージ数は、`git ls-files internal/api` のうちテストでない `.go` を持つ
+ディレクトリの数 (`apierr` のような handler でないものも含む)。
 
-`/api` の外は `s.echo` へ直接登録していて、**呼び出し**の数は 55
-(`GET` 45 / `POST` 5 / `OPTIONS` 2 / `Any` 3)。`Any` は 1 呼び出しで全メソッドを
-登録するので、ルート単位に展開すると増える。ほかに静的配信が 8 (`Static` 4 /
-`File` 4)、`/debug/pprof` 配下が 8。
+前に書いていた「52 パッケージ / 503 ルート」(`api.POST` 466 + `api.GET` 12 + 12 × 2 + 1、
+api-compat.md の 444 + 58) は、ルート数の段落を最後に直した 2026-08-20 (`7d430d318`) の時点では
+正しかった (その版の `router.go` と api-compat.md で数え直して一致)。数え方は同じで、その後に
+足したルートとパッケージが反映されていなかった。#3697 で数え直した (ルートは `internal/server` の
+非テストの `.go` の構文木で、`api` への `POST` / `GET` / `Match` / `Any` の呼び出しを数えた)。
 
-**Static / File / pprof は `if` の中**で、設定次第では登録されない。55 呼び出しの側にも条件付きのものが 4 件ある (`/url` / CSP report / `/vite/*` / `/embed_vite/*`)。
+`/api` の外は `s.echo` へ直接登録していて、`setupRoutes()` の本文の登録の式文は 64
+(`GET` 50 / `POST` 5 / `OPTIONS` 2 / `Any` 1 / `File` 4 / `Static` 2。4.2 の「/api のルートの
+登録」の前後の数の表と同じ数え方で、`if` の中も数える)。`Any` は 1 呼び出しで全メソッドを登録するので、
+ルート単位に展開すると増える。ほかに `/debug/pprof` 配下が 8 (`pprofGroup` への登録)。
+`setupRoutes()` から呼ぶ関数の中の登録 (`registerFrontendAssets` の `/vite/*` と `/embed_vite/*`、
+`wireMetricsEndpoint` の `/metrics`、`serveStaticAssetDir` の `/twemoji/*` と `/fluent-emoji/*`) は、
+この数に入れていない。
+
+**`if` の中にあり、設定次第では登録されないもの**は、64 のうち 7 (`Static` 2・`File` 4・CSP report
+の `POST`) と、pprof の 8。上の関数の中の登録のうち、`serveStaticAssetDir` の 2 つも
+`os.Stat` の `if` の中で呼ぶので、置き場所が無ければ登録されない。
 
 **数え方で値が変わるので、引用するときは何を数えたかも書くこと。**
 
@@ -294,7 +308,7 @@ dispatcher が shareable channel の共有・pong ack を upstream `Connection.t
 
 ## 4. DI / 配線
 
-すべてのサービス生成・配線は `internal/server/router.go` の `setupRoutes()` で手動実行（NestJS 相当を関数呼び出しで構築）。DI フレームワークは使わない。repository は `setupRoutes()` から呼ぶ `buildRepos()` (`internal/server/wiring_repos.go`) で、core の service の一部は `buildCore()` (`internal/server/wiring_core.go`) で、連合の部品の一部は `buildFederation()` (`internal/server/wiring_fed.go`) で、queue の processor の一部は `buildQueue()` (`internal/server/wiring_queue.go`) で、stream の部品の一部は `buildStream()` (`internal/server/wiring_stream.go`) で、API の handler の一部は `buildHandlers()` (`internal/server/wiring_handlers.go`) で作る (4.2)。
+すべてのサービス生成・配線は `internal/server/router.go` の `setupRoutes()` で手動実行（NestJS 相当を関数呼び出しで構築）。DI フレームワークは使わない。repository は `setupRoutes()` から呼ぶ `buildRepos()` (`internal/server/wiring_repos.go`) で、core の service の一部は `buildCore()` (`internal/server/wiring_core.go`) で、連合の部品の一部は `buildFederation()` (`internal/server/wiring_fed.go`) で、queue の processor の一部は `buildQueue()` (`internal/server/wiring_queue.go`) で、stream の部品の一部は `buildStream()` (`internal/server/wiring_stream.go`) で、API の handler の一部は `buildHandlers()` (`internal/server/wiring_handlers.go`) で作る。`/api` のルートは、領域ごとのファイル (`internal/server/routes_<領域>.go`) の `register…Routes()` が登録し、`setupRoutes()` はそれを 1 回ずつ呼ぶ (4.2)。
 
 ```
 server.New() → setupRoutes()
@@ -308,14 +322,19 @@ server.New() → setupRoutes()
   ├→ queue の processor の生成 (作るだけのものは buildQueue → wiring.queue で作り、別名を置く。
   │   setter と、outbound client や setupRoutes で作る部品に依存するものは元の位置)
   ├→ hook 注入 (§5)
-  ├→ Handler 生成 + ルート登録 (§3.1)。作るだけの handler は buildHandlers → wiring.handlers
-  │   で作り、usersHandler の位置で別名を置く。setter とルートの登録は元の位置。この途中
+  ├→ Handler 生成 (§3.1)。作るだけの handler は buildHandlers → wiring.handlers
+  │   で作り、usersHandler の位置で別名を置く。setter は元の位置。この途中
   │   (プラグインの準備より前) で、queue の handler を registerQueueHandlers で 1 回だけ
   │   登録する (一覧は builtinQueueHandlers)
-  └→ stream (bus・registry・manager と、ここから配る publisher は buildStream → wiring.stream
-      で作り、別名を置く。pubsub の購読をここで始める。WebSocket のチャンネルは
-      registerStreamChannels で 1 回だけ登録する。一覧は builtinStreamChannels) /
-      WebSocket / 静的ファイル / middleware
+  ├→ stream (bus・registry・manager と、ここから配る publisher は buildStream → wiring.stream
+  │   で作り、別名を置く。pubsub の購読をここで始める。WebSocket のチャンネルは
+  │   registerStreamChannels で 1 回だけ登録する。一覧は builtinStreamChannels) /
+  │   WebSocket / middleware
+  ├→ /api のルートの登録。handler をすべて作った後、プラグインの準備より前で、
+  │   routes_<領域>.go の register…Routes を 1 回ずつ呼ぶ (24 個)。/api の外のルート
+  │   (ActivityPub・SSR・well-known など) は s.echo へ元の位置で登録する
+  └→ プラグインの準備 (失敗したらここで return) / /api の catchall / 静的ファイル /
+      SPA の catchall
 ```
 
 ### 4.1 作る順と、後から入れる依存 (#3676)
@@ -355,13 +374,13 @@ setter は依存を先に作っても、元の位置 (streaming の publisher �
 `featuredService`、`hashtagService`、`modLogService`、`instanceService` など) を
 受け手より先に作るようにした (こちらは setter を呼ぶ位置は変えていない)。
 
-| | #3676 の前 (`b9db7e49b`) | #3676 の後 | #3684 の後 | #3686 の後 | #3688 の後 | #3690 の後 | #3692 の後 | 今 (#3694 の後) |
-|---|---|---|---|---|---|---|---|---|
-| setter で依存を入れる辺 | 877 | 877 | 879 | 879 | 872 | 872 | 872 | 872 |
-| うち、受け手より後で作った依存を入れるもの | 192 (受け手 55 個) | 107 (受け手 41 個) | 104 (受け手 41 個) | 103 (受け手 40 個) | 96 (受け手 40 個) | 96 (受け手 40 個) | 96 (受け手 40 個) | 96 (受け手 40 個) |
-| うち、循環しているもの | 40 | 40 | 40 | 39 | 35 | 35 | 34 | 34 |
-| うち、それ以外 | 152 | 67 | 64 | 64 | 61 | 61 | 62 | 62 |
-| setter の呼び出しが受け手から離れているもの (下の数え方) | 359 | 307 | 308 | 392 | 415 | 426 | 444 | 660 |
+| | #3676 の前 (`b9db7e49b`) | #3676 の後 | #3684 の後 | #3686 の後 | #3688 の後 | #3690 の後 | #3692 の後 | #3694 の後 | 今 (#3697 の後) |
+|---|---|---|---|---|---|---|---|---|---|
+| setter で依存を入れる辺 | 877 | 877 | 879 | 879 | 872 | 872 | 872 | 872 | 872 |
+| うち、受け手より後で作った依存を入れるもの | 192 (受け手 55 個) | 107 (受け手 41 個) | 104 (受け手 41 個) | 103 (受け手 40 個) | 96 (受け手 40 個) | 96 (受け手 40 個) | 96 (受け手 40 個) | 96 (受け手 40 個) | 96 (受け手 40 個) |
+| うち、循環しているもの | 40 | 40 | 40 | 39 | 35 | 35 | 34 | 34 | 34 |
+| うち、それ以外 | 152 | 67 | 64 | 64 | 61 | 61 | 62 | 62 | 62 |
+| setter の呼び出しが受け手から離れているもの (下の数え方) | 359 | 307 | 308 | 392 | 415 | 426 | 444 | 660 | 660 |
 
 #3684 の後の列は、#3684 の後の `router.go` を同じ道具で数えた。#3676 の後に入った変更で、setter の
 辺と呼び出しが離れている辺が 2 つずつ増えている (#3684 の直前の `692710223` で
@@ -448,6 +467,12 @@ manager と note・notification の publisher (どれも setter の受け手) �
 `SetDetailExtrasMany` の `usersHandler`、`followingService.SetMeUpdatedPublisher` の
 `iHandler`)。ルートの登録は setter ではないので、どの行にも数えない。
 
+#3697 で `/api` のルートの登録 539 本を `routes_<領域>.go` の 24 個の関数へ移した (4.2)。
+setter も構築も動かしていないので、どの行も数が変わらない。後から入れる 96 辺と、呼び出しが
+離れている 660 辺は、どちらも行番号を除けば前と同じ (道具の一覧を行番号を消して突き合わせた)。
+節点は 364 から 361 に減った。ルートの行だけが使っていた `chartMethods`・`chatRead`・
+`chatWrite` の定義を登録の関数へ移したためで、どれも setter の引数に現れないので辺は変わらない。
+
 数え方 (`setupRoutes()` の構文木。道具はコミットしていない):
 
 - 節点: `setupRoutes()` の中で `:=` か `var` で定義した名前 (関数リテラルの中と、
@@ -503,6 +528,8 @@ manager と note・notification の publisher (どれも setter の受け手) �
 #3684 で repository を、#3686 で core の service の一部を、#3688 で連合の部品の一部を、
 #3690 で queue の processor の一部を、#3692 で stream の部品の一部を、#3694 で API の handler の
 一部を移した。今のフィールドは `repos`・`core`・`fed`・`queue`・`stream`・`handlers` の 6 つ。
+#3697 で `/api` のルートの登録を領域ごとのファイルの関数へ分けた (部品は作らないので、
+フィールドは増やしていない。下の「/api のルートの登録」)。
 
 ```
 setupRoutes()
@@ -993,6 +1020,9 @@ setupRoutes()
   api.POST("/get-avatar-decorations", avatarDecorationsHandler.Get)
 ```
 
+(#3694 の時点の形。ルートの登録は #3697 で `routes_<領域>.go` の関数へ移った。下の
+「/api のルートの登録」)
+
 - **`buildHandlers()` は `*Server` のメソッドで、repository は `w` から、core の service と
   連合の部品は `buildCore()` / `buildFederation()` の戻り値 `coreSvcs` / `fedSvcs` から
   受け取る。** 中の行は `setupRoutes()` にあった行をそのまま移し、作る順も元のまま。使う
@@ -1042,7 +1072,9 @@ setupRoutes()
 パス 9 件と、関係の無いテストの `Existing`。どれも `internal/server` の行を照合しない)。上の規則のとおり、
 `avatarDecorations: avatarDecorationsHandler`、`hSvcs := s.buildHandlers(w, coreSvcs, fedSvcs, idGen)`、
 `w.handlers = hSvcs`、`avatarDecorationsHandler := hSvcs.avatarDecorations` と、ルートの登録
-`api.POST("/get-avatar-decorations", avatarDecorationsHandler.Get)` も照合する。
+`api.POST("/get-avatar-decorations", avatarDecorationsHandler.Get)` も照合する (ルートの登録は、
+#3697 から `routes_emojis.go` の `registerEmojisRoutes` と、`setupRoutes()` からの呼び出しまで
+照合する)。
 `internal/server/wiring_handlers_test.go` のテストも付けた (`buildHandlers()` が `apiHandlers` の
 欄をすべて埋めること。method value は nil のレシーバでも作れるので、欄を書き忘れると最初の
 リクエストまで気付かない。`setupRoutes()` が本文の直下で `hSvcs := s.buildHandlers(...)` と
@@ -1091,10 +1123,183 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
 `hSvcs` の 2 行・別名の 30 行・理由を書いたコメント 9 行・空行 1 行 (計 42 行) を足し、構築の
 30 行・使わなくなった別名 5 行・`buildHandlers()` へ移したコメント 2 行 (計 37 行) を消したため。
 
-**残りは、ルートの登録を領域ごとのファイルに分ける段 (#3666 の段階 2-7)。** 上で残した
-core の service・連合の部品・queue の processor・stream の部品・handler は、依存する領域を
-移すときに一緒に扱う。部品を移すときは、どれも `wiring` のフィールドに入れ、`build…` の関数で
-作り、`setupRoutes()` では別名を置く。repository は `w` から、それより後の領域は
+#### /api のルートの登録 (#3697)
+
+```
+setupRoutes()
+  api := apiRoutes{s.echo.Group("/api")}
+  api.Use(…)                                     // group の middleware (元の位置)
+  …                                              // handler の構築と setter (元の位置のまま)
+  registerMetaRoutes(api, metaHandler, statsHandler, endpointsHandler, echoTestHandler)
+  …                                              // routes_<領域>.go の 24 個を 1 回ずつ
+  registerFetchRoutes(api, fetchExternalHandler, fetchRSSHandler)
+  …                                              // プラグインの準備 (失敗したら return)
+  api.Any("/*", apiCatchall)                     // catchall は元の位置
+```
+
+- **領域ごとのファイル `routes_<領域>.go` に、`func register<領域>Routes(api apiRoutes, …)` を
+  1 つ置く。** 受けるのは `apiRoutes` で、`*echo.Group` では受けない。`*echo.Group` で受けると、
+  その中の登録に `withParamShadow` と `requireObjectBody` が付かず、
+  `TestAPIRegistrationsGoThroughAPIRoutes` の走査からも外れる (docs/gates.md)。`Server` の
+  フィールドを使わないので、メソッドではなく普通の関数にした
+- **分け方は、`/api` の 1 つ目の区切りを単位にし、同じ handler が受ける小さな区切りは同じ
+  ファイルにまとめた。** 例: `promo/read` は notes、`pinned-users` と `get-online-users-count`
+  は users、`verify-email` は i、`retention` は charts、`page-push` は pages、`v2/admin/emoji/list`
+  は admin。関係の近い区切りも 1 つにした: 利用者どうしの関係 (`following`・`blocking`・
+  `mute`・`renote-mute`)、アカウントの作成と認証とアプリの認可 (`signup*`・`signin*`・
+  パスワードの再設定・`invite`・`auth`・`miauth`・`app`・`my`)、通知と push の購読
+  (`notifications`・`sw`)、連合 (`federation`・`v1/instance/peers`・`ap`)、ゲーム
+  (`reversi`・`bubble-game`)、外部の取得 (`fetch-rss`・`fetch-external-resources`)、
+  サーバーの情報 (`meta`・`ping`・`stats`・`server-info`・`endpoints`・`endpoint`・`test`)、
+  絵文字とアバターデコレーション。`admin` (144 本) は 2 つ目の区切りで分けず 1 つにした。
+  handler はほぼ `adminHandler` 1 つで、分けても引数が減らないため
+- **ルートの行は移す前と同じ文字列にし、関数の引数の名前を `setupRoutes()` の変数の名前に
+  揃える。`setupRoutes()` は同じ名前の変数をそのまま渡す。** ルートの行を文字列で照合する
+  ゲート (`assertWired` など) を書き換えずに済み、名前が同じ値を指すことはテストで見る (下)。
+  引数は多くて 7 個 (auth と i) なので、構造体にはしていない
+- **ルートの行だけが使う値は、関数の中で作る。** `chartMethods` (`parseGetRoutes` が method の
+  一覧の変数を同じファイルの中でだけ引くため。docs/gates.md) と、`chatRead` / `chatWrite`
+  (`RequireChatAvailability` を返す closure を作るだけ)
+- **呼ぶ位置は 1 か所。** handler をすべて作った後で、プラグインの準備 (`registeredPlugins` の節)
+  の直前。すべての `api.Use` より後 (echo の group は `Use` より前に登録したルートに middleware を
+  付けない)、`setupRoutes()` のどの `return` よりも前 (プラグインの準備に失敗した経路でも、元と
+  同じく /api のルートを登録してから止まる) になる。並びは、移す前に各ファイルの最初のルートが
+  あった順にした
+
+| ファイル | 関数 | 1 つ目の区切り (本数) | 登録の文 | 引数 (`api` の後) |
+|---|---|---|---|---|
+| `routes_meta.go` | `registerMetaRoutes` | `server-info` 2・`meta` 1・`ping` 1・`stats` 1・`endpoints` 1・`endpoint` 1・`test` 1 | 8 | `metaHandler`、`statsHandler`、`endpointsHandler`、`echoTestHandler` |
+| `routes_auth.go` | `registerAuthRoutes` | `signup-application` 4・`auth` 4・`invite` 4・`miauth` 2・`app` 2・`signup` 1・`signup-pending` 1・`username` 1・`signin` 1・`signin-flow` 1・`signin-with-passkey` 1・`request-reset-password` 1・`reset-password` 1・`my` 1・`email-address` 1 | 26 | `signupHandler`、`signinHandler`、`resetHandler`、`authHandler`、`appHandler`、`inviteHandler`、`roleService` |
+| `routes_emojis.go` | `registerEmojisRoutes` | `emoji-application` 3・`emojis` 2・`emoji` 2・`get-avatar-decorations` 1・`export-custom-emojis` 1 | 9 | `emojisHandler`、`emojiApplicationHandler`、`avatarDecorationsHandler`、`roleService` |
+| `routes_notes.go` | `registerNotesRoutes` | `notes` 38・`promo` 1 | 39 | `notesHandler`、`promoHandler` |
+| `routes_users.go` | `registerUsersRoutes` | `users` 33・`get-online-users-count` 2・`pinned-users` 1 | 36 | `usersHandler`、`userListHandler`、`roleService` |
+| `routes_i.go` | `registerIRoutes` | `i` 59・`verify-email` 1 | 60 | `iHandler`、`webhookHandler`、`notificationsHandler`、`pagesHandler`、`flashHandler`、`announcementHandler`、`roleService` |
+| `routes_notifications.go` | `registerNotificationsRoutes` | `notifications` 4・`sw` 4 | 8 | `notificationsHandler`、`swHandler` |
+| `routes_hashtags.go` | `registerHashtagsRoutes` | `hashtags` 6 | 6 | `hashtagsHandler` |
+| `routes_gallery.go` | `registerGalleryRoutes` | `gallery` 9 | 9 | `galleryHandler` |
+| `routes_relations.go` | `registerRelationsRoutes` | `following` 12・`blocking` 3・`mute` 3・`renote-mute` 3 | 21 | `blockingHandler`、`muteHandler`、`renoteMuteHandler`、`followingHandler` |
+| `routes_drive.go` | `registerDriveRoutes` | `drive` 24 | 24 | `driveHandler`、`chatHandler` |
+| `routes_federation.go` | `registerFederationRoutes` | `federation` 9・`ap` 2・`v1` 1 | 12 | `federationHandler`、`apHandler`、`roleService` |
+| `routes_channels.go` | `registerChannelsRoutes` | `channels` 16 | 16 | `channelsHandler`、`roleService` |
+| `routes_antennas.go` | `registerAntennasRoutes` | `antennas` 7 | 7 | `antennasHandler` |
+| `routes_clips.go` | `registerClipsRoutes` | `clips` 11 | 11 | `clipsHandler` |
+| `routes_pages.go` | `registerPagesRoutes` | `pages` 7・`page-push` 1 | 8 | `pagesHandler` |
+| `routes_flash.go` | `registerFlashRoutes` | `flash` 10 | 10 | `flashHandler` |
+| `routes_charts.go` | `registerChartsRoutes` | `charts` 12・`retention` 2 | 14 | `chartsHandler` |
+| `routes_roles.go` | `registerRolesRoutes` | `roles` 5 | 5 | `rolesHandler` |
+| `routes_announcements.go` | `registerAnnouncementsRoutes` | `announcements` 2 | 2 | `announcementHandler` |
+| `routes_admin.go` | `registerAdminRoutes` | `admin` 144・`v2` 1 | 145 | `adminHandler`、`announcementHandler`、`backupHandler`、`roleService`、`backupGuard` |
+| `routes_games.go` | `registerGamesRoutes` | `bubble-game` 13・`reversi` 7 | 20 | `reversiHandler`、`bubbleGameHandler`、`bubbleVersusHandler` |
+| `routes_chat.go` | `registerChatRoutes` | `chat` 40 | 40 | `chatHandler`、`roleService` |
+| `routes_fetch.go` | `registerFetchRoutes` | `fetch-rss` 2・`fetch-external-resources` 1 | 3 | `fetchExternalHandler`、`fetchRSSHandler` |
+
+数え方: 「登録の文」は、関数の本文の `api.POST` / `api.GET` / `api.Match` の呼び出しの数
+(`api.Match` は 2 つの method を登録するが 1 に数える)。区切りは、その呼び出しの path の
+最初の `/` と次の `/` の間。行の並びは表の上からが `setupRoutes()` で呼ぶ順。
+
+**登録が値を受け取る時点が変わる。** ルートの行の引数 (handler の method value、
+`middleware.RequireRolePolicy(roleService, …)` のような呼び出し) は、登録した時点で評価される。
+移す前は各領域の handler を作った直後に登録していたので、元の位置から呼ぶ位置までの間に変わる
+値を受け取っていると、登録が受け取る値も変わる。移した 539 文について、次を道具で確かめた
+(`setupRoutes()` を `go/types` で読む。道具はコミットしていない)。
+
+- 行に現れる `setupRoutes()` の変数は、どれも `setupRoutes()` で 1 回だけ定義し、`=`・`++`・
+  `&` で書き換えていない。書き換えのある変数を使うルートは `/avatar/@:acct` の `localHost`
+  だけで、/api の外なので移していない
+- handler の method value の受け手はすべてポインタで、値の受け手のメソッドや、埋め込みを通して
+  引くメソッドは無い。method value は作った時点で受け手を写すので、値の受け手だと、その間の
+  setter が入れた依存を登録が持たなくなる。ポインタなら setter の結果は呼ばれたときに見える
+- 行の中の呼び出しは middleware の constructor (`RequireAuth`・`RequireScope`・
+  `RequireNotMoved`・`RequireSecure`・`RequireModerator`・`RequireAdmin`・`RequireRolePolicy`・
+  `RequireRolePolicyPublic`・`RejectAppToken`・`AdmitAppUser`、chat の `RequireChatAvailability`)
+  だけ。どれも引数を閉じ込めた closure を返すだけで、ログ・metrics・Redis・`s.*` への代入を
+  持たない (本体を読んで確かめた)。`roleService` も `backupGuard` も書き換えていない
+- /api の行には、handler を関数リテラルで書いたものが無い
+
+**echo の登録の順は変わる。** `Echo.Routes()` は map から作るので順を持たない。
+`Echo.OnAddRouteHandler` で登録の順に並べると、前後で同じ位置にある登録は、test mode でない
+構成で 667 のうち 61、test mode と pprof を有効にした構成で 676 のうち 69 だった。順が効くのは
+同じ method と path を 2 回登録したとき (後の登録が勝つ) だけで、2 回登録しているのは
+`api.Use` が足す `echo_route_not_found` の `/api` と `/api/*` だけ (順は前後で同じ)。catchall
+(`/api/*` の `Any`) とプラグインのルートは、前と同じく /api のほかのルートより後に登録する。
+
+**残したもの**
+
+| 登録 | 理由 |
+|---|---|
+| test mode の `/api/reset-db` | handler を test mode の `if` の中で作る。`if` ごと元の位置に残した (`apiRoutesOutsideRegistrars` に、どの経路で登録するかを書いた) |
+| catchall の `api.Any("/*", apiCatchall)` | プラグインのルートより後に置く (読み手のため。echo は静的な path を wildcard より優先するので、順には依存しない)。`apiRoutes` を通らない登録なので、`apiRegistrationAllowed` でファイル (`router.go`) まで決めてある |
+| /api の外の `s.echo` の 64 文 (ActivityPub・SSR・well-known・oauth・nodeinfo・inbox・streaming・`/files`・`/proxy`・`/url`・`/backup-download`・静的配信・SPA) | `apiRoutes` を通らない別の層で、この段の関数の形 (`api apiRoutes` を受ける) に当てはまらない。`/notes/:id` や `/@:acct` のように `s` と `ssrMeta` などを捕まえる closure、構築の呼び出しを行の中に持つもの (`filesHandler(…)`、`newTwemojiBadgeHandler(…)`) があり、評価の時刻の確認がこの段より重い。静的配信と SPA の catchall はプラグインの準備の `return` より後にある |
+| `/debug/pprof` の 8 文 | `s.config.EnablePprof` の `if` の中で、/api の外 |
+
+**同じ動きであることの確かめ方。** `develop` (`b3d75729a`) とこの段の binary で、
+`elythia dump-routes` の出力、起動時の Redis の命令の列と起動ログ、PostgreSQL の文の集合が
+一致する。#3676 の道具で並べた副作用のある文の列、setter の辺の一覧 (行番号を除く)、
+呼び出しが離れている辺の一覧も一致する。加えて、起動したサーバーで `OnAddRouteHandler` から
+ルートごとの method・path・名前・handler の関数名・middleware の関数名の並びを書き出し、前後で
+集合として一致することを確かめた (上の 2 つの構成で 667 と 676)。middleware の関数名は引数を
+含まないので、各ルートの行の引数の式も構文木から文字列で書き出し、`api`・`s.echo`・pprof の
+613 文で前後が一致することを確かめた。`collectRoutes` の解決 (589 本、/api の 528 本) も前後で
+同じ。
+
+**ゲートとテスト**
+
+- `internal/server/routes_registrars_test.go`
+  - `TestSetupRoutesCallsEveryRouteRegistrarOnce`: 登録の関数ごとに、`setupRoutes()` の本文の
+    直下の式文としての呼び出しが 1 つだけで、ほかから呼ばない。呼び出しはすべての `api.Use`
+    より後、どの `return` と `setupPlugins` よりも前。引数は関数の引数と同じ名前の識別子で、
+    `setupRoutes()` の本文の直下で `:=` で 1 回だけ定義し、関数リテラルの中を含めて書き換えず、
+    アドレスも取らない
+  - `TestRouteRegistrarsOnlyRegisterRoutes`: 本文の直下は `api` の `POST` / `GET` / `Match` の
+    式文と `:=` だけ (`if` の中の登録、`api.Use`、`api.Group` を落とす)。引数を書き換えない
+  - `TestAPIRoutesAreRegisteredByRegistrars`: パッケージのどこでも、`api` への `POST` / `GET` /
+    `Match` は登録の関数の中に限る。外は `apiRoutesOutsideRegistrars` (`/api/reset-db` だけ。
+    使われていない項目も落とす)
+  - 登録の関数の形も見る: `apiRoutes` を受ける関数は、`register…Routes` という名前の、
+    `routes_` で始まるファイルの、最初の引数を `api` と名付けた普通の関数に限る。名指しの
+    4 つ (notes・admin・i・chat) とファイルを要求し、20 個未満なら落とす。最初の引数の名前を
+    `api` に限るので、perm / secure / oauth / cacheSec などの `api.` を正規表現で見る抽出から
+    ルートが外れることも無い (docs/gates.md の既知の限界)
+- `TestAPIRegistrationsGoThroughAPIRoutes` (`param_shadow_test.go`) は、許可した登録をファイルごとに
+  照合するようにした。catchall を `routes_<領域>.go` へ移すと落ちる
+- ルートの行を文字列で照合していたゲートは、行に出る名前が関数の引数になったので、
+  `assertRouteRegisteredBy(t, "<ファイル>", "<関数>", <行>, …)` (`internal/entitycompat`) で照合する。
+  行がそのファイルのその関数の本文の直下にあり、`setupRoutes()` がその関数を本文の直下で 1 回だけ、
+  引数と同じ名前の変数を渡して呼ぶことを見る。対象は `TestDriveUsageRouteIsRegistered`、
+  `TestIPAccountSearchRouteIsRegistered`、`TestIPRelatedAccountsRouteIsRegistered`、
+  `TestIPLookupLogRouteIsRegistered`、`TestAvatarDecorationRoleSetsAreWired` の 5 つ。前の
+  `assertWired` のままだと、`setupRoutes()` で別名を作って渡す・引数の名前を変えて行の名前へ
+  入れ直す・`if` の中で呼ぶ・ルートを別の関数へ移す、の 5 つの変異がすべて通った
+- 照合するリテラルが移ったゲートの探し方: tracked な `_test.go` すべてと
+  `tools/apicompat/main.go` の文字列リテラル (と、その各行) のうち、#3697 の前の `router.go` に
+  現れ、後の `router.go` と `routes_*.go` 以外の `internal/server` のファイルに現れないもの。
+  568 件で、ほとんどは endpoint の path や scope の文字列。`internal/server` のソースを読む
+  テストのファイルに絞り、`setupRoutes()` の変数の名前を含む行を照合しているものが上の 5 つ。
+  ほかは middleware の中身 (`RequireRolePolicy(` や scope) を見るもので、名前が指す値は上の
+  `TestSetupRoutesCallsEveryRouteRegistrarOnce` が見る
+- `collectRoutes` (docs/gates.md) は、関数の引数で受けた handler の型を引くので、変更は要らなかった
+
+| | #3697 の前 (`b3d75729a`) | 後 |
+|---|---|---|
+| `setupRoutes()` の行数 | 4,843 | 4,069 |
+| `setupRoutes()` のルートの登録の文 | 613 (`api` 541・`s.echo` 64・pprof 8) | 74 (`api` 2・`s.echo` 64・pprof 8) |
+| 同じ (前の段の数え方: 行頭の `api.` / `s.echo.` / `pprofGroup.` の `GET` などの行) | 605 (541・56・8) | 66 (2・56・8) |
+| `routes_<領域>.go` のファイル (登録の関数) | — | 24 (539 文) |
+| `setupRoutes()` の節点 (4.1 の数え方) | 364 | 361 |
+
+数え方: 行数は `setupRoutes()` の本文 (`func` の行から、行頭の `}` まで) の `wc -l`。774 行
+減ったのは、ルートの登録の文 590 行 (複数行の文がある)・それに付いていたコメント 200 行・空行 19 行・
+登録の関数へ移した 3 つの定義の 3 行 (計 812 行) を消し、呼び出しの 24 行・理由のコメント 13 行・
+空行 1 行 (計 38 行) を足したため。登録の文は構文木で、`api`・`s.echo`・`pprofGroup` への
+`GET`・`POST`・`PUT`・`DELETE`・`PATCH`・`OPTIONS`・`HEAD`・`Match`・`Any`・`Add`・`File`・`Static`
+の呼び出しの式文を数えた (`if` の中も数える)。前の段の数え方は `GET|POST|PUT|DELETE|Match|Any` の
+行頭だけを数えるので、`OPTIONS`・`File`・`Static` の 8 文を数えない。
+
+**#3666 の段階 (2) はここまで。** 次は段階 (3)、部品に起動・停止の口を持たせる段 (#3661・#3662 で
+先に直した内容を土台にする)。上で残した core の service・連合の部品・queue の processor・
+stream の部品・handler と、/api の外のルートの登録は、依存する領域の起動・停止を扱うときに
+一緒に扱う。部品を移すときは、どれも `wiring` のフィールドに入れ、`build…` の関数で作り、
+`setupRoutes()` では別名を置く。repository は `w` から、それより後の領域は
 `coreSvcs` / `fedSvcs` / `queueSvcs` / `streamSvcs` / `hSvcs` のような変数から受け取る。後の
 領域ほど、構築の途中で動く処理 (4.1) と shutdown hook を登録するものが多いので、それらを
 動かさずに残す範囲を PR ごとに決める。
