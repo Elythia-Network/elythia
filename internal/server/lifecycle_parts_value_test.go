@@ -413,7 +413,9 @@ func TestValueShape_ClassifiesThePartTypes(t *testing.T) {
 		// closure でしか止められないので addPart で足す型と、値を持たない worker。
 		{name: "fedrule.HitStore", part: (*fedrule.HitStore)(nil)},
 		{name: "hashtag.Service", part: (*corehashtag.Service)(nil)},
-		{name: "EmojiInvalidationQueue", part: (*repository.EmojiInvalidationQueue)(nil)},
+		// Start と Stop を持つので形を満たす (#3705)。setupRoutes はまだ addPart で登録する
+		// (addPartShapeAllowlist)。
+		{name: "EmojiInvalidationQueue", part: (*repository.EmojiInvalidationQueue)(nil), use: "startPartWithStop"},
 		{name: "paramshadow.Recorder", part: (*paramshadow.Recorder)(nil)},
 		{name: "no value", part: nil},
 	}
