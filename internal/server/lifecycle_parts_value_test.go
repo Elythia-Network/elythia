@@ -7,7 +7,9 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,6 +28,10 @@ import (
 type partCalls struct {
 	srv   *Server
 	calls []string
+	// name and order, when set, record the start of this part into a list
+	// shared by the parts of one test, so the test can see the start order.
+	name  string
+	order *[]string
 }
 
 type partCtxKey struct{}
@@ -40,9 +46,12 @@ func ctxTag(ctx context.Context) string {
 }
 
 // started records a start, with the number of parts already in the list, so
-// a test can tell whether the part was started before it was added.
+// a test can tell whether the part was started before every part was added.
 func (c *partCalls) started(ctx string) {
 	c.calls = append(c.calls, fmt.Sprintf("Start(%s) listed=%d", ctx, len(c.srv.lifecycle.parts)))
+	if c.order != nil {
+		*c.order = append(*c.order, c.name)
+	}
 }
 
 func (c *partCalls) record(call string) { c.calls = append(c.calls, call) }
@@ -74,10 +83,11 @@ func (f fakeErrCloser) Close() error {
 }
 
 // TestServer_RegistersAPartFromItsValue checks each registration that builds
-// the start and the stop of a part from its value (#3701): it calls the start
-// once, right away and before the part is added, with the ctx it was given;
-// it keeps the value itself as the part; and the stop calls that value's
-// method, passing the shutdown ctx only to the methods that take one.
+// the start and the stop of a part from its value (#3701): it does not start
+// the part when it adds it; startAll calls the start once, in list order and
+// with the ctx the registration was given (#3703); it keeps the value itself
+// as the part; and the stop calls that value's method, passing the shutdown
+// ctx only to the methods that take one.
 func TestServer_RegistersAPartFromItsValue(t *testing.T) {
 	startCtx := context.WithValue(context.Background(), partCtxKey{}, "start")
 	shutdownCtx := context.WithValue(context.Background(), partCtxKey{}, "shutdown")
@@ -85,8 +95,8 @@ func TestServer_RegistersAPartFromItsValue(t *testing.T) {
 		name string
 		// register adds two parts, "a" and "b", of the same type.
 		register func(s *Server, a, b *partCalls) (any, any)
-		// start is the call the registration makes, with %d for the number of
-		// parts listed before it ("" when it does not start the part).
+		// start is the call startAll makes, with %d for the number of parts
+		// listed when it is made ("" when the part has nothing to start).
 		start string
 		stop  string
 	}{
@@ -147,19 +157,28 @@ func TestServer_RegistersAPartFromItsValue(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Server{}
-			a, b := &partCalls{srv: s}, &partCalls{srv: s}
+			var order []string
+			a := &partCalls{srv: s, name: "a", order: &order}
+			b := &partCalls{srv: s, name: "b", order: &order}
 			pa, pb := tt.register(s, a, b)
 			require.NoError(t, s.lifecycle.err)
 			assert.Equal(t, []string{"a", "b"}, s.lifecycle.names())
+			// 登録では起動しない(#3703)。
+			assert.Empty(t, a.calls, "a was started when it was added")
+			assert.Empty(t, b.calls, "b was started when it was added")
 
-			// 起動は登録したその場で 1 回だけ、登録の前に呼ぶ。b の起動は a の登録の後。
-			var wantA, wantB []string
+			// 起動はstartAllで1回だけ、一覧の順に呼ぶ。どちらも2つの登録の後。
+			require.NoError(t, s.lifecycle.startAll())
+			require.NoError(t, s.lifecycle.startAll())
+			var wantA, wantB, wantOrder []string
 			if tt.start != "" {
-				wantA = []string{fmt.Sprintf(tt.start, 0)}
-				wantB = []string{fmt.Sprintf(tt.start, 1)}
+				wantA = []string{fmt.Sprintf(tt.start, 2)}
+				wantB = []string{fmt.Sprintf(tt.start, 2)}
+				wantOrder = []string{"a", "b"}
 			}
-			assert.Equal(t, wantA, a.calls, "a was not started once, before it was added")
-			assert.Equal(t, wantB, b.calls, "b was not started once, before it was added")
+			assert.Equal(t, wantA, a.calls, "startAll did not start a once")
+			assert.Equal(t, wantB, b.calls, "startAll did not start b once")
+			assert.Equal(t, wantOrder, order, "startAll did not start the parts in list order")
 
 			va, _ := s.lifecycle.partValue("a")
 			vb, _ := s.lifecycle.partValue("b")
@@ -179,21 +198,94 @@ func TestServer_RegistersAPartFromItsValue(t *testing.T) {
 	}
 }
 
-// TestServer_StartPartDoesNotAddAPartWhoseStartPanics pins the order of a
-// registration that starts the part: the start runs before the part is added,
-// so a part whose start panics is not stopped by the rollback.
-func TestServer_StartPartDoesNotAddAPartWhoseStartPanics(t *testing.T) {
+// TestLifecycle_StartAllRecoversAPanickingStart checks that a start that
+// panics makes startAll return an error naming the part, that the parts after
+// it are not started (not even by a later startAll), and that stopAll still
+// stops every part, the one that panicked and the ones never started
+// included (#3703).
+func TestLifecycle_StartAllRecoversAPanickingStart(t *testing.T) {
 	s := &Server{}
-	p := fakeStartCloser{&partCalls{srv: s}}
-	require.Panics(t, func() {
-		s.startPartWithClose(context.Background(), "a", panickingStartCloser{p})
-	})
-	assert.Empty(t, s.lifecycle.names())
+	var order []string
+	a := &partCalls{srv: s, name: "a", order: &order}
+	b := &partCalls{srv: s, name: "b", order: &order}
+	c := &partCalls{srv: s, name: "c", order: &order}
+	s.startPartWithClose(context.Background(), "a", fakeStartCloser{a})
+	s.startPartWithClose(context.Background(), "b", panickingStartCloser{fakeStartCloser{b}})
+	s.startPartWithClose(context.Background(), "c", fakeStartCloser{c})
+	require.NoError(t, s.lifecycle.err)
+
+	err := s.lifecycle.startAll()
+	require.ErrorIs(t, err, errLifecycleStart)
+	assert.ErrorContains(t, err, `part "b" panicked: start failed`)
+	assert.Equal(t, []string{"a"}, order, "startAll started a part after the one that panicked")
+	require.NoError(t, s.lifecycle.startAll())
+	assert.Equal(t, []string{"a"}, order, "a second startAll started the parts again")
+
+	s.lifecycle.stopAll(context.Background())
+	assert.Equal(t, []string{"Start(none) listed=3", "Close()"}, a.calls)
+	assert.Equal(t, []string{"Close()"}, b.calls)
+	assert.Equal(t, []string{"Close()"}, c.calls)
 }
 
 type panickingStartCloser struct{ fakeStartCloser }
 
 func (panickingStartCloser) Start(context.Context) { panic("start failed") }
+
+// TestLifecycle_StartAllStartsNothingAfterStopAll checks that the parts of a
+// generation that has begun to stop are not started: a start after the stop
+// would leave a goroutine nobody stops.
+func TestLifecycle_StartAllStartsNothingAfterStopAll(t *testing.T) {
+	s := &Server{}
+	a := &partCalls{srv: s}
+	s.startPartWithClose(context.Background(), "a", fakeStartCloser{a})
+	s.lifecycle.stopAll(context.Background())
+	require.NoError(t, s.lifecycle.startAll())
+	assert.Equal(t, []string{"Close()"}, a.calls)
+}
+
+// TestServer_ConstructionWorkerRunsOnlyOnceStarted checks the worker part of
+// startConstructionWorker: adding it does not run it, startAll runs it once,
+// and the stop of a worker that never started returns at once, even with a
+// shutdown ctx that never expires (#3703).
+func TestServer_ConstructionWorkerRunsOnlyOnceStarted(t *testing.T) {
+	t.Run("not started", func(t *testing.T) {
+		s := &Server{}
+		var runs atomic.Int32
+		s.startConstructionWorker("w", func(context.Context) { runs.Add(1) })
+		stopped := make(chan struct{})
+		go func() {
+			defer close(stopped)
+			s.lifecycle.stopAll(context.Background())
+		}()
+		select {
+		case <-stopped:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the stop of a worker that never started waited for it")
+		}
+		require.NoError(t, s.lifecycle.startAll())
+		assert.Zero(t, runs.Load(), "the worker ran without being started, or after its stop")
+	})
+	t.Run("started", func(t *testing.T) {
+		s := &Server{}
+		running := make(chan struct{})
+		var runs atomic.Int32
+		s.startConstructionWorker("w", func(ctx context.Context) {
+			runs.Add(1)
+			close(running)
+			<-ctx.Done()
+		})
+		select {
+		case <-running:
+			t.Fatal("the worker ran when it was added")
+		case <-time.After(50 * time.Millisecond):
+		}
+		require.NoError(t, s.lifecycle.startAll())
+		require.NoError(t, s.lifecycle.startAll())
+		<-running
+		s.lifecycle.stopAll(context.Background())
+		assert.EqualValues(t, 1, runs.Load())
+	})
+}
 
 // TestServer_AddPartDoesNotMarkThePartAsFromValue checks that a part added by
 // addPart, even one that has a shape of its own, is not marked as added from
@@ -271,7 +363,7 @@ func TestValueShapes_CoverEveryRegistrationFromValue(t *testing.T) {
 				return true
 			}
 			sel, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok || sel.Sel.Name != "addFromValue" || len(call.Args) != 3 {
+			if !ok || sel.Sel.Name != "addFromValue" || len(call.Args) != 4 {
 				return true
 			}
 			arg, ok := call.Args[1].(*ast.Ident)

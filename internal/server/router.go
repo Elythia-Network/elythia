@@ -172,7 +172,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// DB に触らないので、作る位置が下の EnsureInitial などより前に移っても、DB の文の
 	// 順は変わらない。
 	// lifecycle は Server が持つ部品の一覧 (#3699) を指す。登録は s.startPartWithClose などの
-	// 値から作る登録か s.addPart で行う (docs/architecture.md 4.3)。
+	// 値から作る登録か s.addPart で行う (docs/architecture.md 4.3)。構築では登録するだけで、
+	// 起動はStartBackgroundが一覧の順に行う(#3703)。
 	w := &wiring{repos: s.buildRepos(), lifecycle: &s.lifecycle}
 	userRepo := w.repos.user
 	noteRepo := w.repos.note
@@ -336,7 +337,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 同じ名前の別名を置くだけにする。移したのは、作るだけで DB にも Redis にも外部にも
 	// 触らず、goroutine も shutdown hook も持たず、依存が repository と先に作った core
 	// だけのもの。**setter の呼び出しは 1 つも動かしていない** (下の元の位置のまま)。
-	// 構築の途中で動く worker から見える配線を変えないため (docs/architecture.md 4.1)。
+	// 構築の途中で動く処理から見える配線を変えないため (docs/architecture.md 4.1)。
 	// 副作用のあるものと、stream・handler・連合の部品に依存するものは、下の元の位置で作る。
 	// **別名は変数 coreSvcs から取る。** w.core から取ると、別名を代入より前に書いても
 	// コンパイルが通り、ゼロ値 (nil) を黙って受け取る (#3686 のレビュー)。
@@ -1067,9 +1068,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	federationResolver.SetRuleEvaluator(fedRuleService)
 	federationProcessor.SetRuleEvaluator(fedRuleService)
 	{
+		// 起動はStartBackgroundで行う(#3703)。起動せずに止めても、cancelするだけで済む。
 		hitsCtx, stopHits := context.WithCancel(context.Background())
-		fedRuleHits.Start(hitsCtx)
-		s.addPart("fedRuleHits", fedRuleHits, func(context.Context) { stopHits() })
+		s.addPartWithStart("fedRuleHits", fedRuleHits, func() { fedRuleHits.Start(hitsCtx) }, func(context.Context) { stopHits() })
 	}
 	// 新規 instance row 発見時に nodeinfo を取得して metadata を更新する。
 	// admin/federation/refresh-remote-instance-metadata でも同じ fetcher を
@@ -1325,9 +1326,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// enableStatsForFederatedInstances の分岐の中で動かす。notesCount の加算は
 	// inbox の最頻経路なので、本家の CollapsedQueue と同じく窓で合算してから書く。
 	//
-	// chartHooks は repository の直後で作るが、このバッファは goroutine を起動し、
-	// 停止の部品 (#3699) を登録するので、部品の登録順 (FIFO で止まる) を変えないよう
-	// ここに残す (#3676)。chartHooks のフィールドに入れるだけなので setter の辺ではない。
+	// chartHooksはrepositoryの直後で作るが、このバッファは起動と停止を持つ部品(#3699)として
+	// 一覧に登録するので、部品の登録順(この順で起動し、FIFOで止まる)を変えないようここに
+	// 残す(#3676)。起動はStartBackgroundで行う(#3703)。chartHooks のフィールドに入れるだけなので setter の辺ではない。
 	instanceCounterBuffer := coreinstance.NewCounterBuffer(instanceRepo, 30*time.Second)
 	s.startPartWithClose(context.Background(), "instanceCounterBuffer", instanceCounterBuffer)
 	chartHooks.InstanceCounter = instanceCounterBuffer
@@ -3033,10 +3034,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// のみで pubsub publish が欠落していた)。
 	antennaService.SetStreamingPublisher(notePublisher)
 	notificationService.SetStreamingPublisher(notificationPublisher)
-	// main stream の publisher は、pollExpiryWorker (構築の途中で起動し、初回の Tick で
-	// 通知を作る) より後で入れる (#3676)。前へ移すと、構築中に作った pollEnded の通知が
-	// packer を通らない形で unreadNotification として流れる (SetPacker はここより後)。
-	// 元の配線と同じにするため、streaming の publisher の隣に残す。
+	// main streamのpublisherは、#3676の時点ではpollExpiryWorker(構築の途中で起動し、
+	// 初回のTickで通知を作る)より後で入れていた。前へ移すと、構築中に作ったpollEndedの
+	// 通知がpackerを通らない形でunreadNotificationとして流れた(SetPackerはここより後)。
+	// #3703でworkerの起動はStartBackground(構築の後)へ移ったので、構築中に通知を作る
+	// ことはもう無い。元の配線と同じにするため、streamingのpublisherの隣に残す。
 	notificationService.SetMainStreamPublisher(mainStreamPublisher)
 	// readAllNotifications は upstream postReadAllNotifications と同じく
 	// main stream と Web Push の両方へ送る。これが無いと SW 側の

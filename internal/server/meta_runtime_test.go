@@ -59,6 +59,10 @@ type metaRuntimeOptions struct {
 	// pubsubDown points the pub/sub client at a stopped Redis, so the process
 	// receives no internal:metaUpdated, not even its own.
 	pubsubDown bool
+	// startBackground calls StartBackground after the construction, for a
+	// test that needs the parts of the generation running (the reaction
+	// flush ticker). Construction alone starts none of them (#3703).
+	startBackground bool
 }
 
 func newMetaRuntimeHarnessWith(t *testing.T, opts metaRuntimeOptions, beforeSetup ...func(*Server)) *metaRuntimeHarness {
@@ -119,6 +123,9 @@ func newMetaRuntimeHarnessWith(t *testing.T, opts metaRuntimeOptions, beforeSetu
 	srv, err := newServer(cfg, db, redisClients, nil, noopStorage, beforeSetup...)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
+	if opts.startBackground {
+		require.NoError(t, srv.StartBackground())
+	}
 	h.srv = srv
 	return h
 }
@@ -373,7 +380,7 @@ func (h *metaRuntimeHarness) unreact(token, noteID string) {
 // ticker の有無を決めていたので、後から有効にしても誰も flush しなかった。
 func TestMetaRuntime_ReactionFlushTickerRunsWhenStartedDisabled(t *testing.T) {
 	started := make(chan func() error, 1)
-	_ = newMetaRuntimeHarnessWith(t, metaRuntimeOptions{}, func(s *Server) {
+	_ = newMetaRuntimeHarnessWith(t, metaRuntimeOptions{startBackground: true}, func(s *Server) {
 		s.reactionFlushWorker = func(ctx context.Context, fn func() error) {
 			started <- fn
 			<-ctx.Done()
@@ -439,7 +446,7 @@ func TestMetaRuntime_NodeinfoFollowsMetaUpdated(t *testing.T) {
 // web だけのプロセスも ticker を回し (設定の読み直しのため)、flush は積まない。
 func TestMetaRuntime_ReactionTickerRunsInServerOnlyRoleWithoutEnqueue(t *testing.T) {
 	started := make(chan func() error, 1)
-	_ = newMetaRuntimeHarnessWith(t, metaRuntimeOptions{onlyServer: "1"}, func(s *Server) {
+	_ = newMetaRuntimeHarnessWith(t, metaRuntimeOptions{onlyServer: "1", startBackground: true}, func(s *Server) {
 		s.reactionFlushWorker = func(ctx context.Context, fn func() error) {
 			started <- fn
 			<-ctx.Done()
@@ -460,7 +467,7 @@ func TestMetaRuntime_ReactionTickerRunsInServerOnlyRoleWithoutEnqueue(t *testing
 // 有効のまま溜め続けている状態を作り、tick で DB の値 (無効) に揃うことを見る。
 func TestMetaRuntime_ReactionTickReloadsInServerOnlyRole(t *testing.T) {
 	started := make(chan func() error, 1)
-	h := newMetaRuntimeHarnessWith(t, metaRuntimeOptions{onlyServer: "1"}, func(s *Server) {
+	h := newMetaRuntimeHarnessWith(t, metaRuntimeOptions{onlyServer: "1", startBackground: true}, func(s *Server) {
 		s.reactionFlushWorker = func(ctx context.Context, fn func() error) {
 			started <- fn
 			<-ctx.Done()
