@@ -46,7 +46,7 @@ homeTimeline hybridTimeline localTimeline main queueStats reversi
 reversiGame roleTimeline serverStats userList
 ```
 
-この一覧と上の表の合計が `internal/server` の `streamRegistry` 登録名と一致すること
+この一覧と上の表の合計が `internal/server` の登録名 (`builtinStreamChannels()` の一覧、#3692) と一致すること
 は `TestDivergenceDoc_StreamChannelsMatchRegistry` が固定する。ただし固定できるのは
 **Elythia 側だけ**で、「upstream は 18」「名前も upstream に揃えてある」の検証は入って
 いない (`test-shards` は本家のソースを取得しない)。upstream が増減した場合は

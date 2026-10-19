@@ -277,6 +277,9 @@ driver は `mkq`（BullMQ wire 互換）のみ。legacy の `asynq` は #2985 �
 
 dispatcher が shareable channel の共有・pong ack を upstream `Connection.ts` 互換で扱う。
 
+組み込みのチャンネル名と、それを作る factory と credentialed (匿名の接続に許すか) の対応は、
+`internal/server/wiring_stream.go` の `builtinStreamChannels()` の一覧にだけある (#3692、4.2)。
+
 ### 3.9 その他
 
 | Elythia | Misskey-TS | 役割 |
@@ -291,11 +294,11 @@ dispatcher が shareable channel の共有・pong ack を upstream `Connection.t
 
 ## 4. DI / 配線
 
-すべてのサービス生成・配線は `internal/server/router.go` の `setupRoutes()` で手動実行（NestJS 相当を関数呼び出しで構築）。DI フレームワークは使わない。repository は `setupRoutes()` から呼ぶ `buildRepos()` (`internal/server/wiring_repos.go`) で、core の service の一部は `buildCore()` (`internal/server/wiring_core.go`) で、連合の部品の一部は `buildFederation()` (`internal/server/wiring_fed.go`) で、queue の processor の一部は `buildQueue()` (`internal/server/wiring_queue.go`) で作る (4.2)。
+すべてのサービス生成・配線は `internal/server/router.go` の `setupRoutes()` で手動実行（NestJS 相当を関数呼び出しで構築）。DI フレームワークは使わない。repository は `setupRoutes()` から呼ぶ `buildRepos()` (`internal/server/wiring_repos.go`) で、core の service の一部は `buildCore()` (`internal/server/wiring_core.go`) で、連合の部品の一部は `buildFederation()` (`internal/server/wiring_fed.go`) で、queue の processor の一部は `buildQueue()` (`internal/server/wiring_queue.go`) で、stream の部品の一部は `buildStream()` (`internal/server/wiring_stream.go`) で作る (4.2)。
 
 ```
 server.New() → setupRoutes()
-  ├→ stream の pubsub と publisher 生成 (購読はまだ始めない)
+  ├→ stream の pubsub と、stream の節より前の受け手へ渡す publisher の生成 (購読はまだ始めない)
   ├→ Repository 生成 (buildRepos → wiring.repos。setupRoutes では userRepo, noteRepo, … の別名を置く)
   ├→ chart の hook と、作るだけで副作用の無い部品の生成
   ├→ Core サービス生成 (作るだけのものは buildCore → wiring.core で作り、別名を置く。
@@ -307,7 +310,10 @@ server.New() → setupRoutes()
   ├→ hook 注入 (§5)
   ├→ Handler 生成 + ルート登録 (§3.1)。この途中 (プラグインの準備より前) で、queue の
   │   handler を registerQueueHandlers で 1 回だけ登録する (一覧は builtinQueueHandlers)
-  └→ stream (pubsub の購読をここで始める) / WebSocket / 静的ファイル / middleware
+  └→ stream (bus・registry・manager と、ここから配る publisher は buildStream → wiring.stream
+      で作り、別名を置く。pubsub の購読をここで始める。WebSocket のチャンネルは
+      registerStreamChannels で 1 回だけ登録する。一覧は builtinStreamChannels) /
+      WebSocket / 静的ファイル / middleware
 ```
 
 ### 4.1 作る順と、後から入れる依存 (#3676)
@@ -347,13 +353,13 @@ setter は依存を先に作っても、元の位置 (streaming の publisher �
 `featuredService`、`hashtagService`、`modLogService`、`instanceService` など) を
 受け手より先に作るようにした (こちらは setter を呼ぶ位置は変えていない)。
 
-| | #3676 の前 (`b9db7e49b`) | #3676 の後 | #3684 の後 | #3686 の後 | #3688 の後 | 今 (#3690 の後) |
-|---|---|---|---|---|---|---|
-| setter で依存を入れる辺 | 877 | 877 | 879 | 879 | 872 | 872 |
-| うち、受け手より後で作った依存を入れるもの | 192 (受け手 55 個) | 107 (受け手 41 個) | 104 (受け手 41 個) | 103 (受け手 40 個) | 96 (受け手 40 個) | 96 (受け手 40 個) |
-| うち、循環しているもの | 40 | 40 | 40 | 39 | 35 | 35 |
-| うち、それ以外 | 152 | 67 | 64 | 64 | 61 | 61 |
-| setter の呼び出しが受け手から離れているもの (下の数え方) | 359 | 307 | 308 | 392 | 415 | 426 |
+| | #3676 の前 (`b9db7e49b`) | #3676 の後 | #3684 の後 | #3686 の後 | #3688 の後 | #3690 の後 | 今 (#3692 の後) |
+|---|---|---|---|---|---|---|---|
+| setter で依存を入れる辺 | 877 | 877 | 879 | 879 | 872 | 872 | 872 |
+| うち、受け手より後で作った依存を入れるもの | 192 (受け手 55 個) | 107 (受け手 41 個) | 104 (受け手 41 個) | 103 (受け手 40 個) | 96 (受け手 40 個) | 96 (受け手 40 個) | 96 (受け手 40 個) |
+| うち、循環しているもの | 40 | 40 | 40 | 39 | 35 | 35 | 34 |
+| うち、それ以外 | 152 | 67 | 64 | 64 | 61 | 61 | 62 |
+| setter の呼び出しが受け手から離れているもの (下の数え方) | 359 | 307 | 308 | 392 | 415 | 426 | 444 |
 
 #3684 の後の列は、#3684 の後の `router.go` を同じ道具で数えた。#3676 の後に入った変更で、setter の
 辺と呼び出しが離れている辺が 2 つずつ増えている (#3684 の直前の `692710223` で
@@ -406,6 +412,29 @@ setter の辺、後から入れる辺、循環、それ以外は、どれも数�
 `cleanGenericProcessor` の 2 辺、`deleteAccountProcessor` の 3 辺、`postScheduledNoteProcessor`
 の 3 辺)。handler の登録 (`s.queueServer.Handle`) は setter ではないので、どの行にも数えない。
 
+#3692 で stream の部品 7 個 (registry、manager、revoke publisher、note・notification・
+broadcast・chat の publisher。bus も作るが manager に渡すだけ) を `buildStream()` へ移し、
+その別名を `setupRoutes()` の `streamBus` を作っていた位置 (stream の節の先頭) に置いた (4.2)。
+setter を呼ぶ位置は変えていない。setter の辺と後から入れる辺は数が変わらず、後から入れる
+96 辺は行番号を除けば前と同じ。循環が 1 つ減り、それ以外が 1 つ増えたのは、
+`iHandler.SetStreamRevoker(streamRevokePublisher)` の分類が循環からそれ以外へ変わったため。
+#3686 の `ephemeralStore` と同じく道具の数え方による (別名
+`streamRevokePublisher := streamSvcs.streamRevokePublisher` の依存は `streamSvcs` だけで、
+右辺の `streamManager` を辿らなくなった)。呼び出しが離れている辺は 18 増えた。受け手か依存の
+定義が前へ移り、setter の呼び出しは元の位置に残したため (`notePublisher` の 5 辺、
+`notificationPublisher` の 11 辺、`iHandler.SetStreamRevoker` と `oauthHandler.SetStreamRevoker`
+の 1 辺ずつ)。2 つの handler の setter の引数でそれぞれ作っていた
+`NewUserListStreamPublisher` を先頭の 1 つにまとめたが、setter の辺の数は変わらない (依存が
+`streamPubSub` から `userListStreamPublisher` に変わっただけ)。チャンネルの登録
+(`Register` / `RegisterCredentialed`) は setter ではないので、どの行にも数えない。
+
+`buildStream()` を `setupRoutes()` の先頭で呼ぶ形も、同じ道具で比べた。先頭で呼ぶと、
+manager と note・notification の publisher (どれも setter の受け手) まで先頭へ移り、
+後から入れる辺は 96 から 117 に増える (27 辺増えて 6 辺減る。増えるのは
+`streamManager` の setter の 12 辺、`notePublisher` の 5 辺、`notificationPublisher` の 10 辺)。
+なので、#3676 で先頭に置いた 4 つの publisher は先頭に残し、`buildStream()` は stream の節で
+呼んだ (4.2)。
+
 数え方 (`setupRoutes()` の構文木。道具はコミットしていない):
 
 - 節点: `setupRoutes()` の中で `:=` か `var` で定義した名前 (関数リテラルの中と、
@@ -416,8 +445,8 @@ setter の辺、後から入れる辺、循環、それ以外は、どれも数�
 - 後から入れる辺: `B` の定義の行が `X` の定義の行より後のもの
 - 循環: 依存の図 (`A := f(... B ...)` の右辺と、setter の引数から張る `A → B`) で、
   `B` から `X` へ辿り着けるもの。図は `setupRoutes()` の中だけで張り、`buildRepos()`・
-  `buildCore()`・`buildFederation()`・`buildQueue()` の中の構築の依存は辿らない (別名
-  `x := coreSvcs.y` の依存は `coreSvcs` だけ)
+  `buildCore()`・`buildFederation()`・`buildQueue()`・`buildStream()` の中の構築の依存は
+  辿らない (別名 `x := coreSvcs.y` の依存は `coreSvcs` だけ)
 - 「後から入れる辺」は**定義の順だけを見ていて、setter を呼ぶ位置は見ていない**。依存の
   定義だけを前へ移した辺 (setter の呼び出しは元の位置) も、元の位置に残した
   `notificationService.SetMainStreamPublisher` も、後から入れる辺には数えない。呼ぶ位置は
@@ -459,7 +488,8 @@ setter の辺、後から入れる辺、循環、それ以外は、どれも数�
 **`setupRoutes()` で作る部品は、領域ごとの関数で作り、コンテナの構造体 `wiring`
 (`internal/server/wiring.go`) の領域ごとのフィールドに入れる。** #3666 の段階 2。
 #3684 で repository を、#3686 で core の service の一部を、#3688 で連合の部品の一部を、
-#3690 で queue の processor の一部を移した。今のフィールドは `repos`・`core`・`fed`・`queue` の 4 つ。
+#3690 で queue の processor の一部を、#3692 で stream の部品の一部を移した。今のフィールドは
+`repos`・`core`・`fed`・`queue`・`stream` の 5 つ。
 
 ```
 setupRoutes()
@@ -512,10 +542,14 @@ setupRoutes()
     `w.fed = fedSvcs`、別名は `x := fedSvcs.x`)
   - `queue` も同じ形 (`queueSvcs := s.buildQueue(w, coreSvcs, idGen)`、
     `w.queue = queueSvcs`、別名は `x := queueSvcs.x`)
+  - `stream` も同じ形 (`streamSvcs := buildStream(streamPubSub, idGen)`、
+    `w.stream = streamSvcs`、別名は `x := streamSvcs.x`)。`buildStream()` は `Server` の
+    フィールドを読まないので、メソッドではなく普通の関数にした。stream の pubsub は
+    `setupRoutes()` の先頭で作った変数 `streamPubSub` を引数で受ける
   - **後の領域の `build…()` も、先に作った領域を `w.core.x` のようにコンテナから読まず、
     `coreSvcs` のような変数を引数で受ける。** コンテナのフィールドから読むと、その
     `build…()` を代入より前に置いてもコンパイルが通り、ゼロ値を受け取る (別名と同じ穴)。
-    今 `w.core`・`w.fed`・`w.queue` を読む箇所は無い (#3686 のレビュー 2 周目。
+    今 `w.core`・`w.fed`・`w.queue`・`w.stream` を読む箇所は無い (#3686 のレビュー 2 周目。
     `buildFederation()` と `buildQueue()` は `coreSvcs` を引数で受ける)
 - **関数に移してよいのは、作るだけで副作用の無いものだけ (4.1 と同じ)。** 作るときに
   DB に触る文 (`EnsureInitial`、`NormalizePrivateKeysToPKCS8`、`RecomputeFollowCounts`)
@@ -788,11 +822,149 @@ setupRoutes()
 `grep -c '{queue\.TaskType'`、processor の数は `queueHandlerProcs` のフィールドの行数、
 行数は同じ本文の `wc -l`。
 
-**残りの領域は、次の順で同じ形に移す。** stream → handler と
+#### stream の部品 (#3692)
+
+```
+setupRoutes()
+  streamPubSub := event.NewPubSubService(...)        // 先頭 (#3676)
+  noteEventPub := stream.NewNoteEventPublisher(...)  // 受け手へ早く渡す 5 つは先頭のまま
+  …
+  // Streaming の節
+  streamSvcs := buildStream(streamPubSub, idGen)     // wiring_stream.go
+  w.stream = streamSvcs
+  streamManager := streamSvcs.streamManager          // 別名 (変数から取る)
+  …
+  s.streamManager = streamManager                    // 代入・setter・購読は元の位置のまま
+  streamManager.SetNotificationReader(…)
+  …
+  chatRoomFactory := channels.NewChatRoomFactory(chatService)
+  registerStreamChannels(streamRegistry, builtinStreamChannels(streamChannelDeps{  // 登録は 1 回
+    chatRoom: chatRoomFactory,
+    …
+  }))
+  streamingHandler := streaming.NewHandler(streamManager)  // /streaming はこの後
+```
+
+- **`buildStream()` は普通の関数で、stream の pubsub (`streamPubSub`) と ID の generator を
+  引数で受ける。** `Server` のフィールドは読まない。中の行は `setupRoutes()` にあった行を
+  そのまま移し、作る順も元のまま
+- **移す条件は core・連合・queue と同じ。** コンストラクタの本体を 1 つずつ読み、構造体を
+  作るだけなのを確かめた。Redis に繋ぐのは pubsub の最初の `Subscribe` で、作るときには
+  繋がない。移したのは 8 つの構築: bus (`NewEventPubSubBus`。manager に渡すだけなので
+  フィールドは持たない)、registry (`NewRegistry`。空の map を 2 つ作るだけ)、manager
+  (`NewManager`。接続の map を作り、registry と bus の参照を持つだけで、goroutine も購読も
+  始めない)、revoke publisher (`NewStreamRevokePublisher`。pubsub と manager の参照を
+  持つだけ)、note・notification・broadcast・chat の publisher。フィールドは 7 つ
+- **setter は 1 つも動かさない。** 購読 (`Subscribe…`。server role の分岐の中)、
+  `OnStreamRevoke`、`s.streamManager` への代入も、位置も順も元のまま。`buildStream()` を
+  呼ぶ位置は、移したものの中で最初に作っていた `streamBus` の位置 (stream の節の先頭)。
+  移した構築は副作用を持たないので、DB と Redis の文の順は変わらない
+- **#3676 で `setupRoutes()` の先頭に置いた 4 つの publisher (note event・drive・reversi・
+  main stream) は、先頭に残した。** どれも stream の節より前にある受け手 (core の service・
+  連合の processor・handler) へ渡す依存で、stream の節より前に要る。`buildStream()` を先頭で呼ぶ形も比べたが、manager と note・notification
+  の publisher (setter の受け手) まで先頭へ移り、後から入れる辺が 96 から 117 に増えた
+  (4.1)。stream の節で呼べば 96 のまま。`relationReloadPublisher` は `internal/server` の
+  adapter で、これも先頭のまま
+- **2 つの handler の setter の引数で別々に作っていた `NewUserListStreamPublisher` を、
+  先頭の 1 つ (`userListStreamPublisher`) にまとめた。** フィールドは pubsub だけで、
+  コンストラクタでしか書かず、setter も無い。メソッドはそれを読んで publish するだけなので、
+  1 つを共有しても使う側ごとに作るのと動きが同じ。先頭に置いたのは、受け手の
+  `usersHandler` が stream の節より前にあるため
+- **`wiring` へは変数を経由した代入で入れ、別名は変数から取る** (上の規則)。別名を
+  `buildStream()` の呼び出しより前に書くとコンパイルが通らない
+
+**チャンネルの登録は、チャンネル名・factory・credentialed の一覧 (`builtinStreamChannels()`)
+にまとめ、`setupRoutes()` で 1 回だけ登録する (`registerStreamChannels()`)。** 前は
+`streamRegistry.Register(...)` / `RegisterCredentialed(...)` が `setupRoutes()` の 22 行に
+散らばっていた。
+
+- **登録の場所を変えても動きは変わらない。** `Registry.Register` / `RegisterCredentialed` は
+  mutex を取って map に入れるだけで、map を引くのは dispatcher が接続を受けたとき
+  (`Lookup` / `RequiresCredential`) だけ。manager は registry の参照を持つだけで、作るときにも
+  購読の処理でも引かない。`internal/server` の中で registry を引く経路はほかに無く、
+  プラグインはチャンネルを登録しない。21 個の名前はすべて別々で、上書きは起きない。
+  registry は世代ごとに `buildStream()` で作るので、メンテナンスで世代を作り直すときも、
+  その世代の `setupRoutes()` の中で登録するのは同じ
+- **登録の位置は、最後の登録 (chatUser) があった位置。** /streaming の handler
+  (`streaming.NewHandler`) を作るより前で、`setupRoutes()` の途中の return (プラグインの
+  準備の失敗) より前でもある。サーバーが接続を受けるのは `setupRoutes()` が終わった後
+- **factory が依存する service と publisher は、setter を呼ぶのと同じ `setupRoutes()` の名前から
+  渡す (`streamChannelDeps`)。** reversi・バブルゲームの対戦・chat の service、serverStats・
+  queueStats の publisher、antenna の repository、role の service。chatRoom には、起動時の
+  検査 (`streamChannels.chatRoom.service`) が `HasService` を見るのと同じ `chatRoomFactory` を
+  渡す。欄名は別名と重ならないようにした (`chat: chatService` など)
+- **queueStats の分岐は一覧の中で表す。** `setupRoutes()` は、queueInspector があるときだけ
+  publisher を作って `Start` する (server role の条件と shutdown hook はそのまま)。
+  publisher は `var queueStatsPub *stream.QueueStatsPublisher` で宣言し、
+  `if s.queueInspector != nil {` の中で 1 回だけ代入する。一覧は publisher が nil なら
+  fallback の factory (`NewQueueStats`) を選ぶ。前の `else` の枝は登録だけだったので無くなった
+  (#3676 の道具で並べた副作用のある文の列は、この `ELSE` の 1 行だけが減り、ほかは同じ)
+
+照合する行が `buildStream()` の中にだけ移ったゲートは、`TestStreamRevokeIsWired` の
+`stream.NewStreamRevokePublisher(streamPubSub, streamManager)` の 1 本だった (確かめ方: #3690 と
+同じく、tracked な `_test.go` すべてと `tools/apicompat/main.go` の文字列リテラルのうち、
+#3692 の前の `router.go` に現れ、後の `router.go` と `internal/server` のほかのファイル
+(`wiring_stream.go` を除く) に現れないものを探した。登録を移す前で 1 件。登録を移した後に
+増えた 11 件は、足したテスト (`wiring_stream_test.go`) の文字列と、`internal/stream/channels`
+と `tests/e2e-federation` のテストのチャンネル名で、どれも `internal/server` の行を照合しない)。上の規則のとおり、
+`streamRevokePublisher: streamRevokePublisher`、`streamManager: streamManager`、
+`streamSvcs := buildStream(streamPubSub, idGen)`、`w.stream = streamSvcs`、
+`streamRevokePublisher := streamSvcs.streamRevokePublisher`、
+`streamManager := streamSvcs.streamManager` も照合する。
+`TestDivergenceDoc_StreamChannelsMatchRegistry` は `streamRegistry.Register(...)` の正規表現で
+チャンネル名を読んでいたので、`builtinStreamChannels()` の項目の名前を構文木から読む形に
+直した (名前が文字列リテラルでない項目と、関数が 1 つでないときは落とす。一覧の外の直接の
+登録も、今までの正規表現で拾う)。一覧には `internal/server/wiring_stream_test.go` のテストを
+付けた (一覧がチャンネル名を 1 回ずつ含み、credentialed が前と同じであること、名前ごとの
+factory の関数 (queueStats は publisher の有無の両方)、登録が一覧のとおりで印も付くこと、
+chatRoom に起動時の検査と同じ factory を登録すること (一覧が `d.chatRoom.New` を使うことと、
+`setupRoutes()` が `chatRoom` の欄に検査と同じ変数を渡すことの両方)、実際に作ったサーバーの
+manager が引く registry (`stream.Manager.Registry()`。このテストのために足した) に一覧の
+チャンネルがすべて同じ関数の factory と credentialed で載っていること (queueInspector の有無の両方。
+factory は関数名で比べ、どのインスタンスに束ねたかは上の構文木のテストが見る。
+registry は `buildStream()` で作り、登録は `setupRoutes()` の別名に対して行うので、別名を
+別の registry に書き換えると構文木のテストは通ったまま、どの connect も黙って無視される)、
+`internal/stream/channels` の
+チャンネルの実装 (`stream.Channel` / `stream.ChannelFactory` / `*…Factory` を返す exported な
+`New…`) をどれも一覧が使うこと (使わない許可は `NewServerStats` だけで、使われていない項目も
+落とす)、`setupRoutes()` が登録を本文の直下の文として 1 回だけ、/streaming の handler を作る
+より前とどの return よりも前で呼び、関数リテラルの中を含めて `Register` /
+`RegisterCredentialed` を直接呼ばないこと、`streamChannelDeps` の欄の値がどれも
+`setupRoutes()` の本文の直下で 1 回だけ定義し、`=` で書き換えていない変数で (queueStats だけは
+上の形に限って許す)、欄の書き忘れが無いこと、パッケージの中で stream の registry に登録する
+関数が `registerStreamChannels()` に限られること)。
+
+**`setupRoutes()` に残したもの** (`stream.New…` の 9 回の呼び出し):
+
+| 理由 | 例 |
+|---|---|
+| stream の節より前にある受け手へ渡す | `noteEventPub`・`drivePublisher`・`reversiPublisher`・`mainStreamPublisher` (#3676 で先頭に置いたもの。受け手は core の service・連合の processor・handler)、`userListStreamPublisher` (上でまとめたもの。stream の節より前の受け手は `usersHandler`) |
+| `Start` と shutdown hook を対で持つ | `serverStatsPub`、`queueStatsPub` (queueInspector の分岐の中) |
+| 別の部品の構築の引数の中で作る | `NewAdminStreamPublisher` (`coreabuse.NewCreatedNotifier` の引数。ゲートが式ごと照合する)、`NewBubbleVersusPublisher` (`corebubbleversus.NewService` の引数) |
+
+| | #3692 の前 (`f2d14ede1`) | 後 |
+|---|---|---|
+| `setupRoutes()` の `stream.New…` の呼び出し | 18 | 9 |
+| `buildStream()` の `stream.New…` の呼び出し | — | 8 |
+| `stream` のフィールド (`buildStream()` で作る部品) | — | 7 |
+| `setupRoutes()` の `streamRegistry.Register…` | 22 | 0 |
+| `builtinStreamChannels()` の項目 (チャンネル) | — | 21 (credentialed は 12) |
+| `setupRoutes()` の行数 | 4,823 | 4,838 |
+| setter で後から入れる辺 (4.1 の数え方) | 96 | 96 |
+
+数え方: `setupRoutes()` と `buildStream()` の本文 (`func` の行から、行頭の `}` まで) に
+`grep -oE '\bstream\.New[A-Z]'` を当てた。18 から 9 への差の 9 は、移した 8 回と、まとめて
+無くなった `NewUserListStreamPublisher` の 1 回。登録は `setupRoutes()` の本文の
+`grep -c 'streamRegistry\.Register'`、一覧の項目は `builtinStreamChannels()` の本文で
+`{"` で始まる行の数 (credentialed はそのうち `credentialed},` で終わる行)、フィールドは
+`streamParts` のフィールドの行数、行数は `setupRoutes()` の本文の `wc -l`。行数が増えたのは、
+`streamChannelDeps` のリテラルと、移した理由を書いたコメントのため。
+
+**残りの領域は、次の順で同じ形に移す。** handler と
 ルート (ルートはファイルを分ける)。上で残した core の service・連合の部品・queue の
-processor は、依存する領域を移すときに一緒に扱う。どれも `wiring` にフィールドを 1 つ足し、
+processor・stream の部品は、依存する領域を移すときに一緒に扱う。どれも `wiring` にフィールドを 1 つ足し、
 `build…` の関数で作り、`setupRoutes()` では別名を置く。repository は `w` から、それより後の
-領域は `coreSvcs` / `fedSvcs` / `queueSvcs` のような変数から受け取る。後の領域ほど、構築の途中で動く処理
+領域は `coreSvcs` / `fedSvcs` / `queueSvcs` / `streamSvcs` のような変数から受け取る。後の領域ほど、構築の途中で動く処理
 (4.1) と shutdown hook を登録するものが多いので、それらを動かさずに残す範囲を
 PR ごとに決める。
 
