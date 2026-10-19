@@ -137,10 +137,11 @@ func (r *lifecycleRecorder) result() ([]string, []string) {
 // lifecyclePartTypes is the dynamic type of the part value of each name
 // (pluginStorage:<name> is looked up as pluginStorage:).
 //
-// 部品の値 (part) と停止の関数の対応は、型でも実行時でも保証していない。この表は、
-// 名前が別の種類の値を持つ取り違え (serverStatsPub に hashtagService を渡すなど) を
-// 落とす。**同じ型の部品どうしの取り違えは落とせない** (deliveryHealth と inboxHealth は
-// どちらも *deliveryhealth.Service、ほかに 4 つの worker はどれも nil)。
+// この表は、名前が別の種類の値を持つ取り違え (serverStatsPub に hashtagService を渡すなど) を
+// 落とす。**同じ型の部品どうしの名前の取り違えは落とせない** (deliveryHealth と inboxHealth は
+// どちらも *deliveryhealth.Service、ほかに 4 つの worker はどれも nil)。値から作る登録
+// (startPartWithClose など、#3701) では part と停止は同じ値を指すが、addPart で登録する部品では、
+// 部品の値と停止の関数の対応は型でも実行時でも保証していない。
 var lifecyclePartTypes = map[string]string{
 	"pollExpiryWorker":            "<nil>",
 	"fedRuleHits":                 "*fedrule.HitStore",
