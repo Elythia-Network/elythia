@@ -308,7 +308,7 @@ dispatcher が shareable channel の共有・pong ack を upstream `Connection.t
 
 ## 4. DI / 配線
 
-すべてのサービス生成・配線は `internal/server/router.go` の `setupRoutes()` で手動実行（NestJS 相当を関数呼び出しで構築）。DI フレームワークは使わない。repository は `setupRoutes()` から呼ぶ `buildRepos()` (`internal/server/wiring_repos.go`) で、core の service の一部は `buildCore()` (`internal/server/wiring_core.go`) で、連合の部品の一部は `buildFederation()` (`internal/server/wiring_fed.go`) で、queue の processor の一部は `buildQueue()` (`internal/server/wiring_queue.go`) で、stream の部品の一部は `buildStream()` (`internal/server/wiring_stream.go`) で、API の handler の一部は `buildHandlers()` (`internal/server/wiring_handlers.go`) で作る。`/api` のルートは、領域ごとのファイル (`internal/server/routes_<領域>.go`) の `register…Routes()` が登録し、`setupRoutes()` はそれを 1 回ずつ呼ぶ (4.2)。
+すべてのサービス生成・配線は `internal/server/router.go` の `setupRoutes()` で手動実行（NestJS 相当を関数呼び出しで構築）。DI フレームワークは使わない。repository は `setupRoutes()` から呼ぶ `buildRepos()` (`internal/server/wiring_repos.go`) で、core の service の一部は `buildCore()` (`internal/server/wiring_core.go`) で、連合の部品の一部は `buildFederation()` (`internal/server/wiring_fed.go`) で、queue の processor の一部は `buildQueue()` (`internal/server/wiring_queue.go`) で、stream の部品の一部は `buildStream()` (`internal/server/wiring_stream.go`) で、API の handler の一部は `buildHandlers()` (`internal/server/wiring_handlers.go`) で作る。`/api` のルートは、領域ごとのファイル (`internal/server/routes_<領域>.go`) の `register…Routes()` が登録し、`setupRoutes()` はそれを 1 回ずつ呼ぶ (4.2)。停止が要る部品は、名前を付けて一覧 `lifecycle` に登録し、世代を止めるときに登録した順に止める (4.3)。
 
 ```
 server.New() → setupRoutes()
@@ -374,13 +374,13 @@ setter は依存を先に作っても、元の位置 (streaming の publisher �
 `featuredService`、`hashtagService`、`modLogService`、`instanceService` など) を
 受け手より先に作るようにした (こちらは setter を呼ぶ位置は変えていない)。
 
-| | #3676 の前 (`b9db7e49b`) | #3676 の後 | #3684 の後 | #3686 の後 | #3688 の後 | #3690 の後 | #3692 の後 | #3694 の後 | 今 (#3697 の後) |
-|---|---|---|---|---|---|---|---|---|---|
-| setter で依存を入れる辺 | 877 | 877 | 879 | 879 | 872 | 872 | 872 | 872 | 872 |
-| うち、受け手より後で作った依存を入れるもの | 192 (受け手 55 個) | 107 (受け手 41 個) | 104 (受け手 41 個) | 103 (受け手 40 個) | 96 (受け手 40 個) | 96 (受け手 40 個) | 96 (受け手 40 個) | 96 (受け手 40 個) | 96 (受け手 40 個) |
-| うち、循環しているもの | 40 | 40 | 40 | 39 | 35 | 35 | 34 | 34 | 34 |
-| うち、それ以外 | 152 | 67 | 64 | 64 | 61 | 61 | 62 | 62 | 62 |
-| setter の呼び出しが受け手から離れているもの (下の数え方) | 359 | 307 | 308 | 392 | 415 | 426 | 444 | 660 | 660 |
+| | #3676 の前 (`b9db7e49b`) | #3676 の後 | #3684 の後 | #3686 の後 | #3688 の後 | #3690 の後 | #3692 の後 | #3694 の後 | #3697 の後 | 今 (#3699 の後) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| setter で依存を入れる辺 | 877 | 877 | 879 | 879 | 872 | 872 | 872 | 872 | 872 | 872 |
+| うち、受け手より後で作った依存を入れるもの | 192 (受け手 55 個) | 107 (受け手 41 個) | 104 (受け手 41 個) | 103 (受け手 40 個) | 96 (受け手 40 個) | 96 (受け手 40 個) | 96 (受け手 40 個) | 96 (受け手 40 個) | 96 (受け手 40 個) | 96 (受け手 40 個) |
+| うち、循環しているもの | 40 | 40 | 40 | 39 | 35 | 35 | 34 | 34 | 34 | 34 |
+| うち、それ以外 | 152 | 67 | 64 | 64 | 61 | 61 | 62 | 62 | 62 | 62 |
+| setter の呼び出しが受け手から離れているもの (下の数え方) | 359 | 307 | 308 | 392 | 415 | 426 | 444 | 660 | 660 | 660 |
 
 #3684 の後の列は、#3684 の後の `router.go` を同じ道具で数えた。#3676 の後に入った変更で、setter の
 辺と呼び出しが離れている辺が 2 つずつ増えている (#3684 の直前の `692710223` で
@@ -473,6 +473,10 @@ setter も構築も動かしていないので、どの行も数が変わらな�
 節点は 364 から 361 に減った。ルートの行だけが使っていた `chartMethods`・`chatRead`・
 `chatWrite` の定義を登録の関数へ移したためで、どれも setter の引数に現れないので辺は変わらない。
 
+#3699 で停止の hook を名前付きの一覧の登録に置き換えた (4.3)。登録の位置も順も変えていないので、
+どの行も数が変わらない。後から入れる 96 辺と、呼び出しが離れている 660 辺は、どちらも行番号を除けば
+前と同じ。節点も 361 のまま。
+
 数え方 (`setupRoutes()` の構文木。道具はコミットしていない):
 
 - 節点: `setupRoutes()` の中で `:=` か `var` で定義した名前 (関数リテラルの中と、
@@ -527,13 +531,16 @@ setter も構築も動かしていないので、どの行も数が変わらな�
 (`internal/server/wiring.go`) の領域ごとのフィールドに入れる。** #3666 の段階 2。
 #3684 で repository を、#3686 で core の service の一部を、#3688 で連合の部品の一部を、
 #3690 で queue の processor の一部を、#3692 で stream の部品の一部を、#3694 で API の handler の
-一部を移した。今のフィールドは `repos`・`core`・`fed`・`queue`・`stream`・`handlers` の 6 つ。
+一部を移した。部品の領域のフィールドは `repos`・`core`・`fed`・`queue`・`stream`・`handlers` の 6 つ。
+#3699 で、停止が要る部品の一覧を指す `lifecycle` を足した (4.3。部品は作らず、`Server` が持つ一覧を指すだけ。
+今は誰も読まない。段階 (6) で、作り直す範囲を絞るときに使う)。
 #3697 で `/api` のルートの登録を領域ごとのファイルの関数へ分けた (部品は作らないので、
 フィールドは増やしていない。下の「/api のルートの登録」)。
 
 ```
 setupRoutes()
-  w := &wiring{repos: s.buildRepos()}   // wiring_repos.go
+  w := &wiring{repos: s.buildRepos(), lifecycle: &s.lifecycle}
+  // ↑ repos は buildRepos (wiring_repos.go) が作る。lifecycle は Server の一覧を指すだけ (4.3)
   noteRepo := w.repos.note              // 別名。以降の行はこの名前を使う
   …
 ```
@@ -570,7 +577,7 @@ setupRoutes()
   別名を、コンテナへ値を入れるより前に書けてしまう形だと、別名はゼロ値 (nil) を黙って
   受け取り、文字列の照合はすべて残ったまま緑になる (#3686 のレビューで実測)。今の形は
   2 つある
-  - `repos` はリテラルのキー (`w := &wiring{repos: s.buildRepos()}`)。`w` を定義する文で
+  - `repos` はリテラルのキー (`w := &wiring{repos: s.buildRepos(), …}`)。`w` を定義する文で
     入れるので、それより前に `w.repos.x` を書くとコンパイルが通らない。照合はキー
     `repos: s.buildRepos()` で行い、リテラル全体は見ない (後でフィールドを足しても
     書き直さずに済む)
@@ -1303,6 +1310,140 @@ stream の部品・handler と、/api の外のルートの登録は、依存す
 `coreSvcs` / `fedSvcs` / `queueSvcs` / `streamSvcs` / `hSvcs` のような変数から受け取る。後の
 領域ほど、構築の途中で動く処理 (4.1) と shutdown hook を登録するものが多いので、それらを
 動かさずに残す範囲を PR ごとに決める。
+
+### 4.3 部品の起動と停止の一覧 (#3699)
+
+**停止が要る部品は、名前を付けて 1 つの一覧 `lifecycle` (`internal/server/lifecycle_parts.go`)
+に登録する。** #3666 の段階 (3) の最初の段。前は `registerShutdownHook(func(context.Context))`
+の無名の closure の並びで、どの部品の停止かがテストからも実行時からも見えなかった。#3699 で
+すべての呼び出しを名前付きの登録に置き換え、`registerShutdownHook` と `shutdownHooks` を消した。
+無名で登録する口は残していない。
+
+- 項目は名前・止める値 (`part`)・停止 (`func(context.Context)`) を持つ。登録は
+  `s.addPart(name, part, stop)`。`part` は停止が働きかける値 (バッファ・publisher・service・
+  プラグインの store など) で、止めるのには使わない。名前どおりの値を止めたかをテストが確かめる
+  ために持ち、本番のコードは読まない。**`part` と `stop` の対応は、型でも実行時でも保証していない**
+  (別の値を渡しても、テストの外では誰も気付かない)。段階 (6) で `part` に頼る (部品の単位で
+  作り直す) 前に、停止を `part` から作る形 (例えば `part` が `Close` / `Stop` を持つ interface を
+  満たすようにする) に寄せるかを決める。構築の途中で goroutine を起動する worker は
+  `s.startConstructionWorker(name, run)` で、起動と停止の登録を 1 か所で行う (同じ関数から 4 つ登録するので、名前は引数で受ける。`part` は nil)
+- 一覧は `Server.lifecycle` が値で持つ (テストが組む `Server` のリテラルでも、ゼロ値が空の一覧として
+  使える)。登録はどれも `s.addPart` を通し、止めるのも `s.lifecycle` から回す
+  (`paramShadowMiddleware` と `dbBackedStorage` は `w` を受け取らない)。コンテナの
+  `wiring.lifecycle` は同じ一覧を指すが、**今は誰も読まない** (消してもテストは落ちない)。
+  段階 (6) で、メンテナンスの作り直しの範囲を部品の単位に絞るときに使う
+- **項目は起動を持たない。** 起動 (`.Start(...)`、`go` 文、`startConstructionWorker` の goroutine) は、
+  構築の途中の今の位置に残した。起動の位置を動かすと、構築の途中で動く処理から見える配線が
+  変わる (4.1)。`StartBackground` が起動するもの (queue の worker・autoscale・scheduler・chart の
+  保存の loop) は、下の直書きの手順と対になっていて、一覧には入れていない
+- **名前は、部品を持つ変数の名前にする** (`setupRoutes()` の局所変数か、`Server` のフィールド)。
+  例外は 3 つで、起動時に 1 回だけ走る retention の集計は `retentionAggregateAtStartup`
+  (変数 `retentionSvc` は集計の service で、止めるのは起動時の 1 回の実行だけ)、param shadow の
+  記録は `paramShadowRecorder` (`param_shadow.go` の変数名は `rec` で、部品が分からない)、プラグインの
+  store は `pluginStorage:<プラグイン名>` (プラグインごとに 1 つ開く) にした
+- **名前が空・停止が nil・名前の重複は、構築の失敗にする** (`constructionError`)。その場で panic
+  しないのは、プラグインの名前のように実行時の値から作る名前があるため。重複した部品も一覧に
+  入れるので、構築に失敗した世代の後始末で、それも止まる
+
+止める順と、登録の条件は次のとおり (上から順に止める。登録した順と同じ)。
+
+| 順 | 名前 | 止め方 | 登録の条件 |
+|---|---|---|---|
+| 1 | `pollExpiryWorker` | ctx を切り、`Run` が返るのを待つ (`startConstructionWorker`) | queue role |
+| 2 | `fedRuleHits` | `Start` に渡した ctx を切る | 常に |
+| 3 | `metadataRefresher` | `Close(ctx)`。新しい取り直しを止め、走っているものを短く待つ | 常に |
+| 4 | `instanceTouchBuffer` | `Close()`。残りを flush する | 常に |
+| 5 | `sigCapBuffer` | `Close()`。残りを flush する | 常に |
+| 6 | `reactionFlushWorker` | 1 と同じ | 常に |
+| 7 | `instanceCounterBuffer` | `Close()`。残りを flush する | 常に |
+| 8 | `deliveryHealth` | `Stop(ctx)` | queue role |
+| 9 | `inboxHealth` | `Stop(ctx)` | queue role |
+| 10 | `hashtagService` | `Shutdown(ctx)`。in-flight の集計を待つ (#727) | 常に |
+| 11 | `retentionAggregateAtStartup` | 1 と同じ | queue role |
+| 12 | `paramShadowRecorder` | `Flush()`。最後の要約を書く | `disableParamShadow` でなく、本家の paramDef を読めたとき |
+| 13 | `emojiInvalidationQueue` | ctx を切り、`Run` が溜まった分を送って返るのを待つ | 常に |
+| 14 | `userCacheLink` | 1 と同じ | 常に |
+| 15 | `serverStatsPub` | `Stop()` | server role |
+| 16 | `queueStatsPub` | `Stop()` | server role で、queueInspector があるとき |
+| 17〜 | `pluginStorage:<名前>` | `Close()` (DB のプールを閉じる) | 有効なプラグインごと (`newServer` が DB の store を開くとき。本番の経路)。プラグインの順 |
+
+「常に」は role と設定に関係なく登録するもの。両方の role (既定) では 1〜16 がすべて、server role
+では 2〜7・10・12〜16、queue role では 1〜14 が並ぶ。`deliveryBreaker` は停止を持たないので、
+有無で並びは変わらない。
+
+**世代の停止 (`shutdown`) は、一覧を次の位置で回す。** 順を決めている理由は #3662 と #3661。
+
+1. streaming の接続を 1012 で閉じる (別の上限付き)
+2. queue の worker と scheduler を止める (`stopQueue`)。**一覧より先に止める** (#3662)。worker の
+   ジョブはバッファと chart へ書くので、先にバッファを閉じると、止まるまでに終わったジョブの書き込みが
+   flush されずに消える
+3. 投げっぱなしの goroutine の箱 (`background`) を回収する (#3661)。queue の後に置くのは、受信の処理が
+   止まるまで箱へ足され続けるため。一覧より前に置くのは、箱の goroutine が書くバッファと chart の分を
+   flush と保存に含めるため。queue が上限内に止まらなかったときは、6 の後で回収する
+4. **一覧を登録した順 (FIFO) に、停止の ctx を渡して止める。** 後に登録した部品の停止が、先に登録した
+   部品の閉じるものを使う組は無い (#3662 で全件を確認)
+5. chart の管理の loop を止める (`chartMgmt.Stop`。最後の保存を含む)
+6. queue が上限内に止まらなかったときは、ここで止まるのを待ち、箱を回収してから chart をもう一度保存する
+7. queue の driver を閉じる
+8. この世代の Redis の購読 (`internalPubSub` / `streamPubSub`) を閉じる
+9. echo を Shutdown する
+
+構築に失敗したときの後始末 (`cleanupConstruction`) は、プラグインの保留の work を捨て、一覧を
+`context.Background()` で同じ順に止め、箱を 1 秒まで待ち、queue の driver・streaming の接続・
+購読を閉じる。
+
+**直書きの手順 (上の 1〜3・5〜9) は、一覧に入れていない。** 動きを変えずには入れられないため。
+
+| 手順 | 入れない理由 |
+|---|---|
+| streaming の `CloseAll` | `shutdown` では queue より前 (一覧より前) に、`cleanupConstruction` では driver の後に置いていて、2 つの経路で位置が違う。待ちの上限も一覧と別 (`streamCloseContext`) |
+| `stopQueue` | 止まったかどうかを返し、それで箱の回収と chart の再保存の位置 (3 と 6) が変わる。待ちは裏で続く |
+| `background.Stop` | queue が止まったかどうかで、一覧の前か 6 の後かが変わる。後始末では一覧の後 |
+| `chartMgmt.Stop` | 起動するのは `StartBackground` で、構築の途中ではない。後始末では止めない (起動していない) |
+| `queueDriver.Close` | エラーを返し、6 で止まらなかった worker を待った後に閉じる。後始末では nil に戻す |
+| pubsub の `Close` | 購読は stream の節で始めるが、閉じるのは driver の後。一覧に入れると、一覧より後に止める 5〜7 より先に閉じることになる |
+| echo の `Shutdown` | 戻り値が `StopBackground` の戻り値になる |
+
+**テストが見ている範囲は次のとおり** (どれも `internal/server/lifecycle_parts_test.go`。実際に
+`newServer` で作ったサーバーで見る)。部品を足す・動かすときは、テストの表とこの節の表を一緒に直す。
+
+- **名前の並びと登録の条件。** `TestNewServer_ShutdownStopsThePartsInTheirOrder` が、role (両方・
+  server・queue) と設定 (queueInspector の有無、`disableParamShadow`、DB の store を持つプラグインの
+  有無) の 7 つの組で、一覧の名前の並びを固定する。`StopBackground` が一覧の停止の関数を、その順に、
+  停止の ctx を渡して全部呼ぶことも見る
+- **値の型。** 同じテストが、各部品の `part` の動的な型を表 (`lifecyclePartTypes`) と照合する。
+  名前が別の種類の値を持つ取り違え (`serverStatsPub` に `hashtagService` を渡すなど) は落ちるが、
+  **同じ型の部品どうしの取り違えは落とせない**。`deliveryHealth` と `inboxHealth` はどちらも
+  `*deliveryhealth.Service` で、`startConstructionWorker` の 4 つはどれも nil
+- **名前どおりの値を止めたこと。** `TestNewServer_ShutdownStopsTheNamedParts` が、`StopBackground` の
+  後に、次の部品が実際に止まったことを観測する。`instanceTouchBuffer`・`sigCapBuffer`・
+  `instanceCounterBuffer` (閉じた後の書き込みは、溜めずにその場で DB へ書く)、`hashtagService`
+  (書き込み中の worker を表の lock で止めておくと、`Shutdown(ctx)` が期限まで待って警告を出す)、
+  `pluginStorage:<名前>` (閉じた後は DB のプールに Ping できない)。停止が ctx を無視する退行が
+  入ると hashtag の worker を待ち続けるので、`StopBackground` を 10 秒で打ち切って落とす
+- **それ以外の部品** (`pollExpiryWorker`・`fedRuleHits`・`metadataRefresher`・`reactionFlushWorker`・
+  `deliveryHealth`・`inboxHealth`・`retentionAggregateAtStartup`・`paramShadowRecorder`・
+  `emojiInvalidationQueue`・`userCacheLink`・`serverStatsPub`・`queueStatsPub`) は、その名前の停止の
+  関数が呼ばれることまでしか見ていない。停止の関数が名前どおりの値を止めているかは、外から観測する
+  口が無く、テストしていない (`paramShadowRecorder` の停止が要約を書くことは
+  `TestParamShadowRunsAfterTheRouteMiddleware` が別に見る)
+- 後始末が一覧を順に回すことは `TestNewServer_FailedConstructionStopsTheRegisteredParts`、重複で構築が
+  失敗することは `TestNewServer_DuplicatePartFailsTheConstruction` が見る
+
+#3699 の前後で同じ動きであることは、次のように確かめた (道具はコミットしていない)。
+
+- 停止の順: #3699 の前の `registerShutdownHook` に、登録した呼び出し元の行を記録する使い捨ての
+  変更を当て、8 つの組 (上のテストの 7 つの組に、両方の role で queueInspector が無い組を足したもの。
+  プラグインの組はどちらも 2 つのプラグインで) で、`StopBackground` が hook を呼んだ順を記録した。行と名前の対応表で名前に
+  直すと、どの組も #3699 の後の名前の並びと一致した。停止にかかった時間も、どの組も 10ms 未満で
+  前後に差は無かった
+- `elythia dump-routes` の出力、起動の間の Redis の命令の列と起動ログ、PostgreSQL の文の集合は、
+  前後で一致した
+- 4.1 の道具の数は変わらない。#3676 の seq の道具は `registerShutdownHook` を副作用の文として
+  拾うので、後の `router.go` の `s.addPart("<名前>", <値>, ` を `s.registerShutdownHook(` に、
+  `startConstructionWorker` の名前の引数を消して戻すと、前と一致した
+
+コメントの「shutdown hook」は、この一覧の部品の停止を指す。
 
 ## 5. フック注入パターン
 
