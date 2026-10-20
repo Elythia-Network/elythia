@@ -16,6 +16,11 @@ type InstanceRepository interface {
 	// timeline hot paths (#277). Empty input returns nil.
 	FindManyByHosts(hosts []string) ([]*model.Instance, error)
 	UpdateFields(host string, fields map[string]any) error
+	// UpdateFieldsIf applies fields only while the row still satisfies cond,
+	// and reports whether it did (#3731). 読んだ行から書く内容を決める経路
+	// (自動の停止とその解除) が、読んだ後に変わった状態 (管理者の手動の停止、
+	// 相手の回復) を上書きしないために使う。
+	UpdateFieldsIf(host string, cond model.InstanceUpdateCondition, fields map[string]any) (bool, error)
 	IncrementCount(host, column string, delta int) error
 	List(filter model.InstanceListFilter) ([]*model.Instance, error)
 	// ListPeerHosts returns the host of every instance that is not suspended,
@@ -89,6 +94,40 @@ func (r *instanceRepository) UpdateFields(host string, fields map[string]any) er
 		return nil
 	}
 	return r.db.Model(&model.Instance{}).Where("host = ?", host).Updates(fields).Error
+}
+
+// UpdateFieldsIf applies fields to the instance row keyed by host only while
+// it satisfies cond, and reports whether a row was updated (#3731).
+//
+// 空の fields は何も書かずに false を返す。GORM は空の map の Updates をエラーも
+// 件数も無しに返すので、書いたかどうかの答えを呼び出し側に誤らせないよう先に返す。
+func (r *instanceRepository) UpdateFieldsIf(host string, cond model.InstanceUpdateCondition, fields map[string]any) (bool, error) {
+	if len(fields) == 0 {
+		return false, nil
+	}
+	q := r.db.Model(&model.Instance{}).Where("host = ?", host)
+	if len(cond.SuspensionIn) > 0 {
+		q = q.Where(`"suspensionState" IN ?`, suspensionStrings(cond.SuspensionIn))
+	}
+	if len(cond.SuspensionNotIn) > 0 {
+		q = q.Where(`"suspensionState" NOT IN ?`, suspensionStrings(cond.SuspensionNotIn))
+	}
+	if cond.NotRespondingSinceAtOrBefore != nil {
+		q = q.Where(`"isNotResponding" = true AND "notRespondingSince" <= ?`, *cond.NotRespondingSinceAtOrBefore)
+	}
+	res := q.Updates(fields)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
+}
+
+func suspensionStrings(states []model.SuspensionState) []string {
+	out := make([]string, len(states))
+	for i, st := range states {
+		out[i] = string(st)
+	}
+	return out
 }
 
 // IncrementCount adjusts a counter column on the instance row by delta. A
