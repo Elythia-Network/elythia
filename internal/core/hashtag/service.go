@@ -231,6 +231,21 @@ func (s *Service) Shutdown(ctx context.Context) error {
 	}
 }
 
+// Close stops the service when the server generation stops: it waits for
+// the in-flight workers like Shutdown, and logs a warning when ctx ends
+// first. It is safe to call on a nil Service.
+//
+// graceful shutdown 経路で in-flight worker (#719 fire-and-forget) を ctx
+// 期限内に drain する (#727)。typical case では即返り、長時間動く worker は
+// ctx timeout で諦める (idempotent な RecordMention なので次回再カウント)。
+// 時間切れを警告に出すのは、サーバーの組み立ての closure にあったものをここへ
+// 移した (#3717)。
+func (s *Service) Close(ctx context.Context) {
+	if err := s.Shutdown(ctx); err != nil {
+		slog.Warn("hashtag service shutdown timed out", "err", err)
+	}
+}
+
 // fetchHiddenAndSensitive returns (hiddenTags, sensitiveWords) from meta,
 // or (nil, nil) when metaRepo is not wired / fetch failed / both empty.
 // Best-effort: meta fetch 失敗時は filter skip = 旧挙動 (= 全 tag 通る)

@@ -2,6 +2,7 @@ package paramshadow
 
 import (
 	"cmp"
+	"context"
 	"log/slog"
 	"slices"
 	"sync"
@@ -169,3 +170,7 @@ func (r *Recorder) Flush() {
 		slog.Group("skippedBy", skipAttrs...),
 	)
 }
+
+// Close writes what was counted since the previous summary, like Flush, when
+// the server generation stops. The ctx is not used.
+func (r *Recorder) Close(context.Context) { r.Flush() }
