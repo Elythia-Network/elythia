@@ -195,9 +195,11 @@ var errLifecycleStop = errors.New("server: a lifecycle part failed to stop")
 // stopped.
 //
 // 停止はどれも呼び出し元のgoroutineで同期に走るので、ここで回収できる。回収しないと、
-// 1つの部品のpanicで後ろの部品の停止(バッファのflushなど)と、呼び出し元の残りの手順
-// (chartの保存、queueのdriverと購読を閉じる処理)がすべて飛び、panicはSupervisorまで
-// 抜けてプロセスを落とす(#3707)。
+// 1つの部品のpanicで後ろの部品の停止(バッファのflushなど)がすべて飛ぶ(#3707)。
+// #3707の前は呼び出し元の残りの手順(chartの保存、queueのdriverと購読を閉じる処理)も
+// 飛び、panicはSupervisorまで抜けてプロセスを落としていた。今は停止の段ごとの回収
+// (runShutdownSteps。#3711)が残りの段を続けるが、一覧の中の後ろの部品は、ここで
+// 回収しないと止まらない。
 func (l *lifecycle) stopAll(ctx context.Context) error {
 	l.mu.Lock()
 	l.stopped = true

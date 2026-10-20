@@ -930,41 +930,78 @@ func newServer(cfg *config.Config, db *gorm.DB, redis *cache.RedisClients, plugi
 func (s *Server) cleanupConstruction() {
 	s.shutdownOnce.Do(func() {
 		// 構築に失敗した世代は使われないが、後から起動を呼ばれても何も起動しないよう、
-		// 停止と同じ印を立てる(#3709)。
+		// 停止と同じ印を立てる(#3709)。段の表の外に置くので、段のpanicで飛ばない。
 		s.markStopped()
-		if s.pluginGoGate != nil {
-			s.pluginGoGate.discard()
-		}
-		// 一覧の部品は、構築では起動していない(#3703)。起動していない部品の停止は
-		// 待たずに返る(docs/architecture.md 4.3)。停止のpanicはstopAllが部品ごとに
-		// 回収して記録するので、下の後始末は続く(#3707)。エラーを返す口は無く、
-		// 記録はstopAllの1部品1行で足りるので、ここでは重ねて記録しない。
-		_ = s.lifecycle.stopAll(context.Background())
-		// 構築の途中で起動したものがあれば止める (#3661)。構築に失敗した世代は
-		// 使われないので、待ちは短くてよい。
-		bgCtx, bgCancel := context.WithTimeout(context.Background(), time.Second)
-		s.background.Stop(bgCtx)
-		bgCancel()
-		s.lifecycle.parts = nil
-		if s.queueDriver != nil {
-			if err := s.queueDriver.Close(); err != nil {
-				slog.Warn("queue driver close failed during server construction rollback", "err", err)
-			}
-			s.queueDriver = nil
-		}
-		// setupRoutes が作った購読も閉じる。メンテナンスの後の作り直しは失敗すると
-		// 繰り返すので、閉じないと試すたびに Redis の接続と goroutine が漏れる (#3463)。
-		if s.streamManager != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-			s.streamManager.CloseAll(ctx, stream.ServiceRestartCloseCode, "server restarting")
-			cancel()
-		}
-		for _, ps := range []*event.PubSubService{s.internalPubSub, s.streamPubSub} {
-			if ps != nil {
-				_ = ps.Close()
-			}
-		}
+		// エラーを返す口は無い。段のpanicはrunShutdownStepsが段ごとに記録し、一覧の
+		// 部品の停止のpanicはstopAllが部品ごとに記録するので、ここでは重ねて記録しない
+		// (#3707、#3711)。
+		_ = runShutdownSteps(context.Background(), s.cleanupSteps())
 	})
+}
+
+// cleanupSteps returns the steps of rolling back a failed construction, in
+// the order they run (docs/architecture.md 4.3). It is run with
+// context.Background().
+func (s *Server) cleanupSteps() []shutdownStep {
+	return []shutdownStep{
+		{name: "pluginGoGate", run: func(context.Context) error {
+			if s.pluginGoGate != nil {
+				s.pluginGoGate.discard()
+			}
+			return nil
+		}},
+		{name: "lifecycle", run: func(ctx context.Context) error {
+			// 一覧の部品は、構築では起動していない(#3703)。起動していない部品の停止は
+			// 待たずに返る(docs/architecture.md 4.3)。停止のpanicはstopAllが部品ごとに
+			// 回収して記録するので、後の段は続く(#3707)。エラーはcleanupConstructionが
+			// 捨てる(記録はstopAllの1部品1行で足りる)。
+			return s.lifecycle.stopAll(ctx)
+		}},
+		{name: "background", run: func(ctx context.Context) error {
+			// 構築の途中で起動したものがあれば止める (#3661)。構築に失敗した世代は
+			// 使われないので、待ちは短くてよい。
+			bgCtx, bgCancel := context.WithTimeout(ctx, time.Second)
+			s.background.Stop(bgCtx)
+			bgCancel()
+			return nil
+		}},
+		{name: "releaseParts", run: func(context.Context) error {
+			s.lifecycle.parts = nil
+			return nil
+		}},
+		{name: "queueDriver", run: func(context.Context) error {
+			if s.queueDriver != nil {
+				if err := s.queueDriver.Close(); err != nil {
+					slog.Warn("queue driver close failed during server construction rollback", "err", err)
+				}
+				s.queueDriver = nil
+			}
+			return nil
+		}},
+		{name: "streaming", run: func(ctx context.Context) error {
+			// setupRoutes が作った購読も閉じる。メンテナンスの後の作り直しは失敗すると
+			// 繰り返すので、閉じないと試すたびに Redis の接続と goroutine が漏れる (#3463)。
+			if s.streamManager != nil {
+				closeCtx, cancel := context.WithTimeout(ctx, time.Second)
+				s.streamManager.CloseAll(closeCtx, stream.ServiceRestartCloseCode, "server restarting")
+				cancel()
+			}
+			return nil
+		}},
+		{name: "pubsub", run: func(context.Context) error {
+			s.closePubSubs()
+			return nil
+		}},
+	}
+}
+
+// closePubSubs closes the Redis subscriptions of this generation.
+func (s *Server) closePubSubs() {
+	for _, ps := range []*event.PubSubService{s.internalPubSub, s.streamPubSub} {
+		if ps != nil {
+			_ = ps.Close()
+		}
+	}
 }
 
 // Handler returns the underlying http.Handler for use with httptest.
@@ -1217,10 +1254,16 @@ func (s *Server) Shutdown(ctx context.Context) error {
 // finished; StartBackground and StartBackgroundForTest called after that
 // start nothing and return errGenerationStopped (#3709).
 //
-// When the stop of a part of the lifecycle list panics, the panic is logged
-// and the rest of the stop still runs; the returned error then joins one
-// error per panicked part (wrapping errLifecycleStop) with the error of the
-// echo shutdown (#3707). The other steps of the stop are not guarded.
+// The stop runs the named steps of shutdownSteps in order. When a step
+// panics, the panic is logged and the later steps still run (#3711); when
+// the stop of a part of the lifecycle list panics, the panic is logged and
+// the rest of the list still stops (#3707). The errors of the stop are one
+// error per panicked step (wrapping errShutdownStep and naming the step),
+// the error of the lifecycle list (one error per panicked part, wrapping
+// errLifecycleStop) and the error of echo's shutdown. It returns nil when
+// there is none, the error itself when there is exactly one (so a stop
+// without a panic returns echo's error as is), and otherwise their
+// errors.Join in step order (see runShutdownSteps).
 func (s *Server) StopBackground(ctx context.Context) error {
 	s.shutdownOnce.Do(func() {
 		s.shutdownErr = s.shutdown(ctx)
@@ -1350,91 +1393,138 @@ func (s *Server) shutdown(ctx context.Context) error {
 	// 何かを止めるより先に、起動しない印を立てる(#3709)。走っている起動があれば、
 	// 印を立てる前にそれが済むのを待つので、下の手順はその起動が起動したものも止める。
 	// 止め終わってから立てると、その間に起動したworkerを止める人が居なくなる。
+	// 段の表の外に置くので、段のpanicで飛ぶことは無い(#3711)。
 	s.markStopped()
-	// streaming を最初に閉じる。接続の close handler は DB を触る
-	// (lastActiveDate など) ので、DB を閉じる前に終わらせる。close frame を
-	// 送るので、クライアントは 1006 ではなく 1012 を受けて繋ぎ直す (#3463)。
-	//
-	// **待ちには別の上限を付ける。** 待ちが ctx を使い切ると、後に続く shutdown
-	// hook (chart の SaveAll や buffer の flush) の時間が 0 になる。
-	if s.streamManager != nil {
-		closeCtx, cancel := streamCloseContext(ctx)
-		left := s.streamManager.CloseAll(closeCtx, stream.ServiceRestartCloseCode, "server restarting")
-		cancel()
-		if left > 0 {
-			slog.Warn("streaming connections did not close before the deadline", "left", left)
-		}
+	return runShutdownSteps(ctx, s.shutdownSteps())
+}
+
+// shutdownSteps returns the steps of stopping the generation, in the order
+// they run (docs/architecture.md 4.3). Each call returns a new table whose
+// steps share the result of the queue step: the background step and the
+// lateQueue step read whether the queue worker stopped in time.
+//
+// When the queue step panics, the queue is taken as not stopped in time:
+// the background step does nothing, and the lateQueue step collects the
+// goroutines and saves the chart again without waiting for the queue,
+// since there is no channel to wait on.
+//
+// queueの段がpanicしたときは、workerが止まったかが分からない。止まらなかったものとして
+// 扱い、箱の回収を一覧とchartの後(lateQueueの段)へ回す。止まったものとして扱うと、
+// 止まっていないworkerが箱へ足した分を捨てうる。待つchannelは無い(stopQueueが
+// 返していない)ので、lateQueueの段は待たない。nilのchannelを待つと永久に止まる。
+func (s *Server) shutdownSteps() []shutdownStep {
+	var (
+		queueDone    <-chan struct{}
+		queueStopped bool
+	)
+	return []shutdownStep{
+		{name: "streaming", run: func(ctx context.Context) error {
+			// streaming を最初に閉じる。接続の close handler は DB を触る
+			// (lastActiveDate など) ので、DB を閉じる前に終わらせる。close frame を
+			// 送るので、クライアントは 1006 ではなく 1012 を受けて繋ぎ直す (#3463)。
+			//
+			// **待ちには別の上限を付ける。** 待ちが ctx を使い切ると、後に続く shutdown
+			// hook (chart の SaveAll や buffer の flush) の時間が 0 になる。
+			if s.streamManager != nil {
+				closeCtx, cancel := streamCloseContext(ctx)
+				left := s.streamManager.CloseAll(closeCtx, stream.ServiceRestartCloseCode, "server restarting")
+				cancel()
+				if left > 0 {
+					slog.Warn("streaming connections did not close before the deadline", "left", left)
+				}
+			}
+			return nil
+		}},
+		{name: "queue", run: func(ctx context.Context) error {
+			// **queue の worker と scheduler を、hook と chart より先に止める (#3662)。**
+			// worker のジョブはバッファ (TouchBuffer など) と chart へ書くので、先に
+			// それらを閉じると、止まるまでに終わったジョブの書き込みが誰にも flush
+			// されずに消える。hook どうしは登録順のまま走らせる。後に登録した hook の
+			// 処理が、先に登録した hook の閉じるものを使う組は無い (#3662 で全件を確認)。
+			queueDone, queueStopped = s.stopQueue(ctx)
+			return nil
+		}},
+		{name: "background", run: func(ctx context.Context) error {
+			// 投げっぱなしの goroutine (投稿後の hook、サインインの記録、メールなど) を
+			// 回収する (#3661)。hook と chart より前に置くのは、箱の goroutine が書く
+			// バッファと chart の分を、flush と保存に含めるため。queue の後に置くのは、
+			// 受信の処理 (inbox) が止まるまで hook を起動し続けるため。待ちには上限があり、
+			// 止まらない goroutine は残して進む (DB を閉じた後に失敗する)。
+			// queue が上限内に止まらなかったときは、止まらなかった worker がまだ箱へ
+			// 足しうるので、閉じるのは lateQueue の段の <-queueDone の後にする (先に
+			// 閉じると、その worker のジョブが起動する fanout・アンテナ・通知が捨てられる)。
+			if queueStopped {
+				s.background.Stop(ctx)
+			}
+			return nil
+		}},
+		{name: "lifecycle", run: func(ctx context.Context) error {
+			// 部品の一覧 (#3699) を登録順に止める。publisher goroutine の clean 停止と、
+			// graceful drain が必要な service (hashtag #727 等) の Shutdown(ctx) を
+			// 兼ねる。ctx を渡すので timeout 共有が可能 (#764)。
+			// 部品の停止のpanicはstopAllが回収してエラーにするので、後の段はpanicがあっても
+			// 走る(#3707)。エラーは段のエラーとして返し、echoのエラーとまとめる。
+			return s.lifecycle.stopAll(ctx)
+		}},
+		{name: "chart", run: func(ctx context.Context) error {
+			if s.chartMgmt != nil {
+				s.chartMgmt.Stop(ctx)
+			}
+			return nil
+		}},
+		{name: "lateQueue", run: func(ctx context.Context) error {
+			// 上限内に止まらなかった worker は、driver を閉じる前にここで待つ (以前と
+			// 同じく、待ちの上限は driver の側にある)。止まるまでに chart へ足された分を
+			// 保存する。
+			if queueStopped {
+				return nil
+			}
+			// queueの段がpanicしたときはchannelが無いので待たない(shutdownStepsのGoDoc)。
+			if queueDone != nil {
+				<-queueDone
+			}
+			// 箱を先に回収してから保存する。ここでは停止の期限が切れていることが多い
+			// ので、箱の待ちは ctx の取り消しに縛られない上限 (lateBackgroundWait) で
+			// 取る。保存の期限 (lateSaveContext) は待った後に取るので、保存の時間は
+			// 箱の待ちに削られない (#3661 のレビュー2周目 L-3)。
+			s.background.StopWithin(lateBackgroundWait(ctx))
+			saveCtx, cancel := lateSaveContext(ctx)
+			if s.chartMgmt != nil {
+				_ = s.chartMgmt.SaveAll(saveCtx)
+			}
+			cancel()
+			return nil
+		}},
+		{name: "queueDriver", run: func(context.Context) error {
+			// queueClient.Close を直接呼ばないこと。queueDriver.Close が
+			// Client / Inspector を含むサブコンポーネントの Close を一括処理する。
+			// mkq driver は Client.Close が no-op で接続は driver 本体が持つので、
+			// 閉じ口は driver.Close の一本に統一する。
+			if s.queueDriver != nil {
+				if err := s.queueDriver.Close(); err != nil {
+					slog.Warn("queue driver close failed", "err", err)
+				}
+			}
+			return nil
+		}},
+		{name: "pubsub", run: func(context.Context) error {
+			// この世代の Redis 購読を閉じる。internal: の購読は解除の関数を捨てて
+			// いるので、個別ではなく pubsub ごと閉じる (#3463)。Publish はクライアントを
+			// 直接使うので、閉じた後も (古い世代の残りの処理が) 送ることはできる。
+			s.closePubSubs()
+			return nil
+		}},
+		{name: "echo", run: func(ctx context.Context) error {
+			// listener は Supervisor が持つ。echo は listen していないので、Shutdown は
+			// echo が自分で張った server を持っていた場合 (テストなど) にだけ効く。
+			// 戻り値は段のエラーとして返す。ほかに失敗した段が無ければ、runShutdownStepsは
+			// これをそのまま返す(#3707より前と同じ値)。
+			if s.echo != nil {
+				return s.echo.Shutdown(ctx)
+			}
+			return nil
+		}},
 	}
-	// **queue の worker と scheduler を、hook と chart より先に止める (#3662)。**
-	// worker のジョブはバッファ (TouchBuffer など) と chart へ書くので、先に
-	// それらを閉じると、止まるまでに終わったジョブの書き込みが誰にも flush
-	// されずに消える。hook どうしは登録順のまま走らせる。後に登録した hook の
-	// 処理が、先に登録した hook の閉じるものを使う組は無い (#3662 で全件を確認)。
-	queueDone, queueStopped := s.stopQueue(ctx)
-	// 投げっぱなしの goroutine (投稿後の hook、サインインの記録、メールなど) を
-	// 回収する (#3661)。hook と chart より前に置くのは、箱の goroutine が書く
-	// バッファと chart の分を、flush と保存に含めるため。queue の後に置くのは、
-	// 受信の処理 (inbox) が止まるまで hook を起動し続けるため。待ちには上限があり、
-	// 止まらない goroutine は残して進む (DB を閉じた後に失敗する)。
-	// queue が上限内に止まらなかったときは、止まらなかった worker がまだ箱へ
-	// 足しうるので、閉じるのは下の <-queueDone の後にする (先に閉じると、その
-	// worker のジョブが起動する fanout・アンテナ・通知が捨てられる)。
-	if queueStopped {
-		s.background.Stop(ctx)
-	}
-	// 部品の一覧 (#3699) を登録順に止める。publisher goroutine の clean 停止と、
-	// graceful drain が必要な service (hashtag #727 等) の Shutdown(ctx) を
-	// 兼ねる。ctx を渡すので timeout 共有が可能 (#764)。
-	// 部品の停止のpanicはstopAllが回収してエラーにするので、下の手順はpanicがあっても
-	// 走る(#3707)。エラーは最後にechoのエラーとまとめて返す。
-	stopErr := s.lifecycle.stopAll(ctx)
-	if s.chartMgmt != nil {
-		s.chartMgmt.Stop(ctx)
-	}
-	// 上限内に止まらなかった worker は、driver を閉じる前にここで待つ (以前と
-	// 同じく、待ちの上限は driver の側にある)。止まるまでに chart へ足された分を
-	// 保存する。
-	if !queueStopped {
-		<-queueDone
-		// 箱を先に回収してから保存する。ここでは停止の期限が切れていることが多い
-		// ので、箱の待ちは ctx の取り消しに縛られない上限 (lateBackgroundWait) で
-		// 取る。保存の期限 (lateSaveContext) は待った後に取るので、保存の時間は
-		// 箱の待ちに削られない (#3661 のレビュー2周目 L-3)。
-		s.background.StopWithin(lateBackgroundWait(ctx))
-		saveCtx, cancel := lateSaveContext(ctx)
-		if s.chartMgmt != nil {
-			_ = s.chartMgmt.SaveAll(saveCtx)
-		}
-		cancel()
-	}
-	// queueClient.Close を直接呼ばないこと。queueDriver.Close が
-	// Client / Inspector を含むサブコンポーネントの Close を一括処理する。
-	// mkq driver は Client.Close が no-op で接続は driver 本体が持つので、
-	// 閉じ口は driver.Close の一本に統一する。
-	if s.queueDriver != nil {
-		if err := s.queueDriver.Close(); err != nil {
-			slog.Warn("queue driver close failed", "err", err)
-		}
-	}
-	// この世代の Redis 購読を閉じる。internal: の購読は解除の関数を捨てて
-	// いるので、個別ではなく pubsub ごと閉じる (#3463)。Publish はクライアントを
-	// 直接使うので、閉じた後も (古い世代の残りの処理が) 送ることはできる。
-	for _, ps := range []*event.PubSubService{s.internalPubSub, s.streamPubSub} {
-		if ps != nil {
-			_ = ps.Close()
-		}
-	}
-	// listener は Supervisor が持つ。echo は listen していないので、Shutdown は
-	// echo が自分で張った server を持っていた場合 (テストなど) にだけ効く。
-	var echoErr error
-	if s.echo != nil {
-		echoErr = s.echo.Shutdown(ctx)
-	}
-	// panicが無ければechoのエラーをそのまま返す(#3707より前と同じ値)。
-	if stopErr == nil {
-		return echoErr
-	}
-	return errors.Join(stopErr, echoErr)
 }
 
 // setChartManagement registers the chart management service so its
