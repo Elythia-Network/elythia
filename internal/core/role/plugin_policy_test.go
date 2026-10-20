@@ -1318,6 +1318,14 @@ func TestEffectivePolicy_UserInvalidationDoesNotReturnJoinedStaleFlight(t *testi
 	})
 }
 
+// 一覧から捨てたとき (#3725) も、捨てる前に始まった解決の結果を返さず、積まない。
+func TestEffectivePolicy_DropLocalDoesNotReturnJoinedStaleFlight(t *testing.T) {
+	testEffectivePolicyInvalidationDoesNotReturnJoinedStaleFlight(t, func(svc *role.Service) error {
+		svc.DropLocal()
+		return nil
+	})
+}
+
 func TestEffectivePolicy_RoleInvalidationDoesNotReturnJoinedStaleFlight(t *testing.T) {
 	testEffectivePolicyInvalidationDoesNotReturnJoinedStaleFlight(t, func(svc *role.Service) error {
 		return svc.InvalidateRolePolicies(context.Background(), "r1")

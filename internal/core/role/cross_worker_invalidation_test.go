@@ -8,6 +8,7 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/testutil"
+	"github.com/elythia-network/elythia/plugin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -87,4 +88,46 @@ func TestInvalidationHook_UnwiredIsSafe(t *testing.T) {
 		_ = svc.InvalidateRolePolicies(context.Background(), "r1")
 		svc.InvalidateAllCachesLocally()
 	})
+}
+
+// DropLocal は一覧 (internal/server の cacheList) から呼ぶ口で、ロールの
+// キャッシュとプラグインの policy の結果を全部捨て、他のワーカーへは伝えない
+// (#3725)。
+func TestDropLocal_DropsRolesAndPolicyResultsWithoutNotify(t *testing.T) {
+	roleRepo := testutil.NewMockRoleRepository()
+	assignRepo := testutil.NewMockRoleAssignmentRepository(roleRepo)
+	metaRepo := testutil.NewMockMetaRepository()
+	metaRepo.Meta = &model.Meta{ID: "x"}
+	idGen, _ := id.NewGenerator("aidx")
+	svc := role.NewService(roleRepo, assignRepo, metaRepo, idGen)
+	calls := 0
+	svc.SetInvalidationHook(func() { calls++ })
+	var resolved int
+	require.NoError(t, svc.RegisterEffectivePolicyProvider("p", plugin.EffectivePolicyRegistration{
+		Keys: []string{"canSearchNotes"},
+		Resolve: func(context.Context, plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+			resolved++
+			return []plugin.EffectivePolicyContribution{{Key: "canSearchNotes", Priority: 2, Value: true}}, nil
+		},
+	}))
+
+	roleRepo.Roles["r1"] = &model.Role{ID: "r1", IsAdministrator: true}
+	require.NoError(t, assignRepo.Create(&model.RoleAssignment{ID: "a1", RoleID: "r1", UserID: "u1"}))
+	require.True(t, svc.IsAdministrator("u1"))
+	_, err := svc.GetUserPoliciesChecked("u2")
+	require.NoError(t, err)
+	_, err = svc.GetUserPoliciesChecked("u2")
+	require.NoError(t, err)
+	require.Equal(t, 1, resolved, "前提: policy の結果は cache から返る")
+
+	// 他のワーカーが剥奪した状況 (このプロセスの invalidate は通っていない)。
+	require.NoError(t, assignRepo.Delete("u1", "r1"))
+	require.True(t, svc.IsAdministrator("u1"), "前提: キャッシュに残っている")
+
+	svc.DropLocal()
+	assert.False(t, svc.IsAdministrator("u1"), "DropLocal did not drop the role cache")
+	_, err = svc.GetUserPoliciesChecked("u2")
+	require.NoError(t, err)
+	assert.Equal(t, 2, resolved, "DropLocal did not drop the policy results")
+	assert.Equal(t, 0, calls, "DropLocal must not call the invalidation hook")
 }
