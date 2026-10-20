@@ -78,6 +78,16 @@ func TestDropSuspendCacheLocally(t *testing.T) {
 type hookedInstanceRepo struct {
 	*testutil.MockInstanceRepository
 	onFind func()
+	// fallbackErr, when set, fails UpdateFields (the unconditional write) while
+	// UpdateFieldsIf still succeeds (#3731).
+	fallbackErr error
+}
+
+func (r *hookedInstanceRepo) UpdateFields(host string, fields map[string]any) error {
+	if r.fallbackErr != nil {
+		return r.fallbackErr
+	}
+	return r.MockInstanceRepository.UpdateFields(host, fields)
 }
 
 func (r *hookedInstanceRepo) FindByHost(host string) (*model.Instance, error) {
