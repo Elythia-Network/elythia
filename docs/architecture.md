@@ -2043,7 +2043,7 @@ Supervisorの側は変えていない。停止のエラーの使われ方は次�
 
 コメントの「shutdown hook」は、この一覧の部品の停止を指す。
 
-### 4.4 キャッシュの一覧 (#3721、#3723、#3725、#3727)
+### 4.4 キャッシュの一覧 (#3721、#3723、#3725、#3727、#3729)
 
 **世代のキャッシュは、そのプロセスが持つ分を全部捨てる口 (`DropLocal()`) を持たせ、名前と由来と
 一緒に `Server` の一覧 (`cacheList`、`internal/server/caches.go`) へ登録する。** #3666 の段階 4。
@@ -2064,6 +2064,9 @@ setupRoutes()
   s.addCache("emojis", cacheFromDB, emojiRepo)            // #3727
   s.addCache("emojiDecorations", cacheFromDB, emojiDecorationResolver)  // emojis の後
   s.addCache("avatarDecorations", cacheFromDB, avatarDecorationResolver)
+  s.addCache("instances", cacheFromDB, instanceService)   // #3729
+  s.addCache("relays", cacheFromDB, relaySvc)
+  s.addCache("fedRules", cacheFromDB, fedRuleService)
 ```
 
 - **`DropLocal()` は他のプロセスに知らせない。** publish も、無効化の hook (`SetInvalidationHook`)
@@ -2095,7 +2098,8 @@ setupRoutes()
 | 利用者と関係 | `userCache` (`CachedUserRepository`)・`relationCache` (`RelationCache`)・`authTokens` (`AuthMiddleware` の tokenCache) | #3723 |
 | ロール | `roles` (`role.Service`。利用者のロール・ロールの一覧と、プラグインの policy の結果) | #3725 |
 | 絵文字とデコレーション | `emojis` (`CachedEmojiRepository`。ローカルの一覧と (name, host) の entry)・`emojiDecorations` (`avatardecoration.EmojiResolver`)・`avatarDecorations` (`avatardecoration.Resolver`。catalog) | #3727 |
-| 連合・外部 | (未) | 後続 |
+| 連合 (その 1) | `instances` (`instance.Service`。ホストの停止の判定と応答の健全)・`relays` (`relay.Service`。承認済みの relay の一覧)・`fedRules` (`fedrule.Service`。連合のルールのスナップショット) | #3729 |
+| 連合 (残り: 配送の署名鍵と Ed25519 の対応、相手の公開鍵、instance actor の秘密鍵)・外部 | (未) | 後続 |
 
 - 利用者と関係の系統の 3 つは、どれもこのプロセスだけで全部を捨てる処理を元から中に持っていて
   (`invalidateAllLocal`・`apply({All: true})`・`tokenCache.invalidateAll`)、`DropLocal()` はそれを
@@ -2117,6 +2121,29 @@ setupRoutes()
   一覧 (`ListLocal`) から作り直すので、先に捨てると、間に来たリクエストが古い一覧から作り直した map を
   積む (他のプロセスからの通知を受ける `cachebus.SubscribeEmojiCache` が同じ順に捨てるのと同じ理由)。
   catalog は DB から読むので順の制約は無い
+- `instances` の `DropLocal()` は、停止の判定・応答の健全・受信時刻の窓 (`requestReceivedCache`) を
+  捨てる。受信時刻の窓は書き込みの間引きだが、窓の間は SELECT も省くので応答なしの解除と自動停止の解除の
+  判定も飛ぶ。古い窓を残すと、戻した DB で停止になっている相手からの正当な受信でも窓 (5 分) の間解除され
+  ない (失うのはホストごとに 1 回分の間引きだけ)。応答の健全と受信時刻の窓には #3729 で世代の番号
+  (`dropGen`) を足し、捨てる前に読み始めた行から作った判定や窓を積まないようにした (番号を進めるのは
+  `DropLocal()` だけ)。警告の間引き (`lastMetaWarn`) はログのためだけなので捨てない
+- `relays` は `InvalidateCacheLocally()` を、`fedRules` は `Invalidate()` を呼ぶ。連合のルールは捨てても
+  すぐには空にせず、次の評価で読み直す。**`dropAll` が返った後も、前のスナップショットで評価する時間が
+  残る**: 読み直しは 1 つの goroutine だけが行い、並行する評価は読み直しが終わるまで前のスナップショットを
+  使う。読み直しに失敗したら `retryInterval` (30 秒) の間、前のスナップショットのまま (空にすると拒否して
+  いたものが全部通るため。今と同じ)。段階 (6) で、戻した直後に同期で読み直す (`Reload()`) かを決める。
+  3 つとも DB を直接読むので、ほかの系統との間に順の制約は無い
+- **キャッシュとして扱わず、一覧に入れないもの。** 値のキャッシュではなく、取得の backoff・同時実行の
+  上限・ログの間引きで、捨てると間引きが外れるだけになる: `instance.Service` の警告の間引き
+  (`lastMetaWarn`)、`mentionFetchGuard`、`Resolver.keyFetchFailures`、`MetadataRefresher` の実行中の印
+- `MetadataRefresher` の次の確認の時刻 (`nextCheck`) は、DB の `infoUpdatedAt` から計算した取り直しの
+  時刻で、その間は DB も見ない。DB を戻すと、戻した行の nodeinfo (ソフトウェアの版など) のまま最大
+  24 時間取り直さない。#3729 では一覧に入れず、扱いは段階 (6) で決める
+- `activitypub.PublicKeyCache` と、配送の `keyCache` のうち (kind, keyID, PEM) で引く entry は、PEM の
+  解析の結果を覚えるだけで古くならないので、どの系統にも入れない。配送の `keyCache` のうち署名者の
+  利用者で引く entry は DB の秘密鍵の写しで、配送の署名鍵として連合の残りの段で扱う
+- `instance` の書き込みのバッファ (`TouchBuffer`・`CapabilityBuffer` の保留) は値のキャッシュではなく
+  書き込みの保留で、捨ててはいけない。DB を戻すときに flush するか捨てるかは段階 (6) で決める
 
 - captcha の provider と、リアクションのバッファの切り替えは、meta 行の写しで、捨てるだけでは
   足りず読み直しが要る。#3721 では登録していない。扱いは段階 4 の最後で決める
@@ -2161,8 +2188,18 @@ setupRoutes()
   (name, host) の entry と 2 つのデコレーションは、読み込みの途中で捨てたときに読んだ結果を積まない
   こと (世代の番号 `gen`)。絵文字の一覧はテストしていない。`ListLocal` は排他のロックを握ったまま
   読むので、`DropLocal()` は読み込みが終わるまで待ってから捨てる
+- `TestCaches_FederationLine` (#3729): 3 つがサーバーの使う値のまま一覧にあることを確かめる
+  (`fedRules` は `crossProcessCaches` から引く)。DB のインスタンスを停止にし、承認済みの relay と、
+  そのホストのノートを拒否するルールを直接書いて、`dropAll` の後に配送の判定・relay の判定・ルールの
+  評価が読み直すことを見る。`internal:` へ何も publish しないことも見る
+- `TestService_DropLocal` (instance)・`TestRecordResponseSuccess_DropLocalDuringReadIsNotCached`・
+  `TestMarkRequestReceived_DropLocalDuringReadIsNotCached`・
+  `TestDropLocal` (relay)・`TestService_DropLocal` (fedrule) (#3729): 対象 (instance は受信時刻の窓も)
+  を全部捨て、hook を呼ばないこと。応答の健全と受信時刻の窓は、読み込みの途中で捨てたときに読んだ行から作ったものを
+  積まないこと。
+  連合のルールは、読み直しに失敗したら前のルールを使い続けること
 
-#3721・#3723・#3725・#3727 の前後で同じであることは、それぞれ次のように確かめた (道具はコミットしていない)。
+#3721・#3723・#3725・#3727・#3729 の前後で同じであることは、それぞれ次のように確かめた (道具はコミットしていない)。
 どれも、結果は次のとおりだった。
 
 - `elythia dump-routes`: 出力 (ルート)、起動ログ、Redis の命令の列、PostgreSQL の文の集合は、前後で
