@@ -129,3 +129,62 @@ func TestEmojiResolver_InvalidationDuringReadIsNotStored(t *testing.T) {
 	_, _, ok = r.LookupEmojiDecoration("e1")
 	assert.True(t, ok, "the stale read was not kept")
 }
+
+// TestResolvers_DropLocal pins that DropLocal drops the catalog and the emoji
+// map of this process without calling the hook (#3727), that a read in flight
+// when it runs is not kept, and that it is nil-safe.
+func TestResolvers_DropLocal(t *testing.T) {
+	t.Run("catalog", func(t *testing.T) {
+		repo := &invalidatingDecoRepo{MockAvatarDecorationRepository: testutil.NewMockAvatarDecorationRepository()}
+		repo.Decorations["d1"] = &model.AvatarDecoration{ID: "d1", URL: "https://e/1.png"}
+		r := NewResolver(repo)
+		r.SetInvalidationHook(func() { t.Error("DropLocal must not call the hook") })
+		_, ok := r.LookupURL("d1")
+		assert.True(t, ok)
+		repo.Decorations["d2"] = &model.AvatarDecoration{ID: "d2", URL: "https://e/2.png"}
+		_, ok = r.LookupURL("d2")
+		assert.False(t, ok, "前提: 捨てるまでは cache が返る")
+		r.DropLocal()
+		_, ok = r.LookupURL("d2")
+		assert.True(t, ok, "DropLocal did not drop the catalog")
+
+		repo.during = func() {
+			repo.Decorations["d3"] = &model.AvatarDecoration{ID: "d3", URL: "https://e/3.png"}
+			r.DropLocal()
+		}
+		r.DropLocal()
+		_, ok = r.LookupURL("d3")
+		assert.False(t, ok, "the in-flight read answers with what it read")
+		_, ok = r.LookupURL("d3")
+		assert.True(t, ok, "the read overtaken by DropLocal was kept")
+
+		var nilResolver *Resolver
+		nilResolver.DropLocal()
+	})
+	t.Run("emoji", func(t *testing.T) {
+		src := &invalidatingEmojiSource{rows: []*model.Emoji{{ID: "e1", Name: "one", OriginalURL: "https://e/1.png"}}}
+		r := NewEmojiResolver(src)
+		r.SetInvalidationHook(func() { t.Error("DropLocal must not call the hook") })
+		_, _, ok := r.LookupEmojiDecoration("e1")
+		assert.True(t, ok)
+		src.rows = append(src.rows, &model.Emoji{ID: "e2", Name: "two", OriginalURL: "https://e/2.png"})
+		_, _, ok = r.LookupEmojiDecoration("e2")
+		assert.False(t, ok, "前提: 捨てるまでは cache が返る")
+		r.DropLocal()
+		_, _, ok = r.LookupEmojiDecoration("e2")
+		assert.True(t, ok, "DropLocal did not drop the emoji map")
+
+		src.during = func() {
+			src.rows = append(src.rows, &model.Emoji{ID: "e3", Name: "three", OriginalURL: "https://e/3.png"})
+			r.DropLocal()
+		}
+		r.DropLocal()
+		_, _, ok = r.LookupEmojiDecoration("e3")
+		assert.False(t, ok, "the in-flight read answers with what it read")
+		_, _, ok = r.LookupEmojiDecoration("e3")
+		assert.True(t, ok, "the read overtaken by DropLocal was kept")
+
+		var nilResolver *EmojiResolver
+		nilResolver.DropLocal()
+	})
+}

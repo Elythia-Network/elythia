@@ -365,3 +365,91 @@ func TestCaches_RoleLine(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code, "the admin API still sees the old roles: %s", rec.Body.String())
 	assert.Empty(t, published("caches-role-line"), "dropping the caches told the other processes")
 }
+
+// TestCaches_EmojiLine checks on a whole server that the emoji and decoration
+// line is listed with the values the server uses, the emoji decorations after
+// the emojis they are built from, and that dropping the list makes the three
+// read the database again, without telling the other processes (#3727).
+//
+// 絵文字の通知は世代の worker (emojiInvalidationQueue) が待ち行列から非同期に送るので、
+// TestCaches_UserLine と同じく世代を起動しておき、止めてから目印を送る。
+func TestCaches_EmojiLine(t *testing.T) {
+	h := newMetaRuntimeHarnessWith(t, metaRuntimeOptions{onlyServer: "1", startBackground: true})
+	srv := h.srv
+	caches := srv.crossProcessCaches
+
+	want := map[string]localCache{"emojis": caches.emojis, "emojiDecorations": caches.emojiDecorations, "avatarDecorations": caches.decorations}
+	at := map[string]int{}
+	for i, p := range srv.caches.parts {
+		if v, ok := want[p.name]; ok {
+			at[p.name] = i
+			assert.Equal(t, cacheFromDB, p.origin, "cache %q", p.name)
+			assert.Same(t, v, p.cache, "cache %q is not the value the server uses", p.name)
+		}
+	}
+	for name := range want {
+		require.Contains(t, at, name, "cache %q is not listed", name)
+	}
+	// 絵文字由来のデコレーションは絵文字のキャッシュの一覧から作り直すので、後に捨てる。
+	assert.Greater(t, at["emojiDecorations"], at["emojis"], "emojiDecorations is dropped before the emojis it is built from")
+
+	emojiID := h.idGen.Generate(time.Now())
+	decorationID := h.idGen.Generate(time.Now())
+	// 名前は ID から作る。(name, host) の一意制約は host が NULL の行どうしを区別しない
+	// ので、落ちた回の行が残っていても次の回の前提を崩さない。
+	emojiName := "caches_" + emojiID
+	t.Cleanup(func() {
+		require.NoError(t, h.db.Where("id = ?", emojiID).Delete(&model.Emoji{}).Error)
+		require.NoError(t, h.db.Where("id = ?", decorationID).Delete(&model.AvatarDecoration{}).Error)
+	})
+	key := []model.EmojiKey{{Name: emojiName}}
+	hasLocal := func() bool {
+		list, err := caches.emojis.ListLocal()
+		require.NoError(t, err)
+		for _, e := range list {
+			if e.ID == emojiID {
+				return true
+			}
+		}
+		return false
+	}
+	byKey := func() int {
+		rows, err := caches.emojis.FindManyByKeys(key)
+		require.NoError(t, err)
+		return len(rows)
+	}
+	emojiDecoration := func() bool {
+		_, _, ok := caches.emojiDecorations.LookupEmojiDecoration(emojiID)
+		return ok
+	}
+	decoration := func() bool {
+		_, ok := caches.decorations.LookupURL(decorationID)
+		return ok
+	}
+	require.False(t, hasLocal())
+	require.Zero(t, byKey())
+	require.False(t, emojiDecoration())
+	require.False(t, decoration())
+
+	// 他のプロセスが書いたときと違い、通知は送らない。このプロセスのキャッシュは
+	// 古いまま残る。
+	now := time.Now()
+	require.NoError(t, h.db.Create(&model.Emoji{ID: emojiID, Name: emojiName, OriginalURL: "https://example.test/e.png", PublicURL: "https://example.test/e.png", UpdatedAt: &now}).Error)
+	require.NoError(t, h.db.Create(&model.AvatarDecoration{ID: decorationID, URL: "https://example.test/d.png", Name: "caches-emoji-line"}).Error)
+	require.False(t, hasLocal(), "前提: 捨てるまでは cache が返る")
+	require.Zero(t, byKey(), "前提: 捨てるまでは cache が返る")
+	require.False(t, emojiDecoration(), "前提: 捨てるまでは cache が返る")
+	require.False(t, decoration(), "前提: 捨てるまでは cache が返る")
+
+	published := watchInternal(t, h)
+
+	srv.caches.dropAll()
+
+	assert.True(t, hasLocal(), "the local emoji list was not dropped")
+	assert.Equal(t, 1, byKey(), "the (name, host) emoji entries were not dropped")
+	assert.True(t, emojiDecoration(), "the emoji decorations were not dropped")
+	assert.True(t, decoration(), "the decoration catalog was not dropped")
+
+	require.NoError(t, srv.StopBackground(context.Background()))
+	assert.Empty(t, published("caches-emoji-line"), "dropping the caches told the other processes")
+}

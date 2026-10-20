@@ -168,6 +168,17 @@ func (c *CachedEmojiRepository) ApplyRemoteInvalidation(ev EmojiCacheInvalidatio
 	}
 }
 
+// DropLocal drops both caches of this process, the local list and the
+// (name, host) entries, without calling the invalidation hook, so no other
+// process is told (#3727). It is what the cache list of internal/server
+// calls (docs/architecture.md 4.4).
+//
+// 公開の Invalidate はローカルの一覧しか捨てず (name, host) の entry を残すので、
+// キャッシュの一覧からは呼ばない。
+func (c *CachedEmojiRepository) DropLocal() {
+	c.ApplyRemoteInvalidation(EmojiCacheInvalidation{All: true})
+}
+
 // ListLocal returns the cached local emoji slice if still valid, otherwise
 // fetches from the inner repo. The returned slice is the cache-internal
 // pointer; callers must treat it as read-only (never mutate elements or

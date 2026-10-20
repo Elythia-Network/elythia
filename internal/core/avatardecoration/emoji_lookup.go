@@ -102,6 +102,13 @@ func (r *EmojiResolver) InvalidateLocally() {
 	r.mu.Unlock()
 }
 
+// DropLocal drops this process's emoji map without calling the invalidation
+// hook, so no other process is told (#3727). It is what the cache list of
+// internal/server calls (docs/architecture.md 4.4). nil-safe.
+func (r *EmojiResolver) DropLocal() {
+	r.InvalidateLocally()
+}
+
 // SetInvalidationHook registers fn, called after every Invalidate has dropped
 // this process's emoji map (#3664). Call it once while wiring.
 func (r *EmojiResolver) SetInvalidationHook(fn func()) {
