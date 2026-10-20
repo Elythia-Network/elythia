@@ -118,9 +118,9 @@ func newShutdownOrderFixture(t *testing.T) *shutdownOrderFixture {
 		queueDriver: d, queueServer: queue.NewServer(d),
 	}
 	// setupRoutes と同じ順で、同じ形で登録する。
-	f.srv.startPartWithClose(context.Background(), "instanceTouchBuffer", f.touch)
-	f.srv.startPartWithClose(context.Background(), "sigCapBuffer", f.sigCap)
-	f.srv.startPartWithClose(context.Background(), "instanceCounterBuffer", f.counter)
+	f.srv.addStartCloser(context.Background(), "instanceTouchBuffer", f.touch)
+	f.srv.addStartCloser(context.Background(), "sigCapBuffer", f.sigCap)
+	f.srv.addStartCloser(context.Background(), "instanceCounterBuffer", f.counter)
 	// 本番と同じく、バッファはqueueより先に起動しておく(StartBackground、#3703)。
 	require.NoError(t, f.srv.lifecycle.startAll())
 	mgmt := chart.NewManagementService([]*chart.Chart{f.apReq}, time.Hour)

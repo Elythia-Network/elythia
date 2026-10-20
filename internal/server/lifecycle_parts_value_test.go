@@ -104,8 +104,8 @@ func TestServer_RegistersAPartFromItsValue(t *testing.T) {
 			name: "Start(ctx) and Close()",
 			register: func(s *Server, a, b *partCalls) (any, any) {
 				pa, pb := fakeStartCloser{a}, fakeStartCloser{b}
-				s.startPartWithClose(startCtx, "a", pa)
-				s.startPartWithClose(startCtx, "b", pb)
+				s.addStartCloser(startCtx, "a", pa)
+				s.addStartCloser(startCtx, "b", pb)
 				return pa, pb
 			},
 			start: "Start(start) listed=%d",
@@ -115,8 +115,8 @@ func TestServer_RegistersAPartFromItsValue(t *testing.T) {
 			name: "Start(ctx) and Stop(ctx)",
 			register: func(s *Server, a, b *partCalls) (any, any) {
 				pa, pb := fakeStartStopper{a}, fakeStartStopper{b}
-				s.startPartWithStop(startCtx, "a", pa)
-				s.startPartWithStop(startCtx, "b", pb)
+				s.addStartStopper(startCtx, "a", pa)
+				s.addStartStopper(startCtx, "b", pb)
 				return pa, pb
 			},
 			start: "Start(start) listed=%d",
@@ -126,8 +126,8 @@ func TestServer_RegistersAPartFromItsValue(t *testing.T) {
 			name: "Start() and Stop()",
 			register: func(s *Server, a, b *partCalls) (any, any) {
 				pa, pb := fakePlainStartStopper{a}, fakePlainStartStopper{b}
-				s.startPartWithoutCtx("a", pa)
-				s.startPartWithoutCtx("b", pb)
+				s.addPlainStartStopper("a", pa)
+				s.addPlainStartStopper("b", pb)
 				return pa, pb
 			},
 			start: "Start(-) listed=%d",
@@ -209,9 +209,9 @@ func TestLifecycle_StartAllRecoversAPanickingStart(t *testing.T) {
 	a := &partCalls{srv: s, name: "a", order: &order}
 	b := &partCalls{srv: s, name: "b", order: &order}
 	c := &partCalls{srv: s, name: "c", order: &order}
-	s.startPartWithClose(context.Background(), "a", fakeStartCloser{a})
-	s.startPartWithClose(context.Background(), "b", panickingStartCloser{fakeStartCloser{b}})
-	s.startPartWithClose(context.Background(), "c", fakeStartCloser{c})
+	s.addStartCloser(context.Background(), "a", fakeStartCloser{a})
+	s.addStartCloser(context.Background(), "b", panickingStartCloser{fakeStartCloser{b}})
+	s.addStartCloser(context.Background(), "c", fakeStartCloser{c})
 	require.NoError(t, s.lifecycle.err)
 
 	err := s.lifecycle.startAll()
@@ -237,21 +237,21 @@ func (panickingStartCloser) Start(context.Context) { panic("start failed") }
 func TestLifecycle_StartAllStartsNothingAfterStopAll(t *testing.T) {
 	s := &Server{}
 	a := &partCalls{srv: s}
-	s.startPartWithClose(context.Background(), "a", fakeStartCloser{a})
+	s.addStartCloser(context.Background(), "a", fakeStartCloser{a})
 	require.NoError(t, s.lifecycle.stopAll(context.Background()))
 	require.NoError(t, s.lifecycle.startAll())
 	assert.Equal(t, []string{"Close()"}, a.calls)
 }
 
-// TestServer_ConstructionWorkerRunsOnlyOnceStarted checks the worker part of
-// startConstructionWorker: adding it does not run it, startAll runs it once,
+// TestServer_WorkerRunsOnlyOnceStarted checks the worker part of
+// addWorker: adding it does not run it, startAll runs it once,
 // and the stop of a worker that never started returns at once, even with a
 // shutdown ctx that never expires (#3703).
-func TestServer_ConstructionWorkerRunsOnlyOnceStarted(t *testing.T) {
+func TestServer_WorkerRunsOnlyOnceStarted(t *testing.T) {
 	t.Run("not started", func(t *testing.T) {
 		s := &Server{}
 		var runs atomic.Int32
-		s.startConstructionWorker("w", func(context.Context) { runs.Add(1) })
+		s.addWorker("w", func(context.Context) { runs.Add(1) })
 		stopped := make(chan struct{})
 		go func() {
 			defer close(stopped)
@@ -269,7 +269,7 @@ func TestServer_ConstructionWorkerRunsOnlyOnceStarted(t *testing.T) {
 		s := &Server{}
 		running := make(chan struct{})
 		var runs atomic.Int32
-		s.startConstructionWorker("w", func(ctx context.Context) {
+		s.addWorker("w", func(ctx context.Context) {
 			runs.Add(1)
 			close(running)
 			<-ctx.Done()
@@ -308,9 +308,9 @@ var valueShapes = []struct {
 	iface        string
 	matches      func(any) bool
 }{
-	{"startPartWithClose", "startCloser", func(v any) bool { _, ok := v.(startCloser); return ok }},
-	{"startPartWithStop", "startStopper", func(v any) bool { _, ok := v.(startStopper); return ok }},
-	{"startPartWithoutCtx", "plainStartStopper", func(v any) bool { _, ok := v.(plainStartStopper); return ok }},
+	{"addStartCloser", "startCloser", func(v any) bool { _, ok := v.(startCloser); return ok }},
+	{"addStartStopper", "startStopper", func(v any) bool { _, ok := v.(startStopper); return ok }},
+	{"addPlainStartStopper", "plainStartStopper", func(v any) bool { _, ok := v.(plainStartStopper); return ok }},
 	{"addCloser", "ctxCloser", func(v any) bool { _, ok := v.(ctxCloser); return ok }},
 	{"addErrCloser", "errCloser", func(v any) bool { _, ok := v.(errCloser); return ok }},
 }
@@ -393,21 +393,21 @@ func TestValueShape_ClassifiesThePartTypes(t *testing.T) {
 		// use is the registration valueShape names, or "" for none.
 		use string
 	}{
-		{name: "fake Start(ctx) and Close()", part: fakeStartCloser{}, use: "startPartWithClose"},
-		{name: "fake Start(ctx) and Stop(ctx)", part: fakeStartStopper{}, use: "startPartWithStop"},
-		{name: "fake Start() and Stop()", part: fakePlainStartStopper{}, use: "startPartWithoutCtx"},
+		{name: "fake Start(ctx) and Close()", part: fakeStartCloser{}, use: "addStartCloser"},
+		{name: "fake Start(ctx) and Stop(ctx)", part: fakeStartStopper{}, use: "addStartStopper"},
+		{name: "fake Start() and Stop()", part: fakePlainStartStopper{}, use: "addPlainStartStopper"},
 		{name: "fake Close(ctx)", part: fakeCtxCloser{}, use: "addCloser"},
 		{name: "fake Close() error", part: fakeErrCloser{}, use: "addErrCloser"},
 
 		// 値から作る登録で足す10個の部品の型(9つ。deliveryHealthとinboxHealthは同じ型)。
 		// pluginstore.Store だけは setupRoutes ではなく dbBackedStorage が登録する。
-		{name: "TouchBuffer", part: (*coreinstance.TouchBuffer)(nil), use: "startPartWithClose"},
-		{name: "CapabilityBuffer", part: (*coreinstance.CapabilityBuffer)(nil), use: "startPartWithClose"},
-		{name: "CounterBuffer", part: (*coreinstance.CounterBuffer)(nil), use: "startPartWithClose"},
-		{name: "deliveryhealth.Service", part: (*deliveryhealth.Service)(nil), use: "startPartWithStop"},
-		{name: "EmojiInvalidationQueue", part: (*repository.EmojiInvalidationQueue)(nil), use: "startPartWithStop"},
-		{name: "ServerStatsPublisher", part: (*stream.ServerStatsPublisher)(nil), use: "startPartWithoutCtx"},
-		{name: "QueueStatsPublisher", part: (*stream.QueueStatsPublisher)(nil), use: "startPartWithoutCtx"},
+		{name: "TouchBuffer", part: (*coreinstance.TouchBuffer)(nil), use: "addStartCloser"},
+		{name: "CapabilityBuffer", part: (*coreinstance.CapabilityBuffer)(nil), use: "addStartCloser"},
+		{name: "CounterBuffer", part: (*coreinstance.CounterBuffer)(nil), use: "addStartCloser"},
+		{name: "deliveryhealth.Service", part: (*deliveryhealth.Service)(nil), use: "addStartStopper"},
+		{name: "EmojiInvalidationQueue", part: (*repository.EmojiInvalidationQueue)(nil), use: "addStartStopper"},
+		{name: "ServerStatsPublisher", part: (*stream.ServerStatsPublisher)(nil), use: "addPlainStartStopper"},
+		{name: "QueueStatsPublisher", part: (*stream.QueueStatsPublisher)(nil), use: "addPlainStartStopper"},
 		{name: "MetadataRefresher", part: (*coreinstance.MetadataRefresher)(nil), use: "addCloser"},
 		{name: "pluginstore.Store", part: (*pluginstore.Store)(nil), use: "addErrCloser"},
 

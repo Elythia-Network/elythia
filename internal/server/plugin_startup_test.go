@@ -324,12 +324,12 @@ func TestNew_PluginSetupFailureRollsBackConstructionResources(t *testing.T) {
 	}
 }
 
-func TestStartConstructionWorkerCleanupWaitsAndRunsOnce(t *testing.T) {
+func TestAddWorkerCleanupWaitsAndRunsOnce(t *testing.T) {
 	cancelled := make(chan struct{})
 	allowExit := make(chan struct{})
 	runCalls := 0
 	s := &Server{}
-	s.startConstructionWorker("testWorker", func(ctx context.Context) {
+	s.addWorker("testWorker", func(ctx context.Context) {
 		runCalls++
 		<-ctx.Done()
 		close(cancelled)
@@ -373,7 +373,7 @@ func TestServerShutdown_DeadlineBoundsReactionFlushDrain(t *testing.T) {
 			close(workerStopped)
 		},
 	}
-	s.startConstructionWorker("reactionFlushWorker", func(ctx context.Context) {
+	s.addWorker("reactionFlushWorker", func(ctx context.Context) {
 		s.reactionFlushWorker(ctx, func() error { return nil })
 	})
 	require.NoError(t, s.StartBackground())

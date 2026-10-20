@@ -171,7 +171,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// (wiring-check などのゲートが照合する文字列を変えないため)。repository は作っても
 	// DB に触らないので、作る位置が下の EnsureInitial などより前に移っても、DB の文の
 	// 順は変わらない。
-	// lifecycle は Server が持つ部品の一覧 (#3699) を指す。登録は s.startPartWithClose などの
+	// lifecycle は Server が持つ部品の一覧 (#3699) を指す。登録は s.addStartCloser などの
 	// 値から作る登録か s.addPart で行う (docs/architecture.md 4.3)。構築では登録するだけで、
 	// 起動はStartBackgroundが一覧の順に行う(#3703)。
 	w := &wiring{repos: s.buildRepos(), lifecycle: &s.lifecycle}
@@ -738,7 +738,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// retention aggregate は同じ理由で既にゲートされており、ここだけ漏れていた。
 	if s.role.RunsQueue() {
 		pollExpiryWorker := corepoll.NewExpiryWorker(pollRepo, pollVoteRepo, noteRepo, userRepo, notificationService, 60*time.Second, 100)
-		s.startConstructionWorker("pollExpiryWorker", pollExpiryWorker.Run)
+		s.addWorker("pollExpiryWorker", pollExpiryWorker.Run)
 	}
 
 	// Drive storage (Phase 4.9: Meta に基づいて Local / S3 を切り替え)
@@ -1090,7 +1090,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// に集約。同一 remote host の連続 inbox 受信で 10k UPDATE が 1 UPDATE に
 	// 縮退する (#569)。
 	instanceTouchBuffer := coreinstance.NewTouchBuffer(instanceService, time.Second)
-	s.startPartWithClose(context.Background(), "instanceTouchBuffer", instanceTouchBuffer)
+	s.addStartCloser(context.Background(), "instanceTouchBuffer", instanceTouchBuffer)
 
 	// 署名方式の観測 (#2393)。inbound は同一 host から高頻度に来るので、
 	// TouchBuffer と同じ縮退方式で per-host per系統 1 UPDATE にまとめる。
@@ -1100,7 +1100,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// UPDATE が増え、instance touch の書き込み負荷を実質倍にしてしまう。相手の
 	// 署名方式はそう頻繁に変わらないので、60s 窓で十分に追随できる。
 	sigCapBuffer := coreinstance.NewCapabilityBuffer(sigCapRepo, time.Minute)
-	s.startPartWithClose(context.Background(), "sigCapBuffer", sigCapBuffer)
+	s.addStartCloser(context.Background(), "sigCapBuffer", sigCapBuffer)
 	// 宣言 (assertionMethod の Ed25519) は actor resolve 経路で同期に書く。
 	// inbound ほど高頻度ではないので buffer を挟まない。
 	federationResolver.SetSignatureCapabilityDeclarer(sigCapRepo)
@@ -1281,7 +1281,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// web だけのプロセスも、通知を取りこぼしたまま溜め続けたり、窓を過ぎて
 	// 移さずに書いたりしないよう、meta のキャッシュの期限で揃える
 	// (reactionFlushTick)。止め方は他の構築時の worker と同じ
-	// (startConstructionWorker の停止の hook)。
+	// (addWorker の停止の hook)。
 	//
 	// **flush を積むのは queue role だけ** (#2459)。`EnqueueReactionFlush` の
 	// `WithUnique` TTL は 25s で ticker 間隔 30s より短いため、複数ノードが
@@ -1290,7 +1290,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	if s.role.RunsQueue() {
 		enqueueReactionFlush = s.queueClient.EnqueueReactionFlush
 	}
-	s.startConstructionWorker("reactionFlushWorker", func(ctx context.Context) {
+	s.addWorker("reactionFlushWorker", func(ctx context.Context) {
 		s.reactionFlushWorker(ctx, func() error {
 			return reactionFlushTick(cachedMeta, reactionCountWriter, enqueueReactionFlush)
 		})
@@ -1330,7 +1330,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 一覧に登録するので、部品の登録順(この順で起動し、FIFOで止まる)を変えないようここに
 	// 残す(#3676)。起動はStartBackgroundで行う(#3703)。chartHooks のフィールドに入れるだけなので setter の辺ではない。
 	instanceCounterBuffer := coreinstance.NewCounterBuffer(instanceRepo, 30*time.Second)
-	s.startPartWithClose(context.Background(), "instanceCounterBuffer", instanceCounterBuffer)
+	s.addStartCloser(context.Background(), "instanceCounterBuffer", instanceCounterBuffer)
 	chartHooks.InstanceCounter = instanceCounterBuffer
 	// 配送先ホストごとの健全性テレメトリ (#2461)。upstream は結果を
 	// `isNotResponding` の真偽値にしか残さないので、mk-go 独自の観測。
@@ -1354,9 +1354,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			deliverProcessor.SetDeliveryBreaker(deliveryBreaker)
 		}
 		deliverProcessor.SetDeliveryTelemetry(deliveryHealth)
-		s.startPartWithStop(context.Background(), "deliveryHealth", deliveryHealth)
+		s.addStartStopper(context.Background(), "deliveryHealth", deliveryHealth)
 		inboxProcessor.SetDeliveryTelemetry(inboxHealth)
-		s.startPartWithStop(context.Background(), "inboxHealth", inboxHealth)
+		s.addStartStopper(context.Background(), "inboxHealth", inboxHealth)
 	}
 
 	noteCreateService.SetHashtagHook(hashtagService)
@@ -1409,12 +1409,12 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// なので複数ノードで走っても壊れないが、Web ノードを増やすたびに起動時の
 	// DB 書き込みが増えるのは無駄。
 	//
-	// **startConstructionWorker で走らせる** (#3463)。素の goroutine だと、
+	// **addWorker で走らせる** (#3463)。素の goroutine だと、
 	// メンテナンスで世代を止めて DB のプールを閉じた後も走り続け、閉じたプールへ
 	// 書きに行く (実測で "sql: database is closed" が出た)。shutdown hook が
 	// 終わるのを待つので、DB を閉じる前に終わる。
 	if s.role.RunsQueue() {
-		s.startConstructionWorker("retentionAggregateAtStartup", func(ctx context.Context) {
+		s.addWorker("retentionAggregateAtStartup", func(ctx context.Context) {
 			if err := retentionSvc.Aggregate(ctx); err != nil {
 				slog.Warn("retention aggregate at startup failed", "err", err)
 			}
@@ -2835,7 +2835,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	//
 	// RunはStartBackgroundで起動する(#3705)。hookは今の位置で繋ぐので、構築から
 	// 起動までに積まれた分は溜めておき、起動の後に送る。
-	s.startPartWithStop(context.Background(), "emojiInvalidationQueue", emojiInvalidationQueue)
+	s.addStartStopper(context.Background(), "emojiInvalidationQueue", emojiInvalidationQueue)
 	emojiRepo.SetInvalidationHook(emojiInvalidationQueue.Enqueue)
 	// 受けた側は絵文字のキャッシュを捨て、ローカルの絵文字に関わる通知では絵文字
 	// 由来のデコレーションの map も、その後で捨てる (#3664。順の理由は
@@ -2860,7 +2860,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	}
 
 	userCacheLink := cachebus.ConnectUsers(s.userCache, internalPubSub, idGen.Generate(time.Now()))
-	s.startConstructionWorker("userCacheLink", userCacheLink.Run)
+	s.addWorker("userCacheLink", userCacheLink.Run)
 
 	// 取り消したリノート / 削除した引用の通知を消す (#3201)。**配線しないと build も
 	// テストも通ったまま** 未読件数に中身の無い通知が数えられ続ける。
@@ -3004,7 +3004,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		return err == nil && m != nil && m.EnableServerMachineStats
 	})
 	if s.role.RunsServer() {
-		s.startPartWithoutCtx("serverStatsPub", serverStatsPub)
+		s.addPlainStartStopper("serverStatsPub", serverStatsPub)
 	}
 	// queueInspector が無い起動 (テスト等) では nil のまま。チャンネルの一覧
 	// (builtinStreamChannels) が、そのとき fallback の factory を選ぶ (#3692)。
@@ -3012,7 +3012,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	if s.queueInspector != nil {
 		queueStatsPub = stream.NewQueueStatsPublisher(&queueStatsInspectorAdapter{inner: s.queueInspector}, streamPubSub, 0)
 		if s.role.RunsServer() {
-			s.startPartWithoutCtx("queueStatsPub", queueStatsPub)
+			s.addPlainStartStopper("queueStatsPub", queueStatsPub)
 		}
 	}
 

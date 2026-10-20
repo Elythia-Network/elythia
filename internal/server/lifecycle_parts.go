@@ -18,12 +18,12 @@ type lifecyclePart struct {
 	// the same across releases, so tests and logs can refer to it.
 	name string
 	// part is the value stop acts on (a buffer, a publisher, a service), or
-	// nil for a worker started by startConstructionWorker, which has no
-	// value of its own. Production code never reads it. Only tests read it,
-	// to check that stopping the generation stopped that value and that each
-	// name holds a value of the expected type.
+	// nil for a worker added by addWorker, which has no value of its own.
+	// Production code never reads it. Only tests read it, to check that
+	// stopping the generation stopped that value and that each name holds a
+	// value of the expected type.
 	//
-	// For a part added from its value (startPartWithClose and the others,
+	// For a part added from its value (addStartCloser and the others,
 	// #3701), stop is built from part itself, so the two cannot disagree. For
 	// a part added by addPart with its own stop, nothing ties part to stop,
 	// neither the type system nor a check at run time.
@@ -43,7 +43,7 @@ type lifecyclePart struct {
 	// recovered by stopAll, which goes on with the next part (#3707).
 	stop func(context.Context)
 	// fromValue reports that the part was added by a registration that
-	// builds its stop from part (startPartWithClose and the others, #3701),
+	// builds its stop from part (addStartCloser and the others, #3701),
 	// not by addPart. Production code never reads it; tests use it to find
 	// a part that could be added from its value but went through addPart.
 	fromValue bool
@@ -234,13 +234,13 @@ func stopPart(ctx context.Context, p lifecyclePart) (err error) {
 // Shutdown (and by the rollback of a failed construction). Parts are stopped
 // in registration order (FIFO); see lifecycle. part is the value stop acts
 // on (nil when there is none). The part has nothing to start; one that
-// StartBackground has to start is added by addPartWithStart, by
-// startConstructionWorker or by a registration from its value.
+// StartBackground has to start is added by addPartWithStart, by addWorker
+// or by a registration from its value.
 //
 // It is for a part whose stop cannot be built from its value (a ctx to
 // cancel, a goroutine to wait for, a warning to log). A part whose start and
-// stop are its own methods is added by startPartWithClose, startPartWithStop,
-// startPartWithoutCtx, addCloser or addErrCloser instead. Tests check that
+// stop are its own methods is added by addStartCloser, addStartStopper,
+// addPlainStartStopper, addCloser or addErrCloser instead. Tests check that
 // no part of setupRoutes with one of those shapes comes through addPart
 // (docs/architecture.md 4.3); addPart itself does not refuse it.
 //
@@ -302,27 +302,26 @@ type (
 	}
 )
 
-// startPartWithClose adds p as a part named name, started by p.Start(ctx)
+// addStartCloser adds p as a part named name, started by p.Start(ctx)
 // when StartBackground starts the parts, and stopped by p.Close(). The
 // shutdown ctx is not passed to Close. It does not start p itself.
 //
-// 名前のstartは「StartBackgroundで起動する部品を登録する」の意味(#3703より前は、
-// 登録したその場で起動していた)。ctxは登録の時に受け取り、起動の時に渡す。
-func (s *Server) startPartWithClose(ctx context.Context, name string, p startCloser) {
+// ctxは登録の時に受け取り、起動の時に渡す(#3703より前は、登録したその場で起動していた)。
+func (s *Server) addStartCloser(ctx context.Context, name string, p startCloser) {
 	s.lifecycle.addFromValue(name, p, func() { p.Start(ctx) }, func(context.Context) { p.Close() })
 }
 
-// startPartWithStop adds p as a part named name, started by p.Start(ctx)
+// addStartStopper adds p as a part named name, started by p.Start(ctx)
 // when StartBackground starts the parts, and stopped by p.Stop with the
 // shutdown ctx. It does not start p itself.
-func (s *Server) startPartWithStop(ctx context.Context, name string, p startStopper) {
+func (s *Server) addStartStopper(ctx context.Context, name string, p startStopper) {
 	s.lifecycle.addFromValue(name, p, func() { p.Start(ctx) }, p.Stop)
 }
 
-// startPartWithoutCtx adds p as a part named name, started by p.Start() when
+// addPlainStartStopper adds p as a part named name, started by p.Start() when
 // StartBackground starts the parts, and stopped by p.Stop(). Neither takes a
 // ctx. It does not start p itself.
-func (s *Server) startPartWithoutCtx(name string, p plainStartStopper) {
+func (s *Server) addPlainStartStopper(name string, p plainStartStopper) {
 	s.lifecycle.addFromValue(name, p, p.Start, func(context.Context) { p.Stop() })
 }
 
@@ -342,15 +341,15 @@ func (s *Server) addErrCloser(name string, p errCloser) {
 	s.lifecycle.addFromValue(name, p, nil, func(context.Context) { _ = p.Close() })
 }
 
-// startConstructionWorker adds a part named name that, when StartBackground
-// starts the parts, runs run in a goroutine. Its stop cancels run's ctx and
-// waits for run to return (at most until the shutdown ctx is done); when run
-// was never started, the stop returns at once.
+// addWorker adds a part named name that, when StartBackground starts the
+// parts, runs run in a goroutine. Its stop cancels run's ctx and waits for
+// run to return (at most until the shutdown ctx is done); when run was never
+// started, the stop returns at once. It does not run run itself.
 //
-// 同じ関数から複数の部品を登録するので、名前は呼び出し元が渡す(#3699)。関数の名前は
-// 構築の途中で起動していた頃(#3703より前)のまま。起動していないworkerの停止は待たずに
-// 返す。doneは起動しないと閉じないので、待つと停止のctxが切れるまで固まる。
-func (s *Server) startConstructionWorker(name string, run func(context.Context)) {
+// 同じ関数から複数の部品を登録するので、名前は呼び出し元が渡す(#3699)。起動していない
+// workerの停止は待たずに返す。doneは起動しないと閉じないので、待つと停止のctxが切れる
+// まで固まる。
+func (s *Server) addWorker(name string, run func(context.Context)) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	var started atomic.Bool
