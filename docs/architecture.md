@@ -1350,6 +1350,9 @@ stream の部品・handler と、/api の外のルートの登録は、依存す
 (`startPartWithStop`)で一覧に入れた。#3707で、部品の停止のpanicを部品ごとに回収し、残りの停止を
 続ける形にした(下の「停止のpanic」)。#3709で、`StartBackground`と`StartBackgroundForTest`が同じ
 1度きりの起動を通り、停止を始めた後は何も起動しない形にした(下の「2回呼んだとき」と「停止の後の起動」)。
+#3711で、世代の停止(`shutdown`)と構築の後始末(`cleanupConstruction`)で直書きしていた手順を、名前付きの
+段の表(`shutdownSteps`・`cleanupSteps`)にし、段ごとにpanicを回収して残りの段を続ける形にした(下の
+「世代の停止」と「停止のpanic」)。
 
 - 項目は名前・止める値 (`part`)・起動 (`func()`。起動するものが無い部品はnil)・停止
   (`func(context.Context)`) を持つ。`part` は停止が働きかける値 (バッファ・publisher・service・
@@ -1362,8 +1365,8 @@ stream の部品・handler と、/api の外のルートの登録は、依存す
   段階 (6) で、メンテナンスの作り直しの範囲を部品の単位に絞るときに使う
 - **構築では起動しない(#3703)。** 登録は部品と起動・停止を一覧に足すだけで、起動は
   `StartBackground`が一覧の順に呼ぶ(下の「起動」)。`StartBackground`自身が起動するもの(queueの
-  worker・autoscale・scheduler・chartの保存のloop)は、下の直書きの手順と対になっていて、一覧には
-  入れていない
+  worker・autoscale・scheduler・chartの保存のloop)は、下の一覧の外の停止の段(`queue`・`chart`)と
+  対になっていて、一覧には入れていない
 - **名前は、部品を持つ変数の名前にする** (`setupRoutes()` の局所変数か、`Server` のフィールド)。
   例外は 3 つで、起動時に 1 回だけ走る retention の集計は `retentionAggregateAtStartup`
   (変数 `retentionSvc` は集計の service で、止めるのは起動時の 1 回の実行だけ)、param shadow の
@@ -1584,8 +1587,18 @@ closureの3つの型と値の無いworkerは満たさない。部品の型にメ
 
 - 部品の停止のpanicは、前は呼び出し元を抜けてプロセスごと落としていた。後ろの部品の停止、chartの保存、
   queueのdriverと購読を閉じる処理は飛び、SIGTERMの停止でも、メンテナンスに入るときの停止でも、DBを
-  閉じる前に落ちた。今は記録して残りを止め、`StopBackground`のエラーになる(上の「停止のpanic」)
+  閉じる前に落ちた。今は記録して残りを止め、`StopBackground`のエラーになる(下の「停止のpanic」)
 - panicしない限り、停止の順も`StopBackground`の戻り値も変わらない
+
+**意図して変えた動き(#3711)。**
+
+- 一覧の外の停止の段(streaming、queue、箱、chart、遅れたqueueの後始末、queueのdriver、購読、echo)と、
+  構築の後始末の段のpanicは、前は`StopBackground`(または`cleanupConstruction`)を抜けて、後の手順を飛ばして
+  プロセスごと落としていた。今は記録して後の段を続け、`StopBackground`のエラーになる(下の「段のpanic」)
+- panicしない限り、停止の順も`StopBackground`の戻り値も変わらない
+- 一覧の部品の停止だけがpanicし、echoのエラーが無いときの戻り値は、前は`stopAll`のエラーを
+  `errors.Join`でもう1段包んでいたが、今は`stopAll`のエラーそのものになる。`errors.Is`の結果と`Error()`の
+  文字列は変わらない
 
 **意図して変えた動き(#3709)。** どちらも本番の経路では起きない(Supervisorは`genMu`の下で、1つの
 世代に`StartBackground`を1回だけ呼び、止めた世代を再び起動しない)。
@@ -1602,7 +1615,7 @@ closureの3つの型と値の無いworkerは満たさない。部品の型にメ
 `metaUpdated`など4つと、`cachebus`・`relationcache`の`Connect…`/`Subscribe…`)は、#3703の後も
 構築の途中で始める。一覧に乗せなかった理由は3つ。
 
-- 購読を閉じるのは一覧ではなく、queueのdriverの後の直書きの手順(下の手順8)で、pubsubごと閉じる。
+- 購読を閉じるのは一覧ではなく、queueのdriverの後の一覧の外の段(下の手順8の`pubsub`)で、pubsubごと閉じる。
   起動だけを一覧に乗せると、起動と停止が別の仕組みに分かれる
 - 購読の多くは、他の部品への配線と1つの関数(`cachebus.ConnectUsers`など)で行っていて、購読だけを
   後で始めるには、それらの関数の形から変える必要がある
@@ -1612,26 +1625,32 @@ closureの3つの型と値の無いworkerは満たさない。部品の型にメ
 一覧に乗せるかは、段階(6)でメンテナンスの作り直しの範囲を決めるときに、別に決める。
 
 **世代の停止 (`shutdown`) は、一覧を次の位置で回す。** 順を決めている理由は #3662 と #3661。
-次の手順の前に、起動しない印(`stopped`)を立てる(#3709。上の「停止の後の起動」)。
+停止は名前付きの段の表(`shutdownSteps`。#3711)を上から順に回す。段の名前は次の各行の先頭に書く。
+表の前に、起動しない印(`stopped`)を立てる(#3709。上の「停止の後の起動」)。印は段の表の外に置くので、
+段のpanicで飛ぶことは無い。
 
-1. streaming の接続を 1012 で閉じる (別の上限付き)
-2. queue の worker と scheduler を止める (`stopQueue`)。**一覧より先に止める** (#3662)。worker の
-   ジョブはバッファと chart へ書くので、先にバッファを閉じると、止まるまでに終わったジョブの書き込みが
-   flush されずに消える
-3. 投げっぱなしの goroutine の箱 (`background`) を回収する (#3661)。queue の後に置くのは、受信の処理が
-   止まるまで箱へ足され続けるため。一覧より前に置くのは、箱の goroutine が書くバッファと chart の分を
-   flush と保存に含めるため。queue が上限内に止まらなかったときは、6 の後で回収する
-4. **一覧を登録した順 (FIFO) に、停止の ctx を渡して止める。** 後に登録した部品の停止が、先に登録した
-   部品の閉じるものを使う組は無い (#3662 で全件を確認)
-5. chart の管理の loop を止める (`chartMgmt.Stop`。最後の保存を含む)
-6. queue が上限内に止まらなかったときは、ここで止まるのを待ち、箱を回収してから chart をもう一度保存する
-7. queue の driver を閉じる
-8. この世代の Redis の購読 (`internalPubSub` / `streamPubSub`) を閉じる
-9. echo を Shutdown する
+1. `streaming`: streamingの接続を1012で閉じる(別の上限付き。`streamCloseContext`)
+2. `queue`: queueのworkerとschedulerを止める(`stopQueue`)。**一覧より先に止める**(#3662)。workerの
+   ジョブはバッファとchartへ書くので、先にバッファを閉じると、止まるまでに終わったジョブの書き込みが
+   flushされずに消える
+3. `background`: 投げっぱなしのgoroutineの箱(`background`)を回収する(#3661)。queueの後に置くのは、
+   受信の処理が止まるまで箱へ足され続けるため。一覧より前に置くのは、箱のgoroutineが書くバッファと
+   chartの分をflushと保存に含めるため。queueが上限内に止まらなかったときは、ここでは何もせず、6で回収する
+4. `lifecycle`: **一覧を登録した順(FIFO)に、停止のctxを渡して止める。** 後に登録した部品の停止が、
+   先に登録した部品の閉じるものを使う組は無い(#3662で全件を確認)
+5. `chart`: chartの管理のloopを止める(`chartMgmt.Stop`。最後の保存を含む)
+6. `lateQueue`: queueが上限内に止まらなかったときは、ここで止まるのを待ち、箱を回収してからchartを
+   もう一度保存する。止まっていれば何もしない
+7. `queueDriver`: queueのdriverを閉じる
+8. `pubsub`: この世代のRedisの購読(`internalPubSub` / `streamPubSub`)を閉じる
+9. `echo`: echoをShutdownする
 
-構築に失敗したときの後始末 (`cleanupConstruction`) は、起動しない印を立て(#3709)、プラグインの保留の work を捨て、一覧を
-`context.Background()` で同じ順に止め、箱を 1 秒まで待ち、queue の driver・streaming の接続・
-購読を閉じる。
+queueが止まったかどうか(2の結果)は、表を作る関数の中の変数に置き、3と6がそれを読む。
+
+構築に失敗したときの後始末(`cleanupConstruction`)は、起動しない印を立て(#3709)、段の表(`cleanupSteps`)を
+`context.Background()`で回す。段は`pluginGoGate`(プラグインの保留のworkを捨てる)、`lifecycle`(一覧を
+同じ順に止める)、`background`(箱を1秒まで待つ)、`releaseParts`(一覧を空にする)、`queueDriver`(driverを
+閉じてnilに戻す)、`streaming`(接続を1秒まで待って閉じる)、`pubsub`(購読を閉じる)の順。
 
 **停止のpanic(#3707)。** 一覧の部品の停止は、どれも呼び出し元のgoroutineで同期に走る。`stopAll`は
 部品ごとに停止をrecoverで包み、panicしたら部品の名前・panicの値・スタックを`slog.Error`で1件記録して、
@@ -1639,11 +1658,11 @@ closureの3つの型と値の無いworkerは満たさない。部品の型にメ
 `errors.Join`でまとめて返す(panicが無ければnil)。起動の側の`startAll`(#3703)と違い、後の部品も止める。
 止めないと、その部品が流すもの(バッファのflushなど)が失われるため。
 
-- `shutdown`は、panicがあっても一覧の後の手順(上の5〜9)を走らせ、`stopAll`のエラーとechoの
-  `Shutdown`のエラーを`errors.Join`でまとめて返す。panicが無ければechoのエラーをそのまま返す
-  (#3707の前と同じ値)。`StopBackground`はそれを返す
+- `lifecycle`の段は`stopAll`のエラーを段のエラーとして返す。`shutdown`は、panicがあっても後の段
+  (上の5〜9)を走らせ、段のエラーをまとめて返す(下の「段のpanic」)。panicが無ければechoのエラーを
+  そのまま返す(#3707の前と同じ値)。`StopBackground`はそれを返す
 - `cleanupConstruction`は、エラーを返す口が無いので、`stopAll`の記録だけにする(重ねて記録しない)。
-  後始末の残り(箱、queueのdriver、streaming、購読)は続く
+  後の段(箱、queueのdriver、streaming、購読)は続く
 - 停止のctxは、panicした部品の後もそのまま後の部品へ渡す。panicした部品が使った時間は、後の部品の
   時間から引かれる
 - panicした部品は止め直さない。停止の途中でpanicした部品は、途中まで止まったまま残りうる(goroutineが
@@ -1657,9 +1676,32 @@ closureの3つの型と値の無いworkerは満たさない。部品の型にメ
   flushのDBへの書き込み、配送の健全性の集計の読み出しなど)は、どれもロックを`defer`で外すので、
   この組み合わせは無い(#3707で各部品の停止を読んで確かめた)
 - 回収するのは停止を呼んだgoroutineのpanicだけで、停止が立てたgoroutineの中のpanicは回収しない
-- 包むのは一覧の部品の停止だけ。直書きの手順(streamingの`CloseAll`、`stopQueue`、`background.Stop`、
-  `chartMgmt.Stop`、`queueDriver.Close`、pubsubの`Close`)のpanicは、今までどおり回収しない。一覧に
-  入れる段で扱う(#3666)
+- 一覧の外の停止の手順(streamingの`CloseAll`、`stopQueue`、`background.Stop`、`chartMgmt.Stop`、
+  `queueDriver.Close`、pubsubの`Close`、echoの`Shutdown`)のpanicは、#3707の時点では回収せず、一覧に
+  入れる段階で扱うとしていた(#3666)。#3711で、一覧には入れないまま(下の「一覧の外の段」)、段ごとに
+  回収する形にした(下の「段のpanic」)
+
+**段のpanic(#3711)。** 停止の段は、どれも呼び出し元のgoroutineで同期に走る。段を回す関数
+(`runShutdownSteps`。`internal/server/shutdown_steps.go`)は、段ごとにrecoverで包み、panicしたら段の名前・
+panicの値・スタックを`slog.Error`で1件記録して(`stopAll`と同じ形)、次の段へ進む。
+
+- panicした段ごとに、名前を含み`errShutdownStep`を包むエラーを作る。段が返したエラー(`lifecycle`の段の
+  `stopAll`のエラー、`echo`の段の`Shutdown`のエラー)と合わせて、段の順に`errors.Join`でまとめて返す。
+  失敗した段が1つだけなら、そのエラーを包まずに返す。panicが無い停止の戻り値(echoのエラーか、nil)は、
+  #3711の前と同じ値になる
+- `cleanupConstruction`は、段のエラーを捨てる。段のpanicは`runShutdownSteps`の記録だけ、部品の停止の
+  panicは`stopAll`の記録だけにする(重ねて記録しない)
+- 停止のctxは、panicした段の後もそのまま後の段へ渡す。panicした段は止め直さない。途中までしか
+  済んでいないことがある(たとえば`queueDriver`の段で`Close`がpanicすると、後始末の側ではdriverを
+  nilに戻さない)
+- **queueの段がpanicしたとき。** `stopQueue`が値を返していないので、workerが止まったかは分からない。
+  止まらなかったものとして扱う。`background`の段は何もせず、`lateQueue`の段が一覧とchartの後で箱を
+  回収し、chartをもう一度保存する。止まったものとして扱うと、止まっていないworkerが箱へ足した分を
+  捨てうるため。待つchannelが無いので、`lateQueue`の段はqueueを待たない(nilのchannelを待つと永久に
+  止まる)。`stopQueue`が裏で立てるgoroutine(autoscale・scheduler・workerの停止)の中のpanicは、
+  一覧の部品の停止と同じく回収しない(プロセスごと落ちる)
+- 停止がロックを握ったままpanicしたときに後の停止が止まりうること(上の部品の停止の項)は、段にも
+  同じことが言える
 
 Supervisorの側は変えていない。停止のエラーの使われ方は次のとおり。
 
@@ -1668,26 +1710,27 @@ Supervisorの側は変えていない。停止のエラーの使われ方は次�
   エラーがあっても`ProcDrained`にし、報告の`Error`にその文字列を載せるだけで、メンテナンスを抜ける
   ときの作り直し(`resume`)は止めたときのエラーを見ない
 - `Supervisor.Shutdown`は、期限内に終わったときだけエラーに含めて返す。期限が切れて背景処理の停止を
-  呼んだ後に返るときは`ctx.Err()`だけを返し、panicは`stopAll`の記録にだけ残る。`serve`は返ったエラーを
+  呼んだ後に返るときは`ctx.Err()`だけを返し、panicは`stopAll`と`runShutdownSteps`の記録にだけ残る。`serve`は返ったエラーを
   `server shutdown error`として記録する。
   Redisを閉じずに残すのは期限切れ・取り消しのエラーを含むときだけ(`keepRedis`)で、終了コードは
   このエラーで変わらない
 - `startGenerationLocked`(`StartBackground`に失敗した世代)は、今までどおり停止のエラーを捨てる
 
-**直書きの手順 (上の 1〜3・5〜9) は、一覧に入れていない。** 動きを変えずには入れられないため。
+**一覧の外の段(上の1〜3・5〜9)は、一覧に入れていない。** 動きを変えずには入れられないため。
+#3711で段の表にした後も、一覧とは別の表に置いている。
 
-| 手順 | 入れない理由 |
+| 段 | 入れない理由 |
 |---|---|
-| streaming の `CloseAll` | `shutdown` では queue より前 (一覧より前) に、`cleanupConstruction` では driver の後に置いていて、2 つの経路で位置が違う。待ちの上限も一覧と別 (`streamCloseContext`) |
-| `stopQueue` | 止まったかどうかを返し、それで箱の回収と chart の再保存の位置 (3 と 6) が変わる。待ちは裏で続く |
-| `background.Stop` | queue が止まったかどうかで、一覧の前か 6 の後かが変わる。後始末では一覧の後 |
-| `chartMgmt.Stop` | 起動するのは `StartBackground` で、構築の途中ではない。後始末では止めない (起動していない) |
-| `queueDriver.Close` | エラーを返し、6 で止まらなかった worker を待った後に閉じる。後始末では nil に戻す |
-| pubsub の `Close` | 購読は stream の節で始めるが、閉じるのは driver の後。一覧に入れると、一覧より後に止める 5〜7 より先に閉じることになる |
-| echo の `Shutdown` | 戻り値が `StopBackground` の戻り値になる(一覧の停止のpanicがあれば、そのエラーと`errors.Join`でまとめる。#3707) |
+| `streaming` (`CloseAll`) | `shutdown` では queue より前 (一覧より前) に、`cleanupConstruction` では driver の後に置いていて、2 つの経路で位置が違う。待ちの上限も一覧と別 (`streamCloseContext`) |
+| `queue` (`stopQueue`) | 止まったかどうかを返し、それで箱の回収と chart の再保存の位置 (3 と 6) が変わる。待ちは裏で続く |
+| `background` / `lateQueue` (`background.Stop`) | queue が止まったかどうかで、一覧の前か 6 の後かが変わる。後始末では一覧の後 |
+| `chart` (`chartMgmt.Stop`) | 起動するのは `StartBackground` で、構築の途中ではない。後始末では止めない (起動していない) |
+| `queueDriver` (`queueDriver.Close`) | エラーを返し、6 で止まらなかった worker を待った後に閉じる。後始末では nil に戻す |
+| `pubsub` (pubsub の `Close`) | 購読は stream の節で始めるが、閉じるのは driver の後。一覧に入れると、一覧より後に止める 5〜7 より先に閉じることになる |
+| `echo` (echo の `Shutdown`) | 戻り値が `StopBackground` の戻り値になる(ほかの段が失敗していれば、そのエラーと`errors.Join`でまとめる。#3707、#3711) |
 
 **テストが見ている範囲は次のとおり** (`internal/server/lifecycle_parts_test.go`・
-`lifecycle_parts_value_test.go`・`lifecycle_start_test.go`・`lifecycle_startonce_test.go`・`lifecycle_stop_test.go`。多くは実際に`newServer`で作ったサーバーで見る)。部品を足す・動かすときは、テストの表とこの節の表を一緒に直す。
+`lifecycle_parts_value_test.go`・`lifecycle_start_test.go`・`lifecycle_startonce_test.go`・`lifecycle_stop_test.go`・`lifecycle_steps_test.go`。多くは実際に`newServer`で作ったサーバーで見る)。部品を足す・動かすときは、テストの表とこの節の表を一緒に直す。
 
 - **名前の並びと登録の条件。** `TestNewServer_ShutdownStopsThePartsInTheirOrder` が、role (両方・
   server・queue) と設定 (queueInspector の有無、`disableParamShadow`、DB の store を持つプラグインの
@@ -1769,6 +1812,17 @@ Supervisorの側は変えていない。停止のエラーの使われ方は次�
   部品・worker・schedulerがその後に止まり、autoscaleとchartが残らず、固まらないことを見る(`-race`で
   `autoscale`のフィールドの競合も見る)。組ごとに先に譲る側を替え、起動が先の組と停止が先の組の両方が
   起きたことも確かめる(片方だけでは、もう片方の順の検査が空振りする)
+- **停止の段(#3711)。** `lifecycle_steps_test.go`が見る。`TestServer_ShutdownStepsAreInTheirOrder`が、
+  `shutdownSteps`と`cleanupSteps`の段の名前と順を固定する。`TestRunShutdownSteps_RecoversAPanickingStep`が、
+  2つの段をpanicさせ、1つの段にエラーを返させて、後の段も同じctxで順に走ること、エラーが段の順に3つで、
+  panicしたものは`errShutdownStep`を包み名前とpanicの値を含むこと、段の名前・panicの値・スタックが記録
+  されることを見る。`TestRunShutdownSteps_ReturnsASingleErrorAsIs`が、失敗した段が1つならそのエラーを
+  包まずに返すことを見る。`TestServer_StopBackgroundGoesOnAfterAPanickingStep`が、`queueDriver`の段と
+  一覧の部品をpanicさせ、後の段(購読を閉じる、echoの`Shutdown`)が走り、`StopBackground`のエラーが段の
+  名前・部品の名前・echoのエラーを含むことを見る。`TestServer_ShutdownAfterAPanickingQueueStep`が、
+  `queue`の段をpanicさせても後の段が固まらず、箱の回収が一覧の後(`lateQueue`の段)になることを、
+  panicしない組を対照にして見る。`TestServer_FailedConstructionCleanupGoesOnAfterAPanickingStep`が、
+  構築の後始末の`queueDriver`の段がpanicしても後の段が走り、panicが1回だけ記録されることを見る
 
 #3699 の前後で同じ動きであることは、次のように確かめた (道具はコミットしていない)。
 
@@ -1859,6 +1913,19 @@ Supervisorの側は変えていない。停止のエラーの使われ方は次�
   外した)で、PostgreSQLの文の集合と、Redisの命令とキーの組の集合は、前の木の2回と後の木の2回の4通りの
   組み合わせのどれでも一致した。起動ログの差は、#3707と同じくgormのログに出る呼び出し元のファイルの
   パス(ビルドした木の置き場所)だけだった
+- 4.1の道具は、`router.go`を変えていないので数が変わらない
+
+#3711の前後で、panicしない限り同じであることは、次のように確かめた(道具はコミットしていない)。
+
+- 起動と停止の順: #3709と同じ使い捨ての記録に、一覧の外の停止の手順の記録(streamingの`CloseAll`、
+  `stopQueue`、箱の`Stop`/`StopWithin`、chartの`Stop`/`SaveAll`、pubsubの`Close`の先頭と、差し替えた
+  queueのdriverの`Close`)を足して前後の木に当て、#3699と同じ8つの組で、`newServer`・`StartBackground`・
+  `StopBackground`のそれぞれの間の起動と停止の列を記録した。8つの組のどれも、前後で一致した。どちらの
+  木も2回回して揺れないことを確かめた。echoの`Shutdown`は外のパッケージなので記録していない
+- `elythia dump-routes`: 出力(ルート)、起動ログ、Redisの命令の列、PostgreSQLの文の集合は、前後で一致した
+- `serve`: #3709と同じ方法で、PostgreSQLの文の集合と、Redisの命令とキーの組の集合は、前の木の2回と後の木の
+  2回の4通りの組み合わせのどれでも一致した。起動と停止のログの差は、#3707と同じくgormのログに出る
+  呼び出し元のファイルのパス(ビルドした木の置き場所)だけだった
 - 4.1の道具は、`router.go`を変えていないので数が変わらない
 
 コメントの「shutdown hook」は、この一覧の部品の停止を指す。
