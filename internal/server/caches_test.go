@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/elythia-network/elythia/internal/core/fedrule"
+	corerelay "github.com/elythia-network/elythia/internal/core/relay"
 	"github.com/elythia-network/elythia/internal/model"
 )
 
@@ -452,4 +454,81 @@ func TestCaches_EmojiLine(t *testing.T) {
 
 	require.NoError(t, srv.StopBackground(context.Background()))
 	assert.Empty(t, published("caches-emoji-line"), "dropping the caches told the other processes")
+}
+
+// TestCaches_FederationLine checks on a whole server that the instance
+// decisions, the relay list and the federation rules are listed with the
+// values the server uses, and that dropping the list makes them read the
+// database again, without telling the other processes (#3729).
+func TestCaches_FederationLine(t *testing.T) {
+	h := newMetaRuntimeHarness(t)
+	srv := h.srv
+	caches := srv.crossProcessCaches
+	// 停止の判定は、連合のモードが「すべて」でないと停止を見る前に配送を止める。
+	var federation string
+	require.NoError(t, h.db.Model(&model.Meta{}).Select("federation").Take(&federation).Error)
+	t.Cleanup(func() {
+		require.NoError(t, h.db.Model(&model.Meta{}).Where("1 = 1").Update("federation", federation).Error)
+	})
+	h.updateMetaElsewhere(map[string]any{"federation": "all"})
+
+	want := map[string]localCache{"instances": caches.instances, "relays": caches.relays, "fedRules": caches.fedRules}
+	seen := map[string]bool{}
+	for _, p := range srv.caches.parts {
+		if v, ok := want[p.name]; ok {
+			seen[p.name] = true
+			assert.Equal(t, cacheFromDB, p.origin, "cache %q", p.name)
+			assert.Same(t, v, p.cache, "cache %q is not the value the server uses", p.name)
+		}
+	}
+	for name := range want {
+		require.True(t, seen[name], "cache %q is not listed", name)
+	}
+
+	// 名前は ID から作る。落ちた回の行が残っていても、次の回の前提を崩さない。
+	suffix := h.idGen.Generate(time.Now())
+	host := "fed-" + suffix + ".example"
+	instanceID := h.idGen.Generate(time.Now())
+	relayA, relayB := h.idGen.Generate(time.Now()), h.idGen.Generate(time.Now())
+	inboxA, inboxB := "https://relay-a-"+suffix+".example/inbox", "https://relay-b-"+suffix+".example/inbox"
+	ruleID := h.idGen.Generate(time.Now())
+	t.Cleanup(func() {
+		require.NoError(t, h.db.Where("id = ?", instanceID).Delete(&model.Instance{}).Error)
+		require.NoError(t, h.db.Where("id IN ?", []string{relayA, relayB}).Delete(&model.Relay{}).Error)
+		require.NoError(t, h.db.Where("id = ?", ruleID).Delete(&model.FederationRule{}).Error)
+	})
+	now := time.Now()
+	require.NoError(t, h.db.Create(&model.Instance{ID: instanceID, Host: host, FirstRetrievedAt: now, SuspensionState: model.SuspensionStateNone}).Error)
+	// 承認済みの relay を 1 つ置いてから一覧を読ませる (空の一覧は積まれないことがあり、
+	// 捨てなくても読み直して検査が空振りする)。
+	require.NoError(t, h.db.Create(&model.Relay{ID: relayA, Inbox: inboxA, Status: corerelay.StatusAccepted}).Error)
+
+	relayActor := func(inbox string) bool {
+		return caches.relays.IsRelayActor(&model.User{ID: "relay-actor", Inbox: &inbox})
+	}
+	rejects := func() bool {
+		return caches.fedRules.EvaluateNote(fedrule.NoteInput{Host: host}).Reject
+	}
+	require.False(t, caches.instances.ShouldSkipDelivery(host))
+	require.True(t, relayActor(inboxA))
+	require.False(t, relayActor(inboxB))
+	require.False(t, rejects())
+
+	// 他のプロセスが書いたときと違い、通知は送らない。このプロセスのキャッシュは
+	// 古いまま残る。
+	require.NoError(t, h.db.Model(&model.Instance{}).Where("id = ?", instanceID).Update("suspensionState", model.SuspensionStateManuallySuspended).Error)
+	require.NoError(t, h.db.Create(&model.Relay{ID: relayB, Inbox: inboxB, Status: corerelay.StatusAccepted}).Error)
+	require.NoError(t, h.db.Create(&model.FederationRule{ID: ruleID, CreatedAt: now, UpdatedAt: now, Mode: model.FederationRuleModeEnforce, Target: model.FederationRuleTargetNote, Hosts: model.StringArray{host}, Reject: true}).Error)
+	require.False(t, caches.instances.ShouldSkipDelivery(host), "前提: 捨てるまでは cache が返る")
+	require.False(t, relayActor(inboxB), "前提: 捨てるまでは cache が返る")
+	require.False(t, rejects(), "前提: 捨てるまでは cache が返る")
+
+	published := watchInternal(t, h)
+
+	srv.caches.dropAll()
+
+	assert.True(t, caches.instances.ShouldSkipDelivery(host), "the suspend decisions were not dropped")
+	assert.True(t, relayActor(inboxB), "the relay list was not dropped")
+	assert.True(t, rejects(), "the federation rules were not reloaded")
+	assert.Empty(t, published("caches-federation-line"), "dropping the caches told the other processes")
 }

@@ -150,3 +150,71 @@ func TestSuspendInvalidationHook_AfterTheWrite(t *testing.T) {
 		"a.example": {model.SuspensionStateAutoSuspendedForNotResponding, model.SuspensionStateNone},
 	}, seen)
 }
+
+// TestService_DropLocal pins that DropLocal drops the suspend decisions, the
+// response health and the received-at windows of this process without calling
+// the hook (#3729). The received-at window also skips the recovery check (the
+// SELECT), so a stale one would keep a restored suspension for the window.
+func TestService_DropLocal(t *testing.T) {
+	svc, repo, _ := newService(t)
+	svc.SetSuspendInvalidationHook(func(string) { t.Fatal("DropLocal must not call the hook") })
+	svc.SetResponseHealthyTTL(time.Hour)
+	repo.Instances["a.example"] = &model.Instance{ID: "i1", Host: "a.example", SuspensionState: model.SuspensionStateNone}
+
+	svc.ShouldSkipDelivery("a.example")
+	require.NoError(t, svc.RecordResponseSuccess("a.example"))
+	require.NoError(t, svc.MarkRequestReceived("a.example"))
+	before := repo.FindCalls
+	svc.ShouldSkipDelivery("a.example")
+	require.NoError(t, svc.RecordResponseSuccess("a.example"))
+	require.NoError(t, svc.MarkRequestReceived("a.example"))
+	require.Equal(t, before, repo.FindCalls, "前提: 3 つとも cache から返る")
+
+	svc.DropLocal()
+	assert.Equal(t, 0, svc.SuspendCacheLen(), "DropLocal did not drop the suspend decisions")
+	require.NoError(t, svc.RecordResponseSuccess("a.example"))
+	assert.Equal(t, before+1, repo.FindCalls, "DropLocal did not drop the response health")
+	require.NoError(t, svc.MarkRequestReceived("a.example"))
+	assert.Equal(t, before+2, repo.FindCalls, "DropLocal did not drop the received-at window")
+}
+
+// TestRecordResponseSuccess_DropLocalDuringReadIsNotCached pins that a response
+// health read while DropLocal ran is not stored (#3729).
+func TestRecordResponseSuccess_DropLocalDuringReadIsNotCached(t *testing.T) {
+	repo := &hookedInstanceRepo{MockInstanceRepository: testutil.NewMockInstanceRepository()}
+	metaRepo := testutil.NewMockMetaRepository()
+	metaRepo.Meta = &model.Meta{}
+	idGen, _ := id.NewGenerator("aidx")
+	svc := instance.NewService(repo, metaRepo, idGen)
+	svc.SetResponseHealthyTTL(time.Hour)
+	repo.Instances["a.example"] = &model.Instance{ID: "i1", Host: "a.example"}
+
+	repo.onFind = svc.DropLocal
+	require.NoError(t, svc.RecordResponseSuccess("a.example"))
+	calls := repo.FindCalls
+	require.NoError(t, svc.RecordResponseSuccess("a.example"))
+	assert.Equal(t, calls+1, repo.FindCalls, "the health read during DropLocal was cached")
+	require.NoError(t, svc.RecordResponseSuccess("a.example"))
+	assert.Equal(t, calls+1, repo.FindCalls, "a later read is cached again")
+}
+
+// TestMarkRequestReceived_DropLocalDuringReadIsNotCached pins that a
+// received-at window built from a row read while DropLocal ran is not stored
+// (#3729): the row may predate a restored suspension, and the window would
+// skip the recovery check for its length.
+func TestMarkRequestReceived_DropLocalDuringReadIsNotCached(t *testing.T) {
+	repo := &hookedInstanceRepo{MockInstanceRepository: testutil.NewMockInstanceRepository()}
+	metaRepo := testutil.NewMockMetaRepository()
+	metaRepo.Meta = &model.Meta{}
+	idGen, _ := id.NewGenerator("aidx")
+	svc := instance.NewService(repo, metaRepo, idGen)
+	repo.Instances["a.example"] = &model.Instance{ID: "i1", Host: "a.example"}
+
+	repo.onFind = svc.DropLocal
+	require.NoError(t, svc.MarkRequestReceived("a.example"))
+	calls := repo.FindCalls
+	require.NoError(t, svc.MarkRequestReceived("a.example"))
+	assert.Equal(t, calls+1, repo.FindCalls, "the window built during DropLocal was stored")
+	require.NoError(t, svc.MarkRequestReceived("a.example"))
+	assert.Equal(t, calls+1, repo.FindCalls, "a later window is stored again")
+}

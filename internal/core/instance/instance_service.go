@@ -76,6 +76,10 @@ type Service struct {
 	// RecordResponseError だけ (確認済み) なので、そこで invalidate すれば整合する。
 	responseHealthyCache map[string]time.Time
 	responseHealthyTTL   time.Duration
+	// dropGen は DropLocal が応答の健全と受信時刻の窓を捨てるたびに進める (#3729)。
+	// DB を読んでいる間に捨てられたとき、読んだ行から作った判定や窓を、読み終わった
+	// 後に積まないために使う。進めるのは DropLocal だけ。
+	dropGen uint64
 	// lastMetaWarn / metaWarnEvery は meta.Fetch 失敗 warn のレート制限用。
 	// 継続障害時に配送ごとに warn を吐かないよう間引く (#1410)。
 	lastMetaWarn  time.Time
@@ -208,6 +212,7 @@ func (s *Service) MarkRequestReceived(host string) error {
 		s.mu.Unlock()
 		return nil
 	}
+	gen := s.dropGen
 	s.mu.Unlock()
 
 	inst, err := s.repo.FindByHost(host)
@@ -249,6 +254,12 @@ func (s *Service) MarkRequestReceived(host string) error {
 		s.mu.Unlock()
 	}
 	s.mu.Lock()
+	if s.dropGen != gen {
+		// 読んでいる間にキャッシュが捨てられた (#3729)。読んだ行は捨てる前のもの
+		// かもしれず、窓を積むと、その間の回復の判定を飛ばす。
+		s.mu.Unlock()
+		return nil
+	}
 	// 書き込みついでに期限切れ entry を amortized に掃除する (suspendCache と同方針)。
 	s.evictExpiredRequestReceivedLocked(now)
 	s.requestReceivedCache[host] = now.Add(s.requestReceivedWindow)
@@ -290,6 +301,7 @@ func (s *Service) RecordResponseSuccess(host string) error {
 		s.mu.Unlock()
 		return nil
 	}
+	gen := s.dropGen
 	s.mu.Unlock()
 
 	inst, err := s.repo.FindByHost(host)
@@ -308,6 +320,12 @@ func (s *Service) RecordResponseSuccess(host string) error {
 	}
 	// healthy と確定したので窓キャッシュに載せ、以降の SELECT を省く。
 	s.mu.Lock()
+	if s.dropGen != gen {
+		// 読んでいる間にキャッシュが捨てられた (#3729)。読んだ行は捨てる前のもの
+		// かもしれないので積まない。
+		s.mu.Unlock()
+		return nil
+	}
 	s.evictExpiredResponseHealthyLocked(now)
 	s.responseHealthyCache[host] = now.Add(s.responseHealthyTTL)
 	s.mu.Unlock()
@@ -749,6 +767,25 @@ func (s *Service) DropSuspendCacheLocally(host string) {
 			delete(s.suspendCache, h)
 		}
 	}
+}
+
+// DropLocal drops this process's cached suspend decisions, response health
+// and received-at windows without calling the invalidation hook, so no other
+// process is told (#3729). It is what the cache list of internal/server calls
+// (docs/architecture.md 4.4).
+//
+// 受信時刻の窓 (requestReceivedCache) も捨てる。書き込みの間引きだが、窓の間は
+// SELECT も省くので、応答なしの解除と自動停止の解除の判定も飛ぶ。古い窓を残すと、
+// 戻した DB で停止になっている相手からの正当な受信でも、窓の間は解除されない
+// (応答の健全を捨てるのと同じ理由)。失うのはホストごとに 1 回分の間引きだけ。
+// 警告の間引き (lastMetaWarn) はログのためだけなので残す。
+func (s *Service) DropLocal() {
+	s.DropSuspendCacheLocally("")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dropGen++
+	clear(s.responseHealthyCache)
+	clear(s.requestReceivedCache)
 }
 
 // SuspendCacheLen returns the number of entries currently held in the suspend

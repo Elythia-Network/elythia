@@ -2866,6 +2866,12 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	s.addCache("emojis", cacheFromDB, emojiRepo)
 	s.addCache("emojiDecorations", cacheFromDB, emojiDecorationResolver)
 	s.addCache("avatarDecorations", cacheFromDB, avatarDecorationResolver)
+	// 連合の系統のうち、インスタンスの判定・relay の一覧・連合のルール (#3729)。3 つとも
+	// DB を直接読み、meta は判定のたびに cachedMeta から読むだけで持たないので、ほかの
+	// 系統との間に捨てる順の制約は無い。
+	s.addCache("instances", cacheFromDB, instanceService)
+	s.addCache("relays", cacheFromDB, relaySvc)
+	s.addCache("fedRules", cacheFromDB, fedRuleService)
 
 	// #3664: 利用者のキャッシュ (CachedUserRepository) の cross-worker invalidation。
 	// queue のプロセスがリモートの利用者を更新 (凍結の反映、Update の受信) しても、
@@ -2875,7 +2881,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 最大 2 秒かけて送ってから止まる (絵文字と同じ)。
 	s.crossProcessCaches = crossProcessCaches{
 		instances: instanceService, relays: relaySvc, decorations: avatarDecorationResolver,
-		emojiDecorations: emojiDecorationResolver, emojis: emojiRepo,
+		emojiDecorations: emojiDecorationResolver, emojis: emojiRepo, fedRules: fedRuleService,
 	}
 
 	userCacheLink := cachebus.ConnectUsers(s.userCache, internalPubSub, idGen.Generate(time.Now()))
@@ -4644,4 +4650,7 @@ type crossProcessCaches struct {
 	// emojiDecorations と emojis は、絵文字由来のデコレーションの配線を見るため。
 	emojiDecorations *avatardecoration.EmojiResolver
 	emojis           *repository.CachedEmojiRepository
+	// fedRules は連合のルール (#3090)。internal:federationRulesUpdated で読み直させる。
+	// キャッシュの一覧のテストが、登録した値と同じかを見るため (#3729)。
+	fedRules *fedrule.Service
 }

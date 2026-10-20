@@ -239,3 +239,26 @@ func TestEvaluateNote_AtBeforeFirstSeenFallsBackToNow(t *testing.T) {
 	assert.True(t, s.EvaluateNote(NoteInput{Actor: fresh, At: testNow.Add(-71 * time.Hour)}).Reject,
 		"a note posted while the actor was new is still measured at its post time")
 }
+
+// TestService_DropLocal pins that DropLocal makes the next evaluation reload
+// the rules (#3729) and that a failed reload keeps the previous rules, as
+// Invalidate does.
+func TestService_DropLocal(t *testing.T) {
+	rule := enforce(&model.FederationRule{ID: "r", Target: model.FederationRuleTargetNote, Hosts: model.StringArray{"spam.example"}, Reject: true})
+	s, store, _ := newTestService(t, rule)
+	s.SetClockForTest(func() time.Time { return testNow })
+	in := NoteInput{Host: "spam.example"}
+	require.True(t, s.EvaluateNote(in).Reject)
+	calls := store.calls
+
+	store.err = errors.New("db down")
+	s.DropLocal()
+	assert.True(t, s.EvaluateNote(in).Reject, "a failed reload keeps the previous rules")
+	assert.Equal(t, calls+1, store.calls, "DropLocal did not make the next evaluation reload")
+
+	store.err = nil
+	store.rules = nil
+	s.DropLocal()
+	assert.False(t, s.EvaluateNote(in).Reject, "DropLocal did not reload the rules")
+	assert.Equal(t, calls+2, store.calls)
+}

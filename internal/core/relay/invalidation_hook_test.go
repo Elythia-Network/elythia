@@ -41,3 +41,24 @@ func TestInvalidationHook_CalledByEveryWrite(t *testing.T) {
 	require.NoError(t, svc.Remove(ctx, rel.ID))
 	assert.Equal(t, 3, calls)
 }
+
+// TestDropLocal pins that DropLocal drops this process's list without calling
+// the hook (#3729).
+func TestDropLocal(t *testing.T) {
+	svc, repo, _, _ := newService(t)
+	ctx := context.Background()
+	rel, err := svc.Add(ctx, "https://r.example/inbox")
+	require.NoError(t, err)
+	require.NoError(t, svc.MarkAccepted(ctx, rel.ID))
+	svc.SetInvalidationHook(func() { t.Error("DropLocal must not call the hook") })
+
+	inbox := rel.Inbox
+	actor := &model.User{ID: "a", Inbox: &inbox}
+	require.True(t, svc.IsRelayActor(actor))
+	// 他のプロセスが書いた (このプロセスの invalidate は通っていない)。
+	repo.Relays[rel.ID].Status = relay.StatusRejected
+	require.True(t, svc.IsRelayActor(actor), "前提: 捨てるまでは cache が返る")
+
+	svc.DropLocal()
+	assert.False(t, svc.IsRelayActor(actor), "DropLocal did not drop the list")
+}

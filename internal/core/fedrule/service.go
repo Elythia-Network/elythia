@@ -62,6 +62,14 @@ func (s *Service) SetClockForTest(fn func() time.Time) { s.clock = fn }
 // Invalidate makes the next evaluation reload the rules.
 func (s *Service) Invalidate() { s.stale.Store(true) }
 
+// DropLocal makes the next evaluation reload the rules, like Invalidate
+// (#3729). It is what the cache list of internal/server calls
+// (docs/architecture.md 4.4). It tells no other process.
+//
+// スナップショットはすぐには空にしない。次の評価で読み直し、読み直しに失敗したら
+// 前のスナップショットを使い続ける (空にすると、拒否していたものが全部通る)。
+func (s *Service) DropLocal() { s.Invalidate() }
+
 // Reload reads the rules now (管理 API が変更の直後に呼ぶ)。
 func (s *Service) Reload() error {
 	s.loading.Lock()
