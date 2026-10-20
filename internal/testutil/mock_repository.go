@@ -4133,6 +4133,21 @@ func (m *MockInstanceRepository) FindManyByHosts(hosts []string) ([]*model.Insta
 	return out, nil
 }
 
+// UpdateFieldsIf applies fields only while the stored instance satisfies cond
+// (#3731). It counts as an update call.
+func (m *MockInstanceRepository) UpdateFieldsIf(host string, cond model.InstanceUpdateCondition, fields map[string]any) (bool, error) {
+	m.UpdateCalls++
+	if m.UpdateErr != nil {
+		return false, m.UpdateErr
+	}
+	inst, ok := m.Instances[host]
+	if !ok || len(fields) == 0 || !cond.Matches(inst) {
+		return false, nil
+	}
+	applyInstanceFields(inst, fields)
+	return true, nil
+}
+
 func (m *MockInstanceRepository) UpdateFields(host string, fields map[string]any) error {
 	m.UpdateCalls++
 	if m.UpdateErr != nil {

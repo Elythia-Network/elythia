@@ -1,6 +1,9 @@
 package model
 
-import "time"
+import (
+	"slices"
+	"time"
+)
 
 // SuspensionState represents the suspension state of a remote instance.
 type SuspensionState string
@@ -68,4 +71,37 @@ type InstanceListFilter struct {
 	// 上書きして cursor 一貫性を保つ。Offset は無視する。
 	SinceID string
 	UntilID string
+}
+
+// InstanceUpdateCondition is the state an instance row must still be in for
+// InstanceRepository.UpdateFieldsIf to write it (#3731). The zero value
+// matches every row.
+type InstanceUpdateCondition struct {
+	// SuspensionIn lists the suspension states the row may be in. Empty
+	// means any state.
+	SuspensionIn []SuspensionState
+	// SuspensionNotIn lists the suspension states the row must not be in.
+	SuspensionNotIn []SuspensionState
+	// NotRespondingSinceAtOrBefore, when set, requires isNotResponding = true
+	// and a notRespondingSince at or before it.
+	NotRespondingSinceAtOrBefore *time.Time
+}
+
+// Matches reports whether inst satisfies c. The mock repository uses it, so
+// the fake and the SQL of UpdateFieldsIf agree on what a condition means.
+//
+// repository ではなく model に置くのは、testutil の mock から使うため (repository の
+// テストが testutil を import するので、testutil は repository を import できない)。
+func (c InstanceUpdateCondition) Matches(inst *Instance) bool {
+	if len(c.SuspensionIn) > 0 && !slices.Contains(c.SuspensionIn, inst.SuspensionState) {
+		return false
+	}
+	if slices.Contains(c.SuspensionNotIn, inst.SuspensionState) {
+		return false
+	}
+	if c.NotRespondingSinceAtOrBefore != nil &&
+		(!inst.IsNotResponding || inst.NotRespondingSince == nil || inst.NotRespondingSince.After(*c.NotRespondingSinceAtOrBefore)) {
+		return false
+	}
+	return true
 }

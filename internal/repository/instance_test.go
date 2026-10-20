@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -600,4 +601,147 @@ func TestInstanceRepository_RecomputeFollowCounts_DBError(t *testing.T) {
 	cancel()
 	repo := NewInstanceRepository(testDB.WithContext(ctx))
 	assert.Error(t, repo.RecomputeFollowCounts())
+}
+
+// UpdateFieldsIf writes only while the row still satisfies the condition the
+// caller read it under (#3731): a state changed in between (an administrator's
+// manual suspension, a recovered host) is not overwritten.
+func TestInstanceRepository_UpdateFieldsIf(t *testing.T) {
+	repo := NewInstanceRepository(testDB)
+	inst := newTestInstance("i_ir_cas", "cas.example")
+	inst.SuspensionState = model.SuspensionStateAutoSuspendedForNotResponding
+	require.NoError(t, repo.Create(inst))
+	defer cleanupInstance(t, inst.ID)
+	state := func() model.SuspensionState {
+		got, err := repo.FindByHost("cas.example")
+		require.NoError(t, err)
+		return got.SuspensionState
+	}
+	set := func(fields map[string]any) {
+		require.NoError(t, repo.UpdateFields("cas.example", fields))
+	}
+	write := func(cond model.InstanceUpdateCondition, to model.SuspensionState) bool {
+		ok, err := repo.UpdateFieldsIf("cas.example", cond, map[string]any{"suspensionState": string(to)})
+		require.NoError(t, err)
+		return ok
+	}
+	only := func(states ...model.SuspensionState) model.InstanceUpdateCondition {
+		return model.InstanceUpdateCondition{SuspensionIn: states}
+	}
+
+	// 読んだ後に管理者が手動で停止した。
+	set(map[string]any{"suspensionState": string(model.SuspensionStateManuallySuspended)})
+	assert.False(t, write(only(model.SuspensionStateAutoSuspendedForNotResponding), model.SuspensionStateNone),
+		"the row whose state changed must not be written")
+	assert.Equal(t, model.SuspensionStateManuallySuspended, state())
+	assert.False(t, write(only(model.SuspensionStateNone, model.SuspensionStateAutoSuspendedForNotResponding), model.SuspensionStateGoneSuspended),
+		"no listed state matches")
+	notIn := func(states ...model.SuspensionState) model.InstanceUpdateCondition {
+		return model.InstanceUpdateCondition{SuspensionNotIn: states}
+	}
+	assert.False(t, write(notIn(model.SuspensionStateGoneSuspended, model.SuspensionStateManuallySuspended), model.SuspensionStateGoneSuspended),
+		"an excluded state must not be written")
+	assert.Equal(t, model.SuspensionStateManuallySuspended, state())
+	assert.True(t, write(only(model.SuspensionStateNone, model.SuspensionStateManuallySuspended), model.SuspensionStateNone),
+		"any of the listed states matches")
+	assert.Equal(t, model.SuspensionStateNone, state())
+	assert.True(t, write(notIn(model.SuspensionStateGoneSuspended, model.SuspensionStateManuallySuspended), model.SuspensionStateGoneSuspended),
+		"a state not excluded matches")
+	set(map[string]any{"suspensionState": string(model.SuspensionStateNone)})
+
+	// 応答なしの期間: 応答なしで、閾値以前からのときだけ書く。
+	threshold := time.Now().Add(-7 * 24 * time.Hour)
+	stale := model.InstanceUpdateCondition{NotRespondingSinceAtOrBefore: &threshold}
+	old := threshold.Add(-time.Hour)
+	recent := threshold.Add(time.Hour)
+	set(map[string]any{"isNotResponding": false, "notRespondingSince": &old})
+	assert.False(t, write(stale, model.SuspensionStateAutoSuspendedForNotResponding), "a responding host must not be written")
+	set(map[string]any{"isNotResponding": true, "notRespondingSince": &recent})
+	assert.False(t, write(stale, model.SuspensionStateAutoSuspendedForNotResponding), "not responding for too short must not be written")
+	set(map[string]any{"isNotResponding": true, "notRespondingSince": nil})
+	assert.False(t, write(stale, model.SuspensionStateAutoSuspendedForNotResponding), "an unknown since must not be written")
+	set(map[string]any{"isNotResponding": true, "notRespondingSince": &old})
+	assert.True(t, write(stale, model.SuspensionStateAutoSuspendedForNotResponding))
+	assert.Equal(t, model.SuspensionStateAutoSuspendedForNotResponding, state())
+
+	ok, err := repo.UpdateFieldsIf("missing.example", model.InstanceUpdateCondition{}, map[string]any{"suspensionState": "none"})
+	require.NoError(t, err)
+	assert.False(t, ok, "no row, nothing written")
+}
+
+// TestInstanceRepository_UpdateFieldsIf_Error pins that a failed write is
+// returned, not reported as "the condition did not match".
+func TestInstanceRepository_UpdateFieldsIf_Error(t *testing.T) {
+	repo := NewInstanceRepository(testDB)
+	inst := newTestInstance("i_ir_cas_err", "cas-err.example")
+	require.NoError(t, repo.Create(inst))
+	defer cleanupInstance(t, inst.ID)
+	_, err := repo.UpdateFieldsIf("cas-err.example", model.InstanceUpdateCondition{}, map[string]any{"noSuchColumn": 1})
+	require.Error(t, err)
+}
+
+// TestInstanceUpdateCondition_MatchesAgreesWithSQL pins that the meaning the
+// mock repository gives to a condition (model.InstanceUpdateCondition.Matches)
+// is the meaning of the SQL of UpdateFieldsIf (#3731): for each row and
+// condition, the write happens exactly when Matches says so. 境界 (応答なしの
+// 期間がしきい値ちょうど) も含める。
+func TestInstanceUpdateCondition_MatchesAgreesWithSQL(t *testing.T) {
+	repo := NewInstanceRepository(testDB)
+	// DB の時刻はマイクロ秒なので、境界の比較がずれないよう揃える。
+	threshold := time.Now().Add(-7 * 24 * time.Hour).Truncate(time.Microsecond)
+	before, after := threshold.Add(-time.Hour), threshold.Add(time.Hour)
+	rows := []struct {
+		name  string
+		state model.SuspensionState
+		notR  bool
+		since *time.Time
+	}{
+		{"none responding", model.SuspensionStateNone, false, nil},
+		{"none responding with an old since", model.SuspensionStateNone, false, &before},
+		{"none since before", model.SuspensionStateNone, true, &before},
+		{"none since at", model.SuspensionStateNone, true, &threshold},
+		{"none since after", model.SuspensionStateNone, true, &after},
+		{"none since unknown", model.SuspensionStateNone, true, nil},
+		{"manual since before", model.SuspensionStateManuallySuspended, true, &before},
+		{"gone", model.SuspensionStateGoneSuspended, false, nil},
+		{"auto", model.SuspensionStateAutoSuspendedForNotResponding, true, &before},
+	}
+	conds := map[string]model.InstanceUpdateCondition{
+		"zero":    {},
+		"in none": {SuspensionIn: []model.SuspensionState{model.SuspensionStateNone}},
+		"in auto or gone": {SuspensionIn: []model.SuspensionState{
+			model.SuspensionStateAutoSuspendedForNotResponding, model.SuspensionStateGoneSuspended}},
+		"not in gone or manual": {SuspensionNotIn: []model.SuspensionState{
+			model.SuspensionStateGoneSuspended, model.SuspensionStateManuallySuspended}},
+		"stale":         {NotRespondingSinceAtOrBefore: &threshold},
+		"in none stale": {SuspensionIn: []model.SuspensionState{model.SuspensionStateNone}, NotRespondingSinceAtOrBefore: &threshold},
+	}
+	writes := 0
+	for i, row := range rows {
+		for cname, cond := range conds {
+			t.Run(row.name+"/"+cname, func(t *testing.T) {
+				id := fmt.Sprintf("i_ir_agree_%d", i)
+				host := fmt.Sprintf("agree-%d.example", i)
+				inst := newTestInstance(id, host)
+				inst.SuspensionState = row.state
+				inst.IsNotResponding = row.notR
+				inst.NotRespondingSince = row.since
+				require.NoError(t, repo.Create(inst))
+				defer cleanupInstance(t, id)
+
+				stored, err := repo.FindByHost(host)
+				require.NoError(t, err)
+				want := cond.Matches(stored)
+				ok, err := repo.UpdateFieldsIf(host, cond, map[string]any{"name": "written"})
+				require.NoError(t, err)
+				assert.Equal(t, want, ok, "the SQL and Matches disagree")
+				if ok {
+					writes++
+				}
+			})
+		}
+	}
+	// 表が片側に偏って、一致の検査が空振りしていないこと。
+	assert.Positive(t, writes)
+	assert.Less(t, writes, len(rows)*len(conds))
 }
