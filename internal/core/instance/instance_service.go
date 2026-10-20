@@ -76,10 +76,16 @@ type Service struct {
 	// RecordResponseError だけ (確認済み) なので、そこで invalidate すれば整合する。
 	responseHealthyCache map[string]time.Time
 	responseHealthyTTL   time.Duration
-	// dropGen は DropLocal が応答の健全と受信時刻の窓を捨てるたびに進める (#3729)。
-	// DB を読んでいる間に捨てられたとき、読んだ行から作った判定や窓を、読み終わった
-	// 後に積まないために使う。進めるのは DropLocal だけ。
+	// dropGen は DropLocal が受信時刻の窓を捨てるたびに進める (#3729)。DB を読んで
+	// いる間に捨てられたとき、読んだ行から作った窓を、読み終わった後に積まないために
+	// 使う。進めるのは DropLocal だけ。
 	dropGen uint64
+	// healthGen は応答の健全のキャッシュを、not-responding への遷移 (RecordResponseError、
+	// #3731) と DropLocal (#3729) で消すときに進める。回復で消す (MarkRequestReceived) とき
+	// は進めない (健全の方向へ動くので、積み直されても正しい)。DB を読んで
+	// いる間に消されたとき、読んだ行から作った「健全」を積まないために使う。積むと、
+	// 遷移の直後の成功が TTL の間 SELECT を省き、回復の UPDATE を取りこぼす。
+	healthGen uint64
 	// lastMetaWarn / metaWarnEvery は meta.Fetch 失敗 warn のレート制限用。
 	// 継続障害時に配送ごとに warn を吐かないよう間引く (#1410)。
 	lastMetaWarn  time.Time
@@ -235,9 +241,24 @@ func (s *Service) MarkRequestReceived(host string) error {
 	// suspensionState を none に自動復活させる (upstream の shouldUnsuspend)。
 	unsuspend := inst.SuspensionState == model.SuspensionStateAutoSuspendedForNotResponding
 	if unsuspend {
+		// **読んだ時点の自動の停止のままのときだけ解除する (#3731)。** 読んだ後に
+		// 管理者が手動で停止していたら、その停止を外さない。そのときは停止以外の
+		// 列だけを書く。
 		fields["suspensionState"] = string(model.SuspensionStateNone)
-	}
-	if err := s.repo.UpdateFields(host, fields); err != nil {
+		ok, err := s.repo.UpdateFieldsIf(host, model.InstanceUpdateCondition{
+			SuspensionIn: []model.SuspensionState{model.SuspensionStateAutoSuspendedForNotResponding},
+		}, fields)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			unsuspend = false
+			delete(fields, "suspensionState")
+			if err := s.repo.UpdateFields(host, fields); err != nil {
+				return err
+			}
+		}
+	} else if err := s.repo.UpdateFields(host, fields); err != nil {
 		return err
 	}
 	if unsuspend {
@@ -301,7 +322,7 @@ func (s *Service) RecordResponseSuccess(host string) error {
 		s.mu.Unlock()
 		return nil
 	}
-	gen := s.dropGen
+	gen := s.healthGen
 	s.mu.Unlock()
 
 	inst, err := s.repo.FindByHost(host)
@@ -320,8 +341,8 @@ func (s *Service) RecordResponseSuccess(host string) error {
 	}
 	// healthy と確定したので窓キャッシュに載せ、以降の SELECT を省く。
 	s.mu.Lock()
-	if s.dropGen != gen {
-		// 読んでいる間にキャッシュが捨てられた (#3729)。読んだ行は捨てる前のもの
+	if s.healthGen != gen {
+		// 読んでいる間に判定が消された (#3729、#3731)。読んだ行は消す前のもの
 		// かもしれないので積まない。
 		s.mu.Unlock()
 		return nil
@@ -365,10 +386,23 @@ func (s *Service) RecordResponseError(host string) error {
 		}
 		if inst.SuspensionState == model.SuspensionStateNone &&
 			!inst.NotRespondingSince.After(now.Add(-autoSuspendNotRespondingThreshold)) {
-			if err := s.repo.UpdateFields(host, map[string]any{
+			// **停止を決めた理由が書く時点でも成り立つときだけ停止する (#3731)。**
+			// 読んだ後に管理者が手動で停止していたら、自動の停止で上書きしない
+			// (上書きすると、相手からの受信で自動の停止として解除される)。読んだ後に
+			// 相手が回復していたら (並行した成功や受信が not-responding を下ろした)、
+			// 回復した相手を停止しない。
+			threshold := now.Add(-autoSuspendNotRespondingThreshold)
+			ok, err := s.repo.UpdateFieldsIf(host, model.InstanceUpdateCondition{
+				SuspensionIn:                 []model.SuspensionState{model.SuspensionStateNone},
+				NotRespondingSinceAtOrBefore: &threshold,
+			}, map[string]any{
 				"suspensionState": string(model.SuspensionStateAutoSuspendedForNotResponding),
-			}); err != nil {
+			})
+			if err != nil {
 				return err
+			}
+			if !ok {
+				return nil
 			}
 			// 自動の停止も、管理画面からの停止 (Suspend) と同じく判定のキャッシュを
 			// 捨てて全プロセスへ伝える。捨てないと cacheTTL の間は配送が続く (#3664)。
@@ -387,7 +421,10 @@ func (s *Service) RecordResponseError(host string) error {
 	// stale な healthy 判定で回復 UPDATE を取りこぼし、TTL が切れるまで
 	// isNotResponding が解除されない。isNotResponding==true への遷移は本メソッド
 	// だけなので、ここで消せば healthy-cache の整合が保てる (#1429 review)。
+	// 世代も進める (#3731)。消す前に読み始めた RecordResponseSuccess が、消した後に
+	// 「健全」を積み直さないようにする。
 	s.mu.Lock()
+	s.healthGen++
 	delete(s.responseHealthyCache, host)
 	s.mu.Unlock()
 	return nil
@@ -409,10 +446,19 @@ func (s *Service) MarkGoneSuspended(host string) error {
 		inst.SuspensionState == model.SuspensionStateManuallySuspended {
 		return nil
 	}
-	if err := s.repo.UpdateFields(host, map[string]any{
+	// **書く時点でも手動の停止・消えた相手の停止でないときだけ書く (#3731)。** 読んだ
+	// 後に管理者が手動で停止していたら、消えた相手の停止で上書きしない (上書きすると、
+	// 消えた相手のフォローの片付けの候補に並ぶ)。
+	ok, err := s.repo.UpdateFieldsIf(host, model.InstanceUpdateCondition{
+		SuspensionNotIn: []model.SuspensionState{model.SuspensionStateGoneSuspended, model.SuspensionStateManuallySuspended},
+	}, map[string]any{
 		"suspensionState": string(model.SuspensionStateGoneSuspended),
-	}); err != nil {
+	})
+	if err != nil {
 		return err
+	}
+	if !ok {
+		return nil
 	}
 	// 判定のキャッシュを捨てる。残すと cacheTTL の間、消えた相手へ配送が続く
 	// (管理画面からの停止と同じ扱い)。
@@ -784,6 +830,7 @@ func (s *Service) DropLocal() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.dropGen++
+	s.healthGen++
 	clear(s.responseHealthyCache)
 	clear(s.requestReceivedCache)
 }
