@@ -1347,7 +1347,8 @@ stream の部品・handler と、/api の外のルートの登録は、依存す
 渡すだけで起動と停止の登録を済ませる形にした。#3703で、一覧の項目に起動を持たせ、構築では登録だけを
 行い、起動は`StartBackground`が一覧の順にまとめて行う形にした(下の「起動」)。#3705で、構築の途中で
 `go`文で回していた最後の部品`emojiInvalidationQueue`に`Start`と`Stop`を持たせ、値から作る登録
-(`startPartWithStop`)で一覧に入れた。
+(`startPartWithStop`)で一覧に入れた。#3707で、部品の停止のpanicを部品ごとに回収し、残りの停止を
+続ける形にした(下の「停止のpanic」)。
 
 - 項目は名前・止める値 (`part`)・起動 (`func()`。起動するものが無い部品はnil)・停止
   (`func(context.Context)`) を持つ。`part` は停止が働きかける値 (バッファ・publisher・service・
@@ -1560,6 +1561,13 @@ closureの3つの型と値の無いworkerは満たさない。部品の型にメ
 - 2回目の`Start`・`Stop`と、止めた後の`Start`は何もしない(部品の型が自分で守る。一覧の`startAll`も
   止め始めた後は起動しない)
 
+**意図して変えた動き(#3707)。**
+
+- 部品の停止のpanicは、前は呼び出し元を抜けてプロセスごと落としていた。後ろの部品の停止、chartの保存、
+  queueのdriverと購読を閉じる処理は飛び、SIGTERMの停止でも、メンテナンスに入るときの停止でも、DBを
+  閉じる前に落ちた。今は記録して残りを止め、`StopBackground`のエラーになる(上の「停止のpanic」)
+- panicしない限り、停止の順も`StopBackground`の戻り値も変わらない
+
 **Redisの購読は動かしていない。** streamの節で始める購読(`internalPubSub.Subscribe`の
 `metaUpdated`など4つと、`cachebus`・`relationcache`の`Connect…`/`Subscribe…`)は、#3703の後も
 構築の途中で始める。一覧に乗せなかった理由は3つ。
@@ -1594,6 +1602,47 @@ closureの3つの型と値の無いworkerは満たさない。部品の型にメ
 `context.Background()` で同じ順に止め、箱を 1 秒まで待ち、queue の driver・streaming の接続・
 購読を閉じる。
 
+**停止のpanic(#3707)。** 一覧の部品の停止は、どれも呼び出し元のgoroutineで同期に走る。`stopAll`は
+部品ごとに停止をrecoverで包み、panicしたら部品の名前・panicの値・スタックを`slog.Error`で1件記録して、
+次の部品の停止へ進む。panicした部品ごとに、名前を含み`errLifecycleStop`を包むエラーを作り、
+`errors.Join`でまとめて返す(panicが無ければnil)。起動の側の`startAll`(#3703)と違い、後の部品も止める。
+止めないと、その部品が流すもの(バッファのflushなど)が失われるため。
+
+- `shutdown`は、panicがあっても一覧の後の手順(上の5〜9)を走らせ、`stopAll`のエラーとechoの
+  `Shutdown`のエラーを`errors.Join`でまとめて返す。panicが無ければechoのエラーをそのまま返す
+  (#3707の前と同じ値)。`StopBackground`はそれを返す
+- `cleanupConstruction`は、エラーを返す口が無いので、`stopAll`の記録だけにする(重ねて記録しない)。
+  後始末の残り(箱、queueのdriver、streaming、購読)は続く
+- 停止のctxは、panicした部品の後もそのまま後の部品へ渡す。panicした部品が使った時間は、後の部品の
+  時間から引かれる
+- panicした部品は止め直さない。停止の途中でpanicした部品は、途中まで止まったまま残りうる(goroutineが
+  残れば、DBを閉じた後に失敗する)。`StopBackground`は1回目だけ働く(`shutdownOnce`)ので、呼び直しても
+  1回目のエラーを返すだけになる
+- 停止がロックを握ったまま(`defer`で外さずに)panicすると、そのロックを待つ後の部品の停止や手順が
+  止まりうる。#3707の前はプロセスごと落ち、立ち上げ直しは運用の側(composeの`restart`など)に
+  任されていた。今はたとえばメンテナンスに入るとき(`genMu`を握ったまま止める`stopGeneration`)が、
+  期限無しに`ProcDraining`のまま止まりうる。SIGTERMの停止は、`Supervisor.Shutdown`の期限と
+  `lockBefore`で打ち切られる。今の部品の停止では、ロックを握ったままpanicしうる区間(バッファの
+  flushのDBへの書き込み、配送の健全性の集計の読み出しなど)は、どれもロックを`defer`で外すので、
+  この組み合わせは無い(#3707で各部品の停止を読んで確かめた)
+- 回収するのは停止を呼んだgoroutineのpanicだけで、停止が立てたgoroutineの中のpanicは回収しない
+- 包むのは一覧の部品の停止だけ。直書きの手順(streamingの`CloseAll`、`stopQueue`、`background.Stop`、
+  `chartMgmt.Stop`、`queueDriver.Close`、pubsubの`Close`)のpanicは、今までどおり回収しない。一覧に
+  入れる段で扱う(#3666)
+
+Supervisorの側は変えていない。停止のエラーの使われ方は次のとおり。
+
+- `stopGenerationLocked`は、今までどおり`StopBackground`のエラーをDBを閉じるエラーと合わせて
+  `StopReport.Err`に載せ、その後でDBを閉じる。メンテナンスに入るとき(`maintenance.go`の`enter`)は、
+  エラーがあっても`ProcDrained`にし、報告の`Error`にその文字列を載せるだけで、メンテナンスを抜ける
+  ときの作り直し(`resume`)は止めたときのエラーを見ない
+- `Supervisor.Shutdown`は、期限内に終わったときだけエラーに含めて返す。期限が切れて背景処理の停止を
+  呼んだ後に返るときは`ctx.Err()`だけを返し、panicは`stopAll`の記録にだけ残る。`serve`は返ったエラーを
+  `server shutdown error`として記録する。
+  Redisを閉じずに残すのは期限切れ・取り消しのエラーを含むときだけ(`keepRedis`)で、終了コードは
+  このエラーで変わらない
+- `startGenerationLocked`(`StartBackground`に失敗した世代)は、今までどおり停止のエラーを捨てる
+
 **直書きの手順 (上の 1〜3・5〜9) は、一覧に入れていない。** 動きを変えずには入れられないため。
 
 | 手順 | 入れない理由 |
@@ -1604,10 +1653,10 @@ closureの3つの型と値の無いworkerは満たさない。部品の型にメ
 | `chartMgmt.Stop` | 起動するのは `StartBackground` で、構築の途中ではない。後始末では止めない (起動していない) |
 | `queueDriver.Close` | エラーを返し、6 で止まらなかった worker を待った後に閉じる。後始末では nil に戻す |
 | pubsub の `Close` | 購読は stream の節で始めるが、閉じるのは driver の後。一覧に入れると、一覧より後に止める 5〜7 より先に閉じることになる |
-| echo の `Shutdown` | 戻り値が `StopBackground` の戻り値になる |
+| echo の `Shutdown` | 戻り値が `StopBackground` の戻り値になる(一覧の停止のpanicがあれば、そのエラーと`errors.Join`でまとめる。#3707) |
 
 **テストが見ている範囲は次のとおり** (`internal/server/lifecycle_parts_test.go`・
-`lifecycle_parts_value_test.go`・`lifecycle_start_test.go`。多くは実際に`newServer`で作ったサーバーで見る)。部品を足す・動かすときは、テストの表とこの節の表を一緒に直す。
+`lifecycle_parts_value_test.go`・`lifecycle_start_test.go`・`lifecycle_stop_test.go`。多くは実際に`newServer`で作ったサーバーで見る)。部品を足す・動かすときは、テストの表とこの節の表を一緒に直す。
 
 - **名前の並びと登録の条件。** `TestNewServer_ShutdownStopsThePartsInTheirOrder` が、role (両方・
   server・queue) と設定 (queueInspector の有無、`disableParamShadow`、DB の store を持つプラグインの
@@ -1665,6 +1714,18 @@ closureの3つの型と値の無いworkerは満たさない。部品の型にメ
   `TestNewServer_FailedConstructionStopsTheRegisteredParts`、重複で構築が
   失敗することは `TestNewServer_DuplicatePartFailsTheConstruction` が見る。`addPart` が部品に値から
   作った印を付けず、形を満たす値も拒まないことは `TestServer_AddPartDoesNotMarkThePartAsFromValue` が見る
+- **停止のpanic(#3707)。** `TestLifecycle_StopAllRecoversAPanickingStop`が、2つの部品の停止をpanicさせ、
+  後の部品も同じctxで順に止まること、エラーがpanicした部品ごとに1つで、どれも`errLifecycleStop`を包み
+  名前とpanicの値を含むこと、部品の名前・panicの値・スタックが記録されることを見る。
+  `TestServer_StopBackgroundGoesOnAfterAPanickingStop`が、一覧の中ほどの部品の停止がpanicしても、
+  後の部品の停止とqueueのdriverを閉じる処理が走り、Redisの購読が閉じることと、`StopBackground`の
+  エラーが部品の名前を含むことを見る。`TestServer_StopBackgroundJoinsThePanicWithTheEchoError`が、
+  echoの`Shutdown`のエラーが残ることと、panicが無ければechoのエラーをそのまま返すことを、
+  `TestServer_StopBackgroundWithoutAPanic`がpanicの無い停止がnilを返すことを見る。
+  `TestServer_FailedConstructionCleanupGoesOnAfterAPanickingStop`が、構築の後始末が最後まで走り、
+  記録を重ねないことを見る。`TestSupervisor_StopGenerationGoesOnAfterAPanickingStop`が、`newServer`で
+  作った世代の2つの部品の停止をpanicさせ、Supervisorが全部の部品をその順に止め、`StopReport.Err`に
+  載せ、世代のDBの接続とRedisの購読を残さず、次の世代を作れることを見る
 
 #3699 の前後で同じ動きであることは、次のように確かめた (道具はコミットしていない)。
 
@@ -1730,6 +1791,18 @@ closureの3つの型と値の無いworkerは満たさない。部品の型にメ
   組の集合、起動ログは、前後の4通りの組み合わせのどれでも一致した
 - 4.1の道具: 節点は361から358に、呼び出しが離れている辺は660から659になった(4.1)。#3676のseqの道具の
   列は、消した`go`文の1つだけが違う(`addPart`と`startPartWithStop`はどちらも拾わない)
+
+#3707の前後で、panicしない限り同じであることは、次のように確かめた(道具はコミットしていない)。
+
+- 起動と停止の順: #3705と同じ使い捨ての記録(`emojiInvalidationQueue`の`Start`/`Stop`を含む)を前後の木に
+  当て、#3699と同じ8つの組で、`newServer`・`StartBackground`・`StopBackground`のそれぞれの間の起動と
+  停止の列を記録した。8つの組のどれも、前後で一致した。どちらの木も2回回して揺れないことを確かめた
+- `elythia dump-routes`: 出力(ルート)、起動ログ、Redisの命令の列、PostgreSQLの文の集合は、前後で一致した
+- `serve`: #3703と同じ方法(前後のバイナリを25秒ずつ)で、PostgreSQLの文の集合と、Redisの命令とキーの
+  組の集合は、前の木の2回と後の木の2回の4通りの組み合わせのどれでも一致した。起動ログの差は、gormの
+  ログに出る呼び出し元のファイルのパス(ビルドした木の置き場所)だけだった。前の木の最初の1回は、
+  空のDBへの初回の起動(`meta`と`instance_secret`の行を作る)なので、比べる対象から外した
+- 4.1の道具は、`router.go`を変えていないので数が変わらない
 
 コメントの「shutdown hook」は、この一覧の部品の停止を指す。
 
