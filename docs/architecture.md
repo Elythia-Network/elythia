@@ -2043,7 +2043,7 @@ Supervisorの側は変えていない。停止のエラーの使われ方は次�
 
 コメントの「shutdown hook」は、この一覧の部品の停止を指す。
 
-### 4.4 キャッシュの一覧 (#3721、#3723)
+### 4.4 キャッシュの一覧 (#3721、#3723、#3725)
 
 **世代のキャッシュは、そのプロセスが持つ分を全部捨てる口 (`DropLocal()`) を持たせ、名前と由来と
 一緒に `Server` の一覧 (`cacheList`、`internal/server/caches.go`) へ登録する。** #3666 の段階 4。
@@ -2059,6 +2059,7 @@ setupRoutes()
   s.addCache("userCache", cacheFromDB, s.userCache)       // 3 つは newServer で作る (#3723)
   s.addCache("relationCache", cacheFromDB, s.relationCache)
   s.addCache("authTokens", cacheFromDB, s.auth)
+  s.addCache("roles", cacheFromDB, roleService)           // #3725。userCache の後
 ```
 
 - **`DropLocal()` は他のプロセスに知らせない。** publish も、無効化の hook (`SetInvalidationHook`)
@@ -2088,7 +2089,8 @@ setupRoutes()
 |---|---|---|
 | meta | `cachedMeta`・`metaResponse`・`nodeinfo` | #3721 |
 | 利用者と関係 | `userCache` (`CachedUserRepository`)・`relationCache` (`RelationCache`)・`authTokens` (`AuthMiddleware` の tokenCache) | #3723 |
-| ロール・絵文字とデコレーション・連合・外部 | (未) | 後続 |
+| ロール | `roles` (`role.Service`。利用者のロール・ロールの一覧と、プラグインの policy の結果) | #3725 |
+| 絵文字とデコレーション・連合・外部 | (未) | 後続 |
 
 - 利用者と関係の系統の 3 つは、どれもこのプロセスだけで全部を捨てる処理を元から中に持っていて
   (`invalidateAllLocal`・`apply({All: true})`・`tokenCache.invalidateAll`)、`DropLocal()` はそれを
@@ -2096,6 +2098,13 @@ setupRoutes()
   `RelationCache.InvalidateAll()` は他のプロセスにも通知するので、一覧からは呼ばない
 - この 3 つの間に捨てる順の制約は無い。tokenCache は利用者を DB から読み (native token は
   `FindByToken`、app token は `FindByHashOrToken` の Preload)、利用者のキャッシュを通らない
+- ロールの `DropLocal()` は、`rolesUpdated` を受けたときと同じ `InvalidateAllCachesLocally()` を呼ぶ。
+  世代の番号 (`allUserRoleEpoch`・`rolesListEpoch`・`globalEpoch`) を進めるので、捨てる前に始まった
+  読み込みや policy の解決の結果は積まない
+- **`roles` は `userCache` の後に登録する。** 条件付きロールは利用者の行 (`CachedUserRepository`) から
+  評価して利用者のロールのキャッシュに積むので、先に捨てると、間に来たリクエストが古い利用者の行で
+  評価した結果を積む。meta の base policy はロールのキャッシュに持たず、評価のたびに meta のキャッシュ
+  (`cachedMeta`) から読むので、meta の系統との間に順の制約は無い
 
 - captcha の provider と、リアクションのバッファの切り替えは、meta 行の写しで、捨てるだけでは
   足りず読み直しが要る。#3721 では登録していない。扱いは段階 4 の最後で決める
@@ -2122,9 +2131,18 @@ setupRoutes()
   hook や publisher に何も渡さないこと。読み込みの途中で捨てたときに読んだ行を積まないことは、
   利用者のキャッシュは `TestCachedUserRepository_DropLocal` が、tokenCache は
   `TestAuthMiddleware_InvalidationDuringReadIsNotStored` の `drop` の場合が見る
+- `TestCaches_RoleLine` (#3725): `roles` がサーバーの使う `role.Service` のまま、`userCache` より後に
+  一覧にあることを確かめる。
+  DB にロール (管理者) と割り当てを直接書いて、`dropAll` の後に `IsAdministrator` と管理 API の認可
+  (`/api/admin/meta` が 200 になる) が読み直すことを見る。`internal:` へ何も publish しないことも見る
+  (`watchInternal`。`TestCaches_UserLine` と共通)
+- `TestDropLocal_DropsRolesAndPolicyResultsWithoutNotify`・
+  `TestEffectivePolicy_DropLocalDoesNotReturnJoinedStaleFlight` (#3725): ロールのキャッシュと
+  プラグインの policy の結果を全部捨て、hook を呼ばないこと。捨てる前に始まった policy の解決の
+  結果を、捨てた後のリクエストに返さないこと
 
-#3721 と #3723 の前後で同じであることは、それぞれ次のように確かめた (道具はコミットしていない)。
-#3721 でも #3723 でも、結果は次のとおりだった。
+#3721・#3723・#3725 の前後で同じであることは、それぞれ次のように確かめた (道具はコミットしていない)。
+どれも、結果は次のとおりだった。
 
 - `elythia dump-routes`: 出力 (ルート)、起動ログ、Redis の命令の列、PostgreSQL の文の集合は、前後で
   一致した。前の木を 2 回流して揺れないことも確かめ、後の木も 2 回流した
