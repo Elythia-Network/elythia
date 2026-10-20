@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"strconv"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -32,9 +33,16 @@ type HitStore struct {
 	rdb   redis.UniversalClient
 	clock func() time.Time
 	queue chan Hit
+
+	// mu guards cancels and stopped, so that Stop cancels every loop Start
+	// started and no loop starts after Stop.
+	mu      sync.Mutex
+	cancels []context.CancelFunc
+	stopped bool
 }
 
-// NewHitStore constructs a HitStore. Start must be called to write the hits.
+// NewHitStore constructs a HitStore. Start must be called to write the hits,
+// and Stop stops writing them.
 func NewHitStore(rdb redis.UniversalClient) *HitStore {
 	return &HitStore{rdb: rdb, clock: time.Now, queue: make(chan Hit, hitQueueSize)}
 }
@@ -65,11 +73,23 @@ func (s *HitStore) Record(h Hit) {
 	}
 }
 
-// Start writes the queued hits until ctx is done.
+// Start writes the queued hits in a goroutine until ctx is done or Stop is
+// called. It does nothing once Stop has been called.
+//
+// 止める口をStopにするため、ctxから切れるctxを作ってここで持つ(#3717)。前はサーバーの
+// 組み立てが自分でcancelするctxを渡し、それを切って止めていた。
 func (s *HitStore) Start(ctx context.Context) {
 	if s == nil || s.rdb == nil {
 		return
 	}
+	s.mu.Lock()
+	if s.stopped {
+		s.mu.Unlock()
+		return
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	s.cancels = append(s.cancels, cancel)
+	s.mu.Unlock()
 	go func() {
 		for {
 			select {
@@ -94,6 +114,28 @@ func (s *HitStore) Start(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+// Stop stops the loops Start started by cancelling their ctx, and keeps a
+// later Start from starting one. It does not wait for a loop to return; the
+// write of a batch in progress gets the cancelled ctx as well. Hits still
+// queued may be left unwritten. It is safe to call before Start, more than
+// once, and on a nil HitStore. The ctx is not used.
+//
+// 待たないのは#3717の前の停止(組み立てがctxを切るだけ)と同じ。書き込みのctxはloopの
+// ctxから作るので、書き込み中の1回も同じ取り消しで終わる。
+func (s *HitStore) Stop(context.Context) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.stopped = true
+	cancels := s.cancels
+	s.cancels = nil
+	s.mu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
 }
 
 func (s *HitStore) write(ctx context.Context, hits []Hit) error {

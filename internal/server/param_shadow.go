@@ -55,7 +55,7 @@ func (s *Server) paramShadowMiddleware() echo.MiddlewareFunc {
 	})
 	// 停止のときに、最後の要約からの分を出す。メンテナンスで作り直す世代も
 	// それぞれが自分の分を出す。
-	s.addPart("paramShadowRecorder", rec, func(context.Context) { rec.Flush() })
+	s.addCloser("paramShadowRecorder", rec)
 	shadow := paramshadow.Middleware(eps, rec)
 	slog.Info("param shadow validation enabled", "endpoints", len(eps), "logInterval", interval.String())
 	return func(next echo.HandlerFunc) echo.HandlerFunc {

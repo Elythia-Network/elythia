@@ -24,13 +24,12 @@ type lifecyclePart struct {
 	// value of the expected type.
 	//
 	// For a part added from its value (addStartCloser and the others,
-	// #3701), stop is built from part itself, so the two cannot disagree. For
-	// a part added by addPart with its own stop, nothing ties part to stop,
-	// neither the type system nor a check at run time.
+	// #3701), stop is built from part itself, so the two cannot disagree.
+	// Production adds every part that has a value that way (#3717); the only
+	// registration that takes a stop of its own, addWorker, has no value.
 	//
 	// 停止の関数が名前どおりの部品を止めているかは、名前の並びだけでは
 	// 分からない (#3699 のレビュー L-1)。テストが部品そのものを引けるようにする。
-	// addPart で登録した部品どうしの取り違えは、同じ型なら型の表のテストでも落とせない。
 	part any
 	// start starts the part, or is nil for a part that has nothing to start
 	// (a part that only has to be stopped). StartBackground calls it once,
@@ -44,8 +43,8 @@ type lifecyclePart struct {
 	stop func(context.Context)
 	// fromValue reports that the part was added by a registration that
 	// builds its stop from part (addStartCloser and the others, #3701),
-	// not by addPart. Production code never reads it; tests use it to find
-	// a part that could be added from its value but went through addPart.
+	// not with a stop of its own. Production code never reads it; tests use
+	// it to check that every part with a value was added from it (#3717).
 	fromValue bool
 }
 
@@ -228,36 +227,6 @@ func stopPart(ctx context.Context, p lifecyclePart) (err error) {
 	}()
 	p.stop(ctx)
 	return nil
-}
-
-// addPart registers a named part of this generation to be stopped by
-// Shutdown (and by the rollback of a failed construction). Parts are stopped
-// in registration order (FIFO); see lifecycle. part is the value stop acts
-// on (nil when there is none). The part has nothing to start; one that
-// StartBackground has to start is added by addPartWithStart, by addWorker
-// or by a registration from its value.
-//
-// It is for a part whose stop cannot be built from its value (a ctx to
-// cancel, a goroutine to wait for, a warning to log). A part whose start and
-// stop are its own methods is added by addStartCloser, addStartStopper,
-// addPlainStartStopper, addCloser or addErrCloser instead. Tests check that
-// no part of setupRoutes with one of those shapes comes through addPart
-// (docs/architecture.md 4.3); addPart itself does not refuse it.
-//
-// 実行時には拒まない。部品の型にメソッドを足しただけで本番の構築が失敗し、
-// 案内どおりに直すと closure の停止 (時間切れの警告など) が失われるため (#3701 の
-// レビュー L-2)。検査は newServer で作った一覧をテストで見る。
-func (s *Server) addPart(name string, part any, stop func(context.Context)) {
-	s.lifecycle.add(name, part, stop)
-}
-
-// addPartWithStart registers a named part like addPart, with start, which
-// StartBackground calls once, in list order (#3703). stop must be safe to
-// call when start has not run.
-//
-// 値から作る登録の形に合わない部品(ctxのcancelで止めるfedRuleHits)に使う。
-func (s *Server) addPartWithStart(name string, part any, start func(), stop func(context.Context)) {
-	s.lifecycle.addWithStart(name, part, start, stop)
 }
 
 // addFromValue adds a part whose start (nil when it has none) and stop are

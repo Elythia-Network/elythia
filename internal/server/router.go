@@ -172,8 +172,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// DB に触らないので、作る位置が下の EnsureInitial などより前に移っても、DB の文の
 	// 順は変わらない。
 	// lifecycle は Server が持つ部品の一覧 (#3699) を指す。登録は s.addStartCloser などの
-	// 値から作る登録か s.addPart で行う (docs/architecture.md 4.3)。構築では登録するだけで、
-	// 起動はStartBackgroundが一覧の順に行う(#3703)。
+	// 値から作る登録か、値を持たない s.addWorker で行う (docs/architecture.md 4.3)。構築では
+	// 登録するだけで、起動はStartBackgroundが一覧の順に行う(#3703)。
 	w := &wiring{repos: s.buildRepos(), lifecycle: &s.lifecycle}
 	userRepo := w.repos.user
 	noteRepo := w.repos.note
@@ -1067,11 +1067,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	fedRuleService := fedrule.NewService(fedRuleRepo, fedRuleHits, idGen.ParseTime)
 	federationResolver.SetRuleEvaluator(fedRuleService)
 	federationProcessor.SetRuleEvaluator(fedRuleService)
-	{
-		// 起動はStartBackgroundで行う(#3703)。起動せずに止めても、cancelするだけで済む。
-		hitsCtx, stopHits := context.WithCancel(context.Background())
-		s.addPartWithStart("fedRuleHits", fedRuleHits, func() { fedRuleHits.Start(hitsCtx) }, func(context.Context) { stopHits() })
-	}
+	// 起動はStartBackgroundで行う(#3703)。起動せずに止めても、Stopは停止の印を立てるだけで
+	// 済む。止め方はStartの中で作ったctxを切るだけで、goroutineは待たない(#3717)。
+	s.addStartStopper(context.Background(), "fedRuleHits", fedRuleHits)
 	// 新規 instance row 発見時に nodeinfo を取得して metadata を更新する。
 	// admin/federation/refresh-remote-instance-metadata でも同じ fetcher を
 	// 再利用して on-demand で再取得する (#351 フォロー)。
@@ -1364,16 +1362,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// i/update の profile description 由来 user.tags 変更で hashtag attach 集計
 	// (attachedUsersCount) を追従させる (#1362)。
 	userService.SetUsertagHook(hashtagService)
-	// graceful shutdown 経路で in-flight worker (#719 fire-and-forget) を ctx
-	// 期限内に drain する (#727)。typical case では即返り、長時間動く worker は
-	// ctx timeout で諦める (idempotent な RecordMention なので次回再カウント)。
+	// 停止は Close(ctx) で、in-flight worker を ctx 期限内に drain し、時間切れを
+	// 警告に出す (#727、#3717。理由は Close のコメント)。
 	// #764: 旧版は Server.hashtagService field 経由で Shutdown() から呼ばれて
 	// いたが、ctx-aware hook 化で field 不要になった。
-	s.addPart("hashtagService", hashtagService, func(ctx context.Context) {
-		if err := hashtagService.Shutdown(ctx); err != nil {
-			slog.Warn("hashtag service shutdown timed out", "err", err)
-		}
-	})
+	s.addCloser("hashtagService", hashtagService)
 
 	// Chart cron processor: tickCharts (毎時) / resyncCharts (毎日) /
 	// cleanCharts (毎日) を queue.Scheduler 経由で受け取る。Scheduler

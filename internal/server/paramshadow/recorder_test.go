@@ -2,6 +2,7 @@ package paramshadow
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -274,5 +275,25 @@ func TestRecorderWritesTheSummaryOffTheRequest(t *testing.T) {
 	r.Record(Event{Kind: KindAgreed})
 	if got := buf.lines(t); len(got) != 2 || got[1]["agreed"] != 2.0 || len(pending) != 1 {
 		t.Fatalf("lines = %v, pending %d", got, len(pending))
+	}
+}
+
+// TestRecorderCloseFlushes checks that Close, the stop of the part
+// paramShadowRecorder (#3717), writes what was counted since the previous
+// summary, as Flush does.
+func TestRecorderCloseFlushes(t *testing.T) {
+	r, buf, clock := newTestRecorder(10 * time.Minute)
+	r.Record(Event{Endpoint: "x", Kind: KindAgreed, HandlerStatus: 200})
+	if got := buf.lines(t); len(got) != 0 {
+		t.Fatalf("wrote before the interval: %v", got)
+	}
+	clock.t = clock.t.Add(30 * time.Second)
+	r.Close(context.Background())
+	want := []map[string]any{
+		{"msg": "paramshadow summary", "since": "2026-10-18T12:00:00Z", "seconds": 30.0, "agreed": 1.0, "diverged": 0.0,
+			"skipped": 0.0},
+	}
+	if got := buf.lines(t); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("lines =\n%v\nwant\n%v", got, want)
 	}
 }

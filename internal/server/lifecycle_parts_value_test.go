@@ -287,10 +287,11 @@ func TestServer_WorkerRunsOnlyOnceStarted(t *testing.T) {
 	})
 }
 
-// TestServer_AddPartDoesNotMarkThePartAsFromValue checks that a part added by
-// addPart, even one that has a shape of its own, is not marked as added from
-// its value, and that addPart does not refuse it at run time (#3701 review
-// L-2: the check is in TestNewServer_ShutdownStopsThePartsInTheirOrder).
+// TestServer_AddPartDoesNotMarkThePartAsFromValue checks that a part added
+// with a stop of its own (lifecycle.add, which the test helper addPart
+// calls), even one that has a shape of its own, is not marked as added from
+// its value and is not refused at run time. partsNotFromValue relies on the
+// mark (#3717: the check is in TestNewServer_ShutdownStopsThePartsInTheirOrder).
 func TestServer_AddPartDoesNotMarkThePartAsFromValue(t *testing.T) {
 	s := &Server{}
 	s.addPart("closure", fakeStartCloser{}, func(context.Context) {})
@@ -330,10 +331,11 @@ func valueShape(part any) string {
 // lists every method of Server that adds a part through addFromValue, with
 // the interface type of the parameter it passes as the value. valueShapes has
 // to list exactly those, so a new shape added to the registrations cannot be
-// missed by the check of addPart (addPartShapeViolations).
+// missed by valueShape, which partsNotFromValue uses to name the registration
+// a part can move to.
 //
 // 構文木で読むのは、形を判定する関数が interface の一覧を実行時に取れないため。
-// 本体の登録を足して valueShapes に足し忘れると、addPart の検査がその形を見逃す。
+// 本体の登録を足して valueShapes に足し忘れると、valueShape がその形を知らないままになる。
 // 読むのは lifecycle_parts.go の Server のメソッドだけなので、登録は Server の
 // メソッドとしてこのファイルに置くこと。別のファイルのメソッドと、型パラメータを
 // 持つ自由関数で書いた登録は拾えない (#3701 のレビュー 3 周目、#3369 に記録)。
@@ -399,8 +401,9 @@ func TestValueShape_ClassifiesThePartTypes(t *testing.T) {
 		{name: "fake Close(ctx)", part: fakeCtxCloser{}, use: "addCloser"},
 		{name: "fake Close() error", part: fakeErrCloser{}, use: "addErrCloser"},
 
-		// 値から作る登録で足す10個の部品の型(9つ。deliveryHealthとinboxHealthは同じ型)。
+		// 値から作る登録で足す13個の部品の型(12。deliveryHealthとinboxHealthは同じ型)。
 		// pluginstore.Store だけは setupRoutes ではなく dbBackedStorage が登録する。
+		// 最後の3つは#3717で停止の口を足し、closureの登録から移した。
 		{name: "TouchBuffer", part: (*coreinstance.TouchBuffer)(nil), use: "addStartCloser"},
 		{name: "CapabilityBuffer", part: (*coreinstance.CapabilityBuffer)(nil), use: "addStartCloser"},
 		{name: "CounterBuffer", part: (*coreinstance.CounterBuffer)(nil), use: "addStartCloser"},
@@ -410,11 +413,11 @@ func TestValueShape_ClassifiesThePartTypes(t *testing.T) {
 		{name: "QueueStatsPublisher", part: (*stream.QueueStatsPublisher)(nil), use: "addPlainStartStopper"},
 		{name: "MetadataRefresher", part: (*coreinstance.MetadataRefresher)(nil), use: "addCloser"},
 		{name: "pluginstore.Store", part: (*pluginstore.Store)(nil), use: "addErrCloser"},
+		{name: "fedrule.HitStore", part: (*fedrule.HitStore)(nil), use: "addStartStopper"},
+		{name: "hashtag.Service", part: (*corehashtag.Service)(nil), use: "addCloser"},
+		{name: "paramshadow.Recorder", part: (*paramshadow.Recorder)(nil), use: "addCloser"},
 
-		// closure でしか止められないので addPart で足す型と、値を持たない worker。
-		{name: "fedrule.HitStore", part: (*fedrule.HitStore)(nil)},
-		{name: "hashtag.Service", part: (*corehashtag.Service)(nil)},
-		{name: "paramshadow.Recorder", part: (*paramshadow.Recorder)(nil)},
+		// 値を持たない worker。
 		{name: "no value", part: nil},
 	}
 	for _, tt := range tests {
