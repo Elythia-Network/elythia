@@ -54,6 +54,13 @@ func (c *CachedMetaRepository) Invalidate() {
 	c.invalidate()
 }
 
+// DropLocal drops the cached meta row of this process without firing the
+// invalidation hook, so no other process is told (#3721). It is what the
+// cache list of internal/server calls (docs/architecture.md 4.4).
+func (c *CachedMetaRepository) DropLocal() {
+	c.invalidate()
+}
+
 // Fetch returns the cached meta if still valid, otherwise fetches from DB.
 // 返却される *model.Meta はキャッシュ内部と同一ポインタのため、呼び出し側で
 // フィールドを変更してはならない（read-only）。

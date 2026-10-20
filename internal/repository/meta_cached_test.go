@@ -212,3 +212,26 @@ func TestNewCachedMetaRepository_DefaultTTL(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "m1", m.ID)
 }
+
+// DropLocal は cache を捨てて次の Fetch を読み直させるが、hook は呼ばない
+// (#3721)。hook は他のプロセスへ metaUpdated を publish するので、呼ぶと
+// キャッシュを捨てるたびに全プロセスへ通知が飛ぶ。
+func TestCachedMetaRepository_DropLocalDropsWithoutHook(t *testing.T) {
+	inner := &countingMetaRepo{meta: &model.Meta{ID: "m1"}}
+	cached := repository.NewCachedMetaRepositoryWithTTL(inner, 1*time.Minute)
+	var hookCount atomic.Int32
+	cached.SetInvalidationHook(func() { hookCount.Add(1) })
+
+	_, err := cached.Fetch()
+	require.NoError(t, err)
+	_, err = cached.Fetch()
+	require.NoError(t, err)
+	require.Equal(t, int32(1), inner.fetchCount.Load(), "前提: 2 回目は cache から返る")
+
+	cached.DropLocal()
+
+	_, err = cached.Fetch()
+	require.NoError(t, err)
+	assert.Equal(t, int32(2), inner.fetchCount.Load(), "DropLocal forces a re-fetch")
+	assert.Equal(t, int32(0), hookCount.Load(), "DropLocal must not fire the invalidation hook")
+}

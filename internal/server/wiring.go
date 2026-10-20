@@ -27,6 +27,10 @@ package server
 // s.addWorker) and started and stopped through s.lifecycle. It is kept for
 // stage 6 of #3666, which narrows what a maintenance rebuild recreates.
 //
+// caches points at the Server's ordered list of the named caches that can
+// drop what they hold in this process (#3721, docs/architecture.md 4.4), the
+// same way. The caches are added through s.addCache.
+//
 // 今は誰も読まないので、消してもテストは落ちない。段階 (6) で、作り直す範囲を
 // 部品の単位に絞るときに使う。
 type wiring struct {
@@ -37,4 +41,5 @@ type wiring struct {
 	stream    streamParts
 	handlers  apiHandlers
 	lifecycle *lifecycle
+	caches    *cacheList
 }

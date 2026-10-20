@@ -644,3 +644,31 @@ func TestNodeinfo_InvalidateDuringBuildDoesNotCacheStaleDocument(t *testing.T) {
 	assert.Equal(t, "fresh", getNodeinfo(t, h.Version2_1)["metadata"].(map[string]any)["nodeName"],
 		"the stale build must not overwrite the cache")
 }
+
+// DropLocal は version ごとの document を両方捨てる (#3721)。
+func TestNodeinfo_DropLocalDropsEveryVersion(t *testing.T) {
+	now := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
+	h, _, _ := newCountingHandler(t, now)
+	metaRepo := testutil.NewMockMetaRepository()
+	before := "before"
+	metaRepo.Meta = &model.Meta{ID: "x", Name: &before}
+	h.SetMetaRepo(metaRepo)
+
+	versions := map[string]func(echo.Context) error{"2.0": h.Version2_0, "2.1": h.Version2_1}
+	name := func(fn func(echo.Context) error) any {
+		return getNodeinfo(t, fn)["metadata"].(map[string]any)["nodeName"]
+	}
+	for v, fn := range versions {
+		require.Equal(t, "before", name(fn), v)
+	}
+	after := "after"
+	metaRepo.Meta.Name = &after
+	for v, fn := range versions {
+		require.Equal(t, "before", name(fn), "前提: 捨てるまでは cache が返る (%s)", v)
+	}
+
+	h.DropLocal()
+	for v, fn := range versions {
+		assert.Equal(t, "after", name(fn), "DropLocal did not drop the %s document", v)
+	}
+}

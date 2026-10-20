@@ -113,6 +113,11 @@ func (s *Server) constructionError() error {
 	if s.lifecycle.err != nil {
 		return s.lifecycle.err
 	}
+	// キャッシュの一覧への不正な登録 (#3721)。名前で引くテストと、登録の順に捨てる
+	// 前提が崩れるので、起動させない。
+	if s.caches.err != nil {
+		return s.caches.err
+	}
 	if !s.wiringChecked {
 		return errWiringCheckSkipped
 	}
