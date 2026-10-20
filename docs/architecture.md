@@ -381,13 +381,15 @@ following・reaction・drive・連合・queueのprocessor・handlerなど)には
 `featuredService`、`hashtagService`、`modLogService`、`instanceService` など) を
 受け手より先に作るようにした (こちらは setter を呼ぶ位置は変えていない)。
 
-| | #3676 の前 (`b9db7e49b`) | #3676 の後 | #3684 の後 | #3686 の後 | #3688 の後 | #3690 の後 | #3692 の後 | #3694 の後 | #3697 の後 | #3699 の後 | 今(#3705の後) |
+| | #3676 の前 (`b9db7e49b`) | #3676 の後 | #3684 の後 | #3686 の後 | #3688 の後 | #3690 の後 | #3692 の後 | #3694 の後 | #3697 の後 | #3699 の後 | #3705〜#3729 の後 |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | setter で依存を入れる辺 | 877 | 877 | 879 | 879 | 872 | 872 | 872 | 872 | 872 | 872 | 872 |
 | うち、受け手より後で作った依存を入れるもの | 192 (受け手 55 個) | 107 (受け手 41 個) | 104 (受け手 41 個) | 103 (受け手 40 個) | 96 (受け手 40 個) | 96 (受け手 40 個) | 96 (受け手 40 個) | 96 (受け手 40 個) | 96 (受け手 40 個) | 96 (受け手 40 個) | 96(受け手40個) |
 | うち、循環しているもの | 40 | 40 | 40 | 39 | 35 | 35 | 34 | 34 | 34 | 34 | 34 |
 | うち、それ以外 | 152 | 67 | 64 | 64 | 61 | 61 | 62 | 62 | 62 | 62 | 62 |
 | setter の呼び出しが受け手から離れているもの (下の数え方) | 359 | 307 | 308 | 392 | 415 | 426 | 444 | 660 | 660 | 660 | 659 |
+
+#3732 の後の数は、4.4 の末尾にある (instance actor の秘密鍵を 1 つの変数にまとめたので、setter で依存を入れる辺が 870、呼び出しが離れている辺が 657 になった。後から入れる辺は 96 のまま)。
 
 #3684 の後の列は、#3684 の後の `router.go` を同じ道具で数えた。#3676 の後に入った変更で、setter の
 辺と呼び出しが離れている辺が 2 つずつ増えている (#3684 の直前の `692710223` で
@@ -2043,7 +2045,7 @@ Supervisorの側は変えていない。停止のエラーの使われ方は次�
 
 コメントの「shutdown hook」は、この一覧の部品の停止を指す。
 
-### 4.4 キャッシュの一覧 (#3721、#3723、#3725、#3727、#3729)
+### 4.4 キャッシュの一覧 (#3721、#3723、#3725、#3727、#3729、#3732)
 
 **世代のキャッシュは、そのプロセスが持つ分を全部捨てる口 (`DropLocal()`) を持たせ、名前と由来と
 一緒に `Server` の一覧 (`cacheList`、`internal/server/caches.go`) へ登録する。** #3666 の段階 4。
@@ -2067,6 +2069,10 @@ setupRoutes()
   s.addCache("instances", cacheFromDB, instanceService)   // #3729
   s.addCache("relays", cacheFromDB, relaySvc)
   s.addCache("fedRules", cacheFromDB, fedRuleService)
+  s.addCache("deliverEd25519", cacheFromDB, deliverService)        // #3732
+  s.addCache("federationPublicKeys", cacheFromDB, federationResolver)
+  s.addCache("deliverSigningKeys", cacheFromDB, deliverProcessor)
+  s.addCache("instanceActorSigner", cacheFromDB, instanceSigner)   // userCache の後
 ```
 
 - **`DropLocal()` は他のプロセスに知らせない。** publish も、無効化の hook (`SetInvalidationHook`)
@@ -2099,7 +2105,8 @@ setupRoutes()
 | ロール | `roles` (`role.Service`。利用者のロール・ロールの一覧と、プラグインの policy の結果) | #3725 |
 | 絵文字とデコレーション | `emojis` (`CachedEmojiRepository`。ローカルの一覧と (name, host) の entry)・`emojiDecorations` (`avatardecoration.EmojiResolver`)・`avatarDecorations` (`avatardecoration.Resolver`。catalog) | #3727 |
 | 連合 (その 1) | `instances` (`instance.Service`。ホストの停止の判定と応答の健全)・`relays` (`relay.Service`。承認済みの relay の一覧)・`fedRules` (`fedrule.Service`。連合のルールのスナップショット) | #3729 |
-| 連合 (残り: 配送の署名鍵と Ed25519 の対応、相手の公開鍵、instance actor の秘密鍵)・外部 | (未) | 後続 |
+| 連合 (その 2) | `deliverEd25519` (`DeliverService`。相手の Ed25519 の対応と送る側の Ed25519 の鍵)・`federationPublicKeys` (`Resolver`。相手の公開鍵と、Ed25519 の鍵が無いことの記憶)・`deliverSigningKeys` (`DeliverProcessor` の解析済みの署名鍵)・`instanceActorSigner` (instance actor の秘密鍵) | #3732 |
+| 外部 | (未) | 後続 |
 
 - 利用者と関係の系統の 3 つは、どれもこのプロセスだけで全部を捨てる処理を元から中に持っていて
   (`invalidateAllLocal`・`apply({All: true})`・`tokenCache.invalidateAll`)、`DropLocal()` はそれを
@@ -2142,7 +2149,20 @@ setupRoutes()
   24 時間取り直さない。#3729 では一覧に入れず、扱いは段階 (6) で決める
 - `activitypub.PublicKeyCache` と、配送の `keyCache` のうち (kind, keyID, PEM) で引く entry は、PEM の
   解析の結果を覚えるだけで古くならないので、どの系統にも入れない。配送の `keyCache` のうち署名者の
-  利用者で引く entry は DB の秘密鍵の写しで、配送の署名鍵として連合の残りの段で扱う
+  利用者で引く entry は DB の秘密鍵の写しで、#3732 で `deliverSigningKeys` として一覧に入れた (同じ LRU に
+  入っているので、捨てるときは解析だけの entry も一緒に捨てる)
+- **#3732 の 4 つは、捨てる口と、捨てる前に読んだ値を積まない守りを新しく足した。** `DeliverService`・
+  `Resolver`・`DeliverProcessor` は世代の番号を持ち、`DropLocal()` が進めた後は、捨てる前に始まった
+  読み込みの結果を積まない。instance actor の秘密鍵は読み込みの間も lock を握るので、`DropLocal()` は
+  読み込みが終わるのを待ってから捨てる (番号は要らない)。この秘密鍵だけは読み込みの失敗の backoff も
+  捨てる。自分の DB の読み込みの失敗なので、DB を戻した後には当てはまらない (残すと 30 秒の間、署名なしの
+  取得が続く)。`DeliverService` は
+  singleflight の鍵にも番号を含め、捨てた後の呼び出しが捨てる前の読み込みに相乗りしないようにした。
+  `Resolver` が捨てるのは相手の公開鍵と Ed25519 の鍵が無いことの記憶で、取得の失敗の backoff
+  (`keyFetchFailures`) は捨てない。鍵を捨てた直後は、`ResolveActor` が鍵の無い actor を相手から取り直す
+  ので、外への取得が `keyFetchBackoff` の範囲で増える。instance actor の秘密鍵は、#3732 まで AP の取得用と
+  プラグインの peer 用に 2 つ作っていたのを、世代に 1 つにまとめた。system account の利用者を
+  `CachedUserRepository` から引くので、`userCache` の後に登録する。ほかの 3 つは DB を直接読む
 - `instance` の書き込みのバッファ (`TouchBuffer`・`CapabilityBuffer` の保留) は値のキャッシュではなく
   書き込みの保留で、捨ててはいけない。DB を戻すときに flush するか捨てるかは段階 (6) で決める
 
@@ -2199,14 +2219,28 @@ setupRoutes()
   を全部捨て、hook を呼ばないこと。応答の健全と受信時刻の窓は、読み込みの途中で捨てたときに読んだ行から作ったものを
   積まないこと。
   連合のルールは、読み直しに失敗したら前のルールを使い続けること
+- `TestCaches_FederationKeysLine` (#3732): 4 つがサーバーの使う値のまま一覧にあり、instance actor の
+  秘密鍵が `userCache` より後にあること、AP の取得とプラグインの peer が一覧の秘密鍵と同じ値を使うことを
+  確かめる。DB の相手の公開鍵と instance actor の秘密鍵を直接書き換えて、`dropAll` の後に読み直すことと、
+  `internal:` へ何も publish しないことを見る。配送の 2 つは job を流さないと観測できないので、各
+  パッケージのテストに任せる
+- `TestDeliverService_DropLocal`・`TestDeliverService_DropLocalDuringReadIsNotCached`・
+  `TestDeliverService_DropLocalDoesNotJoinAnOlderRead`・`TestResolver_DropLocal`・
+  `TestResolver_DropLocalDuringReadIsNotCached`・`TestResolver_DropLocalForgetsMissingExtraKeys`・
+  `TestResolver_DropLocalKeepsFetchBackoff`・`TestMissingExtraKeys_DropAll`・
+  `TestDeliverProcessor_DropLocal`・`TestDeliverProcessor_DropLocalDuringReadIsNotCached`・
+  `TestInstanceActorSigner_DropLocal` (#3732):
+  対象を全部捨て、backoff を残すこと。読み込みの途中で捨てたときに読んだ値を積まず、相乗りもさせない
+  こと
 
-#3721・#3723・#3725・#3727・#3729 の前後で同じであることは、それぞれ次のように確かめた (道具はコミットしていない)。
-どれも、結果は次のとおりだった。
+#3721・#3723・#3725・#3727・#3729・#3732 の前後で同じであることは、それぞれ次のように確かめた (道具はコミットしていない)。
 
-- `elythia dump-routes`: 出力 (ルート)、起動ログ、Redis の命令の列、PostgreSQL の文の集合は、前後で
+- `elythia dump-routes`: 出力 (ルート)、起動ログ、Redis の命令の列、PostgreSQL の文の集合は、どれも前後で
   一致した。前の木を 2 回流して揺れないことも確かめ、後の木も 2 回流した
-- 4.1 の道具: 節点 356、後から入れる辺 96 (行番号を除けば前と同じ)、呼び出しが離れている辺 659 で、
-  前後で同じだった
+- 4.1 の道具: #3729 までは、節点 356、後から入れる辺 96 (行番号を除けば前と同じ)、呼び出しが離れている辺
+  659 で、前後で同じだった。#3732 では instance actor の秘密鍵を 1 つの変数 (`instanceSigner`) にまとめた
+  ので、節点が 357、setter で依存を入れる辺が 872 から 870、呼び出しが離れている辺が 657 になった。後から
+  入れる辺は 96 のまま (行番号を除けば前と同じ)。`instanceSigner` は受け手の `apFetcher` より先に作る
 
 ## 5. フック注入パターン
 
