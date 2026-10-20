@@ -2799,6 +2799,12 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// #3664: 認証の tokenCache の cross-worker invalidation。捨てた利用者の ID だけを
 	// 伝え、他のプロセスはその利用者の entry を捨てる (token は流さない)。
 	cachebus.ConnectAuth(s.auth, internalPubSub, idGen.Generate(time.Now()))
+	// 利用者と関係の系統のキャッシュを一覧に登録する (#3723)。3 つとも newServer で
+	// 作る。tokenCache は利用者を DB から読み (native token は FindByToken、app token は
+	// FindByHashOrToken の Preload)、利用者のキャッシュを通らないので、捨てる順の制約は無い。
+	s.addCache("userCache", cacheFromDB, s.userCache)
+	s.addCache("relationCache", cacheFromDB, s.relationCache)
+	s.addCache("authTokens", cacheFromDB, s.auth)
 
 	// #3383: 絵文字の (name, host) cache の cross-worker invalidation。
 	// リモート絵文字の作成・更新は連合の受信 (MK_ONLY_QUEUE のプロセス) で

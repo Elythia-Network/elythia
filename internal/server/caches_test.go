@@ -197,3 +197,101 @@ func TestCaches_MetaLine(t *testing.T) {
 	assert.Equal(t, []string{marker}, received, "dropping the caches told the other processes")
 	mu.Unlock()
 }
+
+// userLineCaches are the caches of the user and relation line (#3723). They
+// are built in newServer and do not depend on each other, so their order is
+// not checked.
+var userLineCaches = []string{"userCache", "relationCache", "authTokens"}
+
+// TestCaches_UserLine checks on a whole server that the user and relation
+// line is listed with the values the server uses, and that dropping the list
+// makes the user cache, the relation cache and the auth token cache read the
+// database again, without telling the other processes.
+//
+// 利用者と関係のキャッシュは Server のフィールド (配線に渡しているもの) から読み、
+// token のキャッシュは API を通して確かめる。
+//
+// 利用者のキャッシュの通知は、世代の worker (userCacheLink) が待ち行列から非同期に
+// 送る。worker を起動しておき、捨てた後に世代を止めてから (止めるときに待ち行列を
+// 送り切る) 目印を送るので、捨てたことで積まれた通知は目印より前に届く。
+func TestCaches_UserLine(t *testing.T) {
+	h := newMetaRuntimeHarnessWith(t, metaRuntimeOptions{onlyServer: "1", startBackground: true})
+	srv := h.srv
+
+	want := map[string]localCache{"userCache": srv.userCache, "relationCache": srv.relationCache, "authTokens": srv.auth}
+	seen := map[string]bool{}
+	for _, p := range srv.caches.parts {
+		if v, ok := want[p.name]; ok {
+			seen[p.name] = true
+			assert.Equal(t, cacheFromDB, p.origin, "cache %q", p.name)
+			assert.Same(t, v, p.cache, "cache %q is not the value the server uses", p.name)
+		}
+	}
+	for _, name := range userLineCaches {
+		assert.True(t, seen[name], "cache %q is not listed", name)
+	}
+
+	const token = "metartuser000023"
+	const userID = "metart-user-23"
+	h.createUser(userID, "metart_user23", token, false)
+	muteID := h.idGen.Generate(time.Now())
+	t.Cleanup(func() { h.db.Where("id = ?", muteID).Delete(&model.Muting{}) })
+
+	user, err := srv.userCache.FindByID(userID)
+	require.NoError(t, err)
+	require.Nil(t, user.Name)
+	muted, err := srv.relationCache.MutedUserIDs(userID)
+	require.NoError(t, err)
+	require.Empty(t, muted)
+	require.Equal(t, http.StatusOK, h.post("/api/i", token, map[string]any{}).Code)
+
+	// 他のプロセスが書いたときと違い、通知は送らない。このプロセスのキャッシュは
+	// 古いまま残る。
+	require.NoError(t, h.db.Model(&model.User{}).Where("id = ?", userID).Updates(map[string]any{"name": "dropped", "isSuspended": true}).Error)
+	require.NoError(t, h.db.Create(&model.Muting{ID: muteID, MuterID: userID, MuteeID: h.rootID}).Error)
+	user, err = srv.userCache.FindByID(userID)
+	require.NoError(t, err)
+	require.Nil(t, user.Name, "前提: 捨てるまでは cache が返る")
+	muted, err = srv.relationCache.MutedUserIDs(userID)
+	require.NoError(t, err)
+	require.Empty(t, muted, "前提: 捨てるまでは cache が返る")
+	require.Equal(t, http.StatusOK, h.post("/api/i", token, map[string]any{}).Code, "前提: 捨てるまでは cache が返る")
+
+	// 捨てた後に internal: の購読へ届いたものを記録する。目印より前に何か届けば、
+	// 捨てたことで他のプロセスへ通知している。
+	sub := h.rdb.PSubscribe(context.Background(), "internal:*")
+	t.Cleanup(func() { _ = sub.Close() })
+	_, err = sub.Receive(context.Background())
+	require.NoError(t, err)
+
+	srv.caches.dropAll()
+
+	user, err = srv.userCache.FindByID(userID)
+	require.NoError(t, err)
+	if assert.NotNil(t, user.Name, "the user cache was not dropped") {
+		assert.Equal(t, "dropped", *user.Name)
+	}
+	muted, err = srv.relationCache.MutedUserIDs(userID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{h.rootID}, muted, "the relation cache was not dropped")
+	assert.Equal(t, http.StatusForbidden, h.post("/api/i", token, map[string]any{}).Code, "the auth token cache was not dropped")
+
+	require.NoError(t, srv.StopBackground(context.Background()))
+	const marker = "caches-user-line"
+	require.NoError(t, h.rdb.Publish(context.Background(), "internal:"+marker, "x").Err())
+	ch := sub.Channel()
+	var got []string
+	timeout := time.After(10 * time.Second)
+	for {
+		select {
+		case msg := <-ch:
+			got = append(got, msg.Channel)
+		case <-timeout:
+			t.Fatalf("the marker did not arrive; got %v", got)
+		}
+		if got[len(got)-1] == "internal:"+marker {
+			break
+		}
+	}
+	assert.Equal(t, []string{"internal:" + marker}, got, "dropping the caches told the other processes")
+}

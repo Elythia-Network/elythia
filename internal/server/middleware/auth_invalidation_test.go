@@ -121,6 +121,7 @@ func TestAuthMiddleware_InvalidationDuringReadIsNotStored(t *testing.T) {
 	for name, invalidate := range map[string]func(*AuthMiddleware){
 		"user": func(a *AuthMiddleware) { a.InvalidateTokensForUserLocally("u1") },
 		"all":  func(a *AuthMiddleware) { a.InvalidateAllLocally() },
+		"drop": func(a *AuthMiddleware) { a.DropLocal() },
 		"token": func(a *AuthMiddleware) {
 			a.InvalidateUserToken("u1", "some-other-token-of-u1")
 		},
@@ -214,5 +215,21 @@ func TestTokenCache_MarksBeforeDropping(t *testing.T) {
 			_, _, _, _, ok = c.get("late")
 			assert.False(t, ok, "a lookup from before the invalidation must not be stored after it")
 		})
+	}
+}
+
+// TestAuthMiddleware_DropLocal pins that DropLocal drops every entry of this
+// process without handing anything to the hook that tells the other
+// processes (#3723).
+func TestAuthMiddleware_DropLocal(t *testing.T) {
+	auth := NewAuthMiddleware(testutil.NewMockUserRepository(), testutil.NewMockAccessTokenRepository())
+	auth.SetInvalidationHook(func(userID string) { t.Errorf("DropLocal handed %q to the hook", userID) })
+	auth.tokenCache.put("tok-u1", &model.User{ID: "u1"}, nil, "", false)
+	auth.tokenCache.put("tok-u2", &model.User{ID: "u2"}, nil, "", true)
+
+	auth.DropLocal()
+	for _, token := range []string{"tok-u1", "tok-u2"} {
+		_, _, _, _, ok := auth.tokenCache.get(token)
+		assert.False(t, ok, "DropLocal did not drop %s", token)
 	}
 }

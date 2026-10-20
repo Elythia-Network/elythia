@@ -413,6 +413,18 @@ func (c *RelationCache) InvalidateAll() {
 	c.forward(inv)
 }
 
+// DropLocal drops every entry in this process without forwarding the
+// invalidation, so no other process is told (#3723). It is what the cache
+// list of internal/server calls (docs/architecture.md 4.4). nil-safe.
+//
+// InvalidateAll は他のプロセスにも通知するので、一覧からは呼ばない。
+func (c *RelationCache) DropLocal() {
+	if c == nil {
+		return
+	}
+	c.apply(RelationInvalidation{All: true})
+}
+
 // ApplyRemote applies an invalidation received from another process. It does
 // not forward it again. nil-safe.
 func (c *RelationCache) ApplyRemote(inv RelationInvalidation) {

@@ -745,3 +745,42 @@ func TestRelationCache_AgeCountsFromReadStart(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{x}, got, "expired one TTL after the read started")
 }
+
+// TestRelationCache_DropLocalDoesNotForward pins that DropLocal drops every
+// entry of this process without handing an invalidation to the publisher
+// (#3723), unlike InvalidateAll.
+func TestRelationCache_DropLocalDoesNotForward(t *testing.T) {
+	f := newRelFixture(t, "rcD_")
+	viewer, x, y := f.user("v"), f.user("x"), f.user("y")
+	rc := NewRelationCache(testDB)
+	var sent []RelationInvalidation
+	rc.SetPublisher(func(inv RelationInvalidation) { sent = append(sent, inv) })
+
+	mustInsert(t, &model.Muting{ID: f.id("m1"), MuterID: viewer, MuteeID: x})
+	mustInsert(t, &model.Following{ID: f.id("f1"), FollowerID: viewer, FolloweeID: x})
+	ids, err := rc.MutedUserIDs(viewer)
+	require.NoError(t, err)
+	require.Equal(t, []string{x}, ids)
+	ids, err = rc.FolloweeIDs(viewer)
+	require.NoError(t, err)
+	require.Equal(t, []string{x}, ids)
+
+	// DB を直接書くので、キャッシュは古いまま。
+	mustInsert(t, &model.Muting{ID: f.id("m2"), MuterID: viewer, MuteeID: y})
+	mustInsert(t, &model.Following{ID: f.id("f2"), FollowerID: viewer, FolloweeID: y})
+	ids, err = rc.MutedUserIDs(viewer)
+	require.NoError(t, err)
+	require.Equal(t, []string{x}, ids, "前提: 捨てるまでは cache が返る")
+
+	rc.DropLocal()
+	ids, err = rc.MutedUserIDs(viewer)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{x, y}, ids, "DropLocal did not drop the mutings")
+	ids, err = rc.FolloweeIDs(viewer)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{x, y}, ids, "DropLocal did not drop the followings")
+	assert.Empty(t, sent, "DropLocal must not forward the invalidation")
+
+	var nilCache *RelationCache
+	assert.NotPanics(t, nilCache.DropLocal)
+}
