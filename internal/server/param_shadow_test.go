@@ -101,7 +101,7 @@ func TestParamShadowRunsAfterTheRouteMiddleware(t *testing.T) {
 	// requireObjectBody は検証の内側で答える(検証器も#/typeで拒否するので一致)。
 	assert.Equal(t, http.StatusBadRequest, serve(http.MethodPost, "/api/notes/show", `null`))
 
-	s.lifecycle.stopAll(context.Background())
+	require.NoError(t, s.lifecycle.stopAll(context.Background()))
 	out := logs.String()
 	for _, want := range []string{
 		`"endpoint":"notes/show","kind":"rejected_handler_ok","schemaPath":"#/properties/noteId/format"`,

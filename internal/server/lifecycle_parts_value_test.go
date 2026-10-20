@@ -189,7 +189,7 @@ func TestServer_RegistersAPartFromItsValue(t *testing.T) {
 			}
 
 			// 止めると、登録したその値のメソッドが 1 回ずつ呼ばれる。
-			s.lifecycle.stopAll(shutdownCtx)
+			require.NoError(t, s.lifecycle.stopAll(shutdownCtx))
 			assert.Equal(t, append(wantA, tt.stop), a.calls, "stopping did not stop a itself")
 			assert.Equal(t, append(wantB, tt.stop), b.calls, "stopping did not stop b itself")
 			// Close() のエラーは捨てる。一覧の登録のエラーにもしない。
@@ -221,7 +221,7 @@ func TestLifecycle_StartAllRecoversAPanickingStart(t *testing.T) {
 	require.NoError(t, s.lifecycle.startAll())
 	assert.Equal(t, []string{"a"}, order, "a second startAll started the parts again")
 
-	s.lifecycle.stopAll(context.Background())
+	require.NoError(t, s.lifecycle.stopAll(context.Background()))
 	assert.Equal(t, []string{"Start(none) listed=3", "Close()"}, a.calls)
 	assert.Equal(t, []string{"Close()"}, b.calls)
 	assert.Equal(t, []string{"Close()"}, c.calls)
@@ -238,7 +238,7 @@ func TestLifecycle_StartAllStartsNothingAfterStopAll(t *testing.T) {
 	s := &Server{}
 	a := &partCalls{srv: s}
 	s.startPartWithClose(context.Background(), "a", fakeStartCloser{a})
-	s.lifecycle.stopAll(context.Background())
+	require.NoError(t, s.lifecycle.stopAll(context.Background()))
 	require.NoError(t, s.lifecycle.startAll())
 	assert.Equal(t, []string{"Close()"}, a.calls)
 }
@@ -255,7 +255,7 @@ func TestServer_ConstructionWorkerRunsOnlyOnceStarted(t *testing.T) {
 		stopped := make(chan struct{})
 		go func() {
 			defer close(stopped)
-			s.lifecycle.stopAll(context.Background())
+			assert.NoError(t, s.lifecycle.stopAll(context.Background()))
 		}()
 		select {
 		case <-stopped:
@@ -282,7 +282,7 @@ func TestServer_ConstructionWorkerRunsOnlyOnceStarted(t *testing.T) {
 		require.NoError(t, s.lifecycle.startAll())
 		require.NoError(t, s.lifecycle.startAll())
 		<-running
-		s.lifecycle.stopAll(context.Background())
+		require.NoError(t, s.lifecycle.stopAll(context.Background()))
 		assert.EqualValues(t, 1, runs.Load())
 	})
 }
