@@ -98,7 +98,7 @@ func TestLifecycle_StopAllRunsEveryPartInOrderWithTheCtx(t *testing.T) {
 			got = append(got, name)
 		})
 	}
-	l.stopAll(ctx)
+	require.NoError(t, l.stopAll(ctx))
 	assert.Equal(t, []string{"first", "second", "third"}, got)
 }
 

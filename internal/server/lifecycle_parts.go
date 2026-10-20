@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 )
@@ -37,7 +39,8 @@ type lifecyclePart struct {
 	// stop stops the part. It receives the shutdown ctx, which bounds any
 	// graceful drain the part does. It must be safe to call when start has
 	// not run: a generation whose construction or StartBackground failed is
-	// stopped with parts that never started (#3703).
+	// stopped with parts that never started (#3703). A panic of stop is
+	// recovered by stopAll, which goes on with the next part (#3707).
 	stop func(context.Context)
 	// fromValue reports that the part was added by a registration that
 	// builds its stop from part (startPartWithClose and the others, #3701),
@@ -52,7 +55,8 @@ type lifecyclePart struct {
 // order (FIFO), after the queue worker and the goroutines of the generation
 // and before the chart management, the queue driver and the Redis
 // subscriptions (see Server.StartBackground, Server.shutdown and
-// docs/architecture.md 4.3).
+// docs/architecture.md 4.3). A panic of a start or a stop is recovered per
+// part and turned into an error (startAll, #3703; stopAll, #3707).
 //
 // The zero value is an empty list ready to use. Building a generation only
 // adds the parts; no part runs until startAll. emojiInvalidationQueue, the
@@ -177,16 +181,51 @@ func startPart(p lifecyclePart) (err error) {
 	return nil
 }
 
+// errLifecycleStop is wrapped by the error of a part whose stop panicked.
+var errLifecycleStop = errors.New("server: a lifecycle part failed to stop")
+
 // stopAll stops every part in the order it was added, passing ctx to each,
 // whether it was started or not. Once it has begun, startAll starts nothing.
-func (l *lifecycle) stopAll(ctx context.Context) {
+//
+// When the stop of a part panics, stopAll recovers it, logs the part's name,
+// the panic value and the stack, and goes on with the next part (#3707). It
+// returns nil when no stop panicked, and otherwise the errors.Join of one
+// error per panicked part, each wrapping errLifecycleStop and naming the part.
+// A part whose stop panicked is not stopped again and may be left half
+// stopped.
+//
+// 停止はどれも呼び出し元のgoroutineで同期に走るので、ここで回収できる。回収しないと、
+// 1つの部品のpanicで後ろの部品の停止(バッファのflushなど)と、呼び出し元の残りの手順
+// (chartの保存、queueのdriverと購読を閉じる処理)がすべて飛び、panicはSupervisorまで
+// 抜けてプロセスを落とす(#3707)。
+func (l *lifecycle) stopAll(ctx context.Context) error {
 	l.mu.Lock()
 	l.stopped = true
 	parts := l.parts
 	l.mu.Unlock()
+	var errs []error
 	for _, p := range parts {
-		p.stop(ctx)
+		if err := stopPart(ctx, p); err != nil {
+			errs = append(errs, err)
+		}
 	}
+	return errors.Join(errs...)
+}
+
+// stopPart calls the stop of p with ctx, turning a panic into an error after
+// logging it with the stack.
+//
+// スタックはrecoverの中でしか取れないので、ここで記録する。エラーには値だけを載せる。
+func stopPart(ctx context.Context, p lifecyclePart) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("server: a lifecycle part panicked while stopping; stopping the rest",
+				"part", p.name, "panic", r, "stack", string(debug.Stack()))
+			err = fmt.Errorf("%w: part %q panicked: %v", errLifecycleStop, p.name, r)
+		}
+	}()
+	p.stop(ctx)
+	return nil
 }
 
 // addPart registers a named part of this generation to be stopped by
@@ -295,7 +334,8 @@ func (s *Server) addCloser(name string, p ctxCloser) {
 // error of Close is dropped, and the shutdown ctx is not passed. It does not
 // start p.
 //
-// エラーを捨てるのは #3699 の前の hook と同じ。停止の一覧はエラーを返す口を持たない。
+// エラーを捨てるのは #3699 の前の hook と同じ。部品の停止はエラーを返す口を持たない
+// (一覧が返すのは停止のpanicだけ。#3707)。
 func (s *Server) addErrCloser(name string, p errCloser) {
 	s.lifecycle.addFromValue(name, p, nil, func(context.Context) { _ = p.Close() })
 }

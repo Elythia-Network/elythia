@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -911,8 +912,10 @@ func (s *Server) cleanupConstruction() {
 			s.pluginGoGate.discard()
 		}
 		// 一覧の部品は、構築では起動していない(#3703)。起動していない部品の停止は
-		// 待たずに返る(docs/architecture.md 4.3)。
-		s.lifecycle.stopAll(context.Background())
+		// 待たずに返る(docs/architecture.md 4.3)。停止のpanicはstopAllが部品ごとに
+		// 回収して記録するので、下の後始末は続く(#3707)。エラーを返す口は無く、
+		// 記録はstopAllの1部品1行で足りるので、ここでは重ねて記録しない。
+		_ = s.lifecycle.stopAll(context.Background())
 		// 構築の途中で起動したものがあれば止める (#3661)。構築に失敗した世代は
 		// 使われないので、待ちは短くてよい。
 		bgCtx, bgCancel := context.WithTimeout(context.Background(), time.Second)
@@ -1156,6 +1159,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 // closes this generation's Redis subscriptions. It does not close the DB
 // pool or the Redis clients, which the caller owns. Only the first call does
 // the work; later calls return its result.
+//
+// When the stop of a part of the lifecycle list panics, the panic is logged
+// and the rest of the stop still runs; the returned error then joins one
+// error per panicked part (wrapping errLifecycleStop) with the error of the
+// echo shutdown (#3707). The other steps of the stop are not guarded.
 func (s *Server) StopBackground(ctx context.Context) error {
 	s.shutdownOnce.Do(func() {
 		s.shutdownErr = s.shutdown(ctx)
@@ -1308,7 +1316,9 @@ func (s *Server) shutdown(ctx context.Context) error {
 	// 部品の一覧 (#3699) を登録順に止める。publisher goroutine の clean 停止と、
 	// graceful drain が必要な service (hashtag #727 等) の Shutdown(ctx) を
 	// 兼ねる。ctx を渡すので timeout 共有が可能 (#764)。
-	s.lifecycle.stopAll(ctx)
+	// 部品の停止のpanicはstopAllが回収してエラーにするので、下の手順はpanicがあっても
+	// 走る(#3707)。エラーは最後にechoのエラーとまとめて返す。
+	stopErr := s.lifecycle.stopAll(ctx)
 	if s.chartMgmt != nil {
 		s.chartMgmt.Stop(ctx)
 	}
@@ -1347,10 +1357,15 @@ func (s *Server) shutdown(ctx context.Context) error {
 	}
 	// listener は Supervisor が持つ。echo は listen していないので、Shutdown は
 	// echo が自分で張った server を持っていた場合 (テストなど) にだけ効く。
+	var echoErr error
 	if s.echo != nil {
-		return s.echo.Shutdown(ctx)
+		echoErr = s.echo.Shutdown(ctx)
 	}
-	return nil
+	// panicが無ければechoのエラーをそのまま返す(#3707より前と同じ値)。
+	if stopErr == nil {
+		return echoErr
+	}
+	return errors.Join(stopErr, echoErr)
 }
 
 // setChartManagement registers the chart management service so its
