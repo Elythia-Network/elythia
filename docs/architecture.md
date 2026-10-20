@@ -2106,7 +2106,9 @@ setupRoutes()
 | 絵文字とデコレーション | `emojis` (`CachedEmojiRepository`。ローカルの一覧と (name, host) の entry)・`emojiDecorations` (`avatardecoration.EmojiResolver`)・`avatarDecorations` (`avatardecoration.Resolver`。catalog) | #3727 |
 | 連合 (その 1) | `instances` (`instance.Service`。ホストの停止の判定と応答の健全)・`relays` (`relay.Service`。承認済みの relay の一覧)・`fedRules` (`fedrule.Service`。連合のルールのスナップショット) | #3729 |
 | 連合 (その 2) | `deliverEd25519` (`DeliverService`。相手の Ed25519 の対応と送る側の Ed25519 の鍵)・`federationPublicKeys` (`Resolver`。相手の公開鍵と、Ed25519 の鍵が無いことの記憶)・`deliverSigningKeys` (`DeliverProcessor` の解析済みの署名鍵)・`instanceActorSigner` (instance actor の秘密鍵) | #3732 |
-| 外部 | (未) | 後続 |
+| 投稿・タイムライン・通知 | `antennas` (`CachedAntennaRepository`。有効なアンテナの全件)・`pushSubscriptions` (`webpush.SubscriptionCache` のメモリの層)・`featuredNotes` (`notes.FeaturedRankingCache`。注目ノートの全体の順位)・`notePublisher` (`stream.NotePublisher`。直前に pack したノート)・`timelineJSON` (`notes.TimelineJSONCache`。opt-in のタイムラインの最初の頁) | #3736 |
+| 管理画面と統計 (ドライブの使用量、DB の統計、`/api/stats` の件数、IP の記録の窓) | (未) | #3666 の (4-8) |
+| 外部とファイル (URL プレビュー、リモート利用者の統計、RSS、peer のプラグイン一覧、twemoji のバッジ) | (未) | #3666 の (4-9) |
 
 - 利用者と関係の系統の 3 つは、どれもこのプロセスだけで全部を捨てる処理を元から中に持っていて
   (`invalidateAllLocal`・`apply({All: true})`・`tokenCache.invalidateAll`)、`DropLocal()` はそれを
@@ -2147,8 +2149,10 @@ setupRoutes()
 - `MetadataRefresher` の次の確認の時刻 (`nextCheck`) は、DB の `infoUpdatedAt` から計算した取り直しの
   時刻で、その間は DB も見ない。DB を戻すと、戻した行の nodeinfo (ソフトウェアの版など) のまま最大
   24 時間取り直さない。#3729 では一覧に入れず、扱いは段階 (6) で決める
-- `activitypub.PublicKeyCache` と、配送の `keyCache` のうち (kind, keyID, PEM) で引く entry は、PEM の
-  解析の結果を覚えるだけで古くならないので、どの系統にも入れない。配送の `keyCache` のうち署名者の
+- `activitypub.PublicKeyCache` (プラグインの peer の `s.peerDeps.keyCache`、inbox の handler と
+  processor が持つもの) と、配送の `keyCache` のうち (kind, keyID, PEM) で引く entry は、PEM の
+  解析の結果を覚えるだけで古くならないので、どの系統にも入れない (PEM を鍵に含めて引くので、相手の鍵が
+  変われば別の entry になる。PEM 自体は `federationPublicKeys` などの登録済みのキャッシュか DB から来る)。配送の `keyCache` のうち署名者の
   利用者で引く entry は DB の秘密鍵の写しで、#3732 で `deliverSigningKeys` として一覧に入れた (同じ LRU に
   入っているので、捨てるときは解析だけの entry も一緒に捨てる)
 - **#3732 の 4 つは、捨てる口と、捨てる前に読んだ値を積まない守りを新しく足した。** `DeliverService`・
@@ -2163,11 +2167,34 @@ setupRoutes()
   ので、外への取得が `keyFetchBackoff` の範囲で増える。instance actor の秘密鍵は、#3732 まで AP の取得用と
   プラグインの peer 用に 2 つ作っていたのを、世代に 1 つにまとめた。system account の利用者を
   `CachedUserRepository` から引くので、`userCache` の後に登録する。ほかの 3 つは DB を直接読む
+- 投稿・タイムライン・通知の系統 (#3736) のうち、アンテナ・注目ノートの順位・ストリームの直前のノートは、
+  読み込み (pack) の間もロックを握るので、`DropLocal()` は読み込みが終わるのを待ってから捨てる (番号は
+  要らない)。アンテナの `DropLocal()` は、hook を呼ばない `Invalidate()` と同じ。タイムラインの JSON と
+  push 購読はロックの外で読むので、世代の番号 (`gen`) を足し、捨てる前に読み始めた値を積まないようにした。
+  タイムラインの JSON は番号を組み立ての前に読む。push 購読は、捨てた後には読んだ行を Redis の層にも
+  書かない
+- **ロックや番号で守れるのは、キャッシュ自身が読む分だけ。** 呼び出し側が捨てる前に読んだ値は残りうる。
+  タイムラインの JSON は、認証で解決した閲覧者 (`authTokens`・`userCache` から引いたもの) を番号より前に
+  受け取るので、捨てる前に解決した閲覧者で組み立てた応答を、捨てた後の番号で積みうる (TTL の間返る)。
+  匿名の閲覧者に見せる範囲 (`visitorPolicy`) も番号より前に読むが、キーに入っているので、設定が変わった
+  後のリクエストは別のキーを引く。
+  ストリームの直前のノートも、呼び出し側が捨てる前に読んだ投稿者で pack すると、次の別のノートまで
+  使い回す。段階 (6) で本番から `dropAll` を呼ぶときは、受け付けを止めてから捨てる前提にする
+- **push 購読の `DropLocal()` はメモリの層だけを捨てる。** Redis の層 (`userSwSubscriptions:*`) は
+  プロセスの間で共有していて、DB を戻したときは `CleanRedisAfterRestore` が消す。`dropAll` だけでは、
+  Redis に残った行をメモリへ読み直す
+- **ストリームの直前のノートとタイムラインの JSON は、この系統の最後に登録する。** どちらも pack した
+  利用者・ロール・絵文字・デコレーション・インスタンスを含むので、先に捨てると、間に来た pack が古い元から
+  作り直して積む。注目ノートの順位は Redis の順位から引いた ID だけを持ち、ノートは毎回 DB から読む。
+  タイムラインの JSON は opt-in (`enableTimelineCache`) で、有効にしたときだけ登録する
+- ドライブのストレージの backend (`coredrive.MetaStorage`) は、どの系統にも入れない。使うたびに meta
+  (`cachedMeta`) を読み、オブジェクトストレージの設定から作った鍵が変わったときだけ作り直すので、meta を
+  捨てれば追従する (meta が読めないときは、前の backend を使い続ける)
 - `instance` の書き込みのバッファ (`TouchBuffer`・`CapabilityBuffer` の保留) は値のキャッシュではなく
   書き込みの保留で、捨ててはいけない。DB を戻すときに flush するか捨てるかは段階 (6) で決める
 
-- captcha の provider と、リアクションのバッファの切り替えは、meta 行の写しで、捨てるだけでは
-  足りず読み直しが要る。#3721 では登録していない。扱いは段階 4 の最後で決める
+- captcha の provider と、リアクションのバッファの切り替えと、DeepL のキーは、meta 行の写しで、捨てる
+  だけでは足りず読み直しが要る。#3721 では登録していない。扱いは段階 4 の最後 (#3666 の (4-10)) で決める
 - 登録漏れを落とす検査は、全系統を移した後に足す
 
 テスト (`internal/server/caches_test.go` と、各型のパッケージ):
@@ -2232,15 +2259,28 @@ setupRoutes()
   `TestInstanceActorSigner_DropLocal` (#3732):
   対象を全部捨て、backoff を残すこと。読み込みの途中で捨てたときに読んだ値を積まず、相乗りもさせない
   こと
+- `TestCaches_NotesLine` (#3736): 5 つがサーバーの使う値のまま一覧にあり、`notePublisher` と
+  `timelineJSON` が pack の元のキャッシュ (`notesLinePackedFrom`) より後にあることを確かめる。DB に
+  アンテナ・push 購読・ノートを直接書いて、`dropAll` の後にアンテナの一覧・push 購読・
+  `/api/notes/local-timeline` が読み直すことと、`internal:` へ何も publish しないことを見る。注目ノートの
+  順位とストリームの直前のノートは、値が同じであることだけを見て、捨てることは各パッケージのテストに任せる。
+  `TestCaches_TimelineJSONOnlyWhenEnabled` は、タイムラインの JSON を有効にしないと一覧に無いことを見る
+- `TestCachedAntennaRepository_DropLocal`・`TestCache_DropLocal_DropsMemoryOnly`・
+  `TestCache_DropLocal_DuringReadIsNotStored` (webpush)・`TestFeaturedRankingCache_DropLocal`・
+  `TestTimelineJSONCache_DropLocal`・`TestTimeline_Cache_DropDuringBuildIsNotStored`・
+  `TestNotePublisher_DropLocal` (#3736): 対象を全部捨てること。アンテナは hook を呼ばないこと。push 購読は
+  Redis の層を残すこと。タイムラインの JSON と push 購読は、読み込みの途中で捨てたときに読んだ値を積まない (push 購読は
+  Redis にも書かない) こと
 
-#3721・#3723・#3725・#3727・#3729・#3732 の前後で同じであることは、それぞれ次のように確かめた (道具はコミットしていない)。
+#3721・#3723・#3725・#3727・#3729・#3732・#3736 の前後で同じであることは、それぞれ次のように確かめた (道具はコミットしていない)。
 
 - `elythia dump-routes`: 出力 (ルート)、起動ログ、Redis の命令の列、PostgreSQL の文の集合は、どれも前後で
   一致した。前の木を 2 回流して揺れないことも確かめ、後の木も 2 回流した
 - 4.1 の道具: #3729 までは、節点 356、後から入れる辺 96 (行番号を除けば前と同じ)、呼び出しが離れている辺
   659 で、前後で同じだった。#3732 では instance actor の秘密鍵を 1 つの変数 (`instanceSigner`) にまとめた
   ので、節点が 357、setter で依存を入れる辺が 872 から 870、呼び出しが離れている辺が 657 になった。後から
-  入れる辺は 96 のまま (行番号を除けば前と同じ)。`instanceSigner` は受け手の `apFetcher` より先に作る
+  入れる辺は 96 のまま (行番号を除けば前と同じ)。`instanceSigner` は受け手の `apFetcher` より先に作る。
+  #3736 では、節点 357・setter の辺 870・後から入れる辺 96・呼び出しが離れている辺 657 のまま変わらない
 
 ## 5. フック注入パターン
 
