@@ -81,7 +81,7 @@ var partGoroutineMarkers = map[string]string{
 	"fedRuleHits":                "fedrule.(*HitStore).Start.func",
 	"emojiInvalidationQueue":     "repository.(*EmojiInvalidationQueue).Run(",
 	// pollExpiryWorker・reactionFlushWorker・userCacheLinkの3つ。
-	"workers": "server.(*Server).startConstructionWorker.func",
+	"workers": "server.(*Server).addWorker.func",
 }
 
 // countPartGoroutines counts the goroutines of this process whose stack has

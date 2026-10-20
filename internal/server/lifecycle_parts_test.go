@@ -140,7 +140,7 @@ func (r *lifecycleRecorder) result() ([]string, []string) {
 // この表は、名前が別の種類の値を持つ取り違え (serverStatsPub に hashtagService を渡すなど) を
 // 落とす。**同じ型の部品どうしの名前の取り違えは落とせない** (deliveryHealth と inboxHealth は
 // どちらも *deliveryhealth.Service、ほかに 4 つの worker はどれも nil)。値から作る登録
-// (startPartWithClose など、#3701) では part と停止は同じ値を指すが、addPart で登録する部品では、
+// (addStartCloser など、#3701) では part と停止は同じ値を指すが、addPart で登録する部品では、
 // 部品の値と停止の関数の対応は型でも実行時でも保証していない。
 var lifecyclePartTypes = map[string]string{
 	"pollExpiryWorker":            "<nil>",
@@ -256,10 +256,10 @@ func TestPartChecks_ReportViolations(t *testing.T) {
 		s.addPart("closure", shaped, stop)
 		s.addPart("noShape", &struct{ n int }{}, stop)
 		s.addPart("worker", nil, stop)
-		s.startPartWithClose(context.Background(), "fromValue", fakeStartCloser{&partCalls{srv: s}})
+		s.addStartCloser(context.Background(), "fromValue", fakeStartCloser{&partCalls{srv: s}})
 		inspected, used := map[string]bool{}, map[string]bool{}
 		got := addPartShapeViolations(s.lifecycle.parts, nil, inspected, used)
-		assert.Equal(t, []string{`part "closure" (server.fakeStartCloser) is added by addPart, but its value can be added by startPartWithClose`}, got)
+		assert.Equal(t, []string{`part "closure" (server.fakeStartCloser) is added by addPart, but its value can be added by addStartCloser`}, got)
 		assert.Equal(t, map[string]bool{"closure": true, "noShape": true}, inspected)
 		assert.Empty(t, used)
 
