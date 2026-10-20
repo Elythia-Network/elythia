@@ -2859,6 +2859,13 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// cross-worker invalidation。管理画面の操作を受けたプロセスだけが捨てると、
 	// 他のプロセスは TTL (30 秒) の間、作ったばかりのデコレーションを装着から落とす。
 	cachebus.ConnectAvatarDecorations(avatarDecorationResolver, emojiDecorationResolver, internalPubSub, idGen.Generate(time.Now()))
+	// 絵文字とデコレーションの系統のキャッシュを一覧に登録する (#3727)。**絵文字の後に
+	// 絵文字由来のデコレーションを登録する。** emojiDecorations は絵文字のキャッシュの
+	// 一覧 (ListLocal) から作り直すので、先に捨てると、間に来たリクエストが古い一覧から
+	// 作り直した map を積む (SubscribeEmojiCache と同じ理由)。catalog は DB から読む。
+	s.addCache("emojis", cacheFromDB, emojiRepo)
+	s.addCache("emojiDecorations", cacheFromDB, emojiDecorationResolver)
+	s.addCache("avatarDecorations", cacheFromDB, avatarDecorationResolver)
 
 	// #3664: 利用者のキャッシュ (CachedUserRepository) の cross-worker invalidation。
 	// queue のプロセスがリモートの利用者を更新 (凍結の反映、Update の受信) しても、

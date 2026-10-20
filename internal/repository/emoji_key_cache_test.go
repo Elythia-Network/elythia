@@ -841,3 +841,61 @@ func TestEmojiInvalidationQueue_StopsWhileWritesContinue(t *testing.T) {
 		t.Fatal("Run did not return while writes kept coming")
 	}
 }
+
+// TestEmojiKeyCache_DropLocal pins that DropLocal drops both caches of this
+// process, the local list and the (name, host) entries, without calling the
+// hook (#3727), unlike Invalidate, which drops only the list.
+func TestEmojiKeyCache_DropLocal(t *testing.T) {
+	inner := &keyedEmojiRepo{
+		countingEmojiRepo: countingEmojiRepo{emojis: []*model.Emoji{{ID: "l1", Name: "local"}}},
+		rows:              []*model.Emoji{remoteEmoji("e1", "blob", "a.example", "u1")},
+	}
+	c, _ := newKeyCache(inner, repository.EmojiKeyCacheOptions{})
+	c.SetInvalidationHook(func(repository.EmojiCacheInvalidation) { t.Error("DropLocal must not call the hook") })
+	keys := []model.EmojiKey{rk("blob", "a.example"), rk("gone", "a.example")}
+	_, _ = c.FindManyByKeys(keys)
+	_, _ = c.ListLocal()
+	_, _ = c.FindManyByKeys(keys)
+	_, _ = c.ListLocal()
+	require.Equal(t, 1, inner.calls(), "前提: (name, host) は cache から返る")
+	require.Equal(t, int64(1), inner.listLocalCalls.Load(), "前提: 一覧は cache から返る")
+
+	c.DropLocal()
+	_, _ = c.FindManyByKeys(keys)
+	_, _ = c.ListLocal()
+	assert.Equal(t, 2, inner.calls(), "DropLocal did not drop the (name, host) entries")
+	assert.ElementsMatch(t, keys, inner.lastAsked(), "DropLocal did not drop every (name, host) entry")
+	assert.Equal(t, int64(2), inner.listLocalCalls.Load(), "DropLocal did not drop the local list")
+}
+
+// TestEmojiKeyCache_DropLocalDuringFetchDiscardsResult pins that a (name,
+// host) fetch in flight when DropLocal runs is not cached (#3727).
+func TestEmojiKeyCache_DropLocalDuringFetchDiscardsResult(t *testing.T) {
+	inner := &keyedEmojiRepo{
+		rows:    []*model.Emoji{remoteEmoji("e1", "blob", "a.example", "old")},
+		entered: make(chan struct{}, 16),
+		release: make(chan struct{}),
+	}
+	c, _ := newKeyCache(inner, repository.EmojiKeyCacheOptions{})
+	keys := []model.EmojiKey{rk("blob", "a.example")}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = c.FindManyByKeys(keys)
+	}()
+	<-inner.entered
+	c.DropLocal()
+	rel := inner.release
+	inner.mu.Lock()
+	inner.entered, inner.release = nil, nil
+	inner.mu.Unlock()
+	close(rel)
+	<-done
+	inner.setRows(remoteEmoji("e1", "blob", "a.example", "new"))
+
+	got, err := c.FindManyByKeys(keys)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "new", got[0].PublicURL, "a fetch overtaken by DropLocal must not be cached")
+}

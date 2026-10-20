@@ -98,6 +98,13 @@ func (r *Resolver) InvalidateLocally() {
 	r.mu.Unlock()
 }
 
+// DropLocal drops this process's catalog without calling the invalidation
+// hook, so no other process is told (#3727). It is what the cache list of
+// internal/server calls (docs/architecture.md 4.4). nil-safe.
+func (r *Resolver) DropLocal() {
+	r.InvalidateLocally()
+}
+
 // SetInvalidationHook registers fn, called after every Invalidate has dropped
 // this process's catalog (#3664). Call it once while wiring.
 func (r *Resolver) SetInvalidationHook(fn func()) {
