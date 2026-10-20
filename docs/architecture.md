@@ -2043,7 +2043,7 @@ Supervisorの側は変えていない。停止のエラーの使われ方は次�
 
 コメントの「shutdown hook」は、この一覧の部品の停止を指す。
 
-### 4.4 キャッシュの一覧 (#3721)
+### 4.4 キャッシュの一覧 (#3721、#3723)
 
 **世代のキャッシュは、そのプロセスが持つ分を全部捨てる口 (`DropLocal()`) を持たせ、名前と由来と
 一緒に `Server` の一覧 (`cacheList`、`internal/server/caches.go`) へ登録する。** #3666 の段階 4。
@@ -2055,6 +2055,10 @@ setupRoutes()
   s.addCache("cachedMeta", cacheFromDB, cachedMeta)
   s.addCache("metaResponse", cacheFromDB, metaHandler)
   s.addCache("nodeinfo", cacheFromDB, nodeinfoHandler)
+  …
+  s.addCache("userCache", cacheFromDB, s.userCache)       // 3 つは newServer で作る (#3723)
+  s.addCache("relationCache", cacheFromDB, s.relationCache)
+  s.addCache("authTokens", cacheFromDB, s.auth)
 ```
 
 - **`DropLocal()` は他のプロセスに知らせない。** publish も、無効化の hook (`SetInvalidationHook`)
@@ -2083,7 +2087,15 @@ setupRoutes()
 | 系統 | 一覧の名前 | issue |
 |---|---|---|
 | meta | `cachedMeta`・`metaResponse`・`nodeinfo` | #3721 |
-| 利用者と関係・ロール・絵文字とデコレーション・連合・外部 | (未) | 後続 |
+| 利用者と関係 | `userCache` (`CachedUserRepository`)・`relationCache` (`RelationCache`)・`authTokens` (`AuthMiddleware` の tokenCache) | #3723 |
+| ロール・絵文字とデコレーション・連合・外部 | (未) | 後続 |
+
+- 利用者と関係の系統の 3 つは、どれもこのプロセスだけで全部を捨てる処理を元から中に持っていて
+  (`invalidateAllLocal`・`apply({All: true})`・`tokenCache.invalidateAll`)、`DropLocal()` はそれを
+  呼ぶ。全体を捨てた時刻 (`allInvalidatedAt`) を持つので、捨てる前に読み始めた結果は積まない。
+  `RelationCache.InvalidateAll()` は他のプロセスにも通知するので、一覧からは呼ばない
+- この 3 つの間に捨てる順の制約は無い。tokenCache は利用者を DB から読み (native token は
+  `FindByToken`、app token は `FindByHashOrToken` の Preload)、利用者のキャッシュを通らない
 
 - captcha の provider と、リアクションのバッファの切り替えは、meta 行の写しで、捨てるだけでは
   足りず読み直しが要る。#3721 では登録していない。扱いは段階 4 の最後で決める
@@ -2100,8 +2112,19 @@ setupRoutes()
   `internal:metaUpdated` を送らないことを見る
 - `TestCachedMetaRepository_DropLocalDropsWithoutHook`・`TestMeta_DropLocalDropsBothVariants`・
   `TestNodeinfo_DropLocalDropsEveryVersion`: 各型の `DropLocal()` が全部を捨て、hook を呼ばないこと
+- `TestCaches_UserLine` (#3723): 利用者と関係の系統の 3 つが、サーバーが使う値のまま一覧にあることを
+  名前の下限 (`userLineCaches`) で確かめる。DB の行 (利用者の名前と凍結、ミュート) を直接書き換えて、
+  `dropAll` の後に利用者のキャッシュ・関係のキャッシュと、`/api/i` の認証 (凍結で 403 になる) が読み
+  直すことを見る。捨てても `internal:` のチャンネルへ何も publish しないことを、世代を止めて
+  (利用者の通知の待ち行列を送り切らせて) から送る目印で確かめる
+- `TestCachedUserRepository_DropLocal`・`TestRelationCache_DropLocalDoesNotForward`・
+  `TestAuthMiddleware_DropLocal` (#3723): 各型の `DropLocal()` が全部を捨て、他のプロセスへ伝える
+  hook や publisher に何も渡さないこと。読み込みの途中で捨てたときに読んだ行を積まないことは、
+  利用者のキャッシュは `TestCachedUserRepository_DropLocal` が、tokenCache は
+  `TestAuthMiddleware_InvalidationDuringReadIsNotStored` の `drop` の場合が見る
 
-#3721 の前後で同じであることは、次のように確かめた (道具はコミットしていない)。
+#3721 と #3723 の前後で同じであることは、それぞれ次のように確かめた (道具はコミットしていない)。
+#3721 でも #3723 でも、結果は次のとおりだった。
 
 - `elythia dump-routes`: 出力 (ルート)、起動ログ、Redis の命令の列、PostgreSQL の文の集合は、前後で
   一致した。前の木を 2 回流して揺れないことも確かめ、後の木も 2 回流した
