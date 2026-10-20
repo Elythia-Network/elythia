@@ -1348,7 +1348,8 @@ stream の部品・handler と、/api の外のルートの登録は、依存す
 行い、起動は`StartBackground`が一覧の順にまとめて行う形にした(下の「起動」)。#3705で、構築の途中で
 `go`文で回していた最後の部品`emojiInvalidationQueue`に`Start`と`Stop`を持たせ、値から作る登録
 (`startPartWithStop`)で一覧に入れた。#3707で、部品の停止のpanicを部品ごとに回収し、残りの停止を
-続ける形にした(下の「停止のpanic」)。
+続ける形にした(下の「停止のpanic」)。#3709で、`StartBackground`と`StartBackgroundForTest`が同じ
+1度きりの起動を通り、停止を始めた後は何も起動しない形にした(下の「2回呼んだとき」と「停止の後の起動」)。
 
 - 項目は名前・止める値 (`part`)・起動 (`func()`。起動するものが無い部品はnil)・停止
   (`func(context.Context)`) を持つ。`part` は停止が働きかける値 (バッファ・publisher・service・
@@ -1504,13 +1505,31 @@ closureの3つの型と値の無いworkerは満たさない。部品の型にメ
   queueもchartも起動せずにそのエラーを返す。Supervisorはそれを受けて世代を`StopBackground`で止め、
   DBのプールを閉じる(`startGenerationLocked`。最初の世代は`Start`がエラーを返し、`serve`が
   `Shutdown`する)。#3703の前は構築の中で起動していたので、panicは構築ごとプロセスを落としていた
-- **2回呼んだとき。** `StartBackground`は1回目だけ起動し、2回目からは1回目の結果を返す(`startOnce`)。
-  `startAll`も1回目だけ起動し、`stopAll`を始めた後は何も起動しない(止める人の居ないgoroutineを
-  残さないため)。本番の経路で`StartBackground`を呼ぶのは、最初の世代を`Supervisor.Start`が、
+- **2回呼んだとき。** `StartBackground`と`StartBackgroundForTest`は同じ`startOnce`を通る(#3709)。
+  どちらを先に呼んでも、先に呼んだ方だけが起動し、後から呼んだ方(どちらでも)は何も起動せずに先の
+  結果を返す。`startAll`も1回目だけ起動し、`stopAll`を始めた後は何も起動しない(止める人の居ない
+  goroutineを残さないため)。本番の経路で`StartBackground`を呼ぶのは、最初の世代を`Supervisor.Start`が、
   作り直した世代を`startGenerationLocked`が呼ぶ2か所で、同じ世代に2回は呼ばない(`Start`は
   listenより前に呼び、メンテナンスの監視は`Start`の中のlistenの後で始まる)
-- `StartBackgroundForTest`(e2e-federationが使う)も、queueより先に一覧を起動する。roleを見ないことと
-  chartを起動しないことは前と同じ
+- `StartBackgroundForTest`(e2e-federationが使う)は、`StartBackground`と同じ起動の関数を、違いを
+  引数(`backgroundStart`)で渡して通る。違いは2つで、roleを見ずにqueueのworker・autoscale・schedulerを
+  起動することと、chartを起動しないこと(どちらも前と同じ)。一覧をqueueより先に起動するのも同じ。
+  先に`StartBackgroundForTest`を呼んだ世代では、後から`StartBackground`を呼んでもchartは起動しない
+- **停止の後の起動(#3709)。** `Server`は起動と停止の順を守るmutex(`runMu`)と、停止を始めた印
+  (`stopped`)を持つ。停止(`shutdown`)は何かを止めるより先に、mutexを取って印を立てる。構築の後始末
+  (`cleanupConstruction`)も同じ印を立てる。起動はmutexを握ったまま走り、印が立っていれば何も
+  起動せずに`errGenerationStopped`を返す(1度きりの起動の結果なので、後の呼び出しも同じエラーを返す)。
+  起動の途中で停止が始まったときは、停止は起動が済むのを待ってから印を立て、その起動が起動したもの
+  をすべて止める。起動の間はmutexを握ったままにした。起動は部品のgoroutineを立てるほか、cronの登録
+  (`registerSchedulerJobs`の11個の登録の関数)と撤去(`PruneUnregistered`)でRedisを
+  `context.Background()`のまま呼ぶので、その分だけ長くかかりうる
+  - **本番の経路に足す待ちは無い。** Supervisorは`StartBackground`と`StopBackground`をどちらも`genMu`の
+    下で呼ぶので、固まった起動は#3709の前から停止を止めていた(`Supervisor.Shutdown`は
+    `lockBefore(&s.genMu, b.drainUntil)`で見切って進む)。走っている起動を`runMu`で待つのは、
+    `Server.StopBackground`を直接呼ぶもの(テスト)だけで、その待ちは停止のctxを見ない
+  - **待ち合い(デッドロック)にならない。** 停止は印を立てる間だけ`runMu`を握り、部品やqueueを止めて
+    待つ間は握らない。起動が`runMu`を握ったまま取るのは、一覧のmutex(`stopAll`は印を立てる間だけ握る)、
+    chartの管理のmutex、queueのdriverの中のmutexで、停止の側が`runMu`を握ったままそれらを待つことは無い
 
 **起動していない部品を止めても安全であること。** 構築に失敗した世代(`cleanupConstruction`)と、
 `StartBackground`に失敗した世代(Supervisorの`StopBackground`)では、起動していない部品も止める。
@@ -1568,6 +1587,17 @@ closureの3つの型と値の無いworkerは満たさない。部品の型にメ
   閉じる前に落ちた。今は記録して残りを止め、`StopBackground`のエラーになる(上の「停止のpanic」)
 - panicしない限り、停止の順も`StopBackground`の戻り値も変わらない
 
+**意図して変えた動き(#3709)。** どちらも本番の経路では起きない(Supervisorは`genMu`の下で、1つの
+世代に`StartBackground`を1回だけ呼び、止めた世代を再び起動しない)。
+
+- `StopBackground`の後(または構築の後始末の後)に`StartBackground`を呼ぶと、前は一覧だけを起動せず、
+  queueのworker・autoscale・schedulerとchartは止めた世代のまま起動して成功を返した。起動したworkerを
+  止める人は居らず、queueのdriverは閉じた後だった。今は何も起動せず、`errGenerationStopped`を返す
+- `StartBackground`と`StartBackgroundForTest`を両方呼ぶと、前はqueueの`Start`を2回呼んだ
+  (`StartBackgroundForTest`は`startOnce`を通らなかった)。今は先に呼んだ方だけが起動する
+- 起動と停止を並行に呼んだとき、前は停止が止め終わった後に起動が走りえた。今は上の「停止の後の起動」の
+  とおり、起動したものはすべて止まる
+
 **Redisの購読は動かしていない。** streamの節で始める購読(`internalPubSub.Subscribe`の
 `metaUpdated`など4つと、`cachebus`・`relationcache`の`Connect…`/`Subscribe…`)は、#3703の後も
 構築の途中で始める。一覧に乗せなかった理由は3つ。
@@ -1582,6 +1612,7 @@ closureの3つの型と値の無いworkerは満たさない。部品の型にメ
 一覧に乗せるかは、段階(6)でメンテナンスの作り直しの範囲を決めるときに、別に決める。
 
 **世代の停止 (`shutdown`) は、一覧を次の位置で回す。** 順を決めている理由は #3662 と #3661。
+次の手順の前に、起動しない印(`stopped`)を立てる(#3709。上の「停止の後の起動」)。
 
 1. streaming の接続を 1012 で閉じる (別の上限付き)
 2. queue の worker と scheduler を止める (`stopQueue`)。**一覧より先に止める** (#3662)。worker の
@@ -1598,7 +1629,7 @@ closureの3つの型と値の無いworkerは満たさない。部品の型にメ
 8. この世代の Redis の購読 (`internalPubSub` / `streamPubSub`) を閉じる
 9. echo を Shutdown する
 
-構築に失敗したときの後始末 (`cleanupConstruction`) は、プラグインの保留の work を捨て、一覧を
+構築に失敗したときの後始末 (`cleanupConstruction`) は、起動しない印を立て(#3709)、プラグインの保留の work を捨て、一覧を
 `context.Background()` で同じ順に止め、箱を 1 秒まで待ち、queue の driver・streaming の接続・
 購読を閉じる。
 
@@ -1656,7 +1687,7 @@ Supervisorの側は変えていない。停止のエラーの使われ方は次�
 | echo の `Shutdown` | 戻り値が `StopBackground` の戻り値になる(一覧の停止のpanicがあれば、そのエラーと`errors.Join`でまとめる。#3707) |
 
 **テストが見ている範囲は次のとおり** (`internal/server/lifecycle_parts_test.go`・
-`lifecycle_parts_value_test.go`・`lifecycle_start_test.go`・`lifecycle_stop_test.go`。多くは実際に`newServer`で作ったサーバーで見る)。部品を足す・動かすときは、テストの表とこの節の表を一緒に直す。
+`lifecycle_parts_value_test.go`・`lifecycle_start_test.go`・`lifecycle_startonce_test.go`・`lifecycle_stop_test.go`。多くは実際に`newServer`で作ったサーバーで見る)。部品を足す・動かすときは、テストの表とこの節の表を一緒に直す。
 
 - **名前の並びと登録の条件。** `TestNewServer_ShutdownStopsThePartsInTheirOrder` が、role (両方・
   server・queue) と設定 (queueInspector の有無、`disableParamShadow`、DB の store を持つプラグインの
@@ -1726,6 +1757,18 @@ Supervisorの側は変えていない。停止のエラーの使われ方は次�
   記録を重ねないことを見る。`TestSupervisor_StopGenerationGoesOnAfterAPanickingStop`が、`newServer`で
   作った世代の2つの部品の停止をpanicさせ、Supervisorが全部の部品をその順に止め、`StopReport.Err`に
   載せ、世代のDBの接続とRedisの購読を残さず、次の世代を作れることを見る
+- **1度きりの起動と、停止の後の起動(#3709)。** `lifecycle_startonce_test.go`が、queueのworkerと
+  schedulerの`Start`/`Shutdown`を記録し、autoscaleの`Resize`を数える差し替えのdriverと、chartの
+  管理の`Start`が起動中に失敗することで、起動したものを見る。`TestServer_StartAfterStopStartsNothing`が、
+  `StopBackground`の後の`StartBackground`と`StartBackgroundForTest`が何も起動せずに
+  `errGenerationStopped`を返すことを、`TestServer_StartAfterFailedConstructionStartsNothing`が構築の
+  後始末の後も同じことを見る。`TestServer_StartBackgroundAndForTestShareTheOnce`が、2つの起動を
+  どちらの順で呼んでもqueueの`Start`が1回で、後の呼び出しが先の結果(失敗なら同じエラーの値)を返す
+  ことを、`TestServer_StartBackgroundForTestIgnoresTheRole`が引数で分けた2つの違い(roleとchart)を見る。
+  `TestServer_ConcurrentStartAndStopLeaveNothingRunning`が、起動と停止を並行に300回呼び、起動した
+  部品・worker・schedulerがその後に止まり、autoscaleとchartが残らず、固まらないことを見る(`-race`で
+  `autoscale`のフィールドの競合も見る)。組ごとに先に譲る側を替え、起動が先の組と停止が先の組の両方が
+  起きたことも確かめる(片方だけでは、もう片方の順の検査が空振りする)
 
 #3699 の前後で同じ動きであることは、次のように確かめた (道具はコミットしていない)。
 
@@ -1802,6 +1845,20 @@ Supervisorの側は変えていない。停止のエラーの使われ方は次�
   組の集合は、前の木の2回と後の木の2回の4通りの組み合わせのどれでも一致した。起動ログの差は、gormの
   ログに出る呼び出し元のファイルのパス(ビルドした木の置き場所)だけだった。前の木の最初の1回は、
   空のDBへの初回の起動(`meta`と`instance_secret`の行を作る)なので、比べる対象から外した
+- 4.1の道具は、`router.go`を変えていないので数が変わらない
+
+#3709の前後で、本番の経路(構築 → `StartBackground` → `StopBackground`を1回ずつ)の動きが同じであることは、
+次のように確かめた(道具はコミットしていない)。意図して変えた動き(上の「意図して変えた動き(#3709)」)は、
+上のテストが見る。
+
+- 起動と停止の順: #3707と同じ使い捨ての記録を前後の木に当て、#3699と同じ8つの組で、`newServer`・
+  `StartBackground`・`StopBackground`のそれぞれの間の起動と停止の列を記録した。8つの組のどれも、前後で
+  一致した。どちらの木も2回回して揺れないことを確かめた
+- `elythia dump-routes`: 出力(ルート)、起動ログ、Redisの命令の列、PostgreSQLの文の集合は、前後で一致した
+- `serve`: #3703と同じ方法(前後のバイナリを25秒ずつ2回。前の木の初回の起動を1回先に流し、比べる対象から
+  外した)で、PostgreSQLの文の集合と、Redisの命令とキーの組の集合は、前の木の2回と後の木の2回の4通りの
+  組み合わせのどれでも一致した。起動ログの差は、#3707と同じくgormのログに出る呼び出し元のファイルの
+  パス(ビルドした木の置き場所)だけだった
 - 4.1の道具は、`router.go`を変えていないので数が変わらない
 
 コメントの「shutdown hook」は、この一覧の部品の停止を指す。
