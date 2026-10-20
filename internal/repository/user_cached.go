@@ -236,6 +236,13 @@ func (c *CachedUserRepository) ApplyRemoteInvalidation(inv UserCacheInvalidation
 	}
 }
 
+// DropLocal drops every entry of this process without calling the
+// invalidation hook, so no other process is told (#3723). It is what the
+// cache list of internal/server calls (docs/architecture.md 4.4).
+func (c *CachedUserRepository) DropLocal() {
+	c.invalidateAllLocal()
+}
+
 // invalidateAllLocal drops every entry of this process. Reads in flight when
 // it runs are not stored afterwards (see allInvalidatedAt).
 func (c *CachedUserRepository) invalidateAllLocal() {

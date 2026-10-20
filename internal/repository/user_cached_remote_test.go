@@ -302,3 +302,50 @@ func TestCachedUserRepository_URIIndex(t *testing.T) {
 	multi.ApplyRemoteInvalidation(UserCacheInvalidation{URIs: []string{"https://r.example/m1"}})
 	assert.Equal(t, []string{"https://r.example/m2"}, multi.urisByID["m"])
 }
+
+// TestCachedUserRepository_DropLocal pins that DropLocal drops the users, the
+// byURI entries and the profiles of this process without calling the hook
+// (#3723), and that a read in flight when it runs does not store what it read.
+func TestCachedUserRepository_DropLocal(t *testing.T) {
+	inner := newRemoteInvUserRepo()
+	c := NewCachedUserRepositoryWithTTL(inner, time.Hour)
+	c.SetInvalidationHook(func(UserCacheInvalidation) { t.Fatal("DropLocal must not call the hook") })
+	const uri = "https://r.example/u1"
+	inner.set(&model.User{ID: "u1", URI: strPtr(uri), NotesCount: 1})
+	inner.set(&model.User{ID: "u2", NotesCount: 1})
+	inner.profiles["u1"] = &model.UserProfile{UserID: "u1", Description: strPtr("old")}
+	_, _ = c.FindByID("u2")
+	_, _ = c.FindByURI(uri)
+	_, _ = c.FindProfileByUserID("u1")
+
+	inner.set(&model.User{ID: "u1", URI: strPtr(uri), NotesCount: 2})
+	inner.set(&model.User{ID: "u2", NotesCount: 2})
+	inner.profiles["u1"] = &model.UserProfile{UserID: "u1", Description: strPtr("new")}
+	u, err := c.FindByID("u2")
+	require.NoError(t, err)
+	require.Equal(t, 1, u.NotesCount, "前提: 捨てるまでは cache が返る")
+
+	c.DropLocal()
+	u, err = c.FindByID("u2")
+	require.NoError(t, err)
+	assert.Equal(t, 2, u.NotesCount, "DropLocal did not drop the users")
+	u, err = c.FindByURI(uri)
+	require.NoError(t, err)
+	assert.Equal(t, 2, u.NotesCount, "DropLocal did not drop the byURI entries")
+	p, err := c.FindProfileByUserID("u1")
+	require.NoError(t, err)
+	assert.Equal(t, "new", *p.Description, "DropLocal did not drop the profiles")
+
+	// 読み込みの途中で捨てたら、読んだ行は積まない。
+	inner.during = func() {
+		inner.set(&model.User{ID: "u2", NotesCount: 3})
+		c.DropLocal()
+	}
+	c.DropLocal()
+	u, err = c.FindByID("u2")
+	require.NoError(t, err)
+	assert.Equal(t, 2, u.NotesCount, "the in-flight read returns what it read")
+	u, err = c.FindByID("u2")
+	require.NoError(t, err)
+	assert.Equal(t, 3, u.NotesCount, "the row read before DropLocal was stored")
+}

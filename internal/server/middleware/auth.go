@@ -161,6 +161,13 @@ func (a *AuthMiddleware) InvalidateAllLocally() {
 	a.tokenCache.invalidateAll()
 }
 
+// DropLocal drops every entry of this process's auth cache without calling
+// the invalidation hook, so no other process is told (#3723). It is what the
+// cache list of internal/server calls (docs/architecture.md 4.4).
+func (a *AuthMiddleware) DropLocal() {
+	a.tokenCache.invalidateAll()
+}
+
 // SetInvalidationHook registers fn, called with the user id after this
 // process dropped that user's entries through InvalidateUserToken or
 // InvalidateTokensForUser (#3664). Call it once while wiring.
