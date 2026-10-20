@@ -82,6 +82,13 @@ func (c *CachedAntennaRepository) Invalidate() {
 	c.mu.Unlock()
 }
 
+// DropLocal drops the cached rows held by this process without notifying
+// other processes (#3736). 読み込みの間も書き込みのロックを握るので
+// (ListAllActive)、捨てる前に始まった読み込みは待ってから捨てる。
+func (c *CachedAntennaRepository) DropLocal() {
+	c.Invalidate()
+}
+
 // ListAllActive returns the active antennas, serving them from cache.
 func (c *CachedAntennaRepository) ListAllActive() ([]*model.Antenna, error) {
 	c.mu.RLock()

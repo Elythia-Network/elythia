@@ -2883,6 +2883,18 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	s.addCache("federationPublicKeys", cacheFromDB, federationResolver)
 	s.addCache("deliverSigningKeys", cacheFromDB, deliverProcessor)
 	s.addCache("instanceActorSigner", cacheFromDB, instanceSigner)
+	// 投稿・タイムライン・通知の系統 (#3736)。アンテナ・push 購読・注目ノートの順位は
+	// DB (順位は Redis) を直接読む。**ストリームの直前のノートとタイムラインの JSON は、
+	// 最後に置く。** どちらも pack した利用者・ロール・絵文字・デコレーション・
+	// インスタンスを含むので、先に捨てると、間に来た pack が古い元から作り直して積む。
+	// タイムラインの JSON は opt-in で、有効にしたときだけ登録する。
+	s.addCache("antennas", cacheFromDB, cachedAntenna)
+	s.addCache("pushSubscriptions", cacheFromDB, webPushCache)
+	s.addCache("featuredNotes", cacheFromDB, notesHandler.FeaturedRankingCache())
+	s.addCache("notePublisher", cacheFromDB, notePublisher)
+	if tc := notesHandler.TimelineJSONCache(); tc != nil {
+		s.addCache("timelineJSON", cacheFromDB, tc)
+	}
 
 	// #3664: 利用者のキャッシュ (CachedUserRepository) の cross-worker invalidation。
 	// queue のプロセスがリモートの利用者を更新 (凍結の反映、Update の受信) しても、
@@ -2895,6 +2907,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		emojiDecorations: emojiDecorationResolver, emojis: emojiRepo, fedRules: fedRuleService,
 		deliver: deliverService, resolver: federationResolver, deliverProcessor: deliverProcessor,
 		instanceSigner: instanceSigner, fetcherSigner: apFetcher.SignerProvider(),
+		antennas: cachedAntenna, pushSubscriptions: webPushCache, notes: notesHandler,
+		notePublisher: notePublisher,
 	}
 
 	userCacheLink := cachebus.ConnectUsers(s.userCache, internalPubSub, idGen.Generate(time.Now()))
@@ -4691,4 +4705,11 @@ type crossProcessCaches struct {
 	deliverProcessor *processors.DeliverProcessor
 	instanceSigner   *instanceActorSigner
 	fetcherSigner    corefederation.SignerProvider
+	// antennas / pushSubscriptions / notes / notePublisher は投稿・タイムライン・
+	// 通知の系統のキャッシュ (#3736)。キャッシュの一覧のテストが、登録した値と
+	// 同じかを見るため。注目ノートの順位とタイムラインの JSON は notes から引く。
+	antennas          *repository.CachedAntennaRepository
+	pushSubscriptions *corewebpush.SubscriptionCache
+	notes             *notes.Handler
+	notePublisher     *stream.NotePublisher
 }

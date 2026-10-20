@@ -639,3 +639,116 @@ func TestInstanceActorSigner_DropLocal(t *testing.T) {
 	assert.Nil(t, s.cachedKey, "DropLocal did not drop the key")
 	assert.True(t, s.lastFailure.IsZero(), "DropLocal did not drop the load backoff")
 }
+
+// notesLineCaches are the caches of the notes, timelines and notifications
+// line (#3736). notePublisher と timelineJSON は pack した利用者・ロール・
+// 絵文字・デコレーション・インスタンスを含むので、それらの後に並ぶ。
+var notesLineCaches = []string{"antennas", "pushSubscriptions", "featuredNotes", "notePublisher", "timelineJSON"}
+
+// notesLinePackedFrom are the caches that notePublisher and timelineJSON pack from.
+var notesLinePackedFrom = []string{"userCache", "relationCache", "roles", "emojis", "emojiDecorations", "avatarDecorations", "instances"}
+
+func TestCaches_NotesLine(t *testing.T) {
+	h := newMetaRuntimeHarness(t, func(s *Server) {
+		s.config.EnableTimelineCache = true
+		s.config.TimelineCacheTTLSeconds = 3600
+	})
+	srv := h.srv
+	caches := srv.crossProcessCaches
+	require.NotNil(t, caches.notes.TimelineJSONCache())
+
+	want := map[string]localCache{
+		"antennas": caches.antennas, "pushSubscriptions": caches.pushSubscriptions,
+		"featuredNotes": caches.notes.FeaturedRankingCache(), "notePublisher": caches.notePublisher,
+		"timelineJSON": caches.notes.TimelineJSONCache(),
+	}
+	at := map[string]int{}
+	for i, p := range srv.caches.parts {
+		at[p.name] = i
+		if v, ok := want[p.name]; ok {
+			assert.Equal(t, cacheFromDB, p.origin, "cache %q", p.name)
+			assert.Same(t, v, p.cache, "cache %q is not the value the server uses", p.name)
+		}
+	}
+	for _, name := range notesLineCaches {
+		require.Contains(t, at, name, "cache %q is not listed", name)
+	}
+	for _, packed := range []string{"notePublisher", "timelineJSON"} {
+		for _, from := range notesLinePackedFrom {
+			require.Contains(t, at, from)
+			assert.Greater(t, at[packed], at[from], "%q must be dropped after %q", packed, from)
+		}
+	}
+
+	const token = "metartuser000036"
+	const userID = "metart-user-36"
+	h.createUser(userID, "metart_user36", token, false)
+	antennaID, subID := h.idGen.Generate(time.Now()), h.idGen.Generate(time.Now())
+	t.Cleanup(func() {
+		require.NoError(t, h.db.Where("id = ?", antennaID).Delete(&model.Antenna{}).Error)
+		require.NoError(t, h.db.Where("id = ?", subID).Delete(&model.SwSubscription{}).Error)
+	})
+
+	hasAntenna := func() bool {
+		rows, err := caches.antennas.ListAllActive()
+		require.NoError(t, err)
+		for _, a := range rows {
+			if a.ID == antennaID {
+				return true
+			}
+		}
+		return false
+	}
+	subscriptions := func() int {
+		subs, err := caches.pushSubscriptions.Get(context.Background(), userID)
+		require.NoError(t, err)
+		return len(subs)
+	}
+	timeline := func() []string {
+		rec := h.post("/api/notes/local-timeline", token, map[string]any{})
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		var notes []struct {
+			ID string `json:"id"`
+		}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &notes))
+		ids := make([]string, len(notes))
+		for i, n := range notes {
+			ids[i] = n.ID
+		}
+		return ids
+	}
+	require.False(t, hasAntenna())
+	require.Zero(t, subscriptions())
+	before := timeline()
+
+	// 他のプロセスが書いたときと違い、通知は送らない。このプロセスのキャッシュは
+	// 古いまま残る。
+	require.NoError(t, h.db.Create(&model.Antenna{ID: antennaID, LastUsedAt: time.Now(), UserID: userID, Name: "dropped", Src: model.AntennaSourceAll, IsActive: true}).Error)
+	require.NoError(t, h.db.Create(&model.SwSubscription{ID: subID, UserID: userID, Endpoint: "https://push.example/" + subID, Auth: "auth", PublicKey: "key"}).Error)
+	noteID := h.createNote(userID, "dropped")
+	require.False(t, hasAntenna(), "前提: 捨てるまでは cache が返る")
+	require.Zero(t, subscriptions(), "前提: 捨てるまでは cache が返る")
+	require.Equal(t, before, timeline(), "前提: 捨てるまでは cache が返る")
+	// push 購読の Redis の層はプロセスの間で共有していて、DropLocal は触らない。
+	// DB を戻したときと同じく、Redis の層は先に消しておく (CleanRedisAfterRestore)。
+	require.NoError(t, h.rdb.Del(context.Background(), "userSwSubscriptions:"+userID).Err())
+	require.Zero(t, subscriptions(), "前提: 捨てるまではメモリの層が返る")
+
+	published := watchInternal(t, h)
+
+	srv.caches.dropAll()
+
+	assert.True(t, hasAntenna(), "the antennas were not dropped")
+	assert.Equal(t, 1, subscriptions(), "the push subscriptions were not dropped")
+	assert.Contains(t, timeline(), noteID, "the timeline responses were not dropped")
+	assert.Empty(t, published("caches-notes-line"), "dropping the caches told the other processes")
+}
+
+// The timeline response cache is opt-in, and is listed only when it is on.
+func TestCaches_TimelineJSONOnlyWhenEnabled(t *testing.T) {
+	h := newMetaRuntimeHarness(t)
+	require.Nil(t, h.srv.crossProcessCaches.notes.TimelineJSONCache())
+	for _, p := range h.srv.caches.parts {
+		assert.NotEqual(t, "timelineJSON", p.name)
+	}
+}

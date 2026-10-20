@@ -30,6 +30,9 @@ type SubscriptionCache struct {
 
 	mu  sync.Mutex
 	mem map[string]memEntry
+	// gen は DropLocal で進める世代の番号 (#3736)。読み込みは mu の外で Redis と
+	// DB を読むので、捨てる前に読み始めた行を、捨てた後に積まないために使う。
+	gen uint64
 }
 
 type memEntry struct {
@@ -58,13 +61,14 @@ func (c *SubscriptionCache) Get(ctx context.Context, userID string) ([]*model.Sw
 		c.mu.Unlock()
 		return e.subs, nil
 	}
+	gen := c.gen
 	c.mu.Unlock()
 
 	if c.redis != nil {
 		if raw, err := c.redis.Get(ctx, cacheKeyPrefix+userID).Bytes(); err == nil {
 			var subs []*model.SwSubscription
 			if jerr := json.Unmarshal(raw, &subs); jerr == nil {
-				c.setMemory(userID, subs, now)
+				c.setMemory(gen, userID, subs, now)
 				return subs, nil
 			}
 		}
@@ -74,7 +78,12 @@ func (c *SubscriptionCache) Get(ctx context.Context, userID string) ([]*model.Sw
 	if err != nil {
 		return nil, err
 	}
-	c.setMemory(userID, subs, now)
+	// 捨てた後は、捨てる前に読んだ行を Redis にも書かない。Redis の層は
+	// プロセスの間で共有していて、DB を戻したときは CleanRedisAfterRestore が消す。
+	// 消した後に古い行を書き戻すと、他のプロセスも 1 時間それを読む。
+	if !c.setMemory(gen, userID, subs, now) {
+		return subs, nil
+	}
 	if c.redis != nil {
 		if raw, jerr := json.Marshal(subs); jerr == nil {
 			_ = c.redis.Set(ctx, cacheKeyPrefix+userID, raw, cacheRedisTTL).Err()
@@ -94,8 +103,23 @@ func (c *SubscriptionCache) Invalidate(ctx context.Context, userID string) {
 	}
 }
 
-func (c *SubscriptionCache) setMemory(userID string, subs []*model.SwSubscription, now time.Time) {
+// DropLocal drops the in-memory layer held by this process (#3736). Redis の
+// 層はプロセスの間で共有しているので触らない。他のプロセスへも伝えない。
+func (c *SubscriptionCache) DropLocal() {
 	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.gen++
+	clear(c.mem)
+}
+
+// setMemory stores subs unless the cache was dropped after gen was read, and
+// reports whether it stored them.
+func (c *SubscriptionCache) setMemory(gen uint64, userID string, subs []*model.SwSubscription, now time.Time) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.gen != gen {
+		return false
+	}
 	c.mem[userID] = memEntry{subs: subs, expiresAt: now.Add(cacheMemoryTTL)}
-	c.mu.Unlock()
+	return true
 }

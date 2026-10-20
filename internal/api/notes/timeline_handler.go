@@ -415,6 +415,7 @@ func (h *Handler) serveTimeline(
 	// pack + encode を丸ごとスキップ。cache 無効時 / cursor 付きは cacheKey="" で
 	// 従来通り c.JSON 経路を通る (= default 挙動は byte 一致のまま)。
 	var cacheKey string
+	var cacheGen uint64
 	if h.timelineCache != nil && req.SinceID == "" && req.UntilID == "" {
 		// 匿名の応答は ugcVisibilityForVisitor で中身が変わるので、設定ごとに
 		// 別のキーにする。同じキーだと、設定を締めた直後も TTL の間は締める前の
@@ -424,6 +425,7 @@ func (h *Handler) serveTimeline(
 			vid = viewer.ID
 		}
 		cacheKey = timelineCacheKey(kind, vid, req)
+		cacheGen = h.timelineCache.generation()
 		if body, ok := h.timelineCache.get(cacheKey, time.Now()); ok {
 			return c.JSONBlob(http.StatusOK, body)
 		}
@@ -456,7 +458,7 @@ func (h *Handler) serveTimeline(
 			// echo の c.JSON は json.Encoder 経由で末尾に改行を付ける。cache 経路も
 			// 同じ byte 列にして default (c.JSON) 経路と応答を一致させる。
 			body = append(body, '\n')
-			h.timelineCache.set(cacheKey, body, time.Now())
+			h.timelineCache.set(cacheGen, cacheKey, body, time.Now())
 			return c.JSONBlob(http.StatusOK, body)
 		}
 		// marshal 失敗時は通常の c.JSON 経路へ fallthrough。

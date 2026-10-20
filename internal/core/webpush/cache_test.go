@@ -35,6 +35,8 @@ type fakeSwRepo struct {
 	data  map[string][]*model.SwSubscription
 	calls int
 	err   error
+	// onFind runs inside FindByUserID, after the call is counted.
+	onFind func()
 }
 
 func (f *fakeSwRepo) FindByUserAndEndpoint(_, _ string) (*model.SwSubscription, error) {
@@ -45,6 +47,9 @@ func (f *fakeSwRepo) FindByUserEndpointAuthKey(_, _, _, _ string) (*model.SwSubs
 }
 func (f *fakeSwRepo) FindByUserID(userID string) ([]*model.SwSubscription, error) {
 	f.calls++
+	if f.onFind != nil {
+		f.onFind()
+	}
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -165,4 +170,49 @@ func TestCache_WithRedis_CorruptValueFallsThroughToRepo(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, got, 1)
 	assert.Equal(t, 1, repo.calls)
+}
+
+// DropLocal drops the memory layer only. Redis の層はプロセスの間で共有するので
+// 残り、捨てた後の Get は Redis から読む。
+func TestCache_DropLocal_DropsMemoryOnly(t *testing.T) {
+	testRedis.FlushAll(context.Background())
+	repo := &fakeSwRepo{data: map[string][]*model.SwSubscription{
+		"u1": {{ID: "s1"}},
+		"u2": {{ID: "s2"}},
+	}}
+	cache := webpush.NewSubscriptionCache(repo, testRedis.Client)
+	for _, u := range []string{"u1", "u2"} {
+		_, err := cache.Get(context.Background(), u)
+		require.NoError(t, err)
+	}
+	require.NoError(t, testRedis.Client.Del(context.Background(), "userSwSubscriptions:u2").Err())
+
+	cache.DropLocal()
+	_, err := cache.Get(context.Background(), "u1")
+	require.NoError(t, err)
+	assert.Equal(t, 2, repo.calls, "u1 is read from Redis, which DropLocal leaves alone")
+	_, err = cache.Get(context.Background(), "u2")
+	require.NoError(t, err)
+	assert.Equal(t, 3, repo.calls, "u2 is gone from memory, so it is read from the DB")
+}
+
+// 読み込みの途中で捨てたときは、捨てる前に読んだ行をメモリにも Redis にも積まない。
+func TestCache_DropLocal_DuringReadIsNotStored(t *testing.T) {
+	testRedis.FlushAll(context.Background())
+	repo := &fakeSwRepo{data: map[string][]*model.SwSubscription{"u1": {{ID: "s1"}}}}
+	cache := webpush.NewSubscriptionCache(repo, testRedis.Client)
+	repo.onFind = func() {
+		repo.onFind = nil
+		cache.DropLocal()
+	}
+	got, err := cache.Get(context.Background(), "u1")
+	require.NoError(t, err)
+	assert.Len(t, got, 1, "the caller still gets what it read")
+
+	n, err := testRedis.Client.Exists(context.Background(), "userSwSubscriptions:u1").Result()
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), n, "the rows read before the drop are not written to Redis")
+	_, err = cache.Get(context.Background(), "u1")
+	require.NoError(t, err)
+	assert.Equal(t, 2, repo.calls, "the rows read before the drop are not kept in memory")
 }
