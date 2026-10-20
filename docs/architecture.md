@@ -566,13 +566,14 @@ setter も構築も動かしていないので、どの行も数が変わらな�
 一部を移した。部品の領域のフィールドは `repos`・`core`・`fed`・`queue`・`stream`・`handlers` の 6 つ。
 #3699 で、停止が要る部品の一覧を指す `lifecycle` を足した (4.3。部品は作らず、`Server` が持つ一覧を指すだけ。
 今は誰も読まない。段階 (6) で、作り直す範囲を絞るときに使う)。
+#3721 で、キャッシュの一覧を指す `caches` を同じ形で足した (4.4)。
 #3697 で `/api` のルートの登録を領域ごとのファイルの関数へ分けた (部品は作らないので、
 フィールドは増やしていない。下の「/api のルートの登録」)。
 
 ```
 setupRoutes()
-  w := &wiring{repos: s.buildRepos(), lifecycle: &s.lifecycle}
-  // ↑ repos は buildRepos (wiring_repos.go) が作る。lifecycle は Server の一覧を指すだけ (4.3)
+  w := &wiring{repos: s.buildRepos(), lifecycle: &s.lifecycle, caches: &s.caches}
+  // ↑ repos は buildRepos (wiring_repos.go) が作る。lifecycle と caches は Server の一覧を指すだけ (4.3、4.4)
   noteRepo := w.repos.note              // 別名。以降の行はこの名前を使う
   …
 ```
@@ -1697,7 +1698,7 @@ queueが止まったかどうか(2の結果)は、表を作る関数の中の変
 
 構築に失敗したときの後始末(`cleanupConstruction`)は、起動しない印を立て(#3709)、段の表(`cleanupSteps`)を
 `context.Background()`で回す。段は`pluginGoGate`(プラグインの保留のworkを捨てる)、`lifecycle`(一覧を
-同じ順に止める)、`background`(箱を1秒まで待つ)、`releaseParts`(一覧を空にする)、`queueDriver`(driverを
+同じ順に止める)、`background`(箱を1秒まで待つ)、`releaseParts`(一覧と、4.4のキャッシュの一覧を空にする。キャッシュの一覧は#3721から)、`queueDriver`(driverを
 閉じてnilに戻す)、`streaming`(接続を1秒まで待って閉じる)、`pubsub`(購読を閉じる)の順。
 
 **停止のpanic(#3707)。** 一覧の部品の停止は、どれも呼び出し元のgoroutineで同期に走る。`stopAll`は
@@ -2041,6 +2042,71 @@ Supervisorの側は変えていない。停止のエラーの使われ方は次�
   辺は659のまま(4.1)
 
 コメントの「shutdown hook」は、この一覧の部品の停止を指す。
+
+### 4.4 キャッシュの一覧 (#3721)
+
+**世代のキャッシュは、そのプロセスが持つ分を全部捨てる口 (`DropLocal()`) を持たせ、名前と由来と
+一緒に `Server` の一覧 (`cacheList`、`internal/server/caches.go`) へ登録する。** #3666 の段階 4。
+段階 (6) でメンテナンスの作り直しの範囲を狭めるときに、捨てるべきキャッシュをコードの上で列挙
+できるようにするため。
+
+```
+setupRoutes()
+  s.addCache("cachedMeta", cacheFromDB, cachedMeta)
+  s.addCache("metaResponse", cacheFromDB, metaHandler)
+  s.addCache("nodeinfo", cacheFromDB, nodeinfoHandler)
+```
+
+- **`DropLocal()` は他のプロセスに知らせない。** publish も、無効化の hook (`SetInvalidationHook`)
+  も呼ばない。誰に捨てさせるかは呼ぶ側が決める。今の捨てる口は型ごとに意味がばらばらで
+  (`CachedEmojiRepository.Invalidate()` は一覧だけを捨てる、`RelationCache.InvalidateAll()` は他の
+  プロセスにも通知する)、そのままでは 1 つの口として扱えない。既存のメソッドと精密な無効化
+  (`metaUpdated` の購読など) は置き換えずに残す
+- **名前を `Flush` にしない。** `paramshadow.Recorder.Flush()` やリアクションのバッファ (`corereaction` の
+  `bufferedWriter.Flush`) では、`Flush` は
+  「溜めた分を書き出す」という逆の意味で使われている
+- **由来** (`cacheOrigin`) は DB・設定・外部・ファイルの 4 つ。どの元が変わったときに捨てるべきかを
+  表す
+- **一覧は登録した順に捨てる** (`cacheList.dropAll`)。ほかのキャッシュから組み立てるものは、元の後に
+  登録する。meta の系統では meta 行を先に捨てる。逆だと、間に来たリクエストが古い meta 行から
+  `/api/meta` や `/nodeinfo` を組み直して積む (`nodeinfo.Handler.InvalidateCache` の doc と同じ理由)
+- **名前が空・由来が不明・値が nil (型付きの nil を含む)・名前の重複・同じ値の 2 回目の登録は、
+  構築の失敗にする** (`constructionError`)。不正な登録は一覧に入れない。比較できない値 (型が
+  比較できても、interface のフィールドに slice を持つ struct など) は、同じ値かを見られないので
+  2 回目の検査を飛ばす (今の値はどれもポインタ)。構築に失敗した世代の
+  後始末 (`releaseParts`、4.3) は、この一覧も空にする
+- **本番の経路からは、まだ誰も `dropAll` を呼ばない。** 段階 (6) で使う。`wiring` の `caches` も
+  一覧を指すだけで、誰も読まない (4.2)
+
+移した系統と、残りの系統 (#3666 の段階 4)。
+
+| 系統 | 一覧の名前 | issue |
+|---|---|---|
+| meta | `cachedMeta`・`metaResponse`・`nodeinfo` | #3721 |
+| 利用者と関係・ロール・絵文字とデコレーション・連合・外部 | (未) | 後続 |
+
+- captcha の provider と、リアクションのバッファの切り替えは、meta 行の写しで、捨てるだけでは
+  足りず読み直しが要る。#3721 では登録していない。扱いは段階 4 の最後で決める
+- 登録漏れを落とす検査は、全系統を移した後に足す
+
+テスト (`internal/server/caches_test.go` と、各型のパッケージ):
+
+- `TestCacheList_RejectsInvalidRegistrations` / `TestCacheList_AcceptsNonComparableValues` /
+  `TestCacheList_DropAllInOrder` / `TestNewServer_InvalidCacheFailsTheConstruction`: 不正な登録、
+  比較できない型、捨てる順、構築の失敗と後始末
+- `TestCaches_MetaLine`: サーバー全体を組み、meta の系統が捨てる順で並んでいることを、名前の下限
+  (`metaCachesInOrder`) で確かめる。DB の meta 行を直接書き換えて、`dropAll` の後に `/api/meta` と
+  `/nodeinfo` が読み直すこと (登録した値が配線で使われている値と同じこと) と、捨てても
+  `internal:metaUpdated` を送らないことを見る
+- `TestCachedMetaRepository_DropLocalDropsWithoutHook`・`TestMeta_DropLocalDropsBothVariants`・
+  `TestNodeinfo_DropLocalDropsEveryVersion`: 各型の `DropLocal()` が全部を捨て、hook を呼ばないこと
+
+#3721 の前後で同じであることは、次のように確かめた (道具はコミットしていない)。
+
+- `elythia dump-routes`: 出力 (ルート)、起動ログ、Redis の命令の列、PostgreSQL の文の集合は、前後で
+  一致した。前の木を 2 回流して揺れないことも確かめ、後の木も 2 回流した
+- 4.1 の道具: 節点 356、後から入れる辺 96 (行番号を除けば前と同じ)、呼び出しが離れている辺 659 で、
+  前後で同じだった
 
 ## 5. フック注入パターン
 
