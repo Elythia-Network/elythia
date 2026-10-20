@@ -407,6 +407,9 @@ type Resolver struct {
 	// (Devin review #555 FLAG-1)。
 	keysMu sync.RWMutex
 	keys   map[string]publicKeyEntry // userID → publicKey + fetchedAt
+	// keysGen は DropLocal が keys を捨てるたびに進める (#3732)。keysMu で保護する。
+	// DB から読んでいる間に捨てられたとき、読んだ鍵を捨てた後に積まないために使う。
+	keysGen uint64
 	// keyFetchFailures は refreshPublicKey が失敗した時刻 (userID → 時刻)。
 	// keysMu で保護する。keyFetchBackoff の説明を参照。
 	keyFetchFailures map[string]time.Time
@@ -1007,6 +1010,7 @@ func (r *Resolver) PublicKeyForActor(actorID string) (string, error) {
 	// 1. in-memory cache (TTL内)
 	r.keysMu.RLock()
 	entry, ok := r.keys[actorID]
+	gen := r.keysGen
 	r.keysMu.RUnlock()
 	if ok {
 		if r.clock().Sub(entry.fetchedAt) <= r.actorTTL {
@@ -1022,7 +1026,11 @@ func (r *Resolver) PublicKeyForActor(actorID string) (string, error) {
 		switch {
 		case err == nil:
 			r.keysMu.Lock()
-			r.keys[actorID] = publicKeyEntry{pem: pk.KeyPEM, fetchedAt: r.clock()}
+			// 読んでいる間に捨てられたら積まない (#3732)。読んだ行は捨てる前の
+			// ものかもしれない。この呼び出しの答えにだけ使う。
+			if r.keysGen == gen {
+				r.keys[actorID] = publicKeyEntry{pem: pk.KeyPEM, fetchedAt: r.clock()}
+			}
 			r.keysMu.Unlock()
 			return pk.KeyPEM, nil
 		case !repository.IsNotFound(err):
@@ -2749,6 +2757,15 @@ func (m *missingExtraKeys) remember(userID, keyID string, gen uint64, now time.T
 	m.total++
 }
 
+// dropAll drops every record and advances the generation (#3732).
+func (m *missingExtraKeys) dropAll() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.gen++
+	clear(m.byUser)
+	m.total = 0
+}
+
 // forget drops every record for userID and advances the generation.
 func (m *missingExtraKeys) forget(userID string) {
 	m.mu.Lock()
@@ -2768,6 +2785,22 @@ func (m *missingExtraKeys) deleteLocked(userID, keyID string) {
 	if len(keys) == 0 {
 		delete(m.byUser, userID)
 	}
+}
+
+// DropLocal drops the cached public keys of remote actors and the records of
+// missing Ed25519 keys in this process (#3732). It is what the cache list of
+// internal/server calls (docs/architecture.md 4.4). It tells no other process.
+//
+// 取得の失敗の backoff (keyFetchFailures) と mentionFetch は捨てない (#3729 と
+// 同じ判断。値のキャッシュではなく、捨てると backoff が外れるだけ)。鍵を捨てた
+// 直後は、ResolveActor が鍵の無い actor を相手から取り直すので、外への取得が
+// keyFetchBackoff の範囲で増える。
+func (r *Resolver) DropLocal() {
+	r.keysMu.Lock()
+	r.keysGen++
+	clear(r.keys)
+	r.keysMu.Unlock()
+	r.missingExtra.dropAll()
 }
 
 // forgetMissingExtraKeys drops every "no extra key" record for userID.

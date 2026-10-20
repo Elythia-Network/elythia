@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/elythia-network/elythia/internal/activitypub"
@@ -128,6 +129,11 @@ type DeliverProcessor struct {
 	// 毎 job で PEM->x509 を再パースしていた。worker 間共有の単一 processor
 	// にここを持たせて job 横断でメモ化する (#1425)。nil の場合は都度パース。
 	keyCache *lru.Cache[string, *activitypub.PrivateKey]
+	// keyMu / keyGen は DropLocal (#3732) のための世代。署名者の利用者で引く entry は
+	// DB の秘密鍵の写しなので、DB から読んでいる間に捨てられたら、読んだ鍵を積まない。
+	// (kind, keyID, PEM) で引く entry は解析の結果だけで古くならないので守らない。
+	keyMu  sync.Mutex
+	keyGen uint64
 	// keySource は payload に鍵が無いとき (= 新しい job) に引く先。
 	keySource SigningKeySource
 }
@@ -235,6 +241,9 @@ func (p *DeliverProcessor) resolveSigningKey(kind string, payload queue.DeliverP
 			return k, nil
 		}
 	}
+	p.keyMu.Lock()
+	gen := p.keyGen
+	p.keyMu.Unlock()
 	pem, err := p.keySource.SigningKeyPEM(payload.SignerUserID, kind)
 	if err != nil {
 		return nil, fmt.Errorf("load %s signing key: %w", kind, err)
@@ -248,9 +257,29 @@ func (p *DeliverProcessor) resolveSigningKey(kind string, payload queue.DeliverP
 		return nil, fmt.Errorf("%w: %w", errSigningKeyInvalid, err)
 	}
 	if p.keyCache != nil {
-		p.keyCache.Add(ck, k)
+		p.keyMu.Lock()
+		if p.keyGen == gen {
+			p.keyCache.Add(ck, k)
+		}
+		p.keyMu.Unlock()
 	}
 	return k, nil
+}
+
+// DropLocal drops every parsed signing key this processor holds (#3732). It is
+// what the cache list of internal/server calls (docs/architecture.md 4.4).
+//
+// 署名者の利用者で引く entry は DB の秘密鍵の写しで、DB を戻すと古くなりうる。
+// (kind, keyID, PEM) で引く entry は解析の結果だけだが、同じ LRU に入っているので
+// 一緒に捨てる (読み直すのは解析の分だけ)。
+func (p *DeliverProcessor) DropLocal() {
+	if p.keyCache == nil {
+		return
+	}
+	p.keyMu.Lock()
+	defer p.keyMu.Unlock()
+	p.keyGen++
+	p.keyCache.Purge()
 }
 
 // errSigningKeyInvalid marks a key that will never parse (retry は無意味)。

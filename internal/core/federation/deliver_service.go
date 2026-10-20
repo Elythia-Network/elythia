@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strconv"
 	"sync"
 	"time"
 
@@ -84,6 +85,12 @@ type DeliverService struct {
 	// に対する DB lookup を 1 回に集約。resolver の resolveActorGroup と同 pattern。
 	capGroup    singleflight.Group
 	signerGroup singleflight.Group
+	// cacheMu / cacheGen は DropLocal (#3732) のための世代。DropLocal は番号を進めてから
+	// 2 つの cache を消し、読み込みの結果は読む前に控えた番号と一致するときだけ積む。
+	// singleflight の鍵にも番号を含め、捨てた後の呼び出しが捨てる前に始まった
+	// 読み込みに相乗りしないようにする。
+	cacheMu  sync.Mutex
+	cacheGen uint64
 }
 
 // NewDeliverService constructs a DeliverService.
@@ -274,7 +281,8 @@ func (s *DeliverService) recipientIsEd25519Capable(recipient *model.User) bool {
 			return entry.capable
 		}
 	}
-	val, _, _ := s.capGroup.Do(recipient.ID, func() (any, error) {
+	gen := s.cacheGeneration()
+	val, _, _ := s.capGroup.Do(flightKey(recipient.ID, gen), func() (any, error) {
 		rows, err := s.publickeyExtraRepo.ListByUserID(recipient.ID)
 		if err != nil {
 			// DB error は cache せず次回 retry させる (= 戻り値の bool 経由で
@@ -282,9 +290,11 @@ func (s *DeliverService) recipientIsEd25519Capable(recipient *model.User) bool {
 			return false, nil
 		}
 		capable := len(rows) > 0
-		s.capCache.Store(recipient.ID, ed25519CapEntry{
-			capable:   capable,
-			fetchedAt: s.clock(),
+		s.storeIfCurrent(gen, func() {
+			s.capCache.Store(recipient.ID, ed25519CapEntry{
+				capable:   capable,
+				fetchedAt: s.clock(),
+			})
 		})
 		return capable, nil
 	})
@@ -306,12 +316,13 @@ func (s *DeliverService) signerEd25519Credentials(userID string) (string, string
 			return entry.keyID, entry.privPEM
 		}
 	}
-	val, _, _ := s.signerGroup.Do(userID, func() (any, error) {
+	gen := s.cacheGeneration()
+	val, _, _ := s.signerGroup.Do(flightKey(userID, gen), func() (any, error) {
 		kp, err := s.keypairExtraRepo.FindByUserID(userID)
 		if err != nil {
 			// 鍵未発行は cache に空 entry を入れて再 query を抑える
 			entry := ed25519SignerEntry{fetchedAt: s.clock()}
-			s.signerCache.Store(userID, entry)
+			s.storeIfCurrent(gen, func() { s.signerCache.Store(userID, entry) })
 			return entry, nil
 		}
 		entry := ed25519SignerEntry{
@@ -319,11 +330,45 @@ func (s *DeliverService) signerEd25519Credentials(userID string) (string, string
 			privPEM:   kp.Ed25519PrivateKey,
 			fetchedAt: s.clock(),
 		}
-		s.signerCache.Store(userID, entry)
+		s.storeIfCurrent(gen, func() { s.signerCache.Store(userID, entry) })
 		return entry, nil
 	})
 	entry := val.(ed25519SignerEntry)
 	return entry.keyID, entry.privPEM
+}
+
+// DropLocal drops the cached Ed25519 capabilities of recipients and the
+// cached Ed25519 keys of local signers in this process (#3732). It is what the
+// cache list of internal/server calls (docs/architecture.md 4.4). It tells no
+// other process.
+func (s *DeliverService) DropLocal() {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	s.cacheGen++
+	s.capCache.Clear()
+	s.signerCache.Clear()
+}
+
+func (s *DeliverService) cacheGeneration() uint64 {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	return s.cacheGen
+}
+
+// storeIfCurrent runs store only while no DropLocal has run since gen was
+// read. 番号の比較と積むことを同じ lock の中で行い、比べた直後に捨てられて古い値が
+// 残ることを防ぐ。
+func (s *DeliverService) storeIfCurrent(gen uint64, store func()) {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	if s.cacheGen == gen {
+		store()
+	}
+}
+
+// flightKey is the singleflight key of id in generation gen.
+func flightKey(id string, gen uint64) string {
+	return id + "\x00" + strconv.FormatUint(gen, 10)
 }
 
 // isBlockedInbox returns true when the inbox URL points at a host the local
