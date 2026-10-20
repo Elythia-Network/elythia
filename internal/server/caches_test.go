@@ -2,7 +2,11 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"net/http"
 	"sync"
 	"testing"
@@ -11,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/elythia-network/elythia/internal/activitypub"
 	"github.com/elythia-network/elythia/internal/core/fedrule"
 	corerelay "github.com/elythia-network/elythia/internal/core/relay"
 	"github.com/elythia-network/elythia/internal/model"
@@ -531,4 +536,106 @@ func TestCaches_FederationLine(t *testing.T) {
 	assert.True(t, relayActor(inboxB), "the relay list was not dropped")
 	assert.True(t, rejects(), "the federation rules were not reloaded")
 	assert.Empty(t, published("caches-federation-line"), "dropping the caches told the other processes")
+}
+
+// TestCaches_FederationKeysLine checks on a whole server that the rest of the
+// federation line (#3732) is listed with the values the server uses, that the
+// instance actor key is one value shared by the AP fetcher and the plugin
+// peers, and that dropping the list makes the public key of a remote actor and
+// the instance actor key read the database again, without telling the other
+// processes.
+//
+// 配送の Ed25519 の対応と署名鍵は、配送の job を流さないと観測できないので、
+// 各パッケージのテスト (TestDeliverService_DropLocal・TestDeliverProcessor_DropLocal)
+// に任せ、ここでは一覧にあることと値が同じことだけを見る。
+func TestCaches_FederationKeysLine(t *testing.T) {
+	h := newMetaRuntimeHarness(t)
+	srv := h.srv
+	caches := srv.crossProcessCaches
+
+	want := map[string]localCache{
+		"deliverEd25519": caches.deliver, "federationPublicKeys": caches.resolver,
+		"deliverSigningKeys": caches.deliverProcessor, "instanceActorSigner": caches.instanceSigner,
+	}
+	at := map[string]int{}
+	for i, p := range srv.caches.parts {
+		at[p.name] = i
+		if v, ok := want[p.name]; ok {
+			assert.Equal(t, cacheFromDB, p.origin, "cache %q", p.name)
+			assert.Same(t, v, p.cache, "cache %q is not the value the server uses", p.name)
+		}
+	}
+	for name := range want {
+		require.Contains(t, at, name, "cache %q is not listed", name)
+	}
+	// instance actor の利用者は CachedUserRepository から引くので、userCache の後に捨てる。
+	assert.Greater(t, at["instanceActorSigner"], at["userCache"], "instanceActorSigner is dropped before the user cache it reads from")
+	// 秘密鍵のキャッシュは 1 つで、AP の取得とプラグインの peer が同じ値を使う。
+	assert.Same(t, caches.instanceSigner, caches.fetcherSigner, "the AP fetcher does not use the listed instance actor signer")
+	assert.Same(t, caches.instanceSigner, srv.peerDeps.signer, "the plugin peers do not use the listed instance actor signer")
+
+	// 相手の公開鍵: 名前は ID から作る (落ちた回の行が残っていても前提を崩さない)。
+	remoteID := h.idGen.Generate(time.Now())
+	host := "keys-" + remoteID + ".example"
+	t.Cleanup(func() {
+		require.NoError(t, h.db.Where(`"userId" = ?`, remoteID).Delete(&model.UserPublickey{}).Error)
+		require.NoError(t, h.db.Where("id = ?", remoteID).Delete(&model.User{}).Error)
+	})
+	require.NoError(t, h.db.Create(&model.User{ID: remoteID, Username: "keys", UsernameLower: "keys", Host: &host}).Error)
+	require.NoError(t, h.db.Create(&model.UserPublickey{UserID: remoteID, KeyID: "https://" + host + "/users/keys#main-key", KeyPEM: "OLD"}).Error)
+	publicKey := func() string {
+		pem, err := caches.resolver.PublicKeyForActor(remoteID)
+		require.NoError(t, err)
+		return pem
+	}
+
+	// instance actor の秘密鍵: 読み込みで system account と鍵が作られる。
+	signer := func() string {
+		key, err := caches.instanceSigner.Signer()
+		require.NoError(t, err)
+		return key.PrivatePEM
+	}
+	before := signer()
+	var actor model.UserKeypair
+	require.NoError(t, h.db.Where(`"privateKey" = ?`, before).Take(&actor).Error)
+	newPEM := testRSAPrivateKeyPEM(t)
+	t.Cleanup(func() {
+		require.NoError(t, h.db.Model(&model.UserKeypair{}).Where(`"userId" = ?`, actor.UserID).Update("privateKey", before).Error)
+	})
+
+	require.Equal(t, "OLD", publicKey())
+	// 他のプロセスが書いたときと違い、通知は送らない。このプロセスのキャッシュは
+	// 古いまま残る。
+	require.NoError(t, h.db.Model(&model.UserPublickey{}).Where(`"userId" = ?`, remoteID).Update("keyPem", "NEW").Error)
+	require.NoError(t, h.db.Model(&model.UserKeypair{}).Where(`"userId" = ?`, actor.UserID).Update("privateKey", newPEM).Error)
+	require.Equal(t, "OLD", publicKey(), "前提: 捨てるまでは cache が返る")
+	require.Equal(t, before, signer(), "前提: 捨てるまでは cache が返る")
+
+	published := watchInternal(t, h)
+
+	srv.caches.dropAll()
+
+	assert.Equal(t, "NEW", publicKey(), "the public keys were not dropped")
+	assert.Equal(t, newPEM, signer(), "the instance actor key was not dropped")
+	assert.Empty(t, published("caches-federation-keys-line"), "dropping the caches told the other processes")
+}
+
+// testRSAPrivateKeyPEM returns a fresh RSA private key in PKCS#8 PEM.
+func testRSAPrivateKeyPEM(t *testing.T) string {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	require.NoError(t, err)
+	return string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))
+}
+
+// TestInstanceActorSigner_DropLocal pins that DropLocal drops both the cached
+// key and the backoff after a failed load (#3732): a failure just before a
+// restore would otherwise keep the fetches unsigned for the backoff.
+func TestInstanceActorSigner_DropLocal(t *testing.T) {
+	s := &instanceActorSigner{cachedKey: &activitypub.PrivateKey{KeyID: "k"}, lastFailure: time.Now()}
+	s.DropLocal()
+	assert.Nil(t, s.cachedKey, "DropLocal did not drop the key")
+	assert.True(t, s.lastFailure.IsZero(), "DropLocal did not drop the load backoff")
 }

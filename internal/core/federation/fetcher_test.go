@@ -276,3 +276,13 @@ func TestAPFetcher_FetchObjectSignedOnly_NoSigner(t *testing.T) {
 	_, err = f.FetchObjectSignedOnly("https://remote.example/users/alice")
 	assert.ErrorIs(t, err, ErrNoSigner, "a nil key is treated as no signer")
 }
+
+// SignerProvider returns what SetSigner set (#3732): the wiring test uses it
+// to check the AP fetcher and the plugin peers share one instance actor key.
+func TestAPFetcher_SignerProvider(t *testing.T) {
+	f := NewAPFetcher(nil)
+	assert.Nil(t, f.SignerProvider())
+	s := &stubSigner{}
+	f.SetSigner(s)
+	assert.Same(t, s, f.SignerProvider())
+}

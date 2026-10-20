@@ -48,6 +48,13 @@ func (f *APFetcher) SetSigner(s SignerProvider) {
 	f.signer = s
 }
 
+// SignerProvider returns the SignerProvider set by SetSigner, or nil. 配線の
+// テストが、プラグインの peer と同じ instance actor の署名を渡していることを確かめる
+// ために使う (#3732)。
+func (f *APFetcher) SignerProvider() SignerProvider {
+	return f.signer
+}
+
 // FetchObjectWithFinalURL is FetchObject but also returns the final response URL
 // (after redirects) so the resolver can bind a fetched object's id host to the
 // host that served it (object-spoofing 防止、#1820)。

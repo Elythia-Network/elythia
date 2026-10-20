@@ -99,3 +99,34 @@ func TestMissingExtraKeys_PerActorBoundSweepsExpired(t *testing.T) {
 	assert.Equal(t, 1, m.total)
 	assert.Len(t, m.byUser["alice"], 1)
 }
+
+// dropAll forgets every record and advances the generation (#3732), so a
+// lookup that started before it does not remember its result after.
+func TestMissingExtraKeys_DropAll(t *testing.T) {
+	var m missingExtraKeys
+	now := time.Date(2026, 10, 21, 0, 0, 0, 0, time.UTC)
+	m.remember("u1", "k", m.generation(), now)
+	m.remember("u2", "k", m.generation(), now)
+	gen := m.generation()
+
+	m.dropAll()
+	assert.False(t, m.known("u1", "k", now))
+	assert.False(t, m.known("u2", "k", now))
+	assert.Equal(t, 0, m.total)
+	m.remember("u1", "k", gen, now)
+	assert.False(t, m.known("u1", "k", now), "a lookup that started before dropAll was remembered")
+}
+
+// DropLocal keeps the backoff after failed key fetches (#3732): it is not a
+// cache of a value, and dropping it would only let the fetches hammer a host
+// that is down.
+func TestResolver_DropLocalKeepsFetchBackoff(t *testing.T) {
+	now := time.Date(2026, 10, 21, 0, 0, 0, 0, time.UTC)
+	r := &Resolver{
+		keys:             map[string]publicKeyEntry{"u1": {pem: "P", fetchedAt: now}},
+		keyFetchFailures: map[string]time.Time{"u1": now},
+	}
+	r.DropLocal()
+	assert.Empty(t, r.keys)
+	assert.Equal(t, map[string]time.Time{"u1": now}, r.keyFetchFailures, "DropLocal dropped the fetch backoff")
+}

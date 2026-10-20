@@ -967,6 +967,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	apClient := activitypub.NewClient(apHTTPClient, s.config.UserAgent)
 	// meta.allowExternalApRedirect は外向きの取得には使わない。upstream と同じく、
 	// 自分が返す外部への 3xx を止める設定 (apHandler.SetExternalRedirectPolicy)。
+	// instance actor の秘密鍵は世代に 1 つだけ持ち、AP の取得とプラグインの peer の両方へ
+	// 同じ値を渡す (#3732)。2 つ作ると同じ鍵のキャッシュが 2 つになり、片方を捨てても
+	// 意味が無い。受け手 (apFetcher) より先に作る (後から入れる辺を増やさない、4.1)。
+	instanceSigner := newInstanceActorSigner(sysAcctSvc, keypairRepo, apURLs)
 	apFetcher := corefederation.NewAPFetcher(apClient)
 	// AP attachment の先頭取得 (#461 / #3243) 用 outbound HTTP client。
 	// SSRF-safe transport で内部 IP / cloud metadata エンドポイントへの
@@ -1138,7 +1142,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 弾かれるため、apFetcher.FetchObject は signed GET を優先しに行く。
 	// 署名失敗時は従来通り unsigned にフォールバック (deliver_service と
 	// 同じ keyID 形式 = `<baseURL>/users/<id>#main-key`)。
-	apFetcher.SetSigner(newInstanceActorSigner(sysAcctSvc, keypairRepo, apURLs))
+	apFetcher.SetSigner(instanceSigner)
 
 	noteDeliveryHook.SetRelayBroadcaster(relaySvc)
 	noteCreateService.SetFederationHook(noteDeliveryHook)
@@ -2872,6 +2876,13 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	s.addCache("instances", cacheFromDB, instanceService)
 	s.addCache("relays", cacheFromDB, relaySvc)
 	s.addCache("fedRules", cacheFromDB, fedRuleService)
+	// 連合の系統の残り (#3732)。instance actor の秘密鍵は system account の利用者を
+	// CachedUserRepository から引くので、userCache の後に置く (ここは後ろなので満たす)。
+	// ほかの 3 つは DB を直接読む。
+	s.addCache("deliverEd25519", cacheFromDB, deliverService)
+	s.addCache("federationPublicKeys", cacheFromDB, federationResolver)
+	s.addCache("deliverSigningKeys", cacheFromDB, deliverProcessor)
+	s.addCache("instanceActorSigner", cacheFromDB, instanceSigner)
 
 	// #3664: 利用者のキャッシュ (CachedUserRepository) の cross-worker invalidation。
 	// queue のプロセスがリモートの利用者を更新 (凍結の反映、Update の受信) しても、
@@ -2882,6 +2893,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	s.crossProcessCaches = crossProcessCaches{
 		instances: instanceService, relays: relaySvc, decorations: avatarDecorationResolver,
 		emojiDecorations: emojiDecorationResolver, emojis: emojiRepo, fedRules: fedRuleService,
+		deliver: deliverService, resolver: federationResolver, deliverProcessor: deliverProcessor,
+		instanceSigner: instanceSigner, fetcherSigner: apFetcher.SignerProvider(),
 	}
 
 	userCacheLink := cachebus.ConnectUsers(s.userCache, internalPubSub, idGen.Generate(time.Now()))
@@ -3676,7 +3689,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		resolver: federationResolver,
 		keyCache: activitypub.NewPublicKeyCache(256),
 		blocker:  instanceService,
-		signer:   newInstanceActorSigner(sysAcctSvc, keypairRepo, apURLs),
+		signer:   instanceSigner,
 		// **こちらが持っているものだけ覚える。** 相手の nodeinfo は相手が
 		// 書いた値なので、そのまま持つと外から中身を膨らませられる。
 		remote:  newNodeInfoPeerLister(s.outboundClient(peerLookupTimeout), peered),
@@ -4510,12 +4523,13 @@ func (a *noteDeleteStreamAdapter) OnNoteDeleted(noteID string, deletedAt time.Ti
 }
 
 // instanceActorSigner is the SignerProvider used by APFetcher to sign
-// outgoing GETs with the instance.actor system account (#419)。
+// outgoing GETs with the instance.actor system account (#419), and the signer
+// of the plugin peers. One value per generation is shared by both (#3732).
 //
 // 初回 Signer() で systemaccount.Fetch + keypair lookup + RSA PEM parse を
 // やってから、結果 (parse 済みの *PrivateKey) を mutex 配下にキャッシュする。
-// 一度成功した key は process lifetime 中に変わらない前提で無期限保持し、
-// 再起動で再ロードされる。
+// 一度成功した key は期限なしで保持する。世代の作り直しか、キャッシュの一覧の
+// DropLocal (#3732) で捨てられ、次の Signer() で読み直す。
 //
 // 失敗側はキャッシュしない: transient な DB glitch で起動直後に load が
 // コケた時、その後ずっと unsigned-only に張り付くことを避けるため、失敗
@@ -4533,6 +4547,21 @@ type instanceActorSigner struct {
 // signerLoadBackoff は load() 失敗後の再試行抑制間隔。DB が一時的に死んだ
 // 時に Signer() の per-fetch で同じクエリを叩き続けないようにする。
 const signerLoadBackoff = 30 * time.Second
+
+// DropLocal drops the cached instance actor key and the backoff after a failed
+// load (#3732), so the next Signer reads the key again. It is what the cache
+// list calls (docs/architecture.md 4.4). 読み込みは mu を握ったまま行うので、
+// DropLocal はそれが終わるのを待ってから捨てる (世代の番号は要らない)。
+//
+// 失敗の backoff も捨てる。ほかの系統の backoff (相手への取得の失敗) と違い、
+// これは自分の DB の読み込みの失敗で、DB を戻した後にはもう当てはまらない。残すと、
+// 戻す直前の失敗から 30 秒の間、署名なしの取得が続く。
+func (s *instanceActorSigner) DropLocal() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cachedKey = nil
+	s.lastFailure = time.Time{}
+}
 
 func newInstanceActorSigner(
 	svc *coresystemaccount.Service,
@@ -4653,4 +4682,13 @@ type crossProcessCaches struct {
 	// fedRules は連合のルール (#3090)。internal:federationRulesUpdated で読み直させる。
 	// キャッシュの一覧のテストが、登録した値と同じかを見るため (#3729)。
 	fedRules *fedrule.Service
+	// deliver / resolver / deliverProcessor / instanceSigner は連合の系統の残りの
+	// キャッシュ (#3732)。キャッシュの一覧のテストが、登録した値と同じかを見るため。
+	// fetcherSigner は apFetcher が持つ署名の口で、instanceSigner と同じ値を渡して
+	// いることをテストが確かめる。
+	deliver          *corefederation.DeliverService
+	resolver         *corefederation.Resolver
+	deliverProcessor *processors.DeliverProcessor
+	instanceSigner   *instanceActorSigner
+	fetcherSigner    corefederation.SignerProvider
 }
