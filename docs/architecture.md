@@ -503,6 +503,12 @@ setter も構築も動かしていないので、どの行も数が変わらな�
 `emojiRepo.SetInvalidationHook(emojiInvalidationQueue.Enqueue)`の辺で、`emojiInvalidationQueue`を
 作ってから呼ぶまでの間に定義していた節点が、消した3つだけだったため。
 
+#3717で、`fedRuleHits`・`hashtagService`の登録を値から作る登録にした(4.3)。`setupRoutes()`の中で
+変えたのは、`fedRuleHits`のブロック(局所変数`hitsCtx`・`stopHits`と`s.addPartWithStart(...)`)と
+`hashtagService`の`s.addPart(...)`のclosureを、それぞれ1行の登録にしたことだけで、setterも構築の順も
+動かしていない。節点は消した2つの局所変数の分だけ減り、356になった。後から入れる96辺は行番号を除けば
+前と同じで、呼び出しが離れている辺は659のまま。
+
 数え方 (`setupRoutes()` の構文木。道具はコミットしていない):
 
 - 節点: `setupRoutes()` の中で `:=` か `var` で定義した名前 (関数リテラルの中と、
@@ -1354,14 +1360,17 @@ stream の部品・handler と、/api の外のルートの登録は、依存す
 段の表(`shutdownSteps`・`cleanupSteps`)にし、段ごとにpanicを回収して残りの段を続ける形にした(下の
 「世代の停止」と「停止のpanic」)。#3713で、起動がqueueのworkerを起動したことを世代に記録し(`queueStarted`)、
 停止がroleにかかわらずそのworkerとschedulerを止める形にした(下の`StartBackgroundForTest`の項と、
-「世代の停止」の手順2)。#3715で、登録の関数の名前を`add…`に揃えた(下の「登録の形」)。
+「世代の停止」の手順2)。#3715で、登録の関数の名前を`add…`に揃えた(下の「登録の形」)。#3717で、値を持つ
+残りの3つの部品(`fedRuleHits`・`hashtagService`・`paramShadowRecorder`)に停止の口を足して値から作る登録へ
+移し、closureで停止を渡す登録(`addPart`・`addPartWithStart`)を本番のコードから消した(下の「登録の形」と
+「closureのまま残した4つ」)。
 
 - 項目は名前・止める値 (`part`)・起動 (`func()`。起動するものが無い部品はnil)・停止
   (`func(context.Context)`) を持つ。`part` は停止が働きかける値 (バッファ・publisher・service・
   プラグインの store など) で、本番のコードは読まない。名前どおりの
   値を止めたかをテストが確かめるために持つ
 - 一覧は `Server.lifecycle` が値で持つ (テストが組む `Server` のリテラルでも、ゼロ値が空の一覧として
-  使える)。登録はどれも `Server` のメソッド (下の表の 8 つ) を通し、起動と停止も `s.lifecycle` から回す
+  使える)。登録はどれも `Server` のメソッド (下の表の6つ) を通し、起動と停止も `s.lifecycle` から回す
   (`paramShadowMiddleware` と `dbBackedStorage` は `w` を受け取らない)。コンテナの
   `wiring.lifecycle` は同じ一覧を指すが、**今は誰も読まない** (消してもテストは落ちない)。
   段階 (6) で、メンテナンスの作り直しの範囲を部品の単位に絞るときに使う
@@ -1386,13 +1395,15 @@ stream の部品・handler と、/api の外のルートの登録は、依存す
 | 登録 | 受ける形 | 起動 | 停止 | 部品 |
 |---|---|---|---|---|
 | `s.addStartCloser(ctx, name, part)` | `Start(ctx)` + `Close()` | `StartBackground`で`Start(ctx)`(ctxは登録で渡したもの) | `Close()`。停止の ctx は捨てる | `instanceTouchBuffer`・`sigCapBuffer`・`instanceCounterBuffer` |
-| `s.addStartStopper(ctx, name, part)` | `Start(ctx)` + `Stop(ctx)` | `StartBackground`で`Start(ctx)`(ctxは登録で渡したもの) | 停止の ctx を渡して `Stop(ctx)` | `deliveryHealth`・`inboxHealth`・`emojiInvalidationQueue` |
+| `s.addStartStopper(ctx, name, part)` | `Start(ctx)` + `Stop(ctx)` | `StartBackground`で`Start(ctx)`(ctxは登録で渡したもの) | 停止の ctx を渡して `Stop(ctx)` | `fedRuleHits`・`deliveryHealth`・`inboxHealth`・`emojiInvalidationQueue` |
 | `s.addPlainStartStopper(name, part)` | `Start()` + `Stop()` | `StartBackground`で`Start()` | `Stop()`。停止の ctx は捨てる | `serverStatsPub`・`queueStatsPub` |
-| `s.addCloser(name, part)` | `Close(ctx)` | しない | 停止の ctx を渡して `Close(ctx)` | `metadataRefresher` |
+| `s.addCloser(name, part)` | `Close(ctx)` | しない | 停止の ctx を渡して `Close(ctx)` | `metadataRefresher`・`hashtagService`・`paramShadowRecorder` |
 | `s.addErrCloser(name, part)` | `Close() error` | しない | `Close()`。エラーと停止の ctx は捨てる (エラーを捨てるのは前の hook と同じ) | `pluginStorage:<名前>` (`setupRoutes()` の外の `dbBackedStorage` で登録する) |
-| `s.addPartWithStart(name, part, start, stop)` | 問わない (起動と停止を closure で渡す) | `StartBackground`で渡した`start` | 渡した `stop` | `fedRuleHits` |
 | `s.addWorker(name, run)` | 値を持たない (関数を渡す) | `StartBackground`で`run`をgoroutineで回す | ctx を切り、`run` が返るのを待つ。起動していなければ待たずに返す | 下の worker の 4 つ |
-| `s.addPart(name, part, stop)` | 問わない (停止を closure で渡す) | しない (起動するものが無い) | 渡した `stop` | `hashtagService`・`paramShadowRecorder` |
+
+起動と停止をclosureで渡す登録(`s.addPart(name, part, stop)`・`s.addPartWithStart(name, part, start, stop)`)は、
+#3717で本番のコードから消した。テストが偽の部品を足す口として、同じ形のまま`lifecycle_parts_test.go`へ
+移した。本番でclosureの停止を渡せるのは、値を持たない`addWorker`だけになった。
 
 #3715で、登録の関数の名前を、部品の値が満たすinterfaceの名前に揃えて`add…`に改めた
 (`startPartWithClose`→`addStartCloser`、`startPartWithStop`→`addStartStopper`、
@@ -1401,49 +1412,63 @@ stream の部品・handler と、/api の外のルートの登録は、依存す
 部品の名前、登録の順、起動と停止の順は変えていない。各段の記録(この節と4.1・4.2)は、当時の名前のまま
 残している。
 
-**closureのまま残した7つ**は、停止が部品のメソッド1つでは書けないもの(#3705で
-`emojiInvalidationQueue`が値から作る登録へ移り、8つから7つになった)。
+**closureのまま残した4つ**は、値を持たないworker(#3705で`emojiInvalidationQueue`が値から作る登録へ
+移り8つから7つに、#3717で値を持つ3つが移り4つになった)。
 
 | 名前 | closure が要る理由 | `part` |
 |---|---|---|
-| `fedRuleHits` | `Start` に渡した ctx を切って止める。`HitStore` に停止のメソッドは無い。`addPartWithStart`で起動も渡す | `*fedrule.HitStore` |
-| `hashtagService` | `Shutdown(ctx)` がエラーを返し、時間切れを警告に出す | `*hashtag.Service` |
-| `paramShadowRecorder` | 停止は `Flush()` で、停止のための口ではない | `*paramshadow.Recorder` |
 | `pollExpiryWorker`・`reactionFlushWorker`・`retentionAggregateAtStartup`・`userCacheLink` | `addWorker(name, run)` が関数を goroutine で回し、ctx を切って返るのを待つ。止める値が無い | nil |
 
-この7つの`part`は、本番で読まない値のまま残した(nilにしなかった)。理由は2つで、型の表の
-テスト (下) が別の種類の値を渡す取り違えを落とせることと、`hashtagService` は値を引いて止まったこと
-を観測しているため (`TestNewServer_ShutdownStopsTheNamedParts`)。
+#3717で移した3つは、前のclosureの中身を部品のメソッドへ移した。止め方は変えていない。
 
-**値から作れる部品を `addPart` で登録していないかは、テストで検査する。** closure で書くと、`part` と
-停止が別の値を指しうる形に戻るため。一覧の項目は、値から作る登録を経たかの印 (`fromValue`) を持つ。
-`TestNewServer_ShutdownStopsThePartsInTheirOrder` が 7 つの組で、`addPart` で登録した部品のうち、
-`part` が上の 5 つの形のどれかを満たすものを落とす。理由付きの許可リスト (`addPartShapeAllowlist`。
-理由の欄には、なぜ closure のまま残すかを書く) に載っているものは落とさず、使われていない項目は落とす。
-許可リストは今は空(closureの7つは、どれも形を満たさない)なので、使われていない項目の検査は
-空振りする。代わりに、検査がclosureの3つ(`fedRuleHits`・`hashtagService`・`paramShadowRecorder`)を
-見たことと、値から作る10個に印が付いたことを名指しで確かめる。
-形の判定 (テストの `valueShape`) は、`TestValueShape_ClassifiesThePartTypes` が型の名前を並べて固定する。
-値から作る10個の部品の型は9つ(`deliveryHealth`と`inboxHealth`は同じ型)で、どれも形を満たす。
-closureの3つの型と値の無いworkerは満たさない。部品の型にメソッドを足して形が変わると、ここが落ちる。
+| 名前 | 足した口 | 中身(前のclosureと同じ) |
+|---|---|---|
+| `fedRuleHits` | `HitStore.Stop(ctx)` | `Start`の中で作ったctxを切る。goroutineは待たない。前は組み立てが自分でcancelするctxを`Start`に渡し、それを切っていた |
+| `hashtagService` | `Service.Close(ctx)` | `Shutdown(ctx)`を呼び、エラーなら前と同じ文面(`hashtag service shutdown timed out`)と属性(`err`)で警告を出す |
+| `paramShadowRecorder` | `Recorder.Close(ctx)` | `Flush()`を呼ぶ。ctxは使わない |
+
+- `HitStore`は、`Start`の中で作ったctxのcancelをmutexの下で持つ。`Stop`はmutexの下で停止の印を立てて
+  cancelを取り出し、mutexの外で呼ぶ。`Start`より先に呼んでも、2回呼んでも、nilの`HitStore`でも安全で、
+  `Start`と並行に呼んでも、どちらが先でもloopは残らない。`Start`を2回呼んだときは、`Stop`が両方のloopを止める
+- `Stop`の後の`Start`はloopを立てない。前は切れたctxでloopを立て、すぐに抜けていた(溜まった記録があると、
+  切れたctxで1回書こうとして失敗することはありえた)。一覧の`startAll`は停止を始めた後には起動しないので、
+  本番の経路ではどちらも起きない
+
+**値を持つ部品が、値から作る登録を経ていることは、テストで検査する。** closureで書くと、`part`と
+停止が別の値を指しうる形に戻るため。#3717で本番からclosureの登録を消したが、一覧へ直接足す
+`lifecycle.add`・`addWithStart`は値と停止を別々に受けるので、型だけでは防げない。一覧の項目は、
+値から作る登録を経たかの印(`fromValue`)を持つ。`TestNewServer_ShutdownStopsThePartsInTheirOrder`が
+7つの組で、`part`がnilでない部品のうち印の無いものを落とす(`partsNotFromValue`)。違反の文には、
+形の判定(テストの`valueShape`)で、その値を受ける登録の名前を添える。形を満たさない値も落とす
+(停止の口を足して、値から作る登録へ移す)。
+違反が0件なのが正常な検査なので、下限を置く。検査が値を持つ部品を見たことを、名前の一覧
+(`valuePartsInspected`。両方のroleの組の12個と、プラグインの組の2つのstoreで14個)で、どれかの組で
+見たことを確かめる。一覧に無い名前で値を持つ部品が出ても落とす(下限が古くならないように)。
+組をまたぐこの検査は、7つの組が全部走ったときだけ行う
+(`-run`で組を絞ったときは、関係の無い失敗を出さないように省く)。
+#3717の前は、`addPart`で登録した部品のうち形を満たすものだけを落とす検査で、理由付きの許可リスト
+(`addPartShapeAllowlist`。#3717の時点で空)を持っていた。形を満たさない値をclosureで登録しても落ちなかった。
+形の判定は、`TestValueShape_ClassifiesThePartTypes`が型の名前を並べて固定する。
+値から作る13個の部品の型は12(`deliveryHealth`と`inboxHealth`は同じ型)で、どれも形を満たす。
+値の無いworkerは満たさない。部品の型にメソッドを足して形が変わると、ここが落ちる。
 判定が知る形の一覧 (`valueShapes`) は、`TestValueShapes_CoverEveryRegistrationFromValue` が
 `lifecycle_parts.go` を構文木で読み、`addFromValue` を呼ぶ登録の関数と、その値の引数の interface の型を
 列挙して突き合わせる (1 つも拾えなければ落とす)。登録の形を足して判定に足し忘れると、ここが落ちる。
 ただし読むのは `lifecycle_parts.go` の `Server` のメソッドだけで、別のファイルに置いた登録と、
 型パラメータを持つ自由関数 (メソッドは型パラメータを持てない) で書いた登録は拾えない。
-組をまたぐ検査 (許可リストの使われていない項目と下限) は、7 つの組が全部走ったときだけ行う
-(`-run` で組を絞ったときは、関係の無い失敗を出さないように省く)。
 
-**実行時には拒まない** (`addPart` は形を見ない)。拒むと、部品の型にメソッドを足しただけで本番の構築が
-失敗し、案内どおりに値から作る登録へ直すと、closure の停止 (`hashtagService` の時間切れの警告など) が
-失われるため (#3701 のレビュー)。
+**実行時には拒まない**(`lifecycle.add`は印を見ない)。本番で`lifecycle.add`・`addWithStart`を呼ぶのは、
+値から作る登録(`addFromValue`)と`addWorker`だけで、値を持つ部品が直接通っていないことは上のテストが見る。
+#3701では、`addPart`が形を見て拒むと、部品の型にメソッドを足しただけで本番の構築が失敗し、案内どおりに
+値から作る登録へ直すと、closureの停止(`hashtagService`の時間切れの警告など)が失われるため、拒まなかった
+(#3701のレビュー)。#3717でその停止を部品のメソッドへ移したので、この懸念は無くなった。
 
 **同じ型どうしの取り違えを書く余地が無くなった範囲。** #3699 では値と停止を別々に渡すので、
 `s.addPart("deliveryHealth", deliveryHealth, func(ctx context.Context) { inboxHealth.Stop(ctx) })` の
 ような、値と停止で別の部品を指す誤りを書けた。同じ型どうし (`deliveryHealth` と `inboxHealth`) では、
 型の表のテストでも落とせなかった。#3701 の後は次のとおり。
 
-- **値から作る10個(#3705の後)は、値と停止が別の部品を指す誤りを書けない。** 停止は渡した値そのものから作る。
+- **値から作る13個(#3717の後。#3705の後は10個)は、値と停止が別の部品を指す誤りを書けない。** 停止は渡した値そのものから作る。
   起動も同じ値に対して呼ぶので、値と起動が別の部品を指す誤りも書けない
 - **同じ値を 2 回渡す誤りは、テストが落とす。** 例えば `s.addStartStopper(ctx, "inboxHealth", deliveryHealth)`
   と書くと、値が起動と停止を決めるので、`inboxHealth` は起動も停止もされない。同じ型なので型の表では
@@ -1455,10 +1480,10 @@ closureの3つの型と値の無いworkerは満たさない。部品の型にメ
   作れないため。ただし両方とも起動され、両方とも止まるので、起動されない・止まらない部品は出ない
   (変わるのは、一覧の名前と値の対応と、その 2 つの間の起動と停止の順だけ)。別の型の値を渡す誤り
   (`sigCapBuffer` の名前に `instanceTouchBuffer` を渡すなど) は、型の表のテストが落とす
-- **closureの7つ(#3705の後)は#3699と同じ。** 値と停止の対応は保証しない。`fedRuleHits`・
-  `hashtagService`・`paramShadowRecorder`は型が互いに違うので、別の部品の値を渡す誤りは
-  型の表のテストが落とす。停止の closure が別の部品を止める誤りは、観測している `hashtagService` の
-  ほかは落とせない
+- **closureで停止を渡すのは、値を持たないworkerの4つだけになった(#3717)。** 値が無いので、値と停止の
+  取り違えは起きない。名前と`run`の対応は、#3699と同じく型でも値でも保証しない。#3717の前は、値を持つ
+  `fedRuleHits`・`hashtagService`・`paramShadowRecorder`もclosureで、停止のclosureが別の部品を止める誤りは、
+  観測している`hashtagService`のほかは落とせなかった
 
 起動と停止の順と、登録の条件は次のとおり(上から順に起動し、上から順に止める。どちらも登録した順と同じ)。
 「起動」が○の13個は`StartBackground`が起動し、構築だけでは動かない(#3703。`emojiInvalidationQueue`は#3705)。
@@ -1466,7 +1491,7 @@ closureの3つの型と値の無いworkerは満たさない。部品の型にメ
 | 順 | 名前 | 登録 | 起動 | 止め方 | 登録の条件 |
 |---|---|---|---|---|---|
 | 1 | `pollExpiryWorker` | `addWorker` | ○ | ctx を切り、`Run` が返るのを待つ | queue role |
-| 2 | `fedRuleHits` | `addPartWithStart` | ○ | `Start` に渡した ctx を切る | 常に |
+| 2 | `fedRuleHits` | `addStartStopper` | ○ | `Stop(ctx)`。`Start`の中で作ったctxを切る(待たない) | 常に |
 | 3 | `metadataRefresher` | `addCloser` | | `Close(ctx)`。新しい取り直しを止め、走っているものを短く待つ | 常に |
 | 4 | `instanceTouchBuffer` | `addStartCloser` | ○ | `Close()`。残りを flush する | 常に |
 | 5 | `sigCapBuffer` | `addStartCloser` | ○ | `Close()`。残りを flush する | 常に |
@@ -1474,9 +1499,9 @@ closureの3つの型と値の無いworkerは満たさない。部品の型にメ
 | 7 | `instanceCounterBuffer` | `addStartCloser` | ○ | `Close()`。残りを flush する | 常に |
 | 8 | `deliveryHealth` | `addStartStopper` | ○ | `Stop(ctx)` | queue role |
 | 9 | `inboxHealth` | `addStartStopper` | ○ | `Stop(ctx)` | queue role |
-| 10 | `hashtagService` | `addPart` | | `Shutdown(ctx)`。in-flight の集計を待つ (#727) | 常に |
+| 10 | `hashtagService` | `addCloser` | | `Close(ctx)`。`Shutdown(ctx)`で in-flight の集計を待ち (#727)、時間切れなら警告を出す | 常に |
 | 11 | `retentionAggregateAtStartup` | `addWorker` | ○ | 1 と同じ | queue role |
-| 12 | `paramShadowRecorder` | `addPart` | | `Flush()`。最後の要約を書く | `disableParamShadow` でなく、本家の paramDef を読めたとき |
+| 12 | `paramShadowRecorder` | `addCloser` | | `Close(ctx)`。`Flush()`で最後の要約を書く | `disableParamShadow` でなく、本家の paramDef を読めたとき |
 | 13 | `emojiInvalidationQueue` | `addStartStopper` | ○ | `Stop(ctx)`。ctxを切り、`Run`が溜まった分を送って返るのを待つ | 常に |
 | 14 | `userCacheLink` | `addWorker` | ○ | 1 と同じ | 常に |
 | 15 | `serverStatsPub` | `addPlainStartStopper` | ○ | `Stop()` | server role |
@@ -1503,8 +1528,9 @@ closureの3つの型と値の無いworkerは満たさない。部品の型にメ
   止めるので(下の手順2と4)、起動と停止はqueueを挟んで対になる
 - **chartとの前後。** 一覧の部品はchartの保存のloopに頼らない(chartのhookはメモリの集計へ書くだけで、
   loopの有無に関係なく書ける)。前と同じくchartを最後にした
-- **起動のctx。** 前と同じく、登録で渡した`context.Background()`(`fedRuleHits`は自分でcancelするctx)を
-  使う。`StartBackground`はctxを受け取らず、部品は停止のメソッド(`Close`・`Stop`・ctxのcancel)で
+- **起動のctx。** 前と同じく、登録で渡した`context.Background()`を使う(`fedRuleHits`は#3717の前は
+  組み立てが自分でcancelするctxを渡していた。今は`context.Background()`を渡し、切れるctxは`Start`の中で
+  作る)。`StartBackground`はctxを受け取らず、部品は停止のメソッド(`Close`・`Stop`・ctxのcancel)で
   止める。停止で切れるctxを渡すと、バッファの`runLoop`が`Close`の最後のflushより先にctxで抜けるなど、
   止まり方が変わる
 - **起動の失敗。** 部品の起動はどれもgoroutineを立てるだけで、エラーを返さない。panicしたときは
@@ -1551,7 +1577,7 @@ closureの3つの型と値の無いworkerは満たさない。部品の型にメ
 | `deliveryHealth`・`inboxHealth` | `Stop(ctx)`は`cancel`がnilなら何もせずに返る |
 | `serverStatsPub`・`queueStatsPub` | `Stop()`は`started`がfalseなら何もせずに返る |
 | `emojiInvalidationQueue` | `Stop(ctx)`は起動していなければ`Run`を待たずに、溜まった分を同期で送って返る(#3705。バッファの`Close()`と同じ扱い)。送るのは締め切り(`drainTimeout`、2秒)と停止のctxの期限の早いほうまでで、1件ごとに送る前に見る。送信中の1件はpublishの側のtimeout(2秒)まで待つので、最悪で約4秒かかる(`router.go`のコメントの「最悪約4秒」と同じ) |
-| `fedRuleHits` | 停止はctxをcancelするだけ。起動していなければ待つgoroutineも無い |
+| `fedRuleHits` | `Stop(ctx)`は`Start`の中で作ったctxをcancelするだけ。起動していなければcancelするものも待つgoroutineも無く、停止の印を立てるだけ(#3717。後の`Start`はloopを立てない) |
 | worker の 4 つ(`addWorker`) | 停止はctxをcancelし、起動していなければ`done`を待たずに返る。`done`は起動しないと閉じないので、待つと停止のctxの期限まで固まる(後始末は`context.Background()`で止めるので、永久に返らない) |
 | 起動を持たない部品(`metadataRefresher`・`hashtagService`・`paramShadowRecorder`・`pluginStorage:<名前>`) | 起動するものが無い。停止は#3703の前と同じ |
 
@@ -1780,12 +1806,13 @@ Supervisorの側は変えていない。停止のエラーの使われ方は次�
   名前が別の種類の値を持つ取り違え (`serverStatsPub` に `hashtagService` を渡すなど) は落ちるが、
   **同じ型の部品どうしの名前の取り違えは落とせない**。`deliveryHealth` と `inboxHealth` はどちらも
   `*deliveryhealth.Service` で、`addWorker` の 4 つはどれも nil。値と停止の取り違えは、
-  値から作る10個では書けない(上の「同じ型どうしの取り違えを書く余地が無くなった範囲」)
+  値から作る13個では書けない(上の「同じ型どうしの取り違えを書く余地が無くなった範囲」)
 - **値の同一性と、登録の経路。** 同じテストが、nil でない `part` どうしが互いに異なる値であることと、
-  形を満たす値が `addPart` を経ていないこと (上の許可リストの検査) を見る。値は同一性で比べるので
-  ポインタに限り、**ポインタでない値を持つ部品は、それだけで落ちる** (値の型の部品を足すときは、
-  比べ方から見直す)。2 つの検査は違反の一覧を返す関数 (`sharedPartValues`・`addPartShapeViolations`) で、
-  `TestPartChecks_ReportViolations` が手で組んだ一覧で違反を報告すること (正の対照) を固定する
+  nilでない`part`を持つ部品がすべて値から作る登録を経ていること(上の`partsNotFromValue`の検査。#3717)を
+  見る。値は同一性で比べるのでポインタに限り、**ポインタでない値を持つ部品は、それだけで落ちる** (値の型の部品を足すときは、
+  比べ方から見直す)。2 つの検査は違反の一覧を返す関数 (`sharedPartValues`・`partsNotFromValue`) で、
+  `TestPartChecks_ReportViolations` が手で組んだ一覧で違反を報告すること (正の対照) と、守った一覧では
+  報告しないことを固定する
 - **値から作る登録。** `TestServer_RegistersAPartFromItsValue` が 5 つの登録それぞれについて、次を見る。
   登録では起動せず、`startAll`が1回だけ、一覧の順に、登録で渡したctxで起動すること(#3703)。`part` が渡した値そのもので
   あること。止めるとその値のメソッドが 1 回呼ばれ、停止の ctx を `Stop(ctx)`・`Close(ctx)` には渡し、
@@ -1805,11 +1832,19 @@ Supervisorの側は変えていない。停止のエラーの使われ方は次�
   `TestParamShadowRunsAfterTheRouteMiddleware` が別に見る)。`emojiInvalidationQueue`の`Start`/`Stop`
   そのものの動き(起動の前に積んだ分を起動の後に送る、起動していない`Stop`が`Run`を待たずに溜まった
   分を締め切りか停止のctxの期限まで送る、2回目の`Start`/`Stop`と止めた後の`Start`は何もしない)は、
-  `internal/repository`の`TestEmojiInvalidationQueue_*`が見る(#3705)
+  `internal/repository`の`TestEmojiInvalidationQueue_*`が見る(#3705)。#3717で足した停止の口そのものの
+  動きは、各パッケージの単体テストが見る。`internal/core/fedrule`の`TestHitStore_Stop*`・
+  `TestHitStore_StartAfterStopStartsNothing`・`TestHitStore_ConcurrentStartAndStop`が、`Stop`がloopを
+  終わらせ、その後の記録を書かないこと、`Start`を2回呼んだときも両方を止めること、`Stop`の後の`Start`が
+  loopを立てないこと、`Start`と並行に呼んでもloopが残らないこと(`-race`)、nilとRedisの無い`HitStore`で
+  何もしないことを見る。`internal/core/hashtag`の`TestService_Close_*`が、書き込み中のworkerがctxより
+  長いと警告を出し、ctx内に終われば待って何も出さないことを、`internal/server/paramshadow`の
+  `TestRecorderCloseFlushes`が、`Close`が要約を書くことを見る
 - 後始末が一覧を順に回し、起動していないworkerを待って固まらないことは
   `TestNewServer_FailedConstructionStopsTheRegisteredParts`、重複で構築が
-  失敗することは `TestNewServer_DuplicatePartFailsTheConstruction` が見る。`addPart` が部品に値から
-  作った印を付けず、形を満たす値も拒まないことは `TestServer_AddPartDoesNotMarkThePartAsFromValue` が見る
+  失敗することは `TestNewServer_DuplicatePartFailsTheConstruction` が見る。値と停止を別々に受ける
+  `lifecycle.add`(テストの`addPart`が呼ぶ)が部品に値から作った印を付けず、形を満たす値も拒まないことは
+  `TestServer_AddPartDoesNotMarkThePartAsFromValue` が見る
 - **停止のpanic(#3707)。** `TestLifecycle_StopAllRecoversAPanickingStop`が、2つの部品の停止をpanicさせ、
   後の部品も同じctxで順に止まること、エラーがpanicした部品ごとに1つで、どれも`errLifecycleStop`を包み
   名前とpanicの値を含むこと、部品の名前・panicの値・スタックが記録されることを見る。
@@ -1987,6 +2022,23 @@ Supervisorの側は変えていない。停止のエラーの使われ方は次�
   変えずに通った。workerのgoroutineをスタックの関数名で数える`TestNewServer_ConstructionStartsNoPart`の
   印(`server.(*Server).addWorker.func`)は、前の名前に戻すと落ちる
 - 4.1の道具の数は変わらない。後から入れる辺は96、呼び出しが離れている辺は659で、前後で同じだった
+
+#3717の前後で同じであることは、次のように確かめた(道具はコミットしていない)。
+
+- 起動と停止の順: #3713と同じ使い捨ての記録に、`hashtagService`の`Shutdown`と`paramShadowRecorder`の
+  `Flush`の記録を足して前後の木に当て、#3699と同じ8つの組で、`newServer`・`StartBackground`・
+  `StopBackground`のそれぞれの間の起動と停止の列を記録した。8つの組のどれも、差は`fedRuleHits`の
+  `Start`が受けたctxの型(前は組み立てが作った`*context.cancelCtx`、後は登録で渡す
+  `context.backgroundCtx`。切れるctxは`Start`の中で作る)だけだった。停止の列(一覧の停止の名前と、
+  各部品の停止のメソッドと受けたctxの型)は前後で一致した。どちらの木も2回回して揺れないことを確かめた
+- `elythia dump-routes`: 出力(ルート)、起動ログ、Redisの命令の列、PostgreSQLの文の集合は、前後で一致した。
+  前の木を2回流して揺れないことも確かめた
+- `serve`: #3709と同じ方法で、PostgreSQLの文の集合と、Redisの命令とキーの組の集合は、前の木の2回と後の木の
+  2回の4通りの組み合わせのどれでも一致した。起動と停止のログの差は、#3707と同じくgormのログに出る
+  呼び出し元のファイルのパス(ビルドした木の置き場所)だけだった。前に1回流してから測った(最初の1回は
+  `meta`などの初期化の文を出すため)
+- 4.1の道具: 節点は358から356になった。後から入れる96辺は行番号を除けば前と同じで、呼び出しが離れている
+  辺は659のまま(4.1)
 
 コメントの「shutdown hook」は、この一覧の部品の停止を指す。
 
