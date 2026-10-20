@@ -1352,7 +1352,9 @@ stream の部品・handler と、/api の外のルートの登録は、依存す
 1度きりの起動を通り、停止を始めた後は何も起動しない形にした(下の「2回呼んだとき」と「停止の後の起動」)。
 #3711で、世代の停止(`shutdown`)と構築の後始末(`cleanupConstruction`)で直書きしていた手順を、名前付きの
 段の表(`shutdownSteps`・`cleanupSteps`)にし、段ごとにpanicを回収して残りの段を続ける形にした(下の
-「世代の停止」と「停止のpanic」)。
+「世代の停止」と「停止のpanic」)。#3713で、起動がqueueのworkerを起動したことを世代に記録し(`queueStarted`)、
+停止がroleにかかわらずそのworkerとschedulerを止める形にした(下の`StartBackgroundForTest`の項と、
+「世代の停止」の手順2)。
 
 - 項目は名前・止める値 (`part`)・起動 (`func()`。起動するものが無い部品はnil)・停止
   (`func(context.Context)`) を持つ。`part` は停止が働きかける値 (バッファ・publisher・service・
@@ -1517,7 +1519,10 @@ closureの3つの型と値の無いworkerは満たさない。部品の型にメ
 - `StartBackgroundForTest`(e2e-federationが使う)は、`StartBackground`と同じ起動の関数を、違いを
   引数(`backgroundStart`)で渡して通る。違いは2つで、roleを見ずにqueueのworker・autoscale・schedulerを
   起動することと、chartを起動しないこと(どちらも前と同じ)。一覧をqueueより先に起動するのも同じ。
-  先に`StartBackgroundForTest`を呼んだ世代では、後から`StartBackground`を呼んでもchartは起動しない
+  先に`StartBackgroundForTest`を呼んだ世代では、後から`StartBackground`を呼んでもchartは起動しない。
+  起動したworker・autoscale・schedulerは、roleにかかわらず`StopBackground`が止める(#3713。下の
+  「世代の停止」の手順2)。#3713の前は、server role(`MK_ONLY_SERVER`)の世代で起動したworkerと
+  schedulerを止めなかった
 - **停止の後の起動(#3709)。** `Server`は起動と停止の順を守るmutex(`runMu`)と、停止を始めた印
   (`stopped`)を持つ。停止(`shutdown`)は何かを止めるより先に、mutexを取って印を立てる。構築の後始末
   (`cleanupConstruction`)も同じ印を立てる。起動はmutexを握ったまま走り、印が立っていれば何も
@@ -1600,6 +1605,16 @@ closureの3つの型と値の無いworkerは満たさない。部品の型にメ
   `errors.Join`でもう1段包んでいたが、今は`stopAll`のエラーそのものになる。`errors.Is`の結果と`Error()`の
   文字列は変わらない
 
+**意図して変えた動き(#3713)。** 本番の経路では起きない(本番は`StartBackgroundForTest`を呼ばず、
+`StartBackground`はroleがqueueを回すときだけworkerを起動するので、`queueStarted`が立つ世代では、
+roleの判定もすでに真になっている)。
+
+- server role(`MK_ONLY_SERVER`)の世代で`StartBackgroundForTest`を呼ぶと、前は起動したworkerと
+  schedulerを`StopBackground`が止めず、autoscaleが無ければ`stopQueue`は待たずに返った。今は
+  workerとschedulerの`Shutdown`を1回ずつ呼び、止まるのを待つ。e2e-federationは既定のrole(両方)で
+  呼ぶので、変わらない
+- 起動していない世代と、roleがqueueを回す世代の停止は、前と同じ
+
 **意図して変えた動き(#3709)。** どちらも本番の経路では起きない(Supervisorは`genMu`の下で、1つの
 世代に`StartBackground`を1回だけ呼び、止めた世代を再び起動しない)。
 
@@ -1632,7 +1647,12 @@ closureの3つの型と値の無いworkerは満たさない。部品の型にメ
 1. `streaming`: streamingの接続を1012で閉じる(別の上限付き。`streamCloseContext`)
 2. `queue`: queueのworkerとschedulerを止める(`stopQueue`)。**一覧より先に止める**(#3662)。workerの
    ジョブはバッファとchartへ書くので、先にバッファを閉じると、止まるまでに終わったジョブの書き込みが
-   flushされずに消える
+   flushされずに消える。autoscaleは起動していれば止める。workerとschedulerの`Shutdown`を呼ぶのは、
+   roleがqueueを回すとき(起動していない世代でも呼ぶ。#3713の前と同じ)と、起動がworkerを起動したと
+   記録したとき(`queueStarted`。#3713)。`queueStarted`はworkerの`Start`が成功した直後に立てるので、
+   続くautoscaleの起動が失敗した世代でもworkerを止める。どちらでもなく、autoscaleも無ければ、
+   待たずに止まったものとして返る(期限の切れたctxで、止めるものの無いqueueを「止まらなかった」と
+   取り違えないため)
 3. `background`: 投げっぱなしのgoroutineの箱(`background`)を回収する(#3661)。queueの後に置くのは、
    受信の処理が止まるまで箱へ足され続けるため。一覧より前に置くのは、箱のgoroutineが書くバッファと
    chartの分をflushと保存に含めるため。queueが上限内に止まらなかったときは、ここでは何もせず、6で回収する
@@ -1807,11 +1827,22 @@ Supervisorの側は変えていない。停止のエラーの使われ方は次�
   `errGenerationStopped`を返すことを、`TestServer_StartAfterFailedConstructionStartsNothing`が構築の
   後始末の後も同じことを見る。`TestServer_StartBackgroundAndForTestShareTheOnce`が、2つの起動を
   どちらの順で呼んでもqueueの`Start`が1回で、後の呼び出しが先の結果(失敗なら同じエラーの値)を返す
-  ことを、`TestServer_StartBackgroundForTestIgnoresTheRole`が引数で分けた2つの違い(roleとchart)を見る。
+  ことを、`TestServer_StartBackgroundForTestIgnoresTheRole`が引数で分けた2つの違い(roleとchart)と、
+  server roleでどちらの起動の後も`StopBackground`が起動したものだけを止めること(#3713)を見る。
   `TestServer_ConcurrentStartAndStopLeaveNothingRunning`が、起動と停止を並行に300回呼び、起動した
   部品・worker・schedulerがその後に止まり、autoscaleとchartが残らず、固まらないことを見る(`-race`で
   `autoscale`のフィールドの競合も見る)。組ごとに先に譲る側を替え、起動が先の組と停止が先の組の両方が
-  起きたことも確かめる(片方だけでは、もう片方の順の検査が空振りする)
+  起きたことも確かめる(片方だけでは、もう片方の順の検査が空振りする)。両方のroleの組に加えて、server roleで
+  `StartBackgroundForTest`を呼ぶ組も回し、停止が`queueStarted`を読む経路を`-race`で見る(#3713。両方の
+  roleではroleの判定で短絡し、`queueStarted`を読まない)
+- **起動したqueueの停止(#3713)。** `TestServer_StopBackgroundStopsTheQueueByRoleOrStart`が、
+  `StopBackground`がworkerとschedulerの`Shutdown`を呼ぶ回数を、server roleで`StartBackgroundForTest`を
+  呼んだ世代(1回ずつ)、server roleでworkerの起動の後にautoscaleの起動が失敗した世代(1回ずつ)、
+  server roleでworkerの起動が失敗した世代(呼ばない)、起動していないserver roleの世代(呼ばない)、
+  起動していない両方とqueueのroleの世代(1回ずつ。#3713の前と同じ)、`StartBackground`で起動した両方のroleの世代(1回ずつ)で固定し、autoscaleが
+  残らないことを見る。`TestServer_StopQueueOfANeverStartedServerRoleDoesNotWait`が、起動していない
+  server roleの世代の`stopQueue`が、期限の切れたctxでも待たずに止まったものとして返り、workerと
+  schedulerの`Shutdown`を呼ばないことを見る
 - **停止の段(#3711)。** `lifecycle_steps_test.go`が見る。`TestServer_ShutdownStepsAreInTheirOrder`が、
   `shutdownSteps`と`cleanupSteps`の段の名前と順を固定する。`TestRunShutdownSteps_RecoversAPanickingStep`が、
   2つの段をpanicさせ、1つの段にエラーを返させて、後の段も同じctxで順に走ること、エラーが段の順に3つで、
@@ -1922,6 +1953,21 @@ Supervisorの側は変えていない。停止のエラーの使われ方は次�
   queueのdriverの`Close`)を足して前後の木に当て、#3699と同じ8つの組で、`newServer`・`StartBackground`・
   `StopBackground`のそれぞれの間の起動と停止の列を記録した。8つの組のどれも、前後で一致した。どちらの
   木も2回回して揺れないことを確かめた。echoの`Shutdown`は外のパッケージなので記録していない
+- `elythia dump-routes`: 出力(ルート)、起動ログ、Redisの命令の列、PostgreSQLの文の集合は、前後で一致した
+- `serve`: #3709と同じ方法で、PostgreSQLの文の集合と、Redisの命令とキーの組の集合は、前の木の2回と後の木の
+  2回の4通りの組み合わせのどれでも一致した。起動と停止のログの差は、#3707と同じくgormのログに出る
+  呼び出し元のファイルのパス(ビルドした木の置き場所)だけだった
+- 4.1の道具は、`router.go`を変えていないので数が変わらない
+
+#3713の前後で、本番の経路の動きが同じであることは、次のように確かめた(道具はコミットしていない)。
+意図して変えた動き(上の「意図して変えた動き(#3713)」)は、上のテストが見る。
+
+- 起動と停止の順: #3711と同じ使い捨ての記録に、queueのworkerとschedulerの`Start`/`Shutdown`
+  (`internal/queue`の`Server`と`Scheduler`)の記録を足して前後の木に当て、#3699と同じ8つの組で、
+  `newServer`・`StartBackground`・`StopBackground`のそれぞれの間の起動と停止の列を記録した。8つの組の
+  どれも、前後で一致した。どちらの木も2回回して揺れないことを確かめた。同じ8つの組を
+  `StartBackgroundForTest`で起動したときの差は、server roleの2つの組(queueInspectorの有無)で、停止に
+  schedulerとworkerの`Shutdown`が足されたことだけだった
 - `elythia dump-routes`: 出力(ルート)、起動ログ、Redisの命令の列、PostgreSQLの文の集合は、前後で一致した
 - `serve`: #3709と同じ方法で、PostgreSQLの文の集合と、Redisの命令とキーの組の集合は、前の木の2回と後の木の
   2回の4通りの組み合わせのどれでも一致した。起動と停止のログの差は、#3707と同じくgormのログに出る
