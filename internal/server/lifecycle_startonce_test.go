@@ -221,10 +221,30 @@ func TestServer_StartBackgroundAndForTestShareTheOnce(t *testing.T) {
 	}
 }
 
+// autoscaleStopped reports whether the goroutines of the auto-scale
+// controller the start left in the Server have exited (true when there is
+// none), waiting for them at most a few seconds.
+func (f *startOnceFixture) autoscaleStopped() bool {
+	r := f.srv.autoscale
+	if r == nil {
+		return true
+	}
+	exited := make(chan struct{})
+	go func() { r.wg.Wait(); close(exited) }()
+	select {
+	case <-exited:
+		return true
+	case <-time.After(3 * time.Second):
+		r.Stop(context.Background())
+		return false
+	}
+}
+
 // TestServer_StartBackgroundForTestIgnoresTheRole pins what the parameter of
 // the shared start selects (#3709): StartBackgroundForTest starts the queue
 // worker whatever the role and never the chart save loop; StartBackground
-// starts the queue only for a role that runs it, and the chart always.
+// starts the queue only for a role that runs it, and the chart always. What
+// either started, StopBackground stops (#3713).
 func TestServer_StartBackgroundForTestIgnoresTheRole(t *testing.T) {
 	t.Run("StartBackgroundForTest", func(t *testing.T) {
 		f := newStartOnceFixture(config.RoleServer)
@@ -232,13 +252,12 @@ func TestServer_StartBackgroundForTestIgnoresTheRole(t *testing.T) {
 		assert.Equal(t, []string{"part start", "queue start", "scheduler start"}, f.log.all())
 		assert.True(t, f.autoscaleStarted(), "StartBackgroundForTest did not start the auto-scale controller")
 		assert.False(t, f.chartRunning(t), "StartBackgroundForTest started the chart save loop")
-		// stopQueueはworkerとschedulerの停止をroleで守るので、server roleで
-		// StartBackgroundForTestが起動したものはStopBackgroundでは止まらない
-		// (#3709より前から同じ)。ここでは手で止める。
-		f.srv.autoscale.Stop(context.Background())
-		f.srv.queueServer.Shutdown()
-		f.srv.queueScheduler.Shutdown()
+		// #3713より前は、server roleでStartBackgroundForTestが起動したworkerとschedulerを
+		// StopBackgroundが止めず、ここで手で止めていた。
 		require.NoError(t, f.srv.StopBackground(context.Background()))
+		assert.Equal(t, []string{"part start", "queue start", "scheduler start", "scheduler shutdown", "queue shutdown", "part stop"},
+			f.log.all(), "StopBackground did not stop what StartBackgroundForTest started")
+		assert.True(t, f.autoscaleStopped(), "StopBackground left the auto-scale controller running")
 	})
 	t.Run("StartBackground", func(t *testing.T) {
 		f := newStartOnceFixture(config.RoleServer)
@@ -247,7 +266,107 @@ func TestServer_StartBackgroundForTestIgnoresTheRole(t *testing.T) {
 		assert.False(t, f.autoscaleStarted(), "StartBackground started the auto-scale controller on a server role")
 		assert.True(t, f.chartRunning(t), "StartBackground did not start the chart save loop")
 		require.NoError(t, f.srv.StopBackground(context.Background()))
+		// queueを起動していないserver roleの世代では、今までどおりworkerとschedulerの
+		// Shutdownを呼ばない。
+		assert.Equal(t, []string{"part start", "part stop"}, f.log.all(),
+			"StopBackground shut down the queue that StartBackground did not start on a server role")
 	})
+}
+
+// TestServer_StopBackgroundStopsTheQueueByRoleOrStart pins when
+// StopBackground shuts the queue worker and the scheduler down (#3713): when
+// the role runs the queue, started or not (as before #3713), and when the
+// start started the worker, whatever the role, even when the start failed
+// after it.
+func TestServer_StopBackgroundStopsTheQueueByRoleOrStart(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		role config.ProcessRole
+		// start starts the generation (nil: never started) and checks its result.
+		start func(t *testing.T, f *startOnceFixture)
+		// shutdowns is how many times the stop shuts the worker and the scheduler down.
+		shutdowns int
+	}{
+		{
+			name: "server role started for the test",
+			role: config.RoleServer,
+			start: func(t *testing.T, f *startOnceFixture) {
+				require.NoError(t, f.srv.StartBackgroundForTest())
+			},
+			shutdowns: 1,
+		},
+		{
+			name: "server role whose auto-scale failed to start",
+			role: config.RoleServer,
+			start: func(t *testing.T, f *startOnceFixture) {
+				// workerの起動の後、autoscaleの起動で失敗させる(下限×queueの数が全体の上限を超える)。
+				minWorkers, maxGlobal := 2, 1
+				f.srv.config.MinWorkers = &minWorkers
+				f.srv.config.MaxWorkersGlobal = &maxGlobal
+				err := f.srv.StartBackgroundForTest()
+				require.ErrorContains(t, err, "start autoscale")
+				require.Equal(t, []string{"part start", "queue start"}, f.log.all(),
+					"premise: the worker started and the start failed after it")
+			},
+			shutdowns: 1,
+		},
+		{
+			name: "server role whose worker failed to start",
+			role: config.RoleServer,
+			start: func(t *testing.T, f *startOnceFixture) {
+				failure := errors.New("queue start failed")
+				f.drv.srv.startErr = failure
+				require.ErrorIs(t, f.srv.StartBackgroundForTest(), failure)
+			},
+			// 起動に失敗したworkerは、起動していないものとして扱う(roleの判定だけが残る)。
+			shutdowns: 0,
+		},
+		{name: "server role never started", role: config.RoleServer, shutdowns: 0},
+		{name: "both roles never started", role: config.RoleBoth, shutdowns: 1},
+		{name: "queue role never started", role: config.RoleQueue, shutdowns: 1},
+		{
+			name: "both roles started",
+			role: config.RoleBoth,
+			start: func(t *testing.T, f *startOnceFixture) {
+				require.NoError(t, f.srv.StartBackground())
+			},
+			shutdowns: 1,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newStartOnceFixture(tc.role)
+			if tc.start != nil {
+				tc.start(t, f)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			require.NoError(t, f.srv.StopBackground(ctx))
+			assert.Equal(t, tc.shutdowns, f.log.count("queue shutdown"), "shutdowns of the queue worker")
+			assert.Equal(t, tc.shutdowns, f.log.count("scheduler shutdown"), "shutdowns of the scheduler")
+			// 失敗したStartも"queue start"を記録するので、止めるはずの組だけ順を見る。
+			if at := slices.Index(f.log.all(), "queue start"); at >= 0 && tc.shutdowns > 0 {
+				assert.Contains(t, f.log.all()[at+1:], "queue shutdown", "the queue worker was not shut down after it started")
+			}
+			assert.True(t, f.autoscaleStopped(), "StopBackground left the auto-scale controller running")
+		})
+	}
+}
+
+// TestServer_StopQueueOfANeverStartedServerRoleDoesNotWait checks that the
+// stop of a server-role generation that never started the queue still
+// returns without waiting, even with an expired ctx, and without shutting
+// the worker or the scheduler down (#3713 keeps it as before).
+func TestServer_StopQueueOfANeverStartedServerRoleDoesNotWait(t *testing.T) {
+	f := newStartOnceFixture(config.RoleServer)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	// 待ちのselectは準備のできたcaseを無作為に選ぶので、何度か試す。
+	for range 50 {
+		done, stopped := f.srv.stopQueue(ctx)
+		require.True(t, stopped, "a generation with nothing to stop was taken as not stopped in time")
+		<-done
+	}
+	assert.Empty(t, f.log.all(), "the stop of a never-started server role shut the queue down")
 }
 
 // TestServer_ConcurrentStartAndStopLeaveNothingRunning runs StartBackground
@@ -255,89 +374,105 @@ func TestServer_StartBackgroundForTestIgnoresTheRole(t *testing.T) {
 // times, and checks that whatever the start started was stopped after it:
 // the part, the queue worker and scheduler, the auto-scale controller and
 // the chart save loop (#3709). Run it with -race: the start and the stop
-// share the fields of the Server (the auto-scale runner).
+// share the fields of the Server (the auto-scale runner, and queueStarted,
+// which the stop of a server role reads (#3713)).
 //
 // 起動と停止の順を守る印が無いと、停止が止め終わった後(または止めている途中)に
 // 起動したworkerが残る。
 func TestServer_ConcurrentStartAndStopLeaveNothingRunning(t *testing.T) {
 	const rounds = 300
-	starts := []func(*Server) error{(*Server).StartBackground, (*Server).StartBackgroundForTest}
-	startedFirst := 0
-	for i := range rounds {
-		f := newStartOnceFixture(config.RoleBoth)
-		start := starts[i%len(starts)]
-		// 片方の順に偏らないよう、組ごとに先に譲る側を替える。譲らないと、GOMAXPROCS=1で
-		// -raceを付けないときに、どの組でも起動が先に走る(実測で300組のうち300組)。
-		startYields := (i/len(starts))%2 == 0
-		var wg sync.WaitGroup
-		var startErr error
-		ready := make(chan struct{})
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			<-ready
-			if startYields {
-				runtime.Gosched()
-			}
-			startErr = start(f.srv)
-		}()
-		go func() {
-			defer wg.Done()
-			<-ready
-			if !startYields {
-				runtime.Gosched()
-			}
-			assert.NoError(t, f.srv.StopBackground(context.Background()))
-		}()
-		close(ready)
-		done := make(chan struct{})
-		go func() { wg.Wait(); close(done) }()
-		select {
-		case <-done:
-		case <-time.After(10 * time.Second):
-			t.Fatalf("round %d: the start and the stop did not return (deadlock)", i)
-		}
+	for _, tc := range []struct {
+		name   string
+		role   config.ProcessRole
+		starts []func(*Server) error
+	}{
+		{name: "both roles", role: config.RoleBoth, starts: []func(*Server) error{(*Server).StartBackground, (*Server).StartBackgroundForTest}},
+		// server roleではStartBackgroundForTestだけがworkerを起動し、停止はqueueStartedを
+		// 読んで止める(#3713)。RoleBothではroleの判定で短絡し、queueStartedを読まない。
+		{name: "server role", role: config.RoleServer, starts: []func(*Server) error{(*Server).StartBackgroundForTest}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			startedFirst := 0
+			for i := range rounds {
+				f := newStartOnceFixture(tc.role)
+				start := tc.starts[i%len(tc.starts)]
+				// 片方の順に偏らないよう、組ごとに先に譲る側を替える。譲らないと、GOMAXPROCS=1で
+				// -raceを付けないときに、どの組でも起動が先に走る(実測で300組のうち300組)。
+				startYields := (i/len(tc.starts))%2 == 0
+				var wg sync.WaitGroup
+				var startErr error
+				ready := make(chan struct{})
+				wg.Add(2)
+				go func() {
+					defer wg.Done()
+					<-ready
+					if startYields {
+						runtime.Gosched()
+					}
+					startErr = start(f.srv)
+				}()
+				go func() {
+					defer wg.Done()
+					<-ready
+					if !startYields {
+						runtime.Gosched()
+					}
+					assert.NoError(t, f.srv.StopBackground(context.Background()))
+				}()
+				close(ready)
+				done := make(chan struct{})
+				go func() { wg.Wait(); close(done) }()
+				select {
+				case <-done:
+				case <-time.After(10 * time.Second):
+					t.Fatalf("round %d: the start and the stop did not return (deadlock)", i)
+				}
 
-		events := f.log.all()
-		if startErr != nil {
-			require.ErrorIs(t, startErr, errGenerationStopped, "round %d", i)
-			assert.NotContains(t, events, "part start", "round %d: a start that lost to the stop started a part", i)
-			assert.NotContains(t, events, "queue start", "round %d: a start that lost to the stop started the queue", i)
-			assert.False(t, f.autoscaleStarted(), "round %d: a start that lost to the stop started the auto-scale controller", i)
-		} else {
-			startedFirst++
-		}
-		for _, pair := range [][2]string{
-			{"part start", "part stop"},
-			{"queue start", "queue shutdown"},
-			{"scheduler start", "scheduler shutdown"},
-		} {
-			at := slices.Index(events, pair[0])
-			if at < 0 {
-				continue
+				events := f.log.all()
+				if startErr != nil {
+					require.ErrorIs(t, startErr, errGenerationStopped, "round %d", i)
+					assert.NotContains(t, events, "part start", "round %d: a start that lost to the stop started a part", i)
+					assert.NotContains(t, events, "queue start", "round %d: a start that lost to the stop started the queue", i)
+					assert.False(t, f.autoscaleStarted(), "round %d: a start that lost to the stop started the auto-scale controller", i)
+				} else {
+					startedFirst++
+					// 起動が勝った組では、queueのworkerを起動している。起動していなければ、下の
+					// workerとschedulerの停止の検査が空振りする。
+					assert.Contains(t, events, "queue start", "round %d: a start that won did not start the queue", i)
+				}
+				for _, pair := range [][2]string{
+					{"part start", "part stop"},
+					{"queue start", "queue shutdown"},
+					{"scheduler start", "scheduler shutdown"},
+				} {
+					at := slices.Index(events, pair[0])
+					if at < 0 {
+						continue
+					}
+					assert.Containsf(t, events[at+1:], pair[1], "round %d: %q was not stopped after it started: %v", i, pair[0], events)
+				}
+				if r := f.srv.autoscale; r != nil {
+					stopped := make(chan struct{})
+					go func() { r.wg.Wait(); close(stopped) }()
+					select {
+					case <-stopped:
+					case <-time.After(5 * time.Second):
+						r.Stop(context.Background())
+						t.Errorf("round %d: the auto-scale controller was left running", i)
+					}
+				}
+				if f.chartRunning(t) {
+					f.srv.chartMgmt.Stop(context.Background())
+					t.Errorf("round %d: the chart save loop was left running", i)
+				}
+				if t.Failed() {
+					return
+				}
 			}
-			assert.Containsf(t, events[at+1:], pair[1], "round %d: %q was not stopped after it started: %v", i, pair[0], events)
-		}
-		if r := f.srv.autoscale; r != nil {
-			stopped := make(chan struct{})
-			go func() { r.wg.Wait(); close(stopped) }()
-			select {
-			case <-stopped:
-			case <-time.After(5 * time.Second):
-				r.Stop(context.Background())
-				t.Errorf("round %d: the auto-scale controller was left running", i)
-			}
-		}
-		if f.chartRunning(t) {
-			f.srv.chartMgmt.Stop(context.Background())
-			t.Errorf("round %d: the chart save loop was left running", i)
-		}
-		if t.Failed() {
-			return
-		}
+			// 両方の順が起きていなければ、片方の順の検査は空振りしている。
+			t.Logf("the start ran before the stop in %d of %d rounds", startedFirst, rounds)
+			assert.Positive(t, startedFirst, "the start never ran before the stop")
+			assert.Less(t, startedFirst, rounds, "the stop never ran before the start")
+		})
 	}
-	// 両方の順が起きていなければ、片方の順の検査は空振りしている。
-	t.Logf("the start ran before the stop in %d of %d rounds", startedFirst, rounds)
-	assert.Positive(t, startedFirst, "the start never ran before the stop")
-	assert.Less(t, startedFirst, rounds, "the stop never ran before the start")
 }

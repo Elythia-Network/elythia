@@ -172,6 +172,15 @@ type Server struct {
 	// generation has begun. A start that sees it starts nothing and returns
 	// errGenerationStopped.
 	stopped bool
+	// queueStarted is set, under runMu, once the start has started the queue
+	// worker (#3713). stopQueue then shuts the worker and the scheduler down
+	// whatever the role, so what StartBackgroundForTest started on a server
+	// role stops too.
+	//
+	// 停止(stopQueue)はrunMuを取らずに読む。停止は先にmarkStoppedでrunMuを取り、
+	// 済んだ起動はそれより前にrunMuを放しているので、起動の書き込みは停止の読みより
+	// 前に起きる(happens-before)。markStoppedより後の起動は何も起動せず、書かない。
+	queueStarted bool
 
 	// outboundTr は外向きの HTTP で共有する SSRF-safe な Transport
 	// (outboundTransport)。初めて使うときに 1 度だけ作る (#3591)。
@@ -1064,6 +1073,9 @@ func (s *Server) DumpRoutes(w io.Writer) error {
 // result of the first. Once StopBackground has begun, it starts nothing and
 // returns errGenerationStopped.
 //
+// StopBackground stops the queue worker, auto-scale and scheduler it started
+// whatever the process role (#3713), as it does for StartBackground.
+//
 // 用途: e2e_federation 系のテストで `httptest.Server` 経由で echo handler を
 // 外部 listener にぶら下げつつ、deliver / inbox 処理など async queue 経路も
 // 動かしたい場合 (#435)。本番経路 (Server.Start) は HTTP listener を含めて
@@ -1206,6 +1218,10 @@ func (s *Server) startBackground(what backgroundStart) error {
 		if err := s.queueServer.Start(); err != nil {
 			return fmt.Errorf("start queue worker: %w", err)
 		}
+		// workerを起動したら、続くautoscaleの起動が失敗しても止めるよう、ここで記録する
+		// (#3713)。roleがqueueを回さない世代(StartBackgroundForTest)の停止は、これを見て
+		// workerとschedulerを止める。
+		s.queueStarted = true
 		// queueServer.Start 後にのみ controller を起動する (Start 前は driver.Resize
 		// が ErrResizeNotSupported を返す = no pool yet)。startAutoScale は
 		// jobQueueAutoScale=false なら nil runner を返す cheap no-op。
@@ -1343,10 +1359,14 @@ func shutdownStepContext(ctx context.Context, limit time.Duration) (context.Cont
 // stopped, and whether they stopped within the wait.
 func (s *Server) stopQueue(ctx context.Context) (<-chan struct{}, bool) {
 	done := make(chan struct{})
-	// 止めるものが無い構成 (MK_ONLY_SERVER で autoscale も無い) は待たない。期限の
-	// 切れた ctx では、下の select が止まっている queue を「止まらなかった」と
-	// 取り違え、誤った警告と 2 回目の chart の保存を出しうる。
-	if s.autoscale == nil && !s.role.RunsQueue() {
+	// 止めるものが無い構成(MK_ONLY_SERVERでautoscaleも無く、queueを起動していない)は
+	// 待たない。期限の切れたctxでは、下のselectが止まっているqueueを「止まらなかった」と
+	// 取り違え、誤った警告と2回目のchartの保存を出しうる。
+	// workerとschedulerを止めるのは、roleがqueueを回すとき(起動していない世代も
+	// #3713より前と同じ)と、起動がworkerを起動したとき(#3713)。queueStartedは
+	// runMuを取らずに読む(queueStartedのコメント)。
+	stopWorker := s.role.RunsQueue() || s.queueStarted
+	if s.autoscale == nil && !stopWorker {
 		close(done)
 		return done, true
 	}
@@ -1356,10 +1376,11 @@ func (s *Server) stopQueue(ctx context.Context) (<-chan struct{}, bool) {
 		// 余計な変更が走らない状態で queueServer の pool を畳める)。Shutdown ctx を
 		// 伝播することで autoscale の goroutine drain にも graceful deadline が効く。
 		s.autoscale.Stop(ctx)
-		// RoleServer では scheduler も worker も起動していない。mkq driver は
-		// どちらの Shutdown も未起動で安全だが、「起動済み」を前提にした driver へ
-		// 差し替わっても壊れないよう role で守る (#2459)。
-		if s.role.RunsQueue() {
+		// RoleServerでは(StartBackgroundForTestを除き)schedulerもworkerも起動していない。
+		// mkq driverはどちらのShutdownも未起動で安全だが、「起動済み」を前提にしたdriverへ
+		// 差し替わっても壊れないようroleで守る(#2459)。起動を記録した世代はroleにかかわらず
+		// 止める(#3713)。
+		if stopWorker {
 			if s.queueScheduler != nil {
 				s.queueScheduler.Shutdown()
 			}
