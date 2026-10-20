@@ -377,6 +377,13 @@ func (s *Service) InvalidateCacheLocally() {
 	s.cacheMu.Unlock()
 }
 
+// DropLocal drops this process's accepted-relay list without calling the
+// invalidation hook, so no other process is told (#3729). It is what the cache
+// list of internal/server calls (docs/architecture.md 4.4).
+func (s *Service) DropLocal() {
+	s.InvalidateCacheLocally()
+}
+
 // SetInvalidationHook registers fn, called after every local write has dropped
 // this process's accepted-relay list (#3664). Call it once while wiring.
 func (s *Service) SetInvalidationHook(fn func()) {
