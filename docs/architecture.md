@@ -2043,7 +2043,7 @@ Supervisorの側は変えていない。停止のエラーの使われ方は次�
 
 コメントの「shutdown hook」は、この一覧の部品の停止を指す。
 
-### 4.4 キャッシュの一覧 (#3721、#3723、#3725)
+### 4.4 キャッシュの一覧 (#3721、#3723、#3725、#3727)
 
 **世代のキャッシュは、そのプロセスが持つ分を全部捨てる口 (`DropLocal()`) を持たせ、名前と由来と
 一緒に `Server` の一覧 (`cacheList`、`internal/server/caches.go`) へ登録する。** #3666 の段階 4。
@@ -2060,6 +2060,10 @@ setupRoutes()
   s.addCache("relationCache", cacheFromDB, s.relationCache)
   s.addCache("authTokens", cacheFromDB, s.auth)
   s.addCache("roles", cacheFromDB, roleService)           // #3725。userCache の後
+  …
+  s.addCache("emojis", cacheFromDB, emojiRepo)            // #3727
+  s.addCache("emojiDecorations", cacheFromDB, emojiDecorationResolver)  // emojis の後
+  s.addCache("avatarDecorations", cacheFromDB, avatarDecorationResolver)
 ```
 
 - **`DropLocal()` は他のプロセスに知らせない。** publish も、無効化の hook (`SetInvalidationHook`)
@@ -2090,7 +2094,8 @@ setupRoutes()
 | meta | `cachedMeta`・`metaResponse`・`nodeinfo` | #3721 |
 | 利用者と関係 | `userCache` (`CachedUserRepository`)・`relationCache` (`RelationCache`)・`authTokens` (`AuthMiddleware` の tokenCache) | #3723 |
 | ロール | `roles` (`role.Service`。利用者のロール・ロールの一覧と、プラグインの policy の結果) | #3725 |
-| 絵文字とデコレーション・連合・外部 | (未) | 後続 |
+| 絵文字とデコレーション | `emojis` (`CachedEmojiRepository`。ローカルの一覧と (name, host) の entry)・`emojiDecorations` (`avatardecoration.EmojiResolver`)・`avatarDecorations` (`avatardecoration.Resolver`。catalog) | #3727 |
+| 連合・外部 | (未) | 後続 |
 
 - 利用者と関係の系統の 3 つは、どれもこのプロセスだけで全部を捨てる処理を元から中に持っていて
   (`invalidateAllLocal`・`apply({All: true})`・`tokenCache.invalidateAll`)、`DropLocal()` はそれを
@@ -2105,6 +2110,13 @@ setupRoutes()
   評価して利用者のロールのキャッシュに積むので、先に捨てると、間に来たリクエストが古い利用者の行で
   評価した結果を積む。meta の base policy はロールのキャッシュに持たず、評価のたびに meta のキャッシュ
   (`cachedMeta`) から読むので、meta の系統との間に順の制約は無い
+- 絵文字の `DropLocal()` は、ローカルの一覧と (name, host) の entry の両方を捨てる。公開の
+  `Invalidate()` はローカルの一覧しか捨てないので使わない。2 つのデコレーションの `DropLocal()` は
+  `InvalidateLocally()` を呼ぶ (公開の `Invalidate()` は他のプロセスに通知する)
+- **`emojiDecorations` は `emojis` の後に登録する。** 絵文字由来のデコレーションは絵文字のキャッシュの
+  一覧 (`ListLocal`) から作り直すので、先に捨てると、間に来たリクエストが古い一覧から作り直した map を
+  積む (他のプロセスからの通知を受ける `cachebus.SubscribeEmojiCache` が同じ順に捨てるのと同じ理由)。
+  catalog は DB から読むので順の制約は無い
 
 - captcha の provider と、リアクションのバッファの切り替えは、meta 行の写しで、捨てるだけでは
   足りず読み直しが要る。#3721 では登録していない。扱いは段階 4 の最後で決める
@@ -2140,8 +2152,17 @@ setupRoutes()
   `TestEffectivePolicy_DropLocalDoesNotReturnJoinedStaleFlight` (#3725): ロールのキャッシュと
   プラグインの policy の結果を全部捨て、hook を呼ばないこと。捨てる前に始まった policy の解決の
   結果を、捨てた後のリクエストに返さないこと
+- `TestCaches_EmojiLine` (#3727): 3 つがサーバーの使う値のまま一覧にあり、`emojiDecorations` が
+  `emojis` より後にあることを確かめる。DB に絵文字とデコレーションを直接書いて、`dropAll` の後に
+  絵文字の一覧・(name, host)・絵文字由来のデコレーション・catalog が読み直すことを見る。絵文字の通知は
+  待ち行列から非同期に送るので、世代を止めてから `internal:` へ何も publish していないことを見る
+- `TestEmojiKeyCache_DropLocal`・`TestEmojiKeyCache_DropLocalDuringFetchDiscardsResult`・
+  `TestResolvers_DropLocal` (#3727): 各型の `DropLocal()` が全部を捨て、hook を呼ばないこと。
+  (name, host) の entry と 2 つのデコレーションは、読み込みの途中で捨てたときに読んだ結果を積まない
+  こと (世代の番号 `gen`)。絵文字の一覧はテストしていない。`ListLocal` は排他のロックを握ったまま
+  読むので、`DropLocal()` は読み込みが終わるまで待ってから捨てる
 
-#3721・#3723・#3725 の前後で同じであることは、それぞれ次のように確かめた (道具はコミットしていない)。
+#3721・#3723・#3725・#3727 の前後で同じであることは、それぞれ次のように確かめた (道具はコミットしていない)。
 どれも、結果は次のとおりだった。
 
 - `elythia dump-routes`: 出力 (ルート)、起動ログ、Redis の命令の列、PostgreSQL の文の集合は、前後で
