@@ -17,7 +17,7 @@ func TestTimelineJSONCache_GetSetTTL(t *testing.T) {
 	_, ok := c.get("k", base)
 	assert.False(t, ok)
 
-	c.set("k", []byte(`[{"id":"a"}]`), base)
+	c.set(c.generation(), "k", []byte(`[{"id":"a"}]`), base)
 
 	// hit within TTL
 	body, ok := c.get("k", base.Add(2*time.Second))
@@ -63,15 +63,15 @@ func TestTimelineJSONCache_Bounded(t *testing.T) {
 	c.maxEntries = 2
 	base := time.Unix(1000, 0)
 
-	c.set("a", []byte("1"), base)
-	c.set("b", []byte("2"), base)
+	c.set(c.generation(), "a", []byte("1"), base)
+	c.set(c.generation(), "b", []byte("2"), base)
 	// 上限到達。全 entry が未期限なので "c" は cache されない。
-	c.set("c", []byte("3"), base)
+	c.set(c.generation(), "c", []byte("3"), base)
 	_, okC := c.get("c", base)
 	assert.False(t, okC, "上限到達かつ全 entry 未期限なら新規は cache しない")
 
 	// a が期限切れになれば sweep されて空きができ、新規を入れられる。
-	c.set("d", []byte("4"), base.Add(4*time.Second))
+	c.set(c.generation(), "d", []byte("4"), base.Add(4*time.Second))
 	body, okD := c.get("d", base.Add(4*time.Second))
 	assert.True(t, okD, "期限切れ sweep 後は空きに入る")
 	assert.Equal(t, "4", string(body))

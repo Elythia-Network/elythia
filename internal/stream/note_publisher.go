@@ -54,6 +54,16 @@ type NotePublisher struct {
 	cachedBody []byte
 }
 
+// DropLocal drops the last packed note held by this process (#3736). pack も
+// mu の中で行うので、捨てる前に始まった pack は待ってから捨てる。ただし呼び出し側が
+// 捨てる前に読んだ投稿者で、捨てた後に pack したものは、次の別のノートまで残る。
+func (p *NotePublisher) DropLocal() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.cachedID = ""
+	p.cachedBody = nil
+}
+
 // NewNotePublisher constructs a NotePublisher.
 func NewNotePublisher(pub PubSubPublisher, idGen id.Generator) *NotePublisher {
 	return &NotePublisher{pub: pub, idGen: idGen}

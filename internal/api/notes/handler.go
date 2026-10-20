@@ -114,14 +114,14 @@ type Handler struct {
 	scheduledNoteEnqueuer ScheduledNoteEnqueuer
 	// timelineCache は config flag enableTimelineCache (MK_ENABLETIMELINECACHE)
 	// 有効時のみ non-nil。first-page timeline 応答を per-viewer で短期キャッシュする。
-	timelineCache *timelineJSONCache
+	timelineCache *TimelineJSONCache
 	// featuredRanking は notes/featured の engagement ランキング (#1687)。nil 時
 	// (= 未配線 / test) は SQL count-DESC fallback を使う。
 	featuredRanking FeaturedRankingReader
 	// featuredGlobalCache は global ranking の 30分 in-memory cache
 	// (upstream featured.ts の globalNotesRankingCache)。channel ranking は cache
 	// しない (channel ごとなので)。
-	featuredGlobalCache featuredGlobalRankingCache
+	featuredGlobalCache FeaturedRankingCache
 }
 
 // SetPiningRepo wires the repository used to verify that a notes/show target
@@ -137,11 +137,33 @@ type FeaturedRankingReader interface {
 	GetInChannelNotesRanking(ctx context.Context, channelID string, threshold int) ([]string, error)
 }
 
-// featuredGlobalRankingCache holds the 30-min global ranking cache.
-type featuredGlobalRankingCache struct {
+// FeaturedRankingCache holds the 30-min global ranking cache.
+type FeaturedRankingCache struct {
 	mu        sync.Mutex
 	ids       []string
 	fetchedAt time.Time
+}
+
+// DropLocal drops the cached global ranking held by this process (#3736).
+// 読み込みの間も mu を握るので (cachedGlobalRanking)、捨てる前に始まった読み込みは
+// 待ってから捨てる。
+func (c *FeaturedRankingCache) DropLocal() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.ids = nil
+	c.fetchedAt = time.Time{}
+}
+
+// FeaturedRankingCache returns the cache of the global featured ranking, for
+// the server's cache list (#3736).
+func (h *Handler) FeaturedRankingCache() *FeaturedRankingCache {
+	return &h.featuredGlobalCache
+}
+
+// TimelineJSONCache returns the first-page timeline response cache, or nil
+// when EnableTimelineJSONCache was not called (#3736).
+func (h *Handler) TimelineJSONCache() *TimelineJSONCache {
+	return h.timelineCache
 }
 
 // SetFeaturedRanking wires the engagement ranking reader so notes/featured uses

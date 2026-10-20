@@ -317,3 +317,19 @@ func TestCachedAntennaRepository_ConcurrentUse(t *testing.T) {
 	require.Len(t, rows, 1)
 	assert.Equal(t, model.StringArray{"@a@b"}, rows[0].Users, "キャッシュが汚染されないこと")
 }
+
+// DropLocal drops the rows without calling the cross-process hook (#3736).
+func TestCachedAntennaRepository_DropLocal(t *testing.T) {
+	inner := newCountingRepo(&model.Antenna{ID: "a1", IsActive: true})
+	c := repository.NewCachedAntennaRepository(inner)
+	hooks := 0
+	c.SetInvalidationHook(func() { hooks++ })
+	_, err := c.ListAllActive()
+	require.NoError(t, err)
+
+	c.DropLocal()
+	_, err = c.ListAllActive()
+	require.NoError(t, err)
+	assert.Equal(t, 2, inner.listCall)
+	assert.Zero(t, hooks, "DropLocal does not tell other processes")
+}

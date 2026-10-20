@@ -28,18 +28,21 @@ type timelineCacheEntry struct {
 	expiresAt time.Time
 }
 
-// timelineJSONCache is a bounded in-memory TTL cache of marshaled timeline
+// TimelineJSONCache is a bounded in-memory TTL cache of marshaled timeline
 // responses. 単一 process 内のみ (multi-process では process ごとに別 cache だが
 // 応答の正しさは保たれる)。
-type timelineJSONCache struct {
+type TimelineJSONCache struct {
 	mu         sync.Mutex
 	m          map[string]timelineCacheEntry
 	ttl        time.Duration
 	maxEntries int
+	// gen は DropLocal で進める世代の番号 (#3736)。応答はロックの外で組み立てる
+	// ので、捨てる前に組み立て始めた応答を、捨てた後に積まないために使う。
+	gen uint64
 }
 
-func newTimelineJSONCache(ttl time.Duration) *timelineJSONCache {
-	return &timelineJSONCache{
+func newTimelineJSONCache(ttl time.Duration) *TimelineJSONCache {
+	return &TimelineJSONCache{
 		m:          make(map[string]timelineCacheEntry),
 		ttl:        ttl,
 		maxEntries: 50000,
@@ -48,7 +51,7 @@ func newTimelineJSONCache(ttl time.Duration) *timelineJSONCache {
 
 // get returns the cached body if present and unexpired. 期限切れ entry は lazy に
 // 削除する。
-func (c *timelineJSONCache) get(key string, now time.Time) ([]byte, bool) {
+func (c *TimelineJSONCache) get(key string, now time.Time) ([]byte, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e, ok := c.m[key]
@@ -62,11 +65,32 @@ func (c *timelineJSONCache) get(key string, now time.Time) ([]byte, bool) {
 	return e.body, true
 }
 
-// set stores body under key with the configured TTL. 上限到達時はまず期限切れを
-// 掃き、それでも上限なら今回は cache しない (= bounded、メモリ無制限増加を防ぐ)。
-func (c *timelineJSONCache) set(key string, body []byte, now time.Time) {
+// generation returns the current drop generation. 組み立てを始める前に読み、
+// set に渡す。
+func (c *TimelineJSONCache) generation() uint64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.gen
+}
+
+// DropLocal drops every cached response held by this process (#3736). Other
+// processes are not told.
+func (c *TimelineJSONCache) DropLocal() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.gen++
+	clear(c.m)
+}
+
+// set stores body under key with the configured TTL, unless the cache was
+// dropped after gen was read. 上限到達時はまず期限切れを
+// 掃き、それでも上限なら今回は cache しない (= bounded、メモリ無制限増加を防ぐ)。
+func (c *TimelineJSONCache) set(gen uint64, key string, body []byte, now time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.gen != gen {
+		return
+	}
 	if len(c.m) >= c.maxEntries {
 		for k, e := range c.m {
 			if now.After(e.expiresAt) {
