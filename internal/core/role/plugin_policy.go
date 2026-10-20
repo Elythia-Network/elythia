@@ -1005,6 +1005,14 @@ func (s *Service) InvalidateAllCachesLocally() {
 	}
 }
 
+// DropLocal drops every cached role and policy input of this process without
+// telling the others (#3725). It is what the cache list of internal/server
+// calls (docs/architecture.md 4.4), and does what InvalidateAllCachesLocally
+// does.
+func (s *Service) DropLocal() {
+	s.InvalidateAllCachesLocally()
+}
+
 // SetInvalidationHook registers fn, invoked after a **local** mutation has
 // dropped this process's role / policy caches.
 //

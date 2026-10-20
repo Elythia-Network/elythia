@@ -257,12 +257,7 @@ func TestCaches_UserLine(t *testing.T) {
 	require.Empty(t, muted, "前提: 捨てるまでは cache が返る")
 	require.Equal(t, http.StatusOK, h.post("/api/i", token, map[string]any{}).Code, "前提: 捨てるまでは cache が返る")
 
-	// 捨てた後に internal: の購読へ届いたものを記録する。目印より前に何か届けば、
-	// 捨てたことで他のプロセスへ通知している。
-	sub := h.rdb.PSubscribe(context.Background(), "internal:*")
-	t.Cleanup(func() { _ = sub.Close() })
-	_, err = sub.Receive(context.Background())
-	require.NoError(t, err)
+	published := watchInternal(t, h)
 
 	srv.caches.dropAll()
 
@@ -277,21 +272,96 @@ func TestCaches_UserLine(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, h.post("/api/i", token, map[string]any{}).Code, "the auth token cache was not dropped")
 
 	require.NoError(t, srv.StopBackground(context.Background()))
-	const marker = "caches-user-line"
-	require.NoError(t, h.rdb.Publish(context.Background(), "internal:"+marker, "x").Err())
-	ch := sub.Channel()
-	var got []string
-	timeout := time.After(10 * time.Second)
-	for {
-		select {
-		case msg := <-ch:
-			got = append(got, msg.Channel)
-		case <-timeout:
-			t.Fatalf("the marker did not arrive; got %v", got)
-		}
-		if got[len(got)-1] == "internal:"+marker {
-			break
+	assert.Empty(t, published("caches-user-line"), "dropping the caches told the other processes")
+}
+
+// watchInternal subscribes to every internal: channel and returns a function
+// that publishes a marker and returns the channels published on before it, in
+// order. 目印より前に何か届けば、それは購読を始めてから目印までの間に他の
+// プロセスへ通知したもの。
+//
+// 非同期に送る通知 (利用者のキャッシュの待ち行列など) は、目印を送る前に送り
+// 切らせておくこと。
+func watchInternal(t *testing.T, h *metaRuntimeHarness) func(marker string) []string {
+	t.Helper()
+	sub := h.rdb.PSubscribe(context.Background(), "internal:*")
+	t.Cleanup(func() { _ = sub.Close() })
+	_, err := sub.Receive(context.Background())
+	require.NoError(t, err)
+	return func(marker string) []string {
+		t.Helper()
+		require.NoError(t, h.rdb.Publish(context.Background(), "internal:"+marker, "x").Err())
+		ch := sub.Channel()
+		var got []string
+		timeout := time.After(10 * time.Second)
+		for {
+			select {
+			case msg := <-ch:
+				if msg.Channel == "internal:"+marker {
+					return got
+				}
+				got = append(got, msg.Channel)
+			case <-timeout:
+				t.Fatalf("the marker did not arrive; got %v", got)
+			}
 		}
 	}
-	assert.Equal(t, []string{"internal:" + marker}, got, "dropping the caches told the other processes")
+}
+
+// TestCaches_RoleLine checks on a whole server that the role line is listed
+// with the role service the server uses, and that dropping the list makes the
+// role checks read the database again, without telling the other processes
+// (#3725).
+//
+// ロールのキャッシュは Server のフィールド (配線に渡しているもの) から読むのに
+// 加えて、管理 API の認可 (RequireAdmin) を通して確かめる。
+func TestCaches_RoleLine(t *testing.T) {
+	h := newMetaRuntimeHarness(t)
+	srv := h.srv
+
+	// 条件付きロールは利用者のキャッシュから評価するので、roles は userCache の後に捨てる。
+	at := map[string]int{}
+	for i, p := range srv.caches.parts {
+		at[p.name] = i
+		if p.name == "roles" {
+			assert.Equal(t, cacheFromDB, p.origin)
+			assert.Same(t, srv.roleService, p.cache, "cache %q is not the role service the server uses", p.name)
+		}
+	}
+	rolesAt, ok := at["roles"]
+	require.True(t, ok, `cache "roles" is not listed`)
+	userAt, ok := at["userCache"]
+	require.True(t, ok, `cache "userCache" is not listed`)
+	assert.Greater(t, rolesAt, userAt, "roles is dropped before the user cache it is evaluated from")
+
+	const token = "metartuser000025"
+	const userID = "metart-user-25"
+	h.createUser(userID, "metart_user25", token, false)
+	roleID := h.idGen.Generate(time.Now())
+	assignID := h.idGen.Generate(time.Now())
+	// 管理者のロールが残ると、後のテストに管理者が混ざる。
+	t.Cleanup(func() {
+		require.NoError(t, h.db.Where("id = ?", assignID).Delete(&model.RoleAssignment{}).Error)
+		require.NoError(t, h.db.Where("id = ?", roleID).Delete(&model.Role{}).Error)
+	})
+
+	require.False(t, srv.roleService.IsAdministrator(userID))
+	require.NotEqual(t, http.StatusOK, h.post("/api/admin/meta", token, map[string]any{}).Code)
+
+	// 他のプロセスが書いたときと違い、通知は送らない。このプロセスのキャッシュは
+	// 古いまま残る。
+	now := time.Now()
+	require.NoError(t, h.db.Create(&model.Role{ID: roleID, Name: "caches-role-line", UpdatedAt: now, LastUsedAt: now, IsAdministrator: true}).Error)
+	require.NoError(t, h.db.Create(&model.RoleAssignment{ID: assignID, UserID: userID, RoleID: roleID}).Error)
+	require.False(t, srv.roleService.IsAdministrator(userID), "前提: 捨てるまでは cache が返る")
+	require.NotEqual(t, http.StatusOK, h.post("/api/admin/meta", token, map[string]any{}).Code, "前提: 捨てるまでは cache が返る")
+
+	published := watchInternal(t, h)
+
+	srv.caches.dropAll()
+
+	assert.True(t, srv.roleService.IsAdministrator(userID), "the role cache was not dropped")
+	rec := h.post("/api/admin/meta", token, map[string]any{})
+	assert.Equal(t, http.StatusOK, rec.Code, "the admin API still sees the old roles: %s", rec.Body.String())
+	assert.Empty(t, published("caches-role-line"), "dropping the caches told the other processes")
 }

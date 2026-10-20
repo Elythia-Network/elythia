@@ -2805,6 +2805,13 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	s.addCache("userCache", cacheFromDB, s.userCache)
 	s.addCache("relationCache", cacheFromDB, s.relationCache)
 	s.addCache("authTokens", cacheFromDB, s.auth)
+	// ロールの系統のキャッシュ (#3725)。利用者のロール・ロールの一覧と、プラグインの
+	// policy の結果を持つ。**利用者のキャッシュの後に登録する。** 条件付きロールは
+	// 利用者の行 (CachedUserRepository) から評価して利用者のロールのキャッシュに積むので、
+	// 先に捨てると、間に来たリクエストが古い利用者の行で評価した結果を積む。meta の
+	// base policy は評価のたびに meta のキャッシュから読み、ロールのキャッシュには持た
+	// ないので、meta の系統との間に順の制約は無い。
+	s.addCache("roles", cacheFromDB, roleService)
 
 	// #3383: 絵文字の (name, host) cache の cross-worker invalidation。
 	// リモート絵文字の作成・更新は連合の受信 (MK_ONLY_QUEUE のプロセス) で
