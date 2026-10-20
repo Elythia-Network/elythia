@@ -159,6 +159,14 @@ func (h *Handler) InvalidateCache() {
 	h.invalidateCache()
 }
 
+// DropLocal drops the cached documents of this process (#3721). It is what
+// the cache list of internal/server calls (docs/architecture.md 4.4). No
+// other process is told. The caller drops the meta row cache first, as for
+// InvalidateCache.
+func (h *Handler) DropLocal() {
+	h.invalidateCache()
+}
+
 // documentBody returns the marshalled nodeinfo document for version, building
 // it at most once per TTL per version.
 //

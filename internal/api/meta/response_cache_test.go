@@ -341,3 +341,27 @@ func TestMeta_SettersInvalidateCache(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+// DropLocal は detail の有無の 2 種をどちらも捨てる (#3721)。
+func TestMeta_DropLocalDropsBothVariants(t *testing.T) {
+	h, metaRepo := newTestHandler()
+	// 実時計の TTL (5 秒) が切れると、捨て損ねても読み直して緑になる。
+	h.respCache.ttl = time.Hour
+	metaRepo.Meta = &model.Meta{ID: "x", Name: strPtr("before")}
+	for _, body := range []string{"", `{"detail":false}`} {
+		_, _, first := callMeta(t, h, body)
+		require.Contains(t, string(first), "before")
+	}
+
+	metaRepo.Meta = &model.Meta{ID: "x", Name: strPtr("after")}
+	for _, body := range []string{"", `{"detail":false}`} {
+		_, _, cached := callMeta(t, h, body)
+		require.Contains(t, string(cached), "before", "前提: 捨てるまでは cache が返る (body %q)", body)
+	}
+
+	h.DropLocal()
+	for _, body := range []string{"", `{"detail":false}`} {
+		_, _, fresh := callMeta(t, h, body)
+		assert.Contains(t, string(fresh), "after", "DropLocal did not drop the cached body (body %q)", body)
+	}
+}

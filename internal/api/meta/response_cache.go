@@ -129,3 +129,10 @@ func (c *metaResponseCache) invalidate() {
 func (h *Handler) InvalidateResponseCache() {
 	h.respCache.invalidate()
 }
+
+// DropLocal drops the cached /api/meta bodies of this process (#3721). It is
+// what the cache list of internal/server calls (docs/architecture.md 4.4).
+// No other process is told.
+func (h *Handler) DropLocal() {
+	h.respCache.invalidate()
+}

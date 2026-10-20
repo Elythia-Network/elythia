@@ -144,7 +144,10 @@ type Server struct {
 	// ctx を渡すので graceful drain (例: hashtag service の in-flight worker、
 	// #727) もここで止められる。テストが組む Server のリテラルでも使えるよう、
 	// ポインタではなく値で持つ (ゼロ値が空の一覧)。
-	lifecycle    lifecycle
+	lifecycle lifecycle
+	// caches は、この世代のキャッシュの名前付きの一覧 (#3721)。登録した順に捨てる。
+	// 本番ではまだ誰も捨てない (段階 (6) で使う)。lifecycle と同じく値で持つ。
+	caches       cacheList
 	shutdownOnce sync.Once
 	shutdownErr  error
 	// startOnce makes StartBackground and StartBackgroundForTest start the
@@ -976,6 +979,8 @@ func (s *Server) cleanupSteps() []shutdownStep {
 		}},
 		{name: "releaseParts", run: func(context.Context) error {
 			s.lifecycle.parts = nil
+			// キャッシュの一覧も、失敗した世代のハンドラへの参照を手放す (#3721)。
+			s.caches.parts = nil
 			return nil
 		}},
 		{name: "queueDriver", run: func(context.Context) error {

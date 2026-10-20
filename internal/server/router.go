@@ -174,7 +174,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// lifecycle は Server が持つ部品の一覧 (#3699) を指す。登録は s.addStartCloser などの
 	// 値から作る登録か、値を持たない s.addWorker で行う (docs/architecture.md 4.3)。構築では
 	// 登録するだけで、起動はStartBackgroundが一覧の順に行う(#3703)。
-	w := &wiring{repos: s.buildRepos(), lifecycle: &s.lifecycle}
+	// caches はキャッシュの一覧 (#3721) を指す。登録は s.addCache で行う。
+	w := &wiring{repos: s.buildRepos(), lifecycle: &s.lifecycle, caches: &s.caches}
 	userRepo := w.repos.user
 	noteRepo := w.repos.note
 	cachedMeta := w.repos.cachedMeta
@@ -2684,6 +2685,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		}
 		reactionCountWriter.SetBuffering(m.EnableReactionsBuffering)
 	}
+	// meta の系統のキャッシュを一覧に登録する (#3721)。捨てる順は下の hook と購読と
+	// 同じで、meta 行を先に捨てる (逆だと、間に来たリクエストが古い行から組み直す)。
+	s.addCache("cachedMeta", cacheFromDB, cachedMeta)
+	s.addCache("metaResponse", cacheFromDB, metaHandler)
+	s.addCache("nodeinfo", cacheFromDB, nodeinfoHandler)
 	cachedMeta.SetInvalidationHook(func() {
 		metaHandler.InvalidateResponseCache()
 		// /nodeinfo の応答 (10 分) も meta から組むので、同じ順序で捨てる (#3663)。
