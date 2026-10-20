@@ -147,10 +147,31 @@ type Server struct {
 	lifecycle    lifecycle
 	shutdownOnce sync.Once
 	shutdownErr  error
-	// startOnce makes StartBackground start the generation once; later calls
-	// return startErr, the result of the first (#3703).
+	// startOnce makes StartBackground and StartBackgroundForTest start the
+	// generation once, whichever is called first; later calls of either
+	// return startErr, the result of the first (#3703, #3709).
 	startOnce sync.Once
 	startErr  error
+	// runMu orders the start of the generation against its stop (#3709). The
+	// start holds it for its whole run; the stop (shutdown) and the rollback
+	// of a failed construction (cleanupConstruction) take it only to set
+	// stopped, before they stop anything.
+	//
+	// 起動の間は握ったままにする。起動は部品のgoroutineを立てるほか、cronの登録
+	// (registerSchedulerJobsの11個の登録の関数)と撤去(PruneUnregistered)でRedisを
+	// context.Background()のまま呼ぶので、その分だけ長くかかりうる。本番の経路では
+	// StartBackgroundとStopBackgroundをどちらもSupervisorのgenMuの下で呼ぶので、
+	// 固まった起動は#3709の前から停止を止めていた(Supervisor.ShutdownはlockBeforeで
+	// 見切る)。runMuが本番に足す待ちは無い。走っている起動を待つのは、
+	// Server.StopBackgroundを直接呼ぶもの(テスト)だけで、その待ちはctxを見ない。
+	// 停止は印を立てる間だけ握り、部品やqueueを止めて待つ間は握らない。起動が握ったまま
+	// 取るのは一覧のmutex・chartの管理のmutex・queueのdriverの中のmutexで、停止の側が
+	// runMuを握ったままそれらを待つことは無いので、待ち合いにならない。
+	runMu sync.Mutex
+	// stopped is set, under runMu, once the stop or the rollback of the
+	// generation has begun. A start that sees it starts nothing and returns
+	// errGenerationStopped.
+	stopped bool
 
 	// outboundTr は外向きの HTTP で共有する SSRF-safe な Transport
 	// (outboundTransport)。初めて使うときに 1 度だけ作る (#3591)。
@@ -908,6 +929,9 @@ func newServer(cfg *config.Config, db *gorm.DB, redis *cache.RedisClients, plugi
 
 func (s *Server) cleanupConstruction() {
 	s.shutdownOnce.Do(func() {
+		// 構築に失敗した世代は使われないが、後から起動を呼ばれても何も起動しないよう、
+		// 停止と同じ印を立てる(#3709)。
+		s.markStopped()
 		if s.pluginGoGate != nil {
 			s.pluginGoGate.discard()
 		}
@@ -997,6 +1021,12 @@ func (s *Server) DumpRoutes(w io.Writer) error {
 // worker and the optional auto-scale and scheduler, without launching the
 // HTTP listener. Unlike StartBackground it does not look at the process role
 // and does not start the chart management.
+//
+// It goes through the same once as StartBackground (#3709): only the first
+// call of either starts anything, and later calls of either return the
+// result of the first. Once StopBackground has begun, it starts nothing and
+// returns errGenerationStopped.
+//
 // 用途: e2e_federation 系のテストで `httptest.Server` 経由で echo handler を
 // 外部 listener にぶら下げつつ、deliver / inbox 処理など async queue 経路も
 // 動かしたい場合 (#435)。本番経路 (Server.Start) は HTTP listener を含めて
@@ -1005,23 +1035,7 @@ func (s *Server) DumpRoutes(w io.Writer) error {
 //
 // production code から呼ばないこと。
 func (s *Server) StartBackgroundForTest() error {
-	// 部品はStartBackgroundと同じく、queueより先に起動する(#3703)。
-	if err := s.lifecycle.startAll(); err != nil {
-		return err
-	}
-	if err := s.queueServer.Start(); err != nil {
-		return fmt.Errorf("start queue worker: %w", err)
-	}
-	// queueServer.Start 後にのみ controller を起動する (Start 前は driver.Resize
-	// が ErrResizeNotSupported を返す = no pool yet)。startAutoScale は
-	// jobQueueAutoScale=false なら nil runner を返す cheap no-op。
-	runner, err := startAutoScale(context.Background(), s.config, s.queueDriver, s.queueMetrics, s.queueRuntimeStats)
-	if err != nil {
-		return fmt.Errorf("start autoscale: %w", err)
-	}
-	s.autoscale = runner
-	s.registerSchedulerJobs()
-	return nil
+	return s.startOnceWith(backgroundStart{anyRole: true})
 }
 
 // registerSchedulerJobs registers every periodic cron job and starts the
@@ -1087,20 +1101,59 @@ func (s *Server) SetSyncDeliverHookForTest(fn func(payload queue.DeliverPayload)
 // queue) and the chart save loop. It does not listen; the Supervisor owns the
 // listener and routes requests to Handler / ServeHandler.
 //
-// Only the first call starts anything; later calls return its result. When
-// it returns an error, the caller stops the generation with StopBackground,
-// which also stops the parts that did not start.
+// Only the first call of StartBackground or StartBackgroundForTest starts
+// anything; later calls of either return its result. When it returns an
+// error, the caller stops the generation with StopBackground, which also
+// stops the parts that did not start. Once StopBackground has begun (or the
+// construction failed), it starts nothing and returns errGenerationStopped;
+// a start that is running when StopBackground begins finishes first, and
+// StopBackground then stops what it started (#3709).
 //
 // listener を Server から外したのは、メンテナンスで Server を作り直しても
 // listener を張ったままにするため (#3463)。
 func (s *Server) StartBackground() error {
+	return s.startOnceWith(backgroundStart{startChart: true})
+}
+
+// errGenerationStopped is returned by StartBackground and
+// StartBackgroundForTest when the stop of the generation (or the rollback of
+// its failed construction) began before the start (#3709).
+var errGenerationStopped = errors.New("server: the generation has been stopped")
+
+// backgroundStart is what a start of the generation starts besides the parts
+// of the lifecycle list and the queue worker, auto-scale and scheduler.
+type backgroundStart struct {
+	// anyRole starts the queue worker, auto-scale and scheduler whatever the
+	// process role (StartBackgroundForTest). Otherwise they start only when
+	// the role runs the queue.
+	anyRole bool
+	// startChart starts the chart save loop (StartBackground).
+	startChart bool
+}
+
+// startOnceWith starts the generation, with the differences in what, unless
+// it was started already (it then returns the result of the first start) or
+// its stop has begun (errGenerationStopped).
+//
+// StartBackgroundForTestもstartOnceを通す(#3709)。通さないと、StartBackgroundと
+// 両方を呼んだときにqueueのStartを2回呼ぶ。
+func (s *Server) startOnceWith(what backgroundStart) error {
 	s.startOnce.Do(func() {
-		s.startErr = s.startBackground()
+		s.startErr = s.startBackground(what)
 	})
 	return s.startErr
 }
 
-func (s *Server) startBackground() error {
+func (s *Server) startBackground(what backgroundStart) error {
+	// 起動の間は印のmutexを握る(#3709)。停止は始めに印を立てるのにこのmutexを取るので、
+	// 起動の途中から止め始めることは無く、止める側は起動が済んでから、起動したものを
+	// すべて止める。印が先に立っていれば、止める人の居ないworkerを残さないよう何も
+	// 起動しない(queueのdriverも閉じた後でありうる)。
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
+	if s.stopped {
+		return errGenerationStopped
+	}
 	// 部品(バッファ、配送の健全性、statsのpublisher、構築時のworkerなど)を、queueより
 	// 先に一覧の順で起動する(#3703)。queueのworkerのジョブがバッファ・健全性・連合の
 	// ルールの記録へ書くので、書き手より先に、溜めたものをflushする側を動かす。
@@ -1111,8 +1164,8 @@ func (s *Server) startBackground() error {
 	}
 	// queue 側 (worker / autoscale / scheduler) は RoleServer では起動しない。
 	// Web ノードもジョブを **enqueue** はするので queueClient は生かしたまま、
-	// 消費側だけ止める (#2459)。
-	if s.role.RunsQueue() {
+	// 消費側だけ止める (#2459)。StartBackgroundForTestはroleを見ずに起動する。
+	if what.anyRole || s.role.RunsQueue() {
 		if err := s.queueServer.Start(); err != nil {
 			return fmt.Errorf("start queue worker: %w", err)
 		}
@@ -1128,8 +1181,8 @@ func (s *Server) startBackground() error {
 	}
 	// chart は **両方の role で回す**。メモリ上の集計バッファはプロセスごとに
 	// 溜まり (API 経由の投稿は server、連合 inbox 由来は queue)、自分の分は
-	// 自分で flush しないと失われる。
-	if s.chartMgmt != nil {
+	// 自分で flush しないと失われる。StartBackgroundForTestは起動しない。
+	if what.startChart && s.chartMgmt != nil {
 		if err := s.chartMgmt.Start(context.Background()); err != nil {
 			slog.Warn("chart management service start failed", "err", err)
 		}
@@ -1159,6 +1212,10 @@ func (s *Server) Shutdown(ctx context.Context) error {
 // closes this generation's Redis subscriptions. It does not close the DB
 // pool or the Redis clients, which the caller owns. Only the first call does
 // the work; later calls return its result.
+//
+// It first marks the generation stopped, after a start that is running has
+// finished; StartBackground and StartBackgroundForTest called after that
+// start nothing and return errGenerationStopped (#3709).
 //
 // When the stop of a part of the lifecycle list panics, the panic is logged
 // and the rest of the stop still runs; the returned error then joins one
@@ -1281,7 +1338,19 @@ func (s *Server) stopQueue(ctx context.Context) (<-chan struct{}, bool) {
 	}
 }
 
+// markStopped sets the stopped flag under runMu. A start that is running
+// holds runMu, so markStopped waits for it to finish (#3709).
+func (s *Server) markStopped() {
+	s.runMu.Lock()
+	s.stopped = true
+	s.runMu.Unlock()
+}
+
 func (s *Server) shutdown(ctx context.Context) error {
+	// 何かを止めるより先に、起動しない印を立てる(#3709)。走っている起動があれば、
+	// 印を立てる前にそれが済むのを待つので、下の手順はその起動が起動したものも止める。
+	// 止め終わってから立てると、その間に起動したworkerを止める人が居なくなる。
+	s.markStopped()
 	// streaming を最初に閉じる。接続の close handler は DB を触る
 	// (lastActiveDate など) ので、DB を閉じる前に終わらせる。close frame を
 	// 送るので、クライアントは 1006 ではなく 1012 を受けて繋ぎ直す (#3463)。
