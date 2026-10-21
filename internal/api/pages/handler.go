@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/optional"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	corepage "github.com/elythia-network/elythia/internal/core/page"
 	coreuser "github.com/elythia-network/elythia/internal/core/user"
@@ -251,18 +252,20 @@ func (h *Handler) Show(c echo.Context) error {
 
 // UpdateRequest is the request body for pages/update.
 type UpdateRequest struct {
-	PageID              string                `json:"pageId"`
-	Title               *string               `json:"title"`
-	Name                *string               `json:"name"`
-	Summary             *string               `json:"summary"`
-	Content             json.RawMessage       `json:"content"`
-	Variables           json.RawMessage       `json:"variables"`
-	Script              *string               `json:"script"`
-	EyeCatchingImageID  *string               `json:"eyeCatchingImageId"`
-	Font                *string               `json:"font"`
-	AlignCenter         *bool                 `json:"alignCenter"`
-	HideTitleWhenPinned *bool                 `json:"hideTitleWhenPinned"`
-	Visibility          *model.PageVisibility `json:"visibility"`
+	PageID string  `json:"pageId"`
+	Title  *string `json:"title"`
+	Name   *string `json:"name"`
+	// Summary and EyeCatchingImageID distinguish null (clear, like upstream)
+	// from absent (keep) (#3751).
+	Summary             optional.Nullable[string] `json:"summary"`
+	Content             json.RawMessage           `json:"content"`
+	Variables           json.RawMessage           `json:"variables"`
+	Script              *string                   `json:"script"`
+	EyeCatchingImageID  optional.Nullable[string] `json:"eyeCatchingImageId"`
+	Font                *string                   `json:"font"`
+	AlignCenter         *bool                     `json:"alignCenter"`
+	HideTitleWhenPinned *bool                     `json:"hideTitleWhenPinned"`
+	Visibility          *model.PageVisibility     `json:"visibility"`
 }
 
 // Update handles POST /api/pages/update.
@@ -289,7 +292,7 @@ func (h *Handler) Update(c echo.Context) error {
 	}
 	// upstream update.ts: eyeCatchingImageId 指定時は自分の drive file か検証し、
 	// 不在なら NO_SUCH_FILE (#1548)。
-	if !h.eyeCatchingImageOK(req.EyeCatchingImageID, user.ID) {
+	if !h.eyeCatchingImageOK(req.EyeCatchingImageID.Value, user.ID) {
 		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_FILE", "No such file.", "cfc23c7c-3887-490e-af30-0ed576703c82"))
 	}
 	in := corepage.UpdateInput{
@@ -301,13 +304,13 @@ func (h *Handler) Update(c echo.Context) error {
 		Script:              req.Script,
 		Visibility:          req.Visibility,
 	}
-	if req.Summary != nil {
-		s := req.Summary
-		in.Summary = &s
+	// null は本家と同じく外す (nil を書く)。以前は *string で受けていたので null
+	// が省略と同じになり、外しても元の値が残っていた (#3751)。
+	if req.Summary.Present {
+		in.Summary = &req.Summary.Value
 	}
-	if req.EyeCatchingImageID != nil {
-		s := req.EyeCatchingImageID
-		in.EyeCatchingImageID = &s
+	if req.EyeCatchingImageID.Present {
+		in.EyeCatchingImageID = &req.EyeCatchingImageID.Value
 	}
 	if req.Content != nil {
 		in.Content = req.Content
