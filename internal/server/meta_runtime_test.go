@@ -45,7 +45,7 @@ type metaRuntimeHarness struct {
 
 // metaRuntimeColumns are the meta columns the #3663 tests change. 元の値を
 // 戻さないと、同じパッケージの後続のテストが変えた値で起動する。
-var metaRuntimeColumns = []string{"name", "deeplAuthKey", "deeplIsPro", "enableReactionsBuffering"}
+var metaRuntimeColumns = []string{"name", "deeplAuthKey", "deeplIsPro", "enableReactionsBuffering", "enableIpLogging"}
 
 func newMetaRuntimeHarness(t *testing.T, beforeSetup ...func(*Server)) *metaRuntimeHarness {
 	t.Helper()

@@ -147,6 +147,16 @@ func (s *Service) mark(userID, ip string, at time.Time) bool {
 	return true
 }
 
+// DropLocal drops every mark held by this process and restarts the window
+// (#3738). 印はDBへ書いたことの記録なので、DBを戻した後に残すと、戻したDBに
+// 行が無いのに窓の終わりまで書かない。他のプロセスへは伝えない。
+func (s *Service) DropLocal() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.seen = make(map[string]map[string]struct{})
+	s.clearedAt = s.now()
+}
+
 func (s *Service) unmark(userID, ip string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

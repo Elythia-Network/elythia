@@ -408,6 +408,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	proxyAccountResolver := newProxyAccountResolver(systemAccountRepo, userRepo)
 	// DB の健全性 (#3095)。統計はプライマリから読み、1 分キャッシュする。
 	dbHealth := dbhealth.NewService(s.db, s.config.DBReplications && len(s.config.DBSlaves) > 0)
+	// ドライブ使用量の集計 (#3053)。キャッシュの一覧に登録するので (#3738)、管理画面の
+	// handler に渡す所より前に作る。
+	driveUsage := driveusage.NewService(repository.NewDriveUsageRepository(s.db), driveusage.DefaultTTL, driveusage.DefaultTopN)
 	// 連合の部品 (#3688)。作るのは buildFederation (wiring_fed.go) で、ここでは今までと
 	// 同じ名前の別名を置く。呼ぶ位置は、移した部品の中で最初に作っていた
 	// inboxSoftwareChecker の位置。移した部品は作るだけで副作用を持たないので、
@@ -2883,6 +2886,13 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	s.addCache("federationPublicKeys", cacheFromDB, federationResolver)
 	s.addCache("deliverSigningKeys", cacheFromDB, deliverProcessor)
 	s.addCache("instanceActorSigner", cacheFromDB, instanceSigner)
+	// 管理画面と統計の系統 (#3738)。4 つとも DB を直接読むか、DB へ書いたことの印を
+	// 持つだけで、ほかのキャッシュの値を含まないので、捨てる順の制約は無い。投稿・
+	// タイムライン・通知の系統を最後に置いたままにするため、その前に置く。
+	s.addCache("driveUsage", cacheFromDB, driveUsage)
+	s.addCache("dbHealth", cacheFromDB, dbHealth)
+	s.addCache("statsCounts", cacheFromDB, statsHandler)
+	s.addCache("ipLogWindow", cacheFromDB, ipLogService)
 	// 投稿・タイムライン・通知の系統 (#3736)。アンテナ・push 購読・注目ノートの順位は
 	// DB (順位は Redis) を直接読む。**ストリームの直前のノートとタイムラインの JSON は、
 	// 最後に置く。** どちらも pack した利用者・ロール・絵文字・デコレーション・
@@ -2908,7 +2918,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		deliver: deliverService, resolver: federationResolver, deliverProcessor: deliverProcessor,
 		instanceSigner: instanceSigner, fetcherSigner: apFetcher.SignerProvider(),
 		antennas: cachedAntenna, pushSubscriptions: webPushCache, notes: notesHandler,
-		notePublisher: notePublisher,
+		notePublisher: notePublisher, driveUsage: driveUsage, dbHealth: dbHealth, stats: statsHandler,
+		ipLog: ipLogService,
 	}
 
 	userCacheLink := cachebus.ConnectUsers(s.userCache, internalPubSub, idGen.Generate(time.Now()))
@@ -3348,8 +3359,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	adminHandler.SetIPLookupLogRepo(ipLookupLogRepo)
 	// ドライブ使用量の集計 (#3053)。**この行を落とすと admin/drive/usage が
 	// 500 を返す** — 0 バイトを返して「使っていない」と誤認させるよりよい。
-	adminHandler.SetDriveUsageProvider(driveusage.NewService(
-		repository.NewDriveUsageRepository(s.db), driveusage.DefaultTTL, driveusage.DefaultTopN))
+	adminHandler.SetDriveUsageProvider(driveUsage)
 	adminHandler.SetSignupApplicationReviewer(signupApplicationService)
 	// カスタム絵文字の登録申請 (#2934)。承認までは emoji 行を作らず、
 	// 専用テーブルに閉じ込める (signup_application と同じ形)。
@@ -4712,4 +4722,10 @@ type crossProcessCaches struct {
 	pushSubscriptions *corewebpush.SubscriptionCache
 	notes             *notes.Handler
 	notePublisher     *stream.NotePublisher
+	// driveUsage / dbHealth / stats / ipLog は管理画面と統計の系統のキャッシュ
+	// (#3738)。キャッシュの一覧のテストが、登録した値と同じかを見るため。
+	driveUsage *driveusage.Service
+	dbHealth   *dbhealth.Service
+	stats      *stats.Handler
+	ipLog      *iplog.Service
 }
