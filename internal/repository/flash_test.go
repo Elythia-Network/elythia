@@ -334,3 +334,41 @@ func TestFlashRepository_Search_WordAndAndLikeEscape(t *testing.T) {
 	assert.True(t, contains(rows, "fl_n8_pct"), "literal % にマッチ")
 	assert.False(t, contains(rows, "fl_n8_oth"), "% は wildcard でなく literal (100Xdone は除外)")
 }
+
+// 同点の likedCount は、本家 FlashService.featured と同じく updatedAt、id の
+// 降順で決まる。offset でページを送っても重複や抜けが出ない (#3750)。
+func TestFlashRepository_ListFeatured_TieOrder(t *testing.T) {
+	repo := NewFlashRepository(testDB)
+	user := insertTestUser(t, "u_fla_tie", "flashusertie")
+	defer cleanupUser(t, user.ID)
+
+	base := time.Now().Add(-time.Hour)
+	mk := func(id string, updated time.Time) *model.Flash {
+		f := newTestFlash(id, user.ID, id)
+		f.LikedCount = 7777
+		f.UpdatedAt = updated
+		return f
+	}
+	flashes := []*model.Flash{
+		mk("fl_tie_a", base),
+		mk("fl_tie_b", base.Add(time.Minute)),
+		mk("fl_tie_c", base),
+	}
+	for _, f := range flashes {
+		require.NoError(t, repo.Create(f))
+		defer cleanupFlash(t, f.ID)
+	}
+	var got []string
+	for offset := 0; offset < 50; offset++ {
+		rows, err := repo.ListFeatured("", "", 1, offset)
+		require.NoError(t, err)
+		if len(rows) == 0 {
+			break
+		}
+		if rows[0].LikedCount == 7777 {
+			got = append(got, rows[0].ID)
+		}
+	}
+	// b は updatedAt が新しいので先、a と c は updatedAt が同じなので id の降順。
+	assert.Equal(t, []string{"fl_tie_b", "fl_tie_c", "fl_tie_a"}, got)
+}
