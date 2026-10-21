@@ -66,6 +66,13 @@ export type ElythiaRequestExtensions = {
 		 */
 		inboxSuspendedSoftware?: SuspendedSoftware[];
 	};
+	'antennas/update': {
+		/**
+		 * Sets whether the antenna is active. When omitted (or `null`), the
+		 * update makes it active again, as upstream does.
+		 */
+		isActive?: boolean | null;
+	};
 	'chat/history': {
 		/**
 		 * Returns only the conversations whose latest message is older than this
