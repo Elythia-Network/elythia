@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"unicode/utf8"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/notehide"
+	"github.com/elythia-network/elythia/internal/api/optional"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	coreantenna "github.com/elythia-network/elythia/internal/core/antenna"
 	corenote "github.com/elythia-network/elythia/internal/core/note"
@@ -179,12 +182,33 @@ func (r *CreateRequest) missingRequired() bool {
 		r.CaseSensitive == nil || r.WithReplies == nil || r.WithFile == nil
 }
 
+// antennaNameMaxLength is upstream paramDef's maxLength of name. ajv counts
+// code points, so runes are counted.
+const antennaNameMaxLength = 100
+
+// nameTooLong reports whether name exceeds upstream's maxLength.
+//
+// 本家に揃えた検証 (#3748) が先に 400 にするが、上限 (16KiB、トークン 256) を
+// 超える body は検証せずに handler へ渡る。本家はキーワードや利用者の数に上限
+// を持たないので、普通の編集でも超えうる。そのときも名前の長さは本家と同じに
+// 見る (以前は 128 文字まで保存し、それより長いと列に入らず 500 だった)。
+func nameTooLong(name string) bool {
+	return utf8.RuneCountInString(name) > antennaNameMaxLength
+}
+
+func invalidName(c echo.Context) error {
+	return apierr.JSONInvalidParamClient(c, "#/properties/name/maxLength", "must NOT have more than 100 characters")
+}
+
 // Create handles POST /api/antennas/create.
 func (h *Handler) Create(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req CreateRequest
 	if err := c.Bind(&req); err != nil || req.missingRequired() {
 		return apierr.JSONInvalidParam(c)
+	}
+	if nameTooLong(req.Name) {
+		return invalidName(c)
 	}
 	// upstream create.ts: keywords と excludeKeywords が両方とも空なら EMPTY_KEYWORD。
 	if coreantenna.AllKeywordsEmpty(req.Keywords) && coreantenna.AllKeywordsEmpty(req.ExcludeKeywords) {
@@ -252,20 +276,22 @@ func (h *Handler) Show(c echo.Context) error {
 
 // UpdateRequest is the request body for antennas/update.
 type UpdateRequest struct {
-	AntennaID                      string               `json:"antennaId"`
-	Name                           *string              `json:"name"`
-	Src                            *model.AntennaSource `json:"src"`
-	UserListID                     *string              `json:"userListId"`
-	Users                          *[]string            `json:"users"`
-	Keywords                       *[][]string          `json:"keywords"`
-	ExcludeKeywords                *[][]string          `json:"excludeKeywords"`
-	CaseSensitive                  *bool                `json:"caseSensitive"`
-	ExcludeBots                    *bool                `json:"excludeBots"`
-	WithReplies                    *bool                `json:"withReplies"`
-	WithFile                       *bool                `json:"withFile"`
-	LocalOnly                      *bool                `json:"localOnly"`
-	IsActive                       *bool                `json:"isActive"`
-	ExcludeNotesInSensitiveChannel *bool                `json:"excludeNotesInSensitiveChannel"`
+	AntennaID string               `json:"antennaId"`
+	Name      *string              `json:"name"`
+	Src       *model.AntennaSource `json:"src"`
+	// UserListID distinguishes null (clear the list, like upstream) from
+	// absent (#3748).
+	UserListID                     optional.Nullable[string] `json:"userListId"`
+	Users                          *[]string                 `json:"users"`
+	Keywords                       *[][]string               `json:"keywords"`
+	ExcludeKeywords                *[][]string               `json:"excludeKeywords"`
+	CaseSensitive                  *bool                     `json:"caseSensitive"`
+	ExcludeBots                    *bool                     `json:"excludeBots"`
+	WithReplies                    *bool                     `json:"withReplies"`
+	WithFile                       *bool                     `json:"withFile"`
+	LocalOnly                      *bool                     `json:"localOnly"`
+	IsActive                       *bool                     `json:"isActive"`
+	ExcludeNotesInSensitiveChannel *bool                     `json:"excludeNotesInSensitiveChannel"`
 }
 
 // Update handles POST /api/antennas/update.
@@ -274,6 +300,9 @@ func (h *Handler) Update(c echo.Context) error {
 	var req UpdateRequest
 	if err := c.Bind(&req); err != nil || req.AntennaID == "" {
 		return apierr.JSONInvalidParam(c)
+	}
+	if req.Name != nil && nameTooLong(*req.Name) {
+		return invalidName(c)
 	}
 	// upstream update.ts: keywords/excludeKeywords が両方指定され、かつ両方とも
 	// 空なら EMPTY_KEYWORD (片方のみ指定の場合は検査しない)。
@@ -284,7 +313,8 @@ func (h *Handler) Update(c echo.Context) error {
 	a, err := h.svc.Update(user.ID, req.AntennaID, coreantenna.UpdateInput{
 		Name:                           req.Name,
 		Src:                            req.Src,
-		UserListID:                     req.UserListID,
+		UserListID:                     req.UserListID.Value,
+		ClearUserListID:                req.UserListID.IsNull(),
 		Users:                          req.Users,
 		Keywords:                       req.Keywords,
 		ExcludeKeywords:                req.ExcludeKeywords,
@@ -379,12 +409,12 @@ func (h *Handler) List(c echo.Context) error {
 // 設定しないと FE が無限スクロールするたびに同じ最新 N 件を取り続けて
 // 「同じノートが何度も表示される」現象になる。
 type NotesRequest struct {
-	AntennaID string `json:"antennaId"`
-	Limit     *int   `json:"limit"`
-	SinceID   string `json:"sinceId"`
-	UntilID   string `json:"untilId"`
-	SinceDate *int64 `json:"sinceDate"`
-	UntilDate *int64 `json:"untilDate"`
+	AntennaID string     `json:"antennaId"`
+	Limit     *jsnum.Int `json:"limit"`
+	SinceID   string     `json:"sinceId"`
+	UntilID   string     `json:"untilId"`
+	SinceDate *jsnum.Int `json:"sinceDate"`
+	UntilDate *jsnum.Int `json:"untilDate"`
 }
 
 // Notes handles POST /api/antennas/notes.
@@ -395,11 +425,11 @@ func (h *Handler) Notes(c echo.Context) error {
 		return apierr.JSONInvalidParam(c)
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}

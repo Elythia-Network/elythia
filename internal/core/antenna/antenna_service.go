@@ -335,9 +335,12 @@ func (s *Service) Show(ownerID, antennaID string) (*model.Antenna, error) {
 // UpdateInput holds the editable fields of an antenna. nil の field は更新
 // されない。
 type UpdateInput struct {
-	Name                           *string
-	Src                            *model.AntennaSource
+	Name *string
+	Src  *model.AntennaSource
+	// UserListID sets the list; ClearUserListID (userListId: null in the
+	// API) clears it. Both unset leaves it as it is.
 	UserListID                     *string
+	ClearUserListID                bool
 	Users                          *[]string
 	Keywords                       *[][]string
 	ExcludeKeywords                *[][]string
@@ -372,7 +375,10 @@ func (s *Service) Update(ownerID, antennaID string, in UpdateInput) (*model.Ante
 		finalSrc = *in.Src
 	}
 	finalListID := a.UserListID
-	if in.UserListID != nil {
+	switch {
+	case in.ClearUserListID:
+		finalListID = nil
+	case in.UserListID != nil:
 		finalListID = in.UserListID
 	}
 	if finalSrc == model.AntennaSourceList {
@@ -402,10 +408,15 @@ func (s *Service) Update(ownerID, antennaID string, in UpdateInput) (*model.Ante
 		if a.UserListID != nil || in.UserListID != nil {
 			fields["userListId"] = nil
 		}
+	case in.ClearUserListID:
+		// 本家と同じく、userListId: null でリストの指定を外す (#3748)。
+		fields["userListId"] = nil
 	case in.UserListID != nil:
-		// #2106 L48 (documented limitation): Go の *string は JSON の null と
-		// absent を区別できないため、mk-go は「空文字列で clear」の convention を
-		// 採る (JSON null での clear は未対応)。
+		// 空文字列も外す。本家の update.ts は userListId を真偽で見るので、
+		// '' も null と同じく null を書く。API からは本家に揃えた検証
+		// (misskey:id の形) が先に 400 にするので、届くのは検証を飛ばした
+		// 入力だけ (#3748。それまでは null で外せず、これが外す唯一の手段
+		// だった。#2106 L48)。
 		if *in.UserListID == "" {
 			fields["userListId"] = nil
 		} else {
