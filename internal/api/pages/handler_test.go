@@ -1062,3 +1062,36 @@ func TestCreate_OrdinaryJSONBStillPasses(t *testing.T) {
 	require.NoError(t, h.Create(c))
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
+
+// summary / eyeCatchingImageId の null は、本家と同じく外す。省略は今の値を
+// 残す (#3751)。同梱の frontend は、アイキャッチ画像を外すと null を送る。
+func TestUpdate_NullClearsSummaryAndEyeCatchingImage(t *testing.T) {
+	h, repo, _ := newHandler(t)
+	summary, img := "s", "img"
+	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "alice", Name: "alpha", Title: "t", Summary: &summary, EyeCatchingImageID: &img}
+
+	c, rec := newReq(t, `{"pageId":"p1","title":"t2"}`)
+	setUser(c, "alice")
+	require.NoError(t, h.Update(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	last := repo.UpdateFieldsCalls[len(repo.UpdateFieldsCalls)-1]
+	assert.NotContains(t, last, "summary", "an absent summary must be kept")
+	assert.NotContains(t, last, "eyeCatchingImageId", "an absent eyeCatchingImageId must be kept")
+	require.NotNil(t, repo.Pages["p1"].Summary)
+	require.NotNil(t, repo.Pages["p1"].EyeCatchingImageID)
+
+	c, rec = newReq(t, `{"pageId":"p1","summary":null,"eyeCatchingImageId":null}`)
+	setUser(c, "alice")
+	require.NoError(t, h.Update(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	last = repo.UpdateFieldsCalls[len(repo.UpdateFieldsCalls)-1]
+	require.Contains(t, last, "summary")
+	require.Contains(t, last, "eyeCatchingImageId")
+	assert.Nil(t, repo.Pages["p1"].Summary)
+	assert.Nil(t, repo.Pages["p1"].EyeCatchingImageID)
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Nil(t, resp["summary"])
+	assert.Nil(t, resp["eyeCatchingImageId"])
+}
