@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	coreflash "github.com/elythia-network/elythia/internal/core/flash"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
@@ -57,10 +58,13 @@ func (h *Handler) SetModLog(m ModLogger) { h.modLog = m }
 // CreateRequest is the request body for flash/create. summary / permissions は
 // upstream paramDef で required なので pointer で受けて「キー欠如」を検出する
 // (#1548)。空文字 / 空配列は present 扱い (= upstream の required は presence 検査)。
+//
+// title / script も required だが、本家は空文字列をそのまま保存する。pointer
+// で受けて欠落だけを 400 にする (#3750)。
 type CreateRequest struct {
-	Title       string    `json:"title"`
+	Title       *string   `json:"title"`
 	Summary     *string   `json:"summary"`
-	Script      string    `json:"script"`
+	Script      *string   `json:"script"`
 	Permissions *[]string `json:"permissions"`
 	Visibility  string    `json:"visibility"`
 }
@@ -70,8 +74,8 @@ func (h *Handler) Create(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req CreateRequest
 	// upstream paramDef required: ['title','summary','script','permissions']。
-	// summary/permissions の欠如は 400 にする (title/script は従来どおり空も弾く)。
-	if err := c.Bind(&req); err != nil || req.Title == "" || req.Script == "" || req.Summary == nil || req.Permissions == nil {
+	// 欠如だけを 400 にする。
+	if err := c.Bind(&req); err != nil || req.Title == nil || req.Script == nil || req.Summary == nil || req.Permissions == nil {
 		return apierr.JSONInvalidParam(c)
 	}
 	// upstream flash/create.ts は visibility:{enum:['public','private']}。空は public
@@ -81,9 +85,9 @@ func (h *Handler) Create(c echo.Context) error {
 	}
 	f, err := h.svc.Create(coreflash.CreateInput{
 		OwnerID:     user.ID,
-		Title:       req.Title,
+		Title:       *req.Title,
 		Summary:     *req.Summary,
-		Script:      req.Script,
+		Script:      *req.Script,
 		Permissions: *req.Permissions,
 		Visibility:  req.Visibility,
 	})
@@ -160,8 +164,6 @@ func (h *Handler) Update(c echo.Context) error {
 			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_FLASH", "No such flash.", "611e13d2-309e-419a-a5e4-e0422da39b02"))
 		case errors.Is(err, coreflash.ErrAccessDenied):
 			return c.JSON(http.StatusBadRequest, apierr.Error("ACCESS_DENIED", "Access denied.", "08e60c88-5948-478e-a132-02ec701d67b2"))
-		case errors.Is(err, coreflash.ErrFlashTitleRequired):
-			return apierr.JSONInvalidParam(c)
 		}
 		return apierr.JSONInternalError(c)
 	}
@@ -226,25 +228,34 @@ func (h *Handler) usernameOf(userID string) string {
 	return u.Username
 }
 
-// PaginationRequest is the shared body for list-style endpoints.
+// PaginationRequest is the shared body for the cursor-paged list endpoints
+// (flash/my, flash/my-likes and their i/flashs aliases).
+//
+// offset は本家の paramDef に無いので読まない。limit と sinceDate / untilDate
+// は、本家(ajv の integer)と同じく値が整数の小数を受ける (#3750)。
 type PaginationRequest struct {
-	Limit     *int   `json:"limit"`
-	Offset    int    `json:"offset"`
-	SinceID   string `json:"sinceId"`
-	UntilID   string `json:"untilId"`
-	SinceDate *int64 `json:"sinceDate"`
-	UntilDate *int64 `json:"untilDate"`
+	Limit     *jsnum.Int `json:"limit"`
+	SinceID   string     `json:"sinceId"`
+	UntilID   string     `json:"untilId"`
+	SinceDate *jsnum.Int `json:"sinceDate"`
+	UntilDate *jsnum.Int `json:"untilDate"`
+}
+
+// FeaturedRequest is the request body for flash/featured. Upstream pages it
+// by offset only; the cursors are not read (#3750).
+type FeaturedRequest struct {
+	Offset jsnum.Int  `json:"offset"`
+	Limit  *jsnum.Int `json:"limit"`
 }
 
 // SearchRequest is the request body for flash/search.
 type SearchRequest struct {
-	Query     string `json:"query"`
-	Limit     *int   `json:"limit"`
-	Offset    int    `json:"offset"`
-	SinceID   string `json:"sinceId"`
-	UntilID   string `json:"untilId"`
-	SinceDate *int64 `json:"sinceDate"`
-	UntilDate *int64 `json:"untilDate"`
+	Query     string     `json:"query"`
+	Limit     *jsnum.Int `json:"limit"`
+	SinceID   string     `json:"sinceId"`
+	UntilID   string     `json:"untilId"`
+	SinceDate *jsnum.Int `json:"sinceDate"`
+	UntilDate *jsnum.Int `json:"untilDate"`
 }
 
 // My handles POST /api/i/flashs and POST /api/flash/my (own list).
@@ -257,15 +268,15 @@ func (h *Handler) My(c echo.Context) error {
 		return apierr.JSONInvalidParam(c)
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	rows, err := h.svc.My(user.ID, sinceID, untilID, limit, req.Offset)
+	rows, err := h.svc.My(user.ID, sinceID, untilID, limit, 0)
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -278,20 +289,18 @@ func (h *Handler) My(c echo.Context) error {
 
 // Featured handles POST /api/flash/featured.
 func (h *Handler) Featured(c echo.Context) error {
-	var req PaginationRequest
+	var req FeaturedRequest
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
 	}
-	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
-	if !cursorOK {
-		return apierr.JSONInvalidParam(c)
-	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	rows, err := h.svc.Featured(sinceID, untilID, limit, req.Offset)
+	// 本家の paramDef は offset の minimum を 0 にする。揃えた検証が先に 400 に
+	// するので、負の値が届くのは検証を飛ばした入力だけ。repository は正の値の
+	// ときだけ OFFSET を付けるので、0 と同じになる。
+	rows, err := h.svc.Featured("", "", limit, int(req.Offset))
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -305,15 +314,15 @@ func (h *Handler) Search(c echo.Context) error {
 		return apierr.JSONInvalidParam(c)
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 5, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 5, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	rows, err := h.svc.Search(req.Query, sinceID, untilID, limit, req.Offset)
+	rows, err := h.svc.Search(req.Query, sinceID, untilID, limit, 0)
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -381,15 +390,15 @@ func (h *Handler) MyLikes(c echo.Context) error {
 		return apierr.JSONInvalidParam(c)
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	pairs, err := h.svc.MyLikes(user.ID, req.Search, sinceID, untilID, limit, req.Offset)
+	pairs, err := h.svc.MyLikes(user.ID, req.Search, sinceID, untilID, limit, 0)
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}

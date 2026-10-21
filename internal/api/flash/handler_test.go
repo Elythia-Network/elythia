@@ -110,9 +110,10 @@ func TestCreate_BadJSON(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
+// title / script の欠落は 400。他の required が揃っていても弾く。
 func TestCreate_TitleRequired(t *testing.T) {
 	h, _, _ := newHandler(t)
-	c, rec := newReq(t, `{"script":"x"}`)
+	c, rec := newReq(t, `{"script":"x","summary":"","permissions":[]}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Create(c))
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
@@ -120,10 +121,24 @@ func TestCreate_TitleRequired(t *testing.T) {
 
 func TestCreate_ScriptRequired(t *testing.T) {
 	h, _, _ := newHandler(t)
-	c, rec := newReq(t, `{"title":"t"}`)
+	c, rec := newReq(t, `{"title":"t","summary":"","permissions":[]}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Create(c))
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+// 本家は空の title / script をそのまま保存する (#3750)。
+func TestCreate_EmptyTitleAndScriptAccepted(t *testing.T) {
+	h, repo, _ := newHandler(t)
+	c, rec := newReq(t, `{"title":"","script":"","summary":"","permissions":[]}`)
+	setUser(c, "alice")
+	require.NoError(t, h.Create(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Len(t, repo.Flashes, 1)
+	for _, f := range repo.Flashes {
+		assert.Equal(t, "", f.Title)
+		assert.Equal(t, "", f.Script)
+	}
 }
 
 // failingFlashRepo causes Create to fail.
@@ -214,13 +229,15 @@ func TestUpdate_AccessDenied(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
+// 本家は空の title もそのまま保存する (#3750)。
 func TestUpdate_TitleEmpty(t *testing.T) {
 	h, repo, _ := newHandler(t)
-	repo.Flashes["f1"] = &model.Flash{ID: "f1", UserID: "alice"}
+	repo.Flashes["f1"] = &model.Flash{ID: "f1", UserID: "alice", Title: "old"}
 	c, rec := newReq(t, `{"flashId":"f1","title":""}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Update(c))
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, "", repo.LastUpdates["title"])
 }
 
 // failingUpdateRepo causes UpdateFields to fail.
@@ -732,7 +749,6 @@ func TestCursorGuardRejectsUnstorableCursor(t *testing.T) {
 		fn   func(h *Handler) func(echo.Context) error
 	}{
 		{"My", func(h *Handler) func(echo.Context) error { return h.My }},
-		{"Featured", func(h *Handler) func(echo.Context) error { return h.Featured }},
 		{"Search", func(h *Handler) func(echo.Context) error { return h.Search }},
 		{"MyLikes", func(h *Handler) func(echo.Context) error { return h.MyLikes }},
 	} {
@@ -795,4 +811,83 @@ func TestShow_PrivateStillHiddenFromStranger(t *testing.T) {
 	setUser(c, "stranger")
 	require.NoError(t, h.Show(c))
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+// flashIDs decodes a flash list response into its ids, in order.
+func flashIDs(t *testing.T, rec *httptest.ResponseRecorder) []string {
+	t.Helper()
+	var rows []map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &rows))
+	ids := make([]string, 0, len(rows))
+	for _, r := range rows {
+		ids = append(ids, r["id"].(string))
+	}
+	return ids
+}
+
+// flash/my と flash/search は、本家の paramDef に無い offset を読まない。
+// flash/featured は本家と同じく offset で送り、cursor を読まない (#3750)。
+func TestListParamsFollowUpstream(t *testing.T) {
+	h, repo, _ := newHandler(t)
+	repo.Flashes["f1"] = &model.Flash{ID: "f1", UserID: "alice", Title: "match", Visibility: "public", LikedCount: 2}
+	repo.Flashes["f2"] = &model.Flash{ID: "f2", UserID: "alice", Title: "match", Visibility: "public", LikedCount: 1}
+
+	c, rec := newReq(t, `{"offset":1}`)
+	setUser(c, "alice")
+	require.NoError(t, h.My(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Len(t, flashIDs(t, rec), 2, "flash/my must not read offset")
+
+	c, rec = newReq(t, `{"query":"match","offset":1}`)
+	setUser(c, "alice")
+	require.NoError(t, h.Search(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Len(t, flashIDs(t, rec), 2, "flash/search must not read offset")
+
+	c, rec = newReq(t, `{"offset":1}`)
+	setUser(c, "alice")
+	require.NoError(t, h.Featured(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, []string{"f2"}, flashIDs(t, rec), "flash/featured pages by offset")
+
+	c, rec = newReq(t, `{"untilId":"f2"}`)
+	setUser(c, "alice")
+	require.NoError(t, h.Featured(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, []string{"f1", "f2"}, flashIDs(t, rec), "flash/featured must not read untilId")
+
+	// flash/my-likes も offset を読まない。
+	for _, id := range []string{"f1", "f2"} {
+		c, rec = newReq(t, `{"flashId":"`+id+`"}`)
+		setUser(c, "bob")
+		require.NoError(t, h.Like(c))
+		require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+	}
+	c, rec = newReq(t, `{"offset":1}`)
+	setUser(c, "bob")
+	require.NoError(t, h.MyLikes(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var likes []map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &likes))
+	assert.Len(t, likes, 2, "flash/my-likes must not read offset")
+}
+
+// limit / offset / sinceDate / untilDate は、本家(ajv の integer)と同じく値が
+// 整数の小数を受ける (#3750)。
+func TestIntegerValuedFractionsAreAccepted(t *testing.T) {
+	h, _, _ := newHandler(t)
+	for _, tc := range []struct {
+		fn   func(echo.Context) error
+		body string
+	}{
+		{h.My, `{"limit":10.0,"sinceDate":1.0}`},
+		{h.MyLikes, `{"limit":1e1,"untilDate":4102444800000.0}`},
+		{h.Featured, `{"limit":10.0,"offset":1e1}`},
+		{h.Search, `{"query":"x","limit":5.0}`},
+	} {
+		c, rec := newReq(t, tc.body)
+		setUser(c, "alice")
+		require.NoError(t, tc.fn(c))
+		assert.Equal(t, http.StatusOK, rec.Code, tc.body)
+	}
 }
