@@ -114,7 +114,8 @@ const DefaultEnforcedMaxBody = 16 << 10
 // 数に対して十分に大きく、decodeの確保は上限の4096より1桁以上小さくなる。
 // 例外はantennas/create・updateで、本家はkeywords・excludeKeywords・usersの
 // 数に上限を持たないので、多く並べたbodyは超えうる。超えたbodyは拒否せず
-// handlerへ渡す(#3748)。
+// handlerへ渡す(#3748)。flash/create・updateも、scriptが約16KiBを超えると
+// 大きさの上限を超える(#3750)。
 const DefaultEnforcedMaxValues = 256
 
 // input is what upstream hands to ajv for one request, or why the request is
