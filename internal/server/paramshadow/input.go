@@ -112,6 +112,9 @@ const DefaultEnforcedMaxBody = 16 << 10
 // (#3742のレビュー1周目M-1)。正当なbodyは多くて十数トークン(clips/notesの
 // 全項目と`i`で18、charts/*で12、hashtags/usersで16)。本家のparamDefの項目の
 // 数に対して十分に大きく、decodeの確保は上限の4096より1桁以上小さくなる。
+// 例外はantennas/create・updateで、本家はkeywords・excludeKeywords・usersの
+// 数に上限を持たないので、多く並べたbodyは超えうる。超えたbodyは拒否せず
+// handlerへ渡す(#3748)。
 const DefaultEnforcedMaxValues = 256
 
 // input is what upstream hands to ajv for one request, or why the request is
