@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/meself"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/api/userrelation"
@@ -124,13 +125,13 @@ var listSortOrders = map[string]string{
 
 // List handles POST /api/hashtags/list.
 func (h *Handler) List(c echo.Context) error {
+	// offset は本家の paramDef に無いので、本家と同じく読まない (#3746)。
 	var req struct {
-		Limit                    *int   `json:"limit"`
-		Sort                     string `json:"sort"`
-		Offset                   int    `json:"offset"`
-		AttachedToUserOnly       bool   `json:"attachedToUserOnly"`
-		AttachedToLocalUserOnly  bool   `json:"attachedToLocalUserOnly"`
-		AttachedToRemoteUserOnly bool   `json:"attachedToRemoteUserOnly"`
+		Limit                    *jsnum.Int `json:"limit"`
+		Sort                     string     `json:"sort"`
+		AttachedToUserOnly       bool       `json:"attachedToUserOnly"`
+		AttachedToLocalUserOnly  bool       `json:"attachedToLocalUserOnly"`
+		AttachedToRemoteUserOnly bool       `json:"attachedToRemoteUserOnly"`
 	}
 	if err := c.Bind(&req); err != nil || req.Sort == "" {
 		// upstream Misskey TS は paramDef で sort を required にしている (#925)。
@@ -141,7 +142,7 @@ func (h *Handler) List(c echo.Context) error {
 	if !ok {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "sort must be one of upstream-defined enum.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -157,9 +158,6 @@ func (h *Handler) List(c echo.Context) error {
 		q = q.Where(`"attachedRemoteUsersCount" != 0`)
 	}
 	q = q.Order(order).Limit(limit)
-	if req.Offset > 0 {
-		q = q.Offset(req.Offset)
-	}
 	var tags []*model.Hashtag
 	if err := q.Find(&tags).Error; err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
@@ -173,33 +171,36 @@ func (h *Handler) List(c echo.Context) error {
 
 // Search handles POST /api/hashtags/search.
 func (h *Handler) Search(c echo.Context) error {
+	// query は欠落(nil)と空文字列を区別する。本家は空文字列を通し、前方一致の
+	// '%' で全タグから返す (#3746)。
 	var req struct {
-		Query  string `json:"query"`
-		Limit  *int   `json:"limit"`
-		Offset int    `json:"offset"`
+		Query  *string    `json:"query"`
+		Limit  *jsnum.Int `json:"limit"`
+		Offset jsnum.Int  `json:"offset"`
 	}
-	if err := c.Bind(&req); err != nil || req.Query == "" {
+	if err := c.Bind(&req); err != nil || req.Query == nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "query is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	query := *req.Query
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
 	// 列に入らない文字は保存された値に現れないので、一致しえない (#3025)。
 	// **引く前に弾く** — LIKE のパターンに載せるとクエリごと落ちて 500 になる。
 	// repository 層の検索と同じく、空の結果で答える (エラーではない)。
-	if !colfit.Storable(req.Query) {
+	if !colfit.Storable(query) {
 		return c.JSON(http.StatusOK, []string{})
 	}
 	// upstream search.ts: name LIKE sqlLikeEscape(query.toLowerCase())+'%' (前方一致)
 	// を mentionedLocalUsersCount DESC で並べ offset を適用する。hashtag.name は
 	// normalizeForSearch 済 (lowercase) で格納されるため小文字化で一致する。
 	q := h.db.Model(&model.Hashtag{}).
-		Where(`"name" LIKE ? ESCAPE '\'`, escapeLike(strings.ToLower(req.Query))+"%").
+		Where(`"name" LIKE ? ESCAPE '\'`, escapeLike(strings.ToLower(query))+"%").
 		Order(`"mentionedLocalUsersCount" DESC`).
 		Limit(limit)
 	if req.Offset > 0 {
-		q = q.Offset(req.Offset)
+		q = q.Offset(int(req.Offset))
 	}
 	var tags []*model.Hashtag
 	if err := q.Find(&tags).Error; err != nil {
@@ -214,23 +215,26 @@ func (h *Handler) Search(c echo.Context) error {
 
 // Show handles POST /api/hashtags/show.
 func (h *Handler) Show(c echo.Context) error {
+	// tag は欠落(nil)と空文字列を区別する。本家は空文字列を通し、一致する
+	// タグが無いので NO_SUCH_HASHTAG になる (#3746)。
 	var req struct {
-		Tag string `json:"tag"`
+		Tag *string `json:"tag"`
 	}
-	if err := c.Bind(&req); err != nil || req.Tag == "" {
+	if err := c.Bind(&req); err != nil || req.Tag == nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "tag is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
+	tagName := *req.Tag
 	// upstream show.ts: hashtags.findOneBy({name: normalizeForSearch(tag)})。
 	// hashtag.name は normalizeForSearch (NFKC+lowercase) 済で格納されるため、
 	// 入力も同じく正規化して一致させる ('Misskey' → 'misskey')。
 	// 列に入らない文字を含む tag はどの行とも一致しえない (#3025)。**引く前に
 	// 弾く** — 比較の右辺に載せるとクエリごと落ち、下の `err != nil` が
 	// **DB 障害まで NO_SUCH_HASHTAG に潰す**経路に流れ込む。
-	if !colfit.Storable(req.Tag) {
+	if !colfit.Storable(tagName) {
 		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_HASHTAG", "No such hashtag.", "110ee688-193e-4a3a-9ecf-c167b2e6981e"))
 	}
 	var tag model.Hashtag
-	if err := h.db.Where("name = ?", searchnorm.Normalize(req.Tag)).First(&tag).Error; err != nil {
+	if err := h.db.Where("name = ?", searchnorm.Normalize(tagName)).First(&tag).Error; err != nil {
 		// HTTP semantics 的には not-found = 404 が望ましいが、upstream
 		// Misskey TS は ApiError の既定動作で 400 を返している (#925)。
 		// drop-in 互換を優先して 400 + NO_SUCH_HASHTAG body に揃える。
@@ -506,15 +510,17 @@ const usersAliveWindow = 5 * 24 * time.Hour
 // 正規化して array containment (`tags @> {normTag}`) する。user.tags 側も同じ
 // 正規化で populate される前提 (Part 2)。
 func (h *Handler) Users(c echo.Context) error {
+	// tag は欠落(nil)と空文字列を区別する。本家は空文字列を通し、空の結果を
+	// 返す (#3746)。
 	var req struct {
-		Tag    string `json:"tag"`
-		Sort   string `json:"sort"`
-		State  string `json:"state"`
-		Origin string `json:"origin"`
-		Limit  *int   `json:"limit"`
-		Offset int    `json:"offset"`
+		Tag    *string    `json:"tag"`
+		Sort   string     `json:"sort"`
+		State  string     `json:"state"`
+		Origin string     `json:"origin"`
+		Limit  *jsnum.Int `json:"limit"`
+		Offset jsnum.Int  `json:"offset"`
 	}
-	if err := c.Bind(&req); err != nil || req.Tag == "" || req.Sort == "" {
+	if err := c.Bind(&req); err != nil || req.Tag == nil || req.Sort == "" {
 		// upstream Misskey TS は paramDef で tag + sort を required にしている (#925)。
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "tag and sort are required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
@@ -533,22 +539,23 @@ func (h *Handler) Users(c echo.Context) error {
 	if _, ok := validUsersOrigins[req.Origin]; !ok {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "origin must be one of upstream-defined enum.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
 	if req.Offset < 0 {
 		req.Offset = 0
 	}
+	tagValue := *req.Tag
 
 	// 列に入らない文字を含む tag はどの行とも一致しえない (#3025)。配列の
 	// containment も bind parameter なので、載せるとクエリごと落ちる。
-	if !colfit.Storable(req.Tag) {
+	if !colfit.Storable(tagValue) {
 		return c.JSON(http.StatusOK, []any{})
 	}
 	// containment query。upstream は `:tag <@ user.tags` (= tag 配列が user.tags の
 	// 部分集合)。単一要素なので `tags @> {normTag}` と等価。
-	normTag := searchnorm.Normalize(req.Tag)
+	normTag := searchnorm.Normalize(tagValue)
 	q := h.db.Model(&model.User{}).
 		Where("tags @> ?", model.StringArray{normTag}).
 		Where("\"isSuspended\" = FALSE")
@@ -577,7 +584,7 @@ func (h *Handler) Users(c echo.Context) error {
 	}
 
 	var users []*model.User
-	if err := q.Limit(limit).Offset(req.Offset).Find(&users).Error; err != nil {
+	if err := q.Limit(limit).Offset(int(req.Offset)).Find(&users).Error; err != nil {
 		return apierr.JSONInternalError(c)
 	}
 
