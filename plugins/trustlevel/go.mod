@@ -1,6 +1,6 @@
 module github.com/elythia-network/elythia-plugin-trustlevel
 
-go 1.27.2
+go 1.27.3
 
 require (
 	github.com/elythia-network/elythia v0.0.0
