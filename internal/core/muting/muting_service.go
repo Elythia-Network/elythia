@@ -146,13 +146,13 @@ func (s *Service) IsMuted(muterID, muteeID string) (bool, error) {
 	return s.mutingRepo.Exists(muterID, muteeID)
 }
 
-// List returns the user's mutings with cursor (sinceID/untilID) or offset
-// pagination. Cursor 指定時は offset 無視 (upstream makePaginationQuery と一致)。
-func (s *Service) List(muterID, sinceID, untilID string, limit, offset int) ([]*model.Muting, error) {
+// List returns the user's mutings with cursor (sinceID/untilID) pagination.
+// 本家の paramDef に offset は無いので受けない (#3760)。
+func (s *Service) List(muterID, sinceID, untilID string, limit int) ([]*model.Muting, error) {
 	if limit <= 0 {
 		limit = 10
 	}
-	return s.mutingRepo.ListByMuter(muterID, sinceID, untilID, limit, offset)
+	return s.mutingRepo.ListByMuter(muterID, sinceID, untilID, limit, 0)
 }
 
 // RenoteService manages renote-only mutes (the mutee can still post original
@@ -242,13 +242,13 @@ func (s *RenoteService) IsRenoteMuted(muterID, muteeID string) (bool, error) {
 	return s.renoteMutingRepo.Exists(muterID, muteeID)
 }
 
-// List returns the user's renote mutings with cursor (sinceID/untilID) or
-// offset pagination.
-func (s *RenoteService) List(muterID, sinceID, untilID string, limit, offset int) ([]*model.RenoteMuting, error) {
+// List returns the user's renote mutings with cursor (sinceID/untilID)
+// pagination. 本家の paramDef に offset は無いので受けない (#3760)。
+func (s *RenoteService) List(muterID, sinceID, untilID string, limit int) ([]*model.RenoteMuting, error) {
 	if limit <= 0 {
 		limit = 10
 	}
-	return s.renoteMutingRepo.ListByMuter(muterID, sinceID, untilID, limit, offset)
+	return s.renoteMutingRepo.ListByMuter(muterID, sinceID, untilID, limit, 0)
 }
 
 // UserMaterializer promotes a relay-only author out of the ephemeral store
