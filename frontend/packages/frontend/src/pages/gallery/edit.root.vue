@@ -63,7 +63,10 @@ function chooseFile(evt: MouseEvent) {
 		anchorElement: evt.currentTarget ?? evt.target,
 		multiple: true,
 	}).then(selected => {
-		files.value = files.value.concat(selected);
+		// 同じファイルを2回選んでも1つにする。サーバーは本家と同じく、重複した
+		// fileIdsを400にする (paramDefのuniqueItems、#3754)。
+		const added = selected.filter(f => !files.value.some(x => x.id === f.id));
+		files.value = files.value.concat(added);
 	});
 }
 
