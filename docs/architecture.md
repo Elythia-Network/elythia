@@ -140,12 +140,12 @@ api-compat.md の 444 + 58) は、ルート数の段落を最後に直した 202
 |---|---|
 | `apierr` | Misskey 互換のエラーコード/UUID 定義 |
 | `pagination` | sinceId/untilId/sinceDate/untilDate の正規化 |
-| `paramschema` | 本家の`paramDef`(引数のJSON Schema)で、本家のajvと同じ判定・同じ最初のエラー・同じdefaultの挿入をする検証器(#3673)。`internal/server/paramshadow`がhandlerの前で走らせる。`clips/*`と`charts/*`では拒否に使い(#3742、#3744)、それ以外の本家のendpointでは、検証だけを走らせてhandlerと判定が分かれた件数を数える(#3677) |
+| `paramschema` | 本家の`paramDef`(引数のJSON Schema)で、本家のajvと同じ判定・同じ最初のエラー・同じdefaultの挿入をする検証器(#3673)。`internal/server/paramshadow`がhandlerの前で走らせる。`clips/*`・`charts/*`・`hashtags/*`では拒否に使い(#3742、#3744、#3746)、それ以外の本家のendpointでは、検証だけを走らせてhandlerと判定が分かれた件数を数える(#3677) |
 | `optional` | JSON の null/absent を区別する Nullable 型 |
 | `notehide` | per-viewer の hideNote ゲートを全 REST に一律適用（TS は各 pack 内 `hideNote`） |
 | `userrelation` | viewer 視点の relation block (isFollowing 等) 解決 |
 | `middleware` (**`internal/server/middleware`**。`internal/api/` 配下ではない) | 認証 / rate limit / WWW-Authenticate / Cache-Control |
-| `paramshadow` (**`internal/server/paramshadow`**) | 本家の`paramDef`での検証をhandlerの前で走らせる。本家に揃えたendpoint(`clips/*`・`charts/*`)では本家と同じ400で拒否し(#3742)、それ以外では応答を変えずに、判定が分かれた件数をログに出す(#3677、[param-shadow.md](param-shadow.md)) |
+| `paramshadow` (**`internal/server/paramshadow`**) | 本家の`paramDef`での検証をhandlerの前で走らせる。本家に揃えたendpoint(`clips/*`・`charts/*`・`hashtags/*`)では本家と同じ400で拒否し(#3742)、それ以外では応答を変えずに、判定が分かれた件数をログに出す(#3677、[param-shadow.md](param-shadow.md)) |
 
 ### 3.2 `internal/core/` — ビジネスロジック（≈50 パッケージ）
 
