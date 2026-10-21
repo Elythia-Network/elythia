@@ -19,8 +19,8 @@ const paramShadowContextKey = "mk.server.paramShadow"
 // validated with upstream's paramDef and rejected with upstream's 400
 // (clips/* in #3742, the first step of #3667; charts/* in #3744; hashtags/*
 // in #3746; antennas/* in #3748; flash/* in #3750; gallery/* in #3754;
-// following/* in #3756). The other upstream endpoints are only validated and
-// counted (#3677).
+// following/* in #3756; channels/* in #3758). The other upstream endpoints
+// are only validated and counted (#3677).
 //
 // 本家に揃える対象はパッケージ単位で広げる(#3667)。足したら、そのendpoint
 // で本家と判定が分かれる入力を、手書きの検査が拒否していないか(本家が通す
@@ -92,6 +92,22 @@ var paramEnforcedEndpoints = []string{
 	"following/requests/sent",
 	"following/update",
 	"following/update-all",
+	"channels/create",
+	"channels/favorite",
+	"channels/featured",
+	"channels/follow",
+	"channels/followed",
+	"channels/mute/create",
+	"channels/mute/delete",
+	"channels/mute/list",
+	"channels/my-favorites",
+	"channels/owned",
+	"channels/search",
+	"channels/show",
+	"channels/timeline",
+	"channels/unfavorite",
+	"channels/unfollow",
+	"channels/update",
 }
 
 // paramShadowMiddleware returns the /api group middleware that enables the

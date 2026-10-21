@@ -1545,7 +1545,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 数えたいので、その後ろに置く。kindを持つendpointではRequireScopeなどの
 	// gateが利用者を戻す。
 	api.Use(middleware.HideAppUserWithoutRead())
-	// 本家のparamDefで引数を検証する。本家に揃えたendpoint(clips/*、charts/*、hashtags/*、antennas/*、flash/*、gallery/*、following/*)では本家と
+	// 本家のparamDefで引数を検証する。本家に揃えたendpoint(clips/*、charts/*、hashtags/*、antennas/*、flash/*、gallery/*、following/*、channels/*)では本家と
 	// 同じ400で拒否し(#3742)、それ以外では応答を変えずに、handlerと判定が
 	// 分かれた件数を数える(#3677)。検証そのものはrouteのmiddlewareの末尾
 	// (withParamShadow)で走る。
