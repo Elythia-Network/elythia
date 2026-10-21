@@ -107,6 +107,7 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	cleanup := func() {
 		require.NoError(t, db.Exec(`DELETE FROM clip WHERE "userId" = ?`, userID).Error)
 		require.NoError(t, db.Exec(`DELETE FROM antenna WHERE "userId" = ?`, userID).Error)
+		require.NoError(t, db.Exec(`DELETE FROM flash WHERE "userId" = ?`, userID).Error)
 		require.NoError(t, db.Where("id = ?", userID).Delete(&model.User{}).Error)
 	}
 	cleanup()
