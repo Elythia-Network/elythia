@@ -118,6 +118,37 @@ func WithBudget(cores float64, burst time.Duration) Option {
 	return func(s *shadow) { s.budget = newBudget(cores, burst) }
 }
 
+// WithEnforced makes the middleware answer for the endpoints named (by
+// upstream name): a request the validator rejects gets upstream's 400
+// INVALID_PARAM (paramschema.Error.Response) instead of reaching the handler
+// (#3742). Their requests are validated whatever the budget and the
+// concurrency limit, with the smaller limits DefaultEnforcedMaxBody and
+// DefaultEnforcedMaxValues instead, and are not recorded except KindPanic
+// and KindCompileError. A request that cannot be validated (a Skip* reason,
+// or the GET cast step failing) goes on to the handler, whose own checks
+// stay.
+func WithEnforced(names ...string) Option {
+	return func(s *shadow) {
+		s.enforced = make(map[string]bool, len(names))
+		for _, n := range names {
+			s.enforced[n] = true
+		}
+	}
+}
+
+// WithoutShadow stops validating and recording the requests to the endpoints
+// not given to WithEnforced; they go straight to the handler
+// (disableParamShadow). A paramDef that does not compile is still recorded as
+// KindCompileError.
+func WithoutShadow() Option { return func(s *shadow) { s.shadowOff = true } }
+
+// withEnforcedMaxBody sets the size limit of the enforced endpoints (tests).
+func withEnforcedMaxBody(n int) Option { return func(s *shadow) { s.enforcedMaxBody = n } }
+
+// withEnforcedMaxValues sets the token limit of the enforced endpoints
+// (tests).
+func withEnforcedMaxValues(n int) Option { return func(s *shadow) { s.enforcedMaxValues = n } }
+
 // withClock replaces the clock of the budget (tests).
 func withClock(now func() time.Time) Option { return func(s *shadow) { s.now = now } }
 
@@ -129,9 +160,17 @@ func WithMaxConcurrent(n int) Option {
 }
 
 type shadow struct {
-	eps     map[string]paramschema.Endpoint
-	sink    Sink
-	maxBody int
+	eps  map[string]paramschema.Endpoint
+	sink Sink
+	// enforcedは、検証の結果で拒否するendpoint(本家の名前)。
+	enforced map[string]bool
+	// enforcedMaxBodyとenforcedMaxValuesは、拒否するendpointの大きさと
+	// トークンの上限。予算と枠を通さないので、1件の費用をこちらで抑える。
+	enforcedMaxBody   int
+	enforcedMaxValues int
+	// shadowOffは、enforced以外を検証も記録もせずに通す(disableParamShadow)。
+	shadowOff bool
+	maxBody   int
 	// maxValues はトークンの数の上限。bodyの大きさだけでは、小さな値を並べた
 	// bodyのdecodeの確保を抑えられない(#3677のレビュー2周目M-1)。
 	maxValues int
@@ -147,14 +186,20 @@ type shadow struct {
 // Middleware returns the route middleware that validates the params of the
 // requests to the endpoints of eps (by upstream name; the route is /api/<name>)
 // and reports every outcome to sink. It changes neither the response nor
-// what the handler reads. Install it as a route middleware after the route's
-// credential and permission checks, where upstream runs ajv.
+// what the handler reads, except for the endpoints given to WithEnforced,
+// whose rejected requests get upstream's 400. Install it as a route
+// middleware after the route's credential and permission checks, where
+// upstream runs ajv.
 //
-// The cost is bounded: a body (or query) over the size limit is not
-// validated, and at most the concurrency limit of validations run at once.
+// The cost is bounded: a body (or query) over the size or token limit is not
+// validated, and at most the concurrency limit of validations run at once
+// within the budget. The enforced endpoints skip the budget and the
+// concurrency limit and have the smaller limits DefaultEnforcedMaxBody and
+// DefaultEnforcedMaxValues instead.
 func Middleware(eps map[string]paramschema.Endpoint, sink Sink, opts ...Option) echo.MiddlewareFunc {
 	s := &shadow{
 		eps: eps, sink: sink, maxBody: DefaultMaxBody, maxValues: DefaultMaxValues,
+		enforcedMaxBody: DefaultEnforcedMaxBody, enforcedMaxValues: DefaultEnforcedMaxValues,
 		budget: newBudget(DefaultBudgetCores(), DefaultBudgetBurst), now: time.Now,
 	}
 	WithMaxConcurrent(DefaultMaxConcurrent())(s)
@@ -178,7 +223,13 @@ func (s *shadow) middleware(next echo.HandlerFunc) echo.HandlerFunc {
 			s.sink.Record(Event{Endpoint: name, Kind: KindCompileError})
 			return next(c)
 		}
-		in := s.validate(c, ep)
+		if s.enforced[name] {
+			return s.enforce(c, name, ep, next)
+		}
+		if s.shadowOff {
+			return next(c)
+		}
+		in := s.validate(c, ep, false)
 		switch {
 		case in.skip != "":
 			s.sink.Record(Event{Endpoint: name, Kind: KindSkipped, Skip: in.skip})
@@ -202,6 +253,29 @@ func (s *shadow) middleware(next echo.HandlerFunc) echo.HandlerFunc {
 	}
 }
 
+// enforce validates a request to an enforced endpoint and answers upstream's
+// 400 when the validator rejects it.
+//
+// **検証できない入力は拒否せず、handlerの検査に任せる。** 64KiBを超えるbody
+// やトークンの多いbodyを本家の判定なしに拒否すると、本家が通すリクエストを
+// 落としうる。handlerの手書きの検査は消さずに残してあるので、そこで今までと
+// 同じ判定を受ける。
+func (s *shadow) enforce(c echo.Context, name string, ep paramschema.Endpoint, next echo.HandlerFunc) error {
+	in := s.validate(c, ep, true)
+	switch {
+	case in.panicked:
+		s.sink.Record(Event{Endpoint: name, Kind: KindPanic})
+		return next(c)
+	case !in.rejected, in.cast:
+		// 検証しなかった入力(in.skip)は判定を持たず、rejectedはfalseになる。
+		// GETの変換の失敗は、本家ではajvより先の別のエラーになる。binderが
+		// 同じ形で答えるので、handlerへ渡す。
+		return next(c)
+	}
+	e := paramschema.Error{SchemaPath: in.param, Message: in.message}
+	return c.JSON(http.StatusBadRequest, e.Response())
+}
+
 // judged is the validator's verdict on one request, or why there is none.
 type judged struct {
 	verdict
@@ -210,8 +284,10 @@ type judged struct {
 }
 
 // validate builds what upstream would validate, without changing what the
-// handler reads, and validates it, holding a slot while it does.
-func (s *shadow) validate(c echo.Context, ep paramschema.Endpoint) judged {
+// handler reads, and validates it, holding a slot while it does. An enforced
+// request is validated without the budget and the slots: skipping it would
+// let the request through without upstream's check.
+func (s *shadow) validate(c echo.Context, ep paramschema.Endpoint, enforced bool) judged {
 	req := c.Request()
 	if ep.RequireFile {
 		return judged{skip: SkipMultipart}
@@ -220,41 +296,49 @@ func (s *shadow) validate(c echo.Context, ep paramschema.Endpoint) judged {
 	switch {
 	case isGet && !ep.AllowGet, !isGet && req.Method != http.MethodPost:
 		return judged{skip: SkipMethod}
-	case isGet && len(req.URL.RawQuery) > s.maxBody:
+	case isGet && len(req.URL.RawQuery) > s.bodyLimit(enforced):
 		return judged{skip: SkipTooLarge}
-	case isGet && queryTooManyValues(req.URL.RawQuery, s.maxValues):
+	case isGet && queryTooManyValues(req.URL.RawQuery, s.valueLimit(enforced)):
 		return judged{skip: SkipTooManyValues}
 	case !isGet && !middleware.IsJSONContentType(req.Header.Get(echo.HeaderContentType)):
 		return judged{skip: SkipNotJSON}
 	}
-	if !s.budget.admit(s.now()) {
-		return judged{skip: SkipBudget}
-	}
-	select {
-	case s.slots <- struct{}{}:
-		defer func() { <-s.slots }()
-	default:
-		return judged{skip: SkipBusy}
+	if !enforced {
+		if !s.budget.admit(s.now()) {
+			return judged{skip: SkipBudget}
+		}
+		select {
+		case s.slots <- struct{}{}:
+			defer func() { <-s.slots }()
+		default:
+			return judged{skip: SkipBusy}
+		}
 	}
 	// 予算に積むのは、枠の中の全部(bodyの読み取り、トークンの走査、decode、
 	// 検証)にかかった時間。走査も64KiBで約0.1msかかり、上限を超えるbodyを
 	// 送り続けられたときに数えないと、その分が予算の外になる。
-	start := s.now()
-	defer func() {
-		end := s.now()
-		s.budget.spend(end, end.Sub(start))
-	}()
+	// 拒否するendpointの分は積まない。積むと、匿名で呼べるendpoint(clips/show
+	// など)を送り続けるだけで予算を使い切らせ、他のendpointの計測を止められる
+	// (#3742のレビュー1周目M-1)。費用は大きさとトークンの上限で抑える
+	// (bodyLimit、valueLimit)。
+	if !enforced {
+		start := s.now()
+		defer func() {
+			end := s.now()
+			s.budget.spend(end, end.Sub(start))
+		}()
+	}
 	var in input
 	if isGet {
 		in = queryInput(req.URL.RawQuery, ep.Schema)
 	} else {
-		body, tooLarge, err := readBody(req, s.maxBody)
+		body, tooLarge, err := readBody(req, s.bodyLimit(enforced))
 		switch {
 		case tooLarge:
 			return judged{skip: SkipTooLarge}
 		case err != nil || len(body) == 0:
 			return judged{skip: SkipBody}
-		case tooManyValues(body, s.maxValues):
+		case tooManyValues(body, s.valueLimit(enforced)):
 			return judged{skip: SkipTooManyValues}
 		}
 		in = jsonInput(body)
@@ -266,11 +350,32 @@ func (s *shadow) validate(c echo.Context, ep paramschema.Endpoint) judged {
 	return judged{verdict: v, panicked: panicked}
 }
 
+// bodyLimit is the size limit of a request: maxBody, or for an enforced
+// endpoint the smaller enforcedMaxBody.
+func (s *shadow) bodyLimit(enforced bool) int {
+	if enforced {
+		return min(s.maxBody, s.enforcedMaxBody)
+	}
+	return s.maxBody
+}
+
+// valueLimit is the token limit of a request: maxValues, or for an enforced
+// endpoint the smaller enforcedMaxValues.
+func (s *shadow) valueLimit(enforced bool) int {
+	if enforced {
+		return min(s.maxValues, s.enforcedMaxValues)
+	}
+	return s.maxValues
+}
+
 // verdict is upstream's answer to the params: accepted, or rejected with
-// info.param = param.
+// info.param = param and info.reason = message. cast is set when the GET
+// cast step rejected (param is then the param name and message is empty).
 type verdict struct {
 	rejected bool
 	param    string
+	message  string
+	cast     bool
 }
 
 var panicStackOnce sync.Once
@@ -281,7 +386,7 @@ var validate = (*paramschema.Schema).Validate
 // judge validates in against s, recovering a panic of the validator.
 func judge(s *paramschema.Schema, in input) (v verdict, panicked bool) {
 	if in.castFailed != "" {
-		return verdict{rejected: true, param: in.castFailed}, false
+		return verdict{rejected: true, param: in.castFailed, cast: true}, false
 	}
 	defer func() {
 		if r := recover(); r != nil {
@@ -294,7 +399,7 @@ func judge(s *paramschema.Schema, in input) (v verdict, panicked bool) {
 		}
 	}()
 	if e := validate(s, in.data); e != nil {
-		return verdict{rejected: true, param: e.SchemaPath}, false
+		return verdict{rejected: true, param: e.SchemaPath, message: e.Message}, false
 	}
 	return verdict{}, false
 }
