@@ -14,6 +14,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/core/chart"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
@@ -67,11 +68,15 @@ type Request struct {
 	// Offset は epoch-ms タイムスタンプ。upstream paramDef は
 	// `{type:'integer', nullable:true, default:null}` で、新ミリ秒値が大きい
 	// (~1.7e12 で 32bit を超える) ため int64 で受ける。
-	Span   string `json:"span" query:"span"`
-	Limit  *int   `json:"limit" query:"limit"`
-	Offset *int64 `json:"offset" query:"offset"`
-	UserID string `json:"userId" query:"userId"`
-	Host   string `json:"host" query:"host"`
+	//
+	// Limit と Offset は、本家(ajv の integer)と同じく値が整数の小数(10.0)を
+	// 受ける。GET の query も同じ (#3744)。
+	Span   string     `json:"span" query:"span"`
+	Limit  *jsnum.Int `json:"limit" query:"limit"`
+	Offset *jsnum.Int `json:"offset" query:"offset"`
+	UserID string     `json:"userId" query:"userId"`
+	// Host は欠落(nil)と空文字列を区別する。本家は空文字列を通す (#3744)。
+	Host *string `json:"host" query:"host"`
 }
 
 // paramError carries an upstream-compatible (param, reason) pair for a
@@ -104,7 +109,8 @@ func (h *Handler) Federation(c echo.Context) error {
 }
 
 // Instance handles POST /api/charts/instance. The chart is grouped by
-// host so the request must supply a non-empty host.
+// host so the request must supply host; an empty host is accepted, like
+// upstream, and gets an empty chart.
 func (h *Handler) Instance(c echo.Context) error {
 	return h.serveInstance(c, h.c.Instance, true)
 }
@@ -164,10 +170,14 @@ func (h *Handler) serveInstance(c echo.Context, ch *chart.Chart, requireHost boo
 	}
 	group := ""
 	if requireHost {
-		if req.Host == "" {
+		// 本家の paramDef は host を required にするだけで、空文字列は通す (#3744)。
+		// ただし本家の getChartRaw は '' を falsy として group で絞らず、範囲内の
+		// どれかのホストの行を返す。Elythia は group が '' の行を探すので空の
+		// chart になる (docs/divergence/approximations.md)。
+		if req.Host == nil {
 			return invalidParam(c, &paramError{param: "#/required", reason: "must have required property 'host'"})
 		}
-		group = req.Host
+		group = *req.Host
 	}
 	return h.respond(c, ch, span, amount, cursor, group)
 }
@@ -225,18 +235,18 @@ func (h *Handler) parseRequest(req *Request) (chart.Span, int, *time.Time, *para
 		return "", 0, nil, &paramError{param: "#/properties/span/enum", reason: "must be equal to one of the allowed values"}
 	}
 	amount := 30
-	if req.Limit != nil {
-		if *req.Limit < 1 {
+	if limit := req.Limit.IntPtr(); limit != nil {
+		if *limit < 1 {
 			return "", 0, nil, &paramError{param: "#/properties/limit/minimum", reason: "must be >= 1"}
 		}
-		if *req.Limit > 500 {
+		if *limit > 500 {
 			return "", 0, nil, &paramError{param: "#/properties/limit/maximum", reason: "must be <= 500"}
 		}
-		amount = *req.Limit
+		amount = *limit
 	}
 	var cursor *time.Time
-	if req.Offset != nil && *req.Offset != 0 {
-		t := time.UnixMilli(*req.Offset)
+	if offset := req.Offset.Int64Ptr(); offset != nil && *offset != 0 {
+		t := time.UnixMilli(*offset)
 		cursor = &t
 	}
 	return span, amount, cursor, nil
