@@ -154,8 +154,8 @@ type UpdateInput struct {
 	Color       *string
 	IsArchived  *bool
 	IsSensitive *bool
-	// BannerID: nil = 変更なし、非 nil で "" = banner 解除(null)、値 = 設定。
-	BannerID *string
+	// BannerID: nil = 変更なし、*が nil = banner 解除(null)、値 = 設定 (#3758)。
+	BannerID **string
 	// PinnedNoteIDs: nil = 変更なし、非 nil = その配列で置換。
 	PinnedNoteIDs *[]string
 	// AllowRenoteToExternal: nil = 変更なし、非 nil でその値に更新。
@@ -201,15 +201,12 @@ func (s *Service) Update(userID, channelID string, in UpdateInput) (*model.Chann
 		fields["isSensitive"] = *in.IsSensitive
 	}
 	if in.BannerID != nil {
-		// "" は banner 解除 (null)、それ以外は設定。なお upstream の TS
-		// update.ts は bannerId:null を送っても解除しない (banner は外せない既知
-		// 制約) ので、"" 解除は mk-go 独自の利便機能。stock frontend は解除時
-		// bannerId:null を送るが、Go の *string は null/absent を区別できず
-		// 「変更なし」に落ちるため、この "" 解除分岐は API 直叩き専用。
-		if *in.BannerID == "" {
+		// upstream の update.ts は bannerId: null を送っても解除しない。同梱の
+		// frontend は解除に null を送るので、Elythia は null で解除する (#3758)。
+		if *in.BannerID == nil {
 			fields["bannerId"] = nil
 		} else {
-			fields["bannerId"] = *in.BannerID
+			fields["bannerId"] = **in.BannerID
 		}
 	}
 	if in.PinnedNoteIDs != nil {

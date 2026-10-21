@@ -731,17 +731,49 @@ func TestSearch_ListIncludesIsMuting(t *testing.T) {
 	assert.Equal(t, true, resp[0]["isMuting"])
 }
 
-// 解除: bannerId:"" で既存 banner が null 化される。
+// bannerId: null removes the banner, which is what the bundled frontend's
+// "remove banner" sends; upstream ignores it (#3758). An absent bannerId keeps
+// the banner.
 func TestUpdate_BannerClear(t *testing.T) {
+	kept := "b0"
+	cases := []struct {
+		name string
+		body string
+		want *string
+	}{
+		{"null removes the banner", `{"channelId":"c1","bannerId":null}`, nil},
+		{"absent keeps the banner", `{"channelId":"c1","name":"renamed"}`, &kept},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, repo, _, _ := newHandler(t)
+			owner := "alice"
+			existing := "b0"
+			repo.Channels["c1"] = &model.Channel{ID: "c1", Name: "ch", UserID: &owner, BannerID: &existing}
+			c, rec := newReq(t, tc.body)
+			setUser(c, "alice")
+			require.NoError(t, h.Update(c))
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			assert.Equal(t, tc.want, repo.Channels["c1"].BannerID)
+		})
+	}
+}
+
+// bannerId: "" no longer removes the banner: it is not a misskey:id, which
+// the validator in front rejects (#3758). Should the validator be skipped, the
+// handler treats it as a file id it cannot find.
+func TestUpdate_EmptyBannerIDIsNotARemoval(t *testing.T) {
 	h, repo, _, _ := newHandler(t)
 	owner := "alice"
 	existing := "b0"
 	repo.Channels["c1"] = &model.Channel{ID: "c1", Name: "ch", UserID: &owner, BannerID: &existing}
+	h.SetDriveFileRepo(testutil.NewMockDriveFileRepository())
 	c, rec := newReq(t, `{"channelId":"c1","bannerId":""}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Update(c))
-	require.Equal(t, http.StatusOK, rec.Code)
-	assert.Nil(t, repo.Channels["c1"].BannerID, `bannerId:"" は banner を解除する`)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "NO_SUCH_FILE")
+	assert.Equal(t, &existing, repo.Channels["c1"].BannerID)
 }
 
 // Update で他人所有 banner は NO_SUCH_FILE (update 固有 error id)。
