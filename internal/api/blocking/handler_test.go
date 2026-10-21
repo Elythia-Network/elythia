@@ -407,3 +407,40 @@ func TestList_RepoError(t *testing.T) {
 	require.NoError(t, h.List(c))
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
+
+// listAfterTwoCreates makes alice target bob and carol, then lists with body.
+func listAfterTwoCreates(t *testing.T, body string) []map[string]any {
+	t.Helper()
+	h, repo := newHandler(t)
+	addUser(repo, "alice")
+	addUser(repo, "bob")
+	addUser(repo, "carol")
+	for _, target := range []string{"bob", "carol"} {
+		c, rec := newReq(t, `{"userId":"`+target+`"}`)
+		setUser(c, "alice")
+		require.NoError(t, h.Create(c))
+		require.Less(t, rec.Code, 300, rec.Body.String())
+	}
+	c, rec := newReq(t, body)
+	setUser(c, "alice")
+	require.NoError(t, h.List(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var resp []map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	return resp
+}
+
+// list accepts an integer-valued fraction for limit / sinceDate / untilDate,
+// as upstream's ajv does for an integer (#3760).
+func TestList_AcceptsIntegerValuedFractions(t *testing.T) {
+	assert.Len(t, listAfterTwoCreates(t, `{"limit":1.0,"untilDate":1e15}`), 1)
+	assert.Len(t, listAfterTwoCreates(t, `{"sinceDate":1e1}`), 2)
+	assert.Empty(t, listAfterTwoCreates(t, `{"sinceDate":1e15}`), "sinceDate is read, not just accepted")
+}
+
+// list does not read offset, which upstream's paramDef does not have:
+// upstream ignores it and answers from the top (#3760).
+func TestList_IgnoresOffset(t *testing.T) {
+	assert.Len(t, listAfterTwoCreates(t, `{"offset":1}`), 2)
+	assert.Len(t, listAfterTwoCreates(t, `{"offset":"x"}`), 2)
+}

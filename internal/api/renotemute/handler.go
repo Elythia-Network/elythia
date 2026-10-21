@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/api/userrelation"
 	coremuting "github.com/elythia-network/elythia/internal/core/muting"
@@ -119,13 +120,16 @@ func (h *Handler) Delete(c echo.Context) error {
 }
 
 // ListRequest is the body for renote-mute/list.
+//
+// 本家の paramDef に offset は無く、送られても無視して先頭から返すので読まない。
+// limit / sinceDate / untilDate は、本家(ajv の integer)と同じく値が整数の
+// 小数(10.0)を受ける (#3760)。
 type ListRequest struct {
-	Limit     *int   `json:"limit"`
-	Offset    int    `json:"offset"`
-	SinceID   string `json:"sinceId"`
-	UntilID   string `json:"untilId"`
-	SinceDate *int64 `json:"sinceDate"`
-	UntilDate *int64 `json:"untilDate"`
+	Limit     *jsnum.Int `json:"limit"`
+	SinceID   string     `json:"sinceId"`
+	UntilID   string     `json:"untilId"`
+	SinceDate *jsnum.Int `json:"sinceDate"`
+	UntilDate *jsnum.Int `json:"untilDate"`
 }
 
 // List handles POST /api/renote-mute/list.
@@ -138,16 +142,16 @@ func (h *Handler) List(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 30, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 30, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1173)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	rows, err := h.svc.List(user.ID, sinceID, untilID, limit, req.Offset)
+	rows, err := h.svc.List(user.ID, sinceID, untilID, limit)
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}

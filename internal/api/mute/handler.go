@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/api/userrelation"
 	coremuting "github.com/elythia-network/elythia/internal/core/muting"
@@ -77,9 +78,11 @@ func NewHandler(svc *coremuting.Service, userRepo repository.UserRepository, idG
 }
 
 // CreateRequest is the request body for mute/create.
+//
+// expiresAt は、本家(ajv の integer)と同じく値が整数の小数(1e13)も受ける (#3760)。
 type CreateRequest struct {
-	UserID    string `json:"userId"`
-	ExpiresAt *int64 `json:"expiresAt"`
+	UserID    string     `json:"userId"`
+	ExpiresAt *jsnum.Int `json:"expiresAt"`
 }
 
 // Create handles POST /api/mute/create.
@@ -94,8 +97,8 @@ func (h *Handler) Create(c echo.Context) error {
 	// JS の 0 は falsy)。0 を 1970 年として渡すと、失効済みの no-op 分岐に入り、
 	// 204 を返すのにミュートを作らなかった。channels/mute/create も同じ扱い。
 	var expires *time.Time
-	if req.ExpiresAt != nil && *req.ExpiresAt != 0 {
-		t := time.UnixMilli(*req.ExpiresAt)
+	if at := req.ExpiresAt.Int64Ptr(); at != nil && *at != 0 {
+		t := time.UnixMilli(*at)
 		expires = &t
 	}
 
@@ -138,13 +141,16 @@ func (h *Handler) Delete(c echo.Context) error {
 }
 
 // ListRequest is the request body for mute/list.
+//
+// 本家の paramDef に offset は無く、送られても無視して先頭から返すので読まない。
+// limit / sinceDate / untilDate は、本家(ajv の integer)と同じく値が整数の
+// 小数(10.0)を受ける (#3760)。
 type ListRequest struct {
-	Limit     *int   `json:"limit"`
-	Offset    int    `json:"offset"`
-	SinceID   string `json:"sinceId"`
-	UntilID   string `json:"untilId"`
-	SinceDate *int64 `json:"sinceDate"`
-	UntilDate *int64 `json:"untilDate"`
+	Limit     *jsnum.Int `json:"limit"`
+	SinceID   string     `json:"sinceId"`
+	UntilID   string     `json:"untilId"`
+	SinceDate *jsnum.Int `json:"sinceDate"`
+	UntilDate *jsnum.Int `json:"untilDate"`
 }
 
 // List handles POST /api/mute/list.
@@ -158,16 +164,16 @@ func (h *Handler) List(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 30, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 30, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1173)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	rows, err := h.svc.List(user.ID, sinceID, untilID, limit, req.Offset)
+	rows, err := h.svc.List(user.ID, sinceID, untilID, limit)
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}

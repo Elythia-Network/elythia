@@ -350,13 +350,13 @@ func (s *Service) IsBlocked(blockerID, blockeeID string) (bool, error) {
 	return s.blockingRepo.Exists(blockerID, blockeeID)
 }
 
-// List returns the user's blockings with cursor (sinceID/untilID) or offset
-// pagination. Cursor 指定時は offset 無視 (upstream makePaginationQuery と一致)。
-func (s *Service) List(blockerID, sinceID, untilID string, limit, offset int) ([]*model.Blocking, error) {
+// List returns the user's blockings with cursor (sinceID/untilID) pagination.
+// 本家の paramDef に offset は無いので受けない (#3760)。
+func (s *Service) List(blockerID, sinceID, untilID string, limit int) ([]*model.Blocking, error) {
 	if limit <= 0 {
 		limit = 10
 	}
-	return s.blockingRepo.ListByBlocker(blockerID, sinceID, untilID, limit, offset)
+	return s.blockingRepo.ListByBlocker(blockerID, sinceID, untilID, limit, 0)
 }
 
 // UserMaterializer promotes a relay-only author out of the ephemeral store
