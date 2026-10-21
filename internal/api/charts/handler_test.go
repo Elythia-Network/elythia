@@ -599,3 +599,39 @@ func TestCacheControl_ErrorResponseHasNoHeader(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Empty(t, rec.Header().Get("Cache-Control"), "error responses must not be cached")
 }
+
+// limit と offset は、本家(ajv の integer)と同じく値が整数の小数を受ける。
+// GET の query も同じ (#3744)。
+func TestIntegerValuedFractionsAreAccepted(t *testing.T) {
+	h, _ := newHandlerWithAllCharts(t)
+	for _, body := range []string{`{"span":"day","limit":10.0}`, `{"span":"day","limit":1e1}`, `{"span":"day","offset":1.7e12}`} {
+		c, rec := newReq(t, body)
+		require.NoError(t, h.Notes(c))
+		assert.Equal(t, http.StatusOK, rec.Code, body)
+	}
+	for _, q := range []string{"span=day&limit=10.0", "span=day&limit=1e1", "span=day&offset=10.0", "span=day&offset=null"} {
+		c, rec := newGetReq(t, q)
+		require.NoError(t, h.Notes(c))
+		assert.Equal(t, http.StatusOK, rec.Code, q)
+	}
+	c, rec := newReq(t, `{"span":"day","limit":10.5}`)
+	require.NoError(t, h.Notes(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+// 本家の paramDef は host を required にするだけで、空文字列は通す (#3744)。
+// 欠落は従来どおり #/required。
+func TestInstanceEndpoint_EmptyHostIsAccepted(t *testing.T) {
+	h, _ := newHandlerWithAllCharts(t)
+	c, rec := newReq(t, `{"span":"day","host":""}`)
+	require.NoError(t, h.Instance(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	c, rec = newGetReq(t, "span=day&host=")
+	require.NoError(t, h.Instance(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	c, rec = newReq(t, `{"span":"day","host":null}`)
+	require.NoError(t, h.Instance(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
