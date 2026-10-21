@@ -76,3 +76,27 @@ func TestMuting_DBFailureIsNotNotFound(t *testing.T) {
 			"DB 障害が「mute していない」に化けている")
 	})
 }
+
+// 関係が無いときに相手を引く所でも、DB 障害を ErrMuteeNotFound / ErrNotMuting に
+// 丸めない (#2799、#3760)。
+func TestUnmute_MuteeLookupDBFailureIsNotNotFound(t *testing.T) {
+	dbErr := errors.New("dial tcp 127.0.0.1:5432: connect: connection refused")
+	idGen, _ := id.NewGenerator("aidx")
+	users := &dbFailingUserRepo{MockUserRepository: testutil.NewMockUserRepository(), err: dbErr}
+	unmutes := map[string]func() error{
+		"Unmute": func() error {
+			return muting.NewService(users, testutil.NewMockMutingRepository(), idGen).Unmute("u1", "u2")
+		},
+		"RenoteService.Unmute": func() error {
+			return muting.NewRenoteService(users, testutil.NewMockRenoteMutingRepository(), idGen).Unmute("u1", "u2")
+		},
+	}
+	for name, unmute := range unmutes {
+		t.Run(name, func(t *testing.T) {
+			err := unmute()
+			require.ErrorIs(t, err, dbErr)
+			assert.NotErrorIs(t, err, muting.ErrMuteeNotFound)
+			assert.NotErrorIs(t, err, muting.ErrNotMuting)
+		})
+	}
+}

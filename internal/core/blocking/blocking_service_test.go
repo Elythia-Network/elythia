@@ -150,9 +150,19 @@ func TestUnblock_Self(t *testing.T) {
 }
 
 func TestUnblock_NotBlocking(t *testing.T) {
-	svc, _, _, _ := newSvc(t)
+	svc, ur, _, _ := newSvc(t)
+	addUser(ur, "a")
+	addUser(ur, "b")
 	err := svc.Unblock("a", "b")
 	require.ErrorIs(t, err, blocking.ErrNotBlocking)
+}
+
+// A blockee that does not exist is ErrBlockeeNotFound, which the handler
+// answers with NO_SUCH_USER as upstream does (#3760).
+func TestUnblock_NoSuchBlockee(t *testing.T) {
+	svc, ur, _, _ := newSvc(t)
+	addUser(ur, "a")
+	require.ErrorIs(t, svc.Unblock("a", "b"), blocking.ErrBlockeeNotFound)
 }
 
 func TestUnblock_Success(t *testing.T) {

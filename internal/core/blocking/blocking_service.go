@@ -318,6 +318,24 @@ func (s *Service) publishBlockReload(blockeeID string) {
 	s.relationReload.PublishMuteBlockReload(blockeeID)
 }
 
+// notBlockingOrNoSuchUser tells why a pair to unblock was not found: the
+// blockee does not exist (ErrBlockeeNotFound) or is not blocked
+// (ErrNotBlocking).
+//
+// 本家の blocking/delete は、関係の有無より先に相手の有無を見て NO_SUCH_USER を
+// 返す (#3760)。関係の行は相手の行を外部キーで要るので、関係があれば相手は居る。
+// 相手を引くのは、関係が見つからなかったときだけでよい。
+func notBlockingOrNoSuchUser(users repository.UserRepository, blockeeID string) error {
+	if _, err := users.FindByID(blockeeID); err != nil {
+		// **DB 障害を not-found に丸めない** (#2799)。
+		if !repository.IsNotFound(err) {
+			return err
+		}
+		return ErrBlockeeNotFound
+	}
+	return ErrNotBlocking
+}
+
 // Unblock removes a blocking relationship.
 func (s *Service) Unblock(blockerID, blockeeID string) error {
 	if blockerID == blockeeID {
@@ -329,7 +347,7 @@ func (s *Service) Unblock(blockerID, blockeeID string) error {
 		if !repository.IsNotFound(err) {
 			return err
 		}
-		return ErrNotBlocking
+		return notBlockingOrNoSuchUser(s.userRepo, blockeeID)
 	}
 	if err := s.blockingRepo.Delete(b); err != nil {
 		return err

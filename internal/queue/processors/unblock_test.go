@@ -57,6 +57,14 @@ func TestUnblockProcessor_NotBlocking_Success(t *testing.T) {
 	assert.NoError(t, p.Handle(context.Background(), task))
 }
 
+// 相手の利用者が消えていても、関係の行は残っていないので成功扱い (#3760)。
+func TestUnblockProcessor_BlockeeGone_Success(t *testing.T) {
+	fu := &fakeUnblocker{err: blocking.ErrBlockeeNotFound}
+	p := processors.NewUnblockProcessor(fu)
+	task := queue.NewUnblockTask(queue.UnblockPayload{BlockerID: "a", BlockeeID: "b"})
+	assert.NoError(t, p.Handle(context.Background(), task))
+}
+
 // 自己 unblock は retry 不能の恒久エラー。
 func TestUnblockProcessor_SelfBlock_SkipRetry(t *testing.T) {
 	fu := &fakeUnblocker{err: blocking.ErrSelfBlock}

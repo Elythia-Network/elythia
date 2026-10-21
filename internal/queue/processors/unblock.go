@@ -45,7 +45,9 @@ func (p *UnblockProcessor) Handle(_ context.Context, t driver.Task) error {
 	case err == nil:
 		return nil
 	// 既に解消済 (row 無し) は望む終状態に到達済みとして成功扱い - 冪等吸収。
-	case errors.Is(err, blocking.ErrNotBlocking):
+	// 相手の利用者が消えているとき (ErrBlockeeNotFound、#3760) も、関係の行は
+	// 外部キーの ON DELETE CASCADE で消えているので同じ扱い。
+	case errors.Is(err, blocking.ErrNotBlocking), errors.Is(err, blocking.ErrBlockeeNotFound):
 		return nil
 	// 自己 unblock は retry しても解消しない恒久エラー。
 	case errors.Is(err, blocking.ErrSelfBlock):
