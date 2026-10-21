@@ -1339,3 +1339,87 @@ func TestShow_PinnedNotesAreVisibilityGated(t *testing.T) {
 		assert.Equal(t, []string{"pub"}, pinnedIDs(t, rec))
 	})
 }
+
+// seedTwoOwnedFollowedChannels makes two channels that alice owns and follows,
+// both matching the search query "pg".
+func seedTwoOwnedFollowedChannels(t *testing.T, repo *testutil.MockChannelRepository, followRepo *testutil.MockChannelFollowingRepository) {
+	t.Helper()
+	owner := "alice"
+	for _, cid := range []string{"pg1", "pg2"} {
+		repo.Channels[cid] = &model.Channel{ID: cid, Name: "pg-" + cid, UserID: &owner}
+		require.NoError(t, followRepo.Create(&model.ChannelFollowing{ID: "f-" + cid, FolloweeID: cid, FollowerID: owner}))
+	}
+}
+
+func listCount(t *testing.T, rec *httptest.ResponseRecorder) int {
+	t.Helper()
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var resp []map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	return len(resp)
+}
+
+// The lists accept an integer-valued fraction for limit / sinceDate /
+// untilDate, as upstream's ajv does for an integer (#3758).
+func TestListsAcceptIntegerValuedFractions(t *testing.T) {
+	lists := []struct {
+		name string
+		call func(*Handler, echo.Context) error
+		body string
+	}{
+		{"followed", (*Handler).Followed, `{"limit":1.0,"untilDate":1e15}`},
+		{"owned", (*Handler).Owned, `{"limit":1.0,"untilDate":1e15}`},
+		{"search", (*Handler).Search, `{"query":"pg","limit":1.0,"untilDate":1e15}`},
+	}
+	for _, l := range lists {
+		t.Run(l.name, func(t *testing.T) {
+			h, repo, followRepo, _ := newHandler(t)
+			seedTwoOwnedFollowedChannels(t, repo, followRepo)
+			c, rec := newReq(t, l.body)
+			setUser(c, "alice")
+			require.NoError(t, l.call(h, c))
+			assert.Equal(t, 1, listCount(t, rec))
+		})
+	}
+	t.Run("timeline", func(t *testing.T) {
+		h, repo, _, _ := newHandler(t)
+		repo.Channels["pg1"] = &model.Channel{ID: "pg1", Name: "pg"}
+		c, rec := newReq(t, `{"channelId":"pg1","limit":1.0,"sinceDate":1e1}`)
+		require.NoError(t, h.Timeline(c))
+		assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	})
+}
+
+// followed / owned / search do not read offset, which upstream's paramDef does
+// not have: upstream ignores it and answers from the top (#3758).
+func TestListsIgnoreOffset(t *testing.T) {
+	lists := []struct {
+		name string
+		call func(*Handler, echo.Context) error
+		body string
+	}{
+		{"followed", (*Handler).Followed, `{"offset":1}`},
+		{"owned", (*Handler).Owned, `{"offset":1}`},
+		{"search", (*Handler).Search, `{"query":"pg","offset":1}`},
+		{"followed with a mistyped offset", (*Handler).Followed, `{"offset":"x"}`},
+	}
+	for _, l := range lists {
+		t.Run(l.name, func(t *testing.T) {
+			h, repo, followRepo, _ := newHandler(t)
+			seedTwoOwnedFollowedChannels(t, repo, followRepo)
+			c, rec := newReq(t, l.body)
+			setUser(c, "alice")
+			require.NoError(t, l.call(h, c))
+			assert.Equal(t, 2, listCount(t, rec))
+		})
+	}
+}
+
+// featured takes no params; upstream's paramDef is {} and passes extra keys
+// of any type (#3758).
+func TestFeatured_AcceptsMistypedExtraKeys(t *testing.T) {
+	h, _, _, _ := newHandler(t)
+	c, rec := newReq(t, `{"limit":"x","sinceId":1}`)
+	require.NoError(t, h.Featured(c))
+	assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+}

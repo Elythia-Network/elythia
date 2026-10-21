@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/notehide"
 	"github.com/elythia-network/elythia/internal/api/optional"
 	"github.com/elythia-network/elythia/internal/api/pagination"
@@ -483,16 +484,18 @@ func (h *Handler) Unfollow(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-// PaginatedListRequest is shared by followed / owned / featured / search /
-// timeline endpoints. frontend Paginator は cursor mode で sinceId / untilId
-// を投げてくる (#493)。
+// PaginatedListRequest is shared by the followed / owned endpoints. frontend
+// Paginator は cursor mode で sinceId / untilId を投げてくる (#493)。
+//
+// 本家の paramDef に offset は無く、送られても無視して先頭から返すので読まない。
+// limit / sinceDate / untilDate は、本家(ajv の integer)と同じく値が整数の
+// 小数(10.0)を受ける。search・timeline も同じ (#3758)。
 type PaginatedListRequest struct {
-	Limit     *int   `json:"limit"`
-	Offset    int    `json:"offset"`
-	SinceID   string `json:"sinceId"`
-	UntilID   string `json:"untilId"`
-	SinceDate *int64 `json:"sinceDate"`
-	UntilDate *int64 `json:"untilDate"`
+	Limit     *jsnum.Int `json:"limit"`
+	SinceID   string     `json:"sinceId"`
+	UntilID   string     `json:"untilId"`
+	SinceDate *jsnum.Int `json:"sinceDate"`
+	UntilDate *jsnum.Int `json:"untilDate"`
 }
 
 // Followed handles POST /api/channels/followed.
@@ -508,15 +511,15 @@ func (h *Handler) Followed(c echo.Context) error {
 		return apierr.JSONInvalidParam(c)
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 5, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 5, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	rows, err := h.svc.ListFollowed(user.ID, sinceID, untilID, limit, req.Offset)
+	rows, err := h.svc.ListFollowed(user.ID, sinceID, untilID, limit)
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -531,15 +534,15 @@ func (h *Handler) Owned(c echo.Context) error {
 		return apierr.JSONInvalidParam(c)
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 5, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 5, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	rows, err := h.svc.ListOwned(user.ID, sinceID, untilID, limit, req.Offset)
+	rows, err := h.svc.ListOwned(user.ID, sinceID, untilID, limit)
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -551,9 +554,10 @@ func (h *Handler) Owned(c echo.Context) error {
 // upstream featured.ts は pagination param を持たず、lastNotedAt IS NOT NULL かつ
 // isArchived=FALSE の channel を lastNotedAt DESC で固定 10 件返す (#1540)。
 // cursor / limit は無視する (service が固定条件で返す) が、malformed JSON は
-// upstream のフレームワーク同様 400 で弾くため bind 検証だけ残す。
+// upstream のフレームワーク同様 400 で弾くため bind 検証だけ残す。本家の paramDef
+// は {} で、型の違う余分な鍵(limit: "x")も通すので、鍵を持たない型で受ける (#3758)。
 func (h *Handler) Featured(c echo.Context) error {
-	var req PaginatedListRequest
+	var req struct{}
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -566,14 +570,13 @@ func (h *Handler) Featured(c echo.Context) error {
 
 // SearchRequest carries the query string for channels/search.
 type SearchRequest struct {
-	Query     string `json:"query"`
-	Type      string `json:"type"`
-	Limit     *int   `json:"limit"`
-	Offset    int    `json:"offset"`
-	SinceID   string `json:"sinceId"`
-	UntilID   string `json:"untilId"`
-	SinceDate *int64 `json:"sinceDate"`
-	UntilDate *int64 `json:"untilDate"`
+	Query     string     `json:"query"`
+	Type      string     `json:"type"`
+	Limit     *jsnum.Int `json:"limit"`
+	SinceID   string     `json:"sinceId"`
+	UntilID   string     `json:"untilId"`
+	SinceDate *jsnum.Int `json:"sinceDate"`
+	UntilDate *jsnum.Int `json:"untilDate"`
 }
 
 // Search handles POST /api/channels/search.
@@ -588,15 +591,15 @@ func (h *Handler) Search(c echo.Context) error {
 		return apierr.JSONInvalidParam(c)
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 5, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 5, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	rows, err := h.svc.Search(req.Query, req.Type, sinceID, untilID, limit, req.Offset)
+	rows, err := h.svc.Search(req.Query, req.Type, sinceID, untilID, limit)
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -620,12 +623,12 @@ func (h *Handler) bannerOwnedBy(bannerID, userID string) bool {
 
 // TimelineRequest is the request body for channels/timeline.
 type TimelineRequest struct {
-	ChannelID string `json:"channelId"`
-	UntilID   string `json:"untilId"`
-	SinceID   string `json:"sinceId"`
-	SinceDate *int64 `json:"sinceDate"`
-	UntilDate *int64 `json:"untilDate"`
-	Limit     *int   `json:"limit"`
+	ChannelID string     `json:"channelId"`
+	UntilID   string     `json:"untilId"`
+	SinceID   string     `json:"sinceId"`
+	SinceDate *jsnum.Int `json:"sinceDate"`
+	UntilDate *jsnum.Int `json:"untilDate"`
+	Limit     *jsnum.Int `json:"limit"`
 }
 
 // Timeline handles POST /api/channels/timeline.
@@ -634,12 +637,12 @@ func (h *Handler) Timeline(c echo.Context) error {
 	if err := c.Bind(&req); err != nil || req.ChannelID == "" {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}

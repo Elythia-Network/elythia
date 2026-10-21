@@ -279,8 +279,8 @@ func (s *Service) Unfollow(userID, channelID string) error {
 // 各 follow row の channel 実体は FindByIDs で一括解決して N+1 を回避する。
 // 元 followings の order は frontend cursor 整合のため保持する必要があるため
 // channelByID map を介して並び順を保つ。
-func (s *Service) ListFollowed(userID, sinceID, untilID string, limit, offset int) ([]*model.Channel, error) {
-	rows, err := s.followingRepo.ListFollowed(userID, sinceID, untilID, limit, offset)
+func (s *Service) ListFollowed(userID, sinceID, untilID string, limit int) ([]*model.Channel, error) {
+	rows, err := s.followingRepo.ListFollowed(userID, sinceID, untilID, limit, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -309,8 +309,8 @@ func (s *Service) ListFollowed(userID, sinceID, untilID string, limit, offset in
 }
 
 // ListOwned returns channels owned by the user with cursor (sinceID/untilID)
-// or offset pagination.
-func (s *Service) ListOwned(userID, sinceID, untilID string, limit, offset int) ([]*model.Channel, error) {
+// pagination.
+func (s *Service) ListOwned(userID, sinceID, untilID string, limit int) ([]*model.Channel, error) {
 	// upstream owned.ts は isArchived=FALSE を AND し、cursor 無し時は id DESC で
 	// 並べる (makePaginationQuery, #1540)。
 	notArchived := false
@@ -319,7 +319,6 @@ func (s *Service) ListOwned(userID, sinceID, untilID string, limit, offset int) 
 		IsArchived: &notArchived,
 		SortBy:     "-id",
 		Limit:      limit,
-		Offset:     offset,
 		SinceID:    sinceID,
 		UntilID:    untilID,
 	})
@@ -341,7 +340,7 @@ func (s *Service) ListFeatured() ([]*model.Channel, error) {
 // Search returns channels whose name matches the query.
 // Search finds channels by name (and description when searchType is
 // "nameAndDescription", the upstream default). "nameOnly" matches name only.
-func (s *Service) Search(query, searchType, sinceID, untilID string, limit, offset int) ([]*model.Channel, error) {
+func (s *Service) Search(query, searchType, sinceID, untilID string, limit int) ([]*model.Channel, error) {
 	// upstream channels/search は常に isArchived=FALSE を AND し、cursor 無し時は
 	// id DESC で並べる (makePaginationQuery, #1540)。
 	notArchived := false
@@ -351,7 +350,6 @@ func (s *Service) Search(query, searchType, sinceID, untilID string, limit, offs
 		IsArchived:        &notArchived,
 		SortBy:            "-id",
 		Limit:             limit,
-		Offset:            offset,
 		SinceID:           sinceID,
 		UntilID:           untilID,
 	})

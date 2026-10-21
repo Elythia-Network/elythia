@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/labstack/echo/v4"
@@ -42,8 +43,8 @@ func (h *Handler) MuteCreate(c echo.Context) error {
 		ChannelID string `json:"channelId"`
 		// ExpiresAt is an epoch-ms timestamp that must lie in the future
 		// (nil = indefinite mute), mirroring upstream channels/mute/create
-		// paramDef (#1603)。
-		ExpiresAt *int64 `json:"expiresAt"`
+		// paramDef (#1603)。本家(ajv の integer)と同じく値が整数の小数も受ける (#3758)。
+		ExpiresAt *jsnum.Int `json:"expiresAt"`
 	}
 	if err := c.Bind(&req); err != nil || req.ChannelID == "" {
 		return apierr.JSONInvalidParam(c)
@@ -65,11 +66,11 @@ func (h *Handler) MuteCreate(c echo.Context) error {
 	// 本家 create.ts: `ps.expiresAt && ps.expiresAt <= Date.now()` で過去なら
 	// EXPIRES_AT_IS_PAST。0 は JS で falsy のため無期限 (nil) として扱う。
 	var expires *time.Time
-	if req.ExpiresAt != nil && *req.ExpiresAt != 0 {
-		if *req.ExpiresAt <= time.Now().UnixMilli() {
+	if at := req.ExpiresAt.Int64Ptr(); at != nil && *at != 0 {
+		if *at <= time.Now().UnixMilli() {
 			return c.JSON(http.StatusBadRequest, apierr.Error("EXPIRES_AT_IS_PAST", `Cannot set past date to "expiresAt".`, "42b32236-df2c-a45f-fdbf-def67268f749"))
 		}
-		t := time.UnixMilli(*req.ExpiresAt)
+		t := time.UnixMilli(*at)
 		expires = &t
 	}
 	mut := &model.ChannelMuting{
