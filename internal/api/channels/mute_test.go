@@ -165,3 +165,16 @@ func TestMuteList_WithData(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &arr))
 	assert.Len(t, arr, 1)
 }
+
+// expiresAt accepts an integer-valued fraction, as upstream's ajv does for an
+// integer (#3758).
+func TestMuteCreate_ExpiresAtAcceptsIntegerValuedFraction(t *testing.T) {
+	h, chRepo, _, mutRepo := newStubHandler(t)
+	chRepo.Channels["ch1"] = &model.Channel{ID: "ch1", Name: "test"}
+	rec := postStubWithBody(t, h.MuteCreate, `{"channelId":"ch1","expiresAt":1e13}`, "u1")
+	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+	mut := mutRepo.Mutings["u1:ch1"]
+	require.NotNil(t, mut)
+	require.NotNil(t, mut.ExpiresAt)
+	assert.Equal(t, int64(1e13), mut.ExpiresAt.UnixMilli())
+}

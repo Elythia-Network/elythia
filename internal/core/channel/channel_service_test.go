@@ -359,7 +359,7 @@ func TestListFollowed(t *testing.T) {
 	require.NoError(t, svc.Follow("u1", "c1"))
 	require.NoError(t, svc.Follow("u1", "c2"))
 
-	rows, err := svc.ListFollowed("u1", "", "", 10, 0)
+	rows, err := svc.ListFollowed("u1", "", "", 10)
 	require.NoError(t, err)
 	assert.Len(t, rows, 2)
 }
@@ -387,7 +387,7 @@ func TestListFollowed_FindByIDsFailure(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	svc := channel.NewService(repo, followRepo, testutil.NewMockNoteRepository(), idGen)
 
-	_, err := svc.ListFollowed("u1", "", "", 10, 0)
+	_, err := svc.ListFollowed("u1", "", "", 10)
 	require.Error(t, err)
 }
 
@@ -404,7 +404,7 @@ func TestListFollowed_MissingChannelSkipped(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	svc := channel.NewService(repo, followRepo, testutil.NewMockNoteRepository(), idGen)
 
-	rows, err := svc.ListFollowed("u1", "", "", 10, 0)
+	rows, err := svc.ListFollowed("u1", "", "", 10)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	assert.Equal(t, "c1", rows[0].ID)
@@ -424,7 +424,7 @@ func TestListFollowed_ListError(t *testing.T) {
 	followRepo := &listFailFollowRepo{MockChannelFollowingRepository: testutil.NewMockChannelFollowingRepository()}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := channel.NewService(repo, followRepo, testutil.NewMockNoteRepository(), idGen)
-	_, err := svc.ListFollowed("u1", "", "", 10, 0)
+	_, err := svc.ListFollowed("u1", "", "", 10)
 	assert.Error(t, err)
 }
 
@@ -433,7 +433,7 @@ func TestListOwned(t *testing.T) {
 	owner := "u1"
 	repo.Channels["c1"] = &model.Channel{ID: "c1", UserID: &owner}
 	repo.Channels["c2"] = &model.Channel{ID: "c2", UserID: &owner}
-	rows, err := svc.ListOwned("u1", "", "", 10, 0)
+	rows, err := svc.ListOwned("u1", "", "", 10)
 	require.NoError(t, err)
 	assert.Len(t, rows, 2)
 }
@@ -444,7 +444,7 @@ func TestListOwned_ExcludesArchived(t *testing.T) {
 	owner := "u1"
 	repo.Channels["c1"] = &model.Channel{ID: "c1", UserID: &owner}
 	repo.Channels["c2"] = &model.Channel{ID: "c2", UserID: &owner, IsArchived: true}
-	rows, err := svc.ListOwned("u1", "", "", 10, 0)
+	rows, err := svc.ListOwned("u1", "", "", 10)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	assert.Equal(t, "c1", rows[0].ID)
@@ -469,7 +469,7 @@ func TestSearch(t *testing.T) {
 	svc, repo, _, _ := newSvc(t)
 	repo.Channels["c1"] = &model.Channel{ID: "c1", Name: "alpha"}
 	repo.Channels["c2"] = &model.Channel{ID: "c2", Name: "beta"}
-	rows, err := svc.Search("alp", "nameAndDescription", "", "", 10, 0)
+	rows, err := svc.Search("alp", "nameAndDescription", "", "", 10)
 	require.NoError(t, err)
 	assert.Len(t, rows, 1)
 }
