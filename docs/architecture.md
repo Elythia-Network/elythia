@@ -2045,7 +2045,7 @@ Supervisorの側は変えていない。停止のエラーの使われ方は次�
 
 コメントの「shutdown hook」は、この一覧の部品の停止を指す。
 
-### 4.4 キャッシュの一覧 (#3721、#3723、#3725、#3727、#3729、#3732)
+### 4.4 キャッシュの一覧 (#3721、#3723、#3725、#3727、#3729、#3732、#3736、#3738)
 
 **世代のキャッシュは、そのプロセスが持つ分を全部捨てる口 (`DropLocal()`) を持たせ、名前と由来と
 一緒に `Server` の一覧 (`cacheList`、`internal/server/caches.go`) へ登録する。** #3666 の段階 4。
@@ -2107,7 +2107,7 @@ setupRoutes()
 | 連合 (その 1) | `instances` (`instance.Service`。ホストの停止の判定と応答の健全)・`relays` (`relay.Service`。承認済みの relay の一覧)・`fedRules` (`fedrule.Service`。連合のルールのスナップショット) | #3729 |
 | 連合 (その 2) | `deliverEd25519` (`DeliverService`。相手の Ed25519 の対応と送る側の Ed25519 の鍵)・`federationPublicKeys` (`Resolver`。相手の公開鍵と、Ed25519 の鍵が無いことの記憶)・`deliverSigningKeys` (`DeliverProcessor` の解析済みの署名鍵)・`instanceActorSigner` (instance actor の秘密鍵) | #3732 |
 | 投稿・タイムライン・通知 | `antennas` (`CachedAntennaRepository`。有効なアンテナの全件)・`pushSubscriptions` (`webpush.SubscriptionCache` のメモリの層)・`featuredNotes` (`notes.FeaturedRankingCache`。注目ノートの全体の順位)・`notePublisher` (`stream.NotePublisher`。直前に pack したノート)・`timelineJSON` (`notes.TimelineJSONCache`。opt-in のタイムラインの最初の頁) | #3736 |
-| 管理画面と統計 (ドライブの使用量、DB の統計、`/api/stats` の件数、IP の記録の窓) | (未) | #3666 の (4-8) |
+| 管理画面と統計 | `driveUsage` (`driveusage.Service`。ドライブの使用量の集計)・`dbHealth` (`dbhealth.Service`。DB の統計)・`statsCounts` (`stats.Handler`。`/api/stats` の instance と note_reaction の総数)・`ipLogWindow` (`iplog.Service`。書いた (利用者, IP) の印) | #3738 |
 | 外部とファイル (URL プレビュー、リモート利用者の統計、RSS、peer のプラグイン一覧、twemoji のバッジ) | (未) | #3666 の (4-9) |
 
 - 利用者と関係の系統の 3 つは、どれもこのプロセスだけで全部を捨てる処理を元から中に持っていて
@@ -2187,6 +2187,20 @@ setupRoutes()
   利用者・ロール・絵文字・デコレーション・インスタンスを含むので、先に捨てると、間に来た pack が古い元から
   作り直して積む。注目ノートの順位は Redis の順位から引いた ID だけを持ち、ノートは毎回 DB から読む。
   タイムラインの JSON は opt-in (`enableTimelineCache`) で、有効にしたときだけ登録する
+- 管理画面と統計の系統 (#3738) のうち、ドライブの使用量・DB の統計・`/api/stats` の件数は、どれも
+  ロックの外で `singleflight` の中で読み、読み終えたら積む。世代の番号を足し、捨てる前に読み始めた値を
+  積まないようにした。`singleflight` の鍵にも番号を含め、捨てた後の呼び出しが捨てる前の読み込みに
+  相乗りしないようにした (`DeliverService` と同じ)。DB の統計の読み込みは呼び出し元の ctx から切り離して
+  いて最大 30 秒かかるので、相乗りさせると、捨てた後の呼び出しがその間古い統計を受け取る
+- IP の記録の窓 (`ipLogWindow`) は値のキャッシュではなく、書き込みを重ねないための印で、DB を戻すと
+  戻した DB に行が無いのに記録済みとして窓 (1 時間) の終わりまで書かない。`DropLocal()` は印を全部捨て、
+  窓を捨てた時刻から数え直す。印はロックの中で付け、DB への書き込みはその後に行うので、番号は要らない。
+  捨てる前に始まった書き込みが捨てた後に失敗すると、捨てた後に付けた同じ印を外すが、書き込みは (利用者,
+  IP) で upsert するので、行は 1 つのまま観測の回数が 1 つ増えるだけになる
+- この 4 つは DB を直接読むか、DB へ書いたことの印を持つだけで、ほかのキャッシュの値を含まないので、
+  捨てる順の制約は無い。投稿・タイムライン・通知の系統を最後に置いたままにするため、その前に登録する。
+  ドライブの使用量は、管理画面の handler に渡す所の引数の中で作っていたのを、一覧に登録するために変数に
+  した
 - ドライブのストレージの backend (`coredrive.MetaStorage`) は、どの系統にも入れない。使うたびに meta
   (`cachedMeta`) を読み、オブジェクトストレージの設定から作った鍵が変わったときだけ作り直すので、meta を
   捨てれば追従する (meta が読めないときは、前の backend を使い続ける)
@@ -2271,8 +2285,18 @@ setupRoutes()
   `TestNotePublisher_DropLocal` (#3736): 対象を全部捨てること。アンテナは hook を呼ばないこと。push 購読は
   Redis の層を残すこと。タイムラインの JSON と push 購読は、読み込みの途中で捨てたときに読んだ値を積まない (push 購読は
   Redis にも書かない) こと
+- `TestCaches_AdminStatsLine` (#3738): 4 つがサーバーの使う値のまま一覧にあることを確かめる。DB に
+  instance を直接足し、IP の記録の行を消して、`dropAll` の後に `/api/stats` の件数・
+  `/api/admin/drive/usage`・`/api/admin/database-health` が読み直すことと、`/api/i` へのリクエストで
+  IP の記録を書き直すことを見る。どれも API を通すので、一覧に登録した値と、管理画面・`/api/stats`・
+  認証の middleware が使う値が同じであることも確かめる。`internal:` へ何も publish しないことも見る
+- `TestService_DropLocal`・`TestService_DropDuringAggregation` (driveusage)・`TestService_DropLocal`・
+  `TestService_DropDuringRead` (dbhealth)・`TestStats_DropLocal`・`TestStats_DropDuringCount`・
+  `TestService_DropLocal` (iplog) (#3738): 対象を全部捨てること。集計の 3 つは、読み込みの途中で捨てた
+  ときに読んだ値を積まず、捨てた後の呼び出しを相乗りさせないこと。IP の記録は窓を捨てた時刻から数え直す
+  こと
 
-#3721・#3723・#3725・#3727・#3729・#3732・#3736 の前後で同じであることは、それぞれ次のように確かめた (道具はコミットしていない)。
+#3721・#3723・#3725・#3727・#3729・#3732・#3736・#3738 の前後で同じであることは、それぞれ次のように確かめた (道具はコミットしていない)。
 
 - `elythia dump-routes`: 出力 (ルート)、起動ログ、Redis の命令の列、PostgreSQL の文の集合は、どれも前後で
   一致した。前の木を 2 回流して揺れないことも確かめ、後の木も 2 回流した
@@ -2280,7 +2304,10 @@ setupRoutes()
   659 で、前後で同じだった。#3732 では instance actor の秘密鍵を 1 つの変数 (`instanceSigner`) にまとめた
   ので、節点が 357、setter で依存を入れる辺が 872 から 870、呼び出しが離れている辺が 657 になった。後から
   入れる辺は 96 のまま (行番号を除けば前と同じ)。`instanceSigner` は受け手の `apFetcher` より先に作る。
-  #3736 では、節点 357・setter の辺 870・後から入れる辺 96・呼び出しが離れている辺 657 のまま変わらない
+  #3736 では、節点 357・setter の辺 870・後から入れる辺 96・呼び出しが離れている辺 657 のまま変わらない。
+  #3738 では、ドライブの使用量の集計を変数 (`driveUsage`) にしたので、節点が 358 になった。setter の辺
+  870・後から入れる辺 96・呼び出しが離れている辺 657 は変わらない。`SetDriveUsageProvider` の引数に
+  現れる節点が `s.db` から `driveUsage` に替わっただけで、`driveUsage` は受け手の `adminHandler` より先に作る
 
 ## 5. フック注入パターン
 
