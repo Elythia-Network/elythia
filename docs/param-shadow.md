@@ -2,7 +2,7 @@
 
 本家と同じendpointへのリクエストを、本家の`paramDef`(`internal/api/paramschema`、#3673)で検証し、その判定とhandlerの答えが分かれた件数をログに出す(#3677)。**応答もhandlerの読むものも変えない。** 検証の結果で拒否はしない。
 
-**例外は、本家に揃えたendpointである(#3742)。** `internal/server/param_shadow.go`の`paramEnforcedEndpoints`(今は`clips/*`の11件(#3742)、`charts/*`の12件(#3744)、`hashtags/*`の5件(#3746)、`antennas/*`の7件(#3748))は、同じ位置で検証し、拒否すれば本家と同じ400を返す。数える対象からは外れる。詳細は下の「[本家に揃えたendpoint](#本家に揃えたendpoint3742)」。
+**例外は、本家に揃えたendpointである(#3742)。** `internal/server/param_shadow.go`の`paramEnforcedEndpoints`(今は`clips/*`の11件(#3742)、`charts/*`の12件(#3744)、`hashtags/*`の5件(#3746)、`antennas/*`の7件(#3748)、`flash/*`の10件(#3750))は、同じ位置で検証し、拒否すれば本家と同じ400を返す。数える対象からは外れる。詳細は下の「[本家に揃えたendpoint](#本家に揃えたendpoint3742)」。
 
 目的は、手書きの検証を本家の`paramDef`に置き換える前に、どの差が実際の利用で踏まれているかを数えることである。本家より緩い所(省略できる項目へのnull、`misskey:id`の形式、`limit`の丸めなど)を一度に400へ変えると、今は動いているクライアントが落ちうる。数えた結果は、揃える順番と、差として残すものを決める材料にする(親issue #3667)。
 
@@ -67,11 +67,11 @@ routeのmiddlewareで401や403になったリクエストは、6に届かない�
 - **拒否したときは、本家と同じ400を返す。** `INVALID_PARAM`(id `3d81ceae-…`)、message `Invalid param.`、`info`は`{param: <schemaPath>, reason: <ajvのmessage>}`(`paramschema.Error.Response`)。handlerは呼ばない
 - **受理したときは、handlerがそのまま答える。** 検証器がdefaultを入れるのは写しのほうなので、handlerが読むbodyは変わらない。handlerの手書きの検査は残してあり、二段目になる。**手書きの検査が本家より厳しいと、本家が通す入力を400にしてしまう**ので、対象に足すときは、#3673で作ったajvのcorpusを本物のrouteに流して確かめる(`internal/server`の`TestEnforcedEndpointsMatchTheCorpus`)
 - **検証できない入力は拒否せず、handlerに任せる。** 上の「検証しないもの」のうち、`not_json`・`multipart`・`method`・`lone_surrogate`・`invalid_utf8`・`unparsable_query`・`too_large`・`too_many_values`・`body_error`と、GETの型の変換の失敗が当たる。本家の判定なしに拒否すると、本家が通すリクエストを落としうるからである。これらはhandlerの検査で、今までと同じ判定を受ける
-- **予算(`budget`)と同時実行の枠(`busy`)では飛ばさない。** 飛ばすと、本家の検証を受けずにhandlerへ届く。代わりに、1件の費用を小さい上限で抑える。bodyかqueryが16KiB(16,384バイト、`DefaultEnforcedMaxBody`)かトークン256(`DefaultEnforcedMaxValues`)を超える入力は、検証せずにhandlerへ渡す(上の項目と同じ扱い)。`clips/*`の正当なbodyは、UTF-8のまま送れば`description`の2048文字を4バイトの文字で埋めても約8KiBで、トークンは全項目と`i`を送る`clips/notes`でも18である。非ASCIIを`\u`のescapeで送るクライアント(Pythonの`json.dumps`の既定など)が`description`を絵文字で埋めると約24KiBになり、上限を超えてhandlerの検査に回る。`antennas/create` / `antennas/update`は、本家の`paramDef`が`keywords`・`excludeKeywords`・`users`の数に上限を持たないので、キーワードや利用者を多く並べたbodyは上限を超えうる(キーワード1行が括弧2つと語の数のトークンになる)。同梱のfrontendの送る更新のbodyでは、1語のキーワードを74行か、利用者を218人並べると超える(全項目と`i`で、トークンは37+3×行数か39+人数。作成は`antennaId`が無いので35+3×行数か37+人数で、キーワードは同じ74行、利用者は220人で超える)。超えたbodyも拒否はせず、handlerの検査に回る。handlerは名前の長さを本家と同じ1〜100文字で見るが、それ以外は以前の判定になる([docs/divergence/approximations.md](divergence/approximations.md#本家のparamdefで引数を検証するendpoint-3742))。上限を大きくすると、資格情報さえあれば予算の外で重い検証を走らせられるので、大きくはしない。`clips/show`・`clips/notes`、`charts/*`の12件、`hashtags/*`の5件は資格情報なしで呼べてrate limitも無い(`charts/*`と`hashtags/trend`はGETでも呼べる)ので、この上限が無いと、予算の外で重い検証を走らせ続けられる(#3742のレビュー1周目M-1)。1件の費用は下の表のとおり
+- **予算(`budget`)と同時実行の枠(`busy`)では飛ばさない。** 飛ばすと、本家の検証を受けずにhandlerへ届く。代わりに、1件の費用を小さい上限で抑える。bodyかqueryが16KiB(16,384バイト、`DefaultEnforcedMaxBody`)かトークン256(`DefaultEnforcedMaxValues`)を超える入力は、検証せずにhandlerへ渡す(上の項目と同じ扱い)。`clips/*`の正当なbodyは、UTF-8のまま送れば`description`の2048文字を4バイトの文字で埋めても約8KiBで、トークンは全項目と`i`を送る`clips/notes`でも18である。非ASCIIを`\u`のescapeで送るクライアント(Pythonの`json.dumps`の既定など)が`description`を絵文字で埋めると約24KiBになり、上限を超えてhandlerの検査に回る。`antennas/create` / `antennas/update`は、本家の`paramDef`が`keywords`・`excludeKeywords`・`users`の数に上限を持たないので、キーワードや利用者を多く並べたbodyは上限を超えうる(キーワード1行が括弧2つと語の数のトークンになる)。同梱のfrontendの送る更新のbodyでは、1語のキーワードを74行か、利用者を218人並べると超える(全項目と`i`で、トークンは37+3×行数か39+人数。作成は`antennaId`が無いので35+3×行数か37+人数で、キーワードは同じ74行、利用者は220人で超える)。超えたbodyも拒否はせず、handlerの検査に回る。`flash/create` / `flash/update`も、`script`が約16KiBを超える大きなPlayは同じくhandlerの検査に回る(同梱のプリセットは224〜2,343バイト)。antennasのhandlerは名前の長さを本家と同じ1〜100文字で見るが、それ以外は以前の判定になる([docs/divergence/approximations.md](divergence/approximations.md#本家のparamdefで引数を検証するendpoint-3742))。上限を大きくすると、資格情報さえあれば予算の外で重い検証を走らせられるので、大きくはしない。`clips/show`・`clips/notes`、`charts/*`の12件、`hashtags/*`の5件、`flash/show`・`flash/featured`・`flash/search`は資格情報なしで呼べてrate limitも無い(`charts/*`と`hashtags/trend`はGETでも呼べる)ので、この上限が無いと、予算の外で重い検証を走らせ続けられる(#3742のレビュー1周目M-1)。1件の費用は下の表のとおり
 - **検証にかかった時間は予算に積まない。** 積むと、資格情報の要らないendpointへ送り続けるだけで予算を使い切らせ、他のendpointの計測を止められる
 - **数えない。** 判定は常に一致するので、要約の`agreed`にも`diverged`にも入らない。記録するのは`validator_panic`と`compile_error`だけで、どちらのときもリクエストはhandlerへ渡す
 - **`disableParamShadow`では止まらない。** 止まるのは数えるだけの検証で、本家に揃えたendpointは検証を続ける
-- **対象はパッケージ単位で足す。** `TestEnforcedEndpointsAreUpstreamEndpoints`が、対象に載せたパッケージ(`clips`・`charts`・`hashtags`・`antennas`)の本家のendpointが全部載っていることを確かめる。一部だけ載せると、残りが手書きの検査のままになる
+- **対象はパッケージ単位で足す。** `TestEnforcedEndpointsAreUpstreamEndpoints`が、対象に載せたパッケージ(`clips`・`charts`・`hashtags`・`antennas`・`flash`)の本家のendpointが全部載っていることを確かめる。一部だけ載せると、残りが手書きの検査のままになる
 - **GETで呼べるendpoint(`charts/*`)は、queryの型の変換も本家と同じに扱う。** 本家はinteger / number / booleanの項目の文字列の値を`JSON.parse`してからajvに渡す。変換に失敗した値はajvより先に`INVALID_PARAM`(id `0b5f1631-…`、`info: {param: <項目名>, reason: "cannot cast to <型>"}`)になる。この失敗は検証器では拒否せず、binderの印を見たhandlerが同じ形で返す(上の「検証できない入力」)。変換を通った値(`10.0`、`null`)と、同じキーを2回並べたquery(配列になる)は検証器が判定する。GETのqueryの確かめ方は、corpusがbodyだけなので、`internal/server`の`TestEnforcedGETMatchesUpstream`に代表的な入力を表で持つ
 
 `BenchmarkEnforcedWorstCase`(`clips/notes`のroute、handlerはbodyを読んで200を返すだけ。Intel Xeon E-2274G、2026-10-21の実測。値は3回の幅)。
@@ -239,7 +239,7 @@ Intel Xeon E-2274G(4.00GHz、8スレッド)、2026-10-18の実測。値は3回�
 
 | キー | 環境変数 | 既定 | 中身 |
 |---|---|---|---|
-| `disableParamShadow` | `MK_DISABLEPARAMSHADOW` | `false` | `true`で検証だけの実行を止める。止めたendpointでは、検証のための読み取りもしない。本家に揃えたendpoint(`clips/*`・`charts/*`・`hashtags/*`・`antennas/*`)の検証は止めない |
+| `disableParamShadow` | `MK_DISABLEPARAMSHADOW` | `false` | `true`で検証だけの実行を止める。止めたendpointでは、検証のための読み取りもしない。本家に揃えたendpoint(`clips/*`・`charts/*`・`hashtags/*`・`antennas/*`・`flash/*`)の検証は止めない |
 | `paramShadowLogSeconds` | `MK_PARAMSHADOWLOGSECONDS` | `600` | 要約を出す間隔(秒)。0以下は既定に戻す |
 
 どちらも`bindEnvKeys()`に登録してあり、設定ファイルに書かなくても環境変数だけで変えられる。変更には再起動が要る。
