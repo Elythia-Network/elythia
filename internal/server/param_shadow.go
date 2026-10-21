@@ -15,26 +15,56 @@ import (
 // hands the param shadow validation (#3677) to withParamShadow.
 const paramShadowContextKey = "mk.server.paramShadow"
 
+// paramEnforcedEndpoints are the upstream endpoints whose params are
+// validated with upstream's paramDef and rejected with upstream's 400
+// (#3742, the first step of #3667). The other upstream endpoints are only
+// validated and counted (#3677).
+//
+// 本家に揃える対象はパッケージ単位で広げる(#3667)。足したら、そのendpoint
+// で本家と判定が分かれる入力を、手書きの検査が拒否していないか(本家が通す
+// のに400にしていないか)を確かめる。TestEnforcedEndpointsMatchTheCorpusが
+// ajvのcorpusで確かめる。
+var paramEnforcedEndpoints = []string{
+	"clips/add-note",
+	"clips/create",
+	"clips/delete",
+	"clips/favorite",
+	"clips/list",
+	"clips/my-favorites",
+	"clips/notes",
+	"clips/remove-note",
+	"clips/show",
+	"clips/unfavorite",
+	"clips/update",
+}
+
 // paramShadowMiddleware returns the /api group middleware that enables the
-// param shadow validation for the request, or nil when it is disabled
-// (disableParamShadow). The validation itself runs in withParamShadow, at
-// the end of the route's middleware.
+// param validation for the request: rejecting for paramEnforcedEndpoints,
+// and counting only (the param shadow validation) for the other upstream
+// endpoints unless disableParamShadow. The validation itself runs in
+// withParamShadow, at the end of the route's middleware. It returns nil only
+// when the embedded upstream paramDefs do not load; the handlers' own checks
+// then stay the only ones.
 //
 // It also adds the part paramShadowRecorder (#3699), whose stop writes the
 // counts of this server generation.
 func (s *Server) paramShadowMiddleware() echo.MiddlewareFunc {
-	if s.config.DisableParamShadow {
-		slog.Info("param shadow validation disabled (disableParamShadow)")
-		return nil
-	}
 	eps, err := paramschema.Upstream()
 	if err != nil {
-		slog.Warn("param shadow validation disabled: the embedded upstream paramDefs do not load", "err", err)
+		slog.Warn("param validation disabled: the embedded upstream paramDefs do not load", "err", err)
 		return nil
+	}
+	opts := []paramshadow.Option{paramshadow.WithEnforced(paramEnforcedEndpoints...)}
+	if s.config.DisableParamShadow {
+		// 止めるのは数えるだけの検証。本家に揃えた分の拒否は止めない。記録は
+		// 検証器のpanicとcompileの失敗だけになる。
+		opts = append(opts, paramshadow.WithoutShadow())
+		slog.Info("param shadow validation disabled (disableParamShadow); the enforced endpoints are still validated",
+			"enforced", len(paramEnforcedEndpoints))
 	}
 	for name, ep := range eps {
 		if ep.CompileErr != nil {
-			slog.Warn("param shadow validation: an upstream paramDef does not compile; its requests are counted as compile_error",
+			slog.Warn("param validation: an upstream paramDef does not compile; its requests go to the handler and are counted as compile_error",
 				"endpoint", name, "err", ep.CompileErr)
 		}
 	}
@@ -56,8 +86,15 @@ func (s *Server) paramShadowMiddleware() echo.MiddlewareFunc {
 	// 停止のときに、最後の要約からの分を出す。メンテナンスで作り直す世代も
 	// それぞれが自分の分を出す。
 	s.addCloser("paramShadowRecorder", rec)
-	shadow := paramshadow.Middleware(eps, rec)
-	slog.Info("param shadow validation enabled", "endpoints", len(eps), "logInterval", interval.String())
+	shadow := paramshadow.Middleware(eps, rec, opts...)
+	if !s.config.DisableParamShadow {
+		slog.Info("param shadow validation enabled", "endpoints", len(eps), "enforced", len(paramEnforcedEndpoints), "logInterval", interval.String())
+	}
+	return paramValidationGroupMiddleware(shadow)
+}
+
+// paramValidationGroupMiddleware hands shadow to withParamShadow.
+func paramValidationGroupMiddleware(shadow echo.MiddlewareFunc) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			c.Set(paramShadowContextKey, shadow)

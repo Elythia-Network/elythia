@@ -385,7 +385,7 @@ func TestNewServer_ShutdownStopsThePartsInTheirOrder(t *testing.T) {
 			want: []string{
 				"pollExpiryWorker", "fedRuleHits", "metadataRefresher", "instanceTouchBuffer",
 				"sigCapBuffer", "reactionFlushWorker", "instanceCounterBuffer", "deliveryHealth",
-				"inboxHealth", "hashtagService", "retentionAggregateAtStartup",
+				"inboxHealth", "hashtagService", "retentionAggregateAtStartup", "paramShadowRecorder",
 				"emojiInvalidationQueue", "userCacheLink", "serverStatsPub", "queueStatsPub",
 			},
 		},
@@ -409,7 +409,7 @@ func TestNewServer_ShutdownStopsThePartsInTheirOrder(t *testing.T) {
 			want: []string{
 				"pollExpiryWorker", "fedRuleHits", "metadataRefresher", "instanceTouchBuffer",
 				"sigCapBuffer", "reactionFlushWorker", "instanceCounterBuffer", "deliveryHealth",
-				"inboxHealth", "hashtagService", "retentionAggregateAtStartup",
+				"inboxHealth", "hashtagService", "retentionAggregateAtStartup", "paramShadowRecorder",
 				"emojiInvalidationQueue", "userCacheLink", "pluginStorage:lifecyclea",
 			},
 		},

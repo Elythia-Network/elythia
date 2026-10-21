@@ -187,7 +187,8 @@ type Source struct {
 	ChmodSocket string `mapstructure:"chmodSocket"`
 	DisableHSTS bool   `mapstructure:"disableHsts"`
 	// DisableParamShadow stops running upstream's paramDef validation in
-	// front of the API handlers to count disagreements (#3677).
+	// front of the API handlers to count disagreements (#3677). The
+	// endpoints that reject with it (#3742) keep validating.
 	DisableParamShadow bool `mapstructure:"disableParamShadow"`
 	// ParamShadowLogSeconds is the interval of the summary the param shadow
 	// validation writes to the log. Unset or non-positive means 600.

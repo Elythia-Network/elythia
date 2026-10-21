@@ -54,10 +54,37 @@ func captureDefaultLog(t *testing.T) *syncBuffer {
 	return buf
 }
 
+// TestParamShadowMiddlewareDisabled checks that disableParamShadow stops
+// only the counting: the enforced endpoints still reject with upstream's 400
+// (#3742), and the other upstream endpoints are neither validated nor
+// counted.
 func TestParamShadowMiddlewareDisabled(t *testing.T) {
-	s := &Server{config: &config.Config{DisableParamShadow: true}}
-	assert.Nil(t, s.paramShadowMiddleware())
-	assert.Empty(t, s.lifecycle.names())
+	logs := captureDefaultLog(t)
+	s := &Server{config: &config.Config{DisableParamShadow: true, ParamShadowLogSeconds: 3600}}
+	mw := s.paramShadowMiddleware()
+	require.NotNil(t, mw)
+
+	e := echo.New()
+	api := apiRoutes{e.Group("/api")}
+	api.Use(mw)
+	ok := func(c echo.Context) error { return c.NoContent(http.StatusNoContent) }
+	api.POST("/clips/show", ok)
+	api.POST("/notes/show", ok)
+	serve := func(target, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(body))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		return rec
+	}
+	rec := serve("/api/clips/show", `{"clipId":"a-b"}`)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"param":"#/properties/clipId/format"`)
+	assert.Equal(t, http.StatusNoContent, serve("/api/notes/show", `{"noteId":"a-b"}`).Code)
+
+	require.NoError(t, s.lifecycle.stopAll(context.Background()))
+	assert.NotContains(t, logs.String(), "paramshadow divergence")
+	assert.NotContains(t, logs.String(), "notes/show")
 }
 
 // TestParamShadowRunsAfterTheRouteMiddleware pins the wiring of
