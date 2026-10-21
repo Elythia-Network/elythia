@@ -26,7 +26,7 @@
 # と揃っていることを CI の `vulncheck` job が見る。tag だけでは中身が固定されない
 # ので digest を併記する (`Dockerfile` と同じ値。更新は dependabot の `docker` が
 # digest ごと上げる)。
-FROM golang:1.27.2-alpine@sha256:f92b6ef800e499660581efdabdf25d9d817a9d124eaf900924f0504e7e27e12d AS plugingen
+FROM golang:1.27.3-alpine@sha256:f2c872bcee949b7be9c490efd02b48a8a2fbf947cdf533f1c58525ec9d8170fd AS plugingen
 
 # git は go mod download 時の private module fetch に使う (通常の Dockerfile と同じ)。
 # plugins/ のプラグインが private な依存を持つ場合にここで要る。
