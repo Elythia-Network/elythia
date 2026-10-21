@@ -16,10 +16,15 @@ import (
 // テストが変異検証付きで固定している。ここが見るのは「router から正しい引数で
 // 呼ばれていること」だけ。引数まで照合するので、`driveusage.NewService(..., 0, 0)`
 // のように定数へ書き換えてキャッシュを無効化する形も落ちる。
+//
+// 集計はキャッシュの一覧に登録するので (#3738)、作る行と渡す行を分けて照合する。
 func TestDriveUsageProviderIsWired(t *testing.T) {
 	assertWired(t, serverPkg,
-		"adminHandler.SetDriveUsageProvider(driveusage.NewService("+
-			"repository.NewDriveUsageRepository(s.db), driveusage.DefaultTTL, driveusage.DefaultTopN))",
+		"driveUsage := driveusage.NewService("+
+			"repository.NewDriveUsageRepository(s.db), driveusage.DefaultTTL, driveusage.DefaultTopN)",
+		"admin/drive/usage の集計が別の引数で作られ、キャッシュが効かなくなるか DB を読まなくなる (#3053)")
+	assertWired(t, serverPkg,
+		"adminHandler.SetDriveUsageProvider(driveUsage)",
 		"admin/drive/usage が 500 を返し、ストレージ使用量の画面が開かなくなる (#3053)")
 }
 

@@ -752,3 +752,126 @@ func TestCaches_TimelineJSONOnlyWhenEnabled(t *testing.T) {
 		assert.NotEqual(t, "timelineJSON", p.name)
 	}
 }
+
+// adminStatsLineCaches are the caches of the admin and statistics line (#3738).
+var adminStatsLineCaches = []string{"driveUsage", "dbHealth", "statsCounts", "ipLogWindow"}
+
+func TestCaches_AdminStatsLine(t *testing.T) {
+	h := newMetaRuntimeHarness(t)
+	srv := h.srv
+	caches := srv.crossProcessCaches
+
+	want := map[string]localCache{
+		"driveUsage": caches.driveUsage, "dbHealth": caches.dbHealth,
+		"statsCounts": caches.stats, "ipLogWindow": caches.ipLog,
+	}
+	at := map[string]int{}
+	for i, p := range srv.caches.parts {
+		at[p.name] = i
+		if v, ok := want[p.name]; ok {
+			assert.Equal(t, cacheFromDB, p.origin, "cache %q", p.name)
+			assert.Same(t, v, p.cache, "cache %q is not the value the server uses", p.name)
+		}
+	}
+	// 4 つの間に順の制約は無い。投稿・タイムライン・通知の系統を最後に置いたままに
+	// するため、その前に並ぶ。
+	for _, name := range adminStatsLineCaches {
+		require.Contains(t, at, name, "cache %q is not listed", name)
+		require.Contains(t, at, "antennas")
+		assert.Less(t, at[name], at["antennas"], "%q must be listed before the notes line", name)
+	}
+
+	const userID = "metart-user-38"
+	const token = "metartuser000038"
+	// httptest.NewRequest が付ける接続元の IP。
+	const ip = "192.0.2.1"
+	h.createUser(userID, "metart_user38", token, false)
+	instanceID := h.idGen.Generate(time.Now())
+	t.Cleanup(func() {
+		require.NoError(t, h.db.Where("id = ?", instanceID).Delete(&model.Instance{}).Error)
+		// 管理画面の API を呼ぶので、root の行も書かれる。user_ip は利用者を消しても
+		// 残る (FK が無い) ので消す。書き込みは goroutine で走るので、捨てる前と後の
+		// 2 回分が届いてから消す。途中で失敗したときは待たずに消す (次に流したときは
+		// 始めに消す)。
+		if !t.Failed() {
+			assert.Eventually(t, func() bool {
+				var n int
+				require.NoError(t, h.db.Model(&model.UserIP{}).Where(`"userId" = ? AND ip = ?`, h.rootID, ip).
+					Select(`COALESCE(MAX("observationCount"), 0)`).Scan(&n).Error)
+				return n == 2
+			}, 5*time.Second, 10*time.Millisecond)
+		}
+		require.NoError(t, h.db.Where(`"userId" IN ?`, []string{userID, h.rootID}).Delete(&model.UserIP{}).Error)
+	})
+	require.NoError(t, h.db.Where(`"userId" IN ?`, []string{userID, h.rootID}).Delete(&model.UserIP{}).Error)
+	h.updateMetaHere(map[string]any{"enableIpLogging": true})
+
+	instances := func() float64 {
+		rec := h.post("/api/stats", "", map[string]any{})
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		var got map[string]any
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+		return got["instances"].(float64)
+	}
+	// 管理画面の 2 つは API を通して読む。一覧に登録した値と、管理画面が使う値が
+	// 同じであることも確かめるため。
+	driveUsageCached := func() bool {
+		rec := h.post("/api/admin/drive/usage", h.rootToken, map[string]any{})
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		var got struct {
+			Cached bool `json:"cached"`
+		}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+		return got.Cached
+	}
+	dbHealthAt := func() string {
+		rec := h.post("/api/admin/database-health", h.rootToken, map[string]any{})
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		var got struct {
+			GeneratedAt string `json:"generatedAt"`
+		}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+		require.NotEmpty(t, got.GeneratedAt)
+		return got.GeneratedAt
+	}
+	// IP の記録は API を通して起こす。一覧に登録した値と、認証の middleware が
+	// 使う値が同じであることも確かめるため。
+	request := func() {
+		rec := h.post("/api/i", token, map[string]any{})
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	}
+	ipRows := func() int64 {
+		var n int64
+		require.NoError(t, h.db.Model(&model.UserIP{}).Where(`"userId" = ? AND ip = ?`, userID, ip).Count(&n).Error)
+		return n
+	}
+
+	before := instances()
+	driveUsageCached()
+	require.True(t, driveUsageCached(), "前提: 2 回目はキャッシュから返る")
+	reportAt := dbHealthAt()
+	require.Equal(t, reportAt, dbHealthAt(), "前提: 2 回目はキャッシュから返る")
+	request()
+	require.Eventually(t, func() bool { return ipRows() == 1 }, 5*time.Second, 10*time.Millisecond)
+
+	// 他のプロセスが書いたときやDBを戻したときと同じく、DBだけを変える。
+	require.NoError(t, h.db.Create(&model.Instance{ID: instanceID, Host: instanceID + ".example", FirstRetrievedAt: time.Now()}).Error)
+	require.NoError(t, h.db.Where(`"userId" = ?`, userID).Delete(&model.UserIP{}).Error)
+	require.Equal(t, before, instances(), "前提: 捨てるまではキャッシュが返る")
+	request()
+	// 前提の確認なので、書き込みの goroutine を待つのは短い時間だけにする。
+	time.Sleep(100 * time.Millisecond)
+	require.Zero(t, ipRows(), "前提: 捨てるまでは記録済みとして書かない")
+
+	published := watchInternal(t, h)
+
+	srv.caches.dropAll()
+
+	assert.Equal(t, before+1, instances(), "the stats counts were not dropped")
+	assert.False(t, driveUsageCached(), "the drive usage was not dropped")
+	assert.NotEqual(t, reportAt, dbHealthAt(), "the database health was not dropped")
+	request()
+	assert.Eventually(t, func() bool { return ipRows() == 1 }, 5*time.Second, 10*time.Millisecond,
+		"the IP log window was not dropped")
+	assert.Empty(t, published("caches-admin-stats-line"), "dropping the caches told the other processes")
+}

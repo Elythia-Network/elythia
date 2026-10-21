@@ -10,6 +10,7 @@ package dbhealth
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -149,7 +150,10 @@ type Service struct {
 
 	mu     sync.Mutex
 	cached *Report
-	group  singleflight.Group
+	// gen は DropLocal で進める世代の番号 (#3738)。読み取りは mu の外で走るので、
+	// 捨てる前に始めた読み取りを、捨てた後に積まないために使う。
+	gen   uint64
+	group singleflight.Group
 	// readFn は統計の読み取り (テストで遅い読み取りを差し込むため)。
 	readFn func(ctx context.Context, now time.Time) (Report, error)
 }
@@ -175,11 +179,14 @@ func (s *Service) SetClockForTest(fn func() time.Time) { s.clock = fn }
 func (s *Service) Report(ctx context.Context) (Report, error) {
 	s.mu.Lock()
 	cached := s.cached
+	gen := s.gen
 	s.mu.Unlock()
 	if cached != nil && s.clock().Sub(cached.GeneratedAt) < cacheTTL {
 		return *cached, nil
 	}
-	ch := s.group.DoChan("report", func() (res any, err error) {
+	// singleflight のキーに世代の番号を含める。捨てた後の呼び出しが、捨てる前に
+	// 始まった読み取りに相乗りして古い値を受け取らないようにする。
+	ch := s.group.DoChan("report:"+strconv.FormatUint(gen, 10), func() (res any, err error) {
 		// **panic をここで拾う。** DoChan は関数内の panic を別の goroutine で
 		// 投げ直すので、echo の Recover では拾えずプロセスごと落ちる。
 		defer func() {
@@ -194,7 +201,9 @@ func (s *Service) Report(ctx context.Context) (Report, error) {
 			return nil, err
 		}
 		s.mu.Lock()
-		s.cached = &r
+		if s.gen == gen {
+			s.cached = &r
+		}
 		s.mu.Unlock()
 		return r, nil
 	})
@@ -207,6 +216,15 @@ func (s *Service) Report(ctx context.Context) (Report, error) {
 		}
 		return res.Val.(Report), nil
 	}
+}
+
+// DropLocal drops the report held by this process (#3738). 他のプロセスへは
+// 伝えない。
+func (s *Service) DropLocal() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.gen++
+	s.cached = nil
 }
 
 func (s *Service) read(ctx context.Context, now time.Time) (Report, error) {

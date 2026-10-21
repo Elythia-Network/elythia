@@ -10,6 +10,7 @@
 package driveusage
 
 import (
+	"strconv"
 	"sync"
 	"time"
 
@@ -22,7 +23,8 @@ const (
 	DefaultTTL = 5 * time.Minute
 	// DefaultTopN is how many hosts / users the rankings carry.
 	DefaultTopN = 30
-	// cacheKey is the singleflight key. 集計は 1 種類しか無いので定数。
+	// cacheKey is the singleflight key prefix. 集計は 1 種類しか無いので、
+	// 後ろに付けるのは世代の番号だけ。
 	cacheKey = "breakdown"
 )
 
@@ -55,6 +57,9 @@ type Service struct {
 
 	mu     sync.RWMutex
 	cached *Result
+	// gen は DropLocal で進める世代の番号 (#3738)。集計は mu の外で走るので、
+	// 捨てる前に始めた集計を、捨てた後に積まないために使う。
+	gen uint64
 }
 
 // NewService wires the aggregation source. ttl <= 0 disables caching (every call
@@ -84,7 +89,13 @@ func (s *Service) Breakdown(forceRecalc bool) (*Result, error) {
 	// 集計が走っている最中に来た要求へ**待たせずに手持ちのスナップショットを
 	// 返せる**ため。代償は「判定の直後に別の呼び出しが計算し終えた」ときに
 	// 1 回だけ余計に走ること (結果は正しい)。
-	v, err, _ := s.group.Do(cacheKey, func() (any, error) {
+
+	// singleflight のキーに世代の番号を含める。捨てた後の呼び出しが、捨てる前に
+	// 始まった集計に相乗りして古い値を受け取らないようにする。
+	s.mu.RLock()
+	gen := s.gen
+	s.mu.RUnlock()
+	v, err, _ := s.group.Do(cacheKey+":"+strconv.FormatUint(gen, 10), func() (any, error) {
 		started := s.now()
 		b, err := s.repo.Breakdown(s.topN)
 		if err != nil {
@@ -98,7 +109,9 @@ func (s *Service) Breakdown(forceRecalc bool) (*Result, error) {
 			TTL:          s.ttl,
 		}
 		s.mu.Lock()
-		s.cached = res
+		if s.gen == gen {
+			s.cached = res
+		}
 		s.mu.Unlock()
 		return res, nil
 	})
@@ -136,6 +149,15 @@ func (s *Service) fresh() *Result {
 	out := *cached
 	out.Cached = true
 	return &out
+}
+
+// DropLocal drops the snapshot held by this process (#3738). 他のプロセスへは
+// 伝えない。
+func (s *Service) DropLocal() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.gen++
+	s.cached = nil
 }
 
 // TTL reports the configured cache lifetime (0 when caching is off).

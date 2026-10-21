@@ -5,6 +5,7 @@ package stats
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -47,7 +48,10 @@ type Handler struct {
 	now      func() time.Time
 	countsMu sync.Mutex
 	counts   *dbCounts
-	sf       singleflight.Group
+	// countsGen は DropLocal で進める世代の番号 (#3738)。数え上げは countsMu の
+	// 外で走るので、捨てる前に始めた数え上げを、捨てた後に積まないために使う。
+	countsGen uint64
+	sf        singleflight.Group
 }
 
 // dbCounts is the cached pair of DB-wide totals and when it goes stale.
@@ -81,9 +85,12 @@ func (h *Handler) countDB() (instances, reactions int64) {
 		h.countsMu.Unlock()
 		return c.instances, c.reactions
 	}
+	gen := h.countsGen
 	h.countsMu.Unlock()
 
-	v, _, _ := h.sf.Do("counts", func() (any, error) {
+	// singleflight のキーに世代の番号を含める。捨てた後の呼び出しが、捨てる前に
+	// 始まった数え上げに相乗りして古い値を受け取らないようにする。
+	v, _, _ := h.sf.Do("counts:"+strconv.FormatUint(gen, 10), func() (any, error) {
 		var c dbCounts
 		errInstances := h.db.Model(&model.Instance{}).Count(&c.instances).Error
 		// upstream stats.ts は reactionsCount を noteReactionsRepository.count()
@@ -92,13 +99,24 @@ func (h *Handler) countDB() (instances, reactions int64) {
 		if errInstances == nil && errReactions == nil {
 			c.expires = h.now().Add(CountsCacheTTL)
 			h.countsMu.Lock()
-			h.counts = &c
+			if h.countsGen == gen {
+				h.counts = &c
+			}
 			h.countsMu.Unlock()
 		}
 		return c, nil
 	})
 	c := v.(dbCounts)
 	return c.instances, c.reactions
+}
+
+// DropLocal drops the totals held by this process (#3738). 他のプロセスへは
+// 伝えない。
+func (h *Handler) DropLocal() {
+	h.countsMu.Lock()
+	defer h.countsMu.Unlock()
+	h.countsGen++
+	h.counts = nil
 }
 
 // totals reads the newest local/remote cumulative totals from one chart.
