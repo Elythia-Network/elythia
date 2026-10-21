@@ -434,16 +434,16 @@ func TestPluginNotifications_HandlerFailureDoesNotFailNoteCreation_RealDB(t *tes
 func TestPluginNotifications_SuppressedByMuteAndBlock_RealDB(t *testing.T) {
 	h := newPluginNotificationsHarness(t)
 	cleanupPluginNotificationRows(t, h.db, "ps_bot_a", "ps_muted", "ps_blocked", "ps_ok")
-	createLocalUser(t, h.db, "ps-muted", "ps_muted", "psmutedtoken0016", "muted-pass", false)
-	createLocalUser(t, h.db, "ps-blocked", "ps_blocked", "psblocktoken0016", "block-pass", false)
+	createLocalUser(t, h.db, "psmuted", "ps_muted", "psmutedtoken0016", "muted-pass", false)
+	createLocalUser(t, h.db, "psblocked", "ps_blocked", "psblocktoken0016", "block-pass", false)
 	createLocalUser(t, h.db, "ps-ok", "ps_ok", "psokokoktoken016", "ok-pass", false)
 	const muted, blocked, ok = "psmutedtoken0016", "psblocktoken0016", "psokokoktoken016"
 
 	bot, err := h.ctxA.Accounts().Create(context.Background(), "ps_bot_a")
 	require.NoError(t, err)
 	asBot(t, h.ctxA, bot.ID, "i/update", map[string]any{"chatScope": "everyone"})
-	asBot(t, h.ctxA, bot.ID, "mute/create", map[string]any{"userId": "ps-muted"})
-	asBot(t, h.ctxA, bot.ID, "blocking/create", map[string]any{"userId": "ps-blocked"})
+	asBot(t, h.ctxA, bot.ID, "mute/create", map[string]any{"userId": "psmuted"})
+	asBot(t, h.ctxA, bot.ID, "blocking/create", map[string]any{"userId": "psblocked"})
 	own := createdNoteID(t, asBot(t, h.ctxA, bot.ID, "notes/create", map[string]any{"text": "bot post"}))
 
 	// ミュートした相手: メンション・リアクション・チャットのどれも積まない。
@@ -462,8 +462,8 @@ func TestPluginNotifications_SuppressedByMuteAndBlock_RealDB(t *testing.T) {
 	h.waitJob("bot-a", "mention", bot.ID)
 	time.Sleep(300 * time.Millisecond)
 	for _, j := range h.rec.notificationJobs(t, "bot-a") {
-		assert.NotEqual(t, "ps-muted", j.ev.UserID, "ミュートした相手の %s を積んだ", j.ev.Type)
-		assert.NotEqual(t, "ps-blocked", j.ev.UserID, "ブロックした相手の %s を積んだ", j.ev.Type)
+		assert.NotEqual(t, "psmuted", j.ev.UserID, "ミュートした相手の %s を積んだ", j.ev.Type)
+		assert.NotEqual(t, "psblocked", j.ev.UserID, "ブロックした相手の %s を積んだ", j.ev.Type)
 	}
 	assert.Equal(t, 1, h.rec.allNotificationJobs(), "積まれるのは ps_ok のメンションだけ")
 }
