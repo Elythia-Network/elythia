@@ -80,3 +80,18 @@ type dbFailingBlockingRepo struct {
 func (r *dbFailingBlockingRepo) FindByPair(string, string) (*model.Blocking, error) {
 	return nil, r.err
 }
+
+// 関係が無いときに相手を引く所でも、DB 障害を ErrBlockeeNotFound / ErrNotBlocking
+// に丸めない (#2799、#3760)。
+func TestUnblock_BlockeeLookupDBFailureIsNotNotFound(t *testing.T) {
+	dbErr := errors.New("dial tcp 127.0.0.1:5432: connect: connection refused")
+	idGen, _ := id.NewGenerator("aidx")
+	svc := blocking.NewService(
+		&failingUserRepo{MockUserRepository: testutil.NewMockUserRepository(), err: dbErr},
+		testutil.NewMockBlockingRepository(), idGen)
+
+	err := svc.Unblock("u1", "u2")
+	require.ErrorIs(t, err, dbErr)
+	assert.NotErrorIs(t, err, blocking.ErrBlockeeNotFound)
+	assert.NotErrorIs(t, err, blocking.ErrNotBlocking)
+}

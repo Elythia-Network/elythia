@@ -320,11 +320,27 @@ func TestDelete_Self(t *testing.T) {
 }
 
 func TestDelete_NotBlocking(t *testing.T) {
-	h, _ := newHandler(t)
+	h, repo := newHandler(t)
+	addUser(repo, "alice")
+	addUser(repo, "bob")
 	c, rec := newReq(t, `{"userId":"bob"}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Delete(c))
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "NOT_BLOCKING")
+}
+
+// A user that does not exist is NO_SUCH_USER, not NOT_BLOCKING: upstream looks up
+// the user before the relation (#3760).
+func TestDelete_NoSuchUser(t *testing.T) {
+	h, repo := newHandler(t)
+	addUser(repo, "alice")
+	c, rec := newReq(t, `{"userId":"nosuchuser1"}`)
+	setUser(c, "alice")
+	require.NoError(t, h.Delete(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"code":"NO_SUCH_USER"`)
+	assert.Contains(t, rec.Body.String(), "8621d8bf-c358-4303-a066-5ea78610eb3f")
 }
 
 // failingDeleteBlockingRepo lets us trigger Delete errors.

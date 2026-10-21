@@ -111,6 +111,8 @@ func (h *Handler) Delete(c echo.Context) error {
 		switch {
 		case errors.Is(err, coremuting.ErrSelfMute):
 			return c.JSON(http.StatusBadRequest, apierr.Error("MUTEE_IS_YOURSELF", "You cannot unmute yourself.", "619b1314-0850-4597-a242-e245f3da42af"))
+		case errors.Is(err, coremuting.ErrMuteeNotFound):
+			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_USER", "No such user.", "9b6728cf-638c-4aa1-bedb-e07d8101474d"))
 		case errors.Is(err, coremuting.ErrNotMuting):
 			return c.JSON(http.StatusBadRequest, apierr.Error("NOT_MUTING", "You are not muting that user.", "2e4ef874-8bf0-4b4b-b069-4598f6d05817"))
 		}

@@ -121,6 +121,23 @@ func (s *Service) Mute(muterID, muteeID string, expiresAt *time.Time) (*model.Mu
 	return rec, nil
 }
 
+// notMutingOrNoSuchUser tells why a pair to unmute was not found: the mutee
+// does not exist (ErrMuteeNotFound) or is not muted (ErrNotMuting).
+//
+// 本家の mute/delete・renote-mute/delete は、関係の有無より先に相手の有無を見て
+// NO_SUCH_USER を返す (#3760)。関係の行は相手の行を外部キーで要るので、関係が
+// あれば相手は居る。相手を引くのは、関係が見つからなかったときだけでよい。
+func notMutingOrNoSuchUser(users repository.UserRepository, muteeID string) error {
+	if _, err := users.FindByID(muteeID); err != nil {
+		// **DB 障害を not-found に丸めない** (#2799)。
+		if !repository.IsNotFound(err) {
+			return err
+		}
+		return ErrMuteeNotFound
+	}
+	return ErrNotMuting
+}
+
 // Unmute removes the muting relationship.
 func (s *Service) Unmute(muterID, muteeID string) error {
 	if muterID == muteeID {
@@ -132,7 +149,7 @@ func (s *Service) Unmute(muterID, muteeID string) error {
 		if !repository.IsNotFound(err) {
 			return err
 		}
-		return ErrNotMuting
+		return notMutingOrNoSuchUser(s.userRepo, muteeID)
 	}
 	if err := s.mutingRepo.Delete(rec); err != nil {
 		return err
@@ -228,7 +245,7 @@ func (s *RenoteService) Unmute(muterID, muteeID string) error {
 		if !repository.IsNotFound(err) {
 			return err
 		}
-		return ErrNotMuting
+		return notMutingOrNoSuchUser(s.userRepo, muteeID)
 	}
 	if err := s.renoteMutingRepo.Delete(rec); err != nil {
 		return err

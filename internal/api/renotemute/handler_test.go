@@ -156,11 +156,27 @@ func TestDelete_Self(t *testing.T) {
 }
 
 func TestDelete_NotMuting(t *testing.T) {
-	h, _ := newHandler(t)
+	h, repo := newHandler(t)
+	addUser(repo, "alice")
+	addUser(repo, "bob")
 	c, rec := newReq(t, `{"userId":"bob"}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Delete(c))
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "NOT_MUTING")
+}
+
+// A user that does not exist is NO_SUCH_USER, not NOT_MUTING: upstream looks up
+// the user before the relation (#3760).
+func TestDelete_NoSuchUser(t *testing.T) {
+	h, repo := newHandler(t)
+	addUser(repo, "alice")
+	c, rec := newReq(t, `{"userId":"nosuchuser1"}`)
+	setUser(c, "alice")
+	require.NoError(t, h.Delete(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"code":"NO_SUCH_USER"`)
+	assert.Contains(t, rec.Body.String(), "9b6728cf-638c-4aa1-bedb-e07d8101474d")
 }
 
 // failingDeleteRenoteMutingRepo lets us trigger Delete error.

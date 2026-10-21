@@ -141,6 +141,8 @@ func (h *Handler) Delete(c echo.Context) error {
 		switch {
 		case errors.Is(err, coreblocking.ErrSelfBlock):
 			return c.JSON(http.StatusBadRequest, apierr.Error("BLOCKEE_IS_YOURSELF", "You cannot unblock yourself.", "06f6fac6-524b-473c-a354-e97a40ae6eac"))
+		case errors.Is(err, coreblocking.ErrBlockeeNotFound):
+			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_USER", "No such user.", "8621d8bf-c358-4303-a066-5ea78610eb3f"))
 		case errors.Is(err, coreblocking.ErrNotBlocking):
 			return c.JSON(http.StatusBadRequest, apierr.Error("NOT_BLOCKING", "You are not blocking that user.", "291b2efa-60c6-45c0-9f6a-045c8f9b02cd"))
 		}
