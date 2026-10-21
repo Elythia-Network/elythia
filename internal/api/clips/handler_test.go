@@ -353,6 +353,38 @@ func TestList_FullShape(t *testing.T) {
 	shapetest.Assert(t, "Clip", cl) // L3 (#1270)
 }
 
+// offset は本家の paramDef に無いので、本家と同じく読まない (#3742)。以前は
+// cursor が無いときにその件数を飛ばしていた。
+func TestList_IgnoresOffset(t *testing.T) {
+	h, repo, _, _ := newHandler(t)
+	repo.Clips["c1"] = &model.Clip{ID: "c1", UserID: "alice", Name: "alpha"}
+	repo.Clips["c2"] = &model.Clip{ID: "c2", UserID: "alice", Name: "beta"}
+	c, rec := newReq(t, `{"offset":1}`)
+	setUser(c, "alice")
+	require.NoError(t, h.List(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var rows []map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &rows))
+	assert.Len(t, rows, 2)
+}
+
+// limit と sinceDate / untilDate は、本家(ajv の integer)と同じく、値が整数
+// の小数(10.0)を受ける (#3742)。
+func TestList_AcceptsIntegerValuedFractions(t *testing.T) {
+	h, repo, _, _ := newHandler(t)
+	repo.Clips["c1"] = &model.Clip{ID: "c1", UserID: "alice", Name: "alpha"}
+	for _, body := range []string{`{"limit":10.0}`, `{"limit":1e1}`, `{"untilDate":4102444800000.0}`} {
+		c, rec := newReq(t, body)
+		setUser(c, "alice")
+		require.NoError(t, h.List(c))
+		assert.Equal(t, http.StatusOK, rec.Code, body)
+	}
+	c, rec := newReq(t, `{"limit":10.5}`)
+	setUser(c, "alice")
+	require.NoError(t, h.List(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
 func TestList_BadJSON(t *testing.T) {
 	h, _, _, _ := newHandler(t)
 	c, rec := newReq(t, `{not`)
