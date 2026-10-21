@@ -1,10 +1,12 @@
 // Package paramshadow runs upstream's paramDef validation (internal/api/
-// paramschema) in front of the API handlers without acting on it, and counts
-// the requests where its verdict and the handler's answer disagree (#3677).
+// paramschema) in front of the API handlers. For most upstream endpoints it
+// does not act on it and counts the requests where its verdict and the
+// handler's answer disagree (#3677); for the endpoints aligned with upstream
+// (WithEnforced, #3742) it answers a rejected request with upstream's 400.
 //
-// The middleware never changes the response or what the handler reads: it
-// reads the JSON body (and puts the same bytes back), decodes its own copy
-// and validates that copy. What it records is the endpoint name, the
+// The middleware never changes what the handler reads: it reads the JSON
+// body (and puts the same bytes back), decodes its own copy and validates
+// that copy. What it records is the endpoint name, the
 // schemaPath of the validator's first error, the INVALID_PARAM info.param of
 // the handler's answer, the handler's status and error code, and the kind of
 // disagreement. It never records a value, the body, the user, the IP or the
@@ -89,6 +91,26 @@ const DefaultMaxBody = 64 << 10
 // 埋めたものが78。64KiBいっぱいの`{}`の配列は約4.4万になり、decodeの確保の
 // 大半はここから来る(#3677のレビュー2周目M-1)。
 const DefaultMaxValues = 4096
+
+// DefaultEnforcedMaxBody is the size limit of the JSON body (and query) of
+// the endpoints that reject (WithEnforced), in bytes. A larger one goes to
+// the handler unvalidated, like SkipTooLarge.
+//
+// 1件の費用の上限を、トークンの数だけでなく大きさでも抑える。64KiBの`\u`の
+// escapeの文字列は、検証ありで1件0.52ms・311KBかかった。16KiBでは約0.14ms・
+// 83KB(docs/param-shadow.md)。clips/*の正当なbodyは、UTF-8のまま送れば
+// descriptionの2048文字を4バイトの文字で埋めても約8KiB。
+const DefaultEnforcedMaxBody = 16 << 10
+
+// DefaultEnforcedMaxValues is the token limit of the endpoints that reject
+// (WithEnforced). A request over it goes to the handler unvalidated, like
+// SkipTooManyValues.
+//
+// 拒否するendpointは予算と枠を通さないので、1件の費用をトークンの数で抑える
+// (#3742のレビュー1周目M-1)。clips/*の正当なbodyは多くて十数トークン
+// (clips/notesの全項目と`i`で18)。本家のparamDefの項目の数に対して十分に大きく、
+// decodeの確保は上限の4096より1桁以上小さくなる。
+const DefaultEnforcedMaxValues = 256
 
 // input is what upstream hands to ajv for one request, or why the request is
 // not validated.

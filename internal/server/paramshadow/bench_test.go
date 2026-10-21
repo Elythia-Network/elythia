@@ -223,3 +223,97 @@ func BenchmarkCountTokens(b *testing.B) {
 		})
 	}
 }
+
+// enforcedWorstBodies are the costliest bodies an enforced endpoint
+// (clips/notes) validates, around its token limit DefaultEnforcedMaxValues,
+// and the costliest string body: \u escapes up to DefaultEnforcedMaxBody.
+func enforcedWorstBodies() []struct{ name, body string } {
+	arr := func(objs int) string {
+		return `{"clipId":"a","x":[{}` + strings.Repeat(",{}", objs-1) + `]}`
+	}
+	keys := func(n int) string {
+		var b strings.Builder
+		b.WriteString(`{"clipId":"a","x":{`)
+		for i := range n {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			fmt.Fprintf(&b, `"k%05d":0`, i)
+		}
+		b.WriteString(`}}`)
+		return b.String()
+	}
+	escaped := func(size int) string {
+		head, tail := `{"clipId":"a","x":"`, `"}`
+		return head + strings.Repeat(`\u3042`, (size-len(head)-len(tail))/6) + tail
+	}
+	// {"clipId":"a","x":[ ... ]} の外側のトークンは7。
+	at := (DefaultEnforcedMaxValues - 7) / 2
+	return []struct{ name, body string }{
+		{"values-at-limit", arr(at)},
+		{"keys-at-limit", keys(at)},
+		{"values-over-limit", arr(at + 1)},
+		{"escaped-string-at-limit", escaped(DefaultEnforcedMaxBody)},
+		{"escaped-string-64KiB", escaped(DefaultMaxBody)},
+	}
+}
+
+// BenchmarkEnforcedWorstCase measures enforcedWorstBodies on clips/notes
+// with and without the middleware. The enforced endpoint has neither the
+// budget nor the slots, so its cost per request is bounded by the limits
+// alone (#3742).
+func BenchmarkEnforcedWorstCase(b *testing.B) {
+	eps, err := paramschema.Upstream()
+	if err != nil {
+		b.Fatal(err)
+	}
+	for _, c := range enforcedWorstBodies() {
+		for _, on := range []bool{false, true} {
+			name := c.name + "/off"
+			if on {
+				name = c.name + "/on"
+			}
+			b.Run(name, func(b *testing.B) {
+				e := echo.New()
+				var mws []echo.MiddlewareFunc
+				if on {
+					mws = append(mws, Middleware(eps, &fakeSink{}, WithEnforced("clips/notes")))
+				}
+				e.POST("/api/clips/notes", func(c echo.Context) error {
+					_, _ = io.Copy(io.Discard, c.Request().Body)
+					return c.NoContent(http.StatusOK)
+				}, mws...)
+				b.ReportAllocs()
+				b.SetBytes(int64(len(c.body)))
+				for b.Loop() {
+					req := httptest.NewRequest(http.MethodPost, "/api/clips/notes", strings.NewReader(c.body))
+					req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+					e.ServeHTTP(httptest.NewRecorder(), req)
+				}
+			})
+		}
+	}
+}
+
+// TestEnforcedWorstBodiesHitTheLimits keeps BenchmarkEnforcedWorstCase
+// honest: each body lands on the side of the limits its name says.
+func TestEnforcedWorstBodiesHitTheLimits(t *testing.T) {
+	for _, c := range enforcedWorstBodies() {
+		over := tooManyValues([]byte(c.body), DefaultEnforcedMaxValues) || len(c.body) > DefaultEnforcedMaxBody
+		if over != (strings.Contains(c.name, "over") || strings.Contains(c.name, "64KiB")) || !json.Valid([]byte(c.body)) {
+			t.Errorf("%s (%d bytes): over the limits %v", c.name, len(c.body), over)
+		}
+		// 大きさで名付けたbodyは、その大きさの近くまで埋まっていること(escapeの
+		// つもりが1文字の文字になっていて、半分の大きさで測っていた。#3742の
+		// レビュー2周目M-1)。
+		for _, size := range []struct {
+			tag  string
+			size int
+		}{{"at-limit", DefaultEnforcedMaxBody}, {"64KiB", DefaultMaxBody}} {
+			if strings.HasPrefix(c.name, "escaped-string-") && strings.Contains(c.name, size.tag) &&
+				(len(c.body) > size.size || len(c.body) <= size.size-6) {
+				t.Errorf("%s is %d bytes, want just under %d", c.name, len(c.body), size.size)
+			}
+		}
+	}
+}
