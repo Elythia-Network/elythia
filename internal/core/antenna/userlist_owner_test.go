@@ -82,8 +82,8 @@ func TestUpdate_NonListSourceClearsUserListID(t *testing.T) {
 	assert.Nil(t, v)
 }
 
-// 自分の list へ切り替える通常の更新は通り、値が保存されること。空文字列は
-// clear の convention (#2106)。
+// 自分の list へ切り替える通常の更新は通り、値が保存されること。空文字列も
+// 外す (本家の update.ts は userListId を真偽で見る。#2106、#3748)。
 func TestUpdate_ListSourceOwnList(t *testing.T) {
 	svc, repo := newSvcWithForeignList(t)
 	lists := svc.userListRepo.(*testutil.MockUserListRepository)
@@ -131,4 +131,27 @@ func TestMatchNote_ListSource_ForeignListDoesNotMatch(t *testing.T) {
 	own := &model.Antenna{ID: "a2", UserID: "other", Src: model.AntennaSourceList, UserListID: &theirs, IsActive: true}
 	assert.False(t, svc.matchNote(a, n, &model.User{ID: "alice", Username: "alice"}, memo))
 	assert.True(t, svc.matchNote(own, n, &model.User{ID: "alice", Username: "alice"}, memo))
+}
+
+// ClearUserListID (API の userListId: null) は、src が list のままでも
+// リストの指定を外す。既存の値が他人の list でも検証しない (#3748)。
+func TestUpdate_ClearUserListID(t *testing.T) {
+	svc, repo := newSvcWithForeignList(t)
+	theirs := "theirs"
+	repo.Antennas["a1"] = &model.Antenna{ID: "a1", UserID: "u1", Name: "a", Src: model.AntennaSourceList, UserListID: &theirs}
+
+	_, err := svc.Update("u1", "a1", UpdateInput{ClearUserListID: true})
+	require.NoError(t, err)
+	v, ok := repo.LastUpdates["userListId"]
+	require.True(t, ok)
+	assert.Nil(t, v)
+
+	// src を list 以外へ変えるときも外す。
+	repo.LastUpdates = nil
+	home := model.AntennaSourceHome
+	_, err = svc.Update("u1", "a1", UpdateInput{Src: &home, ClearUserListID: true})
+	require.NoError(t, err)
+	v, ok = repo.LastUpdates["userListId"]
+	require.True(t, ok)
+	assert.Nil(t, v)
 }

@@ -889,3 +889,78 @@ func seedAntennaNote(t *testing.T, key, noteID string) {
 	t.Helper()
 	require.NoError(t, testRedis.Client.ZAdd(context.Background(), key, redis.Z{Score: 0, Member: noteID}).Err())
 }
+
+// userListId: null は、本家と同じくリストの指定を外す。省略は今の値を残す
+// (#3748)。
+func TestUpdate_NullUserListIDClearsTheList(t *testing.T) {
+	h, repo, lists := newHandlerWithUserList(t)
+	require.NoError(t, lists.Create(&model.UserList{ID: "ul1", UserID: "alice", Name: "mine"}))
+	ul := "ul1"
+	repo.Antennas["a1"] = &model.Antenna{ID: "a1", UserID: "alice", Name: "alpha", Src: model.AntennaSourceList, UserListID: &ul}
+
+	c, rec := newReq(t, `{"antennaId":"a1","name":"beta"}`)
+	setUser(c, "alice")
+	require.NoError(t, h.Update(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	_, touched := repo.LastUpdates["userListId"]
+	assert.False(t, touched, "an absent userListId must leave the list as it is")
+
+	c, rec = newReq(t, `{"antennaId":"a1","userListId":null}`)
+	setUser(c, "alice")
+	require.NoError(t, h.Update(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	v, touched := repo.LastUpdates["userListId"]
+	require.True(t, touched, "userListId: null must clear the list")
+	assert.Nil(t, v)
+}
+
+// limit と sinceDate / untilDate は、本家(ajv の integer)と同じく値が整数の
+// 小数を受ける (#3748)。
+func TestNotes_AcceptsIntegerValuedFractions(t *testing.T) {
+	h, repo, _ := newHandler(t)
+	repo.Antennas["a1"] = &model.Antenna{ID: "a1", UserID: "alice"}
+	for _, body := range []string{`{"antennaId":"a1","limit":10.0}`, `{"antennaId":"a1","sinceDate":1e1}`, `{"antennaId":"a1","untilDate":4102444800000.0}`} {
+		c, rec := newReq(t, body)
+		setUser(c, "alice")
+		require.NoError(t, h.Notes(c))
+		assert.Equal(t, http.StatusOK, rec.Code, body)
+	}
+}
+
+// 名前は本家の paramDef と同じく 100 文字 (code point) まで。本家に揃えた検証の
+// 上限を超える body は handler に届くので、handler でも見る (#3748)。
+func TestNameLength(t *testing.T) {
+	createBody := func(name string) string {
+		return `{"name":"` + name + `","src":"all","keywords":[["a"]],"excludeKeywords":[],"users":[],"caseSensitive":false,"withReplies":false,"withFile":false}`
+	}
+	for _, tc := range []struct {
+		name string
+		ok   bool
+	}{
+		{strings.Repeat("a", 100), true},
+		{strings.Repeat("😀", 100), true},
+		{strings.Repeat("a", 101), false},
+	} {
+		h, repo, _ := newHandler(t)
+		c, rec := newReq(t, createBody(tc.name))
+		setUser(c, "alice")
+		require.NoError(t, h.Create(c))
+		if !tc.ok {
+			assert.Equal(t, http.StatusBadRequest, rec.Code)
+			assert.Contains(t, rec.Body.String(), `"param":"#/properties/name/maxLength"`)
+		} else {
+			assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		}
+
+		repo.Antennas["a1"] = &model.Antenna{ID: "a1", UserID: "alice", Name: "alpha"}
+		c, rec = newReq(t, `{"antennaId":"a1","name":"`+tc.name+`"}`)
+		setUser(c, "alice")
+		require.NoError(t, h.Update(c))
+		if !tc.ok {
+			assert.Equal(t, http.StatusBadRequest, rec.Code)
+			assert.Contains(t, rec.Body.String(), `"param":"#/properties/name/maxLength"`)
+		} else {
+			assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		}
+	}
+}
