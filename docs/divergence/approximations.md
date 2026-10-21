@@ -154,12 +154,14 @@ entropy も sharp と一致する (gif は完全一致、他は差 0.03 以下)�
 
 `gallery/*`の9件も、#3754で同じ検証に載せた。次の差が本家と同じになった。`limit` / `sinceDate` / `untilDate`の整数の値の小数 (以前は400)、`gallery/posts`の`offset` (本家の`paramDef`に無い。以前は読んで件数を飛ばした)、`gallery/posts/update`の`description: null` (以前は省略と同じで消えなかった。本家と同じく消す)、重複した`fileIds` (以前は重複を除いて受けた)、`misskey:id`の形でないID、nullを許さない項目へのnull、`info`。
 
+`following/*`の11件も、#3756で同じ検証に載せた。次の差が本家と同じになった。`following/list` / `following/requests/list` / `following/requests/sent`の`limit` / `sinceDate` / `untilDate`の整数の値の小数 (以前は400)、`misskey:id`の形でない`userId` (以前は`NO_SUCH_USER`) と`sinceId` / `untilId` (以前は形を問わずcursorとして読み、空は指定なしと同じ)、nullを許さない項目へのnull (`withReplies`、`notify`、`following/list`の`notification`、`limit`など。以前は省略と同じかfalse)、`info`。同じ形のElythia独自の`following/silent/list` (#3466) も整数の値の小数を受けるが、本家に無いので検証の対象外で、nullやIDの形は以前と同じく受ける。
+
 残っている差は次のとおり。
 
 - **`clips/create` / `clips/update`の`name`・`description`にNULがあると、Elythiaは400 (`info`無し) を返す。** 本家はajvを通した後、DBへの書き込みで失敗して500になる。PostgreSQLのtext列に入らない値なので、500にする意味が無い
 - **bodyに不正なUTF-8があると、Elythiaは検証せずにhandlerへ渡し、`name`・`description`にあれば400 (`info`無し) を返す。** 本家はbodyを読むときに不正なバイトをU+FFFDに置き換えるので、そのまま保存して200を返す
 - **`charts/instance`の`host:""`には、Elythiaは空の集計を返す。** 本家の`getChartRaw`は空文字列をfalsyとしてgroupで絞らず、範囲内のどれかのホストの行を返す (DBの行の順で決まる)。意味のある結果ではないので揃えない
-- **`sinceDate` / `untilDate` (`clips/*`・`antennas/notes`・`flash/my`・`flash/my-likes`・`flash/search`・`gallery/posts`)、`charts/*`・`hashtags/search`・`hashtags/users`の`offset`がGoのint64の範囲外の数 (`1e19`、`-1e19`など) のとき、Elythiaは400を返す (`clips/*`・`antennas/notes`・`flash/*`・`gallery/posts`は`info`無し、`charts/*`は`info.param`が`#`、`hashtags/*`は`info`無しで文言は`query is required.`などの必須の項目の欠け)。** ajvは有限の整数として通す。ミリ秒の日付としては意味が無い。範囲内でも日付として表せない`charts/*`の`offset` (絶対値が8.64e15を超えるもの) は500になる。#3744より前から同じで、本家での挙動は確かめていない (#3369)
+- **`sinceDate` / `untilDate` (`clips/*`・`antennas/notes`・`flash/my`・`flash/my-likes`・`flash/search`・`gallery/posts`・`following/list`・`following/requests/list`・`following/requests/sent`)、`charts/*`・`hashtags/search`・`hashtags/users`の`offset`がGoのint64の範囲外の数 (`1e19`、`-1e19`など) のとき、Elythiaは400を返す (`clips/*`・`antennas/notes`・`flash/*`・`gallery/posts`・`following/*`は`info`無し、`charts/*`は`info.param`が`#`、`hashtags/*`は`info`無しで文言は`query is required.`などの必須の項目の欠け)。** ajvは有限の整数として通す。ミリ秒の日付としては意味が無い。範囲内でも日付として表せない`charts/*`の`offset` (絶対値が8.64e15を超えるもの) は500になる。#3744より前から同じで、本家での挙動は確かめていない (#3369)
 - **GETのqueryのキーは、handlerが大文字小文字を無視して読む。** 本家では`?Limit=1000`は知らない項目として無視されるが、Elythiaではechoのbinderが`limit`として読み、`#/properties/limit/maximum`の400になる。`?Limit=abc`は`#` ("Invalid request body.") の400になる。GETで呼べるendpoint全体の、以前からの差 (#3369)
 - **`gallery/posts/create` / `gallery/posts/update`で、`fileIds`に自分のファイルが1件も無いとき、Elythiaは400 `NO_SUCH_FILE` (Elythia独自のid `04b23109-…`) を返す。** 本家は`meta.errors`を持たず、素の`Error`を投げて500になる。500は避ける (#2106 L26)。以前は`INVALID_PARAM`を返していたが、本家の`paramDef`の検証を通った入力なので、本家の`notes/create`などと同じ名前の`NO_SUCH_FILE`にした (#3754)
 - **`hashtags/search` / `hashtags/users`の`offset`が負の数のとき、Elythiaは0として扱う。** ajvは通し、本家はその値をそのままSQLの`OFFSET`へ渡す (本家での結果は確かめていない)
