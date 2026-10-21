@@ -764,3 +764,60 @@ func TestUnstorableTagIsNotAServerError(t *testing.T) {
 		assert.Equal(t, "[]", strings.TrimSpace(rec.Body.String()))
 	})
 }
+
+// offset は本家の paramDef に無いので、本家と同じく読まない (#3746)。
+func TestList_IgnoresOffset(t *testing.T) {
+	cleanup()
+	defer cleanup()
+	require.NoError(t, testDB.Create(&model.Hashtag{ID: "ht_off1", Name: "offa", MentionedUsersCount: 2}).Error)
+	require.NoError(t, testDB.Create(&model.Hashtag{ID: "ht_off2", Name: "offb", MentionedUsersCount: 1}).Error)
+	names := decodeListTagNames(t, doPost(newHandler().List, `{"sort":"+mentionedUsers","offset":1}`))
+	assert.Equal(t, []string{"offa", "offb"}, names)
+}
+
+// limit / offset は、本家(ajv の integer)と同じく値が整数の小数を受ける (#3746)。
+func TestIntegerValuedFractionsAreAccepted(t *testing.T) {
+	h := newHandler()
+	for _, tc := range []struct {
+		fn   func(echo.Context) error
+		body string
+	}{
+		{h.List, `{"sort":"+mentionedUsers","limit":10.0}`},
+		{h.Search, `{"query":"x","limit":1e1,"offset":1.0}`},
+		{h.Users, `{"tag":"x","sort":"+follower","limit":10.0,"offset":0.0}`},
+	} {
+		assert.Equal(t, http.StatusOK, doPost(tc.fn, tc.body).Code, tc.body)
+	}
+	assert.Equal(t, http.StatusBadRequest, doPost(h.List, `{"sort":"+mentionedUsers","limit":10.5}`).Code)
+}
+
+// 本家は空文字列の query を通し、前方一致の '%' で全タグから、ローカルの
+// 利用者による言及の多い順に
+// 返す (#3746)。欠落は従来どおり 400。
+func TestSearch_EmptyQueryMatchesEveryTag(t *testing.T) {
+	cleanup()
+	defer cleanup()
+	require.NoError(t, testDB.Create(&model.Hashtag{ID: "ht_e1", Name: "emptya", MentionedLocalUsersCount: 1}).Error)
+	require.NoError(t, testDB.Create(&model.Hashtag{ID: "ht_e2", Name: "emptyb", MentionedLocalUsersCount: 5}).Error)
+	names := decodeSearchNames(t, doPost(newHandler().Search, `{"query":""}`))
+	assert.Equal(t, []string{"emptyb", "emptya"}, names)
+	assert.Equal(t, http.StatusBadRequest, doPost(newHandler().Search, `{"query":null}`).Code)
+}
+
+// 本家は空文字列の tag を通し、一致するタグが無いので NO_SUCH_HASHTAG (#3746)。
+func TestShow_EmptyTagIsNoSuchHashtag(t *testing.T) {
+	rec := doPost(newHandler().Show, `{"tag":""}`)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "NO_SUCH_HASHTAG")
+}
+
+// 本家は空文字列の tag を通し、空の結果を返す (#3746)。タグを持つ人も、
+// タグが空の人も返さない。
+func TestUsers_EmptyTagReturnsEmpty(t *testing.T) {
+	now := time.Now()
+	seedTagUser(t, "u_htu_e1", "htue1", []string{"emptytagx"}, nil, false, 1, now)
+	seedTagUser(t, "u_htu_e2", "htue2", []string{}, nil, false, 1, now)
+	rec := doPost(newHandler().Users, `{"tag":"","sort":"+follower"}`)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, []string{}, decodeUserIDs(t, rec))
+}
