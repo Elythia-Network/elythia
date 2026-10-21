@@ -118,12 +118,18 @@ func seedPost(t *testing.T, p *model.GalleryPost) {
 }
 
 // seedDriveFile inserts a minimal drive file owned by ownerID for gallery tests.
-func seedDriveFile(id, ownerID string) {
+//
+// **作成の失敗を検査する。** 所有者は FK で実在する利用者 (gal_u1 / gal_u2) に
+// 限られる。以前は失敗を捨てていたので、存在しない所有者を書くと行が作られず、
+// 「他人のファイル」のつもりが「存在しないファイル」を試していた。所有者の
+// 検査を外しても、どのテストも落ちなかった (#3754 のレビュー)。
+func seedDriveFile(t *testing.T, id, ownerID string) {
+	t.Helper()
 	uid := ownerID
-	testDB.Create(&model.DriveFile{
+	require.NoError(t, testDB.Create(&model.DriveFile{
 		ID: id, UserID: &uid, MD5: "x", Name: id + ".png", Type: "image/png",
 		Size: 1, StoredInternal: true, URL: "https://example/" + id + ".png",
-	})
+	}).Error)
 }
 
 func doPost(h func(echo.Context) error, body string, user *model.User) *httptest.ResponseRecorder {
@@ -201,9 +207,9 @@ func TestPosts_Success(t *testing.T) {
 func TestPosts_BatchFilesAndPerPostIsLiked(t *testing.T) {
 	cleanup()
 	defer cleanup()
-	seedDriveFile("galf_a1", "gal_u1")
-	seedDriveFile("galf_a2", "gal_u1")
-	seedDriveFile("galf_b1", "gal_u1")
+	seedDriveFile(t, "galf_a1", "gal_u1")
+	seedDriveFile(t, "galf_a2", "gal_u1")
+	seedDriveFile(t, "galf_b1", "gal_u1")
 	// postA: files [a1,a2]、liked。postB: [b1]、not-liked。
 	seedPost(t, &model.GalleryPost{ID: "gp_a", UpdatedAt: time.Now(), Title: "A", UserID: "gal_u1", FileIDs: []string{"galf_a1", "galf_a2"}, Tags: []string{}})
 	seedPost(t, &model.GalleryPost{ID: "gp_b", UpdatedAt: time.Now(), Title: "B", UserID: "gal_u1", FileIDs: []string{"galf_b1"}, Tags: []string{}})
@@ -277,7 +283,7 @@ func TestPostsUpdate_IsSensitiveResetOnOmit(t *testing.T) {
 func TestPostsCreate_TitleEmptyAndDedup(t *testing.T) {
 	cleanup()
 	defer cleanup()
-	seedDriveFile("galf_d1", "gal_u1")
+	seedDriveFile(t, "galf_d1", "gal_u1")
 	// title 空は 400 (update 側 minLength)。create は title=="" を既存どおり弾く。
 	assert.Equal(t, http.StatusBadRequest, doPost(newHandler().PostsCreate, `{"title":"","fileIds":["galf_d1"]}`, &model.User{ID: "gal_u1"}).Code)
 	// 重複 fileId は dedup されて 1 件で保存される。
@@ -302,9 +308,9 @@ func TestPostsCreate_TooManyFiles(t *testing.T) {
 func TestPostsCreate_MixedOwnedForeignOrder(t *testing.T) {
 	cleanup()
 	defer cleanup()
-	seedDriveFile("galf_m1", "gal_u1")
-	seedDriveFile("galf_m2", "gal_u1")
-	seedDriveFile("galf_mforeign", "someone_else")
+	seedDriveFile(t, "galf_m1", "gal_u1")
+	seedDriveFile(t, "galf_m2", "gal_u1")
+	seedDriveFile(t, "galf_mforeign", "gal_u2")
 	rec := doPost(newHandler().PostsCreate, `{"title":"Mix","fileIds":["galf_m2","galf_mforeign","galf_m1"]}`, &model.User{ID: "gal_u1"})
 	require.Equal(t, http.StatusOK, rec.Code)
 	var resp map[string]any
@@ -335,7 +341,7 @@ func TestPosts_DBError(t *testing.T) {
 func TestPostsCreate_Success(t *testing.T) {
 	cleanup()
 	defer cleanup()
-	seedDriveFile("galf_c1", "gal_u1")
+	seedDriveFile(t, "galf_c1", "gal_u1")
 	user := &model.User{ID: "gal_u1", Username: "galuser"}
 	rec := doPost(newHandler().PostsCreate, `{"title":"My Art","fileIds":["galf_c1"]}`, user)
 	assert.Equal(t, http.StatusOK, rec.Code)
@@ -361,7 +367,7 @@ func TestPostsCreate_FileIdsRequired(t *testing.T) {
 func TestPostsCreate_ForeignFilesRejected(t *testing.T) {
 	cleanup()
 	defer cleanup()
-	seedDriveFile("galf_other", "someone_else")
+	seedDriveFile(t, "galf_other", "gal_u2")
 	rec := doPost(newHandler().PostsCreate, `{"title":"x","fileIds":["galf_other"]}`, &model.User{ID: "gal_u1"})
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
@@ -392,7 +398,7 @@ func TestPostsShow_Found(t *testing.T) {
 func TestPostsShow_IsLikedAndFiles(t *testing.T) {
 	cleanup()
 	defer cleanup()
-	seedDriveFile("galf_s2", "gal_u1")
+	seedDriveFile(t, "galf_s2", "gal_u1")
 	seedPost(t, &model.GalleryPost{ID: "gp_s2", UpdatedAt: time.Now(), Title: "S", UserID: "gal_u1", FileIDs: []string{"galf_s2"}, Tags: []string{}})
 	testDB.Create(&model.GalleryLike{ID: "gl_s2", UserID: "gal_u1", PostID: "gp_s2"})
 
@@ -515,7 +521,7 @@ func TestPostsUpdate_WithDescription(t *testing.T) {
 func TestPostsUpdate_ForeignFilesRejected(t *testing.T) {
 	cleanup()
 	defer cleanup()
-	seedDriveFile("galf_foreign", "someone_else")
+	seedDriveFile(t, "galf_foreign", "gal_u2")
 	seedPost(t, &model.GalleryPost{ID: "gp_uf", UpdatedAt: time.Now(), Title: "Old", UserID: "gal_u1", FileIDs: []string{}, Tags: []string{}})
 	rec := doPost(newHandler().PostsUpdate, `{"postId":"gp_uf","fileIds":["galf_foreign"]}`, &model.User{ID: "gal_u1"})
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
@@ -525,7 +531,7 @@ func TestPostsUpdate_ForeignFilesRejected(t *testing.T) {
 func TestPostsUpdate_FileIdsAndSensitive(t *testing.T) {
 	cleanup()
 	defer cleanup()
-	seedDriveFile("galf_u2a", "gal_u1")
+	seedDriveFile(t, "galf_u2a", "gal_u1")
 	seedPost(t, &model.GalleryPost{ID: "gp_u2", UpdatedAt: time.Now(), Title: "Old", UserID: "gal_u1", FileIDs: []string{}, Tags: []string{}})
 	rec := doPost(newHandler().PostsUpdate, `{"postId":"gp_u2","fileIds":["galf_u2a"],"isSensitive":true}`, &model.User{ID: "gal_u1"})
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -630,4 +636,66 @@ func TestPostsUnlike_NotLiked(t *testing.T) {
 
 func TestPostsUnlike_InvalidParam(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, doPost(newHandler().PostsUnlike, `{}`, &model.User{ID: "u1"}).Code)
+}
+
+// 自分のファイルが 1 件も無い fileIds は、400 NO_SUCH_FILE (#3754)。本家は
+// 500 になるが避ける (#2106 L26)。本家の paramDef の検証を通る入力なので、
+// INVALID_PARAM は返さない。
+func TestPostsCreateUpdate_NoOwnedFilesIsNoSuchFile(t *testing.T) {
+	cleanup()
+	defer cleanup()
+	seedDriveFile(t, "galf_nsf", "gal_u2")
+	seedPost(t, &model.GalleryPost{ID: "gp_nsf", UpdatedAt: time.Now(), Title: "t", UserID: "gal_u1", FileIDs: []string{}, Tags: []string{}})
+	for _, tc := range []struct {
+		fn   func(echo.Context) error
+		body string
+	}{
+		{newHandler().PostsCreate, `{"title":"x","fileIds":["galf_nsf"]}`},
+		{newHandler().PostsUpdate, `{"postId":"gp_nsf","fileIds":["galf_nsf"]}`},
+	} {
+		rec := doPost(tc.fn, tc.body, &model.User{ID: "gal_u1"})
+		assert.Equal(t, http.StatusBadRequest, rec.Code, tc.body)
+		assert.Contains(t, rec.Body.String(), `"code":"NO_SUCH_FILE"`, tc.body)
+		assert.NotContains(t, rec.Body.String(), "INVALID_PARAM", tc.body)
+	}
+}
+
+// description: null は本家と同じく説明を消す。省略は今の値を残す (#3754)。
+func TestPostsUpdate_NullDescriptionClears(t *testing.T) {
+	cleanup()
+	defer cleanup()
+	desc := "old description"
+	seedPost(t, &model.GalleryPost{ID: "gp_nd", UpdatedAt: time.Now(), Title: "t", Description: &desc, UserID: "gal_u1", FileIDs: []string{}, Tags: []string{}})
+	description := func() *string {
+		var p model.GalleryPost
+		require.NoError(t, testDB.Where("id = ?", "gp_nd").First(&p).Error)
+		return p.Description
+	}
+
+	rec := doPost(newHandler().PostsUpdate, `{"postId":"gp_nd","title":"t2"}`, &model.User{ID: "gal_u1"})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotNil(t, description(), "an absent description must be kept")
+
+	rec = doPost(newHandler().PostsUpdate, `{"postId":"gp_nd","description":null}`, &model.User{ID: "gal_u1"})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Nil(t, description(), "description: null must clear it")
+}
+
+// gallery/posts は、本家の paramDef に無い offset を読まない。limit と
+// sinceDate / untilDate は、値が整数の小数を受ける (#3754)。
+func TestPosts_FollowUpstreamParams(t *testing.T) {
+	cleanup()
+	defer cleanup()
+	seedPost(t, &model.GalleryPost{ID: "gp_of1", UpdatedAt: time.Now(), Title: "a", UserID: "gal_u1", FileIDs: []string{}, Tags: []string{}})
+	seedPost(t, &model.GalleryPost{ID: "gp_of2", UpdatedAt: time.Now(), Title: "b", UserID: "gal_u1", FileIDs: []string{}, Tags: []string{}})
+	rec := doPost(newHandler().Posts, `{"offset":1}`, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var rows []map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &rows))
+	assert.Len(t, rows, 2, "gallery/posts must not read offset")
+
+	for _, body := range []string{`{"limit":10.0}`, `{"sinceDate":1.0}`, `{"untilDate":4102444800000.0}`} {
+		assert.Equal(t, http.StatusOK, doPost(newHandler().Posts, body, nil).Code, body)
+	}
+	assert.Equal(t, http.StatusOK, doPost(newHandler().Featured, `{"limit":10.0}`, nil).Code)
 }
