@@ -162,3 +162,78 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		}
 	}
 }
+
+// TestEnforcedGETMatchesUpstream sends GET queries to the enforced charts/*
+// endpoints of a real server and compares the answers with upstream's: the
+// cast step (JSON.parse of integer params, 0b5f1631-… on failure), then
+// ajv on the cast values. The corpus has JSON bodies only, so the queries
+// are written out here (#3744).
+func TestEnforcedGETMatchesUpstream(t *testing.T) {
+	if serverIntegrationDB == nil {
+		t.Skip("PostgreSQL unavailable")
+	}
+	_, on, _ := newParamShadowServers(t)
+
+	const castID = "0b5f1631-7c1a-41a6-b399-cce335f34d85"
+	const ajvID = "3d81ceae-475f-4600-b2a8-2bc116157532"
+	for _, tc := range []struct {
+		query string
+		// ok: upstream accepts. Otherwise the INVALID_PARAM id, info.param
+		// and info.reason upstream answers with.
+		ok                bool
+		id, param, reason string
+	}{
+		{query: "charts/notes?span=day", ok: true},
+		{query: "charts/notes?span=day&limit=10.0", ok: true},
+		{query: "charts/notes?span=day&limit=1e1", ok: true},
+		{query: "charts/notes?span=day&limit=%2010", ok: true},
+		{query: "charts/notes?span=day&offset=null", ok: true},
+		{query: "charts/notes?span=day&offset=10.0", ok: true},
+		{query: "charts/notes?span=day&unknown=1", ok: true},
+		{query: "charts/instance?span=day&host=", ok: true},
+		{query: "charts/instance?span=day&host=remote.example", ok: true},
+		{query: "charts/user/notes?span=day&userId=abc123", ok: true},
+		{query: "charts/notes?span=day&limit=abc", id: castID, param: "limit", reason: "cannot cast to integer"},
+		{query: "charts/notes?span=day&limit=", id: castID, param: "limit", reason: "cannot cast to integer"},
+		{query: "charts/notes?span=day&offset=x", id: castID, param: "offset", reason: "cannot cast to integer"},
+		{query: "charts/notes?span=day&limit=abc&offset=x", id: castID, param: "limit", reason: "cannot cast to integer"},
+		{query: "charts/notes?span=day&limit=1&limit=2", id: ajvID, param: "#/properties/limit/type", reason: "must be integer"},
+		{query: "charts/notes?span=day&span=hour", id: ajvID, param: "#/properties/span/type", reason: "must be string"},
+		{query: "charts/notes?span=day&limit=null", id: ajvID, param: "#/properties/limit/type", reason: "must be integer"},
+		{query: "charts/notes?span=day&limit=%2210%22", id: ajvID, param: "#/properties/limit/type", reason: "must be integer"},
+		{query: "charts/notes?span=day&limit=10.5", id: ajvID, param: "#/properties/limit/type", reason: "must be integer"},
+		{query: "charts/notes?span=day&limit=0", id: ajvID, param: "#/properties/limit/minimum", reason: "must be >= 1"},
+		{query: "charts/notes?span=day&limit=501", id: ajvID, param: "#/properties/limit/maximum", reason: "must be <= 500"},
+		{query: "charts/notes?span=week", id: ajvID, param: "#/properties/span/enum", reason: "must be equal to one of the allowed values"},
+		{query: "charts/notes", id: ajvID, param: "#/required", reason: "must have required property 'span'"},
+		{query: "charts/instance?span=day", id: ajvID, param: "#/required", reason: "must have required property 'host'"},
+		{query: "charts/user/notes?span=week", id: ajvID, param: "#/required", reason: "must have required property 'userId'"},
+		{query: "charts/user/notes?span=day&userId=x-y", id: ajvID, param: "#/properties/userId/format", reason: `must match format "misskey:id"`},
+		{query: "charts/user/notes?span=day&userId=", id: ajvID, param: "#/properties/userId/format", reason: `must match format "misskey:id"`},
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/api/"+tc.query, nil)
+		rec := httptest.NewRecorder()
+		on.Handler().ServeHTTP(rec, req)
+		var env struct {
+			Error struct {
+				Code string `json:"code"`
+				ID   string `json:"id"`
+				Info struct {
+					Param  string `json:"param"`
+					Reason string `json:"reason"`
+				} `json:"info"`
+			} `json:"error"`
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &env)
+		if tc.ok {
+			assert.Equal(t, http.StatusOK, rec.Code, "%s: %s", tc.query, rec.Body.String())
+			continue
+		}
+		if assert.Equal(t, http.StatusBadRequest, rec.Code, "%s: %s", tc.query, rec.Body.String()) {
+			assert.Equal(t, "INVALID_PARAM", env.Error.Code, tc.query)
+			assert.Equal(t, tc.id, env.Error.ID, tc.query)
+			assert.Equal(t, tc.param, env.Error.Info.Param, tc.query)
+			assert.Equal(t, tc.reason, env.Error.Info.Reason, tc.query)
+		}
+	}
+}
