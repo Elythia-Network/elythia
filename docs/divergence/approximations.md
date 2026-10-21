@@ -144,9 +144,13 @@ entropy も sharp と一致する (gif は完全一致、他は差 0.03 以下)�
 
 `clips/*`の11件は、本家の`paramDef`で引数を検証し、本家と同じ400 (`INVALID_PARAM`、`info: {param, reason}`) を返す (仕組みは[param-shadow.md](../param-shadow.md#本家に揃えたendpoint3742))。#3742で、次の差が本家と同じになった。`misskey:id`の形でないID (以前は`NO_SUCH_CLIP` / `NO_SUCH_NOTE`)、nullを許さない任意の項目へのnull (`isPublic`・`limit`・`sinceId`など。以前は省略と同じに扱った)、空の`sinceId` / `untilId` (同上)、`limit: 10.0`のような整数の値の小数 (以前は400)、`info`。`clips/list`の`offset` (本家の`paramDef`に無い) も、本家と同じく読まなくなった (以前はcursorが無ければその件数を飛ばした)。
 
+`charts/*`の12件も、#3744で同じ検証に載せた。次の差が本家と同じになった。`limit` / `offset`の整数の値の小数 (`10.0`、GETの`?limit=10.0`。以前は400 `#`)、GETの`?offset=null` (以前は400)、`limit:null` (以前は既定の30として通した)、`span`の空文字列とnull・型の誤り (以前は`#/required`か`#`)、`misskey:id`の形でない`userId` (以前はその文字列で集計を引いて200)、`charts/instance`の`host:""`を通すこと (以前は`#/required`。返す集計は下の差を参照)、GETの同じキーの2回の指定 (以前は先頭の値で200)、requiredとほかの誤りが重なったときの順。
+
 残っている差は次のとおり。
 
 - **`clips/create` / `clips/update`の`name`・`description`にNULがあると、Elythiaは400 (`info`無し) を返す。** 本家はajvを通した後、DBへの書き込みで失敗して500になる。PostgreSQLのtext列に入らない値なので、500にする意味が無い
 - **bodyに不正なUTF-8があると、Elythiaは検証せずにhandlerへ渡し、`name`・`description`にあれば400 (`info`無し) を返す。** 本家はbodyを読むときに不正なバイトをU+FFFDに置き換えるので、そのまま保存して200を返す
-- **`sinceDate` / `untilDate`が2^63以上の数 (`1e19`など) のとき、Elythiaは400 (`info`無し) を返す。** ajvは有限の整数として通す。Goのint64に入らない値で、ミリ秒の日付としては意味が無い
-- **検証しない入力は、handlerの手書きの検査が判定する。** 16KiB (16,384バイト) かトークン256を超えるbody、対になっていないサロゲートのescapeや不正なUTF-8を含むbody、`application/json`でないbodyが当たる。手書きの検査は型・必須・長さ・範囲を本家と同じに見るが、`info`を付けず (`application/json`でないbodyの`#/type`だけは付く)、`misskey:id`の形とnullの扱いは#3742より前のまま (上の差が残る)。本家のクライアントが普通に送るbodyは上限に収まる ([param-shadow.md](../param-shadow.md#本家に揃えたendpoint3742))
+- **`charts/instance`の`host:""`には、Elythiaは空の集計を返す。** 本家の`getChartRaw`は空文字列をfalsyとしてgroupで絞らず、範囲内のどれかのホストの行を返す (DBの行の順で決まる)。意味のある結果ではないので揃えない
+- **`sinceDate` / `untilDate`、`charts/*`の`offset`がGoのint64の範囲外の数 (`1e19`、`-1e19`など) のとき、Elythiaは400を返す (`clips/*`は`info`無し、`charts/*`は`info.param`が`#`)。** ajvは有限の整数として通す。ミリ秒の日付としては意味が無い。範囲内でも日付として表せない`charts/*`の`offset` (絶対値が8.64e15を超えるもの) は500になる。#3744より前から同じで、本家での挙動は確かめていない (#3369)
+- **GETのqueryのキーは、handlerが大文字小文字を無視して読む。** 本家では`?Limit=1000`は知らない項目として無視されるが、Elythiaではechoのbinderが`limit`として読み、`#/properties/limit/maximum`の400になる。`?Limit=abc`は`#` ("Invalid request body.") の400になる。GETで呼べるendpoint全体の、以前からの差 (#3369)
+- **検証しない入力は、handlerの手書きの検査が判定する。** 16KiB (16,384バイト) かトークン256を超えるbody、対になっていないサロゲートのescapeや不正なUTF-8を含むbody、`application/json`でないbody、`url.ParseQuery`が読めないGETのquery (`;`を含むものなど) が当たる。手書きの検査は型・必須・長さ・範囲を本家と同じに見るが、`info`を付けず (`application/json`でないbodyの`#/type`だけは付く)、`misskey:id`の形とnullの扱いは#3742より前のまま (上の差が残る)。本家のクライアントが普通に送るbodyは上限に収まる ([param-shadow.md](../param-shadow.md#本家に揃えたendpoint3742))
