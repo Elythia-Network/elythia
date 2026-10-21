@@ -782,3 +782,38 @@ func TestList_DefaultLimit(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
 	assert.Equal(t, 10, len(out), "limit 未指定 → default 10")
 }
+
+// 一覧の limit / sinceDate / untilDate は、本家(ajv の integer)と同じく値が
+// 整数の小数を受ける。following/silent/list (独自) も同じ形 (#3756)。
+func TestListsAcceptIntegerValuedFractions(t *testing.T) {
+	h, repo := newTestHandler(t)
+	h.followingService.SetSilentFollowRepo(&fakeSilentFollowRepo{})
+	bob := addUser(repo, "bob", false)
+	for _, tc := range []struct {
+		name string
+		fn   func(echo.Context) error
+	}{
+		{"list", h.List},
+		{"requests/list", h.ListRequests},
+		{"requests/sent", h.RequestsSent},
+		{"silent/list", h.ListSilent},
+	} {
+		for _, body := range []string{`{"limit":10.0}`, `{"limit":1e1}`, `{"sinceDate":1.0}`, `{"untilDate":4102444800000.0}`} {
+			assert.Equal(t, http.StatusOK, postJSON(tc.fn, body, bob).Code, tc.name+" "+body)
+		}
+		assert.Equal(t, http.StatusBadRequest, postJSON(tc.fn, `{"limit":10.5}`, bob).Code, tc.name)
+	}
+
+	// 小数の limit が件数として効く (読んだうえで無視していない)。
+	a := addUser(repo, "lockeda", true)
+	b := addUser(repo, "lockedb", true)
+	for _, target := range []*model.User{a, b} {
+		_, err := h.followingService.Follow(bob.ID, target.ID, corefollowing.FollowOptions{})
+		require.NoError(t, err)
+	}
+	var sent []map[string]any
+	rec := postJSON(h.RequestsSent, `{"limit":1.0}`, bob)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &sent))
+	assert.Len(t, sent, 1)
+}

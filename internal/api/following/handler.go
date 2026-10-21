@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	corefollowing "github.com/elythia-network/elythia/internal/core/following"
 	coreuser "github.com/elythia-network/elythia/internal/core/user"
@@ -234,16 +235,17 @@ type ListRequestsResponseItem struct {
 }
 
 // ListRequest is the request body for /api/following/list (upstream 2026.5.2
-// #17385 + #17416)。`sinceDate` / `untilDate` は upstream paramDef にあるが
-// mk-go の他 endpoint と同じく現状未対応で、bind は受けるが silent ignore
-// (= 上流仕様の subset、別 issue で全 endpoint 横断対応)。
+// #17385 + #17416). sinceDate / untilDate are read as cursors (#1166).
+//
+// limit / sinceDate / untilDate は、本家(ajv の integer)と同じく値が整数の
+// 小数(10.0)を受ける。following/requests/list・sent・silent/list も同じ (#3756)。
 type ListRequest struct {
-	Notification bool   `json:"notification"`
-	SinceID      string `json:"sinceId"`
-	UntilID      string `json:"untilId"`
-	SinceDate    *int64 `json:"sinceDate"`
-	UntilDate    *int64 `json:"untilDate"`
-	Limit        *int   `json:"limit"`
+	Notification bool       `json:"notification"`
+	SinceID      string     `json:"sinceId"`
+	UntilID      string     `json:"untilId"`
+	SinceDate    *jsnum.Int `json:"sinceDate"`
+	UntilDate    *jsnum.Int `json:"untilDate"`
+	Limit        *jsnum.Int `json:"limit"`
 }
 
 // List handles POST /api/following/list (upstream 2026.5.2 #17385 + #17416)。
@@ -255,14 +257,14 @@ func (h *Handler) List(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
 	// sinceDate / untilDate (Unix ms) を aidx prefix に正規化して sinceID /
 	// untilID と同 SQL cursor で扱う (#1166)。sinceID が指定されている場合
 	// upstream 同様 sinceDate は無視される。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -367,22 +369,22 @@ func (h *Handler) packRequests(rows []*model.FollowRequest) []ListRequestsRespon
 func (h *Handler) ListRequests(c echo.Context) error {
 	me := middleware.GetUser(c)
 	var req struct {
-		Limit     *int   `json:"limit"`
-		SinceID   string `json:"sinceId"`
-		UntilID   string `json:"untilId"`
-		SinceDate *int64 `json:"sinceDate"`
-		UntilDate *int64 `json:"untilDate"`
+		Limit     *jsnum.Int `json:"limit"`
+		SinceID   string     `json:"sinceId"`
+		UntilID   string     `json:"untilId"`
+		SinceDate *jsnum.Int `json:"sinceDate"`
+		UntilDate *jsnum.Int `json:"untilDate"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
 
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
