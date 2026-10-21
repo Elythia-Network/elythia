@@ -121,8 +121,9 @@ func (r *flashRepository) ListPublicByUser(userID, sinceID, untilID string, limi
 	return rows, nil
 }
 
-// ListFeatured returns the most-liked flashes (offset mode), or id-ordered
-// when cursor is supplied (frontend Paginator対応)。
+// ListFeatured returns the most-liked public flashes, paged by offset like
+// upstream, or id-ordered when a cursor is supplied. flash/featured passes no
+// cursor since #3750 (upstream's paramDef has none).
 func (r *flashRepository) ListFeatured(sinceID, untilID string, limit, offset int) ([]*model.Flash, error) {
 	if limit <= 0 {
 		limit = 30
@@ -143,7 +144,10 @@ func (r *flashRepository) ListFeatured(sinceID, untilID string, limit, offset in
 	if sinceID != "" || untilID != "" {
 		q = q.Order(paginationOrder(sinceID, untilID, "id"))
 	} else {
-		q = q.Order(`"likedCount" DESC`)
+		// 本家 FlashService.featured と同じく、同点は updatedAt、id の降順で
+		// 決める。決めないと offset でページを送るたびに同点の並びが変わり、
+		// 重複や抜けが出る (#3750)。
+		q = q.Order(`"likedCount" DESC`).Order(`"updatedAt" DESC`).Order("id DESC")
 	}
 	q = q.Limit(limit)
 	if sinceID == "" && untilID == "" && offset > 0 {
