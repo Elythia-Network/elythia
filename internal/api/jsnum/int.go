@@ -4,6 +4,7 @@ package jsnum
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"math"
 	"strconv"
@@ -43,6 +44,20 @@ func (n *Int) UnmarshalJSON(data []byte) error {
 	}
 	*n = Int(f)
 	return nil
+}
+
+// UnmarshalParam decodes a query value (echo.BindUnmarshaler) the way
+// upstream casts a GET param of type integer: JSON.parse, so "10.0", "1e1"
+// and " 10" are 10. A value JSON.parse rejects is an error; "null" leaves the
+// value unchanged, like UnmarshalJSON.
+//
+// echoはqueryの値にUnmarshalJSONを使わないので、GETでも10.0を受けるには
+// これが要る(#3744)。
+func (n *Int) UnmarshalParam(s string) error {
+	if !json.Valid([]byte(s)) {
+		return errNotInteger
+	}
+	return n.UnmarshalJSON([]byte(s))
 }
 
 // IntPtr returns the value as *int, or nil for a nil n.

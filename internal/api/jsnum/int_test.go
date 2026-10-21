@@ -72,3 +72,36 @@ func TestIntPointers(t *testing.T) {
 	require.NotNil(t, n.Int64Ptr())
 	assert.Equal(t, int64(42), *n.Int64Ptr())
 }
+
+func TestIntUnmarshalParam(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want Int
+		ok   bool
+	}{
+		{"10", 10, true},
+		{"10.0", 10, true},
+		{"1e1", 10, true},
+		{" 10", 10, true},
+		{"null", 7, true},
+		{"10.5", 0, false},
+		{"+10", 0, false},
+		{"abc", 0, false},
+		{"", 0, false},
+		{`"10"`, 0, false},
+		{"\t10\n", 10, true},
+		{"1e400", 0, false},
+		{"NaN", 0, false},
+		{"Infinity", 0, false},
+		{"0x10", 0, false},
+	} {
+		n := Int(7)
+		err := n.UnmarshalParam(tc.in)
+		if !tc.ok {
+			assert.Error(t, err, tc.in)
+			continue
+		}
+		require.NoError(t, err, tc.in)
+		assert.Equal(t, tc.want, n, tc.in)
+	}
+}
