@@ -99,8 +99,9 @@ const DefaultMaxValues = 4096
 // 1件の費用の上限を、トークンの数だけでなく大きさでも抑える。64KiBの`\u`の
 // escapeの文字列は、検証ありで1件0.52ms・311KBかかった。16KiBでは約0.14ms・
 // 83KB(docs/param-shadow.md)。clips/*の正当なbodyは、UTF-8のまま送れば
-// descriptionの2048文字を4バイトの文字で埋めても約8KiB。charts/*はもっと
-// 小さい(項目は最大4つで、長さに上限の無い文字列はuserIdとhostだけ)。
+// descriptionの2048文字を4バイトの文字で埋めても約8KiB。charts/*と
+// hashtags/*はもっと小さい(項目は最大6つで、長さに上限の無い文字列は
+// charts/*のuserIdとhost、hashtags/*のqueryとtagだけ)。
 const DefaultEnforcedMaxBody = 16 << 10
 
 // DefaultEnforcedMaxValues is the token limit of the endpoints that reject
@@ -108,10 +109,9 @@ const DefaultEnforcedMaxBody = 16 << 10
 // SkipTooManyValues.
 //
 // 拒否するendpointは予算と枠を通さないので、1件の費用をトークンの数で抑える
-// (#3742のレビュー1周目M-1)。clips/*の正当なbodyは多くて十数トークン
-// (clips/notesの全項目と`i`で18。charts/*は全項目と`i`で12)。本家の
-// paramDefの項目の数に対して十分に大きく、decodeの確保は上限の4096より
-// 1桁以上小さくなる。
+// (#3742のレビュー1周目M-1)。正当なbodyは多くて十数トークン(clips/notesの
+// 全項目と`i`で18、charts/*で12、hashtags/usersで16)。本家のparamDefの項目の
+// 数に対して十分に大きく、decodeの確保は上限の4096より1桁以上小さくなる。
 const DefaultEnforcedMaxValues = 256
 
 // input is what upstream hands to ajv for one request, or why the request is
