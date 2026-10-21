@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/notehide"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	coreclip "github.com/elythia-network/elythia/internal/core/clip"
@@ -184,9 +185,9 @@ type CreateRequest struct {
 	IsPublic    bool    `json:"isPublic"`
 }
 
-// upstream paramDef の長さ制約 (clips/create.ts / update.ts)。ajv は UTF-16
-// code unit 長だが、mk-go では他 endpoint と同じく rune 数で近似する (#1624 と
-// 同方針。サロゲートペアを含む文字列は upstream より長く受理される)。
+// upstream paramDef の長さ制約 (clips/create.ts / update.ts)。ajv の既定
+// (unicode: true) は code point を数えるので、rune 数で数える今の形が本家と
+// 一致する (#3742)。
 const (
 	clipNameMaxLength        = 100
 	clipDescriptionMaxLength = 2048
@@ -344,18 +345,17 @@ func (h *Handler) Delete(c echo.Context) error {
 
 // ListRequest is the request body for clips/list.
 type ListRequest struct {
-	Limit     *int   `json:"limit"`
-	Offset    int    `json:"offset"`
-	SinceID   string `json:"sinceId"`
-	UntilID   string `json:"untilId"`
-	SinceDate *int64 `json:"sinceDate"`
-	UntilDate *int64 `json:"untilDate"`
+	Limit     *jsnum.Int `json:"limit"`
+	SinceID   string     `json:"sinceId"`
+	UntilID   string     `json:"untilId"`
+	SinceDate *jsnum.Int `json:"sinceDate"`
+	UntilDate *jsnum.Int `json:"untilDate"`
 }
 
 // List handles POST /api/clips/list.
 //
 // frontend Paginator は cursor mode (untilId / sinceId) で叩いてくる。
-// upstream Misskey TS と同じく cursor 指定時は offset を無視する。
+// offset は本家の paramDef に無いので、本家と同じく読まない (#3742)。
 func (h *Handler) List(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req ListRequest
@@ -363,15 +363,15 @@ func (h *Handler) List(c echo.Context) error {
 		return apierr.JSONInvalidParam(c)
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	rows, err := h.svc.ListByUser(user.ID, sinceID, untilID, limit, req.Offset)
+	rows, err := h.svc.ListByUser(user.ID, sinceID, untilID, limit, 0)
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -456,13 +456,13 @@ func (h *Handler) RemoveNote(c echo.Context) error {
 
 // NotesRequest is the request body for clips/notes.
 type NotesRequest struct {
-	ClipID    string  `json:"clipId"`
-	UntilID   string  `json:"untilId"`
-	SinceID   string  `json:"sinceId"`
-	SinceDate *int64  `json:"sinceDate"`
-	UntilDate *int64  `json:"untilDate"`
-	Limit     *int    `json:"limit"`
-	Search    *string `json:"search"`
+	ClipID    string     `json:"clipId"`
+	UntilID   string     `json:"untilId"`
+	SinceID   string     `json:"sinceId"`
+	SinceDate *jsnum.Int `json:"sinceDate"`
+	UntilDate *jsnum.Int `json:"untilDate"`
+	Limit     *jsnum.Int `json:"limit"`
+	Search    *string    `json:"search"`
 }
 
 // clipNotesSearchMaxLength は upstream clips/notes paramDef の search
@@ -490,11 +490,11 @@ func (h *Handler) Notes(c echo.Context) error {
 		requesterID = user.ID
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
