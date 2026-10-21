@@ -115,7 +115,8 @@ const DefaultEnforcedMaxBody = 16 << 10
 // 例外はantennas/create・updateで、本家はkeywords・excludeKeywords・usersの
 // 数に上限を持たないので、多く並べたbodyは超えうる。超えたbodyは拒否せず
 // handlerへ渡す(#3748)。flash/create・updateも、scriptが約16KiBを超えると
-// 大きさの上限を超える(#3750)。
+// 大きさの上限を超える(#3750)。gallery/posts/create・updateのdescriptionも
+// 本家に上限が無い(#3754)。
 const DefaultEnforcedMaxValues = 256
 
 // input is what upstream hands to ajv for one request, or why the request is

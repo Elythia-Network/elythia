@@ -18,8 +18,8 @@ const paramShadowContextKey = "mk.server.paramShadow"
 // paramEnforcedEndpoints are the upstream endpoints whose params are
 // validated with upstream's paramDef and rejected with upstream's 400
 // (clips/* in #3742, the first step of #3667; charts/* in #3744; hashtags/*
-// in #3746; antennas/* in #3748; flash/* in #3750). The other upstream
-// endpoints are only validated and counted (#3677).
+// in #3746; antennas/* in #3748; flash/* in #3750; gallery/* in #3754).
+// The other upstream endpoints are only validated and counted (#3677).
 //
 // 本家に揃える対象はパッケージ単位で広げる(#3667)。足したら、そのendpoint
 // で本家と判定が分かれる入力を、手書きの検査が拒否していないか(本家が通す
@@ -71,6 +71,15 @@ var paramEnforcedEndpoints = []string{
 	"flash/show",
 	"flash/unlike",
 	"flash/update",
+	"gallery/featured",
+	"gallery/popular",
+	"gallery/posts",
+	"gallery/posts/create",
+	"gallery/posts/delete",
+	"gallery/posts/like",
+	"gallery/posts/show",
+	"gallery/posts/unlike",
+	"gallery/posts/update",
 }
 
 // paramShadowMiddleware returns the /api group middleware that enables the
