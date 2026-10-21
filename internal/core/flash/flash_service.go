@@ -16,10 +16,6 @@ import (
 var (
 	// ErrFlashNotFound is returned when the requested Flash does not exist.
 	ErrFlashNotFound = errors.New("flash not found")
-	// ErrFlashTitleRequired is returned when title is empty on Create / Update.
-	ErrFlashTitleRequired = errors.New("flash title is required")
-	// ErrFlashScriptRequired is returned when script is empty on Create.
-	ErrFlashScriptRequired = errors.New("flash script is required")
 	// ErrAccessDenied is returned when a user attempts to mutate a Flash they
 	// do not own.
 	ErrAccessDenied = errors.New("not the owner of this flash")
@@ -78,12 +74,7 @@ func (s *Service) Create(in CreateInput) (*model.Flash, error) {
 	if in.OwnerID == "" {
 		return nil, errors.New("ownerId is required")
 	}
-	if in.Title == "" {
-		return nil, ErrFlashTitleRequired
-	}
-	if in.Script == "" {
-		return nil, ErrFlashScriptRequired
-	}
+	// title / script の空文字列は、本家と同じくそのまま保存する (#3750)。
 	if in.Visibility == "" {
 		in.Visibility = "public"
 	}
@@ -184,9 +175,7 @@ func (s *Service) Update(ownerID, flashID string, in UpdateInput) (*model.Flash,
 	}
 	fields := map[string]any{}
 	if in.Title != nil {
-		if *in.Title == "" {
-			return nil, ErrFlashTitleRequired
-		}
+		// 空文字列も本家と同じくそのまま保存する (#3750)。
 		fields["title"] = *in.Title
 	}
 	if in.Summary != nil {
@@ -250,8 +239,9 @@ func (s *Service) My(userID, sinceID, untilID string, limit, offset int) ([]*mod
 	return s.repo.ListByUser(userID, sinceID, untilID, limit, offset)
 }
 
-// Featured returns the flashes ordered by likedCount desc, or by id when
-// cursor is supplied (frontend Paginator対応)。
+// Featured returns the public flashes ordered by likedCount desc (ties by
+// updatedAt and id desc, like upstream), paged by offset, or by id when a
+// cursor is supplied. flash/featured passes no cursor (#3750).
 func (s *Service) Featured(sinceID, untilID string, limit, offset int) ([]*model.Flash, error) {
 	return s.repo.ListFeatured(sinceID, untilID, limit, offset)
 }

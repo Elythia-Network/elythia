@@ -56,16 +56,13 @@ func TestCreate_OwnerRequired(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestCreate_TitleRequired(t *testing.T) {
+// 本家は空の title / script をそのまま保存する (#3750)。
+func TestCreate_EmptyTitleAndScriptAreSaved(t *testing.T) {
 	svc, _, _ := newSvc(t)
-	_, err := svc.Create(flash.CreateInput{OwnerID: "u1", Script: "x"})
-	assert.ErrorIs(t, err, flash.ErrFlashTitleRequired)
-}
-
-func TestCreate_ScriptRequired(t *testing.T) {
-	svc, _, _ := newSvc(t)
-	_, err := svc.Create(flash.CreateInput{OwnerID: "u1", Title: "t"})
-	assert.ErrorIs(t, err, flash.ErrFlashScriptRequired)
+	f, err := svc.Create(flash.CreateInput{OwnerID: "u1"})
+	require.NoError(t, err)
+	assert.Equal(t, "", f.Title)
+	assert.Equal(t, "", f.Script)
 }
 
 func TestCreate_RepoError(t *testing.T) {
@@ -128,12 +125,14 @@ func TestUpdate_AccessDenied(t *testing.T) {
 	assert.ErrorIs(t, err, flash.ErrAccessDenied)
 }
 
+// 本家は空の title もそのまま保存する (#3750)。
 func TestUpdate_TitleEmpty(t *testing.T) {
 	svc, repo, _ := newSvc(t)
-	repo.Flashes["f1"] = &model.Flash{ID: "f1", UserID: "u1"}
+	repo.Flashes["f1"] = &model.Flash{ID: "f1", UserID: "u1", Title: "old"}
 	empty := ""
-	_, err := svc.Update("u1", "f1", flash.UpdateInput{Title: &empty})
-	assert.ErrorIs(t, err, flash.ErrFlashTitleRequired)
+	f, err := svc.Update("u1", "f1", flash.UpdateInput{Title: &empty})
+	require.NoError(t, err)
+	assert.Equal(t, "", f.Title)
 }
 
 // Update で empty Permissions を渡しても、UpdateFields に model.StringArray
