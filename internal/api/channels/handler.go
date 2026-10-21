@@ -378,7 +378,7 @@ type UpdateRequest struct {
 	Color                 *string                   `json:"color"`
 	IsArchived            *bool                     `json:"isArchived"`
 	IsSensitive           *bool                     `json:"isSensitive"`
-	BannerID              *string                   `json:"bannerId"`
+	BannerID              optional.Nullable[string] `json:"bannerId"`
 	PinnedNoteIDs         *[]string                 `json:"pinnedNoteIds"`
 	AllowRenoteToExternal *bool                     `json:"allowRenoteToExternal"`
 }
@@ -411,7 +411,6 @@ func (h *Handler) Update(c echo.Context) error {
 		Color:                 req.Color,
 		IsArchived:            req.IsArchived,
 		IsSensitive:           req.IsSensitive,
-		BannerID:              req.BannerID,
 		PinnedNoteIDs:         req.PinnedNoteIDs,
 		AllowRenoteToExternal: req.AllowRenoteToExternal,
 	}
@@ -422,10 +421,18 @@ func (h *Handler) Update(c echo.Context) error {
 		desc := req.Description.Value // *string (nil for explicit null)
 		in.Description = &desc
 	}
-	// bannerId 設定時 (空文字 = 解除は検証不要) は所有権を検証する
+	// bannerId: null はバナーを外す。本家は null を受けても外さない
+	// (`banner ? { bannerId } : {}`) が、同梱の frontend の「バナーを削除」は null を
+	// 送るので、外せるようにする (#3758、docs/divergence/)。以前の bannerId: "" で
+	// 外す独自の慣習は、本家と同じく misskey:id の形でないとして 400 になる。
+	if req.BannerID.Present {
+		banner := req.BannerID.Value // *string (nil for explicit null)
+		in.BannerID = &banner
+	}
+	// bannerId 設定時は所有権を検証する
 	// (upstream channels/update: bannerId != null → findOneBy({id, userId}) → NO_SUCH_FILE)。
-	if req.BannerID != nil && *req.BannerID != "" {
-		if !h.bannerOwnedBy(*req.BannerID, user.ID) {
+	if req.BannerID.Value != nil {
+		if !h.bannerOwnedBy(*req.BannerID.Value, user.ID) {
 			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_FILE", "No such file.", "e86c14a4-0da2-4032-8df3-e737a04c7f3b"))
 		}
 	}
