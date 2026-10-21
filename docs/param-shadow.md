@@ -2,6 +2,8 @@
 
 本家と同じendpointへのリクエストを、本家の`paramDef`(`internal/api/paramschema`、#3673)で検証し、その判定とhandlerの答えが分かれた件数をログに出す(#3677)。**応答もhandlerの読むものも変えない。** 検証の結果で拒否はしない。
 
+**例外は、本家に揃えたendpointである(#3742)。** `internal/server/param_shadow.go`の`paramEnforcedEndpoints`(今は`clips/*`の11件)は、同じ位置で検証し、拒否すれば本家と同じ400を返す。数える対象からは外れる。詳細は下の「[本家に揃えたendpoint](#本家に揃えたendpoint3742)」。
+
 目的は、手書きの検証を本家の`paramDef`に置き換える前に、どの差が実際の利用で踏まれているかを数えることである。本家より緩い所(省略できる項目へのnull、`misskey:id`の形式、`limit`の丸めなど)を一度に400へ変えると、今は動いているクライアントが落ちうる。数えた結果は、揃える順番と、差として残すものを決める材料にする(親issue #3667)。
 
 実装は`internal/server/paramshadow`、配線は`internal/server/param_shadow.go`にある。
@@ -15,7 +17,7 @@
 3. `JSONBodyParse`(`/api`のgroup): 壊れたJSON、空のJSON、`__proto__`や`constructor.prototype`を持つJSON(本家のsecure-json-parseが拒否するもの)は、ここでFastifyの形の400になる
 4. rate limit、IPの記録、`HideAppUserWithoutRead`(group)
 5. routeの認証・権限のmiddleware(`RequireAuth`、`RequireScope`など)
-6. **検証だけの実行**(`withParamShadow`)
+6. **検証**(`withParamShadow`)。本家に揃えたendpointでは、ここで拒否する
 7. `requireObjectBody`(bodyがobjectでなければ`#/type`の400)
 8. handler
 
@@ -41,8 +43,8 @@ routeのmiddlewareで401や403になったリクエストは、6に届かない�
 | `lone_surrogate` | 対になっていないサロゲートのescape(`"\ud800"`)を含むbody | `JSON.parse`はそのまま残すが、Goの`encoding/json`はU+FFFDに置き換える。enumや`uniqueItems`(`"\ud800"`と`"\ud801"`が同じ値になる)の判定が本家と分かれうる。decodeで情報が失われるので、検証器の側では直せない |
 | `invalid_utf8` | UTF-8として正しくないbodyやquery | 正しくないバイト列をU+FFFDに置き換える数が、NodeとGoで違う(Nodeは最大の部分列ごとに1つ、Goは1バイトごとに1つ)。ajvの数える長さが変わる |
 | `unparsable_query` | `url.ParseQuery`が拒否するquery(`;`、壊れた`%`のescape) | 本家のfast-querystringとは読み方が違う |
-| `too_large` | 64KiB(65,536バイト)を超えるJSONのbody、またはquery | Goの値へのdecodeは、bodyの大きさの数十倍のメモリを確保する。1MiBに近いbodyで検証すると、資格情報の要らないendpointでもCPUとメモリを大きく増やせる(後述の「最悪の場合」)。本家のクライアントが普通に送るbodyは収まる(下の表)。Content-Lengthが上限を超えるbodyは読まない。Content-Lengthが分からないbodyは、上限+1バイトまでしか読まない |
-| `too_many_values` | トークン(キー、値、括弧をそれぞれ1つと数える)が4096を超えるJSONのbody、または項目が4096を超えるquery | decodeの確保は値の数に比例する。小さな値を並べたbodyは、64KiBに収まっていても検証の費用が大きい。本家のクライアントが普通に送るbodyは収まる(下の表) |
+| `too_large` | 64KiB(65,536バイト)を超えるJSONのbody、またはquery(本家に揃えたendpointでは16KiB。[後述](#本家に揃えたendpoint3742)) | Goの値へのdecodeは、bodyの大きさの数十倍のメモリを確保する。1MiBに近いbodyで検証すると、資格情報の要らないendpointでもCPUとメモリを大きく増やせる(後述の「最悪の場合」)。本家のクライアントが普通に送るbodyは収まる(下の表)。Content-Lengthが上限を超えるbodyは読まない。Content-Lengthが分からないbodyは、上限+1バイトまでしか読まない |
+| `too_many_values` | トークン(キー、値、括弧をそれぞれ1つと数える)が4096を超えるJSONのbody、または項目が4096を超えるquery(本家に揃えたendpointでは256) | decodeの確保は値の数に比例する。小さな値を並べたbodyは、64KiBに収まっていても検証の費用が大きい。本家のクライアントが普通に送るbodyは収まる(下の表) |
 | `busy` | 同時に走っている検証が上限(`GOMAXPROCS`の4分の1、最低1)に達していた | 検証のためにリクエストを待たせない。同時に検証へ使うCPUを、枠の数までに抑える |
 | `budget` | 最近の検証に使った時間が予算(`GOMAXPROCS`÷16コアの速さで減り、100msまで溜まる)に達していた | 時間あたりに検証へ使うCPUを抑える。値と根拠は「最悪の場合」 |
 | `body_error` | bodyの読み取りかdecodeに失敗した | `JSONBodyParse`が検査済みなので、通常は起きない |
@@ -57,6 +59,33 @@ routeのmiddlewareで401や403になったリクエストは、6に届かない�
 | `admin/update-meta`: `blockedHosts`を1000件 | 27,057バイト | 1,007 |
 | `admin/update-meta`: `blockedHosts`を2000件 | 54,057バイト | 2,007 |
 | `admin/update-meta`: `blockedHosts`を3000件 | 81,018バイト(`too_large`) | 3,007 |
+
+## 本家に揃えたendpoint(#3742)
+
+`paramEnforcedEndpoints`に載せたendpointは、検証の結果で拒否する。手書きの検証を本家の`paramDef`へ揃える段階(#3667の(3))で、パッケージ単位で対象を広げる。
+
+- **拒否したときは、本家と同じ400を返す。** `INVALID_PARAM`(id `3d81ceae-…`)、message `Invalid param.`、`info`は`{param: <schemaPath>, reason: <ajvのmessage>}`(`paramschema.Error.Response`)。handlerは呼ばない
+- **受理したときは、handlerがそのまま答える。** 検証器がdefaultを入れるのは写しのほうなので、handlerが読むbodyは変わらない。handlerの手書きの検査は残してあり、二段目になる。**手書きの検査が本家より厳しいと、本家が通す入力を400にしてしまう**ので、対象に足すときは、#3673で作ったajvのcorpusを本物のrouteに流して確かめる(`internal/server`の`TestEnforcedEndpointsMatchTheCorpus`)
+- **検証できない入力は拒否せず、handlerに任せる。** 上の「検証しないもの」のうち、`not_json`・`multipart`・`method`・`lone_surrogate`・`invalid_utf8`・`unparsable_query`・`too_large`・`too_many_values`・`body_error`と、GETの型の変換の失敗が当たる。本家の判定なしに拒否すると、本家が通すリクエストを落としうるからである。これらはhandlerの検査で、今までと同じ判定を受ける
+- **予算(`budget`)と同時実行の枠(`busy`)では飛ばさない。** 飛ばすと、本家の検証を受けずにhandlerへ届く。代わりに、1件の費用を小さい上限で抑える。bodyかqueryが16KiB(16,384バイト、`DefaultEnforcedMaxBody`)かトークン256(`DefaultEnforcedMaxValues`)を超える入力は、検証せずにhandlerへ渡す(上の項目と同じ扱い)。`clips/*`の正当なbodyは、UTF-8のまま送れば`description`の2048文字を4バイトの文字で埋めても約8KiBで、トークンは全項目と`i`を送る`clips/notes`でも18である。非ASCIIを`\u`のescapeで送るクライアント(Pythonの`json.dumps`の既定など)が`description`を絵文字で埋めると約24KiBになり、上限を超えてhandlerの検査に回る。`clips/show`と`clips/notes`は資格情報なしで呼べてrate limitも無いので、この上限が無いと、予算の外で重い検証を走らせ続けられる(#3742のレビュー1周目M-1)。1件の費用は下の表のとおり
+- **検証にかかった時間は予算に積まない。** 積むと、資格情報の要らないendpointへ送り続けるだけで予算を使い切らせ、他のendpointの計測を止められる
+- **数えない。** 判定は常に一致するので、要約の`agreed`にも`diverged`にも入らない。記録するのは`validator_panic`と`compile_error`だけで、どちらのときもリクエストはhandlerへ渡す
+- **`disableParamShadow`では止まらない。** 止まるのは数えるだけの検証で、本家に揃えたendpointは検証を続ける
+- **対象はパッケージ単位で足す。** `TestEnforcedEndpointsAreUpstreamEndpoints`が、対象に載せたパッケージ(`clips`)の本家のendpointが全部載っていることを確かめる。一部だけ載せると、残りが手書きの検査のままになる
+
+`BenchmarkEnforcedWorstCase`(`clips/notes`のroute、handlerはbodyを読んで200を返すだけ。Intel Xeon E-2274G、2026-10-21の実測。値は3回の幅)。
+
+| body | 大きさ | 検証なし | 検証あり | 確保(検証あり) |
+|---|---|---|---|---|
+| トークン上限ちょうどの`{}`の配列 | 約0.4KB | 2.3µs | 45〜46µs | 24KB / 546回 |
+| トークン上限ちょうどのキーと値 | 約1.4KB | 2.3〜2.4µs | 66〜68µs | 37KB / 430回 |
+| 大きさ上限ちょうどの`\u`のescapeの文字列 | 16,383バイト | 2.3〜2.4µs | 138〜139µs | 83KB / 49回 |
+| トークン上限+1(handlerへ渡す) | 約0.4KB | 2.3µs | 3.5µs | 6.9KB / 23回 |
+| 64KiBの`\u`のescapeの文字列(handlerへ渡す) | 65,535バイト | 2.3µs | 2.7µs | 5.8KB / 19回 |
+
+大きさの上限を置く前は、64KiBの`\u`のescapeの文字列が1件0.52ms・311KBだった(上限だけを64KiBにして同じベンチで測った)。上限ちょうどの`\u`のescapeの文字列が最も重く、1件約0.14msになる。
+
+本家と違う挙動として残すものは[docs/divergence/approximations.md](divergence/approximations.md#本家のparamdefで引数を検証するendpoint-3742)にある。
 
 ## 数える種類
 
@@ -203,13 +232,13 @@ Intel Xeon E-2274G(4.00GHz、8スレッド)、2026-10-18の実測。値は3回�
 
 本番の組み立てでは、`/api`の前で`JSONBodyParse`がbodyを読み(`io.ReadAll`)、JSONとして正しいかを確かめる(`json.Valid`)。同じリクエストのその費用の方がずっと大きく、検証が無くても、同じ送り方で同じくらいのCPUを使わせられる(#3677のレビュー3周目で測った)。
 
-**2コア以下の機械で、資格情報の要らないendpointへの大量のリクエストが心配なら、`disableParamShadow: true`で止める。** 普通のリクエストでの増分はマイクロ秒の桁で、DBを引くhandlerの時間(ミリ秒の桁)に比べて小さい。最悪の場合も上の範囲(予算の値と、それに近いGCの分)で抑えられるので、**既定では有効**にしてある。
+**2コア以下の機械で、資格情報の要らないendpointへの大量のリクエストが心配なら、`disableParamShadow: true`で止める。** 普通のリクエストでの増分はマイクロ秒の桁で、DBを引くhandlerの時間(ミリ秒の桁)に比べて小さい。最悪の場合も上の範囲(予算の値と、それに近いGCの分)で抑えられるので、**既定では有効**にしてある。止まるのは数えるだけの検証で、本家に揃えたendpointの検証は止まらない。そちらの費用は、上の「[本家に揃えたendpoint](#本家に揃えたendpoint3742)」の上限で1件ごとに抑えてある。
 
 ## 設定
 
 | キー | 環境変数 | 既定 | 中身 |
 |---|---|---|---|
-| `disableParamShadow` | `MK_DISABLEPARAMSHADOW` | `false` | `true`で検証だけの実行を止める。止めると、groupのmiddlewareを登録しないので、検証のための読み取りもしない |
+| `disableParamShadow` | `MK_DISABLEPARAMSHADOW` | `false` | `true`で検証だけの実行を止める。止めたendpointでは、検証のための読み取りもしない。本家に揃えたendpoint(`clips/*`)の検証は止めない |
 | `paramShadowLogSeconds` | `MK_PARAMSHADOWLOGSECONDS` | `600` | 要約を出す間隔(秒)。0以下は既定に戻す |
 
 どちらも`bindEnvKeys()`に登録してあり、設定ファイルに書かなくても環境変数だけで変えられる。変更には再起動が要る。
