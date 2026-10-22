@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/colfit"
 	"github.com/elythia-network/elythia/internal/misc/id"
@@ -39,15 +40,18 @@ const bubbleGameModeMaxRunes = 128
 func (h *Handler) Register(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
-		Score       int     `json:"score"`
-		Seed        string  `json:"seed"`
-		Logs        [][]any `json:"logs"`
-		GameMode    string  `json:"gameMode"`
-		GameVersion int     `json:"gameVersion"`
+		Score       jsnum.Int `json:"score"`
+		Seed        string    `json:"seed"`
+		Logs        [][]any   `json:"logs"`
+		GameMode    *string   `json:"gameMode"`
+		GameVersion jsnum.Int `json:"gameVersion"`
 	}
-	if err := c.Bind(&req); err != nil || req.Seed == "" || req.GameMode == "" {
+	// 本家の paramDef は gameMode に minLength を持たないので、空文字も登録する (#3768)。
+	// 欠けは本家の paramDef が先に 400 にする。
+	if err := c.Bind(&req); err != nil || req.Seed == "" || req.GameMode == nil {
 		return apierr.JSONInvalidParam(c)
 	}
+	gameMode := *req.GameMode
 	// upstream register.ts paramDef は score:{minimum:0}。負値を ajv 同様 400 で弾く (#2027)。
 	if req.Score < 0 {
 		return c.JSON(http.StatusBadRequest, apierr.InvalidParamClient("#/properties/score/minimum", "must be >= 0"))
@@ -77,7 +81,7 @@ func (h *Handler) Register(c echo.Context) error {
 	// 列に入らない値を SQLSTATE 22021 / 22P05 でクエリごと落とすので、引く前に
 	// 弾かないと**任意の認証ユーザーが 500 を起こせる**。`seed` は上で
 	// `ParseInt` を通っているので数字だけ (列幅 1024 に収まる)。
-	if !colfit.Fits(req.GameMode, bubbleGameModeMaxRunes) {
+	if !colfit.Fits(gameMode, bubbleGameModeMaxRunes) {
 		return apierr.JSONInvalidParam(c)
 	}
 	logsJSON, _ := json.Marshal(req.Logs)
@@ -89,9 +93,9 @@ func (h *Handler) Register(c echo.Context) error {
 		UserID:      user.ID,
 		SeededAt:    seedDate,
 		Seed:        req.Seed,
-		GameVersion: req.GameVersion,
-		GameMode:    req.GameMode,
-		Score:       req.Score,
+		GameVersion: int(req.GameVersion),
+		GameMode:    gameMode,
+		Score:       int(req.Score),
 		Logs:        logsJSON,
 		IsVerified:  false,
 	}
@@ -104,20 +108,25 @@ func (h *Handler) Register(c echo.Context) error {
 // Ranking handles GET/POST /api/bubble-game/ranking. upstream ranking.ts は
 // allowGet:true で、frontend drop-and-fusion.vue は misskeyApiGet (GET +
 // query string) で gameMode を投げる。Echo の Bind は GET だと query を
-// `query` タグでしか拾わないため、fetch-rss と同様に QueryParam を先に読み、
-// 無ければ JSON body に fallback する (#1774)。
+// `query` タグでしか拾わないため、GET では QueryParam で読む (#1774)。
 func (h *Handler) Ranking(c echo.Context) error {
-	gameMode := c.QueryParam("gameMode")
-	if gameMode == "" {
-		var req struct {
-			GameMode string `json:"gameMode"`
+	// 本家は GET なら query、POST なら body だけを読む。POST の query を読むと、
+	// 本家の paramDef が見た body とは別の gameMode で引くことになる (#3768)。
+	// 空文字は本家と同じく、その名前のモードとして引く。
+	var gameMode string
+	if c.Request().Method == http.MethodGet {
+		if !c.QueryParams().Has("gameMode") {
+			return apierr.JSONInvalidParam(c)
 		}
-		// Bind 失敗は無視 (空 gameMode のまま下の guard で 400 を返す)。
-		_ = c.Bind(&req)
-		gameMode = req.GameMode
-	}
-	if gameMode == "" {
-		return apierr.JSONInvalidParam(c)
+		gameMode = c.QueryParam("gameMode")
+	} else {
+		var req struct {
+			GameMode *string `json:"gameMode"`
+		}
+		if err := c.Bind(&req); err != nil || req.GameMode == nil {
+			return apierr.JSONInvalidParam(c)
+		}
+		gameMode = *req.GameMode
 	}
 
 	records, err := h.repo.Ranking(gameMode, 10)

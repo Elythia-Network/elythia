@@ -638,6 +638,19 @@ func TestAPIGet_UserKeypairError(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "NO_SUCH_OBJECT")
 }
 
+// 本家の paramDef は空の uri を通す (本家はその後 new URL が投げて 500)。必須項目の
+// 欠けとして INVALID_PARAM にせず、他の解決できない URI と同じ応答にする (#3768)。
+func TestEmptyURIIsNotRejectedAsMissing(t *testing.T) {
+	h, _, _, _ := newHandler(t)
+	rec := postJSON(h.APIGet, `{"uri":""}`)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "NO_SUCH_OBJECT")
+
+	rec = postJSON(h.APIShow, `{"uri":""}`)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "URI_INVALID")
+}
+
 func TestAPIGet_NoMatch(t *testing.T) {
 	h, _, _, _ := newHandler(t)
 	rec := postJSON(h.APIGet, `{"uri":"https://other.example/something"}`)

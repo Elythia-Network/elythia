@@ -20,8 +20,9 @@ import (
 var errMock = assert.AnError
 
 type mockBubbleGameRepo struct {
-	records   []*model.BubbleGameRecord
-	createErr error
+	records     []*model.BubbleGameRecord
+	createErr   error
+	rankingMode *string
 }
 
 func (m *mockBubbleGameRepo) Create(r *model.BubbleGameRecord) error {
@@ -32,7 +33,8 @@ func (m *mockBubbleGameRepo) Create(r *model.BubbleGameRecord) error {
 	return nil
 }
 
-func (m *mockBubbleGameRepo) Ranking(_ string, _ int) ([]*model.BubbleGameRecord, error) {
+func (m *mockBubbleGameRepo) Ranking(gameMode string, _ int) ([]*model.BubbleGameRecord, error) {
+	m.rankingMode = &gameMode
 	return m.records, nil
 }
 
@@ -69,6 +71,18 @@ func TestRegister_Success(t *testing.T) {
 	rec := post(h.Register, body, u1)
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 	assert.Len(t, repo.records, 1)
+}
+
+// 本家の paramDef は整数の値を持つ小数と、空の gameMode を通す (#3768)。
+func TestRegister_AcceptsIntegerValuedFractionsAndEmptyGameMode(t *testing.T) {
+	h, repo := newTestHandler()
+	body := fmt.Sprintf(`{"score":10.0,"seed":"%s","logs":[],"gameMode":"","gameVersion":4.0}`, validSeed())
+	rec := post(h.Register, body, u1)
+	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+	require.Len(t, repo.records, 1)
+	assert.Equal(t, 10, repo.records[0].Score)
+	assert.Equal(t, 4, repo.records[0].GameVersion)
+	assert.Empty(t, repo.records[0].GameMode)
 }
 
 func TestRegister_InvalidParam(t *testing.T) {
@@ -225,6 +239,34 @@ func TestRanking_GetMissingGameMode(t *testing.T) {
 	h, _ := newTestHandler()
 	rec := getRanking(h.Ranking, "")
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+// 本家は空の gameMode もモードの名前として引く (#3768)。
+func TestRanking_EmptyGameMode(t *testing.T) {
+	h, repo := newTestHandler()
+	rec := post(h.Ranking, `{"gameMode":""}`, nil)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, repo.rankingMode)
+	assert.Empty(t, *repo.rankingMode)
+
+	repo.rankingMode = nil
+	rec = getRanking(h.Ranking, "gameMode=")
+	assert.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, repo.rankingMode)
+	assert.Empty(t, *repo.rankingMode)
+}
+
+// 本家は POST の query string を読まない。本家の paramDef が見た body の値で引く (#3768)。
+func TestRanking_PostIgnoresQuery(t *testing.T) {
+	h, repo := newTestHandler()
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/?gameMode=fromQuery", strings.NewReader(`{"gameMode":"fromBody"}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	_ = h.Ranking(e.NewContext(req, rec))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, repo.rankingMode)
+	assert.Equal(t, "fromBody", *repo.rankingMode)
 }
 
 func TestRanking_InvalidParam(t *testing.T) {
