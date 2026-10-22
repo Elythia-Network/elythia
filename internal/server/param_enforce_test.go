@@ -70,9 +70,19 @@ func readAJVCorpus(t *testing.T, eps []string) []ajvCase {
 	return cases
 }
 
+// enforcementPending lists the endpoints of an enforced package that are not
+// enforced yet, with a JSON body Elythia accepts but upstream's paramDef
+// rejects.
+var enforcementPending = map[string]string{
+	// 本家のsortのenumに、Elythia独自の+host / -hostが無い。enumに値を
+	// 重ねる仕組みは、独自の引数の宣言(#3667の(4))で作る(#3770)。
+	"federation/instances": `{"sort":"+host"}`,
+}
+
 // TestEnforcedEndpointsAreUpstreamEndpoints keeps paramEnforcedEndpoints to
 // names upstream has, and to whole packages: an endpoint of a package left
-// out would keep the handwritten checks only.
+// out would keep the handwritten checks only, unless enforcementPending
+// names it.
 func TestEnforcedEndpointsAreUpstreamEndpoints(t *testing.T) {
 	eps, err := paramschema.Upstream()
 	require.NoError(t, err)
@@ -87,9 +97,22 @@ func TestEnforcedEndpointsAreUpstreamEndpoints(t *testing.T) {
 	require.NotEmpty(t, packages)
 	for name := range eps {
 		pkg, _, _ := strings.Cut(name, "/")
-		if packages[pkg] {
+		if packages[pkg] && enforcementPending[name] == "" {
 			assert.Contains(t, paramEnforcedEndpoints, name, "package %s is enforced, but not %s", pkg, name)
 		}
+	}
+	// 使われなくなった項目を残さない: 載せたか、パッケージごと外したら消す。
+	for name, body := range enforcementPending {
+		pkg, _, _ := strings.Cut(name, "/")
+		ep, ok := eps[name]
+		if assert.True(t, ok, "pending %s is not an upstream endpoint", name) {
+			// 本家がその入力を通すようになったら、除外の理由は無くなる。
+			var in any
+			require.NoError(t, json.Unmarshal([]byte(body), &in), name)
+			assert.NotNil(t, ep.Schema.Validate(in), "pending %s: upstream now accepts %s; enforce it", name, body)
+		}
+		assert.NotContains(t, paramEnforcedEndpoints, name, "pending %s is enforced; drop it from enforcementPending", name)
+		assert.True(t, packages[pkg], "pending %s: package %s is not enforced; drop it from enforcementPending", name, pkg)
 	}
 }
 
@@ -199,9 +222,9 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	}
 }
 
-// TestEnforcedGETMatchesUpstream sends GET queries to the enforced charts/*
-// and bubble-game/ranking endpoints of a real server and compares the answers with upstream's: the
-// cast step (JSON.parse of integer params, 0b5f1631-… on failure), then
+// TestEnforcedGETMatchesUpstream sends GET queries to the enforced charts/*,
+// bubble-game/ranking and federation/stats endpoints of a real server and
+// compares the answers with upstream's: the cast step (JSON.parse of integer params, 0b5f1631-… on failure), then
 // ajv on the cast values. The corpus has JSON bodies only, so the queries
 // are written out here (#3744).
 func TestEnforcedGETMatchesUpstream(t *testing.T) {
@@ -251,6 +274,14 @@ func TestEnforcedGETMatchesUpstream(t *testing.T) {
 		{query: "bubble-game/ranking?gameMode=", ok: true},
 		{query: "bubble-game/ranking", id: ajvID, param: "#/required", reason: "must have required property 'gameMode'"},
 		{query: "bubble-game/ranking?gameMode=a&gameMode=b", id: ajvID, param: "#/properties/gameMode/type", reason: "must be string"},
+		// federation/statsはadmin/overviewがGETで呼ぶ(#3770)。
+		{query: "federation/stats", ok: true},
+		{query: "federation/stats?limit=10.0", ok: true},
+		{query: "federation/stats?limit=1e1", ok: true},
+		{query: "federation/stats?limit=abc", id: castID, param: "limit", reason: "cannot cast to integer"},
+		{query: "federation/stats?limit=null", id: ajvID, param: "#/properties/limit/type", reason: "must be integer"},
+		{query: "federation/stats?limit=0", id: ajvID, param: "#/properties/limit/minimum", reason: "must be >= 1"},
+		{query: "federation/stats?limit=101", id: ajvID, param: "#/properties/limit/maximum", reason: "must be <= 100"},
 	} {
 		req := httptest.NewRequest(http.MethodGet, "/api/"+tc.query, nil)
 		rec := httptest.NewRecorder()

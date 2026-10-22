@@ -108,7 +108,7 @@ func TestParamShadowRunsAfterTheRouteMiddleware(t *testing.T) {
 	ok := func(c echo.Context) error { return c.NoContent(http.StatusNoContent) }
 	api.POST("/notes/show", ok)
 	api.POST("/notes/create", ok, deny)
-	api.Match([]string{http.MethodGet, http.MethodPost}, "/federation/stats", ok)
+	api.Match([]string{http.MethodGet, http.MethodPost}, "/notes/featured", ok)
 	api.GET("/emojis", ok)
 	api.POST("/elythia-only", ok)
 
@@ -121,8 +121,8 @@ func TestParamShadowRunsAfterTheRouteMiddleware(t *testing.T) {
 	}
 	assert.Equal(t, http.StatusNoContent, serve(http.MethodPost, "/api/notes/show", `{"noteId":"a-b"}`))
 	assert.Equal(t, http.StatusUnauthorized, serve(http.MethodPost, "/api/notes/create", `{"text":""}`))
-	assert.Equal(t, http.StatusNoContent, serve(http.MethodGet, "/api/federation/stats?limit=0", ""))
-	assert.Equal(t, http.StatusNoContent, serve(http.MethodPost, "/api/federation/stats", `{"limit":101}`))
+	assert.Equal(t, http.StatusNoContent, serve(http.MethodGet, "/api/notes/featured?limit=0", ""))
+	assert.Equal(t, http.StatusNoContent, serve(http.MethodPost, "/api/notes/featured", `{"limit":101}`))
 	assert.Equal(t, http.StatusNoContent, serve(http.MethodGet, "/api/emojis?x=1", ""))
 	assert.Equal(t, http.StatusNoContent, serve(http.MethodPost, "/api/elythia-only", `{"a":1}`))
 	// requireObjectBody は検証の内側で答える(検証器も#/typeで拒否するので一致)。
@@ -132,8 +132,8 @@ func TestParamShadowRunsAfterTheRouteMiddleware(t *testing.T) {
 	out := logs.String()
 	for _, want := range []string{
 		`"endpoint":"notes/show","kind":"rejected_handler_ok","schemaPath":"#/properties/noteId/format"`,
-		`"endpoint":"federation/stats","kind":"rejected_handler_ok","schemaPath":"#/properties/limit/minimum"`,
-		`"endpoint":"federation/stats","kind":"rejected_handler_ok","schemaPath":"#/properties/limit/maximum"`,
+		`"endpoint":"notes/featured","kind":"rejected_handler_ok","schemaPath":"#/properties/limit/minimum"`,
+		`"endpoint":"notes/featured","kind":"rejected_handler_ok","schemaPath":"#/properties/limit/maximum"`,
 		`"msg":"paramshadow summary"`,
 		`"agreed":2,"diverged":3,"skipped":0`,
 	} {
