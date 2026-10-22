@@ -222,7 +222,7 @@ func (p *Packer) applyRelationsMany(viewerID string, details []*entity.UserDetai
 // with one query per relation when Relations implements RelationManyApplier.
 //
 // The viewer's own entry is returned as UserDetailed; callers whose list can
-// contain the viewer promote it with meself.Pack (upstream returns MeDetailed
+// contain the viewer promote it with meself.Packer.Pack (upstream returns MeDetailed
 // when isMe).
 //
 // 本家 packMany と同じく、閲覧者がモデレーターなら moderationNote と 2FA の

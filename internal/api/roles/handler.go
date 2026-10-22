@@ -53,7 +53,14 @@ type Handler struct {
 	// metaRepo は roles/notes の blocked-host filter で meta.blockedHosts を
 	// 引く (upstream generateBlockedHostQueryForNote)。
 	metaRepo repository.MetaRepository
+	// selfPacker は閲覧者自身を MeDetailed へ昇格させ、/api/i の handler で未読・
+	// role・ピン留めを埋める (#3784)。未配線なら補完せずに昇格だけする。
+	selfPacker *meself.Packer
 }
+
+// SetSelfPacker wires the Packer that promotes the viewer's own entry into
+// MeDetailed. Unset promotes without the handler-only fields.
+func (h *Handler) SetSelfPacker(p *meself.Packer) { h.selfPacker = p }
 
 // HasMetaRepo reports whether the blocked-host filter can read meta.
 //
@@ -289,7 +296,7 @@ func (h *Handler) Users(c echo.Context) error {
 		out = append(out, map[string]any{
 			"id": a.ID,
 			// 本家の pack は isMe なら MeDetailed を返す。
-			"user": meself.Pack(ctx, packed[i], a.User, profByID[a.UserID], viewer),
+			"user": h.selfPacker.Pack(ctx, packed[i], a.User, profByID[a.UserID], viewer),
 		})
 	}
 	return c.JSON(http.StatusOK, out)

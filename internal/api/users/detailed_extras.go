@@ -3,7 +3,6 @@ package users
 import (
 	"context"
 
-	"github.com/elythia-network/elythia/internal/api/meself"
 	"github.com/elythia-network/elythia/internal/api/notehide"
 	"github.com/elythia-network/elythia/internal/core/notesfilter"
 	"github.com/elythia-network/elythia/internal/core/userpack"
@@ -61,14 +60,14 @@ func (h *Handler) packDetailedMany(ctx context.Context, viewer *model.User, user
 	return h.listPacker().DetailedMany(ctx, viewer, users, profiles)
 }
 
-// packDetailedAll is packDetailedMany serialized like meself.Pack: the
+// packDetailedAll is packDetailedMany serialized like meself.Packer.Pack: the
 // viewer's own entry becomes MeDetailed (upstream pack returns MeDetailed when
 // isDetailed && isMe).
 func (h *Handler) packDetailedAll(ctx context.Context, viewer *model.User, users []*model.User, profiles map[string]*model.UserProfile) []any {
 	packed := h.packDetailedMany(ctx, viewer, users, profiles)
 	out := make([]any, len(users))
 	for i, u := range users {
-		out[i] = meself.Pack(ctx, packed[i], u, profiles[u.ID], viewer)
+		out[i] = h.selfPacker.Pack(ctx, packed[i], u, profiles[u.ID], viewer)
 	}
 	return out
 }

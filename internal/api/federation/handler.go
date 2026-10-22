@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/meself"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	corefederation "github.com/elythia-network/elythia/internal/core/federation"
 	coreinstance "github.com/elythia-network/elythia/internal/core/instance"
@@ -62,7 +63,14 @@ type Handler struct {
 	// capabilities は instance ごとの署名方式観測 (#2393)。未配線なら
 	// signatureCapability は null。
 	capabilities SignatureCapabilityLookup
+	// selfPacker は閲覧者自身を MeDetailed へ昇格させ、/api/i の handler で未読・
+	// role・ピン留めを埋める (#3784)。未配線なら補完せずに昇格だけする。
+	selfPacker *meself.Packer
 }
+
+// SetSelfPacker wires the Packer that promotes the viewer's own entry into
+// MeDetailed. Unset promotes without the handler-only fields.
+func (h *Handler) SetSelfPacker(p *meself.Packer) { h.selfPacker = p }
 
 // NewHandler creates a new federation Handler.
 func NewHandler(svc *coreinstance.Service) *Handler {

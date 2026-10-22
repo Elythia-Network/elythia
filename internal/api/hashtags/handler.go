@@ -48,7 +48,14 @@ type Handler struct {
 	// タグを外すのに使う (#3628)。キャッシュ付きの meta (metaUpdated で無効化される)
 	// を渡す。未配線なら外さない (起動時検査が production の配線漏れを拾う)。
 	meta repository.MetaRepository
+	// selfPacker は閲覧者自身を MeDetailed へ昇格させ、/api/i の handler で未読・
+	// role・ピン留めを埋める (#3784)。未配線なら補完せずに昇格だけする。
+	selfPacker *meself.Packer
 }
+
+// SetSelfPacker wires the Packer that promotes the viewer's own entry into
+// MeDetailed. Unset promotes without the handler-only fields.
+func (h *Handler) SetSelfPacker(p *meself.Packer) { h.selfPacker = p }
 
 // SetMetaRepo wires the meta repository whose hiddenTags / sensitiveWords are
 // kept out of hashtags/trend (#3628).
@@ -626,7 +633,7 @@ func (h *Handler) Users(c echo.Context) error {
 	for i, u := range users {
 		// upstream の pack は isDetailed && isMe で MeDetailed を返すので、
 		// 結果に自分が混ざるときは自分だけ MeDetailed になる。
-		out = append(out, meself.Pack(ctx, packed[i], u, profByID[u.ID], viewer))
+		out = append(out, h.selfPacker.Pack(ctx, packed[i], u, profByID[u.ID], viewer))
 	}
 	return c.JSON(http.StatusOK, out)
 }

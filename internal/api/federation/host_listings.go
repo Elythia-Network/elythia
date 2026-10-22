@@ -5,7 +5,6 @@ import (
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/jsnum"
-	"github.com/elythia-network/elythia/internal/api/meself"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/id"
@@ -110,7 +109,7 @@ func (h *Handler) Users(c echo.Context) error {
 //
 // 関係・カウントのゲート (匿名含む、#1957-a / #1988)・モデレーター向けの項目・
 // ピン留め・移行先・instance・絵文字は共有の packer に任せる (#3330)。本家の
-// pack は isMe なら MeDetailed を返すので、閲覧者自身は meself.Pack で昇格する。
+// pack は isMe なら MeDetailed を返すので、閲覧者自身は meself.Packer.Pack で昇格する。
 func (h *Handler) packUsers(c echo.Context, users []*model.User, profiles map[string]*model.UserProfile) []any {
 	out := make([]any, len(users))
 	if len(users) == 0 {
@@ -128,7 +127,7 @@ func (h *Handler) packUsers(c echo.Context, users []*model.User, profiles map[st
 	}
 	packed := h.packer.DetailedMany(ctx, viewer, users, profiles)
 	for i, u := range users {
-		out[i] = meself.Pack(ctx, packed[i], u, profiles[u.ID], viewer)
+		out[i] = h.selfPacker.Pack(ctx, packed[i], u, profiles[u.ID], viewer)
 	}
 	return out
 }
