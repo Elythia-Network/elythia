@@ -19,6 +19,19 @@ type localCache interface {
 	DropLocal()
 }
 
+// reloadOnDrop is an item of the cache list whose DropLocal reads its values
+// again instead of dropping them (#3777). captchaのproviderの組と、リアクションの
+// バッファの切り替えがこれで、どちらもmetaUpdatedと同じ読み直しの関数を渡す。
+//
+// 捨てずに読み直すのは、空にした状態が安全でない側に倒れるため。providerの組が
+// 空ならVerifyは成功を返す(captcha無効と同じ)。読めなければ、読み直しの関数が
+// 前の値を据え置く。読み直しはcachedMetaから読むので、一覧ではcachedMetaより
+// 後に登録する。
+type reloadOnDrop func()
+
+// DropLocal reads the values again.
+func (r reloadOnDrop) DropLocal() { r() }
+
 // cacheOrigin is where the values a cache holds come from. It tells which
 // caches have to be dropped when that source changes under the process (the
 // database restored from a backup, a file rebuilt).
