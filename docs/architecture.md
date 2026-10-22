@@ -1271,7 +1271,7 @@ setupRoutes()
 |---|---|
 | test mode の `/api/reset-db` | handler を test mode の `if` の中で作る。`if` ごと元の位置に残した (`apiRoutesOutsideRegistrars` に、どの経路で登録するかを書いた) |
 | catchall の `api.Any("/*", apiCatchall)` | プラグインのルートより後に置く (読み手のため。echo は静的な path を wildcard より優先するので、順には依存しない)。`apiRoutes` を通らない登録なので、`apiRegistrationAllowed` でファイル (`router.go`) まで決めてある |
-| /api の外の `s.echo` の 64 文 (ActivityPub・SSR・well-known・oauth・nodeinfo・inbox・streaming・`/files`・`/proxy`・`/url`・`/backup-download`・静的配信・SPA) | `apiRoutes` を通らない別の層で、この段の関数の形 (`api apiRoutes` を受ける) に当てはまらない。`/notes/:id` や `/@:acct` のように `s` と `ssrMeta` などを捕まえる closure、構築の呼び出しを行の中に持つもの (`filesHandler(…)`、`newTwemojiBadgeHandler(…)`) があり、評価の時刻の確認がこの段より重い。静的配信と SPA の catchall はプラグインの準備の `return` より後にある |
+| /api の外の `s.echo` の 64 文 (ActivityPub・SSR・well-known・oauth・nodeinfo・inbox・streaming・`/files`・`/proxy`・`/url`・`/backup-download`・静的配信・SPA) | `apiRoutes` を通らない別の層で、この段の関数の形 (`api apiRoutes` を受ける) に当てはまらない。`/notes/:id` や `/@:acct` のように `s` と `ssrMeta` などを捕まえる closure、構築の呼び出しを行の中に持つもの (`filesHandler(…)`、`newTwemojiBadgeHandler(…)`。後者は #3776 で変数に取り出した) があり、評価の時刻の確認がこの段より重い。静的配信と SPA の catchall はプラグインの準備の `return` より後にある |
 | `/debug/pprof` の 8 文 | `s.config.EnablePprof` の `if` の中で、/api の外 |
 
 **同じ動きであることの確かめ方。** `develop` (`b3d75729a`) とこの段の binary で、
@@ -2045,7 +2045,7 @@ Supervisorの側は変えていない。停止のエラーの使われ方は次�
 
 コメントの「shutdown hook」は、この一覧の部品の停止を指す。
 
-### 4.4 キャッシュの一覧 (#3721、#3723、#3725、#3727、#3729、#3732、#3736、#3738)
+### 4.4 キャッシュの一覧 (#3721、#3723、#3725、#3727、#3729、#3732、#3736、#3738、#3776)
 
 **世代のキャッシュは、そのプロセスが持つ分を全部捨てる口 (`DropLocal()`) を持たせ、名前と由来と
 一緒に `Server` の一覧 (`cacheList`、`internal/server/caches.go`) へ登録する。** #3666 の段階 4。
@@ -2073,6 +2073,10 @@ setupRoutes()
   s.addCache("federationPublicKeys", cacheFromDB, federationResolver)
   s.addCache("deliverSigningKeys", cacheFromDB, deliverProcessor)
   s.addCache("instanceActorSigner", cacheFromDB, instanceSigner)   // userCache の後
+  …
+  s.addCache("urlPreview", cacheFromExternal, urlPreviewFetcher)   // #3776。peerDeps の直後
+  …
+  s.addCache("twemojiBadge", cacheFromFile, twemojiBadge)
 ```
 
 - **`DropLocal()` は他のプロセスに知らせない。** publish も、無効化の hook (`SetInvalidationHook`)
@@ -2108,7 +2112,7 @@ setupRoutes()
 | 連合 (その 2) | `deliverEd25519` (`DeliverService`。相手の Ed25519 の対応と送る側の Ed25519 の鍵)・`federationPublicKeys` (`Resolver`。相手の公開鍵と、Ed25519 の鍵が無いことの記憶)・`deliverSigningKeys` (`DeliverProcessor` の解析済みの署名鍵)・`instanceActorSigner` (instance actor の秘密鍵) | #3732 |
 | 投稿・タイムライン・通知 | `antennas` (`CachedAntennaRepository`。有効なアンテナの全件)・`pushSubscriptions` (`webpush.SubscriptionCache` のメモリの層)・`featuredNotes` (`notes.FeaturedRankingCache`。注目ノートの全体の順位)・`notePublisher` (`stream.NotePublisher`。直前に pack したノート)・`timelineJSON` (`notes.TimelineJSONCache`。opt-in のタイムラインの最初の頁) | #3736 |
 | 管理画面と統計 | `driveUsage` (`driveusage.Service`。ドライブの使用量の集計)・`dbHealth` (`dbhealth.Service`。DB の統計)・`statsCounts` (`stats.Handler`。`/api/stats` の instance と note_reaction の総数)・`ipLogWindow` (`iplog.Service`。書いた (利用者, IP) の印) | #3738 |
-| 外部とファイル (URL プレビュー、リモート利用者の統計、RSS、peer のプラグイン一覧、twemoji のバッジ) | (未) | #3666 の (4-9) |
+| 外部とファイル | `urlPreview` (`urlpreview.Fetcher`。URL ごとのプレビュー)・`remoteStats` (`federation.RemoteStatsFetcher`。リモート利用者の統計の件数と作成日時)・`fetchRSS` (`fetchrss.Handler`。URL ごとの pack 済みの本文)・`pluginPeers` (`nodeInfoPeerLister`。相手の nodeinfo にあるプラグインの名前)・`twemojiBadge` (`twemojiBadgeHandler`。名前ごとの焼いた PNG) | #3776 |
 
 - 利用者と関係の系統の 3 つは、どれもこのプロセスだけで全部を捨てる処理を元から中に持っていて
   (`invalidateAllLocal`・`apply({All: true})`・`tokenCache.invalidateAll`)、`DropLocal()` はそれを
@@ -2198,7 +2202,8 @@ setupRoutes()
   捨てる前に始まった書き込みが捨てた後に失敗すると、捨てた後に付けた同じ印を外すが、書き込みは (利用者,
   IP) で upsert するので、行は 1 つのまま観測の回数が 1 つ増えるだけになる
 - この 4 つは DB を直接読むか、DB へ書いたことの印を持つだけで、ほかのキャッシュの値を含まないので、
-  捨てる順の制約は無い。投稿・タイムライン・通知の系統を最後に置いたままにするため、その前に登録する。
+  捨てる順の制約は無い。投稿・タイムライン・通知の系統より後に、それらの pack の元になるキャッシュを
+  置かないため、その前に登録する。
   ドライブの使用量は、管理画面の handler に渡す所の引数の中で作っていたのを、一覧に登録するために変数に
   した
 - ドライブのストレージの backend (`coredrive.MetaStorage`) は、どの系統にも入れない。使うたびに meta
@@ -2206,6 +2211,34 @@ setupRoutes()
   捨てれば追従する (meta が読めないときは、前の backend を使い続ける)
 - `instance` の書き込みのバッファ (`TouchBuffer`・`CapabilityBuffer` の保留) は値のキャッシュではなく
   書き込みの保留で、捨ててはいけない。DB を戻すときに flush するか捨てるかは段階 (6) で決める
+- **外部とファイルの系統 (#3776) で、由来の `cacheFromExternal` と `cacheFromFile` を初めて使った。**
+  URL プレビュー・リモート利用者の統計・RSS・peer のプラグイン一覧は外から取った値を、twemoji のバッジは
+  ファイル (`frontendutil.TwemojiDir()`、`MISSKEY_TWEMOJI_DIR`) を描いた値を持つ。5 つとも他のプロセスへ
+  伝える仕組み (Redis の層や publish) を持たず、ほかのキャッシュの値を含まないので、捨てる順の制約は無い。
+  RSS と peer のプラグイン一覧はそれまでの登録の並びより後で作るので、5 つとも `peerDeps` を作った直後
+  (プラグインの準備の `return` より前) に登録する。一覧の最後は投稿・タイムライン・通知の系統ではなくなった
+  が、この 5 つは pack の元にならないので、`notePublisher` と `timelineJSON` の順の制約は崩れない
+- 5 つとも、取得 (twemoji のバッジはファイルの読み込みと描画) をロックの外で行い、終わったらそのまま
+  積んでいた。世代の番号を足し、取得の前に番号を読み、比べることと積むことを同じロックの中で行う。
+  `singleflight` を使うリモート利用者の統計と RSS は鍵にも番号を含め、捨てた後の呼び出しが捨てる前の
+  取得に相乗りしないようにした。RSS は同時実行の上限 (`inflight`) の鍵にも番号を含める。含めないと、
+  捨てた後の取得を「既存の取得への合流」と数え、上限を超えて取得する。外の値なので、捨てる前に読み始めた
+  値も同じ相手から数秒前に取った値にすぎないが、これまでの段と揃えた。URL プレビューは戻す前の条件で
+  取った値を 1 時間積みうるし、twemoji のバッジは TTL が無いので、ファイルの差し替えと重なると古い描画が
+  残り続けるため
+- URL プレビューの `Fetcher` は、リクエストごとに構造体を複製する (`forRequest`)。LRU・mutex・世代の
+  番号はポインタの先の型 (`previewCache`) にまとめ、複製しても同じものを指すようにした
+- **URL プレビューの取得の条件 (redirect の可否、本文の上限など) は meta の設定で決まるが、
+  `metaUpdated` では捨てない。** DB を戻したときや設定を変えたときに、前の条件で取った結果が最大 1 時間
+  残る (以前からの挙動)。meta から作った値ではなく外から取った値なので、由来は `cacheFromExternal` にした
+- **キャッシュとして扱わず、捨てないもの。** リモート利用者の統計の `createdHostDown` (応答しなかった
+  ホストを 5 分覚える) は取得の間引きで、`DropLocal()` でも残す。捨てると、応答しない相手にフォローの
+  処理が 5 秒ずつ待たされる守りが外れる。RSS の同時実行の上限 (`inflight`) と peer のレート制限
+  (`peerRateLimiter`) も値のキャッシュではない
+- peer のプラグイン一覧と twemoji のバッジは、interface のフィールドの中 (`pluginPeerDeps.remote`) と
+  ルートの登録の引数の中で作っていたのを、一覧に登録するために変数 (`pluginPeers`・`twemojiBadge`) にした
+- **今の `dropAll` は由来を見ずに全部を捨てる。** DB を戻すたびに呼ぶと、外への取得 (URL プレビュー・
+  統計・RSS・nodeinfo) が一斉に増える。段階 (6) で、由来で絞るか (DB 由来だけを捨てるなど) を決める
 
 - captcha の provider と、リアクションのバッファの切り替えと、DeepL のキーは、meta 行の写しで、捨てる
   だけでは足りず読み直しが要る。#3721 では登録していない。扱いは段階 4 の最後 (#3666 の (4-10)) で決める
@@ -2295,8 +2328,24 @@ setupRoutes()
   `TestService_DropLocal` (iplog) (#3738): 対象を全部捨てること。集計の 3 つは、読み込みの途中で捨てた
   ときに読んだ値を積まず、捨てた後の呼び出しを相乗りさせないこと。IP の記録は窓を捨てた時刻から数え直す
   こと
+- `TestCaches_ExternalLine` (#3776): 5 つがサーバーの使う値のまま、決めた由来 (`externalLineCaches`) で
+  一覧にあることと、peer のプラグイン一覧がプラグインの通信 (`peerDeps.remote`) と同じ値であることを
+  確かめる。`MISSKEY_TWEMOJI_DIR` を一時ディレクトリに向け、URL プレビューと RSS は 127.0.0.1 の
+  httptest のサーバーを `allowedPrivateNetworks` で許して、相手の内容とファイルを変えてから、`dropAll` の
+  後に `/url`・`/api/fetch-rss`・`/twemoji-badge/…` が取り直す (描き直す) ことと、`internal:` へ何も
+  publish しないことを見る。リモート利用者の統計と peer のプラグイン一覧は相手へ https で取りに行くので、
+  値が同じであることだけを見て、捨てることは各パッケージのテストに任せる
+- `TestFetcher_DropLocal`・`TestFetcher_DropLocalDuringFetchIsNotStored` (urlpreview)・
+  `TestRemoteStatsFetcher_DropLocal`・`TestRemoteStatsFetcher_DropDuringFetch`・`TestFetchRSS_DropLocal`・
+  `TestFetchRSS_DropDuringFetch`・`TestFetchRSS_DropDuringFetchCountsTowardTheCap`・
+  `TestNodeInfoPeerLister_DropLocal`・`TestNodeInfoPeerLister_DropLocalDuringFetchIsNotStored`・
+  `TestTwemojiBadge_DropLocal`・`TestTwemojiBadge_DropLocalDuringReadIsNotStored` (#3776): 対象を全部捨てる
+  こと (リモート利用者の統計は `createdHostDown` を残すこと)。取得の途中で捨てたときに取った値を積まない
+  こと。リモート利用者の統計 (統計と作成日時の両方) と RSS は、捨てた後の呼び出しを相乗りさせないこと。
+  RSS は、捨てた後の取得を同時実行の上限に数えること。URL プレビューは設定を毎回読む構成 (`forRequest` で
+  複製する) で確かめる。twemoji のバッジは、ファイルを名前付きパイプにして読み込みの途中で止める (unix だけ)
 
-#3721・#3723・#3725・#3727・#3729・#3732・#3736・#3738 の前後で同じであることは、それぞれ次のように確かめた (道具はコミットしていない)。
+#3721・#3723・#3725・#3727・#3729・#3732・#3736・#3738・#3776 の前後で同じであることは、それぞれ次のように確かめた (道具はコミットしていない)。
 
 - `elythia dump-routes`: 出力 (ルート)、起動ログ、Redis の命令の列、PostgreSQL の文の集合は、どれも前後で
   一致した。前の木を 2 回流して揺れないことも確かめ、後の木も 2 回流した
@@ -2307,7 +2356,9 @@ setupRoutes()
   #3736 では、節点 357・setter の辺 870・後から入れる辺 96・呼び出しが離れている辺 657 のまま変わらない。
   #3738 では、ドライブの使用量の集計を変数 (`driveUsage`) にしたので、節点が 358 になった。setter の辺
   870・後から入れる辺 96・呼び出しが離れている辺 657 は変わらない。`SetDriveUsageProvider` の引数に
-  現れる節点が `s.db` から `driveUsage` に替わっただけで、`driveUsage` は受け手の `adminHandler` より先に作る
+  現れる節点が `s.db` から `driveUsage` に替わっただけで、`driveUsage` は受け手の `adminHandler` より先に作る。
+  #3776 では、peer のプラグイン一覧と twemoji のバッジを変数 (`pluginPeers`・`twemojiBadge`) にしたので、
+  節点が 360 になった。setter の辺 870・後から入れる辺 96・呼び出しが離れている辺 657 は変わらない
 
 ## 5. フック注入パターン
 
