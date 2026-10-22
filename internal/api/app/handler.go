@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/misc"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
@@ -66,12 +67,13 @@ func NewHandler(repo repository.AuthSessionRepository, idGen id.Generator) *Hand
 // Create handles POST /api/app/create.
 func (h *Handler) Create(c echo.Context) error {
 	var req struct {
-		Name        string   `json:"name"`
-		Description string   `json:"description"`
+		Name        *string  `json:"name"`
+		Description *string  `json:"description"`
 		Permission  []string `json:"permission"`
 		CallbackURL *string  `json:"callbackUrl"`
 	}
-	if err := c.Bind(&req); err != nil || req.Name == "" || req.Description == "" || req.Permission == nil {
+	// 本家は空文字のnameとdescriptionでもアプリを作る(#3764)。欠けているかだけを見る。
+	if err := c.Bind(&req); err != nil || req.Name == nil || req.Description == nil || req.Permission == nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "name, description, and permission are required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
 
@@ -86,8 +88,8 @@ func (h *Handler) Create(c echo.Context) error {
 		ID:          h.idGen.Generate(time.Now()),
 		UserID:      userID,
 		Secret:      misc.SecureRandomHex(32),
-		Name:        req.Name,
-		Description: req.Description,
+		Name:        *req.Name,
+		Description: *req.Description,
 		// legacy permission の正規化 + de-dup (upstream app/create.ts、#1557)。
 		Permission:  normalizeAppPermissions(req.Permission),
 		CallbackURL: req.CallbackURL,
@@ -140,16 +142,16 @@ func (h *Handler) Show(c echo.Context) error {
 func (h *Handler) MyApps(c echo.Context) error {
 	u := middleware.GetUser(c)
 	var req struct {
-		Limit  *int `json:"limit"`
-		Offset *int `json:"offset"`
+		Limit  *jsnum.Int `json:"limit"`
+		Offset *jsnum.Int `json:"offset"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "Invalid parameters.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
 
 	limit := 10
-	if req.Limit != nil {
-		limit = *req.Limit
+	if l := req.Limit.IntPtr(); l != nil {
+		limit = *l
 		if limit < 1 {
 			limit = 1
 		}
@@ -158,8 +160,8 @@ func (h *Handler) MyApps(c echo.Context) error {
 		}
 	}
 	offset := 0
-	if req.Offset != nil && *req.Offset > 0 {
-		offset = *req.Offset
+	if o := req.Offset.IntPtr(); o != nil && *o > 0 {
+		offset = *o
 	}
 
 	apps, err := h.repo.ListAppsByUserID(u.ID, limit, offset)
