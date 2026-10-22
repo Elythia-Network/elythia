@@ -29,6 +29,7 @@
 | `ipshape-check` | レスポンス / 連合の shape に IP が出ていないか検査 |
 | `iprecord-check` | 利用者の IP を記録する call site が allowlist の外に増えていないか検査 |
 | `sqlbind-check` | 値をクォート内へ差し込まずバインドしているか検査 |
+| `cachelist-check` | 同期の部品を持つ型と変数が、キャッシュの一覧への登録か理由付きの除外に分類されているか検査 |
 | `gaterun-check` | gates の -run が名指しするテストが実在するか検査 |
 
 ## `internal/server` のソースを読むゲート (#3672)
@@ -191,6 +192,97 @@ go/types へ移せば消える。
 `api` なら /api の group そのものとみなすので、`apiRoutes` と `*echo.Group` を区別しない。
 `*echo.Group` 型の引数 (上の 1 つ目) も /api と結び付けない。どちらも足すと
 `internal/entitycompat` の解析を広げる大きさになるので、ここでは限界として書くにとどめた。
+
+## キャッシュの一覧への登録漏れ(`cachelist-check`、#3777)
+
+キャッシュの一覧(`internal/server`の`addCache`、[architecture.md 4.4](architecture.md))は、新しい
+キャッシュを足した人が登録を忘れても何も落ちなかった。実際に、`/api/emojis`の符号化済みの応答
+(`api/emojis.Handler.encoded`、#3593)が、一覧にも除外の理由にも載っていなかった。
+
+並行で共有するメモリには同期が要り、`-race`がそれを強制するので、普通に書いたキャッシュは同期の部品を
+フィールドかパッケージの変数に持つ。そこで、その形のものを全部数え、表(`cacheEntries`、
+`internal/entitycompat/cache_list_table_test.go`)で人に分類させる。
+
+- **数えるもの(`ScanCacheTypes`、`internal/entitycompat/cache_types.go`)。** `git ls-files internal plugin`で
+  列挙した非テストの`.go`の、次の4つ。#3777の時点で145件
+  - フィールドに同期の部品(`sync.Mutex`・`RWMutex`・`Map`・`Once`、`sync/atomic`の型、`singleflight.Group`、
+    golang-lruの`lru.Cache`・`expirable.LRU`)を持つ名前付きのstruct(106)。ポインタ・slice・mapの値・
+    型引数の中にあっても数える。名前の無いstructのフィールドは、外のフィールド名を前に付けて数える
+  - `DropLocal()`を持つstructで、同期の部品を持たないもの(3。`meta.Handler`など)
+  - 同じパッケージで`DropLocal()`を持つ型からフィールドの型を辿って届くstructで、同期の部品を持たず
+    mapを持つもの(5。`relationKindCache`など)。途中の型は同期の部品を持たなくてよい
+    (`role.Service`→`policyProvider`→`policyProviderRuntime`)
+  - パッケージの変数で、型が同期の部品を持つもの(31)。型は宣言から引き、無ければ値の形(`T{}`・`&T{}`・
+    `new(T)`・`make(T)`)から引く。同じパッケージの、同期の部品を持つstructの型も数える。
+    `sync.OnceFunc`・`sync.OnceValue`・`sync.OnceValues`の呼び出しで作る変数は、型を値の形から引けないが、
+    最初の結果をプロセスの間持つので`sync.Once`として数える(`metaColumnNames`など3つ)
+- **読まないもの。** testutil・plugintest、`testdata`の下、`internal/entitycompat`の`*fixture`の下と、
+  サーバーの世代の部品から使われない`internal/backup/daemon`・`internal/backup/restoreop`(importするのは
+  `internal/cli/backup`だけ)・`internal/cli`。理由は`CacheScanExcludedDirs`に書いてある。
+  `internal/backup`自体は、サーバーが`backupadmin`から使うので読む。どの除外も、追跡されたファイルに
+  1つも当たらなくなったら`TestCacheScanExclusionsAreUsed`が落とす
+- **表の行。** 種類・理由・全部のフィールドの名前(指紋)を持つ。種類は次のとおり(数は#3777の時点)
+  - `dropLocal`(31): `DropLocal()`を持ち、一覧に登録する
+  - `droppedByOwner`(8): 辿って届き、持ち主の`DropLocal()`が捨てるか、`DropLocal()`の後の次の読み込みで
+    置き換わる(`fedrule.compiledRule`は、集合を古いことにされて次の評価で読み直した集合に替わる)。
+    **辿って届くだけでは分類しない。**
+    `mentionFetchGuard`や`resolveGroup`のように、持ち主が捨てないものもあるため
+  - `notCache`(59): 値の写しを持たない(lock・singleflight・世代の起動と停止・数え・ジョブキューの接続・
+    コードから1回だけ組む値)
+  - `processGlobal`(16): 世代をまたいで残るパッケージの状態(構築のときに配線するhook、一度だけ書く
+    設定、`setupLatch`)。段階(5)で依存として渡す形に寄せる
+  - `writeBuffer`(7)・`perConnection`(6)・`throttle`(5)・`contentKeyed`(5)・`perCall`(4)・
+    `followsRegistered`(2)・`reloadOnDrop`(2)
+- **指紋は全部のフィールドの名前。** 埋め込みは型の名前で、変数は名前の無いstructのフィールドと、同じ
+  `var`のブロックの他の名前(`var:<名前>`)で持つ。どのフィールドを足しても一致しなくなって落ちるので、
+  足した人が分類を確かめ直す。同期の部品やmapのフィールドだけを見ると、既にあるmutexで守る値をポインタで
+  足す形(`captcha.Service`に`metaSnap *string`を足すなど)を見逃す。`DropLocal()`を持つ型も指紋を持つ
+  ので、`Resolver`にキャッシュのmapを足しても落ちる。落ちたときの報告は、足した名前・消えた名前と、
+  表に貼れる形の新しい一覧を出す
+- **`keeps`。** `dropLocal`と`droppedByOwner`の行は、`DropLocal()`が捨てずに残す状態(実行中の読み込み、
+  取得の間引き、構築のときの登録)を、フィールドの名前と理由で持つ。`keeps`に無いフィールドの状態は、
+  `DropLocal()`が捨てるか、構築のときに決まる依存や設定。この区別は人が読んで書くもので、検査は名前が
+  フィールドにあることだけを見る
+- **種類と走査の食い違いも落とす**(`TestCacheTypesAreClassified`)。`dropLocal`の行の型に`DropLocal()`が
+  無い、`droppedByOwner`の行に届く持ち主が無い、`DropLocal()`を持つ型を他の種類で除外している、変数を
+  `dropLocal`か`droppedByOwner`にしている、のどれでも落ちる
+- **使われない行は落とす**(`TestCacheEntriesHaveNoDeadRows`)。走査が見つけなくなった行、理由の無い行、
+  `keeps`の名前がフィールドに無い行も落とす
+- **下限。** 検出の枝ごとに実在するものを名指しする(`cacheTypeLowerBounds`。`sync.Mutex`は
+  `RelationCache`、`sync.Map`は`tokenCache`、`sync/atomic`は`emojis.Handler`、`expirable.LRU`は
+  `urlpreview`の`previewCache`など)。同期の部品を持たない`DropLocal()`の型、辿って届くmapの型、全部の
+  フィールドの指紋、変数の4つの形(`setupLatch`・`versionRegexps`・`parsedCache`・`sync.OnceValue`で作る`metaColumnNames`)と同じブロックの名前も
+  名指しする(`TestCacheTypeScanFindsEveryBranch`)。importの別名・埋め込み・名前の無いstruct・型引数の
+  付いた受け手・変数の値の形は、小さなリポジトリを作って確かめる(`TestScanCacheTypesShapes`)
+- **go/typesを使わない。** 型検査には全パッケージのexport dataが要り、`collectRoutes`
+  (`route_resolve_test.go`)と同じ理由で遅い。フィールドの型は、importの名前と同じパッケージの型名から
+  引く
+
+**一覧に実際に登録したことは、実行時に確かめる。** `internal/server`の
+`TestCaches_ListMatchesTheDropLocalTypes`(`caches_types_test.go`)が、タイムラインのJSONのキャッシュを
+有効にしてサーバーを組み、一覧にある値の型の集合が、同じ走査(`entitycompat.ScanCacheTypes`)で
+`DropLocal()`を持つとした型の集合と一致することを見る。型の一覧をどちらかに書き写すと片方だけ直して
+ずれるので、走査そのものを`internal/entitycompat`の非テストのコードに置き、`internal/server`のテストから
+呼ぶ。こちらは`make gates`ではなく`make test`で回る(サーバーの組み立てにPostgreSQLが要るため)。
+
+**限界。**
+
+- 実行時の検査は型の集合を比べるので、登録した型の2つ目の値を登録し忘れても気付けない。読み直しの
+  項目(`reloadOnDrop`)は2つが同じ型なので、名前は`TestCaches_ReloadedFromMeta`が別に見る。型引数の付いた
+  型は、`reflect`の名前に型引数が入るので一致しない(今は無い)
+- 同期の部品を別のパッケージの型に包んで持つ形(フィールドの型が`internal`の別の型)は、包む側を数えない。
+  包まれる側の型が数えられて分類される
+- 同期の部品を持たないキャッシュ(起動時に読んだ値を変数やフィールドに持つだけのもの)は、`DropLocal()`の
+  型から届くmapの型を除いて数えない。関数の戻り値で作る変数(`var c = newCache()`)と、ブロックを分けて
+  書いたパッケージのmutexとmapの組も、型や関係が構文から分からないので数えない
+- `sync.OnceValue`が返した関数(`func() T`)をstructのフィールドに持つ形は、フィールドの型が関数なので
+  見つけられない。見つけるのはパッケージの変数を、型を書かずに`sync.OnceValue`などの呼び出しで作る形
+  だけで、型を書いて宣言した変数(`var x func() T = sync.OnceValue(...)`)と、型引数を明示した呼び出し
+  (`sync.OnceValue[T](...)`)は見つけられない
+- 指紋は表に載る型のフィールドしか見ない。表に載らない同じパッケージの型(同期の部品もmapも持たず、
+  `DropLocal()`の型から届かないもの)にフィールドを足しても落ちない。たとえば`emojis.Handler.encoded`の
+  中身の`encodedEmojis`。mapやsliceの要素に使う名前の無いstructのフィールドも、指紋に入らない
+- 名前で見る走査なので、意図的な回避は振る舞いのテストで受ける(CLAUDE.md Section 4)
 
 ## 変更の経緯 (旧 CLAUDE.md の更新記録)
 
