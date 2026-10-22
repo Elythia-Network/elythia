@@ -70,13 +70,14 @@ func (h *Handler) SetTokenNotifier(n TokenNotifier) { h.tokenNotifier = n }
 // SessionGenerate handles POST /api/auth/session/generate.
 func (h *Handler) SessionGenerate(c echo.Context) error {
 	var req struct {
-		AppSecret string `json:"appSecret"`
+		AppSecret *string `json:"appSecret"`
 	}
-	if err := c.Bind(&req); err != nil || req.AppSecret == "" {
+	// 空文字は本家と同じく、見つからないアプリとして扱う(#3764)。
+	if err := c.Bind(&req); err != nil || req.AppSecret == nil {
 		return apierr.JSONInvalidParam(c)
 	}
 
-	app, err := h.repo.FindAppBySecret(req.AppSecret)
+	app, err := h.repo.FindAppBySecret(*req.AppSecret)
 	if err != nil && !repository.IsNotFound(err) {
 		// **DB 障害を not-found に丸めない** (#2792)。
 		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
@@ -104,13 +105,14 @@ func (h *Handler) SessionGenerate(c echo.Context) error {
 // SessionShow handles POST /api/auth/session/show.
 func (h *Handler) SessionShow(c echo.Context) error {
 	var req struct {
-		Token string `json:"token"`
+		Token *string `json:"token"`
 	}
-	if err := c.Bind(&req); err != nil || req.Token == "" {
+	// 空文字は本家と同じく、見つからないセッションとして扱う(#3764)。
+	if err := c.Bind(&req); err != nil || req.Token == nil {
 		return apierr.JSONInvalidParam(c)
 	}
 
-	session, err := h.repo.FindSessionByToken(req.Token)
+	session, err := h.repo.FindSessionByToken(*req.Token)
 	if err != nil && !repository.IsNotFound(err) {
 		// **DB 障害を not-found に丸めない** (#2792)。
 		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
@@ -135,9 +137,10 @@ func (h *Handler) SessionShow(c echo.Context) error {
 func (h *Handler) Accept(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
-		Token string `json:"token"`
+		Token *string `json:"token"`
 	}
-	if err := c.Bind(&req); err != nil || req.Token == "" {
+	// 空文字は本家と同じく、見つからないセッションとして扱う(#3764)。
+	if err := c.Bind(&req); err != nil || req.Token == nil {
 		return apierr.JSONInvalidParam(c)
 	}
 	// **プラグインが管理するアカウントには app token を発行しない (#3468)。**
@@ -148,7 +151,7 @@ func (h *Handler) Accept(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, apierr.PluginManagedAccount())
 	}
 
-	session, err := h.repo.FindSessionByToken(req.Token)
+	session, err := h.repo.FindSessionByToken(*req.Token)
 	if err != nil && !repository.IsNotFound(err) {
 		// **DB 障害を not-found に丸めない** (#2792)。
 		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
@@ -189,14 +192,15 @@ func (h *Handler) Accept(c echo.Context) error {
 // SessionUserkey handles POST /api/auth/session/userkey.
 func (h *Handler) SessionUserkey(c echo.Context) error {
 	var req struct {
-		AppSecret string `json:"appSecret"`
-		Token     string `json:"token"`
+		AppSecret *string `json:"appSecret"`
+		Token     *string `json:"token"`
 	}
-	if err := c.Bind(&req); err != nil || req.AppSecret == "" || req.Token == "" {
+	// 空文字は本家と同じく、見つからないアプリかセッションとして扱う(#3764)。
+	if err := c.Bind(&req); err != nil || req.AppSecret == nil || req.Token == nil {
 		return apierr.JSONInvalidParam(c)
 	}
 
-	app, err := h.repo.FindAppBySecret(req.AppSecret)
+	app, err := h.repo.FindAppBySecret(*req.AppSecret)
 	if err != nil && !repository.IsNotFound(err) {
 		// **DB 障害を not-found に丸めない** (#2792)。
 		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
@@ -205,7 +209,7 @@ func (h *Handler) SessionUserkey(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_APP", "No such app.", "fcab192a-2c5a-43b7-8ad8-9b7054d8d40d"))
 	}
 
-	session, err := h.repo.FindSessionByTokenAndAppID(req.Token, app.ID)
+	session, err := h.repo.FindSessionByTokenAndAppID(*req.Token, app.ID)
 	if err != nil && !repository.IsNotFound(err) {
 		// **DB 障害を not-found に丸めない** (#2792)。
 		return c.JSON(http.StatusInternalServerError, apierr.InternalError())

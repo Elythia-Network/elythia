@@ -680,3 +680,32 @@ func TestMiAuthCheck_NoUserRepoOmitsUser(t *testing.T) {
 	_, hasUser := out["user"]
 	assert.False(t, hasUser)
 }
+
+// TestEmptyStringsAreLookedUpNotRejected pins that an empty appSecret or token
+// is looked up and answered with upstream's NO_SUCH_APP / NO_SUCH_SESSION,
+// not rejected as a missing param (#3764).
+func TestEmptyStringsAreLookedUpNotRejected(t *testing.T) {
+	h, repo := newTestHandler()
+	repo.apps["s1"] = &model.App{ID: "a1", Secret: "s1"}
+	user := &model.User{ID: "u1"}
+	for _, tc := range []struct {
+		name string
+		fn   func(echo.Context) error
+		body string
+		code string
+	}{
+		{"auth/session/generate", h.SessionGenerate, `{"appSecret":""}`, "NO_SUCH_APP"},
+		{"auth/session/show", h.SessionShow, `{"token":""}`, "NO_SUCH_SESSION"},
+		{"auth/accept", h.Accept, `{"token":""}`, "NO_SUCH_SESSION"},
+		{"auth/session/userkey appSecret", h.SessionUserkey, `{"appSecret":"","token":"t"}`, "NO_SUCH_APP"},
+		{"auth/session/userkey token", h.SessionUserkey, `{"appSecret":"s1","token":""}`, "NO_SUCH_SESSION"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := post(tc.fn, tc.body, user)
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			var out map[string]any
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
+			assert.Equal(t, tc.code, out["error"].(map[string]any)["code"])
+		})
+	}
+}

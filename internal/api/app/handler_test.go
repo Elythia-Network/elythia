@@ -432,3 +432,45 @@ func TestNormalizeAppPermissions(t *testing.T) {
 	// account/read -> read:account (既存と重複し dedup)、notes-write -> write:notes
 	assert.Equal(t, []string{"read:account", "write:notes", "read:drive"}, []string(got))
 }
+
+// TestCreate_AcceptsEmptyNameAndDescription pins that an empty name or
+// description is stored as-is, as upstream does (#3764); only a missing one is
+// rejected.
+func TestCreate_AcceptsEmptyNameAndDescription(t *testing.T) {
+	for _, body := range []string{
+		`{"name":"","description":"d","permission":[]}`,
+		`{"name":"n","description":"","permission":[]}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			h, repo := newTestHandler()
+			rec := post(h.Create, body, nil)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			assert.Len(t, repo.apps, 1)
+		})
+	}
+}
+
+// TestMyApps_AcceptsIntegerValuedFractions pins that limit and offset accept
+// integer-valued fractions such as 2.0 and 3e0, which upstream's ajv accepts
+// as integers (#3764).
+func TestMyApps_AcceptsIntegerValuedFractions(t *testing.T) {
+	h, repo := newTestHandler()
+	uid := "u1"
+	for i := range 6 {
+		appID := "a" + string(rune('0'+i))
+		repo.apps[appID] = &model.App{ID: appID, Name: "App", Secret: "s", UserID: &uid, Permission: model.StringArray{"read:account"}}
+	}
+
+	for body, want := range map[string]int{
+		`{"limit":2.0}`:  2,
+		`{"offset":4e0}`: 2,
+	} {
+		t.Run(body, func(t *testing.T) {
+			rec := post(h.MyApps, body, &model.User{ID: "u1"})
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			var resp []map[string]any
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+			assert.Len(t, resp, want)
+		})
+	}
+}
