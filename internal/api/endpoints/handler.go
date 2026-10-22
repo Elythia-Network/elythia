@@ -54,14 +54,16 @@ func (h *Handler) Endpoints(c echo.Context) error {
 // endpoint の null だけ upstream に揃える (#1695)。
 func (h *Handler) Endpoint(c echo.Context) error {
 	var req struct {
-		Endpoint string `json:"endpoint"`
+		Endpoint *string `json:"endpoint"`
 	}
-	if err := c.Bind(&req); err != nil || req.Endpoint == "" {
+	// 空の endpoint は本家と同じく未知の endpoint として null を返す (#3774)。
+	// 欠けだけを拒否する。
+	if err := c.Bind(&req); err != nil || req.Endpoint == nil {
 		return c.JSON(http.StatusBadRequest, apierr.InvalidParam())
 	}
 	// 未知 endpoint は null (upstream: ep == null → return null)。
 	for _, n := range h.names() {
-		if n == req.Endpoint {
+		if n == *req.Endpoint {
 			return c.JSON(http.StatusOK, map[string]any{"params": []any{}})
 		}
 	}

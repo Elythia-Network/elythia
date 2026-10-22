@@ -155,12 +155,14 @@ func encodeEmojis(emojis []*model.Emoji) *encodedEmojis {
 // POST /api/emoji
 func (h *Handler) Emoji(c echo.Context) error {
 	var req struct {
-		Name string `json:"name" query:"name"`
+		Name *string `json:"name" query:"name"`
 	}
-	if err := c.Bind(&req); err != nil || req.Name == "" {
+	// 空の name は本家の paramDef を通る。本家は findOneOrFail で 500 になるが、
+	// 存在しない絵文字と同じ NO_SUCH_EMOJI にする (#3774)。欠けだけを拒否する。
+	if err := c.Bind(&req); err != nil || req.Name == nil {
 		return c.JSON(http.StatusBadRequest, apierr.InvalidParam())
 	}
-	e, err := h.emojiRepo.FindByNameAndHost(req.Name, nil)
+	e, err := h.emojiRepo.FindByNameAndHost(*req.Name, nil)
 	if err != nil && !repository.IsNotFound(err) {
 		// **DB 障害を not-found に丸めない** (#2792)。
 		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
