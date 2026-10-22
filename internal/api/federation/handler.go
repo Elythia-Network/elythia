@@ -210,16 +210,18 @@ func (h *Handler) Instances(c echo.Context) error {
 
 // ShowInstanceRequest is the request body for federation/show-instance.
 type ShowInstanceRequest struct {
-	Host string `json:"host"`
+	Host *string `json:"host"`
 }
 
 // ShowInstance handles POST /api/federation/show-instance.
 func (h *Handler) ShowInstance(c echo.Context) error {
 	var req ShowInstanceRequest
-	if err := c.Bind(&req); err != nil || req.Host == "" {
+	// 空の host は本家と同じく受け、該当が無いので 204 を返す (#3770)。
+	if err := c.Bind(&req); err != nil || req.Host == nil {
 		return apierr.JSONInvalidParam(c)
 	}
-	inst, err := h.svc.FindByHost(req.Host)
+	host := *req.Host
+	inst, err := h.svc.FindByHost(host)
 	if err != nil {
 		// upstream Misskey TS は該当 instance 行がないとき 204 No Content を
 		// 返す (= null 相当)。frontend admin の lookup UI も 204 を「未知 host」
@@ -228,12 +230,12 @@ func (h *Handler) ShowInstance(c echo.Context) error {
 		if errors.Is(err, coreinstance.ErrInstanceNotFound) {
 			return c.NoContent(http.StatusNoContent)
 		}
-		slog.Error("federation/show-instance: FindByHost failed", "host", req.Host, "err", err)
+		slog.Error("federation/show-instance: FindByHost failed", "host", host, "err", err)
 		return apierr.JSONInternalError(c)
 	}
 	hosts, err := h.svc.FederationHostLists()
 	if err != nil {
-		slog.Error("federation/show-instance: FederationHostLists failed", "host", req.Host, "err", err)
+		slog.Error("federation/show-instance: FederationHostLists failed", "host", host, "err", err)
 		return apierr.JSONInternalError(c)
 	}
 	return c.JSON(http.StatusOK, instanceToMap(inst, hosts, h.requesterIsModerator(c), h.lookupCapability(inst.Host)))

@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/meself"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/entity"
@@ -15,14 +16,18 @@ import (
 
 // hostPageRequest is the common request body for the three per-host listing
 // endpoints (federation/followers, federation/following, federation/users).
+//
+// offset は本家の paramDef に無いので、本家と同じく読まない (#3770)。
 type hostPageRequest struct {
-	Host      string `json:"host"`
-	Limit     *int   `json:"limit"`
-	Offset    int    `json:"offset"`
-	SinceID   string `json:"sinceId"`
-	UntilID   string `json:"untilId"`
-	SinceDate *int64 `json:"sinceDate"`
-	UntilDate *int64 `json:"untilDate"`
+	Host      *string    `json:"host"`
+	Limit     *jsnum.Int `json:"limit"`
+	SinceID   string     `json:"sinceId"`
+	UntilID   string     `json:"untilId"`
+	SinceDate *jsnum.Int `json:"sinceDate"`
+	UntilDate *jsnum.Int `json:"untilDate"`
+	// host / limit は parseHostPage が埋める値。
+	host  string
+	limit int
 	// sinceID / untilID は parseHostPage が sinceDate/untilDate を aidx prefix に
 	// 正規化して埋める cursor 値 (#1732、upstream makePaginationQuery 互換)。
 	sinceID string
@@ -42,7 +47,7 @@ func (h *Handler) Followers(c echo.Context) error {
 		return c.JSON(http.StatusOK, []any{})
 	}
 	viewer := h.followListViewer(c)
-	rows, err := h.followingRepo.ListFollowersByHostCursor(req.Host, req.sinceID, req.untilID, (*req.Limit), viewer)
+	rows, err := h.followingRepo.ListFollowersByHostCursor(req.host, req.sinceID, req.untilID, req.limit, viewer)
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -62,7 +67,7 @@ func (h *Handler) Following(c echo.Context) error {
 		return c.JSON(http.StatusOK, []any{})
 	}
 	viewer := h.followListViewer(c)
-	rows, err := h.followingRepo.ListFollowingByHostCursor(req.Host, req.sinceID, req.untilID, (*req.Limit), viewer)
+	rows, err := h.followingRepo.ListFollowingByHostCursor(req.host, req.sinceID, req.untilID, req.limit, viewer)
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -77,14 +82,15 @@ func (h *Handler) Users(c echo.Context) error {
 	if !ok {
 		return apierr.JSONInvalidParam(c)
 	}
-	if h.userRepo == nil {
+	// 本家は user.host = '' で絞るので、空の host には誰も当たらない。
+	// ListUsers は空の Hostname では絞らず、リモートの利用者を全員返してしまう (#3770)。
+	if h.userRepo == nil || req.host == "" {
 		return c.JSON(http.StatusOK, []any{})
 	}
 	users, err := h.userRepo.ListUsers(model.UserListFilter{
 		Origin:   "remote",
-		Hostname: req.Host,
-		Limit:    (*req.Limit),
-		Offset:   req.Offset,
+		Hostname: req.host,
+		Limit:    req.limit,
 		SinceID:  req.sinceID,
 		UntilID:  req.untilID,
 	})
@@ -189,18 +195,20 @@ func (h *Handler) userProfiles(users []*model.User) map[string]*model.UserProfil
 // itself to avoid double-writing the body.
 func parseHostPage(c echo.Context) (hostPageRequest, bool) {
 	var req hostPageRequest
-	if err := c.Bind(&req); err != nil || req.Host == "" {
+	// 空の host は本家と同じく受け、0 件を返す (#3770)。欠けだけを拒否する。
+	if err := c.Bind(&req); err != nil || req.Host == nil {
 		return req, false
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	req.host = *req.Host
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return req, false
 	}
-	req.Limit = &limit
+	req.limit = limit
 	// sinceDate / untilDate を aidx prefix に正規化して cursor 値に落とす
 	// (#1732、upstream makePaginationQuery 互換)。
 	// **列に入らないカーソルもここで ok=false にする (#3025)。**
-	cursorSince, cursorUntil, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	cursorSince, cursorUntil, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return req, false
 	}

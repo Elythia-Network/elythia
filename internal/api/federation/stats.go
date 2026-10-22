@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/labstack/echo/v4"
@@ -17,12 +18,12 @@ func (h *Handler) Stats(c echo.Context) error {
 	// admin/overview は GET で叩いてくるので `query` タグも必要
 	// (#421 Devin review: charts.Request と同じ pattern)。
 	var req struct {
-		Limit *int `json:"limit" query:"limit"`
+		Limit *jsnum.Int `json:"limit" query:"limit"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
