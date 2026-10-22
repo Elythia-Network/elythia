@@ -22,9 +22,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/elythia-network/elythia/internal/activitypub"
+	corecaptcha "github.com/elythia-network/elythia/internal/core/captcha"
 	"github.com/elythia-network/elythia/internal/core/fedrule"
 	corerelay "github.com/elythia-network/elythia/internal/core/relay"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // recordingCache records the order in which DropLocal is called.
@@ -133,9 +135,11 @@ func TestNewServer_InvalidCacheFailsTheConstruction(t *testing.T) {
 }
 
 // metaCachesInOrder are the caches of the meta line (#3721), in the order
-// they have to be dropped: the meta row first, then what is built from it.
-// It is the lower bound of what TestCaches_MetaLine inspects.
-var metaCachesInOrder = []string{"cachedMeta", "metaResponse", "nodeinfo"}
+// they have to be dropped: the meta row first, then what is built from it
+// (the captcha providers and the reaction buffering switch are read again
+// from it, #3777). It is the lower bound of what TestCaches_MetaLine
+// inspects.
+var metaCachesInOrder = []string{"cachedMeta", "metaResponse", "nodeinfo", "captcha", "reactionBuffering"}
 
 // TestCaches_MetaLine checks on a whole server that the meta line is listed in
 // drop order, and that dropping the list makes /api/meta and /nodeinfo read
@@ -991,4 +995,80 @@ func TestCaches_ExternalLine(t *testing.T) {
 	assert.Equal(t, "Feed 2", rss(), "the feeds were not dropped")
 	assert.NotEqual(t, before, badge(), "the twemoji badges were not dropped")
 	assert.Empty(t, published("caches-external-line"), "dropping the caches told the other processes")
+}
+
+// reloadedOnDrop are the items of the cache list that read their values again
+// instead of dropping them (#3777).
+var reloadedOnDrop = []string{"captcha", "reactionBuffering"}
+
+// TestCaches_ReloadedFromMeta checks on a whole server that the captcha
+// providers and the reaction buffering switch are listed as items that read
+// meta again, and that after the meta row changes in the database, dropping
+// the list makes captcha verify with the new providers and reactions follow
+// the new switch, without telling the other processes (#3777).
+//
+// 読み直しの項目はfuncの型なので、サーバーの使う値と同じかは比べられない。
+// 捨てた後に、サーバーの使う値(captchaのserviceとリアクションのwriter)が
+// 新しい設定で動くことで確かめる。
+func TestCaches_ReloadedFromMeta(t *testing.T) {
+	if serverIntegrationDB == nil {
+		t.Skip("PostgreSQL unavailable")
+	}
+	// testcaptchaは無効で起動させる(起動時の写しが前提の状態になるように)。
+	// metaの行が無いschema(このテストだけを流したとき)でも読めるよう、ハーネスと
+	// 同じく先に行を作る。
+	db := serverIntegrationDB
+	require.NoError(t, repository.NewMetaRepository(db).EnsureInitial("meta-runtime-meta"))
+	var testcaptcha bool
+	require.NoError(t, db.Model(&model.Meta{}).Select(`"enableTestcaptcha"`).Take(&testcaptcha).Error)
+	t.Cleanup(func() {
+		require.NoError(t, db.Model(&model.Meta{}).Where("1 = 1").Update("enableTestcaptcha", testcaptcha).Error)
+	})
+	require.NoError(t, db.Model(&model.Meta{}).Where("1 = 1").Update("enableTestcaptcha", false).Error)
+
+	h := newMetaRuntimeHarness(t)
+	srv := h.srv
+	svc := srv.crossProcessCaches.captcha
+	require.NotNil(t, svc)
+	writer := srv.reactionCountWriter
+	require.NotNil(t, writer)
+
+	var listed []string
+	for _, p := range srv.caches.parts {
+		if _, ok := p.cache.(reloadOnDrop); ok {
+			listed = append(listed, p.name)
+			assert.Equal(t, cacheFromDB, p.origin, "cache %q", p.name)
+		}
+	}
+	require.Equal(t, reloadedOnDrop, listed, "the items read again from meta are not listed")
+	require.False(t, svc.IsEnabled(), "前提: captchaは無効")
+	require.False(t, writer.Buffering(), "前提: バッファは無効")
+
+	// 他のプロセスが書いたときと違い、通知は送らない。このプロセスの写しは古いまま
+	// 残る。
+	require.NoError(t, h.db.Model(&model.Meta{}).Where("1 = 1").Updates(map[string]any{
+		"enableTestcaptcha": true, "enableReactionsBuffering": true,
+	}).Error)
+	require.NoError(t, svc.Verify(context.Background(), corecaptcha.CaptchaTokens{}), "前提: 捨てるまでは前のproviderの組で検証する")
+	require.False(t, writer.Buffering(), "前提: 捨てるまでは前の切り替えのまま")
+
+	published := watchInternal(t, h)
+
+	srv.caches.dropAll()
+
+	assert.True(t, svc.IsEnabled(), "the captcha providers were not read again")
+	assert.Error(t, svc.Verify(context.Background(), corecaptcha.CaptchaTokens{}), "captcha does not verify with the new providers")
+	assert.NoError(t, svc.Verify(context.Background(), corecaptcha.CaptchaTokens{Testcaptcha: "testcaptcha-passed"}))
+	assert.True(t, writer.Buffering(), "the reaction buffering switch was not read again")
+	assert.Empty(t, published("caches-reloaded-from-meta"), "dropping the caches told the other processes")
+}
+
+// TestReloadOnDrop_DropLocalReads checks that DropLocal of a reload item calls
+// the reload function, every time.
+func TestReloadOnDrop_DropLocalReads(t *testing.T) {
+	calls := 0
+	r := reloadOnDrop(func() { calls++ })
+	r.DropLocal()
+	r.DropLocal()
+	assert.Equal(t, 2, calls)
 }

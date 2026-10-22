@@ -2700,6 +2700,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	s.addCache("cachedMeta", cacheFromDB, cachedMeta)
 	s.addCache("metaResponse", cacheFromDB, metaHandler)
 	s.addCache("nodeinfo", cacheFromDB, nodeinfoHandler)
+	// captchaとリアクションの切り替えはmetaから読み直す項目として登録する(#3777)。
+	// 捨てて空にするとcaptchaが無効と同じになるので、捨てずに読み直す。hookと購読と
+	// 同じく、meta行を捨てた後に読み直す。
+	s.addCache("captcha", cacheFromDB, reloadOnDrop(reloadCaptcha))
+	s.addCache("reactionBuffering", cacheFromDB, reloadOnDrop(reloadReactionBuffering))
 	cachedMeta.SetInvalidationHook(func() {
 		metaHandler.InvalidateResponseCache()
 		// /nodeinfo の応答 (10 分) も meta から組むので、同じ順序で捨てる (#3663)。
@@ -2925,7 +2930,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		instanceSigner: instanceSigner, fetcherSigner: apFetcher.SignerProvider(),
 		antennas: cachedAntenna, pushSubscriptions: webPushCache, notes: notesHandler,
 		notePublisher: notePublisher, driveUsage: driveUsage, dbHealth: dbHealth, stats: statsHandler,
-		ipLog: ipLogService,
+		ipLog: ipLogService, captcha: captchaSvc,
 	}
 
 	userCacheLink := cachebus.ConnectUsers(s.userCache, internalPubSub, idGen.Generate(time.Now()))
@@ -4760,4 +4765,7 @@ type crossProcessCaches struct {
 	fetchRSS     *apifetchrss.Handler
 	pluginPeers  *nodeInfoPeerLister
 	twemojiBadge *twemojiBadgeHandler
+	// captchaは一覧の読み直しの項目(#3777)が読み直すproviderの組。キャッシュの
+	// 一覧のテストが、捨てた後に新しい設定で検証することを見るため。
+	captcha *corecaptcha.Service
 }
