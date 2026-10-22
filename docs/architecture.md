@@ -2264,8 +2264,11 @@ setupRoutes()
 - **`/api/emojis`の符号化済みの応答(`api/emojis.Handler.encoded`、#3593)も登録しない。** 使うたびに、
   `emojis`(`CachedEmojiRepository.ListLocal`)が返した一覧と同じsliceかを比べ、違えば作り直すので、
   `emojis`を捨てれば追従する。これまでどこにも記録が無かったので、下の検査の除外に理由付きで載せた
-- **`meta`のsetupの印(`setupLatch`、`internal/api/meta`)は段階(5)の範囲。** ローカルの利用者を一度でも
-  見たことを覚えるパッケージの変数で、世代をまたいで残る。グローバルを依存として渡す形に寄せるときに扱う
+- **`meta`のsetupの印(`setupLatch`、`internal/api/meta`)は段階(6)の範囲。** ローカルの利用者を一度でも
+  見たことを覚えるパッケージの変数で、世代をまたいで残る。利用者の数え方は#3782で、組み立てで作る
+  `meta.SetupDetector`として`/api/meta`とfrontendのshellの4つの経路(通常・OAuthの同意画面・permalinkの
+  SSR・埋め込み)へ渡す形にした。印まで世代ごとにすると、DBを差し替えたときに数え直すようになり動きが
+  変わるので、DBを差し替える段階(6)で扱う
 - **ストリームの接続ごとの写しは、`dropAll`の後も接続が続く間は残る。** `stream.Connection`のフォロー・
   ハードミュート・ミュートとブロック・policyの写し、リストのチャンネルのメンバーの設定、チャットの部屋を
   見られるかの確認(期限まで)は、接続やチャンネルの開始のときにDBから読む。一覧には入れず、下の検査では
@@ -2281,12 +2284,12 @@ setupRoutes()
   前者は「キャッシュなら`DropLocal()`を持つか、理由がある」を、後者は「`DropLocal()`を持つなら一覧に
   ある」を守る。走査は`internal/entitycompat`の非テストのコード(`ScanCacheTypes`)に置き、両方から呼ぶ。
   型の一覧を書き写すと、片方だけ直してずれるため
-- 表の数(#3780の時点で142行): `dropLocal`が31、持ち主の`DropLocal()`が捨てるか、その後の次の読み込みで
+- 表の数(#3782の時点で141行): `dropLocal`が31、持ち主の`DropLocal()`が捨てるか、その後の次の読み込みで
   置き換わる`droppedByOwner`が8
   (`metaResponseCache`・`missingExtraKeys`・`policyProviderRuntime`・`previewCache`・`emojiKeyCache`・
-  `relationKindCache`・`tokenCache`・`fedrule.compiledRule`)。除外は103で、`notCache`(値の写しを持たない。
+  `relationKindCache`・`tokenCache`・`fedrule.compiledRule`)。除外は102で、`notCache`(値の写しを持たない。
   lock・singleflight・世代の起動と停止・数え・ジョブキューの接続・コードから1回だけ組む値)が58、`processGlobal`(世代をまたぐ
-  パッケージの状態。段階(5))が14、`writeBuffer`(書き込みや他のプロセスへの通知の保留)が7、
+  パッケージの状態。`setupLatch`を除き段階(5))が13、`writeBuffer`(書き込みや他のプロセスへの通知の保留)が7、
   `perConnection`が6、`throttle`(間引き)が5、`contentKeyed`(元の内容を鍵に含める)が5、`perCall`が4、
   `followsRegistered`が2(`emojis.Handler`・`coredrive.MetaStorage`)、`reloadOnDrop`が2(`captcha.Service`・
   `reaction.SwitchableWriter`)。`Resolver`から届く`mentionFetchGuard`・`resolveGroup`・`resolveWaits`などは、
