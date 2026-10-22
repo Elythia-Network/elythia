@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
 	"github.com/elythia-network/elythia/internal/entity"
@@ -114,14 +115,14 @@ func (h *Handler) logAnnouncementAction(c echo.Context, globalType, userType mod
 // List handles POST /api/announcements.
 func (h *Handler) List(c echo.Context) error {
 	var req struct {
-		Limit     *int   `json:"limit"`
-		Offset    int    `json:"offset"`
-		SinceID   string `json:"sinceId"`
-		UntilID   string `json:"untilId"`
-		SinceDate *int64 `json:"sinceDate"`
-		UntilDate *int64 `json:"untilDate"`
-		IsActive  *bool  `json:"isActive"`
+		Limit     *jsnum.Int `json:"limit"`
+		SinceID   string     `json:"sinceId"`
+		UntilID   string     `json:"untilId"`
+		SinceDate *jsnum.Int `json:"sinceDate"`
+		UntilDate *jsnum.Int `json:"untilDate"`
+		IsActive  *bool      `json:"isActive"`
 	}
+	// 本家のparamDefにoffsetは無いので読まない(#3766)。
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "Invalid parameters.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
@@ -130,7 +131,7 @@ func (h *Handler) List(c echo.Context) error {
 		activeOnly = *req.IsActive
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1173)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -140,15 +141,15 @@ func (h *Handler) List(c echo.Context) error {
 	// 漏らさない。
 	user := middleware.GetUser(c)
 	var items []*model.Announcement
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
 	var err error
 	if user != nil {
-		items, err = h.repo.ListForUser(user.ID, activeOnly, limit, req.Offset, sinceID, untilID)
+		items, err = h.repo.ListForUser(user.ID, activeOnly, limit, sinceID, untilID)
 	} else {
-		items, err = h.repo.ListGlobal(activeOnly, limit, req.Offset, sinceID, untilID)
+		items, err = h.repo.ListGlobal(activeOnly, limit, sinceID, untilID)
 	}
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))

@@ -52,25 +52,28 @@ func (h *Handler) invalidate(ctx context.Context, userID string) {
 func (h *Handler) Register(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
-		Endpoint        string `json:"endpoint"`
-		Auth            string `json:"auth"`
-		PublicKey       string `json:"publickey"`
-		SendReadMessage bool   `json:"sendReadMessage"`
+		Endpoint        *string `json:"endpoint"`
+		Auth            *string `json:"auth"`
+		PublicKey       *string `json:"publickey"`
+		SendReadMessage bool    `json:"sendReadMessage"`
 	}
-	if err := c.Bind(&req); err != nil || req.Endpoint == "" || req.Auth == "" || req.PublicKey == "" {
+	// 空文字は本家と同じく拒否しない(#3766)。空のendpointは下の
+	// IsValidEndpointがINVALID_ENDPOINTで断り、空のauth / publickeyは登録する。
+	if err := c.Bind(&req); err != nil || req.Endpoint == nil || req.Auth == nil || req.PublicKey == nil {
 		return apierr.JSONInvalidParam(c)
 	}
+	endpoint, auth, publicKey := *req.Endpoint, *req.Auth, *req.PublicKey
 	// **列に入らない値はここで断る (#3025)。** 下の重複チェックは
 	// `IsNotFound` を「重複ではない」と読んで新規登録へ落ちるので、通すと
 	// INSERT が SQLSTATE 22021 で落ちて 500 になる。**書き込みも必ず失敗する値**
 	// なので「見つからない」に丸めてはいけない数少ない形。
-	if !colfit.Storable(req.Endpoint) || !colfit.Storable(req.Auth) || !colfit.Storable(req.PublicKey) {
+	if !colfit.Storable(endpoint) || !colfit.Storable(auth) || !colfit.Storable(publicKey) {
 		return apierr.JSONInvalidParam(c)
 	}
 	// 配送先として使える endpoint だけを受け付ける (本家 sw/register の
 	// invalidEndpoint と同じ code / id / 400)。本家と同じく既存の購読の確認より
 	// 前に断るので、不正な endpoint が already-subscribed で返ることもない。
-	if !webpush.IsValidEndpoint(req.Endpoint) {
+	if !webpush.IsValidEndpoint(endpoint) {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_ENDPOINT", "Invalid push endpoint.", "4432adbe-17c0-4f9f-b43c-9ceb2f8910fe"))
 	}
 
@@ -84,7 +87,7 @@ func (h *Handler) Register(c echo.Context) error {
 	// 再 subscribe は match しないため、下の新規登録に落ちて最新キーで insert される。
 	// 2-tuple (userId, endpoint) match だと stale キーのまま already-subscribed を
 	// 返して Web Push 配信が無言で壊れていた (#1775)。
-	existing, err := h.repo.FindByUserEndpointAuthKey(user.ID, req.Endpoint, req.Auth, req.PublicKey)
+	existing, err := h.repo.FindByUserEndpointAuthKey(user.ID, endpoint, auth, publicKey)
 	// **DB 障害で重複チェックを skip しない** (#2792)。`err == nil` だけを見ると、
 	// 接続断のときに下の新規登録へ落ちる。`sw_subscription` に unique index は
 	// 無いので**重複行が恒久的に残り、その端末へ web push が二重配信される**。
@@ -105,9 +108,9 @@ func (h *Handler) Register(c echo.Context) error {
 	sub := &model.SwSubscription{
 		ID:              h.idGen.Generate(time.Now()),
 		UserID:          user.ID,
-		Endpoint:        req.Endpoint,
-		Auth:            req.Auth,
-		PublicKey:       req.PublicKey,
+		Endpoint:        endpoint,
+		Auth:            auth,
+		PublicKey:       publicKey,
 		SendReadMessage: req.SendReadMessage,
 	}
 	if err := h.repo.Create(sub); err != nil {
@@ -121,7 +124,7 @@ func (h *Handler) Register(c echo.Context) error {
 		"state":           "subscribed",
 		"key":             swPublicKey,
 		"userId":          user.ID,
-		"endpoint":        req.Endpoint,
+		"endpoint":        endpoint,
 		"sendReadMessage": req.SendReadMessage,
 	})
 }
@@ -130,13 +133,14 @@ func (h *Handler) Register(c echo.Context) error {
 func (h *Handler) ShowRegistration(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
-		Endpoint string `json:"endpoint"`
+		Endpoint *string `json:"endpoint"`
 	}
-	if err := c.Bind(&req); err != nil || req.Endpoint == "" {
+	// 空文字は本家と同じく、見つからない購読として扱う(#3766)。
+	if err := c.Bind(&req); err != nil || req.Endpoint == nil {
 		return apierr.JSONInvalidParam(c)
 	}
 
-	sub, err := h.repo.FindByUserAndEndpoint(user.ID, req.Endpoint)
+	sub, err := h.repo.FindByUserAndEndpoint(user.ID, *req.Endpoint)
 	if err != nil {
 		// upstream Misskey TS は handler が null を return すると Endpoint base
 		// が 204 No Content に変換する。mk-go は明示的に 200 + JSON null を
@@ -147,7 +151,7 @@ func (h *Handler) ShowRegistration(c echo.Context) error {
 			return c.NoContent(http.StatusNoContent)
 		}
 		slog.Error("sw/show-registration: FindByUserAndEndpoint failed",
-			"userId", user.ID, "endpoint", req.Endpoint, "err", err)
+			"userId", user.ID, "endpoint", *req.Endpoint, "err", err)
 		return apierr.JSONInternalError(c)
 	}
 
@@ -162,14 +166,15 @@ func (h *Handler) ShowRegistration(c echo.Context) error {
 func (h *Handler) UpdateRegistration(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
-		Endpoint        string `json:"endpoint"`
-		SendReadMessage *bool  `json:"sendReadMessage"`
+		Endpoint        *string `json:"endpoint"`
+		SendReadMessage *bool   `json:"sendReadMessage"`
 	}
-	if err := c.Bind(&req); err != nil || req.Endpoint == "" {
+	// 空文字は本家と同じく、見つからない購読として扱う(#3766)。
+	if err := c.Bind(&req); err != nil || req.Endpoint == nil {
 		return apierr.JSONInvalidParam(c)
 	}
 
-	sub, err := h.repo.FindByUserAndEndpoint(user.ID, req.Endpoint)
+	sub, err := h.repo.FindByUserAndEndpoint(user.ID, *req.Endpoint)
 	if err != nil {
 		// gorm.ErrRecordNotFound は 404 (= upstream / 旧実装と一致)、
 		// それ以外 (DB connection error 等) は 500 + slog で観測性確保
@@ -178,7 +183,7 @@ func (h *Handler) UpdateRegistration(c echo.Context) error {
 			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_REGISTRATION", "No such registration.", "b09d8066-8064-5613-efb6-0e963b21d012"))
 		}
 		slog.Error("sw/update-registration: FindByUserAndEndpoint failed",
-			"userId", user.ID, "endpoint", req.Endpoint, "err", err)
+			"userId", user.ID, "endpoint", *req.Endpoint, "err", err)
 		return apierr.JSONInternalError(c)
 	}
 

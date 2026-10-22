@@ -620,11 +620,11 @@ func (f *failingListAnnouncementRepo) List(_ bool, _, _ int, _, _ string) ([]*mo
 	return nil, assert.AnError
 }
 
-func (f *failingListAnnouncementRepo) ListGlobal(_ bool, _, _ int, _, _ string) ([]*model.Announcement, error) {
+func (f *failingListAnnouncementRepo) ListGlobal(_ bool, _ int, _, _ string) ([]*model.Announcement, error) {
 	return nil, assert.AnError
 }
 
-func (f *failingListAnnouncementRepo) ListForUser(_ string, _ bool, _, _ int, _, _ string) ([]*model.Announcement, error) {
+func (f *failingListAnnouncementRepo) ListForUser(_ string, _ bool, _ int, _, _ string) ([]*model.Announcement, error) {
 	return nil, assert.AnError
 }
 
@@ -828,6 +828,56 @@ func TestAdminCreate_RequiresImageURL(t *testing.T) {
 			h, _ := newTestHandler(t)
 			rec := doPost(h.AdminCreate, tc.body, nil)
 			assert.Equal(t, tc.want, rec.Code)
+		})
+	}
+}
+
+// TestList_AcceptsIntegerValuedFractions pins that limit, sinceDate and
+// untilDate accept integer-valued fractions such as 2.0 and 1.7172e12, which
+// upstream's ajv accepts as integers (#3766).
+func TestList_AcceptsIntegerValuedFractions(t *testing.T) {
+	h, repo := newTestHandler(t)
+	idGen, _ := id.NewGenerator("aidx")
+	for _, d := range []time.Time{
+		time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2024, 12, 1, 0, 0, 0, 0, time.UTC),
+	} {
+		aid := idGen.Generate(d)
+		repo.Items[aid] = &model.Announcement{ID: aid, Title: "t", Text: "t", IsActive: true}
+	}
+	// 1.7172e12 は 2024-05-31T23:20:00Z。1月より後、6月より前。
+	for body, want := range map[string]int{
+		`{"limit":2.0}`:           2,
+		`{"sinceDate":1.7172e12}`: 2,
+		`{"untilDate":1.7172e12}`: 1,
+	} {
+		t.Run(body, func(t *testing.T) {
+			rec := doPost(h.List, body, nil)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			var resp []map[string]any
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+			assert.Len(t, resp, want)
+		})
+	}
+}
+
+// TestList_IgnoresOffset pins that offset, which upstream's paramDef does
+// not have, is neither read nor validated (#3766).
+func TestList_IgnoresOffset(t *testing.T) {
+	h, repo := newTestHandler(t)
+	idGen, _ := id.NewGenerator("aidx")
+	for i := range 3 {
+		aid := idGen.Generate(time.Date(2024, time.Month(i+1), 1, 0, 0, 0, 0, time.UTC))
+		repo.Items[aid] = &model.Announcement{ID: aid, Title: "t", Text: "t", IsActive: true}
+	}
+	for _, body := range []string{`{"offset":2}`, `{"offset":"x"}`} {
+		t.Run(body, func(t *testing.T) {
+			rec := doPost(h.List, body, nil)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			var resp []map[string]any
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+			assert.Len(t, resp, 3)
 		})
 	}
 }

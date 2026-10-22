@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -642,4 +643,44 @@ func TestRegister_InvalidEndpointCheckedBeforeExisting(t *testing.T) {
 	}
 	rec := post(h.Register, `{"endpoint":"http://push.example/1","auth":"a1","publickey":"pk1"}`, &model.User{ID: "u1"})
 	assertInvalidEndpoint(t, rec)
+}
+
+// TestEmptyStringsAreNotRejected pins that an empty endpoint, auth or
+// publickey is handled as upstream does, not rejected as a missing param
+// (#3766): register stores empty keys and answers INVALID_ENDPOINT for an
+// empty endpoint, and the lookups answer as for an unknown subscription.
+func TestEmptyStringsAreNotRejected(t *testing.T) {
+	user := &model.User{ID: "u1"}
+	errCode := func(t *testing.T, rec *httptest.ResponseRecorder) string {
+		t.Helper()
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
+		e, _ := out["error"].(map[string]any)
+		return fmt.Sprint(e["code"])
+	}
+
+	t.Run("register empty auth and publickey", func(t *testing.T) {
+		h, repo := newTestHandler()
+		rec := post(h.Register, `{"endpoint":"https://push.example/1","auth":"","publickey":""}`, user)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		assert.Len(t, repo.subs, 1)
+	})
+	t.Run("register empty endpoint", func(t *testing.T) {
+		h, repo := newTestHandler()
+		rec := post(h.Register, `{"endpoint":"","auth":"a","publickey":"p"}`, user)
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Equal(t, "INVALID_ENDPOINT", errCode(t, rec))
+		assert.Empty(t, repo.subs)
+	})
+	t.Run("show-registration", func(t *testing.T) {
+		h, _ := newTestHandler()
+		rec := post(h.ShowRegistration, `{"endpoint":""}`, user)
+		assert.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+	})
+	t.Run("update-registration", func(t *testing.T) {
+		h, _ := newTestHandler()
+		rec := post(h.UpdateRegistration, `{"endpoint":""}`, user)
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Equal(t, "NO_SUCH_REGISTRATION", errCode(t, rec))
+	})
 }
