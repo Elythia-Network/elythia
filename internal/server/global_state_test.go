@@ -18,7 +18,6 @@ import (
 	"github.com/elythia-network/elythia/internal/api/meself"
 	apimeta "github.com/elythia-network/elythia/internal/api/meta"
 	"github.com/elythia-network/elythia/internal/api/notehide"
-	corenote "github.com/elythia-network/elythia/internal/core/note"
 	coretwofactor "github.com/elythia-network/elythia/internal/core/twofactor"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/frontendutil"
@@ -63,8 +62,6 @@ func restoreProcessGlobals(t *testing.T) {
 		// counter だけ外しても前のテストの観測が残る。
 		apimeta.SetLocalUserCounter(nil)
 		apimeta.ResetSetupLatchForTest()
-		// cfg 由来。0 を渡すと core/note の既定に戻る。
-		corenote.SetHookConcurrency(0)
 		frontendutil.ResetLoaderCacheForTest()
 	})
 }
@@ -130,7 +127,6 @@ func TestProcessGlobalsAreRestored(t *testing.T) {
 	found, _ := processGlobalSetters(t)
 
 	want := []string{
-		"corenote.SetHookConcurrency",
 		"coretwofactor.SetTestMode",
 		"entity.SetAvatarDecorationLookup",
 		"entity.SetCanChatLookup",
