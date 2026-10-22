@@ -115,6 +115,8 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		require.NoError(t, db.Exec(`DELETE FROM flash WHERE "userId" = ?`, userID).Error)
 		require.NoError(t, db.Exec(`DELETE FROM channel WHERE "userId" = ?`, userID).Error)
 		require.NoError(t, db.Exec(`DELETE FROM registration_ticket WHERE "createdById" = ?`, userID).Error)
+		require.NoError(t, db.Exec(`DELETE FROM access_token WHERE "userId" = ?`, userID).Error)
+		require.NoError(t, db.Exec(`DELETE FROM app WHERE "userId" = ?`, userID).Error)
 		require.NoError(t, db.Where("id = ?", userID).Delete(&model.User{}).Error)
 	}
 	cleanup()
