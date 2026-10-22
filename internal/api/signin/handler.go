@@ -148,7 +148,8 @@ func (h *Handler) SetCaptcha(svc *captcha.Service) {
 }
 
 // SetTestMode enables the captcha bypass (本家 `process.env.NODE_ENV !== 'test'`
-// 相当)。signup 側の同名 setter と対にして配線する。
+// 相当) and the TOTP bypass of twofactor.ValidateWithReplay. signup 側の同名
+// setter と対にして配線する。
 func (h *Handler) SetTestMode(v bool) {
 	h.testMode = v
 }
@@ -493,7 +494,7 @@ func (h *Handler) SigninFlow(c echo.Context) error {
 		// ValidateWithReplay は RFC 6238 §5.2 に従い同コードの 2 回目以降
 		// (acceptance window 内) を拒否する。**upstream も 2026.6.0 で同等の
 		// 機構を持つ** (`UserAuthService.validateOtp`)。mk-go が先行実装したもの。
-		if profile.TwoFactorSecret != nil && twofactor.ValidateWithReplay(c.Request().Context(), h.totpReplayGuard, user.ID, *req.Token, *profile.TwoFactorSecret) {
+		if profile.TwoFactorSecret != nil && twofactor.ValidateWithReplay(c.Request().Context(), h.totpReplayGuard, user.ID, *req.Token, *profile.TwoFactorSecret, h.testMode) {
 			return h.ok(c, user)
 		}
 		if _, berr := twofactor.ConsumeBackupCode([]string(profile.TwoFactorBackupSecret), *req.Token); berr == nil {

@@ -2021,7 +2021,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	iHandler.SetPasswordFailureGuard(passwordFailureGuard)
 	iHandler.SetPasswordHasher(s.passwordHasher)
 	// upstream UserAuthService と同じテスト用バイパス。testMode 以外では無効。
-	coretwofactor.SetTestMode(s.config.TestMode)
+	iHandler.SetTestMode(s.config.TestMode)
 	iHandler.SetRegistryRepo(registryRepo)
 	iHandler.SetMetaRepo(metaRepo)
 	iHandler.SetServerURL(s.config.URL)

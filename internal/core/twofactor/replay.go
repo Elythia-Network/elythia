@@ -5,20 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"sync/atomic"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 )
-
-// testMode mirrors config.testMode. Router が起動時に一度だけ設定する。
-var testMode atomic.Bool
-
-// SetTestMode enables the upstream-compatible TOTP bypass for test runs.
-// 本番 (testMode=false) では何の効果も無い。
-func SetTestMode(v bool) {
-	testMode.Store(v)
-}
 
 // bypassForTest reports whether TOTP validation should be skipped entirely.
 //
@@ -29,8 +19,11 @@ func SetTestMode(v bool) {
 // replay 保護そのものを検証するテストだけが同 env に '1' を立てる。
 //
 // 環境変数は毎回読む。e2e ハーネスがテストの途中で値を差し替えるため。
-func bypassForTest() bool {
-	return testMode.Load() && os.Getenv("MISSKEY_TEST_CHECK_DUPLICATED_TOTP") != "1"
+//
+// testModeは呼び出し元(api/signinとapi/iのhandler)が設定から受け取って渡す
+// (#3780)。以前はパッケージの変数で、Routerが起動のたびに書き換えていた。
+func bypassForTest(testMode bool) bool {
+	return testMode && os.Getenv("MISSKEY_TEST_CHECK_DUPLICATED_TOTP") != "1"
 }
 
 // ReplayGuard records previously accepted TOTP codes so the same code
@@ -192,11 +185,15 @@ func ReserveOnce(ctx context.Context, guard ReplayGuard, userID, key string) boo
 // window. A nil guard disables replay protection (returns Validate-only
 // semantics) — production callers should always pass a non-nil guard.
 //
+// testMode is config.testMode. When it is true and the environment variable
+// MISSKEY_TEST_CHECK_DUPLICATED_TOTP is not "1", any code is accepted without
+// validation or replay protection, as upstream does in its test runs.
+//
 // The caller is expected to translate a false return into the same
 // "invalid token" response shape it already returns for ordinary TOTP
 // failures, so the frontend / client behaviour is unchanged.
-func ValidateWithReplay(ctx context.Context, guard ReplayGuard, userID, code, secret string) bool {
-	if bypassForTest() {
+func ValidateWithReplay(ctx context.Context, guard ReplayGuard, userID, code, secret string, testMode bool) bool {
+	if bypassForTest(testMode) {
 		return true
 	}
 	if !Validate(code, secret) {

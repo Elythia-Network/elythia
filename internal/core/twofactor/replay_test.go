@@ -117,9 +117,9 @@ func TestValidateWithReplay_NilGuard_BehavesLikeValidate(t *testing.T) {
 	require.NoError(t, err)
 
 	// nil guard でも valid code は通る
-	assert.True(t, ValidateWithReplay(context.Background(), nil, "u1", code, secret))
+	assert.True(t, ValidateWithReplay(context.Background(), nil, "u1", code, secret, false))
 	// invalid code は通らない
-	assert.False(t, ValidateWithReplay(context.Background(), nil, "u1", "000000", secret))
+	assert.False(t, ValidateWithReplay(context.Background(), nil, "u1", "000000", secret, false))
 }
 
 func TestValidateWithReplay_RejectsReplayWithRedisGuard(t *testing.T) {
@@ -132,9 +132,9 @@ func TestValidateWithReplay_RejectsReplayWithRedisGuard(t *testing.T) {
 	require.NoError(t, err)
 	ctx := context.Background()
 
-	assert.True(t, ValidateWithReplay(ctx, g, "u1", code, secret), "first use must succeed")
-	assert.False(t, ValidateWithReplay(ctx, g, "u1", code, secret), "second use of same code must be refused as replay")
-	assert.False(t, ValidateWithReplay(ctx, g, "u1", code, secret), "subsequent retries are also refused")
+	assert.True(t, ValidateWithReplay(ctx, g, "u1", code, secret, false), "first use must succeed")
+	assert.False(t, ValidateWithReplay(ctx, g, "u1", code, secret, false), "second use of same code must be refused as replay")
+	assert.False(t, ValidateWithReplay(ctx, g, "u1", code, secret, false), "subsequent retries are also refused")
 }
 
 func TestValidateWithReplay_InvalidCode_DoesNotConsumeGuardSlot(t *testing.T) {
@@ -146,7 +146,7 @@ func TestValidateWithReplay_InvalidCode_DoesNotConsumeGuardSlot(t *testing.T) {
 	ctx := context.Background()
 
 	// 構造的に invalid なコードを送っても Redis には何も書かない
-	assert.False(t, ValidateWithReplay(ctx, g, "u1", "000000", secret))
+	assert.False(t, ValidateWithReplay(ctx, g, "u1", "000000", secret, false))
 	assert.Empty(t, mr.Keys(), "failed validation must not consume the replay slot")
 }
 
@@ -160,9 +160,9 @@ func TestValidateWithReplay_AnotherUserSameCode_AllowedIndependently(t *testing.
 	require.NoError(t, err)
 	ctx := context.Background()
 
-	assert.True(t, ValidateWithReplay(ctx, g, "alice", code, secret))
+	assert.True(t, ValidateWithReplay(ctx, g, "alice", code, secret, false))
 	// 同じ secret を共有することは通常ないが、guard の隔離性は user 単位
-	assert.True(t, ValidateWithReplay(ctx, g, "bob", code, secret))
+	assert.True(t, ValidateWithReplay(ctx, g, "bob", code, secret, false))
 }
 
 // failingGuard returns an error from MarkUsed, simulating Redis outage.
@@ -178,7 +178,7 @@ func TestValidateWithReplay_GuardError_FailsOpen(t *testing.T) {
 	require.NoError(t, err)
 	code, err := totp.GenerateCode(secret, time.Now())
 	require.NoError(t, err)
-	assert.True(t, ValidateWithReplay(context.Background(), failingGuard{}, "u1", code, secret))
+	assert.True(t, ValidateWithReplay(context.Background(), failingGuard{}, "u1", code, secret, false))
 }
 
 // --- test bypass (upstream UserAuthService.validateOtp 互換) ---
@@ -195,13 +195,11 @@ func TestValidateWithReplay_TestModeBypass(t *testing.T) {
 	require.NoError(t, err)
 	ctx := context.Background()
 
-	SetTestMode(true)
-	t.Cleanup(func() { SetTestMode(false) })
 	t.Setenv("MISSKEY_TEST_CHECK_DUPLICATED_TOTP", "")
 
-	assert.True(t, ValidateWithReplay(ctx, g, "u1", code, secret))
-	assert.True(t, ValidateWithReplay(ctx, g, "u1", code, secret), "bypass 中は同じコードを何度でも受け付ける")
-	assert.True(t, ValidateWithReplay(ctx, g, "u1", "000000", secret), "bypass 中は不正コードも通る (upstream と同じ)")
+	assert.True(t, ValidateWithReplay(ctx, g, "u1", code, secret, true))
+	assert.True(t, ValidateWithReplay(ctx, g, "u1", code, secret, true), "bypass 中は同じコードを何度でも受け付ける")
+	assert.True(t, ValidateWithReplay(ctx, g, "u1", "000000", secret, true), "bypass 中は不正コードも通る (upstream と同じ)")
 }
 
 // 同 env に "1" が立っているときは bypass せず、replay 保護が効く。
@@ -214,12 +212,11 @@ func TestValidateWithReplay_TestModeRespectsCheckDuplicatedEnv(t *testing.T) {
 	require.NoError(t, err)
 	ctx := context.Background()
 
-	SetTestMode(true)
-	t.Cleanup(func() { SetTestMode(false) })
 	t.Setenv("MISSKEY_TEST_CHECK_DUPLICATED_TOTP", "1")
 
-	assert.True(t, ValidateWithReplay(ctx, g, "u1", code, secret))
-	assert.False(t, ValidateWithReplay(ctx, g, "u1", code, secret), "env=1 なら replay を拒否する")
+	assert.True(t, ValidateWithReplay(ctx, g, "u1", code, secret, true))
+	assert.False(t, ValidateWithReplay(ctx, g, "u1", code, secret, true), "env=1 なら replay を拒否する")
+	assert.False(t, ValidateWithReplay(ctx, g, "u1", "000000", secret, true), "env=1 なら不正コードを拒否する")
 }
 
 // 本番 (testMode=false) では env の値に関係なく bypass しない。
@@ -232,12 +229,11 @@ func TestValidateWithReplay_ProductionIgnoresEnv(t *testing.T) {
 	require.NoError(t, err)
 	ctx := context.Background()
 
-	SetTestMode(false)
 	t.Setenv("MISSKEY_TEST_CHECK_DUPLICATED_TOTP", "")
 
-	assert.True(t, ValidateWithReplay(ctx, g, "u1", code, secret))
-	assert.False(t, ValidateWithReplay(ctx, g, "u1", code, secret), "本番は常に replay 保護が効く")
-	assert.False(t, ValidateWithReplay(ctx, g, "u1", "000000", secret), "本番は不正コードを拒否する")
+	assert.True(t, ValidateWithReplay(ctx, g, "u1", code, secret, false))
+	assert.False(t, ValidateWithReplay(ctx, g, "u1", code, secret, false), "本番は常に replay 保護が効く")
+	assert.False(t, ValidateWithReplay(ctx, g, "u1", "000000", secret, false), "本番は不正コードを拒否する")
 }
 
 // Release は記録を消して同じコードを再び受け付けられるようにする (#2852)。

@@ -18,7 +18,6 @@ import (
 	"github.com/elythia-network/elythia/internal/api/meself"
 	apimeta "github.com/elythia-network/elythia/internal/api/meta"
 	"github.com/elythia-network/elythia/internal/api/notehide"
-	coretwofactor "github.com/elythia-network/elythia/internal/core/twofactor"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/frontendutil"
 )
@@ -42,7 +41,9 @@ import (
 // 手で数えると漏れる — 実際、初版は `entity` の 7 つだけで、残り 5 つ
 // (`notehide.SetFollowingRepo` / `coretwofactor.SetTestMode` /
 // `meself.SetEnricher` / `password.SetCost` / `corenote.SetHookConcurrency`) を
-// 落としていた。
+// 落としていた。このうち設定だけで決まる3つ(`coretwofactor.SetTestMode` /
+// `password.SetCost` / `corenote.SetHookConcurrency`)は、使う部品へ依存として
+// 渡す形にして消した(#3780)。
 func restoreProcessGlobals(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
@@ -56,7 +57,6 @@ func restoreProcessGlobals(t *testing.T) {
 		entity.SetSilencedLookup(nil)
 		notehide.SetFollowingRepo(nil)
 		notehide.SetUGCVisibilityLookup(nil)
-		coretwofactor.SetTestMode(false)
 		meself.SetEnricher(nil)
 		// **latch も戻す。** `RequireSetup` は「利用者を観測した」を覚えるので、
 		// counter だけ外しても前のテストの観測が残る。
@@ -127,7 +127,6 @@ func TestProcessGlobalsAreRestored(t *testing.T) {
 	found, _ := processGlobalSetters(t)
 
 	want := []string{
-		"coretwofactor.SetTestMode",
 		"entity.SetAvatarDecorationLookup",
 		"entity.SetCanChatLookup",
 		"entity.SetEmojiDecorationLookup",
