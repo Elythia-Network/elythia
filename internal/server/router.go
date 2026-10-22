@@ -2184,7 +2184,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// なので、UserDetailed pack は単一 user の detail 取得が主用途であり許容範囲。
 	entity.SetSilencedLookup(roleService)
 	iHandler.SetNoteFieldResolver(noteFieldResolver)
-	// announcementRepo (/api/i の未読のお知らせ) は、下の meself.SetEnricher の直前で入れる。
+	// announcementRepo (/api/i の未読のお知らせ) は、下の meself.NewPacker の直前で入れる。
 
 	// i/export-* and i/import-* (Phase 9.4)
 	iHandler.SetTransferEnqueuer(s.queueClient)
@@ -3324,9 +3324,16 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	iHandler.SetAnnouncementRepo(announcementRepo)
 	// self を MeDetailed へ昇格させる他 handler (users / hashtags 等) が、未読 /
 	// policies / pinned を /api/i と同じ source で埋められるようにする。iHandler は
-	// これらの依存を全て持っているので、Enricher として 1 度だけ登録する。
-	// SetAnnouncementRepo などの依存配線が済んだ後に呼ぶこと。
-	meself.SetEnricher(iHandler)
+	// これらの依存を全て持っているので、Enricher として包んだ Packer を 1 つ作り、
+	// 昇格させる handler へ渡す (#3784)。admin は下で作るので、作った直後に渡す。
+	// 渡し忘れても補完が抜けるだけで落ちないので、配線のテスト
+	// (self_packer_wiring_test.go) が handler ごとに見る。
+	selfPacker := meself.NewPacker(iHandler)
+	usersHandler.SetSelfPacker(selfPacker)
+	hashtagsHandler.SetSelfPacker(selfPacker)
+	federationHandler.SetSelfPacker(selfPacker)
+	pagesHandler.SetSelfPacker(selfPacker)
+	rolesHandler.SetSelfPacker(selfPacker)
 	announcementHandler := apiannouncements.NewHandler(announcementRepo, idGen)
 	announcementHandler.SetMainStreamPublisher(mainStreamPublisher)
 	announcementHandler.SetBroadcastPublisher(broadcastPublisher) // global announcementCreated (#2056)
@@ -3342,6 +3349,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	emojiApplicationRepo := emojiApplicationRepoForNotif
 	adminHandler := apiadmin.NewHandler(signupService, roleService, metaRepo, userRepo, idGen)
 	adminHandler.SetBackground(s.background)     // #3661: 世代の停止で待つ
+	adminHandler.SetSelfPacker(selfPacker)       // #3784: show-users・roles/users・update-proxy-account で自分を MeDetailed に
 	adminHandler.SetDetailExtras(usersHandler)   // #3330: find-by-email・update-proxy-account のピン留め・移行先
 	adminHandler.SetListPacker(sharedUserPacker) // #3330: show-users・roles/users・abuse-user-reports・show-moderation-logs の利用者を本家 packMany と同じ形に
 	adminHandler.SetPasswordHasher(s.passwordHasher)

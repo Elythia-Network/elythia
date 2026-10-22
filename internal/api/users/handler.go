@@ -111,7 +111,14 @@ type Handler struct {
 	// featuredRanking は users/featured-notes の per-user engagement ランキング
 	// (#1687)。nil 時 (= 未配線 / test) は SQL count-DESC fallback を使う。
 	featuredRanking FeaturedRankingReader
+	// selfPacker は閲覧者自身を MeDetailed へ昇格させ、/api/i の handler で未読・
+	// role・ピン留めを埋める (#3784)。未配線なら補完せずに昇格だけする。
+	selfPacker *meself.Packer
 }
+
+// SetSelfPacker wires the Packer that promotes the viewer's own entry into
+// MeDetailed. Unset promotes without the handler-only fields.
+func (h *Handler) SetSelfPacker(p *meself.Packer) { h.selfPacker = p }
 
 // FeaturedRankingReader reads the per-user engagement ranking for
 // users/featured-notes (#1687). 循環依存回避のため narrow interface
@@ -712,7 +719,7 @@ func (h *Handler) Show(c echo.Context) error {
 		// meself が /api/i の handler (= 全依存を持つ) に委譲して埋めるので、
 		// self-view の field set と値が /api/i と一致する。Enricher 未配線の
 		// unit test 経路では MeDetailed の既定値のままになる。
-		return c.JSON(http.StatusOK, meself.PackMe(c.Request().Context(), detailed, bundle.User, bundle.Profile))
+		return c.JSON(http.StatusOK, h.selfPacker.PackMe(c.Request().Context(), detailed, bundle.User, bundle.Profile))
 	}
 	// followers/following count を visibility で gate する (#1558)。ここに来るのは
 	// non-self (anonymous 含む)。isMe=false、isFollowing は relation ブロックで
@@ -1189,7 +1196,7 @@ func (h *Handler) packRelationItems(
 
 	byID := make(map[string]any, len(users))
 	for i, u := range users {
-		byID[u.ID] = meself.Pack(ctx, packed[i], u, profiles[u.ID], viewer)
+		byID[u.ID] = h.selfPacker.Pack(ctx, packed[i], u, profiles[u.ID], viewer)
 	}
 	out := make([]relationItem, 0, len(rows))
 	for _, f := range rows {

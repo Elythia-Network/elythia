@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/meself"
 	"github.com/elythia-network/elythia/internal/api/optional"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	corepage "github.com/elythia-network/elythia/internal/core/page"
@@ -54,7 +55,14 @@ type Handler struct {
 	// drive file を解決して attachedFiles / eyeCatchingImage を埋めるのに使う
 	// (#1662)。未配線なら両 field は PackPage の default (空配列 / null)。
 	driveFileRepo repository.DriveFileRepository
+	// selfPacker は閲覧者自身を MeDetailed へ昇格させ、/api/i の handler で未読・
+	// role・ピン留めを埋める (#3784)。未配線なら補完せずに昇格だけする。
+	selfPacker *meself.Packer
 }
+
+// SetSelfPacker wires the Packer that promotes the viewer's own entry into
+// MeDetailed. Unset promotes without the handler-only fields.
+func (h *Handler) SetSelfPacker(p *meself.Packer) { h.selfPacker = p }
 
 // SetDriveFileRepo wires the drive file repo used to resolve a page's
 // attachedFiles (image-block files) and eyeCatchingImage (#1662)。

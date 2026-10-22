@@ -11,14 +11,13 @@
 // MeDetailed の一部 (未読 / policies / roles / pinnedPage) は entity 層では
 // 計算できず、それらの依存を全 handler へ配線するのは現実的でない。そこで
 // 補完だけを Enricher として切り出し、全依存を既に持つ /api/i の handler を
-// router で 1 度だけ登録する。notehide.SetFollowingRepo と同じ package-level
-// wiring の pattern。
+// 包んだ Packer を router で 1 つ作り、昇格させる handler へ渡す (#3784)。
+// 以前はパッケージの変数に 1 度だけ登録していた。
 package meself
 
 import (
 	"context"
 	"encoding/json"
-	"sync"
 
 	"github.com/elythia-network/elythia/internal/core/role"
 	"github.com/elythia-network/elythia/internal/entity"
@@ -32,25 +31,20 @@ type Enricher interface {
 	EnrichSelf(ctx context.Context, u *model.User, profile *model.UserProfile, resp map[string]any)
 }
 
-var (
-	mu       sync.RWMutex
+// Packer promotes the viewer's own UserDetailed into MeDetailed, filling the
+// handler-only fields through its Enricher.
+//
+// nil の *Packer と、Enricher を持たない値は補完しない (entity 層の MeDetailed の
+// 既定値のまま返す)。渡し忘れてもエラーにならず補完が抜けるだけなので、配線は
+// internal/server の配線のテストが handler ごとに見る。
+type Packer struct {
 	enricher Enricher
-)
-
-// SetEnricher wires the Enricher used by Pack. Call once during server setup
-// before requests are served. nil disables enrichment, which leaves the
-// entity-level MeDetailed defaults in place (unit test 用の no-op)。
-func SetEnricher(e Enricher) {
-	mu.Lock()
-	enricher = e
-	mu.Unlock()
 }
 
-func currentEnricher() Enricher {
-	mu.RLock()
-	e := enricher
-	mu.RUnlock()
-	return e
+// NewPacker returns a Packer that fills the MeDetailed fields with e.
+// A nil e yields a Packer that does not enrich.
+func NewPacker(e Enricher) *Packer {
+	return &Packer{enricher: e}
 }
 
 // IsSelf reports whether the packed target is the viewer.
@@ -63,16 +57,16 @@ func IsSelf(viewer *model.User, targetID string) bool {
 //
 // 戻り値が any なのは、同じ配列に UserDetailed と MeDetailed が混ざるため
 // (upstream の packMany も self だけ field が増えた object を返す)。
-func Pack(ctx context.Context, d entity.UserDetailed, u *model.User, profile *model.UserProfile, viewer *model.User) any {
+func (p *Packer) Pack(ctx context.Context, d entity.UserDetailed, u *model.User, profile *model.UserProfile, viewer *model.User) any {
 	if !IsSelf(viewer, u.ID) {
 		return d
 	}
-	return PackMe(ctx, d, u, profile)
+	return p.PackMe(ctx, d, u, profile)
 }
 
 // PackMe promotes an already-packed UserDetailed into the MeDetailed map,
 // without re-checking the viewer. 呼び出し側が self を判定済みのとき用。
-func PackMe(ctx context.Context, d entity.UserDetailed, u *model.User, profile *model.UserProfile) any {
+func (p *Packer) PackMe(ctx context.Context, d entity.UserDetailed, u *model.User, profile *model.UserProfile) any {
 	me := entity.AsMeDetailed(d, u, profile)
 	b, err := json.Marshal(me)
 	if err != nil {
@@ -92,8 +86,8 @@ func PackMe(ctx context.Context, d entity.UserDetailed, u *model.User, profile *
 	if _, ok := resp["policies"]; !ok {
 		resp["policies"] = role.DefaultPolicies()
 	}
-	if e := currentEnricher(); e != nil {
-		e.EnrichSelf(ctx, u, profile, resp)
+	if p != nil && p.enricher != nil {
+		p.enricher.EnrichSelf(ctx, u, profile, resp)
 	}
 	return resp
 }

@@ -15,7 +15,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/elythia-network/elythia/internal/api/meself"
 	apimeta "github.com/elythia-network/elythia/internal/api/meta"
 	"github.com/elythia-network/elythia/internal/api/notehide"
 	"github.com/elythia-network/elythia/internal/entity"
@@ -43,7 +42,8 @@ import (
 // `meself.SetEnricher` / `password.SetCost` / `corenote.SetHookConcurrency`) を
 // 落としていた。このうち設定だけで決まる3つ(`coretwofactor.SetTestMode` /
 // `password.SetCost` / `corenote.SetHookConcurrency`)は、使う部品へ依存として
-// 渡す形にして消した(#3780)。
+// 渡す形にして消した(#3780)。`meself.SetEnricher`も、組み立てで作る
+// `meself.Packer`を渡す形にして消した(#3784)。
 func restoreProcessGlobals(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
@@ -57,7 +57,6 @@ func restoreProcessGlobals(t *testing.T) {
 		entity.SetSilencedLookup(nil)
 		notehide.SetFollowingRepo(nil)
 		notehide.SetUGCVisibilityLookup(nil)
-		meself.SetEnricher(nil)
 		// **latch を戻す。** 数え方は組み立てごとの値になった (#3782) が、
 		// `RequireSetup` が「利用者を観測した」と覚える印はまだパッケージの変数
 		// なので、戻さないと前のテストの観測が残る。
@@ -135,7 +134,6 @@ func TestProcessGlobalsAreRestored(t *testing.T) {
 		"entity.SetShowRemoteBadgesLookup",
 		"entity.SetSilencedLookup",
 		"entity.SetUserRolesLookup",
-		"meself.SetEnricher",
 		"notehide.SetFollowingRepo",
 		"notehide.SetUGCVisibilityLookup",
 	}

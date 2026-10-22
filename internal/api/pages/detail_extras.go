@@ -3,7 +3,6 @@ package pages
 import (
 	"context"
 
-	"github.com/elythia-network/elythia/internal/api/meself"
 	coreuser "github.com/elythia-network/elythia/internal/core/user"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/model"
@@ -54,7 +53,7 @@ func (h *Handler) packPusher(ctx context.Context, pusher *coreuser.UserWithProfi
 		return nil, false
 	}
 	if owner.ID == pusher.User.ID {
-		return meself.PackMe(ctx, d, pusher.User, pusher.Profile), true
+		return h.selfPacker.PackMe(ctx, d, pusher.User, pusher.Profile), true
 	}
 	return d, true
 }

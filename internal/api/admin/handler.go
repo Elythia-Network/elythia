@@ -270,7 +270,14 @@ type Handler struct {
 	// passwordHasher はadmin/reset-passwordで作ったパスワードをハッシュする(#3780)。
 	// 零値は既定のcost。
 	passwordHasher password.Hasher
+	// selfPacker は閲覧者自身を MeDetailed へ昇格させ、/api/i の handler で未読・
+	// role・ピン留めを埋める (#3784)。未配線なら補完せずに昇格だけする。
+	selfPacker *meself.Packer
 }
+
+// SetSelfPacker wires the Packer that promotes the viewer's own entry into
+// MeDetailed. Unset promotes without the handler-only fields.
+func (h *Handler) SetSelfPacker(p *meself.Packer) { h.selfPacker = p }
 
 // UserModerationFederationHook delivers AP Delete / Undo(Delete) for a local
 // user's actor to remote instances when the account is suspended, deleted, or
@@ -1293,7 +1300,7 @@ func (h *Handler) ShowUsers(c echo.Context) error {
 	packed := h.packUsersMany(ctx, viewer, users, profileByUser)
 	result := make([]any, 0, len(users))
 	for i, u := range users {
-		result = append(result, meself.Pack(ctx, packed[i], u, profileByUser[u.ID], viewer))
+		result = append(result, h.selfPacker.Pack(ctx, packed[i], u, profileByUser[u.ID], viewer))
 	}
 	return c.JSON(http.StatusOK, result)
 }
@@ -3191,7 +3198,7 @@ func (h *Handler) RolesUsers(c echo.Context) error {
 		result = append(result, map[string]any{
 			"id":        a.ID,
 			"createdAt": createdAt,
-			"user":      meself.Pack(ctx, packed[i], a.User, profileByUser[a.User.ID], viewer),
+			"user":      h.selfPacker.Pack(ctx, packed[i], a.User, profileByUser[a.User.ID], viewer),
 			"expiresAt": expiresAt,
 		})
 	}

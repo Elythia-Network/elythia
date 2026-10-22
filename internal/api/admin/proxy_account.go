@@ -4,7 +4,6 @@ import (
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
-	"github.com/elythia-network/elythia/internal/api/meself"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/labstack/echo/v4"
@@ -51,12 +50,12 @@ func (h *Handler) UpdateProxyAccount(c echo.Context) error {
 	//
 	// 本家は pack(proxy.id, proxy, {schema: 'MeDetailed'}) で、proxy 自身を閲覧者に
 	// する。ピン留め・移行先も proxy から見た形で埋め、createdAt と policies など
-	// MeDetailed の項目は他の self 経路と同じく meself.PackMe で揃える (#3330)。
+	// MeDetailed の項目は他の self 経路と同じく meself.Packer.PackMe で揃える (#3330)。
 	profile, _ := h.userRepo.FindProfileByUserID(proxy.ID)
 	ctx := c.Request().Context()
 	d := entity.PackUserDetailed(proxy, profile, h.idGen)
 	if h.detailExtras != nil {
 		h.detailExtras.FillDetailedExtras(ctx, proxy, proxy, profile, &d)
 	}
-	return c.JSON(http.StatusOK, meself.PackMe(ctx, d, proxy, profile))
+	return c.JSON(http.StatusOK, h.selfPacker.PackMe(ctx, d, proxy, profile))
 }
