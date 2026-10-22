@@ -107,9 +107,11 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	db := serverIntegrationDB
 	const userID, token = "penforce-user", "penforcetoken001"
 	const roleID, assignID = "penforce-role", "penforce-assign"
+	const adminID, adminToken = "penforce-admin", "penforceadmintk1"
+	const adminRoleID, adminAssignID = "penforce-admin-role", "penforce-admin-assign"
 	cleanup := func() {
-		require.NoError(t, db.Where("id = ?", assignID).Delete(&model.RoleAssignment{}).Error)
-		require.NoError(t, db.Where("id = ?", roleID).Delete(&model.Role{}).Error)
+		require.NoError(t, db.Where("id IN ?", []string{assignID, adminAssignID}).Delete(&model.RoleAssignment{}).Error)
+		require.NoError(t, db.Where("id IN ?", []string{roleID, adminRoleID}).Delete(&model.Role{}).Error)
 		require.NoError(t, db.Exec(`DELETE FROM clip WHERE "userId" = ?`, userID).Error)
 		require.NoError(t, db.Exec(`DELETE FROM antenna WHERE "userId" = ?`, userID).Error)
 		require.NoError(t, db.Exec(`DELETE FROM flash WHERE "userId" = ?`, userID).Error)
@@ -117,7 +119,7 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		require.NoError(t, db.Exec(`DELETE FROM registration_ticket WHERE "createdById" = ?`, userID).Error)
 		require.NoError(t, db.Exec(`DELETE FROM access_token WHERE "userId" = ?`, userID).Error)
 		require.NoError(t, db.Exec(`DELETE FROM app WHERE "userId" = ?`, userID).Error)
-		require.NoError(t, db.Where("id = ?", userID).Delete(&model.User{}).Error)
+		require.NoError(t, db.Where("id IN ?", []string{userID, adminID}).Delete(&model.User{}).Error)
 	}
 	cleanup()
 	t.Cleanup(cleanup)
@@ -127,13 +129,23 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	}))
 	// invite/* は route の canInvite の検査が引数の検証より先に 403 を返す。本家も
 	// requiredRolePolicy を引数の検証より先に見るので順は同じで、検証まで届かせる
-	// には利用者に canInvite が要る (#3762)。
+	// には利用者に canInvite が要る (#3762)。管理者限定の ap/get も同じ理由で、
+	// 管理者のトークンで送る。他のendpointは、管理者でない利用者の経路で
+	// 確かめたいので、管理者は ap/get だけに使う (#3768)。
 	now := time.Now()
 	require.NoError(t, db.Create(&model.Role{
 		ID: roleID, Name: "penforce-role", UpdatedAt: now, LastUsedAt: now,
 		Policies: datatypes.JSON(`{"canInvite":{"useDefault":false,"priority":0,"value":true}}`),
 	}).Error)
 	require.NoError(t, db.Create(&model.RoleAssignment{ID: assignID, UserID: userID, RoleID: roleID}).Error)
+	adminTok := adminToken
+	require.NoError(t, repository.NewUserRepository(db).Create(&model.User{
+		ID: adminID, Username: "penforceadmin", UsernameLower: "penforceadmin", Token: &adminTok,
+	}))
+	require.NoError(t, db.Create(&model.Role{
+		ID: adminRoleID, Name: "penforce-admin-role", UpdatedAt: now, LastUsedAt: now, IsAdministrator: true,
+	}).Error)
+	require.NoError(t, db.Create(&model.RoleAssignment{ID: adminAssignID, UserID: adminID, RoleID: adminRoleID}).Error)
 	_, on, _ := newParamShadowServers(t)
 
 	cases := readAJVCorpus(t, paramEnforcedEndpoints)
@@ -156,7 +168,11 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	for _, tc := range cases {
 		req := httptest.NewRequest(http.MethodPost, "/api/"+tc.ep, bytes.NewReader(tc.in))
 		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-		req.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
+		bearer := token
+		if tc.ep == "ap/get" {
+			bearer = adminToken
+		}
+		req.Header.Set(echo.HeaderAuthorization, "Bearer "+bearer)
 		rec := httptest.NewRecorder()
 		on.Handler().ServeHTTP(rec, req)
 
@@ -184,7 +200,7 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 }
 
 // TestEnforcedGETMatchesUpstream sends GET queries to the enforced charts/*
-// endpoints of a real server and compares the answers with upstream's: the
+// and bubble-game/ranking endpoints of a real server and compares the answers with upstream's: the
 // cast step (JSON.parse of integer params, 0b5f1631-… on failure), then
 // ajv on the cast values. The corpus has JSON bodies only, so the queries
 // are written out here (#3744).
@@ -230,6 +246,11 @@ func TestEnforcedGETMatchesUpstream(t *testing.T) {
 		{query: "charts/user/notes?span=week", id: ajvID, param: "#/required", reason: "must have required property 'userId'"},
 		{query: "charts/user/notes?span=day&userId=x-y", id: ajvID, param: "#/properties/userId/format", reason: `must match format "misskey:id"`},
 		{query: "charts/user/notes?span=day&userId=", id: ajvID, param: "#/properties/userId/format", reason: `must match format "misskey:id"`},
+		// bubble-game/rankingは本家もallowGetで、文字列の引数は変換しない(#3768)。
+		{query: "bubble-game/ranking?gameMode=normal", ok: true},
+		{query: "bubble-game/ranking?gameMode=", ok: true},
+		{query: "bubble-game/ranking", id: ajvID, param: "#/required", reason: "must have required property 'gameMode'"},
+		{query: "bubble-game/ranking?gameMode=a&gameMode=b", id: ajvID, param: "#/properties/gameMode/type", reason: "must be string"},
 	} {
 		req := httptest.NewRequest(http.MethodGet, "/api/"+tc.query, nil)
 		rec := httptest.NewRecorder()

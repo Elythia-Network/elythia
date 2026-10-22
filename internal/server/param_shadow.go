@@ -22,7 +22,9 @@ const paramShadowContextKey = "mk.server.paramShadow"
 // following/* in #3756; channels/* in #3758; blocking/*, mute/* and
 // renote-mute/* in #3760; roles/*, invite/* and notifications/* in #3762;
 // app/*, auth/*, miauth/gen-token and my/apps in #3764; sw/* and
-// announcements in #3766).
+// announcements in #3766; promo/read, email-address/available,
+// username/available, ap/*, bubble-game/ranking and bubble-game/register in
+// #3768).
 // The other upstream endpoints are only validated and counted (#3677).
 //
 // 本家に揃える対象はパッケージ単位で広げる(#3667)。足したら、そのendpoint
@@ -146,6 +148,13 @@ var paramEnforcedEndpoints = []string{
 	"sw/update-registration",
 	"announcements",
 	"announcements/show",
+	"promo/read",
+	"email-address/available",
+	"username/available",
+	"ap/get",
+	"ap/show",
+	"bubble-game/ranking",
+	"bubble-game/register",
 }
 
 // paramShadowMiddleware returns the /api group middleware that enables the
