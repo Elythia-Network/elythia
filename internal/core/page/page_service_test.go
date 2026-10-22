@@ -72,10 +72,12 @@ func TestCreate_OwnerRequired(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestCreate_TitleRequired(t *testing.T) {
+// 本家は空の title をそのまま保存する (#3772)。
+func TestCreate_EmptyTitle(t *testing.T) {
 	svc, _, _ := newSvc(t)
-	_, err := svc.Create(page.CreateInput{OwnerID: "u1", Name: "alpha"})
-	assert.ErrorIs(t, err, page.ErrPageTitleRequired)
+	p, err := svc.Create(page.CreateInput{OwnerID: "u1", Name: "alpha"})
+	require.NoError(t, err)
+	assert.Equal(t, "", p.Title)
 }
 
 func TestCreate_NameRequired(t *testing.T) {
@@ -258,12 +260,14 @@ func TestUpdate_AccessDenied(t *testing.T) {
 	assert.ErrorIs(t, err, page.ErrAccessDenied)
 }
 
+// 本家は空の title をそのまま保存する (#3772)。
 func TestUpdate_TitleEmpty(t *testing.T) {
 	svc, repo, _ := newSvc(t)
-	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "u1"}
+	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "u1", Title: "t"}
 	empty := ""
-	_, err := svc.Update("u1", "p1", page.UpdateInput{Title: &empty})
-	assert.ErrorIs(t, err, page.ErrPageTitleRequired)
+	p, err := svc.Update("u1", "p1", page.UpdateInput{Title: &empty})
+	require.NoError(t, err)
+	assert.Equal(t, "", p.Title)
 }
 
 func TestUpdate_NameEmpty(t *testing.T) {

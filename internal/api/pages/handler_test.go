@@ -179,12 +179,14 @@ func TestShow_ByID(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), `"createdAt":`)
 }
 
-func TestShow_ByName(t *testing.T) {
+// 本家の paramDef は {pageId} と {name, username} だけを受ける。本家に無い
+// {userId, name} は受けない (#3772)。
+func TestShow_UserIDShapeIsNotAccepted(t *testing.T) {
 	h, repo, _ := newHandler(t)
 	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "alice", Name: "alpha", Visibility: model.PageVisibilityPublic}
 	c, rec := newReq(t, `{"userId":"alice","name":"alpha"}`)
 	require.NoError(t, h.Show(c))
-	assert.Equal(t, http.StatusOK, rec.Code)
+	testutil.AssertInvalidParam(t, rec)
 }
 
 // TestShow_IncludesUserAndIsLiked guards #1134 for the single-page path:
@@ -287,18 +289,6 @@ func TestShow_AccessDenied(t *testing.T) {
 	assert.Equal(t, "NO_SUCH_PAGE", errObj["code"])
 }
 
-// 存在隠蔽は経路非依存であることを固定する (#1432 review)。{userId, name} 経路
-// (ShowByName) でも非public・非所有者には 404 NO_SUCH_PAGE を返す。
-func TestShow_AccessDenied_ByName(t *testing.T) {
-	h, repo, _ := newHandler(t)
-	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "owner", Name: "alpha", Visibility: model.PageVisibilityPrivate}
-	c, rec := newReq(t, `{"userId":"owner","name":"alpha"}`)
-	setUser(c, "alice")
-	require.NoError(t, h.Show(c))
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Contains(t, rec.Body.String(), "NO_SUCH_PAGE")
-}
-
 // {username, name} 経路 (#955) でも非public・非所有者には 404 NO_SUCH_PAGE。
 func TestShow_AccessDenied_ByUsername(t *testing.T) {
 	h, repo, _ := newHandler(t)
@@ -364,13 +354,15 @@ func TestUpdate_AccessDenied(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
+// 本家は空の title をそのまま保存する (#3772)。
 func TestUpdate_TitleEmpty(t *testing.T) {
 	h, repo, _ := newHandler(t)
-	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "alice"}
+	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "alice", Title: "t"}
 	c, rec := newReq(t, `{"pageId":"p1","title":""}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Update(c))
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, "", repo.Pages["p1"].Title)
 }
 
 func TestUpdate_NameConflict(t *testing.T) {

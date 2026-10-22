@@ -26,8 +26,6 @@ var (
 	// ErrPageNameInvalid is returned when name violates pageNameSchema
 	// (禁止文字 / 長さ超過、#1548)。
 	ErrPageNameInvalid = errors.New("page name has invalid characters")
-	// ErrPageTitleRequired is returned when title is empty on Create / Update.
-	ErrPageTitleRequired = errors.New("page title is required")
 	// ErrAccessDenied is returned when the requester cannot view or mutate
 	// the page (e.g. private page accessed by non-owner, or update by
 	// non-owner).
@@ -98,9 +96,7 @@ func (s *Service) Create(in CreateInput) (*model.Page, error) {
 	if in.OwnerID == "" {
 		return nil, errors.New("ownerId is required")
 	}
-	if in.Title == "" {
-		return nil, ErrPageTitleRequired
-	}
+	// 空の title は本家と同じくそのまま保存する (#3772)。
 	if in.Name == "" {
 		return nil, ErrPageNameRequired
 	}
@@ -232,9 +228,7 @@ func (s *Service) Update(ownerID, pageID string, in UpdateInput) (*model.Page, e
 	}
 	fields := map[string]any{}
 	if in.Title != nil {
-		if *in.Title == "" {
-			return nil, ErrPageTitleRequired
-		}
+		// 空の title は本家と同じくそのまま保存する (#3772)。
 		fields["title"] = *in.Title
 	}
 	if in.Name != nil {

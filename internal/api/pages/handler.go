@@ -90,7 +90,7 @@ func jsonAbsent(r json.RawMessage) bool {
 // CreateRequest is the request body for pages/create. Content / Variables
 // are stored verbatim into jsonb columns; we don't interpret them.
 type CreateRequest struct {
-	Title               string               `json:"title"`
+	Title               *string              `json:"title"`
 	Name                string               `json:"name"`
 	Summary             *string              `json:"summary"`
 	Content             json.RawMessage      `json:"content"`
@@ -107,7 +107,8 @@ type CreateRequest struct {
 func (h *Handler) Create(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req CreateRequest
-	if err := c.Bind(&req); err != nil || req.Title == "" || req.Name == "" {
+	// 空の title は本家と同じく受ける (#3772)。欠けだけを拒否する。
+	if err := c.Bind(&req); err != nil || req.Title == nil || req.Name == "" {
 		return apierr.JSONInvalidParam(c)
 	}
 	// upstream pages/create.ts は required:['title','name','content','variables','script']。
@@ -133,7 +134,7 @@ func (h *Handler) Create(c echo.Context) error {
 	}
 	p, err := h.svc.Create(corepage.CreateInput{
 		OwnerID:             user.ID,
-		Title:               req.Title,
+		Title:               *req.Title,
 		Name:                req.Name,
 		Summary:             req.Summary,
 		AlignCenter:         req.AlignCenter,
@@ -174,15 +175,28 @@ func (h *Handler) eyeCatchingImageOK(imageID *string, userID string) bool {
 	return true
 }
 
-// ShowRequest is the request body for pages/show. upstream Misskey TS の
-// paramDef は anyOf で 3 形を accept する: {pageId} / {userId, name} /
-// {username, name} (#955)。frontend (page.vue) は 3 つ目の {username, name}
-// を投げてくるので、本 struct も同 shape を受ける。
+// ShowRequest is the request body for pages/show. upstream の paramDef は
+// anyOf で {pageId} と {name, username} の 2 形を受ける (#955)。
+//
+// 本家と同じく pageId があればそれで引き、無ければ name と username で引く。
+// 空文字もそのまま引いて NO_SUCH_PAGE にする。以前は本家に無い {userId, name}
+// も受けていたが、本家の paramDef で拒否されるので消した (#3772)。
+//
+// 3 項目は型を決めずに受ける。anyOf は片方の形を満たせば通すので、使わない側の
+// 項目の型が違っても本家は通す ({"pageId":"x","name":1} など、#3772)。
 type ShowRequest struct {
-	PageID   string `json:"pageId"`
-	UserID   string `json:"userId"`
-	Username string `json:"username"`
-	Name     string `json:"name"`
+	PageID   json.RawMessage `json:"pageId"`
+	Username json.RawMessage `json:"username"`
+	Name     json.RawMessage `json:"name"`
+}
+
+// rawString decodes raw as a JSON string. ok is false when raw is absent,
+// null or not a string.
+func rawString(raw json.RawMessage) (s string, ok bool) {
+	if len(raw) == 0 {
+		return "", false
+	}
+	return s, json.Unmarshal(raw, &s) == nil && string(raw) != "null"
 }
 
 // Show handles POST /api/pages/show.
@@ -200,23 +214,32 @@ func (h *Handler) Show(c echo.Context) error {
 		p   *model.Page
 		err error
 	)
+	username, usernameOK := rawString(req.Username)
+	name, nameOK := rawString(req.Name)
 	switch {
-	case req.PageID != "":
-		p, err = h.svc.Show(requesterID, req.PageID)
-	case req.UserID != "" && req.Name != "":
-		p, err = h.svc.ShowByName(requesterID, req.UserID, req.Name)
-	case req.Username != "" && req.Name != "":
+	// pageId: null は name と username で引く。本家は 'pageId' in ps で pageId の
+	// 経路に入り、TypeORM が null の条件を無視するので、どれか 1 件の Page を
+	// 返してしまう (#3772)。
+	case len(req.PageID) > 0 && string(req.PageID) != "null":
+		pageID, ok := rawString(req.PageID)
+		if !ok {
+			// 文字列でない pageId は anyOf の {name, username} の側で通る。本家は
+			// その値の id で引くので、該当の Page は無い。
+			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_PAGE", "No such page.", "222120c0-3ead-4528-811b-b96f233388d7"))
+		}
+		p, err = h.svc.Show(requesterID, pageID)
+	case usernameOK && nameOK:
 		// {username, name} 経路 (#955): username で local user を引いて
 		// その user.id + name で page を引く。upstream は host=NULL の
 		// local user 縛り (= remote の page は連合経路で配信されない)。
 		if h.userSource == nil {
 			return apierr.JSONInternalError(c)
 		}
-		bundle, ulerr := h.userSource.ShowByUsername(req.Username, nil)
+		bundle, ulerr := h.userSource.ShowByUsername(username, nil)
 		if ulerr != nil || bundle == nil || bundle.User == nil {
 			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_PAGE", "No such page.", "222120c0-3ead-4528-811b-b96f233388d7"))
 		}
-		p, err = h.svc.ShowByName(requesterID, bundle.User.ID, req.Name)
+		p, err = h.svc.ShowByName(requesterID, bundle.User.ID, name)
 	default:
 		return apierr.JSONInvalidParam(c)
 	}
@@ -329,7 +352,6 @@ func (h *Handler) Update(c echo.Context) error {
 		case errors.Is(err, corepage.ErrAccessDenied):
 			return c.JSON(http.StatusBadRequest, apierr.Error("ACCESS_DENIED", "Access denied.", "3c15cd52-3b4b-4274-967d-6456fc4f792b"))
 		case errors.Is(err, corepage.ErrPageNameRequired),
-			errors.Is(err, corepage.ErrPageTitleRequired),
 			errors.Is(err, corepage.ErrPageNameInvalid):
 			return apierr.JSONInvalidParam(c)
 		case errors.Is(err, corepage.ErrPageNameConflict):
@@ -495,7 +517,7 @@ func (h *Handler) Like(c echo.Context) error {
 // PagePushRequest is the request body for /api/page-push.
 type PagePushRequest struct {
 	PageID string          `json:"pageId"`
-	Event  string          `json:"event"`
+	Event  *string         `json:"event"`
 	Var    json.RawMessage `json:"var"`
 }
 
@@ -506,7 +528,8 @@ type PagePushRequest struct {
 func (h *Handler) PagePush(c echo.Context) error {
 	caller := middleware.GetUser(c)
 	var req PagePushRequest
-	if err := c.Bind(&req); err != nil || req.PageID == "" || req.Event == "" {
+	// 空の event は本家と同じく受ける (#3772)。欠けだけを拒否する。
+	if err := c.Bind(&req); err != nil || req.PageID == "" || req.Event == nil {
 		return apierr.JSONInvalidParam(c)
 	}
 	// TS本家はfindOneByのみで可視性チェックをしないのでFindByIDを
@@ -541,7 +564,7 @@ func (h *Handler) PagePush(c echo.Context) error {
 	}
 	body := map[string]any{
 		"pageId": p.ID,
-		"event":  req.Event,
+		"event":  *req.Event,
 		"var":    rawJSONBytes(req.Var),
 		"userId": caller.ID,
 		"user":   user,
