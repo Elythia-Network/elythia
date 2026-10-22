@@ -118,6 +118,8 @@ const DefaultEnforcedMaxBody = 16 << 10
 // 大きさの上限を超える(#3750)。gallery/posts/create・updateのdescriptionも
 // 本家に上限が無い(#3754)。channels/updateのpinnedNoteIdsも本家に上限が無く、
 // 同梱のfrontendが`i`と一緒に送るbodyでは236件からトークンの上限を超える(#3758)。
+// pages/create・updateも、本家がcontentの数にも文字列の長さにも上限を持たず、
+// 同梱のエディタのbodyではtextのブロック29個からトークンの上限を超える(#3772)。
 const DefaultEnforcedMaxValues = 256
 
 // input is what upstream hands to ajv for one request, or why the request is
