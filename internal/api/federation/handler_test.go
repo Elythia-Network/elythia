@@ -410,11 +410,19 @@ func TestShowInstance_BadJSON(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
-func TestShowInstance_EmptyHost(t *testing.T) {
+func TestShowInstance_MissingHost(t *testing.T) {
 	h, _ := newHandler(t)
 	c, rec := newReq(t, `{}`)
 	require.NoError(t, h.ShowInstance(c))
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+// 本家は空の host を paramDef で通し、該当の instance が無いので 204 を返す (#3770)。
+func TestShowInstance_EmptyHostIsNotFound(t *testing.T) {
+	h, _ := newHandler(t)
+	c, rec := newReq(t, `{"host":""}`)
+	require.NoError(t, h.ShowInstance(c))
+	assert.Equal(t, http.StatusNoContent, rec.Code)
 }
 
 // TestShowInstance_NotFound: upstream Misskey TS と同じく未知 host は
