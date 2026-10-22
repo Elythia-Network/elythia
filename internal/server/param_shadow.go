@@ -24,7 +24,7 @@ const paramShadowContextKey = "mk.server.paramShadow"
 // app/*, auth/*, miauth/gen-token and my/apps in #3764; sw/* and
 // announcements in #3766; promo/read, email-address/available,
 // username/available, ap/*, bubble-game/ranking and bubble-game/register in
-// #3768).
+// #3768; federation/* except federation/instances in #3770).
 // The other upstream endpoints are only validated and counted (#3677).
 //
 // 本家に揃える対象はパッケージ単位で広げる(#3667)。足したら、そのendpoint
@@ -155,6 +155,14 @@ var paramEnforcedEndpoints = []string{
 	"ap/show",
 	"bubble-game/ranking",
 	"bubble-game/register",
+	// federation/instancesは、独自のsortの値(+host / -host)が本家のenumに
+	// 無いので、まだ載せない(#3770)。
+	"federation/followers",
+	"federation/following",
+	"federation/show-instance",
+	"federation/stats",
+	"federation/update-remote-user",
+	"federation/users",
 }
 
 // paramShadowMiddleware returns the /api group middleware that enables the
