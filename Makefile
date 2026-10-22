@@ -42,7 +42,7 @@ check: fmt lint actionlint golangci-lint test ## コミット前に必須 (lint 
 	# `make plugins-all && go build ./cmd/elythia`)、`lint` job の重複 fixture ID 検査、
 	# `test` のカバレッジ閾値は再現しない。
 
-gates: shapecheck errorid-check limitspec-check perm-check wiring-check catalog-check notfound-check nulparam-check compose-check testflags-check migrationdoc-check mdtable-check notiftype-check pluginembed-check dockerignore-check secretfield-check ipshape-check iprecord-check sqlbind-check gaterun-check ## 静的 parity ゲートを一括実行
+gates: shapecheck errorid-check limitspec-check perm-check wiring-check catalog-check notfound-check nulparam-check compose-check testflags-check migrationdoc-check mdtable-check notiftype-check pluginembed-check dockerignore-check secretfield-check ipshape-check iprecord-check sqlbind-check cachelist-check gaterun-check ## 静的 parity ゲートを一括実行
 
 version: ## Elythia / 互換 Misskey / 追従している本家のバージョンを表示
 	@printf "Elythia          : %s\n" "$$(sed -n 's/^var MkGoVersion = "\(.*\)"/\1/p' internal/config/config.go)"
@@ -1598,6 +1598,16 @@ sqlbind-check: ## 値をクォート内へ差し込まずバインドしてい�
 	# chart の unique 配列は別に名指しで見る。**ApplyDeltas が組む書式集合を
 	# そのまま pin する** — 「プレースホルダが在るか」はダミーの ? 1 つで満たせる。
 	go test ./internal/entitycompat/... -run 'TestSQLBindVerbDetectionShapes|TestSQLBindFoldsConcatenatedFormats|TestSQLBindNoVerbInsideQuotedLiteral|TestSQLBindChartUniqueArrayIsParameterised' -count=1 -v
+
+.PHONY: cachelist-check
+cachelist-check: ## 同期の部品を持つ型と変数が、キャッシュの一覧への登録か理由付きの除外に分類されているか検査
+	# 一覧(internal/serverのaddCache)への登録を忘れても、何も落ちなかった(#3777)。
+	# 並行で共有するメモリには同期が要るので、同期の部品(sync.Mutexなど)を持つstructと
+	# パッケージの変数を全部数え、表(cacheEntries)で種類と理由を書かせる。表は全部の
+	# フィールドの名前を持つので、どのフィールドを足しても分類し直すまで落ちる。
+	# 一覧に実際に登録したことは、internal/serverのTestCaches_ListMatchesTheDropLocalTypesが
+	# 同じ走査の結果と比べる(make testで回る)。
+	go test ./internal/entitycompat/... -run 'TestCacheTypesAreClassified|TestCacheEntriesHaveNoDeadRows|TestCacheTypeScanFindsEveryBranch|TestCacheScanExclusionsAreUsed|TestScanCacheTypesShapes' -count=1 -v
 
 .PHONY: dockerignore-check
 dockerignore-check: ## .dockerignore がシークレットと利用者データを除外しているか検査
