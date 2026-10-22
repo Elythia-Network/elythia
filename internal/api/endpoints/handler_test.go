@@ -62,6 +62,14 @@ func TestEndpoint(t *testing.T) {
 		assert.Equal(t, "null", strings.TrimSpace(rec.Body.String()))
 	})
 
+	t.Run("empty endpoint returns null", func(t *testing.T) {
+		// 本家の paramDef は空文字を通し、未知の endpoint として null を返す (#3774)。
+		rec := call(t, h.Endpoint, `{"endpoint":""}`)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, "null", strings.TrimSpace(rec.Body.String()))
+	})
+
 	t.Run("missing endpoint param is a 400", func(t *testing.T) {
 		rec := call(t, h.Endpoint, `{}`)
 

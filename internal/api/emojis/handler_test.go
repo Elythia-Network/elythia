@@ -241,8 +241,30 @@ func TestEmoji_GET_Found(t *testing.T) {
 
 func TestEmoji_GET_MissingName(t *testing.T) {
 	h, _ := setup()
-	rec := doGetEmoji(h, "")
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/emoji", nil)
+	rec := httptest.NewRecorder()
+	_ = h.Emoji(e.NewContext(req, rec))
+	testutil.AssertInvalidParam(t, rec)
+}
+
+// 本家の paramDef は空の name を通す。存在しない絵文字と同じく NO_SUCH_EMOJI
+// にする (本家は findOneOrFail で 500、#3774)。
+func TestEmoji_EmptyNameIsNoSuchEmoji(t *testing.T) {
+	for name, rec := range map[string]*httptest.ResponseRecorder{
+		"GET":  doGetEmoji(setupHandler(), ""),
+		"POST": doPostEmoji(setupHandler(), `{"name":""}`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			assert.Contains(t, rec.Body.String(), "NO_SUCH_EMOJI")
+		})
+	}
+}
+
+func setupHandler() *emojis.Handler {
+	h, _ := setup()
+	return h
 }
 
 // /api/emoji は EmojiDetailed を返し、license と
