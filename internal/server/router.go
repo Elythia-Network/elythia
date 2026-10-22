@@ -1682,6 +1682,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// invitation ticket の SELECT FOR UPDATE ロックを有効化する (#600 item 2 + #604)。
 	signupService.SetDB(s.db)
 	signupService.SetTicketRepo(signupTicketRepo)
+	// パスワードをハッシュする5つの部品へ、設定のbcryptCostから作ったHasherを渡す(#3780)。
+	signupService.SetPasswordHasher(s.passwordHasher)
 	signupHandler := apisignup.NewHandler(signupService, metaRepo, idGen)
 	signupHandler.SetBackground(s.background) // #3661: 世代の停止で待つ
 	// #2673: signup も upstream と同じく実効 policy を返す (meta の base override /
@@ -1757,6 +1759,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 配線されていたので、captcha を有効にした e2e 構成では signup だけ
 	// 通って signin が落ちる。
 	signinHandler.SetTestMode(s.config.TestMode)
+	signinHandler.SetPasswordHasher(s.passwordHasher)
 	// IP logging (#3103)。**起動時に meta を読んで配線するかどうかを決めない** —
 	// その形だと管理画面で有効にしても再起動するまで記録が始まらなかった (#3107)。
 	// 記録するかどうかは iplog.Service が呼び出しのたびに meta から判断する。
@@ -1775,6 +1778,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	resetHandler := apiresetpassword.NewHandler(userRepo, resetReqRepo, idGen)
 	resetHandler.SetBackground(s.background) // #3661: 世代の停止で待つ
 	resetHandler.SetServerURL(s.config.URL)
+	resetHandler.SetPasswordHasher(s.passwordHasher)
 	// password reset の確認メール送信。配線パターンは signup と同じく
 	// SenderFromMeta で per-call 再 Fetch、runtime 設定変更追従 (#1112)。
 	resetHandler.SetMetaRepo(metaRepo)
@@ -2015,6 +2019,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	iHandler.SetTOTPReplayGuard(totpReplayGuard)
 	iHandler.SetTwoFAPendingGuard(coretwofactor.NewRedisPendingGuard(s.redis.Default))
 	iHandler.SetPasswordFailureGuard(passwordFailureGuard)
+	iHandler.SetPasswordHasher(s.passwordHasher)
 	// upstream UserAuthService と同じテスト用バイパス。testMode 以外では無効。
 	coretwofactor.SetTestMode(s.config.TestMode)
 	iHandler.SetRegistryRepo(registryRepo)
@@ -3336,6 +3341,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	adminHandler.SetBackground(s.background)     // #3661: 世代の停止で待つ
 	adminHandler.SetDetailExtras(usersHandler)   // #3330: find-by-email・update-proxy-account のピン留め・移行先
 	adminHandler.SetListPacker(sharedUserPacker) // #3330: show-users・roles/users・abuse-user-reports・show-moderation-logs の利用者を本家 packMany と同じ形に
+	adminHandler.SetPasswordHasher(s.passwordHasher)
 	// モデレーターの suspend / unsuspend を local 由来として刻む (#2973)。
 	adminHandler.SetSuspensionOriginRepo(suspensionOriginRepo)
 	// catalog 更新を entity 側 packer に即時反映する (#2258)。TTL 任せだと

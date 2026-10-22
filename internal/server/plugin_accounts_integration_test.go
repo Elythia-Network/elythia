@@ -162,7 +162,7 @@ func createLocalUser(t *testing.T, db *gorm.DB, id, username, token, plain strin
 		ID: id, Username: username, UsernameLower: strings.ToLower(username), Token: &tok, IsRoot: root,
 		AvatarDecorations: []byte("[]"),
 	}).Error)
-	hash, err := password.Hash(plain)
+	hash, err := password.Hasher{}.Hash(plain)
 	require.NoError(t, err)
 	email := username + "@example.test"
 	require.NoError(t, db.Create(&model.UserProfile{
@@ -378,7 +378,7 @@ func TestPluginAccounts_EveryLoginPathRefused_RealDB(t *testing.T) {
 
 	bot, err := h.ctxA.Accounts().Create(ctx, "pl_bot")
 	require.NoError(t, err)
-	hash, err := password.Hash("same-pass")
+	hash, err := password.Hasher{}.Hash("same-pass")
 	require.NoError(t, err)
 	email := "pl_bot@example.test"
 	require.NoError(t, h.db.Model(&model.UserProfile{}).Where(`"userId" = ?`, bot.ID).

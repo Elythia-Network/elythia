@@ -35,6 +35,8 @@ type Handler struct {
 	idGen      id.Generator
 	email      EmailSender
 	serverURL  string
+	// passwordHasherは新しいパスワードをハッシュする(#3780)。零値は既定のcost。
+	passwordHasher password.Hasher
 }
 
 // SetBackground sets the group the work after a response runs in, so stopping
@@ -48,6 +50,10 @@ func (h *Handler) HasBackground() bool { return h.background != nil }
 func NewHandler(userRepo repository.UserRepository, resetRepo repository.PasswordResetRequestRepository, idGen id.Generator) *Handler {
 	return &Handler{userRepo: userRepo, resetRepo: resetRepo, idGen: idGen}
 }
+
+// SetPasswordHasher sets the Hasher that the new password is hashed with.
+// Unset, the default cost is used.
+func (h *Handler) SetPasswordHasher(hasher password.Hasher) { h.passwordHasher = hasher }
 
 // SetMetaRepo wires meta lookup for email locale fallback.
 func (h *Handler) SetMetaRepo(r repository.MetaRepository) { h.metaRepo = r }
@@ -181,7 +187,7 @@ func (h *Handler) Reset(c echo.Context) error {
 
 	// cost は misc/password に集約してある。**ここだけ 8 を直書きしていたので、
 	// リセットするとハッシュの強度が下がっていた。**
-	hashed, err := password.Hash(req.Password)
+	hashed, err := h.passwordHasher.Hash(req.Password)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}

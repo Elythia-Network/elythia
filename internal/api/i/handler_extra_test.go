@@ -140,7 +140,26 @@ func TestChangePassword_AcceptsArgon2AndStoresBcrypt(t *testing.T) {
 	assert.NoError(t, bcrypt.CompareHashAndPassword([]byte(stored), []byte("newpass")))
 	cost, err := bcrypt.Cost([]byte(stored))
 	require.NoError(t, err)
-	assert.Equal(t, passwordutil.Cost(), cost)
+	assert.Equal(t, passwordutil.DefaultCost, cost)
+}
+
+// 新しいパスワードは配線したHasherのcostでハッシュする(#3780)。
+func TestChangePassword_UsesWiredHasher(t *testing.T) {
+	const configured = bcrypt.MinCost + 1
+	hasher, err := passwordutil.NewHasher(configured)
+	require.NoError(t, err)
+	h, repo := newExtraHandler(t)
+	h.SetPasswordHasher(hasher)
+	user := setupUserWithPassword(repo, "u1", "oldpass")
+
+	rec := postExtra(h.ChangePassword, `{"currentPassword":"oldpass","newPassword":"newpass"}`, user)
+	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+
+	stored := *repo.Profiles["u1"].Password
+	assert.NoError(t, bcrypt.CompareHashAndPassword([]byte(stored), []byte("newpass")))
+	cost, err := bcrypt.Cost([]byte(stored))
+	require.NoError(t, err)
+	assert.Equal(t, configured, cost)
 }
 
 func TestChangePassword_RejectsWrongArgon2PasswordWithoutRewrite(t *testing.T) {

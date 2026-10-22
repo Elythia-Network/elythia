@@ -10,11 +10,13 @@ import (
 
 	"github.com/elythia-network/elythia/internal/core/signup"
 	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/misc/password"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
@@ -605,6 +607,31 @@ func TestPromotePending_ApplicationRecordsConsumedTicket(t *testing.T) {
 	require.NoError(t, db.Where("id = ?", appID).First(&stored).Error)
 	require.NotNil(t, stored.TicketID)
 	assert.Equal(t, ticketID, *stored.TicketID, "消費した ticket を申請に残す")
+}
+
+// 申請経由の登録も、配線したHasherのcostでハッシュする(#3780)。
+func TestSignupForApplication_UsesWiredHasher(t *testing.T) {
+	db := integrationDB(t)
+	const prefix = "itphs_"
+	defer cleanupSignupRows(t, db, prefix)
+	defer db.Exec(`DELETE FROM "signup_application" WHERE id LIKE ?`, prefix+"%")
+
+	const configured = bcrypt.MinCost + 1
+	hasher, err := password.NewHasher(configured)
+	require.NoError(t, err)
+	svc := newTxService(t, db)
+	svc.SetPasswordHasher(hasher)
+	app := insertApprovedApplication(t, db, prefix+"app1")
+
+	res, err := svc.SignupForApplication(prefix+"user", "hunter22", app.ID, "")
+	require.NoError(t, err)
+
+	var profile model.UserProfile
+	require.NoError(t, db.Where(`"userId" = ?`, res.User.ID).First(&profile).Error)
+	require.NotNil(t, profile.Password)
+	cost, err := bcrypt.Cost([]byte(*profile.Password))
+	require.NoError(t, err)
+	assert.Equal(t, configured, cost)
 }
 
 // **1 つの承認から作れるアカウントは 1 つ。** 承認済みの申請者が別々の username で

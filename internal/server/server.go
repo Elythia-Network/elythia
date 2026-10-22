@@ -132,6 +132,9 @@ type Server struct {
 	// 明示設定が無ければ DB (instance_secret) の生成値を使うため、New() で
 	// 一度だけ解決して保持する。
 	mediaProxySecret []byte
+	// passwordHasherは設定のbcryptCostから作ったHasher(#3780)。
+	// setupRoutesがパスワードをハッシュする部品へ渡す。
+	passwordHasher password.Hasher
 
 	// deliverSvc は federation deliver service への参照。本番では queue
 	// 経由で deliver を enqueue するが、test (#780) で queue を bypass する
@@ -714,24 +717,12 @@ func newServer(cfg *config.Config, db *gorm.DB, redis *cache.RedisClients, plugi
 	}
 	logDevModeBanner(cfg)
 
-	// パスワードのハッシュ強度をプロセス全体に反映する。
-	//
-	// **ゼロ値は「未設定」として扱う。** config.resolve を通れば必ず範囲内の値が
-	// 入るが、Config を構造体リテラルで組む呼び出し元 (テスト / ツール) では 0 の
-	// まま来る。そこで起動を失敗させると、この項目を知らない呼び出し元が全部壊れる。
-	bcryptCost := cfg.BcryptCost
-	if bcryptCost == 0 {
-		bcryptCost = password.DefaultCost
-	}
-	if err := password.SetCost(bcryptCost); err != nil {
-		// resolve を通っていれば到達しない。通っていない呼び出し元のために
-		// 既定へ落として続行する。
-		slog.Warn("bcrypt cost が不正なので既定値を使います", "value", bcryptCost, "err", err)
-		bcryptCost = password.DefaultCost
-		_ = password.SetCost(bcryptCost)
-	}
-	if bcryptCost != password.DefaultCost {
-		slog.Info("bcrypt cost overridden", "cost", bcryptCost, "default", password.DefaultCost)
+	// パスワードのハッシュ強度。使う部品(signup・signin・パスワードの変更と
+	// リセット)へsetupRoutesが渡す(#3780)。0と範囲外の扱いはHasherFromConfigに
+	// ある。起動のログはここで出し、出る位置を変えない。
+	passwordHasher := password.HasherFromConfig(cfg.BcryptCost)
+	if passwordHasher.Cost() != password.DefaultCost {
+		slog.Info("bcrypt cost overridden", "cost", passwordHasher.Cost(), "default", password.DefaultCost)
 	}
 
 	// 投稿後のベストエフォートフックの同時実行数。**絞らないと応答のテールが
@@ -900,6 +891,7 @@ func newServer(cfg *config.Config, db *gorm.DB, redis *cache.RedisClients, plugi
 		role:                role,
 		reactionFlushWorker: runReactionFlushWorker,
 		background:          bgwork.New(),
+		passwordHasher:      passwordHasher,
 	}
 	for _, fn := range beforeSetup {
 		fn(s)
