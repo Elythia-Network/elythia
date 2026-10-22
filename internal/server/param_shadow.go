@@ -25,7 +25,7 @@ const paramShadowContextKey = "mk.server.paramShadow"
 // announcements in #3766; promo/read, email-address/available,
 // username/available, ap/*, bubble-game/ranking and bubble-game/register in
 // #3768; federation/* except federation/instances in #3770; pages/* and
-// page-push in #3772).
+// page-push in #3772; the read-only top-level endpoints in #3774).
 // The other upstream endpoints are only validated and counted (#3677).
 //
 // 本家に揃える対象はパッケージ単位で広げる(#3667)。足したら、そのendpoint
@@ -172,6 +172,21 @@ var paramEnforcedEndpoints = []string{
 	"pages/show",
 	"pages/unlike",
 	"pages/update",
+	// どのパッケージにも属さない、参照だけのendpoint(#3774)。
+	"emoji",
+	"emojis",
+	"endpoint",
+	"endpoints",
+	"fetch-rss",
+	"get-avatar-decorations",
+	"get-online-users-count",
+	"meta",
+	"ping",
+	"pinned-users",
+	"retention",
+	"server-info",
+	"stats",
+	"test",
 }
 
 // paramShadowMiddleware returns the /api group middleware that enables the
