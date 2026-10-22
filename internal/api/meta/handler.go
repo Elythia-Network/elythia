@@ -31,6 +31,8 @@ type Handler struct {
 	// chunkedUpload は分割アップロード (#2313) の能力告知。nil / ok=false なら
 	// field ごと出さない。
 	chunkedUpload ChunkedUploadCapability
+	// setup は `requireSetup` の判定 (#3037)。nil なら `rootUserId` だけで判定する。
+	setup *SetupDetector
 	// respCache は serialize 済みレスポンスのキャッシュ (#2649)。
 	// 上の依存を差し替える SetXxx は、レスポンスの中身が変わるので
 	// いずれも respCache を落とす。
@@ -69,6 +71,13 @@ type ChunkedUploadCapability func() (chunkSize int64, ok bool)
 // Misskey never emits it either.
 func (h *Handler) SetChunkedUploadCapability(f ChunkedUploadCapability) {
 	h.chunkedUpload = f
+	h.respCache.invalidate()
+}
+
+// SetSetupDetector wires the detector behind the `requireSetup` field.
+// Unset judges by rootUserId alone.
+func (h *Handler) SetSetupDetector(d *SetupDetector) {
+	h.setup = d
 	h.respCache.invalidate()
 }
 
@@ -233,7 +242,7 @@ func (h *Handler) buildMeta(detail bool) (map[string]any, error) {
 		"notesPerOneAd":             m.NotesPerOneAd,
 		"mediaProxy":                h.config.MediaProxy,
 		"cacheRemoteSensitiveFiles": m.CacheRemoteSensitiveFiles,
-		"requireSetup":              RequireSetup(m),
+		"requireSetup":              h.setup.RequireSetup(m),
 		// mk-go は /tarball/ を配信しないので常に false (#2700)。config の値を
 		// そのまま返すと、SPA catchall が HTML を 200 で返すリンクを
 		// 「ソースコード (Tarball)」として出すため config.ProvidesTarball() を通す。

@@ -175,6 +175,27 @@ func TestMeta_RequireSetupFalseWhenRootExists(t *testing.T) {
 	assert.Equal(t, false, resp["requireSetup"])
 }
 
+// requireSetup は SetSetupDetector で渡した数え方で判定する (#3782)。
+// 利用者が居れば、rootUserId が nil でもセットアップ画面を出さない。
+func TestMeta_RequireSetupUsesWiredDetector(t *testing.T) {
+	ResetSetupLatchForTest()
+	t.Cleanup(ResetSetupLatchForTest)
+	h, repo := newTestHandler()
+	repo.Meta = &model.Meta{ID: "x"}
+	calls := 0
+	h.SetSetupDetector(NewSetupDetector(func() (int64, error) { calls++; return 2, nil }))
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/meta", nil)
+	rec := httptest.NewRecorder()
+	require.NoError(t, h.Meta(e.NewContext(req, rec)))
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, false, resp["requireSetup"])
+	assert.Equal(t, 1, calls, "渡した数え方を使っていない")
+}
+
 // --- Branding / UI exposure (issue #50) ---
 
 // /api/meta が meta テーブルの新フィールド (mascot / app192/512 / themes /

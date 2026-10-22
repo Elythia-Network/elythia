@@ -58,9 +58,9 @@ func restoreProcessGlobals(t *testing.T) {
 		notehide.SetFollowingRepo(nil)
 		notehide.SetUGCVisibilityLookup(nil)
 		meself.SetEnricher(nil)
-		// **latch も戻す。** `RequireSetup` は「利用者を観測した」を覚えるので、
-		// counter だけ外しても前のテストの観測が残る。
-		apimeta.SetLocalUserCounter(nil)
+		// **latch を戻す。** 数え方は組み立てごとの値になった (#3782) が、
+		// `RequireSetup` が「利用者を観測した」と覚える印はまだパッケージの変数
+		// なので、戻さないと前のテストの観測が残る。
 		apimeta.ResetSetupLatchForTest()
 		frontendutil.ResetLoaderCacheForTest()
 	})
@@ -136,7 +136,6 @@ func TestProcessGlobalsAreRestored(t *testing.T) {
 		"entity.SetSilencedLookup",
 		"entity.SetUserRolesLookup",
 		"meself.SetEnricher",
-		"meta.SetLocalUserCounter",
 		"notehide.SetFollowingRepo",
 		"notehide.SetUGCVisibilityLookup",
 	}

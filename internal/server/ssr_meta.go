@@ -35,6 +35,7 @@ type ssrMetaHandler struct {
 	metaRepo      repository.MetaRepository
 	proxyResolver meta.ProxyAccountResolver
 	chunkedUpload meta.ChunkedUploadCapability
+	setup         *meta.SetupDetector
 	clientEntry   frontendutil.ClientEntryInfo
 
 	userRepo      repository.UserRepository
@@ -75,6 +76,7 @@ func newSSRMetaHandler(
 	metaRepo repository.MetaRepository,
 	proxyResolver meta.ProxyAccountResolver,
 	chunkedUpload meta.ChunkedUploadCapability,
+	setup *meta.SetupDetector,
 	deps ssrMetaDeps,
 ) *ssrMetaHandler {
 	return &ssrMetaHandler{
@@ -82,6 +84,7 @@ func newSSRMetaHandler(
 		metaRepo:      metaRepo,
 		proxyResolver: proxyResolver,
 		chunkedUpload: chunkedUpload,
+		setup:         setup,
 		clientEntry:   clientEntryFor(cfg),
 		userRepo:      deps.User,
 		noteRepo:      deps.Note,
@@ -100,7 +103,7 @@ func newSSRMetaHandler(
 
 // render serves the shell with the given per-page overrides.
 func (h *ssrMetaHandler) render(c echo.Context, ov shellOverrides) error {
-	return renderFrontendShell(c, h.cfg, h.metaRepo, h.proxyResolver, h.chunkedUpload, h.clientEntry, ov)
+	return renderFrontendShell(c, h.cfg, h.metaRepo, h.proxyResolver, h.chunkedUpload, h.setup, h.clientEntry, ov)
 }
 
 // renderPlain serves the shell without any page-specific override. 対象が

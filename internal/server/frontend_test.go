@@ -34,7 +34,7 @@ func TestFrontendHTML_SplashStructure(t *testing.T) {
 
 	t.Run("default fallback to /static-assets/splash.png", func(t *testing.T) {
 		repo := testutil.NewMockMetaRepository()
-		handler := frontendHTML(cfg, repo, nil, nil)
+		handler := frontendHTML(cfg, repo, nil, nil, nil)
 
 		e := echo.New()
 		rec := httptest.NewRecorder()
@@ -67,7 +67,7 @@ func TestFrontendHTML_SplashStructure(t *testing.T) {
 		customIcon := "https://example.test/files/server-icon.png"
 		repo.Meta = &model.Meta{ID: "x", IconURL: &customIcon}
 
-		handler := frontendHTML(cfg, repo, nil, nil)
+		handler := frontendHTML(cfg, repo, nil, nil, nil)
 		e := echo.New()
 		rec := httptest.NewRecorder()
 		c := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)
@@ -85,7 +85,7 @@ func TestFrontendHTML_SplashStructure(t *testing.T) {
 		mascot := "https://example.test/custom-mascot.png"
 		repo.Meta = &model.Meta{ID: "x", MascotImageURL: &mascot}
 
-		handler := frontendHTML(cfg, repo, nil, nil)
+		handler := frontendHTML(cfg, repo, nil, nil, nil)
 		e := echo.New()
 		rec := httptest.NewRecorder()
 		c := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)
@@ -123,7 +123,7 @@ func TestFrontendHTML_IconLinks(t *testing.T) {
 		if m != nil {
 			repo.Meta = m
 		}
-		handler := frontendHTML(cfg, repo, nil, nil)
+		handler := frontendHTML(cfg, repo, nil, nil, nil)
 		e := echo.New()
 		rec := httptest.NewRecorder()
 		c := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)
@@ -194,7 +194,7 @@ func TestFrontendHTML_EmbeddedMetaPolicies(t *testing.T) {
 		t.Helper()
 		repo := testutil.NewMockMetaRepository()
 		repo.Meta = m
-		handler := frontendHTML(cfg, repo, nil, nil)
+		handler := frontendHTML(cfg, repo, nil, nil, nil)
 
 		e := echo.New()
 		rec := httptest.NewRecorder()
@@ -270,17 +270,17 @@ func TestFrontendHTML_EmbedsChunkedUploadCapability(t *testing.T) {
 	}
 
 	// 未対応構成では field ごと出さない (純正 Misskey と同じ undefined)。
-	got := extract(t, frontendHTML(cfg, repo, nil, func() (int64, bool) { return 0, false }))
+	got := extract(t, frontendHTML(cfg, repo, nil, func() (int64, bool) { return 0, false }, nil))
 	_, present := got["chunkedUpload"]
 	assert.False(t, present)
 
 	// 未配線でも落ちない。
-	got = extract(t, frontendHTML(cfg, repo, nil, nil))
+	got = extract(t, frontendHTML(cfg, repo, nil, nil, nil))
 	_, present = got["chunkedUpload"]
 	assert.False(t, present)
 
 	// 利用可能なら /api/meta と同じ shape で出す。
-	got = extract(t, frontendHTML(cfg, repo, nil, func() (int64, bool) { return 10 * 1024 * 1024, true }))
+	got = extract(t, frontendHTML(cfg, repo, nil, func() (int64, bool) { return 10 * 1024 * 1024, true }, nil))
 	require.NotNil(t, got["chunkedUpload"])
 	assert.Equal(t, float64(10*1024*1024), got["chunkedUpload"].(map[string]any)["chunkSize"])
 }
@@ -291,7 +291,7 @@ func TestFrontendHTML_EmbedsChunkedUploadCapability(t *testing.T) {
 func TestFrontendHTML_ExternalMediaProxyOriginInCSP(t *testing.T) {
 	serve := func(cfg *config.Config) string {
 		t.Helper()
-		handler := frontendHTML(cfg, testutil.NewMockMetaRepository(), nil, nil)
+		handler := frontendHTML(cfg, testutil.NewMockMetaRepository(), nil, nil, nil)
 		e := echo.New()
 		rec := httptest.NewRecorder()
 		c := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)
@@ -343,7 +343,7 @@ func TestFrontendHTML_CaptchaOriginsInCSP(t *testing.T) {
 		if meta != nil {
 			repo.Meta = meta
 		}
-		handler := frontendHTML(cfg, repo, nil, nil)
+		handler := frontendHTML(cfg, repo, nil, nil, nil)
 		e := echo.New()
 		rec := httptest.NewRecorder()
 		c := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)
@@ -527,7 +527,7 @@ func TestFrontendHTML_OpenGraph(t *testing.T) {
 		e := echo.New()
 		rec := httptest.NewRecorder()
 		c := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)
-		require.NoError(t, frontendHTML(cfg, repo, nil, nil)(c))
+		require.NoError(t, frontendHTML(cfg, repo, nil, nil, nil)(c))
 		return rec.Body.String()
 	}
 
@@ -598,7 +598,7 @@ func TestFrontendHTML_UpstreamHeadTags(t *testing.T) {
 		e := echo.New()
 		rec := httptest.NewRecorder()
 		c := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)
-		require.NoError(t, frontendHTML(cfg, repo, nil, nil)(c))
+		require.NoError(t, frontendHTML(cfg, repo, nil, nil, nil)(c))
 		return rec.Body.String()
 	}
 
@@ -620,7 +620,7 @@ func TestFrontendHTML_UpstreamHeadTags(t *testing.T) {
 		e := echo.New()
 		rec := httptest.NewRecorder()
 		c := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)
-		require.NoError(t, frontendHTML(trailing, repo, nil, nil)(c))
+		require.NoError(t, frontendHTML(trailing, repo, nil, nil, nil)(c))
 
 		assert.Contains(t, rec.Body.String(), `href="https://example.test/opensearch.xml"`)
 		assert.NotContains(t, rec.Body.String(), "//opensearch.xml")
@@ -692,7 +692,7 @@ func TestRenderFrontendShell_Overrides(t *testing.T) {
 		e := echo.New()
 		rec := httptest.NewRecorder()
 		c := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)
-		require.NoError(t, renderFrontendShell(c, cfg, repo, nil, nil, frontendutil.ClientEntryInfo{}, ov))
+		require.NoError(t, renderFrontendShell(c, cfg, repo, nil, nil, nil, frontendutil.ClientEntryInfo{}, ov))
 		return rec.Body.String()
 	}
 
@@ -757,7 +757,7 @@ func TestRenderFrontendShell_CacheControl(t *testing.T) {
 		e := echo.New()
 		rec := httptest.NewRecorder()
 		c := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)
-		require.NoError(t, renderFrontendShell(c, cfg, repo, nil, nil, frontendutil.ClientEntryInfo{}, ov))
+		require.NoError(t, renderFrontendShell(c, cfg, repo, nil, nil, nil, frontendutil.ClientEntryInfo{}, ov))
 		return rec
 	}
 
@@ -792,7 +792,7 @@ func TestFrontendConsentHTML_IsNotCacheable(t *testing.T) {
 	e := echo.New()
 	rec := httptest.NewRecorder()
 	c := e.NewContext(httptest.NewRequest(http.MethodGet, "/oauth/authorize", nil), rec)
-	require.NoError(t, frontendConsentHTML(cfg, repo, nil, nil)(c, oauth.ConsentMeta{
+	require.NoError(t, frontendConsentHTML(cfg, repo, nil, nil, nil)(c, oauth.ConsentMeta{
 		TransactionID: "tx-secret",
 		ClientName:    "Test App",
 		Scope:         "read:account",
@@ -825,7 +825,7 @@ func TestFrontendHTML_SplashIgnoresThemeColor(t *testing.T) {
 	evil := "red}body{display:none"
 	repo.Meta = &model.Meta{ID: "x", ThemeColor: &evil}
 
-	handler := frontendHTML(cfg, repo, nil, nil)
+	handler := frontendHTML(cfg, repo, nil, nil, nil)
 	e := echo.New()
 	rec := httptest.NewRecorder()
 	c := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)
@@ -856,7 +856,7 @@ func TestFrontendHTML_InlinesLoaderAssets(t *testing.T) {
 	t.Cleanup(frontendutil.ResetLoaderCacheForTest)
 
 	cfg := &config.Config{URL: "https://example.test", Version: "0.0.1-test"}
-	handler := frontendHTML(cfg, testutil.NewMockMetaRepository(), nil, nil)
+	handler := frontendHTML(cfg, testutil.NewMockMetaRepository(), nil, nil, nil)
 
 	e := echo.New()
 	rec := httptest.NewRecorder()
@@ -879,7 +879,7 @@ func TestFrontendHTML_FallsBackToLoaderReferences(t *testing.T) {
 	t.Cleanup(frontendutil.ResetLoaderCacheForTest)
 
 	cfg := &config.Config{URL: "https://example.test", Version: "0.0.1-test"}
-	handler := frontendHTML(cfg, testutil.NewMockMetaRepository(), nil, nil)
+	handler := frontendHTML(cfg, testutil.NewMockMetaRepository(), nil, nil, nil)
 
 	e := echo.New()
 	rec := httptest.NewRecorder()
@@ -903,7 +903,7 @@ func TestFrontendHTML_DevModeKeepsReferences(t *testing.T) {
 	t.Cleanup(frontendutil.ResetLoaderCacheForTest)
 
 	cfg := &config.Config{URL: "https://example.test", Version: "0.0.1-test", Dev: true}
-	handler := frontendHTML(cfg, testutil.NewMockMetaRepository(), nil, nil)
+	handler := frontendHTML(cfg, testutil.NewMockMetaRepository(), nil, nil, nil)
 
 	e := echo.New()
 	rec := httptest.NewRecorder()
@@ -924,7 +924,7 @@ func TestFrontendHTML_PacksThemeAsJSON(t *testing.T) {
 	repo.Meta = &model.Meta{ID: "x", DefaultDarkTheme: &theme}
 
 	cfg := &config.Config{URL: "https://example.test", Version: "0.0.1-test"}
-	handler := frontendHTML(cfg, repo, nil, nil)
+	handler := frontendHTML(cfg, repo, nil, nil, nil)
 
 	e := echo.New()
 	rec := httptest.NewRecorder()
@@ -947,7 +947,7 @@ func TestFrontendHTML_BrokenThemeBecomesNull(t *testing.T) {
 	repo.Meta = &model.Meta{ID: "x", DefaultDarkTheme: &broken}
 
 	cfg := &config.Config{URL: "https://example.test", Version: "0.0.1-test"}
-	handler := frontendHTML(cfg, repo, nil, nil)
+	handler := frontendHTML(cfg, repo, nil, nil, nil)
 
 	e := echo.New()
 	rec := httptest.NewRecorder()
@@ -986,7 +986,7 @@ func TestFrontendHTML_EmbedsBuildRevision(t *testing.T) {
 	cfg := &config.Config{URL: "https://example.test", Version: "0.0.1-test"}
 	repo := testutil.NewMockMetaRepository()
 	repo.Meta = &model.Meta{ID: "x"}
-	handler := frontendHTML(cfg, repo, nil, nil)
+	handler := frontendHTML(cfg, repo, nil, nil, nil)
 
 	e := echo.New()
 	rec := httptest.NewRecorder()
@@ -1014,7 +1014,7 @@ func TestFrontendHTML_ProvidesTarballIgnoresConfigFlag(t *testing.T) {
 
 	repo := testutil.NewMockMetaRepository()
 	repo.Meta = &model.Meta{ID: "x"}
-	handler := frontendHTML(cfg, repo, nil, nil)
+	handler := frontendHTML(cfg, repo, nil, nil, nil)
 
 	e := echo.New()
 	rec := httptest.NewRecorder()
@@ -1037,7 +1037,7 @@ func TestFrontendHTML_CreditImageOriginsInCSP(t *testing.T) {
 		URL: "https://example.test", Version: "0.0.1-test",
 		FrontendContentSecurityPolicy: CSPModeEnforce,
 	}
-	handler := frontendHTML(cfg, testutil.NewMockMetaRepository(), nil, nil)
+	handler := frontendHTML(cfg, testutil.NewMockMetaRepository(), nil, nil, nil)
 	e := echo.New()
 	rec := httptest.NewRecorder()
 	c := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)
@@ -1089,7 +1089,7 @@ func TestRenderFrontendShell_ClientPreloads(t *testing.T) {
 		e := echo.New()
 		rec := httptest.NewRecorder()
 		c := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)
-		require.NoError(t, renderFrontendShell(c, cfg, testutil.NewMockMetaRepository(), nil, nil, entry, shellOverrides{}))
+		require.NoError(t, renderFrontendShell(c, cfg, testutil.NewMockMetaRepository(), nil, nil, nil, entry, shellOverrides{}))
 		return rec.Body.String(), rec.Header().Get("Content-Security-Policy")
 	}
 	scriptHash := func(t *testing.T, body string) string {

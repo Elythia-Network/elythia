@@ -445,7 +445,7 @@ func TestFrontendCSP_HashesCoverRenderedInlineScripts(t *testing.T) {
 		Version:                       "0.0.1-test",
 		FrontendContentSecurityPolicy: CSPModeEnforce,
 	}
-	handler := frontendHTML(cfg, testutil.NewMockMetaRepository(), nil, nil)
+	handler := frontendHTML(cfg, testutil.NewMockMetaRepository(), nil, nil, nil)
 
 	e := echo.New()
 	rec := httptest.NewRecorder()

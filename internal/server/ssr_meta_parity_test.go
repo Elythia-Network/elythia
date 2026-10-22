@@ -18,7 +18,7 @@ import (
 // buildSSRMetaKeys renders the embedded meta and returns its top-level keys.
 func buildSSRMetaKeys(t *testing.T, cfg *config.Config, m *model.Meta) map[string]any {
 	t.Helper()
-	raw := buildMetaJSON(cfg, m, nil, nil)
+	raw := buildMetaJSON(cfg, m, nil, nil, nil)
 	var out map[string]any
 	require.NoError(t, json.Unmarshal([]byte(raw), &out))
 	return out
