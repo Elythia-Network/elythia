@@ -165,3 +165,68 @@ func TestNodeInfoPeerLister_BoundsHosts(t *testing.T) {
 		require.LessOrEqual(t, n, peerLookupMaxHosts, "i=%d", i)
 	}
 }
+
+// seqNodeInfo declares only "demo" on the first request and both plugins
+// after it. When block is set, the first request waits until release is
+// closed (after entered is closed).
+func seqNodeInfo(block bool, entered, release chan struct{}) http.HandlerFunc {
+	var n atomic.Int32
+	return func(w http.ResponseWriter, _ *http.Request) {
+		if n.Add(1) == 1 {
+			if block {
+				close(entered)
+				<-release
+			}
+			_, _ = w.Write([]byte(`{"metadata":{"elythiaPlugins":["demo"]}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"metadata":{"elythiaPlugins":["demo","other"]}}`))
+	}
+}
+
+func TestNodeInfoPeerLister_DropLocal(t *testing.T) {
+	l, hits := testLister(t, seqNodeInfo(false, nil, nil))
+
+	got, err := l.Plugins(context.Background(), "other.example")
+	require.NoError(t, err)
+	require.Equal(t, []string{"demo"}, got)
+	got, err = l.Plugins(context.Background(), "other.example")
+	require.NoError(t, err)
+	require.Equal(t, []string{"demo"}, got, "前提: 2 回目はキャッシュから返る")
+
+	l.DropLocal()
+	got, err = l.Plugins(context.Background(), "other.example")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"demo", "other"}, got, "the answers were not dropped")
+	assert.Equal(t, int32(2), hits.Load())
+}
+
+// A drop while nodeinfo is fetched keeps the answer out of the cache.
+func TestNodeInfoPeerLister_DropLocalDuringFetchIsNotStored(t *testing.T) {
+	entered, release := make(chan struct{}), make(chan struct{})
+	l, hits := testLister(t, seqNodeInfo(true, entered, release))
+
+	done := make(chan []string, 1)
+	go func() {
+		got, _ := l.Plugins(context.Background(), "other.example")
+		done <- got
+	}()
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the first fetch never reached the server")
+	}
+	l.DropLocal()
+	close(release)
+	select {
+	case got := <-done:
+		require.Equal(t, []string{"demo"}, got)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the first fetch never returned")
+	}
+
+	got, err := l.Plugins(context.Background(), "other.example")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"demo", "other"}, got, "the answer fetched before the drop was stored")
+	assert.Equal(t, int32(2), hits.Load())
+}

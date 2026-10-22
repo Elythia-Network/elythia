@@ -910,7 +910,7 @@ func TestFetchRSS_ConcurrencyAllowsJoin(t *testing.T) {
 	require.Eventually(t, func() bool {
 		h.inflightMu.Lock()
 		defer h.inflightMu.Unlock()
-		return h.inflight[target] == 2 || len(results) == 2
+		return h.inflight[flightKey(0, target)] == 2 || len(results) == 2
 	}, time.Second, time.Millisecond)
 	close(release)
 	for range 2 {

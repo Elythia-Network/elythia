@@ -85,6 +85,9 @@ type Handler struct {
 	// hit path で json.Marshal を回避するため pre-serialized で保持する。
 	cacheMu sync.Mutex
 	cache   map[string]cacheEntry
+	// cacheGen は DropLocal で進める世代の番号 (#3776)。取得は cacheMu の外で
+	// 走るので、捨てる前に始めた取得の結果を、捨てた後に積まないために使う。
+	cacheGen uint64
 
 	// singleflight: 同一 URL への concurrent fetch を 1 つに集約する。
 	// upstream への thundering herd を防ぐため、cache miss 中に到着した
@@ -192,14 +195,20 @@ func (h *Handler) Fetch(c echo.Context) error {
 	}
 
 	// Cache hit fast path: TTL 内ならパースなしで JSON bytes をそのまま返す。
-	if body, ok := h.cacheGet(key); ok {
+	body, gen, ok := h.cacheGet(key)
+	if ok {
 		return writeCachedJSON(c, body)
 	}
+	// singleflight と inflight のキーに世代の番号を含める (#3776)。捨てた後の
+	// 呼び出しが、捨てる前に始まった取得に相乗りしないようにする。inflight の
+	// キーにも含めるのは、合流しない取得を「既存の flight への合流」と数えて、
+	// 同時に取得する数の上限を超えないようにするため。
+	flight := flightKey(gen, key)
 
 	// upstream 2026.7.0 の MAX_CONCURRENT_REQUESTS: distinct URL の同時 fetch
 	// が上限を超えたら 503。既存 flight への合流は数えない (upstream の
 	// inFlightRequests 共有と同じ)。
-	if !h.inflightEnter(key) {
+	if !h.inflightEnter(flight) {
 		return c.JSON(http.StatusServiceUnavailable, apierr.ErrorWithKind("FETCH_RSS_UNAVAILABLE", "RSS fetching is temporarily unavailable.", "91e6ff44-c63f-4725-9ad0-b7a40d7f7655", apierr.KindServer))
 	}
 	// 解放は「fetch 完了時点」で行いたい (レスポンス送信を上限内に含めると、
@@ -207,7 +216,7 @@ func (h *Handler) Fetch(c echo.Context) error {
 	// 無期限占有できる) が、singleflight は fn 内の panic を全 caller に再
 	// panic させるため defer 無しだと panic 経路でスロットが恒久リークする。
 	// OnceFunc で「早期解放 + panic-safe」を両立する。
-	leaveOnce := sync.OnceFunc(func() { h.inflightLeave(key) })
+	leaveOnce := sync.OnceFunc(func() { h.inflightLeave(flight) })
 	defer leaveOnce()
 
 	// singleflight で同 URL への concurrent miss を 1 fetch に集約する。
@@ -220,10 +229,10 @@ func (h *Handler) Fetch(c echo.Context) error {
 	// upstream HTTP を中断すると、その時点で A と一緒に sf.Do を待っている
 	// B/C/D も同じエラーを受け取って 502 になり、結果的に A が頻繁に切断する
 	// クライアントだと健康な feed でも 502 が返り続ける。
-	v, err, _ := h.sf.Do(key, func() (any, error) {
+	v, err, _ := h.sf.Do(flight, func() (any, error) {
 		// singleflight 入場時にキャッシュを再確認: 直前の coalesced 呼び出しが
 		// 既に populate していれば再 fetch しない。
-		if body, ok := h.cacheGet(key); ok {
+		if body, _, ok := h.cacheGet(key); ok {
 			return body, nil
 		}
 		fetchCtx, cancel := context.WithTimeout(context.Background(), FetchTimeout)
@@ -243,7 +252,7 @@ func (h *Handler) Fetch(c echo.Context) error {
 		// 成功時のみ cache に積む。エラーレスポンスは cache しない:
 		// short-lived な upstream 障害から復旧した直後に古い 502 を引きずらない
 		// ようにするのと、攻撃者がエラーを cache 占有に使うのを防ぐ。
-		h.cachePut(key, body)
+		h.cachePut(key, body, gen)
 		return body, nil
 	})
 	// upstream は .finally() を fetch promise に付けており、serialize /
@@ -360,6 +369,12 @@ func isDefaultPort(scheme, port string) bool {
 
 // inflightEnter registers the request against the concurrency cap. Returns
 // false if starting a fetch for a new distinct URL would exceed the cap.
+// flightKey is the singleflight and inflight key of a fetch of the feed key
+// started in the drop generation gen.
+func flightKey(gen uint64, key string) string {
+	return strconv.FormatUint(gen, 10) + "|" + key
+}
+
 func (h *Handler) inflightEnter(key string) bool {
 	h.inflightMu.Lock()
 	defer h.inflightMu.Unlock()
@@ -402,29 +417,43 @@ func writeCachedJSON(c echo.Context, body []byte) error {
 }
 
 // cacheGet returns a cached body and true if a fresh entry exists for the
-// key, else nil/false。Lazy expiration: 期限切れ entry は読んだタイミングで
+// key, else nil/false, together with the drop generation to pass to cachePut.
+// Lazy expiration: 期限切れ entry は読んだタイミングで
 // map から落とす (定期 sweeper を持たないので、再度同 URL が来た時に自然
 // 整理される)。
-func (h *Handler) cacheGet(key string) ([]byte, bool) {
+func (h *Handler) cacheGet(key string) ([]byte, uint64, bool) {
 	h.cacheMu.Lock()
 	defer h.cacheMu.Unlock()
 	e, ok := h.cache[key]
 	if !ok {
-		return nil, false
+		return nil, h.cacheGen, false
 	}
 	if h.now().After(e.expiresAt) {
 		delete(h.cache, key)
-		return nil, false
+		return nil, h.cacheGen, false
 	}
-	return e.body, true
+	return e.body, h.cacheGen, true
 }
 
-// cachePut stores the body keyed by url with TTL = h.cacheTTL。容量超過時は
-// 最古 expiresAt の entry を 1 件 evict する (LRU ではなく LFRU 近似で十分)。
-// O(N) sweep だが N <= cacheMaxLen で実用上問題なし。
-func (h *Handler) cachePut(key string, body []byte) {
+// DropLocal drops the feeds held by this process (#3776). The concurrency cap
+// (inflight) is not a cache and is kept. 他のプロセスへは伝えない。
+func (h *Handler) DropLocal() {
 	h.cacheMu.Lock()
 	defer h.cacheMu.Unlock()
+	h.cacheGen++
+	clear(h.cache)
+}
+
+// cachePut stores the body keyed by url with TTL = h.cacheTTL, unless the
+// cache was dropped since gen was read。容量超過時は
+// 最古 expiresAt の entry を 1 件 evict する (LRU ではなく LFRU 近似で十分)。
+// O(N) sweep だが N <= cacheMaxLen で実用上問題なし。
+func (h *Handler) cachePut(key string, body []byte, gen uint64) {
+	h.cacheMu.Lock()
+	defer h.cacheMu.Unlock()
+	if h.cacheGen != gen {
+		return
+	}
 	if _, exists := h.cache[key]; !exists && len(h.cache) >= h.cacheMaxLen {
 		h.evictOldestLocked()
 	}

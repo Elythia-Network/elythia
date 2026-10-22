@@ -2472,7 +2472,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	s.echo.GET("/opensearch.xml", webResHandler.OpenSearchXML)
 	s.echo.GET("/api.json", s.OpenAPISpec)
 	// Web Push の通知バッジ (#2345)。twemoji SVG を単色 PNG に焼いて返す。
-	s.echo.GET("/twemoji-badge/*", newTwemojiBadgeHandler(frontendutil.TwemojiDir()).Serve)
+	// 焼いた PNG をキャッシュの一覧に登録するので (#3776)、handler を変数に取り出す。
+	twemojiBadge := newTwemojiBadgeHandler(frontendutil.TwemojiDir())
+	s.echo.GET("/twemoji-badge/*", twemojiBadge.Serve)
 
 	s.echo.GET("/.well-known/webfinger", wellknownHandler.Webfinger)
 	s.echo.GET("/.well-known/host-meta", wellknownHandler.HostMeta)
@@ -2889,15 +2891,18 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	s.addCache("instanceActorSigner", cacheFromDB, instanceSigner)
 	// 管理画面と統計の系統 (#3738)。4 つとも DB を直接読むか、DB へ書いたことの印を
 	// 持つだけで、ほかのキャッシュの値を含まないので、捨てる順の制約は無い。投稿・
-	// タイムライン・通知の系統を最後に置いたままにするため、その前に置く。
+	// タイムライン・通知の系統より後に、それらの元になるキャッシュを置かないため、
+	// その前に置く。
 	s.addCache("driveUsage", cacheFromDB, driveUsage)
 	s.addCache("dbHealth", cacheFromDB, dbHealth)
 	s.addCache("statsCounts", cacheFromDB, statsHandler)
 	s.addCache("ipLogWindow", cacheFromDB, ipLogService)
 	// 投稿・タイムライン・通知の系統 (#3736)。アンテナ・push 購読・注目ノートの順位は
 	// DB (順位は Redis) を直接読む。**ストリームの直前のノートとタイムラインの JSON は、
-	// 最後に置く。** どちらも pack した利用者・ロール・絵文字・デコレーション・
-	// インスタンスを含むので、先に捨てると、間に来た pack が古い元から作り直して積む。
+	// pack の元になるキャッシュより後に置く。** どちらも pack した利用者・ロール・絵文字・
+	// デコレーション・インスタンスを含むので、先に捨てると、間に来た pack が古い元から
+	// 作り直して積む。この後に登録する外部とファイルの系統 (#3776) は、pack の元に
+	// ならない。
 	// タイムラインの JSON は opt-in で、有効にしたときだけ登録する。
 	s.addCache("antennas", cacheFromDB, cachedAntenna)
 	s.addCache("pushSubscriptions", cacheFromDB, webPushCache)
@@ -3708,6 +3713,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// プラグイン同士の通信 (#2537)。**署名・解決・ブロック判定は本体のものを
 	// そのまま使う** — inbox と同じ厳しさにするため、専用の実装を作らない。
+	// 相手のプラグイン一覧はキャッシュの一覧に登録するので (#3776)、変数に取り出す。
+	pluginPeers := newNodeInfoPeerLister(s.outboundClient(peerLookupTimeout), peered)
 	s.peerDeps = &pluginPeerDeps{
 		selfHost: s.config.Host,
 		client:   s.outboundClient(peerTimeout),
@@ -3717,13 +3724,28 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		signer:   instanceSigner,
 		// **こちらが持っているものだけ覚える。** 相手の nodeinfo は相手が
 		// 書いた値なので、そのまま持つと外から中身を膨らませられる。
-		remote:  newNodeInfoPeerLister(s.outboundClient(peerLookupTimeout), peered),
+		remote:  pluginPeers,
 		idGen:   idGen,
 		limiter: newPeerRateLimiter(),
 		// 送信はキューに積む (#2819)。**プロセス内の time.Sleep だと再起動を
 		// またげず、デプロイのたびに送信中のものが消える。**
 		enqueuer: s.queueClient,
 	}
+
+	// 外部とファイルの系統 (#3776)。RSS と peer のプラグイン一覧はここより前の登録の
+	// 並びの後で作るので、ここで登録する。5 つとも外から取った値か、ファイルを描いた
+	// 値だけを持ち、ほかのキャッシュの値を含まないので、捨てる順の制約は無い。
+	// プラグインの準備の return より前に置く (失敗しても一覧は揃える)。
+	s.addCache("urlPreview", cacheFromExternal, urlPreviewFetcher)
+	s.addCache("remoteStats", cacheFromExternal, remoteStatsFetcher)
+	s.addCache("fetchRSS", cacheFromExternal, fetchRSSHandler)
+	s.addCache("pluginPeers", cacheFromExternal, pluginPeers)
+	s.addCache("twemojiBadge", cacheFromFile, twemojiBadge)
+	s.crossProcessCaches.urlPreview = urlPreviewFetcher
+	s.crossProcessCaches.remoteStats = remoteStatsFetcher
+	s.crossProcessCaches.fetchRSS = fetchRSSHandler
+	s.crossProcessCaches.pluginPeers = pluginPeers
+	s.crossProcessCaches.twemojiBadge = twemojiBadge
 
 	// プラグインが管理するアカウント (#3468)。作成は signup、画像はドライブ、
 	// プロフィールはプロセス内の i/update、削除は admin/delete-account と同じ
@@ -4729,4 +4751,13 @@ type crossProcessCaches struct {
 	dbHealth   *dbhealth.Service
 	stats      *stats.Handler
 	ipLog      *iplog.Service
+	// urlPreview / remoteStats / fetchRSS / pluginPeers / twemojiBadge は外部と
+	// ファイルの系統のキャッシュ (#3776)。キャッシュの一覧のテストが、登録した値と
+	// 同じかを見るため。RSS と peer のプラグイン一覧は setupRoutes で s.crossProcessCaches
+	// を組む位置より後で作るので、5 つとも一覧に登録する所でフィールドに入れる。
+	urlPreview   *coreurlpreview.Fetcher
+	remoteStats  *corefederation.RemoteStatsFetcher
+	fetchRSS     *apifetchrss.Handler
+	pluginPeers  *nodeInfoPeerLister
+	twemojiBadge *twemojiBadgeHandler
 }

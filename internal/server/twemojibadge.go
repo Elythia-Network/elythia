@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/labstack/echo/v4"
@@ -50,6 +51,13 @@ type twemojiBadgeHandler struct {
 	// SVG のラスタライズと 512x512 のピクセルループ 2 周で 15ms 前後かかる。
 	// 名前空間は同梱ファイルで固定なので、素直に全部持ってよい。
 	cache *lru.Cache[string, []byte]
+	// mu は gen を守る。cache は自前で排他するが、番号を比べることと積むことを
+	// 1 つのロックの中で行うために使う。
+	mu sync.Mutex
+	// gen は DropLocal で進める世代の番号 (#3776)。読み込みと描画はロックの外で
+	// 走るので、捨てる前に読んだファイルの描画を、捨てた後に積まないために使う。
+	// TTL が無いので、積むと差し替えたファイルを描き直さないまま残り続ける。
+	gen uint64
 }
 
 func newTwemojiBadgeHandler(dir string) *twemojiBadgeHandler {
@@ -102,6 +110,10 @@ func (h *twemojiBadgeHandler) badge(base string) ([]byte, error) {
 			return out, nil
 		}
 	}
+	// 世代の番号はファイルを読む前に読む。
+	h.mu.Lock()
+	gen := h.gen
+	h.mu.Unlock()
 	svg, err := os.ReadFile(filepath.Join(h.dir, base+".svg"))
 	if err != nil {
 		return nil, echo.NewHTTPError(http.StatusNotFound)
@@ -111,9 +123,24 @@ func (h *twemojiBadgeHandler) badge(base string) ([]byte, error) {
 		return nil, echo.NewHTTPError(http.StatusInternalServerError)
 	}
 	if h.cache != nil {
-		h.cache.Add(base, out)
+		h.mu.Lock()
+		if h.gen == gen {
+			h.cache.Add(base, out)
+		}
+		h.mu.Unlock()
 	}
 	return out, nil
+}
+
+// DropLocal drops the rendered badges held by this process (#3776), so the
+// next request reads the file again. 他のプロセスへは伝えない。
+func (h *twemojiBadgeHandler) DropLocal() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.gen++
+	if h.cache != nil {
+		h.cache.Purge()
+	}
 }
 
 // renderTwemojiBadge rasterises the SVG and applies the upstream pipeline.
