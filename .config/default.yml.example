@@ -97,8 +97,9 @@ port: 3000
 # notifications/*, app/*, auth/*, miauth/gen-token, my/apps, sw/*,
 # announcements, promo/read, email-address/available, username/available,
 # ap/*, bubble-game/ranking, bubble-game/register, federation/* except
-# federation/instances, pages/*, page-push) are validated and rejected
-# regardless of this setting. See docs/param-shadow.md.
+# federation/instances, pages/*, page-push and the read-only top-level
+# endpoints such as meta and emojis) are validated and rejected regardless of
+# this setting. See docs/param-shadow.md.
 #disableParamShadow: false
 # Interval of the summary written to the log, in seconds (default: 600).
 #paramShadowLogSeconds: 600

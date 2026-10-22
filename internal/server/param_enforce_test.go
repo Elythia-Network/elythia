@@ -223,9 +223,10 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	}
 }
 
-// TestEnforcedGETMatchesUpstream sends GET queries to the enforced charts/*,
-// bubble-game/ranking and federation/stats endpoints of a real server and
-// compares the answers with upstream's: the cast step (JSON.parse of integer params, 0b5f1631-… on failure), then
+// TestEnforcedGETMatchesUpstream sends GET queries to the enforced allowGet
+// endpoints of a real server (charts/*, bubble-game/ranking, federation/stats
+// and the top-level emoji, emojis, fetch-rss, get-online-users-count,
+// retention and server-info) and compares the answers with upstream's: the cast step (JSON.parse of integer params, 0b5f1631-… on failure), then
 // ajv on the cast values. The corpus has JSON bodies only, so the queries
 // are written out here (#3744).
 func TestEnforcedGETMatchesUpstream(t *testing.T) {
@@ -242,6 +243,9 @@ func TestEnforcedGETMatchesUpstream(t *testing.T) {
 		// and info.reason upstream answers with.
 		ok                bool
 		id, param, reason string
+		// code: the error the handler answers an accepted query with,
+		// instead of 200 (an emoji that does not exist and the like).
+		code string
 	}{
 		{query: "charts/notes?span=day", ok: true},
 		{query: "charts/notes?span=day&limit=10.0", ok: true},
@@ -283,6 +287,20 @@ func TestEnforcedGETMatchesUpstream(t *testing.T) {
 		{query: "federation/stats?limit=null", id: ajvID, param: "#/properties/limit/type", reason: "must be integer"},
 		{query: "federation/stats?limit=0", id: ajvID, param: "#/properties/limit/minimum", reason: "must be >= 1"},
 		{query: "federation/stats?limit=101", id: ajvID, param: "#/properties/limit/maximum", reason: "must be <= 100"},
+		// 参照だけのトップレベルのendpoint(#3774)。
+		{query: "emoji?name=hello", ok: true, code: "NO_SUCH_EMOJI"},
+		{query: "emoji?name=", ok: true, code: "NO_SUCH_EMOJI"},
+		{query: "emoji", id: ajvID, param: "#/required", reason: "must have required property 'name'"},
+		{query: "emoji?name=a&name=b", id: ajvID, param: "#/properties/name/type", reason: "must be string"},
+		{query: "fetch-rss?url=hello", ok: true, code: "INVALID_URL"},
+		{query: "fetch-rss?url=", ok: true, code: "INVALID_URL"},
+		{query: "fetch-rss", id: ajvID, param: "#/required", reason: "must have required property 'url'"},
+		{query: "fetch-rss?url=a&url=b", id: ajvID, param: "#/properties/url/type", reason: "must be string"},
+		{query: "emojis", ok: true},
+		{query: "emojis?x=1", ok: true},
+		{query: "get-online-users-count", ok: true},
+		{query: "retention", ok: true},
+		{query: "server-info", ok: true},
 	} {
 		req := httptest.NewRequest(http.MethodGet, "/api/"+tc.query, nil)
 		rec := httptest.NewRecorder()
@@ -298,6 +316,11 @@ func TestEnforcedGETMatchesUpstream(t *testing.T) {
 			} `json:"error"`
 		}
 		_ = json.Unmarshal(rec.Body.Bytes(), &env)
+		if tc.ok && tc.code != "" {
+			assert.Equal(t, http.StatusBadRequest, rec.Code, "%s: %s", tc.query, rec.Body.String())
+			assert.Equal(t, tc.code, env.Error.Code, "%s: %s", tc.query, rec.Body.String())
+			continue
+		}
 		if tc.ok {
 			assert.Equal(t, http.StatusOK, rec.Code, "%s: %s", tc.query, rec.Body.String())
 			continue
