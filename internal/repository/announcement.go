@@ -17,11 +17,11 @@ type AnnouncementRepository interface {
 	// (userId IS NULL) plus those targeted at this user. Used by
 	// /api/announcements so per-user announcements do not leak to unrelated
 	// users.
-	ListForUser(userID string, activeOnly bool, limit, offset int, sinceID, untilID string) ([]*model.Announcement, error)
+	ListForUser(userID string, activeOnly bool, limit int, sinceID, untilID string) ([]*model.Announcement, error)
 	// ListGlobal returns only global announcements (userId IS NULL). Used
 	// for unauthenticated /api/announcements requests so targeted
 	// announcements are never exposed.
-	ListGlobal(activeOnly bool, limit, offset int, sinceID, untilID string) ([]*model.Announcement, error)
+	ListGlobal(activeOnly bool, limit int, sinceID, untilID string) ([]*model.Announcement, error)
 	// ListForAdmin returns announcements for the admin/announcements/list
 	// endpoint. When userID is non-empty, restricts to "userId" = ? (per-
 	// user announcements only). When empty, restricts to "userId" IS NULL
@@ -93,7 +93,7 @@ func (r *announcementRepository) List(activeOnly bool, limit, offset int, sinceI
 	return announcements, nil
 }
 
-func (r *announcementRepository) ListGlobal(activeOnly bool, limit, offset int, sinceID, untilID string) ([]*model.Announcement, error) {
+func (r *announcementRepository) ListGlobal(activeOnly bool, limit int, sinceID, untilID string) ([]*model.Announcement, error) {
 	q := r.db.Where(`"userId" IS NULL`).Order(paginationOrder(sinceID, untilID, "id"))
 	// #2106 N7: activeOnly は upstream announcements.ts の ps.isActive (default true)
 	// に相当する「フィルタ値」。常に等値比較を当てる (true=active のみ / false=inactive
@@ -112,9 +112,6 @@ func (r *announcementRepository) ListGlobal(activeOnly bool, limit, offset int, 
 	if untilID != "" {
 		q = q.Where("id < ?", untilID)
 	}
-	if sinceID == "" && untilID == "" && offset > 0 {
-		q = q.Offset(offset)
-	}
 	var announcements []*model.Announcement
 	if err := q.Find(&announcements).Error; err != nil {
 		return nil, err
@@ -122,7 +119,7 @@ func (r *announcementRepository) ListGlobal(activeOnly bool, limit, offset int, 
 	return announcements, nil
 }
 
-func (r *announcementRepository) ListForUser(userID string, activeOnly bool, limit, offset int, sinceID, untilID string) ([]*model.Announcement, error) {
+func (r *announcementRepository) ListForUser(userID string, activeOnly bool, limit int, sinceID, untilID string) ([]*model.Announcement, error) {
 	// GORMは連続.WhereをANDで繋ぐがraw SQL側のORはデフォルトでは括弧で
 	// 囲まれないので、明示的に囲まないとAND側の他フィルタ(isActive等)を
 	// バイパスしてしまう(SQL優先順位: AND > OR)。note.go:423と同じ gotcha。
@@ -143,9 +140,6 @@ func (r *announcementRepository) ListForUser(userID string, activeOnly bool, lim
 	}
 	if untilID != "" {
 		q = q.Where("id < ?", untilID)
-	}
-	if sinceID == "" && untilID == "" && offset > 0 {
-		q = q.Offset(offset)
 	}
 	var announcements []*model.Announcement
 	if err := q.Find(&announcements).Error; err != nil {
