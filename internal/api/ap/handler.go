@@ -457,21 +457,24 @@ func wantsActivityJSON(accept string) bool {
 // APIGet handles POST /api/ap/get — Admin専用。URIからActivityPubオブジェクトを取得。
 func (h *Handler) APIGet(c echo.Context) error {
 	var req struct {
-		URI string `json:"uri"`
+		URI *string `json:"uri"`
 	}
-	if err := c.Bind(&req); err != nil || req.URI == "" {
+	// 空の uri は本家の paramDef を通り、本家では new URL が投げて 500 になる。
+	// Elythia は他の解決できない URI と同じく NO_SUCH_OBJECT を返す (#3768)。
+	if err := c.Bind(&req); err != nil || req.URI == nil {
 		return apierr.JSONInvalidParam(c)
 	}
+	uri := *req.URI
 
 	// ローカルURIからオブジェクトを解決
-	obj, err := h.resolveLocal(req.URI)
+	obj, err := h.resolveLocal(uri)
 	if err == nil {
 		return c.JSON(http.StatusOK, obj)
 	}
 
 	// リモートフェッチ
 	if h.remoteFetcher != nil {
-		data, err := h.remoteFetcher.FetchObject(req.URI)
+		data, err := h.remoteFetcher.FetchObject(uri)
 		if err == nil {
 			var parsed map[string]any
 			if json.Unmarshal(data, &parsed) == nil {
@@ -486,15 +489,18 @@ func (h *Handler) APIGet(c echo.Context) error {
 // APIShow handles POST /api/ap/show — URIからUser/Noteを解決して返す。
 func (h *Handler) APIShow(c echo.Context) error {
 	var req struct {
-		URI string `json:"uri"`
+		URI *string `json:"uri"`
 	}
-	if err := c.Bind(&req); err != nil || req.URI == "" {
+	// 空の uri は本家の paramDef を通り、本家では new URL が投げて 500 になる。
+	// Elythia は他の解析できない URI と同じく URI_INVALID を返す (#3768)。
+	if err := c.Bind(&req); err != nil || req.URI == nil {
 		return apierr.JSONInvalidParam(c)
 	}
+	uri := *req.URI
 
 	// URI を解析して host を得る。http(s) でない / host 無しは URI_INVALID
 	// (upstream uriInvalid 1a5eab56)。
-	_, hostErr := apShowURIHost(req.URI)
+	_, hostErr := apShowURIHost(uri)
 	if hostErr != nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("URI_INVALID", "URI is invalid.", "1a5eab56-e47b-48c2-8d5e-217b897d70db"))
 	}
@@ -502,12 +508,12 @@ func (h *Handler) APIShow(c echo.Context) error {
 	// skip し、remote host が blocked / 非 federation、または受信を拒否する
 	// ソフトウェア (Elythia 独自、#3563) なら FEDERATION_NOT_ALLOWED (974b799e) を
 	// 返す。gate 未配線なら全許可 (legacy)。
-	if h.federationDenied(req.URI) {
+	if h.federationDenied(uri) {
 		return c.JSON(http.StatusBadRequest, apierr.Error("FEDERATION_NOT_ALLOWED", "Federation for this host is not allowed.", "974b799e-1a29-4889-b706-18d4dd93e266"))
 	}
 
 	// ローカルのノートURIかチェック (/notes/ を含む)
-	if noteID := extractLocalID(req.URI, "/notes/"); noteID != "" {
+	if noteID := extractLocalID(uri, "/notes/"); noteID != "" {
 		n, err := h.queryService.Show(nil, noteID)
 		if err == nil && n.UserHost == nil {
 			return c.JSON(http.StatusOK, map[string]any{
@@ -518,7 +524,7 @@ func (h *Handler) APIShow(c echo.Context) error {
 	}
 
 	// ローカルのユーザーURIかチェック (/users/ を含む)
-	if userID := extractLocalID(req.URI, "/users/"); userID != "" {
+	if userID := extractLocalID(uri, "/users/"); userID != "" {
 		bundle, err := h.userService.ShowByID(userID)
 		if err == nil && bundle.User.Host == nil {
 			return c.JSON(http.StatusOK, map[string]any{
@@ -537,7 +543,7 @@ func (h *Handler) APIShow(c echo.Context) error {
 	// NO_SUCH_OBJECT ではなく REQUEST_FAILED (81b539cf) を返すための記録。
 	fetchRequestFailed := false
 	if h.remoteFetcher != nil {
-		data, fetchErr := h.remoteFetcher.FetchObject(req.URI)
+		data, fetchErr := h.remoteFetcher.FetchObject(uri)
 		switch {
 		case fetchErr != nil:
 			// 404 / 410 は「不在」なので NO_SUCH_OBJECT 経路へ。それ以外は
@@ -571,7 +577,7 @@ func (h *Handler) APIShow(c echo.Context) error {
 			// #2662)。
 			case "Note", "Question", "Article", "Audio", "Document", "Image", "Page", "Video", "Event":
 				if h.remoteResolver != nil {
-					if remoteNote, err := h.remoteResolver.ResolveNoteAllowCrossHost(req.URI); err == nil {
+					if remoteNote, err := h.remoteResolver.ResolveNoteAllowCrossHost(uri); err == nil {
 						return c.JSON(http.StatusOK, map[string]any{
 							"type":   "Note",
 							"object": h.packNoteForAPI(middleware.GetUser(c), remoteNote),
@@ -591,7 +597,7 @@ func (h *Handler) APIShow(c echo.Context) error {
 				})
 			case "Person", "Service", "Application", "Organization", "Group":
 				if h.remoteResolver != nil {
-					if remoteUser, err := h.remoteResolver.ResolveActorAllowCrossHost(req.URI); err == nil {
+					if remoteUser, err := h.remoteResolver.ResolveActorAllowCrossHost(uri); err == nil {
 						return c.JSON(http.StatusOK, map[string]any{
 							"type":   "User",
 							"object": h.packUserForAPI(middleware.GetUser(c), remoteUser, h.userService.GetProfile(remoteUser.ID)),
@@ -605,7 +611,7 @@ func (h *Handler) APIShow(c echo.Context) error {
 	// フェッチ失敗 or Type 不明の場合は ResolveActor を試す (webfinger 経由の
 	// /@user URL に対する fetch が失敗するケースがあるため)。
 	if h.remoteResolver != nil {
-		if remoteUser, err := h.remoteResolver.ResolveActorAllowCrossHost(req.URI); err == nil {
+		if remoteUser, err := h.remoteResolver.ResolveActorAllowCrossHost(uri); err == nil {
 			return c.JSON(http.StatusOK, map[string]any{
 				"type":   "User",
 				"object": h.packUserForAPI(middleware.GetUser(c), remoteUser, h.userService.GetProfile(remoteUser.ID)),
