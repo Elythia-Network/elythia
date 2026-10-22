@@ -48,12 +48,12 @@ func sameOriginURL(base, u string) bool {
 // proxyAccountResolver is used to populate the embedded meta JSON's
 // proxyAccountName field; passing nil leaves the value as null (appropriate
 // for pre-setup instances).
-func frontendHTML(cfg *config.Config, metaRepo repository.MetaRepository, proxyAccountResolver meta.ProxyAccountResolver, chunkedUpload meta.ChunkedUploadCapability) echo.HandlerFunc {
+func frontendHTML(cfg *config.Config, metaRepo repository.MetaRepository, proxyAccountResolver meta.ProxyAccountResolver, chunkedUpload meta.ChunkedUploadCapability, setup *meta.SetupDetector) echo.HandlerFunc {
 	// ビルド済みアセットからCLIENT_ENTRYを取得 (dev モードでは常に dev server を見る)
 	clientEntry := clientEntryFor(cfg)
 
 	return func(c echo.Context) error {
-		return renderFrontendShell(c, cfg, metaRepo, proxyAccountResolver, chunkedUpload, clientEntry, shellOverrides{})
+		return renderFrontendShell(c, cfg, metaRepo, proxyAccountResolver, chunkedUpload, setup, clientEntry, shellOverrides{})
 	}
 }
 
@@ -135,7 +135,7 @@ const splashMarkup = `<div id="splash">
 </div>`
 
 // renderFrontendShell renders the Misskey frontend SPA shell.
-func renderFrontendShell(c echo.Context, cfg *config.Config, metaRepo repository.MetaRepository, proxyAccountResolver meta.ProxyAccountResolver, chunkedUpload meta.ChunkedUploadCapability, clientEntry frontendutil.ClientEntryInfo, ov shellOverrides) error {
+func renderFrontendShell(c echo.Context, cfg *config.Config, metaRepo repository.MetaRepository, proxyAccountResolver meta.ProxyAccountResolver, chunkedUpload meta.ChunkedUploadCapability, setup *meta.SetupDetector, clientEntry frontendutil.ClientEntryInfo, ov shellOverrides) error {
 	instanceName := config.DisplayName
 	// og:description の既定値は upstream views/_.ts の defaultDescription。
 	// `<meta name="description">` の方は upstream と同じく meta.description が
@@ -212,7 +212,7 @@ func renderFrontendShell(c echo.Context, cfg *config.Config, metaRepo repository
 			}
 			prefetchTags += fmt.Sprintf(`<link rel="prefetch" as="image" href="%s">`, stdhtml.EscapeString(*u)) + "\n"
 		}
-		metaJSON = buildMetaJSON(cfg, m, proxyAccountResolver, chunkedUpload)
+		metaJSON = buildMetaJSON(cfg, m, proxyAccountResolver, chunkedUpload, setup)
 		// 有効な captcha 業者の origin (#2502)。無いと enforce で captcha の
 		// script が読めずサインアップが壊れる。
 		captchaEx := captchaCSPExtras(m.EnableHcaptcha, m.EnableRecaptcha, m.EnableTurnstile)
@@ -381,7 +381,7 @@ func renderFrontendShell(c echo.Context, cfg *config.Config, metaRepo repository
 // SPA shell with the misskey:oauth:* meta tags injected, so the frontend's
 // OAuth component can render the authorization prompt (#1899). Values are
 // HTML-escaped (client name/logo are attacker-suppliable via discovery).
-func frontendConsentHTML(cfg *config.Config, metaRepo repository.MetaRepository, proxyAccountResolver meta.ProxyAccountResolver, chunkedUpload meta.ChunkedUploadCapability) oauth.ConsentRenderer {
+func frontendConsentHTML(cfg *config.Config, metaRepo repository.MetaRepository, proxyAccountResolver meta.ProxyAccountResolver, chunkedUpload meta.ChunkedUploadCapability, setup *meta.SetupDetector) oauth.ConsentRenderer {
 	clientEntry := clientEntryFor(cfg)
 	return func(c echo.Context, m oauth.ConsentMeta) error {
 		var sb strings.Builder
@@ -394,7 +394,7 @@ func frontendConsentHTML(cfg *config.Config, metaRepo repository.MetaRepository,
 		// **同意画面は共有キャッシュに載せない。** transaction id を含む HTML が
 		// CDN に載ると別の利用者に配られる。upstream も OAuth 側で no-store を
 		// 出している (OAuth2ProviderService.ts:322)。
-		return renderFrontendShell(c, cfg, metaRepo, proxyAccountResolver, chunkedUpload, clientEntry, shellOverrides{
+		return renderFrontendShell(c, cfg, metaRepo, proxyAccountResolver, chunkedUpload, setup, clientEntry, shellOverrides{
 			Head:         sb.String(),
 			CacheControl: "no-store",
 		})
@@ -404,7 +404,7 @@ func frontendConsentHTML(cfg *config.Config, metaRepo repository.MetaRepository,
 // buildMetaJSON constructs the /api/meta equivalent JSON for inline embedding.
 // /api/meta ハンドラ (meta/handler.go) と完全に同じフィールドを返す。
 // フロントエンドはこのJSONを先に読んで /api/meta の呼び出しを省略する。
-func buildMetaJSON(cfg *config.Config, m *model.Meta, proxyAccountResolver meta.ProxyAccountResolver, chunkedUpload meta.ChunkedUploadCapability) string {
+func buildMetaJSON(cfg *config.Config, m *model.Meta, proxyAccountResolver meta.ProxyAccountResolver, chunkedUpload meta.ChunkedUploadCapability, setup *meta.SetupDetector) string {
 	// mascotImageUrl フォールバック
 	mascot := "/assets/ai.png"
 	if m.MascotImageURL != nil && *m.MascotImageURL != "" {
@@ -492,7 +492,7 @@ func buildMetaJSON(cfg *config.Config, m *model.Meta, proxyAccountResolver meta.
 		"notesPerOneAd":             m.NotesPerOneAd,
 		"mediaProxy":                cfg.MediaProxy,
 		"cacheRemoteSensitiveFiles": m.CacheRemoteSensitiveFiles,
-		"requireSetup":              meta.RequireSetup(m),
+		"requireSetup":              setup.RequireSetup(m),
 		"singleUserMode":            m.SingleUserMode,
 		// /api/meta と同じ理由で常に false (#2700)。frontend の instance cache を
 		// 上書きする経路なので、片側だけ設定値に戻すと /api/meta と食い違う。

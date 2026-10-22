@@ -164,7 +164,7 @@ func TestShells_VersionIsAJSStringLiteral(t *testing.T) {
 	})
 
 	t.Run("spa", func(t *testing.T) {
-		handler := frontendHTML(cfg, testutil.NewMockMetaRepository(), nil, nil)
+		handler := frontendHTML(cfg, testutil.NewMockMetaRepository(), nil, nil, nil)
 		e := echo.New()
 		rec := httptest.NewRecorder()
 		c := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)

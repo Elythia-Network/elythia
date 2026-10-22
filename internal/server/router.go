@@ -1562,7 +1562,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// **セットアップ画面が出続けて作成ボタンが必ず失敗する**。
 	// 初回セットアップの判定は admin/accounts/create と同じ数え方にする。
 	// プラグインが管理するアカウント (#3468) は数えない。
-	meta.SetLocalUserCounter(func() (int64, error) { return userRepo.CountLocalUsersForSetup() })
+	// /api/meta と、frontend の shell に埋める meta (通常・OAuth の同意画面・
+	// permalink の SSR・埋め込み) の全部へ同じ値を渡す (#3782)。
+	setupDetector := meta.NewSetupDetector(func() (int64, error) { return userRepo.CountLocalUsersForSetup() })
+	metaHandler.SetSetupDetector(setupDetector)
 	metaHandler.SetAdRepo(adRepo)
 	metaHandler.SetProxyAccountResolver(proxyAccountResolver)
 	// 分割アップロード (#2313) の能力告知。未対応構成では field ごと出さないので、
@@ -1576,7 +1579,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// Frontend SPA shell — AP resource handlers fall back to this when the
 	// request prefers HTML over application/activity+json, and the final
 	// catch-all route at the bottom of RegisterRoutes uses the same handler.
-	frontend := frontendHTML(s.config, metaRepo, proxyAccountResolver, chunkedUploadCapability)
+	frontend := frontendHTML(s.config, metaRepo, proxyAccountResolver, chunkedUploadCapability, setupDetector)
 
 	// URL preview endpoint
 	//
@@ -2368,7 +2371,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// permalink の SSR meta (#2345 の続き)。AP クライアントは Accept で
 	// 振り分けて従来どおり apHandler に渡す。
 	ssrMeta := newSSRMetaHandler(
-		s.config, metaRepo, proxyAccountResolver, chunkedUploadCapability,
+		s.config, metaRepo, proxyAccountResolver, chunkedUploadCapability, setupDetector,
 		ssrMetaDeps{
 			User:         userRepo,
 			Note:         noteRepo,
@@ -2509,7 +2512,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		// 本家 OAuth2ProviderService は NODE_ENV === 'test' のとき http の
 		// client_id を許可する (本番は https のみ)。TestMode を同じ用途で使う。
 		s.config.TestMode,
-		frontendConsentHTML(s.config, metaRepo, proxyAccountResolver, chunkedUploadCapability),
+		frontendConsentHTML(s.config, metaRepo, proxyAccountResolver, chunkedUploadCapability, setupDetector),
 	)
 	// code 再利用で token を revoke したとき、auth cache に残った entry で
 	// 通り続けないよう即時失効させる (RFC6749 §4.1.2)。
@@ -3900,7 +3903,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// pack は viewer なしで行う。埋め込みは認証を伴わないので、閲覧者依存の
 	// フィールドを解決してはいけない。可視性の判断は各 handler の
 	// PackForEmbed 経由で既存の CanSee / HideEmbeds に委ねる。
-	embed := newEmbedHandlers(s.config, metaRepo, proxyAccountResolver, chunkedUploadCapability, EmbedDeps{
+	embed := newEmbedHandlers(s.config, metaRepo, proxyAccountResolver, chunkedUploadCapability, setupDetector, EmbedDeps{
 		NoteRepo: noteRepo,
 		UserRepo: userRepo,
 		ClipRepo: clipRepo,

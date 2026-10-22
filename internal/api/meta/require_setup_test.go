@@ -15,28 +15,25 @@ import (
 // しておくと、TS から引き継いだ DB などで **セットアップ画面が出続けて作成
 // ボタンが必ず `ACCESS_DENIED` を返す**。
 func TestRequireSetup(t *testing.T) {
-	t.Cleanup(func() {
-		SetLocalUserCounter(nil)
-		ResetSetupLatchForTest()
-	})
+	t.Cleanup(ResetSetupLatchForTest)
 	rootID := "someroot"
 
 	t.Run("rootUserId 設定済みなら false", func(t *testing.T) {
 		ResetSetupLatchForTest()
-		SetLocalUserCounter(func() (int64, error) { return 0, nil })
-		assert.False(t, RequireSetup(&model.Meta{RootUserID: &rootID}))
+		d := NewSetupDetector(func() (int64, error) { return 0, nil })
+		assert.False(t, d.RequireSetup(&model.Meta{RootUserID: &rootID}))
 	})
 
 	t.Run("未設定 + 利用者 0 なら true", func(t *testing.T) {
 		ResetSetupLatchForTest()
-		SetLocalUserCounter(func() (int64, error) { return 0, nil })
-		assert.True(t, RequireSetup(&model.Meta{}))
+		d := NewSetupDetector(func() (int64, error) { return 0, nil })
+		assert.True(t, d.RequireSetup(&model.Meta{}))
 	})
 
 	t.Run("未設定でも利用者が居れば false", func(t *testing.T) {
 		ResetSetupLatchForTest()
-		SetLocalUserCounter(func() (int64, error) { return 3, nil })
-		assert.False(t, RequireSetup(&model.Meta{}), "作成ボタンが必ず失敗する画面を出している")
+		d := NewSetupDetector(func() (int64, error) { return 3, nil })
+		assert.False(t, d.RequireSetup(&model.Meta{}), "作成ボタンが必ず失敗する画面を出している")
 	})
 
 	// **一度 false になったら戻らない。** 利用者は増える一方なので、観測した
@@ -44,30 +41,31 @@ func TestRequireSetup(t *testing.T) {
 	t.Run("観測したら以後は数えない", func(t *testing.T) {
 		ResetSetupLatchForTest()
 		calls := 0
-		SetLocalUserCounter(func() (int64, error) { calls++; return 1, nil })
-		assert.False(t, RequireSetup(&model.Meta{}))
-		assert.False(t, RequireSetup(&model.Meta{}))
+		d := NewSetupDetector(func() (int64, error) { calls++; return 1, nil })
+		assert.False(t, d.RequireSetup(&model.Meta{}))
+		assert.False(t, d.RequireSetup(&model.Meta{}))
 		assert.Equal(t, 1, calls, "毎回 COUNT を発行している")
 	})
 
-	// counter 未配線なら従来どおり `rootUserId` だけで判定する。
-	t.Run("counter 未配線は従来どおり", func(t *testing.T) {
+	// 数え方が無ければ (nil の値・零値・nil の関数) 従来どおり `rootUserId` だけで判定する。
+	t.Run("数え方が無ければ従来どおり", func(t *testing.T) {
 		ResetSetupLatchForTest()
-		SetLocalUserCounter(nil)
-		assert.True(t, RequireSetup(&model.Meta{}))
-		assert.False(t, RequireSetup(&model.Meta{RootUserID: &rootID}))
+		for _, d := range []*SetupDetector{nil, {}, NewSetupDetector(nil)} {
+			assert.True(t, d.RequireSetup(&model.Meta{}))
+			assert.False(t, d.RequireSetup(&model.Meta{RootUserID: &rootID}))
+		}
 	})
 
 	// **数えられないときは促さない。** 促して失敗させるより出さないほうが
 	// 害が小さい (本当に初回なら次のリクエストで出る)。
 	t.Run("数えられなければ false", func(t *testing.T) {
 		ResetSetupLatchForTest()
-		SetLocalUserCounter(func() (int64, error) { return 0, errors.New("db down") })
-		assert.False(t, RequireSetup(&model.Meta{}))
+		d := NewSetupDetector(func() (int64, error) { return 0, errors.New("db down") })
+		assert.False(t, d.RequireSetup(&model.Meta{}))
 	})
 
 	t.Run("nil meta は false", func(t *testing.T) {
 		ResetSetupLatchForTest()
-		assert.False(t, RequireSetup(nil))
+		assert.False(t, NewSetupDetector(func() (int64, error) { return 0, nil }).RequireSetup(nil))
 	})
 }
