@@ -21,7 +21,8 @@ const paramShadowContextKey = "mk.server.paramShadow"
 // in #3746; antennas/* in #3748; flash/* in #3750; gallery/* in #3754;
 // following/* in #3756; channels/* in #3758; blocking/*, mute/* and
 // renote-mute/* in #3760; roles/*, invite/* and notifications/* in #3762;
-// app/*, auth/*, miauth/gen-token and my/apps in #3764).
+// app/*, auth/*, miauth/gen-token and my/apps in #3764; sw/* and
+// announcements in #3766).
 // The other upstream endpoints are only validated and counted (#3677).
 //
 // 本家に揃える対象はパッケージ単位で広げる(#3667)。足したら、そのendpoint
@@ -139,6 +140,12 @@ var paramEnforcedEndpoints = []string{
 	"auth/session/userkey",
 	"miauth/gen-token",
 	"my/apps",
+	"sw/register",
+	"sw/show-registration",
+	"sw/unregister",
+	"sw/update-registration",
+	"announcements",
+	"announcements/show",
 }
 
 // paramShadowMiddleware returns the /api group middleware that enables the
