@@ -156,8 +156,6 @@ var cacheEntries = map[string]cacheEntry{
 		[]string{"clock", "closed", "doneCh", "flushIn", "mu", "pending", "started", "stopCh", "target"}, nil},
 	"internal/core/iplog.Service": {kindDropLocal, "",
 		[]string{"clearedAt", "dispatch", "meta", "mu", "now", "repo", "seen", "window"}, nil},
-	"internal/core/note.hookSemsMu": {kindNotCache, "hookの同時実行の枠(hookSems)を守るlock",
-		[]string{"var:hookSems"}, nil},
 	"internal/core/notification.NoteSource": {kindPerCall, "1つの通知のstreamとWeb Pushで同じノートを1回だけ読むためのもの(#3611)。通知を送り終えれば捨てられる",
 		[]string{"err", "load", "note", "once"}, nil},
 	"internal/core/reaction.SwitchableWriter": {kindReloadOnDrop, "bufferingはmetaのenableReactionsBuffering。一覧のreactionBufferingの項目(reloadOnDrop)がmetaUpdatedと同じreloadReactionBufferingで読み直す(#3777)。drainUntilは切り替えた後に溜めた分を読みに足す期限",

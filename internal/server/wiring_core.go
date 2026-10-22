@@ -178,6 +178,8 @@ func (s *Server) buildCore(w *wiring, idGen id.Generator) core {
 	roleService := corerole.NewService(roleRepo, roleAssignmentRepo, metaRepo, idGen)
 	signupService := coresignup.NewService(userRepo, metaRepo, idGen)
 	noteCreateService := corenote.NewCreateService(noteRepo, pollRepo, idGen, followingRepo)
+	// 投稿後のフックの同時実行の枠を設定の数で作り直す(#3780)。
+	noteCreateService.SetHookConcurrency(s.config.NoteHookConcurrency)
 	noteDeleteService := corenote.NewDeleteService(noteRepo)
 	noteQueryService := corenote.NewQueryService(noteRepo, followingRepo)
 	userService := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)

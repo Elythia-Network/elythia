@@ -267,6 +267,10 @@ type CreateService struct {
 	remoteUserResolver RemoteUserResolver
 	// remoteMentionTimeout overrides defaultRemoteMentionFetchTimeout (tests).
 	remoteMentionTimeout time.Duration
+	// hookSlotsは作成後のベストエフォートフックの同時実行の枠(#3780)。
+	// NewCreateServiceが既定の枠で作り、組み立てのときにSetHookConcurrencyで
+	// 設定の数に作り直す。
+	hookSlots *hookSlots
 }
 
 // RemoteUserResolver resolves a remote `username@host` that is not in the DB
@@ -392,8 +396,26 @@ func NewCreateService(
 		pollRepo:      pollRepo,
 		followingRepo: followingRepo,
 		idGen:         idGen,
+		hookSlots:     newHookSlots(0),
 	}
 }
+
+// SetHookConcurrency sets how many best-effort hooks of each kind may run at
+// once. n <= 0 selects the default (GOMAXPROCS * defaultHookConcurrencyFactor).
+//
+// **組み立てのときに1度だけ呼ぶこと。** 投稿を受け付けた後で差し替えると、
+// 古い枠を掴んだgoroutineと新しい枠を掴んだgoroutineが別々に数えられ、
+// その間だけ上限を超えて走る。
+func (s *CreateService) SetHookConcurrency(n int) {
+	s.hookSlots = newHookSlots(n)
+	// ログは設定から作り直すここでだけ出す。NewCreateServiceが作る既定の枠でも
+	// 出すと、1つの世代で既定の値と設定の値の2行が並ぶ。
+	slog.Debug("note hook concurrency configured", "perKind", s.hookSlots.perKind(), "kinds", int(hookKindCount))
+}
+
+// HookConcurrency returns how many best-effort hooks of each kind may run at
+// once.
+func (s *CreateService) HookConcurrency() int { return s.hookSlots.perKind() }
 
 // SetFanoutHook attaches a TimelineFanoutHook to be invoked on note creation.
 // 後付けセッターにすることで、Wireのような循環依存問題を起こさず、テストでも
@@ -1001,13 +1023,13 @@ func (s *CreateService) Create(in CreateInput) (*model.Note, error) {
 	// ベストエフォートフックを非同期で並列実行する。各フックは独立しており、
 	// 失敗してもノート作成自体は成功扱い。TS版と同様にfire-and-forgetで配信する。
 	if s.fanoutHook != nil {
-		safeGoKind(s.background, hookFanout, func() { s.fanoutHook.OnNoteCreated(finalNote, in.User) })
+		safeGoKind(s.background, s.hookSlots, hookFanout, func() { s.fanoutHook.OnNoteCreated(finalNote, in.User) })
 	}
 	if s.notificationHook != nil {
-		safeGo(s.background, func() { s.notificationHook.OnNoteCreated(finalNote, in.User, replyTarget, renoteTarget) })
+		safeGo(s.background, s.hookSlots, func() { s.notificationHook.OnNoteCreated(finalNote, in.User, replyTarget, renoteTarget) })
 	}
 	if s.federationHook != nil {
-		safeGo(s.background, func() { s.federationHook.OnNoteCreated(finalNote, in.User) })
+		safeGo(s.background, s.hookSlots, func() { s.federationHook.OnNoteCreated(finalNote, in.User) })
 	}
 	// OnNotePosted は note が実際に属する effective channel (re-scope 後、#1859) で
 	// 発火する。reply で別 channel に入った/外れた場合も正しい channel に通知する。
@@ -1015,7 +1037,7 @@ func (s *CreateService) Create(in CreateInput) (*model.Note, error) {
 		chID := *effectiveChannelID
 		noteID := finalNote.ID
 		authorID := in.User.ID
-		safeGo(s.background, func() { s.channelHook.OnNotePosted(chID, noteID, authorID) })
+		safeGo(s.background, s.hookSlots, func() { s.channelHook.OnNotePosted(chID, noteID, authorID) })
 	}
 	if s.antennaHook != nil {
 		// アンテナへの fan-out は同期で行う。upstream は
@@ -1028,10 +1050,10 @@ func (s *CreateService) Create(in CreateInput) (*model.Note, error) {
 		s.antennaHook.OnNoteCreated(finalNote, in.User)
 	}
 	if s.indexHook != nil {
-		safeGo(s.background, func() { s.indexHook.OnNoteCreated(finalNote) })
+		safeGo(s.background, s.hookSlots, func() { s.indexHook.OnNoteCreated(finalNote) })
 	}
 	if s.chartHook != nil {
-		safeGo(s.background, func() { s.chartHook.OnNoteCreated(finalNote) })
+		safeGo(s.background, s.hookSlots, func() { s.chartHook.OnNoteCreated(finalNote) })
 	}
 	if s.hashtagHook != nil {
 		// HashtagHook は実装側 (core/hashtag.Service) が内部で goroutine を
@@ -1039,7 +1061,7 @@ func (s *CreateService) Create(in CreateInput) (*model.Note, error) {
 		s.hashtagHook.OnNoteCreated(finalNote, in.User)
 	}
 	if s.webhookHook != nil {
-		safeGo(s.background, func() { s.webhookHook.OnNoteCreated(finalNote, in.User, replyTarget, renoteTarget) })
+		safeGo(s.background, s.hookSlots, func() { s.webhookHook.OnNoteCreated(finalNote, in.User, replyTarget, renoteTarget) })
 	}
 	// reply / renote / mention 各イベントを対象local userのmainにemit。
 	// Misskey本家NoteCreateServiceと同じfan-out方針 (TS lines 792 / 809 / 935)。
@@ -1049,7 +1071,7 @@ func (s *CreateService) Create(in CreateInput) (*model.Note, error) {
 	// で CachedUserRepository wrapper の invalidate が走り、stale notesCount
 	// が profile API に出続ける問題を防ぐ (Devin review #552 BUG-2)。
 	// userRepo 未配線の旧経路は noteRepo の同等メソッドにフォールバック。
-	safeGo(s.background, func() {
+	safeGo(s.background, s.hookSlots, func() {
 		if s.userRepo != nil {
 			_ = s.userRepo.IncrementNotesCount(in.User.ID, 1)
 			return

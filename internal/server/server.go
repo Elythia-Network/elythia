@@ -23,7 +23,6 @@ import (
 	"github.com/elythia-network/elythia/internal/core/chart"
 	"github.com/elythia-network/elythia/internal/core/event"
 	corefederation "github.com/elythia-network/elythia/internal/core/federation"
-	corenote "github.com/elythia-network/elythia/internal/core/note"
 	"github.com/elythia-network/elythia/internal/core/pluginaccount"
 	"github.com/elythia-network/elythia/internal/core/pluginsecret"
 	corereaction "github.com/elythia-network/elythia/internal/core/reaction"
@@ -727,8 +726,9 @@ func newServer(cfg *config.Config, db *gorm.DB, redis *cache.RedisClients, plugi
 
 	// 投稿後のベストエフォートフックの同時実行数。**絞らないと応答のテールが
 	// 伸びる** (負荷時に数百 goroutine が GOMAXPROCS 個の P を奪い合い、応答を
-	// 返す goroutine もその列に並ぶ)。0 なら core/note 側の既定が入る。
-	corenote.SetHookConcurrency(cfg.NoteHookConcurrency)
+	// 返す goroutine もその列に並ぶ)。枠はbuildCoreがCreateServiceに設定の数で
+	// 作る(#3780)。0ならcore/note側の既定が入る。起動のログはここで出し、出る
+	// 位置を変えない。
 	if cfg.NoteHookConcurrency > 0 {
 		slog.Info("note hook concurrency overridden", "perKind", cfg.NoteHookConcurrency)
 	}

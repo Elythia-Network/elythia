@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"runtime"
-	"sync"
 
 	"github.com/elythia-network/elythia/internal/bgwork"
 )
@@ -57,42 +56,37 @@ const (
 // 8 コアなら 1 枠 16 / 総枠 32。
 const defaultHookConcurrencyFactor = 2
 
-var (
-	hookSemsMu sync.RWMutex
-	hookSems   [hookKindCount]chan struct{}
-)
-
-func init() { SetHookConcurrency(0) }
-
-// SetHookConcurrency sets how many best-effort hooks of each kind may run at
-// once. n <= 0 selects the default (GOMAXPROCS * defaultHookConcurrencyFactor).
+// hookSlots holds one semaphore per hook kind. Its capacity is how many
+// best-effort hooks of that kind may run at once.
 //
-// **起動時に 1 度だけ呼ぶこと。** 実行中に差し替えると、古い semaphore を掴んだ
-// goroutine が解放先を失う。
-func SetHookConcurrency(n int) {
+// **プロセスの変数ではなくCreateServiceが持つ(#3780)。** 以前はパッケージの
+// 変数をSetHookConcurrencyで起動時に書き換えていた。世代を作るたびに同じ設定の
+// 値で書き直すだけで、テストはそれを毎回戻す必要があった。
+type hookSlots [hookKindCount]chan struct{}
+
+// newHookSlots returns the slots for n hooks of each kind at once. n <= 0
+// selects the default (GOMAXPROCS * defaultHookConcurrencyFactor).
+func newHookSlots(n int) *hookSlots {
 	if n <= 0 {
 		n = runtime.GOMAXPROCS(0) * defaultHookConcurrencyFactor
 	}
 	if n < 1 {
 		n = 1
 	}
-	hookSemsMu.Lock()
-	defer hookSemsMu.Unlock()
-	for i := range hookSems {
-		hookSems[i] = make(chan struct{}, n)
+	var s hookSlots
+	for i := range s {
+		s[i] = make(chan struct{}, n)
 	}
-	slog.Debug("note hook concurrency configured", "perKind", n, "kinds", int(hookKindCount))
+	return &s
 }
 
-func hookSem(k hookKind) chan struct{} {
-	hookSemsMu.RLock()
-	defer hookSemsMu.RUnlock()
-	return hookSems[k]
-}
+// perKind returns how many hooks of each kind may run at once.
+func (s *hookSlots) perKind() int { return cap(s[hookFanout]) }
 
-// safeGo runs fn in a new goroutine of g, recovering from panics.
+// safeGo runs fn in a new goroutine of g within the slots of the other
+// hooks, recovering from panics.
 // ベストエフォートフックでパニックが発生してもプロセス全体が落ちないようにする。
-func safeGo(g *bgwork.Group, fn func()) { safeGoKind(g, hookOther, fn) }
+func safeGo(g *bgwork.Group, slots *hookSlots, fn func()) { safeGoKind(g, slots, hookOther, fn) }
 
 // safeGoKind is safeGo with an explicit hook kind, so the slot budget of one
 // kind cannot be consumed by another.
@@ -100,8 +94,8 @@ func safeGo(g *bgwork.Group, fn func()) { safeGoKind(g, hookOther, fn) }
 // g is the group of the server generation (#3661). A hook still waiting for
 // its slot when the generation stop cancels the context of g is dropped
 // (and counted in g.Dropped) instead of run.
-func safeGoKind(g *bgwork.Group, k hookKind, fn func()) {
-	sem := hookSem(k)
+func safeGoKind(g *bgwork.Group, slots *hookSlots, k hookKind, fn func()) {
+	sem := slots[k]
 	g.Go(func(ctx context.Context) {
 		// **枠は goroutine の中で取る。** 外で取ると呼び出し元 (= 応答を返す
 		// 経路) が待たされ、非同期にした意味が無くなる。
