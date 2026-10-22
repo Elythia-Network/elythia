@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/elythia-network/elythia/internal/misc/keyword"
@@ -60,7 +61,9 @@ type Fetcher struct {
 	cfg         Config
 	client      *http.Client
 	proxyClient *http.Client
-	cache       *expirable.LRU[string, []byte]
+	// cache はポインタで持つ。forRequest がリクエストごとに Fetcher を複製するので、
+	// 値で持つと mutex と世代の番号が複製されて、DropLocal が複製に届かない (#3776)。
+	cache *previewCache
 
 	// cfgProvider returns the current settings (meta). 管理画面で変えた値
 	// (有効/無効、リダイレクト、上限、timeout、summaryProxy) を再起動なしで
@@ -159,8 +162,49 @@ func NewFetcher(cfg Config, allowedPrivateNetworks []string, transportOpts ...sa
 		// ここに forward proxy を掛けると 127.0.0.1 への内向き呼び出しまで
 		// proxy 経由になって壊れるので、明示的に裸の Client を使う。
 		proxyClient: &http.Client{Timeout: previewTimeout(cfg)},
-		cache:       expirable.NewLRU[string, []byte](cacheSize, nil, cacheTTL),
+		cache:       &previewCache{lru: expirable.NewLRU[string, []byte](cacheSize, nil, cacheTTL)},
 	}
+}
+
+// previewCache holds the previews of one Fetcher and every copy forRequest
+// makes of it.
+type previewCache struct {
+	mu  sync.Mutex
+	lru *expirable.LRU[string, []byte]
+	// gen は DropLocal で進める世代の番号 (#3776)。取得はロックの外で走るので、
+	// 捨てる前に始めた取得の結果を、捨てた後に積まないために使う。
+	gen uint64
+}
+
+// get returns the cached preview for key, and the generation to pass to add
+// when it is missing.
+func (c *previewCache) get(key string) (data []byte, gen uint64, ok bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	data, ok = c.lru.Get(key)
+	return data, c.gen, ok
+}
+
+// add stores data unless the cache was dropped since gen was read.
+func (c *previewCache) add(key string, data []byte, gen uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.gen == gen {
+		c.lru.Add(key, data)
+	}
+}
+
+// DropLocal drops the previews held by this process (#3776). 他のプロセスへは
+// 伝えない。
+//
+// 取得の条件 (redirect の可否、本文の上限など) は meta の設定で決まるが、
+// metaUpdated では捨てていない (以前からの挙動)。ここで捨てるのは、一覧から
+// 全部を捨てるときだけ。
+func (f *Fetcher) DropLocal() {
+	f.cache.mu.Lock()
+	defer f.cache.mu.Unlock()
+	f.cache.gen++
+	f.cache.lru.Purge()
 }
 
 // Fetch returns the URL preview, using the in-process cache when available.
@@ -191,17 +235,17 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (*Result, error) {
 
 	// キャッシュ確認
 	cacheKey := hashURL(rawURL)
-	if f.cache != nil {
-		if cached, ok := f.cache.Get(cacheKey); ok {
-			var result Result
-			// 旧バージョン期に検証前の値が入った可能性に備え、cache 読み出し
-			// にも scheme 検証を掛ける (不正 entry は miss 扱いで再取得)。
-			if json.Unmarshal(cached, &result) == nil && validateResultSchemes(&result) == nil {
-				// sensitive 上書きは cache 読み出し後に評価する (upstream 同様、
-				// リスト変更が cache 済み entry にも即時反映される)。
-				f.applySensitiveList(&result)
-				return &result, nil
-			}
+	// 世代の番号は取得の前に読む。取得の途中で捨てられたら、取った値は積まない。
+	cached, gen, ok := f.cache.get(cacheKey)
+	if ok {
+		var result Result
+		// 旧バージョン期に検証前の値が入った可能性に備え、cache 読み出し
+		// にも scheme 検証を掛ける (不正 entry は miss 扱いで再取得)。
+		if json.Unmarshal(cached, &result) == nil && validateResultSchemes(&result) == nil {
+			// sensitive 上書きは cache 読み出し後に評価する (upstream 同様、
+			// リスト変更が cache 済み entry にも即時反映される)。
+			f.applySensitiveList(&result)
+			return &result, nil
 		}
 	}
 
@@ -218,10 +262,8 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (*Result, error) {
 
 	// キャッシュ保存 (keyword 由来の sensitive 上書き前の生値を保存し、
 	// リスト変更が過去 entry へ遡って効くようにする)。
-	if f.cache != nil {
-		if data, err := json.Marshal(result); err == nil {
-			f.cache.Add(cacheKey, data)
-		}
+	if data, err := json.Marshal(result); err == nil {
+		f.cache.add(cacheKey, data, gen)
 	}
 
 	f.applySensitiveList(result)

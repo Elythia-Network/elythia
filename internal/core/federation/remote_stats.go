@@ -11,7 +11,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/elythia-network/elythia/internal/safehttp"
@@ -78,10 +80,18 @@ type RemoteStatsFetcher struct {
 	// 聞くので、片方の負キャッシュがもう片方を止めないようにする)。
 	createdCache *lru.Cache[string, cachedAccountCreatedAt]
 	// createdHostDown は FetchAccountCreatedAt で応答しなかった (時間切れ・
-	// 接続失敗) ホストと、その時刻 (#3465)。
+	// 接続失敗) ホストと、その時刻 (#3465)。値のキャッシュではなく取得の間引きなので、
+	// DropLocal でも捨てない (#3776)。
 	createdHostDown *lru.Cache[string, time.Time]
 	group           singleflight.Group
-	userAgent       string
+	// dropMu は gen を守る。cache と createdCache は自前で排他するが、番号を比べる
+	// ことと積むことを 1 つのロックの中で行うために使う。
+	dropMu sync.Mutex
+	// gen は DropLocal で進める世代の番号 (#3776)。取得は singleflight の中で
+	// ロックの外を走るので、捨てる前に始めた取得の結果を、捨てた後に積まないために
+	// 使う。
+	gen       uint64
+	userAgent string
 	// hostAllowed は連合ポリシー (blockedHosts / federation モード) の判定。
 	// 未配線なら全ホストへ出す (従来の挙動)。
 	hostAllowed func(host string) bool
@@ -198,13 +208,18 @@ func (f *RemoteStatsFetcher) Fetch(ctx context.Context, host, username string) *
 		// (Get で hot 化しないようにする)。
 		f.cache.Remove(key)
 	}
-	v, _, _ := f.group.Do(key, func() (any, error) {
+	// singleflight のキーに世代の番号を含める。捨てた後の呼び出しが、捨てる前に
+	// 始まった取得に相乗りしないようにする。
+	gen := f.currentGen()
+	v, _, _ := f.group.Do(strconv.FormatUint(gen, 10)+"|"+key, func() (any, error) {
 		stats := f.fetchRemote(ctx, host, username)
 		ttl := remoteStatsTTL
 		if stats == nil {
 			ttl = remoteStatsNegativeTTL
 		}
-		f.cache.Add(key, cachedRemoteStats{stats: stats, fetched: time.Now(), ttl: ttl})
+		f.storeIfGen(gen, func() {
+			f.cache.Add(key, cachedRemoteStats{stats: stats, fetched: time.Now(), ttl: ttl})
+		})
 		return stats, nil
 	})
 	if stats, ok := v.(*RemoteUserStats); ok {
@@ -246,22 +261,56 @@ func (f *RemoteStatsFetcher) FetchAccountCreatedAt(ctx context.Context, host, us
 		}
 		f.createdCache.Remove(key)
 	}
-	v, _, _ := f.group.Do("createdAt|"+key, func() (any, error) {
+	gen := f.currentGen()
+	v, _, _ := f.group.Do("createdAt|"+strconv.FormatUint(gen, 10)+"|"+key, func() (any, error) {
 		createdAt, unreachable := f.fetchMisskeyCreatedAt(ctx, host, username)
 		if unreachable {
+			// 応答しなかったことは、捨てた後でも覚える (取得の間引きで、値ではない)。
 			f.createdHostDown.Add(host, time.Now())
 		}
 		ttl := remoteStatsTTL
 		if createdAt == nil {
 			ttl = remoteStatsNegativeTTL
 		}
-		f.createdCache.Add(key, cachedAccountCreatedAt{createdAt: createdAt, fetched: time.Now(), ttl: ttl})
+		f.storeIfGen(gen, func() {
+			f.createdCache.Add(key, cachedAccountCreatedAt{createdAt: createdAt, fetched: time.Now(), ttl: ttl})
+		})
 		return createdAt, nil
 	})
 	if createdAt, ok := v.(*time.Time); ok {
 		return createdAt
 	}
 	return nil
+}
+
+// currentGen returns the drop generation to pass to storeIfGen.
+func (f *RemoteStatsFetcher) currentGen() uint64 {
+	f.dropMu.Lock()
+	defer f.dropMu.Unlock()
+	return f.gen
+}
+
+// storeIfGen runs store unless the caches were dropped since gen was read.
+func (f *RemoteStatsFetcher) storeIfGen(gen uint64, store func()) {
+	f.dropMu.Lock()
+	defer f.dropMu.Unlock()
+	if f.gen == gen {
+		store()
+	}
+}
+
+// DropLocal drops the stats and the account creation times held by this
+// process (#3776). The hosts that did not answer (createdHostDown) are kept:
+// they throttle the fetches, they are not values. 他のプロセスへは伝えない。
+//
+// createdHostDown を捨てると、応答しない相手に、フォローの処理が 5 秒ずつ
+// 待たされる守りが外れる。
+func (f *RemoteStatsFetcher) DropLocal() {
+	f.dropMu.Lock()
+	defer f.dropMu.Unlock()
+	f.gen++
+	f.cache.Purge()
+	f.createdCache.Purge()
 }
 
 // fetchMisskeyCreatedAt reads `createdAt` from `/api/users/show`.

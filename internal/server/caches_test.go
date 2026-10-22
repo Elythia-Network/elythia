@@ -7,8 +7,14 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -773,8 +779,8 @@ func TestCaches_AdminStatsLine(t *testing.T) {
 			assert.Same(t, v, p.cache, "cache %q is not the value the server uses", p.name)
 		}
 	}
-	// 4 つの間に順の制約は無い。投稿・タイムライン・通知の系統を最後に置いたままに
-	// するため、その前に並ぶ。
+	// 4 つの間に順の制約は無い。投稿・タイムライン・通知の系統より後に、それらの
+	// 元になるキャッシュを置かないため、その前に並ぶ。
 	for _, name := range adminStatsLineCaches {
 		require.Contains(t, at, name, "cache %q is not listed", name)
 		require.Contains(t, at, "antennas")
@@ -874,4 +880,115 @@ func TestCaches_AdminStatsLine(t *testing.T) {
 	assert.Eventually(t, func() bool { return ipRows() == 1 }, 5*time.Second, 10*time.Millisecond,
 		"the IP log window was not dropped")
 	assert.Empty(t, published("caches-admin-stats-line"), "dropping the caches told the other processes")
+}
+
+// externalLineCaches are the caches of the external and file line (#3776) and
+// where their values come from.
+var externalLineCaches = map[string]cacheOrigin{
+	"urlPreview": cacheFromExternal, "remoteStats": cacheFromExternal, "fetchRSS": cacheFromExternal,
+	"pluginPeers": cacheFromExternal, "twemojiBadge": cacheFromFile,
+}
+
+// TestCaches_ExternalLine checks on a whole server that the external and file
+// line is listed with the values the server uses and the origins decided for
+// them, and that dropping the list makes the URL preview, /api/fetch-rss and
+// the twemoji badge read their source again, without telling the other
+// processes (#3776).
+//
+// URL プレビューと RSS は、127.0.0.1 の httptest のサーバーを allowedPrivateNetworks
+// で許して、API を通して読む。リモート利用者の統計と peer のプラグイン一覧は相手へ
+// https で取りに行くので、ここでは一覧の値がサーバーの使う値と同じことだけを見て、
+// 捨てることと捨てる前の取得を積まないことは各パッケージのテスト
+// (TestRemoteStatsFetcher_DropLocal、TestNodeInfoPeerLister_DropLocal など) に任せる。
+func TestCaches_ExternalLine(t *testing.T) {
+	twemojiDir := t.TempDir()
+	svgPath := filepath.Join(twemojiDir, "1f004.svg")
+	require.NoError(t, os.WriteFile(svgPath, []byte(testSVG), 0o600))
+	t.Setenv("MISSKEY_TWEMOJI_DIR", twemojiDir)
+
+	var pageHits, feedHits atomic.Int64
+	page := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = fmt.Fprintf(w, `<html><head><title>Page %d</title></head></html>`, pageHits.Add(1))
+	}))
+	t.Cleanup(page.Close)
+	feed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprintf(w, `<?xml version="1.0"?><rss version="2.0"><channel><title>Feed %d</title></channel></rss>`, feedHits.Add(1))
+	}))
+	t.Cleanup(feed.Close)
+
+	h := newMetaRuntimeHarness(t, func(s *Server) {
+		s.config.AllowedPrivateNetworks = []string{"127.0.0.1/32"}
+	})
+	srv := h.srv
+	caches := srv.crossProcessCaches
+
+	want := map[string]localCache{
+		"urlPreview": caches.urlPreview, "remoteStats": caches.remoteStats, "fetchRSS": caches.fetchRSS,
+		"pluginPeers": caches.pluginPeers, "twemojiBadge": caches.twemojiBadge,
+	}
+	seen := map[string]bool{}
+	for _, p := range srv.caches.parts {
+		if v, ok := want[p.name]; ok {
+			seen[p.name] = true
+			assert.Equal(t, externalLineCaches[p.name], p.origin, "cache %q", p.name)
+			assert.Same(t, v, p.cache, "cache %q is not the value the server uses", p.name)
+		}
+	}
+	for name := range externalLineCaches {
+		require.True(t, seen[name], "cache %q is not listed", name)
+	}
+	// peer のプラグイン一覧は、プラグインの通信が使う値と同じであること。
+	assert.Equal(t, peerPluginLister(caches.pluginPeers), srv.peerDeps.remote,
+		"the plugin peers are not the lister the plugin peer protocol uses")
+
+	var saved struct{ URLPreviewEnabled bool }
+	require.NoError(t, h.db.Model(&model.Meta{}).Select(`"urlPreviewEnabled"`).Take(&saved).Error)
+	t.Cleanup(func() {
+		require.NoError(t, h.db.Model(&model.Meta{}).Where("1 = 1").Update("urlPreviewEnabled", saved.URLPreviewEnabled).Error)
+	})
+	h.updateMetaHere(map[string]any{"urlPreviewEnabled": true})
+
+	preview := func() string {
+		rec := h.get("/url?url=" + url.QueryEscape(page.URL))
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		var got struct {
+			Title string `json:"title"`
+		}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+		return got.Title
+	}
+	rss := func() string {
+		rec := h.get("/api/fetch-rss?url=" + url.QueryEscape(feed.URL))
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		var got struct {
+			Title string `json:"title"`
+		}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+		return got.Title
+	}
+	badge := func() []byte {
+		rec := h.get("/twemoji-badge/1f004.png")
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		return rec.Body.Bytes()
+	}
+
+	require.Equal(t, "Page 1", preview())
+	require.Equal(t, "Feed 1", rss())
+	before := badge()
+
+	// 相手の内容とファイルだけを変える (相手のサーバーは呼ばれるたびに番号を進める)。
+	require.NoError(t, os.WriteFile(svgPath, []byte(testSVGSmall), 0o600))
+	require.Equal(t, "Page 1", preview(), "前提: 捨てるまではキャッシュが返る")
+	require.Equal(t, "Feed 1", rss(), "前提: 捨てるまではキャッシュが返る")
+	require.Equal(t, before, badge(), "前提: 捨てるまではキャッシュが返る")
+
+	published := watchInternal(t, h)
+
+	srv.caches.dropAll()
+
+	assert.Equal(t, "Page 2", preview(), "the URL previews were not dropped")
+	assert.Equal(t, "Feed 2", rss(), "the feeds were not dropped")
+	assert.NotEqual(t, before, badge(), "the twemoji badges were not dropped")
+	assert.Empty(t, published("caches-external-line"), "dropping the caches told the other processes")
 }

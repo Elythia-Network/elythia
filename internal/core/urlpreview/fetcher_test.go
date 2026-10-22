@@ -429,7 +429,7 @@ func TestFetcher_CacheIsBounded(t *testing.T) {
 		_, err := f.Fetch(context.Background(), fmt.Sprintf("%s/p?i=%d", srv.URL, i))
 		require.NoError(t, err)
 	}
-	assert.LessOrEqual(t, f.cache.Len(), 1000, "キャッシュが件数の上限を超えた")
+	assert.LessOrEqual(t, f.cache.lru.Len(), 1000, "キャッシュが件数の上限を超えた")
 
 	before := hits
 	_, err := f.Fetch(context.Background(), fmt.Sprintf("%s/p?i=%d", srv.URL, 1009))
