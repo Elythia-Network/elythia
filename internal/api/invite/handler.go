@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/id"
@@ -136,22 +137,24 @@ func (h *Handler) Create(c echo.Context) error {
 func (h *Handler) List(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
-		Limit     *int   `json:"limit"`
-		SinceID   string `json:"sinceId"`
-		UntilID   string `json:"untilId"`
-		SinceDate *int64 `json:"sinceDate"`
-		UntilDate *int64 `json:"untilDate"`
+		// limit / sinceDate / untilDate は、本家(ajv の integer)と同じく値が
+		// 整数の小数(10.0)を受ける (#3762)。
+		Limit     *jsnum.Int `json:"limit"`
+		SinceID   string     `json:"sinceId"`
+		UntilID   string     `json:"untilId"`
+		SinceDate *jsnum.Int `json:"sinceDate"`
+		UntilDate *jsnum.Int `json:"untilDate"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1173)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
 
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 30, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 30, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}

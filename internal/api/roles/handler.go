@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/meself"
 	"github.com/elythia-network/elythia/internal/api/notehide"
 	"github.com/elythia-network/elythia/internal/core/notesfilter"
@@ -206,12 +207,14 @@ func (h *Handler) Show(c echo.Context) error {
 // 返す。!isPublic / !isExplorable は NO_SUCH_ROLE 扱い (#1544)。
 func (h *Handler) Users(c echo.Context) error {
 	var req struct {
-		RoleID    string `json:"roleId"`
-		Limit     int    `json:"limit"`
-		SinceID   string `json:"sinceId"`
-		UntilID   string `json:"untilId"`
-		SinceDate *int64 `json:"sinceDate"`
-		UntilDate *int64 `json:"untilDate"`
+		RoleID string `json:"roleId"`
+		// limit / sinceDate / untilDate は、本家(ajv の integer)と同じく値が
+		// 整数の小数(10.0)を受ける (#3762)。
+		Limit     *jsnum.Int `json:"limit"`
+		SinceID   string     `json:"sinceId"`
+		UntilID   string     `json:"untilId"`
+		SinceDate *jsnum.Int `json:"sinceDate"`
+		UntilDate *jsnum.Int `json:"untilDate"`
 	}
 	if err := c.Bind(&req); err != nil || req.RoleID == "" {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "roleId is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
@@ -229,7 +232,10 @@ func (h *Handler) Users(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_ROLE", "No such role.", "30aaaee3-4792-48dc-ab0d-cf501a575ac5"))
 	}
 
-	limit := req.Limit
+	limit := 0
+	if l := req.Limit.IntPtr(); l != nil {
+		limit = *l
+	}
 	if limit <= 0 {
 		limit = 10
 	}
@@ -237,7 +243,7 @@ func (h *Handler) Users(c echo.Context) error {
 		limit = 100
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (Notes と同 pattern、#1173)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -324,12 +330,14 @@ func (h *Handler) assignmentProfiles(assigns []*model.RoleAssignment) map[string
 // Notes handles POST /api/roles/notes.
 func (h *Handler) Notes(c echo.Context) error {
 	var req struct {
-		RoleID    string `json:"roleId"`
-		Limit     int    `json:"limit"`
-		SinceID   string `json:"sinceId"`
-		UntilID   string `json:"untilId"`
-		SinceDate *int64 `json:"sinceDate"`
-		UntilDate *int64 `json:"untilDate"`
+		RoleID string `json:"roleId"`
+		// limit / sinceDate / untilDate は、本家(ajv の integer)と同じく値が
+		// 整数の小数(10.0)を受ける (#3762)。
+		Limit     *jsnum.Int `json:"limit"`
+		SinceID   string     `json:"sinceId"`
+		UntilID   string     `json:"untilId"`
+		SinceDate *jsnum.Int `json:"sinceDate"`
+		UntilDate *jsnum.Int `json:"untilDate"`
 	}
 	if err := c.Bind(&req); err != nil || req.RoleID == "" {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "roleId is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
@@ -356,7 +364,10 @@ func (h *Handler) Notes(c echo.Context) error {
 		return c.JSON(http.StatusOK, []any{})
 	}
 
-	limit := req.Limit
+	limit := 0
+	if l := req.Limit.IntPtr(); l != nil {
+		limit = *l
+	}
 	if limit <= 0 {
 		limit = 10
 	}
@@ -365,7 +376,7 @@ func (h *Handler) Notes(c echo.Context) error {
 	}
 
 	// sinceDate / untilDate を aidx prefix に正規化 (#1173)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
