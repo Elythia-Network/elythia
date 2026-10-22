@@ -144,9 +144,12 @@ func TestUsersSecondLookupErrors(t *testing.T) {
 type mockRoleNotesQuery struct {
 	Notes []*model.Note
 	Err   error
+	// LastSinceID / LastUntilID record the cursor of the last call.
+	LastSinceID, LastUntilID string
 }
 
 func (m *mockRoleNotesQuery) ListByRole(roleID string, limit int, sinceID, untilID string) ([]*model.Note, error) {
+	m.LastSinceID, m.LastUntilID = sinceID, untilID
 	if m.Err != nil {
 		return nil, m.Err
 	}
@@ -679,4 +682,46 @@ func TestSettersWireOptionalDeps(t *testing.T) {
 	h.SetNotesQuery(mock)
 	rec := doPost(h.Notes, `{"roleId":"r1"}`)
 	require.Equal(t, http.StatusOK, rec.Code)
+}
+
+// roles/users and roles/notes accept an integer-valued fraction for limit /
+// sinceDate / untilDate, as upstream's ajv does for an integer, and read them
+// (#3762).
+func TestUsersAndNotes_AcceptIntegerValuedFractions(t *testing.T) {
+	usersCount := func(t *testing.T, body string) int {
+		t.Helper()
+		h, roleRepo, assignRepo, userRepo := newUsersTestHandler(t)
+		roleRepo.Roles["r1"] = &model.Role{ID: "r1", IsPublic: true, IsExplorable: true}
+		// 割り当ての ID を 1e12 と 2e12 (ミリ秒) の時刻で作り、日付で絞れることを見る。
+		gen, _ := id.NewGenerator("aidx")
+		for i, u := range []string{"alice", "bob"} {
+			userRepo.Users[u] = &model.User{ID: u, Username: u}
+			aid := gen.Generate(time.UnixMilli(int64(i+1) * 1e12))
+			require.NoError(t, assignRepo.Create(&model.RoleAssignment{ID: aid, RoleID: "r1", UserID: u}))
+		}
+		rec := doPost(h.Users, body)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		var resp []map[string]any
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		return len(resp)
+	}
+	assert.Equal(t, 1, usersCount(t, `{"roleId":"r1","limit":1.0}`))
+	assert.Equal(t, 0, usersCount(t, `{"roleId":"r1","untilDate":1e1}`), "untilDate is read, not just accepted")
+	assert.Equal(t, 2, usersCount(t, `{"roleId":"r1","sinceDate":1e1}`))
+	assert.Equal(t, 1, usersCount(t, `{"roleId":"r1","sinceDate":1.5e12}`), "sinceDate is read, not just accepted")
+
+	h, roleRepo := newTestHandler(t)
+	roleRepo.Roles["r1"] = &model.Role{ID: "r1", Name: "Public", IsPublic: true, IsExplorable: true}
+	notes := &mockRoleNotesQuery{Notes: []*model.Note{
+		{ID: "n1", UserID: "u1", Text: strPtr("a"), Visibility: "public"},
+		{ID: "n2", UserID: "u1", Text: strPtr("b"), Visibility: "public"},
+	}}
+	h.SetNotesQuery(notes)
+	rec := doPost(h.Notes, `{"roleId":"r1","limit":1.0,"sinceDate":1e1,"untilDate":1e15}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var arr []any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &arr))
+	assert.Len(t, arr, 1)
+	assert.NotEmpty(t, notes.LastSinceID, "sinceDate is read as a cursor")
+	assert.NotEmpty(t, notes.LastUntilID, "untilDate is read as a cursor")
 }

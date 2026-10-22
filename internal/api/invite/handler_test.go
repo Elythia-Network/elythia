@@ -745,3 +745,26 @@ func TestCreate_NegativeLimitDenies(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Empty(t, repo.Tickets)
 }
+
+// invite/list accepts an integer-valued fraction for limit / sinceDate /
+// untilDate, as upstream's ajv does for an integer, and reads them (#3762).
+func TestList_AcceptsIntegerValuedFractions(t *testing.T) {
+	count := func(t *testing.T, body string) int {
+		t.Helper()
+		h, repo := newTestHandler(t)
+		user := "u1"
+		// ID を 1e12 と 2e12 (ミリ秒) の時刻で作り、日付で絞れることを見る。
+		gen, _ := id.NewGenerator("aidx")
+		repo.Tickets["t1"] = &model.RegistrationTicket{ID: gen.Generate(time.UnixMilli(1e12)), Code: "code-a1", CreatedByID: &user}
+		repo.Tickets["t2"] = &model.RegistrationTicket{ID: gen.Generate(time.UnixMilli(2e12)), Code: "code-a2", CreatedByID: &user}
+		rec := post(h.List, body, &model.User{ID: user})
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		var out []map[string]any
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
+		return len(out)
+	}
+	assert.Equal(t, 1, count(t, `{"limit":1.0}`))
+	assert.Equal(t, 0, count(t, `{"untilDate":1e1}`), "untilDate is read, not just accepted")
+	assert.Equal(t, 2, count(t, `{"sinceDate":1e1}`))
+	assert.Equal(t, 1, count(t, `{"sinceDate":1.5e12}`), "sinceDate is read, not just accepted")
+}
