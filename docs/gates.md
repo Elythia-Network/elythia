@@ -221,16 +221,17 @@ go/types へ移せば消える。
   `internal/cli/backup`だけ)・`internal/cli`。理由は`CacheScanExcludedDirs`に書いてある。
   `internal/backup`自体は、サーバーが`backupadmin`から使うので読む。どの除外も、追跡されたファイルに
   1つも当たらなくなったら`TestCacheScanExclusionsAreUsed`が落とす
-- **表の行。** 種類・理由・全部のフィールドの名前(指紋)を持つ。種類は次のとおり(数は#3777の時点)
+- **表の行。** 種類・理由・全部のフィールドの名前(指紋)を持つ。種類は次のとおり(数は#3780の時点)
   - `dropLocal`(31): `DropLocal()`を持ち、一覧に登録する
   - `droppedByOwner`(8): 辿って届き、持ち主の`DropLocal()`が捨てるか、`DropLocal()`の後の次の読み込みで
     置き換わる(`fedrule.compiledRule`は、集合を古いことにされて次の評価で読み直した集合に替わる)。
     **辿って届くだけでは分類しない。**
     `mentionFetchGuard`や`resolveGroup`のように、持ち主が捨てないものもあるため
-  - `notCache`(59): 値の写しを持たない(lock・singleflight・世代の起動と停止・数え・ジョブキューの接続・
+  - `notCache`(58): 値の写しを持たない(lock・singleflight・世代の起動と停止・数え・ジョブキューの接続・
     コードから1回だけ組む値)
-  - `processGlobal`(16): 世代をまたいで残るパッケージの状態(構築のときに配線するhook、一度だけ書く
-    設定、`setupLatch`)。段階(5)で依存として渡す形に寄せる
+  - `processGlobal`(14): 世代をまたいで残るパッケージの状態(構築のときに配線するhook、`setupLatch`、
+    プロセスで1回だけ読むfrontendのファイル、プラグインの登録)。段階(5)で依存として渡す形に寄せる。
+    設定だけで決まっていたもの(bcryptのcost・testMode)は#3780で依存として渡す形にし、表から消した
   - `writeBuffer`(7)・`perConnection`(6)・`throttle`(5)・`contentKeyed`(5)・`perCall`(4)・
     `followsRegistered`(2)・`reloadOnDrop`(2)
 - **指紋は全部のフィールドの名前。** 埋め込みは型の名前で、変数は名前の無いstructのフィールドと、同じ

@@ -443,7 +443,8 @@ checkout / setup-go を除くと step は実行順に 3 つ。**required job な
   引いて赤くなる)。1 パッケージが試す順序は 1 通りなので、`-shuffle` だけで全ての
   順序依存が見つかるわけではない。
   **プロセス共有の状態を張り替えて戻さないテストがここで落ちる** — `internal/server` は
-  `newServer` / `New` がグローバルを 12 個差し替えており、戻さないまま後続の
+  `newServer` / `New` がグローバルを差し替えており (数と内訳は
+  [testing.md](testing.md) の「プロセス共有の状態」の項)、戻さないまま後続の
   `avatar` / `emoji_redirect` が署名付きプロキシ URL を受け取って落ちていた。
 - **カバレッジ閾値チェック** (各shard内で実行)：
   - `internal/api/admin`配下: 80%以上（SMTP/queue/DB集計等の外部依存で90%未到達のため暫定緩和）

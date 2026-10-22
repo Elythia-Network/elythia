@@ -2281,12 +2281,12 @@ setupRoutes()
   前者は「キャッシュなら`DropLocal()`を持つか、理由がある」を、後者は「`DropLocal()`を持つなら一覧に
   ある」を守る。走査は`internal/entitycompat`の非テストのコード(`ScanCacheTypes`)に置き、両方から呼ぶ。
   型の一覧を書き写すと、片方だけ直してずれるため
-- 表の数(#3777の時点で145行): `dropLocal`が31、持ち主の`DropLocal()`が捨てるか、その後の次の読み込みで
+- 表の数(#3780の時点で142行): `dropLocal`が31、持ち主の`DropLocal()`が捨てるか、その後の次の読み込みで
   置き換わる`droppedByOwner`が8
   (`metaResponseCache`・`missingExtraKeys`・`policyProviderRuntime`・`previewCache`・`emojiKeyCache`・
-  `relationKindCache`・`tokenCache`・`fedrule.compiledRule`)。除外は106で、`notCache`(値の写しを持たない。
-  lock・singleflight・世代の起動と停止・数え・ジョブキューの接続・コードから1回だけ組む値)が59、`processGlobal`(世代をまたぐ
-  パッケージの状態。段階(5))が16、`writeBuffer`(書き込みや他のプロセスへの通知の保留)が7、
+  `relationKindCache`・`tokenCache`・`fedrule.compiledRule`)。除外は103で、`notCache`(値の写しを持たない。
+  lock・singleflight・世代の起動と停止・数え・ジョブキューの接続・コードから1回だけ組む値)が58、`processGlobal`(世代をまたぐ
+  パッケージの状態。段階(5))が14、`writeBuffer`(書き込みや他のプロセスへの通知の保留)が7、
   `perConnection`が6、`throttle`(間引き)が5、`contentKeyed`(元の内容を鍵に含める)が5、`perCall`が4、
   `followsRegistered`が2(`emojis.Handler`・`coredrive.MetaStorage`)、`reloadOnDrop`が2(`captcha.Service`・
   `reaction.SwitchableWriter`)。`Resolver`から届く`mentionFetchGuard`・`resolveGroup`・`resolveWaits`などは、
