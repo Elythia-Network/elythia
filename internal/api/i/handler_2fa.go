@@ -168,7 +168,7 @@ func (h *Handler) TwoFADone(c echo.Context) error {
 			return apierr.JSONInvalidParam(c)
 		}
 	}
-	if !twofactor.ValidateWithReplay(c.Request().Context(), h.totpReplayGuard, user.ID, token, *profile.TwoFactorTempSecret) {
+	if !twofactor.ValidateWithReplay(c.Request().Context(), h.totpReplayGuard, user.ID, token, *profile.TwoFactorTempSecret, h.testMode) {
 		return c.JSON(http.StatusForbidden, apierr.InvalidToken())
 	}
 
@@ -416,7 +416,7 @@ func (h *Handler) check2FAToken(ctx context.Context, profile *model.UserProfile,
 	if profile.TwoFactorSecret == nil {
 		return twoFAUse{}, false
 	}
-	if !twofactor.ValidateWithReplay(ctx, h.totpReplayGuard, profile.UserID, token, *profile.TwoFactorSecret) {
+	if !twofactor.ValidateWithReplay(ctx, h.totpReplayGuard, profile.UserID, token, *profile.TwoFactorSecret, h.testMode) {
 		return twoFAUse{}, false
 	}
 	guard, userID := h.totpReplayGuard, profile.UserID

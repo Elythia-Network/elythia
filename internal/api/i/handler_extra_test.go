@@ -162,6 +162,36 @@ func TestChangePassword_UsesWiredHasher(t *testing.T) {
 	assert.Equal(t, configured, cost)
 }
 
+// 本家のテスト用の素通し(UserAuthService.validateOtp)は、handlerのtestModeの
+// ときだけ効き、MISSKEY_TEST_CHECK_DUPLICATED_TOTP=1なら効かない(#3780)。
+// 2FAを有効にした利用者のi/change-passwordで、正しくないコードを送って見る。
+func TestChangePassword_TOTPBypassOnlyInTestMode(t *testing.T) {
+	tests := []struct {
+		name     string
+		testMode bool
+		env      string
+		wantCode int
+	}{
+		{name: "test mode bypasses the check", testMode: true, env: "", wantCode: http.StatusNoContent},
+		{name: "test mode with the duplicated check env validates", testMode: true, env: "1", wantCode: http.StatusForbidden},
+		{name: "production validates", testMode: false, env: "", wantCode: http.StatusForbidden},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("MISSKEY_TEST_CHECK_DUPLICATED_TOTP", tt.env)
+			h, repo := newExtraHandler(t)
+			h.SetTestMode(tt.testMode)
+			user := setupUserWithPassword(repo, "u1", "oldpass")
+			secret := "JBSWY3DPEHPK3PXP"
+			repo.Profiles["u1"].TwoFactorSecret = &secret
+			repo.Profiles["u1"].TwoFactorEnabled = true
+
+			rec := postExtra(h.ChangePassword, `{"currentPassword":"oldpass","newPassword":"newpass","token":"000000"}`, user)
+			assert.Equal(t, tt.wantCode, rec.Code, rec.Body.String())
+		})
+	}
+}
+
 func TestChangePassword_RejectsWrongArgon2PasswordWithoutRewrite(t *testing.T) {
 	h, repo := newExtraHandler(t)
 	user := setupUserWithArgon2Password(repo, "u1", "oldpass")

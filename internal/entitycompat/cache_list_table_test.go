@@ -180,8 +180,6 @@ var cacheEntries = map[string]cacheEntry{
 		[]string{"logger", "occurrences"}, nil},
 	"internal/core/strongauth.DBVerifier": {kindNotCache, "同時に走る照合の上限のsemaphoreを1回だけ作る。照合のたびにDBを開き直すので、本体のキャッシュのような古い値を持たない",
 		[]string{"Guard", "IDGen", "MaxChecks", "Open", "Passkeys", "Replay", "sem", "semOnce"}, nil},
-	"internal/core/twofactor.testMode": {kindProcessGlobal, "設定のtestModeの写し。構築のときに一度だけ書く。段階(5)で依存として渡す形に寄せる",
-		[]string{}, nil},
 	"internal/core/urlpreview.Fetcher": {kindDropLocal, "",
 		[]string{"cache", "cfg", "cfgProvider", "client", "proxyClient", "sensitiveList"}, nil},
 	"internal/core/urlpreview.previewCache": {kindDroppedByOwner, "URLごとのプレビュー。urlpreview.Fetcher.DropLocalがlruを捨て、genを進める",

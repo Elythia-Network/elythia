@@ -179,6 +179,9 @@ type Handler struct {
 	// passwordHasher は i/change-passwordで新しいパスワードをハッシュする(#3780)。
 	// 零値は既定のcost。
 	passwordHasher password.Hasher
+	// testModeは2FAのTOTPの検証を素通しにする(本家UserAuthService.validateOtpの
+	// `NODE_ENV === 'test'`相当、#3780)。twofactor.ValidateWithReplayへ渡す。
+	testMode bool
 }
 
 // TokenInvalidator は i/regenerate-token / i/change-password 等の sensitive
@@ -481,6 +484,10 @@ func (h *Handler) SetMainStreamPublisher(p MainStreamPublisher) {
 func (h *Handler) SetTOTPReplayGuard(g twofactor.ReplayGuard) {
 	h.totpReplayGuard = g
 }
+
+// SetTestMode enables the upstream-compatible TOTP bypass of test runs (see
+// twofactor.ValidateWithReplay). Production leaves it false.
+func (h *Handler) SetTestMode(v bool) { h.testMode = v }
 
 // SetPasswordHasher sets the Hasher that i/change-password hashes the new
 // password with. Unset, the default cost is used.

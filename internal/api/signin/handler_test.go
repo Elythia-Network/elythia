@@ -536,6 +536,41 @@ func TestSigninFlow_RecordsFailed2FA(t *testing.T) {
 	assert.False(t, signinRepo.Signins[0].Success)
 }
 
+// 本家のテスト用の素通し(UserAuthService.validateOtp)は、handlerのtestModeの
+// ときだけ効き、MISSKEY_TEST_CHECK_DUPLICATED_TOTP=1なら効かない(#3780)。
+// testModeはパッケージの変数ではなくhandlerがtwofactor.ValidateWithReplayへ渡す。
+func TestSigninFlow_TOTPBypassOnlyInTestMode(t *testing.T) {
+	tests := []struct {
+		name     string
+		testMode bool
+		env      string
+		wantOK   bool
+	}{
+		{name: "test mode bypasses the check", testMode: true, env: "", wantOK: true},
+		{name: "test mode with the duplicated check env validates", testMode: true, env: "1", wantOK: false},
+		{name: "production validates", testMode: false, env: "", wantOK: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("MISSKEY_TEST_CHECK_DUPLICATED_TOTP", tt.env)
+			h, repo := newTestHandler(t)
+			h.SetTestMode(tt.testMode)
+			user := createTestUser(repo, "tfauser", "password123")
+			repo.Profiles[user.ID].TwoFactorEnabled = true
+			secret := "JBSWY3DPEHPK3PXP"
+			repo.Profiles[user.ID].TwoFactorSecret = &secret
+
+			rec := doPost(h.SigninFlow, `{"username":"tfauser","password":"password123","token":"000000"}`)
+			if tt.wantOK {
+				require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+				assert.Contains(t, rec.Body.String(), `"i"`)
+				return
+			}
+			assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+		})
+	}
+}
+
 // #1776: 凍結アカウントの signin 試行は履歴に記録しない (upstream は suspended で
 // fail() を呼ばず先に弾く)。user-not-found も同様。
 func TestSignin_SuspendedAndNotFoundDoNotRecord(t *testing.T) {
