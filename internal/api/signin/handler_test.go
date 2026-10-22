@@ -150,7 +150,7 @@ func TestSignin_MigratesArgon2AfterSuccess(t *testing.T) {
 	assert.NoError(t, bcrypt.CompareHashAndPassword([]byte(after), []byte("pass123")))
 	afterCost, err := bcrypt.Cost([]byte(after))
 	require.NoError(t, err)
-	assert.Equal(t, password.Cost(), afterCost)
+	assert.Equal(t, password.DefaultCost, afterCost)
 }
 
 func TestSignin_Argon2PasswordOver72BytesStaysArgon2(t *testing.T) {
@@ -168,7 +168,7 @@ func TestSignin_Argon2CASConflictDoesNotOverwriteNewPassword(t *testing.T) {
 	h, repo := newTestHandler(t)
 	stored := signinArgon2Fixture("pass123")
 	createTestUserWithStoredPassword(repo, "admin", stored)
-	newer, err := password.Hash("newer")
+	newer, err := password.Hasher{}.Hash("newer")
 	require.NoError(t, err)
 	repo.UpdatePasswordIfCurrentFn = func(userID, currentHash, newHash string) (bool, error) {
 		assert.Equal(t, "u1", userID)
@@ -750,7 +750,7 @@ func TestSignin_RehashesWeakPasswordOnSuccess(t *testing.T) {
 	before := *repo.Profiles["u1"].Password
 	beforeCost, err := bcrypt.Cost([]byte(before))
 	require.NoError(t, err)
-	require.Less(t, beforeCost, password.Cost(), "前提: 設定より弱いこと")
+	require.Less(t, beforeCost, password.DefaultCost, "前提: 設定より弱いこと")
 
 	rec := doPost(h.Signin, `{"username":"admin","password":"pass123"}`)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
@@ -758,9 +758,58 @@ func TestSignin_RehashesWeakPasswordOnSuccess(t *testing.T) {
 	after := *repo.Profiles["u1"].Password
 	afterCost, err := bcrypt.Cost([]byte(after))
 	require.NoError(t, err)
-	assert.Equal(t, password.Cost(), afterCost, "設定した cost に焼き直されていない")
+	assert.Equal(t, password.DefaultCost, afterCost, "設定した cost に焼き直されていない")
 	// **平文は変わっていないこと。** 焼き直しでパスワードが変わると締め出す。
 	assert.NoError(t, bcrypt.CompareHashAndPassword([]byte(after), []byte("pass123")))
+}
+
+// 焼き直しとArgon2からの移行は、配線したHasherのcostを使う(#3780)。
+// 配線しないと既定のcostになるので、既定と違う値で確かめる。
+func TestSignin_RehashUsesWiredHasher(t *testing.T) {
+	const configured = bcrypt.MinCost + 1
+	hasher, err := password.NewHasher(configured)
+	require.NoError(t, err)
+
+	t.Run("rehash a weaker hash to the wired cost", func(t *testing.T) {
+		h, repo := newTestHandler(t)
+		h.SetPasswordHasher(hasher)
+		createTestUser(repo, "admin", "pass123") // bcrypt.MinCost で作られる
+
+		rec := doPost(h.Signin, `{"username":"admin","password":"pass123"}`)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+		afterCost, err := bcrypt.Cost([]byte(*repo.Profiles["u1"].Password))
+		require.NoError(t, err)
+		assert.Equal(t, configured, afterCost, "配線したcostに焼き直されていない")
+	})
+
+	t.Run("a hash already at the wired cost is kept", func(t *testing.T) {
+		// 既定のcost(10)なら焼き直す対象になる強さ。配線したcostと比べていれば触らない。
+		h, repo := newTestHandler(t)
+		h.SetPasswordHasher(hasher)
+		createTestUser(repo, "admin", "pass123")
+		atWired, err := bcrypt.GenerateFromPassword([]byte("pass123"), configured)
+		require.NoError(t, err)
+		stored := string(atWired)
+		repo.Profiles["u1"].Password = &stored
+
+		rec := doPost(h.Signin, `{"username":"admin","password":"pass123"}`)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		assert.Equal(t, stored, *repo.Profiles["u1"].Password, "配線したcostと同じなのに焼き直している")
+	})
+
+	t.Run("argon2 migration uses the wired cost", func(t *testing.T) {
+		h, repo := newTestHandler(t)
+		h.SetPasswordHasher(hasher)
+		createTestUserWithStoredPassword(repo, "admin", signinArgon2Fixture("pass123"))
+
+		rec := doPost(h.Signin, `{"username":"admin","password":"pass123"}`)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+		afterCost, err := bcrypt.Cost([]byte(*repo.Profiles["u1"].Password))
+		require.NoError(t, err)
+		assert.Equal(t, configured, afterCost, "移行したハッシュが配線したcostになっていない")
+	})
 }
 
 // パスワードが違うときは焼き直さない。**間違った平文で上書きすると締め出す。**
@@ -778,7 +827,7 @@ func TestSignin_DoesNotRehashOnWrongPassword(t *testing.T) {
 func TestSignin_DoesNotRehashWhenAlreadyStrong(t *testing.T) {
 	h, repo := newTestHandler(t)
 	createTestUser(repo, "admin", "pass123")
-	strong, err := password.Hash("pass123")
+	strong, err := password.Hasher{}.Hash("pass123")
 	require.NoError(t, err)
 	repo.Profiles["u1"].Password = &strong
 
@@ -964,7 +1013,7 @@ func TestSignin_RehashUsesCASAndDoesNotOverwriteNewPassword(t *testing.T) {
 
 	// **競合は CAS の呼び出し中に起こす。** 先に差し替えると Verify が落ちて
 	// signin 自体が 403 になり、rehash まで到達しない。
-	newer, err := password.Hash("brand-new")
+	newer, err := password.Hasher{}.Hash("brand-new")
 	require.NoError(t, err)
 	var gotCurrent string
 	repo.UpdatePasswordIfCurrentFn = func(userID, current, next string) (bool, error) {

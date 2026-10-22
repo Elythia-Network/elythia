@@ -338,6 +338,29 @@ func TestRequestReset_InvalidParam(t *testing.T) {
 
 // --- Reset ---
 
+// 新しいパスワードは配線したHasherのcostでハッシュする(#3780)。
+func TestReset_UsesWiredHasher(t *testing.T) {
+	const configured = bcrypt.MinCost + 1
+	hasher, err := password.NewHasher(configured)
+	require.NoError(t, err)
+	h, userRepo, resetRepo := newTestHandler()
+	h.SetPasswordHasher(hasher)
+	oldPw := "$2a$04$unused"
+	userRepo.profiles["u1"] = &model.UserProfile{UserID: "u1", Password: &oldPw}
+	idGen, _ := id.NewGenerator("aidx")
+	resetID := idGen.Generate(time.Now())
+	resetRepo.requests[resetID] = &model.PasswordResetRequest{ID: resetID, Token: "valid-token", UserID: "u1"}
+
+	rec := post(h.Reset, `{"token":"valid-token","password":"newpassword"}`)
+	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+
+	newPw := *userRepo.profiles["u1"].Password
+	assert.NoError(t, bcrypt.CompareHashAndPassword([]byte(newPw), []byte("newpassword")))
+	cost, err := bcrypt.Cost([]byte(newPw))
+	require.NoError(t, err)
+	assert.Equal(t, configured, cost)
+}
+
 func TestReset_Success(t *testing.T) {
 	h, userRepo, resetRepo := newTestHandler()
 
@@ -363,7 +386,7 @@ func TestReset_Success(t *testing.T) {
 	assert.NoError(t, bcrypt.CompareHashAndPassword([]byte(newPw), []byte("newpassword")))
 	cost, err := bcrypt.Cost([]byte(newPw))
 	require.NoError(t, err)
-	assert.Equal(t, password.Cost(), cost)
+	assert.Equal(t, password.DefaultCost, cost)
 
 	// トークンが削除されている
 	assert.Len(t, resetRepo.requests, 0)

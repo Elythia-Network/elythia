@@ -8,7 +8,6 @@ import (
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
 	"github.com/elythia-network/elythia/internal/misc"
-	"github.com/elythia-network/elythia/internal/misc/password"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 )
@@ -74,7 +73,7 @@ func (h *Handler) ResetPassword(c echo.Context) error {
 	}
 	// upstream secureRndstr(8) = 英数字 8 文字。
 	newPass := misc.SecureRandomString(8, misc.AlphanumericChars)
-	hash, err := password.Hash(newPass)
+	hash, err := h.passwordHasher.Hash(newPass)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
 	}

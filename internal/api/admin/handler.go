@@ -39,6 +39,7 @@ import (
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/colfit"
 	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/misc/password"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/queue"
 	"github.com/elythia-network/elythia/internal/repository"
@@ -266,6 +267,9 @@ type Handler struct {
 	// user の AP Delete / Undo(Delete) を remote instances へ配信する (#1759)。
 	// nil なら連合副作用は no-op (security guard / DB 更新には影響しない)。
 	userModerationFed UserModerationFederationHook
+	// passwordHasher はadmin/reset-passwordで作ったパスワードをハッシュする(#3780)。
+	// 零値は既定のcost。
+	passwordHasher password.Hasher
 }
 
 // UserModerationFederationHook delivers AP Delete / Undo(Delete) for a local
@@ -869,6 +873,10 @@ func (h *Handler) SetQueueRuntimeProvider(p QueueRuntimeProvider) {
 // SetBackground sets the group the work after a response runs in, so stopping
 // the server generation waits for it (#3661).
 func (h *Handler) SetBackground(g *bgwork.Group) { h.background = g }
+
+// SetPasswordHasher sets the Hasher that admin/reset-password hashes the
+// generated password with. Unset, the default cost is used.
+func (h *Handler) SetPasswordHasher(hasher password.Hasher) { h.passwordHasher = hasher }
 
 // HasBackground reports whether SetBackground received a group.
 func (h *Handler) HasBackground() bool { return h.background != nil }

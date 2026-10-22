@@ -88,6 +88,9 @@ type Handler struct {
 	testMode bool
 	// metaRepo はメール l10n の instance fallback 用。未配線なら英語 fallback。
 	metaRepo repository.MetaRepository
+	// passwordHasher はログインのときの焼き直しと、Argon2からの移行に使う(#3780)。
+	// 零値は既定のcost。
+	passwordHasher password.Hasher
 }
 
 // LoginNotifier records a 'login' notification on signin success (#1559)。
@@ -149,6 +152,10 @@ func (h *Handler) SetCaptcha(svc *captcha.Service) {
 func (h *Handler) SetTestMode(v bool) {
 	h.testMode = v
 }
+
+// SetPasswordHasher sets the Hasher that rehashes and migrates passwords at
+// signin. Unset, the default cost is used.
+func (h *Handler) SetPasswordHasher(hasher password.Hasher) { h.passwordHasher = hasher }
 
 // SetWebAuthn attaches optional WebAuthn dependencies to enable 2FA login
 // via security keys. Without it the handler still supports TOTP and backup
@@ -604,7 +611,7 @@ func (h *Handler) migratePendingPassword(c echo.Context, userID string) {
 	if !ok {
 		return
 	}
-	fresh, err := password.Hash(pending.plain)
+	fresh, err := h.passwordHasher.Hash(pending.plain)
 	if err != nil {
 		if errors.Is(err, bcrypt.ErrPasswordTooLong) {
 			// **恒久保留。** bcrypt は 72 byte で切るので、移行すると password が
@@ -978,10 +985,10 @@ func encodeCredID(raw []byte) string {
 // 呼ぶのは**パスワードの照合が通った後だけ**。失敗しても認証自体は成立して
 // いるので握りつぶす (次のログインでまた試す)。
 func (h *Handler) maybeRehashPassword(userID, storedHash, plain string) {
-	if !password.NeedsRehash(storedHash) {
+	if !h.passwordHasher.NeedsRehash(storedHash) {
 		return
 	}
-	fresh, err := password.Hash(plain)
+	fresh, err := h.passwordHasher.Hash(plain)
 	if err != nil {
 		// 72 byte を超える平文で通ることは無い (登録時に弾いている) が、
 		// 通ったとしても認証は済んでいるので進める。

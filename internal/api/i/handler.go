@@ -30,6 +30,7 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/colfit"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/misc/langmap"
+	"github.com/elythia-network/elythia/internal/misc/password"
 	miscsmtp "github.com/elythia-network/elythia/internal/misc/smtp"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
@@ -175,6 +176,9 @@ type Handler struct {
 	// passwordGuard は現在のパスワードの照合失敗をアカウント単位で数える。
 	// nil なら数えない (router は必ず配線する。TestPasswordFailureGuardIsWired)。
 	passwordGuard passwordguard.Guard
+	// passwordHasher は i/change-passwordで新しいパスワードをハッシュする(#3780)。
+	// 零値は既定のcost。
+	passwordHasher password.Hasher
 }
 
 // TokenInvalidator は i/regenerate-token / i/change-password 等の sensitive
@@ -477,6 +481,10 @@ func (h *Handler) SetMainStreamPublisher(p MainStreamPublisher) {
 func (h *Handler) SetTOTPReplayGuard(g twofactor.ReplayGuard) {
 	h.totpReplayGuard = g
 }
+
+// SetPasswordHasher sets the Hasher that i/change-password hashes the new
+// password with. Unset, the default cost is used.
+func (h *Handler) SetPasswordHasher(hasher password.Hasher) { h.passwordHasher = hasher }
 
 // SetTwoFAPendingGuard wires the guard that bounds the lifetime and the
 // wrong-code budget of the temp secret issued by i/2fa/register. nil disables

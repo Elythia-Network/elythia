@@ -22,7 +22,6 @@ import (
 	coretwofactor "github.com/elythia-network/elythia/internal/core/twofactor"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/frontendutil"
-	"github.com/elythia-network/elythia/internal/misc/password"
 )
 
 // restoreProcessGlobals undoes the process-wide state that `New` /
@@ -64,8 +63,7 @@ func restoreProcessGlobals(t *testing.T) {
 		// counter だけ外しても前のテストの観測が残る。
 		apimeta.SetLocalUserCounter(nil)
 		apimeta.ResetSetupLatchForTest()
-		// この 2 つは cfg 由来。0 / 既定を渡すと各パッケージの既定に戻る。
-		_ = password.SetCost(password.DefaultCost)
+		// cfg 由来。0 を渡すと core/note の既定に戻る。
 		corenote.SetHookConcurrency(0)
 		frontendutil.ResetLoaderCacheForTest()
 	})
@@ -146,7 +144,6 @@ func TestProcessGlobalsAreRestored(t *testing.T) {
 		"meta.SetLocalUserCounter",
 		"notehide.SetFollowingRepo",
 		"notehide.SetUGCVisibilityLookup",
-		"password.SetCost",
 	}
 	got := make([]string, 0, len(found))
 	for call := range found {

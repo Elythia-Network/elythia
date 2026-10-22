@@ -68,11 +68,29 @@ func TestResetPasswordAdmin_Success(t *testing.T) {
 	assert.NoError(t, bcrypt.CompareHashAndPassword([]byte(*profile.Password), []byte(resp.Password)))
 	cost, err := bcrypt.Cost([]byte(*profile.Password))
 	require.NoError(t, err)
-	assert.Equal(t, password.Cost(), cost)
+	assert.Equal(t, password.DefaultCost, cost)
 }
 
 // password 永続化に失敗したら 500 を返し、ハッシュ未保存のまま password を
 // 返してしまわないことを保証する (#1825 で error を握り潰さなくした)。
+// 作ったパスワードは配線したHasherのcostでハッシュする(#3780)。
+func TestResetPasswordAdmin_UsesWiredHasher(t *testing.T) {
+	const configured = bcrypt.MinCost + 1
+	hasher, err := password.NewHasher(configured)
+	require.NoError(t, err)
+	h, userRepo, _, _ := newTestHandler(t)
+	h.SetPasswordHasher(hasher)
+	userRepo.Users["u1"] = &model.User{ID: "u1", Username: "testuser"}
+	userRepo.Profiles["u1"] = &model.UserProfile{UserID: "u1"}
+
+	rec := doPost(h.ResetPassword, `{"userId":"u1"}`, adminUser)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	cost, err := bcrypt.Cost([]byte(*userRepo.Profiles["u1"].Password))
+	require.NoError(t, err)
+	assert.Equal(t, configured, cost)
+}
+
 func TestResetPasswordAdmin_UpdateProfileError(t *testing.T) {
 	h, userRepo, _, _ := newTestHandler(t)
 	userRepo.Users["u1"] = &model.User{ID: "u1", Username: "testuser"}

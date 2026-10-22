@@ -221,12 +221,18 @@ type Service struct {
 	db          *gorm.DB
 	webhookHook WebhookHook
 	idGen       id.Generator
+	// passwordHasherは登録のときのパスワードをハッシュする(#3780)。零値は既定のcost。
+	passwordHasher passwordpkg.Hasher
 }
 
 // NewService creates a new SignupService.
 func NewService(userRepo repository.UserRepository, metaRepo repository.MetaRepository, idGen id.Generator) *Service {
 	return &Service{userRepo: userRepo, metaRepo: metaRepo, idGen: idGen}
 }
+
+// SetPasswordHasher sets the Hasher that signup hashes passwords with. Unset,
+// the default cost is used.
+func (s *Service) SetPasswordHasher(h passwordpkg.Hasher) { s.passwordHasher = h }
 
 // SetDB wires the GORM database handle so PromotePending can run inside a
 // transaction. production の router 配線時に呼ぶ。設定しない場合は repo-based
@@ -444,7 +450,7 @@ func (s *Service) SignupWithHost(username, password string, isInitialSetup bool,
 	// bcrypt が silent truncation するのと異なり、Go の bcrypt は error にする
 	// ため、ここで拾わないと空 hash が DB に書かれて user が永久 login 不能に
 	// なる (#1075)。
-	hash, err := passwordpkg.Hash(password)
+	hash, err := s.passwordHasher.Hash(password)
 	if err != nil {
 		if errors.Is(err, bcrypt.ErrPasswordTooLong) {
 			return nil, ErrPasswordTooLong
@@ -662,7 +668,7 @@ func (s *Service) CreatePendingForApplication(username, email, password string, 
 		}
 	}
 
-	hash, err := passwordpkg.Hash(password)
+	hash, err := s.passwordHasher.Hash(password)
 	if err != nil {
 		if errors.Is(err, bcrypt.ErrPasswordTooLong) {
 			return nil, ErrPasswordTooLong
@@ -1029,7 +1035,7 @@ func (s *Service) SignupForApplication(username, password, applicationID, ticket
 		}
 	}
 
-	hash, err := passwordpkg.Hash(password)
+	hash, err := s.passwordHasher.Hash(password)
 	if err != nil {
 		if errors.Is(err, bcrypt.ErrPasswordTooLong) {
 			return nil, ErrPasswordTooLong

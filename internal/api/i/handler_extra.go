@@ -113,7 +113,7 @@ func (h *Handler) ChangePassword(c echo.Context) error {
 	// bcrypt は 73 byte 以上の password で ErrPasswordTooLong を返す。Node 側
 	// (upstream Misskey TS) は silent truncation するが、Go では error で
 	// 弾かれて空 hash が DB に書かれてしまうため明示的に 400 にする (#1075)。
-	hash, err := password.Hash(req.NewPassword)
+	hash, err := h.passwordHasher.Hash(req.NewPassword)
 	if err != nil {
 		if errors.Is(err, bcrypt.ErrPasswordTooLong) {
 			return c.JSON(http.StatusBadRequest, apierr.Error("PASSWORD_TOO_LONG", "Password is too long.", "f2e62243-b80a-43e4-9b17-329b422deded"))
