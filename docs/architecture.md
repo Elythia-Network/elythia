@@ -2045,7 +2045,7 @@ Supervisorの側は変えていない。停止のエラーの使われ方は次�
 
 コメントの「shutdown hook」は、この一覧の部品の停止を指す。
 
-### 4.4 キャッシュの一覧 (#3721、#3723、#3725、#3727、#3729、#3732、#3736、#3738、#3776)
+### 4.4 キャッシュの一覧 (#3721、#3723、#3725、#3727、#3729、#3732、#3736、#3738、#3776、#3777)
 
 **世代のキャッシュは、そのプロセスが持つ分を全部捨てる口 (`DropLocal()`) を持たせ、名前と由来と
 一緒に `Server` の一覧 (`cacheList`、`internal/server/caches.go`) へ登録する。** #3666 の段階 4。
@@ -2057,6 +2057,8 @@ setupRoutes()
   s.addCache("cachedMeta", cacheFromDB, cachedMeta)
   s.addCache("metaResponse", cacheFromDB, metaHandler)
   s.addCache("nodeinfo", cacheFromDB, nodeinfoHandler)
+  s.addCache("captcha", cacheFromDB, reloadOnDrop(reloadCaptcha))   // #3777。捨てずに読み直す
+  s.addCache("reactionBuffering", cacheFromDB, reloadOnDrop(reloadReactionBuffering))
   …
   s.addCache("userCache", cacheFromDB, s.userCache)       // 3 つは newServer で作る (#3723)
   s.addCache("relationCache", cacheFromDB, s.relationCache)
@@ -2113,6 +2115,7 @@ setupRoutes()
 | 投稿・タイムライン・通知 | `antennas` (`CachedAntennaRepository`。有効なアンテナの全件)・`pushSubscriptions` (`webpush.SubscriptionCache` のメモリの層)・`featuredNotes` (`notes.FeaturedRankingCache`。注目ノートの全体の順位)・`notePublisher` (`stream.NotePublisher`。直前に pack したノート)・`timelineJSON` (`notes.TimelineJSONCache`。opt-in のタイムラインの最初の頁) | #3736 |
 | 管理画面と統計 | `driveUsage` (`driveusage.Service`。ドライブの使用量の集計)・`dbHealth` (`dbhealth.Service`。DB の統計)・`statsCounts` (`stats.Handler`。`/api/stats` の instance と note_reaction の総数)・`ipLogWindow` (`iplog.Service`。書いた (利用者, IP) の印) | #3738 |
 | 外部とファイル | `urlPreview` (`urlpreview.Fetcher`。URL ごとのプレビュー)・`remoteStats` (`federation.RemoteStatsFetcher`。リモート利用者の統計の件数と作成日時)・`fetchRSS` (`fetchrss.Handler`。URL ごとの pack 済みの本文)・`pluginPeers` (`nodeInfoPeerLister`。相手の nodeinfo にあるプラグインの名前)・`twemojiBadge` (`twemojiBadgeHandler`。名前ごとの焼いた PNG) | #3776 |
+| 起動時の写し(段階4の最後) | `captcha`(captchaのproviderの組)・`reactionBuffering`(リアクションのバッファの切り替え)。どちらも捨てずにmetaから読み直す項目(`reloadOnDrop`) | #3777 |
 
 - 利用者と関係の系統の 3 つは、どれもこのプロセスだけで全部を捨てる処理を元から中に持っていて
   (`invalidateAllLocal`・`apply({All: true})`・`tokenCache.invalidateAll`)、`DropLocal()` はそれを
@@ -2240,9 +2243,55 @@ setupRoutes()
 - **今の `dropAll` は由来を見ずに全部を捨てる。** DB を戻すたびに呼ぶと、外への取得 (URL プレビュー・
   統計・RSS・nodeinfo) が一斉に増える。段階 (6) で、由来で絞るか (DB 由来だけを捨てるなど) を決める
 
-- captcha の provider と、リアクションのバッファの切り替えと、DeepL のキーは、meta 行の写しで、捨てる
-  だけでは足りず読み直しが要る。#3721 では登録していない。扱いは段階 4 の最後 (#3666 の (4-10)) で決める
-- 登録漏れを落とす検査は、全系統を移した後に足す
+- **captchaのproviderの組と、リアクションのバッファの切り替え(`enableReactionsBuffering`)は、捨てずに
+  読み直す項目として登録する(#3777)。** どちらも構築のときにmetaから作り、`metaUpdated`のhookと購読で
+  読み直す(`reloadCaptcha`・`reloadReactionBuffering`)。`cachedMeta`の`DropLocal()`はhookを呼ばないので、
+  一覧を捨てるだけでは、captchaは戻す前の組を**期限なく**使い続け、リアクションの切り替えは次のtick
+  (最大30秒。その間の加算はどちらのモードでも正しく入る)まで前のままになる。一覧には、`DropLocal()`が
+  同じ関数を呼ぶ項目(`reloadOnDrop`、`internal/server/caches.go`)を登録する
+- **この2つの`DropLocal()`は、捨てずに読み直す例外。** captchaの組を捨てて空にすると、`Verify`は成功を
+  返す(captchaが無効と同じ)ので、安全でない側に倒れる。metaが読めなければ、`metaUpdated`のときと同じく
+  前の値を据え置く。`cachedMeta`から読むので、`nodeinfo`の後(meta行を捨てた後)に登録する。逆だと、
+  捨てる前の行から読み直す。他のプロセスへは何も送らない
+- **DBが読めないときに`dropAll`を呼ぶと、captchaは戻す前の組のまま残る。** 読み直しが読めずに据え置き、
+  次の`metaUpdated`(管理画面での変更か他のプロセスからの通知)まで読み直さない。リアクションの切り替えは
+  次のtick(30秒)で読み直す。段階(6)で本番から`dropAll`を呼ぶときは、DBが読める状態になってから呼ぶ
+- **DeepLのキーは登録しない。** #3663から、翻訳のたびに`cachedMeta`から読むので、meta行を捨てれば揃う
+- **読めないときの代わりにだけ使う起動時の値は、登録しない。** chartのフラグ(`ChartsForRemoteUser`など、
+  `charthook`)・センシティブの判定の設定(`SetSensitiveSettingsProvider`に渡す`sensCfg`)・
+  `proxyRemoteFiles`(`SetProxyRemoteFilesLookup`)は、どれも使うたびに`cachedMeta`から読み、読めなかった
+  ときだけ起動時の値を使う。meta行を捨てれば揃い、捨てても代わりが要るので、捨てる対象ではない
+- **`/api/emojis`の符号化済みの応答(`api/emojis.Handler.encoded`、#3593)も登録しない。** 使うたびに、
+  `emojis`(`CachedEmojiRepository.ListLocal`)が返した一覧と同じsliceかを比べ、違えば作り直すので、
+  `emojis`を捨てれば追従する。これまでどこにも記録が無かったので、下の検査の除外に理由付きで載せた
+- **`meta`のsetupの印(`setupLatch`、`internal/api/meta`)は段階(5)の範囲。** ローカルの利用者を一度でも
+  見たことを覚えるパッケージの変数で、世代をまたいで残る。グローバルを依存として渡す形に寄せるときに扱う
+- **ストリームの接続ごとの写しは、`dropAll`の後も接続が続く間は残る。** `stream.Connection`のフォロー・
+  ハードミュート・ミュートとブロック・policyの写し、リストのチャンネルのメンバーの設定、チャットの部屋を
+  見られるかの確認(期限まで)は、接続やチャンネルの開始のときにDBから読む。一覧には入れず、下の検査では
+  `perConnection`として除外する。段階(6)でDBを戻すときは、ストリームの接続を閉じるか読み直させる
+  (書き込みのバッファや`MetadataRefresher`と同じく、段階(6)で決める)
+- **登録漏れは、静的な検査と実行時の検査の2つで落とす(#3777)。** 静的な検査(`make cachelist-check`、
+  [gates.md](gates.md#キャッシュの一覧への登録漏れcachelist-check3777))は、同期の部品(`sync.Mutex`
+  など)を持つstructとパッケージの変数、`DropLocal()`を持つstruct、それから届くmapのstructを全部数え、
+  表(`cacheEntries`)で種類と理由を書かせる。表は全部のフィールドの名前を持つので、どのフィールドを
+  足しても分類し直すまで落ちる。`DropLocal()`の型の行は、捨てずに残す状態を理由付きで持つ(`keeps`)。
+  実行時の検査(`TestCaches_ListMatchesTheDropLocalTypes`)は、タイムラインのJSONを有効にして組んだ
+  サーバーの一覧の値の型の集合が、同じ走査で`DropLocal()`を持つとした型の集合と一致することを見る。
+  前者は「キャッシュなら`DropLocal()`を持つか、理由がある」を、後者は「`DropLocal()`を持つなら一覧に
+  ある」を守る。走査は`internal/entitycompat`の非テストのコード(`ScanCacheTypes`)に置き、両方から呼ぶ。
+  型の一覧を書き写すと、片方だけ直してずれるため
+- 表の数(#3777の時点で145行): `dropLocal`が31、持ち主の`DropLocal()`が捨てるか、その後の次の読み込みで
+  置き換わる`droppedByOwner`が8
+  (`metaResponseCache`・`missingExtraKeys`・`policyProviderRuntime`・`previewCache`・`emojiKeyCache`・
+  `relationKindCache`・`tokenCache`・`fedrule.compiledRule`)。除外は106で、`notCache`(値の写しを持たない。
+  lock・singleflight・世代の起動と停止・数え・ジョブキューの接続・コードから1回だけ組む値)が59、`processGlobal`(世代をまたぐ
+  パッケージの状態。段階(5))が16、`writeBuffer`(書き込みや他のプロセスへの通知の保留)が7、
+  `perConnection`が6、`throttle`(間引き)が5、`contentKeyed`(元の内容を鍵に含める)が5、`perCall`が4、
+  `followsRegistered`が2(`emojis.Handler`・`coredrive.MetaStorage`)、`reloadOnDrop`が2(`captcha.Service`・
+  `reaction.SwitchableWriter`)。`Resolver`から届く`mentionFetchGuard`・`resolveGroup`・`resolveWaits`などは、
+  `Resolver.DropLocal()`が捨てないので除外にした。`MetadataRefresher`の`nextCheck`は上のとおり段階(6)で
+  決めるので、`throttle`として除外に載せた
 
 テスト (`internal/server/caches_test.go` と、各型のパッケージ):
 
@@ -2345,7 +2394,20 @@ setupRoutes()
   RSS は、捨てた後の取得を同時実行の上限に数えること。URL プレビューは設定を毎回読む構成 (`forRequest` で
   複製する) で確かめる。twemoji のバッジは、ファイルを名前付きパイプにして読み込みの途中で止める (unix だけ)
 
-#3721・#3723・#3725・#3727・#3729・#3732・#3736・#3738・#3776 の前後で同じであることは、それぞれ次のように確かめた (道具はコミットしていない)。
+- `TestCaches_ReloadedFromMeta` (#3777): 読み直しの2つの項目が、決めた順(`reloadedOnDrop`)で一覧にある
+  ことを確かめる。testcaptchaとリアクションのバッファを無効にして組み、DBのmetaで両方を有効にしてから、
+  `dropAll`の後にcaptchaの`Verify`が新しいproviderの組で検証し(トークンが無ければ落ちる)、リアクションの
+  writerがバッファへ切り替わることと、`internal:`へ何もpublishしないことを見る。読み直しの項目はfuncの型
+  なので値を比べられず、サーバーの使う値(`crossProcessCaches.captcha`・`reactionCountWriter`)の振る舞いで
+  確かめる。`metaCachesInOrder`にも2つを足し、`nodeinfo`の後にあることを`TestCaches_MetaLine`が見る。
+  `TestReloadOnDrop_DropLocalReads`は、`DropLocal()`が読み直しの関数を毎回呼ぶことを見る
+- `TestCaches_ListMatchesTheDropLocalTypes` (#3777、`caches_types_test.go`): タイムラインのJSONを有効にして
+  組んだサーバーの一覧の値の型の集合が、`entitycompat.ScanCacheTypes`が`DropLocal()`を持つとした型の集合と
+  一致すること。型の集合を比べるので、同じ型の2つ目の値の登録漏れは見えない。読み直しの2つの項目は同じ型
+  (`reloadOnDrop`)なので、名前は`TestCaches_ReloadedFromMeta`が見る
+- `make cachelist-check` (#3777): 上の静的な検査。中身は[gates.md](gates.md#キャッシュの一覧への登録漏れcachelist-check3777)
+
+#3721・#3723・#3725・#3727・#3729・#3732・#3736・#3738・#3776・#3777 の前後で同じであることは、それぞれ次のように確かめた (道具はコミットしていない)。
 
 - `elythia dump-routes`: 出力 (ルート)、起動ログ、Redis の命令の列、PostgreSQL の文の集合は、どれも前後で
   一致した。前の木を 2 回流して揺れないことも確かめ、後の木も 2 回流した
@@ -2359,6 +2421,9 @@ setupRoutes()
   現れる節点が `s.db` から `driveUsage` に替わっただけで、`driveUsage` は受け手の `adminHandler` より先に作る。
   #3776 では、peer のプラグイン一覧と twemoji のバッジを変数 (`pluginPeers`・`twemojiBadge`) にしたので、
   節点が 360 になった。setter の辺 870・後から入れる辺 96・呼び出しが離れている辺 657 は変わらない
+- #3777: `elythia dump-routes`の出力(ルート)、起動ログ、Redisの命令の列、PostgreSQLの文の集合は、前後で
+  一致した(前の木を2回、後の木を2回流した)。一覧への登録を2つと、テストが読むフィールドを1つ足した
+  だけで、読み直しは`dropAll`の中でしか走らない。4.1の道具は流していない
 
 ## 5. フック注入パターン
 
