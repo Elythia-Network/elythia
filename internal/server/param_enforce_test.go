@@ -10,10 +10,12 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/datatypes"
 
 	"github.com/elythia-network/elythia/internal/api/paramschema"
 	"github.com/elythia-network/elythia/internal/model"
@@ -104,11 +106,15 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	}
 	db := serverIntegrationDB
 	const userID, token = "penforce-user", "penforcetoken001"
+	const roleID, assignID = "penforce-role", "penforce-assign"
 	cleanup := func() {
+		require.NoError(t, db.Where("id = ?", assignID).Delete(&model.RoleAssignment{}).Error)
+		require.NoError(t, db.Where("id = ?", roleID).Delete(&model.Role{}).Error)
 		require.NoError(t, db.Exec(`DELETE FROM clip WHERE "userId" = ?`, userID).Error)
 		require.NoError(t, db.Exec(`DELETE FROM antenna WHERE "userId" = ?`, userID).Error)
 		require.NoError(t, db.Exec(`DELETE FROM flash WHERE "userId" = ?`, userID).Error)
 		require.NoError(t, db.Exec(`DELETE FROM channel WHERE "userId" = ?`, userID).Error)
+		require.NoError(t, db.Exec(`DELETE FROM registration_ticket WHERE "createdById" = ?`, userID).Error)
 		require.NoError(t, db.Where("id = ?", userID).Delete(&model.User{}).Error)
 	}
 	cleanup()
@@ -117,6 +123,15 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	require.NoError(t, repository.NewUserRepository(db).Create(&model.User{
 		ID: userID, Username: "penforce", UsernameLower: "penforce", Token: &tok,
 	}))
+	// invite/* は route の canInvite の検査が引数の検証より先に 403 を返す。本家も
+	// requiredRolePolicy を引数の検証より先に見るので順は同じで、検証まで届かせる
+	// には利用者に canInvite が要る (#3762)。
+	now := time.Now()
+	require.NoError(t, db.Create(&model.Role{
+		ID: roleID, Name: "penforce-role", UpdatedAt: now, LastUsedAt: now,
+		Policies: datatypes.JSON(`{"canInvite":{"useDefault":false,"priority":0,"value":true}}`),
+	}).Error)
+	require.NoError(t, db.Create(&model.RoleAssignment{ID: assignID, UserID: userID, RoleID: roleID}).Error)
 	_, on, _ := newParamShadowServers(t)
 
 	cases := readAJVCorpus(t, paramEnforcedEndpoints)

@@ -20,8 +20,8 @@ const paramShadowContextKey = "mk.server.paramShadow"
 // (clips/* in #3742, the first step of #3667; charts/* in #3744; hashtags/*
 // in #3746; antennas/* in #3748; flash/* in #3750; gallery/* in #3754;
 // following/* in #3756; channels/* in #3758; blocking/*, mute/* and
-// renote-mute/* in #3760). The other upstream endpoints are only validated
-// and counted (#3677).
+// renote-mute/* in #3760; roles/*, invite/* and notifications/* in #3762).
+// The other upstream endpoints are only validated and counted (#3677).
 //
 // 本家に揃える対象はパッケージ単位で広げる(#3667)。足したら、そのendpoint
 // で本家と判定が分かれる入力を、手書きの検査が拒否していないか(本家が通す
@@ -118,6 +118,18 @@ var paramEnforcedEndpoints = []string{
 	"renote-mute/create",
 	"renote-mute/delete",
 	"renote-mute/list",
+	"roles/list",
+	"roles/notes",
+	"roles/show",
+	"roles/users",
+	"invite/create",
+	"invite/delete",
+	"invite/limit",
+	"invite/list",
+	"notifications/create",
+	"notifications/flush",
+	"notifications/mark-all-as-read",
+	"notifications/test-notification",
 }
 
 // paramShadowMiddleware returns the /api group middleware that enables the
