@@ -677,7 +677,7 @@ func (h *Handler) Clips(c echo.Context) error {
 				}
 			}
 		}
-		out = append(out, entity.PackClip(cl, h.idGen, owner, extras))
+		out = append(out, h.entityPacker.PackClip(cl, h.idGen, owner, extras))
 	}
 	return c.JSON(http.StatusOK, out)
 }

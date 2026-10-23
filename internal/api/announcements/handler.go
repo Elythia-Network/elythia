@@ -41,7 +41,18 @@ type Handler struct {
 	broadcastPublisher  BroadcastPublisher
 	modLogService       *moderationlog.Service
 	userRepo            repository.UserRepository
+	// entityPacker は entity を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3796)。組み立てで渡し、既定の Packer を読まない。
+	entityPacker *entity.Packer
 }
+
+// SetEntityPacker wires the Packer this Handler packs entities with (#3796).
+func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs. 無いとお知らせの imageUrl を生のまま返し、閲覧者の IP が
+// リモートへ漏れる。
+func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
 
 // NewHandler creates a new announcements Handler.
 func NewHandler(repo repository.AnnouncementRepository, idGen id.Generator) *Handler {
@@ -162,7 +173,7 @@ func (h *Handler) List(c echo.Context) error {
 	}
 	result := make([]map[string]any, 0, len(items))
 	for _, a := range items {
-		item := packAnnouncement(a, h.idGen, viewerID)
+		item := packAnnouncement(h.entityPacker, a, h.idGen, viewerID)
 		if user != nil {
 			read, _ := h.repo.IsRead(user.ID, a.ID)
 			item["isRead"] = read
@@ -296,7 +307,7 @@ func (h *Handler) AdminCreate(c echo.Context) error {
 	// upstream AnnouncementService.create: per-user (userId 指定) は main へ、
 	// global (userId 無し) は broadcast stream へ announcementCreated を流す (#2056)。
 	// #2106 L24/L52: create event は upstream 同様 me-less で pack する (viewerID="" → forYou=false)。
-	body := map[string]any{"announcement": entity.PackAnnouncement(a, h.idGen, false, "")}
+	body := map[string]any{"announcement": h.entityPacker.PackAnnouncement(a, h.idGen, false, "")}
 	if a.UserID != nil {
 		if h.mainStreamPublisher != nil {
 			h.mainStreamPublisher.PublishMainEvent(*a.UserID, "announcementCreated", body)
@@ -315,7 +326,7 @@ func (h *Handler) AdminCreate(c echo.Context) error {
 	// (admin/list #1967 と同じく proxy しない)。public 用 PackAnnouncement は #1529 で
 	// imageUrl を proxy 化するため、その field だけ raw に上書きする (#1977)。
 	// #2106 L24: upstream create は me-less pack なので forYou=false (viewerID="")。
-	resp := entity.PackAnnouncement(a, h.idGen, false, "")
+	resp := h.entityPacker.PackAnnouncement(a, h.idGen, false, "")
 	resp["imageUrl"] = a.ImageURL // upstream wire は raw imageUrl
 	return c.JSON(http.StatusOK, resp)
 }
@@ -537,11 +548,11 @@ func (h *Handler) AdminList(c echo.Context) error {
 	return c.JSON(http.StatusOK, out)
 }
 
-// packAnnouncement wraps entity.PackAnnouncement for the user-facing List/Show.
+// packAnnouncement wraps (*entity.Packer).PackAnnouncement for the user-facing List/Show.
 // isRead defaults to false at this layer; the caller overrides after the viewer
 // check. admin 管理用 field (forExistingUsers / isActive) は user-facing には
 // 出さない: upstream の user-facing pack (AnnouncementEntityService.pack) はこれらを
 // 返さず、admin は AdminList が別途返す (#2101)。
-func packAnnouncement(a *model.Announcement, idGen id.Generator, viewerID string) map[string]any {
-	return entity.PackAnnouncement(a, idGen, false, viewerID)
+func packAnnouncement(pk *entity.Packer, a *model.Announcement, idGen id.Generator, viewerID string) map[string]any {
+	return pk.PackAnnouncement(a, idGen, false, viewerID)
 }

@@ -803,6 +803,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	followingService.SetEntityPacker(entityPacker)
 	// UserLite を包む部品にも渡す (#3794)。
 	reversiPublisher.SetEntityPacker(entityPacker)
+	// 残りの Pack (ドライブのファイル・ページ・クリップ・お知らせ・通知) を呼ぶ部品 (#3796)。
+	driveService.SetEntityPacker(entityPacker)
 	reactionService.SetWebhookHook(webhookReactionHook)
 	followingService.SetWebhookHook(webhookFollowingHook)
 	webhookSignupHook := corewebhook.NewSignupHook(webhookService)
@@ -2098,6 +2100,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	galleryHandler.SetEntityPacker(entityPacker)
 	inviteHandler.SetEntityPacker(entityPacker)
 	userListHandler.SetEntityPacker(entityPacker)
+	notificationsHandler.SetEntityPacker(entityPacker) // #3796
 
 	// Users endpoints
 	// users/lists/update-membership の withReplies 変更を userUpdated として流し、接続中の
@@ -2342,10 +2345,12 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// /drive/files/upload-from-url: SSRF-safe client で URL を download し、
 	// drive へ保存後 urlUploadFinished を main stream に流す (#1217)。download は
 	// 大きめになりうるので 60s timeout、cap は cfg.MaxFileSize に揃える。
-	driveHandler.SetURLUploader(drive.NewURLUploader(
+	driveURLUploader := drive.NewURLUploader(
 		s.outboundClient(60*time.Second), driveService, mainStreamPublisher,
 		idGen, s.config.UserAgent, s.config.MaxFileSize,
-	))
+	)
+	driveURLUploader.SetEntityPacker(entityPacker) // #3796: urlUploadFinished のファイルを包む
+	driveHandler.SetURLUploader(driveURLUploader)
 	driveHandler.SetRepos(driveFileRepo, driveFolderRepo, noteRepo)
 	driveHandler.SetUserRepo(userRepo)
 	driveHandler.SetInstanceRepo(instanceRepo)
@@ -2459,6 +2464,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			IDGen:        idGen,
 		},
 	)
+	ssrMeta.SetEntityPacker(entityPacker) // #3796: SSR の OGP 画像のファイルを包む
 	s.echo.GET("/notes/:id", func(c echo.Context) error {
 		// 同一 URL が Accept 次第で HTML / AP JSON / 302 を返すので、HTML 変種
 		// (ssrMeta 側) にも Vary が要る。閉包で立てれば両分岐に載る (#2506)。
@@ -2727,6 +2733,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	streamRevokePublisher := streamSvcs.streamRevokePublisher
 	notePublisher := streamSvcs.notePublisher
 	notificationPublisher := streamSvcs.notificationPublisher
+	notificationPublisher.SetEntityPacker(entityPacker) // #3796: 通知の本文と埋め込んだ投稿・利用者を包む
 	broadcastPublisher := streamSvcs.broadcastPublisher
 	chatPublisher := streamSvcs.chatPublisher
 
@@ -3350,11 +3357,13 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// webhookService がここで揃うため本箇所で配線する。announcement は repo 直接
 	// ではなく create + announcementCreated publish を対で行う Creator 経由
 	// (#1606、本家 AnnouncementService.create 相当)。
+	announcementCreator := coreannouncement.NewCreator(announcementRepo, idGen, mainStreamPublisher, broadcastPublisher)
+	announcementCreator.SetEntityPacker(entityPacker) // #3796: announcementCreated の本文を包む
 	modActivitySvc := coremoderatoractivity.NewService(
 		roleService,
 		metaRepo,
 		userRepo,
-		coreannouncement.NewCreator(announcementRepo, idGen, mainStreamPublisher, broadcastPublisher),
+		announcementCreator,
 		webhookService,
 		idGen,
 		miscsmtp.SubjectBodySenderFromMeta(metaRepo, s.config.ProxySMTP),
@@ -3412,6 +3421,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	pagesHandler.SetSelfPacker(selfPacker)
 	rolesHandler.SetSelfPacker(selfPacker)
 	announcementHandler := apiannouncements.NewHandler(announcementRepo, idGen)
+	announcementHandler.SetEntityPacker(entityPacker) // #3796
 	announcementHandler.SetMainStreamPublisher(mainStreamPublisher)
 	announcementHandler.SetBroadcastPublisher(broadcastPublisher) // global announcementCreated (#2056)
 
@@ -4112,6 +4122,14 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		{"webPushUser.entityPacker", webPushUserPacker.HasEntityPacker(), entityPackerMissingEffect},
 		{"bubbleVersusPublisher.entityPacker", bubbleVersusPublisher.HasEntityPacker(), entityPackerMissingEffect},
 		{"reversiPublisher.entityPacker", reversiPublisher.HasEntityPacker(), entityPackerMissingEffect},
+		// 残りの Pack を呼ぶ部品 (#3796)。
+		{"announcements.entityPacker", announcementHandler.HasEntityPacker(), entityPackerMissingEffect},
+		{"notifications.entityPacker", notificationsHandler.HasEntityPacker(), entityPackerMissingEffect},
+		{"announcementCreator.entityPacker", announcementCreator.HasEntityPacker(), entityPackerMissingEffect},
+		{"driveService.entityPacker", driveService.HasEntityPacker(), entityPackerMissingEffect},
+		{"ssrMeta.entityPacker", ssrMeta.HasEntityPacker(), entityPackerMissingEffect},
+		{"notificationPublisher.entityPacker", notificationPublisher.HasEntityPacker(), entityPackerMissingEffect},
+		{"driveURLUploader.entityPacker", driveURLUploader.HasEntityPacker(), entityPackerMissingEffect},
 		{"users.remoteStatsFederationGate", remoteStatsFetcher.HasHostAllowedChecker(),
 			"連合を切った相手へもプロフィール表示のたびに統計を取りに行き、誰をいつ見たかが漏れる"},
 		{"peer.blocker", s.peerDeps.HasBlocker(),

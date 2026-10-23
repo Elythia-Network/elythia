@@ -29,11 +29,11 @@ func TestPackDriveFile_URLsMatchGetters(t *testing.T) {
 	for ctxName, c := range map[string]*MediaURLContext{"nil": nil, "internal": internalCtx(), "external": externalCtx(), "disabled": disabledCtx()} {
 		SetMediaURLContext(c)
 		for name, f := range files {
-			got := PackDriveFile(f, idGen)
+			got := currentPacker().PackDriveFile(f, idGen)
 			assert.Equal(t, c.GetPublicURL(f, modeDefault), got.URL, "%s/%s url", ctxName, name)
 			assert.Equal(t, c.GetThumbnailURL(f), got.ThumbnailURL, "%s/%s thumbnailUrl", ctxName, name)
 			assert.Equal(t, c.GetWebpublicURL(f), got.WebpublicURL, "%s/%s webpublicUrl", ctxName, name)
-			self := PackDriveFileSelf(f, idGen)
+			self := currentPacker().PackDriveFileSelf(f, idGen)
 			assert.Equal(t, c.GetSelfURL(f, modeDefault), self.URL, "%s/%s self url", ctxName, name)
 		}
 	}
@@ -46,9 +46,9 @@ func TestPackDriveFile_MalformedRemoteURLs(t *testing.T) {
 	idGen := newTestIDGen(t)
 	f := &model.DriveFile{ID: idGen.Generate(time.Now()), Type: "image/png", URL: "/a.png",
 		ThumbnailURL: sp("/t.png"), WebpublicURL: sp("/w.png"), UserHost: sp(remoteHost), IsLink: true}
-	got := PackDriveFile(f, idGen)
+	got := currentPacker().PackDriveFile(f, idGen)
 	assert.Empty(t, got.URL)
 	assert.Nil(t, got.ThumbnailURL)
 	assert.Nil(t, got.WebpublicURL)
-	assert.Empty(t, PackDriveFileSelf(f, idGen).URL)
+	assert.Empty(t, currentPacker().PackDriveFileSelf(f, idGen).URL)
 }

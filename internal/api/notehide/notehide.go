@@ -128,7 +128,7 @@ func (h *Hider) HideStoredNotes(viewer *model.User, packed []entity.NoteEntity) 
 
 // HideNotificationNotes applies the per-viewer hideNote gate to the embedded
 // `note` of each packed notification (the map shape produced by
-// entity.PackNotifications). The notification's note itself gets the top-level
+// (*entity.Packer).PackNotifications). The notification's note itself gets the top-level
 // author-preference gate; its depth-2 renote/reply embeds get the full embed
 // gate (#1568). The REST i/notifications path already runs FilterVisible (#1444)
 // which drops notes the viewer cannot see at all, so the intrinsic

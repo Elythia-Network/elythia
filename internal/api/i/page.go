@@ -99,7 +99,7 @@ func (h *Handler) PageLikes(c echo.Context) error {
 		}
 		out = append(out, map[string]any{
 			"id": l.ID,
-			"page": entity.PackPageWithContext(p, entity.PackPageContext{
+			"page": h.entityPacker.PackPageWithContext(p, entity.PackPageContext{
 				IDGen:   h.idGen,
 				Owner:   owner,
 				IsLiked: &liked,

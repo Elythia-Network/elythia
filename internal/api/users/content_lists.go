@@ -91,7 +91,7 @@ func (h *Handler) Clips(c echo.Context) error {
 				}
 			}
 		}
-		out = append(out, entity.PackClip(cl, h.idGen, owner, extras))
+		out = append(out, h.entityPacker.PackClip(cl, h.idGen, owner, extras))
 	}
 	return c.JSON(http.StatusOK, out)
 }
@@ -264,7 +264,7 @@ func (h *Handler) resolveGalleryFiles(fileIDs []string) []any {
 	}
 	for _, fid := range fileIDs {
 		if f, ok := byID[fid]; ok {
-			files = append(files, entity.PackDriveFile(f, h.idGen))
+			files = append(files, h.entityPacker.PackDriveFile(f, h.idGen))
 		}
 	}
 	return files
@@ -322,8 +322,8 @@ func (h *Handler) Pages(c echo.Context) error {
 		// content の image block / eyeCatchingImageId から drive file を解決する
 		// (#1662)。driveFileRepo 未配線なら default ([] / null)。page list なので
 		// per-page lookup (N+1) だが list は小さい前提で許容する。
-		attachedFiles, eyeCatchingImage := entity.ResolvePageDriveFiles(p, h.driveFileRepo, h.idGen)
-		out = append(out, entity.PackPageWithContext(p, entity.PackPageContext{
+		attachedFiles, eyeCatchingImage := h.entityPacker.ResolvePageDriveFiles(p, h.driveFileRepo, h.idGen)
+		out = append(out, h.entityPacker.PackPageWithContext(p, entity.PackPageContext{
 			IDGen:            h.idGen,
 			Owner:            owner.User,
 			EyeCatchingImage: eyeCatchingImage,

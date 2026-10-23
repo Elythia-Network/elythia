@@ -568,7 +568,7 @@ func (h *Handler) Notes(c echo.Context) error {
 }
 
 // clipToMap packs a clip into the misskey_dart-compatible shape via
-// entity.PackClip. owner (clip の所有ユーザー) を userRepo から解決して user
+// (*entity.Packer).PackClip. owner (clip の所有ユーザー) を userRepo から解決して user
 // field を埋める。misskey_dart の Clip.fromJson は createdAt / user /
 // favoritedCount を非null必須とするため、旧 ad-hoc map では落ちていた (#1245)。
 // viewer は favoritedCount / isFavorited / notesCount の出し分けに使う (#1562)。
@@ -577,7 +577,7 @@ func (h *Handler) clipToMap(cl *model.Clip, viewer *model.User) map[string]any {
 	if h.userRepo != nil {
 		owner, _ = h.userRepo.FindByID(cl.UserID)
 	}
-	return entity.PackClip(cl, h.idGen, owner, h.clipExtras(cl, viewer))
+	return h.entityPacker.PackClip(cl, h.idGen, owner, h.clipExtras(cl, viewer))
 }
 
 // clipExtras resolves the viewer-dependent clip fields (#1562)。upstream

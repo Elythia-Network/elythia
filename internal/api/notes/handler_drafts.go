@@ -966,7 +966,7 @@ func (h *Handler) resolveDraftFileMap(fileIDs []string) map[string]entity.DriveF
 		return m
 	}
 	for _, f := range rows {
-		m[f.ID] = entity.PackDriveFile(f, h.idGen)
+		m[f.ID] = h.entityPacker.PackDriveFile(f, h.idGen)
 	}
 	return m
 }

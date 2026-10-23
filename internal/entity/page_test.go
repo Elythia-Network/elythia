@@ -99,7 +99,7 @@ func TestPackPageWithContext_AttachesOwnerAndOptionalFields(t *testing.T) {
 	idGen := newTestIDGen(t)
 	p := &model.Page{ID: idGen.Generate(time.Now()), UserID: "u1", Visibility: model.PageVisibilityPublic}
 	liked := true
-	out := PackPageWithContext(p, PackPageContext{
+	out := currentPacker().PackPageWithContext(p, PackPageContext{
 		IDGen:            idGen,
 		Owner:            &model.User{ID: "u1", Username: "alice", UsernameLower: "alice"},
 		EyeCatchingImage: map[string]any{"id": "f1"},
@@ -115,7 +115,7 @@ func TestPackPageWithContext_AttachesOwnerAndOptionalFields(t *testing.T) {
 func TestPackPageWithContext_OmitsAbsentOptionals(t *testing.T) {
 	idGen := newTestIDGen(t)
 	p := &model.Page{ID: idGen.Generate(time.Now()), UserID: "u1", Visibility: model.PageVisibilityPublic}
-	out := PackPageWithContext(p, PackPageContext{IDGen: idGen})
+	out := currentPacker().PackPageWithContext(p, PackPageContext{IDGen: idGen})
 	// Owner=nil → user field 自体を omit (null 出しすると frontend が
 	// page.user.username で再 throw するため)。isLiked も viewer 無し時は omit
 	// (golden isLiked? は optional)。
@@ -131,7 +131,7 @@ func TestPackPageWithContext_OmitsAbsentOptionals(t *testing.T) {
 }
 
 func TestPackPageWithContext_NilPage(t *testing.T) {
-	assert.Nil(t, PackPageWithContext(nil, PackPageContext{}))
+	assert.Nil(t, currentPacker().PackPageWithContext(nil, PackPageContext{}))
 }
 
 // #1662 CollectPageImageFileIDs は image block の fileId を document 順 (children
@@ -250,14 +250,14 @@ func TestResolvePageDriveFiles(t *testing.T) {
 	p := &model.Page{ID: "p1", UserID: "alice", EyeCatchingImageID: &eyeID,
 		Content: []byte(`[{"type":"image","fileId":"f1"},{"type":"image","fileId":"f2"}]`)}
 
-	attached, eye := ResolvePageDriveFiles(p, lookup, idGen)
+	attached, eye := currentPacker().ResolvePageDriveFiles(p, lookup, idGen)
 	require.Len(t, attached, 1, "owner alice の f1 のみ。bob の f2 は除外")
 	assert.Equal(t, "f1", attached[0].(DriveFileEntity).ID)
 	require.NotNil(t, eye)
 	assert.Equal(t, "eye", eye.(DriveFileEntity).ID)
 
 	// lookup nil → (nil, nil) で default 維持。
-	a2, e2 := ResolvePageDriveFiles(p, nil, idGen)
+	a2, e2 := currentPacker().ResolvePageDriveFiles(p, nil, idGen)
 	assert.Nil(t, a2)
 	assert.Nil(t, e2)
 }

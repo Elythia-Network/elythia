@@ -494,7 +494,7 @@ func (h *Handler) resolveFiles(fileIDs []string) []entity.DriveFileEntity {
 	}
 	for _, fid := range fileIDs {
 		if f := byID[fid]; f != nil {
-			out = append(out, entity.PackDriveFile(f, h.idGen))
+			out = append(out, h.entityPacker.PackDriveFile(f, h.idGen))
 		}
 	}
 	return out
@@ -536,7 +536,7 @@ func (h *Handler) packMany(posts []*model.GalleryPost, viewer *model.User) []map
 		var rows []*model.DriveFile
 		if err := h.db.Where("id IN ?", allFileIDs).Find(&rows).Error; err == nil {
 			for _, f := range rows {
-				fileByID[f.ID] = entity.PackDriveFile(f, h.idGen)
+				fileByID[f.ID] = h.entityPacker.PackDriveFile(f, h.idGen)
 			}
 		}
 	}

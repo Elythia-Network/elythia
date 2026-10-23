@@ -79,7 +79,7 @@ func (h *Handler) Grouped(c echo.Context) error {
 		slog.Error("notifications-grouped: resolve abuse report states failed", "err", err)
 		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
 	}
-	packed := entity.PackNotifications(items, h.idGen, h.instanceLookup(), h.emojiLookup(), opts...)
+	packed := h.entityPacker.PackNotifications(items, h.idGen, h.instanceLookup(), h.emojiLookup(), opts...)
 	// depth-2 embed hide (#1570): grouping の前に通知 note の renote/reply embed と
 	// 著者設定ゲートを viewer 可視性で適用する。Show と同じく #1444 CanSeeNote gate は
 	// 落とすだけで embed に再帰しないため、ここで hide しないと grouped 経由で

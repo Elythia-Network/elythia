@@ -280,7 +280,18 @@ type Service struct {
 	// mediaSlotCap は mediaSlots の容量。semaphore.Weighted は容量を公開
 	// しないので、テストと自己検査のために持っておく。
 	mediaSlotCap int
+	// entityPacker は entity を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3796)。組み立てで渡し、既定の Packer を読まない。
+	entityPacker *entity.Packer
 }
+
+// SetEntityPacker wires the Packer this Service packs entities with (#3796).
+func (s *Service) SetEntityPacker(p *entity.Packer) { s.entityPacker = p }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs. 無いとファイルの url などを生のまま返し、閲覧者の IP が
+// リモートへ漏れる。
+func (s *Service) HasEntityPacker() bool { return s.entityPacker.HasMediaURL() }
 
 // defaultMediaProcessingConcurrency is how many uploads may decode at once.
 //
@@ -951,12 +962,12 @@ func (s *Service) Upload(ctx context.Context, in UploadInput) (*model.DriveFile,
 	// それぞれ userID を必要とする。
 	if in.User != nil {
 		// upstream は packedFile (self) を drive channel に送る (#2002)。
-		s.publishEvent(in.User.ID, "fileCreated", entity.PackDriveFileSelf(f, s.idGen))
+		s.publishEvent(in.User.ID, "fileCreated", s.entityPacker.PackDriveFileSelf(f, s.idGen))
 		// Misskey本家DriveService.addFileはdrive topicに加えてmainにも
 		// driveFileCreatedをemitしてUploader自身のUI(ドロップアップロード等)
 		// を即時反映させる(TS: DriveService.ts:665)。
 		if s.mainStreamPublisher != nil {
-			s.mainStreamPublisher.PublishMainEvent(in.User.ID, "driveFileCreated", entity.PackDriveFileSelf(f, s.idGen))
+			s.mainStreamPublisher.PublishMainEvent(in.User.ID, "driveFileCreated", s.entityPacker.PackDriveFileSelf(f, s.idGen))
 		}
 	}
 	// chartHook は user nil でも発火させる: bytes / count は instance-wide
@@ -1481,7 +1492,7 @@ func (s *Service) Update(user *model.User, id string, in UpdateInput) (*model.Dr
 	}
 	// イベントは操作した人ではなく所有者の drive stream へ送る (本家
 	// publishDriveStream(file.userId, ...))。所有者が居なければ送らない。
-	s.publishEvent(ownerID, "fileUpdated", entity.PackDriveFileSelf(updated, s.idGen))
+	s.publishEvent(ownerID, "fileUpdated", s.entityPacker.PackDriveFileSelf(updated, s.idGen))
 	// 本家と同じく、値が実際に変わったときだけ残す。
 	if byModerator && in.IsSensitive != nil && *in.IsSensitive != wasSensitive {
 		t := moderationlog.LogUnmarkSensitiveDriveFile

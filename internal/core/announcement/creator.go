@@ -40,7 +40,18 @@ type Creator struct {
 	idGen     id.Generator
 	publisher MainStreamPublisher
 	broadcast BroadcastPublisher
+	// entityPacker は entity を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3796)。組み立てで渡し、既定の Packer を読まない。
+	entityPacker *entity.Packer
 }
+
+// SetEntityPacker wires the Packer this Creator packs entities with (#3796).
+func (c *Creator) SetEntityPacker(p *entity.Packer) { c.entityPacker = p }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs. 無いとお知らせの imageUrl を生のまま返し、閲覧者の IP が
+// リモートへ漏れる。
+func (c *Creator) HasEntityPacker() bool { return c.entityPacker.HasMediaURL() }
 
 // NewCreator constructs a Creator. publisher / broadcast may be nil to disable
 // the corresponding stream emit (graceful for tests / partial wiring)。
@@ -59,7 +70,7 @@ func (c *Creator) Create(a *model.Announcement) error {
 		return err
 	}
 	// #2106 L52: broadcast event は me-less なので viewerID="" (forYou=false)。
-	body := map[string]any{"announcement": entity.PackAnnouncement(a, c.idGen, false, "")}
+	body := map[string]any{"announcement": c.entityPacker.PackAnnouncement(a, c.idGen, false, "")}
 	if a.UserID != nil {
 		if c.publisher != nil {
 			c.publisher.PublishMainEvent(*a.UserID, "announcementCreated", body)

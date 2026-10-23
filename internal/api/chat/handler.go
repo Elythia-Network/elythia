@@ -329,7 +329,7 @@ func (h *Handler) packMessageWithCreatedAt(m *model.ChatMessage) map[string]any 
 			result["createdAt"] = t.UTC().Format("2006-01-02T15:04:05.000Z")
 		}
 		if m.File != nil {
-			result["file"] = entity.PackDriveFile(m.File, h.idGen)
+			result["file"] = h.entityPacker.PackDriveFile(m.File, h.idGen)
 		}
 	}
 	return result

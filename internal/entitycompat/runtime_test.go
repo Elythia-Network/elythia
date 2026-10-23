@@ -228,7 +228,7 @@ func notifFixture(typ notification.Type, withUser, withNote bool, extra map[stri
 	if typ == notification.TypeRoleAssigned {
 		n.NotifierID = ""
 	}
-	return entity.PackNotification(n, user, note, idGen, nil, nil, opts...)
+	return (*entity.Packer)(nil).PackNotification(n, user, note, idGen, nil, nil, opts...)
 }
 
 func TestEmbeddedGolden(t *testing.T) {
@@ -337,7 +337,7 @@ func TestAnnouncementShapeL2(t *testing.T) {
 		},
 	}
 	for name, a := range cases {
-		assertNoGatedDrift(t, "Announcement["+name+"]", entity.PackAnnouncement(a, idGen, true, ""), schema)
+		assertNoGatedDrift(t, "Announcement["+name+"]", (*entity.Packer)(nil).PackAnnouncement(a, idGen, true, ""), schema)
 	}
 }
 
@@ -350,7 +350,7 @@ func TestClipShapeL2(t *testing.T) {
 	owner := &model.User{ID: "u_owner", Username: "owner"}
 	desc := "my clip"
 	cl := &model.Clip{ID: idGen.Generate(time.Now()), UserID: "u_owner", Name: "clip", Description: &desc, IsPublic: true}
-	out := entity.PackClip(cl, idGen, owner, entity.ClipExtras{})
+	out := (*entity.Packer)(nil).PackClip(cl, idGen, owner, entity.ClipExtras{})
 	assertNoGatedDrift(t, "Clip", out, schema)
 }
 
@@ -382,7 +382,7 @@ func TestPageShapeL2(t *testing.T) {
 		Content:   datatypes.JSON([]byte("[]")),
 		Variables: datatypes.JSON([]byte("[]")),
 	}
-	out := entity.PackPageWithContext(p, entity.PackPageContext{IDGen: idGen, Owner: owner, IsLiked: &liked})
+	out := (*entity.Packer)(nil).PackPageWithContext(p, entity.PackPageContext{IDGen: idGen, Owner: owner, IsLiked: &liked})
 	assertNoGatedDrift(t, "Page", out, schema)
 }
 

@@ -128,7 +128,7 @@ func (h *Handler) resolveGalleryFiles(fileIDs []string) []any {
 	}
 	for _, fid := range fileIDs {
 		if f, ok := byID[fid]; ok {
-			files = append(files, entity.PackDriveFile(f, h.idGen))
+			files = append(files, h.entityPacker.PackDriveFile(f, h.idGen))
 		}
 	}
 	return files

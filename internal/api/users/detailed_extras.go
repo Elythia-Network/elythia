@@ -275,7 +275,7 @@ func (h *Handler) fillPinnedPages(viewer *model.User, targets []userpack.DetailT
 		if pinnedPageVisibleTo(p, viewer) {
 			// golden Page は user 必須。pinnedPage は profile user 自身の page
 			// なので owner=u を渡して user (UserLite) を埋める (#1266 follow-up)。
-			t.Detailed.PinnedPage = entity.PackPageWithContext(p, entity.PackPageContext{IDGen: h.idGen, Owner: t.User})
+			t.Detailed.PinnedPage = h.entityPacker.PackPageWithContext(p, entity.PackPageContext{IDGen: h.idGen, Owner: t.User})
 		} else if p != nil || (lookupFailed && (viewer == nil || t.User == nil || viewer.ID != t.User.ID)) {
 			// private の Page は ID も出さない (#3479)。ID が出ると、作者以外に
 			// private の Page を持っていることと、その ID が分かる。

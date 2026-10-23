@@ -245,7 +245,7 @@ func TestPackDriveFile_Integration(t *testing.T) {
 		URL: "https://" + remoteHost + "/orig.png", URI: sp("https://" + remoteHost + "/orig.png"),
 		ThumbnailURL: sp("https://" + remoteHost + "/t.png"), UserHost: sp(remoteHost), IsLink: true,
 	}
-	got := PackDriveFile(remote, idGen)
+	got := currentPacker().PackDriveFile(remote, idGen)
 	if strings.Contains(u(t, got.URL).Host, remoteHost) {
 		t.Errorf("packed url leaks remote host: %s", got.URL)
 	}
@@ -791,8 +791,8 @@ func TestPackDriveFile_SelfKeepsTheOriginalURL(t *testing.T) {
 		WebpublicURL: &web,
 	}
 
-	assert.Equal(t, web, PackDriveFile(local, idGen).URL,
+	assert.Equal(t, web, currentPacker().PackDriveFile(local, idGen).URL,
 		"他人向けの pack が原本 (EXIF 込み) を指している")
-	assert.Equal(t, local.URL, PackDriveFileSelf(local, idGen).URL,
+	assert.Equal(t, local.URL, currentPacker().PackDriveFileSelf(local, idGen).URL,
 		"所有者向けの pack が webpublic を指している")
 }
