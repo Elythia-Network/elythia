@@ -320,3 +320,53 @@ func TestNewServer_RemainingPackersUseTheWiredPacker(t *testing.T) {
 		proxied(t, f.URL)
 	})
 }
+
+// **/avatar と /emoji は、組み立てで作った Packer でリモートの画像を media proxy
+// へ通す (#3798)。**
+//
+// どちらも部品を持たず、router が組み立てた Packer をそのまま渡す。上と同じく、
+// 組み立ての後に既定の Packer の mediaURL を外し、渡した Packer だけで proxy が
+// 付くことを確かめる。
+func TestNewServer_MediaRoutesUseTheWiredPacker(t *testing.T) {
+	db := serverIntegrationDB
+	if db == nil {
+		t.Skip("PostgreSQL unavailable")
+	}
+	const (
+		userID = "eppuser3798aaaaa"
+		token  = "epptokenx3798aaa"
+		host   = "remote.example"
+	)
+	idGen := testIDGen(t)
+	emojiID := idGen.Generate(time.Now())
+	cleanupPluginAccountUsers(t, db, "epp_media")
+	t.Cleanup(func() {
+		db.Exec(`DELETE FROM "emoji" WHERE "id" = ?`, emojiID)
+	})
+	createLocalUser(t, db, userID, "epp_media", token, "epp-pass", false)
+	avatarURL := "https://" + host + "/files/epp3798-avatar.png"
+	require.NoError(t, db.Exec(`UPDATE "user" SET "avatarUrl" = ? WHERE "id" = ?`, avatarURL, userID).Error)
+	emojiURL := "https://" + host + "/files/epp3798-emoji.png"
+	require.NoError(t, db.Create(&model.Emoji{
+		ID: emojiID, Name: "epp3798", Host: strPtrLeak(host), OriginalURL: emojiURL, PublicURL: emojiURL,
+	}).Error)
+
+	srv := newServerWithConfig(t, func(*config.Config) {})
+	// 既定の Packer の mediaURL を外す。restoreProcessGlobals が後で nil に戻す。
+	entity.SetMediaURLContext(nil)
+
+	for _, tc := range []struct{ name, path, shape string }{
+		{"avatar", "/avatar/@epp_media", "/avatar.webp?"},
+		{"emoji", "/emoji/epp3798@" + host + ".webp", "/emoji.webp?"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tc.path, nil))
+			require.Equal(t, http.StatusFound, rec.Code, rec.Body.String())
+			loc := rec.Header().Get("Location")
+			// 否定形だと空文字でも通るので、proxy の形であることを肯定形で見る。
+			assert.Contains(t, loc, tc.shape, "Location: %s", loc)
+			assert.False(t, strings.HasPrefix(loc, "https://"+host), "Location: %s", loc)
+		})
+	}
+}

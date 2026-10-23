@@ -13,8 +13,8 @@ import (
 // いた。newServer が組み立てのたびにプロセス全体の状態を書き換えるのをやめる
 // ため、依存を 1 つの値にまとめる (#3788、#3666 の段階 (5))。(5-5) では公開
 // 関数を Packer のメソッドにし、パッケージ関数は既定の Packer へ委ねる。
-// 呼び出し側は系統ごとに Packer を受け取る形へ移す。投稿の系統は (5-6) で移した
-// (#3790)。利用者の詳細の系統は (5-7a) で移した (#3792)。
+// 呼び出し側は系統ごとに Packer を受け取る形へ移し、(5-9) でパッケージ関数は
+// 無くなった (#3790〜#3798)。既定の Packer は Set* が書くだけで、(5-10) で消す。
 //
 // nil の *Packer と、依存が欠けた Packer は、それぞれの依存が未配線のときと
 // 同じに動く。**mediaURL が無いとメディアの URL を生のまま出す** (閲覧者の IP が
@@ -75,8 +75,10 @@ func NewPacker(deps PackerDeps) *Packer {
 	}
 }
 
-// defaultPacker is the Packer the package-level functions delegate to until
-// their callers take a Packer (#3666 段階 (5-6)〜(5-10))。
+// defaultPacker is the Packer that Set* writes. Outside Set* itself (which
+// copies it before replacing) and the tests, nothing reads it since the
+// package-level functions were removed (#3798); it goes away with Set* in
+// #3666 段階 (5-10)。
 //
 // 読み込みはリクエストごとに走るので atomic にし、Set* は写しを作って差し替える。
 // 書き込みどうしは defaultPackerMu で直列にする (2 つの Set* が同時に写しを

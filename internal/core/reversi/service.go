@@ -187,7 +187,7 @@ type Service struct {
 	userRepo  UserLookup
 	baseURL   string
 	// stream で配る UserLite の avatarUrl を決める関数。core は entity を import
-	// できないので、メディアプロキシを通す entity.IdenticonURL を server から渡す。
+	// できないので、メディアプロキシを通す (*entity.Packer).IdenticonURL を server から渡す。
 	avatarURL func(*model.User) string
 }
 

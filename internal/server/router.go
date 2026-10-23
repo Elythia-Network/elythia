@@ -476,9 +476,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		Silenced:         roleService,
 		MediaURL:         mediaURLCtx,
 	}
-	// 部品へ渡す Packer (#3790)。投稿を包む部品は既定の Packer を読まない。
-	// 既定の Packer は、まだ移していない呼び出し側 (#3666 の (5-7)〜(5-9)) のために
-	// 同じ依存で配線する。
+	// 部品へ渡す Packer (#3790)。部品は既定の Packer を読まない。
+	// 既定の Packer は #3798 で読み手が無くなった。下の Set* は書くだけで、
+	// #3666 の (5-10) で Set* ごと消す。
 	entityPacker := entity.NewPacker(entityPackerDeps)
 	entity.SetAvatarDecorationLookup(entityPackerDeps.AvatarDecoration)
 	entity.SetEmojiDecorationLookup(entityPackerDeps.EmojiDecoration)
@@ -1720,6 +1720,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		return m.URLPreviewSensitiveList
 	})
 	urlHandler := apiurl.NewHandler(urlPreviewFetcher)
+	urlHandler.SetEntityPacker(entityPacker) // #3798: プレビューの画像を media proxy へ通す
 	// **接続元ごとの上限を付ける。** `/url` は認証不要で、1 回ごとにサーバーから
 	// 外向きの取得を 1 本起こす。`/api` の外なので API の rate limit は掛からない。
 	s.echo.GET("/url", urlHandler.Preview, middleware.RequireIPRateLimit(rateLimiter, middleware.URLPreviewRateLimitKey))
@@ -2504,7 +2505,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			if u.AvatarURL != nil && *u.AvatarURL != "" {
 				return *u.AvatarURL
 			}
-			return entity.IdenticonURL(u)
+			return entityPacker.IdenticonURL(u)
 		},
 		toHTML: feedNoteHTML(feedHost),
 	}
@@ -3209,7 +3210,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	reversiService := corereversi.NewService(reversiRepo, reversiPublisher, s.redis.Default)
 	// stream で配る対局の UserLite も、API と同じくリモートのアイコンをメディア
 	// プロキシに通す。配線しないとリモートの人は identicon になる。
-	reversiService.SetAvatarURLFunc(entity.IdenticonURL)
+	reversiService.SetAvatarURLFunc(entityPacker.IdenticonURL)
 
 	// バブルゲームの対戦 (#3230)。対局の状態は Redis にだけ置き、記録 (両者の
 	// 報告と勝敗) は DB に書く (#3232)。
@@ -3973,7 +3974,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// アイコン無しで描画される (#462)。upstream Misskey TS の同名 endpoint
 	// と互換: 見つかった user の avatarUrl にリダイレクトし、未設定なら
 	// identicon、未存在なら /static-assets/user-unknown.png にフォールバック。
-	s.echo.GET("/avatar/@:acct", avatarHandler(userRepo, localHost))
+	s.echo.GET("/avatar/@:acct", avatarHandler(entityPacker, userRepo, localHost))
 
 	// /emoji/:path — frontend の MkCustomEmoji が `:emojiUrl` プロップを
 	// 受け取らないとき (典型: 通知 reaction icon) に <img src="/emoji/<name>@<host>.webp">
@@ -3982,7 +3983,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// ServerService.ts:153 と互換に: name + host を抜いて emoji table を
 	// lookup → publicUrl に 302 redirect、見つからなければ ?fallback クエリ
 	// 付きなら /static-assets/emoji-unknown.png、無ければ 404。
-	s.echo.GET("/emoji/:path", emojiRedirectHandler(emojiRepo))
+	s.echo.GET("/emoji/:path", emojiRedirectHandler(entityPacker, emojiRepo))
 
 	// manifest.json — PWA用
 	s.echo.GET("/manifest.json", manifestJSON(s.config, metaRepo))
@@ -4130,6 +4131,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		{"ssrMeta.entityPacker", ssrMeta.HasEntityPacker(), entityPackerMissingEffect},
 		{"notificationPublisher.entityPacker", notificationPublisher.HasEntityPacker(), entityPackerMissingEffect},
 		{"driveURLUploader.entityPacker", driveURLUploader.HasEntityPacker(), entityPackerMissingEffect},
+		// メディアのプロキシ URL を作る部品 (#3798)。/avatar・/emoji・フィードと
+		// reversi のアイコンは部品を持たず、組み立てた Packer をそのまま使うので、
+		// Packer 自身も載せる。
+		{"url.entityPacker", urlHandler.HasEntityPacker(), entityPackerMissingEffect},
+		{"entityPacker.mediaURL", entityPacker.HasMediaURL(), entityPackerMissingEffect},
 		{"users.remoteStatsFederationGate", remoteStatsFetcher.HasHostAllowedChecker(),
 			"連合を切った相手へもプロフィール表示のたびに統計を取りに行き、誰をいつ見たかが漏れる"},
 		{"peer.blocker", s.peerDeps.HasBlocker(),

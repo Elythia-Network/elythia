@@ -53,7 +53,7 @@ func makeSolidPNG(t *testing.T) []byte {
 // 実際に badge (96x96、暗いところが透明な silhouette PNG) になること。
 //
 // **redirect の Location を固定するだけでは足りない。** `emoji_redirect_test.go` は
-// entity.BadgeEmojiProxyURL が出す URL の形しか見ておらず、その URL を proxy が
+// (*entity.Packer).BadgeEmojiProxyURL が出す URL の形しか見ておらず、その URL を proxy が
 // 実際に badge として解釈するかは検査していない (#2905 で「setter は固定したが
 // 渡す 1 行が未検証」を踏んだのと同じ型)。ここは URL を直書きして**受け側の挙動**を
 // 見る。`emoji=1` を足すと badge が奪われることも同時に固定するので、
@@ -78,7 +78,7 @@ func TestHandle_BadgeEmojiIsGrayscale96(t *testing.T) {
 	h := NewHandler(svc, cfg)
 	e := echo.New()
 
-	// entity.BadgeEmojiProxyURL が出す形 (emoji.png + badge のみ)。
+	// (*entity.Packer).BadgeEmojiProxyURL が出す形 (emoji.png + badge のみ)。
 	rec := doRequest(e, h, http.MethodGet, "/proxy/emoji.png?url="+imgServer.URL+"/a.png&badge=1",
 		map[string]string{"User-Agent": "TestBrowser/1.0"})
 	require.Equal(t, http.StatusOK, rec.Code)

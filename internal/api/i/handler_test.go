@@ -2992,18 +2992,18 @@ func TestUpdate_OrdinaryFieldsStillPass(t *testing.T) {
 // ロールのアイコンは entity (meUpdated の経路) と同じく media proxy を通す。
 // 通さないと $i.roles[].iconUrl が /api/i とストリーミングで食い違う。
 func TestRolePayload_ProxiesRoleIcon(t *testing.T) {
-	entity.SetMediaURLContext(entity.NewMediaURLContext(
-		"https://mk.test", "https://mk.test/proxy", []byte("role-icon-secret"), false, true))
-	defer entity.SetMediaURLContext(nil)
+	// アイコンは handler に渡した Packer で proxy へ通す (#3798)。
+	pk := entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
+		"https://mk.test", "https://mk.test/proxy", []byte("role-icon-secret"), false, true)})
 	icon := "https://cdn.example.test/role.png"
 	h := &Handler{roleProvider: &stubRoleProvider{roles: []*model.Role{
 		{ID: "pub", Name: "public-role", IsPublic: true, IconURL: &icon},
-	}}}
+	}}, entityPacker: pk}
 	_, _, _, roles := h.rolePayload("u1")
 	require.Len(t, roles, 1)
 	got := roles[0].(map[string]any)["iconUrl"].(*string)
 	require.NotNil(t, got)
-	assert.Equal(t, *entity.ProxyMediaURLPtr(&icon), *got)
+	assert.Equal(t, *pk.ProxyMediaURLPtr(&icon), *got)
 	assert.NotEqual(t, icon, *got, "a remote icon goes through the proxy")
 }
 

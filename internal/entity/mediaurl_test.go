@@ -264,7 +264,7 @@ func TestAvatarBannerProxying(t *testing.T) {
 
 	t.Run("remote avatar is proxied (avatar mode)", func(t *testing.T) {
 		u0 := &model.User{Username: "alice", Host: sp(remoteHost), AvatarURL: sp("https://" + remoteHost + "/a.png")}
-		got := IdenticonURL(u0)
+		got := currentPacker().IdenticonURL(u0)
 		if !strings.HasPrefix(got, testInternalProxy+"/avatar.webp?") {
 			t.Errorf("remote avatar not proxied: %s", got)
 		}
@@ -274,7 +274,7 @@ func TestAvatarBannerProxying(t *testing.T) {
 	})
 	t.Run("local avatar unchanged", func(t *testing.T) {
 		u0 := &model.User{Username: "bob", AvatarURL: sp(testInstanceURL + "/files/a.png")}
-		if got := IdenticonURL(u0); got != testInstanceURL+"/files/a.png" {
+		if got := currentPacker().IdenticonURL(u0); got != testInstanceURL+"/files/a.png" {
 			t.Errorf("local avatar changed: %s", got)
 		}
 	})
@@ -283,7 +283,7 @@ func TestAvatarBannerProxying(t *testing.T) {
 	t.Run("malformed remote avatar falls back to identicon", func(t *testing.T) {
 		for _, raw := range []string{"/a.png", "https:\\\\" + remoteHost + "/a.png", "https:///" + remoteHost + "/a.png"} {
 			u0 := &model.User{Username: "carol", Host: sp(remoteHost), AvatarURL: sp(raw)}
-			if got := IdenticonURL(u0); got != "/identicon/carol@"+remoteHost {
+			if got := currentPacker().IdenticonURL(u0); got != "/identicon/carol@"+remoteHost {
 				t.Errorf("%q: got %s", raw, got)
 			}
 		}
@@ -291,7 +291,7 @@ func TestAvatarBannerProxying(t *testing.T) {
 	// 括弧などは捨てずに符号化してからプロキシに渡す。
 	t.Run("remote avatar with parentheses is encoded and proxied", func(t *testing.T) {
 		u0 := &model.User{Username: "carol", Host: sp(remoteHost), AvatarURL: sp("https://" + remoteHost + "/a (1).png")}
-		got := IdenticonURL(u0)
+		got := currentPacker().IdenticonURL(u0)
 		if !strings.HasPrefix(got, testInternalProxy+"/avatar.webp?") {
 			t.Fatalf("remote avatar not proxied: %s", got)
 		}
@@ -301,13 +301,13 @@ func TestAvatarBannerProxying(t *testing.T) {
 	})
 	t.Run("relative local avatar unchanged", func(t *testing.T) {
 		u0 := &model.User{Username: "bob", AvatarURL: sp("/files/a.png")}
-		if got := IdenticonURL(u0); got != "/files/a.png" {
+		if got := currentPacker().IdenticonURL(u0); got != "/files/a.png" {
 			t.Errorf("local avatar changed: %s", got)
 		}
 	})
 	t.Run("identicon fallback unchanged", func(t *testing.T) {
 		u0 := &model.User{Username: "carol", Host: sp(remoteHost)}
-		if got := IdenticonURL(u0); got != "/identicon/carol@"+remoteHost {
+		if got := currentPacker().IdenticonURL(u0); got != "/identicon/carol@"+remoteHost {
 			t.Errorf("identicon changed: %s", got)
 		}
 	})
@@ -317,7 +317,7 @@ func TestAvatarBannerProxying(t *testing.T) {
 		SetInstanceIconURLLookup(func() string { return "https://example.test/icon.png" })
 		defer SetInstanceIconURLLookup(nil)
 		u0 := &model.User{Username: "relay.actor"} // local, no avatar
-		if got := IdenticonURL(u0); got != "https://example.test/icon.png" {
+		if got := currentPacker().IdenticonURL(u0); got != "https://example.test/icon.png" {
 			t.Errorf("system account should use meta.iconUrl, got: %s", got)
 		}
 	})
@@ -325,7 +325,7 @@ func TestAvatarBannerProxying(t *testing.T) {
 		SetInstanceIconURLLookup(func() string { return "" })
 		defer SetInstanceIconURLLookup(nil)
 		u0 := &model.User{Username: "instance.actor"}
-		if got := IdenticonURL(u0); got != "/identicon/instance.actor" {
+		if got := currentPacker().IdenticonURL(u0); got != "/identicon/instance.actor" {
 			t.Errorf("empty meta.iconUrl should fall back to identicon, got: %s", got)
 		}
 	})
@@ -333,7 +333,7 @@ func TestAvatarBannerProxying(t *testing.T) {
 		SetInstanceIconURLLookup(func() string { return "https://example.test/icon.png" })
 		defer SetInstanceIconURLLookup(nil)
 		u0 := &model.User{Username: "alice"} // no '.' in username
-		if got := IdenticonURL(u0); got != "/identicon/alice" {
+		if got := currentPacker().IdenticonURL(u0); got != "/identicon/alice" {
 			t.Errorf("non-system account must use identicon, got: %s", got)
 		}
 	})
@@ -479,12 +479,12 @@ func TestMediaURLEdgeCases(t *testing.T) {
 
 	t.Run("ProxyMediaURL nil-context and local pass through", func(t *testing.T) {
 		SetMediaURLContext(nil)
-		if got := ProxyMediaURL("https://" + remoteHost + "/x"); got != "https://"+remoteHost+"/x" {
+		if got := currentPacker().ProxyMediaURL("https://" + remoteHost + "/x"); got != "https://"+remoteHost+"/x" {
 			t.Errorf("nil ctx should be raw: %s", got)
 		}
 		SetMediaURLContext(c)
 		defer SetMediaURLContext(nil)
-		if got := ProxyMediaURL(testInstanceURL + "/files/x"); got != testInstanceURL+"/files/x" {
+		if got := currentPacker().ProxyMediaURL(testInstanceURL + "/files/x"); got != testInstanceURL+"/files/x" {
 			t.Errorf("local should be raw: %s", got)
 		}
 	})
@@ -492,24 +492,24 @@ func TestMediaURLEdgeCases(t *testing.T) {
 	t.Run("ProxyMediaURLPtr handles nil/empty/local/remote (role icon, announcement)", func(t *testing.T) {
 		SetMediaURLContext(c)
 		defer SetMediaURLContext(nil)
-		if got := ProxyMediaURLPtr(nil); got != nil {
+		if got := currentPacker().ProxyMediaURLPtr(nil); got != nil {
 			t.Error("nil pointer should stay nil")
 		}
 		empty := ""
-		if got := ProxyMediaURLPtr(&empty); got != &empty {
+		if got := currentPacker().ProxyMediaURLPtr(&empty); got != &empty {
 			t.Error("empty pointer should pass through")
 		}
 		local := testInstanceURL + "/files/icon.png"
-		if got := ProxyMediaURLPtr(&local); got == nil || *got != local {
+		if got := currentPacker().ProxyMediaURLPtr(&local); got == nil || *got != local {
 			t.Errorf("local should be raw: %v", got)
 		}
 		remote := "https://" + remoteHost + "/icon.png"
-		if got := ProxyMediaURLPtr(&remote); got == nil || !strings.HasPrefix(*got, testInternalProxy+"/") {
+		if got := currentPacker().ProxyMediaURLPtr(&remote); got == nil || !strings.HasPrefix(*got, testInternalProxy+"/") {
 			t.Errorf("remote should be wrapped: %v", got)
 		}
 		// nil context: pointer passes through untouched.
 		SetMediaURLContext(nil)
-		if got := ProxyMediaURLPtr(&remote); got == nil || *got != remote {
+		if got := currentPacker().ProxyMediaURLPtr(&remote); got == nil || *got != remote {
 			t.Errorf("nil ctx should pass through: %v", got)
 		}
 	})
@@ -669,7 +669,7 @@ func TestBadgeEmojiProxyURL(t *testing.T) {
 		[]byte("test-secret"), false, true))
 	t.Cleanup(func() { SetMediaURLContext(nil) })
 
-	got := BadgeEmojiProxyURL("https://cdn.example/anim.gif")
+	got := currentPacker().BadgeEmojiProxyURL("https://cdn.example/anim.gif")
 	u, err := url.Parse(got)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
@@ -700,7 +700,7 @@ func TestBadgeEmojiProxyURL_ExternalProxyHasNoSig(t *testing.T) {
 		[]byte("test-secret"), true, true))
 	t.Cleanup(func() { SetMediaURLContext(nil) })
 
-	got := BadgeEmojiProxyURL("https://cdn.example/anim.gif")
+	got := currentPacker().BadgeEmojiProxyURL("https://cdn.example/anim.gif")
 	u, err := url.Parse(got)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
@@ -719,7 +719,7 @@ func TestBadgeEmojiProxyURL_ExternalProxyHasNoSig(t *testing.T) {
 // context 未配線なら空文字 (呼び出し元が raw へ 302 できる)。
 func TestBadgeEmojiProxyURL_NoContext(t *testing.T) {
 	SetMediaURLContext(nil)
-	if got := BadgeEmojiProxyURL("https://cdn.example/anim.gif"); got != "" {
+	if got := currentPacker().BadgeEmojiProxyURL("https://cdn.example/anim.gif"); got != "" {
 		t.Fatalf("context 未配線では空文字を返すこと: %s", got)
 	}
 }

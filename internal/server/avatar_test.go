@@ -54,7 +54,7 @@ func TestAvatarHandler_LocalUserRedirectsToAvatarURL(t *testing.T) {
 	repo := &stubAvatarLookup{users: map[string]*model.User{
 		"alice|": {ID: "u1", Username: "alice", AvatarURL: &avatarURL},
 	}}
-	h := avatarHandler(repo, "go.example")
+	h := avatarHandler(nil, repo, "go.example")
 
 	c, rec := newAvatarTestContext(t, "alice")
 	require.NoError(t, h(c))
@@ -68,7 +68,7 @@ func TestAvatarHandler_RemoteUserUsesHostFilter(t *testing.T) {
 	repo := &stubAvatarLookup{users: map[string]*model.User{
 		"bob|remote.example": {ID: "u2", Username: "bob", AvatarURL: &avatarURL},
 	}}
-	h := avatarHandler(repo, "go.example")
+	h := avatarHandler(nil, repo, "go.example")
 
 	c, rec := newAvatarTestContext(t, "bob@remote.example")
 	require.NoError(t, h(c))
@@ -83,7 +83,7 @@ func TestAvatarHandler_OwnHostTreatedAsLocal(t *testing.T) {
 	repo := &stubAvatarLookup{users: map[string]*model.User{
 		"carol|": {ID: "u3", Username: "carol", AvatarURL: &avatarURL},
 	}}
-	h := avatarHandler(repo, "go.example")
+	h := avatarHandler(nil, repo, "go.example")
 
 	c, rec := newAvatarTestContext(t, "carol@go.example")
 	require.NoError(t, h(c))
@@ -95,7 +95,7 @@ func TestAvatarHandler_FallsBackToIdenticonWhenNoAvatar(t *testing.T) {
 	repo := &stubAvatarLookup{users: map[string]*model.User{
 		"dan|": {ID: "u4", Username: "dan"}, // AvatarURL == nil
 	}}
-	h := avatarHandler(repo, "go.example")
+	h := avatarHandler(nil, repo, "go.example")
 
 	c, rec := newAvatarTestContext(t, "dan")
 	require.NoError(t, h(c))
@@ -105,7 +105,7 @@ func TestAvatarHandler_FallsBackToIdenticonWhenNoAvatar(t *testing.T) {
 
 func TestAvatarHandler_UnknownUserRedirectsToStaticFallback(t *testing.T) {
 	repo := &stubAvatarLookup{users: map[string]*model.User{}}
-	h := avatarHandler(repo, "go.example")
+	h := avatarHandler(nil, repo, "go.example")
 
 	c, rec := newAvatarTestContext(t, "ghost")
 	require.NoError(t, h(c))
@@ -118,7 +118,7 @@ func TestAvatarHandler_SuspendedUserHidden(t *testing.T) {
 	repo := &stubAvatarLookup{users: map[string]*model.User{
 		"banned|": {ID: "u5", Username: "banned", AvatarURL: &avatarURL, IsSuspended: true},
 	}}
-	h := avatarHandler(repo, "go.example")
+	h := avatarHandler(nil, repo, "go.example")
 
 	c, rec := newAvatarTestContext(t, "banned")
 	require.NoError(t, h(c))
@@ -129,7 +129,7 @@ func TestAvatarHandler_SuspendedUserHidden(t *testing.T) {
 
 func TestAvatarHandler_RepoErrorFallback(t *testing.T) {
 	repo := &stubAvatarLookup{err: errors.New("db down")}
-	h := avatarHandler(repo, "go.example")
+	h := avatarHandler(nil, repo, "go.example")
 
 	c, rec := newAvatarTestContext(t, "alice")
 	require.NoError(t, h(c))
@@ -139,7 +139,7 @@ func TestAvatarHandler_RepoErrorFallback(t *testing.T) {
 
 func TestAvatarHandler_EmptyAcctFallback(t *testing.T) {
 	repo := &stubAvatarLookup{}
-	h := avatarHandler(repo, "go.example")
+	h := avatarHandler(nil, repo, "go.example")
 
 	// Echo router strips the leading `@` via `:acct`、handler は acct ""
 	// を受けたら即 fallback する。
@@ -174,13 +174,13 @@ func newAvatarStaticContext(t *testing.T, acct string) (echo.Context, *httptest.
 // mk-go の proxy は allowlist が DB に実在する URL だけを通すので、その URL は
 // 403 + `max-age=86400` になり、静止画になるどころか 1 日壊れていた。
 func TestAvatarHandler_StaticGoesThroughProxy(t *testing.T) {
-	withMediaProxy(t)
+	pk := withMediaProxy(t)
 	avatarURL := "https://remote.example/avatars/bob.gif"
 	remote := "remote.example"
 	repo := &stubAvatarLookup{users: map[string]*model.User{
 		"bob|remote.example": {ID: "u2", Username: "bob", Host: &remote, AvatarURL: &avatarURL},
 	}}
-	h := avatarHandler(repo, "go.example")
+	h := avatarHandler(pk, repo, "go.example")
 
 	c, rec := newAvatarStaticContext(t, "bob@remote.example")
 	require.NoError(t, h(c))
@@ -204,11 +204,11 @@ func TestAvatarHandler_StaticGoesThroughProxy(t *testing.T) {
 // 400 + `max-age=86400` になる (#3034 より前は 404 + 同じキャッシュ)。
 // PNG を生成して返すのでアニメーションもしない。
 func TestAvatarHandler_StaticKeepsIdenticonDirect(t *testing.T) {
-	withMediaProxy(t)
+	pk := withMediaProxy(t)
 	repo := &stubAvatarLookup{users: map[string]*model.User{
 		"dave|": {ID: "u4", Username: "dave"},
 	}}
-	h := avatarHandler(repo, "go.example")
+	h := avatarHandler(pk, repo, "go.example")
 
 	c, rec := newAvatarStaticContext(t, "dave")
 	require.NoError(t, h(c))
@@ -224,12 +224,12 @@ func TestAvatarHandler_StaticKeepsIdenticonDirect(t *testing.T) {
 // ローカルユーザーにだけ効かない。allowlist は関係ない — `StaticAvatarProxyURL` は
 // 必ず `sig` を付け、`Authorize` は allowlist より先に HMAC を見る。
 func TestAvatarHandler_StaticProxiesSameOriginAvatar(t *testing.T) {
-	withMediaProxy(t)
+	pk := withMediaProxy(t)
 	avatarURL := "https://local.example/files/abc.gif"
 	repo := &stubAvatarLookup{users: map[string]*model.User{
 		"carol|": {ID: "u5", Username: "carol", AvatarURL: &avatarURL},
 	}}
-	h := avatarHandler(repo, "local.example")
+	h := avatarHandler(pk, repo, "local.example")
 
 	c, rec := newAvatarStaticContext(t, "carol")
 	require.NoError(t, h(c))
@@ -247,13 +247,13 @@ func TestAvatarHandler_StaticProxiesSameOriginAvatar(t *testing.T) {
 
 // static が無ければ従来どおり (回帰していないこと)。
 func TestAvatarHandler_WithoutStaticUnchanged(t *testing.T) {
-	withMediaProxy(t)
+	pk := withMediaProxy(t)
 	avatarURL := "https://remote.example/avatars/bob.gif"
 	remote := "remote.example"
 	repo := &stubAvatarLookup{users: map[string]*model.User{
 		"bob|remote.example": {ID: "u2", Username: "bob", Host: &remote, AvatarURL: &avatarURL},
 	}}
-	h := avatarHandler(repo, "go.example")
+	h := avatarHandler(pk, repo, "go.example")
 
 	c, rec := newAvatarTestContext(t, "bob@remote.example")
 	require.NoError(t, h(c))

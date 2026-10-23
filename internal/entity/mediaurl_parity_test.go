@@ -28,14 +28,13 @@ import (
 // test fails first.
 func TestProxySigAcceptedByMediaproxy(t *testing.T) {
 	secret := []byte("parity-secret-9f3a")
-	entity.SetMediaURLContext(entity.NewMediaURLContext(
-		"https://mk.example", "https://mk.example/proxy", secret, false, true))
-	defer entity.SetMediaURLContext(nil)
+	pk := entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
+		"https://mk.example", "https://mk.example/proxy", secret, false, true)})
 
 	// A URL with spaces + query chars stresses the encode/decode round-trip the
 	// sig depends on.
 	raw := "https://remote.example/files/a b.png?w=1&h=2"
-	built := entity.ProxyMediaURL(raw)
+	built := pk.ProxyMediaURL(raw)
 
 	u, err := url.Parse(built)
 	if err != nil {
@@ -61,12 +60,11 @@ func TestProxySigAcceptedByMediaproxy(t *testing.T) {
 // 素の署名と同じ理由 — ずれると URL プレビューの画像が全部 403 になる。
 func TestExpiringProxySigAcceptedByMediaproxy(t *testing.T) {
 	secret := []byte("parity-secret-9f3a")
-	entity.SetMediaURLContext(entity.NewMediaURLContext(
-		"https://mk.example", "https://mk.example/proxy", secret, false, true))
-	defer entity.SetMediaURLContext(nil)
+	pk := entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
+		"https://mk.example", "https://mk.example/proxy", secret, false, true)})
 
 	raw := "https://remote.example/og/a b.png?w=1&h=2"
-	built := entity.ProxyUserSuppliedMediaURLPtr(&raw)
+	built := pk.ProxyUserSuppliedMediaURLPtr(&raw)
 	require.NotNil(t, built)
 
 	u, err := url.Parse(*built)
@@ -98,12 +96,11 @@ func TestExpiringProxySigAcceptedByMediaproxy(t *testing.T) {
 // 画像は長期間そのまま配る前提なので、期限を付けると「いつの間にか画像が
 // 消える」事故になる。
 func TestAdminSuppliedProxySigHasNoExpiry(t *testing.T) {
-	entity.SetMediaURLContext(entity.NewMediaURLContext(
-		"https://mk.example", "https://mk.example/proxy", []byte("k"), false, true))
-	defer entity.SetMediaURLContext(nil)
+	pk := entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
+		"https://mk.example", "https://mk.example/proxy", []byte("k"), false, true)})
 
 	raw := "https://remote.example/role-icon.png"
-	built := entity.ProxyMediaURLPtr(&raw)
+	built := pk.ProxyMediaURLPtr(&raw)
 	require.NotNil(t, built)
 
 	u, err := url.Parse(*built)

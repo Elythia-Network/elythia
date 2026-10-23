@@ -59,7 +59,7 @@ func TestEmojiRedirectHandler_LocalEmoji(t *testing.T) {
 	repo := &stubEmojiLookup{emojis: map[string]*model.Emoji{
 		"smile|": {Name: "smile", PublicURL: "https://cdn.example/local-smile.png"},
 	}}
-	h := emojiRedirectHandler(repo)
+	h := emojiRedirectHandler(nil, repo)
 
 	c, rec := newEmojiTestContext(t, "smile.webp", "")
 	require.NoError(t, h(c))
@@ -75,7 +75,7 @@ func TestEmojiRedirectHandler_LocalCanonicalDotSuffix(t *testing.T) {
 	repo := &stubEmojiLookup{emojis: map[string]*model.Emoji{
 		"smile|": {Name: "smile", PublicURL: "https://cdn.example/local-smile.png"},
 	}}
-	h := emojiRedirectHandler(repo)
+	h := emojiRedirectHandler(nil, repo)
 
 	c, rec := newEmojiTestContext(t, "smile@..webp", "")
 	require.NoError(t, h(c))
@@ -90,7 +90,7 @@ func TestEmojiRedirectHandler_RemoteEmoji(t *testing.T) {
 			PublicURL: "https://r/meow.png",
 		},
 	}}
-	h := emojiRedirectHandler(repo)
+	h := emojiRedirectHandler(nil, repo)
 
 	c, rec := newEmojiTestContext(t, "meow_yikes@remote.example.webp", "")
 	require.NoError(t, h(c))
@@ -103,7 +103,7 @@ func TestEmojiRedirectHandler_PublicURLFallbackToOriginal(t *testing.T) {
 	repo := &stubEmojiLookup{emojis: map[string]*model.Emoji{
 		"x|host.example": {Name: "x", PublicURL: "", OriginalURL: "https://r/x_orig.png"},
 	}}
-	h := emojiRedirectHandler(repo)
+	h := emojiRedirectHandler(nil, repo)
 
 	c, rec := newEmojiTestContext(t, "x@host.example.webp", "")
 	require.NoError(t, h(c))
@@ -113,7 +113,7 @@ func TestEmojiRedirectHandler_PublicURLFallbackToOriginal(t *testing.T) {
 
 func TestEmojiRedirectHandler_NotFound_404(t *testing.T) {
 	repo := &stubEmojiLookup{emojis: map[string]*model.Emoji{}}
-	h := emojiRedirectHandler(repo)
+	h := emojiRedirectHandler(nil, repo)
 
 	c, rec := newEmojiTestContext(t, "ghost.webp", "")
 	require.NoError(t, h(c))
@@ -123,7 +123,7 @@ func TestEmojiRedirectHandler_NotFound_404(t *testing.T) {
 func TestEmojiRedirectHandler_NotFound_FallbackQuery(t *testing.T) {
 	// ?fallback クエリ付きの場合は static-assets の placeholder へ 302
 	repo := &stubEmojiLookup{emojis: map[string]*model.Emoji{}}
-	h := emojiRedirectHandler(repo)
+	h := emojiRedirectHandler(nil, repo)
 
 	c, rec := newEmojiTestContext(t, "ghost.webp", "fallback=1")
 	require.NoError(t, h(c))
@@ -133,7 +133,7 @@ func TestEmojiRedirectHandler_NotFound_FallbackQuery(t *testing.T) {
 
 func TestEmojiRedirectHandler_BadPath_404(t *testing.T) {
 	repo := &stubEmojiLookup{}
-	h := emojiRedirectHandler(repo)
+	h := emojiRedirectHandler(nil, repo)
 
 	cases := []string{
 		"foo.png",   // 拡張子違反
@@ -155,7 +155,7 @@ func TestEmojiRedirectHandler_BadAtChunks_400(t *testing.T) {
 	// regex は `[a-zA-Z0-9\-_@\.]+?\.webp$` なので "a@b@c.webp" は通る。
 	// path split 後に chunks > 2 で 400 を返す。
 	repo := &stubEmojiLookup{}
-	h := emojiRedirectHandler(repo)
+	h := emojiRedirectHandler(nil, repo)
 
 	c, rec := newEmojiTestContext(t, "a@b@c.webp", "")
 	require.NoError(t, h(c))
@@ -167,7 +167,7 @@ func TestEmojiRedirectHandler_BadAtChunks_400(t *testing.T) {
 // 固定していたが、それだと接続断が「そんな絵文字は無い」に化けたまま気付けない。
 func TestEmojiRedirectHandler_DBFailureIs500(t *testing.T) {
 	repo := &stubEmojiLookup{err: errors.New("db down")}
-	h := emojiRedirectHandler(repo)
+	h := emojiRedirectHandler(nil, repo)
 
 	// **`e.ServeHTTP` を通す。** handler の戻り値だけを見ると、echo が実際に
 	// 書き出す status と header が確かめられない。ここでは 500 に 1 日の
@@ -187,7 +187,7 @@ func TestEmojiRedirectHandler_DBFailureIs500(t *testing.T) {
 // not-found は従来どおり 404。
 func TestEmojiRedirectHandler_NotFoundIs404(t *testing.T) {
 	repo := &stubEmojiLookup{err: repository.ErrNotFound}
-	h := emojiRedirectHandler(repo)
+	h := emojiRedirectHandler(nil, repo)
 
 	c, rec := newEmojiTestContext(t, "smile.webp", "")
 	require.NoError(t, h(c))
@@ -199,7 +199,7 @@ func TestEmojiRedirectHandler_EmptyURLs_404(t *testing.T) {
 	repo := &stubEmojiLookup{emojis: map[string]*model.Emoji{
 		"empty|": {Name: "empty", PublicURL: "", OriginalURL: ""},
 	}}
-	h := emojiRedirectHandler(repo)
+	h := emojiRedirectHandler(nil, repo)
 
 	c, rec := newEmojiTestContext(t, "empty.webp", "")
 	require.NoError(t, h(c))
@@ -215,7 +215,7 @@ func TestEmojiRedirectHandler_SetsAssetCSP(t *testing.T) {
 	repo := &stubEmojiLookup{emojis: map[string]*model.Emoji{
 		"smile|": {Name: "smile", PublicURL: "https://cdn.example/local-smile.png"},
 	}}
-	h := emojiRedirectHandler(repo)
+	h := emojiRedirectHandler(nil, repo)
 
 	c, rec := newEmojiTestContext(t, "smile.webp", "")
 	require.NoError(t, h(c))
@@ -237,7 +237,7 @@ func TestEmojiRedirectHandler_StaticWithoutContextFallsBackToRaw(t *testing.T) {
 	repo := &stubEmojiLookup{emojis: map[string]*model.Emoji{
 		"smile|": {Name: "smile", PublicURL: "https://cdn.example/anim.gif"},
 	}}
-	h := emojiRedirectHandler(repo)
+	h := emojiRedirectHandler(nil, repo)
 
 	c, rec := newEmojiTestContext(t, "smile.webp", "static=1")
 	require.NoError(t, h(c))
@@ -258,11 +258,11 @@ func TestEmojiRedirectHandler_StaticWithoutContextFallsBackToRaw(t *testing.T) {
 // **context を配線しないと検出できない。** 未配線だと raw へ 302 するので、
 // この欠陥はテストから完全に不可視だった。
 func TestEmojiRedirectHandler_StaticIsSigned(t *testing.T) {
-	withMediaProxy(t)
+	pk := withMediaProxy(t)
 	repo := &stubEmojiLookup{emojis: map[string]*model.Emoji{
 		"smile|": {Name: "smile", PublicURL: "https://cdn.example/anim.gif"},
 	}}
-	h := emojiRedirectHandler(repo)
+	h := emojiRedirectHandler(pk, repo)
 
 	c, rec := newEmojiTestContext(t, "smile.webp", "static=1")
 	require.NoError(t, h(c))
@@ -287,7 +287,7 @@ func TestEmojiRedirectHandler_WithoutStaticKeepsDirectRedirect(t *testing.T) {
 	repo := &stubEmojiLookup{emojis: map[string]*model.Emoji{
 		"smile|": {Name: "smile", PublicURL: "https://cdn.example/anim.gif"},
 	}}
-	h := emojiRedirectHandler(repo)
+	h := emojiRedirectHandler(nil, repo)
 
 	c, rec := newEmojiTestContext(t, "smile.webp", "")
 	require.NoError(t, h(c))
@@ -302,11 +302,11 @@ func TestEmojiRedirectHandler_WithoutStaticKeepsDirectRedirect(t *testing.T) {
 // 枝に落ち、96x96 の silhouette PNG ではなく**カラーの絵文字画像**が 200 で返る
 // ので、SW のエラー処理を素通りして静かに違うものが出る。
 func TestEmojiRedirectHandler_BadgeGoesThroughProxy(t *testing.T) {
-	withMediaProxy(t)
+	pk := withMediaProxy(t)
 	repo := &stubEmojiLookup{emojis: map[string]*model.Emoji{
 		"smile|": {Name: "smile", PublicURL: "https://cdn.example/anim.gif"},
 	}}
-	h := emojiRedirectHandler(repo)
+	h := emojiRedirectHandler(pk, repo)
 
 	c, rec := newEmojiTestContext(t, "smile.webp", "badge=1")
 	require.NoError(t, h(c))
@@ -333,11 +333,11 @@ func TestEmojiRedirectHandler_BadgeGoesThroughProxy(t *testing.T) {
 // badge は 96x96 の silhouette PNG 固定なので、アニメーションの有無を渡しても
 // 結果が変わらない。
 func TestEmojiRedirectHandler_BadgeWinsOverStatic(t *testing.T) {
-	withMediaProxy(t)
+	pk := withMediaProxy(t)
 	repo := &stubEmojiLookup{emojis: map[string]*model.Emoji{
 		"smile|": {Name: "smile", PublicURL: "https://cdn.example/anim.gif"},
 	}}
-	h := emojiRedirectHandler(repo)
+	h := emojiRedirectHandler(pk, repo)
 
 	c, rec := newEmojiTestContext(t, "smile.webp", "badge=1&static=1")
 	require.NoError(t, h(c))
@@ -354,11 +354,11 @@ func TestEmojiRedirectHandler_BadgeWinsOverStatic(t *testing.T) {
 // **値は問わない (存在で見る)。** upstream は fastify の `'badge' in query` なので
 // `?badge=` (空値) でも badge になる。static 側の判定と揃える。
 func TestEmojiRedirectHandler_BadgeWithoutValue(t *testing.T) {
-	withMediaProxy(t)
+	pk := withMediaProxy(t)
 	repo := &stubEmojiLookup{emojis: map[string]*model.Emoji{
 		"smile|": {Name: "smile", PublicURL: "https://cdn.example/anim.gif"},
 	}}
-	h := emojiRedirectHandler(repo)
+	h := emojiRedirectHandler(pk, repo)
 
 	c, rec := newEmojiTestContext(t, "smile.webp", "badge")
 	require.NoError(t, h(c))
@@ -373,7 +373,7 @@ func TestEmojiRedirectHandler_BadgeWithoutContextFallsBackToRaw(t *testing.T) {
 	repo := &stubEmojiLookup{emojis: map[string]*model.Emoji{
 		"smile|": {Name: "smile", PublicURL: "https://cdn.example/anim.gif"},
 	}}
-	h := emojiRedirectHandler(repo)
+	h := emojiRedirectHandler(nil, repo)
 
 	c, rec := newEmojiTestContext(t, "smile.webp", "badge=1")
 	require.NoError(t, h(c))
@@ -389,12 +389,12 @@ func TestEmojiRedirectHandler_BadgeWithoutContextFallsBackToRaw(t *testing.T) {
 // **ローカル絵文字だけ #2909 の症状が戻る**。リモートの URL しか使わないテスト
 // だとその変異が素通りするため、ここで同一オリジンを固定する。
 func TestEmojiRedirectHandler_BadgeProxiesLocalEmoji(t *testing.T) {
-	withMediaProxy(t)
+	pk := withMediaProxy(t)
 	repo := &stubEmojiLookup{emojis: map[string]*model.Emoji{
 		// ローカル絵文字の publicUrl は自インスタンスの drive URL。
 		"smile|": {Name: "smile", PublicURL: "https://local.example/files/abc.png"},
 	}}
-	h := emojiRedirectHandler(repo)
+	h := emojiRedirectHandler(pk, repo)
 
 	c, rec := newEmojiTestContext(t, "smile.webp", "badge=1")
 	require.NoError(t, h(c))
@@ -412,13 +412,13 @@ func TestEmojiRedirectHandler_BadgeProxiesLocalEmoji(t *testing.T) {
 // リモートの絵文字の、プロキシで包めない形の URL へは飛ばさない。絵文字が
 // 無いときと同じく、fallback があればその画像へ、無ければ 404 にする。
 func TestEmojiRedirectHandler_MalformedRemoteURL(t *testing.T) {
-	withMediaProxy(t)
+	pk := withMediaProxy(t)
 	host := "remote.example"
 	for _, raw := range []string{"/meow.png", "https:///remote.example/meow.png", "https:\\\\remote.example/meow.png"} {
 		repo := &stubEmojiLookup{emojis: map[string]*model.Emoji{
 			"meow|remote.example": {Name: "meow", Host: &host, PublicURL: raw, OriginalURL: raw},
 		}}
-		h := emojiRedirectHandler(repo)
+		h := emojiRedirectHandler(pk, repo)
 		for _, q := range []string{"", "static=1", "badge=1"} {
 			c, rec := newEmojiTestContext(t, "meow@remote.example.webp", q)
 			require.NoError(t, h(c))
@@ -433,12 +433,12 @@ func TestEmojiRedirectHandler_MalformedRemoteURL(t *testing.T) {
 
 // 括弧などを含むリモートの絵文字の URL は、符号化してからプロキシに渡す。
 func TestEmojiRedirectHandler_RemoteURLIsEncoded(t *testing.T) {
-	withMediaProxy(t)
+	pk := withMediaProxy(t)
 	repo := &stubEmojiLookup{emojis: map[string]*model.Emoji{
 		"meow|remote.example": {Name: "meow", PublicURL: "https://remote.example/meow (1).png"},
 	}}
 	c, rec := newEmojiTestContext(t, "meow@remote.example.webp", "")
-	require.NoError(t, emojiRedirectHandler(repo)(c))
+	require.NoError(t, emojiRedirectHandler(pk, repo)(c))
 	require.Equal(t, http.StatusFound, rec.Code)
 	loc, err := neturl.Parse(rec.Header().Get(echo.HeaderLocation))
 	require.NoError(t, err)
@@ -452,7 +452,7 @@ func TestEmojiRedirectHandler_LocalURLIsNotChecked(t *testing.T) {
 		"smile|": {Name: "smile", PublicURL: "/files/smile.png"},
 	}}
 	c, rec := newEmojiTestContext(t, "smile.webp", "")
-	require.NoError(t, emojiRedirectHandler(repo)(c))
+	require.NoError(t, emojiRedirectHandler(nil, repo)(c))
 	assert.Equal(t, http.StatusFound, rec.Code)
 	assert.Equal(t, "/files/smile.png", rec.Header().Get(echo.HeaderLocation))
 }

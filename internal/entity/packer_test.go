@@ -56,21 +56,20 @@ func TestPacker_UsesItsOwnDependencies(t *testing.T) {
 	}
 }
 
-// パッケージ関数は Set* で配線した既定の Packer へ委ね、同じ依存の Packer と
-// 同じ結果を返す。
-func TestPacker_PackageFuncsDelegateToTheDefault(t *testing.T) {
+// Set* は既定の Packer を書き換え、同じ依存で作った Packer と同じ結果になる。
+// 委ねる薄い関数は #3798 で無くなったので、既定の Packer を直接読んで比べる。
+func TestSetters_WriteTheDefaultPacker(t *testing.T) {
 	isolateDefaultPacker(t)
 	SetMediaURLContext(internalCtx())
 
-	// 利用者を包む関数は #3792・#3794 で消えたので、残る ProxyMediaURL で見る。
 	raw := "https://" + remoteHost + "/a.png"
-	viaFunc := ProxyMediaURL(raw)
+	viaDefault := currentPacker().ProxyMediaURL(raw)
 	viaPacker := NewPacker(PackerDeps{MediaURL: internalCtx()}).ProxyMediaURL(raw)
-	if viaFunc != viaPacker {
-		t.Errorf("package func and Packer differ: %q vs %q", viaFunc, viaPacker)
+	if viaDefault != viaPacker {
+		t.Errorf("default Packer and Packer differ: %q vs %q", viaDefault, viaPacker)
 	}
-	if !strings.HasPrefix(viaFunc, testInternalProxy) {
-		t.Errorf("package func must use the wired default Packer: %q", viaFunc)
+	if !strings.HasPrefix(viaDefault, testInternalProxy) {
+		t.Errorf("Set* must write the default Packer: %q", viaDefault)
 	}
 }
 
@@ -181,31 +180,16 @@ type silencedByID map[string]bool
 
 func (s silencedByID) IsSilenced(userID string) bool { return s[userID] }
 
-// **既定の Packer を読むのは、委ねる薄い関数と packer.go だけ (#3788)。**
+// **既定の Packer を読むのは packer.go だけ (#3788、#3798)。**
 //
-// Packer のメソッドの中で currentPacker() を呼ぶか、委ねる薄い関数 (修飾子の
-// 無い ProxyMediaURL(...) など) を呼ぶと、明示的に渡した Packer の依存ではなく
-// 既定の Packer の依存を使ってしまう。テストは代表の経路しか見ないので、呼び出しの
-// 場所でまとめて縛る。
+// Packer のメソッドの中で currentPacker() を呼ぶと、明示的に渡した Packer の
+// 依存ではなく既定の Packer の依存を使ってしまう。テストは代表の経路しか見ない
+// ので、呼び出しの場所でまとめて縛る。既定の Packer へ委ねる薄い関数は #3798 で
+// 無くなったので、残る読み手は packer.go の Set* (updateDefaultPacker) だけになる。
 //
 // ファイルはディスクから列挙する (git ls-files ではない)。縛りたいのはこの
 // パッケージとしてコンパイルされるファイルで、それはディスク上のファイルだから。
-func TestCurrentPackerIsOnlyReadByTheDelegatingFuncs(t *testing.T) {
-	wrappers := map[string]bool{}
-	wf, err := parser.ParseFile(token.NewFileSet(), "packer_default_funcs.go", nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, d := range wf.Decls {
-		if fd, ok := d.(*ast.FuncDecl); ok && fd.Recv == nil {
-			wrappers[fd.Name.Name] = true
-		}
-	}
-	// 抽出が空振りしていないこと (薄い関数は 9 個。#3790 で投稿の 3 つ、#3792 で利用者の
-	// 詳細の 3 つ、#3794 で PackUserLite、#3796 で残りの Pack の 11 個を消した)。
-	if len(wrappers) < 9 {
-		t.Fatalf("found only %d delegating funcs; the scan is broken", len(wrappers))
-	}
+func TestCurrentPackerIsOnlyReadByPackerGo(t *testing.T) {
 	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
@@ -224,23 +208,18 @@ func TestCurrentPackerIsOnlyReadByTheDelegatingFuncs(t *testing.T) {
 			if !ok {
 				return true
 			}
-			id, ok := ce.Fun.(*ast.Ident)
-			if !ok {
-				return true
-			}
-			switch {
-			case id.Name == "currentPacker":
+			if id, ok := ce.Fun.(*ast.Ident); ok && id.Name == "currentPacker" {
 				seen++
-				if f != "packer.go" && f != "packer_default_funcs.go" {
+				if f != "packer.go" {
 					t.Errorf("%s calls currentPacker(); a Packer method must use its receiver", f)
 				}
-			case wrappers[id.Name] && f != "packer_default_funcs.go":
-				t.Errorf("%s calls the delegating func %s; call the method on the Packer instead", f, id.Name)
 			}
 			return true
 		})
 	}
-	if seen < 9 {
-		t.Errorf("found only %d currentPacker() calls; the scan is broken", seen)
+	// 読み手は packer.go の updateDefaultPacker の 1 回だけ。0 回なら抽出が空振り
+	// している。2 回以上なら packer.go の中に新しい読み手が増えている。
+	if seen != 1 {
+		t.Errorf("found %d currentPacker() calls; want exactly 1 (updateDefaultPacker)", seen)
 	}
 }

@@ -54,7 +54,7 @@ type emojiLookup interface {
 //
 // Cache-Control header mirrors upstream so the browser stops
 // re-fetching reaction images on every notification render.
-func emojiRedirectHandler(repo emojiLookup) echo.HandlerFunc {
+func emojiRedirectHandler(pk *entity.Packer, repo emojiLookup) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		path := c.Param("path")
 
@@ -134,7 +134,7 @@ func emojiRedirectHandler(repo emojiLookup) echo.HandlerFunc {
 		if _, wantsBadge := c.QueryParams()["badge"]; wantsBadge {
 			// static と同じく entity 側で組む。`/proxy` を手で組むと sig が付かず、
 			// Authorize が HMAC ではなく DB allowlist に落ちる (#2905)。
-			if proxied := entity.BadgeEmojiProxyURL(target); proxied != "" {
+			if proxied := pk.BadgeEmojiProxyURL(target); proxied != "" {
 				c.Response().Header().Set("Content-Security-Policy", assetCSP)
 				return c.Redirect(http.StatusFound, proxied)
 			}
@@ -155,7 +155,7 @@ func emojiRedirectHandler(repo emojiLookup) echo.HandlerFunc {
 			// 引くことになる (#3036 で DB 障害は 403 + 1 日ではなく
 			// 503 + `no-store` になったが、引く回数そのものは減らない)。
 			// media proxy の設定 (external / proxyRemoteFiles) にも従う。
-			if proxied := entity.StaticEmojiProxyURL(target); proxied != "" {
+			if proxied := pk.StaticEmojiProxyURL(target); proxied != "" {
 				c.Response().Header().Set("Content-Security-Policy", assetCSP)
 				return c.Redirect(http.StatusFound, proxied)
 			}
@@ -179,6 +179,6 @@ func emojiRedirectHandler(repo emojiLookup) echo.HandlerFunc {
 		//
 		// API 応答の `emojis` field を server-proxy してはいけない (frontend が
 		// client 側で包むので二重になる) のとは別経路。こちらは frontend が包まない。
-		return c.Redirect(http.StatusFound, entity.ProxyEmojiURLString(target))
+		return c.Redirect(http.StatusFound, pk.ProxyEmojiURLString(target))
 	}
 }
