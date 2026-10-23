@@ -45,7 +45,7 @@ func (h *Handler) packUsersMany(ctx context.Context, viewer *model.User, users [
 	}
 	out := make([]entity.UserDetailed, len(users))
 	for i, u := range users {
-		out[i] = entity.PackUserDetailed(u, profiles[u.ID], h.idGen)
+		out[i] = h.entityPacker.PackUserDetailed(u, profiles[u.ID], h.idGen)
 		entity.GateCountVisibility(&out[i], false, viewer != nil, false)
 	}
 	return out
@@ -58,7 +58,7 @@ func (h *Handler) packUsersMany(ctx context.Context, viewer *model.User, users [
 // 本家 find-by-email は閲覧者を null で pack するので、呼んだ管理者には
 // フォロワー限定のカウントも moderationNote も見えない (#3330)。
 func (h *Handler) packUserAnonymous(ctx context.Context, u *model.User, profile *model.UserProfile) entity.UserDetailed {
-	d := entity.PackUserDetailed(u, profile, h.idGen)
+	d := h.entityPacker.PackUserDetailed(u, profile, h.idGen)
 	entity.GateCountVisibility(&d, false, false, false)
 	if h.listPacker != nil {
 		h.listPacker.FillLites([]*model.User{u}, []*entity.UserLite{&d.UserLite})

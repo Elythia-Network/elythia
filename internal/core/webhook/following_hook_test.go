@@ -108,7 +108,7 @@ func wireFollowLookups(t *testing.T, h *webhook.FollowingHook, userIDs ...string
 	}
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	h.SetUserLookups(followLookups(profiles, nil, nil), idGen)
+	h.SetUserLookups(nil, followLookups(profiles, nil, nil), idGen)
 }
 
 // userOf decodes the `user` of the single enqueued delivery.
@@ -132,7 +132,7 @@ func newFollowingHook(t *testing.T, owner, event string, l webhook.UserLookups) 
 	h := webhook.NewFollowingHook(svc)
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	h.SetUserLookups(l, idGen)
+	h.SetUserLookups(nil, l, idGen)
 	return h, enq
 }
 

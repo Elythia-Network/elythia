@@ -31,7 +31,7 @@ func TestPackUserDetailed_HidesRestrictedCountsWithoutGate(t *testing.T) {
 		{"private は伏せる", model.FollowingVisibilityPrivate, true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			d := PackUserDetailed(u, profileWith(c.vis, c.vis))
+			d := currentPacker().PackUserDetailed(u, profileWith(c.vis, c.vis))
 			if c.wantHidden {
 				require.Equal(t, 0, d.FollowersCount, "ゲートを呼ぶ前は伏せておくこと")
 				require.Equal(t, 0, d.FollowingCount)
@@ -50,20 +50,20 @@ func TestGateCountVisibility_RestoresForPermittedViewer(t *testing.T) {
 	u := &model.User{ID: "u", Username: "u", FollowersCount: 42, FollowingCount: 7}
 	prof := profileWith(model.FollowingVisibilityFollowers, model.FollowingVisibilityFollowers)
 
-	d := PackUserDetailed(u, prof)
+	d := currentPacker().PackUserDetailed(u, prof)
 	GateCountVisibility(&d, false, false, true) // follower
 	require.Equal(t, 42, d.FollowersCount, "follower には見せること")
 	require.Equal(t, 7, d.FollowingCount)
 
-	d2 := PackUserDetailed(u, prof)
+	d2 := currentPacker().PackUserDetailed(u, prof)
 	GateCountVisibility(&d2, false, false, false) // 非 follower
 	require.Equal(t, 0, d2.FollowersCount)
 
-	d3 := PackUserDetailed(u, prof)
+	d3 := currentPacker().PackUserDetailed(u, prof)
 	GateCountVisibility(&d3, true, false, false) // self
 	require.Equal(t, 42, d3.FollowersCount, "self には常に見せること")
 
-	d4 := PackUserDetailed(u, prof)
+	d4 := currentPacker().PackUserDetailed(u, prof)
 	GateCountVisibility(&d4, false, true, false) // moderator
 	require.Equal(t, 42, d4.FollowersCount, "moderator には見せること")
 }
@@ -74,7 +74,7 @@ func TestOverrideRemoteCounts_SurvivesGate(t *testing.T) {
 
 	host := "remote.example"
 	u := &model.User{ID: "u", Username: "u", Host: &host, FollowersCount: 5, FollowingCount: 3}
-	d := PackUserDetailed(u, profileWith(model.FollowingVisibilityPublic, model.FollowingVisibilityPublic))
+	d := currentPacker().PackUserDetailed(u, profileWith(model.FollowingVisibilityPublic, model.FollowingVisibilityPublic))
 	OverrideRemoteCounts(&d, 1000, 250)
 	require.Equal(t, 1000, d.FollowersCount)
 
@@ -89,7 +89,7 @@ func TestPackUserDetailed_EmptyVisibilityIsPublic(t *testing.T) {
 	t.Parallel()
 
 	u := &model.User{ID: "u", Username: "u", FollowersCount: 11, FollowingCount: 2}
-	d := PackUserDetailed(u, &model.UserProfile{UserID: "u"})
+	d := currentPacker().PackUserDetailed(u, &model.UserProfile{UserID: "u"})
 	require.Equal(t, 11, d.FollowersCount, "未設定は既定 (public) として扱う")
 }
 
@@ -112,7 +112,7 @@ func TestGateCountVisibility_ProfileMissingIsClosed(t *testing.T) {
 		{"moderator", false, true, false, 42, 7},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			d := PackUserDetailed(u, nil)
+			d := currentPacker().PackUserDetailed(u, nil)
 			GateCountVisibility(&d, c.isMe, c.isMod, c.isFollowing)
 			require.Equal(t, c.wantFollowers, d.FollowersCount)
 			require.Equal(t, c.wantFollowing, d.FollowingCount)
@@ -126,7 +126,7 @@ func TestOverrideRemoteCounts_ProfileMissingStaysClosed(t *testing.T) {
 
 	host := "remote.example"
 	u := &model.User{ID: "u", Username: "u", Host: &host, FollowersCount: 5, FollowingCount: 3}
-	d := PackUserDetailed(u, nil)
+	d := currentPacker().PackUserDetailed(u, nil)
 	OverrideRemoteCounts(&d, 1000, 250)
 	require.Equal(t, 0, d.FollowersCount)
 	require.Equal(t, 0, d.FollowingCount)

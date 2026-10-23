@@ -160,7 +160,7 @@ func TestPackUserDetailed_IncludesPublicRoles(t *testing.T) {
 			{ID: "rPriv", Name: "Hidden", IsPublic: false, DisplayOrder: 5},
 		},
 	}})
-	d := PackUserDetailed(&model.User{ID: "u1", Username: "alice"}, nil)
+	d := currentPacker().PackUserDetailed(&model.User{ID: "u1", Username: "alice"}, nil)
 	require.Len(t, d.Roles, 1, "public role should appear, private role should not")
 	r := d.Roles[0].(map[string]any)
 	assert.Equal(t, "rPub", r["id"])
@@ -192,7 +192,7 @@ func TestPackUserLite_IncludesBadgeRoles(t *testing.T) {
 func TestPackUserDetailed_RolesEmptyWhenLookupUnwired(t *testing.T) {
 	t.Cleanup(func() { SetUserRolesLookup(nil) })
 	SetUserRolesLookup(nil)
-	d := PackUserDetailed(&model.User{ID: "u1", Username: "alice"}, nil)
+	d := currentPacker().PackUserDetailed(&model.User{ID: "u1", Username: "alice"}, nil)
 	assert.NotNil(t, d.Roles, "Roles must be [] not nil so JSON output is `[]`")
 	assert.Empty(t, d.Roles)
 }

@@ -97,14 +97,23 @@ type Lookups struct {
 
 // Packer packs users as UserLite / UserDetailedNotMe.
 type Packer struct {
-	lookups Lookups
-	idGen   id.Generator
+	entityPacker *entity.Packer
+	lookups      Lookups
+	idGen        id.Generator
 }
 
-// New constructs a Packer. idGen derives createdAt from the user ID.
-func New(l Lookups, idGen id.Generator) *Packer {
-	return &Packer{lookups: l, idGen: idGen}
+// New constructs a Packer. pk packs the entities (#3792) and idGen derives
+// createdAt from the user ID.
+//
+// pk を後から渡す形にしないのは、この Packer を組む経路が router・hashtags・
+// users・webhook と散っていて、渡し忘れても気付けないため。
+func New(pk *entity.Packer, l Lookups, idGen id.Generator) *Packer {
+	return &Packer{entityPacker: pk, lookups: l, idGen: idGen}
 }
+
+// HasEntityPacker reports whether New received a Packer that rewrites media
+// URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP がリモートへ漏れる。
+func (p *Packer) HasEntityPacker() bool { return p.entityPacker.HasMediaURL() }
 
 // SetDetailExtras wires the pinned / move-target filler after construction.
 //
@@ -138,7 +147,7 @@ func (p *Packer) HasDetailExtrasMany() bool { return p.lookups.ExtrasMany != nil
 // PackUserLite だけでは instance も絵文字の URL も付かず、相手がリモートだと
 // 本家と差が出る。
 func (p *Packer) Lite(u *model.User) entity.UserLite {
-	lite := entity.PackUserLite(u)
+	lite := p.entityPacker.PackUserLite(u)
 	p.resolveLite(u, &lite)
 	return lite
 }
@@ -170,7 +179,7 @@ func (p *Packer) DetailedNotMe(ctx context.Context, target, viewer *model.User) 
 		slog.Warn("userpack: load profile failed", "userId", target.ID, "err", err)
 		return entity.UserDetailed{}, false
 	}
-	d := entity.PackUserDetailed(target, profile, p.idGen)
+	d := p.entityPacker.PackUserDetailed(target, profile, p.idGen)
 	p.resolveLite(target, &d.UserLite)
 	iAmModerator := p.lookups.Moderators != nil && p.lookups.Moderators.IsModerator(viewer.ID)
 	// 本家は閲覧者がモデレーターなら moderationNote と 2FA の 3 項目を足す
@@ -243,7 +252,7 @@ func (p *Packer) DetailedMany(ctx context.Context, viewer *model.User, users []*
 	profs := make([]*model.UserProfile, len(users))
 	for i, u := range users {
 		profile := profiles[u.ID]
-		out[i] = entity.PackUserDetailed(u, profile, p.idGen)
+		out[i] = p.entityPacker.PackUserDetailed(u, profile, p.idGen)
 		d := &out[i]
 		if iAmModerator {
 			note := ""

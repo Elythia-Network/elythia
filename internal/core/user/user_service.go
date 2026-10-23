@@ -106,7 +106,18 @@ type Service struct {
 	// hashtag 集計 (attachedUsersCount) を更新する hook。未配線なら集計を
 	// skip (= populate のみ、旧挙動)。実装は core/hashtag.Service。
 	usertagHook UsertagHook
+	// entityPacker は利用者や投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3792)。組み立てで渡し、既定の Packer を読まない。
+	entityPacker *entity.Packer
 }
+
+// SetEntityPacker wires the Packer this service packs entities with (#3792).
+func (s *Service) SetEntityPacker(p *entity.Packer) { s.entityPacker = p }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
+// リモートへ漏れる。
+func (s *Service) HasEntityPacker() bool { return s.entityPacker.HasMediaURL() }
 
 // UsertagHook reconciles the hashtag attach aggregate when a user's tags
 // change. 実装は core/hashtag.Service.UpdateUsertags。
@@ -958,7 +969,7 @@ func (s *Service) publishMeUpdated(bundle *UserWithProfile) {
 	}
 	// profile update / pin / unpin は頻度が低く hot path ではないため
 	// full pack する (UserLite ではなく UserDetailed)。
-	body := entity.PackUserDetailed(bundle.User, bundle.Profile, s.idGen)
+	body := s.entityPacker.PackUserDetailed(bundle.User, bundle.Profile, s.idGen)
 	// **本人にはカウントを見せる。** packer は `followersVisibility` /
 	// `followingVisibility` が public でないカウントを既定で伏せるので、
 	// self event でゲートを通さないと 0 が流れる。fork frontend は

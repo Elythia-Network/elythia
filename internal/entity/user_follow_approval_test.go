@@ -31,15 +31,15 @@ func TestPackMeDetailed_FollowApproval(t *testing.T) {
 		"unset":          {UserID: "u1"},
 		"unknown action": {UserID: "u1", FollowApprovalAction: "bogus"},
 	} {
-		m := decode(PackMeDetailed(u, profile))
+		m := decode(currentPacker().PackMeDetailed(u, profile))
 		for _, k := range []string{"followApprovalLocalSeconds", "followApprovalRemoteSeconds", "followApprovalAction"} {
 			assert.NotContains(t, m, k, "%s: %s", name, k)
 		}
 	}
-	m := decode(PackMeDetailed(u, &model.UserProfile{UserID: "u1", FollowApprovalAction: model.FollowApprovalActionRequest}))
+	m := decode(currentPacker().PackMeDetailed(u, &model.UserProfile{UserID: "u1", FollowApprovalAction: model.FollowApprovalActionRequest}))
 	assert.NotContains(t, m, "followApprovalAction", "既定の request は出さない")
 
-	m = decode(PackMeDetailed(u, &model.UserProfile{
+	m = decode(currentPacker().PackMeDetailed(u, &model.UserProfile{
 		UserID:                      "u1",
 		FollowApprovalLocalSeconds:  new(0),
 		FollowApprovalRemoteSeconds: new(86400),
@@ -50,7 +50,7 @@ func TestPackMeDetailed_FollowApproval(t *testing.T) {
 	assert.Equal(t, "silentFollow", m["followApprovalAction"])
 
 	// 他人に見せる UserDetailed には出さない (本家の e2e と同じ)。
-	d, err := json.Marshal(PackUserDetailed(u, &model.UserProfile{UserID: "u1", FollowApprovalLocalSeconds: new(60)}))
+	d, err := json.Marshal(currentPacker().PackUserDetailed(u, &model.UserProfile{UserID: "u1", FollowApprovalLocalSeconds: new(60)}))
 	require.NoError(t, err)
 	assert.NotContains(t, string(d), "followApproval")
 }

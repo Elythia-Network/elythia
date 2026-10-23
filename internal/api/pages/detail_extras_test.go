@@ -25,7 +25,7 @@ func (r *recordingPacker) DetailedNotMe(_ context.Context, target, viewer *model
 	if r.fail {
 		return entity.UserDetailed{}, false
 	}
-	d := entity.PackUserDetailed(target, nil)
+	d := (*entity.Packer)(nil).PackUserDetailed(target, nil)
 	d.PinnedNoteIDs = []string{"pinned"}
 	return d, true
 }

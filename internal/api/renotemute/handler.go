@@ -41,7 +41,18 @@ type Handler struct {
 	moderator ModeratorChecker
 	// extras は一覧の利用者のピン留め・移行先をまとめて埋める (#3330)。
 	extras userpack.DetailExtrasMany
+	// entityPacker は利用者や投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3792)。組み立てで渡し、既定の Packer を読まない。
+	entityPacker *entity.Packer
 }
+
+// SetEntityPacker wires the Packer this handler packs entities with (#3792).
+func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
+// リモートへ漏れる。
+func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
 
 // SetDetailExtras wires the batch filler of pinnedNotes / pinnedPage / movedTo /
 // alsoKnownAs for the embedded users of renote-mute/list (#3330).
@@ -211,7 +222,7 @@ func (h *Handler) fetchMuteeMap(ctx context.Context, viewer *model.User, rows []
 	iAmModerator := h.moderator != nil && viewerID != "" && h.moderator.IsModerator(viewerID)
 	packed := make([]entity.UserDetailed, len(users))
 	for i, u := range users {
-		d := entity.PackUserDetailed(u, profileByUser[u.ID], h.idGen)
+		d := h.entityPacker.PackUserDetailed(u, profileByUser[u.ID], h.idGen)
 		// viewer-relation flag を付与 (#1912)。renote-mute 一覧なので
 		// isRenoteMuted=true が出る。
 		viewerIsFollowing := h.relation.Apply(&d, viewerID, u, profileByUser[u.ID])

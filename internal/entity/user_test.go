@@ -47,13 +47,13 @@ func TestPackUserDetailed_IsSilenced(t *testing.T) {
 
 	// lookup 未配線なら false。
 	SetSilencedLookup(nil)
-	assert.False(t, PackUserDetailed(u, nil).IsSilenced)
+	assert.False(t, currentPacker().PackUserDetailed(u, nil).IsSilenced)
 
 	// lookup が true を返せば反映される。
 	SetSilencedLookup(stubSilenced{ids: map[string]bool{"silenced-user": true}})
-	assert.True(t, PackUserDetailed(u, nil).IsSilenced)
+	assert.True(t, currentPacker().PackUserDetailed(u, nil).IsSilenced)
 	// 別ユーザーは false。
-	assert.False(t, PackUserDetailed(&model.User{ID: "other"}, nil).IsSilenced)
+	assert.False(t, currentPacker().PackUserDetailed(&model.User{ID: "other"}, nil).IsSilenced)
 }
 
 type stubSilenced struct{ ids map[string]bool }
@@ -167,7 +167,7 @@ func TestPackUserDetailed(t *testing.T) {
 		Fields:      datatypes.JSON([]byte("[]")),
 	}
 
-	detailed := PackUserDetailed(u, profile)
+	detailed := currentPacker().PackUserDetailed(u, profile)
 
 	assert.Equal(t, "user3", detailed.ID)
 	assert.Equal(t, "detailed", detailed.Username)
@@ -253,7 +253,7 @@ func TestPackUserDetailed_MoveFields(t *testing.T) {
 		AlsoKnownAs:   &aka,
 	}
 
-	d := PackUserDetailed(u, nil)
+	d := currentPacker().PackUserDetailed(u, nil)
 
 	// lastFetchedAt は ISO8601(ms) で埋まる。
 	require.NotNil(t, d.LastFetchedAt)
@@ -281,7 +281,7 @@ func TestPackUserDetailed_MoveFields(t *testing.T) {
 
 func TestPackUserDetailed_LastFetchedAtNil(t *testing.T) {
 	u := &model.User{ID: "u_local", Username: "local"}
-	d := PackUserDetailed(u, nil)
+	d := currentPacker().PackUserDetailed(u, nil)
 	assert.Nil(t, d.LastFetchedAt, "local user without lastFetchedAt -> null")
 }
 
@@ -301,7 +301,7 @@ func TestResolveMoveTargets(t *testing.T) {
 	}
 	resolve := func(uri string) (string, bool) { id, ok := known[uri]; return id, ok }
 
-	d := PackUserDetailed(u, nil)
+	d := currentPacker().PackUserDetailed(u, nil)
 	d.ResolveMoveTargets(u, resolve)
 
 	require.NotNil(t, d.MovedTo)
@@ -317,7 +317,7 @@ func TestResolveMoveTargets_AllUnresolvableYieldsEmptyArray(t *testing.T) {
 	u := &model.User{ID: "u1", AlsoKnownAs: &aka}
 	resolve := func(string) (string, bool) { return "", false } // 全て解決不能
 
-	d := PackUserDetailed(u, nil)
+	d := currentPacker().PackUserDetailed(u, nil)
 	d.ResolveMoveTargets(u, resolve)
 	require.NotNil(t, d.AlsoKnownAs, "URI があれば全解決不能でも [] (#2027)")
 	assert.Empty(t, d.AlsoKnownAs)
@@ -325,7 +325,7 @@ func TestResolveMoveTargets_AllUnresolvableYieldsEmptyArray(t *testing.T) {
 	// URI が皆無 (空文字列) のときは null のまま。
 	empty := ""
 	u2 := &model.User{ID: "u2", AlsoKnownAs: &empty}
-	d2 := PackUserDetailed(u2, nil)
+	d2 := currentPacker().PackUserDetailed(u2, nil)
 	d2.ResolveMoveTargets(u2, resolve)
 	assert.Nil(t, d2.AlsoKnownAs, "URI 皆無は null")
 }
@@ -351,7 +351,7 @@ func TestResolveMoveTargets_NilAndUnresolvable(t *testing.T) {
 
 func TestPackUserDetailed_MemoNullNotOmitted(t *testing.T) {
 	u := &model.User{ID: "u_memo", Username: "memo"}
-	d := PackUserDetailed(u, nil)
+	d := currentPacker().PackUserDetailed(u, nil)
 	b, err := json.Marshal(d)
 	require.NoError(t, err)
 	var m map[string]any
@@ -384,7 +384,7 @@ func TestPackUserDetailed_ProfileVisibility(t *testing.T) {
 		Fields:              datatypes.JSON([]byte("[]")),
 	}
 
-	detailed := PackUserDetailed(u, profile)
+	detailed := currentPacker().PackUserDetailed(u, profile)
 
 	assert.Equal(t, "followers", detailed.FollowersVisibility)
 	assert.Equal(t, "private", detailed.FollowingVisibility)
@@ -410,7 +410,7 @@ func TestPackUser_BlurhashGatedByMediaID(t *testing.T) {
 
 	t.Run("bannerId nil → bannerUrl / bannerBlurhash nil", func(t *testing.T) {
 		u := &model.User{ID: "u", Username: "u", BannerURL: &bannerURL, BannerBlurhash: &blur}
-		d := PackUserDetailed(u, nil)
+		d := currentPacker().PackUserDetailed(u, nil)
 		assert.Nil(t, d.BannerURL, "bannerId が無ければ bannerUrl も出さない")
 		assert.Nil(t, d.BannerBlurhash, "bannerId が無ければ bannerBlurhash も出さない")
 	})
@@ -420,7 +420,7 @@ func TestPackUser_BlurhashGatedByMediaID(t *testing.T) {
 	t.Run("remote user without bannerId → bannerUrl kept", func(t *testing.T) {
 		host := "remote.example"
 		u := &model.User{ID: "u", Username: "u", Host: &host, BannerURL: &bannerURL, BannerBlurhash: &blur}
-		d := PackUserDetailed(u, nil)
+		d := currentPacker().PackUserDetailed(u, nil)
 		require.NotNil(t, d.BannerURL, "リモートの人のバナーは bannerId が無くても出す")
 		assert.Equal(t, bannerURL, *d.BannerURL)
 		assert.Nil(t, d.BannerBlurhash)
@@ -429,14 +429,14 @@ func TestPackUser_BlurhashGatedByMediaID(t *testing.T) {
 	t.Run("remote user without banner → bannerUrl nil", func(t *testing.T) {
 		host := "remote.example"
 		u := &model.User{ID: "u", Username: "u", Host: &host}
-		d := PackUserDetailed(u, nil)
+		d := currentPacker().PackUserDetailed(u, nil)
 		assert.Nil(t, d.BannerURL)
 	})
 
 	t.Run("bannerId set → banner kept", func(t *testing.T) {
 		bid := "b1"
 		u := &model.User{ID: "u", Username: "u", BannerID: &bid, BannerURL: &bannerURL, BannerBlurhash: &blur}
-		d := PackUserDetailed(u, nil)
+		d := currentPacker().PackUserDetailed(u, nil)
 		require.NotNil(t, d.BannerURL)
 		assert.Equal(t, bannerURL, *d.BannerURL)
 		assert.Equal(t, &blur, d.BannerBlurhash)
@@ -471,7 +471,7 @@ func TestGateCountVisibility(t *testing.T) {
 				FollowersVisibility: model.FollowingVisibility(c.followersVis),
 				FollowingVisibility: model.FollowingVisibility(c.followingVis),
 			}
-			packed := PackUserDetailed(u, prof)
+			packed := currentPacker().PackUserDetailed(u, prof)
 			d := &packed
 			GateCountVisibility(d, c.isMe, c.isModerator, c.isFollowing)
 			assert.Equal(t, c.wantFollowers, d.FollowersCount)
@@ -493,7 +493,7 @@ func TestPackUserDetailed_VerifiedLinks(t *testing.T) {
 		Fields:        datatypes.JSON([]byte("[]")),
 	}
 
-	detailed := PackUserDetailed(u, profile)
+	detailed := currentPacker().PackUserDetailed(u, profile)
 
 	assert.Equal(t, []string{"https://example.com", "https://blog.example.com"}, detailed.VerifiedLinks)
 }
@@ -506,7 +506,7 @@ func TestPackUserDetailed_DefaultValues(t *testing.T) {
 	}
 
 	// nilプロフィールのデフォルト
-	detailed := PackUserDetailed(u, nil)
+	detailed := currentPacker().PackUserDetailed(u, nil)
 
 	assert.Equal(t, "public", detailed.FollowersVisibility)
 	assert.Equal(t, "public", detailed.FollowingVisibility)
@@ -527,7 +527,7 @@ func TestPackUserDetailed_ExposesChatScope(t *testing.T) {
 				ChatScope:         scope,
 				AvatarDecorations: datatypes.JSON([]byte("[]")),
 			}
-			detailed := PackUserDetailed(u, nil)
+			detailed := currentPacker().PackUserDetailed(u, nil)
 			assert.Equal(t, scope, detailed.ChatScope)
 		})
 	}
@@ -540,7 +540,7 @@ func TestPackUserDetailed_NilProfile(t *testing.T) {
 		AvatarDecorations: datatypes.JSON([]byte("[]")),
 	}
 
-	detailed := PackUserDetailed(u, nil)
+	detailed := currentPacker().PackUserDetailed(u, nil)
 
 	assert.Equal(t, "user4", detailed.ID)
 	assert.Nil(t, detailed.Description)
@@ -645,7 +645,7 @@ func TestUserDetailed_EmbedsUserLiteOptionalFields(t *testing.T) {
 		ID: "u1", Username: "x", AvatarDecorations: datatypes.JSON([]byte("[]")),
 		RequireSigninToViewContents: req,
 	}
-	detailed := PackUserDetailed(u, nil)
+	detailed := currentPacker().PackUserDetailed(u, nil)
 	require.NotNil(t, detailed.RequireSigninToViewContents)
 	assert.True(t, *detailed.RequireSigninToViewContents)
 
@@ -663,7 +663,7 @@ func TestUserDetailed_EmbedsUserLiteOptionalFields(t *testing.T) {
 // 真っ白になる。
 func TestPackUserDetailed_FieldsDefaultWhenProfileNil(t *testing.T) {
 	u := &model.User{ID: "u1", Username: "x", AvatarDecorations: datatypes.JSON([]byte("[]"))}
-	detailed := PackUserDetailed(u, nil)
+	detailed := currentPacker().PackUserDetailed(u, nil)
 	b, err := json.Marshal(detailed)
 	require.NoError(t, err)
 	assert.Contains(t, string(b), `"fields":[]`)
@@ -676,7 +676,7 @@ func TestPackUserForFollowStreamEvent(t *testing.T) {
 	u := &model.User{ID: uid, Username: "alice", AvatarDecorations: datatypes.JSON([]byte("[]"))}
 
 	t.Run("follow event sets isFollowing=true and hasPending=false", func(t *testing.T) {
-		out := PackUserForFollowStreamEvent(u, true, false, idGen)
+		out := currentPacker().PackUserForFollowStreamEvent(u, true, false, idGen)
 		require.NotNil(t, out.IsFollowing)
 		assert.True(t, *out.IsFollowing)
 		require.NotNil(t, out.HasPendingFollowRequestFromYou)
@@ -696,7 +696,7 @@ func TestPackUserForFollowStreamEvent(t *testing.T) {
 	})
 
 	t.Run("unfollow event sets isFollowing=false and hasPending=false", func(t *testing.T) {
-		out := PackUserForFollowStreamEvent(u, false, false, idGen)
+		out := currentPacker().PackUserForFollowStreamEvent(u, false, false, idGen)
 		require.NotNil(t, out.IsFollowing)
 		assert.False(t, *out.IsFollowing)
 		require.NotNil(t, out.HasPendingFollowRequestFromYou)
@@ -704,7 +704,7 @@ func TestPackUserForFollowStreamEvent(t *testing.T) {
 	})
 
 	t.Run("pending request sets isFollowing=false and hasPending=true", func(t *testing.T) {
-		out := PackUserForFollowStreamEvent(u, false, true, idGen)
+		out := currentPacker().PackUserForFollowStreamEvent(u, false, true, idGen)
 		require.NotNil(t, out.IsFollowing)
 		assert.False(t, *out.IsFollowing)
 		require.NotNil(t, out.HasPendingFollowRequestFromYou)
@@ -712,7 +712,7 @@ func TestPackUserForFollowStreamEvent(t *testing.T) {
 	})
 
 	t.Run("serialized JSON exposes the viewer fields", func(t *testing.T) {
-		out := PackUserForFollowStreamEvent(u, true, false, idGen)
+		out := currentPacker().PackUserForFollowStreamEvent(u, true, false, idGen)
 		b, err := json.Marshal(out)
 		require.NoError(t, err)
 		assert.Contains(t, string(b), `"isFollowing":true`)
@@ -738,7 +738,7 @@ func TestUserDetailed_OmitsAvatarIDKey(t *testing.T) {
 		AvatarDecorations: datatypes.JSON([]byte("[]")),
 	}
 
-	detailed := PackUserDetailed(u, nil, idGen)
+	detailed := currentPacker().PackUserDetailed(u, nil, idGen)
 	b, err := json.Marshal(detailed)
 	require.NoError(t, err)
 
@@ -764,7 +764,7 @@ func TestMeDetailed_EmitsAvatarIDKey(t *testing.T) {
 			AvatarID:          &avatarID,
 			AvatarDecorations: datatypes.JSON([]byte("[]")),
 		}
-		me := PackMeDetailed(u, nil, idGen)
+		me := currentPacker().PackMeDetailed(u, nil, idGen)
 		b, err := json.Marshal(me)
 		require.NoError(t, err)
 		assert.Contains(t, string(b), `"avatarId":"avatar-id-1"`)
@@ -779,7 +779,7 @@ func TestMeDetailed_EmitsAvatarIDKey(t *testing.T) {
 			Username:          "me",
 			AvatarDecorations: datatypes.JSON([]byte("[]")),
 		}
-		me := PackMeDetailed(u, nil, idGen)
+		me := currentPacker().PackMeDetailed(u, nil, idGen)
 		b, err := json.Marshal(me)
 		require.NoError(t, err)
 		// avatar 未設定でも key 自体は出ること (dispatch discriminator)。
@@ -814,7 +814,7 @@ func TestPackMeDetailed_TransfersSelfViewFields(t *testing.T) {
 		Fields:                   datatypes.JSON([]byte("[]")),
 	}
 
-	me := PackMeDetailed(u, profile)
+	me := currentPacker().PackMeDetailed(u, profile)
 
 	assert.False(t, me.IsExplorable)
 	assert.True(t, me.IsDeleted)
@@ -844,7 +844,7 @@ func TestPackMeDetailed_NilProfile(t *testing.T) {
 		AvatarDecorations: datatypes.JSON([]byte("[]")),
 	}
 
-	me := PackMeDetailed(u, nil)
+	me := currentPacker().PackMeDetailed(u, nil)
 
 	assert.True(t, me.IsExplorable)
 	assert.True(t, me.HideOnlineStatus)
@@ -904,7 +904,7 @@ func TestPackMeDetailed_ListFields(t *testing.T) {
 		Achievements:   datatypes.JSON([]byte(`[{"name":"a","unlockedAt":1}]`)),
 		LoggedInDates:  model.StringArray{"2026-05-01", "2026-05-02"},
 	}
-	me := PackMeDetailed(u, profile)
+	me := currentPacker().PackMeDetailed(u, profile)
 	assert.Len(t, me.MutedWords, 2)
 	assert.Equal(t, []string{"evil.example"}, me.MutedInstances)
 	assert.Len(t, me.Achievements, 1)
@@ -914,7 +914,7 @@ func TestPackMeDetailed_ListFields(t *testing.T) {
 // 空 / nil profile でも非null 空配列を保つこと (#1240)。
 func TestPackMeDetailed_ListFieldsEmptyAreNonNull(t *testing.T) {
 	u := &model.User{ID: "me5", Username: "empty", AvatarDecorations: datatypes.JSON([]byte("[]"))}
-	me := PackMeDetailed(u, nil)
+	me := currentPacker().PackMeDetailed(u, nil)
 	assert.Equal(t, []any{}, me.MutedWords)
 	assert.Equal(t, []string{}, me.MutedInstances)
 	assert.Equal(t, []any{}, me.Achievements)
@@ -926,7 +926,7 @@ func TestPackMeDetailed_MeDetailedOnlyHighFields(t *testing.T) {
 	u := &model.User{ID: "me_high", Username: "high", AvatarDecorations: datatypes.JSON([]byte("[]"))}
 
 	// nil profile -> 非null default (users/show self の best-effort と同じ)。
-	me := PackMeDetailed(u, nil)
+	me := currentPacker().PackMeDetailed(u, nil)
 	assert.Equal(t, []any{}, me.UnreadAnnouncements)
 	assert.Equal(t, []any{}, me.HardMutedWords)
 	assert.False(t, me.HasUnreadChatMessages)
@@ -953,17 +953,17 @@ func TestPackMeDetailed_ProfileDerivedHighFields(t *testing.T) {
 		SecurityKeysAvailable: true,
 		TwoFactorBackupSecret: model.StringArray{"a", "b"}, // 2 codes -> partial
 	}
-	me := PackMeDetailed(u, profile)
+	me := currentPacker().PackMeDetailed(u, profile)
 	assert.Len(t, me.HardMutedWords, 2, "hardMutedWords は jsonb から展開")
 	assert.Equal(t, "partial", me.TwoFactorBackupCodesStock)
 	// #1921: 2FA 有効 + key 有り → securityKeys true。
 	assert.True(t, me.SecurityKeys, "2FA 有効 + key 有りで securityKeys true")
 
 	profile.TwoFactorBackupSecret = model.StringArray{"a", "b", "c", "d", "e"} // >=5 -> full
-	assert.Equal(t, "full", PackMeDetailed(u, profile).TwoFactorBackupCodesStock)
+	assert.Equal(t, "full", currentPacker().PackMeDetailed(u, profile).TwoFactorBackupCodesStock)
 
 	profile.TwoFactorEnabled = false // 2FA off -> none
-	off := PackMeDetailed(u, profile)
+	off := currentPacker().PackMeDetailed(u, profile)
 	assert.Equal(t, "none", off.TwoFactorBackupCodesStock)
 	// #1921: 2FA 無効なら SecurityKeysAvailable=true でも securityKeys false。
 	assert.False(t, off.SecurityKeys, "2FA 無効なら securityKeys false")
@@ -975,7 +975,7 @@ func TestPackMeDetailed_ProfileDerivedHighFields(t *testing.T) {
 // 判定が壊れる。omitempty で省略されることを保証する。
 func TestPackMeDetailed_OmitsPoliciesWhenUnset(t *testing.T) {
 	u := &model.User{ID: "me6", Username: "nopol", AvatarDecorations: datatypes.JSON([]byte("[]"))}
-	me := PackMeDetailed(u, &model.UserProfile{UserID: "me6", Fields: datatypes.JSON([]byte("[]"))})
+	me := currentPacker().PackMeDetailed(u, &model.UserProfile{UserID: "me6", Fields: datatypes.JSON([]byte("[]"))})
 	assert.Nil(t, me.Policies)
 	b, err := json.Marshal(me)
 	require.NoError(t, err)
@@ -999,7 +999,7 @@ func TestPackMeDetailed_SerializedJSON(t *testing.T) {
 		Fields:            datatypes.JSON([]byte("[]")),
 	}
 
-	me := PackMeDetailed(u, profile)
+	me := currentPacker().PackMeDetailed(u, profile)
 	b, err := json.Marshal(me)
 	require.NoError(t, err)
 	s := string(b)
@@ -1024,7 +1024,7 @@ func TestPackMeDetailed_NotificationDefaults(t *testing.T) {
 		Fields: datatypes.JSON([]byte("[]")),
 	}
 
-	me := PackMeDetailed(u, profile)
+	me := currentPacker().PackMeDetailed(u, profile)
 
 	assert.Equal(t, []string{"follow", "receiveFollowRequest"}, me.EmailNotificationTypes)
 	assert.Equal(t, []string{}, me.MutingNotificationTypes)
@@ -1053,7 +1053,7 @@ func TestPackMeDetailed_NotificationOverride(t *testing.T) {
 		Fields:                    datatypes.JSON([]byte("[]")),
 	}
 
-	me := PackMeDetailed(u, profile)
+	me := currentPacker().PackMeDetailed(u, profile)
 	assert.Equal(t, []string{"mention"}, me.EmailNotificationTypes)
 	require.Contains(t, me.NotificationRecieveConfig, "mention")
 }
@@ -1065,7 +1065,7 @@ func TestPackMeDetailed_NotificationNilProfile(t *testing.T) {
 		Username:          "nilprof-notif",
 		AvatarDecorations: datatypes.JSON([]byte("[]")),
 	}
-	me := PackMeDetailed(u, nil)
+	me := currentPacker().PackMeDetailed(u, nil)
 	assert.Equal(t, []string{"follow", "receiveFollowRequest"}, me.EmailNotificationTypes)
 	assert.Equal(t, []string{}, me.MutingNotificationTypes)
 	assert.Equal(t, map[string]any{}, me.NotificationRecieveConfig)
@@ -1090,7 +1090,7 @@ func TestAsMeDetailed_PreservesEmbeddedUserDetailed(t *testing.T) {
 	}
 	// pre-built UserDetailed に external な後付け修正 (= users/show が行う
 	// remote stats / pinned 反映に相当) を加えたものを base として渡す。
-	d := PackUserDetailed(u, profile)
+	d := currentPacker().PackUserDetailed(u, profile)
 	d.NotesCount = 42
 	pinnedIDs := []string{"note1", "note2"}
 	d.PinnedNoteIDs = pinnedIDs
@@ -1120,7 +1120,7 @@ func TestPackMeDetailed_NotificationMalformed(t *testing.T) {
 		NotificationRecieveConfig: datatypes.JSON([]byte(`not-json`)),
 		Fields:                    datatypes.JSON([]byte("[]")),
 	}
-	me := PackMeDetailed(u, profile)
+	me := currentPacker().PackMeDetailed(u, profile)
 	assert.Equal(t, []string{"follow", "receiveFollowRequest"}, me.EmailNotificationTypes)
 	assert.Equal(t, map[string]any{}, me.NotificationRecieveConfig)
 }
@@ -1140,7 +1140,7 @@ func TestPackUserDetailed_RemoteUserPublicReactionsFalse(t *testing.T) {
 	// profile が publicReactions=true でも remote なら false に上書きされる。
 	profile := &model.UserProfile{UserID: "ruser", PublicReactions: true, Fields: datatypes.JSON([]byte("[]"))}
 
-	detailed := PackUserDetailed(u, profile)
+	detailed := currentPacker().PackUserDetailed(u, profile)
 	assert.False(t, detailed.PublicReactions, "remote user must report publicReactions=false")
 }
 
@@ -1150,6 +1150,6 @@ func TestPackUserDetailed_LocalUserPublicReactionsPreserved(t *testing.T) {
 	u := &model.User{ID: "luser", Username: "bob", AvatarDecorations: datatypes.JSON([]byte("[]"))}
 	profile := &model.UserProfile{UserID: "luser", PublicReactions: true, Fields: datatypes.JSON([]byte("[]"))}
 
-	detailed := PackUserDetailed(u, profile)
+	detailed := currentPacker().PackUserDetailed(u, profile)
 	assert.True(t, detailed.PublicReactions, "local user with publicReactions=true must stay true")
 }

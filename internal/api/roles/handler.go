@@ -60,8 +60,8 @@ type Handler struct {
 	// 匿名の閲覧者への ugcVisibilityForVisitor が効かないので、criticalWiring が
 	// 起動時に検査する。
 	noteHider *notehide.Hider
-	// entityPacker は投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
-	// 持つ (#3790)。組み立てで渡し、既定の Packer を読まない。
+	// entityPacker は利用者や投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3790、#3792)。組み立てで渡し、既定の Packer を読まない。
 	entityPacker *entity.Packer
 }
 
@@ -311,7 +311,7 @@ func (h *Handler) Users(c echo.Context) error {
 		// 配線が外れた構成では素の UserDetailed (packer の既定で非公開のカウントは伏せる)。
 		packed = make([]entity.UserDetailed, len(users))
 		for i, u := range users {
-			packed[i] = entity.PackUserDetailed(u, profByID[u.ID], h.idGen)
+			packed[i] = h.entityPacker.PackUserDetailed(u, profByID[u.ID], h.idGen)
 		}
 	}
 	out := make([]any, 0, len(kept))

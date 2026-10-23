@@ -17,6 +17,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/userrelation"
 	corehashtag "github.com/elythia-network/elythia/internal/core/hashtag"
 	"github.com/elythia-network/elythia/internal/core/userpack"
+	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/colfit"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/misc/searchnorm"
@@ -51,7 +52,18 @@ type Handler struct {
 	// selfPacker は閲覧者自身を MeDetailed へ昇格させ、/api/i の handler で未読・
 	// role・ピン留めを埋める (#3784)。未配線なら補完せずに昇格だけする。
 	selfPacker *meself.Packer
+	// entityPacker は利用者や投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3792)。組み立てで渡し、既定の Packer を読まない。
+	entityPacker *entity.Packer
 }
+
+// SetEntityPacker wires the Packer this handler packs entities with (#3792).
+func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
+// リモートへ漏れる。
+func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
 
 // SetSelfPacker wires the Packer that promotes the viewer's own entry into
 // MeDetailed. Unset promotes without the handler-only fields.
@@ -623,7 +635,7 @@ func (h *Handler) Users(c echo.Context) error {
 	// 替えて読めないよう、#1558)・ピン留め・移行先を DetailedMany でまとめて組み、
 	// 関係は getRelations と同じく関係ごとに 1 回の IN で引く (#3330)。匿名の
 	// 閲覧者にはピン留めを出さない (本家 packMany と同じ)。
-	packer := userpack.New(userpack.Lookups{
+	packer := userpack.New(h.entityPacker, userpack.Lookups{
 		Relations:  h.relation,
 		Moderators: h.moderators,
 		ExtrasMany: h.extras,

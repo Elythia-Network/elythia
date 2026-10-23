@@ -58,7 +58,7 @@ func newStreamSvc(t *testing.T) (*following.Service, *testutil.MockUserRepositor
 	svc, userRepo, fRepo, frRepo := newSvc(t)
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	svc.SetUserPacker(userpack.New(userpack.Lookups{
+	svc.SetUserPacker(userpack.New(nil, userpack.Lookups{
 		Instances: streamInstances{},
 		Emojis:    streamEmojis{},
 		Profiles:  userRepo,

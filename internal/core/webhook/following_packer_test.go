@@ -35,7 +35,7 @@ func TestFollowingHook_SharedPackerFillsPinnedAndMoveTargets(t *testing.T) {
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
 	h := webhook.NewFollowingHook(svc)
-	h.SetUserPacker(userpack.New(l, idGen))
+	h.SetUserPacker(userpack.New(nil, l, idGen))
 
 	h.OnFollow(follower, followee)
 
@@ -55,12 +55,12 @@ func TestFollowingHook_PackedUsesSharedValue(t *testing.T) {
 	h := webhook.NewFollowingHook(svc)
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	h.SetUserLookups(followLookups(profiles, nil, nil), idGen)
+	h.SetUserLookups(nil, followLookups(profiles, nil, nil), idGen)
 
 	calls := 0
 	packed := func() (entity.UserDetailed, bool) {
 		calls++
-		d := entity.PackUserDetailed(remoteUser(), &model.UserProfile{}, idGen)
+		d := (*entity.Packer)(nil).PackUserDetailed(remoteUser(), &model.UserProfile{}, idGen)
 		d.Description = new("shared")
 		return d, true
 	}
@@ -88,7 +88,7 @@ func TestFollowingHook_HasUserPacker(t *testing.T) {
 	svc, _, _, _ := newTestService(t)
 	h := webhook.NewFollowingHook(svc)
 	assert.False(t, h.HasUserPacker())
-	h.SetUserPacker(userpack.New(userpack.Lookups{}, nil))
+	h.SetUserPacker(userpack.New(nil, userpack.Lookups{}, nil))
 	assert.True(t, h.HasUserPacker())
 }
 

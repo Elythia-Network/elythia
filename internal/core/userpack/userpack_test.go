@@ -84,7 +84,7 @@ func newPacker(t *testing.T, l userpack.Lookups) *userpack.Packer {
 	t.Helper()
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	return userpack.New(l, idGen)
+	return userpack.New(nil, l, idGen)
 }
 
 func followersOnlyProfile(u *model.User) *model.UserProfile {

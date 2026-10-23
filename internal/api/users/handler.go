@@ -118,8 +118,8 @@ type Handler struct {
 	// 匿名の閲覧者への ugcVisibilityForVisitor が効かないので、criticalWiring が
 	// 起動時に検査する。
 	noteHider *notehide.Hider
-	// entityPacker は投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
-	// 持つ (#3790)。組み立てで渡し、既定の Packer を読まない。
+	// entityPacker は利用者や投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3790、#3792)。組み立てで渡し、既定の Packer を読まない。
 	entityPacker *entity.Packer
 }
 
@@ -675,7 +675,7 @@ func (h *Handler) Show(c echo.Context) error {
 		h.chartHook.OnUserShow(bundle.User.ID, viewerID, visitorKey)
 	}
 
-	detailed := entity.PackUserDetailed(bundle.User, bundle.Profile, h.idGen)
+	detailed := h.entityPacker.PackUserDetailed(bundle.User, bundle.Profile, h.idGen)
 	h.applyModerationNote(&detailed, iAmModerator, bundle.Profile)
 	// moderator が他ユーザーを見るときは twoFactorEnabled/usePasswordLessLogin/
 	// securityKeys を出す (upstream UserEntityService、#1781)。self-view は下の

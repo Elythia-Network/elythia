@@ -6,7 +6,6 @@ import (
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/pagination"
-	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
@@ -121,7 +120,7 @@ func (h *Handler) packUsers(c echo.Context, users []*model.User, profiles map[st
 		// 配線が外れた構成では素の UserDetailed を返す (packer が既定で
 		// 非公開のカウントを伏せるので、漏れる側には倒れない)。
 		for i, u := range users {
-			out[i] = entity.PackUserDetailed(u, profiles[u.ID], h.idGen)
+			out[i] = h.entityPacker.PackUserDetailed(u, profiles[u.ID], h.idGen)
 		}
 		return out
 	}

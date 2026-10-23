@@ -37,7 +37,7 @@ func (h *Handler) HasUserPacker() bool { return h.userPacker != nil }
 func (h *Handler) packPusher(ctx context.Context, pusher *coreuser.UserWithProfile, ownerID string) (any, bool) {
 	if h.userPacker == nil {
 		// 配線が外れた構成では素の UserDetailed (packer の既定で非公開のカウントは伏せる)。
-		return entity.PackUserDetailed(pusher.User, pusher.Profile, h.idGen), true
+		return h.entityPacker.PackUserDetailed(pusher.User, pusher.Profile, h.idGen), true
 	}
 	owner := pusher.User
 	if ownerID != pusher.User.ID {

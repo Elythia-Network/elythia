@@ -235,9 +235,9 @@ func NewFollowingHook(svc *Service) *FollowingHook {
 }
 
 // SetUserLookups wires the lookups used to pack the `user` of follow /
-// followed / unfollow bodies, and idGen to derive createdAt.
-func (h *FollowingHook) SetUserLookups(l UserLookups, idGen id.Generator) {
-	h.packer = userpack.New(l, idGen)
+// followed / unfollow bodies with pk, and idGen to derive createdAt.
+func (h *FollowingHook) SetUserLookups(pk *entity.Packer, l UserLookups, idGen id.Generator) {
+	h.packer = userpack.New(pk, l, idGen)
 }
 
 // SetUserPacker wires a packer shared with the main stream publisher, so the
@@ -309,9 +309,13 @@ func (h *FollowingHook) HasUserPacker() bool { return h.packer != nil }
 
 // userPacker returns the wired packer, or one without lookups when unwired
 // (which drops the detailed bodies, see userpack.Packer.DetailedNotMe).
+//
+// 未配線のときの Packer は nil の entity.Packer なので、followed の avatarUrl は
+// 生のリモートの URL になる (#3792)。本番は criticalWiring の
+// webhookFollowing.userPacker が配線を必須にしているので、ここへは来ない。
 func (h *FollowingHook) userPacker() *userpack.Packer {
 	if h.packer == nil {
-		return userpack.New(userpack.Lookups{}, nil)
+		return userpack.New(nil, userpack.Lookups{}, nil)
 	}
 	return h.packer
 }

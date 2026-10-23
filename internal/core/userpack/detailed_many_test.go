@@ -56,7 +56,7 @@ func TestDetailedMany(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			many := &recordingMany{}
-			p := userpack.New(userpack.Lookups{
+			p := userpack.New(nil, userpack.Lookups{
 				Instances: fakeInstances{}, Emojis: fakeEmojis{},
 				Relations: fakeRelations{following: tt.following}, Moderators: tt.moderators,
 			}, idGen)
@@ -89,7 +89,7 @@ func TestDetailedMany(t *testing.T) {
 
 // 一覧の埋め手が無い構成でも instance と絵文字は自前で埋める。
 func TestDetailedMany_WithoutExtrasManyStillFillsLites(t *testing.T) {
-	p := userpack.New(userpack.Lookups{Instances: fakeInstances{}, Emojis: fakeEmojis{}}, nil)
+	p := userpack.New(nil, userpack.Lookups{Instances: fakeInstances{}, Emojis: fakeEmojis{}}, nil)
 	out := p.DetailedMany(context.Background(), nil, []*model.User{target()}, nil)
 	require.Len(t, out, 1)
 	require.NotNil(t, out[0].Instance)
@@ -115,7 +115,7 @@ func TestDetailedMany_MissingProfileHidesCounts(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := userpack.New(userpack.Lookups{Relations: fakeRelations{following: tt.following}, Moderators: tt.moderators}, nil)
+			p := userpack.New(nil, userpack.Lookups{Relations: fakeRelations{following: tt.following}, Moderators: tt.moderators}, nil)
 			out := p.DetailedMany(context.Background(), tt.viewer, []*model.User{u}, nil)
 			require.Len(t, out, 1)
 			assert.EqualValues(t, tt.want, out[0].FollowersCount)
@@ -124,12 +124,12 @@ func TestDetailedMany_MissingProfileHidesCounts(t *testing.T) {
 }
 
 func TestDetailedMany_Empty(t *testing.T) {
-	p := userpack.New(userpack.Lookups{}, nil)
+	p := userpack.New(nil, userpack.Lookups{}, nil)
 	assert.Empty(t, p.DetailedMany(context.Background(), nil, nil, nil))
 }
 
 func TestFillLites(t *testing.T) {
-	p := userpack.New(userpack.Lookups{Instances: fakeInstances{}, Emojis: fakeEmojis{}}, nil)
+	p := userpack.New(nil, userpack.Lookups{Instances: fakeInstances{}, Emojis: fakeEmojis{}}, nil)
 	lite := entity.PackUserLite(target())
 	p.FillLites([]*model.User{target()}, []*entity.UserLite{&lite})
 	require.NotNil(t, lite.Instance)
@@ -162,7 +162,7 @@ func (m *manyRelations) ApplyMany(viewerID string, details []*entity.UserDetaile
 // #3330)。戻り値の isFollowing はカウントのゲートに渡る。
 func TestDetailedMany_UsesBatchRelations(t *testing.T) {
 	rel := &manyRelations{fakeRelations: fakeRelations{following: true}}
-	p := userpack.New(userpack.Lookups{Relations: rel}, nil)
+	p := userpack.New(nil, userpack.Lookups{Relations: rel}, nil)
 	users := []*model.User{target(), {ID: "u2", Username: "u2", FollowersCount: 9}}
 	profiles := map[string]*model.UserProfile{target().ID: privateProfile(target().ID), "u2": privateProfile("u2")}
 
