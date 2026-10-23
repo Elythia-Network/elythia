@@ -75,7 +75,7 @@ func TestNoteFieldResolver_ResolveFiles_EmbedsRenoteAndReply(t *testing.T) {
 		"f2": {ID: "f2", Name: "renote.png", Type: "image/png", URL: "https://example.com/f2"},
 		"f3": {ID: "f3", Name: "reply.png", Type: "image/png", URL: "https://example.com/f3"},
 	}}
-	r := NewNoteFieldResolver(files, nil, nil, nil, nil, makeIDGen(t))
+	r := NewNoteFieldResolver(currentPacker(), files, nil, nil, nil, nil, makeIDGen(t))
 
 	notes := []NoteEntity{{
 		ID:      "n1",
@@ -102,7 +102,7 @@ func TestNoteFieldResolver_ResolveViewerFields_EmbedsRenoteAndReply(t *testing.T
 	channels := &stubChannelLookup{channels: map[string]*model.Channel{
 		chID: {ID: chID, Name: "general"},
 	}}
-	r := NewNoteFieldResolver(nil, nil, nil, reactions, channels, makeIDGen(t))
+	r := NewNoteFieldResolver(currentPacker(), nil, nil, nil, reactions, channels, makeIDGen(t))
 
 	// #1641: myReaction は reactionCount>0 の note だけ fetch するので、
 	// reaction を持つ note には ReactionCount を立てる (reaction row があるのに
@@ -131,7 +131,7 @@ func TestNoteFieldResolver_MyReactionLegacyConverted(t *testing.T) {
 	reactions := &stubNoteReactionLookup{rows: map[string]*model.NoteReaction{
 		"n1": {NoteID: "n1", Reaction: "like"},
 	}}
-	r := NewNoteFieldResolver(nil, nil, nil, reactions, nil, makeIDGen(t))
+	r := NewNoteFieldResolver(currentPacker(), nil, nil, nil, reactions, nil, makeIDGen(t))
 
 	notes := []NoteEntity{{ID: "n1", ReactionCount: 1}}
 	r.ResolveViewerFields(notes, &model.User{ID: "v1"})
@@ -147,7 +147,7 @@ func TestNoteFieldResolver_NilSafe(t *testing.T) {
 	r.ResolveFiles(nil)
 	r.ResolveViewerFields(nil, nil)
 
-	r2 := NewNoteFieldResolver(nil, nil, nil, nil, nil, nil)
+	r2 := NewNoteFieldResolver(currentPacker(), nil, nil, nil, nil, nil, nil)
 	r2.Apply([]NoteEntity{{ID: "n1"}}, nil)
 
 	// 個別 helper も nil 入力で panic しない
@@ -209,7 +209,7 @@ func TestNoteFieldResolver_ResolveFiles_EmbedsFolderAndOwner(t *testing.T) {
 	owners := &stubFileOwnerLookup{users: map[string]*model.User{
 		owner: {ID: owner, Username: "alice"},
 	}}
-	r := NewNoteFieldResolver(files, folders, owners, nil, nil, makeIDGen(t))
+	r := NewNoteFieldResolver(currentPacker(), files, folders, owners, nil, nil, makeIDGen(t))
 
 	notes := []NoteEntity{{ID: "n1", FileIDs: model.StringArray{"f1", "f2"}}}
 	r.ResolveFiles(notes)
@@ -283,7 +283,7 @@ func TestNoteFieldResolver_ResolveFiles_BatchesFolderAndOwner(t *testing.T) {
 	owners := &batchOwnerStub{users: map[string]*model.User{
 		uA: {ID: uA, Username: "a"}, uB: {ID: uB, Username: "b"},
 	}}
-	r := NewNoteFieldResolver(files, folders, owners, nil, nil, makeIDGen(t))
+	r := NewNoteFieldResolver(currentPacker(), files, folders, owners, nil, nil, makeIDGen(t))
 
 	notes := []NoteEntity{{ID: "n1", FileIDs: model.StringArray{"f1", "f2", "f3"}}}
 	r.ResolveFiles(notes)
@@ -306,7 +306,7 @@ func TestNoteFieldResolver_ResolveFiles_LookupErrorsTolerated(t *testing.T) {
 	}}
 	folders := &stubFolderLookup{err: assertError("db down")}
 	owners := &stubFileOwnerLookup{err: assertError("db down")}
-	r := NewNoteFieldResolver(files, folders, owners, nil, nil, makeIDGen(t))
+	r := NewNoteFieldResolver(currentPacker(), files, folders, owners, nil, nil, makeIDGen(t))
 
 	notes := []NoteEntity{{ID: "n1", FileIDs: model.StringArray{"f1"}}}
 	r.ResolveFiles(notes)
@@ -322,7 +322,7 @@ func TestNoteFieldResolver_NilViewerSkipsMyReaction(t *testing.T) {
 	channels := &stubChannelLookup{channels: map[string]*model.Channel{
 		chID: {ID: chID, Name: "general"},
 	}}
-	r := NewNoteFieldResolver(nil, nil, nil, reactions, channels, makeIDGen(t))
+	r := NewNoteFieldResolver(currentPacker(), nil, nil, nil, reactions, channels, makeIDGen(t))
 
 	notes := []NoteEntity{{ID: "n1", ChannelID: &chID}}
 	r.ResolveViewerFields(notes, nil)
@@ -482,7 +482,7 @@ func TestNoteFieldResolver_MyReaction_SkipsZeroReactionNotes(t *testing.T) {
 	reactions := &countingReactionLookup{rows: map[string]*model.NoteReaction{
 		"hot": {NoteID: "hot", Reaction: "👍"},
 	}}
-	r := NewNoteFieldResolver(nil, nil, nil, reactions, nil, makeIDGen(t))
+	r := NewNoteFieldResolver(currentPacker(), nil, nil, nil, reactions, nil, makeIDGen(t))
 
 	notes := []NoteEntity{
 		{ID: "hot", ReactionCount: 3},  // reaction あり → fetch 対象
@@ -511,7 +511,7 @@ func TestResolveViewerFields_UsesViewerIDOnly(t *testing.T) {
 		"n1": {NoteID: "n1", Reaction: "👍"},
 	}}
 	votes := &recordingPollVoteLookup{votes: map[string][]int{"n1": {1}}}
-	r := NewNoteFieldResolver(nil, nil, nil, reactions, nil, makeIDGen(t))
+	r := NewNoteFieldResolver(currentPacker(), nil, nil, nil, reactions, nil, makeIDGen(t))
 	r.SetPollVoteLookup(votes)
 
 	// ID だけを持つ stub と、同じ ID で他フィールドが埋まった user の出力が
@@ -582,7 +582,7 @@ func TestNoteFieldResolver_ResolveFilesShallow_OmitsFolderAndOwner(t *testing.T)
 	folders := &stubFolderLookup{folders: map[string]*model.DriveFolder{folderID: {ID: folderID, Name: "media"}}}
 	owners := &stubFileOwnerLookup{users: map[string]*model.User{owner: {ID: owner, Username: "alice"}}}
 
-	deep := NewNoteFieldResolver(newFiles(), folders, owners, nil, nil, makeIDGen(t))
+	deep := NewNoteFieldResolver(currentPacker(), newFiles(), folders, owners, nil, nil, makeIDGen(t))
 	deepNotes := []NoteEntity{{ID: "n1", FileIDs: model.StringArray{"f1"}}}
 	deep.ResolveFiles(deepNotes)
 	require.Len(t, deepNotes[0].Files, 1)
@@ -590,7 +590,7 @@ func TestNoteFieldResolver_ResolveFilesShallow_OmitsFolderAndOwner(t *testing.T)
 	require.NotNil(t, deepFile.Folder, "ResolveFiles は folder を embed する")
 	require.NotNil(t, deepFile.User, "ResolveFiles は owner を embed する")
 
-	shallow := NewNoteFieldResolver(newFiles(), folders, owners, nil, nil, makeIDGen(t))
+	shallow := NewNoteFieldResolver(currentPacker(), newFiles(), folders, owners, nil, nil, makeIDGen(t))
 	notes := []NoteEntity{{ID: "n1", FileIDs: model.StringArray{"f1"}}}
 	shallow.ResolveFilesShallow(notes)
 	require.Len(t, notes[0].Files, 1)
@@ -609,7 +609,7 @@ func TestNoteFieldResolver_ResolveFilesShallow_EmbedsRenoteAndReply(t *testing.T
 		"f2": {ID: "f2", Name: "b.png", Type: "image/png", URL: "https://example.com/f2"},
 		"f3": {ID: "f3", Name: "c.png", Type: "image/png", URL: "https://example.com/f3"},
 	}}
-	r := NewNoteFieldResolver(files, nil, nil, nil, nil, makeIDGen(t))
+	r := NewNoteFieldResolver(currentPacker(), files, nil, nil, nil, nil, makeIDGen(t))
 	notes := []NoteEntity{{
 		ID:      "n1",
 		FileIDs: model.StringArray{"f1"},
@@ -627,7 +627,7 @@ func TestNoteFieldResolver_ResolveFilesShallow_NoOp(t *testing.T) {
 	var nilResolver *NoteFieldResolver
 	nilResolver.ResolveFilesShallow([]NoteEntity{{ID: "n1"}})
 
-	r := NewNoteFieldResolver(nil, nil, nil, nil, nil, makeIDGen(t))
+	r := NewNoteFieldResolver(currentPacker(), nil, nil, nil, nil, nil, makeIDGen(t))
 	notes := []NoteEntity{{ID: "n1", FileIDs: model.StringArray{"f1"}}}
 	r.ResolveFilesShallow(notes)
 	assert.Empty(t, notes[0].Files)

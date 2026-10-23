@@ -442,7 +442,7 @@ func (h *Handler) Reactions(c echo.Context) error {
 			notes = append(notes, r.Note)
 		}
 	}
-	packed := entity.PackNotes(c.Request().Context(), notes, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
+	packed := h.entityPacker.PackNotes(c.Request().Context(), notes, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
 	h.noteHider.HideEmbeds(viewer, packed)
 	noteByID := make(map[string]entity.NoteEntity, len(packed))
 	for _, ne := range packed {
@@ -555,7 +555,7 @@ func (h *Handler) FeaturedNotes(c echo.Context) error {
 		return apierr.JSONInternalError(c)
 	}
 	notes = notesfilter.ApplyBlockedHosts(notes, blockedHosts)
-	result := entity.PackNotes(c.Request().Context(), notes, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
+	result := h.entityPacker.PackNotes(c.Request().Context(), notes, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
 	h.fieldRes.Apply(result, viewer)
 	h.noteHider.HideEmbeds(viewer, result)
 	return c.JSON(http.StatusOK, result)

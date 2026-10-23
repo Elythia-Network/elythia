@@ -348,7 +348,7 @@ func TestPackNotification_ResolvesNoteFiles(t *testing.T) {
 	files := &stubDriveFileLookup{files: map[string]*model.DriveFile{
 		"f1": {ID: "f1", Name: "a.png", Type: "image/png", URL: "https://example.com/f1"},
 	}}
-	r := NewNoteFieldResolver(files, nil, nil, nil, nil, idGen)
+	r := NewNoteFieldResolver(currentPacker(), files, nil, nil, nil, nil, idGen)
 
 	n := &notification.Notification{
 		ID: idGen.Generate(time.Now()), CreatedAt: time.Now(),
@@ -388,7 +388,7 @@ func TestPackNotifications_BatchesNoteFileLookup(t *testing.T) {
 		"f1": {ID: "f1", Name: "a.png", Type: "image/png", URL: "https://example.com/f1"},
 		"f2": {ID: "f2", Name: "b.png", Type: "image/png", URL: "https://example.com/f2"},
 	}}
-	r := NewNoteFieldResolver(files, nil, nil, nil, nil, idGen)
+	r := NewNoteFieldResolver(currentPacker(), files, nil, nil, nil, nil, idGen)
 
 	items := make([]NotificationItem, 0, 2)
 	for i, spec := range []struct{ noteID, fileID string }{{"n1", "f1"}, {"n2", "f2"}} {
@@ -426,7 +426,7 @@ func TestPackNotifications_MixedNoteAndNoteLessRows(t *testing.T) {
 	files := &stubDriveFileLookup{files: map[string]*model.DriveFile{
 		"f1": {ID: "f1", Name: "a.png", Type: "image/png", URL: "https://example.com/f1"},
 	}}
-	r := NewNoteFieldResolver(files, nil, nil, nil, nil, idGen)
+	r := NewNoteFieldResolver(currentPacker(), files, nil, nil, nil, nil, idGen)
 
 	base := time.Now()
 	items := []NotificationItem{
@@ -458,7 +458,7 @@ func TestPackNotifications_MixedNoteAndNoteLessRows(t *testing.T) {
 func TestPackNotifications_NoNoteSkipsFileLookup(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	files := &stubDriveFileLookup{files: map[string]*model.DriveFile{}}
-	r := NewNoteFieldResolver(files, nil, nil, nil, nil, idGen)
+	r := NewNoteFieldResolver(currentPacker(), files, nil, nil, nil, nil, idGen)
 
 	out := PackNotifications([]NotificationItem{{
 		N: &notification.Notification{
@@ -477,7 +477,7 @@ func TestPackNotification_ResolvesViewerFieldsForNotifiee(t *testing.T) {
 	reactions := &stubNoteReactionLookup{rows: map[string]*model.NoteReaction{
 		"n1": {NoteID: "n1", Reaction: "👍"},
 	}}
-	r := NewNoteFieldResolver(nil, nil, nil, reactions, nil, idGen)
+	r := NewNoteFieldResolver(currentPacker(), nil, nil, nil, reactions, nil, idGen)
 
 	n := &notification.Notification{
 		ID: idGen.Generate(time.Now()), CreatedAt: time.Now(),
@@ -503,7 +503,7 @@ func TestPackNotification_EmptyViewerSkipsViewerFields(t *testing.T) {
 	reactions := &countingReactionLookup{rows: map[string]*model.NoteReaction{
 		"n1": {NoteID: "n1", Reaction: "👍"},
 	}}
-	r := NewNoteFieldResolver(nil, nil, nil, reactions, nil, idGen)
+	r := NewNoteFieldResolver(currentPacker(), nil, nil, nil, reactions, nil, idGen)
 
 	n := &notification.Notification{
 		ID: idGen.Generate(time.Now()), CreatedAt: time.Now(),

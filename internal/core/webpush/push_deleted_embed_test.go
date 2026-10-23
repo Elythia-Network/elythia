@@ -99,7 +99,7 @@ func TestHook_PushOmitsDeletedNotes(t *testing.T) {
 			hook := corenotification.NewHook(svc, users)
 			pub := &recordingPush{}
 			hook.SetWebPushPublisher(pub)
-			hook.SetPackers(webpush.NewUserRepoPacker(users), webpush.NewNoteRepoPacker(notes, idGen, testutil.NewMockFollowingRepository(), nil))
+			hook.SetPackers(webpush.NewUserRepoPacker(users), webpush.NewNoteRepoPacker(notes, idGen, testutil.NewMockFollowingRepository(), nil, nil))
 			hook.SetNoteLoader(notes.FindByIDWithRelations)
 			hook.SetNoteExistenceChecker(notes)
 

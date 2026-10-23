@@ -1,0 +1,50 @@
+package webpush_test
+
+import (
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/elythia-network/elythia/internal/core/webpush"
+	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/testutil"
+)
+
+// push の payload は、NewNoteRepoPacker に渡した Packer で包む (#3790)。
+//
+// 作者の avatarUrl (投稿の本体) と添付ファイル (内部の resolver) の両方が、渡した
+// Packer の media proxy を通ることを確かめる。このパッケージのテストは既定の
+// Packer を配線しないので、既定の Packer を読むと生の URL になる。
+func TestNoteRepoPacker_UsesTheGivenPacker(t *testing.T) {
+	idGen, _ := id.NewGenerator("aidx")
+	repo := testutil.NewMockNoteRepository()
+	drive := testutil.NewMockDriveFileRepository()
+	const remote = "https://remote.example"
+	avatar := remote + "/avatar.png"
+	n := &model.Note{
+		ID: idGen.Generate(time.Now()), UserID: "u1",
+		Visibility: model.NoteVisibilityPublic, FileIDs: model.StringArray{"f1"},
+		User: &model.User{ID: "u1", Username: "alice", AvatarURL: &avatar},
+	}
+	repo.Notes[n.ID] = n
+	host, uri := "remote.example", remote+"/a.png"
+	drive.Files["f1"] = &model.DriveFile{
+		ID: "f1", Name: "a.png", Type: "image/png", URL: uri, URI: &uri, UserHost: &host, IsLink: true,
+	}
+	pk := entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
+		"https://local.example", "", []byte("secret"), false, true)})
+
+	out, ok := webpush.NewNoteRepoPacker(repo, idGen, nil, drive, pk).PackNoteByID(n.ID, "viewer")
+	require.True(t, ok)
+	user, _ := out["user"].(map[string]any)
+	assert.False(t, strings.HasPrefix(user["avatarUrl"].(string), remote), "avatarUrl: %v", user["avatarUrl"])
+	files, _ := out["files"].([]any)
+	require.Len(t, files, 1)
+	f, _ := files[0].(map[string]any)
+	assert.False(t, strings.HasPrefix(f["url"].(string), remote), "url: %v", f["url"])
+}

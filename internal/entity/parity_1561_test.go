@@ -20,7 +20,7 @@ func TestPackNote_ClippedCountRealValue(t *testing.T) {
 		Visibility: model.NoteVisibilityPublic, Reactions: datatypes.JSON([]byte("{}")),
 		ClippedCount: 5,
 	}
-	packed := PackNote(n, idGen)
+	packed := currentPacker().PackNote(n, idGen)
 	require.NotNil(t, packed.ClippedCount)
 	assert.Equal(t, 5, *packed.ClippedCount)
 }
@@ -35,12 +35,12 @@ func TestPackNote_VisibleUserIDsSpecifiedOnly(t *testing.T) {
 		}
 	}
 	// specified: 出力される
-	spec := PackNote(base(model.NoteVisibilitySpecified), idGen)
+	spec := currentPacker().PackNote(base(model.NoteVisibilitySpecified), idGen)
 	assert.Equal(t, []string{"a", "b"}, spec.VisibleUserIDs)
 	bs, _ := json.Marshal(spec)
 	assert.Contains(t, string(bs), `"visibleUserIds":["a","b"]`)
 	// public: VisibleUserIDs が DB にあっても省略
-	pub := PackNote(base(model.NoteVisibilityPublic), idGen)
+	pub := currentPacker().PackNote(base(model.NoteVisibilityPublic), idGen)
 	assert.Nil(t, pub.VisibleUserIDs)
 	bp, _ := json.Marshal(pub)
 	assert.NotContains(t, string(bp), `"visibleUserIds"`)
@@ -56,7 +56,7 @@ func TestPackNote_NamePrefixedText(t *testing.T) {
 		ID: idGen.Generate(time.Now()), UserID: "u1", Visibility: model.NoteVisibilityPublic,
 		Reactions: datatypes.JSON([]byte("{}")), Name: &name, Text: &body, URL: &url,
 	}
-	got := PackNote(n, idGen)
+	got := currentPacker().PackNote(n, idGen)
 	require.NotNil(t, got.Text)
 	assert.Equal(t, "【Page Title】\nhello body\n\nhttps://remote.example/pages/x", *got.Text)
 
@@ -66,7 +66,7 @@ func TestPackNote_NamePrefixedText(t *testing.T) {
 		ID: idGen.Generate(time.Now()), UserID: "u1", Visibility: model.NoteVisibilityPublic,
 		Reactions: datatypes.JSON([]byte("{}")), Name: &name, URI: &uri,
 	}
-	got2 := PackNote(n2, idGen)
+	got2 := currentPacker().PackNote(n2, idGen)
 	require.NotNil(t, got2.Text)
 	assert.Equal(t, "【Page Title】\n\n\nhttps://remote.example/notes/y", *got2.Text)
 
@@ -75,7 +75,7 @@ func TestPackNote_NamePrefixedText(t *testing.T) {
 		ID: idGen.Generate(time.Now()), UserID: "u1", Visibility: model.NoteVisibilityPublic,
 		Reactions: datatypes.JSON([]byte("{}")), Name: &name, Text: &body,
 	}
-	assert.Equal(t, body, *PackNote(n3, idGen).Text)
+	assert.Equal(t, body, *currentPacker().PackNote(n3, idGen).Text)
 }
 
 // #1561 [MEDIUM] channel.userId が出力される (nil なら null)。
@@ -102,7 +102,7 @@ func TestPackNote_HasPollAndMentionsOmit(t *testing.T) {
 		ID: idGen.Generate(time.Now()), UserID: "u1", Visibility: model.NoteVisibilityPublic,
 		Reactions: datatypes.JSON([]byte("{}")), HasPoll: true, Mentions: []string{"m1"},
 	}
-	bp, _ := json.Marshal(PackNote(withPoll, idGen))
+	bp, _ := json.Marshal(currentPacker().PackNote(withPoll, idGen))
 	assert.Contains(t, string(bp), `"hasPoll":true`)
 	assert.Contains(t, string(bp), `"mentions":["m1"]`)
 	// hasPoll=false + mentions 空 → 省略
@@ -110,7 +110,7 @@ func TestPackNote_HasPollAndMentionsOmit(t *testing.T) {
 		ID: idGen.Generate(time.Now()), UserID: "u1", Visibility: model.NoteVisibilityPublic,
 		Reactions: datatypes.JSON([]byte("{}")),
 	}
-	bn, _ := json.Marshal(PackNote(plain, idGen))
+	bn, _ := json.Marshal(currentPacker().PackNote(plain, idGen))
 	assert.NotContains(t, string(bn), `"hasPoll"`)
 	assert.NotContains(t, string(bn), `"mentions"`)
 }
@@ -126,7 +126,7 @@ func TestPackNote_EmojisRemoteOnly(t *testing.T) {
 		ID: idGen.Generate(time.Now()), UserID: "u1", Visibility: model.NoteVisibilityPublic,
 		Reactions: datatypes.JSON([]byte("{}")),
 	}
-	lp := PackNote(local, idGen)
+	lp := currentPacker().PackNote(local, idGen)
 	assert.Nil(t, lp.Emojis, "local note omits emojis")
 	// top-level の emojis key が無いことを確認 (user.emojis の null と混同しない
 	// よう unmarshal して top-level key の有無で判定)。
@@ -140,7 +140,7 @@ func TestPackNote_EmojisRemoteOnly(t *testing.T) {
 		ID: idGen.Generate(time.Now()), UserID: "u2", UserHost: &remote,
 		Visibility: model.NoteVisibilityPublic, Reactions: datatypes.JSON([]byte("{}")),
 	}
-	rp := PackNote(rmt, idGen)
+	rp := currentPacker().PackNote(rmt, idGen)
 	require.NotNil(t, rp.Emojis, "remote note always carries emojis object")
 	assert.Empty(t, *rp.Emojis)
 	var rm map[string]json.RawMessage
@@ -164,7 +164,7 @@ func TestPackNote_ReactionAndUserPairCacheOmittedInREST(t *testing.T) {
 		Reactions:                datatypes.JSON([]byte("{}")),
 		ReactionAndUserPairCache: []string{"userA/👍"},
 	}
-	got := PackNote(n, idGen)
+	got := currentPacker().PackNote(n, idGen)
 	assert.Nil(t, got.ReactionAndUserPairCache, "REST pack omits reactionAndUserPairCache")
 	var m map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(mustJSON(t, got), &m))

@@ -104,6 +104,9 @@ type Handler struct {
 	// 匿名の閲覧者への ugcVisibilityForVisitor が効かないので、criticalWiring が
 	// 起動時に検査する。
 	noteHider *notehide.Hider
+	// entityPacker は投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3790)。組み立てで渡し、既定の Packer を読まない。
+	entityPacker *entity.Packer
 }
 
 // SetNoteHider wires the Hider that applies the per-viewer hideNote gate to
@@ -113,6 +116,14 @@ func (h *Handler) SetNoteHider(n *notehide.Hider) { h.noteHider = n }
 // HasNoteHider reports whether SetNoteHider received a Hider. 未配線だと
 // 匿名の閲覧者に ugcVisibilityForVisitor が効かない (fail-open)。
 func (h *Handler) HasNoteHider() bool { return h.noteHider != nil }
+
+// SetEntityPacker wires the Packer this handler packs entities with (#3790).
+func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs. 無いとリモートのメディアの URL を生のまま返し、閲覧者の
+// IP がリモートへ漏れる。
+func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
 
 // SetFollowingRepo wires the repository used by the followers/following AP
 // collection endpoints (#1877)。
@@ -753,7 +764,7 @@ func (h *Handler) packNoteForAPI(viewer *model.User, n *model.Note) entity.NoteE
 	// 欠くと followers/specified note を引用/返信した note 経由で非可視本文が ap/show
 	// から漏れる IDOR になる。ap/show は RequireAuth なので viewer は通常非 nil だが、
 	// nil でも notehide が fail-closed (followers/specified embed を hide) する。
-	arr := []entity.NoteEntity{entity.PackNote(n, h.idGen)}
+	arr := []entity.NoteEntity{h.entityPacker.PackNote(n, h.idGen)}
 	h.noteHider.HideEmbeds(viewer, arr)
 	return arr[0]
 }

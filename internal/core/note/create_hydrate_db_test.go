@@ -46,7 +46,7 @@ func comparableNote(t *testing.T, n *model.Note, idGen id.Generator) map[string]
 	out := map[string]any{}
 	// 作者は packed の user (UserLite) で比べる。行そのもの (notesCount /
 	// updatedAt) は作成の後に非同期で増えるので、読み直した時刻で変わる。
-	for k, v := range map[string]any{"row": row, "packed": entity.PackNote(n, idGen)} {
+	for k, v := range map[string]any{"row": row, "packed": (*entity.Packer)(nil).PackNote(n, idGen)} {
 		raw, err := json.Marshal(v)
 		require.NoError(t, err)
 		var m any

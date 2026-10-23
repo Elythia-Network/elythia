@@ -38,7 +38,7 @@ func TestPackNote_Basic(t *testing.T) {
 		Tags:       model.StringArray{"tag1"},
 	}
 
-	entity := PackNote(note, idGen)
+	entity := currentPacker().PackNote(note, idGen)
 
 	assert.Equal(t, noteID, entity.ID)
 	assert.Equal(t, "user1", entity.UserID)
@@ -65,7 +65,7 @@ func TestPackNote_NilArrays(t *testing.T) {
 		Reactions:  datatypes.JSON([]byte("{}")),
 	}
 
-	entity := PackNote(note, idGen)
+	entity := currentPacker().PackNote(note, idGen)
 
 	// FileIDsはnilでも空スライスに変換、Tagsはomitemptyでnil維持
 	assert.NotNil(t, entity.FileIDs)
@@ -89,7 +89,7 @@ func TestPackNote_WithUser(t *testing.T) {
 		},
 	}
 
-	entity := PackNote(note, idGen)
+	entity := currentPacker().PackNote(note, idGen)
 
 	assert.Equal(t, "user1", entity.User.ID)
 	assert.Equal(t, "testuser", entity.User.Username)
@@ -106,7 +106,7 @@ func TestPackNote_ReactionCount(t *testing.T) {
 		Reactions:  datatypes.JSON([]byte(`{"👍":3,"❤️":2,"🎉":1}`)),
 	}
 
-	entity := PackNote(note, idGen)
+	entity := currentPacker().PackNote(note, idGen)
 	assert.Equal(t, 6, entity.ReactionCount)
 }
 
@@ -121,7 +121,7 @@ func TestPackNote_ReactionCount_Empty(t *testing.T) {
 		Reactions:  datatypes.JSON([]byte("{}")),
 	}
 
-	entity := PackNote(note, idGen)
+	entity := currentPacker().PackNote(note, idGen)
 	assert.Equal(t, 0, entity.ReactionCount)
 }
 
@@ -135,7 +135,7 @@ func TestPackNote_ReactionCount_NilReactions(t *testing.T) {
 		Visibility: model.NoteVisibilityPublic,
 	}
 
-	entity := PackNote(note, idGen)
+	entity := currentPacker().PackNote(note, idGen)
 	assert.Equal(t, 0, entity.ReactionCount)
 }
 
@@ -150,7 +150,7 @@ func TestPackNote_ReactionCount_InvalidJSON(t *testing.T) {
 		Reactions:  datatypes.JSON([]byte("invalid")),
 	}
 
-	entity := PackNote(note, idGen)
+	entity := currentPacker().PackNote(note, idGen)
 	assert.Equal(t, 0, entity.ReactionCount)
 }
 
@@ -168,7 +168,7 @@ func TestPackNote_VisibleUserIDs_Mentions_HasPoll(t *testing.T) {
 		HasPoll:        true,
 	}
 
-	entity := PackNote(note, idGen)
+	entity := currentPacker().PackNote(note, idGen)
 
 	assert.Equal(t, []string{"user2", "user3"}, entity.VisibleUserIDs)
 	assert.Equal(t, []string{"user2"}, entity.Mentions)
@@ -186,7 +186,7 @@ func TestPackNote_NilVisibleUserIDs_Mentions(t *testing.T) {
 		Reactions:  datatypes.JSON([]byte("{}")),
 	}
 
-	entity := PackNote(note, idGen)
+	entity := currentPacker().PackNote(note, idGen)
 
 	// #1561: public note では visibleUserIds は省略 (specified 限定) / mentions は
 	// 空なら省略 / hasPoll は false なら省略 → いずれも nil で omitempty が落とす。
@@ -237,7 +237,7 @@ func TestPackNote_ReactionsKeyNormalized(t *testing.T) {
 		Reactions:  datatypes.JSON([]byte(`{":lifelog:":1,":lifelog@.:" :1,"👍":3}`)),
 	}
 
-	e := PackNote(note, idGen)
+	e := currentPacker().PackNote(note, idGen)
 
 	var reactions map[string]float64
 	require.NoError(t, json.Unmarshal(e.Reactions, &reactions))
@@ -263,7 +263,7 @@ func TestPackNote_ReactionsLegacyTextAlias(t *testing.T) {
 		Reactions:  datatypes.JSON([]byte(`{"like":2,"👍":3,"love":1}`)),
 	}
 
-	e := PackNote(note, idGen)
+	e := currentPacker().PackNote(note, idGen)
 
 	var reactions map[string]float64
 	require.NoError(t, json.Unmarshal(e.Reactions, &reactions))
@@ -293,7 +293,7 @@ func TestPackNote_ReactionCount_SummedBeforeNormalization(t *testing.T) {
 		Reactions:  datatypes.JSON([]byte(`{"like":1.5,"👍":1.5}`)),
 	}
 
-	e := PackNote(note, idGen)
+	e := currentPacker().PackNote(note, idGen)
 	assert.Equal(t, 2, e.ReactionCount, "合計は正規化前の各値を int に落として足す")
 
 	var reactions map[string]float64
@@ -382,7 +382,7 @@ func TestPackNote_WithRenoteAndReply(t *testing.T) {
 		},
 	}
 
-	e := PackNote(note, idGen)
+	e := currentPacker().PackNote(note, idGen)
 
 	require.NotNil(t, e.Renote)
 	assert.Equal(t, renoteID, e.Renote.ID)
@@ -448,7 +448,7 @@ func TestPackNote_NestedRenoteEmbedPacksQuoteTarget(t *testing.T) {
 	top.Renote = quote
 	top.Reply = reply
 
-	e := PackNote(top, idGen)
+	e := currentPacker().PackNote(top, idGen)
 
 	// LV1: 引用投稿
 	require.NotNil(t, e.Renote, "top.renote (quote) should pack")
@@ -507,7 +507,7 @@ func TestPackNote_ReplyEmbedDetailFalse(t *testing.T) {
 		},
 	}
 
-	e := PackNote(note, idGen)
+	e := currentPacker().PackNote(note, idGen)
 
 	// top-level (detail:true): clippedCount / poll を出す。
 	require.NotNil(t, e.ClippedCount)
@@ -574,7 +574,7 @@ func TestPackNotes_EmbeddedRenoteHasInstanceAndEmoji(t *testing.T) {
 		remoteHost: {{Name: "wave", PublicURL: "https://remote.example/emoji/wave.png"}},
 	}}
 
-	out := PackNotes(context.Background(), []*model.Note{note}, idGen, instLookup, emojiLookup, nil)
+	out := currentPacker().PackNotes(context.Background(), []*model.Note{note}, idGen, instLookup, emojiLookup, nil)
 	require.Len(t, out, 1)
 	require.NotNil(t, out[0].Renote)
 	require.NotNil(t, out[0].Renote.User.Instance)
@@ -615,7 +615,7 @@ func TestPackNoteWithInstance_EmbeddedRenote(t *testing.T) {
 		remoteHost: {Host: remoteHost, Name: strPtr("Remote")},
 	}}
 
-	out := PackNoteWithInstance(context.Background(), note, idGen, instLookup, nil, nil)
+	out := currentPacker().PackNoteWithInstance(context.Background(), note, idGen, instLookup, nil, nil)
 	require.NotNil(t, out.Renote)
 	require.NotNil(t, out.Renote.User.Instance)
 	assert.Equal(t, strPtr("Remote"), out.Renote.User.Instance.Name)
@@ -661,7 +661,7 @@ func TestPackNotes_MergesBufferedReactions(t *testing.T) {
 		noteID: {":yikes@" + remoteHost + ":": 1},
 	}}
 
-	out := PackNotes(context.Background(), []*model.Note{note}, idGen, nil, emojiLookup, reader)
+	out := currentPacker().PackNotes(context.Background(), []*model.Note{note}, idGen, nil, emojiLookup, reader)
 	require.Len(t, out, 1)
 	// merged reactions JSON は両方のキーを含む
 	var got map[string]int
@@ -701,7 +701,7 @@ func TestPackNotes_SharedRenote_NoDoubleMerge(t *testing.T) {
 		renoteID: {":base@.:": 2},
 	}}
 
-	out := PackNotes(context.Background(), []*model.Note{n1, n2}, idGen, nil, nil, reader)
+	out := currentPacker().PackNotes(context.Background(), []*model.Note{n1, n2}, idGen, nil, nil, reader)
 	require.Len(t, out, 2)
 	// 二重加算なら 1+2+2=5 になる。正しくは 1+2=3 (1 回のみ適用)。
 	for _, e := range out {
@@ -728,7 +728,7 @@ func TestPackNotes_BufferedNegativeDelta_RemovesKey(t *testing.T) {
 		noteID: {":foo@.:": -1},
 	}}
 
-	out := PackNotes(context.Background(), []*model.Note{note}, idGen, nil, nil, reader)
+	out := currentPacker().PackNotes(context.Background(), []*model.Note{note}, idGen, nil, nil, reader)
 	require.Len(t, out, 1)
 	var got map[string]int
 	if len(out[0].Reactions) > 0 {
@@ -750,7 +750,7 @@ func TestPackNotes_NilReader_NoMerge(t *testing.T) {
 		Reactions:  datatypes.JSON([]byte(`{":foo@.:": 3}`)),
 		User:       &model.User{ID: "user1", Username: "alice", AvatarDecorations: datatypes.JSON([]byte("[]"))},
 	}
-	out := PackNotes(context.Background(), []*model.Note{note}, idGen, nil, nil, nil)
+	out := currentPacker().PackNotes(context.Background(), []*model.Note{note}, idGen, nil, nil, nil)
 	require.Len(t, out, 1)
 	assert.Equal(t, 3, out[0].ReactionCount)
 }
@@ -769,7 +769,7 @@ func TestPackNotes_ReaderError_FallsBackToDB(t *testing.T) {
 	}
 	reader := &stubBufferedReader{err: errors.New("redis down")}
 
-	out := PackNotes(context.Background(), []*model.Note{note}, idGen, nil, nil, reader)
+	out := currentPacker().PackNotes(context.Background(), []*model.Note{note}, idGen, nil, nil, reader)
 	require.Len(t, out, 1)
 	assert.Equal(t, 2, out[0].ReactionCount, "reader error 時は DB 値で続行")
 }
@@ -800,7 +800,7 @@ func TestPackNotes_MergesBufferedReactions_OnEmbeddedRenote(t *testing.T) {
 		renoteID: {":heart@.:": 5},
 	}}
 
-	out := PackNotes(context.Background(), []*model.Note{note}, idGen, nil, nil, reader)
+	out := currentPacker().PackNotes(context.Background(), []*model.Note{note}, idGen, nil, nil, reader)
 	require.Len(t, out, 1)
 	require.NotNil(t, out[0].Renote)
 	assert.Equal(t, 5, out[0].Renote.ReactionCount)
@@ -832,7 +832,7 @@ func TestPackNotes_MergesBufferedReactions_OnEmbeddedReply(t *testing.T) {
 		replyID: {":heart@.:": 3},
 	}}
 
-	out := PackNotes(context.Background(), []*model.Note{note}, idGen, nil, nil, reader)
+	out := currentPacker().PackNotes(context.Background(), []*model.Note{note}, idGen, nil, nil, reader)
 	require.Len(t, out, 1)
 	require.NotNil(t, out[0].Reply)
 	assert.Equal(t, 4, out[0].Reply.ReactionCount, "embed reply の DB(1) + buffered(3) が merge される")
@@ -855,7 +855,7 @@ func TestPackNote_CreatedAtParsing(t *testing.T) {
 		Reactions:  datatypes.JSON([]byte("{}")),
 	}
 
-	entity := PackNote(note, idGen)
+	entity := currentPacker().PackNote(note, idGen)
 
 	// createdAtはISO 8601形式
 	assert.Contains(t, entity.CreatedAt, "T")

@@ -13,7 +13,8 @@ import (
 // いた。newServer が組み立てのたびにプロセス全体の状態を書き換えるのをやめる
 // ため、依存を 1 つの値にまとめる (#3788、#3666 の段階 (5))。(5-5) では公開
 // 関数を Packer のメソッドにし、パッケージ関数は既定の Packer へ委ねる。
-// 呼び出し側は (5-6) 以降で系統ごとに Packer を受け取る形へ移す。
+// 呼び出し側は系統ごとに Packer を受け取る形へ移す。投稿の系統は (5-6) で移した
+// (#3790)。
 //
 // nil の *Packer と、依存が欠けた Packer は、それぞれの依存が未配線のときと
 // 同じに動く。**mediaURL が無いとメディアの URL を生のまま出す** (閲覧者の IP が
@@ -102,10 +103,17 @@ func updateDefaultPacker(fn func(*Packer)) {
 	defaultPacker.Store(&next)
 }
 
-// pk returns the Packer a NoteFieldResolver packs with. (5-6) で resolver に
-// Packer を持たせるまでは、既定の Packer を使う。
-func (r *NoteFieldResolver) pk() *Packer {
-	return currentPacker()
+// HasMediaURL reports whether pkr rewrites media URLs through the media
+// proxy. false means every remote media URL goes out raw and the viewer's
+// browser fetches it from the remote server directly, so the router checks
+// it at startup (criticalWiring).
+//
+// 見るのは mediaURL だけ。canChat や silenced などが欠けても true を返す。今は
+// router が 1 組の依存から Packer を作るので、mediaURL があれば他も揃っている。
+// 欠けたときに閲覧者の IP が漏れる側に倒れるのは mediaURL だけなので、これを
+// 起動時に止める。
+func (pkr *Packer) HasMediaURL() bool {
+	return pkr != nil && pkr.mediaURL != nil
 }
 
 // get returns the dependencies of pkr, or none for a nil Packer.

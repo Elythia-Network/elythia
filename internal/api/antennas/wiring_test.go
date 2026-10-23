@@ -16,7 +16,7 @@ func TestOptionalSetters(t *testing.T) {
 	h.SetUserRepo(testutil.NewMockUserRepository())
 	assert.NotNil(t, h.userRepo)
 
-	h.SetNoteFieldResolver(entity.NewNoteFieldResolver(nil, nil, nil, nil, nil, nil))
+	h.SetNoteFieldResolver(entity.NewNoteFieldResolver(nil, nil, nil, nil, nil, nil, nil))
 	assert.NotNil(t, h.fieldRes)
 
 	h.SetInstanceRepo(testutil.NewMockInstanceRepository())

@@ -235,7 +235,9 @@ type CreateService struct {
 	pollRepo           repository.PollRepository
 	followingRepo      repository.FollowingRepository
 	idGen              id.Generator
-	fanoutHook         TimelineFanoutHook
+	// entityPacker は main stream へ流す投稿を包む依存を持つ (#3790)。
+	entityPacker *entity.Packer
+	fanoutHook   TimelineFanoutHook
 	// materializer はリレー由来で DB に無い返信 / renote 対象を昇格させる
 	// (#2332)。note.replyId / renoteId は note への外部キーなので、行が無いと
 	// INSERT が失敗する。
@@ -457,6 +459,14 @@ func (s *CreateService) SetIndexHook(h IndexHook) {
 func (s *CreateService) SetChartHook(h ChartHook) {
 	s.chartHook = h
 }
+
+// SetEntityPacker wires the Packer the notes published to the main stream are
+// packed with (#3790).
+func (s *CreateService) SetEntityPacker(p *entity.Packer) { s.entityPacker = p }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs.
+func (s *CreateService) HasEntityPacker() bool { return s.entityPacker.HasMediaURL() }
 
 // SetWebhookHook attaches a WebhookHook invoked after note creation so that
 // user webhooks subscribed to note / reply / renote / mention events can fire.
@@ -1155,7 +1165,7 @@ func (s *CreateService) updateFeaturedOnRenote(target *model.Note) {
 // 同一userに対して複数イベント(例: 相手へのリプライかつメンション)が
 // 並列で届きうる(frontendはイベント種別ごとに意味付けるため)。
 //
-// 旧実装は target が note を見られるか検証せずに `entity.PackNote` の full
+// 旧実装は target が note を見られるか検証せずに `(*entity.Packer).PackNote` の full
 // payload (Text / CW / Files / Renote / Reply embed) を main stream に流して
 // いた (#1472)。followers visibility note を非フォロワー reply/renote/mention
 // target に届けたり、specified visibility note を visibleUserIDs 外の
@@ -1166,7 +1176,7 @@ func (s *CreateService) publishNoteMainEvents(note *model.Note, author *model.Us
 	if s.mainStreamPublisher == nil {
 		return
 	}
-	packed := entity.PackNote(note, s.idGen)
+	packed := s.entityPacker.PackNote(note, s.idGen)
 	// reply: reply先がlocal (UserHost == nil) かつ自分自身へのリプライで
 	// ない場合にemit。visibility gate (#1472): reply target が note を見ら
 	// れないとき (= 非 follower や visibleUserIds 外) は本文 leak になるので

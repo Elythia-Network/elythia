@@ -19,7 +19,7 @@ func TestPackNote_CarriesURL(t *testing.T) {
 	idGen := newTestIDGen(t)
 	uri := "https://remote.example/users/alice/statuses/1"
 	url := "https://remote.example/@alice/1"
-	e := PackNote(&model.Note{
+	e := currentPacker().PackNote(&model.Note{
 		ID:         idGen.Generate(time.Now()),
 		UserID:     "alice",
 		Visibility: model.NoteVisibilityPublic,
@@ -40,7 +40,7 @@ func TestPackNote_CarriesURL(t *testing.T) {
 // ない。upstream も `url: note.url ?? undefined` なので同じ形になる (#2729)。
 func TestPackNote_OmitsURLWhenAbsent(t *testing.T) {
 	idGen := newTestIDGen(t)
-	e := PackNote(&model.Note{
+	e := currentPacker().PackNote(&model.Note{
 		ID:         idGen.Generate(time.Now()),
 		UserID:     "alice",
 		Visibility: model.NoteVisibilityPublic,

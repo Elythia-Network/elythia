@@ -380,7 +380,7 @@ func (h *Handler) Favorites(c echo.Context) error {
 			notes = append(notes, f.Note)
 		}
 	}
-	packed := entity.PackNotes(c.Request().Context(), notes, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
+	packed := h.entityPacker.PackNotes(c.Request().Context(), notes, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
 	// /api/i/favorites は認証 path なので u が viewer。pinned notes と同じく
 	// 自分の myReaction / Channel / Files を埋める (#426)。
 	h.fieldRes.Apply(packed, u)

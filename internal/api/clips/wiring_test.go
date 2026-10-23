@@ -17,7 +17,7 @@ func TestOptionalSetters(t *testing.T) {
 
 	assert.Nil(t, h.instanceLookup(), "未配線なら lookup は nil")
 
-	h.SetNoteFieldResolver(entity.NewNoteFieldResolver(nil, nil, nil, nil, nil, nil))
+	h.SetNoteFieldResolver(entity.NewNoteFieldResolver(nil, nil, nil, nil, nil, nil, nil))
 	assert.NotNil(t, h.fieldRes)
 
 	h.SetInstanceRepo(testutil.NewMockInstanceRepository())

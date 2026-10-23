@@ -1,8 +1,6 @@
 package entity
 
 import (
-	"context"
-
 	"github.com/elythia-network/elythia/internal/core/notification"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
@@ -64,21 +62,6 @@ func PackFollowing(
 // PackMeDetailed is (*Packer).PackMeDetailed on the default Packer.
 func PackMeDetailed(u *model.User, profile *model.UserProfile, idGens ...id.Generator) MeDetailed {
 	return currentPacker().PackMeDetailed(u, profile, idGens...)
-}
-
-// PackNote is (*Packer).PackNote on the default Packer.
-func PackNote(n *model.Note, idGen id.Generator) NoteEntity {
-	return currentPacker().PackNote(n, idGen)
-}
-
-// PackNoteWithInstance is (*Packer).PackNoteWithInstance on the default Packer.
-func PackNoteWithInstance(ctx context.Context, n *model.Note, idGen id.Generator, instLookup InstanceLookup, emojiLookup EmojiLookup, reactionReader BufferedReactionsReader) NoteEntity {
-	return currentPacker().PackNoteWithInstance(ctx, n, idGen, instLookup, emojiLookup, reactionReader)
-}
-
-// PackNotes is (*Packer).PackNotes on the default Packer.
-func PackNotes(ctx context.Context, notes []*model.Note, idGen id.Generator, instLookup InstanceLookup, emojiLookup EmojiLookup, reactionReader BufferedReactionsReader) []NoteEntity {
-	return currentPacker().PackNotes(ctx, notes, idGen, instLookup, emojiLookup, reactionReader)
 }
 
 // PackNotification is (*Packer).PackNotification on the default Packer.

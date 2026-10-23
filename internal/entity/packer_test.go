@@ -1,6 +1,7 @@
 package entity
 
 import (
+	"encoding/json"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -104,6 +105,78 @@ func TestPacker_NilBehavesAsUnwired(t *testing.T) {
 	}
 }
 
+// **NoteFieldResolver は、渡された Packer で添付ファイルを包む (#3790)。**
+//
+// 以前は既定の Packer を読んでいたので、明示した Packer で投稿を包んでも、
+// 埋め込んだ投稿のファイルの URL だけ既定の Packer の mediaURL になった。既定の
+// Packer を空にして、渡した Packer の proxy が本体・renote・reply のすべての
+// ファイルに付くことを、深い経路と浅い経路の両方で確かめる。
+func TestNoteFieldResolver_PacksFilesWithItsPacker(t *testing.T) {
+	isolateDefaultPacker(t)
+	remoteFile := func(id string) *model.DriveFile {
+		return &model.DriveFile{
+			ID: id, Type: "image/png", URL: "https://" + remoteHost + "/" + id + ".png",
+			URI: sp("https://" + remoteHost + "/" + id + ".png"), UserHost: sp(remoteHost), IsLink: true,
+		}
+	}
+	files := &stubDriveFileLookup{files: map[string]*model.DriveFile{
+		"f1": remoteFile("f1"), "f2": remoteFile("f2"), "f3": remoteFile("f3"),
+	}}
+	pk := NewPacker(PackerDeps{MediaURL: internalCtx()})
+	r := NewNoteFieldResolver(pk, files, nil, nil, nil, nil, makeIDGen(t))
+	notes := func() []NoteEntity {
+		return []NoteEntity{{
+			ID:      "n1",
+			FileIDs: model.StringArray{"f1"},
+			Renote:  &NoteEntity{ID: "n2", FileIDs: model.StringArray{"f2"}},
+			Reply:   &NoteEntity{ID: "n3", FileIDs: model.StringArray{"f3"}},
+		}}
+	}
+	check := func(t *testing.T, n []NoteEntity) {
+		t.Helper()
+		for _, e := range []*NoteEntity{&n[0], n[0].Renote, n[0].Reply} {
+			if len(e.Files) != 1 {
+				t.Fatalf("%s: files = %d", e.ID, len(e.Files))
+			}
+			b, err := json.Marshal(e.Files[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got struct {
+				URL string `json:"url"`
+			}
+			if err := json.Unmarshal(b, &got); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.HasPrefix(got.URL, testInternalProxy) {
+				t.Errorf("%s: the file url must go through the resolver's Packer: %s", e.ID, got.URL)
+			}
+		}
+	}
+	t.Run("deep", func(t *testing.T) {
+		n := notes()
+		r.ResolveFiles(n)
+		check(t, n)
+	})
+	t.Run("shallow", func(t *testing.T) {
+		n := notes()
+		r.ResolveFilesShallow(n)
+		check(t, n)
+	})
+}
+
+// HasMediaURL は mediaURL を持つ Packer だけ true を返す。criticalWiring が
+// これで入れ忘れを見る。
+func TestPacker_HasMediaURL(t *testing.T) {
+	var nilPacker *Packer
+	if nilPacker.HasMediaURL() || NewPacker(PackerDeps{}).HasMediaURL() {
+		t.Error("a Packer without mediaURL must report false")
+	}
+	if !NewPacker(PackerDeps{MediaURL: internalCtx()}).HasMediaURL() {
+		t.Error("a Packer with mediaURL must report true")
+	}
+}
+
 type silencedByID map[string]bool
 
 func (s silencedByID) IsSilenced(userID string) bool { return s[userID] }
@@ -128,8 +201,8 @@ func TestCurrentPackerIsOnlyReadByTheDelegatingFuncs(t *testing.T) {
 			wrappers[fd.Name.Name] = true
 		}
 	}
-	// 抽出が空振りしていないこと (薄い関数は 27 個)。
-	if len(wrappers) < 27 {
+	// 抽出が空振りしていないこと (薄い関数は 24 個。#3790 で投稿の 3 つを消した)。
+	if len(wrappers) < 24 {
 		t.Fatalf("found only %d delegating funcs; the scan is broken", len(wrappers))
 	}
 	files, err := filepath.Glob("*.go")
@@ -166,7 +239,7 @@ func TestCurrentPackerIsOnlyReadByTheDelegatingFuncs(t *testing.T) {
 			return true
 		})
 	}
-	if seen < 27 {
+	if seen < 24 {
 		t.Errorf("found only %d currentPacker() calls; the scan is broken", seen)
 	}
 }

@@ -168,7 +168,7 @@ func TestNotePublisher_FieldResolverPopulatesFiles(t *testing.T) {
 		Type: "image/png",
 		URL:  "https://r/remote.png",
 	}
-	resolver := entity.NewNoteFieldResolver(driveRepo, nil, nil, nil, nil, idGen)
+	resolver := entity.NewNoteFieldResolver(nil, driveRepo, nil, nil, nil, nil, idGen)
 	np.SetFieldResolver(resolver)
 
 	n := &model.Note{
@@ -942,7 +942,7 @@ func TestNotificationPublisher_FieldResolverPopulatesNoteFiles(t *testing.T) {
 		}},
 		idGen,
 	)
-	np.SetFieldResolver(entity.NewNoteFieldResolver(driveRepo, nil, nil, nil, nil, idGen))
+	np.SetFieldResolver(entity.NewNoteFieldResolver(nil, driveRepo, nil, nil, nil, nil, idGen))
 
 	np.PublishNotification("alice", &corenotification.Notification{
 		ID:         idGen.Generate(time.Now()),
@@ -981,7 +981,7 @@ func TestNotificationPublisher_ResolvesViewerFieldsForNotifiee(t *testing.T) {
 		}},
 		idGen,
 	)
-	np.SetFieldResolver(entity.NewNoteFieldResolver(nil, nil, nil, reactionRepo, nil, idGen))
+	np.SetFieldResolver(entity.NewNoteFieldResolver(nil, nil, nil, nil, reactionRepo, nil, idGen))
 
 	np.PublishNotification("alice", &corenotification.Notification{
 		ID:         idGen.Generate(time.Now()),
