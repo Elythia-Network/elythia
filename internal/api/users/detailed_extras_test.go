@@ -42,7 +42,7 @@ func TestFillDetailedExtras_PinnedAndMoveTargets(t *testing.T) {
 	profile := &model.UserProfile{UserID: owner.ID, PinnedPageID: &pageID}
 	h.SetPageRepo(&stubPageRepoForPin{page: &model.Page{ID: pageID, Title: "page", UserID: owner.ID}})
 
-	d := entity.PackUserDetailed(owner, profile, h.idGen)
+	d := (*entity.Packer)(nil).PackUserDetailed(owner, profile, h.idGen)
 	h.FillDetailedExtras(context.Background(), &model.User{ID: "viewer"}, owner, profile, &d)
 
 	require.NotNil(t, d.MovedTo)
@@ -65,7 +65,7 @@ func TestFillDetailedExtras_PinnedAndMoveTargets(t *testing.T) {
 	followingRepo := testutil.NewMockFollowingRepository()
 	require.NoError(t, followingRepo.Create(&model.Following{ID: "f1", FollowerID: "follower", FolloweeID: owner.ID}))
 	h.SetFollowingRepo(followingRepo)
-	d = entity.PackUserDetailed(owner, profile, h.idGen)
+	d = (*entity.Packer)(nil).PackUserDetailed(owner, profile, h.idGen)
 	h.FillDetailedExtras(context.Background(), &model.User{ID: "follower"}, owner, profile, &d)
 	ids := make([]string, 0, len(d.PinnedNotes))
 	for _, n := range d.PinnedNotes {

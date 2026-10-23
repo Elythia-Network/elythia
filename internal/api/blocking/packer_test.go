@@ -38,7 +38,7 @@ func TestCreateDelete_UsePacker(t *testing.T) {
 	relations := userrelation.Repos{Blocking: blockingRepo}
 	h.SetRelationRepos(relations)
 	extras := &pinExtras{}
-	h.SetUserPacker(userpack.New(userpack.Lookups{Profiles: userRepo, Relations: relations, Extras: extras}, idGen))
+	h.SetUserPacker(userpack.New(nil, userpack.Lookups{Profiles: userRepo, Relations: relations, Extras: extras}, idGen))
 	addUser(userRepo, "alice")
 	addUser(userRepo, "bob")
 	userRepo.Profiles["bob"] = &model.UserProfile{UserID: "bob"}
@@ -74,7 +74,7 @@ func TestCreate_PackerFailsClosedWithoutProfile(t *testing.T) {
 	h, userRepo := newHandler(t)
 	extras := &pinExtras{}
 	idGen, _ := id.NewGenerator("aidx")
-	h.SetUserPacker(userpack.New(userpack.Lookups{Profiles: userRepo, Extras: extras}, idGen))
+	h.SetUserPacker(userpack.New(nil, userpack.Lookups{Profiles: userRepo, Extras: extras}, idGen))
 	addUser(userRepo, "alice")
 	addUser(userRepo, "bob")
 	userRepo.Users["bob"].FollowersCount = 7
@@ -93,6 +93,6 @@ func TestCreate_PackerFailsClosedWithoutProfile(t *testing.T) {
 func TestHandler_HasUserPacker(t *testing.T) {
 	h, userRepo := newHandler(t)
 	assert.False(t, h.HasUserPacker())
-	h.SetUserPacker(userpack.New(userpack.Lookups{Profiles: userRepo}, nil))
+	h.SetUserPacker(userpack.New(nil, userpack.Lookups{Profiles: userRepo}, nil))
 	assert.True(t, h.HasUserPacker())
 }

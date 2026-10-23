@@ -186,8 +186,8 @@ type Handler struct {
 	// 匿名の閲覧者への ugcVisibilityForVisitor が効かないので、criticalWiring が
 	// 起動時に検査する。
 	noteHider *notehide.Hider
-	// entityPacker は投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
-	// 持つ (#3790)。組み立てで渡し、既定の Packer を読まない。
+	// entityPacker は利用者や投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3790、#3792)。組み立てで渡し、既定の Packer を読まない。
 	entityPacker *entity.Packer
 }
 
@@ -984,7 +984,7 @@ func (h *Handler) RegistryRemove(c echo.Context) error {
 // Me handles POST /api/i - returns the authenticated user's info.
 //
 // MeDetailed (UserLite + UserDetailed + 11 self-view + notification 3) は
-// entity.PackMeDetailed 経由で一括展開し、`/api/i` 固有の private field
+// (*entity.Packer).PackMeDetailed 経由で一括展開し、`/api/i` 固有の private field
 // (email / mutedWords / twoFactor* / clientData / role / unread 等) を
 // resp map に merge する design (#971)。MeDetailed packer に新 field が
 // 追加されたとき自動追従する。
@@ -1050,7 +1050,7 @@ func (h *Handler) me(c echo.Context, allowSecrets bool) error {
 	// marshalable な field が追加されても、(*json.UnsupportedTypeError) は
 	// CI の TestMe_PreservesMeDetailedFields で即検出される (= empty resp
 	// で field 不在 assertion が落ちる)。silent leak には繋がらない。
-	me := entity.PackMeDetailed(u, profile, h.idGen)
+	me := h.entityPacker.PackMeDetailed(u, profile, h.idGen)
 	// movedTo / alsoKnownAs を URI→ローカルID 解決して埋める (#1255)。self
 	// view も他 path と同じ shape にするため marshal 前に enrich する。
 	me.ResolveMoveTargets(u, h.resolveUserIDByURI)
@@ -1367,7 +1367,7 @@ func (h *Handler) rolePayload(userID string) (isAdmin bool, isMod bool, policies
 // clobbering the real badge/unread state. Going through fillUnreadFields keeps
 // those fields correct on every path (the same shape /api/i returns).
 func (h *Handler) meDetailedWithUnread(ctx context.Context, u *model.User, profile *model.UserProfile) map[string]any {
-	me := entity.PackMeDetailed(u, profile, h.idGen)
+	me := h.entityPacker.PackMeDetailed(u, profile, h.idGen)
 	b, _ := json.Marshal(me)
 	resp := map[string]any{}
 	_ = json.Unmarshal(b, &resp)

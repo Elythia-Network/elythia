@@ -145,7 +145,18 @@ type Service struct {
 	instanceStatsEnabled func() bool
 	// silentFollowRepo は「静かに成立させる」(#3466) で通したフォローを記録する。
 	silentFollowRepo repository.SilentFollowRepository
+	// entityPacker は利用者や投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3792)。組み立てで渡し、既定の Packer を読まない。
+	entityPacker *entity.Packer
 }
+
+// SetEntityPacker wires the Packer this service packs entities with (#3792).
+func (s *Service) SetEntityPacker(p *entity.Packer) { s.entityPacker = p }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
+// リモートへ漏れる。
+func (s *Service) HasEntityPacker() bool { return s.entityPacker.HasMediaURL() }
 
 // SilencedHostChecker reports whether a remote host is silenced.
 type SilencedHostChecker interface {
@@ -351,7 +362,7 @@ func (s *Service) publishFolloweeEvent(event string, follower, followee *model.U
 		return
 	}
 	if packed == nil {
-		s.mainStreamPublisher.PublishMainEvent(follower.ID, event, entity.PackUserForFollowStreamEvent(followee, isFollowing, false, s.idGen))
+		s.mainStreamPublisher.PublishMainEvent(follower.ID, event, s.entityPacker.PackUserForFollowStreamEvent(followee, isFollowing, false, s.idGen))
 		return
 	}
 	d, ok := packed()

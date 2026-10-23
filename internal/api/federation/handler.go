@@ -66,7 +66,18 @@ type Handler struct {
 	// selfPacker は閲覧者自身を MeDetailed へ昇格させ、/api/i の handler で未読・
 	// role・ピン留めを埋める (#3784)。未配線なら補完せずに昇格だけする。
 	selfPacker *meself.Packer
+	// entityPacker は利用者や投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3792)。組み立てで渡し、既定の Packer を読まない。
+	entityPacker *entity.Packer
 }
+
+// SetEntityPacker wires the Packer this handler packs entities with (#3792).
+func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
+// リモートへ漏れる。
+func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
 
 // SetSelfPacker wires the Packer that promotes the viewer's own entry into
 // MeDetailed. Unset promotes without the handler-only fields.

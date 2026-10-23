@@ -24,14 +24,14 @@ var errWiringCheckSkipped = errors.New("critical wiring check did not run: setup
 
 // criticalWiringCount is the number of entries setupRoutes is expected to
 // register. Guards against an entry being dropped from the table.
-const criticalWiringCount = 170
+const criticalWiringCount = 183
 
 // noteHiderMissingEffect is the effect shared by the per-handler noteHider
 // entries (#3786).
 const noteHiderMissingEffect = "未ログインの閲覧者に ugcVisibilityForVisitor='none' が効かず、投稿の中身が見える (fail-open)。フォロワー限定の埋め込みは隠す側に倒れる"
 
 // entityPackerMissingEffect is the effect shared by the per-component
-// entityPacker rows (#3790).
+// entityPacker rows (#3790, #3792).
 const entityPackerMissingEffect = "リモートのメディア (添付ファイル・アバター等) の URL を media proxy を通さずに返し、閲覧者の IP がリモートへ漏れる"
 
 // criticalWiring names one dependency whose absence degrades behaviour

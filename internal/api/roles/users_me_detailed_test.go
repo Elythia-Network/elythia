@@ -21,7 +21,7 @@ func TestUsers_ViewerRowIsMeDetailed(t *testing.T) {
 	userRepo.Users["viewer1"] = &model.User{ID: "viewer1", Username: "viewer1"}
 	require.NoError(t, assignRepo.Create(&model.RoleAssignment{ID: "ra1", RoleID: "r1", UserID: "alice"}))
 	require.NoError(t, assignRepo.Create(&model.RoleAssignment{ID: "ra2", RoleID: "r1", UserID: "viewer1"}))
-	h.SetListPacker(userpack.New(userpack.Lookups{Relations: userrelation.Repos{}}, nil))
+	h.SetListPacker(userpack.New(nil, userpack.Lookups{Relations: userrelation.Repos{}}, nil))
 	assert.True(t, h.HasListPacker())
 
 	vc := newCtxWithViewer(`{"roleId":"r1"}`, "viewer1")

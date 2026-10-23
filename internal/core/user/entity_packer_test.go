@@ -1,0 +1,25 @@
+package user
+
+import (
+	"testing"
+
+	"github.com/elythia-network/elythia/internal/entity"
+)
+
+// HasEntityPacker は mediaURL を持つ Packer を受け取ったときだけ true を返す
+// (#3792)。criticalWiring がこれで入れ忘れを見る。
+func TestService_HasEntityPacker(t *testing.T) {
+	h := &Service{}
+	if h.HasEntityPacker() {
+		t.Error("an unwired service must report false")
+	}
+	h.SetEntityPacker(entity.NewPacker(entity.PackerDeps{}))
+	if h.HasEntityPacker() {
+		t.Error("a Packer without mediaURL must report false")
+	}
+	h.SetEntityPacker(entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
+		"https://local.example", "", []byte("secret"), false, true)}))
+	if !h.HasEntityPacker() {
+		t.Error("a Packer with mediaURL must report true")
+	}
+}

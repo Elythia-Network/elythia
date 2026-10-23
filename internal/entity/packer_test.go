@@ -50,7 +50,7 @@ func TestPacker_UsesItsOwnDependencies(t *testing.T) {
 	}
 
 	// 既定の Packer は空のままなので、パッケージ関数は未配線の値を返す。
-	plain := PackUserDetailed(packerTestUser(), nil)
+	plain := currentPacker().PackUserDetailed(packerTestUser(), nil)
 	if !plain.CanChat || plain.IsSilenced || plain.AvatarURL != "https://"+remoteHost+"/a.png" {
 		t.Errorf("the default Packer must not see the explicit Packer's deps: %+v", plain)
 	}
@@ -64,12 +64,13 @@ func TestPacker_PackageFuncsDelegateToTheDefault(t *testing.T) {
 	SetCanChatLookup(canChat)
 	SetMediaURLContext(internalCtx())
 
-	viaFunc := PackUserDetailed(packerTestUser(), nil)
-	viaPacker := NewPacker(PackerDeps{CanChat: canChat, MediaURL: internalCtx()}).PackUserDetailed(packerTestUser(), nil)
-	if viaFunc.CanChat != viaPacker.CanChat || viaFunc.AvatarURL != viaPacker.AvatarURL {
+	// 利用者の詳細を包む関数は #3792 で消えたので、残る PackUserLite で見る。
+	viaFunc := PackUserLite(packerTestUser())
+	viaPacker := NewPacker(PackerDeps{CanChat: canChat, MediaURL: internalCtx()}).PackUserLite(packerTestUser())
+	if viaFunc.AvatarURL != viaPacker.AvatarURL {
 		t.Errorf("package func and Packer differ: %+v vs %+v", viaFunc, viaPacker)
 	}
-	if viaFunc.CanChat || !strings.HasPrefix(viaFunc.AvatarURL, testInternalProxy) {
+	if !strings.HasPrefix(viaFunc.AvatarURL, testInternalProxy) {
 		t.Errorf("package func must use the wired default Packer: %+v", viaFunc)
 	}
 }
@@ -81,13 +82,13 @@ func TestSetters_KeepTheOtherDependencies(t *testing.T) {
 	SetSilencedLookup(silencedByID{"u1": true})
 	SetMediaURLContext(internalCtx())
 
-	got := PackUserDetailed(packerTestUser(), nil)
+	got := currentPacker().PackUserDetailed(packerTestUser(), nil)
 	if got.CanChat || !got.IsSilenced || !strings.HasPrefix(got.AvatarURL, testInternalProxy) {
 		t.Errorf("a later Set* dropped an earlier dependency: %+v", got)
 	}
 
 	SetCanChatLookup(nil)
-	got = PackUserDetailed(packerTestUser(), nil)
+	got = currentPacker().PackUserDetailed(packerTestUser(), nil)
 	if !got.CanChat || !got.IsSilenced {
 		t.Errorf("Set*(nil) must clear only its own dependency: %+v", got)
 	}
@@ -201,8 +202,9 @@ func TestCurrentPackerIsOnlyReadByTheDelegatingFuncs(t *testing.T) {
 			wrappers[fd.Name.Name] = true
 		}
 	}
-	// 抽出が空振りしていないこと (薄い関数は 24 個。#3790 で投稿の 3 つを消した)。
-	if len(wrappers) < 24 {
+	// 抽出が空振りしていないこと (薄い関数は 21 個。#3790 で投稿の 3 つ、#3792 で利用者の
+	// 詳細の 3 つを消した)。
+	if len(wrappers) < 21 {
 		t.Fatalf("found only %d delegating funcs; the scan is broken", len(wrappers))
 	}
 	files, err := filepath.Glob("*.go")
@@ -239,7 +241,7 @@ func TestCurrentPackerIsOnlyReadByTheDelegatingFuncs(t *testing.T) {
 			return true
 		})
 	}
-	if seen < 24 {
+	if seen < 21 {
 		t.Errorf("found only %d currentPacker() calls; the scan is broken", seen)
 	}
 }

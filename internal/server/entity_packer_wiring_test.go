@@ -110,3 +110,60 @@ func TestNewServer_NotePackersUseTheWiredPacker(t *testing.T) {
 		assertProxied(t, ns[0].Renote.Files)
 	})
 }
+
+// **利用者の詳細を包む部品も、組み立てで渡された Packer で avatarUrl を media
+// proxy へ通す (#3792)。**
+//
+// 見る経路は users/show (users の handler)、i (i の handler の MeDetailed)、
+// blocking/create (router が作る共有の userpack.Packer)。上と同じく、組み立ての
+// 後に既定の Packer の mediaURL を外し、渡した Packer だけで proxy が付くことを
+// 確かめる。
+func TestNewServer_UserDetailedPackersUseTheWiredPacker(t *testing.T) {
+	db := serverIntegrationDB
+	if db == nil {
+		t.Skip("PostgreSQL unavailable")
+	}
+	const (
+		viewerID = "eppviewer3792aaa"
+		token    = "epptokenx3792aaa"
+		targetID = "epptarget3792aaa"
+		host     = "remote.example"
+	)
+	cleanupPluginAccountUsers(t, db, "epp_viewer")
+	cleanupPluginAccountUsers(t, db, "epp_target")
+	t.Cleanup(func() {
+		db.Exec(`DELETE FROM "blocking" WHERE "blockerId" = ?`, viewerID)
+	})
+	createLocalUser(t, db, viewerID, "epp_viewer", token, "epp-pass", false)
+	createLocalUser(t, db, targetID, "epp_target", "epptokenx3792bbb", "epp-pass", false)
+	for _, id := range []string{viewerID, targetID} {
+		avatarURL := "https://" + host + "/files/" + id + ".png"
+		require.NoError(t, db.Exec(`UPDATE "user" SET "avatarUrl" = ? WHERE "id" = ?`, avatarURL, id).Error)
+	}
+
+	srv := newServerWithConfig(t, func(*config.Config) {})
+	// 既定の Packer の mediaURL を外す。restoreProcessGlobals が後で nil に戻す。
+	entity.SetMediaURLContext(nil)
+
+	for _, tc := range []struct {
+		name string
+		path string
+		body map[string]any
+	}{
+		{"users/show", "/api/users/show", map[string]any{"userId": targetID}},
+		{"i", "/api/i", map[string]any{}},
+		{"blocking/create", "/api/blocking/create", map[string]any{"userId": targetID}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := postJSON(t, srv, tc.path, token, tc.body)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			var u struct {
+				AvatarURL string `json:"avatarUrl"`
+			}
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &u), rec.Body.String())
+			// 否定形だと空文字でも通るので、proxy の形であることを肯定形で見る。
+			assert.Contains(t, u.AvatarURL, "/avatar.webp?", "avatarUrl: %s", u.AvatarURL)
+			assert.NotContains(t, u.AvatarURL, "://"+host+"/", "avatarUrl: %s", u.AvatarURL)
+		})
+	}
+}

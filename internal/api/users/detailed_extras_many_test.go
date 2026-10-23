@@ -106,9 +106,9 @@ func TestFillDetailedExtrasMany_BatchesAndOrdersPins(t *testing.T) {
 	profB := &model.UserProfile{UserID: b.ID, PinnedPageID: &pageB}
 
 	ds := []entity.UserDetailed{
-		entity.PackUserDetailed(a, profA, h.idGen),
-		entity.PackUserDetailed(b, profB, h.idGen),
-		entity.PackUserDetailed(c, nil, h.idGen),
+		(*entity.Packer)(nil).PackUserDetailed(a, profA, h.idGen),
+		(*entity.Packer)(nil).PackUserDetailed(b, profB, h.idGen),
+		(*entity.Packer)(nil).PackUserDetailed(c, nil, h.idGen),
 	}
 	targets := []userpack.DetailTarget{
 		{User: a, Profile: profA, Detailed: &ds[0]},
@@ -150,7 +150,7 @@ func TestFillDetailedExtrasMany_AnonymousGetsNoPins(t *testing.T) {
 	h.SetPageRepo(&stubPageRepoForPin{page: &model.Page{ID: page, UserID: a.ID, Title: "a"}})
 	prof := &model.UserProfile{UserID: a.ID, PinnedPageID: &page}
 
-	many := entity.PackUserDetailed(a, prof, h.idGen)
+	many := (*entity.Packer)(nil).PackUserDetailed(a, prof, h.idGen)
 	h.FillDetailedExtrasMany(context.Background(), nil, []userpack.DetailTarget{{User: a, Profile: prof, Detailed: &many}})
 	assert.Empty(t, many.PinnedNoteIDs)
 	assert.Empty(t, many.PinnedNotes)
@@ -158,7 +158,7 @@ func TestFillDetailedExtrasMany_AnonymousGetsNoPins(t *testing.T) {
 	require.NotNil(t, many.MovedTo)
 	assert.Equal(t, "dest", *many.MovedTo)
 
-	single := entity.PackUserDetailed(a, prof, h.idGen)
+	single := (*entity.Packer)(nil).PackUserDetailed(a, prof, h.idGen)
 	h.FillDetailedExtras(context.Background(), nil, a, prof, &single)
 	assert.Equal(t, []string{"a-note"}, single.PinnedNoteIDs)
 	assert.Equal(t, []string{"a-note"}, noteIDs(&single))

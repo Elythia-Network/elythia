@@ -29,7 +29,7 @@ func (r *recordingListPacker) DetailedMany(_ context.Context, viewer *model.User
 	out := make([]entity.UserDetailed, len(users))
 	for i, u := range users {
 		ids = append(ids, u.ID)
-		out[i] = entity.PackUserDetailed(u, profiles[u.ID])
+		out[i] = (*entity.Packer)(nil).PackUserDetailed(u, profiles[u.ID])
 		out[i].PinnedNoteIDs = []string{"pin-" + u.ID}
 	}
 	r.userIDs = append(r.userIDs, ids)

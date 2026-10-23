@@ -50,7 +50,7 @@ func (h *Handler) listPacker() *userpack.Packer {
 	if h.moderatorChecker != nil {
 		l.Moderators = h.moderatorChecker
 	}
-	return userpack.New(l, h.idGen)
+	return userpack.New(h.entityPacker, l, h.idGen)
 }
 
 // packDetailedMany packs users as upstream packMany(users, me, {schema:

@@ -18,7 +18,7 @@ func (c *countingPacker) Lite(u *model.User) entity.UserLite { return entity.Pac
 
 func (c *countingPacker) DetailedNotMe(_ context.Context, target, _ *model.User) (entity.UserDetailed, bool) {
 	c.detailed++
-	d := entity.PackUserDetailed(target, &model.UserProfile{UserID: target.ID})
+	d := (*entity.Packer)(nil).PackUserDetailed(target, &model.UserProfile{UserID: target.ID})
 	d.Description = new("packed")
 	return d, true
 }

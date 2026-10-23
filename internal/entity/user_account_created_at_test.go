@@ -35,7 +35,7 @@ func TestPackUserDetailed_AccountCreatedAt(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.user.Username = "alice"
 			tc.user.AvatarDecorations = datatypes.JSON([]byte("[]"))
-			b, err := json.Marshal(PackUserDetailed(tc.user, nil, idGen))
+			b, err := json.Marshal(currentPacker().PackUserDetailed(tc.user, nil, idGen))
 			require.NoError(t, err)
 			var got map[string]any
 			require.NoError(t, json.Unmarshal(b, &got))

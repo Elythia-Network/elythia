@@ -59,11 +59,6 @@ func PackFollowing(
 	return currentPacker().PackFollowing(f, populateFollowee, populateFollower, lookup, idGen)
 }
 
-// PackMeDetailed is (*Packer).PackMeDetailed on the default Packer.
-func PackMeDetailed(u *model.User, profile *model.UserProfile, idGens ...id.Generator) MeDetailed {
-	return currentPacker().PackMeDetailed(u, profile, idGens...)
-}
-
 // PackNotification is (*Packer).PackNotification on the default Packer.
 func PackNotification(n *notification.Notification, user *model.User, note *model.Note, idGen id.Generator, instLookup InstanceLookup, emojiLookup EmojiLookup, opts ...NotificationOption) map[string]any {
 	return currentPacker().PackNotification(n, user, note, idGen, instLookup, emojiLookup, opts...)
@@ -77,16 +72,6 @@ func PackNotifications(items []NotificationItem, idGen id.Generator, instLookup 
 // PackPageWithContext is (*Packer).PackPageWithContext on the default Packer.
 func PackPageWithContext(p *model.Page, ctx PackPageContext) map[string]any {
 	return currentPacker().PackPageWithContext(p, ctx)
-}
-
-// PackUserDetailed is (*Packer).PackUserDetailed on the default Packer.
-func PackUserDetailed(u *model.User, profile *model.UserProfile, idGens ...id.Generator) UserDetailed {
-	return currentPacker().PackUserDetailed(u, profile, idGens...)
-}
-
-// PackUserForFollowStreamEvent is (*Packer).PackUserForFollowStreamEvent on the default Packer.
-func PackUserForFollowStreamEvent(u *model.User, isFollowing, hasPendingFollowRequestFromYou bool, idGen id.Generator) UserDetailed {
-	return currentPacker().PackUserForFollowStreamEvent(u, isFollowing, hasPendingFollowRequestFromYou, idGen)
 }
 
 // PackUserLite is (*Packer).PackUserLite on the default Packer.

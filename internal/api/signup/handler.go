@@ -95,7 +95,18 @@ type Handler struct {
 	// signup-application/apply を守る署名付きフォームトークン (#2806)。
 	// **captcha の代替ではない** — 位置づけは core/signupform の doc を見ること。
 	formTokens *signupform.Issuer
+	// entityPacker は利用者や投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3792)。組み立てで渡し、既定の Packer を読まない。
+	entityPacker *entity.Packer
 }
+
+// SetEntityPacker wires the Packer this handler packs entities with (#3792).
+func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
+// リモートへ漏れる。
+func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
 
 // SetFormTokenIssuer wires the signed form tokens used when no real captcha
 // provider is configured (#2806).
@@ -420,7 +431,7 @@ func (h *Handler) Signup(c echo.Context) error {
 	// 足して返すだけ。ここで signin を通すと login 通知が 1 件生まれ、作りたての
 	// アカウントの hasUnreadNotification / unreadNotificationsCount が upstream と
 	// 食い違う (#1804 の適用範囲を signup-pending に限定)。
-	return c.JSON(http.StatusOK, packSignupResponse(result.User, result.Profile, result.Token, h.idGen, h.signupPolicies(result.User.ID)))
+	return c.JSON(http.StatusOK, packSignupResponse(h.entityPacker, result.User, result.Profile, result.Token, h.idGen, h.signupPolicies(result.User.ID)))
 }
 
 // SignupPending handles POST /api/signup-pending. Misskey TS 互換: code を
@@ -634,8 +645,8 @@ func (h *Handler) signupPolicies(userID string) map[string]any {
 // mk-go も同じ packer を通し、MeDetailed struct に無い /api/i 固有 field
 // (pinnedPage / clientData / room / securityKeysList 等) だけを新規ユーザーの
 // 既定値で補う。個別に map を組み立てていた頃は 24 個の field が欠けていた。
-func packSignupResponse(u *model.User, profile *model.UserProfile, token string, idGen id.Generator, policies map[string]any) map[string]any {
-	me := entity.PackMeDetailed(u, profile, idGen)
+func packSignupResponse(pk *entity.Packer, u *model.User, profile *model.UserProfile, token string, idGen id.Generator, policies map[string]any) map[string]any {
+	me := pk.PackMeDetailed(u, profile, idGen)
 	me.Policies = policies
 	b, _ := json.Marshal(me)
 	resp := map[string]any{}

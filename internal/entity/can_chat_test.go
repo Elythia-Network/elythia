@@ -30,7 +30,7 @@ func TestPackUserDetailed_CanChatDefault(t *testing.T) {
 		ChatScope:         "none", // 旧実装ではこの値で canChat=false だった
 		AvatarDecorations: datatypes.JSON([]byte("[]")),
 	}
-	d := PackUserDetailed(u, nil)
+	d := currentPacker().PackUserDetailed(u, nil)
 	assert.True(t, d.CanChat, "lookup unwired → default true (upstream available)")
 }
 
@@ -46,8 +46,8 @@ func TestPackUserDetailed_CanChatFromLookup(t *testing.T) {
 	u1 := &model.User{ID: "u1", Username: "ok", AvatarDecorations: datatypes.JSON([]byte("[]"))}
 	u2 := &model.User{ID: "u2", Username: "blocked", AvatarDecorations: datatypes.JSON([]byte("[]"))}
 
-	assert.True(t, PackUserDetailed(u1, nil).CanChat)
-	assert.False(t, PackUserDetailed(u2, nil).CanChat)
+	assert.True(t, currentPacker().PackUserDetailed(u1, nil).CanChat)
+	assert.False(t, currentPacker().PackUserDetailed(u2, nil).CanChat)
 }
 
 // TestPackUserDetailed_CanChatLookupNotFound: lookup is wired but the user is not
@@ -58,7 +58,7 @@ func TestPackUserDetailed_CanChatLookupNotFound(t *testing.T) {
 	SetCanChatLookup(&stubCanChatLookup{results: map[string]bool{}})
 
 	u := &model.User{ID: "unknown", Username: "unknown", AvatarDecorations: datatypes.JSON([]byte("[]"))}
-	assert.True(t, PackUserDetailed(u, nil).CanChat, "lookup ok=false → default true")
+	assert.True(t, currentPacker().PackUserDetailed(u, nil).CanChat, "lookup ok=false → default true")
 }
 
 // TestPackUserDetailed_CanChatIgnoresChatScope: chatScope の値に関係なく lookup
@@ -70,7 +70,7 @@ func TestPackUserDetailed_CanChatIgnoresChatScope(t *testing.T) {
 
 	for _, scope := range []string{"all", "followers", "mutuals", "none"} {
 		u := &model.User{ID: "u1", Username: "x", ChatScope: scope, AvatarDecorations: datatypes.JSON([]byte("[]"))}
-		assert.False(t, PackUserDetailed(u, nil).CanChat, "scope=%s should not affect canChat", scope)
+		assert.False(t, currentPacker().PackUserDetailed(u, nil).CanChat, "scope=%s should not affect canChat", scope)
 	}
 }
 
@@ -86,6 +86,6 @@ func BenchmarkPackUserDetailed_CanChatLookup(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = PackUserDetailed(u, nil)
+		_ = currentPacker().PackUserDetailed(u, nil)
 	}
 }

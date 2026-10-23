@@ -594,7 +594,7 @@ func (h *Handler) PublishMeUpdated(userID string) { h.publishMeUpdated(userID) }
 // frontend (main-boot.ts) は payload を updateCurrentAccountPartial で
 // 部分 merge するので、本 helper が送る MeDetailed の field がそのまま
 // `$i` に反映される。upstream Misskey TS の meUpdated stream は
-// MeDetailed shape を流すため、entity.PackMeDetailed で isExplorable /
+// MeDetailed shape を流すため、(*entity.Packer).PackMeDetailed で isExplorable /
 // noCrawle / preventAiLearning など self-view-only field も含めて送る
 // (#968)。なお usePasswordLessLogin など UserProfile 由来でも MeDetailed
 // に含まれない field は publishMeUpdatedPartial で個別 publish する
@@ -617,7 +617,7 @@ func (h *Handler) publishMeUpdated(userID string) {
 
 // publishMeUpdatedPartial は specific field のみを `meUpdated` payload と
 // して送る。frontend は updateCurrentAccountPartial で部分 merge する
-// ので、entity.PackUserDetailed が含まない private profile field を
+// ので、(*entity.Packer).PackUserDetailed が含まない private profile field を
 // 更新した endpoint がこの helper で当該 field だけ publish できる
 // (#758)。fields が空 / mainStreamPublisher 未配線なら no-op。
 func (h *Handler) publishMeUpdatedPartial(userID string, fields map[string]any) {
@@ -808,7 +808,7 @@ func (h *Handler) TwoFAPasswordLess(c echo.Context) error {
 		return apierr.JSONInternalError(c)
 	}
 	// usePasswordLessLogin は /api/i 経路の private profile field 群に属し、
-	// entity.PackUserDetailed が含まないため publishMeUpdated (UserDetailed
+	// (*entity.Packer).PackUserDetailed が含まないため publishMeUpdated (UserDetailed
 	// publish) では frontend の $i に反映されない (#758)。partial helper で
 	// 当該 field だけ送る。
 	h.publishMeUpdatedPartial(user.ID, map[string]any{

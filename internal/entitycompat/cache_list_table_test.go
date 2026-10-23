@@ -27,7 +27,7 @@ var cacheEntries = map[string]cacheEntry{
 			"sf":       "実行中の取得をまとめるsingleflight。鍵に世代の番号を含めるので、捨てた後の呼び出しは相乗りしない",
 		}},
 	"internal/api/hashtags.Handler": {kindNotCache, "trendFlightはhashtags/trendの同時の集計を1回にまとめるsingleflight(#3579)で、集計の結果は持たない",
-		[]string{"db", "extras", "idGen", "meta", "moderators", "relation", "selfPacker", "trendFlight"}, nil},
+		[]string{"db", "entityPacker", "extras", "idGen", "meta", "moderators", "relation", "selfPacker", "trendFlight"}, nil},
 	"internal/api/meta.Handler": {kindDropLocal, "",
 		[]string{"adRepo", "chunkedUpload", "config", "metaRepo", "proxyAccountName", "respCache", "setup"}, nil},
 	"internal/api/meta.metaResponseCache": {kindDroppedByOwner, "/api/metaの応答。meta.Handler.DropLocalがinvalidateで捨てる",

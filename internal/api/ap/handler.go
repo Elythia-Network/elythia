@@ -104,8 +104,8 @@ type Handler struct {
 	// 匿名の閲覧者への ugcVisibilityForVisitor が効かないので、criticalWiring が
 	// 起動時に検査する。
 	noteHider *notehide.Hider
-	// entityPacker は投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
-	// 持つ (#3790)。組み立てで渡し、既定の Packer を読まない。
+	// entityPacker は利用者や投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3790、#3792)。組み立てで渡し、既定の Packer を読まない。
 	entityPacker *entity.Packer
 }
 
@@ -777,7 +777,7 @@ func (h *Handler) packUserForAPI(viewer *model.User, u *model.User, profile *mod
 	if u == nil {
 		return map[string]any{}
 	}
-	d := entity.PackUserDetailed(u, profile, h.idGen)
+	d := h.entityPacker.PackUserDetailed(u, profile, h.idGen)
 	// ピン留めと移行先は users/show と同じ規則で埋める (#3330)。
 	if h.detailExtras != nil {
 		h.detailExtras.FillDetailedExtras(context.Background(), viewer, u, profile, &d)

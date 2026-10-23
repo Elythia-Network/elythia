@@ -23,7 +23,7 @@ func (s *stubListPacker) DetailedMany(_ context.Context, viewer *model.User, use
 	s.viewers = append(s.viewers, viewer)
 	out := make([]entity.UserDetailed, len(users))
 	for i, u := range users {
-		out[i] = entity.PackUserDetailed(u, profiles[u.ID])
+		out[i] = (*entity.Packer)(nil).PackUserDetailed(u, profiles[u.ID])
 		out[i].PinnedNoteIDs = []string{"pin-" + u.ID}
 	}
 	return out

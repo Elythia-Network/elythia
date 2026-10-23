@@ -42,7 +42,18 @@ type Handler struct {
 	packer UserPacker
 	// extras は一覧の利用者のピン留め・移行先をまとめて埋める (#3330)。
 	extras userpack.DetailExtrasMany
+	// entityPacker は利用者や投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3792)。組み立てで渡し、既定の Packer を読まない。
+	entityPacker *entity.Packer
 }
+
+// SetEntityPacker wires the Packer this handler packs entities with (#3792).
+func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
+// リモートへ漏れる。
+func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
 
 // SetDetailExtras wires the batch filler of pinnedNotes / pinnedPage / movedTo /
 // alsoKnownAs for the embedded users of blocking/list (#3330).
@@ -181,7 +192,7 @@ func (h *Handler) respondPackedUser(c echo.Context, viewer *model.User, userID s
 		return c.JSON(http.StatusOK, detailed)
 	}
 	profile, _ := h.userRepo.FindProfileByUserID(userID)
-	detailed := entity.PackUserDetailed(target, profile, h.idGen)
+	detailed := h.entityPacker.PackUserDetailed(target, profile, h.idGen)
 	if viewer != nil {
 		viewerIsFollowing := h.relation.Apply(&detailed, viewer.ID, target, profile)
 		// followers-only count を非フォロワーに leak させない (upstream blocking/create・delete も
@@ -290,7 +301,7 @@ func (h *Handler) fetchBlockeeMap(ctx context.Context, viewer *model.User, rows 
 	iAmModerator := h.moderator != nil && viewerID != "" && h.moderator.IsModerator(viewerID)
 	packed := make([]entity.UserDetailed, len(users))
 	for i, u := range users {
-		d := entity.PackUserDetailed(u, profileByUser[u.ID], h.idGen)
+		d := h.entityPacker.PackUserDetailed(u, profileByUser[u.ID], h.idGen)
 		// viewer->blockee の relation block を付与 (isBlocking=true 等)。Apply は
 		// viewerID 空 / self では no-op。relation 未配線 (test stub) でも安全。
 		viewerIsFollowing := h.relation.Apply(&d, viewerID, u, profileByUser[u.ID])

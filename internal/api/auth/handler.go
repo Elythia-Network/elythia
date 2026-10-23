@@ -38,7 +38,18 @@ type Handler struct {
 	// tokenNotifier は gen-token で access token を生成した時に本人へ
 	// 'createToken' 通知を送る (#1559)。未配線なら通知しない。
 	tokenNotifier TokenNotifier
+	// entityPacker は利用者や投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3792)。組み立てで渡し、既定の Packer を読まない。
+	entityPacker *entity.Packer
 }
+
+// SetEntityPacker wires the Packer this handler packs entities with (#3792).
+func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
+// リモートへ漏れる。
+func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
 
 // TokenNotifier records a 'createToken' notification when a token is generated
 // (#1559)。循環依存を避けるため interface で受け取る (実装は
@@ -263,7 +274,7 @@ func (h *Handler) packUserDetailed(u *model.User, userID string) any {
 // 'UserDetailedNotMe'}): the pinned notes / page and move targets are filled
 // as seen by an anonymous viewer.
 func (h *Handler) packDetailedNotMe(u *model.User, profile *model.UserProfile) entity.UserDetailed {
-	d := entity.PackUserDetailed(u, profile, h.idGen)
+	d := h.entityPacker.PackUserDetailed(u, profile, h.idGen)
 	if h.detailExtras != nil {
 		h.detailExtras.FillDetailedExtras(context.Background(), nil, u, profile, &d)
 	}

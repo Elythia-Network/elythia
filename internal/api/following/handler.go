@@ -29,7 +29,18 @@ type Handler struct {
 	// following/requests/* の follower / followee (UserLite) を本家 packMany と
 	// 同じ形に組む (#1912、#3330)。未配線なら関係・ピン留め・instance などを欠く。
 	packer userpack.ListPacker
+	// entityPacker は利用者や投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3792)。組み立てで渡し、既定の Packer を読まない。
+	entityPacker *entity.Packer
 }
+
+// SetEntityPacker wires the Packer this handler packs entities with (#3792).
+func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
+// リモートへ漏れる。
+func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
 
 // SetListPacker wires the packer of the users embedded in following/list and
 // following/requests/{list,sent} (#1912, #3330).
@@ -301,7 +312,7 @@ func (h *Handler) List(c echo.Context) error {
 
 	out := make([]entity.Following, 0, len(rows))
 	for _, r := range rows {
-		packed := entity.PackFollowing(r, false, false, lookup, h.idGen)
+		packed := h.entityPacker.PackFollowing(r, false, false, lookup, h.idGen)
 		packed.Followee = packedByID[r.FolloweeID]
 		out = append(out, packed)
 	}
@@ -317,7 +328,7 @@ func (h *Handler) packDetailed(c echo.Context, viewer *model.User, users []*mode
 	}
 	out := make([]entity.UserDetailed, len(users))
 	for i, u := range users {
-		out[i] = entity.PackUserDetailed(u, profiles[u.ID], h.idGen)
+		out[i] = h.entityPacker.PackUserDetailed(u, profiles[u.ID], h.idGen)
 	}
 	return out
 }

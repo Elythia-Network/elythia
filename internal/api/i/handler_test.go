@@ -254,8 +254,7 @@ func TestMe_AppTokenOmitsSecrets(t *testing.T) {
 func TestMe_CanChatFromRolePolicy(t *testing.T) {
 	h, userRepo, _, _ := newTestHandler(t)
 
-	t.Cleanup(func() { entity.SetCanChatLookup(nil) })
-	entity.SetCanChatLookup(&stubMeCanChatLookup{result: false})
+	h.SetEntityPacker(entity.NewPacker(entity.PackerDeps{CanChat: &stubMeCanChatLookup{result: false}}))
 
 	user := &model.User{
 		ID:                "user-canchat",

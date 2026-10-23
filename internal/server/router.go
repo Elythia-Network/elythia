@@ -800,6 +800,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	webhookReactionHook.SetFollowingRepo(followingRepo)
 	webhookReactionHook.SetEntityPacker(entityPacker)
 	noteCreateService.SetEntityPacker(entityPacker)
+	// 利用者の詳細を包む core の部品にも渡す (#3792)。
+	userService.SetEntityPacker(entityPacker)
+	followingService.SetEntityPacker(entityPacker)
 	reactionService.SetWebhookHook(webhookReactionHook)
 	followingService.SetWebhookHook(webhookFollowingHook)
 	signupService.SetWebhookHook(corewebhook.NewSignupHook(webhookService))
@@ -1753,7 +1756,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// main stream の同じイベントと blocking/create・delete の応答も同じ packer で
 	// 組む (#3330)。ピン留めと移行先を埋める側 (users の handler) は後で組み立てる
 	// ので、そこで SetDetailExtras する。
-	sharedUserPacker := userpack.New(userpack.Lookups{
+	sharedUserPacker := userpack.New(entityPacker, userpack.Lookups{
 		Instances:  instanceRepo,
 		Emojis:     emojiRepo,
 		Profiles:   userRepo,
@@ -1794,7 +1797,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// パスワードをハッシュする5つの部品へ、設定のbcryptCostから作ったHasherを渡す(#3780)。
 	signupService.SetPasswordHasher(s.passwordHasher)
 	signupHandler := apisignup.NewHandler(signupService, metaRepo, idGen)
-	signupHandler.SetBackground(s.background) // #3661: 世代の停止で待つ
+	signupHandler.SetBackground(s.background)   // #3661: 世代の停止で待つ
+	signupHandler.SetEntityPacker(entityPacker) // #3792: 作成直後の利用者を MeDetailed で包む
 	// #2673: signup も upstream と同じく実効 policy を返す (meta の base override /
 	// role 集約 / server cap 込み)。素の default を返すと /api/i と食い違う。
 	signupHandler.SetUserPolicyResolver(roleService)
@@ -2077,6 +2081,15 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	notesHandler.SetEntityPacker(entityPacker)
 	rolesHandler.SetEntityPacker(entityPacker)
 	usersHandler.SetEntityPacker(entityPacker)
+	// 利用者の詳細を包む handler にも渡す (#3792)。
+	authHandler.SetEntityPacker(entityPacker)
+	blockingHandler.SetEntityPacker(entityPacker)
+	federationHandler.SetEntityPacker(entityPacker)
+	followingHandler.SetEntityPacker(entityPacker)
+	hashtagsHandler.SetEntityPacker(entityPacker)
+	muteHandler.SetEntityPacker(entityPacker)
+	pagesHandler.SetEntityPacker(entityPacker)
+	renoteMuteHandler.SetEntityPacker(entityPacker)
 
 	// Users endpoints
 	// users/lists/update-membership の withReplies 変更を userUpdated として流し、接続中の
@@ -3401,6 +3414,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	emojiApplicationRepo := emojiApplicationRepoForNotif
 	adminHandler := apiadmin.NewHandler(signupService, roleService, metaRepo, userRepo, idGen)
 	adminHandler.SetBackground(s.background)     // #3661: 世代の停止で待つ
+	adminHandler.SetEntityPacker(entityPacker)   // #3792: 利用者の詳細を包む
 	adminHandler.SetSelfPacker(selfPacker)       // #3784: show-users・roles/users・update-proxy-account で自分を MeDetailed に
 	adminHandler.SetDetailExtras(usersHandler)   // #3330: find-by-email・update-proxy-account のピン留め・移行先
 	adminHandler.SetListPacker(sharedUserPacker) // #3330: show-users・roles/users・abuse-user-reports・show-moderation-logs の利用者を本家 packMany と同じ形に
@@ -4038,7 +4052,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		{"notifications.noteHider", notificationsHandler.HasNoteHider(), noteHiderMissingEffect},
 		{"roles.noteHider", rolesHandler.HasNoteHider(), noteHiderMissingEffect},
 		{"users.noteHider", usersHandler.HasNoteHider(), noteHiderMissingEffect},
-		// 投稿を包む Packer (#3790)。無い部品はリモートのメディアの URL を生のまま出す。
+		// 投稿を包む部品の Packer (#3790)。無い部品はリモートのメディアの URL を生のまま出す。
 		{"antennas.entityPacker", antennasHandler.HasEntityPacker(), entityPackerMissingEffect},
 		{"ap.entityPacker", apHandler.HasEntityPacker(), entityPackerMissingEffect},
 		{"channels.entityPacker", channelsHandler.HasEntityPacker(), entityPackerMissingEffect},
@@ -4053,6 +4067,21 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		{"webhookReaction.entityPacker", webhookReactionHook.HasEntityPacker(), entityPackerMissingEffect},
 		{"webPushNote.entityPacker", webPushNotePacker.HasEntityPacker(), entityPackerMissingEffect},
 		{"notePublisher.entityPacker", notePublisher.HasEntityPacker(), entityPackerMissingEffect},
+		// 利用者の詳細を包む部品 (#3792)。sharedUserPacker は follow 系の webhook と
+		// main stream、blocking の応答、pages の pageEvent、一覧を包む handler などが共有する。
+		{"admin.entityPacker", adminHandler.HasEntityPacker(), entityPackerMissingEffect},
+		{"auth.entityPacker", authHandler.HasEntityPacker(), entityPackerMissingEffect},
+		{"blocking.entityPacker", blockingHandler.HasEntityPacker(), entityPackerMissingEffect},
+		{"federation.entityPacker", federationHandler.HasEntityPacker(), entityPackerMissingEffect},
+		{"following.entityPacker", followingHandler.HasEntityPacker(), entityPackerMissingEffect},
+		{"hashtags.entityPacker", hashtagsHandler.HasEntityPacker(), entityPackerMissingEffect},
+		{"mute.entityPacker", muteHandler.HasEntityPacker(), entityPackerMissingEffect},
+		{"pages.entityPacker", pagesHandler.HasEntityPacker(), entityPackerMissingEffect},
+		{"renoteMute.entityPacker", renoteMuteHandler.HasEntityPacker(), entityPackerMissingEffect},
+		{"signup.entityPacker", signupHandler.HasEntityPacker(), entityPackerMissingEffect},
+		{"userService.entityPacker", userService.HasEntityPacker(), entityPackerMissingEffect},
+		{"followingService.entityPacker", followingService.HasEntityPacker(), entityPackerMissingEffect},
+		{"sharedUserPacker.entityPacker", sharedUserPacker.HasEntityPacker(), entityPackerMissingEffect},
 		{"users.remoteStatsFederationGate", remoteStatsFetcher.HasHostAllowedChecker(),
 			"連合を切った相手へもプロフィール表示のたびに統計を取りに行き、誰をいつ見たかが漏れる"},
 		{"peer.blocker", s.peerDeps.HasBlocker(),

@@ -16,7 +16,7 @@ func newUser(id string) *model.User {
 }
 
 func packed(u *model.User) entity.UserDetailed {
-	return entity.PackUserDetailed(u, nil)
+	return (*entity.Packer)(nil).PackUserDetailed(u, nil)
 }
 
 type recordingEnricher struct {

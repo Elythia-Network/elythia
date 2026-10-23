@@ -374,7 +374,7 @@ func TestUsers_EmbedsViewerRelation(t *testing.T) {
 	require.NoError(t, assignRepo.Create(&model.RoleAssignment{ID: "ra1", RoleID: "r1", UserID: "alice"}))
 	followingRepo := testutil.NewMockFollowingRepository()
 	followingRepo.Followings["f1"] = &model.Following{ID: "f1", FollowerID: "viewer1", FolloweeID: "alice"}
-	h.SetListPacker(userpack.New(userpack.Lookups{Relations: userrelation.Repos{Following: followingRepo}}, nil))
+	h.SetListPacker(userpack.New(nil, userpack.Lookups{Relations: userrelation.Repos{Following: followingRepo}}, nil))
 
 	// 認証 viewer: isFollowing=true。
 	vc := newCtxWithViewer(`{"roleId":"r1"}`, "viewer1")

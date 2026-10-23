@@ -19,7 +19,7 @@ import (
 // moderator checker, plus a recording batch filler.
 func setListPacker(h *Handler, rel userrelation.Repos, mod userpack.ModeratorChecker) *recordingManyExtras {
 	idGen, _ := id.NewGenerator("aidx")
-	p := userpack.New(userpack.Lookups{Relations: rel, Moderators: mod}, idGen)
+	p := userpack.New(nil, userpack.Lookups{Relations: rel, Moderators: mod}, idGen)
 	extras := &recordingManyExtras{}
 	p.SetDetailExtrasMany(extras)
 	h.SetListPacker(p)

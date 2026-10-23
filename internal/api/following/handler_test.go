@@ -371,7 +371,7 @@ func TestList_EmbedsRelationFlags(t *testing.T) {
 	uSvc := coreuser.NewService(userRepo, nil, nil, nil)
 	h := NewHandler(fSvc, uSvc)
 	h.SetIDGen(idGen)
-	h.SetListPacker(userpack.New(userpack.Lookups{Relations: userrelation.Repos{
+	h.SetListPacker(userpack.New(nil, userpack.Lookups{Relations: userrelation.Repos{
 		Following:     fRepo,
 		Blocking:      testutil.NewMockBlockingRepository(),
 		Muting:        testutil.NewMockMutingRepository(),
