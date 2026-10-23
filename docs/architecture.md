@@ -192,7 +192,7 @@ api-compat.md の 444 + 58) は、ルート数の段落を最後に直した 202
 
 ### 3.3 `internal/entity/` — レスポンス DTO
 
-`core/entities/*EntityService.pack()` に対応。Elythia では `entity.Packer` のメソッド `PackX()` で、ドメインロジックは持たない。pack が読む依存 (role 由来の値・アバターの飾り・メディアのプロキシなど) は Packer が持つ (#3788)。組み立て (`internal/server`) で 1 組の依存から部品へ渡す Packer を作り、既定の Packer も同じ依存で配線する。投稿を包む部品 (`PackNote` / `PackNotes` / `PackNoteWithInstance` と `NoteFieldResolver`) は渡された Packer を使う (#3790)。利用者の詳細を包む部品 (`PackUserDetailed` / `PackMeDetailed` / `PackUserForFollowStreamEvent` と `userpack.Packer`) も同じく渡された Packer を使う (#3792)。`PackUserLite` を直接呼ぶ部品も同じ (#3794)。ドライブのファイル・ページ・クリップ・お知らせ・通知を包む部品も同じで、通知に埋め込む投稿と利用者も渡された Packer で包む (#3796)。残るメディアのプロキシ URL の関数と `IdenticonURL` は、まだ既定の Packer へ委ねるパッケージ関数 (`packer_default_funcs.go`) を通り、#3666 の段階 (5-9) で移す。
+`core/entities/*EntityService.pack()` に対応。Elythia では `entity.Packer` のメソッド `PackX()` で、ドメインロジックは持たない。pack が読む依存 (role 由来の値・アバターの飾り・メディアのプロキシなど) は Packer が持つ (#3788)。組み立て (`internal/server`) で 1 組の依存から部品へ渡す Packer を作り、既定の Packer も同じ依存で配線する。投稿を包む部品 (`PackNote` / `PackNotes` / `PackNoteWithInstance` と `NoteFieldResolver`) は渡された Packer を使う (#3790)。利用者の詳細を包む部品 (`PackUserDetailed` / `PackMeDetailed` / `PackUserForFollowStreamEvent` と `userpack.Packer`) も同じく渡された Packer を使う (#3792)。`PackUserLite` を直接呼ぶ部品も同じ (#3794)。ドライブのファイル・ページ・クリップ・お知らせ・通知を包む部品も同じで、通知に埋め込む投稿と利用者も渡された Packer で包む (#3796)。メディアのプロキシ URL と `IdenticonURL` を使う側も同じで、`/avatar`・`/emoji`・フィード・reversi のアイコンは組み立てた Packer をそのまま使う (#3798)。既定の Packer へ委ねるパッケージ関数は無くなった。既定の Packer と `Set*` は #3666 の段階 (5-10) で消す。
 
 | Elythia | Misskey-TS |
 |---|---|
