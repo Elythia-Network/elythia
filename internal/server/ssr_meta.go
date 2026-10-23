@@ -51,7 +51,18 @@ type ssrMetaHandler struct {
 	announceRepo  repository.AnnouncementRepository
 	// idGen は drive file の pack (createdAt の復元) に要る。
 	idGen id.Generator
+	// entityPacker は entity を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3796)。組み立てで渡し、既定の Packer を読まない。
+	entityPacker *entity.Packer
 }
+
+// SetEntityPacker wires the Packer this ssrMetaHandler packs entities with (#3796).
+func (h *ssrMetaHandler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs. 無いとファイルの url などを生のまま返し、閲覧者の IP が
+// リモートへ漏れる。
+func (h *ssrMetaHandler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
 
 // ssrMetaDeps carries the repositories the permalink pages read from.
 // 引数で並べると 10 個を超えて取り違えても型が通ってしまうので、名前で渡す。
@@ -374,7 +385,7 @@ func (h *ssrMetaHandler) filesOf(ids []string) []entity.DriveFileEntity {
 	out := make([]entity.DriveFileEntity, 0, len(ids))
 	for _, fid := range ids {
 		if f, ok := byID[fid]; ok {
-			out = append(out, entity.PackDriveFile(f, h.idGen))
+			out = append(out, h.entityPacker.PackDriveFile(f, h.idGen))
 		}
 	}
 	return out

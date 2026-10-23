@@ -14,6 +14,7 @@ import (
 	"time"
 
 	coredrive "github.com/elythia-network/elythia/internal/core/drive"
+	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 )
@@ -93,7 +94,18 @@ type URLUploader struct {
 	slots     chan struct{}
 	userMu    sync.Mutex
 	userSlots map[string]*userSlot
+	// entityPacker は entity を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3796)。組み立てで渡し、既定の Packer を読まない。
+	entityPacker *entity.Packer
 }
+
+// SetEntityPacker wires the Packer this URLUploader packs entities with (#3796).
+func (u *URLUploader) SetEntityPacker(p *entity.Packer) { u.entityPacker = p }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs. 無いとファイルの url などを生のまま返し、閲覧者の IP が
+// リモートへ漏れる。
+func (u *URLUploader) HasEntityPacker() bool { return u.entityPacker.HasMediaURL() }
 
 // userSlot is the per-user semaphore and the number of requests holding or
 // waiting for it (the entry is dropped when that reaches zero).
@@ -186,7 +198,7 @@ func (u *URLUploader) Process(ctx context.Context, in URLUploadInput) {
 	// を防ぐ (#1564 review)。
 	u.publisher.PublishMainEvent(in.User.ID, "urlUploadFinished", map[string]any{
 		"marker": in.Marker,
-		"file":   packDriveFileSelfSingle(df, u.idGen),
+		"file":   packDriveFileSelfSingle(u.entityPacker, df, u.idGen),
 	})
 }
 

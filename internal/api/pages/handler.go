@@ -687,8 +687,8 @@ func (h *Handler) pageToMapWithOwner(p *model.Page, owner *model.User, isLiked *
 	// (#1662)。driveFileRepo 未配線なら entity 側が (nil,nil) を返し default 維持。
 	// list 経路 (i/pages, featured) では page ごとに drive lookup が走る (N+1)
 	// が、page list は通常小さいので許容する。
-	attachedFiles, eyeCatchingImage := entity.ResolvePageDriveFiles(p, h.driveFileRepo, h.idGen)
-	return entity.PackPageWithContext(p, entity.PackPageContext{
+	attachedFiles, eyeCatchingImage := h.entityPacker.ResolvePageDriveFiles(p, h.driveFileRepo, h.idGen)
+	return h.entityPacker.PackPageWithContext(p, entity.PackPageContext{
 		IDGen:            h.idGen,
 		Owner:            owner,
 		EyeCatchingImage: eyeCatchingImage,

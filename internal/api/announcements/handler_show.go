@@ -50,7 +50,7 @@ func (h *Handler) Show(c echo.Context) error {
 	if me != nil {
 		viewerID = me.ID
 	}
-	item := packAnnouncement(a, h.idGen, viewerID)
+	item := packAnnouncement(h.entityPacker, a, h.idGen, viewerID)
 	// upstream getAnnouncement は announcement_reads を引いて isRead=(read!==null)
 	// を pack する。匿名では isRead を undefined にし key を省略する。mk-go は read
 	// 状態を見ずに常に false を返していた (#1955)。

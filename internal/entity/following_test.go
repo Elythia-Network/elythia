@@ -15,7 +15,7 @@ import (
 func TestPackFollowing_CreatedAtMsISO(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	fid := idGen.Generate(time.Now())
-	out := PackFollowing(&model.Following{ID: fid, FolloweeID: "a", FollowerID: "b"}, false, false, nil, idGen)
+	out := currentPacker().PackFollowing(&model.Following{ID: fid, FolloweeID: "a", FollowerID: "b"}, false, false, nil, idGen)
 
 	require.NotEmpty(t, out.CreatedAt)
 	_, err := time.Parse("2006-01-02T15:04:05.000Z", out.CreatedAt)

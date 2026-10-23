@@ -186,8 +186,8 @@ var driveTypePatternRe = regexp.MustCompile(`^[a-zA-Z/\-*]+$`)
 //
 // self list path とは異なり userId も **null にする** 点に注意 (= pack は
 // detail=false で userId を返さない、packNullable とは別経路)。
-func packDriveFileSelfSingle(f *model.DriveFile, idGen id.Generator) entity.DriveFileEntity {
-	e := entity.PackDriveFileSelf(f, idGen)
+func packDriveFileSelfSingle(pk *entity.Packer, f *model.DriveFile, idGen id.Generator) entity.DriveFileEntity {
+	e := pk.PackDriveFileSelf(f, idGen)
 	e.UserID = nil
 	return e
 }
@@ -205,7 +205,7 @@ func packDriveFileSelfSingle(f *model.DriveFile, idGen id.Generator) entity.Driv
 // self single path (#812) とは異なり userId は **owner ID を維持** する
 // (= packNullable は userId を常時返す)。
 func (h *Handler) packDriveFileSelfList(f *model.DriveFile) entity.DriveFileEntity {
-	return entity.PackDriveFileSelf(f, h.idGen)
+	return h.entityPacker.PackDriveFileSelf(f, h.idGen)
 }
 
 // openMultipartFile opens one parsed multipart part. テスト用の差し替え口。
@@ -490,7 +490,7 @@ func (h *Handler) FilesCreate(c echo.Context) error {
 	// self single path 経路 (#812)。helper が folder / userId / user を
 	// 一律 null 化する (旧 inline 版は folder の nil 化を見落としていて
 	// folderId 指定 upload で drift していたが、helper 化で同時に解消)。
-	return c.JSON(http.StatusOK, packDriveFileSelfSingle(f, h.idGen))
+	return c.JSON(http.StatusOK, packDriveFileSelfSingle(h.entityPacker, f, h.idGen))
 }
 
 // FileIDRequest is the body for show/delete and similar single-file ops.
@@ -536,7 +536,7 @@ func (h *Handler) FilesShow(c echo.Context) error {
 // (#1564)。folder / user は各 1 回だけ fetch する (full pack 経由の二重
 // fetch を解消、#1564 review)。
 func (h *Handler) packDriveFileShow(f *model.DriveFile) entity.DriveFileEntity {
-	e := entity.PackDriveFileSelf(f, h.idGen)
+	e := h.entityPacker.PackDriveFileSelf(f, h.idGen)
 	if h.folderRepo != nil && f.FolderID != nil {
 		if fo, err := h.folderRepo.FindByID(*f.FolderID); err == nil {
 			d := h.packDriveFolderDetail(fo)
@@ -623,7 +623,7 @@ func (h *Handler) FilesUpdate(c echo.Context) error {
 	// upstream は updateFile 後 `pack(file.id, { self: true })` を返す
 	// (= self single shape、DriveService.ts)。本実装も #812 の create と
 	// 同じ self single helper を使う (folder / userId / user 全 null)。
-	return c.JSON(http.StatusOK, packDriveFileSelfSingle(f, h.idGen))
+	return c.JSON(http.StatusOK, packDriveFileSelfSingle(h.entityPacker, f, h.idGen))
 }
 
 // FilesDelete handles POST /api/drive/files/delete.

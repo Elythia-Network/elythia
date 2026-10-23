@@ -18,7 +18,7 @@ func TestPackClip_Basic(t *testing.T) {
 
 	fav := true
 	notesCount := 5
-	out := PackClip(cl, idGen, owner, ClipExtras{FavoritedCount: 3, IsFavorited: &fav, NotesCount: &notesCount})
+	out := currentPacker().PackClip(cl, idGen, owner, ClipExtras{FavoritedCount: 3, IsFavorited: &fav, NotesCount: &notesCount})
 	assert.Equal(t, clipID, out["id"])
 	assert.Equal(t, "u1", out["userId"])
 	assert.Equal(t, "favs", out["name"])
@@ -45,7 +45,7 @@ func TestPackClip_ViewerDependentFieldsHidden(t *testing.T) {
 	idGen := newTestIDGen(t)
 	cl := &model.Clip{ID: idGen.Generate(time.Now()), UserID: "u1", Name: "favs", IsPublic: true}
 
-	out := PackClip(cl, idGen, &model.User{ID: "u1"}, ClipExtras{})
+	out := currentPacker().PackClip(cl, idGen, &model.User{ID: "u1"}, ClipExtras{})
 	_, hasNotesCount := out["notesCount"]
 	assert.False(t, hasNotesCount, "notesCount must be omitted for non-owner viewers")
 	_, hasIsFavorited := out["isFavorited"]
@@ -56,11 +56,11 @@ func TestPackClip_ViewerDependentFieldsHidden(t *testing.T) {
 func TestPackClip_NilOwnerOmitsUser(t *testing.T) {
 	idGen := newTestIDGen(t)
 	cl := &model.Clip{ID: idGen.Generate(time.Now()), UserID: "u1", Name: "x"}
-	out := PackClip(cl, idGen, nil, ClipExtras{})
+	out := currentPacker().PackClip(cl, idGen, nil, ClipExtras{})
 	_, hasUser := out["user"]
 	assert.False(t, hasUser)
 }
 
 func TestPackClip_NilInput(t *testing.T) {
-	assert.Nil(t, PackClip(nil, nil, nil, ClipExtras{}))
+	assert.Nil(t, currentPacker().PackClip(nil, nil, nil, ClipExtras{}))
 }

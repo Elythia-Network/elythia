@@ -2690,7 +2690,7 @@ func (h *Handler) fillUnreadFields(ctx context.Context, u *model.User, resp map[
 				// 欠落し、misskey_dart の AnnouncementsResponse.fromJson が
 				// createdAt を非null String として cast して落ちる (#1224)。
 				// #2106 L52: UnreadForUser は viewer u 宛て/global の announcement。viewerID=u.ID。
-				packed := entity.PackAnnouncement(a, h.idGen, false, u.ID)
+				packed := h.entityPacker.PackAnnouncement(a, h.idGen, false, u.ID)
 				if packed == nil {
 					// nil entry を配列に入れると [null] になり、misskey_dart が
 					// 各要素を fromJson する際 null で落ちるため除外する。
@@ -2806,7 +2806,7 @@ func (h *Handler) fillPinnedFields(ctx context.Context, u *model.User, profile *
 			if p, err := h.pageRepo.FindByID(*profile.PinnedPageID); err == nil {
 				// golden Page は user 必須。pinnedPage は自分の page なので
 				// owner=u を渡して user (UserLite) を埋める (#1266 follow-up)。
-				resp["pinnedPage"] = entity.PackPageWithContext(p, entity.PackPageContext{IDGen: h.idGen, Owner: u})
+				resp["pinnedPage"] = h.entityPacker.PackPageWithContext(p, entity.PackPageContext{IDGen: h.idGen, Owner: u})
 			}
 		}
 	}

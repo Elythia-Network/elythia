@@ -201,9 +201,9 @@ func TestCurrentPackerIsOnlyReadByTheDelegatingFuncs(t *testing.T) {
 			wrappers[fd.Name.Name] = true
 		}
 	}
-	// 抽出が空振りしていないこと (薄い関数は 20 個。#3790 で投稿の 3 つ、#3792 で利用者の
-	// 詳細の 3 つ、#3794 で PackUserLite を消した)。
-	if len(wrappers) < 20 {
+	// 抽出が空振りしていないこと (薄い関数は 9 個。#3790 で投稿の 3 つ、#3792 で利用者の
+	// 詳細の 3 つ、#3794 で PackUserLite、#3796 で残りの Pack の 11 個を消した)。
+	if len(wrappers) < 9 {
 		t.Fatalf("found only %d delegating funcs; the scan is broken", len(wrappers))
 	}
 	files, err := filepath.Glob("*.go")
@@ -240,7 +240,7 @@ func TestCurrentPackerIsOnlyReadByTheDelegatingFuncs(t *testing.T) {
 			return true
 		})
 	}
-	if seen < 20 {
+	if seen < 9 {
 		t.Errorf("found only %d currentPacker() calls; the scan is broken", seen)
 	}
 }

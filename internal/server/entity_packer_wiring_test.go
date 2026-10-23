@@ -247,3 +247,76 @@ func TestNewServer_UserLitePackersUseTheWiredPacker(t *testing.T) {
 		assert.True(t, strings.HasPrefix(ctx.User.AvatarURL, "/avatar.webp?"), "avatarUrl: %s", ctx.User.AvatarURL)
 	})
 }
+
+// **残りの Pack を呼ぶ部品も、組み立てで渡された Packer でリモートの URL を media
+// proxy へ通す (#3796)。**
+//
+// 見る経路は announcements (お知らせの imageUrl) と drive/files/update (リモートの
+// ファイルの url)。上と同じく、組み立ての後に既定の Packer の mediaURL を外し、
+// 渡した Packer だけで proxy が付くことを確かめる。通知は stream の
+// TestNotificationPublisher_PacksWithTheGivenPacker が見る。
+func TestNewServer_RemainingPackersUseTheWiredPacker(t *testing.T) {
+	db := serverIntegrationDB
+	if db == nil {
+		t.Skip("PostgreSQL unavailable")
+	}
+	const (
+		userID = "eppuser3796aaaaa"
+		token  = "epptokenx3796aaa"
+		host   = "remote.example"
+	)
+	idGen := testIDGen(t)
+	annID := idGen.Generate(time.Now())
+	fileID := idGen.Generate(time.Now())
+	cleanupPluginAccountUsers(t, db, "epp_rest")
+	t.Cleanup(func() {
+		db.Exec(`DELETE FROM "announcement" WHERE "id" = ?`, annID)
+		db.Exec(`DELETE FROM "drive_file" WHERE "id" = ?`, fileID)
+	})
+	createLocalUser(t, db, userID, "epp_rest", token, "epp-pass", false)
+	imageURL := "https://" + host + "/files/epp3796-ann.png"
+	require.NoError(t, db.Create(&model.Announcement{
+		ID: annID, Title: "t", Text: "x", ImageURL: &imageURL, IsActive: true, UserID: strPtrLeak(userID),
+	}).Error)
+	fileURL := "https://" + host + "/files/epp3796.png"
+	require.NoError(t, db.Create(&model.DriveFile{
+		ID: fileID, UserID: strPtrLeak(userID), MD5: "d41d8cd98f00b204e9800998ecf8427e",
+		Name: "epp3796.png", Type: "image/png", URL: fileURL, URI: strPtrLeak(fileURL), IsLink: true,
+	}).Error)
+
+	srv := newServerWithConfig(t, func(*config.Config) {})
+	// 既定の Packer の mediaURL を外す。restoreProcessGlobals が後で nil に戻す。
+	entity.SetMediaURLContext(nil)
+	// 否定形だと空文字でも通るので、proxy の形であることを肯定形で見る。
+	proxied := func(t *testing.T, got string) {
+		t.Helper()
+		assert.Contains(t, got, "/image.webp?", "url: %s", got)
+		assert.False(t, strings.HasPrefix(got, "https://"+host), "url: %s", got)
+	}
+
+	t.Run("announcements", func(t *testing.T) {
+		rec := postJSON(t, srv, "/api/announcements", token, map[string]any{})
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		var anns []struct {
+			ID       string `json:"id"`
+			ImageURL string `json:"imageUrl"`
+		}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &anns), rec.Body.String())
+		var got string
+		for _, a := range anns {
+			if a.ID == annID {
+				got = a.ImageURL
+			}
+		}
+		proxied(t, got)
+	})
+	t.Run("drive/files/update", func(t *testing.T) {
+		rec := postJSON(t, srv, "/api/drive/files/update", token, map[string]any{"fileId": fileID, "name": "renamed.png"})
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		var f struct {
+			URL string `json:"url"`
+		}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &f), rec.Body.String())
+		proxied(t, f.URL)
+	})
+}

@@ -156,7 +156,7 @@ func (h *Handler) FilesCreateChunkedFinish(c echo.Context) error {
 	if err != nil {
 		return h.chunkedError(c, err)
 	}
-	return c.JSON(http.StatusOK, packDriveFileSelfSingle(f, h.idGen))
+	return c.JSON(http.StatusOK, packDriveFileSelfSingle(h.entityPacker, f, h.idGen))
 }
 
 // FilesCreateChunkedAbort handles POST /api/drive/files/create-chunked/abort.

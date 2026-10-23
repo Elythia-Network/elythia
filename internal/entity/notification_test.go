@@ -13,7 +13,7 @@ import (
 )
 
 func TestPackNotification_NilInput(t *testing.T) {
-	assert.Nil(t, PackNotification(nil, nil, nil, nil, nil, nil))
+	assert.Nil(t, currentPacker().PackNotification(nil, nil, nil, nil, nil, nil))
 }
 
 func TestPackNotification_FollowType_WithUser(t *testing.T) {
@@ -26,7 +26,7 @@ func TestPackNotification_FollowType_WithUser(t *testing.T) {
 		NotifierID: "u_bob",
 	}
 	user := &model.User{ID: "u_bob", Username: "bob", UsernameLower: "bob"}
-	out := PackNotification(n, user, nil, idGen, nil, nil)
+	out := currentPacker().PackNotification(n, user, nil, idGen, nil, nil)
 	assert.Equal(t, nid, out["id"])
 	assert.Equal(t, "2026-04-19T12:00:00.000Z", out["createdAt"])
 	assert.Equal(t, "follow", out["type"])
@@ -55,7 +55,7 @@ func TestPackNotification_ReactionType_WithNote(t *testing.T) {
 	}
 	user := &model.User{ID: "u_alice", Username: "alice"}
 	note := &model.Note{ID: noteID, UserID: "u_me", Text: ptrStr("hi")}
-	out := PackNotification(n, user, note, idGen, nil, nil)
+	out := currentPacker().PackNotification(n, user, note, idGen, nil, nil)
 	assert.Equal(t, "reaction", out["type"])
 	assert.Equal(t, "u_alice", out["userId"])
 	assert.Equal(t, ":smile:", out["reaction"])
@@ -75,7 +75,7 @@ func TestPackNotification_PollVote_WithChoice(t *testing.T) {
 		NoteID:     "n1",
 		Choice:     &choice,
 	}
-	out := PackNotification(n, nil, nil, idGen, nil, nil)
+	out := currentPacker().PackNotification(n, nil, nil, idGen, nil, nil)
 	assert.Equal(t, 2, out["choice"])
 	// user / note は nil なので含まれない
 	_, hasUser := out["user"]
@@ -100,7 +100,7 @@ func TestPackNotification_PopulatesInstanceOnUser(t *testing.T) {
 	}
 	user := &model.User{ID: "u_remote", Username: "remote", Host: &remoteHost}
 
-	out := PackNotification(n, user, nil, idGen, instLookup, nil)
+	out := currentPacker().PackNotification(n, user, nil, idGen, instLookup, nil)
 
 	u, ok := out["user"].(UserLite)
 	require.True(t, ok)
@@ -116,7 +116,7 @@ func TestPackNotification_ExtraFields_Merged(t *testing.T) {
 		Type:      notification.TypeExportCompleted,
 		Extra:     map[string]any{"fileId": "df_1"},
 	}
-	out := PackNotification(n, nil, nil, idGen, nil, nil)
+	out := currentPacker().PackNotification(n, nil, nil, idGen, nil, nil)
 	assert.Equal(t, "df_1", out["fileId"])
 }
 
@@ -146,7 +146,7 @@ func TestPackNotification_NormalizesExportedEntity(t *testing.T) {
 			Type:      notification.TypeExportCompleted,
 			Extra:     map[string]any{"exportedEntity": stored, "fileId": "df_1"},
 		}
-		out := PackNotification(n, nil, nil, idGen, nil, nil)
+		out := currentPacker().PackNotification(n, nil, nil, idGen, nil, nil)
 		assert.Equal(t, want, out["exportedEntity"], "stored=%q", stored)
 		assert.Equal(t, "df_1", out["fileId"], "stored=%q: other extra fields preserved", stored)
 	}
@@ -185,7 +185,7 @@ func TestPackNotifications_BatchesResolvers(t *testing.T) {
 		mkItem("n3", &hostB),
 	}
 
-	out := PackNotifications(items, idGen, instLookup, emojiLookup)
+	out := currentPacker().PackNotifications(items, idGen, instLookup, emojiLookup)
 	require.Len(t, out, 3)
 
 	assert.Len(t, instLookup.calls, 1, "InstanceResolver は 1 batch fetch のみ")
@@ -209,7 +209,7 @@ func TestPackNotifications_SkipsNilNotifications(t *testing.T) {
 		{N: nil},
 		{N: &notification.Notification{ID: "x2", CreatedAt: time.Now(), Type: notification.TypeFollow}},
 	}
-	out := PackNotifications(items, idGen, nil, nil)
+	out := currentPacker().PackNotifications(items, idGen, nil, nil)
 	require.Len(t, out, 2)
 	assert.Equal(t, "x1", out[0]["id"])
 	assert.Equal(t, "x2", out[1]["id"])
@@ -234,7 +234,7 @@ func TestPackNotifications_NoteAndUserShareInstanceFetch(t *testing.T) {
 		NotifierID: "u_a", NoteID: "n_1",
 	}
 
-	out := PackNotifications([]NotificationItem{{N: n, User: notifier, Note: note}}, idGen, instLookup, nil)
+	out := currentPacker().PackNotifications([]NotificationItem{{N: n, User: notifier, Note: note}}, idGen, instLookup, nil)
 	require.Len(t, out, 1)
 	assert.Len(t, instLookup.calls, 1, "host 重複は uniq 化されて 1 回の fetch")
 	assert.ElementsMatch(t, []string{host}, instLookup.calls[0])
@@ -253,7 +253,7 @@ func TestPackNotification_RoleAssigned_PacksRole(t *testing.T) {
 		assert.Equal(t, "r1", roleID)
 		return map[string]any{"id": "r1", "name": "VIP"}, true
 	}
-	out := PackNotification(n, nil, nil, idGen, nil, nil, WithRoleLookup(lookup))
+	out := currentPacker().PackNotification(n, nil, nil, idGen, nil, nil, WithRoleLookup(lookup))
 	require.NotNil(t, out)
 	assert.Equal(t, "roleAssigned", out["type"])
 	role, ok := out["role"].(map[string]any)
@@ -273,7 +273,7 @@ func TestPackNotification_RoleAssigned_DroppedWhenRoleDeleted(t *testing.T) {
 		Extra:     map[string]any{"roleId": "gone"},
 	}
 	lookup := func(string) (map[string]any, bool) { return nil, false }
-	assert.Nil(t, PackNotification(n, nil, nil, idGen, nil, nil, WithRoleLookup(lookup)))
+	assert.Nil(t, currentPacker().PackNotification(n, nil, nil, idGen, nil, nil, WithRoleLookup(lookup)))
 }
 
 // role lookup 未配線でも安全側に倒して通知を drop する。
@@ -285,7 +285,7 @@ func TestPackNotification_RoleAssigned_DroppedWhenLookupUnset(t *testing.T) {
 		Type:      notification.TypeRoleAssigned,
 		Extra:     map[string]any{"roleId": "r1"},
 	}
-	assert.Nil(t, PackNotification(n, nil, nil, idGen, nil, nil))
+	assert.Nil(t, currentPacker().PackNotification(n, nil, nil, idGen, nil, nil))
 }
 
 // #1559 chatRoomInvitationReceived: lookup が invitation を返せば packed
@@ -305,7 +305,7 @@ func TestPackNotification_ChatRoomInvitation_PacksInvitation(t *testing.T) {
 		assert.Equal(t, "u_me", viewerID)
 		return map[string]any{"id": invID, "roomId": "room1"}, true
 	}
-	out := PackNotification(n, inviter, nil, idGen, nil, nil, WithChatInvitationLookup(lookup), WithViewer("u_me"))
+	out := currentPacker().PackNotification(n, inviter, nil, idGen, nil, nil, WithChatInvitationLookup(lookup), WithViewer("u_me"))
 	require.NotNil(t, out)
 	assert.Equal(t, "chatRoomInvitationReceived", out["type"])
 	assert.Equal(t, "u_inviter", out["userId"], "notifier(招待者) は userId として出る")
@@ -326,7 +326,7 @@ func TestPackNotification_ChatRoomInvitation_DroppedWhenDeleted(t *testing.T) {
 		Extra:     map[string]any{"invitationId": "gone"},
 	}
 	lookup := func(string, string) (map[string]any, bool) { return nil, false }
-	assert.Nil(t, PackNotification(n, nil, nil, idGen, nil, nil, WithChatInvitationLookup(lookup)))
+	assert.Nil(t, currentPacker().PackNotification(n, nil, nil, idGen, nil, nil, WithChatInvitationLookup(lookup)))
 }
 
 // lookup 未配線でも安全側に倒して通知を drop する。
@@ -338,7 +338,7 @@ func TestPackNotification_ChatRoomInvitation_DroppedWhenLookupUnset(t *testing.T
 		Type:      notification.TypeChatRoomInvitationReceived,
 		Extra:     map[string]any{"invitationId": "inv1"},
 	}
-	assert.Nil(t, PackNotification(n, nil, nil, idGen, nil, nil))
+	assert.Nil(t, currentPacker().PackNotification(n, nil, nil, idGen, nil, nil))
 }
 
 // #2735: 通知の note embed に files が入ること。packNoteAtDepth は Files を空
@@ -356,7 +356,7 @@ func TestPackNotification_ResolvesNoteFiles(t *testing.T) {
 	}
 	note := &model.Note{ID: "n1", UserID: "u_bob", FileIDs: model.StringArray{"f1"}}
 
-	out := PackNotification(n, nil, note, idGen, nil, nil, WithNoteFieldResolver(r))
+	out := currentPacker().PackNotification(n, nil, note, idGen, nil, nil, WithNoteFieldResolver(r))
 	packed, ok := out["note"].(NoteEntity)
 	require.True(t, ok)
 	require.Len(t, packed.Files, 1)
@@ -373,7 +373,7 @@ func TestPackNotification_NilNoteFieldResolverIsNoOp(t *testing.T) {
 	}
 	note := &model.Note{ID: "n1", UserID: "u_bob", FileIDs: model.StringArray{"f1"}}
 
-	out := PackNotification(n, nil, note, idGen, nil, nil, WithNoteFieldResolver(nil))
+	out := currentPacker().PackNotification(n, nil, note, idGen, nil, nil, WithNoteFieldResolver(nil))
 	packed, ok := out["note"].(NoteEntity)
 	require.True(t, ok)
 	assert.Empty(t, packed.Files)
@@ -401,7 +401,7 @@ func TestPackNotifications_BatchesNoteFileLookup(t *testing.T) {
 		})
 	}
 
-	out := PackNotifications(items, idGen, nil, nil, WithNoteFieldResolver(r))
+	out := currentPacker().PackNotifications(items, idGen, nil, nil, WithNoteFieldResolver(r))
 	require.Len(t, out, 2)
 	// **どの通知行にどの note が戻ったか**まで見る。resolveNoteFields は値型 slice に
 	// 抜き出して書き戻すので、対応付けを取り違えると通知 A の行に通知 B の note が
@@ -443,7 +443,7 @@ func TestPackNotifications_MixedNoteAndNoteLessRows(t *testing.T) {
 		},
 	}
 
-	out := PackNotifications(items, idGen, nil, nil, WithNoteFieldResolver(r))
+	out := currentPacker().PackNotifications(items, idGen, nil, nil, WithNoteFieldResolver(r))
 	require.Len(t, out, 2)
 	_, hasNote := out[0]["note"]
 	assert.False(t, hasNote, "note を持たない通知の行に note が生えないこと")
@@ -460,7 +460,7 @@ func TestPackNotifications_NoNoteSkipsFileLookup(t *testing.T) {
 	files := &stubDriveFileLookup{files: map[string]*model.DriveFile{}}
 	r := NewNoteFieldResolver(currentPacker(), files, nil, nil, nil, nil, idGen)
 
-	out := PackNotifications([]NotificationItem{{
+	out := currentPacker().PackNotifications([]NotificationItem{{
 		N: &notification.Notification{
 			ID: idGen.Generate(time.Now()), CreatedAt: time.Now(),
 			Type: notification.TypeFollow, NotifierID: "u_bob",
@@ -488,7 +488,7 @@ func TestPackNotification_ResolvesViewerFieldsForNotifiee(t *testing.T) {
 		Reactions: datatypes.JSON([]byte(`{"👍":1}`)),
 	}
 
-	out := PackNotification(n, nil, note, idGen, nil, nil,
+	out := currentPacker().PackNotification(n, nil, note, idGen, nil, nil,
 		WithViewer("u_alice"), WithNoteFieldResolver(r))
 	packed, ok := out["note"].(NoteEntity)
 	require.True(t, ok)
@@ -511,7 +511,7 @@ func TestPackNotification_EmptyViewerSkipsViewerFields(t *testing.T) {
 	}
 	note := &model.Note{ID: "n1", UserID: "u_alice", Reactions: datatypes.JSON([]byte(`{"👍":1}`))}
 
-	out := PackNotification(n, nil, note, idGen, nil, nil, WithNoteFieldResolver(r))
+	out := currentPacker().PackNotification(n, nil, note, idGen, nil, nil, WithNoteFieldResolver(r))
 	packed, ok := out["note"].(NoteEntity)
 	require.True(t, ok)
 	assert.Nil(t, packed.MyReaction)

@@ -35,7 +35,7 @@ func TestPackDriveFile_Basic(t *testing.T) {
 		FolderID:     &folderID,
 	}
 
-	out := PackDriveFile(f, idGen)
+	out := currentPacker().PackDriveFile(f, idGen)
 	assert.Equal(t, fileID, out.ID)
 	assert.NotEmpty(t, out.CreatedAt)
 	assert.Equal(t, "hello.txt", out.Name)
@@ -51,7 +51,7 @@ func TestPackDriveFile_Basic(t *testing.T) {
 func TestPackDriveFile_InvalidIDLeavesCreatedAtEmpty(t *testing.T) {
 	idGen := newTestIDGen(t)
 	f := &model.DriveFile{ID: "not-a-valid-id"}
-	out := PackDriveFile(f, idGen)
+	out := currentPacker().PackDriveFile(f, idGen)
 	assert.Empty(t, out.CreatedAt)
 }
 
@@ -98,7 +98,7 @@ func TestPackDriveFile_WithPropertiesAndWebpublic(t *testing.T) {
 		WebpublicType: &wpType,
 	}
 
-	out := PackDriveFile(f, idGen)
+	out := currentPacker().PackDriveFile(f, idGen)
 	assert.Equal(t, &wpURL, out.WebpublicURL)
 	// typed DriveFileProperties に変換されているため、width/height が
 	// ポインタ int で直接触れる。
@@ -117,7 +117,7 @@ func TestPackDriveFile_EmptyProperties(t *testing.T) {
 		Name: "file.txt",
 		URL:  "https://example.com/files/x",
 	}
-	out := PackDriveFile(f, idGen)
+	out := currentPacker().PackDriveFile(f, idGen)
 	// properties 空 → zero-valued DriveFileProperties (全フィールド nil)
 	assert.Nil(t, out.Properties.Width)
 	assert.Nil(t, out.Properties.Height)
@@ -148,7 +148,7 @@ func TestPackDriveFile_AllPropertyFields(t *testing.T) {
 	// #1948-14: PackDriveFile は非 self (公開) view なので getPublicProperties を
 	// 適用する。orientation=8 (>=5) なので width/height が swap され、orientation は
 	// strip される (upstream getPublicProperties)。
-	out := PackDriveFile(f, idGen)
+	out := currentPacker().PackDriveFile(f, idGen)
 	require.NotNil(t, out.Properties.Width)
 	assert.Equal(t, 720, *out.Properties.Width, "orientation>=5 で width/height が swap (#1948-14)")
 	require.NotNil(t, out.Properties.Height)
@@ -158,7 +158,7 @@ func TestPackDriveFile_AllPropertyFields(t *testing.T) {
 	assert.Equal(t, "rgb(40,65,87)", *out.Properties.AvgColor)
 
 	// #1948-14: self path (PackDriveFileSelf) は raw properties を保持する。
-	self := PackDriveFileSelf(f, idGen)
+	self := currentPacker().PackDriveFileSelf(f, idGen)
 	assert.Equal(t, 1280, *self.Properties.Width, "self view は raw width を保持")
 	assert.Equal(t, 720, *self.Properties.Height)
 	require.NotNil(t, self.Properties.Orientation, "self view は orientation を保持 (#1948-14)")
@@ -170,7 +170,7 @@ func TestPackDriveFile_PublicPropertiesNoSwapBelowFive(t *testing.T) {
 	idGen := newTestIDGen(t)
 	props, _ := json.Marshal(map[string]any{"width": 1280, "height": 720, "orientation": 3})
 	f := &model.DriveFile{ID: idGen.Generate(time.Now()), Name: "p.jpg", URL: "https://e/p.jpg", Properties: datatypes.JSON(props)}
-	out := PackDriveFile(f, idGen)
+	out := currentPacker().PackDriveFile(f, idGen)
 	assert.Equal(t, 1280, *out.Properties.Width, "orientation<5 は swap しない")
 	assert.Equal(t, 720, *out.Properties.Height)
 	assert.Nil(t, out.Properties.Orientation, "orientation は strip される")
@@ -184,7 +184,7 @@ func TestPackDriveFile_InvalidPropertiesJSON_Defaults(t *testing.T) {
 		URL:        "x",
 		Properties: datatypes.JSON([]byte("not-json")),
 	}
-	out := PackDriveFile(f, idGen)
+	out := currentPacker().PackDriveFile(f, idGen)
 	// invalid JSON → 全フィールド nil にフォールバック
 	assert.Nil(t, out.Properties.Width)
 	assert.Nil(t, out.Properties.Height)
@@ -199,7 +199,7 @@ func TestPackDriveFile_WithFolderAndUser(t *testing.T) {
 	folder := &model.DriveFolder{ID: folderID, Name: "Pictures"}
 	user := &model.User{ID: userID, Username: "alice"}
 
-	out := PackDriveFile(f, idGen)
+	out := currentPacker().PackDriveFile(f, idGen)
 	// caller が pack して後付けするパターン
 	packedFolder := PackDriveFolder(folder, idGen)
 	out.Folder = &packedFolder
@@ -221,7 +221,7 @@ func TestPackDriveFileWithRelations_BothSet(t *testing.T) {
 	folder := &model.DriveFolder{ID: folderID, Name: "Pictures"}
 	user := &model.User{ID: userID, Username: "alice"}
 
-	out := PackDriveFileWithRelations(f, idGen, folder, user)
+	out := currentPacker().PackDriveFileWithRelations(f, idGen, folder, user)
 	require.NotNil(t, out.Folder)
 	assert.Equal(t, "Pictures", out.Folder.Name)
 	require.NotNil(t, out.User)
@@ -244,7 +244,7 @@ func TestPackDriveFile_FallbackThumbnailFromURL(t *testing.T) {
 		// ThumbnailURL / WebpublicURL は nil (link-format で生成され
 		// ていない remote attachment を想定)
 	}
-	out := PackDriveFile(f, idGen)
+	out := currentPacker().PackDriveFile(f, idGen)
 	require.NotNil(t, out.ThumbnailURL)
 	assert.Equal(t, "https://r/remote.png", *out.ThumbnailURL)
 }
@@ -259,7 +259,7 @@ func TestPackDriveFile_FallbackThumbnailFromWebpublic(t *testing.T) {
 		URL:          "https://r/remote.webp",
 		WebpublicURL: &web,
 	}
-	out := PackDriveFile(f, idGen)
+	out := currentPacker().PackDriveFile(f, idGen)
 	require.NotNil(t, out.ThumbnailURL)
 	// webpublicUrl が優先される (upstream getThumbnailUrl と一致)
 	assert.Equal(t, web, *out.ThumbnailURL)
@@ -273,7 +273,7 @@ func TestPackDriveFile_NoFallbackForNonImage(t *testing.T) {
 		Type: "video/mp4",
 		URL:  "https://r/video.mp4",
 	}
-	out := PackDriveFile(f, idGen)
+	out := currentPacker().PackDriveFile(f, idGen)
 	// video など非 image MIME はフォールバックさせない (frontend が
 	// thumbnail として動画を読み込んでしまうのを避ける)
 	assert.Nil(t, out.ThumbnailURL)
@@ -289,7 +289,7 @@ func TestPackDriveFile_PreservesExistingThumbnailUrl(t *testing.T) {
 		URL:          "https://r/x.png",
 		ThumbnailURL: &thumb,
 	}
-	out := PackDriveFile(f, idGen)
+	out := currentPacker().PackDriveFile(f, idGen)
 	require.NotNil(t, out.ThumbnailURL)
 	assert.Equal(t, thumb, *out.ThumbnailURL)
 }
@@ -298,7 +298,7 @@ func TestPackDriveFileWithRelations_NilRelations(t *testing.T) {
 	idGen := newTestIDGen(t)
 	f := &model.DriveFile{ID: idGen.Generate(time.Now()), Name: "a", URL: "x"}
 	// folder/user が nil のときは omitempty で省略される
-	out := PackDriveFileWithRelations(f, idGen, nil, nil)
+	out := currentPacker().PackDriveFileWithRelations(f, idGen, nil, nil)
 	assert.Nil(t, out.Folder)
 	assert.Nil(t, out.User)
 }

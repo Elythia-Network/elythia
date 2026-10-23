@@ -271,7 +271,7 @@ func (h *Handler) packDriveFileAdmin(f *model.DriveFile) entity.DriveFileEntity 
 	}
 	// admin moderation view は upstream pack({self:true}) 相当で raw properties を
 	// 保持する (orientation を strip しない、#1948-14)。
-	return entity.PackDriveFileWithRelationsSelf(f, h.idGen, nil, user)
+	return h.entityPacker.PackDriveFileWithRelationsSelf(f, h.idGen, nil, user)
 }
 
 // DriveShowFile handles POST /api/admin/drive/show-file.
@@ -338,7 +338,7 @@ func (h *Handler) packAdminDriveShowFile(f *model.DriveFile, viewer *model.User)
 	// admin moderation view は self:true 相当。ここでは packed から url/thumbnailUrl/
 	// webpublicUrl のみ使い、properties は後段の driveFileProperties が raw 返却するため
 	// self の有無は実効的に URL のみに影響する。一貫性のため Self 変種を使う (#1948-14)。
-	packed := entity.PackDriveFileSelf(f, h.idGen)
+	packed := h.entityPacker.PackDriveFileSelf(f, h.idGen)
 	fileURL := packed.URL
 	thumbURL := packed.ThumbnailURL
 	webpublicURL := packed.WebpublicURL

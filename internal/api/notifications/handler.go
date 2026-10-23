@@ -78,7 +78,18 @@ type Handler struct {
 	// 匿名の閲覧者への ugcVisibilityForVisitor が効かないので、criticalWiring が
 	// 起動時に検査する。
 	noteHider *notehide.Hider
+	// entityPacker は entity を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3796)。組み立てで渡し、既定の Packer を読まない。
+	entityPacker *entity.Packer
 }
+
+// SetEntityPacker wires the Packer this Handler packs entities with (#3796).
+func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
+// リモートへ漏れる。
+func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
 
 // SetNoteHider wires the Hider that applies the per-viewer hideNote gate to
 // the notes this handler packs.
@@ -368,7 +379,7 @@ func (h *Handler) Show(c echo.Context) error {
 		slog.Error("notifications: resolve abuse report states failed", "err", err)
 		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
 	}
-	out := entity.PackNotifications(items, h.idGen, h.instanceLookup(), h.emojiLookup(), opts...)
+	out := h.entityPacker.PackNotifications(items, h.idGen, h.instanceLookup(), h.emojiLookup(), opts...)
 	// depth-2 embed hide (#1570): collectNotifications の #1444 CanSeeNote gate は
 	// 見えない note を丸ごと落とすが embed (renote/reply) には再帰しない。通知 note の
 	// embed と著者設定ゲートを viewer 可視性で適用する。これを欠くと #1570 で塞いだ

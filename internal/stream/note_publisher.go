@@ -356,7 +356,7 @@ type NotificationFollowingChecker interface {
 // NotificationPublisher serializes a notification.Notification and publishes
 // it to the per-user `notifications:<id>` topic. Implements
 // core/notification.StreamingPublisher. When userRepo / noteRepo are set
-// the outbound JSON is packed via entity.PackNotification so the WebSocket
+// the outbound JSON is packed via (*entity.Packer).PackNotification so the WebSocket
 // body matches Misskey's NotificationEntityService.pack shape.
 type NotificationPublisher struct {
 	pub                  PubSubPublisher
@@ -378,7 +378,18 @@ type NotificationPublisher struct {
 	// (#2735)。未配線だと通知 payload の files が空配列のままになり、通知ページの
 	// reply / mention / quote (MkNote で全体描画される) から添付メディアが消える。
 	fieldResolver *entity.NoteFieldResolver
+	// entityPacker は entity を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3796)。組み立てで渡し、既定の Packer を読まない。
+	entityPacker *entity.Packer
 }
+
+// SetEntityPacker wires the Packer this NotificationPublisher packs entities with (#3796).
+func (p *NotificationPublisher) SetEntityPacker(pk *entity.Packer) { p.entityPacker = pk }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
+// リモートへ漏れる。
+func (p *NotificationPublisher) HasEntityPacker() bool { return p.entityPacker.HasMediaURL() }
 
 // NewNotificationPublisher constructs a NotificationPublisher.
 func NewNotificationPublisher(pub PubSubPublisher) *NotificationPublisher {
@@ -535,7 +546,7 @@ func (p *NotificationPublisher) pack(notifieeID string, n *corenotification.Noti
 			}
 		}
 	}
-	packed := entity.PackNotification(n, user, note, p.idGen, p.instanceLookup, p.emojiLookup,
+	packed := p.entityPacker.PackNotification(n, user, note, p.idGen, p.instanceLookup, p.emojiLookup,
 		entity.WithRoleLookup(p.roleLookup),
 		entity.WithAbuseReportLookup(p.abuseReportLookup),
 		entity.WithEmojiApplicationLookup(p.emojiApplicationLookup),

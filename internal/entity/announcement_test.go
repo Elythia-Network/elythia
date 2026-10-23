@@ -25,7 +25,7 @@ func TestPackAnnouncement_Basic(t *testing.T) {
 		Silence:                false,
 		UserID:                 &userID,
 	}
-	out := PackAnnouncement(a, idGen, true, userID)
+	out := currentPacker().PackAnnouncement(a, idGen, true, userID)
 	assert.Equal(t, aid, out["id"])
 	assert.Equal(t, "Hello", out["title"])
 	assert.Equal(t, "World", out["text"])
@@ -44,12 +44,12 @@ func TestPackAnnouncement_Basic(t *testing.T) {
 }
 
 func TestPackAnnouncement_NilInput(t *testing.T) {
-	assert.Nil(t, PackAnnouncement(nil, nil, false, ""))
+	assert.Nil(t, currentPacker().PackAnnouncement(nil, nil, false, ""))
 }
 
 func TestPackAnnouncement_NoUserID_ForYouFalse(t *testing.T) {
 	a := &model.Announcement{ID: "x", Title: "G", Text: "global"}
-	out := PackAnnouncement(a, nil, false, "")
+	out := currentPacker().PackAnnouncement(a, nil, false, "")
 	assert.Equal(t, false, out["forYou"])
 	assert.Nil(t, out["updatedAt"])
 	assert.Equal(t, "", out["createdAt"])
@@ -59,7 +59,7 @@ func TestPackAnnouncement_NoUserID_ForYouFalse(t *testing.T) {
 func TestPackAnnouncement_ForYouViewerMatch(t *testing.T) {
 	uid := "u1"
 	a := &model.Announcement{ID: "x", Title: "T", Text: "t", UserID: &uid}
-	assert.Equal(t, true, PackAnnouncement(a, nil, false, "u1")["forYou"], "viewer 自身宛て")
-	assert.Equal(t, false, PackAnnouncement(a, nil, false, "u2")["forYou"], "別 viewer")
-	assert.Equal(t, false, PackAnnouncement(a, nil, false, "")["forYou"], "me-less (create/event)")
+	assert.Equal(t, true, currentPacker().PackAnnouncement(a, nil, false, "u1")["forYou"], "viewer 自身宛て")
+	assert.Equal(t, false, currentPacker().PackAnnouncement(a, nil, false, "u2")["forYou"], "別 viewer")
+	assert.Equal(t, false, currentPacker().PackAnnouncement(a, nil, false, "")["forYou"], "me-less (create/event)")
 }
