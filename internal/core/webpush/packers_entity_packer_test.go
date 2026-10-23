@@ -18,8 +18,8 @@ import (
 // push の payload は、NewNoteRepoPacker に渡した Packer で包む (#3790)。
 //
 // 作者の avatarUrl (投稿の本体) と添付ファイル (内部の resolver) の両方が、渡した
-// Packer の media proxy を通ることを確かめる。このパッケージのテストは既定の
-// Packer を配線しないので、既定の Packer を読むと生の URL になる。
+// Packer の media proxy を通ることを確かめる。
+// 渡した Packer を使わずに nil の Packer で包むと生の URL になる。
 func TestNoteRepoPacker_UsesTheGivenPacker(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	repo := testutil.NewMockNoteRepository()

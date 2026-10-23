@@ -37,8 +37,9 @@ func TestHasEntityPacker(t *testing.T) {
 }
 
 // i/notifications の通知した人 (UserLite) は、SetEntityPacker で渡された Packer で
-// 包む (#3796)。このパッケージのテストは既定の Packer を配線しないので、既定の
-// Packer を読むと avatarUrl が生のリモートの URL になって落ちる。
+// 包む (#3796)。
+// 渡した Packer を使わずに nil の Packer で包むと avatarUrl が生のリモートの
+// URL になって落ちる。
 func TestShow_PacksWithTheGivenPacker(t *testing.T) {
 	h, svc := newTestHandler(t)
 	userRepo := testutil.NewMockUserRepository()

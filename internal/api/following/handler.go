@@ -30,7 +30,7 @@ type Handler struct {
 	// 同じ形に組む (#1912、#3330)。未配線なら関係・ピン留め・instance などを欠く。
 	packer userpack.ListPacker
 	// entityPacker は利用者や投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
-	// 持つ (#3792)。組み立てで渡し、既定の Packer を読まない。
+	// 持つ (#3792)。組み立てで渡す。
 	entityPacker *entity.Packer
 }
 

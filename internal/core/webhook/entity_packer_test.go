@@ -17,8 +17,8 @@ import (
 // webhook の payload の投稿は、SetEntityPacker で渡した Packer で包む (#3790)。
 //
 // 作者の avatarUrl が渡した Packer の media proxy を通ることを、投稿とリアクションの
-// 両方の hook で確かめる。このパッケージのテストは既定の Packer を配線しないので、
-// 既定の Packer を読むと生の URL になる。
+// 両方の hook で確かめる。
+// 渡した Packer を使わずに nil の Packer で包むと生の URL になる。
 func TestHooks_PackWithTheGivenPacker(t *testing.T) {
 	const remote = "https://remote.example"
 	avatar := remote + "/avatar.png"

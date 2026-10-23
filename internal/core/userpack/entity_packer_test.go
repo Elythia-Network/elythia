@@ -29,8 +29,8 @@ func TestPacker_HasEntityPacker(t *testing.T) {
 }
 
 // Lite・DetailedNotMe・DetailedMany は、New で渡された Packer で包む (#3792)。
-// 既定の Packer は空のままなので、既定の Packer を読むように戻ると avatarUrl が
-// 生のリモートの URL になって落ちる。
+// 渡した Packer を使わずに nil の Packer で包むと avatarUrl が生のリモートの
+// URL になって落ちる。
 func TestPacker_PacksWithTheGivenEntityPacker(t *testing.T) {
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)

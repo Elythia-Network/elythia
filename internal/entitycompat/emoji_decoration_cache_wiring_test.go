@@ -14,9 +14,10 @@ import (
 // 絵文字を作った直後にそれを装着しても **保存されているのに API が
 // `avatarDecorations: []` を返す** — #2258 が catalog 側で踏んだ形そのもの。
 //
-// **`entity.SetEmojiDecorationLookup` だけは `TestProcessGlobalsAreRestored` が
-// 見ているが、invalidator 側は誰も見ていなかった。** どちらも消してもビルドも
-// テストも通り、症状は「30 秒だけ消える」なのでログにも出ない。
+// **resolver を Packer に入れる配線 (`EmojiDecoration: emojiDecorationResolver`)
+// は `TestEntityPackerDepsAreWired` が見ているが、invalidator 側は誰も見て
+// いなかった。** どちらも消してもビルドもテストも通り、症状は「30 秒だけ
+// 消える」なのでログにも出ない。
 //
 // **criticalWiring の表には載せない。** あちらは GoDoc が「認証や一回性の保証」
 // と tier を定義しており、未配線で起きるのが「空配列 / 0 / 使えない」のものは

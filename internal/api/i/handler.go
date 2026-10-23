@@ -187,7 +187,7 @@ type Handler struct {
 	// 起動時に検査する。
 	noteHider *notehide.Hider
 	// entityPacker は利用者や投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
-	// 持つ (#3790、#3792)。組み立てで渡し、既定の Packer を読まない。
+	// 持つ (#3790、#3792)。組み立てで渡す。
 	entityPacker *entity.Packer
 }
 
@@ -1077,7 +1077,7 @@ func (h *Handler) me(c echo.Context, allowSecrets bool) error {
 	// (/api/i) では出さない。旧実装は `resp["moderationNote"]=nil` で null を出し
 	// golden 非互換だった (#1270 L3 で検出)。
 	// isSilenced は role policy 由来 (MeDetailed/UserDetailedNotMe 共通 field)。
-	// PackUserDetailed も entity.SetSilencedLookup 経由で同値を埋めるが、/api/i は
+	// PackUserDetailed も Packer の silenced lookup で同値を埋めるが、/api/i は
 	// handler 層の roleProvider を権威ソースとして明示的に上書きする (両者とも
 	// 同一 roleService なので値は一致)。
 	resp["isSilenced"] = h.isSilenced(u.ID)

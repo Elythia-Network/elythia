@@ -15,7 +15,7 @@ type CanChatLookupAdapter struct {
 }
 
 // NewCanChatLookup returns an entity.CanChatLookup that resolves a user's
-// canChat status via role policies. Use entity.SetCanChatLookup(...) to wire.
+// canChat status via role policies. Wire it as entity.PackerDeps.CanChat.
 //
 // nil provider を渡された場合は nil adapter を返す代わりに usable な
 // stub adapter (= 常に ok=false を返す) を返す。これにより呼び出し側

@@ -235,48 +235,77 @@ func TestNew_FailedConstructionClosesItsSubscriptions(t *testing.T) {
 	assert.False(t, built.background.Go(func(context.Context) {}), "失敗した構築の箱が閉じていない")
 }
 
-// TestNewServer_ConstructionIsSerialized checks that two constructions in one
-// process do not overlap: newServer replaces process-wide state while it
-// wires the routes, so a second one must wait for the first.
-func TestNewServer_ConstructionIsSerialized(t *testing.T) {
+// TestNewServer_ConstructionsMayOverlap checks that two constructions in one
+// process can run at the same time.
+//
+// 以前は newServer がプロセス共有の状態 (entity の Set*) を書き換えたので、
+// constructionMu で構築ごと直列にしていた。#3800 で書き換えが無くなったので
+// lock を外した。ここでは 2 つの構築が両方とも途中にいる状態を作ってから同時に
+// 進め、**最後まで成功させる**。共有の状態を同期無しに書き換える処理が、
+// beforeSetup より後のどこかに戻れば、-race (make test は付ける) で落とす。
+// lock や sync.Once で守った張り替えはデータ競合にならないので拾えないが、
+// `pkg.SetXxx(...)` の形なら TestProcessGlobalsAreRestored が別に拾う。
+// プラグインは渡さない (失敗するプラグインを渡すと setupPlugins で戻り、その先が
+// 検査から漏れる)。
+func TestNewServer_ConstructionsMayOverlap(t *testing.T) {
 	db, clients, _, cfg := constructionFixture(t)
 	restoreProcessGlobals(t)
-	firstIn := make(chan struct{})
-	releaseFirst := make(chan struct{})
-	secondIn := make(chan struct{})
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		_, _ = newServer(cfg, db, clients, []plugin.Definition{failingRoutes()}, noopStorage, func(*Server) {
-			close(firstIn)
-			<-releaseFirst
-		})
-	}()
-	<-firstIn
-	go func() {
-		defer wg.Done()
-		_, _ = newServer(cfg, db, clients, []plugin.Definition{failingRoutes()}, noopStorage, func(*Server) { close(secondIn) })
-	}()
-	select {
-	case <-secondIn:
-		t.Fatal("1 つ目の構築の途中で、2 つ目の構築が始まった")
-	case <-time.After(300 * time.Millisecond):
+	// ドライブのファイルは作業ディレクトリ相対の./drive-filesに置かれるので、
+	// リポジトリを汚さないよう一時ディレクトリへ移る。
+	t.Chdir(t.TempDir())
+	var inside sync.WaitGroup
+	inside.Add(2)
+	release := make(chan struct{})
+	type result struct {
+		srv *Server
+		err error
 	}
-	close(releaseFirst)
+	results := make(chan result, 2)
+	// 失敗の経路でも、作られたサーバーを止める。結果は 2 つとも必ず受け取る。
+	var collected []result
+	t.Cleanup(func() {
+		for len(collected) < 2 {
+			collected = append(collected, <-results)
+		}
+		for _, r := range collected {
+			if r.srv != nil {
+				_ = r.srv.Shutdown(context.Background())
+			}
+		}
+	})
+	for range 2 {
+		go func() {
+			srv, err := newServer(cfg, db, clients, nil, noopStorage, func(*Server) {
+				inside.Done()
+				<-release
+			})
+			results <- result{srv, err}
+		}()
+	}
+	bothInside := make(chan struct{})
+	go func() { inside.Wait(); close(bothInside) }()
 	select {
-	case <-secondIn:
+	case <-bothInside:
+	case r := <-results:
+		// 途中まで進む前に戻った。直列化ではなく構築の失敗なので、そのまま報告する。
+		collected = append(collected, r)
+		close(release)
+		t.Fatalf("構築が途中まで進む前に戻った: %v", r.err)
 	case <-time.After(10 * time.Second):
-		t.Fatal("1 つ目が終わっても、2 つ目の構築が始まらない")
+		close(release)
+		t.Fatal("2 つの構築が同時に途中まで進まない (構築が直列になっている)")
 	}
-	wg.Wait()
+	close(release)
+	for len(collected) < 2 {
+		collected = append(collected, <-results)
+	}
+	for _, r := range collected {
+		require.NoError(t, r.err, "構築は最後まで成功する")
+	}
 }
 
-// failingRoutes is a plugin whose Routes fails, so a construction stops
-// right after setupRoutes has opened its subscriptions.
-func failingRoutes() plugin.Definition { return failingRoutesWith(nil) }
-
-// failingRoutesWith is failingRoutes that calls onFail (when non-nil) just
+// failingRoutesWith is a plugin whose Routes fails, so a construction stops
+// right after setupRoutes has opened its subscriptions. It calls onFail (when non-nil) just
 // before Routes fails.
 func failingRoutesWith(onFail func()) plugin.Definition {
 	return plugin.Definition{

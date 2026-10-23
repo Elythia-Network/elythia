@@ -515,7 +515,7 @@ func (pkr *Packer) IdenticonURL(u *model.User) string {
 // via InstanceRepository and assigned to the returned UserLite.Instance.
 // PackUserLite itself performs no DB access on the steady-state hot path
 // (designed for timeline packing). 例外として avatarDecorations の url 解決
-// は entity.SetAvatarDecorationLookup() 経由の resolver を引く — 通常実装は
+// は Packer の avatarDecoration の resolver を引く — 通常実装は
 // 30s TTL の in-memory cache (core/avatardecoration.Resolver) で hit 時は
 // DB を叩かない。cache miss / TTL 切れでのみ admin catalog の List を 1 回
 // 引く (#521 / #524 review)。

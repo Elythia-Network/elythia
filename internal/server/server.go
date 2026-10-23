@@ -691,19 +691,7 @@ func New(cfg *config.Config, db *gorm.DB, redis *cache.RedisClients) (*Server, e
 	return newServer(cfg, db, redis, plugin.Registered(), nil)
 }
 
-// constructionMu serializes server construction. newServer replaces
-// process-wide state (the setters TestProcessGlobalsAreRestored lists, e.g.
-// entity.Set*) while it wires the routes.
-//
-// 本番では 1 プロセスに Supervisor は 1 つで、世代の作り直しは genMu で直列に
-// なる。それでも、同じプロセスで 2 つの構築が重なると (2 つの Supervisor を立てる
-// テストで実際に起きた) グローバルへの書き込みが競合するので、構築ごと直列にする。
-// 構築は起動時とメンテナンスを抜けるときにしか走らないので、待ちは問題にならない。
-var constructionMu sync.Mutex
-
 func newServer(cfg *config.Config, db *gorm.DB, redis *cache.RedisClients, plugins []plugin.Definition, openStorage pluginStorageOpener, beforeSetup ...func(*Server)) (*Server, error) {
-	constructionMu.Lock()
-	defer constructionMu.Unlock()
 	// 役割は環境変数で決まる (#2459)。矛盾した指定はここで落として、
 	// 「起動はしたがジョブが処理されない」形の失敗にしない。
 	role, err := config.ResolveProcessRole()

@@ -180,46 +180,47 @@ type silencedByID map[string]bool
 
 func (s silencedByID) IsSilenced(userID string) bool { return s[userID] }
 
-// **既定の Packer を読むのは packer.go だけ (#3788、#3798)。**
+// **本番のコードは既定の Packer を持たず、読まない (#3800)。**
 //
-// Packer のメソッドの中で currentPacker() を呼ぶと、明示的に渡した Packer の
-// 依存ではなく既定の Packer の依存を使ってしまう。テストは代表の経路しか見ない
-// ので、呼び出しの場所でまとめて縛る。既定の Packer へ委ねる薄い関数は #3798 で
-// 無くなったので、残る読み手は packer.go の Set* (updateDefaultPacker) だけになる。
+// 既定の Packer と Set* は、このパッケージのテスト用の補助 (default_packer_test.go)
+// にだけある。本番のファイルが currentPacker() を呼ぶか定義すると、組み立てで
+// 渡した Packer ではなくプロセス共有の状態を読む形に戻る。テストは代表の経路しか
+// 見ないので、呼び出しと定義の場所でまとめて縛る。
 //
 // ファイルはディスクから列挙する (git ls-files ではない)。縛りたいのはこの
 // パッケージとしてコンパイルされるファイルで、それはディスク上のファイルだから。
-func TestCurrentPackerIsOnlyReadByPackerGo(t *testing.T) {
+func TestProductionDoesNotUseTheDefaultPacker(t *testing.T) {
 	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	seen := 0
+	helperDefined := false
 	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
-		}
 		af, err := parser.ParseFile(token.NewFileSet(), f, nil, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
+		isTest := strings.HasSuffix(f, "_test.go")
 		ast.Inspect(af, func(n ast.Node) bool {
-			ce, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			if id, ok := ce.Fun.(*ast.Ident); ok && id.Name == "currentPacker" {
-				seen++
-				if f != "packer.go" {
-					t.Errorf("%s calls currentPacker(); a Packer method must use its receiver", f)
+			switch n := n.(type) {
+			case *ast.FuncDecl:
+				if n.Recv == nil && n.Name.Name == "currentPacker" {
+					if isTest {
+						helperDefined = true
+					} else {
+						t.Errorf("%s defines currentPacker; the default Packer is test-only", f)
+					}
+				}
+			case *ast.CallExpr:
+				if id, ok := n.Fun.(*ast.Ident); ok && id.Name == "currentPacker" && !isTest {
+					t.Errorf("%s calls currentPacker(); take the Packer the assembly passes instead", f)
 				}
 			}
 			return true
 		})
 	}
-	// 読み手は packer.go の updateDefaultPacker の 1 回だけ。0 回なら抽出が空振り
-	// している。2 回以上なら packer.go の中に新しい読み手が増えている。
-	if seen != 1 {
-		t.Errorf("found %d currentPacker() calls; want exactly 1 (updateDefaultPacker)", seen)
+	// 走査が空振りしていないこと (テスト用の補助の定義は見つかるはず)。
+	if !helperDefined {
+		t.Error("currentPacker is not defined in any _test.go file; the scan is broken")
 	}
 }

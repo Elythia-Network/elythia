@@ -146,7 +146,7 @@ type Service struct {
 	// silentFollowRepo は「静かに成立させる」(#3466) で通したフォローを記録する。
 	silentFollowRepo repository.SilentFollowRepository
 	// entityPacker は利用者や投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
-	// 持つ (#3792)。組み立てで渡し、既定の Packer を読まない。
+	// 持つ (#3792)。組み立てで渡す。
 	entityPacker *entity.Packer
 }
 

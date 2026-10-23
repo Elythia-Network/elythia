@@ -13,15 +13,6 @@ type CanChatLookup interface {
 	LookupCanChat(userID string) (canChat bool, ok bool)
 }
 
-// SetCanChatLookup wires the role-policy lookup used by PackUserLite to
-// derive canChat. Pass nil to clear (used in tests).
-//
-// It changes only the default Packer (#3788); a Packer built by NewPacker
-// keeps its own dependencies.
-func SetCanChatLookup(l CanChatLookup) {
-	updateDefaultPacker(func(p *Packer) { p.canChat = l })
-}
-
 // resolveCanChat returns the canChat value for userID via the Packer's
 // lookup, falling back to true (= upstream default `chatAvailability ===
 // "available"`) when lookup is unwired or returns ok=false.

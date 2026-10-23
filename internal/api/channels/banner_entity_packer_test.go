@@ -9,8 +9,8 @@ import (
 )
 
 // チャンネルのバナーは、引数で渡された Packer で media proxy へ通す (#3798)。
-// このパッケージのテストは既定の Packer を配線しないので、既定の Packer を読むと
-// 生のリモートの URL になって落ちる。
+// 渡した Packer を使わずに nil の Packer で包むと生のリモートの URL
+// になって落ちる。
 func TestChannelBannerPublicURL_UsesTheGivenPacker(t *testing.T) {
 	pk := entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
 		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true)})
