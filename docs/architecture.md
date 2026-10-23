@@ -192,11 +192,11 @@ api-compat.md の 444 + 58) は、ルート数の段落を最後に直した 202
 
 ### 3.3 `internal/entity/` — レスポンス DTO
 
-`core/entities/*EntityService.pack()` に対応。ただし Elythia は**純関数 `PackX()`**（DI なし・ドメインロジックなし）。
+`core/entities/*EntityService.pack()` に対応。Elythia では `entity.Packer` のメソッド `PackX()` で、ドメインロジックは持たない。pack が読む依存 (role 由来の値・アバターの飾り・メディアのプロキシなど) は Packer が持つ (#3788)。組み立て (`internal/server`) で 1 組の依存から部品へ渡す Packer を作り、既定の Packer も同じ依存で配線する。投稿を包む部品 (`PackNote` / `PackNotes` / `PackNoteWithInstance` と `NoteFieldResolver`) は渡された Packer を使う (#3790)。ただし通知 (`PackNotification(s)`) に埋め込む投稿の本体は、まだ既定の Packer で包む (添付ファイルは共有の resolver の Packer)。それ以外の `PackX()` は、まだ既定の Packer へ委ねるパッケージ関数 (`packer_default_funcs.go`) を通り、#3666 の段階 (5) で順に移す。
 
 | Elythia | Misskey-TS |
 |---|---|
-| `PackNote` / `PackNotes` (note.go) | NoteEntityService |
+| `(*Packer).PackNote` / `PackNotes` (note.go) | NoteEntityService |
 | `PackUserLite` / `PackUserDetailed` (user系) | UserEntityService |
 | `PackNotification` | NotificationEntityService |
 | `PackDriveFile` / `PackDriveFolder` | DriveFile/DriveFolder EntityService |
