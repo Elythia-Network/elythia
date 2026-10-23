@@ -273,7 +273,7 @@ func (h *Handler) UsersBulk(c echo.Context) error {
 	out := make([]entity.UserLite, 0, len(req.UserIDs))
 	for _, uid := range req.UserIDs {
 		if bundle, err := h.userService.ShowByID(uid); err == nil {
-			out = append(out, entity.PackUserLite(bundle.User))
+			out = append(out, h.entityPacker.PackUserLite(bundle.User))
 		}
 	}
 	return c.JSON(http.StatusOK, out)

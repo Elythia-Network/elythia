@@ -949,7 +949,7 @@ func (s *Service) applyMediaUpdate(userID string, idPtr *string, prefix string, 
 	// **プロキシには通さない。** ここは DB に保存する値で、mk-go の
 	// `ProxiedURL` は `sig=` に HMAC を付けるため、保存するとプロキシの secret を
 	// 変えた瞬間に全員のアイコン URL が無効になる。リモート origin の包み直しは
-	// packer 側 (`entity.PackUserLite` → `ProxyAvatarURL`) が既に行う。
+	// packer 側 (`(*entity.Packer).PackUserLite` → `ProxyAvatarURL`) が既に行う。
 	userFields[prefix+"Url"] = entity.WebpublicOrOriginalURL(file)
 	if file.Blurhash != nil {
 		userFields[prefix+"Blurhash"] = *file.Blurhash

@@ -184,7 +184,7 @@ func (h *Handler) IPRelatedAccounts(c echo.Context) error {
 	}
 	noStoreIPLookup(c)
 	return c.JSON(http.StatusOK, ipRelatedResponse{
-		User:                entity.PackUserLite(target),
+		User:                h.entityPacker.PackUserLite(target),
 		LoggingEnabled:      m.EnableIPLogging,
 		HasAnyHistory:       hasAnyHistory,
 		SinceDays:           sinceDays,
@@ -389,7 +389,7 @@ func (h *Handler) packRelatedCandidates(ranked []iprelation.Candidate) ([]ipRela
 			})
 		}
 		out = append(out, ipRelatedCandidate{
-			User:           entity.PackUserLite(u),
+			User:           h.entityPacker.PackUserLite(u),
 			IsSuspended:    u.IsSuspended,
 			IsDeleted:      u.IsDeleted,
 			LastActiveDate: formatIPTimePtr(u.LastActiveDate),

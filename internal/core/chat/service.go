@@ -192,7 +192,18 @@ type Service struct {
 	// プラグインが管理するアカウント宛のメッセージを、そのプラグインへ届ける
 	// のに使う。未配線なら呼ばない。
 	messageObserver MessageObserver
+	// entityPacker は利用者を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3794)。組み立てで渡し、既定の Packer を読まない。
+	entityPacker *entity.Packer
 }
+
+// SetEntityPacker wires the Packer this Service packs entities with (#3794).
+func (s *Service) SetEntityPacker(p *entity.Packer) { s.entityPacker = p }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
+// リモートへ漏れる。
+func (s *Service) HasEntityPacker() bool { return s.entityPacker.HasMediaURL() }
 
 // MessageObserver is told about each direct (1:1) chat message after it has
 // been stored (#3469).
@@ -1924,7 +1935,7 @@ func (s *Service) publishReaction(ctx context.Context, msg *model.ChatMessage, e
 	body := map[string]any{
 		"messageId": msg.ID,
 		"reaction":  emoji,
-		"user":      entity.PackUserLite(reactor),
+		"user":      s.entityPacker.PackUserLite(reactor),
 	}
 	switch {
 	case msg.ToRoomID != nil && *msg.ToRoomID != "":
@@ -2156,7 +2167,7 @@ func (s *Service) resolveUser(known *model.User, id string) *model.User {
 }
 
 // packUsersStream packs users as upstream's UserLite (the same
-// entity.PackUserLite the REST API uses) and resolves instance / emojis of all
+// (*entity.Packer).PackUserLite the REST API uses) and resolves instance / emojis of all
 // of them with one FillLites call. out[i] is nil when users[i] is nil.
 //
 // 本家の stream / push の fromUser・toUser は userEntityService.pack の UserLite。
@@ -2170,7 +2181,7 @@ func (s *Service) packUsersStream(users ...*model.User) []*entity.UserLite {
 		if u == nil {
 			continue
 		}
-		l := entity.PackUserLite(u)
+		l := s.entityPacker.PackUserLite(u)
 		out[i] = &l
 		present = append(present, u)
 		lites = append(lites, &l)

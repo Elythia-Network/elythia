@@ -16,7 +16,7 @@ func TestUserRepoPacker_Found(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
 	repo.Users["u1"] = &model.User{ID: "u1", Username: "alice", UsernameLower: "alice"}
 
-	p := webpush.NewUserRepoPacker(repo)
+	p := webpush.NewUserRepoPacker(repo, nil)
 	out, ok := p.PackUserByID("u1")
 	assert.True(t, ok)
 	assert.Equal(t, "alice", out["username"])
@@ -24,13 +24,13 @@ func TestUserRepoPacker_Found(t *testing.T) {
 
 func TestUserRepoPacker_NotFound(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
-	p := webpush.NewUserRepoPacker(repo)
+	p := webpush.NewUserRepoPacker(repo, nil)
 	_, ok := p.PackUserByID("missing")
 	assert.False(t, ok)
 }
 
 func TestUserRepoPacker_NilRepo(t *testing.T) {
-	p := webpush.NewUserRepoPacker(nil)
+	p := webpush.NewUserRepoPacker(nil, nil)
 	_, ok := p.PackUserByID("x")
 	assert.False(t, ok)
 }

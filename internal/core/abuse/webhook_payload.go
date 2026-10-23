@@ -31,7 +31,7 @@ type UserLookups struct {
 // 解決する (UserEntityService.pack)。PackUserLite だけではどちらも付かないので、
 // 他の packer と同じ resolver を通す。Flag の通報者は必ずリモートなので、ここを
 // 省くと Flag 経由の通報だけ本文の形が変わる。
-func WebhookPayload(report *model.AbuseUserReport, reporter, target, assignee *model.User, lookups UserLookups, idGen id.Generator) map[string]any {
+func WebhookPayload(pk *entity.Packer, report *model.AbuseUserReport, reporter, target, assignee *model.User, lookups UserLookups, idGen id.Generator) map[string]any {
 	users := make([]*model.User, 0, 3)
 	for _, u := range []*model.User{reporter, target, assignee} {
 		if u != nil {
@@ -50,7 +50,7 @@ func WebhookPayload(report *model.AbuseUserReport, reporter, target, assignee *m
 		if u == nil {
 			return nil
 		}
-		lite := entity.PackUserLite(u)
+		lite := pk.PackUserLite(u)
 		instances.FillUserLite(&lite)
 		emojis.PopulateUserEmojis(u, &lite)
 		return &lite

@@ -38,7 +38,18 @@ type Handler struct {
 	idGen    id.Generator
 	roles    RoleChecker
 	modLog   ModLogger
+	// entityPacker は利用者を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3794)。組み立てで渡し、既定の Packer を読まない。
+	entityPacker *entity.Packer
 }
+
+// SetEntityPacker wires the Packer this Handler packs entities with (#3794).
+func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
+// リモートへ漏れる。
+func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
 
 // NewHandler creates a new flash Handler.
 // userRepo / idGen are required by list endpoints to embed the
@@ -452,7 +463,7 @@ func (h *Handler) flashWithKnownUser(f *model.Flash, owner *model.User) map[stri
 	// 残す。frontend が `if (item.createdAt)` する場合のため (#520 review)。
 	entry["createdAt"] = createdAt
 	if owner != nil && owner.ID == f.UserID {
-		entry["user"] = entity.PackUserLite(owner)
+		entry["user"] = h.entityPacker.PackUserLite(owner)
 	}
 	return entry
 }
@@ -507,7 +518,7 @@ func (h *Handler) flashesToListForViewer(rows []*model.Flash, viewer *model.User
 		}
 		entry["createdAt"] = createdAt
 		if u, ok := userByID[f.UserID]; ok {
-			entry["user"] = entity.PackUserLite(u)
+			entry["user"] = h.entityPacker.PackUserLite(u)
 		}
 		if viewer != nil {
 			entry["isLiked"] = likedSet[f.ID]

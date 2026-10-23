@@ -270,7 +270,7 @@ func (h *Handler) packIPAccounts(rows []repository.UserIPAccountRow) ([]ipAccoun
 			continue
 		}
 		out = append(out, ipAccountEntity{
-			User:             entity.PackUserLite(u),
+			User:             h.entityPacker.PackUserLite(u),
 			IsSuspended:      u.IsSuspended,
 			IsDeleted:        u.IsDeleted,
 			LastActiveDate:   formatIPTimePtr(u.LastActiveDate),

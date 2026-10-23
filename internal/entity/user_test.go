@@ -35,10 +35,10 @@ func TestComputeOnlineStatus(t *testing.T) {
 	assert.Equal(t, "offline", computeOnlineStatus(mk(false, &justOffline)))
 
 	// PackUserLite が computeOnlineStatus を使う。
-	lite := PackUserLite(mk(false, &online))
+	lite := currentPacker().PackUserLite(mk(false, &online))
 	assert.Equal(t, "online", lite.OnlineStatus)
 	// HideOnlineStatus は packer 経由でも尊重される。
-	assert.Equal(t, "unknown", PackUserLite(mk(true, &online)).OnlineStatus)
+	assert.Equal(t, "unknown", currentPacker().PackUserLite(mk(true, &online)).OnlineStatus)
 }
 
 func TestPackUserDetailed_IsSilenced(t *testing.T) {
@@ -78,7 +78,7 @@ func TestPackUserLite(t *testing.T) {
 		IsCat:             false,
 	}
 
-	lite := PackUserLite(u)
+	lite := currentPacker().PackUserLite(u)
 
 	assert.Equal(t, "user1", lite.ID)
 	assert.Equal(t, "testuser", lite.Username)
@@ -101,7 +101,7 @@ func TestPackUserLite_NilFields(t *testing.T) {
 		AvatarDecorations: datatypes.JSON([]byte("[]")),
 	}
 
-	lite := PackUserLite(u)
+	lite := currentPacker().PackUserLite(u)
 
 	assert.Equal(t, "user2", lite.ID)
 	assert.Nil(t, lite.Name)
@@ -119,7 +119,7 @@ func TestPackUserLite_IdenticonWithHost(t *testing.T) {
 		Host:              &host,
 		AvatarDecorations: datatypes.JSON([]byte("[]")),
 	}
-	lite := PackUserLite(u)
+	lite := currentPacker().PackUserLite(u)
 	assert.Equal(t, "/identicon/alice@remote.example", lite.AvatarURL)
 }
 
@@ -131,7 +131,7 @@ func TestPackUserLite_ExistingAvatarURL(t *testing.T) {
 		AvatarURL:         &avatar,
 		AvatarDecorations: datatypes.JSON([]byte("[]")),
 	}
-	lite := PackUserLite(u)
+	lite := currentPacker().PackUserLite(u)
 	assert.Equal(t, "https://example.com/avatar.png", lite.AvatarURL)
 }
 
@@ -397,14 +397,14 @@ func TestPackUser_BlurhashGatedByMediaID(t *testing.T) {
 
 	t.Run("avatarId nil → avatarBlurhash nil", func(t *testing.T) {
 		u := &model.User{ID: "u", Username: "u", AvatarBlurhash: &blur, AvatarDecorations: datatypes.JSON([]byte("[]"))}
-		lite := PackUserLite(u)
+		lite := currentPacker().PackUserLite(u)
 		assert.Nil(t, lite.AvatarBlurhash, "avatarId が無ければ blurhash も出さない")
 	})
 
 	t.Run("avatarId set → avatarBlurhash kept", func(t *testing.T) {
 		aid := "a1"
 		u := &model.User{ID: "u", Username: "u", AvatarID: &aid, AvatarBlurhash: &blur, AvatarDecorations: datatypes.JSON([]byte("[]"))}
-		lite := PackUserLite(u)
+		lite := currentPacker().PackUserLite(u)
 		assert.Equal(t, &blur, lite.AvatarBlurhash)
 	})
 
@@ -556,7 +556,7 @@ func TestPackUserLite_RequireSigninToViewContents_TrueExposed(t *testing.T) {
 		ID: "u1", Username: "x", AvatarDecorations: datatypes.JSON([]byte("[]")),
 		RequireSigninToViewContents: true,
 	}
-	lite := PackUserLite(u)
+	lite := currentPacker().PackUserLite(u)
 	require.NotNil(t, lite.RequireSigninToViewContents)
 	assert.Equal(t, true, *lite.RequireSigninToViewContents)
 }
@@ -566,7 +566,7 @@ func TestPackUserLite_RequireSigninToViewContents_FalseOmitted(t *testing.T) {
 		ID: "u1", Username: "x", AvatarDecorations: datatypes.JSON([]byte("[]")),
 		RequireSigninToViewContents: false,
 	}
-	lite := PackUserLite(u)
+	lite := currentPacker().PackUserLite(u)
 	// false → nil (TS で undefined、JSONはomit)
 	assert.Nil(t, lite.RequireSigninToViewContents)
 
@@ -587,7 +587,7 @@ func TestPackUserLite_MakeNotesBefore(t *testing.T) {
 		MakeNotesFollowersOnlyBefore: &followersSec,
 		MakeNotesHiddenBefore:        &hiddenRelSec,
 	}
-	lite := PackUserLite(u)
+	lite := currentPacker().PackUserLite(u)
 	require.NotNil(t, lite.MakeNotesFollowersOnlyBefore)
 	assert.Equal(t, 1700000000, *lite.MakeNotesFollowersOnlyBefore)
 	require.NotNil(t, lite.MakeNotesHiddenBefore)
@@ -599,7 +599,7 @@ func TestPackUserLite_MakeNotesBefore_NilOmitted(t *testing.T) {
 		ID: "u1", Username: "x", AvatarDecorations: datatypes.JSON([]byte("[]")),
 		// MakeNotes*Before は nil
 	}
-	lite := PackUserLite(u)
+	lite := currentPacker().PackUserLite(u)
 	assert.Nil(t, lite.MakeNotesFollowersOnlyBefore)
 	assert.Nil(t, lite.MakeNotesHiddenBefore)
 
@@ -613,7 +613,7 @@ func TestPackUserLite_Instance_NilByDefault(t *testing.T) {
 	u := &model.User{
 		ID: "u1", Username: "x", AvatarDecorations: datatypes.JSON([]byte("[]")),
 	}
-	lite := PackUserLite(u)
+	lite := currentPacker().PackUserLite(u)
 	// PackUserLite 自体は Instance を設定しない (caller がpre-fetchしてセット)
 	assert.Nil(t, lite.Instance)
 
@@ -626,7 +626,7 @@ func TestUserLite_Instance_WhenSet(t *testing.T) {
 	u := &model.User{
 		ID: "u1", Username: "x", AvatarDecorations: datatypes.JSON([]byte("[]")),
 	}
-	lite := PackUserLite(u)
+	lite := currentPacker().PackUserLite(u)
 	name := "example.com"
 	iconURL := "https://example.com/icon.png"
 	lite.Instance = &InstanceLite{Name: &name, IconURL: &iconURL}

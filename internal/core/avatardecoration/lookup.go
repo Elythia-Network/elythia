@@ -1,5 +1,5 @@
 // Package avatardecoration provides a cached id->url resolver used by
-// entity.PackUserLite to embed `url` on each avatarDecorations entry.
+// (*entity.Packer).PackUserLite to embed `url` on each avatarDecorations entry.
 //
 // Avatar decorations are admin-managed, low-cardinality assets. We cache the
 // full catalog in process and invalidate on a TTL — refresh-on-miss would

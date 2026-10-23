@@ -29,7 +29,18 @@ type Handler struct {
 	favoriteRepo       UserListFavoriteReader
 	proxyFollow        ProxyFollowEnqueuer
 	userListEventPub   UserListEventPublisher
+	// entityPacker は利用者を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3794)。組み立てで渡し、既定の Packer を読まない。
+	entityPacker *entity.Packer
 }
+
+// SetEntityPacker wires the Packer this Handler packs entities with (#3794).
+func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
+// リモートへ漏れる。
+func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
 
 // UserListFavoriteReader abstracts the favorite count / exists lookup for
 // users/lists/show forPublic の likedCount/isLiked (#1550)。実装は
@@ -378,7 +389,7 @@ func (h *Handler) Push(c echo.Context) error {
 	// (#1549、upstream UserListService.addMember の publishUserListStream)。
 	// body は packed UserLite (= upstream userEntityService.pack(target))。
 	if h.userListEventPub != nil && target != nil {
-		h.userListEventPub.PublishUserListEvent(list.ID, "userAdded", entity.PackUserLite(target))
+		h.userListEventPub.PublishUserListEvent(list.ID, "userAdded", h.entityPacker.PackUserLite(target))
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -428,7 +439,7 @@ func (h *Handler) Pull(c echo.Context) error {
 	// userList channel に userRemoved を流して member list を live 更新する
 	// (#1549、upstream UserListService.removeMember の publishUserListStream)。
 	if h.userListEventPub != nil && target != nil {
-		h.userListEventPub.PublishUserListEvent(list.ID, "userRemoved", entity.PackUserLite(target))
+		h.userListEventPub.PublishUserListEvent(list.ID, "userRemoved", h.entityPacker.PackUserLite(target))
 	}
 	return c.NoContent(http.StatusNoContent)
 }

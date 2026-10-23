@@ -83,7 +83,7 @@ func (h *Handler) packLites(users []*model.User) []entity.UserLite {
 	out := make([]entity.UserLite, len(users))
 	lites := make([]*entity.UserLite, len(users))
 	for i, u := range users {
-		out[i] = entity.PackUserLite(u)
+		out[i] = h.entityPacker.PackUserLite(u)
 		lites[i] = &out[i]
 	}
 	h.fillUserLites(users, lites)

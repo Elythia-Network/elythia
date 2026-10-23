@@ -203,7 +203,7 @@ func TestPackDriveFile_WithFolderAndUser(t *testing.T) {
 	// caller が pack して後付けするパターン
 	packedFolder := PackDriveFolder(folder, idGen)
 	out.Folder = &packedFolder
-	lite := PackUserLite(user)
+	lite := currentPacker().PackUserLite(user)
 	out.User = &lite
 
 	require.NotNil(t, out.Folder)

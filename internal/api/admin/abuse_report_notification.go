@@ -38,7 +38,7 @@ func (h *Handler) packRecipient(r *model.AbuseReportNotificationRecipient) packe
 	p.UpdatedAt = entity.ISOMillis(r.UpdatedAt)
 	if r.UserID != nil && *r.UserID != "" && h.userRepo != nil {
 		if u, err := h.userRepo.FindByID(*r.UserID); err == nil && u != nil {
-			lite := entity.PackUserLite(u)
+			lite := h.entityPacker.PackUserLite(u)
 			p.User = &lite
 		}
 	}

@@ -773,10 +773,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// Web Push (Phase 9.3): 通知作成後にサブスクライバーへpush配信する。
 	notificationHook.SetWebPushPublisher(webPushService)
 	webPushNotePacker := corewebpush.NewNoteRepoPacker(noteRepo, idGen, followingRepo, driveFileRepo, entityPacker)
-	notificationHook.SetPackers(
-		corewebpush.NewUserRepoPacker(userRepo),
-		webPushNotePacker,
-	)
+	webPushUserPacker := corewebpush.NewUserRepoPacker(userRepo, entityPacker)
+	notificationHook.SetPackers(webPushUserPacker, webPushNotePacker)
 	// 1 件の通知の stream と Web Push が、ノートの読み込みを共有する (#3611)。
 	notificationHook.SetNoteLoader(noteRepo.FindByIDWithRelations)
 	// push は送る直前に、ノートがまだあるかだけを primary で確かめる (#3611)。
@@ -803,9 +801,13 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 利用者の詳細を包む core の部品にも渡す (#3792)。
 	userService.SetEntityPacker(entityPacker)
 	followingService.SetEntityPacker(entityPacker)
+	// UserLite を包む部品にも渡す (#3794)。
+	reversiPublisher.SetEntityPacker(entityPacker)
 	reactionService.SetWebhookHook(webhookReactionHook)
 	followingService.SetWebhookHook(webhookFollowingHook)
-	signupService.SetWebhookHook(corewebhook.NewSignupHook(webhookService))
+	webhookSignupHook := corewebhook.NewSignupHook(webhookService)
+	webhookSignupHook.SetEntityPacker(entityPacker)
+	signupService.SetWebhookHook(webhookSignupHook)
 	// Webhook delivery: SSRF-safe transport + forward proxy 経由で user-supplied
 	// URL に POST する (#638)。Timeout は processors 側の DefaultWebhookTimeout
 	// に揃える。
@@ -2090,6 +2092,12 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	muteHandler.SetEntityPacker(entityPacker)
 	pagesHandler.SetEntityPacker(entityPacker)
 	renoteMuteHandler.SetEntityPacker(entityPacker)
+	// UserLite を包む handler にも渡す (#3794)。
+	bubbleGameHandler.SetEntityPacker(entityPacker)
+	flashHandler.SetEntityPacker(entityPacker)
+	galleryHandler.SetEntityPacker(entityPacker)
+	inviteHandler.SetEntityPacker(entityPacker)
+	userListHandler.SetEntityPacker(entityPacker)
 
 	// Users endpoints
 	// users/lists/update-membership の withReplies 変更を userUpdated として流し、接続中の
@@ -3130,6 +3138,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// recipientRepo (無効にした通知先の除外に使う) が揃う後段で SetWebhook する。
 	abuseCreatedNotifier := coreabuse.NewCreatedNotifier(abuseInAppNotifier, roleService, stream.NewAdminStreamPublisher(streamPubSub))
 	abuseCreatedNotifier.SetBackground(s.background) // #3661: 世代の停止で待つ
+	abuseCreatedNotifier.SetEntityPacker(entityPacker)
 	usersHandler.SetAbuseReportCreatedNotifier(abuseCreatedNotifier)
 
 	// server / queue stats publishers (#344)。起動時から tick を回して
@@ -3197,11 +3206,14 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// バブルゲームの対戦 (#3230)。対局の状態は Redis にだけ置き、記録 (両者の
 	// 報告と勝敗) は DB に書く (#3232)。
-	bubbleVersusService := corebubbleversus.NewService(s.redis.Default, stream.NewBubbleVersusPublisher(streamPubSub), blockingService, idGen)
+	bubbleVersusPublisher := stream.NewBubbleVersusPublisher(streamPubSub)
+	bubbleVersusPublisher.SetEntityPacker(entityPacker)
+	bubbleVersusService := corebubbleversus.NewService(s.redis.Default, bubbleVersusPublisher, blockingService, idGen)
 	bubbleVersusService.SetRecordStore(bubbleVersusRecordRepo)
 
 	// 6. Chat WebSocket channels (Phase 9.8): chatRoom と chatUser の service
 	chatService := corechat.NewService(chatRepo, idGen)
+	chatService.SetEntityPacker(entityPacker)
 	chatService.SetStreamingPublisher(chatPublisher)
 	chatService.SetMainStreamPublisher(mainStreamPublisher)
 	// newChatMessage は upstream ChatService.ts と同じく main stream への publish と
@@ -3665,6 +3677,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// reversi/* — オセロゲーム (実データ)
 	reversiHandler := apireversi.NewHandler(reversiRepo, idGen)
+	reversiHandler.SetEntityPacker(entityPacker)
 	reversiHandler.SetService(reversiService)
 	reversiHandler.SetLiteFiller(sharedUserPacker) // #3330: invitations の招待者の instance・絵文字
 	reversiHandler.SetFederation(s.config.URL, deliverService, reversiFedCache, userRepo)
@@ -3690,11 +3703,13 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// bubble-game/versus/* — 1:1 の対戦 (mk-go 独自、#3230)
 	bubbleVersusHandler := apibubblegame.NewVersusHandler(bubbleVersusService, userRepo)
+	bubbleVersusHandler.SetEntityPacker(entityPacker)
 	// 対戦の記録 (#3232)。見せる範囲は handler の canView が決める。
 	bubbleVersusHandler.SetRecords(bubbleVersusRecordRepo, blockingService)
 
 	// chat/* — Misskey v2026 チャット機能 (実データ)
 	chatHandler := apichat.NewHandler(chatRepo, idGen)
+	chatHandler.SetEntityPacker(entityPacker)
 	chatHandler.SetService(chatService)
 	// drive/files/attached-chat-messages: chat message を pack するため chat
 	// handler が処理する。file の owner-scope (moderator は任意 file 可) (#1218)。
@@ -3986,7 +4001,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		},
 		PackUser: func(_ echo.Context, u *model.User) (any, error) {
 			// upstream の userEntityService.pack(user) 相当 (= UserLite)。
-			return entity.PackUserLite(u), nil
+			return entityPacker.PackUserLite(u), nil
 		},
 		PackClip: func(_ echo.Context, cl *model.Clip) (any, error) {
 			return clipsHandler.PackForEmbed(cl), nil
@@ -4082,6 +4097,21 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		{"userService.entityPacker", userService.HasEntityPacker(), entityPackerMissingEffect},
 		{"followingService.entityPacker", followingService.HasEntityPacker(), entityPackerMissingEffect},
 		{"sharedUserPacker.entityPacker", sharedUserPacker.HasEntityPacker(), entityPackerMissingEffect},
+		// UserLite を包む部品 (#3794)。
+		{"bubbleGame.entityPacker", bubbleGameHandler.HasEntityPacker(), entityPackerMissingEffect},
+		{"bubbleVersus.entityPacker", bubbleVersusHandler.HasEntityPacker(), entityPackerMissingEffect},
+		{"chat.entityPacker", chatHandler.HasEntityPacker(), entityPackerMissingEffect},
+		{"flash.entityPacker", flashHandler.HasEntityPacker(), entityPackerMissingEffect},
+		{"gallery.entityPacker", galleryHandler.HasEntityPacker(), entityPackerMissingEffect},
+		{"invite.entityPacker", inviteHandler.HasEntityPacker(), entityPackerMissingEffect},
+		{"reversi.entityPacker", reversiHandler.HasEntityPacker(), entityPackerMissingEffect},
+		{"userList.entityPacker", userListHandler.HasEntityPacker(), entityPackerMissingEffect},
+		{"chatService.entityPacker", chatService.HasEntityPacker(), entityPackerMissingEffect},
+		{"webhookSignup.entityPacker", webhookSignupHook.HasEntityPacker(), entityPackerMissingEffect},
+		{"abuseCreated.entityPacker", abuseCreatedNotifier.HasEntityPacker(), entityPackerMissingEffect},
+		{"webPushUser.entityPacker", webPushUserPacker.HasEntityPacker(), entityPackerMissingEffect},
+		{"bubbleVersusPublisher.entityPacker", bubbleVersusPublisher.HasEntityPacker(), entityPackerMissingEffect},
+		{"reversiPublisher.entityPacker", reversiPublisher.HasEntityPacker(), entityPackerMissingEffect},
 		{"users.remoteStatsFederationGate", remoteStatsFetcher.HasHostAllowedChecker(),
 			"連合を切った相手へもプロフィール表示のたびに統計を取りに行き、誰をいつ見たかが漏れる"},
 		{"peer.blocker", s.peerDeps.HasBlocker(),

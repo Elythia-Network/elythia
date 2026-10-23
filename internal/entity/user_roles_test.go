@@ -177,7 +177,7 @@ func TestPackUserLite_IncludesBadgeRoles(t *testing.T) {
 			{ID: "r1", Name: "Cool", AsBadge: true, IsPublic: true, DisplayOrder: 7, IconURL: &icon},
 		},
 	}})
-	lite := PackUserLite(&model.User{ID: "u1", Username: "alice"})
+	lite := currentPacker().PackUserLite(&model.User{ID: "u1", Username: "alice"})
 	require.NotNil(t, lite.BadgeRoles)
 	require.Len(t, *lite.BadgeRoles, 1)
 	br := (*lite.BadgeRoles)[0].(map[string]any)
@@ -201,7 +201,7 @@ func TestPackUserDetailed_RolesEmptyWhenLookupUnwired(t *testing.T) {
 func TestPackUserLite_BadgeRolesEmptyWhenLookupUnwired(t *testing.T) {
 	t.Cleanup(func() { SetUserRolesLookup(nil) })
 	SetUserRolesLookup(nil)
-	lite := PackUserLite(&model.User{ID: "u1", Username: "alice"})
+	lite := currentPacker().PackUserLite(&model.User{ID: "u1", Username: "alice"})
 	assert.NotNil(t, lite.BadgeRoles)
 	assert.Empty(t, lite.BadgeRoles)
 }

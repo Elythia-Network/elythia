@@ -143,7 +143,7 @@ func (h *Handler) packIPLookupLog(rows []*model.IPLookupLog) ([]ipLookupLogEntit
 		if u == nil {
 			return nil
 		}
-		lite := entity.PackUserLite(u)
+		lite := h.entityPacker.PackUserLite(u)
 		return &lite
 	}
 	for _, r := range rows {

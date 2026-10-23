@@ -90,18 +90,18 @@ func TestInstanceResolver_FillUserLite(t *testing.T) {
 	r := NewInstanceResolver(lookup, remoteUser("u1", "a.example"))
 
 	// remote user: Instance populated
-	remote := PackUserLite(remoteUser("u1", "a.example"))
+	remote := currentPacker().PackUserLite(remoteUser("u1", "a.example"))
 	r.FillUserLite(&remote)
 	require.NotNil(t, remote.Instance)
 	assert.Equal(t, "Foo", *remote.Instance.Name)
 
 	// local user: Instance remains nil
-	local := PackUserLite(localUser("u2"))
+	local := currentPacker().PackUserLite(localUser("u2"))
 	r.FillUserLite(&local)
 	assert.Nil(t, local.Instance)
 
 	// unknown host: Instance remains nil
-	unknown := PackUserLite(remoteUser("u3", "unknown.example"))
+	unknown := currentPacker().PackUserLite(remoteUser("u3", "unknown.example"))
 	r.FillUserLite(&unknown)
 	assert.Nil(t, unknown.Instance)
 

@@ -74,3 +74,27 @@ func TestHooks_PackWithTheGivenPacker(t *testing.T) {
 		assert.True(t, r.HasEntityPacker())
 	})
 }
+
+// userCreated の本文 (UserLite) は、SignupHook に渡した Packer で包む (#3794)。
+func TestSignupHook_PacksWithTheGivenPacker(t *testing.T) {
+	svc, enq, _, sysRepo := newTestService(t)
+	sysRepo.hooks["sh1"] = &model.SystemWebhook{
+		ID: "sh1", IsActive: true, On: model.StringArray{"userCreated"},
+	}
+	h := webhook.NewSignupHook(svc)
+	assert.False(t, h.HasEntityPacker())
+	h.SetEntityPacker(entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
+		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true)}))
+	assert.True(t, h.HasEntityPacker())
+
+	avatar := "https://remote.example/avatar.png"
+	h.OnUserCreated(&model.User{ID: "alice", Username: "alice", UsernameLower: "alice", AvatarURL: &avatar})
+	require.Len(t, enq.systemCalls, 1)
+	var env struct {
+		Body struct {
+			AvatarURL string `json:"avatarUrl"`
+		} `json:"body"`
+	}
+	require.NoError(t, json.Unmarshal(enq.systemCalls[0].Body, &env), string(enq.systemCalls[0].Body))
+	assert.True(t, strings.HasPrefix(env.Body.AvatarURL, "https://local.example/proxy/avatar.webp?"), "body: %s", enq.systemCalls[0].Body)
+}

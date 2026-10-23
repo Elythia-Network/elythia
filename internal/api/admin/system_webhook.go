@@ -122,11 +122,11 @@ func dummyWebhookUser(n int, followers, following, notes int) *model.User {
 // WebhookTestService.toPackedUserLite: アバターは空、onlineStatus は active、
 // バッジは無し。実在しない利用者なので、本物の packer の判定 (identicon や
 // ロールの引き当て) をそのまま出さない。
-func dummyWebhookUserLite(u *model.User) *entity.UserLite {
+func dummyWebhookUserLite(pk *entity.Packer, u *model.User) *entity.UserLite {
 	if u == nil {
 		return nil
 	}
-	lite := entity.PackUserLite(u)
+	lite := pk.PackUserLite(u)
 	lite.AvatarURL = ""
 	lite.AvatarBlurhash = nil
 	lite.OnlineStatus = "active"
@@ -137,7 +137,7 @@ func dummyWebhookUserLite(u *model.User) *entity.UserLite {
 // dummySystemWebhookBody builds the test payload per system event type,
 // mirroring upstream WebhookTestService.testSystemWebhook (#3262)。本文の形は
 // 本配送と同じ関数で作る (通報は coreabuse.WebhookPayload)。
-func dummySystemWebhookBody(eventType string) any {
+func dummySystemWebhookBody(pk *entity.Packer, eventType string) any {
 	user1 := dummyWebhookUser(1, 10, 5, 30)
 	user2 := dummyWebhookUser(2, 40, 50, 900)
 	user3 := dummyWebhookUser(3, 60, 70, 15900)
@@ -156,18 +156,18 @@ func dummySystemWebhookBody(eventType string) any {
 			report.AssigneeID = &user3.ID
 			assignee = user3
 		}
-		body := coreabuse.WebhookPayload(report, user2, user1, assignee, coreabuse.UserLookups{}, nil)
-		body["reporter"] = dummyWebhookUserLite(user2)
-		body["targetUser"] = dummyWebhookUserLite(user1)
+		body := coreabuse.WebhookPayload(pk, report, user2, user1, assignee, coreabuse.UserLookups{}, nil)
+		body["reporter"] = dummyWebhookUserLite(pk, user2)
+		body["targetUser"] = dummyWebhookUserLite(pk, user1)
 		if assignee != nil {
-			body["assignee"] = dummyWebhookUserLite(assignee)
+			body["assignee"] = dummyWebhookUserLite(pk, assignee)
 		}
 		// 本配送は通報の id から作成時刻を出す (mk-go の追加の項目)。ダミーの id
 		// からは出せないので、送る時刻を入れる。
 		body["createdAt"] = entity.ISOMillis(time.Now())
 		return body
 	case "userCreated":
-		return dummyWebhookUserLite(user1)
+		return dummyWebhookUserLite(pk, user1)
 	case "inactiveModeratorsWarning":
 		return map[string]any{"remainingTime": map[string]any{
 			"time":    100000,
@@ -354,7 +354,7 @@ func (h *Handler) SystemWebhookTest(c echo.Context) error {
 			overrideSecret = *req.Override.Secret
 		}
 	}
-	h.systemWebhookDispatcher.DispatchSystemTest(sw.ID, req.Type, dummySystemWebhookBody(req.Type), overrideURL, overrideSecret)
+	h.systemWebhookDispatcher.DispatchSystemTest(sw.ID, req.Type, dummySystemWebhookBody(h.entityPacker, req.Type), overrideURL, overrideSecret)
 	return c.NoContent(http.StatusNoContent)
 }
 

@@ -6,6 +6,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/bgwork"
 	corewebhook "github.com/elythia-network/elythia/internal/core/webhook"
+	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 )
@@ -79,7 +80,18 @@ type CreatedNotifier struct {
 	// background はメールの送信を起動する箱 (#3661)。世代の停止で待つ。nil なら
 	// 素の goroutine で起動する (テスト)。
 	background *bgwork.Group
+	// entityPacker は利用者を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3794)。組み立てで渡し、既定の Packer を読まない。
+	entityPacker *entity.Packer
 }
+
+// SetEntityPacker wires the Packer this CreatedNotifier packs entities with (#3794).
+func (n *CreatedNotifier) SetEntityPacker(p *entity.Packer) { n.entityPacker = p }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs. 無いと webhook の本文の avatarUrl がリモートの生の URL に
+// なり、ほかの経路 (media proxy を通す) と形が変わる。
+func (n *CreatedNotifier) HasEntityPacker() bool { return n.entityPacker.HasMediaURL() }
 
 // NewCreatedNotifier constructs a CreatedNotifier. Any nil dependency
 // disables that channel.
@@ -243,7 +255,7 @@ func (n *CreatedNotifier) dispatchWebhook(report *model.AbuseUserReport, reporte
 	if n.webhook == nil {
 		return
 	}
-	body := WebhookPayload(report, reporter, target, nil, n.lookups, n.idGen)
+	body := WebhookPayload(n.entityPacker, report, reporter, target, nil, n.lookups, n.idGen)
 	n.webhook.DispatchSystemExcluding(corewebhook.SystemEventAbuseReport, body, n.inactiveWebhookIDs())
 }
 

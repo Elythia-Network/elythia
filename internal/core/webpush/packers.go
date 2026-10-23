@@ -349,15 +349,20 @@ func parseCreatedAtMs(s string) int64 {
 }
 
 // UserRepoPacker adapts UserRepository into notification.UserPacker using
-// entity.PackUserLite.
+// (*entity.Packer).PackUserLite.
 type UserRepoPacker struct {
-	repo repository.UserRepository
+	repo         repository.UserRepository
+	entityPacker *entity.Packer
 }
 
-// NewUserRepoPacker constructs a UserRepoPacker.
-func NewUserRepoPacker(repo repository.UserRepository) *UserRepoPacker {
-	return &UserRepoPacker{repo: repo}
+// NewUserRepoPacker constructs a UserRepoPacker that packs with pk (#3794).
+func NewUserRepoPacker(repo repository.UserRepository, pk *entity.Packer) *UserRepoPacker {
+	return &UserRepoPacker{repo: repo, entityPacker: pk}
 }
+
+// HasEntityPacker reports whether the Packer given to NewUserRepoPacker
+// rewrites media URLs.
+func (p *UserRepoPacker) HasEntityPacker() bool { return p.entityPacker.HasMediaURL() }
 
 // PackUserByID implements notification.UserPacker.
 func (p *UserRepoPacker) PackUserByID(userID string) (map[string]any, bool) {
@@ -368,7 +373,7 @@ func (p *UserRepoPacker) PackUserByID(userID string) (map[string]any, bool) {
 	if err != nil {
 		return nil, false
 	}
-	return toMap(entity.PackUserLite(u))
+	return toMap(p.entityPacker.PackUserLite(u))
 }
 
 // toMap round-trips any JSON-serializable value into a map. Used because the

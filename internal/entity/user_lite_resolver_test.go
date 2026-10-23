@@ -46,7 +46,7 @@ func TestFillUserLites(t *testing.T) {
 	lites := make([]UserLite, len(users))
 	ptrs := make([]*UserLite, 0, len(users)+1)
 	for i, u := range users {
-		lites[i] = PackUserLite(u)
+		lites[i] = currentPacker().PackUserLite(u)
 		ptrs = append(ptrs, &lites[i])
 	}
 	// nil は飛ばす
@@ -71,7 +71,7 @@ func TestFillUserLites_NoTargetsOrLookups(t *testing.T) {
 	FillUserLites(nil, nil, []*model.User{nil}, []*UserLite{nil})
 	h := "a.example"
 	u := &model.User{ID: "1", Host: &h, Emojis: model.StringArray{"e1"}}
-	lite := PackUserLite(u)
+	lite := currentPacker().PackUserLite(u)
 	FillUserLites(nil, nil, []*model.User{u}, []*UserLite{&lite})
 	assert.Nil(t, lite.Instance)
 	// 長さが食い違う呼び出しは何もしない。
