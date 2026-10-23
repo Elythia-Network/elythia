@@ -68,7 +68,7 @@ func (r *Resolver) LookupURL(id string) (string, bool) {
 // Invalidate drops the cached catalog so the next LookupURL re-reads from
 // the DB. admin/avatar-decorations/{create,update,delete} call this: without
 // it, a decoration created and attached within the same cacheTTL window is
-// missing from the catalog, and entity.resolveAvatarDecorations **silently
+// missing from the catalog, and entity.(*Packer).resolveAvatarDecorations **silently
 // drops** the entry — the user's avatarDecorations reads back as `[]` from
 // every API for up to 30 秒 while the DB row is already correct (#2258).
 //

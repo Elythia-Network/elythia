@@ -77,15 +77,15 @@ func applyPublicProperties(props DriveFileProperties) DriveFileProperties {
 // Folder and User fields are left nil; callers that need the nested objects should
 // fetch them and assign &PackDriveFolder(...) / &PackUserLite(...). Owner/admin
 // (self) listings must use PackDriveFileSelf to keep raw properties.
-func PackDriveFile(f *model.DriveFile, idGen id.Generator) DriveFileEntity {
-	return packDriveFile(f, idGen, false)
+func (pkr *Packer) PackDriveFile(f *model.DriveFile, idGen id.Generator) DriveFileEntity {
+	return pkr.packDriveFile(f, idGen, false)
 }
 
 // PackDriveFileSelf is PackDriveFile for the self path (owner-owned drive
 // listings and admin moderation views): the raw stored properties are kept,
 // matching upstream pack({self: true}) (#1948-14)。
-func PackDriveFileSelf(f *model.DriveFile, idGen id.Generator) DriveFileEntity {
-	return packDriveFile(f, idGen, true)
+func (pkr *Packer) PackDriveFileSelf(f *model.DriveFile, idGen id.Generator) DriveFileEntity {
+	return pkr.packDriveFile(f, idGen, true)
 }
 
 // driveFileURL picks the `url` field for the viewer.
@@ -103,7 +103,7 @@ func driveFileURL(ctx *MediaURLContext, f *model.DriveFile, self bool) string {
 	return ctx.checkedPublicURL(f, modeDefault)
 }
 
-func packDriveFile(f *model.DriveFile, idGen id.Generator, self bool) DriveFileEntity {
+func (pkr *Packer) packDriveFile(f *model.DriveFile, idGen id.Generator, self bool) DriveFileEntity {
 	createdAt := ""
 	if t, err := idGen.ParseTime(f.ID); err == nil {
 		createdAt = t.UTC().Format("2006-01-02T15:04:05.000Z")
@@ -124,7 +124,7 @@ func packDriveFile(f *model.DriveFile, idGen id.Generator, self bool) DriveFileE
 	// 挙動を維持する (メソッドは nil-safe)。admin/drive も同 proxy を通すのは
 	// upstream の self:true raw-url 契約からの意図的 deviation (moderator IP 保護、
 	// #1529 / #1948-14 で文書化済)。
-	ctx := currentMediaURLContext()
+	ctx := pkr.currentMediaURLContext()
 	// リモートのファイルの URL の形は、ここで 1 回だけ確かめる。各 URL の組み立ては
 	// 確かめた後の値を受ける checked* を使い、コピーと解析を繰り返さない。
 	checked := wellFormedRemoteFile(f)
@@ -190,24 +190,24 @@ func isImageMime(t string) bool {
 // embedding. The caller is responsible for fetching the related rows (so
 // batch/cached access is possible). Pass nil for fields you do not want to
 // expose — JSON 上は `null` として出る (#812 で omitempty を外した)。
-func PackDriveFileWithRelations(f *model.DriveFile, idGen id.Generator, folder *model.DriveFolder, user *model.User) DriveFileEntity {
-	return packDriveFileWithRelations(f, idGen, folder, user, false)
+func (pkr *Packer) PackDriveFileWithRelations(f *model.DriveFile, idGen id.Generator, folder *model.DriveFolder, user *model.User) DriveFileEntity {
+	return pkr.packDriveFileWithRelations(f, idGen, folder, user, false)
 }
 
 // PackDriveFileWithRelationsSelf is PackDriveFileWithRelations for the self path
 // (admin moderation drive views): raw properties are kept (#1948-14)。
-func PackDriveFileWithRelationsSelf(f *model.DriveFile, idGen id.Generator, folder *model.DriveFolder, user *model.User) DriveFileEntity {
-	return packDriveFileWithRelations(f, idGen, folder, user, true)
+func (pkr *Packer) PackDriveFileWithRelationsSelf(f *model.DriveFile, idGen id.Generator, folder *model.DriveFolder, user *model.User) DriveFileEntity {
+	return pkr.packDriveFileWithRelations(f, idGen, folder, user, true)
 }
 
-func packDriveFileWithRelations(f *model.DriveFile, idGen id.Generator, folder *model.DriveFolder, user *model.User, self bool) DriveFileEntity {
-	out := packDriveFile(f, idGen, self)
+func (pkr *Packer) packDriveFileWithRelations(f *model.DriveFile, idGen id.Generator, folder *model.DriveFolder, user *model.User, self bool) DriveFileEntity {
+	out := pkr.packDriveFile(f, idGen, self)
 	if folder != nil {
 		packed := PackDriveFolder(folder, idGen)
 		out.Folder = &packed
 	}
 	if user != nil {
-		lite := PackUserLite(user)
+		lite := pkr.PackUserLite(user)
 		out.User = &lite
 	}
 	return out

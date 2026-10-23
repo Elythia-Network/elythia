@@ -13,7 +13,7 @@ import (
 // PackAnnouncement serialises an announcement into the upstream-compatible shape.
 // viewerID is the requesting user's ID ("" for me-less paths such as admin create
 // and broadcast events); it drives forYou (#2106 L52: upstream は userId === me.id 判定)。
-func PackAnnouncement(a *model.Announcement, idGen id.Generator, isRead bool, viewerID string) map[string]any {
+func (pkr *Packer) PackAnnouncement(a *model.Announcement, idGen id.Generator, isRead bool, viewerID string) map[string]any {
 	if a == nil {
 		return nil
 	}
@@ -38,7 +38,7 @@ func PackAnnouncement(a *model.Announcement, idGen id.Generator, isRead bool, vi
 		// announcement の imageUrl は admin 設定だが remote URL を指せる。
 		// frontend は <img :src="announcement.imageUrl"> で直接読むため、
 		// remote origin は proxy 経由へ書き換えて IP 漏洩を防ぐ (#1529)。
-		"imageUrl":               ProxyMediaURLPtr(a.ImageURL),
+		"imageUrl":               pkr.ProxyMediaURLPtr(a.ImageURL),
 		"icon":                   a.Icon,
 		"display":                a.Display,
 		"needConfirmationToRead": a.NeedConfirmationToRead,

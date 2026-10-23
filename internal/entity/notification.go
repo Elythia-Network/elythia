@@ -196,11 +196,11 @@ func buildPackOptions(opts []NotificationOption) *packOptions {
 // 都度作るので、ループから呼ぶと N+1 クエリになる。複数件をまとめて pack
 // する callsite (例: /api/i/notifications) は PackNotifications を使うこと
 // (#428)。
-func PackNotification(n *notification.Notification, user *model.User, note *model.Note, idGen id.Generator, instLookup InstanceLookup, emojiLookup EmojiLookup, opts ...NotificationOption) map[string]any {
+func (pkr *Packer) PackNotification(n *notification.Notification, user *model.User, note *model.Note, idGen id.Generator, instLookup InstanceLookup, emojiLookup EmojiLookup, opts ...NotificationOption) map[string]any {
 	if n == nil {
 		return nil
 	}
-	out := PackNotifications([]NotificationItem{{N: n, User: user, Note: note}}, idGen, instLookup, emojiLookup, opts...)
+	out := pkr.PackNotifications([]NotificationItem{{N: n, User: user, Note: note}}, idGen, instLookup, emojiLookup, opts...)
 	if len(out) == 0 {
 		return nil
 	}
@@ -218,7 +218,7 @@ func PackNotification(n *notification.Notification, user *model.User, note *mode
 // 約 80 クエリ → 各 1 回に削減される (host / 絵文字名は内部で uniq 化)。
 //
 // items 内で N == nil の要素は単純に skip する。残りは入力順序を保って返す。
-func PackNotifications(items []NotificationItem, idGen id.Generator, instLookup InstanceLookup, emojiLookup EmojiLookup, opts ...NotificationOption) []map[string]any {
+func (pkr *Packer) PackNotifications(items []NotificationItem, idGen id.Generator, instLookup InstanceLookup, emojiLookup EmojiLookup, opts ...NotificationOption) []map[string]any {
 	packOpts := buildPackOptions(opts)
 	// 全 item の notifier user + 埋め込み note.user / Renote/Reply author を
 	// flatten して resolver の入力にする。
@@ -258,11 +258,11 @@ func PackNotifications(items []NotificationItem, idGen id.Generator, instLookup 
 
 	out := make([]map[string]any, 0, len(items))
 	for _, it := range items {
-		if packed := packNotificationCore(it.N, it.User, it.Note, idGen, instResolver, emojiResolver, packOpts); packed != nil {
+		if packed := pkr.packNotificationCore(it.N, it.User, it.Note, idGen, instResolver, emojiResolver, packOpts); packed != nil {
 			out = append(out, packed)
 		}
 	}
-	resolveNoteFields(out, packOpts)
+	pkr.resolveNoteFields(out, packOpts)
 	return out
 }
 
@@ -273,7 +273,7 @@ func PackNotifications(items []NotificationItem, idGen id.Generator, instLookup 
 // Apply は []NoteEntity の要素を `&notes[i]` 経由で mutate するため、map から値を
 // 取り出した slice に対して走らせて書き戻す (notehide.hideNotificationNotesAt と
 // 同型)。Renote / Reply は pointer なので embed 側の解決はそのまま反映される。
-func resolveNoteFields(packed []map[string]any, opts *packOptions) {
+func (pkr *Packer) resolveNoteFields(packed []map[string]any, opts *packOptions) {
 	if opts == nil || opts.noteResolver == nil || len(packed) == 0 {
 		return
 	}
@@ -304,7 +304,7 @@ func resolveNoteFields(packed []map[string]any, opts *packOptions) {
 // packNotificationCore is the resolver-aware body shared by the single-item
 // PackNotification entry point and the batched PackNotifications. Resolvers
 // are passed in so the same instance can be re-used across many items.
-func packNotificationCore(n *notification.Notification, user *model.User, note *model.Note, idGen id.Generator, instResolver *InstanceResolver, emojiResolver *EmojiResolver, opts *packOptions) map[string]any {
+func (pkr *Packer) packNotificationCore(n *notification.Notification, user *model.User, note *model.Note, idGen id.Generator, instResolver *InstanceResolver, emojiResolver *EmojiResolver, opts *packOptions) map[string]any {
 	if n == nil {
 		return nil
 	}
@@ -408,7 +408,7 @@ func packNotificationCore(n *notification.Notification, user *model.User, note *
 		// TS本家はnotifierIdを"userId"として返す。
 		out["userId"] = n.NotifierID
 		if user != nil {
-			lite := PackUserLite(user)
+			lite := pkr.PackUserLite(user)
 			instResolver.FillUserLite(&lite)
 			emojiResolver.PopulateUserEmojis(user, &lite)
 			out["user"] = lite
@@ -422,7 +422,7 @@ func packNotificationCore(n *notification.Notification, user *model.User, note *
 		// Instance / 絵文字を適用する。
 		out["noteId"] = n.NoteID
 		if note != nil && idGen != nil {
-			packed := PackNote(note, idGen)
+			packed := pkr.PackNote(note, idGen)
 			applyNoteResolvers(note, &packed, instResolver, emojiResolver)
 			out["note"] = packed
 		}

@@ -176,7 +176,7 @@ func (r *NoteFieldResolver) populateNoteFilesShallow(n *NoteEntity, fileMap map[
 		if !ok {
 			continue
 		}
-		packed = append(packed, PackDriveFile(f, r.idGen))
+		packed = append(packed, r.pk().PackDriveFile(f, r.idGen))
 	}
 	n.Files = packed
 	r.populateNoteFilesShallow(n.Renote, fileMap)
@@ -264,7 +264,7 @@ func (r *NoteFieldResolver) packNoteFiles(fileIDs []string, fileMap map[string]*
 		if f.UserID != nil {
 			user = userCache[*f.UserID]
 		}
-		packed = append(packed, PackDriveFileWithRelations(f, r.idGen, folder, user))
+		packed = append(packed, r.pk().PackDriveFileWithRelations(f, r.idGen, folder, user))
 	}
 	return packed
 }

@@ -1,7 +1,5 @@
 package entity
 
-import "sync"
-
 // CanChatLookup resolves a user's effective canChat status by consulting
 // role policies. Mirrors upstream Misskey TS `UserEntityService.pack`:
 //
@@ -15,35 +13,24 @@ type CanChatLookup interface {
 	LookupCanChat(userID string) (canChat bool, ok bool)
 }
 
-// canChatLookup is process-wide so PackUserLite can resolve canChat without
-// changing its signature (called from 100+ sites). Router wires this once
-// at startup via SetCanChatLookup. nil disables enrichment, which keeps
-// existing tests that don't bother wiring the lookup green (the result is
-// the upstream default `chatAvailability = "available"` → canChat=true).
-var (
-	canChatLookupMu sync.RWMutex
-	canChatLookup   CanChatLookup
-)
-
 // SetCanChatLookup wires the role-policy lookup used by PackUserLite to
 // derive canChat. Pass nil to clear (used in tests).
+//
+// It changes only the default Packer (#3788); a Packer built by NewPacker
+// keeps its own dependencies.
 func SetCanChatLookup(l CanChatLookup) {
-	canChatLookupMu.Lock()
-	canChatLookup = l
-	canChatLookupMu.Unlock()
+	updateDefaultPacker(func(p *Packer) { p.canChat = l })
 }
 
-// resolveCanChat returns the canChat value for userID via the registered
+// resolveCanChat returns the canChat value for userID via the Packer's
 // lookup, falling back to true (= upstream default `chatAvailability ===
 // "available"`) when lookup is unwired or returns ok=false.
 //
 // upstream の lookup は async だが mk-go の role.Service は in-memory
 // cache (#761) を持つ pure sync function なので、entity 層から直接
 // 呼んで OK (DB 負荷は加わらない)。
-func resolveCanChat(userID string) bool {
-	canChatLookupMu.RLock()
-	l := canChatLookup
-	canChatLookupMu.RUnlock()
+func (pkr *Packer) resolveCanChat(userID string) bool {
+	l := pkr.get().canChat
 	if l == nil {
 		return true
 	}

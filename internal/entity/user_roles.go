@@ -2,7 +2,6 @@ package entity
 
 import (
 	"sort"
-	"sync"
 
 	"github.com/elythia-network/elythia/internal/model"
 )
@@ -20,83 +19,49 @@ type UserRolesLookup interface {
 	LookupUserRoles(userID string) []*model.Role
 }
 
-// userRolesLookup is process-wide so PackUserLite / PackUserDetailed can
-// resolve roles without changing their signature. Router wires this once at
-// startup via SetUserRolesLookup. nil disables enrichment, which keeps
-// existing tests that don't bother wiring the lookup green (= empty roles
-// / badgeRoles array).
-var (
-	userRolesLookupMu sync.RWMutex
-	userRolesLookup   UserRolesLookup
-)
-
 // SetUserRolesLookup wires the role lookup used by PackUserLite and
 // PackUserDetailed to populate the `roles` / `badgeRoles` fields. Pass nil
 // to clear (used in tests).
+//
+// It changes only the default Packer (#3788); a Packer built by NewPacker
+// keeps its own dependencies.
 func SetUserRolesLookup(l UserRolesLookup) {
-	userRolesLookupMu.Lock()
-	userRolesLookup = l
-	userRolesLookupMu.Unlock()
+	updateDefaultPacker(func(p *Packer) { p.userRoles = l })
 }
-
-// showRemoteBadgesLookup resolves meta.showRoleBadgesOfRemoteUsers so
-// packBadgeRoles can decide whether a remote user's badge roles are exposed
-// (upstream `meta.showRoleBadgesOfRemoteUsers || user.host == null`、#1653)。
-// Router wires this once at startup with a closure that reads the cached meta.
-// nil leaves it false, which keeps the conservative local-only default for
-// tests that don't wire it.
-var (
-	showRemoteBadgesMu     sync.RWMutex
-	showRemoteBadgesLookup func() bool
-)
 
 // SetShowRemoteBadgesLookup wires the meta.showRoleBadgesOfRemoteUsers
 // accessor used by packBadgeRoles (#1653)。Pass nil to clear (used in tests).
+//
+// It changes only the default Packer (#3788); a Packer built by NewPacker
+// keeps its own dependencies.
 func SetShowRemoteBadgesLookup(fn func() bool) {
-	showRemoteBadgesMu.Lock()
-	showRemoteBadgesLookup = fn
-	showRemoteBadgesMu.Unlock()
+	updateDefaultPacker(func(p *Packer) { p.showRemoteBadges = fn })
 }
 
 // resolveShowRemoteBadges reports whether remote users' badge roles should be
 // exposed, falling back to false (= local-only) when the lookup is unwired.
-func resolveShowRemoteBadges() bool {
-	showRemoteBadgesMu.RLock()
-	fn := showRemoteBadgesLookup
-	showRemoteBadgesMu.RUnlock()
+func (pkr *Packer) resolveShowRemoteBadges() bool {
+	fn := pkr.get().showRemoteBadges
 	if fn == nil {
 		return false
 	}
 	return fn()
 }
 
-// instanceIconURLLookup resolves meta.iconUrl so IdenticonURL can apply
-// upstream's local-system-account special case: a local user whose username
-// contains '.' (relay.actor / instance.actor / proxy.actor) uses the instance
-// icon as its avatarUrl instead of the identicon route (upstream
-// getIdenticonUrl, UserEntityService.ts:386-391、#1781)。Router wires this once
-// at startup with a closure reading the cached meta. nil / 未配線時は "" を返し
-// identicon route に fallback する。
-var (
-	instanceIconURLMu     sync.RWMutex
-	instanceIconURLLookup func() string
-)
-
 // SetInstanceIconURLLookup wires the meta.iconUrl accessor used by IdenticonURL
 // for the local-system-account avatarUrl special case (#1781)。Pass nil to clear
 // (used in tests).
+//
+// It changes only the default Packer (#3788); a Packer built by NewPacker
+// keeps its own dependencies.
 func SetInstanceIconURLLookup(fn func() string) {
-	instanceIconURLMu.Lock()
-	instanceIconURLLookup = fn
-	instanceIconURLMu.Unlock()
+	updateDefaultPacker(func(p *Packer) { p.instanceIconURL = fn })
 }
 
 // resolveInstanceIconURL returns meta.iconUrl, or "" when the lookup is unwired
 // or meta.iconUrl is unset.
-func resolveInstanceIconURL() string {
-	instanceIconURLMu.RLock()
-	fn := instanceIconURLLookup
-	instanceIconURLMu.RUnlock()
+func (pkr *Packer) resolveInstanceIconURL() string {
+	fn := pkr.get().instanceIconURL
 	if fn == nil {
 		return ""
 	}
@@ -109,10 +74,8 @@ func resolveInstanceIconURL() string {
 // per-user cache (#761).
 //
 // nil is returned when the lookup isn't wired or the user has no roles.
-func resolveUserRolesSorted(userID string) []*model.Role {
-	userRolesLookupMu.RLock()
-	l := userRolesLookup
-	userRolesLookupMu.RUnlock()
+func (pkr *Packer) resolveUserRolesSorted(userID string) []*model.Role {
+	l := pkr.get().userRoles
 	if l == nil {
 		return nil
 	}
@@ -150,16 +113,16 @@ func resolveUserRolesSorted(userID string) []*model.Role {
 //   - remote + flag on: badge を pack した non-nil slice
 //
 // BadgeRoles は *[]any + omitempty なので nil → 省略、non-nil → present。
-func packBadgeRoles(u *model.User) *[]any {
+func (pkr *Packer) packBadgeRoles(u *model.User) *[]any {
 	if u == nil {
 		return nil
 	}
-	if u.Host != nil && !resolveShowRemoteBadges() {
+	if u.Host != nil && !pkr.resolveShowRemoteBadges() {
 		// remote user は flag off なら badge を出さない (upstream: undefined)
 		return nil
 	}
 	out := []any{}
-	roles := resolveUserRolesSorted(u.ID)
+	roles := pkr.resolveUserRolesSorted(u.ID)
 	for _, r := range roles {
 		if r == nil || !r.AsBadge || !r.IsPublic {
 			continue
@@ -169,7 +132,7 @@ func packBadgeRoles(u *model.User) *[]any {
 			// role icon は admin 設定だが remote URL を指せるため、frontend が
 			// <img src> へ直接載せる前に proxy 経由へ書き換えて IP 漏洩を防ぐ
 			// (#1529)。local は no-op。
-			"iconUrl":      ProxyMediaURLPtr(r.IconURL),
+			"iconUrl":      pkr.ProxyMediaURLPtr(r.IconURL),
 			"displayOrder": r.DisplayOrder,
 		})
 	}
@@ -182,12 +145,12 @@ func packBadgeRoles(u *model.User) *[]any {
 //
 // Always returns a non-nil slice ([]any{}) so the JSON output is `[]` not
 // `null`.
-func packPublicRoles(u *model.User) []any {
+func (pkr *Packer) packPublicRoles(u *model.User) []any {
 	out := []any{}
 	if u == nil {
 		return out
 	}
-	roles := resolveUserRolesSorted(u.ID)
+	roles := pkr.resolveUserRolesSorted(u.ID)
 	for _, r := range roles {
 		if r == nil || !r.IsPublic {
 			continue
@@ -196,7 +159,7 @@ func packPublicRoles(u *model.User) []any {
 			"id":              r.ID,
 			"name":            r.Name,
 			"color":           r.Color,
-			"iconUrl":         ProxyMediaURLPtr(r.IconURL),
+			"iconUrl":         pkr.ProxyMediaURLPtr(r.IconURL),
 			"description":     r.Description,
 			"isModerator":     r.IsModerator,
 			"isAdministrator": r.IsAdministrator,

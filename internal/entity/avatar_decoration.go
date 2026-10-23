@@ -2,7 +2,6 @@ package entity
 
 import (
 	"encoding/json"
-	"sync"
 )
 
 // AvatarDecorationLookup resolves avatar decoration ids to their public URL
@@ -14,22 +13,13 @@ type AvatarDecorationLookup interface {
 	LookupURL(id string) (url string, ok bool)
 }
 
-// avatarDecorationLookup is process-wide so PackUserLite can enrich without
-// changing its signature (called from 100+ sites). Router wires this once at
-// startup via SetAvatarDecorationLookup. nil disables enrichment, which keeps
-// existing tests that don't bother wiring the lookup green (the response will
-// simply omit url, identical to pre-#521 behaviour).
-var (
-	avatarDecorationLookupMu sync.RWMutex
-	avatarDecorationLookup   AvatarDecorationLookup
-)
-
 // SetAvatarDecorationLookup wires the catalog used by PackUserLite to embed
 // `url` on each avatarDecorations entry. Pass nil to clear (used in tests).
+//
+// It changes only the default Packer (#3788); a Packer built by NewPacker
+// keeps its own dependencies.
 func SetAvatarDecorationLookup(l AvatarDecorationLookup) {
-	avatarDecorationLookupMu.Lock()
-	avatarDecorationLookup = l
-	avatarDecorationLookupMu.Unlock()
+	updateDefaultPacker(func(p *Packer) { p.avatarDecoration = l })
 }
 
 // EmojiDecorationLookup resolves a decoration entry that points at a local
@@ -44,24 +34,17 @@ type EmojiDecorationLookup interface {
 	LookupEmojiDecoration(emojiID string) (url string, name string, ok bool)
 }
 
-// emojiDecorationLookup mirrors avatarDecorationLookup: process-wide so
-// PackUserLite can resolve without a signature change. Router wires this once
-// at startup via SetEmojiDecorationLookup.
-var (
-	emojiDecorationLookupMu sync.RWMutex
-	emojiDecorationLookup   EmojiDecorationLookup
-)
-
 // SetEmojiDecorationLookup wires the resolver used by PackUserLite for
 // emoji-backed avatarDecorations entries. Pass nil to clear (used in tests).
 //
 // **nil のときは絵文字由来のエントリを落とす** (fail-closed)。カタログ由来は
 // 未配線でも `url` 抜きで残すが、こちらは「まだセンシティブでないか」を
 // 判断する術がないので、配線されていない環境で出すわけにいかない。
+//
+// It changes only the default Packer (#3788); a Packer built by NewPacker
+// keeps its own dependencies.
 func SetEmojiDecorationLookup(l EmojiDecorationLookup) {
-	emojiDecorationLookupMu.Lock()
-	emojiDecorationLookup = l
-	emojiDecorationLookupMu.Unlock()
+	updateDefaultPacker(func(p *Packer) { p.emojiDecoration = l })
 }
 
 // AvatarDecorationItem is the per-entry shape sent to clients. Mirrors
@@ -96,7 +79,7 @@ type AvatarDecorationItem struct {
 // silently dropped (TS upstream does the same — a deleted decoration must not
 // keep rendering on user profiles). Returns an empty slice (not nil) so the
 // JSON output is `[]` rather than `null`, which is what the frontend expects.
-func resolveAvatarDecorations(raw []byte) []AvatarDecorationItem {
+func (pkr *Packer) resolveAvatarDecorations(raw []byte) []AvatarDecorationItem {
 	out := []AvatarDecorationItem{}
 	if len(raw) == 0 {
 		return out
@@ -105,12 +88,8 @@ func resolveAvatarDecorations(raw []byte) []AvatarDecorationItem {
 	if err := json.Unmarshal(raw, &rows); err != nil || len(rows) == 0 {
 		return out
 	}
-	avatarDecorationLookupMu.RLock()
-	lookup := avatarDecorationLookup
-	avatarDecorationLookupMu.RUnlock()
-	emojiDecorationLookupMu.RLock()
-	emojiLookup := emojiDecorationLookup
-	emojiDecorationLookupMu.RUnlock()
+	lookup := pkr.get().avatarDecoration
+	emojiLookup := pkr.get().emojiDecoration
 	for _, r := range rows {
 		idVal, _ := r["id"].(string)
 		if idVal == "" {

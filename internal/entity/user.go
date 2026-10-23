@@ -338,8 +338,8 @@ func (d *UserDetailed) EnsureRelationFlags() {
 // updateCurrentAccountPartial receives the full $i shape; otherwise
 // privacy-scoped fields like isExplorable / noCrawle stay stale in the
 // session (#968).
-func PackMeDetailed(u *model.User, profile *model.UserProfile, idGens ...id.Generator) MeDetailed {
-	return AsMeDetailed(PackUserDetailed(u, profile, idGens...), u, profile)
+func (pkr *Packer) PackMeDetailed(u *model.User, profile *model.UserProfile, idGens ...id.Generator) MeDetailed {
+	return AsMeDetailed(pkr.PackUserDetailed(u, profile, idGens...), u, profile)
 }
 
 // AsMeDetailed promotes a pre-built UserDetailed payload into MeDetailed by
@@ -476,7 +476,7 @@ type InstanceLite struct {
 //
 // 共有 helper として切り出してあるので、UserLite 以外のレスポンスも同じ規則を
 // 使える (#692 / #708 review)。chat の利用者は #3438 から PackUserLite を通る。
-func IdenticonURL(u *model.User) string {
+func (pkr *Packer) IdenticonURL(u *model.User) string {
 	avatar := ""
 	if u.AvatarURL != nil {
 		avatar = *u.AvatarURL
@@ -490,7 +490,7 @@ func IdenticonURL(u *model.User) string {
 		// remote user の avatarUrl は remote origin を指すため proxy 経由に
 		// 書き換えて閲覧者の IP 漏洩を防ぐ (#1529)。local / identicon は素通し
 		// (ProxyAvatarURL は同一オリジン・相対 URL を wrap しない)。
-		return currentMediaURLContext().ProxyAvatarURL(avatar)
+		return pkr.currentMediaURLContext().ProxyAvatarURL(avatar)
 	}
 	// upstream getIdenticonUrl (UserEntityService.ts:386-391): local かつ
 	// username に '.' を含むユーザー (= system account relay.actor /
@@ -498,7 +498,7 @@ func IdenticonURL(u *model.User) string {
 	// identicon ではなくインスタンスアイコンを avatarUrl に使う (#1781)。
 	if u.Host == nil || *u.Host == "" {
 		if strings.Contains(u.Username, ".") {
-			if icon := resolveInstanceIconURL(); icon != "" {
+			if icon := pkr.resolveInstanceIconURL(); icon != "" {
 				return icon
 			}
 		}
@@ -538,12 +538,12 @@ func blurhashIfPresent(mediaID, blurhash *string) *string {
 // 本家はリモートの人のバナーもドライブのファイルとして取り込み bannerId を持つが、
 // Elythia はファイルを作らず bannerUrl だけを保存する (federation の resolver)。
 // bannerId で判定すると、リモートの人は常にバナー無しになる (#3526)。
-func bannerURLIfPresent(host, bannerID, bannerURL *string) *string {
+func (pkr *Packer) bannerURLIfPresent(host, bannerID, bannerURL *string) *string {
 	if host == nil || *host == "" {
 		if bannerID == nil {
 			return nil
 		}
-		return currentMediaURLContext().ProxyBannerURL(bannerURL)
+		return pkr.currentMediaURLContext().ProxyBannerURL(bannerURL)
 	}
 	// リモートの人の bannerUrl は相手が決めた文字列。取り込みで確かめる前に保存された
 	// 行もあるので、返すときにも形を確かめる (アイコンの IdenticonURL と同じ)。
@@ -554,26 +554,26 @@ func bannerURLIfPresent(host, bannerID, bannerURL *string) *string {
 	if !ok {
 		return nil
 	}
-	return currentMediaURLContext().ProxyBannerURL(&clean)
+	return pkr.currentMediaURLContext().ProxyBannerURL(&clean)
 }
 
-func PackUserLite(u *model.User) UserLite {
+func (pkr *Packer) PackUserLite(u *model.User) UserLite {
 	out := UserLite{
 		ID:        u.ID,
 		Name:      u.Name,
 		Username:  u.Username,
 		Host:      u.Host,
-		AvatarURL: IdenticonURL(u),
+		AvatarURL: pkr.IdenticonURL(u),
 		// avatarId が null のとき avatarBlurhash も null にする (upstream
 		// `user.avatarId == null ? null : user.avatarBlurhash`、#1558)。avatarUrl
 		// 自体は IdenticonURL fallback があるので gate しない (TS も `?? identicon`)。
 		AvatarBlurhash:    blurhashIfPresent(u.AvatarID, u.AvatarBlurhash),
-		AvatarDecorations: resolveAvatarDecorations(u.AvatarDecorations),
+		AvatarDecorations: pkr.resolveAvatarDecorations(u.AvatarDecorations),
 		IsBot:             u.IsBot,
 		IsCat:             u.IsCat,
 		Emojis:            make(map[string]string),
 		OnlineStatus:      computeOnlineStatus(u),
-		BadgeRoles:        packBadgeRoles(u),
+		BadgeRoles:        pkr.packBadgeRoles(u),
 	}
 	// requireSigninToViewContents: true のときだけ出す (TS は false→undefined)
 	if u.RequireSigninToViewContents {
@@ -591,20 +591,20 @@ func PackUserLite(u *model.User) UserLite {
 }
 
 // PackUserDetailed converts a model.User and optional profile to UserDetailed.
-func PackUserDetailed(u *model.User, profile *model.UserProfile, idGens ...id.Generator) UserDetailed {
+func (pkr *Packer) PackUserDetailed(u *model.User, profile *model.UserProfile, idGens ...id.Generator) UserDetailed {
 	d := UserDetailed{
-		UserLite: PackUserLite(u),
+		UserLite: pkr.PackUserLite(u),
 		// upstream `chatAvailability === 'available'` 互換 (#988)。
 		// 旧実装は `u.ChatScope != "none"` で user 自身の受信設定を返して
 		// いたが、upstream は role policy の chatAvailability を見る
 		// (admin が role に設定する権限)。lookup が wire されていない
 		// path (= 既存 unit test 等) は default true で fallback する。
-		CanChat: resolveCanChat(u.ID),
+		CanChat: pkr.resolveCanChat(u.ID),
 		// ローカルの利用者は bannerId が null のとき bannerUrl / bannerBlurhash も
 		// null にする (upstream `user.bannerId == null ? null : ...`、#1558)。
 		// リモートの人は bannerId を持たないので bannerUrl の有無で決める (#3526)。
 		// remote user の bannerUrl は remote origin を指すため proxy 経由に書き換える (#1529)。
-		BannerURL:           bannerURLIfPresent(u.Host, u.BannerID, u.BannerURL),
+		BannerURL:           pkr.bannerURLIfPresent(u.Host, u.BannerID, u.BannerURL),
 		BannerBlurhash:      blurhashIfPresent(u.BannerID, u.BannerBlurhash),
 		IsLocked:            u.IsLocked,
 		IsSuspended:         u.IsSuspended,
@@ -619,10 +619,10 @@ func PackUserDetailed(u *model.User, profile *model.UserProfile, idGens ...id.Ge
 		URI:                 u.URI,
 		PinnedNoteIDs:       []string{},
 		PinnedNotes:         []any{},
-		Roles:               packPublicRoles(u),
+		Roles:               pkr.packPublicRoles(u),
 		// isSilenced は role policy 由来 (canPublicNote を否定する role を持つか)。
 		// router で wire される lookup から解決する。unwired なら false。
-		IsSilenced: resolveSilenced(u.ID),
+		IsSilenced: pkr.resolveSilenced(u.ID),
 		// DBデフォルト値 (user_profileのpublicReactions DEFAULT true)
 		PublicReactions: true,
 	}
@@ -859,8 +859,8 @@ func (d *UserDetailed) ResolveMoveTargets(u *model.User, resolve MoveTargetResol
 // idGen で createdAt を有効にし、EnsureRelationFlags で未設定 relation bool を
 // false 補完して shape を完備する。idGen が nil の場合 createdAt は空になるため
 // caller は必ず idGen を渡すこと。
-func PackUserForFollowStreamEvent(u *model.User, isFollowing, hasPendingFollowRequestFromYou bool, idGen id.Generator) UserDetailed {
-	d := PackUserDetailed(u, nil, idGen)
+func (pkr *Packer) PackUserForFollowStreamEvent(u *model.User, isFollowing, hasPendingFollowRequestFromYou bool, idGen id.Generator) UserDetailed {
+	d := pkr.PackUserDetailed(u, nil, idGen)
 	d.IsFollowing = &isFollowing
 	d.HasPendingFollowRequestFromYou = &hasPendingFollowRequestFromYou
 	d.EnsureRelationFlags()

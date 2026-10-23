@@ -38,7 +38,7 @@ type UserProfileLookup func(userID string) (*model.User, *model.UserProfile)
 //
 // `idGen` is used to derive `createdAt` from the time-based aidx ID. When nil
 // or parse fails the field stays empty (= caller can still ship the rest).
-func PackFollowing(
+func (pkr *Packer) PackFollowing(
 	f *model.Following,
 	populateFollowee, populateFollower bool,
 	lookup UserProfileLookup,
@@ -59,13 +59,13 @@ func PackFollowing(
 	}
 	if populateFollowee && lookup != nil {
 		if u, p := lookup(f.FolloweeID); u != nil {
-			d := PackUserDetailed(u, p, idGen)
+			d := pkr.PackUserDetailed(u, p, idGen)
 			out.Followee = &d
 		}
 	}
 	if populateFollower && lookup != nil {
 		if u, p := lookup(f.FollowerID); u != nil {
-			d := PackUserDetailed(u, p, idGen)
+			d := pkr.PackUserDetailed(u, p, idGen)
 			out.Follower = &d
 		}
 	}

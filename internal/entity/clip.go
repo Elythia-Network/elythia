@@ -34,7 +34,7 @@ type ClipExtras struct {
 // を埋めるために caller が渡す (nil なら user は省略するが、misskey_dart 互換の
 // ため呼び出し側は必ず owner を解決して渡すこと)。createdAt は clip ID (aidx)
 // から復元する。
-func PackClip(cl *model.Clip, idGen id.Generator, owner *model.User, extras ClipExtras) map[string]any {
+func (pkr *Packer) PackClip(cl *model.Clip, idGen id.Generator, owner *model.User, extras ClipExtras) map[string]any {
 	if cl == nil {
 		return nil
 	}
@@ -68,7 +68,7 @@ func PackClip(cl *model.Clip, idGen id.Generator, owner *model.User, extras Clip
 		}
 	}
 	if owner != nil {
-		out["user"] = PackUserLite(owner)
+		out["user"] = pkr.PackUserLite(owner)
 	}
 	return out
 }

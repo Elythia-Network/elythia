@@ -23,7 +23,7 @@ func packEmojiApplicationNotification(t *testing.T, applicationID string, opts .
 	for _, o := range opts {
 		o(po)
 	}
-	return packNotificationCore(n, nil, nil, nil, nil, nil, po)
+	return currentPacker().packNotificationCore(n, nil, nil, nil, nil, nil, po)
 }
 
 // TestEmojiApplicationNotificationPacksCurrentState asserts that the result and
