@@ -128,9 +128,9 @@ func TestPreview_Success(t *testing.T) {
 // リモートの og:image (thumbnail) / favicon (icon) は proxy 経由に書き換えられ、
 // 閲覧者 IP が外部サイトへ漏洩しない (issue #1529)。
 func TestPreview_RemoteThumbnailProxied(t *testing.T) {
-	entity.SetMediaURLContext(entity.NewMediaURLContext(
-		"https://mk.test", "https://mk.test/proxy", []byte("url-preview-secret"), false, true))
-	defer entity.SetMediaURLContext(nil)
+	// プレビューの画像は handler に渡した Packer で proxy へ通す (#3798)。
+	pk := entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
+		"https://mk.test", "https://mk.test/proxy", []byte("url-preview-secret"), false, true)})
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -146,6 +146,7 @@ func TestPreview_RemoteThumbnailProxied(t *testing.T) {
 	}, nil)
 	f.SetHTTPClient(&http.Client{})
 	h := apiurl.NewHandler(f)
+	h.SetEntityPacker(pk)
 
 	rec := doPreview(h, srv.URL)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -170,9 +171,8 @@ func TestPreview_RemoteThumbnailProxied(t *testing.T) {
 // proxy の allowlist を恒久的に迂回できる。
 func TestPreview_ProxySignatureExpires(t *testing.T) {
 	secret := []byte("url-preview-secret")
-	entity.SetMediaURLContext(entity.NewMediaURLContext(
-		"https://mk.test", "https://mk.test/proxy", secret, false, true))
-	defer entity.SetMediaURLContext(nil)
+	pk := entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
+		"https://mk.test", "https://mk.test/proxy", secret, false, true)})
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -188,7 +188,9 @@ func TestPreview_ProxySignatureExpires(t *testing.T) {
 	}, nil)
 	f.SetHTTPClient(&http.Client{})
 
-	rec := doPreview(apiurl.NewHandler(f), srv.URL)
+	h := apiurl.NewHandler(f)
+	h.SetEntityPacker(pk)
+	rec := doPreview(h, srv.URL)
 	require.Equal(t, http.StatusOK, rec.Code)
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))

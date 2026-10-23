@@ -526,7 +526,7 @@ func (r *Renderer) RenderPerson(u *model.User, profile *model.UserProfile, publi
 		p.Icon = &Image{Type: "Image", URL: APLenientHref(instanceIcon)}
 	default:
 		// identicon URL は mk-go の /identicon/<username> route 規則に合わせる
-		// (entity.IdenticonURL と同一 seed なので REST avatarUrl と同じ画像)。
+		// ((*entity.Packer).IdenticonURL と同一 seed なので REST avatarUrl と同じ画像)。
 		p.Icon = &Image{Type: "Image", URL: APLenientHref(r.urls.baseURL + "/identicon/" + u.Username)}
 	}
 	switch {

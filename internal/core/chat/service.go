@@ -355,7 +355,7 @@ func (s *Service) packMessagePush(packed map[string]any, sender *model.User, roo
 		"username":  sender.Username,
 		"host":      sender.Host,
 		"name":      sender.Name,
-		"avatarUrl": entity.IdenticonURL(sender),
+		"avatarUrl": s.entityPacker.IdenticonURL(sender),
 	}
 	// **text キーを必ず持たせる。** packMessage は msg.Text が nil だとキーごと
 	// 落とすが、SW は `${name}: ${body.text}` を無条件に組むので添付のみの

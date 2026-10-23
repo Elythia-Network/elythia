@@ -15,13 +15,13 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 )
 
-// withMediaProxy installs a media URL context for the duration of the test.
-func withMediaProxy(t *testing.T) {
+// withMediaProxy returns a Packer that rewrites media URLs through the proxy.
+// handler には引数で渡す (#3798)。既定の Packer は書き換えない。
+func withMediaProxy(t *testing.T) *entity.Packer {
 	t.Helper()
-	entity.SetMediaURLContext(entity.NewMediaURLContext(
+	return entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
 		"https://local.example", "https://local.example/proxy",
-		[]byte("test-secret"), false, true))
-	t.Cleanup(func() { entity.SetMediaURLContext(nil) })
+		[]byte("test-secret"), false, true)})
 }
 
 // leakUserRepo serves a single user for the avatar handler.
@@ -39,7 +39,7 @@ func strPtrLeak(s string) *string { return &s }
 // リファラが相手インスタンスへ渡る。** API 応答側は既に leak-safe だったのに、
 // この endpoint だけ素通しだった。
 func TestAvatarHandler_RemoteAvatarGoesThroughProxy(t *testing.T) {
-	withMediaProxy(t)
+	pk := withMediaProxy(t)
 	host := "remote.example"
 	repo := leakUserRepo{user: &model.User{
 		ID: "u1", Username: "bob", Host: &host,
@@ -47,7 +47,7 @@ func TestAvatarHandler_RemoteAvatarGoesThroughProxy(t *testing.T) {
 	}}
 
 	e := echo.New()
-	e.GET("/avatar/@:acct", avatarHandler(repo, "local.example"))
+	e.GET("/avatar/@:acct", avatarHandler(pk, repo, "local.example"))
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/avatar/@bob@remote.example", nil))
 
@@ -61,7 +61,7 @@ func TestAvatarHandler_RemoteAvatarGoesThroughProxy(t *testing.T) {
 
 // リモートの人の、プロキシで包めない形の avatarUrl は使わず identicon へ飛ばす。
 func TestAvatarHandler_MalformedRemoteAvatarFallsBackToIdenticon(t *testing.T) {
-	withMediaProxy(t)
+	pk := withMediaProxy(t)
 	host := "remote.example"
 	repo := leakUserRepo{user: &model.User{
 		ID: "u1", Username: "bob", Host: &host,
@@ -69,7 +69,7 @@ func TestAvatarHandler_MalformedRemoteAvatarFallsBackToIdenticon(t *testing.T) {
 	}}
 
 	e := echo.New()
-	e.GET("/avatar/@:acct", avatarHandler(repo, "local.example"))
+	e.GET("/avatar/@:acct", avatarHandler(pk, repo, "local.example"))
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/avatar/@bob@remote.example", nil))
 
@@ -81,7 +81,7 @@ func TestAvatarHandler_MalformedRemoteAvatarFallsBackToIdenticon(t *testing.T) {
 
 // 括弧や空白を含むリモートの avatarUrl は、符号化した値をプロキシに渡す。
 func TestAvatarHandler_RemoteAvatarIsEncoded(t *testing.T) {
-	withMediaProxy(t)
+	pk := withMediaProxy(t)
 	host := "remote.example"
 	repo := leakUserRepo{user: &model.User{
 		ID: "u1", Username: "bob", Host: &host,
@@ -89,7 +89,7 @@ func TestAvatarHandler_RemoteAvatarIsEncoded(t *testing.T) {
 	}}
 
 	e := echo.New()
-	e.GET("/avatar/@:acct", avatarHandler(repo, "local.example"))
+	e.GET("/avatar/@:acct", avatarHandler(pk, repo, "local.example"))
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/avatar/@bob@remote.example", nil))
 
@@ -101,11 +101,11 @@ func TestAvatarHandler_RemoteAvatarIsEncoded(t *testing.T) {
 
 // ローカルの人の相対パスの avatarUrl は、形の判定に掛けずにそのまま使う。
 func TestAvatarHandler_LocalRelativeAvatarIsNotChecked(t *testing.T) {
-	withMediaProxy(t)
+	pk := withMediaProxy(t)
 	repo := leakUserRepo{user: &model.User{ID: "u1", Username: "bob", AvatarURL: strPtrLeak("/files/avatar.png")}}
 
 	e := echo.New()
-	e.GET("/avatar/@:acct", avatarHandler(repo, "local.example"))
+	e.GET("/avatar/@:acct", avatarHandler(pk, repo, "local.example"))
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/avatar/@bob", nil))
 
@@ -116,14 +116,14 @@ func TestAvatarHandler_LocalRelativeAvatarIsNotChecked(t *testing.T) {
 // ローカル user の avatar は書き換えない。同一オリジンなので包む意味が無く、
 // 包むと無駄な往復が 1 段増える。
 func TestAvatarHandler_LocalAvatarUnchanged(t *testing.T) {
-	withMediaProxy(t)
+	pk := withMediaProxy(t)
 	repo := leakUserRepo{user: &model.User{
 		ID: "u1", Username: "alice",
 		AvatarURL: strPtrLeak("https://local.example/files/avatar.png"),
 	}}
 
 	e := echo.New()
-	e.GET("/avatar/@:acct", avatarHandler(repo, "local.example"))
+	e.GET("/avatar/@:acct", avatarHandler(pk, repo, "local.example"))
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/avatar/@alice", nil))
 
@@ -133,11 +133,11 @@ func TestAvatarHandler_LocalAvatarUnchanged(t *testing.T) {
 
 // avatar 未設定は identicon への相対 URL。プロキシに包まれてはいけない。
 func TestAvatarHandler_IdenticonFallbackUnchanged(t *testing.T) {
-	withMediaProxy(t)
+	pk := withMediaProxy(t)
 	repo := leakUserRepo{user: &model.User{ID: "u1", Username: "alice"}}
 
 	e := echo.New()
-	e.GET("/avatar/@:acct", avatarHandler(repo, "local.example"))
+	e.GET("/avatar/@:acct", avatarHandler(pk, repo, "local.example"))
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/avatar/@alice", nil))
 
@@ -151,11 +151,11 @@ func TestAvatarHandler_IdenticonFallbackUnchanged(t *testing.T) {
 // **生の URL を返していた mk-go の方が乖離していた。** リアクションを 1 つ表示
 // するだけで閲覧者の IP が相手インスタンスへ渡っていた。
 func TestEmojiRedirectHandler_RemoteEmojiGoesThroughProxy(t *testing.T) {
-	withMediaProxy(t)
+	pk := withMediaProxy(t)
 	repo := &stubEmojiLookup{emojis: map[string]*model.Emoji{
 		"smile|remote.example": {Name: "smile", PublicURL: "https://remote.example/files/smile.png"},
 	}}
-	h := emojiRedirectHandler(repo)
+	h := emojiRedirectHandler(pk, repo)
 
 	c, rec := newEmojiTestContext(t, "smile@remote.example.webp", "")
 	require.NoError(t, h(c))
@@ -169,11 +169,11 @@ func TestEmojiRedirectHandler_RemoteEmojiGoesThroughProxy(t *testing.T) {
 
 // ローカル emoji は書き換えない。
 func TestEmojiRedirectHandler_LocalEmojiUnchanged(t *testing.T) {
-	withMediaProxy(t)
+	pk := withMediaProxy(t)
 	repo := &stubEmojiLookup{emojis: map[string]*model.Emoji{
 		"smile|": {Name: "smile", PublicURL: "https://local.example/files/smile.png"},
 	}}
-	h := emojiRedirectHandler(repo)
+	h := emojiRedirectHandler(pk, repo)
 
 	c, rec := newEmojiTestContext(t, "smile.webp", "")
 	require.NoError(t, h(c))
@@ -185,9 +185,9 @@ func TestEmojiRedirectHandler_LocalEmojiUnchanged(t *testing.T) {
 // context 未設定 (proxy 無効構成) では素通し。ここで空文字を返すと画像が
 // 全部壊れるので、**書き換えられないなら元の URL を返す**のが正しい。
 func TestMediaLeak_WithoutContextPassesThrough(t *testing.T) {
-	entity.SetMediaURLContext(nil)
+	var pk *entity.Packer
 	assert.Equal(t, "https://remote.example/a.png",
-		entity.ProxyAvatarURLString("https://remote.example/a.png"))
+		pk.ProxyAvatarURLString("https://remote.example/a.png"))
 	assert.Equal(t, "https://remote.example/a.png",
-		entity.ProxyEmojiURLString("https://remote.example/a.png"))
+		pk.ProxyEmojiURLString("https://remote.example/a.png"))
 }

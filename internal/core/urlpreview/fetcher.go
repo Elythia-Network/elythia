@@ -287,7 +287,7 @@ func (f *Fetcher) applySensitiveList(result *Result) {
 //
 // upstream は thumbnail / icon を無条件に mediaProxy URL へ書き換えるので
 // 非 http(s) 値がクライアントに出ることが構造上ありえないが、mk-go の
-// `entity.ProxyMediaURL` は host を持たない URL (`javascript:…` / `data:…`) を
+// `(*entity.Packer).ProxyMediaURL` は host を持たない URL (`javascript:…` / `data:…`) を
 // proxy 対象外として素通しするため、ここで落とす必要がある。
 func validateResultSchemes(result *Result) error {
 	if !isHTTPScheme(result.URL) {

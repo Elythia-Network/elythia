@@ -1344,7 +1344,7 @@ func (h *Handler) rolePayload(userID string) (isAdmin bool, isMod bool, policies
 					"id":              r.ID,
 					"name":            r.Name,
 					"color":           r.Color,
-					"iconUrl":         entity.ProxyMediaURLPtr(r.IconURL),
+					"iconUrl":         h.entityPacker.ProxyMediaURLPtr(r.IconURL),
 					"description":     r.Description,
 					"isModerator":     r.IsModerator,
 					"isAdministrator": r.IsAdministrator,

@@ -805,14 +805,14 @@ func (h *Handler) channelToMap(ch *model.Channel, bannerURL any) map[string]any 
 // channelBannerPublicURL mirrors upstream DriveFileEntityService.getPublicUrl
 // for the non-proxy path (webpublicUrl ?? url, #1280), then wraps a remote
 // origin through the media proxy to prevent viewer IP leakage (#1529).
-// entity.ProxyMediaURL は context 未配線時 / local URL では raw を返すので
+// (*entity.Packer).ProxyMediaURL は context 未配線時 / local URL では raw を返すので
 // 従来挙動を維持する。
-func channelBannerPublicURL(f *model.DriveFile) string {
+func channelBannerPublicURL(pk *entity.Packer, f *model.DriveFile) string {
 	raw := f.URL
 	if f.WebpublicURL != nil && *f.WebpublicURL != "" {
 		raw = *f.WebpublicURL
 	}
-	return entity.ProxyMediaURL(raw)
+	return pk.ProxyMediaURL(raw)
 }
 
 // resolveBannerURL resolves a single channel's bannerId to its public URL.
@@ -825,7 +825,7 @@ func (h *Handler) resolveBannerURL(bannerID *string) any {
 	if err != nil || f == nil {
 		return nil
 	}
-	return channelBannerPublicURL(f)
+	return channelBannerPublicURL(h.entityPacker, f)
 }
 
 // resolveBannerURLs batch-resolves bannerUrl for a slice of channels in a
@@ -855,7 +855,7 @@ func (h *Handler) resolveBannerURLs(rows []*model.Channel) map[string]any {
 	for _, ch := range rows {
 		if ch.BannerID != nil {
 			if f := byID[*ch.BannerID]; f != nil {
-				res[ch.ID] = channelBannerPublicURL(f)
+				res[ch.ID] = channelBannerPublicURL(h.entityPacker, f)
 			}
 		}
 	}

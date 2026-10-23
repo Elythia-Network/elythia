@@ -357,13 +357,13 @@ func (h *ssrMetaHandler) absoluteURL(u string) string {
 	return strings.TrimSuffix(h.cfg.URL, "/") + "/" + strings.TrimPrefix(u, "/")
 }
 
-// avatarURL resolves the OGP image for a user. entity.IdenticonURL が
+// avatarURL resolves the OGP image for a user. (*entity.Packer).IdenticonURL が
 // proxy 化と identicon fallback をまとめて面倒を見る (#1529 / #710)。
 func (h *ssrMetaHandler) avatarURL(u *model.User) string {
 	if u == nil {
 		return ""
 	}
-	return h.absoluteURL(entity.IdenticonURL(u))
+	return h.absoluteURL(h.entityPacker.IdenticonURL(u))
 }
 
 // filesOf packs the drive files attached to a note / gallery post.
