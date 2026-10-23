@@ -19,25 +19,6 @@ type UserRolesLookup interface {
 	LookupUserRoles(userID string) []*model.Role
 }
 
-// SetUserRolesLookup wires the role lookup used by PackUserLite and
-// PackUserDetailed to populate the `roles` / `badgeRoles` fields. Pass nil
-// to clear (used in tests).
-//
-// It changes only the default Packer (#3788); a Packer built by NewPacker
-// keeps its own dependencies.
-func SetUserRolesLookup(l UserRolesLookup) {
-	updateDefaultPacker(func(p *Packer) { p.userRoles = l })
-}
-
-// SetShowRemoteBadgesLookup wires the meta.showRoleBadgesOfRemoteUsers
-// accessor used by packBadgeRoles (#1653)。Pass nil to clear (used in tests).
-//
-// It changes only the default Packer (#3788); a Packer built by NewPacker
-// keeps its own dependencies.
-func SetShowRemoteBadgesLookup(fn func() bool) {
-	updateDefaultPacker(func(p *Packer) { p.showRemoteBadges = fn })
-}
-
 // resolveShowRemoteBadges reports whether remote users' badge roles should be
 // exposed, falling back to false (= local-only) when the lookup is unwired.
 func (pkr *Packer) resolveShowRemoteBadges() bool {
@@ -46,16 +27,6 @@ func (pkr *Packer) resolveShowRemoteBadges() bool {
 		return false
 	}
 	return fn()
-}
-
-// SetInstanceIconURLLookup wires the meta.iconUrl accessor used by IdenticonURL
-// for the local-system-account avatarUrl special case (#1781)。Pass nil to clear
-// (used in tests).
-//
-// It changes only the default Packer (#3788); a Packer built by NewPacker
-// keeps its own dependencies.
-func SetInstanceIconURLLookup(fn func() string) {
-	updateDefaultPacker(func(p *Packer) { p.instanceIconURL = fn })
 }
 
 // resolveInstanceIconURL returns meta.iconUrl, or "" when the lookup is unwired

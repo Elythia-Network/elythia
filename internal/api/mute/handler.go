@@ -43,7 +43,7 @@ type Handler struct {
 	// extras は一覧の利用者のピン留め・移行先をまとめて埋める (#3330)。
 	extras userpack.DetailExtrasMany
 	// entityPacker は利用者や投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
-	// 持つ (#3792)。組み立てで渡し、既定の Packer を読まない。
+	// 持つ (#3792)。組み立てで渡す。
 	entityPacker *entity.Packer
 }
 

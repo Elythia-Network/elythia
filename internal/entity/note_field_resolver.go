@@ -52,8 +52,8 @@ type PollVoteLookup interface {
 // nil レシーバはすべて no-op として扱われ、構築側 (router) の wiring が
 // 不完全でも panic しない。
 type NoteFieldResolver struct {
-	// packer packs the files the resolver embeds. 既定の Packer を読むと、
-	// 投稿の本体と添付ファイルで別の mediaURL を使いうる (#3790)。
+	// packer packs the files the resolver embeds. 投稿の本体と同じ Packer を
+	// 渡さないと、添付ファイルだけ別の mediaURL を使いうる (#3790)。
 	packer       *Packer
 	driveFile    DriveFileLookup
 	driveFolder  DriveFolderLookup

@@ -664,15 +664,6 @@ func signURL(secret []byte, rawURL string) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// SetMediaURLContext wires the media-proxy URL rewriter. Pass nil to clear
-// (used in tests).
-//
-// It changes only the default Packer (#3788); a Packer built by NewPacker
-// keeps its own dependencies.
-func SetMediaURLContext(c *MediaURLContext) {
-	updateDefaultPacker(func(p *Packer) { p.mediaURL = c })
-}
-
 // currentMediaURLContext returns the Packer's media context (may be nil). All
 // MediaURLContext methods are nil-safe so callers can use the result directly.
 func (pkr *Packer) currentMediaURLContext() *MediaURLContext {

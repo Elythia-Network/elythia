@@ -12,9 +12,9 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 )
 
-// meUpdated の本体は、SetEntityPacker で渡された Packer で包む (#3792)。既定の
-// Packer は空のままなので、既定の Packer を読むように戻ると avatarUrl が生の
-// リモートの URL になって落ちる。
+// meUpdated の本体は、SetEntityPacker で渡された Packer で包む (#3792)。
+// 渡した Packer を使わずに nil の Packer で包むと avatarUrl が生のリモートの
+// URL になって落ちる。
 func TestService_MeUpdatedPacksWithTheGivenEntityPacker(t *testing.T) {
 	svc, repo, _, _ := newFullSvc(t)
 	avatar := "https://remote.example/avatar.png"

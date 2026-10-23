@@ -16,7 +16,7 @@ import (
 )
 
 // withMediaProxy returns a Packer that rewrites media URLs through the proxy.
-// handler には引数で渡す (#3798)。既定の Packer は書き換えない。
+// handler には引数で渡す (#3798)。
 func withMediaProxy(t *testing.T) *entity.Packer {
 	t.Helper()
 	return entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(

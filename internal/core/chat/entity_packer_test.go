@@ -35,8 +35,9 @@ func TestHasEntityPacker(t *testing.T) {
 }
 
 // stream と push に載せる fromUser・toUser・reaction の user は、SetEntityPacker で
-// 渡された Packer で包む (#3794)。このパッケージのテストは既定の Packer を配線
-// しないので、既定の Packer を読むと avatarUrl が生のリモートの URL になって落ちる。
+// 渡された Packer で包む (#3794)。
+// 渡した Packer を使わずに nil の Packer で包むと avatarUrl が生のリモートの
+// URL になって落ちる。
 func TestService_PackUsersStreamUsesTheGivenPacker(t *testing.T) {
 	s := &Service{}
 	s.SetEntityPacker(entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(

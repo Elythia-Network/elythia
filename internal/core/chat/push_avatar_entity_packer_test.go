@@ -9,8 +9,9 @@ import (
 )
 
 // push に載せる送り主のアイコンは、SetEntityPacker で渡された Packer で media
-// proxy へ通す (#3798)。このパッケージのテストは既定の Packer を配線しないので、
-// 既定の Packer を読むと生のリモートの URL になって落ちる。
+// proxy へ通す (#3798)。
+// 渡した Packer を使わずに nil の Packer で包むと生のリモートの URL
+// になって落ちる。
 func TestService_PackMessagePushUsesTheGivenPacker(t *testing.T) {
 	s := &Service{}
 	s.SetEntityPacker(entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(

@@ -14,8 +14,9 @@ import (
 )
 
 // 通知の本文 (通知した利用者) と、埋め込んだ投稿の作者は、SetEntityPacker で渡された
-// Packer で包む (#3796)。このパッケージのテストは既定の Packer を配線しないので、
-// 既定の Packer を読むと avatarUrl が生のリモートの URL になって落ちる。
+// Packer で包む (#3796)。
+// 渡した Packer を使わずに nil の Packer で包むと avatarUrl が生のリモートの
+// URL になって落ちる。
 func TestNotificationPublisher_PacksWithTheGivenPacker(t *testing.T) {
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)

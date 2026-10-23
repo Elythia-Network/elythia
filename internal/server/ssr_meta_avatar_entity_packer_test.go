@@ -10,8 +10,9 @@ import (
 )
 
 // OGP のアバターは、SetEntityPacker で渡された Packer で media proxy へ通す
-// (#3798)。既定の Packer は空のままなので、既定の Packer を読むと生のリモートの
-// URL になって落ちる。
+// (#3798)。
+// 渡した Packer を使わずに nil の Packer で包むと生のリモートの URL
+// になって落ちる。
 func TestSSRMetaHandler_AvatarURLUsesTheGivenPacker(t *testing.T) {
 	h := &ssrMetaHandler{cfg: &config.Config{URL: "https://local.example"}}
 	h.SetEntityPacker(entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(

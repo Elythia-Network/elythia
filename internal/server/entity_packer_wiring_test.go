@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/elythia-network/elythia/internal/config"
-	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/model"
 )
 
@@ -20,10 +19,9 @@ import (
 // media proxy へ通す (#3790)。**
 //
 // 以前は既定の Packer (パッケージの変数) を読んでいた。組み立てで Packer を
-// 渡す形にしたので、handler か NoteFieldResolver が既定の Packer を読むように
-// 戻ると、既定の Packer を配線しない組み立て (段階 (5-10) 以降) では、閲覧者の
-// ブラウザがリモートのファイルを直接取りに行く。ここでは組み立ての後に既定の
-// Packer の mediaURL を外し、渡した Packer だけで proxy が付くことを確かめる。
+// 渡す形にし、#3800 で既定の Packer は本番から無くなった。handler か
+// NoteFieldResolver に Packer が渡らないと、閲覧者のブラウザがリモートの
+// ファイルを直接取りに行く。ここでは渡した Packer で proxy が付くことを確かめる。
 //
 // 見る経路は notes/show (notes の handler と、その handler が作る resolver) と
 // users/notes (users の handler と、router が作る共有の resolver)。どちらも
@@ -68,9 +66,6 @@ func TestNewServer_NotePackersUseTheWiredPacker(t *testing.T) {
 	}).Error)
 
 	srv := newServerWithConfig(t, func(*config.Config) {})
-	// 既定の Packer の mediaURL を外す。restoreProcessGlobals が後で nil に戻すので、
-	// ここで外した分を戻す必要は無い。
-	entity.SetMediaURLContext(nil)
 
 	assertProxied := func(t *testing.T, files []map[string]any) {
 		t.Helper()
@@ -116,9 +111,8 @@ func TestNewServer_NotePackersUseTheWiredPacker(t *testing.T) {
 // proxy へ通す (#3792)。**
 //
 // 見る経路は users/show (users の handler)、i (i の handler の MeDetailed)、
-// blocking/create (router が作る共有の userpack.Packer)。上と同じく、組み立ての
-// 後に既定の Packer の mediaURL を外し、渡した Packer だけで proxy が付くことを
-// 確かめる。
+// blocking/create (router が作る共有の userpack.Packer)。上と同じく、渡した
+// Packer で proxy が付くことを確かめる。
 func TestNewServer_UserDetailedPackersUseTheWiredPacker(t *testing.T) {
 	db := serverIntegrationDB
 	if db == nil {
@@ -143,8 +137,6 @@ func TestNewServer_UserDetailedPackersUseTheWiredPacker(t *testing.T) {
 	}
 
 	srv := newServerWithConfig(t, func(*config.Config) {})
-	// 既定の Packer の mediaURL を外す。restoreProcessGlobals が後で nil に戻す。
-	entity.SetMediaURLContext(nil)
 
 	for _, tc := range []struct {
 		name string
@@ -174,8 +166,7 @@ func TestNewServer_UserDetailedPackersUseTheWiredPacker(t *testing.T) {
 //
 // 見る経路は flash/create (flash の handler)、chat/rooms/create (chat の handler の
 // レシーバの無い packRoom)、/embed/user-timeline (router のクロージャ)。上と同じく、
-// 組み立ての後に既定の Packer の mediaURL を外し、渡した Packer だけで proxy が
-// 付くことを確かめる。
+// 渡した Packer で proxy が付くことを確かめる。
 func TestNewServer_UserLitePackersUseTheWiredPacker(t *testing.T) {
 	db := serverIntegrationDB
 	if db == nil {
@@ -196,8 +187,6 @@ func TestNewServer_UserLitePackersUseTheWiredPacker(t *testing.T) {
 	require.NoError(t, db.Exec(`UPDATE "user" SET "avatarUrl" = ? WHERE "id" = ?`, avatarURL, userID).Error)
 
 	srv := newServerWithConfig(t, func(*config.Config) {})
-	// 既定の Packer の mediaURL を外す。restoreProcessGlobals が後で nil に戻す。
-	entity.SetMediaURLContext(nil)
 
 	t.Run("flash/create", func(t *testing.T) {
 		rec := postJSON(t, srv, "/api/flash/create", token, map[string]any{
@@ -252,8 +241,8 @@ func TestNewServer_UserLitePackersUseTheWiredPacker(t *testing.T) {
 // proxy へ通す (#3796)。**
 //
 // 見る経路は announcements (お知らせの imageUrl) と drive/files/update (リモートの
-// ファイルの url)。上と同じく、組み立ての後に既定の Packer の mediaURL を外し、
-// 渡した Packer だけで proxy が付くことを確かめる。通知は stream の
+// ファイルの url)。上と同じく、渡した Packer で proxy が付くことを
+// 確かめる。通知は stream の
 // TestNotificationPublisher_PacksWithTheGivenPacker が見る。
 func TestNewServer_RemainingPackersUseTheWiredPacker(t *testing.T) {
 	db := serverIntegrationDB
@@ -285,8 +274,6 @@ func TestNewServer_RemainingPackersUseTheWiredPacker(t *testing.T) {
 	}).Error)
 
 	srv := newServerWithConfig(t, func(*config.Config) {})
-	// 既定の Packer の mediaURL を外す。restoreProcessGlobals が後で nil に戻す。
-	entity.SetMediaURLContext(nil)
 	// 否定形だと空文字でも通るので、proxy の形であることを肯定形で見る。
 	proxied := func(t *testing.T, got string) {
 		t.Helper()
@@ -325,8 +312,7 @@ func TestNewServer_RemainingPackersUseTheWiredPacker(t *testing.T) {
 // へ通す (#3798)。**
 //
 // どちらも部品を持たず、router が組み立てた Packer をそのまま渡す。上と同じく、
-// 組み立ての後に既定の Packer の mediaURL を外し、渡した Packer だけで proxy が
-// 付くことを確かめる。
+// 渡した Packer で proxy が付くことを確かめる。
 func TestNewServer_MediaRoutesUseTheWiredPacker(t *testing.T) {
 	db := serverIntegrationDB
 	if db == nil {
@@ -352,8 +338,6 @@ func TestNewServer_MediaRoutesUseTheWiredPacker(t *testing.T) {
 	}).Error)
 
 	srv := newServerWithConfig(t, func(*config.Config) {})
-	// 既定の Packer の mediaURL を外す。restoreProcessGlobals が後で nil に戻す。
-	entity.SetMediaURLContext(nil)
 
 	for _, tc := range []struct{ name, path, shape string }{
 		{"avatar", "/avatar/@epp_media", "/avatar.webp?"},

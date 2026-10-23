@@ -1,10 +1,5 @@
 package entity
 
-import (
-	"sync"
-	"sync/atomic"
-)
-
 // Packer holds the lookups the entity packers consult beyond the row they
 // pack: role-derived flags, avatar decorations, meta-backed switches and the
 // media-proxy URL rewriter.
@@ -14,7 +9,8 @@ import (
 // ため、依存を 1 つの値にまとめる (#3788、#3666 の段階 (5))。(5-5) では公開
 // 関数を Packer のメソッドにし、パッケージ関数は既定の Packer へ委ねる。
 // 呼び出し側は系統ごとに Packer を受け取る形へ移し、(5-9) でパッケージ関数は
-// 無くなった (#3790〜#3798)。既定の Packer は Set* が書くだけで、(5-10) で消す。
+// 無くなった (#3790〜#3798)。(5-10) で既定の Packer と Set* も本番から消し、
+// このパッケージのテスト用の補助 (default_packer_test.go) にだけ残した (#3800)。
 //
 // nil の *Packer と、依存が欠けた Packer は、それぞれの依存が未配線のときと
 // 同じに動く。**mediaURL が無いとメディアの URL を生のまま出す** (閲覧者の IP が
@@ -24,7 +20,9 @@ type Packer struct {
 	// url (the pre-#521 behaviour).
 	avatarDecoration AvatarDecorationLookup
 	// emojiDecoration resolves emoji-backed avatarDecorations entries (#2975).
-	// nil drops those entries (fail-closed; see SetEmojiDecorationLookup).
+	// nil drops those entries (fail-closed): unlike catalog entries, which are
+	// kept without `url` when unwired, there is no way to tell whether an emoji
+	// is still non-sensitive.
 	emojiDecoration EmojiDecorationLookup
 	// canChat derives canChat from role policies. nil yields the upstream
 	// default `chatAvailability = "available"` (canChat=true).
@@ -73,36 +71,6 @@ func NewPacker(deps PackerDeps) *Packer {
 		silenced:         deps.Silenced,
 		mediaURL:         deps.MediaURL,
 	}
-}
-
-// defaultPacker is the Packer that Set* writes. Outside Set* itself (which
-// copies it before replacing) and the tests, nothing reads it since the
-// package-level functions were removed (#3798); it goes away with Set* in
-// #3666 段階 (5-10)。
-//
-// 読み込みはリクエストごとに走るので atomic にし、Set* は写しを作って差し替える。
-// 書き込みどうしは defaultPackerMu で直列にする (2 つの Set* が同時に写しを
-// 作ると、片方の書き込みが消える)。
-var (
-	defaultPackerMu sync.Mutex
-	defaultPacker   atomic.Pointer[Packer]
-)
-
-// currentPacker returns the default Packer, never nil.
-func currentPacker() *Packer {
-	if p := defaultPacker.Load(); p != nil {
-		return p
-	}
-	return &Packer{}
-}
-
-// updateDefaultPacker replaces the default Packer with a copy changed by fn.
-func updateDefaultPacker(fn func(*Packer)) {
-	defaultPackerMu.Lock()
-	defer defaultPackerMu.Unlock()
-	next := *currentPacker()
-	fn(&next)
-	defaultPacker.Store(&next)
 }
 
 // HasMediaURL reports whether pkr rewrites media URLs through the media

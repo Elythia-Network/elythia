@@ -13,15 +13,6 @@ type AvatarDecorationLookup interface {
 	LookupURL(id string) (url string, ok bool)
 }
 
-// SetAvatarDecorationLookup wires the catalog used by PackUserLite to embed
-// `url` on each avatarDecorations entry. Pass nil to clear (used in tests).
-//
-// It changes only the default Packer (#3788); a Packer built by NewPacker
-// keeps its own dependencies.
-func SetAvatarDecorationLookup(l AvatarDecorationLookup) {
-	updateDefaultPacker(func(p *Packer) { p.avatarDecoration = l })
-}
-
 // EmojiDecorationLookup resolves a decoration entry that points at a local
 // custom emoji instead of the admin-managed catalog (#2975). It must only
 // return emojis that are still usable as a decoration — local (host IS NULL)
@@ -32,19 +23,6 @@ func SetAvatarDecorationLookup(l AvatarDecorationLookup) {
 // `admin/emoji/update` は名前を変えられるので、そちらを出すと古い名前が残る。
 type EmojiDecorationLookup interface {
 	LookupEmojiDecoration(emojiID string) (url string, name string, ok bool)
-}
-
-// SetEmojiDecorationLookup wires the resolver used by PackUserLite for
-// emoji-backed avatarDecorations entries. Pass nil to clear (used in tests).
-//
-// **nil のときは絵文字由来のエントリを落とす** (fail-closed)。カタログ由来は
-// 未配線でも `url` 抜きで残すが、こちらは「まだセンシティブでないか」を
-// 判断する術がないので、配線されていない環境で出すわけにいかない。
-//
-// It changes only the default Packer (#3788); a Packer built by NewPacker
-// keeps its own dependencies.
-func SetEmojiDecorationLookup(l EmojiDecorationLookup) {
-	updateDefaultPacker(func(p *Packer) { p.emojiDecoration = l })
 }
 
 // AvatarDecorationItem is the per-entry shape sent to clients. Mirrors

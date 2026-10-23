@@ -16,9 +16,8 @@ import (
 // main stream へ流す投稿は、SetEntityPacker で渡した Packer で包む (#3790)。
 //
 // 返信先の投稿者の avatarUrl が、渡した Packer の media proxy を通ることを確かめる。
-// (このテストの mock は作った投稿に作者を付けないので、作者ではなく返信先で見る。) この
-// パッケージのテストは既定の Packer を配線しないので、既定の Packer を読むと生の
-// URL になる。
+// (このテストの mock は作った投稿に作者を付けないので、作者ではなく返信先で見る。)
+// 渡した Packer を使わずに nil の Packer で包むと生の URL になる。
 func TestCreateService_PublishesWithTheGivenPacker(t *testing.T) {
 	svc, noteRepo, _ := newCreateService(t)
 	pub := &stubMainStreamPublisher{}

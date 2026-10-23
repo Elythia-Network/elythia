@@ -18,8 +18,8 @@ import (
 // ストリームへ流す投稿は、SetEntityPacker で渡した Packer で包む (#3790)。
 //
 // 作者の avatarUrl (投稿の本体) と添付ファイル (resolver) の両方が、渡した Packer の
-// media proxy を通ることを確かめる。このパッケージのテストは既定の Packer を
-// 配線しないので、既定の Packer を読むと生の URL になる。
+// media proxy を通ることを確かめる。
+// 渡した Packer を使わずに nil の Packer で包むと生の URL になる。
 func TestNotePublisher_PacksWithTheGivenPacker(t *testing.T) {
 	pub := &stubPublisher{}
 	idGen, _ := id.NewGenerator("aidx")

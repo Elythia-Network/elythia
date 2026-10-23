@@ -22,8 +22,8 @@ type UserRolesProvider interface {
 }
 
 // NewUserRolesLookup returns an entity.UserRolesLookup that resolves a
-// user's assigned roles via the role service. Use entity.SetUserRolesLookup
-// to wire. Passing nil provider yields an adapter that always returns nil
+// user's assigned roles via the role service. Wire it as
+// entity.PackerDeps.UserRoles. Passing nil provider yields an adapter that always returns nil
 // (= entity sees empty roles, behaves like pre-#1103).
 func NewUserRolesLookup(provider UserRolesProvider) *UserRolesLookupAdapter {
 	return &UserRolesLookupAdapter{provider: provider}

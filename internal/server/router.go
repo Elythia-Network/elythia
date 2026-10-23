@@ -476,18 +476,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		Silenced:         roleService,
 		MediaURL:         mediaURLCtx,
 	}
-	// 部品へ渡す Packer (#3790)。部品は既定の Packer を読まない。
-	// 既定の Packer は #3798 で読み手が無くなった。下の Set* は書くだけで、
-	// #3666 の (5-10) で Set* ごと消す。
+	// 部品へ渡す Packer (#3790)。組み立てごとに作り、プロセスの状態は書き換えない
+	// (#3800 で既定の Packer と Set* を本番から消した)。
 	entityPacker := entity.NewPacker(entityPackerDeps)
-	entity.SetAvatarDecorationLookup(entityPackerDeps.AvatarDecoration)
-	entity.SetEmojiDecorationLookup(entityPackerDeps.EmojiDecoration)
-	entity.SetCanChatLookup(entityPackerDeps.CanChat)
-	entity.SetUserRolesLookup(entityPackerDeps.UserRoles)
-	entity.SetShowRemoteBadgesLookup(entityPackerDeps.ShowRemoteBadges)
-	entity.SetInstanceIconURLLookup(entityPackerDeps.InstanceIconURL)
-	entity.SetMediaURLContext(entityPackerDeps.MediaURL)
-	entity.SetSilencedLookup(entityPackerDeps.Silenced)
 
 	// 以下は #3676 で受け手より先に作るようにした部品のうち、buildCore へ移さなかった
 	// もの (passwordFailureGuard・proxyAccountResolver・dbHealth) と、buildCore へ移した

@@ -16,7 +16,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	apimeta "github.com/elythia-network/elythia/internal/api/meta"
-	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/frontendutil"
 )
 
@@ -43,19 +42,12 @@ import (
 // `password.SetCost` / `corenote.SetHookConcurrency`)は、使う部品へ依存として
 // 渡す形にして消した(#3780)。`meself.SetEnricher`も、組み立てで作る
 // `meself.Packer`を渡す形にして消した(#3784)。`notehide`の2つも、組み立てで
-// 作る`notehide.Hider`を渡す形にして消した(#3786)。残るのは`entity`の8つの`Set*`で、
-// どれも既定の`entity.Packer`(1つの変数、#3788)の依存を1つずつ差し替える。
+// 作る`notehide.Hider`を渡す形にして消した(#3786)。最後に残った`entity`の8つの`Set*`も、
+// 組み立てで作る`entity.Packer`を部品へ渡す形にして消した(#3790〜#3800)。組み立てが
+// 張り替えるグローバルはもう無く、ここで戻すのは組み立ての外で書かれる2つだけになった。
 func restoreProcessGlobals(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
-		entity.SetMediaURLContext(nil)
-		entity.SetAvatarDecorationLookup(nil)
-		entity.SetEmojiDecorationLookup(nil)
-		entity.SetCanChatLookup(nil)
-		entity.SetUserRolesLookup(nil)
-		entity.SetShowRemoteBadgesLookup(nil)
-		entity.SetInstanceIconURLLookup(nil)
-		entity.SetSilencedLookup(nil)
 		// **latch を戻す。** 数え方は組み立てごとの値になった (#3782) が、
 		// `RequireSetup` が「利用者を観測した」と覚える印はまだパッケージの変数
 		// なので、戻さないと前のテストの観測が残る。
@@ -124,16 +116,10 @@ func TestProcessGlobalsAreRestored(t *testing.T) {
 	// **漏らす人は表にも書き忘れる**ので、表だけを正にしても意味がない。
 	found, _ := processGlobalSetters(t)
 
-	want := []string{
-		"entity.SetAvatarDecorationLookup",
-		"entity.SetCanChatLookup",
-		"entity.SetEmojiDecorationLookup",
-		"entity.SetInstanceIconURLLookup",
-		"entity.SetMediaURLContext",
-		"entity.SetShowRemoteBadgesLookup",
-		"entity.SetSilencedLookup",
-		"entity.SetUserRolesLookup",
-	}
+	// **組み立ては、プロセス共有の状態を 1 つも張り替えない (#3800)。** 期待値が空なので、
+	// 抽出が空振りしても緑になる。検出そのものは TestProcessGlobalSettersReadEveryFile が
+	// fixture で確かめる。
+	want := []string{}
 	got := make([]string, 0, len(found))
 	for call := range found {
 		got = append(got, call)

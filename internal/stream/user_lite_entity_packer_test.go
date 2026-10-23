@@ -39,8 +39,8 @@ func TestUserLitePublishers_HasEntityPacker(t *testing.T) {
 }
 
 // 招待の `invited` に載せる招待者 (UserLite) は、渡された Packer で包む (#3794)。
-// このパッケージのテストは既定の Packer を配線しないので、既定の Packer を読むと
-// avatarUrl が生のリモートの URL になって落ちる。
+// 渡した Packer を使わずに nil の Packer で包むと avatarUrl が生のリモートの
+// URL になって落ちる。
 func TestUserLitePublishers_PackInviterWithTheGivenPacker(t *testing.T) {
 	pk := entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
 		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true)})

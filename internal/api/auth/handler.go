@@ -39,7 +39,7 @@ type Handler struct {
 	// 'createToken' 通知を送る (#1559)。未配線なら通知しない。
 	tokenNotifier TokenNotifier
 	// entityPacker は利用者や投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
-	// 持つ (#3792)。組み立てで渡し、既定の Packer を読まない。
+	// 持つ (#3792)。組み立てで渡す。
 	entityPacker *entity.Packer
 }
 

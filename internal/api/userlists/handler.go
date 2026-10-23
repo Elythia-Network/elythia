@@ -30,7 +30,7 @@ type Handler struct {
 	proxyFollow        ProxyFollowEnqueuer
 	userListEventPub   UserListEventPublisher
 	// entityPacker は利用者を包むときの依存 (role 由来の値、メディアのプロキシ等) を
-	// 持つ (#3794)。組み立てで渡し、既定の Packer を読まない。
+	// 持つ (#3794)。組み立てで渡す。
 	entityPacker *entity.Packer
 }
 
