@@ -60,7 +60,19 @@ type Handler struct {
 	// ugcVisibilityFn は meta.ugcVisibilityForVisitor の live lookup。
 	// clips/notes の匿名 visitor への gate に使う。
 	ugcVisibilityFn func() string
+	// noteHider は閲覧者が見てはいけない投稿の中身を隠す (#3786)。未配線だと
+	// 匿名の閲覧者への ugcVisibilityForVisitor が効かないので、criticalWiring が
+	// 起動時に検査する。
+	noteHider *notehide.Hider
 }
+
+// SetNoteHider wires the Hider that applies the per-viewer hideNote gate to
+// the notes this handler packs.
+func (h *Handler) SetNoteHider(n *notehide.Hider) { h.noteHider = n }
+
+// HasNoteHider reports whether SetNoteHider received a Hider. 未配線だと
+// 匿名の閲覧者に ugcVisibilityForVisitor が効かない (fail-open)。
+func (h *Handler) HasNoteHider() bool { return h.noteHider != nil }
 
 // SetUGCVisibilityLookup wires a live lookup of meta.ugcVisibilityForVisitor.
 //
@@ -536,7 +548,7 @@ func (h *Handler) Notes(c echo.Context) error {
 	notes = notesfilter.ApplyHardMute(h.userRepo, user, notes, h.idGen)
 	entities := entity.PackNotes(c.Request().Context(), notes, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
 	h.fieldRes.Apply(entities, user)
-	notehide.HideEmbeds(user, entities)
+	h.noteHider.HideEmbeds(user, entities)
 	out := make([]any, 0, len(entities))
 	for _, pn := range entities {
 		out = append(out, pn)

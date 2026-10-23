@@ -51,7 +51,19 @@ type Handler struct {
 	// requestIp / requestHeaders を保存しないために使う (#2106 S4)。nil なら保存しない
 	// (= 安全側)。
 	metaRepo repository.MetaRepository
+	// noteHider は閲覧者が見てはいけない投稿の中身を隠す (#3786)。未配線だと
+	// 匿名の閲覧者への ugcVisibilityForVisitor が効かないので、criticalWiring が
+	// 起動時に検査する。
+	noteHider *notehide.Hider
 }
+
+// SetNoteHider wires the Hider that applies the per-viewer hideNote gate to
+// the notes this handler packs.
+func (h *Handler) SetNoteHider(n *notehide.Hider) { h.noteHider = n }
+
+// HasNoteHider reports whether SetNoteHider received a Hider. 未配線だと
+// 匿名の閲覧者に ugcVisibilityForVisitor が効かない (fail-open)。
+func (h *Handler) HasNoteHider() bool { return h.noteHider != nil }
 
 // SetMetaRepo wires the meta repository used to honor enableIpLogging on upload.
 func (h *Handler) SetMetaRepo(m repository.MetaRepository) {
@@ -1126,7 +1138,7 @@ func (h *Handler) FilesAttachedNotes(c echo.Context) error {
 	notes = notesfilter.ApplyHardMute(h.userRepo, viewer, notes, h.idGen)
 	out := entity.PackNotes(c.Request().Context(), notes, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
 	h.fieldRes.Apply(out, viewer)
-	notehide.HideEmbeds(viewer, out)
+	h.noteHider.HideEmbeds(viewer, out)
 	return c.JSON(http.StatusOK, out)
 }
 

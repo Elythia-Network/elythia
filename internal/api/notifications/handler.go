@@ -74,7 +74,19 @@ type Handler struct {
 	// token.iconUrl) + appAccessTokenId を埋めるために使う (#1557)。未配線なら
 	// fallback 無し。
 	accessTokenRepo repository.AccessTokenRepository
+	// noteHider は閲覧者が見てはいけない投稿の中身を隠す (#3786)。未配線だと
+	// 匿名の閲覧者への ugcVisibilityForVisitor が効かないので、criticalWiring が
+	// 起動時に検査する。
+	noteHider *notehide.Hider
 }
+
+// SetNoteHider wires the Hider that applies the per-viewer hideNote gate to
+// the notes this handler packs.
+func (h *Handler) SetNoteHider(n *notehide.Hider) { h.noteHider = n }
+
+// HasNoteHider reports whether SetNoteHider received a Hider. 未配線だと
+// 匿名の閲覧者に ugcVisibilityForVisitor が効かない (fail-open)。
+func (h *Handler) HasNoteHider() bool { return h.noteHider != nil }
 
 // SetAccessTokenRepo wires the access token repo used by notifications/create
 // to resolve the request's app token for header/icon fallback (#1557)。
@@ -361,7 +373,7 @@ func (h *Handler) Show(c echo.Context) error {
 	// 見えない note を丸ごと落とすが embed (renote/reply) には再帰しない。通知 note の
 	// embed と著者設定ゲートを viewer 可視性で適用する。これを欠くと #1570 で塞いだ
 	// i/notifications の depth-2 embed IDOR が再オープンする。
-	notehide.HideNotificationNotes(user, out)
+	h.noteHider.HideNotificationNotes(user, out)
 	h.maybeMarkAsRead(c, user, req)
 	return c.JSON(http.StatusOK, out)
 }

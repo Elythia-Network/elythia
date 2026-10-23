@@ -100,7 +100,19 @@ type Handler struct {
 	noteRepo repository.NoteRepository
 	// quoteAuthorizations は引用の承認の実体を配る (FEP-044f、#3234)。
 	quoteAuthorizations QuoteAuthorizationStore
+	// noteHider は閲覧者が見てはいけない投稿の中身を隠す (#3786)。未配線だと
+	// 匿名の閲覧者への ugcVisibilityForVisitor が効かないので、criticalWiring が
+	// 起動時に検査する。
+	noteHider *notehide.Hider
 }
+
+// SetNoteHider wires the Hider that applies the per-viewer hideNote gate to
+// the notes this handler packs.
+func (h *Handler) SetNoteHider(n *notehide.Hider) { h.noteHider = n }
+
+// HasNoteHider reports whether SetNoteHider received a Hider. 未配線だと
+// 匿名の閲覧者に ugcVisibilityForVisitor が効かない (fail-open)。
+func (h *Handler) HasNoteHider() bool { return h.noteHider != nil }
 
 // SetFollowingRepo wires the repository used by the followers/following AP
 // collection endpoints (#1877)。
@@ -742,7 +754,7 @@ func (h *Handler) packNoteForAPI(viewer *model.User, n *model.Note) entity.NoteE
 	// から漏れる IDOR になる。ap/show は RequireAuth なので viewer は通常非 nil だが、
 	// nil でも notehide が fail-closed (followers/specified embed を hide) する。
 	arr := []entity.NoteEntity{entity.PackNote(n, h.idGen)}
-	notehide.HideEmbeds(viewer, arr)
+	h.noteHider.HideEmbeds(viewer, arr)
 	return arr[0]
 }
 

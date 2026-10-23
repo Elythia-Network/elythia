@@ -122,7 +122,19 @@ type Handler struct {
 	// (upstream featured.ts の globalNotesRankingCache)。channel ranking は cache
 	// しない (channel ごとなので)。
 	featuredGlobalCache FeaturedRankingCache
+	// noteHider は閲覧者が見てはいけない投稿の中身を隠す (#3786)。未配線だと
+	// 匿名の閲覧者への ugcVisibilityForVisitor が効かないので、criticalWiring が
+	// 起動時に検査する。
+	noteHider *notehide.Hider
 }
+
+// SetNoteHider wires the Hider that applies the per-viewer hideNote gate to
+// the notes this handler packs.
+func (h *Handler) SetNoteHider(n *notehide.Hider) { h.noteHider = n }
+
+// HasNoteHider reports whether SetNoteHider received a Hider. 未配線だと
+// 匿名の閲覧者に ugcVisibilityForVisitor が効かない (fail-open)。
+func (h *Handler) HasNoteHider() bool { return h.noteHider != nil }
 
 // SetPiningRepo wires the repository used to verify that a notes/show target
 // is still pinned at request time.
@@ -570,7 +582,7 @@ func (h *Handler) Create(c echo.Context) error {
 	packed := entity.PackNoteWithInstance(c.Request().Context(), created, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
 	s := []entity.NoteEntity{packed}
 	h.fieldResolver().Apply(s, user)
-	notehide.HideEmbeds(user, s)
+	h.noteHider.HideEmbeds(user, s)
 	return c.JSON(http.StatusOK, map[string]any{
 		"createdNote": s[0],
 	})
@@ -689,9 +701,9 @@ func (h *Handler) Show(c echo.Context) error {
 	s := []entity.NoteEntity{packed}
 	h.fieldResolver().Apply(s, viewer)
 	if h.isCurrentlyPinned(n) {
-		notehide.HidePinnedNotes(viewer, s)
+		h.noteHider.HidePinnedNotes(viewer, s)
 	} else {
-		notehide.HideEmbeds(viewer, s)
+		h.noteHider.HideEmbeds(viewer, s)
 	}
 	// #2106 H1: ID-known doctrine (#799) で note は 200 で返すが、follower/specified を
 	// 見られない viewer (非フォロワー/匿名/非対象) には upstream NoteEntityService.hideNote
@@ -1353,7 +1365,7 @@ func (h *Handler) BulkShow(c echo.Context) error {
 func (h *Handler) packReferencedNote(ctx context.Context, n *model.Note, viewer *model.User, detail bool) entity.NoteEntity {
 	packed := entity.PackNotes(ctx, []*model.Note{n}, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
 	h.fieldResolver().Apply(packed, viewer)
-	notehide.HideEmbeds(viewer, packed)
+	h.noteHider.HideEmbeds(viewer, packed)
 	out := packed[0]
 	// queryService 未配線時は fail-closed で hide (= 検証不能なら隠す)。
 	if h.queryService == nil || !h.queryService.CanSee(viewer, n) {
@@ -1405,7 +1417,7 @@ func (h *Handler) packMany(ctx context.Context, notes []*model.Note, viewer *mod
 func (h *Handler) packManyWithoutHardMute(ctx context.Context, notes []*model.Note, viewer *model.User) []entity.NoteEntity {
 	out := entity.PackNotes(ctx, notes, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
 	h.fieldResolver().Apply(out, viewer)
-	notehide.HideEmbeds(viewer, out)
+	h.noteHider.HideEmbeds(viewer, out)
 	return out
 }
 

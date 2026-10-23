@@ -693,7 +693,7 @@ func New(cfg *config.Config, db *gorm.DB, redis *cache.RedisClients) (*Server, e
 
 // constructionMu serializes server construction. newServer replaces
 // process-wide state (the setters TestProcessGlobalsAreRestored lists, e.g.
-// entity.Set* / notehide.Set*) while it wires the routes.
+// entity.Set*) while it wires the routes.
 //
 // 本番では 1 プロセスに Supervisor は 1 つで、世代の作り直しは genMu で直列に
 // なる。それでも、同じプロセスで 2 つの構築が重なると (2 つの Supervisor を立てる

@@ -29,7 +29,7 @@ func TestHideStoredAt_TopLevelFullDecision(t *testing.T) {
 	specifiedMe.VisibleUserIDs = []string{"viewer"}
 
 	packed := []entity.NoteEntity{unfollowed, followed, own, replyToMe, specifiedOther, specifiedMe}
-	hideAt(viewer, packed, repo, heNowMs, true, false)
+	hiderWith(repo).hideAt(viewer, packed, heNowMs, true, false)
 
 	want := map[string]bool{"f1": true, "f2": false, "f3": false, "f4": false, "s1": true, "s2": false}
 	for _, n := range packed {
@@ -49,19 +49,16 @@ func TestHideStoredAt_TopLevelFullDecision(t *testing.T) {
 // (別のゲートが担う、#1568)。全判定は HideStoredNotes を選んだときだけ。
 func TestHideEmbedsAt_TopLevelFollowersUntouched(t *testing.T) {
 	packed := []entity.NoteEntity{*followersEmbed("f1", "stranger")}
-	hideEmbedsAt(&model.User{ID: "viewer"}, packed, followsRepo(), heNowMs)
+	hiderWith(followsRepo()).hideEmbedsAt(&model.User{ID: "viewer"}, packed, heNowMs)
 	if packed[0].IsHidden {
 		t.Error("HideEmbeds must not apply the intrinsic followers gate to top-level notes")
 	}
 }
 
-// 公開用の入口は配線された followingRepo を使う。未配線なら fail-closed。
+// 公開用の入口は Hider の followingRepo を使う。未配線なら fail-closed。
 func TestHideStoredNotes_NilRepoFailClosed(t *testing.T) {
-	prev := followingRepo
-	defer func() { followingRepo = prev }()
-	followingRepo = nil
 	packed := []entity.NoteEntity{*followersEmbed("f1", "stranger")}
-	HideStoredNotes(&model.User{ID: "viewer"}, packed)
+	hiderWith(nil).HideStoredNotes(&model.User{ID: "viewer"}, packed)
 	if !packed[0].IsHidden {
 		t.Error("nil followingRepo must fail closed (blank followers top-level note)")
 	}

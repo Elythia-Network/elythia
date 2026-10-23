@@ -5,6 +5,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/testutil"
 )
 
@@ -51,7 +52,7 @@ func TestHideEmbedsAt_SingleQueryForMixedAuthors(t *testing.T) {
 		noteWithRenote("p2", followersEmbed("e2", "a2")),
 		noteWithRenote("p3", followersEmbed("e3", "a3")),
 	}
-	hideEmbedsAt(viewer, packed, repo, heNowMs)
+	hiderWith(repo).hideEmbedsAt(viewer, packed, heNowMs)
 
 	if repo.calls != 1 {
 		t.Fatalf("expected exactly 1 batched follow query, got %d", repo.calls)
@@ -81,7 +82,7 @@ func TestHideEmbedsAt_DepthTwoQuoteTargetHidden(t *testing.T) {
 		Renote: quoteTarget,
 	}
 	packed := []entity.NoteEntity{noteWithRenote("boost", quote)}
-	hideEmbedsAt(viewer, packed, repo, heNowMs)
+	hiderWith(repo).hideEmbedsAt(viewer, packed, heNowMs)
 
 	if packed[0].Renote.IsHidden || packed[0].Renote.Text == nil {
 		t.Error("public quote embed must stay visible")
@@ -96,7 +97,7 @@ func TestHideEmbedsAt_PublicBatchZeroQuery(t *testing.T) {
 	repo := followsRepo()
 	pub := &entity.NoteEntity{ID: "e", UserID: "a", CreatedAt: "2026-01-02T03:04:05.000Z", User: entity.UserLite{ID: "a"}, Visibility: "public", Text: heStr("hi"), FileIDs: []string{}, Files: []any{}, VisibleUserIDs: []string{}, Mentions: []string{}}
 	packed := []entity.NoteEntity{noteWithRenote("p", pub)}
-	hideEmbedsAt(viewer, packed, repo, heNowMs)
+	hiderWith(repo).hideEmbedsAt(viewer, packed, heNowMs)
 
 	if repo.calls != 0 {
 		t.Fatalf("public-only batch must issue ZERO follow queries, got %d", repo.calls)
@@ -113,7 +114,7 @@ func TestHideEmbedsAt_AnonymousHidesFollowersKeepsPublic(t *testing.T) {
 		noteWithRenote("p1", followersEmbed("e1", "a1")),
 		noteWithRenote("p2", pub),
 	}
-	hideEmbedsAt(nil, packed, repo, heNowMs)
+	hiderWith(repo).hideEmbedsAt(nil, packed, heNowMs)
 
 	if repo.calls != 0 {
 		t.Fatalf("anonymous viewer must not query, got %d", repo.calls)
@@ -131,7 +132,7 @@ func TestHideEmbedsAt_OwnEmbedVisibleNoQuery(t *testing.T) {
 	repo := followsRepo()
 	own := followersEmbed("e", "viewer")
 	packed := []entity.NoteEntity{noteWithRenote("p", own)}
-	hideEmbedsAt(viewer, packed, repo, heNowMs)
+	hiderWith(repo).hideEmbedsAt(viewer, packed, heNowMs)
 
 	if repo.calls != 0 {
 		t.Fatalf("own embed needs no query, got %d", repo.calls)
@@ -147,7 +148,7 @@ func TestHideEmbedsAt_SpecifiedMembership(t *testing.T) {
 	in := &entity.NoteEntity{ID: "in", UserID: "a", CreatedAt: "2026-01-02T03:04:05.000Z", User: entity.UserLite{ID: "a"}, Visibility: "specified", Text: heStr("dm"), FileIDs: []string{}, Files: []any{}, VisibleUserIDs: []string{"viewer"}, Mentions: []string{}}
 	out := &entity.NoteEntity{ID: "out", UserID: "a", CreatedAt: "2026-01-02T03:04:05.000Z", User: entity.UserLite{ID: "a"}, Visibility: "specified", Text: heStr("dm"), FileIDs: []string{}, Files: []any{}, VisibleUserIDs: []string{"someone-else"}, Mentions: []string{}}
 	packed := []entity.NoteEntity{noteWithRenote("p1", in), noteWithRenote("p2", out)}
-	hideEmbedsAt(viewer, packed, repo, heNowMs)
+	hiderWith(repo).hideEmbedsAt(viewer, packed, heNowMs)
 
 	if repo.calls != 0 {
 		t.Fatalf("specified is decided from visibleUserIds, ZERO query expected, got %d", repo.calls)
@@ -211,7 +212,7 @@ func TestHideEmbedsAt_MakeNotesHiddenBeforeHidesEvenFollower(t *testing.T) {
 		Text: heStr("old"), FileIDs: []string{}, Files: []any{}, VisibleUserIDs: []string{}, Mentions: []string{},
 	}
 	packed := []entity.NoteEntity{noteWithRenote("p", old)}
-	hideEmbedsAt(viewer, packed, repo, heNowMs)
+	hiderWith(repo).hideEmbedsAt(viewer, packed, heNowMs)
 	if !packed[0].Renote.IsHidden {
 		t.Error("makeNotesHiddenBefore must hide an old embed even for a follower")
 	}
@@ -232,22 +233,25 @@ func TestHideEmbedsAt_UnparseableCreatedAtFailsClosed(t *testing.T) {
 		Text: heStr("old"), FileIDs: []string{}, Files: []any{}, VisibleUserIDs: []string{}, Mentions: []string{},
 	}
 	packed := []entity.NoteEntity{noteWithRenote("p", bad)}
-	hideEmbedsAt(viewer, packed, repo, heNowMs)
+	hiderWith(repo).hideEmbedsAt(viewer, packed, heNowMs)
 	if !packed[0].Renote.IsHidden {
 		t.Error("unparseable createdAt must fail CLOSED on absolute makeNotesHiddenBefore")
 	}
 }
 
-func TestHideEmbeds_PackageLevelRepo(t *testing.T) {
-	// exercise the exported HideEmbeds + package-level repo wiring.
-	prev := followingRepo
-	defer func() { followingRepo = prev }()
-	SetFollowingRepo(testutil.NewMockFollowingRepository())
+// hiderWith returns a Hider that answers follow queries with repo and has no
+// visitor policy.
+func hiderWith(repo repository.FollowingRepository) *Hider {
+	return NewHider(repo, nil)
+}
+
+func TestHideEmbeds_WiredRepo(t *testing.T) {
+	// exercise the exported HideEmbeds through a Hider built by NewHider.
 	viewer := &model.User{ID: "viewer"}
 	packed := []entity.NoteEntity{noteWithRenote("p", followersEmbed("e", "author"))}
-	HideEmbeds(viewer, packed)
+	NewHider(testutil.NewMockFollowingRepository(), nil).HideEmbeds(viewer, packed)
 	if !packed[0].Renote.IsHidden {
-		t.Error("followers embed must be hidden via package-level HideEmbeds for a non-follower")
+		t.Error("followers embed must be hidden via HideEmbeds for a non-follower")
 	}
 }
 
@@ -272,7 +276,7 @@ func TestHideTopLevelAt_FollowersOnlyBeforeDowngrade(t *testing.T) {
 	t.Run("hidden from non-follower", func(t *testing.T) {
 		repo := followsRepo()
 		packed := []entity.NoteEntity{tlNote("n", "author", "public", pastWindow, entity.UserLite{MakeNotesFollowersOnlyBefore: hePtrInt(-3600)})}
-		hideEmbedsAt(viewer, packed, repo, heNowMs)
+		hiderWith(repo).hideEmbedsAt(viewer, packed, heNowMs)
 		if repo.calls != 1 {
 			t.Fatalf("downgrade candidate must batch one follow query, got %d", repo.calls)
 		}
@@ -283,7 +287,7 @@ func TestHideTopLevelAt_FollowersOnlyBeforeDowngrade(t *testing.T) {
 	t.Run("visible to follower", func(t *testing.T) {
 		repo := followsRepo([2]string{"viewer", "author"})
 		packed := []entity.NoteEntity{tlNote("n", "author", "public", pastWindow, entity.UserLite{MakeNotesFollowersOnlyBefore: hePtrInt(-3600)})}
-		hideEmbedsAt(viewer, packed, repo, heNowMs)
+		hiderWith(repo).hideEmbedsAt(viewer, packed, heNowMs)
 		if packed[0].IsHidden {
 			t.Error("downgraded note must stay visible to a follower")
 		}
@@ -294,7 +298,7 @@ func TestHideTopLevelAt_MakeNotesHiddenBefore(t *testing.T) {
 	viewer := &model.User{ID: "viewer"}
 	repo := followsRepo([2]string{"viewer", "author"}) // even a follower
 	packed := []entity.NoteEntity{tlNote("n", "author", "public", pastWindow, entity.UserLite{MakeNotesHiddenBefore: hePtrInt(-1)})}
-	hideEmbedsAt(viewer, packed, repo, heNowMs)
+	hiderWith(repo).hideEmbedsAt(viewer, packed, heNowMs)
 	if !packed[0].IsHidden {
 		t.Error("makeNotesHiddenBefore must blank an old top-level note even for a follower")
 	}
@@ -305,7 +309,7 @@ func TestHideTopLevelAt_RequireSignin(t *testing.T) {
 	t.Run("anonymous blanked", func(t *testing.T) {
 		repo := followsRepo()
 		packed := []entity.NoteEntity{tlNote("n", "author", "public", pastWindow, pref)}
-		hideEmbedsAt(nil, packed, repo, heNowMs)
+		hiderWith(repo).hideEmbedsAt(nil, packed, heNowMs)
 		if !packed[0].IsHidden {
 			t.Error("requireSigninToViewContents must blank a top-level note for anonymous")
 		}
@@ -313,7 +317,7 @@ func TestHideTopLevelAt_RequireSignin(t *testing.T) {
 	t.Run("authenticated visible", func(t *testing.T) {
 		repo := followsRepo()
 		packed := []entity.NoteEntity{tlNote("n", "author", "public", pastWindow, pref)}
-		hideEmbedsAt(&model.User{ID: "viewer"}, packed, repo, heNowMs)
+		hiderWith(repo).hideEmbedsAt(&model.User{ID: "viewer"}, packed, heNowMs)
 		if packed[0].IsHidden {
 			t.Error("requireSignin must not blank for an authenticated viewer")
 		}
@@ -333,7 +337,7 @@ func TestHideTopLevelAt_IntrinsicNotBlanked(t *testing.T) {
 		tlNote("s", "a2", "specified", "2026-01-02T03:04:05.000Z", entity.UserLite{}),
 	}
 	packed[2-1].VisibleUserIDs = []string{"someone-else"}
-	hideEmbedsAt(viewer, packed, repo, heNowMs)
+	hiderWith(repo).hideEmbedsAt(viewer, packed, heNowMs)
 	if packed[0].IsHidden {
 		t.Error("intrinsic followers top-level must NOT be blanked by the prefs gate (#799)")
 	}
@@ -349,7 +353,7 @@ func TestHideTopLevelAt_SpecifiedRecipientKept(t *testing.T) {
 		tlNote("s", "a2", "specified", "2026-01-02T03:04:05.000Z", entity.UserLite{}),
 	}
 	packed[0].VisibleUserIDs = []string{"viewer"}
-	hideEmbedsAt(viewer, packed, followsRepo(), heNowMs)
+	hiderWith(followsRepo()).hideEmbedsAt(viewer, packed, heNowMs)
 	if packed[0].IsHidden {
 		t.Error("specified top-level must survive for a recipient")
 	}
@@ -359,7 +363,7 @@ func TestHideTopLevelAt_OwnNoteVerbatim(t *testing.T) {
 	viewer := &model.User{ID: "viewer"}
 	repo := followsRepo()
 	packed := []entity.NoteEntity{tlNote("n", "viewer", "public", pastWindow, entity.UserLite{MakeNotesHiddenBefore: hePtrInt(-1), RequireSigninToViewContents: heBool(true)})}
-	hideEmbedsAt(viewer, packed, repo, heNowMs)
+	hiderWith(repo).hideEmbedsAt(viewer, packed, heNowMs)
 	if packed[0].IsHidden {
 		t.Error("author must always see their own top-level note")
 	}
@@ -374,7 +378,7 @@ func TestHideTopLevelAt_SingleQueryTopAndEmbed(t *testing.T) {
 	top := tlNote("top", "tlauthor", "public", pastWindow, entity.UserLite{MakeNotesFollowersOnlyBefore: hePtrInt(-3600)})
 	withEmbed := noteWithRenote("p", followersEmbed("e", "embedauthor"))
 	packed := []entity.NoteEntity{top, withEmbed}
-	hideEmbedsAt(viewer, packed, repo, heNowMs)
+	hiderWith(repo).hideEmbedsAt(viewer, packed, heNowMs)
 	if repo.calls != 1 {
 		t.Fatalf("top-level + embed authors must batch into one query, got %d", repo.calls)
 	}
@@ -400,7 +404,7 @@ func TestHideNotificationNotesAt(t *testing.T) {
 		note := tlNote("base", "noteauthor", "public", "2026-01-02T03:04:05.000Z", entity.UserLite{})
 		note.Renote = followersEmbed("r", "renoteauthor")
 		packed := []map[string]any{notifNoteMap(note)}
-		hideNotificationNotesAt(viewer, packed, repo, heNowMs)
+		hiderWith(repo).hideNotificationNotesAt(viewer, packed, heNowMs)
 		if repo.calls != 1 {
 			t.Fatalf("one batched follow query expected, got %d", repo.calls)
 		}
@@ -418,7 +422,7 @@ func TestHideNotificationNotesAt(t *testing.T) {
 		note := tlNote("base", "noteauthor", "public", "2026-01-02T03:04:05.000Z", entity.UserLite{})
 		note.Renote = followersEmbed("r", "renoteauthor")
 		packed := []map[string]any{notifNoteMap(note)}
-		hideNotificationNotesAt(viewer, packed, repo, heNowMs)
+		hiderWith(repo).hideNotificationNotesAt(viewer, packed, heNowMs)
 		got := packed[0]["note"].(entity.NoteEntity)
 		if got.Renote.IsHidden {
 			t.Error("follower must see the depth-2 renote")
@@ -429,7 +433,7 @@ func TestHideNotificationNotesAt(t *testing.T) {
 		repo := followsRepo()
 		note := tlNote("base", "noteauthor", "public", pastWindow, entity.UserLite{MakeNotesHiddenBefore: hePtrInt(-1)})
 		packed := []map[string]any{notifNoteMap(note)}
-		hideNotificationNotesAt(viewer, packed, repo, heNowMs)
+		hiderWith(repo).hideNotificationNotesAt(viewer, packed, heNowMs)
 		got := packed[0]["note"].(entity.NoteEntity)
 		if !got.IsHidden || got.Text != nil {
 			t.Error("makeNotesHiddenBefore must blank the notification note and be written back into the map")
@@ -439,7 +443,7 @@ func TestHideNotificationNotesAt(t *testing.T) {
 	t.Run("notification without note is skipped", func(t *testing.T) {
 		repo := followsRepo()
 		packed := []map[string]any{{"id": "n", "type": "follow"}}
-		hideNotificationNotesAt(viewer, packed, repo, heNowMs) // must not panic
+		hiderWith(repo).hideNotificationNotesAt(viewer, packed, heNowMs) // must not panic
 		if _, ok := packed[0]["note"]; ok {
 			t.Error("follow notification must stay note-less")
 		}
@@ -450,13 +454,11 @@ func TestHideNotificationNotesAt(t *testing.T) {
 }
 
 func TestHideNotificationNotes_NilRepoFailClosed(t *testing.T) {
-	prev := followingRepo
-	defer func() { followingRepo = prev }()
-	followingRepo = nil
+	var h *Hider
 	note := tlNote("base", "noteauthor", "public", "2026-01-02T03:04:05.000Z", entity.UserLite{})
 	note.Renote = followersEmbed("r", "renoteauthor")
 	packed := []map[string]any{notifNoteMap(note)}
-	HideNotificationNotes(&model.User{ID: "viewer"}, packed)
+	h.HideNotificationNotes(&model.User{ID: "viewer"}, packed)
 	got := packed[0]["note"].(entity.NoteEntity)
 	if got.Renote == nil || !got.Renote.IsHidden {
 		t.Error("nil followingRepo must fail closed (blank followers depth-2 embed)")
@@ -471,7 +473,7 @@ func TestHideEmbedsAt_TreatVisibilityDowngrade(t *testing.T) {
 		User: entity.UserLite{ID: "a", MakeNotesFollowersOnlyBefore: &mk}, Visibility: "public",
 		Text: heStr("hi"), FileIDs: []string{}, Files: []any{}, VisibleUserIDs: []string{}, Mentions: []string{}}
 	packed := []entity.NoteEntity{pub}
-	hideEmbedsAt(nil, packed, followsRepo(), heNowMs)
+	hiderWith(followsRepo()).hideEmbedsAt(nil, packed, heNowMs)
 	if packed[0].Visibility != "followers" {
 		t.Errorf("public note past makeNotesFollowersOnlyBefore window should downgrade to followers, got %q", packed[0].Visibility)
 	}
@@ -489,7 +491,7 @@ func TestHidePinnedNotesAt_AuthorPreferenceExceptionMatrix(t *testing.T) {
 
 	t.Run("anonymous public pin bypasses time lockdown without downgrade", func(t *testing.T) {
 		packed := []entity.NoteEntity{base}
-		hidePinnedNotesAt(nil, packed, followsRepo(), heNowMs)
+		hiderWith(followsRepo()).hidePinnedNotesAt(nil, packed, heNowMs)
 		if packed[0].IsHidden || packed[0].Text == nil || *packed[0].Text != "published by pin" {
 			t.Fatal("anonymous public pin must retain content")
 		}
@@ -503,7 +505,7 @@ func TestHidePinnedNotesAt_AuthorPreferenceExceptionMatrix(t *testing.T) {
 		followersOnly := 0
 		n.User.MakeNotesFollowersOnlyBefore = &followersOnly
 		packed := []entity.NoteEntity{n}
-		hidePinnedNotesAt(nil, packed, followsRepo(), heNowMs)
+		hiderWith(followsRepo()).hidePinnedNotesAt(nil, packed, heNowMs)
 		if packed[0].IsHidden || packed[0].Text == nil {
 			t.Fatal("a qualifying public pin must bypass makeNotesFollowersOnlyBefore")
 		}
@@ -516,7 +518,7 @@ func TestHidePinnedNotesAt_AuthorPreferenceExceptionMatrix(t *testing.T) {
 		n := base
 		n.User.RequireSigninToViewContents = &requireSignin
 		packed := []entity.NoteEntity{n}
-		hidePinnedNotesAt(nil, packed, followsRepo(), heNowMs)
+		hiderWith(followsRepo()).hidePinnedNotesAt(nil, packed, heNowMs)
 		if !packed[0].IsHidden || packed[0].Text != nil {
 			t.Fatal("requireSigninToViewContents must hide an anonymous pin")
 		}
@@ -526,7 +528,7 @@ func TestHidePinnedNotesAt_AuthorPreferenceExceptionMatrix(t *testing.T) {
 		n := base
 		n.User.RequireSigninToViewContents = &requireSignin
 		packed := []entity.NoteEntity{n}
-		hidePinnedNotesAt(&model.User{ID: "viewer"}, packed, followsRepo(), heNowMs)
+		hiderWith(followsRepo()).hidePinnedNotesAt(&model.User{ID: "viewer"}, packed, heNowMs)
 		if packed[0].IsHidden || packed[0].Text == nil {
 			t.Fatal("authenticated viewer must receive a public pin despite author preference gates")
 		}
@@ -536,7 +538,7 @@ func TestHidePinnedNotesAt_AuthorPreferenceExceptionMatrix(t *testing.T) {
 		n := base
 		n.Visibility = "followers"
 		packed := []entity.NoteEntity{n}
-		hidePinnedNotesAt(&model.User{ID: "viewer"}, packed, followsRepo(), heNowMs)
+		hiderWith(followsRepo()).hidePinnedNotesAt(&model.User{ID: "viewer"}, packed, heNowMs)
 		if !packed[0].IsHidden {
 			t.Fatal("followers pin must remain subject to author preference gates")
 		}

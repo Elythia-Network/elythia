@@ -16,7 +16,7 @@ var cacheEntries = map[string]cacheEntry{
 	"internal/api/admin.updateMetaWritableColumns": {kindNotCache, "update-metaが書いてよい列の集合を、列の名前と守る列の一覧から1回だけ組む。コードから決まり、DBから読んだ値ではない",
 		nil, nil},
 	"internal/api/ap.Handler": {kindNotCache, "backfillGroupは同じ対象への並行なbackfillを1回にまとめるsingleflightで、呼び出しが終われば何も残さない",
-		[]string{"allowExternalRedirect", "backfillGroup", "detailExtras", "followingRepo", "hostBlocker", "idGen", "keypairExtraRepo", "keypairRepo", "localHost", "nonAPFallback", "noteRepo", "queryService", "quoteAuthorizations", "relation", "remoteFetcher", "remoteResolver", "renderer", "selfOrigin", "softwareBlocker", "userService"}, nil},
+		[]string{"allowExternalRedirect", "backfillGroup", "detailExtras", "followingRepo", "hostBlocker", "idGen", "keypairExtraRepo", "keypairRepo", "localHost", "nonAPFallback", "noteHider", "noteRepo", "queryService", "quoteAuthorizations", "relation", "remoteFetcher", "remoteResolver", "renderer", "selfOrigin", "softwareBlocker", "userService"}, nil},
 	"internal/api/drive.URLUploader": {kindNotCache, "URLからのアップロードの、利用者ごとの同時実行の枠。値の写しではない",
 		[]string{"httpClient", "idGen", "maxBytes", "publisher", "slots", "uploader", "userAgent", "userMu", "userSlots"}, nil},
 	"internal/api/emojis.Handler": {kindFollowsRegistered, "encodedは/api/emojisの符号化済みの応答(#3593)。CachedEmojiRepository.ListLocal(一覧のemojis)が返したsliceと同じかを使うたびに比べ、違えば作り直すので、emojisを捨てれば追従する",

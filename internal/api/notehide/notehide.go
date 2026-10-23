@@ -37,37 +37,48 @@ import (
 	"github.com/elythia-network/elythia/internal/repository"
 )
 
-// followingRepo is wired once at startup (router) so handlers can call
-// HideEmbeds without each threading a FollowingRepository. A nil repo fails
-// closed (followers embeds hidden), which is safe.
-var followingRepo repository.FollowingRepository
-
-// SetFollowingRepo wires the FollowingRepository used by HideEmbeds. Call once
-// during server setup before requests are served.
-func SetFollowingRepo(r repository.FollowingRepository) {
-	followingRepo = r
+// Hider applies the per-viewer hideNote gate with the dependencies the server
+// assembly wires in.
+//
+// 以前はパッケージの変数 (SetFollowingRepo / SetUGCVisibilityLookup) に 1 度
+// 登録していた。ロックの無い素の変数で、組み立てで書き換えるとリクエストの
+// 読み込みと競合するので、組み立てで作る値として使う部品へ渡す (#3786)。
+//
+// 未配線のときの向きは 2 つで逆になる。followingRepo が無いとフォロワー限定を
+// 隠す側 (安全側) に倒れるが、ugcVisibilityLookup が無いと匿名の閲覧者に何も
+// 隠さない側に倒れる。nil の *Hider はどちらも未配線として扱うので、使う部品は
+// Hider を受け取ったかを criticalWiring に載せ、本番で渡し忘れたら起動で落とす。
+type Hider struct {
+	// followingRepo answers the batched follow query. nil fails closed
+	// (followers embeds hidden).
+	followingRepo repository.FollowingRepository
+	// ugcVisibilityLookup returns the live meta.ugcVisibilityForVisitor. nil
+	// applies no visitor-policy hiding.
+	ugcVisibilityLookup func() string
 }
 
-// ugcVisibilityLookup returns the live meta.ugcVisibilityForVisitor. Wired once
-// at startup (router), like followingRepo. A nil lookup applies no
-// visitor-policy hiding.
-var ugcVisibilityLookup func() string
+// NewHider returns a Hider that answers follow queries with followingRepo and
+// reads meta.ugcVisibilityForVisitor through ugcVisibilityLookup for anonymous
+// viewers.
+func NewHider(followingRepo repository.FollowingRepository, ugcVisibilityLookup func() string) *Hider {
+	return &Hider{followingRepo: followingRepo, ugcVisibilityLookup: ugcVisibilityLookup}
+}
 
-// SetUGCVisibilityLookup wires the live lookup of
-// meta.ugcVisibilityForVisitor consulted for anonymous viewers. Call once
-// during server setup before requests are served; nil unwires it.
-func SetUGCVisibilityLookup(fn func() string) {
-	ugcVisibilityLookup = fn
+func (h *Hider) repo() repository.FollowingRepository {
+	if h == nil {
+		return nil
+	}
+	return h.followingRepo
 }
 
 // visitorHidesAll reports whether every packed note must be blanked for
 // viewer: an anonymous viewer while the instance policy is 'none'.
-func visitorHidesAll(viewer *model.User) bool {
+func (h *Hider) visitorHidesAll(viewer *model.User) bool {
 	// meta の参照はログイン済み viewer では不要なので、匿名のときだけ引く。
-	if viewer != nil || ugcVisibilityLookup == nil {
+	if viewer != nil || h == nil || h.ugcVisibilityLookup == nil {
 		return false
 	}
-	return ugcvisibility.HidesAll(ugcVisibilityLookup())
+	return ugcvisibility.HidesAll(h.ugcVisibilityLookup())
 }
 
 // HideEmbeds blanks embedded renote/reply content that `viewer` is not allowed
@@ -75,30 +86,30 @@ func visitorHidesAll(viewer *model.User) bool {
 // whole page (never a per-embed query). Safe to call on every note-returning
 // REST response. viewer==nil (anonymous) hides followers/specified embeds with
 // no query.
-func HideEmbeds(viewer *model.User, packed []entity.NoteEntity) {
-	hideEmbedsAt(viewer, packed, followingRepo, time.Now().UnixMilli())
+func (h *Hider) HideEmbeds(viewer *model.User, packed []entity.NoteEntity) {
+	h.hideEmbedsAt(viewer, packed, time.Now().UnixMilli())
 }
 
 // HidePinnedNotes applies the normal embed gates while treating each top-level
 // entity as a currently pinned profile note. A public/home pin may bypass the
 // author's time-based gates, but never intrinsic visibility, sign-in for an
 // anonymous viewer, or the instance-wide visitor policy.
-func HidePinnedNotes(viewer *model.User, packed []entity.NoteEntity) {
-	hidePinnedNotesAt(viewer, packed, followingRepo, time.Now().UnixMilli())
+func (h *Hider) HidePinnedNotes(viewer *model.User, packed []entity.NoteEntity) {
+	h.hidePinnedNotesAt(viewer, packed, time.Now().UnixMilli())
 }
 
 // HideProfilePinnedNotes grants the current-pin exception only when the note
 // author is also the owner of the profile whose pin rows are being rendered.
 // Legacy Misskey databases can contain pin rows that point at another user's
 // note; those notes still receive the ordinary author-preference gates.
-func HideProfilePinnedNotes(viewer *model.User, packed []entity.NoteEntity, profileOwnerID string) {
+func (h *Hider) HideProfilePinnedNotes(viewer *model.User, packed []entity.NoteEntity, profileOwnerID string) {
 	nowMs := time.Now().UnixMilli()
 	for i := range packed {
 		one := packed[i : i+1]
 		if packed[i].UserID == profileOwnerID {
-			hidePinnedNotesAt(viewer, one, followingRepo, nowMs)
+			h.hidePinnedNotesAt(viewer, one, nowMs)
 		} else {
-			hideEmbedsAt(viewer, one, followingRepo, nowMs)
+			h.hideEmbedsAt(viewer, one, nowMs)
 		}
 	}
 }
@@ -111,8 +122,8 @@ func HideProfilePinnedNotes(viewer *model.User, packed []entity.NoteEntity, prof
 // (i/favorites) and therefore have no visibility gate of their own: the
 // viewer may have lost access since (unfollowed the author, or the author
 // removed them), and upstream blanks such notes instead of returning them.
-func HideStoredNotes(viewer *model.User, packed []entity.NoteEntity) {
-	hideAt(viewer, packed, followingRepo, time.Now().UnixMilli(), true, false)
+func (h *Hider) HideStoredNotes(viewer *model.User, packed []entity.NoteEntity) {
+	h.hideAt(viewer, packed, time.Now().UnixMilli(), true, false)
 }
 
 // HideNotificationNotes applies the per-viewer hideNote gate to the embedded
@@ -124,11 +135,11 @@ func HideStoredNotes(viewer *model.User, packed []entity.NoteEntity) {
 // followers/specified gate is owned there; this only refines the survivors and
 // closes the depth-2 embed leak FilterVisible does not recurse into. One batched
 // follow query for the whole page.
-func HideNotificationNotes(viewer *model.User, packed []map[string]any) {
-	hideNotificationNotesAt(viewer, packed, followingRepo, time.Now().UnixMilli())
+func (h *Hider) HideNotificationNotes(viewer *model.User, packed []map[string]any) {
+	h.hideNotificationNotesAt(viewer, packed, time.Now().UnixMilli())
 }
 
-func hideNotificationNotesAt(viewer *model.User, packed []map[string]any, repo repository.FollowingRepository, nowMs int64) {
+func (h *Hider) hideNotificationNotesAt(viewer *model.User, packed []map[string]any, nowMs int64) {
 	if len(packed) == 0 {
 		return
 	}
@@ -149,32 +160,32 @@ func hideNotificationNotesAt(viewer *model.User, packed []map[string]any, repo r
 	if len(notes) == 0 {
 		return
 	}
-	hideEmbedsAt(viewer, notes, repo, nowMs)
+	h.hideEmbedsAt(viewer, notes, nowMs)
 	for j, i := range idx {
 		packed[i]["note"] = notes[j]
 	}
 }
 
-func hideEmbedsAt(viewer *model.User, packed []entity.NoteEntity, repo repository.FollowingRepository, nowMs int64) {
-	hideAt(viewer, packed, repo, nowMs, false, false)
+func (h *Hider) hideEmbedsAt(viewer *model.User, packed []entity.NoteEntity, nowMs int64) {
+	h.hideAt(viewer, packed, nowMs, false, false)
 }
 
-func hidePinnedNotesAt(viewer *model.User, packed []entity.NoteEntity, repo repository.FollowingRepository, nowMs int64) {
-	hideAt(viewer, packed, repo, nowMs, false, true)
+func (h *Hider) hidePinnedNotesAt(viewer *model.User, packed []entity.NoteEntity, nowMs int64) {
+	h.hideAt(viewer, packed, nowMs, false, true)
 }
 
 // hideAt is the shared body of HideEmbeds / HideStoredNotes. fullTopLevel
 // selects the full decision (HideEmbedDecision) for top-level notes instead of
 // the author-preference subset.
-func hideAt(viewer *model.User, packed []entity.NoteEntity, repo repository.FollowingRepository, nowMs int64, fullTopLevel, pinnedTopLevel bool) {
+func (h *Hider) hideAt(viewer *model.User, packed []entity.NoteEntity, nowMs int64, fullTopLevel, pinnedTopLevel bool) {
 	if len(packed) == 0 {
 		return
 	}
 	// upstream shouldHideNote は匿名 viewer かつ ugcVisibilityForVisitor='none' の
 	// とき、pack するすべての note (埋め込みを含む) を hide する。follow 判定は
 	// 不要なので、他の判定より先に全件を blank する。
-	hideAll := visitorHidesAll(viewer)
-	follows := buildFollowSet(viewer, packed, repo, fullTopLevel, pinnedTopLevel)
+	hideAll := h.visitorHidesAll(viewer)
+	follows := buildFollowSet(viewer, packed, h.repo(), fullTopLevel, pinnedTopLevel)
 	for i := range packed {
 		if hideAll {
 			hideEveryLevel(&packed[i])

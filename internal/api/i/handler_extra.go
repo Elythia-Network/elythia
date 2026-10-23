@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
-	"github.com/elythia-network/elythia/internal/api/notehide"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/core/notification"
 	"github.com/elythia-network/elythia/internal/core/role"
@@ -385,7 +384,7 @@ func (h *Handler) Favorites(c echo.Context) error {
 	// /api/i/favorites は認証 path なので u が viewer。pinned notes と同じく
 	// 自分の myReaction / Channel / Files を埋める (#426)。
 	h.fieldRes.Apply(packed, u)
-	notehide.HideStoredNotes(u, packed)
+	h.noteHider.HideStoredNotes(u, packed)
 	byID := make(map[string]*entity.NoteEntity, len(packed))
 	for i := range packed {
 		byID[packed[i].ID] = &packed[i]

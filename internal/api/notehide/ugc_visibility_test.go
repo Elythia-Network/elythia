@@ -8,12 +8,10 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 )
 
-// setUGCPolicy wires a fixed policy and restores the unwired state afterwards,
-// since the lookup is process-global.
-func setUGCPolicy(t *testing.T, policy string) {
-	t.Helper()
-	SetUGCVisibilityLookup(func() string { return policy })
-	t.Cleanup(func() { SetUGCVisibilityLookup(nil) })
+// policyHider returns a Hider whose visitor policy is fixed to policy and
+// which has no follow repository.
+func policyHider(policy string) *Hider {
+	return NewHider(nil, func() string { return policy })
 }
 
 func publicNote(id, author string) *entity.NoteEntity {
@@ -61,16 +59,15 @@ func TestUGCVisibility_PackedNotesForVisitor(t *testing.T) {
 		{name: "visitor under all is not hidden", policy: ugcvisibility.All},
 		{name: "signed-in viewer under none is not hidden", policy: ugcvisibility.None, viewer: signedIn},
 	}
-	hiders := map[string]func(*model.User, []entity.NoteEntity){
-		"HideEmbeds":      HideEmbeds,
-		"HideStoredNotes": HideStoredNotes,
+	hiders := map[string]func(*Hider, *model.User, []entity.NoteEntity){
+		"HideEmbeds":      (*Hider).HideEmbeds,
+		"HideStoredNotes": (*Hider).HideStoredNotes,
 	}
 	for _, tc := range cases {
 		for hname, hide := range hiders {
 			t.Run(hname+"/"+tc.name, func(t *testing.T) {
-				setUGCPolicy(t, tc.policy)
 				packed := fullyEmbeddedBatch()
-				hide(tc.viewer, packed)
+				hide(policyHider(tc.policy), tc.viewer, packed)
 				for level, n := range levels(&packed[0]) {
 					if n.IsHidden != tc.hidden {
 						t.Errorf("%s: IsHidden = %v, want %v", level, n.IsHidden, tc.hidden)
@@ -89,20 +86,22 @@ func TestUGCVisibility_PackedNotesForVisitor(t *testing.T) {
 
 func TestUGCVisibility_NotificationNotesUseSameGate(t *testing.T) {
 	// 通知は常にログイン済みの受信者向けなので、'none' でも隠さない。
-	setUGCPolicy(t, ugcvisibility.None)
 	note := *publicNote("n", "a1")
 	out := []map[string]any{notifNoteMap(note)}
-	HideNotificationNotes(&model.User{ID: "viewer"}, out)
+	policyHider(ugcvisibility.None).HideNotificationNotes(&model.User{ID: "viewer"}, out)
 	if out[0]["note"].(entity.NoteEntity).IsHidden {
 		t.Error("notification note for a signed-in recipient must not be hidden")
 	}
 }
 
+// 未配線 (nil の *Hider と、lookup が nil の Hider) は公開範囲を見ない。
+// 本番で渡し忘れないよう、使う部品は criticalWiring で起動時に検査する。
 func TestUGCVisibility_UnwiredLookupDoesNotHide(t *testing.T) {
-	SetUGCVisibilityLookup(nil)
-	packed := fullyEmbeddedBatch()
-	HideEmbeds(nil, packed)
-	if packed[0].IsHidden {
-		t.Error("an unwired lookup must not hide public notes")
+	for name, h := range map[string]*Hider{"nil hider": nil, "nil lookup": NewHider(nil, nil)} {
+		packed := fullyEmbeddedBatch()
+		h.HideEmbeds(nil, packed)
+		if packed[0].IsHidden {
+			t.Errorf("%s: an unwired lookup must not hide public notes", name)
+		}
 	}
 }
