@@ -545,7 +545,7 @@ func (h *Handler) packDriveFileShow(f *model.DriveFile) entity.DriveFileEntity {
 	}
 	if h.userRepo != nil && f.UserID != nil {
 		if u, err := h.userRepo.FindByID(*f.UserID); err == nil {
-			lite := entity.PackUserLite(u)
+			lite := h.entityPacker.PackUserLite(u)
 			e.User = &lite
 		}
 	}

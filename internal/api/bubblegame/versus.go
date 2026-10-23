@@ -29,7 +29,18 @@ type VersusHandler struct {
 	users   UserFinder
 	records repository.BubbleVersusRepository
 	blocks  bubbleversus.BlockChecker
+	// entityPacker は利用者を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3794)。組み立てで渡し、既定の Packer を読まない。
+	entityPacker *entity.Packer
 }
+
+// SetEntityPacker wires the Packer this VersusHandler packs entities with (#3794).
+func (h *VersusHandler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
+// リモートへ漏れる。
+func (h *VersusHandler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
 
 // NewVersusHandler constructs a VersusHandler.
 func NewVersusHandler(svc *bubbleversus.Service, users UserFinder) *VersusHandler {
@@ -126,7 +137,7 @@ func (h *VersusHandler) packMatch(m *bubbleversus.Match, known map[string]*model
 		}
 		out[n+"Id"] = p.UserID
 		if u != nil {
-			out[n] = entity.PackUserLite(u)
+			out[n] = h.entityPacker.PackUserLite(u)
 		} else {
 			out[n] = nil
 		}

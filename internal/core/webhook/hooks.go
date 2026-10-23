@@ -324,7 +324,18 @@ func (h *FollowingHook) userPacker() *userpack.Packer {
 // `userCreated` system webhook event on new user creation.
 type SignupHook struct {
 	svc *Service
+	// entityPacker は利用者を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3794)。組み立てで渡し、既定の Packer を読まない。
+	entityPacker *entity.Packer
 }
+
+// SetEntityPacker wires the Packer this SignupHook packs entities with (#3794).
+func (h *SignupHook) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs. 無いと webhook の本文の avatarUrl がリモートの生の URL に
+// なり、ほかの経路 (media proxy を通す) と形が変わる。
+func (h *SignupHook) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
 
 // NewSignupHook constructs a SignupHook.
 func NewSignupHook(svc *Service) *SignupHook {
@@ -336,7 +347,7 @@ func (h *SignupHook) OnUserCreated(user *model.User) {
 	if h == nil || h.svc == nil || user == nil {
 		return
 	}
-	h.svc.DispatchSystem(SystemEventUserCreated, packUser(user))
+	h.svc.DispatchSystem(SystemEventUserCreated, packUser(h.entityPacker, user))
 }
 
 // noteEntityToMap converts a packed NoteEntity into the generic map[string]any
@@ -351,8 +362,8 @@ func noteEntityToMap(packed entity.NoteEntity) map[string]any {
 
 // packUser turns a model.User into a generic map matching entity.UserLite.
 // 呼び出し元で u != nil は保証済み。
-func packUser(u *model.User) map[string]any {
-	return toMap(entity.PackUserLite(u))
+func packUser(pk *entity.Packer, u *model.User) map[string]any {
+	return toMap(pk.PackUserLite(u))
 }
 
 // toMap converts a packed entity into the generic map the webhook envelope

@@ -1114,7 +1114,7 @@ func (s *Service) packGame(game *model.ReversiGame) map[string]any {
 
 // userLiteMap builds a UserLite-compatible map without importing the
 // entity package (core layer must not depend on presentation layer).
-// フィールドは entity.PackUserLite の必須部分のみ (optional な TS 互換
+// フィールドは (*entity.Packer).PackUserLite の必須部分のみ (optional な TS 互換
 // フィールドは省略)。avatarUrl は SetAvatarURLFunc で渡された関数で決める。
 func (s *Service) userLiteMap(u *model.User) map[string]any {
 	var avatarURL string

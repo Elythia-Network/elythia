@@ -536,7 +536,7 @@ func (h *Handler) invalidateMetaResponseCache() {
 }
 
 // AvatarDecorationCacheInvalidator drops the process-wide avatar decoration
-// catalog cache used by entity.PackUserLite. Implemented by
+// catalog cache used by (*entity.Packer).PackUserLite. Implemented by
 // core/avatardecoration.Resolver.
 type AvatarDecorationCacheInvalidator interface {
 	Invalidate()
@@ -4638,7 +4638,7 @@ func (h *Handler) notifyAbuseReportResolved(ctx context.Context, reportID string
 	}
 	// 本文は管理画面の API の形 (packAbuseReport) ではなく、本家の Webhook の形
 	// (#3260)。FindByID が利用者 3 人を Preload している。
-	body := coreabuse.WebhookPayload(report, report.Reporter, report.TargetUser, report.Assignee, h.abuseWebhookLookups(), h.idGen)
+	body := coreabuse.WebhookPayload(h.entityPacker, report, report.Reporter, report.TargetUser, report.Assignee, h.abuseWebhookLookups(), h.idGen)
 	h.systemWebhookDispatcher.DispatchSystemExcluding(
 		corewebhook.SystemEventAbuseReportResolved, body, h.inactiveAbuseWebhookIDs())
 }

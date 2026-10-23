@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -166,4 +167,83 @@ func TestNewServer_UserDetailedPackersUseTheWiredPacker(t *testing.T) {
 			assert.NotContains(t, u.AvatarURL, "://"+host+"/", "avatarUrl: %s", u.AvatarURL)
 		})
 	}
+}
+
+// **UserLite を包む部品も、組み立てで渡された Packer で avatarUrl を media proxy
+// へ通す (#3794)。**
+//
+// 見る経路は flash/create (flash の handler)、chat/rooms/create (chat の handler の
+// レシーバの無い packRoom)、/embed/user-timeline (router のクロージャ)。上と同じく、
+// 組み立ての後に既定の Packer の mediaURL を外し、渡した Packer だけで proxy が
+// 付くことを確かめる。
+func TestNewServer_UserLitePackersUseTheWiredPacker(t *testing.T) {
+	db := serverIntegrationDB
+	if db == nil {
+		t.Skip("PostgreSQL unavailable")
+	}
+	const (
+		userID = "eppuser3794aaaaa"
+		token  = "epptokenx3794aaa"
+		host   = "remote.example"
+	)
+	cleanupPluginAccountUsers(t, db, "epp_lite")
+	t.Cleanup(func() {
+		db.Exec(`DELETE FROM "flash" WHERE "userId" = ?`, userID)
+		db.Exec(`DELETE FROM "chat_room" WHERE "ownerId" = ?`, userID)
+	})
+	createLocalUser(t, db, userID, "epp_lite", token, "epp-pass", false)
+	avatarURL := "https://" + host + "/files/epp3794-avatar.png"
+	require.NoError(t, db.Exec(`UPDATE "user" SET "avatarUrl" = ? WHERE "id" = ?`, avatarURL, userID).Error)
+
+	srv := newServerWithConfig(t, func(*config.Config) {})
+	// 既定の Packer の mediaURL を外す。restoreProcessGlobals が後で nil に戻す。
+	entity.SetMediaURLContext(nil)
+
+	t.Run("flash/create", func(t *testing.T) {
+		rec := postJSON(t, srv, "/api/flash/create", token, map[string]any{
+			"title": "t", "summary": "s", "script": "", "permissions": []string{},
+		})
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		var f struct {
+			User struct {
+				AvatarURL string `json:"avatarUrl"`
+			} `json:"user"`
+		}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &f), rec.Body.String())
+		// 否定形だと空文字でも通るので、proxy の形であることを肯定形で見る。
+		assert.Contains(t, f.User.AvatarURL, "/avatar.webp?", "avatarUrl: %s", f.User.AvatarURL)
+		assert.NotContains(t, f.User.AvatarURL, "://"+host+"/", "avatarUrl: %s", f.User.AvatarURL)
+	})
+	t.Run("chat/rooms/create", func(t *testing.T) {
+		rec := postJSON(t, srv, "/api/chat/rooms/create", token, map[string]any{"name": "epp3794"})
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		var room struct {
+			Owner struct {
+				AvatarURL string `json:"avatarUrl"`
+			} `json:"owner"`
+		}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &room), rec.Body.String())
+		assert.Contains(t, room.Owner.AvatarURL, "/avatar.webp?", "avatarUrl: %s", room.Owner.AvatarURL)
+		assert.NotContains(t, room.Owner.AvatarURL, "://"+host+"/", "avatarUrl: %s", room.Owner.AvatarURL)
+	})
+	t.Run("embed/user-timeline", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/embed/user-timeline/"+userID, nil))
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		// 利用者は misskey_embedCtx の JSON に埋め込まれる。
+		body := rec.Body.String()
+		const open = `<script type="application/json" id="misskey_embedCtx">`
+		start := strings.Index(body, open)
+		require.GreaterOrEqual(t, start, 0, body)
+		rest := body[start+len(open):]
+		end := strings.Index(rest, "</script>")
+		require.GreaterOrEqual(t, end, 0, body)
+		var ctx struct {
+			User struct {
+				AvatarURL string `json:"avatarUrl"`
+			} `json:"user"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(rest[:end]), &ctx), rest[:end])
+		assert.True(t, strings.HasPrefix(ctx.User.AvatarURL, "/avatar.webp?"), "avatarUrl: %s", ctx.User.AvatarURL)
+	})
 }

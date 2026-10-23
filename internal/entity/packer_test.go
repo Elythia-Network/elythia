@@ -60,18 +60,17 @@ func TestPacker_UsesItsOwnDependencies(t *testing.T) {
 // 同じ結果を返す。
 func TestPacker_PackageFuncsDelegateToTheDefault(t *testing.T) {
 	isolateDefaultPacker(t)
-	canChat := &stubCanChatLookup{results: map[string]bool{"u1": false}}
-	SetCanChatLookup(canChat)
 	SetMediaURLContext(internalCtx())
 
-	// 利用者の詳細を包む関数は #3792 で消えたので、残る PackUserLite で見る。
-	viaFunc := PackUserLite(packerTestUser())
-	viaPacker := NewPacker(PackerDeps{CanChat: canChat, MediaURL: internalCtx()}).PackUserLite(packerTestUser())
-	if viaFunc.AvatarURL != viaPacker.AvatarURL {
-		t.Errorf("package func and Packer differ: %+v vs %+v", viaFunc, viaPacker)
+	// 利用者を包む関数は #3792・#3794 で消えたので、残る ProxyMediaURL で見る。
+	raw := "https://" + remoteHost + "/a.png"
+	viaFunc := ProxyMediaURL(raw)
+	viaPacker := NewPacker(PackerDeps{MediaURL: internalCtx()}).ProxyMediaURL(raw)
+	if viaFunc != viaPacker {
+		t.Errorf("package func and Packer differ: %q vs %q", viaFunc, viaPacker)
 	}
-	if !strings.HasPrefix(viaFunc.AvatarURL, testInternalProxy) {
-		t.Errorf("package func must use the wired default Packer: %+v", viaFunc)
+	if !strings.HasPrefix(viaFunc, testInternalProxy) {
+		t.Errorf("package func must use the wired default Packer: %q", viaFunc)
 	}
 }
 
@@ -185,7 +184,7 @@ func (s silencedByID) IsSilenced(userID string) bool { return s[userID] }
 // **既定の Packer を読むのは、委ねる薄い関数と packer.go だけ (#3788)。**
 //
 // Packer のメソッドの中で currentPacker() を呼ぶか、委ねる薄い関数 (修飾子の
-// 無い PackUserLite(...) など) を呼ぶと、明示的に渡した Packer の依存ではなく
+// 無い ProxyMediaURL(...) など) を呼ぶと、明示的に渡した Packer の依存ではなく
 // 既定の Packer の依存を使ってしまう。テストは代表の経路しか見ないので、呼び出しの
 // 場所でまとめて縛る。
 //
@@ -202,9 +201,9 @@ func TestCurrentPackerIsOnlyReadByTheDelegatingFuncs(t *testing.T) {
 			wrappers[fd.Name.Name] = true
 		}
 	}
-	// 抽出が空振りしていないこと (薄い関数は 21 個。#3790 で投稿の 3 つ、#3792 で利用者の
-	// 詳細の 3 つを消した)。
-	if len(wrappers) < 21 {
+	// 抽出が空振りしていないこと (薄い関数は 20 個。#3790 で投稿の 3 つ、#3792 で利用者の
+	// 詳細の 3 つ、#3794 で PackUserLite を消した)。
+	if len(wrappers) < 20 {
 		t.Fatalf("found only %d delegating funcs; the scan is broken", len(wrappers))
 	}
 	files, err := filepath.Glob("*.go")
@@ -241,7 +240,7 @@ func TestCurrentPackerIsOnlyReadByTheDelegatingFuncs(t *testing.T) {
 			return true
 		})
 	}
-	if seen < 21 {
+	if seen < 20 {
 		t.Errorf("found only %d currentPacker() calls; the scan is broken", seen)
 	}
 }

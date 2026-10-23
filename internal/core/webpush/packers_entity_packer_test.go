@@ -48,3 +48,20 @@ func TestNoteRepoPacker_UsesTheGivenPacker(t *testing.T) {
 	f, _ := files[0].(map[string]any)
 	assert.False(t, strings.HasPrefix(f["url"].(string), remote), "url: %v", f["url"])
 }
+
+// 通知の送り主 (UserLite) は、NewUserRepoPacker に渡した Packer で包む (#3794)。
+func TestUserRepoPacker_UsesTheGivenPacker(t *testing.T) {
+	repo := testutil.NewMockUserRepository()
+	avatar := "https://remote.example/avatar.png"
+	repo.Users["u1"] = &model.User{ID: "u1", Username: "alice", AvatarURL: &avatar}
+	pk := entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
+		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true)})
+
+	p := webpush.NewUserRepoPacker(repo, pk)
+	assert.True(t, p.HasEntityPacker())
+	assert.False(t, webpush.NewUserRepoPacker(repo, nil).HasEntityPacker())
+	out, ok := p.PackUserByID("u1")
+	require.True(t, ok)
+	got, _ := out["avatarUrl"].(string)
+	assert.True(t, strings.HasPrefix(got, "https://local.example/proxy/avatar.webp?"), "avatarUrl: %s", got)
+}

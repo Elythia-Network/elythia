@@ -85,7 +85,18 @@ type Handler struct {
 	// (PackInvitationByID) は通知 1 件ごとに呼ばれるので、そこでは通知 1 件ごとに
 	// 1 回になる。未配線なら埋めない。
 	lites userpack.LiteFiller
+	// entityPacker は利用者を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3794)。組み立てで渡し、既定の Packer を読まない。
+	entityPacker *entity.Packer
 }
+
+// SetEntityPacker wires the Packer this Handler packs entities with (#3794).
+func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
+// リモートへ漏れる。
+func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
 
 // SetLiteFiller wires the batch resolver of instance / emojis for the UserLite
 // values embedded in chat responses (#3438).
@@ -234,13 +245,13 @@ func (h *Handler) mapChatErr(c echo.Context, err error) error {
 // upstream Misskey TS の packedChatRoomSchema は `isArchived` を返さない。
 // mk-go も互換のため field を出力しない (#851)。archived state は別経路で
 // 取得する設計を踏襲する。
-func packRoom(r *model.ChatRoom) map[string]any {
+func packRoom(pk *entity.Packer, r *model.ChatRoom) map[string]any {
 	result := map[string]any{
 		"id": r.ID, "name": r.Name, "ownerId": r.OwnerID,
 		"description": r.Description,
 	}
 	if r.Owner != nil {
-		result["owner"] = packUser(r.Owner)
+		result["owner"] = packUser(pk, r.Owner)
 	}
 	return result
 }
@@ -258,7 +269,7 @@ func packRoom(r *model.ChatRoom) map[string]any {
 // packedChatMessageSchema には対応 field が無い。response から omit して
 // upstream 互換に揃える (#855)。既読判定 (isRead) は別途 hint 経由で
 // computed する設計に移行予定。
-func packMessage(m *model.ChatMessage) map[string]any {
+func packMessage(pk *entity.Packer, m *model.ChatMessage) map[string]any {
 	result := map[string]any{
 		"id":         m.ID,
 		"fromUserId": m.FromUserID,
@@ -277,7 +288,7 @@ func packMessage(m *model.ChatMessage) map[string]any {
 		result["fileId"] = *m.FileID
 	}
 	if m.FromUser != nil {
-		result["fromUser"] = packUser(m.FromUser)
+		result["fromUser"] = packUser(pk, m.FromUser)
 	}
 	return result
 }
@@ -312,7 +323,7 @@ func packChatReactions(reactions []string) []map[string]any {
 // upstream とは差分、follow-up issue で create response も file を含めるよう
 // 修正予定)。
 func (h *Handler) packMessageWithCreatedAt(m *model.ChatMessage) map[string]any {
-	result := packMessage(m)
+	result := packMessage(h.entityPacker, m)
 	if h.idGen != nil {
 		if t, err := h.idGen.ParseTime(m.ID); err == nil {
 			result["createdAt"] = t.UTC().Format("2006-01-02T15:04:05.000Z")
@@ -329,7 +340,7 @@ func (h *Handler) packMessageWithCreatedAt(m *model.ChatMessage) map[string]any 
 // するため、room を返す全 endpoint は本 method 経由で createdAt を含める
 // (packMessageWithCreatedAt と同 pattern, #855)。
 func (h *Handler) packRoomWithCreatedAt(r *model.ChatRoom) map[string]any {
-	result := packRoom(r)
+	result := packRoom(h.entityPacker, r)
 	if h.idGen != nil {
 		if t, err := h.idGen.ParseTime(r.ID); err == nil {
 			result["createdAt"] = t.UTC().Format("2006-01-02T15:04:05.000Z")
@@ -393,7 +404,7 @@ func (h *Handler) packInvitationDetailed(inv *model.ChatRoomInvitation, meID str
 		}
 	}
 	if inv.User != nil {
-		result["user"] = packUser(inv.User)
+		result["user"] = packUser(h.entityPacker, inv.User)
 	}
 	if inv.Room != nil {
 		result["room"] = h.packRoomDetailed(inv.Room, meID)
@@ -476,7 +487,7 @@ func (h *Handler) packMessagesDetailed(msgs []*model.ChatMessage, meID string) [
 func (h *Handler) packMessageDetailedWith(m *model.ChatMessage, meID string, reactionUsers map[string]*model.User) map[string]any {
 	result := h.packMessageWithCreatedAt(m)
 	if m.ToUser != nil {
-		result["toUser"] = packUser(m.ToUser)
+		result["toUser"] = packUser(h.entityPacker, m.ToUser)
 	}
 	if m.ToRoom != nil {
 		result["toRoom"] = h.packRoomDetailed(m.ToRoom, meID)
@@ -559,7 +570,7 @@ func (h *Handler) packRoomReactions(m *model.ChatMessage, users map[string]*mode
 		if !ok {
 			continue // user 未解決 (削除済等) の reaction は drop
 		}
-		out = append(out, map[string]any{"user": packUser(u), "reaction": reaction})
+		out = append(out, map[string]any{"user": packUser(h.entityPacker, u), "reaction": reaction})
 	}
 	return out
 }
@@ -573,15 +584,15 @@ type chatUser struct {
 }
 
 // packUser packs u as upstream's UserLite (packedUserLiteSchema) via the shared
-// entity.PackUserLite, so avatarDecorations / emojis / onlineStatus /
+// (*entity.Packer).PackUserLite, so avatarDecorations / emojis / onlineStatus /
 // badgeRoles are present like every other UserLite response. instance and the
 // display-name emojis are filled later by fillUsers.
 //
 // 以前は chat だけの縮めた形 (id / username / name / host / avatarUrl /
 // avatarBlurhash / isBot / isCat) を返しており、misskey-js の UserLite で必須の
 // avatarDecorations / emojis / onlineStatus が欠けていた (#3438)。
-func packUser(u *model.User) *chatUser {
-	return &chatUser{UserLite: entity.PackUserLite(u), src: u}
+func packUser(pk *entity.Packer, u *model.User) *chatUser {
+	return &chatUser{UserLite: pk.PackUserLite(u), src: u}
 }
 
 // fillUsers resolves instance / emojis of every chatUser reachable from v
@@ -2005,7 +2016,7 @@ func (h *Handler) RoomsMembers(c echo.Context) error {
 			}
 		}
 		if m.User != nil {
-			entry["user"] = packUser(m.User)
+			entry["user"] = packUser(h.entityPacker, m.User)
 		}
 		out = append(out, entry)
 	}

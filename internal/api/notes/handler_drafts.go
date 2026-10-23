@@ -893,7 +893,7 @@ func (h *Handler) packDraft(ctx context.Context, viewer *model.User, d *model.No
 		result["poll"] = nil
 	}
 	if d.User != nil {
-		result["user"] = entity.PackUserLite(d.User)
+		result["user"] = h.entityPacker.PackUserLite(d.User)
 	}
 	return result
 }

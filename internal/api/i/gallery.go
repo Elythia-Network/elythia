@@ -103,7 +103,7 @@ func (h *Handler) GalleryLikes(c echo.Context) error {
 		}
 		out = append(out, map[string]any{
 			"id":   l.ID,
-			"post": packGalleryPost(p, h.idGen, h.resolveGalleryFiles(p.FileIDs), &liked),
+			"post": packGalleryPost(h.entityPacker, p, h.idGen, h.resolveGalleryFiles(p.FileIDs), &liked),
 		})
 	}
 	return c.JSON(http.StatusOK, out)
@@ -138,7 +138,7 @@ func (h *Handler) resolveGalleryFiles(fileIDs []string) []any {
 // に揃えてレスポンス用の map を返す。files は呼び出し側が resolveGalleryFiles
 // で解決した DriveFile entity 群、isLiked は viewer の like 状態 (nil で省略、
 // upstream は me==null 時に undefined)。
-func packGalleryPost(p *model.GalleryPost, idGen id.Generator, files []any, isLiked *bool) map[string]any {
+func packGalleryPost(pk *entity.Packer, p *model.GalleryPost, idGen id.Generator, files []any, isLiked *bool) map[string]any {
 	const tsFormat = "2006-01-02T15:04:05.000Z"
 	createdAt := ""
 	if idGen != nil {
@@ -176,7 +176,7 @@ func packGalleryPost(p *model.GalleryPost, idGen id.Generator, files []any, isLi
 		resp["isLiked"] = *isLiked
 	}
 	if p.User != nil {
-		resp["user"] = entity.PackUserLite(p.User)
+		resp["user"] = pk.PackUserLite(p.User)
 	}
 	return resp
 }
@@ -210,7 +210,7 @@ func (h *Handler) GalleryPosts(c echo.Context) error {
 		if ok, err := h.galleryRepo.ExistsLike(u.ID, p.ID); err == nil {
 			liked = ok
 		}
-		out = append(out, packGalleryPost(p, h.idGen, h.resolveGalleryFiles(p.FileIDs), &liked))
+		out = append(out, packGalleryPost(h.entityPacker, p, h.idGen, h.resolveGalleryFiles(p.FileIDs), &liked))
 	}
 	return c.JSON(http.StatusOK, out)
 }

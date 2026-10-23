@@ -138,7 +138,7 @@ func (h *Handler) Flashs(c echo.Context) error {
 	const tsFormat = "2006-01-02T15:04:05.000Z"
 	var packedUser any
 	if bundle, err := h.userService.ShowByID(req.UserID); err == nil && bundle != nil {
-		packedUser = entity.PackUserLite(bundle.User)
+		packedUser = h.entityPacker.PackUserLite(bundle.User)
 	}
 	out := make([]map[string]any, 0, len(rows))
 	for _, f := range rows {
@@ -239,7 +239,7 @@ func (h *Handler) GalleryPosts(c echo.Context) error {
 			entry["isLiked"] = liked
 		}
 		if g.User != nil {
-			entry["user"] = entity.PackUserLite(g.User)
+			entry["user"] = h.entityPacker.PackUserLite(g.User)
 		}
 		out = append(out, entry)
 	}

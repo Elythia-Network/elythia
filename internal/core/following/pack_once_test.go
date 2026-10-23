@@ -14,7 +14,9 @@ import (
 // countingPacker counts DetailedNotMe calls and returns a marker body.
 type countingPacker struct{ detailed int }
 
-func (c *countingPacker) Lite(u *model.User) entity.UserLite { return entity.PackUserLite(u) }
+func (c *countingPacker) Lite(u *model.User) entity.UserLite {
+	return (*entity.Packer)(nil).PackUserLite(u)
+}
 
 func (c *countingPacker) DetailedNotMe(_ context.Context, target, _ *model.User) (entity.UserDetailed, bool) {
 	c.detailed++

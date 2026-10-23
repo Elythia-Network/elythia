@@ -113,7 +113,7 @@ func (h *Handler) Create(c echo.Context) error {
 		}
 	}
 
-	return c.JSON(http.StatusOK, entity.PackUserLite(bundle.User))
+	return c.JSON(http.StatusOK, h.entityPacker.PackUserLite(bundle.User))
 }
 
 // DeleteRequest is the request body for following/delete.
@@ -146,7 +146,7 @@ func (h *Handler) Delete(c echo.Context) error {
 		}
 	}
 
-	return c.JSON(http.StatusOK, entity.PackUserLite(bundle.User))
+	return c.JSON(http.StatusOK, h.entityPacker.PackUserLite(bundle.User))
 }
 
 // RequestActionRequest is the shared request body for following/requests/{accept,reject,cancel}.
@@ -235,7 +235,7 @@ func (h *Handler) CancelRequest(c echo.Context) error {
 		}
 		return apierr.JSONInternalError(c)
 	}
-	return c.JSON(http.StatusOK, entity.PackUserLite(bundle.User))
+	return c.JSON(http.StatusOK, h.entityPacker.PackUserLite(bundle.User))
 }
 
 // ListRequestsResponseItem represents a single received follow request.
@@ -354,7 +354,7 @@ func (h *Handler) packRequests(rows []*model.FollowRequest) []ListRequestsRespon
 	users := make([]*model.User, 0, len(bundles))
 	for _, b := range bundles {
 		if b != nil && b.User != nil {
-			lites = append(lites, entity.PackUserLite(b.User))
+			lites = append(lites, h.entityPacker.PackUserLite(b.User))
 			users = append(users, b.User)
 		}
 	}

@@ -49,7 +49,18 @@ type Handler struct {
 	// まとめて埋める (本家 packMany(invitations, me)、#3330)。連合対戦では
 	// リモートの招待者が混ざる。
 	lites userpack.LiteFiller
+	// entityPacker は利用者を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3794)。組み立てで渡し、既定の Packer を読まない。
+	entityPacker *entity.Packer
 }
+
+// SetEntityPacker wires the Packer this Handler packs entities with (#3794).
+func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
+// リモートへ漏れる。
+func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
 
 // SetLiteFiller wires the batch resolver of instance / emojis for the
 // inviters of reversi/invitations (#3330).
@@ -124,7 +135,7 @@ func (h *Handler) SetFederation(baseURL string, deliverer FederationDeliverer, f
 	h.userRepo = userRepo
 }
 
-func packGame(g *model.ReversiGame, idGen id.Generator) map[string]any {
+func packGame(pk *entity.Packer, g *model.ReversiGame, idGen id.Generator) map[string]any {
 	result := map[string]any{
 		"id":         g.ID,
 		"user1Id":    g.User1ID,
@@ -164,10 +175,10 @@ func packGame(g *model.ReversiGame, idGen id.Generator) map[string]any {
 		result["createdAt"] = t.UTC().Format("2006-01-02T15:04:05.000Z")
 	}
 	if g.User1 != nil {
-		result["user1"] = entity.PackUserLite(g.User1)
+		result["user1"] = pk.PackUserLite(g.User1)
 	}
 	if g.User2 != nil {
-		result["user2"] = entity.PackUserLite(g.User2)
+		result["user2"] = pk.PackUserLite(g.User2)
 	}
 	// winner は upstream Misskey TS の ReversiGameEntityService.packDetail と
 	// 同じく winnerId から UserLite を派生させる (#649)。frontend は
@@ -177,9 +188,9 @@ func packGame(g *model.ReversiGame, idGen id.Generator) map[string]any {
 	result["winner"] = nil
 	if g.WinnerID != nil {
 		if g.User1 != nil && g.User1.ID == *g.WinnerID {
-			result["winner"] = entity.PackUserLite(g.User1)
+			result["winner"] = pk.PackUserLite(g.User1)
 		} else if g.User2 != nil && g.User2.ID == *g.WinnerID {
-			result["winner"] = entity.PackUserLite(g.User2)
+			result["winner"] = pk.PackUserLite(g.User2)
 		}
 	}
 	return result
@@ -297,7 +308,7 @@ func (h *Handler) Games(c echo.Context) error {
 	// なく cherrypick + 連合拡張を権威とする (MEMORY: reversi_cherrypick_lineage)。
 	out := make([]map[string]any, len(games))
 	for i, g := range games {
-		out[i] = packGame(g, h.idGen)
+		out[i] = packGame(h.entityPacker, g, h.idGen)
 	}
 	return c.JSON(http.StatusOK, out)
 }
@@ -329,7 +340,7 @@ func (h *Handler) Invitations(c echo.Context) error {
 			continue
 		}
 		seen[g.User1.ID] = struct{}{}
-		inviters = append(inviters, entity.PackUserLite(g.User1))
+		inviters = append(inviters, h.entityPacker.PackUserLite(g.User1))
 		users = append(users, g.User1)
 	}
 	if h.lites != nil {
@@ -369,7 +380,7 @@ func (h *Handler) ShowGame(c echo.Context) error {
 	if viewer != nil && !game.IsStarted && !game.IsEnded && game.User2ID == viewer.ID {
 		h.sendJoinForAcceptedInvite(c, viewer, game)
 	}
-	return c.JSON(http.StatusOK, packGame(game, h.idGen))
+	return c.JSON(http.StatusOK, packGame(h.entityPacker, game, h.idGen))
 }
 
 // Match handles POST /api/reversi/match — create or join a game.
@@ -429,7 +440,7 @@ func (h *Handler) Match(c echo.Context) error {
 	// 噛み合わなくなる。
 	if existing := h.findPendingInvitationFrom(user.ID, req.UserID); existing != nil {
 		h.sendJoinForAcceptedInvite(c, user, existing)
-		return c.JSON(http.StatusOK, packGame(existing, h.idGen))
+		return c.JSON(http.StatusOK, packGame(h.entityPacker, existing, h.idGen))
 	}
 
 	// upstream matchSpecificUser: multiple=false なら直近 3 分以内の未開始 pending
@@ -743,7 +754,7 @@ func (h *Handler) Verify(c echo.Context) error {
 	desynced := game.CRC32 == nil || *game.CRC32 != req.CRC32
 	resp := map[string]any{"desynced": desynced}
 	if desynced {
-		resp["game"] = packGame(game, h.idGen)
+		resp["game"] = packGame(h.entityPacker, game, h.idGen)
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -775,7 +786,7 @@ func (h *Handler) matchAny(c echo.Context, user *model.User, noIrregularRules, m
 	//    毎回新しく探す (ReversiService.ts:146)。
 	if !multiple {
 		if g := h.findPendingGameFor(user.ID); g != nil {
-			return c.JSON(http.StatusOK, packGame(g, h.idGen))
+			return c.JSON(http.StatusOK, packGame(h.entityPacker, g, h.idGen))
 		}
 	}
 
@@ -784,7 +795,7 @@ func (h *Handler) matchAny(c echo.Context, user *model.User, noIrregularRules, m
 	//    accept 経路と同じ扱いにして、相手に Join を返す。
 	if g := h.findPendingInvitationTo(user.ID); g != nil {
 		h.sendJoinForAcceptedInvite(c, user, g)
-		return c.JSON(http.StatusOK, packGame(g, h.idGen))
+		return c.JSON(http.StatusOK, packGame(h.entityPacker, g, h.idGen))
 	}
 
 	// 3. 待機列。
@@ -827,7 +838,7 @@ func (h *Handler) matchAny(c echo.Context, user *model.User, noIrregularRules, m
 	if h.streamPub != nil {
 		h.streamPub.PublishInvited(res.OpponentID, user)
 	}
-	return c.JSON(http.StatusOK, packGame(game, h.idGen))
+	return c.JSON(http.StatusOK, packGame(h.entityPacker, game, h.idGen))
 }
 
 // findPendingGameFor returns the caller's most recent unstarted game within the

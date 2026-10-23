@@ -15,7 +15,18 @@ import (
 // 対局中のやりとりは `bubbleVersusMatch:<matchId>` へ出す。
 type BubbleVersusPublisher struct {
 	pub PubSubPublisher
+	// entityPacker は利用者を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3794)。組み立てで渡し、既定の Packer を読まない。
+	entityPacker *entity.Packer
 }
+
+// SetEntityPacker wires the Packer this BubbleVersusPublisher packs entities with (#3794).
+func (p *BubbleVersusPublisher) SetEntityPacker(pk *entity.Packer) { p.entityPacker = pk }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
+// リモートへ漏れる。
+func (p *BubbleVersusPublisher) HasEntityPacker() bool { return p.entityPacker.HasMediaURL() }
 
 // NewBubbleVersusPublisher constructs a BubbleVersusPublisher.
 func NewBubbleVersusPublisher(pub PubSubPublisher) *BubbleVersusPublisher {
@@ -38,7 +49,7 @@ func (p *BubbleVersusPublisher) PublishInvited(targetUserID string, inviter *mod
 	p.publish(BubbleVersusUserTopic(targetUserID), "invited", map[string]any{
 		"matchId":  m.ID,
 		"gameMode": m.GameMode,
-		"user":     entity.PackUserLite(inviter),
+		"user":     p.entityPacker.PackUserLite(inviter),
 	})
 }
 

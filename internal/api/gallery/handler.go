@@ -51,7 +51,18 @@ type Handler struct {
 	ranking GalleryRanking
 	roles   RoleChecker
 	modLog  ModLogger
+	// entityPacker は利用者を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3794)。組み立てで渡し、既定の Packer を読まない。
+	entityPacker *entity.Packer
 }
+
+// SetEntityPacker wires the Packer this Handler packs entities with (#3794).
+func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
+// リモートへ漏れる。
+func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
 
 // NewHandler creates a new gallery Handler.
 func NewHandler(db *gorm.DB, idGen id.Generator) *Handler {
@@ -595,7 +606,7 @@ func (h *Handler) buildPostMap(p *model.GalleryPost, files []entity.DriveFileEnt
 		resp["tags"] = tags
 	}
 	if p.User != nil {
-		resp["user"] = entity.PackUserLite(p.User)
+		resp["user"] = h.entityPacker.PackUserLite(p.User)
 	}
 	if isLiked != nil {
 		resp["isLiked"] = *isLiked

@@ -21,7 +21,18 @@ import (
 type Handler struct {
 	repo  repository.BubbleGameRepository
 	idGen id.Generator
+	// entityPacker は利用者を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3794)。組み立てで渡し、既定の Packer を読まない。
+	entityPacker *entity.Packer
 }
+
+// SetEntityPacker wires the Packer this Handler packs entities with (#3794).
+func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
+// リモートへ漏れる。
+func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
 
 // NewHandler creates a new bubble-game handler.
 func NewHandler(repo repository.BubbleGameRepository, idGen id.Generator) *Handler {
@@ -146,7 +157,7 @@ func (h *Handler) Ranking(c echo.Context) error {
 		// 4 フィールドマップだと avatarUrl 等の必須フィールドが欠けて
 		// frontend のランキング表示が壊れるため packer を経由する (#1553)。
 		if r.User != nil {
-			entry["user"] = entity.PackUserLite(r.User)
+			entry["user"] = h.entityPacker.PackUserLite(r.User)
 		}
 		result[i] = entry
 	}

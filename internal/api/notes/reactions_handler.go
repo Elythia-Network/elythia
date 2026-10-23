@@ -130,7 +130,7 @@ func (h *Handler) Reactions(c echo.Context) error {
 	reactors := make([]*model.User, len(rows))
 	for i, r := range rows {
 		if r.User != nil {
-			lites[i] = entity.PackUserLite(r.User)
+			lites[i] = h.entityPacker.PackUserLite(r.User)
 			litePtrs[i], reactors[i] = &lites[i], r.User
 		}
 	}

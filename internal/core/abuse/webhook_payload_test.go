@@ -28,7 +28,7 @@ func payloadJSON(t *testing.T, v any) map[string]any {
 func TestWebhookPayload_HasUpstreamKeys(t *testing.T) {
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	body := payloadJSON(t, abuse.WebhookPayload(cnReport(t, idGen), nil, nil, nil, abuse.UserLookups{}, idGen))
+	body := payloadJSON(t, abuse.WebhookPayload(nil, cnReport(t, idGen), nil, nil, nil, abuse.UserLookups{}, idGen))
 
 	keys := make([]string, 0, len(body))
 	for k := range body {
@@ -56,7 +56,7 @@ func TestWebhookPayload_CopiesReportColumns(t *testing.T) {
 		Comment: "spam", ModerationNote: "checked", ResolvedAs: &resolvedAs,
 		ReporterHost: &reporterHost, TargetUserHost: &targetHost,
 	}
-	body := payloadJSON(t, abuse.WebhookPayload(report, nil, nil, nil, abuse.UserLookups{}, idGen))
+	body := payloadJSON(t, abuse.WebhookPayload(nil, report, nil, nil, nil, abuse.UserLookups{}, idGen))
 	assert.Equal(t, "bob", body["targetUserId"])
 	assert.Equal(t, "other.example", body["targetUserHost"])
 	assert.Equal(t, "alice", body["reporterId"])
@@ -69,7 +69,7 @@ func TestWebhookPayload_CopiesReportColumns(t *testing.T) {
 	assert.Equal(t, "accept", body["resolvedAs"])
 
 	// ローカルの利用者の host は null (列が NULL)。
-	local := payloadJSON(t, abuse.WebhookPayload(&model.AbuseUserReport{ID: report.ID}, nil, nil, nil, abuse.UserLookups{}, idGen))
+	local := payloadJSON(t, abuse.WebhookPayload(nil, &model.AbuseUserReport{ID: report.ID}, nil, nil, nil, abuse.UserLookups{}, idGen))
 	assert.Contains(t, local, "targetUserHost")
 	assert.Nil(t, local["targetUserHost"])
 	assert.Contains(t, local, "reporterHost")
@@ -90,9 +90,9 @@ func TestWebhookPayload_UsersAreUserLite(t *testing.T) {
 	report := cnReport(t, idGen)
 	report.AssigneeID = &assigneeID
 
-	body := payloadJSON(t, abuse.WebhookPayload(report, reporter, target, assignee, abuse.UserLookups{}, idGen))
+	body := payloadJSON(t, abuse.WebhookPayload(nil, report, reporter, target, assignee, abuse.UserLookups{}, idGen))
 	for key, u := range map[string]*model.User{"reporter": reporter, "targetUser": target, "assignee": assignee} {
-		assert.Equal(t, payloadJSON(t, entity.PackUserLite(u)), body[key], key)
+		assert.Equal(t, payloadJSON(t, (*entity.Packer)(nil).PackUserLite(u)), body[key], key)
 	}
 	assert.NotContains(t, body["reporter"], "followersCount", "UserDetailed の項目を載せない")
 }
@@ -101,7 +101,7 @@ func TestWebhookPayload_UsersAreUserLite(t *testing.T) {
 func TestWebhookPayload_NoAssigneeIDMeansNullAssignee(t *testing.T) {
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	body := payloadJSON(t, abuse.WebhookPayload(cnReport(t, idGen), nil, nil, &model.User{ID: "mod1"}, abuse.UserLookups{}, idGen))
+	body := payloadJSON(t, abuse.WebhookPayload(nil, cnReport(t, idGen), nil, nil, &model.User{ID: "mod1"}, abuse.UserLookups{}, idGen))
 	assert.Contains(t, body, "assignee")
 	assert.Nil(t, body["assignee"])
 }
@@ -110,8 +110,8 @@ func TestWebhookPayload_NoAssigneeIDMeansNullAssignee(t *testing.T) {
 func TestWebhookPayload_CreatedAtWithoutIDGen(t *testing.T) {
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	assert.Equal(t, "", abuse.WebhookPayload(cnReport(t, idGen), nil, nil, nil, abuse.UserLookups{}, nil)["createdAt"])
-	assert.Equal(t, "", abuse.WebhookPayload(&model.AbuseUserReport{ID: "not-an-aidx"}, nil, nil, nil, abuse.UserLookups{}, idGen)["createdAt"])
+	assert.Equal(t, "", abuse.WebhookPayload(nil, cnReport(t, idGen), nil, nil, nil, abuse.UserLookups{}, nil)["createdAt"])
+	assert.Equal(t, "", abuse.WebhookPayload(nil, &model.AbuseUserReport{ID: "not-an-aidx"}, nil, nil, nil, abuse.UserLookups{}, idGen)["createdAt"])
 }
 
 type wpInstances struct{ rows []*model.Instance }
@@ -163,7 +163,7 @@ func TestWebhookPayload_ResolvesInstanceAndEmojis(t *testing.T) {
 	reporter := &model.User{ID: "alice", Username: "alice", Host: &host, Emojis: []string{"blob"}}
 	target := &model.User{ID: "bob", Username: "bob", Emojis: []string{"blob"}}
 
-	body := payloadJSON(t, abuse.WebhookPayload(cnReport(t, idGen), reporter, target, nil, lookups, idGen))
+	body := payloadJSON(t, abuse.WebhookPayload(nil, cnReport(t, idGen), reporter, target, nil, lookups, idGen))
 	rep := body["reporter"].(map[string]any)
 	inst, ok := rep["instance"].(map[string]any)
 	require.True(t, ok, "リモートの利用者に instance を付ける: %v", rep["instance"])

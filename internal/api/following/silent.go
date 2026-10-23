@@ -73,7 +73,7 @@ func (h *Handler) packSilent(rows []*model.SilentFollow) []SilentFollowItem {
 	lites := make([]entity.UserLite, len(users))
 	ptrs := make([]*entity.UserLite, len(users))
 	for i, u := range users {
-		lites[i] = entity.PackUserLite(u)
+		lites[i] = h.entityPacker.PackUserLite(u)
 		ptrs[i] = &lites[i]
 	}
 	if h.packer != nil {

@@ -6,7 +6,6 @@ import (
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	corefollowing "github.com/elythia-network/elythia/internal/core/following"
-	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/labstack/echo/v4"
 )
@@ -40,7 +39,7 @@ func (h *Handler) Invalidate(c echo.Context) error {
 		}
 		return apierr.JSONInternalError(c)
 	}
-	return c.JSON(http.StatusOK, entity.PackUserLite(bundle.User))
+	return c.JSON(http.StatusOK, h.entityPacker.PackUserLite(bundle.User))
 }
 
 // UpdateFollow handles POST /api/following/update.
@@ -95,7 +94,7 @@ func (h *Handler) UpdateFollow(c echo.Context) error {
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
-	return c.JSON(http.StatusOK, entity.PackUserLite(meBundle.User))
+	return c.JSON(http.StatusOK, h.entityPacker.PackUserLite(meBundle.User))
 }
 
 // validNotify reports whether v is one of upstream's `notify` enum values

@@ -6,7 +6,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 )
 
-// UserRolesLookupAdapter wraps a role.Service so that entity.PackUserLite /
+// UserRolesLookupAdapter wraps a role.Service so that (*entity.Packer).PackUserLite /
 // PackUserDetailed can populate the `roles` / `badgeRoles` JSON fields
 // without entity depending on core/role (= preserves layering: api → core →
 // entity, never reverse). Implements entity.UserRolesLookup (issue #1103).

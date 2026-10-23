@@ -10,7 +10,6 @@ import (
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
-	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/labstack/echo/v4"
@@ -124,7 +123,7 @@ func (h *Handler) packInviteTickets(rows []*model.RegistrationTicket) []map[stri
 		if !ok {
 			return nil
 		}
-		return entity.PackUserLite(u)
+		return h.entityPacker.PackUserLite(u)
 	}
 
 	out := make([]map[string]any, 0, len(rows))

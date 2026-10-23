@@ -74,11 +74,6 @@ func PackPageWithContext(p *model.Page, ctx PackPageContext) map[string]any {
 	return currentPacker().PackPageWithContext(p, ctx)
 }
 
-// PackUserLite is (*Packer).PackUserLite on the default Packer.
-func PackUserLite(u *model.User) UserLite {
-	return currentPacker().PackUserLite(u)
-}
-
 // ProxyAvatarURLString is (*Packer).ProxyAvatarURLString on the default Packer.
 func ProxyAvatarURLString(rawURL string) string {
 	return currentPacker().ProxyAvatarURLString(rawURL)

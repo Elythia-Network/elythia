@@ -5,7 +5,7 @@ import (
 	"log/slog"
 )
 
-// CanChatLookupAdapter wraps a role policy provider so that entity.PackUserLite
+// CanChatLookupAdapter wraps a role policy provider so that (*entity.Packer).PackUserLite
 // can derive `canChat` from the upstream `chatAvailability === "available"`
 // semantics (#988). Implements entity.CanChatLookup without creating a
 // dependency from entity to core/role (= keeps the layering: api → core →

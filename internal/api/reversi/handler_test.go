@@ -902,7 +902,7 @@ func TestPackGame_WinnerField(t *testing.T) {
 			ID: gid, User1ID: "alice", User2ID: "bob",
 			User1: user1, User2: user2, WinnerID: &winnerID,
 		}
-		out := packGame(g, idGen)
+		out := packGame(nil, g, idGen)
 		w, ok := out["winner"].(entity.UserLite)
 		require.True(t, ok, "winner must be present and be a UserLite")
 		assert.Equal(t, "alice", w.ID)
@@ -915,7 +915,7 @@ func TestPackGame_WinnerField(t *testing.T) {
 			ID: gid, User1ID: "alice", User2ID: "bob",
 			User1: user1, User2: user2, WinnerID: &winnerID,
 		}
-		out := packGame(g, idGen)
+		out := packGame(nil, g, idGen)
 		w, ok := out["winner"].(entity.UserLite)
 		require.True(t, ok)
 		assert.Equal(t, "bob", w.ID)
@@ -926,7 +926,7 @@ func TestPackGame_WinnerField(t *testing.T) {
 			ID: gid, User1ID: "alice", User2ID: "bob",
 			User1: user1, User2: user2,
 		}
-		out := packGame(g, idGen)
+		out := packGame(nil, g, idGen)
 		// upstream json-schema は winner を optional:false, nullable:true で
 		// 宣言するためキー欠落ではなく null を出す (#1553)。
 		w, has := out["winner"]
@@ -965,7 +965,7 @@ func TestPackGame_FormFields(t *testing.T) {
 
 	t.Run("nil form columns serialize to null but keys present", func(t *testing.T) {
 		g := &model.ReversiGame{ID: gid, User1ID: "alice", User2ID: "bob"}
-		out := packGame(g, idGen)
+		out := packGame(nil, g, idGen)
 
 		f1, has1 := out["form1"]
 		require.True(t, has1, "form1 key must always be present")
@@ -994,7 +994,7 @@ func TestPackGame_FormFields(t *testing.T) {
 			Form1: datatypes.JSON(`{"autoStart":true}`),
 			Form2: datatypes.JSON(`[{"id":"x"}]`),
 		}
-		out := packGame(g, idGen)
+		out := packGame(nil, g, idGen)
 
 		raw, err := json.Marshal(out)
 		require.NoError(t, err)
@@ -1022,14 +1022,14 @@ func TestPackGame_TimestampFormat(t *testing.T) {
 		started := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)        // 0 fractional
 		ended := time.Date(2026, 6, 15, 12, 5, 30, 123456000, time.UTC) // 123456us
 		g := &model.ReversiGame{ID: gid, User1ID: "alice", User2ID: "bob", StartedAt: &started, EndedAt: &ended}
-		out := packGame(g, idGen)
+		out := packGame(nil, g, idGen)
 		assert.Equal(t, "2026-06-15T12:00:00.000Z", out["startedAt"])
 		assert.Equal(t, "2026-06-15T12:05:30.123Z", out["endedAt"])
 	})
 
 	t.Run("nil times serialize to null with key present", func(t *testing.T) {
 		g := &model.ReversiGame{ID: gid, User1ID: "alice", User2ID: "bob"}
-		out := packGame(g, idGen)
+		out := packGame(nil, g, idGen)
 		s, hasS := out["startedAt"]
 		e, hasE := out["endedAt"]
 		require.True(t, hasS, "startedAt key must always be present")

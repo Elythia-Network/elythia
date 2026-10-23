@@ -379,7 +379,7 @@ func (s *Service) publishFollowerLite(event string, follower, followee *model.Us
 	if s.mainStreamPublisher == nil || follower == nil || followee == nil || !followee.IsLocal() {
 		return
 	}
-	body := entity.PackUserLite(follower)
+	body := s.entityPacker.PackUserLite(follower)
 	if s.userPacker != nil {
 		body = s.userPacker.Lite(follower)
 	}

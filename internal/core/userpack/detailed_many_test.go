@@ -130,7 +130,7 @@ func TestDetailedMany_Empty(t *testing.T) {
 
 func TestFillLites(t *testing.T) {
 	p := userpack.New(nil, userpack.Lookups{Instances: fakeInstances{}, Emojis: fakeEmojis{}}, nil)
-	lite := entity.PackUserLite(target())
+	lite := (*entity.Packer)(nil).PackUserLite(target())
 	p.FillLites([]*model.User{target()}, []*entity.UserLite{&lite})
 	require.NotNil(t, lite.Instance)
 	assert.Equal(t, "https://remote.example/blobcat.png", lite.Emojis["blobcat"])

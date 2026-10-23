@@ -30,7 +30,7 @@ func TestPackUserLite_AvatarDecorations_EnrichedWithURL(t *testing.T) {
 		Username:          "alice",
 		AvatarDecorations: datatypes.JSON([]byte(`[{"id":"dec1","angle":0.5,"flipH":true,"offsetX":-0.25,"offsetY":0.25}]`)),
 	}
-	out := PackUserLite(u)
+	out := currentPacker().PackUserLite(u)
 	require.Len(t, out.AvatarDecorations, 1)
 	d := out.AvatarDecorations[0]
 	assert.Equal(t, "dec1", d.ID)
@@ -50,7 +50,7 @@ func TestPackUserLite_AvatarDecorations_DropsUnknownIDs(t *testing.T) {
 		Username:          "alice",
 		AvatarDecorations: datatypes.JSON([]byte(`[{"id":"dec1"},{"id":"deleted"}]`)),
 	}
-	out := PackUserLite(u)
+	out := currentPacker().PackUserLite(u)
 	require.Len(t, out.AvatarDecorations, 1)
 	assert.Equal(t, "dec1", out.AvatarDecorations[0].ID)
 }
@@ -64,7 +64,7 @@ func TestPackUserLite_AvatarDecorations_NoLookup(t *testing.T) {
 		Username:          "alice",
 		AvatarDecorations: datatypes.JSON([]byte(`[{"id":"dec1","angle":1}]`)),
 	}
-	out := PackUserLite(u)
+	out := currentPacker().PackUserLite(u)
 	// lookup 未配線時は url 空のまま全件残す (旧挙動と同じくフロント側で
 	// catalog 解決させる fallback)。
 	require.Len(t, out.AvatarDecorations, 1)
@@ -86,7 +86,7 @@ func TestPackUserLite_AvatarDecorations_EmptyOrNull(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			u := &model.User{ID: "u1", Username: "alice", AvatarDecorations: datatypes.JSON(tc.raw)}
-			out := PackUserLite(u)
+			out := currentPacker().PackUserLite(u)
 			// JSON null ではなく空配列で出すこと。
 			b, err := json.Marshal(out.AvatarDecorations)
 			require.NoError(t, err)
@@ -107,7 +107,7 @@ func TestPackUserLite_AvatarDecorations_OmitsFalsyFields(t *testing.T) {
 			Username:          "alice",
 			AvatarDecorations: datatypes.JSON([]byte(`[{"id":"dec1","angle":0,"flipH":false,"offsetX":0,"offsetY":0}]`)),
 		}
-		out := PackUserLite(u)
+		out := currentPacker().PackUserLite(u)
 		b, err := json.Marshal(out.AvatarDecorations)
 		require.NoError(t, err)
 		s := string(b)
@@ -126,7 +126,7 @@ func TestPackUserLite_AvatarDecorations_OmitsFalsyFields(t *testing.T) {
 			Username:          "alice",
 			AvatarDecorations: datatypes.JSON([]byte(`[{"id":"dec1","angle":0.5,"flipH":true,"offsetX":-0.25,"offsetY":0.25}]`)),
 		}
-		out := PackUserLite(u)
+		out := currentPacker().PackUserLite(u)
 		b, err := json.Marshal(out.AvatarDecorations)
 		require.NoError(t, err)
 		s := string(b)
@@ -143,7 +143,7 @@ func TestPackUserLite_AvatarDecorations_DropsEmptyIDEntry(t *testing.T) {
 		Username:          "alice",
 		AvatarDecorations: datatypes.JSON([]byte(`[{"id":""},{"angle":1}]`)),
 	}
-	out := PackUserLite(u)
+	out := currentPacker().PackUserLite(u)
 	assert.Empty(t, out.AvatarDecorations)
 }
 
@@ -171,7 +171,7 @@ func TestPackUserLite_EmojiDecoration_Resolved(t *testing.T) {
 		Username:          "alice",
 		AvatarDecorations: datatypes.JSON([]byte(`[{"id":"e1","emojiName":"party","angle":0.25}]`)),
 	}
-	out := PackUserLite(u)
+	out := currentPacker().PackUserLite(u)
 	require.Len(t, out.AvatarDecorations, 1)
 	d := out.AvatarDecorations[0]
 	assert.Equal(t, "e1", d.ID)
@@ -193,7 +193,7 @@ func TestPackUserLite_EmojiDecoration_UsesCurrentName(t *testing.T) {
 		Username:          "alice",
 		AvatarDecorations: datatypes.JSON([]byte(`[{"id":"e1","emojiName":"oldname"}]`)),
 	}
-	out := PackUserLite(u)
+	out := currentPacker().PackUserLite(u)
 	require.Len(t, out.AvatarDecorations, 1)
 	assert.Equal(t, "renamed", out.AvatarDecorations[0].EmojiName)
 }
@@ -212,7 +212,7 @@ func TestPackUserLite_EmojiDecoration_DropsUnresolvable(t *testing.T) {
 		Username:          "alice",
 		AvatarDecorations: datatypes.JSON([]byte(`[{"id":"dec1"},{"id":"gone","emojiName":"gone"},{"id":"e1","emojiName":"ok"}]`)),
 	}
-	out := PackUserLite(u)
+	out := currentPacker().PackUserLite(u)
 	require.Len(t, out.AvatarDecorations, 2)
 	assert.Equal(t, "dec1", out.AvatarDecorations[0].ID)
 	assert.Equal(t, "e1", out.AvatarDecorations[1].ID)
@@ -229,7 +229,7 @@ func TestPackUserLite_EmojiDecoration_DroppedWhenLookupUnwired(t *testing.T) {
 		Username:          "alice",
 		AvatarDecorations: datatypes.JSON([]byte(`[{"id":"e1","emojiName":"party"}]`)),
 	}
-	out := PackUserLite(u)
+	out := currentPacker().PackUserLite(u)
 	assert.Empty(t, out.AvatarDecorations)
 }
 
@@ -248,7 +248,7 @@ func TestPackUserLite_CatalogDecoration_DoesNotUseEmojiLookup(t *testing.T) {
 		Username:          "alice",
 		AvatarDecorations: datatypes.JSON([]byte(`[{"id":"dec1","emojiName":""}]`)),
 	}
-	out := PackUserLite(u)
+	out := currentPacker().PackUserLite(u)
 	require.Len(t, out.AvatarDecorations, 1)
 	assert.Equal(t, "https://cdn.example/dec1.png", out.AvatarDecorations[0].URL)
 	assert.Zero(t, emojiLookup.calls, "emojiName が空なら絵文字の lookup は引かない")
@@ -276,7 +276,7 @@ func TestPackUserLite_Decoration_ScaleRoundTrips(t *testing.T) {
 		Username:          "alice",
 		AvatarDecorations: datatypes.JSON([]byte(`[{"id":"dec1","scale":0.4}]`)),
 	}
-	out := PackUserLite(u)
+	out := currentPacker().PackUserLite(u)
 	require.Len(t, out.AvatarDecorations, 1)
 	require.NotNil(t, out.AvatarDecorations[0].Scale)
 	assert.Equal(t, 0.4, *out.AvatarDecorations[0].Scale)
@@ -293,7 +293,7 @@ func TestPackUserLite_Decoration_ScaleOmittedWhenDefault(t *testing.T) {
 		Username:          "alice",
 		AvatarDecorations: datatypes.JSON([]byte(`[{"id":"dec1"},{"id":"dec2","scale":1}]`)),
 	}
-	out := PackUserLite(u)
+	out := currentPacker().PackUserLite(u)
 	require.Len(t, out.AvatarDecorations, 2)
 	assert.Nil(t, out.AvatarDecorations[0].Scale)
 	assert.Nil(t, out.AvatarDecorations[1].Scale)

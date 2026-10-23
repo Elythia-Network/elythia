@@ -168,7 +168,7 @@ func TestChatRoomInvitationPush_BodyFitsTheWebPushLimit(t *testing.T) {
 	hook := notification.NewHook(notifSvc, users)
 	enq := &fakeEnqueuer{}
 	hook.SetWebPushPublisher(webpush.NewService(enq))
-	hook.SetPackers(webpush.NewUserRepoPacker(users), nil)
+	hook.SetPackers(webpush.NewUserRepoPacker(users, nil), nil)
 
 	hook.OnChatRoomInvitationReceived(invitee.ID, inviter.ID, "inv1")
 

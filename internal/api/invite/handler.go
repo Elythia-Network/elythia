@@ -42,7 +42,18 @@ type Handler struct {
 	rolePolicyProvider role.PolicyProvider
 	userRepo           repository.UserRepository
 	moderatorChecker   ModeratorChecker
+	// entityPacker は利用者を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3794)。組み立てで渡し、既定の Packer を読まない。
+	entityPacker *entity.Packer
 }
+
+// SetEntityPacker wires the Packer this Handler packs entities with (#3794).
+func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
+// リモートへ漏れる。
+func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
 
 // NewHandler returns a Handler wired with the given repository + id generator.
 func NewHandler(repo repository.RegistrationTicketRepository, idGen id.Generator) *Handler {
@@ -122,7 +133,7 @@ func (h *Handler) Create(c echo.Context) error {
 		"code": ticket.Code,
 		// upstream InviteCodeEntityService.ts:50 は expiresAt ? toISOString() : null (#1948-10)。
 		"expiresAt": entity.ISOMillisPtr(ticket.ExpiresAt),
-		"createdBy": entity.PackUserLite(user),
+		"createdBy": h.entityPacker.PackUserLite(user),
 		"usedBy":    nil,
 		"usedAt":    nil,
 		"used":      false,
@@ -171,7 +182,7 @@ func (h *Handler) List(c echo.Context) error {
 	// createdBy は常に呼び出し元自身。usedBy は `usedById` を持つ ticket の利用者を batch 解決する
 	// (#1776)。frontend MkInviteCode.vue が createdBy/usedBy の avatar/username を
 	// 描画するため、ここを null 固定にすると招待管理画面の詳細表示が空になる。
-	createdByLite := entity.PackUserLite(user)
+	createdByLite := h.entityPacker.PackUserLite(user)
 	usedByMap := map[string]entity.UserLite{}
 	if h.userRepo != nil {
 		seen := make(map[string]struct{}, len(tickets))
@@ -189,7 +200,7 @@ func (h *Handler) List(c echo.Context) error {
 		if len(ids) > 0 {
 			if users, err := h.userRepo.FindManyByIDs(ids); err == nil {
 				for _, u := range users {
-					usedByMap[u.ID] = entity.PackUserLite(u)
+					usedByMap[u.ID] = h.entityPacker.PackUserLite(u)
 				}
 			}
 		}

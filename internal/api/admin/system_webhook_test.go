@@ -389,6 +389,9 @@ func TestSystemWebhookTest_OverrideMergesWithSaved(t *testing.T) {
 func testWebhookBody(t *testing.T, eventType string) map[string]any {
 	t.Helper()
 	h, _, _, _ := newTestHandler(t)
+	// ダミーの利用者にロールが当たっても、本家と同じくバッジは出さない。本文は
+	// handler に渡した Packer で包むので、そこへバッジのロールを入れておく (#3794)。
+	h.SetEntityPacker(entity.NewPacker(entity.PackerDeps{UserRoles: badgeRoleLookup{}}))
 	repo := testutil.NewMockSystemWebhookRepository()
 	require.NoError(t, repo.Create(&model.SystemWebhook{ID: "w1", URL: "https://saved.example"}))
 	h.SetSystemWebhookRepo(repo)
@@ -414,10 +417,6 @@ func (badgeRoleLookup) LookupUserRoles(string) []*model.Role {
 
 // テスト送信の本文は本家 WebhookTestService と同じ形 (本配送と同じ組み立て)。
 func TestSystemWebhookTest_DummyBodies(t *testing.T) {
-	// ダミーの利用者にロールが当たっても、本家と同じくバッジは出さない。
-	entity.SetUserRolesLookup(badgeRoleLookup{})
-	t.Cleanup(func() { entity.SetUserRolesLookup(nil) })
-
 	report := testWebhookBody(t, "abuseReport")
 	for _, k := range []string{"id", "createdAt", "targetUserId", "targetUser", "targetUserHost", "reporterId", "reporter", "reporterHost", "assigneeId", "assignee", "resolved", "forwarded", "comment", "moderationNote", "resolvedAs"} {
 		assert.Contains(t, report, k)
