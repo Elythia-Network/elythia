@@ -18,13 +18,13 @@ UDS production の運用報告 (#943): リモートユーザーの数値が実�
 
 ## 2. 設計判断: origin instance の `/api/users/show` を fetch して上書き
 
-mk-go 独自拡張として、 `users/show` で remote user (= `user.Host != nil`) の場合に origin instance の `/api/users/show` を https POST して 3 つの count を取得 → `entity.PackUserDetailed` の戻り値に上書きする。
+mk-go 独自拡張として、 `users/show` で remote user (= `user.Host != nil`) の場合に origin instance の `/api/users/show` を https POST して 3 つの count を取得 → `(*entity.Packer).PackUserDetailed` の戻り値に上書きする。
 
 ```
 [users/show 呼び出し]
         │
         ▼
-[entity.PackUserDetailed]  ← 自インスタンス観測値
+[(*entity.Packer).PackUserDetailed]  ← 自インスタンス観測値
         │
         ▼
 [remote user?]  ── no ──► そのまま返す
@@ -105,7 +105,7 @@ upstream にも提案できるが、frontend 側 (TS) に対しても drop-in �
 
 ## 5. 利用フロー
 
-1. mk-go の `internal/api/users/handler.go` の `Show` 関数で `entity.PackUserDetailed` 直後に呼ぶ
+1. mk-go の `internal/api/users/handler.go` の `Show` 関数で `(*entity.Packer).PackUserDetailed` 直後に呼ぶ
 2. `bundle.User.Host != nil && *bundle.User.Host != ""` なら `h.remoteStatsFetcher.Fetch(ctx, host, username)` 呼び出し
 3. 戻り値 `*RemoteUserStatsView` が non-nil なら `detailed.NotesCount` / `FollowersCount` / `FollowingCount` を上書き
 
