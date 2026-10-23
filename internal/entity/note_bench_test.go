@@ -40,7 +40,7 @@ func BenchmarkPackNotes(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		out := PackNotes(context.Background(), notes, idGen, nil, nil, nil)
+		out := currentPacker().PackNotes(context.Background(), notes, idGen, nil, nil, nil)
 		if len(out) != pageSize {
 			b.Fatalf("packed %d, want %d", len(out), pageSize)
 		}

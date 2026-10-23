@@ -28,7 +28,7 @@ type BatchPubSubPublisher interface {
 	PublishMany(ctx context.Context, channels []string, payload any) []error
 }
 
-// NotePublisher serializes a model.Note via entity.PackNote, embeds the author
+// NotePublisher serializes a model.Note via (*entity.Packer).PackNoteWithInstance, embeds the author
 // in NoteEntity.User and publishes the JSON to a Redis pubsub topic. これは
 // core/timeline.StreamingPublisher を実装する。
 //
@@ -48,6 +48,8 @@ type NotePublisher struct {
 	// 解決されない後段 field を埋める。未設定時は従来通り Files が
 	// 空配列のまま publish される (旧挙動)。SetFieldResolver で配線。
 	fieldResolver *entity.NoteFieldResolver
+	// entityPacker は流す投稿を包む依存を持つ (#3790)。
+	entityPacker *entity.Packer
 
 	mu         sync.Mutex
 	cachedID   string
@@ -132,6 +134,13 @@ func reactionsNonEmpty(raw []byte) bool {
 func (p *NotePublisher) SetFieldResolver(r *entity.NoteFieldResolver) {
 	p.fieldResolver = r
 }
+
+// SetEntityPacker wires the Packer the published notes are packed with (#3790).
+func (p *NotePublisher) SetEntityPacker(pk *entity.Packer) { p.entityPacker = pk }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs.
+func (p *NotePublisher) HasEntityPacker() bool { return p.entityPacker.HasMediaURL() }
 
 // PublishNote implements core/timeline.StreamingPublisher.
 func (p *NotePublisher) PublishNote(topic string, n *model.Note, author *model.User) {
@@ -242,7 +251,7 @@ func logPublishFailures(noteID string, topics []string, errs []error) {
 // 同じノートが繰返しpublishされるため、直前のノートIDが一致する場合は
 // キャッシュを再利用して絵文字 / インスタンス解決の DB クエリを 1 回に抑える。
 //
-// author を n.User に差し戻してから entity.PackNoteWithInstance に渡すことで、
+// author を n.User に差し戻してから (*entity.Packer).PackNoteWithInstance に渡すことで、
 // Instance / emoji の解決が embed (Renote / Reply) にまで波及する。shallow
 // copy なので元の model.Note は変更されない (Renote 等のポインタは共有)。
 func (p *NotePublisher) packNote(n *model.Note, author *model.User) []byte {
@@ -260,7 +269,7 @@ func (p *NotePublisher) packNote(n *model.Note, author *model.User) []byte {
 	// 持たない。reactionReader への Redis call は短命なので
 	// context.Background() で進める (#657)。将来 PublishNote signature に
 	// ctx を追加するなら一緒に伝播させる。
-	pn := entity.PackNoteWithInstance(context.Background(), &noteForPack, p.idGen, p.instanceLookup, p.emojiLookup, p.reactionReader)
+	pn := p.entityPacker.PackNoteWithInstance(context.Background(), &noteForPack, p.idGen, p.instanceLookup, p.emojiLookup, p.reactionReader)
 	// streaming note event は upstream NoteCreateService が
 	// withReactionAndUserPairCache=true で pack する経路に対応するため、
 	// reactionAndUserPairCache を (空でも) 出力する (#1640)。REST pack は

@@ -52,6 +52,9 @@ type PollVoteLookup interface {
 // nil レシーバはすべて no-op として扱われ、構築側 (router) の wiring が
 // 不完全でも panic しない。
 type NoteFieldResolver struct {
+	// packer packs the files the resolver embeds. 既定の Packer を読むと、
+	// 投稿の本体と添付ファイルで別の mediaURL を使いうる (#3790)。
+	packer       *Packer
 	driveFile    DriveFileLookup
 	driveFolder  DriveFolderLookup
 	fileOwner    FileOwnerLookup
@@ -64,8 +67,12 @@ type NoteFieldResolver struct {
 // NewNoteFieldResolver constructs a resolver. 個々の lookup が nil でも
 // 適切に skip される (例えば driveFile が nil なら ResolveFiles は no-op、
 // channel が nil なら ResolveViewerFields の channel 解決のみ skip)。
-func NewNoteFieldResolver(driveFile DriveFileLookup, driveFolder DriveFolderLookup, fileOwner FileOwnerLookup, noteReaction NoteReactionLookup, channel ChannelLookup, idGen id.Generator) *NoteFieldResolver {
+//
+// pk packs the embedded files. A nil pk leaves their URLs raw, so the caller
+// passes the Packer it packs the notes with.
+func NewNoteFieldResolver(pk *Packer, driveFile DriveFileLookup, driveFolder DriveFolderLookup, fileOwner FileOwnerLookup, noteReaction NoteReactionLookup, channel ChannelLookup, idGen id.Generator) *NoteFieldResolver {
 	return &NoteFieldResolver{
+		packer:       pk,
 		driveFile:    driveFile,
 		driveFolder:  driveFolder,
 		fileOwner:    fileOwner,
@@ -176,7 +183,7 @@ func (r *NoteFieldResolver) populateNoteFilesShallow(n *NoteEntity, fileMap map[
 		if !ok {
 			continue
 		}
-		packed = append(packed, r.pk().PackDriveFile(f, r.idGen))
+		packed = append(packed, r.packer.PackDriveFile(f, r.idGen))
 	}
 	n.Files = packed
 	r.populateNoteFilesShallow(n.Renote, fileMap)
@@ -264,7 +271,7 @@ func (r *NoteFieldResolver) packNoteFiles(fileIDs []string, fileMap map[string]*
 		if f.UserID != nil {
 			user = userCache[*f.UserID]
 		}
-		packed = append(packed, r.pk().PackDriveFileWithRelations(f, r.idGen, folder, user))
+		packed = append(packed, r.packer.PackDriveFileWithRelations(f, r.idGen, folder, user))
 	}
 	return packed
 }

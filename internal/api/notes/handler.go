@@ -126,6 +126,9 @@ type Handler struct {
 	// 匿名の閲覧者への ugcVisibilityForVisitor が効かないので、criticalWiring が
 	// 起動時に検査する。
 	noteHider *notehide.Hider
+	// entityPacker は投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
+	// 持つ (#3790)。組み立てで渡し、既定の Packer を読まない。
+	entityPacker *entity.Packer
 }
 
 // SetNoteHider wires the Hider that applies the per-viewer hideNote gate to
@@ -135,6 +138,14 @@ func (h *Handler) SetNoteHider(n *notehide.Hider) { h.noteHider = n }
 // HasNoteHider reports whether SetNoteHider received a Hider. 未配線だと
 // 匿名の閲覧者に ugcVisibilityForVisitor が効かない (fail-open)。
 func (h *Handler) HasNoteHider() bool { return h.noteHider != nil }
+
+// SetEntityPacker wires the Packer this handler packs entities with (#3790).
+func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs. 無いとリモートのメディアの URL を生のまま返し、閲覧者の
+// IP がリモートへ漏れる。
+func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
 
 // SetPiningRepo wires the repository used to verify that a notes/show target
 // is still pinned at request time.
@@ -579,7 +590,7 @@ func (h *Handler) Create(c echo.Context) error {
 		return apierr.JSONInternalError(c)
 	}
 
-	packed := entity.PackNoteWithInstance(c.Request().Context(), created, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
+	packed := h.entityPacker.PackNoteWithInstance(c.Request().Context(), created, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
 	s := []entity.NoteEntity{packed}
 	h.fieldResolver().Apply(s, user)
 	h.noteHider.HideEmbeds(user, s)
@@ -697,7 +708,7 @@ func (h *Handler) Show(c echo.Context) error {
 		}
 	}
 
-	packed := entity.PackNoteWithInstance(c.Request().Context(), n, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
+	packed := h.entityPacker.PackNoteWithInstance(c.Request().Context(), n, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
 	s := []entity.NoteEntity{packed}
 	h.fieldResolver().Apply(s, viewer)
 	if h.isCurrentlyPinned(n) {
@@ -1363,7 +1374,7 @@ func (h *Handler) BulkShow(c echo.Context) error {
 // (upstream shouldHideNote→hideNote)。draft は owner-only だが、replyId/renoteId に
 // 任意の note ID を入れて非可視 note の本文を読み出す leak を塞ぐ (#1948-19)。
 func (h *Handler) packReferencedNote(ctx context.Context, n *model.Note, viewer *model.User, detail bool) entity.NoteEntity {
-	packed := entity.PackNotes(ctx, []*model.Note{n}, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
+	packed := h.entityPacker.PackNotes(ctx, []*model.Note{n}, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
 	h.fieldResolver().Apply(packed, viewer)
 	h.noteHider.HideEmbeds(viewer, packed)
 	out := packed[0]
@@ -1404,7 +1415,7 @@ func (h *Handler) packReferencedNote(ctx context.Context, n *model.Note, viewer 
 // packManyWithoutHardMute を使う。
 //
 // 注意: filter を意図的に bypass したい admin 系 path (例: モデレーション目的で
-// 隠さず全件を見せたい / pinned notes 等) は本関数を経由せず entity.PackNotes
+// 隠さず全件を見せたい / pinned notes 等) は本関数を経由せず (*entity.Packer).PackNotes
 // を直接呼ぶ慣習。pinned (i/show, users/show) と i/favorites は upstream に
 // 揃えて既に packMany を経由していない。
 func (h *Handler) packMany(ctx context.Context, notes []*model.Note, viewer *model.User) []entity.NoteEntity {
@@ -1415,7 +1426,7 @@ func (h *Handler) packMany(ctx context.Context, notes []*model.Note, viewer *mod
 // packManyWithoutHardMute is packMany without the hardMutedWords filter, for
 // the endpoints the note detail view reads (see packMany).
 func (h *Handler) packManyWithoutHardMute(ctx context.Context, notes []*model.Note, viewer *model.User) []entity.NoteEntity {
-	out := entity.PackNotes(ctx, notes, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
+	out := h.entityPacker.PackNotes(ctx, notes, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
 	h.fieldResolver().Apply(out, viewer)
 	h.noteHider.HideEmbeds(viewer, out)
 	return out
@@ -1426,6 +1437,7 @@ func (h *Handler) packManyWithoutHardMute(ctx context.Context, notes []*model.No
 // configured)。
 func (h *Handler) fieldResolver() *entity.NoteFieldResolver {
 	return entity.NewNoteFieldResolver(
+		h.entityPacker,
 		nilOrDriveFile(h.driveFileRepo),
 		nilOrDriveFolder(h.driveFolderRepo),
 		nilOrUser(h.userRepo),

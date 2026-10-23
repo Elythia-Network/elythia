@@ -210,7 +210,7 @@ func (h *Handler) fillPinnedNotes(ctx context.Context, viewer *model.User, targe
 		return
 	}
 	notes = notesfilter.FilterVisible(viewer, notes, h.followingRepo)
-	entities := entity.PackNotes(ctx, notes, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
+	entities := h.entityPacker.PackNotes(ctx, notes, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
 	h.fieldRes.Apply(entities, viewer)
 	byID := make(map[string]entity.NoteEntity, len(entities))
 	for _, e := range entities {

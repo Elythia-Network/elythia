@@ -124,7 +124,7 @@ func (s *Service) dbFallbackEnabled() bool {
 // (GlobalTimeline の doc を参照)。
 //
 // **非 nil の空 slice を返す。** 現状の呼び出し元 (internal/api/notes の
-// handler) は `entity.PackNotes` を通り、そこが `make([]NoteEntity, 0, ...)` で
+// handler) は `(*entity.Packer).PackNotes` を通り、そこが `make([]NoteEntity, 0, ...)` で
 // 受けるので nil でも JSON は `[]` になる。それに寄りかからないという契約。
 // nil を返す実装は「取得できなかった」と区別が付かない。
 func noDBFallback() []*model.Note { return []*model.Note{} }

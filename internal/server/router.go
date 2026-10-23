@@ -387,6 +387,108 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	proxyAllowlist := coreSvcs.proxyAllowlist
 	abuseInAppNotifier := coreSvcs.abuseInAppNotifier
 
+	// entity の Packer の依存 (#3788、#3790)。投稿を包む部品 (webpush、
+	// NoteFieldResolver、handler) へ渡すので、それらを作るより前に組み立てる。
+	// どれも作るだけで、DB に触るのは metaRepo.Fetch だけ (上で既に読んで
+	// キャッシュにある)。
+	// PackUserLite が avatarDecorations の各エントリに url を埋め込めるよう
+	// 共有 catalog resolver を entity package に登録する (#521)。catalog は
+	// admin 管理で低頻度更新のため 30s TTL の in-memory cache で十分。
+	avatarDecorationResolver := avatardecoration.NewResolver(avatarDecorationRepo)
+	// PackUserLite の canChat を role policy 由来 (= upstream
+	// `chatAvailability === "available"`) に揃える (#988)。roleService 自体
+	// が in-memory cache を持つ (#761) ので追加 DB 負荷は実質ゼロ。
+	canChatLookup := corerole.NewCanChatLookup(roleService)
+	// PackUserLite / PackUserDetailed の `badgeRoles` / `roles` field を
+	// role assignment から populate (#1103)。旧 mk-go は両 field を空配列
+	// hard-code していたため、admin が公開ロールを assign しても profile
+	// に表示されなかった。roleService.GetUserRoles も in-memory cache 経由
+	// (#761) で hot path コスト無し。
+	userRolesLookup := corerole.NewUserRolesLookup(roleService)
+	// remote user の badgeRoles を出すかは meta.showRoleBadgesOfRemoteUsers
+	// 次第 (upstream)。CachedMetaRepository.Fetch は cache 経由で hot path
+	// コスト無し。fetch 失敗時は false (= local-only の保守的 default) (#1653)。
+	showRemoteBadges := func() bool {
+		m, err := metaRepo.Fetch()
+		return err == nil && m != nil && m.ShowRoleBadgesOfRemoteUsers
+	}
+	// local system account (relay.actor 等) の avatarUrl を meta.iconUrl に
+	// する upstream の特例 (#1781)。IdenticonURL が '.' を含む local username の
+	// fallback でのみ参照する。
+	instanceIconURL := func() string {
+		m, err := metaRepo.Fetch()
+		if err != nil || m == nil || m.IconURL == nil {
+			return ""
+		}
+		return *m.IconURL
+	}
+	// PackDriveFile / IdenticonURL が remote origin の media URL (note 添付・
+	// avatar・banner 等) を pack 時に media proxy 経由へ書き換えられるよう
+	// context を登録する (#1529)。これが無いと remote の url/thumbnailUrl/
+	// avatarUrl が raw のまま <img src> に乗り、閲覧者の IP が remote server
+	// に漏れる。proxyRemoteFiles は meta 由来 (既定 true) で boot 時に snapshot
+	// する。
+	proxyRemoteFiles := true
+	if m, err := metaRepo.Fetch(); err == nil {
+		proxyRemoteFiles = m.ProxyRemoteFiles
+	}
+
+	mediaURLCtx := entity.NewMediaURLContext(
+		s.config.URL,
+		s.config.MediaProxy,
+		s.mediaProxySecret,
+		s.config.ExternalMediaProxyEnabled,
+		proxyRemoteFiles,
+	)
+	// **毎回読む。** 起動時の値を焼き込むと、運営者が管理画面で切り替えても
+	// プロセスを再起動するまで反映されない。これは閲覧者の IP がリモートへ
+	// 漏れるかどうかを決める設定なので、締めたつもりで漏れ続ける形になる。
+	mediaURLCtx.SetProxyRemoteFilesLookup(func() bool {
+		m, err := metaRepo.Fetch()
+		if err != nil || m == nil {
+			// 読めないときは起動時の値に倒す (既定 true = プロキシ経由)。
+			return proxyRemoteFiles
+		}
+		return m.ProxyRemoteFiles
+	})
+	// オブジェクトストレージの公開ドメインは instance ドメインと別なので、
+	// これを教えないと自分が保存したファイルまで remote 判定されて media proxy
+	// を経由してしまう (#2315)。設定は admin が変更しうるので都度引く。
+	mediaURLCtx.SetOwnMediaBaseURLResolver(func() string {
+		m, err := metaRepo.Fetch()
+		if err != nil {
+			return ""
+		}
+		return coredrive.PublicBaseURL(m)
+	})
+	// PackUserDetailed の isSilenced を role policy 由来に揃える (旧実装は
+	// /api/i 以外で常に false 固定だった)。roleService.IsSilenced が
+	// entity.SilencedLookup を構造的に満たすので直接 wire する。GetUserRoles は
+	// in-memory cache (#761) だが IsSilenced 内の policy merge 自体は per-call
+	// なので、UserDetailed pack は単一 user の detail 取得が主用途であり許容範囲。
+	entityPackerDeps := entity.PackerDeps{
+		AvatarDecoration: avatarDecorationResolver,
+		EmojiDecoration:  emojiDecorationResolver,
+		CanChat:          canChatLookup,
+		UserRoles:        userRolesLookup,
+		ShowRemoteBadges: showRemoteBadges,
+		InstanceIconURL:  instanceIconURL,
+		Silenced:         roleService,
+		MediaURL:         mediaURLCtx,
+	}
+	// 部品へ渡す Packer (#3790)。投稿を包む部品は既定の Packer を読まない。
+	// 既定の Packer は、まだ移していない呼び出し側 (#3666 の (5-7)〜(5-9)) のために
+	// 同じ依存で配線する。
+	entityPacker := entity.NewPacker(entityPackerDeps)
+	entity.SetAvatarDecorationLookup(entityPackerDeps.AvatarDecoration)
+	entity.SetEmojiDecorationLookup(entityPackerDeps.EmojiDecoration)
+	entity.SetCanChatLookup(entityPackerDeps.CanChat)
+	entity.SetUserRolesLookup(entityPackerDeps.UserRoles)
+	entity.SetShowRemoteBadgesLookup(entityPackerDeps.ShowRemoteBadges)
+	entity.SetInstanceIconURLLookup(entityPackerDeps.InstanceIconURL)
+	entity.SetMediaURLContext(entityPackerDeps.MediaURL)
+	entity.SetSilencedLookup(entityPackerDeps.Silenced)
+
 	// 以下は #3676 で受け手より先に作るようにした部品のうち、buildCore へ移さなかった
 	// もの (passwordFailureGuard・proxyAccountResolver・dbHealth) と、buildCore へ移した
 	// 部品 (featuredService・hashtagService など) への setter。inboxSoftwareChecker は
@@ -670,9 +772,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// Web Push (Phase 9.3): 通知作成後にサブスクライバーへpush配信する。
 	notificationHook.SetWebPushPublisher(webPushService)
+	webPushNotePacker := corewebpush.NewNoteRepoPacker(noteRepo, idGen, followingRepo, driveFileRepo, entityPacker)
 	notificationHook.SetPackers(
 		corewebpush.NewUserRepoPacker(userRepo),
-		corewebpush.NewNoteRepoPacker(noteRepo, idGen, followingRepo, driveFileRepo),
+		webPushNotePacker,
 	)
 	// 1 件の通知の stream と Web Push が、ノートの読み込みを共有する (#3611)。
 	notificationHook.SetNoteLoader(noteRepo.FindByIDWithRelations)
@@ -692,8 +795,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	webhookNoteHook.SetThreadMutingRepo(noteThreadMutingRepo)
 	// note payload の embed (renote/reply/引用先) を受信者の可視性で gate する。
 	webhookNoteHook.SetFollowingRepo(followingRepo)
+	webhookNoteHook.SetEntityPacker(entityPacker)
 	noteCreateService.SetWebhookHook(webhookNoteHook)
 	webhookReactionHook.SetFollowingRepo(followingRepo)
+	webhookReactionHook.SetEntityPacker(entityPacker)
+	noteCreateService.SetEntityPacker(entityPacker)
 	reactionService.SetWebhookHook(webhookReactionHook)
 	followingService.SetWebhookHook(webhookFollowingHook)
 	signupService.SetWebhookHook(corewebhook.NewSignupHook(webhookService))
@@ -1804,10 +1910,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	emojisHandler := apiemojis.NewHandler(emojiRepo)
 	emojisHandler.SetExportEnqueuer(s.queueClient)
 
-	// 7+ handlers across api/* pack notes via entity.PackNotes. Files /
+	// api/* の多くの handler が渡された Packer の PackNotes で投稿を包む。Files /
 	// MyReaction / Channel の post-pack 解決は notes 以外でも必要 (#426)。
-	// 共通 resolver を 1 つだけ作って全 handler に注入する。
-	noteFieldResolver := entity.NewNoteFieldResolver(driveFileRepo, driveFolderRepo, userRepo, reactionRepo, channelRepo, idGen)
+	// 共通 resolver を 1 つだけ作って全 handler に注入する。添付ファイルも投稿の
+	// 本体と同じ Packer で包むよう、entityPacker を渡す (#3790)。
+	noteFieldResolver := entity.NewNoteFieldResolver(entityPacker, driveFileRepo, driveFolderRepo, userRepo, reactionRepo, channelRepo, idGen)
 	// viewer の poll vote から Poll.choices[i].IsVoted を埋める (#690)。
 	// frontend の MkPoll.vue が `showResult = isVoted || closed` を初期化に
 	// 使うため、これがないと「結果を見る」toggle が reload で揮発する。
@@ -1960,6 +2067,16 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	notificationsHandler.SetNoteHider(noteHider)
 	rolesHandler.SetNoteHider(noteHider)
 	usersHandler.SetNoteHider(noteHider)
+	// 投稿を包む handler に Packer を渡す (#3790)。
+	antennasHandler.SetEntityPacker(entityPacker)
+	apHandler.SetEntityPacker(entityPacker)
+	channelsHandler.SetEntityPacker(entityPacker)
+	clipsHandler.SetEntityPacker(entityPacker)
+	driveHandler.SetEntityPacker(entityPacker)
+	iHandler.SetEntityPacker(entityPacker)
+	notesHandler.SetEntityPacker(entityPacker)
+	rolesHandler.SetEntityPacker(entityPacker)
+	usersHandler.SetEntityPacker(entityPacker)
 
 	// Users endpoints
 	// users/lists/update-membership の withReplies 変更を userUpdated として流し、接続中の
@@ -2117,85 +2234,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	iHandler.SetEmojiRepo(emojiRepo)
 	iHandler.SetReactionReader(reactionCountWriter)
 	iHandler.SetAvatarDecorationRepo(avatarDecorationRepo)
-	// PackUserLite が avatarDecorations の各エントリに url を埋め込めるよう
-	// 共有 catalog resolver を entity package に登録する (#521)。catalog は
-	// admin 管理で低頻度更新のため 30s TTL の in-memory cache で十分。
-	avatarDecorationResolver := avatardecoration.NewResolver(avatarDecorationRepo)
-	entity.SetAvatarDecorationLookup(avatarDecorationResolver)
-	entity.SetEmojiDecorationLookup(emojiDecorationResolver)
-	// PackUserLite の canChat を role policy 由来 (= upstream
-	// `chatAvailability === "available"`) に揃える (#988)。roleService 自体
-	// が in-memory cache を持つ (#761) ので追加 DB 負荷は実質ゼロ。
-	entity.SetCanChatLookup(corerole.NewCanChatLookup(roleService))
-	// PackUserLite / PackUserDetailed の `badgeRoles` / `roles` field を
-	// role assignment から populate (#1103)。旧 mk-go は両 field を空配列
-	// hard-code していたため、admin が公開ロールを assign しても profile
-	// に表示されなかった。roleService.GetUserRoles も in-memory cache 経由
-	// (#761) で hot path コスト無し。
-	entity.SetUserRolesLookup(corerole.NewUserRolesLookup(roleService))
-	// remote user の badgeRoles を出すかは meta.showRoleBadgesOfRemoteUsers
-	// 次第 (upstream)。CachedMetaRepository.Fetch は cache 経由で hot path
-	// コスト無し。fetch 失敗時は false (= local-only の保守的 default) (#1653)。
-	entity.SetShowRemoteBadgesLookup(func() bool {
-		m, err := metaRepo.Fetch()
-		return err == nil && m != nil && m.ShowRoleBadgesOfRemoteUsers
-	})
-	// local system account (relay.actor 等) の avatarUrl を meta.iconUrl に
-	// する upstream の特例 (#1781)。IdenticonURL が '.' を含む local username の
-	// fallback でのみ参照する。
-	entity.SetInstanceIconURLLookup(func() string {
-		m, err := metaRepo.Fetch()
-		if err != nil || m == nil || m.IconURL == nil {
-			return ""
-		}
-		return *m.IconURL
-	})
-	// PackDriveFile / IdenticonURL が remote origin の media URL (note 添付・
-	// avatar・banner 等) を pack 時に media proxy 経由へ書き換えられるよう
-	// context を登録する (#1529)。これが無いと remote の url/thumbnailUrl/
-	// avatarUrl が raw のまま <img src> に乗り、閲覧者の IP が remote server
-	// に漏れる。proxyRemoteFiles は meta 由来 (既定 true) で boot 時に snapshot
-	// する。
-	proxyRemoteFiles := true
-	if m, err := metaRepo.Fetch(); err == nil {
-		proxyRemoteFiles = m.ProxyRemoteFiles
-	}
-
-	mediaURLCtx := entity.NewMediaURLContext(
-		s.config.URL,
-		s.config.MediaProxy,
-		s.mediaProxySecret,
-		s.config.ExternalMediaProxyEnabled,
-		proxyRemoteFiles,
-	)
-	// **毎回読む。** 起動時の値を焼き込むと、運営者が管理画面で切り替えても
-	// プロセスを再起動するまで反映されない。これは閲覧者の IP がリモートへ
-	// 漏れるかどうかを決める設定なので、締めたつもりで漏れ続ける形になる。
-	mediaURLCtx.SetProxyRemoteFilesLookup(func() bool {
-		m, err := metaRepo.Fetch()
-		if err != nil || m == nil {
-			// 読めないときは起動時の値に倒す (既定 true = プロキシ経由)。
-			return proxyRemoteFiles
-		}
-		return m.ProxyRemoteFiles
-	})
-	// オブジェクトストレージの公開ドメインは instance ドメインと別なので、
-	// これを教えないと自分が保存したファイルまで remote 判定されて media proxy
-	// を経由してしまう (#2315)。設定は admin が変更しうるので都度引く。
-	mediaURLCtx.SetOwnMediaBaseURLResolver(func() string {
-		m, err := metaRepo.Fetch()
-		if err != nil {
-			return ""
-		}
-		return coredrive.PublicBaseURL(m)
-	})
-	entity.SetMediaURLContext(mediaURLCtx)
-	// PackUserDetailed の isSilenced を role policy 由来に揃える (旧実装は
-	// /api/i 以外で常に false 固定だった)。roleService.IsSilenced が
-	// entity.SilencedLookup を構造的に満たすので直接 wire する。GetUserRoles は
-	// in-memory cache (#761) だが IsSilenced 内の policy merge 自体は per-call
-	// なので、UserDetailed pack は単一 user の detail 取得が主用途であり許容範囲。
-	entity.SetSilencedLookup(roleService)
 	iHandler.SetNoteFieldResolver(noteFieldResolver)
 	// announcementRepo (/api/i の未読のお知らせ) は、下の meself.NewPacker の直前で入れる。
 
@@ -3058,6 +3096,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	notePublisher.SetReactionReader(reactionCountWriter)
 	notePublisher.SetReactionPairReader(reactionRepo) // #2067: renote embed の pair cache を note_reaction から埋める
 	notePublisher.SetFieldResolver(noteFieldResolver)
+	notePublisher.SetEntityPacker(entityPacker)
 	notificationPublisher.SetRepos(userRepo, noteRepo, idGen)
 	notificationPublisher.SetInstanceLookup(instanceRepo)
 	notificationPublisher.SetEmojiLookup(emojiRepo)
@@ -3999,6 +4038,21 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		{"notifications.noteHider", notificationsHandler.HasNoteHider(), noteHiderMissingEffect},
 		{"roles.noteHider", rolesHandler.HasNoteHider(), noteHiderMissingEffect},
 		{"users.noteHider", usersHandler.HasNoteHider(), noteHiderMissingEffect},
+		// 投稿を包む Packer (#3790)。無い部品はリモートのメディアの URL を生のまま出す。
+		{"antennas.entityPacker", antennasHandler.HasEntityPacker(), entityPackerMissingEffect},
+		{"ap.entityPacker", apHandler.HasEntityPacker(), entityPackerMissingEffect},
+		{"channels.entityPacker", channelsHandler.HasEntityPacker(), entityPackerMissingEffect},
+		{"clips.entityPacker", clipsHandler.HasEntityPacker(), entityPackerMissingEffect},
+		{"drive.entityPacker", driveHandler.HasEntityPacker(), entityPackerMissingEffect},
+		{"i.entityPacker", iHandler.HasEntityPacker(), entityPackerMissingEffect},
+		{"notes.entityPacker", notesHandler.HasEntityPacker(), entityPackerMissingEffect},
+		{"roles.entityPacker", rolesHandler.HasEntityPacker(), entityPackerMissingEffect},
+		{"users.entityPacker", usersHandler.HasEntityPacker(), entityPackerMissingEffect},
+		{"noteCreate.entityPacker", noteCreateService.HasEntityPacker(), entityPackerMissingEffect},
+		{"webhookNote.entityPacker", webhookNoteHook.HasEntityPacker(), entityPackerMissingEffect},
+		{"webhookReaction.entityPacker", webhookReactionHook.HasEntityPacker(), entityPackerMissingEffect},
+		{"webPushNote.entityPacker", webPushNotePacker.HasEntityPacker(), entityPackerMissingEffect},
+		{"notePublisher.entityPacker", notePublisher.HasEntityPacker(), entityPackerMissingEffect},
 		{"users.remoteStatsFederationGate", remoteStatsFetcher.HasHostAllowedChecker(),
 			"連合を切った相手へもプロフィール表示のたびに統計を取りに行き、誰をいつ見たかが漏れる"},
 		{"peer.blocker", s.peerDeps.HasBlocker(),

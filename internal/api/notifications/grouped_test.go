@@ -515,7 +515,7 @@ func TestGrouped_ResolvesNoteFiles(t *testing.T) {
 	}
 	h.SetRepos(userRepo, noteRepo)
 	h.SetQueryService(corenote.NewQueryService(noteRepo, testutil.NewMockFollowingRepository()))
-	h.SetNoteFieldResolver(entity.NewNoteFieldResolver(driveRepo, nil, nil, nil, nil, idGen))
+	h.SetNoteFieldResolver(entity.NewNoteFieldResolver(nil, driveRepo, nil, nil, nil, nil, idGen))
 
 	_, err := svc.Create(context.Background(), notification.CreateInput{
 		NotifieeID: "alice", NotifierID: "bob", Type: notification.TypeMention, NoteID: "n1",

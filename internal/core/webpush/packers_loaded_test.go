@@ -17,7 +17,7 @@ func TestNoteRepoPacker_PackLoadedNote_MatchesPackNoteByID(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	repo := testutil.NewMockNoteRepository()
 	follow := testutil.NewMockFollowingRepository()
-	p := webpush.NewNoteRepoPacker(repo, idGen, follow, nil)
+	p := webpush.NewNoteRepoPacker(repo, idGen, follow, nil, nil)
 
 	public := seedNote(repo, idGen, "author", model.NoteVisibilityPublic, nil)
 	followers := seedNote(repo, idGen, "author", model.NoteVisibilityFollowers, nil)
@@ -50,15 +50,15 @@ func TestNoteRepoPacker_PackNoteByIDOnPrimary(t *testing.T) {
 	n := seedNote(mock, idGen, "author", model.NoteVisibilityPublic, nil)
 
 	lag := &laggingReplicaRepo{MockNoteRepository: mock, stale: map[string]*model.Note{}}
-	out, ok := webpush.NewNoteRepoPacker(lag, idGen, nil, nil).PackNoteByIDOnPrimary(n.ID, "viewer")
+	out, ok := webpush.NewNoteRepoPacker(lag, idGen, nil, nil, nil).PackNoteByIDOnPrimary(n.ID, "viewer")
 	assert.True(t, ok)
 	assert.Equal(t, n.ID, out["id"])
 	assert.Equal(t, 1, lag.primaryReads)
 
-	_, ok = webpush.NewNoteRepoPacker(lag, idGen, nil, nil).PackNoteByIDOnPrimary("missing", "viewer")
+	_, ok = webpush.NewNoteRepoPacker(lag, idGen, nil, nil, nil).PackNoteByIDOnPrimary("missing", "viewer")
 	assert.False(t, ok)
 
-	out, ok = webpush.NewNoteRepoPacker(noPrimaryRepo{mock}, idGen, nil, nil).PackNoteByIDOnPrimary(n.ID, "viewer")
+	out, ok = webpush.NewNoteRepoPacker(noPrimaryRepo{mock}, idGen, nil, nil, nil).PackNoteByIDOnPrimary(n.ID, "viewer")
 	assert.True(t, ok)
 	assert.Equal(t, n.ID, out["id"])
 

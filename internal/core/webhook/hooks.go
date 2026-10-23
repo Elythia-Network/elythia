@@ -32,12 +32,21 @@ type NoteCreateHook struct {
 	// 可視性で gate するために使う。未配線なら fail-closed (followers/specified
 	// embed を隠す)。
 	followingRepo repository.FollowingRepository
+	// entityPacker は payload の投稿を包む依存を持つ (#3790)。
+	entityPacker *entity.Packer
 }
 
 // NewNoteCreateHook constructs a NoteCreateHook.
 func NewNoteCreateHook(svc *Service, idGen id.Generator) *NoteCreateHook {
 	return &NoteCreateHook{svc: svc, idGen: idGen}
 }
+
+// SetEntityPacker wires the Packer the note payload is packed with (#3790).
+func (h *NoteCreateHook) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs.
+func (h *NoteCreateHook) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
 
 // SetThreadMutingRepo attaches a NoteThreadMutingRepository so reply/mention
 // webhook events are suppressed for recipients who thread-muted the thread,
@@ -109,7 +118,7 @@ func (h *NoteCreateHook) OnNoteCreated(note *model.Note, author *model.User, rep
 
 // packNoteFor packs note for a single webhook recipient and applies the
 // per-recipient embed visibility gate (renote/reply/引用先) with recipientID as
-// the viewer. entity.PackNote produces fresh embed pointers each call, so the
+// the viewer. (*entity.Packer).PackNote produces fresh embed pointers each call, so the
 // per-recipient blank never mutates another recipient's payload.
 func (h *NoteCreateHook) packNoteFor(note *model.Note, author *model.User, recipientID string) map[string]any {
 	if note.User == nil && author != nil {
@@ -117,7 +126,7 @@ func (h *NoteCreateHook) packNoteFor(note *model.Note, author *model.User, recip
 		clone.User = author
 		note = &clone
 	}
-	packed := entity.PackNote(note, h.idGen)
+	packed := h.entityPacker.PackNote(note, h.idGen)
 	recipient := &model.User{ID: recipientID}
 	// **top-level の可視性ゲート。** `gateNoteEmbeds` が見るのは embed だけなので、
 	// これが無いと note 本体が受信者の可視性を無視して届く。
@@ -147,12 +156,21 @@ type ReactionCreateHook struct {
 	svc           *Service
 	idGen         id.Generator
 	followingRepo repository.FollowingRepository
+	// entityPacker は payload の投稿を包む依存を持つ (#3790)。
+	entityPacker *entity.Packer
 }
 
 // NewReactionCreateHook constructs a ReactionCreateHook.
 func NewReactionCreateHook(svc *Service, idGen id.Generator) *ReactionCreateHook {
 	return &ReactionCreateHook{svc: svc, idGen: idGen}
 }
+
+// SetEntityPacker wires the Packer the note payload is packed with (#3790).
+func (h *ReactionCreateHook) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
+
+// HasEntityPacker reports whether SetEntityPacker received a Packer that
+// rewrites media URLs.
+func (h *ReactionCreateHook) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
 
 // SetFollowingRepo attaches a FollowingRepository used to gate the embed
 // visibility of the reaction note payload for the recipient (= note author).
@@ -180,7 +198,7 @@ func (h *ReactionCreateHook) OnReactionCreated(note *model.Note, reactor *model.
 		clone.User = &model.User{ID: note.UserID}
 		noteForPack = &clone
 	}
-	packed := entity.PackNote(noteForPack, h.idGen)
+	packed := h.entityPacker.PackNote(noteForPack, h.idGen)
 	gateNoteEmbeds(&model.User{ID: note.UserID}, &packed, h.followingRepo, time.Now().UnixMilli())
 	body := map[string]any{
 		"note":     noteEntityToMap(packed),

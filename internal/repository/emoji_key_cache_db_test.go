@@ -65,12 +65,12 @@ func TestCachedEmojiRepository_PackNotesSecondPageSkipsDB(t *testing.T) {
 	}
 	queries := countEmojiQueries(t, db)
 
-	first := entity.PackNotes(context.Background(), page("kc_n1"), idGen, nil, cached, nil)
+	first := (*entity.Packer)(nil).PackNotes(context.Background(), page("kc_n1"), idGen, nil, cached, nil)
 	require.Len(t, first, 1)
 	firstQueries := queries.Load()
 	require.Equal(t, int64(1), firstQueries, "the first page fetches every host in one query")
 
-	second := entity.PackNotes(context.Background(), page("kc_n2"), idGen, nil, cached, nil)
+	second := (*entity.Packer)(nil).PackNotes(context.Background(), page("kc_n2"), idGen, nil, cached, nil)
 	require.Len(t, second, 1)
 	assert.Equal(t, firstQueries, queries.Load(), "the second page must not query the emoji table again")
 
@@ -84,7 +84,7 @@ func TestCachedEmojiRepository_PackNotesSecondPageSkipsDB(t *testing.T) {
 
 	// URL が変わったら、次のページは新しい URL を引き直す。
 	require.NoError(t, cached.UpdateFields("kc_note", map[string]any{"publicUrl": "https://kc-a.example/n2.webp"}))
-	third := entity.PackNotes(context.Background(), page("kc_n3"), idGen, nil, cached, nil)
+	third := (*entity.Packer)(nil).PackNotes(context.Background(), page("kc_n3"), idGen, nil, cached, nil)
 	assert.Equal(t, firstQueries+1, queries.Load())
 	assert.Equal(t, map[string]string{"kc_note_emoji": "https://kc-a.example/n2.webp"}, *third[0].Emojis)
 
@@ -92,11 +92,11 @@ func TestCachedEmojiRepository_PackNotesSecondPageSkipsDB(t *testing.T) {
 	created := &model.Emoji{ID: "kc_absent", Name: "kc_absent", Host: &hostA, OriginalURL: "https://kc-a.example/a.png"}
 	require.NoError(t, cached.Create(created))
 	t.Cleanup(func() { db.Exec(`DELETE FROM "emoji" WHERE id = ?`, created.ID) })
-	fourth := entity.PackNotes(context.Background(), page("kc_n4"), idGen, nil, cached, nil)
+	fourth := (*entity.Packer)(nil).PackNotes(context.Background(), page("kc_n4"), idGen, nil, cached, nil)
 	assert.Equal(t, "https://kc-a.example/a.png", (*fourth[0].Emojis)["kc_absent"])
 
 	// 消したら、次のページには出ない。
 	require.NoError(t, cached.Delete("kc_react"))
-	fifth := entity.PackNotes(context.Background(), page("kc_n5"), idGen, nil, cached, nil)
+	fifth := (*entity.Packer)(nil).PackNotes(context.Background(), page("kc_n5"), idGen, nil, cached, nil)
 	assert.Empty(t, fifth[0].ReactionEmojis)
 }

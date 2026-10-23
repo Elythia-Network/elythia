@@ -12,7 +12,7 @@ import (
 )
 
 // NoteRepoPacker adapts (NoteRepository + id.Generator) into the
-// notification.NotePacker interface, re-using entity.PackNote for the note shape.
+// notification.NotePacker interface, re-using (*entity.Packer).PackNote for the note shape.
 //
 // **REST /api/i/notifications と同一の内容にはならない。** REST と streaming は
 // files に加えて channel / myReaction / poll の isVoted も埋めるが (#2735)、push は
@@ -26,6 +26,8 @@ type NoteRepoPacker struct {
 	idGen         id.Generator
 	followingRepo repository.FollowingRepository
 	files         *entity.NoteFieldResolver
+	// entityPacker は push の payload の投稿と添付ファイルを包む依存を持つ (#3790)。
+	entityPacker *entity.Packer
 }
 
 // NewNoteRepoPacker constructs a NoteRepoPacker. followingRepo is used to gate
@@ -33,15 +35,20 @@ type NoteRepoPacker struct {
 // fails closed (followers notes hidden from non-author recipients).
 // driveFile は要約の `(📎N)` を出すための batch lookup。nil なら files は空配列
 // のままになる (#2737)。
-func NewNoteRepoPacker(repo repository.NoteRepository, idGen id.Generator, followingRepo repository.FollowingRepository, driveFile entity.DriveFileLookup) *NoteRepoPacker {
-	p := &NoteRepoPacker{repo: repo, idGen: idGen, followingRepo: followingRepo}
+// pk packs the note and its files; a nil pk leaves media URLs raw (#3790).
+func NewNoteRepoPacker(repo repository.NoteRepository, idGen id.Generator, followingRepo repository.FollowingRepository, driveFile entity.DriveFileLookup, pk *entity.Packer) *NoteRepoPacker {
+	p := &NoteRepoPacker{repo: repo, idGen: idGen, followingRepo: followingRepo, entityPacker: pk}
 	if driveFile != nil {
 		// folder / owner の lookup は渡さない。push payload では使われず、
 		// 1 ファイルあたり 312-367 B 増えるだけで上限に近づく (#2737)。
-		p.files = entity.NewNoteFieldResolver(driveFile, nil, nil, nil, nil, idGen)
+		p.files = entity.NewNoteFieldResolver(pk, driveFile, nil, nil, nil, nil, idGen)
 	}
 	return p
 }
+
+// HasEntityPacker reports whether the Packer given to NewNoteRepoPacker
+// rewrites media URLs.
+func (p *NoteRepoPacker) HasEntityPacker() bool { return p.entityPacker.HasMediaURL() }
 
 // PackNoteByID implements notification.NotePacker. viewerID is the push
 // recipient (notifiee); the note is gated by their visibility before packing
@@ -101,7 +108,7 @@ func (p *NoteRepoPacker) PackLoadedNote(n *model.Note, viewerID string) (map[str
 	if !corenote.CanSeeNote(viewer, n, p.followingRepo) {
 		return nil, false
 	}
-	packed := entity.PackNote(n, p.idGen)
+	packed := p.entityPacker.PackNote(n, p.idGen)
 	// depth-2 embed hide: 通知 note の renote/reply embed (= depth-1 here) を
 	// 受信者可視性で blank する。REST notehide.HideNotificationNotes (#1570) /
 	// stream hideNotificationNote (#1570) と整合させる (#1575)。core/webpush は
