@@ -1858,11 +1858,12 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	notesHandler.SetUserListRepo(userListRepo)
 	notesHandler.SetClipRepos(clipRepo, clipNoteRepo, clipFavoriteRepo) // #1554: notes/clips
 
-	notehide.SetFollowingRepo(followingRepo)
+	// 投稿を返す handler が、閲覧者の見てはいけない中身を隠すのに使う (#3786)。
 	// 匿名 viewer へ pack する note を ugcVisibilityForVisitor='none' で hide する
 	// (upstream NoteEntityService.shouldHideNote)。管理画面の変更を再起動なしで
-	// 反映するよう、起動時の値ではなく都度引く。
-	notehide.SetUGCVisibilityLookup(func() string { return metaUGCVisibility(metaRepo) })
+	// 反映するよう、起動時の値ではなく都度引く。渡す先は下の hSvcs の後でまとめる。
+	noteHider := notehide.NewHider(followingRepo, func() string { return metaUGCVisibility(metaRepo) })
+	notesHandler.SetNoteHider(noteHider)
 	// LocalTimeline / GlobalTimeline / HybridTimeline で ltlAvailable /
 	// gtlAvailable role policy を gate するために配線 (#1026)。匿名 viewer に
 	// 対しては GetUserPolicies("") が base policies を返すので、admin が
@@ -1947,6 +1948,18 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	promoHandler := hSvcs.promo
 	inviteHandler := hSvcs.invite
 	echoTestHandler := hSvcs.echoTest
+	// 投稿を返す handler へ、上で作った noteHider を渡す (#3786)。渡し忘れると
+	// その経路だけ匿名の閲覧者に ugcVisibilityForVisitor が効かないので、
+	// 下の recordCriticalWiring が handler ごとに検査する。
+	antennasHandler.SetNoteHider(noteHider)
+	apHandler.SetNoteHider(noteHider)
+	channelsHandler.SetNoteHider(noteHider)
+	clipsHandler.SetNoteHider(noteHider)
+	driveHandler.SetNoteHider(noteHider)
+	iHandler.SetNoteHider(noteHider)
+	notificationsHandler.SetNoteHider(noteHider)
+	rolesHandler.SetNoteHider(noteHider)
+	usersHandler.SetNoteHider(noteHider)
 
 	// Users endpoints
 	// users/lists/update-membership の withReplies 変更を userUpdated として流し、接続中の
@@ -3974,6 +3987,18 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	//     防げるのは事前の案内だけという点で他の項目と tier が違う。
 	//     移設で新しく生まれた面なので、棚卸し (#2674) の対象には入れる
 	s.recordCriticalWiring([]criticalWiring{
+		// 投稿の中身を隠す判定 (#3786)。未配線の handler は、匿名の閲覧者に
+		// ugcVisibilityForVisitor='none' を効かせない。
+		{"antennas.noteHider", antennasHandler.HasNoteHider(), noteHiderMissingEffect},
+		{"ap.noteHider", apHandler.HasNoteHider(), noteHiderMissingEffect},
+		{"channels.noteHider", channelsHandler.HasNoteHider(), noteHiderMissingEffect},
+		{"clips.noteHider", clipsHandler.HasNoteHider(), noteHiderMissingEffect},
+		{"drive.noteHider", driveHandler.HasNoteHider(), noteHiderMissingEffect},
+		{"i.noteHider", iHandler.HasNoteHider(), noteHiderMissingEffect},
+		{"notes.noteHider", notesHandler.HasNoteHider(), noteHiderMissingEffect},
+		{"notifications.noteHider", notificationsHandler.HasNoteHider(), noteHiderMissingEffect},
+		{"roles.noteHider", rolesHandler.HasNoteHider(), noteHiderMissingEffect},
+		{"users.noteHider", usersHandler.HasNoteHider(), noteHiderMissingEffect},
 		{"users.remoteStatsFederationGate", remoteStatsFetcher.HasHostAllowedChecker(),
 			"連合を切った相手へもプロフィール表示のたびに統計を取りに行き、誰をいつ見たかが漏れる"},
 		{"peer.blocker", s.peerDeps.HasBlocker(),

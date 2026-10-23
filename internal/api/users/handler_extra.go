@@ -13,7 +13,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
-	"github.com/elythia-network/elythia/internal/api/notehide"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/core/notesfilter"
 	"github.com/elythia-network/elythia/internal/core/reaction"
@@ -444,7 +443,7 @@ func (h *Handler) Reactions(c echo.Context) error {
 		}
 	}
 	packed := entity.PackNotes(c.Request().Context(), notes, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
-	notehide.HideEmbeds(viewer, packed)
+	h.noteHider.HideEmbeds(viewer, packed)
 	noteByID := make(map[string]entity.NoteEntity, len(packed))
 	for _, ne := range packed {
 		noteByID[ne.ID] = ne
@@ -558,7 +557,7 @@ func (h *Handler) FeaturedNotes(c echo.Context) error {
 	notes = notesfilter.ApplyBlockedHosts(notes, blockedHosts)
 	result := entity.PackNotes(c.Request().Context(), notes, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
 	h.fieldRes.Apply(result, viewer)
-	notehide.HideEmbeds(viewer, result)
+	h.noteHider.HideEmbeds(viewer, result)
 	return c.JSON(http.StatusOK, result)
 }
 

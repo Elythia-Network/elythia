@@ -182,7 +182,19 @@ type Handler struct {
 	// testModeは2FAのTOTPの検証を素通しにする(本家UserAuthService.validateOtpの
 	// `NODE_ENV === 'test'`相当、#3780)。twofactor.ValidateWithReplayへ渡す。
 	testMode bool
+	// noteHider は閲覧者が見てはいけない投稿の中身を隠す (#3786)。未配線だと
+	// 匿名の閲覧者への ugcVisibilityForVisitor が効かないので、criticalWiring が
+	// 起動時に検査する。
+	noteHider *notehide.Hider
 }
+
+// SetNoteHider wires the Hider that applies the per-viewer hideNote gate to
+// the notes this handler packs.
+func (h *Handler) SetNoteHider(n *notehide.Hider) { h.noteHider = n }
+
+// HasNoteHider reports whether SetNoteHider received a Hider. 未配線だと
+// 匿名の閲覧者に ugcVisibilityForVisitor が効かない (fail-open)。
+func (h *Handler) HasNoteHider() bool { return h.noteHider != nil }
 
 // TokenInvalidator は i/regenerate-token / i/change-password 等の sensitive
 // 操作後に auth cache の旧 token entry を即時削除するための interface
@@ -2765,7 +2777,7 @@ func (h *Handler) fillPinnedFields(ctx context.Context, u *model.User, profile *
 					// /api/i は認証された自身を返す path なので u 自身を viewer
 					// として渡し、pinned note の myReaction も含めて埋める (#426)。
 					h.fieldRes.Apply(entities, u)
-					notehide.HideEmbeds(u, entities)
+					h.noteHider.HideEmbeds(u, entities)
 					packed := make([]any, 0, len(entities))
 					for _, pn := range entities {
 						packed = append(packed, pn)

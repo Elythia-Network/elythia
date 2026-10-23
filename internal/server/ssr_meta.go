@@ -441,7 +441,7 @@ func (h *ssrMetaHandler) summaryMap(note *model.Note, hydrate bool) map[string]a
 
 // embedHiddenFromVisitor reports whether an embedded reply / renote must be
 // summarized as hidden for an anonymous visitor, using the same decision as
-// the REST embed gate (notehide.HideEmbeds with viewer=nil).
+// the REST embed gate (notehide.Hider.HideEmbeds with viewer=nil).
 //
 // 作者の行が読めない (User が nil) ときは、設定を確かめられないので隠す。
 // REST の embed gate は設定が不明なら作者の設定を見ないが、SSR はクローラに

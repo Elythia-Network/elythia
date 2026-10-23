@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
-	"github.com/elythia-network/elythia/internal/api/notehide"
 	"github.com/elythia-network/elythia/internal/core/notification"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/model"
@@ -85,7 +84,7 @@ func (h *Handler) Grouped(c echo.Context) error {
 	// 著者設定ゲートを viewer 可視性で適用する。Show と同じく #1444 CanSeeNote gate は
 	// 落とすだけで embed に再帰しないため、ここで hide しないと grouped 経由で
 	// 非可視 embed 本文が漏れる (#1546 で混入しかけた IDOR を塞ぐ)。
-	notehide.HideNotificationNotes(user, packed)
+	h.noteHider.HideNotificationNotes(user, packed)
 
 	grouped := groupNotifications(all, packed, noteByID)
 	// 本家 i/notifications-grouped.ts:153 と同じく grouping 後に limit で slice する。

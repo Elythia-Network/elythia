@@ -3,7 +3,6 @@ package users
 import (
 	"context"
 
-	"github.com/elythia-network/elythia/internal/api/notehide"
 	"github.com/elythia-network/elythia/internal/core/notesfilter"
 	"github.com/elythia-network/elythia/internal/core/userpack"
 	"github.com/elythia-network/elythia/internal/entity"
@@ -228,7 +227,7 @@ func (h *Handler) fillPinnedNotes(ctx context.Context, viewer *model.User, targe
 				mine = append(mine, e)
 			}
 		}
-		notehide.HideProfilePinnedNotes(viewer, mine, t.User.ID)
+		h.noteHider.HideProfilePinnedNotes(viewer, mine, t.User.ID)
 		packed := make([]any, 0, len(mine))
 		for _, pn := range mine {
 			packed = append(packed, pn)
