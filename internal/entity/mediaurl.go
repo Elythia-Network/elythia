@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/elythia-network/elythia/internal/misc/remoteurl"
@@ -168,8 +167,8 @@ func (c *MediaURLContext) ProxiedURL(rawURL string, mode proxyMode) string {
 // image (#2905).
 //
 // context 未配線なら空文字を返す (呼び出し元は raw URL へ 302 する)。
-func StaticEmojiProxyURL(rawURL string) string {
-	return staticProxyURL(rawURL, modeEmoji)
+func (pkr *Packer) StaticEmojiProxyURL(rawURL string) string {
+	return pkr.staticProxyURL(rawURL, modeEmoji)
 }
 
 // StaticAvatarProxyURL builds the proxy URL that serves an avatar as a still
@@ -183,8 +182,8 @@ func StaticEmojiProxyURL(rawURL string) string {
 // frontend は素の `/avatar/@u@h?static=1` を出せばよくなる。
 //
 // context 未配線なら空文字を返す。
-func StaticAvatarProxyURL(rawURL string) string {
-	return staticProxyURL(rawURL, modeAvatar)
+func (pkr *Packer) StaticAvatarProxyURL(rawURL string) string {
+	return pkr.staticProxyURL(rawURL, modeAvatar)
 }
 
 // BadgeEmojiProxyURL builds the proxy URL that serves an emoji as a push
@@ -201,8 +200,8 @@ func StaticAvatarProxyURL(rawURL string) string {
 // 保つ)。modeBadge のファイル名と flag は fileAndFlag が持つ。
 //
 // context 未配線なら空文字を返す (呼び出し元は raw URL へ 302 する)。
-func BadgeEmojiProxyURL(rawURL string) string {
-	c := currentMediaURLContext()
+func (pkr *Packer) BadgeEmojiProxyURL(rawURL string) string {
+	c := pkr.currentMediaURLContext()
 	if c == nil {
 		return ""
 	}
@@ -223,8 +222,8 @@ func BadgeEmojiProxyURL(rawURL string) string {
 // **mode の flag と static の両方を立てる。** proxyMode は 1 つしか選べないが、
 // 静止画は「その mode のリサイズ寸法で、ただしアニメーションを止める」意味なので
 // 両方が要る (upstream の `animated: !('static' in query)` と同じ考え方)。
-func staticProxyURL(rawURL string, mode proxyMode) string {
-	c := currentMediaURLContext()
+func (pkr *Packer) staticProxyURL(rawURL string, mode proxyMode) string {
+	c := pkr.currentMediaURLContext()
 	if c == nil {
 		return ""
 	}
@@ -528,8 +527,8 @@ func (c *MediaURLContext) ProxyBannerURL(p *string) *string {
 // when it is a remote origin, otherwise returns it unchanged. Exported for
 // callers outside this package (e.g. channel banner packing) that already have
 // the resolved URL string and just need the leak-safe rewrite (#1529).
-func ProxyMediaURL(rawURL string) string {
-	c := currentMediaURLContext()
+func (pkr *Packer) ProxyMediaURL(rawURL string) string {
+	c := pkr.currentMediaURLContext()
 	if c == nil {
 		return rawURL
 	}
@@ -546,8 +545,8 @@ func ProxyMediaURL(rawURL string) string {
 // entity 側で既に wrap 済みだが、**あの endpoint だけ生の URL を Location に
 // 入れていた**ので、mention chip を表示するだけで閲覧者の IP が相手インスタンス
 // へ渡っていた。
-func ProxyAvatarURLString(rawURL string) string {
-	return currentMediaURLContext().ProxyAvatarURL(rawURL)
+func (pkr *Packer) ProxyAvatarURLString(rawURL string) string {
+	return pkr.currentMediaURLContext().ProxyAvatarURL(rawURL)
 }
 
 // ProxyEmojiURLString wraps a custom emoji URL through the proxy in emoji mode.
@@ -559,8 +558,8 @@ func ProxyAvatarURLString(rawURL string) string {
 // API 応答の `emojis` field を server-proxy してはいけない (frontend が
 // `meta.mediaProxy` で client 側プロキシするので二重になる) のとは**別の経路**。
 // こちらは frontend が URL を包まないので、包まないと生で外へ出る。
-func ProxyEmojiURLString(rawURL string) string {
-	c := currentMediaURLContext()
+func (pkr *Packer) ProxyEmojiURLString(rawURL string) string {
+	c := pkr.currentMediaURLContext()
 	if c == nil {
 		return rawURL
 	}
@@ -575,11 +574,11 @@ func ProxyEmojiURLString(rawURL string) string {
 // URLs through unchanged. Used for optional admin-set image fields that the
 // frontend renders directly in <img src> — role iconUrl, announcement imageUrl
 // — so a remote URL there cannot leak the viewer's IP either (#1529 hardening).
-func ProxyMediaURLPtr(p *string) *string {
+func (pkr *Packer) ProxyMediaURLPtr(p *string) *string {
 	if p == nil || *p == "" {
 		return p
 	}
-	s := ProxyMediaURL(*p)
+	s := pkr.ProxyMediaURL(*p)
 	return &s
 }
 
@@ -607,11 +606,11 @@ const UserSuppliedProxyTTL = 7 * 24 * time.Hour
 // バナー) には付けない。** あちらは値を入れられるのが管理者だけで、しかも
 // 長期間そのまま配る前提なので、期限を付けると「いつの間にか画像が消える」
 // 側の事故になる。
-func ProxyUserSuppliedMediaURLPtr(p *string) *string {
+func (pkr *Packer) ProxyUserSuppliedMediaURLPtr(p *string) *string {
 	if p == nil || *p == "" {
 		return p
 	}
-	c := currentMediaURLContext()
+	c := pkr.currentMediaURLContext()
 	if c == nil {
 		return p
 	}
@@ -665,28 +664,17 @@ func signURL(secret []byte, rawURL string) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// mediaURLContext is process-wide so PackDriveFile / IdenticonURL can rewrite
-// URLs without threading config through their many call sites (mirrors the
-// SetCanChatLookup / SetAvatarDecorationLookup pattern). Router wires it once at
-// startup; nil leaves all URLs raw, keeping context-less tests green.
-var (
-	mediaURLContextMu sync.RWMutex
-	mediaURLContext   *MediaURLContext
-)
-
 // SetMediaURLContext wires the media-proxy URL rewriter. Pass nil to clear
 // (used in tests).
+//
+// It changes only the default Packer (#3788); a Packer built by NewPacker
+// keeps its own dependencies.
 func SetMediaURLContext(c *MediaURLContext) {
-	mediaURLContextMu.Lock()
-	mediaURLContext = c
-	mediaURLContextMu.Unlock()
+	updateDefaultPacker(func(p *Packer) { p.mediaURL = c })
 }
 
-// currentMediaURLContext returns the registered context (may be nil). All
+// currentMediaURLContext returns the Packer's media context (may be nil). All
 // MediaURLContext methods are nil-safe so callers can use the result directly.
-func currentMediaURLContext() *MediaURLContext {
-	mediaURLContextMu.RLock()
-	c := mediaURLContext
-	mediaURLContextMu.RUnlock()
-	return c
+func (pkr *Packer) currentMediaURLContext() *MediaURLContext {
+	return pkr.get().mediaURL
 }

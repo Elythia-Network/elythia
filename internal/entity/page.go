@@ -96,13 +96,13 @@ type PackPageContext struct {
 // PageEntityService.pack always populates `user`; mk-go list endpoints used
 // to omit it and the frontend MkPagePreview crashed silently (template
 // `page.user.username` reference) — see #1134.
-func PackPageWithContext(p *model.Page, ctx PackPageContext) map[string]any {
+func (pkr *Packer) PackPageWithContext(p *model.Page, ctx PackPageContext) map[string]any {
 	out := PackPage(p, ctx.IDGen)
 	if out == nil {
 		return nil
 	}
 	if ctx.Owner != nil {
-		out["user"] = PackUserLite(ctx.Owner)
+		out["user"] = pkr.PackUserLite(ctx.Owner)
 	}
 	// 注: Owner が nil の場合は user field を omit する。null 出しすると
 	// frontend MkPagePreview の page.user.username で再 throw するので、
@@ -170,7 +170,7 @@ func CollectPageImageFileIDs(content []byte) []string {
 // (upstream は block 単位で push するため同一 file が複数 block にあれば重複)。
 // owner-scope は upstream findOneBy({id, userId: page.userId}) と一致。
 // eyeCatchingImage は owner-scope 無しで id から pack する (upstream 同様)。
-func ResolvePageDriveFiles(p *model.Page, lookup PageDriveFileLookup, idGen id.Generator) ([]any, any) {
+func (pkr *Packer) ResolvePageDriveFiles(p *model.Page, lookup PageDriveFileLookup, idGen id.Generator) ([]any, any) {
 	if lookup == nil || p == nil {
 		return nil, nil
 	}
@@ -195,14 +195,14 @@ func ResolvePageDriveFiles(p *model.Page, lookup PageDriveFileLookup, idGen id.G
 		}
 		for _, fid := range ids {
 			if f, ok := byID[fid]; ok {
-				attached = append(attached, PackDriveFile(f, idGen))
+				attached = append(attached, pkr.PackDriveFile(f, idGen))
 			}
 		}
 	}
 	var eyeCatchingImage any
 	if p.EyeCatchingImageID != nil {
 		if f, err := lookup.FindByID(*p.EyeCatchingImageID); err == nil && f != nil {
-			eyeCatchingImage = PackDriveFile(f, idGen)
+			eyeCatchingImage = pkr.PackDriveFile(f, idGen)
 		}
 	}
 	return attached, eyeCatchingImage

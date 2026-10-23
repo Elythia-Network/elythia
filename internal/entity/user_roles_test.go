@@ -21,7 +21,7 @@ func (s *stubRolesLookup) LookupUserRoles(userID string) []*model.Role {
 func TestResolveUserRolesSorted_LookupUnwired(t *testing.T) {
 	t.Cleanup(func() { SetUserRolesLookup(nil) })
 	SetUserRolesLookup(nil)
-	got := resolveUserRolesSorted("u1")
+	got := currentPacker().resolveUserRolesSorted("u1")
 	assert.Nil(t, got)
 }
 
@@ -35,7 +35,7 @@ func TestResolveUserRolesSorted_SortDescending(t *testing.T) {
 		{ID: "mid", DisplayOrder: 5},
 	}
 	SetUserRolesLookup(&stubRolesLookup{roles: map[string][]*model.Role{"u1": src}})
-	got := resolveUserRolesSorted("u1")
+	got := currentPacker().resolveUserRolesSorted("u1")
 	require.Len(t, got, 3)
 	assert.Equal(t, "high", got[0].ID)
 	assert.Equal(t, "mid", got[1].ID)
@@ -58,7 +58,7 @@ func TestPackPublicRoles_FiltersIsPublic(t *testing.T) {
 			{ID: "rC", Name: "AlsoPublic", IsPublic: true, DisplayOrder: 5},
 		},
 	}})
-	got := packPublicRoles(&model.User{ID: "u1"})
+	got := currentPacker().packPublicRoles(&model.User{ID: "u1"})
 	require.Len(t, got, 2)
 	// displayOrder desc で並ぶ: rC (5) → rA (2)
 	got0 := got[0].(map[string]any)
@@ -78,7 +78,7 @@ func TestPackPublicRoles_FiltersIsPublic(t *testing.T) {
 func TestPackPublicRoles_EmptyReturnsEmptySlice(t *testing.T) {
 	t.Cleanup(func() { SetUserRolesLookup(nil) })
 	SetUserRolesLookup(nil) // unwired
-	got := packPublicRoles(&model.User{ID: "u1"})
+	got := currentPacker().packPublicRoles(&model.User{ID: "u1"})
 	assert.NotNil(t, got, "must return [] not nil so JSON output is `[]`")
 	assert.Empty(t, got)
 }
@@ -95,7 +95,7 @@ func TestPackBadgeRoles_FiltersAsBadgeAndIsPublic(t *testing.T) {
 			{ID: "r4", Name: "Badge2", AsBadge: true, IsPublic: true, DisplayOrder: 10},
 		},
 	}})
-	gotPtr := packBadgeRoles(&model.User{ID: "u1"})
+	gotPtr := currentPacker().packBadgeRoles(&model.User{ID: "u1"})
 	require.NotNil(t, gotPtr)
 	got := *gotPtr
 	require.Len(t, got, 2)
@@ -119,15 +119,15 @@ func TestPackBadgeRoles_RemoteUserGatedByMetaFlag(t *testing.T) {
 	remote := &model.User{ID: "u1", Host: &host}
 
 	// flag 未配線 (= off) → nil (omit)
-	assert.Nil(t, packBadgeRoles(remote))
+	assert.Nil(t, currentPacker().packBadgeRoles(remote))
 
 	// flag off → nil (omit)
 	SetShowRemoteBadgesLookup(func() bool { return false })
-	assert.Nil(t, packBadgeRoles(remote))
+	assert.Nil(t, currentPacker().packBadgeRoles(remote))
 
 	// flag on → badge を pack
 	SetShowRemoteBadgesLookup(func() bool { return true })
-	got := packBadgeRoles(remote)
+	got := currentPacker().packBadgeRoles(remote)
 	require.NotNil(t, got)
 	require.Len(t, *got, 1)
 	assert.Equal(t, "Badge", (*got)[0].(map[string]any)["name"])
@@ -137,7 +137,7 @@ func TestPackBadgeRoles_RemoteUserGatedByMetaFlag(t *testing.T) {
 func TestPackBadgeRoles_LocalEmptyReturnsPresentEmpty(t *testing.T) {
 	t.Cleanup(func() { SetUserRolesLookup(nil) })
 	SetUserRolesLookup(nil)
-	got := packBadgeRoles(&model.User{ID: "u1"})
+	got := currentPacker().packBadgeRoles(&model.User{ID: "u1"})
 	require.NotNil(t, got, "local user は badge が無くても present (空配列)")
 	assert.Empty(t, *got)
 }
@@ -145,8 +145,8 @@ func TestPackBadgeRoles_LocalEmptyReturnsPresentEmpty(t *testing.T) {
 // packBadgeRoles: nil user は nil (omit)、packPublicRoles は空配列。
 func TestPackRoles_NilUserReturnsEmpty(t *testing.T) {
 	t.Cleanup(func() { SetUserRolesLookup(nil) })
-	assert.Nil(t, packBadgeRoles(nil))
-	assert.Empty(t, packPublicRoles(nil))
+	assert.Nil(t, currentPacker().packBadgeRoles(nil))
+	assert.Empty(t, currentPacker().packPublicRoles(nil))
 }
 
 // 報告経路 (#1103) の end-to-end guard: PackUserDetailed が public role を

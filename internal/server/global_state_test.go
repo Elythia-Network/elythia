@@ -31,7 +31,7 @@ import (
 //
 // **保存して戻すのではなく零値に戻す。** どの setter も「まだ配線されていない」
 // 状態を零値で表し、その場合の fallback が定義されている
-// (`entity/mediaurl.go` の `currentMediaURLContext` など)。保存する形だと、
+// (`entity/mediaurl.go` の `(*Packer).currentMediaURLContext` など)。保存する形だと、
 // 先に漏れた値を掴んでいたときにそれを持ち回してしまう。
 //
 // **同ファイルの `TestProcessGlobalsAreRestored` が、ここの一覧と
@@ -43,7 +43,8 @@ import (
 // `password.SetCost` / `corenote.SetHookConcurrency`)は、使う部品へ依存として
 // 渡す形にして消した(#3780)。`meself.SetEnricher`も、組み立てで作る
 // `meself.Packer`を渡す形にして消した(#3784)。`notehide`の2つも、組み立てで
-// 作る`notehide.Hider`を渡す形にして消した(#3786)。残るのは`entity`の8つ。
+// 作る`notehide.Hider`を渡す形にして消した(#3786)。残るのは`entity`の8つの`Set*`で、
+// どれも既定の`entity.Packer`(1つの変数、#3788)の依存を1つずつ差し替える。
 func restoreProcessGlobals(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
