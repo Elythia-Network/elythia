@@ -3,8 +3,9 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	stdhtml "html"
+	"html/template"
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 )
@@ -34,6 +35,9 @@ const scalarIntegrity = "sha384-kYDGzV91Jnn3TbHINV3nt54riK2uMJDfN5Al8dAkz4FssELT
 // **配色はここだけに置く。** 下のapiDocScalarVarsは、この--ely-*をScalarの変数へ
 // 写すだけで色の値を持たない。fg-strong / fg-muted / navBgのダーク(= bg)は
 // テーマのファイルに無い値で、fgから読みやすさのために足した。
+//
+// **CSSのコメント(`/* */`や`//`)を書かない。** apiDocTemplateの本文として
+// html/templateが読むので、コメントは出力から黙って削られる。`{{`も書けない。
 const apiDocPalette = `:root {
 	--ely-bg: #f4f4f8;
 	--ely-panel: #ffffff;
@@ -153,7 +157,15 @@ func apiDocConfiguration() string {
 //
 // 本家のapi-doc.tsxと同じく、`<script id="api-reference">`をScalarが見つけて
 // `/api.json`を読む。設定は属性で渡すので、inlineのscriptは無い。
-var apiDocHTML = `<!DOCTYPE html>
+//
+// 設定のJSONはhtml/templateで属性へ埋める。文字列をつなげて`html.EscapeString`
+// で逃がしても結果は同じだが、CodeQL(go/unsafe-quoting)はそれを逃がしとして
+// 認めず、JSONが引用符を抜けうると判定する(#3810)。
+var apiDocHTML = renderAPIDocHTML()
+
+// apiDocTemplate is the markup of /api-doc. Only the configuration is filled
+// in by the template; the rest are constants.
+var apiDocTemplate = template.Must(template.New("api-doc").Parse(`<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
@@ -165,11 +177,20 @@ var apiDocHTML = `<!DOCTYPE html>
 ` + apiDocPalette + `</style>
 </head>
 <body>
-<script id="api-reference" data-url="/api.json" data-configuration="` + stdhtml.EscapeString(apiDocConfiguration()) + `"></script>
+<script id="api-reference" data-url="/api.json" data-configuration="{{.}}"></script>
 <script src="` + scalarScriptURL + `" integrity="` + scalarIntegrity + `" crossorigin="anonymous"></script>
 </body>
 </html>
-`
+`))
+
+func renderAPIDocHTML() string {
+	var sb strings.Builder
+	if err := apiDocTemplate.Execute(&sb, apiDocConfiguration()); err != nil {
+		// 入力は定数だけなので、失敗しない。
+		panic(fmt.Sprintf("apidoc: %v", err))
+	}
+	return sb.String()
+}
 
 // APIDoc serves /api-doc, the API reference page that renders /api.json.
 //
