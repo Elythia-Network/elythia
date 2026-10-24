@@ -126,7 +126,7 @@ make frontend-lint / frontend-test   # frontend/のeslint / vitest
 
 ### テストの書き方
 
-- **プロセス全体で共有される状態(パッケージ変数、キャッシュなど)を張り替えたら、`t.Cleanup`で戻す。** CIは`-shuffle`で順序を変えるので、戻さないと後に走る別のテストが落ちる。`internal/server`の`newServer` / `New`はグローバルを多数差し替えており、戻すべきものの一覧は`TestProcessGlobalsAreRestored`にある
+- **プロセス全体で共有される状態(パッケージ変数、キャッシュなど)を張り替えたら、`t.Cleanup`で戻す。** CIは`-shuffle`で順序を変えるので、戻さないと後に走る別のテストが落ちる。`internal/server`の組み立て(`newServer` / `New`)はグローバルを書き換えない。書き換え(他のパッケージの`SetXxx(...)`の呼び出しと、他のパッケージの変数への代入)を足すと`TestConstructionSetsNoProcessGlobals`が落とす
 
 ### ゲートを書くとき
 
@@ -304,6 +304,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 
 このファイル自体を変えたときだけ、1行で追記します(新しいものを上に)。経緯の本文はリンク先にあります。個別のfixの履歴は`CHANGELOG.md`にあります。
 
+- 2026-10-24: 組み立てが書き換えるグローバルが無くなり`restoreProcessGlobals`を消したので、Section 4の`TestProcessGlobalsAreRestored`の案内を`TestConstructionSetsNoProcessGlobals`に直した (#3803) → [docs/testing.md](docs/testing.md)
 - 2026-10-17: 本家Misskeyとの性能比較の`bench-upstream` workflowを足したので、Section 8の表に1行を足した (#3654) → [docs/bench-compare.md](docs/bench-compare.md#本家-misskey-との比較-bench-upstream)
 - 2026-10-16: システムカタログの`indexdef`をWHEREに書かないことを、`catalog-check`が検査するようにしたので、Section 4の行に注意を足した (#3369) → [docs/testing.md](docs/testing.md)
 - 2026-10-14: `bench-compare`の結果をPRにコメントで出す`bench-compare-comment` workflowを足したので、Section 8の表に1行を足した (#3560) → [docs/bench-compare.md](docs/bench-compare.md)

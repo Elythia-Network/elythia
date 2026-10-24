@@ -193,10 +193,11 @@ jobs:
       # **seedは実測で選ぶこと。** 覚えやすい値 (issue番号など) を置くと、
       # 検出力を持たない値を引く。#2795で実測したところ、restoreを無効化した
       # 変異が落ちるseedは12個中7個だけだった (2795自身は落ちない側)。
-      # 3は最も強く6テストが落ちる。変えるときは
-      # `internal/server/global_state_test.go`のrestoreProcessGlobalsの
-      # cleanup本体を`if true { return }`で潰し、その状態で落ちることを
-      # 確認してから差し替える。
+      # 3は最も強く6テストが落ちる。この測り方で潰したrestoreProcessGlobals
+      # は、戻すプロセス共有の状態が無くなったので#3803で消した。変えるときは、
+      # 共有の状態を戻すテストの`t.Cleanup`を外すなどの順序に依存する変異を
+      # 入れ、その状態で落ちることを確認してから差し替える (落ちない変異では
+      # seedの検出力を測れないので、落ちる変異を先に探す)。
       - name: Run tests with coverage
         run: |
           set -o pipefail
