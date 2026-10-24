@@ -541,8 +541,8 @@ func (h *Handler) Notes(c echo.Context) error {
 	// post-fetch で適用する (#1562。antennas / roles の #1544 と同形のため
 	// LIMIT 後適用 = ページ過少充填はあり得る)。channel mute は upstream
 	// clips/notes が適用しないため渡さない。upstream が併せ持つ
-	// muted-instances と renote 入れ子変種 (renote の reply/renote author) は
-	// #1544 と同じく未対応の follow-up。
+	// muted-instances と renote 入れ子変種 (renote の reply/renote author) も
+	// 適用する (#1630。入れ子は h.noteRepo が要り、#3818 まで本番で未配線だった)。
 	mbSets, err := notesfilter.LoadMuteBlockSetsCached(h.relationCache, user, h.mutingRepo, h.blockingRepo, nil, h.userRepo)
 	if err != nil {
 		return apierr.JSONInternalError(c)
