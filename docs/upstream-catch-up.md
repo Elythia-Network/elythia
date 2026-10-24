@@ -245,6 +245,17 @@ git add internal/api/paramschema/upstream_paramdefs.json internal/api/paramschem
   - `TestConformsToAJVCorpus`の個々の不一致: 検証器とajvの判定が食い違った。不一致を例外にして通さず、検証器を直す
 - **goldenはバイナリに埋め込まれる。** 本番で検証だけを走らせて本家と判定が分かれる件数を数える仕組み(#3677、[param-shadow.md](param-shadow.md))が、このgoldenで判定する。作り直したgoldenは、次のビルドから数え方に効く
 - CIでは、`apicompat` workflowの`make upstream-check`が`paramdef-gen`を流して差分が無いことを見る。corpusとの一致は、nodeの要らない`go test`として`test`(`test-shards`)で走る
+- **goldenには`/api.json`の材料も入る**(#3810)。endpointごとの`doc`(metaの`description` / `tags` / `errors` / `res`と、`limit`の有無)、応答の型の定義の`refs`(本家の`misc/json-schema.ts`)、`endpoint-list.ts`の外で登録されるrouteの名前の`directRoutes`(本家の`ApiServerService.ts`)。chartの`res`は本家の`getJsonSchema`を`extract.mjs`の`chartJsonSchema`で同じように組み立てる。本家がこれらに新しい書き方を使い始めたときも、`unresolved values`で落ちる
+- **`paramdef-gen`の後に`make openapi-upstream-check`を流す**(Dockerが要る)。本家の公式image(`misskey/misskey:<版>`)の中で本家の`genOpenapiSpec`を呼んで`/api.json`を書き出し、`internal/api/openapi`が作る文書の本家互換の部分(全endpointのpathと`components`)と項目の順まで比べる。goldenの抜き出しかGoへの移植(`internal/api/openapi`)のどちらかがずれると、`TestSpecMatchesUpstreamAPIJSON`が落ちる。本家の`gen-spec.ts` / `schemas.ts` / `errors.ts`が変わっていたら、`internal/api/openapi`を合わせる。imageをpullするので`make gates`にもCIにも入れていない
+
+### `/api-doc`のScalarの版を上げるとき
+
+`/api-doc`は`internal/server/apidoc.go`の`scalarVersion`の版のScalarを、SRI(`scalarIntegrity`)で照合してjsdelivrから読む(#3810)。本家の版とは独立に上げる。
+
+1. 公開から2週間以上経った版を選ぶ
+2. `https://cdn.jsdelivr.net/npm/@scalar/api-reference@<版>/dist/browser/standalone.js`を取り、npmのtarballの同じファイルと同じであることを確かめてから、`openssl dgst -sha384 -binary standalone.js | openssl base64 -A`でhashを出す
+3. `scalarVersion`と`scalarIntegrity`を変え、手元で`/api-doc`を開いて表示と、CSPを`enforce`にしたときに違反が出ないことを確かめる。Scalarの設定の名前(`theme` / `withDefaultFonts` / `telemetry` / `proxyUrl` / `hideClientButton`など)や色の変数(`--scalar-*`)が変わっていないかも見る
+4. **「Test Request」の宛先が自分のoriginで、`proxy.scalar.com`など外へ出ていないことを確かめる。** localhostでないホスト名で開く(chromiumなら`--host-resolver-rules="MAP <名前> 127.0.0.1"`で向け、`config.url`もその名前にする)。`.test` / `.example` / `.invalid` / `localhost`はScalarがローカル扱いにして中継しないので、確かめたことにならない。認証付きのリクエストを送り、ページから出たリクエストの宛先を全部見る。`proxyUrl: ""`で中継が止まるのは、bundleの実装に頼っている(`$x`が未指定(`undefined`)のときだけ既定のproxyに置き換え、`Py`が空の`proxyUrl`を「中継しない」と扱う)。版を上げてこの扱いが変わると、何も言わずに中継が始まる
 
 ### 本家の版を上げた後に必須: TypeORM migrations seed の追加
 
