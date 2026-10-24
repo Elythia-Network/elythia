@@ -943,7 +943,7 @@ func TestShells_ReadLoaderAtConstruction(t *testing.T) {
 			}
 		}},
 		{name: "permalink SSR", dir: spa, build: func() echo.HandlerFunc {
-			h := newSSRMetaHandler(cfg, repo, nil, nil, nil, ssrMetaDeps{})
+			h := newSSRMetaHandler(cfg, repo, nil, nil, nil, ssrMetaDeps{}, nil)
 			return func(c echo.Context) error { return h.render(c, shellOverrides{}) }
 		}},
 		{name: "embed", dir: embedDir, build: func() echo.HandlerFunc {

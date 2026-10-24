@@ -117,7 +117,7 @@ func TestCreateRoomMessageViaAP_RejectsOversizedURI(t *testing.T) {
 func TestCreateMessageViaAP_TruncatesTextAndRejectsOversizedURI(t *testing.T) {
 	chatRepo := newFakeRepo()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := corechat.NewService(chatRepo, idGen)
+	svc := corechat.NewService(chatRepo, idGen, nil, nil, nil)
 	sender := &model.User{ID: "remote1", Username: "remote1"}
 
 	msg, err := svc.CreateMessageViaAP(context.Background(),

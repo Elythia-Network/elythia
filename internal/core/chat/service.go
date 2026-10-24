@@ -197,14 +197,6 @@ type Service struct {
 	entityPacker *entity.Packer
 }
 
-// SetEntityPacker wires the Packer this Service packs entities with (#3794).
-func (s *Service) SetEntityPacker(p *entity.Packer) { s.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
-// リモートへ漏れる。
-func (s *Service) HasEntityPacker() bool { return s.entityPacker.HasMediaURL() }
-
 // MessageObserver is told about each direct (1:1) chat message after it has
 // been stored (#3469).
 //
@@ -258,8 +250,18 @@ func (s *Service) SetApprovalRepo(r repository.ChatApprovalRepository) {
 }
 
 // NewService constructs a chat Service.
-func NewService(repo repository.ChatRepository, idGen id.Generator) *Service {
-	return &Service{repo: repo, idGen: idGen}
+//
+// entityPacker is the Packer this Service packs entities with (#3794). lites
+// is the batch resolver of instance / emojis for the UserLite values
+// (fromUser / toUser) of stream and push payloads (#3438). blockingRepo lets
+// CreateMessageToUser reject DMs to a recipient who has blocked the sender;
+// nil disables the block check.
+//
+// どれも無いと黙って劣化する (メディアの URL が生のまま / リモートの利用者に
+// instance と絵文字が載らない / 自分をブロックしている相手へ DM を送れる) ので、
+// 構築子の必須の引数で受ける (#3823)。
+func NewService(repo repository.ChatRepository, idGen id.Generator, entityPacker *entity.Packer, lites userpack.LiteFiller, blockingRepo repository.BlockingRepository) *Service {
+	return &Service{repo: repo, idGen: idGen, entityPacker: entityPacker, lites: lites, blockingRepo: blockingRepo}
 }
 
 // SetStreamingPublisher wires a StreamingPublisher so state-changing methods
@@ -293,16 +295,6 @@ func (s *Service) SetChatPusher(p ChatPusher) {
 func (s *Service) SetUserRepo(r repository.UserRepository) {
 	s.userRepo = r
 }
-
-// SetLiteFiller wires the batch resolver of instance / emojis for the UserLite
-// values (fromUser / toUser) of stream and push payloads (#3438).
-func (s *Service) SetLiteFiller(f userpack.LiteFiller) { s.lites = f }
-
-// HasLiteFiller reports whether the lite filler was wired.
-//
-// 未配線だと stream と Web Push で流す chat のメッセージのリモートの利用者に
-// instance と絵文字が載らない。起動時検査に使う。
-func (s *Service) HasLiteFiller() bool { return s.lites != nil }
 
 // pushNewChatMessage sends the Web Push half. **main stream の publish と必ず
 // 対で呼ぶこと** — 片方だけになると、タブを開いている利用者にしか届かない。
@@ -392,12 +384,6 @@ func (s *Service) SetAPDelivery(userRepo repository.UserRepository, renderer *ac
 // nil なら moderator bypass は無効化 (= owner / member / 招待のみ true)。
 func (s *Service) SetModeratorChecker(m ModeratorChecker) {
 	s.moderatorChecker = m
-}
-
-// SetBlockingRepo wires a BlockingRepository so CreateMessageToUser can reject
-// DMs to a recipient who has blocked the sender. nil disables the block check.
-func (s *Service) SetBlockingRepo(r repository.BlockingRepository) {
-	s.blockingRepo = r
 }
 
 // HasPermissionToViewRoomInfo は room のメタ情報を閲覧できる権限を持つか判定する
@@ -2214,9 +2200,3 @@ func (s *Service) BlockedEitherWay(userA, userB string) (bool, error) {
 	}
 	return s.blockingRepo.Exists(userA, userB)
 }
-
-// HasBlockingRepo reports whether the blocking repository was wired.
-//
-// 未配線だと**自分をブロックしている**相手へ DM を送れる。gate は
-// `Exists(toUserID, fromUserID)` (blocker が受信者)。起動時検査に使う (#2708)。
-func (s *Service) HasBlockingRepo() bool { return s.blockingRepo != nil }

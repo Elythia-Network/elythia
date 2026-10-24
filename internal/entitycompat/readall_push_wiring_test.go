@@ -278,14 +278,15 @@ func keysOf(m map[string]bool) []string {
 // リモート統計の取得ゲートが **fail-closed な述語**で配線されていること。
 //
 // **型が同じなので取り違えられる。** `ShouldSkipDelivery` を反転したものを
-// 渡しても `SetHostAllowedChecker(func(string) bool)` としては通り、起動時
-// 検査も「配線されている」と判定する。しかしあちらは meta が読めないとき
+// 渡しても構築子の `hostAllowed func(string) bool` としては通り (#3823 で
+// setter から構築子の必須の引数にした)、nil を見るテストも「配線されている」と
+// 判定する。しかしあちらは meta が読めないとき
 // fail-open (= 配送する) に倒すので、**DB 障害のあいだ defederate した相手へ
 // 「誰をいつ見たか」が漏れる**。統計は付加情報なので、取れないより出すほうが
 // 悪い。
 func TestRemoteStatsGateUsesFailClosedPredicate(t *testing.T) {
 	assertWired(t, serverPkg,
-		"remoteStatsFetcher.SetHostAllowedChecker(instanceService.CanFetchOptionalRemoteData)",
+		"remoteStatsFetcher := corefederation.NewRemoteStatsFetcher(s.config.AllowedPrivateNetworks, s.config.UserAgent, instanceService.CanFetchOptionalRemoteData, s.outboundOpts()...)",
 		"リモート統計の取得は fail-closed な述語で配線すること。\n"+
 			"`ShouldSkipDelivery` は meta が読めないとき配送する側へ倒れるので、\n"+
 			"反転して渡すと DB 障害のあいだ defederate した相手へ出てしまう")

@@ -46,7 +46,7 @@ func TestCreateInvitationViaAP_BlockedInviteeCreatesNoRow(t *testing.T) {
 	blocks := testutil.NewMockBlockingRepository()
 	// blocker=localUser (invitee), blockee=remoteOwner (inviter)。
 	require.NoError(t, blocks.Create(&model.Blocking{ID: "b1", BlockerID: "localUser", BlockeeID: "remoteOwner"}))
-	svc.SetBlockingRepo(blocks)
+	svc.SetBlockingRepoForTest(blocks)
 	notifier := &recordingInvitationNotifier{}
 	svc.SetInvitationNotifier(notifier)
 
@@ -65,7 +65,7 @@ func TestCreateInvitationViaAP_ReverseBlockCreatesNoRow(t *testing.T) {
 	seedRemoteRoom(t, repo, "room1", "remoteOwner")
 	blocks := testutil.NewMockBlockingRepository()
 	require.NoError(t, blocks.Create(&model.Blocking{ID: "b1", BlockerID: "remoteOwner", BlockeeID: "localUser"}))
-	svc.SetBlockingRepo(blocks)
+	svc.SetBlockingRepoForTest(blocks)
 
 	err := svc.CreateInvitationViaAP(remoteRoomURI("room1"), "localUser")
 	assert.ErrorIs(t, err, corechat.ErrChatBlocked)
@@ -81,7 +81,7 @@ func TestBlockedEitherWay(t *testing.T) {
 	assert.False(t, blocked, "blocking repo 未配線なら false")
 
 	blocks := testutil.NewMockBlockingRepository()
-	svc.SetBlockingRepo(blocks)
+	svc.SetBlockingRepoForTest(blocks)
 	blocked, err = svc.BlockedEitherWay("a", "b")
 	require.NoError(t, err)
 	assert.False(t, blocked)
@@ -108,7 +108,7 @@ func TestCreateInvitationViaAP_UnrelatedBlockStillInvites(t *testing.T) {
 	seedRemoteRoom(t, repo, "room1", "remoteOwner")
 	blocks := testutil.NewMockBlockingRepository()
 	require.NoError(t, blocks.Create(&model.Blocking{ID: "b1", BlockerID: "localUser", BlockeeID: "someoneElse"}))
-	svc.SetBlockingRepo(blocks)
+	svc.SetBlockingRepoForTest(blocks)
 
 	require.NoError(t, svc.CreateInvitationViaAP(remoteRoomURI("room1"), "localUser"))
 	_, err := repo.FindInvitation("localUser", "room1")
@@ -121,7 +121,7 @@ func TestCreateInvitationViaAP_BlockCheckFailClosed(t *testing.T) {
 	seedRemoteRoom(t, repo, "room1", "remoteOwner")
 	blocks := testutil.NewMockBlockingRepository()
 	blocks.ExistsErr = errors.New("db down")
-	svc.SetBlockingRepo(blocks)
+	svc.SetBlockingRepoForTest(blocks)
 
 	err := svc.CreateInvitationViaAP(remoteRoomURI("room1"), "localUser")
 
@@ -300,7 +300,7 @@ func TestCreateInvitationViaAP_InvitationListFailureIsError(t *testing.T) {
 	boom := errors.New("db down")
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	svc := corechat.NewService(&invitationListFailingRepo{MockChatRepository: base, err: boom}, idGen)
+	svc := corechat.NewService(&invitationListFailingRepo{MockChatRepository: base, err: boom}, idGen, nil, nil, nil)
 
 	cerr := svc.CreateInvitationViaAP(remoteRoomURI("room1"), "localUser")
 

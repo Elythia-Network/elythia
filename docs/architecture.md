@@ -1210,7 +1210,7 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
   setterで入れるフィールドも、`setupRoutes()`を通った後なので同じ規則で見る。組み立てた
   handlerは`Server`のフィールド`builtHandlers`に持たせる(本番では読まない)。nilでよい
   フィールドは、どの経路で実際にnilになるかを書いた許可リスト(`handlerNilAllowed`)に載せ、
-  使われない項目があれば落とす。#3817の時点では空(#3823で2つ足した。下の段(2))。このテストを書く途中で、`setupRoutes()`が
+  使われない項目があれば落とす。#3817の時点では空(#3823で3つ足した。下の段(2))。このテストを書く途中で、`setupRoutes()`が
   `clipsHandler.SetNoteRepo`を呼んでおらず本番でもnilのままだったことが分かり
   (clips/notesのrenoteの入れ子のmute/block検査が飛んでいた)、#3818で配線した。
   抽出が空振りしても緑にならないよう、置き換えた依存のフィールドを名指しで要求する
@@ -1252,6 +1252,18 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
   `userStreamRevoker`・`ipLookupAudit`・`emojiImageFetcher`)、signup(3行)、signin(3行)、
   resetpassword(2行)、oauthの`authInvalidator`(1行)、`emojiapplication.Service`(2行)、
   `abuse.CreatedNotifier`(2行)
+- **2段目はその他の部品の14構築子・19行。** chatのhandler(3行: `entityPacker`・`fileRepo`・
+  `lites`)と`chat.Service`(3行: `entityPacker`・`lites`・`blockingRepo`)、reversiのhandler(2行)、
+  bubble-gameの`VersusHandler`と`stream.BubbleVersusPublisher`、announcementsのhandlerと
+  `announcement.Creator`、urlのhandler、`ssrMetaHandler`、`drive.URLUploader`、
+  `webhook.SignupHook`(ここまで各1行で、どれも`entityPacker`)、`move.Service`
+  (`SetCarryOverRepos`の4つの値を1行と数える)、`federation.RemoteStatsFetcher`
+  (`hostAllowed`。可変長の`opts`の前に置いた)、`federation.RemoteUserResolver`(`softwareBlocker`)
+- **`move.Service`の`blockQueue`はsetterのまま。** 表の述語(`HasCarryOverRepos`)は
+  `SetCarryOverRepos`の4つに加えて`SetBlockQueue`で入れる`blockQueue`も見ていた。`blockQueue`は
+  置き換えの対象ではないが、`accountMover`を`routeParts`に入れたので、nilのまま組み立てが終わると
+  `TestBuiltHandlersHaveNoNilDependencies`が落とす(`requiredDepChecks`にも名指しで入れた)。
+  `remoteUserResolver.SetHostBlockChecker`も表に無いので、setterのまま残した
 - **`signup.formTokens`は残した。** 鍵かnonceの置き場が作れないときは機能を切る設計で、#3812で
   残すと決めた行。表の行もsetterも元のまま
 - **段(4)へ回したもの。** `oauth.streamRevoker`(構築子より後の`buildStream()`で作る値)、
@@ -1263,19 +1275,23 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
   間に、`Subscribe`・`Connect…`・`Start`・goroutineの起動は無い(行を突き合わせて確かめた)。
   pubsubの購読のhandlerから辿れる配線は変わらない(4.1)
 - **外部パッケージのテストは、`export_test.go`の`…ForTest`で後から入れる。** 同じパッケージの
-  テストはフィールドへ直接代入するが(1段目と同じ)、adminとsignup・signinのテストの多くは
-  外部パッケージ(`admin_test`など)にある。補助関数が作ったhandlerに後から入れていた箇所
-  (adminは`SetEmojiImageFetcher`だけで60か所。テストで`h.SetEmojiImageFetcherForTest(`を呼ぶ行を数えた)を、構築子の引数へ書き換える代わりに、テストの
-  ビルドでだけ見える入れ口を置いた。本番のコードからは呼べない
+  テストはフィールドへ直接代入するが(#3817と同じ)、admin・signup・signin・`core/chat`・
+  `core/federation`のテストの多くは外部パッケージ(`admin_test`など)にある。補助関数が作った
+  部品に後から入れていた箇所(adminは`SetEmojiImageFetcher`だけで60か所。テストで
+  `h.SetEmojiImageFetcherForTest(`を呼ぶ行を数えた)を、構築子の引数へ書き換える代わりに、
+  テストのビルドでだけ見える入れ口を置いた。本番のコードからは呼べない。別のパッケージの
+  テスト(`api/chat`から`chat.Service`を作るものなど)は`export_test.go`が見えないので、
+  構築子で渡す
 - **nilを渡す形は、`TestBuiltHandlersHaveNoNilDependencies`を広げて見る。** `setupRoutes()`の
   本文で作る部品を、`Server`のフィールド`builtRouteParts`(型は`routeParts`、
   `internal/server/route_parts.go`)に持たせる。代入は全部のsetterを呼んだ後
   (`recordCriticalWiring`の直前)。テストは`routeParts`の欄を全部見るので、欄を足せばそのまま
-  対象になる。許可リスト(`handlerNilAllowed`)に入れたのは、adminの`captchaVerifierFactory`と
-  `clock`の2つで、どちらもテストだけが入れるseam(`SetCaptchaVerifierFactory`・`SetClockForTest`)。
-  `setupRoutes()`は入れないので、本番では常にnil。issueで挙げていたadminのqueueまわり・captcha・
-  WebAuthnは、テストの組み立て(test mode・miniredis)では全部入るので、載せると「使われない項目」
-  として落ちる
+  対象になる。許可リスト(`handlerNilAllowed`)に入れたのは3つ。adminの`captchaVerifierFactory`と
+  `clock`は、どちらもテストだけが入れるseam(`SetCaptchaVerifierFactory`・`SetClockForTest`)で、
+  `setupRoutes()`は入れないので本番でも常にnil。`chatService.messageObserver`は、通知を受け取る
+  プラグインが居るとき(`newPluginNotificationDispatcher`がnilでないとき)だけ入れるもので、テストの
+  組み立てはプラグインを登録しない。issueで挙げていたadminのqueueまわり・captcha・WebAuthnは、
+  テストの組み立て(test mode・miniredis)では全部入るので、載せると「使われない項目」として落ちる
 - **依存の中まで見るものは`nestedDepChecks`に書く。** `iplookuplog.Service`は`repo`と`idGen`の
   どちらかがnilだと黙って記録しない。以前の表の述語(`Wired()`)は両方を見ていたので、
   `admin.ipLookupAudit`の`repo`・`idGen`も見る。`Wired()`は使う所が無くなったので消した
@@ -1283,18 +1299,24 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
   項目を外し(読む側の`SetIPLookupLogRepo`は残す)、`TestAbuseReportNotifierIsWired`は構築子の
   呼び出しを、`TestEmojiApplicationIsWired`(`internal/server`)は`emojiapplication.NewService`の
   最後の引数が`repository.NewEmojiApplicationQuotaResetRepository(s.db)`であることと、
-  `apiadmin.NewHandler`の最後の引数が`apiadmin.NewEmojiImageFetcher(...)`であることを照合する
+  `apiadmin.NewHandler`の最後の引数が`apiadmin.NewEmojiImageFetcher(...)`であることを照合する。
+  `TestRemoteStatsGateUsesFailClosedPredicate`は、`NewRemoteStatsFetcher`の呼び出しに
+  `instanceService.CanFetchOptionalRemoteData`を渡していることを照合する(同じ型で判定を反転させた
+  関数も渡せるので、型では防げない)
 
-| | #3823の前(`8b832bd5ec`) | 1段目の後 |
-|---|---|---|
-| `criticalWiringCount` | 145 | 123 |
-| `setupRoutes()`の本文で、行頭が`<名前>Handler.Set`の行 | 368 | 350 |
-| そのsetterを呼ぶhandler(受け手) | 41 | 41 |
-| `setupRoutes()`の本文で、行頭が`<変数>.Set`の行 | 721 | 699 |
+| | #3823の前(`8b832bd5ec`) | 1段目の後 | 2段目の後 |
+|---|---|---|---|
+| `criticalWiringCount` | 145 | 123 | 104 |
+| `setupRoutes()`の本文で、行頭が`<名前>Handler.Set`の行 | 368 | 350 | 342 |
+| そのsetterを呼ぶhandler(受け手) | 41 | 41 | 40 |
+| `setupRoutes()`の本文で、行頭が`<変数>.Set`の行 | 721 | 699 | 680 |
+| その受け手 | 119 | 119 | 112 |
 
-数え方: 上の表と同じ。最後の行は、行頭の空白の後が`<変数>.Set`に大文字が続く行(handler以外の
-部品も数える)。#3823の前の368行は、2段目の後の367行に、#3818で足した`clipsHandler.SetNoteRepo`の
-1行を足したもの。
+数え方: 上の表と同じ。下の2行は、行頭の空白の後が`<変数>.Set`に大文字が続く行と、その`<変数>`の
+種類(handler以外の部品も数える)。#3823の前の368行は、#3817の2段目の後の367行に、#3818で足した
+`clipsHandler.SetNoteRepo`の1行を足したもの。2段目で減った受け手は、置き換えたsetterしか
+呼んでいなかった`urlHandler`・`bubbleVersusPublisher`・`announcementCreator`・`ssrMeta`・
+`driveURLUploader`・`webhookSignupHook`・`remoteStatsFetcher`の7つ(うちhandlerは`urlHandler`)。
 
 #### /api のルートの登録 (#3697)
 

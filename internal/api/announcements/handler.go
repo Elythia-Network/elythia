@@ -56,17 +56,11 @@ func (h *Handler) SetClock(now func() time.Time) {
 	}
 }
 
-// SetEntityPacker wires the Packer this Handler packs entities with (#3796).
-func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いとお知らせの imageUrl を生のまま返し、閲覧者の IP が
-// リモートへ漏れる。
-func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
-
-// NewHandler creates a new announcements Handler.
-func NewHandler(repo repository.AnnouncementRepository, idGen id.Generator) *Handler {
-	return &Handler{repo: repo, idGen: idGen, clock: time.Now}
+// NewHandler creates a new announcements Handler. entityPacker is the Packer
+// this Handler packs entities with (#3796); 無いとお知らせの imageUrl を生のまま
+// 返すので、構築子の必須の引数で受ける (#3823)。
+func NewHandler(repo repository.AnnouncementRepository, idGen id.Generator, entityPacker *entity.Packer) *Handler {
+	return &Handler{repo: repo, idGen: idGen, clock: time.Now, entityPacker: entityPacker}
 }
 
 // SetMainStreamPublisher attaches a publisher used to emit `main` channel

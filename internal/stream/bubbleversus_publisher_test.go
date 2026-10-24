@@ -26,7 +26,7 @@ func decodeEnvelope(t *testing.T, payload any) (string, map[string]any) {
 
 func TestBubbleVersusPublisher(t *testing.T) {
 	bus := &capturingPubSub{}
-	p := NewBubbleVersusPublisher(bus)
+	p := NewBubbleVersusPublisher(bus, nil)
 
 	p.PublishInvited("bob", &model.User{ID: "alice", Username: "alice"}, &bubbleversus.Match{ID: "m1", GameMode: "square"})
 	p.PublishUser("alice", "accepted", map[string]any{"matchId": "m1"})
@@ -56,11 +56,11 @@ func TestBubbleVersusPublisher(t *testing.T) {
 }
 
 func TestBubbleVersusPublisher_Failures(t *testing.T) {
-	NewBubbleVersusPublisher(nil).PublishMatch("m1", "x", nil) // no panic
+	NewBubbleVersusPublisher(nil, nil).PublishMatch("m1", "x", nil) // no panic
 	var nilPub *BubbleVersusPublisher
 	nilPub.PublishMatch("m1", "x", nil)
-	NewBubbleVersusPublisher(&capturingPubSub{err: errors.New("boom")}).PublishMatch("m1", "x", nil)
+	NewBubbleVersusPublisher(&capturingPubSub{err: errors.New("boom")}, nil).PublishMatch("m1", "x", nil)
 	bus := &capturingPubSub{}
-	NewBubbleVersusPublisher(bus).PublishMatch("m1", "x", func() {}) // marshal failure
+	NewBubbleVersusPublisher(bus, nil).PublishMatch("m1", "x", func() {}) // marshal failure
 	assert.Empty(t, bus.calls)
 }

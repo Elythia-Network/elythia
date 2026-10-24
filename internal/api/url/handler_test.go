@@ -38,7 +38,7 @@ func doPreview(h *apiurl.Handler, rawURL string) *httptest.ResponseRecorder {
 // url query param が空のとき 400 INVALID_PARAM を返す。
 func TestPreview_EmptyURL(t *testing.T) {
 	// fetcher は呼ばれない経路なので disabled で十分。
-	h := apiurl.NewHandler(urlpreview.NewFetcher(urlpreview.Config{Enabled: false}, nil))
+	h := apiurl.NewHandler(urlpreview.NewFetcher(urlpreview.Config{Enabled: false}, nil), nil)
 	rec := doPreview(h, "")
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
@@ -52,7 +52,7 @@ func TestPreview_EmptyURL(t *testing.T) {
 // #2106 N18: url preview が disabled のとき、handler は 403 + URL_PREVIEW_DISABLED
 // を返す (以前は 200 + null degrade body で frontend の !res.ok 分岐が機能しなかった)。
 func TestPreview_Disabled_Returns403(t *testing.T) {
-	h := apiurl.NewHandler(urlpreview.NewFetcher(urlpreview.Config{Enabled: false}, nil))
+	h := apiurl.NewHandler(urlpreview.NewFetcher(urlpreview.Config{Enabled: false}, nil), nil)
 	rec := doPreview(h, "https://example.com/article")
 
 	assert.Equal(t, http.StatusForbidden, rec.Code)
@@ -73,7 +73,7 @@ func TestPreview_FetchFailed_Returns422(t *testing.T) {
 		Enabled: true, TimeoutMs: 2000, MaxContentLength: 1 << 20,
 	}, nil)
 	f.SetHTTPClient(&http.Client{})
-	h := apiurl.NewHandler(f)
+	h := apiurl.NewHandler(f, nil)
 
 	rec := doPreview(h, failURL)
 	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
@@ -106,7 +106,7 @@ func TestPreview_Success(t *testing.T) {
 	// SetHTTPClient で SSRF-safe transport を上書きし、httptest (127.0.0.1) へ
 	// 到達できるようにする (= urlpreview/fetcher_test.go の既存パターン)。
 	f.SetHTTPClient(&http.Client{})
-	h := apiurl.NewHandler(f)
+	h := apiurl.NewHandler(f, nil)
 
 	rec := doPreview(h, srv.URL)
 	assert.Equal(t, http.StatusOK, rec.Code)
@@ -145,8 +145,7 @@ func TestPreview_RemoteThumbnailProxied(t *testing.T) {
 		Enabled: true, AllowRedirect: true, TimeoutMs: 5000, MaxContentLength: 1 << 20,
 	}, nil)
 	f.SetHTTPClient(&http.Client{})
-	h := apiurl.NewHandler(f)
-	h.SetEntityPacker(pk)
+	h := apiurl.NewHandler(f, pk)
 
 	rec := doPreview(h, srv.URL)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -188,8 +187,7 @@ func TestPreview_ProxySignatureExpires(t *testing.T) {
 	}, nil)
 	f.SetHTTPClient(&http.Client{})
 
-	h := apiurl.NewHandler(f)
-	h.SetEntityPacker(pk)
+	h := apiurl.NewHandler(f, pk)
 	rec := doPreview(h, srv.URL)
 	require.Equal(t, http.StatusOK, rec.Code)
 	var body map[string]any

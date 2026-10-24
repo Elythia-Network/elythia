@@ -112,3 +112,12 @@ const InboundMentionFailureTTL = inboundMentionFailureTTL
 func NewRemoteStatsFetcherRedirectingTo(target string) *RemoteStatsFetcher {
 	return newRemoteStatsFetcherWithTransport(redirectTransport{target: target})
 }
+
+// SetSoftwareSuspensionCheckerForTest replaces the software suspension checker.
+//
+// 構築子の必須の引数にした依存 (#3823) を、補助関数が作った resolver へ後から
+// 入れるための seam。同じパッケージのテストならフィールドへ直接代入するところを、
+// 外部パッケージ (federation_test) のテストから行う。
+func (r *RemoteUserResolver) SetSoftwareSuspensionCheckerForTest(c SoftwareSuspensionChecker) {
+	r.softwareBlocker = c
+}

@@ -57,14 +57,6 @@ type ssrMetaHandler struct {
 	entityPacker *entity.Packer
 }
 
-// SetEntityPacker wires the Packer this ssrMetaHandler packs entities with (#3796).
-func (h *ssrMetaHandler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いとファイルの url などを生のまま返し、閲覧者の IP が
-// リモートへ漏れる。
-func (h *ssrMetaHandler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
-
 // ssrMetaDeps carries the repositories the permalink pages read from.
 // 引数で並べると 10 個を超えて取り違えても型が通ってしまうので、名前で渡す。
 type ssrMetaDeps struct {
@@ -83,6 +75,9 @@ type ssrMetaDeps struct {
 	IDGen id.Generator
 }
 
+// newSSRMetaHandler builds the permalink SSR meta handler. entityPacker is the
+// Packer this ssrMetaHandler packs entities with (#3796); 無いとファイルの url
+// などを生のまま返すので、構築子の必須の引数で受ける (#3823)。
 func newSSRMetaHandler(
 	cfg *config.Config,
 	metaRepo repository.MetaRepository,
@@ -90,6 +85,7 @@ func newSSRMetaHandler(
 	chunkedUpload meta.ChunkedUploadCapability,
 	setup *meta.SetupDetector,
 	deps ssrMetaDeps,
+	entityPacker *entity.Packer,
 ) *ssrMetaHandler {
 	return &ssrMetaHandler{
 		cfg:           cfg,
@@ -111,6 +107,7 @@ func newSSRMetaHandler(
 		reversiRepo:   deps.Reversi,
 		announceRepo:  deps.Announcement,
 		idGen:         deps.IDGen,
+		entityPacker:  entityPacker,
 	}
 }
 

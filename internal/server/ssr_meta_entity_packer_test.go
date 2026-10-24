@@ -3,29 +3,17 @@ package server
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
+	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/entity"
 )
 
-// HasEntityPacker は mediaURL を持つ Packer を受け取ったときだけ true を返す
-// (#3796)。criticalWiring がこれで入れ忘れを見る。
-func TestSSRMetaHandler_HasEntityPacker(t *testing.T) {
-	for name, h := range map[string]interface {
-		SetEntityPacker(*entity.Packer)
-		HasEntityPacker() bool
-	}{"ssrMetaHandler": &ssrMetaHandler{}} {
-		t.Run(name, func(t *testing.T) {
-			if h.HasEntityPacker() {
-				t.Error("an unwired component must report false")
-			}
-			h.SetEntityPacker(entity.NewPacker(entity.PackerDeps{}))
-			if h.HasEntityPacker() {
-				t.Error("a Packer without mediaURL must report false")
-			}
-			h.SetEntityPacker(entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
-				"https://local.example", "", []byte("secret"), false, true)}))
-			if !h.HasEntityPacker() {
-				t.Error("a Packer with mediaURL must report true")
-			}
-		})
-	}
+// newSSRMetaHandler は受け取った依存を handler に持たせる (#3823)。依存を構築子の
+// 必須の引数にしたので、起動時の検査 (criticalWiring) は入れ忘れを見なくなった。
+// 構築子が引数を捨てても build は通るので、ここで固定する。
+func TestNewSSRMetaHandlerKeepsDependencies(t *testing.T) {
+	packer := entity.NewPacker(entity.PackerDeps{})
+	h := newSSRMetaHandler(&config.Config{URL: "https://local.example"}, nil, nil, nil, nil, ssrMetaDeps{}, packer)
+	assert.Same(t, packer, h.entityPacker)
 }

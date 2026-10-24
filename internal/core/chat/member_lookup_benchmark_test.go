@@ -54,7 +54,7 @@ func BenchmarkCreateMessageToRoomMemberLookup(b *testing.B) {
 					if err != nil {
 						b.Fatal(err)
 					}
-					svc := corechat.NewService(chatRepo, idGen)
+					svc := corechat.NewService(chatRepo, idGen, nil, nil, nil)
 					svc.SetMainStreamPublisher(roomMessageBenchmarkMainPublisher{})
 
 					baseUsers := testutil.NewMockUserRepository()

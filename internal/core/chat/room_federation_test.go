@@ -18,7 +18,7 @@ func newRoomFedService(t *testing.T) (*corechat.Service, *testutil.MockChatRepos
 	t.Helper()
 	repo := newFakeRepo()
 	idGen, _ := id.NewGenerator("aidx")
-	return corechat.NewService(repo, idGen), repo
+	return corechat.NewService(repo, idGen, nil, nil, nil), repo
 }
 
 func TestEnsureRoomViaAP_CreatesCopy(t *testing.T) {
@@ -197,7 +197,7 @@ func TestAddMemberViaAP_BlockedEitherWayKeepsInvitation(t *testing.T) {
 			require.NoError(t, repo.CreateInvitation(&model.ChatRoomInvitation{ID: "inv1", UserID: "remoteUser", RoomID: "room1"}))
 			blocks := testutil.NewMockBlockingRepository()
 			require.NoError(t, blocks.Create(&model.Blocking{ID: "b1", BlockerID: tc.blocker, BlockeeID: tc.blockee}))
-			svc.SetBlockingRepo(blocks)
+			svc.SetBlockingRepoForTest(blocks)
 
 			err := svc.AddMemberViaAP(remoteRoomURI("room1"), "remoteUser")
 			require.ErrorIs(t, err, corechat.ErrChatBlocked)
@@ -213,7 +213,7 @@ func TestAddMemberViaAP_BlockedEitherWayKeepsInvitation(t *testing.T) {
 		require.NoError(t, repo.CreateInvitation(&model.ChatRoomInvitation{ID: "inv1", UserID: "remoteUser", RoomID: "room1"}))
 		blocks := testutil.NewMockBlockingRepository()
 		blocks.ExistsErr = errors.New("db down")
-		svc.SetBlockingRepo(blocks)
+		svc.SetBlockingRepoForTest(blocks)
 
 		err := svc.AddMemberViaAP(remoteRoomURI("room1"), "remoteUser")
 		require.Error(t, err)
@@ -847,7 +847,7 @@ func TestResolveRoom_IDLookupFailureIsError(t *testing.T) {
 		err:                errors.New("dial tcp: connection refused"),
 	}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := corechat.NewService(repo, idGen)
+	svc := corechat.NewService(repo, idGen, nil, nil, nil)
 
 	err := svc.RemoveMemberViaAP("https://remote.example/chat/rooms/room1", "rmt")
 	require.Error(t, err)

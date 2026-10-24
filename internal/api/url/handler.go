@@ -19,17 +19,11 @@ type Handler struct {
 	entityPacker *entity.Packer
 }
 
-// SetEntityPacker wires the Packer this Handler packs entities with (#3798).
-func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
-// リモートへ漏れる。
-func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
-
-// NewHandler creates a new URL preview handler.
-func NewHandler(fetcher *urlpreview.Fetcher) *Handler {
-	return &Handler{fetcher: fetcher}
+// NewHandler creates a new URL preview handler. entityPacker is the Packer
+// this Handler packs entities with (#3798); 無いとプレビューの画像の URL を
+// media proxy に通さずに返すので、構築子の必須の引数で受ける (#3823)。
+func NewHandler(fetcher *urlpreview.Fetcher, entityPacker *entity.Packer) *Handler {
+	return &Handler{fetcher: fetcher, entityPacker: entityPacker}
 }
 
 // Preview handles GET /url (matches Misskey's endpoint path).

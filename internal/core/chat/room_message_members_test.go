@@ -38,7 +38,7 @@ func newRoomMessageMembersFixture(t *testing.T, failListMembersCall int) (*corec
 	}
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	svc := corechat.NewService(countingRepo, idGen)
+	svc := corechat.NewService(countingRepo, idGen, nil, nil, nil)
 
 	userRepo := testutil.NewMockUserRepository()
 	remoteHost := "remote.example"

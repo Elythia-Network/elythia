@@ -16,9 +16,8 @@ import (
 func newInvitationBlockHandler(t *testing.T) (*Handler, *testutil.MockChatRepository, *testutil.MockBlockingRepository) {
 	t.Helper()
 	h, repo := newTestHandler()
-	svc := corechat.NewService(repo, h.idGen)
 	blocks := testutil.NewMockBlockingRepository()
-	svc.SetBlockingRepo(blocks)
+	svc := corechat.NewService(repo, h.idGen, nil, nil, blocks)
 	h.SetService(svc)
 	require.NoError(t, repo.CreateRoom(&model.ChatRoom{ID: "r1", Name: "General", OwnerID: u1.ID, Owner: u1}))
 	return h, repo, blocks

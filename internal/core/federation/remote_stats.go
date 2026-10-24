@@ -119,31 +119,19 @@ type cachedAccountCreatedAt struct {
 //
 // urlpreview / mediaproxy と同じく safehttp 経由で組み立てる pattern (#943
 // review SSRF guard)。
-func NewRemoteStatsFetcher(allowedPrivateNetworks []string, userAgent string, opts ...safehttp.Option) *RemoteStatsFetcher {
+//
+// hostAllowed is the federation gate: a host it rejects is never asked. nil
+// asks every host (tests only). 無くても統計は取れてしまい、外れても利用者からは
+// 見えないので、構築子の必須の引数で受ける (#3823)。
+func NewRemoteStatsFetcher(allowedPrivateNetworks []string, userAgent string, hostAllowed func(host string) bool, opts ...safehttp.Option) *RemoteStatsFetcher {
 	transport := safehttp.NewSSRFSafeTransport(allowedPrivateNetworks, opts...)
 	f := newFetcherWithClient(&http.Client{
 		Transport: transport,
 		Timeout:   remoteStatsTimeout,
 	}, remoteStatsCacheSize)
 	f.userAgent = userAgent
+	f.hostAllowed = hostAllowed
 	return f
-}
-
-// HasHostAllowedChecker reports whether the federation gate is wired.
-//
-// 未配線でも統計は取れてしまうので、外れても利用者からは見えない。起動時の
-// critical wiring 検査で落とす。
-func (f *RemoteStatsFetcher) HasHostAllowedChecker() bool {
-	return f != nil && f.hostAllowed != nil
-}
-
-// SetHostAllowedChecker wires the federation gate.
-//
-// 未配線なら従来どおり (= 全ホストへ出す)。production では必ず配線する。
-func (f *RemoteStatsFetcher) SetHostAllowedChecker(fn func(host string) bool) {
-	if f != nil {
-		f.hostAllowed = fn
-	}
 }
 
 // newRemoteStatsFetcherWithTransport はテスト専用 constructor。redirectTransport

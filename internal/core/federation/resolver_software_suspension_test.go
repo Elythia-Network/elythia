@@ -318,9 +318,7 @@ func TestRemoteUserResolver_ResolveByUsernameHost_SkipsInboxSuspendedSoftware(t 
 		t.Run(tc.name, func(t *testing.T) {
 			wf := &fakeWebFinger{uri: "https://ok.example/users/alice"}
 			ar := &fakeActorResolver{user: &model.User{ID: "uR", Host: &okHost}}
-			r := federation.NewRemoteUserResolver(wf, ar, testutil.NewMockUserRepository(), "local.example")
-			r.SetSoftwareSuspensionChecker(newSpellingChecker(t))
-			require.True(t, r.HasSoftwareSuspensionChecker())
+			r := federation.NewRemoteUserResolver(wf, ar, testutil.NewMockUserRepository(), "local.example", newSpellingChecker(t))
 
 			_, err := r.ResolveByUsernameHost("alice", tc.host)
 			if tc.wantSkip {
@@ -340,7 +338,7 @@ func TestRemoteUserResolver_ResolveByUsernameHost_SkipsInboxSuspendedSoftware(t 
 // 従来どおり失敗にする (TestResyncIfStale_SkipsBlockedHost)。
 func TestResyncIfStale_InboxSuspendedSoftwareKeepsStoredRow(t *testing.T) {
 	r, wf, ar, repo, u := newResyncFixture(t, nil, aliceURI)
-	r.SetSoftwareSuspensionChecker(newSpellingChecker(t))
+	r.SetSoftwareSuspensionCheckerForTest(newSpellingChecker(t))
 
 	got, err := r.ResyncIfStale(u)
 	require.NoError(t, err)
@@ -352,7 +350,7 @@ func TestResyncIfStale_InboxSuspendedSoftwareKeepsStoredRow(t *testing.T) {
 
 	// 連合ポリシーの拒否は、ソフトウェアの拒否より先に見て失敗にする。
 	r2, wf2, _, _, u2 := newResyncFixture(t, nil, aliceURI)
-	r2.SetSoftwareSuspensionChecker(newSpellingChecker(t))
+	r2.SetSoftwareSuspensionCheckerForTest(newSpellingChecker(t))
 	r2.SetHostBlockChecker(stubRemoteUserHostBlocker{blocked: map[string]bool{"remote.example": true}})
 	_, err = r2.ResyncIfStale(u2)
 	require.ErrorIs(t, err, federation.ErrRemoteUserHostNotAllowed)

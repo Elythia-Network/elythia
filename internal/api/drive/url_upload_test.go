@@ -57,7 +57,7 @@ func newTestURLUploader(uploader driveUploader, pub mainEventPublisher) *URLUplo
 	// http.DefaultClient で httptest (127.0.0.1) を叩く。production の SSRF-safe
 	// transport は private IP を弾くため unit test では使わない (SSRF 防御は
 	// safehttp package 側でテスト済み)。
-	return NewURLUploader(http.DefaultClient, uploader, pub, idGen, "mk-go-test", 0)
+	return NewURLUploader(http.DefaultClient, uploader, pub, idGen, "mk-go-test", 0, nil)
 }
 
 // --- URLUploader.Process ---
@@ -72,7 +72,7 @@ func TestURLUploader_Process_Success(t *testing.T) {
 	fileID := idGen.Generate(time.Now())
 	up := &mockDriveUploader{ret: &model.DriveFile{ID: fileID, Name: "cat.png", Type: "image/png"}}
 	pub := &mockMainPublisher{}
-	u := NewURLUploader(http.DefaultClient, up, pub, idGen, "mk-go-test", 0)
+	u := NewURLUploader(http.DefaultClient, up, pub, idGen, "mk-go-test", 0, nil)
 
 	marker := "m-123"
 	u.Process(context.Background(), URLUploadInput{
@@ -174,7 +174,7 @@ func TestURLUploader_Process_RootPathNameFallback(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	up := &mockDriveUploader{ret: &model.DriveFile{ID: idGen.Generate(time.Now()), Name: "unknown"}}
 	pub := &mockMainPublisher{}
-	u := NewURLUploader(http.DefaultClient, up, pub, idGen, "", 0)
+	u := NewURLUploader(http.DefaultClient, up, pub, idGen, "", 0, nil)
 
 	// path 無し (root) の URL は name="unknown" にフォールバックする。
 	u.Process(context.Background(), URLUploadInput{User: &model.User{ID: "u1"}, URL: srv.URL})
@@ -187,16 +187,16 @@ func TestURLUploader_Process_RootPathNameFallback(t *testing.T) {
 func TestURLUploader_Process_NotWiredNoPanic(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	// uploader/httpClient nil でも panic せず no-op。
-	u := NewURLUploader(nil, nil, nil, idGen, "", 0)
+	u := NewURLUploader(nil, nil, nil, idGen, "", 0, nil)
 	u.Process(context.Background(), URLUploadInput{User: &model.User{ID: "u1"}, URL: "https://example.com/x"})
 }
 
 func TestNewURLUploader_MaxBytesDefault(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
-	u := NewURLUploader(http.DefaultClient, &mockDriveUploader{}, &mockMainPublisher{}, idGen, "", 0)
+	u := NewURLUploader(http.DefaultClient, &mockDriveUploader{}, &mockMainPublisher{}, idGen, "", 0, nil)
 	assert.Equal(t, defaultURLUploadMaxBytes, u.maxBytes)
 
-	u2 := NewURLUploader(http.DefaultClient, &mockDriveUploader{}, &mockMainPublisher{}, idGen, "", 100)
+	u2 := NewURLUploader(http.DefaultClient, &mockDriveUploader{}, &mockMainPublisher{}, idGen, "", 100, nil)
 	assert.Equal(t, int64(100), u2.maxBytes)
 }
 
@@ -326,7 +326,7 @@ func TestURLUploader_Process_PolicyLimitStopsBeforeUpload(t *testing.T) {
 	up := &limitedUploader{limit: 1024 * 1024, ok: true} // 1MiB
 	pub := &mockMainPublisher{}
 	idGen, _ := id.NewGenerator("aidx")
-	u := NewURLUploader(http.DefaultClient, up, pub, idGen, "", 250*1024*1024)
+	u := NewURLUploader(http.DefaultClient, up, pub, idGen, "", 250*1024*1024, nil)
 
 	_, err := u.fetchAndStore(context.Background(), URLUploadInput{User: &model.User{ID: "u1"}, URL: srv.URL + "/big.bin"})
 	require.ErrorIs(t, err, errURLUploadTooLarge)
@@ -344,7 +344,7 @@ func TestURLUploader_Process_PolicyLimitStopsBeforeUpload(t *testing.T) {
 	}))
 	defer small.Close()
 	up2 := &limitedUploader{mockDriveUploader: mockDriveUploader{ret: &model.DriveFile{ID: idGen.Generate(time.Now())}}, limit: 1024 * 1024, ok: true}
-	u2 := NewURLUploader(http.DefaultClient, up2, pub, idGen, "", 250*1024*1024)
+	u2 := NewURLUploader(http.DefaultClient, up2, pub, idGen, "", 250*1024*1024, nil)
 	_, err = u2.fetchAndStore(context.Background(), URLUploadInput{User: &model.User{ID: "u1"}, URL: small.URL + "/s.bin"})
 	require.NoError(t, err)
 	require.NotNil(t, up2.gotInput)
@@ -364,13 +364,13 @@ func TestURLUploader_Process_DeclaredLengthAndNegativePolicy(t *testing.T) {
 
 	idGen, _ := id.NewGenerator("aidx")
 	up := &limitedUploader{limit: 1024, ok: true}
-	u := NewURLUploader(http.DefaultClient, up, &mockMainPublisher{}, idGen, "", 0)
+	u := NewURLUploader(http.DefaultClient, up, &mockMainPublisher{}, idGen, "", 0, nil)
 	_, err := u.fetchAndStore(context.Background(), URLUploadInput{User: &model.User{ID: "u1"}, URL: srv.URL + "/a"})
 	require.ErrorIs(t, err, errURLUploadTooLarge)
 	assert.Nil(t, up.gotInput)
 
 	neg := &limitedUploader{limit: -1, ok: true}
-	u = NewURLUploader(http.DefaultClient, neg, &mockMainPublisher{}, idGen, "", 0)
+	u = NewURLUploader(http.DefaultClient, neg, &mockMainPublisher{}, idGen, "", 0, nil)
 	before := hits
 	_, err = u.fetchAndStore(context.Background(), URLUploadInput{User: &model.User{ID: "u1"}, URL: srv.URL + "/b"})
 	require.ErrorIs(t, err, errURLUploadTooLarge)
@@ -380,7 +380,7 @@ func TestURLUploader_Process_DeclaredLengthAndNegativePolicy(t *testing.T) {
 // 1 人が同時に走らせられる取得は 1 本、全体では 4 本まで。待つ側は本文を持たない。
 func TestURLUploader_ConcurrencySlots(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
-	u := NewURLUploader(http.DefaultClient, &mockDriveUploader{}, &mockMainPublisher{}, idGen, "", 0)
+	u := NewURLUploader(http.DefaultClient, &mockDriveUploader{}, &mockMainPublisher{}, idGen, "", 0, nil)
 	ctx := context.Background()
 
 	rel1, err := u.acquire(ctx, "u1")
@@ -426,7 +426,7 @@ func TestURLUploader_Process_InvalidNameFallsBack(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	for _, p := range []string{"/a%00b.png", "/a%5Cb.png", "/" + strings.Repeat("x", 201)} {
 		up := &mockDriveUploader{ret: &model.DriveFile{ID: idGen.Generate(time.Now())}}
-		u := NewURLUploader(http.DefaultClient, up, &mockMainPublisher{}, idGen, "", 0)
+		u := NewURLUploader(http.DefaultClient, up, &mockMainPublisher{}, idGen, "", 0, nil)
 		u.Process(context.Background(), URLUploadInput{User: &model.User{ID: "u1"}, URL: srv.URL + p})
 		require.NotNil(t, up.gotInput, p)
 		assert.Equal(t, "untitled", up.gotInput.Name, p)
@@ -441,7 +441,7 @@ func TestURLUploader_Process_MaxInt64LimitReadsBody(t *testing.T) {
 	defer srv.Close()
 	idGen, _ := id.NewGenerator("aidx")
 	up := &mockDriveUploader{ret: &model.DriveFile{ID: idGen.Generate(time.Now())}}
-	u := NewURLUploader(http.DefaultClient, up, &mockMainPublisher{}, idGen, "", math.MaxInt64)
+	u := NewURLUploader(http.DefaultClient, up, &mockMainPublisher{}, idGen, "", math.MaxInt64, nil)
 	_, err := u.fetchAndStore(context.Background(), URLUploadInput{User: &model.User{ID: "u1"}, URL: srv.URL + "/s.bin"})
 	require.NoError(t, err)
 	require.NotNil(t, up.gotInput)

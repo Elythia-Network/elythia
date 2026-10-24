@@ -388,7 +388,7 @@ func TestSignupHook_FiresUserCreated(t *testing.T) {
 	sysRepo.hooks["sh1"] = &model.SystemWebhook{
 		ID: "sh1", IsActive: true, On: model.StringArray{"userCreated"},
 	}
-	h := webhook.NewSignupHook(svc)
+	h := webhook.NewSignupHook(svc, nil)
 	h.OnUserCreated(&model.User{ID: "alice", Username: "alice", UsernameLower: "alice"})
 	require.Len(t, enq.systemCalls, 1)
 	assert.Equal(t, "sh1", enq.systemCalls[0].WebhookID)
@@ -398,7 +398,7 @@ func TestSignupHook_FiresUserCreated(t *testing.T) {
 func TestSignupHook_NilSafe(t *testing.T) {
 	var h *webhook.SignupHook
 	h.OnUserCreated(nil)
-	h = webhook.NewSignupHook(nil)
+	h = webhook.NewSignupHook(nil, nil)
 	h.OnUserCreated(nil)
 }
 

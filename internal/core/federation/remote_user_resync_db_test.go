@@ -63,7 +63,7 @@ func TestResyncIfStale_DB_FixesURIAndRefreshes(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	resolver := corefederation.NewResolver(userRepo, repository.NewNoteRepository(db), activitypub.NewURLBuilder("https://local.example"), f, idGen)
 	wf := &countingWebFinger{uri: newURI}
-	r := corefederation.NewRemoteUserResolver(wf, resolver, userRepo, "local.example")
+	r := corefederation.NewRemoteUserResolver(wf, resolver, userRepo, "local.example", nil)
 
 	u, err := userRepo.FindByID("rsAlice0000000000001")
 	require.NoError(t, err)

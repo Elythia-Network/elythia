@@ -75,7 +75,7 @@ func TestChatPush_BodyFitsTheWebPushLimitAtMaximumSize(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			idGen, _ := id.NewGenerator("aidx")
 			repo := testutil.NewMockChatRepository()
-			chat := corechat.NewService(repo, idGen)
+			chat := corechat.NewService(repo, idGen, nil, heavyLiteFiller{}, nil)
 			users := testutil.NewMockUserRepository()
 			sender := maxRemoteUser3438("sender1")
 			owner := maxRemoteUser3438("owner_1")
@@ -84,7 +84,6 @@ func TestChatPush_BodyFitsTheWebPushLimitAtMaximumSize(t *testing.T) {
 				users.Users[u.ID] = u
 			}
 			chat.SetUserRepo(users)
-			chat.SetLiteFiller(heavyLiteFiller{})
 			enq := &fakeEnqueuer{}
 			chat.SetMainStreamPublisher(noopMain3438{})
 			chat.SetChatPusher(webpush.NewService(enq))

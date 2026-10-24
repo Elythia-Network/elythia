@@ -39,7 +39,7 @@ func (f *failingInstanceCounter) IncrementFollowersCount(string, int) error {
 func newStatsService(followingRepo repository.FollowingRepository, counter move.InstanceFollowersCounter, enabled func() bool, chart move.ChartHook) *move.Service {
 	userRepo := testutil.NewMockUserRepository()
 	urls := activitypub.NewURLBuilder("https://local.example")
-	svc := move.NewService(userRepo, followingRepo, urls, activitypub.NewRenderer(urls), &fakeResolver{}, &fakeDeliverer{})
+	svc := move.NewService(userRepo, followingRepo, urls, activitypub.NewRenderer(urls), &fakeResolver{}, &fakeDeliverer{}, nil, nil, nil, nil)
 	svc.SetFollowQueue(&fakeFollowQueue{})
 	svc.SetInstanceStats(counter, enabled, chart)
 	return svc

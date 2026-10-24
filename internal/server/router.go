@@ -801,8 +801,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	driveService.SetEntityPacker(entityPacker)
 	reactionService.SetWebhookHook(webhookReactionHook)
 	followingService.SetWebhookHook(webhookFollowingHook)
-	webhookSignupHook := corewebhook.NewSignupHook(webhookService)
-	webhookSignupHook.SetEntityPacker(entityPacker)
+	webhookSignupHook := corewebhook.NewSignupHook(webhookService, entityPacker) // #3823: Packer は構築子の必須の引数
 	signupService.SetWebhookHook(webhookSignupHook)
 	// Webhook delivery: SSRF-safe transport + forward proxy 経由で user-supplied
 	// URL に POST する (#638)。Timeout は processors 側の DefaultWebhookTimeout
@@ -1140,8 +1139,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// **1 つの instance を共有する。** 同じ acct の解決・再同期を singleflight で
 	// まとめるので、users/show と notes/create (と reversi) が別々に持つと、
 	// 同じ acct への WebFinger が経路の数だけ並ぶ。
+	//
+	// 受信を拒否するソフトウェア (#3362) のホストの利用者も、ドメインブロックと同じく
+	// WebFinger を投げる前に止める (#3563)。構築子の必須の引数 (#3823)。
 	remoteUserResolver := corefederation.NewRemoteUserResolver(
-		webfingerClient, federationResolver, userRepo, localHost,
+		webfingerClient, federationResolver, userRepo, localHost, inboxSoftwareChecker,
 	)
 	userService.SetRemoteUserResolver(remoteUserResolver)
 	noteCreateService.SetRemoteUserResolver(remoteUserResolver)
@@ -1169,10 +1171,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	federationResolver.SetHostBlockChecker(instanceService)
 	// 受信を拒否するソフトウェア (#3362) のホストの投稿・actor も、リノートや返信の
 	// 連鎖、ap/show で取り込まない (#3563)。inbox と同じく判定のたびに meta を読む。
-	// メンションの解決も、ドメインブロックと同じく WebFinger を投げる前に止める。
+	// メンションの解決 (remoteUserResolver) は構築子で同じ checker を受け取る。
 	federationResolver.SetSoftwareSuspensionChecker(inboxSoftwareChecker)
 	remoteUserResolver.SetHostBlockChecker(instanceService)
-	remoteUserResolver.SetSoftwareSuspensionChecker(inboxSoftwareChecker)
 	federationResolver.SetSilencedHostChecker(instanceService)      // #2106 N14: silenced host の public note を home 降格
 	federationResolver.SetMediaSilencedHostChecker(instanceService) // #3218: media silenced host の添付をセンシティブに
 	// 受信した note の mentionLimit を投稿者 (リモート) の role policy から引く (#3330)。
@@ -1716,8 +1717,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		}
 		return m.URLPreviewSensitiveList
 	})
-	urlHandler := apiurl.NewHandler(urlPreviewFetcher)
-	urlHandler.SetEntityPacker(entityPacker) // #3798: プレビューの画像を media proxy へ通す
+	urlHandler := apiurl.NewHandler(urlPreviewFetcher, entityPacker) // #3798: プレビューの画像を media proxy へ通す
 	// **接続元ごとの上限を付ける。** `/url` は認証不要で、1 回ごとにサーバーから
 	// 外向きの取得を 1 本起こす。`/api` の外なので API の rate limit は掛からない。
 	s.echo.GET("/url", urlHandler.Preview, middleware.RequireIPRateLimit(rateLimiter, middleware.URLPreviewRateLimitKey))
@@ -2111,11 +2111,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	usersHandler.SetNoteReactionRepo(reactionRepo)
 	sharedUserPacker.SetDetailExtras(usersHandler)
 	sharedUserPacker.SetDetailExtrasMany(usersHandler) // #3330: 一覧の DetailedMany のピン留め・移行先・instance・絵文字
-	remoteStatsFetcher := corefederation.NewRemoteStatsFetcher(s.config.AllowedPrivateNetworks, s.config.UserAgent, s.outboundOpts()...)
 	// **連合を切った相手へ取りに行かない。** この経路は未認証の
 	// `/api/users/show` から呼ばれるので、放っておくと defederate した相手に
-	// 「誰をいつ見たか」が漏れる。
-	remoteStatsFetcher.SetHostAllowedChecker(instanceService.CanFetchOptionalRemoteData)
+	// 「誰をいつ見たか」が漏れる。判定は構築子の必須の引数で渡す (#3823)。
+	remoteStatsFetcher := corefederation.NewRemoteStatsFetcher(s.config.AllowedPrivateNetworks, s.config.UserAgent, instanceService.CanFetchOptionalRemoteData, s.outboundOpts()...)
 	// フォローしてきたリモートの人のアカウントの作成日時を、Misskey 系の相手
 	// なら `/api/users/show` から埋める (#3465)。統計と同じ fetcher を使うので、
 	// 待ち時間の上限・キャッシュ・SSRF 対策・連合を切った相手の扱いが揃う。
@@ -2178,7 +2177,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	iHandler.SetPageLikeRepo(pageLikeRepo)
 	// P4-6 followup (#174): i/move は federation resolver + deliverService を使って
 	// 宛先 actor 解決 → alsoKnownAs 検証 → MovedTo 書き込み → Move activity 配送。
-	accountMover := coremove.NewService(userRepo, followingRepo, apURLs, apRenderer, federationResolver, deliverService)
+	// #2419: フォロワー以外の関連データ (ブロック / ミュート / リスト) も移行先へ
+	// 引き継ぐ。いずれも「旧側を消さずに新側を足す」片方向で、旧アカウントの関係は
+	// 残す。引き継ぎの repository は構築子の必須の引数で渡す (#3823)。
+	accountMover := coremove.NewService(userRepo, followingRepo, apURLs, apRenderer, federationResolver, deliverService,
+		blockingRepo, mutingRepo, userListRepo, idGen)
 	// #2418: 移行時に旧アカウントのローカルフォロワーを移行先へ follow させる。
 	// relationship queue (#2403) に載るので AP 配送を詰まらせない。
 	accountMover.SetFollowQueue(s.queueClient)
@@ -2192,9 +2195,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		}
 		return sa.UserID, true
 	})
-	// #2419: フォロワー以外の関連データも移行先へ引き継ぐ。いずれも
-	// 「旧側を消さずに新側を足す」片方向で、旧アカウントの関係は残す。
-	accountMover.SetCarryOverRepos(blockingRepo, mutingRepo, userListRepo, idGen)
 	accountMover.SetBlockQueue(s.queueClient)
 	accountMover.SetRoleAssigner(roleService)
 	accountMover.SetAntennaMover(antennaService)
@@ -2301,8 +2301,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	driveURLUploader := drive.NewURLUploader(
 		s.outboundClient(60*time.Second), driveService, mainStreamPublisher,
 		idGen, s.config.UserAgent, s.config.MaxFileSize,
+		entityPacker, // #3796: urlUploadFinished のファイルを包む
 	)
-	driveURLUploader.SetEntityPacker(entityPacker) // #3796: urlUploadFinished のファイルを包む
 	driveHandler.SetURLUploader(driveURLUploader)
 	driveHandler.SetRepos(driveFileRepo, driveFolderRepo, noteRepo)
 	driveHandler.SetUserRepo(userRepo)
@@ -2408,8 +2408,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			Announcement: announcementRepo,
 			IDGen:        idGen,
 		},
+		entityPacker, // #3796: SSR の OGP 画像のファイルを包む
 	)
-	ssrMeta.SetEntityPacker(entityPacker) // #3796: SSR の OGP 画像のファイルを包む
 	s.echo.GET("/notes/:id", func(c echo.Context) error {
 		// 同一 URL が Accept 次第で HTML / AP JSON / 302 を返すので、HTML 変種
 		// (ssrMeta 側) にも Vary が要る。閉包で立てれば両分岐に載る (#2506)。
@@ -3146,14 +3146,16 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// バブルゲームの対戦 (#3230)。対局の状態は Redis にだけ置き、記録 (両者の
 	// 報告と勝敗) は DB に書く (#3232)。
-	bubbleVersusPublisher := stream.NewBubbleVersusPublisher(streamPubSub)
-	bubbleVersusPublisher.SetEntityPacker(entityPacker)
+	bubbleVersusPublisher := stream.NewBubbleVersusPublisher(streamPubSub, entityPacker)
 	bubbleVersusService := corebubbleversus.NewService(s.redis.Default, bubbleVersusPublisher, blockingService, idGen)
 	bubbleVersusService.SetRecordStore(bubbleVersusRecordRepo)
 
 	// 6. Chat WebSocket channels (Phase 9.8): chatRoom と chatUser の service
-	chatService := corechat.NewService(chatRepo, idGen)
-	chatService.SetEntityPacker(entityPacker)
+	//
+	// Packer (#3794)・stream / push の fromUser・toUser の instance・絵文字 (#3438)・
+	// 1-on-1 DM で recipient が sender を block している場合に弾く repository
+	// (upstream YOU_HAVE_BEEN_BLOCKED 互換) は、構築子の必須の引数で渡す (#3823)。
+	chatService := corechat.NewService(chatRepo, idGen, entityPacker, sharedUserPacker, blockingRepo)
 	chatService.SetStreamingPublisher(chatPublisher)
 	chatService.SetMainStreamPublisher(mainStreamPublisher)
 	// newChatMessage は upstream ChatService.ts と同じく main stream への publish と
@@ -3161,7 +3163,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	chatService.SetChatPusher(webPushService)
 	// push の body に fromUser を載せるため sender を引く (#2840)。
 	chatService.SetUserRepo(userRepo)
-	chatService.SetLiteFiller(sharedUserPacker) // #3438: stream / push の fromUser・toUser の instance・絵文字
 	// CherryPick 互換 AP 連合: 1-on-1 DM を Create+Note(_misskey_talk:true) で配送 (#692)。
 	chatService.SetAPDelivery(userRepo, apRenderer, apURLs, deliverService)
 	// chatScope=followers/following/mutual 判定用に following repo を渡す (#692)。
@@ -3169,9 +3170,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// chat/rooms/show の権限 gate で moderator bypass を効かせる
 	// (upstream 2026.5.4 hasPermissionToViewRoomInfo 互換、#1164 Phase C)。
 	chatService.SetModeratorChecker(roleService)
-	// 1-on-1 DM で recipient が sender を block している場合に弾く
-	// (upstream YOU_HAVE_BEEN_BLOCKED 互換)。
-	chatService.SetBlockingRepo(blockingRepo)
 	// React で custom emoji (:name:) reaction の存在検証に使う (#1541)。
 	chatService.SetEmojiRepo(emojiRepo)
 	// 1-on-1 DM の chatApproval bypass + 送信後 approval 挿入に使う (#1748)。
@@ -3287,8 +3285,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// webhookService がここで揃うため本箇所で配線する。announcement は repo 直接
 	// ではなく create + announcementCreated publish を対で行う Creator 経由
 	// (#1606、本家 AnnouncementService.create 相当)。
-	announcementCreator := coreannouncement.NewCreator(announcementRepo, idGen, mainStreamPublisher, broadcastPublisher)
-	announcementCreator.SetEntityPacker(entityPacker) // #3796: announcementCreated の本文を包む
+	announcementCreator := coreannouncement.NewCreator(announcementRepo, idGen, mainStreamPublisher, broadcastPublisher,
+		entityPacker) // #3796: announcementCreated の本文を包む
 	modActivitySvc := coremoderatoractivity.NewService(
 		roleService,
 		metaRepo,
@@ -3351,8 +3349,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	federationHandler.SetSelfPacker(selfPacker)
 	pagesHandler.SetSelfPacker(selfPacker)
 	rolesHandler.SetSelfPacker(selfPacker)
-	announcementHandler := apiannouncements.NewHandler(announcementRepo, idGen)
-	announcementHandler.SetEntityPacker(entityPacker) // #3796
+	announcementHandler := apiannouncements.NewHandler(announcementRepo, idGen, entityPacker) // #3796
 	announcementHandler.SetMainStreamPublisher(mainStreamPublisher)
 	announcementHandler.SetBroadcastPublisher(broadcastPublisher) // global announcementCreated (#2056)
 
@@ -3613,10 +3610,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	swHandler := apisw.NewHandler(swSubRepo, metaRepo, idGen, webPushCache)
 
 	// reversi/* — オセロゲーム (実データ)
-	reversiHandler := apireversi.NewHandler(reversiRepo, idGen)
-	reversiHandler.SetEntityPacker(entityPacker)
+	reversiHandler := apireversi.NewHandler(reversiRepo, idGen, entityPacker,
+		sharedUserPacker) // #3330: invitations の招待者の instance・絵文字
 	reversiHandler.SetService(reversiService)
-	reversiHandler.SetLiteFiller(sharedUserPacker) // #3330: invitations の招待者の instance・絵文字
 	reversiHandler.SetFederation(s.config.URL, deliverService, reversiFedCache, userRepo)
 	reversiHandler.SetStreamPublisher(reversiPublisher)
 	// #417 P3: reversi 連合対応ホストのみ Invite を送る。Federation check
@@ -3639,21 +3635,20 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	reversiService.SetBaseURL(s.config.URL)
 
 	// bubble-game/versus/* — 1:1 の対戦 (mk-go 独自、#3230)
-	bubbleVersusHandler := apibubblegame.NewVersusHandler(bubbleVersusService, userRepo)
-	bubbleVersusHandler.SetEntityPacker(entityPacker)
+	bubbleVersusHandler := apibubblegame.NewVersusHandler(bubbleVersusService, userRepo, entityPacker)
 	// 対戦の記録 (#3232)。見せる範囲は handler の canView が決める。
 	bubbleVersusHandler.SetRecords(bubbleVersusRecordRepo, blockingService)
 
 	// chat/* — Misskey v2026 チャット機能 (実データ)
-	chatHandler := apichat.NewHandler(chatRepo, idGen)
-	chatHandler.SetEntityPacker(entityPacker)
+	chatHandler := apichat.NewHandler(chatRepo, idGen, entityPacker,
+		// drive/files/attached-chat-messages: chat message を pack するため chat
+		// handler が処理する。file の owner-scope (moderator は任意 file 可) (#1218)。
+		driveFileRepo,
+		sharedUserPacker, // #3438: UserLite の instance・絵文字を応答ごとにまとめて埋める
+	)
 	chatHandler.SetService(chatService)
-	// drive/files/attached-chat-messages: chat message を pack するため chat
-	// handler が処理する。file の owner-scope (moderator は任意 file 可) (#1218)。
-	chatHandler.SetDriveFileRepo(driveFileRepo)
 	chatHandler.SetModeratorChecker(roleService)
 	chatHandler.SetUserRepo(userRepo)
-	chatHandler.SetLiteFiller(sharedUserPacker)         // #3438: UserLite の instance・絵文字を応答ごとにまとめて埋める
 	chatHandler.SetChatAvailabilityChecker(roleService) // #1796: recipient の chatAvailability(write) 検査
 	chatHandler.SetModLog(modLogService)                // #1541: moderator による chat room 削除の監査ログ
 	// chatRoomInvitationReceived 通知 (#1559): 招待作成 (local handler / AP service)
@@ -3993,6 +3988,21 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		oauth:            oauthHandler,
 		emojiApplication: emojiApplicationService,
 		abuseCreated:     abuseCreatedNotifier,
+
+		chat:                  chatHandler,
+		chatService:           chatService,
+		reversi:               reversiHandler,
+		bubbleVersus:          bubbleVersusHandler,
+		bubbleVersusPublisher: bubbleVersusPublisher,
+		announcements:         announcementHandler,
+		announcementCreator:   announcementCreator,
+		url:                   urlHandler,
+		ssrMeta:               ssrMeta,
+		driveURLUploader:      driveURLUploader,
+		webhookSignup:         webhookSignupHook,
+		accountMover:          accountMover,
+		remoteStatsFetcher:    remoteStatsFetcher,
+		remoteUserResolver:    remoteUserResolver,
 	}
 	s.recordCriticalWiring([]criticalWiring{
 		// 投稿の中身を隠す判定 (#3786)。未配線の handler は、匿名の閲覧者に
@@ -4013,28 +4023,15 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		{"followingService.entityPacker", followingService.HasEntityPacker(), entityPackerMissingEffect},
 		{"sharedUserPacker.entityPacker", sharedUserPacker.HasEntityPacker(), entityPackerMissingEffect},
 		// UserLite を包む部品 (#3794)。
-		{"bubbleVersus.entityPacker", bubbleVersusHandler.HasEntityPacker(), entityPackerMissingEffect},
-		{"chat.entityPacker", chatHandler.HasEntityPacker(), entityPackerMissingEffect},
-		{"reversi.entityPacker", reversiHandler.HasEntityPacker(), entityPackerMissingEffect},
-		{"chatService.entityPacker", chatService.HasEntityPacker(), entityPackerMissingEffect},
-		{"webhookSignup.entityPacker", webhookSignupHook.HasEntityPacker(), entityPackerMissingEffect},
 		{"webPushUser.entityPacker", webPushUserPacker.HasEntityPacker(), entityPackerMissingEffect},
-		{"bubbleVersusPublisher.entityPacker", bubbleVersusPublisher.HasEntityPacker(), entityPackerMissingEffect},
 		{"reversiPublisher.entityPacker", reversiPublisher.HasEntityPacker(), entityPackerMissingEffect},
 		// 残りの Pack を呼ぶ部品 (#3796)。
-		{"announcements.entityPacker", announcementHandler.HasEntityPacker(), entityPackerMissingEffect},
-		{"announcementCreator.entityPacker", announcementCreator.HasEntityPacker(), entityPackerMissingEffect},
 		{"driveService.entityPacker", driveService.HasEntityPacker(), entityPackerMissingEffect},
-		{"ssrMeta.entityPacker", ssrMeta.HasEntityPacker(), entityPackerMissingEffect},
 		{"notificationPublisher.entityPacker", notificationPublisher.HasEntityPacker(), entityPackerMissingEffect},
-		{"driveURLUploader.entityPacker", driveURLUploader.HasEntityPacker(), entityPackerMissingEffect},
 		// メディアのプロキシ URL を作る部品 (#3798)。/avatar・/emoji・フィードと
 		// reversi のアイコンは部品を持たず、組み立てた Packer をそのまま使うので、
 		// Packer 自身も載せる。
-		{"url.entityPacker", urlHandler.HasEntityPacker(), entityPackerMissingEffect},
 		{"entityPacker.mediaURL", entityPacker.HasMediaURL(), entityPackerMissingEffect},
-		{"users.remoteStatsFederationGate", remoteStatsFetcher.HasHostAllowedChecker(),
-			"連合を切った相手へもプロフィール表示のたびに統計を取りに行き、誰をいつ見たかが漏れる"},
 		{"peer.blocker", s.peerDeps.HasBlocker(),
 			"プラグイン間通信でブロックリストと連合ポリシーが効かなくなる"},
 		{"inbox.signatureVerifier", inboxProcessor.HasSignatureVerifier(),
@@ -4090,8 +4087,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"MIME 許可リスト・NSFW 強制・ファイルサイズ上限・容量上限が同時に無効になる"},
 		{"drive.moderationLog", driveService.HasModerationLog(),
 			"moderator が他人のファイルのセンシティブを変えても削除しても、モデレーションログに残らない"},
-		{"move.carryOverRepos", accountMover.HasCarryOverRepos(),
-			"移行先アカウントにブロック / ミュート / リストが引き継がれない"},
 		{"note.blockingRepo", noteCreateService.HasBlockingRepo(),
 			"自分をブロックしている相手への返信・引用が通る"},
 		{"note.metaRepo", noteCreateService.HasMetaRepo(),
@@ -4129,10 +4124,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		// 残していた同クラスの依存。
 		{"notes.driveFileRepo", notesHandler.HasDriveFileRepo(),
 			"下書きの添付で他人の drive ファイル ID を指定でき、かつ全 note の files が空になる (昇格時は note.driveFileRepo が checkFileIDs で弾くので実体は漏れない)"},
-		{"chat.driveFileRepo", chatHandler.HasDriveFileRepo(),
-			"他人の drive ファイルをチャットに添付できる (IDOR)"},
-		{"remoteUserResolver.softwareBlocker", remoteUserResolver.HasSoftwareSuspensionChecker(),
-			"受信を拒否するソフトウェアのホストにも、メンションの解決や users/show で WebFinger を投げる (#3563)"},
 		{"deliverProcessor.deliveryGate", deliverProcessor.HasDeliveryGate(),
 			"block / federation mode は enqueue 時チェックの第 2 の関門が外れ (積み残しと retry 中が漏れる)、suspend は enqueue 側に検査が無いので新規ジョブごと配送し続ける"},
 		{"resolver.suspensionOriginRepo", federationResolver.HasSuspensionOriginRepo(),
@@ -4184,12 +4175,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		// #3330: 一覧・単体の UserDetailed のピン留め・移行先を users/show と同じ規則で埋める。
 		{"userpack.detailExtrasMany", sharedUserPacker.HasDetailExtrasMany(),
 			"共有 packer で組む一覧 (federation・following・roles・admin) の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
-		{"reversi.liteFiller", reversiHandler.HasLiteFiller(),
-			"reversi/invitations のリモートの招待者に instance・絵文字が載らない"},
-		{"chat.liteFiller", chatHandler.HasLiteFiller(),
-			"chat の応答 (メッセージの fromUser・toUser・reactions[].user、ルームの owner、招待の user) のリモートの利用者に instance・絵文字が載らない"},
-		{"chat.streamLiteFiller", chatService.HasLiteFiller(),
-			"stream と Web Push で流す chat のメッセージ (fromUser・toUser) のリモートの利用者に instance・絵文字が載らない"},
 		{"following.blockingChecker", followingService.HasBlockingChecker(),
 			"ブロック関係を無視してフォローが成立する (自分がブロックした相手・自分をブロックしている相手の両方。後者は inbox の Follow も通す)"},
 		{"blocking.followRequestCanceller", blockingService.HasFollowRequestCanceller(),
@@ -4198,8 +4183,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"自分をブロックしている相手の投稿にリアクションできる (IsBlocked(target.UserID, user.ID))"},
 		{"poll.blockingChecker", pollService.HasBlockingChecker(),
 			"自分をブロックしている相手のアンケートに投票できる (IsBlocked(target.UserID, user.ID))"},
-		{"chat.blockingRepo", chatService.HasBlockingRepo(),
-			"自分をブロックしている相手へ DM を送れる (Exists(toUserID, fromUserID))"},
 		{"notes.blockingRepo", notesHandler.HasBlockingRepo(),
 			"ブロック / ミュート / チャンネルミュートの post-fetch filter が丸ごと skip される"},
 		{"notes.mutingRepo", notesHandler.HasMutingRepo(),

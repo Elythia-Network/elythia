@@ -29,7 +29,7 @@ func newAPService(t *testing.T) (*corechat.Service, *testutil.MockUserRepository
 	t.Helper()
 	chatRepo := newFakeRepo()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := corechat.NewService(chatRepo, idGen)
+	svc := corechat.NewService(chatRepo, idGen, nil, nil, nil)
 	userRepo := testutil.NewMockUserRepository()
 	urls := activitypub.NewURLBuilder("https://local.example")
 	renderer := activitypub.NewRenderer(urls)
@@ -86,7 +86,7 @@ func TestCreateMessageToUser_DeliveryFailureIsSwallowed(t *testing.T) {
 func TestCreateMessageViaAP(t *testing.T) {
 	chatRepo := newFakeRepo()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := corechat.NewService(chatRepo, idGen)
+	svc := corechat.NewService(chatRepo, idGen, nil, nil, nil)
 	sender := &model.User{ID: "remote1", Username: "remote1"}
 
 	msg, err := svc.CreateMessageViaAP(context.Background(), "https://remote.example/chat-messages/1", sender, "local1", "hello from remote", "")
@@ -102,7 +102,7 @@ func TestCreateMessageViaAP(t *testing.T) {
 func TestCreateMessageViaAP_InvalidTarget(t *testing.T) {
 	chatRepo := newFakeRepo()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := corechat.NewService(chatRepo, idGen)
+	svc := corechat.NewService(chatRepo, idGen, nil, nil, nil)
 
 	_, err := svc.CreateMessageViaAP(context.Background(), "", nil, "local1", "hi", "")
 	assert.Error(t, err)
@@ -120,7 +120,7 @@ func newScopeService(t *testing.T) (*corechat.Service, *testutil.MockUserReposit
 	t.Helper()
 	chatRepo := newFakeRepo()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := corechat.NewService(chatRepo, idGen)
+	svc := corechat.NewService(chatRepo, idGen, nil, nil, nil)
 	userRepo := testutil.NewMockUserRepository()
 	followingRepo := testutil.NewMockFollowingRepository()
 	urls := activitypub.NewURLBuilder("https://local.example")
@@ -247,7 +247,7 @@ func TestCreateMessageViaAP_ScopeEnforced(t *testing.T) {
 func TestCreateMessageToUser_GranularScope_NoFollowingRepo_FailClosed(t *testing.T) {
 	chatRepo := newFakeRepo()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := corechat.NewService(chatRepo, idGen)
+	svc := corechat.NewService(chatRepo, idGen, nil, nil, nil)
 	userRepo := testutil.NewMockUserRepository()
 	urls := activitypub.NewURLBuilder("https://local.example")
 	renderer := activitypub.NewRenderer(urls)
@@ -269,7 +269,7 @@ func TestCreateMessageToUser_GranularScope_NoFollowingRepo_FailClosed(t *testing
 func TestCreateMessageToUser_NonGranularScope_NoFollowingRepoOK(t *testing.T) {
 	chatRepo := newFakeRepo()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := corechat.NewService(chatRepo, idGen)
+	svc := corechat.NewService(chatRepo, idGen, nil, nil, nil)
 	userRepo := testutil.NewMockUserRepository()
 	urls := activitypub.NewURLBuilder("https://local.example")
 	renderer := activitypub.NewRenderer(urls)
@@ -287,7 +287,7 @@ func newInvitationService(t *testing.T) (*corechat.Service, *testutil.MockChatRe
 	t.Helper()
 	chatRepo := newFakeRepo()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := corechat.NewService(chatRepo, idGen)
+	svc := corechat.NewService(chatRepo, idGen, nil, nil, nil)
 	userRepo := testutil.NewMockUserRepository()
 	urls := activitypub.NewURLBuilder("https://local.example")
 	renderer := activitypub.NewRenderer(urls)

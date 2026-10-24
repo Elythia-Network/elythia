@@ -45,18 +45,12 @@ type Creator struct {
 	entityPacker *entity.Packer
 }
 
-// SetEntityPacker wires the Packer this Creator packs entities with (#3796).
-func (c *Creator) SetEntityPacker(p *entity.Packer) { c.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いとお知らせの imageUrl を生のまま返し、閲覧者の IP が
-// リモートへ漏れる。
-func (c *Creator) HasEntityPacker() bool { return c.entityPacker.HasMediaURL() }
-
 // NewCreator constructs a Creator. publisher / broadcast may be nil to disable
 // the corresponding stream emit (graceful for tests / partial wiring)。
-func NewCreator(repo Repo, idGen id.Generator, publisher MainStreamPublisher, broadcast BroadcastPublisher) *Creator {
-	return &Creator{repo: repo, idGen: idGen, publisher: publisher, broadcast: broadcast}
+// entityPacker is the Packer this Creator packs entities with (#3796); 無いと
+// お知らせの imageUrl を生のまま流すので、構築子の必須の引数で受ける (#3823)。
+func NewCreator(repo Repo, idGen id.Generator, publisher MainStreamPublisher, broadcast BroadcastPublisher, entityPacker *entity.Packer) *Creator {
+	return &Creator{repo: repo, idGen: idGen, publisher: publisher, broadcast: broadcast, entityPacker: entityPacker}
 }
 
 // Create persists the announcement and, for a per-user announcement

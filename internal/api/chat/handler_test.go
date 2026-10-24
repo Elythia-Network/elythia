@@ -41,7 +41,7 @@ var errMock = assert.AnError
 func newTestHandler() (*Handler, *testutil.MockChatRepository) {
 	repo := testutil.NewMockChatRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(repo, idGen)
+	h := NewHandler(repo, idGen, nil, nil, nil)
 	// **利用者表も配線する。** `rooms/transfer-ownership` は譲渡先がローカル利用者か
 	// を見る (#2994)。router は必ず配線するので、未配線のまま試すと本番と違う枝を
 	// 通ることになる。
@@ -58,8 +58,8 @@ func newTestHandler() (*Handler, *testutil.MockChatRepository) {
 func newTestHandlerWithService() (*Handler, *testutil.MockChatRepository) {
 	repo := testutil.NewMockChatRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(repo, idGen)
-	svc := corechat.NewService(repo, idGen)
+	h := NewHandler(repo, idGen, nil, nil, nil)
+	svc := corechat.NewService(repo, idGen, nil, nil, nil)
 	h.SetService(svc)
 	return h, repo
 }
@@ -211,7 +211,7 @@ func TestRoomsUpdate_Error(t *testing.T) {
 	base := testutil.NewMockChatRepository()
 	base.Rooms["r1"] = &model.ChatRoom{ID: "r1", Name: "x", OwnerID: "u1"}
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(&failUpdateRoomRepo{base}, idGen)
+	h := NewHandler(&failUpdateRoomRepo{base}, idGen, nil, nil, nil)
 	rec := post(h.RoomsUpdate, `{"roomId":"r1","name":"y"}`, u1)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -511,7 +511,7 @@ func (m *mockJoinedRepo) ListJoinedRooms(_, _, _ string, _ int) ([]*model.ChatRo
 func TestRoomsJoined_WithRooms(t *testing.T) {
 	base := testutil.NewMockChatRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(&mockJoinedRepo{base}, idGen)
+	h := NewHandler(&mockJoinedRepo{base}, idGen, nil, nil, nil)
 	rec := post(h.RoomsJoined, `{}`, u1)
 	assert.Equal(t, http.StatusOK, rec.Code)
 	var resp []any
@@ -531,7 +531,7 @@ func (m *mockMsgRepo) SearchMessages(_, _ string, _ int, _, _ string) ([]*model.
 func TestMessages_WithData(t *testing.T) {
 	base := testutil.NewMockChatRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(&mockMsgRepo{base}, idGen)
+	h := NewHandler(&mockMsgRepo{base}, idGen, nil, nil, nil)
 	// room 発言の閲覧には member であることが必要 (u1 を owner にする)。
 	base.Rooms["r1"] = &model.ChatRoom{ID: "r1", OwnerID: u1.ID}
 	rec := post(h.Messages, `{"roomId":"r1"}`, u1)
@@ -560,7 +560,7 @@ func TestMessages_RoomPermission(t *testing.T) {
 func TestMessagesSearch_WithData(t *testing.T) {
 	base := testutil.NewMockChatRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(&mockMsgRepo{base}, idGen)
+	h := NewHandler(&mockMsgRepo{base}, idGen, nil, nil, nil)
 	rec := post(h.MessagesSearch, `{"query":"test"}`, u1)
 	assert.Equal(t, http.StatusOK, rec.Code)
 	var resp []any
@@ -652,8 +652,8 @@ func newHandlerWithService(t *testing.T) (*Handler, *testutil.MockChatRepository
 	t.Helper()
 	repo := testutil.NewMockChatRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(repo, idGen)
-	svc := corechat.NewService(repo, idGen)
+	h := NewHandler(repo, idGen, nil, nil, nil)
+	svc := corechat.NewService(repo, idGen, nil, nil, nil)
 	h.SetService(svc)
 	return h, repo
 }
@@ -762,7 +762,7 @@ func TestMessagesCreate_FileOnly_NoContentRequired(t *testing.T) {
 	fileRepo := testutil.NewMockDriveFileRepository()
 	owner := u1.ID
 	fileRepo.Files["f1"] = &model.DriveFile{ID: "f1", UserID: &owner}
-	h.SetDriveFileRepo(fileRepo)
+	h.fileRepo = fileRepo
 	rec := post(h.MessagesCreate, `{"toUserId":"u2","fileId":"f1"}`, u1)
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Len(t, repo.Messages, 1)
@@ -779,7 +779,7 @@ func TestMessagesCreate_RecipientIsYourself(t *testing.T) {
 // NO_SUCH_FILE は存在しない fileId を弾く (create-to-user golden)。
 func TestMessagesCreate_NoSuchFile_ToUser(t *testing.T) {
 	h, _ := newHandlerWithService(t)
-	h.SetDriveFileRepo(testutil.NewMockDriveFileRepository())
+	h.fileRepo = testutil.NewMockDriveFileRepository()
 	rec := post(h.MessagesCreate, `{"text":"hi","toUserId":"u2","fileId":"ghost"}`, u1)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assertErrorCode(t, rec, "NO_SUCH_FILE", "4372b8e2-185d-4146-8749-2f68864a3e5f")
@@ -792,7 +792,7 @@ func TestMessagesCreate_NoSuchFile_ToRoom_NotOwner(t *testing.T) {
 	fileRepo := testutil.NewMockDriveFileRepository()
 	other := "otherUser"
 	fileRepo.Files["f1"] = &model.DriveFile{ID: "f1", UserID: &other}
-	h.SetDriveFileRepo(fileRepo)
+	h.fileRepo = fileRepo
 	rec := post(h.MessagesCreate, `{"text":"hi","toRoomId":"r1","fileId":"f1"}`, u1)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assertErrorCode(t, rec, "NO_SUCH_FILE", "b6accbd3-1d7b-4d9f-bdb7-eb185bac06db")
@@ -912,7 +912,7 @@ func (m *mockUserMsgRepo) ListMessagesByUser(_, _, _, _ string, _ int) ([]*model
 func TestMessages_ListByUser(t *testing.T) {
 	base := testutil.NewMockChatRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(&mockUserMsgRepo{base}, idGen)
+	h := NewHandler(&mockUserMsgRepo{base}, idGen, nil, nil, nil)
 	rec := post(h.Messages, `{"userId":"u2"}`, u1)
 	assert.Equal(t, http.StatusOK, rec.Code)
 	var resp []any
@@ -1039,8 +1039,8 @@ func TestReactions_AccessErrorIsIndistinguishable(t *testing.T) {
 		t.Helper()
 		repo := testutil.NewMockChatRepository()
 		idGen, _ := id.NewGenerator("aidx")
-		h := NewHandler(repo, idGen)
-		svc := corechat.NewService(repo, idGen)
+		h := NewHandler(repo, idGen, nil, nil, nil)
+		svc := corechat.NewService(repo, idGen, nil, nil, nil)
 		pub := &recordingPublisher{}
 		svc.SetStreamingPublisher(pub)
 		h.SetService(svc)
@@ -1534,7 +1534,7 @@ func TestHistory_UntilID(t *testing.T) {
 	base := testutil.NewMockChatRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	hr := &historyRepo{MockChatRepository: base}
-	h := NewHandler(hr, idGen)
+	h := NewHandler(hr, idGen, nil, nil, nil)
 
 	assert.Equal(t, http.StatusOK, post(h.History, `{"untilId":"m5"}`, u1).Code)
 	assert.Equal(t, http.StatusOK, post(h.History, `{"room":true,"untilId":"r3"}`, u1).Code)
@@ -1562,7 +1562,7 @@ func TestHistory_IsRead_DM(t *testing.T) {
 	to := u1.ID
 	base.Messages["m1"] = &model.ChatMessage{ID: "m1", FromUserID: "u2", ToUserID: &to, Reads: model.StringArray{}, Reactions: model.StringArray{}}
 	hr := &historyRepo{MockChatRepository: base, userHistory: []*model.ChatMessage{base.Messages["m1"]}}
-	h := NewHandler(hr, idGen)
+	h := NewHandler(hr, idGen, nil, nil, nil)
 
 	// 未読: u1 が cm を読んでいない → isRead=false
 	var resp []map[string]any
@@ -1585,7 +1585,7 @@ func TestHistory_IsRead_Room(t *testing.T) {
 	roomID := "r1"
 	base.Messages["m1"] = &model.ChatMessage{ID: "m1", FromUserID: "u2", ToRoomID: &roomID, Reads: model.StringArray{}, Reactions: model.StringArray{}}
 	hr := &historyRepo{MockChatRepository: base, roomHistory: []*model.ChatMessage{base.Messages["m1"]}}
-	h := NewHandler(hr, idGen)
+	h := NewHandler(hr, idGen, nil, nil, nil)
 
 	var resp []map[string]any
 	require.NoError(t, json.Unmarshal(post(h.History, `{"room":true}`, u1).Body.Bytes(), &resp))
@@ -1670,7 +1670,7 @@ func (m *readMarkSpyRepo) MarkAllReadInRoom(reader, room string) error {
 func TestUserTimeline_MarksReadOnOpen(t *testing.T) {
 	spy := &readMarkSpyRepo{MockChatRepository: testutil.NewMockChatRepository()}
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(spy, idGen)
+	h := NewHandler(spy, idGen, nil, nil, nil)
 	rec := post(h.UserTimeline, `{"userId":"u_other"}`, u1)
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "u1", spy.markFromUserCalled.reader)
@@ -1699,7 +1699,7 @@ func TestUserTimeline_UserExists(t *testing.T) {
 func TestRoomTimeline_MarksReadOnOpen(t *testing.T) {
 	spy := &readMarkSpyRepo{MockChatRepository: testutil.NewMockChatRepository()}
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(spy, idGen)
+	h := NewHandler(spy, idGen, nil, nil, nil)
 	// u1 を owner にして閲覧権限を満たす。
 	spy.Rooms["r_x"] = &model.ChatRoom{ID: "r_x", OwnerID: u1.ID}
 	rec := post(h.RoomTimeline, `{"roomId":"r_x"}`, u1)
@@ -1719,7 +1719,7 @@ func (m *readMarkErrRepo) MarkAllReadInRoom(_, _ string) error   { return errMoc
 func TestTimeline_BestEffortReadMark(t *testing.T) {
 	r := &readMarkErrRepo{MockChatRepository: testutil.NewMockChatRepository()}
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(r, idGen)
+	h := NewHandler(r, idGen, nil, nil, nil)
 	r.Rooms["r1"] = &model.ChatRoom{ID: "r1", OwnerID: u1.ID}
 	assert.Equal(t, http.StatusOK, post(h.UserTimeline, `{"userId":"u2"}`, u1).Code)
 	assert.Equal(t, http.StatusOK, post(h.RoomTimeline, `{"roomId":"r1"}`, u1).Code)
@@ -1747,12 +1747,11 @@ func TestMessagesCreateToUser(t *testing.T) {
 func TestMessagesCreateToUser_Blocked(t *testing.T) {
 	repo := testutil.NewMockChatRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(repo, idGen)
-	svc := corechat.NewService(repo, idGen)
+	h := NewHandler(repo, idGen, nil, nil, nil)
 	blocks := testutil.NewMockBlockingRepository()
 	// blocker=u2 (recipient), blockee=u1 (sender)。
 	require.NoError(t, blocks.Create(&model.Blocking{ID: "b1", BlockerID: "u2", BlockeeID: "u1"}))
-	svc.SetBlockingRepo(blocks)
+	svc := corechat.NewService(repo, idGen, nil, nil, blocks)
 	h.SetService(svc)
 
 	rec := post(h.MessagesCreateToUser, `{"text":"hi","toUserId":"u2"}`, u1)
@@ -2090,7 +2089,7 @@ func attachedHandler(t *testing.T) (*Handler, *testutil.MockChatRepository, *tes
 	t.Helper()
 	h, repo := newTestHandler()
 	fileRepo := testutil.NewMockDriveFileRepository()
-	h.SetDriveFileRepo(fileRepo)
+	h.fileRepo = fileRepo
 	h.SetModeratorChecker(fakeModeratorChecker{mods: map[string]bool{"mod1": true}})
 	return h, repo, fileRepo
 }
