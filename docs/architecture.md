@@ -2264,11 +2264,19 @@ setupRoutes()
 - **`/api/emojis`の符号化済みの応答(`api/emojis.Handler.encoded`、#3593)も登録しない。** 使うたびに、
   `emojis`(`CachedEmojiRepository.ListLocal`)が返した一覧と同じsliceかを比べ、違えば作り直すので、
   `emojis`を捨てれば追従する。これまでどこにも記録が無かったので、下の検査の除外に理由付きで載せた
-- **`meta`のsetupの印(`setupLatch`、`internal/api/meta`)は段階(6)の範囲。** ローカルの利用者を一度でも
-  見たことを覚えるパッケージの変数で、世代をまたいで残る。利用者の数え方は#3782で、組み立てで作る
-  `meta.SetupDetector`として`/api/meta`とfrontendのshellの4つの経路(通常・OAuthの同意画面・permalinkの
-  SSR・埋め込み)へ渡す形にした。印まで世代ごとにすると、DBを差し替えたときに数え直すようになり動きが
-  変わるので、DBを差し替える段階(6)で扱う
+- **`meta`のsetupの印は、組み立てごとの値にした(#3803)。** ローカルの利用者を一度でも見たことを覚える
+  印で、以前はパッケージの変数(`setupLatch`)として世代をまたいで残った。利用者の数え方は#3782で、組み立てで
+  作る`meta.SetupDetector`として`/api/meta`とfrontendのshellの4つの経路(通常・OAuthの同意画面・permalinkの
+  SSR・埋め込み)へ渡す形にし、#3803で印もその値のフィールドにした。組み立て直した世代は、最初のリクエストで
+  1回数え直す。一覧には入れず(`DropLocal()`を持たない)、下の検査では`throttle`として除外する。同じ世代の
+  ままDBを利用者のいない状態へ戻すと、印は残る
+- **frontendのloader(`loader/style.css`・`loader/boot.js`)も、組み立てのときに読む(#3803)。** 以前は
+  `frontendutil`がプロセスで1回だけ読んで持っていたので、メンテナンスの間にfrontendを作り直すと、組み立て
+  直した世代は新しいentry(`clientEntryFor`。組み立てのたびに読む)と古いloaderを組み合わせ、#2551と同じ形で
+  表示が崩れた。今はentryと同じく組み立てのときに読み(`loaderAssetsFor` / `embedLoaderAssetsFor`)、shellの
+  4つの経路へ渡す。devでは埋め込まない分岐はそのまま。読む時点は、以前の「最初のリクエスト」から組み立てに
+  移った。組み立ての時点でloaderが読めないと、その世代は埋め込まずにURL参照(`/vite/loader/*`)を出し続ける
+  (entryも同じで、作り直すか再起動すると読み直す)
 - **ストリームの接続ごとの写しは、`dropAll`の後も接続が続く間は残る。** `stream.Connection`のフォロー・
   ハードミュート・ミュートとブロック・policyの写し、リストのチャンネルのメンバーの設定、チャットの部屋を
   見られるかの確認(期限まで)は、接続やチャンネルの開始のときにDBから読む。一覧には入れず、下の検査では
@@ -2297,6 +2305,9 @@ setupRoutes()
   決めるので、`throttle`として除外に載せた
 - #3800で、既定の`entity.Packer`の2行(`processGlobal`)と`constructionMu`(`notCache`)を表から消した。
   `processGlobal`は4、`notCache`は57になった(`grep -c "{kindProcessGlobal,"`などで数えた)
+- #3803で、`meta.setupLatch`と`frontendutil.loaderOnce`・`embedLoaderOnce`の3行(`processGlobal`)を消し、
+  印を持つようになった`meta.SetupDetector`の1行(`throttle`)を足した。`processGlobal`は1、`throttle`は6、表は
+  129行になった(種類ごとは`grep -c "{kindThrottle,"`など、全体は`grep -cE '^\s"[^"]+": \{kind'`で数えた)
 
 テスト (`internal/server/caches_test.go` と、各型のパッケージ):
 

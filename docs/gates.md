@@ -221,7 +221,7 @@ go/types へ移せば消える。
   `internal/cli/backup`だけ)・`internal/cli`。理由は`CacheScanExcludedDirs`に書いてある。
   `internal/backup`自体は、サーバーが`backupadmin`から使うので読む。どの除外も、追跡されたファイルに
   1つも当たらなくなったら`TestCacheScanExclusionsAreUsed`が落とす
-- **表の行。** 種類・理由・全部のフィールドの名前(指紋)を持つ。種類は次のとおり(数は#3800の時点)
+- **表の行。** 種類・理由・全部のフィールドの名前(指紋)を持つ。種類は次のとおり(数は#3803の時点。`cache_list_table_test.go`で`grep -c "{kindDropLocal,"`のように種類ごとに数えた)
   - `dropLocal`(31): `DropLocal()`を持ち、一覧に登録する
   - `droppedByOwner`(8): 辿って届き、持ち主の`DropLocal()`が捨てるか、`DropLocal()`の後の次の読み込みで
     置き換わる(`fedrule.compiledRule`は、集合を古いことにされて次の評価で読み直した集合に替わる)。
@@ -229,11 +229,10 @@ go/types へ移せば消える。
     `mentionFetchGuard`や`resolveGroup`のように、持ち主が捨てないものもあるため
   - `notCache`(57): 値の写しを持たない(lock・singleflight・世代の起動と停止・数え・ジョブキューの接続・
     コードから1回だけ組む値)
-  - `processGlobal`(4): 世代をまたいで残るパッケージの状態(`setupLatch`、
-    プロセスで1回だけ読むfrontendのファイル、プラグインの登録)。`setupLatch`を除き、段階(5)で依存として渡す形に寄せる。
+  - `processGlobal`(1): 世代をまたいで残るパッケージの状態。残っているのはプラグインの登録(`plugin.registryMu`)だけ。
     設定だけで決まっていたもの(bcryptのcost・testMode)は#3780で、初回セットアップの判定に使う利用者の
-    数え方(`meta.localUserCounter`)は#3782で、自分自身をMeDetailedへ昇格させるときの補完役(`meself.mu`が守っていた`enricher`)は#3784で依存として渡す形にし、表から消した。`entity`の8つのlookupとそれぞれのlockは、#3788で既定の`entity.Packer`(`defaultPacker`と、書き込みを直列にする`defaultPackerMu`)の2行にまとめ、#3800で既定のPackerを本番から消したので表からも消した(組み立てを直列にしていた`constructionMu`も、#3800で`notCache`から消した)。`setupLatch`は動きが変わるので段階(6)で扱う
-  - `writeBuffer`(7)・`perConnection`(6)・`throttle`(5)・`contentKeyed`(5)・`perCall`(4)・
+    数え方(`meta.localUserCounter`)は#3782で、自分自身をMeDetailedへ昇格させるときの補完役(`meself.mu`が守っていた`enricher`)は#3784で依存として渡す形にし、表から消した。`entity`の8つのlookupとそれぞれのlockは、#3788で既定の`entity.Packer`(`defaultPacker`と、書き込みを直列にする`defaultPackerMu`)の2行にまとめ、#3800で既定のPackerを本番から消したので表からも消した(組み立てを直列にしていた`constructionMu`も、#3800で`notCache`から消した)。ローカルの利用者を一度でも見た印(`meta.setupLatch`)と、プロセスで1回だけ読んでいたfrontendのloader(`frontendutil.loaderOnce`・`embedLoaderOnce`)は、#3803で組み立てごとの値にして表から消した。印は`meta.SetupDetector`のフィールドになったので、その型を`throttle`として載せた(捨てても次のリクエストで1回数え直すだけ)
+  - `writeBuffer`(7)・`perConnection`(6)・`throttle`(6)・`contentKeyed`(5)・`perCall`(4)・
     `followsRegistered`(2)・`reloadOnDrop`(2)
 - **指紋は全部のフィールドの名前。** 埋め込みは型の名前で、変数は名前の無いstructのフィールドと、同じ
   `var`のブロックの他の名前(`var:<名前>`)で持つ。どのフィールドを足しても一致しなくなって落ちるので、
@@ -253,9 +252,10 @@ go/types へ移せば消える。
 - **下限。** 検出の枝ごとに実在するものを名指しする(`cacheTypeLowerBounds`。`sync.Mutex`は
   `RelationCache`、`sync.Map`は`tokenCache`、`sync/atomic`は`emojis.Handler`、`expirable.LRU`は
   `urlpreview`の`previewCache`など)。同期の部品を持たない`DropLocal()`の型、辿って届くmapの型、全部の
-  フィールドの指紋、変数の4つの形(`setupLatch`・`versionRegexps`・`parsedCache`・`sync.OnceValue`で作る`metaColumnNames`)と同じブロックの名前も
+  フィールドの指紋、変数の3つの形(`versionRegexps`・`parsedCache`・`sync.OnceValue`で作る`metaColumnNames`)と同じブロックの名前も
   名指しする(`TestCacheTypeScanFindsEveryBranch`)。importの別名・埋め込み・名前の無いstruct・型引数の
-  付いた受け手・変数の値の形は、小さなリポジトリを作って確かめる(`TestScanCacheTypesShapes`)
+  付いた受け手・変数の値の形は、小さなリポジトリを作って確かめる(`TestScanCacheTypesShapes`)。宣言の型が
+  名前の無いstructの変数は、実在した`setupLatch`を#3803で消したので、こちらのfixture(`declared`)で見る
 - **go/typesを使わない。** 型検査には全パッケージのexport dataが要り、`collectRoutes`
   (`route_resolve_test.go`)と同じ理由で遅い。フィールドの型は、importの名前と同じパッケージの型名から
   引く
