@@ -2704,6 +2704,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	clipsHandler.SetQueryService(noteQueryService)           // #1456: AddNote の visibility gate
 	clipsHandler.SetMuteBlockRepos(mutingRepo, blockingRepo) // #1562: Notes の muted/blocked-user filter
 	clipsHandler.SetMetaRepo(metaRepo)                       // #1562: Notes の blocked-host filter
+	clipsHandler.SetNoteRepo(noteRepo)                       // #1630 / #3818: Notes の renote 入れ子の mute/block filter
 	// clips/notes の匿名 visitor への ugcVisibilityForVisitor gate (notes 側と同じく無条件・毎回読む)。
 	clipsHandler.SetUGCVisibilityLookup(func() string { return metaUGCVisibility(metaRepo) })
 
