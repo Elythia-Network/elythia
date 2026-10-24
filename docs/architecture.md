@@ -566,16 +566,16 @@ setter も構築も動かしていないので、どの行も数が変わらな�
 #3684 で repository を、#3686 で core の service の一部を、#3688 で連合の部品の一部を、
 #3690 で queue の processor の一部を、#3692 で stream の部品の一部を、#3694 で API の handler の
 一部を移した。部品の領域のフィールドは `repos`・`core`・`fed`・`queue`・`stream`・`handlers` の 6 つ。
-#3699 で、停止が要る部品の一覧を指す `lifecycle` を足した (4.3。部品は作らず、`Server` が持つ一覧を指すだけ。
-今は誰も読まない。段階 (6) で、作り直す範囲を絞るときに使う)。
-#3721 で、キャッシュの一覧を指す `caches` を同じ形で足した (4.4)。
+#3699 で停止が要る部品の一覧を指す `lifecycle` を、#3721 でキャッシュの一覧を指す `caches` を足した
+(4.3 / 4.4。部品は作らず、`Server` が持つ一覧を指すだけ)。段階 (6) で作り直す範囲を絞るときに使う予定
+だったが、#3802 で狭めないと決め、誰も読まないまま残っていたので #3808 で消した (一覧そのものは `Server` に残る)。
 #3697 で `/api` のルートの登録を領域ごとのファイルの関数へ分けた (部品は作らないので、
 フィールドは増やしていない。下の「/api のルートの登録」)。
 
 ```
 setupRoutes()
-  w := &wiring{repos: s.buildRepos(), lifecycle: &s.lifecycle, caches: &s.caches}
-  // ↑ repos は buildRepos (wiring_repos.go) が作る。lifecycle と caches は Server の一覧を指すだけ (4.3、4.4)
+  w := &wiring{repos: s.buildRepos()}
+  // ↑ repos は buildRepos (wiring_repos.go) が作る
   noteRepo := w.repos.note              // 別名。以降の行はこの名前を使う
   …
 ```
@@ -1374,9 +1374,8 @@ stream の部品・handler と、/api の外のルートの登録は、依存す
   値を止めたかをテストが確かめるために持つ
 - 一覧は `Server.lifecycle` が値で持つ (テストが組む `Server` のリテラルでも、ゼロ値が空の一覧として
   使える)。登録はどれも `Server` のメソッド (下の表の6つ) を通し、起動と停止も `s.lifecycle` から回す
-  (`paramShadowMiddleware` と `dbBackedStorage` は `w` を受け取らない)。コンテナの
-  `wiring.lifecycle` は同じ一覧を指すが、**今は誰も読まない** (消してもテストは落ちない)。
-  段階 (6) で、メンテナンスの作り直しの範囲を部品の単位に絞るときに使う
+  (`paramShadowMiddleware` と `dbBackedStorage` は `w` を受け取らない)。コンテナにも同じ一覧を指す
+  `wiring.lifecycle` があったが、誰も読まないまま残っていたので #3808 で消した (4.2)
 - **構築では起動しない(#3703)。** 登録は部品と起動・停止を一覧に足すだけで、起動は
   `StartBackground`が一覧の順に呼ぶ(下の「起動」)。`StartBackground`自身が起動するもの(queueの
   worker・autoscale・scheduler・chartの保存のloop)は、下の一覧の外の停止の段(`queue`・`chart`)と
@@ -1668,7 +1667,8 @@ roleの判定もすでに真になっている)。
 - 購読を始める時刻を動かすと、構築から`StartBackground`までの間に他のプロセスが送った通知
   (キャッシュの無効化、`metaUpdated`)を受け取らなくなる。受けるかどうかは、通知ごとに確かめる必要がある
 
-一覧に乗せるかは、段階(6)でメンテナンスの作り直しの範囲を決めるときに、別に決める。
+一覧には乗せない。段階(6)でメンテナンスの作り直しの範囲を決めるときに検討する予定だったが、#3802で範囲を狭めないと
+決めた(世代ごとに全部を作り直すので、一覧に乗せる理由が無い)。
 
 **世代の停止 (`shutdown`) は、一覧を次の位置で回す。** 順を決めている理由は #3662 と #3661。
 停止は名前付きの段の表(`shutdownSteps`。#3711)を上から順に回す。段の名前は次の各行の先頭に書く。
@@ -2050,7 +2050,10 @@ Supervisorの側は変えていない。停止のエラーの使われ方は次�
 **世代のキャッシュは、そのプロセスが持つ分を全部捨てる口 (`DropLocal()`) を持たせ、名前と由来と
 一緒に `Server` の一覧 (`cacheList`、`internal/server/caches.go`) へ登録する。** #3666 の段階 4。
 段階 (6) でメンテナンスの作り直しの範囲を狭めるときに、捨てるべきキャッシュをコードの上で列挙
-できるようにするため。
+できるようにするためだった。#3802 で作り直しが短い (組み立てと起動で中央値 58ms・最大 71ms。空の DB・プラグイン無し・負荷無しの
+隔離した環境で 10 回測った値) と分かり、範囲は狭めないと
+決めたので、本番から `dropAll` は呼ばない。一覧は、世代のキャッシュの登録漏れを落とす検査 (下の #3777) の
+土台として残す。
 
 ```
 setupRoutes()
@@ -2099,8 +2102,8 @@ setupRoutes()
   比較できても、interface のフィールドに slice を持つ struct など) は、同じ値かを見られないので
   2 回目の検査を飛ばす (今の値はどれもポインタ)。構築に失敗した世代の
   後始末 (`releaseParts`、4.3) は、この一覧も空にする
-- **本番の経路からは、まだ誰も `dropAll` を呼ばない。** 段階 (6) で使う。`wiring` の `caches` も
-  一覧を指すだけで、誰も読まない (4.2)
+- **本番の経路からは `dropAll` を呼ばない。** 段階 (6) で使う予定だったが、#3802 で範囲を狭めないと
+  決めた。`wiring` の `caches` も一覧を指すだけで誰も読まなかったので、#3808 で消した (4.2)
 
 移した系統と、残りの系統 (#3666 の段階 4)。
 
@@ -2148,14 +2151,16 @@ setupRoutes()
   すぐには空にせず、次の評価で読み直す。**`dropAll` が返った後も、前のスナップショットで評価する時間が
   残る**: 読み直しは 1 つの goroutine だけが行い、並行する評価は読み直しが終わるまで前のスナップショットを
   使う。読み直しに失敗したら `retryInterval` (30 秒) の間、前のスナップショットのまま (空にすると拒否して
-  いたものが全部通るため。今と同じ)。段階 (6) で、戻した直後に同期で読み直す (`Reload()`) かを決める。
+  いたものが全部通るため。今と同じ)。戻した直後に同期で読み直す (`Reload()`) かは段階 (6) で決める予定
+  だったが、本番から `dropAll` を呼ばないので要らなくなった (#3802。DB を戻すと世代ごと作り直す)。
   3 つとも DB を直接読むので、ほかの系統との間に順の制約は無い
 - **キャッシュとして扱わず、一覧に入れないもの。** 値のキャッシュではなく、取得の backoff・同時実行の
   上限・ログの間引きで、捨てると間引きが外れるだけになる: `instance.Service` の警告の間引き
   (`lastMetaWarn`)、`mentionFetchGuard`、`Resolver.keyFetchFailures`、`MetadataRefresher` の実行中の印
 - `MetadataRefresher` の次の確認の時刻 (`nextCheck`) は、DB の `infoUpdatedAt` から計算した取り直しの
-  時刻で、その間は DB も見ない。DB を戻すと、戻した行の nodeinfo (ソフトウェアの版など) のまま最大
-  24 時間取り直さない。#3729 では一覧に入れず、扱いは段階 (6) で決める
+  時刻で、その間は DB も見ない。`dropAll` だけで捨てて同じ世代のまま DB を戻すと、戻した行の nodeinfo
+  (ソフトウェアの版など) のまま最大 24 時間取り直さない。#3729 では一覧に入れなかった。メンテナンスでは
+  世代ごと作り直して捨てるので、一覧に入れる必要は無い (#3802)
 - `activitypub.PublicKeyCache` (プラグインの peer の `s.peerDeps.keyCache`、inbox の handler と
   processor が持つもの) と、配送の `keyCache` のうち (kind, keyID, PEM) で引く entry は、PEM の
   解析の結果を覚えるだけで古くならないので、どの系統にも入れない (PEM を鍵に含めて引くので、相手の鍵が
@@ -2186,7 +2191,7 @@ setupRoutes()
   匿名の閲覧者に見せる範囲 (`visitorPolicy`) も番号より前に読むが、キーに入っているので、設定が変わった
   後のリクエストは別のキーを引く。
   ストリームの直前のノートも、呼び出し側が捨てる前に読んだ投稿者で pack すると、次の別のノートまで
-  使い回す。段階 (6) で本番から `dropAll` を呼ぶときは、受け付けを止めてから捨てる前提にする
+  使い回す。本番から `dropAll` を呼ぶなら受け付けを止めてから捨てる前提が要るが、#3802 で呼ばないと決めた
 - **push 購読の `DropLocal()` はメモリの層だけを捨てる。** Redis の層 (`userSwSubscriptions:*`) は
   プロセスの間で共有していて、DB を戻したときは `CleanRedisAfterRestore` が消す。`dropAll` だけでは、
   Redis に残った行をメモリへ読み直す
@@ -2212,8 +2217,10 @@ setupRoutes()
 - ドライブのストレージの backend (`coredrive.MetaStorage`) は、どの系統にも入れない。使うたびに meta
   (`cachedMeta`) を読み、オブジェクトストレージの設定から作った鍵が変わったときだけ作り直すので、meta を
   捨てれば追従する (meta が読めないときは、前の backend を使い続ける)
-- `instance` の書き込みのバッファ (`TouchBuffer`・`CapabilityBuffer` の保留) は値のキャッシュではなく
-  書き込みの保留で、捨ててはいけない。DB を戻すときに flush するか捨てるかは段階 (6) で決める
+- `instance` の書き込みのバッファ (`TouchBuffer`・`CapabilityBuffer`・`CounterBuffer` の保留) は値のキャッシュではなく
+  書き込みの保留で、捨ててはいけない。メンテナンスに入ると世代を止め、`StopBackground` の中の `Close` が
+  保留の分を書き出してから閉じる (DB を戻すのはその後)。段階 (6) で別に決める予定だったが、#3802 で範囲を
+  狭めないと決め、決めることは無くなった
 - **外部とファイルの系統 (#3776) で、由来の `cacheFromExternal` と `cacheFromFile` を初めて使った。**
   URL プレビュー・リモート利用者の統計・RSS・peer のプラグイン一覧は外から取った値を、twemoji のバッジは
   ファイル (`frontendutil.TwemojiDir()`、`MISSKEY_TWEMOJI_DIR`) を描いた値を持つ。5 つとも他のプロセスへ
@@ -2241,7 +2248,8 @@ setupRoutes()
 - peer のプラグイン一覧と twemoji のバッジは、interface のフィールドの中 (`pluginPeerDeps.remote`) と
   ルートの登録の引数の中で作っていたのを、一覧に登録するために変数 (`pluginPeers`・`twemojiBadge`) にした
 - **今の `dropAll` は由来を見ずに全部を捨てる。** DB を戻すたびに呼ぶと、外への取得 (URL プレビュー・
-  統計・RSS・nodeinfo) が一斉に増える。段階 (6) で、由来で絞るか (DB 由来だけを捨てるなど) を決める
+  統計・RSS・nodeinfo) が一斉に増える。由来で絞るかは段階 (6) で決める予定だったが、本番から呼ばない
+  ので要らなくなった (#3802)
 
 - **captchaのproviderの組と、リアクションのバッファの切り替え(`enableReactionsBuffering`)は、捨てずに
   読み直す項目として登録する(#3777)。** どちらも構築のときにmetaから作り、`metaUpdated`のhookと購読で
@@ -2255,7 +2263,7 @@ setupRoutes()
   捨てる前の行から読み直す。他のプロセスへは何も送らない
 - **DBが読めないときに`dropAll`を呼ぶと、captchaは戻す前の組のまま残る。** 読み直しが読めずに据え置き、
   次の`metaUpdated`(管理画面での変更か他のプロセスからの通知)まで読み直さない。リアクションの切り替えは
-  次のtick(30秒)で読み直す。段階(6)で本番から`dropAll`を呼ぶときは、DBが読める状態になってから呼ぶ
+  次のtick(30秒)で読み直す。呼ぶならDBが読める状態になってから呼ぶ。本番からは呼ばない(#3802)
 - **DeepLのキーは登録しない。** #3663から、翻訳のたびに`cachedMeta`から読むので、meta行を捨てれば揃う
 - **読めないときの代わりにだけ使う起動時の値は、登録しない。** chartのフラグ(`ChartsForRemoteUser`など、
   `charthook`)・センシティブの判定の設定(`SetSensitiveSettingsProvider`に渡す`sensCfg`)・
@@ -2280,8 +2288,8 @@ setupRoutes()
 - **ストリームの接続ごとの写しは、`dropAll`の後も接続が続く間は残る。** `stream.Connection`のフォロー・
   ハードミュート・ミュートとブロック・policyの写し、リストのチャンネルのメンバーの設定、チャットの部屋を
   見られるかの確認(期限まで)は、接続やチャンネルの開始のときにDBから読む。一覧には入れず、下の検査では
-  `perConnection`として除外する。段階(6)でDBを戻すときは、ストリームの接続を閉じるか読み直させる
-  (書き込みのバッファや`MetadataRefresher`と同じく、段階(6)で決める)
+  `perConnection`として除外する。DBを戻すときは世代ごと作り直し、ストリームの接続も閉じる(1012)ので、
+  写しは残らない(#3802で範囲を狭めないと決めた)
 - **登録漏れは、静的な検査と実行時の検査の2つで落とす(#3777)。** 静的な検査(`make cachelist-check`、
   [gates.md](gates.md#キャッシュの一覧への登録漏れcachelist-check3777))は、同期の部品(`sync.Mutex`
   など)を持つstructとパッケージの変数、`DropLocal()`を持つstruct、それから届くmapのstructを全部数え、
@@ -2301,8 +2309,8 @@ setupRoutes()
   `perConnection`が6、`throttle`(間引き)が5、`contentKeyed`(元の内容を鍵に含める)が5、`perCall`が4、
   `followsRegistered`が2(`emojis.Handler`・`coredrive.MetaStorage`)、`reloadOnDrop`が2(`captcha.Service`・
   `reaction.SwitchableWriter`)。`Resolver`から届く`mentionFetchGuard`・`resolveGroup`・`resolveWaits`などは、
-  `Resolver.DropLocal()`が捨てないので除外にした。`MetadataRefresher`の`nextCheck`は上のとおり段階(6)で
-  決めるので、`throttle`として除外に載せた
+  `Resolver.DropLocal()`が捨てないので除外にした。`MetadataRefresher`の`nextCheck`は上のとおり一覧に
+  入れないので、`throttle`として除外に載せた
 - #3800で、既定の`entity.Packer`の2行(`processGlobal`)と`constructionMu`(`notCache`)を表から消した。
   `processGlobal`は4、`notCache`は57になった(`grep -c "{kindProcessGlobal,"`などで数えた)
 - #3803で、`meta.setupLatch`と`frontendutil.loaderOnce`・`embedLoaderOnce`の3行(`processGlobal`)を消し、
