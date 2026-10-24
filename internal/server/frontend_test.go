@@ -576,12 +576,30 @@ func TestFrontendHTML_OpenGraph(t *testing.T) {
 		// 管理者が `"` を入れると属性が閉じて head が壊れる。upstream は
 		// kitajs/html が属性値を自動エスケープするので同じ挙動に揃える。
 		name := `Evil" onload="alert(1)`
-		desc := "<script>alert(1)</script>"
+		// description は平文にしてから入れる (upstream #18013) ので、文字参照で書いた
+		// `<` `"` が平文に残ったときにエスケープされることを見る。
+		desc := `x&quot; onload=&quot;alert(1) &lt;script&gt;`
 		body := render(t, &model.Meta{ID: "x", Name: &name, Description: &desc})
 
 		assert.NotContains(t, body, `onload="alert(1)`)
-		assert.NotContains(t, body, "<script>alert(1)</script>")
-		assert.Contains(t, body, `&lt;script&gt;alert(1)&lt;/script&gt;`)
+		assert.Contains(t, body, `<meta name="description" content="x&#34; onload=&#34;alert(1) &lt;script&gt;">`)
+	})
+
+	t.Run("HTML in the description is turned into plain text", func(t *testing.T) {
+		// upstream 2026.10.1 (#18013): サーバーの紹介は HTML を書けるので、
+		// タグを除いて平文にする。区切りのタグは空白になる。
+		desc := `<p>Welcome to <b>Example</b></p><p>Be nice.</p><script>x()</script>`
+		body := render(t, &model.Meta{ID: "x", Description: &desc})
+
+		assert.Contains(t, body, `<meta name="description" content="Welcome to Example Be nice.">`)
+		assert.Contains(t, body, `<meta property="og:description" content="Welcome to Example Be nice.">`)
+	})
+
+	t.Run("a description with only tags uses the default text", func(t *testing.T) {
+		desc := `<p></p><br>`
+		body := render(t, &model.Meta{ID: "x", Description: &desc})
+
+		assert.Contains(t, body, `<meta name="description" content="`+defaultInstanceDescription+`">`)
 	})
 }
 

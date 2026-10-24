@@ -17,6 +17,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/role"
 	"github.com/elythia-network/elythia/internal/core/signup"
 	"github.com/elythia-network/elythia/internal/frontendutil"
+	"github.com/elythia-network/elythia/internal/misc/htmltext"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/labstack/echo/v4"
@@ -188,8 +189,10 @@ func renderFrontendShell(c echo.Context, cfg *config.Config, metaRepo repository
 		// 「タグは出すが既定文言」という扱いになる。
 		if m.Description != nil {
 			hasInstanceDesc = true
-			if *m.Description != "" {
-				instanceDesc = *m.Description
+			// サーバーの紹介は HTML を書けるので、平文にしてから入れる (本家 2026.10.1、
+			// upstream #18013)。平文にして空になったら、空文字と同じく既定の文言にする。
+			if desc := htmltext.PlainText(*m.Description); desc != "" {
+				instanceDesc = desc
 			}
 		}
 		if m.BannerURL != nil && *m.BannerURL != "" {
