@@ -403,7 +403,7 @@ GTL が無傷なので、この食い違いは Elythia 側の退行として出�
 
 | | Elythia | 本家 |
 |---|---|---|
-| `immutable`を付けるファイル | 名前に内容のhashが入っているもの(`<名前>-<8文字>.<拡張子>`)の、2xxと304の応答だけ。2026.10.0のビルドで外れるのは`manifest.json`、`loader/boot.js`、`loader/style.css`、`mockServiceWorker.js`の4つで、これらには`Cache-Control`を付けない | prefixの下の全部 |
+| `immutable`を付けるファイル | 名前に内容のhashが入っているもの(`<名前>-<8文字>.<拡張子>`)の、2xxと304の応答だけ。2026.10.1のビルドで外れるのは`manifest.json`、`preloads.json`、`loader/boot.js`、`loader/style.css`の4つで(`mockServiceWorker.js`は2026.10.1から追跡もビルドの出力もしない)、これらには`Cache-Control`を付けない | prefixの下の全部 |
 | 圧縮 | `make frontend-precompress`(`frontend/scripts/precompress.mjs`)が、hashの付いたファイルに`.br`(brotli quality 10)と`.gz`(gzip level 9)を足し、Elythiaは`Accept-Encoding`のq値が高い方をそのまま返す(`Content-Encoding`、200には`Content-Length`)。hashの付いたファイルには常に`Vary: Accept-Encoding`を付ける。変種が無いファイルとhashの無いファイルは、従来どおりその場でgzipする | `@fastify/static`の事前圧縮は使っていない |
 
 - hashの無いファイルは、名前を変えずに中身だけが変わる。`immutable`にすると、更新の後も最長30日間、古い`boot.js`を使い続けるブラウザが出る。`loader/*`はHTMLに埋め込んでいる(#2551)ので、普段は要求されない

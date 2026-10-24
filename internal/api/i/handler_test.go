@@ -1083,7 +1083,7 @@ func TestUpdate_Success(t *testing.T) {
 
 // #968: i/update の response は MeDetailed shape (= isExplorable / noCrawle /
 // preventAiLearning など self-view-only field を含む) を返すこと。
-// フロントの updateCurrentAccountPartial が key 名で merge するため、
+// フロントの updateCurrentAccount が key 名で merge するため、
 // 欠損があると保存後も session が stale なまま残る regression を防ぐ。
 func TestUpdate_ResponseContainsMeDetailedFields(t *testing.T) {
 	h, repo, _, _ := newTestHandler(t)
@@ -1532,7 +1532,7 @@ func TestMe_ReturnsFreshUserNotCachedOne(t *testing.T) {
 }
 
 // i/update の応答は MeDetailed をそのまま返すので policies / roles を含む。
-// フロントは応答を updateCurrentAccountPartial で `$i` にマージするため、
+// フロントは応答を updateCurrentAccount で `$i` にマージするため、
 // 欠けているとプロフィール更新のたびに role 由来の権限が消える。
 //
 // meUpdated (ストリーミング) は逆に policies を含めてはいけない (#1240)。

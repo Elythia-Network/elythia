@@ -30,7 +30,7 @@ const hashedAssetCacheControl = staticAssetCacheControl
 // worker chunks `<name>-[hash:8].js`). The hash alphabet is base64url.
 //
 // **hash の付かないファイルには immutable を付けない。** 本家は `/vite/` の全体に
-// 付けるが、`manifest.json`・`loader/boot.js`・`mockServiceWorker.js` は名前が
+// 付けるが、`manifest.json`・`preloads.json`・`loader/boot.js` は名前が
 // 変わらずに中身だけ変わるので、immutable にすると更新の後も 30 日間古いものを
 // 使い続けるブラウザが出る (docs/divergence/operations.md §5.8)。
 var hashedAssetNameRe = regexp.MustCompile(`^.+-[A-Za-z0-9_-]{8}\.[A-Za-z0-9]+$`)

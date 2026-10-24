@@ -5,6 +5,17 @@ import pluginVue from 'eslint-plugin-vue';
 import pluginMisskey from '@misskey-dev/eslint-plugin';
 import sharedConfig from '../shared/eslint.config.js';
 
+// Elythia (#3515): MFM の解析器を直接 import してよいのは js/mfm.ts だけ。mfm-js は読まない。
+// 同じルールを書くと共通の設定 (../shared) を丸ごと置き換えるので、punycode の禁止も書き直す。
+const mfmParserImports = [
+	{ name: 'mfm-js', message: 'mfm-js is no longer used. Use `./mfm.js`.' },
+	{ name: '@elythia-network/mfm', message: 'Use `./mfm.js` instead of importing the MFM parser directly.' },
+];
+const mfmParserImportPatterns = [
+	{ group: ['mfm-js/*'], message: 'mfm-js is no longer used. Use `./mfm.js`.' },
+	{ group: ['@elythia-network/mfm/*'], message: 'Use `./mfm.js` instead of importing the MFM parser directly.' },
+];
+
 // eslint-disable-next-line import/no-default-export
 export default [
 	...sharedConfig,
@@ -164,5 +175,24 @@ export default [
 			'js/i18n.ts',
 			'js-built/',
 		],
+	},
+	{
+		files: ['@types/**/*.ts', 'js/**/*.ts', '**/*.vue'],
+		ignores: ['js/mfm.ts'],
+		rules: {
+			'no-restricted-imports': ['error', {
+				paths: [{ name: 'punycode' }, ...mfmParserImports],
+				patterns: mfmParserImportPatterns,
+			}],
+		},
+	},
+	{
+		files: ['js/mfm.ts'],
+		rules: {
+			'no-restricted-imports': ['error', {
+				paths: [{ name: 'punycode' }, ...mfmParserImports.filter(path => path.name !== '@elythia-network/mfm')],
+				patterns: mfmParserImportPatterns.filter(pattern => !pattern.group.includes('@elythia-network/mfm/*')),
+			}],
+		},
 	},
 ];

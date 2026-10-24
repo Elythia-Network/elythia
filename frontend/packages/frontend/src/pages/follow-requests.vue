@@ -60,7 +60,7 @@ import type * as Elythia from 'elythia-js';
 import MkPagination from '@/components/MkPagination.vue';
 import MkButton from '@/components/MkButton.vue';
 import MkInfo from '@/components/MkInfo.vue';
-import { userPage, acct } from '@/filters/user.js';
+import { userPage, acct } from '@@/js/user.js';
 import * as os from '@/os.js';
 import { i18n } from '@/i18n.js';
 import { definePage } from '@/page.js';

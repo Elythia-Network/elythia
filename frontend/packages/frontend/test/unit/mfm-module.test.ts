@@ -30,7 +30,7 @@ describe('MFM parser imports', () => {
 	// 画面のコードが解析器を直接読むと、このモジュールを通らなくなる。import 文だけで
 	// なく import() (テンプレートリテラルを含む) や require、<パッケージ>/... の形も拾う。
 	// eslint は import 文しか見ないので、ここでも確かめる。
-	const roots = [join(__dirname, '../../src'), join(__dirname, '../../../frontend-embed/src')];
+	const roots = [join(__dirname, '../../src'), join(__dirname, '../../../frontend-embed/src'), join(__dirname, '../../../frontend-shared/js')];
 	const files = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
 		const path = join(dir, entry.name);
 		if (entry.isDirectory()) return files(path);
@@ -43,9 +43,9 @@ describe('MFM parser imports', () => {
 		.sort();
 
 	test('only the mfm module imports @elythia-network/mfm', () => {
+		// 本家 2026.10.1 で MFM の描画が frontend-shared へ移ったので、入口も frontend-shared に置く。
 		expect(importersOf(/@elythia-network\/mfm/)).toEqual([
-			'frontend-embed/src/utility/mfm.ts',
-			'frontend/src/utility/mfm.ts',
+			'frontend-shared/js/mfm.ts',
 		]);
 	});
 

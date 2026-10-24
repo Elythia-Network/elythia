@@ -184,18 +184,4 @@ export default [
 			}],
 		},
 	},
-	{
-		// @elythia-network/mfm を直接 import してよいのは、このモジュールだけ。
-		// mfm-js (#3515 で外した解析器) はここでも読まない。
-		files: ['src/utility/mfm.ts'],
-		rules: {
-			'no-restricted-imports': ['error', {
-				paths: [
-					{ name: 'punycode' },
-					...mfmParserImports.filter(path => path.name !== '@elythia-network/mfm'),
-				],
-				patterns: mfmParserImportPatterns,
-			}],
-		},
-	},
 ];

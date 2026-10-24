@@ -323,9 +323,9 @@ func TestApplyFrontendCSP_PassesMediaOrigins(t *testing.T) {
 
 // wantEsmShSources are the only esm.sh sources the policy may allow.
 var wantEsmShSources = []string{
-	"https://esm.sh/shiki@4.4.3/",
-	"https://esm.sh/@shikijs/langs@4.4.3/",
-	"https://esm.sh/@shikijs/themes@4.4.3/",
+	"https://esm.sh/shiki@4.5.0/",
+	"https://esm.sh/@shikijs/langs@4.5.0/",
+	"https://esm.sh/@shikijs/themes@4.5.0/",
 }
 
 // esm.sh の許可は**意図的な妥協**なので、増えていないことを固定する (#2425)。
