@@ -484,6 +484,9 @@ type Resolver struct {
 	// prohibitedWordsProvider は meta.prohibitedWords の読み取り元。nil なら
 	// hostBlocker から optional interface で拾う (prohibitedWords() を参照)。
 	prohibitedWordsProvider ProhibitedWordsProvider
+	// sensitiveWordsProvider は meta.sensitiveWords の読み取り元。nil なら
+	// hostBlocker が SensitiveWordsProvider を実装していればそちらを使う。
+	sensitiveWordsProvider SensitiveWordsProvider
 
 	// resolveActorGroup / resolveNoteGroup は同一 URI への並行 ResolveActor /
 	// ResolveNote 呼び出しを 1 度の DB lookup + HTTP fetch に collapse する
@@ -844,6 +847,59 @@ type ProhibitedWordsProvider interface {
 // 別の実体から読みたくなった場合のための逃げ道。
 func (r *Resolver) SetProhibitedWordsProvider(p ProhibitedWordsProvider) {
 	r.prohibitedWordsProvider = p
+}
+
+// SensitiveWordsProvider exposes meta.sensitiveWords to the inbound note
+// ingest path. *instance.Service implements it.
+type SensitiveWordsProvider interface {
+	SensitiveWords() []string
+}
+
+// SetSensitiveWordsProvider overrides where meta.sensitiveWords is read from.
+// 既定は prohibitedWords と同じく hostBlocker の optional interface から読む。
+func (r *Resolver) SetSensitiveWordsProvider(p SensitiveWordsProvider) {
+	r.sensitiveWordsProvider = p
+}
+
+// HasSensitiveWordsSource reports whether a source for meta.sensitiveWords is
+// reachable (either the explicit setter or the hostBlocker's optional面).
+//
+// 未配線だと、センシティブワードに当たるリモートの public の投稿が home に
+// ならない。起動時検査に使う。
+func (r *Resolver) HasSensitiveWordsSource() bool {
+	if r.sensitiveWordsProvider != nil {
+		return true
+	}
+	_, ok := r.hostBlocker.(SensitiveWordsProvider)
+	return ok
+}
+
+// sensitiveWords returns the configured meta.sensitiveWords, or nil when no
+// source is wired.
+func (r *Resolver) sensitiveWords() []string {
+	if r.sensitiveWordsProvider != nil {
+		return r.sensitiveWordsProvider.SensitiveWords()
+	}
+	if p, ok := r.hostBlocker.(SensitiveWordsProvider); ok {
+		return p.SensitiveWords()
+	}
+	return nil
+}
+
+// containsSensitiveWords reports whether cw or text hits meta.sensitiveWords.
+//
+// ローカル投稿 (`core/note.matchesSensitiveWords`) と同じく、cw と text を別々に
+// 判定し (#1106)、欄の中の URL を表示される形に直したもの (mfm.KeywordCheckTarget)
+// も同じ欄の一部として見る。
+func (r *Resolver) containsSensitiveWords(text, cw *string) bool {
+	words := r.sensitiveWords()
+	if len(words) == 0 {
+		return false
+	}
+	if cw != nil && *cw != "" && keyword.IsKeyWordIncluded(mfm.KeywordCheckTarget(*cw), words) {
+		return true
+	}
+	return text != nil && *text != "" && keyword.IsKeyWordIncluded(mfm.KeywordCheckTarget(*text), words)
 }
 
 // SetBackground sets the group the chart hook of new notes runs in, so
@@ -3520,6 +3576,13 @@ func (r *Resolver) ingestNoteWithCreated(body []byte, deliveringActorURI string,
 			"uri", truncateRunes(apNote.ID, noteURIMaxRunes), "actor", actor.ID)
 		return nil, false, nil
 	}
+	// センシティブワード (meta.sensitiveWords) に当たる public の投稿は home にする。
+	// 本家はリモートの投稿も NoteCreateService.create を通すので、ローカル投稿と
+	// 同じ降格が掛かる。判定は禁止語と同じく切る前の全文で行う (本家も切る前に
+	// 判定する)。編集 (Update) の取り込みでも同じ判定で降格する (UpdateRemoteNote)。
+	if note.Visibility == model.NoteVisibilityPublic && r.containsSensitiveWords(fullText, note.CW) {
+		note.Visibility = model.NoteVisibilityHome
+	}
 	// 連合のルール (#3090)。禁止語と同じく**行を作る前**に評価する。ここより後ろは
 	// 返信先・引用先の取得や添付の登録で行を書くので、拒否するものはここで落とす。
 	// 取り込みの全経路 (inbox の Create、Announce 先・返信先・引用先の取得、
@@ -4200,6 +4263,15 @@ func (r *Resolver) UpdateRemoteNote(body []byte, actorURI string) (*model.Note, 
 			fields["visibility"] = model.NoteVisibilityHome
 			existing.Visibility = model.NoteVisibilityHome
 		}
+	}
+	// 編集した本文 / CW がセンシティブワードに当たれば、public の投稿を home にする
+	// (取り込みと同じ判定)。編集の取り込みは Elythia の拡張なので本家に対応物は
+	// 無いが、掛けないと当たらない投稿を作ってから差し替えるだけで降格を
+	// 素通りできる。**狭める方向だけ** — 当たらなくなっても public には戻さない
+	// (降格の理由がセンシティブワードかどうかを記録していないため)。
+	if existing.Visibility == model.NoteVisibilityPublic && r.containsSensitiveWords(effectiveText, effectiveCW) {
+		fields["visibility"] = model.NoteVisibilityHome
+		existing.Visibility = model.NoteVisibilityHome
 	}
 	if newText != "" {
 		fields["text"] = &storedText

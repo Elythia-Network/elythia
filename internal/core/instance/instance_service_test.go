@@ -780,6 +780,19 @@ func TestService_ProhibitedWords(t *testing.T) {
 	assert.Nil(t, svc.ProhibitedWords())
 }
 
+// meta.sensitiveWords を連合の note 取り込みへ渡す経路。meta が読めないときは
+// 判定を skip できるよう nil を返す。
+func TestService_SensitiveWords(t *testing.T) {
+	svc, _, metaRepo := newService(t)
+	assert.Empty(t, svc.SensitiveWords(), "既定は空")
+
+	metaRepo.Meta.SensitiveWords = model.StringArray{"spoiler"}
+	assert.Equal(t, []string{"spoiler"}, svc.SensitiveWords())
+
+	metaRepo.Meta = nil
+	assert.Nil(t, svc.SensitiveWords())
+}
+
 type recordedGone struct {
 	host string
 	at   time.Time
