@@ -154,11 +154,12 @@ func NewSupervisor(cfg *config.Config, redis *cache.RedisClients, deps Superviso
 		return s, nil
 	}
 
-	gen, err := s.buildGeneration()
+	gen, rep, err := s.buildGeneration()
 	if err != nil {
 		s.maint.stop(context.Background())
 		return nil, err
 	}
+	slog.Info("server generation built", "openDB", rep.OpenDB, "construct", rep.Construct)
 	s.gen = gen
 	s.setHandler(gen.srv.ServeHandler())
 	s.maint.setProc(maintmode.ProcRunning, StopReport{})
@@ -174,19 +175,24 @@ func unavailable(w http.ResponseWriter, _ *http.Request) {
 
 // buildGeneration opens a DB pool and constructs a Server on it. On failure
 // it closes the pool it opened.
-func (s *Supervisor) buildGeneration() (*generation, error) {
+func (s *Supervisor) buildGeneration() (*generation, StartReport, error) {
+	var rep StartReport
+	began := time.Now()
 	db, err := s.deps.OpenDB(s.cfg)
+	rep.OpenDB = time.Since(began)
 	if err != nil {
-		return nil, fmt.Errorf("connect to database: %w", err)
+		return nil, rep, fmt.Errorf("connect to database: %w", err)
 	}
+	began = time.Now()
 	srv, err := s.deps.NewServer(s.cfg, db, s.redis)
+	rep.Construct = time.Since(began)
 	if err != nil {
 		if cerr := s.deps.CloseDB(db); cerr != nil {
 			slog.Warn("failed to close database after a failed server construction", "err", cerr)
 		}
-		return nil, fmt.Errorf("construct server: %w", err)
+		return nil, rep, fmt.Errorf("construct server: %w", err)
 	}
-	return &generation{srv: srv, db: db}, nil
+	return &generation{srv: srv, db: db}, rep, nil
 }
 
 // setHandler routes new requests to h and returns the handler it replaced.
@@ -262,6 +268,19 @@ type StopReport struct {
 	OpenConns int
 	// Err is the error StopBackground or CloseDB returned.
 	Err error
+	// Drain, StopBackground and CloseDB are how long each step took
+	// (#3802). 作り直す範囲を狭めるかどうかを、段ごとの時間で決めるため。
+	Drain          time.Duration
+	StopBackground time.Duration
+	CloseDB        time.Duration
+}
+
+// StartReport describes how long building and starting a generation took
+// (#3802). A step that did not run is zero.
+type StartReport struct {
+	OpenDB          time.Duration
+	Construct       time.Duration
+	StartBackground time.Duration
 }
 
 // stopGeneration routes new requests to standby, waits for the in-flight
@@ -284,16 +303,22 @@ func (s *Supervisor) stopGenerationLocked(standby http.Handler) StopReport {
 	// 背景処理の停止や DB を閉じる待ちが 0 秒にならないようにする。
 	drainCtx, cancelDrain := context.WithTimeout(context.Background(), s.deps.DrainTimeout)
 	defer cancelDrain()
+	began := time.Now()
 	if rep.InFlight = retire(drainCtx, old); rep.InFlight > 0 {
 		slog.Warn("in-flight requests did not finish before the drain deadline", "inFlight", rep.InFlight)
 	}
+	rep.Drain = time.Since(began)
 	stopCtx, cancelStop := context.WithTimeout(context.Background(), s.deps.DrainTimeout)
 	defer cancelStop()
+	began = time.Now()
 	stopErr := gen.srv.StopBackground(stopCtx)
+	rep.StopBackground = time.Since(began)
 	closeCtx, cancelClose := context.WithTimeout(context.Background(), s.deps.DrainTimeout)
 	defer cancelClose()
 	var closeErr error
+	began = time.Now()
 	rep.OpenConns, closeErr = s.closeDB(closeCtx, gen.db)
+	rep.CloseDB = time.Since(began)
 	rep.Err = errors.Join(stopErr, closeErr)
 	s.gen = nil
 	return rep
@@ -324,30 +349,33 @@ func (s *Supervisor) closeDB(ctx context.Context, db *gorm.DB) (int, error) {
 
 // startGeneration builds a new generation, starts its background work and
 // routes requests to it. On failure the previous handler keeps serving.
-func (s *Supervisor) startGeneration() error {
+func (s *Supervisor) startGeneration() (StartReport, error) {
 	s.genMu.Lock()
 	defer s.genMu.Unlock()
 	return s.startGenerationLocked()
 }
 
-func (s *Supervisor) startGenerationLocked() error {
+func (s *Supervisor) startGenerationLocked() (StartReport, error) {
 	if s.gen != nil {
-		return nil
+		return StartReport{}, nil
 	}
-	gen, err := s.buildGeneration()
+	gen, rep, err := s.buildGeneration()
 	if err != nil {
-		return err
+		return rep, err
 	}
-	if err := gen.srv.StartBackground(); err != nil {
+	began := time.Now()
+	err = gen.srv.StartBackground()
+	rep.StartBackground = time.Since(began)
+	if err != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), s.deps.DrainTimeout)
 		defer cancel()
 		_ = gen.srv.StopBackground(ctx)
 		_, _ = s.closeDB(ctx, gen.db)
-		return err
+		return rep, err
 	}
 	s.gen = gen
 	s.setHandler(gen.srv.ServeHandler())
-	return nil
+	return rep, nil
 }
 
 // Start starts the background work of the current generation, listens on the

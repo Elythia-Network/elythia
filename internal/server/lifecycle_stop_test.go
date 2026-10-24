@@ -310,7 +310,8 @@ func TestSupervisor_StopGenerationGoesOnAfterAPanickingStop(t *testing.T) {
 	env.requireNoPatterns(t, "the generation left its Redis subscriptions after the panic")
 
 	// genMuを握ったまま抜けていないので、次の世代を作れる。
-	require.NoError(t, sup.startGeneration())
+	_, err = sup.startGeneration()
+	require.NoError(t, err)
 	rep = sup.stopGeneration(http.HandlerFunc(unavailable))
 	require.NoError(t, rep.Err)
 }
