@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/jsnum"
@@ -19,6 +20,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/userpack"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/colfit"
+	"github.com/elythia-network/elythia/internal/misc/hashtag"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/misc/searchnorm"
 	"github.com/elythia-network/elythia/internal/model"
@@ -243,6 +245,11 @@ func (h *Handler) Show(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "tag is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
 	tagName := *req.Tag
+	// 本家の paramDef は tag に maxLength: 128 を持つ (ajv は code point で数える)。
+	// 正規化 (NFKC) の前に判定する。
+	if utf8.RuneCountInString(tagName) > hashtag.MaxTagLength {
+		return apierr.JSONInvalidParam(c)
+	}
 	// upstream show.ts: hashtags.findOneBy({name: normalizeForSearch(tag)})。
 	// hashtag.name は normalizeForSearch (NFKC+lowercase) 済で格納されるため、
 	// 入力も同じく正規化して一致させる ('Misskey' → 'misskey')。
@@ -542,6 +549,10 @@ func (h *Handler) Users(c echo.Context) error {
 	if err := c.Bind(&req); err != nil || req.Tag == nil || req.Sort == "" {
 		// upstream Misskey TS は paramDef で tag + sort を required にしている (#925)。
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "tag and sort are required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
+	}
+	// 本家の paramDef は tag に maxLength: 128 を持つ (hashtags/show と同じ)。
+	if utf8.RuneCountInString(*req.Tag) > hashtag.MaxTagLength {
+		return apierr.JSONInvalidParam(c)
 	}
 	if _, ok := validUsersSorts[req.Sort]; !ok {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "sort must be one of upstream-defined enum.", "3d81ceae-475f-4600-b2a8-2bc116157532"))

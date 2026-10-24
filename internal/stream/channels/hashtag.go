@@ -68,9 +68,15 @@ func (c *HashtagChannel) Init(params json.RawMessage) error {
 	// 利用者が自由に決められるので、長い名前でトピックの枠と Redis のチャネル名を
 	// 膨らませる余地を残さない。購読より前に全部を確かめる (途中で拒否すると、
 	// それまでのタグを購読したまま返してしまう)。
+	//
+	// **長さは正規化の前に見る** (本家 hashtag.ts の `Array.from(y).length <= 128`)。
+	// 正規化 (NFKC) の手間は入力の長さに応じて増えるので、長い入力を正規化して
+	// から数えると、拒否する入力にも手間を掛けることになる。正規化の後の長さでは
+	// 拒否しない (本家と同じ。NFKC で膨らむ幅には上限があるので、トピック名も
+	// 正規化前の上限から決まる長さに収まる)。
 	for _, group := range p.Q {
 		for _, tag := range group {
-			if utf8.RuneCountInString(searchnorm.Normalize(tag)) > hashtag.MaxTagLength {
+			if utf8.RuneCountInString(tag) > hashtag.MaxTagLength {
 				return stream.ErrInvalidParams
 			}
 		}
