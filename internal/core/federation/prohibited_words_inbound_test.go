@@ -229,3 +229,36 @@ func TestUpdateRemoteNote_ChecksExistingTextWhenContentAbsent(t *testing.T) {
 	assert.Empty(t, noteRepo.UpdateFieldsCalls)
 	assert.Empty(t, emojiRepo.Emojis)
 }
+
+// 受信した note の URL も、表示される形に直してから禁止語と比べること
+// (本家はリモートの note も checkProhibitedWordsContain を通す)。
+func TestIngestNote_DropsProhibitedWordInNormalizedURL(t *testing.T) {
+	tests := []struct{ name, extra string }{
+		{name: "text", extra: `"content": "x", "_misskey_content": "hoge https://%62anned.example/ huge"`},
+		{name: "cw", extra: `"content": "clean", "summary": "https://%62anned.example/"`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r, noteRepo := newProhibitedWordsResolver(t, []string{"banned.example"})
+
+			note, _, err := r.IngestNoteWithCreated([]byte(remoteNoteBody(tc.extra)), "")
+			require.NoError(t, err)
+			assert.Nil(t, note)
+			assert.Empty(t, noteRepo.Notes)
+		})
+	}
+}
+
+// 編集でも、URL を表示される形に直してから禁止語と比べること。
+func TestUpdateRemoteNote_DropsProhibitedWordInNormalizedURL(t *testing.T) {
+	r, noteRepo, _ := newProhibitedWordsUpdateResolver(t, []string{"banned.example"})
+
+	body := `{"@context":"https://www.w3.org/ns/activitystreams",
+		"id":"https://remote.example/notes/n1","type":"Note",
+		"attributedTo":"https://remote.example/users/alice",
+		"content":"x","_misskey_content":"see https://%62anned.example/"}`
+	_, err := r.UpdateRemoteNote([]byte(body), "")
+	require.NoError(t, err)
+	assert.Empty(t, noteRepo.UpdateFieldsCalls)
+	assert.Equal(t, "original", *noteRepo.Notes["n1"].Text)
+}
